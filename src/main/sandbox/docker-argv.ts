@@ -523,6 +523,55 @@ export const BROWSER_IDLE_MS = 10 * 60_000
 /** Al massimo 3 browser contemporanei per box (Chromium pesa e il box ha 4g). */
 export const BROWSERS_PER_BOX_MAX = 3
 
+// ---- fase 14 (punto 7a): il browser con un UTENTE SUO ----
+
+/**
+ * L'utente del solo processo Playwright MCP (punto 7a): uid/gid 1001, gruppo
+ * supplementare 1000 (scrive screenshot e pid nella home del bot, gruppo del
+ * bot). La shell del bot resta 1000: il profilo di Chromium (0700, di 1001)
+ * NON è leggibile né ptrace-abile dai comandi del bot — il cookie di sessione
+ * di un login non finisce nel loro contesto.
+ */
+export const BROWSER_USER = '1001:1001'
+
+/**
+ * Il profilo del browser di un bot DENTRO il volume, fuori dalla home del bot
+ * (punto 7a): /box/browser/<owner>/profile, mode 0700, proprietario 1001.
+ */
+export function browserProfilePath(owner: string): string {
+  return `${BOX_MOUNT}/browser/${owner}/profile`
+}
+
+/**
+ * Il one-shot ROOT che prepara il terreno del browser (punto 7a), sul modello
+ * della home del bot: profilo nuovo di proprietà di 1001 e 0700; le cartelle
+ * di output nella home del bot (pid, screenshot, output del server) scrivibili
+ * da 1001 via GRUPPO 1000 (g+rwX, setgid: i file nuovi nascono del gruppo
+ * giusto); il profilo VECCHIO in /box/home/<owner>/.browser/profile si
+ * CANCELLA (non si migra: quei cookie li ha già visti la shell del bot).
+ * La stringa sh -c è COSTANTE, l'owner viaggia come $1.
+ */
+export const DOCKER_BROWSER_INIT_SH = [
+  'mkdir -p "$(dirname "$1")" "$1"',
+  'chown -R 1001:1001 "$(dirname "$1")"',
+  'chmod 0700 "$1"',
+  'H="/box/home/$2"',
+  'mkdir -p "$H/.sandbot" "$H/.browser/screens" "$H/.browser/output"',
+  'chgrp -R 1000 "$H/.sandbot" "$H/.browser/screens" "$H/.browser/output"',
+  'chmod -R g+rwX "$H/.sandbot" "$H/.browser/screens" "$H/.browser/output"',
+  'chmod g+s "$H/.browser/screens" "$H/.browser/output"',
+  'rm -rf "$H/.browser/profile"'
+].join('\n')
+
+/**
+ * L'argv del one-shot dei permessi del browser (punto 7a): root nel container
+ * del box; $1 = path del profilo nuovo, $2 = id del PROPRIETARIO della home
+ * (le cartelle di output stanno in /box/home/<owner>/.browser).
+ */
+export function dockerBrowserInitArgv(container: string, owner: string): string[] {
+  return ['exec', '-u', '0', container, 'sh', '-c', DOCKER_BROWSER_INIT_SH, 'sh', browserProfilePath(owner), owner]
+}
+
 /**
  * Il wrapper COSTANTE del server browser (punto 2): il pid va nel file della
  * home del bot (per uccidere gli orfani: se il daemon muore, il processo nel
@@ -530,6 +579,8 @@ export const BROWSERS_PER_BOX_MAX = 3
  * (I2): il processo di docker exec è GIÀ leader di sessione e di gruppo, setsid
  * in quel caso forka e il padre esce subito CHIUDENDO lo stdio del client MCP;
  * il pid scritto è anche il pgid, quindi il kill di gruppo (G1) resta valido.
+ * Fase 14 (7a): il pid file sta in una cartella di gruppo 1000 scrivibile da
+ * 1001 (la prepara il one-shot), quindi il wrapper gira anche come sbrowser.
  */
 export const DOCKER_BROWSER_WRAPPER_SH = [
   'mkdir -p "$(dirname "$1")"',
@@ -549,6 +600,9 @@ export const DOCKER_BROWSER_WRAPPER_SH = [
  * Fase 12 (0e): --config obbligatorio col file /etc/sandbot/playwright-mcp.json
  * del Dockerfile — spegne il traffico di fondo di Chromium (component update,
  * sync, telemetry): connessioni non richieste, rumore nel proxy e privacy.
+ * Fase 14 (7a): il profilo del bot PRINCIPALE sta in /box/browser/<owner>/
+ * profile (di 1001, 0700), MAI sotto /box/home — la shell del bot (1000) non
+ * può leggerlo. I FIGLI (--isolated) restano come prima.
  */
 export function browserMcpFlags(agentId: string, proxyPort: number, opts: { child?: boolean; home?: string } = {}): string[] {
   const home = opts.home ?? boxHomePath(agentId)
@@ -557,7 +611,7 @@ export function browserMcpFlags(agentId: string, proxyPort: number, opts: { chil
     '--no-sandbox',
     // fase 12 (punto 1): il figlio usa --isolated AL POSTO del profilo
     // persistente (due Chromium sullo stesso profilo si bloccano a vicenda)
-    ...(opts.child ? ['--isolated'] : ['--user-data-dir', `${home}/.browser/profile`]),
+    ...(opts.child ? ['--isolated'] : ['--user-data-dir', browserProfilePath(agentId)]),
     '--output-dir', opts.child ? `${home}/.browser/output-${agentId}` : `${home}/.browser/output`,
     '--output-max-size', '52428800',
     '--no-webmcp',
@@ -588,15 +642,17 @@ export const PLAYWRIGHT_MCP_CONFIG_JSON =
   '{"browser":{"launchOptions":{"args":["--disable-background-networking","--disable-component-update","--disable-sync","--no-pings","--disable-domain-reliability","--disable-features=OptimizationHints,MediaRouter,Translate,AutofillServerCommunication"]}}}'
 
 /**
- * L'argv del launcher del browser di un bot (puro): `docker exec -i` con
- * l'utente e la home del bot, il wrapper COSTANTE (pid file come $1) e i flag
- * del server MCP come argomenti posizionali dopo `sh <pidfile>`.
+ * L'argv del launcher del browser di un bot (puro): `docker exec -i` col
+ * wrapper COSTANTE (pid file come $1) e i flag del server MCP come argomenti
+ * posizionali dopo `sh <pidfile>`. Fase 14 (7a): il browser del bot
+ * PRINCIPALE gira come 1001:1001 (sbrowser, profilo suo in /box/browser);
+ * il browser di un FIGLIO (--isolated) resta 1000:1000 come prima.
  */
 export function dockerBrowserMcpArgv(agentId: string, proxyPort: number, opts: { child?: boolean; home?: string } = {}): string[] {
   const home = opts.home ?? boxHomePath(agentId)
   return [
     'exec', '-i',
-    '-u', CONTAINER_USER,
+    '-u', opts.child ? CONTAINER_USER : BROWSER_USER,
     '-w', home,
     BOX_CONTAINER,
     'sh', '-c', DOCKER_BROWSER_WRAPPER_SH, 'sh',

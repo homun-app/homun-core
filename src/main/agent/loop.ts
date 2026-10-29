@@ -18,7 +18,7 @@
 // draft_external. Ogni turno si chiude con un evento meta.turnEnd ∈
 // FINISHED | STOPPED | SUPERSEDED | AWAITING_USER.
 import { randomUUID } from 'node:crypto'
-import { getAgent, listAgents, listRoutines, getEntries, updateAgent, appendEntry, updateEntryContent, updateEntryMeta, getSetting, holdOutboxEntry, db, getTask, createTask, updateTask, openTasksOf, MAX_OPEN_TASKS, listProviders, createAgent, subagentRefusal, type AppendEntry } from '../store/db'
+import { getAgent, listAgents, listRoutines, getEntries, updateAgent, appendEntry, updateEntryContent, updateEntryMeta, getSetting, holdOutboxEntry, db, getTask, createTask, updateTask, openTasksOf, MAX_OPEN_TASKS, listProviders, createAgent, subagentRefusal, addGrant, listGrants, type Grant, type AppendEntry } from '../store/db'
 import { llmStream, type ChatMessage, type ToolCall } from './llm'
 import { systemPrompt, secondaryPrompts, mainAgentSection } from './prompts'
 import { toolDefs, executeTool } from './tools'
@@ -180,6 +180,11 @@ function appendSend(
     : message.type === 'rule' ? message.text
     : message.type === 'mcp-server' ? `Aggiungi server MCP: ${message.name}`
     : message.type === 'plugin' ? `Installa plugin: ${message.name}`
+    : message.type === 'document' ? message.title
+    : message.type === 'chart' ? message.title
+    : message.type === 'fill' ? `Compila il login «${message.label}» su ${message.origin}`
+    : message.type === 'secure-input' ? `Modulo sicuro: ${message.reason}`
+    : message.type === 'contact' ? `Salva il contatto «${message.name}»`
     : (message.subject || message.to || '')
   const entry = appendEntry({
     agentId, kind: 'send-message', role: 'assistant', content,
@@ -302,6 +307,11 @@ export interface RunTurnOptions {
  */
 async function turnGrantKey(tool: string, input: Record<string, unknown>): Promise<string | null> {
   if (tool === 'update_state') return null
+  // fase 14 (7d): il grant "per questo turno" del fill vale per QUEL login su
+  // QUELL'origine (l'origine la mette il loop nell'input dell'approval)
+  if (tool === 'fill_credential') {
+    return `fill_credential|${String(input.id ?? '')}|${String(input.origin ?? '')}`
+  }
   if (tool === 'run-command') {
     const analysis = await analyzeCommand(String(input.command ?? ''))
     if (!analysis.commands.length || analysis.commands.some((c) => isNeverAuto(c))) return null
@@ -611,6 +621,48 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
   }
 
   /**
+   * Fase 14: una card che ASPETTA la decisione dell'utente (fill, modulo
+   * sicuro, contatto, export): crea l'Approval, l'entry che la UI renderizza
+   * con la sua forma (kind 'approval' o send-message), attende la decisione
+   * e aggiorna lo stato dell'entry. Ritorna la decisione ('allow' vale per
+   * Consenti/Salva/Esporta).
+   */
+  const awaitCard = async (
+    approval: Approval,
+    entryKind: 'approval' | 'send-message',
+    content: string,
+    entryMeta: Record<string, unknown>
+  ): Promise<'allow' | 'deny' | 'timeout' | 'superseded' | 'cancelled'> => {
+    run.approvals.set(approval.id, () => undefined)
+    const entry = add({
+      agentId, kind: entryKind, ...(entryKind === 'send-message' ? { role: 'assistant' as const } : { role: 'system' as const }),
+      content, meta: { approvalId: approval.id, status: 'pending', ...entryMeta }
+    })
+    emit({ type: 'entries', agentId, entries: [entry] })
+    emit({ type: 'approval', agentId, approval })
+    emitNeedsInput(agentId, entry, content.slice(0, 80), emit)
+    taskNeedsInput()
+    setStatus(agentId, 'paused-for-approval', emit)
+    const decision = await new Promise<'allow' | 'deny' | 'timeout' | 'superseded' | 'cancelled'>((resolve) => {
+      run.approvals.set(approval.id, (d) => resolve(d))
+      setTimeout(() => resolve('timeout'), getSetting<number>('permissions.timeoutMs', 5 * 60_000))
+    })
+    run.approvals.delete(approval.id)
+    // il meta si RILEGGE: l'RPC può aver già scritto esiti (secureinput:submit
+    // salva savedOutcome prima di risolvere) e non vanno persi
+    const freshMeta = getEntries(agentId).find((x) => x.id === entry.id)?.meta ?? entry.meta
+    updateEntryMeta(entry.id, {
+      ...freshMeta,
+      status: decision === 'timeout' ? 'expired' : decision === 'allow' ? 'allowed' : decision === 'deny' ? 'denied' : decision === 'cancelled' ? 'cancelled' : 'superseded'
+    })
+    const updated = getEntries(agentId).find((x) => x.id === entry.id)
+    if (updated) emit({ type: 'entries', agentId, entries: [updated] })
+    taskWorking()
+    setStatus(agentId, 'thinking', emit)
+    return decision
+  }
+
+  /**
    * Un send_to_user con le regole dei turni automatici (residuo 0b + §3bis L4):
    * il primo urgent passa, i successivi diventano non urgenti, e i non urgenti
    * restano in outbox fino alla finestra di consegna o all'apertura della chat.
@@ -812,7 +864,8 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       }
       // fase 12 (punto 6): la sezione Sottoagenti solo nei bot NORMALI, mai
       // nei turni di gruppo (lì si coordina col gruppo)
-      systemText = systemPrompt(agent, { subagents: opts.groupTurn === undefined, connectors: opts.groupTurn === undefined }) +
+      // fase 14 (punto 8): le righe delle credenziali solo nei turni NON di gruppo
+      systemText = systemPrompt(agent, { subagents: opts.groupTurn === undefined, connectors: opts.groupTurn === undefined, credentials: opts.groupTurn === undefined }) +
         mainSection + buildMemorySection(agentId) + buildSkillsSection(agentId) + connectorsSection
     }
 
@@ -1607,6 +1660,194 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           continue
         }
 
+        // ---- fase 14: libreria e credenziali ----
+
+        // punto 5: export_from_library — card di conferma come copy_from_box
+        // (nome, formato, destinazione), poi la copia in ~/Downloads/SandBot
+        // con nome non in conflitto
+        if (call.name === 'export_from_library') {
+          emit({ type: 'activity', agentId, activity: activityOf(call.name, input) })
+          const xEntry = add({
+            agentId, kind: 'tool-call', role: 'assistant', content: call.name,
+            meta: { id: call.id, name: call.name, arguments: call.arguments }
+          })
+          emit({ type: 'entries', agentId, entries: [xEntry] })
+          const { prepareLibraryExport, runLibraryExport } = await import('./library')
+          const pre = prepareLibraryExport(input)
+          if (!pre.ok) {
+            messages.push({ role: 'tool', toolCallId: call.id, content: pre.error })
+            const res = add({ agentId, kind: 'tool-result', role: 'system', content: pre.error, meta: { callId: call.id, error: true } })
+            emit({ type: 'entries', agentId, entries: [res] })
+            continue
+          }
+          const plan = pre.value
+          const approval: Approval = { id: randomUUID(), agentId, tool: call.name, input, status: 'pending', createdAt: Date.now() }
+          const decision = await awaitCard(approval, 'approval', `export_from_library: «${plan.name}» (${plan.format}) → ${plan.destination}`, {
+            tool: call.name, input, libraryExport: plan, keys: [`export ${plan.name}`]
+          })
+          if (decision !== 'allow') {
+            const msg = decision === 'deny' ? 'Esportazione annullata dall\'utente.' : 'Approvazione scaduta o interrotta: esportazione non eseguita.'
+            messages.push({ role: 'tool', toolCallId: call.id, content: msg })
+            const res = add({ agentId, kind: 'tool-result', role: 'system', content: msg, meta: { callId: call.id } })
+            emit({ type: 'entries', agentId, entries: [res] })
+            continue
+          }
+          let out: string
+          try {
+            const { getPrintToPdf } = await import('../../daemon/host-bridge')
+            const fn = getPrintToPdf()
+            out = (await runLibraryExport(plan, fn ? { printToPdf: fn } : {})).output
+          } catch (e) {
+            out = `Errore nell'esportazione: ${e instanceof Error ? e.message : String(e)}`
+          }
+          messages.push({ role: 'tool', toolCallId: call.id, content: out })
+          const res = add({ agentId, kind: 'tool-result', role: 'system', content: out, meta: { callId: call.id } })
+          emit({ type: 'entries', agentId, entries: [res] })
+          continue
+        }
+
+        // punto 7d: fill_credential — i controlli in CODICE e in ordine
+        // (origine, ref+tipo, approvazione), poi il DAEMON compila i campi col
+        // valore del vault e il result per il modello non contiene MAI i valori
+        // (il flusso sta in fill.ts, testabile col MCP finto)
+        if (call.name === 'fill_credential') {
+          emit({ type: 'activity', agentId, activity: activityOf(call.name, input) })
+          const fillEntry = add({
+            agentId, kind: 'tool-call', role: 'assistant', content: call.name,
+            meta: { id: call.id, name: call.name, arguments: call.arguments }
+          })
+          emit({ type: 'entries', agentId, entries: [fillEntry] })
+          const pushResult = (content: string, meta: Record<string, unknown> = {}): void => {
+            const res = add({ agentId, kind: 'tool-result', role: 'system', content: content.slice(0, 50_000), meta: { callId: call.id, ...meta } })
+            emit({ type: 'entries', agentId, entries: [res] })
+            messages.push({ role: 'tool', toolCallId: call.id, content: content.slice(0, 50_000) })
+          }
+          const browser = await import('./browser')
+          const { runFillCredential } = await import('./fill')
+          const vault = await import('../vault')
+          const outcome = await runFillCredential(input, {
+            getLogin: (id) => vault.getLoginForFill(id),
+            lastUrl: () => browser.lastUrlOf(agentId),
+            refInfo: (ref) => browser.refInfoOf(agentId, ref),
+            probe: (ref) => browser.probeFieldType(agentId, ref),
+            typeInto: (ref, value) => browser.typeIntoFieldForFill(agentId, ref, value),
+            hasStandingGrant: (loginId, origin) =>
+              listGrants().some((g: Grant) => g.tool === 'fill_credential' && g.target === `${loginId}|${origin}`),
+            hasTurnAllow: (loginId, origin) => run.turnAllows.has(`fill_credential|${loginId}|${origin}`),
+            requestApproval: async (login, origin, fields) => {
+              const approval: Approval = { id: randomUUID(), agentId, tool: call.name, input: { ...input, origin }, status: 'pending', createdAt: Date.now() }
+              const decision = await awaitCard(approval, 'send-message', `Compilo il login «${login.label}» su ${origin}?`, {
+                message: { type: 'fill', id: login.id, label: login.label, origin, fields },
+                tool: call.name, input: { ...input, origin }, fill: { loginId: login.id, origin }
+              })
+              if (decision === 'allow') return 'allow-turn' // 'always' lo registra resolveApproval
+              if (decision === 'deny') return 'deny'
+              return 'timeout'
+            }
+          })
+          // "Consenti" (mode 'turn') registra il grant del turno in
+          // resolveApproval via turnGrantKey; "Sempre per questo sito" (mode
+          // 'always') registra la concessione (loginId, origin)
+          pushResult(outcome.output, { ...(outcome.denied ? { fillDenied: true } : {}), ...(outcome.error ? { error: true } : {}) })
+          continue
+        }
+
+        // punto 7e: request_secure_input — il modulo nella UI chiede il dato
+        // sensibile SENZA chat; i valori salvano nel vault via RPC e il
+        // modello riceve solo l'esito
+        if (call.name === 'request_secure_input') {
+          const kind = input.kind === 'secret' ? 'secret' : 'login'
+          const reason = String(input.reason ?? '').trim()
+          const label = String(input.label ?? '').trim()
+          const name = String(input.name ?? '').trim()
+          const origin = String(input.origin ?? '').trim()
+          const sEntry = add({
+            agentId, kind: 'tool-call', role: 'assistant', content: call.name,
+            meta: { id: call.id, name: call.name, arguments: call.arguments }
+          })
+          emit({ type: 'entries', agentId, entries: [sEntry] })
+          const pushResult = (content: string): void => {
+            messages.push({ role: 'tool', toolCallId: call.id, content })
+            const res = add({ agentId, kind: 'tool-result', role: 'system', content, meta: { callId: call.id } })
+            emit({ type: 'entries', agentId, entries: [res] })
+          }
+          if (kind === 'login' && !label) {
+            pushResult('Per un login serve l\'etichetta (label), es. "Portale ASPI": si vede nel modulo dell\'utente.')
+            continue
+          }
+          if (kind === 'secret' && !name) {
+            pushResult('Per un secret serve il nome (name), es. API_KEY.')
+            continue
+          }
+          const approval: Approval = { id: randomUUID(), agentId, tool: call.name, input, status: 'pending', createdAt: Date.now() }
+          const decision = await awaitCard(approval, 'send-message', `Modulo sicuro (${kind === 'login' ? `login «${label}»` : `secret ${name}`}): ${reason}`, {
+            message: {
+              type: 'secure-input', kind,
+              ...(kind === 'login' ? { label, ...(origin ? { origin } : {}) } : { name }),
+              reason
+            },
+            tool: call.name, input, secureInput: true
+          })
+          if (decision !== 'allow') {
+            pushResult('annullato dall\'utente')
+            continue
+          }
+          // l'utente ha salvato: l'esito (con l'id/nome reale) sta nell'entry
+          // meta.savedOutcome, scritta dall'RPC secureinput:submit
+          const savedOutcome = (() => {
+            const e = getEntries(agentId).findLast((x) => x.kind === 'send-message' && x.meta?.approvalId === approval.id)
+            return (e?.meta?.savedOutcome as string | undefined) ?? null
+          })()
+          pushResult(savedOutcome ?? 'annullato dall\'utente')
+          continue
+        }
+
+        // punto 7f: save_contact — card di conferma coi campi; "Salva" crea
+        // la voce nel vault e il modello riceve l'id
+        if (call.name === 'save_contact') {
+          const cEntry = add({
+            agentId, kind: 'tool-call', role: 'assistant', content: call.name,
+            meta: { id: call.id, name: call.name, arguments: call.arguments }
+          })
+          emit({ type: 'entries', agentId, entries: [cEntry] })
+          const pushResult = (content: string): void => {
+            messages.push({ role: 'tool', toolCallId: call.id, content })
+            const res = add({ agentId, kind: 'tool-result', role: 'system', content, meta: { callId: call.id } })
+            emit({ type: 'entries', agentId, entries: [res] })
+          }
+          const name = String(input.name ?? '').trim()
+          if (!name) {
+            pushResult('Contatto non salvato: serve il nome.')
+            continue
+          }
+          const contact = {
+            name,
+            emails: Array.isArray(input.emails) ? input.emails.map(String) : [],
+            phones: Array.isArray(input.phones) ? input.phones.map(String) : [],
+            ...(input.address !== undefined && String(input.address).trim() ? { address: String(input.address) } : {}),
+            ...(input.notes !== undefined && String(input.notes).trim() ? { notes: String(input.notes) } : {})
+          }
+          const approval: Approval = { id: randomUUID(), agentId, tool: call.name, input, status: 'pending', createdAt: Date.now() }
+          // proposta nata in un turno contaminato: la card avvisa che i dati
+          // arrivano da una fonte esterna
+          const decision = await awaitCard(approval, 'send-message', `Salvo il contatto «${name}» nel vault?`, {
+            message: { type: 'contact', ...contact, ...(contaminated ? { untrusted: true as const } : {}) },
+            tool: call.name, input, contactProposal: contact
+          })
+          if (decision !== 'allow') {
+            pushResult('Contatto non salvato: annullato dall\'utente.')
+            continue
+          }
+          const vault = await import('../vault')
+          try {
+            const id = await vault.saveContact(contact)
+            pushResult(`Contatto «${name}» salvato nel vault (id ${id}).`)
+          } catch (e) {
+            pushResult(`Contatto non salvato: ${e instanceof Error ? e.message : String(e)}`)
+          }
+          continue
+        }
+
         // fase 5 (§3ter T2-T3, funnel): OFFERTA di connessione — l'agente NON
         // può connettere da solo, crea solo la card col bottone "Connetti";
         // quando l'utente connette, arriverà un messaggio di sistema
@@ -2191,10 +2432,13 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           // correzione A5: il contesto del turno (chi lo ha aperto) serve a
           // update_state per decidere se accettare la provenance 'template';
           // correzione B3: il task corrente serve a update_task (dentro un
-          // task si chiude SOLO quello)
+          // task si chiude SOLO quello); fase 14 (punto 6): contaminato e
+          // turno utente servono alle scritture in libreria (tainted)
           const { output, meta, images } = await executeTool(agentId, call.name, input, {
             turnInitiator: opts.initiator,
-            ...(opts.taskId !== undefined ? { taskId: opts.taskId } : {})
+            ...(opts.taskId !== undefined ? { taskId: opts.taskId } : {}),
+            ...(contaminated ? { contaminated: true } : {}),
+            ...(source === 'user' && !automatic && !untrustedTurn ? { userTurn: true } : {})
           })
           // fase 13 (punto 8): OGNI result MCP è un DATO ESTERNO (email, pagine
           // Notion, issue): blocco evidenza con la fonte mcp:<server> e
@@ -2211,12 +2455,38 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             }
             contaminated = true
           }
+          // fase 14 (punto 6): la lettura di una voce tainted della libreria è
+          // un DATO ESTERNO (fonte libreria:<id>) e contamina il turno che
+          // legge — un'istruzione iniettata in una pagina, copiata in un
+          // report, non diventa "fidata" quando un altro bot legge il report
+          if (meta.libraryTainted) {
+            const source14 = meta.libraryTainted === 'list' ? 'search_connectors' : `libreria:${meta.libraryTainted}`
+            finalOutput = formatExternalDataEvidence(String(source14), finalOutput)
+            if (!contaminated) {
+              run.turnAllows.clear()
+              run.turnGrantEpoch++
+            }
+            contaminated = true
+          }
+          // fase 14 (7d-5): OGNI result del bot passa dalla redazione dei
+          // valori compilati da fill_credential (snapshot e testo di pagina
+          // li redige già browser.ts: qui copre comandi, web e MCP)
+          {
+            const browserMod = await import('./browser')
+            finalOutput = browserMod.redactBrowserSecrets(agentId, finalOutput)
+          }
           const res = add({
             agentId, kind: 'tool-result', role: 'system',
             content: finalOutput.slice(0, 50_000),
             meta: { callId: call.id, ...meta, ...(call.name.startsWith('mcp__') ? { webEvidence: true, mcpEvidence: true } : {}) }
           })
           emit({ type: 'entries', agentId, entries: [res] })
+          // fase 14 (punti 2-3): la card del documento/grafico salvato in
+          // libreria — stessa destinazione dei messaggi del turno, col bottone
+          // Apri; il documento NON si incolla in chat
+          if (meta.libraryCard) {
+            appendSend(agentId, call, meta.libraryCard as SendMessagePayload, emit, {}, opts.taskId)
+          }
           // fase 5: il tool MCP ha rifiutato perché il connettore ha il token
           // scaduto → card "Riconnetti" in chat (il click dell'utente riavvia l'OAuth)
           const reconnect = meta.needsReconnect as { serverName: string; connectorId: string } | undefined
@@ -2484,10 +2754,21 @@ export function resolveApproval(
     console.log(`[sandbot] approval ${approvalId.slice(0, 8)} non in attesa (click stantio o già risolta)`)
     return
   }
-  const entry = getEntries(agentId).findLast((e: import('../../shared/types').TranscriptEntry) => e.kind === 'approval' && e.meta?.approvalId === approvalId)
+  // fase 14: anche le card send-message (fill, modulo sicuro, contatto)
+  // registrano approvalId
+  const entry = getEntries(agentId).findLast(
+    (e: import('../../shared/types').TranscriptEntry) =>
+      (e.kind === 'approval' || e.kind === 'send-message') && e.meta?.approvalId === approvalId
+  )
   if (decision === 'allow' && mode === 'always') {
-    // registra standing grant per il tool+target dell'approval in sospeso
-    if (entry) {
+    // fase 14 (7d-3): "Sempre per questo sito" della card fill crea la
+    // concessione (loginId, origin) — MAI una concessione generica del tool
+    const fill = entry?.meta?.fill as { loginId: string; origin: string } | undefined
+    if (fill) {
+      // fase 14 (7d-3): concessione (loginId, origin) — mai generica
+      addGrant('fill_credential', `${fill.loginId}|${fill.origin}`)
+    } else if (entry) {
+      // registra standing grant per il tool+target dell'approval in sospeso
       void permissions.grantStanding(String(entry.meta?.tool), entry.meta?.input as Record<string, unknown>)
     }
   }

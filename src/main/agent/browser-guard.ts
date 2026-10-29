@@ -102,7 +102,7 @@ export type BrowserActionRisk =
 
 /** Il testo del deny sui campi con credenziali o dati di pagamento. */
 export const CREDENTIAL_DENY_TEXT =
-  'Non scrivo MAI password, dati di carta o credenziali in un sito: chiedi all\'utente di completare lui questo passaggio (puoi dirgli il campo esatto e la pagina).'
+  'Non scrivo MAI password, dati di carta o credenziali in un sito: quel passaggio lo fa l\'utente, oppure il sistema con fill_credential se esiste un login salvato per questo sito (cercalo con list-credentials).'
 
 /**
  * La classificazione PURA del rischio di un'azione del browser (punto 2, I5 e

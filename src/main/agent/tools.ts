@@ -185,11 +185,22 @@ export const toolDefs: ToolDef[] = [
   },
   {
     name: 'list-credentials',
-    description: "Elenca i NOMI delle credenziali disponibili nel vault locale. Il valore non si legge mai direttamente: si usa scrivendo {{secret:NOME}} nell'argomento command di run-command.",
+    description: "Elenca le credenziali disponibili nel vault locale: i NOMI dei secret (si usano nei comandi scrivendo {{secret:NOME}}) e i LOGIN dei siti (id, etichetta, origini, se hanno TOTP — MAI utente o password). Per compilare un login nella pagina del browser si usa fill_credential col suo id.",
     parameters: {
       type: 'object',
       properties: {},
       required: []
+    }
+  },
+  {
+    name: 'find_contacts',
+    description: "Cerca i contatti dell'utente nel vault (nome, email, telefono, note) per parole chiave: al massimo 10 risultati, con i valori VISIBILI (servono a scrivere bozze, che passano comunque da draft_external).",
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Parole chiave (nome, email, telefono)' }
+      },
+      required: ['query']
     }
   },
   {
@@ -526,6 +537,148 @@ export const toolDefs: ToolDef[] = [
       },
       required: ['target', 'action']
     }
+  },
+  {
+    name: 'write_document',
+    description: "Salva un documento nella LIBRERIA dell'utente (Markdown GFM, max 200 KB): senza id lo crea (versione 1), con id scrive una NUOVA VERSIONE intera (le versioni non si sovrascrivono mai). Per un report, un piano o un testo lungo usa QUESTO, non un messaggio in chat. I grafici si incorporano con un blocco ```vega-lite (spec JSON, dati solo inline in data.values) o ```mermaid: un blocco non valido fa fallire la chiamata e nessuna versione viene scritta. Il documento NON va incollato anche in chat: al massimo una riga che dice cosa contiene.",
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Titolo del documento' },
+        content: { type: 'string', description: 'Il Markdown GFM completo' },
+        id: { type: 'string', description: 'Id del documento esistente (lib_…) per una nuova versione (opzionale)' }
+      },
+      required: ['title', 'content']
+    }
+  },
+  {
+    name: 'edit_document',
+    description: "Modifica un documento della libreria con SOSTITUZIONI ESATTE: ogni edits[i].old deve comparire ESATTAMENTE UNA volta nella versione corrente (l'errore dice quante volte compare e nessuna modifica si applica). Le modifiche si applicano in ordine e producono UNA nuova versione.",
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Id del documento (lib_…)' },
+        edits: {
+          type: 'array',
+          description: 'Le modifiche in ordine',
+          items: {
+            type: 'object',
+            properties: {
+              old: { type: 'string', description: 'Il testo da sostituire (unico nel documento)' },
+              new: { type: 'string', description: 'Il testo nuovo' }
+            },
+            required: ['old', 'new']
+          }
+        }
+      },
+      required: ['id', 'edits']
+    }
+  },
+  {
+    name: 'read_document',
+    description: "Legge un documento della libreria: il Markdown con titolo, versione e autore (version? per una versione precedente). Un documento proveniente da dati esterni arriva come dato non fidato.",
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Id del documento (lib_…)' },
+        version: { type: 'number', description: 'Versione specifica (opzionale: default l\'ultima)' }
+      },
+      required: ['id']
+    }
+  },
+  {
+    name: 'visualize',
+    description: "Crea un grafico nella libreria e una card in chat. kind 'vega-lite': spec JSON (max 200 KB) con i dati SOLO inline (data.values, max 5000 righe): nessuna chiave url, nessun loader — la resa SVG la fa il sistema; kind 'mermaid': il sorgente del diagramma (max 50 KB), reso in modalità strict. Mai HTML o JavaScript.",
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Titolo del grafico' },
+        kind: { type: 'string', enum: ['vega-lite', 'mermaid'], description: 'Il tipo di grafico' },
+        spec: { type: 'string', description: "La spec Vega-Lite (JSON) o il sorgente Mermaid" }
+      },
+      required: ['title', 'kind', 'spec']
+    }
+  },
+  {
+    name: 'save_to_library',
+    description: "Porta un file che hai prodotto nel computer dei bot DENTRO la libreria dell'utente (max 50 MB), perché lo ritrovi insieme a documenti e grafici. path come read-file (relativo alla tua home o /workspace/…). Le immagini si vedono nella libreria.",
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Percorso del file nel computer dei bot' },
+        title: { type: 'string', description: 'Titolo nella libreria (opzionale: default il nome del file)' }
+      },
+      required: ['path']
+    }
+  },
+  {
+    name: 'list_library',
+    description: "Elenca le voci della libreria dell'utente (documenti, grafici, file): id, tipo, titolo, autore, versione, fissate prima — al massimo 20 righe. Filtra per kind o query sul titolo.",
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Filtro sul titolo (opzionale)' },
+        kind: { type: 'string', enum: ['document', 'chart', 'file'], description: 'Solo questo tipo (opzionale)' },
+        limit: { type: 'number', description: 'Massimo righe (opzionale, default 20, tetto 20)' }
+      },
+      required: []
+    }
+  },
+  {
+    name: 'export_from_library',
+    description: "Esporta una voce della libreria per l'utente in ~/Downloads/SandBot (con la sua conferma): documenti in md, html autonomo o pdf; grafici Vega-Lite in svg, Mermaid in mmd; file così come sono.",
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Id della voce (lib_…)' },
+        format: { type: 'string', enum: ['md', 'html', 'pdf', 'svg', 'mmd', 'file'], description: 'Formato di esportazione' }
+      },
+      required: ['id', 'format']
+    }
+  },
+  {
+    name: 'fill_credential',
+    description: "Compila i campi di un login salvato nel vault DENTRO la pagina aperta del browser: il valore va dal vault al campo, senza mai passare dalla chat. Almeno un ref fra username_ref, password_ref e totp_ref (i ref dello snapshot, non di iframe). Il login si compila SOLO sull'origine esatta per cui è salvato e ogni uso lo approva l'utente con una card. Mai password o codici in chat o in browser_type.",
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Id del login (da list-credentials)' },
+        username_ref: { type: 'string', description: 'Ref del campo nome utente (opzionale)' },
+        password_ref: { type: 'string', description: 'Ref del campo password (opzionale)' },
+        totp_ref: { type: 'string', description: 'Ref del campo del codice TOTP (opzionale)' }
+      },
+      required: ['id']
+    }
+  },
+  {
+    name: 'request_secure_input',
+    description: "Chiede all'utente un dato sensibile SENZA passare dalla chat: una card con un modulo (per un login: origine, utente, password, TOTP facoltativo; per un secret: nome e valore). I campi sono cifrati e salvati nel vault; tu ricevi solo l'esito (salvato: login «label» (id) / secret NOME). Usalo quando manca una credenziale, MAI chiedere password in chat.",
+    parameters: {
+      type: 'object',
+      properties: {
+        kind: { type: 'string', enum: ['login', 'secret'], description: 'Cosa chiedere' },
+        label: { type: 'string', description: 'Etichetta del login (per kind login)' },
+        origin: { type: 'string', description: 'Origine https del sito, precompilata nel modulo (per kind login, opzionale)' },
+        name: { type: 'string', description: 'Nome proposto del secret (per kind secret)' },
+        reason: { type: 'string', description: 'Perché serve (una frase, mostrata nel modulo)' }
+      },
+      required: ['kind', 'reason']
+    }
+  },
+  {
+    name: 'save_contact',
+    description: "Salva un contatto nel vault dell'utente (con la sua conferma su una card): nome, email, telefoni, indirizzo e note. Un contatto nuovo si salva SOLO con questo tool.",
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Nome del contatto' },
+        emails: { type: 'array', items: { type: 'string' }, description: 'Indirizzi email' },
+        phones: { type: 'array', items: { type: 'string' }, description: 'Numeri di telefono' },
+        address: { type: 'string', description: 'Indirizzo (opzionale)' },
+        notes: { type: 'string', description: 'Note (opzionale)' }
+      },
+      required: ['name']
+    }
   }
 ]
 
@@ -589,6 +742,10 @@ export interface ToolTurnContext {
   turnInitiator?: string
   /** fase 8 (correzione B3): il turno gira nel sotto-transcript di questo task (dentro un task si chiude SOLO quello). */
   taskId?: number
+  /** fase 14 (punto 6): il turno è contaminato (web/email/MCP letti) — le scritture in libreria diventano tainted. */
+  contaminated?: boolean
+  /** fase 14 (punto 6): il turno è nato da un messaggio diretto dell'utente (solo una sua scrittura pulita toglie tainted). */
+  userTurn?: boolean
 }
 
 /** Azione su una routine (update_state target 'routine'): validazione cron con parseCron del daemon. */
@@ -749,9 +906,103 @@ export async function executeTool(
       return { output: r.output, meta: { computerUse: true, error: r.error ?? false }, images: r.images }
     }
     case 'list-credentials': {
-      const { listSecretNames } = await import('../vault')
+      // fase 14 (punto 7c): i NOMI dei secret (come prima) + i login senza
+      // utente né password (id, etichetta, origini, TOTP sì/no); i contatti
+      // non ci sono (hanno find_contacts)
+      const { listSecretNames, listLogins } = await import('../vault')
       const names = listSecretNames()
-      return { output: names.length ? names.join('\n') : '(vault vuoto)', meta: { vault: true } }
+      const logins = await listLogins()
+      const lines: string[] = []
+      if (names.length) lines.push('SECRET (nei comandi: {{secret:NOME}}):', ...names.map((n) => `- ${n}`))
+      if (logins.length) {
+        lines.push(
+          'LOGIN (per il browser, si compilano con fill_credential):',
+          ...logins.map((l) => `- ${l.id} · «${l.label}» · ${l.origins.join(', ')}${l.hasTotp ? ' · con TOTP' : ''}`)
+        )
+      }
+      return {
+        output: lines.length ? lines.join('\n') : '(vault vuoto)',
+        meta: { vault: true }
+      }
+    }
+    case 'find_contacts': {
+      // fase 14 (punto 7f): valori VISIBILI (servono a scrivere bozze, che
+      // passano comunque da draft_external); al massimo 10 risultati
+      const query = String(input.query ?? '')
+      const { searchContacts } = await import('../vault')
+      const found = await searchContacts(query)
+      if (!found.length) return { output: `Nessun contatto trovato per "${query.slice(0, 60)}".`, meta: {} }
+      const lines = found.map((c) => {
+        const bits = [
+          c.emails.length ? `email: ${c.emails.join(', ')}` : '',
+          c.phones.length ? `tel: ${c.phones.join(', ')}` : '',
+          c.address ? `indirizzo: ${c.address}` : '',
+          c.notes ? `note: ${c.notes}` : ''
+        ].filter(Boolean).join(' · ')
+        return `- ${c.name} (${c.id})${bits ? ` · ${bits}` : ''}`
+      })
+      return { output: lines.join('\n'), meta: { contacts: found.length } }
+    }
+    case 'write_document': {
+      // fase 14 (punto 2): crea o aggiorna il documento; la card la appende il
+      // loop da meta.libraryCard (segue la destinazione dei messaggi del turno)
+      const { writeDocument, documentResultText } = await import('./library')
+      const r = writeDocument(agentId, input, { contaminated: ctx.contaminated, userTurn: ctx.userTurn })
+      if (!r.ok) return { output: `Documento non salvato: ${r.error}`, meta: { error: true } }
+      return {
+        output: documentResultText(r.value),
+        meta: { libraryCard: { type: 'document', id: r.value.id, title: r.value.title, version: r.value.version } }
+      }
+    }
+    case 'edit_document': {
+      const { editDocument, documentResultText } = await import('./library')
+      const r = editDocument(agentId, input, { contaminated: ctx.contaminated, userTurn: ctx.userTurn })
+      if (!r.ok) return { output: `Documento non modificato: ${r.error}`, meta: { error: true } }
+      return {
+        output: documentResultText(r.value),
+        meta: { libraryCard: { type: 'document', id: r.value.id, title: r.value.title, version: r.value.version } }
+      }
+    }
+    case 'read_document': {
+      // fase 14 (punti 2 e 6): il contenuto; se la voce è tainted il meta lo
+      // dice e il loop lo incarta nel blocco dato esterno (+ contaminazione)
+      const { readDocument } = await import('./library')
+      const r = readDocument(input)
+      if (!r.ok) return { output: r.error, meta: { error: true } }
+      const v = r.value
+      const header = `# ${v.title}\n(versione ${v.version} di ${v.authorName}${v.versions.length > 1 ? `, versioni: ${v.versions.join(', ')}` : ''})\n\n`
+      return {
+        output: header + v.content,
+        meta: { libraryRead: v.id, ...(v.tainted ? { libraryTainted: v.id } : {}) }
+      }
+    }
+    case 'visualize': {
+      // fase 14 (punto 3): validazione + resa SVG nel daemon; la card la
+      // appende il loop da meta.libraryCard
+      const { saveChart } = await import('./library')
+      const r = await saveChart(agentId, input, { contaminated: ctx.contaminated, userTurn: ctx.userTurn })
+      if (!r.ok) return { output: `Grafico non creato: ${r.error}`, meta: { error: true } }
+      return {
+        output: `Grafico «${r.value.title}» (${r.value.id}, ${r.value.kind}) salvato nella libreria.`,
+        meta: { libraryCard: { type: 'chart', id: r.value.id, title: r.value.title } }
+      }
+    }
+    case 'save_to_library': {
+      // fase 14 (punto 4): nessuna card di conferma — la libreria è interna
+      const { getSaveFileFromBox } = await import('./library')
+      const r = await getSaveFileFromBox()(agentId, input, {}, { contaminated: ctx.contaminated, userTurn: ctx.userTurn })
+      if (!r.ok) return { output: `File non salvato in libreria: ${r.error}`, meta: { error: true } }
+      return {
+        output: `File «${r.value.title}» (${r.value.id}, ${r.value.name}, ${r.value.size} byte) salvato nella libreria.`,
+        meta: {}
+      }
+    }
+    case 'list_library': {
+      // fase 14 (punto 4): se c'è almeno una voce tainted l'INTERO result è
+      // un dato esterno (il meta lo dice, il loop incarta e contamina)
+      const { listLibrary, formatLibraryRows } = await import('./library')
+      const { rows, anyTainted } = listLibrary(input)
+      return { output: formatLibraryRows(rows), meta: { ...(anyTainted ? { libraryTainted: 'list' } : {}) } }
     }
     case 'update_memory':
       return runMemoryAction(agentId, input)

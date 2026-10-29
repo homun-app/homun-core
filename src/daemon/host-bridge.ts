@@ -19,6 +19,19 @@ export interface HostBridgeDeps {
   hasUi(): boolean
 }
 
+/** Fase 14 (punto 5): il generatore di PDF via UI (printToPDF su finestra nascosta). */
+let printToPdfFn: ((html: string) => Promise<Buffer>) | null = null
+
+/** Registra (o togli) il generatore di PDF del bridge. */
+export function setPrintToPdf(fn: ((html: string) => Promise<Buffer>) | null): void {
+  printToPdfFn = fn
+}
+
+/** Il generatore di PDF registrato, se c'è (null = senza UI: l'export dice di aprire SandBot). */
+export function getPrintToPdf(): ((html: string) => Promise<Buffer>) | null {
+  return printToPdfFn
+}
+
 /** safeStorage proxy verso la UI: disponibile solo a finestra aperta. */
 export function uiSafeStorage(deps: HostBridgeDeps): SafeStorageLike {
   return {
@@ -35,6 +48,18 @@ export function uiSafeStorage(deps: HostBridgeDeps): SafeStorageLike {
  */
 export function attachHostBridge(deps: HostBridgeDeps): { notify(title: string, body: string): void; refreshScale(): void } {
   setSafeStorage(uiSafeStorage(deps))
+
+  /**
+   * Fase 14 (punto 5): il PDF lo genera la UI (Electron printToPDF su una
+   * finestra nascosta con l'HTML autonomo del documento). Il daemon lo chiama
+   * via RPC host.printToPDF; senza UI la funzione non c'è e l'export dice di
+   * aprire SandBot o scegliere html.
+   */
+  setPrintToPdf(async (html: string) => {
+    if (!deps.hasUi()) throw new Error('il PDF lo genera la finestra di SandBot: aprila e riprova, oppure esporta in html')
+    const b64 = await deps.callUi('host.printToPDF', [html])
+    return Buffer.from(String(b64), 'base64')
+  })
 
   let scaleFactor = 2
   setScaleFactorProvider(() => scaleFactor)

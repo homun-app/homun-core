@@ -12,6 +12,13 @@ export const CONNECTOR_PROPOSAL_DENIED =
 /** I due tool che il turno può offrire SOLO se è dell'utente. */
 export const CONNECTOR_PROPOSAL_TOOLS = new Set(['add_mcp_server', 'install_plugin'])
 
+/**
+ * Fase 14 (punto 7d): fill_credential NON esiste nei turni di GRUPPO (Grok:
+ * niente accessi né dati sensibili nei gruppi). Nei figli non c'è già: la
+ * whitelist del sottoagente non lo contiene.
+ */
+export const GROUP_EXCLUDED_TOOLS = new Set(['fill_credential'])
+
 /** I fatti del turno che decidono se i tool di proposta ci sono. */
 export interface TurnSourceFacts {
   source: 'user' | 'routine' | 'group' | string
@@ -52,6 +59,9 @@ export function connectorProposalOffered(f: TurnSourceFacts): boolean {
  * dell'utente (pura): i tool NON compaiono proprio nella lista.
  */
 export function toolsForTurnSource(tools: ToolDef[], f: TurnSourceFacts): ToolDef[] {
-  if (connectorProposalOffered(f)) return tools
-  return tools.filter((t) => !CONNECTOR_PROPOSAL_TOOLS.has(t.name))
+  // fase 14 (7d): nei turni di gruppo niente fill_credential (accessi e dati
+  // sensibili restano fuori dai gruppi)
+  const base = f.groupTurn !== undefined ? tools.filter((t) => !GROUP_EXCLUDED_TOOLS.has(t.name)) : tools
+  if (connectorProposalOffered(f)) return base
+  return base.filter((t) => !CONNECTOR_PROPOSAL_TOOLS.has(t.name))
 }

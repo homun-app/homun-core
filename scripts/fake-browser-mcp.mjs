@@ -76,6 +76,21 @@ const PAGES = {
       '- textbox [ref=e9]',
       '- button "Accedi" [ref=e10]'
     ]
+  },
+  // fase 14 (punto 7d): il login del sito di prova della verifica — username
+  // (text), password (password) e campo codice (text), ognino col suo tipo
+  'https://app.example.test/login': {
+    title: 'Accedi al portale',
+    file: 'page-appexample-login',
+    lines: [
+      '- Page URL: https://app.example.test/login',
+      '- Page Title: Accedi al portale',
+      '- heading "Accedi al portale" [ref=e1]',
+      '- textbox "Email" [ref=e2]',
+      '- textbox "Password" [ref=e3]',
+      '- textbox "Codice di verifica" [ref=e4]',
+      '- button "Accedi" [ref=e5]'
+    ]
   }
 }
 
@@ -90,6 +105,12 @@ const PAGES = {
 const FIELD_TYPES = {
   'https://spa.example/offerte': {},
   'https://spa.example/menu': {},
+  'https://app.example.test/login': {
+    e2: { type: 'text', autocomplete: 'username', name: 'email', id: 'email', placeholder: '', label: 'Email', aria: '', title: '' },
+    e3: { type: 'password', autocomplete: 'current-password', name: 'password', id: '', placeholder: '', label: 'Password', aria: '', title: '' },
+    e4: { type: 'text', autocomplete: 'one-time-code', name: 'otp', id: '', placeholder: '', label: 'Codice di verifica', aria: '', title: '' },
+    e5: { type: 'submit', autocomplete: '', name: '', id: '', placeholder: '', label: '', aria: '', title: '' }
+  },
   'https://spa.example/prenota': {
     e4: { type: 'text', autocomplete: 'name', name: 'nome', id: '', placeholder: '', label: 'Nome', aria: '', title: '' },
     e6: { type: 'text', autocomplete: 'cc-number', name: 'card', id: 'card-number', placeholder: 'Numero carta', label: 'Numero carta', aria: '', title: '' },
@@ -102,8 +123,11 @@ const FIELD_TYPES = {
   }
 }
 
-// lo stato della sessione: la pagina corrente (una connessione per bot)
+// lo stato della sessione: la pagina corrente (una connessione per bot) e i
+// testi digitati per ref (il vero snapshot di Playwright mostra il testo dei
+// campi compilati: è così che la REDAZIONE di fase 14 si vede davvero)
 const state = { url: '', page: null }
+const typed = {}
 
 const TOOLS = [
   { name: 'browser_navigate', description: 'apre un URL', inputSchema: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] } },
@@ -166,8 +190,15 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     return text(actionResult(`await page.goto('${url}')`))
   }
   if (name === 'browser_snapshot') {
-    // l'UNICO result con lo snapshot inline (comprese le righe di pagina)
-    return text(state.page ? state.page.lines.join('\n') : '(nessuna pagina aperta)')
+    // l'UNICO result con lo snapshot inline (comprese le righe di pagina); i
+    // campi compilati mostrano il loro testo, come nello snapshot VERO
+    if (!state.page) return text('(nessuna pagina aperta)')
+    const withTyped = state.page.lines.map((l) => {
+      const m = /^(\s*-\s+textbox[^\n]*?\[ref=(\w+)\])([^\n]*)$/.exec(l)
+      if (m && typed[m[2]] !== undefined) return `${m[1]}: ${typed[m[2]]}`
+      return l
+    })
+    return text(withTyped.join('\n'))
   }
   if (name === 'browser_click') {
     const target = String(args.target ?? '')
@@ -180,7 +211,12 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     return text(actionResult(`await page.getByTestId('${target}').click()`))
   }
   if (name === 'browser_type') {
-    return text(actionResult(`await page.getByTestId('${String(args.target ?? '')}').fill('(text omitted)')`))
+    // come il server VERO 0.0.83: il result porta il CODICE Playwright col
+    // TESTO digitato (è per questo che fill_credential BUTTA il result e il
+    // daemon redige ogni output del bot); il testo resta nel campo e RIAPPARE
+    // nello snapshot successivo (come nel browser vero)
+    typed[String(args.target ?? '')] = String(args.text ?? '')
+    return text(actionResult(`await page.getByTestId('${String(args.target ?? '')}').fill('${String(args.text ?? '')}')`))
   }
   if (name === 'browser_press_key') {
     return text(actionResult(`await page.keyboard.press('${String(args.key ?? '')}')`))

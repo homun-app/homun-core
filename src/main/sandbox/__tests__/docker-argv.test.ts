@@ -213,11 +213,11 @@ describe('migrazione docker una tantum (punto 1): argv puri, copia senza cancell
 // ---- fase 11b (punto 2): il launcher del browser (Playwright MCP nel box) ----
 
 describe('il launcher del browser: argv PURI con TUTTI i flag obbligatori e NESSUNO dei vietati', () => {
-  it('dockerBrowserMcpArgv: exec -i -u 1000:1000 -w <home> col wrapper COSTANTE e i flag MCP', () => {
+  it('dockerBrowserMcpArgv: exec -i -u 1001:1001 (sbrowser, fase 14 7a) -w <home> col wrapper COSTANTE e i flag MCP', () => {
     const argv = dockerBrowserMcpArgv('agent_x', 18765)
     expect(argv.slice(0, 12)).toEqual([
       'exec', '-i',
-      '-u', '1000:1000',
+      '-u', '1001:1001',
       '-w', '/box/home/agent_x',
       'sandbot-box',
       'sh', '-c', DOCKER_BROWSER_WRAPPER_SH, 'sh',
@@ -237,7 +237,7 @@ describe('il launcher del browser: argv PURI con TUTTI i flag obbligatori e NESS
     const flags = browserMcpFlags('agent_x', 18765)
     for (const [f, v] of [
       ['--headless', null], ['--browser', 'chromium'], ['--no-sandbox', null],
-      ['--user-data-dir', '/box/home/agent_x/.browser/profile'],
+      ['--user-data-dir', '/box/browser/agent_x/profile'],
       ['--output-dir', '/box/home/agent_x/.browser/output'],
       ['--output-max-size', '52428800'],
       ['--no-webmcp', null], ['--block-service-workers', null],
@@ -599,5 +599,55 @@ describe('fase 13: argv del server MCP stdio nel box (dockerStdioMcpArgv)', () =
     expect(dockerRmDirArgv('/box/plugins/mp/demo/abc', IMG)).toEqual([
       'exec', 'sandbot-box', 'rm', '-rf', '--', '/box/plugins/mp/demo/abc'
     ])
+  })
+})
+
+// ---- fase 14 (punto 7a): il browser con un UTENTE SUO (sbrowser, 1001) ----
+
+import {
+  BROWSER_USER, browserProfilePath, dockerBrowserInitArgv, DOCKER_BROWSER_INIT_SH
+} from '../docker-argv'
+import { readFileSync as rf } from 'node:fs'
+
+describe('fase 14 7a: il browser gira come 1001:1001 col profilo FUORI dalla home del bot', () => {
+  it('il launcher del bot PRINCIPALE: -u 1001:1001 e --user-data-dir /box/browser/<owner>/profile', () => {
+    expect(BROWSER_USER).toBe('1001:1001')
+    expect(browserProfilePath('agent_x')).toBe('/box/browser/agent_x/profile')
+    const argv = dockerBrowserMcpArgv('agent_x', 18765)
+    expect(argv[argv.indexOf('-u') + 1]).toBe('1001:1001')
+    const flags = browserMcpFlags('agent_x', 18765)
+    expect(flags[flags.indexOf('--user-data-dir') + 1]).toBe('/box/browser/agent_x/profile')
+    // NESSUN --user-data-dir sotto /box/home (il profilo non è leggibile dal bot)
+    expect(flags.some((f, i) => f === '--user-data-dir' && flags[i + 1]!.startsWith('/box/home'))).toBe(false)
+  })
+
+  it('il FIGLIO (--isolated) resta COME PRIMA: uid 1000, niente profilo persistente', () => {
+    const argv = dockerBrowserMcpArgv('sub_a1b2c3d4', 18765, { child: true, home: '/box/home/agent_padre' })
+    expect(argv[argv.indexOf('-u') + 1]).toBe('1000:1000')
+    const flags = browserMcpFlags('sub_a1b2c3d4', 18765, { child: true, home: '/box/home/agent_padre' })
+    expect(flags).toContain('--isolated')
+    expect(flags).not.toContain('--user-data-dir')
+  })
+
+  it('il one-shot ROOT dei permessi: profilo 0700 di 1001, output del gruppo 1000 (g+rwX, setgid), profilo VECCHIO cancellato', () => {
+    const argv = dockerBrowserInitArgv('sandbot-box', 'agent_x')
+    expect(argv).toEqual(['exec', '-u', '0', 'sandbot-box', 'sh', '-c', DOCKER_BROWSER_INIT_SH, 'sh', '/box/browser/agent_x/profile', 'agent_x'])
+    // sh -c COSTANTE: l'owner viaggia come argomento posizionale, mai in una shell
+    expect(DOCKER_BROWSER_INIT_SH).toContain('chown -R 1001:1001')
+    expect(DOCKER_BROWSER_INIT_SH).toContain('chmod 0700 "$1"')
+    // le cartelle di output nella home del bot: gruppo 1000, g+w, setgid
+    expect(DOCKER_BROWSER_INIT_SH).toContain('chgrp -R 1000')
+    expect(DOCKER_BROWSER_INIT_SH).toContain('g+rwX')
+    expect(DOCKER_BROWSER_INIT_SH).toContain('chmod g+s')
+    // lo screenshot resta nella home del bot (il bot lo legge come oggi)
+    expect(DOCKER_BROWSER_INIT_SH).toContain('.browser/screens')
+    // il profilo VECCHIO si CANCELLA (non si migra: quei cookie li ha già visti la shell)
+    expect(DOCKER_BROWSER_INIT_SH).toContain('rm -rf "$H/.browser/profile"')
+  })
+
+  it('il Dockerfile crea l\'utente sbrowser: uid 1001, gruppo suo, gruppo supplementare 1000', () => {
+    const dockerfile = rf('resources/box/Dockerfile', 'utf8')
+    expect(dockerfile).toMatch(/useradd\s+--uid 1001\s+--user-group\s+--groups 1000\b/)
+    expect(dockerfile).toContain('sbrowser')
   })
 })

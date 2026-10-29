@@ -2,6 +2,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { api, useStore } from '../store'
 import { describeTrigger } from '../../../shared/cron-human'
+import { VaultTab } from './VaultSettings'
 import { choosePollTool, chooseQueryArgName } from '../../../shared/triggers'
 import type { ProviderConfig, ProviderKind, ModelInfo, Agent, RoutineInfo, RoutineSuggestion, ConnectorInfo, McpServerInfo, McpServerSecret, RoutineTrigger, TemplateInfo, AutoReviewSettings } from '../../../shared/types'
 import { DEFAULT_AUTO_REVIEW, SECRET_KIND_FOR_NEEDS } from '../../../shared/types'
@@ -18,7 +19,7 @@ export function Settings() {
   const pendingTab = useStore((s) => s.settingsTab)
   const refreshProviders = useStore((s) => s.refreshProviders)
   const refreshPermissions = useStore((s) => s.refreshPermissions)
-  const [tab, setTab] = useState<'provider' | 'agenti' | 'permessi' | 'routine' | 'connettori' | 'autoreview' | 'generale'>('provider')
+  const [tab, setTab] = useState<'provider' | 'agenti' | 'permessi' | 'routine' | 'connettori' | 'autoreview' | 'vault' | 'generale'>('provider')
 
   // fase 7: un widget può chiedere di aprire un tab preciso (es. il provider
   // durante l'onboarding): lo si applica una volta e si consuma
@@ -36,7 +37,7 @@ export function Settings() {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-1 border-b border-neutral-800 px-4 pt-4 pb-2">
-          {(['provider', 'agenti', 'permessi', 'routine', 'connettori', 'autoreview', 'generale'] as const).map((t) => (
+          {(['provider', 'agenti', 'permessi', 'routine', 'connettori', 'autoreview', 'vault', 'generale'] as const).map((t) => (
             <button
               key={t}
               className={`rounded-lg px-3 py-1.5 text-sm capitalize ${tab === t ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-500 hover:text-neutral-300'}`}
@@ -57,6 +58,7 @@ export function Settings() {
           {tab === 'routine' && <RoutinesTab />}
           {tab === 'connettori' && <ConnectorsTab />}
           {tab === 'autoreview' && <AutoReviewTab />}
+          {tab === 'vault' && <VaultTab />}
           {tab === 'generale' && <GeneralTab />}
         </div>
       </div>
@@ -774,6 +776,10 @@ function GeneralTab() {
   const [awayPauseDays, setAwayPauseDays] = useState(7)
   const [disabledNotifications, setDisabledNotifications] = useState<string[]>([])
 
+  // fase 14 (punto 1): spazio della LIBRERIA — avviso oltre 2 GB, NESSUN blocco
+  const [libStats, setLibStats] = useState<{ bytes: number; warn: boolean } | null>(null)
+  useEffect(() => { void api.libraryStats().then(setLibStats).catch(() => undefined) }, [])
+
   useEffect(() => {
     void api.getLaunchAtLogin().then(setAtLogin)
     void api.settingsGet('userTimeZone', '').then(setTz)
@@ -811,6 +817,12 @@ function GeneralTab() {
 
   return (
     <div className="space-y-3">
+      {libStats?.warn && (
+        <p className="rounded-lg border border-amber-800/50 bg-amber-950/20 px-3 py-2 text-xs text-amber-300">
+          Libreria: {(libStats.bytes / 1024 / 1024 / 1024).toFixed(1)} GB — oltre i 2 GB consigliati. Valuta cosa cancellare dalla vista Libreria (nessun blocco automatico).
+        </p>
+      )}
+
       <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-neutral-800 px-4 py-3">
         <input
           type="checkbox"

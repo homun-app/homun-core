@@ -12,6 +12,7 @@ import { JOBS_DDL } from './jobs'
 import { GROUPS_DDL } from './groups'
 import { SHELL_JOBS_DDL } from './shell-jobs'
 import { SUBAGENTS_DDL } from './subagents'
+import { LIBRARY_DDL } from './library'
 import type { Agent, TranscriptEntry, PermissionsConfig, RoutineTrigger } from '../../shared/types'
 
 let _dir: string | null = null
@@ -103,6 +104,7 @@ function open(): DatabaseSync {
     ${GROUPS_DDL}
     ${SHELL_JOBS_DDL}
     ${SUBAGENTS_DDL}
+    ${LIBRARY_DDL}
   `)
   // fase 4: colonne nuove delle routine per i DB esistenti (CREATE TABLE IF
   // NOT EXISTS non le aggiunge); provenance distingue le routine dell'utente
@@ -442,7 +444,23 @@ export function getPermissions(): PermissionsConfig {
       { tool: 'await_shell', pattern: '*', mode: 'always_allow' },
       { tool: 'copy_to_box', pattern: '*', mode: 'needs_approval' },
       { tool: 'copy_from_box', pattern: '*', mode: 'needs_approval' },
-      { tool: 'mcp__*', pattern: '*', mode: 'needs_approval' }
+      { tool: 'mcp__*', pattern: '*', mode: 'needs_approval' },
+      // fase 14: la LIBRERIA è interna all'utente (documenti, grafici, file):
+      // scrittura e lettura passano sempre; l'EXPORT chiede SEMPRE la card
+      // (intercettato dal loop prima del gate, come lo scambio di file);
+      // fill_credential ha la SUA card (mai auto-review); i contatti sono
+      // visibili (find_contacts) ma salvarli chiede la card dell'utente
+      { tool: 'write_document', pattern: '*', mode: 'always_allow' },
+      { tool: 'edit_document', pattern: '*', mode: 'always_allow' },
+      { tool: 'read_document', pattern: '*', mode: 'always_allow' },
+      { tool: 'visualize', pattern: '*', mode: 'always_allow' },
+      { tool: 'save_to_library', pattern: '*', mode: 'always_allow' },
+      { tool: 'list_library', pattern: '*', mode: 'always_allow' },
+      { tool: 'export_from_library', pattern: '*', mode: 'needs_approval' },
+      { tool: 'fill_credential', pattern: '*', mode: 'needs_approval' },
+      { tool: 'request_secure_input', pattern: '*', mode: 'always_allow' },
+      { tool: 'find_contacts', pattern: '*', mode: 'always_allow' },
+      { tool: 'save_contact', pattern: '*', mode: 'always_allow' }
     ]
   })
 }

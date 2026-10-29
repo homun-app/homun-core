@@ -818,6 +818,167 @@ export function buildApiMethods(
     'vault:store': ([name, value]) => vault().then((x) => x.storeSecret(name as string, value as string)),
     'vault:delete': ([name]) => vault().then((x) => x.deleteSecret(name as string)),
 
+    // ---- fase 14 (punto 7b): vault esteso (login, contatti, concessioni) ----
+    'vault:items': () => vault().then((x) => x.listVaultItems()),
+    'vault:save-login': async ([input]) => {
+      const i = input as { id?: string; label: string; origins: string[]; username: string; password: string; totp?: string }
+      const id = await vault().then((x) => x.saveLogin(i))
+      return { id }
+    },
+    'vault:save-contact': async ([input]) => {
+      const i = input as { id?: string; name: string; emails?: string[]; phones?: string[]; address?: string; notes?: string }
+      const id = await vault().then((x) => x.saveContact(i))
+      return { id }
+    },
+    'vault:delete-item': ([kind, key]) => {
+      if (kind !== 'secret' && kind !== 'login' && kind !== 'contact') throw new Error(`tipo non valido: ${String(kind)}`)
+      return vault().then((x) => x.deleteVaultItem(kind, String(key)))
+    },
+    'vault:get-contact': ([id]) => vault().then((x) => x.getContact(String(id))),
+    /** Le concessioni "Sempre per questo sito" di fill_credential (Settings → Vault). */
+    'fills:grants': async () => {
+      const grants = store.listGrants().filter((g) => g.tool === 'fill_credential')
+      const logins = await vault().then((x) => x.listLogins())
+      return grants.map((g) => {
+        const [loginId, origin] = g.target.split('|')
+        return {
+          id: g.id,
+          loginId: loginId ?? g.target,
+          label: logins.find((l) => l.id === loginId)?.label ?? loginId ?? '',
+          origin: origin ?? '',
+          createdAt: g.createdAt
+        }
+      })
+    },
+    'fills:revoke': ([id]) => {
+      store.removeGrant(Number(id))
+      return { ok: true }
+    },
+    /**
+     * Fase 14 (punto 7e): l'utente ha compilato il modulo sicuro. I valori
+     * salvano nel vault QUI (mai in chat) e l'esito torna al modello tramite
+     * l'approval risolta: solo "salvato: login «label» (id)" / "salvato:
+     * secret NOME".
+     */
+    'secureinput:submit': async ([agentId, approvalId, values]) => {
+      const aid = agentId as string
+      const entry = store.getEntries(aid).findLast(
+        (e) => e.kind === 'send-message' && e.meta?.approvalId === approvalId && e.meta?.status === 'pending'
+      )
+      const message = entry?.meta?.message as SendMessagePayload | undefined
+      if (!entry || message?.type !== 'secure-input') throw new Error('Modulo non trovato o già chiuso')
+      const v = (values ?? {}) as Record<string, string>
+      let outcome: string
+      if (message.kind === 'login') {
+        const origin = String(v.origin ?? message.origin ?? '').trim()
+        if (!origin || !v.username || !v.password) throw new Error('Servono origine, utente e password')
+        const label = String(v.label ?? message.label ?? '').trim() || 'Login'
+        const id = await vault().then((x) => x.saveLogin({
+          label, origins: [origin], username: v.username, password: v.password,
+          ...(v.totp ? { totp: v.totp } : {})
+        }))
+        outcome = `salvato: login «${label}» (${id})`
+      } else {
+        const name = String(v.name ?? message.name ?? '').trim()
+        if (!name || !v.value) throw new Error('Servono il nome e il valore del secret')
+        await vault().then((x) => x.storeSecret(name, v.value))
+        outcome = `salvato: secret ${name}`
+      }
+      store.updateEntryMeta(entry.id, { ...entry.meta, status: 'allowed', savedOutcome: outcome })
+      emitUpdatedEntry(aid, entry.id)
+      loop.resolveApproval(aid, String(approvalId), 'allow', 'once')
+      return { ok: true }
+    },
+
+    // ---- fase 14 (punti 1-5): la libreria ----
+    'library:list': async ([query, kind]) => {
+      const libraryStore = await import('../main/store/library')
+      return libraryStore.listLibraryItems({
+        ...(typeof query === 'string' && query.trim() ? { query } : {}),
+        ...(kind === 'document' || kind === 'chart' || kind === 'file' ? { kind } : {})
+      }).map((i): import('../shared/types').LibraryItemInfo => ({
+        id: i.id, kind: i.kind, title: i.title, authorAgentId: i.authorAgentId,
+        createdAt: i.createdAt, updatedAt: i.updatedAt, pinned: i.pinned, tainted: i.tainted,
+        currentVersion: i.currentVersion, chartKind: i.chartKind ?? null,
+        fileName: i.fileName ?? null, fileSize: i.fileSize ?? null, fileMime: i.fileMime ?? null
+      }))
+    },
+    'library:get': async ([id, version]) => {
+      const lib = await import('../main/agent/library')
+      const item = lib.getLibraryItemPublic(String(id))
+      if (!item) throw new Error('voce non trovata')
+      if (item.kind === 'document') {
+        const r = lib.readDocument({ id: String(id), ...(version !== undefined && version !== null ? { version } : {}) })
+        if (!r.ok) throw new Error(r.error)
+        return {
+          kind: 'document', content: r.value.content, svg: null, fileBase64: null, fileMime: null,
+          versions: r.value.versions, authorName: r.value.authorName
+        }
+      }
+      if (item.kind === 'chart') {
+        const src = lib.chartSourceOf(String(id))
+        return {
+          kind: 'chart', content: src, svg: item.chartKind === 'vega-lite' ? lib.chartSvgOf(String(id)) : null,
+          fileBase64: null, fileMime: item.chartKind === 'vega-lite' ? 'image/svg+xml' : 'text/plain',
+          versions: [1], authorName: store.getAgent(item.authorAgentId)?.name ?? item.authorAgentId
+        }
+      }
+      const file = lib.fileOfItem(item)
+      if (!file) throw new Error('voce incoerente')
+      const { readFileSync } = await import('node:fs')
+      const isImage = /^image\/(png|jpeg|svg\+xml)$/.test(item.fileMime ?? '')
+      return {
+        kind: 'file', content: null, svg: null,
+        fileBase64: isImage ? readFileSync(file).toString('base64') : null,
+        fileMime: item.fileMime ?? 'application/octet-stream',
+        versions: [1], authorName: store.getAgent(item.authorAgentId)?.name ?? item.authorAgentId
+      }
+    },
+    'library:delete': async ([id]) => {
+      const libraryStore = await import('../main/store/library')
+      if (!libraryStore.deleteLibraryItem(String(id))) throw new Error('voce non trovata')
+      return { ok: true }
+    },
+    'library:rename': async ([id, title]) => {
+      const libraryStore = await import('../main/store/library')
+      if (!libraryStore.getLibraryItem(String(id))) throw new Error('voce non trovata')
+      libraryStore.updateLibraryItem(String(id), { title: String(title ?? '').trim() || 'Senza titolo', updatedAt: Date.now() })
+      return { ok: true }
+    },
+    'library:pin': async ([id, pinned]) => {
+      const libraryStore = await import('../main/store/library')
+      if (!libraryStore.getLibraryItem(String(id))) throw new Error('voce non trovata')
+      libraryStore.updateLibraryItem(String(id), { pinned: pinned === true, updatedAt: Date.now() })
+      return { ok: true }
+    },
+    /** Fase 14: "ripristina come nuova versione" — la versione vecchia diventa l'ultima (MAI sovrascritta). */
+    'library:restore-version': async ([id, version]) => {
+      const lib = await import('../main/agent/library')
+      const item = lib.getLibraryItemPublic(String(id))
+      if (!item || item.kind !== 'document') throw new Error('documento non trovato')
+      const read = lib.readDocument({ id: String(id), version: Number(version) })
+      if (!read.ok) throw new Error(read.error)
+      const r = lib.writeDocument(item.authorAgentId, { id: String(id), title: item.title, content: read.value.content }, { userTurn: true })
+      if (!r.ok) throw new Error(r.error)
+      return { ok: true, version: r.value.version }
+    },
+    'library:export': async ([id, format]) => {
+      // il bottone Esporta della UI: stessa strada dell'export del bot, SENZA
+      // la card (l'ha già cliccata l'utente qui); l'esito torna alla UI
+      const lib = await import('../main/agent/library')
+      const pre = lib.prepareLibraryExport({ id, format })
+      if (!pre.ok) throw new Error(pre.error)
+      const { getPrintToPdf } = await import('./host-bridge')
+      const fn = getPrintToPdf()
+      const r = await lib.runLibraryExport(pre.value, fn ? { printToPdf: fn } : {})
+      return { ok: true, path: r.finalPath, output: r.output }
+    },
+    'library:stats': async () => {
+      const lib = await import('../main/agent/library')
+      const bytes = lib.libraryTotalBytes()
+      return { bytes, warn: bytes > lib.LIBRARY_TOTAL_WARN_BYTES, warnBytes: lib.LIBRARY_TOTAL_WARN_BYTES }
+    },
+
     // ---- approvazioni ----
     // fase 8 (punto 2): mode 'once' | 'always' (standing grant) | 'turn' (fino a fine turno)
     'approvals:resolve': ([agentId, approvalId, decision, mode]) => {

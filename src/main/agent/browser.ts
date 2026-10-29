@@ -28,7 +28,8 @@ import {
 } from './browser-guard'
 import {
   dockerBrowserMcpArgv, browserMcpFlags, BOX_CONTAINER,
-  BROWSER_IDLE_MS, BROWSERS_PER_BOX_MAX, boxHomePath, browserPidFile, dockerReadFileArgv, dockerKillGroupArgv
+  BROWSER_IDLE_MS, BROWSERS_PER_BOX_MAX, boxHomePath, browserPidFile, dockerReadFileArgv, dockerKillGroupArgv,
+  dockerBrowserInitArgv
 } from '../sandbox/docker-argv'
 import {
   sandboxMode, browserSandboxOk, ensureBoxContainer, ensureBotHome, runDockerRaw,
@@ -40,8 +41,18 @@ import { randomUUID } from 'node:crypto'
 
 /** Il browser è disponibile? (docker + rete bridge; il flag di test attiva il percorso in host). */
 export function browserAvailable(): boolean {
-  if (process.env.SANDBOT_TEST_FAKE_BROWSER_MCP) return true
+  if (fakeBrowserMcpPath()) return true
   return browserSandboxOk()
+}
+
+/**
+ * Fase 14 (verifica): il server MCP FINTO del browser sull'host — attivato SOLO
+ * da una variabile SANDBOT_TEST_* (SANDBOT_TEST_FAKE_BROWSER_MCP, o l'alias
+ * SANDBOT_TEST_FAKE_BROWSER_CMD della fase 14): senza una delle due, in
+ * produzione, il percorso non esiste.
+ */
+export function fakeBrowserMcpPath(): string | null {
+  return process.env.SANDBOT_TEST_FAKE_BROWSER_MCP ?? process.env.SANDBOT_TEST_FAKE_BROWSER_CMD ?? null
 }
 
 /** Il result quando il browser non c'è (mai un browser sul Mac dell'utente). */
@@ -169,6 +180,13 @@ interface BrowserSession {
   url: string
   lastActionAt: number
   closeTimer: NodeJS.Timeout
+  /**
+   * fase 14 (7d-5): i valori compilati da fill_credential (username, password,
+   * TOTP). Vivono qui PER BOT per la vita della sessione del browser: OGNI
+   * result di tool di quel bot passa da redactBrowserSecrets, quindi uno
+   * snapshot successivo non li rivela. Con la sessione se ne vanno.
+   */
+  filledValues: string[]
 }
 
 const sessions = new Map<string, BrowserSession>()
@@ -264,7 +282,7 @@ async function startBrowserSession(agentId: string): Promise<BrowserSession> {
   let command = 'docker'
   let args: string[]
   let env: Record<string, string> | undefined
-  const fakeMcp = process.env.SANDBOT_TEST_FAKE_BROWSER_MCP
+  const fakeMcp = fakeBrowserMcpPath()
   if (fakeMcp) {
     // MODALITÀ TEST: il server MCP finto al posto di docker exec — SOLO il suo
     // path, senza i flag (sono del server vero e node li leggerebbe come suoi;
@@ -282,16 +300,27 @@ async function startBrowserSession(agentId: string): Promise<BrowserSession> {
     await ensureBoxContainer()
     await ensureBotHome(agentId) // -w punta alla home (del proprietario)
     await killBrowserOrphan(agentId)
+    // fase 14 (punto 7a): il terreno del browser — profilo nuovo di 1001
+    // (0700, /box/browser/<owner>/profile), cartelle di output del gruppo
+    // 1000 scrivibili da 1001, profilo VECCHIO cancellato. Per un FIGLIO non
+    // serve: gira --isolated come 1000 nella home del padre, come prima
+    const child = isSubagent(agentId)
+    if (!child) {
+      const { runDockerRaw } = await import('../sandbox')
+      const init = await runDockerRaw(dockerBrowserInitArgv(BOX_CONTAINER, boxOwnerOf(agentId)), { timeoutMs: 30_000 })
+      if (init.exitCode !== 0) {
+        throw new Error(`preparazione del profilo del browser non riuscita: ${init.stderr || `exit ${init.exitCode}`}`)
+      }
+    }
     // fase 12 (punto 1): il browser di un FIGLIO ha istanza e pid file SUOI,
     // --isolated al posto del profilo persistente e l'output separato — ma
     // gira nella HOME DEL PADRE (condivisa)
-    const child = isSubagent(agentId)
     args = dockerBrowserMcpArgv(agentId, proxyPort, { child, home: boxHomePath(boxOwnerOf(agentId)) })
   }
   const client = new Client({ name: 'sandbot', version: '0.1.0' })
   await client.connect(new StdioClientTransport(env ? { command, args, env } : { command, args }))
   const session: BrowserSession = {
-    client, snapshot: '', url: '', lastActionAt: Date.now(), closeTimer: setTimeout(() => undefined, BROWSER_IDLE_MS)
+    client, snapshot: '', url: '', lastActionAt: Date.now(), closeTimer: setTimeout(() => undefined, BROWSER_IDLE_MS), filledValues: []
   }
   // I4: il trasporto chiuso (server morto o idle timeout del server) toglie la
   // sessione dalla mappa e ferma il suo timer, subito — mai "Not connected"
@@ -450,8 +479,7 @@ async function runBrowserTool(agentId: string, tool: string, input: Record<strin
       mcpName = 'browser_type'
       mcpArgs = { target: ref, text, ...(input.submit === true ? { submit: true } : {}) }
       break
-    }
-    case 'browser_select':
+    }    case 'browser_select':
       mcpName = 'browser_select_option'
       mcpArgs = { target: ref, values: Array.isArray(input.values) ? input.values.map(String) : [] }
       break
@@ -509,9 +537,11 @@ async function runBrowserTool(agentId: string, tool: string, input: Record<strin
   if (SNAPSHOT_AFTER_ACTIONS.has(tool)) {
     const snap = await session.client.callTool({ name: 'browser_snapshot', arguments: {} })
     snapshotRaw = mcpText(snap)
-    if (snapshotRaw) session.snapshot = snapshotRaw.slice(0, 200_000)
+    // 7d-5: lo snapshot di STATO passa dalla redazione (un "mostra password"
+    // seguito da uno snapshot non rivela il valore compilato)
+    if (snapshotRaw) session.snapshot = redactBrowserSecrets(agentId, snapshotRaw).slice(0, 200_000)
   } else if (raw.includes('[ref=')) {
-    session.snapshot = raw.slice(0, 200_000)
+    session.snapshot = redactBrowserSecrets(agentId, raw).slice(0, 200_000)
   }
   // l'URL corrente: dal result dell'azione, o dallo snapshot ricevuto a parte
   const pageUrl = browserPageUrl(raw) ?? browserPageUrl(snapshotRaw)
@@ -519,9 +549,11 @@ async function runBrowserTool(agentId: string, tool: string, input: Record<strin
   else if (tool === 'browser_open') session.url = String(mcpArgs.url ?? session.url)
   // il result al modello è COMPATTO e uguale per tutte le azioni: righe di
   // pagina ed eventuali Error/Modal state dall'azione, più lo snapshot inline
+  // — e passa dalla REDAZIONE dei valori compilati (7d-5)
   const composed = SNAPSHOT_AFTER_ACTIONS.has(tool) ? composeBrowserResult(raw, snapshotRaw) : raw
-  const truncated = truncateSnapshot(composed)
-  const challenge = snapshotChallenge(composed)
+  const redacted = redactBrowserSecrets(agentId, composed)
+  const truncated = truncateSnapshot(redacted)
+  const challenge = snapshotChallenge(redacted)
   const output = challenge ? `${truncated.text}\n\n${SNAPSHOT_BLOCKED_NOTE}` : truncated.text
   return {
     output,
@@ -532,4 +564,63 @@ async function runBrowserTool(agentId: string, tool: string, input: Record<strin
       ...(challenge ? { challenge: true } : {})
     }
   }
+}
+
+// ---- fase 14 (punto 7d): il fill dei campi col valore del vault ----
+
+/**
+ * Il DAEMON compila un campo col valore del login (7d-4): chiama browser_type
+ * di Playwright MCP col valore; il result GREZZO (che contiene il codice
+ * Playwright col valore) NON torna né al modello né al transcript — SI BUTTA.
+ * Il valore entra nella lista di redazione del bot (7d-5), che vive quanto la
+ * sessione del browser.
+ */
+export async function typeIntoFieldForFill(agentId: string, ref: string, value: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!value) return { ok: false, error: 'valore vuoto: niente da scrivere nel campo' }
+  try {
+    const session = await getBrowserSession(agentId)
+    const res = await session.client.callTool({ name: 'browser_type', arguments: { target: ref, text: value } })
+    // 7d-4: il result contiene il codice Playwright col valore — non si legge
+    // nemmeno per l'errore: si guarda solo isError
+    if ((res as { isError?: boolean }).isError) {
+      return { ok: false, error: 'la scrittura nel campo non è riuscita (errore del server MCP del browser)' }
+    }
+    registerFilledValues(agentId, [value])
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+/** Registra i valori compilati per la redazione (7d-5): vita della sessione. */
+export function registerFilledValues(agentId: string, values: string[]): void {
+  const s = sessions.get(agentId)
+  if (!s) return
+  for (const v of values) {
+    if (v && !s.filledValues.includes(v)) s.filledValues.push(v)
+  }
+}
+
+/** I valori compilati di un bot (per i test e la verifica). */
+export function filledValuesOf(agentId: string): string[] {
+  return [...(sessions.get(agentId)?.filledValues ?? [])]
+}
+
+/**
+ * redactBrowserSecrets (7d-5): oscura i valori compilati in OGNI result di
+ * tool del bot (snapshot, testo di pagina, comandi, web): un "mostra password"
+ * seguito da uno snapshot non rivela niente. Oltre al valore letterale oscura
+ * le codifiche più comuni (come redactSecrets dei comandi).
+ */
+export function redactBrowserSecrets(agentId: string, text: string): string {
+  const s = sessions.get(agentId)
+  if (!s || !s.filledValues.length) return text
+  let out = text
+  for (const v of s.filledValues) {
+    if (!v) continue
+    for (const x of [v, Buffer.from(v, 'utf8').toString('base64'), encodeURIComponent(v)]) {
+      if (x && x.length >= 4) out = out.split(x).join('[redacted:credential]')
+    }
+  }
+  return out
 }

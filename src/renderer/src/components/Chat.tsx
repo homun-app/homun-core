@@ -12,6 +12,8 @@ import { McpServerCard, PluginCard } from './ConnectorCards13'
 import { RuleProposalCard } from './RuleProposalCard'
 import { TaskCard } from './TaskCard'
 import { SubagentCard } from './SubagentCard'
+import { DocumentCard, ChartCard, FillCard, SecureInputCard, ContactCard } from './LibraryCards'
+import { LibraryPanel } from './LibraryPanel'
 import { MemoryPanel } from './MemoryPanel'
 import { SkillsPanel } from './SkillsPanel'
 
@@ -164,6 +166,9 @@ export function Chat() {
 
       {/* fase 10: vista del gruppo aperto (messaggi, membri, scrittura come utente) */}
       <GroupPanel />
+
+      {/* fase 14: la Libreria (documenti, grafici, file) */}
+      <LibraryPanel />
 
       <footer className="border-t border-neutral-800 px-6 py-4">
         <div className="mx-auto flex max-w-3xl items-end gap-2">
@@ -333,6 +338,13 @@ function EntryRow({ entry, showReasoning }: { entry: TranscriptEntry; showReason
       if (message?.type === 'task') return <TaskCard entry={entry} />
       // fase 12 (punto 7): card del sottoagente (unica riga del figlio in chat)
       if (message?.type === 'subagent') return <SubagentCard entry={entry} />
+      // fase 14: documenti e grafici in libreria, fill dei login, modulo
+      // sicuro, contatto da salvare
+      if (message?.type === 'document') return <DocumentCard entry={entry} />
+      if (message?.type === 'chart') return <ChartCard entry={entry} />
+      if (message?.type === 'fill') return <FillCard entry={entry} />
+      if (message?.type === 'secure-input') return <SecureInputCard entry={entry} />
+      if (message?.type === 'contact') return <ContactCard entry={entry} />
       return (
         <div className="max-w-[92%] text-sm leading-relaxed text-neutral-100">
           <div className="prose-invert max-w-none prose-pre:bg-neutral-900 prose-pre:border prose-pre:border-neutral-800 prose-code:text-neutral-300">

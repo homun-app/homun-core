@@ -33,3 +33,11 @@ RUN npm install -g @playwright/mcp@0.0.83 \
  && node "$PWCLI" install chromium \
  && playwright-mcp --help >/dev/null \
  && chmod -R a+rX,go-w "${PLAYWRIGHT_BROWSERS_PATH:-/ms-playwright}"
+
+# fase 14 (punto 7a): l'utente del SOLO processo Playwright MCP — uid/gid 1001
+# (sbrowser) col gruppo supplementare 1000 (quello del bot): il suo profilo
+# (/box/browser/<id>/profile, 0700 di 1001) NON è leggibile dalla shell del
+# bot (uid 1000), quindi nemmeno il cookie di sessione dopo un login; il gruppo
+# supplementare gli lascia scrivere pid e screenshot nelle cartelle del bot
+# (gruppo 1000, g+w, setgid — le prepara il one-shot del daemon).
+RUN useradd --uid 1001 --user-group --groups 1000 --system --shell /usr/sbin/nologin sbrowser

@@ -232,3 +232,49 @@ describe('fase 12 (punto 6): la sezione "Sottoagenti" nel prompt del padre', () 
     expect(child).toContain('vale quello del brief')
   })
 })
+
+// ---- fase 14 (punto 8): la sezione "Documenti e credenziali" ----
+
+import { documentsCredentialsSection } from '../prompts'
+
+describe('fase 14 (punto 8): "Documenti e credenziali"', () => {
+  it('la sezione c\'è nel prompt principale con tutte le regole, in ~200 token', () => {
+    const s = documentsCredentialsSection()
+    expect(s.startsWith('# Documenti e credenziali')).toBe(true)
+    expect(s).toContain('write_document')
+    expect(s).toContain('edit_document')
+    expect(s).toContain('visualize')
+    expect(s).toContain('save_to_library')
+    expect(s).toContain('list-credentials')
+    expect(s).toContain('fill_credential')
+    expect(s).toContain('MAI password')
+    expect(s).toContain('browser_type')
+    expect(s).toContain('request_secure_input')
+    expect(s).toContain('non la si usa')
+    expect(s).toContain('save_contact')
+    // ~200 token stimati (caratteri/4)
+    expect(s.length / 4).toBeLessThanOrEqual(200)
+  })
+
+  it('il prompt principale la contiene; il budget resta ≤ 2000 token', () => {
+    const p = systemPrompt(agent)
+    expect(p).toContain('# Documenti e credenziali')
+    expect(p.length / 4).toBeLessThanOrEqual(PROMPT_TOKEN_BUDGET)
+  })
+
+  it('le righe delle credenziali sono ASSENTI nel prompt del figlio e nei turni di gruppo', () => {
+    // figlio: costruttore proprio — la sezione c'è SENZA le righe credenziali
+    const child = subagentSystemPrompt(agent, { id: 'sub_ab12cd34', title: 't' })
+    expect(child).toContain('# Documenti e credenziali')
+    expect(child).toContain('write_document')
+    expect(child).not.toContain('fill_credential')
+    expect(child).not.toContain('request_secure_input')
+    // gruppo: systemPrompt con credentials false (come fa il loop)
+    const group = systemPrompt(agent, { subagents: false, connectors: false, credentials: false })
+    expect(group).toContain('# Documenti e credenziali')
+    expect(group).not.toContain('fill_credential')
+    expect(group).not.toContain('request_secure_input')
+    // e nel prompt normale le righe ci sono
+    expect(systemPrompt(agent)).toContain('fill_credential')
+  })
+})

@@ -69,6 +69,10 @@ interface Store {
   sendGroupMessage(text: string): void
   /** fase 12: apre/chiude la vista del transcript di un sottoagente */
   openSubagent(id: string | null): void
+  /** fase 14: apre la Libreria (null = chiusa, '' = lista, id = voce) */
+  openLibrary(id: string | null): void
+  /** fase 14: la libreria aperta (null = chiusa, '' = lista, id = voce) */
+  openLibraryId: string | null
   /** fase 12: bottone Ferma sulla card del sottoagente */
   stopSubagent(id: string): void
   setSettingsOpen(v: boolean): void
@@ -96,6 +100,7 @@ export const useStore = create<Store>((set, get) => ({
   subagents: [],
   openSubagentId: null,
   subEntries: [],
+  openLibraryId: null,
 
   async init() {
     const agents = await api.listAgents()
@@ -384,6 +389,10 @@ export const useStore = create<Store>((set, get) => ({
     if (id !== null) {
       void api.getEntries(id).then((subEntries) => set({ subEntries })).catch(() => undefined)
     }
+  },
+
+  openLibrary(id) {
+    set({ openLibraryId: id })
   },
 
   // fase 12: il bottone Ferma della card (RPC subagents:stop)

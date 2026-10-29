@@ -166,6 +166,59 @@ export type SendMessagePayload =
       subagentId: string
       title: string
     }
+  | {
+      /** fase 14 (punto 2): card del documento salvato in libreria, col bottone Apri */
+      type: 'document'
+      id: string
+      title: string
+      version: number
+    }
+  | {
+      /** fase 14 (punto 3): card del grafico salvato in libreria */
+      type: 'chart'
+      id: string
+      title: string
+    }
+  | {
+      /**
+       * Fase 14 (punto 7d): card del fill di un login — "Compilo il login
+       * «label» su origin?". Consenti = per questo turno; Sempre per questo
+       * sito = concessione (loginId, origin) revocabile; Nega.
+       */
+      type: 'fill'
+      /** id del login nel vault */
+      id: string
+      label: string
+      origin: string
+      /** quali campi verranno compilati (username/password/totp) */
+      fields: string[]
+    }
+  | {
+      /**
+       * Fase 14 (punto 7e): modulo sicuro — l'utente compila un dato sensibile
+       * che NON passa dalla chat (campi di tipo password, salvati via RPC nel
+       * vault). Il modello riceve solo l'esito.
+       */
+      type: 'secure-input'
+      kind: 'login' | 'secret'
+      /** login: etichetta; secret: nome proposto (modificabile) */
+      label?: string
+      name?: string
+      /** login: origine precompilata e modificabile */
+      origin?: string
+      reason: string
+    }
+  | {
+      /** fase 14 (punto 7f): card di conferma del contatto che il bot vuole salvare */
+      type: 'contact'
+      name: string
+      emails: string[]
+      phones: string[]
+      address?: string
+      notes?: string
+      /** proposta nata in un turno contaminato: avviso in card */
+      untrusted?: true
+    }
 
 /**
  * meta di una entry 'send-message':
@@ -408,6 +461,25 @@ export interface SandbotApi {
   vaultList(): Promise<string[]>
   vaultStore(name: string, value: string): Promise<void>
   vaultDelete(name: string): Promise<void>
+  // fase 14 (punto 7b): vault esteso — login, contatti, concessioni
+  vaultItems(): Promise<VaultItemInfoUi[]>
+  vaultSaveLogin(input: { id?: string; label: string; origins: string[]; username: string; password: string; totp?: string }): Promise<{ id: string }>
+  vaultSaveContact(input: { id?: string; name: string; emails?: string[]; phones?: string[]; address?: string; notes?: string }): Promise<{ id: string }>
+  vaultDeleteItem(kind: 'secret' | 'login' | 'contact', key: string): Promise<boolean>
+  vaultGetContact(id: string): Promise<{ id: string; name: string; emails: string[]; phones: string[]; address?: string; notes?: string } | null>
+  fillGrants(): Promise<FillGrantInfo[]>
+  fillGrantRevoke(id: number): Promise<{ ok: boolean }>
+  /** fase 14 (punto 7e): l'utente ha compilato il modulo sicuro */
+  secureInputSubmit(agentId: string, approvalId: string, values: Record<string, string>): Promise<{ ok: boolean }>
+  // fase 14 (punti 1-5): la libreria
+  libraryList(query?: string, kind?: string): Promise<LibraryItemInfo[]>
+  libraryGet(id: string, version?: number): Promise<LibraryContentInfo>
+  libraryDelete(id: string): Promise<{ ok: boolean }>
+  libraryRename(id: string, title: string): Promise<{ ok: boolean }>
+  libraryPin(id: string, pinned: boolean): Promise<{ ok: boolean }>
+  libraryExport(id: string, format: string): Promise<{ ok: boolean; path: string; output: string }>
+  libraryRestoreVersion(id: string, version: number): Promise<{ ok: boolean; version: number }>
+  libraryStats(): Promise<{ bytes: number; warn: boolean; warnBytes: number }>
   // daemon all'accesso (LaunchAgent)
   getLaunchAtLogin(): Promise<boolean>
   setLaunchAtLogin(enabled: boolean): Promise<void>
@@ -619,6 +691,59 @@ export const DEFAULT_AUTO_REVIEW: AutoReviewSettings = {
   blockRules: [],
   providerId: null,
   model: null
+}
+
+// ---- libreria (fase 14, punti 1-5) ----
+
+/** Una voce della libreria come la vede la UI. */
+export interface LibraryItemInfo {
+  id: string
+  kind: 'document' | 'chart' | 'file'
+  title: string
+  authorAgentId: string
+  createdAt: number
+  updatedAt: number
+  pinned: boolean
+  tainted: boolean
+  currentVersion: number
+  chartKind?: 'vega-lite' | 'mermaid' | null
+  fileName?: string | null
+  fileSize?: number | null
+  fileMime?: string | null
+  hasTotp?: boolean
+}
+
+/** Il contenuto di una voce (documento: markdown della versione; grafico: sorgente; file: base64 per le immagini). */
+export interface LibraryContentInfo {
+  kind: 'document' | 'chart' | 'file'
+  /** document: il markdown; chart: spec/diagramma; file: null (si usa fileData) */
+  content: string | null
+  /** chart vega-lite: l'SVG generato dal daemon */
+  svg: string | null
+  /** file: contenuto base64 quando è un'immagine png/jpg/svg (altrimenti null) */
+  fileBase64: string | null
+  fileMime: string | null
+  versions: number[]
+  authorName: string
+}
+
+/** Una voce del vault come la vede la UI (mai i valori). */
+export interface VaultItemInfoUi {
+  kind: 'secret' | 'login' | 'contact'
+  key: string
+  label: string
+  origins?: string[]
+  hasTotp?: boolean
+  createdAt: number
+}
+
+/** Una concessione "Sempre per questo sito" di fill_credential, revocabile. */
+export interface FillGrantInfo {
+  id: number
+  loginId: string
+  label: string
+  origin: string
+  createdAt: number
 }
 
 // ---- template dei bot (fase 7, §3ter T4 + Appendice A) ----

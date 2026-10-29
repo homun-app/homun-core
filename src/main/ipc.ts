@@ -39,6 +39,11 @@ export const DAEMON_RPC_CHANNELS = [
   'plugins:resolve', 'plugins:uninstall',
   'marketplace:list', 'marketplace:add', 'marketplace:remove',
   'vault:list', 'vault:store', 'vault:delete',
+  // fase 14: vault esteso (login, contatti, concessioni fill) e modulo sicuro
+  'vault:items', 'vault:save-login', 'vault:save-contact', 'vault:delete-item', 'vault:get-contact',
+  'fills:grants', 'fills:revoke', 'secureinput:submit',
+  // fase 14: la libreria (documenti, grafici, file; esportazione anche da UI)
+  'library:list', 'library:get', 'library:delete', 'library:rename', 'library:pin', 'library:export', 'library:stats', 'library:restore-version',
   'approvals:resolve', 'approvals:resolve-latest',
   // fase 8: regole di auto-review proposte dal bot (salvataggio SOLO al click)
   'autoreview:rule-decision',
@@ -105,6 +110,20 @@ export function registerIpc(client: DaemonClient, getWindows: () => BrowserWindo
     n.on('click', () => { const w = windows[0]; w?.show(); w?.focus() })
     n.show()
     return { shown: true }
+  })
+
+  // fase 14 (punto 5): il PDF dell'esportazione lo genera la UI — Electron
+  // printToPDF su una finestra NASCOSTA con l'HTML autonomo del documento
+  // (nessuna risorsa esterna); il buffer torna al daemon in base64
+  client.registerHost('host.printToPDF', async ([html]) => {
+    const win = new BrowserWindow({ show: false, webPreferences: { offscreen: true } })
+    try {
+      await win.loadURL('data:text/html;charset=utf-8;base64,' + Buffer.from(String(html ?? ''), 'utf8').toString('base64'))
+      const pdf = await win.webContents.printToPDF({ printBackground: true })
+      return pdf.toString('base64')
+    } finally {
+      win.destroy()
+    }
   })
 }
 

@@ -31,6 +31,8 @@ export function Sidebar() {
   const subagents = useStore((s) => s.subagents)
   const openGroupId = useStore((s) => s.openGroupId)
   const openGroup = useStore((s) => s.openGroup)
+  const openLibraryId = useStore((s) => s.openLibraryId)
+  const openLibrary = useStore((s) => s.openLibrary)
   const select = useStore((s) => s.select)
   const createAgent = useStore((s) => s.createAgent)
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
@@ -112,6 +114,13 @@ export function Sidebar() {
           </div>
         ))}
         {/* fase 10: i gruppi in una sezione propria (vista gruppo con @menzioni) */}
+        {/* fase 14: la LIBRERIA dei prodotti dei bot (documenti, grafici, file) */}
+        <button
+          className={`w-full rounded-lg px-2 py-1.5 text-left text-sm ${openLibraryId !== null ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-400 hover:bg-neutral-800/50'}`}
+          onClick={() => openLibraryId === null ? openLibrary('') : openLibrary(null)}
+        >
+          🗂 Libreria
+        </button>
         {groups.length > 0 && (
           <div className="mt-3 border-t border-neutral-800/60 pt-2">
             <p className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-neutral-600">Gruppi</p>

@@ -3827,7 +3827,8 @@ describe('fase 11b: il browser del bot nel loop', () => {
     expect(browserState.calls).toHaveLength(0)
     const res = h.llm.calls[1]!.find((m) => m.role === 'tool')!
     expect(String(res.content)).toContain('Non scrivo MAI password')
-    expect(String(res.content)).toContain('chiedi all\'utente')
+    // fase 14 (7d): il deny indica fill_credential come strada del sistema
+    expect(String(res.content)).toContain('fill_credential')
   })
 
   it('pagina letta col browser → blocco evidenza <pagina_web via="browser"> e turno CONTAMINATO', async () => {
