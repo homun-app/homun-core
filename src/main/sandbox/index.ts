@@ -444,6 +444,12 @@ export async function ensureBoxContainer(): Promise<void> {
   }
   const plan = boxEnsurePlan(facts)
   if (plan.kind === 'use') return
+  // N1 (fase 13 correzioni 3): il MOTIVO di ogni ricreazione una riga nel log
+  // del daemon (stdout/stderr finiscono in data/daemon.log) — un ciclo di
+  // ricreazioni a ogni comando si vede nei log invece di passare inosservato
+  if (plan.kind === 'recreate') {
+    console.error(`[sandbox] ricreazione del container ${BOX_CONTAINER}: ${plan.reason}`)
+  }
   // H2: il container sta per essere creato o ricreato — le home assicurate
   // finora non contano più: il ricordo si rifa dal container vero
   ensuredBotHomes.clear()

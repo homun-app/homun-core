@@ -312,14 +312,23 @@ export function dockerPluginsRmHelperArgv(helper: string): string[] {
   return ['rm', '-f', helper]
 }
 
-/** M4: i mount dichiarati al create del container del box (inspect -f, argv puro). */
+/**
+ * M4: i mount del container del box (inspect -f, argv puro). N1 (fase 13
+ * correzioni 3): si legge `.Mounts`, la vista EFFETTIVA dei mount — un
+ * container creato con `-v volume:/path` (come dockerBoxCreateArgv) NON
+ * compare in `.HostConfig.Mounts` (che elenca solo i `--mount`: output
+ * sempre vuoto → ricreazione a OGNI comando), mentre `.Mounts` vale per
+ * `-v` e `--mount` indistintamente. Sul box vero l'output è
+ * `/box:rw /plugins:ro ` (Binds: `sandbot-box:/box:nocopy`,
+ * `sandbot-plugins:/plugins:ro`).
+ */
 export function dockerBoxMountsArgv(container: string): string[] {
-  return ['inspect', '-f', '{{range .HostConfig.Mounts}}{{.Target}}:{{if .ReadOnly}}ro{{else}}rw{{end}} {{end}}', container]
+  return ['inspect', '-f', '{{range .Mounts}}{{.Destination}}:{{if .RW}}rw{{else}}ro{{end}} {{end}}', container]
 }
 
 /**
  * M4 (puro): il container ha il volume dei plugin montato `/plugins` in
- * SOLA LETTURA? L'output di dockerBoxMountsArgv è `/plugins:ro /box:rw …`;
+ * SOLA LETTURA? L'output di dockerBoxMountsArgv è `/box:rw /plugins:ro …`;
  * qualunque altra cosa (vuoto, errore) NON ricrea (come G2: la ricreazione è
  * ottimale, non vitale — un inspect fallito non deve fermare i bot).
  */

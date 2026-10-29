@@ -1,6 +1,9 @@
 // Test del worker della coda: lease, rinnovo (heartbeat sugli eventi), retry
 // con backoff, ripresa dopo crash simulato, un solo job attivo per agente.
 // SQLite :memory: + orologio finto + runner finto: nessun timer reale.
+// N2 (fase 13 correzioni 3): maxSubagentLeases iniettato in OGNI JobWorker —
+// senza, tick() leggerebbe subagents.maxConcurrent dal DB VERO e aprirebbe
+// la cartella dati dell'utente (~/.sandbot/data) durante i test.
 import { describe, expect, it, beforeEach, vi } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
 import { JOBS_DDL, enqueueJob, getJobById } from '../../main/store/jobs'
@@ -9,6 +12,8 @@ import type { Job } from '../../main/store/jobs'
 import type { SandbotEvent } from '../../shared/types'
 
 const LEASE = 2 * 60_000
+/** Tetto dei subagent-run iniettato (N2): niente lettura dal DB vero. */
+const MAX_SUBLEASES = { maxSubagentLeases: () => 3 }
 const ev = (agentId: string): SandbotEvent => ({ type: 'status', agentId, status: 'thinking' })
 
 /** Orologio controllabile: il worker vede solo questo. */
@@ -46,7 +51,7 @@ describe('worker: esecuzione e lease', () => {
   it('un job dovuto viene eseguito e marcato done', async () => {
     const clock = fakeClock()
     const { runJob } = makeRunner()
-    const w = new JobWorker(db, { now: clock.now, runJob }, () => undefined, LEASE, 0)
+    const w = new JobWorker(db, { now: clock.now, runJob, ...MAX_SUBLEASES }, () => undefined, LEASE, 0)
     enqueueJob(db, { agentId: 'a1', kind: 'user-message', payload: { text: 'ciao' }, runAt: clock.now(), now: clock.now() })
 
     w.tick()
@@ -61,7 +66,7 @@ describe('worker: esecuzione e lease', () => {
   it('heartbeat: gli eventi del turno rinnovano il lease', async () => {
     const clock = fakeClock()
     const runner = makeRunner()
-    const w = new JobWorker(db, { now: clock.now, runJob: runner.runJob }, () => undefined, LEASE, 0)
+    const w = new JobWorker(db, { now: clock.now, runJob: runner.runJob, ...MAX_SUBLEASES }, () => undefined, LEASE, 0)
     enqueueJob(db, { agentId: 'a1', kind: 'user-message', payload: { text: 'x' }, runAt: clock.now(), now: clock.now() })
 
     // il runner emette un "passo" del loop al minuto: senza rinnovo il lease
@@ -91,7 +96,7 @@ describe('worker: esecuzione e lease', () => {
       () => gate, // il primo job resta in volo finché non si apre il cancello
       'ok'
     ]
-    const w = new JobWorker(db, { now: clock.now, runJob: runner.runJob }, () => undefined, LEASE, 0)
+    const w = new JobWorker(db, { now: clock.now, runJob: runner.runJob, ...MAX_SUBLEASES }, () => undefined, LEASE, 0)
     enqueueJob(db, { agentId: 'a1', kind: 'user-message', payload: { text: 'primo' }, runAt: clock.now(), now: clock.now() })
     enqueueJob(db, { agentId: 'a1', kind: 'user-message', payload: { text: 'secondo' }, runAt: clock.now(), now: clock.now() })
 
@@ -117,7 +122,7 @@ describe('worker: retry e crash', () => {
     const clock = fakeClock()
     const runner = makeRunner()
     const errors: Array<{ job: Job; outcome: string }> = []
-    const w = new JobWorker(db, { now: clock.now, runJob: runner.runJob, onError: (_j, _e, o) => errors.push({ job: _j, outcome: o }) }, () => undefined, LEASE, 0)
+    const w = new JobWorker(db, { now: clock.now, runJob: runner.runJob, onError: (_j, _e, o) => errors.push({ job: _j, outcome: o }), ...MAX_SUBLEASES }, () => undefined, LEASE, 0)
     enqueueJob(db, { agentId: 'a1', kind: 'user-message', payload: { text: 'x' }, runAt: clock.now(), now: clock.now() })
 
     // 5 tentativi, tutti in errore
@@ -142,7 +147,7 @@ describe('worker: retry e crash', () => {
   it('crash simulato: lease scaduto → il job riprende dal punto di coda (attempts=2)', async () => {
     const clock = fakeClock()
     const runner = makeRunner()
-    const w = new JobWorker(db, { now: clock.now, runJob: runner.runJob }, () => undefined, LEASE, 0)
+    const w = new JobWorker(db, { now: clock.now, runJob: runner.runJob, ...MAX_SUBLEASES }, () => undefined, LEASE, 0)
     enqueueJob(db, { agentId: 'a1', kind: 'user-message', payload: { text: 'x' }, runAt: clock.now(), now: clock.now() })
 
     // primo worker: il job parte ma il "processo muore" (il run non finisce mai)
@@ -154,7 +159,7 @@ describe('worker: retry e crash', () => {
     // nuovo worker sulla stessa coda dopo la scadenza del lease
     const clock2 = { now: () => clock.now() + LEASE + 1 }
     const runner2 = makeRunner()
-    const w2 = new JobWorker(db, { now: clock2.now, runJob: runner2.runJob }, () => undefined, LEASE, 0)
+    const w2 = new JobWorker(db, { now: clock2.now, runJob: runner2.runJob, ...MAX_SUBLEASES }, () => undefined, LEASE, 0)
     w2.tick()
     await w2.drain()
     expect(runner2.state.seen).toEqual([1]) // stesso job
@@ -167,7 +172,7 @@ describe('worker: retry e crash', () => {
   it('routine-run: payload passato tale e quale al runner', async () => {
     const clock = fakeClock()
     const runner = makeRunner()
-    const w = new JobWorker(db, { now: clock.now, runJob: runner.runJob }, () => undefined, LEASE, 0)
+    const w = new JobWorker(db, { now: clock.now, runJob: runner.runJob, ...MAX_SUBLEASES }, () => undefined, LEASE, 0)
     enqueueJob(db, {
       agentId: 'a2', kind: 'routine-run',
       payload: { routineId: 7, title: 'Backup', prompt: 'fai il backup' },

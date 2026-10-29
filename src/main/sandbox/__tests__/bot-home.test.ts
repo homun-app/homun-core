@@ -16,7 +16,7 @@ vi.mock('../../store/db', () => ({
   dataDir: () => TMP
 }))
 
-const { execCommand, ensureBotHome, setDockerRunnerForTests, resetBotHomesForTests, boxImage } = await import('../index')
+const { execCommand, ensureBotHome, ensureBoxContainer, setDockerRunnerForTests, resetBotHomesForTests, boxImage } = await import('../index')
 
 /**
  * Runner finto del client docker: container SANO di default (ps lo vede,
@@ -24,7 +24,8 @@ const { execCommand, ensureBotHome, setDockerRunnerForTests, resetBotHomesForTes
  * ogni argv. `state.inspect` si può girare a 'false' per simulare il container
  * nato senza --init e forzare la RICREAZIONE (G2); `state.image` cambia
  * l'immagine con cui il container è nato (punto 1); `state.mounts` cambia i
- * mount dichiarati al create (M4: senza /plugins:ro si ricrea);
+ * mount EFFETTIVI del container (M4: senza /plugins:ro si ricrea) e di
+ * default è l'output VERO del template .Mounts sul box (N1);
  * `state.mkdirExit` fa fallire il mkdir della home.
  */
 function fakeDocker(state: { inspect: string; image?: string; mounts?: string; mkdirExit?: number }) {
@@ -35,8 +36,10 @@ function fakeDocker(state: { inspect: string; image?: string; mounts?: string; m
     if (argv[0] === 'ps') return ok('sandbot-box') // il container esiste
     // punto 1: init e immagine del container si leggono con inspect -f diversi
     if (argv[0] === 'inspect' && argv[2] === '{{.Config.Image}}') return ok(state.image ?? boxImage())
-    // M4: i mount dichiarati al create (inspect -f {{range .HostConfig.Mounts}}…)
-    if (argv[0] === 'inspect' && argv[2]?.startsWith('{{range .HostConfig.Mounts}}')) return ok(state.mounts ?? '/plugins:ro /box:rw ')
+    // M4/N1: i mount EFFETTIVI del container (inspect -f {{range .Mounts}}…) —
+    // il matcher segue il template VERO: un ritorno a .HostConfig.Mounts non
+    // viene riconosciuto, cade nell'inspect generico e la guardia N1 fallisce
+    if (argv[0] === 'inspect' && argv[2]?.startsWith('{{range .Mounts}}')) return ok(state.mounts ?? '/box:rw /plugins:ro ')
     if (argv[0] === 'inspect') return ok(state.inspect)
     if (argv[0] === 'image') return ok() // l'immagine del box c'è già
     if (argv[0] === 'exec' && argv[2] === 'mkdir') {
@@ -140,6 +143,51 @@ describe('H2: la home del bot prima dell\'exec in docker', () => {
       expect(f.calls).toHaveLength(0)
     } finally {
       mode.value = 'docker'
+    }
+  })
+})
+
+// N1 (fase 13 correzioni 3): GUARDIA di non-regressione. Su 498c365
+// l'inspect leggeva .HostConfig.Mounts (SEMPRE vuoto per un container creato
+// con -v): ensureBoxContainer ricreava il box a OGNI comando — rm del
+// container, one-shot chown -R di tutto /box, create e start — con browser,
+// server MCP stdio e processi in background del box che morivano ogni volta.
+describe('N1: il box già a posto NON si ricrea a ogni comando', () => {
+  it('due ensureBoxContainer consecutive su un box sano: NESSUN rm/create/chown, solo i controlli', async () => {
+    const f = fakeDocker({ inspect: 'true' }) // Docker vero a un box a posto: init ok, stessa immagine, mount /box:rw /plugins:ro, scrivibile
+    setDockerRunnerForTests(f.runner)
+    await ensureBoxContainer()
+    await ensureBoxContainer()
+    // NESSUN rm del container, NESSUN create, NESSUN one-shot di init (`run`)
+    // e NESSUN volume: la ricreazione a ogni comando (il difetto N1) salterebbe fuori qui
+    expect(f.calls.some((a) => a[0] === 'rm')).toBe(false)
+    expect(f.calls.some((a) => a[0] === 'create')).toBe(false)
+    expect(f.calls.some((a) => a[0] === 'run')).toBe(false)
+    expect(f.calls.some((a) => a[0] === 'volume')).toBe(false)
+    // SOLO controlli: image inspect, ps, inspect (init/immagine/mount), start
+    // e il test -w — una corsa completa per chiamata
+    expect(new Set(f.calls.map((a) => a[0]))).toEqual(new Set(['image', 'ps', 'inspect', 'start', 'exec']))
+    expect(f.calls.filter((a) => a[0] === 'inspect')).toHaveLength(6) // init, immagine e mount × 2
+    expect(f.calls.filter((a) => a[0] === 'start')).toHaveLength(2)
+    expect(f.calls.filter((a) => a[0] === 'exec' && a[2] === 'test')).toHaveLength(2) // test -w /box/workspace
+  })
+
+  it('il box NATO PRIMA del mount :ro si ricrea UNA volta col motivo nel log (N1.4), poi non più', async () => {
+    const state = { inspect: 'true', mounts: '/box:rw ' } // container pre-M4: -v ma senza /plugins:ro
+    const f = fakeDocker(state)
+    setDockerRunnerForTests(f.runner)
+    const err = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    try {
+      await ensureBoxContainer() // ricreazione: mount-plugin-mancante
+      expect(err).toHaveBeenCalledWith(expect.stringContaining('ricreazione del container sandbot-box: mount-plugin-mancante'))
+      // dopo la ricreazione il container vero avrebbe il mount: la seconda
+      // chiamata NON ricrea più (nessun secondo rm)
+      state.mounts = '/box:rw /plugins:ro '
+      await ensureBoxContainer()
+      expect(f.calls.filter((a) => a[0] === 'rm')).toHaveLength(1)
+      expect(err).toHaveBeenCalledTimes(1) // una riga per ricreazione, non una per comando
+    } finally {
+      err.mockRestore()
     }
   })
 })

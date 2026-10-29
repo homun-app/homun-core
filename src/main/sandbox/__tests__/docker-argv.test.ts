@@ -445,9 +445,17 @@ describe('H1: controllo test -w e decisione use/una ricreazione/errore chiaro', 
     expect(boxEnsurePlan({ exists: true, initOk: true, pluginsMountOk: undefined, writable: true })).toEqual({ kind: 'use' })
   })
 
-  it('M4: inspect dei mount e boxHasPluginsMountRo (puro)', () => {
-    expect(dockerBoxMountsArgv(BOX_CONTAINER)).toEqual(['inspect', '-f', '{{range .HostConfig.Mounts}}{{.Target}}:{{if .ReadOnly}}ro{{else}}rw{{end}} {{end}}', 'sandbot-box'])
-    expect(boxHasPluginsMountRo('/plugins:ro /box:rw ')).toBe(true)
+  it('M4/N1: inspect dei mount sulla vista EFFETTIVA .Mounts e boxHasPluginsMountRo (puro)', () => {
+    // N1: il template è FISSATO dal test — .Mounts è la vista effettiva dei
+    // mount e vale per -v e --mount; un ritorno a .HostConfig.Mounts (che per
+    // un container creato con -v è SEMPRE vuoto) ricreava il box a ogni
+    // comando e questo test lo prende
+    expect(dockerBoxMountsArgv(BOX_CONTAINER)).toEqual(['inspect', '-f', '{{range .Mounts}}{{.Destination}}:{{if .RW}}rw{{else}}ro{{end}} {{end}}', 'sandbot-box'])
+    expect(dockerBoxMountsArgv(BOX_CONTAINER)[2]).toContain('.Mounts')
+    expect(dockerBoxMountsArgv(BOX_CONTAINER)[2]).not.toContain('.HostConfig.Mounts')
+    // fixture VERA: l'output di quel template sul box creato dal nostro codice
+    // (Binds: "sandbot-box:/box:nocopy","sandbot-plugins:/plugins:ro")
+    expect(boxHasPluginsMountRo('/box:rw /plugins:ro ')).toBe(true)
     expect(boxHasPluginsMountRo('/box:rw ')).toBe(false) // nato prima di M4
     expect(boxHasPluginsMountRo('/plugins:rw ')).toBe(false) // montato rw: non basta
     expect(boxHasPluginsMountRo('')).toBe(false) // inspect fallito
