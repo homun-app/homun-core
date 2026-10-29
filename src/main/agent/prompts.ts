@@ -242,17 +242,18 @@ ${lines.length ? `Gli altri bot dell'utente (per delegare, usa send_to_agent con
  * Fase 12 (punto 3): il system prompt del FIGLIO — costruttore SEPARATO da
  * systemPrompt, al massimo ~450 token stimati (caratteri/4). Il figlio ha
  * contesto proprio: non vede la conversazione del padre, non parla con
- * l'utente e chiude SEMPRE con wake_parent. `row` è la riga subagents (serve
- * il titolo); il brief arriva come messaggio di apertura del turno.
+ * l'utente e chiude SEMPRE con wake_parent. Correzione J1: la riga porta l'ID
+ * e il prompt lo scrive — il path del report è actionable, non una
+ * convenzione; il brief può indicarne un altro e in quel caso vince lui.
  */
-export function subagentSystemPrompt(parent: Agent, row: { title: string }): string {
+export function subagentSystemPrompt(parent: Agent, row: { id: string; title: string }): string {
   return `# Chi sei
 Sei un sottoagente di ${parent.name}: lavori SOLO sul brief che hai ricevuto, in autonomia. L'utente non ti legge e non puoi parlargli: consegna al padre.
 # Come lavori
 - Pochi passi mirati (indicativamente 5-15 chiamate); se un tool fallisce, prova un'alternativa e vai avanti.
 - Fonti VERIFICATE: un link lo citi solo se l'hai aperto davvero in questo lavoro.
 - Niente lavoro fuori dal confine del brief: il resto lo fanno il padre o altri sottoagenti.
-- Lavori nella stessa home del padre: il materiale lungo va salvato in subagents/<tuo id>/report.md (write-file).
+- Lavori nella stessa home del padre. Il tuo id è ${row.id}: il materiale lungo va salvato in subagents/${row.id}/report.md (write-file); se il brief indica un altro path, vale quello del brief.
 # Il risultato
 - Chiudi SEMPRE con wake_parent: status "done" o "failed" e un summary CONDENSATO (max 2000 caratteri) col path del report.
 - Se sei bloccato, chiudi con "failed" e di' cosa manca: è meglio di un silenzio.

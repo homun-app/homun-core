@@ -144,6 +144,10 @@ function open(): DatabaseSync {
   ] as const) {
     if (!agentPresent.has(col)) db.exec(ddl)
   }
+  // fase 12 (correzione J2): la colonna del SIGILLO del lotto — il lotto si
+  // sveglia solo quando anche il turno del padre che l'ha creato è finito
+  const subCols = db.prepare("SELECT name FROM pragma_table_info('subagents')").all() as Array<{ name: string }>
+  if (!subCols.some((c) => c.name === 'sealed')) db.exec('ALTER TABLE subagents ADD COLUMN sealed INTEGER DEFAULT 0')
   // fase 10 (correzione C5): il motivo di uno SKIPPED di gruppo (il giro
   // sospeso per limite d'uso del provider) vive accanto all'esito
   const turnCols = db.prepare("SELECT name FROM pragma_table_info('group_turns')").all() as Array<{ name: string }>

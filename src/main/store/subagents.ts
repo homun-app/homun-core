@@ -27,6 +27,13 @@ export interface SubagentRow {
   automatic: number
   /** il padre è già stato svegliato per questo figlio (il lotto si sveglia UNA volta) */
   woken: number
+  /**
+   * Correzione J2: il lotto è SIGILLATO — la fine del turno del padre che li
+   * ha lanciati (o riaperti) chiude l'elenco: un figlio che consegna a metà
+   * turno NON sveglia il padre da solo, i fratelli lanciati dopo contano
+   * ancora. Il risveglio vuole TUTTI terminali E sigillati.
+   */
+  sealed: number
   created_at: number
   started_at: number | null
   finished_at: number | null
@@ -36,7 +43,7 @@ export interface SubagentRow {
 interface SubagentDbRow {
   id: string; parent_id: string; parent_task_id: number | null; batch_id: string
   title: string; brief: string; status: string; summary: string | null; report_path: string | null
-  contaminated: number; untrusted: number; automatic: number; woken: number
+  contaminated: number; untrusted: number; automatic: number; woken: number; sealed: number
   created_at: number; started_at: number | null; finished_at: number | null; deadline_at: number
 }
 
@@ -46,7 +53,8 @@ function rowToSubagent(r: SubagentDbRow): SubagentRow {
     title: r.title, brief: r.brief, status: r.status as SubagentStatus,
     summary: r.summary, report_path: r.report_path,
     contaminated: r.contaminated, untrusted: r.untrusted, automatic: r.automatic, woken: r.woken,
-    created_at: r.created_at, started_at: r.started_at, finished_at: r.finished_at, deadline_at: r.deadline_at
+    sealed: r.sealed, created_at: r.created_at, started_at: r.started_at,
+    finished_at: r.finished_at, deadline_at: r.deadline_at
   }
 }
 
@@ -66,6 +74,7 @@ export const SUBAGENTS_DDL = `
       untrusted INTEGER DEFAULT 0,
       automatic INTEGER DEFAULT 0,
       woken INTEGER DEFAULT 0,
+      sealed INTEGER DEFAULT 0,
       created_at INTEGER NOT NULL,
       started_at INTEGER,
       finished_at INTEGER,
@@ -138,6 +147,8 @@ export interface SubagentPatch {
   report_path?: string
   contaminated?: boolean
   woken?: boolean
+  /** correzione J2: la RIAPERTURA azzera anche il sigillo (nuovo lotto da sigillare) */
+  sealed?: boolean
   started_at?: number
   finished_at?: number
   deadline_at?: number
@@ -154,7 +165,7 @@ export function updateSubagent(db: DatabaseSync, id: string, patch: SubagentPatc
   if (!cur) return null
   db.prepare(`
     UPDATE subagents SET
-      status = ?, summary = ?, report_path = ?, contaminated = ?, woken = ?,
+      status = ?, summary = ?, report_path = ?, contaminated = ?, woken = ?, sealed = ?,
       started_at = ?, finished_at = ?, deadline_at = ?, batch_id = ?
     WHERE id = ?
   `).run(
@@ -163,8 +174,9 @@ export function updateSubagent(db: DatabaseSync, id: string, patch: SubagentPatc
     patch.report_path !== undefined ? patch.report_path : cur.report_path,
     patch.contaminated === true || cur.contaminated === 1 ? 1 : 0,
     // woken NON è monotono: la riapertura con message_subagent lo azzera (il
-    // lotto nuovo va svegliato di nuovo)
+    // lotto nuovo va svegliato di nuovo); lo stesso vale per sealed (J2)
     patch.woken !== undefined ? (patch.woken ? 1 : 0) : cur.woken,
+    patch.sealed !== undefined ? (patch.sealed ? 1 : 0) : cur.sealed,
     patch.started_at !== undefined ? patch.started_at : cur.started_at,
     patch.finished_at !== undefined ? patch.finished_at : cur.finished_at,
     patch.deadline_at !== undefined ? patch.deadline_at : cur.deadline_at,
@@ -199,16 +211,33 @@ export function subagentsOfBatch(db: DatabaseSync, batchId: string): SubagentRow
 }
 
 /**
- * Punto 5, il cuore atomico: se TUTTI i figli del lotto sono terminali, un
- * solo `UPDATE … SET woken = 1 WHERE batch_id = ? AND woken = 0 RETURNING *`.
- * Due figli che finiscono insieme non svegliano il padre due volte: il primo
- * UPDATE azzera woken per tutto il lotto e il secondo non restituisce righe.
- * Torna le righe svegliate (vuoto = lotto incompleto o già svegliato).
+ * Punto 5, il cuore atomico: se TUTTI i figli del lotto sono terminali E il
+ * lotto è SIGILLATO (correzione J2: il turno del padre che li ha lanciati è
+ * finito), un solo `UPDATE … SET woken = 1 WHERE batch_id = ? AND woken = 0
+ * RETURNING *`. Due figli che finiscono insieme non svegliano il padre due
+ * volte: il primo UPDATE azzera woken per tutto il lotto e il secondo non
+ * restituisce righe. Lotto non sigillato → NESSUN risveglio: il padre può
+ * ancora lanciare (o riaprire) altri figli dello stesso turno.
+ * Torna le righe svegliate (vuoto = lotto incompleto, non sigillato o già svegliato).
  */
 export function wakeBatch(db: DatabaseSync, batchId: string): SubagentRow[] {
   return (db.prepare(
-    "UPDATE subagents SET woken = 1 WHERE batch_id = ? AND woken = 0 AND NOT EXISTS (SELECT 1 FROM subagents s2 WHERE s2.batch_id = ? AND s2.status IN ('queued','running')) RETURNING *"
+    "UPDATE subagents SET woken = 1 WHERE batch_id = ? AND woken = 0 AND NOT EXISTS (SELECT 1 FROM subagents s2 WHERE s2.batch_id = ? AND (s2.status IN ('queued','running') OR s2.sealed = 0)) RETURNING *"
   ).all(batchId, batchId) as unknown as SubagentDbRow[]).map(rowToSubagent)
+}
+
+/**
+ * Correzione J2: sigilla un lotto — la fine del turno del padre chiude
+ * l'elenco dei figli che il risveglio deve aspettare. Idempotente.
+ */
+export function sealBatch(db: DatabaseSync, batchId: string): void {
+  db.prepare('UPDATE subagents SET sealed = 1 WHERE batch_id = ? AND sealed = 0').run(batchId)
+}
+
+/** I lotti NON sigillati (al boot: crash del padre a metà turno). */
+export function unsealedBatches(db: DatabaseSync): string[] {
+  const rows = db.prepare('SELECT DISTINCT batch_id FROM subagents WHERE sealed = 0').all() as Array<{ batch_id: string }>
+  return rows.map((r) => r.batch_id)
 }
 
 /** I lotti con figli non ancora svegliati (al boot: crash tra fine e risveglio). */

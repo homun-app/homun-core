@@ -472,12 +472,14 @@ const subagentsState = vi.hoisted(() => ({
   rows: [] as Array<{
     id: string; parent_id: string; parent_task_id: number | null; batch_id: string
     title: string; brief: string; status: string; summary: string | null; report_path: string | null
-    contaminated: number; untrusted: number; automatic: number; woken: number
+    contaminated: number; untrusted: number; automatic: number; woken: number; sealed: number
     created_at: number; started_at: number | null; finished_at: number | null; deadline_at: number
   }>,
   nextId: 1,
   terminal: [] as string[],
-  changed: [] as string[]
+  changed: [] as string[],
+  /** correzione J2: i lotti sigillati alla fine dei turni del padre */
+  sealedBatches: [] as string[]
 }))
 vi.mock('../../store/subagents', () => {
   const TERMINAL = ['done', 'failed', 'stopped', 'expired']
@@ -492,7 +494,7 @@ vi.mock('../../store/subagents', () => {
         parent_task_id: (input.parentTaskId as number | null) ?? null,
         batch_id: input.batchId as string, title: input.title as string, brief: input.brief as string,
         status: 'queued', summary: null, report_path: null,
-        contaminated: 0, untrusted: input.untrusted ? 1 : 0, automatic: input.automatic ? 1 : 0, woken: 0,
+        contaminated: 0, untrusted: input.untrusted ? 1 : 0, automatic: input.automatic ? 1 : 0, woken: 0, sealed: 0,
         created_at: input.createdAt as number, started_at: null, finished_at: null,
         deadline_at: input.deadlineAt as number
       }
@@ -507,8 +509,9 @@ vi.mock('../../store/subagents', () => {
       const r = find(id)
       if (!r) return null
       Object.assign(r, patch, {
-        // come lo store: woken si azzera pure (riapertura), contaminated no
+        // come lo store: woken e sealed si azera anche (riapertura), contaminated no
         woken: patch.woken !== undefined ? (patch.woken ? 1 : 0) : r.woken,
+        sealed: patch.sealed !== undefined ? (patch.sealed ? 1 : 0) : r.sealed,
         contaminated: patch.contaminated === true || r.contaminated === 1 ? 1 : 0
       })
       return { ...r }
@@ -525,9 +528,12 @@ vi.mock('../../store/subagents', () => {
       return { ...r }
     },
     subagentsOfBatch: (_db: unknown, batchId: string) => subagentsState.rows.filter((r) => r.batch_id === batchId).map((r) => ({ ...r })),
+    sealBatch: (_db: unknown, batchId: string) => {
+      for (const r of subagentsState.rows) if (r.batch_id === batchId) r.sealed = 1
+    },
     wakeBatch: (_db: unknown, batchId: string) => {
       const rows = subagentsState.rows.filter((r) => r.batch_id === batchId)
-      if (!rows.length || rows.some((r) => !TERMINAL.includes(r.status))) return []
+      if (!rows.length || rows.some((r) => !TERMINAL.includes(r.status) || r.sealed === 0)) return []
       const toWake = rows.filter((r) => r.woken === 0)
       for (const r of toWake) r.woken = 1
       return toWake.map((r) => ({ ...r }))
@@ -536,6 +542,7 @@ vi.mock('../../store/subagents', () => {
 })
 vi.mock('../../../daemon/subagent-ops', () => ({
   onSubagentTerminal: (_db: unknown, id: string) => { subagentsState.terminal.push(id) },
+  sealTurnBatch: (_db: unknown, batchId: string) => { subagentsState.sealedBatches.push(batchId) },
   subagentsChanged: (parentId: string) => { subagentsState.changed.push(parentId) }
 }))
 
@@ -562,6 +569,9 @@ vi.mock('../browser', async (importOriginal) => {
       ref === 'e8' ? { role: 'button', name: 'Conferma prenotazione', text: '' }
         : ref === 'e6' ? { role: 'textbox', name: 'Numero carta', text: '' }
         : ref === 'e2' ? { role: 'link', name: 'Vedi il menu', text: '' }
+        // correzione J3: il campo username di quotes.toscrape.com/login — il
+        // nome accessibile contiene "Password" ma il campo VERO è un text
+        : ref === 'e5' ? { role: 'textbox', name: 'Username Password', text: '' }
         // fase 12 (0a): il campo password SENZA nome accessibile (rev. su
         // quotes.toscrape.com/login): ref valido e presente, nome vuoto
         : ref === 'e9' ? { role: 'textbox', name: '', text: '' }
@@ -684,6 +694,7 @@ beforeEach(() => {
   subagentsState.nextId = 1
   subagentsState.terminal.length = 0
   subagentsState.changed.length = 0
+  subagentsState.sealedBatches.length = 0
   // fase 4: memoria e skill scritte dai test non devono inquinare il dopo
   rmSync(join(TMP, 'agents'), { recursive: true, force: true })
   h.llm.queue.length = 0
@@ -3880,6 +3891,22 @@ describe('fase 12 0a/0d: probe interno del tipo di campo e card di press_key', (
     expect(String(res.content)).toContain('Non scrivo MAI password')
   })
 
+  it('correzione J3: username "Username Password" col campo VERO pulito → FREE ed ESEGUITO (il nome dello snapshot non conta)', async () => {
+    browserState.available = true
+    browserState.fieldProbe = false // il probe dice: {type: "text", name: "username"} — pulito
+    h.llm.queue = [
+      { toolCalls: [{ id: 'p0', name: 'browser_type', arguments: JSON.stringify({ ref: 'e5', text: 'pippo@example.com' }) }] },
+      { toolCalls: [{ id: 'p0b', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurn(AGENT, 'compila lo username', emit)
+    // il nome accessibile conterrebbe "Password" (deny del nome): la verifica
+    // interna RIESCE e decide lei — free, nessuna card, il typing parte
+    expect(h.db.entries.filter((e) => e.kind === 'approval')).toHaveLength(0)
+    expect(browserState.calls.filter((c) => c.tool === 'browser_type')).toHaveLength(1)
+    const res = h.llm.calls[1]!.find((m) => m.role === 'tool')!
+    expect(String(res.content)).not.toContain('Non scrivo MAI password')
+  })
+
   it('0a: valutazione fallita (errore MCP o result non leggibile) → ASK "non riesco a verificare il tipo del campo", mai free', async () => {
     browserState.available = true
     browserState.fieldProbe = null
@@ -3991,6 +4018,58 @@ describe('fase 12: spawn_subagent — validazioni, card, job e lotto', () => {
     expect(subagentsState.rows).toHaveLength(4)
   })
 
+  it('correzione J2: il lotto del turno si SIGILLA alla fine del turno del padre (UNA volta, qualunque esito)', async () => {
+    h.llm.queue = [
+      { toolCalls: [spawnCall('j1', 'A', LONG_BRIEF)] },
+      { toolCalls: [{ id: 'j2', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurn(AGENT, 'cerca', emit)
+    const rows = subagentsState.rows.filter((r) => r.parent_id === AGENT)
+    expect(rows).toHaveLength(1)
+    // il finally del turno ha sigillato il lotto del turno, una volta sola
+    // (il DB lo tocca sealTurnBatch, provato a parte nei test dello store)
+    expect(subagentsState.sealedBatches).toEqual([rows[0]!.batch_id])
+  })
+
+  it('correzione J2: DUE RIAPERTURE nello stesso turno del padre → lo STESSO lotto (un solo risveglio)', async () => {
+    // due figli chiusi e svegliati di un turno PRECEDENTE (lotti vecchi)
+    const mk = (id: string, oldBatch: string) => {
+      h.db.agents.set(id, {
+        id, name: `TestBot · ${id}`, description: '', providerId: 'prov', model: 'm1',
+        status: 'idle', unread: 0, createdAt: 1, createdBy: null, section: '', parentId: AGENT
+      })
+      subagentsState.rows.push({
+        id, parent_id: AGENT, parent_task_id: null, batch_id: oldBatch, title: id, brief: 'b',
+        status: 'done', summary: 'prima consegna', report_path: null,
+        contaminated: 0, untrusted: 0, automatic: 0, woken: 1, sealed: 1,
+        created_at: 1000, started_at: 1000, finished_at: 2000, deadline_at: 9e15
+      })
+    }
+    mk('sub_re1', 'old-1')
+    mk('sub_re2', 'old-2')
+    h.llm.queue = [
+      { toolCalls: [
+        { id: 'j3', name: 'message_subagent', arguments: JSON.stringify({ id: 'sub_re1', text: 'aggiungi i prezzi' }) },
+        { id: 'j4', name: 'message_subagent', arguments: JSON.stringify({ id: 'sub_re2', text: 'aggiungi i prezzi' }) }
+      ] },
+      { toolCalls: [{ id: 'j5', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurn(AGENT, 'riapri entrambi', emit)
+    const re1 = subagentsState.rows.find((r) => r.id === 'sub_re1')!
+    const re2 = subagentsState.rows.find((r) => r.id === 'sub_re2')!
+    // riaperti: queued, woken e sigillo azzerati
+    expect(re1.status).toBe('queued')
+    expect(re2.status).toBe('queued')
+    expect(re1.woken).toBe(0)
+    expect(re1.sealed).toBe(0)
+    // lo STESSO lotto del turno corrente (non uno a figlio): alla fine del
+    // turno si sigilla UNA volta e il risveglio sarà uno
+    expect(re1.batch_id).toBe(re2.batch_id)
+    expect(re1.batch_id).not.toBe('old-1')
+    expect(re1.batch_id).not.toBe('old-2')
+    expect(subagentsState.sealedBatches).toEqual([re1.batch_id])
+  })
+
   it('brief corto → rifiuto con il motivo, NESSUNA creazione; title mancante idem', async () => {
     h.llm.queue = [
       { toolCalls: [spawnCall('c1', 'Corto', 'breve')] },
@@ -4011,7 +4090,7 @@ describe('fase 12: spawn_subagent — validazioni, card, job e lotto', () => {
       subagentsState.rows.push({
         id, parent_id: AGENT, parent_task_id: null, batch_id: 'old', title: `T${i}`, brief: 'b',
         status: i < 3 ? 'running' : 'queued', summary: null, report_path: null,
-        contaminated: 0, untrusted: 0, automatic: 0, woken: 0,
+        contaminated: 0, untrusted: 0, automatic: 0, woken: 0, sealed: 0,
         created_at: i, started_at: null, finished_at: null, deadline_at: 9e15
       })
     }
@@ -4056,7 +4135,7 @@ describe('fase 12: il FIGLIO — tool, prompt, whitelist e consegna', () => {
     subagentsState.rows.push({
       id: CHILD, parent_id: AGENT, parent_task_id: null, batch_id: 'b-child', title: 'Ricerca', brief: 'il brief del padre',
       status: 'running', summary: null, report_path: null,
-      contaminated: 0, untrusted: 0, automatic: 0, woken: 0,
+      contaminated: 0, untrusted: 0, automatic: 0, woken: 0, sealed: 0,
       created_at: 1000, started_at: 1000, finished_at: null, deadline_at: 9e15
     })
   }
@@ -4222,7 +4301,7 @@ describe('fase 12: check/message/stop_subagent e i rifiuti sugli id dei figli', 
     subagentsState.rows.push({
       id: CHILD, parent_id: AGENT, parent_task_id: null, batch_id: 'b-mgr', title: 'Ricerca', brief: 'b',
       status, summary: null, report_path: null,
-      contaminated: 0, untrusted: 0, automatic: 0, woken: 0,
+      contaminated: 0, untrusted: 0, automatic: 0, woken: 0, sealed: 0,
       created_at: Date.now() - 60_000, started_at: Date.now() - 30_000, finished_at: null, deadline_at: Date.now() + 60_000
     })
     h.db.entries.push({
@@ -4348,7 +4427,7 @@ describe('fase 12: check/message/stop_subagent e i rifiuti sugli id dei figli', 
     subagentsState.rows.push({
       id: 'sub_no1', parent_id: AGENT, parent_task_id: null, batch_id: 'b-nido', title: 'Nido', brief: 'b',
       status: 'running', summary: null, report_path: null,
-      contaminated: 0, untrusted: 0, automatic: 0, woken: 0,
+      contaminated: 0, untrusted: 0, automatic: 0, woken: 0, sealed: 0,
       created_at: 1, started_at: 1, finished_at: null, deadline_at: 9e15
     })
     h.llm.queue = [

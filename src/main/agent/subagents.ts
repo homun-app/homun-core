@@ -33,6 +33,40 @@ export function subagentBriefError(brief: string): string | null {
   return null
 }
 
+// ---- correzione J4: i CONFINI nel brief non sono OBIETTIVI ----
+
+/**
+ * Le frasi che dichiarano un CONFINE o un CONFRONTO, non un obiettivo: le
+ * menzioni dei nomi qui dentro NON contano (il prompt del padre chiede proprio
+ * confini espliciti come "non cercare SvelteKit né Remix: lo cerca un altro",
+ * e "quando sceglierlo rispetto a SvelteKit" è un confronto, non lavoro da
+ * fare). Parola intera, IT e EN.
+ */
+const BRIEF_BOUNDARY_RE =
+  /(?<![\p{L}\p{N}])(?:non|né|esclus[oa]e?|not|don't|doesn't|lo (?:cerca|fa) un altro|li (?:cerca|fa) un altro|rispetto a|in confronto a|piuttosto che|versus|vs|compared to)(?![\p{L}\p{N}])/iu
+
+/**
+ * briefTargets (pura, correzione J4): i nomi che il brief indica come
+ * OBIETTIVO. Il brief si spezza in righe e frasi; le frasi di confine o di
+ * confronto (BRIEF_BOUNDARY_RE) ignorano TUTTI i nomi che contengono, i nomi
+ * nelle altre frasi contano (parola intera, case-insensitive). Un brief del
+ * padre ben fatto ha UN solo obiettivo: gli altri framework si NOMINANO solo
+ * nei confini. Torna i nomi (minuscoli) nell'ordine di `names`.
+ */
+export function briefTargets(brief: string, names: readonly string[]): string[] {
+  const hit = new Set<string>()
+  for (const line of brief.split(/\r?\n/)) {
+    for (const phrase of line.split(/(?<=[.!?:;])\s+/)) {
+      if (!phrase.trim() || BRIEF_BOUNDARY_RE.test(phrase)) continue
+      for (const name of names) {
+        const re = new RegExp(`(?<![\\p{L}\\p{N}])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}])`, 'iu')
+        if (re.test(phrase)) hit.add(name.toLowerCase())
+      }
+    }
+  }
+  return names.filter((n) => hit.has(n.toLowerCase())).map((n) => n.toLowerCase())
+}
+
 // ---- punto 3: la whitelist dei tool del figlio ----
 
 /** I tool di LAVORO e lettura che il figlio riceve (i browser_* se disponibili si aggiungono a parte). */

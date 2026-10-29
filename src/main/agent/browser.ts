@@ -24,7 +24,7 @@ import type { ToolDef } from './llm'
 import { checkUrl } from './web-guard'
 import {
   refInfo, truncateSnapshot, snapshotChallenge, browserPageUrl, composeBrowserResult,
-  errorSection, fieldIsCredential, SNAPSHOT_BLOCKED_NOTE, type RefInfo, type FieldProbeInfo
+  errorSection, fieldIsCredential, parseEvaluateResult, SNAPSHOT_BLOCKED_NOTE, type RefInfo, type FieldProbeInfo
 } from './browser-guard'
 import {
   dockerBrowserMcpArgv, browserMcpFlags, BOX_CONTAINER,
@@ -363,6 +363,9 @@ export const FIELD_PROBE_FN =
  * quando il campo NON ha nome accessibile nello snapshot. Mai esposto al
  * modello: il result non entra nel contesto. ok:false su errore MCP o result
  * non leggibile (il chiamante in quel caso chiede all'utente, mai free).
+ * Correzione J3: il result reale della 0.0.83 è markdown (`### Result` col
+ * JSON, poi `### Ran Playwright code` e `### Page`), NON JSON nudo — lo
+ * legge il parser puro parseEvaluateResult.
  */
 export async function probeFieldType(
   agentId: string,
@@ -375,17 +378,8 @@ export async function probeFieldType(
       arguments: { function: FIELD_PROBE_FN, target: ref }
     })
     if ((res as { isError?: boolean }).isError) return { ok: false }
-    const info = JSON.parse(mcpText(res)) as Partial<FieldProbeInfo>
-    if (typeof info !== 'object' || info === null) return { ok: false }
-    return {
-      ok: true,
-      info: {
-        type: String(info.type ?? ''), autocomplete: String(info.autocomplete ?? ''),
-        name: String(info.name ?? ''), id: String(info.id ?? ''),
-        placeholder: String(info.placeholder ?? ''), label: String(info.label ?? ''),
-        aria: String(info.aria ?? '')
-      }
-    }
+    const info = parseEvaluateResult(mcpText(res))
+    return info ? { ok: true, info } : { ok: false }
   } catch {
     return { ok: false }
   }

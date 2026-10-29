@@ -17,9 +17,9 @@ store.db()
 store.createAgent('Padre', '')
 const parent = store.listAgents().find((a) => a.name === 'Padre')!
 
-const { insertSubagent, getSubagent, closeSubagent } = await import('../../main/store/subagents')
+const { insertSubagent, getSubagent, closeSubagent, sealBatch } = await import('../../main/store/subagents')
 const { listJobs } = await import('../../main/store/jobs')
-const { onSubagentTerminal, tickSubagentDeadlines, wakeDueBatchesAtBoot, subagentsDoneText, lastFreeTextOf } = await import('../subagent-ops')
+const { onSubagentTerminal, tickSubagentDeadlines, wakeDueBatchesAtBoot, sealBatchesAtBoot, sealTurnBatch, subagentsDoneText, lastFreeTextOf } = await import('../subagent-ops')
 const { formatSubagentsDone } = await import('../../shared/agent-message')
 
 afterAll(() => {
@@ -43,16 +43,44 @@ const seed = (over: Record<string, unknown> = {}): ReturnType<typeof insertSubag
 })
 
 describe('fase 12 (punto 5): il risveglio del padre, UNO per lotto', () => {
+  it('correzione J2: figlio terminale con lotto NON sigillato → NESSUN risveglio; il sigillo di fine turno lo fa partire', () => {
+    // il padre ha lanciato alfa ed è ancora al lavoro (comando lento): alfa
+    // consegna A METÀ TURNO — non sveglia, il padre può ancora lanciare beta
+    const a = seed({ id: 'sub_j1', batchId: 'bj1' })
+    closeSubagent(store.db(), a.id, { status: 'done', summary: 'presto', finishedAt: 1000 })
+    onSubagentTerminal(store.db(), a.id, emit)
+    expect(listJobs(store.db()).filter((j) => (j.payload as { extraMeta?: { subagentBatch?: string } }).extraMeta?.subagentBatch === 'bj1')).toEqual([])
+    // la fine del turno del padre sigilla il lotto e controlla SUBITO
+    sealTurnBatch(store.db(), 'bj1', emit)
+    const wakes = listJobs(store.db()).filter((j) => (j.payload as { extraMeta?: { subagentBatch?: string } }).extraMeta?.subagentBatch === 'bj1')
+    expect(wakes).toHaveLength(1)
+  })
+
+  it('correzione J2: sigillo con figli ancora in corso → nessun risveglio, poi UNO all\'ultimo che chiude', () => {
+    const a = seed({ id: 'sub_j2', batchId: 'bj2' })
+    const b = seed({ id: 'sub_j3', batchId: 'bj2' })
+    closeSubagent(store.db(), a.id, { status: 'done', summary: 'a', finishedAt: 1 })
+    sealTurnBatch(store.db(), 'bj2', emit) // il turno del padre finisce, b lavora ancora
+    expect(listJobs(store.db()).filter((j) => (j.payload as { extraMeta?: { subagentBatch?: string } }).extraMeta?.subagentBatch === 'bj2')).toEqual([])
+    closeSubagent(store.db(), b.id, { status: 'done', summary: 'b', finishedAt: 2 })
+    onSubagentTerminal(store.db(), b.id, emit)
+    const wakes = listJobs(store.db()).filter((j) => (j.payload as { extraMeta?: { subagentBatch?: string } }).extraMeta?.subagentBatch === 'bj2')
+    expect(wakes).toHaveLength(1)
+    expect(String((wakes[0]!.payload as { text: string }).text)).toContain('sub_j2')
+    expect(String((wakes[0]!.payload as { text: string }).text)).toContain('sub_j3')
+  })
+
   it('lotto incompleto → NESSUN risveglio; ultimo terminale → UN job SUBAGENTS_DONE', () => {
     const a = seed({ id: 'sub_w1', batchId: 'bw1' })
     const b = seed({ id: 'sub_w2', batchId: 'bw1' })
+    sealBatch(store.db(), 'bw1') // il turno del padre è già finito
     closeSubagent(store.db(), a.id, { status: 'done', summary: 'primo', finishedAt: 2000 })
     onSubagentTerminal(store.db(), a.id, emit)
-    expect(listJobs(store.db()).filter((j) => j.kind === 'user-message')).toEqual([])
+    expect(listJobs(store.db()).filter((j) => (j.payload as { extraMeta?: { subagentBatch?: string } }).extraMeta?.subagentBatch === 'bw1')).toEqual([])
     closeSubagent(store.db(), b.id, { status: 'failed', summary: 'secondo', finishedAt: 3000 })
     onSubagentTerminal(store.db(), b.id, emit)
     // UN solo job di risveglio, per il PADRE, con initiator SUBAGENTS_DONE
-    const wakes = listJobs(store.db()).filter((j) => j.kind === 'user-message' && (j.payload as { initiator?: string }).initiator === 'SUBAGENTS_DONE')
+    const wakes = listJobs(store.db()).filter((j) => (j.payload as { extraMeta?: { subagentBatch?: string } }).extraMeta?.subagentBatch === 'bw1' && (j.payload as { initiator?: string }).initiator === 'SUBAGENTS_DONE')
     expect(wakes).toHaveLength(1)
     expect(wakes[0]!.agent_id).toBe(parent.id)
     expect((wakes[0]!.payload as { extraMeta?: { subagentBatch?: string } }).extraMeta?.subagentBatch).toBe('bw1')
@@ -65,12 +93,13 @@ describe('fase 12 (punto 5): il risveglio del padre, UNO per lotto', () => {
     // la seconda notifica terminale dello stesso lotto NON risveglia di nuovo
     closeSubagent(store.db(), 'sub_w1', { status: 'done', finishedAt: 4000 }) // no-op: già terminale
     onSubagentTerminal(store.db(), 'sub_w1', emitRec)
-    expect(listJobs(store.db()).filter((j) => j.kind === 'user-message' && (j.payload as { initiator?: string }).initiator === 'SUBAGENTS_DONE')).toHaveLength(1)
+    expect(listJobs(store.db()).filter((j) => (j.payload as { extraMeta?: { subagentBatch?: string } }).extraMeta?.subagentBatch === 'bw1')).toHaveLength(1)
   })
 
   it('padre in un TASK: il risveglio è un job task-run con lo stesso testo', () => {
     const task = store.createTask(parent.id, 'Confronto framework')
     const a = seed({ id: 'sub_t1', batchId: 'bt1', parentTaskId: task.id })
+    sealBatch(store.db(), 'bt1')
     closeSubagent(store.db(), a.id, { status: 'done', summary: 'x', finishedAt: 1 })
     onSubagentTerminal(store.db(), a.id, emit)
     const runs = listJobs(store.db()).filter((j) => j.kind === 'task-run' && (j.payload as { taskId?: number }).taskId === task.id)
@@ -80,6 +109,7 @@ describe('fase 12 (punto 5): il risveglio del padre, UNO per lotto', () => {
 
   it('le bandiere del lotto: untrusted/automatic/contaminated arrivano al turno del padre', () => {
     seed({ id: 'sub_f1', batchId: 'bf1', untrusted: true, automatic: true })
+    sealBatch(store.db(), 'bf1')
     closeSubagent(store.db(), 'sub_f1', { status: 'done', summary: 'x', finishedAt: 1, contaminated: true })
     onSubagentTerminal(store.db(), 'sub_f1', emit)
     const wakes = listJobs(store.db()).filter((j) => (j.payload as { extraMeta?: { subagentBatch?: string } }).extraMeta?.subagentBatch === 'bf1')
@@ -98,6 +128,8 @@ describe('fase 12 (punto 4): la scadenza al tick', () => {
   it('il figlio oltre deadline_at: interrupt, expired, summary con i minuti, lotto svegliato', () => {
     const interrupted: string[] = []
     seed({ id: 'sub_e1', batchId: 'be1', createdAt: 1000, deadlineAt: 61_000 })
+    // il turno del padre che l'ha lanciato è finito da un pezzo: lotto sigillato
+    sealBatch(store.db(), 'be1')
     store.appendEntry({ agentId: 'sub_e1', kind: 'thinking', role: 'assistant', content: 'quasi finito' })
     const due = tickSubagentDeadlines(store.db(), { interrupt: (id) => interrupted.push(id), now: () => 120_000 }, emit)
     expect(due.map((r) => r.id)).toEqual(['sub_e1'])
@@ -117,12 +149,32 @@ describe('fase 12 (punto 4): la scadenza al tick', () => {
 })
 
 describe('fase 12 (punto 5): il recupero dei lotti al boot', () => {
-  it('i lotti TUTTI terminali con woken=0 si svegliano; gli incompleti no', () => {
+  it('correzione J2: i lotti NON sigillati (crash del padre a metà turno) si sigillano e si controllano', () => {
+    // il padre è morto DOPO aver lanciato due figli, PRIMA della fine del
+    // turno: il lotto è aperto; uno dei due figli aveva già consegnato
+    const a = seed({ id: 'sub_c1', batchId: 'bc1' })
+    const b = seed({ id: 'sub_c2', batchId: 'bc1' })
+    closeSubagent(store.db(), a.id, { status: 'done', summary: 'a', finishedAt: 1 })
+    onSubagentTerminal(store.db(), a.id, emit) // lotto non sigillato: nulla
+    expect(listJobs(store.db()).filter((j) => (j.payload as { extraMeta?: { subagentBatch?: string } }).extraMeta?.subagentBatch === 'bc1')).toEqual([])
+    // al boot nessun padre ha turni in corso: si sigilla e si controlla; il
+    // secondo figlio è ancora APERTO (il suo job riparte) → nessun risveglio
+    expect(sealBatchesAtBoot(store.db(), emit)).toBeGreaterThanOrEqual(1)
+    expect(getSubagent(store.db(), a.id)!.sealed).toBe(1)
+    expect(listJobs(store.db()).filter((j) => (j.payload as { extraMeta?: { subagentBatch?: string } }).extraMeta?.subagentBatch === 'bc1')).toEqual([])
+    // quando ANCHE b chiude (dopo il boot), il lotto sigillato si sveglia
+    closeSubagent(store.db(), b.id, { status: 'done', summary: 'b', finishedAt: 2 })
+    onSubagentTerminal(store.db(), b.id, emit)
+    expect(listJobs(store.db()).filter((j) => (j.payload as { extraMeta?: { subagentBatch?: string } }).extraMeta?.subagentBatch === 'bc1')).toHaveLength(1)
+  })
+
+  it('i lotti TUTTI terminali SIGILLATI con woken=0 si svegliano; gli incompleti no', () => {
     // lotto completo mai svegliato (crash tra fine e risveglio)
     const a = seed({ id: 'sub_b1', batchId: 'bb1' })
     const b = seed({ id: 'sub_b2', batchId: 'bb1' })
     closeSubagent(store.db(), a.id, { status: 'done', summary: 'a', finishedAt: 1 })
     closeSubagent(store.db(), b.id, { status: 'done', summary: 'b', finishedAt: 2 })
+    sealBatch(store.db(), 'bb1')
     // lotto incompleto
     seed({ id: 'sub_b3', batchId: 'bb2' })
     const woken = wakeDueBatchesAtBoot(store.db(), emit)

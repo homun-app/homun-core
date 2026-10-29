@@ -21,7 +21,7 @@ vi.mock('../../main/agent/loop', () => ({
 const interrupted = vi.hoisted(() => [] as string[])
 
 const { setDataDir, dataDir, db, createAgent, updateAgent } = await import('../../main/store/db')
-const { insertSubagent, getSubagent } = await import('../../main/store/subagents')
+const { insertSubagent, getSubagent, sealBatch } = await import('../../main/store/subagents')
 const { listJobs } = await import('../../main/store/jobs')
 const { buildApiMethods } = await import('../api')
 import type { JobWorker } from '../worker'
@@ -68,6 +68,8 @@ describe('fase 12 (punto 7): RPC subagents:list e subagents:stop', () => {
       id: 'sub_rpc2', parentId: parent.id, parentTaskId: null, batchId: 'b-rpc2',
       title: 'Solo', brief: 'b', deadlineAt: 9e15, createdAt: 1000
     })
+    // il turno del padre che l'ha lanciato è finito: lotto SIGILLATO (J2)
+    sealBatch(db(), 'b-rpc2')
     const { enqueueJob } = await import('../../main/store/jobs')
     enqueueJob(db(), { agentId: 'sub_rpc2', kind: 'subagent-run', payload: {}, runAt: 1, now: 1 })
     const out = (await api['subagents:stop']!(['sub_rpc2'])) as { ok: boolean }

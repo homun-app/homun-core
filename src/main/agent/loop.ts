@@ -65,14 +65,15 @@ import {
   insertSubagent, getSubagent, updateSubagent, closeSubagent, openSubagentsOf,
   newSubagentId, newSubagentBatchId, DEFAULT_SUBAGENT_DEADLINE_MIN
 } from '../store/subagents'
-import { onSubagentTerminal, subagentsChanged } from '../../daemon/subagent-ops'
+import { onSubagentTerminal, sealTurnBatch, subagentsChanged } from '../../daemon/subagent-ops'
 import { subagentSystemPrompt } from './prompts'
 import { formatSubagentBrief } from '../../shared/agent-message'
 
 // §5.3: buildMessages vive in history.ts (modulo puro, testabile senza Electron)
 export { buildMessages } from './history'
 
-const MAX_STEPS = 24
+/** I passi di un turno (correzione J4: l'eval lo IMPORTA, così il figlio eval ha lo stesso budget del loop vero). */
+export const MAX_STEPS = 24
 
 /** Fase 3: il sollecito della chiamata di recupero quando un turno utente finisce senza send_to_user. */
 export const RECOVERY_NUDGE =
@@ -426,12 +427,14 @@ async function runSubagentTool(
       return { output: `"${row.title}" è ${row.status === 'stopped' ? 'fermato' : 'scaduto'}: non si riapre con un messaggio (serve una nuova spawn_subagent).` }
     }
     const now = Date.now()
-    // done/failed → RIAPRE: lotto nuovo di un solo membro e nuova scadenza —
-    // il suo risultato arriverà da solo
+    // done/failed → RIAPRE sul LOTTO DEL TURNO CORRENTE (lo stesso delle
+    // spawn, correzione J2): due figli riaperti nello stesso turno del padre
+    // formano UN lotto e danno UN solo risveglio; il sigillo lo mette la fine
+    // del turno. Nuova scadenza e woken azzero come prima
     const reopened = row.status === 'done' || row.status === 'failed'
     if (reopened) {
       updateSubagent(database, row.id, {
-        status: 'queued', batch_id: newSubagentBatchId(), woken: false,
+        status: 'queued', batch_id: deps.batchIdOf(), woken: false, sealed: false,
         deadline_at: now + deadlineMin * 60_000
       })
     }
@@ -443,7 +446,7 @@ async function runSubagentTool(
     })
     return {
       output: reopened
-        ? `Sottoagente "${row.title}" (id ${row.id}) RIAPERTO su questo messaggio: lavora e il risultato ti arriva da solo quando chiude.`
+        ? `Sottoagente "${row.title}" (id ${row.id}) RIAPERTO su questo messaggio: lavora e il risultato ti arriva quando il lotto di questo turno ha chiuso.`
         : `Messaggio in coda per "${row.title}" (id ${row.id}): lo riceverà nel suo turno.`,
       changed: true
     }
@@ -766,7 +769,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       // update_memory/update_skill non sono nella whitelist del figlio)
       const subRow = getSubagent(db(), opts.subagent.id)
       const parent = getAgent(opts.subagent.parentId)
-      systemText = subagentSystemPrompt(parent ?? agent, subRow ?? { title: '' }) +
+      // correzione J1: anche il ripiego porta l'id — il path del report nel
+      // prompt è sempre quello VERO del figlio
+      systemText = subagentSystemPrompt(parent ?? agent, subRow ?? { id: opts.subagent.id, title: '' }) +
         buildMemorySection(opts.subagent.parentId) + buildSkillsSection(opts.subagent.parentId)
     } else {
       try {
@@ -1242,18 +1247,19 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             continue
           }
           let risk = guard.browserActionRisk(call.name, input, browser.refInfoOf(agentId, String(input.ref ?? '')))
-          // fase 12 (0a): per browser_type col ref valido e presente il daemon
-          // verifica INTERNAMENTE il tipo di campo con browser_evaluate (mai
-          // esposto al modello): un input type=password senza etichetta non ha
-          // nome accessibile e il deny sul nome non scatta. Valutazione fallita
-          // → ask (mai free: "non riesco a verificare il tipo del campo")
-          if (call.name === 'browser_type' && risk.kind === 'free') {
-            const credential = await browser.fieldIsCredentialRef(agentId, String(input.ref ?? ''))
-            if (credential === null) {
-              risk = { kind: 'ask', reason: 'non riesco a verificare il tipo del campo' }
-            } else if (credential) {
-              risk = { kind: 'deny', reason: guard.CREDENTIAL_DENY_TEXT }
-            }
+          // fase 12 (0a, correzione J3): per browser_type col ref valido e
+          // presente nello snapshot il daemon verifica INTERNAMENTE il campo
+          // con browser_evaluate (mai esposto al modello). Quando la
+          // verifica RIESCE decide IL CAMPO VERO (type, autocomplete, name,
+          // id, placeholder, label, aria): il nome accessibile dello snapshot
+          // NON conta — in quotes.toscrape.com/login il campo username si
+          // chiama "Username Password" ma è un text e deve passare libero.
+          // Quando FALLISCE (errore MCP, result non leggibile) restano le
+          // regole dello snapshot e un free diventa ask, mai free
+          const askedRef = String(input.ref ?? '')
+          if (call.name === 'browser_type' && guard.VALID_REF_RE.test(askedRef) && browser.refInfoOf(agentId, askedRef)) {
+            const credential = await browser.fieldIsCredentialRef(agentId, askedRef)
+            risk = guard.applyFieldProbe(risk, input, browser.refInfoOf(agentId, askedRef), credential)
           }
           if (risk.kind === 'deny') {
             pushResult(risk.reason, { browserDeny: true })
@@ -2203,6 +2209,12 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     updateAgent(agentId, { unread: 0 })
     emit({ type: 'agents' })
   } finally {
+    // correzione J2: il lotto di questo turno si SIGILLA alla fine del turno,
+    // con QUALUNQUE esito (FINISHED, STOPPED, AWAITING_USER, SUPERSEDED,
+    // errore): il padre non lancerà altro qui. Subito dopo il controllo — se
+    // i figli erano già tutti finiti, il risveglio parte da qui, non dalla
+    // prima consegna arrivata a metà turno
+    if (turnBatchId) sealTurnBatch(db(), turnBatchId, emit)
     running.delete(agentId)
     // fase 8 (§3bis L7): fine del turno = niente attività in corso
     emit({ type: 'activity', agentId, activity: null })

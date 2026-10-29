@@ -199,6 +199,71 @@ export function fieldIsCredential(info: FieldProbeInfo): boolean {
   )
 }
 
+/**
+ * Correzione J3: il result REALE di browser_evaluate (Playwright MCP 0.0.83)
+ * NON è JSON nudo — è markdown: riga `### Result` col JSON del ritorno della
+ * funzione, poi `### Ran Playwright code` col codice e `### Page` con le
+ * righe della pagina. Il parser prende il testo dopo `### Result` fino alla
+ * prima riga successiva che inizia con `### ` e fa JSON.parse. null se la
+ * sezione non c'è o il corpo non è un oggetto (valutazione non leggibile: il
+ * chiamante in quel caso chiede all'utente, mai free).
+ */
+export function parseEvaluateResult(mcpResultText: string): FieldProbeInfo | null {
+  const lines = mcpResultText.split('\n')
+  const start = lines.findIndex((l) => l.trim() === '### Result')
+  if (start < 0) return null
+  const body: string[] = []
+  for (let i = start + 1; i < lines.length; i++) {
+    if (/^\s*###/.test(lines[i]!)) break
+    body.push(lines[i]!)
+  }
+  try {
+    const info = JSON.parse(body.join('\n')) as Partial<FieldProbeInfo>
+    // solo un oggetto è un campo: un array o un primitivo non sono leggibili
+    if (typeof info !== 'object' || info === null || Array.isArray(info)) return null
+    return {
+      type: String(info.type ?? ''), autocomplete: String(info.autocomplete ?? ''),
+      name: String(info.name ?? ''), id: String(info.id ?? ''),
+      placeholder: String(info.placeholder ?? ''), label: String(info.label ?? ''),
+      aria: String(info.aria ?? '')
+    }
+  } catch {
+    return null
+  }
+}
+
+/** Il testo dell'ask quando la verifica interna del campo NON riesce (J3). */
+export const FIELD_PROBE_ASK_TEXT = 'non riesco a verificare il tipo del campo'
+
+/**
+ * Correzione J3: la decisione di browser_type dopo la verifica INTERNA del
+ * campo. `credential` è l'esito di fieldIsCredentialRef: true/false quando la
+ * valutazione è riuscita, null quando è fallita. Quando RIESCE decide il
+ * campo VERO: deny se è di credenziali; se NON lo è, il deny venuto dal NOME
+ * ACCESSIBILE dello snapshot NON conta più (in quotes.toscrape.com/login il
+ * campo username si chiama "Username Password" ma è {type: "text", name:
+ * "username", label: "Username"}): resta solo l'ask di submit. Quando FALLISCE
+ * le regole dello snapshot restano e un free NON resta free (ask, mai free).
+ */
+export function applyFieldProbe(
+  risk: BrowserActionRisk,
+  args: Record<string, unknown>,
+  ref: RefInfo | null,
+  credential: boolean | null
+): BrowserActionRisk {
+  if (credential === true) return { kind: 'deny', reason: CREDENTIAL_DENY_TEXT }
+  if (credential === false) {
+    // il campo vero non è di credenziali: il deny del nome non conta; l'ask
+    // del submit (o di altro) resta quello di browserActionRisk
+    if (risk.kind !== 'deny') return risk
+    return args.submit === true
+      ? { kind: 'ask', reason: `browser_type con submit: true invia il modulo (campo "${ref?.name || ref?.text || '?'}")` }
+      : { kind: 'free' }
+  }
+  if (risk.kind === 'free') return { kind: 'ask', reason: FIELD_PROBE_ASK_TEXT }
+  return risk
+}
+
 // ---- il passaggio da web_fetch al browser (decisione in codice) ----
 // looksJsBuiltPage e JS_PAGE_HINT vivono in web-guard (li usa anche web_fetch)
 export { looksJsBuiltPage, JS_PAGE_HINT } from './web-guard'

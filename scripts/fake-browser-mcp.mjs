@@ -64,6 +64,10 @@ const PAGES = {
       '- Page URL: https://spa.example/login',
       '- Page Title: Accedi',
       '- heading "Accedi" [ref=e1]',
+      // correzione J3: come quotes.toscrape.com/login visto dal revisore — il
+      // campo username ha nome accessibile "Username Password" (stranezza
+      // della pagina) ma è un text: decide il campo VERO del probe, non il nome
+      '- textbox "Username Password" [ref=e8]',
       '- textbox [ref=e9]',
       '- button "Accedi" [ref=e10]'
     ]
@@ -72,7 +76,9 @@ const PAGES = {
 
 // fase 12 (0a): il tipo di ogni campo della pagina corrente, come lo restituisce
 // browser_evaluate — il campo e9 del login è type=password SENZA nome (nome,
-// id, placeholder e aria vuoti: il deny può scattare SOLO dal tipo)
+// id, placeholder e aria vuoti: il deny può scattare SOLO dal tipo); l'e8 è
+// lo username della pagina vera di quotes.toscrape.com/login: nome
+// accessibile "Username Password" MA text/name username/label Username
 const FIELD_TYPES = {
   'https://spa.example/offerte': {},
   'https://spa.example/menu': {},
@@ -81,6 +87,7 @@ const FIELD_TYPES = {
     e6: { type: 'text', autocomplete: 'cc-number', name: 'card', id: 'card-number', placeholder: 'Numero carta', label: 'Numero carta', aria: '' }
   },
   'https://spa.example/login': {
+    e8: { type: 'text', autocomplete: 'username', name: 'username', id: '', placeholder: '', label: 'Username', aria: '' },
     e9: { type: 'password', autocomplete: '', name: '', id: '', placeholder: '', label: '', aria: '' },
     e10: { type: 'submit', autocomplete: '', name: '', id: '', placeholder: '', label: '', aria: '' }
   }
@@ -175,14 +182,27 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
   if (name === 'browser_wait_for') {
     return text(actionResult('await page.waitForTimeout(1000)'))
   }
-  // fase 12 (0a): la valutazione interna del daemon — il result è il JSON
-  // dell'oggetto restituito dalla funzione (il daemon fa JSON.parse)
+  // fase 12 (0a, correzione J3): la valutazione interna del daemon — il
+  // result è quello REALE della 0.0.83, NON JSON nudo: `### Result` col JSON
+  // indentato, poi il codice eseguito e la pagina (il parser del daemon legge
+  // la sola sezione Result). Un ref SENZA campo restituisce testo non-JSON
+  // senza la sezione (valutazione fallita per il chiamante → ask)
   if (name === 'browser_evaluate') {
     const fields = FIELD_TYPES[state.url] ?? {}
     const target = String(args.target ?? '')
     const info = fields[target]
     if (!info) return text(`(nessun campo per il ref ${target} in questa pagina)`)
-    return text(JSON.stringify(info))
+    return text([
+      '### Result',
+      JSON.stringify(info, null, 2),
+      '### Ran Playwright code',
+      '```js',
+      `await page.locator('[ref=${target}]').evaluate(${String(args.function ?? '')})`,
+      '```',
+      '### Page',
+      `- Page URL: ${state.url}`,
+      `- Page Title: ${state.page?.title ?? ''}`
+    ].join('\n'))
   }
   return text(`Tool sconosciuto: ${name}`)
 })

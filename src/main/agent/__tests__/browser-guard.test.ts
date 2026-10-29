@@ -307,6 +307,98 @@ describe('fase 12 0a: fieldIsCredential (il tipo di campo letto DENTRO la pagina
   })
 })
 
+// ---- correzione J3: il result di browser_evaluate NON è JSON nudo, e quando
+// la verifica riesce decide il CAMPO VERO (non il nome dello snapshot) ----
+
+import { parseEvaluateResult, applyFieldProbe, refInfo as refInfoOf, FIELD_PROBE_ASK_TEXT } from '../browser-guard'
+
+describe('correzione J3: parseEvaluateResult — la sezione ### Result del result REALE della 0.0.83', () => {
+  // l'output REALE catturato dal revisore su quotes.toscrape.com/login
+  // (container vero, Playwright MCP 0.0.83): JSON dentro ### Result, poi il
+  // blocco del codice eseguito e la sezione ### Page
+  const REAL_RESULT = [
+    '### Result',
+    '{',
+    '  "type": "password",',
+    '  "autocomplete": "",',
+    '  "name": "password",',
+    '  "id": "password",',
+    '  "placeholder": "",',
+    '  "label": "",',
+    '  "aria": ""',
+    '}',
+    '### Ran Playwright code',
+    '```js',
+    "await page.locator('#password').evaluate('(el) => …');",
+    '```',
+    '### Page',
+    '- Page URL: https://quotes.toscrape.com/login',
+    '- Page Title: Login'
+  ].join('\n')
+
+  it('il testo REALE (con blocco del codice e sezione Page) → il FieldProbeInfo del campo', () => {
+    expect(parseEvaluateResult(REAL_RESULT)).toEqual({
+      type: 'password', autocomplete: '', name: 'password', id: 'password',
+      placeholder: '', label: '', aria: ''
+    })
+    expect(fieldIsCredential(parseEvaluateResult(REAL_RESULT)!)).toBe(true)
+  })
+  it('JSON indentato dal finto, senza nulla dopo Result → comunque letto', () => {
+    const p = parseEvaluateResult('### Result\n' + JSON.stringify({ type: 'text', name: 'username', label: 'Username' }, null, 2))
+    expect(p).toMatchObject({ type: 'text', name: 'username', label: 'Username' })
+  })
+  it('senza la sezione Result (es. testo d\'errore del finto) o corpo non JSON → null', () => {
+    expect(parseEvaluateResult('(nessun campo per il ref e1 in questa pagina)')).toBeNull()
+    expect(parseEvaluateResult('### Result\nnon sono json')).toBeNull()
+    expect(parseEvaluateResult('### Result\n[1,2]')).toBeNull()
+  })
+})
+
+describe('correzione J3: applyFieldProbe — quando la verifica RIESCE decide il campo VERO', () => {
+  const SNAPSHOT_LOGIN = [
+    '- Page URL: https://quotes.toscrape.com/login',
+    '- heading "Login" [ref=e1]',
+    '- textbox "Username Password" [ref=e8]',
+    '- textbox [ref=e9]'
+  ].join('\n')
+  const SNAPSHOT_FORM = [
+    '- Page URL: https://demo.example/ordine',
+    '- textbox "Customer name:" [ref=e4]'
+  ].join('\n')
+  const riskOf = (snapshot: string, ref: string, args: Record<string, unknown> = {}) =>
+    browserActionRisk('browser_type', { ref, ...args }, refInfoOf(snapshot, ref))
+
+  it('username di quotes.toscrape.com/login: nome accessibile "Username Password" ma text/username → FREE', () => {
+    // il nome dello snapshot da solo lo NEGHEREBBE (parola "Password"):
+    // il campo vero ({type: "text", name: "username", label: "Username"}) decide
+    expect(riskOf(SNAPSHOT_LOGIN, 'e8').kind).toBe('deny')
+    const decided = applyFieldProbe(riskOf(SNAPSHOT_LOGIN, 'e8'), { ref: 'e8', text: 'pippo' }, refInfoOf(SNAPSHOT_LOGIN, 'e8'), false)
+    expect(decided).toEqual({ kind: 'free' })
+  })
+  it('password {type: "password"} SENZA nome accessibile → DENY dal campo vero', () => {
+    expect(riskOf(SNAPSHOT_LOGIN, 'e9').kind).toBe('free') // nessun nome nel snapshot
+    const decided = applyFieldProbe(riskOf(SNAPSHOT_LOGIN, 'e9'), { ref: 'e9', text: 'x' }, refInfoOf(SNAPSHOT_LOGIN, 'e9'), true)
+    expect(decided).toEqual({ kind: 'deny', reason: CREDENTIAL_DENY_TEXT })
+  })
+  it('"Customer name:" {type: "text", name: "custname"} → FREE', () => {
+    const decided = applyFieldProbe(riskOf(SNAPSHOT_FORM, 'e4'), { ref: 'e4', text: 'Fabio' }, refInfoOf(SNAPSHOT_FORM, 'e4'), false)
+    expect(decided).toEqual({ kind: 'free' })
+  })
+  it('result NON leggibile (verifica fallita) → ASK "non riesco a verificare", mai free; il deny del nome resta', () => {
+    const ask = applyFieldProbe(riskOf(SNAPSHOT_LOGIN, 'e9'), { ref: 'e9', text: 'x' }, refInfoOf(SNAPSHOT_LOGIN, 'e9'), null)
+    expect(ask).toEqual({ kind: 'ask', reason: FIELD_PROBE_ASK_TEXT })
+    // il nome "Username Password" senza verifica resta deny (regola dello snapshot)
+    const stillDeny = applyFieldProbe(riskOf(SNAPSHOT_LOGIN, 'e8'), { ref: 'e8', text: 'x' }, refInfoOf(SNAPSHOT_LOGIN, 'e8'), null)
+    expect(stillDeny).toEqual({ kind: 'deny', reason: CREDENTIAL_DENY_TEXT })
+  })
+  it('il campo vero pulito NON cancella l\'ask del submit', () => {
+    const args = { ref: 'e4', text: 'Fabio', submit: true }
+    const decided = applyFieldProbe(riskOf(SNAPSHOT_FORM, 'e4', args), args, refInfoOf(SNAPSHOT_FORM, 'e4'), false)
+    expect(decided.kind).toBe('ask')
+    expect(String(decided.kind === 'ask' ? decided.reason : '')).toContain('submit')
+  })
+})
+
 describe('fase 12 0b: composeBrowserResult — le righe di pagina SOLO dallo snapshot', () => {
   const ACTION = [
     '### Ran Playwright code',

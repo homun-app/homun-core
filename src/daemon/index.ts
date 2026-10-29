@@ -121,6 +121,15 @@ async function main(): Promise<void> {
     store_setAgentStopper(loop.interrupt)
   }
 
+  // fase 12 (correzione J2): i lotti mai SIGILLATI (crash del padre a metà
+  // turno) si sigillano ora — al boot nessun padre ha un turno in corso — e
+  // si controllano subito: un lotto già completo parte da qui
+  {
+    const { sealBatchesAtBoot } = await import('./subagent-ops')
+    const sealed = sealBatchesAtBoot(database, emitBoot)
+    if (sealed > 0) console.log(`[sandbotd] ${sealed} lotti di sottoagenti sigillati all'avvio (padre fermo a metà turno)`)
+  }
+
   // fase 12 (punto 5): i lotti TUTTI terminali mai svegliati (crash tra la
   // fine dell'ultimo figlio e l'accodamento del risveglio) si svegliano ora
   {

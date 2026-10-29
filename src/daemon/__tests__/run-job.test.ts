@@ -5,6 +5,7 @@
 import { describe, expect, it, beforeEach } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
 import { JOBS_DDL, enqueueJob, getJobById } from '../../main/store/jobs'
+import { SUBAGENTS_DDL } from '../../main/store/subagents'
 import { makeJobRunner } from '../run-job'
 import type { RunTurnOptions } from '../../main/agent/loop'
 import type { SandbotEvent } from '../../shared/types'
@@ -191,15 +192,8 @@ describe('makeJobRunner: routine-run', () => {
 describe('makeJobRunner: subagent-run', () => {
   beforeEach(() => {
     db.exec('CREATE TABLE IF NOT EXISTS agents (id TEXT PRIMARY KEY, name TEXT, description TEXT DEFAULT "", provider_id TEXT, model TEXT, status TEXT DEFAULT "offline", unread INTEGER DEFAULT 0, created_at INTEGER, parent_id TEXT)')
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS subagents (
-        id TEXT PRIMARY KEY, parent_id TEXT NOT NULL, parent_task_id INTEGER, batch_id TEXT NOT NULL,
-        title TEXT NOT NULL, brief TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'queued',
-        summary TEXT, report_path TEXT, contaminated INTEGER DEFAULT 0, untrusted INTEGER DEFAULT 0,
-        automatic INTEGER DEFAULT 0, woken INTEGER DEFAULT 0, created_at INTEGER NOT NULL,
-        started_at INTEGER, finished_at INTEGER, deadline_at INTEGER NOT NULL
-      );
-    `)
+    // il DDL VERO dello store (correzione J2: la colonna del sigillo compresa)
+    db.exec(SUBAGENTS_DDL)
     db.prepare('INSERT INTO agents(id, name) VALUES(?, ?)').run('agent_p', 'Padre')
     db.prepare(`INSERT INTO subagents(id, parent_id, batch_id, title, brief, status, created_at, deadline_at)
       VALUES('sub_k1', 'agent_p', 'b1', 'Ricerca', 'il brief', 'queued', 1, 999)`).run()

@@ -91,3 +91,36 @@ describe('fase 12 (punto 3): subagentClosure, la chiusura robusta', () => {
     expect(expiredSummary('quasi finito', 20)).toBe('quasi finito\n(scaduto dopo 20 minuti)')
   })
 })
+
+// ---- correzione J4 (caso 21): i CONFINI nel brief non sono obiettivi ----
+
+import { briefTargets } from '../subagents'
+
+describe('correzione J4: briefTargets — un brief "copre" un nome solo se lo dichiara OBIETTIVO', () => {
+  // il brief del caso eval 24: obiettivo Astro, SvelteKit e Remix solo nei
+  // CONFINI e nel CONFRONTO
+  const CASE24_BRIEF = [
+    'Ricerca approfondita sul framework web Astro.',
+    'Obiettivo: punti di forza, limiti principali e quando sceglierlo rispetto a SvelteKit e Remix.',
+    'Confini: NON cercare SvelteKit né Remix (li cerca un altro sottoagente).',
+    'Formato: summary di massimo 10 righe col giudizio; il dettaglio va nel report.',
+    'Dove salvare: subagents/sub_e24a/report.md (write-file).'
+  ].join('\n')
+  const FW = ['astro', 'sveltekit', 'remix']
+
+  it('il brief del caso 24 (obiettivo Astro, confini SvelteKit e Remix) → ["astro"]', () => {
+    expect(briefTargets(CASE24_BRIEF, FW)).toEqual(['astro'])
+  })
+  it('il brief SPORCO (nessun confine) copre TUTTI: il giudizio eval lo boccia', () => {
+    expect(briefTargets('Ricerca su Astro, SvelteKit e Remix: confrontali e consegnami tutto.', FW))
+      .toEqual(['astro', 'sveltekit', 'remix'])
+  })
+  it('confini in EN ("Do not cover…") non contano; la frase di CONFRONTO intera si salta', () => {
+    expect(briefTargets('Deep dive on Remix. Do not cover Astro; another subagent does it.', ['astro', 'remix'])).toEqual(['remix'])
+    // "Studia SvelteKit vs Astro" è tutta una frase di confronto: nessun obiettivo
+    expect(briefTargets('Studia SvelteKit vs Astro per il confronto.', ['astro', 'sveltekit'])).toEqual([])
+  })
+  it('il nome conta solo a PAROLA INTERA (AstroMol non è Astro)', () => {
+    expect(briefTargets('Ricerca su AstroMol, il gestore molecolare.', FW)).toEqual([])
+  })
+})

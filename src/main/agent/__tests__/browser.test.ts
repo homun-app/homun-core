@@ -190,13 +190,15 @@ describe('evidenza del browser: blocco <pagina_web via="browser"> col tag neutra
 import { probeFieldType, fieldIsCredentialRef } from '../browser'
 import { fieldIsCredential } from '../browser-guard'
 
-describe('fase 12 0a: il probe INTERNO del tipo di campo (browser_evaluate, mai esposto)', () => {
+describe('fase 12 0a / correzione J3: il probe INTERNO del tipo di campo (browser_evaluate, mai esposto)', () => {
   it('browser_evaluate non è MALE tra i tool offerti al modello', () => {
     expect(browserToolDefs.map((t) => t.name)).not.toContain('browser_evaluate')
   })
-  it('campo type=password SENZA nome (login del finto) → il probe lo vede e fieldIsCredential scatta', async () => {
+  it('il result del finto è nel formato REALE della 0.0.83: il probe lo legge (### Result + codice + pagina)', async () => {
     await callBrowserTool(AGENT, 'browser_open', { url: 'https://spa.example/login' })
-    // il campo e9 NON ha nome accessibile nello snapshot: `textbox [ref=e9]`
+    // il campo e9 NON ha nome accessibile nello snapshot: `textbox [ref=e9]`;
+    // col result in formato reale (NON JSON nudo) il JSON.parse diretto di
+    // prima fallirebbe: serve il parser della sezione ### Result
     expect(refInfoOf(AGENT, 'e9')).toEqual({ role: 'textbox', name: '', text: '' })
     const probe = await probeFieldType(AGENT, 'e9')
     expect(probe.ok).toBe(true)
@@ -205,6 +207,19 @@ describe('fase 12 0a: il probe INTERNO del tipo di campo (browser_evaluate, mai 
       expect(fieldIsCredential(probe.info)).toBe(true)
     }
     expect(await fieldIsCredentialRef(AGENT, 'e9')).toBe(true)
+  })
+  it('J3: il campo username del login si chiama "Username Password" nello snapshot ma è un text → probe pulito', async () => {
+    await callBrowserTool(AGENT, 'browser_open', { url: 'https://spa.example/login' })
+    // il nome accessibile contiene "Password" (stranezza della pagina vera di
+    // quotes.toscrape.com/login): il campo VERO dice text/username
+    expect(refInfoOf(AGENT, 'e8')).toEqual({ role: 'textbox', name: 'Username Password', text: '' })
+    const probe = await probeFieldType(AGENT, 'e8')
+    expect(probe.ok).toBe(true)
+    if (probe.ok) {
+      expect(probe.info).toMatchObject({ type: 'text', name: 'username', label: 'Username' })
+      expect(fieldIsCredential(probe.info)).toBe(false)
+    }
+    expect(await fieldIsCredentialRef(AGENT, 'e8')).toBe(false)
   })
   it('ref senza campo nella pagina → valutazione NON riuscita (ok:false → il loop chiede, mai free)', async () => {
     await callBrowserTool(AGENT, 'browser_open', { url: 'https://spa.example/menu' })
