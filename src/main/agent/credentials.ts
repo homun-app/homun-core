@@ -4,9 +4,15 @@
 // 1. ORIGINE: l'URL della pagina corrente è https: e la sua origine è
 //    ESATTAMENTE una delle origins del login (niente wildcard, niente
 //    sottodomini): è la difesa anti-phishing di ogni password manager;
-// 2. REF: ogni ref è un ref valido dello snapshot e NON di un iframe
-//    (`f<n>e<n>`: una cornice può avere un'altra origine), e il tipo del campo
-//    si verifica col probe interno del browser (browser-guard).
+// 2. REF: ogni ref ha un formato valido (`^[A-Za-z0-9]+$`) ed è presente
+//    nell'ultimo snapshot; il tipo del campo si verifica col probe interno
+//    del browser (browser-guard), che porta anche l'origine del FRAME e il
+//    fatto che il campo stia nel documento TOP. Q2 (fase 14 correzioni 2):
+//    il PREFISSO `f<n>` del ref NON è più un segnale di iframe — dalla
+//    seconda navigazione nella scheda lo hanno anche i campi del documento
+//    principale (Playwright MCP vero: e5 → f1e5), e un login vero passa
+//    quasi sempre da una navigazione. "È in un iframe" lo dice solo il probe
+//    (`top`), come fanno i password manager.
 // Il valore NON entra MAI nel contesto del modello: va dal vault al campo.
 import { createHmac } from 'node:crypto'
 
@@ -160,27 +166,28 @@ export function checkFillOrigin(login: { label: string; origins: string[] }, pag
 
 // ---- i ref dei campi (punto 7d, controllo 2) ----
 
-/** Un ref è di IFRAME (`f<n>e<n>`: una cornice può avere un'altra origine). */
-export const IFRAME_REF_RE = /^f\d+e\d+$/
-
 export type FillRefCheck =
   | { ok: true; ref: string }
   | { ok: false; error: string }
 
 /**
- * Il controllo dei REF (puro, punto 7d-2): il ref è un ref valido
- * (`^[A-Za-z0-9]+$`, come REF_TOOLS) e NON di iframe; la presenza nello
- * snapshot la verifica il chiamante con refInfo (la verità è lo snapshot
- * ricevuto, mai ciò che dice il modello).
+ * Il controllo dei REF (puro, punto 7d-2): il ref ha un formato valido
+ * (`^[A-Za-z0-9]+$`, come REF_TOOLS); la presenza nello snapshot la verifica
+ * il chiamante con refInfo (la verità è lo snapshot ricevuto, mai ciò che
+ * dice il modello). Q2 (fase 14 correzioni 2): QUI non si rifiuta più il
+ * prefisso `f<n>` — nel Playwright MCP vero, dalla seconda navigazione nella
+ * scheda lo hanno anche i ref del documento PRINCIPALE (e5 → f1e5: è solo
+ * "documento diverso dal primo", non "iframe"), quindi quel rifiuto
+ * bloccava il caso d'uso normale del login (apro il sito, clicco "Accedi",
+ * arriva la pagina del login). Il campo è davvero in un iframe lo scopre
+ * SOLO il probe: checkFieldFrame (`top`), prima della card e prima di ogni
+ * scrittura.
  */
 export function checkFillRef(ref: unknown, kind: 'username' | 'password' | 'totp'): FillRefCheck {
   const r = String(ref ?? '').trim()
   if (!r) return { ok: false, error: `manca ${kind}_ref: servono i ref dei campi presi dallo snapshot` }
   if (!/^[A-Za-z0-9]+$/.test(r)) {
-    return { ok: false, error: `"${r.slice(0, 40)}" non è un ref dello snapshot (i ${kind}_ref sono i ref dello snapshot, es. e12)` }
-  }
-  if (IFRAME_REF_RE.test(r)) {
-    return { ok: false, error: `"${r}" è il ref di un elemento DENTRO un iframe: una cornice può avere un'altra origine. Usa un campo della pagina principale.` }
+    return { ok: false, error: `"${r.slice(0, 40)}" non è un ref dello snapshot (i ${kind}_ref sono i ref dello snapshot, es. e12 o f1e12)` }
   }
   return { ok: true, ref: r }
 }

@@ -253,38 +253,42 @@ describe('fase 12 0a / correzione J3: il probe INTERNO del tipo di campo (browse
     expect(await fieldIsCredentialRef(AGENT, 'e9')).toBe(true)
   })
   it('K1: il campo username del login ha DUE label — col probe nuovo è "Username Password" → fieldIsCredential VERO (deny)', async () => {
+    // SECONDA navigazione della sessione: come nel server VERO, i ref della
+    // pagina principale escono col prefisso f1 (Q2, fase 14 correzioni 2)
     await callBrowserTool(AGENT, 'browser_open', { url: 'https://spa.example/login' })
+    expect(refInfoOf(AGENT, 'f1e8')).toEqual({ role: 'textbox', name: 'Username Password', text: '' })
     // il nome accessibile contiene "Password" (le due label della pagina vera
     // di quotes.toscrape.com/login): il probe ALLINEATO al nome accessibile
     // ora le legge TUTTE e due → il campo è credential, esito atteso deny
-    expect(refInfoOf(AGENT, 'e8')).toEqual({ role: 'textbox', name: 'Username Password', text: '' })
-    const probe = await probeFieldType(AGENT, 'e8')
+    const probe = await probeFieldType(AGENT, 'f1e8')
     expect(probe.ok).toBe(true)
     if (probe.ok) {
       expect(probe.info).toMatchObject({ type: 'text', name: 'username', id: 'username', label: 'Username Password', title: '' })
       expect(fieldIsCredential(probe.info)).toBe(true)
     }
-    expect(await fieldIsCredentialRef(AGENT, 'e8')).toBe(true)
+    expect(await fieldIsCredentialRef(AGENT, 'f1e8')).toBe(true)
   })
   it('K1: il campo e7 della prenota è SENZA nome nello snapshot, aria "Numero carta" dal probe (aria-labelledby) → DENY dal campo vero', async () => {
+    // TERZA navigazione: prefisso f2 (n cresce di 1 a ogni navigazione)
     await callBrowserTool(AGENT, 'browser_open', { url: 'https://spa.example/prenota' })
     // il caso dell'esempio del revisore: <span id="l">Numero carta</span>
     // <input aria-labelledby="l" name="f1"> — lo snapshot NON ha il nome, il
     // probe lo legge nell'aria: la verifica AGGIUNGE il deny
-    expect(refInfoOf(AGENT, 'e7')).toEqual({ role: 'textbox', name: '', text: '' })
-    const probe = await probeFieldType(AGENT, 'e7')
+    expect(refInfoOf(AGENT, 'f2e7')).toEqual({ role: 'textbox', name: '', text: '' })
+    const probe = await probeFieldType(AGENT, 'f2e7')
     expect(probe.ok).toBe(true)
     if (probe.ok) {
       expect(probe.info).toMatchObject({ type: 'text', name: 'f1', aria: 'Numero carta' })
       expect(fieldIsCredential(probe.info)).toBe(true)
     }
-    expect(await fieldIsCredentialRef(AGENT, 'e7')).toBe(true)
+    expect(await fieldIsCredentialRef(AGENT, 'f2e7')).toBe(true)
   })
   it('ref senza campo nella pagina → valutazione NON riuscita (ok:false → il loop chiede, mai free)', async () => {
+    // QUARTA navigazione (prefisso f3): l'heading non è un campo
     await callBrowserTool(AGENT, 'browser_open', { url: 'https://spa.example/menu' })
-    const probe = await probeFieldType(AGENT, 'e1')
+    const probe = await probeFieldType(AGENT, 'f3e1')
     expect(probe.ok).toBe(false)
-    expect(await fieldIsCredentialRef(AGENT, 'e1')).toBeNull()
+    expect(await fieldIsCredentialRef(AGENT, 'f3e1')).toBeNull()
   })
 })
 

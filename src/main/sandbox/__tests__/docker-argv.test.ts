@@ -227,16 +227,21 @@ describe('migrazione docker una tantum (punto 1): argv puri, copia senza cancell
 // ---- fase 11b (punto 2): il launcher del browser (Playwright MCP nel box) ----
 
 describe('il launcher del browser: argv PURI con TUTTI i flag obbligatori e NESSUNO dei vietati', () => {
-  it('dockerBrowserMcpArgv: exec -i -u 1001:1001 (pwuser, P2) -w /browser/<owner> col wrapper COSTANTE e i flag MCP', () => {
+  it('dockerBrowserMcpArgv: exec -i -u 1001:1001 (pwuser, P2) -w /browser (Q1) col wrapper COSTANTE e i flag MCP', () => {
     const argv = dockerBrowserMcpArgv('agent_x', 18765)
     expect(argv.slice(0, 12)).toEqual([
       'exec', '-i',
       '-u', '1001:1001',
-      '-w', '/browser/agent_x',
+      '-w', '/browser',
       'sandbot-box',
       'sh', '-c', DOCKER_BROWSER_WRAPPER_SH, 'sh',
       '/browser/agent_x/mcp.pid'
     ])
+    // Q1 (fase 14 correzioni 2): il `-w` è /browser, NON /browser/<owner> —
+    // l'OCI runtime fa chdir PRIMA di avviare il wrapper e al primo avvio la
+    // cartella del proprietario NON esiste ancora (la crea il mkdir del
+    // wrapper): -w /browser/<owner> faceva fallire ogni avvio con rc 127
+    expect(argv[argv.indexOf('-w') + 1]).toBe(BROWSER_MOUNT)
     // il wrapper COSTANTE è l'elemento sh -c, il pid file è $1 e i flag seguono
     expect(argv[argv.indexOf('-c') + 1]).toBe(DOCKER_BROWSER_WRAPPER_SH)
     expect(argv).toContain('/browser/agent_x/mcp.pid')
@@ -247,6 +252,11 @@ describe('il launcher del browser: argv PURI con TUTTI i flag obbligatori e NESS
     expect(DOCKER_BROWSER_WRAPPER_SH.indexOf('echo $$')).toBeLessThan(DOCKER_BROWSER_WRAPPER_SH.indexOf('exec playwright-mcp'))
     expect(DOCKER_BROWSER_WRAPPER_SH).toContain('exec playwright-mcp')
     expect(DOCKER_BROWSER_WRAPPER_SH).toContain('echo $$')
+    // Q1: il wrapper crea la cartella del pid e CI ENTRA (la cwd del server è
+    // /browser/<owner>, dove finisce il filename RELATIVO dello screenshot);
+    // se mkdir o cd falliscono esce SUBITO: mai un server nella cartella sbagliata
+    expect(DOCKER_BROWSER_WRAPPER_SH).toContain('mkdir -p "$(dirname "$1")" && cd "$(dirname "$1")" || exit 1')
+    expect(DOCKER_BROWSER_WRAPPER_SH.indexOf('cd "$(dirname "$1")"')).toBeLessThan(DOCKER_BROWSER_WRAPPER_SH.indexOf('echo $$'))
     // TUTTI i flag obbligatori (valori compresi), con il tetto delle uscite (I8)
     const flags = browserMcpFlags('agent_x', 18765)
     for (const [f, v] of [
@@ -552,14 +562,16 @@ describe('dimensione di un file nel box: argv PURI (F6)', () => {
 // ---- fase 12 (punto 1) + P2: il browser del FIGLIO (istanza propria, --isolated) ----
 
 describe('il launcher del browser di un SOTTOAGENTE', () => {
-  it('child: --isolated AL POSTO di --user-data-dir, output-dir e pid file col suo id NEL volume del padre, -w /browser/<owner>, e gira ANCHE lui come 1001', () => {
+  it('child: --isolated AL POSTO di --user-data-dir, output-dir e pid file col suo id NEL volume del padre, -w /browser (Q1), e gira ANCHE lui come 1001', () => {
     const flags = browserMcpFlags('sub_a1b2c3d4', 18765, { child: true, owner: 'agent_padre' })
     expect(flags).toContain('--isolated')
     expect(flags).not.toContain('--user-data-dir')
     expect(flags[flags.indexOf('--output-dir') + 1]).toBe('/browser/agent_padre/output-sub_a1b2c3d4')
     const argv = dockerBrowserMcpArgv('sub_a1b2c3d4', 18765, { child: true, owner: 'agent_padre' })
     expect(argv).toContain('/browser/agent_padre/mcp-sub_a1b2c3d4.pid')
-    expect(argv[argv.indexOf('-w') + 1]).toBe('/browser/agent_padre')
+    // Q1: come il principale, il `-w` è il punto di mount (la cartella del
+    // proprietario la crea il wrapper col mkdir)
+    expect(argv[argv.indexOf('-w') + 1]).toBe(BROWSER_MOUNT)
     // P2: il figlio gira COME 1001 pure lui (niente più 1000: il suo stato sta
     // nel volume privato del browser, non nella home del padre)
     expect(argv[argv.indexOf('-u') + 1]).toBe('1001:1001')
@@ -722,5 +734,59 @@ describe('fase 14 7a + P2: il browser gira come pwuser (1001:1001) con lo stato 
     // FALLISCE in modo chiaro invece di far girare il browser con uid inatteso
     expect(dockerfile).toContain('test "$(id -u pwuser)" = 1001 && test "$(id -g pwuser)" = 1001')
     expect(dockerfile).toContain('pwuser')
+  })
+})
+
+// ---- Q1 (fase 14 correzioni 2): la guardia sul `-w` di OGNI docker exec ----
+
+describe('Q1: il `-w` di un docker exec è SOLO un percorso che esiste già', () => {
+  /**
+   * Un `-w` ammesso dalla regola di modulo in docker-argv.ts: /box o /browser
+   * (i punti di mount, esistono SEMPRE) oppure una cartella che un passo
+   * PRECEDENTE ha già creato — la home di un bot (ensureBotHome, H2) o la
+   * cartella di un plugin (l'installazione, fase 13). MAI una cartella che
+   * crea il processo stesso: l'OCI runtime fa chdir PRIMA di eseguire il
+   * comando e un `-w` inesistente muore con rc 127 (è il bug Q1).
+   */
+  const allowedWorkdir = (w: string): boolean =>
+    w === BOX_MOUNT ||
+    w === BROWSER_MOUNT ||
+    /^\/box\/home\/[A-Za-z0-9_-]+$/.test(w) ||
+    /^\/box\/plugins\/[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*$/.test(w)
+
+  it('TUTTI gli argv esportati col `-w` puntano a un percorso dell\'insieme ammesso', () => {
+    const argvsWithW = [
+      dockerExecArgv(BOX_CONTAINER, 'cmd'), // default, senza workdir esplicito
+      dockerExecArgv(BOX_CONTAINER, 'cmd', { workdir: boxHomePath('agent_x') }),
+      dockerExecBackgroundArgv(BOX_CONTAINER, 'cmd', { workdir: boxHomePath('agent_x') }, { log: 'l', exit: 'e', pid: 'p' }),
+      dockerExecBackgroundArgv(BOX_CONTAINER, 'cmd', {}, { log: 'l', exit: 'e', pid: 'p' }),
+      dockerReadFileArgv(BOX_CONTAINER, '/box/home/x/f'),
+      dockerWriteFileArgv(BOX_CONTAINER, '/box/home/x/f'),
+      dockerListDirArgv(BOX_CONTAINER, '.'),
+      dockerStatSizeArgv(BOX_CONTAINER, '/box/home/x/f'),
+      dockerStdioMcpArgv({ workdir: boxHomePath('agent_x'), command: 'npx' }),
+      dockerStdioMcpArgv({ workdir: '/box/plugins/mp/demo/abc', command: 'node', args: ['run.js'] }),
+      dockerBrowserMcpArgv('agent_x', 18765), // launcher del browser principale
+      dockerBrowserMcpArgv('sub_a1b2c3d4', 18765, { child: true, owner: 'agent_padre' }), // e del figlio
+      dockerBrowserReadFileArgv(BOX_CONTAINER, '/browser/agent_x/mcp.pid'),
+      dockerBrowserWriteB64Argv(BOX_CONTAINER, '/box/home/agent_x/.browser/screens/ab12cd34.png')
+    ]
+    for (const argv of argvsWithW) {
+      const ws: string[] = []
+      for (let i = 1; i < argv.length; i++) if (argv[i - 1] === '-w') ws.push(argv[i])
+      expect(ws.length, `atteso almeno un -w docker in [${argv.join(' ')}]`).toBeGreaterThan(0)
+      for (const w of ws) expect(allowedWorkdir(w), `-w "${w}" non ammesso in [${argv.join(' ')}]`).toBe(true)
+    }
+  })
+
+  it('il bug Q1 non torna: NESSUN `-w` punta alla cartella del proprietario del browser (la crea il wrapper stesso)', () => {
+    for (const argv of [
+      dockerBrowserMcpArgv('agent_x', 18765),
+      dockerBrowserMcpArgv('sub_a1b2c3d4', 18765, { child: true, owner: 'agent_padre' })
+    ]) {
+      const ws = argv.filter((_, i) => argv[i - 1] === '-w')
+      expect(ws).not.toContain(browserStateDir('agent_x'))
+      expect(ws).not.toContain(browserStateDir('agent_padre'))
+    }
   })
 })

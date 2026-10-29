@@ -356,22 +356,46 @@ try {
   const transcript = JSON.stringify(await call('agents:entries', agent.id, 0))
   check('6e la password NON è mai nel transcript', !transcript.includes('Finta-Password-Proba'))
 
-  // 6f. P3: campo dentro un iframe (ref SENZA prefisso f) → rifiutato dal probe
+  // 6f. P3+Q2: campo dentro un iframe dopo una SECONDA navigazione (ref col
+  //     prefisso f…): il prefisso non è un segnale di iframe — il rifiuto
+  //     arriva solo dal probe (top:false), NESSUNA card
   pushTool('browser_open', { url: 'https://app.example.test/embedded' })
-  pushTool('fill_credential', { id: savedLogin.id, username_ref: 'e2' })
+  pushTool('fill_credential', { id: savedLogin.id, username_ref: 'f1e2' })
   mark = await turnMark(agent.id)
   await call('chat:send', agent.id, 'Prova a compilare il login sulla pagina con il modulo incorporato.')
   await waitTurnEnd(agent.id, mark)
   entries = await call('agents:entries', agent.id, 0)
   const iframeFill = entries.findLast((e) => e.kind === 'tool-result' && String(e.content).includes('iframe'))
   const pendingFillCard = entries.some((e) => e.kind === 'send-message' && e.meta?.message?.type === 'fill' && e.meta?.status === 'pending')
-  check('6f campo in iframe (ref senza f) → rifiutato da top:false, NESSUNA card',
+  check('6f campo in iframe (ref f1e2) → rifiutato da top:false, NESSUNA card',
     !!iframeFill && !pendingFillCard,
     String(iframeFill?.content ?? '').slice(0, 90))
 
+  // 6g. Q2: login dopo un\'ALTRA navigazione nella sessione (i ref della
+  //     pagina principale ora hanno il prefisso f2…) → card e fill OK: è il
+  //     caso d'uso normale (apro il sito, navigo, arriva la pagina di login)
+  pushTool('browser_open', { url: 'https://app.example.test/login' })
+  pushTool('fill_credential', { id: savedLogin.id, username_ref: 'f2e2', password_ref: 'f2e3' })
+  mark = await turnMark(agent.id)
+  await call('chat:send', agent.id, 'Riapri la pagina di login del portale e accedi di nuovo col login del vault.')
+  entries = await waitTurnEnd(agent.id, mark) // si ferma sulla card del fill
+  const fRefCard = entries.findLast((e) => e.kind === 'send-message' && e.meta?.message?.type === 'fill' && e.meta?.status === 'pending')
+  check('6g card del fill coi ref f… (dopo più navigazioni)',
+    !!fRefCard && fRefCard.meta.message.origin === 'https://app.example.test',
+    fRefCard?.content ?? 'nessuna card')
+  await resolveLatestCard(agent.id, 'allow', 'once')
+  await sleep(500)
+  entries = await call('agents:entries', agent.id, 0)
+  const fRefResult = entries.findLast((e) => e.kind === 'tool-result' && String(e.content).includes('Compilati'))
+  check('6g compilato coi ref f…, esito SENZA valori',
+    !!fRefResult && !String(fRefResult.content).includes('Finta-Password') && !String(fRefResult.content).includes('mario.rossi'),
+    String(fRefResult?.content ?? ''))
+  const transcriptF = JSON.stringify(await call('agents:entries', agent.id, 0))
+  check('6g la password NON è mai nel transcript (nemmeno col fill f…)', !transcriptF.includes('Finta-Password-Proba'))
+
   // ---- 7. stessa chiamata su un'origine DIVERSA → rifiuto senza card ----
   pushTool('browser_open', { url: 'https://spa.example/login' })
-  pushTool('fill_credential', { id: savedLogin.id, username_ref: 'e8', password_ref: 'e9' })
+  pushTool('fill_credential', { id: savedLogin.id, username_ref: 'f3e8', password_ref: 'f3e9' })
   pushTool('send_to_user', { text: 'Il login è di un altro sito: non lo compilo qui.' })
   mark = await turnMark(agent.id)
   await call('chat:send', agent.id, 'Ora prova ad accedere su https://spa.example/login con lo stesso login.')

@@ -1,12 +1,15 @@
 #!/usr/bin/env node
 // Server MCP stdio FINTO del browser, FEDELE al Playwright MCP 0.0.83 (fase
-// 11b, I3): le AZIONI restituiscono `### Ran Playwright code`, le righe di
-// pagina (`- Page URL` / `- Page Title`) e il LINK allo snapshot scritto in un
-// file (`.browser/output/…yml`), MAI lo snapshot inline; SOLO browser_snapshot
-// lo restituisce inline. Gli elementi si indicano col parametro `target` (come
-// nel server vero). Si attiva col flag di test SANDBOT_TEST_FAKE_BROWSER_MCP
-// che sostituisce `docker exec …` con `node <questo file>`: quel flag NON
-// esiste in produzione. Nessuna rete, nessun browser vero.
+// 11b, I3 — e, da Q2 della fase 14 correzioni 2, anche al prefisso f<n> che
+// dal VERO server i ref del documento principale prendono dalla seconda
+// navigazione nella scheda): le AZIONI restituiscono `### Ran Playwright
+// code`, le righe di pagina (`- Page URL` / `- Page Title`) e il LINK allo
+// snapshot scritto in un file (`.browser/output/…yml`), MAI lo snapshot
+// inline; SOLO browser_snapshot lo restituisce inline. Gli elementi si
+// indicano col parametro `target` (come nel server vero). Si attiva col flag
+// di test SANDBOT_TEST_FAKE_BROWSER_MCP che sostituisce `docker exec …` con
+// `node <questo file>`: quel flag NON esiste in produzione. Nessuna rete,
+// nessun browser vero.
 // Flag del finto per la SESSIONE MORTA (I4): SANDBOT_TEST_FAKE_BROWSER_MCP_
 // DIE_ON_CALL=N fa morire il processo ALLA N-esima chiamata, senza rispondere
 // (il client vede chiudersi il trasporto); il daemon lo consuma al primo
@@ -93,9 +96,10 @@ const PAGES = {
     ]
   },
   // P3 (fase 14 correzioni): pagina col campo di login DENTRO un iframe di
-  // un'ALTRA origine — il ref NON ha prefisso f (la difesa del prefisso iframe
-  // non scatta) ma il probe riporta top:false e l'origine DEL FRAME:
-  // fill_credential rifiuta dal confronto origine/top del campo
+  // un'ALTRA origine — il prefisso del ref NON è un segnale di iframe (Q2:
+  // dalla seconda navigazione lo hanno anche i campi della pagina principale);
+  // il probe riporta top:false e l'origine DEL FRAME: fill_credential rifiuta
+  // dal confronto origine/top del campo
   'https://app.example.test/embedded': {
     title: 'Accesso incorporato',
     file: 'page-appexample-embedded',
@@ -148,6 +152,20 @@ const FIELD_TYPES = {
 // campi compilati: è così che la REDAZIONE di fase 14 si vede davvero)
 const state = { url: '', page: null }
 const typed = {}
+
+// Q2 (fase 14 correzioni 2): come il Playwright MCP 0.0.83 VERO, dalla
+// SECONDA navigazione nella stessa sessione i ref del documento PRINCIPALE
+// escono col prefisso f<n> (n cresce di 1 a ogni navigazione: 1ª senza,
+// 2ª f1…, 3ª f2…): il prefisso NON dice "iframe", dice solo "documento
+// diverso dal primo della scheda". Lo conta browser_navigate (il driver
+// delle navigazioni qui; il click→menu di offerte è una scorciatoia e non
+// fa crescere l'albero). Il campo in iframe della pagina embedded resta
+// riconosciuto SOLO dal probe (top:false), che riceve il ref come arriva
+// (f<n>e<n> o e<n>) e cerca il campo di partenza.
+let navigations = 0
+const refPrefix = () => (navigations >= 2 ? `f${navigations - 1}` : '')
+const withPrefix = (lines) => lines.map((l) => l.replace(/\[ref=(\w+)\]/g, (_, r) => `[ref=${refPrefix()}${r}]`))
+const baseRef = (ref) => ref.replace(/^f\d+e/, 'e')
 
 const TOOLS = [
   { name: 'browser_navigate', description: 'apre un URL', inputSchema: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] } },
@@ -205,6 +223,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
   if (DIE_ON_CALL > 0 && calls >= DIE_ON_CALL) process.exit(0) // muore SENZA rispondere (I4)
   if (name === 'browser_navigate') {
     const url = String(args.url ?? '')
+    navigations++ // dalla seconda navigazione i ref prendono il prefisso f<n>
     state.url = url
     state.page = pageAt(url)
     return text(actionResult(`await page.goto('${url}')`))
@@ -213,7 +232,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     // l'UNICO result con lo snapshot inline (comprese le righe di pagina); i
     // campi compilati mostrano il loro testo, come nello snapshot VERO
     if (!state.page) return text('(nessuna pagina aperta)')
-    const withTyped = state.page.lines.map((l) => {
+    const withTyped = withPrefix(state.page.lines).map((l) => {
       const m = /^(\s*-\s+textbox[^\n]*?\[ref=(\w+)\])([^\n]*)$/.exec(l)
       if (m && typed[m[2]] !== undefined) return `${m[1]}: ${typed[m[2]]}`
       return l
@@ -223,8 +242,8 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
   if (name === 'browser_click') {
     const target = String(args.target ?? '')
     // il link "Vedi il menu" della pagina offerte porta al menu: l'unica
-    // navigazione interna del sito finto
-    if (target === 'e2' && state.url === 'https://spa.example/offerte') {
+    // navigazione interna del sito finto (il ref può avere il prefisso f<n>)
+    if (baseRef(target) === 'e2' && state.url === 'https://spa.example/offerte') {
       state.url = 'https://spa.example/menu'
       state.page = PAGES[state.url]
     }
@@ -257,8 +276,10 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
   // campo può sovrascriverli (il test dell'iframe: top:false, origine diversa)
   if (name === 'browser_evaluate') {
     const fields = FIELD_TYPES[state.url] ?? {}
+    // il ref arriva come nello snapshot (f<n>e<n> dalla seconda navigazione):
+    // il campo di partenza è senza prefisso
     const target = String(args.target ?? '')
-    const info = fields[target]
+    const info = fields[baseRef(target)]
     if (!info) return text(`(nessun campo per il ref ${target} in questa pagina)`)
     const full = { origin: new URL(state.url).origin, top: true, ...info }
     return text([

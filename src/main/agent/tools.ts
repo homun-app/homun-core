@@ -638,7 +638,7 @@ export const toolDefs: ToolDef[] = [
   },
   {
     name: 'fill_credential',
-    description: "Compila i campi di un login salvato nel vault DENTRO la pagina aperta del browser: il valore va dal vault al campo, senza mai passare dalla chat. Almeno un ref fra username_ref, password_ref e totp_ref (i ref dello snapshot, non di iframe). Il login si compila SOLO sull'origine esatta per cui è salvato e ogni uso lo approva l'utente con una card. Mai password o codici in chat o in browser_type.",
+    description: "Compila i campi di un login salvato nel vault DENTRO la pagina aperta del browser: il valore va dal vault al campo, senza mai passare dalla chat. Almeno un ref fra username_ref, password_ref e totp_ref (i ref dello snapshot della pagina principale). Il login si compila SOLO sull'origine esatta per cui è salvato e ogni uso lo approva l'utente con una card. Mai password o codici in chat o in browser_type.",
     parameters: {
       type: 'object',
       properties: {

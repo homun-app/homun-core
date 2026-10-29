@@ -5,8 +5,6 @@
 // aggirare, niente escape possibile.
 import { createHash } from 'node:crypto'
 
-export const BOX_WORKDIR = '/home/box'
-
 /** Utente non-root del container (ubuntu:24.04 → uid/gid 1000). */
 export const CONTAINER_USER = '1000:1000'
 
@@ -94,9 +92,14 @@ export function dockerEnsureHomeArgv(container: string, agentId: string): string
   return ['exec', container, 'mkdir', '-p', boxHomePath(agentId)]
 }
 
-/** `docker exec -i -w <home del bot> [-e …] <container> sh -c <command>` — il comando del modello resta un unico elemento argv. */
+/**
+ * `docker exec -i -w <home del bot> [-e …] <container> sh -c <command>` — il
+ * comando del modello resta un unico elemento argv. Il default del `-w` è
+ * BOX_MOUNT, che esiste SEMPRE (Q1, fase 14 correzioni 2: regola del modulo —
+ * il workdir di un exec non è mai una cartella che può non esserci).
+ */
 export function dockerExecArgv(container: string, command: string, opts: DockerExecOptions = {}): string[] {
-  const argv = ['exec', '-i', '-w', opts.workdir ?? BOX_WORKDIR]
+  const argv = ['exec', '-i', '-w', opts.workdir ?? BOX_MOUNT]
   pushEnvArgv(argv, opts.env ?? {})
   argv.push(container, 'sh', '-c', command)
   return argv
@@ -544,6 +547,17 @@ export function dockerRmDirArgv(boxPath: string, image: string): string[] {
 // su percorsi controllabili dal bot sarebbero attaccabili via symlink. Il box
 // gira con --cap-drop ALL e no-new-privileges: root lì DENTRO non ha poteri,
 // quindi nel container del box non c'è NESSUN exec di root.
+//
+// REGOLA DEL MODULO (Q1, fase 14 correzioni 2): il `-w` di un `docker exec` è
+// SOLO un percorso che esiste SEMPRE — /box o /browser, i punti di mount —
+// oppure una cartella che un passo PRECEDENTE ha già creato: la home del bot
+// (dockerEnsureHomeArgv, H2) o la cartella di un plugin (l'installazione,
+// fase 13). MAI una cartella che crea il processo stesso: l'OCI runtime fa
+// chdir PRIMA di eseguire il comando, quindi un `-w` ancora inesistente
+// fallisce con rc 127 (chdir to cwd … no such file or directory) prima che
+// un mkdir del wrapper possa rimediare — è esattamente Q1: `-w
+// /browser/<owner>`, dove /browser/<owner> lo crea il wrapper. Il test di
+// guardia in docker-argv.test.ts scorre tutti gli argv esportati col `-w`.
 
 /** Chiusura per inattività: 10 minuti senza azioni (lato nostro + --idle-timeout). */
 export const BROWSER_IDLE_MS = 10 * 60_000
@@ -642,9 +656,16 @@ export function browserPidFile(owner: string, child?: string): string {
  * del client MCP; il pid scritto è anche il pgid, quindi il kill di gruppo
  * (G1) resta valido. P2: gira come 1001 (pwuser) e la cartella del pid se la
  * crea LUI con mkdir -p — nessun root, nessun gruppo supplementare.
+ * Q1 (fase 14 correzioni 2): il `-w` del exec è /browser (esiste sempre: è
+ * il punto di mount); la cartella del proprietario la crea il wrapper STESSO
+ * e poi ci ENTRA con cd — la cwd del server diventa /browser/<owner>, dove
+ * finisce il `filename` RELATIVO dello screenshot, come assume
+ * copyBrowserScreenshot. Se mkdir o cd falliscono il wrapper esce SUBITO
+ * (`|| exit 1`): meglio un errore chiaro che un server vivo nella cartella
+ * sbagliata (screenshot dispersi, pid file altrove).
  */
 export const DOCKER_BROWSER_WRAPPER_SH = [
-  'mkdir -p "$(dirname "$1")"',
+  'mkdir -p "$(dirname "$1")" && cd "$(dirname "$1")" || exit 1',
   'echo $$ >"$1"',
   'shift',
   'exec playwright-mcp "$@"'
@@ -708,15 +729,20 @@ export const PLAYWRIGHT_MCP_CONFIG_JSON =
  * L'argv del launcher del browser di un bot (puro): `docker exec -i` col
  * wrapper COSTANTE (pid file come $1, assoluto in /browser/<owner>) e i flag
  * del server MCP. P2: il browser — PRINCIPALE e FIGLIO — gira come 1001:1001
- * (pwuser) con `-w /browser/<owner>`: la home del bot non serve più al
- * browser, e il bot non vede nulla del suo stato.
+ * (pwuser) e il bot non vede nulla del suo stato. Q1 (fase 14 correzioni 2):
+ * `-w /browser` (BROWSER_MOUNT), NON /browser/<owner> — l'OCI runtime fa
+ * chdir PRIMA di avviare il wrapper, e al primo avvio quella cartella non
+ * esiste ancora (la crea il mkdir del wrapper): `-w /browser/<owner>` faceva
+ * morire OGNI avvio con rc 127 e il daemon vedeva solo `MCP error -32000:
+ * Connection closed`. Nella cartella del proprietario ci entra il wrapper
+ * col cd.
  */
 export function dockerBrowserMcpArgv(agentId: string, proxyPort: number, opts: { child?: boolean; owner?: string } = {}): string[] {
   const owner = opts.owner ?? agentId
   return [
     'exec', '-i',
     '-u', BROWSER_USER,
-    '-w', browserStateDir(owner),
+    '-w', BROWSER_MOUNT,
     BOX_CONTAINER,
     'sh', '-c', DOCKER_BROWSER_WRAPPER_SH, 'sh',
     browserPidFile(owner, opts.child === true ? agentId : undefined),

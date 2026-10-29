@@ -1,12 +1,15 @@
 // Test delle CREDENZIALI del browser (fase 14, punto 7): i controlli PURI di
-// fill_credential (origine esatta, ref non iframe, tipo del campo), il TOTP
+// fill_credential (origine esatta, ref validi, tipo del campo), il TOTP
 // sui vettori della RFC 6238, il vault esteso (login e contatti CIFRATI,
 // list-credentials senza valori) e il FLUSSO completo col Playwright MCP
 // FINTO (nessuna chiamata MCP senza approvazione; con l'approvazione
 // browser_type riceve il valore; il result per il modello non contiene il
 // valore né il codice di MCP; lo snapshot successivo che contiene il valore
-// è REDATTO; il tool non c'è nei figli né nei turni di gruppo).
-import { describe, expect, it, beforeAll, afterAll } from 'vitest'
+// è REDATTO; il tool non c'è nei figli né nei turni di gruppo). Q2 (fase 14
+// correzioni 2): dal finto FEDELE, dalla seconda navigazione i ref della
+// pagina principale hanno il prefisso f<n> — il fill li ACCETTE (il prefisso
+// non è un segnale di iframe), l'iframe lo scopre solo il probe (top:false).
+import { describe, expect, it, beforeAll, afterAll, beforeEach } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -58,6 +61,13 @@ beforeAll(async () => {
   vault.setSafeStorage(null)
   await browser.resetBrowserForTests()
   LOGIN.id = await vault.saveLogin({ ...LOGIN, totp: TOTP_SECRET })
+})
+// Q2: il finto, come il VERO Playwright MCP, prefissa i ref (f<n>) dalla
+// SECONDA navigazione della sessione — ogni test riparte da una sessione
+// NUOVA (prima navigazione: ref e<n>), i test del prefisso fanno le due
+// navigazioni loro
+beforeEach(async () => {
+  await browser.resetBrowserForTests()
 })
 afterAll(async () => {
   await browser.resetBrowserForTests()
@@ -122,10 +132,13 @@ describe('7d-1: il controllo dell\'ORIGINE (esatta, https, niente wildcard)', ()
 })
 
 describe('7d-2: i controlli dei REF e del TIPO di campo', () => {
-  it('ref di iframe (f<n>e<n>) → rifiuto', () => {
-    const r = cred.checkFillRef('f3e44', 'password')
-    expect(r.ok).toBe(false)
-    if (!r.ok) expect(r.error).toContain('iframe')
+  it('Q2: ref f<n>e<n> → ACCETTATO (il prefisso non dice iframe: dalla seconda navigazione lo hanno anche i campi del documento top)', () => {
+    // nel Playwright MCP vero la STESSA pagina, riaperta, dà ref f1e5: è il
+    // caso d'uso normale del login (apro il sito, clicco "Accedi"…). Il
+    // controllo del formato resta, il campo iframe lo scopre solo il probe
+    const r = cred.checkFillRef('f1e5', 'password')
+    expect(r).toEqual({ ok: true, ref: 'f1e5' })
+    expect(cred.checkFillRef('f12e34', 'username').ok).toBe(true)
   })
   it('ref non ref (selettore css) → rifiuto', () => {
     expect(cred.checkFillRef('text=Password', 'password').ok).toBe(false)
@@ -253,8 +266,11 @@ describe('7d: il flusso completo di fill_credential col MCP finto', () => {
   })
 
   it('lo snapshot SUCCESSIVO che contiene il valore → [redacted:credential]', async () => {
-    // il fill del test prima ha lasciato il testo nei campi: lo snapshot del
-    // finto lo mostra, la REDAZIONE lo oscura prima del modello
+    // il fill lascia il testo nei campi: lo snapshot del finto lo mostra, la
+    // REDAZIONE lo oscura prima del modello (il fill lo fa il test STESSO:
+    // con la sessione nuova per test niente dipende dall'ordine dei test)
+    await browser.callBrowserTool(AGENT, 'browser_open', { url: 'https://app.example.test/login' })
+    await runFillCredential({ id: LOGIN.id, username_ref: 'e2', password_ref: 'e3' }, depsOf({ decision: 'allow-turn', asked: 0 }))
     const snap = await browser.callBrowserTool(AGENT, 'browser_snapshot', {})
     expect(snap.output).toContain('[redacted:credential]')
     expect(snap.output).not.toContain(LOGIN.username)
@@ -313,11 +329,19 @@ describe('7d: il flusso completo di fill_credential col MCP finto', () => {
     expect(r.output).toContain('password')
   })
 
-  it('ref di IFRAME → rifiuto', async () => {
+  it('Q2: ref f<n>e<n> del documento TOP (seconda navigazione) → card e COMPILAZIONE', async () => {
+    // come nel Playwright MCP vero: dalla SECONDA navigazione nella scheda i
+    // ref della pagina PRINCIPALE escono col prefisso f (f1e2, f1e3…). Il
+    // prefisso non è un segnale di iframe — il probe dice top:true, il tipo
+    // e l'origine sono giusti: il fill passa e compila
     await browser.callBrowserTool(AGENT, 'browser_open', { url: 'https://app.example.test/login' })
-    const r = await runFillCredential({ id: LOGIN.id, username_ref: 'f1e2' }, depsOf({ decision: 'allow-turn', asked: 0 }))
-    expect(r.denied).toBe(true)
-    expect(r.output).toContain('iframe')
+    await browser.callBrowserTool(AGENT, 'browser_open', { url: 'https://app.example.test/login' })
+    const approvals = { decision: 'allow-turn' as const, asked: 0 }
+    const r = await runFillCredential({ id: LOGIN.id, username_ref: 'f1e2', password_ref: 'f1e3' }, depsOf(approvals))
+    expect(approvals.asked).toBe(1) // la card ARRIVA: i controlli sono passati
+    expect(r.filled).toEqual({ username: true, password: true })
+    expect(browser.filledValuesOf(AGENT)).toContain(LOGIN.username)
+    expect(browser.filledValuesOf(AGENT)).toContain(LOGIN.password)
   })
 
   it("il tool NON c'è nei figli né nei turni di gruppo", async () => {
@@ -394,13 +418,35 @@ describe('P3: l\'origine del campo si verifica nel probe (frame), prima della ca
     const approvals = { decision: 'allow-turn' as const, asked: 0 }
     const t = countingTypeInto()
     const r = await runFillCredential(
-      { id: LOGIN.id, username_ref: 'e2' }, // e2 NON ha prefisso f: la difesa del prefisso non scatta
+      { id: LOGIN.id, username_ref: 'e2' }, // e2 non ha prefisso: NESSUN segnale dal nome del ref — il rifiuto arriva SOLO dal probe
       depsOf(approvals, { typeInto: t.typeInto })
     )
     expect(approvals.asked).toBe(0) // rifiutato PRIMA della card
     expect(r.denied).toBe(true)
     expect(r.output).toContain('iframe')
     expect(t.calls).toHaveLength(0)
+  })
+
+  it('Q2: lo STESSO ref f<n>e<n> col probe top:false → rifiutato dal frame, ZERO browser_type', async () => {
+    // il prefisso f non basta né blocca: il campo è dell'iframe lo decide il
+    // PROBE (top) — qui lo stesso ref f1e2 del test Q2 del flusso, ma col
+    // probe che dice top:false → rifiutato prima della card, niente scritture
+    await browser.callBrowserTool(AGENT, 'browser_open', { url: 'https://app.example.test/login' })
+    await browser.callBrowserTool(AGENT, 'browser_open', { url: 'https://app.example.test/login' })
+    const approvals = { decision: 'allow-turn' as const, asked: 0 }
+    const t = countingTypeInto()
+    const probeTopFalse = async (ref: string) => {
+      const probe = await browser.probeFieldType(AGENT, ref)
+      return probe.ok ? { ok: true as const, info: { ...probe.info, top: false } } : probe
+    }
+    const r = await runFillCredential(
+      { id: LOGIN.id, username_ref: 'f1e2' },
+      depsOf(approvals, { probe: probeTopFalse, typeInto: t.typeInto })
+    )
+    expect(approvals.asked).toBe(0) // rifiutato PRIMA della card
+    expect(r.denied).toBe(true)
+    expect(r.output).toContain('iframe')
+    expect(t.calls).toHaveLength(0) // NESSUN browser_type
   })
 
   it('totp_ref SENZA segreto nel login → errore PRIMA di scrivere qualunque campo (zero browser_type)', async () => {

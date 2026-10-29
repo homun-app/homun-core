@@ -3,12 +3,16 @@
 // (i test lo girano col Playwright MCP finto, senza browser vero):
 // 1. ORIGINE: la pagina è https e la sua origine è ESATTAMENTE una delle
 //    origins del login (niente sottodomini, porte diverse, http);
-// 2. REF: validi, non di iframe, presenti nell'ultimo snapshot; il tipo del
+// 2. REF: formato valido e presenti nell'ultimo snapshot; il tipo del
 //    campo verificato col probe interno (password→password, username→testo
 //    non password, totp→testo non password); P3: il probe porta anche
 //    l'ORIGINE del frame del campo e il fatto che stia nel documento TOP —
 //    l'origine confrontata è quella del CAMPO, non l'ultima URL nota della
-//    sessione (per browser_open è l'URL richiesta, non quella dopo i redirect);
+//    sessione (per browser_open è l'URL richiesta, non quella dopo i redirect).
+//    Q2 (fase 14 correzioni 2): un campo in un iframe si rifiuta SOLO dal
+//    probe (`top`): il prefisso `f<n>` del ref non è un segnale affidabile,
+//    dalla seconda navigazione nella scheda lo hanno anche i campi del
+//    documento principale;
 // 3. APPROVAZIONE: concessione "Sempre per questo sito" o grant del turno →
 //    si compila; altrimenti la card (mai auto-review);
 // 4. COMPILAZIONE: P3 — il TOTP si verifica PRIMA di scrivere qualunque
