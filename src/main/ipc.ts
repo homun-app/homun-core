@@ -50,6 +50,8 @@ export const DAEMON_RPC_CHANNELS = [
   'providers:list', 'providers:save', 'providers:delete', 'providers:discover', 'providers:test', 'models:list',
   // fase 11: chiave per la ricerca web del provider Ollama (vault sigillato)
   'providers:set-web-search-key', 'providers:web-search-key-set',
+  // fase 15: stato dei provider di ricerca (sola lettura, per le Impostazioni)
+  'websearch:status',
   'permissions:get', 'permissions:set', 'settings:get', 'settings:set',
   // fase 7: template dei bot (catalogo + creazione col kickstart)
   'templates:list', 'agents:create-from-template'

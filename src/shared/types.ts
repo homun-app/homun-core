@@ -387,6 +387,8 @@ export interface SandbotApi {
   /** fase 11: chiave per la ricerca web del provider Ollama — SOLO nel vault sigillato */
   setWebSearchKey(providerId: string, key: string | null): Promise<void>
   webSearchKeySet(providerId: string): Promise<boolean>
+  /** fase 15: stato di sola lettura dei provider di ricerca (S5) */
+  webSearchStatus(): Promise<WebSearchStatusRpc>
   // permessi
   getPermissions(): Promise<PermissionsConfig>
   setPermissions(cfg: PermissionsConfig): Promise<void>
@@ -878,4 +880,22 @@ export interface ConnectorInfo {
   }
   tools: ConnectorToolInfoShared[]
   hasStaticCredentials?: boolean
+}
+
+// ---- fase 15 (S5): stato dei provider di ricerca web (RPC websearch:status) ----
+
+/** Lo stato di un provider: disponibile, in raffreddamento fino a (epoch ms) o con ultimo errore. */
+export interface WebSearchProviderStatusRpc {
+  name: 'you' | 'exa' | 'tavily' | 'ollama'
+  label: string
+  cooldownUntil?: number
+  lastError?: { kind: string; status?: number; at: number }
+}
+
+export interface WebSearchStatusRpc {
+  /** il setting webSearch.keyless (interruttore delle Impostazioni) */
+  keyless: boolean
+  /** true se c'è un provider con chiave configurato (Ollama) */
+  keyedConfigured: boolean
+  providers: WebSearchProviderStatusRpc[]
 }

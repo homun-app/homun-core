@@ -272,7 +272,9 @@ const TOOL_RESULTS: Record<string, (args: Record<string, unknown>) => string> = 
     }
     return `[exit 0] ${cmd.slice(0, 60)}`
   },
-  'web_search': () => webSearchToolOutput(WEB_RESULTS),
+  // fase 15 (S8): come il tool vero, il result simulato porta la riga finale
+  // della fonte — il modello vede lo STESSO formato che vedrà in produzione
+  'web_search': () => webSearchToolOutput(WEB_RESULTS, 'You.com'),
   'web_fetch': (a) => {
     const url = String(a.url ?? '')
     // fase 11b (punto 5): la pagina "costruita in JavaScript" col suggerimento

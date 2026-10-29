@@ -1061,6 +1061,13 @@ export function buildApiMethods(
       const { getConnectorsKey } = await import('./keychain')
       return isWebSearchKeySet({ getKey: () => getConnectorsKey() })
     },
+    // fase 15 (S5): stato di sola lettura dei provider di ricerca per la UI —
+    // disponibile, in raffreddamento fino a quando, ultimo errore (tipo e
+    // status, MAI la query)
+    'websearch:status': async () => {
+      const { webSearchStatus } = await import('../main/agent/web-tools')
+      return webSearchStatus()
+    },
 
     // ---- permessi & impostazioni ----
     'permissions:get': () => store.getPermissions(),

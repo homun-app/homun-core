@@ -4,7 +4,7 @@ import { api, useStore } from '../store'
 import { describeTrigger } from '../../../shared/cron-human'
 import { VaultTab } from './VaultSettings'
 import { choosePollTool, chooseQueryArgName } from '../../../shared/triggers'
-import type { ProviderConfig, ProviderKind, ModelInfo, Agent, RoutineInfo, RoutineSuggestion, ConnectorInfo, McpServerInfo, McpServerSecret, RoutineTrigger, TemplateInfo, AutoReviewSettings } from '../../../shared/types'
+import type { ProviderConfig, ProviderKind, ModelInfo, Agent, RoutineInfo, RoutineSuggestion, ConnectorInfo, McpServerInfo, McpServerSecret, RoutineTrigger, TemplateInfo, AutoReviewSettings, WebSearchStatusRpc, WebSearchProviderStatusRpc } from '../../../shared/types'
 import { DEFAULT_AUTO_REVIEW, SECRET_KIND_FOR_NEEDS } from '../../../shared/types'
 // fase 10 (residuo 0d): i default per kind (modulo puro, nessuna dipendenza node)
 import { modelDefaultsFor } from '../../../main/agent/model-defaults'
@@ -1035,6 +1035,80 @@ function WebSearchKeyRow({ p }: { p: ProviderConfig }) {
   )
 }
 
+/**
+ * Fase 15 (S5): sezione "Ricerca web" — l'interruttore dei servizi senza
+ * chiave (You.com, Exa, Tavily), la nota sulla privacy coi link ai termini e
+ * lo stato per provider (disponibile / in raffreddamento fino a HH:MM /
+ * ultimo errore) dall'RPC di sola lettura websearch:status.
+ */
+function WebSearchSection() {
+  const [keyless, setKeyless] = useState<boolean | null>(null)
+  const [status, setStatus] = useState<WebSearchStatusRpc | null>(null)
+
+  const refresh = () => {
+    void api.settingsGet<boolean>('webSearch.keyless', true).then(setKeyless).catch(() => setKeyless(null))
+    void api.webSearchStatus().then(setStatus).catch(() => setStatus(null))
+  }
+  useEffect(refresh, [])
+
+  const toggle = async (v: boolean): Promise<void> => {
+    setKeyless(v)
+    await api.settingsSet('webSearch.keyless', v)
+    refresh()
+  }
+
+  const stateOf = (p: WebSearchProviderStatusRpc): { text: string; cls: string } => {
+    if (p.cooldownUntil) {
+      return {
+        text: `in raffreddamento fino a ${new Date(p.cooldownUntil).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+        cls: 'text-amber-400'
+      }
+    }
+    if (p.lastError) {
+      return {
+        text: `ultimo errore: ${p.lastError.kind}${p.lastError.status !== undefined ? ` (HTTP ${p.lastError.status})` : ''}`,
+        cls: 'text-neutral-500'
+      }
+    }
+    return { text: 'disponibile', cls: 'text-emerald-400' }
+  }
+
+  return (
+    <div className="rounded-xl border border-neutral-800 px-3 py-2.5">
+      <div className="text-sm text-neutral-100">Ricerca web</div>
+      <label className="mt-2 flex cursor-pointer items-start gap-3">
+        <input
+          type="checkbox"
+          className="mt-0.5 h-4 w-4 accent-neutral-300"
+          checked={keyless ?? true}
+          disabled={keyless === null}
+          onChange={(e) => void toggle(e.target.checked)}
+        />
+        <span className="space-y-1">
+          <span className="block text-xs text-neutral-200">
+            Usa i servizi di ricerca gratuiti senza chiave (You.com, Exa, Tavily)
+          </span>
+          <span className="block text-xs text-neutral-500">
+            Le ricerche dei bot vengono inviate a questi servizi, secondo i loro termini d&apos;uso:{' '}
+            <a className="text-sky-400 hover:underline" href="https://you.com/acceptable-use-policy-may-2026" target="_blank" rel="noreferrer">You.com</a>
+            {' · '}
+            <a className="text-sky-400 hover:underline" href="https://exa.ai/terms" target="_blank" rel="noreferrer">Exa</a>
+            {' · '}
+            <a className="text-sky-400 hover:underline" href="https://docs.tavily.com/documentation/keyless" target="_blank" rel="noreferrer">Tavily</a>
+          </span>
+        </span>
+      </label>
+      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+        {(status?.providers ?? []).map((p) => (
+          <span key={p.name} className={`text-xs ${stateOf(p).cls}`}>
+            {p.label}: {stateOf(p).text}
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function ProvidersTab({ onChanged }: { onChanged: () => Promise<void> }) {
   const providers = useStore((s) => s.providers)
   const [edit, setEdit] = useState<ProviderConfig | null>(null)
@@ -1098,6 +1172,9 @@ function ProvidersTab({ onChanged }: { onChanged: () => Promise<void> }) {
           {p.kind === 'ollama' && <WebSearchKeyRow p={p} />}
         </div>
       ))}
+
+      {/* fase 15 (S5): la ricerca senza chiave, accanto alla riga della chiave Ollama */}
+      <WebSearchSection />
 
       {edit ? (
         <ProviderForm

@@ -21,10 +21,16 @@ const {
   ollamaWebSearchProvider, getWebSearchProvider, setWebSearchProviderForTests,
   setWebSearchKeyGetter, webFetch, webFetchCached, clearWebFetchCache,
   htmlToMarkdown, decodeEntities, webSearchToolOutput, webFetchWindowOutput,
-  clampMaxResults, cacheFresh, WEB_SEARCH_INACTIVE, getWebFetchFn, setWebFetchForTests
+  clampMaxResults, cacheFresh, WEB_SEARCH_INACTIVE, WEB_SEARCH_UNAVAILABLE, getWebFetchFn, setWebFetchForTests,
+  searchWeb, resetWebSearchStateForTests, providerCoolingDown, noteSearchRateLimit,
+  noteSearchSuccess, noteSearchTransientFailure, normalizeSearchQuery, fakeWebSearchChainForTests,
+  webSearchStatus, RATE_LIMIT_RETRY_AFTER_CAP_MS, RATE_LIMIT_BACKOFF_BASE_MS, RATE_LIMIT_BACKOFF_MAX_MS
 } = await import('../web-tools')
+import {
+  type ExaMcpClient, type ExaMcpClientFactory
+} from '../web-search-providers'
 import { getSetting, setSetting } from '../../store/db'
-import { WEB_FETCH_MAX_BYTES, WEB_FETCH_TIMEOUT_MS } from '../../../shared/web-limits'
+import { WEB_FETCH_MAX_BYTES, WEB_FETCH_TIMEOUT_MS, WEB_FETCH_CACHE_MS } from '../../../shared/web-limits'
 
 // il vault sigillato con chiave iniettata (niente Keychain reale)
 const KEY = Buffer.alloc(32, 7)
@@ -32,8 +38,10 @@ const sealedDeps = { getKey: async () => KEY }
 const publicFetchImpl = vi.fn()
 
 beforeAll(() => {
+  // fase 15: anche il setting webSearch.keyless passa dallo stesso store
+  // (fase 11: il campo CIFRATO della chiave vive in connectors.secrets)
   vi.mocked(getSetting).mockImplementation(<T>(key: string, fallback: T): T =>
-    (key === 'connectors.secrets' && webSettings[key] !== undefined ? (webSettings[key] as T) : fallback))
+    webSettings[key] !== undefined ? (webSettings[key] as T) : fallback)
 })
 afterAll(() => rmSync(TMP, { recursive: true, force: true }))
 beforeEach(() => {
@@ -44,6 +52,7 @@ beforeEach(() => {
   setWebFetchForTests(null)
   publicFetchImpl.mockReset()
   clearWebFetchCache()
+  resetWebSearchStateForTests()
 })
 
 // lo stato dei settings catturato dai mock (campo cifrato della chiave)
@@ -119,8 +128,296 @@ describe('output dei tool', () => {
   })
 
   it("il messaggio della ricerca non attiva dice all'utente cosa fare", () => {
-    expect(WEB_SEARCH_INACTIVE).toContain('non è attiva')
+    expect(WEB_SEARCH_INACTIVE).toContain('disattivata nelle impostazioni')
     expect(WEB_SEARCH_INACTIVE.toLowerCase()).toContain('impostazioni')
+    expect(WEB_SEARCH_INACTIVE.toLowerCase()).toContain('non cercare sui motori di ricerca col browser')
+  })
+
+  it('fase 15 (S6): WEB_SEARCH_UNAVAILABLE — tutti falliti o in raffreddamento', () => {
+    expect(WEB_SEARCH_UNAVAILABLE).toContain('non è disponibile in questo momento')
+    expect(WEB_SEARCH_UNAVAILABLE).toContain('web_fetch')
+    expect(WEB_SEARCH_UNAVAILABLE.toLowerCase()).toContain('non cercare sui motori di ricerca col browser')
+  })
+
+  it('fase 15 (S6): webSearchToolOutput con la fonte aggiunge la riga finale', () => {
+    const out = webSearchToolOutput([{ title: 'A', url: 'https://a.example', snippet: 'sa' }], 'You.com')
+    expect(out.endsWith('Fonte della ricerca: You.com')).toBe(true)
+    // senza fonte il formato è quello di sempre
+    expect(webSearchToolOutput([])).toBe('Nessun risultato.')
+    expect(webSearchToolOutput([], 'Exa')).toBe('Nessun risultato.\n\nFonte della ricerca: Exa')
+  })
+})
+
+// ---- fase 15 (S2-S5): la catena, il raffreddamento, la cache e i setting ----
+// Nessuna rete: fetch ed Exa MCP sono finti e iniettati nelle deps di searchWeb.
+
+describe('fase 15 S2: la catena dei provider', () => {
+  /** fetch finto: You.com ok (un risultato), Tavily 500, Ollama (se chiamato) 500. */
+  function chainFetch(log: string[]): typeof fetch {
+    return vi.fn(async (url: string | URL) => {
+      const s = String(url)
+      if (s.startsWith('https://api.you.com')) {
+        log.push('you')
+        return new Response(JSON.stringify({ results: { web: [{ url: 'https://ris.example/1', title: 'Risultato You', snippets: ['estratto you'] }] } }), { status: 200 })
+      }
+      if (s.startsWith('https://api.tavily.com')) {
+        log.push('tavily')
+        return new Response('boom', { status: 500 })
+      }
+      log.push('ollama:' + s)
+      return new Response('boom', { status: 500 })
+    }) as unknown as typeof fetch
+  }
+
+  /** fetch finto: You.com 429, Tavily 500. */
+  function you429Fetch(log: string[], retryAfter?: string): typeof fetch {
+    return vi.fn(async (url: string | URL) => {
+      const s = String(url)
+      if (s.startsWith('https://api.you.com')) {
+        log.push('you')
+        return new Response('slow down', { status: 429, ...(retryAfter ? { headers: { 'retry-after': retryAfter } } : {}) })
+      }
+      log.push('tavily')
+      return new Response('boom', { status: 500 })
+    }) as unknown as typeof fetch
+  }
+
+  /** Il client Exa finto che risponde con un risultato. */
+  function exaOk(log: string[], calls: Array<{ name: string; arguments?: Record<string, unknown> }>): ExaMcpClientFactory {
+    return async () => ({
+      async callTool(params) {
+        log.push('exa')
+        calls.push({ name: params.name, arguments: params.arguments })
+        return { content: [{ type: 'text', text: 'Title: Da Exa\nURL: https://ris.example/2\nHighlights:\nestratto exa' }] }
+      },
+      async close() { /* finto */ }
+    })
+  }
+
+  it('senza chiave: ordine You.com → Exa → Tavily; You.com risponde e gli altri NON vengono chiamati', async () => {
+    const log: string[] = []
+    const r = await searchWeb('orari musei', 5, { fetchImpl: chainFetch(log), makeExaClient: exaOk(log, []) })
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.provider).toEqual({ name: 'you', label: 'You.com' })
+      expect(r.results[0]).toEqual({ title: 'Risultato You', url: 'https://ris.example/1', snippet: 'estratto you' })
+    }
+    expect(log).toEqual(['you'])
+  })
+
+  it('con la chiave Ollama: prima Ollama, poi (se fallisce) i keyless nello stesso ordine', async () => {
+    setWebSearchKeyGetter(async () => KEY)
+    await setWebSearchKey('sk-test', sealedDeps)
+    const log: string[] = []
+    const r = await searchWeb('orari musei', 5, { fetchImpl: chainFetch(log), makeExaClient: exaOk(log, []) })
+    // ollama → 500, you → ok: ordine rispettato, nessun secondo tentativo
+    expect(log).toEqual(['ollama:https://ollama.com/api/web_search', 'you'])
+    expect(r.ok && r.provider.name).toBe('you')
+  })
+
+  it('429 su You.com → risposta da Exa nella STESSA chiamata, provider exa; You.com chiamato UNA volta sola', async () => {
+    const log: string[] = []
+    const calls: Array<{ name: string; arguments?: Record<string, unknown> }> = []
+    const r = await searchWeb('orari musei', 5, { fetchImpl: you429Fetch(log), makeExaClient: exaOk(log, calls) })
+    expect(r.ok && r.provider).toEqual({ name: 'exa', label: 'Exa' })
+    expect(log).toEqual(['you', 'exa']) // you UNA volta, poi exa: mai due tentativi allo stesso provider
+    expect(calls[0]!.arguments).toEqual({ query: 'orari musei', objective: 'orari musei', numResults: 5 })
+  })
+
+  it('tutti in errore → all-failed col motivo per provider (tipo e status), MAI la query', async () => {
+    const log: string[] = []
+    const exaKo: ExaMcpClientFactory = async () => ({
+      async callTool() { log.push('exa'); throw new Error('rete giù') },
+      async close() { /* finto */ }
+    })
+    const r = await searchWeb('orari musei', 5, { fetchImpl: you429Fetch(log), makeExaClient: exaKo })
+    expect(r).toMatchObject({ ok: false, error: 'all-failed' })
+    if (!r.ok) {
+      expect(r.failures).toEqual([
+        { name: 'you', kind: 'rate-limit', status: 429 },
+        { name: 'exa', kind: 'network' },
+        { name: 'tavily', kind: 'http', status: 500 }
+      ])
+      // privacy (S2.5): la query MAI negli esiti
+      expect(JSON.stringify(r.failures)).not.toContain('orari')
+    }
+  })
+
+  it('zero risultati è una risposta VALIDA: nessun passaggio al successivo', async () => {
+    const log: string[] = []
+    const emptyYou: typeof fetch = vi.fn(async (url: string | URL) => {
+      log.push(String(url).includes('you.com') ? 'you' : 'altro')
+      return new Response(JSON.stringify({ results: { web: [] } }), { status: 200 })
+    }) as unknown as typeof fetch
+    const r = await searchWeb('query senza risultati', 5, { fetchImpl: emptyYou, makeExaClient: exaOk(log, []) })
+    expect(r).toMatchObject({ ok: true, provider: { name: 'you' }, results: [] })
+    expect(log).toEqual(['you']) // exa mai chiamato
+  })
+})
+
+describe('fase 15 S3: raffreddamento dopo i rifiuti (orologio finto)', () => {
+  const T0 = 1_700_000_000_000
+
+  it('Retry-After: 120 rispettato; il provider in raffreddamento si SALTA senza chiamarlo', async () => {
+    const log: string[] = []
+    const fetchImpl = vi.fn(async (url: string | URL) => {
+      const s = String(url)
+      if (s.startsWith('https://api.you.com')) {
+        log.push('you')
+        return new Response('slow down', { status: 429, headers: { 'retry-after': '120' } })
+      }
+      log.push('tavily')
+      return new Response('boom', { status: 500 })
+    }) as unknown as typeof fetch
+    const makeExaClient: ExaMcpClientFactory = async () => ({
+      async callTool() {
+        log.push('exa')
+        return { content: [{ type: 'text', text: 'Title: Da Exa\nURL: https://ris.example/2\nHighlights:\nestratto exa' }] }
+      },
+      async close() { /* finto */ }
+    })
+    let now = T0
+    const deps = () => ({ now: () => now, fetchImpl, makeExaClient })
+    const r1 = await searchWeb('orari musei', 5, deps())
+    expect(r1.ok && r1.provider.name).toBe('exa') // you 429 → exa nella STESSA chiamata
+    // you in raffreddamento per 120 s: un'altra ricerca NON lo chiama
+    now = T0 + 60_000
+    log.length = 0
+    await searchWeb('altra query', 5, deps())
+    expect(log).not.toContain('you')
+    expect(log).toContain('exa') // la risposta arriva comunque
+    // a 121 s il raffreddamento è scaduto: you viene riprovato (e il nuovo
+    // 429 riapre il raffreddamento di 120 s da ADESSO)
+    now = T0 + 121_000
+    log.length = 0
+    await searchWeb('terza query', 5, deps())
+    expect(log).toContain('you')
+    expect(providerCoolingDown('you', T0 + 121_000)).toBe(T0 + 121_000 + 120_000)
+  })
+
+  it('senza Retry-After le attese raddoppiano: 1 → 2 → 4 min, tetto 1 h; il successo azzera', () => {
+    let now = T0
+    noteSearchRateLimit('you', undefined, now)
+    expect(providerCoolingDown('you', now) - now).toBe(RATE_LIMIT_BACKOFF_BASE_MS)
+    now += 1
+    noteSearchRateLimit('you', undefined, now)
+    expect(providerCoolingDown('you', now) - now).toBe(2 * RATE_LIMIT_BACKOFF_BASE_MS)
+    now += 1
+    noteSearchRateLimit('you', undefined, now)
+    expect(providerCoolingDown('you', now) - now).toBe(4 * RATE_LIMIT_BACKOFF_BASE_MS)
+    // raddoppio fin oltre l'ora: il tetto è 1 h
+    for (let i = 0; i < 10; i++) noteSearchRateLimit('you', undefined, now)
+    expect(providerCoolingDown('you', now) - now).toBe(RATE_LIMIT_BACKOFF_MAX_MS)
+    // Retry-After enorme: tetto 6 h
+    noteSearchRateLimit('you', 24 * 60 * 60_000, now)
+    expect(providerCoolingDown('you', now) - now).toBe(RATE_LIMIT_RETRY_AFTER_CAP_MS)
+    // il primo successo azzera tutto
+    noteSearchSuccess('you', now)
+    expect(providerCoolingDown('you', now)).toBe(0)
+  })
+
+  it('http 5xx / timeout / network: raffreddamento di 1 minuto', () => {
+    noteSearchTransientFailure('tavily', 'http', T0)
+    expect(providerCoolingDown('tavily', T0) - T0).toBe(60_000)
+    expect(providerCoolingDown('tavily', T0 + 60_000)).toBe(0)
+    noteSearchTransientFailure('exa', 'timeout', T0)
+    expect(providerCoolingDown('exa', T0 + 59_999) - T0).toBe(60_000)
+  })
+})
+
+describe('fase 15 S4: cache delle ricerche (15 minuti)', () => {
+  const T0 = 1_700_000_000_000
+  let now = T0
+  const log: string[] = []
+  const fetchImpl = vi.fn(async () => {
+    log.push('fetch')
+    return new Response(JSON.stringify({ results: { web: [{ url: 'https://ris.example/1', title: 'Risultato You', snippets: ['estratto'] }] } }), { status: 200 })
+  }) as unknown as typeof fetch
+  const deps = () => ({ now: () => now, fetchImpl, makeExaClient: undefined })
+
+  it('la stessa query (maiuscole e spazi diversi) entro 15 min fa ZERO chiamate; dopo 15 min richiama', async () => {
+    now = T0
+    await searchWeb('orari   Musei Vaticani', 5, deps())
+    expect(log.length).toBe(1)
+    // stessa ricerca, maiuscole e spazi diversi: cache
+    await searchWeb('orari musei vaticani', 5, deps())
+    expect(log.length).toBe(1)
+    // maxResults diverso → chiave diversa → chiamata
+    await searchWeb('orari musei vaticani', 3, deps())
+    expect(log.length).toBe(2)
+    // dopo 15 minuti (e un secondo) la cache è scaduta
+    now = T0 + WEB_FETCH_CACHE_MS + 1_000
+    await searchWeb('orari musei vaticani', 5, deps())
+    expect(log.length).toBe(3)
+  })
+
+  it('normalizzazione: minuscole, spazi compressi, trim', () => {
+    expect(normalizeSearchQuery('  Orari   MUSEI  ')).toBe('orari musei')
+  })
+
+  it('tetto di 200 voci: la più vecchia viene espulsa', async () => {
+    resetWebSearchStateForTests()
+    log.length = 0
+    now = T0
+    for (let i = 0; i < 201; i++) await searchWeb(`query numero ${i}`, 5, deps())
+    expect(log.length).toBe(201)
+    // la prima ("query numero 0") è stata espulsa: richiamarla fa una richiesta;
+    // la 200a è ancora in cache: richiederla NON fa nulla
+    const before = log.length
+    await searchWeb('query numero 0', 5, deps())
+    expect(log.length).toBe(before + 1)
+    await searchWeb('query numero 200', 5, deps())
+    expect(log.length).toBe(before + 1)
+  })
+})
+
+describe('fase 15 S5: impostazioni e stato', () => {
+  it('webSearch.keyless = false SENZA chiave → inactive (WEB_SEARCH_INACTIVE al tool)', async () => {
+    webSettings['webSearch.keyless'] = false
+    const r = await searchWeb('orari musei', 5, { fetchImpl: vi.fn() as unknown as typeof fetch })
+    expect(r).toEqual({ ok: false, error: 'inactive', failures: [] })
+  })
+
+  it('webSearch.keyless = false CON la chiave Ollama → solo Ollama', async () => {
+    webSettings['webSearch.keyless'] = false
+    setWebSearchKeyGetter(async () => KEY)
+    await setWebSearchKey('sk-test', sealedDeps)
+    const log: string[] = []
+    const fetchImpl = vi.fn(async (url: string | URL) => {
+      log.push(String(url))
+      return new Response(JSON.stringify({ results: [{ title: 'Da Ollama', url: 'https://ris.example/o', snippet: 'estratto ollama' }] }), { status: 200 })
+    }) as unknown as typeof fetch
+    const r = await searchWeb('orari musei', 5, { fetchImpl })
+    expect(r.ok && r.provider).toEqual({ name: 'ollama', label: 'Ollama' })
+    expect(log).toEqual(['https://ollama.com/api/web_search']) // NESSUN keyless chiamato
+  })
+
+  it('lo stato per la UI: disponibile, in raffreddamento o ultimo errore', async () => {
+    let st = await webSearchStatus({ now: () => 1000 })
+    expect(st.keyless).toBe(true)
+    expect(st.keyedConfigured).toBe(false)
+    expect(st.providers.map((p) => p.name)).toEqual(['you', 'exa', 'tavily'])
+    expect(st.providers[0]).toEqual({ name: 'you', label: 'You.com' }) // disponibile
+    noteSearchRateLimit('you', 60_000, 1000)
+    st = await webSearchStatus({ now: () => 1000 })
+    expect(st.providers.find((p) => p.name === 'you')).toMatchObject({ cooldownUntil: 61_000, lastError: { kind: 'rate-limit', status: 429 } })
+    // con la chiave configurata compare anche Ollama
+    setWebSearchKeyGetter(async () => KEY)
+    await setWebSearchKey('sk-test', sealedDeps)
+    st = await webSearchStatus({ now: () => 1000 })
+    expect(st.keyedConfigured).toBe(true)
+    expect(st.providers.map((p) => p.name)).toContain('ollama')
+  })
+
+  it('SANDBOT_TEST_FAKE_WEB_SEARCH_CHAIN: You.com 429 → Exa ok (flag di test, mai in produzione)', () => {
+    process.env.SANDBOT_TEST_FAKE_WEB_SEARCH_CHAIN = '1'
+    try {
+      const chain = fakeWebSearchChainForTests()
+      expect(chain?.map((p) => p.name)).toEqual(['you', 'exa'])
+    } finally {
+      delete process.env.SANDBOT_TEST_FAKE_WEB_SEARCH_CHAIN
+    }
+    expect(fakeWebSearchChainForTests()).toBeNull()
   })
 })
 

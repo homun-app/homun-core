@@ -22,9 +22,14 @@ FROM mcr.microsoft.com/playwright:v1.64.1-noble
 # tutti; il contesto della build resta la sola cartella del Dockerfile, quindi
 # niente COPY: il contenuto è la STESSA stringa di PLAYWRIGHT_MCP_CONFIG_JSON
 # (src/main/sandbox/docker-argv.ts) e il test la confronta.
+# Fase 15 (S9): l'ultimo arg è "--disable-blink-features=" con valore VUOTO —
+# Playwright MCP 0.0.83 aggiunge da SÉ quel flag con valore "AutomationControlled"
+# solo quando NON trova un arg che lo contiene: il flag vuoto lo accontenta SENZA
+# nascondere l'automazione (navigator.webdriver resta true: il browser del bot
+# si presenta come browser automatizzato, niente anti-rilevamento).
 RUN mkdir -p /etc/sandbot \
  && printf '%s\n' \
-      '{"browser":{"launchOptions":{"args":["--disable-background-networking","--disable-component-update","--disable-sync","--no-pings","--disable-domain-reliability","--disable-features=OptimizationHints,MediaRouter,Translate,AutofillServerCommunication"]}}}' \
+      '{"browser":{"launchOptions":{"args":["--disable-background-networking","--disable-component-update","--disable-sync","--no-pings","--disable-domain-reliability","--disable-features=OptimizationHints,MediaRouter,Translate,AutofillServerCommunication","--disable-blink-features="]}}}' \
       > /etc/sandbot/playwright-mcp.json \
  && chmod 644 /etc/sandbot/playwright-mcp.json
 

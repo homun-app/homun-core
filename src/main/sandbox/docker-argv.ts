@@ -721,9 +721,27 @@ export const BROWSER_MCP_FORBIDDEN_FLAGS = [
  */
 export const PLAYWRIGHT_MCP_CONFIG = '/etc/sandbot/playwright-mcp.json'
 
-/** Le launchOptions del file (pure, per il test sul contenuto del Dockerfile). */
+/**
+ * Le launchOptions del file (pure, per il test sul contenuto del Dockerfile).
+ * Fase 15 (S9): in coda c'è `"--disable-blink-features="` — valore VUOTO,
+ * nessuna funzione disattivata. Playwright MCP 0.0.83 aggiunge DA SÉ, nel suo
+ * coreBundle, quel flag con valore "AutomationControlled" quando non ne trova
+ * uno negli args:
+ *
+ *   if (browserName === "chromium") {
+ *     browser.launchOptions.args = browser.launchOptions.args ?? [];
+ *     if (!browser.launchOptions.args.some((a) => a.includes("--disable-blink-features")))
+ *       browser.launchOptions.args.push(`--disable-blink-features=AutomationControlled`);
+ *   }
+ *
+ * Quel valore nasconde ai siti l'automazione (navigator.webdriver): un agente
+ * che agisce per conto dell'utente si presenta come browser automatizzato,
+ * niente misure anti-rilevamento. Il controllo cerca SOLO la stringa
+ * "--disable-blink-features": con il nostro arg vuoto la trova e non aggiunge
+ * più AutomationControlled.
+ */
 export const PLAYWRIGHT_MCP_CONFIG_JSON =
-  '{"browser":{"launchOptions":{"args":["--disable-background-networking","--disable-component-update","--disable-sync","--no-pings","--disable-domain-reliability","--disable-features=OptimizationHints,MediaRouter,Translate,AutofillServerCommunication"]}}}'
+  '{"browser":{"launchOptions":{"args":["--disable-background-networking","--disable-component-update","--disable-sync","--no-pings","--disable-domain-reliability","--disable-features=OptimizationHints,MediaRouter,Translate,AutofillServerCommunication","--disable-blink-features="]}}}'
 
 /**
  * L'argv del launcher del browser di un bot (puro): `docker exec -i` col

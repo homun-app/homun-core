@@ -298,6 +298,21 @@ describe('il launcher del browser: argv PURI con TUTTI i flag obbligatori e NESS
     }
     expect(dockerBrowserMcpArgv('agent_x', 18765).some((a) => a.startsWith('--cdp') || a.startsWith('--caps'))).toBe(false)
   })
+
+  it('fase 15 S9: --disable-blink-features= VUOTO nella config, mai AutomationControlled', () => {
+    // Playwright MCP 0.0.83 aggiunge da sé "--disable-blink-features=AutomationControlled"
+    // SOLO se nessun arg contiene "--disable-blink-features": l'arg VUOTO lo
+    // accontenta senza nascondere l'automazione (navigator.webdriver resta true)
+    const args = JSON.parse(PLAYWRIGHT_MCP_CONFIG_JSON).browser.launchOptions.args as string[]
+    expect(args).toContain('--disable-blink-features=')
+    // da nessuna parte il valore che maschera il browser automatizzato
+    expect(PLAYWRIGHT_MCP_CONFIG_JSON).not.toContain('AutomationControlled')
+    // il Dockerfile crea il file con la STESSA stringa (il test fase 12 0e la
+    // confronta già; qui il punto è che anche lì niente AutomationControlled)
+    const dockerfile = readFileSync('resources/box/Dockerfile', 'utf8')
+    expect(dockerfile).not.toContain('--disable-blink-features=AutomationControlled')
+    expect(dockerfile).toContain('"--disable-blink-features="')
+  })
 })
 
 // ---- F1: il wrapper COSTANTE del background, eseguito col VERO /bin/sh ----

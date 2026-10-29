@@ -21,8 +21,16 @@ import {
 } from './web-guard'
 import {
   WEB_FETCH_TIMEOUT_MS, WEB_FETCH_MAX_BYTES, WEB_FETCH_MAX_REDIRECTS, WEB_FETCH_CACHE_MS,
-  WEB_SEARCH_DEFAULT_RESULTS, WEB_SEARCH_MAX_RESULTS
+  WEB_SEARCH_DEFAULT_RESULTS, WEB_SEARCH_MAX_RESULTS, WEB_SEARCH_TIMEOUT_MS, SANDBOT_USER_AGENT
 } from '../../shared/web-limits'
+import {
+  youKeylessProvider, exaMcpKeylessProvider, tavilyKeylessProvider, parseRetryAfterMs,
+  WebSearchProviderError,
+  type ExaMcpClientFactory, type WebSearchErrorKind, type WebSearchProviderName
+} from './web-search-providers'
+
+export { SANDBOT_USER_AGENT }
+export type { WebSearchProviderName }
 
 // ---- la chiave della ricerca web: SOLO nel vault sigillato ----
 
@@ -64,18 +72,27 @@ export interface WebSearchResult {
 }
 
 export interface WebSearchProvider {
+  /** fase 15 (S1.2): nome stabile del provider (catena, raffreddamento, meta del tool) */
+  name: WebSearchProviderName
+  /** etichetta per l'utente (riga "Fonte della ricerca", Impostazioni) */
+  label: string
   search(query: string, maxResults: number): Promise<WebSearchResult[]>
 }
 
 /** Il messaggio quando la ricerca non è attiva (il bot lo dice all'utente, niente strade alternative). */
 export const WEB_SEARCH_INACTIVE =
-  'La ricerca web non è attiva: serve la chiave per la ricerca web nelle impostazioni del provider Ollama. Dì all\'utente che può attivarla da lì; non tentare strade alternative.'
+  'La ricerca web è disattivata nelle impostazioni. Dillo all\'utente in una riga: può riattivarla in Impostazioni → Ricerca web. Non cercare sui motori di ricerca col browser.'
+
+/** Fase 15 (S6): tutti i provider hanno fallito o sono in raffreddamento. */
+export const WEB_SEARCH_UNAVAILABLE =
+  'La ricerca web non è disponibile in questo momento (i servizi di ricerca hanno rifiutato o non rispondono). Dillo all\'utente in una riga e proponi di riprovare più tardi; se conosci già il sito giusto puoi leggerlo con web_fetch. Non cercare sui motori di ricerca col browser.'
 
 /**
- * L'implementazione reale: POST https://ollama.com/api/web_search con la
+ * L'implementazione a chiave: POST https://ollama.com/api/web_search con la
  * chiave API di Ollama. La chiave viaggia SOLO nell'header Authorization:
  * mai nel contesto del modello, nei log o in argv. Il parsing della risposta
- * è tollerante (title/name, url/link, snippet/description/content).
+ * è tollerante (title/name, url/link, snippet/description/content). Fase 15:
+ * errori tipizzati (la catena sa cosa fare) e timeout di 15 s come tutti.
  */
 export function ollamaWebSearchProvider(
   key: string,
@@ -84,15 +101,34 @@ export function ollamaWebSearchProvider(
   const doFetch = deps.fetchImpl ?? fetch
   const base = (deps.baseUrl ?? 'https://ollama.com').replace(/\/$/, '')
   return {
+    name: 'ollama',
+    label: 'Ollama',
     async search(query, maxResults) {
-      const r = await doFetch(`${base}/api/web_search`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
-        body: JSON.stringify({ query, max_results: maxResults }),
-        signal: AbortSignal.timeout(30_000)
-      })
-      if (!r.ok) throw new Error(`ricerca web non riuscita (HTTP ${r.status})`)
-      const j = (await r.json()) as unknown
+      let r: Response
+      try {
+        r = await doFetch(`${base}/api/web_search`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            authorization: `Bearer ${key}`,
+            'user-agent': SANDBOT_USER_AGENT
+          },
+          credentials: 'omit',
+          body: JSON.stringify({ query, max_results: maxResults }),
+          signal: AbortSignal.timeout(WEB_SEARCH_TIMEOUT_MS)
+        })
+      } catch (e) {
+        const name = e instanceof Error ? e.name : ''
+        throw new WebSearchProviderError(name === 'TimeoutError' || name === 'AbortError' ? 'timeout' : 'network')
+      }
+      if (r.status === 429) throw new WebSearchProviderError('rate-limit', 429, parseRetryAfterMs(r.headers.get('retry-after')))
+      if (!r.ok) throw new WebSearchProviderError('http', r.status)
+      let j: unknown
+      try {
+        j = await r.json()
+      } catch {
+        throw new WebSearchProviderError('parse', r.status)
+      }
       const list = Array.isArray(j)
         ? j
         : Array.isArray((j as { results?: unknown[] }).results)
@@ -127,6 +163,8 @@ export function fakeWebSearchProviderForTests(): WebSearchProvider | null {
   if (process.env.SANDBOT_TEST_FAKE_WEB_SEARCH !== '1') return null
   const target = process.env.SANDBOT_TEST_FAKE_WEB_URL ?? 'http://127.0.0.1:9/test'
   return {
+    name: 'you',
+    label: 'You.com',
     async search() {
       return [
         { title: 'Weekend a Roma: luoghi da vedere e dove mangiare', url: target, snippet: 'I luoghi consigliati per un weekend di due persone a Roma.' }
@@ -135,13 +173,48 @@ export function fakeWebSearchProviderForTests(): WebSearchProvider | null {
   }
 }
 
+/**
+ * MODALITÀ TEST (verifica d'integrazione della fase 15): con
+ * SANDBOT_TEST_FAKE_WEB_SEARCH_CHAIN=1 la catena keyless diventa
+ * [You.com → 429, Exa → un risultato che punta a SANDBOT_TEST_FAKE_WEB_URL]:
+ * si vede il passaggio al provider successivo NELLA STESSA chiamata e il
+ * raffreddamento di You.com, senza toccare i servizi veri. Flag SANDBOT_TEST_*
+ * che non esiste in produzione.
+ */
+export function fakeWebSearchChainForTests(): WebSearchProvider[] | null {
+  if (process.env.SANDBOT_TEST_FAKE_WEB_SEARCH_CHAIN !== '1') return null
+  const target = process.env.SANDBOT_TEST_FAKE_WEB_URL ?? 'http://127.0.0.1:9/test'
+  return [
+    {
+      name: 'you',
+      label: 'You.com',
+      async search() {
+        throw new WebSearchProviderError('rate-limit', 429, 60_000)
+      }
+    },
+    {
+      name: 'exa',
+      label: 'Exa',
+      async search() {
+        return [
+          { title: 'Risultato della prova (Exa)', url: target, snippet: 'Il risultato deterministico della verifica d\'integrazione.' }
+        ]
+      }
+    }
+  ]
+}
+
 let realKeyGetter: (() => Promise<Buffer>) | null = null
 /** Registra il getter della chiave del vault (wiring del daemon: Keychain); null lo rimuove. */
 export function setWebSearchKeyGetter(getKey: (() => Promise<Buffer>) | null): void {
   realKeyGetter = getKey
 }
 
-/** Il provider attivo, o null se la ricerca non è attiva (nessuna chiave). */
+/**
+ * Il provider con chiave attivo (oggi solo Ollama), o null. La catena di
+ * searchWeb lo mette PRIMA dei keyless (S2); questa funzione resta per chi
+ * chiede "c'è un provider a chiave?".
+ */
 export async function getWebSearchProvider(): Promise<WebSearchProvider | null> {
   if (providerOverride) return providerOverride
   const fake = fakeWebSearchProviderForTests()
@@ -149,6 +222,249 @@ export async function getWebSearchProvider(): Promise<WebSearchProvider | null> 
   if (!realKeyGetter) return null
   const key = await getWebSearchKey({ getKey: realKeyGetter })
   return key ? ollamaWebSearchProvider(key) : null
+}
+
+// ---- fase 15 (S3): raffreddamento dei provider dopo i rifiuti ----
+
+/** Teti del raffreddamento: Retry-After al massimo 6 h; raddoppio 1 min → 1 h. */
+export const RATE_LIMIT_RETRY_AFTER_CAP_MS = 6 * 60 * 60_000
+export const RATE_LIMIT_BACKOFF_BASE_MS = 60_000
+export const RATE_LIMIT_BACKOFF_MAX_MS = 60 * 60_000
+export const TRANSIENT_COOLDOWN_MS = 60_000
+
+interface ProviderCooldown {
+  cooldownUntil: number
+  consecutiveRateLimits: number
+  lastError?: { kind: WebSearchErrorKind; status?: number; at: number }
+}
+
+/**
+ * Stato in memoria del daemon, per provider (S3.3): NON persistito — al
+ * riavvio si riparte puliti. Le funzioni prendono l'orologio iniettabile.
+ */
+const cooldowns = new Map<WebSearchProviderName, ProviderCooldown>()
+
+export function providerCoolingDown(name: WebSearchProviderName, now: number): number {
+  const until = cooldowns.get(name)?.cooldownUntil ?? 0
+  return until > now ? until : 0
+}
+
+/** Successo: tutto lo stato del provider si azzera (S3.2). */
+export function noteSearchSuccess(name: WebSearchProviderName, now: number): void {
+  cooldowns.delete(name)
+}
+
+/** Rifiuto 429: Retry-After (tetto 6 h) oppure attesa che raddoppia (1 min → 1 h). */
+export function noteSearchRateLimit(
+  name: WebSearchProviderName,
+  retryAfterMs: number | undefined,
+  now: number
+): void {
+  const prev = cooldowns.get(name)
+  const consecutive = Math.min((prev?.consecutiveRateLimits ?? 0) + 1, 7)
+  const wait =
+    retryAfterMs !== undefined
+      ? Math.min(retryAfterMs, RATE_LIMIT_RETRY_AFTER_CAP_MS)
+      : Math.min(RATE_LIMIT_BACKOFF_BASE_MS * 2 ** (consecutive - 1), RATE_LIMIT_BACKOFF_MAX_MS)
+  cooldowns.set(name, {
+    cooldownUntil: now + wait,
+    consecutiveRateLimits: consecutive,
+    lastError: { kind: 'rate-limit', status: 429, at: now }
+  })
+}
+
+/** http 5xx, timeout o network: raffreddamento breve (1 min), il conteggio dei 429 non si tocca. */
+export function noteSearchTransientFailure(name: WebSearchProviderName, kind: WebSearchErrorKind, now: number): void {
+  const prev = cooldowns.get(name)
+  cooldowns.set(name, {
+    cooldownUntil: now + TRANSIENT_COOLDOWN_MS,
+    consecutiveRateLimits: prev?.consecutiveRateLimits ?? 0,
+    lastError: { kind, at: now }
+  })
+}
+
+/** Errori stabili (http 4xx, parse, tool-error): si registrano per la UI, niente raffreddamento. */
+export function noteSearchError(
+  name: WebSearchProviderName,
+  kind: WebSearchErrorKind,
+  status: number | undefined,
+  now: number
+): void {
+  const prev = cooldowns.get(name)
+  cooldowns.set(name, {
+    cooldownUntil: prev?.cooldownUntil ?? 0,
+    consecutiveRateLimits: prev?.consecutiveRateLimits ?? 0,
+    lastError: { kind, ...(status !== undefined ? { status } : {}), at: now }
+  })
+}
+
+// ---- fase 15 (S4): cache delle ricerche (15 minuti, in memoria) ----
+
+export const WEB_SEARCH_CACHE_MAX_ENTRIES = 200
+
+/** Chiave della cache: query normalizzata (minuscole, spazi compressi, trim) + maxResults. */
+export function normalizeSearchQuery(q: string): string {
+  return q.toLowerCase().replace(/\s+/g, ' ').trim()
+}
+
+interface SearchCacheEntry {
+  at: number
+  results: WebSearchResult[]
+  providerName: WebSearchProviderName
+  providerLabel: string
+}
+
+const searchCache = new Map<string, SearchCacheEntry>()
+
+function cacheSetSearch(key: string, entry: SearchCacheEntry): void {
+  // la stessa chiave si reinserisce in coda (l'ordine della Map è quello d'inserimento)
+  searchCache.delete(key)
+  searchCache.set(key, entry)
+  while (searchCache.size > WEB_SEARCH_CACHE_MAX_ENTRIES) {
+    const oldest = searchCache.keys().next().value
+    if (oldest === undefined) break
+    searchCache.delete(oldest)
+  }
+}
+
+// ---- fase 15 (S2): la catena ----
+
+export interface SearchWebDeps {
+  now?: () => number
+  fetchImpl?: typeof fetch
+  /** fabbrica del client MCP di Exa (test: finta; produzione: l'SDK) */
+  makeExaClient?: ExaMcpClientFactory
+  /** override del setting webSearch.keyless (i test); default: il setting, vero se assente */
+  keyless?: boolean
+}
+
+export interface WebSearchFailure {
+  name: string
+  kind: WebSearchErrorKind | 'cooldown'
+  status?: number
+}
+
+export type WebSearchOutcome =
+  | { ok: true; results: WebSearchResult[]; provider: { name: WebSearchProviderName; label: string } }
+  | { ok: false; error: 'inactive' | 'all-failed'; failures: WebSearchFailure[] }
+
+/**
+ * La catena (S2): prima i provider CON CHIAVE configurati (oggi solo Ollama),
+ * poi — se la ricerca senza chiave è attiva (S5, predefinita vera) —
+ * You.com → Exa → Tavily. Su errore di qualunque tipo si passa al successivo
+ * NELLA STESSA chiamata (mai due tentativi allo stesso provider); zero
+ * risultati è una risposta valida e NON fa passare avanti. La cache (S4)
+ * risponde prima di chiamare chiunque.
+ */
+export async function searchWeb(query: string, maxResults: number, deps: SearchWebDeps = {}): Promise<WebSearchOutcome> {
+  const now = deps.now ?? Date.now
+  const cacheKey = `${normalizeSearchQuery(query)}|${maxResults}`
+  const hit = searchCache.get(cacheKey)
+  if (hit && cacheFresh(hit.at, now())) {
+    return { ok: true, results: hit.results, provider: { name: hit.providerName, label: hit.providerLabel } }
+  }
+
+  const chain = await buildSearchChain(deps)
+  if (!chain.length) return { ok: false, error: 'inactive', failures: [] }
+
+  const failures: WebSearchFailure[] = []
+  for (const p of chain) {
+    if (providerCoolingDown(p.name, now())) {
+      failures.push({ name: p.name, kind: 'cooldown' })
+      continue // in raffreddamento: si salta SENZA chiamarlo (S3.4)
+    }
+    try {
+      const results = await p.search(query, maxResults)
+      noteSearchSuccess(p.name, now())
+      cacheSetSearch(cacheKey, { at: now(), results, providerName: p.name, providerLabel: p.label })
+      return { ok: true, results, provider: { name: p.name, label: p.label } }
+    } catch (e) {
+      const err = e instanceof WebSearchProviderError ? e : new WebSearchProviderError('network')
+      if (err.kind === 'rate-limit') noteSearchRateLimit(p.name, err.retryAfterMs, now())
+      else if (err.kind === 'timeout' || err.kind === 'network' || (err.kind === 'http' && (err.status ?? 0) >= 500)) {
+        noteSearchTransientFailure(p.name, err.kind, now())
+      } else {
+        noteSearchError(p.name, err.kind, err.status, now())
+      }
+      failures.push({ name: p.name, kind: err.kind, ...(err.status !== undefined ? { status: err.status } : {}) })
+    }
+  }
+  return { ok: false, error: 'all-failed', failures }
+}
+
+/** La catena nell'ordine di S2 (override e finti di test compresi). */
+async function buildSearchChain(deps: SearchWebDeps): Promise<WebSearchProvider[]> {
+  if (providerOverride) return [providerOverride]
+  const fakeChain = fakeWebSearchChainForTests()
+  if (fakeChain) return fakeChain
+  const fake = fakeWebSearchProviderForTests()
+  if (fake) return [fake]
+  const out: WebSearchProvider[] = []
+  // 1. i provider con chiave configurati (oggi solo Ollama)
+  if (realKeyGetter) {
+    const key = await getWebSearchKey({ getKey: realKeyGetter })
+    if (key) out.push(ollamaWebSearchProvider(key, { fetchImpl: deps.fetchImpl }))
+  }
+  // 2. la ricerca senza chiave (S5): predefinita VERA
+  const keyless = deps.keyless ?? getSetting<boolean>('webSearch.keyless', true)
+  if (keyless) {
+    out.push(
+      youKeylessProvider({ fetchImpl: deps.fetchImpl }),
+      exaMcpKeylessProvider({ makeClient: deps.makeExaClient }),
+      tavilyKeylessProvider({ fetchImpl: deps.fetchImpl })
+    )
+  }
+  return out
+}
+
+/** Ripristina lo stato della ricerca (raffreddamento e cache): solo per i test. */
+export function resetWebSearchStateForTests(): void {
+  cooldowns.clear()
+  searchCache.clear()
+}
+
+// ---- fase 15 (S5): lo stato per provider che la UI legge via RPC ----
+
+export interface WebSearchProviderStatus {
+  name: WebSearchProviderName
+  label: string
+  /** in raffreddamento fino a (epoch ms), se lo è */
+  cooldownUntil?: number
+  lastError?: { kind: WebSearchErrorKind; status?: number; at: number }
+}
+
+export interface WebSearchStatus {
+  /** il setting webSearch.keyless (la UI lo mostra sull'interruttore) */
+  keyless: boolean
+  /** true se c'è un provider con chiave configurato (Ollama) */
+  keyedConfigured: boolean
+  providers: WebSearchProviderStatus[]
+}
+
+/** Stato di sola lettura dei provider senza chiave (+ Ollama se configurato). */
+export async function webSearchStatus(deps: { now?: () => number } = {}): Promise<WebSearchStatus> {
+  const now = deps.now ?? Date.now
+  const names: WebSearchProviderName[] = ['you', 'exa', 'tavily']
+  let keyedConfigured = false
+  if (realKeyGetter && (await getWebSearchKey({ getKey: realKeyGetter }))) {
+    keyedConfigured = true
+    names.push('ollama')
+  }
+  const labels: Record<WebSearchProviderName, string> = { you: 'You.com', exa: 'Exa', tavily: 'Tavily', ollama: 'Ollama' }
+  return {
+    keyless: getSetting<boolean>('webSearch.keyless', true),
+    keyedConfigured,
+    providers: names.map((name) => {
+      const st = cooldowns.get(name)
+      const cooling = providerCoolingDown(name, now())
+      return {
+        name,
+        label: labels[name],
+        ...(cooling ? { cooldownUntil: cooling } : {}),
+        ...(st?.lastError ? { lastError: st.lastError } : {})
+      }
+    })
+  }
 }
 
 // web_fetch iniettabile per i test del loop (nessuna rete reale)
@@ -192,8 +508,7 @@ export async function webFetchCached(rawUrl: string, deps: WebFetchDeps = {}): P
   return outcome
 }
 
-/** User-agent onesto (SandBot/<versione>). */
-export const SANDBOT_USER_AGENT = 'SandBot/0.1.0'
+/** User-agent onesto (SandBot/<versione>): definito in shared/web-limits, riesportato. */
 
 async function resolveHost(host: string, deps: WebFetchDeps): Promise<string[]> {
   if (deps.lookup) return deps.lookup(host)
@@ -581,9 +896,15 @@ export function htmlToMarkdown(html: string, baseUrl?: string): string {
 
 // ---- l'output dei tool (il loop lo incarta nel blocco evidenza) ----
 
-/** web_search: risultati come elenco (titolo, URL, estratto). */
-export function webSearchToolOutput(results: WebSearchResult[]): string {
-  return results.map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`).join('\n\n') || 'Nessun risultato.'
+/**
+ * web_search: risultati come elenco (titolo, URL, estratto). Fase 15 (S6):
+ * con l'etichetta del provider aggiunge la riga finale "Fonte della ricerca:"
+ * (lo stesso formato che l'eval simula), così il modello sa da chi arriva la
+ * risposta e può dirlo all'utente.
+ */
+export function webSearchToolOutput(results: WebSearchResult[], sourceLabel?: string): string {
+  const list = results.map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`).join('\n\n') || 'Nessun risultato.'
+  return sourceLabel ? `${list}\n\nFonte della ricerca: ${sourceLabel}` : list
 }
 
 /** Il testo della finestra richiesto dal modello (offset + indicazione per proseguire). */
