@@ -5,10 +5,17 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   dockerStdioMcpArgv,
-  dockerCpDirArgv,
-  dockerChmodReadOnlyArgv,
   dockerRmDirArgv,
-  dockerMkdirArgv,
+  dockerPluginCopyCreateArgv,
+  dockerPluginsMkdirArgv,
+  dockerPluginCpArgv,
+  dockerPluginsChownArgv,
+  dockerPluginsChmodArgv,
+  dockerPluginsRmHelperArgv,
+  dockerPluginsVolumeCreateArgv,
+  pluginsContainerPath,
+  dockerBoxMountsArgv,
+  boxHasPluginsMountRo,
   dockerExecArgv,
     dockerReadFileArgv,
     dockerWriteFileArgv,
@@ -48,6 +55,8 @@ import {
     BOX_CONTAINER,
     BOX_VOLUME,
     BOX_MOUNT,
+    PLUGINS_VOLUME,
+    PLUGINS_MOUNT,
     boxHomePath,
     DEFAULT_BOX_LIMITS
 ,
@@ -131,6 +140,9 @@ describe('lifecycle & hardening del box condiviso (§5.2 + fase 11 punto 1)', ()
     // destinazione (root, per via di -w /box), sovrascrivendo il chown
     expect(argv).toContain('sandbot-box:/box:nocopy')
     expect(argv).not.toContain('sandbot-box:/box')
+    // M4: il volume DEDICATO dei plugin montato /plugins:ro — la sola lettura
+    // la impone il KERNEL, non un chmod revocabile dal bot
+    expect(argv).toContain('sandbot-plugins:/plugins:ro')
     expect(val('--user')).toBe('1000:1000')
     expect(val('--cap-drop')).toBe('ALL')
     expect(val('--security-opt')).toBe('no-new-privileges')
@@ -425,6 +437,23 @@ describe('H1: controllo test -w e decisione use/una ricreazione/errore chiaro', 
     expect(boxEnsurePlan({ exists: true, initOk: true, imageOk: undefined, writable: false })).toEqual({ kind: 'recreate', reason: 'volume-di-root' })
   })
 
+  it('M4: decisione pura con pluginsMountOk — mount /plugins:ro mancante ricrea il SOLO container, inspect fallito NON ricrea', () => {
+    expect(boxEnsurePlan({ exists: true, initOk: true, pluginsMountOk: false, writable: true })).toEqual({ kind: 'recreate', reason: 'mount-plugin-mancante' })
+    expect(boxEnsurePlan({ exists: true, initOk: true, pluginsMountOk: false, writable: false })).toEqual({ kind: 'recreate', reason: 'mount-plugin-mancante' })
+    expect(boxEnsurePlan({ exists: true, initOk: true, pluginsMountOk: true, writable: true })).toEqual({ kind: 'use' })
+    // inspect dei mount fallito (undefined): si tiene il container che funziona
+    expect(boxEnsurePlan({ exists: true, initOk: true, pluginsMountOk: undefined, writable: true })).toEqual({ kind: 'use' })
+  })
+
+  it('M4: inspect dei mount e boxHasPluginsMountRo (puro)', () => {
+    expect(dockerBoxMountsArgv(BOX_CONTAINER)).toEqual(['inspect', '-f', '{{range .HostConfig.Mounts}}{{.Target}}:{{if .ReadOnly}}ro{{else}}rw{{end}} {{end}}', 'sandbot-box'])
+    expect(boxHasPluginsMountRo('/plugins:ro /box:rw ')).toBe(true)
+    expect(boxHasPluginsMountRo('/box:rw ')).toBe(false) // nato prima di M4
+    expect(boxHasPluginsMountRo('/plugins:rw ')).toBe(false) // montato rw: non basta
+    expect(boxHasPluginsMountRo('')).toBe(false) // inspect fallito
+    expect(boxHasPluginsMountRo('Error: No such object')).toBe(false)
+  })
+
   it('punto 1: argv PURI di build, esistenza immagine e immagine del container', () => {
     const build = dockerBuildArgv('sandbot-box:abc', '/repo/resources/box/Dockerfile', '/repo/resources/box')
     expect(build).toEqual(['build', '-t', 'sandbot-box:abc', '-f', '/repo/resources/box/Dockerfile', '/repo/resources/box'])
@@ -527,12 +556,40 @@ describe('fase 13: argv del server MCP stdio nel box (dockerStdioMcpArgv)', () =
     // solo HOME (=VALORE) e i NOMI delle chiavi segrete: nessun altro valore in argv
     expect(argv.filter((a) => a.includes('='))).toEqual(['HOME=/box/home/a'])
   })
-  it('L5: dockerMkdirArgv crea la cartella PADRE della copia del plugin (docker cp non la crea)', () => {
-    expect(dockerMkdirArgv('sandbot-box', '/box/plugins/mp/demo')).toEqual(['exec', 'sandbot-box', 'mkdir', '-p', '--', '/box/plugins/mp/demo'])
+  it('M4: gli argv della copia nel volume DEDICATO — one-shot root, volume rw solo nei one-shot, argv PURI', () => {
+    // il contenitore usa-e-getta della copia: volume montato rw in /p
+    expect(dockerPluginCopyCreateArgv('sandbot-plugin-copy-ab12cd34', IMG)).toEqual([
+      'create', '--name', 'sandbot-plugin-copy-ab12cd34', '-v', 'sandbot-plugins:/p', IMG, 'true'
+    ])
+    // mkdir del padre COME ROOT (docker cp crea il figlio, non il padre)
+    expect(dockerPluginsMkdirArgv(IMG, '/plugins/mp/demo')).toEqual([
+      'run', '--rm', '-u', '0', '-v', 'sandbot-plugins:/p', IMG, 'mkdir', '-p', '--', '/p/mp/demo'
+    ])
+    // cp nella usa-e-getta col path mappato da /plugins a /p
+    expect(dockerPluginCpArgv('/tmp/p', 'sandbot-plugin-copy-ab12cd34', '/plugins/mp/demo/abc123def456')).toEqual([
+      'cp', '/tmp/p', 'sandbot-plugin-copy-ab12cd34:/p/mp/demo/abc123def456'
+    ])
+    // chown e chmod come ROOT (docker cp conserva l'uid del Mac: 501:20)
+    expect(dockerPluginsChownArgv(IMG, '/plugins/mp/demo/abc123def456')).toEqual([
+      'run', '--rm', '-u', '0', '-v', 'sandbot-plugins:/p', IMG, 'chown', '-R', '0:0', '--', '/p/mp/demo/abc123def456'
+    ])
+    expect(dockerPluginsChmodArgv(IMG, '/plugins/mp/demo/abc123def456')).toEqual([
+      'run', '--rm', '-u', '0', '-v', 'sandbot-plugins:/p', IMG, 'chmod', '-R', 'a+rX,a-w', '--', '/p/mp/demo/abc123def456'
+    ])
+    // l'usa-e-getta si rimuove SEMPRE
+    expect(dockerPluginsRmHelperArgv('sandbot-plugin-copy-ab12cd34')).toEqual(['rm', '-f', 'sandbot-plugin-copy-ab12cd34'])
+    // il volume si crea se manca (volume create è idempotente)
+    expect(dockerPluginsVolumeCreateArgv()).toEqual(['volume', 'create', 'sandbot-plugins'])
+    // il mapping /plugins → /p è una semplice traduzione di prefisso (puro)
+    expect(pluginsContainerPath('/plugins/a/b/c')).toBe('/p/a/b/c')
   })
-  it('dockerCpDirArgv / dockerChmodReadOnlyArgv / dockerRmDirArgv: copia nel box, sola lettura, rimozione esatta', () => {
-    expect(dockerCpDirArgv('/tmp/p', '/box/plugins/mp/demo/abc')).toEqual(['cp', '/tmp/p', 'sandbot-box:/box/plugins/mp/demo/abc'])
-    expect(dockerChmodReadOnlyArgv('/box/plugins/mp/demo/abc')).toEqual(['exec', 'sandbot-box', 'chmod', '-R', 'a-w', '--', '/box/plugins/mp/demo/abc'])
-    expect(dockerRmDirArgv('/box/plugins/mp/demo/abc')).toEqual(['exec', 'sandbot-box', 'rm', '-rf', '--', '/box/plugins/mp/demo/abc'])
+  it('M4: dockerRmDirArgv — path NUOVI via one-shot root sul volume dei plugin, path VECCHI via exec nel box', () => {
+    expect(dockerRmDirArgv('/plugins/mp/demo/abc', IMG)).toEqual([
+      'run', '--rm', '-u', '0', '-v', 'sandbot-plugins:/p', IMG, 'rm', '-rf', '--', '/p/mp/demo/abc'
+    ])
+    // i record di prima della correzione (/box/plugins/…) non si rompono
+    expect(dockerRmDirArgv('/box/plugins/mp/demo/abc', IMG)).toEqual([
+      'exec', 'sandbot-box', 'rm', '-rf', '--', '/box/plugins/mp/demo/abc'
+    ])
   })
 })

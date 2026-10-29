@@ -595,9 +595,19 @@ export function buildApiMethods(
       const { installedPlugins } = await import('../main/connectors/install')
       const { getSetting } = store
       const states = getSetting<Record<string, { status?: string }>>('connectors.state', {})
-      const servers = mcpMod.listServers().filter((s) => s.source || s.needsAuth)
-        // L1: needsReauth dice alla scheda Installati quando mostrare "Riconnetti"
-        .map((s) => ({ ...s, needsReauth: s.auth?.kind === 'oauth' && !s.catalogId && states[s.id]?.status === 'needs_auth' }))
+      // M2: il bottone di un server OAuth in needs_auth dice "Connetti" se non
+      // ha MAI avuto token (plugin appena installato) e "Riconnetti" se la
+      // sessione è scaduta — i token, quando ci sono, stanno nello store cifrato
+      let storeRead: ((id: string, key: string) => Promise<unknown>) | null = null
+      try { storeRead = (await installBridge()).getInstallDeps().store.read } catch { storeRead = null }
+      const servers = []
+      for (const s of mcpMod.listServers().filter((x) => x.source || x.needsAuth)) {
+        // L1: needsReauth dice alla scheda Installati quando mostrare il bottone
+        const needsReauth = s.auth?.kind === 'oauth' && !s.catalogId && states[s.id]?.status === 'needs_auth'
+        let neverAuthorized: boolean | undefined
+        if (needsReauth && storeRead) neverAuthorized = !(await storeRead(s.id, 'oauth.tokens'))
+        servers.push({ ...s, needsReauth, ...(neverAuthorized !== undefined ? { neverAuthorized } : {}) })
+      }
       // punto 4: "nuova versione disponibile" se lo sha del marketplace è
       // cambiato rispetto a quello installato (aggiornare = nuova card)
       const plugins = installedPlugins({ getSetting }).map((p) => ({ ...p, updateAvailable: false }))
@@ -633,8 +643,16 @@ export function buildApiMethods(
       }
       store.updateEntryMeta(entry.id, { ...entry.meta, status: 'installing' })
       emitUpdatedEntry(aid, entry.id)
-      const { installMcpServer } = await import('../main/connectors/install')
-      const r = await installMcpServer(message, aid, (await installBridge()).getInstallDeps())
+      // M5: l'installazione è protetta — un'eccezione (cpSync/mkdirSync col
+      // disco pieno, errore inatteso del registro) NON lascia la card in
+      // 'installing' per sempre (ogni click dopo risponderebbe "in corso")
+      let r: { ok: true; message: string } | { ok: false; error: string }
+      try {
+        const { installMcpServer } = await import('../main/connectors/install')
+        r = await installMcpServer(message, aid, (await installBridge()).getInstallDeps())
+      } catch (e) {
+        r = { ok: false, error: e instanceof Error ? e.message : String(e) }
+      }
       store.updateEntryMeta(entry.id, { ...entry.meta, status: r.ok ? 'installed' : 'error', ...(r.ok ? {} : { error: r.error }) })
       emitUpdatedEntry(aid, entry.id)
       const text = r.ok ? `[sistema] ${r.message}` : `[sistema] Server "${message.name}" NON aggiunto: ${r.error}`
@@ -662,8 +680,15 @@ export function buildApiMethods(
       }
       store.updateEntryMeta(entry.id, { ...entry.meta, status: 'installing' })
       emitUpdatedEntry(aid, entry.id)
-      const { installPlugin } = await import('../main/connectors/install')
-      const r = await installPlugin(message, aid, (await installBridge()).getInstallDeps(), store.setSetting, store.getSetting)
+      // M5: come la card del server — l'eccezione diventa status 'error' col
+      // messaggio, e il bot riceve comunque il [sistema]
+      let r: { ok: true; message: string } | { ok: false; error: string }
+      try {
+        const { installPlugin } = await import('../main/connectors/install')
+        r = await installPlugin(message, aid, (await installBridge()).getInstallDeps(), store.setSetting, store.getSetting)
+      } catch (e) {
+        r = { ok: false, error: e instanceof Error ? e.message : String(e) }
+      }
       store.updateEntryMeta(entry.id, { ...entry.meta, status: r.ok ? 'installed' : 'error', ...(r.ok ? {} : { error: r.error }) })
       emitUpdatedEntry(aid, entry.id)
       const text = r.ok ? `[sistema] ${r.message}` : `[sistema] Plugin "${message.name}" NON installato: ${r.error}`

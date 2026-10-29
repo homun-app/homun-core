@@ -558,10 +558,32 @@ function parseSkillFrontmatter(text: string): { name: string; description: strin
   return { name, description: fields.get('description') ?? '' }
 }
 
+/**
+ * La mappa dei server di un file .mcp.json (o del manifest), DUE FORME (M1):
+ * `{"mcpServers": {...}}` (context7, discord, …) OPPURE la mappa PIATTA
+ * nome→server alla radice (linear, github, playwright, …: 9 dei 14 plugin
+ * ufficiali) — Claude Code accetta entrambe. Vuota `{}` = 0 server senza
+ * errore; una radice che non è nessuna delle due = errore di ispezione.
+ */
 function collectMcpServers(root: unknown, from: string, out: PluginInspection): void {
-  const servers = (root as { mcpServers?: unknown })?.mcpServers
-  if (!servers || typeof servers !== 'object') return
-  for (const [name, def] of Object.entries(servers as Record<string, unknown>)) {
+  let servers: Record<string, unknown> | null = null
+  const r = root as Record<string, unknown> | null
+  if (r && typeof r === 'object' && r.mcpServers !== undefined) {
+    if (r.mcpServers && typeof r.mcpServers === 'object') servers = r.mcpServers as Record<string, unknown>
+  } else if (r && typeof r === 'object') {
+    // mappa piatta: OGNI valore è un oggetto con url, command o type
+    const entries = Object.values(r)
+    const flat = entries.every((v) => v && typeof v === 'object' && !Array.isArray(v)
+      && ('url' in (v as object) || 'command' in (v as object) || 'type' in (v as object)))
+    if (flat) servers = r
+  }
+  if (servers === null) {
+    if (!r || typeof r !== 'object' || Object.keys(r).length) {
+      out.errors.push(`${from} senza server riconoscibili`)
+    }
+    return
+  }
+  for (const [name, def] of Object.entries(servers)) {
     if (!def || typeof def !== 'object') continue
     const d = def as Record<string, unknown>
     const headers = d.headers && typeof d.headers === 'object' ? { headers: d.headers as Record<string, string> } : {}
@@ -582,16 +604,24 @@ function collectMcpServers(root: unknown, from: string, out: PluginInspection): 
 
 // ---- sostituzioni dei placeholder (pure) ----
 
+/** La forma dei placeholder sostituibili: ${user_config.KEY}, ${VAR}, ${VAR:-default}. */
+const PLACEHOLDER_RE = /\$\{([A-Za-z0-9_.-]+)(?::-([^}]*))?\}/g
+
 /**
- * Sostituisce `${user_config.KEY}` in una STRINGA (pura): il chiamante la usa
- * SOLO su env, headers e url, al momento della CONNESSIONE, coi valori presi
- * dallo store cifrato. Una chiave senza valore resta com'è: la connessione
- * la rifiuta prima di partire.
+ * Sostituisce `${user_config.KEY}`, `${VAR}` e `${VAR:-default}` in una STRINGA
+ * (pura): il chiamante la usa SOLO su env, headers e url, al momento della
+ * CONNESSIONE, coi valori presi dallo store cifrato. Una chiave senza valore
+ * resta com'è (la connessione la rifiuta prima di partire); `${VAR:-default}`
+ * senza valore diventa il default. MAI dall'ambiente del daemon
+ * (process.env): l'ambiente del Mac dell'utente non deve finire in un server
+ * di terzi.
  */
 export function substituteUserConfig(value: string, values: Record<string, string>): string {
-  return value.replace(/\$\{user_config\.([A-Za-z0-9_.-]+)\}/g, (whole, key: string) =>
-    key in values ? values[key]! : whole
-  )
+  return value.replace(PLACEHOLDER_RE, (whole, key: string, def: string | undefined) => {
+    if (key === 'CLAUDE_PLUGIN_ROOT') return whole // sostituito a parte col path nel box
+    const k = key.startsWith('user_config.') ? key.slice('user_config.'.length) : key
+    return Object.hasOwn(values, k) ? values[k]! : def !== undefined ? def : whole
+  })
 }
 
 /** Sostituisce `${CLAUDE_PLUGIN_ROOT}` col path del plugin NEL BOX (puro). */
@@ -599,14 +629,43 @@ export function substitutePluginRoot(value: string, boxPath: string): string {
   return value.split('${CLAUDE_PLUGIN_ROOT}').join(boxPath)
 }
 
-/** Le chiavi ${user_config.KEY} usate in una definizione di server (pura). */
+/**
+ * Le chiavi che l'utente DOVE compilare perché il server parta (pura):
+ * `${user_config.KEY}` e `${VAR}` SENZA default in url, env e headers. Le
+ * `${VAR:-default}` non sono obbligatorie (c'è il default di riserva).
+ */
 export function userConfigKeysOf(server: PluginMcpServer): string[] {
   const keys = new Set<string>()
   const scan = (s: string): void => {
-    for (const m of s.matchAll(/\$\{user_config\.([A-Za-z0-9_.-]+)\}/g)) keys.add(m[1]!)
+    for (const m of s.matchAll(PLACEHOLDER_RE)) {
+      if (m[2] !== undefined) continue // ${VAR:-default}: non obbligatoria
+      const key = (m[1] ?? '').replace(/^user_config\./, '')
+      if (key && key !== 'CLAUDE_PLUGIN_ROOT') keys.add(key)
+    }
   }
   if (server.url) scan(server.url)
   for (const v of Object.values(server.env ?? {})) scan(v)
   for (const v of Object.values(server.headers ?? {})) scan(v)
   return [...keys]
+}
+
+/**
+ * M3: i placeholder (${VAR}, ${VAR:-x}, ${user_config.*}) in `command` o
+ * `args` finirebbero in ARGV del processo nel box: la regola dei segreti lo
+ * vieta, quindi il server non si registra. Restituisce i NOMI delle variabili
+ * (per la card e il messaggio), vuoto se command/args sono puliti (puro).
+ */
+export function argvPlaceholdersOf(server: PluginMcpServer): string[] {
+  const names = new Set<string>()
+  const scan = (s: string): void => {
+    for (const m of s.matchAll(/\$\{([^}]+)\}/g)) {
+      const whole = m[1] ?? ''
+      if (whole === 'CLAUDE_PLUGIN_ROOT') continue // sostituito col path del box
+      const key = whole.split(':-')[0]!.replace(/^user_config\./, '')
+      if (key) names.add(key)
+    }
+  }
+  scan(server.command ?? '')
+  for (const a of server.args ?? []) scan(a)
+  return [...names]
 }

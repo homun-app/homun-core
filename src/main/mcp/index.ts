@@ -245,8 +245,19 @@ async function ensure(cfg: McpServerConfig, force = false): Promise<Cached> {
     void hit.client.close().catch(() => undefined)
     cache.delete(cfg.id)
   }
-  const client = await connect(cfg)
-  const res = await client.listTools()
+  let client: Client
+  let res: Awaited<ReturnType<Client['listTools']>>
+  try {
+    client = await connect(cfg)
+    res = await client.listTools()
+  } catch (e) {
+    // M2: il 401 si scopre OVUNQUE si connetta — anche qui, usato da
+    // activeTools all'inizio del turno — non solo in testServer/callTool:
+    // altrimenti un token scaduto resterebbe un errore generico ritentato a
+    // ogni turno, senza mai il bottone "Riconnetti"
+    if (e instanceof UnauthorizedError) markNeedsAuth(cfg, 'token scaduto: riconnetti')
+    throw e
+  }
   const tools: McpToolInfo[] = (res.tools ?? []).map((t) => ({
     serverId: cfg.id,
     serverName: cfg.name,

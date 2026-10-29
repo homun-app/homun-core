@@ -180,11 +180,17 @@ export interface BoxEnsureFacts {
    * tiene il container che funziona (come G2, la ricreazione è ottimale).
    */
   imageOk?: boolean
+  /**
+   * M4: il container ha il volume dei plugin montato /plugins:ro. false =
+   * nato prima della correzione → ricreazione (solo il container, il volume
+   * /box non si tocca MAI); undefined = inspect non riuscito → si tiene.
+   */
+  pluginsMountOk?: boolean
 }
 
 export type BoxEnsurePlan =
   | { kind: 'use' }
-  | { kind: 'recreate'; reason: 'senza-init' | 'volume-di-root' | 'immagine-vecchia' }
+  | { kind: 'recreate'; reason: 'senza-init' | 'volume-di-root' | 'immagine-vecchia' | 'mount-plugin-mancante' }
   | { kind: 'create' }
 
 /**
@@ -195,11 +201,14 @@ export type BoxEnsurePlan =
  * ricreazione, che ripassa dal one-shot di init (mkdir+chown) come oggi.
  * Punto 1: container nato con un'immagine DIVERSA (Dockerfile cambiato) →
  * stessa regola di G2/H1: si ricrea il SOLO container, il volume non si tocca.
+ * M4: container nato SENZA il mount /plugins:ro (prima della correzione) →
+ * stessa regola: si ricrea il SOLO container, il volume /box resta intatto.
  */
 export function boxEnsurePlan(facts: BoxEnsureFacts): BoxEnsurePlan {
   if (!facts.exists) return { kind: 'create' }
   if (!facts.initOk) return { kind: 'recreate', reason: 'senza-init' }
   if (facts.imageOk === false) return { kind: 'recreate', reason: 'immagine-vecchia' }
+  if (facts.pluginsMountOk === false) return { kind: 'recreate', reason: 'mount-plugin-mancante' }
   return facts.writable ? { kind: 'use' } : { kind: 'recreate', reason: 'volume-di-root' }
 }
 
@@ -217,7 +226,7 @@ export function boxCreateCheck(writable: boolean): { ok: true } | { ok: false; e
 }
 
 /**
- * Hardening del container condiviso a creazione (§5.2 + punto 1 + G2):
+ * Hardening del container condiviso a creazione (§5.2 + punto 1 + G2 + M4):
  * non-root, cap-drop, no-new-privs, limiti CONDIVISI e configurabili (memoria
  * 4g, cpu 2, pids 1024 di default). Volume unico montato su /box. `--init` è
  * tini di Docker (G2): PID 1 raccoglie i processi zombie — con `sleep
@@ -227,6 +236,9 @@ export function boxCreateCheck(writable: boolean): { ok: true } | { ok: false; e
  * proprietà della cartella di destinazione dell'immagine, e `-w /box` la fa
  * nascere di root nel rootfs: il chown del one-shot verrebbe sovrascritto e,
  * non-root con --cap-drop ALL, nessuno scriverebbe più nulla nel box.
+ * M4: il volume DEDICATO dei plugin è montato `/plugins:ro` — la sola
+ * lettura la impone il KERNEL, non un chmod (che il bot, proprietario di
+ * /box, potrebbe scavalcare riscrivendo workdir e codice dei server stdio).
  */
 export function dockerBoxCreateArgv(container: string, volume: string, network: 'bridge' | 'none', limits: BoxLimits, image: string): string[] {
   return [
@@ -241,11 +253,78 @@ export function dockerBoxCreateArgv(container: string, volume: string, network: 
     '--cpus', String(limits.cpus),
     '--network', network,
     '-v', `${volume}:${BOX_MOUNT}:nocopy`,
+    '-v', `${PLUGINS_VOLUME}:${PLUGINS_MOUNT}:ro`,
     '-w', BOX_MOUNT,
     '-i',
     image,
     'sleep', 'infinity'
   ]
+}
+
+// ---- M4: il volume DEDICATO dei plugin, in SOLA LETTURA dal kernel ----
+
+/** Il volume persistente dei plugin di terzi (montato /plugins:ro nel box). */
+export const PLUGINS_VOLUME = 'sandbot-plugins'
+
+/** Punto di montaggio del volume dei plugin nel container del box. */
+export const PLUGINS_MOUNT = '/plugins'
+
+/** Il volume dei plugin si crea se manca (volume create è idempotente). */
+export function dockerPluginsVolumeCreateArgv(): string[] {
+  return ['volume', 'create', PLUGINS_VOLUME]
+}
+
+/**
+ * Un path del box (`/plugins/…`) visto da un one-shot col volume montato in
+ * `/p` (puro).
+ */
+export function pluginsContainerPath(boxPath: string): string {
+  return `/p${boxPath.slice(PLUGINS_MOUNT.length)}`
+}
+
+/** M4: il contenitore usa-e-getta della copia, col volume dei plugin rw in /p. */
+export function dockerPluginCopyCreateArgv(helper: string, image: string): string[] {
+  return ['create', '--name', helper, '-v', `${PLUGINS_VOLUME}:/p`, image, 'true']
+}
+
+/** M4: mkdir del PADRE della copia come ROOT (docker cp crea il figlio, non il padre). */
+export function dockerPluginsMkdirArgv(image: string, parentBoxPath: string): string[] {
+  return ['run', '--rm', '-u', '0', '-v', `${PLUGINS_VOLUME}:/p`, image, 'mkdir', '-p', '--', pluginsContainerPath(parentBoxPath)]
+}
+
+/** M4: docker cp della cartella del plugin nel contenitore usa-e-getta (volume rw). */
+export function dockerPluginCpArgv(localDir: string, helper: string, boxPath: string): string[] {
+  return ['cp', localDir, `${helper}:${pluginsContainerPath(boxPath)}`]
+}
+
+/** M4: chown root:root ricorsivo della copia, come ROOT (docker cp conserva l'uid del Mac). */
+export function dockerPluginsChownArgv(image: string, boxPath: string): string[] {
+  return ['run', '--rm', '-u', '0', '-v', `${PLUGINS_VOLUME}:/p`, image, 'chown', '-R', '0:0', '--', pluginsContainerPath(boxPath)]
+}
+
+/** M4: sola lettura per TUTTI (a+rX, a-w) come ROOT: la impone il volume :ro vista dal box. */
+export function dockerPluginsChmodArgv(image: string, boxPath: string): string[] {
+  return ['run', '--rm', '-u', '0', '-v', `${PLUGINS_VOLUME}:/p`, image, 'chmod', '-R', 'a+rX,a-w', '--', pluginsContainerPath(boxPath)]
+}
+
+/** M4: il contenitore usa-e-getta si rimuove SEMPRE, anche dopo un errore. */
+export function dockerPluginsRmHelperArgv(helper: string): string[] {
+  return ['rm', '-f', helper]
+}
+
+/** M4: i mount dichiarati al create del container del box (inspect -f, argv puro). */
+export function dockerBoxMountsArgv(container: string): string[] {
+  return ['inspect', '-f', '{{range .HostConfig.Mounts}}{{.Target}}:{{if .ReadOnly}}ro{{else}}rw{{end}} {{end}}', container]
+}
+
+/**
+ * M4 (puro): il container ha il volume dei plugin montato `/plugins` in
+ * SOLA LETTURA? L'output di dockerBoxMountsArgv è `/plugins:ro /box:rw …`;
+ * qualunque altra cosa (vuoto, errore) NON ricrea (come G2: la ricreazione è
+ * ottimale, non vitale — un inspect fallito non deve fermare i bot).
+ */
+export function boxHasPluginsMountRo(inspectOutput: string): boolean {
+  return inspectOutput.trim().split(/\s+/).includes(`${PLUGINS_MOUNT}:ro`)
 }
 
 /**
@@ -401,32 +480,17 @@ export function dockerStdioMcpArgv(opts: { workdir: string; command: string; arg
 }
 
 /**
- * Fase 13 (correzione L5): crea la cartella PADRE della copia del plugin nel
- * box prima del docker cp (docker cp NON crea le cartelle intermedie e
- * l'errore "Could not find the file" si ignorava).
+ * Fase 13 (punto 4) + M4: rimozione della NOSTRA copia del plugin alla
+ * disinstallazione. I path NUOVI (`/plugins/…`) passano dal one-shot ROOT sul
+ * volume dei plugin (il box lo ha montato :ro, non può cancellarceli da
+ * solo); i path VECCHI (`/box/plugins/…`, record di prima della correzione)
+ * restano sull'exec nel box rw — argv PURO sul path esatto in entrambi i
+ * casi (mai volumi interi, mai dati utente).
  */
-export function dockerMkdirArgv(container: string, path: string): string[] {
-  return ['exec', container, 'mkdir', '-p', '--', path]
-}
-
-/**
- * Fase 13 (punto 4): copia del plugin installato nel box (docker cp, argv
- * puro) e messa in SOLA LETTURA per l'utente 1000 (chmod a-w ricorsivo): il
- * codice di terzi nel box non si modifica da sé.
- */
-export function dockerCpDirArgv(localDir: string, boxPath: string): string[] {
-  return ['cp', localDir, `${BOX_CONTAINER}:${boxPath}`]
-}
-
-export function dockerChmodReadOnlyArgv(boxPath: string): string[] {
-  return ['exec', BOX_CONTAINER, 'chmod', '-R', 'a-w', '--', boxPath]
-}
-
-/**
- * Fase 13 (punto 4): rimozione della NOSTRA copia del plugin nel box alla
- * disinstallazione — argv PURO sul path esatto (mai volumi, mai dati utente).
- */
-export function dockerRmDirArgv(boxPath: string): string[] {
+export function dockerRmDirArgv(boxPath: string, image: string): string[] {
+  if (boxPath.startsWith(`${PLUGINS_MOUNT}/`)) {
+    return ['run', '--rm', '-u', '0', '-v', `${PLUGINS_VOLUME}:/p`, image, 'rm', '-rf', '--', pluginsContainerPath(boxPath)]
+  }
   return ['exec', BOX_CONTAINER, 'rm', '-rf', '--', boxPath]
 }
 

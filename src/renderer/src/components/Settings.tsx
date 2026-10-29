@@ -283,11 +283,11 @@ function ClientMetadataUrlRow() {
 
 /** Scheda Installati: server del registro/plugin/gateway con fonte, fiducia, stato, enabledFor, disinstalla. */
 function InstalledTab() {
-  const [data, setData] = useState<{ servers: Array<McpServerInfo & { needsReauth?: boolean }>; plugins: Array<{ name: string; marketplace: string; sha12: string; skills: Array<{ name: string }>; servers: string[]; enabledFor: string[]; updateAvailable?: boolean }> } | null>(null)
+  const [data, setData] = useState<{ servers: Array<McpServerInfo & { needsReauth?: boolean; neverAuthorized?: boolean }>; plugins: Array<{ name: string; marketplace: string; sha12: string; skills: Array<{ name: string }>; servers: string[]; enabledFor: string[]; updateAvailable?: boolean }> } | null>(null)
   const agents = useStore((s) => s.agents)
   const [values, setValues] = useState<Record<string, string>>({})
   const [reconnectMsg, setReconnectMsg] = useState('')
-  const refresh = async (): Promise<void> => { setData(await api.connectorsInstalled() as { servers: Array<McpServerInfo & { needsReauth?: boolean }>; plugins: Array<{ name: string; marketplace: string; sha12: string; skills: Array<{ name: string }>; servers: string[]; enabledFor: string[]; updateAvailable?: boolean }> }) }
+  const refresh = async (): Promise<void> => { setData(await api.connectorsInstalled() as { servers: Array<McpServerInfo & { needsReauth?: boolean; neverAuthorized?: boolean }>; plugins: Array<{ name: string; marketplace: string; sha12: string; skills: Array<{ name: string }>; servers: string[]; enabledFor: string[]; updateAvailable?: boolean }> }) }
   useEffect(() => { void refresh() }, [])
   if (data === null) return <p className="text-xs text-neutral-600">installati…</p>
 
@@ -334,7 +334,9 @@ function InstalledTab() {
               <span className="rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] uppercase text-neutral-400">{src?.kind ?? 'manuale'}</span>
               {sv.trustLabel && <span className="text-[10px] text-neutral-500">{sv.trustLabel}</span>}
               <span className="flex-1 truncate text-xs text-neutral-600">{sv.transport === 'http' ? sv.url : `${sv.box?.command ?? ''} ${(sv.box?.args ?? []).join(' ')}`}</span>
-              {/* L1: sessione OAuth scaduta di un server non del catalogo → rifà authorizeWithLoopback */}
+              {/* L1+M2: sessione OAuth da (ri)fare di un server non del catalogo →
+                  authorizeWithLoopback; "Connetti" se non ha mai avuto token
+                  (plugin appena installato), "Riconnetti" se è scaduta */}
               {sv.needsReauth && (
                 <button
                   className="rounded-lg bg-neutral-700 px-2 py-0.5 text-xs text-white hover:bg-neutral-600"
@@ -344,7 +346,7 @@ function InstalledTab() {
                     await refresh()
                   }}
                 >
-                  Riconnetti
+                  {sv.neverAuthorized ? 'Connetti' : 'Riconnetti'}
                 </button>
               )}
               <button className="text-xs text-neutral-500 hover:text-red-400" onClick={async () => { await api.connectorsUninstallServer(sv.id); await refresh() }}>disinstalla</button>

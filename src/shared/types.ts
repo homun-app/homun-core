@@ -705,6 +705,12 @@ export interface McpServerInfo {
   trustLabel?: string
   /** fase 13 (correzione L1): OAuth scaduto/da rifare → bottone "Riconnetti" nella scheda Installati */
   needsReauth?: boolean
+  /**
+   * fase 13 (correzione 2, M2): il server OAuth non ha MAI avuto token
+   * (appena installato da un plugin) — lo stesso bottone dice "Connetti"
+   * invece di "Riconnetti" (che resta per la sessione scaduta).
+   */
+  neverAuthorized?: boolean
 }
 
 /**

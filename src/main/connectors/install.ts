@@ -10,12 +10,12 @@
 // - di un plugin si importano SOLO skill e server MCP: hook, bin/, monitor,
 //   LSP e compagnie non si eseguono mai (l'ispezione li elenca come ignorati).
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import type { SendMessagePayload, SecretKind } from '../../shared/types'
 import { SECRET_KIND } from '../../shared/types'
 import type { McpServerConfig } from '../mcp'
-import { boxHomePath } from '../sandbox/docker-argv'
+import { boxHomePath, dockerRmDirArgv } from '../sandbox/docker-argv'
 import { createOAuthProvider, authorizeWithLoopback } from './oauth-provider'
 import type { ConnectorsSecretStore } from './sealed-store'
 import {
@@ -23,7 +23,7 @@ import {
   type RegistryEntry
 } from './registry'
 import {
-  inspectPlugin, sourceSupported, stagePlugin, substitutePluginRoot, substituteUserConfig, userConfigKeysOf,
+  argvPlaceholdersOf, inspectPlugin, sourceSupported, stagePlugin, substitutePluginRoot, substituteUserConfig, userConfigKeysOf,
   type MarketplacePlugin, type PluginInspection, type PluginMcpServer
 } from './marketplace'
 import type { MarketplaceManager } from './marketplace-manager'
@@ -437,10 +437,16 @@ export function discardPluginProposal(id: string): void {
   pendingPlugins.delete(id)
 }
 
-/** Il path del box di un plugin installato: /box/plugins/<mp>/<nome>/<sha12>. */
+/**
+ * M4: il path del plugin installato nel box: `/plugins/<mp>/<nome>/<sha12>`
+ * dentro il volume DEDICATO `sandbot-plugins`, montato in SOLA LETTURA dal
+ * kernel (`-v sandbot-plugins:/plugins:ro`). Non è più `/box/plugins/…`: il
+ * volume /box è del bot (uid 1000) e il bot potrebbe rimpiazzare il codice
+ * dei server stdio di terzi; qui il kernel nega la scrittura.
+ */
 export function pluginBoxDir(marketplace: string, name: string, sha12: string): string {
   const clean = (s: string): string => s.replace(/[^A-Za-z0-9._-]+/g, '-')
-  return `/box/plugins/${clean(marketplace)}/${clean(name)}/${sha12}`
+  return `/plugins/${clean(marketplace)}/${clean(name)}/${sha12}`
 }
 
 /**
@@ -503,6 +509,13 @@ export async function buildPluginCard(
     inspection,
     createdAt: (deps.now ?? Date.now)()
   })
+  // M3: le impostazioni della card sono il userConfig del MANIFEST più le
+  // chiavi OBBLIGATORIE usate dai server (${user_config.K} e ${VAR} senza
+  // default) che il manifest non dichiara: github usa
+  // ${GITHUB_PERSONAL_ACCESS_TOKEN} senza dichiararlo da nessuna parte
+  const declared = new Set(inspection.userConfig.map((f) => f.key))
+  const serverKeys = [...new Set(inspection.mcpServers.flatMap((s) => userConfigKeysOf(s)))]
+    .filter((k) => !declared.has(k))
   const card: PluginCard = {
     type: 'plugin',
     id,
@@ -513,7 +526,10 @@ export async function buildPluginCard(
     sha12: staged.sha12,
     skills: inspection.skills.map((s) => s.name),
     servers: inspection.mcpServers.map((s) => ({ name: s.name, runtimeLabel: serverRuntimeLabel(s) })),
-    settings: inspection.userConfig.map((f) => ({ key: f.key, ...(f.description ? { description: f.description } : {}), ...(f.sensitive ? { sensitive: true } : {}) })),
+    settings: [
+      ...inspection.userConfig.map((f) => ({ key: f.key, ...(f.description ? { description: f.description } : {}), ...(f.sensitive ? { sensitive: true } : {}) })),
+      ...serverKeys.map((key) => ({ key }))
+    ],
     ignored: inspection.ignored,
     ...(reason ? { reason } : {})
   }
@@ -540,7 +556,10 @@ function repoUrlOf(plugin: MarketplacePlugin): string | null {
   return null
 }
 
+/** M3: il server con `${VAR}` in command/args non si registra: il motivo in card. */
 function serverRuntimeLabel(s: PluginMcpServer): string {
+  const argvVars = argvPlaceholdersOf(s)
+  if (argvVars.length) return `non supportato: valore in argv (${argvVars[0]})`
   if (s.url) return `remoto (${new URL(s.url).host})`
   return `nel box (${[s.command, ...(s.args ?? [])].slice(0, 3).join(' ')})`
 }
@@ -592,32 +611,54 @@ export async function installPlugin(
     return { ok: false, error }
   }
 
-  // L5: copia nel box, SOLA LETTURA per l'utente 1000 (solo docker) —
-  // container, poi mkdir del padre (docker cp NON crea le cartelle), poi cp,
-  // poi chmod; OGNI passo controllato
+  // M4: copia nel volume DEDICATO sandbot-plugins (montato /plugins:ro nel
+  // box dal KERNEL) con one-shot ROOT, stesso schema di init e migrate: il
+  // volume /box è del bot (uid 1000) e chmod/chown come 1000 su file del Mac
+  // (501:20) falliscono — e comunque il bot potrebbe rimpiazzare il codice
+  // dei server stdio di terzi. Sequenza: create dell'usa-e-getta col volume
+  // rw, mkdir del padre (docker cp NON crea le cartelle intermedie), cp,
+  // chown/chmod come root, rm dell'usa-e-getta SEMPRE; OGNI passo controllato
   const boxDir = pluginBoxDir(pending.marketplaceName, pending.plugin.name, pending.sha12)
   let boxCopied = false
   let boxNote = ''
   if (deps.dockerMode() && deps.runDocker) {
     const run = deps.runDocker
-    const { dockerCpDirArgv, dockerChmodReadOnlyArgv, dockerMkdirArgv, BOX_CONTAINER } = await import('../sandbox/docker-argv')
-    const { ensureBoxContainer } = await import('../sandbox')
+    const {
+      dockerPluginCopyCreateArgv, dockerPluginsMkdirArgv, dockerPluginCpArgv, dockerPluginsChownArgv,
+      dockerPluginsChmodArgv, dockerPluginsRmHelperArgv, dockerPluginsVolumeCreateArgv
+    } = await import('../sandbox/docker-argv')
+    const { boxImage } = await import('../sandbox')
     const { dirname } = await import('node:path')
+    const image = boxImage()
+    const helper = `sandbot-plugin-copy-${randomUUID().slice(0, 8)}`
+    const parent = dirname(boxDir)
     try {
-      await ensureBoxContainer()
-      const mkdir = await run(dockerMkdirArgv(BOX_CONTAINER, dirname(boxDir)))
-      if (mkdir.code !== 0) throw new Error(`creazione della cartella ${dirname(boxDir)} nel box non riuscita: ${mkdir.stderr.trim().slice(0, 160)}`)
-      const cp = await run(dockerCpDirArgv(dest, boxDir))
-      if (cp.code !== 0) throw new Error(`copia del plugin nel box non riuscita: ${cp.stderr.trim().slice(0, 160)}`)
-      const chmod = await run(dockerChmodReadOnlyArgv(boxDir))
-      if (chmod.code !== 0) throw new Error(`sola lettura del plugin nel box non riuscita: ${chmod.stderr.trim().slice(0, 160)}`)
-      boxCopied = true
+      const vc = await run(dockerPluginsVolumeCreateArgv())
+      if (vc.code !== 0) throw new Error(`creazione del volume dei plugin non riuscita: ${vc.stderr.trim().slice(0, 160)}`)
+      const create = await run(dockerPluginCopyCreateArgv(helper, image))
+      if (create.code !== 0) throw new Error(`creazione del contenitore di copia non riuscita: ${create.stderr.trim().slice(0, 160)}`)
+      try {
+        const mkdir = await run(dockerPluginsMkdirArgv(image, parent))
+        if (mkdir.code !== 0) throw new Error(`creazione della cartella ${parent} nel volume dei plugin non riuscita: ${mkdir.stderr.trim().slice(0, 160)}`)
+        const cp = await run(dockerPluginCpArgv(dest, helper, boxDir))
+        if (cp.code !== 0) throw new Error(`copia del plugin nel volume dei plugin non riuscita: ${cp.stderr.trim().slice(0, 160)}`)
+        const chown = await run(dockerPluginsChownArgv(image, boxDir))
+        if (chown.code !== 0) throw new Error(`chown del plugin nel volume dei plugin non riuscito: ${chown.stderr.trim().slice(0, 160)}`)
+        const chmod = await run(dockerPluginsChmodArgv(image, boxDir))
+        if (chmod.code !== 0) throw new Error(`sola lettura del plugin nel volume dei plugin non riuscita: ${chmod.stderr.trim().slice(0, 160)}`)
+        boxCopied = true
+      } finally {
+        // M4: l'usa-e-getta si rimuove SEMPRE, anche dopo un errore a metà;
+        // la copia parziale della cartella del plugin si butta via (best-effort)
+        await run(dockerPluginsRmHelperArgv(helper))
+        if (!boxCopied) await run(dockerRmDirArgv(boxDir, image))
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      const hasStdio = pending.inspection.mcpServers.some((s) => !s.url)
+      const hasStdio = pending.inspection.mcpServers.some((s) => !s.url && !argvPlaceholdersOf(s).length)
       if (!hasStdio) {
-        // eccezione L5: senza server stdio la copia nel box non serve al
-        // funzionamento (le skill si leggono dalla dir dati sul Mac)
+        // eccezione L5/M4.6: senza server stdio la copia nel volume non serve
+        // al funzionamento (le skill si leggono dalla dir dati sul Mac)
         boxNote = `copia nel box non riuscita (${msg.slice(0, 120)}): plugin di sole skill, resta installato`
       } else {
         return abort(msg)
@@ -626,16 +667,25 @@ export async function installPlugin(
   }
 
   // i server MCP del plugin: http come il punto 2; stdio nel box con
-  // ${CLAUDE_PLUGIN_ROOT} = il path del box e ${user_config.KEY} risolto
+  // ${CLAUDE_PLUGIN_ROOT} = il path del box e ${user_config.KEY}/${VAR} risolti
   // SOLO in env/headers/url al momento della connessione (dallo store cifrato).
-  // L1: la config conserva la DICHIARAZIONE (pluginSpec, template pubblici)
+  // L1: la config conserva la DICHIARAZIONE (pluginSpec, template pubblici).
+  // M3: un ${VAR} in command/args finirebbe in argv (regola dei segreti): il
+  // server NON si registra e il messaggio lo dice.
   const serverIds: string[] = []
   const settingsKeys: string[] = []
+  const needsConnectorAuth: string[] = []
+  const notRegistered: Array<{ name: string; vars: string[] }> = []
   for (const s of pending.inspection.mcpServers) {
+    const argvVars = argvPlaceholdersOf(s)
+    if (argvVars.length) {
+      notRegistered.push({ name: s.name, vars: argvVars })
+      continue
+    }
     const serverId = serverIdFor({ kind: 'plugin', marketplace: pending.marketplaceName, plugin: pending.plugin.name, server: s.name })
     const uck = userConfigKeysOf(s)
     const values = (await deps.store.read<Record<string, string>>(serverId, SECRET_KIND.userConfig)) ?? {}
-    const missingKeys = uck.filter((k) => !(k in values))
+    const missingKeys = uck.filter((k) => !Object.hasOwn(values, k))
     settingsKeys.push(...missingKeys)
     const source = { kind: 'plugin' as const, plugin: pending.plugin.name, marketplace: pending.marketplaceName, sha: pending.sha12 }
     if (s.url) {
@@ -652,6 +702,13 @@ export async function installPlugin(
       if (missingKeys.length) cfg.needsAuth = { kind: 'settings', keys: missingKeys }
       deps.saveServers([...deps.listServers().filter((x) => x.id !== serverId), cfg])
       serverIds.push(serverId)
+      // M2: server http OAuth senza token salvati → stato connettore needs_auth
+      // (lo vedono la scheda Installati e skippedByConnectorState). Il browser
+      // NON si apre qui: un plugin può avere più server, l'autorizzazione si
+      // dà su richiesta dal bottone Connetti della scheda Installati.
+      if (cfg.auth?.kind === 'oauth' && !(await deps.store.read(serverId, 'oauth.tokens'))) {
+        needsConnectorAuth.push(serverId)
+      }
     } else if (s.command) {
       const cfg: McpServerConfig = {
         id: serverId, name: s.name, transport: 'stdio', enabled: true,
@@ -672,6 +729,13 @@ export async function installPlugin(
       deps.saveServers([...deps.listServers().filter((x) => x.id !== serverId), cfg])
       serverIds.push(serverId)
     }
+  }
+  if (needsConnectorAuth.length) {
+    const states = getSetting<Record<string, Record<string, unknown>>>('connectors.state', {})
+    for (const id of needsConnectorAuth) {
+      states[id] = { ...(states[id] ?? {}), status: 'needs_auth', error: 'da autorizzare (Impostazioni → Installati → Connetti)' }
+    }
+    setSetting('connectors.state', states)
   }
 
   const record: InstalledPlugin = {
@@ -694,11 +758,16 @@ export async function installPlugin(
     `${serverIds.length} server${serverIds.length ? ` (${serverIds.map((id) => deps.listServers().find((x) => x.id === id)?.name ?? id).join(', ')})` : ''}`
   ]
   if (settingsKeys.length) parts.push(`da configurare: ${settingsKeys.join(', ')} (Impostazioni)`)
+  if (needsConnectorAuth.length) {
+    const names = needsConnectorAuth.map((id) => deps.listServers().find((x) => x.id === id)?.name ?? id).join(', ')
+    parts.push(`da autorizzare: ${names} (Impostazioni → Installati → Connetti)`)
+  }
+  if (notRegistered.length) parts.push(`server non installati (valore in argv): ${notRegistered.map((s) => `${s.name} (${s.vars.join(', ')})`).join(', ')}`)
   if (boxNote) parts.push(boxNote)
   return { ok: true, message: `Plugin ${record.name} installato: ${parts.join(', ')}` }
 }
 
-/** Disinstallazione (solo dalle Impostazioni): cartelle (Mac e box), server, skill. I dati dell'utente NON si toccano. */
+/** Disinstallazione (solo dalle Impostazioni): cartelle (Mac e volume dei plugin), server, skill. I dati dell'utente NON si toccano. */
 export async function uninstallPlugin(
   record: InstalledPlugin,
   deps: InstallDeps,
@@ -708,9 +777,12 @@ export async function uninstallPlugin(
   const dir = join(deps.dataDir(), record.dir)
   if (existsSync(dir)) rmSync(dir, { recursive: true, force: true })
   if (record.boxDir && deps.dockerMode() && deps.runDocker) {
-    // argv PURO sul path esatto della NOSTRA copia (mai volumi, mai dati utente)
-    const { dockerRmDirArgv } = await import('../sandbox/docker-argv')
-    await deps.runDocker(dockerRmDirArgv(record.boxDir))
+    // argv PURO sul path esatto della NOSTRA copia (mai volumi interi, mai
+    // dati utente). M4: i path NUOVI (/plugins/…) passano dal one-shot ROOT
+    // sul volume dei plugin; i VECCHI (/box/plugins/…) dall'exec nel box rw
+    // — la disinstallazione non si rompe coi record di prima della correzione
+    const { boxImage } = await import('../sandbox')
+    await deps.runDocker(dockerRmDirArgv(record.boxDir, boxImage()))
   }
   deps.saveServers(deps.listServers().filter((s) => !record.servers.includes(s.id)))
   setSetting(PLUGINS_SETTING, installedPlugins({ getSetting }).filter((p) => !(p.name === record.name && p.marketplace === record.marketplace)))
@@ -721,9 +793,11 @@ export async function uninstallPlugin(
 }
 
 /**
- * L1: la card "Riconnetti" della scheda Installati rifà l'OAuth di un server
- * del registro/plugin/url la cui sessione è scaduta (authorizeWithLoopback con
- * i token salvati sotto cfg.id, lo stesso provider del trasporto).
+ * L1: la card "Connetti"/"Riconnetti" della scheda Installati rifà l'OAuth di
+ * un server del registro/plugin/url (authorizeWithLoopback con i token salvati
+ * sotto cfg.id, lo stesso provider del trasporto). M2: per i server di PLUGIN
+ * l'URL è quello RISOLTO dal resolver (placeholder sostituiti coi valori
+ * dello store), non il template di pluginSpec.
  */
 export async function reconnectServer(
   id: string,
@@ -737,9 +811,25 @@ export async function reconnectServer(
   if (cfg.catalogId) return { ok: false, error: 'usa la vista "Connetti app" per i connettori del catalogo' }
   if (!cfg.url) return { ok: false, error: 'il server non ha un URL' }
   if (!deps.hasUi()) return { ok: false, error: 'serve la finestra di SandBot per autorizzare' }
+  // M2: il template del plugin si risolve PRIMA di autorizzare — un URL con
+  // ${user_config.K}/${VAR} non sostituito non è un URL valido
+  let url = cfg.url
+  if (cfg.pluginSpec?.url) {
+    const values = (await deps.store.read<Record<string, string>>(cfg.id, SECRET_KIND.userConfig)) ?? {}
+    const resolved = resolvePluginServerPlaceholders(
+      { name: cfg.name, from: 'config', url: cfg.pluginSpec.url },
+      values,
+      cfg.box?.workdir ?? ''
+    )
+    const missing = unresolvedUserConfigKeys(resolved)
+    if (missing.length) {
+      return { ok: false, error: `il server "${cfg.name}" richiede i valori ${missing.join(', ')}: l'utente li inserisce nelle Impostazioni` }
+    }
+    url = resolved.url ?? cfg.url
+  }
   try {
     const authorize = deps.authorize ?? authorizeWithLoopback
-    await authorize(cfg.url, (redirectUrl, stateFactory) =>
+    await authorize(url, (redirectUrl, stateFactory) =>
       createOAuthProvider(
         {
           serverId: cfg.id, redirectUrl, openExternal: deps.openExternal, store: deps.store, stateFactory,
@@ -836,14 +926,18 @@ export function resolvePluginServerPlaceholders(
 }
 
 /**
- * L1: i placeholder ${user_config.KEY} rimasti dopo la sostituzione (valore
- * mai salvato). Un placeholder senza valore lascia needsAuth e il server NON
- * parte: niente stringhe vuote silenziose (puro).
+ * L1+M3: i placeholder rimasti dopo la sostituzione (valore mai salvato e
+ * senza default): `${user_config.KEY}` e `${VAR}`. Un placeholder senza
+ * valore lascia needsAuth e il server NON parte: niente stringhe vuote
+ * silenziose (puro).
  */
 export function unresolvedUserConfigKeys(resolved: { url?: string; headers?: Record<string, string>; env?: Record<string, string> }): string[] {
   const keys = new Set<string>()
   const scan = (s: string): void => {
-    for (const m of s.matchAll(/\$\{user_config\.([A-Za-z0-9_.-]+)\}/g)) keys.add(m[1]!)
+    for (const m of s.matchAll(/\$\{([A-Za-z0-9_.-]+)(?::-[^}]*)?\}/g)) {
+      const key = (m[1] ?? '').replace(/^user_config\./, '')
+      if (key && key !== 'CLAUDE_PLUGIN_ROOT') keys.add(key)
+    }
   }
   if (resolved.url) scan(resolved.url)
   for (const v of Object.values(resolved.headers ?? {})) scan(v)

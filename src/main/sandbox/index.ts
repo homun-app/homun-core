@@ -46,10 +46,14 @@ import {
   BOX_IMAGE_BUILD_TIMEOUT_MS,
   type BoxEnsureFacts,
   dockerVolumeLsArgv,
+  dockerPluginsVolumeCreateArgv,
+  dockerBoxMountsArgv,
+  boxHasPluginsMountRo,
   dockerClientEnv,
   BOX_CONTAINER,
   BOX_VOLUME,
   BOX_MOUNT,
+  PLUGINS_VOLUME,
   boxHomePath,
   DEFAULT_BOX_LIMITS,
   type BoxLimits
@@ -427,6 +431,11 @@ export async function ensureBoxContainer(): Promise<void> {
         const img = await dockerRunner(dockerContainerImageArgv(BOX_CONTAINER), { timeoutMs: 15_000 })
         facts.imageOk = img.exitCode === 0 ? img.stdout.trim() === image : undefined
       }
+      // M4: container nato PRIMA del volume dei plugin → niente mount
+      // /plugins:ro → si ricrea (solo il container; il volume /box resta
+      // intatto). Inspect fallito: come sopra, NON si ricrea
+      const mounts = await dockerRunner(dockerBoxMountsArgv(BOX_CONTAINER), { timeoutMs: 15_000 })
+      facts.pluginsMountOk = mounts.exitCode === 0 ? boxHasPluginsMountRo(mounts.stdout) : undefined
       const start = await dockerRunner(dockerStartArgv(BOX_CONTAINER), { timeoutMs: 30_000 })
       if (start.exitCode !== 0) throw new Error(`docker start fallito: ${start.stderr}`)
       const w = await dockerRunner(dockerBoxWritableArgv(BOX_CONTAINER), { timeoutMs: 15_000 })
@@ -442,6 +451,10 @@ export async function ensureBoxContainer(): Promise<void> {
     const rm = await dockerRunner(dockerBoxRmArgv(BOX_CONTAINER), { timeoutMs: 30_000 })
     if (rm.exitCode !== 0) throw new Error(`rimozione del container (${plan.reason}) fallita: ${rm.stderr}`)
   }
+  // M4: il volume DEDICATO dei plugin esiste PRIMA del create che lo monta
+  // (volume create è idempotente: lo crea solo se manca)
+  const pvc = await dockerRunner(dockerPluginsVolumeCreateArgv(), { timeoutMs: 15_000 })
+  if (pvc.exitCode !== 0) throw new Error(`creazione del volume ${PLUGINS_VOLUME} non riuscita: ${pvc.stderr}`)
   // creazione (prima volta o ricreazione G2/H1): il one-shot rende il volume
   // NON vuoto (workspace e home) e lo consegna all'utente del container; il
   // mount :nocopy del create non dipende dal copy-up di docker

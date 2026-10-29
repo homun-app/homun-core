@@ -20,12 +20,14 @@ const { execCommand, ensureBotHome, setDockerRunnerForTests, resetBotHomesForTes
 
 /**
  * Runner finto del client docker: container SANO di default (ps lo vede,
- * init true, IMMAGINE CORRENTE, scrivibile); registra ogni argv. `state.inspect`
- * si può girare a 'false' per simulare il container nato senza --init e forzare
- * la RICREAZIONE (G2); `state.image` cambia l'immagine con cui il container è
- * nato (punto 1); `state.mkdirExit` fa fallire il mkdir della home.
+ * init true, IMMAGINE CORRENTE, mount dei plugin :ro, scrivibile); registra
+ * ogni argv. `state.inspect` si può girare a 'false' per simulare il container
+ * nato senza --init e forzare la RICREAZIONE (G2); `state.image` cambia
+ * l'immagine con cui il container è nato (punto 1); `state.mounts` cambia i
+ * mount dichiarati al create (M4: senza /plugins:ro si ricrea);
+ * `state.mkdirExit` fa fallire il mkdir della home.
  */
-function fakeDocker(state: { inspect: string; image?: string; mkdirExit?: number }) {
+function fakeDocker(state: { inspect: string; image?: string; mounts?: string; mkdirExit?: number }) {
   const calls: string[][] = []
   const ok = (stdout = '') => ({ stdout, stderr: '', exitCode: 0, signal: null })
   const runner = async (argv: string[]): Promise<{ stdout: string; stderr: string; exitCode: number | null; signal: string | null }> => {
@@ -33,13 +35,15 @@ function fakeDocker(state: { inspect: string; image?: string; mkdirExit?: number
     if (argv[0] === 'ps') return ok('sandbot-box') // il container esiste
     // punto 1: init e immagine del container si leggono con inspect -f diversi
     if (argv[0] === 'inspect' && argv[2] === '{{.Config.Image}}') return ok(state.image ?? boxImage())
+    // M4: i mount dichiarati al create (inspect -f {{range .HostConfig.Mounts}}…)
+    if (argv[0] === 'inspect' && argv[2]?.startsWith('{{range .HostConfig.Mounts}}')) return ok(state.mounts ?? '/plugins:ro /box:rw ')
     if (argv[0] === 'inspect') return ok(state.inspect)
     if (argv[0] === 'image') return ok() // l'immagine del box c'è già
     if (argv[0] === 'exec' && argv[2] === 'mkdir') {
       return state.mkdirExit ? { stdout: '', stderr: 'mkdir: Permission denied', exitCode: state.mkdirExit, signal: null } : ok()
     }
     if (argv[0] === 'exec') return ok('output-del-comando') // il comando del bot
-    return ok() // start / rm / run (one-shot) / create / test -w
+    return ok() // start / rm / run (one-shot) / create / volume create / test -w
   }
   // i mkdir delle home visti, in ordine (argv: exec <container> mkdir -p <home>)
   const homes = () => calls.filter((a) => a[0] === 'exec' && a[2] === 'mkdir').map((a) => a[a.length - 1]!)
@@ -99,6 +103,23 @@ describe('H2: la home del bot prima dell\'exec in docker', () => {
     expect(f.calls.some((a) => a[0] === 'create' && a.includes(boxImage()))).toBe(true)
     // MAI rm del volume: i dati dei bot restano
     expect(f.calls.some((a) => a[0] === 'volume' && a.includes('rm'))).toBe(false)
+    expect(f.homes()).toEqual(['/box/home/agent_x'])
+  })
+
+  it('M4: container nato SENZA il mount /plugins:ro → ricreazione del SOLO container, volume creato, sandbot-box MAI rimosso', async () => {
+    const f = fakeDocker({ inspect: 'true', mounts: '/box:rw ' }) // nato prima della correzione
+    setDockerRunnerForTests(f.runner)
+    await execCommand('agent_x', 'true')
+    // ricreato: rm del solo container, NON del volume sandbot-box
+    expect(f.calls.some((a) => a[0] === 'rm' && a.includes('sandbot-box'))).toBe(true)
+    expect(f.calls.some((a) => a[0] === 'volume' && a.includes('rm'))).toBe(false)
+    // il volume dei plugin si crea se manca (idempotente) e il create monta :ro
+    expect(f.calls.some((a) => a[0] === 'volume' && a.includes('create') && a.includes('sandbot-plugins'))).toBe(true)
+    const create = f.calls.find((a) => a[0] === 'create' && a.includes(boxImage()))!
+    expect(create).toContain('-v')
+    expect(create).toContain('sandbot-plugins:/plugins:ro')
+    expect(create).toContain('sandbot-box:/box:nocopy')
+    // e la home del bot è stata rifatta nel container nuovo
     expect(f.homes()).toEqual(['/box/home/agent_x'])
   })
 

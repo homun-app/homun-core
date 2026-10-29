@@ -6,11 +6,16 @@
 // .claude-plugin/ per gli URL git), con cache di 1 ora. La validazione è
 // parseMarketplace (pura): le voci non valide si scartano una per una e la
 // ragione si registra.
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+// Fase 13 correzioni 2 (M6): il clone del catalogo NON vive più in $TMPDIR
+// (una cartella per daemon, mai pulita) ma in <dataDir>/cache/marketplaces/:
+// una cartella per sorgente (nome = hash della sorgente), riusata fra i
+// riavvii col TTL di 1 h; un re-clone avviene in una cartella NUOVA e poi
+// sostituisce la vecchia.
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
-import { getSetting, setSetting } from '../store/db'
+import { getSetting, setSetting, dataDir as dataDirOf } from '../store/db'
 import { webFetchCached, type WebFetchOutcome } from '../agent/web-tools'
 import { parseMarketplace, stagePlugin, type MarketplacePlugin, type ParsedMarketplace } from './marketplace'
 
@@ -48,12 +53,24 @@ export interface MarketplaceCatalog {
 /** Cache dei cataloghi: 1 ora. */
 export const MARKETPLACE_CACHE_MS = 60 * 60_000
 
+/** M6: la radice della cache dei cloni dei marketplace, nella dir DATI (puro). */
+export function marketplaceCacheDir(dataRoot: string): string {
+  return join(dataRoot, 'cache', 'marketplaces')
+}
+
+/** M6: una cartella per sorgente, nome = hash della sorgente (puro). */
+export function marketplaceCacheName(source: string): string {
+  return createHash('sha256').update(source).digest('hex').slice(0, 16)
+}
+
 /** Dipendenze iniettabili (test senza rete né git vero). */
 export interface MarketplaceDeps {
   fetchOutcome?: (url: string) => Promise<WebFetchOutcome>
   runGit?: (args: string[], opts?: { cwd?: string; timeoutMs?: number }) => Promise<{ code: number; stdout: string; stderr: string }>
   mkdtemp?: (prefix: string) => string
   now?: () => number
+  /** M6: la dir dati della cache dei cloni (default: dataDir del db) */
+  dataDir?: () => string
   /** test: URL file:// ammessi per il clone sparsO (in produzione MAI) */
   allowFileUrlsForTests?: boolean
 }
@@ -79,19 +96,38 @@ export function normalizeMarketplaceSource(input: string): { kind: 'github' | 'g
 /**
  * Il manager: elenco, aggiunta/rimozione (SOLO dall'utente, via RPC delle
  * Impostazioni), catalogo con cache. Il clone dei marketplace git è sparsO
- * sul solo .claude-plugin/ e vive in una temporanea finché serve lo staging
- * dei plugin a sorgente relativa.
+ * sul solo .claude-plugin/ e vive in <dataDir>/cache/marketplaces/ (M6).
  */
 export function createMarketplaceManager(deps: MarketplaceDeps = {}) {
   const now = deps.now ?? Date.now
   const cache = new Map<string, MarketplaceCatalog>()
   /** clone sparsi del marketplace (per marketplace.json e sorgenti relative), per source */
-  const clones = new Map<string, string>()
+  const clones = new Map<string, { dir: string; at: number }>()
+  // M6: le temporanee .clone-* di un clone interrotto (crash del daemon) si
+  // buttano via alla creazione: la cache non si moltiplica tra i riavvii
+  try {
+    const root = marketplaceCacheDir((deps.dataDir ?? dataDirOf)())
+    for (const ent of readdirSync(root, { withFileTypes: true })) {
+      if (ent.name.startsWith('.clone-')) rmSync(join(root, ent.name), { recursive: true, force: true })
+    }
+  } catch {
+    // root assente al primo avvio: normale
+  }
 
   const list = (): RegisteredMarketplace[] =>
     getSetting<RegisteredMarketplace[]>(MARKETPLACES_SETTING, [OFFICIAL_MARKETPLACE])
 
   const save = (all: RegisteredMarketplace[]): void => setSetting(MARKETPLACES_SETTING, all)
+
+  /** M6: il timestamp del clone (sidecar `<dir>.at`); null se mai clonato. */
+  const cloneTime = (dir: string): number | null => {
+    try {
+      const t = Number(readFileSync(`${dir}.at`, 'utf8').trim())
+      return Number.isFinite(t) ? t : null
+    } catch {
+      return null
+    }
+  }
 
   /** Aggiunge un marketplace (dalle Impostazioni): normalizza, verifica lo scaricamento, salva. */
   async function add(input: string): Promise<RegisteredMarketplace> {
@@ -114,31 +150,49 @@ export function createMarketplaceManager(deps: MarketplaceDeps = {}) {
   function remove(source: string): void {
     save(list().filter((m) => m.source !== source))
     cache.delete(source)
-    const clone = clones.get(source)
-    if (clone) {
-      rmSync(clone, { recursive: true, force: true })
-      clones.delete(source)
-    }
+    clones.delete(source)
+    // M6: anche la cartella della cache nella dir DATI se ne va
+    const dir = join(marketplaceCacheDir((deps.dataDir ?? dataDirOf)()), marketplaceCacheName(source))
+    rmSync(dir, { recursive: true, force: true })
+    rmSync(`${dir}.at`, { force: true })
   }
 
-  /** Il clone sparsi del marketplace (solo .claude-plugin/), riusato per le sorgenti relative. */
+  /**
+   * Il clone sparsi del marketplace (solo .claude-plugin/), riusato per le
+   * sorgenti relative. M6: vive in <dataDir>/cache/marketplaces/<hash> —
+   * riuso fra riavvii col TTL di 1 h; il re-clone avviene in una cartella
+   * NUOVA e poi sostituisce la vecchia (mai una cartella mezza clonata).
+   */
   async function ensureClone(m: RegisteredMarketplace): Promise<string | null> {
     if (m.kind === 'github') return null // il marketplace.json arriva da raw.githubusercontent
     const hit = clones.get(m.source)
-    if (hit) return hit
+    if (hit && now() - hit.at < MARKETPLACE_CACHE_MS) return hit.dir
     const url = m.source
     if (!url.startsWith('https://') && !deps.allowFileUrlsForTests && !allowFileUrls()) return null
-    const dir = (deps.mkdtemp ?? ((p: string) => mkdtempSync(join(tmpdir(), p))))('sandbot-marketplace-')
+    const dir = join(marketplaceCacheDir((deps.dataDir ?? dataDirOf)()), marketplaceCacheName(m.source))
+    // riuso fra RIACCOLLI (e riavvii): la cartella su disco è ancora fresca
+    const diskAt = cloneTime(dir)
+    if (diskAt !== null && now() - diskAt < MARKETPLACE_CACHE_MS) {
+      clones.set(m.source, { dir, at: diskAt })
+      return dir
+    }
+    mkdirSync(marketplaceCacheDir((deps.dataDir ?? dataDirOf)()), { recursive: true })
+    const tmp = (deps.mkdtemp ?? ((p: string) => mkdtempSync(join(marketplaceCacheDir((deps.dataDir ?? dataDirOf)()), p))))('.clone-')
     const r = await stagePlugin(
       { kind: 'git-subdir', url, path: '.claude-plugin' },
       null,
-      { ...deps, allowFileUrlsForTests: deps.allowFileUrlsForTests ?? allowFileUrls(), mkdtemp: () => dir }
+      { ...deps, allowFileUrlsForTests: deps.allowFileUrlsForTests ?? allowFileUrls(), mkdtemp: () => tmp }
     )
     if (!r.ok) {
-      rmSync(dir, { recursive: true, force: true })
-      return null
+      rmSync(tmp, { recursive: true, force: true })
+      // la VECCHIA copia (scaduta) resta meglio di niente: il catalogo si legge lo stesso
+      return hit?.dir ?? (diskAt !== null ? dir : null)
     }
-    clones.set(m.source, dir)
+    rmSync(dir, { recursive: true, force: true })
+    renameSync(tmp, dir)
+    // il sidecar del timestamp prende il nome DEFINITIVO dopo la rename
+    writeFileSync(`${dir}.at`, String(now()))
+    clones.set(m.source, { dir, at: now() })
     return dir
   }
 
@@ -205,7 +259,7 @@ export function createMarketplaceManager(deps: MarketplaceDeps = {}) {
   }
 
   /** La dir del clone del marketplace (sorgenti relative), se c'è. */
-  const cloneOf = (source: string): string | null => clones.get(source) ?? null
+  const cloneOf = (source: string): string | null => clones.get(source)?.dir ?? null
 
   return { list, add, remove, catalogs, fetchCatalog, findPlugin, cloneOf, rawMarketplaceUrl }
 }

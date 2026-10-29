@@ -1,7 +1,7 @@
 // Test d'integrazione del loop con LLM finto: concorrenza (§5.7), segreti (§5.6)
 // e costruzione della cronologia (§5.3). Il DB è mockato in memoria, la
 // sandbox e il vault sono stub: nessun Electron, nessun processo reale.
-import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
+import { describe, expect, it, beforeAll, beforeEach, afterEach, afterAll, vi } from 'vitest'
 import type { TranscriptEntry, Agent, PermissionsConfig } from '../../../shared/types'
 
 // ---- stato condiviso coi mock (hoisted: disponibile dentro le factory) ----
@@ -653,6 +653,11 @@ const { tmpdir } = await import('node:os')
 const { join } = await import('node:path')
 const TMP = mkdtempSync(join(tmpdir(), 'sandbot-loop-test-'))
 h.db.dataDir = TMP
+// M6: la cartella si cancella a FINE corsa — prima restava in $TMPDIR per
+// ogni `vitest run` (il revisore ne contava ~50 a volta)
+afterAll(() => {
+  rmSync(TMP, { recursive: true, force: true })
+})
 
 function deferred<T = void>() {
   let resolve!: (v: T) => void

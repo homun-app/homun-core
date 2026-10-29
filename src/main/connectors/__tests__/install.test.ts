@@ -359,7 +359,7 @@ describe('plugin: card, installazione, disinstallazione', () => {
     expect(rec.name).toBe('demo-plugin')
     expect(rec.skills[0]?.name).toBe('demo-plugin--helper')
     expect(rec.servers).toEqual([expectedId])
-    expect(pluginBoxDir(rec.marketplace, rec.name, rec.sha12)).toBe(`/box/plugins/mp-di-test/demo-plugin/${sha.slice(0, 12)}`)
+    expect(pluginBoxDir(rec.marketplace, rec.name, rec.sha12)).toBe(`/plugins/mp-di-test/demo-plugin/${sha.slice(0, 12)}`)
     // il FILE SENTINELLA dell'hook non esiste: il codice di terzi non è MAI girato
     expect(existsSync('/tmp/sandbot-plugin-hook-sentinel')).toBe(false)
   })
@@ -596,7 +596,7 @@ describe('L5: copia del plugin nel box — sequenza, esiti, ripristino', () => {
   const set = (k: string, v: unknown) => settings.set(k, v)
   const get = <T,>(k: string, f: T): T => (settings.get(k) as T | undefined) ?? f
 
-  it('sequenza container→mkdir del padre→cp→chmod, ogni passo controllato; server stdio con pluginSpec.env e home', async () => {
+  it('M4: sequenza volume-create → create dell\'usa-e-getta → mkdir del padre → cp → chown → chmod → rm dell\'usa-e-getta, OGNI passo controllato', async () => {
     const calls: string[][] = []
     const deps = makeDockerDeps(async (argv) => {
       calls.push(argv)
@@ -606,32 +606,56 @@ describe('L5: copia del plugin nel box — sequenza, esiti, ripristino', () => {
     if (!card.ok) throw new Error('card')
     const r = await installPlugin(card.card, 'agent_alice', deps, set, get, cloneDeps())
     expect(r.ok).toBe(true)
-    // L5: mkdir del padre PRIMA del cp (docker cp non crea le cartelle intermedie)
-    const mkdir = calls.find((a) => a.includes('mkdir') && a.includes('-p'))
-    const cp = calls.find((a) => a[0] === 'cp')
-    const chmod = calls.find((a) => a.includes('chmod') && a.includes('a-w'))
-    expect(mkdir).toEqual(['exec', 'sandbot-box', 'mkdir', '-p', '--', '/box/plugins/mp-box/box-plugin'])
-    expect(cp?.[0]).toBe('cp')
-    expect(chmod).toEqual(['exec', 'sandbot-box', 'chmod', '-R', 'a-w', '--', `/box/plugins/mp-box/box-plugin/${sha.slice(0, 12)}`])
-    expect(mkdir && cp && chmod).toBeTruthy()
+    const { boxImage } = await import('../../sandbox')
+    const img = boxImage()
+    const sha12 = sha.slice(0, 12)
+    // M4: il volume dedicato si crea PRIMA del create che lo monta
+    expect(calls[0]).toEqual(['volume', 'create', 'sandbot-plugins'])
+    // l'usa-e-getta della copia: volume montato rw in /p (solo qui e nei one-shot)
+    const createHelper = calls.find((a) => a[0] === 'create')!
+    expect(createHelper.slice(0, 3)).toEqual(['create', '--name', createHelper[2]!])
+    expect(createHelper[2]).toMatch(/^sandbot-plugin-copy-[0-9a-f]{8}$/)
+    expect(createHelper).toEqual(['create', '--name', createHelper[2]!, '-v', 'sandbot-plugins:/p', img, 'true'])
+    // mkdir del padre COME ROOT prima del cp (docker cp non crea le intermedie)
+    expect(calls.find((a) => a.includes('mkdir') && a.includes('-p'))).toEqual(
+      ['run', '--rm', '-u', '0', '-v', 'sandbot-plugins:/p', img, 'mkdir', '-p', '--', '/p/mp-box/box-plugin']
+    )
+    const cp = calls.find((a) => a[0] === 'cp')!
+    expect(cp).toEqual(['cp', join(DATA, 'plugins', 'mp-box', 'box-plugin', sha12), `${createHelper[2]}:/p/mp-box/box-plugin/${sha12}`])
+    expect(calls.find((a) => a.includes('chown'))).toEqual(
+      ['run', '--rm', '-u', '0', '-v', 'sandbot-plugins:/p', img, 'chown', '-R', '0:0', '--', `/p/mp-box/box-plugin/${sha12}`]
+    )
+    expect(calls.find((a) => a.includes('chmod'))).toEqual(
+      ['run', '--rm', '-u', '0', '-v', 'sandbot-plugins:/p', img, 'chmod', '-R', 'a+rX,a-w', '--', `/p/mp-box/box-plugin/${sha12}`]
+    )
+    // l'usa-e-getta si rimuove SEMPRE, e per ultimo
+    expect(calls[calls.length - 1]).toEqual(['rm', '-f', createHelper[2]!])
     // il server stdio del plugin conserva i template env (L1) e la home del bot
     const cfg = deps.listServers()[0]!
     expect(cfg.transport).toBe('stdio')
+    expect(cfg.box?.workdir).toBe(`/plugins/mp-box/box-plugin/${sha12}`) // M4: workdir nel volume dedicato
     expect(cfg.box?.home).toBe('/box/home/agent_alice')
     expect(cfg.pluginSpec?.env).toEqual({ API_KEY: '${user_config.API_KEY}', LIT: 'fisso' })
     expect(cfg.needsAuth).toEqual({ kind: 'settings', keys: ['API_KEY'] })
   })
 
-  it('cp fallito → NESSUN server registrato, cartella sul Mac rimossa, errore chiaro', async () => {
+  it('M4: cp fallito → rm dell\'usa-e-getta comunque, NESSUN server registrato, cartella Mac rimossa, errore chiaro', async () => {
+    const calls: string[][] = []
     const deps = makeDockerDeps(async (argv) => {
-      if (argv[0] === 'cp') return { code: 1, stdout: '', stderr: 'Error response from daemon: Could not find the file /box/plugins/mkt/demo in container sandbot-box' }
+      calls.push(argv)
+      if (argv[0] === 'cp') return { code: 1, stdout: '', stderr: 'Error response from daemon: Could not find the file /p/mp-box/mkt/demo' }
       return { code: 0, stdout: '', stderr: '' }
     })
     const card = await buildPluginCard('plugin:box-plugin@mp-box', '', deps, cloneDeps())
     if (!card.ok) throw new Error('card')
     const r = await installPlugin(card.card, 'agent_alice', deps, set, get, cloneDeps())
     expect(r.ok).toBe(false)
-    if (!r.ok) expect(r.error).toContain('copia del plugin nel box non riuscita')
+    if (!r.ok) expect(r.error).toContain('copia del plugin nel volume dei plugin non riuscita')
+    // l'usa-e-getta è stato rimosso comunque (il finally scatta anche sull'errore)
+    const helper = calls.find((a) => a[0] === 'create')![2]!
+    expect(calls.some((a) => a[0] === 'rm' && a.includes(helper))).toBe(true)
+    // e la copia parziale nel volume è stata buttata via (rm one-shot del path)
+    expect(calls.some((a) => a.includes('rm') && a.includes('-rf') && a.some((x) => typeof x === 'string' && x.startsWith('/p/')))).toBe(true)
     expect(deps.listServers()).toEqual([])
     expect(installedPlugins({ getSetting: get })).toEqual([])
     expect(existsSync(join(DATA, 'plugins', 'mp-box', 'box-plugin', sha.slice(0, 12)))).toBe(false)
@@ -666,6 +690,160 @@ describe('L5: copia del plugin nel box — sequenza, esiti, ripristino', () => {
       expect(deps.listServers()).toEqual([])
     } finally {
       rmSync(skillOnly, { recursive: true, force: true })
+    }
+  })
+})
+
+// ---- M1+M2+M3: i .mcp.json PIATTI dei plugin ufficiali (contenuti VERI, pubblici) ----
+
+describe('M1/M2/M3: linear, github, terraform — i .mcp.json veri del marketplace ufficiale', () => {
+  // contenuti copiati dai repository pubblici dei plugin ufficiali (fase 13
+  // correzioni 2): linear e github usano la mappa PIATTA, context7 mcpServers
+  const LINEAR_MCP = '{ "linear": { "type": "http", "url": "https://mcp.linear.app/mcp" } }'
+  const GITHUB_MCP = '{ "github": { "type": "http", "url": "https://api.githubcopilot.com/mcp/",\n' +
+    '    "headers": { "Authorization": "Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN}" } } }'
+  const TERRAFORM_MCP = '{ "terraform": { "command": "docker", "args": ["run", "-i", "--rm", "-e", "TFE_TOKEN=${TFE_TOKEN}",\n' +
+    '        "hashicorp/terraform-mcp-server:0.4.0"] } }'
+  const CONTEXT7_MCP = '{ "mcpServers": { "context7": { "type": "http", "url": "https://mcp.context7.com/mcp?client=claude-code-plugin" } } }'
+
+  let STG: string
+  let settings: Map<string, unknown>
+  let opened: number
+  beforeEach(() => {
+    settings = new Map()
+    STG = mkdtempSync(join(tmpdir(), 'sandbot-install-stg-'))
+    opened = 0
+  })
+  afterEach(() => rmSync(STG, { recursive: true, force: true }))
+  const cloneDeps = (): { allowFileUrlsForTests: boolean; mkdtemp: (prefix: string) => string } => ({
+    allowFileUrlsForTests: true,
+    mkdtemp: (prefix) => {
+      const d = join(STG, prefix + Math.random().toString(36).slice(2, 8))
+      mkdirSync(d, { recursive: true })
+      return d
+    }
+  })
+  /** Un repo git locale col .mcp.json VOLUTO: un plugin ufficiale in miniatura. */
+  const repoWith = (mcpJson: string): { repo: string; sha: string } => {
+    const repo = mkdtempSync(join(tmpdir(), 'sandbot-plugin-repo-'))
+    writeFileSync(join(repo, '.mcp.json'), mcpJson)
+    execSync('git init -q && git config user.email t@t && git config user.name t && git add -A && git commit -qm init', { cwd: repo })
+    return { repo, sha: execSync('git rev-parse HEAD', { cwd: repo }).toString().trim() }
+  }
+  const depsOf = (repo: string, sha: string): InstallDeps => {
+    const saved = new Map<string, Map<string, unknown>>()
+    const servers: McpServerConfig[] = []
+    return {
+      store: fakeStore(saved),
+      marketplaces: {
+        findPlugin: async () => ({ reg: { name: 'claude-plugins-official', source: repo, kind: 'git' as const, official: true, addedAt: 1 }, plugin: { name: 'probe', source: { kind: 'url' as const, url: `file://${repo}`, sha } } }),
+        cloneOf: () => null,
+        list: () => []
+      },
+      findRegistryEntry: async () => null,
+      listServers: () => servers,
+      saveServers: (s: McpServerConfig[]) => { servers.length = 0; servers.push(...s) },
+      toolsOfServer: async () => [],
+      openExternal: async () => { opened++ },
+      hasUi: () => true,
+      dockerMode: () => false, // plugin http-only: nessuna copia nel box
+      dataDir: () => DATA,
+      onChange: () => undefined
+    }
+  }
+  const set = (k: string, v: unknown) => settings.set(k, v)
+  const get = <T,>(k: string, f: T): T => (settings.get(k) as T | undefined) ?? f
+
+  it('M1: linear (mappa PIATTA) — la card mostra 1 server; M2: installato in needs_auth, NESSUN browser, il messaggio lo dice', async () => {
+    const { repo, sha } = repoWith(LINEAR_MCP)
+    try {
+      const deps = depsOf(repo, sha)
+      const card = await buildPluginCard('plugin:probe@claude-plugins-official', '', deps, cloneDeps())
+      expect(card.ok).toBe(true)
+      if (!card.ok) return
+      expect(card.card.servers).toEqual([{ name: 'linear', runtimeLabel: 'remoto (mcp.linear.app)' }])
+      const r = await installPlugin(card.card, 'agent_alice', deps, set, get, cloneDeps())
+      expect(r.ok).toBe(true)
+      if (!r.ok) return
+      expect(r.message).toContain('da autorizzare: linear (Impostazioni → Installati → Connetti)')
+      const cfg = deps.listServers()[0]!
+      expect(cfg.transport).toBe('http')
+      expect(cfg.url).toBe('https://mcp.linear.app/mcp')
+      expect(cfg.auth).toEqual({ kind: 'oauth' }) // server http senza header → OAuth
+      expect(cfg.pluginSpec).toEqual({ url: 'https://mcp.linear.app/mcp' })
+      // M2: stato connettore needs_auth (lo vedono la scheda Installati e
+      // skippedByConnectorState) e il browser NON si apre all'installazione
+      expect((get<Record<string, { status?: string }>>('connectors.state', {})[cfg.id])?.status).toBe('needs_auth')
+      expect(opened).toBe(0)
+    } finally {
+      rmSync(repo, { recursive: true, force: true })
+    }
+  })
+
+  it('M3: github — ${GITHUB_PERSONAL_ACCESS_TOKEN} negli header è "da configurare" in card, needsAuth settings e kind della UI', async () => {
+    const { repo, sha } = repoWith(GITHUB_MCP)
+    try {
+      const deps = depsOf(repo, sha)
+      const card = await buildPluginCard('plugin:probe@claude-plugins-official', '', deps, cloneDeps())
+      expect(card.ok).toBe(true)
+      if (!card.ok) return
+      // il VAR usato negli header è in card anche se il manifest NON lo dichiara
+      expect(card.card.settings).toContainEqual({ key: 'GITHUB_PERSONAL_ACCESS_TOKEN' })
+      const r = await installPlugin(card.card, 'agent_alice', deps, set, get, cloneDeps())
+      expect(r.ok).toBe(true)
+      if (!r.ok) return
+      expect(r.message).toContain('da configurare: GITHUB_PERSONAL_ACCESS_TOKEN')
+      const cfg = deps.listServers()[0]!
+      expect(cfg.auth).toEqual({ kind: 'headers' })
+      expect(cfg.pluginSpec).toEqual({
+        url: 'https://api.githubcopilot.com/mcp/',
+        headers: { Authorization: 'Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN}' }
+      })
+      expect(cfg.needsAuth).toEqual({ kind: 'settings', keys: ['GITHUB_PERSONAL_ACCESS_TOKEN'] })
+      // il valore si salva col kind della UI (SECRET_KIND_FOR_NEEDS.settings →
+      // userConfig): è lo store che il resolver legge alla connessione
+      await deps.store.write(cfg.id, SECRET_KIND.userConfig, { GITHUB_PERSONAL_ACCESS_TOKEN: 'ghp-finta' })
+      expect(await deps.store.read(cfg.id, SECRET_KIND.userConfig)).toEqual({ GITHUB_PERSONAL_ACCESS_TOKEN: 'ghp-finta' })
+    } finally {
+      rmSync(repo, { recursive: true, force: true })
+    }
+  })
+
+  it('M3: terraform — ${TFE_TOKEN} in args: server NON registrato, la card e il messaggio dicono perché', async () => {
+    const { repo, sha } = repoWith(TERRAFORM_MCP)
+    try {
+      const deps = depsOf(repo, sha)
+      const card = await buildPluginCard('plugin:probe@claude-plugins-official', '', deps, cloneDeps())
+      expect(card.ok).toBe(true)
+      if (!card.ok) return
+      expect(card.card.servers).toEqual([{ name: 'terraform', runtimeLabel: 'non supportato: valore in argv (TFE_TOKEN)' }])
+      const r = await installPlugin(card.card, 'agent_alice', deps, set, get, cloneDeps())
+      expect(r.ok).toBe(true)
+      if (!r.ok) return
+      expect(r.message).toContain('server non installati (valore in argv): terraform (TFE_TOKEN)')
+      expect(deps.listServers()).toEqual([])
+      // il plugin resta installato (le sue skill, il suo record) senza il server
+      expect(installedPlugins({ getSetting: get })[0]!.servers).toEqual([])
+    } finally {
+      rmSync(repo, { recursive: true, force: true })
+    }
+  })
+
+  it('M1: context7 (mappa mcpServers) — 1 server http dal file vero', async () => {
+    const { repo, sha } = repoWith(CONTEXT7_MCP)
+    try {
+      const deps = depsOf(repo, sha)
+      const card = await buildPluginCard('plugin:probe@claude-plugins-official', '', deps, cloneDeps())
+      expect(card.ok).toBe(true)
+      if (!card.ok) return
+      expect(card.card.servers).toEqual([{ name: 'context7', runtimeLabel: 'remoto (mcp.context7.com)' }])
+      const r = await installPlugin(card.card, 'agent_alice', deps, set, get, cloneDeps())
+      expect(r.ok).toBe(true)
+      const cfg = deps.listServers()[0]!
+      expect(cfg.url).toBe('https://mcp.context7.com/mcp?client=claude-code-plugin')
+      expect(cfg.auth).toEqual({ kind: 'oauth' })
+    } finally {
+      rmSync(repo, { recursive: true, force: true })
     }
   })
 })

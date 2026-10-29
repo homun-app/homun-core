@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   parseMarketplace, inspectPlugin, pluginSkillName, sourceSupported, substitutePluginRoot,
-  substituteUserConfig, userConfigKeysOf, stagePlugin, gitCloneArgv, checkGitUrl,
+  substituteUserConfig, userConfigKeysOf, argvPlaceholdersOf, stagePlugin, gitCloneArgv, checkGitUrl,
   relativeSourceError, findEscapingSymlink, PLUGIN_MAX_FILES, type PluginSource
 } from '../marketplace'
 
@@ -169,6 +169,75 @@ describe('inspectPlugin (puro sul filesystem)', () => {
   })
 })
 
+// ---- M1: i .mcp.json PIATTI dei plugin ufficiali (contenuti VERI, pubblici) ----
+// 9 dei 14 plugin ufficiali (linear, github, gitlab, playwright, firebase,
+// terraform, serena, laravel-boost, example-plugin) usano la mappa PIATTA
+// nome→server alla radice; prima collectMcpServers leggeva SOLO mcpServers e
+// "Installa il plugin linear" dava 0 server senza nessun errore.
+
+describe('M1: .mcp.json piatto — i file veri di linear, github, terraform, context7', () => {
+  const pluginWith = (mcpJson: string): string => {
+    const dir = join(FIX, 'flat-' + Math.random().toString(36).slice(2, 8))
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, '.mcp.json'), mcpJson)
+    return dir
+  }
+
+  it('linear: mappa piatta con type http → 1 server http', () => {
+    const out = inspectPlugin(pluginWith('{ "linear": { "type": "http", "url": "https://mcp.linear.app/mcp" } }'))
+    expect(out.errors).toEqual([])
+    expect(out.mcpServers).toEqual([{ name: 'linear', url: 'https://mcp.linear.app/mcp', from: '.mcp.json' }])
+  })
+
+  it('github: mappa piatta con header ${GITHUB_PERSONAL_ACCESS_TOKEN} → 1 server http con i header NON sostituiti', () => {
+    const out = inspectPlugin(pluginWith(
+      '{ "github": { "type": "http", "url": "https://api.githubcopilot.com/mcp/",\n' +
+      '    "headers": { "Authorization": "Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN}" } } }'
+    ))
+    expect(out.errors).toEqual([])
+    expect(out.mcpServers).toEqual([{
+      name: 'github', url: 'https://api.githubcopilot.com/mcp/',
+      headers: { Authorization: 'Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN}' }, from: '.mcp.json'
+    }])
+  })
+
+  it('terraform: mappa piatta con command → 1 server stdio (poi M3 decide se è installabile)', () => {
+    const out = inspectPlugin(pluginWith(
+      '{ "terraform": { "command": "docker", "args": ["run", "-i", "--rm", "-e", "TFE_TOKEN=${TFE_TOKEN}",\n' +
+      '        "hashicorp/terraform-mcp-server:0.4.0"] } }'
+    ))
+    expect(out.errors).toEqual([])
+    expect(out.mcpServers).toHaveLength(1)
+    expect(out.mcpServers[0]).toMatchObject({
+      name: 'terraform', command: 'docker',
+      args: ['run', '-i', '--rm', '-e', 'TFE_TOKEN=${TFE_TOKEN}', 'hashicorp/terraform-mcp-server:0.4.0']
+    })
+  })
+
+  it('context7: mappa con mcpServers → 1 server http (la forma che già funzionava)', () => {
+    const out = inspectPlugin(pluginWith(
+      '{ "mcpServers": { "context7": { "type": "http", "url": "https://mcp.context7.com/mcp?client=claude-code-plugin" } } }'
+    ))
+    expect(out.errors).toEqual([])
+    expect(out.mcpServers).toEqual([{ name: 'context7', url: 'https://mcp.context7.com/mcp?client=claude-code-plugin', from: '.mcp.json' }])
+  })
+
+  it('{} vale 0 server SENZA errore; {"foo": 1} è un errore di ispezione', () => {
+    const empty = inspectPlugin(pluginWith('{}'))
+    expect(empty.mcpServers).toEqual([])
+    expect(empty.errors).toEqual([])
+    const bad = inspectPlugin(pluginWith('{"foo": 1}'))
+    expect(bad.mcpServers).toEqual([])
+    expect(bad.errors).toEqual(['.mcp.json senza server riconoscibili'])
+  })
+
+  it('un valore senza url/command/type rompe la forma piatta: errore, non silenzio', () => {
+    const out = inspectPlugin(pluginWith('{ "x": { "type": "http" }, "rotto": {} }'))
+    expect(out.errors).toContain('.mcp.json senza server riconoscibili')
+    expect(out.mcpServers).toEqual([])
+  })
+})
+
 // ---- sostituzioni (pure) ----
 
 describe('sostituzione dei placeholder (pura)', () => {
@@ -176,8 +245,36 @@ describe('sostituzione dei placeholder (pura)', () => {
     expect(substituteUserConfig('Bearer ${user_config.TOKEN}', { TOKEN: 'segreto' })).toBe('Bearer segreto')
     expect(substituteUserConfig('${user_config.MANCANTE}', {})).toBe('${user_config.MANCANTE}')
   })
+  it('M3: ${VAR} e ${VAR:-default} — il valore dallo store, il default senza valore, MAI dall\'ambiente', () => {
+    expect(substituteUserConfig('Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN}', { GITHUB_PERSONAL_ACCESS_TOKEN: 'ghp-1' })).toBe('Bearer ghp-1')
+    // senza valore e senza default: il placeholder RESTA (la connessione rifiuta)
+    expect(substituteUserConfig('${API_KEY}', {})).toBe('${API_KEY}')
+    // con default e senza valore: si usa il default
+    expect(substituteUserConfig('${PORTA:-8080}', {})).toBe('8080')
+    // con default e CON valore: vince il valore
+    expect(substituteUserConfig('${PORTA:-8080}', { PORTA: '9443' })).toBe('9443')
+    // ${CLAUDE_PLUGIN_ROOT} non si tocca qui (lo sostituisce substitutePluginRoot)
+    expect(substituteUserConfig('${CLAUDE_PLUGIN_ROOT}/x', {})).toBe('${CLAUDE_PLUGIN_ROOT}/x')
+  })
+  it('M3: userConfigKeysOf — ${VAR} SENZA default è obbligatoria, con default no', () => {
+    expect(
+      userConfigKeysOf({ name: 'x', from: 't', url: 'https://x/${user_config.U}', env: { E: '${VAR}' }, headers: { H: '${OPT:-v} ${user_config.K} ${VAR}' } }).sort()
+    ).toEqual(['K', 'U', 'VAR'])
+    expect(userConfigKeysOf({ name: 'x', from: 't', headers: { H: '${SOLO:-default}' } })).toEqual([])
+  })
+  it('M3: argvPlaceholdersOf — i nomi in command/args, ${CLAUDE_PLUGIN_ROOT} escluso', () => {
+    // terraform vero: TFE_TOKEN=${TFE_TOKEN} dentro args
+    expect(
+      argvPlaceholdersOf({ name: 'terraform', from: 't', command: 'docker', args: ['run', '-i', '--rm', '-e', 'TFE_TOKEN=${TFE_TOKEN}', 'hashicorp/terraform-mcp-server:0.4.0'] })
+    ).toEqual(['TFE_TOKEN'])
+    expect(
+      argvPlaceholdersOf({ name: 'x', from: 't', command: 'node ${CLAUDE_PLUGIN_ROOT}/run.js', args: ['${user_config.KEY}', 'fisso'] })
+    ).toEqual(['KEY'])
+    expect(argvPlaceholdersOf({ name: 'x', from: 't', command: 'npx', args: ['-y', 'p@1.0.0'] })).toEqual([])
+    expect(argvPlaceholdersOf({ name: 'x', from: 't', command: 'docker', args: ['-e', 'X=${A:-b}'] })).toEqual(['A'])
+  })
   it('${CLAUDE_PLUGIN_ROOT} diventa il path del plugin NEL BOX', () => {
-    expect(substitutePluginRoot('node ${CLAUDE_PLUGIN_ROOT}/bin/run.js', '/box/plugins/mp/demo/abc123')).toBe('node /box/plugins/mp/demo/abc123/bin/run.js')
+    expect(substitutePluginRoot('node ${CLAUDE_PLUGIN_ROOT}/bin/run.js', '/plugins/mp/demo/abc123')).toBe('node /plugins/mp/demo/abc123/bin/run.js')
   })
   it('userConfigKeysOf raccoglie le chiavi da url, env e headers', () => {
     expect(
