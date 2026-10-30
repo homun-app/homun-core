@@ -3,7 +3,6 @@
 // data e sorgente; l'utente può modificarne il contenuto o eliminarle.
 import { useEffect, useState } from 'react'
 import { Trans } from '@lingui/react/macro'
-import { t } from '@lingui/core/macro'
 import { formatDate } from '../lib/i18n'
 import { api } from '../store'
 import type { MemoryInfo } from '../../../shared/types'

@@ -4,12 +4,12 @@
 // messaggio di sistema (CONNECTOR_CONNECTED) per proseguire.
 // La stessa card con etichetta "Riconnetti" appare quando un token scade.
 import { useEffect, useState } from 'react'
-import { Trans } from '@lingui/react/macro'
-import { t } from '@lingui/core/macro'
+import { useLingui, Trans } from '@lingui/react/macro'
 import { api, useStore } from '../store'
 import type { ConnectorInfo, TranscriptEntry } from '../../../shared/types'
 
 export function ConnectorCard({ entry }: { entry: TranscriptEntry }) {
+  const { t } = useLingui()
   const message = (entry.meta?.message ?? {}) as { connectorId?: string; name?: string; reason?: string }
   const [status, setStatus] = useState<'pending' | 'connecting' | 'connected' | 'failed'>(
     entry.meta?.connected ? 'connected' : 'pending'

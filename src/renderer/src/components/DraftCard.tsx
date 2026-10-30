@@ -6,11 +6,9 @@
 // mostrati in "Altri parametri", senza via la bozza è solo testo (Invia
 // disabilitato), con nomi di argomento sconosciuti la modifica è bloccata.
 import { useState } from 'react'
-import { useLingui } from '@lingui/react'
-import { Trans } from '@lingui/react/macro'
-import { t } from '@lingui/core/macro'
-import type { MessageDescriptor } from '@lingui/core'
+import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
+import type { MessageDescriptor } from '@lingui/core'
 import { useStore } from '../store'
 import type { TranscriptEntry, SendMessageMeta, SendMessagePayload } from '../../../shared/types'
 
@@ -23,7 +21,7 @@ const CHANNEL_LABEL: Record<Draft['channel'], MessageDescriptor> = {
 }
 
 export function DraftCard({ entry }: { entry: TranscriptEntry }) {
-  const { i18n } = useLingui()
+  const { t, i18n } = useLingui()
   const send = useStore((s) => s.draftSend)
   const discard = useStore((s) => s.draftDiscard)
   const update = useStore((s) => s.draftUpdate)

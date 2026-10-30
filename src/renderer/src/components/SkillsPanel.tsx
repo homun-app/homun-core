@@ -1,12 +1,12 @@
 // Sezione "Skill" della vista dell'agente (fase 4): elenco delle skill con
 // descrizione, visualizzazione delle istruzioni complete ed eliminazione.
 import { useEffect, useState } from 'react'
-import { Trans } from '@lingui/react/macro'
-import { t } from '@lingui/core/macro'
+import { useLingui, Trans } from '@lingui/react/macro'
 import { api } from '../store'
 import type { SkillInfo } from '../../../shared/types'
 
 export function SkillsPanel({ agentId, onClose }: { agentId: string; onClose: () => void }) {
+  const { t } = useLingui()
   const [skills, setSkills] = useState<SkillInfo[]>([])
   const [open, setOpen] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)

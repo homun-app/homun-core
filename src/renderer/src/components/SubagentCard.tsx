@@ -4,9 +4,8 @@
 // bottoni Apri (pannello del transcript del figlio) e Ferma. Come TaskCard, lo
 // stato arriva dal registro, non dal testo del modello.
 import { useStore } from '../store'
-import { useLingui } from '@lingui/react'
-import { Trans } from '@lingui/react/macro'
-import { t, msg } from '@lingui/core/macro'
+import { useLingui, Trans } from '@lingui/react/macro'
+import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
 import type { TranscriptEntry, SendMessageMeta, SendMessagePayload, SubagentInfo } from '../../../shared/types'
 
@@ -35,7 +34,7 @@ function fmtAgo(at: number, now: number): MessageDescriptor {
 }
 
 export function SubagentCard({ entry }: { entry: TranscriptEntry }) {
-  const { i18n } = useLingui()
+  const { t, i18n } = useLingui()
   const subagents = useStore((s) => s.subagents)
   const openSubagent = useStore((s) => s.openSubagent)
   const stopSubagent = useStore((s) => s.stopSubagent)

@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { registerIpc, emitLocal } from './ipc'
 import { setDataDir, listAgents, createAgent } from './store/db'
 import { createTray, refreshTray } from './tray'
-import { initMainLanguage } from './i18n'
+import { initMainLanguage, applyStartupLanguage } from './i18n'
 import { DaemonClient } from './daemon-client'
 import { userDataDir } from './paths'
 
@@ -78,7 +78,15 @@ app.whenReady().then(() => {
   // fase 5: apre il browser di sistema per l'autorizzazione OAuth dei connettori
   client.registerHost('host.openExternal', ([url]) => shell.openExternal(String(url)))
   registerIpc(client, () => BrowserWindow.getAllWindows())
-  void client.start().catch((e) => console.error('[sandbot] daemon non avviabile:', e))
+  void client.start()
+    .then(() => {
+      // fase 17a (K1): il setting 'ui.language' salvato decide la lingua del
+      // tray anche al riavvio (stessa strada dell'handler IPC settings:get);
+      // se il daemon non risponde resta la lingua di sistema
+      return applyStartupLanguage(() => client.call('settings:get', ['ui.language', 'system']))
+    })
+    .then(() => refreshTray())
+    .catch((e) => console.error('[sandbot] daemon non avviabile:', e))
 
   if (listAgents().length === 0) {
     // primo avvio: agente principale, come il "Bot principale" dell'originale

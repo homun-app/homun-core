@@ -5,8 +5,7 @@
 // come gira, cosa serve, componenti non importate): del modello c'è solo
 // `reason`. La proposta nata in un turno contaminato mostra l'avviso in cima.
 import { useState } from 'react'
-import { Trans } from '@lingui/react/macro'
-import { t } from '@lingui/core/macro'
+import { useLingui, Trans } from '@lingui/react/macro'
 import { api } from '../store'
 import type { TranscriptEntry } from '../../../shared/types'
 
@@ -30,6 +29,7 @@ function UntrustedBanner({ show }: { show: boolean }) {
 }
 
 export function McpServerCard({ entry }: { entry: TranscriptEntry }) {
+  const { t } = useLingui()
   const message = (entry.meta?.message ?? {}) as McpServerMessage
   const [status, setStatus] = useState<'pending' | 'installing' | 'installed' | 'error'>(
     entry.meta?.status === 'installed' ? 'installed' : entry.meta?.status === 'error' ? 'error' : 'pending'
@@ -43,7 +43,7 @@ export function McpServerCard({ entry }: { entry: TranscriptEntry }) {
       const r = await api.connectorsResolveMcpServer(entry.agentId, entry.id, 'add')
       if (r.ok) setStatus('installed')
       else {
-        setError(r.error ?? 'errore')
+        setError(r.error ?? t`errore`)
         setStatus('error')
       }
     } catch (e) {
@@ -114,6 +114,7 @@ export function McpServerCard({ entry }: { entry: TranscriptEntry }) {
 }
 
 export function PluginCard({ entry }: { entry: TranscriptEntry }) {
+  const { t } = useLingui()
   const message = (entry.meta?.message ?? {}) as PluginMessage
   const [status, setStatus] = useState<'pending' | 'installing' | 'installed' | 'error'>(
     entry.meta?.status === 'installed' ? 'installed' : entry.meta?.status === 'error' ? 'error' : 'pending'
@@ -127,7 +128,7 @@ export function PluginCard({ entry }: { entry: TranscriptEntry }) {
       const r = await api.pluginsResolve(entry.agentId, entry.id, 'install')
       if (r.ok) setStatus('installed')
       else {
-        setError(r.error ?? 'errore')
+        setError(r.error ?? t`errore`)
         setStatus('error')
       }
     } catch (e) {

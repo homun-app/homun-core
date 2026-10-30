@@ -815,8 +815,8 @@ msgid "Dettagli"
 msgstr "Details"
 
 #: src/renderer/src/components/LibraryPanel.tsx
-msgid "di"
-msgstr "by"
+msgid "di {author}"
+msgstr "by {author}"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "disattivate"
@@ -880,6 +880,7 @@ msgstr "incoming email"
 msgid "English"
 msgstr "English"
 
+#: src/renderer/src/components/ConnectorCards13.tsx
 #: src/renderer/src/components/DraftCard.tsx
 #: src/renderer/src/components/Settings.tsx
 msgid "errore"
@@ -1899,11 +1900,17 @@ msgstr "Always for this site"
 msgid "Serve un client OAuth tuo (tipo \"Desktop app\"):"
 msgstr "You need your own OAuth client (a \"Desktop app\"):"
 
-#. placeholder {0}: needs.keys.join(', ')
-#. placeholder {1}: needs.kind === 'key' ? '(header)' : needs.kind === 'env' ? '(variabile d&rsquo;ambiente)' : '(impostazione del plugin)'
 #: src/renderer/src/components/Settings.tsx
-msgid "serve: {0} {1}"
-msgstr "needs: {0} {1}"
+msgid "serve: {keys} (header)"
+msgstr "needs: {keys} (header)"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "serve: {keys} (impostazione del plugin)"
+msgstr "needs: {keys} (plugin setting)"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "serve: {keys} (variabile d’ambiente)"
+msgstr "needs: {keys} (environment variable)"
 
 #: src/renderer/src/components/ConnectorCards13.tsx
 msgid "serve: {needs}"

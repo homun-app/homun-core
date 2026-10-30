@@ -2,14 +2,14 @@
 // se allowCustom, multiSelect con conferma. La risposta torna come messaggio
 // utente (meta.respondedTo) e la card mostra lo stato risposto/scartato.
 import { useState } from 'react'
-import { Trans } from '@lingui/react/macro'
-import { t } from '@lingui/core/macro'
+import { useLingui, Trans } from '@lingui/react/macro'
 import { useStore } from '../store'
 import type { TranscriptEntry, SendMessageMeta, SendMessagePayload } from '../../../shared/types'
 
 type Widget = Extract<SendMessagePayload, { type: 'widget' }>
 
 export function WidgetCard({ entry }: { entry: TranscriptEntry }) {
+  const { t } = useLingui()
   const respond = useStore((s) => s.widgetRespond)
   const meta = (entry.meta ?? {}) as Partial<SendMessageMeta>
   const widget = meta.message as Widget | undefined

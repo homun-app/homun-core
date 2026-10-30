@@ -3,9 +3,8 @@
 // a createAgent + updateAgent(avatar), e "Cambia aspetto" del pannello destro
 // (le stesse famiglie e colori, salva con updateAgent(id, { avatar })).
 import { useEffect, useState } from 'react'
-import { useLingui } from '@lingui/react'
-import { Trans } from '@lingui/react/macro'
-import { t, msg } from '@lingui/core/macro'
+import { useLingui, Trans } from '@lingui/react/macro'
+import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog'
 import { api, useStore } from '../store'
@@ -39,7 +38,7 @@ function AvatarPicker({
   onFamily(f: BotFamily): void
   onColor(c: BotColor): void
 }) {
-  const { i18n } = useLingui()
+  const { t, i18n } = useLingui()
   return (
     <>
       <div className="grid grid-cols-5 gap-2">
@@ -73,6 +72,7 @@ function AvatarPicker({
 }
 
 export function NewBotDialog({ onClose }: { onClose: () => void }) {
+  const { t } = useLingui()
   const createAgent = useStore((s) => s.createAgent)
   const select = useStore((s) => s.select)
   const [name, setName] = useState('')

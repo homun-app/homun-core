@@ -1,7 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useLingui } from '@lingui/react'
-import { Trans } from '@lingui/react/macro'
-import { t } from '@lingui/core/macro'
+import { useLingui, Trans } from '@lingui/react/macro'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Paperclip, Plug, PanelRight } from 'lucide-react'
@@ -24,7 +22,7 @@ import { Bot } from '../bot/Bot'
 import { useBotInfo } from '../bot/use-bot'
 
 export function Chat() {
-  const { i18n } = useLingui()
+  const { t, i18n } = useLingui()
   const agents = useStore((s) => s.agents)
   const activeId = useStore((s) => s.activeId)
   const entries = useStore((s) => s.entries)
@@ -279,6 +277,7 @@ export function Chat() {
 }
 
 function EntryRow({ entry, showReasoning }: { entry: TranscriptEntry; showReasoning: boolean }) {
+  const { t } = useLingui()
   const reasoning = useStore((s) => s.reasoning[entry.id])
   // il colore del bot della chat in cui l'entry vive (bolle utente)
   const activeId = useStore((s) => s.activeId)
@@ -506,6 +505,7 @@ function ProviderWidgetCard({ entry }: { entry: TranscriptEntry }) {
  * campo per scrivere come utente (le @menzioni funzionano: le legge il daemon).
  */
 function GroupPanel() {
+  const { t } = useLingui()
   const groups = useStore((s) => s.groups)
   const openGroupId = useStore((s) => s.openGroupId)
   const groupMessages = useStore((s) => s.groupMessages)
@@ -676,6 +676,7 @@ function TaskPanel({ onClose }: { onClose: () => void }) {
  * approvazione funzionano con l'id del figlio e in fondo summary e report.
  */
 function SubagentPanel() {
+  const { t } = useLingui()
   const openSubagentId = useStore((s) => s.openSubagentId)
   const openSubagent = useStore((s) => s.openSubagent)
   const subagents = useStore((s) => s.subagents)

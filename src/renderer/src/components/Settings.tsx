@@ -4,9 +4,8 @@
 // design system. Il meccanismo settingsTab (aprire un tab preciso da un
 // widget) continua a funzionare.
 import { useEffect, useState, type ReactNode } from 'react'
-import { useLingui } from '@lingui/react'
-import { Trans } from '@lingui/react/macro'
-import { t, msg, plural } from '@lingui/core/macro'
+import { useLingui, Trans } from '@lingui/react/macro'
+import { msg, plural } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
 import { api, useStore } from '../store'
 import { formatDate, formatTime } from '../lib/i18n'
@@ -92,7 +91,7 @@ export function Settings() {
 // ---- fase 8 (§3bis L5): auto-review delle approvazioni ----
 
 function AutoReviewTab() {
-  const { i18n } = useLingui()
+  const { t, i18n } = useLingui()
   const providers = useStore((s) => s.providers)
   const prefill = useStore((s) => s.autoreviewPrefill)
   const [cfg, setCfg] = useState<AutoReviewSettings | null>(null)
@@ -242,6 +241,7 @@ const STATUS_LABEL: Record<string, MessageDescriptor> = {
  * Marketplace (elenco, aggiungi/rimuovi) e Gateway (modulo del punto 7).
  */
 function ConnectorsTab() {
+  const { t } = useLingui()
   const connectors = useStore((s) => s.connectors)
   const refreshConnectors = useStore((s) => s.refreshConnectors)
   const [sub, setSub] = useState<'app' | 'installati' | 'marketplace' | 'gateway'>('app')
@@ -285,6 +285,7 @@ function ConnectorsTab() {
  * dall'utente — vuoto = Dynamic Client Registration. Una riga che spiega.
  */
 function ClientMetadataUrlRow() {
+  const { t } = useLingui()
   const [url, setUrl] = useState<string | null>(null)
   useEffect(() => {
     void api.settingsGet<string>('connectors.oauth.clientMetadataUrl', '').then(setUrl).catch(() => setUrl(''))
@@ -307,6 +308,7 @@ function ClientMetadataUrlRow() {
 
 /** Scheda Installati: server del registro/plugin/gateway con fonte, fiducia, stato, enabledFor, disinstalla. */
 function InstalledTab() {
+  const { t } = useLingui()
   const [data, setData] = useState<{ servers: Array<McpServerInfo & { needsReauth?: boolean; neverAuthorized?: boolean }>; plugins: Array<{ name: string; marketplace: string; sha12: string; skills: Array<{ name: string }>; servers: string[]; enabledFor: string[]; updateAvailable?: boolean }> } | null>(null)
   const agents = useStore((s) => s.agents)
   const [values, setValues] = useState<Record<string, string>>({})
@@ -350,6 +352,10 @@ function InstalledTab() {
       {data.servers.map((sv) => {
         const src = sv.source as { kind?: string; name?: string; plugin?: string; preset?: string } | undefined
         const needs = sv.needsAuth as { kind?: string; keys?: string[] } | undefined
+        // fase 17a (K3): tre messaggi interi distinti, scelti col ternario FUORI
+        // dal testo — dentro <Trans> una stringa JS è un segnaposto e resterebbe
+        // italiana anche in inglese
+        const keys = needs?.keys?.join(', ') ?? ''
         return (
           <div key={sv.id} className="rounded-2xl border border-border bg-card px-3 py-2.5">
             <div className="flex items-center gap-2">
@@ -379,7 +385,15 @@ function InstalledTab() {
             {enabledForEditor('server', sv.id, sv.enabledFor)}
             {needs?.keys?.length ? (
               <div className="mt-2 space-y-1 border-t border-border pt-2">
-                <p className="text-[11px] text-destructive/80"><Trans>serve: {needs.keys.join(', ')} {needs.kind === 'key' ? '(header)' : needs.kind === 'env' ? '(variabile d&rsquo;ambiente)' : '(impostazione del plugin)'}</Trans></p>
+                <p className="text-[11px] text-destructive/80">
+                  {needs.kind === 'key' ? (
+                    <Trans>serve: {keys} (header)</Trans>
+                  ) : needs.kind === 'env' ? (
+                    <Trans>serve: {keys} (variabile d’ambiente)</Trans>
+                  ) : (
+                    <Trans>serve: {keys} (impostazione del plugin)</Trans>
+                  )}
+                </p>
                 {needs.keys.map((k) => (
                   <div key={k} className="flex gap-1">
                     <input
@@ -428,6 +442,7 @@ function InstalledTab() {
 
 /** Scheda Marketplace: elenco dei marketplace registrati, aggiungi (owner/repo o URL git) o rimuovi. Il BOT non può. */
 function MarketplaceTab() {
+  const { t } = useLingui()
   const [list, setList] = useState<Array<{ name: string; source: string; kind: string; official: boolean }> | null>(null)
   const [input, setInput] = useState('')
   const [error, setError] = useState('')
@@ -477,6 +492,7 @@ function MarketplaceTab() {
 
 /** Scheda Gateway (punto 7): un server MCP remoto di aggregazione, preset come dati, chiavi cifrate. */
 function GatewayTab() {
+  const { t } = useLingui()
   const [presets, setPresets] = useState<Array<{ id: string; name: string; auth: string; headerName?: string; help: string }> | null>(null)
   const [warning, setWarning] = useState('')
   const [name, setName] = useState('')
@@ -539,7 +555,7 @@ function GatewayTab() {
 }
 
 function ConnectorTile({ c }: { c: ConnectorInfo }) {
-  const { i18n } = useLingui()
+  const { t, i18n } = useLingui()
   const [busy, setBusy] = useState(false)
   const [open, setOpen] = useState(false)
   const [clientId, setClientId] = useState('')
@@ -675,6 +691,7 @@ function ConnectorTile({ c }: { c: ConnectorInfo }) {
 
 /** Server MCP aggiunti a mano: restano nella stessa vista "Connetti app". */
 function ManualServers() {
+  const { t } = useLingui()
   const [servers, setServers] = useState<McpServerInfo[]>([])
   const [secrets, setSecrets] = useState<string[]>([])
   const [edit, setEdit] = useState<McpServerInfo | null>(null)
@@ -787,7 +804,7 @@ function ManualServers() {
 // Fase 6: fuso orario, finestre di consegna, rientro/pausa per assenza e
 // notifiche per agente.
 function GeneralTab() {
-  const { i18n } = useLingui()
+  const { t, i18n } = useLingui()
   const agents = useStore((s) => s.agents)
   // fase 16 (U0): il selettore del tema (setting ui.theme)
   const theme = useStore((s) => s.theme)
@@ -988,6 +1005,7 @@ interface ModelOverrides { defaultModel?: string; fallbackModel?: string; autoRe
  * EFFETTIVO del provider (es. "predefinito: kimi-k3:cloud").
  */
 function ModelDefaultsRow({ p }: { p: ProviderConfig }) {
+  const { t } = useLingui()
   const [models, setModels] = useState<ModelInfo[] | null>(null)
   const [saved, setSaved] = useState<ModelOverrides>({})
 
@@ -1043,6 +1061,7 @@ function ModelDefaultsRow({ p }: { p: ProviderConfig }) {
  * daemon se la chiave è impostata (booleano).
  */
 function WebSearchKeyRow({ p }: { p: ProviderConfig }) {
+  const { t } = useLingui()
   const [set, setSet] = useState<boolean | null>(null)
   const [value, setValue] = useState('')
   const [busy, setBusy] = useState(false)
@@ -1102,6 +1121,7 @@ function WebSearchKeyRow({ p }: { p: ProviderConfig }) {
  * ultimo errore) dall'RPC di sola lettura websearch:status.
  */
 function WebSearchSection() {
+  const { t } = useLingui()
   const [keyless, setKeyless] = useState<boolean | null>(null)
   const [status, setStatus] = useState<WebSearchStatusRpc | null>(null)
 
@@ -1165,7 +1185,7 @@ function WebSearchSection() {
 }
 
 function ProvidersTab({ onChanged }: { onChanged: () => Promise<void> }) {
-  const { i18n } = useLingui()
+  const { t, i18n } = useLingui()
   const providers = useStore((s) => s.providers)
   const [edit, setEdit] = useState<ProviderConfig | null>(null)
   const [testing, setTesting] = useState<string | null>(null)
@@ -1257,6 +1277,7 @@ function ProvidersTab({ onChanged }: { onChanged: () => Promise<void> }) {
 }
 
 function ProviderForm({ initial, onSave, onCancel }: { initial: ProviderConfig; onSave: (p: ProviderConfig) => Promise<void>; onCancel: () => void }) {
+  const { t } = useLingui()
   const [p, setP] = useState(initial)
   return (
     <div className="space-y-2 rounded-2xl border border-border bg-muted p-3">
@@ -1306,6 +1327,7 @@ function ProviderForm({ initial, onSave, onCancel }: { initial: ProviderConfig; 
 }
 
 function AgentsTab() {
+  const { t } = useLingui()
   const agents = useStore((s) => s.agents)
   const providers = useStore((s) => s.providers)
   const mainAgentId = useStore((s) => s.mainAgentId)
@@ -1431,6 +1453,7 @@ function AgentsTab() {
 }
 
 function PermissionsTab({ onChanged }: { onChanged: () => Promise<void> }) {
+  const { t } = useLingui()
   const permissions = useStore((s) => s.permissions)
   if (!permissions) return null
   return (
@@ -1503,7 +1526,7 @@ const KIND_LABEL: Record<TriggerKind, MessageDescriptor> = {
 }
 
 function RoutinesTab() {
-  const { i18n } = useLingui()
+  const { t, i18n } = useLingui()
   const activeId = useStore((s) => s.activeId)
   const connectors = useStore((s) => s.connectors)
   const [routines, setRoutines] = useState<RoutineInfo[]>([])
@@ -1693,7 +1716,7 @@ function TriggerEditor(props: {
   onSaved(): void
   onCreate?(title: string, prompt: string, trigger: RoutineTrigger, timezone: string): Promise<void>
 }) {
-  const { i18n } = useLingui()
+  const { t, i18n } = useLingui()
   const r = props.routine
   const [kind, setKind] = useState<TriggerKind>(props.initialKind ?? kindOf(r?.trigger, r?.schedule))
   const [title, setTitle] = useState(r?.title ?? '')

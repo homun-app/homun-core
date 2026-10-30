@@ -7,9 +7,7 @@
 // Rinomina, Cancella; le versioni col "ripristina come nuova versione".
 // L'avviso di spazio (> 2 GB) sta in cima, nessun blocco.
 import { useEffect, useMemo, useState } from 'react'
-import { useLingui } from '@lingui/react'
-import { Trans, Plural } from '@lingui/react/macro'
-import { t } from '@lingui/core/macro'
+import { useLingui, Trans, Plural } from '@lingui/react/macro'
 import { formatDate } from '../lib/i18n'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -59,6 +57,7 @@ export function LibraryPanel() {
 }
 
 function LibraryList() {
+  const { t } = useLingui()
   const [items, setItems] = useState<LibraryItemInfo[]>([])
   const [kind, setKind] = useState<'' | 'document' | 'chart' | 'file'>('')
   const [author, setAuthor] = useState('')
@@ -112,30 +111,34 @@ function LibraryList() {
         </div>
         {shown.length === 0 && <p className="mt-16 text-center text-sm text-muted-foreground"><Trans>La libreria è vuota: i documenti, i grafici e i file che i bot preparano finiscono qui.</Trans></p>}
         <div className="space-y-2">
-          {shown.map((i) => (
-            <div key={i.id} className="flex items-center justify-between gap-3 rounded-xl border border-border bg-muted/50 px-4 py-3">
-              <button className="min-w-0 flex-1 text-left" onClick={() => openLibrary(i.id)}>
-                <p className="truncate text-sm text-foreground">
-                  {i.pinned && <span className="mr-1 text-destructive">★</span>}
-                  {i.title}
-                  {i.kind === 'document' && <span className="ml-2 text-xs text-muted-foreground">v{i.currentVersion}</span>}
-                  {i.tainted && <span className="ml-2 text-xs text-destructive/80" title={t`Proveniente da dati esterni`}>{t`⚠ esterno`}</span>}
-                </p>
-                <p className="truncate text-xs text-muted-foreground">
-                  {i.kind === 'document' ? (
-                    <Trans>documento</Trans>
-                  ) : i.kind === 'chart' ? (
-                    <Trans>grafico {i.chartKind ?? ''}</Trans>
-                  ) : (
-                    <>
-                      {i.fileName ?? t`file`} · <Plural value={i.fileSize ?? 0} one="# byte" other="# byte" />
-                    </>
-                  )}{' · '}{t`di`} {nameOf(i.authorAgentId)} · {formatDate(i.updatedAt)}
-                </p>
-              </button>
-              <ItemActions item={i} onChanged={() => void refresh()} compact />
-            </div>
-          ))}
+          {shown.map((i) => {
+            // fase 17a (K3): "di {author}" è un solo messaggio (en: "by {author}")
+            const author = nameOf(i.authorAgentId)
+            return (
+              <div key={i.id} className="flex items-center justify-between gap-3 rounded-xl border border-border bg-muted/50 px-4 py-3">
+                <button className="min-w-0 flex-1 text-left" onClick={() => openLibrary(i.id)}>
+                  <p className="truncate text-sm text-foreground">
+                    {i.pinned && <span className="mr-1 text-destructive">★</span>}
+                    {i.title}
+                    {i.kind === 'document' && <span className="ml-2 text-xs text-muted-foreground">v{i.currentVersion}</span>}
+                    {i.tainted && <span className="ml-2 text-xs text-destructive/80" title={t`Proveniente da dati esterni`}>{t`⚠ esterno`}</span>}
+                  </p>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {i.kind === 'document' ? (
+                      <Trans>documento</Trans>
+                    ) : i.kind === 'chart' ? (
+                      <Trans>grafico {i.chartKind ?? ''}</Trans>
+                    ) : (
+                      <>
+                        {i.fileName ?? t`file`} · <Plural value={i.fileSize ?? 0} one="# byte" other="# byte" />
+                      </>
+                    )}{' · '}<Trans>di {author}</Trans> · {formatDate(i.updatedAt)}
+                  </p>
+                </button>
+                <ItemActions item={i} onChanged={() => void refresh()} compact />
+              </div>
+            )
+          })}
         </div>
       </div>
     </div>
@@ -144,6 +147,7 @@ function LibraryList() {
 
 /** Esporta/Fissa/Rinomina/Cancella (azioni dell'UTENTE, mai dei bot). */
 function ItemActions({ item, onChanged, compact }: { item: LibraryItemInfo; onChanged: () => void; compact?: boolean }) {
+  const { t } = useLingui()
   const [busy, setBusy] = useState(false)
   const [renaming, setRenaming] = useState(false)
   const [title, setTitle] = useState(item.title)
@@ -193,6 +197,7 @@ function ItemActions({ item, onChanged, compact }: { item: LibraryItemInfo; onCh
 }
 
 function LibraryItemView({ id }: { id: string }) {
+  const { t } = useLingui()
   const openLibrary = useStore((s) => s.openLibrary)
   const [item, setItem] = useState<LibraryItemInfo | null>(null)
   const [content, setContent] = useState<LibraryContentInfo | null>(null)
@@ -312,6 +317,7 @@ function DocumentBody({ markdown }: { markdown: string }) {
 /** Un grafico: Vega-Lite (SVG dal daemon) o Mermaid (strict, reso dalla UI) — sempre <img>. */
 function InlineChart({ lang, source }: { lang: 'vega-lite' | 'mermaid'; source: string }) {
   // fase 17a: alt tradotti (il contenuto del grafico è dato del bot)
+  const { t } = useLingui()
   const [url, setUrl] = useState<string | null>(null)
   const [failed, setFailed] = useState(false)
   useEffect(() => {
@@ -337,6 +343,7 @@ function InlineChart({ lang, source }: { lang: 'vega-lite' | 'mermaid'; source: 
 }
 
 function ChartBody({ content }: { content: LibraryContentInfo }) {
+  const { t } = useLingui()
   if (content.svg) return <img className="max-w-full rounded-xl border border-border bg-white" src={svgDataUrl(content.svg)} alt={t`grafico`} />
   return <InlineChart lang="mermaid" source={content.content ?? ''} />
 }

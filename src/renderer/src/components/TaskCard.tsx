@@ -3,9 +3,8 @@
 // sotto-transcript) e "Interrompi". Lo stato arriva dalla tabella tasks
 // (aggiornata via eventi), non dal testo del modello.
 import { useStore } from '../store'
-import { useLingui } from '@lingui/react'
-import { Trans } from '@lingui/react/macro'
-import { t, msg } from '@lingui/core/macro'
+import { useLingui, Trans } from '@lingui/react/macro'
+import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
 import type { TranscriptEntry, SendMessageMeta, SendMessagePayload } from '../../../shared/types'
 import type { TaskInfo } from '../../../shared/types'
@@ -33,7 +32,7 @@ function fmtAgo(at: number, now: number): MessageDescriptor {
 }
 
 export function TaskCard({ entry }: { entry: TranscriptEntry }) {
-  const { i18n } = useLingui()
+  const { t, i18n } = useLingui()
   const tasks = useStore((s) => s.tasks)
   const openTask = useStore((s) => s.openTask)
   const cancelTask = useStore((s) => s.cancelTask)

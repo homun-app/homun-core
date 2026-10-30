@@ -4,9 +4,7 @@
 // Le sezioni restano intestazioni della lista; i sottoagenti non compaiono
 // (come prima).
 import { useState } from 'react'
-import { useLingui } from '@lingui/react'
-import { Trans, Plural } from '@lingui/react/macro'
-import { t } from '@lingui/core/macro'
+import { useLingui, Trans, Plural } from '@lingui/react/macro'
 import { Plus, Library as LibraryIcon } from 'lucide-react'
 import { useStore } from '../store'
 import { filterSidebar } from '../sidebar-utils'
@@ -24,7 +22,7 @@ import {
 
 /** Una riga della lista dei bot: mascotte con lo stato di U3, nome, anteprima, pillole. */
 function AgentRow({ a }: { a: Agent }) {
-  const { i18n } = useLingui()
+  const { t, i18n } = useLingui()
   const info = useBotInfo(a.id)
   const select = useStore((s) => s.select)
   const activeId = useStore((s) => s.activeId)
@@ -135,6 +133,7 @@ function GroupRow({ g }: { g: GroupInfo }) {
 
 /** Il menu account di Lovable, adattato a un'app locale (niente account/piano/updater). */
 function AccountMenu() {
+  const { t } = useLingui()
   const agents = useStore((s) => s.agents)
   const mainAgentId = useStore((s) => s.mainAgentId)
   const theme = useStore((s) => s.theme)
@@ -179,6 +178,7 @@ function AccountMenu() {
 }
 
 export function Sidebar() {
+  const { t } = useLingui()
   const agents = useStore((s) => s.agents)
   const groups = useStore((s) => s.groups)
   const openLibraryId = useStore((s) => s.openLibraryId)

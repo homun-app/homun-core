@@ -2388,7 +2388,7 @@ Probe `scripts/fase15-probe.mjs` (nel repo, riutilizzabile): daemon REALE su car
 | **L2.4** mount solo dopo la prima attivazione, avvolta in `<I18nProvider i18n={i18n}>` | fatto | `src/renderer/src/main.tsx:22-30` |
 | **L2.5** cambio a caldo senza ricaricare la finestra | fatto | `store.ts:547-554` (`setUiLanguage` → `activateUiLanguage` + IPC al main) |
 | **L3** ogni testo visibile del renderer avvolto: `<Trans>` per JSX, `t`…`` per attributi/stringhe, `plural()`/`<Plural>` per i plurali, funzioni pure → descriptor `msg`, `toLocale*String('it-IT')` → `formatDate/formatTime` per lingua attiva | fatto | tutti i `components/*.tsx` + `components/ui/dialog.tsx`; funzioni pure: `bot/bot-state.ts:63,82` (botStatusText/botAriaLabel), `sidebar-utils.ts:34` (previewOf), `BotDialogs.tsx:20` (FAMILY_NAMES), `RightPanel.tsx:20,22` (TABS/TASK_LABEL), `TaskCard.tsx`/`SubagentCard.tsx` (STATUS_LABEL, fmtAgo), `Settings.tsx` (TAB_LABELS/KIND_LABEL/STATUS_LABEL); date: `RightPanel.tsx:26`, `Settings.tsx` (routine + raffreddamento), `LibraryPanel.tsx`, `MemoryPanel.tsx` |
-| **L4.1–L4.2** extract + traduzione inglese completa di TUTTI i messaggi, inglese di prodotto, segnaposto identici | fatto | 501/501 msgstr compilati in `locales/en/messages.po` (tabella: `scripts/fase17a-translate-en.py`, idempotente); `npx lingui compile` 0 errori |
+| **L4.1–L4.2** extract + traduzione inglese completa di TUTTI i messaggi, inglese di prodotto, segnaposto identici | fatto | 501/501 msgstr compilati in `locales/en/messages.po`; `npx lingui compile` 0 errori. (Lo script `scripts/fase17a-translate-en.py` usato in corsa è stato tolto nelle correzioni K4: la verità della traduzione è il `.po` più `GLOSSARY.md`) |
 | **L4.3** glossario con le scelte fisse | fatto | `src/renderer/src/locales/GLOSSARY.md` |
 | **L4.4** catalogo it con msgstr vuoto o = msgid | fatto | verificato dal test `i18n-catalogs.test.ts` |
 | **L5.1** dizionario tipato del main (tray, tooltip, notifica di prova, dialoghi nativi) | fatto | `src/main/i18n.ts:18-65` |
@@ -2409,12 +2409,12 @@ Le 10 coppie della specifica (bot→bot, Bot principale/Principale→Main bot/Ma
 
 ### File
 
-- **NUOVI**: `lingui.config.ts`; `src/shared/ui-language.ts` (+test); `src/renderer/src/lib/i18n.ts`; `src/renderer/src/locales/{it,en}/messages.po`; `src/renderer/src/locales/GLOSSARY.md`; `src/main/i18n.ts`; test `ui-language.test.ts`, `i18n-catalogs.test.ts`, `unwrapped-text-guard.test.ts`, helper `po-helper.ts`; `scripts/fase17a-translate-en.py` (tabella della traduzione, idempotente).
+- **NUOVI**: `lingui.config.ts`; `src/shared/ui-language.ts` (+test); `src/renderer/src/lib/i18n.ts`; `src/renderer/src/locales/{it,en}/messages.po`; `src/renderer/src/locales/GLOSSARY.md`; `src/main/i18n.ts`; test `ui-language.test.ts`, `i18n-catalogs.test.ts`, `unwrapped-text-guard.test.ts`, helper `po-helper.ts`. (Lo script `scripts/fase17a-translate-en.py` della traduzione è stato tolto nelle correzioni K4.)
 - **MODIFICATI**: `electron.vite.config.ts`, `vitest.config.ts` (plugin babel per compilare le macro nei test — senza, le macro lanciano errore a runtime), `package.json` (dipendenze esatte + script), `src/renderer/src/vite-env.d.ts`, `main.tsx`, `store.ts`, `sidebar-utils.ts`, `bot/{bot-state,use-bot,Bot}.tsx`, tutti i `components/*.tsx` (Sidebar, Chat, RightPanel, Settings, ApprovalCard, BotDialogs, ConnectorCard, ConnectorCards13, DraftCard, LibraryCards, LibraryPanel, MemoryPanel, RuleProposalCard, SkillsPanel, SubagentCard, TaskCard, VaultSettings, WidgetCard) + `components/ui/dialog.tsx`; main: `index.ts`, `ipc.ts`, `tray.ts`; `preload/index.ts`; `shared/types.ts` (una funzione: `uiLanguageChanged`); test esistenti bot-state/sidebar-utils adattati ai descriptor.
 
 ### Decisioni prese e perché
 
-1. **`t` macro legata all'istanza globale di `@lingui/core`** (stessa istanza passata a `I18nProvider`): in Lingui 6 `useLingui()` non espone più `t`, e il provider ri-renderizza TUTTO l'albero al cambio lingua (`useSyncExternalStore` su `i18n.on('change')`), quindi il cambio a caldo vale per `t` e `<Trans>` senza hook per componente. `useLingui()` resta dove serve l'istanza (aria-label della mascotte, etichette dei tab, FAMILY_NAMES, STATUS_LABEL).
+1. **Nei componenti la `t` viene da `const { t } = useLingui()` di `@lingui/react/macro`** (corretta nelle correzioni K2; la decisione originale era sbagliata). La versione iniziale usava `t` da `@lingui/core/macro`, che legge l'istanza globale al momento del render e NON è reattiva: dopo il clic su English i componenti che non si ri-renderizzavano per altri motivi mostravano testi vecchi (es. il placeholder «Cerca» della sidebar). Il macro `useLingui` di `@lingui/react/macro` restituisce `{ t, i18n }` legato al contesto e il componente che lo usa si ri-renderizza al cambio lingua (`node_modules/@lingui/react/macro/index.d.mts`, riga 113 circa). A livello di modulo e nelle funzioni pure restano i descriptor `msg`, risolti nel componente con `i18n.t(…)`/`t(descriptor)`; `@lingui/core/macro` resta la scelta per i `.ts` non-React, e la guardia vieta `t` da lì nei `.tsx` (`msg`/`plural`/`select` ammessi).
 2. **Le funzioni pure restituiscono descriptor `msg` con i valori incorporati**: la macro genera `{ id, message, values }` e `i18n._` usa `id.values` (verificato nel codice di @lingui/core), quindi chi mostra chiama solo `i18n._(descriptor)` senza ricostruire i valori.
 3. **Plurali ICU dove il numero è visibile**: `{n} task` e `{n} sottoagenti` nella sidebar, `N byte` in libreria, `N modelli disponibili` nel test provider. Unica differenza visibile in italiano rispetto a prima, voluta dalla specifica L3 ("mai n===1 a mano"): con 1 i testi ora al singolare ("1 sottoagente", "1 modello disponibile") dove prima restavano invariati al plurale.
 4. **I testi che diventano REGOLE auto-review restano in italiano** (`suggestedRule` in ApprovalCard, le frasi `proposeRule` in DraftCard): sono input che finiscono nel setting `autoReview` e li valuta il revisore del daemon (prompts = 17b); tradurli ora cambierebbe ciò che viene salvato e valutato.
@@ -2452,7 +2452,7 @@ Le 10 coppie della specifica (bot→bot, Bot principale/Principale→Main bot/Ma
 
 ### Problemi fuori scope (per la 17b)
 
-Testi che l'utente VEDE ma che nascono nel daemon/shared e restano italiani (da muovere nella 17b):
+Testi che l'utente VEDE ma che nascono nel daemon/shared/main e restano italiani (da muovere nella 17b):
 
 1. `describeTrigger`/`describeCron` di `src/shared/cron-human.ts`: la descrizione in linguaggio naturale dei trigger delle routine (Settings → Routine, card di approvazione update_state) — modulo condiviso col daemon, testato a parte.
 2. I riepiloghi delle card di approvazione generati nel loop (`src/main/agent/loop.ts`, es. motivi di neverAuto) e i messaggi di sistema/notice del daemon.
@@ -2461,3 +2461,41 @@ Testi che l'utente VEDE ma che nascono nel daemon/shared e restano italiani (da 
 5. Il fallback `'altro bot'` dentro l'espressione "Da {nome}" in chat (nome di risorsa, resta com'è).
 6. Errori di `vega-render.ts` ('caricamento dati vietato', 'richiesta di rete vietata'): non mostrati in UI (il grafico ricade sul sorgente).
 7. Preesistenti invariati: daemon `sandbot-f14dbg-*` attivi (non miei), SDK MCP v2 fuori fase, avvisi rollup `INEFFECTIVE_DYNAMIC_IMPORT`, test daemon flaky a parallelismo pieno su macchina carica (v. deviazione 5).
+8. Le descrizioni del catalogo connettori (`src/main/connectors/catalog.json`, "Server MCP ufficiale…"): nascono nel main, l'utente le vede nelle Impostazioni → Connettori in inglese come in italiano (viste dal revisore dal vivo).
+9. La descrizione predefinita del bot principale alla creazione (`src/main/index.ts`, «Il mio assistente personale sempre attivo.»): va decisa nella lingua attiva al momento della creazione (un bot già creato conserva la descrizione scritta allora).
+10. Il motivo delle card di approvazione (`src/main/agent/permissions.ts`, «… richiede approvazione»): nasce nel main dal gate dei permessi e arriva alla card del renderer.
+
+## REPORT FASE 17a — CORREZIONI (K1–K6)
+
+Le due arrivano dal revisore dal vivo: il tray ignorava la lingua salvata al riavvio (K1) e il cambio a caldo lasciava testi vecchi nei componenti che non si ri-renderizzavano (K2). K3–K5 sono i residui, K6 i confini.
+
+### Tabella K1–K6
+
+| Punto | Stato | Dove |
+|---|---|---|
+| **K1** il tray segue la lingua salvata all'avvio: il main legge `ui.language` per la stessa strada dell'handler IPC `settings:get` (il daemon tramite il client) appena il client è pronto, poi `setMainLanguage(resolveUiLanguage(...))` e `refreshTray()`; daemon muto → lingua di sistema, nessun errore visibile; il renderer, dopo la prima attivazione, chiama una volta `api.uiLanguageChanged(lingua attiva)` così main e renderer coincidono anche con `system` | fatto | `src/main/index.ts` (catena `client.start()` → `applyStartupLanguage`), `src/main/i18n.ts` (`applyStartupLanguage`), `src/renderer/src/main.tsx` (chiamata una tantum) |
+| **K1 test** funzione pura della scelta all'avvio (setting letto + lingue di sistema): `en` salvato su sistema `it` → `en`; `system` → lingua di sistema; lettura fallita (null/non stringa) → lingua di sistema | fatto | `startupMainLanguage` in `src/shared/ui-language.ts`; casi K1 in `src/shared/__tests__/ui-language.test.ts` (3 test) |
+| **K2** cambio a caldo senza testi vecchi: in tutti i `.tsx` la `t` nei componenti viene da `const { t } = useLingui()` di `@lingui/react/macro` (contestuale e reattivo); a livello di modulo restano i descriptor `msg`, risolti nel componente; `@lingui/core/macro` resta per i `.ts` non-React | fatto | 17 `.tsx`: Sidebar, Chat, Settings, ConnectorCard, ConnectorCards13, SubagentCard, TaskCard, ApprovalCard, LibraryCards, LibraryPanel, BotDialogs, RightPanel, MemoryPanel (import inutilizzato tolto), VaultSettings, DraftCard, WidgetCard, SkillsPanel |
+| **K2 guardia** fallisce se un `.tsx` importa `t` da `@lingui/core/macro` (`msg`/`plural`/`select` ammessi) | fatto | `src/renderer/src/__tests__/unwrapped-text-guard.test.ts` (regola + 3 test, con casi sintetici) |
+| **K2 cataloghi** gli id sono hash del messaggio: la stessa `t` dal hook genera gli stessi id | fatto | `npm run i18n:extract` dopo il cambio: ZERO differenze sui `.po` (verificato prima delle modifiche K3); stessa chiave nei chunk compilati (es. `OAF1CS` it/en) |
+| **K3** testi italiani dentro espressioni di `<Trans>`: tre messaggi interi distinti col ternario fuori dal testo, `d&rsquo;` (non entità HTML, mostrato letterale) → apostrofo tipografico `d’`; fallback `'errore'` tradotto col `t` del hook; `{t\`di\`} {nome}` → un solo messaggio `di {author}` (en `by {author}`) | fatto | `Settings.tsx` (InstalledTab, righe dei server installati), `ConnectorCards13.tsx` (2 fallback errore), `LibraryPanel.tsx` (lista della libreria) |
+| **K3 guardia** fallisce se una `StringLiteral` con ≥2 lettere compare dentro una `JSXExpressionContainer` figlia di `<Trans>`/`<Plural>`, come ramo di ternario o `&&`/`||` (le comparazioni nei testi dei ternari non sono testo); allowlist: `login`/`secret` (valori tecnici di `card.kind`, identici in en) | fatto | `src/renderer/src/__tests__/unwrapped-text-guard.test.ts` (regola + 4 test) |
+| **K4** script di traduzione tolto: la verità è `locales/en/messages.po` + `GLOSSARY.md` (che resta); un secondo giro dello script avrebbe sovrascritto correzioni fatte nel `.po` | fatto | `scripts/fase17a-translate-en.py` rimosso; riferimenti nel REPORT corretti (L4.1–L4.2, File) |
+| **K5** REPORT allineato: decisione 1 riscritta in base a K2 (la `t` globale non era reattiva; il macro `useLingui` di `@lingui/react/macro` restituisce `{ t, i18n }` contestuale); tre testi visti dal revisore fuori dal renderer aggiunti ai problemi per la 17b | fatto | REPORT: "Decisioni prese e perché" punto 1; "Problemi fuori scope" punti 8–10 |
+| **K6** niente modifiche a daemon/prompt/tool/eval; nessun testo italiano cambiato tranne `d&rsquo;` → `d’` (K3); nessuna nuova lingua; regole della fase 17a rispettate (niente Docker/cloud/rete reale/`npm run dist`/app su cartella dati vera/segreti/processi altrui) | fatto | `git diff`: zero file in `src/daemon`, `src/main/agent`, `src/main/mcp`, `eval/`; diff del catalogo it = solo i 4 messaggi nuovi/2 rimossi di K3 |
+
+### Cataloghi dopo K3
+
+`npm run i18n:extract`: uniche differenze nei `.po` i messaggi di K3 — nuovi `serve: {keys} (header)`, `serve: {keys} (variabile d’ambiente)`, `serve: {keys} (impostazione del plugin)`, `di {author}`; rimossi (obsolete, `--clean`) `serve: {0} {1}` e `di`; `errore` guadagna solo un riferimento a ConnectorCards13. Totale 503 per lingua (501 + 4 − 2), en **503/503 compilato, 0 missing**; `npx lingui compile` senza errori.
+
+### Output dei check
+
+- `npm run typecheck`: pulito (exit 0).
+- `npx vitest run --maxWorkers=4`: `Test Files 97 passed (97)` / `Tests 1534 passed (1534)` (1523 + 11 nuovi: 3 K1 + 8 guardia K2/K3).
+- `npm run build`: `✓ built` ×3 (main + preload + renderer); i cataloghi compilati restano chunk dinamici del renderer con le stesse chiavi di prima (K2 non cambia gli id).
+- `npm run i18n:extract`: idempotente, differenze solo K3 (v. sopra); `npx lingui compile` 0 errori; catalogo en completo.
+
+### Cosa NON è stato verificato
+
+1. **La prova dal vivo** (tray inglese dopo il riavvio su Mac in italiano, cambio a caldo senza testi vecchi, dialogo e notifica di prova): la fa il revisore, come da specifica; qui niente app avviata.
+2. Il rendering a schermo dei tre messaggi nuovi di K3 (forma e id verificati nei cataloghi e nei chunk compilati).

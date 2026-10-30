@@ -3,9 +3,8 @@
 // (descrizione e membri). Visibile da lg, chiudibile dal bottone
 // nell'intestazione della chat (setting ui.rightPanel).
 import { useEffect, useState } from 'react'
-import { useLingui } from '@lingui/react'
-import { Trans } from '@lingui/react/macro'
-import { t, msg } from '@lingui/core/macro'
+import { useLingui, Trans } from '@lingui/react/macro'
+import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
 import { formatDate } from '../lib/i18n'
 import { Star, Palette, Brain, Wrench, FileText } from 'lucide-react'
@@ -33,7 +32,7 @@ function fmtTime(at: number): string {
 
 /** Dettagli: descrizione, modello, principale, Cambia aspetto, Memoria e Skill. */
 function DetailsTab({ onAvatar }: { onAvatar(): void }) {
-  const { i18n } = useLingui()
+  const { t } = useLingui()
   const activeId = useStore((s) => s.activeId)
   const agents = useStore((s) => s.agents)
   const mainAgentId = useStore((s) => s.mainAgentId)
@@ -117,7 +116,7 @@ function LibraryTab() {
 
 /** Attività: task del bot (con stato), sottoagenti e prossime routine. */
 function ActivityTab() {
-  const { i18n } = useLingui()
+  const { t, i18n } = useLingui()
   const activeId = useStore((s) => s.activeId)
   const tasks = useStore((s) => s.tasks)
   const subagents = useStore((s) => s.subagents)

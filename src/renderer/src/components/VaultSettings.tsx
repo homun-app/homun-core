@@ -4,8 +4,7 @@
 // concessioni "Sempre per questo sito" di fill_credential sono revocabili da
 // qui. Nessuna concessione generica: ogni riga è (login, origine).
 import { useEffect, useState } from 'react'
-import { Trans } from '@lingui/react/macro'
-import { t } from '@lingui/core/macro'
+import { useLingui, Trans } from '@lingui/react/macro'
 import { api } from '../store'
 
 /** Il template dei secret nei comandi (fase 17a): costante, così nel messaggio
@@ -14,6 +13,7 @@ const SECRET_TEMPLATE = '{{secret:NOME}}'
 import type { VaultItemInfoUi, FillGrantInfo } from '../../../shared/types'
 
 export function VaultTab() {
+  const { t } = useLingui()
   const [scheda, setScheda] = useState<'login' | 'segreti' | 'contatti' | 'concessioni'>('login')
   return (
     <div className="space-y-4">
@@ -40,6 +40,7 @@ export function VaultTab() {
 }
 
 function LoginsScheda() {
+  const { t } = useLingui()
   const [items, setItems] = useState<VaultItemInfoUi[]>([])
   const [open, setOpen] = useState(false)
   const [label, setLabel] = useState('')
@@ -109,6 +110,7 @@ function LoginsScheda() {
 }
 
 function SecretsScheda() {
+  const { t } = useLingui()
   const [items, setItems] = useState<VaultItemInfoUi[]>([])
   const [name, setName] = useState('')
   const [value, setValue] = useState('')
@@ -140,6 +142,7 @@ function SecretsScheda() {
 }
 
 function ContactsScheda() {
+  const { t } = useLingui()
   const [items, setItems] = useState<VaultItemInfoUi[]>([])
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')

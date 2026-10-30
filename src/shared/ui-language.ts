@@ -27,3 +27,18 @@ export function resolveUiLanguage(
   }
   return 'en'
 }
+
+/**
+ * Fase 17a (K1): la lingua del main ALL'AVVIO — il setting 'ui.language'
+ * appena letto dal daemon più le lingue preferite di sistema. Un setting
+ * esplicito vince (tray compreso, anche con la finestra chiusa); 'system',
+ * un setting non stringa o una lettura fallita (null) lasciano decidere le
+ * lingue di sistema. Pura, senza Electron: il main la chiama appena il
+ * client del daemon è pronto.
+ */
+export function startupMainLanguage(
+  setting: string | null | undefined,
+  systemLanguages: readonly string[]
+): UiLanguage {
+  return resolveUiLanguage(typeof setting === 'string' ? setting : null, systemLanguages)
+}

@@ -4,8 +4,7 @@
 // password e salvano via RPC nel vault: mai in chat) e la card del contatto
 // da salvare. UI minima: verrà ridisegnata.
 import { useState } from 'react'
-import { Trans } from '@lingui/react/macro'
-import { t } from '@lingui/core/macro'
+import { useLingui, Trans } from '@lingui/react/macro'
 import { api, useStore } from '../store'
 import type { TranscriptEntry, SendMessagePayload } from '../../../shared/types'
 
@@ -103,6 +102,7 @@ export function FillCard({ entry }: { entry: TranscriptEntry }) {
  * RPC e NON passano mai dalla chat. Il modello riceve solo l'esito.
  */
 export function SecureInputCard({ entry }: { entry: TranscriptEntry }) {
+  const { t } = useLingui()
   const activeId = useStore((s) => s.activeId)
   const m = metaOf(entry)
   const card = m.message as Extract<SendMessagePayload, { type: 'secure-input' }> | undefined

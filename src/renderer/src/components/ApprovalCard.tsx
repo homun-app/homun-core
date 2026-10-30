@@ -6,8 +6,7 @@
 // auto-approvazioni dell'auto-review, e "Crea regola da questa azione" che
 // apre l'editor di Impostazioni → Approvazione automatica precompilato.
 import { useStore } from '../store'
-import { Trans } from '@lingui/react/macro'
-import { t } from '@lingui/core/macro'
+import { useLingui, Trans } from '@lingui/react/macro'
 import { describeCron } from '../../../shared/cron-human'
 import type { TranscriptEntry } from '../../../shared/types'
 
@@ -27,6 +26,7 @@ function suggestedRule(tool: string, input: Record<string, unknown> | undefined)
 }
 
 export function ApprovalCard({ entry }: { entry: TranscriptEntry }) {
+  const { t } = useLingui()
   const resolve = useStore((s) => s.resolveApproval)
   const proposeRule = useStore((s) => s.proposeRule)
   const approvalId = entry.meta?.approvalId as string | undefined
