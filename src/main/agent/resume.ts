@@ -10,7 +10,7 @@ import type { TranscriptEntry } from '../../shared/types'
 
 /** Result sintetico per una tool-call il cui esito è andato perso con l'interruzione. */
 export const INTERRUPTED_TOOL_RESULT =
-  "interrotto da un riavvio: l'esito è sconosciuto. Verifica lo stato prima di ripetere azioni con effetti esterni."
+  'interrupted by a restart: the outcome is unknown. Check the state before repeating actions with external effects.'
 
 /** Notice visibile quando un turno riprende dopo un'interruzione. */
 export const RESUME_NOTICE = 'Turno ripreso dopo un\'interruzione.'

@@ -108,7 +108,7 @@ describe('output dei tool', () => {
     expect(out).toContain('1. A')
     expect(out).toContain('https://a.example')
     expect(out).toContain('2. B')
-    expect(webSearchToolOutput([])).toBe('Nessun risultato.')
+    expect(webSearchToolOutput([])).toBe('No results.')
   })
 
   it('clamp dei risultati: default 5, minimo 1, massimo 10', () => {
@@ -121,30 +121,30 @@ describe('output dei tool', () => {
   it('web_fetch window: 20k caratteri e suggerimento dell\'offset', () => {
     const out = webFetchWindowOutput('x'.repeat(21_000), undefined)
     expect(out.startsWith('x'.repeat(20_000))).toBe(true)
-    expect(out).toContain('pagina lunga: 21000 caratteri')
+    expect(out).toContain('long page: 21000 characters')
     expect(out).toContain('offset: 20000')
     expect(webFetchWindowOutput('corto', undefined)).toBe('corto')
-    expect(webFetchWindowOutput('0123456789', 5)).toBe('[segmento da offset 5 di 10 caratteri]\n56789')
+    expect(webFetchWindowOutput('0123456789', 5)).toBe('[segment from offset 5 of 10 characters]\n56789')
   })
 
   it("il messaggio della ricerca non attiva dice all'utente cosa fare", () => {
-    expect(WEB_SEARCH_INACTIVE).toContain('disattivata nelle impostazioni')
-    expect(WEB_SEARCH_INACTIVE.toLowerCase()).toContain('impostazioni')
-    expect(WEB_SEARCH_INACTIVE.toLowerCase()).toContain('non cercare sui motori di ricerca col browser')
+    expect(WEB_SEARCH_INACTIVE).toContain('disabled in the settings')
+    expect(WEB_SEARCH_INACTIVE.toLowerCase()).toContain('settings')
+    expect(WEB_SEARCH_INACTIVE.toLowerCase()).toContain('do not search on search engines with the browser')
   })
 
   it('fase 15 (S6): WEB_SEARCH_UNAVAILABLE — tutti falliti o in raffreddamento', () => {
-    expect(WEB_SEARCH_UNAVAILABLE).toContain('non è disponibile in questo momento')
+    expect(WEB_SEARCH_UNAVAILABLE).toContain('not available right now')
     expect(WEB_SEARCH_UNAVAILABLE).toContain('web_fetch')
-    expect(WEB_SEARCH_UNAVAILABLE.toLowerCase()).toContain('non cercare sui motori di ricerca col browser')
+    expect(WEB_SEARCH_UNAVAILABLE.toLowerCase()).toContain('do not search on search engines with the browser')
   })
 
   it('fase 15 (S6): webSearchToolOutput con la fonte aggiunge la riga finale', () => {
     const out = webSearchToolOutput([{ title: 'A', url: 'https://a.example', snippet: 'sa' }], 'You.com')
-    expect(out.endsWith('Fonte della ricerca: You.com')).toBe(true)
+    expect(out.endsWith('Search source: You.com')).toBe(true)
     // senza fonte il formato è quello di sempre
-    expect(webSearchToolOutput([])).toBe('Nessun risultato.')
-    expect(webSearchToolOutput([], 'Exa')).toBe('Nessun risultato.\n\nFonte della ricerca: Exa')
+    expect(webSearchToolOutput([])).toBe('No results.')
+    expect(webSearchToolOutput([], 'Exa')).toBe('No results.\n\nSearch source: Exa')
   })
 })
 
@@ -518,7 +518,7 @@ describe('webFetch: difese SSRF (validazione ALLA CONNESSIONE, F4)', () => {
       lookup: async () => ['10.0.0.5']
     })
     expect(r.ok).toBe(false)
-    if (!r.ok) expect(r.reason).toContain('privato/interno')
+    if (!r.ok) expect(r.reason).toContain('private/internal')
     expect(f.connections).toHaveLength(0)
   })
 
@@ -532,7 +532,7 @@ describe('webFetch: difese SSRF (validazione ALLA CONNESSIONE, F4)', () => {
     const f = fakeTransport(() => hop200)
     const r = await webFetch('http://rebinding.example/', { transport: f.transport, lookup })
     expect(r.ok).toBe(false)
-    if (!r.ok) expect(r.reason).toContain('host non ammesso')
+    if (!r.ok) expect(r.reason).toContain('host not allowed')
     expect(calls).toBe(2)
     expect(f.connections).toHaveLength(0)
   })
@@ -543,8 +543,8 @@ describe('webFetch: difese SSRF (validazione ALLA CONNESSIONE, F4)', () => {
       const r = await webFetch(u, { transport: f.transport })
       expect(r.ok, u).toBe(false)
       if (!r.ok) {
-        expect(r.reason, u).toContain('indirizzo interno')
-        expect(r.reason, u).not.toContain('non risolto')
+        expect(r.reason, u).toContain('internal address')
+        expect(r.reason, u).not.toContain('not resolved')
       }
     }
     expect(f.connections).toHaveLength(0)
@@ -562,7 +562,7 @@ describe('webFetch: difese SSRF (validazione ALLA CONNESSIONE, F4)', () => {
       lookup: async (host) => (host === 'private.local' ? ['192.168.1.9'] : ['93.184.216.34'])
     })
     expect(r.ok).toBe(false)
-    if (!r.ok) expect(r.reason).toContain('redirect non ammesso')
+    if (!r.ok) expect(r.reason).toContain('redirect not allowed')
     // solo il primo hop (pubblico) si è connesso: il secondo mai
     expect(f.connections).toEqual(['public.example'])
   })
@@ -612,7 +612,7 @@ describe('webFetch: sfide e captcha (F5, niente falsi positivi)', () => {
       expect(r.ok, String(status)).toBe(false)
       if (!r.ok) {
         expect(r.blocked, String(status)).toBe(true)
-        expect(r.reason).toContain('NON aggirare')
+        expect(r.reason).toContain('DO NOT bypass')
       }
     }
   })
@@ -728,7 +728,7 @@ describe('web_fetch contro un server http locale (flag di test)', () => {
     delete process.env.SANDBOT_WEB_FETCH_ALLOW_LOOPBACK
     const r = await webFetch(`${url}/`, {})
     expect(r.ok).toBe(false)
-    if (!r.ok) expect(r.reason).toContain('indirizzo interno')
+    if (!r.ok) expect(r.reason).toContain('internal address')
     process.env.SANDBOT_WEB_FETCH_ALLOW_LOOPBACK = saved
   })
 
@@ -750,7 +750,7 @@ describe('web_fetch contro un server http locale (flag di test)', () => {
       expect(r.downloadedBytes).toBe(WEB_FETCH_MAX_BYTES)
       // i 3 MB di corpo + la sola nota "pagina troncata": nient'altro in memoria
       expect(r.text.length).toBeLessThanOrEqual(WEB_FETCH_MAX_BYTES + 100)
-      expect(r.text.endsWith('x\n\n[pagina troncata: oltre i 3 MB ho tenuto i primi 3 MB]')).toBe(true)
+      expect(r.text.endsWith('x\n\n[page truncated: past 3 MB I kept the first 3 MB]')).toBe(true)
     }
   })
 
@@ -789,7 +789,7 @@ describe('web_fetch contro un server http locale (flag di test)', () => {
     expect(r.ok).toBe(false)
     if (!r.ok) {
       expect(r.blocked).toBe(true)
-      expect(r.reason).toContain('sfida')
+      expect(r.reason).toContain('challenge')
     }
   })
 

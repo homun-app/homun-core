@@ -80,7 +80,7 @@ describe('parseMcpServerId e i testi fissi delle card', () => {
     expect(parseMcpServerId('notion')).toMatchObject({ error: expect.any(String) })
   })
   it('i testi della specifica: proposta, avviso terzi, host, gateway', () => {
-    expect(PROPOSAL_RESULT).toContain('proposta mostrata all\'utente')
+    expect(PROPOSAL_RESULT).toContain('proposal shown to the user')
     expect(THIRD_PARTY_SERVER_WARNING).toContain('Server pubblicato da terzi')
     expect(HOST_MODE_DISABLED).toBe('si installa solo nel computer dei bot (modalità docker)')
     expect(GATEWAY_WARNING).toBe('Un gateway custodisce l\'accesso a tutte le app che colleghi lì: è un servizio di terzi')

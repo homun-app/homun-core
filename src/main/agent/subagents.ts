@@ -17,18 +17,18 @@ export const MAX_OPEN_SUBAGENTS = 6
 export const WAKE_SUMMARY_MAX_CHARS = 2_000
 
 /** La nota della chiusura automatica (il figlio non ha chiamato wake_parent). */
-export const AUTO_CLOSE_NOTE = '(chiusura automatica: il sottoagente non ha consegnato con wake_parent)'
+export const AUTO_CLOSE_NOTE = '(automatic close: the subagent did not deliver with wake_parent)'
 
 /**
  * Punto 3: il brief deve essere autosufficiente — 200 caratteri sono il minimo
  * per obiettivo, confini e formato del risultato. Messaggio del rifiuto.
  */
 export const SHORT_BRIEF_ERROR =
-  'il brief deve essere autosufficiente: obiettivo, confini, formato del risultato (almeno 200 caratteri)'
+  'the brief must be self-sufficient: goal, boundaries, result format (at least 200 characters)'
 
 /** Punto 3, validazione pura del brief: presente e lungo abbastanza. */
 export function subagentBriefError(brief: string): string | null {
-  if (!brief.trim()) return 'servono title e brief'
+  if (!brief.trim()) return 'title and brief are required'
   if (brief.trim().length < 200) return SHORT_BRIEF_ERROR
   return null
 }
@@ -110,35 +110,35 @@ const SUBAGENT_BASE_TOOLS = new Set([
 const SUBAGENT_DENY_REASONS: ReadonlyArray<{ test: (tool: string) => boolean; reason: string }> = [
   {
     test: (t) => ['send_to_user', 'ask_user', 'send_to_agent', 'post_to_group', 'pass'].includes(t),
-    reason: 'il sottoagente non parla con l\'utente né con gli altri bot: consegna al padre con wake_parent'
+    reason: 'the subagent does not talk with the user or the other bots: deliver to the parent with wake_parent'
   },
   {
     test: (t) => ['spawn_subagent', 'check_subagent', 'message_subagent', 'stop_subagent'].includes(t),
-    reason: 'niente sottoagenti dentro sottoagenti'
+    reason: 'no subagents inside subagents'
   },
   {
     test: (t) => ['create_task', 'update_task'].includes(t),
-    reason: 'i task si aprono dalla chat del padre: qui si lavora sul brief'
+    reason: 'tasks are opened from the parent\'s chat: here you work on the brief'
   },
   {
     test: (t) => ['update_memory', 'update_skill', 'update_state'].includes(t),
-    reason: 'memoria, skill e routine sono del padre e restano in sola lettura'
+    reason: 'memory, skills and routines belong to the parent and stay read-only'
   },
   {
     test: (t) => ['copy_to_box', 'copy_from_box'].includes(t),
-    reason: 'lo scambio di file col Mac lo gestisce il padre'
+    reason: 'file exchange with the Mac is handled by the parent'
   },
   {
     test: (t) => t === 'use-app',
-    reason: 'il computer dell\'utente non si tocca da un sottoagente'
+    reason: 'the user\'s computer is not touched from a subagent'
   },
   {
     test: (t) => t === 'list_agents' || t === 'list-credentials',
-    reason: 'il sottoagente lavora sul brief, il roster e il vault sono del padre'
+    reason: 'the subagent works on the brief; the roster and the vault belong to the parent'
   },
   {
     test: (t) => ['draft_external', 'offer_connector', 'search_connectors', 'add_mcp_server', 'install_plugin', 'propose_rule_change', 'create_agent', 'update_agent', 'delete_agent', 'create_group', 'update_group'].includes(t),
-    reason: 'gli invii esterni, i connettori e la configurazione dei bot sono del padre'
+    reason: 'external sends, connectors and bot configuration belong to the parent'
   }
 ]
 
@@ -159,7 +159,7 @@ export function subagentToolDenyReason(tool: string): string | null {
   for (const d of SUBAGENT_DENY_REASONS) {
     if (d.test(tool)) return d.reason
   }
-  return 'disponibile solo al bot padre'
+  return 'only available to the parent bot'
 }
 
 // ---- punto 3: la chiusura robusta ----
@@ -169,7 +169,7 @@ export function subagentToolDenyReason(tool: string): string | null {
  * senza wake_parent: i tool sono ristretti a wake_parent.
  */
 export const SUBAGENT_RECOVERY_NUDGE =
-  'Non hai consegnato al padre: chiama ORA wake_parent con status ("done" o "failed") e un summary condensato del risultato (solo quello, nessun altro tool).'
+  'You have not delivered to the parent: call wake_parent NOW with status ("done" or "failed") and a condensed summary of the result (that only, no other tool).'
 
 export interface SubagentClosureFacts {
   /** il figlio ha chiamato wake_parent nel turno */
@@ -212,5 +212,5 @@ export function autoCloseSummary(freeText: string): string {
 /** Il summary della scadenza: l'ultimo testo libero + la nota dei minuti (puro). */
 export function expiredSummary(freeText: string, minutes: number): string {
   const text = freeText.trim().slice(0, WAKE_SUMMARY_MAX_CHARS)
-  return [text, `(scaduto dopo ${minutes} minuti)`].filter((l) => l).join('\n')
+  return [text, `(expired after ${minutes} minutes)`].filter((l) => l).join('\n')
 }

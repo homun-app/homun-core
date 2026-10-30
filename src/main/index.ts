@@ -82,8 +82,13 @@ app.whenReady().then(() => {
     .then(() => {
       // fase 17a (K1): il setting 'ui.language' salvato decide la lingua del
       // tray anche al riavvio (stessa strada dell'handler IPC settings:get);
-      // se il daemon non risponde resta la lingua di sistema
-      return applyStartupLanguage(() => client.call('settings:get', ['ui.language', 'system']))
+      // se il daemon non risponde resta la lingua di sistema.
+      // fase 17b (A2): la lingua risolta viene anche pubblicata come setting
+      // 'ui.activeLanguage' (settings:set), la legge currentUserLanguage
+      return applyStartupLanguage(
+        () => client.call('settings:get', ['ui.language', 'system']),
+        (key, value) => client.call('settings:set', [key, value])
+      )
     })
     .then(() => refreshTray())
     .catch((e) => console.error('[sandbot] daemon non avviabile:', e))

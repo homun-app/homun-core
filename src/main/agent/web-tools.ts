@@ -81,11 +81,11 @@ export interface WebSearchProvider {
 
 /** Il messaggio quando la ricerca non è attiva (il bot lo dice all'utente, niente strade alternative). */
 export const WEB_SEARCH_INACTIVE =
-  'La ricerca web è disattivata nelle impostazioni. Dillo all\'utente in una riga: può riattivarla in Impostazioni → Ricerca web. Non cercare sui motori di ricerca col browser.'
+  'Web search is disabled in the settings. Tell the user in one line: they can re-enable it in Settings → Web search. Do not search on search engines with the browser.'
 
 /** Fase 15 (S6): tutti i provider hanno fallito o sono in raffreddamento. */
 export const WEB_SEARCH_UNAVAILABLE =
-  'La ricerca web non è disponibile in questo momento (i servizi di ricerca hanno rifiutato o non rispondono). Dillo all\'utente in una riga e proponi di riprovare più tardi; se conosci già il sito giusto puoi leggerlo con web_fetch. Non cercare sui motori di ricerca col browser.'
+  'Web search is not available right now (the search services refused or are not responding). Tell the user in one line and suggest trying again later; if you already know the right site you can read it with web_fetch. Do not search on search engines with the browser.'
 
 /**
  * L'implementazione a chiave: POST https://ollama.com/api/web_search con la
@@ -523,7 +523,7 @@ async function resolveHost(host: string, deps: WebFetchDeps): Promise<string[]> 
  */
 export class ForbiddenAddressError extends Error {
   constructor(hostname: string, ips: string[]) {
-    super(`indirizzo interno: ${hostname} risolve su ${ips.join(', ') || 'nessun indirizzo'}`)
+    super(`internal address: ${hostname} resolves to ${ips.join(', ') || 'no address'}`)
     this.name = 'ForbiddenAddressError'
   }
 }
@@ -619,7 +619,7 @@ const realTransport: HttpTransport = (url, opts) =>
       }
     }
     const timer = setTimeout(
-      () => settle(new Error(`tempo scaduto (${Math.round(WEB_FETCH_TIMEOUT_MS / 1000)} s totali per richiesta, redirect e lettura del corpo)`)),
+      () => settle(new Error(`time expired (${Math.round(WEB_FETCH_TIMEOUT_MS / 1000)} s in total for request, redirects and reading the body)`)),
       Math.max(0, opts.deadlineAt - Date.now())
     )
     timer.unref?.()
@@ -699,18 +699,18 @@ export async function webFetch(rawUrl: string, deps: WebFetchDeps = {}): Promise
     const literal = literalHostIp(hostname)
     if (literal !== null) {
       return !allowAll && isForbiddenIp(literal)
-        ? `indirizzo interno (${hostname}): la lettura web non tocca la rete interna`
+        ? `internal address (${hostname}): web fetch does not touch the internal network`
         : null
     }
     try {
       const ips = await resolveHost(hostname, deps)
-      if (!ips.length) return `host non risolto: ${hostname}`
+      if (!ips.length) return `host not resolved: ${hostname}`
       if (!allowAll && !resolvedIpsAllowed(ips)) {
-        return `host non ammesso (${hostname} risolve su un indirizzo privato/interno): la lettura web non tocca la rete interna`
+        return `host not allowed (${hostname} resolves to a private/internal address): web fetch does not touch the internal network`
       }
       return null
     } catch {
-      return `host non risolto: ${hostname}`
+      return `host not resolved: ${hostname}`
     }
   }
 
@@ -731,23 +731,23 @@ export async function webFetch(rawUrl: string, deps: WebFetchDeps = {}): Promise
     } catch (e) {
       if (e instanceof ForbiddenAddressError) {
         // la lookup ha rifiutato l'indirizzo ALLA CONNESSIONE (DNS rebinding)
-        return { ok: false, reason: `host non ammesso (${current.hostname}): ${e.message}` }
+        return { ok: false, reason: `host not allowed (${current.hostname}): ${e.message}` }
       }
-      return { ok: false, reason: `richiesta non riuscita: ${e instanceof Error ? e.message : String(e)}` }
+      return { ok: false, reason: `request failed: ${e instanceof Error ? e.message : String(e)}` }
     }
     if (r.status >= 300 && r.status < 400 && r.headers['location']) {
-      if (redirect >= WEB_FETCH_MAX_REDIRECTS) return { ok: false, reason: `troppi redirect (più di ${WEB_FETCH_MAX_REDIRECTS})` }
+      if (redirect >= WEB_FETCH_MAX_REDIRECTS) return { ok: false, reason: `too many redirects (more than ${WEB_FETCH_MAX_REDIRECTS})` }
       // il redirect si ricontrolla DA CAPO: URL valido E host ammesso
       let next: URL
       try {
         next = resolveRedirect(current, r.headers['location'])
       } catch {
-        return { ok: false, reason: 'redirect con location non valida' }
+        return { ok: false, reason: 'redirect with invalid location' }
       }
       const nc = checkUrl(next.toString())
-      if (!nc.ok) return { ok: false, reason: `redirect non ammesso: ${nc.reason}` }
+      if (!nc.ok) return { ok: false, reason: `redirect not allowed: ${nc.reason}` }
       const nd = await checkHost(next.hostname)
-      if (nd) return { ok: false, reason: `redirect non ammesso: ${nd}` }
+      if (nd) return { ok: false, reason: `redirect not allowed: ${nd}` }
       current = next
       continue
     }
@@ -773,24 +773,24 @@ export async function webFetch(rawUrl: string, deps: WebFetchDeps = {}): Promise
       return {
         ok: false,
         blocked: true,
-        reason: `il sito ha bloccato la richiesta (HTTP ${hop.status}, sfida "${sig}"): NON aggirare il blocco, segnala all'utente che la pagina non è leggibile`
+        reason: `the site blocked the request (HTTP ${hop.status}, challenge "${sig}"): DO NOT bypass the block, tell the user that the page cannot be read`
       }
     }
-    return { ok: false, reason: `la pagina risponde HTTP ${hop.status}` }
+    return { ok: false, reason: `the page responds HTTP ${hop.status}` }
   }
   if (hop.status >= 400) {
-    return { ok: false, reason: `la pagina risponde HTTP ${hop.status}` }
+    return { ok: false, reason: `the page responds HTTP ${hop.status}` }
   }
 
   const contentType = (hop.headers['content-type'] ?? '').split(';')[0]!.trim().toLowerCase()
-  const truncatedNote = hop.truncated ? '\n\n[pagina troncata: oltre i 3 MB ho tenuto i primi 3 MB]' : ''
+  const truncatedNote = hop.truncated ? '\n\n[page truncated: past 3 MB I kept the first 3 MB]' : ''
 
   if (contentType.includes('html')) {
     // G3: la base per i link è l'URL FINALE (dopo i redirect)
     const raw = bodyText()
     const text = htmlToMarkdown(raw, current.toString())
     if (challengeBlocked(hop.status, raw, text)) {
-      return { ok: false, blocked: true, reason: 'la pagina richiede un captcha: NON aggirare il blocco, segnala all\'utente che la pagina non è leggibile' }
+      return { ok: false, blocked: true, reason: 'the page requires a captcha: DO NOT bypass the block, tell the user that the page cannot be read' }
     }
     // fase 11b (punto 2): pagina costruita in JavaScript? Il result di
     // web_fetch lo dichiara al modello (che può aprirla col browser); con un
@@ -812,7 +812,7 @@ export async function webFetch(rawUrl: string, deps: WebFetchDeps = {}): Promise
   return {
     ok: false,
     unsupported: true,
-    reason: `tipo non supportato (${contentType || 'sconosciuto'}): leggo html, testo e json`
+    reason: `unsupported type (${contentType || 'unknown'}): I read html, text and json`
   }
 }
 
@@ -903,15 +903,15 @@ export function htmlToMarkdown(html: string, baseUrl?: string): string {
  * risposta e può dirlo all'utente.
  */
 export function webSearchToolOutput(results: WebSearchResult[], sourceLabel?: string): string {
-  const list = results.map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`).join('\n\n') || 'Nessun risultato.'
-  return sourceLabel ? `${list}\n\nFonte della ricerca: ${sourceLabel}` : list
+  const list = results.map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`).join('\n\n') || 'No results.'
+  return sourceLabel ? `${list}\n\nSearch source: ${sourceLabel}` : list
 }
 
 /** Il testo della finestra richiesto dal modello (offset + indicazione per proseguire). */
 export function webFetchWindowOutput(text: string, offset: number | undefined): string {
   const w = sliceWithOffset(text, offset)
-  const head = offset ? `[segmento da offset ${Math.max(0, Math.floor(offset))} di ${w.totalLength} caratteri]\n` : ''
-  const tail = w.nextOffset !== null ? `\n\n[pagina lunga: ${w.totalLength} caratteri — proseguila con web_fetch({url, offset: ${w.nextOffset}})]` : ''
+  const head = offset ? `[segment from offset ${Math.max(0, Math.floor(offset))} of ${w.totalLength} characters]\n` : ''
+  const tail = w.nextOffset !== null ? `\n\n[long page: ${w.totalLength} characters — continue it with web_fetch({url, offset: ${w.nextOffset}})]` : ''
   return head + w.text + tail
 }
 

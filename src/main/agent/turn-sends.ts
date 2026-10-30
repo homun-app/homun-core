@@ -27,11 +27,11 @@ export function previewOf(text: string, max = DELIVERED_PREVIEW_CHARS): string {
  * ripeterlo. `held` = trattenuto nell'outbox di un turno automatico (fase 6).
  */
 export function deliveredResultText(text: string, opts: { held?: boolean } = {}): string {
-  const base = `consegnato all'utente: «${previewOf(text)}»`
+  const base = `delivered to the user: "${previewOf(text)}"`
   if (opts.held) {
-    return `${base} — la consegna è rinviata alla prossima finestra di consegna o all'apertura della chat, salvo urgenza. Non ripeterlo.`
+    return `${base} — delivery is deferred to the next delivery window or when the chat opens, unless urgent. Do not repeat it.`
   }
-  return `${base}. Non ripeterlo.`
+  return `${base}. Do not repeat it.`
 }
 
 /**
@@ -50,7 +50,7 @@ export function isDuplicateSend(delivered: readonly string[], text: string): boo
 
 /** Il result per una send duplicata (punto 0c). */
 export function alreadyDeliveredResult(text: string): string {
-  return `già consegnato all'utente in questo turno: «${previewOf(text)}». Non ripetere lo stesso contenuto.`
+  return `already delivered to the user in this turn: "${previewOf(text)}". Do not repeat the same content.`
 }
 
 /**
@@ -67,7 +67,7 @@ export function isWorkTool(name: string): boolean {
  * il testo è diventato ragionamento, il modello deve fondere o chiudere.
  */
 export function messageCapResult(): string {
-  return 'Non consegnato: in questo turno è già arrivato all’utente un messaggio non seguito da lavoro. Il testo è finito nel ragionamento, non in chat. Non ripetere: se hai finito, chiudi il turno; se devi aggiungere qualcosa di NUOVO, fondilo in un solo messaggio.'
+  return 'Not delivered: in this turn the user has already received a message not followed by work. The text ended up in reasoning, not in chat. Do not repeat: if you are done, close the turn; if you have something NEW to add, merge it into a single message.'
 }
 
 /**
@@ -79,7 +79,7 @@ export const MAX_DELIVERED_PER_TURN = 3
 
 /** Il result per la send oltre il tetto del turno (residuo 0c). */
 export function turnCapResult(): string {
-  return `Non consegnato: in questo turno sono già arrivati all'utente ${MAX_DELIVERED_PER_TURN} messaggi (il tetto del turno). Il testo è finito nel ragionamento, non in chat: se manca qualcosa di essenziale, chiudi il turno e lo riprenderai al prossimo messaggio dell'utente.`
+  return `Not delivered: in this turn the user has already received ${MAX_DELIVERED_PER_TURN} messages (the turn cap). The text ended up in reasoning, not in chat: if something essential is missing, close the turn and you will pick it up at the user's next message.`
 }
 
 /**
@@ -88,5 +88,5 @@ export function turnCapResult(): string {
  * la chat non deve riempirsi di messaggi vuoti.
  */
 export function emptySendResult(): string {
-  return 'Non consegnato: il campo text è vuoto. Scrivi il messaggio nel campo text di send_to_user, oppure non chiamarlo se non hai nulla da dire.'
+  return 'Not delivered: the text field is empty. Write the message in the text field of send_to_user, or do not call it if you have nothing to say.'
 }

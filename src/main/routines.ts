@@ -7,6 +7,7 @@ import { getEntries, getAgent } from './store/db'
 import { llmStream } from './agent/llm'
 import { getProvider } from './agent/providers'
 import { secondaryPrompts } from './agent/prompts'
+import { currentUserLanguage } from './agent/user-language'
 
 export interface RoutineSuggestion {
   title: string
@@ -28,7 +29,7 @@ export async function suggestRoutines(agentId: string): Promise<RoutineSuggestio
     .join('\n')
   if (!transcript.trim()) return []
 
-  const prompt = secondaryPrompts.routinesSuggestion(transcript)
+  const prompt = secondaryPrompts.routinesSuggestion(transcript, currentUserLanguage())
   const controller = new AbortController()
   const stream = llmStream(provider, agent.model, [{ role: 'user', content: prompt }], [], controller.signal)
   const { text } = await (async () => {

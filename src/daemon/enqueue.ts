@@ -12,6 +12,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import { appendEntry, getEntries, updateAgent, updateEntryMeta } from '../main/store/db'
 import { activeJobForAgent, pendingUserMessages, enqueueJob, MAX_USER_MESSAGE_QUEUE, type Job } from '../main/store/jobs'
 import { emitLastEntry, supersedeIfPaused, dismissPendingWidgets } from '../main/agent/loop'
+import { noteHumanText } from '../main/agent/user-language'
 import { findDismissibleWidgets, widgetPayload, responseDisplayText } from '../main/agent/widgets'
 import type { SandbotEvent } from '../shared/types'
 
@@ -39,6 +40,11 @@ export function enqueueUserMessage(
   respondedTo?: number,
   initiator?: string
 ): Job | null {
+  // fase 17b (A2): il testo di una PERSONA aggiorna la lingua dell'utente —
+  // solo i messaggi diretti (senza initiator: i [sistema] non contano) e non
+  // le risposte ai widget (le etichette delle opzioni sono nella lingua del
+  // bot; il testo libero lo registra enqueueWidgetResponse)
+  if (initiator === undefined && respondedTo === undefined) noteHumanText(text)
   updateAgent(agentId, { unread: 0 })
   // un messaggio che NON risponde a un widget scarta i widget "muoviti oltre"
   if (respondedTo === undefined && findDismissibleWidgets(getEntries(agentId)).length) {
@@ -95,6 +101,11 @@ export function enqueueWidgetResponse(
   if (meta.respondedValue !== undefined || meta.widgetDismissed) return null
   // il widget salva la risposta; il testo del messaggio utente è leggibile:
   // le etichette delle opzioni scelte (o il testo libero per allowCustom)
+  // fase 17b (A2): solo il TESTO LIBERO aggiorna la lingua — i clic sulle
+  // opzioni no, le etichette le ha scritte il bot
+  const chosen = Array.isArray(value) ? value : [value]
+  const freeText = chosen.filter((v) => !payload.options.some((o) => o.value === v)).join(' ')
+  if (freeText.trim()) noteHumanText(freeText)
   updateEntryMeta(entryId, { ...meta, respondedValue: value })
   const updated = getEntries(agentId).find((e) => e.id === entryId)
   if (updated) emit({ type: 'entries', agentId, entries: [updated] })

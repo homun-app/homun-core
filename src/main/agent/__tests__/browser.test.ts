@@ -68,10 +68,10 @@ describe('il browser col MCP finto (avvio lazy, stato, tetti)', () => {
   it('URL non valida rifiutata (checkUrl): solo http/https, niente credenziali', async () => {
     const bad = await callBrowserTool(AGENT, 'browser_open', { url: 'ftp://spa.example/x' })
     expect(bad.meta.browserError).toBe(true)
-    expect(bad.output).toContain('schema non ammesso')
+    expect(bad.output).toContain('scheme not allowed')
     const cred = await callBrowserTool(AGENT, 'browser_open', { url: 'https://user:pass@spa.example/x' })
     expect(cred.meta.browserError).toBe(true)
-    expect(cred.output).toContain('credenziali')
+    expect(cred.output).toContain('credentials')
   })
 
   it('I3: il click che naviga aggiorna URL e snapshot (chiesto A PARTE, Page URL dal result)', async () => {
@@ -102,7 +102,7 @@ describe('il browser col MCP finto (avvio lazy, stato, tetti)', () => {
     await callBrowserTool('agent_b1', 'browser_open', { url: 'https://spa.example/offerte' })
     await callBrowserTool('agent_b2', 'browser_open', { url: 'https://spa.example/offerte' })
     await expect(callBrowserTool('agent_b3', 'browser_open', { url: 'https://spa.example/offerte' }))
-      .rejects.toThrow(/al massimo 3 browser contemporanei per box/)
+      .rejects.toThrow(/at most 3 browsers at the same time per computer/)
     // chi ha già l'istanza continua a lavorare
     const r = await callBrowserTool('agent_b2', 'browser_snapshot', {})
     expect(r.meta.browserPage).toBe(true)
@@ -114,14 +114,14 @@ describe('il browser col MCP finto (avvio lazy, stato, tetti)', () => {
   it('browser_screenshot: file nel box col path nel result (nessun contenuto di pagina in contesto)', async () => {
     const r = await callBrowserTool(AGENT, 'browser_screenshot', {})
     expect(r.meta.screenshot).toMatch(/\/box\/home\/agent_browser\/\.browser\/screens\/[0-9a-f]{8}\.png$/)
-    expect(r.output).toContain('Screenshot salvato nel box')
+    expect(r.output).toContain('Screenshot saved in the computer')
     expect(r.meta.browserPage).toBeUndefined()
   })
 
   it('browser_wait senza testo né secondi → result chiaro, nessuna attesa', async () => {
     const r = await callBrowserTool(AGENT, 'browser_wait', {})
     expect(r.meta.browserError).toBe(true)
-    expect(r.output).toContain('al massimo 30')
+    expect(r.output).toContain('at most 30')
   })
 
   it("l'istanza si CHIUDE e la successiva chiamata la riapre (lazy)", async () => {
@@ -161,8 +161,8 @@ describe('il browser col MCP finto (avvio lazy, stato, tetti)', () => {
       const click = await callBrowserTool('agent_i4b', 'browser_click', { ref: 'e2' })
       expect(click.meta.browserError).toBe(true)
       expect(click.meta.browserRestarted).toBe(true)
-      expect(click.output).toContain('Errore del browser')
-      expect(click.output).toContain('riapri la pagina con browser_open')
+      expect(click.output).toContain('Browser error')
+      expect(click.output).toContain('reopen the page with browser_open')
       // e la riapertura su una sessione NUOVA funziona
       const again = await callBrowserTool('agent_i4b', 'browser_open', { url: 'https://spa.example/menu' })
       expect(again.output).toContain('Menu del weekend')
@@ -212,7 +212,7 @@ describe('P2: copia dello screenshot — lettura come 1001, scrittura atomica co
       return { stdout: '', stderr: '', exitCode: 0, signal: null }
     })
     const err = await copyBrowserScreenshot('agent_x', 'nope.png', '/box/home/agent_x/.browser/screens/nope.png')
-    expect(err).toContain('lettura dello screenshot')
+    expect(err).toContain('failed to read the screenshot')
     expect(calls).toHaveLength(1) // nessuna scrittura, nessun rm
   })
 })
@@ -330,7 +330,7 @@ describe('K1: FIELD_PROBE_FN eseguita su un DOM minimo (nessuna dipendenza: fint
 describe('fase 12 0c: il result dello screenshot è solo il path (più l\'eventuale Error)', () => {
   it('nessun ### Ran Playwright code né link alle uscite del server', async () => {
     const r = await callBrowserTool(AGENT, 'browser_screenshot', {})
-    expect(r.output).toContain('Screenshot salvato nel box: ')
+    expect(r.output).toContain('Screenshot saved in the computer: ')
     expect(r.output).toMatch(/\.png$/)
     expect(r.output).not.toContain('### Ran Playwright code')
     expect(r.output).not.toContain('.browser/output')

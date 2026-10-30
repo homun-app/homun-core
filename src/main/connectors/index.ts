@@ -112,7 +112,7 @@ export function connectorsInstructionsSection(
   const withText = connected.filter((c) => c.instructions.trim())
   if (!withText.length) return ''
   const parts = withText.map((c) => `## ${c.name}\n${c.instructions.trim()}`)
-  return ['# Istruzioni per i connettori', ...parts].join('\n\n')
+  return ['# Connector instructions', ...parts].join('\n\n')
 }
 
 /**

@@ -49,6 +49,6 @@ describe('toolsForTurnSource (pura): la lista dei tool per sorgente di turno', (
     expect(kept.length).toBe(toolDefs.filter((t) => !CONNECTOR_PROPOSAL_TOOLS.has(t.name)).length)
   })
   it('il testo del rifiuto è quello della specifica', () => {
-    expect(CONNECTOR_PROPOSAL_DENIED).toBe('puoi proporre connettori solo quando l\'utente te lo chiede in chat')
+    expect(CONNECTOR_PROPOSAL_DENIED).toBe('you may propose connectors only when the user asks you in chat')
   })
 })

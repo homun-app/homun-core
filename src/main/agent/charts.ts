@@ -42,27 +42,27 @@ export type ChartSpecCheck =
  * per il modello.
  */
 export function validateVegaLiteSpec(raw: string): ChartSpecCheck {
-  if (!raw.trim()) return { ok: false, error: 'spec Vega-Lite vuota' }
+  if (!raw.trim()) return { ok: false, error: 'empty Vega-Lite spec' }
   if (Buffer.byteLength(raw, 'utf8') > VEGA_SPEC_MAX_BYTES) {
-    return { ok: false, error: `spec troppo grande (${Buffer.byteLength(raw, 'utf8')} byte, limite ${VEGA_SPEC_MAX_BYTES}): riduci i dati` }
+    return { ok: false, error: `spec too large (${Buffer.byteLength(raw, 'utf8')} bytes, limit ${VEGA_SPEC_MAX_BYTES}): reduce the data` }
   }
   let spec: unknown
   try {
     spec = JSON.parse(raw)
   } catch (e) {
-    return { ok: false, error: `JSON non valido: ${e instanceof Error ? e.message : String(e)}` }
+    return { ok: false, error: `invalid JSON: ${e instanceof Error ? e.message : String(e)}` }
   }
   if (typeof spec !== 'object' || spec === null || Array.isArray(spec)) {
-    return { ok: false, error: 'la spec Vega-Lite deve essere un oggetto JSON' }
+    return { ok: false, error: 'the Vega-Lite spec must be a JSON object' }
   }
   const forbidden = findKey(spec, 'url')
-  if (forbidden) return { ok: false, error: `chiave "url" non ammessa (${forbidden}): i dati del grafico sono solo inline (data.values), il grafico non fa richieste di rete` }
+  if (forbidden) return { ok: false, error: `key "url" not allowed (${forbidden}): the chart data is inline only (data.values), the chart makes no network requests` }
   const href = findKey(spec, 'href')
-  if (href) return { ok: false, error: `chiave "href" non ammessa (link nei grafici) (${href})` }
-  if (findKey(spec, 'loader')) return { ok: false, error: 'chiave "loader" non ammessa: il caricamento dei dati lo decide il daemon, non la spec' }
+  if (href) return { ok: false, error: `key "href" not allowed (links in charts) (${href})` }
+  if (findKey(spec, 'loader')) return { ok: false, error: 'key "loader" not allowed: data loading is decided by the daemon, not the spec' }
   const rows = countInlineRows(spec)
   if (rows > VEGA_MAX_ROWS) {
-    return { ok: false, error: `troppi dati inline (${rows} righe, limite ${VEGA_MAX_ROWS}): riepiloga o campiona` }
+    return { ok: false, error: `too much inline data (${rows} rows, limit ${VEGA_MAX_ROWS}): summarize or sample` }
   }
   return { ok: true, spec: spec as Record<string, unknown> }
 }
@@ -114,9 +114,9 @@ function countInlineRows(spec: unknown): number {
 
 /** La validazione PURA di un sorgente Mermaid (punto 3): solo il tetto. */
 export function validateMermaidSource(raw: string): { ok: true } | { ok: false; error: string } {
-  if (!raw.trim()) return { ok: false, error: 'sorgente Mermaid vuoto' }
+  if (!raw.trim()) return { ok: false, error: 'empty Mermaid source' }
   if (Buffer.byteLength(raw, 'utf8') > MERMAID_MAX_BYTES) {
-    return { ok: false, error: `diagramma troppo grande (${Buffer.byteLength(raw, 'utf8')} byte, limite ${MERMAID_MAX_BYTES})` }
+    return { ok: false, error: `diagram too large (${Buffer.byteLength(raw, 'utf8')} bytes, limit ${MERMAID_MAX_BYTES})` }
   }
   return { ok: true }
 }
@@ -155,7 +155,7 @@ export function validateDocumentCharts(markdown: string): { ok: true } | { ok: f
     const b = blocks[i]!
     const check = b.lang === 'vega-lite' ? validateVegaLiteSpec(b.body) : validateMermaidSource(b.body)
     if (!check.ok) {
-      return { ok: false, error: `blocco ${b.lang} n. ${i + 1} non valido: ${check.error}` }
+      return { ok: false, error: `block ${b.lang} no. ${i + 1} invalid: ${check.error}` }
     }
   }
   return { ok: true }
@@ -174,17 +174,17 @@ export type EditCheck =
  * modifiche parziali).
  */
 export function applyExactEdits(current: string, edits: Array<{ old: string; new: string }>): EditCheck {
-  if (!edits.length) return { ok: false, error: 'nessuna modifica: servono edits [{old, new}]' }
+  if (!edits.length) return { ok: false, error: 'no edits: edits [{old, new}] are required' }
   let text = current
   for (let i = 0; i < edits.length; i++) {
     const e = edits[i]!
-    if (!e.old) return { ok: false, error: `modifica n. ${i + 1}: old vuoto` }
+    if (!e.old) return { ok: false, error: `edit no. ${i + 1}: empty old` }
     const count = text.split(e.old).length - 1
     if (count === 0) {
-      return { ok: false, error: `modifica n. ${i + 1}: "${e.old.slice(0, 80)}${e.old.length > 80 ? '…' : ''}" non compare nel documento (0 volte): nessuna modifica applicata` }
+      return { ok: false, error: `edit no. ${i + 1}: "${e.old.slice(0, 80)}${e.old.length > 80 ? '…' : ''}" does not appear in the document (0 times): no edit applied` }
     }
     if (count > 1) {
-      return { ok: false, error: `modifica n. ${i + 1}: "${e.old.slice(0, 80)}${e.old.length > 80 ? '…' : ''}" compare ${count} volte (deve comparire esattamente una volta): nessuna modifica applicata` }
+      return { ok: false, error: `edit no. ${i + 1}: "${e.old.slice(0, 80)}${e.old.length > 80 ? '…' : ''}" appears ${count} times (it must appear exactly once): no edit applied` }
     }
     text = text.replace(e.old, e.new)
   }

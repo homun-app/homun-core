@@ -88,7 +88,7 @@ describe('fase 12 (punto 5): il risveglio del padre, UNO per lotto', () => {
     const text = String((wakes[0]!.payload as { text: string }).text)
     expect(text).toContain('<risultati_sottoagenti>')
     expect(text).toContain('<sottoagente id="sub_w1" titolo="Ricerca" esito="done">')
-    expect(text).toContain('UN SOLO resoconto')
+    expect(text).toContain('ONE SINGLE report')
     expect(text).toContain('primo')
     // la seconda notifica terminale dello stesso lotto NON risveglia di nuovo
     closeSubagent(store.db(), 'sub_w1', { status: 'done', finishedAt: 4000 }) // no-op: già terminale
@@ -137,7 +137,7 @@ describe('fase 12 (punto 4): la scadenza al tick', () => {
     const row = getSubagent(store.db(), 'sub_e1')!
     expect(row.status).toBe('expired')
     expect(row.summary).toContain('quasi finito')
-    expect(row.summary).toContain('(scaduto dopo 2 minuti)')
+    expect(row.summary).toContain('(expired after 2 minutes)')
     // terminale → il lotto (di un membro) si è svegliato
     expect(listJobs(store.db()).filter((j) => (j.payload as { extraMeta?: { subagentBatch?: string } }).extraMeta?.subagentBatch === 'be1')).toHaveLength(1)
   })

@@ -11,14 +11,14 @@ import {
 describe('previewOf / deliveredResultText (punto 0b)', () => {
   it('il result riporta l\'inizio del testo e dice di non ripeterlo', () => {
     expect(deliveredResultText('Routine "Riepilogo mattina" creata in pausa.'))
-      .toBe('consegnato all\'utente: «Routine "Riepilogo mattina" creata in pausa.». Non ripeterlo.')
+      .toBe('delivered to the user: "Routine "Riepilogo mattina" creata in pausa.". Do not repeat it.')
   })
 
   it('testi oltre 120 caratteri: preview troncata con ellissi', () => {
     const lungo = 'A'.repeat(300)
     const r = deliveredResultText(lungo)
-    expect(r).toContain('«' + 'A'.repeat(DELIVERED_PREVIEW_CHARS) + '…»')
-    expect(r.endsWith('. Non ripeterlo.')).toBe(true)
+    expect(r).toContain('"' + 'A'.repeat(DELIVERED_PREVIEW_CHARS) + '…"')
+    expect(r.endsWith('. Do not repeat it.')).toBe(true)
   })
 
   it('preview esattamente 120 caratteri: nessuna ellissi', () => {
@@ -33,7 +33,7 @@ describe('previewOf / deliveredResultText (punto 0b)', () => {
 
   it('held: il result spiega la consegna rinviata dell\'outbox', () => {
     expect(deliveredResultText('notturno', { held: true }))
-      .toBe("consegnato all'utente: «notturno» — la consegna è rinviata alla prossima finestra di consegna o all'apertura della chat, salvo urgenza. Non ripeterlo.")
+      .toBe('delivered to the user: "notturno" — delivery is deferred to the next delivery window or when the chat opens, unless urgent. Do not repeat it.')
   })
 })
 
@@ -72,7 +72,7 @@ describe('isDuplicateSend (punto 0c)', () => {
 
   it('alreadyDeliveredResult cita l\'inizio del testo', () => {
     expect(alreadyDeliveredResult('Riepilogo mattina'))
-      .toBe('già consegnato all\'utente in questo turno: «Riepilogo mattina». Non ripetere lo stesso contenuto.')
+      .toBe('already delivered to the user in this turn: "Riepilogo mattina". Do not repeat the same content.')
   })
 })
 
@@ -90,9 +90,9 @@ describe('isWorkTool / messageCapResult (punto 0d)', () => {
 
   it('il result del tetto spiega cosa fare (chiudere o fondere, non ripetere)', () => {
     const r = messageCapResult()
-    expect(r).toContain('Non consegnato')
-    expect(r).toContain('Non ripetere')
-    expect(r).toContain('un solo messaggio')
+    expect(r).toContain('Not delivered')
+    expect(r).toContain('Do not repeat')
+    expect(r).toContain('merge it into a single message')
   })
 })
 
@@ -103,9 +103,9 @@ describe('turnCapResult / MAX_DELIVERED_PER_TURN (fase 10, residuo 0c)', () => {
 
   it('il result del tetto dice che il testo è ragionamento e come procedere', () => {
     const r = turnCapResult()
-    expect(r).toContain('Non consegnato')
-    expect(r).toContain('ragionamento')
-    expect(r).toContain('3 messaggi')
-    expect(r).not.toContain('Non ripetere lo stesso contenuto')
+    expect(r).toContain('Not delivered')
+    expect(r).toContain('reasoning')
+    expect(r).toContain('3 messages')
+    expect(r).not.toContain('Do not repeat the same content')
   })
 })

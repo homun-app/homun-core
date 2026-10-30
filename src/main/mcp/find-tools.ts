@@ -79,11 +79,11 @@ export function requiredParamsOf(def: ToolDef): string[] {
 
 /** Il result di find_tools: nome completo, descrizione (200 caratteri), parametri obbligatori (puro). */
 export function formatFindToolsResult(found: Array<{ name: string; description?: string; requiredParams?: string[] }>): string {
-  if (!found.length) return 'Nessuno strumento MCP trovato con questa ricerca: riprova con altre parole o dillo all\'utente.'
+  if (!found.length) return 'No MCP tools found with this search: try again with other words or tell the user.'
   return found
     .map((t) => {
       const desc = (t.description ?? '').replace(/\s+/g, ' ').trim().slice(0, 200)
-      const req = t.requiredParams?.length ? ` · parametri obbligatori: ${t.requiredParams.join(', ')}` : ''
+      const req = t.requiredParams?.length ? ` · required parameters: ${t.requiredParams.join(', ')}` : ''
       return `- ${t.name}: ${desc}${req}`
     })
     .join('\n')
@@ -113,11 +113,11 @@ export function connectorsActiveSection(servers: Array<{ name: string; toolCount
   if (!servers.length) return ''
   const lines = servers.map((s) => {
     const desc = (s.description ?? '').replace(/\s+/g, ' ').trim().slice(0, SERVER_DESC_CHARS)
-    return `- ${s.name}: ${s.toolCount} strumenti${desc ? ` — ${desc}` : ''}`
+    return `- ${s.name}: ${s.toolCount} tools${desc ? ` — ${desc}` : ''}`
   })
   return [
-    '# Connettori attivi',
-    `I loro strumenti NON sono elencati qui: cercali con find_tools({query}) quando ti servono e chiamali dal passo dopo. Server attivi:`,
+    '# Active connectors',
+    `Their tools are NOT listed here: search for them with find_tools({query}) when you need them and call them from the following step. Active servers:`,
     ...lines
   ].join('\n')
 }
@@ -125,11 +125,11 @@ export function connectorsActiveSection(servers: Array<{ name: string; toolCount
 /** La definizione del tool find_tools (aggiunta dal loop SOLO in modalità differita). */
 export const findToolsToolDef: ToolDef = {
   name: 'find_tools',
-  description: 'Cerca fra gli strumenti MCP dei connettori attivi (server collegati, plugin, gateway) e ATTIVA fino a 8 strumenti: dal passo successivo puoi chiamarli per nome. Usalo prima di dire che non puoi fare qualcosa.',
+  description: 'Searches among the MCP tools of the active connectors (linked servers, plugins, gateways) and ACTIVATES up to 8 tools: from the following step you can call them by name. Use it before saying you cannot do something.',
   parameters: {
     type: 'object',
     properties: {
-      query: { type: 'string', description: 'Parole chiave dello strumento che cerchi (es. "issue linear crea")' }
+      query: { type: 'string', description: 'Keywords of the tool you are looking for (e.g. "issue linear crea")' }
     },
     required: ['query']
   }

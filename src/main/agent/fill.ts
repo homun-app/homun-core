@@ -69,7 +69,7 @@ export async function runFillCredential(
   try {
     login = await deps.getLogin(String(input.id ?? ''))
   } catch (e) {
-    return { output: `Login non trovato: ${e instanceof Error ? e.message : String(e)} (cerca gli id con list-credentials)`, error: true }
+    return { output: `Login not found: ${e instanceof Error ? e.message : String(e)} (find the ids with list-credentials)`, error: true }
   }
   // 1. ORIGINE
   const originCheck = checkFillOrigin(login, deps.lastUrl())
@@ -108,10 +108,10 @@ export async function runFillCredential(
     const fields = wanted.map((w) => (w.kind === 'username' ? 'utente' : w.kind === 'password' ? 'password' : 'codice TOTP'))
     const decision = await deps.requestApproval(login, origin, fields)
     if (decision === 'deny') {
-      return { output: 'Compilazione del login annullata dall\'utente: non riprovarla senza il suo ok.', denied: true }
+      return { output: 'Login fill cancelled by the user: do not retry it without their ok.', denied: true }
     }
     if (decision === 'timeout') {
-      return { output: 'Approvazione scaduta o interrotta: login non compilato.', denied: true }
+      return { output: 'Approval expired or interrupted: login not filled.', denied: true }
     }
     // allow-turn / allow-always: si prosegue (la concessione la registra il loop)
   }
@@ -120,7 +120,7 @@ export async function runFillCredential(
   // segreto → niente fill, nemmeno utente e password) e il codice si calcola
   // ADESSO (un segreto non valido lancerebbe QUI, prima di ogni scrittura)
   if (wanted.some((w) => w.kind === 'totp') && !login.totp) {
-    return { output: 'il login non ha un segreto TOTP salvato: totp_ref non si può compilare', error: true }
+    return { output: 'the login has no saved TOTP secret: totp_ref cannot be filled', error: true }
   }
   const totpValue = login.totp && wanted.some((w) => w.kind === 'totp') ? totpCode(login.totp) : null
   const done: { username?: boolean; password?: boolean; totp?: boolean } = {}
@@ -133,13 +133,13 @@ export async function runFillCredential(
     const recheck = checkFieldForWrite(w.kind, probe.ok ? probe.info : null, origin)
     if (!recheck.ok) {
       const part = Object.keys(done).length
-        ? `login compilato solo in parte: ${filledFieldsLabel(done)}`
-        : 'login non compilato'
-      return { output: `la pagina è cambiata durante l'approvazione: ${part}`, error: true }
+        ? `login only partially filled: ${filledFieldsLabel(done)}`
+        : 'login not filled'
+      return { output: `the page changed during the approval: ${part}`, error: true }
     }
     const value = w.kind === 'username' ? login.username : w.kind === 'password' ? login.password : totpValue!
     const r = await deps.typeInto(String(w.ref), value)
-    if (!r.ok) return { output: `Compilazione non riuscita: ${r.error}`, error: true }
+    if (!r.ok) return { output: `Fill failed: ${r.error}`, error: true }
     done[w.kind] = true
   }
   return { output: fillResultText(login.label, origin, done), filled: done }

@@ -7,7 +7,7 @@ import { ipcMain, BrowserWindow, Notification, dialog } from 'electron'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { refreshTray } from './tray'
-import { mainStrings, setMainLanguage } from './i18n'
+import { mainStrings, setMainLanguage, publishActiveLanguage } from './i18n'
 import type { UiLanguage } from '../shared/ui-language'
 import * as db from './store/db'
 import { isLaunchAgentInstalled, setLaunchAgent, LAUNCH_AGENT_LABEL } from './launchagent'
@@ -85,9 +85,12 @@ export function registerIpc(client: DaemonClient, getWindows: () => BrowserWindo
     return { shown: true }
   })
 
-  // fase 17a (L5): l'utente ha cambiato la lingua — il tray si ricostruisce
+  // fase 17a (L5): l'utente ha cambiato la lingua — il tray si ricostruisce.
+  // fase 17b (A2): la lingua risolta si pubblica come 'ui.activeLanguage'
+  // (settings:set, fire-and-forget: se il daemon non risponde nessun errore)
   ipcMain.handle('ui:language-changed', (_e, lang: UiLanguage) => {
     setMainLanguage(lang)
+    void publishActiveLanguage(lang, (method, params) => client.call(method, params))
     refreshTray()
   })
 

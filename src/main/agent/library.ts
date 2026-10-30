@@ -80,10 +80,10 @@ export interface DocumentWriteResult {
 export function writeDocument(agentId: string, input: { title?: unknown; content?: unknown; id?: unknown }, ctx: LibraryWriteContext = {}): LibraryOp<DocumentWriteResult> {
   const content = String(input.content ?? '')
   const title = String(input.title ?? '').trim()
-  if (!title) return { ok: false, error: 'serve un title (il titolo del documento)' }
-  if (!content.trim()) return { ok: false, error: 'serve il content (Markdown GFM del documento)' }
+  if (!title) return { ok: false, error: 'a title is required (the document title)' }
+  if (!content.trim()) return { ok: false, error: 'the content is required (the document GFM Markdown)' }
   if (Buffer.byteLength(content, 'utf8') > DOCUMENT_MAX_BYTES) {
-    return { ok: false, error: `documento troppo grande (${Buffer.byteLength(content, 'utf8')} byte, limite ${DOCUMENT_MAX_BYTES} di Markdown)` }
+    return { ok: false, error: `document too large (${Buffer.byteLength(content, 'utf8')} bytes, limit ${DOCUMENT_MAX_BYTES} of Markdown)` }
   }
   const charts = validateDocumentCharts(content)
   if (!charts.ok) return { ok: false, error: charts.error }
@@ -92,8 +92,8 @@ export function writeDocument(agentId: string, input: { title?: unknown; content
   const now = Date.now()
   if (id) {
     const item = getLibraryItem(id)
-    if (!item) return { ok: false, error: `documento "${id}" non trovato nella libreria: scrivi senza id per crearne uno nuovo` }
-    if (item.kind !== 'document') return { ok: false, error: `"${id}" non è un documento (è ${item.kind === 'chart' ? 'un grafico' : 'un file'}): non si riscrive con write_document` }
+    if (!item) return { ok: false, error: `document "${id}" not found in the library: write without an id to create a new one` }
+    if (item.kind !== 'document') return { ok: false, error: `"${id}" is not a document (it is ${item.kind === 'chart' ? 'a chart' : 'a file'}): it cannot be rewritten with write_document` }
     const version = item.currentVersion + 1
     writeFileSync(versionFile(id, version), content)
     updateLibraryItem(id, { currentVersion: version, updatedAt: now, tainted: nextTainted(item.tainted, ctx), ...(title !== item.title ? { title } : {}) })
@@ -118,16 +118,16 @@ export function writeDocument(agentId: string, input: { title?: unknown; content
  */
 export function editDocument(agentId: string, input: { id?: unknown; edits?: unknown }, ctx: LibraryWriteContext = {}): LibraryOp<DocumentWriteResult> {
   const id = String(input.id ?? '').trim()
-  if (!id) return { ok: false, error: 'serve l\'id del documento (lib_…)' }
+  if (!id) return { ok: false, error: 'the document id is required (lib_…)' }
   const item = getLibraryItem(id)
-  if (!item || item.kind !== 'document') return { ok: false, error: `documento "${id}" non trovato nella libreria` }
+  if (!item || item.kind !== 'document') return { ok: false, error: `document "${id}" not found in the library` }
   const rawEdits = Array.isArray(input.edits) ? input.edits : []
   const edits: Array<{ old: string; new: string }> = []
   for (const e of rawEdits) {
-    if (!e || typeof e !== 'object') return { ok: false, error: 'edits non validi: servono oggetti {old, new}' }
+    if (!e || typeof e !== 'object') return { ok: false, error: 'invalid edits: {old, new} objects are required' }
     const rec = e as Record<string, unknown>
     if (typeof rec.old !== 'string' || typeof rec.new !== 'string') {
-      return { ok: false, error: 'edits non validi: old e new devono essere stringhe' }
+      return { ok: false, error: 'invalid edits: old and new must be strings' }
     }
     edits.push({ old: rec.old, new: rec.new })
   }
@@ -136,7 +136,7 @@ export function editDocument(agentId: string, input: { id?: unknown; edits?: unk
   if (!applied.ok) return { ok: false, error: applied.error }
   const next = applied.text
   if (Buffer.byteLength(next, 'utf8') > DOCUMENT_MAX_BYTES) {
-    return { ok: false, error: `documento troppo grande dopo le modifiche (${Buffer.byteLength(next, 'utf8')} byte, limite ${DOCUMENT_MAX_BYTES})` }
+    return { ok: false, error: `document too large after the edits (${Buffer.byteLength(next, 'utf8')} bytes, limit ${DOCUMENT_MAX_BYTES})` }
   }
   const charts = validateDocumentCharts(next)
   if (!charts.ok) return { ok: false, error: charts.error }
@@ -160,18 +160,18 @@ export interface DocumentReadResult {
 /** read_document (punto 2): il Markdown con title, versione e autore. */
 export function readDocument(input: { id?: unknown; version?: unknown }): LibraryOp<DocumentReadResult> {
   const id = String(input.id ?? '').trim()
-  if (!id) return { ok: false, error: 'serve l\'id del documento (lib_…)' }
+  if (!id) return { ok: false, error: 'the document id is required (lib_…)' }
   const item = getLibraryItem(id)
-  if (!item || item.kind !== 'document') return { ok: false, error: `documento "${id}" non trovato nella libreria (vedi list_library)` }
+  if (!item || item.kind !== 'document') return { ok: false, error: `document "${id}" not found in the library (see list_library)` }
   const wanted = input.version !== undefined && input.version !== null ? Number(input.version) : item.currentVersion
   if (!Number.isInteger(wanted) || wanted < 1 || wanted > item.currentVersion) {
-    return { ok: false, error: `versione ${String(input.version)} non valida: il documento ha versioni da 1 a ${item.currentVersion}` }
+    return { ok: false, error: `invalid version ${String(input.version)}: the document has versions from 1 to ${item.currentVersion}` }
   }
   let content = ''
   try {
     content = readFileSync(versionFile(id, wanted), 'utf8')
   } catch {
-    return { ok: false, error: `il file della versione ${wanted} non si legge (libreria incoerente)` }
+    return { ok: false, error: `the file of version ${wanted} cannot be read (inconsistent library)` }
   }
   return {
     ok: true,
@@ -188,10 +188,10 @@ export function readDocument(input: { id?: unknown; version?: unknown }): Librar
 /** Il LOADER di vega che rifiuta OGNI richiesta (punto 3): nessuna rete. */
 export const REJECTING_LOADER = {
   load(): Promise<never> {
-    return Promise.reject(new Error('caricamento dati vietato: la spec valida ammette solo dati inline'))
+    return Promise.reject(new Error('data loading forbidden: a valid spec only admits inline data'))
   },
   http(): Promise<never> {
-    return Promise.reject(new Error('richiesta di rete vietata: il grafico non naviga'))
+    return Promise.reject(new Error('network request forbidden: the chart does not navigate'))
   }
 }
 
@@ -232,8 +232,8 @@ export async function saveChart(agentId: string, input: { title?: unknown; kind?
   const title = String(input.title ?? '').trim()
   const kind = input.kind === 'mermaid' ? 'mermaid' : input.kind === 'vega-lite' ? 'vega-lite' : null
   const spec = String(input.spec ?? '')
-  if (!title) return { ok: false, error: 'serve un title (il titolo del grafico)' }
-  if (!kind) return { ok: false, error: 'kind non valido: "vega-lite" o "mermaid"' }
+  if (!title) return { ok: false, error: 'a title is required (the chart title)' }
+  if (!kind) return { ok: false, error: 'invalid kind: "vega-lite" or "mermaid"' }
   const now = Date.now()
   const id = newLibraryId()
   const dir = libraryItemDir(id)
@@ -244,7 +244,7 @@ export async function saveChart(agentId: string, input: { title?: unknown; kind?
     try {
       svg = await renderVegaLiteSvg(check.spec)
     } catch (e) {
-      return { ok: false, error: `compilazione Vega-Lite non riuscita: ${e instanceof Error ? e.message : String(e)}` }
+      return { ok: false, error: `Vega-Lite compilation failed: ${e instanceof Error ? e.message : String(e)}` }
     }
     mkdirSync(dir, { recursive: true })
     writeFileSync(join(dir, CHART_SPEC), spec)
@@ -318,12 +318,12 @@ export function listLibrary(input: { query?: unknown; kind?: unknown; limit?: un
 
 /** Il testo del result di list_library per il modello. */
 export function formatLibraryRows(rows: LibraryListRow[]): string {
-  if (!rows.length) return 'La libreria è vuota (o nessuna voce per questo filtro).'
-  const kindLabel: Record<LibraryKind, string> = { document: 'documento', chart: 'grafico', file: 'file' }
+  if (!rows.length) return 'The library is empty (or no items for this filter).'
+  const kindLabel: Record<LibraryKind, string> = { document: 'document', chart: 'chart', file: 'file' }
   return [
-    `Voci della libreria (${rows.length}, fissate prima):`,
+    `Library items (${rows.length}, pinned first):`,
     ...rows.map((r) =>
-      `- ${r.id} · ${kindLabel[r.kind]} · "${r.title}"${r.version ? ` (v${r.version})` : ''} · di ${r.author}${r.pinned ? ' · fissata' : ''}${r.tainted ? ' · ⚠ proveniente da dati esterni' : ''}`
+      `- ${r.id} · ${kindLabel[r.kind]} · "${r.title}"${r.version ? ` (v${r.version})` : ''} · by ${r.author}${r.pinned ? ' · pinned' : ''}${r.tainted ? ' · ⚠ coming from external data' : ''}`
     )
   ].join('\n')
 }
@@ -378,7 +378,7 @@ export async function saveFileFromBox(
   const { sandboxMode, boxRoot, boxDir } = await import('../sandbox')
   const { resolveBoxPath } = await import('../sandbox/box-paths')
   const path = String(input.path ?? '').trim()
-  if (!path) return { ok: false, error: 'serve il path del file nel box (relativo alla tua home o /workspace/…)' }
+  if (!path) return { ok: false, error: 'the file path in the computer is required (relative to your home or /workspace/…)' }
   const owner = (await import('../sandbox')).boxOwnerOf(agentId)
   const root = sandboxMode() === 'docker' ? '/box' : boxRoot()
   const home1 = sandboxMode() === 'docker' ? `/box/home/${owner}` : boxDir(agentId)
@@ -396,17 +396,17 @@ export async function saveFileFromBox(
       return r.exitCode === 0 && Number.isFinite(n) ? n : null
     })
     const s = await stat(agentId, boxAbs)
-    if (s === null) return { ok: false, error: `file non trovato nel box: "${path}"` }
+    if (s === null) return { ok: false, error: `file not found in the computer: "${path}"` }
     size = s
   } else {
     try {
       size = statSync(boxAbs).size
     } catch {
-      return { ok: false, error: `file non trovato nel box: "${path}"` }
+      return { ok: false, error: `file not found in the computer: "${path}"` }
     }
   }
   if (size > LIBRARY_FILE_MAX_BYTES) {
-    return { ok: false, error: `file troppo grande (${size} byte, limite ${LIBRARY_FILE_MAX_BYTES} per la libreria)` }
+    return { ok: false, error: `file too large (${size} bytes, limit ${LIBRARY_FILE_MAX_BYTES} for the library)` }
   }
 
   const name = sanitizeFileName(basename(boxAbs))
@@ -426,14 +426,14 @@ export async function saveFileFromBox(
     try {
       await cp(boxAbs, localPath)
     } catch (e) {
-      return { ok: false, error: `copia dal box non riuscita: ${e instanceof Error ? e.message : String(e)}` }
+      return { ok: false, error: `copy from the computer failed: ${e instanceof Error ? e.message : String(e)}` }
     }
   } else {
     const { copyFile } = await import('node:fs/promises')
     try {
       await copyFile(boxAbs, localPath)
     } catch (e) {
-      return { ok: false, error: `copia non riuscita: ${e instanceof Error ? e.message : String(e)}` }
+      return { ok: false, error: `copy failed: ${e instanceof Error ? e.message : String(e)}` }
     }
   }
   const sha = await sha256OfFile(localPath).catch(() => '')
@@ -489,15 +489,15 @@ export function exportFileName(item: LibraryItem, format: ExportFormat): string 
  */
 export function prepareLibraryExport(input: { id?: unknown; format?: unknown }): LibraryOp<ExportPlan> {
   const id = String(input.id ?? '').trim()
-  if (!id) return { ok: false, error: 'serve l\'id della voce (lib_…)' }
+  if (!id) return { ok: false, error: 'the item id is required (lib_…)' }
   const item = getLibraryItem(id)
-  if (!item) return { ok: false, error: `voce "${id}" non trovata nella libreria` }
+  if (!item) return { ok: false, error: `item "${id}" not found in the library` }
   const rawFormat = String(input.format ?? '').trim()
   const allowed = exportFormatsOf(item)
   // "file" si accetta anche vuoto per le voci file
   const fmt: ExportFormat = (rawFormat === '' && item.kind === 'file') ? 'file' : (rawFormat as ExportFormat)
   if (!allowed.includes(fmt)) {
-    return { ok: false, error: `formato "${rawFormat}" non valido per questa voce: ${allowed.join(', ')}` }
+    return { ok: false, error: `format "${rawFormat}" invalid for this item: ${allowed.join(', ')}` }
   }
   let bytes = 0
   try {
@@ -511,7 +511,7 @@ export function prepareLibraryExport(input: { id?: unknown; format?: unknown }):
       bytes = statSync(join(libraryItemDir(id), item.fileName)).size
     }
   } catch {
-    return { ok: false, error: 'il contenuto della voce non si legge (libreria incoerente)' }
+    return { ok: false, error: 'the item content cannot be read (inconsistent library)' }
   }
   return {
     ok: true,
@@ -535,7 +535,7 @@ export async function runLibraryExport(plan: ExportPlan, deps: ExportRunDeps = {
   const { homedir } = await import('node:os')
   const { nonConflictingName } = await import('./file-exchange')
   const item = getLibraryItem(plan.id)
-  if (!item) throw new Error(`voce "${plan.id}" non trovata`)
+  if (!item) throw new Error(`item "${plan.id}" not found`)
   const dir = deps.targetDir ?? join(homedir(), 'Downloads', 'Homun')
   const { mkdirSync: mkdirS } = await import('node:fs')
   mkdirS(dir, { recursive: true })
@@ -550,26 +550,26 @@ export async function runLibraryExport(plan: ExportPlan, deps: ExportRunDeps = {
     writeFileSync(target, await documentHtmlOf(item))
   } else if (plan.format === 'pdf') {
     if (!deps.printToPdf) {
-      throw new Error('il PDF lo genera la finestra di Homun: aprila e riprova, oppure esporta in html')
+      throw new Error('the PDF is generated by the Homun window: open it and try again, or export as html')
     }
     const pdf = await deps.printToPdf(await documentHtmlOf(item))
     const { writeFile: wf } = await import('node:fs/promises')
     await wf(target, pdf)
   } else if (plan.format === 'svg') {
     const svg = chartSvgOf(plan.id)
-    if (svg === null) throw new Error('il SVG del grafico non c\'è (voce incoerente)')
+    if (svg === null) throw new Error('the chart SVG is missing (inconsistent item)')
     writeFileSync(target, svg)
   } else if (plan.format === 'mmd') {
     const src = readFileSync(join(libraryItemDir(plan.id), CHART_MERMAID), 'utf8')
     writeFileSync(target, src)
   } else {
     const file = fileOfItem(item)
-    if (!file) throw new Error('il file della voce non c\'è (voce incoerente)')
+    if (!file) throw new Error('the item file is missing (inconsistent item)')
     const { copyFile: cf } = await import('node:fs/promises')
     await cf(file, target)
   }
-  const note = basename(target) !== plan.name ? ` (esisteva già: scritto come "${bn(target)}")` : ''
-  return { output: `Esportato in ${target}${note}.`, finalPath: target }
+  const note = basename(target) !== plan.name ? ` (already existed: written as "${bn(target)}")` : ''
+  return { output: `Exported to ${target}${note}.`, finalPath: target }
 }
 
 /** L'HTML autonomo di un documento (punto 5): SVG in linea dei blocchi vega-lite. */
@@ -623,7 +623,7 @@ export function libraryTotalBytes(): number {
 
 /** Il testo del result di write/read/edit per il modello (punto 2). */
 export function documentResultText(r: DocumentWriteResult): string {
-  return `Documento «${r.title}» (${r.id}) v${r.version} salvato nella libreria.`
+  return `Document "${r.title}" (${r.id}) v${r.version} saved to the library.`
 }
 
 // ---- iniezione per i test del loop (nessuna home reale) ----

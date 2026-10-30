@@ -22,7 +22,7 @@ describe('checkUrl (puro)', () => {
   it('credenziali nell\'URL rifiutate (user:pass@host)', () => {
     const r = checkUrl('https://user:password@example.com/')
     expect(r.ok).toBe(false)
-    if (!r.ok) expect(r.reason).toContain('credenziali')
+    if (!r.ok) expect(r.reason).toContain('credentials')
   })
 
   it('URL non valido rifiutato', () => {

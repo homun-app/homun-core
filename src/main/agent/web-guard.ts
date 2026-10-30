@@ -20,15 +20,15 @@ export function checkUrl(raw: string): UrlCheck {
   try {
     u = new URL(trimmed)
   } catch {
-    return { ok: false, reason: `URL non valido: "${trimmed.slice(0, 120)}"` }
+    return { ok: false, reason: `Invalid URL: "${trimmed.slice(0, 120)}"` }
   }
   if (u.protocol !== 'http:' && u.protocol !== 'https:') {
-    return { ok: false, reason: `schema non ammesso (${u.protocol}): solo http e https` }
+    return { ok: false, reason: `scheme not allowed (${u.protocol}): only http and https` }
   }
   if (u.username || u.password) {
-    return { ok: false, reason: 'credenziali nell\'URL non ammesse (user:pass@host)' }
+    return { ok: false, reason: 'credentials in the URL are not allowed (user:pass@host)' }
   }
-  if (!u.hostname) return { ok: false, reason: 'host mancante' }
+  if (!u.hostname) return { ok: false, reason: 'missing host' }
   return { ok: true, url: u, host: u.hostname }
 }
 
@@ -115,7 +115,7 @@ export function resolveRedirect(from: URL, location: string): URL {
 // ---- fase 11b (punto 2): il passaggio da web_fetch al browser ----
 
 /** La nota che il result di web_fetch aggiunge su una pagina costruita in JavaScript. */
-export const JS_PAGE_HINT = 'La pagina sembra costruita in JavaScript: se ti serve, aprila con browser_open.'
+export const JS_PAGE_HINT = 'The page appears to be built in JavaScript: if you need it, open it with browser_open.'
 
 /**
  * Una pagina HTML letta da web_fetch sembra costruita in JavaScript (puro,

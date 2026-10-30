@@ -68,7 +68,7 @@ export function makeJobRunner(db: DatabaseSync, runTurnFn: RunTurnFn = runTurn) 
       // fase 12 (punto 5): un task-run può essere anche il RISVEGLIO del padre
       // (brief = <risultati_sottoagenti>) — le bandiere del payload valgono
       // COME le righe del task (B1: l'origine non si perde)
-      const opening = `[task n. ${p.taskId}${row?.title ? ` "${row.title}"` : ''} — per chiuderlo: update_task con id ${p.taskId}]\n${p.brief}`
+      const opening = `[task no. ${p.taskId}${row?.title ? ` "${row.title}"` : ''} — to close it: update_task with id ${p.taskId}]\n${p.brief}`
       await runTurnFn(job.agent_id, opening, emit, undefined, {
         source: 'user', taskId: p.taskId, ...opts, onTurnEntry,
         ...(p.respondedTo !== undefined ? { respondedTo: p.respondedTo } : {}),
@@ -131,7 +131,7 @@ export function makeJobRunner(db: DatabaseSync, runTurnFn: RunTurnFn = runTurn) 
     // viene da un evento esterno — l'auto-review non lo tocca
     const text = p.event
       ? formatTriggerEvent(p.title, p.prompt, p.event)
-      : `[routine ricorrente: ${p.title}] ${p.prompt}`
+      : `[recurring routine: ${p.title}] ${p.prompt}`
     await runTurnFn(job.agent_id, text, emit, undefined, {
       source: 'routine', title: p.title, ...opts, onTurnEntry,
       ...(p.event ? { externalEvent: true } : {})

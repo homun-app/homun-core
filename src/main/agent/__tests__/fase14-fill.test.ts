@@ -202,7 +202,7 @@ describe('7b: il vault esteso (login e contatti CIFRATI a riposo)', () => {
     expect(r.output).toContain('CHIAVE_API')
     expect(r.output).toContain(LOGIN.id)
     expect(r.output).toContain(LOGIN.label)
-    expect(r.output).toContain('con TOTP')
+    expect(r.output).toContain('with TOTP')
     expect(r.output).not.toContain(LOGIN.username)
     expect(r.output).not.toContain(LOGIN.password)
     expect(r.output).not.toContain(TOTP_SECRET)
@@ -243,7 +243,7 @@ describe('7d: il flusso completo di fill_credential col MCP finto', () => {
     const approvals = { decision: 'deny' as const, asked: 0 }
     const r = await runFillCredential({ id: LOGIN.id, username_ref: 'e2', password_ref: 'e3' }, depsOf(approvals))
     expect(approvals.asked).toBe(1)
-    expect(r.output).toContain('annullata dall\'utente')
+    expect(r.output).toContain('cancelled by the user')
     // nessun valore è arrivato al browser: lo snapshot NON contiene lo username
     const snap = await browser.callBrowserTool(AGENT, 'browser_snapshot', {})
     expect(snap.output).not.toContain(LOGIN.username)
@@ -257,7 +257,7 @@ describe('7d: il flusso completo di fill_credential col MCP finto', () => {
     expect(approvals.asked).toBe(1)
     expect(r.filled).toEqual({ username: true, password: true })
     // l'esito dice label e origine, MAI i valori
-    expect(r.output).toBe('Compilati utente e password di «Portale ASPI» su https://app.example.test.')
+    expect(r.output).toBe('Filled username and password of "Portale ASPI" on https://app.example.test.')
     expect(r.output).not.toContain(LOGIN.username)
     expect(r.output).not.toContain(LOGIN.password)
     // i valori SONO arrivati al browser finto (il registro del modulo)
@@ -281,7 +281,7 @@ describe('7d: il flusso completo di fill_credential col MCP finto', () => {
     await browser.callBrowserTool(AGENT, 'browser_open', { url: 'https://app.example.test/login' })
     const approvals = { decision: 'allow-turn' as const, asked: 0 }
     const r = await runFillCredential({ id: LOGIN.id, totp_ref: 'e4' }, depsOf(approvals))
-    expect(r.output).toContain('codice')
+    expect(r.output).toContain('code')
     expect(r.output).not.toMatch(/\d{6}/) // nessun codice a 6 cifre nell'esito
     // il valore registrato per la redazione è il TOTP corrente
     const code = cred.totpCode(TOTP_SECRET)
@@ -317,7 +317,7 @@ describe('7d: il flusso completo di fill_credential col MCP finto', () => {
     const r = await runFillCredential({ id: LOGIN.id, username_ref: 'e8', password_ref: 'e9' }, depsOf(approvals))
     expect(approvals.asked).toBe(0) // NESSUNA card: il controllo è prima
     expect(r.denied).toBe(true)
-    expect(r.output).toContain('origine')
+    expect(r.output).toContain('origin')
   })
 
   it('username_ref sul campo PASSWORD → rifiuto dal probe (campo vero)', async () => {
@@ -394,8 +394,8 @@ describe('P3: l\'origine del campo si verifica nel probe (frame), prima della ca
       depsOf({ decision: 'allow-turn', asked: 0 }, { probe: probeWithOverrides([{}, {}, { origin: 'https://evil.example.test' }]), typeInto: t.typeInto })
     )
     expect(t.calls).toHaveLength(0) // NESSUN browser_type
-    expect(r.output).toContain('la pagina è cambiata durante l\'approvazione')
-    expect(r.output).toContain('login non compilato')
+    expect(r.output).toContain('the page changed during the approval')
+    expect(r.output).toContain('login not filled')
   })
 
   it('cambio di origine DOPO il primo campo → ci si ferma: compilato solo in parte', async () => {
@@ -408,8 +408,8 @@ describe('P3: l\'origine del campo si verifica nel probe (frame), prima della ca
       depsOf({ decision: 'allow-turn', asked: 0 }, { probe: probeWithOverrides([{}, {}, {}, { origin: 'https://evil.example.test' }]), typeInto: t.typeInto })
     )
     expect(t.calls).toHaveLength(1) // solo lo username
-    expect(r.output).toContain('la pagina è cambiata durante l\'approvazione')
-    expect(r.output).toContain('compilato solo in parte: utente')
+    expect(r.output).toContain('the page changed during the approval')
+    expect(r.output).toContain('only partially filled: username')
     expect(t.calls[0]!.value).toBe(LOGIN.username)
   })
 

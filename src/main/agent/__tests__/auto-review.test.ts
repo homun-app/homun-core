@@ -87,35 +87,38 @@ describe('autoReviewDecision: la decisione finale (pura)', () => {
 
 describe('reviewerPrompt: il revisore vede SOLO regole e azione, come DATO', () => {
   it('contiene le due liste e l\'azione dentro <azione>, mai il transcript', () => {
-    const p = reviewerPrompt(cfg, cmd)
+    const p = reviewerPrompt(cfg, cmd, 'it')
     expect(p).toContain(RULE)
     expect(p).toContain(BLOCK)
     expect(p).toContain('<azione>')
     expect(p).toContain('tool: run-command')
     expect(p).toContain('"command": "ls"')
     // la regola che vince: una regola "fermati" batte le "continua"
-    expect(p).toContain('SEMPRE ask')
+    expect(p).toContain('ALWAYS ask')
     // gli argomenti sono dati, non istruzioni
-    expect(p).toContain('DATO')
+    expect(p).toContain('DATA')
     // contesto dell'ambiente (di sistema): senza workingDirectory si gira nella
     // home del bot — serve a giudicare le regole "dentro la home"
-    expect(p).toContain('directory di lavoro è la HOME del bot')
+    expect(p).toContain('the working directory is the bot\'s HOME')
+    // fase 17b (A3): la riga di lingua per il reason (l'utente lo legge nella card)
+    expect(p).toContain('Write the reason in Italian')
+    expect(reviewerPrompt(cfg, cmd, 'en')).toContain('Write the reason in English')
   })
 
   it('per una bozza il revisore vede destinatario/oggetto/corpo', () => {
     const p = reviewerPrompt(cfg, {
       tool: 'draft_external', neverAuto: false, untrustedTurn: false,
       draft: { channel: 'email', to: 'x@example.com', subject: 'ciao', body: 'corpo del messaggio' }
-    })
-    expect(p).toContain('destinatario: x@example.com')
-    expect(p).toContain('oggetto: ciao')
+    }, 'it')
+    expect(p).toContain('recipient: x@example.com')
+    expect(p).toContain('subject: ciao')
     expect(p).toContain('corpo del messaggio')
   })
 
   it('describeActionForReviewer tronca gli argomenti giganti', () => {
     const long = describeActionForReviewer({ ...cmd, args: { command: 'x'.repeat(10_000) } })
     expect(long.length).toBeLessThan(5_000)
-    expect(long).toContain('troncato')
+    expect(long).toContain('truncated')
   })
 })
 
@@ -133,17 +136,17 @@ describe('runReviewer: normalizzazione e fallback (modello finto)', () => {
 
   it('JSON non valido → ok:false', async () => {
     const out = await runReviewer(cfg, cmd, model({ toolCalls: [{ arguments: '{non json' }] }))
-    expect(out).toEqual({ ok: false, error: 'JSON non valido' })
+    expect(out).toEqual({ ok: false, error: 'invalid JSON' })
   })
 
   it('nessuna tool call → ok:false', async () => {
-    expect(await runReviewer(cfg, cmd, model({}))).toEqual({ ok: false, error: 'nessuna decisione strutturata' })
-    expect(await runReviewer(cfg, cmd, model({ toolCalls: [] }))).toEqual({ ok: false, error: 'nessuna decisione strutturata' })
+    expect(await runReviewer(cfg, cmd, model({}))).toEqual({ ok: false, error: 'no structured decision' })
+    expect(await runReviewer(cfg, cmd, model({ toolCalls: [] }))).toEqual({ ok: false, error: 'no structured decision' })
   })
 
   it('decisione fuori dai valori → ok:false', async () => {
     const out = await runReviewer(cfg, cmd, model({ toolCalls: [{ arguments: JSON.stringify({ decision: 'denied' }) }] }))
-    expect(out).toEqual({ ok: false, error: 'decisione non valida' })
+    expect(out).toEqual({ ok: false, error: 'invalid decision' })
   })
 
   it('errore del modello → ok:false con il messaggio', async () => {

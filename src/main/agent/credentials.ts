@@ -149,16 +149,16 @@ export type FillOriginCheck =
 export function checkFillOrigin(login: { label: string; origins: string[] }, pageUrl: string | null): FillOriginCheck {
   const page = pageUrl ? httpsOriginOf(pageUrl) : null
   if (!pageUrl || !page) {
-    const shown = pageUrl ? pageUrl.slice(0, 120) : '(nessuna pagina aperta)'
+    const shown = pageUrl ? pageUrl.slice(0, 120) : '(no page open)'
     return {
       ok: false,
-      error: `l'origine della pagina non è valida per il login: la pagina è ${shown} e «${login.label}» è per ${login.origins.join(', ')}. Apri tu la pagina del sito e riprova.`
+      error: `the page origin is not valid for the login: the page is ${shown} and "${login.label}" is for ${login.origins.join(', ')}. Open the site page yourself and try again.`
     }
   }
   if (!login.origins.includes(page)) {
     return {
       ok: false,
-      error: `l'origine della pagina non è quella del login: la pagina è ${page} e «${login.label}» è per ${login.origins.join(', ')} (nessun sottodominio o porta diversa). Se il sito è giusto, salvalo come login nuovo.`
+      error: `the page origin is not the login's one: the page is ${page} and "${login.label}" is for ${login.origins.join(', ')} (no subdomain or different port). If the site is right, save it as a new login.`
     }
   }
   return { ok: true, origin: page }
@@ -185,9 +185,9 @@ export type FillRefCheck =
  */
 export function checkFillRef(ref: unknown, kind: 'username' | 'password' | 'totp'): FillRefCheck {
   const r = String(ref ?? '').trim()
-  if (!r) return { ok: false, error: `manca ${kind}_ref: servono i ref dei campi presi dallo snapshot` }
+  if (!r) return { ok: false, error: `missing ${kind}_ref: the field refs taken from the snapshot are required` }
   if (!/^[A-Za-z0-9]+$/.test(r)) {
-    return { ok: false, error: `"${r.slice(0, 40)}" non è un ref dello snapshot (i ${kind}_ref sono i ref dello snapshot, es. e12 o f1e12)` }
+    return { ok: false, error: `"${r.slice(0, 40)}" is not a snapshot ref (${kind}_ref are snapshot refs, e.g. e12 or f1e12)` }
   }
   return { ok: true, ref: r }
 }
@@ -210,19 +210,19 @@ export function checkFieldKind(
   info: { type: string } | null
 ): FieldKindCheck {
   if (!info) {
-    return { ok: false, error: `non riesco a verificare il tipo del campo ${kind}_ref dentro la pagina: rifiutato (se il campo è giusto, riprova dopo un browser_snapshot)` }
+    return { ok: false, error: `cannot verify the type of the ${kind}_ref field inside the page: refused (if the field is right, try again after a browser_snapshot)` }
   }
   if (kind === 'password' && info.type !== 'password') {
-    return { ok: false, error: `password_ref punta a un campo type="${info.type || '(sconosciuto)'}" e non type="password": usa i ref giusti dallo snapshot` }
+    return { ok: false, error: `password_ref points to a field type="${info.type || '(unknown)'}" and not type="password": use the right refs from the snapshot` }
   }
   if (kind === 'username' && info.type === 'password') {
-    return { ok: false, error: 'username_ref punta a un campo password: il nome utente non va nel campo della password' }
+    return { ok: false, error: 'username_ref points to a password field: the username does not go in the password field' }
   }
   if (kind === 'username' && !USERNAME_FIELD_TYPES.has(info.type)) {
-    return { ok: false, error: `username_ref punta a un campo type="${info.type || '(sconosciuto)'}": servono campi di testo (text/email/tel)` }
+    return { ok: false, error: `username_ref points to a field type="${info.type || '(unknown)'}": text fields are required (text/email/tel)` }
   }
   if (kind === 'totp' && info.type === 'password') {
-    return { ok: false, error: 'totp_ref punta a un campo password: il codice va in un campo di testo' }
+    return { ok: false, error: 'totp_ref points to a password field: the code goes in a text field' }
   }
   return { ok: true }
 }
@@ -241,15 +241,15 @@ export function checkFieldFrame(
   expectedOrigins: string[]
 ): FieldKindCheck {
   if (!info) {
-    return { ok: false, error: 'non riesco a leggere l\'origine del campo dentro la pagina (verifica del frame): rifiutato' }
+    return { ok: false, error: 'cannot read the field origin inside the page (frame check): refused' }
   }
   if (info.top !== true) {
-    return { ok: false, error: 'il campo sta in un iframe: una cornice può avere un\'altra origine. Usa un campo della pagina principale.' }
+    return { ok: false, error: 'the field is in an iframe: a frame can have a different origin. Use a field of the main page.' }
   }
   if (!expectedOrigins.includes(info.origin)) {
     return {
       ok: false,
-      error: `l'origine del campo (${info.origin || '(sconosciuta)'}) non è quella del login (${expectedOrigins.join(', ')}): la pagina è cambiata o non è quella giusta`
+      error: `the field origin (${info.origin || '(unknown)'}) is not the login's one (${expectedOrigins.join(', ')}): the page changed or is not the right one`
     }
   }
   return { ok: true }
@@ -280,13 +280,13 @@ export interface FieldProbeLike {
 
 // ---- l'esito per il modello (mai i valori) ----
 
-/** Le parole italiane dei campi compilati, per l'esito (puro). */
+/** Le parole dei campi compilati, per l'esito (puro). */
 export function filledFieldsLabel(refs: { username?: boolean; password?: boolean; totp?: boolean }): string {
   const parts: string[] = []
-  if (refs.username) parts.push('utente')
+  if (refs.username) parts.push('username')
   if (refs.password) parts.push('password')
-  if (refs.totp) parts.push('codice')
-  return parts.join(' e ') || 'i campi'
+  if (refs.totp) parts.push('code')
+  return parts.join(' and ') || 'the fields'
 }
 
 /**
@@ -294,5 +294,5 @@ export function filledFieldsLabel(refs: { username?: boolean; password?: boolean
  * MAI i valori.
  */
 export function fillResultText(label: string, origin: string, refs: { username?: boolean; password?: boolean; totp?: boolean }): string {
-  return `Compilati ${filledFieldsLabel(refs)} di «${label}» su ${origin}.`
+  return `Filled ${filledFieldsLabel(refs)} of "${label}" on ${origin}.`
 }

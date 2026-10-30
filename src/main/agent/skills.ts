@@ -52,8 +52,8 @@ export function skillsSectionPrompt(skills: SkillRecord[]): string {
     .sort((a, b) => a.name.localeCompare(b.name))
     .map((s) => `- ${s.name}: ${s.description.replace(/\n+/g, ' ').trim()}`)
   return [
-    '# Skill disponibili',
-    'Procedure che sai eseguire. Nel prompt vedi solo nome e descrizione: se una skill serve per il compito corrente, carica le istruzioni complete con skill({name}) e seguile. Crea o aggiorna le skill con update_skill (serve l\'approvazione dell\'utente).',
+    '# Available skills',
+    'Procedures you know how to execute. In the prompt you see only the name and description: if a skill is needed for the current task, load the full instructions with skill({name}) and follow them. Create or update skills with update_skill (the user\'s approval is required).',
     ...lines
   ].join('\n')
 }
@@ -63,7 +63,7 @@ export function skillsSectionPrompt(skills: SkillRecord[]): string {
 import { installedPlugins, pluginSkillBody, type InstalledPlugin } from '../connectors/install'
 
 /** Il rifiuto fisso di update_skill/delete_skill su una skill di plugin. */
-export const PLUGIN_SKILL_REFUSAL = 'skill di un plugin: si cambia aggiornando il plugin'
+export const PLUGIN_SKILL_REFUSAL = 'a plugin\'s skill: it is changed by updating the plugin'
 
 /** I plugin installati abilitati per un bot (enabledFor; il figlio eredita dal padre). */
 export function pluginsEnabledFor(agentId: string, parentId?: string): InstalledPlugin[] {
@@ -99,7 +99,7 @@ export function listSkills(agentId: string): SkillRecord[] {
 
 /** Corpo (istruzioni) di una skill — è ciò che il tool skill({name}) consegna al modello. Fase 13: le skill dei plugin si LEGGONO (sono in sola lettura nella cartella del plugin). */
 export function readSkillBody(agentId: string, name: string): string {
-  if (!isValidSkillName(name)) throw new Error(`Nome skill non valido: "${name}" (solo [a-z0-9-], max 64)`)
+  if (!isValidSkillName(name)) throw new Error(`Invalid skill name: "${name}" (only [a-z0-9-], max 64)`)
   // fase 12: il figlio legge le skill del PADRE; fase 13: e le skill dei plugin
   const readFor = boxOwnerOf(agentId)
   try {
@@ -110,14 +110,14 @@ export function readSkillBody(agentId: string, name: string): string {
       const body = pluginSkillBody(p, dataDir(), name)
       if (body !== null) return parseSkillFile(body)?.content ?? body
     }
-    throw new Error(`Skill "${name}" non trovata`)
+    throw new Error(`Skill "${name}" not found`)
   }
 }
 
 /** Crea o aggiorna una skill (update_skill); ritorna il record salvato. */
 export function writeSkill(agentId: string, input: { name: string; description: string; content: string }): SkillRecord {
   const name = String(input.name ?? '')
-  if (!isValidSkillName(name)) throw new Error(`Nome skill non valido: "${name}" (solo [a-z0-9-], max 64)`)
+  if (!isValidSkillName(name)) throw new Error(`Invalid skill name: "${name}" (only [a-z0-9-], max 64)`)
   const record: SkillRecord = {
     name,
     description: String(input.description ?? ''),
@@ -131,7 +131,7 @@ export function writeSkill(agentId: string, input: { name: string; description: 
 
 /** Elimina una skill (directory inclusa); true se esisteva. */
 export function deleteSkill(agentId: string, name: string): boolean {
-  if (!isValidSkillName(name)) throw new Error(`Nome skill non valido: "${name}" (solo [a-z0-9-], max 64)`)
+  if (!isValidSkillName(name)) throw new Error(`Invalid skill name: "${name}" (only [a-z0-9-], max 64)`)
   const dir = join(skillsDir(agentId), name)
   try {
     readdirSync(dir)

@@ -119,7 +119,7 @@ async function redactedTail(deps: ShellHostDeps, agentId: string, logPath: strin
     return redactSecrets(tail, used)
   } catch {
     // impossibile verificare la redazione: l'output NON entra nel contesto
-    return '(output omesso: impossibile redarre i segreti del comando)'
+    return '(output omitted: unable to redact the command secrets)'
   }
 }
 
@@ -215,11 +215,11 @@ export async function startBackgroundShell(
   // tetti: 4 per bot, 8 per box (oltre → result esplicito, nessuna partenza)
   const perAgent = runningShellJobsOf(database, agentId).length
   if (perAgent >= SHELLS_PER_AGENT_MAX) {
-    return { ok: false, error: `Limite raggiunto: al massimo ${SHELLS_PER_AGENT_MAX} comandi in background per bot (ne hai ${perAgent}). Leggi un esito con await_shell o termina un comando con kill.` }
+    return { ok: false, error: `Limit reached: at most ${SHELLS_PER_AGENT_MAX} background commands per bot (you have ${perAgent}). Read an outcome with await_shell or terminate a command with kill.` }
   }
   const perBox = runningShellJobsAll(database).length
   if (perBox >= SHELLS_PER_BOX_MAX) {
-    return { ok: false, error: `Limite raggiunto: al massimo ${SHELLS_PER_BOX_MAX} comandi in background per box (ne girano ${perBox}). Attendi o termina qualcosa.` }
+    return { ok: false, error: `Limit reached: at most ${SHELLS_PER_BOX_MAX} background commands per computer (${perBox} running). Wait or terminate something.` }
   }
   const id = `sh-${randomUUID().slice(0, 12)}`
   const paths = backgroundShellPaths(id)
@@ -315,7 +315,7 @@ export function foregroundOutcome(facts: ForegroundFacts): ForegroundPlan {
   if (facts.capsFull) {
     return {
       kind: 'fallback',
-      why: `i comandi in background simultanei sono al massimo (${SHELLS_PER_AGENT_MAX} per bot, ${SHELLS_PER_BOX_MAX} per box): questo è girato in foreground col timeout, oltre il quale viene terminato`
+      why: `simultaneous background commands are at most (${SHELLS_PER_AGENT_MAX} per bot, ${SHELLS_PER_BOX_MAX} per computer): this one ran in foreground with the timeout, past which it is terminated`
     }
   }
   return facts.exited ? { kind: 'done' } : { kind: 'promote' }
@@ -372,14 +372,14 @@ export async function runForegroundShell(
         const used = await Promise.all(secretNames.map(async (name) => ({ name, envName: `SANDBOT_SECRET_${name}`, value: await deps.reveal!(name) })))
         return redactSecrets(t, used)
       } catch {
-        return '(output omesso: impossibile redarre i segreti del comando)'
+        return '(output omitted: unable to redact the command secrets)'
       }
     }
     const parts: string[] = []
     if (r.stdout) parts.push(await redact(r.stdout))
     if (r.stderr) parts.push('[stderr]\n' + (await redact(r.stderr)))
     parts.push(`[exit ${r.exitCode ?? 'killed'}${r.trimmed ? ' — output trimmed' : ''}]`)
-    parts.push(`[nota: ${capsPlan.why}]`)
+    parts.push(`[note: ${capsPlan.why}]`)
     return { output: parts.join('\n'), meta: { exitCode: r.exitCode, trimmed: r.trimmed, capsFull: true } }
   }
   const id = `sh-${randomUUID().slice(0, 12)}`
@@ -410,7 +410,7 @@ export async function runForegroundShell(
   const plan = foregroundOutcome({ capsFull, exited: exitRaw !== null && exitRaw.trim() !== '' })
   if (plan.kind === 'promote') {
     return {
-      output: `Il comando è ancora in corso dopo ${Math.round(promoteAfterMs / 1000)} s: l'ho passato in background (shellId ${id}). Ti arriva l'esito alla fine (messaggio di sistema con le ultime righe), oppure leggilo subito con await_shell({shellId: "${id}"}). Log: ${paths.log}. Tetto: 6 ore.`,
+      output: `The command is still running after ${Math.round(promoteAfterMs / 1000)} s: I moved it to background (shellId ${id}). The outcome arrives at the end (system message with the last lines), or read it right away with await_shell({shellId: "${id}"}). Log: ${paths.log}. Cap: 6 hours.`,
       meta: { shellId: id, background: true, promoted: true }
     }
   }
@@ -424,7 +424,7 @@ export async function runForegroundShell(
       const used = await Promise.all(secretNames.map(async (name) => ({ name, envName: `SANDBOT_SECRET_${name}`, value: await deps.reveal!(name) })))
       return redactSecrets(rawLog, used)
     } catch {
-      return '(output omesso: impossibile redarre i segreti del comando)'
+      return '(output omitted: unable to redact the command secrets)'
     }
   })()
   const capped = capOutput(redactedLog)
@@ -446,7 +446,7 @@ async function launchErrorText(
   failed: { exitCode: number | null; stderr: string }
 ): Promise<string> {
   const why = failed.stderr.trim().slice(0, 2_000)
-  const head = `Il comando non è mai partito (exit ${failed.exitCode ?? 'docker assente'}).`
+  const head = `The command never started (exit ${failed.exitCode ?? 'docker missing'}).`
   if (!secretNames.length) return why ? `${head} ${why}` : head
   try {
     const used = await Promise.all(secretNames.map(async (name) => ({ name, envName: `SANDBOT_SECRET_${name}`, value: await deps.reveal!(name) })))
@@ -466,7 +466,7 @@ async function finishShell(deps: ShellHostDeps, job: ShellJob, status: 'done' | 
   const tail = await redactedTail(deps, job.agent_id, job.log_path, 50, job.secret_names)
   deps.enqueue?.(job.agent_id, [
     formatShellDone(job.command, job.id, exitCode, tail, status),
-    "Il comando in background è finito: decidi se proseguire il lavoro, avvisare l'utente con send_to_user o tacere."
+    "The background command has finished: decide whether to continue the work, notify the user with send_to_user, or stay silent."
   ].join('\n'), { shellId: job.id, shellStatus: status })
   updateShellJob(deps.db(), job.id, { notified: true })
 }
@@ -499,8 +499,8 @@ export async function awaitShell(
   const database = deps.db()
   const sleep = deps.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)))
   let job = getShellJob(database, shellId)
-  if (!job) return `Nessun comando in background con shellId "${shellId}": gli id validi arrivano da run-command con background:true.`
-  if (job.agent_id !== agentId) return `Il comando ${shellId} non è tuo (è di un altro bot): non puoi attenderlo.`
+  if (!job) return `No background command with shellId "${shellId}": valid ids come from run-command with background:true.`
+  if (job.agent_id !== agentId) return `The command ${shellId} is not yours (it belongs to another bot): you cannot wait for it.`
   if (opts.kill) {
     const terminate = deps.terminate ?? defaultTerminate(deps)
     await terminate(agentId, job)
@@ -515,16 +515,16 @@ export async function awaitShell(
     if (raw !== null && raw.trim() !== '') await finalizeFromExitFile(deps, agentId, shellId, null)
     job = getShellJob(database, shellId)
   }
-  if (!job) return `Comando ${shellId} scomparso.`
+  if (!job) return `Command ${shellId} gone.`
   // il bot ha letto l'esito: la notifica di fine non serve
   updateShellJob(database, shellId, { awaited: true })
   const tail = await redactedTail(deps, agentId, job.log_path, 200, job.secret_names)
   const stato = job.status === 'running'
-    ? 'ancora IN CORSO (timeout di attesa scaduto)'
+    ? 'still RUNNING (wait timeout expired)'
     : job.status === 'done'
-      ? `finito, exit ${job.exit_code ?? '?'}`
+      ? `finished, exit ${job.exit_code ?? '?'}`
       : job.status
-  return `Comando ${shellId} \`$ ${job.command}\`: ${stato}.\nUltime righe del log:\n${tail}`
+  return `Command ${shellId} \`$ ${job.command}\`: ${stato}.\nLast lines of the log:\n${tail}`
 }
 
 /**

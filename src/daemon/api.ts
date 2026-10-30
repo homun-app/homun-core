@@ -23,6 +23,7 @@ import { avatarValidationError } from '../shared/avatar'
 import { generateWebhookToken } from './webhooks'
 import { enqueueJob } from '../main/store/jobs'
 import { enqueueUserMessage, enqueueWidgetResponse } from './enqueue'
+import { noteHumanText, currentUserLanguage } from '../main/agent/user-language'
 import { loadTemplates, templateById, buildKickstartMessage } from '../main/templates'
 import { deliverHeldForAgent } from './outbox'
 import type { JobWorker } from './worker'
@@ -305,6 +306,8 @@ export function buildApiMethods(
 
     // ---- quick-ask (domanda effimera, non inquina il transcript) ----
     quickask: async ([agentId, question]) => {
+      // fase 17b (A2): la domanda della quick ask è testo di una persona
+      noteHumanText(String(question ?? ''))
       const agent = store.getAgent(agentId as string)
       if (!agent?.providerId || !agent.model) throw new Error('Configura prima provider e modello.')
       const provider = providers.getProvider(agent.providerId)
@@ -316,7 +319,7 @@ export function buildApiMethods(
         .filter((e) => e.kind === 'message' || e.kind === 'send-message')
         .map((e) => `${e.role === 'user' ? 'UTENTE' : 'BOT'}: ${e.content.slice(0, 400)}`)
         .join('\n')
-      const prompt = secondaryPrompts.quickAsk(context, question as string)
+      const prompt = secondaryPrompts.quickAsk(context, question as string, currentUserLanguage())
       const controller = new AbortController()
       const stream = llmStream(provider, agent.model, [{ role: 'user', content: prompt }], [], controller.signal)
       let acc = ''
@@ -492,6 +495,8 @@ export function buildApiMethods(
       if (!g) throw new Error('Gruppo non trovato')
       const t = String(text ?? '').trim()
       if (!t) throw new Error('Testo mancante')
+      // fase 17b (A2): il post dell'utente nel gruppo è testo di una persona
+      noteHumanText(t)
       const msg = groups.addGroupMessage({
         groupId: g.id, authorKind: 'user', authorId: null, authorName: 'utente', text: t, depth: 0
       })

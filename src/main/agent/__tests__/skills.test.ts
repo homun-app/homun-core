@@ -67,9 +67,9 @@ describe('scrittura / lettura / eliminazione', () => {
   })
 
   it('nome non valido rifiutato PRIMA di toccare il filesystem (niente directory)', () => {
-    expect(() => writeSkill('agent_s', { name: '../escape', description: 'x', content: 'y' })).toThrow(/non valido/)
-    expect(() => readSkillBody('agent_s', 'a/b')).toThrow(/non valido/)
-    expect(() => deleteSkill('agent_s', '..')).toThrow(/non valido/)
+    expect(() => writeSkill('agent_s', { name: '../escape', description: 'x', content: 'y' })).toThrow(/Invalid skill name/)
+    expect(() => readSkillBody('agent_s', 'a/b')).toThrow(/Invalid skill name/)
+    expect(() => deleteSkill('agent_s', '..')).toThrow(/Invalid skill name/)
     expect(existsSync(join(root, 'escape'))).toBe(false)
   })
 })
@@ -82,7 +82,7 @@ describe('prompt: SOLO nome e descrizione', () => {
       content: 'ISTRUZIONI SEGRETE DEL FLUSSO: passo 1, passo 2'
     })
     const section = buildSkillsSection('agent_p')
-    expect(section).toContain('# Skill disponibili')
+    expect(section).toContain('# Available skills')
     expect(section).toContain('triage-email: smista la posta in arrivo')
     expect(section).toContain('skill({name})')
     expect(section).not.toContain('ISTRUZIONI SEGRETE')

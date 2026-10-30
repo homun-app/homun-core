@@ -51,12 +51,12 @@ describe('formatFindToolsResult + soglia', () => {
       { name: 'mcp__gw__linear_create_issue', description: 'Crea una issue. ' + 'lunga '.repeat(100), requiredParams: ['title', 'team'] }
     ])
     expect(text).toContain('mcp__gw__linear_create_issue')
-    expect(text).toContain('parametri obbligatori: title, team')
+    expect(text).toContain('required parameters: title, team')
     const desc = text.split(': ').pop() ?? ''
     expect(desc.length).toBeLessThanOrEqual(220)
   })
   it('nessun risultato → messaggio che dice di riprovare o avvisare l\'utente', () => {
-    expect(formatFindToolsResult([])).toContain('Nessuno strumento MCP trovato')
+    expect(formatFindToolsResult([])).toContain('No MCP tools found')
   })
   it('toolsDeferred: sotto la soglia tutto inline, sopra si deferisce', () => {
     expect(DEFAULT_MAX_INLINE_TOOLS).toBe(30)
@@ -95,13 +95,13 @@ describe('connectorsActiveSection (pura)', () => {
       { name: 'gw', toolCount: 60, description: 'Gateway con tante app: ' + 'x'.repeat(200) },
       { name: 'notion', toolCount: 12, description: 'Legge e aggiorna il workspace Notion' }
     ])
-    expect(s).toContain('# Connettori attivi')
-    expect(s).toContain('- gw: 60 strumenti')
-    expect(s).toContain('- notion: 12 strumenti — Legge e aggiorna il workspace Notion')
+    expect(s).toContain('# Active connectors')
+    expect(s).toContain('- gw: 60 tools')
+    expect(s).toContain('- notion: 12 tools — Legge e aggiorna il workspace Notion')
     expect(s).toContain('find_tools')
     // la descrizione è troncata a 80
     const gwLine = s.split('\n').find((l) => l.startsWith('- gw'))!
-    expect(gwLine.length).toBeLessThanOrEqual('- gw: 60 strumenti — '.length + 81)
+    expect(gwLine.length).toBeLessThanOrEqual('- gw: 60 tools — '.length + 81)
   })
   it('vuota senza server', () => {
     expect(connectorsActiveSection([])).toBe('')

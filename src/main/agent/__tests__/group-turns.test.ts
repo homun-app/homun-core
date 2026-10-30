@@ -125,7 +125,7 @@ describe('planGroupTurns (puro, il cuore della fase)', () => {
     const pending = [groupTurnNonce(3, 'agent_cerca', 7)]
     const r = plan({ pendingNonces: pending })
     expect(r.turns.map((t) => t.memberId)).not.toContain('agent_cerca')
-    expect(r.skipped.find((s) => s.memberId === 'agent_cerca')?.reason).toContain('fusione')
+    expect(r.skipped.find((s) => s.memberId === 'agent_cerca')?.reason).toContain('merge')
     // gli altri tre sì
     expect(r.turns).toHaveLength(3)
   })
@@ -207,7 +207,7 @@ describe('correzione C4: instradamento verso il coordinatore e tetto per catena'
       memberChainPosts: { agent_cerca: GROUP_MEMBER_CHAIN_POSTS_MAX, agent_piano: 1 }
     })
     expect(r.turns.map((t) => t.memberId)).not.toContain('agent_cerca')
-    expect(r.skipped.find((s) => s.memberId === 'agent_cerca')?.reason).toContain('tetto per catena')
+    expect(r.skipped.find((s) => s.memberId === 'agent_cerca')?.reason).toContain('per-chain cap reached')
     // chi è sotto il tetto resta
     expect(r.turns.map((t) => t.memberId)).toContain('agent_piano')
   })
@@ -245,7 +245,7 @@ describe('correzione C4: instradamento verso il coordinatore e tetto per catena'
       memberChainPosts: { agent_cerca: GROUP_MEMBER_CHAIN_POSTS_MAX }
     })
     expect(u.turns.map((t) => t.memberId)).not.toContain('agent_cerca')
-    expect(u.skipped.find((s) => s.memberId === 'agent_cerca')?.reason).toContain('tetto per catena')
+    expect(u.skipped.find((s) => s.memberId === 'agent_cerca')?.reason).toContain('per-chain cap reached')
   })
 })
 
@@ -364,31 +364,31 @@ describe('correzione C2: shouldScheduleClosingTurn (puro)', () => {
   it('nessun coordinatore → niente turno di chiusura', () => {
     const r = shouldScheduleClosingTurn({ ...ok, coordinatorId: null })
     expect(r.schedule).toBe(false)
-    expect(r.reason).toContain('coordinatore')
+    expect(r.reason).toContain('coordinator')
   })
 
   it('niente doppioni: il turno di chiusura già programmato non si riaccoda', () => {
     const r = shouldScheduleClosingTurn({ ...ok, closeTurnExists: true })
     expect(r.schedule).toBe(false)
-    expect(r.reason).toContain('già programmato')
+    expect(r.reason).toContain('already scheduled')
   })
 
   it('la catena ha ancora turni in coda o in corso → si aspetta', () => {
     const r = shouldScheduleClosingTurn({ ...ok, chainEnded: false })
     expect(r.schedule).toBe(false)
-    expect(r.reason).toContain('in coda')
+    expect(r.reason).toContain('queued')
   })
 
   it('il coordinatore con una domanda o card in attesa NON riceve il turno di chiusura', () => {
     const r = shouldScheduleClosingTurn({ ...ok, coordinatorWaiting: true })
     expect(r.schedule).toBe(false)
-    expect(r.reason).toContain('risposta')
+    expect(r.reason).toContain('answer')
   })
 
   it('nessuna novità dopo l\'ultima attività del coordinatore → niente riepilogo', () => {
     const r = shouldScheduleClosingTurn({ ...ok, newsForCoordinator: false })
     expect(r.schedule).toBe(false)
-    expect(r.reason).toContain('nessun post')
+    expect(r.reason).toContain('no bot posts')
   })
 
   it('il nonce di chiusura è deterministico per catena e si riconosce', () => {
@@ -450,8 +450,8 @@ describe('correzione C2/C3: funzioni pure di supporto', () => {
   })
 
   it('alreadySentToUserResult dice che il riepilogo va fatto alla chiusura', () => {
-    expect(alreadySentToUserResult()).toContain('riepilogo')
-    expect(alreadySentToUserResult()).toContain('chiusura')
+    expect(alreadySentToUserResult()).toContain('summary')
+    expect(alreadySentToUserResult()).toContain('closing')
   })
 })
 
@@ -474,28 +474,28 @@ describe('buildGroupTurnOpening (puro)', () => {
     const o = buildGroupTurnOpening(ev)
     expect(o).toContain('<turno_di_gruppo gruppo="Cena compleanno">')
     expect(o).toContain('</turno_di_gruppo>')
-    expect(o).toContain('Scopo e regole del gruppo: Organizzare la cena')
-    expect(o).toContain('- Coordinatore (coordinatore): Assegna i compiti')
-    expect(o).toContain('[utente] Fabio: Serve il menu entro stasera')
+    expect(o).toContain('Group purpose and rules: Organizzare la cena')
+    expect(o).toContain('- Coordinatore (coordinator): Assegna i compiti')
+    expect(o).toContain('[user] Fabio: Serve il menu entro stasera')
     expect(o).toContain('[bot] Coordinatore: @Cercatore Cena tre opzioni')
-    expect(o).toContain('(in risposta a Fabio: «Serve il menu entro stasera»)')
-    expect(o).toContain('Sei Cercatore Cena')
+    expect(o).toContain('(in reply to Fabio: "Serve il menu entro stasera")')
+    expect(o).toContain('You are Cercatore Cena')
     // fase 11 (residuo 0c): il nome proprio non si menziona da solo
-    expect(o).toContain('Tu sei @Cercatore Cena: non menzionarti nei tuoi messaggi.')
+    expect(o).toContain('You are @Cercatore Cena: do not mention yourself in your messages.')
   })
 
   it('la REGOLA dei turni di gruppo accompagna il blocco', () => {
     const o = buildGroupTurnOpening(ev)
     expect(o).toContain(GROUP_TURN_RULE)
     expect(o).toContain('pass')
-    expect(o).toContain('NON si riporta nel gruppo')
+    expect(o).toContain('NOT reported in the group')
     // correzione C3: la regola dice QUANDO si scrive all'utente
-    expect(o).toContain('solo per una decisione che spetta a lui')
+    expect(o).toContain('only for a decision that belongs to them')
   })
 
   it('windingDown: la riga di chiusura compare solo quando richiesta', () => {
-    expect(buildGroupTurnOpening({ ...ev, windingDown: true })).toContain('Il giro sta CHIUDENDO')
-    expect(buildGroupTurnOpening(ev)).not.toContain('Il giro sta CHIUDENDO')
+    expect(buildGroupTurnOpening({ ...ev, windingDown: true })).toContain('The round is WINDING DOWN')
+    expect(buildGroupTurnOpening(ev)).not.toContain('The round is WINDING DOWN')
   })
 
   it('un tag di chiusura ostile dentro un messaggio NON chiude il blocco (neutralizzato)', () => {
@@ -510,16 +510,16 @@ describe('buildGroupTurnOpening (puro)', () => {
 
   it('correzione C6a: l\'apertura dice che i messaggi PRECEDENTI sono già stati letti', () => {
     const o = buildGroupTurnOpening(ev)
-    expect(o).toContain('quelli precedenti li hai già letti')
-    expect(o).not.toContain('non la vedi')
+    expect(o).toContain('you have already read the earlier ones')
+    expect(o).not.toContain('you have not seen')
   })
 
   it('correzione C2: il turno di CHIUSURA porta chiusura="true" e la riga del riepilogo', () => {
     const o = buildGroupTurnOpening({ ...ev, windingDown: true, closing: true })
     expect(o).toContain('<turno_di_gruppo gruppo="Cena compleanno" chiusura="true">')
     expect(o).toContain(GROUP_CLOSING_LINE)
-    expect(o).toContain('manda ORA all\'utente UN riepilogo completo')
-    expect(o).not.toContain('Il giro sta CHIUDENDO')
+    expect(o).toContain('send the user ONE complete summary NOW')
+    expect(o).not.toContain('The round is WINDING DOWN')
     // senza closing il flag non c'è
     expect(buildGroupTurnOpening(ev)).not.toContain('chiusura="true"')
   })
@@ -538,18 +538,18 @@ describe('correzione E1: la regola del turno di gruppo dice COME si scrive', () 
 
   it('la riga in testa: nel gruppo si scrive SOLO con post_to_group, per tacere si chiama pass', () => {
     expect(GROUP_TURN_RULE).toContain(
-      'Nel gruppo si scrive SOLO con post_to_group: il testo che scrivi fuori dai tool è il tuo ragionamento e non lo legge nessuno. Per restare in silenzio chiama pass.'
+      'In the group you write ONLY with post_to_group: the text you write outside tools is your reasoning and nobody reads it. To stay silent call pass.'
     )
   })
 
   it('niente più "(o semplicemente non scrivere)": il silenzio si dichiara con pass', () => {
-    expect(GROUP_TURN_RULE).not.toContain('o semplicemente non scrivere')
-    expect(GROUP_TURN_RULE).toContain('altrimenti chiama pass')
+    expect(GROUP_TURN_RULE).not.toContain('or simply do not write')
+    expect(GROUP_TURN_RULE).toContain('otherwise call pass')
   })
 
   it('nel turno di CHIUSURA la riga equivalente: all\'utente si scrive SOLO con send_to_user', () => {
-    expect(GROUP_CLOSING_LINE).toContain("All'utente si scrive SOLO con send_to_user")
-    expect(buildGroupTurnOpening({ ...ev, windingDown: true, closing: true })).toContain("All'utente si scrive SOLO con send_to_user")
+    expect(GROUP_CLOSING_LINE).toContain('You write to the user ONLY with send_to_user')
+    expect(buildGroupTurnOpening({ ...ev, windingDown: true, closing: true })).toContain('You write to the user ONLY with send_to_user')
   })
 })
 
@@ -575,9 +575,9 @@ describe('correzione E2: needsGroupRecovery e i tool del recupero (puri)', () =>
   })
 
   it('i solleciti dedicati (testo della specifica per il gruppo, variante per la chiusura)', () => {
-    expect(GROUP_RECOVERY_NUDGE).toContain('Il tuo testo NON è stato pubblicato')
-    expect(GROUP_RECOVERY_NUDGE).toContain('pubblicala ORA con post_to_group')
-    expect(GROUP_CLOSING_RECOVERY_NUDGE).toContain('mandala ORA con send_to_user')
+    expect(GROUP_RECOVERY_NUDGE).toContain('Your text was NOT published')
+    expect(GROUP_RECOVERY_NUDGE).toContain('publish it NOW with post_to_group')
+    expect(GROUP_CLOSING_RECOVERY_NUDGE).toContain('send it NOW with send_to_user')
   })
 
   // fase 11 (residuo 0b): risposta vuota del membro CHIAMATO
@@ -596,9 +596,9 @@ describe('correzione E2: needsGroupRecovery e i tool del recupero (puri)', () =>
   })
 
   it('i solleciti del chiamato (0b): post_to_group nel gruppo, send_to_user nella chiusura', () => {
-    expect(GROUP_CALLED_RECOVERY_NUDGE).toContain('Sei stato chiamato e non hai risposto')
+    expect(GROUP_CALLED_RECOVERY_NUDGE).toContain('You were called and did not answer')
     expect(GROUP_CALLED_RECOVERY_NUDGE).toContain('post_to_group')
-    expect(GROUP_CALLED_CLOSING_RECOVERY_NUDGE).toContain('Sei stato chiamato e non hai risposto')
+    expect(GROUP_CALLED_CLOSING_RECOVERY_NUDGE).toContain('You were called and did not answer')
     expect(GROUP_CALLED_CLOSING_RECOVERY_NUDGE).toContain('send_to_user')
   })
 })

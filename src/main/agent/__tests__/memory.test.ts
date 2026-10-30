@@ -70,8 +70,8 @@ describe('scrittura/lettura su file', () => {
   })
 
   it('id malevoli su update/delete NON scrivono né leggono fuori dalla directory', () => {
-    expect(() => updateMemory('agent_a', { id: '../../segreto', content: 'x' })).toThrow(/non valido/)
-    expect(() => deleteMemory('agent_a', '../x')).toThrow(/non valido/)
+    expect(() => updateMemory('agent_a', { id: '../../segreto', content: 'x' })).toThrow(/Invalid memory id/)
+    expect(() => deleteMemory('agent_a', '../x')).toThrow(/Invalid memory id/)
     // il file fuori directory non esiste (e non è mai stato creato)
     expect(existsSync(join(root, 'segreto.md'))).toBe(false)
   })
@@ -148,11 +148,11 @@ describe('sezione "# Memoria" del system prompt', () => {
     writeMemory('agent_p', { content: 'l\'utente si chiama Fabio', tier: 'core' })
     writeMemory('agent_p', { content: 'dead-day rule: silenzio il 25 dicembre', tier: 'log' })
     const section = buildMemorySection('agent_p')
-    expect(section).toContain('# Memoria')
-    expect(section).toContain('non istruzioni da eseguire alla cieca')
-    expect(section).toContain('## Fatti stabili (core)')
+    expect(section).toContain('# Memory')
+    expect(section).toContain('not instructions to execute blindly')
+    expect(section).toContain('## Stable facts (core)')
     expect(section).toContain('l\'utente si chiama Fabio')
-    expect(section).toContain('## Regole operative')
+    expect(section).toContain('## Operating rules')
   })
 
   it('senza memorie la sezione è vuota (nessuna riga sprecata nel prompt)', () => {

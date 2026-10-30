@@ -23,25 +23,25 @@ describe('fase 12 (punto 3): la whitelist dei tool del figlio', () => {
   })
   it('i tool ESCLUSI hanno un motivo: comunicazione, annidamento, task, scrittura memoria, copie, app', () => {
     const cases: Array<[string, string]> = [
-      ['send_to_user', 'non parla'],
-      ['ask_user', 'non parla'],
-      ['send_to_agent', 'non parla'],
-      ['post_to_group', 'non parla'],
-      ['pass', 'non parla'],
-      ['spawn_subagent', 'niente sottoagenti dentro sottoagenti'],
-      ['check_subagent', 'niente sottoagenti dentro sottoagenti'],
-      ['create_task', 'task'],
-      ['update_task', 'task'],
-      ['update_memory', 'sola lettura'],
-      ['update_skill', 'sola lettura'],
-      ['update_state', 'sola lettura'],
-      ['copy_to_box', 'padre'],
-      ['copy_from_box', 'padre'],
-      ['use-app', 'computer dell'],
-      ['draft_external', 'padre'],
-      ['create_agent', 'padre'],
-      ['delete_agent', 'padre'],
-      ['propose_rule_change', 'padre']
+      ['send_to_user', 'does not talk'],
+      ['ask_user', 'does not talk'],
+      ['send_to_agent', 'does not talk'],
+      ['post_to_group', 'does not talk'],
+      ['pass', 'does not talk'],
+      ['spawn_subagent', 'no subagents inside subagents'],
+      ['check_subagent', 'no subagents inside subagents'],
+      ['create_task', 'tasks'],
+      ['update_task', 'tasks'],
+      ['update_memory', 'read-only'],
+      ['update_skill', 'read-only'],
+      ['update_state', 'read-only'],
+      ['copy_to_box', 'parent'],
+      ['copy_from_box', 'parent'],
+      ['use-app', 'computer'],
+      ['draft_external', 'parent'],
+      ['create_agent', 'parent'],
+      ['delete_agent', 'parent'],
+      ['propose_rule_change', 'parent']
     ]
     for (const [tool, why] of cases) {
       expect(subagentToolAllowed(tool), tool).toBe(false)
@@ -51,13 +51,13 @@ describe('fase 12 (punto 3): la whitelist dei tool del figlio', () => {
     }
   })
   it('un tool sconosciuto al padre: rifiuto generico', () => {
-    expect(subagentToolDenyReason('qualunque_altro')).toBe('disponibile solo al bot padre')
+    expect(subagentToolDenyReason('qualunque_altro')).toBe('only available to the parent bot')
   })
 })
 
 describe('fase 12 (punto 2): validazione del brief e limiti', () => {
   it('brief mancante o sotto i 200 caratteri → errore chiaro', () => {
-    expect(subagentBriefError('')).toBe('servono title e brief')
+    expect(subagentBriefError('')).toBe('title and brief are required')
     expect(subagentBriefError('x'.repeat(199))).toBe(SHORT_BRIEF_ERROR)
     expect(subagentBriefError('x'.repeat(200))).toBeNull()
   })
@@ -87,8 +87,8 @@ describe('fase 12 (punto 3): subagentClosure, la chiusura robusta', () => {
   it('i summary delle chiusure non consegnate: testo + nota; scadenza coi minuti', () => {
     expect(autoCloseSummary('risultato breve')).toBe(`risultato breve\n${AUTO_CLOSE_NOTE}`)
     expect(autoCloseSummary('')).toBe(AUTO_CLOSE_NOTE)
-    expect(expiredSummary('', 20)).toBe('(scaduto dopo 20 minuti)')
-    expect(expiredSummary('quasi finito', 20)).toBe('quasi finito\n(scaduto dopo 20 minuti)')
+    expect(expiredSummary('', 20)).toBe('(expired after 20 minutes)')
+    expect(expiredSummary('quasi finito', 20)).toBe('quasi finito\n(expired after 20 minutes)')
   })
 })
 

@@ -59,7 +59,7 @@ export function fakeBrowserMcpPath(): string | null {
 
 /** Il result quando il browser non c'è (mai un browser sul Mac dell'utente). */
 export const BROWSER_UNAVAILABLE =
-  'Il browser richiede la modalità docker (Impostazioni → Sandbox): qui non è disponibile. Di\' all\'utente che può attivarla da lì.'
+  'The browser requires docker mode (Settings → Sandbox): it is not available here. Tell the user they can enable it there.'
 
 /** L'attesa massima di browser_wait (secondi). */
 export const BROWSER_WAIT_MAX_SEC = 30
@@ -68,106 +68,106 @@ export const BROWSER_WAIT_MAX_SEC = 30
 export const browserToolDefs: ToolDef[] = [
   {
     name: 'browser_open',
-    description: 'Apre un URL nel browser del bot (solo http/https) e restituisce lo snapshot della pagina. È il gradino dopo web_search/web_fetch: per i siti costruiti in JavaScript, i moduli e le pagine che web_fetch non riesce a leggere.',
+    description: 'Opens a URL in the bot\'s browser (http/https only) and returns the page snapshot. It is the step after web_search/web_fetch: for JavaScript-built sites, forms and pages that web_fetch cannot read.',
     parameters: {
       type: 'object',
-      properties: { url: { type: 'string', description: 'URL http/https della pagina' } },
+      properties: { url: { type: 'string', description: 'http/https URL of the page' } },
       required: ['url']
     }
   },
   {
     name: 'browser_snapshot',
-    description: 'Ristampa lo snapshot della pagina corrente (albero di accessibilità con i ref). Con ref o depth restringe a un elemento o a una profondità: lo snapshot lungo si restringe così.',
+    description: 'Reprints the snapshot of the current page (accessibility tree with the refs). With ref or depth it narrows to one element or to one depth: that is how a long snapshot gets narrowed.',
     parameters: {
       type: 'object',
       properties: {
-        ref: { type: 'string', description: 'Ref dell\'elemento da cui partire (opzionale)' },
-        depth: { type: 'number', description: 'Profondità massima dell\'albero (opzionale)' }
+        ref: { type: 'string', description: 'Ref of the element to start from (optional)' },
+        depth: { type: 'number', description: 'Maximum depth of the tree (optional)' }
       },
       required: []
     }
   },
   {
     name: 'browser_click',
-    description: 'Clicca l\'elemento col SUO ref preso dallo snapshot (mai a coordinate). I click che inviano, comprano o prenotano chiedono prima la conferma dell\'utente.',
+    description: 'Clicks the element by ITS ref taken from the snapshot (never by coordinates). Clicks that submit, buy or book ask the user for confirmation first.',
     parameters: {
       type: 'object',
-      properties: { ref: { type: 'string', description: 'Ref dell\'elemento dallo snapshot' } },
+      properties: { ref: { type: 'string', description: 'Ref of the element from the snapshot' } },
       required: ['ref']
     }
   },
   {
     name: 'browser_type',
-    description: 'Scrive testo nel campo col suo ref (submit: true preme anche Invio e invia il modulo). Non scrive MAI password o dati di carta: quei passaggi li fa l\'utente.',
+    description: 'Types text into the field by its ref (submit: true also presses Enter and submits the form). NEVER types passwords or card details: the user does those steps.',
     parameters: {
       type: 'object',
       properties: {
-        ref: { type: 'string', description: 'Ref del campo dallo snapshot' },
-        text: { type: 'string', description: 'Testo da scrivere' },
-        submit: { type: 'boolean', description: 'True per inviare anche il modulo (chiede conferma)' }
+        ref: { type: 'string', description: 'Ref of the field from the snapshot' },
+        text: { type: 'string', description: 'Text to type' },
+        submit: { type: 'boolean', description: 'True to also submit the form (asks for confirmation)' }
       },
       required: ['ref', 'text']
     }
   },
   {
     name: 'browser_select',
-    description: 'Sceglie i valori di un menu a tendina col suo ref.',
+    description: 'Selects the values of a dropdown menu by its ref.',
     parameters: {
       type: 'object',
       properties: {
-        ref: { type: 'string', description: 'Ref del menu dallo snapshot' },
-        values: { type: 'array', items: { type: 'string' }, description: 'Valori da selezionare' }
+        ref: { type: 'string', description: 'Ref of the menu from the snapshot' },
+        values: { type: 'array', items: { type: 'string' }, description: 'Values to select' }
       },
       required: ['ref', 'values']
     }
   },
   {
     name: 'browser_press_key',
-    description: 'Preme un tasto sulla pagina (es. "Enter", "Tab", "Escape").',
+    description: 'Presses a key on the page (e.g. "Enter", "Tab", "Escape").',
     parameters: {
       type: 'object',
-      properties: { key: { type: 'string', description: 'Tasto o combo (es. Enter, Control+a)' } },
+      properties: { key: { type: 'string', description: 'Key or combo (e.g. Enter, Control+a)' } },
       required: ['key']
     }
   },
   {
     name: 'browser_back',
-    description: 'Torna alla pagina precedente.',
+    description: 'Goes back to the previous page.',
     parameters: { type: 'object', properties: {}, required: [] }
   },
   {
     name: 'browser_wait',
-    description: 'Attende sulla pagina corrente (al massimo 30 s): finché compare un testo, o i secondi indicati.',
+    description: 'Waits on the current page (at most 30 s): until a text appears, or for the seconds given.',
     parameters: {
       type: 'object',
       properties: {
-        text: { type: 'string', description: 'Testo da aspettare (opzionale)' },
-        seconds: { type: 'number', description: 'Secondi di attesa (opzionale, massimo 30)' }
+        text: { type: 'string', description: 'Text to wait for (optional)' },
+        seconds: { type: 'number', description: 'Seconds to wait (optional, maximum 30)' }
       },
       required: []
     }
   },
   {
     name: 'browser_tabs',
-    description: 'Gestisce le schede del browser: action new|select|close, con index o url.',
+    description: 'Manages the browser tabs: action new|select|close, with index or url.',
     parameters: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['new', 'select', 'close'], description: 'Azione sulla scheda' },
-        index: { type: 'number', description: 'Indice della scheda (per select/close)' },
-        url: { type: 'string', description: 'URL della nuova scheda (per new)' }
+        action: { type: 'string', enum: ['new', 'select', 'close'], description: 'Action on the tab' },
+        index: { type: 'number', description: 'Index of the tab (for select/close)' },
+        url: { type: 'string', description: 'URL of the new tab (for new)' }
       },
       required: ['action']
     }
   },
   {
     name: 'browser_screenshot',
-    description: 'Scatta uno screenshot della pagina e lo salva nel box: il result dà il path del file png.',
+    description: 'Takes a screenshot of the page and saves it in the computer: the result gives the path of the png file.',
     parameters: { type: 'object', properties: {}, required: [] }
   },
   {
     name: 'browser_close',
-    description: 'Chiude la pagina corrente del browser.',
+    description: 'Closes the current page of the browser.',
     parameters: { type: 'object', properties: {}, required: [] }
   }
 ]
@@ -282,7 +282,7 @@ const sessionFlights = new Map<string, Promise<BrowserSession>>()
 
 async function startBrowserSession(agentId: string): Promise<BrowserSession> {
   if (sessions.size >= BROWSERS_PER_BOX_MAX) {
-    throw new Error(`Limite raggiunto: al massimo ${BROWSERS_PER_BOX_MAX} browser contemporanei per box (Chromium pesa e il box ha memoria condivisa). Chiudine uno con browser_close o riprova più tardi.`)
+    throw new Error(`Limit reached: at most ${BROWSERS_PER_BOX_MAX} browsers at the same time per computer (Chromium is heavy and the computer has shared memory). Close one with browser_close or try again later.`)
   }
   const proxyPort = await ensureBrowserProxy()
   let command = 'docker'
@@ -316,12 +316,12 @@ async function startBrowserSession(agentId: string): Promise<BrowserSession> {
     const owner = boxOwnerOf(agentId)
     const w = await runDockerRaw(dockerBrowserWritableArgv(BOX_CONTAINER), { timeoutMs: 15_000 })
     if (w.exitCode !== 0) {
-      throw new Error(`il volume del browser non è di ${BROWSER_USER} e 0700 (test -O/-w /browser fallito come 1001): lo stato del browser non è sicuro, il browser non parte. I volumi non sono stati toccati.`)
+      throw new Error(`the browser volume is not owned by ${BROWSER_USER} and 0700 (test -O/-w /browser failed as 1001): the browser state is not secure, the browser does not start. The volumes were not touched.`)
     }
     if (!child) {
       const rm = await runDockerRaw(dockerBrowserOldProfileRmArgv(BOX_CONTAINER, owner), { timeoutMs: 30_000 })
       if (rm.exitCode !== 0) {
-        throw new Error(`rimozione del profilo vecchio del browser non riuscita: ${rm.stderr || `exit ${rm.exitCode}`}`)
+        throw new Error(`removal of the old browser profile failed: ${rm.stderr || `exit ${rm.exitCode}`}`)
       }
     }
     // fase 12 (punto 1) + P2: il browser di un FIGLIO ha istanza e pid file
@@ -461,7 +461,7 @@ export async function callBrowserTool(agentId: string, tool: string, input: Reco
     await closeBrowser(agentId) // via la sessione morta (e il suo timer)
     if (tool !== 'browser_open') {
       return {
-        output: `Errore del browser: ${msg}. La sessione è stata riavviata e lo stato della pagina è perso: riapri la pagina con browser_open, poi ripeti l'azione.`,
+        output: `Browser error: ${msg}. The session was restarted and the page state is lost: reopen the page with browser_open, then repeat the action.`,
         meta: { browserError: true, browserRestarted: true }
       }
     }
@@ -482,13 +482,13 @@ export async function callBrowserTool(agentId: string, tool: string, input: Reco
 export async function copyBrowserScreenshot(owner: string, name: string, dest: string): Promise<string | null> {
   const src = `${browserStateDir(owner)}/${name}`
   const read = await runDockerArgv(dockerBrowserReadB64Argv(BOX_CONTAINER, src), { timeoutMs: 30_000 })
-  if (read.exitCode !== 0) return `lettura dello screenshot nel volume del browser non riuscita: ${read.stderr || `exit ${read.exitCode}`}`
+  if (read.exitCode !== 0) return `failed to read the screenshot in the browser volume: ${read.stderr || `exit ${read.exitCode}`}`
   // base64 troncato dal tetto dell'output = PNG corrotto: meglio fermarsi
-  if (read.trimmed) return 'screenshot troppo grande per la copia (lettura troncata): riprova con una pagina più semplice'
+  if (read.trimmed) return 'screenshot too large to copy (read truncated): try again with a simpler page'
   const write = await runDockerArgv(dockerBrowserWriteB64Argv(BOX_CONTAINER, dest), { timeoutMs: 30_000, input: read.stdout })
-  if (write.exitCode !== 0) return `scrittura dello screenshot nella home del bot non riuscita: ${write.stderr || `exit ${write.exitCode}`}`
+  if (write.exitCode !== 0) return `failed to write the screenshot in the bot's home: ${write.stderr || `exit ${write.exitCode}`}`
   const rm = await runDockerArgv(dockerBrowserRmFileArgv(BOX_CONTAINER, src), { timeoutMs: 30_000 })
-  if (rm.exitCode !== 0) return `cancellazione dell'originale nello stato del browser non riuscita: ${rm.stderr || `exit ${rm.exitCode}`}`
+  if (rm.exitCode !== 0) return `failed to delete the original in the browser state: ${rm.stderr || `exit ${rm.exitCode}`}`
   return null
 }
 
@@ -501,7 +501,7 @@ async function runBrowserTool(agentId: string, tool: string, input: Record<strin
     case 'browser_open': {
       // URL validato con checkUrl (come web_fetch): solo http/https, niente credenziali
       const check = checkUrl(String(input.url ?? ''))
-      if (!check.ok) return { output: `URL non valido: ${check.reason}`, meta: { browserError: true } }
+      if (!check.ok) return { output: `Invalid URL: ${check.reason}`, meta: { browserError: true } }
       mcpName = 'browser_navigate'
       mcpArgs = { url: check.url.toString() }
       break
@@ -535,7 +535,7 @@ async function runBrowserTool(agentId: string, tool: string, input: Record<strin
       const text = input.text !== undefined ? String(input.text) : undefined
       const seconds = input.seconds !== undefined ? Math.min(BROWSER_WAIT_MAX_SEC, Math.max(0, Number(input.seconds))) : undefined
       if (!text && seconds === undefined) {
-        return { output: 'browser_wait serve almeno un testo da aspettare o i secondi (al massimo 30).', meta: { browserError: true } }
+        return { output: 'browser_wait needs at least a text to wait for or the seconds (at most 30).', meta: { browserError: true } }
       }
       mcpName = 'browser_wait_for'
       mcpArgs = { ...(text ? { text } : {}), ...(seconds !== undefined ? { time: seconds } : {}) }
@@ -564,18 +564,18 @@ async function runBrowserTool(agentId: string, tool: string, input: Record<strin
       const dest = `${boxHomePath(owner)}/.browser/screens/${id}.png`
       if (fakeBrowserMcpPath()) {
         // MODALITÀ TEST (server finto sull'host): nessun file vero da copiare
-        return { output: `Screenshot salvato nel box: ${dest}${err ? `\n${err}` : ''}`, meta: { screenshot: dest } }
+        return { output: `Screenshot saved in the computer: ${dest}${err ? `\n${err}` : ''}`, meta: { screenshot: dest } }
       }
       const copyErr = await copyBrowserScreenshot(owner, name, dest)
       if (copyErr) return { output: copyErr, meta: { browserError: true } }
-      return { output: `Screenshot salvato nel box: ${dest}${err ? `\n${err}` : ''}`, meta: { screenshot: dest } }
+      return { output: `Screenshot saved in the computer: ${dest}${err ? `\n${err}` : ''}`, meta: { screenshot: dest } }
     }
     case 'browser_close':
       mcpName = 'browser_close'
       mcpArgs = {}
       break
     default:
-      throw new Error(`Tool browser sconosciuto: ${tool}`)
+      throw new Error(`Unknown browser tool: ${tool}`)
   }
   const res = await session.client.callTool({ name: mcpName, arguments: mcpArgs })
   const raw = mcpText(res)
@@ -626,14 +626,14 @@ async function runBrowserTool(agentId: string, tool: string, input: Record<strin
  * sessione del browser.
  */
 export async function typeIntoFieldForFill(agentId: string, ref: string, value: string): Promise<{ ok: true } | { ok: false; error: string }> {
-  if (!value) return { ok: false, error: 'valore vuoto: niente da scrivere nel campo' }
+  if (!value) return { ok: false, error: 'empty value: nothing to type into the field' }
   try {
     const session = await getBrowserSession(agentId)
     const res = await session.client.callTool({ name: 'browser_type', arguments: { target: ref, text: value } })
     // 7d-4: il result contiene il codice Playwright col valore — non si legge
     // nemmeno per l'errore: si guarda solo isError
     if ((res as { isError?: boolean }).isError) {
-      return { ok: false, error: 'la scrittura nel campo non è riuscita (errore del server MCP del browser)' }
+      return { ok: false, error: 'typing into the field failed (browser MCP server error)' }
     }
     registerFilledValues(agentId, [value])
     return { ok: true }

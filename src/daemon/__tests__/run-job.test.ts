@@ -124,7 +124,7 @@ describe('makeJobRunner: task-run (fase 8, §3bis L7)', () => {
     const log: Seen[] = []
     await makeJobRunner(db, fakeTurn(log))(job, emit)
     // il modello del task sa chi è e come chiudersi (contesto separato)
-    expect(log[0]!.text).toBe('[task n. 7 "Verifica controlli" — per chiuderlo: update_task con id 7]\nfai la verifica')
+    expect(log[0]!.text).toBe('[task no. 7 "Verifica controlli" — to close it: update_task with id 7]\nfai la verifica')
     expect(log[0]!.opts).toMatchObject({ source: 'user', taskId: 7, respondedTo: 55 })
     // niente origine sulla riga: nessun flag (turno utente ordinario)
     expect(log[0]!.opts.untrusted).toBeUndefined()
@@ -167,7 +167,7 @@ describe('makeJobRunner: task-run (fase 8, §3bis L7)', () => {
     })
     const log: Seen[] = []
     await makeJobRunner(db, fakeTurn(log))(job, emit)
-    expect(log[0]!.text).toBe('[task n. 99 — per chiuderlo: update_task con id 99]\nb')
+    expect(log[0]!.text).toBe('[task no. 99 — to close it: update_task with id 99]\nb')
   })
 })
 
@@ -180,7 +180,7 @@ describe('makeJobRunner: routine-run', () => {
     })
     const log: Seen[] = []
     await makeJobRunner(db, fakeTurn(log))(job, emit)
-    expect(log[0]!.text).toBe('[routine ricorrente: Backup] fai il backup')
+    expect(log[0]!.text).toBe('[recurring routine: Backup] fai il backup')
     expect(log[0]!.opts.source).toBe('routine')
     expect(log[0]!.opts.title).toBe('Backup')
     expect(log[0]!.opts.resume).toEqual({ entryId: 9 })
@@ -273,7 +273,7 @@ describe('makeJobRunner: subagent-run', () => {
     const log: Seen[] = []
     await makeJobRunner(db, fakeTurn(log))(job, emit)
     expect(log[0]!.opts.taskId).toBe(3)
-    expect(log[0]!.text).toContain('[task n. 3 "Confronto"')
+    expect(log[0]!.text).toContain('[task no. 3 "Confronto"')
     expect(log[0]!.opts.contaminated).toBe(true)
     expect(log[0]!.opts.automatic).toBe(true)
   })

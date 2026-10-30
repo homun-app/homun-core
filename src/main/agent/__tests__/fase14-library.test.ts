@@ -60,7 +60,7 @@ describe('punti 1-2: creazione documenti e VERSIONI mai sovrascritte', () => {
     const before = listLibraryItems().length
     const r = lib.writeDocument(AGENT, { title: 'Troppo grande', content: 'x'.repeat(200 * 1024 + 1) })
     expect(r.ok).toBe(false)
-    if (!r.ok) expect(r.error).toContain('limite')
+    if (!r.ok) expect(r.error).toContain('limit')
     expect(listLibraryItems().length).toBe(before)
   })
 
@@ -122,8 +122,8 @@ describe('punto 2: edit_document con sostituzioni esatte', () => {
     })
     expect(e.ok).toBe(false)
     if (!e.ok) {
-      expect(e.error).toContain('0 volte')
-      expect(e.error).toContain('nessuna modifica applicata')
+      expect(e.error).toContain('0 times')
+      expect(e.error).toContain('no edit applied')
     }
     // NESSUNA modifica parziale: la v2 non esiste
     expect(getLibraryItem(id)?.currentVersion).toBe(1)
@@ -136,7 +136,7 @@ describe('punto 2: edit_document con sostituzioni esatte', () => {
     const id = r.ok ? r.value.id : ''
     const e = lib.editDocument(AGENT, { id, edits: [{ old: 'ripeti', new: 'una volta sola' }] })
     expect(e.ok).toBe(false)
-    if (!e.ok) expect(e.error).toContain('2 volte')
+    if (!e.ok) expect(e.error).toContain('2 times')
     expect(getLibraryItem(id)?.currentVersion).toBe(1)
   })
 })
@@ -174,7 +174,7 @@ describe('punto 3: grafici Vega-Lite e Mermaid', () => {
       data: { values: [{ x: 1, y: 2 }] }
     }))
     expect(markHref.ok).toBe(false)
-    if (!markHref.ok) expect(markHref.error).toContain('chiave "href" non ammessa (link nei grafici)')
+    if (!markHref.ok) expect(markHref.error).toContain('key "href" not allowed (links in charts)')
     // encoding.href, anche NIDIFICATO in un layer
     const nested = charts.validateVegaLiteSpec(JSON.stringify({
       mark: 'point',
@@ -260,7 +260,7 @@ describe('punto 2: blocchi grafico DENTRO un documento', () => {
       content: '# Report\n\n```vega-lite\n{"mark":"point","data":{"url":"https://x.example"}}\n```\n'
     })
     expect(bad.ok).toBe(false)
-    if (!bad.ok) expect(bad.error).toContain('blocco vega-lite n. 1')
+    if (!bad.ok) expect(bad.error).toContain('block vega-lite no. 1')
     // nemmeno la v1 esiste
     expect(getLibraryItem('lib_00000000')).toBeNull()
   })
@@ -422,7 +422,7 @@ describe('punto 5: esportazione', () => {
     const id = r.ok ? r.value.id : ''
     const plan = lib.prepareLibraryExport({ id, format: 'pdf' })
     expect(plan.ok).toBe(true)
-    await expect(lib.runLibraryExport(plan.ok ? plan.value : null as never, {})).rejects.toThrow(/finestra di Homun|html/)
+    await expect(lib.runLibraryExport(plan.ok ? plan.value : null as never, {})).rejects.toThrow(/Homun window|html/)
     // con il generatore finto (la "UI"): pdf scritto davvero
     const dest = mkdtempSync(join(tmpdir(), 'sandbot-pdf-test-'))
     try {

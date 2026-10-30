@@ -70,7 +70,7 @@ describe('esecuzione (store reale)', () => {
       name: 'Monitor menzioni', prompt: 'cerca menzioni e riporta', schedule: '30 8 * * 1-5',
       description: 'monitor quotidiano', timezone: 'Europe/Rome'
     })
-    expect(output).toContain('PAUSA')
+    expect(output).toContain('PAUSED')
     const r = getRoutine((meta.automation as { id: number }).id)!
     expect(r.enabled).toBe(0)
     expect(r.provenance).toBe('agent')
@@ -86,7 +86,7 @@ describe('esecuzione (store reale)', () => {
     const { output, meta } = await executeTool(AGENT, 'update_state', {
       target: 'routine', action: 'create', name: 'Sbagliata', prompt: 'x', schedule: 'non-un-cron'
     })
-    expect(output).toContain('Schedule non valida')
+    expect(output).toContain('Invalid schedule')
     expect(output).toContain('"0 9 * * *"')
     expect(meta.automation).toBeUndefined()
     expect((await import('../../store/db')).listRoutines(AGENT)).toHaveLength(before)
@@ -99,7 +99,7 @@ describe('esecuzione (store reale)', () => {
       target: 'routine', action: 'create', name: 'Da template', prompt: 'p',
       trigger: { type: 'schedule', kind: 'cron', cron: '30 8 * * 1-5' }, provenance: 'template'
     }, { turnInitiator: 'TEMPLATE_IMPORT' })
-    expect(output).toContain('PAUSA')
+    expect(output).toContain('PAUSED')
     expect(output).toContain('provenance template')
     const id = (meta.automation as { id: number }).id
     const r = getRoutine(id)!
@@ -138,13 +138,13 @@ describe('esecuzione (store reale)', () => {
       target: 'routine', action: 'create', name: 'Hook', prompt: 'p',
       trigger: { type: 'webhook', token: 't' }
     })
-    expect(webhook.output).toContain('solo trigger di tipo schedule')
+    expect(webhook.output).toContain('accepts only schedule-type triggers')
     expect(webhook.meta.automation).toBeUndefined()
     const poll = await executeTool(AGENT, 'update_state', {
       target: 'routine', action: 'create', name: 'Poll', prompt: 'p',
       trigger: { type: 'connector_poll', connectorId: 'x', tool: 't', intervalMin: 5, idField: 'items[].id' }
     })
-    expect(poll.output).toContain('solo trigger di tipo schedule')
+    expect(poll.output).toContain('accepts only schedule-type triggers')
     expect((await import('../../store/db')).listRoutines(AGENT)).toHaveLength(before)
   })
 
@@ -154,7 +154,7 @@ describe('esecuzione (store reale)', () => {
       target: 'routine', action: 'create', name: 'Nope', prompt: 'p',
       trigger: { type: 'schedule', kind: 'cron', cron: '9 * * *' }
     })
-    expect(badCron.output).toContain('cron non valido')
+    expect(badCron.output).toContain('invalid cron')
     const badEvery = await executeTool(AGENT, 'update_state', {
       target: 'routine', action: 'create', name: 'Nope2', prompt: 'p',
       trigger: { type: 'schedule', kind: 'every', every: 'mese', at: '09:00', mode: 'at' }
@@ -194,7 +194,7 @@ describe('esecuzione (store reale)', () => {
     const { output, meta } = await executeTool(AGENT, 'update_state', {
       target: 'memory', action: 'write', content: 'preferenza ricordata', tier: 'core'
     })
-    expect(output).toContain('Memoria creata')
+    expect(output).toContain('Memory created')
     const { listMemories } = await import('../memory')
     expect(listMemories(AGENT).some((m) => m.id === meta.memoryId && m.content === 'preferenza ricordata')).toBe(true)
   })

@@ -91,12 +91,12 @@ describe('apertura del turno', () => {
     await runGroupTurnJob(db(), deps(seen), jobFor(bot.id, g, u2.id), emit)
     expect(seen).toHaveLength(1)
     expect(seen[0]!.text).toContain('<turno_di_gruppo gruppo="Cena compleanno">')
-    expect(seen[0]!.text).toContain('[utente] Fabio: e la lista della spesa?')
+    expect(seen[0]!.text).toContain('[user] Fabio: e la lista della spesa?')
     expect(seen[0]!.text).not.toContain('già letto')
     expect(seen[0]!.text).not.toContain('Serve il menu entro stasera')
     // i pari con ruolo e coordinatore marcato, e la regola dei turni
-    expect(seen[0]!.text).toContain('- Coordinatore (coordinatore): Assegna i compiti')
-    expect(seen[0]!.text).toContain('Regole del turno di gruppo')
+    expect(seen[0]!.text).toContain('- Coordinatore (coordinator): Assegna i compiti')
+    expect(seen[0]!.text).toContain('Group turn rules:')
     // origine: turno non fidato (come i messaggi di altri bot), gruppo nel meta
     expect(seen[0]!.opts.untrusted).toBe(true)
     expect(seen[0]!.opts.groupTurn).toEqual({ groupId: g.id, readMaxDepth: 0, rootId: u2.id })
@@ -108,8 +108,8 @@ describe('apertura del turno', () => {
     const d4 = addGroupMessage({ groupId: g.id, authorKind: 'agent', authorId: coord.id, authorName: 'Coordinatore', text: 'quarto passaggio', depth: 4, rootId: u1.id, replyTo: u1.id })
     const seen: Seen[] = []
     await runGroupTurnJob(db(), deps(seen), jobFor(bot.id, g, d4.id), emit)
-    expect(seen[0]!.text).toContain('(in risposta a Fabio: «Serve il menu entro stasera»)')
-    expect(seen[0]!.text).toContain('Il giro sta CHIUDENDO')
+    expect(seen[0]!.text).toContain('(in reply to Fabio: "Serve il menu entro stasera")')
+    expect(seen[0]!.text).toContain('The round is WINDING DOWN')
     expect(seen[0]!.opts.groupTurn?.readMaxDepth).toBe(4)
   })
 })

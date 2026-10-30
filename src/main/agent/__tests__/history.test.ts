@@ -185,7 +185,7 @@ describe('fase 3 (§3bis L2): send-message e thinking nella storia del modello',
     expect(msgs[2]).toMatchObject({ role: 'assistant', content: 'ragiono tra me' })
     // …e la send-message aggrega la sua call su quel messaggio assistant
     expect(msgs[2].toolCalls?.[0]).toMatchObject({ id: `send_${sentId}`, name: 'send_to_user', arguments: '{"text":"Ecco la risposta"}' })
-    expect(msgs[3]).toEqual({ role: 'tool', toolCallId: `send_${sentId}`, content: "consegnato all'utente: «Ecco la risposta». Non ripeterlo." })
+    expect(msgs[3]).toEqual({ role: 'tool', toolCallId: `send_${sentId}`, content: 'delivered to the user: "Ecco la risposta". Do not repeat it.' })
     expect(msgs[4]).toEqual({ role: 'user', content: 'grazie' })
   })
 
@@ -200,13 +200,13 @@ describe('fase 3 (§3bis L2): send-message e thinking nella storia del modello',
     const waiting = buildMessages(sys, [user, widget])
     expect(waiting[2]).toMatchObject({ role: 'assistant', content: '', toolCalls: [{ name: 'ask_user' }] })
     expect(waiting[3]).toMatchObject({ role: 'tool', toolCallId: `send_${widget.id}` })
-    expect(waiting[3]?.content).toContain("turno terminato in attesa della risposta")
+    expect(waiting[3]?.content).toContain('turn ended awaiting the answer')
 
     const answered = buildMessages(sys, [mk('message', 'user', 'x'), base({ respondedValue: 'si' })])
-    expect(answered[3]?.content).toContain('utente ha risposto: "si"')
+    expect(answered[3]?.content).toContain('the user answered: "si"')
 
     const dismissed = buildMessages(sys, [mk('message', 'user', 'x'), base({ widgetDismissed: true })])
-    expect(dismissed[3]?.content).toContain('scartato')
+    expect(dismissed[3]?.content).toContain('dismissed')
   })
 
   it('bozza → call originale (meta.call) con esito dello stato; thinking vuoto escluso', () => {
@@ -224,7 +224,7 @@ describe('fase 3 (§3bis L2): send-message e thinking nella storia del modello',
     // thinking vuoto scartato; la call è quella ORIGINALE del modello
     expect(msgs.filter((m) => m.role === 'assistant' && m.content)).toHaveLength(0)
     expect(msgs[2]).toMatchObject({ role: 'assistant', content: '', toolCalls: [{ id: `send_${draftId}`, name: 'mcp__gmail__send_message' }] })
-    expect(msgs[3]).toMatchObject({ role: 'tool', toolCallId: `send_${draftId}`, content: "bozza inviata all'utente che l'ha confermata" })
+    expect(msgs[3]).toMatchObject({ role: 'tool', toolCallId: `send_${draftId}`, content: 'draft sent by the user who confirmed it' })
   })
 
   it('send-message senza meta.call ricade sul tool del payload (ask_user/draft_external/send_to_user)', () => {
@@ -287,13 +287,13 @@ describe('fase 7 (A2): entry di delega send_to_agent nella storia del modello', 
     // [system, user, assistant(toolCalls), tool-result]
     expect(msgs[2]?.toolCalls?.[0]).toMatchObject({ id: `send_${delegation.id}`, name: 'send_to_agent', arguments: ARGS })
     expect(msgs[3]).toMatchObject({ role: 'tool', toolCallId: `send_${delegation.id}` })
-    expect(msgs[3]?.content).toContain('in coda per Specialista')
-    expect(msgs[3]?.content).toContain('passaggio 1')
+    expect(msgs[3]?.content).toContain('message queued for Specialista')
+    expect(msgs[3]?.content).toContain('hop 1')
   })
 
   it('sendResultText: la delega NON è "consegnato all\'utente"', () => {
-    expect(sendResultText(delegation)).toContain('in coda per Specialista')
-    expect(sendResultText(delegation)).not.toContain('consegnato all\'utente')
+    expect(sendResultText(delegation)).toContain('message queued for Specialista')
+    expect(sendResultText(delegation)).not.toContain('delivered to the user')
   })
 
   // fase 9 (punto 0b): il result di una send di testo riporta l'inizio del testo
@@ -302,16 +302,16 @@ describe('fase 7 (A2): entry di delega send_to_agent nella storia del modello', 
       call: { id: 'c1', name: 'send_to_user', arguments: '{"text":"Routine \\"Riepilogo mattina\\" creata in pausa.\\nAttivala quando vuoi."}' },
       message: { type: 'text', text: 'Routine "Riepilogo mattina" creata in pausa.\nAttivala quando vuoi.' }
     })
-    expect(sendResultText(sent)).toBe('consegnato all\'utente: «Routine "Riepilogo mattina" creata in pausa.\nAttivala quando vuoi.». Non ripeterlo.')
+    expect(sendResultText(sent)).toBe('delivered to the user: "Routine "Riepilogo mattina" creata in pausa.\nAttivala quando vuoi.". Do not repeat it.')
     // held (outbox, fase 6): stessa conferma con la nota sulla consegna rinviata
     const held = mk('send-message', 'assistant', 'riepilogo notturno', {
       message: { type: 'text', text: 'riepilogo notturno' }, held: true
     })
-    expect(sendResultText(held)).toContain('consegnato all\'utente: «riepilogo notturno»')
-    expect(sendResultText(held)).toContain('rinviata alla prossima finestra')
+    expect(sendResultText(held)).toContain('delivered to the user: "riepilogo notturno"')
+    expect(sendResultText(held)).toContain('delivery is deferred to the next delivery window')
     // oltre 120 caratteri la preview è troncata
     const lungo = mk('send-message', 'assistant', 'L'.repeat(200), { message: { type: 'text', text: 'L'.repeat(200) } })
-    expect(sendResultText(lungo)).toContain('«' + 'L'.repeat(120) + '…»')
+    expect(sendResultText(lungo)).toContain('"' + 'L'.repeat(120) + '…"')
   })
 })
 

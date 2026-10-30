@@ -63,8 +63,15 @@ export function initMainLanguage(): void {
  * daemon tramite il client), appena il client è pronto; se il daemon non
  * risponde si resta sulla lingua di sistema, senza errori visibili. Il
  * chiamante ricostruisce poi il tray.
+ * Fase 17b (A2): dopo la risoluzione pubblica la lingua come setting
+ * 'ui.activeLanguage' (settings:set), perché il daemon sappia la lingua
+ * risolta dell'app anche prima del primo messaggio umano. Se il daemon non
+ * risponde, nessun errore visibile.
  */
-export async function applyStartupLanguage(getSetting: () => Promise<unknown>): Promise<UiLanguage> {
+export async function applyStartupLanguage(
+  getSetting: () => Promise<unknown>,
+  setSetting?: (key: string, value: unknown) => Promise<unknown>
+): Promise<UiLanguage> {
   let setting: unknown = null
   try {
     setting = await getSetting()
@@ -72,7 +79,39 @@ export async function applyStartupLanguage(getSetting: () => Promise<unknown>): 
     // daemon non raggiungibile: vale la lingua di sistema
   }
   language = startupMainLanguage(typeof setting === 'string' ? setting : null, app.getPreferredSystemLanguages())
+  if (setSetting) {
+    try {
+      await setSetting('ui.activeLanguage', language)
+    } catch {
+      // daemon non raggiungibile: la pubblicazione si ripete al prossimo cambio
+    }
+  }
   return language
+}
+
+/**
+ * Fase 17b (A2): il payload della chiamata che pubblica la lingua attiva
+ * (settings:set). Pura, per il test del main.
+ */
+export function activeLanguageCall(lang: UiLanguage): { method: string; params: [string, UiLanguage] } {
+  return { method: 'settings:set', params: ['ui.activeLanguage', lang] }
+}
+
+/**
+ * Fase 17b (A2): pubblica 'ui.activeLanguage' a ogni cambio di lingua
+ * dell'interfaccia (IPC 'ui:language-changed'). Se il daemon non risponde,
+ * nessun errore visibile.
+ */
+export async function publishActiveLanguage(
+  lang: UiLanguage,
+  call: (method: string, params: unknown[]) => Promise<unknown>
+): Promise<void> {
+  const { method, params } = activeLanguageCall(lang)
+  try {
+    await call(method, params)
+  } catch {
+    // daemon non raggiungibile: si riproverà al prossimo cambio
+  }
 }
 
 /** Il renderer avvisa quando l'utente cambia il setting 'ui.language'. */

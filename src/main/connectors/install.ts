@@ -38,7 +38,7 @@ type McpServerCard = Extract<SendMessagePayload, { type: 'mcp-server' }>
 type PluginCard = Extract<SendMessagePayload, { type: 'plugin' }>
 
 export const PROPOSAL_RESULT =
-  'proposta mostrata all\'utente; quando la accetta ricevi un messaggio di sistema'
+  'proposal shown to the user; when they accept it you receive a system message'
 
 /** L'avviso per i server pubblicati da terzi (fiducia ≠ dominio verificato). */
 export const THIRD_PARTY_SERVER_WARNING =

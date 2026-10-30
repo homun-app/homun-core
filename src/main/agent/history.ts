@@ -48,17 +48,17 @@ export function sendResultText(e: TranscriptEntry): string {
   // fase 7 (correzione A2): la delega a un altro bot NON è "inviato all'utente":
   // il turno successivo trova la coppia chiamata/risultato con l'esito della coda
   if (m?.agentSend) {
-    return `messaggio in coda per ${m.toAgentName ?? 'un altro bot'} (passaggio ${m.hop ?? 1}): l'altro bot non vede questa conversazione`
+    return `message queued for ${m.toAgentName ?? 'another bot'} (hop ${m.hop ?? 1}): the other bot does not see this conversation`
   }
   if (m && p?.type === 'widget') {
-    if (m.respondedValue !== undefined) return `l'utente ha risposto: ${JSON.stringify(m.respondedValue)}`
-    if (m.widgetDismissed) return "widget mostrato all'utente, poi scartato: l'utente ha proseguito senza rispondere"
-    return "widget mostrato all'utente: turno terminato in attesa della risposta"
+    if (m.respondedValue !== undefined) return `the user answered: ${JSON.stringify(m.respondedValue)}`
+    if (m.widgetDismissed) return "widget shown to the user, then dismissed: the user moved on without answering"
+    return "widget shown to the user: turn ended awaiting the answer"
   }
   if (m && p?.type === 'draft') {
-    if (m.status === 'sent') return "bozza inviata all'utente che l'ha confermata"
-    if (m.status === 'discarded') return "bozza scartata dall'utente"
-    return "bozza creata e mostrata all'utente: l'invio avverrà solo se l'utente lo conferma"
+    if (m.status === 'sent') return "draft sent by the user who confirmed it"
+    if (m.status === 'discarded') return "draft discarded by the user"
+    return "draft created and shown to the user: it will be sent only if the user confirms"
   }
   // fase 9 (punto 0b): per le send di TESTO il result riporta l'inizio di ciò
   // che l'utente ha ricevuto — il modello può verificare che è arrivato intero
@@ -97,7 +97,7 @@ function toMessages(entries: TranscriptEntry[]): ChatMessage[] {
     } else if (e.kind === 'summary') {
       // fase 4: riepilogo dei turni più vecchi (compaction) — entra come
       // messaggio utente di contesto al posto delle entry che copre
-      if (e.content.trim()) msgs.push({ role: 'user', content: `[riepilogo dei turni precedenti]\n${e.content}` })
+      if (e.content.trim()) msgs.push({ role: 'user', content: `[summary of the previous turns]\n${e.content}` })
     } else if (e.kind === 'tool-call') {
       const prev = msgs[msgs.length - 1]
       const call = { id: String(e.meta?.id ?? e.id), name: String(e.meta?.name ?? ''), arguments: String(e.meta?.arguments ?? '{}') }

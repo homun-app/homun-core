@@ -852,7 +852,7 @@ describe('§5.6 segreti: il valore non arriva mai al modello né al transcript',
     await turn
     expect(h.sandboxMock.exec.calls).toBe(0)
     const res = h.db.entries.find((e) => e.kind === 'tool-result')!
-    expect(res.content).toContain('non presenti nel vault')
+    expect(res.content).toContain('Credentials not present in the vault')
     expect(res.content).toContain('API_KEY')
   })
 })
@@ -896,7 +896,7 @@ describe('§5.1+approval: gate asincrono e standing grant esatta', () => {
     expect(h.sandboxMock.exec.calls).toBe(0)
     expect(h.db.entries.some((e) => e.kind === 'notice' && e.content.includes('Approvazione scaduta'))).toBe(true)
     const res = h.db.entries.find((e) => e.kind === 'tool-result')!
-    expect(res.content).toContain("Rifiutato dall'utente")
+    expect(res.content).toContain('Refused by the user')
   })
 
   it('`ls; rm -rf /` con grant solo su "ls" → approval che mostra ENTRAMBE le chiavi', async () => {
@@ -953,8 +953,8 @@ describe('R1: ripresa del turno dopo crash/retry (payload.entryId)', () => {
     expect(h.db.entries.filter((e) => e.kind === 'message' && e.role === 'user')).toHaveLength(1)
     // la tool-call orfana ha ricevuto un tool-result PERSISTITO
     const res = h.db.entries.find((e) => e.kind === 'tool-result')!
-    expect(res.content).toContain('interrotto da un riavvio')
-    expect(res.content).toContain('esito è sconosciuto')
+    expect(res.content).toContain('interrupted by a restart')
+    expect(res.content).toContain('the outcome is unknown')
     expect(res.meta?.callId).toBe('c1')
     // l'approval pending è scaduta e c'è la notice di ripresa
     expect(h.db.entries.find((e) => e.kind === 'approval')!.meta?.status).toBe('expired')
@@ -964,7 +964,7 @@ describe('R1: ripresa del turno dopo crash/retry (payload.entryId)', () => {
     // al modello è arrivato il result sintetico e un solo messaggio utente
     const first = h.llm.calls[0]!
     expect(first.filter((m) => m.role === 'user' && m.content === 'fai il deploy')).toHaveLength(1)
-    expect(first.find((m) => m.role === 'tool')?.content).toContain('interrotto da un riavvio')
+    expect(first.find((m) => m.role === 'tool')?.content).toContain('interrupted by a restart')
   })
 
   it('turno già concluso: la ripresa NON chiama il modello', async () => {
@@ -1129,7 +1129,7 @@ describe('fase 3: l\'agente comunica SOLO tramite tool (§3bis L2)', () => {
     expect(draft.meta?.message).toMatchObject({ via: { tool: 'mcp__gmail__send_message' } })
     // al modello è tornato "bozza creata", non l'esito di un invio
     const toolMsg = h.llm.calls[1]!.find((m) => m.role === 'tool')
-    expect(toolMsg?.content).toContain('bozza')
+    expect(toolMsg?.content).toContain('turned into a draft')
     expect(h.db.entries.findLast((e) => e.kind === 'event')?.meta?.turnEnd).toBe('FINISHED')
   })
 
@@ -1215,7 +1215,7 @@ describe('residuo fase 4 (0c): interrupt durante un’approval', () => {
     expect(marked.meta?.status).toBe('cancelled')
     expect(h.sandboxMock.exec.calls).toBe(0)
     // il modello vede l'esito dell'interrupt e il turno chiude STOPPED
-    const cancelledResult = h.db.entries.find((e) => e.kind === 'tool-result' && e.content === 'Interrotto dall’utente')
+    const cancelledResult = h.db.entries.find((e) => e.kind === 'tool-result' && e.content === 'Interrupted by the user')
     expect(cancelledResult).toBeTruthy()
     expect(h.db.entries.findLast((e) => e.kind === 'event')?.meta?.turnEnd).toBe('STOPPED')
     // nessuna seconda chiamata al modello dopo l'interrupt
@@ -1233,7 +1233,7 @@ describe('fase 4: memoria e skill nel system prompt', () => {
     ]
     await runTurn(AGENT, 'ciao', emit)
     const system = h.llm.calls[0]![0]!.content
-    expect(system).toContain('# Memoria')
+    expect(system).toContain('# Memory')
     expect(system).toContain("l'utente vuole puntualità")
   })
 
@@ -1247,7 +1247,7 @@ describe('fase 4: memoria e skill nel system prompt', () => {
     ]
     await runTurn(AGENT, 'usa la skill', emit)
     const system = h.llm.calls[0]![0]!.content
-    expect(system).toContain('# Skill disponibili')
+    expect(system).toContain('# Available skills')
     expect(system).toContain('triage: smista la posta')
     expect(system).not.toContain('CORPO SEGRETO')
     // il tool skill ha consegnato il corpo al modello come tool result
@@ -1308,10 +1308,10 @@ describe('fase 4: update_state nel loop', () => {
     ]
     await runTurn(AGENT, 'crea routine sbagliata', emit)
     expect(h.db.routines).toHaveLength(0)
-    expect(h.db.entries.some((e) => e.kind === 'tool-result' && e.content.includes('Schedule non valida'))).toBe(true)
+    expect(h.db.entries.some((e) => e.kind === 'tool-result' && e.content.includes('Invalid schedule'))).toBe(true)
     // il modello vede l'errore come tool result nella chiamata successiva
     const secondCall = h.llm.calls[1]!
-    expect(secondCall.some((m) => m.role === 'tool' && m.content.includes('Schedule non valida'))).toBe(true)
+    expect(secondCall.some((m) => m.role === 'tool' && m.content.includes('Invalid schedule'))).toBe(true)
   })
 })
 
@@ -1385,7 +1385,7 @@ describe('fase 5: funnel dei connettori (offer_connector) e card Riconnetti', ()
     expect(h.mcp.calls).toBe(0)
     // al modello torna la spiegazione del funnel (nella chiamata SUCCESSIVA)
     const second = h.llm.calls[1]!
-    expect(second.some((m) => m.role === 'tool' && String(m.content).includes("offerta mostrata"))).toBe(true)
+    expect(second.some((m) => m.role === 'tool' && String(m.content).includes('offer shown to the user'))).toBe(true)
     expect(h.db.entries.findLast((e) => e.kind === 'event')?.meta?.turnEnd).toBe('FINISHED')
   })
 
@@ -1464,7 +1464,7 @@ describe('fase 6: outbox dei turni automatici', () => {
     // al modello è stato detto che la consegna è rinviata
     const lastCall = h.llm.calls[h.llm.calls.length - 1]!
     const toolResults = lastCall.filter((m) => m.role === 'tool')
-    expect(toolResults.some((m) => String(m.content).includes('finestra di consegna'))).toBe(true)
+    expect(toolResults.some((m) => String(m.content).includes('delivery window'))).toBe(true)
     // nessun evento di notifica done: l'utente non ha visto nulla
     expect(h.db.entries.some((e) => e.kind === 'event' && e.meta?.turnEnd === 'FINISHED')).toBe(true)
   })
@@ -1574,7 +1574,7 @@ describe('fase 7: send_to_agent', () => {
     // al modello: conferma leggibile
     const lastCall = h.llm.calls[h.llm.calls.length - 1]!
     const toolResults = lastCall.filter((m) => m.role === 'tool')
-    expect(toolResults.some((m) => String(m.content).includes('in coda per Specialista'))).toBe(true)
+    expect(toolResults.some((m) => String(m.content).includes('Message queued for Specialista'))).toBe(true)
   })
 
   it('destinatario inesistente o se stesso: errore leggibile, NESSUN job', async () => {
@@ -1588,7 +1588,7 @@ describe('fase 7: send_to_agent', () => {
     const lastCall = h.llm.calls[h.llm.calls.length - 1]!
     const toolResults = lastCall.filter((m) => m.role === 'tool').map((m) => String(m.content))
     expect(toolResults.some((c) => c.includes('list_agents'))).toBe(true)
-    expect(toolResults.some((c) => c.includes('te stesso'))).toBe(true)
+    expect(toolResults.some((c) => c.includes('yourself'))).toBe(true)
   })
 
   it('hop massimo: il destinatario di un messaggio a hop 3 non genera altri messaggi', async () => {
@@ -1603,7 +1603,7 @@ describe('fase 7: send_to_agent', () => {
     expect(h.db.jobs).toHaveLength(0)
     const lastCall = h.llm.calls[h.llm.calls.length - 1]!
     const toolResults = lastCall.filter((m) => m.role === 'tool')
-    expect(toolResults.some((m) => String(m.content).includes('hop massimo 3'))).toBe(true)
+    expect(toolResults.some((m) => String(m.content).includes('maximum hop 3'))).toBe(true)
   })
 
   it('limite per ora: oltre 10 messaggi tra la stessa coppia, rifiuto senza accodare', async () => {
@@ -1624,7 +1624,7 @@ describe('fase 7: send_to_agent', () => {
     expect(h.db.jobs).toHaveLength(0)
     const lastCall = h.llm.calls[h.llm.calls.length - 1]!
     const toolResults = lastCall.filter((m) => m.role === 'tool')
-    expect(toolResults.some((m) => String(m.content).includes('ultima ora'))).toBe(true)
+    expect(toolResults.some((m) => String(m.content).includes('in the last hour'))).toBe(true)
   })
 
   it('il messaggio di un altro bot apre il turno con meta fromAgentId/hop (entry non scritta dall\'utente)', async () => {
@@ -1689,8 +1689,8 @@ describe('fase 7: send_to_agent', () => {
     // (terza chiamata); i tool result delle 11 call stanno nella seconda
     expect(h.llm.calls).toHaveLength(3)
     const toolResults = h.llm.calls[1]!.filter((m) => m.role === 'tool').map((m) => String(m.content))
-    expect(toolResults.filter((c) => c.includes('in coda per Specialista'))).toHaveLength(10)
-    expect(toolResults.some((c) => c.includes('ultima ora'))).toBe(true)
+    expect(toolResults.filter((c) => c.includes('Message queued for Specialista'))).toHaveLength(10)
+    expect(toolResults.some((c) => c.includes('in the last hour'))).toBe(true)
   })
 
   it('correzione A1: la coda del destinatario ha lo stesso tetto dei messaggi utente (10 in attesa → rifiuto, niente entry)', async () => {
@@ -1706,7 +1706,7 @@ describe('fase 7: send_to_agent', () => {
     expect(h.db.jobs).toHaveLength(10) // nessun job nuovo
     expect(h.db.entries.some((e) => e.meta?.agentSend)).toBe(false) // nemmeno la traccia A2
     const toolResults = h.llm.calls[h.llm.calls.length - 1]!.filter((m) => m.role === 'tool').map((m) => String(m.content))
-    expect(toolResults.some((c) => c.includes('Coda piena per Specialista'))).toBe(true)
+    expect(toolResults.some((c) => c.includes('Queue full for Specialista'))).toBe(true)
   })
 
   it('correzione A2: la delega lascia una entry "A <nome>" dal mittente, e il turno dopo vede chiamata+esito', async () => {
@@ -1734,8 +1734,8 @@ describe('fase 7: send_to_agent', () => {
     const call = second.flatMap((m) => (m.toolCalls as FakeToolCall[] | undefined) ?? []).find((tc) => tc?.name === 'send_to_agent')
     expect(call).toBeTruthy()
     const result = second.find((m) => m.role === 'tool' && m.toolCallId === call!.id)
-    expect(String(result?.content)).toContain('in coda per Specialista')
-    expect(String(result?.content)).toContain('non vede questa conversazione')
+    expect(String(result?.content)).toContain('message queued for Specialista (hop 1)')
+    expect(String(result?.content)).toContain('the other bot does not see this conversation')
   })
 
   it('correzione A3: la catena partita da una routine è automatica — payload automatic, outbox e un solo urgent per il destinatario', async () => {
@@ -1974,7 +1974,7 @@ describe('fase 8 (punto 1): auto-review delle approvazioni', () => {
     // la regola si salva SOLO al click: nessun setting è stato toccato
     expect(h.db.settings.has('autoReview')).toBe(false)
     const results = h.llm.calls[1]!.filter((m) => m.role === 'tool').map((m) => String(m.content))
-    expect(results.some((c) => c.includes('solo se lui la accetta'))).toBe(true)
+    expect(results.some((c) => c.includes('only if they accept it'))).toBe(true)
   })
 })
 
@@ -2273,7 +2273,7 @@ describe('correzione B2: niente task annidati e tetto di task aperti', () => {
     expect(h.db.tasks).toHaveLength(1)
     expect(h.db.jobs.filter((j) => j.kind === 'task-run')).toHaveLength(0)
     const results = h.llm.calls[1]!.filter((m) => m.role === 'tool').map((m) => String(m.content))
-    expect(results.some((c) => c.includes('sei già in un task'))).toBe(true)
+    expect(results.some((c) => c.includes('already in a task'))).toBe(true)
   })
 
   it('oltre 5 task aperti → errore leggibile e nessuna creazione (i chiusi non contano)', async () => {
@@ -2288,7 +2288,7 @@ describe('correzione B2: niente task annidati e tetto di task aperti', () => {
     await runTurn(AGENT, 'aprilo', emit)
     expect(h.db.tasks).toHaveLength(6) // nessuno nuovo
     const results = h.llm.calls[1]!.filter((m) => m.role === 'tool').map((m) => String(m.content))
-    expect(results.some((c) => c.includes('5 task aperti'))).toBe(true)
+    expect(results.some((c) => c.includes('5 open tasks'))).toBe(true)
   })
 })
 
@@ -2303,7 +2303,7 @@ describe('correzione B3: update_task chiude solo task propri (e, in un task, sol
     expect(h.db.tasks[0]!.status).toBe('working')
     expect(h.db.jobs.filter((j) => j.payload.initiator === 'TASK_DONE')).toHaveLength(0)
     const results = h.llm.calls[1]!.filter((m) => m.role === 'tool').map((m) => String(m.content))
-    expect(results.some((c) => c.includes('non è tuo'))).toBe(true)
+    expect(results.some((c) => c.includes('is not yours'))).toBe(true)
   })
 
   it('dentro un task si chiude SOLO il task corrente (niente chiusure di altri task propri)', async () => {
@@ -2318,7 +2318,7 @@ describe('correzione B3: update_task chiude solo task propri (e, in un task, sol
     expect(h.db.tasks.find((t) => t.id === 2)!.status).toBe('working')
     expect(h.db.jobs.filter((j) => j.payload.initiator === 'TASK_DONE')).toHaveLength(0)
     const results = h.llm.calls[1]!.filter((m) => m.role === 'tool').map((m) => String(m.content))
-    expect(results.some((c) => c.includes('SOLO quello'))).toBe(true)
+    expect(results.some((c) => c.includes('ONLY that one'))).toBe(true)
   })
 
   it('la chiusura del task corrente continua a funzionare (B3 non blocca il percorso giusto)', async () => {
@@ -2332,7 +2332,7 @@ describe('correzione B3: update_task chiude solo task propri (e, in un task, sol
     const done = h.db.jobs.find((j) => j.payload.initiator === 'TASK_DONE')!
     // correzione B1: summary in blocco evidenza con la regola, niente origine da propagare
     expect(String(done.payload.text)).toContain('<task_done')
-    expect(String(done.payload.text)).toContain('DATO')
+    expect(String(done.payload.text)).toContain('DATA')
     expect(done.payload.automatic).toBeUndefined()
     expect(done.payload.untrusted).toBeUndefined()
   })
@@ -2369,9 +2369,9 @@ describe('fase 9 (punto 0): più messaggi per una sola azione', () => {
     // consegna con riscontro, già consegnato, non consegnato ×2
     const lastCall = h.llm.calls[h.llm.calls.length - 1]!
     const results = lastCall.filter((m) => m.role === 'tool').map((m) => String(m.content))
-    expect(results.some((c) => c.includes("consegnato all'utente: «Routine \"Riepilogo mattina\" creata in pausa."))).toBe(true)
-    expect(results.some((c) => c.includes('già consegnato'))).toBe(true)
-    expect(results.filter((c) => c.includes('Non consegnato'))).toHaveLength(2)
+    expect(results.some((c) => c.includes('delivered to the user: "Routine "Riepilogo mattina" creata in pausa.'))).toBe(true)
+    expect(results.some((c) => c.includes('already delivered'))).toBe(true)
+    expect(results.filter((c) => c.includes('Not delivered'))).toHaveLength(2)
   })
 
   it('il turno successivo rivede la chiamata INTATTA: arguments identici con virgolette e a capo', async () => {
@@ -2392,7 +2392,7 @@ describe('fase 9 (punto 0): più messaggi per una sola azione', () => {
     const sendCall = calls.find((tc) => tc.name === 'send_to_user')
     expect(sendCall?.arguments).toBe(ARGS)
     // …e il result della ricostruzione riporta l'inizio del testo consegnato
-    expect(call2.some((m) => m.role === 'tool' && String(m.content).includes("consegnato all'utente: «Routine"))).toBe(true)
+    expect(call2.some((m) => m.role === 'tool' && String(m.content).includes('delivered to the user: "Routine'))).toBe(true)
   })
 
   it('avanzamento legittimo: annuncio, lavoro, risultato — entrambi i messaggi consegnati', async () => {
@@ -2509,7 +2509,7 @@ describe('fase 9: send senza testo', () => {
     expect(sends.map((s) => s.content)).toEqual(['adesso sul serio'])
     const lastCall = h.llm.calls[h.llm.calls.length - 1]!
     const results = lastCall.filter((m) => m.role === 'tool').map((m) => String(m.content))
-    expect(results.filter((c) => c.includes('campo text è vuoto'))).toHaveLength(3)
+    expect(results.filter((c) => c.includes('the text field is empty'))).toHaveLength(3)
   })
 })
 
@@ -2539,7 +2539,7 @@ describe('fase 10 (residuo 0c): al massimo 3 send consegnati per turno', () => {
     // il result spiega il tetto del turno (diverso dal cap di fila 0d)
     const lastCall = h.llm.calls[h.llm.calls.length - 1]!
     const results = lastCall.filter((m) => m.role === 'tool').map((m) => String(m.content))
-    expect(results.some((c) => c.includes('3 messaggi'))).toBe(true)
+    expect(results.some((c) => c.includes('3 messages'))).toBe(true)
   })
 })
 
@@ -2617,7 +2617,7 @@ describe('fase 10 (punto 1): create_agent', () => {
     expect(h.db.jobs.filter((j) => j.agentId === created!.id)).toHaveLength(0)
     // il result lo dice al modello
     const res = h.db.entries.find((e) => e.kind === 'tool-result')
-    expect(res?.content).toContain('NON parte da solo')
+    expect(res?.content).toContain('does NOT start on its own')
   })
 
   it('senza default del provider il bot nuovo eredita provider e modello del creatore', async () => {
@@ -2647,7 +2647,7 @@ describe('fase 10 (punto 1): create_agent', () => {
     const created = [...h.db.agents.values()].filter((a) => a.name.startsWith('Bot'))
     expect(created).toHaveLength(6)
     const results = h.llm.calls[h.llm.calls.length - 1]!.filter((m) => m.role === 'tool').map((m) => String(m.content))
-    expect(results.some((c) => c.includes('Limite del turno raggiunto'))).toBe(true)
+    expect(results.some((c) => c.includes('Turn limit reached'))).toBe(true)
   })
 
   it('oltre 20 bot in totale la creazione è rifiutata', async () => {
@@ -2783,7 +2783,7 @@ describe('fase 10 (punto 1): update_agent / delete_agent', () => {
     resolveApproval(AGENT, String(h.db.entries.find((e) => e.kind === 'approval')!.meta?.approvalId), 'allow', 'once')
     await turn
     const res = h.db.entries.findLast((e) => e.kind === 'tool-result')
-    expect(res?.content).toContain('principale')
+    expect(res?.content).toContain('main bot')
     expect(h.db.agents.get(AGENT)!.description).toBe('')
     h.db.settings.delete('mainAgentId')
   })
@@ -2819,7 +2819,7 @@ describe('fase 10 (punto 1): update_agent / delete_agent', () => {
     await turn2
     expect(h.db.agents.has(altro.id)).toBe(true)
     const res2 = h.db.entries.findLast((e) => e.kind === 'tool-result')
-    expect(res2?.content).toContain('che hai creato tu')
+    expect(res2?.content).toContain('is not a bot you created')
   })
 })
 
@@ -2858,7 +2858,7 @@ describe('fase 10 (punto 2): create_group / update_group', () => {
     ]
     await runTurn(AGENT, 'gruppo', emit)
     expect(h.db.groupsState.groups.some((x) => x.name === 'Rotto')).toBe(false)
-    expect(h.db.entries.find((e) => e.kind === 'tool-result')!.content).toContain('non sono bot esistenti')
+    expect(h.db.entries.find((e) => e.kind === 'tool-result')!.content).toContain('these ids are not existing bots')
   })
 
   it('update_group: il creatore senza card; i membri con card; i non membri mai', async () => {
@@ -2906,7 +2906,7 @@ describe('fase 10 (punto 2): create_group / update_group', () => {
     resolveApproval(AGENT, String(h.db.entries.find((e) => e.kind === 'approval')!.meta?.approvalId), 'allow', 'once')
     await turn3
     expect(h.db.groupsState.groups.find((x) => x.id === 1)!.name).toBe('G1')
-    expect(h.db.entries.findLast((e) => e.kind === 'tool-result')!.content).toContain('Non fai parte del gruppo')
+    expect(h.db.entries.findLast((e) => e.kind === 'tool-result')!.content).toContain('You are not a member of the group')
   })
 })
 
@@ -2937,7 +2937,7 @@ describe('fase 10 (§3): post_to_group, pass e turni di gruppo nel loop', () => 
     expect(msgs[0]!.root_id).toBe(50)
     // il secondo post del turno è rifiutato con spiegazione
     const results = h.llm.calls[h.llm.calls.length - 1]!.filter((m) => m.role === 'tool').map((m) => String(m.content))
-    expect(results.some((c) => c.includes('già scritto nel gruppo'))).toBe(true)
+    expect(results.some((c) => c.includes('already written in the group'))).toBe(true)
     // i turni sono stati pianificati per gli ALTRI membri (coordinatore)
     await vi.waitFor(() => {
       const groupJobs = h.db.jobs.filter((j) => j.kind === 'group-turn')
@@ -2983,7 +2983,7 @@ describe('fase 10 (§3): post_to_group, pass e turni di gruppo nel loop', () => 
     ]
     await runTurn(estraneo, 'scrivi', emit)
     expect(h.db.groupsState.messages.filter((m) => m.author_id === estraneo)).toHaveLength(0)
-    expect(h.db.entries.find((e) => e.kind === 'tool-result')!.content).toContain('Non fai parte')
+    expect(h.db.entries.find((e) => e.kind === 'tool-result')!.content).toContain('You are not a member')
   })
 
   it('pass: dentro il turno di gruppo registra il silenzio e CHIUDE il turno; fuori spiega che non serve', async () => {
@@ -2998,7 +2998,7 @@ describe('fase 10 (§3): post_to_group, pass e turni di gruppo nel loop', () => 
     // correzione C1: il turno finisce con pass — UNA sola chiamata al modello
     expect(h.llm.calls).toHaveLength(1)
     const results = h.db.entries.filter((e) => e.kind === 'tool-result').map((e) => e.content)
-    expect(results.some((c) => c.includes('Silenzio registrato'))).toBe(true)
+    expect(results.some((c) => c.includes('Silence registered'))).toBe(true)
     expect(h.db.entries.some((e) => e.kind === 'event' && e.meta?.turnEnd === 'FINISHED')).toBe(true)
 
     h.db.entries.length = 0
@@ -3008,7 +3008,7 @@ describe('fase 10 (§3): post_to_group, pass e turni di gruppo nel loop', () => 
     ]
     await runTurn(AGENT, 'normale turno', emit)
     const results2 = h.llm.calls[h.llm.calls.length - 1]!.filter((m) => m.role === 'tool').map((m) => String(m.content))
-    expect(results2.some((c) => c.includes('solo dentro i turni di gruppo'))).toBe(true)
+    expect(results2.some((c) => c.includes('pass is only valid inside group turns'))).toBe(true)
   })
 
   it('il testo libero del turno di gruppo non diventa MAI un messaggio (E2: UN sollecito, poi il turno chiude)', async () => {
@@ -3023,7 +3023,7 @@ describe('fase 10 (§3): post_to_group, pass e turni di gruppo nel loop', () => 
     // E2 (terzo giro): la consegna scritta come testo libero merita UN sollecito
     // (prima il recupero non c'era e il testo si perdeva in silenzio)…
     expect(h.llm.calls).toHaveLength(2)
-    expect(h.llm.calls[1]!.some((m) => m.role === 'user' && m.content.includes('NON è stato pubblicato'))).toBe(true)
+    expect(h.llm.calls[1]!.some((m) => m.role === 'user' && m.content.includes('was NOT published'))).toBe(true)
     // …ma NESSUN fallback: il testo libero è thinking (con meta.groupId), mai
     // un messaggio all'utente né un post nel gruppo
     const thinking = h.db.entries.find((e) => e.kind === 'thinking' && e.content.includes('niente da aggiungere'))
@@ -3071,7 +3071,7 @@ describe('fase 10 (§3): post_to_group, pass e turni di gruppo nel loop', () => 
     // un solo tool result: il silenzio registrato di pass
     const results = h.db.entries.filter((e) => e.kind === 'tool-result').map((e) => e.content)
     expect(results).toHaveLength(1)
-    expect(results[0]).toContain('il tuo turno nel gruppo finisce qui')
+    expect(results[0]).toContain('your turn in the group ends here')
     expect(h.db.entries.some((e) => e.kind === 'event' && e.meta?.turnEnd === 'FINISHED')).toBe(true)
   })
 
@@ -3108,7 +3108,7 @@ describe('fase 10 (§3): post_to_group, pass e turni di gruppo nel loop', () => 
     // il post è rifiutato con il result esplicito
     expect(h.db.groupsState.messages.filter((m) => m.author_kind === 'agent')).toHaveLength(0)
     const results = h.llm.calls[h.llm.calls.length - 1]!.filter((m) => m.role === 'tool').map((m) => String(m.content))
-    expect(results.some((c) => c.includes('Il giro è chiuso'))).toBe(true)
+    expect(results.some((c) => c.includes('The round is closed'))).toBe(true)
     // la send all'utente invece passa
     const send = h.db.entries.find((e) => e.kind === 'send-message')
     expect(send?.content).toContain('RIEPILOGO')
@@ -3138,7 +3138,7 @@ describe('fase 10 (§3): post_to_group, pass e turni di gruppo nel loop', () => 
     })
     expect(h.db.entries.filter((e) => e.kind === 'send-message')).toHaveLength(1) // nessuna nuova
     const results2 = h.llm.calls[h.llm.calls.length - 1]!.filter((m) => m.role === 'tool').map((m) => String(m.content))
-    expect(results2.some((c) => c.includes('il riepilogo lo mandi alla chiusura'))).toBe(true)
+    expect(results2.some((c) => c.includes('send the summary at closing'))).toBe(true)
     expect(h.db.entries.some((e) => e.kind === 'thinking' && (e.content as string).includes('altro messaggio'))).toBe(true)
 
     // catena DIVERSA (root 60): la send passa di nuovo
@@ -3171,10 +3171,10 @@ describe('fase 10 (§3): post_to_group, pass e turni di gruppo nel loop', () => 
     const post = toolDefs.find((t) => t.name === 'post_to_group')!
     const pass = toolDefs.find((t) => t.name === 'pass')!
     // post_to_group: è l'UNICO modo di scrivere nel gruppo
-    expect(post.description).toContain("l'UNICO modo di scrivere nel gruppo")
+    expect(post.description).toContain('the ONLY way to write in the group')
     // pass: il testo libero NON pubblica nulla (via "anche chiudere senza scrivere vale silenzio")
-    expect(pass.description).not.toContain('senza scrivere vale come silenzio')
-    expect(pass.description).toContain('solo con post_to_group')
+    expect(pass.description).not.toContain('closing without writing counts as silence')
+    expect(pass.description).toContain('only with post_to_group')
   })
 
   it('E2: consegna scritta come TESTO LIBERO → UNA chiamata di recupero coi tool del sollecito, il post esce con depth e catena giuste', async () => {
@@ -3186,7 +3186,7 @@ describe('fase 10 (§3): post_to_group, pass e turni di gruppo nel loop', () => 
       (msgs: Array<{ role: string; content: string }>, tools: unknown[]) => {
         recoveryTools = (tools as Array<{ name: string }>).map((t) => t.name)
         // il sollecito dedicato è nella chiamata di recupero
-        expect(msgs.some((m) => m.role === 'user' && m.content.includes('NON è stato pubblicato'))).toBe(true)
+        expect(msgs.some((m) => m.role === 'user' && m.content.includes('was NOT published'))).toBe(true)
         return { toolCalls: [{ id: 'rg1', name: 'post_to_group', arguments: JSON.stringify({ text: 'SCALETTA v2: 19:30 aperitivo, 20:00 cena, 22:30 torta' }) }] }
       },
       // il post non è terminale: il turno chiude col pass (come nel turno normale)
@@ -3199,7 +3199,7 @@ describe('fase 10 (§3): post_to_group, pass e turni di gruppo nel loop', () => 
     expect(h.llm.calls).toHaveLength(3)
     // il sollecito è UNO: appare una sola volta come messaggio utente
     const userMsgs = h.llm.calls[2]!.filter((m) => m.role === 'user')
-    expect(userMsgs.filter((m) => m.content.includes('NON è stato pubblicato'))).toHaveLength(1)
+    expect(userMsgs.filter((m) => m.content.includes('was NOT published'))).toHaveLength(1)
     // la chiamata di recupero offre SOLO i tool del sollecito
     expect([...recoveryTools].sort()).toEqual(['pass', 'post_to_group'])
     // il post pubblicato dal recupero passa dallo STESSO percorso: depth letta+1, catena letta
@@ -3224,7 +3224,7 @@ describe('fase 10 (§3): post_to_group, pass e turni di gruppo nel loop', () => 
     expect(h.llm.calls).toHaveLength(2)
     expect(h.db.groupsState.messages.filter((m) => m.author_kind === 'agent')).toHaveLength(0)
     const results = h.db.entries.filter((e) => e.kind === 'tool-result').map((e) => e.content)
-    expect(results.some((c) => c.includes('Silenzio registrato'))).toBe(true)
+    expect(results.some((c) => c.includes('Silence registered'))).toBe(true)
     expect(h.db.entries.some((e) => e.kind === 'event' && e.meta?.turnEnd === 'FINISHED')).toBe(true)
   })
 
@@ -3239,7 +3239,7 @@ describe('fase 10 (§3): post_to_group, pass e turni di gruppo nel loop', () => 
     })
     // il recupero è UNO: due chiamate in tutto, un solo sollecito
     expect(h.llm.calls).toHaveLength(2)
-    expect(h.llm.calls.filter((c) => c.some((m) => m.role === 'user' && String(m.content).includes('NON è stato pubblicato')))).toHaveLength(1)
+    expect(h.llm.calls.filter((c) => c.some((m) => m.role === 'user' && String(m.content).includes('was NOT published')))).toHaveLength(1)
     // il testo NON diventa mai un post automaticamente
     expect(h.db.groupsState.messages.filter((m) => m.author_kind === 'agent')).toHaveLength(0)
     expect(h.db.entries.some((e) => e.kind === 'send-message')).toBe(false)
@@ -3264,7 +3264,7 @@ describe('fase 10 (§3): post_to_group, pass e turni di gruppo nel loop', () => 
       {}, // risposta vuota: né testo né tool
       (msgs: Array<{ role: string; content: string }>, tools: unknown[]) => {
         // il sollecito del chiamato e SOLO i tool del sollecito
-        expect(msgs.some((m) => m.role === 'user' && m.content.includes('Sei stato chiamato e non hai risposto'))).toBe(true)
+        expect(msgs.some((m) => m.role === 'user' && m.content.includes('You were called and did not answer'))).toBe(true)
         expect((tools as Array<{ name: string }>).map((t) => t.name).sort()).toEqual(['pass', 'post_to_group'])
         return { toolCalls: [{ id: 'cv1', name: 'post_to_group', arguments: JSON.stringify({ text: 'eccomi: la scaletta è pronta' }) }] }
       },
@@ -3318,7 +3318,7 @@ describe('fase 10 (§3): post_to_group, pass e turni di gruppo nel loop', () => 
       groupTurn: { groupId: 1, readMaxDepth: 1, rootId: 50, called: true }, untrusted: true
     })
     expect(h.llm.calls).toHaveLength(2)
-    const solleciti = h.llm.calls.filter((c) => c.some((m) => m.role === 'user' && String(m.content).includes('Sei stato chiamato')))
+    const solleciti = h.llm.calls.filter((c) => c.some((m) => m.role === 'user' && String(m.content).includes('You were called')))
     expect(solleciti).toHaveLength(1)
     expect(h.db.entries.some((e) => e.kind === 'event' && e.meta?.turnEnd === 'STOPPED' && e.meta?.stopReason === 'model-error')).toBe(true)
   })
@@ -3330,7 +3330,7 @@ describe('fase 10 (§3): post_to_group, pass e turni di gruppo nel loop', () => 
       { text: 'Riepilogo finale: menu, spesa e scaletta pronti.' },
       (msgs: Array<{ role: string; content: string }>, tools: unknown[]) => {
         recoveryTools = (tools as Array<{ name: string }>).map((t) => t.name)
-        expect(msgs.some((m) => m.role === 'user' && m.content.includes("l'utente non l'ha letto"))).toBe(true)
+        expect(msgs.some((m) => m.role === 'user' && m.content.includes('the user has not read it'))).toBe(true)
         return { toolCalls: [{ id: 'rs1', name: 'send_to_user', arguments: JSON.stringify({ text: 'RIEPILOGO: menu, spesa e scaletta pronti.' }) }] }
       },
       { text: 'consegnato, chiudo' }
@@ -3419,9 +3419,9 @@ describe('fase 11 (punto 2): web_search e web_fetch nel loop', () => {
     const toolMsg = h.llm.calls[1]!.find((m) => m.role === 'tool')!
     expect(String(toolMsg.content)).toContain('<risultati_ricerca query="ristoranti vegetariani bologna">')
     expect(String(toolMsg.content)).toContain('https://da-leo.example')
-    expect(String(toolMsg.content)).toContain('DATO letto dal web')
+    expect(String(toolMsg.content)).toContain('DATA read from the web')
     // fase 15 (S6): la riga della fonte e il meta del provider
-    expect(String(toolMsg.content)).toContain('Fonte della ricerca: You.com')
+    expect(String(toolMsg.content)).toContain('Search source: You.com')
     const res = h.db.entries.find((e) => e.kind === 'tool-result' && e.meta?.webEvidence)!
     expect(res.meta?.webContent).toBe(true)
     expect(res.meta?.provider).toBe('you')
@@ -3469,7 +3469,7 @@ describe('fase 11 (punto 2): web_search e web_fetch nel loop', () => {
     ]
     await runTurn(AGENT, 'cerca', emit)
     const results = h.llm.calls[1]!.filter((m) => m.role === 'tool').map((m) => String(m.content))
-    expect(results[0]).toContain('ricerca web è disattivata nelle impostazioni')
+    expect(results[0]).toContain('Web search is disabled in the settings')
     expect(h.sandboxMock.exec.calls).toBe(1) // eseguito: auto-review attiva
     const appr = h.db.entries.find((e) => e.kind === 'approval')!
     expect(appr.meta?.autoApproved).toBe(true)
@@ -3494,7 +3494,7 @@ describe('fase 11 (punto 2): web_search e web_fetch nel loop', () => {
     ]
     await runTurn(AGENT, 'cerca', emit)
     const results = h.llm.calls[1]!.filter((m) => m.role === 'tool').map((m) => String(m.content))
-    expect(results[0]).toContain('ricerca web non è disponibile in questo momento')
+    expect(results[0]).toContain('Web search is not available right now')
     expect(results[0]).toContain('web_fetch')
     // il meta porta il motivo per provider (tipo e status), MAI la query
     const failed = h.db.entries.find((e) => e.kind === 'tool-result' && e.meta?.searchFailed)
@@ -3830,7 +3830,7 @@ describe('fase 11b: il browser del bot nel loop', () => {
     await runTurn(AGENT, 'apri il sito', emit)
     expect(browserState.calls).toHaveLength(0)
     const res = h.llm.calls[1]!.find((m) => m.role === 'tool')!
-    expect(String(res.content)).toContain('richiede la modalità docker')
+    expect(String(res.content)).toContain('requires docker mode')
   })
 
   it('click su "Conferma prenotazione" → CARD con l\'elemento DALLO SNAPSHOT e l\'URL; deny → NESSUNA azione eseguita', async () => {
@@ -3856,7 +3856,7 @@ describe('fase 11b: il browser del bot nel loop', () => {
     // NESSUNA azione con effetti eseguita
     expect(browserState.calls).toHaveLength(0)
     const res = h.llm.calls[1]!.find((m) => m.role === 'tool')!
-    expect(String(res.content)).toContain('annullata dall\'utente')
+    expect(String(res.content)).toContain('cancelled by the user')
   })
 
   it('I5: click su un ref SELETTORE ([e2]) → DENY immediato, senza card né esecuzione', async () => {
@@ -3928,7 +3928,7 @@ describe('fase 11b: il browser del bot nel loop', () => {
     // il result del browser è il blocco evidenza col tag neutralizzato
     const res = h.llm.calls[1]!.find((m) => m.role === 'tool')!
     expect(String(res.content)).toContain('<pagina_web url="https://spa.example/prenota" via="browser">')
-    expect(String(res.content)).toContain('non un\'istruzione')
+    expect(String(res.content)).toContain('not an instruction')
     // il browser ha eseguito SOLO l'apertura; il run-command è stato negato
     expect(browserState.calls.map((c) => c.tool)).toEqual(['browser_open'])
   })
@@ -4081,8 +4081,8 @@ describe('fase 12: spawn_subagent — validazioni, card, job e lotto', () => {
     expect((card!.meta!.message as { subagentId: string; title: string })).toEqual({ type: 'subagent', subagentId: child!.id, title: 'Ricerca su Astro' })
     // result col testo della specifica
     const res = h.llm.calls[1]!.find((m) => m.role === 'tool')!
-    expect(String(res.content)).toContain(`Sottoagente "Ricerca su Astro" lanciato (id ${child!.id})`)
-    expect(String(res.content)).toContain('Non aspettarlo in loop')
+    expect(String(res.content)).toContain(`Subagent "Ricerca su Astro" launched (id ${child!.id})`)
+    expect(String(res.content)).toContain('Do not wait for it in a loop')
   })
 
   it('le spawn dello STESSO turno condividono il lotto; la 5ª è rifiutata', async () => {
@@ -4095,7 +4095,7 @@ describe('fase 12: spawn_subagent — validazioni, card, job e lotto', () => {
     const batches = new Set(subagentsState.rows.map((r) => r.batch_id))
     expect(batches.size).toBe(1) // un lotto per turno
     const results = h.llm.calls[1]!.concat(h.llm.calls[2]!).filter((m) => m.role === 'tool')
-    const fifth = results.find((m) => String(m.content).includes('al massimo 4 spawn_subagent per turno'))
+    const fifth = results.find((m) => String(m.content).includes('at most 4 spawn_subagent per turn'))
     expect(fifth).toBeTruthy()
     expect(subagentsState.rows).toHaveLength(4)
   })
@@ -4161,7 +4161,7 @@ describe('fase 12: spawn_subagent — validazioni, card, job e lotto', () => {
     expect(subagentsState.rows).toHaveLength(0)
     expect([...h.db.agents.values()].some((a) => a.parentId === AGENT)).toBe(false)
     const res = h.llm.calls[1]!.find((m) => m.role === 'tool')!
-    expect(String(res.content)).toContain('il brief deve essere autosufficiente: obiettivo, confini, formato del risultato')
+    expect(String(res.content)).toContain('the brief must be self-sufficient: goal, boundaries, result format')
   })
 
   it('il 7° figlio APERTO è rifiutato (tetto 6)', async () => {
@@ -4183,7 +4183,7 @@ describe('fase 12: spawn_subagent — validazioni, card, job e lotto', () => {
     await runTurn(AGENT, 'ancora uno', emit)
     expect(subagentsState.rows).toHaveLength(6)
     const res = h.llm.calls[1]!.find((m) => m.role === 'tool')!
-    expect(String(res.content)).toContain('6 sottoagenti aperti')
+    expect(String(res.content)).toContain('6 open subagents')
   })
 
   it('turno di GRUPPO: spawn rifiutata (lì si coordina col gruppo)', async () => {
@@ -4197,7 +4197,7 @@ describe('fase 12: spawn_subagent — validazioni, card, job e lotto', () => {
     })
     expect(subagentsState.rows).toHaveLength(0)
     const res = h.llm.calls[1]!.find((m) => m.role === 'tool')!
-    expect(String(res.content)).toContain('turni di gruppo non si lanciano sottoagenti')
+    expect(String(res.content)).toContain('In group turns subagents are not launched')
   })
 })
 
@@ -4250,9 +4250,9 @@ describe('fase 12: il FIGLIO — tool, prompt, whitelist e consegna', () => {
       async (msgs: Array<{ role: string; content: string }>) => { system = msgs[0]!.content; return { text: 'ok' } }
     ]
     await runTurn(CHILD, 'brief', emit, undefined, { source: 'user', subagent: { id: CHILD, parentId: AGENT } })
-    expect(system).toContain(`sottoagente di TestBot`)
+    expect(system).toContain(`subagent of TestBot`)
     expect(system).toContain('wake_parent')
-    expect(system).toContain('# Come lavori')
+    expect(system).toContain('# How you work')
     // la memoria del PADRE è nel contesto del figlio
     expect(system).toContain("l'utente vuole puntualità")
   })
@@ -4265,7 +4265,7 @@ describe('fase 12: il FIGLIO — tool, prompt, whitelist e consegna', () => {
     ]
     await runTurn(CHILD, 'brief', emit, undefined, { source: 'user', subagent: { id: CHILD, parentId: AGENT } })
     const res = h.llm.calls[1]!.find((m) => m.role === 'tool')!
-    expect(String(res.content)).toBe('non disponibile ai sottoagenti: il sottoagente non parla con l\'utente né con gli altri bot: consegna al padre con wake_parent')
+    expect(String(res.content)).toBe('non disponibile ai sottoagenti: the subagent does not talk with the user or the other bots: deliver to the parent with wake_parent')
     // NESSUN messaggio in chat
     expect(h.db.entries.filter((e) => e.kind === 'send-message')).toHaveLength(0)
   })
@@ -4292,7 +4292,7 @@ describe('fase 12: il FIGLIO — tool, prompt, whitelist e consegna', () => {
     // (nessuna terza chiamata al modello) e il result della consegna è nel
     // transcript del figlio
     expect(h.llm.calls).toHaveLength(2)
-    expect(h.db.entries.some((e) => e.kind === 'tool-result' && e.content.includes('Consegnato al padre. Hai finito: non fare altro.'))).toBe(true)
+    expect(h.db.entries.some((e) => e.kind === 'tool-result' && e.content.includes('Delivered to the parent. You are done: do nothing else.'))).toBe(true)
     expect(h.db.entries.some((e) => e.kind === 'tool-call' && e.content === 'run-command')).toBe(false)
   })
 
@@ -4324,7 +4324,7 @@ describe('fase 12: il FIGLIO — tool, prompt, whitelist e consegna', () => {
     await runTurn(CHILD, 'brief', emit, undefined, { source: 'user', subagent: { id: CHILD, parentId: AGENT } })
     const row = subagentsState.rows.find((r) => r.id === CHILD)!
     expect(row.status).toBe('failed')
-    expect(row.summary).toContain('chiusura automatica: il sottoagente non ha consegnato con wake_parent')
+    expect(row.summary).toContain('automatic close: the subagent did not deliver with wake_parent')
     expect(subagentsState.terminal).toContain(CHILD)
   })
 
@@ -4338,7 +4338,7 @@ describe('fase 12: il FIGLIO — tool, prompt, whitelist e consegna', () => {
     const row = subagentsState.rows.find((r) => r.id === CHILD)!
     expect(row.status).toBe('done')
     expect(row.summary).toContain('Astro è il migliore')
-    expect(row.summary).toContain('(chiusura automatica')
+    expect(row.summary).toContain('(automatic close')
   })
 
   it('errore del modello → il figlio chiude FAILED col motivo, senza sollecito', async () => {
@@ -4364,7 +4364,7 @@ describe('fase 12: il FIGLIO — tool, prompt, whitelist e consegna', () => {
     const row = subagentsState.rows.find((r) => r.id === CHILD)!
     expect(row.status).toBe('done') // c'è testo libero
     expect(row.summary).toContain('lavoro')
-    expect(row.summary).toContain('(chiusura automatica')
+    expect(row.summary).toContain('(automatic close')
   })
 })
 
@@ -4402,11 +4402,11 @@ describe('fase 12: check/message/stop_subagent e i rifiuti sugli id dei figli', 
     await runTurn(AGENT, 'come va', emit)
     // l'ULTIMA chiamata contiene tutti i tool result accumulati
     const results = h.llm.calls[h.llm.calls.length - 1]!.filter((m) => m.role === 'tool').map((m) => String(m.content))
-    expect(results[0]).toContain(`Sottoagente "Ricerca" (id ${CHILD}): stato running`)
-    expect(results[0]).toContain('Passi: 1')
-    expect(results[0]).toContain('Ultima attività: web_fetch')
+    expect(results[0]).toContain(`Subagent "Ricerca" (id ${CHILD}): status running`)
+    expect(results[0]).toContain('Steps: 1')
+    expect(results[0]).toContain('Last activity: web_fetch')
     // un id che non è un figlio tuo: rifiuto generico di non trovato
-    expect(results[1]).toContain('Sottoagente non trovato')
+    expect(results[1]).toContain('Subagent not found')
   })
 
   it('message_subagent: al figlio APERTO accoda un job col blocco <messaggio_dal_padre>; al figlio DONE lo RIAPRE (lotto nuovo, woken 0)', async () => {
@@ -4436,7 +4436,7 @@ describe('fase 12: check/message/stop_subagent e i rifiuti sugli id dei figli', 
     expect(row.batch_id).not.toBe('b-old')
     expect(row.woken).toBe(0)
     expect(row.deadline_at).toBeGreaterThan(Date.now())
-    const res = h.llm.calls[h.llm.calls.length - 1]!.filter((m) => m.role === 'tool').map((m) => String(m.content)).find((c) => c.includes('RIAPERTO'))
+    const res = h.llm.calls[h.llm.calls.length - 1]!.filter((m) => m.role === 'tool').map((m) => String(m.content)).find((c) => c.includes('REOPENED'))
     expect(res).toBeTruthy()
   })
 
@@ -4448,7 +4448,7 @@ describe('fase 12: check/message/stop_subagent e i rifiuti sugli id dei figli', 
     ]
     await runTurn(AGENT, 'riprova', emit)
     const res = h.llm.calls[1]!.find((m) => m.role === 'tool')!
-    expect(String(res.content)).toContain('fermato: non si riapre con un messaggio')
+    expect(String(res.content)).toContain('is stopped: it does not reopen with a message')
     expect(h.db.jobs.filter((j) => j.kind === 'subagent-run')).toHaveLength(0)
   })
 
@@ -4466,7 +4466,7 @@ describe('fase 12: check/message/stop_subagent e i rifiuti sugli id dei figli', 
     expect(h.db.jobs.filter((j) => j.agentId === CHILD)).toHaveLength(0)
     expect(subagentsState.terminal).toContain(CHILD)
     const res = h.llm.calls[1]!.find((m) => m.role === 'tool')!
-    expect(String(res.content)).toContain('fermato')
+    expect(String(res.content)).toContain('stopped')
   })
 
   it('rifiuti sugli id dei FIGLI: update_agent, delete_agent, send_to_agent dicono "non è un bot: è un sottoagente di…"', async () => {
@@ -4518,7 +4518,7 @@ describe('fase 12: check/message/stop_subagent e i rifiuti sugli id dei figli', 
     ]
     await runTurn('sub_no1', 'brief', emit, undefined, { source: 'user', subagent: { id: 'sub_no1', parentId: AGENT } })
     const res = h.llm.calls[1]!.find((m) => m.role === 'tool')!
-    expect(String(res.content)).toContain('non disponibile ai sottoagenti: niente sottoagenti dentro sottoagenti')
+    expect(String(res.content)).toContain('non disponibile ai sottoagenti: no subagents inside subagents')
     expect(subagentsState.rows.filter((r) => r.parent_id === 'sub_no1')).toHaveLength(0)
   })
 })
@@ -4607,7 +4607,7 @@ describe('fase 13: add_mcp_server / install_plugin / find_tools / result MCP', (
     expect(installState.savedServers).toEqual([])
     // il result al modello è la proposta, non un'esecuzione
     const res = h.db.entries.find((e) => e.kind === 'tool-result' && e.meta?.callId === 'p1')
-    expect(res?.content).toContain("proposta mostrata all'utente")
+    expect(res?.content).toContain('proposal shown to the user')
   })
 
   it('punto 3: la chiamata fuori da un turno utente (routine) viene NEGATA e non crea card', async () => {
@@ -4619,7 +4619,7 @@ describe('fase 13: add_mcp_server / install_plugin / find_tools / result MCP', (
     await runTurn(AGENT, '[routine] controlla', emit, undefined, { source: 'routine', title: 'R' })
     expect(h.db.entries.find((e) => e.kind === 'send-message')).toBeFalsy()
     const res = h.db.entries.find((e) => e.kind === 'tool-result' && e.meta?.callId === 'n1')
-    expect(res?.content).toBe('puoi proporre connettori solo quando l\'utente te lo chiede in chat')
+    expect(res?.content).toBe('you may propose connectors only when the user asks you in chat')
     expect(installState.savedServers).toEqual([])
   })
 
@@ -4695,7 +4695,7 @@ describe('fase 13: add_mcp_server / install_plugin / find_tools / result MCP', (
     // il prompt del primo passo: sezione Connettori attivi, NESSUNO schema MCP
     const first = h.llm.calls[0]!
     const system = (first[0] as { content: string }).content
-    expect(system).toContain('# Connettori attivi')
+    expect(system).toContain('# Active connectors')
     expect(system).not.toContain('mcp__gw__linear_create_issue')
     // il find_tools ha attivato e il suo result porta meta.activated
     const fRes = h.db.entries.find((e) => e.kind === 'tool-result' && e.meta?.callId === 'f1')!

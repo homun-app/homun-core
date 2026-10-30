@@ -7,7 +7,7 @@ import type { ToolDef } from './llm'
 
 /** Il rifiuto esplicito per una chiamata arrivata comunque. */
 export const CONNECTOR_PROPOSAL_DENIED =
-  'puoi proporre connettori solo quando l\'utente te lo chiede in chat'
+  'you may propose connectors only when the user asks you in chat'
 
 /** I due tool che il turno può offrire SOLO se è dell'utente. */
 export const CONNECTOR_PROPOSAL_TOOLS = new Set(['add_mcp_server', 'install_plugin'])

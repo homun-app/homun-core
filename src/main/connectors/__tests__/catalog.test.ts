@@ -87,7 +87,7 @@ describe('istruzioni per connettore (mcpCustomInstructionsByServerId)', () => {
       ],
       states
     )
-    expect(out).toContain('# Istruzioni per i connettori')
+    expect(out).toContain('# Connector instructions')
     expect(out).toContain('## Gmail')
     expect(out).toContain('Usa solo l\'account lavoro.')
     expect(out).not.toContain('## Linear')       // connesso ma senza istruzioni

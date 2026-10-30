@@ -166,7 +166,7 @@ describe('scheduleTurnsForMessage (la colla)', () => {
     scheduleTurnsForMessage(m, () => undefined, 3000)
     expect(listJobs(db())).toHaveLength(jobsBefore)
     const sys = groupMessages(g.id).find((x) => x.author_kind === 'system')
-    expect(sys?.text).toContain('chiuso')
+    expect(sys?.text).toContain('closed')
   })
 
   it('tetto orario: la riga di sistema compare UNA volta sola all\'ora', () => {
@@ -180,7 +180,7 @@ describe('scheduleTurnsForMessage (la colla)', () => {
     const now = Date.now()
     scheduleTurnsForMessage(m, () => undefined, now)
     scheduleTurnsForMessage(addGroupMessage({ groupId: g.id, authorKind: 'user', authorId: null, authorName: 'utente', text: 'e ancora', depth: 0 }), () => undefined, now + 1000)
-    const capLines = groupMessages(g.id).filter((x) => x.author_kind === 'system' && x.text.includes('Tetto orario'))
+    const capLines = groupMessages(g.id).filter((x) => x.author_kind === 'system' && x.text.includes('Hourly cap reached'))
     expect(capLines).toHaveLength(1)
   })
 
@@ -224,7 +224,7 @@ describe('correzioni fase 10: instradamento C4 e sospensione C5', () => {
     expect(planned).not.toContain(spec2.id)
     // il coordinatore e chi è sotto il tetto restano
     expect(planned).toContain(coord2.id)
-    expect(r2.plan.skipped.find((s) => s.memberId === spec2.id)?.reason).toContain('tetto per catena')
+    expect(r2.plan.skipped.find((s) => s.memberId === spec2.id)?.reason).toContain('per-chain cap reached')
   })
 
   it('C5: suspendGroupTurns annulla i job del gruppo e registra SKIPPED col motivo (il job in corso si esclude)', async () => {

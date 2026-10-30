@@ -20,7 +20,7 @@
 import { randomUUID } from 'node:crypto'
 import { getAgent, listAgents, listRoutines, getEntries, updateAgent, appendEntry, updateEntryContent, updateEntryMeta, getSetting, holdOutboxEntry, db, getTask, createTask, updateTask, openTasksOf, MAX_OPEN_TASKS, listProviders, createAgent, subagentRefusal, addGrant, listGrants, type Grant, type AppendEntry } from '../store/db'
 import { llmStream, type ChatMessage, type ToolCall } from './llm'
-import { systemPrompt, secondaryPrompts, mainAgentSection } from './prompts'
+import { systemPrompt, secondaryPrompts, mainAgentSection, withLanguage } from './prompts'
 import { toolDefs, executeTool } from './tools'
 import * as permissions from './permissions'
 import { getProvider } from './providers'
@@ -76,6 +76,9 @@ import {
 import { onSubagentTerminal, sealTurnBatch, subagentsChanged } from '../../daemon/subagent-ops'
 import { subagentSystemPrompt } from './prompts'
 import { formatSubagentBrief } from '../../shared/agent-message'
+// fase 17b (A3): la lingua dell'utente, globale e persistente — la sezione
+// Language va in FONDO al system prompt di OGNI variante
+import { currentUserLanguage } from './user-language'
 
 // §5.3: buildMessages vive in history.ts (modulo puro, testabile senza Electron)
 export { buildMessages } from './history'
@@ -85,7 +88,7 @@ export const MAX_STEPS = 24
 
 /** Fase 3: il sollecito della chiamata di recupero quando un turno utente finisce senza send_to_user. */
 export const RECOVERY_NUDGE =
-  "Non hai chiamato né send_to_user né ask_user: l'utente non ha visto alcuna risposta. Rispondi ORA chiamando send_to_user (solo quello, nessun altro tool)."
+  "You called neither send_to_user nor ask_user: the user has seen no answer. Answer NOW by calling send_to_user (that only, no other tool)."
 
 type Emitter = (e: SandbotEvent) => void
 
@@ -359,24 +362,24 @@ async function runSubagentTool(
 ): Promise<SubagentToolResult> {
   const database = db()
   if (deps.inSubagent) {
-    return { output: 'non disponibile ai sottoagenti: niente sottoagenti dentro sottoagenti' }
+    return { output: 'not available to subagents: no subagents inside subagents' }
   }
   const deadlineMin = getSetting<number>('subagents.deadlineMin', DEFAULT_SUBAGENT_DEADLINE_MIN)
 
   if (call.name === 'spawn_subagent') {
     if (deps.inGroupTurn) {
-      return { output: 'Nei turni di gruppo non si lanciano sottoagenti: lì si coordina col gruppo (post_to_group).' }
+      return { output: 'In group turns subagents are not launched: there you coordinate with the group (post_to_group).' }
     }
     const title = String(input.title ?? '').trim()
     const brief = String(input.brief ?? '').trim()
-    if (!title || !brief) return { output: 'Sottoagente non lanciato: servono title e brief.' }
+    if (!title || !brief) return { output: 'Subagent not launched: title and brief are required.' }
     const briefError = subagentBriefError(brief)
-    if (briefError) return { output: `Sottoagente non lanciato: ${briefError}.` }
+    if (briefError) return { output: `Subagent not launched: ${briefError}.` }
     if (deps.spawnsInTurn > MAX_SPAWNS_PER_TURN) {
-      return { output: `Limite del turno raggiunto: al massimo ${MAX_SPAWNS_PER_TURN} spawn_subagent per turno.` }
+      return { output: `Turn limit reached: at most ${MAX_SPAWNS_PER_TURN} spawn_subagent per turn.` }
     }
     if (openSubagentsOf(database, agentId) >= MAX_OPEN_SUBAGENTS) {
-      return { output: `Ci sono già ${MAX_OPEN_SUBAGENTS} sottoagenti aperti (in coda o al lavoro): fermane qualcuno con stop_subagent o aspetta i risultati del lotto.` }
+      return { output: `There are already ${MAX_OPEN_SUBAGENTS} open subagents (queued or working): stop some with stop_subagent or wait for the batch results.` }
     }
     const parent = getAgent(agentId)
     const batchId = deps.batchIdOf()
@@ -398,7 +401,7 @@ async function runSubagentTool(
       runAt: now, now
     })
     return {
-      output: `Sottoagente "${title}" lanciato (id ${childId}): lavora in parallelo; i risultati del lotto ti arrivano tutti insieme quando l'ultimo ha finito. Non aspettarlo in loop.`,
+      output: `Subagent "${title}" launched (id ${childId}): it works in parallel; the batch results all arrive together when the last one finishes. Do not wait for it in a loop.`,
       card: { type: 'subagent', subagentId: childId, title },
       changed: true
     }
@@ -408,14 +411,14 @@ async function runSubagentTool(
   const row = getSubagent(database, id)
   // solo figli PROPRI: il registro lo dice, non serve listAgents
   if (!row || row.parent_id !== agentId) {
-    return { output: `Sottoagente non trovato ("${id}"): gli id sono i sub_… tornati da spawn_subagent, e solo i TUOI figli.` }
+    return { output: `Subagent not found ("${id}"): the ids are the sub_… returned by spawn_subagent, and only YOUR own children.` }
   }
 
   if (call.name === 'check_subagent') {
     const entries = getEntries(row.id)
     const steps = entries.filter((e) => e.kind === 'tool-call').length
     const lastCall = [...entries].reverse().find((e) => e.kind === 'tool-call' && e.meta?.name)
-    let activity = 'nessuna attività ancora'
+    let activity = 'no activity yet'
     if (lastCall) {
       try {
         const args = JSON.parse(String(lastCall.meta?.arguments ?? '{}')) as Record<string, unknown>
@@ -428,13 +431,13 @@ async function runSubagentTool(
     const elapsed = Math.max(0, Math.round((now - row.created_at) / 60_000))
     const left = Math.max(0, Math.round((row.deadline_at - now) / 60_000))
     const childStatus = getAgent(row.id)?.status
-    const waiting = childStatus === 'paused-for-approval' ? ' — in attesa di conferma dell\'utente su una card del figlio' : ''
+    const waiting = childStatus === 'paused-for-approval' ? ' — waiting for the user\'s confirmation on one of the child\'s cards' : ''
     const lines = [
-      `Sottoagente "${row.title}" (id ${row.id}): stato ${row.status}${waiting}.`,
-      `Tempo: ${elapsed} min trascorsi, scadenza tra ${left} min. Passi: ${steps}. Ultima attività: ${activity}.`
+      `Subagent "${row.title}" (id ${row.id}): status ${row.status}${waiting}.`,
+      `Time: ${elapsed} min elapsed, deadline in ${left} min. Steps: ${steps}. Last activity: ${activity}.`
     ]
     if (row.status === 'done' || row.status === 'failed' || row.status === 'stopped' || row.status === 'expired') {
-      lines.push(`Summary: ${row.summary ?? '(nessuno)'}`)
+      lines.push(`Summary: ${row.summary ?? '(none)'}`)
       if (row.report_path) lines.push(`Report: ${row.report_path}`)
     }
     return { output: lines.join('\n') }
@@ -442,9 +445,9 @@ async function runSubagentTool(
 
   if (call.name === 'message_subagent') {
     const text = String(input.text ?? '').trim()
-    if (!text) return { output: 'Testo mancante: scrivi il messaggio nel campo text.' }
+    if (!text) return { output: 'Missing text: write the message in the text field.' }
     if (row.status === 'stopped' || row.status === 'expired') {
-      return { output: `"${row.title}" è ${row.status === 'stopped' ? 'fermato' : 'scaduto'}: non si riapre con un messaggio (serve una nuova spawn_subagent).` }
+      return { output: `"${row.title}" is ${row.status === 'stopped' ? 'stopped' : 'expired'}: it does not reopen with a message (a new spawn_subagent is needed).` }
     }
     const now = Date.now()
     // done/failed → RIAPRE sul LOTTO DEL TURNO CORRENTE (lo stesso delle
@@ -466,8 +469,8 @@ async function runSubagentTool(
     })
     return {
       output: reopened
-        ? `Sottoagente "${row.title}" (id ${row.id}) RIAPERTO su questo messaggio: lavora e il risultato ti arriva quando il lotto di questo turno ha chiuso.`
-        : `Messaggio in coda per "${row.title}" (id ${row.id}): lo riceverà nel suo turno.`,
+        ? `Subagent "${row.title}" (id ${row.id}) REOPENED on this message: it works and the result arrives when this turn's batch has closed.`
+        : `Message queued for "${row.title}" (id ${row.id}): it will receive it in its turn.`,
       changed: true
     }
   }
@@ -480,12 +483,12 @@ async function runSubagentTool(
     const closed = closeSubagent(database, row.id, { status: 'stopped', finishedAt: Date.now() })
     if (closed) onSubagentTerminal(database, row.id, deps.emit)
     return {
-      output: `Sottoagente "${row.title}" fermato: turno interrotto e lavori in coda cancellati. Il risultato del lotto arriva comunque quando gli altri figli finiscono.`,
+      output: `Subagent "${row.title}" stopped: turn interrupted and queued jobs cancelled. The batch result still arrives when the other children finish.`,
       changed: true
     }
   }
 
-  return { output: `Tool sconosciuto: ${call.name}` }
+  return { output: `Unknown tool: ${call.name}` }
 }
 
 export async function runTurn(agentId: string, userText: string, emit: Emitter, images?: string[], opts: RunTurnOptions = {}): Promise<void> {
@@ -824,6 +827,10 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     let mainSection = ''
     let connectorsSection = ''
     let systemText: string
+    // fase 17b (A3): la lingua del turno si legge QUI, all'inizio della
+    // composizione: se il turno nasce da un messaggio umano, noteHumanText è
+    // già stato chiamato all'ingresso (enqueue), quindi vale la lingua nuova
+    const userLang = currentUserLanguage()
     if (opts.subagent) {
       // fase 12 (punto 3): il FIGLIO ha un prompt SEPARATO (costruttore proprio,
       // ~450 token): identità da sottoagente, come lavorare, chiusura col
@@ -943,6 +950,10 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         // MCP non disponibile: nessuna sezione
       }
     }
+    // fase 17b (A3): la sezione Language è l'ULTIMA cosa del systemText, in
+    // tutte e tre le varianti (bot normale, turno di gruppo, figlio) e DOPO
+    // memoria, skill, bot principale, connettori e sezione connettori attivi
+    systemText = withLanguage(systemText, userLang)
     const messages: ChatMessage[] = buildMessages(systemText, scopedEntries(), images)
     // correzione E2: i tool del passo corrente — la chiamata di recupero di un
     // turno di gruppo li restringe a quelli del sollecito
@@ -1174,7 +1185,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           taskNeedsInput()
           messages.push({
             role: 'tool', toolCallId: call.id,
-            content: 'Invio esterno non eseguito: trasformato in una bozza in attesa della conferma dell’utente. Per gli invii usa draft_external.'
+            content: 'Outbound send not executed: turned into a draft awaiting the user\'s confirmation. For sends use draft_external.'
           })
           continue
         }
@@ -1217,7 +1228,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               neverAuto: false, untrustedTurn,
               ...(contaminated ? { contaminated: true } : {})
             }
-            const review = await reviewWithConfiguredModel(action)
+            const review = await reviewWithConfiguredModel(action, userLang)
             if (review) {
               const decision = autoReviewDecision(review.cfg, action, review.outcome, autoApprovals)
               if (decision.autoAllow) {
@@ -1388,7 +1399,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               tool: call.name, args: input, neverAuto: false, untrustedTurn,
               ...(contaminated ? { contaminated: true } : {})
             }
-            const review = await reviewWithConfiguredModel(action)
+            const review = await reviewWithConfiguredModel(action, userLang)
             if (review) {
               const decision = autoReviewDecision(review.cfg, action, review.outcome, autoApprovals)
               if (decision.autoAllow) {
@@ -1443,7 +1454,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               if (decision !== 'allow') {
                 setStatus(agentId, 'thinking', emit)
                 pushResult(
-                  decision === 'deny' ? 'Azione del browser annullata dall\'utente: non riprovarla senza il suo ok.' : 'Approvazione scaduta o interrotta: azione del browser non eseguita.',
+                  decision === 'deny' ? 'Browser action cancelled by the user: do not retry it without their ok.' : 'Approval expired or interrupted: browser action not executed.',
                   { browserAsk: 'denied' }
                 )
                 continue
@@ -1458,7 +1469,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             bOutput = r.output
             bMeta = r.meta
           } catch (e) {
-            bOutput = `Errore del browser: ${e instanceof Error ? e.message : String(e)}`
+            bOutput = `Browser error: ${e instanceof Error ? e.message : String(e)}`
             bMeta = { error: true }
           }
           if (bMeta.browserPage && !bMeta.browserError) {
@@ -1772,11 +1783,11 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             emit({ type: 'entries', agentId, entries: [res] })
           }
           if (kind === 'login' && !label) {
-            pushResult('Per un login serve l\'etichetta (label), es. "Portale ASPI": si vede nel modulo dell\'utente.')
+            pushResult('A login needs the label, e.g. "ASPI portal": the user sees it in the form.')
             continue
           }
           if (kind === 'secret' && !name) {
-            pushResult('Per un secret serve il nome (name), es. API_KEY.')
+            pushResult('A secret needs the name, e.g. API_KEY.')
             continue
           }
           const approval: Approval = { id: randomUUID(), agentId, tool: call.name, input, status: 'pending', createdAt: Date.now() }
@@ -1794,7 +1805,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             tool: call.name, input, secureInput: true
           })
           if (decision !== 'allow') {
-            pushResult('annullato dall\'utente')
+            pushResult('cancelled by the user')
             continue
           }
           // l'utente ha salvato: l'esito (con l'id/nome reale) sta nell'entry
@@ -1803,7 +1814,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             const e = getEntries(agentId).findLast((x) => x.kind === 'send-message' && x.meta?.approvalId === approval.id)
             return (e?.meta?.savedOutcome as string | undefined) ?? null
           })()
-          pushResult(savedOutcome ?? 'annullato dall\'utente')
+          pushResult(savedOutcome ?? 'cancelled by the user')
           continue
         }
 
@@ -1822,7 +1833,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           }
           const name = String(input.name ?? '').trim()
           if (!name) {
-            pushResult('Contatto non salvato: serve il nome.')
+            pushResult('Contact not saved: the name is required.')
             continue
           }
           const contact = {
@@ -1840,15 +1851,15 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             tool: call.name, input, contactProposal: contact
           })
           if (decision !== 'allow') {
-            pushResult('Contatto non salvato: annullato dall\'utente.')
+            pushResult('Contact not saved: cancelled by the user.')
             continue
           }
           const vault = await import('../vault')
           try {
             const id = await vault.saveContact(contact)
-            pushResult(`Contatto «${name}» salvato nel vault (id ${id}).`)
+            pushResult(`Contact "${name}" saved in the vault (id ${id}).`)
           } catch (e) {
-            pushResult(`Contatto non salvato: ${e instanceof Error ? e.message : String(e)}`)
+            pushResult(`Contact not saved: ${e instanceof Error ? e.message : String(e)}`)
           }
           continue
         }
@@ -1864,7 +1875,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           if (!entry2) {
             messages.push({
               role: 'tool', toolCallId: call.id,
-              content: `Connettore "${String(input.id ?? '')}" non esistente: cerca quello giusto con search_connectors.`
+              content: `Connector "${String(input.id ?? '')}" does not exist: find the right one with search_connectors.`
             })
             continue
           }
@@ -1875,7 +1886,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           appendSend(agentId, call, message, emit, { status: 'pending' }, opts.taskId)
           messages.push({
             role: 'tool', toolCallId: call.id,
-            content: `offerta mostrata all'utente: la connessione di ${entry2.name} avviene SOLO dal suo click sul bottone Connetti. Quando l'utente connette riceverai un messaggio di sistema e potrai usare i tool mcp__${entry2.id}__*.`
+            content: `offer shown to the user: connecting ${entry2.name} happens ONLY from their click on the Connect button. When the user connects you will receive a system message and will be able to use the mcp__${entry2.id}__* tools.`
           })
           continue
         }
@@ -1889,7 +1900,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           if (!kind || !text) {
             messages.push({
               role: 'tool', toolCallId: call.id,
-              content: 'Proposta non valida: serve kind ("allow" o "block") e il testo della regola in linguaggio naturale.'
+              content: 'Invalid proposal: kind ("allow" or "block") and the rule text in natural language are required.'
             })
             continue
           }
@@ -1897,7 +1908,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           appendSend(agentId, call, message, emit, {}, opts.taskId)
           messages.push({
             role: 'tool', toolCallId: call.id,
-            content: 'Proposta mostrata all\'utente: la regola verrà salvata solo se lui la accetta dalla card (Impostazioni → Approvazione automatica).'
+            content: 'Proposal shown to the user: the rule will be saved only if they accept it from the card (Settings → Automatic approval).'
           })
           continue
         }
@@ -1912,7 +1923,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           })
           emit({ type: 'entries', agentId, entries: [wakeEntry] })
           if (!opts.subagent) {
-            const msg = 'wake_parent vale solo dentro un sottoagente: qui sei il padre, il risultato ti arriva con il messaggio del lotto.'
+            const msg = 'wake_parent is only valid inside a subagent: here you are the parent, the result arrives with the batch message.'
             messages.push({ role: 'tool', toolCallId: call.id, content: msg })
             const res = add({ agentId, kind: 'tool-result', role: 'system', content: msg, meta: { callId: call.id } })
             emit({ type: 'entries', agentId, entries: [res] })
@@ -1935,7 +1946,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             finishedAt: Date.now()
           })
           if (closed) onSubagentTerminal(db(), opts.subagent.id, emit)
-          const okMsg = 'Consegnato al padre. Hai finito: non fare altro.'
+          const okMsg = 'Delivered to the parent. You are done: do nothing else.'
           const res = add({ agentId, kind: 'tool-result', role: 'system', content: okMsg, meta: { callId: call.id } })
           emit({ type: 'entries', agentId, entries: [res] })
           messages.push({ role: 'tool', toolCallId: call.id, content: okMsg })
@@ -1987,7 +1998,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           if (!title || !brief) {
             messages.push({
               role: 'tool', toolCallId: call.id,
-              content: 'Task non creato: servono title e brief (obiettivo e contesto completo: il task NON vede questa conversazione).'
+              content: 'Task not created: title and brief are required (goal and full context: the task does NOT see this conversation).'
             })
             continue
           }
@@ -1996,7 +2007,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           if (opts.taskId !== undefined) {
             messages.push({
               role: 'tool', toolCallId: call.id,
-              content: 'Non puoi aprire un task da dentro un altro task: sei già in un task, fai il lavoro qui (chiudilo con update_task quando hai finito).'
+              content: 'You cannot open a task from inside another task: you are already in a task, do the work here (close it with update_task when done).'
             })
             continue
           }
@@ -2004,7 +2015,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           if (openTasksOf(agentId) >= MAX_OPEN_TASKS) {
             messages.push({
               role: 'tool', toolCallId: call.id,
-              content: `Non puoi aprire altri task: ci sono già ${MAX_OPEN_TASKS} task aperti (in corso o in attesa di una risposta). Chiudine qualcuno con update_task o parlane con l'utente.`
+              content: `You cannot open more tasks: there are already ${MAX_OPEN_TASKS} open tasks (running or awaiting an answer). Close some with update_task or talk to the user.`
             })
             continue
           }
@@ -2024,7 +2035,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           emit({ type: 'tasks' })
           messages.push({
             role: 'tool', toolCallId: call.id,
-            content: `Task "${title}" creato (id ${task.id}): partirà alla fine di questo turno (stessa coda, in serie). Il task non vede questa conversazione: il contesto sta nel brief. Chiudilo con update_task({id: ${task.id}, status: 'done' | 'failed', summary}) quando hai finito.`
+            content: `Task "${title}" created (id ${task.id}): it starts at the end of this turn (same queue, serially). The task does not see this conversation: the context is in the brief. Close it with update_task({id: ${task.id}, status: 'done' | 'failed', summary}) when you are done.`
           })
           continue
         }
@@ -2043,16 +2054,16 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           }
           const dest = listAgents().find((a) => a.id === toId)
           if (!dest) {
-            messages.push({ role: 'tool', toolCallId: call.id, content: `Destinatario non trovato ("${toId}"): cerca l'id esatto con list_agents.` })
+            messages.push({ role: 'tool', toolCallId: call.id, content: `Recipient not found ("${toId}"): find the exact id with list_agents.` })
             continue
           }
           if (toId === agentId) {
-            messages.push({ role: 'tool', toolCallId: call.id, content: 'Non puoi mandare un messaggio a te stesso: parla con l\'utente o delega a un altro bot.' })
+            messages.push({ role: 'tool', toolCallId: call.id, content: 'You cannot send a message to yourself: talk to the user or delegate to another bot.' })
             continue
           }
           const text = String(input.text ?? '')
           if (!text.trim()) {
-            messages.push({ role: 'tool', toolCallId: call.id, content: 'Testo mancante: scrivi il messaggio per l\'altro bot nel campo text.' })
+            messages.push({ role: 'tool', toolCallId: call.id, content: 'Missing text: write the message for the other bot in the text field.' })
             continue
           }
           const { enqueueJob, pendingUserMessages, pendingAgentPairJobs, MAX_USER_MESSAGE_QUEUE } = await import('../store/jobs')
@@ -2074,7 +2085,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           if (pendingUserMessages(db(), toId) >= MAX_USER_MESSAGE_QUEUE) {
             messages.push({
               role: 'tool', toolCallId: call.id,
-              content: `Coda piena per ${dest.name} (${MAX_USER_MESSAGE_QUEUE} messaggi già in attesa): messaggio NON accodato. Riprova più tardi o riassumi tutto in un solo messaggio.`
+              content: `Queue full for ${dest.name} (${MAX_USER_MESSAGE_QUEUE} messages already waiting): message NOT queued. Try again later or summarize everything in a single message.`
             })
             continue
           }
@@ -2115,10 +2126,10 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               messages.push({
                 role: 'tool', toolCallId: call.id,
                 content: decision === 'deny'
-                  ? 'Delega negata dall\'utente (contenuti web non fidati nel turno): non mandare questo messaggio ad altri bot.'
-                  : 'Approvazione scaduta o interrotta: la delega non è partita.'
+                  ? 'Delegation denied by the user (untrusted web content in the turn): do not send this message to other bots.'
+                  : 'Approval expired or interrupted: the delegation did not start.'
               })
-              const res = add({ agentId, kind: 'tool-result', role: 'system', content: 'Delega non partita', meta: { callId: call.id } })
+              const res = add({ agentId, kind: 'tool-result', role: 'system', content: 'Delegation not started', meta: { callId: call.id } })
               emit({ type: 'entries', agentId, entries: [res] })
               setStatus(agentId, 'thinking', emit)
               continue
@@ -2150,7 +2161,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           })
           messages.push({
             role: 'tool', toolCallId: call.id,
-            content: `Messaggio in coda per ${dest.name}: entrerà nel suo prossimo turno (passaggio ${guard.hop} di ${AGENT_HOP_MAX}). Lui non vede questa conversazione: se serve contesto, mettilo nel messaggio.`
+            content: `Message queued for ${dest.name}: it will enter their next turn (hop ${guard.hop} of ${AGENT_HOP_MAX}). They do not see this conversation: if context is needed, put it in the message.`
           })
           continue
         }
@@ -2166,21 +2177,21 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           let result: string
           const g = gid ? getGroup(gid) : null
           if (!g) {
-            result = 'Gruppo mancante: dentro un turno di gruppo è implicito; fuori serve groupId (i tuoi gruppi sono in list_agents).'
+            result = 'Missing group: inside a group turn it is implicit; outside you need groupId (your groups are in list_agents).'
           } else if (opts.groupTurn?.closing) {
             // correzione C2: nel turno di chiusura non si pubblica più nel
             // gruppo — resta solo il riepilogo all'utente (o pass)
-            result = "Il giro è chiuso: ora solo il riepilogo all'utente (send_to_user). Se l'hai già mandato, chiudi con pass."
+            result = 'The round is closed: now only the summary to the user (send_to_user). If you already sent it, close with pass.'
           } else if (!opts.groupTurn && !isGroupMember(gid, agentId)) {
-            result = `Non fai parte del gruppo "${g.name}": nel gruppo scrivono solo i membri.`
+            result = `You are not a member of the group "${g.name}": only members write in the group.`
           } else if (!text) {
-            result = 'Testo mancante: scrivi il messaggio nel campo text.'
+            result = 'Missing text: write the message in the text field.'
           } else if (groupPosted) {
-            result = 'Hai già scritto nel gruppo in questo turno: al massimo un messaggio per turno. Fondi il contenuto o aspetta il prossimo giro.'
+            result = 'You have already written in the group in this turn: at most one message per turn. Merge the content or wait for the next round.'
           } else {
             const replyTo = input.replyTo !== undefined && input.replyTo !== null ? Number(input.replyTo) : null
             if (replyTo !== null && !getGroupMessage(replyTo)) {
-              result = `Il messaggio ${replyTo} a cui rispondi non esiste in questo gruppo.`
+              result = `The message ${replyTo} you are replying to does not exist in this group.`
             } else {
               // catena causale: il post di un turno di gruppo ha depth = max(depth
               // dei messaggi letti) + 1; un post da fuori (es. il messaggio di
@@ -2196,7 +2207,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               groupPosted = true
               scheduleTurnsForMessage(msg, emit)
               emit({ type: 'groups' })
-              result = `Pubblicato nel gruppo "${g.name}": «${text.slice(0, 120)}${text.length > 120 ? '…' : ''}». Gli altri membri lo riceveranno nel loro turno (chi non è chiamato può restare in silenzio).`
+              result = `Published in the group "${g.name}": "${text.slice(0, 120)}${text.length > 120 ? '…' : ''}". The other members will receive it in their turn (those not called may stay silent).`
             }
           }
           const postEntry = add({
@@ -2217,8 +2228,8 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         if (call.name === 'pass') {
           const terminal = opts.groupTurn !== undefined
           const result = terminal
-            ? 'Silenzio registrato: il tuo turno nel gruppo finisce qui.'
-            : 'pass vale solo dentro i turni di gruppo: fuori puoi semplicemente non scrivere nulla.'
+            ? 'Silence registered: your turn in the group ends here.'
+            : 'pass is only valid inside group turns: outside you can simply write nothing.'
           const passEntry = add({
             agentId, kind: 'tool-call', role: 'assistant', content: 'pass',
             meta: { id: call.id, name: call.name, arguments: call.arguments }
@@ -2240,7 +2251,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         if (call.name === 'create_agent' && executedCalls.filter((c) => c.name === 'create_agent').length > MAX_CREATE_AGENTS_PER_TURN) {
           messages.push({
             role: 'tool', toolCallId: call.id,
-            content: `Limite del turno raggiunto: al massimo ${MAX_CREATE_AGENTS_PER_TURN} create_agent per turno. Prosegui col gruppo che hai.`
+            content: `Turn limit reached: at most ${MAX_CREATE_AGENTS_PER_TURN} create_agent per turn. Continue with the group you have.`
           })
           continue
         }
@@ -2324,7 +2335,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               tool: call.name, args: input, neverAuto: neverAutoCmd || forcedOriginAsk, untrustedTurn,
               ...(contaminated ? { contaminated: true } : {})
             }
-            const review = await reviewWithConfiguredModel(action)
+            const review = await reviewWithConfiguredModel(action, userLang)
             if (review) {
               const decision = autoReviewDecision(review.cfg, action, review.outcome, autoApprovals)
               if (decision.autoAllow) {
@@ -2388,15 +2399,15 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             if (decision === 'cancelled') {
               // fase 4 (0c): interrupt dell'utente — l'approval si chiude subito,
               // niente esecuzione, il turno finirà STOPPED (controller abortito)
-              messages.push({ role: 'tool', toolCallId: call.id, content: 'Interrotto dall’utente.' })
-              const res = add({ agentId, kind: 'tool-result', role: 'system', content: 'Interrotto dall’utente', meta: { callId: call.id } })
+              messages.push({ role: 'tool', toolCallId: call.id, content: 'Interrupted by the user.' })
+              const res = add({ agentId, kind: 'tool-result', role: 'system', content: 'Interrupted by the user', meta: { callId: call.id } })
               emit({ type: 'entries', agentId, entries: [res] })
               break
             }
             if (decision === 'superseded') {
               // fase 3: un nuovo messaggio utente ha sostituito il turno
-              messages.push({ role: 'tool', toolCallId: call.id, content: 'Sostituito da un nuovo messaggio dell’utente.' })
-              const res = add({ agentId, kind: 'tool-result', role: 'system', content: 'Sostituito da un nuovo messaggio utente', meta: { callId: call.id } })
+              messages.push({ role: 'tool', toolCallId: call.id, content: 'Superseded by a new user message.' })
+              const res = add({ agentId, kind: 'tool-result', role: 'system', content: 'Superseded by a new user message', meta: { callId: call.id } })
               emit({ type: 'entries', agentId, entries: [res] })
               break
             }
@@ -2407,9 +2418,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             if (decision !== 'allow') {
               messages.push({
                 role: 'tool', toolCallId: call.id,
-                content: decision === 'deny' ? 'Denied by user: azione rifiutata.' : 'Approval expired.'
+                content: decision === 'deny' ? 'Denied by user: action refused.' : 'Approval expired.'
               })
-              const res = add({ agentId, kind: 'tool-result', role: 'system', content: "Rifiutato dall'utente", meta: { callId: call.id } })
+              const res = add({ agentId, kind: 'tool-result', role: 'system', content: 'Refused by the user', meta: { callId: call.id } })
               emit({ type: 'entries', agentId, entries: [res] })
               setStatus(agentId, 'thinking', emit)
               paused = true
@@ -2525,13 +2536,13 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           if (images?.length) {
             messages.push({
               role: 'user',
-              content: `[screenshot] Ecco lo screenshot richiesto dal tool use-app (le coordinate che vuoi cliccare si intendono in pixel di QUESTA immagine):`,
+              content: '[screenshot] Here is the screenshot requested by the use-app tool (the coordinates you want to click are in pixels of THIS image):',
               images
             })
           }
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e)
-          const res = add({ agentId, kind: 'tool-result', role: 'system', content: `Errore: ${msg}`, meta: { callId: call.id, error: true } })
+          const res = add({ agentId, kind: 'tool-result', role: 'system', content: `Error: ${msg}`, meta: { callId: call.id, error: true } })
           emit({ type: 'entries', agentId, entries: [res] })
           messages.push({ role: 'tool', toolCallId: call.id, content: `Error: ${msg}` })
         }
