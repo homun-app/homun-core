@@ -39,6 +39,8 @@ describe('notifyConnectorConnected (CONNECTOR_CONNECTED)', () => {
 
     let pokes = 0
     await notifyConnectorConnected('gmail', 'Gmail', () => undefined, { poke: () => pokes++ } as never)
+    // fase 17c (C2, MU): il TESTO per il modello resta inglese (prefisso [sistema])
+    // e il payload porta extraMeta.ui per la vista nella lingua dell'interfaccia
 
     // un solo job user-message, per l'agente con l'offerta pendente
     const rows = db().prepare("SELECT agent_id, payload_json FROM jobs WHERE kind = 'user-message'").all() as Array<{ agent_id: string; payload_json: string }>
@@ -47,6 +49,10 @@ describe('notifyConnectorConnected (CONNECTOR_CONNECTED)', () => {
     const payload = JSON.parse(rows[0]!.payload_json) as { initiator?: string; text: string }
     expect(payload.initiator).toBe('CONNECTOR_CONNECTED')
     expect(payload.text).toContain('Gmail')
+    expect(payload.text).toMatch(/^\[sistema\] The user connected Gmail/)
+    const extra = (payload as { extraMeta?: { ui?: { id: string; values?: Record<string, string> } } }).extraMeta
+    expect(extra?.ui?.id).toBe('sistema.connectorConnected')
+    expect(extra?.ui?.values).toEqual({ name: 'Gmail', connectorId: 'gmail' })
     // l'offerta pendente è marcata connessa (non ri-notificare alla prossima)
     expect(getEntries(a1.id).find((x) => x.kind === 'send-message')?.meta?.connected).toBe(true)
     // il worker è stato svegliato (il job parte al prossimo tick)

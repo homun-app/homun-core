@@ -17,6 +17,9 @@ import { activeJobForAgent, enqueueJob, type Job } from '../main/store/jobs'
 import { nextScheduleRun, nextPollAt } from './triggers'
 import { extractIds, extractByPath, splitIdField, guessEventStart, guessItemTitle, mergeSeenIds, type SeenState } from '../shared/triggers'
 import type { SandbotEvent, TriggerEventPayload } from '../shared/types'
+// fase 17c (C2): notice col testo del catalogo UI (meta.ui + content tradotto)
+import { uiLanguage, formatUi, ui } from '../main/ui-language'
+import { UI } from '../shared/ui-messages'
 
 type Emitter = (e: SandbotEvent) => void
 
@@ -65,9 +68,10 @@ export function tickScheduler(db: DatabaseSync, emit: Emitter, now: number): Job
   for (const r of due) {
     touchRoutineRun(r.id)
     if (activeJobForAgent(db, r.agent_id)) {
+      const skipped = ui(UI.routineSkipped, { title: r.title })
       appendEntry({
         agentId: r.agent_id, kind: 'notice', role: 'system',
-        content: `Routine "${r.title}" saltata: l'agente è occupato.`
+        content: formatUi(skipped, uiLanguage()), meta: { ui: skipped }
       })
       emit({ type: 'entries', agentId: r.agent_id, entries: getEntries(r.agent_id).slice(-1) })
       continue

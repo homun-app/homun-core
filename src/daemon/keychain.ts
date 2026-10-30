@@ -104,7 +104,9 @@ export async function getKeychainKey(service: string, run: SecurityRunner = secu
   if (await writeKeychainKey(service, key, run)) return key
   const raced = await readKeychainKey(service, run)
   if (raced) return raced
-  throw new Error('Keychain non disponibile: impossibile conservare la chiave')
+  // fase 17c (C3): errore che arriva alla UI (mcp:save) — testo del catalogo
+  const { uiError, UI } = await import('../main/ui-language')
+  throw uiError(UI.rpcKeychainUnavailable)
 }
 
 /** Chiave dei segreti dei connettori (voce propria, separata dal vault). */

@@ -20,3 +20,9 @@ if (!current?.includes(PREFIX) || !existsSync(current)) {
   afterAll(clean) // fine del file di test (un worker per file, in forks)
   process.on('exit', clean) // se il processo muore prima dell'afterAll
 }
+
+// fase 17c (C1): la lingua dell'interfaccia dei test è l'italiano — i testi
+// salvati del daemon restano italiani come prima della 17c. La scrivono i
+// file che la usano (dopo il loro setDataDir), NON qui: aprire il DB in un
+// setup globale anticiperebbe il singleton di store/db e romperebbe i test
+// di migrazione che creano un DB vecchio nella LORO cartella dati.

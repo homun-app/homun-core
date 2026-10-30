@@ -15,6 +15,10 @@
 // La RESA SVG (vega → view.toSVG() col loader che rifiuta ogni richiesta) sta
 // in library.ts: qui niente dipendenze pesanti, i test girano in nodo puro.
 
+// fase 17c (C3): l'esportazione che legge l'utente segue la lingua dell'interfaccia
+import { uiLanguage, formatUi, ui } from '../ui-language'
+import { UI } from '../../shared/ui-messages'
+
 /** Tetto della spec Vega-Lite (JSON grezzo, punto 3). */
 export const VEGA_SPEC_MAX_BYTES = 200 * 1024
 
@@ -324,22 +328,25 @@ export function documentToHtml(item: { title: string; authorName: string; versio
   for (let i = 0; i < placeholders.length; i++) {
     const svg = placeholders[i]!
     // l'SVG è phrasing content: sta bene dentro il <p> del paragrafo
-    body = body.split(`SANSBOT-CHART-${i}-SANSBOT`).join(svg || 'grafico non disponibile')
+    body = body.split(`SANSBOT-CHART-${i}-SANSBOT`).join(svg || formatUi(ui(UI.chartNotAvailable), uiLanguage()))
   }
   const meta = [
     `<title>${escapeHtml(item.title)}</title>`,
     `<meta charset="utf-8">`,
     `<meta name="generator" content="Homun">`
   ].join('\n    ')
+  // fase 17c (C3): il documento esportato è per l'utente — lang e testi
+  // nella lingua dell'interfaccia
+  const lang = uiLanguage()
   return `<!DOCTYPE html>
-<html lang="it">
+<html lang="${lang}">
   <head>
     ${meta}
     <style>${EXPORT_CSS}</style>
   </head>
   <body>
     <h1>${escapeHtml(item.title)}</h1>
-    <p class="meta">di ${escapeHtml(item.authorName)} · versione ${item.version} · esportato da Homun</p>
+    <p class="meta">${formatUi(ui(UI.chartMetaLine, { author: escapeHtml(item.authorName), version: item.version }), lang)}</p>
 ${body}
   </body>
 </html>`

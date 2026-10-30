@@ -7,12 +7,17 @@
 import { describe, expect, it, beforeEach } from 'vitest'
 import {
   createOnboarding, maybeStartOnboarding, answerOnboardingRole, resumeOnboarding,
-  roleTemplates, welcomeMessage, ONBOARDING_PROMPT, ONBOARDING_ROLE_OPTIONS,
+  roleTemplates, welcomeMessage, onboardingPrompt, onboardingRoleOptions,
   MAIN_BOT_NAME, ROLE_SETTING, PENDING_PROVIDER_SETTING, DONE_SETTING,
   type OnboardingDeps
 } from '../onboarding'
 import type { Agent, ProviderConfig, SendMessagePayload, SandbotEvent } from '../../shared/types'
 import type { BotTemplate } from '../../shared/types'
+// fase 17c: i test della lingua scrivono i setting dello store reale (test-setup).
+// La lingua di default qui è l'italiano (i testi fissi erano italiani prima);
+// il test della lingua EN la cambia e la rimette.
+import { setSetting, deleteSetting } from '../../main/store/db'
+setSetting('ui.activeLanguage', 'it')
 
 interface Log {
   settings: Record<string, unknown>
@@ -96,8 +101,8 @@ describe('maybeStartOnboarding: primo avvio', () => {
     expect(log.sends).toHaveLength(1)
     const w = log.sends[0]!
     expect(w.agentId).toBe(log.agents[0]!.id)
-    expect(w.message).toMatchObject({ type: 'widget', prompt: ONBOARDING_PROMPT, allowCustom: true })
-    expect((w.message as { options: typeof ONBOARDING_ROLE_OPTIONS }).options).toEqual(ONBOARDING_ROLE_OPTIONS)
+    expect(w.message).toMatchObject({ type: 'widget', prompt: onboardingPrompt('it'), allowCustom: true })
+    expect((w.message as { options: ReturnType<typeof onboardingRoleOptions> }).options).toEqual(onboardingRoleOptions('it'))
     expect(w.meta).toMatchObject({ onboardingRole: true })
     expect(log.events).toContain('agents')
   })
@@ -119,6 +124,35 @@ describe('answerOnboardingRole CON provider configurato', () => {
   beforeEach(() => {
     log.providers.push({ id: 'ollama', name: 'Ollama', kind: 'ollama', baseUrl: 'http://x', apiKey: '', enabled: true })
     maybeStartOnboarding(deps)
+  })
+
+  it('fase 17c (C4): la lingua dell’onboarding segue l’utente (userLanguage, ripiego su ui.activeLanguage)', () => {
+    const restart = (): void => {
+      log.agents.length = 0
+      log.sends.length = 0
+      log.settings['onboarding.done'] = false
+      maybeStartOnboarding(deps)
+    }
+    // senza userLanguage e con ui.activeLanguage=en → onboarding inglese
+    deleteSetting('agent.userLanguage')
+    setSetting('ui.activeLanguage', 'en')
+    restart()
+    let w = log.sends.find((s) => (s.message as { type?: string }).type === 'widget')
+    expect((w!.message as { prompt: string }).prompt).toBe('What do you want to use me for the most?')
+    // con userLanguage=en vince la lingua dell'utente anche se l'app è italiana
+    setSetting('ui.activeLanguage', 'it')
+    setSetting('agent.userLanguage', 'en')
+    restart()
+    w = log.sends.find((s) => (s.message as { type?: string }).type === 'widget')
+    expect((w!.message as { prompt: string }).prompt).toBe('What do you want to use me for the most?')
+    deleteSetting('agent.userLanguage')
+    setSetting('ui.activeLanguage', 'it')
+    // e l'italiano resta per i test successivi (comportamento pre-17c)
+    restart()
+    const wIt = log.sends.find((s) => (s.message as { type?: string }).type === 'widget')
+    expect((wIt!.message as { prompt: string }).prompt).toBe('Per cosa vuoi usarmi di più?')
+    // il done resta spento per la describe SENZA provider
+    log.settings['onboarding.done'] = false
   })
 
   it('risposta "Email" → due bot da template, provider/modello assegnati, kickstart in coda, benvenuto FISSO, done', async () => {
@@ -143,7 +177,8 @@ describe('answerOnboardingRole CON provider configurato', () => {
     const text = (welcome!.message as { text: string }).text
     expect(text).toContain('Gestore della posta in arrivo')
     expect(text).toContain('Capo dello staff')
-    expect(welcomeMessage([{ name: 'A', description: 'dA' } as BotTemplate, { name: 'B', description: 'dB' } as BotTemplate]).split('\n')).toHaveLength(3)
+    // fase 17c (C5): i campi sono Localized; la lingua dell'utente qui è italiana
+    expect(welcomeMessage([{ name: 'A', description: 'dA' } as unknown as BotTemplate, { name: 'B', description: 'dB' } as unknown as BotTemplate], 'it').split('\n')).toHaveLength(3)
     expect(log.settings[DONE_SETTING]).toBe(true)
   })
 

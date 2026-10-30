@@ -42,11 +42,15 @@ import { handleWebhook } from './webhooks'
 import { deliverDueHeld } from './outbox'
 import { decideNotification, notifyTexts } from './notifications'
 import { enqueueUserMessage } from './enqueue'
+// fase 17c (C2): notice col testo del catalogo UI
+import { uiLanguage, formatUi, ui } from '../main/ui-language'
+import { UI } from '../shared/ui-messages'
 import { secondaryPrompts } from '../main/agent/prompts'
 import { loadTemplates, buildKickstartMessage } from '../main/templates'
 import { createOnboarding } from './onboarding'
 import { join } from 'node:path'
 import type { SandbotEvent } from '../shared/types'
+import { currentUserLanguage } from '../main/agent/user-language'
 
 function resolveDataDirArgv(argv: string[]): string | null {
   const i = argv.indexOf('--data')
@@ -91,18 +95,17 @@ async function main(): Promise<void> {
     if (migration.migrated.length || migration.failed.length) {
       const main = mainAgentOf(listAgents(), getSetting<string | null>('mainAgentId', null))
       if (main) {
+        // fase 17c (C2): i pezzi fissi sono id del catalogo; i path delle
+        // copie sono DATI (valori), restano invariati
+        const migrationUi = ui(UI.boxMigrated, {
+          root: join(dataDir(), 'box'),
+          copied: migration.migrated.map((m) => `- ${m.from} → ${m.to}`).join('\n'),
+          failed: migration.failed.length ? formatUi(ui(UI.boxMigratedFailed, { list: migration.failed.map((f) => f.from).join(', ') }), uiLanguage()) : ''
+        })
         appendEntry({
           agentId: main.id, kind: 'notice', role: 'system',
-          content: [
-            `Il computer dei bot ora è UNO solo, condiviso (radice: ${join(dataDir(), 'box')}).`,
-            'Ho COPIATO i vecchi box dei bot nella nuova struttura, senza cancellare nulla:',
-            ...migration.migrated.map((m) => `- ${m.from} → ${m.to}`),
-            // F9: le copie fallite si ritentano al prossimo avvio (niente marker)
-            ...(migration.failed.length
-              ? [`Non copiato (riproverò al prossimo avvio): ${migration.failed.map((f) => f.from).join(', ')}.`]
-              : []),
-            'I dati originali restano dove sono: puoi cancellarli tu quando vuoi.'
-          ].join('\n')
+          content: formatUi(migrationUi, uiLanguage()),
+          meta: { ui: migrationUi }
         })
       }
       console.log(`[sandbotd] migrazione box condiviso: copiati ${migration.migrated.length} vecchi box (gli originali restano)${migration.failed.length ? `, ${migration.failed.length} non copiati (riprova al prossimo avvio)` : ''}`)
@@ -352,7 +355,8 @@ async function main(): Promise<void> {
         agentId,
         kind: 'user-message',
         payload: {
-          text: buildKickstartMessage(template),
+          // fase 17c (C4): il kickstart parte nella lingua dell'utente
+          text: buildKickstartMessage(template, currentUserLanguage()),
           initiator: 'TEMPLATE_IMPORT',
           extraMeta: { templateName: template.name }
         },

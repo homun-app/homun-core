@@ -3,6 +3,9 @@
 // una traduzione. Gli id sono hash del testo, quindi sourceLocale decide
 // solo cosa sta scritto nel codice. `lineNumbers: false` così uno
 // spostamento di righe non riscrive i cataloghi.
+// Fase 17c (C1): nel catalogo entrano ANCHE i testi U del daemon e del main
+// (src/shared/ui-messages.ts, con id espliciti): un solo .po per lingua, la
+// stessa catena di strumenti del renderer.
 import { formatter } from '@lingui/format-po'
 
 export default {
@@ -11,7 +14,7 @@ export default {
   catalogs: [
     {
       path: 'src/renderer/src/locales/{locale}/messages',
-      include: ['src/renderer/src'],
+      include: ['src/renderer/src', 'src/shared', 'src/main', 'src/daemon'],
       exclude: ['**/locales/**', '**/__tests__/**', '**/*.test.*']
     }
   ],

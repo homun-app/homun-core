@@ -6,6 +6,9 @@
 // `reason`. La proposta nata in un turno contaminato mostra l'avviso in cima.
 import { useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
+// fase 17c (C5): fiducia, runtime e disabledReason arrivano come CODICI dal
+// daemon — qui si mostrano nella lingua attiva (fallback sul campo grezzo per
+// le card salvate prima della 17c)
 import { api } from '../store'
 import type { TranscriptEntry } from '../../../shared/types'
 
@@ -17,6 +20,15 @@ type PluginMessage = Extract<
   import('../../../shared/types').SendMessagePayload,
   { type: 'plugin' }
 >
+
+/** Il runtime di un server del plugin dal CODICE runtimeKind (fase 17c, C5); fallback sul label salvato (card vecchie). */
+function RuntimeOf({ sv }: { sv: { name: string; runtimeKind?: string; runtimeDetail?: string; runtimeLabel?: string } }) {
+  const { t } = useLingui()
+  if (sv.runtimeKind === 'unsupported') return <>{t`non supportato: valore in argv (${sv.runtimeDetail ?? ''})`}</>
+  if (sv.runtimeKind === 'remote') return <>{t`remoto (${sv.runtimeDetail ?? ''})`}</>
+  if (sv.runtimeKind === 'box') return <>{t`nel box: ${sv.runtimeDetail ?? ''}`}</>
+  return <>{sv.runtimeLabel ?? ''}</>
+}
 
 /** L'avviso per le proposte nate dopo letture esterne (punto 3). */
 function UntrustedBanner({ show }: { show: boolean }) {
@@ -52,6 +64,14 @@ export function McpServerCard({ entry }: { entry: TranscriptEntry }) {
     }
   }
 
+  const trust =
+    message.trustKind === 'verified-domain'
+      ? t`dominio verificato (${message.trustDetail ?? ''})`
+      : message.trustKind === 'github-account'
+        ? t`account GitHub (${message.trustDetail ?? ''})`
+        : message.trustKind === 'unverified'
+          ? t`non verificato`
+          : message.trust
   const needs =
     message.needs.kind === 'oauth'
       ? t`accesso con il tuo account (OAuth)`
@@ -72,7 +92,7 @@ export function McpServerCard({ entry }: { entry: TranscriptEntry }) {
         <span className="font-medium"><Trans>Aggiungi server MCP: {message.name}</Trans></span>
         {message.publisher && <span className="text-xs text-muted-foreground">{message.publisher}</span>}
       </div>
-      <p className="mt-1 text-xs text-muted-foreground"><Trans>fiducia: {message.trust} · come gira: {runtime}</Trans></p>
+      <p className="mt-1 text-xs text-muted-foreground"><Trans>fiducia: {trust} · come gira: {runtime}</Trans></p>
       {message.siteUrl && (
         <a className="mt-0.5 block truncate text-[11px] text-primary hover:underline" href={message.siteUrl} target="_blank" rel="noreferrer">{message.siteUrl}</a>
       )}
@@ -85,7 +105,7 @@ export function McpServerCard({ entry }: { entry: TranscriptEntry }) {
       {message.reason && <p className="mt-1 text-sm text-foreground">{message.reason}</p>}
       {message.disabledReason ? (
         <p className="mt-2 text-xs text-muted-foreground">
-          {message.disabledReason} — <button className="text-muted-foreground underline hover:text-foreground" onClick={() => void api.connectorsResolveMcpServer(entry.agentId, entry.id, 'no').catch(() => undefined)}><Trans>No</Trans></button>
+          {message.disabledReason === 'host-mode' ? <Trans>si installa solo nel computer dei bot (modalità docker)</Trans> : message.disabledReason} — <button className="text-muted-foreground underline hover:text-foreground" onClick={() => void api.connectorsResolveMcpServer(entry.agentId, entry.id, 'no').catch(() => undefined)}><Trans>No</Trans></button>
         </p>
       ) : status === 'installed' ? (
         <p className="mt-2 text-xs text-chart-2"><Trans>✓ Aggiunto — il bot ha ricevuto l'esito</Trans></p>
@@ -122,6 +142,15 @@ export function PluginCard({ entry }: { entry: TranscriptEntry }) {
   const [error, setError] = useState<string>('')
   if (message.type !== 'plugin') return null
 
+  // fase 17c (C5): fiducia dal codice official, fallback sul campo grezzo
+  const pluginTrust = message.official === true ? t`marketplace ufficiale` : message.official === false ? t`marketplace aggiunto da te` : message.trust
+  // fase 17c (C5): il runtime di ogni server dal codice runtimeKind
+  const serversList = message.servers.map((sv, i) => (
+    <span key={sv.name}>
+      {i > 0 ? ', ' : ''}{sv.name} (<RuntimeOf sv={sv} />)
+    </span>
+  ))
+
   const install = async (): Promise<void> => {
     setStatus('installing')
     try {
@@ -145,14 +174,14 @@ export function PluginCard({ entry }: { entry: TranscriptEntry }) {
         <span className="text-xs text-muted-foreground">{message.marketplace}</span>
       </div>
       <p className="mt-1 text-xs text-muted-foreground">
-        <Trans>fiducia: {message.trust} · commit {message.sha12}{message.repoUrl && <> · <a className="text-primary hover:underline" href={message.repoUrl} target="_blank" rel="noreferrer">{t`repository`}</a></>}</Trans>
+        <Trans>fiducia: {pluginTrust} · commit {message.sha12}{message.repoUrl && <> · <a className="text-primary hover:underline" href={message.repoUrl} target="_blank" rel="noreferrer">{t`repository`}</a></>}</Trans>
       </p>
       {message.skills.length > 0 && (
         <p className="mt-1 text-xs text-muted-foreground"><Trans>skill: {message.skills.join(', ')}</Trans></p>
       )}
       {message.servers.length > 0 && (
         <p className="mt-0.5 text-xs text-muted-foreground">
-          <Trans>server: {message.servers.map((sv) => `${sv.name} (${sv.runtimeLabel})`).join(', ')}</Trans>
+          <Trans>server: {serversList}</Trans>
         </p>
       )}
       {message.settings.length > 0 && (

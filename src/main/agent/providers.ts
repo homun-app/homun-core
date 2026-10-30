@@ -1,6 +1,10 @@
 // Registry provider + autodiscovery locale (Ollama :11434, LM Studio :1234).
 // Tutti i provider non-Anthropic parlano OpenAI-compatible: un solo codice.
 import { listProviders, saveProviders } from '../store/db'
+// fase 17c (C3): gli errori del check dei tool si mostrano in impostazioni e
+// onboarding — testo del catalogo UI
+import { uiText } from '../ui-language'
+import { UI } from '../../shared/ui-messages'
 import type { ProviderConfig, ProviderKind, ModelInfo } from '../../shared/types'
 
 export const KNOWN_BASE_URLS: Partial<Record<ProviderKind, string>> = {
@@ -95,14 +99,14 @@ export async function modelSupportsTools(
       body: JSON.stringify({ model }),
       signal: AbortSignal.timeout(8000)
     })
-    if (!r.ok) return { ok: false, checked: true, error: `impossibile verificare "${model}" su ${p.name}: HTTP ${r.status}` }
+    if (!r.ok) return { ok: false, checked: true, error: uiText(UI.providersCannotVerify, { model, provider: p.name, error: `HTTP ${r.status}` }) }
     const j = (await r.json()) as { capabilities?: string[] }
     if (!(j.capabilities ?? []).includes('tools')) {
-      return { ok: false, checked: true, error: `il modello "${model}" non supporta i tool (capability "tools" assente): scegline uno con i tool, altrimenti il bot non può parlarti` }
+      return { ok: false, checked: true, error: uiText(UI.providersNoTools, { model }) }
     }
     return { ok: true, checked: true }
   } catch (e) {
-    return { ok: false, checked: true, error: `impossibile verificare "${model}" su ${p.name}: ${e instanceof Error ? e.message : String(e)}` }
+    return { ok: false, checked: true, error: uiText(UI.providersCannotVerify, { model, provider: p.name, error: e instanceof Error ? e.message : String(e) }) }
   }
 }
 

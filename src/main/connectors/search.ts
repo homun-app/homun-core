@@ -14,6 +14,7 @@ import {
   type RegistryEntry
 } from './registry'
 import type { MarketplacePlugin } from './marketplace'
+import { pickLang } from '../../shared/localized'
 
 /** "come gira" per il modello e la card. */
 export type ConnectorRuntimeKind = 'remote-oauth' | 'remote-key' | 'box-npm' | 'plugin' | 'not-installable'
@@ -53,9 +54,8 @@ export const RUNTIME_LABELS: Record<ConnectorRuntimeKind, string> = {
  * (MU, se ne occupa la 17c).
  */
 export function registryTrustEnLabel(t: ReturnType<typeof registryTrust>): string {
-  if (t.kind === 'verified-domain') return `verified domain (${t.domain})`
-  if (t.kind === 'github-account') return `GitHub account (${t.user})`
-  return 'unverified'
+  // fase 17c (C5): il label di registryTrust è già il testo inglese per il modello
+  return t.label
 }
 
 /** Massimo righe in totale (catalogo e plugin prima). */
@@ -123,7 +123,7 @@ export function mergeConnectorResults(input: MergeInput, query: string): MergeOu
       runtime: 'remote-oauth',
       runtimeLabel: RUNTIME_LABELS['remote-oauth'],
       ...(status && status !== 'not_connected' ? { status: status === 'connected' ? 'connected' : status === 'needs_auth' ? 'needs authorization' : 'error' } : {}),
-      description: truncateDescription(entry.notes)
+      description: truncateDescription(pickLang(entry.notes, 'en'))
     })
   }
   // 2. plugin dei marketplace registrati: fiducia "marketplace:<nome>"

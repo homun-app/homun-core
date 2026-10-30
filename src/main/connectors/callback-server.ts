@@ -4,6 +4,10 @@
 // lo `state` generato dal provider: una richiesta con state sbagliato viene
 // rifiutata SENZA consumare il codice (attesa di quella giusta).
 import { createServer, type Server } from 'node:http'
+// fase 17c (C3): le pagine OAuth vivono nel browser dell'utente — seguono la
+// lingua dell'interfaccia (testi del catalogo UI)
+import { uiLanguage, formatUi, ui, uiError } from '../ui-language'
+import { UI } from '../../shared/ui-messages'
 
 export interface CallbackServer {
   port: number
@@ -18,8 +22,13 @@ export interface CallbackServer {
   close(): void
 }
 
-const PAGE_OK = '<html><body style="font-family:system-ui;background:#0b0d10;color:#e5e5e5;display:flex;align-items:center;justify-content:center;height:100vh"><p>✓ Connettore autorizzato — puoi tornare su Homun.</p></body></html>'
-const PAGE_ERR = '<html><body style="font-family:system-ui;background:#0b0d10;color:#f87171;display:flex;align-items:center;justify-content:center;height:100vh"><p>Richiesta non valida (state errato): riprova la connessione da Homun.</p></body></html>'
+/** La pagina HTML con <html lang> e testo nella lingua dell'interfaccia. */
+function oauthPage(ok: boolean): string {
+  const lang = uiLanguage()
+  const color = ok ? '#e5e5e5' : '#f87171'
+  const text = ok ? formatUi(ui(UI.oauthOkPage), lang) : formatUi(ui(UI.oauthErrPage), lang)
+  return `<html lang="${lang}"><body style="font-family:system-ui;background:#0b0d10;color:${color};display:flex;align-items:center;justify-content:center;height:100vh"><p>${text}</p></body></html>`
+}
 
 export async function startCallbackServer(opts: {
   expectedState: string
@@ -46,14 +55,14 @@ export async function startCallbackServer(opts: {
     const err = url.searchParams.get('error')
     if (!code || state !== opts.expectedState) {
       // state sbagliato o manca il codice: rifiutata, il codice "unico" non si consuma
-      res.writeHead(400, { 'content-type': 'text/html; charset=utf-8' }).end(PAGE_ERR)
+      res.writeHead(400, { 'content-type': 'text/html; charset=utf-8' }).end(oauthPage(false))
       if (err && !settled) {
         settled = true
-        rejectCode?.(new Error(`autorizzazione negata: ${err}`))
+        rejectCode?.(uiError(ui(UI.oauthDenied, { error: err })))
       }
       return
     }
-    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(PAGE_OK)
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(oauthPage(true))
     if (!settled) {
       settled = true
       // fase 13 (punto 6): iss della redirect (RFC 9207), se il server lo manda
@@ -64,7 +73,7 @@ export async function startCallbackServer(opts: {
   const timer = setTimeout(() => {
     if (!settled) {
       settled = true
-      rejectCode?.(new Error(`autorizzazione non completata entro ${Math.round(timeoutMs / 60_000)} minuti`))
+      rejectCode?.(uiError(ui(UI.oauthTimeout, { minutes: Math.round(timeoutMs / 60_000) })))
     }
   }, timeoutMs)
   timer.unref()

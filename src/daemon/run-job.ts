@@ -79,8 +79,17 @@ export function makeJobRunner(db: DatabaseSync, runTurnFn: RunTurnFn = runTurn) 
       // (brief = <risultati_sottoagenti>) — le bandiere del payload valgono
       // COME le righe del task (B1: l'origine non si perde)
       const opening = `[task no. ${p.taskId}${row?.title ? ` "${row.title}"` : ''} — to close it: update_task with id ${p.taskId}]\n${p.brief}`
+      // fase 17c (C2, MU): il testo per il modello resta inglese; l'apertura
+      // che l'utente vede in chat arriva da meta.ui, nella sua lingua
+      const { ui, UI } = await import('../main/ui-language')
+      const openingUi = ui(UI.openTask, {
+        id: p.taskId,
+        hasTitle: row?.title ? 'yes' : 'no',
+        ...(row?.title ? { title: row.title } : {}),
+        brief: p.brief
+      })
       await runTurnFn(job.agent_id, opening, emit, undefined, {
-        source: 'user', taskId: p.taskId, ...opts, onTurnEntry,
+        source: 'user', taskId: p.taskId, ...opts, onTurnEntry, extraMeta: { ui: openingUi },
         ...(p.respondedTo !== undefined ? { respondedTo: p.respondedTo } : {}),
         ...(row?.untrusted || p.untrusted ? { untrusted: true } : {}),
         ...(row?.automatic || p.automatic ? { automatic: true } : {}),
@@ -142,9 +151,15 @@ export function makeJobRunner(db: DatabaseSync, runTurnFn: RunTurnFn = runTurn) 
     const text = p.event
       ? formatTriggerEvent(p.title, p.prompt, p.event)
       : routineOpening(p.title, p.prompt)
+    // fase 17c (C2, MU): l'apertura della routine in chat si mostra tradotta;
+    // il testo che legge il modello resta quello di sopra (inglese). Per i
+    // turni da trigger l'apertura porta l'evento estero: la mostra resta il
+    // testo grezzo (è un blocco evidenza, dato)
+    const { ui, UI } = await import('../main/ui-language')
     await runTurnFn(job.agent_id, text, emit, undefined, {
       source: 'routine', title: p.title, ...opts, onTurnEntry,
-      ...(p.event ? { externalEvent: true } : {})
+      ...(p.event ? { externalEvent: true } : {}),
+      ...(p.event ? {} : { extraMeta: { ui: ui(UI.openRoutine, { title: p.title, prompt: p.prompt }) } })
     })
   }
 }

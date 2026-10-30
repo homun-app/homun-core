@@ -4,6 +4,7 @@
 import { describe, expect, it } from 'vitest'
 import { validateTemplate, loadTemplates, templateById, buildKickstartMessage, kickstartInstructions } from '../index'
 import inboxManager from '../inbox-manager.json'
+import { pickLang } from '../../../shared/localized'
 
 /** Un template valido minimalissimo, da rompere in modi mirati. */
 function validTemplate(): Record<string, unknown> {
@@ -104,14 +105,22 @@ describe('il catalogo dei 6 template', () => {
     expect(new Set(all.map((t) => t.id)).size).toBe(6)
   })
 
-  it('ogni routine del catalogo segue la struttura del prompt (pausa, memoria, anti-invenzione, consegna, ledger, trigger)', () => {
+  it('ogni routine del catalogo segue la struttura del prompt (pausa, memoria, anti-invenzione, consegna, ledger, trigger) in ENTRAMBE le lingue', () => {
+    // fase 17c (C5): i campi sono Localized — la struttura si verifica su it e en
     for (const t of loadTemplates()) {
       for (const r of t.routines) {
-        expect(r.content).toContain('PAUSA')
-        expect(r.content.toLowerCase()).toContain('memoria')
-        expect(r.content).toContain('anti-invenzione')
-        expect(r.content.toLowerCase()).toContain('silenzio')
-        expect(r.content.toLowerCase()).toContain('ledger')
+        for (const lang of ['it', 'en'] as const) {
+          const content = pickLang(r.content, lang)
+          const paused = lang === 'it' ? 'PAUSA' : 'PAUSED'
+          const anti = lang === 'it' ? 'anti-invenzione' : 'Anti-invention'
+          const memory = lang === 'it' ? 'memoria' : 'memory'
+          const silence = lang === 'it' ? 'silenzio' : 'silent'
+          expect(content, `${t.id}/${r.slug}/${lang}`).toContain(paused)
+          expect(content.toLowerCase(), `${t.id}/${r.slug}/${lang}`).toContain(memory)
+          expect(content, `${t.id}/${r.slug}/${lang}`).toContain(anti)
+          expect(content.toLowerCase(), `${t.id}/${r.slug}/${lang}`).toContain(silence)
+          expect(content.toLowerCase(), `${t.id}/${r.slug}/${lang}`).toContain('ledger')
+        }
         expect(r.trigger.type).toBe('schedule')
         expect(r.askUserFor.length).toBeGreaterThan(0)
       }
@@ -142,8 +151,8 @@ describe('il catalogo dei 6 template', () => {
 })
 
 describe('buildKickstartMessage', () => {
-  it('contiene il JSON del template nel blocco context e le istruzioni numerate', () => {
-    const msg = buildKickstartMessage(inboxManager as never)
+  it('contiene il JSON del template nel blocco context e le istruzioni numerate (nella lingua richiesta, C4)', () => {
+    const msg = buildKickstartMessage(inboxManager as never, 'it')
     expect(msg).toContain('<bot_template_setup_context>')
     expect(msg).toContain('</bot_template_setup_context>')
     expect(msg).toContain('"routines"')
@@ -152,10 +161,17 @@ describe('buildKickstartMessage', () => {
     expect(msg).toContain('</bot_template_setup_instructions>')
     expect(msg).toMatch(/1\. Presentati/)
     expect(msg).toMatch(/10\. /)
+    // fase 17c (C4): in inglese il saluto e la prima istruzione cambiano lingua,
+    // i tag restano; il nome del template è quello della lingua richiesta
+    const en = buildKickstartMessage(inboxManager as never, 'en')
+    expect(en).toMatch(/1\. Introduce yourself/)
+    expect(en).toContain('<bot_template_setup_context>')
+    expect(en).toContain('Inbox manager')
+    expect(msg).toContain('Gestore della posta in arrivo')
   })
 
   it('le istruzioni adattate ai nostri tool: update_state in pausa provenance template, resume dalla card, search_connectors/offer_connector, memorie log/agent', () => {
-    const all = kickstartInstructions().join('\n')
+    const all = kickstartInstructions('it').join('\n')
     expect(all).toContain('provenance "template"')
     expect(all).toContain('pausa')
     expect(all).toContain('"resume"')

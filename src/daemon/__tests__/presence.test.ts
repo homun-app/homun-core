@@ -5,9 +5,16 @@
 // pausedForAway, provenance invariata) e riattivazione SOLO di quelle.
 // Dipendenze registrate (nessun db vero): si verifica cosa fa il rientro.
 import { describe, expect, it, beforeEach } from 'vitest'
-import { createPresence, LOOKAROUND_OPENING, isLongReturn, lookaroundAllowed, isAwayForDays, mainAgentOf, DEFAULT_MIN_AWAY_HOURS } from '../presence'
+import { createPresence, isLongReturn, lookaroundAllowed, isAwayForDays, mainAgentOf, DEFAULT_MIN_AWAY_HOURS } from '../presence'
+// fase 17c (C4): il testo fisso del check-in vive nel catalogo UI
+import { formatUi, ui } from '../../shared/ui-text'
+import { UI } from '../../shared/ui-messages'
+const LOOKAROUND_OPENING = formatUi(ui(UI.lookaroundOpening), 'it')
 import type { Routine } from '../../main/store/db'
 import type { Agent, SendMessagePayload, WidgetOption } from '../../shared/types'
+// fase 17c: la lingua dell'interfaccia dei test è l'italiano (i testi erano italiani prima)
+import { setSetting } from '../../main/store/db'
+setSetting('ui.activeLanguage', 'it')
 
 /** Registro di tutto ciò che la presenza fa (per le asserzioni). */
 interface Log {
@@ -160,7 +167,7 @@ describe('rientro dopo l\'assenza lunga (look-around)', () => {
     if (widget.message.type === 'widget') {
       expect(widget.message.prompt).toContain('Ho messo in pausa le tue routine')
       const labels = widget.message.options.map((o: WidgetOption) => o.label)
-      expect(labels).toEqual(['Riattiva tutte', 'Lasciale in pausa'])
+      expect(labels).toEqual([formatUi(ui(UI.presenceResumeAll), 'it'), formatUi(ui(UI.presenceKeepPaused), 'it')])
     }
     expect(widget.meta).toMatchObject({ awayResume: true })
   })

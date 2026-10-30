@@ -2,8 +2,12 @@
 // fa parte di `npx vitest run` (i file *.eval.ts non matchano il glob dei
 // test normali). Il comando è `npm run eval -- --model kimi-k3:cloud --runs 3`.
 import { defineConfig } from 'vitest/config'
+import babel from '@rolldown/plugin-babel'
 
 export default defineConfig({
+  // fase 17c (C1): l'eval importa loop.ts e behaviors.eval.ts, che ora usano
+  // la macro msg — stessa compilazione babel della suite normale
+  plugins: [babel({ plugins: ['@lingui/babel-plugin-lingui-macro'], include: ['src/renderer/**/*.ts', 'src/renderer/**/*.tsx', 'src/shared/**/*.ts', 'src/main/**/*.ts', 'src/daemon/**/*.ts', 'eval/**/*.ts'] })],
   test: {
     include: ['eval/**/*.eval.ts'],
     // fase 10 (residuo 0a): silent:false — vitest 5 nasconde i console.log dei

@@ -25,7 +25,7 @@ import { toolDefs, executeTool } from './tools'
 import * as permissions from './permissions'
 import { getProvider } from './providers'
 import { buildMessages, visibleReplyEntries } from './history'
-import { planResume, INTERRUPTED_TOOL_RESULT, RESUME_NOTICE } from './resume'
+import { planResume, INTERRUPTED_TOOL_RESULT } from './resume'
 import { isExternalSend, draftFromExternalCall, prepareDraft, DEFAULT_EXTERNAL_SEND_TOOLS, type ExternalSendConfig } from './external-send'
 import { normalizeOptions, findDismissibleWidgets } from './widgets'
 import { buildMemorySection } from './memory'
@@ -79,6 +79,61 @@ import { formatSubagentBrief } from '../../shared/agent-message'
 // fase 17b (A3): la lingua dell'utente, globale e persistente — la sezione
 // Language va in FONDO al system prompt di OGNI variante
 import { currentUserLanguage } from './user-language'
+// fase 17c (C2): i testi U del loop — id stabili nel catalogo UI; le entry
+// salvate portano meta.ui (id+valori) e il content nella lingua dell'interfaccia.
+// Il formattatore viene dalle foglie shared e la lingua si legge dallo store
+// qui (getSetting è già importato): così il loop NON dipende da ui-language
+// e il grafo dei mock dei test resta quello di prima.
+import { formatUi, ui } from '../../shared/ui-text'
+import { UI, type UiMessage } from '../../shared/ui-messages'
+import type { UiText } from '../../shared/types'
+import type { UiLanguage } from '../../shared/ui-language'
+
+/** La lingua attiva dell'interfaccia per i testi del loop (ui.activeLanguage, ripiego 'en'). */
+function loopUiLanguage(): UiLanguage {
+  const v = getSetting<unknown>('ui.activeLanguage', null)
+  return v === 'it' || v === 'en' ? v : 'en'
+}
+
+/**
+ * Fase 17c (C2): entry di sistema col testo del catalogo UI — content scritto
+ * con formatUi(…, uiLanguage()) (anteprima della sidebar, ricerca, client
+ * vecchi) e meta.ui per chi la mostra ritradotta nella lingua corrente.
+ */
+function uiSystemEntry(agentId: string, kind: 'notice' | 'event', text: UiText, extra: Record<string, unknown> = {}): AppendEntry {
+  return { agentId, kind, role: 'system', content: formatUi(text, loopUiLanguage()), meta: { ui: text, ...extra } }
+}
+
+/**
+ * Fase 17c (C2): i valori del motivo dell'ask del browser per l'id
+ * card.browserAsk (select su reasonKind): il codice del motivo e le parti
+ * variabili (ref, campo, nome, ruolo dell'elemento).
+ */
+function riskAskValues(ask: import('./browser-guard').BrowserAskInfo): Record<string, string> {
+  const vals: Record<string, string> = { reasonKind: ask.kind }
+  if (ask.ref !== undefined) vals.ref = ask.ref
+  if (ask.field !== undefined) vals.field = ask.field
+  if (ask.name !== undefined) vals.name = ask.name
+  if (ask.role !== undefined) vals.role = ask.role
+  return vals
+}
+
+/**
+ * Fase 17c (C2): l'UiText del verdetto ask (singolo o lista di motivi, per
+ * run-command) da salvare in meta.ui; null se il verdetto non ne ha.
+ */
+function verdictUiOf(verdict: import('./permissions').Verdict): UiText | UiText[] | null {
+  if (verdict.kind !== 'ask') return null
+  if (verdict.uis?.length) return verdict.uis.length === 1 ? verdict.uis[0]! : verdict.uis
+  return verdict.ui ?? null
+}
+
+/** Il testo del motivo per il content/preview: la lingua dell'interfaccia quando c'è l'UiText, il reason (modello) altrimenti. */
+function verdictReasonText(verdict: import('./permissions').Verdict): string {
+  if (verdict.kind !== 'ask') return ''
+  if (verdict.uis?.length) return verdict.uis.map((u) => formatUi(u, loopUiLanguage())).join('; ')
+  return verdict.ui ? formatUi(verdict.ui, loopUiLanguage()) : verdict.reason
+}
 
 // §5.3: buildMessages vive in history.ts (modulo puro, testabile senza Electron)
 export { buildMessages } from './history'
@@ -137,12 +192,12 @@ export function isRunning(agentId: string): boolean {
   return running.has(agentId)
 }
 
-/** Etichette umane degli esiti di turno (la UI mostra gli event solo col toggle ragionamento). */
-const TURN_END_LABELS: Record<TurnEnd, string> = {
-  FINISHED: 'Turno completato',
-  STOPPED: 'Turno interrotto',
-  SUPERSEDED: 'Turno sostituito da un nuovo messaggio',
-  AWAITING_USER: 'In attesa della risposta dell’utente'
+/** Etichette umane degli esiti di turno (la UI mostra gli event solo col toggle ragionamento). Fase 17c: id del catalogo UI. */
+const TURN_END_LABELS: Record<TurnEnd, UiMessage> = {
+  FINISHED: UI.turnEndFinished,
+  STOPPED: UI.turnEndStopped,
+  SUPERSEDED: UI.turnEndSuperseded,
+  AWAITING_USER: UI.turnEndAwaitingUser
 }
 
 /**
@@ -159,8 +214,9 @@ function endTurn(
   stopReason?: 'loop' | 'interrupt' | 'model-error' | 'rate-limit'
 ): void {
   appendEntry({
-    agentId, kind: 'event', role: 'system', content: TURN_END_LABELS[outcome],
+    ...uiSystemEntry(agentId, 'event', ui(TURN_END_LABELS[outcome])),
     meta: {
+      ui: ui(TURN_END_LABELS[outcome]),
       turnEnd: outcome,
       ...(taskId !== undefined ? { taskId } : {}),
       ...(outcome === 'STOPPED' && stopReason ? { stopReason } : {})
@@ -184,23 +240,32 @@ function appendSend(
   extra: Record<string, unknown> = {},
   taskId?: number
 ): import('../../shared/types').TranscriptEntry {
+  // fase 17c (C2): i titoli fissi delle card diventano id del catalogo UI —
+  // meta.ui sulla entry, content nella lingua dell'interfaccia
+  const cardUi: UiText | null =
+    message.type === 'mcp-server' ? ui(UI.cardMcpServer, { name: message.name })
+    : message.type === 'plugin' ? ui(UI.cardPlugin, { name: message.name })
+    : message.type === 'fill' ? ui(UI.cardFill, { label: message.label, origin: message.origin })
+    : message.type === 'secure-input' ? ui(UI.cardSecureInput, { reason: message.reason })
+    : message.type === 'contact' ? ui(UI.cardContact, { name: message.name })
+    : null
   const content = message.type === 'text' ? message.text
     : message.type === 'widget' ? message.prompt
     : message.type === 'connector' ? (message.reason || message.name)
     : message.type === 'task' ? message.title
     : message.type === 'subagent' ? message.title
     : message.type === 'rule' ? message.text
-    : message.type === 'mcp-server' ? `Aggiungi server MCP: ${message.name}`
-    : message.type === 'plugin' ? `Installa plugin: ${message.name}`
     : message.type === 'document' ? message.title
     : message.type === 'chart' ? message.title
-    : message.type === 'fill' ? `Compila il login «${message.label}» su ${message.origin}`
-    : message.type === 'secure-input' ? `Modulo sicuro: ${message.reason}`
-    : message.type === 'contact' ? `Salva il contatto «${message.name}»`
-    : (message.subject || message.to || '')
+    : cardUi ? formatUi(cardUi, loopUiLanguage())
+    : 'subject' in message ? (message.subject || message.to || '') : ''
   const entry = appendEntry({
     agentId, kind: 'send-message', role: 'assistant', content,
-    meta: { call: { id: call.id, name: call.name, arguments: call.arguments }, message, ...extra, ...(taskId !== undefined ? { taskId } : {}) }
+    meta: {
+      call: { id: call.id, name: call.name, arguments: call.arguments }, message,
+      ...(cardUi ? { ui: cardUi } : {}),
+      ...extra, ...(taskId !== undefined ? { taskId } : {})
+    }
   })
   emit({ type: 'entries', agentId, entries: [entry] })
   return entry
@@ -508,10 +573,10 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
   // agente; qui la guardia resta come rete di sicurezza: il turno in eccesso
   // viene scartato con notice, non accodato né sovrascritto.
   if (running.has(agentId)) {
-    const content = source === 'routine'
-      ? `Routine "${opts.title ?? userText.slice(0, 40)}" saltata: l'agente è occupato.`
-      : 'Agente occupato: messaggio scartato (la coda vive nella tabella jobs del daemon).'
-    appendEntry({ agentId, kind: 'notice', role: 'system', content })
+    const notice = source === 'routine'
+      ? ui(UI.routineSkipped, { title: opts.title ?? userText.slice(0, 40) })
+      : ui(UI.agentBusyDiscard)
+    appendEntry(uiSystemEntry(agentId, 'notice', notice))
     emitLastEntry(agentId, emit)
     return
   }
@@ -525,12 +590,10 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     const onboardingWaiting =
       listProviders().some((p) => p.enabled) &&
       getEntries(agentId).some((e) => e.kind === 'send-message' && e.meta?.onboardingRole && e.meta?.respondedValue === undefined)
-    appendEntry({
-      agentId, kind: 'notice', role: 'system',
-      content: onboardingWaiting
-        ? "C'è già un provider attivo: per farmi partire scegli il ruolo nel messaggio qui sopra (con la risposta preparo i tuoi bot)."
-        : "Configura prima un provider e un modello nelle impostazioni dell'agente."
-    })
+    appendEntry(uiSystemEntry(
+      agentId, 'notice',
+      onboardingWaiting ? ui(UI.onboardingWaitingProvider) : ui(UI.configureProviderFirst)
+    ))
     emitLastEntry(agentId, emit)
     return
   }
@@ -749,7 +812,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     if (opts.taskId !== undefined) {
       const t = getTask(opts.taskId)
       if (!t || t.status === 'cancelled') {
-        appendEntry({ agentId, kind: 'notice', role: 'system', content: `Task ${opts.taskId} annullato: esecuzione saltata.` })
+        appendEntry(uiSystemEntry(agentId, 'notice', ui(UI.taskCancelled, { id: opts.taskId })))
         emitLastEntry(agentId, emit)
         return
       }
@@ -793,7 +856,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         })
         emit({ type: 'entries', agentId, entries: [res] })
       }
-      add({ agentId, kind: 'notice', role: 'system', content: RESUME_NOTICE })
+      add({ ...uiSystemEntry(agentId, 'notice', ui(UI.resume)) })
       emitLastEntry(agentId, emit)
     } else {
       const entry = add({
@@ -1041,16 +1104,13 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           fallbackUsed = true
           activeModel = fallbackModel!
           const why = err instanceof Error ? err.message : String(err)
-          add({
-            agentId, kind: 'notice', role: 'system',
-            content: `Il modello principale ${agent.model} non risponde (${why}): uso la riserva ${activeModel}.`
-          })
+          add({ ...uiSystemEntry(agentId, 'notice', ui(UI.modelFallback, { model: agent.model, why, fallback: activeModel })) })
           emitLastEntry(agentId, emit)
           continue
         }
         if (err instanceof StreamDeadlineError) {
           // fase 8 (§3bis L11): il modello non risponde — abort del solo stream
-          add({ agentId, kind: 'notice', role: 'system', content: `Il modello non risponde (${err.message}): turno interrotto.` })
+          add({ ...uiSystemEntry(agentId, 'notice', ui(UI.modelNotResponding, { why: err.message })) })
           emitLastEntry(agentId, emit)
           // fase 12 (punto 3): il figlio che non risponde chiude failed col motivo
           failSubagent(`il modello non ha risposto (${err.message})`)
@@ -1059,7 +1119,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           return
         }
         const msg = err instanceof Error ? err.message : String(err)
-        add({ agentId, kind: 'notice', role: 'system', content: `Errore dal modello: ${msg}` })
+        add({ ...uiSystemEntry(agentId, 'notice', ui(UI.modelError, { message: msg })) })
         emitLastEntry(agentId, emit)
         // fase 12 (punto 3): errore del modello → il figlio chiude failed col motivo
         if (!controller.signal.aborted) failSubagent(`errore del modello: ${msg}`)
@@ -1100,7 +1160,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           })
           continue
         }
-        add({ agentId, kind: 'notice', role: 'system', content: 'Il modello non ha prodotto risposta (vuota).' })
+        add({ ...uiSystemEntry(agentId, 'notice', ui(UI.modelEmpty)) })
         emitLastEntry(agentId, emit)
         // fase 12 (punto 3): flash a volte risponde vuoto — la chiusura del
         // figlio non dipende dal modello: sollecito e chiusura automatica
@@ -1159,7 +1219,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         // (nome + argomenti) per la TERZA volta di fila ferma il turno con una
         // notice leggibile, invece di consumare tutti i MAX_STEPS
         if (isToolLoop(executedCalls, { name: call.name, args: call.arguments })) {
-          add({ agentId, kind: 'notice', role: 'system', content: 'Turno interrotto: la stessa identica chiamata si ripete (loop).' })
+          add({ ...uiSystemEntry(agentId, 'notice', ui(UI.toolLoop)) })
           emitLastEntry(agentId, emit)
           // fase 12 (punto 3): il figlio inceppato chiude failed col motivo
           failSubagent(`il modello ripeteva la stessa identica chiamata (${call.name})`)
@@ -1190,7 +1250,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         // invio esterno chiamato direttamente: MAI eseguito, diventa una bozza
         if (isExternalSend(call.name, externalCfg)) {
           const draft = appendSend(agentId, call, draftFromExternalCall(call.name, input), emit, { status: 'pending' }, opts.taskId)
-          emitNeedsInput(agentId, draft, `bozza in attesa: ${draft.content.slice(0, 80)}`, emit)
+          emitNeedsInput(agentId, draft, formatUi(ui(UI.draftAwaiting, { preview: draft.content.slice(0, 80) }), loopUiLanguage()), emit)
           taskNeedsInput()
           messages.push({
             role: 'tool', toolCallId: call.id,
@@ -1245,7 +1305,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
                 // blocked nega comunque l'invio)
                 const verdict = await permissions.check(via.tool, via.args, agentId)
                 if (verdict.kind === 'deny') {
-                  autoSend = { ok: false, error: 'invio bloccato dai permessi' }
+                  autoSend = { ok: false, error: 'send blocked by permissions' }
                 } else {
                   autoApprovals++
                   try {
@@ -1256,7 +1316,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
                     })
                     const updated = getEntries(agentId).find((e) => e.id === draft.id)
                     if (updated) emit({ type: 'entries', agentId, entries: [updated] })
-                    add({ agentId, kind: 'notice', role: 'system', content: `Bozza inviata automaticamente (${via.tool}). Esito: ${output.slice(0, 300)}` })
+                    add({ ...uiSystemEntry(agentId, 'notice', ui(UI.draftAutoSent, { tool: via.tool, output: output.slice(0, 300) })) })
                     emitLastEntry(agentId, emit)
                     autoSend = { ok: true, ruleMatched: decision.ruleMatched }
                   } catch (e) {
@@ -1272,7 +1332,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           }
           if (!autoSend?.ok) {
             // niente invio automatico (o fallito): la bozza aspetta l'utente
-            emitNeedsInput(agentId, draft, `bozza in attesa: ${draft.content.slice(0, 80)}`, emit)
+            emitNeedsInput(agentId, draft, formatUi(ui(UI.draftAwaiting, { preview: draft.content.slice(0, 80) }), loopUiLanguage()), emit)
             taskNeedsInput()
           }
           messages.push({
@@ -1419,22 +1479,33 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             if (!autoAllowed) {
               // la card mostra URL corrente, elemento (ruolo e nome dallo
               // snapshot) e testo da scrivere. Fase 12 (0d): press_key dice il
-              // TASTO, non "su ref ?" (il tasto non ha ref)
-              const url = browser.lastUrlOf(agentId) ?? '(nessuna pagina aperta)'
+              // TASTO, non "su ref ?" (il tasto non ha ref).
+              // Fase 17c (C2): la card è UN id del catalogo UI (select su
+              // bersaglio e motivo), content nella lingua dell'interfaccia
+              const url = browser.lastUrlOf(agentId) ?? formatUi(ui(UI.cardNoPageOpen), loopUiLanguage())
               const info = browser.refInfoOf(agentId, String(input.ref ?? ''))
               // il nome accessibile, o il testo in linea quando manca (generic)
               const elem = info ? `${info.role} "${info.name || info.text}"` : `ref ${String(input.ref ?? '?')}`
-              const target = call.name === 'browser_press_key' ? `tasto ${String(input.key ?? '?')}` : `su ${elem}`
-              const testo = call.name === 'browser_type' ? ` — testo: "${String(input.text ?? '').slice(0, 80)}"` : ''
+              const askUi = ui(UI.cardBrowserAsk, {
+                tool: call.name,
+                target: call.name === 'browser_press_key' ? 'key' : 'element',
+                ...(call.name === 'browser_press_key'
+                  ? { key: String(input.key ?? '?') }
+                  : { element: elem }),
+                url,
+                typed: call.name === 'browser_type' ? 'yes' : 'no',
+                ...(call.name === 'browser_type' ? { text: String(input.text ?? '').slice(0, 80) } : {}),
+                ...(risk.ask ? riskAskValues(risk.ask) : { reasonKind: 'other', reason: risk.reason })
+              })
               const approval: Approval = {
                 id: randomUUID(), agentId, tool: call.name, input, status: 'pending', createdAt: Date.now()
               }
               run.approvals.set(approval.id, () => undefined)
               const approvalEntry = add({
                 agentId, kind: 'approval', role: 'system',
-                content: `${call.name} ${target} in ${url}${testo}: ${risk.reason}`,
+                content: formatUi(askUi, loopUiLanguage()),
                 meta: {
-                  approvalId: approval.id, tool: call.name, input, status: 'pending',
+                  approvalId: approval.id, tool: call.name, input, status: 'pending', ui: askUi,
                   browser: {
                     url,
                     ...(info ? { element: info } : {}),
@@ -1446,7 +1517,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               setStatus(agentId, 'paused-for-approval', emit)
               emit({ type: 'entries', agentId, entries: [approvalEntry] })
               emit({ type: 'approval', agentId, approval })
-              emitNeedsInput(agentId, approvalEntry, `${call.name}: ${risk.reason}`, emit)
+              emitNeedsInput(agentId, approvalEntry, formatUi(askUi, loopUiLanguage()).slice(0, 80), emit)
               taskNeedsInput()
               const decision = await new Promise<'allow' | 'deny' | 'timeout' | 'superseded' | 'cancelled'>((resolve) => {
                 run.approvals.set(approval.id, (d) => resolve(d))
@@ -1523,11 +1594,16 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             id: randomUUID(), agentId, tool: call.name, input, status: 'pending', createdAt: Date.now()
           }
           run.approvals.set(approval.id, () => undefined)
+          const exchangeUi = ui(UI.cardFileExchange, {
+            tool: call.name,
+            direction: pre.plan.direction === 'to_box' ? 'toBox' : 'fromBox',
+            macPath: pre.plan.macPath, boxPath: pre.plan.boxPath, size: pre.plan.size
+          })
           const approvalEntry = add({
             agentId, kind: 'approval', role: 'system',
-            content: `${call.name}: ${arrow} (${pre.plan.size} byte)`,
+            content: formatUi(exchangeUi, loopUiLanguage()),
             meta: {
-              approvalId: approval.id, tool: call.name, input, status: 'pending',
+              approvalId: approval.id, tool: call.name, input, status: 'pending', ui: exchangeUi,
               fileExchange: { direction: pre.plan.direction, macPath: pre.plan.macPath, boxPath: pre.plan.boxPath, size: pre.plan.size },
               keys: [arrow]
             }
@@ -1535,7 +1611,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           setStatus(agentId, 'paused-for-approval', emit)
           emit({ type: 'entries', agentId, entries: [approvalEntry] })
           emit({ type: 'approval', agentId, approval })
-          emitNeedsInput(agentId, approvalEntry, `${call.name}: ${arrow}`, emit)
+          emitNeedsInput(agentId, approvalEntry, formatUi(exchangeUi, loopUiLanguage()).slice(0, 80), emit)
           taskNeedsInput()
           const decision = await new Promise<'allow' | 'deny' | 'timeout' | 'superseded' | 'cancelled'>((resolve) => {
             run.approvals.set(approval.id, (d) => resolve(d))
@@ -1702,8 +1778,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           }
           const plan = pre.value
           const approval: Approval = { id: randomUUID(), agentId, tool: call.name, input, status: 'pending', createdAt: Date.now() }
-          const decision = await awaitCard(approval, 'approval', `export_from_library: «${plan.name}» (${plan.format}) → ${plan.destination}`, {
-            tool: call.name, input, libraryExport: plan, keys: [`export ${plan.name}`]
+          const exportUi = ui(UI.cardExportLibrary, { name: plan.name, format: plan.format, destination: plan.destination })
+          const decision = await awaitCard(approval, 'approval', formatUi(exportUi, loopUiLanguage()), {
+            tool: call.name, input, libraryExport: plan, keys: [`export ${plan.name}`], ui: exportUi
           })
           if (decision !== 'allow') {
             const msg = decision === 'deny' ? 'Export cancelled by the user.' : 'Approval expired or interrupted: export not executed.'
@@ -1756,9 +1833,10 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             hasTurnAllow: (loginId, origin) => run.turnAllows.has(`fill_credential|${loginId}|${origin}`),
             requestApproval: async (login, origin, fields) => {
               const approval: Approval = { id: randomUUID(), agentId, tool: call.name, input: { ...input, origin }, status: 'pending', createdAt: Date.now() }
-              const decision = await awaitCard(approval, 'send-message', `Compilo il login «${login.label}» su ${origin}?`, {
+              const fillUi = ui(UI.cardFillAsk, { label: login.label, origin })
+              const decision = await awaitCard(approval, 'send-message', formatUi(fillUi, loopUiLanguage()), {
                 message: { type: 'fill', id: login.id, label: login.label, origin, fields },
-                tool: call.name, input: { ...input, origin }, fill: { loginId: login.id, origin }
+                tool: call.name, input: { ...input, origin }, fill: { loginId: login.id, origin }, ui: fillUi
               })
               if (decision === 'allow') return 'allow-turn' // 'always' lo registra resolveApproval
               if (decision === 'deny') return 'deny'
@@ -1804,14 +1882,17 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           // chiedere un login con l'origine GIA' precompilata — come save_contact,
           // una richiesta nata in un turno contaminato porta untrusted e la UI
           // dice all'utente di controllare che l'origine sia davvero quella del sito
-          const decision = await awaitCard(approval, 'send-message', `Modulo sicuro (${kind === 'login' ? `login «${label}»` : `secret ${name}`}): ${reason}`, {
+          const secureUi = kind === 'login'
+            ? ui(UI.cardSecureInputAskLogin, { label, reason })
+            : ui(UI.cardSecureInputAskSecret, { name, reason })
+          const decision = await awaitCard(approval, 'send-message', formatUi(secureUi, loopUiLanguage()), {
             message: {
               type: 'secure-input', kind,
               ...(kind === 'login' ? { label, ...(origin ? { origin } : {}) } : { name }),
               reason,
               ...(contaminated ? { untrusted: true as const } : {})
             },
-            tool: call.name, input, secureInput: true
+            tool: call.name, input, secureInput: true, ui: secureUi
           })
           if (decision !== 'allow') {
             pushResult('cancelled by the user')
@@ -1855,9 +1936,10 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           const approval: Approval = { id: randomUUID(), agentId, tool: call.name, input, status: 'pending', createdAt: Date.now() }
           // proposta nata in un turno contaminato: la card avvisa che i dati
           // arrivano da una fonte esterna
-          const decision = await awaitCard(approval, 'send-message', `Salvo il contatto «${name}» nel vault?`, {
+          const contactUi = ui(UI.cardContactAsk, { name })
+          const decision = await awaitCard(approval, 'send-message', formatUi(contactUi, loopUiLanguage()), {
             message: { type: 'contact', ...contact, ...(contaminated ? { untrusted: true as const } : {}) },
-            tool: call.name, input, contactProposal: contact
+            tool: call.name, input, contactProposal: contact, ui: contactUi
           })
           if (decision !== 'allow') {
             pushResult('Contact not saved: cancelled by the user.')
@@ -2106,18 +2188,19 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               id: randomUUID(), agentId, tool: call.name, input, status: 'pending', createdAt: Date.now()
             }
             run.approvals.set(approval.id, () => undefined)
+            const delegationUi = ui(UI.cardUntrustedDelegation, { name: dest.name })
             const approvalEntry = add({
               agentId, kind: 'approval', role: 'system',
-              content: `send_to_agent → ${dest.name}: il turno ha letto contenuti web non fidati`,
+              content: formatUi(delegationUi, loopUiLanguage()),
               meta: {
-                approvalId: approval.id, tool: call.name, input, status: 'pending',
+                approvalId: approval.id, tool: call.name, input, status: 'pending', ui: delegationUi,
                 contaminated: true, keys: [`delega a ${dest.name}`]
               }
             })
             setStatus(agentId, 'paused-for-approval', emit)
             emit({ type: 'entries', agentId, entries: [approvalEntry] })
             emit({ type: 'approval', agentId, approval })
-            emitNeedsInput(agentId, approvalEntry, `send_to_agent → ${dest.name}: contenuto web non fidato nel turno`, emit)
+            emitNeedsInput(agentId, approvalEntry, formatUi(ui(UI.cardUntrustedDelegationPreview, { name: dest.name }), loopUiLanguage()), emit)
             taskNeedsInput()
             const decision = await new Promise<'allow' | 'deny' | 'timeout' | 'superseded' | 'cancelled'>((resolve) => {
               run.approvals.set(approval.id, (d) => resolve(d))
@@ -2294,7 +2377,11 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         const ownGroup = call.name === 'update_group' ? getGroup(Number(input.groupId)) : null
         let verdict: import('./permissions').Verdict
         if (forcedOriginAsk) {
-          verdict = { kind: 'ask', reason: `${call.name}: the turn is not the user's — creating bots or groups requires their approval` }
+          verdict = {
+            kind: 'ask',
+            reason: `${call.name}: the turn is not the user's — creating bots or groups requires their approval`,
+            ui: ui(UI.approvalForcedOrigin)
+          }
         } else if (ownTarget && ownTarget.createdBy === agentId) {
           verdict = { kind: 'allow', via: 'rule' }
         } else if (ownGroup && ownGroup.created_by === agentId) {
@@ -2310,8 +2397,8 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
 
         if (verdict.kind === 'deny') {
           const denied = add({
-            agentId, kind: 'notice', role: 'system',
-            content: `Bloccato dai permessi: ${call.name}`, meta: { callId: call.id, denied: true }
+            ...uiSystemEntry(agentId, 'notice', ui(UI.deniedByPermissions, { tool: call.name })),
+            meta: { ui: ui(UI.deniedByPermissions, { tool: call.name }), callId: call.id, denied: true }
           })
           emit({ type: 'entries', agentId, entries: [denied] })
           messages.push({ role: 'tool', toolCallId: call.id, content: 'Command blocked by permissions configuration' })
@@ -2356,11 +2443,13 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           if (autoAllowed) {
             // tracciabilità: entry approval chiusa, la UI la mostra compressa
             // come "Approvato automaticamente dalla regola: …" ed espandibile
+            const reasonText = verdictReasonText(verdict)
             const approvalEntry = add({
               agentId, kind: 'approval', role: 'system',
-              content: `${call.name}: ${verdict.reason}`,
+              content: `${call.name}: ${reasonText}`,
               meta: {
                 tool: call.name, input, status: 'allowed', keys: verdict.keys,
+                ...(verdictUiOf(verdict) ? { ui: verdictUiOf(verdict)! } : {}),
                 autoApproved: true, ruleMatched: autoAllowed.ruleMatched,
                 ...(autoAllowed.reason ? { reason: autoAllowed.reason } : {}),
                 ...(verdict.secretRefs?.length ? { secretRefs: verdict.secretRefs } : {})
@@ -2374,12 +2463,15 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               id: randomUUID(), agentId, tool: call.name, input, status: 'pending', createdAt: Date.now()
             }
             run.approvals.set(approval.id, () => undefined)
+            const reasonText = verdictReasonText(verdict)
             const approvalEntry = add({
               agentId, kind: 'approval', role: 'system',
-              content: `${call.name}: ${verdict.reason}`,
-              // C4: la card mostra i nomi dei segreti usati dal comando
+              content: `${call.name}: ${reasonText}`,
+              // C4: la card mostra i nomi dei segreti usati dal comando.
+              // Fase 17c (C2): meta.ui (id+valori) per la lingua dell'interfaccia
               meta: {
                 approvalId: approval.id, tool: call.name, input, status: 'pending', keys: verdict.keys,
+                ...(verdictUiOf(verdict) ? { ui: verdictUiOf(verdict)! } : {}),
                 ...(verdict.secretRefs?.length ? { secretRefs: verdict.secretRefs } : {}),
                 ...(neverAutoCmd ? { neverAuto: true } : {})
               }
@@ -2388,7 +2480,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             emit({ type: 'entries', agentId, entries: [approvalEntry] })
             emit({ type: 'approval', agentId, approval })
             // fase 6 (§3bis L9): l'agente è fermo su un'approval → notifica
-            emitNeedsInput(agentId, approvalEntry, `${call.name}: ${verdict.reason}`, emit)
+            emitNeedsInput(agentId, approvalEntry, `${call.name}: ${reasonText}`, emit)
             // fase 8 (§3bis L7): un'approval dentro un task lo mette in needs_input
             taskNeedsInput()
 
@@ -2421,7 +2513,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               break
             }
             if (decision === 'timeout') {
-              add({ agentId, kind: 'notice', role: 'system', content: 'Approvazione scaduta.' })
+              add({ ...uiSystemEntry(agentId, 'notice', ui(UI.approvalExpired)) })
               emitLastEntry(agentId, emit)
             }
             if (decision !== 'allow') {
@@ -2528,10 +2620,11 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           // "automation-changed" in chat (meta.automation: azione, id, nome)
           if (meta.automation && typeof meta.automation === 'object') {
             const a = meta.automation as { action?: unknown; id?: unknown; name?: unknown }
+            const autoUi = automationEventText(String(a.action ?? ''), String(a.name ?? ''))
             add({
               agentId, kind: 'event', role: 'system',
-              content: automationEventText(String(a.action ?? ''), String(a.name ?? '')),
-              meta: { automation: a }
+              content: formatUi(autoUi, loopUiLanguage()),
+              meta: { automation: a, ui: autoUi }
             })
             emitLastEntry(agentId, emit)
           }
@@ -2573,7 +2666,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       const decision = subagentClosure({ wakeCalled: false, nudged: subagentNudged, freeText: lastFreeText, modelError: false })
       if (decision.kind === 'nudge') {
         subagentNudged = true
-        add({ agentId, kind: 'notice', role: 'system', content: 'Sollecito di consegna al padre (wake_parent).' })
+        add({ ...uiSystemEntry(agentId, 'notice', ui(UI.wakeNudge)) })
         emitLastEntry(agentId, emit)
         messages.push({ role: 'user', content: SUBAGENT_RECOVERY_NUDGE })
         setStatus(agentId, 'thinking', emit)
@@ -2630,7 +2723,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       // fase 12: nel figlio la notice non serve (la chiusura robusta ha già
       // scritto cosa è successo: sollecito o chiusura automatica)
       if (!opts.subagent) {
-        add({ agentId, kind: 'notice', role: 'system', content: 'Turno interrotto: limite di passi raggiunto.' })
+        add({ ...uiSystemEntry(agentId, 'notice', ui(UI.stepsLimit)) })
         emitLastEntry(agentId, emit)
       }
       endTurn(agentId, 'STOPPED', emit, opts.taskId, 'loop')

@@ -7,6 +7,9 @@
 // non passano mai dall'outbox (deciso nel loop), il look-around neppure
 // (turno user-message con initiator LOOK_AROUND).
 import { getSetting } from '../main/store/db'
+// fase 17c (C2): la riga «Mentre eri via:» è un id del catalogo UI
+import { uiLanguage, formatUi, ui } from '../main/ui-language'
+import { UI } from '../shared/ui-messages'
 import { allHeldOutbox, heldOutboxForAgent, releaseOutboxEntry, getEntries, updateEntryMeta, appendEntry, type OutboxRow } from '../main/store/db'
 import { tzParts, parseHm, localTimeZone } from './tz'
 import type { SandbotEvent, TranscriptEntry } from '../shared/types'
@@ -44,6 +47,13 @@ export function inDeliveryWindow(now: number, tz: string, cfg: DeliveryWindowCon
 
 type Emitter = (e: SandbotEvent) => void
 
+/** La riga «Mentre eri via:» (meta.ui per la lingua dell'interfaccia, fase 17c). */
+function awayNotice(agentId: string, emit: Emitter): void {
+  const text = ui(UI.awayLine)
+  const notice = appendEntry({ agentId, kind: 'notice', role: 'system', content: formatUi(text, uiLanguage()), meta: { ui: text } })
+  emit({ type: 'entries', agentId, entries: [notice] })
+}
+
 /** Rimuove meta.held da una entry e la riemette alla UI. */
 function deliverEntry(row: OutboxRow, emit: Emitter): TranscriptEntry | null {
   const entry = getEntries(row.agent_id).find((e) => e.id === row.entry_id)
@@ -65,10 +75,7 @@ function deliverEntry(row: OutboxRow, emit: Emitter): TranscriptEntry | null {
 export function deliverHeldForAgent(agentId: string, emit: Emitter, opts: { now: number; lastSeen: number }): TranscriptEntry[] {
   const rows = heldOutboxForAgent(agentId)
   if (!rows.length) return []
-  if (opts.now - opts.lastSeen > AWAY_NOTICE_MS) {
-    const notice = appendEntry({ agentId, kind: 'notice', role: 'system', content: 'Mentre eri via:' })
-    emit({ type: 'entries', agentId, entries: [notice] })
-  }
+  if (opts.now - opts.lastSeen > AWAY_NOTICE_MS) awayNotice(agentId, emit)
   const out: TranscriptEntry[] = []
   for (const row of rows) {
     const e = deliverEntry(row, emit)
@@ -89,10 +96,7 @@ export function deliverDueHeld(emit: Emitter, now: number, getLastSeen: () => nu
     byAgent.set(row.agent_id, list)
   }
   for (const [agentId, rows] of byAgent) {
-    if (now - getLastSeen() > AWAY_NOTICE_MS) {
-      const notice = appendEntry({ agentId, kind: 'notice', role: 'system', content: 'Mentre eri via:' })
-      emit({ type: 'entries', agentId, entries: [notice] })
-    }
+    if (now - getLastSeen() > AWAY_NOTICE_MS) awayNotice(agentId, emit)
     for (const row of rows) deliverEntry(row, emit)
   }
 }

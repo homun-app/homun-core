@@ -19,9 +19,14 @@ describe('fase 17a (L4): cataloghi completi', () => {
     expect(empty).toEqual([])
   })
 
-  it('il catalogo it (sorgente) ha msgstr vuoto o uguale al msgid', () => {
-    const bad = [...catIt.entries()].filter(([k, v]) => v !== '' && v !== k).map(([k]) => k)
-    expect(bad).toEqual([])
+  it('il catalogo it (sorgente): msgstr sempre pieno (id a hash = testo; id esplicito = traduzione italiana, fase 17c)', () => {
+    // con gli id espliciti della 17c (notice.*, card.*, …) il msgid è il codice
+    // e il msgstr della sorgente è il testo italiano: NON deve essere vuoto
+    const empty = [...catIt.entries()].filter(([, v]) => v === '').map(([k]) => k)
+    expect(empty).toEqual([])
+    // gli id a hash (testi del renderer) restano msgstr == msgid
+    const hashed = [...catIt.entries()].filter(([k, v]) => !k.includes('.') && v !== '' && v !== k).map(([k]) => k)
+    expect(hashed).toEqual([])
   })
 
   it('ogni segnaposto {…} del msgid è presente nel msgstr inglese', () => {

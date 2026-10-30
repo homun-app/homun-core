@@ -119,7 +119,11 @@ describe('browserActionRisk: la tabella IT ed EN (ask / deny / free) a parole in
     for (const key of ['Enter', 'NumpadEnter']) {
       const r = risk('browser_press_key', { key }, null, '')
       expect(r.kind, key).toBe('ask')
-      if (r.kind === 'ask') expect(r.reason).toContain('Invio può inviare il modulo')
+      // fase 17c (C2): reason inglese per il modello; ask.kind è il codice della card
+      if (r.kind === 'ask') {
+        expect(r.reason).toContain('Enter can submit the form')
+        expect(r.ask).toEqual({ kind: 'enter' })
+      }
     }
     expect(risk('browser_press_key', { key: 'Tab' }, null, '').kind).toBe('free')
     expect(risk('browser_press_key', { key: 'Escape' }, null, '').kind).toBe('free')
@@ -163,7 +167,11 @@ describe('browserActionRisk: la tabella IT ed EN (ask / deny / free) a parole in
   it('ref ben formato ma SCONOSCIUTO (non nell\'ultimo snapshot) → ASK, anche senza snapshot', () => {
     const r = risk('browser_click', { ref: 'e42' }, SNAP, 'e42')
     expect(r.kind).toBe('ask')
-    if (r.kind === 'ask') expect(r.reason).toContain('non presente nell\'ultimo snapshot')
+    if (r.kind === 'ask') {
+      // fase 17c (C2): reason inglese per il modello; ask = codice della card
+      expect(r.reason).toContain('not present in the last snapshot')
+      expect(r.ask).toEqual({ kind: 'refMissing', ref: 'e42' })
+    }
     expect(risk('browser_click', { ref: 'e8' }, null, 'e8').kind).toBe('ask')
     expect(risk('browser_type', { ref: 'x', text: 'a' }, null, 'x').kind).toBe('ask')
   })
@@ -387,7 +395,7 @@ describe('correzione J3, giro K1: applyFieldProbe — la verifica AGGIUNGE un de
   })
   it('K1: tabella risk {free, ask, deny} × credential {true, false, null} — vince il più restrittivo', () => {
     const free: BrowserActionRisk = { kind: 'free' }
-    const ask: BrowserActionRisk = { kind: 'ask', reason: 'browser_type con submit: true invia il modulo (campo "x")' }
+    const ask: BrowserActionRisk = { kind: 'ask', reason: 'browser_type with submit: true sends the form (field "x")', ask: { kind: 'submit', field: 'x' } }
     const deny: BrowserActionRisk = { kind: 'deny', reason: CREDENTIAL_DENY_TEXT }
     const args = { ref: 'e9', text: 'x' }
     const ref = refInfoOf(SNAPSHOT_LOGIN, 'e9')
@@ -400,7 +408,7 @@ describe('correzione J3, giro K1: applyFieldProbe — la verifica AGGIUNGE un de
       expect(applyFieldProbe(risk, args, ref, false)).toBe(risk)
     }
     // null → solo il free diventa ask "non riesco a verificare", il resto invariato
-    expect(applyFieldProbe(free, args, ref, null)).toEqual({ kind: 'ask', reason: FIELD_PROBE_ASK_TEXT })
+    expect(applyFieldProbe(free, args, ref, null)).toEqual({ kind: 'ask', reason: FIELD_PROBE_ASK_TEXT, ask: { kind: 'probe' } })
     expect(applyFieldProbe(ask, args, ref, null)).toBe(ask)
     expect(applyFieldProbe(deny, args, ref, null)).toBe(deny)
   })
@@ -415,7 +423,7 @@ describe('correzione J3, giro K1: applyFieldProbe — la verifica AGGIUNGE un de
   })
   it('result NON leggibile (verifica fallita) → ASK "non riesco a verificare", mai free; il deny del nome resta', () => {
     const ask = applyFieldProbe(riskOf(SNAPSHOT_LOGIN, 'e9'), { ref: 'e9', text: 'x' }, refInfoOf(SNAPSHOT_LOGIN, 'e9'), null)
-    expect(ask).toEqual({ kind: 'ask', reason: FIELD_PROBE_ASK_TEXT })
+    expect(ask).toEqual({ kind: 'ask', reason: FIELD_PROBE_ASK_TEXT, ask: { kind: 'probe' } })
     // il nome "Username Password" senza verifica resta deny (regola dello snapshot)
     const stillDeny = applyFieldProbe(riskOf(SNAPSHOT_LOGIN, 'e8'), { ref: 'e8', text: 'x' }, refInfoOf(SNAPSHOT_LOGIN, 'e8'), null)
     expect(stillDeny).toEqual({ kind: 'deny', reason: CREDENTIAL_DENY_TEXT })

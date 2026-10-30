@@ -37,6 +37,7 @@ const { buildApiMethods } = await import('../api')
 const { prepareDraft, DEFAULT_EXTERNAL_SEND_TOOLS } = await import('../../main/agent/external-send')
 import type { JobWorker } from '../worker'
 import type { SandbotEvent, TranscriptEntry, SendMessagePayload } from '../../shared/types'
+import { setSetting } from '../../main/store/db'
 
 const AGENT = 'agent_d'
 let events: SandbotEvent[]
@@ -46,6 +47,8 @@ const api: Record<string, (p: unknown[]) => unknown> = buildApiMethods(emit, { p
 beforeAll(() => {
   const dir = mkdtempSync(join(tmpdir(), 'sandbot-draft-test-'))
   setDataDir(dir)
+  // fase 17c: la lingua dei testi del daemon è l'italiano (come prima)
+  setSetting('ui.activeLanguage', 'it')
   dataDir()
   db()
 })

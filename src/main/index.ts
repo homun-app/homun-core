@@ -9,6 +9,12 @@ import { registerIpc, emitLocal } from './ipc'
 import { setDataDir, listAgents, createAgent } from './store/db'
 import { createTray, refreshTray } from './tray'
 import { initMainLanguage, applyStartupLanguage } from './i18n'
+// fase 17c (C4): la descrizione del Bot principale è un messaggio del bot
+// all'utente — lingua dell'utente (al primo avvio: lingue di sistema, il
+// setting ui.activeLanguage non è ancora stato pubblicato)
+import { formatUi, ui } from '../shared/ui-text'
+import { UI } from '../shared/ui-messages'
+import { resolveUiLanguage } from '../shared/ui-language'
 import { DaemonClient } from './daemon-client'
 import { userDataDir } from './paths'
 
@@ -95,7 +101,7 @@ app.whenReady().then(() => {
 
   if (listAgents().length === 0) {
     // primo avvio: agente principale, come il "Bot principale" dell'originale
-    createAgent('Bot', 'Il mio assistente personale sempre attivo.')
+    createAgent('Bot', formatUi(ui(UI.mainBotDescription), resolveUiLanguage(null, app.getPreferredSystemLanguages())))
   }
   createWindow()
   createTray(getMainWindow)

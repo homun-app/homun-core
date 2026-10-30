@@ -1,4 +1,4 @@
-# Glossario italiano → inglese (fase 17a)
+# Glossario italiano → inglese (fase 17a; esteso dalla 17c)
 
 Le scelte fisse usate in TUTTO il catalogo `en`. Se serve una nuova parola
 ricorrente, la si aggiunge qui prima di tradurla. Homun resta Homun.

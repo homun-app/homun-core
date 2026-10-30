@@ -18,7 +18,7 @@ import { secondaryPrompts } from '../main/agent/prompts'
 import { parseCron } from './cron'
 import { isValidTimeZone } from './tz'
 import { nextScheduleRun, nextPollAt } from './triggers'
-import { triggerShapeErrors, manualServerPollError } from '../shared/triggers'
+import { triggerShapeErrors, manualServerPollError, setTriggerTextsLang } from '../shared/triggers'
 import { avatarValidationError } from '../shared/avatar'
 import { generateWebhookToken } from './webhooks'
 import { enqueueJob } from '../main/store/jobs'
@@ -32,6 +32,13 @@ import type { Presence } from './presence'
 import type { Onboarding } from './onboarding'
 import type { SandbotEvent, SendMessagePayload, McpServerInfo, McpServerSecret, RoutineInfo, RoutineTrigger, AutoReviewSettings } from '../shared/types'
 import { DEFAULT_AUTO_REVIEW } from '../shared/types'
+// fase 17c (C2/C3): testi del catalogo UI — errori RPC nella lingua
+// dell'interfaccia, meta.ui sui messaggi [sistema] (il testo per il modello
+// resta inglese) e sulle notice
+import { uiLanguage, uiText, formatUi, ui, uiError } from '../main/ui-language'
+import { UI } from '../shared/ui-messages'
+import { UiError } from '../shared/ui-text'
+import type { UiText } from '../shared/types'
 
 type Emitter = (e: SandbotEvent) => void
 
@@ -53,9 +60,11 @@ export function buildApiMethods(
       ? `http://127.0.0.1:${opts.webhookPort}/hooks/${r.id}`
       : undefined
 
-  // fase 3: notice di sistema e entry aggiornata, emesse alla UI come le altre
-  const appendLocalNotice = (agentId: string, content: string): void => {
-    store.appendEntry({ agentId, kind: 'notice', role: 'system', content })
+  // fase 3: notice di sistema e entry aggiornata, emesse alla UI come le altre.
+  // Fase 17c (C2): col testo del catalogo UI — content nella lingua
+  // dell'interfaccia, meta.ui per la ritraduzione
+  const appendLocalNotice = (agentId: string, text: UiText): void => {
+    store.appendEntry({ agentId, kind: 'notice', role: 'system', content: formatUi(text, uiLanguage()), meta: { ui: text } })
     emit({ type: 'entries', agentId, entries: store.getEntries(agentId).slice(-1) })
   }
   const emitUpdatedEntry = (agentId: string, entryId: number): void => {
@@ -74,10 +83,12 @@ export function buildApiMethods(
    * trigger viene rifiutato (spec §fase 6 punto 1).
    */
   async function validateTrigger(t: RoutineTrigger): Promise<RoutineTrigger> {
-    if (!t || typeof t !== 'object' || typeof t.type !== 'string') throw new Error('Trigger non valido: oggetto mancante')
+    // fase 17c: gli errori di forma/validazione nella lingua dell'interfaccia
+    setTriggerTextsLang(uiLanguage())
+    if (!t || typeof t !== 'object' || typeof t.type !== 'string') throw uiError(UI.rpcTriggerInvalidObject)
     const errors = triggerShapeErrors(t)
     if (t.type === 'schedule' && t.kind === 'cron' && !parseCron(t.cron)) {
-      errors.unshift(`cron non valido: "${t.cron}" (5 campi, es. "0 9 * * *")`)
+      errors.unshift(uiText(UI.rpcCronInvalid, { cron: t.cron }))
     }
     if (t.type === 'connector_poll') {
       const mcpMod = await mcp()
@@ -85,13 +96,13 @@ export function buildApiMethods(
       try {
         tools = await mcpMod.toolsOfServer(t.connectorId)
       } catch {
-        errors.push(`connettore "${t.connectorId}" non raggiungibile (va connesso prima di creare il trigger)`)
+        errors.push(uiText(UI.rpcConnectorUnreachable, { id: t.connectorId }))
       }
       if (tools) {
         const tool = tools.find((x) => x.name === t.tool)
-        if (!tool) errors.push(`tool "${t.tool}" non disponibile sul connettore ${t.connectorId}`)
+        if (!tool) errors.push(uiText(UI.rpcToolUnavailable, { tool: t.tool, id: t.connectorId }))
         else if (!tool.annotations?.readOnlyHint) {
-          errors.push(`il tool "${t.tool}" non è in sola lettura (readOnlyHint): il trigger viene rifiutato`)
+          errors.push(uiText(UI.rpcToolNotReadOnly, { tool: t.tool }))
         }
       }
       // fase 7 (residuo 0a): poll su un server NON del catalogo → serve la
@@ -102,7 +113,7 @@ export function buildApiMethods(
         if (manual) errors.push(manual)
       }
     }
-    if (errors.length) throw new Error(`Trigger non valido: ${errors.join('; ')}`)
+    if (errors.length) throw uiError(UI.rpcTriggerInvalid, { errors: errors.join('; ') })
     return t
   }
 
@@ -148,7 +159,7 @@ export function buildApiMethods(
     // impostazioni dell'agente ("Rendi principale")
     'agents:set-main': ([id]) => {
       const a = store.getAgent(id as string)
-      if (!a) throw new Error('Agente non trovato')
+      if (!a) throw uiError(UI.rpcAgentNotFound)
       store.setSetting('mainAgentId', a.id)
       emit({ type: 'agents' })
       return { ok: true }
@@ -158,8 +169,11 @@ export function buildApiMethods(
     'templates:list': () => loadTemplates(),
     'agents:create-from-template': async ([templateId]) => {
       const t = templateById(String(templateId))
-      if (!t) throw new Error(`template sconosciuto: ${String(templateId)}`)
-      const a = store.createAgent(t.name, t.description)
+      if (!t) throw uiError(UI.rpcTemplateUnknown, { id: String(templateId) })
+      // fase 17c (C4/C5): nome/descrizione e kickstart nella lingua dell'utente
+      const { pickLang } = await import('../shared/localized')
+      const kickLang = currentUserLanguage()
+      const a = store.createAgent(pickLang(t.name, kickLang), pickLang(t.description, kickLang))
       // fase 9 (punto 1): al bot da template vanno il provider attivo e il suo
       // modello PREDEFINITO (con capability "tools" verificata)
       const { assignDefaultModel } = await import('../main/agent/model-defaults')
@@ -169,7 +183,7 @@ export function buildApiMethods(
         getOverrides: () => store.getSetting<ModelDefaultsMap>('providers.modelDefaults', {}),
         supportsTools: (p, model) => {
           const full = providers.getProvider(p.id)
-          return full ? providers.modelSupportsTools(full, model) : Promise.resolve({ ok: false, checked: false, error: 'provider non trovato' })
+          return full ? providers.modelSupportsTools(full, model) : Promise.resolve({ ok: false, checked: false, error: uiText(UI.rpcProviderNotFoundLower) })
         }
       })
       if (assignment) store.updateAgent(a.id, { providerId: assignment.providerId, model: assignment.model })
@@ -180,9 +194,9 @@ export function buildApiMethods(
         agentId: a.id,
         kind: 'user-message',
         payload: {
-          text: buildKickstartMessage(t),
+          text: buildKickstartMessage(t, kickLang),
           initiator: 'TEMPLATE_IMPORT',
-          extraMeta: { templateName: t.name }
+          extraMeta: { templateName: pickLang(t.name, kickLang) }
         },
         runAt: now,
         now
@@ -212,7 +226,7 @@ export function buildApiMethods(
         const chosen = Array.isArray(value) ? value : [value]
         if (chosen.includes('resume-away')) {
           const resumed = presence.resumeAwayPaused()
-          appendLocalNotice(agentId as string, resumed > 0 ? `Routine riattivate: ${resumed}.` : 'Nessuna routine da riattivare.')
+          appendLocalNotice(agentId as string, resumed > 0 ? ui(UI.routinesResumed, { count: resumed }) : ui(UI.noRoutinesToResume))
         }
       }
       // fase 7: i widget di sistema dell'onboarding sono deterministici —
@@ -238,18 +252,20 @@ export function buildApiMethods(
       const aid = agentId as string
       const entry = store.getEntries(aid).find((x) => x.id === (entryId as number))
       const message = entry?.meta?.message as SendMessagePayload | undefined
-      if (!entry || entry.kind !== 'send-message' || message?.type !== 'draft') throw new Error('Bozza non trovata')
+      if (!entry || entry.kind !== 'send-message' || message?.type !== 'draft') throw uiError(UI.rpcDraftNotFound)
       const meta = entry.meta ?? {}
-      if (meta.status === 'sent' || meta.status === 'discarded') throw new Error(`Bozza già ${meta.status === 'sent' ? 'inviata' : 'scartata'}`)
+      if (meta.status === 'sent' || meta.status === 'discarded') {
+        throw uiError(meta.status === 'sent' ? UI.rpcDraftAlreadySent : UI.rpcDraftAlreadyDiscarded)
+      }
       // body modificato inline nella card: persistito prima dell'invio
       // D1: aggiorna anche via.args (l'argomento che verrà davvero inviato)
       if (typeof body === 'string' && body.trim() && body !== message.body) applyDraftBody(message, body)
       const via = message.via
-      const notice = (content: string): void => {
-        appendLocalNotice(aid, content)
+      const notice = (text: UiText): void => {
+        appendLocalNotice(aid, text)
       }
       if (!via) {
-        notice('La bozza non ha un tool di invio associato: non può essere inviata automaticamente.')
+        notice(ui(UI.rpcDraftNoVia))
         return { ok: false }
       }
       // D1 (difesa in profondità): si eseguono SOLO tool di invio esterno,
@@ -257,7 +273,7 @@ export function buildApiMethods(
       // Invia non può mai eseguire un tool arbitrario lasciato dal modello
       const externalCfg = store.getSetting<ExternalSendConfig>('externalSendTools', DEFAULT_EXTERNAL_SEND_TOOLS)
       if (!isExternalSend(via.tool, externalCfg)) {
-        notice(`Invio rifiutato: ${via.tool} non è un tool di invio esterno configurato.`)
+        notice(ui(UI.rpcDraftViaRejected, { tool: via.tool }))
         return { ok: false }
       }
       // il click su Invia è il consenso esplicito dell'utente (ha visto tutto il
@@ -265,19 +281,19 @@ export function buildApiMethods(
       // nega comunque l'invio
       const verdict = await permissions.check(via.tool, via.args, aid)
       if (verdict.kind === 'deny') {
-        notice(`Invio bloccato dai permessi: ${via.tool}`)
+        notice(ui(UI.rpcDraftBlocked, { tool: via.tool }))
         return { ok: false }
       }
       try {
         const { output } = await executeTool(aid, via.tool, via.args)
         store.updateEntryMeta(entry.id, { ...meta, message, status: 'sent' })
         emitUpdatedEntry(aid, entry.id)
-        notice(`Bozza inviata (${via.tool}). Esito: ${output.slice(0, 300)}`)
+        notice(ui(UI.rpcDraftSent, { tool: via.tool, output: output.slice(0, 300) }))
         return { ok: true }
       } catch (e) {
         store.updateEntryMeta(entry.id, { ...meta, message, status: 'error' })
         emitUpdatedEntry(aid, entry.id)
-        notice(`Errore nell'invio della bozza: ${e instanceof Error ? e.message : String(e)}`)
+        notice(ui(UI.rpcDraftSendError, { error: e instanceof Error ? e.message : String(e) }))
         return { ok: false }
       }
     },
@@ -285,8 +301,8 @@ export function buildApiMethods(
       const aid = agentId as string
       const entry = store.getEntries(aid).find((x) => x.id === (entryId as number))
       const message = entry?.meta?.message as SendMessagePayload | undefined
-      if (!entry || entry.kind !== 'send-message' || message?.type !== 'draft') throw new Error('Bozza non trovata')
-      if (entry.meta?.status === 'sent') throw new Error('Bozza già inviata')
+      if (!entry || entry.kind !== 'send-message' || message?.type !== 'draft') throw uiError(UI.rpcDraftNotFound)
+      if (entry.meta?.status === 'sent') throw uiError(UI.rpcDraftAlreadySent)
       store.updateEntryMeta(entry.id, { ...(entry.meta ?? {}), status: 'discarded' })
       emitUpdatedEntry(aid, entry.id)
       return { ok: true }
@@ -295,8 +311,8 @@ export function buildApiMethods(
       const aid = agentId as string
       const entry = store.getEntries(aid).find((x) => x.id === (entryId as number))
       const message = entry?.meta?.message as SendMessagePayload | undefined
-      if (!entry || entry.kind !== 'send-message' || message?.type !== 'draft') throw new Error('Bozza non trovata')
-      if (entry.meta?.status === 'sent' || entry.meta?.status === 'discarded') throw new Error('Bozza già chiusa')
+      if (!entry || entry.kind !== 'send-message' || message?.type !== 'draft') throw uiError(UI.rpcDraftNotFound)
+      if (entry.meta?.status === 'sent' || entry.meta?.status === 'discarded') throw uiError(UI.rpcDraftAlreadyClosed)
       // D1: il body modificato aggiorna anche via.args (il campo mappato sul corpo)
       applyDraftBody(message, String(body ?? ''))
       store.updateEntryMeta(entry.id, { ...(entry.meta ?? {}), message })
@@ -309,9 +325,9 @@ export function buildApiMethods(
       // fase 17b (A2): la domanda della quick ask è testo di una persona
       noteHumanText(String(question ?? ''))
       const agent = store.getAgent(agentId as string)
-      if (!agent?.providerId || !agent.model) throw new Error('Configura prima provider e modello.')
+      if (!agent?.providerId || !agent.model) throw uiError(UI.rpcConfigureProvider)
       const provider = providers.getProvider(agent.providerId)
-      if (!provider) throw new Error('Provider non trovato')
+      if (!provider) throw uiError(UI.rpcProviderNotFound)
       // fase 3: ciò che il bot ha DETTO all'utente sono le send-message (il
       // testo libero è ragionamento interno e non entra nel contesto)
       const context = store.getEntries(agentId as string)
@@ -343,22 +359,24 @@ export function buildApiMethods(
     },
     'routines:create': ([agentId, title, prompt, schedule]) => {
       // fase 12 (punto 1): niente routine su un SOTTOAGENTE (non è un bot)
-      const refusal = store.subagentRefusal(String(agentId ?? ''))
-      if (refusal) throw new Error(refusal)
-      if (!parseCron(String(schedule))) throw new Error('Schedule non valida: usare un cron a 5 campi, es. "0 9 * * *"')
+      const refusalUi = store.subagentRefusalUi(String(agentId ?? ''))
+      // fase 17c: il rifiuto delle routine è SOLO UI (il modello vede la
+      // versione inglese nei result dei tool): testo tradotto subito
+      if (refusalUi) throw new Error(formatUi(refusalUi, uiLanguage()))
+      if (!parseCron(String(schedule))) throw uiError(UI.rpcScheduleInvalid)
       return store.createRoutine(agentId as string, title as string, prompt as string, schedule as string)
     },
     'routines:create-trigger': async ([agentId, title, prompt, trigger, timezone]) => {
       // fase 12 (punto 1): niente routine su un SOTTOAGENTE (non è un bot)
-      const refusal = store.subagentRefusal(String(agentId ?? ''))
-      if (refusal) throw new Error(refusal)
+      const refusalUi = store.subagentRefusalUi(String(agentId ?? ''))
+      if (refusalUi) throw new Error(formatUi(refusalUi, uiLanguage()))
       let t = trigger as RoutineTrigger
       // il webhook nasce col token generato dal server (prima della validazione:
       // il client non lo manda, la UI lo copia dopo la creazione)
       if (t?.type === 'webhook' && !t.token) t = { ...t, token: generateWebhookToken() }
       t = await validateTrigger(t)
       const tz = timezone ? String(timezone) : ''
-      if (tz && !isValidTimeZone(tz)) throw new Error(`Fuso orario non valido: "${tz}"`)
+      if (tz && !isValidTimeZone(tz)) throw uiError(UI.rpcTzInvalid, { tz })
       const created = store.createRoutine(agentId as string, title as string, prompt as string, cronOfTrigger(t), {
         timezone: tz,
         trigger: t
@@ -369,7 +387,7 @@ export function buildApiMethods(
     'routines:update-trigger': async ([id, patch]) => {
       const p = (patch ?? {}) as { title?: string; prompt?: string; enabled?: number; paused_for_away?: number; trigger?: RoutineTrigger | null; timezone?: string }
       const cur = store.getRoutine(id as number)
-      if (!cur) throw new Error('Routine non trovata')
+      if (!cur) throw uiError(UI.rpcRoutineNotFound)
       let final: RoutineTrigger | null | undefined
       if (p.trigger !== undefined) {
         if (!p.trigger) {
@@ -385,7 +403,7 @@ export function buildApiMethods(
         }
       }
       if (p.timezone !== undefined && p.timezone && !isValidTimeZone(p.timezone)) {
-        throw new Error(`Fuso orario non valido: "${p.timezone}"`)
+        throw uiError(UI.rpcTzInvalid, { tz: p.timezone })
       }
       store.updateRoutine(id as number, {
         ...(p.title !== undefined ? { title: p.title } : {}),
@@ -401,7 +419,7 @@ export function buildApiMethods(
     },
     'routines:update': ([id, patch]) => {
       if (patch && typeof patch === 'object' && 'schedule' in (patch as Record<string, unknown>) && !parseCron(String((patch as Record<string, unknown>).schedule))) {
-        throw new Error('Schedule non valida: usare un cron a 5 campi, es. "0 9 * * *"')
+        throw uiError(UI.rpcScheduleInvalid)
       }
       store.updateRoutine(id as number, patch as Parameters<typeof store.updateRoutine>[1])
     },
@@ -412,11 +430,11 @@ export function buildApiMethods(
 
     // ---- fase 6: presenza (§3ter T2) e consegna dell'outbox ----
     'presence:signal': ([kind]) => {
-      if (!presence) throw new Error('presenza non disponibile')
+      if (!presence) throw uiError(UI.rpcPresenceUnavailable)
       presence.onSignal(kind === 'typing' ? 'typing' : 'active')
     },
     'presence:viewing': ([agentId]) => {
-      if (!presence) throw new Error('presenza non disponibile')
+      if (!presence) throw uiError(UI.rpcPresenceUnavailable)
       presence.onViewing(typeof agentId === 'string' && agentId ? agentId : null)
     },
     'outbox:opened': ([agentId]) => {
@@ -438,7 +456,7 @@ export function buildApiMethods(
     },
     'tasks:cancel': ([taskId]) => {
       const t = store.getTask(taskId as number)
-      if (!t) throw new Error('Task non trovato')
+      if (!t) throw uiError(UI.rpcTaskNotFound)
       if (t.status === 'done' || t.status === 'failed' || t.status === 'cancelled') return { ok: true }
       // prima si ferma il turno (se è quello del task), poi si tolgono i job
       // in coda e infine lo stato: le transizioni dai task chiusi sono bloccate
@@ -466,7 +484,7 @@ export function buildApiMethods(
       const { getSubagent, closeSubagent } = await import('../main/store/subagents')
       const { onSubagentTerminal } = await import('./subagent-ops')
       const row = getSubagent(db(), String(id ?? ''))
-      if (!row) throw new Error('Sottoagente non trovato')
+      if (!row) throw uiError(UI.rpcSubagentNotFound)
       loop.interrupt(row.id)
       cancelAgentJobs(db(), row.id)
       const closed = closeSubagent(db(), row.id, { status: 'stopped', finishedAt: Date.now() })
@@ -492,9 +510,9 @@ export function buildApiMethods(
       // pianificazione dei turni per i membri
       const groups = await import('../main/store/groups')
       const g = groups.getGroup(Number(groupId))
-      if (!g) throw new Error('Gruppo non trovato')
+      if (!g) throw uiError(UI.rpcGroupNotFound)
       const t = String(text ?? '').trim()
-      if (!t) throw new Error('Testo mancante')
+      if (!t) throw uiError(UI.rpcTextMissing)
       // fase 17b (A2): il post dell'utente nel gruppo è testo di una persona
       noteHumanText(t)
       const msg = groups.addGroupMessage({
@@ -553,7 +571,7 @@ export function buildApiMethods(
             x.saveServers(x.listServers())
           }
         } catch (e) {
-          throw new Error(`impossibile salvare il segreto del server (Keychain non disponibile): ${e instanceof Error ? e.message : String(e)}`)
+          throw uiError(UI.rpcSecretSaveFailed, { error: e instanceof Error ? e.message : String(e) })
         }
       }
       return x.listServers()
@@ -566,13 +584,13 @@ export function buildApiMethods(
 
     // ---- fase 5: connettori del catalogo ("Connetti app") ----
     'connectors:list': () => {
-      if (!connectors) throw new Error('connettori non disponibili')
+      if (!connectors) throw uiError(UI.rpcConnectorsUnavailable)
       return connectors.list()
     },
     'connectors:connect': ([id]) => {
-      if (!connectors) throw new Error('connettori non disponibili')
+      if (!connectors) throw uiError(UI.rpcConnectorsUnavailable)
       const entry = connectors.catalog.find((e) => e.id === id)
-      if (!entry) throw new Error(`connettore sconosciuto: ${String(id)}`)
+      if (!entry) throw uiError(UI.rpcConnectorUnknown, { id: String(id) })
       // il flusso OAuth dura fino a 10 minuti (browser): parte in parallelo e
       // la UI segue gli eventi {type:'connectors'}
       void connectors.runConnect(entry).then(async (r) => {
@@ -583,19 +601,19 @@ export function buildApiMethods(
       return { started: true }
     },
     'connectors:disconnect': ([id]) => {
-      if (!connectors) throw new Error('connettori non disponibili')
+      if (!connectors) throw uiError(UI.rpcConnectorsUnavailable)
       return connectors.disconnect(String(id))
     },
     'connectors:set-tools': ([id, disabledTools]) => {
-      if (!connectors) throw new Error('connettori non disponibili')
+      if (!connectors) throw uiError(UI.rpcConnectorsUnavailable)
       connectors.setDisabledTools(String(id), (disabledTools as string[]) ?? [])
     },
     'connectors:set-instructions': ([id, instructions]) => {
-      if (!connectors) throw new Error('connettori non disponibili')
+      if (!connectors) throw uiError(UI.rpcConnectorsUnavailable)
       connectors.setInstructions(String(id), String(instructions ?? ''))
     },
     'connectors:save-static': ([id, clientId, clientSecret]) => {
-      if (!connectors) throw new Error('connettori non disponibili')
+      if (!connectors) throw uiError(UI.rpcConnectorsUnavailable)
       return connectors.saveStaticClient(String(id), String(clientId ?? ''), String(clientSecret ?? ''))
     },
 
@@ -642,12 +660,12 @@ export function buildApiMethods(
       const aid = agentId as string
       const entry = store.getEntries(aid).find((e) => e.id === (entryId as number))
       const message = entry?.meta?.message as SendMessagePayload | undefined
-      if (!entry || entry.kind !== 'send-message' || message?.type !== 'mcp-server') throw new Error('Proposta di server non trovata')
+      if (!entry || entry.kind !== 'send-message' || message?.type !== 'mcp-server') throw uiError(UI.rpcMcpProposalNotFound)
       const status = entry.meta?.status as string | undefined
       // L8: lo stato 'installing' si segna PRIMA di iniziare — due click ravvicinati
       // non installano due volte
-      if (status === 'installed' || status === 'declined') throw new Error('Proposta già gestita')
-      if (status === 'installing') throw new Error('installazione in corso')
+      if (status === 'installed' || status === 'declined') throw uiError(UI.rpcProposalHandled)
+      if (status === 'installing') throw uiError(UI.rpcInstalling)
       if (decision !== 'add') {
         store.updateEntryMeta(entry.id, { ...entry.meta, status: 'declined' })
         emitUpdatedEntry(aid, entry.id)
@@ -667,8 +685,12 @@ export function buildApiMethods(
       }
       store.updateEntryMeta(entry.id, { ...entry.meta, status: r.ok ? 'installed' : 'error', ...(r.ok ? {} : { error: r.error }) })
       emitUpdatedEntry(aid, entry.id)
+      // fase 17c (C2, MU): il testo per il modello resta inglese; meta.ui
+      // dice alla UI cosa mostrare nella lingua dell'interfaccia
       const text = r.ok ? `[sistema] ${r.message}` : `[sistema] Server "${message.name}" NOT added: ${r.error}`
-      enqueueUserMessage(db(), aid, text, undefined, emit, undefined, 'CONNECTOR_INSTALLED')
+      enqueueUserMessage(db(), aid, text, undefined, emit, undefined, 'CONNECTOR_INSTALLED', {
+        ui: r.ok ? ui(UI.sistemaServerAdded, { name: message.name }) : ui(UI.sistemaServerAddFailed, { name: message.name, error: r.error })
+      })
       worker.poke()
       return r
     },
@@ -677,11 +699,11 @@ export function buildApiMethods(
       const aid = agentId as string
       const entry = store.getEntries(aid).find((e) => e.id === (entryId as number))
       const message = entry?.meta?.message as SendMessagePayload | undefined
-      if (!entry || entry.kind !== 'send-message' || message?.type !== 'plugin') throw new Error('Proposta di plugin non trovata')
+      if (!entry || entry.kind !== 'send-message' || message?.type !== 'plugin') throw uiError(UI.rpcPluginProposalNotFound)
       const status = entry.meta?.status as string | undefined
       // L8: come la card del server — 'installing' prima di iniziare
-      if (status === 'installed' || status === 'declined') throw new Error('Proposta già gestita')
-      if (status === 'installing') throw new Error('installazione in corso')
+      if (status === 'installed' || status === 'declined') throw uiError(UI.rpcProposalHandled)
+      if (status === 'installing') throw uiError(UI.rpcInstalling)
       if (decision !== 'install') {
         // L7: il "No" cancella lo staging che la card teneva in attesa
         const { discardPluginProposal } = await import('../main/connectors/install')
@@ -703,8 +725,11 @@ export function buildApiMethods(
       }
       store.updateEntryMeta(entry.id, { ...entry.meta, status: r.ok ? 'installed' : 'error', ...(r.ok ? {} : { error: r.error }) })
       emitUpdatedEntry(aid, entry.id)
+      // fase 17c (C2, MU): come la card del server — testo inglese al modello, ui alla vista
       const text = r.ok ? `[sistema] ${r.message}` : `[sistema] Plugin "${message.name}" NOT installed: ${r.error}`
-      enqueueUserMessage(db(), aid, text, undefined, emit, undefined, 'PLUGIN_INSTALLED')
+      enqueueUserMessage(db(), aid, text, undefined, emit, undefined, 'PLUGIN_INSTALLED', {
+        ui: r.ok ? ui(UI.sistemaPluginInstalled, { name: message.name }) : ui(UI.sistemaPluginInstallFailed, { name: message.name, error: r.error })
+      })
       worker.poke()
       return r
     },
@@ -716,7 +741,7 @@ export function buildApiMethods(
       const v = (values ?? {}) as Record<string, string>
       // L1: la UI passa uno dei kind di SECRET_KIND; un kind sconosciuto si rifiuta
       const kindStr = String(kind) as keyof typeof SECRET_KIND
-      if (!(kindStr in SECRET_KIND)) throw new Error(`tipo di valore non valido: ${String(kind)}`)
+      if (!(kindStr in SECRET_KIND)) throw uiError(UI.rpcInvalidValueType, { kind: String(kind) })
       const storeKey = SECRET_KIND[kindStr]
       if (kindStr === 'bearer') await deps.store.write(String(serverId), storeKey, v.token ?? '')
       else await deps.store.write(String(serverId), storeKey, v)
@@ -741,7 +766,7 @@ export function buildApiMethods(
       if (kind === 'server') {
         const servers = mcpMod.listServers()
         const cfg = servers.find((x) => x.id === id)
-        if (!cfg) throw new Error(`server ${String(id)} non trovato`)
+        if (!cfg) throw uiError(UI.rpcServerNotFound, { id: String(id) })
         cfg.enabledFor = ids.includes('*') ? ['*'] : ids
         mcpMod.saveServers(servers)
         return { ok: true }
@@ -749,7 +774,7 @@ export function buildApiMethods(
       const { installedPlugins, PLUGINS_SETTING } = await import('../main/connectors/install')
       const all = installedPlugins({ getSetting: store.getSetting })
       const idx = all.findIndex((x) => x.name === String(id))
-      if (idx < 0) throw new Error(`plugin ${String(id)} non trovato`)
+      if (idx < 0) throw uiError(UI.rpcPluginNotFound, { id: String(id) })
       all[idx]!.enabledFor = ids.includes('*') ? ['*'] : ids
       store.setSetting(PLUGINS_SETTING, all)
       return { ok: true }
@@ -778,22 +803,22 @@ export function buildApiMethods(
       const { getInstallDeps } = await import('../main/connectors/install-bridge')
       const all = installedPlugins({ getSetting: store.getSetting })
       const rec = all.find((x) => x.name === String(name) && x.marketplace === String(marketplace))
-      if (!rec) throw new Error('plugin non trovato')
+      if (!rec) throw uiError(UI.rpcPluginNotFoundPlain)
       await uninstallPlugin(rec, getInstallDeps(), store.setSetting, store.getSetting)
       emit({ type: 'connectors' })
       return { ok: true }
     },
     /** Marketplace registrati (scheda Marketplace). */
     'marketplace:list': async () => {
-      if (!opts.marketplaces) throw new Error('marketplace non disponibili')
+      if (!opts.marketplaces) throw uiError(UI.rpcMarketplacesUnavailable)
       return opts.marketplaces.list()
     },
     'marketplace:add': ([source]) => {
-      if (!opts.marketplaces) throw new Error('marketplace non disponibili')
+      if (!opts.marketplaces) throw uiError(UI.rpcMarketplacesUnavailable)
       return opts.marketplaces.add(String(source ?? ''))
     },
     'marketplace:remove': ([source]) => {
-      if (!opts.marketplaces) throw new Error('marketplace non disponibili')
+      if (!opts.marketplaces) throw uiError(UI.rpcMarketplacesUnavailable)
       opts.marketplaces.remove(String(source ?? ''))
       return { ok: true }
     },
@@ -816,8 +841,9 @@ export function buildApiMethods(
     },
     /** Preset dei gateway e avviso fisso (dati, nessuna chiamata ai fornitori). */
     'connectors:gateway-presets': async () => {
-      const { GATEWAY_PRESETS, GATEWAY_WARNING } = await import('../main/connectors/install')
-      return { presets: GATEWAY_PRESETS, warning: GATEWAY_WARNING }
+      // fase 17c (C3): l'avviso del gateway è nel catalogo UI
+      const { GATEWAY_PRESETS } = await import('../main/connectors/install')
+      return { presets: GATEWAY_PRESETS, warning: uiText(UI.installGatewayWarning) }
     },
     /** Impostazione CIMD (punto 6): l'URL del documento ospitato dall'utente. */
     'connectors:set-client-metadata-url': ([url]) => {
@@ -878,12 +904,12 @@ export function buildApiMethods(
         (e) => e.kind === 'send-message' && e.meta?.approvalId === approvalId && e.meta?.status === 'pending'
       )
       const message = entry?.meta?.message as SendMessagePayload | undefined
-      if (!entry || message?.type !== 'secure-input') throw new Error('Modulo non trovato o già chiuso')
+      if (!entry || message?.type !== 'secure-input') throw uiError(UI.rpcFormNotFound)
       const v = (values ?? {}) as Record<string, string>
       let outcome: string
       if (message.kind === 'login') {
         const origin = String(v.origin ?? message.origin ?? '').trim()
-        if (!origin || !v.username || !v.password) throw new Error('Servono origine, utente e password')
+        if (!origin || !v.username || !v.password) throw uiError(UI.rpcLoginValuesMissing)
         const label = String(v.label ?? message.label ?? '').trim() || 'Login'
         const id = await vault().then((x) => x.saveLogin({
           label, origins: [origin], username: v.username, password: v.password,
@@ -892,7 +918,7 @@ export function buildApiMethods(
         outcome = `saved: login "${label}" (${id})`
       } else {
         const name = String(v.name ?? message.name ?? '').trim()
-        if (!name || !v.value) throw new Error('Servono il nome e il valore del secret')
+        if (!name || !v.value) throw uiError(UI.rpcSecretValuesMissing)
         await vault().then((x) => x.storeSecret(name, v.value))
         outcome = `saved: secret ${name}`
       }
@@ -918,7 +944,7 @@ export function buildApiMethods(
     'library:get': async ([id, version]) => {
       const lib = await import('../main/agent/library')
       const item = lib.getLibraryItemPublic(String(id))
-      if (!item) throw new Error('voce non trovata')
+      if (!item) throw uiError(UI.rpcItemNotFound)
       if (item.kind === 'document') {
         const r = lib.readDocument({ id: String(id), ...(version !== undefined && version !== null ? { version } : {}) })
         if (!r.ok) throw new Error(r.error)
@@ -936,7 +962,7 @@ export function buildApiMethods(
         }
       }
       const file = lib.fileOfItem(item)
-      if (!file) throw new Error('voce incoerente')
+      if (!file) throw uiError(UI.rpcItemInconsistent)
       const { readFileSync } = await import('node:fs')
       const isImage = /^image\/(png|jpeg|svg\+xml)$/.test(item.fileMime ?? '')
       return {
@@ -948,18 +974,18 @@ export function buildApiMethods(
     },
     'library:delete': async ([id]) => {
       const libraryStore = await import('../main/store/library')
-      if (!libraryStore.deleteLibraryItem(String(id))) throw new Error('voce non trovata')
+      if (!libraryStore.deleteLibraryItem(String(id))) throw uiError(UI.rpcItemNotFound)
       return { ok: true }
     },
     'library:rename': async ([id, title]) => {
       const libraryStore = await import('../main/store/library')
-      if (!libraryStore.getLibraryItem(String(id))) throw new Error('voce non trovata')
+      if (!libraryStore.getLibraryItem(String(id))) throw uiError(UI.rpcItemNotFound)
       libraryStore.updateLibraryItem(String(id), { title: String(title ?? '').trim() || 'Senza titolo', updatedAt: Date.now() })
       return { ok: true }
     },
     'library:pin': async ([id, pinned]) => {
       const libraryStore = await import('../main/store/library')
-      if (!libraryStore.getLibraryItem(String(id))) throw new Error('voce non trovata')
+      if (!libraryStore.getLibraryItem(String(id))) throw uiError(UI.rpcItemNotFound)
       libraryStore.updateLibraryItem(String(id), { pinned: pinned === true, updatedAt: Date.now() })
       return { ok: true }
     },
@@ -967,7 +993,7 @@ export function buildApiMethods(
     'library:restore-version': async ([id, version]) => {
       const lib = await import('../main/agent/library')
       const item = lib.getLibraryItemPublic(String(id))
-      if (!item || item.kind !== 'document') throw new Error('documento non trovato')
+      if (!item || item.kind !== 'document') throw uiError(UI.rpcDocumentNotFound)
       const read = lib.readDocument({ id: String(id), version: Number(version) })
       if (!read.ok) throw new Error(read.error)
       const r = lib.writeDocument(item.authorAgentId, { id: String(id), title: item.title, content: read.value.content }, { userTurn: true })
@@ -1013,8 +1039,8 @@ export function buildApiMethods(
       const aid = agentId as string
       const entry = store.getEntries(aid).find((e) => e.id === (entryId as number))
       const message = entry?.meta?.message as SendMessagePayload | undefined
-      if (!entry || entry.kind !== 'send-message' || message?.type !== 'rule') throw new Error('Proposta di regola non trovata')
-      if (entry.meta?.ruleStatus) throw new Error('Proposta già gestita')
+      if (!entry || entry.kind !== 'send-message' || message?.type !== 'rule') throw uiError(UI.rpcRuleProposalNotFound)
+      if (entry.meta?.ruleStatus) throw uiError(UI.rpcProposalHandled)
       if (action === 'add') {
         // copia difensiva: getSetting restituisce il DEFAULT per riferimento e
         // il DEFAULT non si muta mai (è il fallback di ogni lettura)
@@ -1047,11 +1073,11 @@ export function buildApiMethods(
     'providers:discover': () => providers.discoverProviders(),
     'providers:test': ([id]) => {
       const p = providers.getProvider(id as string)
-      return p ? providers.testProvider(p) : { ok: false, error: 'provider non trovato' }
+      return p ? providers.testProvider(p) : { ok: false, error: uiText(UI.rpcProviderNotFoundLower) }
     },
     'models:list': ([providerId]) => {
       const p = providers.getProvider(providerId as string)
-      if (!p) throw new Error('provider non trovato')
+      if (!p) throw uiError(UI.rpcProviderNotFoundLower)
       return providers.listProviderModels(p)
     },
     // fase 11 (punto 2): chiave per la ricerca web del provider Ollama — vive
@@ -1059,7 +1085,7 @@ export function buildApiMethods(
     // del modello, nei log o in argv); la UI riceve solo un booleano
     'providers:set-web-search-key': async ([providerId, key]) => {
       const p = providers.getProvider(providerId as string)
-      if (!p || p.kind !== 'ollama') throw new Error('la chiave per la ricerca web si imposta sul provider Ollama')
+      if (!p || p.kind !== 'ollama') throw uiError(UI.rpcWebKeyOllama)
       const { setWebSearchKey, clearWebSearchKey } = await import('../main/agent/web-tools')
       const { getConnectorsKey } = await import('./keychain')
       const deps = { getKey: () => getConnectorsKey() }
@@ -1122,7 +1148,9 @@ export async function notifyConnectorConnected(
       undefined,
       emit,
       undefined,
-      'CONNECTOR_CONNECTED'
+      'CONNECTOR_CONNECTED',
+      // fase 17c (C2, MU): la UI mostra la lingua dell'interfaccia
+      { ui: ui(UI.sistemaConnectorConnected, { name, connectorId }) }
     )
     worker.poke()
   }

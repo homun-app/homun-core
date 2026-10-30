@@ -32,6 +32,8 @@ const emit: (e: SandbotEvent) => void = (e) => events.push(e)
 beforeAll(() => {
   const dir = mkdtempSync(join(tmpdir(), 'sandbot-outbox-test-'))
   setDataDir(dir)
+  // fase 17c: la lingua dei testi del daemon è l'italiano (come prima)
+  setSetting('ui.activeLanguage', 'it')
   dataDir()
   db()
 })
@@ -43,6 +45,8 @@ beforeEach(() => {
   d.exec('DELETE FROM entries')
   d.exec('DELETE FROM outbox')
   d.exec('DELETE FROM settings')
+  // fase 17c: la lingua dei testi del daemon è l'italiano (come prima)
+  setSetting('ui.activeLanguage', 'it')
 })
 
 describe('inDeliveryWindow (puro)', () => {

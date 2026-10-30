@@ -30,6 +30,7 @@ const { buildApiMethods } = await import('../api')
 import type { PollDeps } from '../scheduler'
 import type { JobWorker } from '../worker'
 import type { RoutineTrigger, SandbotEvent } from '../../shared/types'
+import { setSetting } from '../../main/store/db'
 
 const AGENT = 'agent_p'
 let clock = 0
@@ -59,6 +60,8 @@ const mkPollRoutine = (trigger: Partial<Extract<RoutineTrigger, { type: 'connect
 beforeAll(() => {
   const dir = mkdtempSync(join(tmpdir(), 'sandbot-polls-test-'))
   setDataDir(dir)
+  // fase 17c: la lingua dei testi del daemon è l'italiano (come prima)
+  setSetting('ui.activeLanguage', 'it')
   dataDir()
   db()
 })
@@ -75,6 +78,8 @@ beforeEach(() => {
   d.exec('DELETE FROM jobs')
   d.exec('DELETE FROM routines')
   d.exec('DELETE FROM settings')
+  // fase 17c: la lingua dei testi del daemon è l'italiano (come prima)
+  setSetting('ui.activeLanguage', 'it')
 })
 
 describe('tickConnectorPolls: id nuovi, prima esecuzione silenziosa', () => {

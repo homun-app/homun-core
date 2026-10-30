@@ -6,6 +6,7 @@ import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import { mkdtempSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { formatUi } from '../../../shared/ui-text'
 
 const { setDataDir, dataDir, createRoutine, getRoutine, updateRoutine } = await import('../../store/db')
 const { updateStateVerdict, automationEventText } = await import('../update-state')
@@ -39,9 +40,11 @@ describe('verdetto (puro)', () => {
     const v = updateStateVerdict({ target: 'routine', action: 'resume', id: r.id }, r)
     expect(v.kind).toBe('ask')
     if (v.kind === 'ask') {
+      // fase 17c (C2): reason inglese per il modello (cron en); ui per la card
       expect(v.reason).toContain('Riepilogo mattina')
-      expect(v.reason).toContain('giorni feriali')
+      expect(v.reason).toContain('on weekdays')
       expect(v.reason).toContain('riassumi le email')
+      expect(v.ui?.id).toBe('approval.usResume')
     }
   })
 
@@ -78,7 +81,8 @@ describe('esecuzione (store reale)', () => {
     expect(r.description).toBe('monitor quotidiano')
     expect(r.timezone).toBe('Europe/Rome')
     expect(meta.automation).toMatchObject({ action: 'create', name: 'Monitor menzioni' })
-    expect(automationEventText('create', 'Monitor menzioni')).toBe('Routine creata (in pausa): Monitor menzioni')
+    // fase 17c (C2): automationEventText torna l'UiText; il testo si formatta
+    expect(formatUi(automationEventText('create', 'Monitor menzioni'), 'it')).toBe('Routine creata (in pausa): Monitor menzioni')
   })
 
   it('cron non valido → errore leggibile per il modello, NESSUNA routine creata', async () => {
@@ -174,7 +178,7 @@ describe('esecuzione (store reale)', () => {
     const resumed = await executeTool(AGENT, 'update_state', { target: 'routine', action: 'resume', id })
     expect(resumed.meta.automation).toMatchObject({ action: 'resume', name: 'Giro prova' })
     expect(getRoutine(id)!.enabled).toBe(1)
-    expect(automationEventText('resume', 'Giro prova')).toBe('Routine attivata: Giro prova')
+    expect(formatUi(automationEventText('resume', 'Giro prova'), 'it')).toBe('Routine attivata: Giro prova')
   })
 
   it('update cambia i campi; delete elimina con l\'evento', async () => {

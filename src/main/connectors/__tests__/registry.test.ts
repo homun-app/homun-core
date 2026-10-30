@@ -15,7 +15,7 @@ import {
 
 describe('registryTrust — lo spazio dei nomi del registro (puro)', () => {
   it('nomi a DNS inverso = dominio verificato (etichette invertite)', () => {
-    expect(registryTrust('com.notion/mcp')).toEqual({ kind: 'verified-domain', domain: 'notion.com', label: 'dominio verificato (notion.com)' })
+    expect(registryTrust('com.notion/mcp')).toEqual({ kind: 'verified-domain', domain: 'notion.com', label: 'verified domain (notion.com)' })
     const domainOf = (name: string): string => {
       const t = registryTrust(name)
       return t.kind === 'verified-domain' ? t.domain : '(non dominio)'
@@ -26,7 +26,7 @@ describe('registryTrust — lo spazio dei nomi del registro (puro)', () => {
   })
   it('io.github.<utente> = solo l\'account GitHub verificato', () => {
     expect(registryTrust('io.github.roman-right/mcp-example')).toEqual({
-      kind: 'github-account', user: 'roman-right', label: 'account GitHub (roman-right)'
+      kind: 'github-account', user: 'roman-right', label: 'GitHub account (roman-right)'
     })
   })
   it('tutto il resto è non verificato (namespace corto, nomi nudi, etichette sporche)', () => {

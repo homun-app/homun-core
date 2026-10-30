@@ -6,7 +6,7 @@ import { describe, expect, it, beforeAll, beforeEach, afterAll, vi } from 'vites
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { setDataDir, dataDir, db, createAgent, createRoutine, listRoutines, getEntries, appendEntry, createTask, type Routine } from '../../main/store/db'
+import { setDataDir, dataDir, db, createAgent, createRoutine, listRoutines, getEntries, appendEntry, createTask, type Routine , setSetting } from '../../main/store/db'
 import { claimDueJobs, activeJobForAgent, enqueueJob, pendingAgentPairJobs } from '../../main/store/jobs'
 import { enqueueUserMessage, enqueueWidgetResponse } from '../enqueue'
 import { dueRoutines, tickScheduler } from '../scheduler'
@@ -21,6 +21,8 @@ const emit: (e: SandbotEvent) => void = (e) => events.push(e)
 beforeAll(() => {
   const dir = mkdtempSync(join(tmpdir(), 'sandbot-queue-test-'))
   setDataDir(dir)
+  // fase 17c: la lingua dei testi del daemon è l'italiano (come prima)
+  setSetting('ui.activeLanguage', 'it')
   dataDir() // crea la directory
   db() // schema (incluse le tabelle jobs)
 })
@@ -34,6 +36,35 @@ beforeEach(() => {
   d.exec('DELETE FROM routines')
   d.exec('DELETE FROM agents')
   createAgent('TestBot', '')
+})
+
+describe('fase 17c (C2): le notice portano meta.ui e il content nella lingua dell’interfaccia', () => {
+  it('agente occupato → notice con content italiano E meta.ui (id+valori)', () => {
+    const a = createAgent('Occupato', '')
+    // job attivo sull'agente (lease del worker): enqueue accoda e scrive la notice
+    const first = enqueueJob(db(), { agentId: a.id, kind: 'user-message', payload: { text: 'x' }, runAt: Date.now(), now: Date.now() })
+    claimDueJobs(db(), Date.now(), 120_000)
+    expect(first).toBeTruthy()
+    enqueueUserMessage(db(), a.id, 'secondo', undefined, () => undefined)
+    const notice = getEntries(a.id).findLast((e) => e.kind === 'notice')!
+    expect(notice.content).toBe('Agente occupato: messaggio in coda (posizione 1).')
+    expect(notice.meta?.ui).toEqual({ id: 'notice.agentBusyQueued', values: { position: 1 } })
+  })
+
+  it('con ui.activeLanguage en il content è inglese, il meta.ui resta il codice', () => {
+    setSetting('ui.activeLanguage', 'en')
+    try {
+      const a = createAgent('Occupato en', '')
+      enqueueJob(db(), { agentId: a.id, kind: 'user-message', payload: { text: 'x' }, runAt: Date.now(), now: Date.now() })
+      claimDueJobs(db(), Date.now(), 120_000)
+      enqueueUserMessage(db(), a.id, 'secondo', undefined, () => undefined)
+      const notice = getEntries(a.id).findLast((e) => e.kind === 'notice')!
+      expect(notice.content).toBe('Agent busy: message queued (position 1).')
+      expect(notice.meta?.ui).toEqual({ id: 'notice.agentBusyQueued', values: { position: 1 } })
+    } finally {
+      setSetting('ui.activeLanguage', 'it')
+    }
+  })
 })
 
 describe('enqueueUserMessage: stessa semantica della coda della fase 1', () => {

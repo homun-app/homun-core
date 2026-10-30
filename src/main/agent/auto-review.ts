@@ -22,9 +22,12 @@
 // LLM iniettabile e timeout: il revisore riceve SOLO le regole e l'azione
 // (argomenti in un blocco delimitato marcato come DATO), mai il transcript né
 // i risultati dei tool — nessun testo esterno che possa convincerlo.
-import type { AutoReviewSettings } from '../../shared/types'
+import type { AutoReviewSettings, UiText } from '../../shared/types'
 import type { Verdict } from './permissions'
 import { languageName, type Lang } from '../../shared/language'
+// fase 17c (C2): le decisioni portano l'UiText del motivo per la card
+import { ui } from '../ui-language'
+import { UI } from '../../shared/ui-messages'
 
 /** Tetto di approvazioni automatiche per turno: poi si torna a chiedere. */
 export const AUTO_REVIEW_MAX_PER_TURN = 20
@@ -53,7 +56,7 @@ export type ReviewerOutcome =
 
 export type AutoReviewDecision =
   | { autoAllow: true; ruleMatched: string; reason?: string }
-  | { autoAllow: false; reason: string }
+  | { autoAllow: false; reason: string; ui: UiText }
 
 /** Tool che cambiano il comportamento futuro del bot: mai auto-approvabili. */
 const FUTURE_CHANGING_TOOLS = new Set(['update_skill', 'update_memory', 'update_state'])
@@ -84,7 +87,11 @@ export const CONTAMINATED_ASK_TOOLS = new Set([
 export function liftContaminatedAllow(verdict: Verdict, tool: string, contaminated: boolean): Verdict {
   if (!contaminated || verdict.kind !== 'allow') return verdict
   if (!CONTAMINATED_ASK_TOOLS.has(tool)) return verdict
-  return { kind: 'ask', reason: `${tool}: il turno ha letto contenuti web non fidati — l'azione con effetti torna all'utente` }
+  return {
+    kind: 'ask',
+    reason: `${tool}: the turn has read untrusted web content — the action with effects goes back to the user`,
+    ui: ui(UI.approvalContaminated, { tool })
+  }
 }
 
 /**
@@ -108,34 +115,54 @@ export function autoReviewDecision(
   reviewer: ReviewerOutcome,
   usedInTurn: number
 ): AutoReviewDecision {
-  if (!cfg.enabled) return { autoAllow: false, reason: 'auto-review disattivata' }
+  if (!cfg.enabled) return { autoAllow: false, reason: 'auto-review disabled', ui: ui(UI.autoReviewDisabled) }
   if (action.untrustedTurn) {
-    return { autoAllow: false, reason: 'turno aperto da un altro bot o da un evento esterno' }
+    return { autoAllow: false, reason: 'turn opened by another bot or an external event', ui: ui(UI.autoReviewUntrusted) }
   }
   // fase 11 (punto 2): le azioni con effetti di un turno contaminato da
   // contenuti web tornano all'utente — nemmeno una regola allow le copre
   if (action.contaminated && CONTAMINATED_ASK_TOOLS.has(action.tool)) {
-    return { autoAllow: false, reason: 'turno contaminato da contenuti web: l\'azione torna all\'utente' }
+    return {
+      autoAllow: false,
+      reason: 'turn contaminated by web content: the action goes back to the user',
+      ui: ui(UI.autoReviewContaminated)
+    }
   }
   if (action.neverAuto) {
-    return { autoAllow: false, reason: 'comando che esegue altri comandi (never-auto)' }
+    return { autoAllow: false, reason: 'command that runs other commands (never-auto)', ui: ui(UI.autoReviewNeverAuto) }
   }
   if (FUTURE_CHANGING_TOOLS.has(action.tool)) {
-    return { autoAllow: false, reason: `${action.tool} cambia il comportamento futuro del bot` }
+    return {
+      autoAllow: false,
+      reason: `${action.tool} changes the bot's future behaviour`,
+      ui: ui(UI.autoReviewFutureChanging, { tool: action.tool })
+    }
   }
   if (ALWAYS_ASK_TOOLS.has(action.tool)) {
-    return { autoAllow: false, reason: 'lo scambio di file con il Mac chiede sempre l\'utente' }
+    return {
+      autoAllow: false,
+      reason: 'the file exchange with the Mac always asks the user',
+      ui: ui(UI.autoReviewAlwaysAsk)
+    }
   }
   if (usedInTurn >= AUTO_REVIEW_MAX_PER_TURN) {
-    return { autoAllow: false, reason: `limite di ${AUTO_REVIEW_MAX_PER_TURN} approvazioni automatiche per turno raggiunto` }
+    return {
+      autoAllow: false,
+      reason: `limit of ${AUTO_REVIEW_MAX_PER_TURN} automatic approvals per turn reached`,
+      ui: ui(UI.autoReviewCap, { count: AUTO_REVIEW_MAX_PER_TURN })
+    }
   }
-  if (!reviewer.ok) return { autoAllow: false, reason: `revisore non disponibile: ${reviewer.error}` }
+  if (!reviewer.ok) {
+    return { autoAllow: false, reason: `reviewer unavailable: ${reviewer.error}`, ui: ui(UI.autoReviewUnavailable, { error: reviewer.error }) }
+  }
   if (reviewer.decision !== 'allow') {
-    return { autoAllow: false, reason: reviewer.reason ?? 'il revisore ha chiesto la conferma dell\'utente' }
+    // il reason del revisore lo scrive il MODELLO nella lingua dell'utente:
+    // resta quello che è (fase 17b A3)
+    return { autoAllow: false, reason: reviewer.reason ?? 'the reviewer asked for the user\'s confirmation', ui: ui(UI.autoReviewReviewerAsk) }
   }
   const rule = reviewer.ruleMatched
   if (!rule || !cfg.allowRules.includes(rule)) {
-    return { autoAllow: false, reason: 'il revisore non ha citato una regola allow valida' }
+    return { autoAllow: false, reason: 'the reviewer did not quote a valid allow rule', ui: ui(UI.autoReviewNoRule) }
   }
   return { autoAllow: true, ruleMatched: rule, ...(reviewer.reason ? { reason: reviewer.reason } : {}) }
 }

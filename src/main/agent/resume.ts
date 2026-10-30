@@ -12,9 +12,6 @@ import type { TranscriptEntry } from '../../shared/types'
 export const INTERRUPTED_TOOL_RESULT =
   'interrupted by a restart: the outcome is unknown. Check the state before repeating actions with external effects.'
 
-/** Notice visibile quando un turno riprende dopo un'interruzione. */
-export const RESUME_NOTICE = 'Turno ripreso dopo un\'interruzione.'
-
 export interface ResumePlan {
   /** Il turno era già concluso (ultimo entry = messaggio assistant finale): nessuna chiamata al modello. */
   alreadyComplete: boolean

@@ -40,8 +40,9 @@ export interface StaticClientCredentials {
  * UnauthorizedError → chi connette (ensure di mcp/index) segna il server
  * needs_auth, col bottone Connetti/Riconnetti dell'utente.
  */
-export const SILENT_NO_CLIENT_MSG =
-  'nessun client OAuth salvato per questo server e la connessione silenziosa non ne registra: connetti il server col bottone Connetti/Riconnetti (il flusso interattivo registra e salva il client)'
+// fase 17c (C3): l'id del catalogo UI del messaggio — il testo finisce nello
+// stato needs_auth che la UI mostra, tradotto alla lingua dell'interfaccia
+export const SILENT_NO_CLIENT_UI = { id: 'conn.silentNoClient' } as const
 
 export interface OAuthProviderDeps {
   /** Server MCP a cui i segreti appartengono (chiave dello store cifrato). */
@@ -136,7 +137,8 @@ export function createOAuthProvider(
       // needs_auth. Con CIMD si prosegue normale: l'URL-based client id non
       // ha bisogno né di client salvato né di registrazione.
       if (!stored && deps.registration === 'existing-only' && !deps.clientMetadataUrl) {
-        throw new UnauthorizedError(SILENT_NO_CLIENT_MSG)
+        const { uiLanguage, formatUi } = await import('../ui-language')
+        throw new UnauthorizedError(formatUi(SILENT_NO_CLIENT_UI, uiLanguage()))
       }
       return stored
     },

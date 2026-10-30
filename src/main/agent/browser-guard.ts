@@ -95,9 +95,22 @@ export function refInfo(snapshot: string | null, ref: string): RefInfo | null {
   return { role: m[1]!.toLowerCase(), name: m[2] ?? '', text: colon >= 0 ? rest.slice(colon + 1).trim() : '' }
 }
 
+/**
+ * Fase 17c (C2): il motivo di un ask in forma di CODICE (con le parti
+ * variabili), per l'id card.browserAsk del catalogo UI — la card mostra la
+ * lingua dell'interfaccia, il `reason` inglese resta per il modello.
+ */
+export interface BrowserAskInfo {
+  kind: 'refMissing' | 'submit' | 'enter' | 'commit' | 'probe'
+  ref?: string
+  field?: string
+  name?: string
+  role?: string
+}
+
 export type BrowserActionRisk =
   | { kind: 'free' }
-  | { kind: 'ask'; reason: string }
+  | { kind: 'ask'; reason: string; ask: BrowserAskInfo }
   | { kind: 'deny'; reason: string }
 
 /** Il testo del deny sui campi con credenziali o dati di pagamento. */
@@ -133,7 +146,8 @@ export function browserActionRisk(
     if (!ref) {
       return {
         kind: 'ask',
-        reason: `ref "${askedRef}" non presente nell'ultimo snapshot ricevuto: ricarica la pagina con browser_snapshot prima di agire`
+        reason: `ref "${askedRef}" not present in the last snapshot received: reload the page with browser_snapshot before acting`,
+        ask: { kind: 'refMissing', ref: askedRef }
       }
     }
   }
@@ -144,19 +158,31 @@ export function browserActionRisk(
       return { kind: 'deny', reason: CREDENTIAL_DENY_TEXT }
     }
     if (args.submit === true) {
-      return { kind: 'ask', reason: `browser_type con submit: true invia il modulo (campo "${ref?.name || ref?.text || '?'}")` }
+      return {
+        kind: 'ask',
+        reason: `browser_type with submit: true sends the form (field "${ref?.name || ref?.text || '?'}")`,
+        ask: { kind: 'submit', field: ref?.name || ref?.text || '?' }
+      }
     }
     return { kind: 'free' }
   }
   if (tool === 'browser_press_key') {
     const key = String(args.key ?? '')
     if (key === 'Enter' || key === 'NumpadEnter') {
-      return { kind: 'ask', reason: 'Invio può inviare il modulo (come browser_type con submit: true): se c\'è un modulo compilato, questo lo spedisce' }
+      return {
+        kind: 'ask',
+        reason: 'Enter can submit the form (like browser_type with submit: true): if a form is filled in, this sends it',
+        ask: { kind: 'enter' }
+      }
     }
     return { kind: 'free' }
   }
   if (tool === 'browser_click' && ref && matchesWholeWord(words, COMMIT_WORDS)) {
-    return { kind: 'ask', reason: `click su "${ref.name || ref.text}" (${ref.role}): un'azione che invia, compra o impegna` }
+    return {
+      kind: 'ask',
+      reason: `click on "${ref.name || ref.text}" (${ref.role}): an action that sends, buys or commits`,
+      ask: { kind: 'commit', name: ref.name || ref.text, role: ref.role }
+    }
   }
   return { kind: 'free' }
 }
@@ -245,7 +271,8 @@ export function parseEvaluateResult(mcpResultText: string): FieldProbeInfo | nul
 }
 
 /** Il testo dell'ask quando la verifica interna del campo NON riesce (J3). */
-export const FIELD_PROBE_ASK_TEXT = 'non riesco a verificare il tipo del campo'
+/** Il result per il MODELLO quando la verifica interna del campo non riesce (J3, inglese dal 17c: il fill la legge). */
+export const FIELD_PROBE_ASK_TEXT = 'cannot verify the type of the field'
 
 /**
  * Correzione J3, giro K1: la decisione di browser_type dopo la verifica INTERNA
@@ -266,7 +293,7 @@ export function applyFieldProbe(
 ): BrowserActionRisk {
   if (credential === true) return { kind: 'deny', reason: CREDENTIAL_DENY_TEXT }
   if (credential === false) return risk
-  if (risk.kind === 'free') return { kind: 'ask', reason: FIELD_PROBE_ASK_TEXT }
+  if (risk.kind === 'free') return { kind: 'ask', reason: FIELD_PROBE_ASK_TEXT, ask: { kind: 'probe' } }
   return risk
 }
 

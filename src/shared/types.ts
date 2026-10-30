@@ -137,8 +137,11 @@ export type SendMessagePayload =
       id: string
       name: string
       publisher?: string
+      /** label di fiducia per il modello (inglese); la UI traduce da trustKind */
       trust: string
       trustKind: 'verified-domain' | 'github-account' | 'unverified'
+      /** il dettaglio del kind (dominio verificato o utente GitHub) */
+      trustDetail?: string
       siteUrl?: string
       runtime: { kind: 'remote'; host: string } | { kind: 'box-npm'; command: string }
       needs:
@@ -149,7 +152,10 @@ export type SendMessagePayload =
       thirdPartyWarning?: true
       /** proposta nata in un turno contaminato: avviso in cima alla card */
       untrusted?: true
-      /** modalità host: il server stdio non si installa, bottone disattivato */
+      /**
+       * modalità host: il server stdio non si installa, bottone disattivato.
+       * Fase 17c: CODICE (es. 'host-mode') — la UI lo traduce
+       */
       disabledReason?: string
       reason?: string
     }
@@ -165,11 +171,14 @@ export type SendMessagePayload =
       name: string
       marketplace: string
       trust: string
+      /** fase 17c (C5): true = marketplace ufficiale — la UI traduce la fiducia da qui */
+      official?: boolean
       repoUrl?: string
       /** i primi 12 caratteri dello sha effettivo */
       sha12: string
       skills: string[]
-      servers: Array<{ name: string; runtimeLabel: string }>
+      /** fase 17c (C5): codice del runtime del server (la UI traduce); runtimeDetail = host o comando */
+      servers: Array<{ name: string; runtimeKind: 'unsupported' | 'remote' | 'box'; runtimeDetail: string; runtimeLabel?: string }>
       settings: Array<{ key: string; description?: string; sensitive?: boolean }>
       /** componenti presenti ma NON importate (non girano in SandBot) */
       ignored: string[]
@@ -285,6 +294,27 @@ export interface TranscriptEntry {
   meta: Record<string, unknown> | null
   createdAt: number
 }
+
+/**
+ * Fase 17c (C1): un testo della UI salvato o prodotto dal daemon/main, come
+ * codice stabile + valori (lo stato dell'arte di Slack/Discord e ICU: chi
+ * mostra il testo lo traduce col catalogo, così la storia cambia lingua con
+ * l'utente). I valori sono SOLO stringhe e numeri; un valore che è a sua
+ * volta testo da tradurre si scrive come `select` su un codice o come id
+ * separato. I testi esterni (errori di provider, output di tool) entrano
+ * come valori, invariati.
+ */
+export interface UiText {
+  id: string
+  values?: Record<string, string | number>
+}
+
+/**
+ * Fase 17c (C5): un campo bilingue dei dati statici (catalogo connettori,
+ * template). La forma stringa resta valida (dati preesistenti e nomi propri
+ * che non si traducono): pickLang la sceglie.
+ */
+export type Localized = string | { it: string; en: string }
 
 // ---- Provider / modelli personalizzati ----
 export type ProviderKind =
@@ -778,15 +808,16 @@ export interface FillGrantInfo {
  */
 export interface BotTemplate {
   id: string
-  name: string
-  description: string
+  /** fase 17c (C5): campi bilingui — la galleria usa la lingua dell'interfaccia, l'installazione quella dell'utente */
+  name: Localized
+  description: Localized
   avatar: string
-  roles: string[]
+  roles: Localized[]
   routines: Array<{
-    name: string
+    name: Localized
     slug: string
-    description: string
-    content: string
+    description: Localized
+    content: Localized
     trigger: RoutineTrigger
     /** domande da fare all'utente a fine kickstart (fuso orario, soglie, …) */
     askUserFor: string[]
@@ -851,6 +882,8 @@ export interface McpServerInfo {
   needsAuth?: { kind: 'key' | 'env' | 'settings'; keys: string[] }
   /** fase 13: fiducia della scheda Installati */
   trustLabel?: string
+  /** fase 17c (C5): il kind della fiducia — la UI lo traduce */
+  trustKind?: 'verified-domain' | 'github-account' | 'unverified'
   /** fase 13 (correzione L1): OAuth scaduto/da rifare → bottone "Riconnetti" nella scheda Installati */
   needsReauth?: boolean
   /**

@@ -9,13 +9,14 @@
     "predev": "node scripts/prepare-wasm.mjs",
     "predist": "node scripts/prepare-wasm.mjs",
     "test": "vitest run",
-    "i18n:extract": "lingui extract --clean",
+    "i18n:extract": "lingui extract --clean && lingui compile --namespace es",
     "eval": "node scripts/run-eval.mjs",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "start": "electron-vite preview",
     "dist": "electron-vite build && electron-builder --mac",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "i18n:compile": "lingui compile --namespace es"
   },
   "keywords": [],
   "author": "",

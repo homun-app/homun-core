@@ -464,10 +464,13 @@ async function finishShell(deps: ShellHostDeps, job: ShellJob, status: 'done' | 
   updateShellJob(deps.db(), job.id, { status, exit_code: exitCode, finished_at: deps.now() })
   if (already.awaited) return // il bot ha già letto l'esito con await_shell
   const tail = await redactedTail(deps, job.agent_id, job.log_path, 50, job.secret_names)
+  // fase 17c (C2, MU): il testo per il modello resta inglese; meta.ui per la
+  // vista nella lingua dell'interfaccia
+  const { ui, UI } = await import('../ui-language')
   deps.enqueue?.(job.agent_id, [
     formatShellDone(job.command, job.id, exitCode, tail, status),
     "The background command has finished: decide whether to continue the work, notify the user with send_to_user, or stay silent."
-  ].join('\n'), { shellId: job.id, shellStatus: status })
+  ].join('\n'), { shellId: job.id, shellStatus: status, ui: ui(UI.shellDoneLine) })
   updateShellJob(deps.db(), job.id, { notified: true })
 }
 

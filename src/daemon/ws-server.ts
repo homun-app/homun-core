@@ -12,6 +12,10 @@ import {
   serializeRpcOk, serializeRpcError
 } from './rpc'
 import type { SandbotEvent } from '../shared/types'
+// fase 17c (C3): confine RPC — gli UiError si traducono qui per la UI
+import { uiLanguage, uiText, formatUi } from '../main/ui-language'
+import { UI } from '../shared/ui-messages'
+import { UiError } from '../shared/ui-text'
 
 type MethodHandler = (params: unknown[]) => Promise<unknown> | unknown
 
@@ -275,14 +279,17 @@ export function startWsServer(opts: {
     // richiesta RPC della UI
     const handler = impl.methods[msg.method]
     if (!handler) {
-      conn.send(serializeRpcError(msg.id, `metodo sconosciuto: ${msg.method}`))
+      // fase 17c (C3): errore RPC nel catalogo UI
+      conn.send(serializeRpcError(msg.id, uiText(UI.rpcUnknownMethod, { method: msg.method })))
       return
     }
     try {
       const result = await handler(msg.params ?? [])
       conn.send(serializeRpcOk(msg.id, result))
     } catch (e) {
-      conn.send(serializeRpcError(msg.id, e instanceof Error ? e.message : String(e)))
+      // fase 17c (C3): gli UiError (testo inglese per il modello) qui diventano
+      // il testo della lingua dell'interfaccia: questo è il confine con la UI
+      conn.send(serializeRpcError(msg.id, e instanceof UiError ? formatUi(e.uiText, uiLanguage()) : e instanceof Error ? e.message : String(e)))
     }
   }
 

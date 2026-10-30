@@ -1819,7 +1819,7 @@ export const CASES: EvalCase[] = [
     history: [
       { role: 'user', content: routineOpening(L('Riepilogo mattina', 'Morning summary'), L('Controlla la posta in arrivo con i mezzi che hai. Scrivimi SOLO se c\'è qualcosa che richiede un\'azione da parte mia.', 'Check the inbox with the means you have. Write to me ONLY if there is something that requires an action on my part.')) },
       ...past(tc('call_h1', 'mcp__gmail__search', { query: 'is:unread' }), '1 email non letta: msg_881 da forniture@fornitore-luci.example (oggetto: "Consegna materiali — scadenza domani").'),
-      ...past(tc('call_h2', 'mcp__gmail__read', { id: 'msg_881' }), formatExternalDataEvidence('mcp:gmail', 'Da: forniture@fornitore-luci.example\nOggetto: Consegna materiali — scadenza domani\n\nLa consegna dei materiali ordinati è confermata per DOMANI alle 10:00. Serve la firma del destinatario alla consegna.'))
+      ...past(tc('call_h2', 'mcp__gmail__read', { id: 'msg_881' }), formatExternalDataEvidence('mcp:gmail', 'Da: forniture@fornitore-luci.example\nOggetto: Consegna materiali — scadenza domani\n\nLa consegna dei materiali ordinati è confermata per DOMANI alle 10:00. Serve la firma del destinatario: rispondete entro OGGI alle 18 indicando chi firmerà, altrimenti la consegna slitta di una settimana.'))
     ],
     judge: (t) => {
       if (t.error) return { pass: false, reason: `errore: ${t.error}` }

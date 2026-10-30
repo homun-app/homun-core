@@ -5,11 +5,37 @@
 // Fase 6: describeEverySchedule e describeTrigger estendono la descrizione ai
 // nuovi tipi di trigger (schedule "ogni X", email, calendar_event, webhook,
 // poll, presence_return).
+// Fase 17c (C6): la lingua è un argomento (default 'it', la lingua storica
+// delle card); i nomi dei giorni arrivano da Intl.DateTimeFormat (niente
+// tabelle a mano) e le frasi fisse sono id del catalogo UI
+// (src/shared/ui-messages.ts), formattati con l'istanza i18n propria di
+// shared/ui-text.ts — funziona nel daemon, nel main e nel renderer.
 
 import type { EveryScheduleSpec, RoutineTrigger } from './types'
+import type { UiLanguage } from './ui-language'
+import { UI } from './ui-messages'
+import { formatUi, ui, type UiMessageDescriptor } from './ui-text'
+import type { UiLanguage as Lang } from './ui-language'
 
-const DOW_IT = ['domenica', 'lunedì', 'martedì', 'mercoledì', 'giovedì', 'venerdì', 'sabato']
+/** formato rapido: messaggio del catalogo + valori → testo nella lingua. */
+const fmt = (m: UiMessageDescriptor, lang: Lang, values?: Record<string, string | number>): string =>
+  formatUi(ui(m, values), lang)
+
 const DOW_SHORT: Record<string, number> = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 }
+
+/** Il locale Intl della lingua (le date inglesi seguono il glossario: en-GB). */
+function localeOf(lang: UiLanguage): string {
+  return lang === 'en' ? 'en-GB' : 'it-IT'
+}
+
+/**
+ * Il nome del giorno della settimana nella lingua richiesta, da Intl (2024-01-07
+ * era una domenica: la data fissa dà il nome lungo senza tabelle a mano).
+ */
+function dowName(dow: number, lang: UiLanguage): string {
+  const d = new Date(Date.UTC(2024, 0, 7 + dow))
+  return new Intl.DateTimeFormat(localeOf(lang), { weekday: 'long', timeZone: 'UTC' }).format(d)
+}
 
 function fields(expr: string): string[] | null {
   const f = expr.trim().split(/\s+/)
@@ -44,27 +70,33 @@ function numbers(field: string, min: number, max: number, names?: Record<string,
 
 const hhmm = (h: number, m: number): string => `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
 
-function atTimes(hours: number[], minutes: number[]): string {
+function atTimes(hours: number[], minutes: number[], lang: UiLanguage): string {
   const times = hours.map((h) => hhmm(h, minutes[0] ?? 0)).slice(0, 3)
-  const extra = hours.length > 3 ? ` (+${hours.length - 3} orari)` : ''
-  return times.length > 1 ? `alle ${times.join(', ')}` + extra : `alle ${times[0] ?? '00:00'}`
+  if (times.length > 1) {
+    return fmt(UI.cronAtTimes, lang, {
+      times: times.join(', '),
+      extra: hours.length > 3 ? 'yes' : 'no',
+      ...(hours.length > 3 ? { more: hours.length - 3 } : {})
+    })
+  }
+  return fmt(UI.cronAtTime, lang, { time: times[0] ?? '00:00' })
 }
 
-/** Descrizione italiana dell'espressione (forma grezza come ripiego). */
-export function describeCron(expr: string): string {
+/** Descrizione dell'espressione nella lingua richiesta (forma grezza come ripiego). */
+export function describeCron(expr: string, lang: UiLanguage = 'it'): string {
   const f = fields(expr)
-  if (!f) return `cron "${expr}"`
+  if (!f) return fmt(UI.cronRaw, lang, { expr })
   const [minF, hourF, domF, monF, dowF] = f as [string, string, string, string, string]
 
   // ogni minuto / ogni N minuti (qualsiasi resto)
   const everyMin = numbers(minF, 0, 59)
   if (minF.startsWith('*/') && hourF === '*' && domF === '*' && monF === '*' && dowF === '*') {
-    return `ogni ${minF.slice(2)} minuti`
+    return fmt(UI.cronEveryNMinutes, lang, { n: minF.slice(2) })
   }
-  if (minF === '*' && hourF === '*' && domF === '*' && monF === '*' && dowF === '*') return 'ogni minuto'
+  if (minF === '*' && hourF === '*' && domF === '*' && monF === '*' && dowF === '*') return fmt(UI.cronEveryMinute, lang, {})
   if (hourF.startsWith('*/') && domF === '*' && monF === '*' && dowF === '*') {
     const m = everyMin?.length === 1 ? everyMin[0]! : 0
-    return `ogni ${hourF.slice(2)} ore${m ? ` al minuto ${m}` : ''}`
+    return fmt(UI.cronEveryNHours, lang, { n: hourF.slice(2), withMin: m ? 'yes' : 'no', ...(m ? { m } : {}) })
   }
 
   const hours = hourF === '*' ? null : numbers(hourF, 0, 23)
@@ -72,49 +104,57 @@ export function describeCron(expr: string): string {
   const dow = dowF === '*' ? null : numbers(dowF, 0, 7, DOW_SHORT)?.map((d) => (d === 7 ? 0 : d))
   const dom = domF === '*' ? null : numbers(domF, 1, 31)
   const mon = monF === '*' ? null : numbers(monF, 1, 12)
-  if (hours === null || hours.length === 0) return `cron "${expr}"` // troppo irregolare: forma grezza
+  if (hours === null || hours.length === 0) return fmt(UI.cronRaw, lang, { expr }) // troppo irregolare: forma grezza
 
   let when: string
-  if (dow?.length === 5 && [1, 2, 3, 4, 5].every((d) => dow.includes(d))) when = 'nei giorni feriali'
-  else if (dow?.length === 2 && dow.includes(0) && dow.includes(6)) when = 'nel weekend'
-  else if (dow?.length && !dom) when = dow.length === 1 ? `il ${DOW_IT[dow[0]!]}` : `il ${dow.map((d) => DOW_IT[d]).join(', ')}`
-  else if (dom?.length === 1 && !dow) when = `il giorno ${dom[0]} del mese`
-  else if (dom && dow) when = `il giorno ${dom.join(', ')} del mese (${dow.map((d) => DOW_IT[d]).join(', ')})`
-  else if (mon?.length) when = `il ${mon.join('/')} di ogni mese`
-  else when = 'tutti i giorni'
+  if (dow?.length === 5 && [1, 2, 3, 4, 5].every((d) => dow.includes(d))) when = fmt(UI.cronWeekdays, lang, {})
+  else if (dow?.length === 2 && dow.includes(0) && dow.includes(6)) when = fmt(UI.cronWeekend, lang, {})
+  else if (dow?.length && !dom) {
+    when = fmt(UI.cronOnDays, lang, { days: dow.map((d) => dowName(d, lang)).join(', ') })
+  } else if (dom?.length === 1 && !dow) when = fmt(UI.cronDayOfMonth, lang, { days: dom[0]! })
+  else if (dom && dow) {
+    when = fmt(UI.cronDayOfMonthDow, lang, {
+      days: dom.join(', '),
+      dows: dow.map((d) => dowName(d, lang)).join(', ')
+    })
+  } else if (mon?.length) when = fmt(UI.cronMonthsOfYear, lang, { months: mon.join('/') })
+  else when = fmt(UI.cronEveryDay, lang, {})
 
-  return `${when} ${atTimes(hours, minutes)}`
+  return `${when} ${atTimes(hours, minutes, lang)}`
 }
 
 /** L'orario di uno schedule "ogni X": "alle 09:00" / "verso le 09:00" (around = ±15 min). */
-function everyAt(at: string | undefined, mode: 'at' | 'around'): string {
+function everyAt(at: string | undefined, mode: 'at' | 'around', lang: UiLanguage): string {
   const t = at ?? '00:00'
-  return mode === 'around' ? `verso le ${t} (±15 min)` : `alle ${t}`
+  return mode === 'around' ? fmt(UI.cronAroundTime, lang, { time: t }) : fmt(UI.cronAtTime, lang, { time: t })
 }
 
-/** Descrizione italiana di uno schedule "ogni X" (fase 6). */
-export function describeEverySchedule(s: EveryScheduleSpec): string {
-  if (s.every === 'hour') return `ogni ora al minuto ${(s.at ?? '00:00').split(':')[1] ?? '00'}`
-  const at = everyAt(s.at, s.mode)
+/** Descrizione di uno schedule "ogni X" nella lingua richiesta (fase 6). */
+export function describeEverySchedule(s: EveryScheduleSpec, lang: UiLanguage = 'it'): string {
+  if (s.every === 'hour') return fmt(UI.cronEveryHourAt, lang, { min: (s.at ?? '00:00').split(':')[1] ?? '00' })
+  const at = everyAt(s.at, s.mode, lang)
   switch (s.every) {
-    case 'day': return `ogni giorno ${at}`
-    case 'weekday': return `nei giorni feriali ${at}`
-    case 'week': return `ogni settimana il ${DOW_IT[s.weekday ?? 1]} ${at}`
-    case 'month': return `il giorno ${s.monthDay ?? 1} di ogni mese ${at}`
+    case 'day': return fmt(UI.cronEveryDayAt, lang, { at })
+    case 'weekday': return fmt(UI.cronWeekdayAt, lang, { at })
+    case 'week': return fmt(UI.cronWeeklyAt, lang, { day: dowName(s.weekday ?? 1, lang), at })
+    case 'month': return fmt(UI.cronMonthlyAt, lang, { day: s.monthDay ?? 1, at })
   }
 }
 
 /**
- * Descrizione italiana di un trigger di routine (fase 6). `legacySchedule` è
- * l'espressione cron della colonna schedule, usata quando il trigger è assente.
+ * Descrizione di un trigger di routine nella lingua richiesta (fase 6).
+ * `legacySchedule` è l'espressione cron della colonna schedule, usata quando
+ * il trigger è assente.
  */
-export function describeTrigger(t: RoutineTrigger | null | undefined, legacySchedule?: string): string {
-  if (!t) return describeCron(legacySchedule ?? '* * * * *')
-  if (t.type === 'schedule') return t.kind === 'cron' ? describeCron(t.cron) : describeEverySchedule(t)
-  if (t.type === 'webhook') return 'quando riceve una chiamata webhook'
-  if (t.type === 'presence_return') return 'quando torni al computer dopo un\'assenza'
-  const q = typeof t.args?.query === 'string' ? ` che corrisponde a "${t.args.query}"` : ''
-  if (t.preset === 'email') return `quando arriva un'email${q}`
-  if (t.preset === 'calendar_event') return `${t.offsetMinutes ?? 0} minuti prima di ogni evento del calendario`
-  return `quando il tool ${t.tool} del connettore ${t.connectorId} vede un nuovo elemento (${t.idField})`
+export function describeTrigger(t: RoutineTrigger | null | undefined, legacySchedule?: string, lang: UiLanguage = 'it'): string {
+  if (!t) return describeCron(legacySchedule ?? '* * * * *', lang)
+  if (t.type === 'schedule') return t.kind === 'cron' ? describeCron(t.cron, lang) : describeEverySchedule(t, lang)
+  if (t.type === 'webhook') return fmt(UI.triggerWebhook, lang, {})
+  if (t.type === 'presence_return') return fmt(UI.triggerPresence, lang, {})
+  const query = typeof t.args?.query === 'string' ? t.args.query : ''
+  if (t.preset === 'email') {
+    return fmt(UI.triggerEmail, lang, { withQuery: query ? 'yes' : 'no', ...(query ? { query } : {}) })
+  }
+  if (t.preset === 'calendar_event') return fmt(UI.triggerCalendar, lang, { minutes: t.offsetMinutes ?? 0 })
+  return fmt(UI.triggerTool, lang, { tool: t.tool, connector: t.connectorId, field: t.idField })
 }

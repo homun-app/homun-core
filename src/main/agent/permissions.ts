@@ -10,6 +10,10 @@ import type { PermissionMode } from '../../shared/types'
 import { targetKey, runCommandVerdict, commandKey, isNeverAuto, ruleToolMatches, mcpAnnotationMode, type McpAnnotationsLike } from './permission-rules'
 import { analyzeCommand } from './shell-ast'
 import { updateStateVerdict, memoryScopeVerdict, type UpdateStateArgs } from './update-state'
+// fase 17c (C2): l'UiText accanto a reason — la card mostra la lingua dell'utente
+import { ui } from '../ui-language'
+import { UI } from '../../shared/ui-messages'
+import type { UiText } from '../../shared/types'
 
 // re-export: i consumer continuano a importare targetKey da qui (loop.ts usa permissions.targetKey)
 export { targetKey }
@@ -30,9 +34,14 @@ export function setMcpAnnotationsLookup(fn: (tool: string) => McpAnnotationInfo 
   mcpAnnotationsLookup = fn
 }
 
+/**
+ * Fase 17c (C2): i verdetti ask portano anche l'UiText del motivo (ui, o uis
+ * per run-command che somma più motivi). `reason` resta il testo per il
+ * modello dove il modello lo legge; la card mostra l'UiText.
+ */
 export type Verdict =
   | { kind: 'allow'; via: 'rule' | 'grant' }
-  | { kind: 'ask'; reason: string; keys?: string[]; secretRefs?: string[] }
+  | { kind: 'ask'; reason: string; keys?: string[]; secretRefs?: string[]; ui?: UiText; uis?: UiText[] }
   | { kind: 'deny'; reason: string }
 
 function matchRule(tool: string, target: string, rules: ReturnType<typeof getPermissions>['rules']): PermissionMode | null {
@@ -126,7 +135,7 @@ export async function check(
       ? getRoutine(Number(input.id))
       : null
     const v = updateStateVerdict(input as UpdateStateArgs, routine)
-    if (v.kind === 'ask') return { kind: 'ask', reason: v.reason }
+    if (v.kind === 'ask') return { kind: 'ask', reason: v.reason, ui: v.ui }
     return { kind: 'allow', via: 'rule' }
   }
 
@@ -141,6 +150,7 @@ export async function check(
     return {
       kind: 'ask',
       reason: d.reasons.join('; '),
+      ...(d.uis.length ? { uis: d.uis } : {}),
       keys: d.keys,
       ...(d.secretRefs.length ? { secretRefs: d.secretRefs } : {})
     }
@@ -161,7 +171,7 @@ export async function check(
     if (specific) {
       return specific.mode === 'always_allow'
         ? { kind: 'allow', via: 'rule' }
-        : { kind: 'ask', reason: `${tool} richiede approvazione` }
+        : { kind: 'ask', reason: `${tool} requires approval`, ui: ui(UI.approvalToolRequires, { tool }) }
     }
     if (listGrants().some((g) => g.tool === tool && g.target === '*')) {
       return { kind: 'allow', via: 'grant' }
@@ -170,12 +180,16 @@ export async function check(
     const annotated = mcpAnnotationMode(info?.annotations, info?.catalogServer ?? false)
     if (annotated === 'always_allow') return { kind: 'allow', via: 'rule' }
     if (annotated === 'needs_approval') {
-      return { kind: 'ask', reason: `${tool} acts towards the outside (MCP server annotation)` }
+      return {
+        kind: 'ask',
+        reason: `${tool} acts towards the outside (MCP server annotation)`,
+        ui: ui(UI.approvalMcpOutward, { tool })
+      }
     }
     // annotazioni assenti: regola di default (mcp__* → needs_approval) o default globale
     const mode = matchRule(tool, '*', cfg.rules) ?? cfg.default
     if (mode === 'always_allow') return { kind: 'allow', via: 'rule' }
-    return { kind: 'ask', reason: `${tool} requires approval` }
+    return { kind: 'ask', reason: `${tool} requires approval`, ui: ui(UI.approvalToolRequires, { tool }) }
   }
 
   const target = targetKey(tool, input)
@@ -193,7 +207,7 @@ export async function check(
     agentId &&
     !resolveBoxPath(String(input.path ?? ''), boxRoot(), boxDir(agentId), realpathSync).ok
   ) {
-    return { kind: 'ask', reason: 'reads outside the shared box' }
+    return { kind: 'ask', reason: 'reads outside the shared box', ui: ui(UI.approvalReadsOutsideBox) }
   }
 
   // standing grant: match ESATTO tool+target ("Consenti sempre" su quel target)
@@ -201,7 +215,13 @@ export async function check(
   if (grant) return { kind: 'allow', via: 'grant' }
 
   if (mode === 'always_allow') return { kind: 'allow', via: 'rule' }
-  return { kind: 'ask', reason: `${tool}${target !== '*' && target ? ` (${target})` : ''} richiede approvazione` }
+  return {
+    kind: 'ask',
+    reason: `${tool}${target !== '*' && target ? ` (${target})` : ''} requires approval`,
+    ui: target !== '*' && target
+      ? ui(UI.approvalToolTargetRequires, { tool, target })
+      : ui(UI.approvalToolRequires, { tool })
+  }
 }
 
 /**

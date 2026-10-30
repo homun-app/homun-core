@@ -24,6 +24,9 @@ import { setMcpAnnotationsLookup } from '../agent/permissions'
 import { dockerStdioMcpArgv } from '../sandbox/docker-argv'
 import { boxOwnerOf, ensureBoxContainer, ensureBotHome } from '../sandbox'
 import type { ToolDef } from '../agent/llm'
+// fase 17c (C3/C5): lo stato needs_auth che la UI mostra è nel catalogo UI; trustKind per la vista Installati
+import { uiText } from '../ui-language'
+import { UI } from '../../shared/ui-messages'
 
 export interface McpServerConfig {
   id: string
@@ -63,6 +66,8 @@ export interface McpServerConfig {
   needsAuth?: { kind: 'key' | 'env' | 'settings'; keys: string[] }
   /** fase 13: fiducia mostrata nella scheda Installati (dominio verificato, …) */
   trustLabel?: string
+  /** fase 17c (C5): il kind della fiducia — la UI lo traduce */
+  trustKind?: 'verified-domain' | 'github-account' | 'unverified'
 }
 
 /**
@@ -255,7 +260,7 @@ async function ensure(cfg: McpServerConfig, force = false): Promise<Cached> {
     // activeTools all'inizio del turno — non solo in testServer/callTool:
     // altrimenti un token scaduto resterebbe un errore generico ritentato a
     // ogni turno, senza mai il bottone "Riconnetti"
-    if (e instanceof UnauthorizedError) markNeedsAuth(cfg, 'token scaduto: riconnetti')
+    if (e instanceof UnauthorizedError) markNeedsAuth(cfg, uiText(UI.connTokenExpired))
     throw e
   }
   const tools: McpToolInfo[] = (res.tools ?? []).map((t) => ({
@@ -282,7 +287,7 @@ export async function testServer(id: string): Promise<{ ok: boolean; error?: str
     const c = await ensure(cfg, true)
     return { ok: true, tools: c.tools.map((t) => t.def.name) }
   } catch (e) {
-    if (e instanceof UnauthorizedError) markNeedsAuth(cfg, 'token scaduto: riconnetti')
+    if (e instanceof UnauthorizedError) markNeedsAuth(cfg, uiText(UI.connTokenExpired))
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }
 }
@@ -385,7 +390,7 @@ export async function callTool(fullName: string, args: Record<string, unknown>):
       return text || JSON.stringify(res).slice(0, 4000)
     } catch (e) {
       if (e instanceof UnauthorizedError) {
-        markNeedsAuth(cfg, 'token scaduto: riconnetti')
+        markNeedsAuth(cfg, uiText(UI.connTokenExpired))
         throw new McpNeedsReconnectError(cfg.name, cfg.catalogId ?? cfg.id)
       }
       throw e

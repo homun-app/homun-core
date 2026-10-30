@@ -15,6 +15,9 @@ import type { UiLanguageSetting } from '../../../shared/ui-language'
  *  di Lingui è un segnaposto e non testo con doppie graffe (sintassi ICU). */
 const SECRET_TEMPLATE = '{{secret:NOME}}'
 import { describeTrigger } from '../../../shared/cron-human'
+// fase 17c (C5/C6): lingua attiva per le descrizioni; fiducia e template dai codici
+import { pickLang } from '../../../shared/localized'
+import { i18n } from '../lib/i18n'
 import { VaultTab } from './VaultSettings'
 import { choosePollTool, chooseQueryArgName } from '../../../shared/triggers'
 import type { ProviderConfig, ProviderKind, ModelInfo, Agent, RoutineInfo, RoutineSuggestion, ConnectorInfo, McpServerInfo, McpServerSecret, RoutineTrigger, TemplateInfo, AutoReviewSettings, WebSearchStatusRpc, WebSearchProviderStatusRpc } from '../../../shared/types'
@@ -38,6 +41,11 @@ const TAB_LABELS: Record<string, MessageDescriptor> = {
   autoreview: msg`Revisione automatica`,
   vault: msg`Cassaforte`,
   generale: msg`Generali`
+}
+
+/** La lingua attiva come UiLanguage (fase 17c, C6: descrizioni cron-human). */
+function uiLang(): 'it' | 'en' {
+  return i18n.locale === 'en' ? 'en' : 'it'
 }
 
 export function Settings() {
@@ -362,7 +370,15 @@ function InstalledTab() {
               <span className={`h-2 w-2 rounded-full ${needs ? 'bg-destructive' : 'bg-chart-2'}`} />
               <span className="text-sm text-foreground">{sv.name}</span>
               <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">{src?.kind ?? t`manuale`}</span>
-              {sv.trustLabel && <span className="text-[10px] text-muted-foreground">{sv.trustLabel}</span>}
+              {sv.trustLabel && (
+                <span className="text-[10px] text-muted-foreground">
+                  {/* fase 17c (C5): la fiducia si traduce dal kind; le righe vecchie mostrano il label com'è */}
+                  {sv.trustKind === 'verified-domain' ? t`dominio verificato`
+                    : sv.trustKind === 'github-account' ? t`account GitHub`
+                    : sv.trustKind === 'unverified' ? t`non verificato`
+                    : sv.trustLabel}
+                </span>
+              )}
               <span className="flex-1 truncate text-xs text-muted-foreground">{sv.transport === 'http' ? sv.url : `${sv.box?.command ?? ''} ${(sv.box?.args ?? []).join(' ')}`}</span>
               {/* L1+M2: sessione OAuth da (ri)fare di un server non del catalogo →
                   authorizeWithLoopback; "Connetti" se non ha mai avuto token
@@ -607,8 +623,9 @@ function ConnectorTile({ c }: { c: ConnectorInfo }) {
         )}
       </div>
       {c.state.error && <p className="mt-1 text-[11px] text-destructive/80">{c.state.error}</p>}
+      {/* fase 17c (C5): le note del catalogo nella lingua dell'interfaccia */}
       {c.state.status !== 'connected' && c.notes && (
-        <p className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">{c.notes}</p>
+        <p className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">{pickLang(c.notes, uiLang())}</p>
       )}
 
       {/* client OAuth statico (Google): credenziali cifrate, guida in docs/google-oauth.md */}
@@ -1438,11 +1455,11 @@ function AgentsTab() {
                     console.error('createAgentFromTemplate:', e instanceof Error ? e.message : e)
                   }
                 }}
-                title={t.description}
+                title={pickLang(t.description, uiLang())}
               >
                 <span className="mr-1">{t.avatar}</span>
-                <span className="text-sm text-foreground">{t.name}</span>
-                <span className="mt-0.5 block truncate text-xs text-muted-foreground">{t.description}</span>
+                <span className="text-sm text-foreground">{pickLang(t.name, uiLang())}</span>
+                <span className="mt-0.5 block truncate text-xs text-muted-foreground">{pickLang(t.description, uiLang())}</span>
               </button>
             ))}
           </div>
@@ -1578,7 +1595,7 @@ function RoutinesTab() {
                 <Trans>elimina</Trans>
               </button>
             </div>
-            <p className="mt-1 text-xs text-muted-foreground">{describeTrigger(r.trigger ?? null, r.schedule)}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{describeTrigger(r.trigger ?? null, r.schedule, uiLang())}</p>
             <div className="mt-1 flex items-center gap-3 text-[10px] text-muted-foreground">
               <span className={stateColor}>{state}</span>
               {r.next_run && <span>{t`prossima: ${formatDate(r.next_run)}`}</span>}

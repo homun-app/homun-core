@@ -15,6 +15,10 @@
 //    (`top`), come fanno i password manager.
 // Il valore NON entra MAI nel contesto del modello: va dal vault al campo.
 import { createHmac } from 'node:crypto'
+// fase 17c (C3): le validazioni TOTP si mostrano nel modulo sicuro (UI) —
+// testi del catalogo UI; gli errori NON contengono mai i valori
+import { uiText } from '../ui-language'
+import { UI } from '../../shared/ui-messages'
 
 // ---- TOTP (RFC 6238) ----
 
@@ -33,7 +37,7 @@ export function base32Decode(s: string): Buffer {
   const out: number[] = []
   for (const ch of clean) {
     const idx = alphabet.indexOf(ch)
-    if (idx < 0) throw new Error(`carattere base32 non valido: "${ch}"`)
+    if (idx < 0) throw new Error(uiText(UI.totpBadChar, { ch }))
     value = (value << 5) | idx
     bits += 5
     if (bits >= 8) {
@@ -87,35 +91,38 @@ export type TotpSecretCheck =
  */
 export function parseTotpSecret(input: string): TotpSecretCheck {
   const raw = input.trim()
-  if (!raw) return { ok: false, error: 'il segreto TOTP è vuoto' }
+  if (!raw) return { ok: false, error: uiText(UI.totpEmpty) }
   let candidate = raw
   if (/^otpauth:\/\//i.test(raw)) {
     let u: URL
     try {
       u = new URL(raw)
     } catch {
-      return { ok: false, error: 'URI otpauth non valido: copia il segreto base32 mostrato sotto il QR' }
+      return { ok: false, error: uiText(UI.totpBadUri) }
     }
-    if (u.protocol !== 'otpauth:') return { ok: false, error: 'serve un URI otpauth:// (TOTP)' }
+    if (u.protocol !== 'otpauth:') return { ok: false, error: uiText(UI.totpNotTotpUri) }
     const type = u.host.toLowerCase()
-    if (type !== 'totp') return { ok: false, error: `URI otpauth di tipo "${u.host}" non supportato: serve totp` }
+    if (type !== 'totp') return { ok: false, error: uiText(UI.totpWrongType, { type: u.host }) }
     const secret = u.searchParams.get('secret') ?? ''
-    if (!secret.trim()) return { ok: false, error: 'l\'URI otpauth non contiene il parametro secret' }
+    if (!secret.trim()) return { ok: false, error: uiText(UI.totpNoSecret) }
     const algorithm = (u.searchParams.get('algorithm') ?? 'SHA1').toUpperCase()
     const digits = u.searchParams.get('digits') ?? '6'
     const period = u.searchParams.get('period') ?? '30'
     if (algorithm !== 'SHA1' || digits !== '6' || period !== '30') {
-      return { ok: false, error: `TOTP non supportato (algorithm ${algorithm}, digits ${digits}, period ${period}): solo SHA1, 6 cifre, 30 secondi` }
+      return {
+        ok: false,
+        error: uiText(UI.totpUnsupported, { algorithm, digits, period })
+      }
     }
     candidate = secret
   }
   // normalizzazione: maiuscole, senza spazi né padding
   const normalized = candidate.toUpperCase().replace(/[\s=]/g, '')
-  if (!normalized) return { ok: false, error: 'il segreto TOTP è vuoto' }
+  if (!normalized) return { ok: false, error: uiText(UI.totpEmpty) }
   try {
     base32Decode(normalized)
   } catch {
-    return { ok: false, error: 'il segreto TOTP non è base32 valido: copialo di nuovo dal sito (o l\'URI otpauth sotto il QR)' }
+    return { ok: false, error: uiText(UI.totpNotBase32) }
   }
   return { ok: true, secret: normalized }
 }

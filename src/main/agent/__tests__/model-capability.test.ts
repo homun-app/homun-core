@@ -3,6 +3,9 @@
 // Il fetch è stubbato: nessuna rete.
 import { describe, expect, it, afterEach, vi } from 'vitest'
 import { modelSupportsTools } from '../providers'
+// fase 17c: la lingua dell'interfaccia dei test è l'italiano (i testi erano italiani prima)
+import { setSetting } from '../../store/db'
+setSetting('ui.activeLanguage', 'it')
 
 const ollama = { id: 'ollama', name: 'Ollama (locale)', kind: 'ollama' as const, baseUrl: 'http://ollama.test', apiKey: '', enabled: true }
 const openai = { id: 'oa', name: 'OpenAI', kind: 'openai-compatible' as const, baseUrl: 'https://api.test', apiKey: 'k', enabled: true }

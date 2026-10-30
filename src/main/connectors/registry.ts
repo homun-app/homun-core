@@ -57,21 +57,22 @@ export type RegistryTrust =
  *   validi) → non verificato.
  */
 export function registryTrust(name: string): RegistryTrust {
+  // fase 17c (C5): il label è il testo PER IL MODELLO (inglese); la UI traduce dal kind
   const ns = name.includes('/') ? name.slice(0, name.indexOf('/')) : ''
-  if (!ns) return { kind: 'unverified', label: 'non verificato' }
+  if (!ns) return { kind: 'unverified', label: 'unverified' }
   const labels = ns.split('.')
   // io.github.<utente>/… — l'account GitHub verificato, non il dominio
   if (labels.length >= 3 && labels[0] === 'io' && labels[1] === 'github') {
     const user = labels.slice(2).join('.')
-    return { kind: 'github-account', user, label: `account GitHub (${user})` }
+    return { kind: 'github-account', user, label: `GitHub account (${user})` }
   }
   // DNS inverso: etichette hostname valide, almeno due (com.notion, ai.smithery)
   const hostLabel = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/i
   if (labels.length >= 2 && labels.every((l) => hostLabel.test(l))) {
     const domain = [...labels].reverse().join('.')
-    return { kind: 'verified-domain', domain, label: `dominio verificato (${domain})` }
+    return { kind: 'verified-domain', domain, label: `verified domain (${domain})` }
   }
-  return { kind: 'unverified', label: 'non verificato' }
+  return { kind: 'unverified', label: 'unverified' }
 }
 
 /**

@@ -10,10 +10,12 @@
 // Tutto il tempo passa da deps.now(): nei test l'orologio è finto.
 import type { Agent, SandbotEvent, SendMessagePayload, WidgetOption } from '../shared/types'
 import type { Routine } from '../main/store/db'
-
-/** La send-message FISSA del check-in (testo di T2, non generato dal modello). */
-export const LOOKAROUND_OPENING =
-  'Do un\'occhiata in giro per vedere se c\'è qualcosa che posso fare per te. Ti aggiorno tra poco.'
+// fase 17c (C4): il messaggio fisso del check-in e il widget delle routine in
+// pausa sono testi del BOT all'utente — lingua dell'utente; il titolo
+// presence_return resta com'è (lo legge il modello nel blocco <evento>)
+import { currentUserLanguage } from '../main/agent/user-language'
+import { formatUi, ui } from '../shared/ui-text'
+import { UI } from '../shared/ui-messages'
 
 /** Massimo un segnale 'active' accettato ogni 30 s (gli altri sono solo rumore). */
 export const ACTIVE_SIGNAL_MIN_MS = 30_000
@@ -151,19 +153,20 @@ export function createPresence(deps: PresenceDeps) {
       const lastAt = deps.getSetting<number>(LOOKAROUND_LAST_SETTING, 0)
       if (!lookaroundAllowed(lastAt, now)) return
       deps.setSetting(LOOKAROUND_LAST_SETTING, now)
-      // 1. send-message FISSA (non generata dal modello)
-      deps.appendSystemSend(main.id, { type: 'text', text: LOOKAROUND_OPENING })
+      const lang = currentUserLanguage()
+      // 1. send-message FISSA (non generata dal modello), nella lingua dell'utente
+      deps.appendSystemSend(main.id, { type: 'text', text: formatUi(ui(UI.lookaroundOpening), lang) })
       // 2. se ci sono routine in pausa per assenza: la domanda fissa con
       //    ask_user (la risposta riprende SOLO quelle, in modo deterministico)
       const pausedAway = deps.listRoutines().filter((r) => !r.enabled && r.paused_for_away)
       if (pausedAway.length) {
         const options: WidgetOption[] = [
-          { label: 'Riattiva tutte', value: 'resume-away', style: 'primary' },
-          { label: 'Lasciale in pausa', value: 'keep-paused' }
+          { label: formatUi(ui(UI.presenceResumeAll), lang), value: 'resume-away', style: 'primary' },
+          { label: formatUi(ui(UI.presenceKeepPaused), lang), value: 'keep-paused' }
         ]
         deps.appendSystemSend(main.id, {
           type: 'widget',
-          prompt: 'Ho messo in pausa le tue routine mentre eri via per evitare consumi inutili. Le riattivo?',
+          prompt: formatUi(ui(UI.presenceAwayPrompt), lang),
           options
         }, { awayResume: true })
       }

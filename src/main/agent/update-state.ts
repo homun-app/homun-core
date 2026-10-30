@@ -4,8 +4,15 @@
 // sempre consentiti (una routine creata dall'agente nasce in PAUSA), resume
 // e l'update di schedule/prompt su una routine ATTIVA chiedono all'utente
 // (cambiano ciò che il bot eseguirà da solo in futuro).
+// Fase 17c (C2): i verdetti portano anche l'UiText del motivo (la card lo
+// mostra nella lingua dell'interfaccia); la schedule che l'utente vede la
+// costruisce la card stessa con describeCron. automationEventText torna un
+// UiText (id + nome della routine).
 import { describeCron } from '../../shared/cron-human'
 import type { Routine } from '../store/db'
+import type { UiText } from '../../shared/types'
+import { ui } from '../ui-language'
+import { UI } from '../../shared/ui-messages'
 
 /** Argomenti possibili di update_state (i campi arrivano dal modello, tutti opzionali). */
 export interface UpdateStateArgs {
@@ -22,12 +29,12 @@ export interface UpdateStateArgs {
   scope?: unknown
 }
 
-export type StateVerdict = { kind: 'allow' } | { kind: 'ask'; reason: string }
+export type StateVerdict = { kind: 'allow' } | { kind: 'ask'; reason: string; ui: UiText }
 
 /** Anteprima del prompt per la card di approvazione (una riga, troncata). */
 function promptPreview(prompt: string): string {
   const one = prompt.replace(/\s+/g, ' ').trim()
-  return one.length > 200 ? one.slice(0, 200) + '…' : one || '(nessun prompt)'
+  return one.length > 200 ? one.slice(0, 200) + '…' : one
 }
 
 /**
@@ -42,16 +49,23 @@ export function updateStateVerdict(args: UpdateStateArgs, routine: Routine | nul
   if (action === 'resume' && routine) {
     const schedule = typeof args.schedule === 'string' && args.schedule ? args.schedule : routine.schedule
     const prompt = typeof args.prompt === 'string' && args.prompt ? args.prompt : routine.prompt
+    const preview = promptPreview(prompt)
     return {
       kind: 'ask',
-      reason: `attivare la routine "${routine.title}" — ${describeCron(schedule)} — prompt: ${promptPreview(prompt)}`
+      reason: `activate the routine "${routine.title}" — ${describeCron(schedule, 'en')} — prompt: ${preview}`,
+      ui: ui(UI.approvalUsResume, { title: routine.title, ...(preview ? { preview } : {}) })
     }
   }
   if (action === 'update' && routine?.enabled && (args.schedule !== undefined || args.prompt !== undefined)) {
     const schedule = typeof args.schedule === 'string' && args.schedule ? args.schedule : routine.schedule
-    const parts = [`modificare l'esecuzione della routine attiva "${routine.title}" — ${describeCron(schedule)}`]
-    if (typeof args.prompt === 'string' && args.prompt) parts.push(`prompt: ${promptPreview(args.prompt)}`)
-    return { kind: 'ask', reason: parts.join(' — ') }
+    const preview = typeof args.prompt === 'string' && args.prompt ? promptPreview(args.prompt) : ''
+    return {
+      kind: 'ask',
+      reason: `change the execution of the active routine "${routine.title}" — ${describeCron(schedule, 'en')}${preview ? ` — prompt: ${preview}` : ''}`,
+      ui: preview
+        ? ui(UI.approvalUsUpdateWithPrompt, { title: routine.title, preview })
+        : ui(UI.approvalUsUpdate, { title: routine.title })
+    }
   }
   // create/pause/delete sempre; resume/update senza routine esistente vanno
   // avanti e sarà l'esecuzione a dare l'errore leggibile ("non trovata")
@@ -75,19 +89,24 @@ export function memoryScopeVerdict(
   if (action !== 'write' && action !== 'update' && action !== 'delete') return { kind: 'allow' }
   const scope = args.scope === 'user' || args.scope === 'agent' ? args.scope : currentScope ?? 'agent'
   if (scope !== 'user') return { kind: 'allow' }
-  const verb = action === 'write' ? 'creare una' : action === 'update' ? 'modificare una' : 'eliminare una'
-  const content = typeof args.content === 'string' && args.content.trim() ? ` — contenuto: ${promptPreview(args.content)}` : ''
-  return { kind: 'ask', reason: `${verb} memoria condivisa da tutti i bot (scope user)${content}` }
+  const verb = action === 'write' ? 'create a' : action === 'update' ? 'update a' : 'delete a'
+  const content = typeof args.content === 'string' && args.content.trim() ? ` — content: ${promptPreview(args.content)}` : ''
+  const preview = typeof args.content === 'string' && args.content.trim() ? promptPreview(args.content) : ''
+  return {
+    kind: 'ask',
+    reason: `${verb} memory shared by all bots (scope user)${content}`,
+    ui: ui(UI.approvalMemoryScope, { action, withContent: preview ? 'yes' : 'no', ...(preview ? { preview } : {}) })
+  }
 }
 
-/** Testo dell'entry event meta.automation per un'azione su routine (§3ter T2/T4). */
-export function automationEventText(action: string, name: string): string {
-  const labels: Record<string, string> = {
-    create: 'Routine creata (in pausa)',
-    update: 'Routine aggiornata',
-    pause: 'Routine messa in pausa',
-    resume: 'Routine attivata',
-    delete: 'Routine eliminata'
+/** Il UiText dell'entry event meta.automation per un'azione su routine (§3ter T2/T4, fase 17c). */
+export function automationEventText(action: string, name: string): UiText {
+  switch (action) {
+    case 'create': return ui(UI.eventRoutineCreate, { name })
+    case 'update': return ui(UI.eventRoutineUpdate, { name })
+    case 'pause': return ui(UI.eventRoutinePause, { name })
+    case 'resume': return ui(UI.eventRoutineResume, { name })
+    case 'delete': return ui(UI.eventRoutineDelete, { name })
+    default: return ui(UI.eventRoutineOther, { action, name })
   }
-  return `${labels[action] ?? `Routine: ${action}`}: ${name}`
 }

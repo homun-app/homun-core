@@ -5,6 +5,9 @@
 import { describe, expect, it, afterEach, vi } from 'vitest'
 import { connect as tcpConnect, type Socket } from 'node:net'
 import { startWsServer, type WsRpcServer } from '../ws-server'
+// fase 17c: la lingua dell'interfaccia dei test è l'italiano (i testi erano italiani prima)
+import { setSetting } from '../../main/store/db'
+setSetting('ui.activeLanguage', 'it')
 
 const UPGRADE =
   'GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n' +

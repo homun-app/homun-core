@@ -52,7 +52,7 @@ export function computerSection(): string {
     : ''
   return `# Your computer
 You have a computer (the box): ${env}
-- \`/workspace\` is the COMMON space of all your bots: deliverables that the others need too go there, in \`/workspace/<project>/…\`, and you cite the path in the group.
+- \`/workspace\` (the shared box) is the COMMON space of all your bots: deliverables that the others need too go there, in \`/workspace/<project>/…\`, and you cite the path in the group.
 - Your home is yours: relative paths start there.
 - Before redoing work, check whether another bot has already left it in \`/workspace\`.
 Base tools: run-command (background: true for long ones), read-file, write-file, list-directory, web_search / web_fetch (web search and reading), copy_to_box / copy_from_box (files with the Mac, with confirmation), update_memory / recall_memory, skill / update_skill, update_state (routines), create_task / update_task (long work).${browser}

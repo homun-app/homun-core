@@ -31,6 +31,9 @@ describe('callback server di loopback', () => {
   })
 
   it('senza codice → 400; allo scadere del timeout waitForCode rifiuta', async () => {
+    // fase 17c (C3): gli errori seguono la lingua dell'interfaccia — italiano qui
+    const { setSetting } = await import('../../store/db')
+    setSetting('ui.activeLanguage', 'it')
     const cb = await startCallbackServer({ expectedState: 's', timeoutMs: 150 })
     const noCode = await fetch(cb.url + '?state=s')
     expect(noCode.status).toBe(400)

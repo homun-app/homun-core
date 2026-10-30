@@ -2,7 +2,8 @@
 // docsUrl presente per ogni voce; il catalogo reale passa la validazione e
 // ogni voce con registrazione statica dichiara i suoi scope.
 import { describe, expect, it } from 'vitest'
-import { validateCatalog, loadCatalog, searchCatalog, connectorStatusLine, connectorsInstructionsSection, connectorInstructionsFromSettings } from '../index'
+import { validateCatalog, loadCatalog, searchCatalog, connectorStatusLine, connectorsInstructionsSection, connectorInstructionsFromSettings  } from '../index'
+import { pickLang } from '../../../shared/localized'
 
 const base = {
   id: 'test',
@@ -41,15 +42,31 @@ describe('validateCatalog', () => {
 })
 
 describe('catalogo reale', () => {
+  it('fase 17c (C5): pickLang sceglie la lingua; validateCatalog accetta stringa e {it,en}', () => {
+    expect(pickLang('semplice', 'en')).toBe('semplice')
+    expect(pickLang({ it: 'ciao', en: 'hello' }, 'en')).toBe('hello')
+    expect(pickLang({ it: 'ciao', en: 'hello' }, 'it')).toBe('ciao')
+    // le note del catalogo reale sono {it, en}
+    for (const e of loadCatalog()) {
+      expect(e.notes).toMatchObject({ it: expect.any(String), en: expect.any(String) })
+    }
+    // la forma stringa resta valida (dati pre-17c)
+    expect(validateCatalog([{ ...loadCatalog()[0]!, notes: 'semplice' }])).toEqual([])
+    // un campo Localized monco è rifiutato
+    expect(validateCatalog([{ ...loadCatalog()[0]!, notes: { it: 'solo it' } as never }])).toHaveLength(1)
+  })
+
   it('loadCatalog passa la validazione', () => {
     const c = loadCatalog()
     expect(c.length).toBeGreaterThanOrEqual(6)
     expect(validateCatalog(c)).toEqual([])
   })
 
-  it('ogni voce porta la fonte ufficiale nelle notes (URL http(s))', () => {
+  it('ogni voce porta la fonte ufficiale nelle notes (URL http(s), bilingue dalla 17c)', () => {
+    // fase 17c (C5): le note sono {it, en} — la fonte si controlla su entrambe
     for (const e of loadCatalog()) {
-      expect(e.notes, e.id).toMatch(/https:\/\/\S+/)
+      const notes = `${typeof e.notes === 'string' ? e.notes : `${e.notes.it} ${e.notes.en}`}`
+      expect(notes, e.id).toMatch(/https:\/\/\S+/)
     }
   })
 })

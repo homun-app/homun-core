@@ -1,8 +1,12 @@
 // Logica pura dei permessi, separata da store/db (che importa Electron)
 // per essere testabile in nodo puro con vitest.
 import { join, resolve, sep } from 'node:path'
-import type { PermissionMode, PermissionRule } from '../../shared/types'
+import type { PermissionMode, PermissionRule, UiText } from '../../shared/types'
 import type { ShellAnalysis, ShellCommand } from './shell-ast'
+// fase 17c (C2): l'UiText accanto a ogni motivo — la card di run-command
+// mostra i motivi nella lingua dell'interfaccia
+import { ui } from '../ui-language'
+import { UI } from '../../shared/ui-messages'
 
 /** Chiave target per tool non-shell: file → path normalizzato, azioni → nome azione. */
 // Per run-command questa chiave NON si usa più per il match: il gate passa da
@@ -73,6 +77,8 @@ export interface RunCommandDecision {
   kind: 'allow' | 'ask' | 'deny'
   via?: 'rule' | 'grant'
   reasons: string[]
+  /** Fase 17c (C2): l'UiText di ogni motivo, in parallelo a reasons (per la card). */
+  uis: UiText[]
   /** Tutte le chiavi estratte dal comando (per approval card e standing grants). */
   keys: string[]
   /** Nomi dei segreti {{secret:NOME}} usati dal comando (per la approval card). */
@@ -221,18 +227,24 @@ export function runCommandVerdict(
 ): RunCommandDecision {
   const keys = [...new Set(a.commands.map(commandKey))]
   if (a.parseError) {
-    return { kind: 'ask', reasons: ['command cannot be parsed reliably'], keys, secretRefs: a.secretRefs }
+    return { kind: 'ask', reasons: ['command cannot be parsed reliably'], uis: [ui(UI.approvalRcUnparsable)], keys, secretRefs: a.secretRefs }
   }
   if (a.hasSubstitution) {
-    return { kind: 'ask', reasons: ['contains a command substitution ($(...) or backtick)'], keys, secretRefs: a.secretRefs }
+    return {
+      kind: 'ask',
+      reasons: ['contains a command substitution ($(...) or backtick)'],
+      uis: [ui(UI.approvalRcSubstitution)],
+      keys,
+      secretRefs: a.secretRefs
+    }
   }
   if (keys.length === 0) {
-    return { kind: 'ask', reasons: ['no recognized command'], keys: [], secretRefs: a.secretRefs }
+    return { kind: 'ask', reasons: ['no recognized command'], uis: [ui(UI.approvalRcNoCommand)], keys: [], secretRefs: a.secretRefs }
   }
   // blocked vince su tutto: mai chiedere quello che una regola vieta
   for (const key of keys) {
     if (bestRuleMode(key, rules, 'run-command') === 'blocked') {
-      return { kind: 'deny', reasons: ['Command blocked by permissions configuration'], keys, secretRefs: a.secretRefs }
+      return { kind: 'deny', reasons: ['Command blocked by permissions configuration'], uis: [], keys, secretRefs: a.secretRefs }
     }
   }
   // §5.6: un comando che usa credenziali non viene MAI auto-approvato
@@ -241,11 +253,13 @@ export function runCommandVerdict(
     return {
       kind: 'ask',
       reasons: [`uses credentials: ${a.secretRefs.join(', ')}`],
+      uis: [ui(UI.approvalRcCredentials, { names: a.secretRefs.join(', ') })],
       keys,
       secretRefs: a.secretRefs
     }
   }
   const reasons: string[] = []
+  const uis: UiText[] = []
   let allCovered = true
   let anyGrant = false
   const neverAuto = new Set(a.commands.filter(isNeverAuto).map(commandKey))
@@ -254,11 +268,13 @@ export function runCommandVerdict(
     if (neverAuto.has(key)) {
       allCovered = false
       reasons.push(`${key} runs other commands`)
+      uis.push(ui(UI.approvalRcRunsCommands, { key }))
       continue
     }
     if (envPrefixKeys.has(key)) {
       allCovered = false
       reasons.push(`${key} changes the command's environment`)
+      uis.push(ui(UI.approvalRcEnv, { key }))
       continue
     }
     if (grants.includes(key)) {
@@ -269,6 +285,7 @@ export function runCommandVerdict(
     if (mode === 'needs_approval') {
       allCovered = false
       reasons.push(`${key} requires approval`)
+      uis.push(ui(UI.approvalRcRequires, { key }))
     }
   }
   // redirect di output verso file non innocui: vale per l'intera riga,
@@ -276,7 +293,8 @@ export function runCommandVerdict(
   if (a.redirectTargets.some((t) => !HARMLESS_REDIRECT_TARGETS.has(t))) {
     allCovered = false
     reasons.unshift('writes to a file')
+    uis.unshift(ui(UI.approvalRcRedirect))
   }
-  if (allCovered) return { kind: 'allow', via: anyGrant ? 'grant' : 'rule', reasons: [], keys, secretRefs: [] }
-  return { kind: 'ask', reasons, keys, secretRefs: [] }
+  if (allCovered) return { kind: 'allow', via: anyGrant ? 'grant' : 'rule', reasons: [], uis: [], keys, secretRefs: [] }
+  return { kind: 'ask', reasons, uis, keys, secretRefs: [] }
 }

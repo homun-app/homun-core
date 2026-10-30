@@ -168,8 +168,10 @@ describe('fase 4: memoria, skill e update_state', () => {
     const resume = await check('update_state', { target: 'routine', action: 'resume', id: 7 })
     expect(resume.kind).toBe('ask')
     if (resume.kind === 'ask') {
+      // fase 17c (C2): reason inglese per il modello (cron in en), ui per la card
       expect(resume.reason).toContain('Riepilogo')
-      expect(resume.reason).toContain('giorni feriali')
+      expect(resume.reason).toContain('on weekdays')
+      expect(resume.ui?.id).toBe('approval.usResume')
     }
     const upd = await check('update_state', { target: 'routine', action: 'update', id: 7, schedule: '0 9 * * *' })
     expect(upd.kind).toBe('ask')
@@ -198,7 +200,7 @@ describe('fase 4: memoria, skill e update_state', () => {
     // il resume riattiva la routine col prompt cambiato: card SEMPRE, grant o no
     const v = await check('update_state', { target: 'routine', action: 'resume', id: 7 })
     expect(v.kind).toBe('ask')
-    if (v.kind === 'ask') expect(v.reason).toContain('attivare la routine "Riepilogo"')
+    if (v.kind === 'ask') expect(v.reason).toContain('activate the routine "Riepilogo"')
   })
 
   it('fase 5 (M3): memorie condivise — write/update/delete con scope user chiedono, scope agent resta allow', async () => {

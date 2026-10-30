@@ -28,6 +28,10 @@ import {
 } from './marketplace'
 import type { MarketplaceManager } from './marketplace-manager'
 import gatewayPresetsJson from './gateway-presets.json'
+// fase 17c (C3/C5): errori RPC nel catalogo UI; label di fiducia come codici
+import { uiText, uiError } from '../ui-language'
+import { UI } from '../../shared/ui-messages'
+import { marketplaceTrustLabel } from './search'
 
 // L1: un solo nome per ogni tipo di segreto (chiave logica UI/RPC → chiave dello
 // store cifrato); anche la UI e l'RPC usano QUESTE costanti, mai stringhe separate
@@ -40,23 +44,18 @@ type PluginCard = Extract<SendMessagePayload, { type: 'plugin' }>
 export const PROPOSAL_RESULT =
   'proposal shown to the user; when they accept it you receive a system message'
 
-/** L'avviso per i server pubblicati da terzi (fiducia ≠ dominio verificato). */
-export const THIRD_PARTY_SERVER_WARNING =
-  'Server pubblicato da terzi: può leggere e fare quello che gli permettono i suoi strumenti'
-
 /**
- * Il bottone dei server stdio in modalità host. Fase 17b correzioni (B2): due
- * testi — quello del result al modello è inglese, quello della card resta
- * italiano per la 17c.
+ * Il bottone dei server stdio in modalità host (result per il modello). La
+ * card mostra il CODICE 'host-mode' in disabledReason: lo traduce la UI
+ * (fase 17c, C3).
  */
 export const HOST_MODE_DISABLED =
   'it installs only in the bots\' computer (docker mode)'
-export const HOST_MODE_DISABLED_CARD =
-  'si installa solo nel computer dei bot (modalità docker)'
+/** Il codice del disabledReason della card (la UI lo traduce). */
+export const HOST_MODE_DISABLED_REASON = 'host-mode'
 
-/** L'avviso fisso del modulo Gateway (punto 7). */
-export const GATEWAY_WARNING =
-  'Un gateway custodisce l\'accesso a tutte le app che colleghi lì: è un servizio di terzi'
+/** L'id del catalogo UI dell'avviso fisso del modulo Gateway (punto 7). */
+export const GATEWAY_WARNING_UI = { id: 'install.gatewayWarning' } as const
 
 /** I preset dei gateway come DATI: compilano solo nome, header e testo d'aiuto. */
 export interface GatewayPreset {
@@ -125,7 +124,11 @@ export async function buildMcpServerCard(
       ok: true,
       card: {
         type: 'mcp-server', id, name: host, publisher: host,
-        trust: 'non verificato', trustKind: 'unverified',
+        // fase 17c (C5): label inglese per il modello; la UI traduce da
+        // trustKind (+ trustDetail)
+        trust: 'unverified',
+        trustKind: 'unverified',
+        trustDetail: host,
         runtime: { kind: 'remote', host },
         needs: { kind: 'oauth' },
         thirdPartyWarning: true,
@@ -148,6 +151,7 @@ export async function buildMcpServerCard(
     publisher: entry.server.name.includes('/') ? entry.server.name.slice(0, entry.server.name.indexOf('/')) : undefined,
     trust: trust.label,
     trustKind: trust.kind === 'verified-domain' ? 'verified-domain' as const : trust.kind === 'github-account' ? 'github-account' as const : 'unverified' as const,
+    ...(trust.kind === 'verified-domain' ? { trustDetail: trust.domain } : trust.kind === 'github-account' ? { trustDetail: trust.user } : {}),
     ...(registrySiteUrl(entry) ? { siteUrl: registrySiteUrl(entry)! } : {}),
     ...(reason ? { reason } : {})
   }
@@ -170,7 +174,7 @@ export async function buildMcpServerCard(
       runtime: { kind: 'box-npm', command: `npx -y ${rt.identifier}@${rt.version}` },
       needs: { kind: 'env', vars: registryEnvVars(entry) },
       ...(trust.kind !== 'verified-domain' ? { thirdPartyWarning: true as const } : {}),
-      ...(deps.dockerMode() ? {} : { disabledReason: HOST_MODE_DISABLED_CARD })
+      ...(deps.dockerMode() ? {} : { disabledReason: HOST_MODE_DISABLED_REASON })
     }
   }
 }
@@ -246,7 +250,8 @@ function registryServerCfg(entry: RegistryEntry, agentId: string): McpServerConf
       auth: rt.secretHeader ? { kind: 'headers' } : { kind: 'oauth' },
       enabledFor: [agentId],
       source: { kind: 'registry', name: entry.server.name, ...(entry.server.version ? { version: entry.server.version } : {}) },
-      trustLabel: trust.label
+      trustLabel: trust.label,
+      trustKind: trust.kind
     }
   }
   const vars = registryEnvVars(entry)
@@ -262,7 +267,8 @@ function registryServerCfg(entry: RegistryEntry, agentId: string): McpServerConf
     },
     enabledFor: [agentId],
     source: { kind: 'registry', name: entry.server.name, ...(entry.server.version ? { version: entry.server.version } : {}) },
-    trustLabel: trust.label
+    trustLabel: trust.label,
+    trustKind: trust.kind
   }
 }
 
@@ -291,7 +297,8 @@ export async function installMcpServer(
       name: new URL(parsed.url).host, transport: 'http', url: parsed.url, enabled: true,
       auth: { kind: 'oauth' }, enabledFor: [agentId],
       source: { kind: 'registry', name: parsed.url },
-      trustLabel: 'non verificato'
+      trustLabel: 'unverified',
+      trustKind: 'unverified'
     }
     return finishRemoteInstall(cfg, deps)
   }
@@ -527,11 +534,13 @@ export async function buildPluginCard(
     id,
     name: inspection.name ?? plugin.name,
     marketplace: marketplaceName,
-    trust: found.reg.official ? 'marketplace ufficiale' : 'marketplace aggiunto da te',
+    // fase 17c (C5): codice + label inglese per il modello; la UI traduce da official
+    trust: marketplaceTrustLabel(found.reg.official),
+    official: found.reg.official,
     ...(repoUrlOf(plugin) ? { repoUrl: repoUrlOf(plugin)! } : {}),
     sha12: staged.sha12,
     skills: inspection.skills.map((s) => s.name),
-    servers: inspection.mcpServers.map((s) => ({ name: s.name, runtimeLabel: serverRuntimeLabel(s) })),
+    servers: inspection.mcpServers.map((s) => serverRuntimeInfo(s)),
     settings: [
       ...inspection.userConfig.map((f) => ({ key: f.key, ...(f.description ? { description: f.description } : {}), ...(f.sensitive ? { sensitive: true } : {}) })),
       ...serverKeys.map((key) => ({ key }))
@@ -562,12 +571,15 @@ function repoUrlOf(plugin: MarketplacePlugin): string | null {
   return null
 }
 
-/** M3: il server con `${VAR}` in command/args non si registra: il motivo in card. */
-function serverRuntimeLabel(s: PluginMcpServer): string {
+/**
+ * M3: il server con `${VAR}` in command/args non si registra: il motivo in
+ * card. Fase 17c (C5): CODICE + dettaglio — il label lo traduce la UI.
+ */
+function serverRuntimeInfo(s: PluginMcpServer): { name: string; runtimeKind: 'unsupported' | 'remote' | 'box'; runtimeDetail: string } {
   const argvVars = argvPlaceholdersOf(s)
-  if (argvVars.length) return `non supportato: valore in argv (${argvVars[0]})`
-  if (s.url) return `remoto (${new URL(s.url).host})`
-  return `nel box (${[s.command, ...(s.args ?? [])].slice(0, 3).join(' ')})`
+  if (argvVars.length) return { name: s.name, runtimeKind: 'unsupported', runtimeDetail: argvVars[0]! }
+  if (s.url) return { name: s.name, runtimeKind: 'remote', runtimeDetail: new URL(s.url).host }
+  return { name: s.name, runtimeKind: 'box', runtimeDetail: [s.command, ...(s.args ?? [])].slice(0, 3).join(' ') }
 }
 
 /**
@@ -739,7 +751,8 @@ export async function installPlugin(
   if (needsConnectorAuth.length) {
     const states = getSetting<Record<string, Record<string, unknown>>>('connectors.state', {})
     for (const id of needsConnectorAuth) {
-      states[id] = { ...(states[id] ?? {}), status: 'needs_auth', error: 'da autorizzare (Impostazioni → Installati → Connetti)' }
+      // fase 17c (C3): stato mostrato dalla scheda Installati — catalogo UI
+      states[id] = { ...(states[id] ?? {}), status: 'needs_auth', error: uiText(UI.connNeedsAuthSettings) }
     }
     setSetting('connectors.state', states)
   }
@@ -812,11 +825,12 @@ export async function reconnectServer(
   setSetting: (key: string, value: unknown) => void
 ): Promise<{ ok: true; message: string } | { ok: false; error: string }> {
   const cfg = deps.listServers().find((s) => s.id === id)
-  if (!cfg) return { ok: false, error: `server non trovato: ${id}` }
-  if (cfg.auth?.kind !== 'oauth') return { ok: false, error: 'il server non usa OAuth' }
-  if (cfg.catalogId) return { ok: false, error: 'usa la vista "Connetti app" per i connettori del catalogo' }
-  if (!cfg.url) return { ok: false, error: 'il server non ha un URL' }
-  if (!deps.hasUi()) return { ok: false, error: 'serve la finestra di Homun per autorizzare' }
+  // fase 17c (C3): errori della scheda Installati — catalogo UI
+  if (!cfg) return { ok: false, error: uiText(UI.rpcServerNotFoundPlain, { id }) }
+  if (cfg.auth?.kind !== 'oauth') return { ok: false, error: uiText(UI.rpcNotOauth) }
+  if (cfg.catalogId) return { ok: false, error: uiText(UI.rpcUseConnectApps) }
+  if (!cfg.url) return { ok: false, error: uiText(UI.rpcNoUrl) }
+  if (!deps.hasUi()) return { ok: false, error: uiText(UI.rpcNeedsWindow) }
   // M2: il template del plugin si risolve PRIMA di autorizzare — un URL con
   // ${user_config.K}/${VAR} non sostituito non è un URL valido
   let url = cfg.url
@@ -829,7 +843,7 @@ export async function reconnectServer(
     )
     const missing = unresolvedUserConfigKeys(resolved)
     if (missing.length) {
-      return { ok: false, error: `il server "${cfg.name}" richiede i valori ${missing.join(', ')}: l'utente li inserisce nelle Impostazioni` }
+      return { ok: false, error: uiText(UI.rpcMissingValues, { name: cfg.name, keys: missing.join(', ') }) }
     }
     url = resolved.url ?? cfg.url
   }
@@ -844,7 +858,7 @@ export async function reconnectServer(
       )
     )
   } catch (e) {
-    return { ok: false, error: `autorizzazione non riuscita (${e instanceof Error ? e.message : String(e)})` }
+    return { ok: false, error: uiText(UI.rpcAuthFailed, { error: e instanceof Error ? e.message : String(e) }) }
   }
   // la sessione è di nuova valida: needs_auth si pulisce e il server si prova
   const states = getSetting<Record<string, Record<string, unknown>>>('connectors.state', {})
@@ -855,7 +869,7 @@ export async function reconnectServer(
     const tools = await deps.toolsOfServer(cfg.id)
     return { ok: true, message: serverInstalledMessage(cfg.name, tools) }
   } catch (e) {
-    return { ok: false, error: `autorizzazione riuscita ma il server non risponde: ${e instanceof Error ? e.message : String(e)}` }
+    return { ok: false, error: uiText(UI.rpcAuthOkServerDown, { error: e instanceof Error ? e.message : String(e) }) }
   }
 }
 
@@ -891,8 +905,8 @@ export interface GatewayInput {
 export async function addGateway(input: GatewayInput, deps: InstallDeps): Promise<McpServerConfig> {
   // https in produzione; http locale SOLO col flag di test della verifica
   const urlOk = /^https:\/\//.test(input.url) || (process.env.SANDBOT_TEST_ALLOW_HTTP_REMOTES === '1' && input.url.startsWith('http://'))
-  if (!urlOk) throw new Error('l\'URL del gateway deve essere https')
-  if (!input.name.trim()) throw new Error('serve un nome per il gateway')
+  if (!urlOk) throw uiError(UI.rpcGatewayHttps)
+  if (!input.name.trim()) throw uiError(UI.rpcGatewayName)
   const id = serverIdFor({ kind: 'gateway', name: input.name.trim(), url: input.url })
   const cfg: McpServerConfig = {
     id, name: input.name.trim(), transport: 'http', url: input.url, enabled: true,

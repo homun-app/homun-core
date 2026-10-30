@@ -358,9 +358,14 @@ function notifyBoxImageBuild(): void {
       const { mainAgentOf } = await import('../../daemon/presence')
       const main = mainAgentOf(listAgents(), getSetting<string | null>('mainAgentId', null))
       if (!main) return
+      // fase 17c (C2): notice col testo del catalogo UI
+      const { uiLanguage, formatUi, ui } = await import('../ui-language')
+      const { UI } = await import('../../shared/ui-messages')
+      const preparing = ui(UI.boxPreparing)
       appendEntry({
         agentId: main.id, kind: 'notice', role: 'system',
-        content: 'Preparo il computer dei bot (immagine del box con il browser): una volta sola, qualche minuto. I bot riprendono appena è pronta.'
+        content: formatUi(preparing, uiLanguage()),
+        meta: { ui: preparing }
       })
     } catch {
       // notice best-effort: la build parte comunque

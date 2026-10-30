@@ -50,7 +50,9 @@ export function buildMcpAuthResolver(deps: AuthResolverDeps): McpAuthResolver {
   // riconnessione parte dalla vista "Connetti app" (catalogo) o dal bottone
   // "Connetti"/"Riconnetti" della scheda Installati (registro/plugin/url).
   const silentOpen = async (): Promise<void> => {
-    throw new Error('browser non disponibile senza la finestra di Homun')
+    // fase 17c (C3): errore di stato connettore mostrato dalla UI
+    const { uiError, UI } = await import('../ui-language')
+    throw uiError(UI.connNoBrowserNoWindow)
   }
 
   /**

@@ -38,6 +38,7 @@ const { setDataDir, db, listAgents, getSetting, saveProviders } = await import('
 const { listJobs } = await import('../../main/store/jobs')
 const { buildApiMethods } = await import('../api')
 import type { JobWorker } from '../worker'
+import { setSetting } from '../../main/store/db'
 
 const fakeWorker = { poke: () => undefined, drain: async () => undefined, start: () => undefined, stop: () => undefined } as unknown as JobWorker
 
@@ -47,6 +48,8 @@ let api: Record<string, (p: unknown[]) => unknown>
 beforeAll(() => {
   dir = mkdtempSync(join(tmpdir(), 'sandbot-tmpl-'))
   setDataDir(dir)
+  // fase 17c: la lingua dei testi del daemon è l'italiano (come prima)
+  setSetting('ui.activeLanguage', 'it')
   db()
   saveProviders([{ id: 'ollama', name: 'Ollama (locale)', kind: 'ollama', baseUrl: 'http://x', apiKey: '', enabled: true, discovered: true }])
   api = buildApiMethods(() => undefined, fakeWorker)
@@ -64,6 +67,11 @@ describe('templates:list', () => {
     )
   })
 })
+
+function jobsOf(agentId: string) {
+  const rows = db().prepare('SELECT kind, payload_json FROM jobs WHERE agent_id = ? ORDER BY id').all(agentId) as Array<{ kind: string; payload_json: string }>
+  return rows.map((r) => ({ kind: r.kind, payload: JSON.parse(r.payload_json) as Record<string, unknown> }))
+}
 
 describe('agents:create-from-template (kickstart)', () => {
   it('crea il bot dal template e accoda il job TEMPLATE_IMPORT con context e istruzioni', async () => {
@@ -98,6 +106,29 @@ describe('agents:create-from-template (kickstart)', () => {
       expect(created.model).toBeNull()
     } finally {
       capability.ok = true
+    }
+  })
+
+  it('fase 17c (C4/C5): con agent.userLanguage=en il bot nasce inglese e il kickstart è inglese', async () => {
+    setSetting('agent.userLanguage', 'en')
+    try {
+      const api = buildApiMethods(() => undefined, fakeWorker)
+      const a = await (api['agents:create-from-template'] as (p: unknown[]) => Promise<{ id: string; name: string; description: string }>)(['inbox-manager'])
+      expect(a.name).toBe('Inbox manager')
+      expect(a.description).toContain('Sorts the morning mail')
+      const job = jobsOf(a.id)[0]!
+      expect(job.kind).toBe('user-message')
+      expect((job.payload as { initiator?: string }).initiator).toBe('TEMPLATE_IMPORT')
+      const text = (job.payload as { text: string }).text
+      expect(text).toContain('Hi Inbox manager.')
+      expect(text).toContain('1. Introduce yourself')
+      // in italiano resta italiano
+      setSetting('agent.userLanguage', 'it')
+      const it = await (api['agents:create-from-template'] as (p: unknown[]) => Promise<{ id: string; name: string }>)(['inbox-manager'])
+      expect(it.name).toBe('Gestore della posta in arrivo')
+      expect(jobsOf(it.id)[0]!.payload).toMatchObject({ text: expect.stringContaining('Ciao Gestore della posta in arrivo.') })
+    } finally {
+      setSetting('agent.userLanguage', 'it')
     }
   })
 

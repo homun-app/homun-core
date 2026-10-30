@@ -37,6 +37,7 @@ vi.mock('../../main/agent/tools', () => ({
 const { setDataDir, db } = await import('../../main/store/db')
 const { buildApiMethods } = await import('../api')
 import type { JobWorker } from '../worker'
+import { setSetting } from '../../main/store/db'
 
 const fakeWorker = { poke: () => undefined, drain: async () => undefined, start: () => undefined, stop: () => undefined } as unknown as JobWorker
 
@@ -45,6 +46,8 @@ let dir: string
 beforeAll(() => {
   dir = mkdtempSync(join(tmpdir(), 'sandbot-triggerval-'))
   setDataDir(dir)
+  // fase 17c: la lingua dei testi del daemon è l'italiano (come prima)
+  setSetting('ui.activeLanguage', 'it')
   db()
 })
 

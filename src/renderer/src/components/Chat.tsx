@@ -4,6 +4,10 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Paperclip, Plug, PanelRight } from 'lucide-react'
 import { api, useStore } from '../store'
+// fase 17c (C2): il testo di notice/eventi/system dal meta.ui (lingua attiva)
+import { uiTextOf } from '../lib/ui-text'
+import { i18n } from '../lib/i18n'
+import { GROUP_CHAIN_CLOSED_TEXT, GROUP_RATE_LIMIT_TEXT, GROUP_HOURLY_CAP_TEXT } from '../../../main/agent/group-turns'
 import { agentMessageDisplay } from '../../../shared/agent-message'
 import type { TranscriptEntry, SendMessageMeta, SendMessagePayload } from '../../../shared/types'
 import { ApprovalCard } from './ApprovalCard'
@@ -326,13 +330,15 @@ function EntryRow({ entry, showReasoning }: { entry: TranscriptEntry; showReason
         )
       }
       return entry.role === 'user' ? (
-        // bolla utente a destra col colore del bot, testo text-background (come Lovable)
+        // bolla utente a destra col colore del bot, testo text-background (come Lovable).
+        // fase 17c (C2): i messaggi di sistema ([sistema], aperture di routine e
+        // task, shell completato) mostrano il loro meta.ui nella lingua attiva
         <div className="flex justify-end">
           <div
             className="max-w-[75%] rounded-2xl rounded-br-md px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap text-background"
             style={{ background: color }}
           >
-            {entry.content}
+            {uiTextOf(entry)}
           </div>
         </div>
       ) : (
@@ -451,12 +457,13 @@ function EntryRow({ entry, showReasoning }: { entry: TranscriptEntry; showReason
     case 'approval':
       return <ApprovalCard entry={entry} />
     case 'notice':
-      return <p className="text-center text-xs text-destructive/90">{entry.content}</p>
+      // fase 17c (C2): la notice si ritraduce dal meta.ui alla lingua attiva
+      return <p className="text-center text-xs text-destructive/90">{uiTextOf(entry)}</p>
     case 'event':
       // gli esiti di turno (meta.turnEnd) sono dettaglio interno: visibili
-      // solo col toggle "mostra ragionamento"
+      // solo col toggle "mostra ragionamento". fase 17c: meta.ui per la lingua
       if (entry.meta?.turnEnd && !showReasoning) return null
-      return <p className="text-center text-xs text-muted-foreground">{entry.content}</p>
+      return <p className="text-center text-xs text-muted-foreground">{uiTextOf(entry)}</p>
     default:
       return null
   }
@@ -551,7 +558,12 @@ function GroupPanel() {
           )}
           {groupMessages.map((m) =>
             m.authorKind === 'system' ? (
-              <p key={m.id} className="text-center text-xs text-muted-foreground">{m.text}</p>
+              // fase 17c (C2, MU): il testo salvato resta la costante inglese
+              // (il modello la rilegge e il dedup orario la confronta); la
+              // vista la riconosce e la traduce, l'autore «sistema» si mostra tradotto
+              <p key={m.id} className="text-center text-xs text-muted-foreground">
+                <Trans>sistema</Trans> · {groupSystemText(m.text)}
+              </p>
             ) : m.authorKind === 'user' ? (
               <div key={m.id} className="flex justify-end">
                 <div className="max-w-[75%] rounded-2xl rounded-br-md bg-foreground px-4 py-2.5 text-sm text-background whitespace-pre-wrap">
@@ -737,4 +749,19 @@ function SubagentPanel() {
       )}
     </div>
   )
+}
+
+
+/**
+ * Fase 17c (C2, MU): la traduzione delle righe di sistema del gruppo. Il
+ * testo salvato nel registro è la costante inglese (chiave del dedup orario
+ * e testo che i bot rileggono): la vista la riconosce e la mostra nella
+ * lingua attiva; righe non riconosciute (dati vecchi) restano come sono.
+ */
+export function groupSystemText(text: string): string {
+  // gli id vivono nel catalogo UI condiviso (src/shared/ui-messages.ts)
+  if (text === GROUP_CHAIN_CLOSED_TEXT) return i18n._('group.chainClosed')
+  if (text === GROUP_RATE_LIMIT_TEXT) return i18n._('group.rateLimit')
+  if (text === GROUP_HOURLY_CAP_TEXT) return i18n._('group.hourlyCap')
+  return text
 }

@@ -45,9 +45,9 @@ describe('fase 6: describeEverySchedule e describeTrigger', () => {
     expect(describeTrigger({ type: 'schedule', kind: 'cron', cron: '0 9 * * *' })).toBe('tutti i giorni alle 09:00')
     expect(describeTrigger({ type: 'schedule', kind: 'every', every: 'day', at: '09:00', mode: 'around' })).toBe('ogni giorno verso le 09:00 (±15 min)')
     expect(describeTrigger({ type: 'webhook', token: 'x' })).toBe('quando riceve una chiamata webhook')
-    expect(describeTrigger({ type: 'presence_return' })).toBe('quando torni al computer dopo un\'assenza')
+    expect(describeTrigger({ type: 'presence_return' })).toBe('quando torni al computer dopo un’assenza')
     const email: RoutineTrigger = { type: 'connector_poll', connectorId: 'gmail', tool: 'mcp__gmail__search', intervalMin: 5, idField: 'messages[].id', preset: 'email', args: { query: 'fatture' } }
-    expect(describeTrigger(email)).toBe('quando arriva un\'email che corrisponde a "fatture"')
+    expect(describeTrigger(email)).toBe('quando arriva un’email che corrisponde a "fatture"')
     const cal: RoutineTrigger = { type: 'connector_poll', connectorId: 'gcalendar', tool: 'mcp__gcalendar__list', intervalMin: 15, idField: 'events[].id', preset: 'calendar_event', offsetMinutes: 10 }
     expect(describeTrigger(cal)).toBe('10 minuti prima di ogni evento del calendario')
     const poll: RoutineTrigger = { type: 'connector_poll', connectorId: 'sentry', tool: 'mcp__sentry__list', intervalMin: 5, idField: 'issues[].id' }
@@ -56,5 +56,29 @@ describe('fase 6: describeEverySchedule e describeTrigger', () => {
 
   it('trigger assente → describeCron della colonna schedule', () => {
     expect(describeTrigger(null, '0 9 * * 1-5')).toBe('nei giorni feriali alle 09:00')
+  })
+})
+
+
+describe('fase 17c (C6): describeCron/describeTrigger in inglese', () => {
+  it('le stesse espressioni si descrivono in en (Intl per i giorni)', () => {
+    expect(describeCron('0 9 * * *', 'en')).toBe('every day at 09:00')
+    expect(describeCron('30 8 * * 1-5', 'en')).toBe('on weekdays at 08:30')
+    expect(describeCron('*/10 * * * *', 'en')).toBe('every 10 minutes')
+    expect(describeCron('0 9 * * 1', 'en')).toBe('on Monday at 09:00')
+    expect(describeCron('0 9 2 * *', 'en')).toBe('on day 2 of the month at 09:00')
+    expect(describeCron('not cron', 'en')).toBe('cron "not cron"')
+    // giorni da Intl (en-GB: lunedì = Monday)
+    expect(describeCron('0 9 * * 1', 'en')).toContain('Monday')
+    expect(describeCron('0 9 * * 1', 'it')).toContain('lunedì')
+  })
+
+  it('describeEverySchedule e describeTrigger in en', () => {
+    expect(describeEverySchedule({ every: 'day', at: '09:00', mode: 'at' }, 'en')).toBe('every day at 09:00')
+    expect(describeEverySchedule({ every: 'week', weekday: 1, at: '09:00', mode: 'at' }, 'en')).toBe('every week on Monday at 09:00')
+    expect(describeTrigger({ type: 'webhook', token: 'x' }, undefined, 'en')).toBe('when it receives a webhook call')
+    expect(describeTrigger({ type: 'schedule', kind: 'every', every: 'weekday', at: '09:00', mode: 'at' }, undefined, 'en')).toBe('on weekdays at 09:00')
+    const email: RoutineTrigger = { type: 'connector_poll', connectorId: 'gmail', tool: 'mcp__gmail__search', intervalMin: 5, idField: 'messages[].id', preset: 'email', args: { query: 'invoices' } }
+    expect(describeTrigger(email, undefined, 'en')).toBe('when an email arrives matching "invoices"')
   })
 })

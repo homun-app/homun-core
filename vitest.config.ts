@@ -4,7 +4,9 @@ import babel from '@rolldown/plugin-babel'
 export default defineConfig({
   // fase 17a: le macro di Lingui (t/msg/plural usati dal renderer) vanno
   // compilate anche nei test — non compilate lanciano errore a runtime.
-  plugins: [babel({ plugins: ['@lingui/babel-plugin-lingui-macro'], include: ['src/renderer/**'] })],
+  // fase 17c (C1): anche i .ts di shared/main/daemon usano la macro msg
+  // (src/shared/ui-messages.ts), quindi la compilazione copre TUTTI i sorgenti.
+  plugins: [babel({ plugins: ['@lingui/babel-plugin-lingui-macro'], include: ['src/renderer/**/*.ts', 'src/renderer/**/*.tsx', 'src/shared/**/*.ts', 'src/main/**/*.ts', 'src/daemon/**/*.ts'] })],
   test: {
     environment: 'node',
     // solo i .test.ts: le fixtures JSON delle __tests__ non sono suite

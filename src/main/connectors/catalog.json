@@ -6,7 +6,10 @@
     "mcpUrl": "https://mcp.cloudflare.com/mcp",
     "clientRegistration": "dynamic",
     "docsUrl": "https://developers.cloudflare.com/agents/model-context-protocol/cloudflare/servers-for-cloudflare",
-    "notes": "Server MCP ufficiale Cloudflare (API completa, docs, containers, browser). OAuth 2.1 con Dynamic Client Registration. Fonti: https://developers.cloudflare.com/agents/model-context-protocol/cloudflare/servers-for-cloudflare e https://blog.cloudflare.com/remote-model-context-protocol-servers-mcp"
+    "notes": {
+      "it": "Server MCP ufficiale Cloudflare (API completa, docs, containers, browser). OAuth 2.1 con Dynamic Client Registration. Fonti: https://developers.cloudflare.com/agents/model-context-protocol/cloudflare/servers-for-cloudflare e https://blog.cloudflare.com/remote-model-context-protocol-servers-mcp",
+      "en": "Cloudflare's official MCP server (full API, docs, containers, browser). OAuth 2.1 with Dynamic Client Registration. Sources: https://developers.cloudflare.com/agents/model-context-protocol/cloudflare/servers-for-cloudflare and https://blog.cloudflare.com/remote-model-context-protocol-servers-mcp"
+    }
   },
   {
     "id": "sentry",
@@ -15,7 +18,10 @@
     "mcpUrl": "https://mcp.sentry.dev/mcp",
     "clientRegistration": "dynamic",
     "docsUrl": "https://mcp.sentry.dev",
-    "notes": "Server MCP ospitato da Sentry (repo ufficiale getsentry/toolkit): OAuth dal browser, nessuna chiave da creare. Fonti: https://mcp.sentry.dev e https://github.com/getsentry/toolkit"
+    "notes": {
+      "it": "Server MCP ospitato da Sentry (repo ufficiale getsentry/toolkit): OAuth dal browser, nessuna chiave da creare. Fonti: https://mcp.sentry.dev e https://github.com/getsentry/toolkit",
+      "en": "MCP server hosted by Sentry (official getsentry/toolkit repo): OAuth from the browser, no key to create. Sources: https://mcp.sentry.dev and https://github.com/getsentry/toolkit"
+    }
   },
   {
     "id": "stripe",
@@ -24,7 +30,10 @@
     "mcpUrl": "https://mcp.stripe.com",
     "clientRegistration": "dynamic",
     "docsUrl": "https://docs.stripe.com/mcp",
-    "notes": "Server MCP ufficiale Stripe (pagamenti, fatture, abbonamenti); OAuth con consenso sulla pagina Stripe (modalità test disponibile). Fonte: https://docs.stripe.com/mcp"
+    "notes": {
+      "it": "Server MCP ufficiale Stripe (pagamenti, fatture, abbonamenti); OAuth con consenso sulla pagina Stripe (modalità test disponibile). Fonte: https://docs.stripe.com/mcp",
+      "en": "Stripe's official MCP server (payments, invoices, subscriptions); OAuth with consent on the Stripe page (test mode available). Source: https://docs.stripe.com/mcp"
+    }
   },
   {
     "id": "notion",
@@ -33,7 +42,10 @@
     "mcpUrl": "https://mcp.notion.com/mcp",
     "clientRegistration": "dynamic",
     "docsUrl": "https://developers.notion.com/guides/mcp/get-started-with-mcp",
-    "notes": "Server MCP remoto ufficiale Notion: lettura e aggiornamento del workspace via OAuth. Fonte: https://developers.notion.com/guides/mcp/overview"
+    "notes": {
+      "it": "Server MCP remoto ufficiale Notion: lettura e aggiornamento del workspace via OAuth. Fonte: https://developers.notion.com/guides/mcp/overview",
+      "en": "Notion's official remote MCP server: read and update the workspace via OAuth. Source: https://developers.notion.com/guides/mcp/overview"
+    }
   },
   {
     "id": "linear",
@@ -42,7 +54,10 @@
     "mcpUrl": "https://mcp.linear.app/mcp",
     "clientRegistration": "dynamic",
     "docsUrl": "https://linear.app/integrations/claude",
-    "notes": "Server MCP remoto ufficiale Linear (issue, progetti, commenti): autenticazione con login Linear. Fonti: https://linear.app/integrations/claude e https://linear.app/integrations/codex-mcp"
+    "notes": {
+      "it": "Server MCP remoto ufficiale Linear (issue, progetti, commenti): autenticazione con login Linear. Fonti: https://linear.app/integrations/claude e https://linear.app/integrations/codex-mcp",
+      "en": "Linear's official remote MCP server (issues, projects, comments): authentication with Linear login. Sources: https://linear.app/integrations/claude and https://linear.app/integrations/codex-mcp"
+    }
   },
   {
     "id": "gmail",
@@ -55,7 +70,10 @@
       "https://www.googleapis.com/auth/gmail.compose"
     ],
     "docsUrl": "https://developers.google.com/workspace/gmail/api/guides/configure-mcp-server",
-    "notes": "Server MCP ufficiale Google per Gmail (Developer Preview). Registrazione statica: serve un client OAuth proprio, vedi docs/google-oauth.md. Endpoint: https://docs.cloud.google.com/mcp/supported-products"
+    "notes": {
+      "it": "Server MCP ufficiale Google per Gmail (Developer Preview). Registrazione statica: serve un client OAuth proprio, vedi docs/google-oauth.md. Endpoint: https://docs.cloud.google.com/mcp/supported-products",
+      "en": "Google's official MCP server for Gmail (Developer Preview). Static registration: you need your own OAuth client, see docs/google-oauth.md. Endpoint: https://docs.cloud.google.com/mcp/supported-products"
+    }
   },
   {
     "id": "gcalendar",
@@ -64,7 +82,10 @@
     "mcpUrl": "https://calendarmcp.googleapis.com/mcp/v1",
     "clientRegistration": "static",
     "docsUrl": "https://docs.cloud.google.com/mcp/supported-products",
-    "notes": "Server MCP ufficiale Google per Calendar (Developer Preview). Registrazione statica: client OAuth proprio come per Gmail (docs/google-oauth.md). Endpoint: https://docs.cloud.google.com/mcp/supported-products"
+    "notes": {
+      "it": "Server MCP ufficiale Google per Calendar (Developer Preview). Registrazione statica: client OAuth proprio come per Gmail (docs/google-oauth.md). Endpoint: https://docs.cloud.google.com/mcp/supported-products",
+      "en": "Google's official MCP server for Calendar (Developer Preview). Static registration: your own OAuth client as for Gmail (docs/google-oauth.md). Endpoint: https://docs.cloud.google.com/mcp/supported-products"
+    }
   },
   {
     "id": "gdrive",
@@ -73,6 +94,9 @@
     "mcpUrl": "https://drivemcp.googleapis.com/mcp/v1",
     "clientRegistration": "static",
     "docsUrl": "https://docs.cloud.google.com/mcp/supported-products",
-    "notes": "Server MCP ufficiale Google per Drive (Developer Preview). Registrazione statica: client OAuth proprio come per Gmail (docs/google-oauth.md). Endpoint: https://docs.cloud.google.com/mcp/supported-products"
+    "notes": {
+      "it": "Server MCP ufficiale Google per Drive (Developer Preview). Registrazione statica: client OAuth proprio come per Gmail (docs/google-oauth.md). Endpoint: https://docs.cloud.google.com/mcp/supported-products",
+      "en": "Google's official MCP server for Drive (Developer Preview). Static registration: your own OAuth client as for Gmail (docs/google-oauth.md). Endpoint: https://docs.cloud.google.com/mcp/supported-products"
+    }
   }
 ]

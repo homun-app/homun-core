@@ -6,6 +6,9 @@
 // entra nel prompt del turno come evidenza.
 import type { ConnectorPollTrigger, EveryScheduleSpec, RoutineTrigger, TriggerEventPayload } from './types'
 import { neutralizeClosingTag } from './agent-message'
+// fase 17c (C3): i testi d'errore dei trigger nel catalogo UI
+import { formatUi, ui } from './ui-text'
+import { UI } from './ui-messages'
 
 /** Il tetto del set dei visti di un trigger connector_poll (ultimi 1000 id). */
 export const SEEN_IDS_CAP = 1000
@@ -196,10 +199,18 @@ export function manualServerPollError(
   catalogServer: boolean
 ): string | null {
   if (catalogServer || t.userConfirmedReadOnly === true) return null
-  return (
-    'connector_poll su un server aggiunto a mano: serve la conferma esplicita ' +
-    'dell\'utente che il tool legga soltanto e non modifichi nulla (userConfirmedReadOnly)'
-  )
+  // fase 17c (C3): l'errore finisce nella validazione del trigger (RPC, UI) —
+  // testo del catalogo UI
+  return formatUi(ui(UI.rpcManualPollConfirm), uiLanguageForTexts())
+}
+
+/** La lingua dei testi dei trigger: la decide il chiamante (il daemon la inietta). */
+let textsLang: 'it' | 'en' = 'it'
+export function setTriggerTextsLang(lang: 'it' | 'en'): void {
+  textsLang = lang
+}
+function uiLanguageForTexts(): 'it' | 'en' {
+  return textsLang
 }
 
 /** Errori di forma di un trigger (il cron e il readOnly del tool si verificano lato daemon). */

@@ -14,6 +14,9 @@ import { SHELL_JOBS_DDL } from './shell-jobs'
 import { SUBAGENTS_DDL } from './subagents'
 import { LIBRARY_DDL } from './library'
 import type { Agent, AgentAvatar, TranscriptEntry, PermissionsConfig, RoutineTrigger } from '../../shared/types'
+// fase 17c (C3): l'UiText del rifiuto per la UI (foglie shared, nessun ciclo)
+import { ui } from '../../shared/ui-text'
+import { UI } from '../../shared/ui-messages'
 
 let _dir: string | null = null
 
@@ -341,7 +344,16 @@ export function subagentParentOf(id: string): Agent | null {
  */
 export function subagentRefusal(id: string): string | null {
   const parent = subagentParentOf(id)
-  return parent ? `${id} non è un bot: è un sottoagente di ${parent.name}` : null
+  // fase 17c (C3): il rifiuto arriva sia al modello (result dei tool, inglese)
+  // sia alla UI (routine sui sottoagenti): subagentRefusalUi dà l'UiText
+  return parent ? `${id} is not a bot: it is a subagent of ${parent.name}` : null
+}
+
+/** Fase 17c (C3): l'UiText del rifiuto per la UI (stesso controllo di subagentRefusal). */
+export function subagentRefusalUi(id: string): import('../../shared/types').UiText | null {
+  const parent = subagentParentOf(id)
+  if (!parent) return null
+  return ui(UI.rpcNotABot, { id, parent: parent.name })
 }
 
 // ---- transcript (event-sourced) ----

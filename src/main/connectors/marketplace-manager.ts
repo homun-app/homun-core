@@ -18,6 +18,9 @@ import { spawn } from 'node:child_process'
 import { getSetting, setSetting, dataDir as dataDirOf } from '../store/db'
 import { webFetchCached, type WebFetchOutcome } from '../agent/web-tools'
 import { parseMarketplace, stagePlugin, type MarketplacePlugin, type ParsedMarketplace } from './marketplace'
+// fase 17c (C3): gli errori delle RPC marketplace seguono la lingua dell'interfaccia
+import { uiText, uiError } from '../ui-language'
+import { UI } from '../../shared/ui-messages'
 
 /** Impostazione: l'elenco dei marketplace registrati. */
 export const MARKETPLACES_SETTING = 'connectors.marketplaces'
@@ -90,7 +93,8 @@ export function normalizeMarketplaceSource(input: string): { kind: 'github' | 'g
   if (/^[\w.-]+\/[\w.-]+$/.test(s)) return { kind: 'github', source: s }
   if (/^https:\/\/[\w.-\/]+$/i.test(s) && !s.includes(' ')) return { kind: 'git', source: s }
   if (allowFileUrls() && s.startsWith('file://')) return { kind: 'git', source: s }
-  return { error: 'sorgente non valida: usa owner/repo di GitHub oppure un URL git https' }
+  // fase 17c (C3): errore RPC per la UI — testo del catalogo
+  return { error: uiText(UI.rpcBadSource) }
 }
 
 /**
@@ -133,7 +137,7 @@ export function createMarketplaceManager(deps: MarketplaceDeps = {}) {
   async function add(input: string): Promise<RegisteredMarketplace> {
     const norm = normalizeMarketplaceSource(input)
     if ('error' in norm) throw new Error(norm.error)
-    if (list().some((m) => m.source === norm.source)) throw new Error('marketplace già registrato')
+    if (list().some((m) => m.source === norm.source)) throw uiError(UI.rpcAlreadyRegistered)
     const cat = await fetchCatalog({ name: '', source: norm.source, kind: norm.kind, official: false, addedAt: now() }, true)
     const reg: RegisteredMarketplace = {
       name: cat.parsed.name,
@@ -219,9 +223,9 @@ export function createMarketplaceManager(deps: MarketplaceDeps = {}) {
         }
       }
     }
-    if (json === null) throw new Error(`marketplace.json non leggibile per ${m.source}`)
+    if (json === null) throw uiError(UI.rpcUnreadable, { source: m.source })
     const { marketplace, issues } = parseMarketplace(json)
-    if (!marketplace) throw new Error(`marketplace non valido (${m.source}): ${issues[0]?.reason ?? 'sconosciuto'}`)
+    if (!marketplace) throw uiError(UI.rpcInvalidMarketplace, { source: m.source, reason: issues[0]?.reason ?? '?' })
     const cat: MarketplaceCatalog = { marketplace: m, parsed: marketplace, issues, fetchedAt: now() }
     cache.set(m.source, cat)
     return cat

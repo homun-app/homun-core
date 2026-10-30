@@ -11,6 +11,9 @@ import { api, useStore } from '../store'
 import { Bot } from '../bot/Bot'
 import { BOT_FAMILIES, BOT_COLORS } from '../../../shared/avatar'
 import type { BotColor, BotFamily, TemplateInfo } from '../../../shared/types'
+// fase 17c (C5): galleria dei template nella lingua dell'interfaccia
+import { pickLang } from '../../../shared/localized'
+import { i18n } from '../lib/i18n'
 
 /**
  * Le 5 famiglie con il loro nome per la UI (come in Lovable). Fase 17a:
@@ -69,6 +72,11 @@ function AvatarPicker({
       </div>
     </>
   )
+}
+
+/** La lingua attiva come UiLanguage (fase 17c, C5). */
+function uiLang(): 'it' | 'en' {
+  return i18n.locale === 'en' ? 'en' : 'it'
 }
 
 export function NewBotDialog({ onClose }: { onClose: () => void }) {
@@ -139,7 +147,7 @@ export function NewBotDialog({ onClose }: { onClose: () => void }) {
                   <button
                     key={t.id}
                     className="rounded-xl border border-border px-3 py-2 transition hover:border-muted-foreground"
-                    title={t.description}
+                    title={pickLang(t.description, uiLang())}
                     onClick={async () => {
                       try {
                         const a = await api.createAgentFromTemplate(t.id)
@@ -151,8 +159,9 @@ export function NewBotDialog({ onClose }: { onClose: () => void }) {
                     }}
                   >
                     <span className="mr-1">{t.avatar}</span>
-                    <span className="text-sm">{t.name}</span>
-                    <span className="mt-0.5 block truncate text-xs text-muted-foreground">{t.description}</span>
+                    {/* fase 17c (C5): la galleria mostra la lingua dell'interfaccia */}
+                    <span className="text-sm">{pickLang(t.name, uiLang())}</span>
+                    <span className="mt-0.5 block truncate text-xs text-muted-foreground">{pickLang(t.description, uiLang())}</span>
                   </button>
                 ))}
               </div>

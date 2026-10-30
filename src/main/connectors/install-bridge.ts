@@ -3,6 +3,10 @@
 // modello propone un server o un plugin. Iniettato per non creare il ciclo
 // loop → daemon.
 import type { InstallDeps } from './install'
+// fase 17c (C3): errore DUPLICE — il loop lo mostra al modello nel result del
+// tool (inglese), il confine RPC lo traduce per la UI
+import { ui, UiError } from '../../shared/ui-text'
+import { UI } from '../../shared/ui-messages'
 
 let deps: InstallDeps | null = null
 
@@ -13,6 +17,11 @@ export function setInstallDeps(d: InstallDeps | null): void {
 
 /** I deps registrati; senza wiring (es. tool base nei test) la proposta rifiuta con errore chiaro. */
 export function getInstallDeps(): InstallDeps {
-  if (!deps) throw new Error('installazione dei connettori non disponibile in questo contesto')
+  if (!deps) {
+    throw new UiError(
+      'connector installation not available in this context',
+      ui(UI.rpcInstallUnavailable)
+    )
+  }
   return deps
 }

@@ -17,7 +17,7 @@ import {
   addGateway, installedPlugins, pluginBoxDir, serverInstalledMessage, parseMcpServerId,
   serverIdFor, serverSlotError, resolvePluginServerPlaceholders, unresolvedUserConfigKeys,
   reconnectServer, discardPluginProposal, PENDING_PLUGIN_TTL_MS, SECRET_KIND,
-  GATEWAY_PRESETS, GATEWAY_WARNING, PROPOSAL_RESULT, THIRD_PARTY_SERVER_WARNING, HOST_MODE_DISABLED, HOST_MODE_DISABLED_CARD,
+  GATEWAY_PRESETS, GATEWAY_WARNING_UI, PROPOSAL_RESULT, HOST_MODE_DISABLED, HOST_MODE_DISABLED_REASON,
   type InstallDeps, type InstalledPlugin
 } from '../install'
 import type { McpServerConfig } from '../../mcp'
@@ -79,11 +79,13 @@ describe('parseMcpServerId e i testi fissi delle card', () => {
     expect(parseMcpServerId('url:http://mcp.example.com')).toMatchObject({ error: expect.any(String) })
     expect(parseMcpServerId('notion')).toMatchObject({ error: expect.any(String) })
   })
-  it('i testi della specifica: proposta, avviso terzi, host, gateway', () => {
+  it('i testi della specifica: proposta, host, gateway, avviso terzi (id del catalogo UI, fase 17c)', () => {
     expect(PROPOSAL_RESULT).toContain('proposal shown to the user')
-    expect(THIRD_PARTY_SERVER_WARNING).toContain('Server pubblicato da terzi')
+    // fase 17c (C3): l'avviso terzi vive nel catalogo UI (install.thirdParty);
+    // il gateway è l'id install.gatewayWarning
     expect(HOST_MODE_DISABLED).toBe('it installs only in the bots\' computer (docker mode)')
-    expect(GATEWAY_WARNING).toBe('Un gateway custodisce l\'accesso a tutte le app che colleghi lì: è un servizio di terzi')
+    expect(HOST_MODE_DISABLED_REASON).toBe('host-mode')
+    expect(GATEWAY_WARNING_UI.id).toBe('install.gatewayWarning')
   })
 })
 
@@ -95,7 +97,7 @@ describe('buildMcpServerCard (pura a deps iniettati)', () => {
     expect(r.ok).toBe(true)
     if (!r.ok) return
     expect(r.card.name).toBe('com.notion/mcp')
-    expect(r.card.trust).toBe('dominio verificato (notion.com)')
+    expect(r.card.trust).toBe('verified domain (notion.com)')
     expect(r.card.runtime).toEqual({ kind: 'remote', host: 'mcp.notion.com' })
     expect(r.card.needs).toEqual({ kind: 'oauth' })
     expect(r.card.thirdPartyWarning).toBeUndefined()
@@ -107,7 +109,7 @@ describe('buildMcpServerCard (pura a deps iniettati)', () => {
     expect(r.ok).toBe(true)
     if (!r.ok) return
     expect(r.card.needs).toEqual({ kind: 'key', header: 'Authorization' })
-    expect(r.card.trust).toBe('dominio verificato (smithery.ai)')
+    expect(r.card.trust).toBe('verified domain (smithery.ai)')
     expect(r.card.thirdPartyWarning).toBeUndefined()
   })
 
@@ -117,7 +119,7 @@ describe('buildMcpServerCard (pura a deps iniettati)', () => {
     expect(r1.ok && r1.card.thirdPartyWarning).toBe(true)
     const nv = makeDeps({ findRegistryEntry: async () => ({ server: { name: 'nudo/mcp', remotes: [{ type: 'streamable-http', url: 'https://mcp.example.com/mcp' }] } }) })
     const r2 = await buildMcpServerCard('registry:nudo/mcp', '', nv)
-    expect(r2.ok && r2.card.trust).toBe('non verificato')
+    expect(r2.ok && r2.card.trust).toBe('unverified')
     expect(r2.ok && r2.card.thirdPartyWarning).toBe(true)
   })
 
@@ -133,7 +135,7 @@ describe('buildMcpServerCard (pura a deps iniettati)', () => {
     const r = await buildMcpServerCard('registry:com.foreverworks/notion', '', makeDeps({ dockerMode: () => false }))
     expect(r.ok).toBe(true)
     if (!r.ok) return
-    expect(r.card.disabledReason).toBe(HOST_MODE_DISABLED_CARD)
+    expect(r.card.disabledReason).toBe(HOST_MODE_DISABLED_REASON)
   })
 
   it('pypi/oci: NESSUNA card, il tool risponde "non installabile qui: tipo <registryType>"', async () => {
@@ -148,7 +150,7 @@ describe('buildMcpServerCard (pura a deps iniettati)', () => {
     const r = await buildMcpServerCard('url:https://mcp.example.com/mcp', 'il server che hai citato', makeDeps())
     expect(r.ok).toBe(true)
     if (!r.ok) return
-    expect(r.card.trust).toBe('non verificato')
+    expect(r.card.trust).toBe('unverified')
     expect(r.card.thirdPartyWarning).toBe(true)
     expect(r.card.runtime).toEqual({ kind: 'remote', host: 'mcp.example.com' })
   })
@@ -332,7 +334,7 @@ describe('plugin: card, installazione, disinstallazione', () => {
     expect(r.card.marketplace).toBe('mp-di-test')
     expect(r.card.sha12).toBe(sha.slice(0, 12))
     expect(r.card.skills).toEqual(['demo-plugin--helper'])
-    expect(r.card.servers).toEqual([{ name: 'demo', runtimeLabel: 'remoto (mcp.demo.example)' }])
+    expect(r.card.servers).toEqual([{ name: 'demo', runtimeKind: 'remote', runtimeDetail: 'mcp.demo.example' }])
     expect(r.card.settings).toEqual([{ key: 'TOKEN', description: 'chiave', sensitive: true }])
     expect(r.card.ignored).toContain('hooks')
   })
@@ -761,7 +763,7 @@ describe('M1/M2/M3: linear, github, terraform — i .mcp.json veri del marketpla
       const card = await buildPluginCard('plugin:probe@claude-plugins-official', '', deps, cloneDeps())
       expect(card.ok).toBe(true)
       if (!card.ok) return
-      expect(card.card.servers).toEqual([{ name: 'linear', runtimeLabel: 'remoto (mcp.linear.app)' }])
+      expect(card.card.servers).toEqual([{ name: 'linear', runtimeKind: 'remote', runtimeDetail: 'mcp.linear.app' }])
       const r = await installPlugin(card.card, 'agent_alice', deps, set, get, cloneDeps())
       expect(r.ok).toBe(true)
       if (!r.ok) return
@@ -816,7 +818,7 @@ describe('M1/M2/M3: linear, github, terraform — i .mcp.json veri del marketpla
       const card = await buildPluginCard('plugin:probe@claude-plugins-official', '', deps, cloneDeps())
       expect(card.ok).toBe(true)
       if (!card.ok) return
-      expect(card.card.servers).toEqual([{ name: 'terraform', runtimeLabel: 'non supportato: valore in argv (TFE_TOKEN)' }])
+      expect(card.card.servers).toEqual([{ name: 'terraform', runtimeKind: 'unsupported', runtimeDetail: 'TFE_TOKEN' }])
       const r = await installPlugin(card.card, 'agent_alice', deps, set, get, cloneDeps())
       expect(r.ok).toBe(true)
       if (!r.ok) return
@@ -836,7 +838,7 @@ describe('M1/M2/M3: linear, github, terraform — i .mcp.json veri del marketpla
       const card = await buildPluginCard('plugin:probe@claude-plugins-official', '', deps, cloneDeps())
       expect(card.ok).toBe(true)
       if (!card.ok) return
-      expect(card.card.servers).toEqual([{ name: 'context7', runtimeLabel: 'remoto (mcp.context7.com)' }])
+      expect(card.card.servers).toEqual([{ name: 'context7', runtimeKind: 'remote', runtimeDetail: 'mcp.context7.com' }])
       const r = await installPlugin(card.card, 'agent_alice', deps, set, get, cloneDeps())
       expect(r.ok).toBe(true)
       const cfg = deps.listServers()[0]!

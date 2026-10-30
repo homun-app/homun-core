@@ -63,7 +63,7 @@ describe('fase 9 (punto 2): system prompt componibile', () => {
     const s = computerSection()
     expect(s.toLowerCase()).toContain('your other bots')
     expect(s.toLowerCase()).toContain('shared')
-    expect(s).toContain('`/workspace` is the COMMON space')
+    expect(s).toContain('`/workspace` (the shared box) is the COMMON space')
     expect(s).toContain('Your home is yours')
     expect(s).toContain('Before redoing work, check whether another bot')
     // fase 11 (punto 5): le capacità dichiarate

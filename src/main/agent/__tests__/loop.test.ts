@@ -679,6 +679,9 @@ beforeEach(() => {
   h.db.entries.length = 0
   h.db.agents.clear()
   h.db.settings.clear()
+  // fase 17c (C2): la lingua dell'interfaccia dei test è l'italiano (i testi
+  // salvati del loop restano italiani come prima; i test della lingua la cambiano)
+  h.db.settings.set('ui.activeLanguage', 'it')
   h.db.grants.length = 0
   h.db.routines.length = 0
   h.db.outbox.length = 0
@@ -805,7 +808,8 @@ describe('§5.6 segreti: il valore non arriva mai al modello né al transcript',
       expect(h.db.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending')).toBeTruthy()
     })
     const appr = h.db.entries.find((e) => e.kind === 'approval')!
-    expect(appr.content).toContain('uses credentials: API_KEY')
+    // fase 17c: il content della card è nella lingua dell'interfaccia (it nei test)
+    expect(appr.content).toContain('usa credenziali: API_KEY')
     expect(appr.meta?.secretRefs).toEqual(['API_KEY'])
 
     // "Consenti sempre" qui NON deve salvare grant (C4)
@@ -1287,7 +1291,11 @@ describe('fase 4: update_state nel loop', () => {
     await vi.waitFor(() => expect(h.db.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending')).toBeTruthy())
     const appr = h.db.entries.find((e) => e.kind === 'approval')!
     expect(appr.content).toContain('Backup')
-    expect(appr.content).toContain('giorni feriali')
+    // fase 17c (C2): la card mostra il motivo nel catalogo UI; la schedule la
+    // costruisce la card stessa con describeCron (non è più nel content) e
+    // meta.ui porta l'id per la ritraduzione
+    expect(appr.content).toContain('attivare la routine "Backup"')
+    expect((appr.meta?.ui as { id?: string })?.id).toBe('approval.usResume')
     resolveApproval(AGENT, String(appr.meta?.approvalId), 'allow', 'once')
     await turn
     expect(h.db.routines[0]!.enabled).toBe(1)
@@ -2697,7 +2705,8 @@ describe('fase 10 (punto 1): permessi per ORIGINE di create_agent/create_group',
     })
     // con l'allow dell'utente la creazione procede
     const appr = h.db.entries.find((e) => e.kind === 'approval')!
-    expect(appr.content).toContain("the turn is not the user's")
+    // fase 17c: il motivo in card nella lingua dell'interfaccia
+    expect(appr.content).toContain("il turno non è dell’utente")
     resolveApproval(AGENT, String(appr.meta?.approvalId), 'allow', 'once')
     await turn
     expect([...h.db.agents.values()].some((a) => a.name === 'Sospetto')).toBe(true)
@@ -4600,7 +4609,12 @@ describe('fase 13: add_mcp_server / install_plugin / find_tools / result MCP', (
     expect(card).toBeTruthy()
     expect(card?.meta?.message).toMatchObject({
       type: 'mcp-server', id: 'registry:com.notion/mcp', name: 'com.notion/mcp',
-      trust: 'dominio verificato (notion.com)', runtime: { kind: 'remote', host: 'mcp.notion.com' }
+      // fase 17c (C5): il label di fiducia per il modello è inglese; la UI
+      // traduce da trustKind + trustDetail
+      trust: 'verified domain (notion.com)',
+      trustKind: 'verified-domain',
+      trustDetail: 'notion.com',
+      runtime: { kind: 'remote', host: 'mcp.notion.com' }
     })
     expect(card?.meta?.status).toBe('pending')
     // NESSUNA installazione: il tool non registra server

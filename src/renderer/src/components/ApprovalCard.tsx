@@ -8,6 +8,10 @@
 import { useStore } from '../store'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { describeCron } from '../../../shared/cron-human'
+// fase 17c (C2): il motivo della card si ritraduce dal meta.ui (id+valori,
+// o lista per i motivi multipli di run-command); describeCron nella lingua attiva
+import { uiTextOfMeta } from '../lib/ui-text'
+import { i18n } from '../lib/i18n'
 import type { TranscriptEntry } from '../../../shared/types'
 
 /** Suggerimento di regola allow partendo dall'azione della card (fase 8). */
@@ -27,11 +31,17 @@ function suggestedRule(tool: string, input: Record<string, unknown> | undefined)
 
 export function ApprovalCard({ entry }: { entry: TranscriptEntry }) {
   const { t } = useLingui()
+  // fase 17c (C6): la schedule in linguaggio naturale nella lingua attiva
+  const activeLang = i18n.locale === 'en' ? 'en' : 'it'
   const resolve = useStore((s) => s.resolveApproval)
   const proposeRule = useStore((s) => s.proposeRule)
   const approvalId = entry.meta?.approvalId as string | undefined
   const status = (entry.meta?.status as string | undefined) ?? 'pending'
   const tool = String(entry.meta?.tool)
+
+  // fase 17c (C2): il testo del motivo nella lingua attiva (meta.ui), con
+  // ripiego sul content per le entry vecchie
+  const reasonText = uiTextOfMeta(entry.meta) ?? entry.content
 
   // fase 8: auto-approvata dall'auto-review — compressa, espandibile
   if (entry.meta?.autoApproved) {
@@ -42,7 +52,7 @@ export function ApprovalCard({ entry }: { entry: TranscriptEntry }) {
           {entry.meta?.reason ? <span className="text-muted-foreground"> — {String(entry.meta.reason)}</span> : null}
         </summary>
         <div className="mt-2 font-mono text-[11px] text-muted-foreground">
-          {tool} {entry.content && entry.content !== tool ? `— ${entry.content}` : ''}
+          {tool} {reasonText && reasonText !== tool ? `— ${reasonText}` : ''}
         </div>
       </details>
     )
@@ -70,14 +80,14 @@ export function ApprovalCard({ entry }: { entry: TranscriptEntry }) {
         <span>{isRoutine ? <Trans>Cambio di automazione — serve la tua approvazione</Trans> : <Trans>Richiede la tua approvazione</Trans>}</span>
       </div>
       <div className="mt-1 font-mono text-xs text-foreground">
-        {tool} {entry.content && entry.content !== tool ? `— ${entry.content}` : ''}
+        {tool} {reasonText && reasonText !== tool ? `— ${reasonText}` : ''}
       </div>
       {isRoutine && (
         <div className="mt-2 space-y-1 rounded-lg bg-muted/50 px-3 py-2 text-xs text-foreground">
           <div><span className="text-muted-foreground">{t`Routine:`}</span> {st?.name ?? (st?.id !== undefined ? `#${st.id}` : '?')}</div>
           {st?.schedule && (
             <div>
-              <span className="text-muted-foreground">{t`Schedule:`}</span> {describeCron(st.schedule)}{' '}
+              <span className="text-muted-foreground">{t`Schedule:`}</span> {describeCron(st.schedule, activeLang)}{' '}
               <span className="font-mono text-muted-foreground">({st.schedule})</span>
             </div>
           )}

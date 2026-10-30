@@ -9,6 +9,12 @@
 // il bottone "Connetti" — la connessione parte dal click dell'utente.
 import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js'
 import catalogJson from './catalog.json'
+// fase 17c (C3/C5): gli errori di stato seguono la lingua dell'interfaccia;
+// il catalogo ha campi Localized (note) scelti con pickLang
+import { uiText } from '../ui-language'
+import { UI } from '../../shared/ui-messages'
+import { pickLang, isLocalized } from '../../shared/localized'
+import type { Localized } from '../../shared/types'
 import { createOAuthProvider, authorizeWithLoopback, type StaticClientCredentials } from './oauth-provider'
 import type { ConnectorsSecretStore } from './sealed-store'
 
@@ -20,7 +26,8 @@ export interface CatalogEntry {
   clientRegistration: 'dynamic' | 'static'
   scopes?: string[]
   docsUrl: string
-  notes: string
+  /** fase 17c (C5): le note sono bilingue (la UI sceglie, il modello riceve en) */
+  notes: Localized
 }
 
 export type ConnectorStatus = 'not_connected' | 'connected' | 'needs_auth' | 'error'
@@ -63,6 +70,8 @@ export function validateCatalog(entries: unknown): string[] {
     if (typeof c.mcpUrl !== 'string' || !c.mcpUrl.startsWith('https://')) errors.push(`${where}: mcpUrl non https (${String(c.mcpUrl)})`)
     if (c.clientRegistration !== 'dynamic' && c.clientRegistration !== 'static') errors.push(`${where}: clientRegistration non valido`)
     if (typeof c.docsUrl !== 'string' || !/^https:\/\//.test(c.docsUrl)) errors.push(`${where}: docsUrl mancante o non https`)
+    // fase 17c (C5): le note accettano la forma stringa (dati vecchi) e {it,en}
+    if (!isLocalized(c.notes)) errors.push(`${where}: notes mancanti`)
     if (c.scopes !== undefined && (!Array.isArray(c.scopes) || c.scopes.some((s) => typeof s !== 'string'))) errors.push(`${where}: scopes non validi`)
   })
   return errors
@@ -83,12 +92,19 @@ export function searchCatalog(entries: CatalogEntry[], query: string): CatalogEn
   if (!q) return entries
   const words = q.split(/\s+/)
   return entries.filter((e) => {
-    const hay = `${e.id} ${e.name} ${e.notes}`.toLowerCase()
+    // fase 17c (C5): la query può arrivare in entrambe le lingue — si cerca
+    // in tutte le forme del campo Localized
+    const hay = `${e.id} ${e.name} ${localizedText(e.notes)}`.toLowerCase()
     return words.some((w) => hay.includes(w))
   })
 }
 
-/** Stato testuale di un connettore per il modello (search_connectors). */
+/** Il testo completo di un campo Localized (per la ricerca, entrambe le lingue). */
+function localizedText(v: Localized): string {
+  return typeof v === 'string' ? v : `${v.it} ${v.en}`
+}
+
+/** Stato testuale di un connettore per il modello (search_connectors): le note in inglese. */
 export function connectorStatusLine(e: CatalogEntry, state: ConnectorState): string {
   const labels: Record<ConnectorStatus, string> = {
     not_connected: 'not connected',
@@ -97,7 +113,8 @@ export function connectorStatusLine(e: CatalogEntry, state: ConnectorState): str
     error: 'error'
   }
   const extra = state.status === 'error' && state.error ? ` — ${state.error}` : ''
-  return `- ${e.name} (${e.id}): ${labels[state.status]}${extra}. ${e.notes}`
+  // fase 17c (C5): il modello legge la descrizione in inglese
+  return `- ${e.name} (${e.id}): ${labels[state.status]}${extra}. ${pickLang(e.notes, 'en')}`
 }
 
 // ---- istruzioni per server nel system prompt (mcpCustomInstructionsByServerId) ----
@@ -206,7 +223,7 @@ export function createConnectorsManager(deps: ConnectorsManagerDeps) {
       (scope) => {
         // refresh fallito o credenziali rifiutate: serve di nuovo l'utente
         if (scope === 'tokens' || scope === 'all') {
-          setState(entry.id, { status: 'needs_auth', error: 'Sessione scaduta: riconnetti' })
+          setState(entry.id, { status: 'needs_auth', error: uiText(UI.connSessionExpired) })
         }
       }
     )
@@ -257,7 +274,7 @@ export function createConnectorsManager(deps: ConnectorsManagerDeps) {
      */
     connect(id: string): { started: boolean; status: ConnectorStatus; message?: string } {
       const entry = catalog.find((e) => e.id === id)
-      if (!entry) return { started: false, status: 'error', message: `connettore sconosciuto: ${id}` }
+      if (!entry) return { started: false, status: 'error', message: uiText(UI.rpcConnectorUnknown, { id }) }
       // il flusso dura fino a 10 minuti (attesa del browser): parte in parallelo
       void this.runConnect(entry)
       return { started: true, status: stateOf(id).status }
@@ -266,7 +283,7 @@ export function createConnectorsManager(deps: ConnectorsManagerDeps) {
     /** Il flusso vero e proprio, separato per essere testabile in linea. */
     async runConnect(entry: CatalogEntry): Promise<{ status: ConnectorStatus; message?: string }> {
       if (entry.clientRegistration === 'static' && !(await deps.store.read(entry.id, 'staticClient'))) {
-        const message = 'Configura client_id e client_secret del client OAuth (vedi docs/google-oauth.md)'
+        const message = uiText(UI.connStaticClient)
         setState(entry.id, { status: 'error', error: message })
         return { status: 'error', message }
       }
@@ -274,8 +291,8 @@ export function createConnectorsManager(deps: ConnectorsManagerDeps) {
       // connessione riparte quando l'utente apre l'app
       if (!deps.hasUi() && !(await deps.store.read(entry.id, 'oauth.tokens'))) {
         pendingAuth.set(entry.id, entry)
-        setState(entry.id, { status: 'needs_auth', error: 'Apri la finestra di Homun per autorizzare' })
-        return { status: 'needs_auth', message: 'finestra chiusa: autorizzazione rinviata' }
+        setState(entry.id, { status: 'needs_auth', error: uiText(UI.connNeedsAuthOpenWindow) })
+        return { status: 'needs_auth', message: uiText(UI.connWindowClosed) }
       }
       try {
         // fase 13 (punto 6): discovery/DCR/PKCE/refresh guidati da auth()
@@ -288,7 +305,7 @@ export function createConnectorsManager(deps: ConnectorsManagerDeps) {
         const tools = await deps.toolsOf(entry.id)
         pendingAuth.delete(entry.id)
         setState(entry.id, { status: 'connected', error: undefined })
-        return { status: 'connected', message: `${tools.length} tool disponibili` }
+        return { status: 'connected', message: uiText(UI.connToolsAvailable, { count: tools.length }) }
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e)
         // apertura del browser fallita (UI chiusa): autorizzazione rinviata

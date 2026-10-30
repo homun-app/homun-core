@@ -26,6 +26,7 @@ const { listJobs } = await import('../../main/store/jobs')
 const { buildApiMethods } = await import('../api')
 import type { JobWorker } from '../worker'
 import type { SandbotEvent } from '../../shared/types'
+import { setSetting } from '../../main/store/db'
 
 let events: SandbotEvent[]
 const emit: (e: SandbotEvent) => void = (e) => events.push(e)
@@ -34,6 +35,8 @@ const api: Record<string, (p: unknown[]) => unknown> = buildApiMethods(emit, { p
 beforeAll(() => {
   const dir = mkdtempSync(join(tmpdir(), 'sandbot-f12rpc-test-'))
   setDataDir(dir)
+  // fase 17c: la lingua dei testi del daemon è l'italiano (come prima)
+  setSetting('ui.activeLanguage', 'it')
   dataDir()
   db()
 })

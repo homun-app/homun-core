@@ -13,6 +13,9 @@ import { describe, expect, it, beforeAll, afterAll, beforeEach } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+// fase 17c: la lingua dell'interfaccia dei test è l'italiano (i testi erano italiani prima)
+import { setSetting } from '../../store/db'
+setSetting('ui.activeLanguage', 'it')
 
 const TMP = mkdtempSync(join(tmpdir(), 'sandbot-fill-test-'))
 const { setDataDir, dataDir, getSetting } = await import('../../store/db')

@@ -13,6 +13,9 @@ import { appendEntry, getEntries, updateAgent, updateEntryMeta } from '../main/s
 import { activeJobForAgent, pendingUserMessages, enqueueJob, MAX_USER_MESSAGE_QUEUE, type Job } from '../main/store/jobs'
 import { emitLastEntry, supersedeIfPaused, dismissPendingWidgets } from '../main/agent/loop'
 import { noteHumanText } from '../main/agent/user-language'
+// fase 17c (C2): le notice portano meta.ui e il content nella lingua dell'interfaccia
+import { uiLanguage, formatUi, ui } from '../main/ui-language'
+import { UI } from '../shared/ui-messages'
 import { findDismissibleWidgets, widgetPayload, responseDisplayText } from '../main/agent/widgets'
 import type { SandbotEvent } from '../shared/types'
 
@@ -38,7 +41,10 @@ export function enqueueUserMessage(
   images: string[] | undefined,
   emit: Emitter,
   respondedTo?: number,
-  initiator?: string
+  initiator?: string,
+  // fase 17c (C2, MU): meta extra del messaggio che apre il turno (es. la
+  // ui dei [sistema]: il testo resta inglese per il modello)
+  extraMeta?: Record<string, unknown>
 ): Job | null {
   // fase 17b (A2): il testo di una PERSONA aggiorna la lingua dell'utente —
   // solo i messaggi diretti (senza initiator: i [sistema] non contano) e non
@@ -59,17 +65,20 @@ export function enqueueUserMessage(
     } else {
       const waiting = pendingUserMessages(db, agentId)
       if (waiting >= MAX_QUEUE) {
-        appendEntry({ agentId, kind: 'notice', role: 'system', content: 'Coda piena: messaggio scartato.' })
+        const full = ui(UI.queueFull)
+        appendEntry({ agentId, kind: 'notice', role: 'system', content: formatUi(full, uiLanguage()), meta: { ui: full } })
         emitLastEntry(agentId, emit)
         return null
       }
-      appendEntry({ agentId, kind: 'notice', role: 'system', content: `Agente occupato: messaggio in coda (posizione ${waiting + 1}).` })
+      const queued = ui(UI.agentBusyQueued, { position: waiting + 1 })
+      appendEntry({ agentId, kind: 'notice', role: 'system', content: formatUi(queued, uiLanguage()), meta: { ui: queued } })
       emitLastEntry(agentId, emit)
     }
   }
   const now = Date.now()
   const payload: Record<string, unknown> = images?.length ? { text, images } : { text }
   if (respondedTo !== undefined) payload.respondedTo = respondedTo
+  if (extraMeta) payload.extraMeta = extraMeta
   // fase 5: chi ha avviato il turno (es. CONNECTOR_CONNECTED dopo il click su
   // "Connetti" di una card offerta dal bot) — finisce in meta.initiator
   if (initiator) payload.initiator = initiator

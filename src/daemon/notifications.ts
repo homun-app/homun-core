@@ -6,6 +6,10 @@
 // throttle di 5 s per agente → consegna. La consegna vera passa dall'HostBridge
 // (notifica nativa con la UI, osascript senza).
 import type { SandbotEvent } from '../shared/types'
+// fase 17c (C3): i titoli delle notifiche seguono la lingua dell'interfaccia;
+// l'anteprima resta il testo vero
+import { uiLanguage, formatUi, ui } from '../main/ui-language'
+import { UI } from '../shared/ui-messages'
 
 export const NOTIFY_THROTTLE_MS = 5_000
 
@@ -42,10 +46,10 @@ export function decideNotification(i: NotificationInput): NotificationDecision {
 
 export type AgentNotifyEvent = Extract<SandbotEvent, { type: 'agent-notify' }>
 
-/** Titolo/corpo della notifica per kind (agent-done / agent-needs-input). */
-export function notifyTexts(agentName: string, e: AgentNotifyEvent): { title: string; body: string } {
+/** Titolo/corpo della notifica per kind (agent-done / agent-needs-input). Fase 17c: titolo nel catalogo UI, corpo = anteprima vera. */
+export function notifyTexts(agentName: string, e: AgentNotifyEvent, lang: 'it' | 'en' = uiLanguage()): { title: string; body: string } {
   if (e.kind === 'needs-input') {
-    return { title: `${agentName} ha bisogno di te`, body: e.preview.slice(0, 120) }
+    return { title: formatUi(ui(UI.notifyNeedsInput, { agent: agentName }), lang), body: e.preview.slice(0, 120) }
   }
-  return { title: `${agentName} ha risposto`, body: e.preview.slice(0, 120) }
+  return { title: formatUi(ui(UI.notifyDone, { agent: agentName }), lang), body: e.preview.slice(0, 120) }
 }

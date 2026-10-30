@@ -11,23 +11,39 @@
 import type { Agent, ProviderConfig, SendMessagePayload, SandbotEvent, WidgetOption } from '../shared/types'
 import type { BotTemplate } from '../shared/types'
 import { templateById } from '../main/templates'
+// fase 17c (C4): i testi dell'onboarding sono messaggi del BOT all'utente —
+// si scrivono con formatUi(…, currentUserLanguage()) e si salvano come testo
+// (contenuto dell'utente, niente meta.ui)
+import { currentUserLanguage } from '../main/agent/user-language'
+import { formatUi, ui } from '../shared/ui-text'
+import { UI } from '../shared/ui-messages'
+import { pickLang } from '../shared/localized'
+import type { Lang } from '../shared/language'
 
 /** Il nome del bot principale creato dall'onboarding. */
 export const MAIN_BOT_NAME = 'Bot'
-export const MAIN_BOT_DESCRIPTION = 'Punto di contatto principale: coordina gli altri bot.'
+/** La descrizione del bot principale nella lingua dell'utente (C4). */
+export function mainBotDescription(lang: Lang): string {
+  return formatUi(ui(UI.onboardingMainBotDescription), lang)
+}
 
 export const ROLE_SETTING = 'onboarding.role'
 export const PENDING_PROVIDER_SETTING = 'onboarding.pendingProvider'
 export const DONE_SETTING = 'onboarding.done'
 
-/** La domanda del widget di sistema (§3ter T3): 4 opzioni + testo libero. */
-export const ONBOARDING_PROMPT = 'Per cosa vuoi usarmi di più?'
-export const ONBOARDING_ROLE_OPTIONS: WidgetOption[] = [
-  { label: 'Lavoro e codice', value: 'lavoro-codice' },
-  { label: 'Organizzazione e calendario', value: 'organizzazione-calendario' },
-  { label: 'Email', value: 'email' },
-  { label: 'Ricerca e aggiornamenti', value: 'ricerca-aggiornamenti' }
-]
+/** La domanda del widget di sistema (§3ter T3): 4 opzioni + testo libero (nella lingua dell'utente). */
+export function onboardingPrompt(lang: Lang): string {
+  return formatUi(ui(UI.onboardingPrompt), lang)
+}
+export function onboardingRoleOptions(lang: Lang): WidgetOption[] {
+  // i value restano CODICI (li legge roleTemplates), le label si traducono
+  return [
+    { label: formatUi(ui(UI.onboardingRoleWork), lang), value: 'lavoro-codice' },
+    { label: formatUi(ui(UI.onboardingRoleOrg), lang), value: 'organizzazione-calendario' },
+    { label: formatUi(ui(UI.onboardingRoleEmail), lang), value: 'email' },
+    { label: formatUi(ui(UI.onboardingRoleSearch), lang), value: 'ricerca-aggiornamenti' }
+  ]
+}
 
 /**
  * La mappa ruolo → 2 template (pura): decide quali bot nascono dall'onboarding.
@@ -47,10 +63,10 @@ export function roleTemplates(role: string): [string, string] {
   }
 }
 
-/** Il messaggio FISSO di benvenuto: presenta i nuovi bot in una riga ciascuno. */
-export function welcomeMessage(templates: BotTemplate[]): string {
-  const lines = templates.map((t) => `- ${t.name}: ${t.description}`)
-  return [`Benvenuto! Ho preparato due bot su misura per te, li trovi nella barra a sinistra:`, ...lines].join('\n')
+/** Il messaggio FISSO di benvenuto: presenta i nuovi bot in una riga ciascuno (nella lingua dell'utente, nomi/descrizioni dei template compresi). */
+export function welcomeMessage(templates: BotTemplate[], lang: Lang): string {
+  const lines = templates.map((t) => formatUi(ui(UI.onboardingWelcomeLine, { name: pickLang(t.name, lang), description: pickLang(t.description, lang) }), lang))
+  return [formatUi(ui(UI.onboardingWelcomeHead), lang), ...lines].join('\n')
 }
 
 export interface OnboardingDeps {
@@ -84,15 +100,18 @@ function providerConfigured(deps: OnboardingDeps): boolean {
 export function maybeStartOnboarding(deps: OnboardingDeps): void {
   if (deps.listAgents().length > 0) return
   if (deps.getSetting<boolean>(DONE_SETTING, false)) return
-  const main = deps.createAgent(MAIN_BOT_NAME, MAIN_BOT_DESCRIPTION)
+  // fase 17c (C4): la lingua dell'utente (prima del primo messaggio umano
+  // ricade su ui.activeLanguage, cioè quella dell'app)
+  const lang = currentUserLanguage()
+  const main = deps.createAgent(MAIN_BOT_NAME, mainBotDescription(lang))
   deps.setSetting('mainAgentId', main.id)
   deps.emit({ type: 'agents' })
   deps.appendSystemSend(main.id, {
     type: 'widget',
-    prompt: ONBOARDING_PROMPT,
-    options: ONBOARDING_ROLE_OPTIONS,
+    prompt: onboardingPrompt(lang),
+    options: onboardingRoleOptions(lang),
     allowCustom: true,
-    helpText: 'Con la risposta preparo due bot dedicati (li potrai cambiare quando vuoi).'
+    helpText: formatUi(ui(UI.onboardingHelp), lang)
   }, { onboardingRole: true })
 }
 
@@ -110,11 +129,12 @@ export function answerOnboardingRole(deps: OnboardingDeps, entryId: number, valu
   } else {
     deps.setSetting(PENDING_PROVIDER_SETTING, true)
     const main = deps.getSetting<string | null>('mainAgentId', null) ?? ''
+    const lang = currentUserLanguage()
     deps.appendSystemSend(main, {
       type: 'widget',
-      prompt: 'Prima di preparare i tuoi bot mi serve un provider (il modello che li fa pensare).',
-      helpText: 'Apre le impostazioni: scegli o attiva un provider e torno a completare da solo.',
-      options: [{ label: 'Apri le impostazioni del provider', value: 'open-provider-settings', style: 'primary' }]
+      prompt: formatUi(ui(UI.onboardingProviderPrompt), lang),
+      helpText: formatUi(ui(UI.onboardingProviderHelp), lang),
+      options: [{ label: formatUi(ui(UI.onboardingProviderButton), lang), value: 'open-provider-settings', style: 'primary' }]
     }, { onboardingProvider: true })
   }
 }
@@ -144,22 +164,25 @@ export async function completeOnboarding(deps: OnboardingDeps, role: string): Pr
   const mainId = deps.getSetting<string | null>('mainAgentId', null)
   if (mainId && assignment) deps.updateAgent(mainId, { providerId: assignment.providerId, model: assignment.model })
 
+  const lang = currentUserLanguage()
   const templates = roleTemplates(role)
     .map((id) => templateById(id))
     .filter((t): t is BotTemplate => !!t)
   for (const t of templates) {
-    const a = deps.createAgent(t.name, t.description)
+    // fase 17c (C5): il bot nasce col nome/descrizione nella lingua
+    // dell'utente (contenuto dell'utente, modificabile)
+    const a = deps.createAgent(pickLang(t.name, lang), pickLang(t.description, lang))
     if (assignment) deps.updateAgent(a.id, { providerId: assignment.providerId, model: assignment.model })
     deps.enqueueKickstart(a.id, t)
   }
   if (mainId) {
-    deps.appendSystemSend(mainId, { type: 'text', text: welcomeMessage(templates) })
+    deps.appendSystemSend(mainId, { type: 'text', text: welcomeMessage(templates, lang) })
     // il default non è assegnabile (niente capability "tools"): lo dice qui,
     // così l'utente sa perché i bot non rispondono finché non sistema il modello
     if (assignment?.warning) {
       deps.appendSystemSend(mainId, {
         type: 'text',
-        text: `Attenzione: non ho potuto assegnare il modello ai bot (${assignment.warning}). Scegline uno valido dalle impostazioni dell'agente.`
+        text: formatUi(ui(UI.onboardingModelWarning, { warning: assignment.warning }), lang)
       })
     }
   }

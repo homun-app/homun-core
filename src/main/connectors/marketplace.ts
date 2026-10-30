@@ -13,6 +13,9 @@ import { spawn } from 'node:child_process'
 import { existsSync, lstatSync, mkdtempSync, cpSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { isAbsolute, join, relative, resolve } from 'node:path'
+// fase 17c (C3): le issue di parse del marketplace si mostrano nella UI
+import { uiText } from '../ui-language'
+import { UI } from '../../shared/ui-messages'
 
 /** Nome valido di plugin/marketplace: ^[A-Za-z0-9][A-Za-z0-9._-]*$. */
 export const VALID_PLUGIN_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
@@ -61,11 +64,13 @@ export interface MarketplaceParseIssue {
 export function parseMarketplace(json: unknown): { marketplace: ParsedMarketplace | null; issues: MarketplaceParseIssue[] } {
   const issues: MarketplaceParseIssue[] = []
   const root = json as { name?: unknown; owner?: unknown; plugins?: unknown } | null
+  // fase 17c (C3): le issue si mostrano nella scheda Marketplace — testi del
+  // catalogo UI nella lingua dell'interfaccia (risolti qui, al build)
   if (!root || typeof root !== 'object') {
-    return { marketplace: null, issues: [{ plugin: '(radice)', reason: 'il marketplace non è un oggetto' }] }
+    return { marketplace: null, issues: [{ plugin: uiText(UI.mpRoot), reason: uiText(UI.mpNotObject) }] }
   }
   if (typeof root.name !== 'string' || !VALID_PLUGIN_NAME_RE.test(root.name)) {
-    return { marketplace: null, issues: [{ plugin: '(radice)', reason: `name non valido: ${String(root.name)}` }] }
+    return { marketplace: null, issues: [{ plugin: uiText(UI.mpRoot), reason: uiText(UI.mpBadName, { name: String(root.name) }) }] }
   }
   const plugins: MarketplacePlugin[] = []
   if (Array.isArray(root.plugins)) {
@@ -73,12 +78,12 @@ export function parseMarketplace(json: unknown): { marketplace: ParsedMarketplac
       const p = raw as Record<string, unknown>
       const name = typeof p?.name === 'string' ? p.name : ''
       if (!name || !VALID_PLUGIN_NAME_RE.test(name)) {
-        issues.push({ plugin: name || '(senza nome)', reason: `name non valido: "${name}"` })
+        issues.push({ plugin: name || uiText(UI.mpUnnamed), reason: uiText(UI.mpBadPluginName, { name }) })
         continue
       }
       const source = parsePluginSource(p?.source)
       if (!source) {
-        issues.push({ plugin: name, reason: `sorgente mancante o non riconosciuta: ${JSON.stringify(p?.source ?? null).slice(0, 80)}` })
+        issues.push({ plugin: name, reason: uiText(UI.mpBadSource, { source: JSON.stringify(p?.source ?? null).slice(0, 80) }) })
         continue
       }
       const author = (p?.developerMetadata as { author?: unknown } | undefined)?.author

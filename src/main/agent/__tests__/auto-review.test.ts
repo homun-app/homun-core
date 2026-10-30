@@ -25,7 +25,11 @@ describe('liftContaminatedAllow (F8, pura): allow → ask nel turno contaminato'
     for (const tool of [...CONTAMINATED_ASK_TOOLS]) {
       const v = liftContaminatedAllow({ kind: 'allow', via: 'rule' }, tool, true)
       expect(v.kind, tool).toBe('ask')
-      if (v.kind === 'ask') expect(v.reason, tool).toContain('il turno ha letto contenuti web')
+      // fase 17c (C2): reason inglese per il modello; la card usa l'UiText
+      if (v.kind === 'ask') {
+        expect(v.reason, tool).toContain('the turn has read untrusted web content')
+        expect(v.ui?.id).toBe('approval.contaminated')
+      }
     }
   })
 
