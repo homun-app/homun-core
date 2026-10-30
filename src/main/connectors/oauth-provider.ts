@@ -105,7 +105,7 @@ export function createOAuthProvider(
       // tipizza ma lo inoltra nella DCR così com'è; con credenziali statiche
       // (es. Google) il secret accompagna le richieste del token endpoint
       const meta: OAuthClientMetadata & { application_type?: string } = {
-        client_name: 'SandBot',
+        client_name: 'Homun',
         redirect_uris: [deps.redirectUrl],
         grant_types: ['authorization_code', 'refresh_token'],
         response_types: ['code'],

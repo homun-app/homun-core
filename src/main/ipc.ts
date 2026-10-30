@@ -77,7 +77,7 @@ export function registerIpc(client: DaemonClient, getWindows: () => BrowserWindo
 
   // diagnostica notifiche (F4)
   ipcMain.handle('notify:test', () => {
-    const n = new Notification({ title: 'SandBot', body: 'Test notifica — se la vedi, i permessi sono ok.' })
+    const n = new Notification({ title: 'Homun', body: 'Test notifica — se la vedi, i permessi sono ok.' })
     n.show()
     return { shown: true }
   })
@@ -106,7 +106,7 @@ export function registerIpc(client: DaemonClient, getWindows: () => BrowserWindo
   client.registerHost('host.notify', ([title, body]) => {
     const windows = getWindows()
     const n = new Notification({
-      title: String(title ?? 'SandBot'),
+      title: String(title ?? 'Homun'),
       body: String(body ?? '').slice(0, 120)
     })
     n.on('click', () => { const w = windows[0]; w?.show(); w?.focus() })

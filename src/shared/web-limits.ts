@@ -10,4 +10,4 @@ export const WEB_SEARCH_MAX_RESULTS = 10
 // fase 15 (S1): timeout di OGNI chiamata ai provider di ricerca (keyless e no)
 export const WEB_SEARCH_TIMEOUT_MS = 15_000
 /** User-agent onesto di ogni richiesta web di SandBot (ricerca e lettura). */
-export const SANDBOT_USER_AGENT = 'SandBot/0.1.0'
+export const SANDBOT_USER_AGENT = 'Homun/0.1.0'

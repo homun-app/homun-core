@@ -793,9 +793,9 @@ describe('web_fetch contro un server http locale (flag di test)', () => {
     }
   })
 
-  it('user-agent onesto SandBot/<versione>', async () => {
+  it('user-agent onesto Homun/<versione>', async () => {
     const r = await webFetch(`${url}/arrivo`, {})
     expect(r.ok).toBe(true)
-    expect(lastUserAgent).toMatch(/^SandBot\/[\d.]+$/)
+    expect(lastUserAgent).toMatch(/^Homun\/[\d.]+$/)
   })
 })

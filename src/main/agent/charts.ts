@@ -329,7 +329,7 @@ export function documentToHtml(item: { title: string; authorName: string; versio
   const meta = [
     `<title>${escapeHtml(item.title)}</title>`,
     `<meta charset="utf-8">`,
-    `<meta name="generator" content="SandBot">`
+    `<meta name="generator" content="Homun">`
   ].join('\n    ')
   return `<!DOCTYPE html>
 <html lang="it">
@@ -339,7 +339,7 @@ export function documentToHtml(item: { title: string; authorName: string; versio
   </head>
   <body>
     <h1>${escapeHtml(item.title)}</h1>
-    <p class="meta">di ${escapeHtml(item.authorName)} · versione ${item.version} · esportato da SandBot</p>
+    <p class="meta">di ${escapeHtml(item.authorName)} · versione ${item.version} · esportato da Homun</p>
 ${body}
   </body>
 </html>`

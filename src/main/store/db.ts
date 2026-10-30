@@ -13,7 +13,7 @@ import { GROUPS_DDL } from './groups'
 import { SHELL_JOBS_DDL } from './shell-jobs'
 import { SUBAGENTS_DDL } from './subagents'
 import { LIBRARY_DDL } from './library'
-import type { Agent, TranscriptEntry, PermissionsConfig, RoutineTrigger } from '../../shared/types'
+import type { Agent, AgentAvatar, TranscriptEntry, PermissionsConfig, RoutineTrigger } from '../../shared/types'
 
 let _dir: string | null = null
 
@@ -137,12 +137,14 @@ function open(): DatabaseSync {
   // fase 10: colonne degli agents — created_by (chi ha creato il bot) e
   // section (raggruppamento della sidebar, testo libero)
   // fase 12: parent_id — un sottoagente è un BOT FIGLIO nascosto (punto 1)
+  // fase 16: avatar — l'aspetto della mascotte scelto dall'utente (JSON, NULL = predefinito)
   const agentCols = db.prepare("SELECT name FROM pragma_table_info('agents')").all() as Array<{ name: string }>
   const agentPresent = new Set(agentCols.map((c) => c.name))
   for (const [col, ddl] of [
     ['created_by', "ALTER TABLE agents ADD COLUMN created_by TEXT"],
     ['section', "ALTER TABLE agents ADD COLUMN section TEXT DEFAULT ''"],
-    ['parent_id', 'ALTER TABLE agents ADD COLUMN parent_id TEXT']
+    ['parent_id', 'ALTER TABLE agents ADD COLUMN parent_id TEXT'],
+    ['avatar', 'ALTER TABLE agents ADD COLUMN avatar TEXT']
   ] as const) {
     if (!agentPresent.has(col)) db.exec(ddl)
   }
@@ -189,6 +191,22 @@ interface AgentRow {
   created_by?: string | null; section?: string | null
   /** fase 12: il padre, se questa riga è un sottoagente (bot figlio nascosto) */
   parent_id?: string | null
+  /** fase 16: l'aspetto della mascotte (JSON {"family":"…","color":"…"}, NULL = predefinito) */
+  avatar?: string | null
+}
+
+/** fase 16: parse dell'avatar salvato — un JSON ROTTO diventa null (predefinito), mai un crash. */
+function parseAvatar(json: string | null | undefined): Agent['avatar'] {
+  if (!json) return null
+  try {
+    const v = JSON.parse(json) as { family?: unknown; color?: unknown }
+    if (typeof v.family === 'string' && typeof v.color === 'string') {
+      return { family: v.family as AgentAvatar['family'], color: v.color as AgentAvatar['color'] }
+    }
+    return null
+  } catch {
+    return null
+  }
 }
 
 function rowToAgent(r: AgentRow): Agent {
@@ -196,7 +214,7 @@ function rowToAgent(r: AgentRow): Agent {
     id: r.id, name: r.name, description: r.description, providerId: r.provider_id,
     model: r.model, status: r.status as Agent['status'], unread: r.unread, createdAt: r.created_at,
     createdBy: r.created_by ?? null, section: r.section ?? null,
-    parentId: r.parent_id ?? null
+    parentId: r.parent_id ?? null, avatar: parseAvatar(r.avatar)
   }
 }
 
@@ -244,16 +262,19 @@ export function createAgent(name: string, description = '', opts: CreateAgentOpt
 
 export function updateAgent(
   id: string,
-  patch: Partial<Pick<Agent, 'name' | 'description' | 'providerId' | 'model' | 'status' | 'unread' | 'section'>>
+  patch: Partial<Pick<Agent, 'name' | 'description' | 'providerId' | 'model' | 'status' | 'unread' | 'section' | 'avatar'>>
 ): void {
   const a = getAgent(id)
   if (!a) return
   db()
-    .prepare('UPDATE agents SET name=?, description=?, provider_id=?, model=?, status=?, unread=?, section=? WHERE id=?')
+    .prepare('UPDATE agents SET name=?, description=?, provider_id=?, model=?, status=?, unread=?, section=?, avatar=? WHERE id=?')
     .run(
       patch.name ?? a.name, patch.description ?? a.description, patch.providerId ?? a.providerId,
       patch.model ?? a.model, patch.status ?? a.status, patch.unread ?? a.unread,
-      patch.section ?? a.section ?? '', id
+      patch.section ?? a.section ?? '',
+      // fase 16: null torna al predefinito (colonna NULL)
+      patch.avatar === undefined ? (a.avatar ? JSON.stringify(a.avatar) : null) : patch.avatar === null ? null : JSON.stringify(patch.avatar),
+      id
     )
 }
 

@@ -32,12 +32,12 @@ export function WidgetCard({ entry }: { entry: TranscriptEntry }) {
     (Array.isArray(v) ? v : [v]).map((x) => widget.options.find((o) => o.value === x)?.label ?? x).join(', ')
 
   return (
-    <div className="max-w-[92%] rounded-2xl rounded-bl-md border border-sky-800/50 bg-sky-950/20 px-4 py-3">
-      <p className="text-sm font-medium text-neutral-100">{widget.prompt}</p>
-      {widget.helpText && <p className="mt-1 text-xs text-neutral-400">{widget.helpText}</p>}
+    <div className="max-w-[75%] rounded-2xl rounded-bl-md border border-border bg-card px-4 py-3 shadow-soft">
+      <p className="text-sm font-medium text-foreground">{widget.prompt}</p>
+      {widget.helpText && <p className="mt-1 text-xs text-muted-foreground">{widget.helpText}</p>}
 
       {responded || dismissed ? (
-        <div className="mt-3 text-xs text-neutral-500">
+        <div className="mt-3 text-xs text-muted-foreground">
           {responded
             ? `✓ Hai risposto: ${labels(meta.respondedValue as string | string[])}`
             : '— domanda scavalcata, hai proseguito senza rispondere'}
@@ -54,11 +54,11 @@ export function WidgetCard({ entry }: { entry: TranscriptEntry }) {
                   className={`rounded-lg border px-3 py-1.5 text-xs transition-colors disabled:opacity-40 ${
                     widget.multiSelect
                       ? chosen
-                        ? 'border-sky-500 bg-sky-800/60 text-neutral-100'
-                        : 'border-neutral-700 bg-neutral-800/60 text-neutral-300 hover:border-neutral-500'
+                        ? 'border-primary bg-primary/15 text-foreground'
+                        : 'border-border bg-muted text-foreground hover:border-muted-foreground'
                       : o.style === 'primary'
-                        ? 'border-sky-500 bg-sky-700/70 font-medium text-white hover:bg-sky-600'
-                        : 'border-neutral-700 bg-neutral-800/60 text-neutral-200 hover:border-neutral-500'
+                        ? 'border-primary bg-primary font-medium text-primary-foreground hover:bg-primary/90'
+                        : 'border-border bg-muted text-foreground hover:border-muted-foreground'
                   }`}
                   title={o.description}
                   onClick={() => (widget.multiSelect ? toggle(o.value) : send(o.value))}
@@ -71,7 +71,7 @@ export function WidgetCard({ entry }: { entry: TranscriptEntry }) {
           {widget.multiSelect && (
             <button
               disabled={confirming || selected.length === 0}
-              className="mt-2 rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-500 disabled:opacity-40"
+              className="mt-2 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-primary/90 disabled:opacity-40"
               onClick={() => send(selected)}
             >
               Conferma{selected.length ? ` (${selected.length})` : ''}
@@ -80,7 +80,7 @@ export function WidgetCard({ entry }: { entry: TranscriptEntry }) {
           {widget.allowCustom && (
             <div className="mt-2 flex gap-2">
               <input
-                className="flex-1 rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 outline-none focus:border-neutral-500"
+                className="flex-1 rounded-lg border border-border bg-muted px-3 py-1.5 text-xs text-foreground outline-none focus:border-ring"
                 placeholder="Altro (testo libero)…"
                 value={custom}
                 disabled={confirming}
@@ -91,7 +91,7 @@ export function WidgetCard({ entry }: { entry: TranscriptEntry }) {
               />
               <button
                 disabled={confirming || !custom.trim()}
-                className="rounded-lg bg-neutral-800 px-3 py-1.5 text-xs text-neutral-200 hover:bg-neutral-700 disabled:opacity-40"
+                className="rounded-lg bg-muted px-3 py-1.5 text-xs text-foreground hover:bg-accent disabled:opacity-40"
                 onClick={() => send(custom.trim())}
               >
                 Invia

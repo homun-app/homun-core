@@ -346,7 +346,7 @@ async function finishRemoteInstall(cfg: McpServerConfig, deps: InstallDeps): Pro
   } catch {
     // 401 o connessione rifiutata: flusso OAuth col loopback e iss verificato
     if (!deps.hasUi()) {
-      return { ok: false, error: `Server ${cfg.name} registrato: serve l'accesso con il tuo account (OAuth). Apri la finestra di SandBot e riavvia la connessione dalle Impostazioni.` }
+      return { ok: false, error: `Server ${cfg.name} registrato: serve l'accesso con il tuo account (OAuth). Apri la finestra di Homun e riavvia la connessione dalle Impostazioni.` }
     }
     try {
       const authorize = deps.authorize ?? authorizeWithLoopback
@@ -810,7 +810,7 @@ export async function reconnectServer(
   if (cfg.auth?.kind !== 'oauth') return { ok: false, error: 'il server non usa OAuth' }
   if (cfg.catalogId) return { ok: false, error: 'usa la vista "Connetti app" per i connettori del catalogo' }
   if (!cfg.url) return { ok: false, error: 'il server non ha un URL' }
-  if (!deps.hasUi()) return { ok: false, error: 'serve la finestra di SandBot per autorizzare' }
+  if (!deps.hasUi()) return { ok: false, error: 'serve la finestra di Homun per autorizzare' }
   // M2: il template del plugin si risolve PRIMA di autorizzare — un URL con
   // ${user_config.K}/${VAR} non sostituito non è un URL valido
   let url = cfg.url

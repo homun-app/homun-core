@@ -2,6 +2,20 @@
 
 export type AgentStatus = 'offline' | 'idle' | 'thinking' | 'running' | 'paused-for-approval'
 
+// ---- fase 16: aspetto della mascotte (le 5 famiglie scelte, 7 colori) ----
+
+/** Le 5 famiglie di mascotte portate dal design Lovable (le 4 d'archivio no). */
+export type BotFamily = 'h-creature' | 'h-robo' | 'h-device' | 'jelly' | 'pixel'
+
+/** I colori della mascotte come TOKEN ('c3' → var(--bot-c3)): mai nomi CSS nel db. */
+export type BotColor = 'c1' | 'c2' | 'c3' | 'c4' | 'c5' | 'c6' | 'c7'
+
+/** L'aspetto di un bot (JSON nella colonna agents.avatar; NULL = predefinito). */
+export interface AgentAvatar {
+  family: BotFamily
+  color: BotColor
+}
+
 export interface Agent {
   id: string
   name: string
@@ -17,6 +31,8 @@ export interface Agent {
   section?: string | null
   /** fase 12: il padre, se questa riga è un SOTTOAGENTE (bot figlio nascosto) */
   parentId?: string | null
+  /** fase 16: aspetto scelto dall'utente (NULL = predefinito da hash dell'id) */
+  avatar?: AgentAvatar | null
 }
 
 export type EntryKind =
@@ -357,7 +373,7 @@ export interface SandbotApi {
   // agenti e transcript
   listAgents(): Promise<Agent[]>
   createAgent(name: string, description?: string): Promise<Agent>
-  updateAgent(id: string, patch: Partial<Pick<Agent, 'name' | 'description' | 'providerId' | 'model'>>): Promise<void>
+  updateAgent(id: string, patch: Partial<Pick<Agent, 'name' | 'description' | 'providerId' | 'model' | 'avatar'>>): Promise<void>
   deleteAgent(id: string): Promise<void>
   /** fase 7: imposta il bot principale (mainAgentId, unico) */
   setMainAgent(id: string): Promise<void>

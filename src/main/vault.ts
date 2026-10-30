@@ -21,7 +21,7 @@ export interface SafeStorageLike {
   decryptString(encrypted: Buffer): string | Promise<string>
 }
 
-export const VAULT_LOCKED_MSG = 'Vault bloccato: safeStorage non disponibile (apri la finestra di SandBot per usare le credenziali)'
+export const VAULT_LOCKED_MSG = 'Vault bloccato: safeStorage non disponibile (apri la finestra di Homun per usare le credenziali)'
 
 let storage: SafeStorageLike | null = null
 /** Runner `security` del Keychain, iniettabile per i test. */

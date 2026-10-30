@@ -29,7 +29,7 @@ import { dataDir } from '../store/db'
 export const FILE_EXCHANGE_MAX_BYTES = 200 * 1024 * 1024
 
 /** La cartella di default sul Mac per copy_from_box. */
-export const MAC_DEFAULT_DIR = join('Downloads', 'SandBot')
+export const MAC_DEFAULT_DIR = join('Downloads', 'Homun')
 
 /** Percorsi del Mac sempre RIFIUTATi (fisso, punto 4). */
 export const SENSITIVE_MAC_DIRS = ['.ssh', 'Library/Keychains', '.aws', '.config/gcloud', '.gnupg']
@@ -148,7 +148,7 @@ export async function prepareFileExchange(
     }
     const macPath = resolveMacPath(String(input.mac_path), home, realpathSync.native)
     if (!macPathAllowed(macPath, { home: realHome, dataDir: realDataDir })) {
-      return { ok: false, error: `Percorso del Mac non permesso: "${macPath}" (niente cartelle sensibili né i dati di SandBot).` }
+      return { ok: false, error: `Percorso del Mac non permesso: "${macPath}" (niente cartelle sensibili né i dati di Homun).` }
     }
     const s = await size(macPath)
     if (s === null) return { ok: false, error: `File non trovato sul Mac: "${input.mac_path}".` }
@@ -196,7 +196,7 @@ export async function prepareFileExchange(
     ? resolveMacPath(String(input.mac_path), home, realpathSync.native)
     : resolveMacPath(join(home, MAC_DEFAULT_DIR, basename(resolved.abs!)), home, realpathSync.native)
   if (!macPathAllowed(macTarget, { home: realHome, dataDir: realDataDir })) {
-    return { ok: false, error: `Percorso del Mac non permesso: "${macTarget}" (niente cartelle sensibili né i dati di SandBot).` }
+    return { ok: false, error: `Percorso del Mac non permesso: "${macTarget}" (niente cartelle sensibili né i dati di Homun).` }
   }
   return { ok: true, plan: { direction: 'from_box', macPath: macTarget, boxPath: resolved.abs!, size: boxSize } }
 }

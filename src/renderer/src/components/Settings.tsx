@@ -1,4 +1,8 @@
-// Impostazioni: provider (modelli personalizzati), modello per agente, permessi, routine, connettori, generale.
+// Impostazioni: provider (modelli personalizzati), modello per agente, permessi, routine, connettori, cassaforte, generali.
+// Fase 16 (U5): diventano un Dialog con la colonna di tab a sinistra come in
+// Lovable; il contenuto dei tab resta quello di prima, coi token del nuovo
+// design system. Il meccanismo settingsTab (aprire un tab preciso da un
+// widget) continua a funzionare.
 import { useEffect, useState, type ReactNode } from 'react'
 import { api, useStore } from '../store'
 import { describeTrigger } from '../../../shared/cron-human'
@@ -8,10 +12,24 @@ import type { ProviderConfig, ProviderKind, ModelInfo, Agent, RoutineInfo, Routi
 import { DEFAULT_AUTO_REVIEW, SECRET_KIND_FOR_NEEDS } from '../../../shared/types'
 // fase 10 (residuo 0d): i default per kind (modulo puro, nessuna dipendenza node)
 import { modelDefaultsFor } from '../../../main/agent/model-defaults'
+import type { UiTheme } from '../theme'
+import { Dialog, DialogContent, DialogTitle } from './ui/dialog'
 
 const KINDS: ProviderKind[] = [
   'ollama', 'lmstudio', 'anthropic', 'mistral', 'openrouter', 'zai', 'xai', 'deepseek', 'groq', 'openai-compatible'
 ]
+
+/** I tab con i nomi italiani per la UI (gli id interni non cambiano). */
+const TAB_LABELS: Record<string, string> = {
+  provider: 'Provider',
+  agenti: 'Bot',
+  permessi: 'Permessi',
+  routine: 'Routine',
+  connettori: 'Connettori',
+  autoreview: 'Revisione automatica',
+  vault: 'Cassaforte',
+  generale: 'Generali'
+}
 
 export function Settings() {
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
@@ -31,27 +49,21 @@ export function Settings() {
   }, [pendingTab, setSettingsTab])
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setSettingsOpen(false)}>
-      <div
-        className="flex h-[560px] w-[720px] max-w-[92vw] flex-col overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-900 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center gap-1 border-b border-neutral-800 px-4 pt-4 pb-2">
-          {(['provider', 'agenti', 'permessi', 'routine', 'connettori', 'autoreview', 'vault', 'generale'] as const).map((t) => (
+    <Dialog open onOpenChange={(o) => !o && setSettingsOpen(false)}>
+      <DialogContent className="flex h-[600px] max-h-[92vh] max-w-[calc(100%-2rem)] gap-0 p-0 sm:max-w-4xl" showCloseButton={false}>
+        <DialogTitle className="sr-only">Impostazioni</DialogTitle>
+        <nav className="w-52 shrink-0 space-y-1 overflow-y-auto scroll-thin border-r border-border p-3">
+          {(Object.keys(TAB_LABELS) as Array<keyof typeof TAB_LABELS>).map((t) => (
             <button
               key={t}
-              className={`rounded-lg px-3 py-1.5 text-sm capitalize ${tab === t ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-500 hover:text-neutral-300'}`}
-              onClick={() => setTab(t)}
+              className={`w-full rounded-lg px-3 py-2 text-left text-sm transition ${tab === t ? 'bg-muted font-medium' : 'text-muted-foreground hover:text-foreground'}`}
+              onClick={() => setTab(t as typeof tab)}
             >
-              {t === 'connettori' ? 'connetti app' : t === 'autoreview' ? 'approvazione automatica' : t}
+              {TAB_LABELS[t]}
             </button>
           ))}
-          <div className="flex-1" />
-          <button className="rounded-md px-2 py-1 text-neutral-500 hover:text-neutral-200" onClick={() => setSettingsOpen(false)}>
-            ✕
-          </button>
-        </div>
-        <div className="flex-1 overflow-y-auto scroll-thin p-4">
+        </nav>
+        <div className="min-w-0 flex-1 overflow-y-auto scroll-thin p-6">
           {tab === 'provider' && <ProvidersTab onChanged={refreshProviders} />}
           {tab === 'agenti' && <AgentsTab />}
           {tab === 'permessi' && <PermissionsTab onChanged={refreshPermissions} />}
@@ -61,8 +73,8 @@ export function Settings() {
           {tab === 'vault' && <VaultTab />}
           {tab === 'generale' && <GeneralTab />}
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -92,12 +104,12 @@ function AutoReviewTab() {
     else setModels([])
   }, [cfg?.providerId])
 
-  if (!cfg) return <p className="text-xs text-neutral-500">caricamento…</p>
+  if (!cfg) return <p className="text-xs text-muted-foreground">caricamento…</p>
   const save = (next: AutoReviewSettings): void => {
     setCfg(next)
     void api.settingsSet('autoReview', next)
   }
-  const inputCls = 'flex-1 rounded-lg bg-neutral-800 px-2 py-1.5 text-xs outline-none'
+  const inputCls = 'flex-1 rounded-lg bg-muted px-2 py-1.5 text-xs outline-none'
 
   const RuleList = ({ title, hint, rules, onAdd, onRemove, value, setValue }: {
     title: string
@@ -108,15 +120,15 @@ function AutoReviewTab() {
     value: string
     setValue(v: string): void
   }) => (
-    <div className="rounded-xl border border-neutral-800 px-3 py-2.5">
-      <div className="text-sm text-neutral-100">{title}</div>
-      <div className="mt-0.5 text-[11px] text-neutral-500">{hint}</div>
+    <div className="rounded-2xl border border-border bg-card px-3 py-2.5">
+      <div className="text-sm text-foreground">{title}</div>
+      <div className="mt-0.5 text-[11px] text-muted-foreground">{hint}</div>
       <ul className="mt-2 space-y-1">
-        {rules.length === 0 && <li className="text-xs text-neutral-600">(nessuna regola)</li>}
+        {rules.length === 0 && <li className="text-xs text-muted-foreground">(nessuna regola)</li>}
         {rules.map((r, i) => (
-          <li key={`${r}-${i}`} className="flex items-start gap-2 text-xs text-neutral-200">
+          <li key={`${r}-${i}`} className="flex items-start gap-2 text-xs text-foreground">
             <span className="flex-1">{r}</span>
-            <button className="shrink-0 text-neutral-500 hover:text-red-400" onClick={() => onRemove(i)}>✕</button>
+            <button className="shrink-0 text-muted-foreground hover:text-destructive" onClick={() => onRemove(i)}>✕</button>
           </li>
         ))}
       </ul>
@@ -129,7 +141,7 @@ function AutoReviewTab() {
           onKeyDown={(e) => { if (e.key === 'Enter' && value.trim()) { onAdd(); setValue('') } }}
         />
         <button
-          className="rounded-lg bg-neutral-700 px-3 py-1.5 text-xs text-neutral-100 hover:bg-neutral-600 disabled:opacity-40"
+          className="rounded-lg bg-accent px-3 py-1.5 text-xs text-foreground hover:bg-muted-foreground/40 disabled:opacity-40"
           disabled={!value.trim()}
           onClick={() => { onAdd(); setValue('') }}
         >
@@ -141,25 +153,25 @@ function AutoReviewTab() {
 
   return (
     <div className="space-y-3">
-      <p className="text-xs text-neutral-500">
+      <p className="text-xs text-muted-foreground">
         Un modello piccolo rivede le azioni che chiedono approvazione secondo queste regole e può lasciarle passare da solo.
         Sta dopo il gate dei permessi e non cambia mai i divieti: le azioni che modificano il comportamento futuro del bot, i comandi che eseguono altri comandi e i turni aperti da altri bot o da eventi esterni chiedono comunque.
       </p>
-      <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-neutral-800 px-4 py-3">
+      <label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-border bg-card px-4 py-3">
         <input
           type="checkbox"
-          className="mt-0.5 h-4 w-4 accent-neutral-300"
+          className="mt-0.5 h-4 w-4 accent-foreground"
           checked={cfg.enabled}
           onChange={(e) => save({ ...cfg, enabled: e.target.checked })}
         />
         <span>
-          <span className="block text-sm text-neutral-100">Approvazione automatica</span>
-          <span className="block text-xs text-neutral-500">Al massimo 20 azioni approvate per turno; un dubbio del revisore diventa sempre una card.</span>
+          <span className="block text-sm text-foreground">Approvazione automatica</span>
+          <span className="block text-xs text-muted-foreground">Al massimo 20 azioni approvate per turno; un dubbio del revisore diventa sempre una card.</span>
         </span>
       </label>
       <div className="flex gap-2">
         <select
-          className="rounded-lg bg-neutral-800 px-2 py-1.5 text-xs outline-none"
+          className="rounded-lg bg-muted px-2 py-1.5 text-xs outline-none"
           value={cfg.providerId ?? ''}
           onChange={(e) => save({ ...cfg, providerId: e.target.value || null, model: null })}
         >
@@ -167,7 +179,7 @@ function AutoReviewTab() {
           {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
         <select
-          className="rounded-lg bg-neutral-800 px-2 py-1.5 text-xs outline-none"
+          className="rounded-lg bg-muted px-2 py-1.5 text-xs outline-none"
           value={cfg.model ?? ''}
           disabled={!cfg.providerId}
           onChange={(e) => save({ ...cfg, model: e.target.value || null })}
@@ -201,10 +213,10 @@ function AutoReviewTab() {
 // ---- fase 5: "Connetti app" — catalogo con stato + server MCP manuali ----
 
 const STATUS_DOT: Record<string, string> = {
-  not_connected: 'bg-neutral-600',
-  connected: 'bg-emerald-500',
-  needs_auth: 'bg-amber-500',
-  error: 'bg-red-500'
+  not_connected: 'bg-muted-foreground/40',
+  connected: 'bg-chart-2',
+  needs_auth: 'bg-destructive',
+  error: 'bg-destructive'
 }
 const STATUS_LABEL: Record<string, string> = {
   not_connected: 'non connesso',
@@ -226,7 +238,7 @@ function ConnectorsTab() {
   const subBtn = (id: typeof sub, label: string): ReactNode => (
     <button
       key={id}
-      className={`rounded-lg px-2.5 py-1 text-xs ${sub === id ? 'bg-neutral-700 text-neutral-100' : 'text-neutral-500 hover:text-neutral-300'}`}
+      className={`rounded-lg px-2.5 py-1 text-xs ${sub === id ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
       onClick={() => setSub(id)}
     >
       {label}
@@ -238,7 +250,7 @@ function ConnectorsTab() {
       <div className="flex items-center gap-1">{subBtn('app', 'App')}{subBtn('installati', 'Installati')}{subBtn('marketplace', 'Marketplace')}{subBtn('gateway', 'Gateway')}</div>
       {sub === 'app' && (
         <>
-          <p className="text-xs text-neutral-500">
+          <p className="text-xs text-muted-foreground">
             Le app si collegano come server MCP con OAuth: i loro tool diventano <code>mcp__&lt;server&gt;__&lt;tool&gt;</code>.
             I token stanno cifrati nel Keychain. Il bot può proporre un'app in chat, ma la connessione parte solo dal tuo click.
           </p>
@@ -269,11 +281,11 @@ function ClientMetadataUrlRow() {
   }, [])
   if (url === null) return null
   return (
-    <div className="flex flex-wrap items-center gap-2 border-t border-neutral-800 pt-3">
-      <span className="text-[11px] uppercase tracking-wide text-neutral-500">OAuth</span>
-      <span className="text-[11px] text-neutral-500">Se ospiti un documento dei metadati del client (CIMD, es. su GitHub Pages, https e con percorso), incollalo qui; vuoto = registrazione dinamica (DCR).</span>
+    <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
+      <span className="text-[11px] uppercase tracking-wide text-muted-foreground">OAuth</span>
+      <span className="text-[11px] text-muted-foreground">Se ospiti un documento dei metadati del client (CIMD, es. su GitHub Pages, https e con percorso), incollalo qui; vuoto = registrazione dinamica (DCR).</span>
       <input
-        className="min-w-0 flex-1 rounded-lg bg-neutral-800 px-2 py-1.5 text-xs outline-none"
+        className="min-w-0 flex-1 rounded-lg bg-muted px-2 py-1.5 text-xs outline-none"
         placeholder="https://utente.github.io/sandbot/client.json"
         value={url}
         onChange={(e) => setUrl(e.target.value)}
@@ -291,18 +303,18 @@ function InstalledTab() {
   const [reconnectMsg, setReconnectMsg] = useState('')
   const refresh = async (): Promise<void> => { setData(await api.connectorsInstalled() as { servers: Array<McpServerInfo & { needsReauth?: boolean; neverAuthorized?: boolean }>; plugins: Array<{ name: string; marketplace: string; sha12: string; skills: Array<{ name: string }>; servers: string[]; enabledFor: string[]; updateAvailable?: boolean }> }) }
   useEffect(() => { void refresh() }, [])
-  if (data === null) return <p className="text-xs text-neutral-600">installati…</p>
+  if (data === null) return <p className="text-xs text-muted-foreground">installati…</p>
 
   const enabledForEditor = (kind: 'server' | 'plugin', id: string, current: string[] | undefined): ReactNode => (
     <div className="flex flex-wrap items-center gap-2">
-      <span className="text-[11px] text-neutral-500">per bot:</span>
+      <span className="text-[11px] text-muted-foreground">per bot:</span>
       {agents.map((a) => {
         const on = current?.includes('*') || current?.includes(a.id)
         return (
-          <label key={a.id} className="flex items-center gap-1 text-[11px] text-neutral-400">
+          <label key={a.id} className="flex items-center gap-1 text-[11px] text-muted-foreground">
             <input
               type="checkbox"
-              className="h-3 w-3 accent-neutral-300"
+              className="h-3 w-3 accent-foreground"
               checked={on}
               onChange={() => {
                 const next = current?.includes('*') ? [] : [...(current ?? [])]
@@ -321,27 +333,27 @@ function InstalledTab() {
 
   return (
     <div className="space-y-3">
-      <p className="text-xs text-neutral-500">
+      <p className="text-xs text-muted-foreground">
         Server del registro pubblico e plugin installati. Chiavi, header e variabili stanno cifrati: si compilano qui, MAI in chat.
       </p>
-      {data.servers.length === 0 && data.plugins.length === 0 && <p className="text-xs text-neutral-600">nessun server o plugin installato</p>}
+      {data.servers.length === 0 && data.plugins.length === 0 && <p className="text-xs text-muted-foreground">nessun server o plugin installato</p>}
       {data.servers.map((sv) => {
         const src = sv.source as { kind?: string; name?: string; plugin?: string; preset?: string } | undefined
         const needs = sv.needsAuth as { kind?: string; keys?: string[] } | undefined
         return (
-          <div key={sv.id} className="rounded-xl border border-neutral-800 px-3 py-2.5">
+          <div key={sv.id} className="rounded-2xl border border-border bg-card px-3 py-2.5">
             <div className="flex items-center gap-2">
-              <span className={`h-2 w-2 rounded-full ${needs ? 'bg-amber-500' : 'bg-emerald-500'}`} />
-              <span className="text-sm text-neutral-100">{sv.name}</span>
-              <span className="rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] uppercase text-neutral-400">{src?.kind ?? 'manuale'}</span>
-              {sv.trustLabel && <span className="text-[10px] text-neutral-500">{sv.trustLabel}</span>}
-              <span className="flex-1 truncate text-xs text-neutral-600">{sv.transport === 'http' ? sv.url : `${sv.box?.command ?? ''} ${(sv.box?.args ?? []).join(' ')}`}</span>
+              <span className={`h-2 w-2 rounded-full ${needs ? 'bg-destructive' : 'bg-chart-2'}`} />
+              <span className="text-sm text-foreground">{sv.name}</span>
+              <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">{src?.kind ?? 'manuale'}</span>
+              {sv.trustLabel && <span className="text-[10px] text-muted-foreground">{sv.trustLabel}</span>}
+              <span className="flex-1 truncate text-xs text-muted-foreground">{sv.transport === 'http' ? sv.url : `${sv.box?.command ?? ''} ${(sv.box?.args ?? []).join(' ')}`}</span>
               {/* L1+M2: sessione OAuth da (ri)fare di un server non del catalogo →
                   authorizeWithLoopback; "Connetti" se non ha mai avuto token
                   (plugin appena installato), "Riconnetti" se è scaduta */}
               {sv.needsReauth && (
                 <button
-                  className="rounded-lg bg-neutral-700 px-2 py-0.5 text-xs text-white hover:bg-neutral-600"
+                  className="rounded-lg bg-accent px-2 py-0.5 text-xs text-white hover:bg-muted-foreground/40"
                   onClick={async () => {
                     const r = await api.connectorsReconnectServer(sv.id).catch((e: unknown) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e) }))
                     setReconnectMsg(r.ok ? (r.message ?? 'riconnesso') : `riconnessione non riuscita: ${'error' in r ? r.error : ''}`)
@@ -351,17 +363,17 @@ function InstalledTab() {
                   {sv.neverAuthorized ? 'Connetti' : 'Riconnetti'}
                 </button>
               )}
-              <button className="text-xs text-neutral-500 hover:text-red-400" onClick={async () => { await api.connectorsUninstallServer(sv.id); await refresh() }}>disinstalla</button>
+              <button className="text-xs text-muted-foreground hover:text-destructive" onClick={async () => { await api.connectorsUninstallServer(sv.id); await refresh() }}>disinstalla</button>
             </div>
-            {reconnectMsg && <p className="mt-1 text-[11px] text-neutral-500">{reconnectMsg}</p>}
+            {reconnectMsg && <p className="mt-1 text-[11px] text-muted-foreground">{reconnectMsg}</p>}
             {enabledForEditor('server', sv.id, sv.enabledFor)}
             {needs?.keys?.length ? (
-              <div className="mt-2 space-y-1 border-t border-neutral-800 pt-2">
-                <p className="text-[11px] text-amber-500/80">serve: {needs.keys.join(', ')} {needs.kind === 'key' ? '(header)' : needs.kind === 'env' ? '(variabile d&rsquo;ambiente)' : '(impostazione del plugin)'}</p>
+              <div className="mt-2 space-y-1 border-t border-border pt-2">
+                <p className="text-[11px] text-destructive/80">serve: {needs.keys.join(', ')} {needs.kind === 'key' ? '(header)' : needs.kind === 'env' ? '(variabile d&rsquo;ambiente)' : '(impostazione del plugin)'}</p>
                 {needs.keys.map((k) => (
                   <div key={k} className="flex gap-1">
                     <input
-                      className="min-w-0 flex-1 rounded-lg bg-neutral-800 px-2 py-1 text-xs outline-none"
+                      className="min-w-0 flex-1 rounded-lg bg-muted px-2 py-1 text-xs outline-none"
                       type="password"
                       placeholder={k}
                       value={values[`${sv.id}:${k}`] ?? ''}
@@ -370,7 +382,7 @@ function InstalledTab() {
                   </div>
                 ))}
                 <button
-                  className="rounded-lg bg-neutral-700 px-2 py-1 text-xs text-white hover:bg-neutral-600"
+                  className="rounded-lg bg-accent px-2 py-1 text-xs text-white hover:bg-muted-foreground/40"
                   onClick={async () => {
                     const vals: Record<string, string> = {}
                     for (const k of needs.keys ?? []) if (values[`${sv.id}:${k}`]?.trim()) vals[k] = values[`${sv.id}:${k}`]!.trim()
@@ -389,14 +401,14 @@ function InstalledTab() {
         )
       })}
       {data.plugins.map((p) => (
-        <div key={`${p.marketplace}/${p.name}`} className="rounded-xl border border-neutral-800 px-3 py-2.5">
+        <div key={`${p.marketplace}/${p.name}`} className="rounded-2xl border border-border bg-card px-3 py-2.5">
           <div className="flex items-center gap-2">
-            <span className="text-sm text-neutral-100">{p.name}</span>
-            <span className="text-xs text-neutral-500">{p.marketplace} · {p.sha12}</span>
+            <span className="text-sm text-foreground">{p.name}</span>
+            <span className="text-xs text-muted-foreground">{p.marketplace} · {p.sha12}</span>
             <span className="flex-1" />
-            <button className="text-xs text-neutral-500 hover:text-red-400" onClick={async () => { await api.pluginsUninstall(p.name, p.marketplace); await refresh() }}>disinstalla</button>
+            <button className="text-xs text-muted-foreground hover:text-destructive" onClick={async () => { await api.pluginsUninstall(p.name, p.marketplace); await refresh() }}>disinstalla</button>
           </div>
-          <p className="mt-0.5 text-[11px] text-neutral-600">{p.skills.length} skill · {p.servers.length} server{p.updateAvailable ? ' · nuova versione disponibile (aggiorna = nuova card in chat)' : ''}</p>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">{p.skills.length} skill · {p.servers.length} server{p.updateAvailable ? ' · nuova versione disponibile (aggiorna = nuova card in chat)' : ''}</p>
           {enabledForEditor('plugin', p.name, p.enabledFor)}
         </div>
       ))}
@@ -413,27 +425,27 @@ function MarketplaceTab() {
   useEffect(() => { void refresh() }, [])
   return (
     <div className="space-y-3">
-      <p className="text-xs text-neutral-500">
+      <p className="text-xs text-muted-foreground">
         Plugin nel formato di Claude Code. Predefinito: <code>anthropics/claude-plugins-official</code> (puoi rimuoverlo).
-        Di un plugin SandBot importa SOLO skill e server MCP; hook, bin/ e comandi non girano mai.
+        Di un plugin Homun importa SOLO skill e server MCP; hook, bin/ e comandi non girano mai.
       </p>
       {(list ?? []).map((m) => (
-        <div key={m.source} className="flex items-center gap-2 rounded-xl border border-neutral-800 px-3 py-2">
-          <span className="text-sm text-neutral-100">{m.name}</span>
-          {m.official && <span className="rounded bg-sky-900/50 px-1.5 py-0.5 text-[10px] text-sky-300">marketplace ufficiale</span>}
-          <span className="flex-1 truncate text-xs text-neutral-600">{m.source}</span>
-          <button className="text-xs text-neutral-500 hover:text-red-400" onClick={async () => { await api.marketplaceRemove(m.source); await refresh() }}>rimuovi</button>
+        <div key={m.source} className="flex items-center gap-2 rounded-2xl border border-border bg-card px-3 py-2">
+          <span className="text-sm text-foreground">{m.name}</span>
+          {m.official && <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">marketplace ufficiale</span>}
+          <span className="flex-1 truncate text-xs text-muted-foreground">{m.source}</span>
+          <button className="text-xs text-muted-foreground hover:text-destructive" onClick={async () => { await api.marketplaceRemove(m.source); await refresh() }}>rimuovi</button>
         </div>
       ))}
       <div className="flex gap-1">
         <input
-          className="min-w-0 flex-1 rounded-lg bg-neutral-800 px-2.5 py-1.5 text-xs outline-none"
+          className="min-w-0 flex-1 rounded-lg bg-muted px-2.5 py-1.5 text-xs outline-none"
           placeholder="owner/repo di GitHub oppure URL git https"
           value={input}
           onChange={(e) => setInput(e.target.value)}
         />
         <button
-          className="rounded-lg bg-neutral-700 px-2.5 py-1.5 text-xs text-white hover:bg-neutral-600 disabled:opacity-40"
+          className="rounded-lg bg-accent px-2.5 py-1.5 text-xs text-white hover:bg-muted-foreground/40 disabled:opacity-40"
           disabled={!input.trim()}
           onClick={async () => {
             setError('')
@@ -449,7 +461,7 @@ function MarketplaceTab() {
           aggiungi
         </button>
       </div>
-      {error && <p className="text-xs text-red-400">{error}</p>}
+      {error && <p className="text-xs text-destructive">{error}</p>}
     </div>
   )
 }
@@ -467,12 +479,12 @@ function GatewayTab() {
   }, [])
   return (
     <div className="space-y-3">
-      <p className="text-xs text-neutral-500">{warning || "Un gateway custodisce l'accesso a tutte le app che colleghi lì: è un servizio di terzi"}</p>
+      <p className="text-xs text-muted-foreground">{warning || "Un gateway custodisce l'accesso a tutte le app che colleghi lì: è un servizio di terzi"}</p>
       <div className="flex flex-wrap gap-1">
         {(presets ?? []).map((p) => (
           <button
             key={p.id}
-            className="rounded-lg border border-neutral-700 px-2 py-1 text-[11px] text-neutral-300 hover:border-sky-700 hover:text-sky-300"
+            className="rounded-lg border border-border px-2 py-1 text-[11px] text-foreground hover:border-primary hover:text-primary"
             onClick={() => { setName(p.name); setUrl(''); setToken('') }}
             title={p.help}
           >
@@ -480,17 +492,17 @@ function GatewayTab() {
           </button>
         ))}
       </div>
-      <div className="space-y-2 rounded-xl border border-neutral-800 p-3">
+      <div className="space-y-2 rounded-2xl border border-border bg-card p-3">
         <div className="grid grid-cols-2 gap-2">
-          <input className="rounded-lg bg-neutral-800 px-2.5 py-1.5 text-sm outline-none" placeholder="Nome (es. Composio)" value={name} onChange={(e) => setName(e.target.value)} />
-          <input className="rounded-lg bg-neutral-800 px-2.5 py-1.5 text-sm outline-none" placeholder="URL https del server MCP" value={url} onChange={(e) => setUrl(e.target.value)} />
+          <input className="rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder="Nome (es. Composio)" value={name} onChange={(e) => setName(e.target.value)} />
+          <input className="rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder="URL https del server MCP" value={url} onChange={(e) => setUrl(e.target.value)} />
         </div>
-        <input className="w-full rounded-lg bg-neutral-800 px-2.5 py-1.5 text-sm outline-none" type="password" placeholder="chiave / token Bearer (salvata cifrata)" value={token} onChange={(e) => setToken(e.target.value)} />
+        <input className="w-full rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" type="password" placeholder="chiave / token Bearer (salvata cifrata)" value={token} onChange={(e) => setToken(e.target.value)} />
         {(presets ?? []).find((p) => p.name === name)?.help && (
-          <p className="text-[11px] text-neutral-500">{presets!.find((p) => p.name === name)!.help}</p>
+          <p className="text-[11px] text-muted-foreground">{presets!.find((p) => p.name === name)!.help}</p>
         )}
         <button
-          className="rounded-lg bg-sky-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-sky-500 disabled:opacity-40"
+          className="rounded-lg bg-primary px-2.5 py-1.5 text-xs font-medium text-white hover:bg-primary/90 disabled:opacity-40"
           disabled={!name.trim() || !url.trim().startsWith('https://') || !token.trim()}
           onClick={async () => {
             setError('')
@@ -511,7 +523,7 @@ function GatewayTab() {
         >
           aggiungi gateway
         </button>
-        {error && <p className="text-xs text-red-400">{error}</p>}
+        {error && <p className="text-xs text-destructive">{error}</p>}
       </div>
     </div>
   )
@@ -532,20 +544,20 @@ function ConnectorTile({ c }: { c: ConnectorInfo }) {
   }
 
   return (
-    <div className="rounded-xl border border-neutral-800 px-3 py-2.5">
+    <div className="rounded-2xl border border-border bg-card px-3 py-2.5">
       <div className="flex items-center gap-2">
         <span className="text-base">{c.logo}</span>
-        <span className="text-sm text-neutral-100">{c.name}</span>
+        <span className="text-sm text-foreground">{c.name}</span>
         <span className={`h-2 w-2 rounded-full ${STATUS_DOT[c.state.status]}`} title={c.state.error ?? STATUS_LABEL[c.state.status]} />
-        <span className="text-[10px] uppercase text-neutral-500">{STATUS_LABEL[c.state.status]}</span>
+        <span className="text-[10px] uppercase text-muted-foreground">{STATUS_LABEL[c.state.status]}</span>
         <div className="flex-1" />
         {c.state.status === 'connected' ? (
           <>
-            <button className="text-xs text-neutral-400 hover:text-neutral-200" onClick={() => setOpen(!open)}>
+            <button className="text-xs text-muted-foreground hover:text-foreground" onClick={() => setOpen(!open)}>
               {open ? 'chiudi' : 'tool'}
             </button>
             <button
-              className="text-xs text-neutral-500 hover:text-red-400"
+              className="text-xs text-muted-foreground hover:text-destructive"
               disabled={busy}
               onClick={async () => {
                 setBusy(true)
@@ -557,7 +569,7 @@ function ConnectorTile({ c }: { c: ConnectorInfo }) {
           </>
         ) : (
           <button
-            className="rounded-lg bg-sky-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-sky-500 disabled:opacity-50"
+            className="rounded-lg bg-primary px-2.5 py-1 text-xs font-medium text-white hover:bg-primary/90 disabled:opacity-50"
             disabled={busy}
             onClick={async () => {
               setBusy(true)
@@ -568,39 +580,39 @@ function ConnectorTile({ c }: { c: ConnectorInfo }) {
           </button>
         )}
       </div>
-      {c.state.error && <p className="mt-1 text-[11px] text-amber-500/80">{c.state.error}</p>}
+      {c.state.error && <p className="mt-1 text-[11px] text-destructive/80">{c.state.error}</p>}
       {c.state.status !== 'connected' && c.notes && (
-        <p className="mt-1 line-clamp-2 text-[11px] text-neutral-600">{c.notes}</p>
+        <p className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">{c.notes}</p>
       )}
 
       {/* client OAuth statico (Google): credenziali cifrate, guida in docs/google-oauth.md */}
       {c.clientRegistration === 'static' && c.state.status !== 'connected' && (
-        <div className="mt-2 space-y-1 border-t border-neutral-800 pt-2">
+        <div className="mt-2 space-y-1 border-t border-border pt-2">
           {c.hasStaticCredentials ? (
-            <p className="text-[11px] text-neutral-500">Client OAuth configurato ✓</p>
+            <p className="text-[11px] text-muted-foreground">Client OAuth configurato ✓</p>
           ) : (
             <>
-              <p className="text-[11px] text-neutral-500">
+              <p className="text-[11px] text-muted-foreground">
                 Serve un client OAuth tuo (tipo "Desktop app"):{' '}
-                <a className="text-sky-400 hover:underline" href={c.docsUrl} target="_blank" rel="noreferrer">guida</a>{' '}
+                <a className="text-primary hover:underline" href={c.docsUrl} target="_blank" rel="noreferrer">guida</a>{' '}
                 · docs/google-oauth.md
               </p>
               <div className="flex gap-1">
                 <input
-                  className="min-w-0 flex-1 rounded-lg bg-neutral-800 px-2 py-1 text-xs outline-none"
+                  className="min-w-0 flex-1 rounded-lg bg-muted px-2 py-1 text-xs outline-none"
                   placeholder="client_id"
                   value={clientId}
                   onChange={(e) => setClientId(e.target.value)}
                 />
                 <input
-                  className="min-w-0 flex-1 rounded-lg bg-neutral-800 px-2 py-1 text-xs outline-none"
+                  className="min-w-0 flex-1 rounded-lg bg-muted px-2 py-1 text-xs outline-none"
                   type="password"
                   placeholder="client_secret"
                   value={clientSecret}
                   onChange={(e) => setClientSecret(e.target.value)}
                 />
                 <button
-                  className="rounded-lg bg-neutral-700 px-2 py-1 text-xs text-white hover:bg-neutral-600 disabled:opacity-40"
+                  className="rounded-lg bg-accent px-2 py-1 text-xs text-white hover:bg-muted-foreground/40 disabled:opacity-40"
                   disabled={!clientId.trim() || !clientSecret.trim()}
                   onClick={() => void api.connectorsSaveStaticClient(c.id, clientId.trim(), clientSecret.trim())}
                 >
@@ -613,31 +625,31 @@ function ConnectorTile({ c }: { c: ConnectorInfo }) {
       )}
 
       {open && (
-        <div className="mt-2 space-y-2 border-t border-neutral-800 pt-2">
+        <div className="mt-2 space-y-2 border-t border-border pt-2">
           {/* tool del connettore: interruttore per ognuno (i disattivati non sono offerti al modello) */}
-          {c.tools.length === 0 && <p className="text-[11px] text-neutral-600">nessun tool elencato</p>}
+          {c.tools.length === 0 && <p className="text-[11px] text-muted-foreground">nessun tool elencato</p>}
           {c.tools.map((t) => {
             const disabled = c.state.disabledTools.includes(t.name)
             return (
               <label key={t.name} className="flex items-start gap-2">
                 <input
                   type="checkbox"
-                  className="mt-0.5 h-3.5 w-3.5 accent-neutral-300"
+                  className="mt-0.5 h-3.5 w-3.5 accent-foreground"
                   checked={!disabled}
                   onChange={() => void toggleTool(t.name, disabled)}
                 />
                 <span className="min-w-0">
-                  <span className="block truncate font-mono text-[11px] text-neutral-300">{t.name}</span>
-                  <span className="block text-[10px] text-neutral-600">{t.description}</span>
+                  <span className="block truncate font-mono text-[11px] text-foreground">{t.name}</span>
+                  <span className="block text-[10px] text-muted-foreground">{t.description}</span>
                 </span>
               </label>
             )
           })}
           {/* istruzioni personalizzate: iniettate nel system prompt quando il connettore è attivo */}
           <div>
-            <p className="mb-1 text-[11px] text-neutral-500">Istruzioni personalizzate (vanno nel prompt del bot quando il connettore è attivo)</p>
+            <p className="mb-1 text-[11px] text-muted-foreground">Istruzioni personalizzate (vanno nel prompt del bot quando il connettore è attivo)</p>
             <textarea
-              className="w-full resize-none rounded-lg bg-neutral-800 px-2 py-1.5 text-xs outline-none"
+              className="w-full resize-none rounded-lg bg-muted px-2 py-1.5 text-xs outline-none"
               rows={3}
               placeholder="es. Usa questo account solo per lavoro; le email in italiano vanno riassunte in bulleted list…"
               value={instructions}
@@ -669,50 +681,50 @@ function ManualServers() {
   useEffect(() => { void refresh() }, [])
 
   return (
-    <div className="space-y-3 border-t border-neutral-800 pt-3">
-      <p className="text-xs text-neutral-500">Server MCP manuali (stdio o HTTP, con header/bearer salvati cifrati).</p>
+    <div className="space-y-3 border-t border-border pt-3">
+      <p className="text-xs text-muted-foreground">Server MCP manuali (stdio o HTTP, con header/bearer salvati cifrati).</p>
       {servers.map((s) => (
-        <div key={s.id} className="rounded-xl border border-neutral-800 px-3 py-2.5">
+        <div key={s.id} className="rounded-2xl border border-border bg-card px-3 py-2.5">
           <div className="flex items-center gap-2">
-            <span className={`h-2 w-2 rounded-full ${s.enabled ? 'bg-emerald-500' : 'bg-neutral-600'}`} />
-            <span className="text-sm text-neutral-100">{s.name}</span>
-            <span className="rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] uppercase text-neutral-400">{s.transport}</span>
-            {s.auth && <span className="rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] uppercase text-sky-400">{s.auth.kind}</span>}
-            <span className="flex-1 truncate text-xs text-neutral-600">{s.transport === 'stdio' ? `${s.command} ${(s.args ?? []).join(' ')}` : s.url}</span>
-            <button className="text-xs text-neutral-400 hover:text-neutral-200" onClick={async () => {
+            <span className={`h-2 w-2 rounded-full ${s.enabled ? 'bg-chart-2' : 'bg-muted-foreground/40'}`} />
+            <span className="text-sm text-foreground">{s.name}</span>
+            <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">{s.transport}</span>
+            {s.auth && <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase text-primary">{s.auth.kind}</span>}
+            <span className="flex-1 truncate text-xs text-muted-foreground">{s.transport === 'stdio' ? `${s.command} ${(s.args ?? []).join(' ')}` : s.url}</span>
+            <button className="text-xs text-muted-foreground hover:text-foreground" onClick={async () => {
               setTests((p) => ({ ...p, [s.id]: { ok: true, tools: ['test…'] } }))
               const r = await api.mcpTest(s.id)
               setTests((p) => ({ ...p, [s.id]: r }))
             }}>test</button>
-            <button className="text-xs text-neutral-400 hover:text-neutral-200" onClick={() => { setEdit(s); setEditBearer('') }}>modifica</button>
-            <button className="text-xs text-neutral-500 hover:text-red-400" onClick={async () => { await api.mcpDelete(s.id); await refresh() }}>elimina</button>
+            <button className="text-xs text-muted-foreground hover:text-foreground" onClick={() => { setEdit(s); setEditBearer('') }}>modifica</button>
+            <button className="text-xs text-muted-foreground hover:text-destructive" onClick={async () => { await api.mcpDelete(s.id); await refresh() }}>elimina</button>
           </div>
           {tests[s.id] && (
-            <div className={`mt-2 text-xs ${tests[s.id].ok ? 'text-emerald-400' : 'text-red-400'}`}>
+            <div className={`mt-2 text-xs ${tests[s.id].ok ? 'text-chart-2' : 'text-destructive'}`}>
               {tests[s.id].ok ? `✓ ${tests[s.id].tools?.length ?? 0} tool: ${tests[s.id].tools?.join(', ').slice(0, 200)}` : `✕ ${tests[s.id].error}`}
             </div>
           )}
         </div>
       ))}
       {edit ? (
-        <div className="space-y-2 rounded-xl border border-neutral-700 bg-neutral-900 p-3">
+        <div className="space-y-2 rounded-2xl border border-border bg-muted p-3">
           <div className="grid grid-cols-2 gap-2">
-            <input className="rounded-lg bg-neutral-800 px-2.5 py-1.5 text-sm outline-none" placeholder="Nome (es. weather)" value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} />
-            <select className="rounded-lg bg-neutral-800 px-2.5 py-1.5 text-sm outline-none" value={edit.transport} onChange={(e) => setEdit({ ...edit, transport: e.target.value as 'stdio' | 'http' })}>
+            <input className="rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder="Nome (es. weather)" value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} />
+            <select className="rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" value={edit.transport} onChange={(e) => setEdit({ ...edit, transport: e.target.value as 'stdio' | 'http' })}>
               <option value="stdio">stdio (comando locale)</option>
               <option value="http">http (URL)</option>
             </select>
           </div>
           {edit.transport === 'stdio' ? (
             <div className="grid grid-cols-2 gap-2">
-              <input className="rounded-lg bg-neutral-800 px-2.5 py-1.5 text-sm outline-none" placeholder="Comando (es. node)" value={edit.command ?? ''} onChange={(e) => setEdit({ ...edit, command: e.target.value })} />
-              <input className="rounded-lg bg-neutral-800 px-2.5 py-1.5 text-sm outline-none" placeholder="Argomenti separati da spazio" value={(edit.args ?? []).join(' ')} onChange={(e) => setEdit({ ...edit, args: e.target.value ? e.target.value.split(/\s+/) : [] })} />
+              <input className="rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder="Comando (es. node)" value={edit.command ?? ''} onChange={(e) => setEdit({ ...edit, command: e.target.value })} />
+              <input className="rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder="Argomenti separati da spazio" value={(edit.args ?? []).join(' ')} onChange={(e) => setEdit({ ...edit, args: e.target.value ? e.target.value.split(/\s+/) : [] })} />
             </div>
           ) : (
             <>
-              <input className="w-full rounded-lg bg-neutral-800 px-2.5 py-1.5 text-sm outline-none" placeholder="URL (es. http://localhost:3001/mcp)" value={edit.url ?? ''} onChange={(e) => setEdit({ ...edit, url: e.target.value })} />
+              <input className="w-full rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder="URL (es. http://localhost:3001/mcp)" value={edit.url ?? ''} onChange={(e) => setEdit({ ...edit, url: e.target.value })} />
               <input
-                className="w-full rounded-lg bg-neutral-800 px-2.5 py-1.5 text-sm outline-none"
+                className="w-full rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none"
                 type="password"
                 placeholder="Bearer token (opzionale — salvato cifrato)"
                 value={editBearer}
@@ -721,9 +733,9 @@ function ManualServers() {
             </>
           )}
           <div className="flex justify-end gap-2 pt-1">
-            <button className="rounded-lg px-3 py-1.5 text-xs text-neutral-400 hover:text-neutral-200" onClick={() => setEdit(null)}>Annulla</button>
+            <button className="rounded-lg px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground" onClick={() => setEdit(null)}>Annulla</button>
             <button
-              className="rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-500"
+              className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-primary/90"
               onClick={async () => {
                 const secret: McpServerSecret | undefined = edit.transport === 'http' && editBearer.trim() ? { bearerToken: editBearer.trim() } : undefined
                 await api.mcpSave({ ...edit, id: edit.id || 'mcp_' + Date.now() }, secret)
@@ -736,24 +748,24 @@ function ManualServers() {
           </div>
         </div>
       ) : (
-        <button className="w-full rounded-xl border border-dashed border-neutral-700 px-3 py-2.5 text-sm text-neutral-500 hover:border-neutral-500 hover:text-neutral-300" onClick={() => { setEdit({ id: '', name: '', transport: 'stdio', command: '', args: [], enabled: true }); setEditBearer('') }}>
+        <button className="w-full rounded-xl border border-dashed border-border px-3 py-2.5 text-sm text-muted-foreground hover:border-muted-foreground hover:text-foreground" onClick={() => { setEdit({ id: '', name: '', transport: 'stdio', command: '', args: [], enabled: true }); setEditBearer('') }}>
           + Aggiungi server MCP
         </button>
       )}
 
-      <div className="space-y-2 border-t border-neutral-800 pt-3">
-        <p className="text-xs text-neutral-500">Vault credenziali (AES-256-GCM, chiave master in safeStorage): il bot vede i nomi col tool <code>list-credentials</code> e li usa scrivendo <code>{'{{secret:NOME}}'}</code> nei comandi — i valori non compaiono mai nel transcript.</p>
+      <div className="space-y-2 border-t border-border pt-3">
+        <p className="text-xs text-muted-foreground">Vault credenziali (AES-256-GCM, chiave master in safeStorage): il bot vede i nomi col tool <code>list-credentials</code> e li usa scrivendo <code>{'{{secret:NOME}}'}</code> nei comandi — i valori non compaiono mai nel transcript.</p>
         {secrets.map((n) => (
-          <div key={n} className="flex items-center gap-2 rounded-lg border border-neutral-800 px-2 py-2">
-            <span className="text-sm text-neutral-200">🔐 {n}</span>
+          <div key={n} className="flex items-center gap-2 rounded-lg border border-border px-2 py-2">
+            <span className="text-sm text-foreground">🔐 {n}</span>
             <div className="flex-1" />
-            <button className="text-xs text-neutral-500 hover:text-red-400" onClick={async () => { await api.vaultDelete(n); await refresh() }}>elimina</button>
+            <button className="text-xs text-muted-foreground hover:text-destructive" onClick={async () => { await api.vaultDelete(n); await refresh() }}>elimina</button>
           </div>
         ))}
         <div className="flex gap-2">
-          <input className="min-w-0 flex-1 rounded-lg bg-neutral-800 px-2.5 py-1.5 text-sm outline-none" placeholder="Nome (es. api_key_github)" value={secName} onChange={(e) => setSecName(e.target.value)} />
-          <input className="min-w-0 flex-1 rounded-lg bg-neutral-800 px-2.5 py-1.5 text-sm outline-none" type="password" placeholder="Valore" value={secValue} onChange={(e) => setSecValue(e.target.value)} />
-          <button className="rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-500 disabled:opacity-40" disabled={!secName.trim() || !secValue} onClick={async () => { await api.vaultStore(secName.trim(), secValue); setSecName(''); setSecValue(''); await refresh() }}>Salva</button>
+          <input className="min-w-0 flex-1 rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder="Nome (es. api_key_github)" value={secName} onChange={(e) => setSecName(e.target.value)} />
+          <input className="min-w-0 flex-1 rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" type="password" placeholder="Valore" value={secValue} onChange={(e) => setSecValue(e.target.value)} />
+          <button className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-primary/90 disabled:opacity-40" disabled={!secName.trim() || !secValue} onClick={async () => { await api.vaultStore(secName.trim(), secValue); setSecName(''); setSecValue(''); await refresh() }}>Salva</button>
         </div>
       </div>
     </div>
@@ -766,6 +778,9 @@ function ManualServers() {
 // notifiche per agente.
 function GeneralTab() {
   const agents = useStore((s) => s.agents)
+  // fase 16 (U0): il selettore del tema (setting ui.theme)
+  const theme = useStore((s) => s.theme)
+  const setTheme = useStore((s) => s.setTheme)
   const [atLogin, setAtLogin] = useState(false)
   const [busy, setBusy] = useState(false)
   const [tz, setTz] = useState('')
@@ -805,7 +820,7 @@ function GeneralTab() {
     }
   }
 
-  const inputCls = 'rounded-lg bg-neutral-800 px-2 py-1.5 text-xs outline-none'
+  const inputCls = 'rounded-lg bg-muted px-2 py-1.5 text-xs outline-none'
   const saveWindow = async (): Promise<void> => {
     await api.settingsSet('deliveryWindow', { mode: winMode, morning, working })
   }
@@ -817,32 +832,47 @@ function GeneralTab() {
 
   return (
     <div className="space-y-3">
+      <div className="flex items-center justify-between rounded-xl border border-border px-4 py-3">
+        <span className="text-sm">Tema</span>
+        <div className="flex gap-1 rounded-full bg-muted p-1">
+          {([['system', 'Sistema'], ['light', 'Chiaro'], ['dark', 'Scuro']] as const).map(([value, label]) => (
+            <button
+              key={value}
+              className={`rounded-full px-3 py-1 text-xs transition ${theme === value ? 'bg-foreground text-background' : 'text-muted-foreground'}`}
+              onClick={() => setTheme(value as UiTheme)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {libStats?.warn && (
-        <p className="rounded-lg border border-amber-800/50 bg-amber-950/20 px-3 py-2 text-xs text-amber-300">
+        <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
           Libreria: {(libStats.bytes / 1024 / 1024 / 1024).toFixed(1)} GB — oltre i 2 GB consigliati. Valuta cosa cancellare dalla vista Libreria (nessun blocco automatico).
         </p>
       )}
 
-      <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-neutral-800 px-4 py-3">
+      <label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-border bg-card px-4 py-3">
         <input
           type="checkbox"
-          className="mt-0.5 h-4 w-4 accent-neutral-300"
+          className="mt-0.5 h-4 w-4 accent-foreground"
           checked={atLogin}
           disabled={busy}
           onChange={(e) => void toggle(e.target.checked)}
         />
         <span className="space-y-1">
-          <span className="block text-sm text-neutral-100">Avvia all'accesso</span>
-          <span className="block text-xs text-neutral-500">
+          <span className="block text-sm text-foreground">Avvia all'accesso</span>
+          <span className="block text-xs text-muted-foreground">
             Il daemon dei Bot parte quando accedi al Mac e resta attivo con la finestra chiusa
             (LaunchAgent con riavvio automatico dopo un crash). Puoi disattivarlo qui.
           </span>
         </span>
       </label>
 
-      <div className="space-y-2 rounded-xl border border-neutral-800 px-4 py-3">
-        <p className="text-sm text-neutral-100">Consegna e presenza</p>
-        <label className="flex items-center justify-between text-xs text-neutral-400">
+      <div className="space-y-2 rounded-2xl border border-border bg-card px-4 py-3">
+        <p className="text-sm text-foreground">Consegna e presenza</p>
+        <label className="flex items-center justify-between text-xs text-muted-foreground">
           Fuso orario
           <input
             className={`w-44 ${inputCls}`}
@@ -852,7 +882,7 @@ function GeneralTab() {
             onBlur={() => void api.settingsSet('userTimeZone', tz.trim())}
           />
         </label>
-        <div className="flex items-center justify-between gap-2 text-xs text-neutral-400">
+        <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
           <span>Finestra di consegna</span>
           <div className="flex items-center gap-2">
             <select
@@ -879,14 +909,14 @@ function GeneralTab() {
             )}
           </div>
         </div>
-        <p className="text-[10px] text-neutral-600">I messaggi non urgenti delle routine aspettano questa finestra (o l'apertura della chat del bot).</p>
-        <label className="flex items-center justify-between text-xs text-neutral-400">
+        <p className="text-[10px] text-muted-foreground">I messaggi non urgenti delle routine aspettano questa finestra (o l'apertura della chat del bot).</p>
+        <label className="flex items-center justify-between text-xs text-muted-foreground">
           Look-around al rientro dopo (ore di assenza)
           <input className={`w-16 ${inputCls}`} type="number" min={1} value={minAwayHours}
             onChange={(e) => setMinAwayHours(Number(e.target.value))}
             onBlur={() => void api.settingsSet('minAwayHours', Math.max(1, Number(minAwayHours) || 12))} />
         </label>
-        <label className="flex items-center justify-between text-xs text-neutral-400">
+        <label className="flex items-center justify-between text-xs text-muted-foreground">
           Pausa delle routine dopo (giorni di assenza)
           <input className={`w-16 ${inputCls}`} type="number" min={1} value={awayPauseDays}
             onChange={(e) => setAwayPauseDays(Number(e.target.value))}
@@ -894,15 +924,15 @@ function GeneralTab() {
         </label>
       </div>
 
-      <div className="space-y-2 rounded-xl border border-neutral-800 px-4 py-3">
-        <p className="text-sm text-neutral-100">Notifiche per agente</p>
+      <div className="space-y-2 rounded-2xl border border-border bg-card px-4 py-3">
+        <p className="text-sm text-foreground">Notifiche per agente</p>
         {agents.map((a) => {
           const off = disabledNotifications.includes(a.id)
           return (
-            <label key={a.id} className="flex items-center justify-between text-xs text-neutral-400">
-              <span className="text-neutral-300">{a.name}</span>
+            <label key={a.id} className="flex items-center justify-between text-xs text-muted-foreground">
+              <span className="text-foreground">{a.name}</span>
               <button
-                className={`rounded-lg px-2 py-1 text-[11px] ${off ? 'bg-neutral-800 text-neutral-500' : 'bg-emerald-800/50 text-emerald-300'}`}
+                className={`rounded-lg px-2 py-1 text-[11px] ${off ? 'bg-muted text-muted-foreground' : 'bg-chart-2/15 text-chart-2'}`}
                 onClick={() => void toggleAgentNotification(a.id, off)}
               >
                 {off ? 'disattivate' : 'attivate'}
@@ -958,12 +988,12 @@ function ModelDefaultsRow({ p }: { p: ProviderConfig }) {
       {(models ?? []).map((m) => <option key={m.id} value={m.id}>{m.label ?? m.id}</option>)}
     </>
   )
-  const sel = 'rounded-lg bg-neutral-800 px-2 py-1.5 text-xs outline-none'
+  const sel = 'rounded-lg bg-muted px-2 py-1.5 text-xs outline-none'
 
-  if (models === null) return <div className="mt-2 text-xs text-neutral-600">modelli…</div>
+  if (models === null) return <div className="mt-2 text-xs text-muted-foreground">modelli…</div>
   return (
     <div className="mt-2 flex flex-wrap items-center gap-2">
-      <span className="text-[11px] uppercase tracking-wide text-neutral-500">modelli</span>
+      <span className="text-[11px] uppercase tracking-wide text-muted-foreground">modelli</span>
       <select className={sel} value={saved.defaultModel ?? ''} onChange={(e) => void save({ defaultModel: e.target.value || undefined })}>
         {options(saved.defaultModel, saved.defaultModel ? 'predefinito…' : effLabel('defaultModel', 'predefinito'))}
       </select>
@@ -1004,16 +1034,16 @@ function WebSearchKeyRow({ p }: { p: ProviderConfig }) {
 
   return (
     <div className="mt-2 flex flex-wrap items-center gap-2">
-      <span className="text-[11px] uppercase tracking-wide text-neutral-500">ricerca web</span>
+      <span className="text-[11px] uppercase tracking-wide text-muted-foreground">ricerca web</span>
       <input
-        className="w-56 rounded-lg bg-neutral-800 px-2 py-1.5 text-xs outline-none"
+        className="w-56 rounded-lg bg-muted px-2 py-1.5 text-xs outline-none"
         type="password"
         placeholder={set ? 'chiave salvata (scrivi per sostituirla)' : 'chiave per la ricerca web di Ollama'}
         value={value}
         onChange={(e) => setValue(e.target.value)}
       />
       <button
-        className="rounded-lg bg-neutral-700 px-2.5 py-1.5 text-xs hover:bg-neutral-600 disabled:opacity-50"
+        className="rounded-lg bg-accent px-2.5 py-1.5 text-xs hover:bg-muted-foreground/40 disabled:opacity-50"
         disabled={busy || !value.trim()}
         onClick={() => void save(value.trim())}
       >
@@ -1021,14 +1051,14 @@ function WebSearchKeyRow({ p }: { p: ProviderConfig }) {
       </button>
       {set && (
         <button
-          className="rounded-lg border border-neutral-600 px-2.5 py-1.5 text-xs text-neutral-400 hover:text-neutral-200 disabled:opacity-50"
+          className="rounded-lg border border-border px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
           disabled={busy}
           onClick={() => void save(null)}
         >
           Rimuovi
         </button>
       )}
-      <span className={`text-xs ${set ? 'text-emerald-400' : 'text-neutral-500'}`}>
+      <span className={`text-xs ${set ? 'text-chart-2' : 'text-muted-foreground'}`}>
         {set === null ? '' : set ? 'ricerca web attiva (chiave nel vault)' : 'ricerca web non attiva'}
       </span>
     </div>
@@ -1061,40 +1091,40 @@ function WebSearchSection() {
     if (p.cooldownUntil) {
       return {
         text: `in raffreddamento fino a ${new Date(p.cooldownUntil).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
-        cls: 'text-amber-400'
+        cls: 'text-destructive'
       }
     }
     if (p.lastError) {
       return {
         text: `ultimo errore: ${p.lastError.kind}${p.lastError.status !== undefined ? ` (HTTP ${p.lastError.status})` : ''}`,
-        cls: 'text-neutral-500'
+        cls: 'text-muted-foreground'
       }
     }
-    return { text: 'disponibile', cls: 'text-emerald-400' }
+    return { text: 'disponibile', cls: 'text-chart-2' }
   }
 
   return (
-    <div className="rounded-xl border border-neutral-800 px-3 py-2.5">
-      <div className="text-sm text-neutral-100">Ricerca web</div>
+    <div className="rounded-2xl border border-border bg-card px-3 py-2.5">
+      <div className="text-sm text-foreground">Ricerca web</div>
       <label className="mt-2 flex cursor-pointer items-start gap-3">
         <input
           type="checkbox"
-          className="mt-0.5 h-4 w-4 accent-neutral-300"
+          className="mt-0.5 h-4 w-4 accent-foreground"
           checked={keyless ?? true}
           disabled={keyless === null}
           onChange={(e) => void toggle(e.target.checked)}
         />
         <span className="space-y-1">
-          <span className="block text-xs text-neutral-200">
+          <span className="block text-xs text-foreground">
             Usa i servizi di ricerca gratuiti senza chiave (You.com, Exa, Tavily)
           </span>
-          <span className="block text-xs text-neutral-500">
+          <span className="block text-xs text-muted-foreground">
             Le ricerche dei bot vengono inviate a questi servizi, secondo i loro termini d&apos;uso:{' '}
-            <a className="text-sky-400 hover:underline" href="https://you.com/acceptable-use-policy-may-2026" target="_blank" rel="noreferrer">You.com</a>
+            <a className="text-primary hover:underline" href="https://you.com/acceptable-use-policy-may-2026" target="_blank" rel="noreferrer">You.com</a>
             {' · '}
-            <a className="text-sky-400 hover:underline" href="https://exa.ai/terms" target="_blank" rel="noreferrer">Exa</a>
+            <a className="text-primary hover:underline" href="https://exa.ai/terms" target="_blank" rel="noreferrer">Exa</a>
             {' · '}
-            <a className="text-sky-400 hover:underline" href="https://docs.tavily.com/documentation/keyless" target="_blank" rel="noreferrer">Tavily</a>
+            <a className="text-primary hover:underline" href="https://docs.tavily.com/documentation/keyless" target="_blank" rel="noreferrer">Tavily</a>
           </span>
         </span>
       </label>
@@ -1130,29 +1160,29 @@ function ProvidersTab({ onChanged }: { onChanged: () => Promise<void> }) {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <p className="text-xs text-neutral-500">Provider locali e cloud — chiunque parli OpenAI-compatible funziona.</p>
-        <button className="rounded-lg bg-neutral-800 px-3 py-1.5 text-xs hover:bg-neutral-700" onClick={() => void scan()}>
+        <p className="text-xs text-muted-foreground">Provider locali e cloud — chiunque parli OpenAI-compatible funziona.</p>
+        <button className="rounded-lg bg-muted px-3 py-1.5 text-xs hover:bg-accent" onClick={() => void scan()}>
           Scansiona locale (Ollama / LM Studio)
         </button>
       </div>
 
       {providers.map((p) => (
-        <div key={p.id} className="rounded-xl border border-neutral-800 px-3 py-2.5">
+        <div key={p.id} className="rounded-2xl border border-border bg-card px-3 py-2.5">
           <div className="flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-emerald-500" />
-            <span className="text-sm text-neutral-100">{p.name}</span>
-            <span className="rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] uppercase text-neutral-400">{p.kind}</span>
-            <span className="flex-1 truncate text-xs text-neutral-600">{p.baseUrl}</span>
-            <button className="text-xs text-neutral-400 hover:text-neutral-200" onClick={() => setEdit(p)}>modifica</button>
+            <span className="h-2 w-2 rounded-full bg-chart-2" />
+            <span className="text-sm text-foreground">{p.name}</span>
+            <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">{p.kind}</span>
+            <span className="flex-1 truncate text-xs text-muted-foreground">{p.baseUrl}</span>
+            <button className="text-xs text-muted-foreground hover:text-foreground" onClick={() => setEdit(p)}>modifica</button>
             <button
-              className="text-xs text-neutral-400 hover:text-neutral-200"
+              className="text-xs text-muted-foreground hover:text-foreground"
               onClick={() => void test(p.id)}
               disabled={testing === p.id}
             >
               {testing === p.id ? 'test…' : 'test'}
             </button>
             <button
-              className="text-xs text-neutral-500 hover:text-red-400"
+              className="text-xs text-muted-foreground hover:text-destructive"
               onClick={async () => {
                 await api.deleteProvider(p.id)
                 await onChanged()
@@ -1162,7 +1192,7 @@ function ProvidersTab({ onChanged }: { onChanged: () => Promise<void> }) {
             </button>
           </div>
           {testResult[p.id] && (
-            <div className={`mt-2 text-xs ${testResult[p.id].ok ? 'text-emerald-400' : 'text-red-400'}`}>
+            <div className={`mt-2 text-xs ${testResult[p.id].ok ? 'text-chart-2' : 'text-destructive'}`}>
               {testResult[p.id].ok
                 ? `✓ ${(testResult[p.id].models?.length ?? 0)} modelli disponibili`
                 : `✕ ${testResult[p.id].error}`}
@@ -1188,7 +1218,7 @@ function ProvidersTab({ onChanged }: { onChanged: () => Promise<void> }) {
         />
       ) : (
         <button
-          className="w-full rounded-xl border border-dashed border-neutral-700 px-3 py-2.5 text-sm text-neutral-500 hover:border-neutral-500 hover:text-neutral-300"
+          className="w-full rounded-xl border border-dashed border-border px-3 py-2.5 text-sm text-muted-foreground hover:border-muted-foreground hover:text-foreground"
           onClick={() =>
             setEdit({ id: '', name: '', kind: 'openai-compatible', baseUrl: 'https://', apiKey: '', enabled: true })
           }
@@ -1203,16 +1233,16 @@ function ProvidersTab({ onChanged }: { onChanged: () => Promise<void> }) {
 function ProviderForm({ initial, onSave, onCancel }: { initial: ProviderConfig; onSave: (p: ProviderConfig) => Promise<void>; onCancel: () => void }) {
   const [p, setP] = useState(initial)
   return (
-    <div className="space-y-2 rounded-xl border border-neutral-700 bg-neutral-900 p-3">
+    <div className="space-y-2 rounded-2xl border border-border bg-muted p-3">
       <div className="grid grid-cols-2 gap-2">
         <input
-          className="rounded-lg bg-neutral-800 px-2.5 py-1.5 text-sm outline-none"
+          className="rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none"
           placeholder="Nome (es. Z.ai)"
           value={p.name}
           onChange={(e) => setP({ ...p, name: e.target.value })}
         />
         <select
-          className="rounded-lg bg-neutral-800 px-2.5 py-1.5 text-sm outline-none"
+          className="rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none"
           value={p.kind}
           onChange={(e) => setP({ ...p, kind: e.target.value as ProviderKind })}
         >
@@ -1222,24 +1252,24 @@ function ProviderForm({ initial, onSave, onCancel }: { initial: ProviderConfig; 
         </select>
       </div>
       <input
-        className="w-full rounded-lg bg-neutral-800 px-2.5 py-1.5 text-sm outline-none"
+        className="w-full rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none"
         placeholder="Base URL (es. https://api.z.ai)"
         value={p.baseUrl}
         onChange={(e) => setP({ ...p, baseUrl: e.target.value })}
       />
       <input
-        className="w-full rounded-lg bg-neutral-800 px-2.5 py-1.5 text-sm outline-none"
+        className="w-full rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none"
         placeholder="API key (vuoto per locali)"
         type="password"
         value={p.apiKey}
         onChange={(e) => setP({ ...p, apiKey: e.target.value })}
       />
       <div className="flex justify-end gap-2 pt-1">
-        <button className="rounded-lg px-3 py-1.5 text-xs text-neutral-400 hover:text-neutral-200" onClick={onCancel}>
+        <button className="rounded-lg px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground" onClick={onCancel}>
           Annulla
         </button>
         <button
-          className="rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-500"
+          className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-primary/90"
           onClick={() => void onSave({ ...p, id: p.id || p.kind + '_' + Date.now() })}
         >
           Salva
@@ -1286,18 +1316,18 @@ function AgentsTab() {
 
   return (
     <div className="space-y-3">
-      <p className="text-xs text-neutral-500">Scegli con quale modello pensa ciascun bot.</p>
+      <p className="text-xs text-muted-foreground">Scegli con quale modello pensa ciascun bot.</p>
       {agents.map((a) => (
-        <div key={a.id} className="rounded-xl border border-neutral-800 px-3 py-2.5">
+        <div key={a.id} className="rounded-2xl border border-border bg-card px-3 py-2.5">
           <div className="mb-2 flex items-center gap-2">
-            <span className="text-sm font-medium text-neutral-100">{a.name}</span>
+            <span className="text-sm font-medium text-foreground">{a.name}</span>
             {a.id === effectiveMain ? (
-              <span className="rounded bg-sky-800/60 px-1.5 py-0.5 text-[10px] text-sky-200" title="Punto di contatto principale dell'utente: coordina gli altri bot">
+              <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[10px] text-primary" title="Punto di contatto principale dell'utente: coordina gli altri bot">
                 ★ principale
               </span>
             ) : (
               <button
-                className="rounded px-1.5 py-0.5 text-[10px] text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200"
+                className="rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
                 title="Rendi questo bot il punto di contatto principale dell'utente"
                 onClick={() => void setMainAgent(a.id)}
               >
@@ -1307,7 +1337,7 @@ function AgentsTab() {
           </div>
           <div className="grid grid-cols-2 gap-2">
             <select
-              className="rounded-lg bg-neutral-800 px-2.5 py-1.5 text-sm outline-none"
+              className="rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none"
               value={a.providerId ?? ''}
               onChange={async (e) => {
                 const pid = e.target.value || null
@@ -1320,7 +1350,7 @@ function AgentsTab() {
               ))}
             </select>
             <select
-              className="rounded-lg bg-neutral-800 px-2.5 py-1.5 text-sm outline-none disabled:opacity-40"
+              className="rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none disabled:opacity-40"
               disabled={!a.providerId}
               value={a.model ?? ''}
               onChange={async (e) => void patch(a, { model: e.target.value || null })}
@@ -1332,27 +1362,27 @@ function AgentsTab() {
             </select>
           </div>
           <input
-            className="mt-2 w-full rounded-lg bg-neutral-800 px-2.5 py-1.5 text-sm outline-none"
+            className="mt-2 w-full rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none"
             placeholder="Descrizione / ruolo del bot (va nel system prompt)"
             defaultValue={a.description}
             onBlur={async (e) => void patch(a, { description: e.target.value })}
           />
           {agentError[a.id] ? (
-            <div className="mt-1.5 text-xs text-red-400">✕ {agentError[a.id]}</div>
+            <div className="mt-1.5 text-xs text-destructive">✕ {agentError[a.id]}</div>
           ) : null}
         </div>
       ))}
 
       {templates.length > 0 && (
-        <div className="space-y-2 border-t border-neutral-800 pt-3">
-          <p className="text-xs text-neutral-500">
+        <div className="space-y-2 border-t border-border pt-3">
+          <p className="text-xs text-muted-foreground">
             Crea un bot da template: parte con un messaggio di configurazione che crea routine (in pausa), memorie e domande di attivazione.
           </p>
           <div className="grid grid-cols-2 gap-2">
             {templates.map((t) => (
               <button
                 key={t.id}
-                className="rounded-xl border border-neutral-800 px-3 py-2 text-left hover:border-neutral-600"
+                className="rounded-2xl border border-border bg-card px-3 py-2 text-left hover:border-border"
                 onClick={async () => {
                   try {
                     await api.createAgentFromTemplate(t.id)
@@ -1363,8 +1393,8 @@ function AgentsTab() {
                 title={t.description}
               >
                 <span className="mr-1">{t.avatar}</span>
-                <span className="text-sm text-neutral-100">{t.name}</span>
-                <span className="mt-0.5 block truncate text-xs text-neutral-500">{t.description}</span>
+                <span className="text-sm text-foreground">{t.name}</span>
+                <span className="mt-0.5 block truncate text-xs text-muted-foreground">{t.description}</span>
               </button>
             ))}
           </div>
@@ -1379,14 +1409,14 @@ function PermissionsTab({ onChanged }: { onChanged: () => Promise<void> }) {
   if (!permissions) return null
   return (
     <div className="space-y-3">
-      <p className="text-xs text-neutral-500">
+      <p className="text-xs text-muted-foreground">
         Regole per tool: consenti sempre / chiedi / blocca. "Consenti sempre" nelle card salva una standing grant.
       </p>
-      <div className="rounded-xl border border-neutral-800 px-3 py-2.5">
+      <div className="rounded-2xl border border-border bg-card px-3 py-2.5">
         <label className="flex items-center justify-between text-sm">
-          <span className="text-neutral-300">Politica predefinita</span>
+          <span className="text-foreground">Politica predefinita</span>
           <select
-            className="rounded-lg bg-neutral-800 px-2.5 py-1.5 text-sm outline-none"
+            className="rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none"
             value={permissions.default}
             onChange={async (e) => {
               await api.setPermissions({ ...permissions, default: e.target.value as typeof permissions.default })
@@ -1400,12 +1430,12 @@ function PermissionsTab({ onChanged }: { onChanged: () => Promise<void> }) {
         </label>
       </div>
       {permissions.rules.map((r, i) => (
-        <div key={i} className="flex items-center gap-2 rounded-xl border border-neutral-800 px-3 py-2.5">
-          <span className="w-36 font-mono text-xs text-neutral-300">{r.tool}</span>
-          <span className="w-24 font-mono text-xs text-neutral-600">{r.pattern}</span>
+        <div key={i} className="flex items-center gap-2 rounded-2xl border border-border bg-card px-3 py-2.5">
+          <span className="w-36 font-mono text-xs text-foreground">{r.tool}</span>
+          <span className="w-24 font-mono text-xs text-muted-foreground">{r.pattern}</span>
           <div className="flex-1" />
           <select
-            className="rounded-lg bg-neutral-800 px-2.5 py-1.5 text-xs outline-none"
+            className="rounded-lg bg-muted px-2.5 py-1.5 text-xs outline-none"
             value={r.mode}
             onChange={async (e) => {
               const rules = [...permissions.rules]
@@ -1476,7 +1506,7 @@ function RoutinesTab() {
 
   return (
     <div className="space-y-3">
-      <p className="text-xs text-neutral-500">
+      <p className="text-xs text-muted-foreground">
         Le routine sono attività automatiche del Bot: su orario (cron o "ogni giorno alle 9, circa"),
         su un'email in arrivo, prima di un evento del calendario, da un webhook o quando torni al computer.
         I loro messaggi non urgenti aspettano la finestra di consegna.
@@ -1484,36 +1514,36 @@ function RoutinesTab() {
 
       {routines.map((r) => {
         const state = r.enabled ? 'attiva' : r.paused_for_away ? 'in pausa per assenza' : 'in pausa'
-        const stateColor = r.enabled ? 'text-emerald-500' : r.paused_for_away ? 'text-amber-500' : 'text-neutral-500'
+        const stateColor = r.enabled ? 'text-chart-2' : r.paused_for_away ? 'text-destructive' : 'text-muted-foreground'
         return (
-          <div key={r.id} className="rounded-xl border border-neutral-800 px-3 py-2.5">
+          <div key={r.id} className="rounded-2xl border border-border bg-card px-3 py-2.5">
             <div className="flex items-center gap-2">
-              <span className={`h-2 w-2 rounded-full ${r.enabled ? 'bg-emerald-500' : r.paused_for_away ? 'bg-amber-500' : 'bg-neutral-600'}`} />
-              <span className="text-sm text-neutral-100">{r.title}</span>
-              <span className="rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] uppercase text-neutral-400">{KIND_LABEL[kindOf(r.trigger)]}</span>
+              <span className={`h-2 w-2 rounded-full ${r.enabled ? 'bg-chart-2' : r.paused_for_away ? 'bg-destructive' : 'bg-muted-foreground/40'}`} />
+              <span className="text-sm text-foreground">{r.title}</span>
+              <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">{KIND_LABEL[kindOf(r.trigger)]}</span>
               <div className="flex-1" />
-              <button className="text-xs text-neutral-400 hover:text-neutral-200" onClick={() => setEditing(r)}>modifica</button>
-              <button className="text-xs text-neutral-400 hover:text-neutral-200" onClick={() => void pauseResume(r)}>
+              <button className="text-xs text-muted-foreground hover:text-foreground" onClick={() => setEditing(r)}>modifica</button>
+              <button className="text-xs text-muted-foreground hover:text-foreground" onClick={() => void pauseResume(r)}>
                 {r.enabled ? 'metti in pausa' : 'riattiva'}
               </button>
-              <button className="text-xs text-neutral-500 hover:text-red-400" onClick={async () => { await api.deleteRoutine(r.id); await refresh() }}>
+              <button className="text-xs text-muted-foreground hover:text-destructive" onClick={async () => { await api.deleteRoutine(r.id); await refresh() }}>
                 elimina
               </button>
             </div>
-            <p className="mt-1 text-xs text-neutral-500">{describeTrigger(r.trigger ?? null, r.schedule)}</p>
-            <div className="mt-1 flex items-center gap-3 text-[10px] text-neutral-600">
+            <p className="mt-1 text-xs text-muted-foreground">{describeTrigger(r.trigger ?? null, r.schedule)}</p>
+            <div className="mt-1 flex items-center gap-3 text-[10px] text-muted-foreground">
               <span className={stateColor}>{state}</span>
               {r.next_run && <span>prossima: {new Date(r.next_run).toLocaleString('it-IT')}</span>}
               {r.last_run && <span>ultima: {new Date(r.last_run).toLocaleString('it-IT')}</span>}
             </div>
             {r.webhook_url && (
-              <div className="mt-1 flex items-center gap-2 rounded-lg border border-neutral-800 bg-neutral-900 px-2 py-1.5">
-                <code className="min-w-0 flex-1 truncate text-[10px] text-neutral-400">{r.webhook_url}</code>
-                <code className="hidden truncate text-[10px] text-neutral-600" title={`Authorization: Bearer ${r.trigger?.type === 'webhook' ? r.trigger.token : ''}`}>
+              <div className="mt-1 flex items-center gap-2 rounded-lg border border-border bg-muted px-2 py-1.5">
+                <code className="min-w-0 flex-1 truncate text-[10px] text-muted-foreground">{r.webhook_url}</code>
+                <code className="hidden truncate text-[10px] text-muted-foreground" title={`Authorization: Bearer ${r.trigger?.type === 'webhook' ? r.trigger.token : ''}`}>
                   {r.trigger?.type === 'webhook' ? r.trigger.token.slice(0, 10) + '…' : ''}
                 </code>
                 <button
-                  className="text-[10px] text-sky-400 hover:text-sky-300"
+                  className="text-[10px] text-primary hover:text-primary"
                   onClick={() => void navigator.clipboard?.writeText(
                     `curl -X POST ${r.webhook_url} -H "Authorization: Bearer ${r.trigger?.type === 'webhook' ? r.trigger.token : ''}" -d '{"test":1}'`
                   )}
@@ -1552,9 +1582,9 @@ function RoutinesTab() {
             }}
             err={err}
           />
-          <div className="space-y-2 border-t border-neutral-800 pt-2">
+          <div className="space-y-2 border-t border-border pt-2">
             <button
-              className="rounded-lg bg-neutral-800 px-3 py-1.5 text-xs hover:bg-neutral-700 disabled:opacity-40"
+              className="rounded-lg bg-muted px-3 py-1.5 text-xs hover:bg-accent disabled:opacity-40"
               disabled={busy || !activeId}
               onClick={async () => {
                 setBusy(true); setErr(''); setSuggestions([])
@@ -1566,13 +1596,13 @@ function RoutinesTab() {
               {busy ? 'analizzo…' : '✨ Suggerisci dal transcript'}
             </button>
             {suggestions.map((s, i) => (
-              <div key={i} className="rounded-lg border border-neutral-800 px-3 py-2">
+              <div key={i} className="rounded-lg border border-border px-3 py-2">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm text-neutral-100">{s.title}</span>
-                  <code className="rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] text-neutral-400">{s.schedule}</code>
+                  <span className="text-sm text-foreground">{s.title}</span>
+                  <code className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{s.schedule}</code>
                   <div className="flex-1" />
                   <button
-                    className="rounded-md bg-emerald-700/60 px-2 py-1 text-xs text-white hover:bg-emerald-600/60"
+                    className="rounded-md bg-chart-2/70 px-2 py-1 text-xs text-white hover:bg-chart-2/80"
                     onClick={async () => {
                       await api.createRoutine(activeId!, s.title, s.description, s.schedule)
                       setSuggestions(suggestions.filter((_, j) => j !== i))
@@ -1582,7 +1612,7 @@ function RoutinesTab() {
                     Aggiungi
                   </button>
                 </div>
-                <p className="mt-1 text-xs text-neutral-500">{s.description}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{s.description}</p>
               </div>
             ))}
           </div>
@@ -1605,12 +1635,12 @@ function NewRoutinePicker(props: {
     return (
       <div className="space-y-2">
         <button
-          className="w-full rounded-xl border border-dashed border-neutral-700 px-3 py-2.5 text-sm text-neutral-500 hover:border-neutral-500 hover:text-neutral-300"
+          className="w-full rounded-xl border border-dashed border-border px-3 py-2.5 text-sm text-muted-foreground hover:border-muted-foreground hover:text-foreground"
           onClick={() => setKind('schedule')}
         >
           + Nuova routine
         </button>
-        {props.err && <p className="text-xs text-red-400">{props.err}</p>}
+        {props.err && <p className="text-xs text-destructive">{props.err}</p>}
       </div>
     )
   }
@@ -1758,7 +1788,7 @@ function TriggerEditor(props: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kind, connectorId])
 
-  const inputCls = 'rounded-lg bg-neutral-800 px-2 py-1.5 text-xs outline-none'
+  const inputCls = 'rounded-lg bg-muted px-2 py-1.5 text-xs outline-none'
   const presetHint = (preset: 'email' | 'calendar_event'): string => {
     const { tool: t } = autoTool(preset, connectorId)
     return t
@@ -1767,12 +1797,12 @@ function TriggerEditor(props: {
   }
 
   return (
-    <div className="space-y-2 rounded-xl border border-neutral-700 bg-neutral-900 p-3">
+    <div className="space-y-2 rounded-2xl border border-border bg-muted p-3">
       <div className="flex gap-1">
         {(Object.keys(KIND_LABEL) as TriggerKind[]).map((k) => (
           <button
             key={k}
-            className={`rounded-lg px-2 py-1 text-[11px] ${kind === k ? 'bg-neutral-700 text-neutral-100' : 'text-neutral-500 hover:text-neutral-300'}`}
+            className={`rounded-lg px-2 py-1 text-[11px] ${kind === k ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
             onClick={() => setKind(k)}
           >
             {KIND_LABEL[k]}
@@ -1784,9 +1814,9 @@ function TriggerEditor(props: {
 
       {kind === 'schedule' && (
         <div className="space-y-2">
-          <div className="flex items-center gap-2 text-xs text-neutral-400">
-            <button className={`rounded-lg px-2 py-1 ${cron !== '' ? 'bg-neutral-700' : ''}`} onClick={() => { setCron('0 9 * * *') }}>cron</button>
-            <button className={`rounded-lg px-2 py-1 ${cron === '' ? 'bg-neutral-700' : ''}`} onClick={() => setCron('')}>ogni…</button>
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <button className={`rounded-lg px-2 py-1 ${cron !== '' ? 'bg-accent' : ''}`} onClick={() => { setCron('0 9 * * *') }}>cron</button>
+            <button className={`rounded-lg px-2 py-1 ${cron === '' ? 'bg-accent' : ''}`} onClick={() => setCron('')}>ogni…</button>
             {cron === '' && (
               <>
                 <select className={inputCls} value={every} onChange={(e) => setEvery(e.target.value as typeof every)}>
@@ -1830,7 +1860,7 @@ function TriggerEditor(props: {
               {props.manualServers.some((s) => s.id === connectorId) && (
                 // fase 7 (residuo 0a): readOnlyHint di un server manuale è
                 // autodichiarato — serve la spunta esplicita dell'utente
-                <label className="flex items-start gap-2 rounded-lg border border-amber-800/50 bg-amber-950/20 px-2 py-1.5 text-[11px] text-amber-200/90">
+                <label className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-[11px] text-destructive/90">
                   <input
                     type="checkbox"
                     className="mt-0.5"
@@ -1842,12 +1872,12 @@ function TriggerEditor(props: {
               )}
             </>
           )}
-          {(kind === 'email' || kind === 'calendar_event') && <p className="text-[11px] text-neutral-500">{presetHint(kind)}</p>}
+          {(kind === 'email' || kind === 'calendar_event') && <p className="text-[11px] text-muted-foreground">{presetHint(kind)}</p>}
           {kind === 'email' && (
             <input className={`w-full ${inputCls}`} placeholder="Quando arriva un'e-mail che corrisponde a… (query)" value={query} onChange={(e) => setQuery(e.target.value)} />
           )}
           {kind === 'calendar_event' && (
-            <label className="flex items-center gap-2 text-xs text-neutral-400">
+            <label className="flex items-center gap-2 text-xs text-muted-foreground">
               avvisa
               <input className={`w-16 ${inputCls}`} type="number" min={0} value={offsetMinutes} onChange={(e) => setOffsetMinutes(Number(e.target.value))} />
               minuti prima dell'evento
@@ -1865,20 +1895,20 @@ function TriggerEditor(props: {
       )}
 
       {kind === 'webhook' && (
-        <p className="text-[11px] text-neutral-500">
+        <p className="text-[11px] text-muted-foreground">
           All'uscita trovi l'URL con il token da copiare: qualunque sistema può far scattare la routine con un POST.
         </p>
       )}
       {kind === 'presence_return' && (
-        <p className="text-[11px] text-neutral-500">La routine gira quando torni al computer dopo un'assenza lunga.</p>
+        <p className="text-[11px] text-muted-foreground">La routine gira quando torni al computer dopo un'assenza lunga.</p>
       )}
 
       <input className={`w-full ${inputCls}`} placeholder="Fuso orario (es. Europe/Rome)" value={timezone} onChange={(e) => setTimezone(e.target.value)} />
-      {err && <p className="text-xs text-red-400">{err}</p>}
+      {err && <p className="text-xs text-destructive">{err}</p>}
       <div className="flex justify-end gap-2 pt-1">
-        <button className="rounded-lg px-3 py-1.5 text-xs text-neutral-400 hover:text-neutral-200" onClick={props.onCancel}>Annulla</button>
+        <button className="rounded-lg px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground" onClick={props.onCancel}>Annulla</button>
         <button
-          className="rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-500 disabled:opacity-40"
+          className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-primary/90 disabled:opacity-40"
           disabled={busy || !title.trim() || !prompt.trim() || !props.agentId}
           onClick={() => void save()}
         >

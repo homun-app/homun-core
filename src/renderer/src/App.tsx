@@ -1,8 +1,10 @@
 import { useEffect } from 'react'
-import { api, useStore } from './store'
+import { useStore } from './store'
 import { Sidebar } from './components/Sidebar'
 import { Chat } from './components/Chat'
+import { RightPanel } from './components/RightPanel'
 import { Settings } from './components/Settings'
+import { api } from './store'
 
 /** Minimo intervallo tra due segnali 'active' (il daemon ne scarta uno ogni 30 s). */
 const ACTIVE_EVERY_MS = 30_000
@@ -51,10 +53,12 @@ export function App() {
     }
   }, [])
 
+  // fase 16 (U4): la shell a 3 colonne di Lovable — sidebar, chat, pannello destro
   return (
-    <div className="flex h-screen w-screen overflow-hidden">
+    <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground">
       <Sidebar />
       <Chat />
+      <RightPanel />
       {settingsOpen && <Settings />}
     </div>
   )

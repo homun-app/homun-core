@@ -515,28 +515,28 @@ export function prepareLibraryExport(input: { id?: unknown; format?: unknown }):
   }
   return {
     ok: true,
-    value: { id, format: fmt, name: exportFileName(item, fmt), bytes, destination: '~/Downloads/SandBot/' + exportFileName(item, fmt) }
+    value: { id, format: fmt, name: exportFileName(item, fmt), bytes, destination: '~/Downloads/Homun/' + exportFileName(item, fmt) }
   }
 }
 
 export interface ExportRunDeps {
   /** genera il PDF dall'HTML in una finestra nascosta (UI); throw = niente UI */
   printToPdf?: (html: string) => Promise<Buffer>
-  /** test: dove mettere l'export (default ~/Downloads/SandBot) */
+  /** test: dove mettere l'export (default ~/Downloads/Homun) */
   targetDir?: string
   existsSync?: (p: string) => boolean
 }
 
 /**
  * Esegue l'export (dopo il click sulla card, punto 5): scrive in
- * ~/Downloads/SandBot con nome NON in conflitto (come copy_from_box).
+ * ~/Downloads/Homun con nome NON in conflitto (come copy_from_box).
  */
 export async function runLibraryExport(plan: ExportPlan, deps: ExportRunDeps = {}): Promise<{ output: string; finalPath: string }> {
   const { homedir } = await import('node:os')
   const { nonConflictingName } = await import('./file-exchange')
   const item = getLibraryItem(plan.id)
   if (!item) throw new Error(`voce "${plan.id}" non trovata`)
-  const dir = deps.targetDir ?? join(homedir(), 'Downloads', 'SandBot')
+  const dir = deps.targetDir ?? join(homedir(), 'Downloads', 'Homun')
   const { mkdirSync: mkdirS } = await import('node:fs')
   mkdirS(dir, { recursive: true })
   const exists = deps.existsSync ?? existsSync
@@ -550,7 +550,7 @@ export async function runLibraryExport(plan: ExportPlan, deps: ExportRunDeps = {
     writeFileSync(target, await documentHtmlOf(item))
   } else if (plan.format === 'pdf') {
     if (!deps.printToPdf) {
-      throw new Error('il PDF lo genera la finestra di SandBot: aprila e riprova, oppure esporta in html')
+      throw new Error('il PDF lo genera la finestra di Homun: aprila e riprova, oppure esporta in html')
     }
     const pdf = await deps.printToPdf(await documentHtmlOf(item))
     const { writeFile: wf } = await import('node:fs/promises')

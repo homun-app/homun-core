@@ -56,7 +56,7 @@ export function attachHostBridge(deps: HostBridgeDeps): { notify(title: string, 
    * aprire SandBot o scegliere html.
    */
   setPrintToPdf(async (html: string) => {
-    if (!deps.hasUi()) throw new Error('il PDF lo genera la finestra di SandBot: aprila e riprova, oppure esporta in html')
+    if (!deps.hasUi()) throw new Error('il PDF lo genera la finestra di Homun: aprila e riprova, oppure esporta in html')
     const b64 = await deps.callUi('host.printToPDF', [html])
     return Buffer.from(String(b64), 'base64')
   })

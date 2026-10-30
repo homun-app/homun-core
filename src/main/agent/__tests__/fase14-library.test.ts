@@ -422,7 +422,7 @@ describe('punto 5: esportazione', () => {
     const id = r.ok ? r.value.id : ''
     const plan = lib.prepareLibraryExport({ id, format: 'pdf' })
     expect(plan.ok).toBe(true)
-    await expect(lib.runLibraryExport(plan.ok ? plan.value : null as never, {})).rejects.toThrow(/finestra di SandBot|html/)
+    await expect(lib.runLibraryExport(plan.ok ? plan.value : null as never, {})).rejects.toThrow(/finestra di Homun|html/)
     // con il generatore finto (la "UI"): pdf scritto davvero
     const dest = mkdtempSync(join(tmpdir(), 'sandbot-pdf-test-'))
     try {

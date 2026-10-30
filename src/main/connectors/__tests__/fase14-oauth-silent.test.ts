@@ -213,7 +213,7 @@ describe('fase 14 0a: il provider SILENZIOSO non registra client (nessuna DCR fu
     const { store } = makeEnv({ 'connectors.oauth.clientMetadataUrl': 'https://pages.github.example/sandbot/client.json' })
     const provider = createOAuthProvider({
       serverId: 'srv_cimd', redirectUrl: 'http://127.0.0.1:9/callback',
-      openExternal: async () => { throw new Error('browser non disponibile senza la finestra di SandBot') },
+      openExternal: async () => { throw new Error('browser non disponibile senza la finestra di Homun') },
       store, registration: 'existing-only',
       clientMetadataUrl: 'https://pages.github.example/sandbot/client.json'
     })

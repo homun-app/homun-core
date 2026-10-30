@@ -39,13 +39,13 @@ export function LibraryPanel() {
   const openLibrary = useStore((s) => s.openLibrary)
   if (openLibraryId === null) return null
   return (
-    <div className="absolute inset-0 z-20 flex flex-col bg-neutral-950/95 backdrop-blur-sm">
-      <header className="flex items-center justify-between border-b border-neutral-800 px-6 py-3">
+    <div className="absolute inset-0 z-20 flex flex-col bg-background/95 backdrop-blur-sm">
+      <header className="flex items-center justify-between border-b border-border px-6 py-3">
         <div>
-          <p className="text-[10px] font-medium uppercase tracking-wide text-emerald-300/80">Libreria</p>
-          <h2 className="text-base font-semibold text-neutral-100">Documenti, grafici e file dei tuoi bot</h2>
+          <p className="text-[10px] font-medium uppercase tracking-wide text-chart-2/80">Libreria</p>
+          <h2 className="text-base font-semibold text-foreground">Documenti, grafici e file dei tuoi bot</h2>
         </div>
-        <button className="rounded-md px-2 py-1 text-neutral-500 hover:text-neutral-200" onClick={() => openLibrary(null)}>
+        <button className="rounded-md px-2 py-1 text-muted-foreground hover:text-foreground" onClick={() => openLibrary(null)}>
           ✕
         </button>
       </header>
@@ -77,13 +77,13 @@ function LibraryList() {
     <div className="flex-1 overflow-y-auto scroll-thin px-6 py-4">
       <div className="mx-auto max-w-3xl space-y-3">
         {stats?.warn && (
-          <p className="rounded-lg border border-amber-800/50 bg-amber-950/20 px-3 py-2 text-xs text-amber-300">
+          <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
             La libreria supera 2 GB: valuta cosa cancellare (nessun blocco automatico).
           </p>
         )}
         <div className="flex flex-wrap items-center gap-2">
           <input
-            className="flex-1 rounded-lg bg-neutral-900 px-3 py-1.5 text-sm outline-none"
+            className="flex-1 rounded-lg bg-muted px-3 py-1.5 text-sm outline-none"
             placeholder="Cerca per titolo…"
             value={q}
             onChange={(e) => setQ(e.target.value)}
@@ -91,14 +91,14 @@ function LibraryList() {
           {(['', 'document', 'chart', 'file'] as const).map((k) => (
             <button
               key={k || 'tutti'}
-              className={`rounded-lg px-2 py-1 text-xs ${kind === k ? 'bg-neutral-700 text-neutral-100' : 'text-neutral-400 hover:bg-neutral-800'}`}
+              className={`rounded-lg px-2 py-1 text-xs ${kind === k ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-muted'}`}
               onClick={() => setKind(k)}
             >
               {k === '' ? 'Tutti' : k === 'document' ? 'Documenti' : k === 'chart' ? 'Grafici' : 'File'}
             </button>
           ))}
           <select
-            className="rounded-lg bg-neutral-900 px-2 py-1 text-xs text-neutral-300"
+            className="rounded-lg bg-muted px-2 py-1 text-xs text-foreground"
             value={author}
             onChange={(e) => setAuthor(e.target.value)}
           >
@@ -106,18 +106,18 @@ function LibraryList() {
             {authors.map((a) => <option key={a} value={a}>{nameOf(a)}</option>)}
           </select>
         </div>
-        {shown.length === 0 && <p className="mt-16 text-center text-sm text-neutral-600">La libreria è vuota: i documenti, i grafici e i file che i bot preparano finiscono qui.</p>}
+        {shown.length === 0 && <p className="mt-16 text-center text-sm text-muted-foreground">La libreria è vuota: i documenti, i grafici e i file che i bot preparano finiscono qui.</p>}
         <div className="space-y-2">
           {shown.map((i) => (
-            <div key={i.id} className="flex items-center justify-between gap-3 rounded-xl border border-neutral-800 bg-neutral-900/50 px-4 py-3">
+            <div key={i.id} className="flex items-center justify-between gap-3 rounded-xl border border-border bg-muted/50 px-4 py-3">
               <button className="min-w-0 flex-1 text-left" onClick={() => openLibrary(i.id)}>
-                <p className="truncate text-sm text-neutral-100">
-                  {i.pinned && <span className="mr-1 text-amber-400">★</span>}
+                <p className="truncate text-sm text-foreground">
+                  {i.pinned && <span className="mr-1 text-destructive">★</span>}
                   {i.title}
-                  {i.kind === 'document' && <span className="ml-2 text-xs text-neutral-500">v{i.currentVersion}</span>}
-                  {i.tainted && <span className="ml-2 text-xs text-amber-500/80" title="Proveniente da dati esterni">⚠ esterno</span>}
+                  {i.kind === 'document' && <span className="ml-2 text-xs text-muted-foreground">v{i.currentVersion}</span>}
+                  {i.tainted && <span className="ml-2 text-xs text-destructive/80" title="Proveniente da dati esterni">⚠ esterno</span>}
                 </p>
-                <p className="truncate text-xs text-neutral-500">
+                <p className="truncate text-xs text-muted-foreground">
                   {i.kind === 'document' ? 'documento' : i.kind === 'chart' ? `grafico ${i.chartKind ?? ''}` : `${i.fileName ?? 'file'} · ${i.fileSize ?? 0} byte`} · di {nameOf(i.authorAgentId)} · {new Date(i.updatedAt).toLocaleString('it-IT')}
                 </p>
               </button>
@@ -143,33 +143,33 @@ function ItemActions({ item, onChanged, compact }: { item: LibraryItemInfo; onCh
   if (renaming) {
     return (
       <div className="flex items-center gap-2">
-        <input className="rounded-lg bg-neutral-900 px-2 py-1 text-xs outline-none" value={title} onChange={(e) => setTitle(e.target.value)} autoFocus />
-        <button className="rounded-lg bg-sky-600 px-2 py-1 text-xs text-white" onClick={() => void act(async () => { await api.libraryRename(item.id, title); setRenaming(false) })}>Salva</button>
-        <button className="text-xs text-neutral-500" onClick={() => setRenaming(false)}>Annulla</button>
+        <input className="rounded-lg bg-muted px-2 py-1 text-xs outline-none" value={title} onChange={(e) => setTitle(e.target.value)} autoFocus />
+        <button className="rounded-lg bg-primary px-2 py-1 text-xs text-white" onClick={() => void act(async () => { await api.libraryRename(item.id, title); setRenaming(false) })}>Salva</button>
+        <button className="text-xs text-muted-foreground" onClick={() => setRenaming(false)}>Annulla</button>
       </div>
     )
   }
   return (
     <div className="flex items-center gap-1">
-      {!compact && <span className="text-xs text-neutral-600">{item.id}</span>}
+      {!compact && <span className="text-xs text-muted-foreground">{item.id}</span>}
       {formats.map((f) => (
         <button
           key={f}
           disabled={busy}
-          className="rounded-lg border border-neutral-700 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800 disabled:opacity-40"
-          title={`Esporta in ~/Downloads/SandBot (${f})`}
+          className="rounded-lg border border-border px-2 py-1 text-xs text-foreground hover:bg-muted disabled:opacity-40"
+          title={`Esporta in ~/Downloads/Homun (${f})`}
           onClick={() => void act(() => api.libraryExport(item.id, f))}
         >
           {f === 'file' ? 'Esporta' : f}
         </button>
       ))}
-      <button disabled={busy} className="rounded-lg px-2 py-1 text-xs text-neutral-400 hover:bg-neutral-800" onClick={() => void act(() => api.libraryPin(item.id, !item.pinned))}>
+      <button disabled={busy} className="rounded-lg px-2 py-1 text-xs text-muted-foreground hover:bg-muted" onClick={() => void act(() => api.libraryPin(item.id, !item.pinned))}>
         {item.pinned ? 'Sblocca' : 'Fissa'}
       </button>
-      <button disabled={busy} className="rounded-lg px-2 py-1 text-xs text-neutral-400 hover:bg-neutral-800" onClick={() => setRenaming(true)}>Rinomina</button>
+      <button disabled={busy} className="rounded-lg px-2 py-1 text-xs text-muted-foreground hover:bg-muted" onClick={() => setRenaming(true)}>Rinomina</button>
       <button
         disabled={busy}
-        className="rounded-lg px-2 py-1 text-xs text-red-400/80 hover:bg-red-950/40"
+        className="rounded-lg px-2 py-1 text-xs text-destructive/80 hover:bg-red-950/40"
         onClick={() => {
           if (confirm(`Cancellare «${item.title}» dalla libreria? Anche i file della voce vengono tolti.`)) void act(() => api.libraryDelete(item.id))
         }}
@@ -201,20 +201,20 @@ function LibraryItemView({ id }: { id: string }) {
   }
   useEffect(() => { void refresh() }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (err) return <div className="flex-1 px-6 py-4 text-sm text-red-400">{err} <button className="underline" onClick={() => openLibrary('')}>torna alla lista</button></div>
-  if (!content) return <div className="flex-1 px-6 py-4 text-sm text-neutral-600">…</div>
+  if (err) return <div className="flex-1 px-6 py-4 text-sm text-destructive">{err} <button className="underline" onClick={() => openLibrary('')}>torna alla lista</button></div>
+  if (!content) return <div className="flex-1 px-6 py-4 text-sm text-muted-foreground">…</div>
 
   return (
     <div className="flex-1 overflow-y-auto scroll-thin px-6 py-4">
       <div className="mx-auto max-w-3xl space-y-4">
-        <button className="text-xs text-neutral-500 hover:text-neutral-300" onClick={() => openLibrary('')}>← Lista</button>
+        <button className="text-xs text-muted-foreground hover:text-foreground" onClick={() => openLibrary('')}>← Lista</button>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="min-w-0">
-            <h3 className="truncate text-lg font-semibold text-neutral-100">
-              {item?.pinned && <span className="mr-1 text-amber-400">★</span>}
+            <h3 className="truncate text-lg font-semibold text-foreground">
+              {item?.pinned && <span className="mr-1 text-destructive">★</span>}
               {item?.title ?? id}
             </h3>
-            <p className="text-xs text-neutral-500">
+            <p className="text-xs text-muted-foreground">
               {content.authorName}{item?.tainted ? ' · ⚠ proveniente da dati esterni' : ''}
             </p>
           </div>
@@ -223,12 +223,12 @@ function LibraryItemView({ id }: { id: string }) {
 
         {content.kind === 'document' && (
           <>
-            <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-400">
+            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
               Versioni:
               {content.versions.map((v) => (
                 <button
                   key={v}
-                  className={`rounded px-2 py-0.5 ${v === version ? 'bg-neutral-700 text-neutral-100' : 'hover:bg-neutral-800'}`}
+                  className={`rounded px-2 py-0.5 ${v === version ? 'bg-accent text-foreground' : 'hover:bg-muted'}`}
                   onClick={() => void refresh(v)}
                 >
                   v{v}
@@ -236,7 +236,7 @@ function LibraryItemView({ id }: { id: string }) {
               ))}
               {version !== null && version < Math.max(...content.versions) && (
                 <button
-                  className="rounded border border-neutral-700 px-2 py-0.5 hover:bg-neutral-800"
+                  className="rounded border border-border px-2 py-0.5 hover:bg-muted"
                   onClick={() => void api.libraryRestoreVersion(id, version).then(() => refresh())}
                 >
                   ↩ Ripristina v{version} come nuova versione
@@ -252,12 +252,12 @@ function LibraryItemView({ id }: { id: string }) {
         {content.kind === 'file' && (
           content.fileBase64 ? (
             <img
-              className="max-h-[70vh] rounded-xl border border-neutral-800"
+              className="max-h-[70vh] rounded-xl border border-border"
               src={`data:${content.fileMime};base64,${content.fileBase64}`}
               alt={item?.title ?? id}
             />
           ) : (
-            <p className="rounded-xl border border-neutral-800 bg-neutral-900/50 px-4 py-3 text-sm text-neutral-300">
+            <p className="rounded-xl border border-border bg-muted/50 px-4 py-3 text-sm text-foreground">
               File: {item?.fileName} ({item?.fileSize} byte) — esportalo per vederlo.
             </p>
           )
@@ -283,10 +283,10 @@ function DocumentBody({ markdown }: { markdown: string }) {
     return out
   }, [markdown])
   return (
-    <div className="space-y-3 text-sm leading-relaxed text-neutral-100">
+    <div className="space-y-3 text-sm leading-relaxed text-foreground">
       {parts.map((p, i) =>
         p.kind === 'md' ? (
-          <div key={i} className="prose-invert max-w-none prose-pre:bg-neutral-900 prose-pre:border prose-pre:border-neutral-800 prose-code:text-neutral-300">
+          <div key={i} className="max-w-none">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{p.text}</ReactMarkdown>
           </div>
         ) : (
@@ -318,12 +318,12 @@ function InlineChart({ lang, source }: { lang: 'vega-lite' | 'mermaid'; source: 
     })()
     return () => { alive = false }
   }, [lang, source])
-  if (failed) return <pre className="overflow-x-auto rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2 text-xs text-neutral-400">{source}</pre>
-  if (!url) return <p className="text-xs text-neutral-600">…grafico…</p>
-  return <img className="max-w-full rounded-xl border border-neutral-800 bg-white" src={url} alt={`grafico ${lang}`} />
+  if (failed) return <pre className="overflow-x-auto rounded-lg border border-border bg-muted px-3 py-2 text-xs text-muted-foreground">{source}</pre>
+  if (!url) return <p className="text-xs text-muted-foreground">…grafico…</p>
+  return <img className="max-w-full rounded-xl border border-border bg-white" src={url} alt={`grafico ${lang}`} />
 }
 
 function ChartBody({ content }: { content: LibraryContentInfo }) {
-  if (content.svg) return <img className="max-w-full rounded-xl border border-neutral-800 bg-white" src={svgDataUrl(content.svg)} alt="grafico" />
+  if (content.svg) return <img className="max-w-full rounded-xl border border-border bg-white" src={svgDataUrl(content.svg)} alt="grafico" />
   return <InlineChart lang="mermaid" source={content.content ?? ''} />
 }

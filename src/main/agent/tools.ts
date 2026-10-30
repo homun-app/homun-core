@@ -121,12 +121,12 @@ export const toolDefs: ToolDef[] = [
   },
   {
     name: 'copy_from_box',
-    description: "Porta un file dal computer dei bot al Mac dell'utente (max 200 MB): chiede SEMPRE la conferma dell'utente con una card. Di default scrive in ~/Downloads/SandBot/ e non sovrascrive MAI un file esistente (usa un nome alternativo).",
+    description: "Porta un file dal computer dei bot al Mac dell'utente (max 200 MB): chiede SEMPRE la conferma dell'utente con una card. Di default scrive in ~/Downloads/Homun/ e non sovrascrive MAI un file esistente (usa un nome alternativo).",
     parameters: {
       type: 'object',
       properties: {
         box_path: { type: 'string', description: 'Percorso del file nel box' },
-        mac_path: { type: 'string', description: 'Destinazione sul Mac (opzionale: default ~/Downloads/SandBot/)' }
+        mac_path: { type: 'string', description: 'Destinazione sul Mac (opzionale: default ~/Downloads/Homun/)' }
       },
       required: ['box_path']
     }
@@ -626,7 +626,7 @@ export const toolDefs: ToolDef[] = [
   },
   {
     name: 'export_from_library',
-    description: "Esporta una voce della libreria per l'utente in ~/Downloads/SandBot (con la sua conferma): documenti in md, html autonomo o pdf; grafici Vega-Lite in svg, Mermaid in mmd; file così come sono.",
+    description: "Esporta una voce della libreria per l'utente in ~/Downloads/Homun (con la sua conferma): documenti in md, html autonomo o pdf; grafici Vega-Lite in svg, Mermaid in mmd; file così come sono.",
     parameters: {
       type: 'object',
       properties: {

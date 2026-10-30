@@ -14,11 +14,11 @@ const STATUS_LABEL: Record<TaskInfo['status'], string> = {
   cancelled: 'annullato'
 }
 const STATUS_CLS: Record<TaskInfo['status'], string> = {
-  working: 'text-sky-300',
-  needs_input: 'text-amber-300',
-  done: 'text-emerald-400',
-  failed: 'text-red-400',
-  cancelled: 'text-neutral-500'
+  working: 'text-primary',
+  needs_input: 'text-destructive',
+  done: 'text-chart-2',
+  failed: 'text-destructive',
+  cancelled: 'text-muted-foreground'
 }
 
 function fmtAgo(at: number, now: number): string {
@@ -42,31 +42,31 @@ export function TaskCard({ entry }: { entry: TranscriptEntry }) {
   const now = Date.now()
 
   return (
-    <div className="max-w-[92%] rounded-2xl rounded-bl-md border border-sky-800/40 bg-sky-950/10 px-4 py-3">
+    <div className="max-w-[75%] rounded-2xl rounded-bl-md border border-border bg-card px-4 py-3 shadow-soft">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-medium uppercase tracking-wide text-sky-300/80">Task</span>
+        <span className="text-xs font-medium uppercase tracking-wide text-primary/80">Task</span>
         <span className={`text-[11px] font-medium ${STATUS_CLS[status]}`}>
           {status === 'working' ? '⏳' : status === 'needs_input' ? '❓' : status === 'done' ? '✓' : status === 'failed' ? '⚠' : '⛔'}
           {' '}{STATUS_LABEL[status]}
         </span>
       </div>
-      <p className="mt-1 text-sm text-neutral-100">{message.title}</p>
+      <p className="mt-1 text-sm text-foreground">{message.title}</p>
       {task && (
-        <p className="mt-0.5 text-[11px] text-neutral-500">
+        <p className="mt-0.5 text-[11px] text-muted-foreground">
           ultima attività {fmtAgo(task.updatedAt, now)}
           {status === 'needs_input' ? ' — rispondi dalla vista del task (Apri)' : ''}
         </p>
       )}
       <div className="mt-2 flex gap-2">
         <button
-          className="rounded-lg border border-sky-500 bg-sky-700/70 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-600"
+          className="rounded-lg border border-primary bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
           onClick={() => openTask(message.taskId)}
         >
           Apri
         </button>
         {open && (
           <button
-            className="rounded-lg bg-neutral-800 px-3 py-1.5 text-xs text-neutral-200 hover:bg-neutral-700"
+            className="rounded-lg bg-muted px-3 py-1.5 text-xs text-foreground hover:bg-accent"
             onClick={() => cancelTask(message.taskId)}
           >
             Interrompi

@@ -47,9 +47,9 @@ describe('policy PURA dei path sul Mac', () => {
     expect(pure.macPathAllowed('/tmp/qualcosa.txt', ctx)).toBe(true)
   })
 
-  it('il limite è 200 MB e la cartella di default è ~/Downloads/SandBot', () => {
+  it('il limite è 200 MB e la cartella di default è ~/Downloads/Homun', () => {
     expect(pure.FILE_EXCHANGE_MAX_BYTES).toBe(200 * 1024 * 1024)
-    expect(pure.MAC_DEFAULT_DIR).toBe(join('Downloads', 'SandBot'))
+    expect(pure.MAC_DEFAULT_DIR).toBe(join('Downloads', 'Homun'))
   })
 })
 
@@ -119,7 +119,7 @@ describe('prepareFileExchange: piano e rifiuti PRIMA della card', () => {
     if (!r.ok) expect(r.error).toContain('troppo grande')
   })
 
-  it('copy_from_box: destinazione di default ~/Downloads/SandBot/<nome>', async () => {
+  it('copy_from_box: destinazione di default ~/Downloads/Homun/<nome>', async () => {
     // un file nel box (host) da portare sul Mac
     const boxFile = join(DATA, 'box', 'home', 'agent_c', 'report.md')
     mkdirSync(join(DATA, 'box', 'home', 'agent_c'), { recursive: true })
@@ -128,7 +128,7 @@ describe('prepareFileExchange: piano e rifiuti PRIMA della card', () => {
     expect(r.ok).toBe(true)
     // F7: il piano porta la forma CANONICA del tratto esistente (la temporanea
     // sta dietro il symlink /var → /private/var) con la coda nuova com'è
-    if (r.ok) expect(r.plan.macPath).toBe(join(realpathSync(join(MAC, 'Downloads')), 'SandBot', 'report.md'))
+    if (r.ok) expect(r.plan.macPath).toBe(join(realpathSync(join(MAC, 'Downloads')), 'Homun', 'report.md'))
   })
 
   it('copy_from_box verso cartella sensibile del Mac rifiutato', async () => {
@@ -214,14 +214,14 @@ describe('runFileExchange: copia reale su directory temporanee', () => {
     expect(readFileSync(join(DATA, 'box', 'home', 'agent_c', 'foto.jpg'), 'utf8')).toBe('byte-del-file')
     expect(r1.output).toContain('Copiato nel box')
     // from_box: sul Mac esiste GIÀ un file con lo stesso nome → nome alternativo
-    mkdirSync(join(MAC, 'Downloads', 'SandBot'), { recursive: true })
-    writeFileSync(join(MAC, 'Downloads', 'SandBot', 'report.md'), 'VECCHIO')
+    mkdirSync(join(MAC, 'Downloads', 'Homun'), { recursive: true })
+    writeFileSync(join(MAC, 'Downloads', 'Homun', 'report.md'), 'VECCHIO')
     const pre2 = await pure.prepareFileExchange('agent_c', 'copy_from_box', { box_path: 'report.md' }, { home: MAC })
     if (!pre2.ok) throw new Error('precheck fallito')
     const r2 = await pure.runFileExchange('agent_c', pre2.plan, { home: MAC })
     // il nome alternativo parte dal path CANONICO del piano (F7)
-    expect(r2.finalMacPath).toBe(join(realpathSync(join(MAC, 'Downloads')), 'SandBot', 'report (1).md'))
-    expect(readFileSync(join(MAC, 'Downloads', 'SandBot', 'report.md'), 'utf8')).toBe('VECCHIO') // intatto
+    expect(r2.finalMacPath).toBe(join(realpathSync(join(MAC, 'Downloads')), 'Homun', 'report (1).md'))
+    expect(readFileSync(join(MAC, 'Downloads', 'Homun', 'report.md'), 'utf8')).toBe('VECCHIO') // intatto
     expect(readFileSync(r2.finalMacPath!, 'utf8')).toBe('# report')
     expect(r2.output).toContain('esisteva già')
   })

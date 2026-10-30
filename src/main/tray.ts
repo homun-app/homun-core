@@ -48,7 +48,7 @@ export function refreshTray(): void {
     Menu.buildFromTemplate([
       ...items,
       { type: 'separator' as const },
-      { label: 'Apri SandBot', click: () => { const w = getWindow(); w?.show(); w?.focus() } },
+      { label: 'Apri Homun', click: () => { const w = getWindow(); w?.show(); w?.focus() } },
       { label: 'Esci', click: () => app.quit() }
     ])
   )
@@ -57,6 +57,6 @@ export function refreshTray(): void {
 export function createTray(getMainWindow: () => BrowserWindow | undefined): void {
   getWindow = getMainWindow
   tray = new Tray(icon())
-  tray.setToolTip('SandBot')
+  tray.setToolTip('Homun')
   refreshTray()
 }

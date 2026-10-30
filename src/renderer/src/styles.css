@@ -1,19 +1,280 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+/* font impacchettati (@fontsource-variable): l'app funziona offline e la CSP
+   (default-src 'self') resta invariata */
+@import "@fontsource-variable/bricolage-grotesque";
+@import "@fontsource-variable/figtree";
 
-/* palette scura stile originale */
-:root {
-  color-scheme: dark;
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Design system Homun (fase 16): i colori sono quelli del progetto Lovable
+ * "Bot & Motion Redesign", alla lettera. Il blocco @theme inline mappa le
+ * variabili CSS alle utility Tailwind (--color-primary → bg-primary, …).
+ * ATTENZIONE ALL'ORDINE: la palette crema sta nel :root, il blocco .dark va
+ * DOPO — in Lovable il secondo :root (crema) veniva dopo .dark e con la stessa
+ * specificità la crema vinceva anche in modalità scura (lì non c'è un
+ * interruttore, qui sì: il tema si cambia dal menu account).
+ */
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
+  --font-display: "Bricolage Grotesque Variable", "Bricolage Grotesque", system-ui, sans-serif;
+  --font-sans: "Figtree Variable", "Figtree", system-ui, sans-serif;
+  --shadow-soft: var(--shadow-soft);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-ring-offset-background: var(--background);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
 }
 
-body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-  overflow: hidden;
+/*
+ * Tema chiaro: palette crema (secondo :root di Lovable) sopra i token di
+ * default di shadcn NON sovrascritti (primo :root). I valori effettivi sono
+ * quelli della specifica; chart e sidebar (pallini di stato) arrivano dal
+ * primo :root perché Lovable non li sovrascrive.
+ */
+:root {
+  color-scheme: light;
+  --radius: 0.625rem;
+  /* palette crema (secondo :root di Lovable) */
+  --background: oklch(0.975 0.006 85);
+  --card: oklch(0.995 0.003 85);
+  --muted: oklch(0.94 0.008 85);
+  --muted-foreground: oklch(0.5 0.01 80);
+  --foreground: oklch(0.18 0.01 80);
+  --border: oklch(0.9 0.01 85);
+  /* token di default di shadcn NON sovrascritti da Lovable (primo :root) */
+  --card-foreground: oklch(0.129 0.042 264.695);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.129 0.042 264.695);
+  --primary: oklch(0.208 0.042 265.755);
+  --primary-foreground: oklch(0.984 0.003 247.858);
+  --secondary: oklch(0.968 0.007 247.896);
+  --secondary-foreground: oklch(0.208 0.042 265.755);
+  --accent: oklch(0.968 0.007 247.896);
+  --accent-foreground: oklch(0.208 0.042 265.755);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.984 0.003 247.858);
+  --input: oklch(0.929 0.013 255.508);
+  --ring: oklch(0.704 0.04 256.788);
+  --chart-1: oklch(0.646 0.222 41.116);
+  --chart-2: oklch(0.6 0.118 184.704);
+  --chart-3: oklch(0.398 0.07 227.392);
+  --chart-4: oklch(0.828 0.189 84.429);
+  --chart-5: oklch(0.769 0.188 70.08);
+  --sidebar: oklch(0.984 0.003 247.858);
+  --sidebar-foreground: oklch(0.129 0.042 264.695);
+  --sidebar-primary: oklch(0.208 0.042 265.755);
+  --sidebar-primary-foreground: oklch(0.984 0.003 247.858);
+  --sidebar-accent: oklch(0.968 0.007 247.896);
+  --sidebar-accent-foreground: oklch(0.208 0.042 265.755);
+  --sidebar-border: oklch(0.929 0.013 255.508);
+  --sidebar-ring: oklch(0.704 0.04 256.788);
+  /* mascotte e ombra (secondo :root di Lovable) */
+  --bot-ink: oklch(0.16 0.01 80);
+  --bot-screen: oklch(0.2 0.01 80);
+  --bot-blush: oklch(0.75 0.15 15);
+  --bot-c1: oklch(0.68 0.2 45);
+  --bot-c2: oklch(0.65 0.24 355);
+  --bot-c3: oklch(0.72 0.17 155);
+  --bot-c4: oklch(0.62 0.19 255);
+  --bot-c5: oklch(0.82 0.16 90);
+  --bot-c6: oklch(0.7 0.12 195);
+  --bot-c7: oklch(0.25 0.01 80);
+  --shadow-soft: 0 20px 50px -25px oklch(0.2 0.02 80 / 0.25);
+}
+
+/* Tema scuro: blocco .dark di Lovable copiato identico (DOPO il :root) */
+.dark {
+  color-scheme: dark;
+  --background: oklch(0.129 0.042 264.695);
+  --foreground: oklch(0.984 0.003 247.858);
+  --card: oklch(0.208 0.042 265.755);
+  --card-foreground: oklch(0.984 0.003 247.858);
+  --popover: oklch(0.208 0.042 265.755);
+  --popover-foreground: oklch(0.984 0.003 247.858);
+  --primary: oklch(0.929 0.013 255.508);
+  --primary-foreground: oklch(0.208 0.042 265.755);
+  --secondary: oklch(0.279 0.041 260.031);
+  --secondary-foreground: oklch(0.984 0.003 247.858);
+  --muted: oklch(0.279 0.041 260.031);
+  --muted-foreground: oklch(0.704 0.04 256.788);
+  --accent: oklch(0.279 0.041 260.031);
+  --accent-foreground: oklch(0.984 0.003 247.858);
+  --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: oklch(0.984 0.003 247.858);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.551 0.027 264.364);
+  --chart-1: oklch(0.488 0.243 264.376);
+  --chart-2: oklch(0.696 0.17 162.48);
+  --chart-3: oklch(0.769 0.188 70.08);
+  --chart-4: oklch(0.627 0.265 303.9);
+  --chart-5: oklch(0.645 0.246 16.439);
+  --sidebar: oklch(0.208 0.042 265.755);
+  --sidebar-foreground: oklch(0.984 0.003 247.858);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.984 0.003 247.858);
+  --sidebar-accent: oklch(0.279 0.041 260.031);
+  --sidebar-accent-foreground: oklch(0.984 0.003 247.858);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.551 0.027 264.364);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    overflow: hidden;
+  }
 }
 
 .scroll-thin::-webkit-scrollbar {
   width: 6px;
 }
 .scroll-thin::-webkit-scrollbar-thumb {
-  background: #2a2f36;
+  background: var(--color-muted-foreground);
+  opacity: 0.4;
   border-radius: 3px;
+}
+
+/* ---------- Bot animations (da Lovable, identiche) ---------- */
+.bot { position: relative; display: grid; place-items: center; }
+.bot-svg { animation: bot-breathe 3.6s ease-in-out infinite; transform-origin: 50% 90%; }
+.bot--speaking .bot-svg { animation: bot-speak .45s ease-in-out infinite; }
+.bot--happy .bot-svg { animation: bot-hop .7s cubic-bezier(.3,1.6,.5,1) infinite; }
+.bot--thinking .bot-svg { animation: bot-tilt 2.4s ease-in-out infinite; }
+.bot--cloud .bot-svg { animation-name: bot-float; animation-duration: 4s; }
+.bot--cloud.bot--happy .bot-svg { animation: bot-hop .7s cubic-bezier(.3,1.6,.5,1) infinite; }
+
+.bot-blink { animation: bot-blink 4.5s infinite; }
+.bot-talk { animation: bot-talk .25s ease-in-out infinite alternate; }
+.bot-dot { animation: bot-dot 1s ease-in-out infinite; }
+.bot-ring { transform-origin: 50px 50px; animation: bot-spin 6s linear infinite; }
+.bot--thinking .bot-ring { animation-duration: 1.4s; }
+.bot-antenna { animation: bot-antenna 1.6s ease-in-out infinite; }
+.bot--speaking .bot-antenna, .bot--listening .bot-antenna { animation-duration: .4s; }
+.bot-puff { transform-origin: 50px 60px; animation: bot-puff 3s ease-in-out infinite; }
+.bot-pixel-grid rect { animation: bot-pixel 2.4s ease-in-out infinite; }
+.bot--thinking .bot-pixel-grid rect { animation-duration: .9s; }
+.bot-draw { stroke-dasharray: 230; animation: bot-draw 3s ease-in-out infinite; }
+.bot-wave { position: absolute; inset: 10%; border-radius: 9999px; border: 2px solid; opacity: 0; animation: bot-wave 1.2s ease-out infinite; }
+
+@keyframes bot-breathe { 0%,100% { transform: scale(1,1); } 50% { transform: scale(1.03,.97); } }
+@keyframes bot-float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-6%); } }
+@keyframes bot-speak { 0%,100% { transform: scale(1); } 50% { transform: scale(1.05,.95); } }
+@keyframes bot-hop { 0%,100% { transform: translateY(0) scale(1); } 40% { transform: translateY(-12%) scale(.96,1.05); } 80% { transform: translateY(0) scale(1.06,.94); } }
+@keyframes bot-tilt { 0%,100% { transform: rotate(-4deg); } 50% { transform: rotate(4deg); } }
+@keyframes bot-blink { 0%,92%,100% { transform: scaleY(1); } 95% { transform: scaleY(.1); } }
+@keyframes bot-talk { from { transform: scaleY(.3); } to { transform: scaleY(1.2); } }
+@keyframes bot-dot { 0%,100% { transform: translateY(0); opacity: .3; } 50% { transform: translateY(-3px); opacity: 1; } }
+@keyframes bot-spin { to { transform: rotate(360deg); } }
+@keyframes bot-antenna { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+@keyframes bot-puff { 0%,100% { transform: scale(1); } 50% { transform: scale(1.04,.98); } }
+@keyframes bot-pixel { 0%,100% { opacity: 1; } 50% { opacity: .65; } }
+@keyframes bot-draw { 0% { stroke-dashoffset: 230; } 50%,100% { stroke-dashoffset: 0; } }
+@keyframes bot-wave { 0% { transform: scale(.8); opacity: .7; } 100% { transform: scale(1.5); opacity: 0; } }
+
+/* homun */
+.hm-ear { animation: hm-ear 2.4s ease-in-out infinite; }
+.hm-ear--l { transform-origin: 36px 34px; }
+.hm-ear--r { transform-origin: 64px 34px; animation-delay: .3s; }
+.bot--listening .hm-ear { animation-duration: .6s; }
+.bot--thinking .hm-ear--l { animation: hm-ear-droop 2.2s ease-in-out infinite; }
+.bot--happy .hm-ear { animation-duration: .35s; }
+.hm-antenna { transform-origin: 50px 22px; animation: hm-ear 1.8s ease-in-out infinite; }
+.bot--speaking .hm-antenna, .bot--listening .hm-antenna { animation-duration: .4s; }
+.hm-hand { transition: transform .4s cubic-bezier(.3,1.6,.5,1); animation: hm-hand 2.6s ease-in-out infinite; }
+.hm-hand--r { animation-delay: .5s; }
+.bot--speaking .hm-hand { animation-duration: .5s; }
+.bot--happy .hm-hand { animation: hm-wave .4s ease-in-out infinite alternate; }
+.hm-scan { animation: hm-scan 2.4s linear infinite; }
+.bot--thinking .hm-scan { animation-duration: .8s; }
+.hm-foot { transform-box: fill-box; transform-origin: center; animation: hm-foot 1.8s ease-in-out infinite; }
+.bot--happy .hm-foot { animation-duration: .35s; }
+@keyframes hm-ear { 0%,100% { transform: rotate(-8deg); } 50% { transform: rotate(8deg) scaleY(.92); } }
+@keyframes hm-ear-droop { 0%,100% { transform: rotate(-30deg); } 50% { transform: rotate(-20deg); } }
+@keyframes hm-hand { 0%,100% { translate: 0 0; } 50% { translate: 0 -6px; } }
+@keyframes hm-wave { from { translate: 0 0; } to { translate: 0 -12px; } }
+@keyframes hm-scan { 0% { translate: 0 0; } 100% { translate: 0 34px; } }
+@keyframes hm-foot { 0%,100% { transform: scale(1,1); } 50% { transform: scale(1.15,.8); } }
+
+/* ---------- sesto stato: waiting ("Aspetta te") ---------- */
+/* il corpo si sporge leggermente in avanti, come chi si sporge per chiedere */
+.bot--waiting .bot-svg { animation: bot-wait 2.2s ease-in-out infinite; }
+@keyframes bot-wait { 0%,100% { transform: translateY(0) scale(1,1); } 50% { transform: translateY(-3%) scale(1.02,.98); } }
+/* Creatura: orecchie dritte e ferme in waiting (nessuna oscillazione) */
+.bot--waiting .hm-ear { animation: none; transform: rotate(0deg); }
+/* Robottino: in waiting l'antenna è ferma, la pallina pulsa (opacity 1 → .4) */
+.bot--waiting .hm-antenna { animation: none; transform: rotate(0deg) translateY(0); }
+.bot--waiting .hm-antenna-ball { animation: bot-attn-pulse 1.2s ease-in-out infinite; }
+@keyframes bot-attn-pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
+/* Tech: la scansione dello schermo è ferma */
+.bot--waiting .hm-scan { animation: none; translate: 0 0; }
+/* pallino di attenzione: 18% della dimensione, in alto a destra fuori dall'SVG */
+.bot-attn {
+  position: absolute;
+  top: -4%;
+  right: -4%;
+  width: 18%;
+  height: 18%;
+  border-radius: 9999px;
+  border: 2px solid var(--background);
+  opacity: 0;
+  animation: bot-wave 1.6s ease-out infinite;
+}
+
+/* bot offline: spento e fermo */
+.bot--dimmed { filter: grayscale(1); opacity: .55; }
+
+/* finestra nascosta (minimizzata o in altro spazio): le animazioni CSS si
+   fermano (lo SMIL lo ferma il componente con svg.pauseAnimations()) —
+   un'app che resta aperta tutto il giorno non consuma CPU per l'invisibile */
+.bots-paused .bot, .bots-paused .bot * { animation-play-state: paused !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  .bot *, .bot-svg { animation: none !important; }
+  /* il pallino di attenzione resta visibile, solo senza pulsazione */
+  .bot-attn { animation: none; opacity: 1; }
 }

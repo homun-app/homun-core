@@ -21,7 +21,7 @@ type PluginMessage = Extract<
 function UntrustedBanner({ show }: { show: boolean }) {
   if (!show) return null
   return (
-    <p className="mb-2 rounded-lg bg-amber-900/30 px-2 py-1 text-[11px] text-amber-300">
+    <p className="mb-2 rounded-lg bg-destructive/15 px-2 py-1 text-[11px] text-destructive">
       Proposta fatta dopo aver letto contenuti esterni: controlla che sia quello che volevi
     </p>
   )
@@ -64,42 +64,42 @@ export function McpServerCard({ entry }: { entry: TranscriptEntry }) {
       : `nel box: ${message.runtime.command}`
 
   return (
-    <div className="max-w-[92%] rounded-xl border border-sky-800/50 bg-sky-950/20 px-4 py-3">
+    <div className="max-w-[75%] rounded-2xl rounded-bl-md border border-border bg-card px-4 py-3 shadow-soft">
       <UntrustedBanner show={message.untrusted === true} />
-      <div className="flex items-center gap-2 text-sm text-neutral-100">
+      <div className="flex items-center gap-2 text-sm text-foreground">
         <span className="font-medium">Aggiungi server MCP: {message.name}</span>
-        {message.publisher && <span className="text-xs text-neutral-500">{message.publisher}</span>}
+        {message.publisher && <span className="text-xs text-muted-foreground">{message.publisher}</span>}
       </div>
-      <p className="mt-1 text-xs text-neutral-400">fiducia: {message.trust} · come gira: {runtime}</p>
+      <p className="mt-1 text-xs text-muted-foreground">fiducia: {message.trust} · come gira: {runtime}</p>
       {message.siteUrl && (
-        <a className="mt-0.5 block truncate text-[11px] text-sky-400 hover:underline" href={message.siteUrl} target="_blank" rel="noreferrer">{message.siteUrl}</a>
+        <a className="mt-0.5 block truncate text-[11px] text-primary hover:underline" href={message.siteUrl} target="_blank" rel="noreferrer">{message.siteUrl}</a>
       )}
-      <p className="mt-1 text-xs text-neutral-400">serve: {needs}</p>
+      <p className="mt-1 text-xs text-muted-foreground">serve: {needs}</p>
       {message.thirdPartyWarning && (
-        <p className="mt-1 rounded-lg bg-amber-900/30 px-2 py-1 text-[11px] text-amber-300">
+        <p className="mt-1 rounded-lg bg-destructive/15 px-2 py-1 text-[11px] text-destructive">
           Server pubblicato da terzi: può leggere e fare quello che gli permettono i suoi strumenti
         </p>
       )}
-      {message.reason && <p className="mt-1 text-sm text-neutral-300">{message.reason}</p>}
+      {message.reason && <p className="mt-1 text-sm text-foreground">{message.reason}</p>}
       {message.disabledReason ? (
-        <p className="mt-2 text-xs text-neutral-500">
-          {message.disabledReason} — <button className="text-neutral-400 underline hover:text-neutral-200" onClick={() => void api.connectorsResolveMcpServer(entry.agentId, entry.id, 'no').catch(() => undefined)}>No</button>
+        <p className="mt-2 text-xs text-muted-foreground">
+          {message.disabledReason} — <button className="text-muted-foreground underline hover:text-foreground" onClick={() => void api.connectorsResolveMcpServer(entry.agentId, entry.id, 'no').catch(() => undefined)}>No</button>
         </p>
       ) : status === 'installed' ? (
-        <p className="mt-2 text-xs text-emerald-400">✓ Aggiunto — il bot ha ricevuto l'esito</p>
+        <p className="mt-2 text-xs text-chart-2">✓ Aggiunto — il bot ha ricevuto l'esito</p>
       ) : status === 'error' ? (
-        <p className="mt-2 text-xs text-red-400">✕ {error} — <button className="underline" onClick={() => void api.connectorsResolveMcpServer(entry.agentId, entry.id, 'no').catch(() => undefined)}>chiudi</button></p>
+        <p className="mt-2 text-xs text-destructive">✕ {error} — <button className="underline" onClick={() => void api.connectorsResolveMcpServer(entry.agentId, entry.id, 'no').catch(() => undefined)}>chiudi</button></p>
       ) : (
         <div className="mt-2 flex items-center gap-2">
           <button
-            className="rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-500 disabled:opacity-50"
+            className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-primary/90 disabled:opacity-50"
             disabled={status === 'installing'}
             onClick={() => void add()}
           >
             {status === 'installing' ? 'Aggiungo…' : 'Aggiungi'}
           </button>
           <button
-            className="rounded-lg border border-neutral-700 px-3 py-1.5 text-xs text-neutral-400 hover:text-neutral-200"
+            className="rounded-lg border border-border px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground"
             disabled={status === 'installing'}
             onClick={() => void api.connectorsResolveMcpServer(entry.agentId, entry.id, 'no').catch(() => undefined)}
           >
@@ -135,46 +135,46 @@ export function PluginCard({ entry }: { entry: TranscriptEntry }) {
   }
 
   return (
-    <div className="max-w-[92%] rounded-xl border border-sky-800/50 bg-sky-950/20 px-4 py-3">
+    <div className="max-w-[75%] rounded-2xl rounded-bl-md border border-border bg-card px-4 py-3 shadow-soft">
       <UntrustedBanner show={message.untrusted === true} />
-      <div className="flex items-center gap-2 text-sm text-neutral-100">
+      <div className="flex items-center gap-2 text-sm text-foreground">
         <span className="font-medium">Installa plugin: {message.name}</span>
-        <span className="text-xs text-neutral-500">{message.marketplace}</span>
+        <span className="text-xs text-muted-foreground">{message.marketplace}</span>
       </div>
-      <p className="mt-1 text-xs text-neutral-400">
+      <p className="mt-1 text-xs text-muted-foreground">
         fiducia: {message.trust} · commit {message.sha12}
-        {message.repoUrl && <> · <a className="text-sky-400 hover:underline" href={message.repoUrl} target="_blank" rel="noreferrer">repository</a></>}
+        {message.repoUrl && <> · <a className="text-primary hover:underline" href={message.repoUrl} target="_blank" rel="noreferrer">repository</a></>}
       </p>
       {message.skills.length > 0 && (
-        <p className="mt-1 text-xs text-neutral-400">skill: {message.skills.join(', ')}</p>
+        <p className="mt-1 text-xs text-muted-foreground">skill: {message.skills.join(', ')}</p>
       )}
       {message.servers.length > 0 && (
-        <p className="mt-0.5 text-xs text-neutral-400">
+        <p className="mt-0.5 text-xs text-muted-foreground">
           server: {message.servers.map((s) => `${s.name} (${s.runtimeLabel})`).join(', ')}
         </p>
       )}
       {message.settings.length > 0 && (
-        <p className="mt-0.5 text-xs text-neutral-400">da configurare: {message.settings.map((s) => s.key).join(', ')} (Impostazioni)</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">da configurare: {message.settings.map((s) => s.key).join(', ')} (Impostazioni)</p>
       )}
       {message.ignored.length > 0 && (
-        <p className="mt-1 text-[11px] text-neutral-500">Non importati (non girano in SandBot): {message.ignored.join(', ')}</p>
+        <p className="mt-1 text-[11px] text-muted-foreground">Non importati (non girano in Homun): {message.ignored.join(', ')}</p>
       )}
-      {message.reason && <p className="mt-1 text-sm text-neutral-300">{message.reason}</p>}
+      {message.reason && <p className="mt-1 text-sm text-foreground">{message.reason}</p>}
       {status === 'installed' ? (
-        <p className="mt-2 text-xs text-emerald-400">✓ Installato — il bot ha ricevuto l'esito</p>
+        <p className="mt-2 text-xs text-chart-2">✓ Installato — il bot ha ricevuto l'esito</p>
       ) : status === 'error' ? (
-        <p className="mt-2 text-xs text-red-400">✕ {error} — <button className="underline" onClick={() => void api.pluginsResolve(entry.agentId, entry.id, 'no').catch(() => undefined)}>chiudi</button></p>
+        <p className="mt-2 text-xs text-destructive">✕ {error} — <button className="underline" onClick={() => void api.pluginsResolve(entry.agentId, entry.id, 'no').catch(() => undefined)}>chiudi</button></p>
       ) : (
         <div className="mt-2 flex items-center gap-2">
           <button
-            className="rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-500 disabled:opacity-50"
+            className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-primary/90 disabled:opacity-50"
             disabled={status === 'installing'}
             onClick={() => void install()}
           >
             {status === 'installing' ? 'Installo…' : 'Installa'}
           </button>
           <button
-            className="rounded-lg border border-neutral-700 px-3 py-1.5 text-xs text-neutral-400 hover:text-neutral-200"
+            className="rounded-lg border border-border px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground"
             disabled={status === 'installing'}
             onClick={() => void api.pluginsResolve(entry.agentId, entry.id, 'no').catch(() => undefined)}
           >

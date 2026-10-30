@@ -36,21 +36,21 @@ export function ConnectorCard({ entry }: { entry: TranscriptEntry }) {
   }
 
   return (
-    <div className="max-w-[92%] rounded-xl border border-sky-800/50 bg-sky-950/20 px-4 py-3">
-      <div className="flex items-center gap-2 text-sm text-neutral-100">
+    <div className="max-w-[75%] rounded-2xl rounded-bl-md border border-border bg-card px-4 py-3 shadow-soft">
+      <div className="flex items-center gap-2 text-sm text-foreground">
         <span className="text-base">{connectors.find((c) => c.id === message.connectorId)?.logo ?? '🔌'}</span>
         <span className="font-medium">{message.name ?? message.connectorId}</span>
-        {needsAuth && <span className="rounded bg-amber-900/40 px-1.5 py-0.5 text-[10px] text-amber-300">token scaduto</span>}
+        {needsAuth && <span className="rounded bg-destructive/15 px-1.5 py-0.5 text-[10px] text-destructive">token scaduto</span>}
       </div>
-      {message.reason && <p className="mt-1 text-sm text-neutral-300">{message.reason}</p>}
+      {message.reason && <p className="mt-1 text-sm text-foreground">{message.reason}</p>}
       {needsAuth && !entry.meta?.connected && (
-        <p className="mt-1 text-xs text-neutral-500">Il bot ha provato a usare questa app ma la sessione è scaduta.</p>
+        <p className="mt-1 text-xs text-muted-foreground">Il bot ha provato a usare questa app ma la sessione è scaduta.</p>
       )}
       {status === 'connected' ? (
-        <p className="mt-2 text-xs text-emerald-400">✓ Connesso — il bot può usarlo</p>
+        <p className="mt-2 text-xs text-chart-2">✓ Connesso — il bot può usarlo</p>
       ) : (
         <button
-          className="mt-2 rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-500 disabled:opacity-50"
+          className="mt-2 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-primary/90 disabled:opacity-50"
           disabled={status === 'connecting' || status === 'failed'}
           onClick={() => void connect()}
         >

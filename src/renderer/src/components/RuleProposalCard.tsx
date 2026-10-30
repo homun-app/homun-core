@@ -14,26 +14,26 @@ export function RuleProposalCard({ entry }: { entry: TranscriptEntry }) {
   const decided = meta.ruleStatus
 
   return (
-    <div className="max-w-[92%] rounded-2xl rounded-bl-md border border-teal-700/40 bg-teal-950/10 px-4 py-3">
-      <p className="text-xs font-medium text-teal-300/90">
+    <div className="max-w-[75%] rounded-2xl rounded-bl-md border border-border bg-card px-4 py-3 shadow-soft">
+      <p className="text-xs font-medium text-chart-2/90">
         {rule.kind === 'allow' ? '⚡ Regola proposta — continuo da solo quando…' : '⛔ Regola proposta — mi fermo e chiedo sempre quando…'}
       </p>
-      <p className="mt-1 whitespace-pre-wrap text-sm text-neutral-100">{rule.text}</p>
-      {rule.why && <p className="mt-1 text-xs text-neutral-400">{rule.why}</p>}
+      <p className="mt-1 whitespace-pre-wrap text-sm text-foreground">{rule.text}</p>
+      {rule.why && <p className="mt-1 text-xs text-muted-foreground">{rule.why}</p>}
       {decided ? (
-        <p className="mt-2 text-xs text-neutral-500">
+        <p className="mt-2 text-xs text-muted-foreground">
           {decided === 'added' ? '✓ Regola aggiunta (revocabile da Impostazioni → Approvazione automatica)' : 'Proposta ignorata'}
         </p>
       ) : (
         <div className="mt-3 flex gap-2">
           <button
-            className="rounded-lg bg-teal-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-teal-600"
+            className="rounded-lg bg-foreground px-3 py-1.5 text-xs font-medium text-background hover:opacity-90"
             onClick={() => decide(entry.id, 'add')}
           >
             Aggiungi regola
           </button>
           <button
-            className="rounded-lg bg-neutral-800 px-3 py-1.5 text-xs text-neutral-200 hover:bg-neutral-700"
+            className="rounded-lg bg-muted px-3 py-1.5 text-xs text-foreground hover:bg-accent"
             onClick={() => decide(entry.id, 'dismiss')}
           >
             Ignora

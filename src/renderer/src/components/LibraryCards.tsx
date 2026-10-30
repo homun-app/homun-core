@@ -16,11 +16,11 @@ export function DocumentCard({ entry }: { entry: TranscriptEntry }) {
   const doc = m.message as Extract<SendMessagePayload, { type: 'document' }> | undefined
   if (!doc) return null
   return (
-    <div className="max-w-[92%] rounded-2xl rounded-bl-md border border-emerald-800/50 bg-emerald-950/20 px-4 py-3">
-      <p className="text-[10px] font-medium uppercase tracking-wide text-emerald-300/80">Documento in libreria</p>
-      <p className="mt-1 text-sm text-neutral-100">{doc.title} <span className="text-neutral-500">v{doc.version}</span></p>
+    <div className="max-w-[75%] rounded-2xl rounded-bl-md border border-chart-2/40 bg-chart-2/10 px-4 py-3 shadow-soft">
+      <p className="text-[10px] font-medium uppercase tracking-wide text-chart-2/80">Documento in libreria</p>
+      <p className="mt-1 text-sm text-foreground">{doc.title} <span className="text-muted-foreground">v{doc.version}</span></p>
       <button
-        className="mt-2 rounded-lg border border-emerald-500 bg-emerald-700/60 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-600"
+        className="mt-2 rounded-lg border border-chart-2 bg-chart-2 px-3 py-1.5 text-xs font-medium text-white hover:bg-chart-2/90"
         onClick={() => openLibrary(doc.id)}
       >
         Apri
@@ -36,11 +36,11 @@ export function ChartCard({ entry }: { entry: TranscriptEntry }) {
   const chart = m.message as Extract<SendMessagePayload, { type: 'chart' }> | undefined
   if (!chart) return null
   return (
-    <div className="max-w-[92%] rounded-2xl rounded-bl-md border border-emerald-800/50 bg-emerald-950/20 px-4 py-3">
-      <p className="text-[10px] font-medium uppercase tracking-wide text-emerald-300/80">Grafico in libreria</p>
-      <p className="mt-1 text-sm text-neutral-100">{chart.title}</p>
+    <div className="max-w-[75%] rounded-2xl rounded-bl-md border border-chart-2/40 bg-chart-2/10 px-4 py-3 shadow-soft">
+      <p className="text-[10px] font-medium uppercase tracking-wide text-chart-2/80">Grafico in libreria</p>
+      <p className="mt-1 text-sm text-foreground">{chart.title}</p>
       <button
-        className="mt-2 rounded-lg border border-emerald-500 bg-emerald-700/60 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-600"
+        className="mt-2 rounded-lg border border-chart-2 bg-chart-2 px-3 py-1.5 text-xs font-medium text-white hover:bg-chart-2/90"
         onClick={() => openLibrary(chart.id)}
       >
         Apri
@@ -62,30 +62,30 @@ export function FillCard({ entry }: { entry: TranscriptEntry }) {
   if (!fill || !activeId) return null
   const done = m.status && m.status !== 'pending'
   return (
-    <div className="max-w-[92%] rounded-2xl rounded-bl-md border border-amber-800/50 bg-amber-950/20 px-4 py-3">
-      <p className="text-[10px] font-medium uppercase tracking-wide text-amber-300/80">Compilazione login</p>
-      <p className="mt-1 text-sm text-neutral-100">
+    <div className="max-w-[75%] rounded-2xl rounded-bl-md border border-destructive/40 bg-destructive/10 px-4 py-3 shadow-soft">
+      <p className="text-[10px] font-medium uppercase tracking-wide text-destructive/80">Compilazione login</p>
+      <p className="mt-1 text-sm text-foreground">
         Compilo il login «{fill.label}» su <span className="font-mono text-xs">{fill.origin}</span>?
       </p>
-      <p className="mt-1 text-xs text-neutral-400">Campi: {fill.fields.join(', ')}</p>
+      <p className="mt-1 text-xs text-muted-foreground">Campi: {fill.fields.join(', ')}</p>
       {done ? (
-        <p className="mt-2 text-xs text-neutral-500">{m.status === 'allowed' ? '✓ consentito' : m.status === 'denied' ? 'negato' : 'scaduto'}</p>
+        <p className="mt-2 text-xs text-muted-foreground">{m.status === 'allowed' ? '✓ consentito' : m.status === 'denied' ? 'negato' : 'scaduto'}</p>
       ) : (
         <div className="mt-3 flex gap-2">
           <button
-            className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-500"
+            className="rounded-lg bg-destructive px-3 py-1.5 text-xs font-medium text-white hover:bg-destructive/90"
             onClick={() => resolveApproval(m.approvalId!, 'allow', 'turn')}
           >
             Consenti
           </button>
           <button
-            className="rounded-lg border border-amber-600 px-3 py-1.5 text-xs text-amber-300 hover:bg-amber-900/40"
+            className="rounded-lg border border-destructive/60 px-3 py-1.5 text-xs text-destructive hover:bg-destructive/10"
             onClick={() => resolveApproval(m.approvalId!, 'allow', 'always')}
           >
             Sempre per questo sito
           </button>
           <button
-            className="rounded-lg px-3 py-1.5 text-xs text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200"
+            className="rounded-lg px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
             onClick={() => resolveApproval(m.approvalId!, 'deny', 'once')}
           >
             Nega
@@ -133,50 +133,50 @@ export function SecureInputCard({ entry }: { entry: TranscriptEntry }) {
     setBusy(false)
   }
   return (
-    <div className="max-w-[92%] rounded-2xl rounded-bl-md border border-sky-800/50 bg-sky-950/20 px-4 py-3">
-      <p className="text-[10px] font-medium uppercase tracking-wide text-sky-300/80">Modulo sicuro — {card.kind === 'login' ? 'login' : 'secret'}</p>
-      <p className="mt-1 text-sm text-neutral-100">{card.reason}</p>
+    <div className="max-w-[75%] rounded-2xl rounded-bl-md border border-border bg-card px-4 py-3 shadow-soft">
+      <p className="text-[10px] font-medium uppercase tracking-wide text-primary/80">Modulo sicuro — {card.kind === 'login' ? 'login' : 'secret'}</p>
+      <p className="mt-1 text-sm text-foreground">{card.reason}</p>
       {/* P5 (fase 14 correzioni): la richiesta nasce dopo contenuti letti dal
           web — l'utente controlla l'origine PRIMA di compilare, ed è in evidenza */}
       {card.untrusted && (
-        <p className="mt-2 rounded-lg border border-amber-700/60 bg-amber-950/30 px-2 py-1.5 text-xs text-amber-300">
+        <p className="mt-2 rounded-lg border border-destructive/40 bg-destructive/10 px-2 py-1.5 text-xs text-destructive">
           ⚠ Richiesta nata dopo contenuti letti dal web: controlla che l'origine sia davvero quella del sito.
         </p>
       )}
       {done ? (
-        <p className="mt-2 text-xs text-neutral-500">{m.status === 'allowed' ? '✓ salvato nel vault' : 'annullato'}</p>
+        <p className="mt-2 text-xs text-muted-foreground">{m.status === 'allowed' ? '✓ salvato nel vault' : 'annullato'}</p>
       ) : (
         <div className="mt-3 space-y-2">
           {card.kind === 'login' ? (
             <>
-              <input className="w-full rounded-lg bg-neutral-900 px-3 py-1.5 text-sm outline-none" placeholder="Etichetta (es. Portale ASPI)" value={label} onChange={(e) => setLabel(e.target.value)} />
+              <input className="w-full rounded-lg bg-muted px-3 py-1.5 text-sm outline-none" placeholder="Etichetta (es. Portale ASPI)" value={label} onChange={(e) => setLabel(e.target.value)} />
               <input
-                className={`w-full rounded-lg px-3 py-1.5 text-sm outline-none ${card.untrusted ? 'border border-amber-600 bg-amber-950/20 text-amber-200' : 'bg-neutral-900'}`}
+                className={`w-full rounded-lg px-3 py-1.5 text-sm outline-none ${card.untrusted ? 'border border-destructive bg-destructive/10 text-destructive' : 'bg-muted'}`}
                 placeholder="Origine https://…"
                 value={origin}
                 onChange={(e) => setOrigin(e.target.value)}
               />
-              <input type="password" autoComplete="off" className="w-full rounded-lg bg-neutral-900 px-3 py-1.5 text-sm outline-none" placeholder="Nome utente" value={username} onChange={(e) => setUsername(e.target.value)} />
-              <input type="password" autoComplete="new-password" className="w-full rounded-lg bg-neutral-900 px-3 py-1.5 text-sm outline-none" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} />
-              <input type="password" autoComplete="off" className="w-full rounded-lg bg-neutral-900 px-3 py-1.5 text-sm outline-none" placeholder="Segreto TOTP (opzionale)" value={totp} onChange={(e) => setTotp(e.target.value)} />
+              <input type="password" autoComplete="off" className="w-full rounded-lg bg-muted px-3 py-1.5 text-sm outline-none" placeholder="Nome utente" value={username} onChange={(e) => setUsername(e.target.value)} />
+              <input type="password" autoComplete="new-password" className="w-full rounded-lg bg-muted px-3 py-1.5 text-sm outline-none" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} />
+              <input type="password" autoComplete="off" className="w-full rounded-lg bg-muted px-3 py-1.5 text-sm outline-none" placeholder="Segreto TOTP (opzionale)" value={totp} onChange={(e) => setTotp(e.target.value)} />
             </>
           ) : (
             <>
-              <input className="w-full rounded-lg bg-neutral-900 px-3 py-1.5 text-sm outline-none" placeholder="Nome (es. API_KEY)" value={name} onChange={(e) => setName(e.target.value)} />
-              <input type="password" autoComplete="new-password" className="w-full rounded-lg bg-neutral-900 px-3 py-1.5 text-sm outline-none" placeholder="Valore" value={value} onChange={(e) => setValue(e.target.value)} />
+              <input className="w-full rounded-lg bg-muted px-3 py-1.5 text-sm outline-none" placeholder="Nome (es. API_KEY)" value={name} onChange={(e) => setName(e.target.value)} />
+              <input type="password" autoComplete="new-password" className="w-full rounded-lg bg-muted px-3 py-1.5 text-sm outline-none" placeholder="Valore" value={value} onChange={(e) => setValue(e.target.value)} />
             </>
           )}
-          {err && <p className="text-xs text-red-400">{err}</p>}
+          {err && <p className="text-xs text-destructive">{err}</p>}
           <div className="flex gap-2">
             <button
-              className="rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-500 disabled:opacity-40"
+              className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-primary/90 disabled:opacity-40"
               disabled={busy || (card.kind === 'login' ? !origin || !username || !password : !name || !value)}
               onClick={() => void submit()}
             >
               Salva nel vault
             </button>
             <button
-              className="rounded-lg px-3 py-1.5 text-xs text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200"
+              className="rounded-lg px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
               onClick={() => useStore.getState().resolveApproval(m.approvalId!, 'deny', 'once')}
             >
               Annulla
@@ -200,26 +200,26 @@ export function ContactCard({ entry }: { entry: TranscriptEntry }) {
   if (!card || !activeId) return null
   const done = m.status && m.status !== 'pending'
   return (
-    <div className="max-w-[92%] rounded-2xl rounded-bl-md border border-teal-800/50 bg-teal-950/20 px-4 py-3">
-      <p className="text-[10px] font-medium uppercase tracking-wide text-teal-300/80">Contatto da salvare nel vault</p>
-      {card.untrusted && <p className="mt-1 text-xs text-amber-400/90">⚠ dati letti da una fonte esterna</p>}
-      <p className="mt-1 text-sm text-neutral-100">{card.name}</p>
-      {card.emails.length > 0 && <p className="text-xs text-neutral-400">{card.emails.join(', ')}</p>}
-      {card.phones.length > 0 && <p className="text-xs text-neutral-400">{card.phones.join(', ')}</p>}
-      {card.address && <p className="text-xs text-neutral-400">{card.address}</p>}
-      {card.notes && <p className="text-xs text-neutral-500">{card.notes}</p>}
+    <div className="max-w-[75%] rounded-2xl rounded-bl-md border border-border bg-card px-4 py-3 shadow-soft">
+      <p className="text-[10px] font-medium uppercase tracking-wide text-chart-2">Contatto da salvare nel vault</p>
+      {card.untrusted && <p className="mt-1 text-xs text-destructive/90">⚠ dati letti da una fonte esterna</p>}
+      <p className="mt-1 text-sm text-foreground">{card.name}</p>
+      {card.emails.length > 0 && <p className="text-xs text-muted-foreground">{card.emails.join(', ')}</p>}
+      {card.phones.length > 0 && <p className="text-xs text-muted-foreground">{card.phones.join(', ')}</p>}
+      {card.address && <p className="text-xs text-muted-foreground">{card.address}</p>}
+      {card.notes && <p className="text-xs text-muted-foreground">{card.notes}</p>}
       {done ? (
-        <p className="mt-2 text-xs text-neutral-500">{m.status === 'allowed' ? '✓ salvato' : 'non salvato'}</p>
+        <p className="mt-2 text-xs text-muted-foreground">{m.status === 'allowed' ? '✓ salvato' : 'non salvato'}</p>
       ) : (
         <div className="mt-3 flex gap-2">
           <button
-            className="rounded-lg bg-teal-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-teal-500"
+            className="rounded-lg bg-foreground px-3 py-1.5 text-xs font-medium text-background hover:opacity-90"
             onClick={() => resolveApproval(m.approvalId!, 'allow', 'once')}
           >
             Salva
           </button>
           <button
-            className="rounded-lg px-3 py-1.5 text-xs text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200"
+            className="rounded-lg px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
             onClick={() => resolveApproval(m.approvalId!, 'deny', 'once')}
           >
             Non salvare

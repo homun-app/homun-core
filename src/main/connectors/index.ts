@@ -274,7 +274,7 @@ export function createConnectorsManager(deps: ConnectorsManagerDeps) {
       // connessione riparte quando l'utente apre l'app
       if (!deps.hasUi() && !(await deps.store.read(entry.id, 'oauth.tokens'))) {
         pendingAuth.set(entry.id, entry)
-        setState(entry.id, { status: 'needs_auth', error: 'Apri la finestra di SandBot per autorizzare' })
+        setState(entry.id, { status: 'needs_auth', error: 'Apri la finestra di Homun per autorizzare' })
         return { status: 'needs_auth', message: 'finestra chiusa: autorizzazione rinviata' }
       }
       try {

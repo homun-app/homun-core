@@ -34,12 +34,12 @@ export function ApprovalCard({ entry }: { entry: TranscriptEntry }) {
   // fase 8: auto-approvata dall'auto-review — compressa, espandibile
   if (entry.meta?.autoApproved) {
     return (
-      <details className="rounded-xl border border-emerald-700/40 bg-emerald-950/10 px-4 py-2">
-        <summary className="cursor-pointer select-none text-xs text-emerald-300/90">
+      <details className="rounded-2xl border border-chart-2/40 bg-chart-2/10 px-4 py-2">
+        <summary className="cursor-pointer select-none text-xs text-chart-2/90">
           ⚡ Approvato automaticamente dalla regola: {String(entry.meta?.ruleMatched ?? '')}
-          {entry.meta?.reason ? <span className="text-neutral-500"> — {String(entry.meta.reason)}</span> : null}
+          {entry.meta?.reason ? <span className="text-muted-foreground"> — {String(entry.meta.reason)}</span> : null}
         </summary>
-        <div className="mt-2 font-mono text-[11px] text-neutral-400">
+        <div className="mt-2 font-mono text-[11px] text-muted-foreground">
           {tool} {entry.content && entry.content !== tool ? `— ${entry.content}` : ''}
         </div>
       </details>
@@ -62,39 +62,39 @@ export function ApprovalCard({ entry }: { entry: TranscriptEntry }) {
   const noTurn = noAlways || entry.meta?.neverAuto === true
 
   return (
-    <div className="rounded-xl border border-orange-500/40 bg-orange-500/5 px-4 py-3">
-      <div className="flex items-center gap-2 text-sm font-medium text-orange-300">
+    <div className="rounded-2xl border border-destructive/40 bg-destructive/10 px-4 py-3 shadow-soft">
+      <div className="flex items-center gap-2 text-sm font-medium text-destructive">
         <span>⛔</span>
         <span>{isRoutine ? 'Cambio di automazione — serve la tua approvazione' : 'Richiede la tua approvazione'}</span>
       </div>
-      <div className="mt-1 font-mono text-xs text-neutral-300">
+      <div className="mt-1 font-mono text-xs text-foreground">
         {tool} {entry.content && entry.content !== tool ? `— ${entry.content}` : ''}
       </div>
       {isRoutine && (
-        <div className="mt-2 space-y-1 rounded-lg bg-neutral-900/60 px-3 py-2 text-xs text-neutral-300">
-          <div><span className="text-neutral-500">Routine:</span> {st?.name ?? (st?.id !== undefined ? `#${st.id}` : '?')}</div>
+        <div className="mt-2 space-y-1 rounded-lg bg-muted/50 px-3 py-2 text-xs text-foreground">
+          <div><span className="text-muted-foreground">Routine:</span> {st?.name ?? (st?.id !== undefined ? `#${st.id}` : '?')}</div>
           {st?.schedule && (
             <div>
-              <span className="text-neutral-500">Schedule:</span> {describeCron(st.schedule)}{' '}
-              <span className="font-mono text-neutral-600">({st.schedule})</span>
+              <span className="text-muted-foreground">Schedule:</span> {describeCron(st.schedule)}{' '}
+              <span className="font-mono text-muted-foreground">({st.schedule})</span>
             </div>
           )}
-          {st?.prompt && <div className="whitespace-pre-wrap"><span className="text-neutral-500">Prompt:</span> {st.prompt}</div>}
+          {st?.prompt && <div className="whitespace-pre-wrap"><span className="text-muted-foreground">Prompt:</span> {st.prompt}</div>}
         </div>
       )}
       {secretRefs.length > 0 && (
-        <div className="mt-1 text-xs text-orange-200/90">Credenziali usate: {secretRefs.join(', ')}</div>
+        <div className="mt-1 text-xs text-destructive/90">Credenziali usate: {secretRefs.join(', ')}</div>
       )}
       {status === 'pending' ? (
         <div className="mt-3 flex flex-wrap gap-2">
           <button
-            className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500"
+            className="rounded-lg bg-chart-2 px-3 py-1.5 text-xs font-medium text-white hover:bg-chart-2/90"
             onClick={() => resolve(approvalId, 'allow', 'once')}
           >
             Consenti una volta
           </button>
           <button
-            className="rounded-lg bg-emerald-700/60 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-600/60 disabled:hidden"
+            className="rounded-lg bg-chart-2/70 px-3 py-1.5 text-xs font-medium text-white hover:bg-chart-2/80 disabled:hidden"
             disabled={noTurn}
             title={noTurn ? 'Questa azione chiede sempre l\'approvazione' : 'Vale per lo stesso tool fino alla fine di questo turno'}
             onClick={() => resolve(approvalId, 'allow', 'turn')}
@@ -102,7 +102,7 @@ export function ApprovalCard({ entry }: { entry: TranscriptEntry }) {
             Consenti per questo turno
           </button>
           <button
-            className="rounded-lg bg-emerald-700/60 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-600/60 disabled:hidden"
+            className="rounded-lg bg-chart-2/70 px-3 py-1.5 text-xs font-medium text-white hover:bg-chart-2/80 disabled:hidden"
             disabled={noAlways}
             title={noAlways ? 'Le modifiche di automazione chiedono ogni volta' : undefined}
             onClick={() => resolve(approvalId, 'allow', 'always')}
@@ -110,14 +110,14 @@ export function ApprovalCard({ entry }: { entry: TranscriptEntry }) {
             Consenti sempre
           </button>
           <button
-            className="rounded-lg bg-neutral-700 px-3 py-1.5 text-xs font-medium text-neutral-200 hover:bg-neutral-600"
+            className="rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted-foreground/40"
             onClick={() => resolve(approvalId, 'deny', 'once')}
           >
             Nega
           </button>
           {/* fase 8: crea una regola di auto-review partendo da questa azione */}
           <button
-            className="rounded-lg border border-neutral-700 px-3 py-1.5 text-xs text-neutral-300 hover:bg-neutral-800"
+            className="rounded-lg border border-border px-3 py-1.5 text-xs text-foreground hover:bg-muted"
             title="Apri Impostazioni → Approvazione automatica con una regola precompilata"
             onClick={() => proposeRule(suggestedRule(tool, entry.meta?.input as Record<string, unknown> | undefined))}
           >
@@ -125,7 +125,7 @@ export function ApprovalCard({ entry }: { entry: TranscriptEntry }) {
           </button>
         </div>
       ) : (
-        <div className={`mt-2 text-xs ${status === 'allowed' ? 'text-emerald-400' : 'text-neutral-500'}`}>
+        <div className={`mt-2 text-xs ${status === 'allowed' ? 'text-chart-2' : 'text-muted-foreground'}`}>
           {status === 'allowed' ? '✓ Consentito' : status === 'denied' ? 'Negato' : status === 'cancelled' ? 'Annullata (interrupt)' : status}
         </div>
       )}

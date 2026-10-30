@@ -50,7 +50,7 @@ export function buildMcpAuthResolver(deps: AuthResolverDeps): McpAuthResolver {
   // riconnessione parte dalla vista "Connetti app" (catalogo) o dal bottone
   // "Connetti"/"Riconnetti" della scheda Installati (registro/plugin/url).
   const silentOpen = async (): Promise<void> => {
-    throw new Error('browser non disponibile senza la finestra di SandBot')
+    throw new Error('browser non disponibile senza la finestra di Homun')
   }
 
   /**

@@ -1,181 +1,241 @@
+// Sidebar (fase 16, U4): ricerca e "+", lista dei bot con la loro mascotte
+// (36 px, track=false, stato di U3), gruppi con le mascotte dei membri
+// sovrapposte, Libreria e in fondo il menu account adattato a un'app locale.
+// Le sezioni restano intestazioni della lista; i sottoagenti non compaiono
+// (come prima).
 import { useState } from 'react'
+import { Plus, Library as LibraryIcon } from 'lucide-react'
 import { useStore } from '../store'
-import type { AgentStatus } from '../../../shared/types'
+import { filterSidebar } from '../sidebar-utils'
+import { avatarOf } from '../../../shared/avatar'
+import type { Agent, GroupInfo } from '../../../shared/types'
+import { Bot } from '../bot/Bot'
+import { useBotInfo } from '../bot/use-bot'
+import type { UiTheme } from '../theme'
+import { NewBotDialog } from './BotDialogs'
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
+  DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger,
+  DropdownMenuRadioGroup, DropdownMenuRadioItem
+} from './ui/dropdown-menu'
 
-const statusColor: Record<AgentStatus, string> = {
-  offline: 'bg-neutral-600',
-  idle: 'bg-emerald-500',
-  thinking: 'bg-amber-400 animate-pulse',
-  running: 'bg-sky-400 animate-pulse',
-  'paused-for-approval': 'bg-orange-500 animate-pulse'
+/** Una riga della lista dei bot: mascotte con lo stato di U3, nome, anteprima, pillole. */
+function AgentRow({ a }: { a: Agent }) {
+  const info = useBotInfo(a.id)
+  const select = useStore((s) => s.select)
+  const activeId = useStore((s) => s.activeId)
+  const openGroupId = useStore((s) => s.openGroupId)
+  const mainAgentId = useStore((s) => s.mainAgentId)
+  const agents = useStore((s) => s.agents)
+  const tasks = useStore((s) => s.tasks)
+  const subagents = useStore((s) => s.subagents)
+  const activity = useStore((s) => s.activity[a.id])
+  const previews = useStore((s) => s.previews)
+  if (!info) return null
+  const effectiveMain = mainAgentId ?? agents[0]?.id ?? null
+  // fase 8/12: gli indicatori già esistenti (task in corso, sottoagenti al
+  // lavoro), resi come piccole pillole
+  const workingTasks = tasks.filter((t) => t.agentId === a.id && t.status === 'working').length
+  const runningSubagents = subagents.filter((x) => x.parentId === a.id && x.status === 'running').length
+  return (
+    <button
+      onClick={() => void select(a.id)}
+      className={`flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition ${
+        a.id === activeId && openGroupId === null ? 'bg-muted' : 'hover:bg-muted/60'
+      }`}
+    >
+      <span className="relative shrink-0">
+        <Bot family={info.avatar.family} color={info.avatar.color} state={info.state} size={36} track={false} dimmed={info.dimmed} label={a.name} />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-1.5">
+          <span className="truncate text-sm font-medium">{a.name}</span>
+          {a.id === effectiveMain && (
+            <span className="shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary" title="Bot principale: coordina gli altri bot">
+              Principale
+            </span>
+          )}
+        </span>
+        <span className="block truncate text-xs text-muted-foreground">
+          {previews[a.id] || info.statusText}
+        </span>
+        <span className="mt-0.5 flex flex-wrap items-center gap-1">
+          {workingTasks > 0 && (
+            <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{workingTasks} task</span>
+          )}
+          {runningSubagents > 0 && (
+            <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{runningSubagents} sottoagenti</span>
+          )}
+          {/* stato live — nome del tool e target, mai testo del modello */}
+          {activity && (
+            <span className="max-w-full truncate rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground" title={`${activity.tool} ${activity.target}`}>
+              sta facendo {activity.tool}
+              {activity.target ? ` · ${activity.target}` : ''}
+            </span>
+          )}
+        </span>
+      </span>
+      {a.unread > 0 && (
+        <span className="shrink-0 rounded-full bg-primary px-1.5 text-xs text-primary-foreground">{a.unread}</span>
+      )}
+    </button>
+  )
 }
 
-const statusLabel: Record<AgentStatus, string> = {
-  offline: 'Offline',
-  idle: 'Online',
-  thinking: 'Thinking',
-  running: 'Running',
-  'paused-for-approval': 'In attesa di approvazione'
+/** Un gruppo della sidebar: le mascotte dei membri sovrapposte (max 3, 20 px). */
+function GroupRow({ g }: { g: GroupInfo }) {
+  const agents = useStore((s) => s.agents)
+  const mainAgentId = useStore((s) => s.mainAgentId)
+  const openGroupId = useStore((s) => s.openGroupId)
+  const openGroup = useStore((s) => s.openGroup)
+  const effectiveMain = mainAgentId ?? agents[0]?.id ?? null
+  return (
+    <button
+      onClick={() => openGroup(g.id)}
+      className={`flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition ${
+        g.id === openGroupId ? 'bg-muted' : 'hover:bg-muted/60'
+      }`}
+      title={g.description}
+    >
+      <span className="flex shrink-0 items-center -space-x-1.5">
+        {g.members.slice(0, 3).map((m) => {
+          const a = agents.find((x) => x.id === m.agentId)
+          if (!a) return null
+          const av = avatarOf(a, agents, effectiveMain)
+          return (
+            <span key={m.agentId} className="rounded-full ring-2 ring-card">
+              <Bot family={av.family} color={av.color} state="idle" size={20} track={false} />
+            </span>
+          )
+        })}
+        {g.members.length > 3 && (
+          <span className="grid size-5 place-items-center rounded-full bg-muted text-[9px] text-muted-foreground ring-2 ring-card">
+            +{g.members.length - 3}
+          </span>
+        )}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-medium">{g.name}</span>
+        <span className="block truncate text-xs text-muted-foreground">
+          {g.members.map((m) => m.name).join(', ') || 'solo tu'}
+        </span>
+      </span>
+    </button>
+  )
+}
+
+/** Il menu account di Lovable, adattato a un'app locale (niente account/piano/updater). */
+function AccountMenu() {
+  const agents = useStore((s) => s.agents)
+  const mainAgentId = useStore((s) => s.mainAgentId)
+  const theme = useStore((s) => s.theme)
+  const setTheme = useStore((s) => s.setTheme)
+  const setSettingsOpen = useStore((s) => s.setSettingsOpen)
+  const setSettingsTab = useStore((s) => s.setSettingsTab)
+  const effectiveMain = mainAgentId ?? agents[0]?.id ?? null
+  const main = agents.find((a) => a.id === effectiveMain)
+  const info = useBotInfo(main?.id)
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger className="flex w-full items-center gap-3 rounded-xl border-t border-border px-4 py-3 text-left transition hover:bg-muted/60 focus:outline-none">
+        {info && (
+          <span className="shrink-0 rounded-full ring-1 ring-border">
+            <Bot family={info.avatar.family} color={info.avatar.color} state={info.state} size={26} track={false} />
+          </span>
+        )}
+        <span className="min-w-0 text-sm">
+          <span className="block font-medium leading-tight">Homun</span>
+          <span className="block truncate text-xs text-muted-foreground">
+            {main ? (main.model ? `${main.providerId ?? ''} · ${main.model}` : 'nessun modello') : 'nessun bot'}
+          </span>
+        </span>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent side="top" align="start" className="w-56">
+        <DropdownMenuItem onClick={() => { setSettingsTab('connettori'); setSettingsOpen(true) }}>Connetti app</DropdownMenuItem>
+        <DropdownMenuItem onClick={() => { setSettingsTab(null); setSettingsOpen(true) }}>Impostazioni</DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>Tema</DropdownMenuSubTrigger>
+          <DropdownMenuSubContent>
+            <DropdownMenuRadioGroup value={theme} onValueChange={(v) => setTheme(v as UiTheme)}>
+              <DropdownMenuRadioItem value="system">Sistema</DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="light">Chiaro</DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="dark">Scuro</DropdownMenuRadioItem>
+            </DropdownMenuRadioGroup>
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
 }
 
 export function Sidebar() {
   const agents = useStore((s) => s.agents)
-  const activeId = useStore((s) => s.activeId)
-  const mainAgentId = useStore((s) => s.mainAgentId)
-  // fase 8 (§3bis L7): stato live (tool in corso) e task in corso per agente
-  const activity = useStore((s) => s.activity)
-  const tasks = useStore((s) => s.tasks)
-  // fase 10: i gruppi della sidebar e la vista gruppo aperta
   const groups = useStore((s) => s.groups)
-  // fase 12: i sottoagenti (stato live del padre: N al lavoro)
-  const subagents = useStore((s) => s.subagents)
-  const openGroupId = useStore((s) => s.openGroupId)
-  const openGroup = useStore((s) => s.openGroup)
   const openLibraryId = useStore((s) => s.openLibraryId)
   const openLibrary = useStore((s) => s.openLibrary)
-  const select = useStore((s) => s.select)
-  const createAgent = useStore((s) => s.createAgent)
-  const setSettingsOpen = useStore((s) => s.setSettingsOpen)
-  const [newName, setNewName] = useState('')
-  const [creating, setCreating] = useState(false)
-  // fase 7: senza setting mainAgentId il principale è il primo agente (il più vecchio)
-  const effectiveMain = mainAgentId ?? agents[0]?.id ?? null
-  const workingTasksOf = (agentId: string): number => tasks.filter((t) => t.agentId === agentId && t.status === 'working').length
-  const subagentsOf = (agentId: string): { running: number } => ({
-    running: subagents.filter((x) => x.parentId === agentId && x.status === 'running').length
-  })
-
-  const agentButton = (a: (typeof agents)[number]) => (
-    <button
-      key={a.id}
-      onClick={() => void select(a.id)}
-      className={`mb-1 flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left ${
-        a.id === activeId && openGroupId === null ? 'bg-neutral-800' : 'hover:bg-neutral-800/50'
-      }`}
-    >
-      <span className={`h-2 w-2 shrink-0 rounded-full ${statusColor[a.status]}`} title={statusLabel[a.status]} />
-      <span className="min-w-0 flex-1">
-        <span className="flex items-center gap-1.5">
-          <span className="truncate text-sm text-neutral-100">{a.name}</span>
-          {a.id === effectiveMain && (
-            <span className="shrink-0 rounded bg-sky-800/60 px-1.5 py-0.5 text-[10px] font-medium text-sky-200" title="Bot principale: coordina gli altri bot">
-              ★ principale
-            </span>
-          )}
-        </span>
-        <span className="block truncate text-xs text-neutral-500">
-          {statusLabel[a.status]}
-          {a.model ? ` · ${a.model}` : ' · nessun modello'}
-          {workingTasksOf(a.id) > 0 ? ` · ${workingTasksOf(a.id)} task` : ''}
-        </span>
-        {/* fase 8 (§3bis L7): stato live — nome del tool e target, mai testo del modello */}
-        {/* fase 12: stato live del padre — figli al lavoro (has_running_subagents di Grok) */}
-        {subagentsOf(a.id).running > 0 && (
-          <span className="block truncate text-[10px] text-teal-400/80">
-            {subagentsOf(a.id).running} sottoagenti al lavoro
-          </span>
-        )}
-        {activity[a.id] && (
-          <span className="block truncate text-[10px] text-sky-400/80" title={`${activity[a.id]!.tool} ${activity[a.id]!.target}`}>
-            sta facendo {activity[a.id]!.tool}
-            {activity[a.id]!.target ? ` · ${activity[a.id]!.target}` : ''}…
-          </span>
-        )}
-      </span>
-      {a.unread > 0 && (
-        <span className="rounded-full bg-sky-600 px-1.5 text-xs text-white">{a.unread}</span>
-      )}
-    </button>
-  )
-
-  // fase 10: i bot senza sezione stanno insieme; quelli con sezione sotto il
-  // suo titolo (l'ordine delle sezioni è di creazione)
-  const noSection = agents.filter((a) => !a.section)
-  const sections = [...new Set(agents.map((a) => a.section).filter((s): s is string => !!s))]
+  const [query, setQuery] = useState('')
+  const [newOpen, setNewOpen] = useState(false)
+  // la ricerca filtra bot e gruppi per nome (funzione pura, testata)
+  const { agents: shown, groups: shownGroups } = filterSidebar(agents, groups, query)
+  // i bot senza sezione stanno insieme; quelli con sezione sotto il suo titolo
+  const noSection = shown.filter((a) => !a.section)
+  const sections = [...new Set(shown.map((a) => a.section).filter((s): s is string => !!s))]
 
   return (
-    <aside className="flex w-60 shrink-0 flex-col border-r border-neutral-800 bg-neutral-900/60">
-      <div className="flex items-center justify-between px-3 pt-10 pb-2">
-        <span className="text-sm font-semibold tracking-wide text-neutral-200">SandBot</span>
+    <aside className="flex w-64 shrink-0 flex-col border-r border-border bg-card">
+      {/* pt-10: spazio per i traffic lights della titlebar nascosta */}
+      <div className="flex items-center gap-2 px-3 pt-10 pb-2">
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Cerca"
+          aria-label="Cerca bot e gruppi"
+          className="min-w-0 flex-1 rounded-xl bg-muted px-3 py-2 text-sm outline-none placeholder:text-muted-foreground"
+        />
         <button
-          className="rounded-md px-2 py-1 text-xs text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200"
-          onClick={() => setSettingsOpen(true)}
+          onClick={() => setNewOpen(true)}
+          aria-label="Nuovo bot"
+          title="Nuovo bot"
+          className="grid size-9 shrink-0 place-items-center rounded-xl bg-foreground text-background transition hover:opacity-90"
         >
-          Impostazioni
+          <Plus className="size-4" />
         </button>
       </div>
-
-      <div className="flex-1 overflow-y-auto scroll-thin px-2">
-        {noSection.map(agentButton)}
+      <nav className="flex-1 space-y-1 overflow-y-auto scroll-thin px-2">
+        {noSection.map((a) => (
+          <AgentRow key={a.id} a={a} />
+        ))}
         {sections.map((sec) => (
           <div key={sec} className="mt-3">
-            <p className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-neutral-600">{sec}</p>
-            {agents.filter((a) => a.section === sec).map(agentButton)}
+            <p className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{sec}</p>
+            {shown.filter((a) => a.section === sec).map((a) => (
+              <AgentRow key={a.id} a={a} />
+            ))}
           </div>
         ))}
-        {/* fase 10: i gruppi in una sezione propria (vista gruppo con @menzioni) */}
-        {/* fase 14: la LIBRERIA dei prodotti dei bot (documenti, grafici, file) */}
-        <button
-          className={`w-full rounded-lg px-2 py-1.5 text-left text-sm ${openLibraryId !== null ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-400 hover:bg-neutral-800/50'}`}
-          onClick={() => openLibraryId === null ? openLibrary('') : openLibrary(null)}
-        >
-          🗂 Libreria
-        </button>
-        {groups.length > 0 && (
-          <div className="mt-3 border-t border-neutral-800/60 pt-2">
-            <p className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-neutral-600">Gruppi</p>
-            {groups.map((g) => (
-              <button
-                key={g.id}
-                onClick={() => openGroup(g.id)}
-                className={`mb-1 flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left ${
-                  g.id === openGroupId ? 'bg-neutral-800' : 'hover:bg-neutral-800/50'
-                }`}
-                title={g.description}
-              >
-                <span className="shrink-0 rounded bg-violet-800/50 px-1.5 py-0.5 text-[10px] font-medium text-violet-200">
-                  {g.members.length + 1}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm text-neutral-100">{g.name}</span>
-                  <span className="block truncate text-xs text-neutral-500">
-                    {g.members.map((m) => m.name).join(', ') || 'solo tu'}
-                  </span>
-                </span>
-              </button>
+        {/* i gruppi sotto i bot, con le mascotte dei membri al posto di un'icona */}
+        {shownGroups.length > 0 && (
+          <div className="mt-3 border-t border-border/60 pt-2">
+            <p className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Gruppi</p>
+            {shownGroups.map((g) => (
+              <GroupRow key={g.id} g={g} />
             ))}
           </div>
         )}
-      </div>
-
-      <div className="border-t border-neutral-800 p-2">
-        {creating ? (
-          <div className="flex gap-1">
-            <input
-              autoFocus
-              className="min-w-0 flex-1 rounded-md bg-neutral-800 px-2 py-1 text-sm outline-none"
-              placeholder="Nome del bot"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && newName.trim()) {
-                  void createAgent(newName.trim())
-                  setNewName('')
-                  setCreating(false)
-                }
-                if (e.key === 'Escape') setCreating(false)
-              }}
-            />
-          </div>
-        ) : (
-          <button
-            className="w-full rounded-md px-2 py-1.5 text-left text-sm text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200"
-            onClick={() => setCreating(true)}
-          >
-            + Nuovo Bot
-          </button>
-        )}
-      </div>
+        {/* la Libreria dei prodotti dei bot (documenti, grafici, file) */}
+        <button
+          className={`mt-2 flex w-full items-center gap-2 rounded-xl px-2 py-1.5 text-left text-sm transition ${
+            openLibraryId !== null ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/60'
+          }`}
+          onClick={() => (openLibraryId === null ? openLibrary('') : openLibrary(null))}
+        >
+          <LibraryIcon className="size-4" />
+          Libreria
+        </button>
+      </nav>
+      <AccountMenu />
+      {newOpen && <NewBotDialog onClose={() => setNewOpen(false)} />}
     </aside>
   )
 }

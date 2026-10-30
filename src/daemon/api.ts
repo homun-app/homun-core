@@ -19,6 +19,7 @@ import { parseCron } from './cron'
 import { isValidTimeZone } from './tz'
 import { nextScheduleRun, nextPollAt } from './triggers'
 import { triggerShapeErrors, manualServerPollError } from '../shared/triggers'
+import { avatarValidationError } from '../shared/avatar'
 import { generateWebhookToken } from './webhooks'
 import { enqueueJob } from '../main/store/jobs'
 import { enqueueUserMessage, enqueueWidgetResponse } from './enqueue'
@@ -113,7 +114,13 @@ export function buildApiMethods(
       return a
     },
     'agents:update': async ([id, patch]) => {
-      const p = patch as { providerId?: string | null; model?: string | null }
+      const p = patch as { providerId?: string | null; model?: string | null; avatar?: unknown }
+      // fase 16 (U2): l'aspetto si valida qui (famiglia tra le 5, colore
+      // c1–c7, null = predefinito) — la UI non è fonte di verità
+      if (p.avatar !== undefined) {
+        const err = avatarValidationError(p.avatar)
+        if (err) throw new Error(err)
+      }
       // fase 9 (punto 1): prima di assegnare provider+modello verifica che il
       // modello supporti i tool (Ollama: /api/show → capabilities "tools");
       // senza → errore leggibile e nessuna assegnazione

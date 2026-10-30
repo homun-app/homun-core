@@ -9,6 +9,13 @@ import { registerIpc, emitLocal } from './ipc'
 import { setDataDir, listAgents, createAgent } from './store/db'
 import { createTray, refreshTray } from './tray'
 import { DaemonClient } from './daemon-client'
+import { userDataDir } from './paths'
+
+// fase 16 (U0b): la cartella dati reale dell'utente è …/Application
+// Support/sandbot (minuscolo), di prima del cambio di nome visibile in
+// "Homun". Va fissata PRIMA di app.whenReady() e di ogni getPath('userData'),
+// altrimenti Electron ricaverebbe …/Homun e l'utente ritroverebbe l'app vuota.
+app.setPath('userData', userDataDir(app.getName(), app.getPath('appData')))
 
 // con "type": "module" electron-vite emette il preload come .mjs (ESM, richiede sandbox:false)
 const preloadPath = join(__dirname, '../preload/index.mjs')

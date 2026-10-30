@@ -1,8 +1,37 @@
 // State renderer: agenti, transcript dell'agente attivo, eventi dal main.
 import { create } from 'zustand'
-import type { Agent, TranscriptEntry, SandbotEvent, ProviderConfig, PermissionsConfig, ConnectorInfo, TaskInfo, GroupInfo, GroupMessageInfo, SubagentInfo } from '../../shared/types'
+import type { Agent, TranscriptEntry, SandbotEvent, ProviderConfig, PermissionsConfig, ConnectorInfo, TaskInfo, GroupInfo, GroupMessageInfo, SubagentInfo, AgentAvatar, TurnEnd } from '../../shared/types'
+import type { UiTheme } from './theme'
+import { applyTheme, watchSystemTheme } from './theme'
+import { previewOf } from './sidebar-utils'
 
 const api = (window as unknown as { sandbot: import('../../shared/types').SandbotApi }).sandbot
+
+/**
+ * Fase 16 (U3): il "happy" dura 1,5 s e poi torna idle. UN solo timer qui
+ * nello store (rimborsato a ogni nuovo messaggio), niente setTimeout sparsi
+ * nei componenti: quando scade, nowTick cambia e la mascotte si ricalcola.
+ */
+let happyTimer: ReturnType<typeof setTimeout> | null = null
+function armHappyTimer(set: (partial: Partial<Store>) => void): void {
+  if (happyTimer) clearTimeout(happyTimer)
+  happyTimer = setTimeout(() => {
+    happyTimer = null
+    set({ nowTick: Date.now() })
+  }, 1550)
+}
+
+/** L'ultimo fine turno di un transcript, col momento dell'ultimo send-message visibile. */
+function lastTurnEndOf(entries: TranscriptEntry[]): { value: TurnEnd; sendAt: number | null } | null {
+  let sendAt: number | null = null
+  let turn: { value: TurnEnd; at: number } | null = null
+  for (const e of entries) {
+    if (e.kind === 'send-message' && !(e.meta as { held?: boolean } | null)?.held) sendAt = e.createdAt
+    const te = (e.meta as { turnEnd?: TurnEnd } | null)?.turnEnd
+    if (te) turn = { value: te, at: e.createdAt }
+  }
+  return turn ? { value: turn.value, sendAt } : null
+}
 
 interface Store {
   agents: Agent[]
@@ -38,6 +67,26 @@ interface Store {
   openSubagentId: string | null
   /** fase 12: entry del figlio aperto (aggiornate dagli eventi entries) */
   subEntries: TranscriptEntry[]
+  // ---- fase 16: la nuova interfaccia ----
+  /** tema dell'app (setting ui.theme); 'dark' su <html> quando serve */
+  theme: UiTheme
+  /** pannello destro aperto (setting ui.rightPanel) */
+  rightPanel: boolean
+  /** fase 16 (U3): l'utente sta scrivendo nel composer di QUESTO bot */
+  typingAgentId: string | null
+  /** fase 16 (U3): ultimo delta per agente (testo in streaming → speaking) */
+  lastDeltaAt: Record<string, number>
+  /** fase 16 (U3): ultimo send-message visibile per agente (happy per 1,5 s) */
+  lastSendAt: Record<string, number>
+  /** fase 16 (U3): ultimo fine turno per agente (waiting / happy) */
+  turnEnds: Record<string, { value: TurnEnd; sendAt: number | null }>
+  /** fase 16 (U3): orologio che si muove quando il happy scade */
+  nowTick: number
+  /** fase 16 (U4): anteprima dell'ultimo messaggio visibile per agente */
+  previews: Record<string, string>
+  /** fase 16 (U5): pannelli Memoria e Skill della vista dell'agente (anche dal pannello destro) */
+  memoryOpen: boolean
+  skillsOpen: boolean
   init(): Promise<void>
   select(agentId: string): Promise<void>
   send(text: string, images?: string[]): Promise<void>
@@ -53,7 +102,7 @@ interface Store {
   autoreviewRuleDecision(entryId: number, action: 'add' | 'dismiss'): void
   /** fase 8: "Crea regola da questa azione" — apre l'editor precompilato */
   proposeRule(text: string): void
-  createAgent(name: string): Promise<void>
+  createAgent(name: string, avatar?: AgentAvatar): Promise<void>
   /** fase 7: "Rendi principale" nelle impostazioni dell'agente */
   setMainAgent(id: string): Promise<void>
   refreshProviders(): Promise<void>
@@ -77,6 +126,14 @@ interface Store {
   stopSubagent(id: string): void
   setSettingsOpen(v: boolean): void
   setSettingsTab(v: string | null): void
+  /** fase 16: tema (classe dark su <html>) e pannello destro */
+  setTheme(t: UiTheme): void
+  setRightPanel(v: boolean): void
+  /** fase 16 (U3): il composer di questo bot ha del testo (o no) */
+  setTyping(agentId: string | null): void
+  /** fase 16 (U5): apre/chiude i pannelli Memoria e Skill */
+  setMemoryOpen(v: boolean): void
+  setSkillsOpen(v: boolean): void
 }
 
 export const useStore = create<Store>((set, get) => ({
@@ -101,6 +158,17 @@ export const useStore = create<Store>((set, get) => ({
   openSubagentId: null,
   subEntries: [],
   openLibraryId: null,
+  // fase 16
+  theme: 'system',
+  rightPanel: true,
+  typingAgentId: null,
+  lastDeltaAt: {},
+  lastSendAt: {},
+  turnEnds: {},
+  nowTick: 0,
+  previews: {},
+  memoryOpen: false,
+  skillsOpen: false,
 
   async init() {
     const agents = await api.listAgents()
@@ -110,8 +178,29 @@ export const useStore = create<Store>((set, get) => ({
     // fase 7: il bot principale per il badge (null → il primo agente)
     const mainAgentId = await api.settingsGet<string | null>('mainAgentId', null).catch(() => null)
     set({ agents, providers, permissions, activeId, mainAgentId })
+    // fase 16 (U0): tema e pannello destro; con 'system' si segue il sistema
+    const theme = await api.settingsGet<UiTheme>('ui.theme', 'system').catch(() => 'system' as UiTheme)
+    const rightPanel = await api.settingsGet<boolean>('ui.rightPanel', true).catch(() => true)
+    set({ theme, rightPanel })
+    applyTheme(theme)
+    watchSystemTheme(() => applyTheme(get().theme))
     if (activeId) {
       set({ entries: await api.getEntries(activeId) })
+    }
+    // fase 16 (U4): anteprima, turnEnd e happy di ogni bot per la sidebar
+    // (una lettura a avvio; poi li aggiornano gli eventi 'entries')
+    for (const a of agents) {
+      api.getEntries(a.id)
+        .then((es) => {
+          const s = get()
+          const te = lastTurnEndOf(es)
+          set({
+            previews: { ...s.previews, [a.id]: previewOf(es) },
+            turnEnds: te ? { ...s.turnEnds, [a.id]: te } : s.turnEnds,
+            lastSendAt: te?.sendAt ? { ...s.lastSendAt, [a.id]: te.sendAt } : s.lastSendAt
+          })
+        })
+        .catch(() => undefined)
     }
     // fase 5: catalogo connettori (per la vista Impostazioni e le card in chat)
     api.connectorsList().then((connectors) => set({ connectors })).catch(() => undefined)
@@ -147,6 +236,20 @@ export const useStore = create<Store>((set, get) => ({
           break
         }
         case 'entries': {
+          // fase 16 (U4/U3): anteprima, turnEnd e happy della sidebar valgono
+          // per OGNI agente, non solo per quello aperto
+          const batch = e.entries
+          const hasSend = batch.some((en) => en.kind === 'send-message' && !(en.meta as { held?: boolean } | null)?.held)
+          const te = lastTurnEndOf(batch)
+          const now = Date.now()
+          set({
+            previews: { ...s.previews, [e.agentId]: previewOf(batch) || s.previews[e.agentId] || '' },
+            turnEnds: te
+              ? { ...s.turnEnds, [e.agentId]: { value: te.value, sendAt: te.sendAt ?? s.lastSendAt[e.agentId] ?? null } }
+              : s.turnEnds,
+            lastSendAt: hasSend ? { ...s.lastSendAt, [e.agentId]: now } : s.lastSendAt
+          })
+          if (hasSend) armHappyTimer(set)
           // fase 12: le entry del FIGLIO aperto finiscono nel suo pannello
           if (e.agentId === s.openSubagentId) {
             const merged = [...s.subEntries]
@@ -172,6 +275,8 @@ export const useStore = create<Store>((set, get) => ({
           break
         }
         case 'delta': {
+          // fase 16 (U3): il delta segna lo streaming di QUESTO bot (speaking)
+          set({ lastDeltaAt: { ...s.lastDeltaAt, [e.agentId]: Date.now() } })
           if (e.agentId !== s.activeId) break
           if (e.reasoning) {
             set({ reasoning: { ...s.reasoning, [e.entryId]: (s.reasoning[e.entryId] ?? '') + e.text } })
@@ -232,7 +337,8 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   async select(agentId) {
-    set({ activeId: agentId, entries: [], openSubagentId: null, subEntries: [] })
+    // fase 16: cambiando bot cambia anche il composer (il typing non resta appeso)
+    set({ activeId: agentId, entries: [], openSubagentId: null, subEntries: [], typingAgentId: null })
     set({ entries: await api.getEntries(agentId) })
     // fase 12: i sottoagenti dell'agente scelto
     api.listSubagents(agentId).then((subagents) => set({ subagents })).catch(() => undefined)
@@ -331,10 +437,14 @@ export const useStore = create<Store>((set, get) => ({
     set({ autoreviewPrefill: text, settingsTab: 'autoreview', settingsOpen: true })
   },
 
-  async createAgent(name) {
-    await api.createAgent(name)
+  // fase 16 (U5): creazione dal dialogo "Crea nuovo bot" — aspetto compreso,
+  // poi il bot nuovo si seleziona
+  async createAgent(name, avatar) {
+    const a = await api.createAgent(name)
+    if (avatar) await api.updateAgent(a.id, { avatar })
     const agents = await api.listAgents()
     set({ agents })
+    await get().select(a.id)
   },
 
   async setMainAgent(id) {
@@ -408,6 +518,31 @@ export const useStore = create<Store>((set, get) => ({
 
   setSettingsTab(v) {
     set({ settingsTab: v })
+  },
+
+  // fase 16 (U0): tema e pannello destro — si applicano subito e restano nel setting
+  setTheme(t) {
+    set({ theme: t })
+    applyTheme(t)
+    void api.settingsSet('ui.theme', t).catch(() => undefined)
+  },
+
+  setRightPanel(v) {
+    set({ rightPanel: v })
+    void api.settingsSet('ui.rightPanel', v).catch(() => undefined)
+  },
+
+  // fase 16 (U3): solo i cambiamenti di stato passano (niente set per tasto)
+  setTyping(agentId) {
+    if (get().typingAgentId !== agentId) set({ typingAgentId: agentId })
+  },
+
+  setMemoryOpen(v) {
+    set({ memoryOpen: v })
+  },
+
+  setSkillsOpen(v) {
+    set({ skillsOpen: v })
   }
 }))
 

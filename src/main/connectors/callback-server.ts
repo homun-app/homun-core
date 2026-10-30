@@ -18,8 +18,8 @@ export interface CallbackServer {
   close(): void
 }
 
-const PAGE_OK = '<html><body style="font-family:system-ui;background:#0b0d10;color:#e5e5e5;display:flex;align-items:center;justify-content:center;height:100vh"><p>✓ Connettore autorizzato — puoi tornare su SandBot.</p></body></html>'
-const PAGE_ERR = '<html><body style="font-family:system-ui;background:#0b0d10;color:#f87171;display:flex;align-items:center;justify-content:center;height:100vh"><p>Richiesta non valida (state errato): riprova la connessione da SandBot.</p></body></html>'
+const PAGE_OK = '<html><body style="font-family:system-ui;background:#0b0d10;color:#e5e5e5;display:flex;align-items:center;justify-content:center;height:100vh"><p>✓ Connettore autorizzato — puoi tornare su Homun.</p></body></html>'
+const PAGE_ERR = '<html><body style="font-family:system-ui;background:#0b0d10;color:#f87171;display:flex;align-items:center;justify-content:center;height:100vh"><p>Richiesta non valida (state errato): riprova la connessione da Homun.</p></body></html>'
 
 export async function startCallbackServer(opts: {
   expectedState: string

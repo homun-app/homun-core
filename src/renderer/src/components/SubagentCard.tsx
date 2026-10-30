@@ -15,12 +15,12 @@ const STATUS_LABEL: Record<SubagentInfo['status'], string> = {
   expired: 'scaduto'
 }
 const STATUS_CLS: Record<SubagentInfo['status'], string> = {
-  queued: 'text-neutral-400',
-  running: 'text-sky-300',
-  done: 'text-emerald-400',
-  failed: 'text-red-400',
-  stopped: 'text-neutral-500',
-  expired: 'text-amber-400'
+  queued: 'text-muted-foreground',
+  running: 'text-primary',
+  done: 'text-chart-2',
+  failed: 'text-destructive',
+  stopped: 'text-muted-foreground',
+  expired: 'text-destructive'
 }
 
 function fmtAgo(at: number, now: number): string {
@@ -46,31 +46,31 @@ export function SubagentCard({ entry }: { entry: TranscriptEntry }) {
   const open = status === 'queued' || status === 'running'
 
   return (
-    <div className="max-w-[92%] rounded-2xl rounded-bl-md border border-teal-800/40 bg-teal-950/10 px-4 py-3">
+    <div className="max-w-[75%] rounded-2xl rounded-bl-md border border-border bg-card px-4 py-3 shadow-soft">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-medium uppercase tracking-wide text-teal-300/80">Sottoagente</span>
+        <span className="text-xs font-medium uppercase tracking-wide text-chart-2">Sottoagente</span>
         <span className={`text-[11px] font-medium ${STATUS_CLS[status]}`}>
           {status === 'done' ? '✓' : status === 'failed' ? '⚠' : status === 'stopped' ? '⛔' : status === 'expired' ? '⏱' : '⏳'}
           {' '}{waiting ? 'in attesa di conferma' : STATUS_LABEL[status]}
         </span>
       </div>
-      <p className="mt-1 text-sm text-neutral-100">{message.title}</p>
+      <p className="mt-1 text-sm text-foreground">{message.title}</p>
       {sub && (
-        <p className="mt-0.5 text-[11px] text-neutral-500">
+        <p className="mt-0.5 text-[11px] text-muted-foreground">
           {fmtAgo(sub.startedAt ?? sub.createdAt, now)} trascorsi
           {sub.status === 'done' && sub.summary ? ` — ${sub.summary.slice(0, 120)}` : ''}
         </p>
       )}
       <div className="mt-2 flex gap-2">
         <button
-          className="rounded-lg border border-teal-500 bg-teal-700/70 px-3 py-1.5 text-xs font-medium text-white hover:bg-teal-600"
+          className="rounded-lg border border-foreground bg-foreground px-3 py-1.5 text-xs font-medium text-background hover:opacity-90"
           onClick={() => openSubagent(message.subagentId)}
         >
           Apri
         </button>
         {open && (
           <button
-            className="rounded-lg bg-neutral-800 px-3 py-1.5 text-xs text-neutral-200 hover:bg-neutral-700"
+            className="rounded-lg bg-muted px-3 py-1.5 text-xs text-foreground hover:bg-accent"
             onClick={() => stopSubagent(message.subagentId)}
           >
             Ferma

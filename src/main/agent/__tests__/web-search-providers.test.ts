@@ -129,7 +129,7 @@ describe('fase 15 S1: You.com keyless', () => {
     // nessuna credenziale, agente onesto, niente cookie
     expect(captured[0]!.headers.authorization).toBeUndefined()
     expect(captured[0]!.headers['X-API-Key']).toBeUndefined()
-    expect(captured[0]!.headers['user-agent']).toMatch(/^SandBot\//)
+    expect(captured[0]!.headers['user-agent']).toMatch(/^Homun\//)
     expect(captured[0]!.headers.cookie).toBeUndefined()
   })
 
@@ -203,7 +203,7 @@ describe('fase 15 S1: Tavily keyless', () => {
     expect(captured[0]!.headers['x-tavily-access-mode']).toBe('keyless')
     expect(captured[0]!.headers['content-type']).toBe('application/json')
     expect(captured[0]!.headers.authorization).toBeUndefined()
-    expect(captured[0]!.headers['user-agent']).toMatch(/^SandBot\//)
+    expect(captured[0]!.headers['user-agent']).toMatch(/^Homun\//)
     expect(captured[0]!.body).toEqual({ query: 'orari musei', max_results: 5 })
   })
 
