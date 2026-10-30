@@ -7,6 +7,8 @@ import { ipcMain, BrowserWindow, Notification, dialog } from 'electron'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { refreshTray } from './tray'
+import { mainStrings, setMainLanguage } from './i18n'
+import type { UiLanguage } from '../shared/ui-language'
 import * as db from './store/db'
 import { isLaunchAgentInstalled, setLaunchAgent, LAUNCH_AGENT_LABEL } from './launchagent'
 import { daemonEntryPath } from './daemon-client'
@@ -67,19 +69,26 @@ export function registerIpc(client: DaemonClient, getWindows: () => BrowserWindo
   ipcMain.handle('dialog:pick-image', async () => {
     const r = await dialog.showOpenDialog({
       properties: ['openFile'],
-      filters: [{ name: 'Immagini', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }]
+      filters: [{ name: mainStrings().dialogs.images, extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }]
     })
     if (r.canceled || !r.filePaths[0]) return null
     const buf = await readFile(r.filePaths[0])
-    if (buf.length > 5_000_000) throw new Error('Immagine troppo grande (max 5MB)')
+    if (buf.length > 5_000_000) throw new Error(mainStrings().dialogs.imageTooLarge)
     return buf.toString('base64')
   })
 
   // diagnostica notifiche (F4)
   ipcMain.handle('notify:test', () => {
-    const n = new Notification({ title: 'Homun', body: 'Test notifica — se la vedi, i permessi sono ok.' })
+    const s = mainStrings().notifyTest
+    const n = new Notification({ title: s.title, body: s.body })
     n.show()
     return { shown: true }
+  })
+
+  // fase 17a (L5): l'utente ha cambiato la lingua — il tray si ricostruisce
+  ipcMain.handle('ui:language-changed', (_e, lang: UiLanguage) => {
+    setMainLanguage(lang)
+    refreshTray()
   })
 
   // ---- "Avvia all'accesso": LaunchAgent del daemon ----

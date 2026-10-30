@@ -7,6 +7,10 @@
 // Rinomina, Cancella; le versioni col "ripristina come nuova versione".
 // L'avviso di spazio (> 2 GB) sta in cima, nessun blocco.
 import { useEffect, useMemo, useState } from 'react'
+import { useLingui } from '@lingui/react'
+import { Trans, Plural } from '@lingui/react/macro'
+import { t } from '@lingui/core/macro'
+import { formatDate } from '../lib/i18n'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api, useStore } from '../store'
@@ -42,8 +46,8 @@ export function LibraryPanel() {
     <div className="absolute inset-0 z-20 flex flex-col bg-background/95 backdrop-blur-sm">
       <header className="flex items-center justify-between border-b border-border px-6 py-3">
         <div>
-          <p className="text-[10px] font-medium uppercase tracking-wide text-chart-2/80">Libreria</p>
-          <h2 className="text-base font-semibold text-foreground">Documenti, grafici e file dei tuoi bot</h2>
+          <p className="text-[10px] font-medium uppercase tracking-wide text-chart-2/80"><Trans>Libreria</Trans></p>
+          <h2 className="text-base font-semibold text-foreground"><Trans>Documenti, grafici e file dei tuoi bot</Trans></h2>
         </div>
         <button className="rounded-md px-2 py-1 text-muted-foreground hover:text-foreground" onClick={() => openLibrary(null)}>
           ✕
@@ -78,13 +82,13 @@ function LibraryList() {
       <div className="mx-auto max-w-3xl space-y-3">
         {stats?.warn && (
           <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-            La libreria supera 2 GB: valuta cosa cancellare (nessun blocco automatico).
+            <Trans>La libreria supera 2 GB: valuta cosa cancellare (nessun blocco automatico).</Trans>
           </p>
         )}
         <div className="flex flex-wrap items-center gap-2">
           <input
             className="flex-1 rounded-lg bg-muted px-3 py-1.5 text-sm outline-none"
-            placeholder="Cerca per titolo…"
+            placeholder={t`Cerca per titolo…`}
             value={q}
             onChange={(e) => setQ(e.target.value)}
           />
@@ -94,7 +98,7 @@ function LibraryList() {
               className={`rounded-lg px-2 py-1 text-xs ${kind === k ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-muted'}`}
               onClick={() => setKind(k)}
             >
-              {k === '' ? 'Tutti' : k === 'document' ? 'Documenti' : k === 'chart' ? 'Grafici' : 'File'}
+              {k === '' ? <Trans>Tutti</Trans> : k === 'document' ? <Trans>Documenti</Trans> : k === 'chart' ? <Trans>Grafici</Trans> : <Trans>File</Trans>}
             </button>
           ))}
           <select
@@ -102,11 +106,11 @@ function LibraryList() {
             value={author}
             onChange={(e) => setAuthor(e.target.value)}
           >
-            <option value="">Tutti i bot</option>
+            <option value="">{t`Tutti i bot`}</option>
             {authors.map((a) => <option key={a} value={a}>{nameOf(a)}</option>)}
           </select>
         </div>
-        {shown.length === 0 && <p className="mt-16 text-center text-sm text-muted-foreground">La libreria è vuota: i documenti, i grafici e i file che i bot preparano finiscono qui.</p>}
+        {shown.length === 0 && <p className="mt-16 text-center text-sm text-muted-foreground"><Trans>La libreria è vuota: i documenti, i grafici e i file che i bot preparano finiscono qui.</Trans></p>}
         <div className="space-y-2">
           {shown.map((i) => (
             <div key={i.id} className="flex items-center justify-between gap-3 rounded-xl border border-border bg-muted/50 px-4 py-3">
@@ -115,10 +119,18 @@ function LibraryList() {
                   {i.pinned && <span className="mr-1 text-destructive">★</span>}
                   {i.title}
                   {i.kind === 'document' && <span className="ml-2 text-xs text-muted-foreground">v{i.currentVersion}</span>}
-                  {i.tainted && <span className="ml-2 text-xs text-destructive/80" title="Proveniente da dati esterni">⚠ esterno</span>}
+                  {i.tainted && <span className="ml-2 text-xs text-destructive/80" title={t`Proveniente da dati esterni`}>{t`⚠ esterno`}</span>}
                 </p>
                 <p className="truncate text-xs text-muted-foreground">
-                  {i.kind === 'document' ? 'documento' : i.kind === 'chart' ? `grafico ${i.chartKind ?? ''}` : `${i.fileName ?? 'file'} · ${i.fileSize ?? 0} byte`} · di {nameOf(i.authorAgentId)} · {new Date(i.updatedAt).toLocaleString('it-IT')}
+                  {i.kind === 'document' ? (
+                    <Trans>documento</Trans>
+                  ) : i.kind === 'chart' ? (
+                    <Trans>grafico {i.chartKind ?? ''}</Trans>
+                  ) : (
+                    <>
+                      {i.fileName ?? t`file`} · <Plural value={i.fileSize ?? 0} one="# byte" other="# byte" />
+                    </>
+                  )}{' · '}{t`di`} {nameOf(i.authorAgentId)} · {formatDate(i.updatedAt)}
                 </p>
               </button>
               <ItemActions item={i} onChanged={() => void refresh()} compact />
@@ -144,8 +156,8 @@ function ItemActions({ item, onChanged, compact }: { item: LibraryItemInfo; onCh
     return (
       <div className="flex items-center gap-2">
         <input className="rounded-lg bg-muted px-2 py-1 text-xs outline-none" value={title} onChange={(e) => setTitle(e.target.value)} autoFocus />
-        <button className="rounded-lg bg-primary px-2 py-1 text-xs text-white" onClick={() => void act(async () => { await api.libraryRename(item.id, title); setRenaming(false) })}>Salva</button>
-        <button className="text-xs text-muted-foreground" onClick={() => setRenaming(false)}>Annulla</button>
+        <button className="rounded-lg bg-primary px-2 py-1 text-xs text-white" onClick={() => void act(async () => { await api.libraryRename(item.id, title); setRenaming(false) })}><Trans>Salva</Trans></button>
+        <button className="text-xs text-muted-foreground" onClick={() => setRenaming(false)}><Trans>Annulla</Trans></button>
       </div>
     )
   }
@@ -157,24 +169,24 @@ function ItemActions({ item, onChanged, compact }: { item: LibraryItemInfo; onCh
           key={f}
           disabled={busy}
           className="rounded-lg border border-border px-2 py-1 text-xs text-foreground hover:bg-muted disabled:opacity-40"
-          title={`Esporta in ~/Downloads/Homun (${f})`}
+          title={t`Esporta in ~/Downloads/Homun (${f})`}
           onClick={() => void act(() => api.libraryExport(item.id, f))}
         >
-          {f === 'file' ? 'Esporta' : f}
+          {f === 'file' ? <Trans>Esporta</Trans> : f}
         </button>
       ))}
       <button disabled={busy} className="rounded-lg px-2 py-1 text-xs text-muted-foreground hover:bg-muted" onClick={() => void act(() => api.libraryPin(item.id, !item.pinned))}>
-        {item.pinned ? 'Sblocca' : 'Fissa'}
+        {item.pinned ? <Trans>Sblocca</Trans> : <Trans>Fissa</Trans>}
       </button>
-      <button disabled={busy} className="rounded-lg px-2 py-1 text-xs text-muted-foreground hover:bg-muted" onClick={() => setRenaming(true)}>Rinomina</button>
+      <button disabled={busy} className="rounded-lg px-2 py-1 text-xs text-muted-foreground hover:bg-muted" onClick={() => setRenaming(true)}><Trans>Rinomina</Trans></button>
       <button
         disabled={busy}
         className="rounded-lg px-2 py-1 text-xs text-destructive/80 hover:bg-red-950/40"
         onClick={() => {
-          if (confirm(`Cancellare «${item.title}» dalla libreria? Anche i file della voce vengono tolti.`)) void act(() => api.libraryDelete(item.id))
+          if (confirm(t`Cancellare «${item.title}» dalla libreria? Anche i file della voce vengono tolti.`)) void act(() => api.libraryDelete(item.id))
         }}
       >
-        Cancella
+        <Trans>Cancella</Trans>
       </button>
     </div>
   )
@@ -201,13 +213,13 @@ function LibraryItemView({ id }: { id: string }) {
   }
   useEffect(() => { void refresh() }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (err) return <div className="flex-1 px-6 py-4 text-sm text-destructive">{err} <button className="underline" onClick={() => openLibrary('')}>torna alla lista</button></div>
+  if (err) return <div className="flex-1 px-6 py-4 text-sm text-destructive">{err} <button className="underline" onClick={() => openLibrary('')}><Trans>torna alla lista</Trans></button></div>
   if (!content) return <div className="flex-1 px-6 py-4 text-sm text-muted-foreground">…</div>
 
   return (
     <div className="flex-1 overflow-y-auto scroll-thin px-6 py-4">
       <div className="mx-auto max-w-3xl space-y-4">
-        <button className="text-xs text-muted-foreground hover:text-foreground" onClick={() => openLibrary('')}>← Lista</button>
+        <button className="text-xs text-muted-foreground hover:text-foreground" onClick={() => openLibrary('')}><Trans>← Lista</Trans></button>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="min-w-0">
             <h3 className="truncate text-lg font-semibold text-foreground">
@@ -215,7 +227,7 @@ function LibraryItemView({ id }: { id: string }) {
               {item?.title ?? id}
             </h3>
             <p className="text-xs text-muted-foreground">
-              {content.authorName}{item?.tainted ? ' · ⚠ proveniente da dati esterni' : ''}
+              {content.authorName}{item?.tainted ? t` · ⚠ proveniente da dati esterni` : ''}
             </p>
           </div>
           {item && <ItemActions item={item} onChanged={() => void refresh(version ?? undefined)} />}
@@ -224,7 +236,7 @@ function LibraryItemView({ id }: { id: string }) {
         {content.kind === 'document' && (
           <>
             <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-              Versioni:
+              <Trans>Versioni:</Trans>
               {content.versions.map((v) => (
                 <button
                   key={v}
@@ -239,7 +251,7 @@ function LibraryItemView({ id }: { id: string }) {
                   className="rounded border border-border px-2 py-0.5 hover:bg-muted"
                   onClick={() => void api.libraryRestoreVersion(id, version).then(() => refresh())}
                 >
-                  ↩ Ripristina v{version} come nuova versione
+                  <Trans>↩ Ripristina v{version} come nuova versione</Trans>
                 </button>
               )}
             </div>
@@ -258,7 +270,7 @@ function LibraryItemView({ id }: { id: string }) {
             />
           ) : (
             <p className="rounded-xl border border-border bg-muted/50 px-4 py-3 text-sm text-foreground">
-              File: {item?.fileName} ({item?.fileSize} byte) — esportalo per vederlo.
+              <Trans>File: {item?.fileName} ({item?.fileSize} byte) — esportalo per vederlo.</Trans>
             </p>
           )
         )}
@@ -299,6 +311,7 @@ function DocumentBody({ markdown }: { markdown: string }) {
 
 /** Un grafico: Vega-Lite (SVG dal daemon) o Mermaid (strict, reso dalla UI) — sempre <img>. */
 function InlineChart({ lang, source }: { lang: 'vega-lite' | 'mermaid'; source: string }) {
+  // fase 17a: alt tradotti (il contenuto del grafico è dato del bot)
   const [url, setUrl] = useState<string | null>(null)
   const [failed, setFailed] = useState(false)
   useEffect(() => {
@@ -319,11 +332,11 @@ function InlineChart({ lang, source }: { lang: 'vega-lite' | 'mermaid'; source: 
     return () => { alive = false }
   }, [lang, source])
   if (failed) return <pre className="overflow-x-auto rounded-lg border border-border bg-muted px-3 py-2 text-xs text-muted-foreground">{source}</pre>
-  if (!url) return <p className="text-xs text-muted-foreground">…grafico…</p>
-  return <img className="max-w-full rounded-xl border border-border bg-white" src={url} alt={`grafico ${lang}`} />
+  if (!url) return <p className="text-xs text-muted-foreground"><Trans>…grafico…</Trans></p>
+  return <img className="max-w-full rounded-xl border border-border bg-white" src={url} alt={t`grafico ${lang}`} />
 }
 
 function ChartBody({ content }: { content: LibraryContentInfo }) {
-  if (content.svg) return <img className="max-w-full rounded-xl border border-border bg-white" src={svgDataUrl(content.svg)} alt="grafico" />
+  if (content.svg) return <img className="max-w-full rounded-xl border border-border bg-white" src={svgDataUrl(content.svg)} alt={t`grafico`} />
   return <InlineChart lang="mermaid" source={content.content ?? ''} />
 }

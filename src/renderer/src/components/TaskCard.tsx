@@ -3,15 +3,19 @@
 // sotto-transcript) e "Interrompi". Lo stato arriva dalla tabella tasks
 // (aggiornata via eventi), non dal testo del modello.
 import { useStore } from '../store'
+import { useLingui } from '@lingui/react'
+import { Trans } from '@lingui/react/macro'
+import { t, msg } from '@lingui/core/macro'
+import type { MessageDescriptor } from '@lingui/core'
 import type { TranscriptEntry, SendMessageMeta, SendMessagePayload } from '../../../shared/types'
 import type { TaskInfo } from '../../../shared/types'
 
-const STATUS_LABEL: Record<TaskInfo['status'], string> = {
-  working: 'in corso',
-  needs_input: ' attende la tua risposta',
-  done: 'completato',
-  failed: 'non riuscito',
-  cancelled: 'annullato'
+const STATUS_LABEL: Record<TaskInfo['status'], MessageDescriptor> = {
+  working: msg`in corso`,
+  needs_input: msg` attende la tua risposta`,
+  done: msg`completato`,
+  failed: msg`non riuscito`,
+  cancelled: msg`annullato`
 }
 const STATUS_CLS: Record<TaskInfo['status'], string> = {
   working: 'text-primary',
@@ -21,14 +25,15 @@ const STATUS_CLS: Record<TaskInfo['status'], string> = {
   cancelled: 'text-muted-foreground'
 }
 
-function fmtAgo(at: number, now: number): string {
+function fmtAgo(at: number, now: number): MessageDescriptor {
   const s = Math.max(0, Math.round((now - at) / 1000))
-  if (s < 60) return `${s} s fa`
-  if (s < 3600) return `${Math.round(s / 60)} min fa`
-  return `${Math.round(s / 3600)} h fa`
+  if (s < 60) return msg`${s} s fa`
+  if (s < 3600) return msg`${Math.round(s / 60)} min fa`
+  return msg`${Math.round(s / 3600)} h fa`
 }
 
 export function TaskCard({ entry }: { entry: TranscriptEntry }) {
+  const { i18n } = useLingui()
   const tasks = useStore((s) => s.tasks)
   const openTask = useStore((s) => s.openTask)
   const cancelTask = useStore((s) => s.cancelTask)
@@ -44,17 +49,16 @@ export function TaskCard({ entry }: { entry: TranscriptEntry }) {
   return (
     <div className="max-w-[75%] rounded-2xl rounded-bl-md border border-border bg-card px-4 py-3 shadow-soft">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-medium uppercase tracking-wide text-primary/80">Task</span>
+        <span className="text-xs font-medium uppercase tracking-wide text-primary/80"><Trans>Task</Trans></span>
         <span className={`text-[11px] font-medium ${STATUS_CLS[status]}`}>
           {status === 'working' ? '⏳' : status === 'needs_input' ? '❓' : status === 'done' ? '✓' : status === 'failed' ? '⚠' : '⛔'}
-          {' '}{STATUS_LABEL[status]}
+          {' '}{i18n.t(STATUS_LABEL[status])}
         </span>
       </div>
       <p className="mt-1 text-sm text-foreground">{message.title}</p>
       {task && (
         <p className="mt-0.5 text-[11px] text-muted-foreground">
-          ultima attività {fmtAgo(task.updatedAt, now)}
-          {status === 'needs_input' ? ' — rispondi dalla vista del task (Apri)' : ''}
+          <Trans>ultima attività {i18n.t(fmtAgo(task.updatedAt, now))}{status === 'needs_input' ? t` — rispondi dalla vista del task (Apri)` : ''}</Trans>
         </p>
       )}
       <div className="mt-2 flex gap-2">
@@ -62,14 +66,14 @@ export function TaskCard({ entry }: { entry: TranscriptEntry }) {
           className="rounded-lg border border-primary bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
           onClick={() => openTask(message.taskId)}
         >
-          Apri
+          <Trans>Apri</Trans>
         </button>
         {open && (
           <button
             className="rounded-lg bg-muted px-3 py-1.5 text-xs text-foreground hover:bg-accent"
             onClick={() => cancelTask(message.taskId)}
           >
-            Interrompi
+            <Trans>Interrompi</Trans>
           </button>
         )}
       </div>

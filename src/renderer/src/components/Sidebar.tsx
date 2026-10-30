@@ -4,6 +4,9 @@
 // Le sezioni restano intestazioni della lista; i sottoagenti non compaiono
 // (come prima).
 import { useState } from 'react'
+import { useLingui } from '@lingui/react'
+import { Trans, Plural } from '@lingui/react/macro'
+import { t } from '@lingui/core/macro'
 import { Plus, Library as LibraryIcon } from 'lucide-react'
 import { useStore } from '../store'
 import { filterSidebar } from '../sidebar-utils'
@@ -21,6 +24,7 @@ import {
 
 /** Una riga della lista dei bot: mascotte con lo stato di U3, nome, anteprima, pillole. */
 function AgentRow({ a }: { a: Agent }) {
+  const { i18n } = useLingui()
   const info = useBotInfo(a.id)
   const select = useStore((s) => s.select)
   const activeId = useStore((s) => s.activeId)
@@ -35,8 +39,10 @@ function AgentRow({ a }: { a: Agent }) {
   const effectiveMain = mainAgentId ?? agents[0]?.id ?? null
   // fase 8/12: gli indicatori già esistenti (task in corso, sottoagenti al
   // lavoro), resi come piccole pillole
-  const workingTasks = tasks.filter((t) => t.agentId === a.id && t.status === 'working').length
+  const workingTasks = tasks.filter((tk) => tk.agentId === a.id && tk.status === 'working').length
   const runningSubagents = subagents.filter((x) => x.parentId === a.id && x.status === 'running').length
+  // fase 17a: anteprima e stato possono essere descriptor (si traducono qui)
+  const preview = previews[a.id] || info.statusText
   return (
     <button
       onClick={() => void select(a.id)}
@@ -51,26 +57,29 @@ function AgentRow({ a }: { a: Agent }) {
         <span className="flex items-center gap-1.5">
           <span className="truncate text-sm font-medium">{a.name}</span>
           {a.id === effectiveMain && (
-            <span className="shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary" title="Bot principale: coordina gli altri bot">
-              Principale
+            <span className="shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary" title={t`Bot principale: coordina gli altri bot`}>
+              <Trans>Principale</Trans>
             </span>
           )}
         </span>
         <span className="block truncate text-xs text-muted-foreground">
-          {previews[a.id] || info.statusText}
+          {typeof preview === 'string' ? preview : i18n.t(preview)}
         </span>
         <span className="mt-0.5 flex flex-wrap items-center gap-1">
           {workingTasks > 0 && (
-            <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{workingTasks} task</span>
+            <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+              <Plural value={workingTasks} one="# task" other="# task" />
+            </span>
           )}
           {runningSubagents > 0 && (
-            <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{runningSubagents} sottoagenti</span>
+            <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+              <Plural value={runningSubagents} one="# sottoagente" other="# sottoagenti" />
+            </span>
           )}
           {/* stato live — nome del tool e target, mai testo del modello */}
           {activity && (
             <span className="max-w-full truncate rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground" title={`${activity.tool} ${activity.target}`}>
-              sta facendo {activity.tool}
-              {activity.target ? ` · ${activity.target}` : ''}
+              <Trans>sta facendo {activity.tool}{activity.target ? ` · ${activity.target}` : ''}</Trans>
             </span>
           )}
         </span>
@@ -117,7 +126,7 @@ function GroupRow({ g }: { g: GroupInfo }) {
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-medium">{g.name}</span>
         <span className="block truncate text-xs text-muted-foreground">
-          {g.members.map((m) => m.name).join(', ') || 'solo tu'}
+          {g.members.map((m) => m.name).join(', ') || <Trans>solo tu</Trans>}
         </span>
       </span>
     </button>
@@ -146,21 +155,21 @@ function AccountMenu() {
         <span className="min-w-0 text-sm">
           <span className="block font-medium leading-tight">Homun</span>
           <span className="block truncate text-xs text-muted-foreground">
-            {main ? (main.model ? `${main.providerId ?? ''} · ${main.model}` : 'nessun modello') : 'nessun bot'}
+            {main ? (main.model ? `${main.providerId ?? ''} · ${main.model}` : t`nessun modello`) : t`nessun bot`}
           </span>
         </span>
       </DropdownMenuTrigger>
       <DropdownMenuContent side="top" align="start" className="w-56">
-        <DropdownMenuItem onClick={() => { setSettingsTab('connettori'); setSettingsOpen(true) }}>Connetti app</DropdownMenuItem>
-        <DropdownMenuItem onClick={() => { setSettingsTab(null); setSettingsOpen(true) }}>Impostazioni</DropdownMenuItem>
+        <DropdownMenuItem onClick={() => { setSettingsTab('connettori'); setSettingsOpen(true) }}><Trans>Connetti app</Trans></DropdownMenuItem>
+        <DropdownMenuItem onClick={() => { setSettingsTab(null); setSettingsOpen(true) }}><Trans>Impostazioni</Trans></DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuSub>
-          <DropdownMenuSubTrigger>Tema</DropdownMenuSubTrigger>
+          <DropdownMenuSubTrigger><Trans>Tema</Trans></DropdownMenuSubTrigger>
           <DropdownMenuSubContent>
             <DropdownMenuRadioGroup value={theme} onValueChange={(v) => setTheme(v as UiTheme)}>
-              <DropdownMenuRadioItem value="system">Sistema</DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="light">Chiaro</DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="dark">Scuro</DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="system"><Trans>Sistema</Trans></DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="light"><Trans>Chiaro</Trans></DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="dark"><Trans>Scuro</Trans></DropdownMenuRadioItem>
             </DropdownMenuRadioGroup>
           </DropdownMenuSubContent>
         </DropdownMenuSub>
@@ -189,14 +198,14 @@ export function Sidebar() {
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Cerca"
-          aria-label="Cerca bot e gruppi"
+          placeholder={t`Cerca`}
+          aria-label={t`Cerca bot e gruppi`}
           className="min-w-0 flex-1 rounded-xl bg-muted px-3 py-2 text-sm outline-none placeholder:text-muted-foreground"
         />
         <button
           onClick={() => setNewOpen(true)}
-          aria-label="Nuovo bot"
-          title="Nuovo bot"
+          aria-label={t`Nuovo bot`}
+          title={t`Nuovo bot`}
           className="grid size-9 shrink-0 place-items-center rounded-xl bg-foreground text-background transition hover:opacity-90"
         >
           <Plus className="size-4" />
@@ -217,7 +226,7 @@ export function Sidebar() {
         {/* i gruppi sotto i bot, con le mascotte dei membri al posto di un'icona */}
         {shownGroups.length > 0 && (
           <div className="mt-3 border-t border-border/60 pt-2">
-            <p className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Gruppi</p>
+            <p className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"><Trans>Gruppi</Trans></p>
             {shownGroups.map((g) => (
               <GroupRow key={g.id} g={g} />
             ))}
@@ -231,7 +240,7 @@ export function Sidebar() {
           onClick={() => (openLibraryId === null ? openLibrary('') : openLibrary(null))}
         >
           <LibraryIcon className="size-4" />
-          Libreria
+          <Trans>Libreria</Trans>
         </button>
       </nav>
       <AccountMenu />

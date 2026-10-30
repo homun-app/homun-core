@@ -2,6 +2,7 @@
 import { Tray, Menu, app, BrowserWindow, nativeImage } from 'electron'
 import { join } from 'node:path'
 import { listAgents } from './store/db'
+import { mainStrings } from './i18n'
 import type { AgentStatus } from '../shared/types'
 
 const statusGlyph: Record<AgentStatus, string> = {
@@ -48,10 +49,12 @@ export function refreshTray(): void {
     Menu.buildFromTemplate([
       ...items,
       { type: 'separator' as const },
-      { label: 'Apri Homun', click: () => { const w = getWindow(); w?.show(); w?.focus() } },
-      { label: 'Esci', click: () => app.quit() }
+      // fase 17a: i testi del tray nella lingua attiva del main
+      { label: mainStrings().tray.open, click: () => { const w = getWindow(); w?.show(); w?.focus() } },
+      { label: mainStrings().tray.quit, click: () => app.quit() }
     ])
   )
+  tray.setToolTip(mainStrings().tooltip)
 }
 
 export function createTray(getMainWindow: () => BrowserWindow | undefined): void {

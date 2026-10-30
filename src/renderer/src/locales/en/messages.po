@@ -1,0 +1,2151 @@
+msgid ""
+msgstr ""
+"POT-Creation-Date: 2026-10-30 11:49+0100\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"X-Generator: @lingui/cli\n"
+"Language: en\n"
+"Project-Id-Version: \n"
+"Report-Msgid-Bugs-To: \n"
+"PO-Revision-Date: \n"
+"Last-Translator: \n"
+"Language-Team: \n"
+"Plural-Forms: \n"
+
+#: src/renderer/src/components/TaskCard.tsx
+msgid " — rispondi dalla vista del task (Apri)"
+msgstr " — answer from the task view (Open)"
+
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid " · ⚠ proveniente da dati esterni"
+msgstr " · ⚠ from external data"
+
+#: src/renderer/src/components/Chat.tsx
+msgid " · coordinatore"
+msgstr " · coordinator"
+
+#: src/renderer/src/components/Settings.tsx
+msgid " · nuova versione disponibile (aggiorna = nuova card in chat)"
+msgstr " · new version available (update = new card in chat)"
+
+#. placeholder {0}: p.lastError.status
+#: src/renderer/src/components/Settings.tsx
+msgid " (HTTP {0})"
+msgstr " (HTTP {0})"
+
+#: src/renderer/src/components/TaskCard.tsx
+msgid " attende la tua risposta"
+msgstr " waiting for your answer"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "— connettore —"
+msgstr "— connector —"
+
+#: src/renderer/src/components/WidgetCard.tsx
+msgid "— domanda scavalcata, hai proseguito senza rispondere"
+msgstr "— question skipped, you went on without answering"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "— modello —"
+msgstr "— model —"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "— provider —"
+msgstr "— provider —"
+
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "…grafico…"
+msgstr "…chart…"
+
+#: src/renderer/src/components/DraftCard.tsx
+msgid "(nessun destinatario)"
+msgstr "(no recipient)"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "(nessuna regola)"
+msgstr "(no rules)"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "(server manuale)"
+msgstr "(manual server)"
+
+#: src/renderer/src/components/SkillsPanel.tsx
+msgid "(vuota)"
+msgstr "(empty)"
+
+#. placeholder {0}: i.fileSize ?? 0
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "{0, plural, one {# byte} other {# byte}}"
+msgstr "{0, plural, one {# byte} other {# bytes}}"
+
+#. placeholder {0}: testResult[p.id].models?.length ?? 0
+#: src/renderer/src/components/Settings.tsx
+msgid "{0, plural, one {✓ # modello disponibile} other {✓ # modelli disponibili}}"
+msgstr "{0, plural, one {✓ # model available} other {✓ # models available}}"
+
+#. placeholder {0}: tk.status
+#: src/renderer/src/components/RightPanel.tsx
+msgid "{0}"
+msgstr "{0}"
+
+#. placeholder {0}: Math.round(s / 3600)
+#: src/renderer/src/components/SubagentCard.tsx
+msgid "{0} h"
+msgstr "{0} h"
+
+#. placeholder {0}: Math.round(s / 3600)
+#: src/renderer/src/components/TaskCard.tsx
+msgid "{0} h fa"
+msgstr "{0} h ago"
+
+#. placeholder {0}: Math.round(s / 60)
+#: src/renderer/src/components/SubagentCard.tsx
+msgid "{0} min"
+msgstr "{0} min"
+
+#. placeholder {0}: Math.round(s / 60)
+#: src/renderer/src/components/TaskCard.tsx
+msgid "{0} min fa"
+msgstr "{0} min ago"
+
+#. placeholder {0}: p.skills.length
+#. placeholder {1}: p.servers.length
+#. placeholder {2}: p.updateAvailable ? t` · nuova versione disponibile (aggiorna = nuova card in chat)` : ''
+#: src/renderer/src/components/Settings.tsx
+msgid "{0} skill · {1} server{2}"
+msgstr "{0, plural, one {# skill} other {# skills}} · {1, plural, one {# server} other {# servers}}{2}"
+
+#. placeholder {0}: i18n.t(fmtAgo(sub.startedAt ?? sub.createdAt, now))
+#. placeholder {1}: sub.status === 'done' && sub.summary ? ` — ${sub.summary.slice(0, 120)}` : ''
+#: src/renderer/src/components/SubagentCard.tsx
+msgid "{0} trascorsi{1}"
+msgstr "{0} elapsed{1}"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "{fallback}: {eff}"
+msgstr "{fallback}: {eff}"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "{fallback}…"
+msgstr "{fallback}…"
+
+#: src/renderer/src/bot/bot-state.ts
+msgid "{name}"
+msgstr "{name}"
+
+#: src/renderer/src/bot/bot-state.ts
+msgid "{name} è contento"
+msgstr "{name} is happy"
+
+#: src/renderer/src/bot/bot-state.ts
+msgid "{name}, aspetta te"
+msgstr "{name} is waiting for you"
+
+#: src/renderer/src/bot/bot-state.ts
+msgid "{name}, sta ascoltando"
+msgstr "{name} is listening"
+
+#: src/renderer/src/bot/bot-state.ts
+msgid "{name}, sta pensando"
+msgstr "{name} is thinking"
+
+#: src/renderer/src/bot/bot-state.ts
+msgid "{name}, sta scrivendo"
+msgstr "{name} is typing"
+
+#: src/renderer/src/components/Sidebar.tsx
+msgid "{runningSubagents, plural, one {# sottoagente} other {# sottoagenti}}"
+msgstr "{runningSubagents, plural, one {# subagent} other {# subagents}}"
+
+#: src/renderer/src/components/SubagentCard.tsx
+msgid "{s} s"
+msgstr "{s} s"
+
+#: src/renderer/src/components/TaskCard.tsx
+msgid "{s} s fa"
+msgstr "{s} s ago"
+
+#: src/renderer/src/components/Sidebar.tsx
+msgid "{workingTasks, plural, one {# task} other {# task}}"
+msgstr "{workingTasks, plural, one {# task} other {# tasks}}"
+
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "← Lista"
+msgstr "← List"
+
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "↩ Ripristina v{version} come nuova versione"
+msgstr "↩ Restore v{version} as a new version"
+
+#: src/renderer/src/components/VaultSettings.tsx
+msgid "+ Aggiungi contatto"
+msgstr "+ Add contact"
+
+#: src/renderer/src/components/VaultSettings.tsx
+msgid "+ Aggiungi login"
+msgstr "+ Add login"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "+ Aggiungi provider"
+msgstr "+ Add provider"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "+ Aggiungi server MCP"
+msgstr "+ Add MCP server"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "+ Nuova routine"
+msgstr "+ New routine"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "★ principale"
+msgstr "★ main"
+
+#: src/renderer/src/components/LibraryCards.tsx
+msgid "⚠ dati letti da una fonte esterna"
+msgstr "⚠ data read from an external source"
+
+#: src/renderer/src/components/Chat.tsx
+msgid "⚠ errore"
+msgstr "⚠ error"
+
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "⚠ esterno"
+msgstr "⚠ external"
+
+#: src/renderer/src/components/LibraryCards.tsx
+msgid "⚠ Richiesta nata dopo contenuti letti dal web: controlla che l'origine sia davvero quella del sito."
+msgstr "⚠ Request raised after reading web content: check the origin is really the site's."
+
+#. placeholder {0}: String(entry.meta?.ruleMatched ?? '')
+#: src/renderer/src/components/ApprovalCard.tsx
+msgid "⚡ Approvato automaticamente dalla regola: {0}"
+msgstr "⚡ Auto-approved by rule: {0}"
+
+#: src/renderer/src/components/Chat.tsx
+msgid "⚡ Chiedi al volo"
+msgstr "⚡ Quick ask"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "⚡ Continua da solo quando l'azione rispetta queste regole"
+msgstr "⚡ Continue on my own when the action follows these rules"
+
+#. placeholder {0}: String(meta.ruleMatched ?? '')
+#: src/renderer/src/components/DraftCard.tsx
+msgid "⚡ Inviata automaticamente dalla regola: {0}"
+msgstr "⚡ Sent automatically by rule: {0}"
+
+#: src/renderer/src/components/RuleProposalCard.tsx
+msgid "⚡ Regola proposta — continuo da solo quando…"
+msgstr "⚡ Proposed rule — I continue on my own when…"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "⛔ Fermati e chiedimi sempre quando…"
+msgstr "⛔ Stop and always ask me when…"
+
+#: src/renderer/src/components/RuleProposalCard.tsx
+msgid "⛔ Regola proposta — mi fermo e chiedo sempre quando…"
+msgstr "⛔ Proposed rule — I stop and always ask when…"
+
+#: src/renderer/src/components/DraftCard.tsx
+msgid "✉️ Email"
+msgstr "✉️ Email"
+
+#. placeholder {0}: tests[s.id].tools?.length ?? 0
+#. placeholder {1}: (tests[s.id].tools ?? []).join(', ').slice(0, 200)
+#: src/renderer/src/components/Settings.tsx
+msgid "✓ {0} tool: {1}"
+msgstr "✓ {0} tool: {1}"
+
+#: src/renderer/src/components/ConnectorCards13.tsx
+msgid "✓ Aggiunto — il bot ha ricevuto l'esito"
+msgstr "✓ Added — the bot received the result"
+
+#: src/renderer/src/components/Chat.tsx
+msgid "✓ Appena il provider è a posto preparo i tuoi bot."
+msgstr "✓ As soon as the provider is ready I'll set up your bots."
+
+#: src/renderer/src/components/ConnectorCard.tsx
+msgid "✓ Connesso — il bot può usarlo"
+msgstr "✓ Connected — the bot can use it"
+
+#: src/renderer/src/components/LibraryCards.tsx
+msgid "✓ consentito"
+msgstr "✓ allowed"
+
+#: src/renderer/src/components/ApprovalCard.tsx
+msgid "✓ Consentito"
+msgstr "✓ Allowed"
+
+#. placeholder {0}: labels(meta.respondedValue as string | string[])
+#: src/renderer/src/components/WidgetCard.tsx
+msgid "✓ Hai risposto: {0}"
+msgstr "✓ You answered: {0}"
+
+#: src/renderer/src/components/ConnectorCards13.tsx
+msgid "✓ Installato — il bot ha ricevuto l'esito"
+msgstr "✓ Installed — the bot received the result"
+
+#: src/renderer/src/components/DraftCard.tsx
+msgid "✓ Inviata"
+msgstr "✓ Sent"
+
+#: src/renderer/src/components/RuleProposalCard.tsx
+msgid "✓ Regola aggiunta (revocabile da Impostazioni → Approvazione automatica)"
+msgstr "✓ Rule added (revocable from Settings → Auto-review)"
+
+#: src/renderer/src/components/LibraryCards.tsx
+msgid "✓ salvato"
+msgstr "✓ saved"
+
+#: src/renderer/src/components/LibraryCards.tsx
+msgid "✓ salvato nel vault"
+msgstr "✓ saved in the vault"
+
+#. placeholder {0}: testResult[p.id].error ?? ''
+#. placeholder {0}: tests[s.id].error ?? ''
+#: src/renderer/src/components/Settings.tsx
+msgid "✕ {0}"
+msgstr "✕ {0}"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "✨ Suggerisci dal transcript"
+msgstr "✨ Suggest from transcript"
+
+#: src/renderer/src/components/DraftCard.tsx
+msgid "💬 Slack"
+msgstr "💬 Slack"
+
+#: src/renderer/src/components/DraftCard.tsx
+msgid "📤 Invio esterno"
+msgstr "📤 External send"
+
+#: src/renderer/src/components/Chat.tsx
+msgid "🗂 Memoria"
+msgstr "🗂 Memory"
+
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "🗂 Memoria di questo bot"
+msgstr "🗂 This bot's memory"
+
+#: src/renderer/src/components/Chat.tsx
+msgid "🧠 Ragionamento"
+msgstr "🧠 Reasoning"
+
+#: src/renderer/src/components/Chat.tsx
+msgid "🛠 Skill"
+msgstr "🛠 Skills"
+
+#: src/renderer/src/components/SkillsPanel.tsx
+msgid "🛠 Skill di questo bot"
+msgstr "🛠 This bot's skills"
+
+#. placeholder {0}: meta.toAgentName
+#: src/renderer/src/components/Chat.tsx
+msgid "A {0}"
+msgstr "To {0}"
+
+#: src/renderer/src/components/DraftCard.tsx
+msgid "A:"
+msgstr "To:"
+
+#: src/renderer/src/components/ConnectorCards13.tsx
+msgid "accesso con il tuo account (OAuth)"
+msgstr "sign-in with your account (OAuth)"
+
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "agente"
+msgstr "agent"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "aggiungi"
+msgstr "add"
+
+#: src/renderer/src/components/ConnectorCards13.tsx
+#: src/renderer/src/components/Settings.tsx
+msgid "Aggiungi"
+msgstr "Add"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "aggiungi gateway"
+msgstr "add gateway"
+
+#: src/renderer/src/components/RuleProposalCard.tsx
+msgid "Aggiungi regola"
+msgstr "Add rule"
+
+#. placeholder {0}: message.name
+#: src/renderer/src/components/ConnectorCards13.tsx
+msgid "Aggiungi server MCP: {0}"
+msgstr "Add MCP server: {0}"
+
+#: src/renderer/src/components/ConnectorCards13.tsx
+msgid "Aggiungo…"
+msgstr "Adding…"
+
+#: src/renderer/src/components/SubagentCard.tsx
+msgid "al lavoro"
+msgstr "working"
+
+#: src/renderer/src/components/Chat.tsx
+msgid "Al lavoro: le card di approvazione del figlio compaiono qui."
+msgstr "At work: the child's approval cards appear here."
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Al massimo 20 azioni approvate per turno; un dubbio del revisore diventa sempre una card."
+msgstr "At most 20 actions approved per turn; any reviewer doubt always becomes a card."
+
+#: src/renderer/src/components/Settings.tsx
+msgid "All'uscita trovi l'URL con il token da copiare: qualunque sistema può far scattare la routine con un POST."
+msgstr "On save you get the URL with the token to copy: any system can trigger the routine with a POST."
+
+#: src/renderer/src/components/Chat.tsx
+msgid "Allega immagine (per modelli vision)"
+msgstr "Attach image (for vision models)"
+
+#: src/renderer/src/components/DraftCard.tsx
+msgid "Altri parametri (verranno inviati così):"
+msgstr "Other parameters (sent as is):"
+
+#: src/renderer/src/components/WidgetCard.tsx
+msgid "Altro (testo libero)…"
+msgstr "Other (free text)…"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "analizzo…"
+msgstr "analyzing…"
+
+#: src/renderer/src/components/BotDialogs.tsx
+#: src/renderer/src/components/DraftCard.tsx
+#: src/renderer/src/components/LibraryCards.tsx
+#: src/renderer/src/components/LibraryPanel.tsx
+#: src/renderer/src/components/MemoryPanel.tsx
+#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/VaultSettings.tsx
+msgid "Annulla"
+msgstr "Cancel"
+
+#: src/renderer/src/components/ApprovalCard.tsx
+msgid "Annullata (interrupt)"
+msgstr "Cancelled (interrupt)"
+
+#: src/renderer/src/components/LibraryCards.tsx
+#: src/renderer/src/components/RightPanel.tsx
+#: src/renderer/src/components/TaskCard.tsx
+msgid "annullato"
+msgstr "cancelled"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "API key (vuoto per locali)"
+msgstr "API key (empty for local)"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "App"
+msgstr "Apps"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Approvazione automatica"
+msgstr "Automatic approval"
+
+#: src/renderer/src/components/LibraryCards.tsx
+#: src/renderer/src/components/SubagentCard.tsx
+#: src/renderer/src/components/TaskCard.tsx
+msgid "Apri"
+msgstr "Open"
+
+#: src/renderer/src/components/ApprovalCard.tsx
+#: src/renderer/src/components/DraftCard.tsx
+msgid "Apri Impostazioni → Approvazione automatica con una regola precompilata"
+msgstr "Open Settings → Auto-review with a prefilled rule"
+
+#: src/renderer/src/components/Chat.tsx
+msgid "Apri le impostazioni del provider"
+msgstr "Open provider settings"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Argomenti (args) non sono JSON valido"
+msgstr "Arguments (args) are not valid JSON"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Argomenti separati da spazio"
+msgstr "Arguments separated by spaces"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "args JSON, es. {\"query\":\"x\"}"
+msgstr "args JSON, e.g. {\"query\":\"x\"}"
+
+#: src/renderer/src/bot/bot-state.ts
+msgid "Aspetta te"
+msgstr "Waiting for you"
+
+#: src/renderer/src/components/RightPanel.tsx
+msgid "attende te"
+msgstr "waiting for you"
+
+#: src/renderer/src/components/RightPanel.tsx
+#: src/renderer/src/components/Settings.tsx
+msgid "attiva"
+msgstr "active"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "attivate"
+msgstr "enabled"
+
+#: src/renderer/src/components/RightPanel.tsx
+msgid "Attività"
+msgstr "Activity"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "auto-review"
+msgstr "auto-review"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "auto-review…"
+msgstr "auto-review…"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "autorizza nel browser…"
+msgstr "authorizing in the browser…"
+
+#: src/renderer/src/components/ConnectorCard.tsx
+msgid "Autorizza nel browser…"
+msgstr "Authorize in the browser…"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Avvia all'accesso"
+msgstr "Start at login"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "avvisa"
+msgstr "notify"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Base URL (es. https://api.z.ai)"
+msgstr "Base URL (e.g. https://api.z.ai)"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Bearer token (opzionale — salvato cifrato)"
+msgstr "Bearer token (optional — stored encrypted)"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Blocca"
+msgstr "Block"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Bot"
+msgstr "Bots"
+
+#: src/renderer/src/components/Sidebar.tsx
+msgid "Bot principale: coordina gli altri bot"
+msgstr "Main bot: coordinates the other bots"
+
+#: src/renderer/src/components/DraftCard.tsx
+msgid "bozza — si invia solo se confermi"
+msgstr "draft — sent only if you confirm"
+
+#. placeholder {0}: meta.message.to ?? '?'
+#: src/renderer/src/sidebar-utils.ts
+msgid "Bozza per {0}"
+msgstr "Draft for {0}"
+
+#: src/renderer/src/components/BotDialogs.tsx
+#: src/renderer/src/components/RightPanel.tsx
+msgid "Cambia aspetto"
+msgstr "Change appearance"
+
+#: src/renderer/src/components/ApprovalCard.tsx
+msgid "Cambio di automazione — serve la tua approvazione"
+msgstr "Automation change — needs your approval"
+
+#. placeholder {0}: fill.fields.join(', ')
+#: src/renderer/src/components/LibraryCards.tsx
+msgid "Campi: {0}"
+msgstr "Fields: {0}"
+
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "Cancella"
+msgstr "Delete"
+
+#. placeholder {0}: item.title
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "Cancellare «{0}» dalla libreria? Anche i file della voce vengono tolti."
+msgstr "Delete \"{0}\" from the library? The item's files are removed too."
+
+#: src/renderer/src/components/RightPanel.tsx
+#: src/renderer/src/components/Settings.tsx
+msgid "caricamento…"
+msgstr "loading…"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Cassaforte"
+msgstr "Vault"
+
+#: src/renderer/src/components/Sidebar.tsx
+msgid "Cerca"
+msgstr "Search"
+
+#: src/renderer/src/components/Sidebar.tsx
+msgid "Cerca bot e gruppi"
+msgstr "Search bots and groups"
+
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "Cerca per titolo…"
+msgstr "Search by title…"
+
+#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/Sidebar.tsx
+msgid "Chiaro"
+msgstr "Light"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "chiave / token Bearer (salvata cifrata)"
+msgstr "key / Bearer token (stored encrypted)"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "chiave per la ricerca web di Ollama"
+msgstr "key for Ollama's web search"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "chiave salvata (scrivi per sostituirla)"
+msgstr "key saved (type to replace it)"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Chiedi approvazione"
+msgstr "Ask for approval"
+
+#. placeholder {0}: agent.name
+#: src/renderer/src/components/Chat.tsx
+msgid "Chiedi qualcosa a {0} senza inquinare la conversazione…"
+msgstr "Ask {0} something without polluting the conversation…"
+
+#: src/renderer/src/components/ConnectorCards13.tsx
+#: src/renderer/src/components/Settings.tsx
+msgid "chiudi"
+msgstr "close"
+
+#: src/renderer/src/components/ui/dialog.tsx
+msgid "Chiudi"
+msgstr "Close"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "circa (±15 min)"
+msgstr "around (±15 min)"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Client OAuth configurato ✓"
+msgstr "OAuth client configured ✓"
+
+#: src/renderer/src/components/BotDialogs.tsx
+msgid "Colore {col}"
+msgstr "Color {col}"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Comando (es. node)"
+msgstr "Command (e.g. node)"
+
+#: src/renderer/src/components/LibraryCards.tsx
+msgid "Compilazione login"
+msgstr "Login fill"
+
+#. placeholder {0}: fill.label
+#. placeholder {1}: fill.origin
+#: src/renderer/src/components/LibraryCards.tsx
+msgid "Compilo il login «{0}» su <0>{1}</0>?"
+msgstr "Fill in the \"{0}\" login on <0>{1}</0>?"
+
+#: src/renderer/src/components/RightPanel.tsx
+#: src/renderer/src/components/TaskCard.tsx
+msgid "completato"
+msgstr "completed"
+
+#: src/renderer/src/components/VaultSettings.tsx
+msgid "Concessioni"
+msgstr "Grants"
+
+#. placeholder {0}: selected.length ? ` (${selected.length})` : ''
+#: src/renderer/src/components/WidgetCard.tsx
+msgid "Conferma{0}"
+msgstr "Confirm{0}"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Confermo che questo tool legge soltanto e non modifica nulla (server aggiunto a mano: la dichiarazione \"sola lettura\" non è verificata)"
+msgstr "I confirm this tool only reads and changes nothing (manually added server: the \"read-only\" claim is unverified)"
+
+#: src/renderer/src/components/Chat.tsx
+#: src/renderer/src/components/RightPanel.tsx
+msgid "configura modello → Impostazioni"
+msgstr "set up model → Settings"
+
+#. placeholder {0}: String(entry.meta?.templateName ?? '')
+#: src/renderer/src/components/Chat.tsx
+msgid "Configurazione da template: {0}"
+msgstr "Template setup: {0}"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "connesso"
+msgstr "connected"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "connetti"
+msgstr "connect"
+
+#: src/renderer/src/components/ConnectorCard.tsx
+#: src/renderer/src/components/Settings.tsx
+msgid "Connetti"
+msgstr "Connect"
+
+#: src/renderer/src/components/Chat.tsx
+#: src/renderer/src/components/Sidebar.tsx
+msgid "Connetti app"
+msgstr "Connect apps"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Connettori"
+msgstr "Connectors"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Consegna e presenza"
+msgstr "Delivery and presence"
+
+#: src/renderer/src/components/Chat.tsx
+msgid "Consegnato"
+msgstr "Delivered"
+
+#: src/renderer/src/components/LibraryCards.tsx
+msgid "Consenti"
+msgstr "Allow"
+
+#: src/renderer/src/components/ApprovalCard.tsx
+msgid "Consenti per questo turno"
+msgstr "Allow for this turn"
+
+#: src/renderer/src/components/ApprovalCard.tsx
+#: src/renderer/src/components/Settings.tsx
+msgid "Consenti sempre"
+msgstr "Always allow"
+
+#: src/renderer/src/components/ApprovalCard.tsx
+msgid "Consenti una volta"
+msgstr "Allow once"
+
+#: src/renderer/src/components/VaultSettings.tsx
+msgid "Contatti"
+msgstr "Contacts"
+
+#: src/renderer/src/components/LibraryCards.tsx
+msgid "Contatto da salvare nel vault"
+msgstr "Contact to save in the vault"
+
+#: src/renderer/src/components/RightPanel.tsx
+msgid "coordinatore"
+msgstr "coordinator"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "copia curl"
+msgstr "copy curl"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Cosa deve fare il Bot a ogni esecuzione"
+msgstr "What the Bot should do on each run"
+
+#: src/renderer/src/components/BotDialogs.tsx
+msgid "Crea"
+msgstr "Create"
+
+#: src/renderer/src/components/BotDialogs.tsx
+msgid "Crea nuovo bot"
+msgstr "Create new bot"
+
+#: src/renderer/src/components/ApprovalCard.tsx
+#: src/renderer/src/components/DraftCard.tsx
+msgid "Crea regola da questa azione"
+msgstr "Create rule from this action"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Crea routine"
+msgstr "Create routine"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Crea un bot da template: parte con un messaggio di configurazione che crea routine (in pausa), memorie e domande di attivazione."
+msgstr "Create a bot from a template: it starts with a setup message that creates routines (paused), memories and activation questions."
+
+#: src/renderer/src/components/BotDialogs.tsx
+msgid "Creatura"
+msgstr "Creature"
+
+#. placeholder {0}: secretRefs.join(', ')
+#: src/renderer/src/components/ApprovalCard.tsx
+msgid "Credenziali usate: {0}"
+msgstr "Credentials used: {0}"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "cron"
+msgstr "cron"
+
+#. placeholder {0}: m.source
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "da {0}"
+msgstr "from {0}"
+
+#. placeholder {0}: String(entry.meta?.fromAgentName ?? 'altro bot')
+#: src/renderer/src/components/Chat.tsx
+msgid "Da {0}"
+msgstr "From {0}"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "da autorizzare"
+msgstr "needs authorization"
+
+#. placeholder {0}: message.settings.map((st) => st.key).join(', ')
+#: src/renderer/src/components/ConnectorCards13.tsx
+msgid "da configurare: {0} (Impostazioni)"
+msgstr "to configure: {0} (Settings)"
+
+#: src/renderer/src/components/BotDialogs.tsx
+msgid "Dai un nome al tuo bot"
+msgstr "Give your bot a name"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Descrizione / ruolo del bot (va nel system prompt)"
+msgstr "Bot description / role (goes in the system prompt)"
+
+#: src/renderer/src/components/RightPanel.tsx
+msgid "Dettagli"
+msgstr "Details"
+
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "di"
+msgstr "by"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "disattivate"
+msgstr "disabled"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "disconnetti"
+msgstr "disconnect"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "disinstalla"
+msgstr "uninstall"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "disponibile"
+msgstr "available"
+
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "Documenti"
+msgstr "Documents"
+
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "Documenti, grafici e file dei tuoi bot"
+msgstr "Documents, charts and files from your bots"
+
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "documento"
+msgstr "document"
+
+#: src/renderer/src/components/LibraryCards.tsx
+msgid "Documento in libreria"
+msgstr "Document in library"
+
+#: src/renderer/src/components/Chat.tsx
+msgid "Domanda effimera sul contesto (non entra nel transcript)"
+msgstr "Ephemeral question about context (not added to the transcript)"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "domenica"
+msgstr "Sunday"
+
+#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/VaultSettings.tsx
+msgid "elimina"
+msgstr "delete"
+
+#: src/renderer/src/components/MemoryPanel.tsx
+#: src/renderer/src/components/SkillsPanel.tsx
+msgid "Elimina"
+msgstr "Delete"
+
+#: src/renderer/src/components/VaultSettings.tsx
+msgid "Email (separate da virgola)"
+msgstr "Email (comma separated)"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "email in arrivo"
+msgstr "incoming email"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "English"
+msgstr "English"
+
+#: src/renderer/src/components/DraftCard.tsx
+#: src/renderer/src/components/Settings.tsx
+msgid "errore"
+msgstr "error"
+
+#. placeholder {0}: err instanceof Error ? err.message : String(err)
+#: src/renderer/src/components/Chat.tsx
+msgid "Errore: {0}"
+msgstr "Error: {0}"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "es. comandi ls e cat dentro la home del bot"
+msgstr "e.g. ls and cat commands inside the bot's home"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "es. Usa questo account solo per lavoro; le email in italiano vanno riassunte in bulleted list…"
+msgstr "e.g. Use this account for work only; emails in Italian should be summarized as a bulleted list…"
+
+#: src/renderer/src/components/Chat.tsx
+msgid "Esito"
+msgstr "Result"
+
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "Esporta"
+msgstr "Export"
+
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "Esporta in ~/Downloads/Homun ({f})"
+msgstr "Export to ~/Downloads/Homun ({f})"
+
+#: src/renderer/src/components/LibraryCards.tsx
+#: src/renderer/src/components/VaultSettings.tsx
+msgid "Etichetta (es. Portale ASPI)"
+msgstr "Label (e.g. ASPI portal)"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "evento del calendario"
+msgstr "calendar event"
+
+#: src/renderer/src/components/SubagentCard.tsx
+msgid "fallito"
+msgstr "failed"
+
+#: src/renderer/src/components/Chat.tsx
+msgid "Fallito"
+msgstr "Failed"
+
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "Fatti e regole che il bot ricorda tra i turni. Scope \"utente\" = condivisi da tutti i bot."
+msgstr "Facts and rules the bot remembers across turns. \"User\" scope = shared by all bots."
+
+#: src/renderer/src/components/Chat.tsx
+#: src/renderer/src/components/SubagentCard.tsx
+msgid "Ferma"
+msgstr "Stop"
+
+#: src/renderer/src/components/SubagentCard.tsx
+msgid "fermato"
+msgstr "stopped"
+
+#. placeholder {0}: message.trust
+#: src/renderer/src/components/ConnectorCards13.tsx
+msgid "fiducia: {0} · come gira: {runtime}"
+msgstr "trust: {0} · how it runs: {runtime}"
+
+#. placeholder {0}: message.trust
+#. placeholder {1}: message.sha12
+#. placeholder {2}: message.repoUrl && <> · <a className="text-primary hover:underline" href={message.repoUrl} target="_blank" rel="noreferrer">{t`repository`}</a></>
+#: src/renderer/src/components/ConnectorCards13.tsx
+msgid "fiducia: {0} · commit {1}{2}"
+msgstr "trust: {0} · commit {1}{2}"
+
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "file"
+msgstr "file"
+
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "File"
+msgstr "Files"
+
+#. placeholder {0}: item?.fileName
+#. placeholder {1}: item?.fileSize
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "File: {0} ({1} byte) — esportalo per vederlo."
+msgstr "File: {0} ({1} byte) — export it to view it."
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Finestra di consegna"
+msgstr "Delivery window"
+
+#: src/renderer/src/components/SubagentCard.tsx
+msgid "finito"
+msgstr "done"
+
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "Fissa"
+msgstr "Pin"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Fuso orario"
+msgstr "Time zone"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Fuso orario (es. Europe/Rome)"
+msgstr "Time zone (e.g. Europe/Rome)"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Gateway"
+msgstr "Gateway"
+
+#: src/renderer/src/components/BotDialogs.tsx
+msgid "Gelatina"
+msgstr "Jelly"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Generali"
+msgstr "General"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "giorni feriali"
+msgstr "weekdays"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "giorno"
+msgstr "day"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "giovedì"
+msgstr "Thursday"
+
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "Grafici"
+msgstr "Charts"
+
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "grafico"
+msgstr "chart"
+
+#. placeholder {0}: i.chartKind ?? ''
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "grafico {0}"
+msgstr "chart {0}"
+
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "grafico {lang}"
+msgstr "chart {lang}"
+
+#: src/renderer/src/components/LibraryCards.tsx
+msgid "Grafico in libreria"
+msgstr "Chart in library"
+
+#: src/renderer/src/components/Sidebar.tsx
+msgid "Gruppi"
+msgstr "Groups"
+
+#: src/renderer/src/components/Chat.tsx
+msgid "Gruppo"
+msgstr "Group"
+
+#: src/renderer/src/components/Chat.tsx
+msgid "Gruppo non più disponibile — chiudi"
+msgstr "Group no longer available — close"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "guida"
+msgstr "guide"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "http (URL)"
+msgstr "http (URL)"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "https://utente.github.io/sandbot/client.json"
+msgstr "https://user.github.io/sandbot/client.json"
+
+#: src/renderer/src/components/VaultSettings.tsx
+msgid "I contatti sono dati personali VISIBILI ai bot (servono a scrivere bozze) ma cifrati a riposo."
+msgstr "Contacts are personal data VISIBLE to bots (they're used to write drafts) but encrypted at rest."
+
+#: src/renderer/src/components/Settings.tsx
+msgid "I messaggi non urgenti delle routine aspettano questa finestra (o l'apertura della chat del bot)."
+msgstr "Non-urgent routine messages wait for this window (or for the bot's chat to open)."
+
+#: src/renderer/src/components/VaultSettings.tsx
+msgid "I secret servono ai COMANDI dei bot (<0>{SECRET_TEMPLATE}</0>): il valore entra solo nell'env del processo, mai nel transcript."
+msgstr "Secrets are used by the bots' COMMANDS (<0>{SECRET_TEMPLATE}</0>): the value only enters the process env, never the transcript."
+
+#: src/renderer/src/components/Settings.tsx
+msgid "idField (es. \"messages[].id\")"
+msgstr "idField (e.g. \"messages[].id\")"
+
+#: src/renderer/src/components/RuleProposalCard.tsx
+msgid "Ignora"
+msgstr "Ignore"
+
+#: src/renderer/src/components/ConnectorCard.tsx
+msgid "Il bot ha provato a usare questa app ma la sessione è scaduta."
+msgstr "The bot tried to use this app but the session has expired."
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Il daemon dei Bot parte quando accedi al Mac e resta attivo con la finestra chiusa (LaunchAgent con riavvio automatico dopo un crash). Puoi disattivarlo qui."
+msgstr "The Bot daemon starts when you log in to your Mac and stays active with the window closed (LaunchAgent with automatic restart after a crash). You can turn it off here."
+
+#: src/renderer/src/components/Chat.tsx
+msgid "Il sottoagente non ha ancora attività."
+msgstr "The subagent has no activity yet."
+
+#: src/renderer/src/components/Chat.tsx
+msgid "Il task non ha ancora attività."
+msgstr "The task has no activity yet."
+
+#: src/renderer/src/components/VaultSettings.tsx
+msgid "Il vault è cifrato a riposo (AES-256-GCM, chiave nel Keychain). I valori non si rileggono mai in chiaro: si possono solo sostituire. I bot vedono i nomi con <0>list-credentials</0> e i login si compilano con <1>fill_credential</1>, sempre col tuo consenso."
+msgstr "The vault is encrypted at rest (AES-256-GCM, key in the Keychain). Values are never read back in clear: they can only be replaced. Bots see names with <0>list-credentials</0> and logins are filled with <1>fill_credential</1>, always with your consent."
+
+#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/Sidebar.tsx
+msgid "Impostazioni"
+msgstr "Settings"
+
+#: src/renderer/src/components/SubagentCard.tsx
+msgid "in attesa di conferma"
+msgstr "waiting for confirmation"
+
+#: src/renderer/src/components/Chat.tsx
+msgid "In attesa di conferma: rispondi alle card qui sopra."
+msgstr "Waiting for confirmation: answer the cards above."
+
+#: src/renderer/src/components/SubagentCard.tsx
+msgid "in coda"
+msgstr "queued"
+
+#: src/renderer/src/components/RightPanel.tsx
+#: src/renderer/src/components/TaskCard.tsx
+msgid "in corso"
+msgstr "in progress"
+
+#: src/renderer/src/components/RightPanel.tsx
+#: src/renderer/src/components/Settings.tsx
+msgid "in pausa"
+msgstr "paused"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "in pausa per assenza"
+msgstr "paused for absence"
+
+#. placeholder {0}: formatTime(p.cooldownUntil)
+#: src/renderer/src/components/Settings.tsx
+msgid "in raffreddamento fino a {0}"
+msgstr "cooling down until {0}"
+
+#: src/renderer/src/components/VaultSettings.tsx
+msgid "Indirizzo"
+msgstr "Address"
+
+#: src/renderer/src/components/ConnectorCards13.tsx
+msgid "Installa"
+msgstr "Install"
+
+#. placeholder {0}: message.name
+#: src/renderer/src/components/ConnectorCards13.tsx
+msgid "Installa plugin: {0}"
+msgstr "Install plugin: {0}"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Installati"
+msgstr "Installed"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "installati…"
+msgstr "installed…"
+
+#: src/renderer/src/components/ConnectorCards13.tsx
+msgid "Installo…"
+msgstr "Installing…"
+
+#: src/renderer/src/components/TaskCard.tsx
+msgid "Interrompi"
+msgstr "Interrupt"
+
+#: src/renderer/src/components/Chat.tsx
+msgid "Interrompi task"
+msgstr "Interrupt task"
+
+#: src/renderer/src/components/Chat.tsx
+#: src/renderer/src/components/DraftCard.tsx
+#: src/renderer/src/components/WidgetCard.tsx
+msgid "Invia"
+msgstr "Send"
+
+#: src/renderer/src/components/DraftCard.tsx
+msgid "inviata"
+msgstr "sent"
+
+#: src/renderer/src/components/SkillsPanel.tsx
+msgid "istruzioni"
+msgstr "instructions"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Istruzioni personalizzate (vanno nel prompt del bot quando il connettore è attivo)"
+msgstr "Custom instructions (added to the bot's prompt when the connector is active)"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Italiano"
+msgstr "Italiano"
+
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "La libreria è vuota: i documenti, i grafici e i file che i bot preparano finiscono qui."
+msgstr "The library is empty: documents, charts and files your bots prepare end up here."
+
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "La libreria supera 2 GB: valuta cosa cancellare (nessun blocco automatico)."
+msgstr "The library is over 2 GB: consider deleting something (no automatic blocking)."
+
+#: src/renderer/src/components/Settings.tsx
+msgid "La routine gira quando torni al computer dopo un'assenza lunga."
+msgstr "The routine runs when you come back to the computer after a long absence."
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Le app si collegano come server MCP con OAuth: i loro tool diventano <0>mcp__<server>__<tool></0>. I token stanno cifrati nel Keychain. Il bot può proporre un'app in chat, ma la connessione parte solo dal tuo click."
+msgstr "Apps connect as MCP servers with OAuth: their tools become <0>mcp__<server>__<tool></0>. Tokens are stored encrypted in the Keychain. The bot can suggest an app in chat, but the connection starts only from your click."
+
+#: src/renderer/src/components/VaultSettings.tsx
+msgid "Le concessioni \"Sempre per questo sito\" del fill dei login: il bot compila QUEL login su QUELL'origine senza chiedere ogni volta. Revocabili una a una; non esistono concessioni generiche."
+msgstr "The \"Always for this site\" grants for login fills: the bot fills THAT login on THAT origin without asking every time. Revocable one by one; generic grants don't exist."
+
+#: src/renderer/src/components/ApprovalCard.tsx
+msgid "Le modifiche di automazione chiedono ogni volta"
+msgstr "Automation changes ask every time"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Le ricerche dei bot vengono inviate a questi servizi, secondo i loro termini d'uso: <0>You.com</0> · <1>Exa</1> · <2>Tavily</2>"
+msgstr "Bot searches are sent to these services under their terms of use: <0>You.com</0> · <1>Exa</1> · <2>Tavily</2>"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Le routine sono attività automatiche del Bot: su orario (cron o \"ogni giorno alle 9, circa\"), su un'email in arrivo, prima di un evento del calendario, da un webhook o quando torni al computer. I loro messaggi non urgenti aspettano la finestra di consegna."
+msgstr "Routines are the Bot's automatic activities: on a schedule (cron or \"every day at 9, roughly\"), on incoming email, before a calendar event, from a webhook or when you come back to the computer. Their non-urgent messages wait for the delivery window."
+
+#: src/renderer/src/components/LibraryPanel.tsx
+#: src/renderer/src/components/RightPanel.tsx
+#: src/renderer/src/components/Sidebar.tsx
+msgid "Libreria"
+msgstr "Library"
+
+#. placeholder {0}: (libStats.bytes / 1024 / 1024 / 1024).toFixed(1)
+#: src/renderer/src/components/Settings.tsx
+msgid "Libreria: {0} GB — oltre i 2 GB consigliati. Valuta cosa cancellare dalla vista Libreria (nessun blocco automatico)."
+msgstr "Library: {0} GB — above the recommended 2 GB. Consider deleting something from the Library view (no automatic blocking)."
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Lingua"
+msgstr "Language"
+
+#: src/renderer/src/components/VaultSettings.tsx
+msgid "Login"
+msgstr "Logins"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Look-around al rientro dopo (ore di assenza)"
+msgstr "Look-around on return after (hours away)"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "lun–ven"
+msgstr "Mon–Fri"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "lunedì"
+msgstr "Monday"
+
+#. placeholder {0}: agent.name
+#: src/renderer/src/components/Chat.tsx
+msgid "Manda un messaggio a {0} per iniziare."
+msgstr "Send a message to {0} to get started."
+
+#: src/renderer/src/components/Settings.tsx
+msgid "manuale"
+msgstr "manual"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Marketplace"
+msgstr "Marketplace"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "marketplace ufficiale"
+msgstr "official marketplace"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "martedì"
+msgstr "Tuesday"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "mattina"
+msgstr "morning"
+
+#: src/renderer/src/components/RightPanel.tsx
+msgid "Membri"
+msgstr "Members"
+
+#: src/renderer/src/components/RightPanel.tsx
+msgid "Memoria"
+msgstr "Memory"
+
+#: src/renderer/src/components/Chat.tsx
+#: src/renderer/src/components/RightPanel.tsx
+msgid "Memoria del bot (fatti e regole ricordati)"
+msgstr "Bot memory (remembered facts and rules)"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "mercoledì"
+msgstr "Wednesday"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "mese"
+msgstr "month"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "metti in pausa"
+msgstr "pause"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "minuti prima dell'evento"
+msgstr "minutes before the event"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "minuti tra i poll (minimo 2)"
+msgstr "minutes between polls (minimum 2)"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "modelli"
+msgstr "models"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "modelli…"
+msgstr "models…"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "modello… (vuoto = default del provider)"
+msgstr "model… (empty = provider default)"
+
+#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/VaultSettings.tsx
+msgid "modifica"
+msgstr "edit"
+
+#: src/renderer/src/components/DraftCard.tsx
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "Modifica"
+msgstr "Edit"
+
+#. placeholder {0}: card.kind === 'login' ? 'login' : 'secret'
+#: src/renderer/src/components/LibraryCards.tsx
+msgid "Modulo sicuro — {0}"
+msgstr "Secure form — {0}"
+
+#: src/renderer/src/components/Chat.tsx
+msgid "Mostra il pannello destro"
+msgstr "Show the right panel"
+
+#: src/renderer/src/components/Chat.tsx
+msgid "Mostra/nascondi il ragionamento del modello e gli eventi di turno"
+msgstr "Show/hide the model's reasoning and turn events"
+
+#: src/renderer/src/components/Chat.tsx
+msgid "Nascondi il pannello destro"
+msgstr "Hide the right panel"
+
+#: src/renderer/src/components/ApprovalCard.tsx
+#: src/renderer/src/components/LibraryCards.tsx
+msgid "Nega"
+msgstr "Deny"
+
+#: src/renderer/src/components/LibraryCards.tsx
+msgid "negato"
+msgstr "denied"
+
+#: src/renderer/src/components/ApprovalCard.tsx
+msgid "Negato"
+msgstr "Denied"
+
+#. placeholder {0}: message.runtime.command
+#: src/renderer/src/components/ConnectorCards13.tsx
+msgid "nel box: {0}"
+msgstr "in the shared computer: {0}"
+
+#: src/renderer/src/components/Chat.tsx
+msgid "Nessun agente"
+msgstr "No agent"
+
+#: src/renderer/src/components/Sidebar.tsx
+msgid "nessun bot"
+msgstr "no bot"
+
+#: src/renderer/src/components/DraftCard.tsx
+msgid "nessun canale di invio collegato"
+msgstr "no sending channel connected"
+
+#: src/renderer/src/components/RightPanel.tsx
+msgid "Nessun documento per ora."
+msgstr "No documents yet."
+
+#: src/renderer/src/components/Chat.tsx
+msgid "Nessun messaggio nel gruppo."
+msgstr "No messages in the group."
+
+#: src/renderer/src/components/Sidebar.tsx
+msgid "nessun modello"
+msgstr "no model"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "nessun server o plugin installato"
+msgstr "no server or plugin installed"
+
+#: src/renderer/src/components/RightPanel.tsx
+msgid "Nessun sottoagente."
+msgstr "No subagents."
+
+#: src/renderer/src/components/RightPanel.tsx
+msgid "Nessun task."
+msgstr "No tasks."
+
+#: src/renderer/src/components/Settings.tsx
+msgid "nessun tool elencato"
+msgstr "no tools listed"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "nessun tool riconosciuto nel connettore: configura tool e idField a mano"
+msgstr "no tool recognized in the connector: set tool and idField by hand"
+
+#: src/renderer/src/components/VaultSettings.tsx
+msgid "Nessuna concessione: ogni fill chiede la card."
+msgstr "No grants: every fill asks with a card."
+
+#: src/renderer/src/components/ConnectorCards13.tsx
+msgid "nessuna credenziale"
+msgstr "no credentials"
+
+#: src/renderer/src/components/RightPanel.tsx
+msgid "Nessuna descrizione."
+msgstr "No description."
+
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "Nessuna memoria: chiedi al bot di ricordare una preferenza."
+msgstr "No memories: ask the bot to remember a preference."
+
+#: src/renderer/src/components/RightPanel.tsx
+msgid "Nessuna routine."
+msgstr "No routines."
+
+#: src/renderer/src/components/SkillsPanel.tsx
+msgid "Nessuna skill: chiedi al bot di crearne una con update_skill."
+msgstr "No skills: ask the bot to create one with update_skill."
+
+#: src/renderer/src/components/ConnectorCards13.tsx
+msgid "No"
+msgstr "No"
+
+#: src/renderer/src/components/VaultSettings.tsx
+msgid "Nome"
+msgstr "Name"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Nome (es. api_key_github)"
+msgstr "Name (e.g. api_key_github)"
+
+#: src/renderer/src/components/LibraryCards.tsx
+#: src/renderer/src/components/VaultSettings.tsx
+msgid "Nome (es. API_KEY)"
+msgstr "Name (e.g. API_KEY)"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Nome (es. Composio)"
+msgstr "Name (e.g. Composio)"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Nome (es. weather)"
+msgstr "Name (e.g. weather)"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Nome (es. Z.ai)"
+msgstr "Name (e.g. Z.ai)"
+
+#: src/renderer/src/components/LibraryCards.tsx
+#: src/renderer/src/components/VaultSettings.tsx
+msgid "Nome utente"
+msgstr "Username"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "non connesso"
+msgstr "not connected"
+
+#. placeholder {0}: message.ignored.join(', ')
+#: src/renderer/src/components/ConnectorCards13.tsx
+msgid "Non importati (non girano in Homun): {0}"
+msgstr "Not imported (they don't run in Homun): {0}"
+
+#: src/renderer/src/components/RightPanel.tsx
+#: src/renderer/src/components/TaskCard.tsx
+msgid "non riuscito"
+msgstr "failed"
+
+#: src/renderer/src/components/LibraryCards.tsx
+msgid "Non salvare"
+msgstr "Don't save"
+
+#: src/renderer/src/components/LibraryCards.tsx
+msgid "non salvato"
+msgstr "not saved"
+
+#: src/renderer/src/components/VaultSettings.tsx
+msgid "Note"
+msgstr "Notes"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Notifiche per agente"
+msgstr "Notifications per agent"
+
+#: src/renderer/src/components/Sidebar.tsx
+msgid "Nuovo bot"
+msgstr "New bot"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "OAuth"
+msgstr "OAuth"
+
+#: src/renderer/src/bot/bot-state.ts
+msgid "Offline"
+msgstr "Offline"
+
+#: src/renderer/src/components/DraftCard.tsx
+msgid "Oggetto:"
+msgstr "Subject:"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "ogni…"
+msgstr "every…"
+
+#: src/renderer/src/bot/bot-state.ts
+msgid "Online"
+msgstr "Online"
+
+#: src/renderer/src/components/BotDialogs.tsx
+msgid "oppure parti da un modello"
+msgstr "or start from a template"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "ora"
+msgstr "hour"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "orario"
+msgstr "schedule"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "orario lavorativo"
+msgstr "working hours"
+
+#: src/renderer/src/components/LibraryCards.tsx
+msgid "Origine https://…"
+msgstr "Origin https://…"
+
+#: src/renderer/src/components/VaultSettings.tsx
+msgid "Origini https://… (separate da virgola)"
+msgstr "Origins https://… (comma separated)"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "owner/repo di GitHub oppure URL git https"
+msgstr "GitHub owner/repo or https git URL"
+
+#: src/renderer/src/components/LibraryCards.tsx
+#: src/renderer/src/components/VaultSettings.tsx
+msgid "Password"
+msgstr "Password"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Pausa delle routine dopo (giorni di assenza)"
+msgstr "Pause routines after (days away)"
+
+#: src/renderer/src/components/Chat.tsx
+msgid "pensando…"
+msgstr "thinking…"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "per bot:"
+msgstr "per bot:"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Permessi"
+msgstr "Permissions"
+
+#: src/renderer/src/components/BotDialogs.tsx
+msgid "Pixel"
+msgstr "Pixel"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Plugin nel formato di Claude Code. Predefinito: <0>anthropics/claude-plugins-official</0> (puoi rimuoverlo). Di un plugin Homun importa SOLO skill e server MCP; hook, bin/ e comandi non girano mai."
+msgstr "Plugins in the Claude Code format. Default: <0>anthropics/claude-plugins-official</0> (you can remove it). Homun imports ONLY skills and MCP servers from a plugin; hooks, bin/ and commands never run."
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Politica predefinita"
+msgstr "Default policy"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "poll di un connettore"
+msgstr "connector poll"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "preciso"
+msgstr "exact"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "predefinito"
+msgstr "default"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "predefinito…"
+msgstr "default…"
+
+#: src/renderer/src/components/Sidebar.tsx
+msgid "Principale"
+msgstr "Main"
+
+#: src/renderer/src/components/RightPanel.tsx
+msgid "Principale — coordina gli altri bot"
+msgstr "Main — coordinates the other bots"
+
+#: src/renderer/src/components/SkillsPanel.tsx
+msgid "Procedure riutilizzabili che il bot carica con il tool skill(). Crearle o aggiornarle richiede la tua approvazione."
+msgstr "Reusable procedures the bot loads with the skill() tool. Creating or updating them needs your approval."
+
+#: src/renderer/src/components/ApprovalCard.tsx
+msgid "Prompt:"
+msgstr "Prompt:"
+
+#: src/renderer/src/components/ConnectorCards13.tsx
+msgid "Proposta fatta dopo aver letto contenuti esterni: controlla che sia quello che volevi"
+msgstr "Proposal made after reading external content: check it's what you wanted"
+
+#: src/renderer/src/components/RuleProposalCard.tsx
+msgid "Proposta ignorata"
+msgstr "Proposal ignored"
+
+#. placeholder {0}: formatDate(r.next_run)
+#: src/renderer/src/components/Settings.tsx
+msgid "prossima: {0}"
+msgstr "next: {0}"
+
+#: src/renderer/src/components/RightPanel.tsx
+msgid "Prossime routine"
+msgstr "Upcoming routines"
+
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "Proveniente da dati esterni"
+msgstr "From external data"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Provider"
+msgstr "Providers"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "provider del revisore…"
+msgstr "reviewer's provider…"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Provider locali e cloud — chiunque parli OpenAI-compatible funziona."
+msgstr "Local and cloud providers — anything that speaks OpenAI-compatible works."
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Punto di contatto principale dell'utente: coordina gli altri bot"
+msgstr "User's main point of contact: coordinates the other bots"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Quando arriva un'e-mail che corrisponde a… (query)"
+msgstr "When an email arrives matching… (query)"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "quando torni al computer"
+msgstr "when you return to the computer"
+
+#: src/renderer/src/components/ApprovalCard.tsx
+msgid "Questa azione chiede sempre l'approvazione"
+msgstr "This action always asks for approval"
+
+#: src/renderer/src/components/Chat.tsx
+msgid "Ragionamento"
+msgstr "Reasoning"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Regole per tool: consenti sempre / chiedi / blocca. \"Consenti sempre\" nelle card salva una standing grant."
+msgstr "Per-tool rules: always allow / ask / block. \"Always allow\" on a card saves a standing grant."
+
+#. placeholder {0}: message.runtime.host
+#: src/renderer/src/components/ConnectorCards13.tsx
+msgid "remoto ({0})"
+msgstr "remote ({0})"
+
+#: src/renderer/src/components/RightPanel.tsx
+#: src/renderer/src/components/Settings.tsx
+msgid "Rendi principale"
+msgstr "Make main"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Rendi questo bot il punto di contatto principale dell'utente"
+msgstr "Make this bot the user's main point of contact"
+
+#. placeholder {0}: String(entry.meta?.taskTitle ?? '')
+#. placeholder {1}: String(entry.meta?.taskRef ?? '')
+#: src/renderer/src/components/Chat.tsx
+msgid "Report del task: {0} ({1})"
+msgstr "Task report: {0} ({1})"
+
+#. placeholder {0}: sub.reportPath
+#: src/renderer/src/components/Chat.tsx
+msgid "report: {0}"
+msgstr "report: {0}"
+
+#: src/renderer/src/components/ConnectorCards13.tsx
+msgid "repository"
+msgstr "repository"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Revisione automatica"
+msgstr "Auto-review"
+
+#: src/renderer/src/components/VaultSettings.tsx
+msgid "revoca"
+msgstr "revoke"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "riattiva"
+msgstr "resume"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "ricerca web"
+msgstr "web search"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Ricerca web"
+msgstr "Web search"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "ricerca web attiva (chiave nel vault)"
+msgstr "web search active (key in the vault)"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "ricerca web non attiva"
+msgstr "web search not active"
+
+#: src/renderer/src/components/ApprovalCard.tsx
+msgid "Richiede la tua approvazione"
+msgstr "Needs your approval"
+
+#: src/renderer/src/components/SkillsPanel.tsx
+msgid "richiudi"
+msgstr "close"
+
+#. placeholder {0}: 'error' in r ? r.error ?? '' : ''
+#: src/renderer/src/components/Settings.tsx
+msgid "riconnessione non riuscita: {0}"
+msgstr "reconnection failed: {0}"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "riconnesso"
+msgstr "reconnected"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "riconnetti"
+msgstr "reconnect"
+
+#: src/renderer/src/components/ConnectorCard.tsx
+#: src/renderer/src/components/Settings.tsx
+msgid "Riconnetti"
+msgstr "Reconnect"
+
+#: src/renderer/src/components/Chat.tsx
+msgid "Riepilogo turni precedenti"
+msgstr "Summary of earlier turns"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "rimuovi"
+msgstr "remove"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Rimuovi"
+msgstr "Remove"
+
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "Rinomina"
+msgstr "Rename"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "riserva"
+msgstr "fallback"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "riserva…"
+msgstr "fallback…"
+
+#: src/renderer/src/components/Chat.tsx
+msgid "risposta di ripiego"
+msgstr "fallback answer"
+
+#: src/renderer/src/components/Chat.tsx
+msgid "risultato"
+msgstr "result"
+
+#: src/renderer/src/components/BotDialogs.tsx
+msgid "Robottino"
+msgstr "Robot"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Routine"
+msgstr "Routines"
+
+#: src/renderer/src/components/ApprovalCard.tsx
+msgid "Routine:"
+msgstr "Routine:"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "sabato"
+msgstr "Saturday"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "salva"
+msgstr "save"
+
+#: src/renderer/src/components/BotDialogs.tsx
+#: src/renderer/src/components/DraftCard.tsx
+#: src/renderer/src/components/LibraryCards.tsx
+#: src/renderer/src/components/LibraryPanel.tsx
+#: src/renderer/src/components/MemoryPanel.tsx
+#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/VaultSettings.tsx
+msgid "Salva"
+msgstr "Save"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Salva chiave"
+msgstr "Save key"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "salva cifrato"
+msgstr "save encrypted"
+
+#: src/renderer/src/components/LibraryCards.tsx
+msgid "Salva nel vault"
+msgstr "Save to vault"
+
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "Sblocca"
+msgstr "Unpin"
+
+#: src/renderer/src/components/LibraryCards.tsx
+#: src/renderer/src/components/SubagentCard.tsx
+msgid "scaduto"
+msgstr "expired"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Scansiona locale (Ollama / LM Studio)"
+msgstr "Scan local (Ollama / LM Studio)"
+
+#: src/renderer/src/components/DraftCard.tsx
+msgid "Scarta"
+msgstr "Discard"
+
+#: src/renderer/src/components/DraftCard.tsx
+msgid "scartata"
+msgstr "discarded"
+
+#: src/renderer/src/components/DraftCard.tsx
+msgid "Scartata"
+msgstr "Discarded"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Scegli con quale modello pensa ciascun bot."
+msgstr "Choose which model each bot thinks with."
+
+#: src/renderer/src/components/ApprovalCard.tsx
+msgid "Schedule:"
+msgstr "Schedule:"
+
+#. placeholder {0}: agent.name
+#: src/renderer/src/components/Chat.tsx
+msgid "Scrivi a {0}…"
+msgstr "Write to {0}…"
+
+#: src/renderer/src/components/Chat.tsx
+msgid "Scrivi nel gruppo (usa @nome per chiamare un bot, @tutti per tutti)"
+msgstr "Write in the group (use @name to call a bot, @all for everyone)"
+
+#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/Sidebar.tsx
+msgid "Scuro"
+msgstr "Dark"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Se ospiti un documento dei metadati del client (CIMD, es. su GitHub Pages, https e con percorso), incollalo qui; vuoto = registrazione dinamica (DCR)."
+msgstr "If you host a client metadata document (CIMD, e.g. on GitHub Pages, https with a path), paste it here; empty = dynamic registration (DCR)."
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Se una regola corrisponde (e nessuna regola di fermata), il revisore può approvare l'azione o l'invio della bozza."
+msgstr "If a rule matches (and no stop rule does), the reviewer can approve the action or the draft send."
+
+#: src/renderer/src/components/VaultSettings.tsx
+msgid "Segreti"
+msgstr "Secrets"
+
+#: src/renderer/src/components/LibraryCards.tsx
+#: src/renderer/src/components/VaultSettings.tsx
+msgid "Segreto TOTP (opzionale)"
+msgstr "TOTP secret (optional)"
+
+#: src/renderer/src/components/LibraryCards.tsx
+msgid "Sempre per questo sito"
+msgstr "Always for this site"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Serve un client OAuth tuo (tipo \"Desktop app\"):"
+msgstr "You need your own OAuth client (a \"Desktop app\"):"
+
+#. placeholder {0}: needs.keys.join(', ')
+#. placeholder {1}: needs.kind === 'key' ? '(header)' : needs.kind === 'env' ? '(variabile d&rsquo;ambiente)' : '(impostazione del plugin)'
+#: src/renderer/src/components/Settings.tsx
+msgid "serve: {0} {1}"
+msgstr "needs: {0} {1}"
+
+#: src/renderer/src/components/ConnectorCards13.tsx
+msgid "serve: {needs}"
+msgstr "needs: {needs}"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Server del registro pubblico e plugin installati. Chiavi, header e variabili stanno cifrati: si compilano qui, MAI in chat."
+msgstr "Servers from the public registry and installed plugins. Keys, headers and variables are stored encrypted: fill them in here, NEVER in chat."
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Server MCP manuali (stdio o HTTP, con header/bearer salvati cifrati)."
+msgstr "Manual MCP servers (stdio or HTTP, with headers/bearer stored encrypted)."
+
+#: src/renderer/src/components/ConnectorCards13.tsx
+msgid "Server pubblicato da terzi: può leggere e fare quello che gli permettono i suoi strumenti"
+msgstr "Server published by third parties: it can read and do whatever its tools allow"
+
+#. placeholder {0}: message.servers.map((sv) => `${sv.name} (${sv.runtimeLabel})`).join(', ')
+#: src/renderer/src/components/ConnectorCards13.tsx
+msgid "server: {0}"
+msgstr "server: {0}"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "settimana"
+msgstr "week"
+
+#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/Sidebar.tsx
+msgid "Sistema"
+msgstr "System"
+
+#: src/renderer/src/components/RightPanel.tsx
+msgid "Skill"
+msgstr "Skills"
+
+#: src/renderer/src/components/Chat.tsx
+#: src/renderer/src/components/RightPanel.tsx
+msgid "Skill del bot (procedure riutilizzabili)"
+msgstr "Bot skills (reusable procedures)"
+
+#. placeholder {0}: message.skills.join(', ')
+#: src/renderer/src/components/ConnectorCards13.tsx
+msgid "skill: {0}"
+msgstr "skill: {0}"
+
+#: src/renderer/src/components/Sidebar.tsx
+msgid "solo tu"
+msgstr "just you"
+
+#: src/renderer/src/components/VaultSettings.tsx
+msgid "sostituisci"
+msgstr "replace"
+
+#: src/renderer/src/components/Chat.tsx
+#: src/renderer/src/components/SubagentCard.tsx
+msgid "Sottoagente"
+msgstr "Subagent"
+
+#: src/renderer/src/components/RightPanel.tsx
+msgid "Sottoagenti"
+msgstr "Subagents"
+
+#. placeholder {0}: activity.tool
+#. placeholder {1}: activity.target ? ` · ${activity.target}` : ''
+#: src/renderer/src/components/Sidebar.tsx
+msgid "sta facendo {0}{1}"
+msgstr "doing {0}{1}"
+
+#. placeholder {0}: input.activityTool
+#: src/renderer/src/bot/bot-state.ts
+msgid "Sta facendo: {0}"
+msgstr "Working on: {0}"
+
+#: src/renderer/src/components/Chat.tsx
+msgid "sta pensando…"
+msgstr "thinking…"
+
+#: src/renderer/src/bot/bot-state.ts
+msgid "Sta pensando…"
+msgstr "Thinking…"
+
+#: src/renderer/src/bot/bot-state.ts
+msgid "Sta scrivendo…"
+msgstr "Typing…"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "stdio (comando locale)"
+msgstr "stdio (local command)"
+
+#: src/renderer/src/components/Chat.tsx
+#: src/renderer/src/components/RightPanel.tsx
+#: src/renderer/src/components/TaskCard.tsx
+msgid "Task"
+msgstr "Task"
+
+#: src/renderer/src/components/BotDialogs.tsx
+msgid "Tech"
+msgstr "Tech"
+
+#: src/renderer/src/components/VaultSettings.tsx
+msgid "Telefoni"
+msgstr "Phones"
+
+#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/Sidebar.tsx
+msgid "Tema"
+msgstr "Theme"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "test"
+msgstr "test"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "test…"
+msgstr "testing…"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Titolo (es. Riepilogo email del mattino)"
+msgstr "Title (e.g. Morning email digest)"
+
+#: src/renderer/src/components/ConnectorCard.tsx
+msgid "token scaduto"
+msgstr "token expired"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "tool"
+msgstr "tools"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "tool (mcp__…__…)"
+msgstr "tool (mcp__…__…)"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "tool scelto dal connettore: {chosen}"
+msgstr "tool chosen from the connector: {chosen}"
+
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "torna alla lista"
+msgstr "back to the list"
+
+#. placeholder {0}: group.members.map((m) => m.name + (m.coordinator ? ' (coord.)' : '')).join(', ')
+#: src/renderer/src/components/Chat.tsx
+msgid "Tu + {0}"
+msgstr "You + {0}"
+
+#. placeholder {0}: e.content
+#: src/renderer/src/sidebar-utils.ts
+msgid "Tu: {0}"
+msgstr "You: {0}"
+
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "Tutti"
+msgstr "All"
+
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "Tutti i bot"
+msgstr "All bots"
+
+#. placeholder {0}: i18n.t(fmtAgo(task.updatedAt, now))
+#. placeholder {1}: status === 'needs_input' ? t` — rispondi dalla vista del task (Apri)` : ''
+#: src/renderer/src/components/TaskCard.tsx
+msgid "ultima attività {0}{1}"
+msgstr "last activity {0}{1}"
+
+#. placeholder {0}: formatDate(r.last_run)
+#: src/renderer/src/components/Settings.tsx
+msgid "ultima: {0}"
+msgstr "last: {0}"
+
+#. placeholder {0}: p.lastError.kind
+#. placeholder {1}: p.lastError.status !== undefined ? t` (HTTP ${p.lastError.status})` : ''
+#: src/renderer/src/components/Settings.tsx
+msgid "ultimo errore: {0}{1}"
+msgstr "last error: {0}{1}"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Un gateway custodisce l'accesso a tutte le app che colleghi lì: è un servizio di terzi"
+msgstr "A gateway holds the keys to all the apps you connect there: it's a third-party service"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Un modello piccolo rivede le azioni che chiedono approvazione secondo queste regole e può lasciarle passare da solo. Sta dopo il gate dei permessi e non cambia mai i divieti: le azioni che modificano il comportamento futuro del bot, i comandi che eseguono altri comandi e i turni aperti da altri bot o da eventi esterni chiedono comunque."
+msgstr "A small model reviews actions that ask for approval against these rules and can let them through on its own. It sits after the permission gate and never changes bans: actions that change the bot's future behavior, commands that run other commands and turns opened by other bots or external events still ask."
+
+#. placeholder {0}: message.needs.header
+#: src/renderer/src/components/ConnectorCards13.tsx
+msgid "una chiave ({0}): la inserisci tu nelle Impostazioni"
+msgstr "a key ({0}): you enter it in Settings"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Una di queste regole vince sempre sulle altre: l'azione diventa una card."
+msgstr "One of these rules always wins over the others: the action becomes a card."
+
+#: src/renderer/src/components/Chat.tsx
+msgid "urgente"
+msgstr "urgent"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "URL (es. http://localhost:3001/mcp)"
+msgstr "URL (e.g. http://localhost:3001/mcp)"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "URL https del server MCP"
+msgstr "MCP server https URL"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Usa i servizi di ricerca gratuiti senza chiave (You.com, Exa, Tavily)"
+msgstr "Use the free keyless search services (You.com, Exa, Tavily)"
+
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "utente (condivisa)"
+msgstr "user (shared)"
+
+#: src/renderer/src/components/ApprovalCard.tsx
+msgid "Vale per lo stesso tool fino alla fine di questo turno"
+msgstr "Applies to the same tool until the end of this turn"
+
+#: src/renderer/src/components/LibraryCards.tsx
+#: src/renderer/src/components/Settings.tsx
+msgid "Valore"
+msgstr "Value"
+
+#: src/renderer/src/components/VaultSettings.tsx
+msgid "Valore (sostituisce)"
+msgstr "Value (replaces)"
+
+#. placeholder {0}: message.needs.vars.filter((v) => v.required).map((v) => v.name).join(', ')
+#: src/renderer/src/components/ConnectorCards13.tsx
+msgid "variabili d'ambiente: {0} (le compili tu nelle Impostazioni)"
+msgstr "environment variables: {0} (you fill them in Settings)"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Vault credenziali (AES-256-GCM, chiave master in safeStorage): il bot vede i nomi col tool <0>list-credentials</0> e li usa scrivendo <1>{SECRET_TEMPLATE}</1> nei comandi — i valori non compaiono mai nel transcript."
+msgstr "Credentials vault (AES-256-GCM, master key in safeStorage): the bot sees names with the <0>list-credentials</0> tool and uses them by writing <1>{SECRET_TEMPLATE}</1> in commands — values never appear in the transcript."
+
+#: src/renderer/src/components/Settings.tsx
+msgid "venerdì"
+msgstr "Friday"
+
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "Versioni:"
+msgstr "Versions:"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "webhook"
+msgstr "webhook"

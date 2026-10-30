@@ -6,6 +6,7 @@
 // pausa con finestra nascosta (bots-paused + pauseAnimations), accessibilità
 // (role="img" + aria-label) e il sesto stato 'waiting' ("Aspetta te").
 import { useEffect, useRef, useState } from 'react'
+import { useLingui } from '@lingui/react'
 import type { BotColor, BotFamily } from '../../../shared/types'
 import { gazeFrom, subscribePointer } from './pointer'
 import { onBotsVisibility, useReducedMotion } from './motion'
@@ -134,6 +135,7 @@ const DEVICE = [
 export function Bot({ family, color, state: stateProp, size = 120, track = true, dimmed = false, label }: BotProps) {
   const ref = useRef<SVGSVGElement>(null)
   const reduced = useReducedMotion()
+  const { i18n } = useLingui()
   const [look, setLook] = useState({ x: 0, y: 0 })
   // il movimento ridotto spegne anche lo sguardo, non solo le animazioni CSS
   const follow = track && !reduced && !dimmed
@@ -278,7 +280,7 @@ export function Bot({ family, color, state: stateProp, size = 120, track = true,
       className={wrap}
       style={{ width: size, height: size }}
       role={label ? 'img' : undefined}
-      aria-label={label ? botAriaLabel(label, state) : undefined}
+      aria-label={label ? i18n.t(botAriaLabel(label, state)) : undefined}
       aria-hidden={label ? undefined : true}
     >
       {state === 'listening' && (

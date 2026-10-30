@@ -4,7 +4,13 @@
 // concessioni "Sempre per questo sito" di fill_credential sono revocabili da
 // qui. Nessuna concessione generica: ogni riga è (login, origine).
 import { useEffect, useState } from 'react'
+import { Trans } from '@lingui/react/macro'
+import { t } from '@lingui/core/macro'
 import { api } from '../store'
+
+/** Il template dei secret nei comandi (fase 17a): costante, così nel messaggio
+ *  di Lingui è un segnaposto e non testo con doppie graffe (sintassi ICU). */
+const SECRET_TEMPLATE = '{{secret:NOME}}'
 import type { VaultItemInfoUi, FillGrantInfo } from '../../../shared/types'
 
 export function VaultTab() {
@@ -12,10 +18,10 @@ export function VaultTab() {
   return (
     <div className="space-y-4">
       <p className="text-xs text-muted-foreground">
-        Il vault è cifrato a riposo (AES-256-GCM, chiave nel Keychain). I valori non si rileggono mai in chiaro: si possono solo sostituire. I bot vedono i nomi con <code>list-credentials</code> e i login si compilano con <code>fill_credential</code>, sempre col tuo consenso.
+        <Trans>Il vault è cifrato a riposo (AES-256-GCM, chiave nel Keychain). I valori non si rileggono mai in chiaro: si possono solo sostituire. I bot vedono i nomi con <code>list-credentials</code> e i login si compilano con <code>fill_credential</code>, sempre col tuo consenso.</Trans>
       </p>
       <div className="flex gap-2">
-        {([['login', 'Login'], ['segreti', 'Segreti'], ['contatti', 'Contatti'], ['concessioni', 'Concessioni']] as const).map(([k, label]) => (
+        {([['login', t`Login`], ['segreti', t`Segreti`], ['contatti', t`Contatti`], ['concessioni', t`Concessioni`]] as const).map(([k, label]) => (
           <button
             key={k}
             className={`rounded-lg px-3 py-1.5 text-sm ${scheda === k ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
@@ -75,27 +81,27 @@ function LoginsScheda() {
               setLabel(l.label); setOrigins((l.origins ?? []).join(', ')); setUsername(''); setPassword(''); setTotp(''); setOpen(true)
             }}
           >
-            sostituisci
+            <Trans>sostituisci</Trans>
           </button>
-          <button className="text-xs text-muted-foreground hover:text-destructive" onClick={async () => { await api.vaultDeleteItem('login', l.key); await refresh() }}>elimina</button>
+          <button className="text-xs text-muted-foreground hover:text-destructive" onClick={async () => { await api.vaultDeleteItem('login', l.key); await refresh() }}><Trans>elimina</Trans></button>
         </div>
       ))}
       {open ? (
         <div className="space-y-2 rounded-2xl border border-border bg-muted p-3">
-          <input className="w-full rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder="Etichetta (es. Portale ASPI)" value={label} onChange={(e) => setLabel(e.target.value)} />
-          <input className="w-full rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder="Origini https://… (separate da virgola)" value={origins} onChange={(e) => setOrigins(e.target.value)} />
-          <input type="password" autoComplete="off" className="w-full rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder="Nome utente" value={username} onChange={(e) => setUsername(e.target.value)} />
-          <input type="password" autoComplete="new-password" className="w-full rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} />
-          <input type="password" autoComplete="off" className="w-full rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder="Segreto TOTP (opzionale)" value={totp} onChange={(e) => setTotp(e.target.value)} />
+          <input className="w-full rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder={t`Etichetta (es. Portale ASPI)`} value={label} onChange={(e) => setLabel(e.target.value)} />
+          <input className="w-full rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder={t`Origini https://… (separate da virgola)`} value={origins} onChange={(e) => setOrigins(e.target.value)} />
+          <input type="password" autoComplete="off" className="w-full rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder={t`Nome utente`} value={username} onChange={(e) => setUsername(e.target.value)} />
+          <input type="password" autoComplete="new-password" className="w-full rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder={t`Password`} value={password} onChange={(e) => setPassword(e.target.value)} />
+          <input type="password" autoComplete="off" className="w-full rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder={t`Segreto TOTP (opzionale)`} value={totp} onChange={(e) => setTotp(e.target.value)} />
           {err && <p className="text-xs text-destructive">{err}</p>}
           <div className="flex justify-end gap-2">
-            <button className="rounded-lg px-3 py-1.5 text-xs text-muted-foreground" onClick={() => setOpen(false)}>Annulla</button>
-            <button className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-primary/90 disabled:opacity-40" disabled={!label || !origins || !username || !password} onClick={() => void save()}>Salva</button>
+            <button className="rounded-lg px-3 py-1.5 text-xs text-muted-foreground" onClick={() => setOpen(false)}><Trans>Annulla</Trans></button>
+            <button className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-primary/90 disabled:opacity-40" disabled={!label || !origins || !username || !password} onClick={() => void save()}><Trans>Salva</Trans></button>
           </div>
         </div>
       ) : (
         <button className="w-full rounded-xl border border-dashed border-border px-3 py-2.5 text-sm text-muted-foreground hover:border-muted-foreground hover:text-foreground" onClick={() => setOpen(true)}>
-          + Aggiungi login
+          <Trans>+ Aggiungi login</Trans>
         </button>
       )}
     </div>
@@ -110,23 +116,23 @@ function SecretsScheda() {
   useEffect(() => { void refresh() }, [])
   return (
     <div className="space-y-2">
-      <p className="text-xs text-muted-foreground">I secret servono ai COMANDI dei bot (<code>{'{{secret:NOME}}'}</code>): il valore entra solo nell'env del processo, mai nel transcript.</p>
+      <p className="text-xs text-muted-foreground"><Trans>I secret servono ai COMANDI dei bot (<code>{SECRET_TEMPLATE}</code>): il valore entra solo nell'env del processo, mai nel transcript.</Trans></p>
       {items.map((sItem) => (
         <div key={sItem.key} className="flex items-center gap-2 rounded-lg border border-border px-3 py-2">
           <span className="text-sm text-foreground">🔐 {sItem.key}</span>
           <div className="flex-1" />
-          <button className="text-xs text-muted-foreground hover:text-destructive" onClick={async () => { await api.vaultDeleteItem('secret', sItem.key); await refresh() }}>elimina</button>
+          <button className="text-xs text-muted-foreground hover:text-destructive" onClick={async () => { await api.vaultDeleteItem('secret', sItem.key); await refresh() }}><Trans>elimina</Trans></button>
         </div>
       ))}
       <div className="flex gap-2">
-        <input className="min-w-0 flex-1 rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder="Nome (es. API_KEY)" value={name} onChange={(e) => setName(e.target.value)} />
-        <input type="password" className="min-w-0 flex-1 rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder="Valore (sostituisce)" value={value} onChange={(e) => setValue(e.target.value)} />
+        <input className="min-w-0 flex-1 rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder={t`Nome (es. API_KEY)`} value={name} onChange={(e) => setName(e.target.value)} />
+        <input type="password" className="min-w-0 flex-1 rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder={t`Valore (sostituisce)`} value={value} onChange={(e) => setValue(e.target.value)} />
         <button
           className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-primary/90 disabled:opacity-40"
           disabled={!name.trim() || !value}
           onClick={async () => { await api.vaultStore(name.trim(), value); setName(''); setValue(''); await refresh() }}
         >
-          Salva
+          <Trans>Salva</Trans>
         </button>
       </div>
     </div>
@@ -146,7 +152,7 @@ function ContactsScheda() {
   useEffect(() => { void refresh() }, [])
   return (
     <div className="space-y-2">
-      <p className="text-xs text-muted-foreground">I contatti sono dati personali VISIBILI ai bot (servono a scrivere bozze) ma cifrati a riposo.</p>
+      <p className="text-xs text-muted-foreground"><Trans>I contatti sono dati personali VISIBILI ai bot (servono a scrivere bozze) ma cifrati a riposo.</Trans></p>
       {items.map((c) => (
         <div key={c.key} className="flex items-center gap-2 rounded-lg border border-border px-3 py-2">
           <span className="text-sm text-foreground">👤 {c.label}</span>
@@ -162,21 +168,21 @@ function ContactsScheda() {
               setOpen(true)
             }}
           >
-            modifica
+            <Trans>modifica</Trans>
           </button>
-          <button className="text-xs text-muted-foreground hover:text-destructive" onClick={async () => { await api.vaultDeleteItem('contact', c.key); await refresh() }}>elimina</button>
+          <button className="text-xs text-muted-foreground hover:text-destructive" onClick={async () => { await api.vaultDeleteItem('contact', c.key); await refresh() }}><Trans>elimina</Trans></button>
         </div>
       ))}
       {open ? (
         <div className="space-y-2 rounded-2xl border border-border bg-muted p-3">
-          <input className="w-full rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder="Nome" value={name} onChange={(e) => setName(e.target.value)} />
-          <input className="w-full rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder="Email (separate da virgola)" value={emails} onChange={(e) => setEmails(e.target.value)} />
-          <input className="w-full rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder="Telefoni" value={phones} onChange={(e) => setPhones(e.target.value)} />
-          <input className="w-full rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder="Indirizzo" value={address} onChange={(e) => setAddress(e.target.value)} />
-          <input className="w-full rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder="Note" value={notes} onChange={(e) => setNotes(e.target.value)} />
+          <input className="w-full rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder={t`Nome`} value={name} onChange={(e) => setName(e.target.value)} />
+          <input className="w-full rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder={t`Email (separate da virgola)`} value={emails} onChange={(e) => setEmails(e.target.value)} />
+          <input className="w-full rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder={t`Telefoni`} value={phones} onChange={(e) => setPhones(e.target.value)} />
+          <input className="w-full rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder={t`Indirizzo`} value={address} onChange={(e) => setAddress(e.target.value)} />
+          <input className="w-full rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder={t`Note`} value={notes} onChange={(e) => setNotes(e.target.value)} />
           {err && <p className="text-xs text-destructive">{err}</p>}
           <div className="flex justify-end gap-2">
-            <button className="rounded-lg px-3 py-1.5 text-xs text-muted-foreground" onClick={() => setOpen(false)}>Annulla</button>
+            <button className="rounded-lg px-3 py-1.5 text-xs text-muted-foreground" onClick={() => setOpen(false)}><Trans>Annulla</Trans></button>
             <button
               className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-primary/90 disabled:opacity-40"
               disabled={!name.trim()}
@@ -195,13 +201,13 @@ function ContactsScheda() {
                 }
               }}
             >
-              Salva
+              <Trans>Salva</Trans>
             </button>
           </div>
         </div>
       ) : (
         <button className="w-full rounded-xl border border-dashed border-border px-3 py-2.5 text-sm text-muted-foreground hover:border-muted-foreground hover:text-foreground" onClick={() => setOpen(true)}>
-          + Aggiungi contatto
+          <Trans>+ Aggiungi contatto</Trans>
         </button>
       )}
     </div>
@@ -214,14 +220,14 @@ function GrantsScheda() {
   useEffect(() => { void refresh() }, [])
   return (
     <div className="space-y-2">
-      <p className="text-xs text-muted-foreground">Le concessioni "Sempre per questo sito" del fill dei login: il bot compila QUEL login su QUELL'origine senza chiedere ogni volta. Revocabili una a una; non esistono concessioni generiche.</p>
-      {grants.length === 0 && <p className="text-xs text-muted-foreground">Nessuna concessione: ogni fill chiede la card.</p>}
+      <p className="text-xs text-muted-foreground"><Trans>Le concessioni "Sempre per questo sito" del fill dei login: il bot compila QUEL login su QUELL'origine senza chiedere ogni volta. Revocabili una a una; non esistono concessioni generiche.</Trans></p>
+      {grants.length === 0 && <p className="text-xs text-muted-foreground"><Trans>Nessuna concessione: ogni fill chiede la card.</Trans></p>}
       {grants.map((g) => (
         <div key={g.id} className="flex items-center gap-2 rounded-lg border border-border px-3 py-2">
           <span className="text-sm text-foreground">🔑 {g.label}</span>
           <span className="font-mono text-xs text-muted-foreground">{g.origin}</span>
           <div className="flex-1" />
-          <button className="text-xs text-muted-foreground hover:text-destructive" onClick={async () => { await api.fillGrantRevoke(g.id); await refresh() }}>revoca</button>
+          <button className="text-xs text-muted-foreground hover:text-destructive" onClick={async () => { await api.fillGrantRevoke(g.id); await refresh() }}><Trans>revoca</Trans></button>
         </div>
       ))}
     </div>

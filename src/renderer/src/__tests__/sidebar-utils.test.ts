@@ -2,8 +2,16 @@
 // per nome, maiuscole/minuscole irrilevanti, spazi = parole tutte necessarie.
 // E dell'anteprima dell'ultimo messaggio visibile.
 import { describe, expect, it } from 'vitest'
-import { matchesQuery, filterSidebar, previewOf } from '../sidebar-utils'
+import { i18n } from '@lingui/core'
+import { matchesQuery, filterSidebar, previewOf, type SidebarPreview } from '../sidebar-utils'
 import type { Agent, GroupInfo, TranscriptEntry } from '../../../shared/types'
+import { itCatalogEntries } from './po-helper'
+
+// fase 17a: le anteprime con prefisso sono descriptor — l'italiano si
+// risolve dal catalogo it, come farà la sidebar
+i18n.load('it', itCatalogEntries())
+i18n.activate('it')
+const resolve = (p: SidebarPreview): string => (typeof p === 'string' ? p : i18n.t(p))
 
 const agent = (id: string, name: string, section: string | null = null): Agent => ({
   id, name, description: '', providerId: null, model: null, status: 'idle', unread: 0,
@@ -54,21 +62,21 @@ describe('fase 16 (U4): anteprima dell’ultimo messaggio visibile', () => {
       entry({ id: 1, kind: 'message', role: 'user', content: 'ciao' }),
       entry({ id: 2, kind: 'send-message', role: 'assistant', content: 'Ecco fatto', meta: { message: { type: 'text', text: 'Ecco fatto' } } })
     ]
-    expect(previewOf(es)).toBe('Ecco fatto')
+    expect(resolve(previewOf(es))).toBe('Ecco fatto')
   })
   it('i messaggi dell’utente hanno il prefisso Tu: ; quelli di altri bot/initiator si saltano', () => {
     const es = [
       entry({ id: 1, kind: 'message', role: 'user', content: 'da altro', meta: { initiator: 'AGENT', fromAgentName: 'X' } }),
       entry({ id: 2, kind: 'message', role: 'user', content: 'mio' })
     ]
-    expect(previewOf(es)).toBe('Tu: mio')
+    expect(resolve(previewOf(es))).toBe('Tu: mio')
   })
   it('i send-message trattenuti (outbox) e le card non fanno anteprima; il widget mostra la domanda', () => {
     const held = [entry({ id: 1, kind: 'send-message', role: 'assistant', content: 'in attesa', meta: { held: true, message: { type: 'text', text: 'in attesa' } } })]
-    expect(previewOf(held)).toBe('')
+    expect(resolve(previewOf(held))).toBe('')
     const widget = [entry({ id: 2, kind: 'send-message', role: 'assistant', content: '', meta: { message: { type: 'widget', prompt: 'Vuoi il riepilogo?' } } })]
-    expect(previewOf(widget)).toBe('Vuoi il riepilogo?')
+    expect(resolve(previewOf(widget))).toBe('Vuoi il riepilogo?')
     const draft = [entry({ id: 3, kind: 'send-message', role: 'assistant', content: '', meta: { message: { type: 'draft', to: 'x@y.it' } } })]
-    expect(previewOf(draft)).toBe('Bozza per x@y.it')
+    expect(resolve(previewOf(draft))).toBe('Bozza per x@y.it')
   })
 })

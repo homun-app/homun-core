@@ -4,15 +4,19 @@
 // bottoni Apri (pannello del transcript del figlio) e Ferma. Come TaskCard, lo
 // stato arriva dal registro, non dal testo del modello.
 import { useStore } from '../store'
+import { useLingui } from '@lingui/react'
+import { Trans } from '@lingui/react/macro'
+import { t, msg } from '@lingui/core/macro'
+import type { MessageDescriptor } from '@lingui/core'
 import type { TranscriptEntry, SendMessageMeta, SendMessagePayload, SubagentInfo } from '../../../shared/types'
 
-const STATUS_LABEL: Record<SubagentInfo['status'], string> = {
-  queued: 'in coda',
-  running: 'al lavoro',
-  done: 'finito',
-  failed: 'fallito',
-  stopped: 'fermato',
-  expired: 'scaduto'
+const STATUS_LABEL: Record<SubagentInfo['status'], MessageDescriptor> = {
+  queued: msg`in coda`,
+  running: msg`al lavoro`,
+  done: msg`finito`,
+  failed: msg`fallito`,
+  stopped: msg`fermato`,
+  expired: msg`scaduto`
 }
 const STATUS_CLS: Record<SubagentInfo['status'], string> = {
   queued: 'text-muted-foreground',
@@ -23,14 +27,15 @@ const STATUS_CLS: Record<SubagentInfo['status'], string> = {
   expired: 'text-destructive'
 }
 
-function fmtAgo(at: number, now: number): string {
+function fmtAgo(at: number, now: number): MessageDescriptor {
   const s = Math.max(0, Math.round((now - at) / 1000))
-  if (s < 60) return `${s} s`
-  if (s < 3600) return `${Math.round(s / 60)} min`
-  return `${Math.round(s / 3600)} h`
+  if (s < 60) return msg`${s} s`
+  if (s < 3600) return msg`${Math.round(s / 60)} min`
+  return msg`${Math.round(s / 3600)} h`
 }
 
 export function SubagentCard({ entry }: { entry: TranscriptEntry }) {
+  const { i18n } = useLingui()
   const subagents = useStore((s) => s.subagents)
   const openSubagent = useStore((s) => s.openSubagent)
   const stopSubagent = useStore((s) => s.stopSubagent)
@@ -48,17 +53,16 @@ export function SubagentCard({ entry }: { entry: TranscriptEntry }) {
   return (
     <div className="max-w-[75%] rounded-2xl rounded-bl-md border border-border bg-card px-4 py-3 shadow-soft">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-medium uppercase tracking-wide text-chart-2">Sottoagente</span>
+        <span className="text-xs font-medium uppercase tracking-wide text-chart-2"><Trans>Sottoagente</Trans></span>
         <span className={`text-[11px] font-medium ${STATUS_CLS[status]}`}>
           {status === 'done' ? '✓' : status === 'failed' ? '⚠' : status === 'stopped' ? '⛔' : status === 'expired' ? '⏱' : '⏳'}
-          {' '}{waiting ? 'in attesa di conferma' : STATUS_LABEL[status]}
+          {' '}{waiting ? t`in attesa di conferma` : i18n.t(STATUS_LABEL[status])}
         </span>
       </div>
       <p className="mt-1 text-sm text-foreground">{message.title}</p>
       {sub && (
         <p className="mt-0.5 text-[11px] text-muted-foreground">
-          {fmtAgo(sub.startedAt ?? sub.createdAt, now)} trascorsi
-          {sub.status === 'done' && sub.summary ? ` — ${sub.summary.slice(0, 120)}` : ''}
+          <Trans>{i18n.t(fmtAgo(sub.startedAt ?? sub.createdAt, now))} trascorsi{sub.status === 'done' && sub.summary ? ` — ${sub.summary.slice(0, 120)}` : ''}</Trans>
         </p>
       )}
       <div className="mt-2 flex gap-2">
@@ -66,14 +70,14 @@ export function SubagentCard({ entry }: { entry: TranscriptEntry }) {
           className="rounded-lg border border-foreground bg-foreground px-3 py-1.5 text-xs font-medium text-background hover:opacity-90"
           onClick={() => openSubagent(message.subagentId)}
         >
-          Apri
+          <Trans>Apri</Trans>
         </button>
         {open && (
           <button
             className="rounded-lg bg-muted px-3 py-1.5 text-xs text-foreground hover:bg-accent"
             onClick={() => stopSubagent(message.subagentId)}
           >
-            Ferma
+            <Trans>Ferma</Trans>
           </button>
         )}
       </div>

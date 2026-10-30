@@ -1,6 +1,14 @@
 // Fase 16 (U4): filtro della ricerca della sidebar e anteprima dell'ultimo
 // messaggio visibile. Funzioni pure, testate.
+// Fase 17a (L3): le anteprime CON prefisso ("Tu: …", "Bozza per …") sono
+// message descriptor (i prefissi si traducono, i contenuti no); le altre
+// restano stringhe di dati.
+import type { MessageDescriptor } from '@lingui/core'
+import { msg } from '@lingui/core/macro'
 import type { Agent, GroupInfo, TranscriptEntry } from '../../shared/types'
+
+/** L'anteprima della sidebar: testo di dati oppure un descriptor da tradurre. */
+export type SidebarPreview = string | MessageDescriptor
 
 /**
  * La query della ricerca: maiuscole/minuscole irrilevanti, gli spazi separano
@@ -27,21 +35,21 @@ export function filterSidebar(agents: Agent[], groups: GroupInfo[], query: strin
  * (non trattenuti), i widget con la loro domanda, le bozze col destinatario e
  * i messaggi dell'utente (con "Tu:"). '' se non c'è niente di visibile.
  */
-export function previewOf(entries: TranscriptEntry[]): string {
+export function previewOf(entries: TranscriptEntry[]): SidebarPreview {
   for (let i = entries.length - 1; i >= 0; i--) {
     const e = entries[i]!
     if (e.kind === 'send-message') {
       const meta = (e.meta ?? {}) as { held?: boolean; message?: { type?: string; prompt?: string; to?: string } }
       if (meta.held) continue
       if (meta.message?.type === 'widget') return meta.message.prompt ?? ''
-      if (meta.message?.type === 'draft') return `Bozza per ${meta.message.to ?? '?'}`
+      if (meta.message?.type === 'draft') return msg`Bozza per ${meta.message.to ?? '?'}`
       if (meta.message?.type === 'text') return e.content
       continue
     }
     if (e.kind === 'message' && e.role === 'user') {
       const initiator = (e.meta as { initiator?: string } | null)?.initiator
       if (initiator === 'AGENT' || initiator === 'TEMPLATE_IMPORT' || initiator === 'TASK_DONE') continue
-      return `Tu: ${e.content}`
+      return msg`Tu: ${e.content}`
     }
   }
   return ''

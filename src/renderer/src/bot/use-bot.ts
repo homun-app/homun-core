@@ -3,6 +3,7 @@
 // di stato. Tutta la logica sta nelle funzioni pure (bot-state, avatar).
 import { useStore } from '../store'
 import { avatarOf } from '../../../shared/avatar'
+import type { MessageDescriptor } from '@lingui/core'
 import type { Agent, AgentAvatar } from '../../../shared/types'
 import { botStateFor, botStatusText, isStreaming, type BotState } from './bot-state'
 
@@ -11,7 +12,8 @@ export interface BotInfo {
   avatar: AgentAvatar
   state: BotState
   dimmed: boolean
-  statusText: string
+  /** fase 17a: descriptor — lo traduce chi lo mostra (i18n._) */
+  statusText: MessageDescriptor
 }
 
 export function useBotInfo(agentId: string | null | undefined): BotInfo | null {

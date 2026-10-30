@@ -8,6 +8,7 @@ import { join } from 'node:path'
 import { registerIpc, emitLocal } from './ipc'
 import { setDataDir, listAgents, createAgent } from './store/db'
 import { createTray, refreshTray } from './tray'
+import { initMainLanguage } from './i18n'
 import { DaemonClient } from './daemon-client'
 import { userDataDir } from './paths'
 
@@ -60,6 +61,9 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  // fase 17a (L5): la lingua del main (tray, notifiche native) dalle
+  // lingue preferite di sistema; cambierà col setting via IPC
+  initMainLanguage()
   // il path dati è quello storico dell'app (userData/data): app e daemon
   // condividono lo stesso store
   setDataDir(join(app.getPath('userData'), 'data'))

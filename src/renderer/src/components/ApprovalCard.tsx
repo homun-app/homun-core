@@ -6,6 +6,8 @@
 // auto-approvazioni dell'auto-review, e "Crea regola da questa azione" che
 // apre l'editor di Impostazioni → Approvazione automatica precompilato.
 import { useStore } from '../store'
+import { Trans } from '@lingui/react/macro'
+import { t } from '@lingui/core/macro'
 import { describeCron } from '../../../shared/cron-human'
 import type { TranscriptEntry } from '../../../shared/types'
 
@@ -36,7 +38,7 @@ export function ApprovalCard({ entry }: { entry: TranscriptEntry }) {
     return (
       <details className="rounded-2xl border border-chart-2/40 bg-chart-2/10 px-4 py-2">
         <summary className="cursor-pointer select-none text-xs text-chart-2/90">
-          ⚡ Approvato automaticamente dalla regola: {String(entry.meta?.ruleMatched ?? '')}
+          <Trans>⚡ Approvato automaticamente dalla regola: {String(entry.meta?.ruleMatched ?? '')}</Trans>
           {entry.meta?.reason ? <span className="text-muted-foreground"> — {String(entry.meta.reason)}</span> : null}
         </summary>
         <div className="mt-2 font-mono text-[11px] text-muted-foreground">
@@ -65,25 +67,25 @@ export function ApprovalCard({ entry }: { entry: TranscriptEntry }) {
     <div className="rounded-2xl border border-destructive/40 bg-destructive/10 px-4 py-3 shadow-soft">
       <div className="flex items-center gap-2 text-sm font-medium text-destructive">
         <span>⛔</span>
-        <span>{isRoutine ? 'Cambio di automazione — serve la tua approvazione' : 'Richiede la tua approvazione'}</span>
+        <span>{isRoutine ? <Trans>Cambio di automazione — serve la tua approvazione</Trans> : <Trans>Richiede la tua approvazione</Trans>}</span>
       </div>
       <div className="mt-1 font-mono text-xs text-foreground">
         {tool} {entry.content && entry.content !== tool ? `— ${entry.content}` : ''}
       </div>
       {isRoutine && (
         <div className="mt-2 space-y-1 rounded-lg bg-muted/50 px-3 py-2 text-xs text-foreground">
-          <div><span className="text-muted-foreground">Routine:</span> {st?.name ?? (st?.id !== undefined ? `#${st.id}` : '?')}</div>
+          <div><span className="text-muted-foreground">{t`Routine:`}</span> {st?.name ?? (st?.id !== undefined ? `#${st.id}` : '?')}</div>
           {st?.schedule && (
             <div>
-              <span className="text-muted-foreground">Schedule:</span> {describeCron(st.schedule)}{' '}
+              <span className="text-muted-foreground">{t`Schedule:`}</span> {describeCron(st.schedule)}{' '}
               <span className="font-mono text-muted-foreground">({st.schedule})</span>
             </div>
           )}
-          {st?.prompt && <div className="whitespace-pre-wrap"><span className="text-muted-foreground">Prompt:</span> {st.prompt}</div>}
+          {st?.prompt && <div className="whitespace-pre-wrap"><span className="text-muted-foreground">{t`Prompt:`}</span> {st.prompt}</div>}
         </div>
       )}
       {secretRefs.length > 0 && (
-        <div className="mt-1 text-xs text-destructive/90">Credenziali usate: {secretRefs.join(', ')}</div>
+        <div className="mt-1 text-xs text-destructive/90"><Trans>Credenziali usate: {secretRefs.join(', ')}</Trans></div>
       )}
       {status === 'pending' ? (
         <div className="mt-3 flex flex-wrap gap-2">
@@ -91,42 +93,42 @@ export function ApprovalCard({ entry }: { entry: TranscriptEntry }) {
             className="rounded-lg bg-chart-2 px-3 py-1.5 text-xs font-medium text-white hover:bg-chart-2/90"
             onClick={() => resolve(approvalId, 'allow', 'once')}
           >
-            Consenti una volta
+            <Trans>Consenti una volta</Trans>
           </button>
           <button
             className="rounded-lg bg-chart-2/70 px-3 py-1.5 text-xs font-medium text-white hover:bg-chart-2/80 disabled:hidden"
             disabled={noTurn}
-            title={noTurn ? 'Questa azione chiede sempre l\'approvazione' : 'Vale per lo stesso tool fino alla fine di questo turno'}
+            title={noTurn ? t`Questa azione chiede sempre l'approvazione` : t`Vale per lo stesso tool fino alla fine di questo turno`}
             onClick={() => resolve(approvalId, 'allow', 'turn')}
           >
-            Consenti per questo turno
+            <Trans>Consenti per questo turno</Trans>
           </button>
           <button
             className="rounded-lg bg-chart-2/70 px-3 py-1.5 text-xs font-medium text-white hover:bg-chart-2/80 disabled:hidden"
             disabled={noAlways}
-            title={noAlways ? 'Le modifiche di automazione chiedono ogni volta' : undefined}
+            title={noAlways ? t`Le modifiche di automazione chiedono ogni volta` : undefined}
             onClick={() => resolve(approvalId, 'allow', 'always')}
           >
-            Consenti sempre
+            <Trans>Consenti sempre</Trans>
           </button>
           <button
             className="rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted-foreground/40"
             onClick={() => resolve(approvalId, 'deny', 'once')}
           >
-            Nega
+            <Trans>Nega</Trans>
           </button>
           {/* fase 8: crea una regola di auto-review partendo da questa azione */}
           <button
             className="rounded-lg border border-border px-3 py-1.5 text-xs text-foreground hover:bg-muted"
-            title="Apri Impostazioni → Approvazione automatica con una regola precompilata"
+            title={t`Apri Impostazioni → Approvazione automatica con una regola precompilata`}
             onClick={() => proposeRule(suggestedRule(tool, entry.meta?.input as Record<string, unknown> | undefined))}
           >
-            Crea regola da questa azione
+            <Trans>Crea regola da questa azione</Trans>
           </button>
         </div>
       ) : (
         <div className={`mt-2 text-xs ${status === 'allowed' ? 'text-chart-2' : 'text-muted-foreground'}`}>
-          {status === 'allowed' ? '✓ Consentito' : status === 'denied' ? 'Negato' : status === 'cancelled' ? 'Annullata (interrupt)' : status}
+          {status === 'allowed' ? <Trans>✓ Consentito</Trans> : status === 'denied' ? <Trans>Negato</Trans> : status === 'cancelled' ? <Trans>Annullata (interrupt)</Trans> : status}
         </div>
       )}
     </div>

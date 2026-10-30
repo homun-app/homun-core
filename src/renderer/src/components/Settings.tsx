@@ -4,7 +4,17 @@
 // design system. Il meccanismo settingsTab (aprire un tab preciso da un
 // widget) continua a funzionare.
 import { useEffect, useState, type ReactNode } from 'react'
+import { useLingui } from '@lingui/react'
+import { Trans } from '@lingui/react/macro'
+import { t, msg, plural } from '@lingui/core/macro'
+import type { MessageDescriptor } from '@lingui/core'
 import { api, useStore } from '../store'
+import { formatDate, formatTime } from '../lib/i18n'
+import type { UiLanguageSetting } from '../../../shared/ui-language'
+
+/** Il template dei secret nei comandi (fase 17a): costante, così nel messaggio
+ *  di Lingui è un segnaposto e non testo con doppie graffe (sintassi ICU). */
+const SECRET_TEMPLATE = '{{secret:NOME}}'
 import { describeTrigger } from '../../../shared/cron-human'
 import { VaultTab } from './VaultSettings'
 import { choosePollTool, chooseQueryArgName } from '../../../shared/triggers'
@@ -19,19 +29,20 @@ const KINDS: ProviderKind[] = [
   'ollama', 'lmstudio', 'anthropic', 'mistral', 'openrouter', 'zai', 'xai', 'deepseek', 'groq', 'openai-compatible'
 ]
 
-/** I tab con i nomi italiani per la UI (gli id interni non cambiano). */
-const TAB_LABELS: Record<string, string> = {
-  provider: 'Provider',
-  agenti: 'Bot',
-  permessi: 'Permessi',
-  routine: 'Routine',
-  connettori: 'Connettori',
-  autoreview: 'Revisione automatica',
-  vault: 'Cassaforte',
-  generale: 'Generali'
+/** I tab con i nomi per la UI (gli id interni non cambiano). Fase 17a: descriptor. */
+const TAB_LABELS: Record<string, MessageDescriptor> = {
+  provider: msg`Provider`,
+  agenti: msg`Bot`,
+  permessi: msg`Permessi`,
+  routine: msg`Routine`,
+  connettori: msg`Connettori`,
+  autoreview: msg`Revisione automatica`,
+  vault: msg`Cassaforte`,
+  generale: msg`Generali`
 }
 
 export function Settings() {
+  const { i18n } = useLingui()
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
   const setSettingsTab = useStore((s) => s.setSettingsTab)
   const pendingTab = useStore((s) => s.settingsTab)
@@ -51,7 +62,7 @@ export function Settings() {
   return (
     <Dialog open onOpenChange={(o) => !o && setSettingsOpen(false)}>
       <DialogContent className="flex h-[600px] max-h-[92vh] max-w-[calc(100%-2rem)] gap-0 p-0 sm:max-w-4xl" showCloseButton={false}>
-        <DialogTitle className="sr-only">Impostazioni</DialogTitle>
+        <DialogTitle className="sr-only"><Trans>Impostazioni</Trans></DialogTitle>
         <nav className="w-52 shrink-0 space-y-1 overflow-y-auto scroll-thin border-r border-border p-3">
           {(Object.keys(TAB_LABELS) as Array<keyof typeof TAB_LABELS>).map((t) => (
             <button
@@ -59,7 +70,7 @@ export function Settings() {
               className={`w-full rounded-lg px-3 py-2 text-left text-sm transition ${tab === t ? 'bg-muted font-medium' : 'text-muted-foreground hover:text-foreground'}`}
               onClick={() => setTab(t as typeof tab)}
             >
-              {TAB_LABELS[t]}
+              {i18n.t(TAB_LABELS[t]!)}
             </button>
           ))}
         </nav>
@@ -81,6 +92,7 @@ export function Settings() {
 // ---- fase 8 (§3bis L5): auto-review delle approvazioni ----
 
 function AutoReviewTab() {
+  const { i18n } = useLingui()
   const providers = useStore((s) => s.providers)
   const prefill = useStore((s) => s.autoreviewPrefill)
   const [cfg, setCfg] = useState<AutoReviewSettings | null>(null)
@@ -104,7 +116,7 @@ function AutoReviewTab() {
     else setModels([])
   }, [cfg?.providerId])
 
-  if (!cfg) return <p className="text-xs text-muted-foreground">caricamento…</p>
+  if (!cfg) return <p className="text-xs text-muted-foreground"><Trans>caricamento…</Trans></p>
   const save = (next: AutoReviewSettings): void => {
     setCfg(next)
     void api.settingsSet('autoReview', next)
@@ -112,8 +124,8 @@ function AutoReviewTab() {
   const inputCls = 'flex-1 rounded-lg bg-muted px-2 py-1.5 text-xs outline-none'
 
   const RuleList = ({ title, hint, rules, onAdd, onRemove, value, setValue }: {
-    title: string
-    hint: string
+    title: MessageDescriptor
+    hint: MessageDescriptor
     rules: string[]
     onAdd(): void
     onRemove(i: number): void
@@ -121,10 +133,10 @@ function AutoReviewTab() {
     setValue(v: string): void
   }) => (
     <div className="rounded-2xl border border-border bg-card px-3 py-2.5">
-      <div className="text-sm text-foreground">{title}</div>
-      <div className="mt-0.5 text-[11px] text-muted-foreground">{hint}</div>
+      <div className="text-sm text-foreground">{i18n.t(title)}</div>
+      <div className="mt-0.5 text-[11px] text-muted-foreground">{i18n.t(hint)}</div>
       <ul className="mt-2 space-y-1">
-        {rules.length === 0 && <li className="text-xs text-muted-foreground">(nessuna regola)</li>}
+        {rules.length === 0 && <li className="text-xs text-muted-foreground"><Trans>(nessuna regola)</Trans></li>}
         {rules.map((r, i) => (
           <li key={`${r}-${i}`} className="flex items-start gap-2 text-xs text-foreground">
             <span className="flex-1">{r}</span>
@@ -135,7 +147,7 @@ function AutoReviewTab() {
       <div className="mt-2 flex gap-2">
         <input
           className={inputCls}
-          placeholder="es. comandi ls e cat dentro la home del bot"
+          placeholder={t`es. comandi ls e cat dentro la home del bot`}
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && value.trim()) { onAdd(); setValue('') } }}
@@ -145,7 +157,7 @@ function AutoReviewTab() {
           disabled={!value.trim()}
           onClick={() => { onAdd(); setValue('') }}
         >
-          Aggiungi
+          <Trans>Aggiungi</Trans>
         </button>
       </div>
     </div>
@@ -154,8 +166,7 @@ function AutoReviewTab() {
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">
-        Un modello piccolo rivede le azioni che chiedono approvazione secondo queste regole e può lasciarle passare da solo.
-        Sta dopo il gate dei permessi e non cambia mai i divieti: le azioni che modificano il comportamento futuro del bot, i comandi che eseguono altri comandi e i turni aperti da altri bot o da eventi esterni chiedono comunque.
+        <Trans>Un modello piccolo rivede le azioni che chiedono approvazione secondo queste regole e può lasciarle passare da solo. Sta dopo il gate dei permessi e non cambia mai i divieti: le azioni che modificano il comportamento futuro del bot, i comandi che eseguono altri comandi e i turni aperti da altri bot o da eventi esterni chiedono comunque.</Trans>
       </p>
       <label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-border bg-card px-4 py-3">
         <input
@@ -165,8 +176,8 @@ function AutoReviewTab() {
           onChange={(e) => save({ ...cfg, enabled: e.target.checked })}
         />
         <span>
-          <span className="block text-sm text-foreground">Approvazione automatica</span>
-          <span className="block text-xs text-muted-foreground">Al massimo 20 azioni approvate per turno; un dubbio del revisore diventa sempre una card.</span>
+          <span className="block text-sm text-foreground"><Trans>Approvazione automatica</Trans></span>
+          <span className="block text-xs text-muted-foreground"><Trans>Al massimo 20 azioni approvate per turno; un dubbio del revisore diventa sempre una card.</Trans></span>
         </span>
       </label>
       <div className="flex gap-2">
@@ -175,7 +186,7 @@ function AutoReviewTab() {
           value={cfg.providerId ?? ''}
           onChange={(e) => save({ ...cfg, providerId: e.target.value || null, model: null })}
         >
-          <option value="">provider del revisore…</option>
+          <option value="">{t`provider del revisore…`}</option>
           {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
         <select
@@ -184,13 +195,13 @@ function AutoReviewTab() {
           disabled={!cfg.providerId}
           onChange={(e) => save({ ...cfg, model: e.target.value || null })}
         >
-          <option value="">modello… (vuoto = default del provider)</option>
+          <option value="">{t`modello… (vuoto = default del provider)`}</option>
           {models.map((m) => <option key={m.id} value={m.id}>{m.label ?? m.id}</option>)}
         </select>
       </div>
       <RuleList
-        title="⚡ Continua da solo quando l'azione rispetta queste regole"
-        hint="Se una regola corrisponde (e nessuna regola di fermata), il revisore può approvare l'azione o l'invio della bozza."
+        title={msg`⚡ Continua da solo quando l'azione rispetta queste regole`}
+        hint={msg`Se una regola corrisponde (e nessuna regola di fermata), il revisore può approvare l'azione o l'invio della bozza.`}
         rules={cfg.allowRules}
         value={newAllow}
         setValue={setNewAllow}
@@ -198,8 +209,8 @@ function AutoReviewTab() {
         onRemove={(i) => save({ ...cfg, allowRules: cfg.allowRules.filter((_, j) => j !== i) })}
       />
       <RuleList
-        title="⛔ Fermati e chiedimi sempre quando…"
-        hint="Una di queste regole vince sempre sulle altre: l'azione diventa una card."
+        title={msg`⛔ Fermati e chiedimi sempre quando…`}
+        hint={msg`Una di queste regole vince sempre sulle altre: l'azione diventa una card.`}
         rules={cfg.blockRules}
         value={newBlock}
         setValue={setNewBlock}
@@ -218,11 +229,11 @@ const STATUS_DOT: Record<string, string> = {
   needs_auth: 'bg-destructive',
   error: 'bg-destructive'
 }
-const STATUS_LABEL: Record<string, string> = {
-  not_connected: 'non connesso',
-  connected: 'connesso',
-  needs_auth: 'da autorizzare',
-  error: 'errore'
+const STATUS_LABEL: Record<string, MessageDescriptor> = {
+  not_connected: msg`non connesso`,
+  connected: msg`connesso`,
+  needs_auth: msg`da autorizzare`,
+  error: msg`errore`
 }
 
 /**
@@ -247,12 +258,11 @@ function ConnectorsTab() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-1">{subBtn('app', 'App')}{subBtn('installati', 'Installati')}{subBtn('marketplace', 'Marketplace')}{subBtn('gateway', 'Gateway')}</div>
+      <div className="flex items-center gap-1">{subBtn('app', t`App`)}{subBtn('installati', t`Installati`)}{subBtn('marketplace', t`Marketplace`)}{subBtn('gateway', t`Gateway`)}</div>
       {sub === 'app' && (
         <>
           <p className="text-xs text-muted-foreground">
-            Le app si collegano come server MCP con OAuth: i loro tool diventano <code>mcp__&lt;server&gt;__&lt;tool&gt;</code>.
-            I token stanno cifrati nel Keychain. Il bot può proporre un'app in chat, ma la connessione parte solo dal tuo click.
+            <Trans>Le app si collegano come server MCP con OAuth: i loro tool diventano <code>mcp__&lt;server&gt;__&lt;tool&gt;</code>. I token stanno cifrati nel Keychain. Il bot può proporre un'app in chat, ma la connessione parte solo dal tuo click.</Trans>
           </p>
           <div className="grid grid-cols-2 gap-2">
             {connectors.map((c) => (
@@ -282,11 +292,11 @@ function ClientMetadataUrlRow() {
   if (url === null) return null
   return (
     <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
-      <span className="text-[11px] uppercase tracking-wide text-muted-foreground">OAuth</span>
-      <span className="text-[11px] text-muted-foreground">Se ospiti un documento dei metadati del client (CIMD, es. su GitHub Pages, https e con percorso), incollalo qui; vuoto = registrazione dinamica (DCR).</span>
+      <span className="text-[11px] uppercase tracking-wide text-muted-foreground"><Trans>OAuth</Trans></span>
+      <span className="text-[11px] text-muted-foreground"><Trans>Se ospiti un documento dei metadati del client (CIMD, es. su GitHub Pages, https e con percorso), incollalo qui; vuoto = registrazione dinamica (DCR).</Trans></span>
       <input
         className="min-w-0 flex-1 rounded-lg bg-muted px-2 py-1.5 text-xs outline-none"
-        placeholder="https://utente.github.io/sandbot/client.json"
+        placeholder={t`https://utente.github.io/sandbot/client.json`}
         value={url}
         onChange={(e) => setUrl(e.target.value)}
         onBlur={() => void api.connectorsSetClientMetadataUrl(url.trim())}
@@ -303,11 +313,11 @@ function InstalledTab() {
   const [reconnectMsg, setReconnectMsg] = useState('')
   const refresh = async (): Promise<void> => { setData(await api.connectorsInstalled() as { servers: Array<McpServerInfo & { needsReauth?: boolean; neverAuthorized?: boolean }>; plugins: Array<{ name: string; marketplace: string; sha12: string; skills: Array<{ name: string }>; servers: string[]; enabledFor: string[]; updateAvailable?: boolean }> }) }
   useEffect(() => { void refresh() }, [])
-  if (data === null) return <p className="text-xs text-muted-foreground">installati…</p>
+  if (data === null) return <p className="text-xs text-muted-foreground"><Trans>installati…</Trans></p>
 
   const enabledForEditor = (kind: 'server' | 'plugin', id: string, current: string[] | undefined): ReactNode => (
     <div className="flex flex-wrap items-center gap-2">
-      <span className="text-[11px] text-muted-foreground">per bot:</span>
+      <span className="text-[11px] text-muted-foreground"><Trans>per bot:</Trans></span>
       {agents.map((a) => {
         const on = current?.includes('*') || current?.includes(a.id)
         return (
@@ -334,9 +344,9 @@ function InstalledTab() {
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">
-        Server del registro pubblico e plugin installati. Chiavi, header e variabili stanno cifrati: si compilano qui, MAI in chat.
+        <Trans>Server del registro pubblico e plugin installati. Chiavi, header e variabili stanno cifrati: si compilano qui, MAI in chat.</Trans>
       </p>
-      {data.servers.length === 0 && data.plugins.length === 0 && <p className="text-xs text-muted-foreground">nessun server o plugin installato</p>}
+      {data.servers.length === 0 && data.plugins.length === 0 && <p className="text-xs text-muted-foreground"><Trans>nessun server o plugin installato</Trans></p>}
       {data.servers.map((sv) => {
         const src = sv.source as { kind?: string; name?: string; plugin?: string; preset?: string } | undefined
         const needs = sv.needsAuth as { kind?: string; keys?: string[] } | undefined
@@ -345,7 +355,7 @@ function InstalledTab() {
             <div className="flex items-center gap-2">
               <span className={`h-2 w-2 rounded-full ${needs ? 'bg-destructive' : 'bg-chart-2'}`} />
               <span className="text-sm text-foreground">{sv.name}</span>
-              <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">{src?.kind ?? 'manuale'}</span>
+              <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">{src?.kind ?? t`manuale`}</span>
               {sv.trustLabel && <span className="text-[10px] text-muted-foreground">{sv.trustLabel}</span>}
               <span className="flex-1 truncate text-xs text-muted-foreground">{sv.transport === 'http' ? sv.url : `${sv.box?.command ?? ''} ${(sv.box?.args ?? []).join(' ')}`}</span>
               {/* L1+M2: sessione OAuth da (ri)fare di un server non del catalogo →
@@ -356,20 +366,20 @@ function InstalledTab() {
                   className="rounded-lg bg-accent px-2 py-0.5 text-xs text-white hover:bg-muted-foreground/40"
                   onClick={async () => {
                     const r = await api.connectorsReconnectServer(sv.id).catch((e: unknown) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e) }))
-                    setReconnectMsg(r.ok ? (r.message ?? 'riconnesso') : `riconnessione non riuscita: ${'error' in r ? r.error : ''}`)
+                    setReconnectMsg(r.ok ? (r.message ?? t`riconnesso`) : t`riconnessione non riuscita: ${'error' in r ? r.error ?? '' : ''}`)
                     await refresh()
                   }}
                 >
-                  {sv.neverAuthorized ? 'Connetti' : 'Riconnetti'}
+                  {sv.neverAuthorized ? <Trans>Connetti</Trans> : <Trans>Riconnetti</Trans>}
                 </button>
               )}
-              <button className="text-xs text-muted-foreground hover:text-destructive" onClick={async () => { await api.connectorsUninstallServer(sv.id); await refresh() }}>disinstalla</button>
+              <button className="text-xs text-muted-foreground hover:text-destructive" onClick={async () => { await api.connectorsUninstallServer(sv.id); await refresh() }}><Trans>disinstalla</Trans></button>
             </div>
             {reconnectMsg && <p className="mt-1 text-[11px] text-muted-foreground">{reconnectMsg}</p>}
             {enabledForEditor('server', sv.id, sv.enabledFor)}
             {needs?.keys?.length ? (
               <div className="mt-2 space-y-1 border-t border-border pt-2">
-                <p className="text-[11px] text-destructive/80">serve: {needs.keys.join(', ')} {needs.kind === 'key' ? '(header)' : needs.kind === 'env' ? '(variabile d&rsquo;ambiente)' : '(impostazione del plugin)'}</p>
+                <p className="text-[11px] text-destructive/80"><Trans>serve: {needs.keys.join(', ')} {needs.kind === 'key' ? '(header)' : needs.kind === 'env' ? '(variabile d&rsquo;ambiente)' : '(impostazione del plugin)'}</Trans></p>
                 {needs.keys.map((k) => (
                   <div key={k} className="flex gap-1">
                     <input
@@ -393,7 +403,7 @@ function InstalledTab() {
                     await refresh()
                   }}
                 >
-                  salva cifrato
+                  <Trans>salva cifrato</Trans>
                 </button>
               </div>
             ) : null}
@@ -406,9 +416,9 @@ function InstalledTab() {
             <span className="text-sm text-foreground">{p.name}</span>
             <span className="text-xs text-muted-foreground">{p.marketplace} · {p.sha12}</span>
             <span className="flex-1" />
-            <button className="text-xs text-muted-foreground hover:text-destructive" onClick={async () => { await api.pluginsUninstall(p.name, p.marketplace); await refresh() }}>disinstalla</button>
+            <button className="text-xs text-muted-foreground hover:text-destructive" onClick={async () => { await api.pluginsUninstall(p.name, p.marketplace); await refresh() }}><Trans>disinstalla</Trans></button>
           </div>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">{p.skills.length} skill · {p.servers.length} server{p.updateAvailable ? ' · nuova versione disponibile (aggiorna = nuova card in chat)' : ''}</p>
+          <p className="mt-0.5 text-[11px] text-muted-foreground"><Trans>{p.skills.length} skill · {p.servers.length} server{p.updateAvailable ? t` · nuova versione disponibile (aggiorna = nuova card in chat)` : ''}</Trans></p>
           {enabledForEditor('plugin', p.name, p.enabledFor)}
         </div>
       ))}
@@ -426,21 +436,20 @@ function MarketplaceTab() {
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">
-        Plugin nel formato di Claude Code. Predefinito: <code>anthropics/claude-plugins-official</code> (puoi rimuoverlo).
-        Di un plugin Homun importa SOLO skill e server MCP; hook, bin/ e comandi non girano mai.
+        <Trans>Plugin nel formato di Claude Code. Predefinito: <code>anthropics/claude-plugins-official</code> (puoi rimuoverlo). Di un plugin Homun importa SOLO skill e server MCP; hook, bin/ e comandi non girano mai.</Trans>
       </p>
       {(list ?? []).map((m) => (
         <div key={m.source} className="flex items-center gap-2 rounded-2xl border border-border bg-card px-3 py-2">
           <span className="text-sm text-foreground">{m.name}</span>
-          {m.official && <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">marketplace ufficiale</span>}
+          {m.official && <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary"><Trans>marketplace ufficiale</Trans></span>}
           <span className="flex-1 truncate text-xs text-muted-foreground">{m.source}</span>
-          <button className="text-xs text-muted-foreground hover:text-destructive" onClick={async () => { await api.marketplaceRemove(m.source); await refresh() }}>rimuovi</button>
+          <button className="text-xs text-muted-foreground hover:text-destructive" onClick={async () => { await api.marketplaceRemove(m.source); await refresh() }}><Trans>rimuovi</Trans></button>
         </div>
       ))}
       <div className="flex gap-1">
         <input
           className="min-w-0 flex-1 rounded-lg bg-muted px-2.5 py-1.5 text-xs outline-none"
-          placeholder="owner/repo di GitHub oppure URL git https"
+          placeholder={t`owner/repo di GitHub oppure URL git https`}
           value={input}
           onChange={(e) => setInput(e.target.value)}
         />
@@ -458,7 +467,7 @@ function MarketplaceTab() {
             }
           }}
         >
-          aggiungi
+          <Trans>aggiungi</Trans>
         </button>
       </div>
       {error && <p className="text-xs text-destructive">{error}</p>}
@@ -479,7 +488,7 @@ function GatewayTab() {
   }, [])
   return (
     <div className="space-y-3">
-      <p className="text-xs text-muted-foreground">{warning || "Un gateway custodisce l'accesso a tutte le app che colleghi lì: è un servizio di terzi"}</p>
+      <p className="text-xs text-muted-foreground">{warning || t`Un gateway custodisce l'accesso a tutte le app che colleghi lì: è un servizio di terzi`}</p>
       <div className="flex flex-wrap gap-1">
         {(presets ?? []).map((p) => (
           <button
@@ -494,10 +503,10 @@ function GatewayTab() {
       </div>
       <div className="space-y-2 rounded-2xl border border-border bg-card p-3">
         <div className="grid grid-cols-2 gap-2">
-          <input className="rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder="Nome (es. Composio)" value={name} onChange={(e) => setName(e.target.value)} />
-          <input className="rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder="URL https del server MCP" value={url} onChange={(e) => setUrl(e.target.value)} />
+          <input className="rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder={t`Nome (es. Composio)`} value={name} onChange={(e) => setName(e.target.value)} />
+          <input className="rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder={t`URL https del server MCP`} value={url} onChange={(e) => setUrl(e.target.value)} />
         </div>
-        <input className="w-full rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" type="password" placeholder="chiave / token Bearer (salvata cifrata)" value={token} onChange={(e) => setToken(e.target.value)} />
+        <input className="w-full rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" type="password" placeholder={t`chiave / token Bearer (salvata cifrata)`} value={token} onChange={(e) => setToken(e.target.value)} />
         {(presets ?? []).find((p) => p.name === name)?.help && (
           <p className="text-[11px] text-muted-foreground">{presets!.find((p) => p.name === name)!.help}</p>
         )}
@@ -521,7 +530,7 @@ function GatewayTab() {
             }
           }}
         >
-          aggiungi gateway
+          <Trans>aggiungi gateway</Trans>
         </button>
         {error && <p className="text-xs text-destructive">{error}</p>}
       </div>
@@ -530,6 +539,7 @@ function GatewayTab() {
 }
 
 function ConnectorTile({ c }: { c: ConnectorInfo }) {
+  const { i18n } = useLingui()
   const [busy, setBusy] = useState(false)
   const [open, setOpen] = useState(false)
   const [clientId, setClientId] = useState('')
@@ -548,13 +558,13 @@ function ConnectorTile({ c }: { c: ConnectorInfo }) {
       <div className="flex items-center gap-2">
         <span className="text-base">{c.logo}</span>
         <span className="text-sm text-foreground">{c.name}</span>
-        <span className={`h-2 w-2 rounded-full ${STATUS_DOT[c.state.status]}`} title={c.state.error ?? STATUS_LABEL[c.state.status]} />
-        <span className="text-[10px] uppercase text-muted-foreground">{STATUS_LABEL[c.state.status]}</span>
+        <span className={`h-2 w-2 rounded-full ${STATUS_DOT[c.state.status]}`} title={c.state.error ?? i18n.t(STATUS_LABEL[c.state.status] ?? msg`errore`)} />
+        <span className="text-[10px] uppercase text-muted-foreground">{i18n.t(STATUS_LABEL[c.state.status] ?? msg`errore`)}</span>
         <div className="flex-1" />
         {c.state.status === 'connected' ? (
           <>
             <button className="text-xs text-muted-foreground hover:text-foreground" onClick={() => setOpen(!open)}>
-              {open ? 'chiudi' : 'tool'}
+              {open ? <Trans>chiudi</Trans> : <Trans>tool</Trans>}
             </button>
             <button
               className="text-xs text-muted-foreground hover:text-destructive"
@@ -564,7 +574,7 @@ function ConnectorTile({ c }: { c: ConnectorInfo }) {
                 try { await api.connectorsDisconnect(c.id) } finally { setBusy(false) }
               }}
             >
-              disconnetti
+              <Trans>disconnetti</Trans>
             </button>
           </>
         ) : (
@@ -576,7 +586,7 @@ function ConnectorTile({ c }: { c: ConnectorInfo }) {
               try { await api.connectorsConnect(c.id) } finally { setBusy(false) }
             }}
           >
-            {busy ? 'autorizza nel browser…' : c.state.status === 'needs_auth' ? 'riconnetti' : 'connetti'}
+            {busy ? <Trans>autorizza nel browser…</Trans> : c.state.status === 'needs_auth' ? <Trans>riconnetti</Trans> : <Trans>connetti</Trans>}
           </button>
         )}
       </div>
@@ -589,13 +599,13 @@ function ConnectorTile({ c }: { c: ConnectorInfo }) {
       {c.clientRegistration === 'static' && c.state.status !== 'connected' && (
         <div className="mt-2 space-y-1 border-t border-border pt-2">
           {c.hasStaticCredentials ? (
-            <p className="text-[11px] text-muted-foreground">Client OAuth configurato ✓</p>
+            <p className="text-[11px] text-muted-foreground"><Trans>Client OAuth configurato ✓</Trans></p>
           ) : (
             <>
               <p className="text-[11px] text-muted-foreground">
-                Serve un client OAuth tuo (tipo "Desktop app"):{' '}
-                <a className="text-primary hover:underline" href={c.docsUrl} target="_blank" rel="noreferrer">guida</a>{' '}
-                · docs/google-oauth.md
+                <Trans>Serve un client OAuth tuo (tipo "Desktop app"):</Trans>{' '}
+                <a className="text-primary hover:underline" href={c.docsUrl} target="_blank" rel="noreferrer">{t`guida`}</a>{' '}
+                {' · docs/google-oauth.md'}
               </p>
               <div className="flex gap-1">
                 <input
@@ -616,7 +626,7 @@ function ConnectorTile({ c }: { c: ConnectorInfo }) {
                   disabled={!clientId.trim() || !clientSecret.trim()}
                   onClick={() => void api.connectorsSaveStaticClient(c.id, clientId.trim(), clientSecret.trim())}
                 >
-                  salva
+                  <Trans>salva</Trans>
                 </button>
               </div>
             </>
@@ -627,7 +637,7 @@ function ConnectorTile({ c }: { c: ConnectorInfo }) {
       {open && (
         <div className="mt-2 space-y-2 border-t border-border pt-2">
           {/* tool del connettore: interruttore per ognuno (i disattivati non sono offerti al modello) */}
-          {c.tools.length === 0 && <p className="text-[11px] text-muted-foreground">nessun tool elencato</p>}
+          {c.tools.length === 0 && <p className="text-[11px] text-muted-foreground"><Trans>nessun tool elencato</Trans></p>}
           {c.tools.map((t) => {
             const disabled = c.state.disabledTools.includes(t.name)
             return (
@@ -647,11 +657,11 @@ function ConnectorTile({ c }: { c: ConnectorInfo }) {
           })}
           {/* istruzioni personalizzate: iniettate nel system prompt quando il connettore è attivo */}
           <div>
-            <p className="mb-1 text-[11px] text-muted-foreground">Istruzioni personalizzate (vanno nel prompt del bot quando il connettore è attivo)</p>
+            <p className="mb-1 text-[11px] text-muted-foreground"><Trans>Istruzioni personalizzate (vanno nel prompt del bot quando il connettore è attivo)</Trans></p>
             <textarea
               className="w-full resize-none rounded-lg bg-muted px-2 py-1.5 text-xs outline-none"
               rows={3}
-              placeholder="es. Usa questo account solo per lavoro; le email in italiano vanno riassunte in bulleted list…"
+              placeholder={t`es. Usa questo account solo per lavoro; le email in italiano vanno riassunte in bulleted list…`}
               value={instructions}
               onChange={(e) => setInstructions(e.target.value)}
               onBlur={() => void api.connectorsSetInstructions(c.id, instructions)}
@@ -682,7 +692,7 @@ function ManualServers() {
 
   return (
     <div className="space-y-3 border-t border-border pt-3">
-      <p className="text-xs text-muted-foreground">Server MCP manuali (stdio o HTTP, con header/bearer salvati cifrati).</p>
+      <p className="text-xs text-muted-foreground"><Trans>Server MCP manuali (stdio o HTTP, con header/bearer salvati cifrati).</Trans></p>
       {servers.map((s) => (
         <div key={s.id} className="rounded-2xl border border-border bg-card px-3 py-2.5">
           <div className="flex items-center gap-2">
@@ -695,13 +705,13 @@ function ManualServers() {
               setTests((p) => ({ ...p, [s.id]: { ok: true, tools: ['test…'] } }))
               const r = await api.mcpTest(s.id)
               setTests((p) => ({ ...p, [s.id]: r }))
-            }}>test</button>
-            <button className="text-xs text-muted-foreground hover:text-foreground" onClick={() => { setEdit(s); setEditBearer('') }}>modifica</button>
-            <button className="text-xs text-muted-foreground hover:text-destructive" onClick={async () => { await api.mcpDelete(s.id); await refresh() }}>elimina</button>
+            }}><Trans>test</Trans></button>
+            <button className="text-xs text-muted-foreground hover:text-foreground" onClick={() => { setEdit(s); setEditBearer('') }}><Trans>modifica</Trans></button>
+            <button className="text-xs text-muted-foreground hover:text-destructive" onClick={async () => { await api.mcpDelete(s.id); await refresh() }}><Trans>elimina</Trans></button>
           </div>
           {tests[s.id] && (
             <div className={`mt-2 text-xs ${tests[s.id].ok ? 'text-chart-2' : 'text-destructive'}`}>
-              {tests[s.id].ok ? `✓ ${tests[s.id].tools?.length ?? 0} tool: ${tests[s.id].tools?.join(', ').slice(0, 200)}` : `✕ ${tests[s.id].error}`}
+              {tests[s.id].ok ? t`✓ ${tests[s.id].tools?.length ?? 0} tool: ${(tests[s.id].tools ?? []).join(', ').slice(0, 200)}` : t`✕ ${tests[s.id].error ?? ''}`}
             </div>
           )}
         </div>
@@ -709,31 +719,31 @@ function ManualServers() {
       {edit ? (
         <div className="space-y-2 rounded-2xl border border-border bg-muted p-3">
           <div className="grid grid-cols-2 gap-2">
-            <input className="rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder="Nome (es. weather)" value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} />
+            <input className="rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder={t`Nome (es. weather)`} value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} />
             <select className="rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" value={edit.transport} onChange={(e) => setEdit({ ...edit, transport: e.target.value as 'stdio' | 'http' })}>
-              <option value="stdio">stdio (comando locale)</option>
-              <option value="http">http (URL)</option>
+              <option value="stdio">{t`stdio (comando locale)`}</option>
+              <option value="http">{t`http (URL)`}</option>
             </select>
           </div>
           {edit.transport === 'stdio' ? (
             <div className="grid grid-cols-2 gap-2">
-              <input className="rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder="Comando (es. node)" value={edit.command ?? ''} onChange={(e) => setEdit({ ...edit, command: e.target.value })} />
-              <input className="rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder="Argomenti separati da spazio" value={(edit.args ?? []).join(' ')} onChange={(e) => setEdit({ ...edit, args: e.target.value ? e.target.value.split(/\s+/) : [] })} />
+              <input className="rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder={t`Comando (es. node)`} value={edit.command ?? ''} onChange={(e) => setEdit({ ...edit, command: e.target.value })} />
+              <input className="rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder={t`Argomenti separati da spazio`} value={(edit.args ?? []).join(' ')} onChange={(e) => setEdit({ ...edit, args: e.target.value ? e.target.value.split(/\s+/) : [] })} />
             </div>
           ) : (
             <>
-              <input className="w-full rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder="URL (es. http://localhost:3001/mcp)" value={edit.url ?? ''} onChange={(e) => setEdit({ ...edit, url: e.target.value })} />
+              <input className="w-full rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder={t`URL (es. http://localhost:3001/mcp)`} value={edit.url ?? ''} onChange={(e) => setEdit({ ...edit, url: e.target.value })} />
               <input
                 className="w-full rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none"
                 type="password"
-                placeholder="Bearer token (opzionale — salvato cifrato)"
+                placeholder={t`Bearer token (opzionale — salvato cifrato)`}
                 value={editBearer}
                 onChange={(e) => setEditBearer(e.target.value)}
               />
             </>
           )}
           <div className="flex justify-end gap-2 pt-1">
-            <button className="rounded-lg px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground" onClick={() => setEdit(null)}>Annulla</button>
+            <button className="rounded-lg px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground" onClick={() => setEdit(null)}><Trans>Annulla</Trans></button>
             <button
               className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-primary/90"
               onClick={async () => {
@@ -743,29 +753,29 @@ function ManualServers() {
                 await refresh()
               }}
             >
-              Salva
+              <Trans>Salva</Trans>
             </button>
           </div>
         </div>
       ) : (
         <button className="w-full rounded-xl border border-dashed border-border px-3 py-2.5 text-sm text-muted-foreground hover:border-muted-foreground hover:text-foreground" onClick={() => { setEdit({ id: '', name: '', transport: 'stdio', command: '', args: [], enabled: true }); setEditBearer('') }}>
-          + Aggiungi server MCP
+          <Trans>+ Aggiungi server MCP</Trans>
         </button>
       )}
 
       <div className="space-y-2 border-t border-border pt-3">
-        <p className="text-xs text-muted-foreground">Vault credenziali (AES-256-GCM, chiave master in safeStorage): il bot vede i nomi col tool <code>list-credentials</code> e li usa scrivendo <code>{'{{secret:NOME}}'}</code> nei comandi — i valori non compaiono mai nel transcript.</p>
+        <p className="text-xs text-muted-foreground"><Trans>Vault credenziali (AES-256-GCM, chiave master in safeStorage): il bot vede i nomi col tool <code>list-credentials</code> e li usa scrivendo <code>{SECRET_TEMPLATE}</code> nei comandi — i valori non compaiono mai nel transcript.</Trans></p>
         {secrets.map((n) => (
           <div key={n} className="flex items-center gap-2 rounded-lg border border-border px-2 py-2">
             <span className="text-sm text-foreground">🔐 {n}</span>
             <div className="flex-1" />
-            <button className="text-xs text-muted-foreground hover:text-destructive" onClick={async () => { await api.vaultDelete(n); await refresh() }}>elimina</button>
+            <button className="text-xs text-muted-foreground hover:text-destructive" onClick={async () => { await api.vaultDelete(n); await refresh() }}><Trans>elimina</Trans></button>
           </div>
         ))}
         <div className="flex gap-2">
-          <input className="min-w-0 flex-1 rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder="Nome (es. api_key_github)" value={secName} onChange={(e) => setSecName(e.target.value)} />
-          <input className="min-w-0 flex-1 rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" type="password" placeholder="Valore" value={secValue} onChange={(e) => setSecValue(e.target.value)} />
-          <button className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-primary/90 disabled:opacity-40" disabled={!secName.trim() || !secValue} onClick={async () => { await api.vaultStore(secName.trim(), secValue); setSecName(''); setSecValue(''); await refresh() }}>Salva</button>
+          <input className="min-w-0 flex-1 rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder={t`Nome (es. api_key_github)`} value={secName} onChange={(e) => setSecName(e.target.value)} />
+          <input className="min-w-0 flex-1 rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" type="password" placeholder={t`Valore`} value={secValue} onChange={(e) => setSecValue(e.target.value)} />
+          <button className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-primary/90 disabled:opacity-40" disabled={!secName.trim() || !secValue} onClick={async () => { await api.vaultStore(secName.trim(), secValue); setSecName(''); setSecValue(''); await refresh() }}><Trans>Salva</Trans></button>
         </div>
       </div>
     </div>
@@ -777,10 +787,14 @@ function ManualServers() {
 // Fase 6: fuso orario, finestre di consegna, rientro/pausa per assenza e
 // notifiche per agente.
 function GeneralTab() {
+  const { i18n } = useLingui()
   const agents = useStore((s) => s.agents)
   // fase 16 (U0): il selettore del tema (setting ui.theme)
   const theme = useStore((s) => s.theme)
   const setTheme = useStore((s) => s.setTheme)
+  // fase 17a (L6): il selettore della lingua (setting ui.language)
+  const uiLanguage = useStore((s) => s.uiLanguage)
+  const setUiLanguage = useStore((s) => s.setUiLanguage)
   const [atLogin, setAtLogin] = useState(false)
   const [busy, setBusy] = useState(false)
   const [tz, setTz] = useState('')
@@ -833,15 +847,32 @@ function GeneralTab() {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between rounded-xl border border-border px-4 py-3">
-        <span className="text-sm">Tema</span>
+        <span className="text-sm"><Trans>Tema</Trans></span>
         <div className="flex gap-1 rounded-full bg-muted p-1">
-          {([['system', 'Sistema'], ['light', 'Chiaro'], ['dark', 'Scuro']] as const).map(([value, label]) => (
+          {([['system', msg`Sistema`], ['light', msg`Chiaro`], ['dark', msg`Scuro`]] as const).map(([value, label]) => (
             <button
               key={value}
               className={`rounded-full px-3 py-1 text-xs transition ${theme === value ? 'bg-foreground text-background' : 'text-muted-foreground'}`}
               onClick={() => setTheme(value as UiTheme)}
             >
-              {label}
+              {i18n.t(label)}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* fase 17a (L6): le voci delle lingue si scrivono nella LORO lingua e
+          non si traducono; solo "Sistema" si traduce */}
+      <div className="flex items-center justify-between rounded-xl border border-border px-4 py-3">
+        <span className="text-sm"><Trans>Lingua</Trans></span>
+        <div className="flex gap-1 rounded-full bg-muted p-1">
+          {([['system', msg`Sistema`], ['it', msg`Italiano`], ['en', msg`English`]] as const).map(([value, label]) => (
+            <button
+              key={value}
+              className={`rounded-full px-3 py-1 text-xs transition ${uiLanguage === value ? 'bg-foreground text-background' : 'text-muted-foreground'}`}
+              onClick={() => setUiLanguage(value as UiLanguageSetting)}
+            >
+              {i18n.t(label)}
             </button>
           ))}
         </div>
@@ -849,7 +880,7 @@ function GeneralTab() {
 
       {libStats?.warn && (
         <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-          Libreria: {(libStats.bytes / 1024 / 1024 / 1024).toFixed(1)} GB — oltre i 2 GB consigliati. Valuta cosa cancellare dalla vista Libreria (nessun blocco automatico).
+          <Trans>Libreria: {(libStats.bytes / 1024 / 1024 / 1024).toFixed(1)} GB — oltre i 2 GB consigliati. Valuta cosa cancellare dalla vista Libreria (nessun blocco automatico).</Trans>
         </p>
       )}
 
@@ -862,18 +893,17 @@ function GeneralTab() {
           onChange={(e) => void toggle(e.target.checked)}
         />
         <span className="space-y-1">
-          <span className="block text-sm text-foreground">Avvia all'accesso</span>
+          <span className="block text-sm text-foreground"><Trans>Avvia all'accesso</Trans></span>
           <span className="block text-xs text-muted-foreground">
-            Il daemon dei Bot parte quando accedi al Mac e resta attivo con la finestra chiusa
-            (LaunchAgent con riavvio automatico dopo un crash). Puoi disattivarlo qui.
+            <Trans>Il daemon dei Bot parte quando accedi al Mac e resta attivo con la finestra chiusa (LaunchAgent con riavvio automatico dopo un crash). Puoi disattivarlo qui.</Trans>
           </span>
         </span>
       </label>
 
       <div className="space-y-2 rounded-2xl border border-border bg-card px-4 py-3">
-        <p className="text-sm text-foreground">Consegna e presenza</p>
+        <p className="text-sm text-foreground"><Trans>Consegna e presenza</Trans></p>
         <label className="flex items-center justify-between text-xs text-muted-foreground">
-          Fuso orario
+          <Trans>Fuso orario</Trans>
           <input
             className={`w-44 ${inputCls}`}
             placeholder={Intl.DateTimeFormat().resolvedOptions().timeZone}
@@ -883,15 +913,15 @@ function GeneralTab() {
           />
         </label>
         <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-          <span>Finestra di consegna</span>
+          <span><Trans>Finestra di consegna</Trans></span>
           <div className="flex items-center gap-2">
             <select
               className={inputCls}
               value={winMode}
               onChange={(e) => { setWinMode(e.target.value as 'morning' | 'working'); void saveWindow() }}
             >
-              <option value="morning">mattina</option>
-              <option value="working">orario lavorativo</option>
+              <option value="morning">{t`mattina`}</option>
+              <option value="working">{t`orario lavorativo`}</option>
             </select>
             {winMode === 'morning' ? (
               <>
@@ -901,7 +931,7 @@ function GeneralTab() {
               </>
             ) : (
               <>
-                <span>lun–ven</span>
+                <span>{t`lun–ven`}</span>
                 <input className={`w-16 ${inputCls}`} value={working.start} onChange={(e) => setWorking({ ...working, start: e.target.value })} onBlur={() => void saveWindow()} />
                 <span>–</span>
                 <input className={`w-16 ${inputCls}`} value={working.end} onChange={(e) => setWorking({ ...working, end: e.target.value })} onBlur={() => void saveWindow()} />
@@ -909,15 +939,15 @@ function GeneralTab() {
             )}
           </div>
         </div>
-        <p className="text-[10px] text-muted-foreground">I messaggi non urgenti delle routine aspettano questa finestra (o l'apertura della chat del bot).</p>
+        <p className="text-[10px] text-muted-foreground"><Trans>I messaggi non urgenti delle routine aspettano questa finestra (o l'apertura della chat del bot).</Trans></p>
         <label className="flex items-center justify-between text-xs text-muted-foreground">
-          Look-around al rientro dopo (ore di assenza)
+          <Trans>Look-around al rientro dopo (ore di assenza)</Trans>
           <input className={`w-16 ${inputCls}`} type="number" min={1} value={minAwayHours}
             onChange={(e) => setMinAwayHours(Number(e.target.value))}
             onBlur={() => void api.settingsSet('minAwayHours', Math.max(1, Number(minAwayHours) || 12))} />
         </label>
         <label className="flex items-center justify-between text-xs text-muted-foreground">
-          Pausa delle routine dopo (giorni di assenza)
+          <Trans>Pausa delle routine dopo (giorni di assenza)</Trans>
           <input className={`w-16 ${inputCls}`} type="number" min={1} value={awayPauseDays}
             onChange={(e) => setAwayPauseDays(Number(e.target.value))}
             onBlur={() => void api.settingsSet('awayPauseDays', Math.max(1, Number(awayPauseDays) || 7))} />
@@ -925,7 +955,7 @@ function GeneralTab() {
       </div>
 
       <div className="space-y-2 rounded-2xl border border-border bg-card px-4 py-3">
-        <p className="text-sm text-foreground">Notifiche per agente</p>
+        <p className="text-sm text-foreground"><Trans>Notifiche per agente</Trans></p>
         {agents.map((a) => {
           const off = disabledNotifications.includes(a.id)
           return (
@@ -935,7 +965,7 @@ function GeneralTab() {
                 className={`rounded-lg px-2 py-1 text-[11px] ${off ? 'bg-muted text-muted-foreground' : 'bg-chart-2/15 text-chart-2'}`}
                 onClick={() => void toggleAgentNotification(a.id, off)}
               >
-                {off ? 'disattivate' : 'attivate'}
+                {off ? t`disattivate` : t`attivate`}
               </button>
             </label>
           )
@@ -978,7 +1008,7 @@ function ModelDefaultsRow({ p }: { p: ProviderConfig }) {
   const effective = modelDefaultsFor(p)
   const effLabel = (role: keyof ModelOverrides, fallback: string): string => {
     const eff = effective[role]
-    return eff ? `${fallback}: ${eff}` : `${fallback}…`
+    return eff ? t`${fallback}: ${eff}` : t`${fallback}…`
   }
   const options = (value: string | undefined, label: string): ReactNode => (
     <>
@@ -990,18 +1020,18 @@ function ModelDefaultsRow({ p }: { p: ProviderConfig }) {
   )
   const sel = 'rounded-lg bg-muted px-2 py-1.5 text-xs outline-none'
 
-  if (models === null) return <div className="mt-2 text-xs text-muted-foreground">modelli…</div>
+  if (models === null) return <div className="mt-2 text-xs text-muted-foreground"><Trans>modelli…</Trans></div>
   return (
     <div className="mt-2 flex flex-wrap items-center gap-2">
-      <span className="text-[11px] uppercase tracking-wide text-muted-foreground">modelli</span>
+      <span className="text-[11px] uppercase tracking-wide text-muted-foreground"><Trans>modelli</Trans></span>
       <select className={sel} value={saved.defaultModel ?? ''} onChange={(e) => void save({ defaultModel: e.target.value || undefined })}>
-        {options(saved.defaultModel, saved.defaultModel ? 'predefinito…' : effLabel('defaultModel', 'predefinito'))}
+        {options(saved.defaultModel, saved.defaultModel ? t`predefinito…` : effLabel('defaultModel', t`predefinito`))}
       </select>
       <select className={sel} value={saved.fallbackModel ?? ''} onChange={(e) => void save({ fallbackModel: e.target.value || undefined })}>
-        {options(saved.fallbackModel, saved.fallbackModel ? 'riserva…' : effLabel('fallbackModel', 'riserva'))}
+        {options(saved.fallbackModel, saved.fallbackModel ? t`riserva…` : effLabel('fallbackModel', t`riserva`))}
       </select>
       <select className={sel} value={saved.autoReviewModel ?? ''} onChange={(e) => void save({ autoReviewModel: e.target.value || undefined })}>
-        {options(saved.autoReviewModel, saved.autoReviewModel ? 'auto-review…' : effLabel('autoReviewModel', 'auto-review'))}
+        {options(saved.autoReviewModel, saved.autoReviewModel ? t`auto-review…` : effLabel('autoReviewModel', t`auto-review`))}
       </select>
     </div>
   )
@@ -1034,11 +1064,11 @@ function WebSearchKeyRow({ p }: { p: ProviderConfig }) {
 
   return (
     <div className="mt-2 flex flex-wrap items-center gap-2">
-      <span className="text-[11px] uppercase tracking-wide text-muted-foreground">ricerca web</span>
+      <span className="text-[11px] uppercase tracking-wide text-muted-foreground"><Trans>ricerca web</Trans></span>
       <input
         className="w-56 rounded-lg bg-muted px-2 py-1.5 text-xs outline-none"
         type="password"
-        placeholder={set ? 'chiave salvata (scrivi per sostituirla)' : 'chiave per la ricerca web di Ollama'}
+        placeholder={set ? t`chiave salvata (scrivi per sostituirla)` : t`chiave per la ricerca web di Ollama`}
         value={value}
         onChange={(e) => setValue(e.target.value)}
       />
@@ -1047,7 +1077,7 @@ function WebSearchKeyRow({ p }: { p: ProviderConfig }) {
         disabled={busy || !value.trim()}
         onClick={() => void save(value.trim())}
       >
-        Salva chiave
+        <Trans>Salva chiave</Trans>
       </button>
       {set && (
         <button
@@ -1055,11 +1085,11 @@ function WebSearchKeyRow({ p }: { p: ProviderConfig }) {
           disabled={busy}
           onClick={() => void save(null)}
         >
-          Rimuovi
+          <Trans>Rimuovi</Trans>
         </button>
       )}
       <span className={`text-xs ${set ? 'text-chart-2' : 'text-muted-foreground'}`}>
-        {set === null ? '' : set ? 'ricerca web attiva (chiave nel vault)' : 'ricerca web non attiva'}
+        {set === null ? '' : set ? t`ricerca web attiva (chiave nel vault)` : t`ricerca web non attiva`}
       </span>
     </div>
   )
@@ -1090,22 +1120,22 @@ function WebSearchSection() {
   const stateOf = (p: WebSearchProviderStatusRpc): { text: string; cls: string } => {
     if (p.cooldownUntil) {
       return {
-        text: `in raffreddamento fino a ${new Date(p.cooldownUntil).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+        text: t`in raffreddamento fino a ${formatTime(p.cooldownUntil)}`,
         cls: 'text-destructive'
       }
     }
     if (p.lastError) {
       return {
-        text: `ultimo errore: ${p.lastError.kind}${p.lastError.status !== undefined ? ` (HTTP ${p.lastError.status})` : ''}`,
+        text: t`ultimo errore: ${p.lastError.kind}${p.lastError.status !== undefined ? t` (HTTP ${p.lastError.status})` : ''}`,
         cls: 'text-muted-foreground'
       }
     }
-    return { text: 'disponibile', cls: 'text-chart-2' }
+    return { text: t`disponibile`, cls: 'text-chart-2' }
   }
 
   return (
     <div className="rounded-2xl border border-border bg-card px-3 py-2.5">
-      <div className="text-sm text-foreground">Ricerca web</div>
+      <div className="text-sm text-foreground"><Trans>Ricerca web</Trans></div>
       <label className="mt-2 flex cursor-pointer items-start gap-3">
         <input
           type="checkbox"
@@ -1116,15 +1146,10 @@ function WebSearchSection() {
         />
         <span className="space-y-1">
           <span className="block text-xs text-foreground">
-            Usa i servizi di ricerca gratuiti senza chiave (You.com, Exa, Tavily)
+            <Trans>Usa i servizi di ricerca gratuiti senza chiave (You.com, Exa, Tavily)</Trans>
           </span>
           <span className="block text-xs text-muted-foreground">
-            Le ricerche dei bot vengono inviate a questi servizi, secondo i loro termini d&apos;uso:{' '}
-            <a className="text-primary hover:underline" href="https://you.com/acceptable-use-policy-may-2026" target="_blank" rel="noreferrer">You.com</a>
-            {' · '}
-            <a className="text-primary hover:underline" href="https://exa.ai/terms" target="_blank" rel="noreferrer">Exa</a>
-            {' · '}
-            <a className="text-primary hover:underline" href="https://docs.tavily.com/documentation/keyless" target="_blank" rel="noreferrer">Tavily</a>
+            <Trans>Le ricerche dei bot vengono inviate a questi servizi, secondo i loro termini d&apos;uso: <a className="text-primary hover:underline" href="https://you.com/acceptable-use-policy-may-2026" target="_blank" rel="noreferrer">You.com</a>{' · '}<a className="text-primary hover:underline" href="https://exa.ai/terms" target="_blank" rel="noreferrer">Exa</a>{' · '}<a className="text-primary hover:underline" href="https://docs.tavily.com/documentation/keyless" target="_blank" rel="noreferrer">Tavily</a></Trans>
           </span>
         </span>
       </label>
@@ -1140,6 +1165,7 @@ function WebSearchSection() {
 }
 
 function ProvidersTab({ onChanged }: { onChanged: () => Promise<void> }) {
+  const { i18n } = useLingui()
   const providers = useStore((s) => s.providers)
   const [edit, setEdit] = useState<ProviderConfig | null>(null)
   const [testing, setTesting] = useState<string | null>(null)
@@ -1160,9 +1186,9 @@ function ProvidersTab({ onChanged }: { onChanged: () => Promise<void> }) {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <p className="text-xs text-muted-foreground">Provider locali e cloud — chiunque parli OpenAI-compatible funziona.</p>
+        <p className="text-xs text-muted-foreground"><Trans>Provider locali e cloud — chiunque parli OpenAI-compatible funziona.</Trans></p>
         <button className="rounded-lg bg-muted px-3 py-1.5 text-xs hover:bg-accent" onClick={() => void scan()}>
-          Scansiona locale (Ollama / LM Studio)
+          <Trans>Scansiona locale (Ollama / LM Studio)</Trans>
         </button>
       </div>
 
@@ -1173,13 +1199,13 @@ function ProvidersTab({ onChanged }: { onChanged: () => Promise<void> }) {
             <span className="text-sm text-foreground">{p.name}</span>
             <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">{p.kind}</span>
             <span className="flex-1 truncate text-xs text-muted-foreground">{p.baseUrl}</span>
-            <button className="text-xs text-muted-foreground hover:text-foreground" onClick={() => setEdit(p)}>modifica</button>
+            <button className="text-xs text-muted-foreground hover:text-foreground" onClick={() => setEdit(p)}><Trans>modifica</Trans></button>
             <button
               className="text-xs text-muted-foreground hover:text-foreground"
               onClick={() => void test(p.id)}
               disabled={testing === p.id}
             >
-              {testing === p.id ? 'test…' : 'test'}
+              {testing === p.id ? t`test…` : t`test`}
             </button>
             <button
               className="text-xs text-muted-foreground hover:text-destructive"
@@ -1188,14 +1214,14 @@ function ProvidersTab({ onChanged }: { onChanged: () => Promise<void> }) {
                 await onChanged()
               }}
             >
-              elimina
+              <Trans>elimina</Trans>
             </button>
           </div>
           {testResult[p.id] && (
             <div className={`mt-2 text-xs ${testResult[p.id].ok ? 'text-chart-2' : 'text-destructive'}`}>
               {testResult[p.id].ok
-                ? `✓ ${(testResult[p.id].models?.length ?? 0)} modelli disponibili`
-                : `✕ ${testResult[p.id].error}`}
+                ? i18n.t(plural(testResult[p.id].models?.length ?? 0, { one: '✓ # modello disponibile', other: '✓ # modelli disponibili' }))
+                : t`✕ ${testResult[p.id].error ?? ''}`}
             </div>
           )}
           <ModelDefaultsRow p={p} />
@@ -1223,7 +1249,7 @@ function ProvidersTab({ onChanged }: { onChanged: () => Promise<void> }) {
             setEdit({ id: '', name: '', kind: 'openai-compatible', baseUrl: 'https://', apiKey: '', enabled: true })
           }
         >
-          + Aggiungi provider
+          <Trans>+ Aggiungi provider</Trans>
         </button>
       )}
     </div>
@@ -1237,7 +1263,7 @@ function ProviderForm({ initial, onSave, onCancel }: { initial: ProviderConfig; 
       <div className="grid grid-cols-2 gap-2">
         <input
           className="rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none"
-          placeholder="Nome (es. Z.ai)"
+          placeholder={t`Nome (es. Z.ai)`}
           value={p.name}
           onChange={(e) => setP({ ...p, name: e.target.value })}
         />
@@ -1253,26 +1279,26 @@ function ProviderForm({ initial, onSave, onCancel }: { initial: ProviderConfig; 
       </div>
       <input
         className="w-full rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none"
-        placeholder="Base URL (es. https://api.z.ai)"
+        placeholder={t`Base URL (es. https://api.z.ai)`}
         value={p.baseUrl}
         onChange={(e) => setP({ ...p, baseUrl: e.target.value })}
       />
       <input
         className="w-full rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none"
-        placeholder="API key (vuoto per locali)"
+        placeholder={t`API key (vuoto per locali)`}
         type="password"
         value={p.apiKey}
         onChange={(e) => setP({ ...p, apiKey: e.target.value })}
       />
       <div className="flex justify-end gap-2 pt-1">
         <button className="rounded-lg px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground" onClick={onCancel}>
-          Annulla
+          <Trans>Annulla</Trans>
         </button>
         <button
           className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-primary/90"
           onClick={() => void onSave({ ...p, id: p.id || p.kind + '_' + Date.now() })}
         >
-          Salva
+          <Trans>Salva</Trans>
         </button>
       </div>
     </div>
@@ -1316,22 +1342,22 @@ function AgentsTab() {
 
   return (
     <div className="space-y-3">
-      <p className="text-xs text-muted-foreground">Scegli con quale modello pensa ciascun bot.</p>
+      <p className="text-xs text-muted-foreground"><Trans>Scegli con quale modello pensa ciascun bot.</Trans></p>
       {agents.map((a) => (
         <div key={a.id} className="rounded-2xl border border-border bg-card px-3 py-2.5">
           <div className="mb-2 flex items-center gap-2">
             <span className="text-sm font-medium text-foreground">{a.name}</span>
             {a.id === effectiveMain ? (
-              <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[10px] text-primary" title="Punto di contatto principale dell'utente: coordina gli altri bot">
-                ★ principale
+              <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[10px] text-primary" title={t`Punto di contatto principale dell'utente: coordina gli altri bot`}>
+                <Trans>★ principale</Trans>
               </span>
             ) : (
               <button
                 className="rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
-                title="Rendi questo bot il punto di contatto principale dell'utente"
+                title={t`Rendi questo bot il punto di contatto principale dell'utente`}
                 onClick={() => void setMainAgent(a.id)}
               >
-                Rendi principale
+                <Trans>Rendi principale</Trans>
               </button>
             )}
           </div>
@@ -1344,7 +1370,7 @@ function AgentsTab() {
                 await patch(a, { providerId: pid, model: null })
               }}
             >
-              <option value="">— provider —</option>
+              <option value="">{t`— provider —`}</option>
               {providers.map((p) => (
                 <option key={p.id} value={p.id}>{p.name}</option>
               ))}
@@ -1355,7 +1381,7 @@ function AgentsTab() {
               value={a.model ?? ''}
               onChange={async (e) => void patch(a, { model: e.target.value || null })}
             >
-              <option value="">— modello —</option>
+              <option value="">{t`— modello —`}</option>
               {(models[a.providerId ?? ''] ?? []).map((m) => (
                 <option key={m.id} value={m.id}>{m.label ?? m.id}</option>
               ))}
@@ -1363,7 +1389,7 @@ function AgentsTab() {
           </div>
           <input
             className="mt-2 w-full rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none"
-            placeholder="Descrizione / ruolo del bot (va nel system prompt)"
+            placeholder={t`Descrizione / ruolo del bot (va nel system prompt)`}
             defaultValue={a.description}
             onBlur={async (e) => void patch(a, { description: e.target.value })}
           />
@@ -1376,7 +1402,7 @@ function AgentsTab() {
       {templates.length > 0 && (
         <div className="space-y-2 border-t border-border pt-3">
           <p className="text-xs text-muted-foreground">
-            Crea un bot da template: parte con un messaggio di configurazione che crea routine (in pausa), memorie e domande di attivazione.
+            <Trans>Crea un bot da template: parte con un messaggio di configurazione che crea routine (in pausa), memorie e domande di attivazione.</Trans>
           </p>
           <div className="grid grid-cols-2 gap-2">
             {templates.map((t) => (
@@ -1410,11 +1436,11 @@ function PermissionsTab({ onChanged }: { onChanged: () => Promise<void> }) {
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">
-        Regole per tool: consenti sempre / chiedi / blocca. "Consenti sempre" nelle card salva una standing grant.
+        <Trans>Regole per tool: consenti sempre / chiedi / blocca. "Consenti sempre" nelle card salva una standing grant.</Trans>
       </p>
       <div className="rounded-2xl border border-border bg-card px-3 py-2.5">
         <label className="flex items-center justify-between text-sm">
-          <span className="text-foreground">Politica predefinita</span>
+          <span className="text-foreground"><Trans>Politica predefinita</Trans></span>
           <select
             className="rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none"
             value={permissions.default}
@@ -1423,9 +1449,9 @@ function PermissionsTab({ onChanged }: { onChanged: () => Promise<void> }) {
               await onChanged()
             }}
           >
-            <option value="always_allow">Consenti sempre</option>
-            <option value="needs_approval">Chiedi approvazione</option>
-            <option value="blocked">Blocca</option>
+            <option value="always_allow">{t`Consenti sempre`}</option>
+            <option value="needs_approval">{t`Chiedi approvazione`}</option>
+            <option value="blocked">{t`Blocca`}</option>
           </select>
         </label>
       </div>
@@ -1444,9 +1470,9 @@ function PermissionsTab({ onChanged }: { onChanged: () => Promise<void> }) {
               await onChanged()
             }}
           >
-            <option value="always_allow">Consenti sempre</option>
-            <option value="needs_approval">Chiedi approvazione</option>
-            <option value="blocked">Blocca</option>
+            <option value="always_allow">{t`Consenti sempre`}</option>
+            <option value="needs_approval">{t`Chiedi approvazione`}</option>
+            <option value="blocked">{t`Blocca`}</option>
           </select>
         </div>
       ))}
@@ -1467,16 +1493,17 @@ function kindOf(t: RoutineTrigger | null | undefined, legacySchedule?: string): 
   return t.type
 }
 
-const KIND_LABEL: Record<TriggerKind, string> = {
-  schedule: 'orario',
-  email: 'email in arrivo',
-  calendar_event: 'evento del calendario',
-  webhook: 'webhook',
-  connector_poll: 'poll di un connettore',
-  presence_return: 'quando torni al computer'
+const KIND_LABEL: Record<TriggerKind, MessageDescriptor> = {
+  schedule: msg`orario`,
+  email: msg`email in arrivo`,
+  calendar_event: msg`evento del calendario`,
+  webhook: msg`webhook`,
+  connector_poll: msg`poll di un connettore`,
+  presence_return: msg`quando torni al computer`
 }
 
 function RoutinesTab() {
+  const { i18n } = useLingui()
   const activeId = useStore((s) => s.activeId)
   const connectors = useStore((s) => s.connectors)
   const [routines, setRoutines] = useState<RoutineInfo[]>([])
@@ -1507,34 +1534,32 @@ function RoutinesTab() {
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">
-        Le routine sono attività automatiche del Bot: su orario (cron o "ogni giorno alle 9, circa"),
-        su un'email in arrivo, prima di un evento del calendario, da un webhook o quando torni al computer.
-        I loro messaggi non urgenti aspettano la finestra di consegna.
+        <Trans>Le routine sono attività automatiche del Bot: su orario (cron o "ogni giorno alle 9, circa"), su un'email in arrivo, prima di un evento del calendario, da un webhook o quando torni al computer. I loro messaggi non urgenti aspettano la finestra di consegna.</Trans>
       </p>
 
       {routines.map((r) => {
-        const state = r.enabled ? 'attiva' : r.paused_for_away ? 'in pausa per assenza' : 'in pausa'
+        const state = r.enabled ? t`attiva` : r.paused_for_away ? t`in pausa per assenza` : t`in pausa`
         const stateColor = r.enabled ? 'text-chart-2' : r.paused_for_away ? 'text-destructive' : 'text-muted-foreground'
         return (
           <div key={r.id} className="rounded-2xl border border-border bg-card px-3 py-2.5">
             <div className="flex items-center gap-2">
               <span className={`h-2 w-2 rounded-full ${r.enabled ? 'bg-chart-2' : r.paused_for_away ? 'bg-destructive' : 'bg-muted-foreground/40'}`} />
               <span className="text-sm text-foreground">{r.title}</span>
-              <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">{KIND_LABEL[kindOf(r.trigger)]}</span>
+              <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">{i18n.t(KIND_LABEL[kindOf(r.trigger)])}</span>
               <div className="flex-1" />
-              <button className="text-xs text-muted-foreground hover:text-foreground" onClick={() => setEditing(r)}>modifica</button>
+              <button className="text-xs text-muted-foreground hover:text-foreground" onClick={() => setEditing(r)}><Trans>modifica</Trans></button>
               <button className="text-xs text-muted-foreground hover:text-foreground" onClick={() => void pauseResume(r)}>
-                {r.enabled ? 'metti in pausa' : 'riattiva'}
+                {r.enabled ? <Trans>metti in pausa</Trans> : <Trans>riattiva</Trans>}
               </button>
               <button className="text-xs text-muted-foreground hover:text-destructive" onClick={async () => { await api.deleteRoutine(r.id); await refresh() }}>
-                elimina
+                <Trans>elimina</Trans>
               </button>
             </div>
             <p className="mt-1 text-xs text-muted-foreground">{describeTrigger(r.trigger ?? null, r.schedule)}</p>
             <div className="mt-1 flex items-center gap-3 text-[10px] text-muted-foreground">
               <span className={stateColor}>{state}</span>
-              {r.next_run && <span>prossima: {new Date(r.next_run).toLocaleString('it-IT')}</span>}
-              {r.last_run && <span>ultima: {new Date(r.last_run).toLocaleString('it-IT')}</span>}
+              {r.next_run && <span>{t`prossima: ${formatDate(r.next_run)}`}</span>}
+              {r.last_run && <span>{t`ultima: ${formatDate(r.last_run)}`}</span>}
             </div>
             {r.webhook_url && (
               <div className="mt-1 flex items-center gap-2 rounded-lg border border-border bg-muted px-2 py-1.5">
@@ -1548,7 +1573,7 @@ function RoutinesTab() {
                     `curl -X POST ${r.webhook_url} -H "Authorization: Bearer ${r.trigger?.type === 'webhook' ? r.trigger.token : ''}" -d '{"test":1}'`
                   )}
                 >
-                  copia curl
+                  <Trans>copia curl</Trans>
                 </button>
               </div>
             )}
@@ -1593,7 +1618,7 @@ function RoutinesTab() {
                 setBusy(false)
               }}
             >
-              {busy ? 'analizzo…' : '✨ Suggerisci dal transcript'}
+              {busy ? t`analizzo…` : <Trans>✨ Suggerisci dal transcript</Trans>}
             </button>
             {suggestions.map((s, i) => (
               <div key={i} className="rounded-lg border border-border px-3 py-2">
@@ -1609,7 +1634,7 @@ function RoutinesTab() {
                       await refresh()
                     }}
                   >
-                    Aggiungi
+                    <Trans>Aggiungi</Trans>
                   </button>
                 </div>
                 <p className="mt-1 text-xs text-muted-foreground">{s.description}</p>
@@ -1638,7 +1663,7 @@ function NewRoutinePicker(props: {
           className="w-full rounded-xl border border-dashed border-border px-3 py-2.5 text-sm text-muted-foreground hover:border-muted-foreground hover:text-foreground"
           onClick={() => setKind('schedule')}
         >
-          + Nuova routine
+          <Trans>+ Nuova routine</Trans>
         </button>
         {props.err && <p className="text-xs text-destructive">{props.err}</p>}
       </div>
@@ -1668,6 +1693,7 @@ function TriggerEditor(props: {
   onSaved(): void
   onCreate?(title: string, prompt: string, trigger: RoutineTrigger, timezone: string): Promise<void>
 }) {
+  const { i18n } = useLingui()
   const r = props.routine
   const [kind, setKind] = useState<TriggerKind>(props.initialKind ?? kindOf(r?.trigger, r?.schedule))
   const [title, setTitle] = useState(r?.title ?? '')
@@ -1762,7 +1788,7 @@ function TriggerEditor(props: {
     setBusy(true)
     try {
       const trigger = buildTrigger()
-      if (!trigger) throw new Error('Argomenti (args) non sono JSON valido')
+      if (!trigger) throw new Error(t`Argomenti (args) non sono JSON valido`)
       if (props.onCreate) await props.onCreate(title.trim(), prompt.trim(), trigger, timezone.trim())
       else await api.updateRoutineTrigger(r!.id, { title: title.trim(), prompt: prompt.trim(), trigger, timezone: timezone.trim() })
       props.onSaved()
@@ -1790,10 +1816,10 @@ function TriggerEditor(props: {
 
   const inputCls = 'rounded-lg bg-muted px-2 py-1.5 text-xs outline-none'
   const presetHint = (preset: 'email' | 'calendar_event'): string => {
-    const { tool: t } = autoTool(preset, connectorId)
-    return t
-      ? `tool scelto dal connettore: ${t}`
-      : 'nessun tool riconosciuto nel connettore: configura tool e idField a mano'
+    const { tool: chosen } = autoTool(preset, connectorId)
+    return chosen
+      ? t`tool scelto dal connettore: ${chosen}`
+      : t`nessun tool riconosciuto nel connettore: configura tool e idField a mano`
   }
 
   return (
@@ -1805,31 +1831,31 @@ function TriggerEditor(props: {
             className={`rounded-lg px-2 py-1 text-[11px] ${kind === k ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
             onClick={() => setKind(k)}
           >
-            {KIND_LABEL[k]}
+            {i18n.t(KIND_LABEL[k])}
           </button>
         ))}
       </div>
-      <input className={`w-full ${inputCls} text-sm`} placeholder="Titolo (es. Riepilogo email del mattino)" value={title} onChange={(e) => setTitle(e.target.value)} />
-      <input className={`w-full ${inputCls} text-sm`} placeholder="Cosa deve fare il Bot a ogni esecuzione" value={prompt} onChange={(e) => setPrompt(e.target.value)} />
+      <input className={`w-full ${inputCls} text-sm`} placeholder={t`Titolo (es. Riepilogo email del mattino)`} value={title} onChange={(e) => setTitle(e.target.value)} />
+      <input className={`w-full ${inputCls} text-sm`} placeholder={t`Cosa deve fare il Bot a ogni esecuzione`} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
 
       {kind === 'schedule' && (
         <div className="space-y-2">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <button className={`rounded-lg px-2 py-1 ${cron !== '' ? 'bg-accent' : ''}`} onClick={() => { setCron('0 9 * * *') }}>cron</button>
-            <button className={`rounded-lg px-2 py-1 ${cron === '' ? 'bg-accent' : ''}`} onClick={() => setCron('')}>ogni…</button>
+            <button className={`rounded-lg px-2 py-1 ${cron !== '' ? 'bg-accent' : ''}`} onClick={() => { setCron('0 9 * * *') }}>{t`cron`}</button>
+            <button className={`rounded-lg px-2 py-1 ${cron === '' ? 'bg-accent' : ''}`} onClick={() => setCron('')}>{t`ogni…`}</button>
             {cron === '' && (
               <>
                 <select className={inputCls} value={every} onChange={(e) => setEvery(e.target.value as typeof every)}>
-                  <option value="day">giorno</option>
-                  <option value="weekday">giorni feriali</option>
-                  <option value="week">settimana</option>
-                  <option value="month">mese</option>
-                  <option value="hour">ora</option>
+                  <option value="day">{t`giorno`}</option>
+                  <option value="weekday">{t`giorni feriali`}</option>
+                  <option value="week">{t`settimana`}</option>
+                  <option value="month">{t`mese`}</option>
+                  <option value="hour">{t`ora`}</option>
                 </select>
                 {every === 'week' && (
                   <select className={inputCls} value={weekday} onChange={(e) => setWeekday(Number(e.target.value))}>
-                    {['domenica', 'lunedì', 'martedì', 'mercoledì', 'giovedì', 'venerdì', 'sabato'].map((d, i) => (
-                      <option key={d} value={i}>{d}</option>
+                    {[msg`domenica`, msg`lunedì`, msg`martedì`, msg`mercoledì`, msg`giovedì`, msg`venerdì`, msg`sabato`].map((d, i) => (
+                      <option key={i} value={i}>{i18n.t(d)}</option>
                     ))}
                   </select>
                 )}
@@ -1838,8 +1864,8 @@ function TriggerEditor(props: {
                 )}
                 <input className={`w-20 ${inputCls}`} placeholder="HH:MM" value={at} onChange={(e) => setAt(e.target.value)} />
                 <select className={inputCls} value={mode} onChange={(e) => setMode(e.target.value as 'at' | 'around')}>
-                  <option value="at">preciso</option>
-                  <option value="around">circa (±15 min)</option>
+                  <option value="at">{t`preciso`}</option>
+                  <option value="around">{t`circa (±15 min)`}</option>
                 </select>
               </>
             )}
@@ -1853,9 +1879,9 @@ function TriggerEditor(props: {
           {kind === 'connector_poll' && (
             <>
               <select className={`w-full ${inputCls}`} value={connectorId} onChange={(e) => setConnectorId(e.target.value)}>
-                <option value="">— connettore —</option>
+                <option value="">{t`— connettore —`}</option>
                 {presetConnectors.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                {props.manualServers.map((s) => <option key={s.id} value={s.id}>{s.name} (server manuale)</option>)}
+                {props.manualServers.map((s) => <option key={s.id} value={s.id}>{s.name} {t`(server manuale)`}</option>)}
               </select>
               {props.manualServers.some((s) => s.id === connectorId) && (
                 // fase 7 (residuo 0a): readOnlyHint di un server manuale è
@@ -1867,28 +1893,28 @@ function TriggerEditor(props: {
                     checked={confirmReadOnly}
                     onChange={(e) => setConfirmReadOnly(e.target.checked)}
                   />
-                  Confermo che questo tool legge soltanto e non modifica nulla (server aggiunto a mano: la dichiarazione "sola lettura" non è verificata)
+                  <Trans>Confermo che questo tool legge soltanto e non modifica nulla (server aggiunto a mano: la dichiarazione "sola lettura" non è verificata)</Trans>
                 </label>
               )}
             </>
           )}
           {(kind === 'email' || kind === 'calendar_event') && <p className="text-[11px] text-muted-foreground">{presetHint(kind)}</p>}
           {kind === 'email' && (
-            <input className={`w-full ${inputCls}`} placeholder="Quando arriva un'e-mail che corrisponde a… (query)" value={query} onChange={(e) => setQuery(e.target.value)} />
+            <input className={`w-full ${inputCls}`} placeholder={t`Quando arriva un'e-mail che corrisponde a… (query)`} value={query} onChange={(e) => setQuery(e.target.value)} />
           )}
           {kind === 'calendar_event' && (
             <label className="flex items-center gap-2 text-xs text-muted-foreground">
-              avvisa
+              <Trans>avvisa</Trans>
               <input className={`w-16 ${inputCls}`} type="number" min={0} value={offsetMinutes} onChange={(e) => setOffsetMinutes(Number(e.target.value))} />
-              minuti prima dell'evento
+              <Trans>minuti prima dell'evento</Trans>
             </label>
           )}
           <div className="grid grid-cols-2 gap-2">
-            <input className={`font-mono ${inputCls}`} placeholder="tool (mcp__…__…)" value={tool} onChange={(e) => setTool(e.target.value)} />
-            <input className={`font-mono ${inputCls}`} placeholder='idField (es. "messages[].id")' value={idField} onChange={(e) => setIdField(e.target.value)} />
-            <input className={inputCls} type="number" min={2} title="minuti tra i poll (minimo 2)" value={intervalMin} onChange={(e) => setIntervalMin(Number(e.target.value))} />
+            <input className={`font-mono ${inputCls}`} placeholder={t`tool (mcp__…__…)`} value={tool} onChange={(e) => setTool(e.target.value)} />
+            <input className={`font-mono ${inputCls}`} placeholder={t`idField (es. "messages[].id")`} value={idField} onChange={(e) => setIdField(e.target.value)} />
+            <input className={inputCls} type="number" min={2} title={t`minuti tra i poll (minimo 2)`} value={intervalMin} onChange={(e) => setIntervalMin(Number(e.target.value))} />
             {kind === 'connector_poll' && (
-              <input className={`font-mono ${inputCls}`} placeholder='args JSON, es. {"query":"x"}' value={argsJson} onChange={(e) => setArgsJson(e.target.value)} />
+              <input className={`font-mono ${inputCls}`} placeholder={t`args JSON, es. {"query":"x"}`} value={argsJson} onChange={(e) => setArgsJson(e.target.value)} />
             )}
           </div>
         </div>
@@ -1896,23 +1922,23 @@ function TriggerEditor(props: {
 
       {kind === 'webhook' && (
         <p className="text-[11px] text-muted-foreground">
-          All'uscita trovi l'URL con il token da copiare: qualunque sistema può far scattare la routine con un POST.
+          <Trans>All'uscita trovi l'URL con il token da copiare: qualunque sistema può far scattare la routine con un POST.</Trans>
         </p>
       )}
       {kind === 'presence_return' && (
-        <p className="text-[11px] text-muted-foreground">La routine gira quando torni al computer dopo un'assenza lunga.</p>
+        <p className="text-[11px] text-muted-foreground"><Trans>La routine gira quando torni al computer dopo un'assenza lunga.</Trans></p>
       )}
 
-      <input className={`w-full ${inputCls}`} placeholder="Fuso orario (es. Europe/Rome)" value={timezone} onChange={(e) => setTimezone(e.target.value)} />
+      <input className={`w-full ${inputCls}`} placeholder={t`Fuso orario (es. Europe/Rome)`} value={timezone} onChange={(e) => setTimezone(e.target.value)} />
       {err && <p className="text-xs text-destructive">{err}</p>}
       <div className="flex justify-end gap-2 pt-1">
-        <button className="rounded-lg px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground" onClick={props.onCancel}>Annulla</button>
+        <button className="rounded-lg px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground" onClick={props.onCancel}><Trans>Annulla</Trans></button>
         <button
           className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-primary/90 disabled:opacity-40"
           disabled={busy || !title.trim() || !prompt.trim() || !props.agentId}
           onClick={() => void save()}
         >
-          {r ? 'Salva' : 'Crea routine'}
+          {r ? <Trans>Salva</Trans> : <Trans>Crea routine</Trans>}
         </button>
       </div>
     </div>

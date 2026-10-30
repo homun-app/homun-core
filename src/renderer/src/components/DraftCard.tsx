@@ -6,18 +6,24 @@
 // mostrati in "Altri parametri", senza via la bozza è solo testo (Invia
 // disabilitato), con nomi di argomento sconosciuti la modifica è bloccata.
 import { useState } from 'react'
+import { useLingui } from '@lingui/react'
+import { Trans } from '@lingui/react/macro'
+import { t } from '@lingui/core/macro'
+import type { MessageDescriptor } from '@lingui/core'
+import { msg } from '@lingui/core/macro'
 import { useStore } from '../store'
 import type { TranscriptEntry, SendMessageMeta, SendMessagePayload } from '../../../shared/types'
 
 type Draft = Extract<SendMessagePayload, { type: 'draft' }>
 
-const CHANNEL_LABEL: Record<Draft['channel'], string> = {
-  email: '✉️ Email',
-  slack: '💬 Slack',
-  other: '📤 Invio esterno'
+const CHANNEL_LABEL: Record<Draft['channel'], MessageDescriptor> = {
+  email: msg`✉️ Email`,
+  slack: msg`💬 Slack`,
+  other: msg`📤 Invio esterno`
 }
 
 export function DraftCard({ entry }: { entry: TranscriptEntry }) {
+  const { i18n } = useLingui()
   const send = useStore((s) => s.draftSend)
   const discard = useStore((s) => s.draftDiscard)
   const update = useStore((s) => s.draftUpdate)
@@ -43,14 +49,14 @@ export function DraftCard({ entry }: { entry: TranscriptEntry }) {
   return (
     <div className="max-w-[75%] rounded-2xl rounded-bl-md border border-destructive/40 bg-destructive/10 px-4 py-3 shadow-soft">
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium text-destructive/90">{CHANNEL_LABEL[draft.channel]}</span>
+        <span className="text-xs font-medium text-destructive/90">{i18n.t(CHANNEL_LABEL[draft.channel])}</span>
         <span className="text-[11px] text-muted-foreground">
-          {status === 'pending' ? 'bozza — si invia solo se confermi' : status === 'sent' ? 'inviata' : status === 'error' ? 'errore' : 'scartata'}
+          {status === 'pending' ? t`bozza — si invia solo se confermi` : status === 'sent' ? t`inviata` : status === 'error' ? t`errore` : t`scartata`}
         </span>
       </div>
       <div className="mt-1 text-xs text-foreground">
-        <span className="text-muted-foreground">A:</span> {draft.to || '(nessun destinatario)'}
-        {draft.subject && (<><br /><span className="text-muted-foreground">Oggetto:</span> {draft.subject}</>)}
+        <span className="text-muted-foreground">{t`A:`}</span> {draft.to || t`(nessun destinatario)`}
+        {draft.subject && (<><br /><span className="text-muted-foreground">{t`Oggetto:`}</span> {draft.subject}</>)}
         {draft.via && (<><br /><span className="text-muted-foreground font-mono text-[10px]">via {draft.via.tool}</span></>)}
       </div>
 
@@ -58,7 +64,7 @@ export function DraftCard({ entry }: { entry: TranscriptEntry }) {
           thread_id, allegati…): sempre visibili, mai collassati */}
       {draft.extraArgs?.length ? (
         <div className="mt-2 rounded-lg bg-muted/50 px-3 py-2">
-          <div className="text-[11px] text-muted-foreground">Altri parametri (verranno inviati così):</div>
+          <div className="text-[11px] text-muted-foreground"><Trans>Altri parametri (verranno inviati così):</Trans></div>
           {draft.extraArgs.map((p) => (
             <div key={p.key} className="mt-0.5 font-mono text-[11px] text-foreground">
               <span className="text-muted-foreground">{p.key}:</span> {p.value}
@@ -80,13 +86,13 @@ export function DraftCard({ entry }: { entry: TranscriptEntry }) {
               className="rounded-lg bg-chart-2 px-3 py-1.5 text-xs font-medium text-white hover:bg-chart-2/90"
               onClick={() => { update(entry.id, body); setEditing(false) }}
             >
-              Salva
+              <Trans>Salva</Trans>
             </button>
             <button
               className="rounded-lg bg-muted px-3 py-1.5 text-xs text-foreground hover:bg-accent"
               onClick={() => setEditing(false)}
             >
-              Annulla
+              <Trans>Annulla</Trans>
             </button>
           </div>
         </div>
@@ -97,10 +103,10 @@ export function DraftCard({ entry }: { entry: TranscriptEntry }) {
       {closed ? (
         <div className={`mt-2 text-xs ${status === 'sent' ? 'text-chart-2' : 'text-muted-foreground'}`}>
           {autoSent
-            ? `⚡ Inviata automaticamente dalla regola: ${meta.ruleMatched ?? ''}`
+            ? <Trans>⚡ Inviata automaticamente dalla regola: {String(meta.ruleMatched ?? '')}</Trans>
             : status === 'sent'
-              ? '✓ Inviata'
-              : 'Scartata'}
+              ? <Trans>✓ Inviata</Trans>
+              : <Trans>Scartata</Trans>}
         </div>
       ) : (
         <>
@@ -110,26 +116,26 @@ export function DraftCard({ entry }: { entry: TranscriptEntry }) {
               disabled={noChannel}
               onClick={() => send(entry.id, editing ? body : undefined)}
             >
-              Invia
+              <Trans>Invia</Trans>
             </button>
             <button
               className="rounded-lg bg-muted px-3 py-1.5 text-xs text-foreground hover:bg-accent"
               onClick={() => discard(entry.id)}
             >
-              Scarta
+              <Trans>Scarta</Trans>
             </button>
             {!editing && !bodyLocked && (
               <button
                 className="rounded-lg bg-muted px-3 py-1.5 text-xs text-foreground hover:bg-accent"
                 onClick={startEdit}
               >
-                Modifica
+                <Trans>Modifica</Trans>
               </button>
             )}
             {/* fase 8: crea una regola di auto-review per invii come questo */}
             <button
               className="rounded-lg border border-border px-3 py-1.5 text-xs text-foreground hover:bg-muted"
-              title="Apri Impostazioni → Approvazione automatica con una regola precompilata"
+              title={t`Apri Impostazioni → Approvazione automatica con una regola precompilata`}
               onClick={() =>
                 proposeRule(
                   draft.channel === 'email'
@@ -138,11 +144,11 @@ export function DraftCard({ entry }: { entry: TranscriptEntry }) {
                 )
               }
             >
-              Crea regola da questa azione
+              <Trans>Crea regola da questa azione</Trans>
             </button>
           </div>
           {noChannel && (
-            <div className="mt-1 text-[11px] text-muted-foreground">nessun canale di invio collegato</div>
+            <div className="mt-1 text-[11px] text-muted-foreground"><Trans>nessun canale di invio collegato</Trans></div>
           )}
         </>
       )}

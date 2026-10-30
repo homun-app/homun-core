@@ -3,7 +3,9 @@ import { create } from 'zustand'
 import type { Agent, TranscriptEntry, SandbotEvent, ProviderConfig, PermissionsConfig, ConnectorInfo, TaskInfo, GroupInfo, GroupMessageInfo, SubagentInfo, AgentAvatar, TurnEnd } from '../../shared/types'
 import type { UiTheme } from './theme'
 import { applyTheme, watchSystemTheme } from './theme'
-import { previewOf } from './sidebar-utils'
+import { previewOf, type SidebarPreview } from './sidebar-utils'
+import { activateUiLanguage } from './lib/i18n'
+import { resolveUiLanguage, type UiLanguageSetting, type UiLanguage } from '../../shared/ui-language'
 
 const api = (window as unknown as { sandbot: import('../../shared/types').SandbotApi }).sandbot
 
@@ -68,8 +70,12 @@ interface Store {
   /** fase 12: entry del figlio aperto (aggiornate dagli eventi entries) */
   subEntries: TranscriptEntry[]
   // ---- fase 16: la nuova interfaccia ----
-  /** tema dell'app (setting ui.theme); 'dark' su <html> quando serve */
+  /** fase 16: tema dell'app (setting ui.theme); 'dark' su <html> quando serve */
   theme: UiTheme
+  /** fase 17a: lingua dell'interfaccia (setting ui.language, predefinito 'system') */
+  uiLanguage: UiLanguageSetting
+  /** fase 17a: la lingua ATTIVA dopo il setting + le lingue di sistema */
+  activeLanguage: UiLanguage
   /** pannello destro aperto (setting ui.rightPanel) */
   rightPanel: boolean
   /** fase 16 (U3): l'utente sta scrivendo nel composer di QUESTO bot */
@@ -83,7 +89,7 @@ interface Store {
   /** fase 16 (U3): orologio che si muove quando il happy scade */
   nowTick: number
   /** fase 16 (U4): anteprima dell'ultimo messaggio visibile per agente */
-  previews: Record<string, string>
+  previews: Record<string, SidebarPreview>
   /** fase 16 (U5): pannelli Memoria e Skill della vista dell'agente (anche dal pannello destro) */
   memoryOpen: boolean
   skillsOpen: boolean
@@ -128,6 +134,8 @@ interface Store {
   setSettingsTab(v: string | null): void
   /** fase 16: tema (classe dark su <html>) e pannello destro */
   setTheme(t: UiTheme): void
+  /** fase 17a: lingua dell'interfaccia — si applica subito e resta nel setting */
+  setUiLanguage(l: UiLanguageSetting): void
   setRightPanel(v: boolean): void
   /** fase 16 (U3): il composer di questo bot ha del testo (o no) */
   setTyping(agentId: string | null): void
@@ -160,6 +168,9 @@ export const useStore = create<Store>((set, get) => ({
   openLibraryId: null,
   // fase 16
   theme: 'system',
+  // fase 17a (L2)
+  uiLanguage: 'system',
+  activeLanguage: 'it',
   rightPanel: true,
   typingAgentId: null,
   lastDeltaAt: {},
@@ -184,6 +195,10 @@ export const useStore = create<Store>((set, get) => ({
     set({ theme, rightPanel })
     applyTheme(theme)
     watchSystemTheme(() => applyTheme(get().theme))
+    // fase 17a (L2): la lingua del setting (il catalogo l'ha già attivato
+    // main.tsx prima del mount; qui si ricordano setting e lingua attiva)
+    const uiLanguage = await api.settingsGet<UiLanguageSetting>('ui.language', 'system').catch(() => 'system' as UiLanguageSetting)
+    set({ uiLanguage, activeLanguage: resolveUiLanguage(uiLanguage, navigator.languages) })
     if (activeId) {
       set({ entries: await api.getEntries(activeId) })
     }
@@ -525,6 +540,16 @@ export const useStore = create<Store>((set, get) => ({
     set({ theme: t })
     applyTheme(t)
     void api.settingsSet('ui.theme', t).catch(() => undefined)
+  },
+
+  // fase 17a (L2): la lingua cambia a caldo (activateUiLanguage ricarica il
+  // catalogo senza toccare la finestra) e il main ricostruisce il tray
+  setUiLanguage(l) {
+    const lang = resolveUiLanguage(l, navigator.languages)
+    set({ uiLanguage: l, activeLanguage: lang })
+    void activateUiLanguage(lang)
+    void api.settingsSet('ui.language', l).catch(() => undefined)
+    void api.uiLanguageChanged(lang).catch(() => undefined)
   },
 
   setRightPanel(v) {

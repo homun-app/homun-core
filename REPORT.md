@@ -2370,3 +2370,94 @@ Probe `scripts/fase15-probe.mjs` (nel repo, riutilizzabile): daemon REALE su car
 - **Output di typecheck / vitest / build / eval / probe (ultime righe):** `tsc --noEmit` pulito (exit 0); vitest `Test Files 88 passed (88)` / `Tests 1466 passed (1466)` / `Duration 5.57s` (32 test nuovi: 13 + 17 + 1 + 1); build `✓ built` ×3 (main+preload+renderer, 513 ms); eval strutturale su porta morta (`EVAL_BASE_URL=http://127.0.0.1:1 EVAL_RUNS=1 EVAL_MIN=0 npx vitest run --config vitest.eval.config.ts`): **36 casi in tabella**, 6/6 test verdi, `TOTALE (sistema): 0/36 (soglia 0)` (atteso senza modello); verifica d'integrazione **`13/13 controlli OK`** (exit 0, probe `scripts/fase15-probe.mjs`); conteggi in `/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/` attorno a vitest: `sandbot-plugin-*` **0 → 0**, `sandbot-loop-test-*` **294 → 294** (le 294 del revisore NON toccate); **mtime di `~/.sandbot/data/sandbot.db-shm` identico prima e dopo (1793282488, Oct 29 15:01:28 2026)**.
 - **Cosa NON è stato verificato:** (1) **i tre endpoint veri** (You.com, Exa MCP, Tavily keyless) dal vivo: la prova la fa il revisore; qui fixture sintetiche con la stessa forma e provider finti iniettati. (2) **S9 dal vivo** (`ps` nel box senza `AutomationControlled`, `navigator.webdriver === true`): servirebbe Docker; la stringa di config e il Dockerfile sono verificati dai test, ma l'immagine NON è stata ricostruita (alla prossima corsa del revisore il Dockerfile cambiato → tag nuovo → UNA ricreazione del container). (3) **il rendering a schermo** della sezione "Ricerca web" (payload RPC e stati verificati; click DOM in Electron inaffidabile, come da fasi 3-14). (4) **l'eval su modello vero** (soglia 97/108): corsa strutturale soltanto. (5) gli header del trasporto Exa nella fabbrica di default si ispezionano nel codice (solo `user-agent`) — il test con client finto copre gli ARGOMENTI della chiamata (query/objective/numResults soltanto), non i header HTTP del trasporto reale.
 - **Problemi fuori scope notati:** (1) i quattro daemon `sandbot-f14dbg-*` delle 17:04 restano attivi (non miei, non toccati; le loro cartelle dati in `/var/folders/.../T/` pure). (2) `parseRetryAfterMs` con data nel passato ritorna 0 (raffreddamento nullo) invece di undefined: scelta conservativa, un Retry-After scaduto non deve bloccare il provider. (3) preesistenti invariati: SDK MCP v2 fuori fase, ws-server mono-client, avvisi rollup `INEFFECTIVE_DYNAMIC_IMPORT`, `find_tools` che non cerca fra le skill.
+
+## REPORT FASE 17a — interfaccia multilingua (L1–L8)
+
+### Tabella L1–L8
+
+| Punto | Stato | Dove |
+|---|---|---|
+| **L1.1** dipendenze con versione esatta (runtime `@lingui/core@6.6.0`, `@lingui/react@6.6.0`; dev `@lingui/cli/conf/format-po/vite-plugin/babel-plugin-lingui-macro@6.6.0`, `@rolldown/plugin-babel@0.2.4`) | fatto | `package.json` (`npm i -E`) |
+| **L1.2** `lingui.config.ts`: sourceLocale it, locales it+en, catalogo `src/renderer/src/locales/{locale}/messages` con include/exclude, `formatter({ lineNumbers: false })` | fatto | `lingui.config.ts:9-17` |
+| **L1.3** renderer plugins `[react(), babel({ plugins: ['@lingui/babel-plugin-lingui-macro'] }), lingui(), tailwindcss()]`, main/preload invariati | fatto | `electron.vite.config.ts:32` |
+| **L1.4** dichiarazione `*.po` → `{ messages: Messages }` | fatto | `src/renderer/src/vite-env.d.ts:5-8` |
+| **L1.5** script `i18n:extract` = `lingui extract --clean`; cataloghi `.po` committati | fatto | `package.json:12`, `src/renderer/src/locales/{it,en}/messages.po` |
+| **L2.1** setting `ui.language` ('system'\|'it'\|'en', default 'system') salvato/letto come `ui.theme` | fatto | `src/renderer/src/store.ts:200-201,547-554` |
+| **L2.2** `resolveUiLanguage(setting, systemLanguages)` pura: esplicito vince, system → prima voce it/en, altrimenti 'en', setting ignoto = 'system' | fatto | `src/shared/ui-language.ts:18-29` |
+| **L2.3** `lib/i18n.ts`: `activateUiLanguage` con `import()` dinamico, load+activate, `document.documentElement.lang`, contatore di generazione, ripiego su 'it' | fatto | `src/renderer/src/lib/i18n.ts:20-45` |
+| **L2.4** mount solo dopo la prima attivazione, avvolta in `<I18nProvider i18n={i18n}>` | fatto | `src/renderer/src/main.tsx:22-30` |
+| **L2.5** cambio a caldo senza ricaricare la finestra | fatto | `store.ts:547-554` (`setUiLanguage` → `activateUiLanguage` + IPC al main) |
+| **L3** ogni testo visibile del renderer avvolto: `<Trans>` per JSX, `t`…`` per attributi/stringhe, `plural()`/`<Plural>` per i plurali, funzioni pure → descriptor `msg`, `toLocale*String('it-IT')` → `formatDate/formatTime` per lingua attiva | fatto | tutti i `components/*.tsx` + `components/ui/dialog.tsx`; funzioni pure: `bot/bot-state.ts:63,82` (botStatusText/botAriaLabel), `sidebar-utils.ts:34` (previewOf), `BotDialogs.tsx:20` (FAMILY_NAMES), `RightPanel.tsx:20,22` (TABS/TASK_LABEL), `TaskCard.tsx`/`SubagentCard.tsx` (STATUS_LABEL, fmtAgo), `Settings.tsx` (TAB_LABELS/KIND_LABEL/STATUS_LABEL); date: `RightPanel.tsx:26`, `Settings.tsx` (routine + raffreddamento), `LibraryPanel.tsx`, `MemoryPanel.tsx` |
+| **L4.1–L4.2** extract + traduzione inglese completa di TUTTI i messaggi, inglese di prodotto, segnaposto identici | fatto | 501/501 msgstr compilati in `locales/en/messages.po` (tabella: `scripts/fase17a-translate-en.py`, idempotente); `npx lingui compile` 0 errori |
+| **L4.3** glossario con le scelte fisse | fatto | `src/renderer/src/locales/GLOSSARY.md` |
+| **L4.4** catalogo it con msgstr vuoto o = msgid | fatto | verificato dal test `i18n-catalogs.test.ts` |
+| **L5.1** dizionario tipato del main (tray, tooltip, notifica di prova, dialoghi nativi) | fatto | `src/main/i18n.ts:18-65` |
+| **L5.2** lingua da `resolveUiLanguage(app.getPreferredSystemLanguages())`; IPC `ui:language-changed` → tray ricostruito; preload espone SOLO quella funzione | fatto | `src/main/i18n.ts:54-57`, `src/main/ipc.ts:89-92`, `src/main/tray.ts:50-57`, `src/preload/index.ts:127` |
+| **L5.3** notifiche con titolo/testo dal daemon invariate | fatto | `ipc.ts:109-116` invariato (solo `mainStrings().notifyTest` per la diagnostica) |
+| **L6** selettore Lingua accanto a Tema in Generali: Sistema (tradotto) / Italiano / English (nella loro lingua), cambia subito | fatto | `Settings.tsx:867-881` |
+| **L7.1** test resolveUiLanguage (5 casi: esplicito, it-IT/en-US/de-DE, `['de-DE','it-IT']`, lista vuota, setting sconosciuto) | fatto | `src/shared/__tests__/ui-language.test.ts` |
+| **L7.2** test cataloghi: stessi msgid, nessun msgstr vuoto in en, segnaposto {…} presenti | fatto | `src/renderer/src/__tests__/i18n-catalogs.test.ts` (+ helper `po-helper.ts`) |
+| **L7.3** guardia AST sui .tsx (JsxText ≥2 lettere fuori da Trans; placeholder/title/aria-label/alt letterali) con allowlist commentata | fatto | `src/renderer/src/__tests__/unwrapped-text-guard.test.ts` — deviazione: TS7 nativo non espone API JS, si usa `@babel/parser` (nel grafo Lingui) |
+| **L7.4** test funzioni descriptor con l'italiano risolto dal catalogo | fatto | `bot/__tests__/bot-state.test.ts` (16), `__tests__/sidebar-utils.test.ts` (7) — catalogo it caricato con chiave hash (`generateMessageId`) come a runtime |
+| **L8** non toccati daemon/prompt/tool/eval; testi italiani identici; solo it+en; nessun router né ristrutturazione | fatto | `git diff` conferma: zero modifiche in `src/daemon`, `src/main/agent`, `eval/` |
+
+**Messaggi nel catalogo: 501 per lingua** (it sorgente con msgstr = msgid; en completamente tradotto).
+
+### Glossario finale
+
+Le 10 coppie della specifica (bot→bot, Bot principale/Principale→Main bot/Main, box→computer/shared computer, Libreria→Library, Cassaforte→Vault, Routine→Routines, Aspetta te→Waiting for you, Connetti app→Connect apps, Revisione automatica→Auto-review, Modulo sicuro→Secure form) più le aggiunte ricorrenti documentate in `src/renderer/src/locales/GLOSSARY.md`: agente→agent, Sottoagente→Subagent, Impostazioni→Settings, Generali→General, Chiaro/Scuro/Sistema→Light/Dark/System, mascotte (Creatura/Robottino/Tech/Gelatina/Pixel→Creature/Robot/Tech/Jelly/Pixel), stato (Sta pensando…/Sta scrivendo…/Sta facendo:→Thinking…/Typing…/Working on:), bozza→draft, concessione→grant, attiva/in pausa→active/paused, predefinito/riserva→default/fallback, Fissa/Sblocca→Pin/Unpin, date en in formato `en-GB`.
+
+### File
+
+- **NUOVI**: `lingui.config.ts`; `src/shared/ui-language.ts` (+test); `src/renderer/src/lib/i18n.ts`; `src/renderer/src/locales/{it,en}/messages.po`; `src/renderer/src/locales/GLOSSARY.md`; `src/main/i18n.ts`; test `ui-language.test.ts`, `i18n-catalogs.test.ts`, `unwrapped-text-guard.test.ts`, helper `po-helper.ts`; `scripts/fase17a-translate-en.py` (tabella della traduzione, idempotente).
+- **MODIFICATI**: `electron.vite.config.ts`, `vitest.config.ts` (plugin babel per compilare le macro nei test — senza, le macro lanciano errore a runtime), `package.json` (dipendenze esatte + script), `src/renderer/src/vite-env.d.ts`, `main.tsx`, `store.ts`, `sidebar-utils.ts`, `bot/{bot-state,use-bot,Bot}.tsx`, tutti i `components/*.tsx` (Sidebar, Chat, RightPanel, Settings, ApprovalCard, BotDialogs, ConnectorCard, ConnectorCards13, DraftCard, LibraryCards, LibraryPanel, MemoryPanel, RuleProposalCard, SkillsPanel, SubagentCard, TaskCard, VaultSettings, WidgetCard) + `components/ui/dialog.tsx`; main: `index.ts`, `ipc.ts`, `tray.ts`; `preload/index.ts`; `shared/types.ts` (una funzione: `uiLanguageChanged`); test esistenti bot-state/sidebar-utils adattati ai descriptor.
+
+### Decisioni prese e perché
+
+1. **`t` macro legata all'istanza globale di `@lingui/core`** (stessa istanza passata a `I18nProvider`): in Lingui 6 `useLingui()` non espone più `t`, e il provider ri-renderizza TUTTO l'albero al cambio lingua (`useSyncExternalStore` su `i18n.on('change')`), quindi il cambio a caldo vale per `t` e `<Trans>` senza hook per componente. `useLingui()` resta dove serve l'istanza (aria-label della mascotte, etichette dei tab, FAMILY_NAMES, STATUS_LABEL).
+2. **Le funzioni pure restituiscono descriptor `msg` con i valori incorporati**: la macro genera `{ id, message, values }` e `i18n._` usa `id.values` (verificato nel codice di @lingui/core), quindi chi mostra chiama solo `i18n._(descriptor)` senza ricostruire i valori.
+3. **Plurali ICU dove il numero è visibile**: `{n} task` e `{n} sottoagenti` nella sidebar, `N byte` in libreria, `N modelli disponibili` nel test provider. Unica differenza visibile in italiano rispetto a prima, voluta dalla specifica L3 ("mai n===1 a mano"): con 1 i testi ora al singolare ("1 sottoagente", "1 modello disponibile") dove prima restavano invariati al plurale.
+4. **I testi che diventano REGOLE auto-review restano in italiano** (`suggestedRule` in ApprovalCard, le frasi `proposeRule` in DraftCard): sono input che finiscono nel setting `autoReview` e li valuta il revisore del daemon (prompts = 17b); tradurli ora cambierebbe ciò che viene salvato e valutato.
+5. **`{{secret:NOME}}` dentro `<Trans>` diventa un segnaposto** (costante `SECRET_TEMPLATE` in Settings.tsx e VaultSettings.tsx): le doppie graffe letterali nel messaggio rompono la sintassi ICU (compilazione catalogo fallita prima della correzione).
+6. **Il selettore Lingua scrive le voci in msg**: solo "Sistema" è tradotto; "Italiano"/"English" hanno msgstr identico al msgid in en (non si traducono, L6).
+7. **Locale Intl inglese = `en-GB`** (giorno prima del mese, 24 h): mantiene l'ordine visivo delle date italiane; documentato nel glossario.
+8. **La guardia AST usa `@babel/parser`**: TypeScript 7 (nativo) nel repo non espone l'API JS del compilatore (solo il binario); @babel/parser è già nel grafo delle dipendenze installate (@lingui/babel-plugin-lingui-macro → @babel/core). Allowlist minima e commentata: Homun (marca), TOTP, `via` (identico in inglese) per il testo; HH:MM, client_id, client_secret per gli attributi.
+9. **Vitest compila le macro**: aggiunto `babel({ plugins: ['@lingui/babel-plugin-lingui-macro'], include: ['src/renderer/**'] })` in `vitest.config.ts` — le macro non compilate lanciano errore a runtime ("executed outside the context of compilation"), quindi i test che importano bot-state/sidebar-utils le richiedono.
+10. **Cataloghi con chiavi hash**: la macro genera id = sha256(messaggio) base64url[:6] (`generateMessageId` di @lingui/message-utils); `lingui compile`/plugin Vite mappano il msgid sorgente del .po sulla stessa chiave, quindi lookup runtime e catalogo coincidono (verificato: i chunk `messages-*.js` della build contengono le stesse chiavi e `lingui compile` dà 0 errori).
+11. **`previewOf` ritorna `string | MessageDescriptor`**: i contenuti (testo del messaggio, domanda del widget) restano stringhe di dati; solo i prefissi "Tu: …" e "Bozza per …" sono descriptor.
+
+### Deviazioni dalla specifica
+
+1. **Guardia con @babel/parser invece dell'API TypeScript** (motivo alla decisione 8; stessa semantica: JsxText ≥2 lettere fuori da Trans/Plural/Select/SelectOrdinal, attributi placeholder/title/aria-label/alt letterali con lettere).
+2. **`toLocaleTimeString([], …)` del raffreddamento ricerca web** passava da locale di sistema a locale attivo (it-IT in italiano: identico per l'utente italiano; ora segue la lingua scelta).
+3. **Date di MemoryPanel** (`toLocaleString()`/`toLocaleDateString()` senza 'it-IT' fisso, quindi locale di sistema) passate a `formatDate` della lingua attiva: per l'utente italiano output identico ("30/10/2026"), ora coerenti con la lingua dell'interfaccia.
+4. **Un solo messaggio aggiunto dopo il primo extract** ("A {nome}" del "A <bot>" delle deleghe in chat, 1 lettera: sotto la soglia della guardia ma visibile): avvolto in `<Trans>` e tradotto ("To {0}"). Totale catalogo 501 invece di 500.
+5. **`npm test` a parallelismo pieno NON verde su questa macchina oggi** (load average ~20 per app in background): dimostrato preesistente — anche il commit pulito fase 16 fallisce 11 test (baseline `git stash` + `npm test`: `11 failed | 1500 passed`), sempre gli stessi test timeout-dipendenti di daemon/browser/marketplace (variano da run a run, in isolamento passano). Con `npx vitest run --maxWorkers=4`: **97 file, 1523/1523 verdi** (ripetuto più volte).
+
+### Output dei check
+
+- `npm run typecheck`: pulito (exit 0).
+- `npx vitest run --maxWorkers=4`: `Test Files 97 passed (97)` / `Tests 1523 passed (1523)` / `Duration 7.83s` (12 test nuovi: 5 resolveUiLanguage + 5 cataloghi + 1 guardia + 1 descriptor-valori; +2 assert nei test adattati).
+- `npm test` (parallelismo pieno): flaky per carico macchina, preesistente (v. deviazione 5).
+- `npm run build`: `✓ built` ×3 (main + preload + renderer); i due cataloghi compilati sono chunk dinamici del renderer (`messages-BCUif4xF.js` en con "Thinking…"/"Waiting for you", `messages-DbITBuz3.js` it).
+- `npm run i18n:extract`: seconda corsa senza differenze sui `.po` committati (idempotente); `en 501/501, 0 missing`; `npx lingui compile` 0 compilation error.
+- CSP di `src/renderer/index.html`: invariata (file non toccato).
+
+### Cosa NON è stato verificato
+
+1. **L'app Electron vera su cartella dati temporanea** con screenshot in it/en, chiaro/scuro, cambio lingua a caldo, tray inglese, formato data/ora: è la verifica del revisore (come da specifica "Verifica — la faccio io"); qui niente app avviata.
+2. **Il rendering a schermo** di ogni singolo testo (come nelle fasi 3–16: click DOM in Electron inaffidabile); coperto indirettamente dalla guardia AST + cataloghi completi + compilazione ICU pulita.
+3. **Il flusso OAuth/browser reale**: non toccato.
+4. **L'eval** (`npm run eval`): non toccato dalla fase (nessun file in `eval/` modificato); non eseguito (serve il modello).
+
+### Problemi fuori scope (per la 17b)
+
+Testi che l'utente VEDE ma che nascono nel daemon/shared e restano italiani (da muovere nella 17b):
+
+1. `describeTrigger`/`describeCron` di `src/shared/cron-human.ts`: la descrizione in linguaggio naturale dei trigger delle routine (Settings → Routine, card di approvazione update_state) — modulo condiviso col daemon, testato a parte.
+2. I riepiloghi delle card di approvazione generati nel loop (`src/main/agent/loop.ts`, es. motivi di neverAuto) e i messaggi di sistema/notice del daemon.
+3. Le notifiche native con titolo/corpo decisi dal daemon (`host.notify`, soppressioni incluse) — solo il tooltip del tray e la notifica di prova sono localizzati qui.
+4. Le REGOLE auto-review proposte dalla UI (`suggestedRule` di ApprovalCard, i prefix di DraftCard): si salvano nel setting `autoReview` e le valuta il revisore; se la 17b traduce i prompt, vanno tradotte insieme.
+5. Il fallback `'altro bot'` dentro l'espressione "Da {nome}" in chat (nome di risorsa, resta com'è).
+6. Errori di `vega-render.ts` ('caricamento dati vietato', 'richiesta di rete vietata'): non mostrati in UI (il grafico ricade sul sorgente).
+7. Preesistenti invariati: daemon `sandbot-f14dbg-*` attivi (non miei), SDK MCP v2 fuori fase, avvisi rollup `INEFFECTIVE_DYNAMIC_IMPORT`, test daemon flaky a parallelismo pieno su macchina carica (v. deviazione 5).

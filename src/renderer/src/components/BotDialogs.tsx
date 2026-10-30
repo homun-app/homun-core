@@ -3,19 +3,26 @@
 // a createAgent + updateAgent(avatar), e "Cambia aspetto" del pannello destro
 // (le stesse famiglie e colori, salva con updateAgent(id, { avatar })).
 import { useEffect, useState } from 'react'
+import { useLingui } from '@lingui/react'
+import { Trans } from '@lingui/react/macro'
+import { t, msg } from '@lingui/core/macro'
+import type { MessageDescriptor } from '@lingui/core'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog'
 import { api, useStore } from '../store'
 import { Bot } from '../bot/Bot'
 import { BOT_FAMILIES, BOT_COLORS } from '../../../shared/avatar'
 import type { BotColor, BotFamily, TemplateInfo } from '../../../shared/types'
 
-/** Le 5 famiglie con il loro nome per la UI (come in Lovable). */
-export const FAMILY_NAMES: Record<BotFamily, string> = {
-  'h-creature': 'Creatura',
-  'h-robo': 'Robottino',
-  'h-device': 'Tech',
-  jelly: 'Gelatina',
-  pixel: 'Pixel'
+/**
+ * Le 5 famiglie con il loro nome per la UI (come in Lovable). Fase 17a:
+ * descriptor (msg) — le traduce chi le mostra.
+ */
+export const FAMILY_NAMES: Record<BotFamily, MessageDescriptor> = {
+  'h-creature': msg`Creatura`,
+  'h-robo': msg`Robottino`,
+  'h-device': msg`Tech`,
+  jelly: msg`Gelatina`,
+  pixel: msg`Pixel`
 }
 
 const btn = 'rounded-xl px-4 py-2 text-sm transition hover:opacity-90'
@@ -32,6 +39,7 @@ function AvatarPicker({
   onFamily(f: BotFamily): void
   onColor(c: BotColor): void
 }) {
+  const { i18n } = useLingui()
   return (
     <>
       <div className="grid grid-cols-5 gap-2">
@@ -39,13 +47,13 @@ function AvatarPicker({
           <button
             key={f}
             onClick={() => onFamily(f)}
-            aria-label={FAMILY_NAMES[f]}
+            aria-label={i18n.t(FAMILY_NAMES[f])}
             className={`grid place-items-center gap-1 rounded-2xl border p-2 text-[11px] transition ${
               family === f ? 'border-foreground' : 'border-border hover:border-muted-foreground'
             }`}
           >
             <Bot family={f} color={color} state="idle" size={48} track={false} />
-            {FAMILY_NAMES[f]}
+            {i18n.t(FAMILY_NAMES[f])}
           </button>
         ))}
       </div>
@@ -53,7 +61,7 @@ function AvatarPicker({
         {BOT_COLORS.map((col) => (
           <button
             key={col}
-            aria-label={`Colore ${col}`}
+            aria-label={t`Colore ${col}`}
             onClick={() => onColor(col)}
             className={`size-7 rounded-full transition ${color === col ? 'ring-2 ring-foreground ring-offset-2 ring-offset-background' : ''}`}
             style={{ background: `var(--bot-${col})` }}
@@ -83,7 +91,7 @@ export function NewBotDialog({ onClose }: { onClose: () => void }) {
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle className="font-display text-2xl">Crea nuovo bot</DialogTitle>
+          <DialogTitle className="font-display text-2xl"><Trans>Crea nuovo bot</Trans></DialogTitle>
         </DialogHeader>
         <div className="grid place-items-center rounded-3xl bg-muted p-5">
           <Bot family={family} color={color} state="happy" size={130} />
@@ -91,13 +99,13 @@ export function NewBotDialog({ onClose }: { onClose: () => void }) {
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="Dai un nome al tuo bot"
+          placeholder={t`Dai un nome al tuo bot`}
           className="rounded-xl border border-border bg-background px-3 py-2 text-sm outline-none placeholder:text-muted-foreground"
         />
         <AvatarPicker family={family} color={color} onFamily={setFamily} onColor={setColor} />
         <DialogFooter>
           <button className={`${btn} bg-muted`} onClick={onClose}>
-            Annulla
+            <Trans>Annulla</Trans>
           </button>
           <button
             disabled={!name.trim() || busy}
@@ -113,7 +121,7 @@ export function NewBotDialog({ onClose }: { onClose: () => void }) {
               }
             }}
           >
-            Crea
+            <Trans>Crea</Trans>
           </button>
         </DialogFooter>
         {/* i template di bot che la UI offre già oggi (Settings → Bot) */}
@@ -123,7 +131,7 @@ export function NewBotDialog({ onClose }: { onClose: () => void }) {
               className="text-xs text-muted-foreground underline-offset-2 hover:underline"
               onClick={() => setShowTemplates((v) => !v)}
             >
-              oppure parti da un modello
+              <Trans>oppure parti da un modello</Trans>
             </button>
             {showTemplates && (
               <div className="mt-2 grid grid-cols-2 gap-2 text-left">
@@ -166,7 +174,7 @@ export function ChangeAvatarDialog({ agentId, current, onClose }: { agentId: str
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle className="font-display text-2xl">Cambia aspetto</DialogTitle>
+          <DialogTitle className="font-display text-2xl"><Trans>Cambia aspetto</Trans></DialogTitle>
         </DialogHeader>
         <div className="grid place-items-center rounded-3xl bg-muted p-5">
           <Bot family={family} color={color} state="happy" size={130} />
@@ -174,7 +182,7 @@ export function ChangeAvatarDialog({ agentId, current, onClose }: { agentId: str
         <AvatarPicker family={family} color={color} onFamily={setFamily} onColor={setColor} />
         <DialogFooter>
           <button className={`${btn} bg-muted`} onClick={onClose}>
-            Annulla
+            <Trans>Annulla</Trans>
           </button>
           <button
             disabled={busy}
@@ -190,7 +198,7 @@ export function ChangeAvatarDialog({ agentId, current, onClose }: { agentId: str
               }
             }}
           >
-            Salva
+            <Trans>Salva</Trans>
           </button>
         </DialogFooter>
       </DialogContent>

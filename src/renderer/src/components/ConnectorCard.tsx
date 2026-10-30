@@ -4,6 +4,8 @@
 // messaggio di sistema (CONNECTOR_CONNECTED) per proseguire.
 // La stessa card con etichetta "Riconnetti" appare quando un token scade.
 import { useEffect, useState } from 'react'
+import { Trans } from '@lingui/react/macro'
+import { t } from '@lingui/core/macro'
 import { api, useStore } from '../store'
 import type { ConnectorInfo, TranscriptEntry } from '../../../shared/types'
 
@@ -40,14 +42,14 @@ export function ConnectorCard({ entry }: { entry: TranscriptEntry }) {
       <div className="flex items-center gap-2 text-sm text-foreground">
         <span className="text-base">{connectors.find((c) => c.id === message.connectorId)?.logo ?? '🔌'}</span>
         <span className="font-medium">{message.name ?? message.connectorId}</span>
-        {needsAuth && <span className="rounded bg-destructive/15 px-1.5 py-0.5 text-[10px] text-destructive">token scaduto</span>}
+        {needsAuth && <span className="rounded bg-destructive/15 px-1.5 py-0.5 text-[10px] text-destructive">{t`token scaduto`}</span>}
       </div>
       {message.reason && <p className="mt-1 text-sm text-foreground">{message.reason}</p>}
       {needsAuth && !entry.meta?.connected && (
-        <p className="mt-1 text-xs text-muted-foreground">Il bot ha provato a usare questa app ma la sessione è scaduta.</p>
+        <p className="mt-1 text-xs text-muted-foreground"><Trans>Il bot ha provato a usare questa app ma la sessione è scaduta.</Trans></p>
       )}
       {status === 'connected' ? (
-        <p className="mt-2 text-xs text-chart-2">✓ Connesso — il bot può usarlo</p>
+        <p className="mt-2 text-xs text-chart-2"><Trans>✓ Connesso — il bot può usarlo</Trans></p>
       ) : (
         <button
           className="mt-2 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-primary/90 disabled:opacity-50"
@@ -55,10 +57,10 @@ export function ConnectorCard({ entry }: { entry: TranscriptEntry }) {
           onClick={() => void connect()}
         >
           {status === 'connecting'
-            ? 'Autorizza nel browser…'
+            ? <Trans>Autorizza nel browser…</Trans>
             : needsAuth
-              ? 'Riconnetti'
-              : 'Connetti'}
+              ? <Trans>Riconnetti</Trans>
+              : <Trans>Connetti</Trans>}
         </button>
       )}
     </div>

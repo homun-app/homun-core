@@ -123,6 +123,8 @@ const api: SandbotApi = {
   libraryRestoreVersion: (id, version) => ipcRenderer.invoke('library:restore-version', id, version),
   getLaunchAtLogin: () => ipcRenderer.invoke('launch-at-login:get'),
   setLaunchAtLogin: (enabled) => ipcRenderer.invoke('launch-at-login:set', enabled),
+  // fase 17a (L5): il main ricostruisce il tray nella lingua scelta
+  uiLanguageChanged: (lang) => ipcRenderer.invoke('ui:language-changed', lang),
   onEvent: (cb) => {
     const listener = (_e: unknown, ev: SandbotEvent) => cb(ev)
     ipcRenderer.on('sandbot:event', listener)

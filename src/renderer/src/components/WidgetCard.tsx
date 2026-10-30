@@ -2,6 +2,8 @@
 // se allowCustom, multiSelect con conferma. La risposta torna come messaggio
 // utente (meta.respondedTo) e la card mostra lo stato risposto/scartato.
 import { useState } from 'react'
+import { Trans } from '@lingui/react/macro'
+import { t } from '@lingui/core/macro'
 import { useStore } from '../store'
 import type { TranscriptEntry, SendMessageMeta, SendMessagePayload } from '../../../shared/types'
 
@@ -39,8 +41,8 @@ export function WidgetCard({ entry }: { entry: TranscriptEntry }) {
       {responded || dismissed ? (
         <div className="mt-3 text-xs text-muted-foreground">
           {responded
-            ? `✓ Hai risposto: ${labels(meta.respondedValue as string | string[])}`
-            : '— domanda scavalcata, hai proseguito senza rispondere'}
+            ? <Trans>✓ Hai risposto: {labels(meta.respondedValue as string | string[])}</Trans>
+            : <Trans>— domanda scavalcata, hai proseguito senza rispondere</Trans>}
         </div>
       ) : (
         <>
@@ -74,14 +76,14 @@ export function WidgetCard({ entry }: { entry: TranscriptEntry }) {
               className="mt-2 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-primary/90 disabled:opacity-40"
               onClick={() => send(selected)}
             >
-              Conferma{selected.length ? ` (${selected.length})` : ''}
+              <Trans>Conferma{selected.length ? ` (${selected.length})` : ''}</Trans>
             </button>
           )}
           {widget.allowCustom && (
             <div className="mt-2 flex gap-2">
               <input
                 className="flex-1 rounded-lg border border-border bg-muted px-3 py-1.5 text-xs text-foreground outline-none focus:border-ring"
-                placeholder="Altro (testo libero)…"
+                placeholder={t`Altro (testo libero)…`}
                 value={custom}
                 disabled={confirming}
                 onChange={(e) => setCustom(e.target.value)}
@@ -94,7 +96,7 @@ export function WidgetCard({ entry }: { entry: TranscriptEntry }) {
                 className="rounded-lg bg-muted px-3 py-1.5 text-xs text-foreground hover:bg-accent disabled:opacity-40"
                 onClick={() => send(custom.trim())}
               >
-                Invia
+                <Trans>Invia</Trans>
               </button>
             </div>
           )}

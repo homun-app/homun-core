@@ -503,6 +503,9 @@ export interface SandbotApi {
   // daemon all'accesso (LaunchAgent)
   getLaunchAtLogin(): Promise<boolean>
   setLaunchAtLogin(enabled: boolean): Promise<void>
+  // fase 17a: il renderer avvisa che la lingua dell'interfaccia è cambiata
+  // (il main ricostruisce tray e notifiche nella lingua attiva)
+  uiLanguageChanged(lang: 'it' | 'en'): Promise<void>
   // evento push
   onEvent(cb: (e: SandbotEvent) => void): () => void
 }

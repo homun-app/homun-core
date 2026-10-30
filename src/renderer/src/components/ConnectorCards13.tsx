@@ -5,6 +5,8 @@
 // come gira, cosa serve, componenti non importate): del modello c'è solo
 // `reason`. La proposta nata in un turno contaminato mostra l'avviso in cima.
 import { useState } from 'react'
+import { Trans } from '@lingui/react/macro'
+import { t } from '@lingui/core/macro'
 import { api } from '../store'
 import type { TranscriptEntry } from '../../../shared/types'
 
@@ -22,7 +24,7 @@ function UntrustedBanner({ show }: { show: boolean }) {
   if (!show) return null
   return (
     <p className="mb-2 rounded-lg bg-destructive/15 px-2 py-1 text-[11px] text-destructive">
-      Proposta fatta dopo aver letto contenuti esterni: controlla che sia quello che volevi
+      <Trans>Proposta fatta dopo aver letto contenuti esterni: controlla che sia quello che volevi</Trans>
     </p>
   )
 }
@@ -52,43 +54,43 @@ export function McpServerCard({ entry }: { entry: TranscriptEntry }) {
 
   const needs =
     message.needs.kind === 'oauth'
-      ? 'accesso con il tuo account (OAuth)'
+      ? t`accesso con il tuo account (OAuth)`
       : message.needs.kind === 'key'
-        ? `una chiave (${message.needs.header}): la inserisci tu nelle Impostazioni`
+        ? t`una chiave (${message.needs.header}): la inserisci tu nelle Impostazioni`
         : message.needs.vars.length
-          ? `variabili d'ambiente: ${message.needs.vars.filter((v) => v.required).map((v) => v.name).join(', ')} (le compili tu nelle Impostazioni)`
-          : 'nessuna credenziale'
+          ? t`variabili d'ambiente: ${message.needs.vars.filter((v) => v.required).map((v) => v.name).join(', ')} (le compili tu nelle Impostazioni)`
+          : t`nessuna credenziale`
   const runtime =
     message.runtime.kind === 'remote'
-      ? `remoto (${message.runtime.host})`
-      : `nel box: ${message.runtime.command}`
+      ? t`remoto (${message.runtime.host})`
+      : t`nel box: ${message.runtime.command}`
 
   return (
     <div className="max-w-[75%] rounded-2xl rounded-bl-md border border-border bg-card px-4 py-3 shadow-soft">
       <UntrustedBanner show={message.untrusted === true} />
       <div className="flex items-center gap-2 text-sm text-foreground">
-        <span className="font-medium">Aggiungi server MCP: {message.name}</span>
+        <span className="font-medium"><Trans>Aggiungi server MCP: {message.name}</Trans></span>
         {message.publisher && <span className="text-xs text-muted-foreground">{message.publisher}</span>}
       </div>
-      <p className="mt-1 text-xs text-muted-foreground">fiducia: {message.trust} · come gira: {runtime}</p>
+      <p className="mt-1 text-xs text-muted-foreground"><Trans>fiducia: {message.trust} · come gira: {runtime}</Trans></p>
       {message.siteUrl && (
         <a className="mt-0.5 block truncate text-[11px] text-primary hover:underline" href={message.siteUrl} target="_blank" rel="noreferrer">{message.siteUrl}</a>
       )}
-      <p className="mt-1 text-xs text-muted-foreground">serve: {needs}</p>
+      <p className="mt-1 text-xs text-muted-foreground"><Trans>serve: {needs}</Trans></p>
       {message.thirdPartyWarning && (
         <p className="mt-1 rounded-lg bg-destructive/15 px-2 py-1 text-[11px] text-destructive">
-          Server pubblicato da terzi: può leggere e fare quello che gli permettono i suoi strumenti
+          <Trans>Server pubblicato da terzi: può leggere e fare quello che gli permettono i suoi strumenti</Trans>
         </p>
       )}
       {message.reason && <p className="mt-1 text-sm text-foreground">{message.reason}</p>}
       {message.disabledReason ? (
         <p className="mt-2 text-xs text-muted-foreground">
-          {message.disabledReason} — <button className="text-muted-foreground underline hover:text-foreground" onClick={() => void api.connectorsResolveMcpServer(entry.agentId, entry.id, 'no').catch(() => undefined)}>No</button>
+          {message.disabledReason} — <button className="text-muted-foreground underline hover:text-foreground" onClick={() => void api.connectorsResolveMcpServer(entry.agentId, entry.id, 'no').catch(() => undefined)}><Trans>No</Trans></button>
         </p>
       ) : status === 'installed' ? (
-        <p className="mt-2 text-xs text-chart-2">✓ Aggiunto — il bot ha ricevuto l'esito</p>
+        <p className="mt-2 text-xs text-chart-2"><Trans>✓ Aggiunto — il bot ha ricevuto l'esito</Trans></p>
       ) : status === 'error' ? (
-        <p className="mt-2 text-xs text-destructive">✕ {error} — <button className="underline" onClick={() => void api.connectorsResolveMcpServer(entry.agentId, entry.id, 'no').catch(() => undefined)}>chiudi</button></p>
+        <p className="mt-2 text-xs text-destructive">✕ {error} — <button className="underline" onClick={() => void api.connectorsResolveMcpServer(entry.agentId, entry.id, 'no').catch(() => undefined)}><Trans>chiudi</Trans></button></p>
       ) : (
         <div className="mt-2 flex items-center gap-2">
           <button
@@ -96,14 +98,14 @@ export function McpServerCard({ entry }: { entry: TranscriptEntry }) {
             disabled={status === 'installing'}
             onClick={() => void add()}
           >
-            {status === 'installing' ? 'Aggiungo…' : 'Aggiungi'}
+            {status === 'installing' ? <Trans>Aggiungo…</Trans> : <Trans>Aggiungi</Trans>}
           </button>
           <button
             className="rounded-lg border border-border px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground"
             disabled={status === 'installing'}
             onClick={() => void api.connectorsResolveMcpServer(entry.agentId, entry.id, 'no').catch(() => undefined)}
           >
-            No
+            <Trans>No</Trans>
           </button>
         </div>
       )}
@@ -138,32 +140,31 @@ export function PluginCard({ entry }: { entry: TranscriptEntry }) {
     <div className="max-w-[75%] rounded-2xl rounded-bl-md border border-border bg-card px-4 py-3 shadow-soft">
       <UntrustedBanner show={message.untrusted === true} />
       <div className="flex items-center gap-2 text-sm text-foreground">
-        <span className="font-medium">Installa plugin: {message.name}</span>
+        <span className="font-medium"><Trans>Installa plugin: {message.name}</Trans></span>
         <span className="text-xs text-muted-foreground">{message.marketplace}</span>
       </div>
       <p className="mt-1 text-xs text-muted-foreground">
-        fiducia: {message.trust} · commit {message.sha12}
-        {message.repoUrl && <> · <a className="text-primary hover:underline" href={message.repoUrl} target="_blank" rel="noreferrer">repository</a></>}
+        <Trans>fiducia: {message.trust} · commit {message.sha12}{message.repoUrl && <> · <a className="text-primary hover:underline" href={message.repoUrl} target="_blank" rel="noreferrer">{t`repository`}</a></>}</Trans>
       </p>
       {message.skills.length > 0 && (
-        <p className="mt-1 text-xs text-muted-foreground">skill: {message.skills.join(', ')}</p>
+        <p className="mt-1 text-xs text-muted-foreground"><Trans>skill: {message.skills.join(', ')}</Trans></p>
       )}
       {message.servers.length > 0 && (
         <p className="mt-0.5 text-xs text-muted-foreground">
-          server: {message.servers.map((s) => `${s.name} (${s.runtimeLabel})`).join(', ')}
+          <Trans>server: {message.servers.map((sv) => `${sv.name} (${sv.runtimeLabel})`).join(', ')}</Trans>
         </p>
       )}
       {message.settings.length > 0 && (
-        <p className="mt-0.5 text-xs text-muted-foreground">da configurare: {message.settings.map((s) => s.key).join(', ')} (Impostazioni)</p>
+        <p className="mt-0.5 text-xs text-muted-foreground"><Trans>da configurare: {message.settings.map((st) => st.key).join(', ')} (Impostazioni)</Trans></p>
       )}
       {message.ignored.length > 0 && (
-        <p className="mt-1 text-[11px] text-muted-foreground">Non importati (non girano in Homun): {message.ignored.join(', ')}</p>
+        <p className="mt-1 text-[11px] text-muted-foreground"><Trans>Non importati (non girano in Homun): {message.ignored.join(', ')}</Trans></p>
       )}
       {message.reason && <p className="mt-1 text-sm text-foreground">{message.reason}</p>}
       {status === 'installed' ? (
-        <p className="mt-2 text-xs text-chart-2">✓ Installato — il bot ha ricevuto l'esito</p>
+        <p className="mt-2 text-xs text-chart-2"><Trans>✓ Installato — il bot ha ricevuto l'esito</Trans></p>
       ) : status === 'error' ? (
-        <p className="mt-2 text-xs text-destructive">✕ {error} — <button className="underline" onClick={() => void api.pluginsResolve(entry.agentId, entry.id, 'no').catch(() => undefined)}>chiudi</button></p>
+        <p className="mt-2 text-xs text-destructive">✕ {error} — <button className="underline" onClick={() => void api.pluginsResolve(entry.agentId, entry.id, 'no').catch(() => undefined)}><Trans>chiudi</Trans></button></p>
       ) : (
         <div className="mt-2 flex items-center gap-2">
           <button
@@ -171,14 +172,14 @@ export function PluginCard({ entry }: { entry: TranscriptEntry }) {
             disabled={status === 'installing'}
             onClick={() => void install()}
           >
-            {status === 'installing' ? 'Installo…' : 'Installa'}
+            {status === 'installing' ? <Trans>Installo…</Trans> : <Trans>Installa</Trans>}
           </button>
           <button
             className="rounded-lg border border-border px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground"
             disabled={status === 'installing'}
             onClick={() => void api.pluginsResolve(entry.agentId, entry.id, 'no').catch(() => undefined)}
           >
-            No
+            <Trans>No</Trans>
           </button>
         </div>
       )}

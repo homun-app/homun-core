@@ -1,5 +1,10 @@
 // Fase 16 (U3): lo stato della mascotte dai dati veri. Funzione pura con la
 // tabella di priorità della specifica — la UI le passa i fatti, non decide.
+// Fase 17a (L3): i testi sono message descriptor (msg): li traduce chi li
+// mostra, con la lingua attiva. I valori ({tool}, {name}) viaggiano nel
+// descriptor, così i18n._ li interpola da sé.
+import type { MessageDescriptor } from '@lingui/core'
+import { msg } from '@lingui/core/macro'
 import type { AgentStatus, TurnEnd } from '../../../shared/types'
 
 export type BotState = 'idle' | 'listening' | 'thinking' | 'speaking' | 'happy' | 'waiting'
@@ -52,34 +57,41 @@ export function botStateFor(input: BotStateInput): BotState {
 
 /**
  * Il testo di stato dell'intestazione: Online / Sta pensando… / Sta facendo:
- * <tool> / Sta scrivendo… / Aspetta te / Offline.
+ * <tool> / Sta scrivendo… / Aspetta te / Offline. Descriptor: chi lo mostra
+ * lo traduce con i18n._().
  */
-export function botStatusText(input: BotStateInput & { activityTool?: string | null }): string {
-  if (input.status === 'offline') return 'Offline'
+export function botStatusText(input: BotStateInput & { activityTool?: string | null }): MessageDescriptor {
+  if (input.status === 'offline') return msg`Offline`
   const state = botStateFor(input)
   switch (state) {
     case 'thinking':
-      return 'Sta pensando…'
+      return msg`Sta pensando…`
     case 'speaking':
-      return 'Sta scrivendo…'
+      return msg`Sta scrivendo…`
     case 'listening':
       // running: il tool in corso; utente che scrive: la mascotte ascolta
-      return input.status === 'running' && input.activityTool ? `Sta facendo: ${input.activityTool}` : 'Sta scrivendo…'
+      return input.status === 'running' && input.activityTool ? msg`Sta facendo: ${input.activityTool}` : msg`Sta scrivendo…`
     case 'waiting':
-      return 'Aspetta te'
+      return msg`Aspetta te`
     default:
-      return 'Online'
+      return msg`Online`
   }
 }
 
-/** L'etichetta per l'aria-label della mascotte ("Nanna, sta pensando"). */
-export function botAriaLabel(name: string, state: BotState): string {
-  const s =
-    state === 'thinking' ? ', sta pensando'
-    : state === 'listening' ? ', sta ascoltando'
-    : state === 'speaking' ? ', sta scrivendo'
-    : state === 'waiting' ? ', aspetta te'
-    : state === 'happy' ? ' è contento'
-    : ''
-  return `${name}${s}`
+/** Il descriptor per l'aria-label della mascotte ("Nanna, sta pensando"). */
+export function botAriaLabel(name: string, state: BotState): MessageDescriptor {
+  switch (state) {
+    case 'thinking':
+      return msg`${name}, sta pensando`
+    case 'listening':
+      return msg`${name}, sta ascoltando`
+    case 'speaking':
+      return msg`${name}, sta scrivendo`
+    case 'waiting':
+      return msg`${name}, aspetta te`
+    case 'happy':
+      return msg`${name} è contento`
+    default:
+      return msg`${name}`
+  }
 }

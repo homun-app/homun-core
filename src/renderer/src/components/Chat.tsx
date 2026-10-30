@@ -1,4 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
+import { useLingui } from '@lingui/react'
+import { Trans } from '@lingui/react/macro'
+import { t } from '@lingui/core/macro'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Paperclip, Plug, PanelRight } from 'lucide-react'
@@ -21,6 +24,7 @@ import { Bot } from '../bot/Bot'
 import { useBotInfo } from '../bot/use-bot'
 
 export function Chat() {
+  const { i18n } = useLingui()
   const agents = useStore((s) => s.agents)
   const activeId = useStore((s) => s.activeId)
   const entries = useStore((s) => s.entries)
@@ -83,7 +87,7 @@ export function Chat() {
   }
 
   if (!agent || !info) {
-    return <main className="flex flex-1 items-center justify-center text-muted-foreground">Nessun agente</main>
+    return <main className="flex flex-1 items-center justify-center text-muted-foreground"><Trans>Nessun agente</Trans></main>
   }
 
   return (
@@ -94,44 +98,44 @@ export function Chat() {
           <Bot family={info.avatar.family} color={info.avatar.color} state={info.state} size={40} dimmed={info.dimmed} label={agent.name} />
           <div className="min-w-0">
             <h1 className="truncate font-display text-lg leading-tight">{agent.name}</h1>
-            <p className="truncate text-xs text-muted-foreground">{info.statusText}</p>
+            <p className="truncate text-xs text-muted-foreground">{i18n.t(info.statusText)}</p>
           </div>
         </div>
         <div className="flex items-center gap-3">
           <span className="hidden text-xs text-muted-foreground xl:inline">
-            {agent.providerId ? `${agent.providerId} · ${agent.model ?? ''}` : 'configura modello → Impostazioni'}
+            {agent.providerId ? `${agent.providerId} · ${agent.model ?? ''}` : t`configura modello → Impostazioni`}
           </span>
           <button
             className={`rounded-lg px-2 py-1 text-xs transition ${memoryOpen ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
-            title="Memoria del bot (fatti e regole ricordati)"
+            title={t`Memoria del bot (fatti e regole ricordati)`}
             onClick={() => { setMemoryOpen(!memoryOpen); setSkillsOpen(false) }}
           >
-            🗂 Memoria
+            <Trans>🗂 Memoria</Trans>
           </button>
           <button
             className={`rounded-lg px-2 py-1 text-xs transition ${skillsOpen ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
-            title="Skill del bot (procedure riutilizzabili)"
+            title={t`Skill del bot (procedure riutilizzabili)`}
             onClick={() => { setSkillsOpen(!skillsOpen); setMemoryOpen(false) }}
           >
-            🛠 Skill
+            <Trans>🛠 Skill</Trans>
           </button>
           <button
             className={`rounded-lg px-2 py-1 text-xs transition ${showReasoning ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
-            title="Mostra/nascondi il ragionamento del modello e gli eventi di turno"
+            title={t`Mostra/nascondi il ragionamento del modello e gli eventi di turno`}
             onClick={() => setShowReasoning(!showReasoning)}
           >
-            🧠 Ragionamento
+            <Trans>🧠 Ragionamento</Trans>
           </button>
           <button
             className={`rounded-lg px-2 py-1 text-xs transition ${quickOpen ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
-            title="Domanda effimera sul contesto (non entra nel transcript)"
+            title={t`Domanda effimera sul contesto (non entra nel transcript)`}
             onClick={() => { setQuickOpen(!quickOpen); setQuickA('') }}
           >
-            ⚡ Chiedi al volo
+            <Trans>⚡ Chiedi al volo</Trans>
           </button>
           <button
             className={`rounded-lg p-1.5 text-muted-foreground transition hover:bg-muted hover:text-foreground ${rightPanel ? '' : 'opacity-50'}`}
-            title={rightPanel ? 'Nascondi il pannello destro' : 'Mostra il pannello destro'}
+            title={rightPanel ? t`Nascondi il pannello destro` : t`Mostra il pannello destro`}
             onClick={() => setRightPanel(!rightPanel)}
           >
             <PanelRight className="size-4" />
@@ -148,20 +152,20 @@ export function Chat() {
             <input
               autoFocus
               className="flex-1 rounded-lg bg-muted px-3 py-1.5 text-sm outline-none placeholder:text-muted-foreground"
-              placeholder={`Chiedi qualcosa a ${agent.name} senza inquinare la conversazione…`}
+              placeholder={t`Chiedi qualcosa a ${agent.name} senza inquinare la conversazione…`}
               value={quickQ}
               onChange={(e) => setQuickQ(e.target.value)}
               onKeyDown={async (e) => {
                 if (e.key === 'Enter' && quickQ.trim() && activeId) {
                   setQuickBusy(true); setQuickA('')
                   try { setQuickA(await api.quickAsk(activeId, quickQ.trim())) }
-                  catch (err) { setQuickA('Errore: ' + (err instanceof Error ? err.message : String(err))) }
+                  catch (err) { setQuickA(t`Errore: ${err instanceof Error ? err.message : String(err)}`) }
                   setQuickBusy(false)
                 }
               }}
             />
           </div>
-          {quickBusy && <p className="mt-2 text-xs text-muted-foreground">pensando…</p>}
+          {quickBusy && <p className="mt-2 text-xs text-muted-foreground"><Trans>pensando…</Trans></p>}
           {quickA && <p className="mt-2 whitespace-pre-wrap text-sm">{quickA}</p>}
         </div>
       )}
@@ -169,7 +173,7 @@ export function Chat() {
       <div ref={scrollRef} className="flex-1 overflow-y-auto scroll-thin px-5 py-6">
         {entries.length === 0 && (
           <p className="mt-16 text-center text-sm text-muted-foreground">
-            Manda un messaggio a {agent.name} per iniziare.
+            <Trans>Manda un messaggio a {agent.name} per iniziare.</Trans>
           </p>
         )}
         <div className="mx-auto max-w-3xl space-y-3">
@@ -187,7 +191,7 @@ export function Chat() {
           {info.state === 'thinking' && (
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Bot family={info.avatar.family} color={info.avatar.color} state="thinking" size={28} track={false} />
-              sta pensando…
+              <Trans>sta pensando…</Trans>
             </div>
           )}
         </div>
@@ -214,7 +218,7 @@ export function Chat() {
           <button
             type="button"
             className="relative grid size-9 shrink-0 place-items-center rounded-xl text-muted-foreground transition hover:bg-muted hover:text-foreground"
-            title="Allega immagine (per modelli vision)"
+            title={t`Allega immagine (per modelli vision)`}
             onClick={async () => {
               const img = await api.pickImage()
               if (img) setImages([...images, img])
@@ -227,7 +231,7 @@ export function Chat() {
           </button>
           <textarea
             className="max-h-40 min-h-[44px] flex-1 resize-none rounded-xl bg-transparent px-3 py-2.5 text-sm outline-none placeholder:text-muted-foreground"
-            placeholder={`Scrivi a ${agent.name}…`}
+            placeholder={t`Scrivi a ${agent.name}…`}
             rows={Math.min(6, text.split('\n').length)}
             value={text}
             onChange={(e) => {
@@ -245,7 +249,7 @@ export function Chat() {
           <button
             type="button"
             className="grid size-9 shrink-0 place-items-center rounded-xl bg-muted text-muted-foreground transition hover:text-foreground"
-            title="Connetti app"
+            title={t`Connetti app`}
             onClick={() => { setSettingsTab('connettori'); setSettingsOpen(true) }}
           >
             <Plug className="size-4" />
@@ -256,7 +260,7 @@ export function Chat() {
               className="h-11 shrink-0 rounded-xl bg-muted px-4 text-sm text-foreground transition hover:bg-accent"
               onClick={interrupt}
             >
-              Ferma
+              <Trans>Ferma</Trans>
             </button>
           ) : (
             <button
@@ -265,7 +269,7 @@ export function Chat() {
               style={{ background: color }}
               disabled={!text.trim()}
             >
-              Invia
+              <Trans>Invia</Trans>
             </button>
           )}
         </form>
@@ -288,7 +292,7 @@ function EntryRow({ entry, showReasoning }: { entry: TranscriptEntry; showReason
         return (
           <div className="max-w-[75%] rounded-2xl rounded-bl-md bg-muted px-4 py-2.5 text-sm">
             <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-              Da {String(entry.meta?.fromAgentName ?? 'altro bot')}
+              <Trans>Da {String(entry.meta?.fromAgentName ?? 'altro bot')}</Trans>
             </p>
             <p className="whitespace-pre-wrap">{agentMessageDisplay(entry.content)}</p>
           </div>
@@ -300,7 +304,7 @@ function EntryRow({ entry, showReasoning }: { entry: TranscriptEntry; showReason
         return (
           <details className="rounded-lg border border-border bg-card/60 px-3 py-1.5">
             <summary className="cursor-pointer select-none text-xs text-muted-foreground">
-              Configurazione da template: {String(entry.meta?.templateName ?? '')}
+              <Trans>Configurazione da template: {String(entry.meta?.templateName ?? '')}</Trans>
             </summary>
             <pre className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap text-[11px] leading-relaxed text-muted-foreground">
               {entry.content}
@@ -314,7 +318,7 @@ function EntryRow({ entry, showReasoning }: { entry: TranscriptEntry; showReason
         return (
           <details className="rounded-lg border border-border bg-card/60 px-3 py-1.5">
             <summary className="cursor-pointer select-none text-xs text-muted-foreground">
-              Report del task: {String(entry.meta?.taskTitle ?? '')} ({String(entry.meta?.taskRef ?? '')})
+              <Trans>Report del task: {String(entry.meta?.taskTitle ?? '')} ({String(entry.meta?.taskRef ?? '')})</Trans>
             </summary>
             <pre className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap text-[11px] leading-relaxed text-muted-foreground">
               {entry.content}
@@ -346,7 +350,7 @@ function EntryRow({ entry, showReasoning }: { entry: TranscriptEntry; showReason
       if (!showReasoning) return null
       return (
         <details className="rounded-lg border border-border bg-card/60 px-3 py-1.5" open={!entry.content}>
-          <summary className="cursor-pointer select-none text-xs text-muted-foreground">Ragionamento</summary>
+          <summary className="cursor-pointer select-none text-xs text-muted-foreground"><Trans>Ragionamento</Trans></summary>
           <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap text-[11px] leading-relaxed text-muted-foreground">
             {entry.content || reasoning || '…'}
           </pre>
@@ -359,7 +363,7 @@ function EntryRow({ entry, showReasoning }: { entry: TranscriptEntry; showReason
       if (!showReasoning) return null
       return (
         <details className="rounded-lg border border-border bg-card/60 px-3 py-1.5">
-          <summary className="cursor-pointer select-none text-xs text-muted-foreground">Riepilogo turni precedenti</summary>
+          <summary className="cursor-pointer select-none text-xs text-muted-foreground"><Trans>Riepilogo turni precedenti</Trans></summary>
           <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap text-[11px] leading-relaxed text-muted-foreground">
             {entry.content || '…'}
           </pre>
@@ -379,7 +383,7 @@ function EntryRow({ entry, showReasoning }: { entry: TranscriptEntry; showReason
         return (
           <div className="max-w-[75%] rounded-2xl rounded-bl-md bg-muted px-4 py-2.5 text-sm">
             <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-              A {meta.toAgentName}
+              <Trans>A {meta.toAgentName}</Trans>
             </p>
             <p className="whitespace-pre-wrap">{entry.content}</p>
           </div>
@@ -416,8 +420,8 @@ function EntryRow({ entry, showReasoning }: { entry: TranscriptEntry; showReason
           <div className="max-w-none">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{entry.content}</ReactMarkdown>
           </div>
-          {meta.fallback && <p className="mt-1 text-[10px] text-muted-foreground">risposta di ripiego</p>}
-          {message?.type === 'text' && message.urgent && <p className="mt-1 text-[10px] text-destructive/80">urgente</p>}
+          {meta.fallback && <p className="mt-1 text-[10px] text-muted-foreground"><Trans>risposta di ripiego</Trans></p>}
+          {message?.type === 'text' && message.urgent && <p className="mt-1 text-[10px] text-destructive/80"><Trans>urgente</Trans></p>}
         </div>
       )
     }
@@ -438,7 +442,7 @@ function EntryRow({ entry, showReasoning }: { entry: TranscriptEntry; showReason
       return (
         <details className="rounded-lg border border-border bg-card/60 px-3 py-2 text-xs">
           <summary className="cursor-pointer select-none text-muted-foreground">
-            risultato {entry.meta?.error ? '⚠ errore' : ''}
+            {t`risultato`} {entry.meta?.error ? t`⚠ errore` : ''}
           </summary>
           <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-all text-[11px] text-muted-foreground">
             {entry.content}
@@ -479,7 +483,7 @@ function ProviderWidgetCard({ entry }: { entry: TranscriptEntry }) {
       <p className="text-sm font-medium">{widget.prompt}</p>
       {widget.helpText && <p className="mt-1 text-xs text-muted-foreground">{widget.helpText}</p>}
       {responded ? (
-        <p className="mt-3 text-xs text-muted-foreground">✓ Appena il provider è a posto preparo i tuoi bot.</p>
+        <p className="mt-3 text-xs text-muted-foreground"><Trans>✓ Appena il provider è a posto preparo i tuoi bot.</Trans></p>
       ) : (
         <button
           className="mt-3 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition hover:bg-primary/90"
@@ -489,7 +493,7 @@ function ProviderWidgetCard({ entry }: { entry: TranscriptEntry }) {
             if (activeId) widgetRespond(entry.id, 'open-provider-settings')
           }}
         >
-          Apri le impostazioni del provider
+          <Trans>Apri le impostazioni del provider</Trans>
         </button>
       )}
     </div>
@@ -520,7 +524,7 @@ function GroupPanel() {
     return (
       <div className="absolute inset-0 z-20 flex items-center justify-center bg-background/95">
         <button className="text-sm text-muted-foreground transition hover:text-foreground" onClick={() => openGroup(null)}>
-          Gruppo non più disponibile — chiudi
+          <Trans>Gruppo non più disponibile — chiudi</Trans>
         </button>
       </div>
     )
@@ -530,10 +534,10 @@ function GroupPanel() {
     <div className="absolute inset-0 z-20 flex flex-col bg-background/95 backdrop-blur-sm">
       <header className="flex items-center justify-between border-b border-border px-5 pt-8 pb-3">
         <div className="min-w-0">
-          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Gruppo</p>
+          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground"><Trans>Gruppo</Trans></p>
           <h2 className="truncate font-display text-lg">{group.name}</h2>
           <p className="truncate text-xs text-muted-foreground">
-            Tu + {group.members.map((m) => m.name + (m.coordinator ? ' (coord.)' : '')).join(', ')}
+            <Trans>Tu + {group.members.map((m) => m.name + (m.coordinator ? ' (coord.)' : '')).join(', ')}</Trans>
           </p>
         </div>
         <button className="rounded-md px-2 py-1 text-muted-foreground transition hover:text-foreground" onClick={() => openGroup(null)}>
@@ -543,7 +547,7 @@ function GroupPanel() {
       <div ref={scrollRef} className="flex-1 overflow-y-auto scroll-thin px-5 py-4">
         <div className="mx-auto max-w-3xl space-y-2">
           {groupMessages.length === 0 && (
-            <p className="mt-16 text-center text-sm text-muted-foreground">Nessun messaggio nel gruppo.</p>
+            <p className="mt-16 text-center text-sm text-muted-foreground"><Trans>Nessun messaggio nel gruppo.</Trans></p>
           )}
           {groupMessages.map((m) =>
             m.authorKind === 'system' ? (
@@ -558,7 +562,7 @@ function GroupPanel() {
               <div key={m.id} className="max-w-[75%] rounded-2xl rounded-bl-md bg-muted px-4 py-2.5 text-sm">
                 <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
                   {m.authorName}
-                  {group.members.find((mem) => mem.agentId === m.authorId)?.coordinator ? ' · coordinatore' : ''}
+                  {group.members.find((mem) => mem.agentId === m.authorId)?.coordinator ? t` · coordinatore` : ''}
                 </p>
                 <p className="whitespace-pre-wrap">{m.text}</p>
               </div>
@@ -570,7 +574,7 @@ function GroupPanel() {
         <div className="mx-auto flex max-w-3xl items-end gap-2 rounded-2xl border border-border bg-card p-2 shadow-soft">
           <textarea
             className="max-h-40 min-h-[44px] flex-1 resize-none rounded-xl bg-transparent px-3 py-2.5 text-sm outline-none placeholder:text-muted-foreground"
-            placeholder={`Scrivi nel gruppo (usa @nome per chiamare un bot, @tutti per tutti)`}
+            placeholder={t`Scrivi nel gruppo (usa @nome per chiamare un bot, @tutti per tutti)`}
             rows={Math.min(4, text.split('\n').length)}
             value={text}
             onChange={(e) => setText(e.target.value)}
@@ -594,7 +598,7 @@ function GroupPanel() {
               }
             }}
           >
-            Invia
+            <Trans>Invia</Trans>
           </button>
         </div>
       </footer>
@@ -628,7 +632,7 @@ function TaskPanel({ onClose }: { onClose: () => void }) {
     <div className="absolute inset-0 z-20 flex flex-col bg-background/95 backdrop-blur-sm">
       <header className="flex items-center justify-between border-b border-border px-5 pt-8 pb-3">
         <div>
-          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Task</p>
+          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground"><Trans>Task</Trans></p>
           <h2 className="font-display text-lg">{task?.title ?? `#${openTaskId}`}</h2>
         </div>
         <div className="flex items-center gap-3">
@@ -636,14 +640,14 @@ function TaskPanel({ onClose }: { onClose: () => void }) {
             className={`rounded-lg px-2 py-1 text-xs transition ${showReasoning ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
             onClick={() => setShowReasoning(!showReasoning)}
           >
-            🧠 Ragionamento
+            <Trans>🧠 Ragionamento</Trans>
           </button>
           {open && (
             <button
               className="rounded-lg bg-muted px-3 py-1.5 text-xs text-foreground transition hover:bg-accent"
               onClick={() => cancelTask(openTaskId)}
             >
-              Interrompi task
+              <Trans>Interrompi task</Trans>
             </button>
           )}
           <button className="rounded-md px-2 py-1 text-muted-foreground transition hover:text-foreground" onClick={onClose}>
@@ -654,7 +658,7 @@ function TaskPanel({ onClose }: { onClose: () => void }) {
       <div ref={scrollRef} className="flex-1 overflow-y-auto scroll-thin px-5 py-4">
         <div className="mx-auto max-w-3xl space-y-3">
           {taskEntries.length === 0 && (
-            <p className="mt-16 text-center text-sm text-muted-foreground">Il task non ha ancora attività.</p>
+            <p className="mt-16 text-center text-sm text-muted-foreground"><Trans>Il task non ha ancora attività.</Trans></p>
           )}
           {taskEntries.map((e) => (
             <EntryRow key={e.id} entry={e} showReasoning={showReasoning} />
@@ -691,7 +695,7 @@ function SubagentPanel() {
     <div className="absolute inset-0 z-20 flex flex-col bg-background/95 backdrop-blur-sm">
       <header className="flex items-center justify-between border-b border-border px-5 pt-8 pb-3">
         <div className="min-w-0">
-          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Sottoagente</p>
+          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground"><Trans>Sottoagente</Trans></p>
           <h2 className="truncate font-display text-lg">{sub?.title ?? openSubagentId}</h2>
         </div>
         <div className="flex items-center gap-3">
@@ -699,7 +703,7 @@ function SubagentPanel() {
             className={`rounded-lg px-2 py-1 text-xs transition ${showReasoning ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
             onClick={() => setShowReasoning(!showReasoning)}
           >
-            🧠 Ragionamento
+            <Trans>🧠 Ragionamento</Trans>
           </button>
           <button className="rounded-md px-2 py-1 text-muted-foreground transition hover:text-foreground" onClick={() => openSubagent(null)}>
             ✕
@@ -709,7 +713,7 @@ function SubagentPanel() {
       <div ref={scrollRef} className="flex-1 overflow-y-auto scroll-thin px-5 py-4">
         <div className="mx-auto max-w-3xl space-y-3">
           {subEntries.length === 0 && (
-            <p className="mt-16 text-center text-sm text-muted-foreground">Il sottoagente non ha ancora attività.</p>
+            <p className="mt-16 text-center text-sm text-muted-foreground"><Trans>Il sottoagente non ha ancora attività.</Trans></p>
           )}
           {subEntries.map((e) => (
             <EntryRow key={e.id} entry={e} showReasoning={showReasoning} />
@@ -717,17 +721,17 @@ function SubagentPanel() {
           {sub && (sub.summary || sub.reportPath) && (
             <div className="rounded-xl border border-border bg-card px-4 py-3 text-sm">
               <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                {sub.status === 'done' ? 'Consegnato' : sub.status === 'failed' ? 'Fallito' : 'Esito'}
+                {sub.status === 'done' ? t`Consegnato` : sub.status === 'failed' ? t`Fallito` : t`Esito`}
               </p>
               {sub.summary && <p className="mt-1 whitespace-pre-wrap">{sub.summary}</p>}
-              {sub.reportPath && <p className="mt-1 font-mono text-xs text-muted-foreground">report: {sub.reportPath}</p>}
+              {sub.reportPath && <p className="mt-1 font-mono text-xs text-muted-foreground">{t`report: ${sub.reportPath}`}</p>}
             </div>
           )}
         </div>
       </div>
       {open && (
         <p className="border-t border-border px-5 py-2 text-center text-[11px] text-muted-foreground">
-          {sub?.agentStatus === 'paused-for-approval' ? 'In attesa di conferma: rispondi alle card qui sopra.' : 'Al lavoro: le card di approvazione del figlio compaiono qui.'}
+          {sub?.agentStatus === 'paused-for-approval' ? t`In attesa di conferma: rispondi alle card qui sopra.` : t`Al lavoro: le card di approvazione del figlio compaiono qui.`}
         </p>
       )}
     </div>

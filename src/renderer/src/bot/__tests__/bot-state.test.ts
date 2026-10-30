@@ -2,7 +2,16 @@
 // priorità della specifica e le precedenze (delta batte running, la scrittura
 // dell'utente batte waiting, offline batte tutto, happy scade dopo 1,5 s).
 import { describe, expect, it } from 'vitest'
+import { i18n } from '@lingui/core'
+import type { MessageDescriptor } from '@lingui/core'
 import { botStateFor, botStatusText, botAriaLabel, HAPPY_MS } from '../bot-state'
+import { itCatalogEntries } from '../../__tests__/po-helper'
+
+// fase 17a: botStatusText/botAriaLabel tornano descriptor; l'italiano si
+// risolve dal catalogo it (lingua sorgente), come farà la UI con i18n._()
+i18n.load('it', itCatalogEntries())
+i18n.activate('it')
+const T = (d: MessageDescriptor): string => i18n.t(d)
 
 const NOW = 1_000_000
 
@@ -63,20 +72,27 @@ describe('fase 16 (U3): precedenze', () => {
   })
 })
 
-describe('fase 16 (U3): testi di stato e aria-label', () => {
+describe('fase 16 (U3) / 17a: testi di stato e aria-label (dal catalogo it)', () => {
   it('i testi dell’intestazione', () => {
-    expect(botStatusText({ status: 'offline' })).toBe('Offline')
-    expect(botStatusText({ status: 'idle', now: NOW })).toBe('Online')
-    expect(botStatusText({ status: 'thinking' })).toBe('Sta pensando…')
-    expect(botStatusText({ status: 'running', activityTool: 'run-command' })).toBe('Sta facendo: run-command')
-    expect(botStatusText({ status: 'running' })).toBe('Sta scrivendo…')
-    expect(botStatusText({ status: 'idle', userTyping: true })).toBe('Sta scrivendo…')
-    expect(botStatusText({ status: 'idle', streaming: true })).toBe('Sta scrivendo…')
-    expect(botStatusText({ status: 'paused-for-approval' })).toBe('Aspetta te')
+    expect(T(botStatusText({ status: 'offline' }))).toBe('Offline')
+    expect(T(botStatusText({ status: 'idle', now: NOW }))).toBe('Online')
+    expect(T(botStatusText({ status: 'thinking' }))).toBe('Sta pensando…')
+    expect(T(botStatusText({ status: 'running', activityTool: 'run-command' }))).toBe('Sta facendo: run-command')
+    expect(T(botStatusText({ status: 'running' }))).toBe('Sta scrivendo…')
+    expect(T(botStatusText({ status: 'idle', userTyping: true }))).toBe('Sta scrivendo…')
+    expect(T(botStatusText({ status: 'idle', streaming: true }))).toBe('Sta scrivendo…')
+    expect(T(botStatusText({ status: 'paused-for-approval' }))).toBe('Aspetta te')
   })
   it('l’aria-label della mascotte', () => {
-    expect(botAriaLabel('Nanna', 'thinking')).toBe('Nanna, sta pensando')
-    expect(botAriaLabel('Nanna', 'idle')).toBe('Nanna')
-    expect(botAriaLabel('Nanna', 'waiting')).toBe('Nanna, aspetta te')
+    expect(T(botAriaLabel('Nanna', 'thinking'))).toBe('Nanna, sta pensando')
+    expect(T(botAriaLabel('Nanna', 'idle'))).toBe('Nanna')
+    expect(T(botAriaLabel('Nanna', 'waiting'))).toBe('Nanna, aspetta te')
+  })
+  it('i descriptor portano i valori (il nome del bot, il tool in corso)', () => {
+    const d = botStatusText({ status: 'running', activityTool: 'run-command' })
+    expect(d.message).toBe('Sta facendo: {0}')
+    expect(d.values).toEqual({ 0: 'run-command' })
+    const a = botAriaLabel('Nanna', 'happy')
+    expect(T(a)).toBe('Nanna è contento')
   })
 })
