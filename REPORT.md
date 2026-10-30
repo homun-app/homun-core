@@ -2511,7 +2511,7 @@ Tutto ciò che il modello legge è in inglese (prompt, tool, result, messaggi di
 | **A1** `detectLanguage` deterministica (token `[a-zà-ÿ']+`, due liste funzionali senza intersezioni, vincente ≥2 colpi e ≥2× l'altra, eccezione 1 colpo IT + accento) e `languageName` | fatto | `src/shared/language.ts`; test `src/shared/__tests__/language.test.ts` (17 casi: frasi normali, URL/codice dentro, «ok»/«grazie!»/«thanks» null, italiano con termine inglese «fammi il deploy della build», inglese con nome italiano, vuota, pari 1-1, comando) |
 | **A2** setting `ui.activeLanguage` (main, all'avvio dentro `applyStartupLanguage` e a ogni `ui:language-changed`, via `settings:set`; daemon muto → nessun errore) e `agent.userLanguage` (ultima lingua rilevata); `currentUserLanguage`/`noteHumanText` in un modulo usato da loop e daemon | fatto | `src/main/agent/user-language.ts`; main: `src/main/i18n.ts` (`activeLanguageCall`, `publishActiveLanguage`), `src/main/index.ts`, `src/main/ipc.ts`; test `src/main/agent/__tests__/user-language.test.ts` (10) + `src/daemon/__tests__/enqueue-language.test.ts` (6, con LOOK_AROUND che NON tocca il setting e i clic delle opzioni che non lo toccano) |
 | **A3** `languageSection`/`withLanguage` (testo fisso, lingua per nome due volte); applicata PER ULTIMA dal loop a tutte e tre le varianti, dopo memoria/skill/main/connectors/connettori attivi; compaction «Write the summary in the language of the conversation.»; quickAsk/routinesSuggestion ricevono `lang`; lookAround coperto dalla sezione; reviewerPrompt: riga di lingua per il reason (arriva nella card); tolta la riga della lingua da «Chi sei» e «lingua» dall'elenco del role in teamGroupsSection | fatto | `src/main/agent/prompts.ts` (`languageSection`, `withLanguage`, secondaryPrompts); `src/main/agent/loop.ts:833` (`userLang = currentUserLanguage()` all'inizio della composizione) e `loop.ts:956` (`systemText = withLanguage(systemText, userLang)` dopo l'ultima aggiunta); caller: `src/daemon/api.ts:322` (quickAsk), `src/main/routines.ts:32` (routinesSuggestion), `src/main/agent/auto-review.ts` (reviewerPrompt(cfg, action, lang), runReviewer/reviewWithConfiguredModel + 3 call site nel loop con `userLang`); test in `prompts.test.ts` (sezione ultima nelle 3 varianti costruite come il loop, nome della lingua due volte, budget base rispettato) |
-| **A4** traduzione fedele in inglese di prompts.ts, descrizioni/parametri di tutti i tool, result dei tool (errori e rifiuti compresi), messaggi di sistema iniettati (nudge, intestazioni memoria/skill/connettori, brief e risvegli dei sottoagenti, turni di gruppo, agent-message, history, shells, resume, auto-review, fill, connectors-policy, run-job, triggers); invarianti rispettati (nomi tool/parametri, tag XML e attributi, marcatori, formati parsati); commenti in italiano; test aggiornati alla stessa intenzione | fatto | v. grep di controllo sotto; ~270 asserzioni aggiornate nei test (loop 89, group-turns/groups 46, shells/agent-message/turn-sends/history/install/catalog/connectors-policy ~45, daemon 10, fase14-fill 6, browser/web/web-guard/fase14-library dei 4 file web ~28, fase14-library/fill/skills/memory/subagents/update-state ~30) |
+| **A4** traduzione fedele in inglese di prompts.ts, descrizioni/parametri di tutti i tool, result dei tool (errori e rifiuti compresi), messaggi di sistema iniettati (nudge, intestazioni memoria/skill/connettori, brief e risvegli dei sottoagenti, turni di gruppo, agent-message, history, shells, resume, auto-review, fill, connectors-policy, run-job, triggers); invarianti rispettati (nomi tool/parametri, tag XML e attributi, marcatori, formati parsati); commenti in italiano; test aggiornati alla stessa intenzione | fatto, **completato in 17b-correzioni (B2)**: il grep di controllo di questa fase copriva una lista scelta a mano e mancavano `loop.ts` e i moduli i cui errori diventano result dei tool — le correzioni li hanno tradotti e il grep ora è obbligatorio su TUTTI i `.ts` di `src/main/agent/`, `src/main/mcp/`, `src/main/connectors/`, `src/main/vault.ts`, `src/main/computeruse/`, `src/main/sandbox/`, `src/shared/agent-message.ts` | v. grep nella sezione «Fase 17b — correzioni» (B2); ~270 asserzioni aggiornate qui + altre ~60 nelle correzioni |
 | **A5** eval bilingue: `--lang it\|en` (default it) come `EVAL_LANG`, system costruito con `withLanguage`; `L(it, en)` sui messaggi scritti dall'utente, mondo invariato; giudici con alternative inglesi equivalenti (regex sotto); controllo di lingua a parte su send_to_user/ask_user (testo+opzioni)/post_to_group/send_to_agent/role di create_agent/brief di spawn_subagent/contenuto write_document+edit_document/fallback, stampa «lingua: X/Y testi nella lingua giusta (Z non decidibili)», testi sbagliati nel dump e in console, soglia `--min-lang` (default 0,95) con uscita non zero; 4 casi nuovi (36 cambio lingua, 37 routine con novità vera, 38 delega nell'altra lingua, 39 documento); runner `--min` ricalcolato: `round(40 × runs × 0,9)` | fatto | `eval/behaviors.eval.ts` (EVAL_LANG/L/NOT_L, sys/sysGroup/sysChild con withLanguage, regex, `controlledTexts`/`expectedLangOf`, raccolta nel loop dei casi, riga `langWrong` nel dump JSONL, `it` dedicato sulla soglia, casi 36–39); `scripts/run-eval.mjs` (--lang, --min-lang, TOTAL_CASES=40 e formula nel commento). NON lanciato sul modello (serve cloud): verificato con `eval/language-judges.eval.ts` — trascrizioni finte, 12 test (casi 1/36/37/38/39 e controllo di lingua, per it ed en) |
 | **A6** le misurazioni (base 17a-correzioni, flash ×3 it+en, kimi-k3 ×1, prove dal vivo) | NON fatto qui — è il revisore | l'utente lancia: `npm run eval -- --model <flash> --runs 3 --lang it` e `--lang en`, più kimi-k3 ×1 per lingua; dump con `--dump` |
 | **A7** nessun testo U toccato (card, notice, notifiche, onboarding, errori RPC, cron-human, catalog.json, templates, descrizione Bot principale); interfaccia invariata (nel main solo la scrittura di `ui.activeLanguage`); nomi tool/parametri/tag invariati; comportamenti invariati; nessuna lingua oltre it/en; regole rispettate (niente Docker/cloud/rete/dist/app su dati veri/segreti/processi altrui) | fatto | `git diff`: zero file in `src/renderer`, `npm run i18n:extract` senza differenze (503/503, 0 missing); gate/permessi/loop-guard/budget intatti (solo testo + sezione Language + rilevamento) |
@@ -2586,11 +2586,11 @@ I giudici strutturali (conta tool, ref, id, ordine) non cambiano; i nomi dei bot
 ### Output dei check
 
 - `npm run typecheck`: pulito (exit 0).
-- `npx vitest run --maxWorkers=4`: `Test Files 100 passed (100)` / `Tests 1571 passed (1571)` (due run consecutivi verdi; +3 file e +37 test rispetto alla 17a-correzioni: 17 language + 10 user-language + 6 enqueue-language + allineamenti).
+- `npx vitest run --maxWorkers=4`: `Test Files 100 passed (100)` / `Tests 1571 passed (1571)` (due run consecutivi verdi; +3 file e +37 test rispetto alla 17a-correzioni: 17 language + 10 user-language + 6 enqueue-language + allineamenti). **Aggiornato in 17b-correzioni:** 1583/1583 (v. la sezione «Fase 17b — correzioni»).
 - `npx vitest run --config vitest.eval.config.ts eval/language-judges.eval.ts`: 12/12 (casi 1/36/37/38/39 e controllo di lingua, it ed en).
 - `npm run build`: `✓ built` ×3 (main + preload + renderer).
 - `npm run i18n:extract`: nessuna differenza (503/503 per lingua, en 0 missing) — il renderer non cambia.
-- Grep di controllo (script: toglie i commenti `//` e `/* */`, cerca `[àèéìòùÀÈÉÌÒÙ]` nel codice rimasto) su prompts.ts, tools.ts, browser.ts, web-tools.ts, web-guard.ts, charts.ts, library.ts, subagents.ts, skills.ts, memory.ts, find-tools.ts, group-turns.ts, agent-message.ts, history.ts, turn-sends.ts, shells.ts, resume.ts, auto-review.ts, connectors-policy.ts, fill.ts, connectors/index.ts: **tutti puliti tranne** `subagents.ts:34` (regex parser bilingue, v. deviazioni) e `connectors/index.ts:53,57` (validateCatalog, U/log). `prompts.ts` non contiene testo italiano fuori dai commenti.
+- Grep di controllo (script: toglie i commenti `//` e `/* */`, cerca `[àèéìòùÀÈÉÌÒÙ]` nel codice rimasto) su prompts.ts, tools.ts, browser.ts, web-tools.ts, web-guard.ts, charts.ts, library.ts, subagents.ts, skills.ts, memory.ts, find-tools.ts, group-turns.ts, agent-message.ts, history.ts, turn-sends.ts, shells.ts, resume.ts, auto-review.ts, connectors-policy.ts, fill.ts, connectors/index.ts: **tutti puliti tranne** `subagents.ts:34` (regex parser bilingue, v. deviazioni) e `connectors/index.ts:53,57` (validateCatalog, U/log). `prompts.ts` non contiene testo italiano fuori dai commenti. **Sostituito in 17b-correzioni (B2)** dal grep obbligatorio su TUTTI i percorsi, con il secondo grep di parole funzionali: esiti nella sezione «Fase 17b — correzioni».
 
 ### Cosa NON è stato verificato
 
@@ -2598,3 +2598,91 @@ I giudici strutturali (conta tool, ref, id, ordine) non cambiano; i nomi dei bot
 2. **La prova dal vivo** (A6.4: due bot, delega e sottoagenti, app in inglese + utente italiano e viceversa).
 3. Le misure A6.1–A6.3 (base di riferimento, flash ×3 per lingua, kimi-k3 ×1, soglia lingua 95%): sono il giudizio del revisore.
 4. Una corsa completa `npx vitest run --config vitest.eval.config.ts` (suite del modello): caricamento e giudici verificati con le trascrizioni finte.
+
+# Fase 17b — correzioni (B1–B6)
+
+Sopra il tag `fase-17b`. Corretti SOLO i punti B1–B4 (B3b compresa); nessun testo U toccato (card, notice, notifiche, onboarding, template e cron-human restano della 17c); nomi di tool, parametri, tag XML e marcatori invariati.
+
+## Tabella B1–B6
+
+| Punto | Stato | Dove |
+|---|---|---|
+| **B1** rilevatore: via `i`, `me`, `do` dalla lista EN (articolo e «per me»/«ti do» italiani contavano come inglese); dentro preposizioni e parole comando IT (`nel, nella, al, alla, dal, sul, se, sì, fai, dammi, dimmi, oggi, domani, ieri, poi, già, tutto, tutti, ancora, ora`) e sostituti EN (`have, has, will, not, from, about, all, if, now, today, tomorrow, yesterday, just, there, they, them`); liste esportate `IT_WORDS`/`EN_WORDS` con test di intersezione vuota; regola invariata (2 colpi e il doppio dell'altra; 1 colpo IT + accento); **isteresi** in `noteHumanText`: senza lingua salvata la prima rilevazione si salva; con lingua salvata, una lingua diversa la cambia solo se il testo è forte (≥3 colpi) o se anche la rilevazione precedente dava la stessa lingua nuova (candidato in `agent.userLanguageCandidate`, azzerato da una rilevazione uguale alla salvata; `null` non tocca nulla) | fatto | `src/shared/language.ts` (+`detectLanguageDetail`), `src/main/agent/user-language.ts`; test: 6 nuovi in `language.test.ts` (14 testi della tabella del prompt + intersezione vuota) e 5 di isteresi in `user-language.test.ts`; i test esistenti restano verdi (il cambio lingua forte del vecchio test passa per la regola ≥3 colpi) |
+| **B2** result dei tool e messaggi per il modello tradotti: `loop.ts` (rifiuto sottoagenti, blocco draft_external ×4, widget, `Error:` ×2, copia negata/scaduta/errore, esportazione ×3, strumento non attivo), `file-exchange.ts` (precheck, esiti, nota conflitto), `box-paths.ts` (reason), `connectors/search.ts` (RUNTIME_LABELS, fonte/fiducia/stato delle righe, REGISTRY_DOWN_LINE, «nessun connettore»; `registryTrustEnLabel` per il modello, i label delle card restano italiani), `connectors/index.ts` (`connectorStatusLine`), `mcp/index.ts` (riconnessione, server non trovato ×2, tool non più disponibile/disattivato, nome malformato, server MCP non trovato), `shells.ts` (pid file, log non scritto, redazione), `tools.ts` (provider non trovato), `vault.ts` (credenziale/login non presenti, validazioni saveLogin, nome contatto, `Vault bloccato` ×2 → MU per il modello), `computeruse/index.ts` (tutti i result), `permission-rules.ts` + `permissions.ts` + `loop.ts:2288` (i reason che il codice produce per il modello; le card restano della 17c), `browser-proxy.ts` (pagine 403/502/400 del proxy), `browser-guard.ts` (INVALID_REF_DENY_TEXT, CREDENTIAL_DENY_TEXT, SNAPSHOT_BLOCKED/TRUNCATED_NOTE), `fill.ts` (ref mancanti/assenti), `credentials.ts` via `fillResultText`, `install.ts` (parse id, card builder → errori, installazione server/plugin completa, serverSlotError, OAuth), `marketplace.ts` (stagePlugin + inspectPlugin), `marketplace-manager`/`oauth-provider.ts` (issuer), `registry.ts` (versione non dichiarata), `sandbox/` (home, container, volumi, build, boxCreateCheck), `web-search-providers.ts`, `external-send.ts` (via non valido), `api.ts` (`[sistema]` CONNECTOR_INSTALLED/PLUGIN_INSTALLED/CONNECTOR_CONNECTED + prefisso invariato, savedOutcome del modulo sicuro); `[task no. …]` invariato (già 17b) | fatto | ~60 asserzioni di test allineate (loop, file-exchange, permissions, permission-rules, shells, browser×3, sandbox×4, connectors×6, vault, daemon); grep obbligatori sotto |
+| **B3** tolta `language` dalla descrizione di `create_agent`, dal parametro `role` e dal result «Bot not created» (stessa frase) | fatto | `src/main/agent/tools.ts`; test nuovo in `prompts.test.ts`: descrizione e role senza «language» |
+| **B3b** il «box» torna nel prompt: «files produced in the box that the user wants to keep go in save_to_library» (documentsCredentialsSection) e «You have a computer (the box): …» (prima riga di computerSection) | fatto | `src/main/agent/prompts.ts`; controllo di fedeltà frase per frase vs `fase-17a-correzioni` (tabella sotto) |
+| **B4** eval: `routineOpening(title, prompt)` pura esportata da `run-job.ts` e usata dal job runner e dall'eval (casi 1 e 37, con `L('Riepilogo mattina', 'Morning summary')` e `L('Controlla la posta…', 'Check the inbox…')`); refuso caso 38 «partando» → «partendo»; **storia dei casi nella lingua del run**: ciò che scrivono i bot (`oneSend`, post dei membri/coordinatore, ruoli e descrizione del gruppo, brief e summary dei sottoagenti, documento del caso 31, nomi delle routine) in `L(it, en)`; i result dei tool simulati sono i testi che il codice produce ORA (inglesi in entrambi i run, coi builder `deliveredResultText`, `fillResultText`, `ASK_USER_RESULT`/`WAKE_PARENT_RESULT` esportati dal loop); dati esterni (email, pagine, result della gmail finta) e nomi del mondo restano; esclusioni dichiarate nel codice (caso 4 = contenuto da copiare; edit su documenti dell'altra lingua non dovrebbero più esserci, i documenti sono `L(…)`); quota di lingua **per caso** in console | fatto | `src/daemon/run-job.ts`, `src/main/agent/loop.ts` (costanti esportate), `eval/behaviors.eval.ts` (TOOL_RESULTS, deliverer, mondi 33/34, storie dei casi 1/3/5/8/9/11/12/13/14/22/24/31/37/38, `langControlExcluded`, `langStatsByCase`) |
+| **B5** REPORT: riga A4 e «Output dei check» corretti, tabella B1–B6, lista U/MU aggiornata per la 17c | fatto | questa sezione |
+| **B6** esiti del revisore (eval flash ×3, prova dal vivo, kimi-k3 rinviato alla 18) | letto, niente da fare | prompt di fase |
+
+## Il grep di controllo di B2 (obbligatorio, su TUTTI i percorsi)
+
+Script: toglie i commenti `//` e `/* */` dal codice, poi (1) cerca le accentate `[àèéìòùÀÈÉÌÒÙ]` e (2) le parole funzionali italiane (`\b(il|lo|la|della|del|non|per|che|nel|alla|…)\b`) dentro i letterali, su **tutti** i `.ts` di `src/main/agent/`, `src/main/mcp/`, `src/main/connectors/`, `src/main/vault.ts`, `src/main/computeruse/`, `src/main/sandbox/`, `src/shared/agent-message.ts` (esclusi `__tests__`). Esito: 26 righe ACC + 138 WORD, **tutte classificate**:
+
+**parser / marcatori / formati (invariati per regola):**
+- `subagents.ts:46` — regex bilingue dei confini del brief (legge il testo del modello, non prosa)
+- `agent-message.ts:75,265` — attributi `esito=` dei tag `<task_done>`/`<sottoagente>`: formato del tag, come `titolo=` (invariante)
+- `browser-guard.ts:20,34` — COMMIT_WORDS / CREDIT_FIELD_WORDS: liste di riconoscimento (parser)
+- `computeruse/index.ts:138` — mappa nomi app localizzati → bundle (parser di open_app)
+
+**U (solo l'utente) — per la 17c:**
+- `loop.ts` — TURN_END_LABELS (144-145), titoli card (197-199), notice (512-532 routine saltata/agente occupato/onboarding provider, 1046-1103 errori del modello, 1162-1165 loop detection, 1259 bozza inviata, 1759/1858 card fill/contatto, 2111-2120 card delega non fidata, 2576 sollecito, 2633 limite passi)
+- `resume.ts:16` — RESUME_NOTICE; `shell-ast.ts:100` — errore interno wasm (log); `stream-deadline.ts:35` — messaggio dentro notice U; `charts.ts:327` — HTML esportato
+- `auto-review.ts:87-138` — reason delle decisioni (card «Approvato automaticamente…»); `update-state.ts:47-80` — reason dei verdetti + automationEventText (entry event, solo UI); `browser-guard.ts:136,147,154,159,248` — ask reason delle card browser
+- `credentials.ts:36,90-118` — validazioni TOTP del modulo sicuro (form UI); `providers.ts:98-105` — verifica modello (onboarding/impostazioni)
+- `connectors/`: `install.ts:45,55,59` (avvisi card), `:128,294,530,568,570` (label card), `:742` (stato Installati), `:815-858` (errori RPC Riconnetta/gateway → UI); `marketplace-manager.ts:93,136,222,224` (RPC); `marketplace.ts:65-81` (issue di parse → UI); `index.ts:53-74` (validateCatalog, log/avvio), `:269,277` (config OAuth Google → UI); `install-bridge.ts:16` (contesto); `callback-server.ts:21-22,67` (pagine OAuth nel browser dell'utente); `oauth-provider.ts:44` (flusso reconnect → UI); `wiring.ts:53,90` (reconnect → UI); `mcp/index.ts:285,388` (`token scaduto: riconnetti` nello stato connettore, UI Installati)
+- `sandbox/index.ts:363` (notice di preparazione del box) e i `console.log/error` (`loop.ts:2779`, `sandbox/index.ts:386,459`) — log del daemon
+- `web-tools.ts:170,200` — dati FINTI dei provider di test (attivi solo con `SANDBOT_TEST_FAKE_WEB_SEARCH*`; dato esterno per costruzione)
+
+**Commenti (falsi positivi del conteggio righe, verificati a mano):** `charts.ts:209,222,306,323,326`, `prompts.ts:312-313`, `web-guard.ts:147,152`.
+
+Nessun testo italiano non classificato nei percorsi del grep.
+
+## Controllo di fedeltà B3b (fase-17a-correzioni → HEAD, frase per frase)
+
+| Termine IT (17a) | Termine EN (ora) | Note |
+|---|---|---|
+| box (8 occorrenze) | box (9) | ripristinato da B3b: 1 in computerSection («the box»), 1 in documentsCredentialsSection («in the box»), il resto era già nei tool copy_to_box/copy_from_box |
+| workspace (3) | workspace (3) | alias `/workspace` invariato |
+| home (2) | home (2) | |
+| routine (18) | routine (19) | +1: la sezione Language cita la lingua del run |
+| task (11) | task (13) | +2: aperture `[task no. …]` e result espliciti |
+| bozza/bozze | draft/drafts (2) | agentsSection («outbound sends remain drafts») e talkingSection |
+| card (3) | card (5) | le card sono citate nei result dei tool di B2 |
+| gruppo (13) | group (12) | −1: il titolo della sezione gruppo è divenuto «Groups» al plurale una volta in meno rispetto al conteggio IT (stesso senso) |
+| libreria | library (1) | save_to_library |
+| contatto (2) | contact (3) | +1 result save_contact di B2 |
+| credenziali (9) | credential (18) | +9: result list-credentials/fill/request_secure_input di B2 |
+| memoria (7) | memory (10) | +3: result update_memory di B2 |
+| skill (10) | skill (11) | |
+| sottoagente (8) | subagent (15) | +7: result spawn/check/message/stop di B2 |
+| figlio (4) | child (0) | **scarto motivato**: nel 17a «figlio» compariva SOLO nei commenti; nel testo del prompt si diceva già «il sottoagente» → ora «subagent» ovunque |
+| padre (4) | parent (7) | wake_parent e result di consegna |
+| documento (2) | document (14) | +12: result write/edit/read_document di B2 |
+| grafico | chart (1) | visualize |
+| riepilogo (3) | summary (5) | |
+| silenzio (2) | silence (1) | −1: «meglio di un silenzio» → «better than silence» (sostantivo singolare) e «stay silent» (verbo) — stesso senso |
+| pass (14) | pass (11) | −3: righe ripetute nelle sezioni gruppo fuse nella traduzione (stesso senso) |
+| connettore (2) | connector (13) | +11: sezione connettori e result search/offer di B2 |
+| delega (2 nel testo) | delegating/delegate (2) | commenti a parte |
+| conferma (4) | confirmation (5) | |
+| permesso (2) | permission (2) | |
+
+Tag e marcatori invariati: `<messaggio_da_agente>`, `<brief titolo=…>`, `<risultati_sottoagenti>`, `<sottoagente … esito=…>`, `<task_done … esito=…>`, `<evento>`, `{{secret:NOME}}`, `[/…]`.
+
+## Lista U/MU per la 17c (aggiornata dalle correzioni)
+
+Dalla lista della 17b RESTANO validi tutti i punti; con B2 cambiano questi:
+
+- **tradotti per il modello (MU), display da separare in 17c:** `Vault bloccato: …` (vault.ts, ora inglese anche a video fino alla 17c), `HOST_MODE_DISABLED` (install.ts: ora inglese nel result; la card usa la nuova costante italiana `HOST_MODE_DISABLED_CARD`), i reason di permessi/auto-review/update-state/browser-guard (modello inglese, card italiana da introdurre), `connectorStatusLine` e le etichette di `search.ts` (le card usano ancora i label italiani di `registryTrust`/buildCard).
+- **nuovi U da aggiungere alla lista 17c:** i reason del revisore auto-review (`auto-review.ts:87-138`), le validazioni TOTP (`credentials.ts`), gli errori provider (`providers.ts:98-105`), gli errori RPC dei connettori (`install.ts:815-858`, `marketplace-manager.ts`, `wiring.ts`, `oauth-provider.ts:44`, `callback-server.ts`), le issue di parse del marketplace (`marketplace.ts:65-81`).
+- **via dalla lista MU (ora solo display):** i messaggi `[sistema]` di `api.ts:670,706,1121` — il testo per il modello è inglese e il prefisso marcatore `[sistema]` è invariato; resta da sistemare solo la visualizzazione in chat (17c).
+
+## Verifica
+
+- `npm run typecheck`: pulito.
+- `npx vitest run --maxWorkers=4`: **100 file / 1583 test verdi** (1571 + 6 language + 5 isteresi + 1 create_agent; le asserzioni toccate da B2 sono state allineate ai nuovi testi).
+- `npx vitest run --config vitest.eval.config.ts eval/language-judges.eval.ts`: 12/12.
+- `npm run build`: ✓ (main + preload + renderer).
+- `npm run i18n:extract`: nessuna differenza (il renderer non cambia).
+- L'eval su modello NON è stato lanciato (serve un modello cloud: lo misura l'utente).

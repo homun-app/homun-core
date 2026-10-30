@@ -4,7 +4,7 @@ import { resolveSecretRefs, redactSecrets, secretEnvName } from '../secrets'
 const VALUE = 'SK-1234-SEGRETO-MOLTO-LUNGO'
 const reveal = async (name: string) => {
   if (name === 'API_KEY' || name === 'API_TOKEN') return name === 'API_KEY' ? VALUE : 'tok-9876'
-  throw new Error(`credenziale "${name}" non presente nel vault`)
+  throw new Error(`credential "${name}" not present in the vault`)
 }
 
 describe('secretEnvName', () => {

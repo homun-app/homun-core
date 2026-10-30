@@ -667,7 +667,7 @@ export function buildApiMethods(
       }
       store.updateEntryMeta(entry.id, { ...entry.meta, status: r.ok ? 'installed' : 'error', ...(r.ok ? {} : { error: r.error }) })
       emitUpdatedEntry(aid, entry.id)
-      const text = r.ok ? `[sistema] ${r.message}` : `[sistema] Server "${message.name}" NON aggiunto: ${r.error}`
+      const text = r.ok ? `[sistema] ${r.message}` : `[sistema] Server "${message.name}" NOT added: ${r.error}`
       enqueueUserMessage(db(), aid, text, undefined, emit, undefined, 'CONNECTOR_INSTALLED')
       worker.poke()
       return r
@@ -703,7 +703,7 @@ export function buildApiMethods(
       }
       store.updateEntryMeta(entry.id, { ...entry.meta, status: r.ok ? 'installed' : 'error', ...(r.ok ? {} : { error: r.error }) })
       emitUpdatedEntry(aid, entry.id)
-      const text = r.ok ? `[sistema] ${r.message}` : `[sistema] Plugin "${message.name}" NON installato: ${r.error}`
+      const text = r.ok ? `[sistema] ${r.message}` : `[sistema] Plugin "${message.name}" NOT installed: ${r.error}`
       enqueueUserMessage(db(), aid, text, undefined, emit, undefined, 'PLUGIN_INSTALLED')
       worker.poke()
       return r
@@ -889,12 +889,12 @@ export function buildApiMethods(
           label, origins: [origin], username: v.username, password: v.password,
           ...(v.totp ? { totp: v.totp } : {})
         }))
-        outcome = `salvato: login «${label}» (${id})`
+        outcome = `saved: login "${label}" (${id})`
       } else {
         const name = String(v.name ?? message.name ?? '').trim()
         if (!name || !v.value) throw new Error('Servono il nome e il valore del secret')
         await vault().then((x) => x.storeSecret(name, v.value))
-        outcome = `salvato: secret ${name}`
+        outcome = `saved: secret ${name}`
       }
       store.updateEntryMeta(entry.id, { ...entry.meta, status: 'allowed', savedOutcome: outcome })
       emitUpdatedEntry(aid, entry.id)
@@ -1118,7 +1118,7 @@ export async function notifyConnectorConnected(
     enqueueUserMessage(
       db(),
       agent.id,
-      `[sistema] L'utente ha connesso ${name}: i suoi tool mcp__${connectorId}__* sono ora disponibili (cerca i nomi esatti con i tuoi tool o chiedendo all'utente).`,
+      `[sistema] The user connected ${name}: its mcp__${connectorId}__* tools are now available (find the exact names with your tools or by asking the user).`,
       undefined,
       emit,
       undefined,

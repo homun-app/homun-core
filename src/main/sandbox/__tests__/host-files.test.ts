@@ -55,9 +55,9 @@ describe('backend host: file via fs/promises (§5.2)', () => {
   it('fuori dalla radice del box → rifiuto con errore chiaro (read, write, list)', async () => {
     // la home è due livelli dentro la radice: tre ../ escono dal box condiviso
     for (const path of ['/etc/passwd', '../../../etc/passwd', join(TMP, 'fuori.txt')]) {
-      await expect(readFileInBox(AGENT, path)).rejects.toThrow(/esce dal box condiviso/)
-      await expect(writeFileInBox(AGENT, path, 'x')).rejects.toThrow(/esce dal box condiviso/)
-      await expect(listDirectoryInBox(AGENT, path)).rejects.toThrow(/esce dal box/)
+      await expect(readFileInBox(AGENT, path)).rejects.toThrow(/leaves the shared box/)
+      await expect(writeFileInBox(AGENT, path, 'x')).rejects.toThrow(/leaves the shared box/)
+      await expect(listDirectoryInBox(AGENT, path)).rejects.toThrow(/leaves the shared box/)
     }
   })
 

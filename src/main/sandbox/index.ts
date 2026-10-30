@@ -285,7 +285,7 @@ export async function ensureBotHome(agentId: string): Promise<void> {
   if (ensuredBotHomes.has(owner)) return
   const r = await dockerRunner(dockerEnsureHomeArgv(BOX_CONTAINER, owner), { timeoutMs: 30_000 })
   if (r.exitCode !== 0) {
-    throw new Error(`creazione della home ${boxHomePath(owner)} nel container fallita: ${r.stderr || `exit ${r.exitCode}`}`)
+    throw new Error(`creation of home ${boxHomePath(owner)} in the container failed: ${r.stderr || `exit ${r.exitCode}`}`)
   }
   ensuredBotHomes.add(owner)
 }
@@ -417,7 +417,7 @@ export async function ensureBoxContainer(): Promise<void> {
   const ps = await dockerRunner(dockerPsArgv(BOX_CONTAINER), { timeoutMs: 15_000 })
   const exists = ps.exitCode === 0 && ps.stdout.trim().split('\n').includes(BOX_CONTAINER)
   if (!imageOk && !exists) {
-    throw new Error(`build dell'immagine del box (${image}) fallita: guarda i log del daemon (docker build); il Dockerfile è ${boxDockerfilePath()}`)
+    throw new Error(`box image build (${image}) failed: check the daemon logs (docker build); the Dockerfile is ${boxDockerfilePath()}`)
   }
   const facts: BoxEnsureFacts = { exists, initOk: true }
   if (exists) {
@@ -463,20 +463,20 @@ export async function ensureBoxContainer(): Promise<void> {
   ensuredBotHomes.clear()
   if (plan.kind === 'recreate') {
     const rm = await dockerRunner(dockerBoxRmArgv(BOX_CONTAINER), { timeoutMs: 30_000 })
-    if (rm.exitCode !== 0) throw new Error(`rimozione del container (${plan.reason}) fallita: ${rm.stderr}`)
+    if (rm.exitCode !== 0) throw new Error(`container removal (${plan.reason}) failed: ${rm.stderr}`)
   }
   // M4: il volume DEDICATO dei plugin esiste PRIMA del create che lo monta
   // (volume create è idempotente: lo crea solo se manca)
   const pvc = await dockerRunner(dockerPluginsVolumeCreateArgv(), { timeoutMs: 15_000 })
-  if (pvc.exitCode !== 0) throw new Error(`creazione del volume ${PLUGINS_VOLUME} non riuscita: ${pvc.stderr}`)
+  if (pvc.exitCode !== 0) throw new Error(`creation of volume ${PLUGINS_VOLUME} failed: ${pvc.stderr}`)
   // P2 (fase 14 correzioni): il volume DEDICATO del browser esiste e la sua
   // RADICE è di 1001 (pwuser) e 0700 — il one-shot di root tocca SOLO la
   // radice del volume (regola del modulo: mai un percorso che il bot può
   // scrivere), è idempotente e gira a ogni (ri)creazione del box
   const bvc = await dockerRunner(dockerBrowserVolumeCreateArgv(), { timeoutMs: 15_000 })
-  if (bvc.exitCode !== 0) throw new Error(`creazione del volume ${BROWSER_VOLUME} non riuscita: ${bvc.stderr}`)
+  if (bvc.exitCode !== 0) throw new Error(`creation of volume ${BROWSER_VOLUME} failed: ${bvc.stderr}`)
   const browserRoot = await dockerRunner(dockerBrowserRootArgv(image), { timeoutMs: 60_000 })
-  if (browserRoot.exitCode !== 0) throw new Error(`init del volume ${BROWSER_VOLUME} non riuscito: ${browserRoot.stderr}`)
+  if (browserRoot.exitCode !== 0) throw new Error(`init of volume ${BROWSER_VOLUME} failed: ${browserRoot.stderr}`)
   // creazione (prima volta o ricreazione G2/H1): il one-shot rende il volume
   // NON vuoto (workspace e home) e lo consegna all'utente del container; il
   // mount :nocopy del create non dipende dal copy-up di docker

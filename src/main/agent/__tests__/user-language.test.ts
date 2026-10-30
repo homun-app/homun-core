@@ -93,6 +93,77 @@ describe('fase 17b (A2): noteHumanText', () => {
   })
 })
 
+// Fase 17b correzioni (B1): isteresi. Cambiare la lingua globale costa molto,
+// quindi un solo messaggio debole nell'altra lingua non basta; ne bastano due
+// consecutivi, o uno forte (≥3 colpi).
+describe('fase 17b correzioni (B1): isteresi di noteHumanText', () => {
+  it('un messaggio forte cambia subito la lingua', async () => {
+    const { setDataDir, getSetting, setSetting, deleteSetting } = await import('../../store/db')
+    const { noteHumanText } = await import('../user-language')
+    setDataDir(join(root, 'i'))
+    setSetting('agent.userLanguage', 'it')
+    deleteSetting('agent.userLanguageCandidate')
+    noteHumanText('hello, can you help me with this?')
+    expect(getSetting('agent.userLanguage', null)).toBe('en')
+    expect(getSetting('agent.userLanguageCandidate', null)).toBeNull()
+  })
+
+  it('due messaggi deboli consecutivi cambiano la lingua', async () => {
+    const { setDataDir, getSetting, setSetting, deleteSetting } = await import('../../store/db')
+    const { noteHumanText } = await import('../user-language')
+    setDataDir(join(root, 'l'))
+    setSetting('agent.userLanguage', 'it')
+    deleteSetting('agent.userLanguageCandidate')
+    // «please send me the file»: 2 colpi EN, debole
+    noteHumanText('please send me the file')
+    expect(getSetting('agent.userLanguage', null)).toBe('it')
+    expect(getSetting('agent.userLanguageCandidate', null)).toBe('en')
+    noteHumanText('please send me the file')
+    expect(getSetting('agent.userLanguage', null)).toBe('en')
+    expect(getSetting('agent.userLanguageCandidate', null)).toBeNull()
+  })
+
+  it('debole, poi uno nella lingua salvata, poi debole: nessun cambio', async () => {
+    const { setDataDir, getSetting, setSetting, deleteSetting } = await import('../../store/db')
+    const { noteHumanText } = await import('../user-language')
+    setDataDir(join(root, 'm'))
+    setSetting('agent.userLanguage', 'it')
+    deleteSetting('agent.userLanguageCandidate')
+    noteHumanText('please send me the file')
+    noteHumanText('puoi farlo tu, per favore?')
+    noteHumanText('please send me the file')
+    expect(getSetting('agent.userLanguage', null)).toBe('it')
+    // il secondo debole ricomincia da capo: è di nuovo solo un candidato
+    expect(getSetting('agent.userLanguageCandidate', null)).toBe('en')
+  })
+
+  it('con null il candidato non si tocca', async () => {
+    const { setDataDir, getSetting, setSetting, deleteSetting } = await import('../../store/db')
+    const { noteHumanText } = await import('../user-language')
+    setDataDir(join(root, 'n'))
+    setSetting('agent.userLanguage', 'it')
+    deleteSetting('agent.userLanguageCandidate')
+    noteHumanText('please send me the file')
+    expect(getSetting('agent.userLanguageCandidate', null)).toBe('en')
+    noteHumanText('ok')
+    noteHumanText('')
+    noteHumanText('npm run build')
+    expect(getSetting('agent.userLanguage', null)).toBe('it')
+    expect(getSetting('agent.userLanguageCandidate', null)).toBe('en')
+  })
+
+  it('la prima rilevazione si salva anche senza lingua precedente', async () => {
+    const { setDataDir, getSetting, deleteSetting } = await import('../../store/db')
+    const { noteHumanText } = await import('../user-language')
+    setDataDir(join(root, 'o'))
+    deleteSetting('agent.userLanguage')
+    deleteSetting('agent.userLanguageCandidate')
+    // debole, ma è la prima: si salva
+    noteHumanText('please send me the file')
+    expect(getSetting('agent.userLanguage', null)).toBe('en')
+  })
+})
+
 describe('fase 17b (A2): il main pubblica ui.activeLanguage', () => {
   it('il payload della chiamata è settings:set con la lingua risolta', async () => {
     const { activeLanguageCall } = await import('../../i18n')

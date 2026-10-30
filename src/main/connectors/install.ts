@@ -44,8 +44,14 @@ export const PROPOSAL_RESULT =
 export const THIRD_PARTY_SERVER_WARNING =
   'Server pubblicato da terzi: può leggere e fare quello che gli permettono i suoi strumenti'
 
-/** Il bottone dei server stdio in modalità host. */
+/**
+ * Il bottone dei server stdio in modalità host. Fase 17b correzioni (B2): due
+ * testi — quello del result al modello è inglese, quello della card resta
+ * italiano per la 17c.
+ */
 export const HOST_MODE_DISABLED =
+  'it installs only in the bots\' computer (docker mode)'
+export const HOST_MODE_DISABLED_CARD =
   'si installa solo nel computer dei bot (modalità docker)'
 
 /** L'avviso fisso del modulo Gateway (punto 7). */
@@ -66,14 +72,14 @@ export const GATEWAY_PRESETS = gatewayPresetsJson as GatewayPreset[]
 export function parseMcpServerId(id: string): { kind: 'registry'; name: string } | { kind: 'url'; url: string } | { error: string } {
   if (id.startsWith('registry:')) {
     const name = id.slice('registry:'.length)
-    return name ? { kind: 'registry', name } : { error: 'id registry: senza nome' }
+    return name ? { kind: 'registry', name } : { error: 'registry id: no name' }
   }
   if (id.startsWith('url:')) {
     const url = id.slice('url:'.length)
-    if (!/^https:\/\//.test(url)) return { error: `l'URL deve essere https: ${url}` }
+    if (!/^https:\/\//.test(url)) return { error: `the URL must be https: ${url}` }
     return { kind: 'url', url }
   }
-  return { error: 'id non valido: usa registry:<nome> (da search_connectors) oppure url:https://…' }
+  return { error: 'invalid id: use registry:<name> (from search_connectors) or url:https://…' }
 }
 
 /** Le dipendenze dell'installatore (tutto iniettabile per i test). */
@@ -128,10 +134,10 @@ export async function buildMcpServerCard(
     }
   }
   const entry = await deps.findRegistryEntry(parsed.name)
-  if (!entry) return { ok: false, error: `voce del registro non trovata: ${parsed.name} (cerca l'id esatto con search_connectors)` }
+  if (!entry) return { ok: false, error: `registry entry not found: ${parsed.name} (find the exact id with search_connectors)` }
   const rt = registryRuntime(entry)
-  if (rt === null) return { ok: false, error: 'non installabile qui: la voce non espone né remotes né pacchetti npm' }
-  if (rt.kind === 'not-installable') return { ok: false, error: `non installabile qui: tipo ${rt.registryType}` }
+  if (rt === null) return { ok: false, error: 'not installable here: the entry exposes neither remotes nor npm packages' }
+  if (rt.kind === 'not-installable') return { ok: false, error: `not installable here: type ${rt.registryType}` }
   const trust = registryTrust(entry.server.name)
   const base = {
     type: 'mcp-server' as const,
@@ -164,7 +170,7 @@ export async function buildMcpServerCard(
       runtime: { kind: 'box-npm', command: `npx -y ${rt.identifier}@${rt.version}` },
       needs: { kind: 'env', vars: registryEnvVars(entry) },
       ...(trust.kind !== 'verified-domain' ? { thirdPartyWarning: true as const } : {}),
-      ...(deps.dockerMode() ? {} : { disabledReason: HOST_MODE_DISABLED })
+      ...(deps.dockerMode() ? {} : { disabledReason: HOST_MODE_DISABLED_CARD })
     }
   }
 }
@@ -216,7 +222,7 @@ export function serverSlotError(existing: McpServerConfig[], next: McpServerConf
   const cur = existing.find((s) => s.id === next.id)
   if (!cur) return null
   if ((cur.source?.kind ?? 'manual') === (next.source?.kind ?? 'manual')) return null
-  return `esiste già un server con questo id (${next.id}): fonte ${cur.source?.kind ?? 'manuale'} diversa da ${next.source?.kind ?? 'manuale'}`
+  return `a server with this id already exists (${next.id}): source ${cur.source?.kind ?? 'manual'} differs from ${next.source?.kind ?? 'manual'}`
 }
 
 /** L2: registra una config — stesso id e stessa fonte = aggiornamento, fonte diversa = errore. */
@@ -230,7 +236,7 @@ function saveServerCfg(cfg: McpServerConfig, deps: InstallDeps): string | null {
 /** Server id e nome (COMPLETO: L2) per una voce del registro. */
 function registryServerCfg(entry: RegistryEntry, agentId: string): McpServerConfig {
   const rt = registryRuntime(entry)
-  if (rt === null || rt.kind === 'not-installable') throw new Error('voce del registro non installabile')
+  if (rt === null || rt.kind === 'not-installable') throw new Error('registry entry not installable')
   const trust = registryTrust(entry.server.name)
   const id = serverIdFor({ kind: 'registry', name: entry.server.name })
   if (rt.kind === 'remote') {
@@ -263,7 +269,7 @@ function registryServerCfg(entry: RegistryEntry, agentId: string): McpServerConf
 /** Il messaggio di esito per il bot: "Server X aggiunto: N strumenti (lettura: a, scrittura: b)". */
 export function serverInstalledMessage(name: string, tools: Array<{ annotations?: { readOnlyHint?: boolean } }>): string {
   const read = tools.filter((t) => t.annotations?.readOnlyHint === true).length
-  return `Server ${name} aggiunto: ${tools.length} strumenti (lettura: ${read}, scrittura: ${tools.length - read})`
+  return `Server ${name} added: ${tools.length} tools (read: ${read}, write: ${tools.length - read})`
 }
 
 /**
@@ -290,10 +296,10 @@ export async function installMcpServer(
     return finishRemoteInstall(cfg, deps)
   }
   const entry = await deps.findRegistryEntry(parsed.name)
-  if (!entry) return { ok: false, error: `voce del registro non trovata: ${parsed.name}` }
+  if (!entry) return { ok: false, error: `registry entry not found: ${parsed.name}` }
   const rt = registryRuntime(entry)
   if (rt === null || rt.kind === 'not-installable') {
-    return { ok: false, error: rt?.kind === 'not-installable' ? `non installabile qui: ${rt.reason ?? `tipo ${rt.registryType}`}` : 'non installabile qui' }
+    return { ok: false, error: rt?.kind === 'not-installable' ? `not installable here: ${rt.reason ?? `type ${rt.registryType}`}` : 'not installable here' }
   }
   const cfg = registryServerCfg(entry, agentId)
   const slot = saveServerCfg(cfg, deps)
@@ -307,14 +313,14 @@ export async function installMcpServer(
     if (missing.length) {
       cfg.needsAuth = { kind: 'env', keys: missing }
       deps.onChange()
-      return { ok: true, message: `Server ${cfg.name} registrato, ma prima di avviarlo servono le variabili ${missing.join(', ')}: l'utente le inserisce nelle Impostazioni.` }
+      return { ok: true, message: `Server ${cfg.name} registered, but before starting it the variables ${missing.join(', ')} are needed: the user enters them in Settings.` }
     }
     deps.onChange()
     try {
       const tools = await deps.toolsOfServer(cfg.id)
       return { ok: true, message: serverInstalledMessage(cfg.name, tools) }
     } catch (e) {
-      return { ok: false, error: `Server ${cfg.name} registrato ma non parte: ${e instanceof Error ? e.message : String(e)}` }
+      return { ok: false, error: `Server ${cfg.name} registered but does not start: ${e instanceof Error ? e.message : String(e)}` }
     }
   }
   // remoto: regola 1 (OAuth) o regola 2 (header isSecret)
@@ -324,13 +330,13 @@ export async function installMcpServer(
     deps.saveServers([...deps.listServers().filter((s) => s.id !== cfg.id), cfg])
     deps.onChange()
     if (cfg.needsAuth) {
-      return { ok: true, message: `Server ${cfg.name} registrato: serve la chiave (${rt.secretHeader}), l'utente la inserisce nelle Impostazioni.` }
+      return { ok: true, message: `Server ${cfg.name} registered: the key is needed (${rt.secretHeader}), the user enters it in Settings.` }
     }
     try {
       const tools = await deps.toolsOfServer(cfg.id)
       return { ok: true, message: serverInstalledMessage(cfg.name, tools) }
     } catch (e) {
-      return { ok: false, error: `Server ${cfg.name} registrato ma non risponde: ${e instanceof Error ? e.message : String(e)}` }
+      return { ok: false, error: `Server ${cfg.name} registered but does not respond: ${e instanceof Error ? e.message : String(e)}` }
     }
   }
   return finishRemoteInstall(cfg, deps)
@@ -346,7 +352,7 @@ async function finishRemoteInstall(cfg: McpServerConfig, deps: InstallDeps): Pro
   } catch {
     // 401 o connessione rifiutata: flusso OAuth col loopback e iss verificato
     if (!deps.hasUi()) {
-      return { ok: false, error: `Server ${cfg.name} registrato: serve l'accesso con il tuo account (OAuth). Apri la finestra di Homun e riavvia la connessione dalle Impostazioni.` }
+      return { ok: false, error: `Server ${cfg.name} registered: sign-in with your account is needed (OAuth). Open the Homun window and restart the connection from Settings.` }
     }
     try {
       const authorize = deps.authorize ?? authorizeWithLoopback
@@ -361,7 +367,7 @@ async function finishRemoteInstall(cfg: McpServerConfig, deps: InstallDeps): Pro
       const tools = await deps.toolsOfServer(cfg.id)
       return { ok: true, message: serverInstalledMessage(cfg.name, tools) }
     } catch (e) {
-      return { ok: false, error: `Server ${cfg.name}: autorizzazione non riuscita (${e instanceof Error ? e.message : String(e)})` }
+      return { ok: false, error: `Server ${cfg.name}: authorization failed (${e instanceof Error ? e.message : String(e)})` }
     }
   }
 }
@@ -465,10 +471,10 @@ export async function buildPluginCard(
   cloneDeps: { allowFileUrlsForTests?: boolean; mkdtemp?: (prefix: string) => string } = testCloneDeps()
 ): Promise<{ ok: true; card: PluginCard } | { ok: false; error: string }> {
   const found = await deps.marketplaces.findPlugin(id)
-  if (!found) return { ok: false, error: `plugin non trovato: ${id} (cerca l'id esatto con search_connectors)` }
+  if (!found) return { ok: false, error: `plugin not found: ${id} (find the exact id with search_connectors)` }
   const { plugin } = found
   if (!sourceSupported(plugin.source)) {
-    return { ok: false, error: `sorgente ${plugin.source.kind} non supportata` }
+    return { ok: false, error: `source ${plugin.source.kind} not supported` }
   }
   // L7: le proposte vecchie non decise non tengono lo staging per sempre
   sweepPendingPlugins((deps.now ?? Date.now)())
@@ -487,11 +493,11 @@ export async function buildPluginCard(
     }
   }
   const staged = await stagePlugin(plugin.source, cloneDir, cloneDeps)
-  if (!staged.ok) return { ok: false, error: `download del plugin non riuscito: ${staged.error}` }
+  if (!staged.ok) return { ok: false, error: `plugin download failed: ${staged.error}` }
   const inspection = inspectPlugin(staged.dir)
   if (inspection.errors.length) {
     dropStaging(staged.root, extraDirs)
-    return { ok: false, error: `il plugin contiene percorsi o file non validi: ${inspection.errors[0]}` }
+    return { ok: false, error: `the plugin contains invalid paths or files: ${inspection.errors[0]}` }
   }
   // L7: una NUOVA proposta dello stesso plugin sostituisce la vecchia: lo
   // staging della vecchia si cancella subito (niente orfani in $TMPDIR)
@@ -586,13 +592,13 @@ export async function installPlugin(
   if (!pending) {
     // daemon riavviato (o proposta vecchia): si ri-scarica lo stesso plugin
     const rebuilt = await buildPluginCard(card.id, '', deps, cloneDeps)
-    if (!rebuilt.ok) return { ok: false, error: `ri-download del plugin non riuscito: ${rebuilt.error}` }
+    if (!rebuilt.ok) return { ok: false, error: `plugin re-download failed: ${rebuilt.error}` }
     pending = pendingPlugins.get(card.id)!
   }
   // L6: l'utente ha approvato la card con QUESTO sha12; se il marketplace nel
   // frattempo è andato avanti, niente installazione silenziosa di altro codice
   if (pending.sha12 !== card.sha12) {
-    const error = `il plugin è cambiato dopo la proposta (era ${card.sha12}, ora ${pending.sha12}): chiedi una nuova proposta`
+    const error = `the plugin changed after the proposal (was ${card.sha12}, now ${pending.sha12}): ask for a new proposal`
     dropStaging(pending.stagingRoot, pending.extraDirs)
     pendingPlugins.delete(card.id)
     return { ok: false, error }
@@ -634,18 +640,18 @@ export async function installPlugin(
     const parent = dirname(boxDir)
     try {
       const vc = await run(dockerPluginsVolumeCreateArgv())
-      if (vc.code !== 0) throw new Error(`creazione del volume dei plugin non riuscita: ${vc.stderr.trim().slice(0, 160)}`)
+      if (vc.code !== 0) throw new Error(`creation of the plugins volume failed: ${vc.stderr.trim().slice(0, 160)}`)
       const create = await run(dockerPluginCopyCreateArgv(helper, image))
-      if (create.code !== 0) throw new Error(`creazione del contenitore di copia non riuscita: ${create.stderr.trim().slice(0, 160)}`)
+      if (create.code !== 0) throw new Error(`creation of the copy container failed: ${create.stderr.trim().slice(0, 160)}`)
       try {
         const mkdir = await run(dockerPluginsMkdirArgv(image, parent))
-        if (mkdir.code !== 0) throw new Error(`creazione della cartella ${parent} nel volume dei plugin non riuscita: ${mkdir.stderr.trim().slice(0, 160)}`)
+        if (mkdir.code !== 0) throw new Error(`creation of the folder ${parent} in the plugins volume failed: ${mkdir.stderr.trim().slice(0, 160)}`)
         const cp = await run(dockerPluginCpArgv(dest, helper, boxDir))
-        if (cp.code !== 0) throw new Error(`copia del plugin nel volume dei plugin non riuscita: ${cp.stderr.trim().slice(0, 160)}`)
+        if (cp.code !== 0) throw new Error(`copy of the plugin into the plugins volume failed: ${cp.stderr.trim().slice(0, 160)}`)
         const chown = await run(dockerPluginsChownArgv(image, boxDir))
-        if (chown.code !== 0) throw new Error(`chown del plugin nel volume dei plugin non riuscito: ${chown.stderr.trim().slice(0, 160)}`)
+        if (chown.code !== 0) throw new Error(`chown of the plugin in the plugins volume failed: ${chown.stderr.trim().slice(0, 160)}`)
         const chmod = await run(dockerPluginsChmodArgv(image, boxDir))
-        if (chmod.code !== 0) throw new Error(`sola lettura del plugin nel volume dei plugin non riuscita: ${chmod.stderr.trim().slice(0, 160)}`)
+        if (chmod.code !== 0) throw new Error(`making the plugin read-only in the plugins volume failed: ${chmod.stderr.trim().slice(0, 160)}`)
         boxCopied = true
       } finally {
         // M4: l'usa-e-getta si rimuove SEMPRE, anche dopo un errore a metà;
@@ -659,7 +665,7 @@ export async function installPlugin(
       if (!hasStdio) {
         // eccezione L5/M4.6: senza server stdio la copia nel volume non serve
         // al funzionamento (le skill si leggono dalla dir dati sul Mac)
-        boxNote = `copia nel box non riuscita (${msg.slice(0, 120)}): plugin di sole skill, resta installato`
+        boxNote = `copy into the box failed (${msg.slice(0, 120)}): skills-only plugin, it stays installed`
       } else {
         return abort(msg)
       }
@@ -757,14 +763,14 @@ export async function installPlugin(
     `${pending.inspection.skills.length} skill`,
     `${serverIds.length} server${serverIds.length ? ` (${serverIds.map((id) => deps.listServers().find((x) => x.id === id)?.name ?? id).join(', ')})` : ''}`
   ]
-  if (settingsKeys.length) parts.push(`da configurare: ${settingsKeys.join(', ')} (Impostazioni)`)
+  if (settingsKeys.length) parts.push(`to configure: ${settingsKeys.join(', ')} (Settings)`)
   if (needsConnectorAuth.length) {
     const names = needsConnectorAuth.map((id) => deps.listServers().find((x) => x.id === id)?.name ?? id).join(', ')
-    parts.push(`da autorizzare: ${names} (Impostazioni → Installati → Connetti)`)
+    parts.push(`to authorize: ${names} (Settings → Installed → Connect)`)
   }
-  if (notRegistered.length) parts.push(`server non installati (valore in argv): ${notRegistered.map((s) => `${s.name} (${s.vars.join(', ')})`).join(', ')}`)
+  if (notRegistered.length) parts.push(`servers not installed (value in argv): ${notRegistered.map((s) => `${s.name} (${s.vars.join(', ')})`).join(', ')}`)
   if (boxNote) parts.push(boxNote)
-  return { ok: true, message: `Plugin ${record.name} installato: ${parts.join(', ')}` }
+  return { ok: true, message: `Plugin ${record.name} installed: ${parts.join(', ')}` }
 }
 
 /** Disinstallazione (solo dalle Impostazioni): cartelle (Mac e volume dei plugin), server, skill. I dati dell'utente NON si toccano. */

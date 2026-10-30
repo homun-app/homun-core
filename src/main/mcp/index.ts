@@ -277,7 +277,7 @@ async function ensure(cfg: McpServerConfig, force = false): Promise<Cached> {
 /** Test connessione + lista tool (per la UI). */
 export async function testServer(id: string): Promise<{ ok: boolean; error?: string; tools?: string[] }> {
   const cfg = listServers().find((s) => s.id === id)
-  if (!cfg) return { ok: false, error: 'server non trovato' }
+  if (!cfg) return { ok: false, error: 'server not found' }
   try {
     const c = await ensure(cfg, true)
     return { ok: true, tools: c.tools.map((t) => t.def.name) }
@@ -303,7 +303,7 @@ export async function toolsOfServer(id: string): Promise<
   Array<{ name: string; description: string; annotations?: McpAnnotations }>
 > {
   const cfg = listServers().find((s) => s.id === id)
-  if (!cfg) throw new Error('server non trovato')
+  if (!cfg) throw new Error('server not found')
   const c = await ensure(cfg, true)
   return c.tools.map((t) => ({
     name: t.def.name,
@@ -361,22 +361,22 @@ export class McpNeedsReconnectError extends Error {
     public serverName: string,
     public serverId: string
   ) {
-    super(`Il connettore "${serverName}" richiede la riconnessione (token scaduto): chiedi all'utente di riconnetterlo dalla vista "Connetti app".`)
+    super(`The connector "${serverName}" requires reconnecting (expired token): ask the user to reconnect it from the "Connect apps" view.`)
   }
 }
 
 /** Esegue mcp__<server>__<tool>. */
 export async function callTool(fullName: string, args: Record<string, unknown>): Promise<string> {
   const parts = fullName.split('__')
-  if (parts.length < 3) throw new Error(`nome tool MCP malformato: ${fullName}`)
+  if (parts.length < 3) throw new Error(`malformed MCP tool name: ${fullName}`)
   const serverSlug = parts[1]
   for (const cfg of listServers().filter((s) => s.enabled)) {
     if (slug(cfg.name) !== serverSlug) continue
     const c = await ensure(cfg)
     const tool = c.tools.find((t) => t.def.name === fullName)
-    if (!tool) throw new Error(`tool ${fullName} non più disponibile (riconnetti)`)
+    if (!tool) throw new Error(`tool ${fullName} no longer available (reconnect)`)
     if ((connectorStateOf(cfg).disabledTools ?? []).includes(fullName)) {
-      throw new Error(`tool ${fullName} disattivato dall'utente per questo connettore`)
+      throw new Error(`tool ${fullName} disabled by the user for this connector`)
     }
     try {
       const res = await c.client.callTool({ name: tool.originalName, arguments: args })
@@ -391,7 +391,7 @@ export async function callTool(fullName: string, args: Record<string, unknown>):
       throw e
     }
   }
-  throw new Error(`server MCP non trovato per ${fullName}`)
+  throw new Error(`MCP server not found for ${fullName}`)
 }
 
 export function toolNameToOriginal(fullName: string): string {

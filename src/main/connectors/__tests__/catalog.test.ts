@@ -67,7 +67,7 @@ describe('search_connectors (puro)', () => {
   it('connectorStatusLine riporta nome, id e stato', () => {
     const line = connectorStatusLine(cat[0]!, { status: 'connected', disabledTools: [], instructions: '' })
     expect(line).toContain(cat[0]!.id)
-    expect(line).toContain('connesso')
+    expect(line).toContain('connected')
   })
 })
 

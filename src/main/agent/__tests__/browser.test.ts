@@ -94,7 +94,7 @@ describe('il browser col MCP finto (avvio lazy, stato, tetti)', () => {
   it('lo snapshot lungo si tronca a 20k con la nota (funzione pura)', () => {
     const r = truncateSnapshot('y'.repeat(SNAPSHOT_MAX_CHARS + 500))
     expect(r.truncated).toBe(true)
-    expect(r.text).toContain('usa browser_snapshot con ref o depth')
+    expect(r.text).toContain('use browser_snapshot with ref or depth')
   })
 
   it('tetto: al massimo 3 browser contemporanei per box, oltre → errore esplicito', async () => {

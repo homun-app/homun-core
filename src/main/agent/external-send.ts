@@ -162,7 +162,7 @@ export function prepareDraft(input: {
     ? { ...(v.args as Record<string, unknown>) }
     : undefined
   if (!tool || !args || !isExternalSend(tool, input.cfg)) {
-    return { message: textOnly, viaRejected: tool || 'via non valido' }
+    return { message: textOnly, viaRejected: tool || 'invalid via' }
   }
   return {
     message: draftPayloadFromVia(input.channel, tool, args, {

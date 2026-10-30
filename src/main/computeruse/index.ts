@@ -62,7 +62,7 @@ function keyCombo(key: string): { script: string; error?: string } {
     .map((m) => ({ cmd: 'command down', command: 'command down', meta: 'command down', ctrl: 'control down', control: 'control down', alt: 'option down', option: 'option down', shift: 'shift down' })[m])
     .filter(Boolean)
   if (mods.some((m) => !({ cmd: 1, command: 1, meta: 1, ctrl: 1, control: 1, alt: 1, option: 1, shift: 1 })[m])) {
-    return { script: '', error: `modifier non valido in "${key}" (usare cmd/ctrl/alt/shift)` }
+    return { script: '', error: `invalid modifier in "${key}" (use cmd/ctrl/alt/shift)` }
   }
   const using = modList.length ? ` using {${modList.join(', ')}}` : ''
   return { script: `tell application "System Events" to ${isCode ? `key ${keyExpr}` : `keystroke ${keyExpr}`}${using}` }
@@ -76,16 +76,16 @@ async function screenshot(): Promise<{ output: string; images: string[] }> {
   try {
     const buf = await readFile(file)
     if (buf.length < 2000) {
-      return { output: 'Screenshot vuoto o bloccato: probabilmente manca il permesso Screen Recording per questa app (System Settings → Privacy → Screen Recording).', images: [] }
+      return { output: 'Screenshot empty or blocked: this app is probably missing the Screen Recording permission (System Settings → Privacy → Screen Recording).', images: [] }
     }
     // ridimensiona se enorme (>2.5MB) per non esplodere il contesto
     let b64 = buf.toString('base64')
     if (buf.length > 2_500_000) {
       await unlink(file).catch(() => undefined)
-      return { output: `Screenshot catturato (${Math.round(buf.length / 1024)}KB) ma troppo grande per il modello: usa una finestra più piccola o un modello con contesto vision maggiore.`, images: [] }
+      return { output: `Screenshot taken (${Math.round(buf.length / 1024)}KB) but too large for the model: use a smaller window or a model with a larger vision context.`, images: [] }
     }
     void b64
-    return { output: `Screenshot catturato (${Math.round(buf.length / 1024)}KB, risoluzione nativa retina — le coordinate che indichi vanno convertite in punti schermo automaticamente).`, images: [b64] }
+    return { output: `Screenshot taken (${Math.round(buf.length / 1024)}KB, native retina resolution — the coordinates you give are converted to screen points automatically).`, images: [b64] }
   } finally {
     await unlink(file).catch(() => undefined)
   }
@@ -105,31 +105,31 @@ export async function executeUseApp(input: UseAppInput): Promise<ComputerUseResu
     case 'double_click':
     case 'right_click': {
       const p = toScreenPoints(input.x, input.y)
-      if (!p) return { output: 'Servono x e y (coordinate in pixel immagine)', images: [], error: true }
+      if (!p) return { output: 'x and y are required (image pixel coordinates)', images: [], error: true }
       const btn = input.action === 'right_click' ? 'right click' : input.action === 'double_click' ? 'double click' : 'click'
       const r = await sh(`tell application "System Events" to ${btn} at {${p.x}, ${p.y}}`)
       if (r.code !== 0) {
-        return { output: `Azione fallita (${r.stderr.trim().split('\n').pop()}). Se manca il permesso: System Settings → Privacy → Accessibility → aggiungi questa app.`, images: [], error: true }
+        return { output: `Action failed (${r.stderr.trim().split('\n').pop()}). If the permission is missing: System Settings → Privacy → Accessibility → add this app.`, images: [], error: true }
       }
-      return { output: `${input.action} a (${p.x}, ${p.y}) punti schermo eseguito`, images: [] }
+      return { output: `${input.action} at (${p.x}, ${p.y}) screen points executed`, images: [] }
     }
     case 'type': {
-      if (!input.text) return { output: 'Manca text', images: [], error: true }
+      if (!input.text) return { output: 'Missing text', images: [], error: true }
       const escaped = input.text.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
       const r = await sh(`tell application "System Events" to keystroke "${escaped}"`)
-      if (r.code !== 0) return { output: `Type fallito: ${r.stderr.trim().split('\n').pop()}`, images: [], error: true }
-      return { output: `Digitato ${input.text.length} caratteri`, images: [] }
+      if (r.code !== 0) return { output: `Type failed: ${r.stderr.trim().split('\n').pop()}`, images: [], error: true }
+      return { output: `Typed ${input.text.length} characters`, images: [] }
     }
     case 'key': {
-      if (!input.key) return { output: 'Manca key', images: [], error: true }
+      if (!input.key) return { output: 'Missing key', images: [], error: true }
       const { script, error } = keyCombo(input.key)
       if (error) return { output: error, images: [], error: true }
       const r = await sh(script)
-      if (r.code !== 0) return { output: `Key fallita: ${r.stderr.trim().split('\n').pop()}`, images: [], error: true }
-      return { output: `Premuto ${input.key}`, images: [] }
+      if (r.code !== 0) return { output: `Key failed: ${r.stderr.trim().split('\n').pop()}`, images: [], error: true }
+      return { output: `Pressed ${input.key}`, images: [] }
     }
     case 'open_app': {
-      if (!input.app) return { output: 'Manca app', images: [], error: true }
+      if (!input.app) return { output: 'Missing app', images: [], error: true }
       const raw = input.app.replace(/"/g, '').trim()
       // nomi localizzati comuni → nome bundle (es. Calcolatrice → Calculator)
       const localized: Record<string, string> = {
@@ -164,11 +164,11 @@ export async function executeUseApp(input: UseAppInput): Promise<ComputerUseResu
           })
         }
       }
-      if (!opened) return { output: `App "${input.app}" non trovata (prova il nome inglese, es. Calculator, Notes)`, images: [], error: true }
+      if (!opened) return { output: `App "${input.app}" not found (try the English name, e.g. Calculator, Notes)`, images: [], error: true }
       await new Promise((res) => setTimeout(res, 800))
-      return { output: `App "${input.app}" attivata`, images: [] }
+      return { output: `App "${input.app}" activated`, images: [] }
     }
     default:
-      return { output: `Azione sconosciuta: ${input.action} (uso: screenshot, click, double_click, right_click, type, key, open_app)`, images: [], error: true }
+      return { output: `Unknown action: ${input.action} (usage: screenshot, click, double_click, right_click, type, key, open_app)`, images: [], error: true }
   }
 }

@@ -100,13 +100,13 @@ describe('prepareFileExchange: piano e rifiuti PRIMA della card', () => {
   it('copy_to_box: percorso sensibile, file assente e fuori dal box rifiutati', async () => {
     const sens = await pure.prepareFileExchange('agent_c', 'copy_to_box', { mac_path: join(MAC, '.ssh', 'id_rsa'), box_path: 'x' }, { home: MAC })
     expect(sens.ok).toBe(false)
-    if (!sens.ok) expect(sens.error).toContain('sensibili')
+    if (!sens.ok) expect(sens.error).toContain('sensitive folders')
     const assente = await pure.prepareFileExchange('agent_c', 'copy_to_box', { mac_path: join(MAC, 'manca.txt'), box_path: 'x' }, { home: MAC })
     expect(assente.ok).toBe(false)
-    if (!assente.ok) expect(assente.error).toContain('non trovato')
+    if (!assente.ok) expect(assente.error).toContain('not found')
     const fuori = await pure.prepareFileExchange('agent_c', 'copy_to_box', { mac_path: join(MAC, 'foto.jpg'), box_path: '../../../etc/passwd' }, { home: MAC })
     expect(fuori.ok).toBe(false)
-    if (!fuori.ok) expect(fuori.error).toContain('esce dal box condiviso')
+    if (!fuori.ok) expect(fuori.error).toContain('leaves the shared box')
   })
 
   it('tetto dei 200 MB rifiutato prima della card', async () => {
@@ -116,7 +116,7 @@ describe('prepareFileExchange: piano e rifiuti PRIMA della card', () => {
       statSize: async () => 300 * 1024 * 1024
     })
     expect(r.ok).toBe(false)
-    if (!r.ok) expect(r.error).toContain('troppo grande')
+    if (!r.ok) expect(r.error).toContain('too large')
   })
 
   it('copy_from_box: destinazione di default ~/Downloads/Homun/<nome>', async () => {
@@ -134,7 +134,7 @@ describe('prepareFileExchange: piano e rifiuti PRIMA della card', () => {
   it('copy_from_box verso cartella sensibile del Mac rifiutato', async () => {
     const r = await pure.prepareFileExchange('agent_c', 'copy_from_box', { box_path: 'report.md', mac_path: '.ssh/x' }, { home: MAC })
     expect(r.ok).toBe(false)
-    if (!r.ok) expect(r.error).toContain('non permesso')
+    if (!r.ok) expect(r.error).toContain('Mac path not allowed')
   })
 })
 
@@ -147,7 +147,7 @@ describe('F7: symlink, maiuscole e ~ nei path del Mac (realpath PRIMA del contro
       const r = await pure.prepareFileExchange('agent_c', 'copy_to_box', { mac_path: join(MAC, 'Downloads', 'chiave', 'id_ed25519'), box_path: 'k' }, { home: MAC })
       expect(r.ok).toBe(false)
       if (!r.ok) {
-        expect(r.error).toContain('sensibili')
+        expect(r.error).toContain('sensitive folders')
         // il messaggio mostra il path REALE risolto, non quello del symlink
         expect(r.error).toContain(realpathSync(join(MAC, '.ssh', 'id_ed25519')))
       }
@@ -165,7 +165,7 @@ describe('F7: symlink, maiuscole e ~ nei path del Mac (realpath PRIMA del contro
       // torna le maiuscole canoniche e il confronto ignora il caso comunque
       const r = await pure.prepareFileExchange('agent_c', 'copy_to_box', { mac_path: join(MAC, '.SSH', 'id_ed25519'), box_path: 'k' }, { home: MAC })
       expect(r.ok).toBe(false)
-      if (!r.ok) expect(r.error).toContain('sensibili')
+      if (!r.ok) expect(r.error).toContain('sensitive folders')
       // il confronto case-insensitive vale anche per la policy pura (stessa
       // base canonica per il path e per la home del contesto)
       const realMac = realpathSync(MAC)
@@ -197,7 +197,7 @@ describe('F7: symlink, maiuscole e ~ nei path del Mac (realpath PRIMA del contro
       symlinkSync(join(MAC, '.ssh'), join(MAC, 'portachiavi'))
       const r = await pure.prepareFileExchange('agent_c', 'copy_from_box', { box_path: 'report.md', mac_path: 'portachiavi/report.md' }, { home: MAC })
       expect(r.ok).toBe(false)
-      if (!r.ok) expect(r.error).toContain('non permesso')
+      if (!r.ok) expect(r.error).toContain('Mac path not allowed')
     } finally {
       rmSync(join(MAC, 'portachiavi'))
       rmSync(join(MAC, '.ssh'), { recursive: true, force: true })
@@ -212,7 +212,7 @@ describe('runFileExchange: copia reale su directory temporanee', () => {
     if (!pre1.ok) throw new Error('precheck fallito')
     const r1 = await pure.runFileExchange('agent_c', pre1.plan, { home: MAC })
     expect(readFileSync(join(DATA, 'box', 'home', 'agent_c', 'foto.jpg'), 'utf8')).toBe('byte-del-file')
-    expect(r1.output).toContain('Copiato nel box')
+    expect(r1.output).toContain('Copied into the box')
     // from_box: sul Mac esiste GIÀ un file con lo stesso nome → nome alternativo
     mkdirSync(join(MAC, 'Downloads', 'Homun'), { recursive: true })
     writeFileSync(join(MAC, 'Downloads', 'Homun', 'report.md'), 'VECCHIO')
@@ -223,6 +223,6 @@ describe('runFileExchange: copia reale su directory temporanee', () => {
     expect(r2.finalMacPath).toBe(join(realpathSync(join(MAC, 'Downloads')), 'Homun', 'report (1).md'))
     expect(readFileSync(join(MAC, 'Downloads', 'Homun', 'report.md'), 'utf8')).toBe('VECCHIO') // intatto
     expect(readFileSync(r2.finalMacPath!, 'utf8')).toBe('# report')
-    expect(r2.output).toContain('esisteva già')
+    expect(r2.output).toContain('already existed')
   })
 })

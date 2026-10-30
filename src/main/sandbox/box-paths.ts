@@ -35,7 +35,7 @@ export function resolveBoxPath(
   realpathSync: (p: string) => string
 ): BoxPathResolution {
   const clean = path.trim()
-  if (!clean) return { ok: false, reason: 'percorso vuoto' }
+  if (!clean) return { ok: false, reason: 'empty path' }
   let abs: string
   if (clean === WORKSPACE_ALIAS || clean.startsWith(WORKSPACE_ALIAS + '/')) {
     abs = resolve(join(root, WORKSPACE_DIR, '.' + clean.slice(WORKSPACE_ALIAS.length)))
@@ -45,7 +45,7 @@ export function resolveBoxPath(
     abs = resolve(home, clean)
   }
   if (!isInsideBox(abs, root, realpathSync)) {
-    return { ok: false, reason: `il percorso "${path}" esce dal box condiviso: usa un path relativo alla tua home oppure dentro ${WORKSPACE_ALIAS}` }
+    return { ok: false, reason: `the path "${path}" leaves the shared box: use a path relative to your home or inside ${WORKSPACE_ALIAS}` }
   }
   return { ok: true, abs }
 }

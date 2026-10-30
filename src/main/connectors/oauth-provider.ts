@@ -245,14 +245,14 @@ export async function authorizeWithLoopback(
       const issSupported = (discovery?.authorizationServerMetadata as { authorization_response_iss_parameter_supported?: boolean } | undefined)
         ?.authorization_response_iss_parameter_supported === true
       if (issSupported && !iss) {
-        throw new Error('issuer assente nella redirect (RFC 9207): l\'authorization server lo dichiara obbligatorio')
+        throw new Error('issuer missing in the redirect (RFC 9207): the authorization server declares it mandatory')
       }
       if (iss && expected && !issuersMatch(iss, expected)) {
-        throw new Error(`issuer non corrispondente: la redirect dichiara ${iss}, l'authorization server scoperto è ${expected}`)
+        throw new Error(`issuer mismatch: the redirect declares ${iss}, the discovered authorization server is ${expected}`)
       }
       result = await auth(provider, { serverUrl, authorizationCode: code })
     }
-    if (result !== 'AUTHORIZED') throw new Error(`autenticazione non completata (${String(result)})`)
+    if (result !== 'AUTHORIZED') throw new Error(`authentication not completed (${String(result)})`)
   } finally {
     cb.close()
   }

@@ -21,7 +21,10 @@ export interface SafeStorageLike {
   decryptString(encrypted: Buffer): string | Promise<string>
 }
 
-export const VAULT_LOCKED_MSG = 'Vault bloccato: safeStorage non disponibile (apri la finestra di Homun per usare le credenziali)'
+// Fase 17b correzioni (B2): MU — lo vede il modello nei result di
+// save_contact/fill_credential e può vederlo l'utente; per il modello va in
+// inglese, la parte di display la sistema la 17c.
+export const VAULT_LOCKED_MSG = 'Vault locked: safeStorage not available (open the Homun window to use credentials)'
 
 let storage: SafeStorageLike | null = null
 /** Runner `security` del Keychain, iniettabile per i test. */
@@ -161,7 +164,7 @@ async function getMasterKey(): Promise<Buffer> {
   try {
     return await getKeychainKey(VAULT_SERVICE, keychainRun)
   } catch {
-    throw new Error('Vault bloccato: Keychain non disponibile (impossibile conservare la chiave master)')
+    throw new Error('Vault locked: Keychain not available (cannot store the master key)')
   }
 }
 
@@ -195,7 +198,7 @@ export async function storeSecret(name: string, value: string): Promise<void> {
 
 export async function revealSecret(name: string): Promise<string> {
   const s = secrets().find((x) => x.name === name)
-  if (!s) throw new Error(`credenziale "${name}" non presente nel vault`)
+  if (!s) throw new Error(`credential "${name}" not present in the vault`)
   const key = await getMasterKey()
   return unseal(key, s.sealed)
 }
@@ -268,13 +271,13 @@ export async function saveLogin(input: {
   totp?: string
 }): Promise<string> {
   const label = input.label.trim()
-  if (!label) throw new Error('serve un\'etichetta per il login')
+  if (!label) throw new Error('a label is required for the login')
   const origins = [...new Set(input.origins.map((o) => o.trim()).filter(Boolean))]
-  if (!origins.length) throw new Error('serve almeno un\'origine https://host (es. https://app.example.com)')
+  if (!origins.length) throw new Error('at least one https://host origin is required (e.g. https://app.example.com)')
   const bad = origins.filter((o) => !validHttpsOrigin(o))
-  if (bad.length) throw new Error(`origini non valide (serve la forma esatta https://host[:porta], niente wildcard): ${bad.join(', ')}`)
-  if (!input.username) throw new Error('serve il nome utente del login')
-  if (!input.password) throw new Error('serve la password del login')
+  if (bad.length) throw new Error(`invalid origins (exact https://host[:port] form required, no wildcards): ${bad.join(', ')}`)
+  if (!input.username) throw new Error('the login username is required')
+  if (!input.password) throw new Error('the login password is required')
   let totp: string | undefined
   if (input.totp !== undefined && input.totp.trim() !== '') {
     const { parseTotpSecret } = await import('./agent/credentials')
@@ -298,7 +301,7 @@ export async function saveLogin(input: {
  */
 export async function getLoginForFill(id: string): Promise<VaultLogin> {
   const l = logins().find((x) => x.id === id)
-  if (!l) throw new Error(`login "${id}" non presente nel vault`)
+  if (!l) throw new Error(`login "${id}" not present in the vault`)
   const key = await getMasterKey()
   const data = JSON.parse(unseal(key, l.sealed)) as { username: string; password: string; totp?: string }
   return { id: l.id, label: l.label, origins: [...l.origins], username: data.username, password: data.password, ...(data.totp ? { totp: data.totp } : {}) }
@@ -328,7 +331,7 @@ export async function saveContact(input: {
   notes?: string
 }): Promise<string> {
   const name = input.name.trim()
-  if (!name) throw new Error('serve il nome del contatto')
+  if (!name) throw new Error('the contact name is required')
   const key = await getMasterKey()
   const now = Date.now()
   const id = input.id ?? newVaultId('contact')

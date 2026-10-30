@@ -65,7 +65,7 @@ describe('pure: path e righe finali', () => {
     for (const bad of [null, '', '\n', '  ', 'abc', '1.5', '-3', '0', '15 7', 'kill -TERM']) {
       const r = parseShellPgid(bad)
       expect(r.ok, JSON.stringify(bad)).toBe(false)
-      if (!r.ok) expect(r.reason).toContain('nessun kill')
+      if (!r.ok) expect(r.reason).toContain('no kill')
     }
   })
 })
@@ -310,7 +310,7 @@ describe('H2: avvio in docker che fallisce subito (exec -d rc ≠ 0)', () => {
     expect(r.ok).toBe(false)
     if (!r.ok) {
       expect(r.error).toContain('The command never started')
-      expect(r.error).toContain('impossibile redarre')
+      expect(r.error).toContain('cannot redact')
       expect(r.error).not.toContain('exec failed')
     }
   })

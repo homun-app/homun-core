@@ -461,7 +461,7 @@ vi.mock('../../sandbox', () => ({
 vi.mock('../../vault', () => ({
   revealSecret: async (name: string) => {
     if (name === 'API_KEY') return 'SK-1234-SEGRETO'
-    throw new Error(`credenziale "${name}" non presente nel vault`)
+    throw new Error(`credential "${name}" not present in the vault`)
   },
   listSecretNames: () => ['API_KEY']
 }))
@@ -805,7 +805,7 @@ describe('§5.6 segreti: il valore non arriva mai al modello né al transcript',
       expect(h.db.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending')).toBeTruthy()
     })
     const appr = h.db.entries.find((e) => e.kind === 'approval')!
-    expect(appr.content).toContain('usa le credenziali: API_KEY')
+    expect(appr.content).toContain('uses credentials: API_KEY')
     expect(appr.meta?.secretRefs).toEqual(['API_KEY'])
 
     // "Consenti sempre" qui NON deve salvare grant (C4)
@@ -1150,8 +1150,8 @@ describe('fase 3: l\'agente comunica SOLO tramite tool (§3bis L2)', () => {
     expect((draft.meta?.message as { to?: string }).to).toBe('x@y.it')
     // il tool-result spiega lo scarto al modello
     const toolMsg = h.llm.calls[1]!.find((m) => m.role === 'tool')
-    expect(toolMsg?.content).toContain('scartato')
-    expect(toolMsg?.content).toContain('non è un tool di invio esterno')
+    expect(toolMsg?.content).toContain('discarded')
+    expect(toolMsg?.content).toContain('is not a configured external-send tool')
     // né run-command né tool MCP sono mai stati eseguiti
     expect(h.sandboxMock.exec.calls).toBe(0)
     expect(h.mcp.calls).toBe(0)
@@ -1420,7 +1420,7 @@ describe('fase 5: funnel dei connettori (offer_connector) e card Riconnetti', ()
         public serverName: string,
         public serverId: string
       ) {
-        super('Il connettore "FakeApp" richiede la riconnessione')
+        super('Il connettore "FakeApp" requires reconnecting')
       }
     }
     // il mock mcp espone la classe e fallisce con l'errore di riconnessione
@@ -1938,7 +1938,7 @@ describe('fase 8 (punto 1): auto-review delle approvazioni', () => {
     // il proseguimento: in mezzo c'è anche la chiamata del revisore)
     const last = h.llm.calls[h.llm.calls.length - 1]!
     const results = last.filter((m) => m.role === 'tool').map((m) => String(m.content))
-    expect(results.some((c) => c.includes('INVIATA automaticamente'))).toBe(true)
+    expect(results.some((c) => c.includes('SENT automatically'))).toBe(true)
   })
 
   it('bozza che non rispetta le regole → resta card (nessun invio)', async () => {
@@ -2697,7 +2697,7 @@ describe('fase 10 (punto 1): permessi per ORIGINE di create_agent/create_group',
     })
     // con l'allow dell'utente la creazione procede
     const appr = h.db.entries.find((e) => e.kind === 'approval')!
-    expect(appr.content).toContain('non è dell\'utente')
+    expect(appr.content).toContain("the turn is not the user's")
     resolveApproval(AGENT, String(appr.meta?.approvalId), 'allow', 'once')
     await turn
     expect([...h.db.agents.values()].some((a) => a.name === 'Sospetto')).toBe(true)
@@ -3765,12 +3765,12 @@ describe('fase 11 (punto 4): copy_to_box / copy_from_box nel loop', () => {
     await turn
     expect(runs).toHaveLength(0)
     const res = h.llm.calls[1]!.find((m) => m.role === 'tool')!
-    expect(String(res.content)).toContain('negata')
+    expect(String(res.content)).toContain('Copy denied by the user.')
   })
 
   it('rifiuto FISSO (percorso sensibile del Mac) → result di errore, NESSUNA card', async () => {
     setFileExchangeForTests({
-      prepare: async () => ({ ok: false, error: 'Percorso del Mac non permesso: "~/.ssh/id_rsa" (niente cartelle sensibili né i dati di SandBot).' })
+      prepare: async () => ({ ok: false, error: 'Mac path not allowed: "~/.ssh/id_rsa" (niente cartelle sensibili né i dati di SandBot).' })
     })
     h.llm.queue = [
       { toolCalls: [{ id: 'cp3', name: 'copy_to_box', arguments: JSON.stringify({ mac_path: '~/.ssh/id_rsa', box_path: 'x' }) }] },
@@ -3779,7 +3779,7 @@ describe('fase 11 (punto 4): copy_to_box / copy_from_box nel loop', () => {
     await runTurn(AGENT, 'portami la chiave', emit)
     expect(h.db.entries.filter((e) => e.kind === 'approval')).toHaveLength(0)
     const res = h.llm.calls[1]!.find((m) => m.role === 'tool')!
-    expect(String(res.content)).toContain('non permesso')
+    expect(String(res.content)).toContain('Mac path not allowed')
   })
 
   it('l\'auto-review PURA non approva MAI i tool di copia (nemmeno col revisore favorevole)', async () => {
@@ -3869,7 +3869,7 @@ describe('fase 11b: il browser del bot nel loop', () => {
     expect(h.db.entries.filter((e) => e.kind === 'approval')).toHaveLength(0)
     expect(browserState.calls).toHaveLength(0)
     const res = h.llm.calls[1]!.find((m) => m.role === 'tool')!
-    expect(String(res.content)).toContain('Usa solo i ref dello snapshot (es. e12)')
+    expect(String(res.content)).toContain('Use only snapshot refs (e.g. e12)')
   })
 
   it('I6: press_key Enter → CARD (Invio può inviare il modulo), anche senza aver scritto', async () => {
@@ -3899,7 +3899,7 @@ describe('fase 11b: il browser del bot nel loop', () => {
     expect(h.db.entries.filter((e) => e.kind === 'approval')).toHaveLength(0)
     expect(browserState.calls).toHaveLength(0)
     const res = h.llm.calls[1]!.find((m) => m.role === 'tool')!
-    expect(String(res.content)).toContain('Non scrivo MAI password')
+    expect(String(res.content)).toContain('I NEVER type passwords')
     // fase 14 (7d): il deny indica fill_credential come strada del sistema
     expect(String(res.content)).toContain('fill_credential')
   })
@@ -3969,7 +3969,7 @@ describe('fase 12 0a/0d: probe interno del tipo di campo e card di press_key', (
     expect(h.db.entries.filter((e) => e.kind === 'approval')).toHaveLength(0)
     expect(browserState.calls).toHaveLength(0)
     const res = h.llm.calls[1]!.find((m) => m.role === 'tool')!
-    expect(String(res.content)).toContain('Non scrivo MAI password')
+    expect(String(res.content)).toContain('I NEVER type passwords')
   })
 
   it('correzione K1: username "Username Password" col campo VERO pulito → DENY e NON eseguito (la verifica non declassa il nome)', async () => {
@@ -3986,7 +3986,7 @@ describe('fase 12 0a/0d: probe interno del tipo di campo e card di press_key', (
     expect(h.db.entries.filter((e) => e.kind === 'approval')).toHaveLength(0)
     expect(browserState.calls).toHaveLength(0)
     const res = h.llm.calls[1]!.find((m) => m.role === 'tool')!
-    expect(String(res.content)).toContain('Non scrivo MAI password')
+    expect(String(res.content)).toContain('I NEVER type passwords')
   })
 
   it('0a: valutazione fallita (errore MCP o result non leggibile) → ASK "non riesco a verificare il tipo del campo", mai free', async () => {
@@ -4265,7 +4265,7 @@ describe('fase 12: il FIGLIO — tool, prompt, whitelist e consegna', () => {
     ]
     await runTurn(CHILD, 'brief', emit, undefined, { source: 'user', subagent: { id: CHILD, parentId: AGENT } })
     const res = h.llm.calls[1]!.find((m) => m.role === 'tool')!
-    expect(String(res.content)).toBe('non disponibile ai sottoagenti: the subagent does not talk with the user or the other bots: deliver to the parent with wake_parent')
+    expect(String(res.content)).toBe('not available to subagents: the subagent does not talk with the user or the other bots: deliver to the parent with wake_parent')
     // NESSUN messaggio in chat
     expect(h.db.entries.filter((e) => e.kind === 'send-message')).toHaveLength(0)
   })
@@ -4518,7 +4518,7 @@ describe('fase 12: check/message/stop_subagent e i rifiuti sugli id dei figli', 
     ]
     await runTurn('sub_no1', 'brief', emit, undefined, { source: 'user', subagent: { id: 'sub_no1', parentId: AGENT } })
     const res = h.llm.calls[1]!.find((m) => m.role === 'tool')!
-    expect(String(res.content)).toContain('non disponibile ai sottoagenti: no subagents inside subagents')
+    expect(String(res.content)).toContain('not available to subagents: no subagents inside subagents')
     expect(subagentsState.rows.filter((r) => r.parent_id === 'sub_no1')).toHaveLength(0)
   })
 })
@@ -4705,7 +4705,7 @@ describe('fase 13: add_mcp_server / install_plugin / find_tools / result MCP', (
     expect(h.mcp.calls).toBe(1)
     // il tool NON attivo è rifiutato senza esecuzione cieca
     const iRes = h.db.entries.find((e) => e.kind === 'tool-result' && e.meta?.callId === 'i2')!
-    expect(iRes.content).toContain('strumento non attivo')
+    expect(iRes.content).toContain('tool not active')
     expect(iRes.meta?.inactive).toBe(true)
     expect(h.mcp.calls).toBe(1) // nessuna seconda esecuzione
     // la persistenza: meta.activated nel transcript alimenta i turni dopo

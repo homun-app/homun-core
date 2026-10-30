@@ -102,7 +102,7 @@ describe('M5: un\'installazione che lancia NON lascia la card in installing', ()
     // il bot riceve il [sistema]: accodato come job user-message (il testo
     // del messaggio che girrà al prossimo turno)
     const sys = listJobs(db()).find((j) => j.kind === 'user-message')
-    expect(String((sys?.payload as { text?: string })?.text)).toContain('NON aggiunto: boom del registro')
+    expect(String((sys?.payload as { text?: string })?.text)).toContain('NOT added: boom del registro')
     // il click SUCCESSIVO non dice "installazione in corso": la card in error
     // si può cliccare di nuovo (retry), non è incollata a installing (M5)
     const r2 = await api['connectors:resolve-mcp-server']!([AGENT, p.id, 'add']) as { ok: boolean }
@@ -123,7 +123,7 @@ describe('M5: un\'installazione che lancia NON lascia la card in installing', ()
     expect(entry.meta?.status).toBe('error')
     expect(String(entry.meta?.error)).toContain('boom del marketplace')
     const sys = listJobs(db()).find((j) => j.kind === 'user-message')
-    expect(String((sys?.payload as { text?: string })?.text)).toContain('NON installato: boom del marketplace')
+    expect(String((sys?.payload as { text?: string })?.text)).toContain('NOT installed: boom del marketplace')
     // il click SUCCESSIVO riprova (niente "installazione in corso") e la card
     // resta in error, non in installing
     const r2 = await api['plugins:resolve']!([AGENT, p.id, 'install']) as { ok: boolean }

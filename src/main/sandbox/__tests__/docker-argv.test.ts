@@ -539,10 +539,10 @@ describe('H1: controllo test -w e decisione use/una ricreazione/errore chiaro', 
     if (!r.ok) {
       // dice COSA è fallito (test -w), CHI non può scrivere e che i dati sono
       // salvi — al posto dei permessi negati sparsi di ogni write-file
-      expect(r.error).toContain('il box non è scrivibile dall\'utente del container (1000:1000)')
+      expect(r.error).toContain('the box is not writable by the container user (1000:1000)')
       expect(r.error).toContain('test -w /box/workspace')
       expect(r.error).toContain('sandbot-box')
-      expect(r.error).toContain('non sono stati toccati')
+      expect(r.error).toContain('the data inside was not touched')
     }
   })
 })

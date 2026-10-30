@@ -188,7 +188,7 @@ export function registryRuntime(e: RegistryEntry): RegistryRuntime | null {
   }
   const pkg = (e.server.packages ?? []).find((p) => p.transport?.type === 'stdio' && p.registryType === 'npm' && p.identifier)
   if (pkg) {
-    if (!pkg.version) return { kind: 'not-installable', registryType: 'npm', reason: 'versione non dichiarata' }
+    if (!pkg.version) return { kind: 'not-installable', registryType: 'npm', reason: 'version not declared' }
     return { kind: 'box-npm', identifier: pkg.identifier!, version: pkg.version }
   }
   const other = (e.server.packages ?? [])[0]

@@ -37,7 +37,7 @@ describe('resolveBoxPath (puro, confini del box condiviso)', () => {
 
   it('fuori dalla radice → RIFIUTO con motivo chiaro', () => {
     expect(resolveBoxPath('/etc/passwd', ROOT, HOME, realpathSync).ok).toBe(false)
-    expect(resolveBoxPath('/etc/passwd', ROOT, HOME, realpathSync).reason).toContain('esce dal box condiviso')
+    expect(resolveBoxPath('/etc/passwd', ROOT, HOME, realpathSync).reason).toContain('leaves the shared box')
     // radice senza /box come prefisso: /boxy non è /box
     expect(resolveBoxPath('/boxy/x', '/box', '/box/home/a', (p) => p).ok).toBe(false)
   })

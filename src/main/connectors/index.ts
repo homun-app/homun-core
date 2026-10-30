@@ -91,10 +91,10 @@ export function searchCatalog(entries: CatalogEntry[], query: string): CatalogEn
 /** Stato testuale di un connettore per il modello (search_connectors). */
 export function connectorStatusLine(e: CatalogEntry, state: ConnectorState): string {
   const labels: Record<ConnectorStatus, string> = {
-    not_connected: 'non connesso',
-    connected: 'connesso',
-    needs_auth: 'da autorizzare (serve il click dell\'utente)',
-    error: 'errore'
+    not_connected: 'not connected',
+    connected: 'connected',
+    needs_auth: 'needs authorization (the user must click)',
+    error: 'error'
   }
   const extra = state.status === 'error' && state.error ? ` — ${state.error}` : ''
   return `- ${e.name} (${e.id}): ${labels[state.status]}${extra}. ${e.notes}`

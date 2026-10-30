@@ -329,3 +329,17 @@ describe('fase 17b (A3): la sezione Language è l\'ultima, in ogni variante', ()
     expect(systemPrompt(agent).length / 4).toBeLessThanOrEqual(PROMPT_TOKEN_BUDGET)
   })
 })
+
+// Fase 17b correzioni (B3): il role di create_agent non contiene più la
+// lingua — un role con la lingua scritta dentro contraddice la lingua
+// globale quando l'utente cambia lingua.
+describe('fase 17b correzioni (B3): create_agent senza lingua nel role', () => {
+  it('la descrizione di create_agent non contiene «language»', async () => {
+    const { toolDefs } = await import('../tools')
+    const def = toolDefs.find((t) => t.name === 'create_agent')
+    expect(def).toBeDefined()
+    expect(def!.description).not.toContain('language')
+    const role = (def!.parameters.properties as Record<string, unknown>).role as { description?: string } | undefined
+    expect(role?.description ?? '').not.toContain('language')
+  })
+})

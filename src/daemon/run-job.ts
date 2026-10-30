@@ -15,6 +15,16 @@ import type { SandbotEvent, TriggerEventPayload } from '../shared/types'
 type Emitter = (e: SandbotEvent) => void
 type RunTurnFn = typeof runTurn
 
+/**
+ * L'apertura del turno di una routine a schedule (fase 17b correzioni, B4):
+ * funzione PURA, la usano il job runner e l'eval, così la storia dell'eval è
+ * identica a ciò che produce il codice. Il titolo e il prompt li ha scritti
+ * l'utente (o il bot nella sua lingua): chi li traduce lo fa prima di chiamare.
+ */
+export function routineOpening(title: string, prompt: string): string {
+  return `[recurring routine: ${title}] ${prompt}`
+}
+
 /** Runner dei job per il worker (runTurn iniettabile nei test). */
 export function makeJobRunner(db: DatabaseSync, runTurnFn: RunTurnFn = runTurn) {
   return async (job: Job, emit: Emitter): Promise<void> => {
@@ -131,7 +141,7 @@ export function makeJobRunner(db: DatabaseSync, runTurnFn: RunTurnFn = runTurn) 
     // viene da un evento esterno — l'auto-review non lo tocca
     const text = p.event
       ? formatTriggerEvent(p.title, p.prompt, p.event)
-      : `[recurring routine: ${p.title}] ${p.prompt}`
+      : routineOpening(p.title, p.prompt)
     await runTurnFn(job.agent_id, text, emit, undefined, {
       source: 'routine', title: p.title, ...opts, onTurnEntry,
       ...(p.event ? { externalEvent: true } : {})

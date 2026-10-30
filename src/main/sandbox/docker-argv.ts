@@ -236,7 +236,7 @@ export function boxCreateCheck(writable: boolean): { ok: true } | { ok: false; e
   if (writable) return { ok: true }
   return {
     ok: false,
-    error: `il box non è scrivibile dall'utente del container (${CONTAINER_USER}): docker exec ${BOX_CONTAINER} test -w ${BOX_MOUNT}/workspace è fallito — il volume ${BOX_VOLUME} resta di root nonostante il one-shot di init; i dati dentro non sono stati toccati`
+    error: `the box is not writable by the container user (${CONTAINER_USER}): docker exec ${BOX_CONTAINER} test -w ${BOX_MOUNT}/workspace failed — volume ${BOX_VOLUME} remains root's despite the init one-shot; the data inside was not touched`
   }
 }
 

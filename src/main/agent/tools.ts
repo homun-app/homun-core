@@ -323,12 +323,12 @@ export const toolDefs: ToolDef[] = [
   },
   {
     name: 'create_agent',
-    description: "Creates another bot: you give it a name and a COMPLETE ROLE PROMPT (it becomes its description: task, language, who it delivers work to, what it does NOT do without the user's ok). It receives model and provider like new bots (no default: yours). Optional section to group it in the sidebar. The new bot does NOT greet and does NOT start on its own: it receives work from whoever writes to it (send_to_agent or the group). In non-user turns (automatic, from other bots, group, from external content) creation asks for the user's confirmation.",
+    description: "Creates another bot: you give it a name and a COMPLETE ROLE PROMPT (it becomes its description: task, who it delivers work to, what it does NOT do without the user's ok). It receives model and provider like new bots (no default: yours). Optional section to group it in the sidebar. The new bot does NOT greet and does NOT start on its own: it receives work from whoever writes to it (send_to_agent or the group). In non-user turns (automatic, from other bots, group, from external content) creation asks for the user's confirmation.",
     parameters: {
       type: 'object',
       properties: {
         name: { type: 'string', description: 'Bot name (short, as you would call it on a team)' },
-        role: { type: 'string', description: 'The COMPLETE role prompt: who it is, what it does, which language it works in, who it delivers to, what it does not do without the user\'s ok' },
+        role: { type: 'string', description: 'The COMPLETE role prompt: who it is, what it does, who it delivers to, what it does not do without the user\'s ok' },
         section: { type: 'string', description: 'Sidebar section to group it in (optional, e.g. "Dinner team")' }
       },
       required: ['name', 'role']
@@ -1131,7 +1131,7 @@ export async function executeTool(
       const role = String(input.role ?? '').trim()
       const section = input.section !== undefined ? String(input.section ?? '').trim() : ''
       if (!name || !role) {
-        return { output: 'Bot not created: name and role are required (the complete role prompt: task, language, who it delivers to, what NOT to do without the user\'s ok).', meta: {} }
+        return { output: 'Bot not created: name and role are required (the complete role prompt: task, who it delivers to, what NOT to do without the user\'s ok).', meta: {} }
       }
       const dbMod = await import('../store/db')
       if (dbMod.listAgents().length >= MAX_AGENTS_TOTAL) {
@@ -1155,7 +1155,7 @@ export async function executeTool(
             const full = providersMod.getProvider(p.id)
             return full
               ? providersMod.modelSupportsTools(full, m)
-              : Promise.resolve({ ok: false, checked: false, error: 'provider non trovato' })
+              : Promise.resolve({ ok: false, checked: false, error: 'provider not found' })
           }
         })
         if (assignment?.model) {

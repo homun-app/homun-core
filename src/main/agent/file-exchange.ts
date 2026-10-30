@@ -144,16 +144,16 @@ export async function prepareFileExchange(
   if (tool === 'copy_to_box') {
     const boxRaw = String(input.box_path ?? '')
     if (!String(input.mac_path ?? '').trim() || !boxRaw.trim()) {
-      return { ok: false, error: 'Servono mac_path (il file sul Mac) e box_path (la destinazione nel box).' }
+      return { ok: false, error: 'mac_path (the file on the Mac) and box_path (the destination in the box) are required.' }
     }
     const macPath = resolveMacPath(String(input.mac_path), home, realpathSync.native)
     if (!macPathAllowed(macPath, { home: realHome, dataDir: realDataDir })) {
-      return { ok: false, error: `Percorso del Mac non permesso: "${macPath}" (niente cartelle sensibili né i dati di Homun).` }
+      return { ok: false, error: `Mac path not allowed: "${macPath}" (no sensitive folders nor Homun's data).` }
     }
     const s = await size(macPath)
-    if (s === null) return { ok: false, error: `File non trovato sul Mac: "${input.mac_path}".` }
+    if (s === null) return { ok: false, error: `File not found on the Mac: "${input.mac_path}".` }
     if (s > FILE_EXCHANGE_MAX_BYTES) {
-      return { ok: false, error: `File troppo grande (${s} byte, limite ${FILE_EXCHANGE_MAX_BYTES}): rifiutato.` }
+      return { ok: false, error: `File too large (${s} bytes, limit ${FILE_EXCHANGE_MAX_BYTES}): refused.` }
     }
     const root = sandboxMode() === 'docker' ? '/box' : boxRoot()
     const home1 = sandboxMode() === 'docker' ? `/box/home/${agentId}` : boxDir(agentId)
@@ -163,7 +163,7 @@ export async function prepareFileExchange(
   }
   // copy_from_box
   const boxRaw = String(input.box_path ?? '')
-  if (!boxRaw.trim()) return { ok: false, error: 'Serve box_path (il file nel box da portare sul Mac).' }
+  if (!boxRaw.trim()) return { ok: false, error: 'box_path is required (the file in the box to bring to the Mac).' }
   const root = sandboxMode() === 'docker' ? '/box' : boxRoot()
   const home1 = sandboxMode() === 'docker' ? `/box/home/${agentId}` : boxDir(agentId)
   const resolved = resolveBoxPath(boxRaw, root, home1, sandboxMode() === 'docker' ? (p) => p : realpathSync)
@@ -187,16 +187,16 @@ export async function prepareFileExchange(
       boxSize = s
     }
   } catch {
-    return { ok: false, error: `File non trovato nel box: "${boxRaw}".` }
+    return { ok: false, error: `File not found in the box: "${boxRaw}".` }
   }
   if (boxSize > FILE_EXCHANGE_MAX_BYTES) {
-    return { ok: false, error: `File troppo grande (${boxSize} byte, limite ${FILE_EXCHANGE_MAX_BYTES}): rifiutato.` }
+    return { ok: false, error: `File too large (${boxSize} bytes, limit ${FILE_EXCHANGE_MAX_BYTES}): refused.` }
   }
   const macTarget = input.mac_path !== undefined && String(input.mac_path).trim()
     ? resolveMacPath(String(input.mac_path), home, realpathSync.native)
     : resolveMacPath(join(home, MAC_DEFAULT_DIR, basename(resolved.abs!)), home, realpathSync.native)
   if (!macPathAllowed(macTarget, { home: realHome, dataDir: realDataDir })) {
-    return { ok: false, error: `Percorso del Mac non permesso: "${macTarget}" (niente cartelle sensibili né i dati di Homun).` }
+    return { ok: false, error: `Mac path not allowed: "${macTarget}" (no sensitive folders nor Homun's data).` }
   }
   return { ok: true, plan: { direction: 'from_box', macPath: macTarget, boxPath: resolved.abs!, size: boxSize } }
 }
@@ -212,14 +212,14 @@ export async function runFileExchange(
   if (plan.direction === 'to_box') {
     // nel box si può sovrascrivere (i confini li ha già validati il piano)
     await copyMacIntoBox(agentId, plan.macPath, plan.boxPath)
-    return { output: `Copiato nel box: ${plan.boxPath} (${plan.size} byte, dal Mac ${plan.macPath}).` }
+    return { output: `Copied into the box: ${plan.boxPath} (${plan.size} bytes, from the Mac ${plan.macPath}).` }
   }
   // from_box: sul Mac MAI sopra un file esistente — nome alternativo
   const exists = deps.existsSync ?? existsSync
   const target = nonConflictingName(plan.macPath, exists)
   await copyBoxOntoMac(agentId, plan.boxPath, target)
-  const note = target !== plan.macPath ? ` (esisteva già: scritto come "${basename(target)}")` : ''
-  return { output: `Copiato sul Mac: ${target} (${plan.size} byte, dal box ${plan.boxPath})${note}.`, finalMacPath: target }
+  const note = target !== plan.macPath ? ` (already existed: written as "${basename(target)}")` : ''
+  return { output: `Copied to the Mac: ${target} (${plan.size} bytes, from the box ${plan.boxPath})${note}.`, finalMacPath: target }
 }
 
 // ---- iniezione per i test del loop (nessuna home reale) ----

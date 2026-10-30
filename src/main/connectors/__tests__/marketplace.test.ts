@@ -151,14 +151,14 @@ describe('inspectPlugin (puro sul filesystem)', () => {
     const fuori = join(FIX, 'mcpfuori')
     mkdirSync(join(fuori, '.claude-plugin'), { recursive: true })
     writeFileSync(join(fuori, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'p', mcpServers: '../altrove.json' }))
-    expect(inspectPlugin(fuori).errors.some((e) => e.includes('fuori dalla cartella'))).toBe(true)
+    expect(inspectPlugin(fuori).errors.some((e) => e.includes('outside the folder'))).toBe(true)
   })
 
   it('path di skill del manifest che esce con .. è un errore', () => {
     const dir = join(FIX, 'skillfuori')
     mkdirSync(join(dir, '.claude-plugin'), { recursive: true })
     writeFileSync(join(dir, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'p', skills: ['../full/skills/review'] }))
-    expect(inspectPlugin(dir).errors.some((e) => e.includes('fuori dalla cartella'))).toBe(true)
+    expect(inspectPlugin(dir).errors.some((e) => e.includes('outside the folder'))).toBe(true)
   })
 
   it('lspServers nel manifest è fra le ignorate', () => {
@@ -228,12 +228,12 @@ describe('M1: .mcp.json piatto — i file veri di linear, github, terraform, con
     expect(empty.errors).toEqual([])
     const bad = inspectPlugin(pluginWith('{"foo": 1}'))
     expect(bad.mcpServers).toEqual([])
-    expect(bad.errors).toEqual(['.mcp.json senza server riconoscibili'])
+    expect(bad.errors).toEqual(['.mcp.json without recognizable servers'])
   })
 
   it('un valore senza url/command/type rompe la forma piatta: errore, non silenzio', () => {
     const out = inspectPlugin(pluginWith('{ "x": { "type": "http" }, "rotto": {} }'))
-    expect(out.errors).toContain('.mcp.json senza server riconoscibili')
+    expect(out.errors).toContain('.mcp.json without recognizable servers')
     expect(out.mcpServers).toEqual([])
   })
 })
@@ -388,7 +388,7 @@ describe('stagePlugin con git locale (allowFileUrlsForTests)', () => {
   it('url NON https rifiutata senza il flag di test (la regola vera non si tocca)', async () => {
     const r = await stagePlugin({ kind: 'url', url: `file://${REPO}` }, null)
     expect(r.ok).toBe(false)
-    expect(r.ok === false && r.error).toContain('non https')
+    expect(r.ok === false && r.error).toContain('not https')
   })
 
   it('clone con file:// (flag di test): staging, sha registrato, contenuto integro', async () => {
@@ -427,13 +427,13 @@ describe('stagePlugin con git locale (allowFileUrlsForTests)', () => {
   it('L3: path assoluto o con .. rifiutato; cartella assente → "cartella del plugin assente nel repository"', async () => {
     const abs = await stagePlugin({ kind: 'git-subdir', url: `file://${REPO}`, path: '/etc' }, null, { allowFileUrlsForTests: true, run: gitRun, mkdtemp: mkdIn(STG) })
     expect(abs.ok).toBe(false)
-    expect(abs.ok === false && abs.error).toContain('path relativo interno')
+    expect(abs.ok === false && abs.error).toContain('internal relative path')
     const dots = await stagePlugin({ kind: 'git-subdir', url: `file://${REPO}`, path: '../fuori' }, null, { allowFileUrlsForTests: true, run: gitRun, mkdtemp: mkdIn(STG) })
     expect(dots.ok).toBe(false)
-    expect(dots.ok === false && dots.error).toContain('path relativo interno')
+    expect(dots.ok === false && dots.error).toContain('internal relative path')
     const missing = await stagePlugin({ kind: 'git-subdir', url: `file://${REPO}`, path: 'plugins/inesistente' }, null, { allowFileUrlsForTests: true, run: gitRun, mkdtemp: mkdIn(STG) })
     expect(missing.ok).toBe(false)
-    expect(missing.ok === false && missing.error).toBe('cartella del plugin assente nel repository: plugins/inesistente')
+    expect(missing.ok === false && missing.error).toBe('plugin folder missing in the repository: plugins/inesistente')
   })
 
   it('L7: clone fallito → lo staging si cancella (nessuna cartella lasciata)', async () => {
@@ -449,7 +449,7 @@ describe('stagePlugin con git locale (allowFileUrlsForTests)', () => {
         return stagingPath
       }
     })
-    expect(r).toEqual({ ok: false, error: expect.stringContaining('clone non riuscito') })
+    expect(r).toEqual({ ok: false, error: expect.stringContaining('clone failed') })
     expect(existsSync(stagingPath)).toBe(false)
   })
 
@@ -467,7 +467,7 @@ describe('stagePlugin con git locale (allowFileUrlsForTests)', () => {
       }
     })
     expect(r.ok).toBe(false)
-    expect(r.ok === false && r.error).toContain('checkout dello sha')
+    expect(r.ok === false && r.error).toContain('checkout of sha')
     expect(existsSync(stagingPath)).toBe(false)
   })
 
@@ -481,7 +481,7 @@ describe('stagePlugin con git locale (allowFileUrlsForTests)', () => {
       }
     })
     expect(r.ok).toBe(false)
-    expect(r.ok === false && r.error).toContain('sha non valido')
+    expect(r.ok === false && r.error).toContain('invalid sha')
     expect(existsSync(stagingPath)).toBe(false)
   })
 
@@ -503,7 +503,7 @@ describe('stagePlugin con git locale (allowFileUrlsForTests)', () => {
       }
     })
     expect(r.ok).toBe(false)
-    expect(r.ok === false && r.error).toContain('troppi file')
+    expect(r.ok === false && r.error).toContain('too many files')
   })
 
   it('sorgente relativa: copia dalla cartella del marketplace e registra lo sha del marketplace', async () => {

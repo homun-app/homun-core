@@ -16,7 +16,7 @@ const h = vi.hoisted(() => ({
 }))
 vi.mock('../../main/mcp', () => ({
   toolsOfServer: async (id: string) => {
-    if (h.unreachable.includes(id)) throw new Error('server non trovato')
+    if (h.unreachable.includes(id)) throw new Error('server not found')
     return h.tools
   },
   listServers: () => [],

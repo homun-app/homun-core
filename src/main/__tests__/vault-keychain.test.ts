@@ -114,7 +114,7 @@ describe('chiave master nel Keychain (senza UI)', () => {
 
   it('Keychain non disponibile e nessuna chiave legacy → vault bloccato, nessun segreto scritto', async () => {
     vault.setVaultKeychainRunner(fakeKeychain({ failWrites: true }).run)
-    await expect(vault.storeSecret('API_KEY', 'v')).rejects.toThrow('Vault bloccato')
+    await expect(vault.storeSecret('API_KEY', 'v')).rejects.toThrow('Vault locked')
     expect(getSetting('vault.masterKeySafe', null)).toBeNull()
     expect(getSetting<Array<unknown>>('vault.secrets', [])).toEqual([])
   })
@@ -151,7 +151,7 @@ describe('migrazione dalla chiave safeStorage (fasi 1–5)', () => {
     vault.setSafeStorage(null) // finestra chiusa
     expect(await vault.migrateVaultKeyToKeychain()).toBe(false)
     expect(getSetting('vault.masterKeySafe', null)).not.toBeNull()
-    await expect(vault.storeSecret('X', 'v')).rejects.toThrow('Vault bloccato')
+    await expect(vault.storeSecret('X', 'v')).rejects.toThrow('Vault locked')
   })
 
   it('al primo uso con UI la migrazione avviene anche passando da storeSecret', async () => {

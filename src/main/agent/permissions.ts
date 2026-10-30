@@ -170,12 +170,12 @@ export async function check(
     const annotated = mcpAnnotationMode(info?.annotations, info?.catalogServer ?? false)
     if (annotated === 'always_allow') return { kind: 'allow', via: 'rule' }
     if (annotated === 'needs_approval') {
-      return { kind: 'ask', reason: `${tool} agisce verso l'esterno (annotazione del server MCP)` }
+      return { kind: 'ask', reason: `${tool} acts towards the outside (MCP server annotation)` }
     }
     // annotazioni assenti: regola di default (mcp__* → needs_approval) o default globale
     const mode = matchRule(tool, '*', cfg.rules) ?? cfg.default
     if (mode === 'always_allow') return { kind: 'allow', via: 'rule' }
-    return { kind: 'ask', reason: `${tool} richiede approvazione` }
+    return { kind: 'ask', reason: `${tool} requires approval` }
   }
 
   const target = targetKey(tool, input)
@@ -193,7 +193,7 @@ export async function check(
     agentId &&
     !resolveBoxPath(String(input.path ?? ''), boxRoot(), boxDir(agentId), realpathSync).ok
   ) {
-    return { kind: 'ask', reason: 'legge fuori dal box condiviso' }
+    return { kind: 'ask', reason: 'reads outside the shared box' }
   }
 
   // standing grant: match ESATTO tool+target ("Consenti sempre" su quel target)

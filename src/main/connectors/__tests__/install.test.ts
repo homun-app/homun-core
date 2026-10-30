@@ -17,7 +17,7 @@ import {
   addGateway, installedPlugins, pluginBoxDir, serverInstalledMessage, parseMcpServerId,
   serverIdFor, serverSlotError, resolvePluginServerPlaceholders, unresolvedUserConfigKeys,
   reconnectServer, discardPluginProposal, PENDING_PLUGIN_TTL_MS, SECRET_KIND,
-  GATEWAY_PRESETS, GATEWAY_WARNING, PROPOSAL_RESULT, THIRD_PARTY_SERVER_WARNING, HOST_MODE_DISABLED,
+  GATEWAY_PRESETS, GATEWAY_WARNING, PROPOSAL_RESULT, THIRD_PARTY_SERVER_WARNING, HOST_MODE_DISABLED, HOST_MODE_DISABLED_CARD,
   type InstallDeps, type InstalledPlugin
 } from '../install'
 import type { McpServerConfig } from '../../mcp'
@@ -82,7 +82,7 @@ describe('parseMcpServerId e i testi fissi delle card', () => {
   it('i testi della specifica: proposta, avviso terzi, host, gateway', () => {
     expect(PROPOSAL_RESULT).toContain('proposal shown to the user')
     expect(THIRD_PARTY_SERVER_WARNING).toContain('Server pubblicato da terzi')
-    expect(HOST_MODE_DISABLED).toBe('si installa solo nel computer dei bot (modalità docker)')
+    expect(HOST_MODE_DISABLED).toBe('it installs only in the bots\' computer (docker mode)')
     expect(GATEWAY_WARNING).toBe('Un gateway custodisce l\'accesso a tutte le app che colleghi lì: è un servizio di terzi')
   })
 })
@@ -133,7 +133,7 @@ describe('buildMcpServerCard (pura a deps iniettati)', () => {
     const r = await buildMcpServerCard('registry:com.foreverworks/notion', '', makeDeps({ dockerMode: () => false }))
     expect(r.ok).toBe(true)
     if (!r.ok) return
-    expect(r.card.disabledReason).toBe(HOST_MODE_DISABLED)
+    expect(r.card.disabledReason).toBe(HOST_MODE_DISABLED_CARD)
   })
 
   it('pypi/oci: NESSUNA card, il tool risponde "non installabile qui: tipo <registryType>"', async () => {
@@ -141,7 +141,7 @@ describe('buildMcpServerCard (pura a deps iniettati)', () => {
       findRegistryEntry: async () => ({ server: { name: 'x/y', packages: [{ registryType: 'pypi', identifier: 'y', transport: { type: 'stdio' } }] } })
     })
     const r = await buildMcpServerCard('registry:x/y', '', deps)
-    expect(r).toEqual({ ok: false, error: 'non installabile qui: tipo pypi' })
+    expect(r).toEqual({ ok: false, error: 'not installable here: type pypi' })
   })
 
   it('url:https://… proposto dall\'utente in chat: card non verificata, remoto OAuth', async () => {
@@ -176,7 +176,7 @@ describe('installMcpServer (regole 1-3)', () => {
     const r = await installMcpServer(card.card, 'agent_alice', deps)
     expect(r.ok).toBe(true)
     if (!r.ok) return
-    expect(r.message).toBe('Server com.notion/mcp aggiunto: 3 strumenti (lettura: 2, scrittura: 1)')
+    expect(r.message).toBe('Server com.notion/mcp added: 3 tools (read: 2, write: 1)')
     // il server è registrato col source registry e abilitato SOLO per chi l'ha proposto
     const cfg = deps.listServers()[0]!
     expect(cfg.id).toBe(serverIdFor({ kind: 'registry', name: 'com.notion/mcp' }))
@@ -201,7 +201,7 @@ describe('installMcpServer (regole 1-3)', () => {
     if (!card.ok) throw new Error('card')
     const r = await installMcpServer(card.card, 'agent_alice', deps)
     expect(r.ok).toBe(true)
-    if (r.ok) expect(r.message).toContain('serve la chiave')
+    if (r.ok) expect(r.message).toContain('the key is needed')
     expect(deps.listServers()[0]!.needsAuth).toEqual({ kind: 'key', keys: ['Authorization'] })
   })
 
@@ -233,7 +233,7 @@ describe('installMcpServer (regole 1-3)', () => {
     const card = await buildMcpServerCard('registry:com.foreverworks/notion', '', deps)
     if (!card.ok) throw new Error('card')
     const r = await installMcpServer(card.card, 'agent_alice', deps)
-    expect(r).toEqual({ ok: true, message: 'Server com.foreverworks/notion aggiunto: 1 strumenti (lettura: 1, scrittura: 0)' })
+    expect(r).toEqual({ ok: true, message: 'Server com.foreverworks/notion added: 1 tools (read: 1, write: 0)' })
     expect(deps.listServers()[0]!.needsAuth).toBeUndefined()
   })
 
@@ -246,7 +246,7 @@ describe('installMcpServer (regole 1-3)', () => {
   })
 
   it('serverInstalledMessage conta lettura/scrittura dalle annotazioni', () => {
-    expect(serverInstalledMessage('x', [{ annotations: { readOnlyHint: true } }, {}, {}])).toBe('Server x aggiunto: 3 strumenti (lettura: 1, scrittura: 2)')
+    expect(serverInstalledMessage('x', [{ annotations: { readOnlyHint: true } }, {}, {}])).toBe('Server x added: 3 tools (read: 1, write: 2)')
   })
 })
 
@@ -321,7 +321,7 @@ describe('plugin: card, installazione, disinstallazione', () => {
   it('sorgente npm/archive/command: NESSUNA card, "sorgente <tipo> non supportata"', async () => {
     const d = { ...deps, marketplaces: { ...deps.marketplaces, findPlugin: async () => ({ reg: { name: 'm', source: 'x', kind: 'git' as const, official: false, addedAt: 1 }, plugin: { name: 'p', source: { kind: 'command' as const, command: 'evil' } } }) } }
     const r = await buildPluginCard('plugin:p@m', '', d)
-    expect(r).toEqual({ ok: false, error: 'sorgente command non supportata' })
+    expect(r).toEqual({ ok: false, error: 'source command not supported' })
   })
 
   it('la card elenca skill, server, impostazioni, lo sha12 e l\'hook fra i NON importati', async () => {
@@ -343,7 +343,7 @@ describe('plugin: card, installazione, disinstallazione', () => {
     const r = await installPlugin(card.card, 'agent_alice', deps, (k, v) => settings.set(k, v), (k, f) => (settings.get(k) as never) ?? f, cloneDeps(STG))
     expect(r.ok).toBe(true)
     if (!r.ok) return
-    expect(r.message).toContain('Plugin demo-plugin installato: 1 skill, 1 server')
+    expect(r.message).toContain('Plugin demo-plugin installed: 1 skill, 1 server')
     const dir = join(DATA, 'plugins', 'mp-di-test', 'demo-plugin', sha.slice(0, 12))
     expect(existsSync(join(dir, 'skills', 'helper', 'SKILL.md'))).toBe(true)
     // il server MCP del plugin: id con hash (L2), template CONSERVATI (L1),
@@ -388,7 +388,7 @@ describe('plugin: card, installazione, disinstallazione', () => {
     const r = await installPlugin({ ...card.card, sha12: '000000000000' }, 'agent_alice', deps, (k, v) => settings.set(k, v), (k, f) => (settings.get(k) as never) ?? f, cloneDeps(STG))
     expect(r).toEqual({
       ok: false,
-      error: 'il plugin è cambiato dopo la proposta (era 000000000000, ora ' + card.card.sha12 + '): chiedi una nuova proposta'
+      error: 'the plugin changed after the proposal (was 000000000000, now ' + card.card.sha12 + '): ask for a new proposal'
     })
     expect(deps.listServers().length).toBe(0)
     expect(installedPlugins({ getSetting: (k, f) => (settings.get(k) as never) ?? f })).toEqual([])
@@ -400,7 +400,7 @@ describe('plugin: card, installazione, disinstallazione', () => {
     const staleCard = { type: 'plugin', id: 'plugin:demo-plugin@mp-di-test', name: 'demo-plugin', marketplace: 'mp-di-test', trust: 'marketplace aggiunto da te', sha12: '999999999999', skills: [], servers: [], settings: [], ignored: [] } as unknown as Extract<SendMessagePayload, { type: 'plugin' }>
     const r = await installPlugin(staleCard, 'agent_alice', deps, (k, v) => settings.set(k, v), (k, f) => (settings.get(k) as never) ?? f, cloneDeps(STG))
     expect(r.ok).toBe(false)
-    if (!r.ok) expect(r.error).toContain('il plugin è cambiato dopo la proposta')
+    if (!r.ok) expect(r.error).toContain('the plugin changed after the proposal')
     expect(deps.listServers().length).toBe(0)
     expect(installedPlugins({ getSetting: (k, f) => (settings.get(k) as never) ?? f })).toEqual([])
   })
@@ -509,7 +509,7 @@ describe('L2: serverIdFor e le collisioni', () => {
   it('mai sostituire in silenzio: stesso id da fonte DIVERSA è un errore (cintura di sicurezza)', () => {
     const registryCfg = { id: 'x', name: 'x', transport: 'http' as const, url: 'u', enabled: true, source: { kind: 'registry' as const, name: 'n' } }
     const gatewayCfg = { id: 'x', name: 'x', transport: 'http' as const, url: 'u', enabled: true, source: { kind: 'gateway' as const } }
-    expect(serverSlotError([registryCfg], gatewayCfg)).toContain('esiste già un server con questo id')
+    expect(serverSlotError([registryCfg], gatewayCfg)).toContain('a server with this id already exists')
     // stessa fonte: è un aggiornamento, nessun errore
     expect(serverSlotError([registryCfg], { ...registryCfg, url: 'nuova' })).toBeNull()
     expect(serverSlotError([], registryCfg)).toBeNull()
@@ -525,7 +525,7 @@ describe('L2: serverIdFor e le collisioni', () => {
     if (!card.ok) throw new Error('card')
     const r = await installMcpServer(card.card, 'agent_alice', deps)
     expect(r.ok).toBe(false)
-    if (!r.ok) expect(r.error).toContain('esiste già un server con questo id')
+    if (!r.ok) expect(r.error).toContain('a server with this id already exists')
     // il gateway è INTATTO
     expect(deps.listServers()).toHaveLength(1)
     expect(deps.listServers()[0]!.source?.kind).toBe('gateway')
@@ -650,7 +650,7 @@ describe('L5: copia del plugin nel box — sequenza, esiti, ripristino', () => {
     if (!card.ok) throw new Error('card')
     const r = await installPlugin(card.card, 'agent_alice', deps, set, get, cloneDeps())
     expect(r.ok).toBe(false)
-    if (!r.ok) expect(r.error).toContain('copia del plugin nel volume dei plugin non riuscita')
+    if (!r.ok) expect(r.error).toContain('copy of the plugin into the plugins volume failed')
     // l'usa-e-getta è stato rimosso comunque (il finally scatta anche sull'errore)
     const helper = calls.find((a) => a[0] === 'create')![2]!
     expect(calls.some((a) => a[0] === 'rm' && a.includes(helper))).toBe(true)
@@ -684,7 +684,7 @@ describe('L5: copia del plugin nel box — sequenza, esiti, ripristino', () => {
       expect(r.ok).toBe(true)
       if (r.ok) {
         expect(r.message).toContain('1 skill')
-        expect(r.message).toContain('copia nel box non riuscita')
+        expect(r.message).toContain('copy into the box failed')
       }
       expect(installedPlugins({ getSetting: get })).toHaveLength(1)
       expect(deps.listServers()).toEqual([])
@@ -765,7 +765,7 @@ describe('M1/M2/M3: linear, github, terraform — i .mcp.json veri del marketpla
       const r = await installPlugin(card.card, 'agent_alice', deps, set, get, cloneDeps())
       expect(r.ok).toBe(true)
       if (!r.ok) return
-      expect(r.message).toContain('da autorizzare: linear (Impostazioni → Installati → Connetti)')
+      expect(r.message).toContain('to authorize: linear (Settings → Installed → Connect)')
       const cfg = deps.listServers()[0]!
       expect(cfg.transport).toBe('http')
       expect(cfg.url).toBe('https://mcp.linear.app/mcp')
@@ -792,7 +792,7 @@ describe('M1/M2/M3: linear, github, terraform — i .mcp.json veri del marketpla
       const r = await installPlugin(card.card, 'agent_alice', deps, set, get, cloneDeps())
       expect(r.ok).toBe(true)
       if (!r.ok) return
-      expect(r.message).toContain('da configurare: GITHUB_PERSONAL_ACCESS_TOKEN')
+      expect(r.message).toContain('to configure: GITHUB_PERSONAL_ACCESS_TOKEN')
       const cfg = deps.listServers()[0]!
       expect(cfg.auth).toEqual({ kind: 'headers' })
       expect(cfg.pluginSpec).toEqual({
@@ -820,7 +820,7 @@ describe('M1/M2/M3: linear, github, terraform — i .mcp.json veri del marketpla
       const r = await installPlugin(card.card, 'agent_alice', deps, set, get, cloneDeps())
       expect(r.ok).toBe(true)
       if (!r.ok) return
-      expect(r.message).toContain('server non installati (valore in argv): terraform (TFE_TOKEN)')
+      expect(r.message).toContain('servers not installed (value in argv): terraform (TFE_TOKEN)')
       expect(deps.listServers()).toEqual([])
       // il plugin resta installato (le sue skill, il suo record) senza il server
       expect(installedPlugins({ getSetting: get })[0]!.servers).toEqual([])
@@ -896,7 +896,7 @@ describe('L1: SECRET_KIND, sostituzioni e unresolved', () => {
     const r = await reconnectServer(cfg.id, deps, get, set)
     expect(authorizedUrls).toEqual([cfg.url])
     expect(r.ok).toBe(true)
-    if (r.ok) expect(r.message).toContain('Server com.linear/linear aggiunto: 1 strumenti')
+    if (r.ok) expect(r.message).toContain('Server com.linear/linear added: 1 tools')
     // lo stato torna connected (la card "Riconnetti" sparirà)
     expect((settings.get('connectors.state') as Record<string, { status: string }>)[cfg.id]!.status).toBe('connected')
     // i rifiuti: server del catalogo, senza OAuth, inesistente

@@ -84,13 +84,13 @@ export async function runFillCredential(
     (w) => w.ref !== undefined && w.ref !== null && String(w.ref).trim() !== ''
   )
   if (!wanted.length) {
-    return { output: 'servono almeno un ref fra username_ref, password_ref e totp_ref (i ref dello snapshot della pagina aperta)', denied: true }
+    return { output: 'at least one ref among username_ref, password_ref and totp_ref is required (the field refs from the snapshot of the open page)', denied: true }
   }
   for (const w of wanted) {
     const rc = checkFillRef(w.ref, w.kind)
     if (!rc.ok) return { output: rc.error, denied: true }
     if (!deps.refInfo(rc.ref)) {
-      return { output: `ref "${rc.ref}" non presente nell'ultimo snapshot ricevuto: ricarica la pagina con browser_snapshot prima di compilare`, denied: true }
+      return { output: `ref "${rc.ref}" not present in the last snapshot received: reload the page with browser_snapshot before filling`, denied: true }
     }
   }
   for (const w of wanted) {

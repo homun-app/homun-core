@@ -2,7 +2,7 @@
 // I casi seguono le regole della fase: 2 colpi e il doppio dell'altra, con
 // l'eccezione del colpo singolo IT più accento; tutto il resto è null.
 import { describe, it, expect } from 'vitest'
-import { detectLanguage, languageName } from '../language'
+import { detectLanguage, languageName, IT_WORDS, EN_WORDS } from '../language'
 
 describe('detectLanguage', () => {
   it('riconosce una frase italiana normale', () => {
@@ -72,6 +72,45 @@ describe('detectLanguage', () => {
   it('le hit a pari merito non decidono', () => {
     // «che when» dà 1+1: nessuna delle due ha il doppio dell'altra
     expect(detectLanguage('che when')).toBeNull()
+  })
+})
+
+// Fase 17b correzioni (B1): l'articolo «i» e «me»/«do» italiani non devono più
+// contare come inglese; le frasi italiane comuni restano italiane e le frasi
+// ambigue restano null, mai «en» per sbaglio.
+describe('fase 17b correzioni (B1): articolo «i» e falsi inglesi', () => {
+  it("l'articolo «i» non sposta la lingua", () => {
+    expect(detectLanguage('Dammi i file di ieri e i risultati')).toBe('it')
+    expect(detectLanguage('Controlla i log e dimmi se ci sono errori')).toBe('it')
+  })
+
+  it('«ti do una mano» non conta «do» come inglese', () => {
+    expect(detectLanguage('Ti do una mano con la presentazione')).toBe('it')
+  })
+
+  it('frasi italiane senza accenti', () => {
+    expect(detectLanguage('Il deploy è fallito, controlla la pipeline')).toBe('it')
+    expect(detectLanguage('Fai il backup')).toBe('it')
+    expect(detectLanguage('Sì, fallo pure')).toBe('it')
+  })
+
+  it('frasi ambigue restano null, mai «en»', () => {
+    expect(detectLanguage('Cerca i voli per Roma')).toBeNull()
+    expect(detectLanguage('Leggi i documenti e riassumi')).toBeNull()
+    expect(detectLanguage('Per me va bene')).toBeNull()
+  })
+
+  it("l'inglese si riconosce anche senza «i»/«me»/«do»", () => {
+    expect(detectLanguage('Can you come with me?')).toBe('en')
+    expect(detectLanguage('Come here and tell me what you need')).toBe('en')
+    expect(detectLanguage('Can you check the logs from yesterday?')).toBe('en')
+    expect(detectLanguage('I need the report by Friday')).toBe('en')
+    expect(detectLanguage('Please send me the file')).toBe('en')
+  })
+
+  it('nessuna parola in comune fra IT_WORDS ed EN_WORDS', () => {
+    const common = [...IT_WORDS].filter((w) => EN_WORDS.has(w))
+    expect(common).toEqual([])
   })
 })
 

@@ -90,6 +90,15 @@ export const MAX_STEPS = 24
 export const RECOVERY_NUDGE =
   "You called neither send_to_user nor ask_user: the user has seen no answer. Answer NOW by calling send_to_user (that only, no other tool)."
 
+/**
+ * Fase 17b correzioni (B4): i result fissi di ask_user e wake_parent, esportati
+ * perché l'eval li RIUSA — la storia dell'eval deve contenere i testi che il
+ * codice produce, non copie a mano.
+ */
+export const ASK_USER_RESULT =
+  'widget shown to the user: the turn ends and the answer will arrive as a new user message. Do not repeat the question.'
+export const WAKE_PARENT_RESULT = 'Delivered to the parent. You are done: do nothing else.'
+
 type Emitter = (e: SandbotEvent) => void
 
 interface Running {
@@ -1168,7 +1177,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         if (opts.subagent) {
           const denyReason = subagentToolDenyReason(call.name)
           if (denyReason) {
-            const refused = `non disponibile ai sottoagenti: ${denyReason}`
+            const refused = `not available to subagents: ${denyReason}`
             const res = add({ agentId, kind: 'tool-result', role: 'system', content: refused, meta: { callId: call.id } })
             emit({ type: 'entries', agentId, entries: [res] })
             messages.push({ role: 'tool', toolCallId: call.id, content: refused })
@@ -1269,12 +1278,12 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           messages.push({
             role: 'tool', toolCallId: call.id,
             content: prepared.viaRejected
-              ? `bozza creata di solo testo: "via" scartato perché ${prepared.viaRejected} non è un tool di invio esterno configurato (nessun canale di invio collegato).`
+              ? `text-only draft created: "via" discarded because ${prepared.viaRejected} is not a configured external-send tool (no send channel connected).`
               : autoSend?.ok
-                ? `bozza INVIATA automaticamente per la regola di auto-review "${autoSend.ruleMatched}" dell'utente: esito riportato in chat.`
+                ? `draft SENT automatically under the user's auto-review rule "${autoSend.ruleMatched}": outcome reported in chat.`
                 : autoSend && !autoSend.ok
-                  ? `invio automatico della bozza non riuscito (${autoSend.error}): la bozza resta in attesa del click dell'utente.`
-                  : 'bozza creata e mostrata all’utente: l’invio avverrà solo se l’utente clicca Invia'
+                  ? `automatic send of the draft failed (${autoSend.error}): the draft waits for the user's click.`
+                  : 'draft created and shown to the user: it will be sent only if the user clicks Send'
           })
           continue
         }
@@ -1293,7 +1302,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           taskNeedsInput()
           messages.push({
             role: 'tool', toolCallId: call.id,
-            content: 'widget mostrato all’utente: il turno termina e la risposta arriverà come nuovo messaggio utente. Non ripetere la domanda.'
+            content: ASK_USER_RESULT
           })
           awaitingUser = true
           break // il turno TERMINA: le chiamate successive della stessa risposta non vengono eseguite
@@ -1317,7 +1326,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             output = r.output
             meta = r.meta
           } catch (e) {
-            output = `Errore: ${e instanceof Error ? e.message : String(e)}`
+            output = `Error: ${e instanceof Error ? e.message : String(e)}`
             meta = { error: true }
           }
           if (meta.webContent) {
@@ -1541,7 +1550,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           if (updatedApproval) emit({ type: 'entries', agentId, entries: [updatedApproval] })
           taskWorking()
           if (decision !== 'allow') {
-            const msg = decision === 'deny' ? 'Copia negata dall\'utente.' : 'Approvazione scaduta o interrotta: copia non eseguita.'
+            const msg = decision === 'deny' ? 'Copy denied by the user.' : 'Approval expired or interrupted: copy not executed.'
             messages.push({ role: 'tool', toolCallId: call.id, content: msg })
             const r = add({ agentId, kind: 'tool-result', role: 'system', content: msg, meta: { callId: call.id } })
             emit({ type: 'entries', agentId, entries: [r] })
@@ -1553,7 +1562,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           try {
             out = (await getRunFileExchange()(agentId, pre.plan)).output
           } catch (e) {
-            out = `Errore nella copia: ${e instanceof Error ? e.message : String(e)}`
+            out = `Error in the copy: ${e instanceof Error ? e.message : String(e)}`
           }
           const r = add({ agentId, kind: 'tool-result', role: 'system', content: out, meta: { callId: call.id } })
           emit({ type: 'entries', agentId, entries: [r] })
@@ -1579,7 +1588,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             output = r.output
             thirdParty = r.meta.thirdParty === true
           } catch (e) {
-            output = `Errore: ${e instanceof Error ? e.message : String(e)}`
+            output = `Error: ${e instanceof Error ? e.message : String(e)}`
           }
           let content = output
           if (thirdParty) {
@@ -1697,7 +1706,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             tool: call.name, input, libraryExport: plan, keys: [`export ${plan.name}`]
           })
           if (decision !== 'allow') {
-            const msg = decision === 'deny' ? 'Esportazione annullata dall\'utente.' : 'Approvazione scaduta o interrotta: esportazione non eseguita.'
+            const msg = decision === 'deny' ? 'Export cancelled by the user.' : 'Approval expired or interrupted: export not executed.'
             messages.push({ role: 'tool', toolCallId: call.id, content: msg })
             const res = add({ agentId, kind: 'tool-result', role: 'system', content: msg, meta: { callId: call.id } })
             emit({ type: 'entries', agentId, entries: [res] })
@@ -1709,7 +1718,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             const fn = getPrintToPdf()
             out = (await runLibraryExport(plan, fn ? { printToPdf: fn } : {})).output
           } catch (e) {
-            out = `Errore nell'esportazione: ${e instanceof Error ? e.message : String(e)}`
+            out = `Error in the export: ${e instanceof Error ? e.message : String(e)}`
           }
           messages.push({ role: 'tool', toolCallId: call.id, content: out })
           const res = add({ agentId, kind: 'tool-result', role: 'system', content: out, meta: { callId: call.id } })
@@ -1946,7 +1955,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             finishedAt: Date.now()
           })
           if (closed) onSubagentTerminal(db(), opts.subagent.id, emit)
-          const okMsg = 'Delivered to the parent. You are done: do nothing else.'
+          const okMsg = WAKE_PARENT_RESULT
           const res = add({ agentId, kind: 'tool-result', role: 'system', content: okMsg, meta: { callId: call.id } })
           emit({ type: 'entries', agentId, entries: [res] })
           messages.push({ role: 'tool', toolCallId: call.id, content: okMsg })
@@ -2285,7 +2294,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         const ownGroup = call.name === 'update_group' ? getGroup(Number(input.groupId)) : null
         let verdict: import('./permissions').Verdict
         if (forcedOriginAsk) {
-          verdict = { kind: 'ask', reason: `${call.name}: il turno non è dell'utente — creare bot o gruppi richiede la sua approvazione` }
+          verdict = { kind: 'ask', reason: `${call.name}: the turn is not the user's — creating bots or groups requires their approval` }
         } else if (ownTarget && ownTarget.createdBy === agentId) {
           verdict = { kind: 'allow', via: 'rule' }
         } else if (ownGroup && ownGroup.created_by === agentId) {
@@ -2436,7 +2445,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         // esegue — niente esecuzione cieca di un nome indovinato: il result
         // dice di cercarlo con find_tools
         if (deferredMcp && call.name.startsWith('mcp__') && !activeMcpNames.has(call.name)) {
-          const refused = 'strumento non attivo: cercalo con find_tools({query}) e chiamalo dal passo dopo'
+          const refused = 'tool not active: find it with find_tools({query}) and call it from the next step'
           messages.push({ role: 'tool', toolCallId: call.id, content: refused })
           const res = add({ agentId, kind: 'tool-result', role: 'system', content: refused, meta: { callId: call.id, inactive: true } })
           emit({ type: 'entries', agentId, entries: [res] })

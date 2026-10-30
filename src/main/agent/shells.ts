@@ -49,7 +49,7 @@ export function lastLines(text: string, n: number): string {
 export function parseShellPgid(raw: string | null): { ok: true; pgid: number } | { ok: false; reason: string } {
   const t = raw?.trim() ?? ''
   if (!/^\d+$/.test(t) || Number(t) <= 0) {
-    return { ok: false, reason: `pid file ${t === '' ? 'vuoto' : `non numerico ("${t.slice(0, 50)}")`}: nessun kill` }
+    return { ok: false, reason: `pid file ${t === '' ? 'empty' : `not numeric ("${t.slice(0, 50)}")`}: no kill` }
   }
   return { ok: true, pgid: Number(t) }
 }
@@ -111,7 +111,7 @@ const defaultDeps = (): ShellHostDeps => ({
 /** L'output del log redatto coi segreti usati dal comando (come l'output di oggi). */
 async function redactedTail(deps: ShellHostDeps, agentId: string, logPath: string, lines: number, secretNames: string[]): Promise<string> {
   const raw = await deps.readBoxFile?.(agentId, logPath) ?? null
-  if (raw === null) return '(log non ancora scritto)'
+  if (raw === null) return '(log not written yet)'
   const tail = lastLines(raw, lines)
   if (!secretNames.length) return tail
   try {
@@ -453,7 +453,7 @@ async function launchErrorText(
     const redacted = redactSecrets(why, used)
     return redacted ? `${head} ${redacted}` : head
   } catch {
-    return `${head} Esito non mostrato: impossibile redarre i segreti del comando.`
+    return `${head} Outcome not shown: cannot redact the command's secrets.`
   }
 }
 

@@ -86,9 +86,9 @@ describe('parseRegistryResponse — fixture REALE (3 voci notion)', () => {
     expect(registryRuntime({ server: { name: 'x/y', packages: [{ registryType: 'oci' }] } }))
       .toEqual({ kind: 'not-installable', registryType: 'oci' })
   })
-  it('L8: pacchetto npm SENZA versione → not-installable "versione non dichiarata" (mai latest)', () => {
+  it('L8: pacchetto npm SENZA versione → not-installable "version not declared" (mai latest)', () => {
     expect(registryRuntime({ server: { name: 'x/y', packages: [{ registryType: 'npm', identifier: 'qualcosa', transport: { type: 'stdio' } }] } }))
-      .toEqual({ kind: 'not-installable', registryType: 'npm', reason: 'versione non dichiarata' })
+      .toEqual({ kind: 'not-installable', registryType: 'npm', reason: 'version not declared' })
   })
   it('l\'URL di ricerca v0.1: search + version=latest + limit', () => {
     expect(registrySearchUrl('notion', 3)).toBe(
@@ -187,15 +187,15 @@ describe('mergeConnectorResults (puro)', () => {
   it('le righe portano fonte, fiducia e come gira', () => {
     const { rows } = mergeConnectorResults(input(), 'notion')
     const catalog = rows.find((r) => r.id === 'catalog:notion')!
-    expect(catalog.trust).toBe('verificato')
-    expect(catalog.runtimeLabel).toBe('remoto (OAuth)')
+    expect(catalog.trust).toBe('verified')
+    expect(catalog.runtimeLabel).toBe('remote (OAuth)')
     const smithery = rows.find((r) => r.id === 'registry:ai.smithery/smithery-notion')!
-    expect(smithery.trust).toBe('dominio verificato (smithery.ai)')
-    expect(smithery.runtimeLabel).toBe('remoto (serve una chiave)')
+    expect(smithery.trust).toBe('verified domain (smithery.ai)')
+    expect(smithery.runtimeLabel).toBe('remote (needs a key)')
     const npm = rows.find((r) => r.id === 'registry:com.foreverworks/notion')!
-    expect(npm.runtimeLabel).toBe('nel box (npm)')
+    expect(npm.runtimeLabel).toBe('in the box (npm)')
     const plugin = rows.find((r) => r.id === 'plugin:notion@claude-plugins-official')!
-    expect(plugin.trust).toBe('marketplace ufficiale')
+    expect(plugin.trust).toBe('official marketplace')
   })
 
   it('tetto di 8 righe in totale', () => {
@@ -214,7 +214,7 @@ describe('mergeConnectorResults (puro)', () => {
   it('registry null → riga "registro pubblico non raggiungibile", le altre fonti rispondono', () => {
     const out = mergeConnectorResults({ ...input(), registry: null }, 'notion')
     expect(out.registryDown).toBe(true)
-    expect(formatSearchResults(out)).toContain('registro pubblico non raggiungibile')
+    expect(formatSearchResults(out)).toContain('public registry unreachable')
     expect(formatSearchResults(out)).toContain('catalog:notion')
   })
 
@@ -223,7 +223,7 @@ describe('mergeConnectorResults (puro)', () => {
       { ...input(), catalog: [{ entry: CATALOG.find((e) => e.id === 'notion')!, state: { status: 'connected', disabledTools: [], instructions: '' } }] },
       'notion'
     )
-    expect(rows.find((r) => r.id === 'catalog:notion')?.status).toBe('connesso')
+    expect(rows.find((r) => r.id === 'catalog:notion')?.status).toBe('connected')
   })
 })
 
@@ -232,18 +232,18 @@ describe('formatConnectorLine (puro)', () => {
     const { rows } = mergeConnectorResults(input(), 'smithery')
     const line = formatConnectorLine(rows.find((r) => r.id === 'registry:ai.smithery/smithery-notion')!)
     expect(line).toContain('registry:ai.smithery/smithery-notion')
-    expect(line).toContain('registro MCP')
-    expect(line).toContain('dominio verificato (smithery.ai)')
-    expect(line).toContain('remoto (serve una chiave)')
+    expect(line).toContain('MCP registry')
+    expect(line).toContain('verified domain (smithery.ai)')
+    expect(line).toContain('remote (needs a key)')
     // la descrizione della fixture resta COM'È (già corta), mai oltre 160
     const desc = line.slice(line.lastIndexOf(': ') + 2)
     expect(desc.length).toBeLessThanOrEqual(160)
   })
   it('la descrizione lunga viene troncata a 160 caratteri', () => {
     const row = {
-      id: 'registry:x/y', name: 'y', source: 'registry' as const, sourceLabel: 'registro MCP',
+      id: 'registry:x/y', name: 'y', source: 'registry' as const, sourceLabel: 'MCP registry',
       trust: 'non verificato', trustKind: 'unverified' as const, runtime: 'remote-oauth' as const,
-      runtimeLabel: 'remoto (OAuth)', description: 'a'.repeat(400)
+      runtimeLabel: 'remote (OAuth)', description: 'a'.repeat(400)
     }
     const line = formatConnectorLine(row)
     expect(line.slice(line.lastIndexOf(': ') + 2).length).toBe(160)

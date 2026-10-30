@@ -221,13 +221,13 @@ export function runCommandVerdict(
 ): RunCommandDecision {
   const keys = [...new Set(a.commands.map(commandKey))]
   if (a.parseError) {
-    return { kind: 'ask', reasons: ['comando non interpretabile in modo affidabile'], keys, secretRefs: a.secretRefs }
+    return { kind: 'ask', reasons: ['command cannot be parsed reliably'], keys, secretRefs: a.secretRefs }
   }
   if (a.hasSubstitution) {
-    return { kind: 'ask', reasons: ['contiene una sostituzione di comando ($(...) o backtick)'], keys, secretRefs: a.secretRefs }
+    return { kind: 'ask', reasons: ['contains a command substitution ($(...) or backtick)'], keys, secretRefs: a.secretRefs }
   }
   if (keys.length === 0) {
-    return { kind: 'ask', reasons: ['nessun comando riconosciuto'], keys: [], secretRefs: a.secretRefs }
+    return { kind: 'ask', reasons: ['no recognized command'], keys: [], secretRefs: a.secretRefs }
   }
   // blocked vince su tutto: mai chiedere quello che una regola vieta
   for (const key of keys) {
@@ -240,7 +240,7 @@ export function runCommandVerdict(
   if (a.secretRefs.length) {
     return {
       kind: 'ask',
-      reasons: [`usa le credenziali: ${a.secretRefs.join(', ')}`],
+      reasons: [`uses credentials: ${a.secretRefs.join(', ')}`],
       keys,
       secretRefs: a.secretRefs
     }
@@ -253,12 +253,12 @@ export function runCommandVerdict(
   for (const key of keys) {
     if (neverAuto.has(key)) {
       allCovered = false
-      reasons.push(`${key} esegue altri comandi`)
+      reasons.push(`${key} runs other commands`)
       continue
     }
     if (envPrefixKeys.has(key)) {
       allCovered = false
-      reasons.push(`${key} modifica l'ambiente del comando`)
+      reasons.push(`${key} changes the command's environment`)
       continue
     }
     if (grants.includes(key)) {
@@ -268,14 +268,14 @@ export function runCommandVerdict(
     const mode = bestRuleMode(key, rules, 'run-command') ?? fallback
     if (mode === 'needs_approval') {
       allCovered = false
-      reasons.push(`${key} richiede approvazione`)
+      reasons.push(`${key} requires approval`)
     }
   }
   // redirect di output verso file non innocui: vale per l'intera riga,
   // oltre alle chiavi dei singoli comandi
   if (a.redirectTargets.some((t) => !HARMLESS_REDIRECT_TARGETS.has(t))) {
     allCovered = false
-    reasons.unshift('scrive su file')
+    reasons.unshift('writes to a file')
   }
   if (allCovered) return { kind: 'allow', via: anyGrant ? 'grant' : 'rule', reasons: [], keys, secretRefs: [] }
   return { kind: 'ask', reasons, keys, secretRefs: [] }

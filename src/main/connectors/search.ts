@@ -34,17 +34,28 @@ export interface ConnectorSearchRow {
   description: string
 }
 
-/** Il Marketplace ufficiale: etichetta "marketplace ufficiale", gli altri "marketplace aggiunto da te". */
+/** Il Marketplace ufficiale: etichetta "official marketplace", gli altri "marketplace added by you". */
 export function marketplaceTrustLabel(official: boolean): string {
-  return official ? 'marketplace ufficiale' : 'marketplace aggiunto da te'
+  return official ? 'official marketplace' : 'marketplace added by you'
 }
 
 export const RUNTIME_LABELS: Record<ConnectorRuntimeKind, string> = {
-  'remote-oauth': 'remoto (OAuth)',
-  'remote-key': 'remoto (serve una chiave)',
-  'box-npm': 'nel box (npm)',
-  plugin: 'plugin (skill e server MCP)',
-  'not-installable': 'non installabile qui'
+  'remote-oauth': 'remote (OAuth)',
+  'remote-key': 'remote (needs a key)',
+  'box-npm': 'in the box (npm)',
+  plugin: 'plugin (skills and MCP servers)',
+  'not-installable': 'not installable here'
+}
+
+/**
+ * Fase 17b correzioni (B2): la fiducia di una voce del registro per il result
+ * del tool, in inglese. Il label italiano di registryTrust resta per la card
+ * (MU, se ne occupa la 17c).
+ */
+export function registryTrustEnLabel(t: ReturnType<typeof registryTrust>): string {
+  if (t.kind === 'verified-domain') return `verified domain (${t.domain})`
+  if (t.kind === 'github-account') return `GitHub account (${t.user})`
+  return 'unverified'
 }
 
 /** Massimo righe in totale (catalogo e plugin prima). */
@@ -106,12 +117,12 @@ export function mergeConnectorResults(input: MergeInput, query: string): MergeOu
       id: `catalog:${entry.id}`,
       name: entry.name,
       source: 'catalog',
-      sourceLabel: 'catalogo',
-      trust: 'verificato',
+      sourceLabel: 'catalog',
+      trust: 'verified',
       trustKind: 'verified',
       runtime: 'remote-oauth',
       runtimeLabel: RUNTIME_LABELS['remote-oauth'],
-      ...(status && status !== 'not_connected' ? { status: status === 'connected' ? 'connesso' : status === 'needs_auth' ? 'da autorizzare' : 'errore' } : {}),
+      ...(status && status !== 'not_connected' ? { status: status === 'connected' ? 'connected' : status === 'needs_auth' ? 'needs authorization' : 'error' } : {}),
       description: truncateDescription(entry.notes)
     })
   }
@@ -130,7 +141,7 @@ export function mergeConnectorResults(input: MergeInput, query: string): MergeOu
       trustKind: 'marketplace',
       runtime: 'plugin',
       runtimeLabel: RUNTIME_LABELS.plugin,
-      description: truncateDescription(plugin.description ?? `plugin ${plugin.name} del marketplace ${marketplace}`)
+      description: truncateDescription(plugin.description ?? `plugin ${plugin.name} from the ${marketplace} marketplace`)
     })
   }
   // 3. registro pubblico: fiducia dallo spazio dei nomi
@@ -142,8 +153,8 @@ export function mergeConnectorResults(input: MergeInput, query: string): MergeOu
         id: `registry:${e.server.name}`,
         name: e.server.name.split('/').pop() ?? e.server.name,
         source: 'registry',
-        sourceLabel: 'registro MCP',
-        trust: trust.label,
+        sourceLabel: 'MCP registry',
+        trust: registryTrustEnLabel(trust),
         trustKind: trust.kind === 'verified-domain' ? 'verified-domain' : trust.kind === 'github-account' ? 'github-account' : 'unverified',
         runtime: rt === null
           ? 'not-installable'
@@ -180,17 +191,17 @@ export function mergeConnectorResults(input: MergeInput, query: string): MergeOu
 /** formatConnectorLine(r) (pura): la riga che il modello vede in search_connectors. */
 export function formatConnectorLine(r: ConnectorSearchRow): string {
   const status = r.status ? ` · ${r.status}` : ''
-  return `- ${r.id} — ${r.name} · fonte: ${r.sourceLabel} · fiducia: ${r.trust} · ${r.runtimeLabel}${status}: ${truncateDescription(r.description)}`
+  return `- ${r.id} — ${r.name} · source: ${r.sourceLabel} · trust: ${r.trust} · ${r.runtimeLabel}${status}: ${truncateDescription(r.description)}`
 }
 
 /** La riga che dice che il registro pubblico non è raggiungibile (le altre fonti rispondono comunque). */
-export const REGISTRY_DOWN_LINE = '- registro pubblico non raggiungibile'
+export const REGISTRY_DOWN_LINE = '- public registry unreachable'
 
 /** Il testo completo del result di search_connectors (puro). */
 export function formatSearchResults(out: MergeOutput): string {
   const lines = out.rows.map(formatConnectorLine)
   if (out.registryDown) lines.push(REGISTRY_DOWN_LINE)
-  return lines.length ? lines.join('\n') : 'Nessun connettore trovato per questa ricerca.'
+  return lines.length ? lines.join('\n') : 'No connector found for this search.'
 }
 
 /**

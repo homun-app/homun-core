@@ -48,7 +48,7 @@ export const VALID_REF_RE = /^[A-Za-z0-9]+$/
 
 /** Il deny quando il ref non è un ref dello snapshot (I5). */
 export const INVALID_REF_DENY_TEXT =
-  'Questo non è un ref dello snapshot: selettori, path e composizioni non si passano al browser. Usa solo i ref dello snapshot (es. e12).'
+  'This is not a snapshot ref: selectors, paths and compositions are not passed to the browser. Use only snapshot refs (e.g. e12).'
 
 const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
@@ -102,7 +102,7 @@ export type BrowserActionRisk =
 
 /** Il testo del deny sui campi con credenziali o dati di pagamento. */
 export const CREDENTIAL_DENY_TEXT =
-  'Non scrivo MAI password, dati di carta o credenziali in un sito: quel passaggio lo fa l\'utente, oppure il sistema con fill_credential se esiste un login salvato per questo sito (cercalo con list-credentials).'
+  'I NEVER type passwords, card data or credentials into a site: that step belongs to the user, or to the system with fill_credential if a login is saved for this site (find it with list-credentials).'
 
 /**
  * La classificazione PURA del rischio di un'azione del browser (punto 2, I5 e
@@ -288,14 +288,14 @@ export function snapshotChallenge(snapshotText: string): boolean {
 
 /** La nota del result quando lo snapshot contiene una sfida. */
 export const SNAPSHOT_BLOCKED_NOTE =
-  'Pagina bloccata da una verifica anti-bot: NON aggirarla, segnalalo all\'utente (la pagina non è leggibile).'
+  'Page blocked by an anti-bot check: do NOT bypass it, report it to the user (the page cannot be read).'
 
 // ---- troncamento dello snapshot al modello ----
 
 export const SNAPSHOT_MAX_CHARS = WEB_FETCH_MAX_CHARS
 
 /** La nota quando lo snapshot supera il tetto (il modello restringe con ref/depth). */
-export const SNAPSHOT_TRUNCATED_NOTE = '[snapshot lungo: usa browser_snapshot con ref o depth]'
+export const SNAPSHOT_TRUNCATED_NOTE = '[long snapshot: use browser_snapshot with ref or depth]'
 
 /**
  * Lo snapshot al modello: al massimo 20.000 caratteri per result (puro); oltre,

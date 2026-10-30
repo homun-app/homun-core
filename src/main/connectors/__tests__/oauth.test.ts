@@ -358,7 +358,7 @@ describe('fase 13 (punto 6): application_type native, iss della redirect (RFC 92
     const { manager } = makeEnv(as)
     const r = await manager.runConnect(ENTRY)
     expect(r.status).toBe('error')
-    expect(r.message).toContain('issuer non corrispondente')
+    expect(r.message).toContain('issuer mismatch')
     // il codice emesso NON è mai stato speso
     expect(as.codes.size).toBe(1)
     expect(as.accessTokens.length).toBe(0)
@@ -370,7 +370,7 @@ describe('fase 13 (punto 6): application_type native, iss della redirect (RFC 92
     const { manager } = makeEnv(as)
     const r = await manager.runConnect(ENTRY)
     expect(r.status).toBe('error')
-    expect(r.message).toContain('issuer assente nella redirect')
+    expect(r.message).toContain('issuer missing in the redirect')
     // il codice emesso NON è mai stato speso
     expect(as.codes.size).toBe(1)
     expect(as.accessTokens.length).toBe(0)

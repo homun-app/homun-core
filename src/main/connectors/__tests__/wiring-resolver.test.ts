@@ -487,7 +487,7 @@ describe('M2/M3: server di PLUGIN — Connetti dalla scheda Installati e ${VAR} 
       onChange: () => undefined
     }, getSetting, setSetting)
     expect(r.ok).toBe(true)
-    if (r.ok) expect(r.message).toContain('Server linear aggiunto')
+    if (r.ok) expect(r.message).toContain('Server linear added')
     // lo stato connettore è tornato connected e il token è arrivato al server
     expect((getSetting<Record<string, { status?: string }>>('connectors.state', {})[cfg.id])?.status).toBe('connected')
     expect(mcpFake.saw.length).toBeGreaterThan(0)

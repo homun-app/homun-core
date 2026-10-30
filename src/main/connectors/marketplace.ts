@@ -179,7 +179,7 @@ export function gitCloneArgv(url: string, staging: string, sparse: boolean, opts
 export function checkGitUrl(url: string, opts: { allowFileUrlsForTests?: boolean } = {}): { ok: true } | { ok: false; error: string } {
   if (url.startsWith('https://')) return { ok: true }
   if (opts.allowFileUrlsForTests && url.startsWith('file://')) return { ok: true }
-  return { ok: false, error: `sorgente non https: ${url} (in produzione si clona solo da https)` }
+  return { ok: false, error: `source is not https: ${url} (in production it clones only from https)` }
 }
 
 /** github:owner/repo → https://github.com/<owner>/<repo>.git */
@@ -248,8 +248,8 @@ export function findEscapingSymlink(dir: string): string | null {
 
 /** Un path relativo di sorgente deve iniziare con ./ e non contenere .. (puro). */
 export function relativeSourceError(path: string): string | null {
-  if (!path.startsWith('./')) return `la sorgente relativa deve iniziare con "./" (${path})`
-  if (path.split('/').includes('..')) return `la sorgente relativa non può contenere ".." (${path})`
+  if (!path.startsWith('./')) return `relative source must start with "./" (${path})`
+  if (path.split('/').includes('..')) return `relative source cannot contain ".." (${path})`
   return null
 }
 
@@ -290,11 +290,11 @@ export async function stagePlugin(
     if (source.kind === 'relative') {
       const err = relativeSourceError(source.path)
       if (err) return { ok: false, error: err }
-      if (!marketplaceDir) return { ok: false, error: 'sorgente relativa senza il clone del marketplace' }
+      if (!marketplaceDir) return { ok: false, error: 'relative source without the marketplace clone' }
       const from = resolve(marketplaceDir, source.path)
       const rel = relative(marketplaceDir, from)
-      if (rel.startsWith('..') || isAbsolute(rel)) return { ok: false, error: `la sorgente relativa esce dal marketplace: ${source.path}` }
-      if (!existsSync(from)) return { ok: false, error: `cartella del plugin assente nel marketplace: ${source.path}` }
+      if (rel.startsWith('..') || isAbsolute(rel)) return { ok: false, error: `the relative source leaves the marketplace: ${source.path}` }
+      if (!existsSync(from)) return { ok: false, error: `plugin folder missing in the marketplace: ${source.path}` }
       cpSync(from, staging, { recursive: true })
       const shaR = await run(['rev-parse', 'HEAD'], { cwd: marketplaceDir })
       const out = finishStaging(staging, staging, shaR.code === 0 ? shaR.stdout.trim() : '')
@@ -306,16 +306,16 @@ export async function stagePlugin(
       : source.kind === 'url' || source.kind === 'git-subdir'
         ? source.url
         : null
-    if (url === null) return { ok: false, error: `sorgente ${source.kind} non scaricabile` }
+    if (url === null) return { ok: false, error: `source ${source.kind} not downloadable` }
     const urlCheck = checkGitUrl(url, deps)
     if (!urlCheck.ok) return { ok: false, error: urlCheck.error }
     const clone = await run(gitCloneArgv(url, staging, source.kind === 'git-subdir', deps), { timeoutMs: PLUGIN_TIMEOUT_MS })
-    if (clone.code !== 0) return { ok: false, error: `clone non riuscito: ${clone.stderr.trim().slice(0, 200)}` }
+    if (clone.code !== 0) return { ok: false, error: `clone failed: ${clone.stderr.trim().slice(0, 200)}` }
     if (source.kind === 'url' || source.kind === 'github' || source.kind === 'git-subdir') {
       if (source.sha) {
-        if (!VALID_SHA_RE.test(source.sha)) return { ok: false, error: `sha non valido: ${source.sha}` }
+        if (!VALID_SHA_RE.test(source.sha)) return { ok: false, error: `invalid sha: ${source.sha}` }
         const co = await run(['checkout', source.sha], { cwd: staging })
-        if (co.code !== 0) return { ok: false, error: `checkout dello sha ${source.sha} non riuscito` }
+        if (co.code !== 0) return { ok: false, error: `checkout of sha ${source.sha} failed` }
       } else if (source.ref) {
         const fe = await run(['fetch', '--depth', '1', 'origin', source.ref], { cwd: staging, timeoutMs: PLUGIN_TIMEOUT_MS })
         if (fe.code === 0) await run(['checkout', 'FETCH_HEAD'], { cwd: staging })
@@ -324,10 +324,10 @@ export async function stagePlugin(
     if (source.kind === 'git-subdir') {
       // L3: il path deve essere relativo, interno e senza ..
       if (isAbsolute(source.path) || source.path.split('/').includes('..')) {
-        return { ok: false, error: `il path di git-subdir non è un path relativo interno (${source.path})` }
+        return { ok: false, error: `the git-subdir path is not an internal relative path (${source.path})` }
       }
       const sp = await run(['sparse-checkout', 'set', source.path], { cwd: staging })
-      if (sp.code !== 0) return { ok: false, error: `sparse-checkout non riuscito per ${source.path}` }
+      if (sp.code !== 0) return { ok: false, error: `sparse-checkout failed for ${source.path}` }
       // dopo il checkout la cartella del plugin ESISTE, è una directory reale
       // (non un symlink) e resta dentro lo staging
       const dir = resolve(staging, source.path)
@@ -335,7 +335,7 @@ export async function stagePlugin(
       let stat: { isDirectory(): boolean; isSymbolicLink(): boolean } | null = null
       try { stat = lstatSync(dir) } catch { stat = null }
       if (rel.startsWith('..') || isAbsolute(rel) || !stat || !stat.isDirectory() || stat.isSymbolicLink()) {
-        return { ok: false, error: `cartella del plugin assente nel repository: ${source.path}` }
+        return { ok: false, error: `plugin folder missing in the repository: ${source.path}` }
       }
       const shaR = await run(['rev-parse', 'HEAD'], { cwd: staging })
       const out = finishStaging(staging, dir, shaR.code === 0 ? shaR.stdout.trim() : '')
@@ -362,11 +362,11 @@ export async function stagePlugin(
  */
 function finishStaging(root: string, dir: string, sha: string): StagingOutcome {
   const stats = dirStats(dir)
-  if (stats.files > PLUGIN_MAX_FILES) return { ok: false, error: `troppi file (${stats.files} > ${PLUGIN_MAX_FILES})` }
-  if (stats.bytes > PLUGIN_MAX_BYTES) return { ok: false, error: `plugin troppo grande (${stats.bytes} byte > ${PLUGIN_MAX_BYTES})` }
+  if (stats.files > PLUGIN_MAX_FILES) return { ok: false, error: `too many files (${stats.files} > ${PLUGIN_MAX_FILES})` }
+  if (stats.bytes > PLUGIN_MAX_BYTES) return { ok: false, error: `plugin too large (${stats.bytes} bytes > ${PLUGIN_MAX_BYTES})` }
   const esc = findEscapingSymlink(dir)
-  if (esc) return { ok: false, error: `link simbolico che esce dalla cartella del plugin: ${esc}` }
-  if (!VALID_SHA_RE.test(sha)) return { ok: false, error: 'commit non leggibile (git rev-parse HEAD)' }
+  if (esc) return { ok: false, error: `symlink leaving the plugin folder: ${esc}` }
+  if (!VALID_SHA_RE.test(sha)) return { ok: false, error: 'commit not readable (git rev-parse HEAD)' }
   return { ok: true, dir, root, sha, sha12: sha.slice(0, 12) }
 }
 
@@ -448,12 +448,12 @@ export function inspectPlugin(dir: string, readFile: (p: string) => string = (p)
     try {
       manifest = JSON.parse(readFile(manifestPath)) as Record<string, unknown>
     } catch {
-      out.errors.push('manifest .claude-plugin/plugin.json non è JSON valido')
+      out.errors.push('manifest .claude-plugin/plugin.json is not valid JSON')
     }
   }
   if (manifest) {
     if (typeof manifest.name === 'string' && manifest.name) out.name = manifest.name
-    else out.errors.push('manifest senza name (obbligatorio quando c\'è)')
+    else out.errors.push('manifest without name (required when present)')
   }
   // skill: directory skills/<nome>/SKILL.md con frontmatter valido
   const skillsDir = join(dir, 'skills')
@@ -462,12 +462,12 @@ export function inspectPlugin(dir: string, readFile: (p: string) => string = (p)
       if (!ent.isDirectory()) continue
       const body = join(skillsDir, ent.name, 'SKILL.md')
       if (!existsSync(body)) {
-        out.errors.push(`skills/${ent.name}/SKILL.md mancante`)
+        out.errors.push(`skills/${ent.name}/SKILL.md missing`)
         continue
       }
       const rec = parseSkillFrontmatter(readFile(body))
       if (!rec) {
-        out.errors.push(`skills/${ent.name}/SKILL.md senza frontmatter valido`)
+        out.errors.push(`skills/${ent.name}/SKILL.md without valid frontmatter`)
         continue
       }
       out.skills.push({ name: pluginSkillName(out.name ?? ent.name, rec.name), description: rec.description, dir: `skills/${ent.name}` })
@@ -479,17 +479,17 @@ export function inspectPlugin(dir: string, readFile: (p: string) => string = (p)
       if (typeof s !== 'string') continue
       const p = resolve(dir, s)
       if (!inside(p)) {
-        out.errors.push(`path skill del manifest fuori dalla cartella: ${s}`)
+        out.errors.push(`manifest skill path outside the folder: ${s}`)
         continue
       }
       const body = join(p, 'SKILL.md')
       if (!existsSync(body)) {
-        out.errors.push(`skill del manifest mancante: ${s}`)
+        out.errors.push(`manifest skill missing: ${s}`)
         continue
       }
       const rec = parseSkillFrontmatter(readFile(body))
       if (!rec) {
-        out.errors.push(`skill del manifest senza frontmatter valido: ${s}`)
+        out.errors.push(`manifest skill without valid frontmatter: ${s}`)
         continue
       }
       out.skills.push({ name: pluginSkillName(out.name ?? 'plugin', rec.name), description: rec.description, dir: s })
@@ -501,19 +501,19 @@ export function inspectPlugin(dir: string, readFile: (p: string) => string = (p)
     try {
       collectMcpServers(JSON.parse(readFile(mcpJsonPath)), '.mcp.json', out)
     } catch {
-      out.errors.push('.mcp.json non è JSON valido')
+      out.errors.push('.mcp.json is not valid JSON')
     }
   }
   if (manifest && manifest.mcpServers !== undefined) {
     if (typeof manifest.mcpServers === 'string') {
       const p = resolve(dir, manifest.mcpServers)
-      if (!inside(p)) out.errors.push(`file mcpServers del manifest fuori dalla cartella: ${manifest.mcpServers}`)
-      else if (!existsSync(p)) out.errors.push(`file mcpServers del manifest mancante: ${manifest.mcpServers}`)
+      if (!inside(p)) out.errors.push(`manifest mcpServers file outside the folder: ${manifest.mcpServers}`)
+      else if (!existsSync(p)) out.errors.push(`manifest mcpServers file missing: ${manifest.mcpServers}`)
       else {
         try {
           collectMcpServers(JSON.parse(readFile(p)), manifest.mcpServers, out)
         } catch {
-          out.errors.push(`file mcpServers del manifest non è JSON valido: ${manifest.mcpServers}`)
+          out.errors.push(`manifest mcpServers file is not valid JSON: ${manifest.mcpServers}`)
         }
       }
     } else if (manifest.mcpServers && typeof manifest.mcpServers === 'object') {
@@ -579,7 +579,7 @@ function collectMcpServers(root: unknown, from: string, out: PluginInspection): 
   }
   if (servers === null) {
     if (!r || typeof r !== 'object' || Object.keys(r).length) {
-      out.errors.push(`${from} senza server riconoscibili`)
+      out.errors.push(`${from} without recognizable servers`)
     }
     return
   }
@@ -597,7 +597,7 @@ function collectMcpServers(root: unknown, from: string, out: PluginInspection): 
         from
       })
     } else {
-      out.errors.push(`server MCP "${name}" (${from}) senza url né command`)
+      out.errors.push(`MCP server "${name}" (${from}) without url or command`)
     }
   }
 }

@@ -130,7 +130,7 @@ describe('H2: la home del bot prima dell\'exec in docker', () => {
   it('mkdir fallito: errore CHIARO e niente memoria (il tentativo si ripete)', async () => {
     const f = fakeDocker({ inspect: 'true', mkdirExit: 1 })
     setDockerRunnerForTests(f.runner)
-    await expect(execCommand('agent_x', 'echo ok')).rejects.toThrow(/creazione della home \/box\/home\/agent_x/)
+    await expect(execCommand('agent_x', 'echo ok')).rejects.toThrow(/creation of home \/box\/home\/agent_x/)
     await expect(execCommand('agent_x', 'echo ok')).rejects.toThrow()
     expect(f.homes()).toEqual(['/box/home/agent_x', '/box/home/agent_x'])
   })

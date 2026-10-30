@@ -18,7 +18,7 @@ const h = vi.hoisted(() => ({
 vi.mock('../../main/mcp', () => ({
   listServers: () => h.mcp.servers,
   toolsOfServer: async (id: string) => {
-    if (!h.mcp.servers.some((s) => s.id === id)) throw new Error('server non trovato')
+    if (!h.mcp.servers.some((s) => s.id === id)) throw new Error('server not found')
     return h.mcp.tools[id] ?? []
   }
 }))

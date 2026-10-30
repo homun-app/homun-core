@@ -36,11 +36,11 @@ export function proxyDecision(host: string, port: number, ips: string[]): ProxyD
   // col flag di test i target loopback/privati passano (server locale del test)
   if (local && ips.length > 0 && ips.every((ip) => isForbiddenIp(ip))) return { allow: true }
   if (port !== 80 && port !== 443) {
-    return { allow: false, reason: `porta non ammessa (${port}): il browser del bot esce solo su 80 e 443` }
+    return { allow: false, reason: `port not allowed (${port}): the bot's browser goes out only on 80 and 443` }
   }
-  if (!ips.length) return { allow: false, reason: `host non risolto: ${host}` }
+  if (!ips.length) return { allow: false, reason: `host not resolved: ${host}` }
   if (ips.some((ip) => isForbiddenIp(ip))) {
-    return { allow: false, reason: 'indirizzo interno: il browser del bot non accede alla rete locale' }
+    return { allow: false, reason: 'internal address: the bot\'s browser does not access the local network' }
   }
   return { allow: true }
 }
@@ -99,7 +99,7 @@ export function createBrowserProxy(): http.Server {
       }
       if (!target) {
         res.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' })
-        res.end('richiesta del proxy malformata (serve una URI assoluta http/https)\r\n')
+        res.end('malformed proxy request (an absolute http/https URI is required)\r\n')
         return
       }
       let ips: string[] = []
@@ -132,7 +132,7 @@ export function createBrowserProxy(): http.Server {
       )
       upstream.on('error', () => {
         if (!res.headersSent) res.writeHead(502, { 'content-type': 'text/plain; charset=utf-8' })
-        res.end('upstream non raggiungibile\r\n')
+        res.end('upstream unreachable\r\n')
       })
       req.pipe(upstream)
     })()
@@ -142,7 +142,7 @@ export function createBrowserProxy(): http.Server {
     void (async () => {
       const target = parseTarget(req.url ?? '', 443)
       if (!target) {
-        denyConnect(clientSocket, 'richiesta CONNECT malformata (host:port)')
+        denyConnect(clientSocket, 'malformed CONNECT request (host:port)')
         return
       }
       let ips: string[] = []
@@ -164,7 +164,7 @@ export function createBrowserProxy(): http.Server {
         upstream.pipe(clientSocket)
         clientSocket.pipe(upstream)
       })
-      upstream.on('error', () => denyConnect(clientSocket, 'upstream non raggiungibile'))
+      upstream.on('error', () => denyConnect(clientSocket, 'upstream unreachable'))
       clientSocket.on('error', () => upstream.destroy())
     })()
   })

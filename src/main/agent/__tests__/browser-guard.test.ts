@@ -223,7 +223,7 @@ describe('troncamento dello snapshot (20.000 caratteri per result)', () => {
     const r = truncateSnapshot(lungo)
     expect(r.truncated).toBe(true)
     expect(r.text.length).toBeLessThanOrEqual(SNAPSHOT_MAX_CHARS + 100)
-    expect(r.text).toContain('snapshot lungo: usa browser_snapshot con ref o depth')
+    expect(r.text).toContain('long snapshot: use browser_snapshot with ref or depth')
   })
 })
 

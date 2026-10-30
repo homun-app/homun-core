@@ -28,7 +28,7 @@ export class WebSearchProviderError extends Error {
     readonly status?: number,
     readonly retryAfterMs?: number
   ) {
-    super(`provider di ricerca non riuscito (${kind}${status !== undefined ? `, HTTP ${status}` : ''}${retryAfterMs !== undefined ? `, retry-after ${retryAfterMs} ms` : ''})`)
+    super(`search provider failed (${kind}${status !== undefined ? `, HTTP ${status}` : ''}${retryAfterMs !== undefined ? `, retry-after ${retryAfterMs} ms` : ''})`)
     this.name = 'WebSearchProviderError'
   }
 }

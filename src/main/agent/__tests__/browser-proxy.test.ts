@@ -13,7 +13,7 @@ describe('proxyDecision (PURO): confine di rete del browser', () => {
   it('porte ammesse: SOLO 80 e 443, le altre 403 con motivo leggibile', () => {
     const r = proxyDecision('api.esempio', 8080, ['93.184.216.34'])
     expect(r.allow).toBe(false)
-    if (!r.allow) expect(r.reason).toContain('porta non ammessa (8080)')
+    if (!r.allow) expect(r.reason).toContain('port not allowed (8080)')
     expect(proxyDecision('api.esempio', 80, ['93.184.216.34']).allow).toBe(true)
     expect(proxyDecision('api.esempio', 443, ['93.184.216.34']).allow).toBe(true)
   })
@@ -24,7 +24,7 @@ describe('proxyDecision (PURO): confine di rete del browser', () => {
     for (const ip of ['192.168.65.254', '127.0.0.1', '10.0.0.5', '169.254.169.254', '172.16.2.3', '::ffff:127.0.0.1', 'fc00::1']) {
       const r = proxyDecision('bersaglio', 443, [ip])
       expect(r.allow, `ip ${ip}`).toBe(false)
-      if (!r.allow) expect(r.reason).toContain('indirizzo interno')
+      if (!r.allow) expect(r.reason).toContain('internal address')
     }
   })
   it('rebinding: lookup con un pubblico E un privato → NESSUNA connessione', () => {
@@ -190,7 +190,7 @@ describe('il server proxy (flag di test per il loopback)', () => {
       // porta 443 ammessa: a fermare la richiesta è l'IP, non la porta
       const r = await proxyGet('http://127.0.0.1:443/?segreta=1')
       expect(r.status).toBe(403)
-      expect(r.body).toContain('indirizzo interno')
+      expect(r.body).toContain('internal address')
     } finally {
       if (prev !== undefined) process.env[LOOPBACK_FLAG] = prev
     }
@@ -202,7 +202,7 @@ describe('il server proxy (flag di test per il loopback)', () => {
     try {
       const r = await proxyGet('http://93.184.216.34:8080/x')
       expect(r.status).toBe(403)
-      expect(r.body).toContain('porta non ammessa (8080)')
+      expect(r.body).toContain('port not allowed (8080)')
     } finally {
       if (prev !== undefined) process.env[LOOPBACK_FLAG] = prev
     }
