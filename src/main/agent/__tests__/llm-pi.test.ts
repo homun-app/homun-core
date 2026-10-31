@@ -19,7 +19,7 @@ import {
   type Models
 } from '@earendil-works/pi-ai'
 import type { ProviderConfig } from '../../../shared/types'
-import { streamPi, toPiContext, openAiCompatBase, ZAI_CONSUMPTION_BASE_URL, piModelFor, piCacheEntryFor, modelCapabilities, FAUX_TEST_PROVIDER_ID, fauxTestHandle, LlmProviderError, PiUserAbortError, type PiStreamMeta } from '../llm-pi'
+import { streamPi, toPiContext, openAiCompatBase, ZAI_CONSUMPTION_BASE_URL, piModelFor, piCacheEntryFor, modelCapabilities, imageMimeOf, FAUX_TEST_PROVIDER_ID, fauxTestHandle, LlmProviderError, PiUserAbortError, type PiStreamMeta } from '../llm-pi'
 import { llmStream } from '../llm'
 import { fallbackEligible } from '../model-fallback'
 import { stopReasonOfError } from '../loop-guard'
@@ -350,6 +350,122 @@ describe('fase 18a (E2.2): le variabili d\'ambiente NON si usano mai', () => {
       type: 'function',
       function: { name: 'run-command', description: 'run', parameters: { type: 'object', properties: { command: { type: 'string' } }, required: ['command'] } }
     }])
+  })
+})
+
+describe('fase 18a G1: le immagini NON spariscono sui modelli fuori catalogo', () => {
+  let server: Server
+  let port: number
+  const bodies: string[] = []
+
+  // lo stesso server HTTP FINTO su 127.0.0.1 di E2.2, ma guarda il body GREZZO
+  // della richiesta: il JSON serializzato si cerca com'è davvero sul filo
+  beforeAll(async () => {
+    server = createServer((req, res) => {
+      let raw = ''
+      req.on('data', (d) => { raw += d })
+      req.on('end', () => {
+        bodies.push(raw)
+        res.writeHead(200, { 'content-type': 'text/event-stream' })
+        res.end([
+          'data: ' + JSON.stringify({ id: 'x', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { content: 'ok' }, finish_reason: null }] }),
+          '',
+          'data: ' + JSON.stringify({ id: 'x', object: 'chat.completion.chunk', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] }),
+          '',
+          'data: [DONE]',
+          ''
+        ].join('\n'))
+      })
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    port = (server.address() as { port: number }).port
+  })
+  afterAll(() => new Promise<void>((resolve) => server.close(() => resolve())))
+
+  // header PNG minimo costruito nel test (niente file binari nel repo)
+  const tinyPng = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d]).toString('base64')
+  const wire = (): string => JSON.stringify(JSON.parse(bodies[bodies.length - 1]!))
+
+  it('ollama con id fuori catalogo: l\'immagine dell\'utente viaggia come image_url, MAI "image omitted"', async () => {
+    const ollama: ProviderConfig = { id: 'g1-ollama', name: 'Ollama', kind: 'ollama', baseUrl: `http://127.0.0.1:${port}`, apiKey: '', enabled: true }
+    await drain(llmStream(ollama, 'kimi-k3:cloud', [{ role: 'user', content: 'guarda', images: [tinyPng] }], [], new AbortController().signal))
+    const json = wire()
+    expect(json).toContain('"type":"image_url"')
+    expect(json).toContain(`"url":"data:image/png;base64,${tinyPng}"`)
+    expect(json).not.toContain('image omitted')
+  })
+
+  it('custom: lo stesso; zai NON si può puntare al finto (baseUrl forzato sull\'a consumo) → si verifica sul modello sintetico', async () => {
+    const custom: ProviderConfig = { id: 'g1-custom', name: 'Custom', kind: 'custom', baseUrl: `http://127.0.0.1:${port}/v1`, apiKey: '', enabled: true }
+    await drain(llmStream(custom, 'un-modello-qualsiasi', [{ role: 'user', content: 'guarda', images: [tinyPng] }], [], new AbortController().signal))
+    expect(wire()).toContain('"type":"image_url"')
+    expect(wire()).not.toContain('image omitted')
+    // zai riscrive SEMPRE il baseUrl sull'API a consumo (protezione anti
+    // Coding Plan che non si tocca), quindi la prova sul filo non è possibile:
+    // il suo modello sintetico dichiara le immagini come tutti gli altri
+    const zai: ProviderConfig = { id: 'g1-zai', name: 'Z.ai', kind: 'zai', baseUrl: 'https://api.z.ai', apiKey: 'sk-test-zai', enabled: true }
+    expect(piModelFor(zai, 'glm-5.3').input).toContain('image')
+  })
+
+  it('un result di tool seguito da [screenshot]: l\'immagine del computer use arriva', async () => {
+    const ollama: ProviderConfig = { id: 'g1-shot', name: 'Ollama', kind: 'ollama', baseUrl: `http://127.0.0.1:${port}`, apiKey: '', enabled: true }
+    await drain(llmStream(ollama, 'kimi-k3:cloud', [
+      { role: 'user', content: 'clicca il bottone' },
+      { role: 'assistant', content: '', toolCalls: [{ id: 'c1', name: 'use-app', arguments: '{"action":"screenshot"}' }] },
+      { role: 'tool', toolCallId: 'c1', content: 'screenshot scattato' },
+      { role: 'user', content: '[screenshot] Here is the screenshot requested by the use-app tool (the coordinates you want to click are in pixels of THIS image):', images: [tinyPng] }
+    ], [], new AbortController().signal))
+    const json = wire()
+    expect(json).toContain('[screenshot]')
+    expect(json).toContain('"type":"image_url"')
+    expect(json).toContain(`"url":"data:image/png;base64,${tinyPng}"`)
+    expect(json).not.toContain('image omitted')
+  })
+
+  it('un modello DEL catalogo senza visione (groq llama-3.3-70b-versatile): il segnaposto di pi-ai resta', async () => {
+    // baseUrl locale ≠ noto: i modelli del catalogo si clonano sull'URL del
+    // finto e il segnaposto si verifica sul filo senza toccare la rete vera.
+    // Il comportamento di pi-ai NON va toccato: se il catalogo dice che non
+    // c'è visione, il segnaposto è corretto
+    const groq: ProviderConfig = { id: 'g1-groq', name: 'Groq', kind: 'groq', baseUrl: `http://127.0.0.1:${port}/v1`, apiKey: 'sk-test-groq', enabled: true }
+    await drain(llmStream(groq, 'llama-3.3-70b-versatile', [{ role: 'user', content: 'guarda', images: [tinyPng] }], [], new AbortController().signal))
+    const json = wire()
+    expect(json).toContain('image omitted')
+    expect(json).not.toContain('"type":"image_url"')
+  })
+
+  it('modelCapabilities: sintetico → vision null (sconosciuta); catalogo → il flag vero', () => {
+    const ollama: ProviderConfig = { id: 'g1-caps', name: 'Ollama', kind: 'ollama', baseUrl: 'http://localhost:11434', apiKey: '', enabled: true }
+    expect(modelCapabilities(ollama, 'kimi-k3:cloud').vision).toBeNull()
+    const groq: ProviderConfig = { id: 'g1-capsg', name: 'Groq', kind: 'groq', baseUrl: 'https://api.groq.com/openai', apiKey: 'sk-test-groq', enabled: true }
+    expect(modelCapabilities(groq, 'qwen/qwen3.6-27b').vision).toBe(true)
+    expect(modelCapabilities(groq, 'llama-3.3-70b-versatile').vision).toBe(false)
+  })
+})
+
+describe('fase 18a G2: il tipo MIME vero delle immagini', () => {
+  // header minimi costruiti nel test (niente file binari nel repo)
+  const pngHead = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d]).toString('base64')
+  const jpegHead = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01]).toString('base64')
+  const gifHead = Buffer.from([0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00, 0x01, 0x00, 0x00, 0xff]).toString('base64')
+  // RIFF + 4 byte di dimensione + WEBP: 12 byte = 16 caratteri base64 giusti giusti
+  const webpHead = Buffer.from([0x52, 0x49, 0x46, 0x46, 0x24, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50]).toString('base64')
+
+  it('imageMimeOf: png, jpeg, gif e webp dalla firma; il resto resta image/png', () => {
+    expect(imageMimeOf(pngHead)).toBe('image/png')
+    expect(imageMimeOf(jpegHead)).toBe('image/jpeg')
+    expect(imageMimeOf(gifHead)).toBe('image/gif')
+    expect(imageMimeOf(webpHead)).toBe('image/webp')
+    // firma sconosciuta (BMP), stringa corta e vuota: image/png come oggi
+    expect(imageMimeOf(Buffer.from([0x42, 0x4d, 0x00, 0x00]).toString('base64'))).toBe('image/png')
+    expect(imageMimeOf('QUJD')).toBe('image/png')
+    expect(imageMimeOf('')).toBe('image/png')
+  })
+
+  it('toPiContext con un JPEG produce mimeType image/jpeg (non tutto png)', () => {
+    const c = toPiContext([{ role: 'user', content: 'guarda', images: [jpegHead] }], [])
+    const u = c.messages[0] as unknown as { content: Array<{ type: string; data?: string; mimeType?: string }> }
+    expect(u.content[1]).toEqual({ type: 'image', data: jpegHead, mimeType: 'image/jpeg' })
   })
 })
 

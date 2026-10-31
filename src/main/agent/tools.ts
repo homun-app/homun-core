@@ -704,7 +704,7 @@ export const wakeParentToolDef: ToolDef = {
 export interface ToolExecResult {
   output: string
   meta: Record<string, unknown>
-  images?: string[]  // base64 PNG per modelli vision
+  images?: string[]  // base64 (png/jpeg/gif/webp) per modelli vision
 }
 
 /** Azione su una memoria (update_memory e update_state target 'memory'). */

@@ -178,7 +178,16 @@ export function fauxTestHandle(id: string = FAUX_TEST_PROVIDER_ID): FauxProvider
   return fauxHandles.get(id)
 }
 
-/** Il modello sintetico per un id assente dal catalogo (modello nuovo o locale). */
+/**
+ * Il modello sintetico per un id assente dal catalogo (modello nuovo o locale).
+ * G1: `input: ['text', 'image']` — con capacità SCONOSCIUTE le immagini si
+ * mandano come prima della 18a e decide il server: con `['text']` pi-ai
+ * (downgradeUnsupportedImages) le sostituiva tutte col segnaposto
+ * "(image omitted…)" sugli ollama/lmstudio/custom/zai e su ogni id fuori
+ * catalogo, e gli screenshot del computer use e le immagini dell'utente
+ * sparivano. Il flag visione VERO (che spegne o accende) arriva col catalogo
+ * della 18b; i modelli DEL catalogo pi-ai restano come sono.
+ */
 function syntheticModel(e: PiCacheEntry, modelId: string, compat?: Record<string, unknown>): Model<Api> {
   return {
     id: modelId,
@@ -186,7 +195,7 @@ function syntheticModel(e: PiCacheEntry, modelId: string, compat?: Record<string
     api: e.api,
     provider: e.providerId,
     baseUrl: e.baseUrl,
-    input: ['text'],
+    input: ['text', 'image'],
     reasoning: false,
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 128_000,
@@ -306,13 +315,16 @@ export function fromCatalog(p: ProviderConfig, modelId: string): boolean {
 /**
  * E2.1: le capacità del modello per la pagina Uso e costi della 18b — qui
  * solo lette. cost null = sconosciuto (modello fuori catalogo) o locale.
+ * G1: vision null = sconosciuta (modello sintetico): il sintetico dice
+ * `input: ['text', 'image']` solo per mandare le immagini al server, NON
+ * perché sappiamo che il modello ci vede — il flag vero arriva col catalogo.
  */
 export function modelCapabilities(
   p: ProviderConfig,
   modelId: string
 ): {
   contextWindow: number
-  vision: boolean
+  vision: boolean | null
   reasoning: boolean
   cost: { input: number; output: number; cacheRead: number; cacheWrite: number } | null
   fromCatalog: boolean
@@ -323,7 +335,7 @@ export function modelCapabilities(
   const local = LOCAL_KINDS.has(p.kind)
   return {
     contextWindow: m.contextWindow,
-    vision: m.input.includes('image'),
+    vision: !catalog ? null : m.input.includes('image'),
     reasoning: m.reasoning,
     cost: !catalog || (zero && local) ? null : { input: m.cost.input, output: m.cost.output, cacheRead: m.cost.cacheRead, cacheWrite: m.cost.cacheWrite },
     fromCatalog: catalog
@@ -331,6 +343,26 @@ export function modelCapabilities(
 }
 
 // ---- E2.3: da ChatMessage[] a Context pi-ai ----
+
+/**
+ * G2: il tipo MIME VERO di un'immagine base64, letto dai primi byte. ipc.ts
+ * accetta png, jpg, jpeg, webp e gif e manda i byte grezzi in base64, ma
+ * tutto veniva etichettato image/png (faceva così anche il vecchio
+ * adattatore): le API che controllano il tipo (Anthropic in particolare)
+ * rifiutano un JPEG dichiarato PNG con un 400. Decodifica SOLO i primi 16
+ * caratteri base64 (12 byte: bastano per tutte le firme), mai tutta
+ * l'immagine; una firma sconosciuta resta image/png (come è sempre stato).
+ */
+export function imageMimeOf(base64: string): string {
+  const head = Buffer.from(base64.slice(0, 16), 'base64')
+  const is = (offset: number, sig: number[]): boolean => sig.every((b, i) => head[offset + i] === b)
+  if (is(0, [0x89, 0x50, 0x4e, 0x47])) return 'image/png'
+  if (is(0, [0xff, 0xd8, 0xff])) return 'image/jpeg'
+  if (is(0, [0x47, 0x49, 0x46, 0x38])) return 'image/gif'
+  // RIFF????WEBP: 4 byte di dimensione saltati tra i due pezzi della firma
+  if (is(0, [0x52, 0x49, 0x46, 0x46]) && is(8, [0x57, 0x45, 0x42, 0x50])) return 'image/webp'
+  return 'image/png'
+}
 
 /** JSON.parse con fallback {} (come safeParse di sempre: argomento rotto → {}). */
 function safeParse(s: string): Record<string, unknown> {
@@ -370,7 +402,8 @@ export function toPiContext(
       const content = m.images?.length
         ? [
             { type: 'text' as const, text: m.content },
-            ...m.images.map((data) => ({ type: 'image' as const, data, mimeType: 'image/png' }))
+            // G2: il MIME vero letto dalla firma, non sempre image/png
+            ...m.images.map((data) => ({ type: 'image' as const, data, mimeType: imageMimeOf(data) }))
           ]
         : m.content
       piMessages.push({ role: 'user', content, timestamp: now })

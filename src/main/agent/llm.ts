@@ -58,7 +58,7 @@ export interface ChatMessage {
   content: string
   toolCalls?: ToolCall[]
   toolCallId?: string // per role 'tool'
-  images?: string[]   // base64 PNG (per modelli vision)
+  images?: string[]   // base64 (png/jpeg/gif/webp) per modelli vision
 }
 
 export interface LlmChunk {

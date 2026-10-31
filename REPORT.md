@@ -3011,3 +3011,40 @@ process.exit(results.every(Boolean) ? 0 : 1)
 - Le riserve multiple, i livelli di thinking nella UI, il flag visione, il modello per routine, la pagina Uso e costi e la scelta dal catalogo: **della 18b** (qui solo i dati: `modelCapabilities` e `model_usage`).
 - Nessuna migrazione del DB: i provider zai salvati con `https://api.z.ai` (o `/v1`) si correggono in lettura.
 - Nessun Docker, nessun modello cloud, nessuna rete reale (solo 127.0.0.1), niente `npm run dist`; né l'app né il daemon sulla cartella dati vera (il daemon dell'utente è rimasto attivo e indisturbato); nessun segreto vero (solo chiavi finte `sk-test-*`); nessun file dell'utente, volume `sandbot-box`/`sandbot-plugins`/`sandbot-browser` o cartella preesistente di `/var/folders/…/T/` cancellati.
+
+# Fase 18a — correzioni (G1–G2)
+
+Sopra il tag `fase-18a` (ca9dd29). Due difetti, entrambi sulle immagini; il contratto, il loop, i prompt, i tool e la UI non cambiano. L'eval NON è lanciata (la misura è dell'utente).
+
+## Tabella G1–G2
+
+| Punto | Stato | Dove | Note |
+|---|---|---|---|
+| **G1** le immagini non devono sparire sui modelli fuori catalogo | fatto | `src/main/agent/llm-pi.ts` (`syntheticModel`, `modelCapabilities`); test in `src/main/agent/__tests__/llm-pi.test.ts` (describe «G1») | `syntheticModel()` ora dichiara `input: ['text', 'image']`: con capacità sconosciuta le immagini si mandano come prima della 18a e decide il server. Prima `input: ['text']` faceva scattare `downgradeUnsupportedImages` di pi-ai (`dist/api/transform-messages.js`), che sostituiva OGNI immagine con `(image omitted: model does not support images)` su tutti i modelli sintetici (ollama, lmstudio, openai-compatible, custom, zai e ogni id fuori catalogo): sparivano gli screenshot del computer use (`[screenshot] …` in `loop.ts`) e le immagini allegate dall'utente. I modelli DEL catalogo pi-ai restano come sono (se il catalogo dice niente visione, il segnaposto è corretto); il flag visione vero arriva col catalogo della 18b. `modelCapabilities().vision` diventa `boolean \| null`: `null` quando `!fromCatalog` («sconosciuta», non `true`); oggi l'unico chiamante è il test (la pagina Uso e costi è della 18b) |
+| **G2** il tipo MIME vero delle immagini | fatto | `imageMimeOf()` in `src/main/agent/llm-pi.ts`, usata da `toPiContext`; commenti aggiornati in `src/main/agent/llm.ts` e `src/main/agent/tools.ts`; test nel describe «G2» | `ipc.ts` accetta png, jpg, jpeg, webp e gif e manda i byte grezzi in base64, ma tutto veniva etichettato `image/png` (come il vecchio adattatore): le API che controllano il tipo (Anthropic in particolare) rifiutano un JPEG dichiarato PNG con un 400. `imageMimeOf(base64)` legge SOLO i primi 16 caratteri base64 (12 byte): `89 50 4E 47` → png, `FF D8 FF` → jpeg, `47 49 46 38` → gif, `RIFF????WEBP` → webp, il resto resta `image/png` (come oggi) |
+
+## Test nuovi (7, tutti in `llm-pi.test.ts`)
+
+G1, col server HTTP finto su 127.0.0.1 che registra il body GREZZO della richiesta:
+1. ollama con id fuori catalogo (`kimi-k3:cloud`) e messaggio utente con `images`: sul filo c'è `"type":"image_url"` con `data:image/png;base64,…` e NON la stringa `image omitted`;
+2. custom: lo stesso. `zai` NON si può puntare al finto (il baseUrl è forzato sull'API a consumo, protezione anti Coding Plan che non si tocca), quindi si verifica sul modello sintetico: `piModelFor(zai, 'glm-5.3').input` contiene `image`;
+3. result di tool seguito dal messaggio `[screenshot]`: l'immagine del computer use arriva (`image_url`, niente segnaposto);
+4. modello DEL catalogo senza visione (groq `llama-3.3-70b-versatile`, `input: ["text"]` nel catalogo 1.4.0): il segnaposto di pi-ai resta e `image_url` non c'è — il comportamento di pi-ai non è stato toccato (catalogo clonato sul baseUrl del finto, nessuna rete vera);
+5. `modelCapabilities`: sintetico → `vision: null`; catalogo con visione (`qwen/qwen3.6-27b`) → `true`; senza visione → `false`.
+
+G2 (puri, header minimi costruiti nel test, niente file binari nel repo):
+6. `imageMimeOf`: png, jpeg, gif e webp riconosciuti dalla firma; BMP, stringa corta e vuota → `image/png`;
+7. `toPiContext` con un JPEG produce `mimeType: 'image/jpeg'` (il test E2.3 esistente con `QUJD` continua a dare `image/png`: caso di riserva).
+
+## Cosa NON cambia
+
+- Niente prompt, tool, comportamento del loop o UI; nessun provider nuovo.
+- Il Coding Plan resta vietato: nessun provider `zai` di pi-ai, nessun `/coding/`; `zai` passa solo da `openai-completions` sull'API a consumo.
+
+## Output dei controlli
+
+- `npm run typecheck`: pulito (exit 0).
+- `npx vitest run`: **105 file / 1654 test verdi** (1647 della 18a + 7 nuovi di G1/G2).
+- `npm run build`: ✓ built ×3 (main/preload/renderer).
+- `npm run i18n:extract`: estrazione senza differenze (nessun messaggio nuovo: i test e l'adattatore non toccano le cataloghe).
+- Nessun Docker, nessun modello cloud, nessuna rete reale (solo 127.0.0.1), niente `npm run dist`; né l'app né il daemon sulla cartella dati vera; nessun segreto vero (solo chiavi finte `sk-test-*`); nessun file dell'utente, volume o cartella preesistente di `/var/folders/…/T/` cancellati.
