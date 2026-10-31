@@ -102,7 +102,8 @@ describe('tickConnectorPolls: id nuovi, prima esecuzione silenziosa', () => {
     const jobs = listJobs(db())
     expect(jobs).toHaveLength(1)
     expect(jobs[0]!.kind).toBe('routine-run')
-    expect(jobs[0]!.payload.event).toMatchObject({ source: 'connector_poll', title: 'Nuova email: Nuova!' })
+    // fase 17c correzioni (D1): titolo inglese + kind/item per la bolla UI
+    expect(jobs[0]!.payload.event).toMatchObject({ source: 'connector_poll', kind: 'newEmail', item: 'Nuova!', title: 'New email: Nuova!' })
     expect((jobs[0]!.payload.event as { data?: unknown }).data).toMatchObject({ id: 'm2', subject: 'Nuova!' })
     // gli id visti ora comprendono anche m2
     expect(getSetting(`trigger.seen.${id}`, { ids: [], primed: false }).ids).toEqual(['m1', 'm2'])
@@ -172,7 +173,8 @@ describe('preset calendar_event: job a start - offsetMinutes', () => {
     // preset evita solo di ri-programmare eventi già visti)
     expect(jobs).toHaveLength(1)
     expect(jobs[0]!.run_at).toBe(start - 10 * 60_000)
-    expect(jobs[0]!.payload.event).toMatchObject({ source: 'calendar_event', title: 'Evento del calendario in arrivo: Standup' })
+    // fase 17c correzioni (D1): titolo inglese + kind/item per la bolla UI
+    expect(jobs[0]!.payload.event).toMatchObject({ source: 'calendar_event', kind: 'calendarSoon', item: 'Standup', title: 'Upcoming calendar event: Standup' })
     // al prossimo poll gli stessi eventi NON generano nuovi job
     clock += 3 * 60_000
     await tickConnectorPolls(pollDeps(), clock)

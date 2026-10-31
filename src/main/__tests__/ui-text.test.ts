@@ -75,6 +75,18 @@ describe('fase 17c (C1): formatUi e il catalogo UI', () => {
     expect(clickEn).toContain('an action that sends, buys or commits')
   })
 
+  // fase 17c correzioni (D1): la bolla dell'apertura di una routine a trigger
+  it('formatUi: open.triggerEvent in it ed en (select sul kind, item opzionale)', () => {
+    const emailIt = formatUi(ui(UI.openTriggerEvent, { title: 'Posta', kind: 'newEmail', item: 'Fattura', withItem: 'yes' }), 'it')
+    expect(emailIt).toBe('Routine "Posta" avviata: nuova email — Fattura')
+    const emailEn = formatUi(ui(UI.openTriggerEvent, { title: 'Mail', kind: 'newEmail', item: 'Invoice', withItem: 'yes' }), 'en')
+    expect(emailEn).toBe('Routine "Mail" started: new email — Invoice')
+    const backIt = formatUi(ui(UI.openTriggerEvent, { title: 'Rientri', kind: 'presenceReturn', withItem: 'no' }), 'it')
+    expect(backIt).toBe('Routine "Rientri" avviata: l’utente è appena tornato al computer')
+    const backEn = formatUi(ui(UI.openTriggerEvent, { title: 'Returns', kind: 'presenceReturn', withItem: 'no' }), 'en')
+    expect(backEn).toBe('Routine "Returns" started: the user just came back to the computer')
+  })
+
   it('formatUi: id sconosciuto ricade sull’id stesso (mai crash)', () => {
     expect(formatUi({ id: 'no.such.id' }, 'it')).toBe('no.such.id')
     expect(formatUi({ id: 'no.such.id', values: { a: 1 } }, 'en')).toBe('no.such.id')

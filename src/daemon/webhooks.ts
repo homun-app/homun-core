@@ -10,6 +10,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { DatabaseSync } from 'node:sqlite'
 import { getRoutine } from '../main/store/db'
 import { enqueueJob } from '../main/store/jobs'
+import { triggerEventTitle } from '../shared/triggers'
 import type { SandbotEvent, TriggerEventPayload } from '../shared/types'
 
 /** Tetto del corpo della richiesta (spec: 64 KB). */
@@ -109,9 +110,11 @@ export async function handleWebhook(req: IncomingMessage, res: ServerResponse, d
     // corpo non JSON: entra come testo grezzo
   }
   const now = deps.now()
+  // fase 17c correzioni (D1): kind per la bolla UI, titolo inglese per il modello
   const event: TriggerEventPayload = {
     source: 'webhook',
-    title: 'Webhook ricevuto',
+    kind: 'webhook',
+    title: triggerEventTitle('webhook'),
     data,
     at: now
   }

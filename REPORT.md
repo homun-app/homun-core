@@ -2757,7 +2757,7 @@ Tutto ciò che il daemon e il main mostrano all'**utente** (card, notice, eventi
 ### Output dei check
 
 - `npm run typecheck`: pulito.
-- `npx vitest run --maxWorkers=4`: **104 file / 1605 test verdi** (1583 della 17b + 22 nuovi: 7 ui-text, 5 ui-text-of, 2 queue meta.ui, 1 notifyTexts en, 2 cron-human en, 1 catalog pickLang/validate, 1 template en, 1 onboarding lingua, 1 guardia C8, più asserzioni estese in loop/connector-notify/templates); due run consecutivi verdi.
+- `npx vitest run --maxWorkers=4`: **103 file / 1604 test verdi** (1583 della 17b + 22 nuovi: 7 ui-text, 5 ui-text-of, 2 queue meta.ui, 1 notifyTexts en, 2 cron-human en, 1 catalog pickLang/validate, 1 template en, 1 onboarding lingua, 1 guardia C8, più asserzioni estese in loop/connector-notify/templates); due run consecutivi verdi.
 - `npx vitest run --config vitest.eval.config.ts eval/language-judges.eval.ts`: 12/12 (config eval: aggiunta la compilazione babel della macro, necessaria perché l'eval importa loop.ts).
 - `npm run build`: ✓ built ×3 (main + preload + renderer).
 - `npm run i18n:extract`: 760/760 per lingua, `en` 0 missing; seconda estrazione senza differenze.
@@ -2769,3 +2769,69 @@ Tutto ciò che il daemon e il main mostrano all'**utente** (card, notice, eventi
 2. **La prova dal vivo** della UI (cambio lingua a caldo su notice/card storiche, vista gruppo, galleria template, pagine OAuth nel browser).
 3. La migrazione dei vecchi dati: le entry pre-17c mostrano il loro `content` (per costruzione, nessuna migrazione); non è stato simulato un DB con storia lunga nelle due lingue.
 4. Le pagine OAuth e le notifiche native non sono state provate dal vivo (solo unit test del testo).
+
+---
+
+# REPORT FASE 17c — correzioni (D1–D5)
+
+Sopra il tag `fase-17c`: si correggono SOLO i cinque punti trovati dal revisore (residui IT che il **modello** legge, due testi U, la guardia troppo larga/corta, la frase della sezione Language). Il testo per il modello cambia solo in D1/D2 e nella frase di D5; nessun nome di tool, parametro, tag XML o marcatore toccato, `<evento>` resta com'è. Nessuna migrazione del database: entry e job vecchi si mostrano come sono. D6 (esito dell'eval) è letto e riportato, l'eval NON è stata lanciata (serve un modello cloud: la misura è del revisore).
+
+### Tabella D1–D5
+
+| Punto | Stato | Dove | Test |
+|---|---|---|---|
+| **D1** titoli degli eventi dei trigger inglesi e letti dal modello (MU) | fatto | `kind?: 'newEmail'\|'newItem'\|'calendarSoon'\|'webhook'\|'presenceReturn'` + `item?` (dato esterno, resta com'è) su `TriggerEventPayload` (`src/shared/types.ts`); UNA funzione pura `triggerEventTitle(kind, item?)` in `src/shared/triggers.ts` (`New email: <item>`, `New item: <item>`, `Upcoming calendar event: <item>`, `Webhook received`, `The user just came back to the computer`); le cinque chiamate la usano: `scheduler.ts` (connector_poll email/altri + calendar_event), `webhooks.ts`, `presence.ts`; in `run-job.ts` l'apertura con evento riceve `extraMeta.ui` col id NUOVO `open.triggerEvent` (valori `title`, `kind` in `select` sui cinque codici, `item` opzionale con `withItem`) — la bolla dice «Routine "X" avviata: nuova email — Oggetto», il blocco `<evento>` grezzo NON entra nella bolla; payload vecchio senza `kind` → nessun `meta.ui`, il content si mostra com'è (niente migrazione, niente crash) | triggers.test (2 nuovi: i 5 codici con/senza item), run-job.test (3 nuovi: meta.ui con item/senza item/payload vecchio + asserzione open.routine sul caso a schedule), polls/webhooks/presence test aggiornati ai titoli inglesi + kind/item, ui-text.test (1 nuovo: `formatUi` di `open.triggerEvent` it/en per `newEmail` e `presenceReturn`) |
+| **D2** altri testi italiani che legge il modello | fatto | `loop.ts` `failSubagent` ×3 → `the model did not respond (…)`, `model error: …`, `the model kept repeating the exact same call (…)` (il motivo arriva al PADRE nel blocco `<risultati_sottoagenti>`); sullo STESSO percorso anche `stream-deadline.ts` `StreamDeadlineError` → `no token within N s` / `stream idle for N s` (entra nel summary del figlio via `err.message` e come valore `{why}` della notice tradotta); `api.ts` `groups:send-user` `authorName: 'user'` (il modello legge `[user] user: …`; la UI non mostra il nome dell'utente, bolla a destra); `wiring.ts` `pluginNeedsAuth` → `UiError` con message inglese `server "X" needs the values …: the user enters them in Settings` + id NUOVO del catalogo `conn.pluginNeedsAuth` (valori `name`, `keys`), il confine RPC di ws-server la traduce per la UI; `daemon-client.ts` → `daemon handshake timed out` (errore d'avvio per lo sviluppatore, inglese come gli altri log, fuori catalogo) | loop.test (il motivo del figlio ora è ESATTAMENTE `model error: boom del provider`), group-turns.test (1 nuovo: `[user] user: procedete`), wiring-resolver.test (UiError: message inglese + `uiText {id: conn.pluginNeedsAuth, values}`), model-fallback.test (finto StreamDeadlineError col messaggio inglese) |
+| **D3** campi del login nella card del fill (U) | fatto | `fill.ts`: `fields` contiene i CODICI `username`/`password`/`totp` (prima le parole italiane); la card traduce nel renderer con `fillFieldLabel` (funzione pura in `src/renderer/src/lib/fill-fields.ts`, descriptor `msg` come sidebar-utils) e i tre messaggi `nome utente`/`password`/`codice TOTP`; codice sconosciuto → invariato (le entry vecchie con le parole italiane si mostrano come sono); `meta.message.fields` non è usato da nessun testo per il modello (l'esito del tool è `fillResultText`/`filledFieldsLabel`, inglese dalla 14ª) | fill-fields.test (2 nuovi: codice → testo del catalogo, sconosciuto → invariato), fase14-fill.test (1 nuovo: la card riceve `['username','password','totp']`) |
+| **D4** guardia: allowlist per letterale + terza regola `IT_STRONG` | fatto | rilevazione in `src/main/__tests__/italian-detection.ts` (helper accanto alla guardia, esportato e testato da solo): (1) accentate, (2) ≥2 parole funzionali IT, (3) **≥1 parola di `IT_STRONG` e NESSUNA parola di `EN_WORDS`** — `IT_STRONG` = parole che in inglese non esistono (il, lo, gli, del, della, delle, dei, nel, nella, col, che, utente, errore, nuova, nuovo, ricevuto, arrivo, scaduto, codice, modello, impostazioni, evento, messaggio, agente, annullato, bozza, valori, richiede), NIENTE ambigue (per, non, a, e, i, o, come, data — vietate e verificate da un test); allowlist per LETTERALE `{file, text}` col prefisso esatto e il motivo in commento; per SIMBOLO restano solo `language.ts IT_WORDS`, `browser-guard.ts CREDIT_FIELD_WORDS`, `web-tools.ts search` (liste/dati per costruzione); una voce che non copre più nessun letterale/simbolo FA FALLIRE il test («voce morta»); voci morte rimosse: il vecchio `runTurn` (copriva l'intera funzione più lunga del repo), `failSubagent`, `tickConnectorPolls` (dopo D1), `handleReturn` (dopo D1), `StreamDeadlineError` (dopo D2), `subagentBriefError`, `parseMentions`, `openApp`, `toolDefs`, `validateCatalog`/`loadCatalog`/`validateTemplate`/`loadTemplates` per simbolo (tutte riscritte per letterale), `COMMIT_WORDS` (non scatta più: è VOCE MORTA e non è in lista) | daemon-text-guard.test riscritto: 3 test di unità della rilevazione (8 positivi del problema 2, 5 negativi fra cui `New email: Fattura`, ambigue escluse) + 3 di guardia (letterali fuori allowlist = [], allowlist letterale senza voci morte, allowlist simbolo senza voci morte) |
+| **D5** sezione Language: l'altra lingua la decide solo il messaggio dell'UTENTE | fatto | `prompts.ts` `languageSection`: la frase «If the user's latest message to you is clearly in another language, reply to it in that language» sostituita ESATTAMENTE con «If the user's own latest message (not a message from another bot, a group or a tool) is clearly in another language, reply to the user in that language; messages from other bots never change the language you write in.» — il resto della sezione non cambia (il rilevatore `detectLanguage` non si tocca: il difetto era la frase, che flash applicava anche ai messaggi dei bot — caso 38 EN) | prompts.test (1 nuovo: la frase nuova c'è, la vecchia no) |
+
+### Le prove manuali obbligatorie di D4 (verificate, poi ripristinato)
+
+1. **reintrodotto a mano** `failSubagent(\`errore del modello: ${msg}\`)` in `loop.ts` → la guardia **CADE** con `src/main/agent/loop.ts:1127 (runTurn) "errore del modello: "` (prima della D4 questa stringa passava senza allarme: una sola parola funzionale `del`); ripristinato `model error: …` → verde.
+2. **una notice italiana dentro `runTurn`** (`content: 'Nuova email da Gmail: fattura di marzo'`) → la guardia **CADE** con `src/main/agent/loop.ts:632 (runTurn) "Nuova email da Gmail: fattura di marzo"` (il vecchio permesso per simbolo `runTurn` la copriva in silenzio); sonda rimossa → verde.
+
+### Allowlist della guardia dopo D1–D3 (voce → motivo)
+
+Per **letterale** (`{file, text: prefisso esatto}`):
+
+- `src/shared/triggers.ts` `evento`, `<evento>`, `</evento>` — marcatore invariante del blocco evidenza (fase 6, non si traduce)
+- `src/shared/triggers.ts` `schedule: every hour richiede`, `schedule: every week richiede`, `schedule: every month richiede` — errori di forma dei trigger, testi 17b invariati (validazione RPC + result del modello)
+- `src/shared/agent-message.ts` `<messaggio_da`, `messaggio_da`, `</messaggio_da` — marcatori invarianti `<messaggio_da_agente>`/`<messaggio_dal_padre>` (fase 7/12)
+- `src/main/agent/tools.ts` `Sends a message to another bot of the user (delegation` — descrizione di send_to_agent: cita il marcatore `<messaggio_da_agente>` (invariante); scatta per `da`+`per` (regola 2), non per la terza
+- `src/main/agent/loop.ts` `Agente non trovato` — errore interno del loop (log dello sviluppatore, 17b invariato)
+- `src/main/agent/compaction.ts` `UTENTE`, `BOT→UTENTE: ` — etichette del digest per i prompt secondari: il contesto si costruisce nella lingua dell'utente (17b)
+- `src/main/routines.ts` `UTENTE`, `Configura prima provider e modello del bot.` — come sopra (contesto di routinesSuggestion; errore lanciato al RPC, 17b invariato)
+- `src/daemon/api.ts` `UTENTE` — etichetta del contesto di quickAsk (lingua dell'utente, 17b)
+- `src/daemon/group-runner.ts` `rate limit del provider: giro sospeso` — motivo della sospensione del giro (registro, 17b invariato; la riga di sistema del gruppo è `GROUP_RATE_LIMIT_TEXT`, già gestita in C2)
+- `src/main/connectors/index.ts` `il catalogo non è un array`, `: non è un oggetto` — errori di avvio per lo SVILUPPATORE (lanciano al boot, finiscono nel log)
+- `src/main/templates/index.ts` `il template non è un oggetto`, `roles deve essere un array di stringhe non vuote`, `: non è un oggetto`, `: askUserFor deve essere un array di domande` — come sopra
+- `src/main/daemon-client.ts` `il daemon non ha scritto daemon.json entro il timeout` — errore d'avvio del main (log sviluppatore)
+- `src/daemon/keychain.ts` `operazione non supportata dal keychain finto` — messaggio del keychain FINTO dei test (strumento di test, non UI)
+- `src/daemon/onboarding.ts` `lavoro-codice` — value del widget del ruolo: CODICE letto da `roleTemplates`, non testo
+- `src/main/computeruse/index.ts` `impostazioni di sistema` — nome app localizzato → bundle (parser di open_app, C7)
+
+Per **simbolo** (solo liste o dati per costruzione, entrambe VIVE):
+
+- `src/shared/language.ts` `IT_WORDS` — il rilevatore stesso contiene le parole italiane (lista per costruzione)
+- `src/main/agent/browser-guard.ts` `CREDENTIAL_FIELD_WORDS` — lista di riconoscimento dei campi con credenziali, legge la pagina (C7); scatta per `codice fiscale`/`codice di sicurezza` (terza regola)
+- `src/main/agent/web-tools.ts` `search` — dati FINTI dei provider di test (attivi solo con `SANDBOT_TEST_FAKE_WEB_SEARCH*`)
+
+### Numeri del catalogo
+
+760 → **765 messaggi** per lingua (+2 del catalogo UI `open.triggerEvent`/`conn.pluginNeedsAuth`, +3 del renderer `nome utente`/`password`/`codice TOTP`); `en` **0 missing**; seconda estrazione senza differenze.
+
+### Output dei check
+
+- `npm run typecheck`: pulito.
+- `npx vitest run --maxWorkers=4`: **104 file / 1620 test verdi** (1604 della 17c + 16 nuovi: 5 guardia+detection, 3 run-job open.triggerEvent, 2 triggerEventTitle, 2 fill-fields, 1 ui-text open.triggerEvent, 1 group-turns `[user] user:`, 1 fase14-fill codici, 1 prompts D5; più asserzioni aggiornate in polls/webhooks/presence/loop/wiring-resolver/model-fallback).
+- `npx vitest run --config vitest.eval.config.ts eval/language-judges.eval.ts`: 12/12.
+- `npm run build`: ✓ built ×3 (main + preload + renderer).
+- `npm run i18n:extract`: 765/765 per lingua, `en` 0 missing; seconda estrazione senza differenze.
+- Prove manuali D4: v. sopra (entrambe CADUTE come richiesto, poi ripristinato).
+
+### Cosa NON è stato fatto (per specifica)
+
+- L'eval NON è stata lanciata (serve un modello cloud): D6 è solo informativo; dopo D5 il revisore rimisura il caso 38 e i comuni.
+- Nessuna migrazione del database: i job in coda col payload vecchio (senza `kind`) aprono il turno senza `meta.ui` e mostrano il content com'è — verificato da test.
+- Nessun Docker, nessun modello cloud, nessuna rete reale, niente `npm run dist`; né l'app né il daemon sono stati avviati sulla cartella dati vera; nessun segreto vero; nessun processo dell'utente toccato; nessun file dell'utente, volume `sandbot-*` o cartella di `/var/folders/…/T/` cancellati.

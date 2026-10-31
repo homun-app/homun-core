@@ -184,6 +184,65 @@ describe('makeJobRunner: routine-run', () => {
     expect(log[0]!.opts.source).toBe('routine')
     expect(log[0]!.opts.title).toBe('Backup')
     expect(log[0]!.opts.resume).toEqual({ entryId: 9 })
+    // fase 17c (C2): l'apertura della routine a schedule ha la sua bolla UI
+    expect(log[0]!.opts.extraMeta).toEqual({
+      ui: { id: 'open.routine', values: { title: 'Backup', prompt: 'fai il backup' } }
+    })
+  })
+
+  // fase 17c correzioni (D1): l'apertura con evento ha la bolla UI open.triggerEvent
+  it('apertura con evento (payload nuovo): meta.ui open.triggerEvent con kind e item; externalEvent', async () => {
+    const job = enqueueJob(db, {
+      agentId: 'a2', kind: 'routine-run',
+      payload: {
+        routineId: 5, title: 'Posta', prompt: 'controlla la posta',
+        event: { source: 'connector_poll', kind: 'newEmail', item: 'Fattura', title: 'New email: Fattura', data: { id: 'm1' }, at: 1 }
+      },
+      runAt: 0, now: 0
+    })
+    const log: Seen[] = []
+    await makeJobRunner(db, fakeTurn(log))(job, emit)
+    // il modello legge il blocco <evento> con il titolo inglese
+    expect(log[0]!.text).toContain('[routine "Posta": New email: Fattura]')
+    expect(log[0]!.text).toContain('<evento>')
+    expect(log[0]!.opts.externalEvent).toBe(true)
+    // la bolla UI dice cosa è arrivato: il blocco grezzo NON è la bolla
+    expect(log[0]!.opts.extraMeta).toEqual({
+      ui: { id: 'open.triggerEvent', values: { title: 'Posta', kind: 'newEmail', item: 'Fattura', withItem: 'yes' } }
+    })
+  })
+
+  it('apertura con evento senza item: withItem no', async () => {
+    const job = enqueueJob(db, {
+      agentId: 'a2', kind: 'routine-run',
+      payload: {
+        routineId: 6, title: 'Rientri', prompt: 'riassumi',
+        event: { source: 'presence_return', kind: 'presenceReturn', title: 'The user just came back to the computer', at: 2 }
+      },
+      runAt: 0, now: 0
+    })
+    const log: Seen[] = []
+    await makeJobRunner(db, fakeTurn(log))(job, emit)
+    expect(log[0]!.opts.extraMeta).toEqual({
+      ui: { id: 'open.triggerEvent', values: { title: 'Rientri', kind: 'presenceReturn', withItem: 'no' } }
+    })
+  })
+
+  // job già in coda col payload vecchio (17b): niente meta.ui, content com'è
+  it('apertura con evento SENZA kind (payload vecchio): nessun meta.ui, il content grezzo resta la bolla', async () => {
+    const job = enqueueJob(db, {
+      agentId: 'a2', kind: 'routine-run',
+      payload: {
+        routineId: 7, title: 'Vecchia', prompt: 'p',
+        event: { source: 'webhook', title: 'Webhook ricevuto', data: { a: 1 }, at: 3 }
+      },
+      runAt: 0, now: 0
+    })
+    const log: Seen[] = []
+    await makeJobRunner(db, fakeTurn(log))(job, emit)
+    expect(log[0]!.text).toContain('[routine "Vecchia": Webhook ricevuto]')
+    expect(log[0]!.opts.externalEvent).toBe(true)
+    expect(log[0]!.opts.extraMeta).toBeUndefined()
   })
 })
 

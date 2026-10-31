@@ -2929,7 +2929,7 @@ describe('fase 10 (§3): post_to_group, pass e turni di gruppo nel loop', () => 
   it('post_to_group DENTRO un turno di gruppo: gruppo implicito, depth = letta+1, un solo post, turni per gli altri', async () => {
     setupGroup()
     // un messaggio già nel gruppo (ci servirà da cursore/quote)
-    h.db.groupsState.messages.push({ id: 50, group_id: 1, author_kind: 'user', author_id: null, author_name: 'utente', text: 'inizio', reply_to: null, root_id: 50, depth: 0, automatic: 0, created_at: 1 })
+    h.db.groupsState.messages.push({ id: 50, group_id: 1, author_kind: 'user', author_id: null, author_name: 'user', text: 'inizio', reply_to: null, root_id: 50, depth: 0, automatic: 0, created_at: 1 })
     h.llm.queue = [
       { toolCalls: [{ id: 'pg1', name: 'post_to_group', arguments: JSON.stringify({ text: 'ecco le tre opzioni di menu' }) }] },
       { toolCalls: [{ id: 'pg2', name: 'post_to_group', arguments: JSON.stringify({ text: 'dimenticavo il dolce' }) }] },
@@ -3188,7 +3188,7 @@ describe('fase 10 (§3): post_to_group, pass e turni di gruppo nel loop', () => 
 
   it('E2: consegna scritta come TESTO LIBERO → UNA chiamata di recupero coi tool del sollecito, il post esce con depth e catena giuste', async () => {
     setupGroup()
-    h.db.groupsState.messages.push({ id: 50, group_id: 1, author_kind: 'user', author_id: null, author_name: 'utente', text: 'inizio', reply_to: null, root_id: 50, depth: 0, automatic: 0, created_at: 1 })
+    h.db.groupsState.messages.push({ id: 50, group_id: 1, author_kind: 'user', author_id: null, author_name: 'user', text: 'inizio', reply_to: null, root_id: 50, depth: 0, automatic: 0, created_at: 1 })
     let recoveryTools: string[] = []
     h.llm.queue = [
       { text: '@Coordinatore cena ecco la scaletta v2 aggiornata al menu' },
@@ -3361,7 +3361,7 @@ describe('fase 10 (§3): post_to_group, pass e turni di gruppo nel loop', () => 
     // un terzo membro (specialista) da menzionare nel post del recupero
     h.db.agents.set('agent_altro', { id: 'agent_altro', name: 'Altro', description: '', providerId: 'prov', model: 'm1', status: 'idle', unread: 0, createdAt: 3 })
     h.db.groupsState.members.set(1, [AGENT, 'agent_coord', 'agent_altro'])
-    h.db.groupsState.messages.push({ id: 50, group_id: 1, author_kind: 'user', author_id: null, author_name: 'utente', text: 'inizio', reply_to: null, root_id: 50, depth: 0, automatic: 0, created_at: 1 })
+    h.db.groupsState.messages.push({ id: 50, group_id: 1, author_kind: 'user', author_id: null, author_name: 'user', text: 'inizio', reply_to: null, root_id: 50, depth: 0, automatic: 0, created_at: 1 })
     const runRecoveryPost = async (): Promise<void> => {
       h.db.jobs.length = 0
       h.db.groupsState.turns.length = 0
@@ -4359,7 +4359,8 @@ describe('fase 12: il FIGLIO — tool, prompt, whitelist e consegna', () => {
     await runTurn(CHILD, 'brief', emit, undefined, { source: 'user', subagent: { id: CHILD, parentId: AGENT } })
     const row = subagentsState.rows.find((r) => r.id === CHILD)!
     expect(row.status).toBe('failed')
-    expect(row.summary).toContain('boom del provider')
+    // fase 17c correzioni (D2): il motivo è INGLESE (il padre lo rilegge nel blocco <risultati_sottoagenti>)
+    expect(row.summary).toBe('model error: boom del provider')
     expect(subagentsState.terminal).toContain(CHILD)
     // niente sollecito: una sola chiamata al modello
     expect(h.llm.calls).toHaveLength(1)

@@ -15,7 +15,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import { listRoutines, touchRoutineRun, touchRoutinePoll, appendEntry, getEntries, getSetting, setSetting, type Routine } from '../main/store/db'
 import { activeJobForAgent, enqueueJob, type Job } from '../main/store/jobs'
 import { nextScheduleRun, nextPollAt } from './triggers'
-import { extractIds, extractByPath, splitIdField, guessEventStart, guessItemTitle, mergeSeenIds, type SeenState } from '../shared/triggers'
+import { extractIds, extractByPath, splitIdField, guessEventStart, guessItemTitle, mergeSeenIds, triggerEventTitle, type SeenState } from '../shared/triggers'
 import type { SandbotEvent, TriggerEventPayload } from '../shared/types'
 // fase 17c (C2): notice col testo del catalogo UI (meta.ui + content tradotto)
 import { uiLanguage, formatUi, ui } from '../main/ui-language'
@@ -155,10 +155,14 @@ export async function tickConnectorPolls(deps: PollDeps, now: number): Promise<v
         }
         const offset = (t.offsetMinutes ?? 0) * 60_000
         const runAt = Math.max(start - offset, now)
-        const title = guessItemTitle(item)
+        // fase 17c correzioni (D1): titolo inglese per il modello (funzione
+        // pura unica); il titolo dell'elemento è un dato esterno e resta com'è
+        const itemTitle = guessItemTitle(item)
         enqueueRoutineRun(deps.db, r, now, {
           source: 'calendar_event',
-          title: `Evento del calendario in arrivo${title ? `: ${title}` : ''}`,
+          kind: 'calendarSoon',
+          ...(itemTitle ? { item: itemTitle } : {}),
+          title: triggerEventTitle('calendarSoon', itemTitle || undefined),
           data: item,
           at: start
         }, runAt)
@@ -184,12 +188,15 @@ export async function tickConnectorPolls(deps: PollDeps, now: number): Promise<v
       const items = split ? extractByPath(parsed, split.itemsPath) : []
       for (const id of fresh) {
         const item = items.find((x) => String((x as Record<string, unknown>)?.[split!.idKey] ?? '') === id)
-        const title = guessItemTitle(item)
+        // fase 17c correzioni (D1): kind + item per la bolla UI, titolo inglese
+        // per il modello; il titolo dell'elemento (o "id <id>") è un dato esterno
+        const kind = t.preset === 'email' ? 'newEmail' as const : 'newItem' as const
+        const itemLabel = guessItemTitle(item) || `id ${id}`
         enqueueRoutineRun(deps.db, r, now, {
           source: 'connector_poll',
-          title: t.preset === 'email'
-            ? `Nuova email${title ? `: ${title}` : ` (id ${id})`}`
-            : `Nuovo elemento${title ? `: ${title}` : ` (id ${id})`}`,
+          kind,
+          item: itemLabel,
+          title: triggerEventTitle(kind, itemLabel),
           data: item ?? id,
           at: now
         })

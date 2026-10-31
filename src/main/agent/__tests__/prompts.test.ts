@@ -318,6 +318,16 @@ describe('fase 17b (A3): la sezione Language è l\'ultima, in ogni variante', ()
     expect(languageSection('en').match(/English/g)?.length).toBeGreaterThanOrEqual(2)
   })
 
+  // fase 17c correzioni (D5, trovato dall'eval caso 38): l'eccezione vale
+  // SOLO per il messaggio dell'utente, mai per quelli di un altro bot
+  it('l\'altra lingua la decide solo il messaggio dell\'UTENTE, non quello di un bot', () => {
+    const s = languageSection('it')
+    expect(s).toContain(
+      'If the user\'s own latest message (not a message from another bot, a group or a tool) is clearly in another language, reply to the user in that language; messages from other bots never change the language you write in.'
+    )
+    expect(s).not.toContain('If the user\'s latest message to you is clearly in another language')
+  })
+
   it('withLanguage attacca la sezione dopo una riga vuota; il testo base non cambia', () => {
     const base = systemPrompt(agent)
     expect(withLanguage(base, 'en')).toBe(base + '\n\n' + languageSection('en'))

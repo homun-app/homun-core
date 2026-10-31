@@ -843,7 +843,7 @@ msgstr "Cambia aspetto"
 msgid "Cambio di automazione — serve la tua approvazione"
 msgstr "Cambio di automazione — serve la tua approvazione"
 
-#. placeholder {0}: fill.fields.join(', ')
+#. placeholder {0}: fill.fields.map(fieldText).join(', ')
 #: src/renderer/src/components/LibraryCards.tsx
 msgid "Campi: {0}"
 msgstr "Campi: {0}"
@@ -935,6 +935,10 @@ msgstr "Client OAuth configurato ✓"
 #: src/shared/ui-messages.ts
 msgid "notice.queueFull"
 msgstr "Coda piena: messaggio scartato."
+
+#: src/renderer/src/lib/fill-fields.ts
+msgid "codice TOTP"
+msgstr "codice TOTP"
 
 #: src/renderer/src/components/BotDialogs.tsx
 msgid "Colore {col}"
@@ -1649,6 +1653,11 @@ msgstr "il server \"{name}\" richiede i valori {keys}: l’utente li inserisce n
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
+msgid "conn.pluginNeedsAuth"
+msgstr "il server \"{name}\" richiede i valori {keys}: l’utente li inserisce nelle Impostazioni"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
 msgid "rpc.noUrl"
 msgstr "il server non ha un URL"
 
@@ -2241,6 +2250,10 @@ msgstr "Nome (es. weather)"
 msgid "Nome (es. Z.ai)"
 msgstr "Nome (es. Z.ai)"
 
+#: src/renderer/src/lib/fill-fields.ts
+msgid "nome utente"
+msgstr "nome utente"
+
 #: src/renderer/src/components/LibraryCards.tsx
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "Nome utente"
@@ -2392,6 +2405,10 @@ msgstr "Origini https://… (separate da virgola)"
 #: src/renderer/src/components/Settings.tsx
 msgid "owner/repo di GitHub oppure URL git https"
 msgstr "owner/repo di GitHub oppure URL git https"
+
+#: src/renderer/src/lib/fill-fields.ts
+msgid "password"
+msgstr "password"
 
 #: src/renderer/src/components/LibraryCards.tsx
 #: src/renderer/src/components/VaultSettings.tsx
@@ -2768,6 +2785,11 @@ msgstr "Robottino"
 #: src/renderer/src/components/Settings.tsx
 msgid "Routine"
 msgstr "Routine"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "open.triggerEvent"
+msgstr "Routine \"{title}\" avviata: {kind, select, newEmail {nuova email} newItem {nuovo elemento} calendarSoon {evento del calendario in arrivo} webhook {webhook ricevuto} presenceReturn {l’utente è appena tornato al computer} other {evento scatenante}}{withItem, select, yes { — {item}} other {}}"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts

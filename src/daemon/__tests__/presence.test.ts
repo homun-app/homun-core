@@ -181,7 +181,12 @@ describe('rientro dopo l\'assenza lunga (look-around)', () => {
     presence.onSignal('active')
     expect(log.routineRuns).toHaveLength(1)
     expect(log.routineRuns[0]!.routine.id).toBe(3)
-    expect(log.routineRuns[0]!.event.source).toBe('presence_return')
+    // fase 17c correzioni (D1): titolo inglese per il modello + kind per la bolla UI
+    expect(log.routineRuns[0]!.event).toMatchObject({
+      source: 'presence_return',
+      kind: 'presenceReturn',
+      title: 'The user just came back to the computer'
+    })
   })
 })
 

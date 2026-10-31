@@ -484,6 +484,16 @@ describe('buildGroupTurnOpening (puro)', () => {
     expect(o).toContain('You are @Cercatore Cena: do not mention yourself in your messages.')
   })
 
+  // fase 17c correzioni (D2): il post dell'utente nel gruppo lo scrive api.ts
+  // con authorName 'user' — il modello legge "[user] user: …" (inglese)
+  it('il messaggio dell\'utente scritto dal RPC (authorName "user") appare come [user] user:', () => {
+    const o = buildGroupTurnOpening({
+      ...ev,
+      newMessages: [{ id: 3, authorKind: 'user', authorName: 'user', text: 'procedete', replyTo: null }]
+    })
+    expect(o).toContain('[user] user: procedete')
+  })
+
   it('la REGOLA dei turni di gruppo accompagna il blocco', () => {
     const o = buildGroupTurnOpening(ev)
     expect(o).toContain(GROUP_TURN_RULE)

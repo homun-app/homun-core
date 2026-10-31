@@ -16,6 +16,10 @@ import { getSetting, setSetting } from '../store/db'
 import { listServers, saveServers, setMcpAuthResolver, type McpServerConfig, type McpAuth, type McpAuthResolver } from '../mcp'
 import { SECRET_KIND } from '../../shared/types'
 import { resolvePluginServerPlaceholders, unresolvedUserConfigKeys } from './install'
+// fase 17c correzioni (D2): il rifiuto è un UiError — message inglese per il
+// modello, id del catalogo UI per la UI (confine RPC di ws-server)
+import { ui, UiError } from '../../shared/ui-text'
+import { UI } from '../../shared/ui-messages'
 
 export interface ConnectorsHost {
   callUi(method: string, params?: unknown[]): Promise<unknown>
@@ -89,7 +93,10 @@ export function buildMcpAuthResolver(deps: AuthResolverDeps): McpAuthResolver {
       cur.needsAuth = { kind: 'settings', keys: missing }
       deps.saveServers(servers)
     }
-    throw new Error(`il server "${cfg.name}" richiede i valori ${missing.join(', ')}: l'utente li inserisce nelle Impostazioni`)
+    throw new UiError(
+      `server "${cfg.name}" needs the values ${missing.join(', ')}: the user enters them in Settings`,
+      ui(UI.connPluginNeedsAuth, { name: cfg.name, keys: missing.join(', ') })
+    )
   }
 
   return async (cfg): Promise<McpAuth> => {

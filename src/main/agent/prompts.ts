@@ -200,7 +200,7 @@ export function documentsCredentialsSection(opts: { credentials?: boolean } = {}
 export function languageSection(lang: Lang): string {
   const name = languageName(lang)
   return `# Language
-The user's language is ${name}. Write every natural-language text you produce in ${name}: messages and questions to the user, group posts, messages and briefs to other bots, roles of new bots, documents, reports and files meant for people. If the user's latest message to you is clearly in another language, reply to it in that language. Code, commands, paths, identifiers and non-prose tool arguments stay as they are. These instructions are written in English; that does not change the user's language.`
+The user's language is ${name}. Write every natural-language text you produce in ${name}: messages and questions to the user, group posts, messages and briefs to other bots, roles of new bots, documents, reports and files meant for people. If the user's own latest message (not a message from another bot, a group or a tool) is clearly in another language, reply to the user in that language; messages from other bots never change the language you write in. Code, commands, paths, identifiers and non-prose tool arguments stay as they are. These instructions are written in English; that does not change the user's language.`
 }
 
 /**

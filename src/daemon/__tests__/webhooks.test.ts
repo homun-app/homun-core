@@ -87,7 +87,8 @@ describe('webhook dei trigger', () => {
     expect(jobs).toHaveLength(1)
     expect(jobs[0]!.kind).toBe('routine-run')
     expect(jobs[0]!.agent_id).toBe('agent_w')
-    expect(jobs[0]!.payload.event).toMatchObject({ source: 'webhook', title: 'Webhook ricevuto', data: { hello: 'world' } })
+    // fase 17c correzioni (D1): titolo inglese per il modello + kind per la bolla UI
+    expect(jobs[0]!.payload.event).toMatchObject({ source: 'webhook', kind: 'webhook', title: 'Webhook received', data: { hello: 'world' } })
     expect(jobs[0]!.payload.routineId).toBe(routineId)
   })
 

@@ -192,7 +192,8 @@ export class DaemonClient {
     this.ws = ws
     ws.send(serializeHello(info.token))
     // il token è valido se l'hello arriva prima della chiusura
-    const guard = setTimeout(() => this.helloFail?.(new Error('handshake col daemon scaduto')), SPAWN_TIMEOUT_MS)
+    // (fase 17c correzioni D2: errore d'avvio per lo sviluppatore, inglese come gli altri log)
+    const guard = setTimeout(() => this.helloFail?.(new Error('daemon handshake timed out')), SPAWN_TIMEOUT_MS)
     try {
       await handshake
       // 0b: alla riconnessione la UI ricarica transcript e agenti

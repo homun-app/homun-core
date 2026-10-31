@@ -9,7 +9,8 @@ const httpError = (status: number): Error => {
   return e
 }
 const deadline = (): Error => {
-  const e = new Error('nessun token entro 150 s')
+  // fase 17c correzioni (D2): il messaggio di StreamDeadlineError è inglese
+  const e = new Error('no token within 150 s')
   e.name = 'StreamDeadlineError'
   return e
 }

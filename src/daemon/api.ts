@@ -516,7 +516,9 @@ export function buildApiMethods(
       // fase 17b (A2): il post dell'utente nel gruppo è testo di una persona
       noteHumanText(t)
       const msg = groups.addGroupMessage({
-        groupId: g.id, authorKind: 'user', authorId: null, authorName: 'utente', text: t, depth: 0
+        // fase 17c correzioni (D2): authorName inglese — il MODELLO lo legge
+        // come "[user] user: …"; la UI non mostra il nome dell'utente (bolla a destra)
+        groupId: g.id, authorKind: 'user', authorId: null, authorName: 'user', text: t, depth: 0
       })
       groups.scheduleTurnsForMessage(msg, emit)
       emit({ type: 'groups' })

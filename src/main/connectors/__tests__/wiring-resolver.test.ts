@@ -16,6 +16,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js'
 import { buildMcpAuthResolver } from '../wiring'
+import { UiError } from '../../../shared/ui-text'
 import { authorizeWithLoopback, createOAuthProvider } from '../oauth-provider'
 import { createConnectorsSecretStore } from '../sealed-store'
 import { serverIdFor, reconnectServer, SECRET_KIND } from '../install'
@@ -137,7 +138,16 @@ describe('L1: il resolver porta i valori salvati dalla UI fino alla connessione'
       auth: { kind: 'headers' }, source: { kind: 'plugin', plugin: 'demo', marketplace: 'mp', sha: 'abc123' },
       pluginSpec: { headers: { 'x-api-key': '${user_config.API_KEY}' } }
     })
-    await expect(resolver(servers[0]!)).rejects.toThrow('richiede i valori API_KEY')
+    // fase 17c correzioni (D2): UiError — message inglese per il modello, id del catalogo per la UI
+    let failure: unknown = null
+    try {
+      await resolver(servers[0]!)
+    } catch (e) {
+      failure = e
+    }
+    expect(failure).toBeInstanceOf(UiError)
+    expect((failure as Error).message).toBe('server "api" needs the values API_KEY: the user enters them in Settings')
+    expect((failure as UiError).uiText).toEqual({ id: 'conn.pluginNeedsAuth', values: { name: 'api', keys: 'API_KEY' } })
     // il server torna in needsAuth: niente stringhe vuote silenziose
     expect(servers[0]!.needsAuth).toEqual({ kind: 'settings', keys: ['API_KEY'] })
   })

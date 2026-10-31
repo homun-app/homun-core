@@ -32,7 +32,9 @@ export class StreamDeadlineError extends Error {
     ms: number
   ) {
     const s = Math.round(ms / 1000)
-    super(deadline === 'first-token' ? `nessun token entro ${s} s` : `stream inattivo da ${s} s`)
+    // fase 17c correzioni (D2): inglese — il messaggio entra nel summary del
+    // figlio che il PADRE rilegge (failSubagent) e come valore nella notice
+    super(deadline === 'first-token' ? `no token within ${s} s` : `stream idle for ${s} s`)
     this.name = 'StreamDeadlineError'
   }
 }

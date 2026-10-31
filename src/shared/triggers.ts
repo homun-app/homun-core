@@ -242,6 +242,25 @@ export function triggerShapeErrors(t: RoutineTrigger): string[] {
 
 // ---- l'evento che entra nel prompt del turno ----
 
+/** Il codice del tipo di un evento di trigger (fase 17c correzioni, D1). */
+export type TriggerEventKind = NonNullable<TriggerEventPayload['kind']>
+
+/**
+ * Fase 17c correzioni (D1): il titolo INGLESE di un evento di trigger, da
+ * UNA sola funzione pura — è la riga `[routine "…": <titolo>]` che il
+ * MODELLO legge nell'apertura del turno. `item` è un dato esterno (subject
+ * dell'email, id) e resta com'è.
+ */
+export function triggerEventTitle(kind: TriggerEventKind, item?: string): string {
+  switch (kind) {
+    case 'newEmail': return `New email${item ? `: ${item}` : ''}`
+    case 'newItem': return `New item${item ? `: ${item}` : ''}`
+    case 'calendarSoon': return `Upcoming calendar event${item ? `: ${item}` : ''}`
+    case 'webhook': return 'Webhook received'
+    case 'presenceReturn': return 'The user just came back to the computer'
+  }
+}
+
 /**
  * Il prompt del turno di un trigger con evento: il prompt della routine più
  * il blocco <evento> come EVIDENZA, con la regola esplicita che il contenuto

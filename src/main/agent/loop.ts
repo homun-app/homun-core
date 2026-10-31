@@ -1113,7 +1113,8 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           add({ ...uiSystemEntry(agentId, 'notice', ui(UI.modelNotResponding, { why: err.message })) })
           emitLastEntry(agentId, emit)
           // fase 12 (punto 3): il figlio che non risponde chiude failed col motivo
-          failSubagent(`il modello non ha risposto (${err.message})`)
+          // (fase 17c correzioni D2: inglese — il summary arriva al PADRE)
+          failSubagent(`the model did not respond (${err.message})`)
           endTurn(agentId, 'STOPPED', emit, opts.taskId, 'model-error')
           setStatus(agentId, 'idle', emit)
           return
@@ -1122,7 +1123,8 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         add({ ...uiSystemEntry(agentId, 'notice', ui(UI.modelError, { message: msg })) })
         emitLastEntry(agentId, emit)
         // fase 12 (punto 3): errore del modello → il figlio chiude failed col motivo
-        if (!controller.signal.aborted) failSubagent(`errore del modello: ${msg}`)
+        // (fase 17c correzioni D2: inglese — il summary arriva al PADRE)
+        if (!controller.signal.aborted) failSubagent(`model error: ${msg}`)
         // correzione C5: il motivo distingue il limite d'uso del provider (429)
         // dagli altri errori; se il turno era già stato interrotto è un interrupt
         endTurn(agentId, 'STOPPED', emit, opts.taskId, controller.signal.aborted ? 'interrupt' : stopReasonOfError(err))
@@ -1222,7 +1224,8 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           add({ ...uiSystemEntry(agentId, 'notice', ui(UI.toolLoop)) })
           emitLastEntry(agentId, emit)
           // fase 12 (punto 3): il figlio inceppato chiude failed col motivo
-          failSubagent(`il modello ripeteva la stessa identica chiamata (${call.name})`)
+          // (fase 17c correzioni D2: inglese — il summary arriva al PADRE)
+          failSubagent(`the model kept repeating the exact same call (${call.name})`)
           endTurn(agentId, 'STOPPED', emit, opts.taskId, 'loop')
           setStatus(agentId, 'idle', emit)
           return

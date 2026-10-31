@@ -241,6 +241,23 @@ const depsOf = (approvals: { decision: import('../fill').FillApproval; asked: nu
 })
 
 describe('7d: il flusso completo di fill_credential col MCP finto', () => {
+  // fase 17c correzioni (D3): la card riceve CODICI, non parole italiane
+  it('i campi passati alla card sono i codici username/password/totp', async () => {
+    await browser.callBrowserTool(AGENT, 'browser_open', { url: 'https://app.example.test/login' })
+    let asked: string[] | null = null
+    const r = await runFillCredential(
+      { id: LOGIN.id, username_ref: 'e2', password_ref: 'e3', totp_ref: 'e4' },
+      depsOf({ decision: 'allow-turn', asked: 0 }, {
+        requestApproval: async (_login, _origin, fields) => {
+          asked = fields
+          return 'allow-turn'
+        }
+      })
+    )
+    expect(asked).toEqual(['username', 'password', 'totp'])
+    expect(r.filled).toEqual({ username: true, password: true, totp: true })
+  })
+
   it('SENZA approvazione NESSUNA chiamata a MCP (nessun browser_type)', async () => {
     await browser.callBrowserTool(AGENT, 'browser_open', { url: 'https://app.example.test/login' })
     const approvals = { decision: 'deny' as const, asked: 0 }

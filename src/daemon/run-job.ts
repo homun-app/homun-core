@@ -152,14 +152,25 @@ export function makeJobRunner(db: DatabaseSync, runTurnFn: RunTurnFn = runTurn) 
       ? formatTriggerEvent(p.title, p.prompt, p.event)
       : routineOpening(p.title, p.prompt)
     // fase 17c (C2, MU): l'apertura della routine in chat si mostra tradotta;
-    // il testo che legge il modello resta quello di sopra (inglese). Per i
-    // turni da trigger l'apertura porta l'evento estero: la mostra resta il
-    // testo grezzo (è un blocco evidenza, dato)
+    // il testo che legge il modello resta quello di sopra (inglese). Fase 17c
+    // correzioni (D1): anche l'apertura con evento ha la sua bolla tradotta
+    // (open.triggerEvent) — il blocco <evento> grezzo NON entra nella bolla.
+    // Un payload vecchio SENZA kind non riceve meta.ui: mostra il content
+    // com'è (niente migrazione, niente crash)
     const { ui, UI } = await import('../main/ui-language')
+    const openingUi = !p.event
+      ? ui(UI.openRoutine, { title: p.title, prompt: p.prompt })
+      : p.event.kind
+        ? ui(UI.openTriggerEvent, {
+          title: p.title,
+          kind: p.event.kind,
+          ...(p.event.item ? { item: p.event.item, withItem: 'yes' } : { withItem: 'no' })
+        })
+        : null
     await runTurnFn(job.agent_id, text, emit, undefined, {
       source: 'routine', title: p.title, ...opts, onTurnEntry,
       ...(p.event ? { externalEvent: true } : {}),
-      ...(p.event ? {} : { extraMeta: { ui: ui(UI.openRoutine, { title: p.title, prompt: p.prompt }) } })
+      ...(openingUi ? { extraMeta: { ui: openingUi } } : {})
     })
   }
 }

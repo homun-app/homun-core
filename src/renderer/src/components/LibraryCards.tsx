@@ -6,6 +6,7 @@
 import { useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { api, useStore } from '../store'
+import { fillFieldLabel } from '../lib/fill-fields'
 import type { TranscriptEntry, SendMessagePayload } from '../../../shared/types'
 
 const metaOf = (entry: TranscriptEntry) => (entry.meta ?? {}) as { approvalId?: string; status?: string; message?: SendMessagePayload }
@@ -56,19 +57,26 @@ export function ChartCard({ entry }: { entry: TranscriptEntry }) {
  * (loginId, origin) revocabile da Impostazioni → Vault.
  */
 export function FillCard({ entry }: { entry: TranscriptEntry }) {
+  const { i18n } = useLingui()
   const activeId = useStore((s) => s.activeId)
   const resolveApproval = useStore((s) => s.resolveApproval)
   const m = metaOf(entry)
   const fill = m.message as Extract<SendMessagePayload, { type: 'fill' }> | undefined
   if (!fill || !activeId) return null
   const done = m.status && m.status !== 'pending'
+  // fase 17c correzioni (D3): i campi sono codici — si traducono qui; le
+  // parole italiane delle entry vecchie restano come sono (codice sconosciuto)
+  const fieldText = (code: string): string => {
+    const label = fillFieldLabel(code)
+    return typeof label === 'string' ? label : i18n.t(label)
+  }
   return (
     <div className="max-w-[75%] rounded-2xl rounded-bl-md border border-destructive/40 bg-destructive/10 px-4 py-3 shadow-soft">
       <p className="text-[10px] font-medium uppercase tracking-wide text-destructive/80"><Trans>Compilazione login</Trans></p>
       <p className="mt-1 text-sm text-foreground">
         <Trans>Compilo il login «{fill.label}» su <span className="font-mono text-xs">{fill.origin}</span>?</Trans>
       </p>
-      <p className="mt-1 text-xs text-muted-foreground"><Trans>Campi: {fill.fields.join(', ')}</Trans></p>
+      <p className="mt-1 text-xs text-muted-foreground"><Trans>Campi: {fill.fields.map(fieldText).join(', ')}</Trans></p>
       {done ? (
         <p className="mt-2 text-xs text-muted-foreground">{m.status === 'allowed' ? <Trans>✓ consentito</Trans> : m.status === 'denied' ? <Trans>negato</Trans> : <Trans>scaduto</Trans>}</p>
       ) : (

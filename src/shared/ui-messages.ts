@@ -178,6 +178,13 @@ export const UI = {
 
   // ---- aperture dei turni di routine/task e shell (MU, C2) ----
   openRoutine: msg({ id: 'open.routine', message: '[routine ricorrente: {title}] {prompt}' }),
+  // fase 17c correzioni (D1): l'apertura del turno di una routine a TRIGGER —
+  // la bolla dice cosa è arrivato, il blocco <evento> grezzo NON si mostra
+  openTriggerEvent: msg({
+    id: 'open.triggerEvent',
+    message:
+      'Routine "{title}" avviata: {kind, select, newEmail {nuova email} newItem {nuovo elemento} calendarSoon {evento del calendario in arrivo} webhook {webhook ricevuto} presenceReturn {l’utente è appena tornato al computer} other {evento scatenante}}{withItem, select, yes { — {item}} other {}}'
+  }),
   openTask: msg({
     id: 'open.task',
     message:
@@ -278,6 +285,12 @@ export const UI = {
   rpcNeedsWindow: msg({ id: 'rpc.needsWindow', message: 'serve la finestra di Homun per autorizzare' }),
   rpcMissingValues: msg({
     id: 'rpc.missingValues',
+    message: 'il server "{name}" richiede i valori {keys}: l’utente li inserisce nelle Impostazioni'
+  }),
+  // fase 17c correzioni (D2): il rifiuto di pluginNeedsAuth serve sia al
+  // modello (message inglese) sia alla UI (questo id)
+  connPluginNeedsAuth: msg({
+    id: 'conn.pluginNeedsAuth',
     message: 'il server "{name}" richiede i valori {keys}: l’utente li inserisce nelle Impostazioni'
   }),
   rpcAuthFailed: msg({ id: 'rpc.authFailed', message: 'autorizzazione non riuscita ({error})' }),

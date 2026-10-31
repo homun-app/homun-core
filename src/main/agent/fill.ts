@@ -105,7 +105,10 @@ export async function runFillCredential(
   }
   // 3. APPROVAZIONE
   if (!deps.hasStandingGrant(login.id, origin) && !deps.hasTurnAllow(login.id, origin)) {
-    const fields = wanted.map((w) => (w.kind === 'username' ? 'utente' : w.kind === 'password' ? 'password' : 'codice TOTP'))
+    // fase 17c correzioni (D3): i campi sono CODICI ('username' | 'password' |
+    // 'totp') — li traduce la card nel renderer; una eventuale parola italiana
+    // delle entry vecchie resta com'è (codice sconosciuto → invariato)
+    const fields = wanted.map((w) => w.kind)
     const decision = await deps.requestApproval(login, origin, fields)
     if (decision === 'deny') {
       return { output: 'Login fill cancelled by the user: do not retry it without their ok.', denied: true }

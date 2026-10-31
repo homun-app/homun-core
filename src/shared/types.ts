@@ -621,8 +621,16 @@ export type RoutineTrigger = ScheduleTrigger | ConnectorPollTrigger | WebhookTri
 /** L'evento che ha fatto scattare un job routine-run (entra nel prompt come <evento>). */
 export interface TriggerEventPayload {
   source: 'connector_poll' | 'webhook' | 'presence_return' | 'calendar_event'
-  /** Riga sintetica per l'utente ("Nuova email da x", "Webhook ricevuto") */
+  /**
+   * Fase 17c correzioni (D1): il codice del tipo di evento, per il titolo
+   * della bolla UI (open.triggerEvent). I job già in coda col payload vecchio
+   * non ce l'hanno: l'apertura mostra il content com'è.
+   */
+  kind?: 'newEmail' | 'newItem' | 'calendarSoon' | 'webhook' | 'presenceReturn'
+  /** Riga sintetica INGLESE per il modello ("New email: x", "Webhook received") */
   title: string
+  /** Il titolo dell'elemento (o "id <id>"): dato esterno, resta com'è */
+  item?: string
   /** Evidenza grezza (l'elemento nuovo, il corpo del webhook) */
   data?: unknown
   at?: number

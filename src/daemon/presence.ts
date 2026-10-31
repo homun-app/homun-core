@@ -12,10 +12,12 @@ import type { Agent, SandbotEvent, SendMessagePayload, WidgetOption } from '../s
 import type { Routine } from '../main/store/db'
 // fase 17c (C4): il messaggio fisso del check-in e il widget delle routine in
 // pausa sono testi del BOT all'utente — lingua dell'utente; il titolo
-// presence_return resta com'è (lo legge il modello nel blocco <evento>)
+// presence_return lo legge il modello nel blocco <evento> ed è inglese
+// (triggerEventTitle, fase 17c correzioni D1)
 import { currentUserLanguage } from '../main/agent/user-language'
 import { formatUi, ui } from '../shared/ui-text'
 import { UI } from '../shared/ui-messages'
+import { triggerEventTitle } from '../shared/triggers'
 
 /** Massimo un segnale 'active' accettato ogni 30 s (gli altri sono solo rumore). */
 export const ACTIVE_SIGNAL_MIN_MS = 30_000
@@ -63,7 +65,7 @@ export interface PresenceDeps {
   /** Accoda il turno look-around (job user-message con initiator LOOK_AROUND). */
   enqueueLookaround(agentId: string): void
   /** Accoda il run di una routine con evento (trigger presence_return). */
-  enqueueRoutineRun(routine: Routine, event: { source: 'presence_return'; title: string; at: number }): void
+  enqueueRoutineRun(routine: Routine, event: { source: 'presence_return'; kind: 'presenceReturn'; title: string; at: number }): void
   pokeWorker(): void
 }
 
@@ -145,7 +147,12 @@ export function createPresence(deps: PresenceDeps) {
       // routine a evento: presence_return scatta a ogni ritorno qualificato
       for (const r of deps.listRoutines()) {
         if (r.enabled && r.trigger?.type === 'presence_return') {
-          deps.enqueueRoutineRun(r, { source: 'presence_return', title: 'L\'utente è appena tornato al computer', at: now })
+          deps.enqueueRoutineRun(r, {
+            source: 'presence_return',
+            kind: 'presenceReturn',
+            title: triggerEventTitle('presenceReturn'),
+            at: now
+          })
         }
       }
       const main = mainAgentOf(deps.listAgents(), deps.getSetting<string | null>('mainAgentId', null))
