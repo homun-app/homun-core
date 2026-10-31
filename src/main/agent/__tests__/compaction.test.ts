@@ -172,10 +172,14 @@ describe('entriesToDigest (pure)', () => {
       e(6, 'event', 'system', 'Turno completato', { turnEnd: 'FINISHED' }),
       e(7, 'message', 'user', 'z'.repeat(5000))
     ])
-    expect(digest).toContain('UTENTE: domanda')
+    // fase 18a (E0): etichette inglesi — le legge il modello, con le vecchie
+    // italiane la compaction tendeva a riassumere in italiano
+    expect(digest).toContain('USER: domanda')
     expect(digest).toContain('TOOL run-command')
-    expect(digest).toContain('RISULTATO: risultato')
-    expect(digest).toContain('BOT→UTENTE: BOT disse questo')
+    expect(digest).toContain('RESULT: risultato')
+    expect(digest).toContain('BOT→USER: BOT disse questo')
+    expect(digest).not.toContain('UTENTE')
+    expect(digest).not.toContain('ASSISTENTE')
     expect(digest).not.toContain('nota interna')
     expect(digest).not.toContain('Turno completato')
     expect(digest.includes('…')).toBe(true) // troncato

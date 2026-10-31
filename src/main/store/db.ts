@@ -103,6 +103,21 @@ function open(): DatabaseSync {
       untrusted INTEGER DEFAULT 0,
       automatic INTEGER DEFAULT 0
     );
+    CREATE TABLE IF NOT EXISTS model_usage (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      at INTEGER NOT NULL,
+      agent_id TEXT,
+      provider_id TEXT NOT NULL,
+      provider_kind TEXT NOT NULL,
+      model TEXT NOT NULL,
+      source TEXT NOT NULL,
+      input INTEGER NOT NULL,
+      output INTEGER NOT NULL,
+      cache_read INTEGER NOT NULL DEFAULT 0,
+      cache_write INTEGER NOT NULL DEFAULT 0,
+      cost_usd REAL
+    );
+    CREATE INDEX IF NOT EXISTS idx_model_usage_at ON model_usage(at);
     ${JOBS_DDL}
     ${GROUPS_DDL}
     ${SHELL_JOBS_DDL}
@@ -732,4 +747,90 @@ export function updateTask(id: number, patch: Partial<Pick<Task, 'status' | 'sum
     .prepare('UPDATE tasks SET status = ?, summary = ?, updated_at = ? WHERE id = ?')
     .run(status, patch.summary ?? cur.summary, Date.now(), id)
   return getTask(id)
+}
+
+// ---- fase 18a (E4): uso registrato dei modelli (i dati della pagina Uso e
+// costi della 18b) — SOLO numeri: mai testo dei messaggi, mai chiavi ----
+
+export interface ModelUsageRecord {
+  at?: number
+  agentId: string | null
+  providerId: string
+  providerKind: string
+  model: string
+  source: string
+  input: number
+  output: number
+  cacheRead?: number
+  cacheWrite?: number
+  costUsd: number | null
+}
+
+/**
+ * Una riga di uso per una chiamata completata (l'usage del chunk finale).
+ * La chiama ogni chiamante di llmStream con la sua `source`; senza usage la
+ * chiamata non si registra (fuori contratto: si è perso il chunk finale).
+ */
+export function recordModelUsage(rec: ModelUsageRecord): void {
+  db()
+    .prepare(
+      `INSERT INTO model_usage(at, agent_id, provider_id, provider_kind, model, source, input, output, cache_read, cache_write, cost_usd)
+       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      rec.at ?? Date.now(), rec.agentId, rec.providerId, rec.providerKind, rec.model, rec.source,
+      rec.input, rec.output, rec.cacheRead ?? 0, rec.cacheWrite ?? 0, rec.costUsd
+    )
+}
+
+/** Una riga aggregata per provider_kind + model (la RPC usage:summary). */
+export interface ModelUsageSummaryRow {
+  providerKind: string
+  model: string
+  calls: number
+  input: number
+  output: number
+  cacheRead: number
+  cacheWrite: number
+  /** null solo se TUTTE le righe aggregate hanno costo null (locale/sconosciuto) */
+  costUsd: number | null
+}
+
+/** L'aggregato per provider_kind + model in una finestra [fromMs, toMs] (facoltativi). */
+export function modelUsageSummary(fromMs?: number, toMs?: number): ModelUsageSummaryRow[] {
+  const where = [
+    ...(fromMs !== undefined ? ['at >= ?'] : []),
+    ...(toMs !== undefined ? ['at <= ?'] : [])
+  ]
+  const params = [
+    ...(fromMs !== undefined ? [fromMs] : []),
+    ...(toMs !== undefined ? [toMs] : [])
+  ]
+  const rows = db()
+    .prepare(
+      `SELECT provider_kind, model,
+              COUNT(*) AS calls,
+              SUM(input) AS input, SUM(output) AS output,
+              SUM(cache_read) AS cacheRead, SUM(cache_write) AS cacheWrite,
+              SUM(cost_usd) AS knownCost, COUNT(cost_usd) AS costRows
+       FROM model_usage${where.length ? ' WHERE ' + where.join(' AND ') : ''}
+       GROUP BY provider_kind, model
+       ORDER BY calls DESC`
+    )
+    .all(...params) as Array<{
+      provider_kind: string; model: string; calls: number
+      input: number; output: number; cacheRead: number; cacheWrite: number
+      knownCost: number | null; costRows: number
+    }>
+  return rows.map((r) => ({
+    providerKind: r.provider_kind,
+    model: r.model,
+    calls: r.calls,
+    input: r.input,
+    output: r.output,
+    cacheRead: r.cacheRead,
+    cacheWrite: r.cacheWrite,
+    // costo noto solo se ALMENO una riga lo aveva; le righe null non pesano
+    costUsd: r.costRows > 0 ? (r.knownCost ?? 0) : null
+  }))
 }

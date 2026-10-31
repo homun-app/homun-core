@@ -18,7 +18,7 @@ import { secondaryPrompts } from '../main/agent/prompts'
 import { parseCron } from './cron'
 import { isValidTimeZone } from './tz'
 import { nextScheduleRun, nextPollAt } from './triggers'
-import { triggerShapeErrors, manualServerPollError, setTriggerTextsLang } from '../shared/triggers'
+import { triggerShapeErrors, manualServerPollError } from '../shared/triggers'
 import { avatarValidationError } from '../shared/avatar'
 import { generateWebhookToken } from './webhooks'
 import { enqueueJob } from '../main/store/jobs'
@@ -83,10 +83,11 @@ export function buildApiMethods(
    * trigger viene rifiutato (spec §fase 6 punto 1).
    */
   async function validateTrigger(t: RoutineTrigger): Promise<RoutineTrigger> {
-    // fase 17c: gli errori di forma/validazione nella lingua dell'interfaccia
-    setTriggerTextsLang(uiLanguage())
     if (!t || typeof t !== 'object' || typeof t.type !== 'string') throw uiError(UI.rpcTriggerInvalidObject)
-    const errors = triggerShapeErrors(t)
+    // fase 17c/18a (E0): gli errori di forma sono UiText, si formattano qui
+    // nella lingua dell'interfaccia (il result del modello in tools.ts è 'en')
+    const lang = uiLanguage()
+    const errors = triggerShapeErrors(t).map((e) => formatUi(e, lang))
     if (t.type === 'schedule' && t.kind === 'cron' && !parseCron(t.cron)) {
       errors.unshift(uiText(UI.rpcCronInvalid, { cron: t.cron }))
     }
@@ -110,7 +111,7 @@ export function buildApiMethods(
       const server = mcpMod.listServers().find((s) => s.id === t.connectorId)
       if (server) {
         const manual = manualServerPollError(t, !!server.catalogId)
-        if (manual) errors.push(manual)
+        if (manual) errors.push(formatUi(manual, lang))
       }
     }
     if (errors.length) throw uiError(UI.rpcTriggerInvalid, { errors: errors.join('; ') })
@@ -130,8 +131,9 @@ export function buildApiMethods(
       // fase 16 (U2): l'aspetto si valida qui (famiglia tra le 5, colore
       // c1–c7, null = predefinito) — la UI non è fonte di verità
       if (p.avatar !== undefined) {
+        // fase 18a (E0): UiText del catalogo, formato nella lingua dell'interfaccia
         const err = avatarValidationError(p.avatar)
-        if (err) throw new Error(err)
+        if (err) throw new Error(formatUi(err, uiLanguage()))
       }
       // fase 9 (punto 1): prima di assegnare provider+modello verifica che il
       // modello supporti i tool (Ollama: /api/show → capabilities "tools");
@@ -333,13 +335,32 @@ export function buildApiMethods(
       const context = store.getEntries(agentId as string)
         .slice(-20)
         .filter((e) => e.kind === 'message' || e.kind === 'send-message')
-        .map((e) => `${e.role === 'user' ? 'UTENTE' : 'BOT'}: ${e.content.slice(0, 400)}`)
+        .map((e) => `${e.role === 'user' ? 'USER' : 'BOT'}: ${e.content.slice(0, 400)}`)
         .join('\n')
       const prompt = secondaryPrompts.quickAsk(context, question as string, currentUserLanguage())
       const controller = new AbortController()
       const stream = llmStream(provider, agent.model, [{ role: 'user', content: prompt }], [], controller.signal)
       let acc = ''
-      for await (const ch of stream) if (ch.textDelta) acc += ch.textDelta
+      let usage: import('../main/agent/llm').LlmChunk['usage'] | undefined
+      for await (const ch of stream) {
+        if (ch.textDelta) acc += ch.textDelta
+        if (ch.usage) usage = ch.usage
+      }
+      // fase 18a (E4): uso registrato della quick ask
+      if (usage) {
+        store.recordModelUsage({
+          agentId: agentId as string,
+          providerId: provider.id,
+          providerKind: provider.kind,
+          model: agent.model,
+          source: 'quick-ask',
+          input: usage.input,
+          output: usage.output,
+          cacheRead: usage.cacheRead ?? 0,
+          cacheWrite: usage.cacheWrite ?? 0,
+          costUsd: usage.costUsd ?? null
+        })
+      }
       return acc
     },
 
@@ -871,7 +892,8 @@ export function buildApiMethods(
       return { id }
     },
     'vault:delete-item': ([kind, key]) => {
-      if (kind !== 'secret' && kind !== 'login' && kind !== 'contact') throw new Error(`tipo non valido: ${String(kind)}`)
+      // fase 18a (E0): errore RPC della UI dal catalogo
+      if (kind !== 'secret' && kind !== 'login' && kind !== 'contact') throw uiError(UI.rpcInvalidKind, { kind: String(kind) })
       return vault().then((x) => x.deleteVaultItem(kind, String(key)))
     },
     'vault:get-contact': ([id]) => vault().then((x) => x.getContact(String(id))),
@@ -1082,6 +1104,14 @@ export function buildApiMethods(
       if (!p) throw uiError(UI.rpcProviderNotFoundLower)
       return providers.listProviderModels(p)
     },
+    // fase 18a (E4): uso registrato dei modelli, aggregato per provider_kind +
+    // model in una finestra [fromMs, toMs] facoltativa — solo numeri, mai
+    // testo dei messaggi. La pagina Uso e costi è della 18b
+    'usage:summary': ([fromMs, toMs]) =>
+      store.modelUsageSummary(
+        typeof fromMs === 'number' ? fromMs : undefined,
+        typeof toMs === 'number' ? toMs : undefined
+      ),
     // fase 11 (punto 2): chiave per la ricerca web del provider Ollama — vive
     // SOLO nel vault sigillato (mai nei settings in chiaro, mai nel contesto
     // del modello, nei log o in argv); la UI riceve solo un booleano

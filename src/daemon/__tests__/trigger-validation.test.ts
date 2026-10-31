@@ -111,4 +111,21 @@ describe('validateTrigger: poll su server non del catalogo (residuo 0a)', () => 
       ])
     ).rejects.toThrow(/non raggiungibile|userConfirmedReadOnly/)
   })
+
+  it('fase 18a (E0): gli errori di forma arrivano alla UI nella lingua dell\'interfaccia (it)', async () => {
+    h.mcp.servers = []
+    const api = buildApiMethods(() => undefined, fakeWorker)
+    // schedule every malformata: gli errori sono i testi del catalogo, in it
+    await expect(
+      (api['routines:create-trigger'] as (p: unknown[]) => Promise<unknown>)([
+        'a1', 'T', 'p', { type: 'schedule', kind: 'every', every: 'mese', at: '9:5', mode: 'x' }, ''
+      ])
+    ).rejects.toThrow('schedule: every non valido ("mese"); schedule: at deve essere HH:MM ("9:5"); schedule: mode non valido ("x")')
+    // cron mancante → italiano, non l'id grezzo
+    await expect(
+      (api['routines:create-trigger'] as (p: unknown[]) => Promise<unknown>)([
+        'a1', 'T', 'p', { type: 'schedule', kind: 'cron', cron: '' }, ''
+      ])
+    ).rejects.toThrow('espressione cron mancante')
+  })
 })

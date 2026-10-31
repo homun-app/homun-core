@@ -14,7 +14,10 @@ export const KNOWN_BASE_URLS: Partial<Record<ProviderKind, string>> = {
   anthropic: 'https://api.anthropic.com',
   mistral: 'https://api.mistral.ai',
   openrouter: 'https://openrouter.ai/api',
-  zai: 'https://api.z.ai',
+  // fase 18a (E2.1): l'API a CONSUMO, mai /api/coding/paas/v4 (GLM Coding
+  // Plan: i termini di z.ai lo vietano agli strumenti di terzi). I provider
+  // salvati con l'url vecchio si correggono in lettura in llm-pi.ts
+  zai: 'https://api.z.ai/api/paas/v4',
   xai: 'https://api.x.ai',
   deepseek: 'https://api.deepseek.com',
   groq: 'https://api.groq.com/openai'

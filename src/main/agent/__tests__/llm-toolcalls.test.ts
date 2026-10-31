@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { mergeToolCallDeltas, toAnthropicMessages } from '../llm'
+import { mergeToolCallDeltas } from '../llm'
+import { toPiContext } from '../llm-pi'
 
 describe('mergeToolCallDeltas (§5.4)', () => {
   it('due tool call nello stesso chunk vengono accumulate entrambe, ordinate per index', () => {
@@ -56,51 +57,75 @@ describe('mergeToolCallDeltas (§5.4)', () => {
   })
 })
 
-describe('toAnthropicMessages (residuo 2a: mai blocchi text vuoti)', () => {
-  it('assistant con solo tool call → solo blocchi tool_use, nessun blocco text', () => {
-    const out = toAnthropicMessages([
+// Fase 18a (E3): i test di toAnthropicMessages (cancellata con gli SDK)
+// diventano test della conversione E2.3 (toPiContext) sugli stessi casi.
+describe('toPiContext (E2.3: la conversione ChatMessage[] → Context pi-ai)', () => {
+  const cur = { api: 'openai-completions', provider: 'test-provider', model: 'test-model' }
+
+  it('assistant con solo tool call → nessun blocco text, argomenti parsati (rotto → {})', () => {
+    const { messages } = toPiContext([
       { role: 'user', content: 'esegui' },
-      { role: 'assistant', content: '', toolCalls: [{ id: 'c1', name: 'run-command', arguments: '{"command":"ls"}' }] },
-      { role: 'tool', toolCallId: 'c1', content: 'ok' }
-    ])
-    expect(out).toHaveLength(3)
-    expect(out[0]).toEqual({ role: 'user', content: [{ type: 'text', text: 'esegui' }] })
-    // solo tool_use: un assistant senza testo non ha blocchi text
-    expect(out[1]!.content).toEqual([{ type: 'tool_use', id: 'c1', name: 'run-command', input: { command: 'ls' } }])
-    // il tool result torna al modello in un messaggio user (convenzione Anthropic)
-    expect(out[2]!.content).toEqual([{ type: 'tool_result', tool_use_id: 'c1', content: 'ok' }])
-  })
-
-  it('assistant con testo di soli spazi + tool call → blocco text scartato', () => {
-    const out = toAnthropicMessages([
-      { role: 'assistant', content: '   ', toolCalls: [{ id: 'c2', name: 'read-file', arguments: '{}' }] }
-    ])
-    expect(out[0]!.content.every((b) => b.type !== 'text')).toBe(true)
-  })
-
-  it('assistant vuoto senza tool call → messaggio scartato del tutto', () => {
-    const out = toAnthropicMessages([
-      { role: 'user', content: 'ciao' },
-      { role: 'assistant', content: '' },
-      { role: 'user', content: 'ehi' }
-    ])
-    expect(out.map((m) => (m.content[0] as { text: string }).text)).toEqual(['ciao', 'ehi'])
-  })
-
-  it('tool result consecutivi si aggregano nello stesso messaggio user', () => {
-    const out = toAnthropicMessages([
       { role: 'assistant', content: '', toolCalls: [
-        { id: 'a', name: 't1', arguments: '{}' }, { id: 'b', name: 't2', arguments: '{}' }
-      ] },
-      { role: 'tool', toolCallId: 'a', content: 'r1' },
-      { role: 'tool', toolCallId: 'b', content: 'r2' }
-    ])
-    expect(out[1]!.content).toHaveLength(2)
-    expect(out[1]!.content[0]).toEqual({ type: 'tool_result', tool_use_id: 'a', content: 'r1' })
+        { id: 'c1', name: 'run-command', arguments: '{"command":"ls"}' },
+        { id: 'c2', name: 'read-file', arguments: '{rotto' }
+      ] }
+    ], [], cur)
+    expect(messages).toHaveLength(2)
+    expect(messages[0]).toMatchObject({ role: 'user' })
+    const a = messages[1] as unknown as { role: string; content: Array<{ type: string }>; stopReason: string }
+    expect(a.role).toBe('assistant')
+    // solo toolCall: un assistant senza testo non ha blocchi text
+    expect(a.content.map((b) => b.type)).toEqual(['toolCall', 'toolCall'])
+    expect(a.stopReason).toBe('toolUse')
+    expect((a.content[0] as unknown as { arguments: unknown }).arguments).toEqual({ command: 'ls' })
+    // argomento JSON rotto → {} (come safeParse di sempre)
+    expect((a.content[1] as unknown as { arguments: unknown }).arguments).toEqual({})
   })
 
-  it('il system viene gestito fuori dai messaggi: qui non compare', () => {
-    const out = toAnthropicMessages([{ role: 'system', content: 'SYS' }, { role: 'user', content: 'ciao' }])
-    expect(out).toHaveLength(1)
+  it("assistant con testo di soli spazi e nessuna tool call → niente blocchi text, stopReason 'stop'", () => {
+    const { messages } = toPiContext([{ role: 'assistant', content: '   ' }], [], cur)
+    const a = messages[0] as unknown as { content: unknown[]; stopReason: string }
+    expect(a.content.every((b) => (b as { type: string }).type !== 'text')).toBe(true)
+    expect(a.stopReason).toBe('stop')
+  })
+
+  it('il toolResult porta toolCallId e il toolName della chiamata con quell\'id (o unknown)', () => {
+    const { messages } = toPiContext([
+      { role: 'assistant', content: '', toolCalls: [{ id: 'a', name: 't1', arguments: '{}' }] },
+      { role: 'tool', toolCallId: 'a', content: 'r1' },
+      { role: 'tool', toolCallId: 'zzz', content: 'r2' }
+    ], [], cur)
+    const r1 = messages[1] as unknown as { role: string; toolCallId: string; toolName: string; isError: boolean; content: unknown[] }
+    const r2 = messages[2] as unknown as { toolName: string }
+    expect(r1).toMatchObject({ role: 'toolResult', toolCallId: 'a', toolName: 't1', isError: false })
+    expect(r1.content).toEqual([{ type: 'text', text: 'r1' }])
+    expect(r2.toolName).toBe('unknown')
+  })
+
+  it('i system diventano systemPrompt (più di uno: uniti con riga vuota, in ordine)', () => {
+    const c1 = toPiContext([{ role: 'system', content: 'SYS' }, { role: 'user', content: 'ciao' }], [], cur)
+    expect(c1.systemPrompt).toBe('SYS')
+    expect(c1.messages).toHaveLength(1)
+    const c2 = toPiContext([
+      { role: 'system', content: 'PRIMO' }, { role: 'system', content: 'SECONDO' }, { role: 'user', content: 'x' }
+    ], [], cur)
+    expect(c2.systemPrompt).toBe('PRIMO\n\nSECONDO')
+    expect(c2.messages.every((m) => m.role !== 'system')).toBe(true)
+  })
+
+  it('le immagini diventano content parts image (base64 PNG), dopo il testo', () => {
+    const { messages } = toPiContext([{ role: 'user', content: 'guarda', images: ['AAA', 'BBB'] }], [], cur)
+    const u = messages[0] as unknown as { content: Array<Record<string, unknown>> }
+    expect(u.content).toEqual([
+      { type: 'text', text: 'guarda' },
+      { type: 'image', data: 'AAA', mimeType: 'image/png' },
+      { type: 'image', data: 'BBB', mimeType: 'image/png' }
+    ])
+  })
+
+  it('i tool diventano Tool pi-ai con lo schema JSON passato intatto', () => {
+    const params = { type: 'object', properties: { command: { type: 'string' } }, required: ['command'] }
+    const { tools } = toPiContext([], [{ name: 'run-command', description: 'run', parameters: params }], cur)
+    expect(tools).toEqual([{ name: 'run-command', description: 'run', parameters: params }])
   })
 })

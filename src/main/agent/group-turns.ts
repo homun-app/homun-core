@@ -33,6 +33,14 @@ export const GROUP_RATE_LIMIT_TEXT =
   'The model is unavailable (provider rate limit): the round is suspended. It resumes at the next message.'
 
 /**
+ * Fase 18a (E0): il motivo dei job group-turn annullati quando il provider
+ * manda un limite d'uso — costante inglese, finisce in group_turns.reason
+ * (registro interno; la riga che vede l'utente è GROUP_RATE_LIMIT_TEXT,
+ * tradotta dal renderer con l'id group.rateLimit).
+ */
+export const GROUP_RATE_LIMIT_SKIP_REASON = 'rate limit: round suspended'
+
+/**
  * Correzione C2: la riga chiara nell'apertura del turno di chiusura del
  * coordinatore — l'ultimo passo del giro che prima mancava. Correzione E1
  * (terzo giro): la riga equivalente della regola di scrittura — all'utente si

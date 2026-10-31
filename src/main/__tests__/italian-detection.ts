@@ -17,7 +17,14 @@ export const IT_STRONG = new Set([
   'il', 'lo', 'gli', 'del', 'della', 'delle', 'dei', 'nel', 'nella', 'col',
   'che', 'utente', 'errore', 'nuova', 'nuovo', 'ricevuto', 'arrivo', 'scaduto',
   'codice', 'modello', 'impostazioni', 'evento', 'messaggio', 'agente',
-  'annullato', 'bozza', 'valori', 'richiede'
+  'annullato', 'bozza', 'valori', 'richiede',
+  // fase 18a (E0): «espressione cron mancante», «every non valido», «deve
+  // essere» — le terze persone di dovere/essere e gli aggettivi italiani
+  // comuni che prima passavano
+  'mancante', 'mancanti', 'valido', 'valida', 'deve', 'devono', 'essere',
+  'nessun', 'nessuno', 'nessuna', 'trovato', 'trovata', 'oppure', 'anche',
+  'ancora', 'prima', 'dopo', 'questo', 'questa', 'quello', 'quella', 'sono',
+  'loro', 'giro', 'sospeso', 'configura'
 ])
 
 /** Accented italiane (minuscole e maiuscole). */

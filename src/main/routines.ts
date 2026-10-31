@@ -3,11 +3,14 @@
 // Fase 2: niente più node-cron in-process — la pianificazione la calcola lo
 // scheduler del daemon (src/daemon/scheduler.ts) che accoda job 'routine-run'
 // nella tabella jobs quando scade il prossimo run.
-import { getEntries, getAgent } from './store/db'
+import { getEntries, getAgent, recordModelUsage } from './store/db'
 import { llmStream } from './agent/llm'
 import { getProvider } from './agent/providers'
 import { secondaryPrompts } from './agent/prompts'
 import { currentUserLanguage } from './agent/user-language'
+// fase 18a (E0): gli errori della suggestion sono per la UI — catalogo UI
+import { uiError } from './ui-language'
+import { UI } from '../shared/ui-messages'
 
 export interface RoutineSuggestion {
   title: string
@@ -18,23 +21,45 @@ export interface RoutineSuggestion {
 /** Suggerisce routine dai comportamenti ricorrenti osservati nel transcript. */
 export async function suggestRoutines(agentId: string): Promise<RoutineSuggestion[]> {
   const agent = getAgent(agentId)
-  if (!agent?.providerId || !agent.model) throw new Error('Configura prima provider e modello del bot.')
+  // fase 18a (E0): errori della UI dal catalogo, non testo cablato
+  if (!agent?.providerId || !agent.model) throw uiError(UI.rpcConfigureProvider)
   const provider = getProvider(agent.providerId)
-  if (!provider) throw new Error('Provider non trovato')
+  if (!provider) throw uiError(UI.rpcProviderNotFound)
+  const model = agent.model
 
   const transcript = getEntries(agentId)
     .slice(-40)
     .filter((e) => e.kind === 'message' || e.kind === 'tool-call')
-    .map((e) => `${e.role === 'user' ? 'UTENTE' : e.role === 'assistant' ? 'BOT' : 'TOOL'}: ${e.content.slice(0, 300)}`)
+    // fase 18a (E0): etichette inglesi, le legge il modello
+    .map((e) => `${e.role === 'user' ? 'USER' : e.role === 'assistant' ? 'BOT' : 'TOOL'}: ${e.content.slice(0, 300)}`)
     .join('\n')
   if (!transcript.trim()) return []
 
   const prompt = secondaryPrompts.routinesSuggestion(transcript, currentUserLanguage())
   const controller = new AbortController()
-  const stream = llmStream(provider, agent.model, [{ role: 'user', content: prompt }], [], controller.signal)
+  const stream = llmStream(provider, model, [{ role: 'user', content: prompt }], [], controller.signal)
   const { text } = await (async () => {
     let acc = ''
-    for await (const ch of stream) if (ch.textDelta) acc += ch.textDelta
+    let usage: import('./agent/llm').LlmChunk['usage'] | undefined
+    for await (const ch of stream) {
+      if (ch.textDelta) acc += ch.textDelta
+      if (ch.usage) usage = ch.usage
+    }
+    // fase 18a (E4): uso registrato della suggestion (source 'routine-suggest')
+    if (usage) {
+      recordModelUsage({
+        agentId,
+        providerId: provider.id,
+        providerKind: provider.kind,
+        model,
+        source: 'routine-suggest',
+        input: usage.input,
+        output: usage.output,
+        cacheRead: usage.cacheRead ?? 0,
+        cacheWrite: usage.cacheWrite ?? 0,
+        costUsd: usage.costUsd ?? null
+      })
+    }
     return { text: acc }
   })()
 

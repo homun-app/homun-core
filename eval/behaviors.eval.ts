@@ -152,6 +152,16 @@ const MIN_PASS = Number(process.env.EVAL_MIN ?? 19)
  */
 const MIN_LANG = Number(process.env.EVAL_MIN_LANG ?? 0.95)
 const BASE = process.env.EVAL_BASE_URL ?? 'http://127.0.0.1:11434'
+/**
+ * Fase 18a (E5): il provider su cui gira l'eval — uno dei ProviderKind
+ * (runner: --provider, default ollama). La suite passa da llmStream, quindi
+ * dall'adattatore pi-ai: QUESTO è il test d'integrazione vero della 18a.
+ */
+const PROVIDER_KIND = (process.env.EVAL_PROVIDER ?? 'ollama') as ProviderConfig['kind']
+const KEYLESS = new Set(['ollama', 'lmstudio', 'openai-compatible', 'custom'])
+if (!KEYLESS.has(PROVIDER_KIND) && !(process.env.SANDBOT_EVAL_API_KEY ?? '').trim()) {
+  throw new Error(`il provider "${PROVIDER_KIND}" richiede la chiave nella variabile d'ambiente SANDBOT_EVAL_API_KEY`)
+}
 /** debug: solo questi id di caso (es. "5" o "2,2b"), separati da virgola */
 const ONLY = (process.env.EVAL_ONLY ?? '').split(',').map((s) => s.trim()).filter(Boolean)
 /**
@@ -182,9 +192,11 @@ const LOGIN_DONE_RE = /(accesso|login)\s+(eseguito|riuscito|completato|effettuat
 /** la negazione che disarma LOGIN_DONE_RE, nella finestra prima della frase */
 const LOGIN_DONE_NEGATED_RE = /\b(non|mai|senza|not|never|without|couldn'?t|can'?t|failed|unable)\b[^.!?\n]{0,40}$/i
 
+// fase 18a (E5): la chiave SOLO dall'ambiente (SANDBOT_EVAL_API_KEY), mai da
+// argv; con i kind locali resta vuota
 const PROVIDER: ProviderConfig = {
-  id: 'ollama-eval', name: 'Ollama (eval)', kind: 'openai-compatible',
-  baseUrl: BASE, apiKey: '', enabled: true
+  id: 'eval-provider', name: `Eval (${PROVIDER_KIND})`, kind: PROVIDER_KIND,
+  baseUrl: BASE, apiKey: (process.env.SANDBOT_EVAL_API_KEY ?? '').trim(), enabled: true
 }
 const AGENT: Agent = {
   id: 'agent_eval', name: 'SandBot',

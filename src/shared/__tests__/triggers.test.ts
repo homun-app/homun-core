@@ -9,6 +9,7 @@ import {
   choosePollTool, chooseQueryArgName, triggerShapeErrors, formatTriggerEvent, manualServerPollError,
   aroundJitterMinutes, mergeSeenIds, SEEN_IDS_CAP, triggerEventTitle
 } from '../triggers'
+import { formatUi } from '../ui-text'
 import type { RoutineTrigger, TriggerEventPayload } from '../types'
 
 describe('estrazione per percorso', () => {
@@ -110,6 +111,11 @@ describe('jitter around e set dei visti', () => {
 })
 
 describe('validazione della forma dei trigger', () => {
+  // fase 18a (E0): gli errori sono UiText del catalogo — si formattano qui
+  // per il confronto (en = ciò che legge il modello nel result del tool)
+  const en = (t: RoutineTrigger): string[] => triggerShapeErrors(t).map((e) => formatUi(e, 'en'))
+  const itText = (t: RoutineTrigger): string[] => triggerShapeErrors(t).map((e) => formatUi(e, 'it'))
+
   it('schedule cron: cron mancante', () => {
     expect(triggerShapeErrors({ type: 'schedule', kind: 'cron', cron: '' })).toHaveLength(1)
     expect(triggerShapeErrors({ type: 'schedule', kind: 'cron', cron: '0 9 * * *' })).toEqual([])
@@ -118,28 +124,53 @@ describe('validazione della forma dei trigger', () => {
   it('schedule every: campi obbligatori per tipo e mode', () => {
     expect(triggerShapeErrors({ type: 'schedule', kind: 'every', every: 'day', at: '09:00', mode: 'at' })).toEqual([])
     const badEvery = { type: 'schedule', kind: 'every', every: 'ora', at: '09:00', mode: 'at' } as unknown as RoutineTrigger
-    expect(triggerShapeErrors(badEvery)[0]).toContain('every')
-    expect(triggerShapeErrors({ type: 'schedule', kind: 'every', every: 'day', at: '9:5', mode: 'at' })[0]).toContain('HH:MM')
-    expect(triggerShapeErrors({ type: 'schedule', kind: 'every', every: 'week', at: '09:00', mode: 'at' })[0]).toContain('weekday')
-    expect(triggerShapeErrors({ type: 'schedule', kind: 'every', every: 'month', at: '09:00', mode: 'at' })[0]).toContain('monthDay')
-    expect(triggerShapeErrors({ type: 'schedule', kind: 'every', every: 'hour', mode: 'at' })[0]).toContain('at')
+    expect(en(badEvery)[0]).toContain('every')
+    expect(en({ type: 'schedule', kind: 'every', every: 'day', at: '9:5', mode: 'at' })[0]).toContain('HH:MM')
+    expect(en({ type: 'schedule', kind: 'every', every: 'week', at: '09:00', mode: 'at' })[0]).toContain('weekday')
+    expect(en({ type: 'schedule', kind: 'every', every: 'month', at: '09:00', mode: 'at' })[0]).toContain('monthDay')
+    expect(en({ type: 'schedule', kind: 'every', every: 'hour', mode: 'at' })[0]).toContain('at')
   })
 
   it('connector_poll: tool/idField/intervallo (minimo 2 minuti)', () => {
     const base = { type: 'connector_poll', connectorId: 'gmail', tool: 'mcp__gmail__x', idField: 'messages[].id', intervalMin: 5 }
     expect(triggerShapeErrors(base as RoutineTrigger)).toEqual([])
-    expect(triggerShapeErrors({ ...base, intervalMin: 1 } as RoutineTrigger)[0]).toContain('≥ 2')
-    expect(triggerShapeErrors({ ...base, idField: 'id' } as RoutineTrigger)[0]).toContain('idField')
-    expect(triggerShapeErrors({ ...base, tool: '' } as RoutineTrigger)[0]).toContain('tool')
+    expect(en({ ...base, intervalMin: 1 } as RoutineTrigger)[0]).toContain('≥ 2')
+    expect(en({ ...base, idField: 'id' } as RoutineTrigger)[0]).toContain('idField')
+    expect(en({ ...base, tool: '' } as RoutineTrigger)[0]).toContain('tool')
     const cal = { ...base, preset: 'calendar_event', offsetMinutes: 10 }
     expect(triggerShapeErrors(cal as RoutineTrigger)).toEqual([])
-    expect(triggerShapeErrors({ ...base, preset: 'calendar_event' } as RoutineTrigger)[0]).toContain('offsetMinutes')
+    expect(en({ ...base, preset: 'calendar_event' } as RoutineTrigger)[0]).toContain('offsetMinutes')
   })
 
   it('webhook senza token: errore (il token lo genera il server alla creazione)', () => {
     expect(triggerShapeErrors({ type: 'webhook', token: '' })).toHaveLength(1)
     expect(triggerShapeErrors({ type: 'webhook', token: 'x' })).toEqual([])
     expect(triggerShapeErrors({ type: 'presence_return' })).toEqual([])
+  })
+
+  it("fase 18a (E0): gli errori sono ID del catalogo, il valore esterno viaggia come dato", () => {
+    const errs = triggerShapeErrors({ type: 'schedule', kind: 'every', every: 'ora', at: '9:5', mode: 'x' } as unknown as RoutineTrigger)
+    expect(errs.map((e) => e.id)).toEqual(['trigger.everyInvalid', 'trigger.atInvalid', 'trigger.modeInvalid'])
+    expect(errs[0]!.values).toEqual({ value: 'ora' })
+    expect(errs[1]!.values).toEqual({ value: '9:5' })
+    expect(errs[2]!.values).toEqual({ value: 'x' })
+  })
+
+  it('fase 18a (E0): formatUi en/it — il modello legge inglese, la UI l\'italiano', () => {
+    const missing = { type: 'schedule', kind: 'cron', cron: '' } as RoutineTrigger
+    expect(en(missing)[0]).toBe('schedule: missing cron expression')
+    expect(itText(missing)[0]).toBe('schedule: espressione cron mancante')
+    const interval = { type: 'connector_poll', connectorId: '', tool: '', idField: '', intervalMin: 0 } as unknown as RoutineTrigger
+    expect(en(interval)).toEqual([
+      'connector_poll: missing connector',
+      'connector_poll: missing tool',
+      'connector_poll: invalid idField ("", e.g. "messages[].id")',
+      'connector_poll: intervalMin must be ≥ 2 minutes'
+    ])
+    expect(itText(interval)[3]).toBe('connector_poll: intervalMin deve essere ≥ 2 minuti')
+    const token = { type: 'webhook', token: '' } as RoutineTrigger
+    expect(en(token)[0]).toBe('webhook: missing token')
+    expect(itText(token)[0]).toBe('webhook: token mancante')
   })
 })
 
@@ -211,9 +242,10 @@ describe('manualServerPollError (residuo 0a)', () => {
   })
 
   it('server manuale senza conferma: errore leggibile', () => {
+    // fase 18a (E0): UiText — si formatta per il contenuto
     const err = manualServerPollError({ ...poll }, false)
     expect(err).toBeTruthy()
-    expect(err).toContain('userConfirmedReadOnly')
+    expect(formatUi(err!, 'en')).toContain('userConfirmedReadOnly')
   })
 
   it('server manuale CON conferma esplicita: ammesso', () => {

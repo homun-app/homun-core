@@ -18,7 +18,7 @@
 // draft_external. Ogni turno si chiude con un evento meta.turnEnd ∈
 // FINISHED | STOPPED | SUPERSEDED | AWAITING_USER.
 import { randomUUID } from 'node:crypto'
-import { getAgent, listAgents, listRoutines, getEntries, updateAgent, appendEntry, updateEntryContent, updateEntryMeta, getSetting, holdOutboxEntry, db, getTask, createTask, updateTask, openTasksOf, MAX_OPEN_TASKS, listProviders, createAgent, subagentRefusal, addGrant, listGrants, type Grant, type AppendEntry } from '../store/db'
+import { getAgent, listAgents, listRoutines, getEntries, updateAgent, appendEntry, updateEntryContent, updateEntryMeta, getSetting, holdOutboxEntry, db, getTask, createTask, updateTask, openTasksOf, MAX_OPEN_TASKS, listProviders, createAgent, subagentRefusal, addGrant, listGrants, recordModelUsage, type Grant, type AppendEntry } from '../store/db'
 import { llmStream, type ChatMessage, type ToolCall } from './llm'
 import { systemPrompt, secondaryPrompts, mainAgentSection, withLanguage } from './prompts'
 import { toolDefs, executeTool } from './tools'
@@ -582,7 +582,8 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
   }
 
   const agent = getAgent(agentId)
-  if (!agent) throw new Error('Agente non trovato')
+  // fase 18a (E0): errore interno in inglese (la UI ha rpc.agentNotFound)
+  if (!agent) throw new Error('agent not found')
   if (!agent.providerId || !agent.model) {
     // fase 10 (residuo 0e): durante l'onboarding, se il provider ESISTE ma il
     // widget del ruolo è ancora in attesa, il problema non è la configurazione:
@@ -598,7 +599,8 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     return
   }
   const provider = getProvider(agent.providerId)
-  if (!provider) throw new Error('Provider non trovato')
+  // fase 18a (E0): errore interno in inglese (la UI ha rpc.providerNotFound)
+  if (!provider) throw new Error('provider not found')
 
   const controller = new AbortController()
   const run: Running = { controller, approvals: new Map(), turnAllows: new Set(), turnGrantEpoch: 0 }
@@ -886,7 +888,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     if (opts.taskId === undefined) {
       await maybeCompactHistory(
         agentId, provider.id, agent.model,
-        (digest) => summarizeWithLlm(provider, agent.model!, digest, secondaryPrompts.compaction),
+        (digest) => summarizeWithLlm(provider, agent.model!, digest, secondaryPrompts.compaction, agentId),
         emit
       )
     }
@@ -1072,6 +1074,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       let final: { text: string; toolCalls: ToolCall[]; finishReason: string }
       let finalToolCalls: ToolCall[] = []
       let finalFinish = 'stop'
+      let finalUsage: import('./llm').LlmChunk['usage'] | undefined
       try {
         const it = stream[Symbol.asyncIterator]()
         let firstChunk = false
@@ -1089,8 +1092,25 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           }
           if (ch.toolCalls) finalToolCalls = ch.toolCalls
           if (ch.finishReason) finalFinish = ch.finishReason
+          if (ch.usage) finalUsage = ch.usage
         }
         final = { text: acc, toolCalls: finalToolCalls, finishReason: finalFinish }
+        // fase 18a (E4): uso registrato della chiamata — la riga va al modello
+        // che ha risposto DAVVERO (la riserva cambia activeModel a metà turno)
+        if (finalUsage) {
+          recordModelUsage({
+            agentId,
+            providerId: provider.id,
+            providerKind: provider.kind,
+            model: activeModel,
+            source: opts.subagent ? 'subagent' : opts.groupTurn !== undefined ? 'group' : 'turn',
+            input: finalUsage.input,
+            output: finalUsage.output,
+            cacheRead: finalUsage.cacheRead ?? 0,
+            cacheWrite: finalUsage.cacheWrite ?? 0,
+            costUsd: finalUsage.costUsd ?? null
+          })
+        }
       } catch (err) {
         streamAbort.abort()
         updateEntryContent(entry.id, acc)
@@ -2677,6 +2697,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           const rstream = llmStream(provider, activeModel, messages, [wakeParentToolDef], controller.signal)
           let racc = ''
           let recoveryCalls: ToolCall[] = []
+          let rusage: import('./llm').LlmChunk['usage'] | undefined
           const rit = rstream[Symbol.asyncIterator]()
           let rfirst = false
           for (;;) {
@@ -2686,6 +2707,22 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             rfirst = true
             if (ch.textDelta) racc += ch.textDelta
             if (ch.toolCalls) recoveryCalls = ch.toolCalls
+            if (ch.usage) rusage = ch.usage
+          }
+          // fase 18a (E4): uso registrato del sollecito di chiusura del figlio
+          if (rusage) {
+            recordModelUsage({
+              agentId,
+              providerId: provider.id,
+              providerKind: provider.kind,
+              model: activeModel,
+              source: 'wake',
+              input: rusage.input,
+              output: rusage.output,
+              cacheRead: rusage.cacheRead ?? 0,
+              cacheWrite: rusage.cacheWrite ?? 0,
+              costUsd: rusage.costUsd ?? null
+            })
           }
           if (racc.trim()) lastFreeText = racc
           const wake = recoveryCalls.find((c) => c.name === 'wake_parent')
@@ -2744,6 +2781,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           const rstream = llmStream(provider, activeModel, messages, allTools, controller.signal)
           let acc = ''
           let recoveryCalls: ToolCall[] = []
+          let rusage: import('./llm').LlmChunk['usage'] | undefined
           const rit = rstream[Symbol.asyncIterator]()
           let rfirst = false
           for (;;) {
@@ -2753,6 +2791,22 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             rfirst = true
             if (ch.textDelta) acc += ch.textDelta
             if (ch.toolCalls) recoveryCalls = ch.toolCalls
+            if (ch.usage) rusage = ch.usage
+          }
+          // fase 18a (E4): uso registrato della chiamata di recupero del turno
+          if (rusage) {
+            recordModelUsage({
+              agentId,
+              providerId: provider.id,
+              providerKind: provider.kind,
+              model: activeModel,
+              source: 'turn',
+              input: rusage.input,
+              output: rusage.output,
+              cacheRead: rusage.cacheRead ?? 0,
+              cacheWrite: rusage.cacheWrite ?? 0,
+              costUsd: rusage.costUsd ?? null
+            })
           }
           const sends = recoveryCalls.filter((c) => c.name === 'send_to_user')
           if (sends.length) {

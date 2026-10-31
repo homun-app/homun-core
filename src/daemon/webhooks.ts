@@ -86,20 +86,21 @@ export async function handleWebhook(req: IncomingMessage, res: ServerResponse, d
   const routine = Number.isInteger(id) && id > 0 ? getRoutine(id) : null
   const trigger = routine?.trigger
   if (!routine || trigger?.type !== 'webhook') {
-    send(res, 404, { ok: false, error: 'routine webhook non trovata' })
+    // fase 18a (E0): risposte HTTP a un chiamante esterno — inglese
+    send(res, 404, { ok: false, error: 'webhook routine not found' })
     return true
   }
   if (!webhookTokenOk(req.headers.authorization, trigger.token)) {
-    send(res, 401, { ok: false, error: 'token non valido' })
+    send(res, 401, { ok: false, error: 'invalid token' })
     return true
   }
   const body = await readBody(req, WEBHOOK_MAX_BODY)
   if (body === null) {
-    send(res, 413, { ok: false, error: `corpo oltre ${WEBHOOK_MAX_BODY} byte` })
+    send(res, 413, { ok: false, error: `body over ${WEBHOOK_MAX_BODY} bytes` })
     return true
   }
   if (!routine.enabled) {
-    send(res, 404, { ok: false, error: 'routine in pausa' })
+    send(res, 404, { ok: false, error: 'routine is paused' })
     return true
   }
   const text = body.toString('utf8')

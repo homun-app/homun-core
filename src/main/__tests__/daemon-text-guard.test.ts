@@ -38,32 +38,21 @@ function walk(dir: string, out: string[] = []): string[] {
 
 // Allowlist per LETTERALE: { file, text } con text = prefisso esatto del
 // letterale come la guardia lo stampa. Il motivo in commento per ogni voce.
+// Fase 18a (E0): le voci dei trigger, delle etichette dei prompt secondari,
+// dell'errore interno del loop e del motivo di sospensione del gruppo sono
+// SCOMPARSE (testi corretti): restano solo errori di avvio per lo sviluppatore
+// e codici invarianti.
 const ALLOWED_LITERALS: ReadonlyArray<{ file: string; text: string }> = [
   // marcatori invarianti del prompt: <evento> (fase 6) non si traduce
   { file: 'src/shared/triggers.ts', text: 'evento' },
   { file: 'src/shared/triggers.ts', text: '<evento>' },
   { file: 'src/shared/triggers.ts', text: '</evento>' },
-  // errori di forma dei trigger: testi 17b invariati (validazione RPC + result del modello)
-  { file: 'src/shared/triggers.ts', text: 'schedule: every hour richiede' },
-  { file: 'src/shared/triggers.ts', text: 'schedule: every week richiede' },
-  { file: 'src/shared/triggers.ts', text: 'schedule: every month richiede' },
   // marcatori invarianti <messaggio_da_agente>/<messaggio_dal_padre> (fase 7/12)
   { file: 'src/shared/agent-message.ts', text: '<messaggio_da' },
   { file: 'src/shared/agent-message.ts', text: 'messaggio_da' },
   { file: 'src/shared/agent-message.ts', text: '</messaggio_da' },
   // descrizione di send_to_agent: cita il marcatore <messaggio_da_agente> (invariante)
   { file: 'src/main/agent/tools.ts', text: 'Sends a message to another bot of the user (delegation' },
-  // errore interno del loop (log dello sviluppatore, 17b invariato)
-  { file: 'src/main/agent/loop.ts', text: 'Agente non trovato' },
-  // etichette del contesto per i prompt secondari (compaction/routines/quickAsk):
-  // il prompt si costruisce nella lingua dell'utente (17b), le etichette seguono
-  { file: 'src/main/agent/compaction.ts', text: 'UTENTE' },
-  { file: 'src/main/agent/compaction.ts', text: 'BOT→UTENTE: ' },
-  { file: 'src/main/routines.ts', text: 'UTENTE' },
-  { file: 'src/main/routines.ts', text: 'Configura prima provider e modello del bot.' },
-  { file: 'src/daemon/api.ts', text: 'UTENTE' },
-  // motivo della sospensione del giro di gruppo (registro, 17b invariato)
-  { file: 'src/daemon/group-runner.ts', text: 'rate limit del provider: giro sospeso' },
   // errori di avvio per lo SVILUPPATORE (lanciano al boot, finiscono nel log)
   { file: 'src/main/connectors/index.ts', text: 'il catalogo non è un array' },
   { file: 'src/main/connectors/index.ts', text: ': non è un oggetto' },
@@ -77,7 +66,10 @@ const ALLOWED_LITERALS: ReadonlyArray<{ file: string; text: string }> = [
   // value del widget dell'onboarding: CODICE del ruolo (lo legge roleTemplates), non testo
   { file: 'src/daemon/onboarding.ts', text: 'lavoro-codice' },
   // nome app localizzato → bundle (parser di open_app, C7)
-  { file: 'src/main/computeruse/index.ts', text: 'impostazioni di sistema' }
+  { file: 'src/main/computeruse/index.ts', text: 'impostazioni di sistema' },
+  // fase 18a (E0): codici del piano box (chiavi del piano sandbox, non testo)
+  { file: 'src/main/sandbox/docker-argv.ts', text: 'mount-plugin-mancante' },
+  { file: 'src/main/sandbox/docker-argv.ts', text: 'mount-browser-mancante' }
 ]
 
 // Allowlist per SIMBOLO — SOLO liste o dati per costruzione (D4). Anche queste
@@ -89,7 +81,12 @@ const ALLOWED_SYMBOLS: Record<string, string[]> = {
   // COMMIT_WORDS non scatta più e NON è in lista: una voce morta fallirebbe
   'src/main/agent/browser-guard.ts': ['CREDENTIAL_FIELD_WORDS'],
   // dati FINTI dei provider di test (attivi solo con SANDBOT_TEST_FAKE_WEB_SEARCH*)
-  'src/main/agent/web-tools.ts': ['search']
+  'src/main/agent/web-tools.ts': ['search'],
+  // fase 18a (E0): validazioni del catalogo connettori e dei template al BOOT —
+  // errori per lo sviluppatore che finiscono nel log, come le voci per letterale
+  // qui sopra (con IT_STRONG allargato scattano i singoli «mancante», «deve»…)
+  'src/main/connectors/index.ts': ['validateCatalog', 'loadCatalog'],
+  'src/main/templates/index.ts': ['validateTemplate', 'loadTemplates']
 }
 
 interface Node {
@@ -192,7 +189,11 @@ describe('fase 17c correzioni (D4): la rilevazione del letterale italiano', () =
       'handshake col daemon scaduto',
       'utente',
       'codice TOTP',
-      'il server "X" richiede i valori A, B: l\'utente li inserisce nelle Impostazioni'
+      'il server "X" richiede i valori A, B: l\'utente li inserisce nelle Impostazioni',
+      // fase 18a (E0): le nuove parole di IT_STRONG prendono i residui 17b
+      'schedule: espressione cron mancante',
+      'schedule: every non valido ("x")',
+      'connector_poll: intervalMin deve essere ≥ 2 minuti'
     ]
     for (const p of positives) {
       expect(isItalianLiteral(p), `dovrebbe scattare: "${p}"`).toBe(true)

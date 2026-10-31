@@ -163,7 +163,8 @@ describe('esecuzione (store reale)', () => {
       target: 'routine', action: 'create', name: 'Nope2', prompt: 'p',
       trigger: { type: 'schedule', kind: 'every', every: 'mese', at: '09:00', mode: 'at' }
     })
-    expect(badEvery.output).toContain('every non valido')
+    // fase 18a (E0): il result del tool è per il MODELLO — inglese, sempre
+    expect(badEvery.output).toContain('schedule: invalid every ("mese")')
     expect((await import('../../store/db')).listRoutines(AGENT)).toHaveLength(before)
   })
 

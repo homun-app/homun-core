@@ -322,6 +322,22 @@ export async function reviewWithConfiguredModel(action: AutoReviewAction, lang: 
     call: async (messages, tools) => {
       const stream = llmStream(provider, reviewerModel, messages as never, tools as never, controller.signal, { temperature: 0 })
       const drained = await stream.drain()
+      // fase 18a (E4): uso registrato del revisore (source 'review')
+      if (drained.usage) {
+        const { recordModelUsage } = await import('../store/db')
+        recordModelUsage({
+          agentId: null,
+          providerId: provider.id,
+          providerKind: provider.kind,
+          model: reviewerModel,
+          source: 'review',
+          input: drained.usage.input,
+          output: drained.usage.output,
+          cacheRead: drained.usage.cacheRead ?? 0,
+          cacheWrite: drained.usage.cacheWrite ?? 0,
+          costUsd: drained.usage.costUsd ?? null
+        })
+      }
       return { toolCalls: drained.toolCalls.map((c) => ({ arguments: c.arguments })) }
     }
   }

@@ -25,7 +25,7 @@ import {
   type GroupTurnOutcome
 } from '../main/store/groups'
 import {
-  buildGroupTurnOpening, GROUP_WINDING_DOWN_DEPTH, GROUP_RATE_LIMIT_TEXT,
+  buildGroupTurnOpening, GROUP_WINDING_DOWN_DEPTH, GROUP_RATE_LIMIT_TEXT, GROUP_RATE_LIMIT_SKIP_REASON,
   shouldScheduleClosingTurn, memberWaitingForUser, closingTurnNonce, readChainDepth,
   needsGroupRecovery, parseMentions
 } from '../main/agent/group-turns'
@@ -237,7 +237,8 @@ export async function runGroupTurnJob(
   // si annullano (SKIPPED col motivo) e nel gruppo compare UNA riga di
   // sistema; niente turno di chiusura: il giro riprende al prossimo messaggio
   if (stopReason === 'rate-limit') {
-    suspendGroupTurns(db, group.id, 'rate limit del provider: giro sospeso', job.id)
+    // fase 18a (E0): motivo dei job saltati in inglese (costante condivisa)
+    suspendGroupTurns(db, group.id, GROUP_RATE_LIMIT_SKIP_REASON, job.id)
     const now = deps.now()
     const recent = groupMessages(group.id).filter(
       (m) => m.author_kind === 'system' && m.text === GROUP_RATE_LIMIT_TEXT && m.created_at > now - 3_600_000

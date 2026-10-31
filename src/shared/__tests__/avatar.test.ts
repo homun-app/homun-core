@@ -3,6 +3,7 @@
 // validazione dell'avatar di agents:update.
 import { describe, expect, it } from 'vitest'
 import { defaultAvatar, avatarValidationError, avatarOf, fnv1a, BOT_FAMILIES, BOT_COLORS } from '../avatar'
+import { formatUi } from '../ui-text'
 import type { Agent } from '../types'
 
 const agent = (over: Partial<Agent> & Pick<Agent, 'id' | 'name'>): Agent => ({
@@ -40,6 +41,11 @@ describe('fase 16 (U2): defaultAvatar', () => {
 })
 
 describe('fase 16 (U2): validazione avatar di agents:update', () => {
+  // fase 18a (E0): la validazione torna UiText — si formatta qui per il match
+  const text = (v: unknown): string => {
+    const t = avatarValidationError(v)
+    return t ? formatUi(t, 'it') : ''
+  }
   it('null e undefined tornano al predefinito senza errore', () => {
     expect(avatarValidationError(null)).toBeNull()
     expect(avatarValidationError(undefined)).toBeNull()
@@ -49,16 +55,16 @@ describe('fase 16 (U2): validazione avatar di agents:update', () => {
   })
   it('famiglia fuori dalle 5 → errore (anche le 4 d’archivio)', () => {
     for (const bad of ['orb', 'cloud', 'capsule', 'doodle', 'creature']) {
-      expect(avatarValidationError({ family: bad, color: 'c1' })).toMatch(/avatar non valido: famiglia/)
+      expect(text({ family: bad, color: 'c1' })).toMatch(/avatar non valido: famiglia/)
     }
   })
   it('colore fuori c1–c7 → errore (anche il nome della variabile CSS)', () => {
-    expect(avatarValidationError({ family: 'pixel', color: 'c8' })).toMatch(/avatar non valido: colore/)
-    expect(avatarValidationError({ family: 'pixel', color: '--bot-c3' })).toMatch(/avatar non valido: colore/)
+    expect(text({ family: 'pixel', color: 'c8' })).toMatch(/avatar non valido: colore/)
+    expect(text({ family: 'pixel', color: '--bot-c3' })).toMatch(/avatar non valido: colore/)
   })
   it('non oggetto → errore', () => {
-    expect(avatarValidationError('c3')).toMatch(/avatar non valido/)
-    expect(avatarValidationError(3)).toMatch(/avatar non valido/)
+    expect(text('c3')).toMatch(/avatar non valido/)
+    expect(text(3)).toMatch(/avatar non valido/)
   })
 })
 

@@ -328,7 +328,9 @@ async function main(): Promise<void> {
         getOverrides: () => getSetting<ModelDefaultsMap>('providers.modelDefaults', {}),
         supportsTools: (p, model) => {
           const full = providersMod.getProvider(p.id)
-          return full ? providersMod.modelSupportsTools(full, model) : Promise.resolve({ ok: false, checked: false, error: 'provider non trovato' })
+          // fase 18a (E0): l'errore finisce nell'avviso dell'onboarding —
+          // testo del catalogo UI
+          return full ? providersMod.modelSupportsTools(full, model) : Promise.resolve({ ok: false, checked: false, error: formatUi(ui(UI.rpcProviderNotFoundLower), uiLanguage()) })
         }
       })
     },

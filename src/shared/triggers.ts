@@ -4,10 +4,10 @@
 // si scelgono dall'elenco di toolsOfServer, NIENTE nomi inventati nel codice),
 // variazione 'around' deterministica, formattazione dell'evento <evento> che
 // entra nel prompt del turno come evidenza.
-import type { ConnectorPollTrigger, EveryScheduleSpec, RoutineTrigger, TriggerEventPayload } from './types'
+import type { ConnectorPollTrigger, EveryScheduleSpec, RoutineTrigger, TriggerEventPayload, UiText } from './types'
 import { neutralizeClosingTag } from './agent-message'
-// fase 17c (C3): i testi d'errore dei trigger nel catalogo UI
-import { formatUi, ui } from './ui-text'
+// fase 17c (C3) / fase 18a (E0): i testi d'errore dei trigger nel catalogo UI
+import { ui } from './ui-text'
 import { UI } from './ui-messages'
 
 /** Il tetto del set dei visti di un trigger connector_poll (ultimi 1000 id). */
@@ -192,50 +192,47 @@ export function chooseQueryArgName(tool: PollToolCandidate | null): string | nul
  * Fase 7 (residuo 0a): un connector_poll su un server NON del catalogo
  * (aggiunto a mano) richiede la conferma esplicita dell'utente che il tool
  * legga soltanto — readOnlyHint di un server manuale è una autodichiarazione
- * non verificata. Torna il messaggio d'errore, o null se il trigger è ammesso.
+ * non verificata. Torna l'errore come UiText, o null se il trigger è ammesso.
+ * Fase 18a (E0): la lingua non si imposta più nel modulo — il chiamante
+ * formatta (il daemon con uiLanguage(), il result del modello in 'en').
  */
 export function manualServerPollError(
   t: { type: string; userConfirmedReadOnly?: boolean },
   catalogServer: boolean
-): string | null {
+): UiText | null {
   if (catalogServer || t.userConfirmedReadOnly === true) return null
-  // fase 17c (C3): l'errore finisce nella validazione del trigger (RPC, UI) —
-  // testo del catalogo UI
-  return formatUi(ui(UI.rpcManualPollConfirm), uiLanguageForTexts())
+  return ui(UI.rpcManualPollConfirm)
 }
 
-/** La lingua dei testi dei trigger: la decide il chiamante (il daemon la inietta). */
-let textsLang: 'it' | 'en' = 'it'
-export function setTriggerTextsLang(lang: 'it' | 'en'): void {
-  textsLang = lang
-}
-function uiLanguageForTexts(): 'it' | 'en' {
-  return textsLang
-}
-
-/** Errori di forma di un trigger (il cron e il readOnly del tool si verificano lato daemon). */
-export function triggerShapeErrors(t: RoutineTrigger): string[] {
-  const errors: string[] = []
+/**
+ * Errori di forma di un trigger (il cron e il readOnly del tool si verificano
+ * lato daemon). Fase 18a (E0): torna UiText[] dal catalogo UI — il result di
+ * update_state li formatta in 'en' (tools.ts), la validazione RPC nella lingua
+ * dell'interfaccia (api.ts); i valori esterni (cron, every, idField…) viaggiano
+ * come dati, non dentro la frase.
+ */
+export function triggerShapeErrors(t: RoutineTrigger): UiText[] {
+  const errors: UiText[] = []
   if (t.type === 'schedule') {
     if (t.kind === 'cron') {
-      if (!t.cron?.trim()) errors.push('schedule: espressione cron mancante')
+      if (!t.cron?.trim()) errors.push(ui(UI.trigCronMissing))
     } else {
       const spec = t as EveryScheduleSpec & { type: unknown; kind: unknown }
-      if (!['day', 'weekday', 'week', 'month', 'hour'].includes(spec.every)) errors.push(`schedule: every non valido ("${String(spec.every)}")`)
-      if (spec.at !== undefined && !/^\d{1,2}:\d{2}$/.test(spec.at)) errors.push(`schedule: at deve essere HH:MM ("${String(spec.at)}")`)
-      if (spec.every === 'hour' && spec.at === undefined) errors.push('schedule: every hour richiede at (il minuto, es. "09:30")')
-      if (spec.every === 'week' && (spec.weekday === undefined || spec.weekday < 0 || spec.weekday > 6)) errors.push('schedule: every week richiede weekday 0-6 (domenica 0)')
-      if (spec.every === 'month' && (spec.monthDay === undefined || spec.monthDay < 1 || spec.monthDay > 31)) errors.push('schedule: every month richiede monthDay 1-31')
-      if (spec.mode !== 'at' && spec.mode !== 'around') errors.push(`schedule: mode non valido ("${String(spec.mode)}")`)
+      if (!['day', 'weekday', 'week', 'month', 'hour'].includes(spec.every)) errors.push(ui(UI.trigEveryInvalid, { value: String(spec.every) }))
+      if (spec.at !== undefined && !/^\d{1,2}:\d{2}$/.test(spec.at)) errors.push(ui(UI.trigAtInvalid, { value: String(spec.at) }))
+      if (spec.every === 'hour' && spec.at === undefined) errors.push(ui(UI.trigEveryHourAt))
+      if (spec.every === 'week' && (spec.weekday === undefined || spec.weekday < 0 || spec.weekday > 6)) errors.push(ui(UI.trigEveryWeekWeekday))
+      if (spec.every === 'month' && (spec.monthDay === undefined || spec.monthDay < 1 || spec.monthDay > 31)) errors.push(ui(UI.trigEveryMonthDay))
+      if (spec.mode !== 'at' && spec.mode !== 'around') errors.push(ui(UI.trigModeInvalid, { value: String(spec.mode) }))
     }
   } else if (t.type === 'connector_poll') {
-    if (!t.connectorId?.trim()) errors.push('connector_poll: connettore mancante')
-    if (!t.tool?.trim()) errors.push('connector_poll: tool mancante')
-    if (!t.idField?.trim() || !splitIdField(t.idField)) errors.push(`connector_poll: idField non valido ("${String(t.idField)}", es. "messages[].id")`)
-    if (!Number.isFinite(t.intervalMin) || t.intervalMin < 2) errors.push('connector_poll: intervalMin deve essere ≥ 2 minuti')
-    if (t.preset === 'calendar_event' && (t.offsetMinutes === undefined || t.offsetMinutes < 0)) errors.push('calendar_event: offsetMinutes mancante (minuti prima dell\'evento)')
+    if (!t.connectorId?.trim()) errors.push(ui(UI.trigConnectorMissing))
+    if (!t.tool?.trim()) errors.push(ui(UI.trigToolMissing))
+    if (!t.idField?.trim() || !splitIdField(t.idField)) errors.push(ui(UI.trigIdFieldInvalid, { value: String(t.idField) }))
+    if (!Number.isFinite(t.intervalMin) || t.intervalMin < 2) errors.push(ui(UI.trigIntervalMin))
+    if (t.preset === 'calendar_event' && (t.offsetMinutes === undefined || t.offsetMinutes < 0)) errors.push(ui(UI.trigOffsetMissing))
   } else if (t.type === 'webhook') {
-    if (!t.token?.trim()) errors.push('webhook: token mancante')
+    if (!t.token?.trim()) errors.push(ui(UI.trigTokenMissing))
   }
   return errors
 }

@@ -71,9 +71,10 @@ describe('fase 16 (U2): agents:update con avatar', () => {
 
   it('famiglia fuori dalle 5 → errore, niente salvataggio', async () => {
     const a = createAgent('Gino')
+    // fase 18a (E0): l'errore RPC segue la lingua dell'interfaccia (en qui)
     await expect(
       api['agents:update']([a.id, { avatar: { family: 'orb', color: 'c1' } }])
-    ).rejects.toThrow(/avatar non valido: famiglia/)
+    ).rejects.toThrow(/invalid avatar: family "orb"/)
     expect(getAgent(a.id)?.avatar).toBeNull()
   })
 
@@ -81,7 +82,7 @@ describe('fase 16 (U2): agents:update con avatar', () => {
     const a = createAgent('Dina')
     await expect(
       api['agents:update']([a.id, { avatar: { family: 'jelly', color: 'c9' } }])
-    ).rejects.toThrow(/avatar non valido: colore/)
+    ).rejects.toThrow(/invalid avatar: color "c9"/)
     expect(getAgent(a.id)?.avatar).toBeNull()
   })
 })

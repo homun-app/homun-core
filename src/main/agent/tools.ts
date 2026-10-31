@@ -771,7 +771,11 @@ async function runRoutineAction(agentId: string, input: Record<string, unknown>,
           meta: {}
         }
       }
-      const errors = (await import('../../shared/triggers')).triggerShapeErrors(t)
+      // fase 18a (E0): gli errori di forma sono UiText — il result del tool è
+      // per il MODELLO, sempre inglese (l'RPC della UI usa uiLanguage())
+      const { triggerShapeErrors } = await import('../../shared/triggers')
+      const { formatUi } = await import('../../shared/ui-text')
+      const errors = triggerShapeErrors(t).map((e) => formatUi(e, 'en'))
       if (t.kind === 'cron' && !parseCron(t.cron)) errors.unshift(`invalid cron: "${t.cron}" (5 fields, e.g. "0 9 * * *")`)
       if (errors.length) return { output: `Invalid trigger: ${errors.join('; ')}.`, meta: {} }
       trigger = t

@@ -9,7 +9,7 @@
 //
 // La decisione (quanto riassumere) è una funzione pura; l'orchestrazione
 // (lettura entry, LLM, append) riceve la chiamata LLM iniettata.
-import { getEntries, appendEntry, getSetting } from '../store/db'
+import { getEntries, appendEntry, getSetting, recordModelUsage } from '../store/db'
 import { llmStream } from './llm'
 import type { ProviderConfig, SandbotEvent, TranscriptEntry } from '../../shared/types'
 
@@ -72,12 +72,14 @@ export function entriesToDigest(entries: TranscriptEntry[]): string {
   const lines: string[] = []
   const cut = (s: string, n = 2000): string => (s.length > n ? s.slice(0, n) + '…' : s)
   for (const e of entries) {
-    if (e.kind === 'message') lines.push(`${e.role === 'user' ? 'UTENTE' : 'ASSISTENTE'}: ${cut(e.content)}`)
-    else if (e.kind === 'send-message') lines.push(`BOT→UTENTE: ${cut(e.content)}`)
-    else if (e.kind === 'thinking') lines.push(`(ragionamento) ${cut(e.content, 800)}`)
-    else if (e.kind === 'summary') lines.push(`(riepilogo precedente) ${cut(e.content)}`)
+    // fase 18a (E0): le etichette sono ENGLESI — le legge il modello e con le
+    // vecchie etichette italiane la compaction tendeva a riassumere in italiano
+    if (e.kind === 'message') lines.push(`${e.role === 'user' ? 'USER' : 'ASSISTANT'}: ${cut(e.content)}`)
+    else if (e.kind === 'send-message') lines.push(`BOT→USER: ${cut(e.content)}`)
+    else if (e.kind === 'thinking') lines.push(`(reasoning) ${cut(e.content, 800)}`)
+    else if (e.kind === 'summary') lines.push(`(previous summary) ${cut(e.content)}`)
     else if (e.kind === 'tool-call') lines.push(`TOOL ${e.content}: ${cut(String(e.meta?.arguments ?? ''), 500)}`)
-    else if (e.kind === 'tool-result') lines.push(`RISULTATO: ${cut(e.content, 500)}`)
+    else if (e.kind === 'tool-result') lines.push(`RESULT: ${cut(e.content, 500)}`)
     // notice/approval/event: contabilità interna, non entra nel riepilogo
   }
   return lines.join('\n')
@@ -117,11 +119,31 @@ export async function summarizeWithLlm(
   provider: ProviderConfig,
   model: string,
   digest: string,
-  compactionPrompt: (digest: string) => string
+  compactionPrompt: (digest: string) => string,
+  agentId: string | null = null
 ): Promise<string> {
   const controller = new AbortController()
   const stream = llmStream(provider, model, [{ role: 'user', content: compactionPrompt(digest) }], [], controller.signal)
   let acc = ''
-  for await (const ch of stream) if (ch.textDelta) acc += ch.textDelta
+  let usage: import('./llm').LlmChunk['usage'] | undefined
+  for await (const ch of stream) {
+    if (ch.textDelta) acc += ch.textDelta
+    if (ch.usage) usage = ch.usage
+  }
+  // fase 18a (E4): uso registrato del riepilogo (source 'compaction')
+  if (usage) {
+    recordModelUsage({
+      agentId,
+      providerId: provider.id,
+      providerKind: provider.kind,
+      model,
+      source: 'compaction',
+      input: usage.input,
+      output: usage.output,
+      cacheRead: usage.cacheRead ?? 0,
+      cacheWrite: usage.cacheWrite ?? 0,
+      costUsd: usage.costUsd ?? null
+    })
+  }
   return acc
 }

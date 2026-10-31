@@ -1,6 +1,9 @@
 // Fase 16 (U2): l'aspetto predefinito dei bot. Funzioni pure, senza DOM né
 // database — le usa il renderer per disegnare e il daemon per validare.
 import type { Agent, AgentAvatar, BotColor, BotFamily } from './types'
+// fase 18a (E0): l'errore di validazione è un UiText del catalogo UI
+import { ui } from './ui-text'
+import { UI } from './ui-messages'
 
 export const BOT_FAMILIES: readonly BotFamily[] = ['h-creature', 'h-robo', 'h-device', 'jelly', 'pixel']
 export const BOT_COLORS: readonly BotColor[] = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7']
@@ -35,17 +38,18 @@ export function defaultAvatar(agentId: string, isMain: boolean): AgentAvatar {
  * Validazione dell'avatar per agents:update (la fa il daemon, mai solo la
  * UI): null torna al predefinito; una famiglia fuori dalle 5 o un colore
  * fuori c1–c7 sono un errore. null se il valore è accettabile, il messaggio
- * d'errore altrimenti.
+ * d'errore come UiText altrimenti (fase 18a E0: la RPC lo forma nella lingua
+ * dell'interfaccia, il catalogo ha l'id rpc.avatarInvalid).
  */
-export function avatarValidationError(v: unknown): string | null {
+export function avatarValidationError(v: unknown): import('./types').UiText | null {
   if (v === null || v === undefined) return null
-  if (typeof v !== 'object') return 'avatar non valido: atteso { family, color } o null'
+  if (typeof v !== 'object') return ui(UI.rpcAvatarInvalidShape)
   const a = v as { family?: unknown; color?: unknown }
   if (!BOT_FAMILIES.includes(a.family as BotFamily)) {
-    return `avatar non valido: famiglia "${String(a.family)}" (le 5 possibili: ${BOT_FAMILIES.join(', ')})`
+    return ui(UI.rpcAvatarInvalid, { family: String(a.family), families: BOT_FAMILIES.join(', ') })
   }
   if (!BOT_COLORS.includes(a.color as BotColor)) {
-    return `avatar non valido: colore "${String(a.color)}" (possibili: ${BOT_COLORS.join(', ')})`
+    return ui(UI.rpcAvatarInvalidColor, { color: String(a.color), colors: BOT_COLORS.join(', ') })
   }
   return null
 }

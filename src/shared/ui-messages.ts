@@ -244,6 +244,32 @@ export const UI = {
     message:
       'connector_poll su un server aggiunto a mano: serve la conferma esplicita dell’utente che il tool legga soltanto e non modifichi nulla (userConfirmedReadOnly)'
   }),
+
+  // ---- fase 18a (E0): errori di forma dei trigger, come UiText dal modulo
+  // puro — il result del modello li formatta in 'en', la RPC nella lingua
+  // dell'interfaccia; i valori esterni (cron, every…) restano dati ----
+  trigCronMissing: msg({ id: 'trigger.cronMissing', message: 'schedule: espressione cron mancante' }),
+  trigEveryInvalid: msg({ id: 'trigger.everyInvalid', message: 'schedule: every non valido ("{value}")' }),
+  trigAtInvalid: msg({ id: 'trigger.atInvalid', message: 'schedule: at deve essere HH:MM ("{value}")' }),
+  trigEveryHourAt: msg({
+    id: 'trigger.everyHourAt',
+    message: 'schedule: every hour richiede at (il minuto, es. "09:30")'
+  }),
+  trigEveryWeekWeekday: msg({ id: 'trigger.everyWeekWeekday', message: 'schedule: every week richiede weekday 0-6 (domenica 0)' }),
+  trigEveryMonthDay: msg({ id: 'trigger.everyMonthDay', message: 'schedule: every month richiede monthDay 1-31' }),
+  trigModeInvalid: msg({ id: 'trigger.modeInvalid', message: 'schedule: mode non valido ("{value}")' }),
+  trigConnectorMissing: msg({ id: 'trigger.connectorMissing', message: 'connector_poll: connettore mancante' }),
+  trigToolMissing: msg({ id: 'trigger.toolMissing', message: 'connector_poll: tool mancante' }),
+  trigIdFieldInvalid: msg({
+    id: 'trigger.idFieldInvalid',
+    message: 'connector_poll: idField non valido ("{value}", es. "messages[].id")'
+  }),
+  trigIntervalMin: msg({ id: 'trigger.intervalMin', message: 'connector_poll: intervalMin deve essere ≥ 2 minuti' }),
+  trigOffsetMissing: msg({
+    id: 'trigger.offsetMissing',
+    message: 'calendar_event: offsetMinutes mancante (minuti prima dell’evento)'
+  }),
+  trigTokenMissing: msg({ id: 'trigger.tokenMissing', message: 'webhook: token mancante' }),
   rpcPresenceUnavailable: msg({ id: 'rpc.presenceUnavailable', message: 'presenza non disponibile' }),
   rpcTaskNotFound: msg({ id: 'rpc.taskNotFound', message: 'Task non trovato' }),
   rpcSubagentNotFound: msg({ id: 'rpc.subagentNotFound', message: 'Sottoagente non trovato' }),
@@ -278,6 +304,16 @@ export const UI = {
   rpcAvatarInvalid: msg({
     id: 'rpc.avatarInvalid',
     message: 'avatar non valido: famiglia "{family}" (le 5 possibili: {families})'
+  }),
+  // fase 18a (E0): le altre due validazioni dell'avatar, prima cablate
+  // (le graffe sono letterali: in ICU si sfuggono con gli apici)
+  rpcAvatarInvalidShape: msg({
+    id: 'rpc.avatarInvalidShape',
+    message: "avatar non valido: atteso '{' family, color '}' o null"
+  }),
+  rpcAvatarInvalidColor: msg({
+    id: 'rpc.avatarInvalidColor',
+    message: 'avatar non valido: colore "{color}" (possibili: {colors})'
   }),
   rpcNotOauth: msg({ id: 'rpc.notOauth', message: 'il server non usa OAuth' }),
   rpcUseConnectApps: msg({ id: 'rpc.useConnectApps', message: 'usa la vista "Connetti app" per i connettori del catalogo' }),

@@ -2835,3 +2835,179 @@ Per **simbolo** (solo liste o dati per costruzione, entrambe VIVE):
 - L'eval NON è stata lanciata (serve un modello cloud): D6 è solo informativo; dopo D5 il revisore rimisura il caso 38 e i comuni.
 - Nessuna migrazione del database: i job in coda col payload vecchio (senza `kind`) aprono il turno senza `meta.ui` e mostrano il content com'è — verificato da test.
 - Nessun Docker, nessun modello cloud, nessuna rete reale, niente `npm run dist`; né l'app né il daemon sono stati avviati sulla cartella dati vera; nessun segreto vero; nessun processo dell'utente toccato; nessun file dell'utente, volume `sandbot-*` o cartella di `/var/folders/…/T/` cancellati.
+
+---
+
+# REPORT FASE 18a — `pi-ai` dietro il loop (E0–E8)
+
+`llmStream` ora delega a `@earendil-works/pi-ai@1.4.0` (ESM, Node ≥ 22.19): l'**interno** è l'adattatore `src/main/agent/llm-pi.ts`, il **contratto** (`LlmStream`, `LlmChunk`, `ChatMessage`, `ToolDef`) e il loop con tutte le sue protezioni (recupero e sollecito, scadenza dello stream, riserva, cicli, gate, contaminazione) restano identici — i test del loop che fanno il mock di `llm` girano senza modifiche. `llm-pi.ts` è l'**unico** file del repo che importa la libreria (lo verifica un test con grep su `src/`, esclusi i test).
+
+### Tabella E0–E8
+
+| Punto | Stato | Dove | Note |
+|---|---|---|---|
+| **E0** residui di lingua della 17c | fatto | `triggers.ts` (`triggerShapeErrors` → `UiText[]` con 13 id nuovi `trigger.*`; eliminati `setTriggerTextsLang` e lo stato globale della lingua), `tools.ts` (result del modello `formatUi(…, 'en')`), `api.ts` `validateTrigger` (`uiLanguage()`), `compaction.ts` (`USER`/`ASSISTANT`/`BOT→USER`/`(reasoning)`/`(previous summary)`/`RESULT:`), `routines.ts` (`USER`/`BOT`/`TOOL` + `uiError(UI.rpcConfigureProvider)` e `rpcProviderNotFound`), `api.ts` quick ask (`USER`), `loop.ts` (`agent not found`, `provider not found`), `group-runner.ts` (constante inglese `GROUP_RATE_LIMIT_SKIP_REASON`, solo registro — la riga che vede l'utente resta `GROUP_RATE_LIMIT_TEXT` tradotta da `groupSystemText`), `webhooks.ts` (risposte HTTP in inglese), `api.ts` `vault:delete-item` (`rpc.invalidKind`), `daemon/index.ts` (`rpc.providerNotFoundLower`), `avatar.ts` (`avatarValidationError` → `UiText`, id `rpc.avatarInvalid{,Shape,Color}`), `templates/index.ts` (validazione al boot formattata 'en') | `IT_STRONG` allargata con le 26 parole richieste; allowlist della guardia: RIMOSSE le 10 voci dei residui (trigger×3, UTENTE×3+BOT→UTENTE, «Configura prima…», «Agente non trovato», «rate limit del provider: giro sospeso»), AGGIUNTE solo codici invariati (`mount-*-mancante` del piano box) e, per simbolo, le validazioni al BOOT di `validateCatalog`/`loadCatalog`/`validateTemplate`/`loadTemplates` (errori per lo sviluppatore nel log, stessa categoria delle voci per letterale già presenti). D4 verde coi negativi + i 3 positivi nuovi |
+| **E1** la dipendenza | fatto | `package.json` `@earendil-works/pi-ai` **1.4.0 esatta**; `openai` e `@anthropic-ai/sdk` **rimossi** (llm.ts era l'unico utente, grep su src/scripts/eval); pi-ai usa le sue copie annidate (openai 7.19.0, @anthropic-ai/sdk 0.129.0) | Node del runtime del daemon: **24.22.0** (`ELECTRON_RUN_AS_NODE=1 npx electron -p process.versions.node`) ≥ 22.19 ✓; `@earendil-works/pi-telemetry` arriva come dipendenza, mai passato alle chiamate; `npm run build` e l'avvio del daemon (E8) caricano il pacchetto da node_modules (externalizeDepsPlugin: gli import `@earendil-works/pi-ai*` restano esterni nel bundle) |
+| **E2** l'adattatore `llm-pi.ts` | fatto | `piModelFor`/`piCacheEntryFor` (collection costruita UNA volta per `p.id`+`p.baseUrl`+`p.kind`, chiave API fuori dalla cache), `modelCapabilities`, `toPiContext`, `streamPi`/`piLlmStream`, `LlmProviderError`, `PiUserAbortError`, `openAiCompatBase`, `ZAI_CONSUMPTION_BASE_URL` | le sette factory (`providers/{openai,anthropic,mistral,openrouter,xai,deepseek,groq}`), MAI `providers/all`; modello non in catalogo → sintetico (`contextWindow` 128000, `maxTokens` 16384, `input` ['text'], `reasoning` false, costo zero); baseUrl diverso dal noto → stessi modelli clonati sull'URL dell'utente, stessa api; **zai** → provider personalizzato `openai-completions` su `https://api.z.ai/api/paas/v4` con `compat: { thinkingFormat: 'zai' }` (test: il baseUrl finale NON contiene MAI `/coding/`), correzione in LETTURA di `https://api.z.ai` e `…/v1` salvati (nessuna migrazione); `KNOWN_BASE_URLS.zai` aggiornato; ollama/lmstudio/openai-compatible/custom → `openAiCompatBase` (`+ '/v1'` SOLO se non finisce già con `/v<n>` o `/api/paas/v4`) con `compat: { supportsDeveloperRole: false, supportsReasoningEffort: false, supportsStore: false }`; messaggi → `Context` (system uniti in `systemPrompt`, immagini `image/png`, tool result col `toolName` dalla chiamata o `unknown`, argomenti `JSON.parse` con fallback `{}`); eventi → chunk (`text_delta`, `thinking_delta`→`reasoningDelta`, `toolcall_end` accumulati in ordine di `contentIndex` e restituiti SOLO alla fine, `done` → `{toolCalls?, finishReason, usage}`, `toolUse`→`'tool_calls'`); `error aborted` → stesso errore di sempre (`APIUserAbortError`, «Request was aborted.»); `error` → `LlmProviderError` con `status` da `/^(\d{3})\b/` o `/\((\d{3})\)/` e messaggio invariato (regex di rete intatte); `usage` nuovo campo facoltativo del chunk finale con `costUsd` (null se fuori catalogo o locale a costo zero); `temperature` passa quando c'è; `drain()` a parte l'`usage` additivo, invariato |
+| **E3** `llm.ts` dopo | fatto | restano contratto, `traceLlmCall` (chiamata dall'adattatore con gli stessi campi: solo numeri), `mergeToolCallDeltas` (usata dai test) e `llmStream` che delega; cancellati `openAiStream`, `anthropicStream`, `toAnthropicMessages` e le relative interfacce | i test di `toAnthropicMessages` sono diventati test di `toPiContext` sugli stessi casi (llm-toolcalls.test.ts) |
+| **E4** uso registrato | fatto | tabella `model_usage` (DDL `CREATE TABLE IF NOT EXISTS` + indice su `at`), `recordModelUsage`/`modelUsageSummary` nello store, RPC **`usage:summary [fromMs, toMs]`** (righe per `provider_kind`+`model` con chiamate, somme dei token e costo — null solo se TUTTE le righe sono null) | i 7 punti chiamanti registrano l'usage del chunk finale con la `source` giusta: loop turno (`turn`/`subagent`/`group`, e la **riserva registra il modello che ha risposto davvero**), sollecito del figlio (`wake`), recupero del turno (`turn`), auto-review (`review`, `agentId` null), compaction (`compaction`, via `summarizeLlm` che ora prende l'`agentId`), quick ask (`quick-ask`), suggestion routine (`routine-suggest`); senza usage non si registra; MAI testo dei messaggi (verificato dal test sulle colonne) |
+| **E5** eval su qualsiasi provider | fatto | `scripts/run-eval.mjs`: `--provider <kind>` (default `ollama`, validato contro i 12 kind), `--base-url` (default l'URL noto del kind), chiave SOLO da `SANDBOT_EVAL_API_KEY` (mai argv, mai stampata), riga `chiave: presente/assente`, errore chiaro PRIMA di partire per i kind con chiave, intestazione con provider/modello/base URL | `eval/behaviors.eval.ts` legge `EVAL_PROVIDER` e costruisce il `ProviderConfig` col kind giusto (stessa guardia sulla chiave anche in `--config vitest.eval.config.ts` diretto); la suite passa da `llmStream`, quindi dall'adattatore. **Eval NON lanciata** (serve un modello cloud) |
+| **E6** test col faux provider | fatto | `src/main/agent/__tests__/llm-pi.test.ts` (23 test): streaming uno-per-uno, thinking→reasoningDelta, due tool call alla fine in ordine con arguments JSON, usage+costUsd (anche null fuori catalogo/locale), abort a metà (`APIUserAbortError`), 503/429/400/ECONNREFUSED (via `fallbackEligible`/`stopReasonOfError`), conversione E2.3, zai mai su `/coding/`, baseUrl ollama/custom/zai (con e senza `/v1`), chiave d'ambiente mai usata + User-Agent «Homun», temperatura + schema del tool intatto nel payload, **llm-pi.ts unico importatore** (grep), e i test E4 (turno VERO col faux → riga in `model_usage`, summary che aggrega, costo null) | per i test end-to-end senza rete: `FAUX_TEST_PROVIDER_ID` ('faux-test') registra il `fauxProvider` di pi-ai nella collection (nessuna configurazione reale ha quell'id); il faux diretto si usa con `streamPi(models, model, meta, …)` |
+| **E7** cosa NON cambia | rispettato | nessun prompt, tool o comportamento del loop (salvo le etichette E0); nessuna UI (solo catalogo + `groupSystemText` invariato); catalogo dei provider a 12 kind; nessun provider OAuth registrato | due differenze VISIBILI volute, da sapere: (1) i modelli del catalogo `openai`/`xai` ora parlano l'api **openai-responses** di pi-ai (prima chat completions) — è il catalogo ufficiale del provider; (2) un provider cloud **senza chiave** ora fallisce con «No API key for provider: …» invece di mandare `Bearer not-needed` e prendere un 401 opaco (i locali senza chiave continuano a mandare `not-needed`, come prima) |
+| **E8** prova del daemon | fatto | script `/tmp/sandbot-18a-e8.mjs` (riportato sotto): daemon REALE (`ELECTRON_RUN_AS_NODE=1 node_modules/.bin/electron out/main/daemon.js --data <dir nuova in $TMPDIR>`), provider `openai-compatible` su server HTTP finto 127.0.0.1 (SSE: testo, tool call `send_to_user`, `usage`), `chat:send` → **8/8 controlli OK**: risposta consegnata in chat, riga in `model_usage` (`input` 42 / `output` 7 — i token ESATTI del provider finto, `source` 'turn', `agent_id`), `usage:summary` con 1 riga aggregata e `costUsd` null (compatibile locale), 3 chiamate HTTP, colonne solo numeriche/id, cartella rimossa | il daemon dell'utente NON toccato (verificato: resta attivo il suo processo su `~/Library/Application Support/sandbot/data`) |
+
+### La versione di Node del runtime
+
+`ELECTRON_RUN_AS_NODE=1 npx electron -p process.versions.node` → **24.22.0** (≥ 22.19 richiesto da pi-ai 1.4.0). Il Node locale della shell è 24.22.1.
+
+### Cosa fa ogni API sui retry (E2.5)
+
+L'adattatore passa `maxRetries: 2` a ogni chiamata (il default dell'SDK openai di prima: comportamento invariato).
+
+- **`openai-completions`** (ollama, lmstudio, openai-compatible, custom, zai, deepseek, groq) e **`openai-responses`** (openai, xai): l'SDK viene chiamato con `maxRetries: 0` e pi-ai riprova per conto suo con `retryProviderRequest` — stessa politica degli SDK (ritenta su 408/409/429/5xx e `x-should-retry: true`, backoff esponenziale 0,5 s → 8 s con jitter, onora `retry-after`/`retry-after-ms` con tetto 60 s) ma **interrompibile col segnale di abort** (i timer interni degli SDK lo ignorerebbero). Il tetto dei 60 s superato → errore immediato, visibile al loop.
+- **`anthropic-messages`** (anthropic, e i modelli anthropic di openrouter): identico — SDK a `maxRetries: 0` + `retryProviderRequest` con gli stessi `maxRetries: 2`.
+- **`mistral-conversations`** (mistral): **nessun retry** — pi-ai usa `fetch` diretto e ignora `maxRetries`. Oggi il kind mistral parlava OpenAI-compatible via SDK openai (2 retry): con il catalogo pi-ai passa all'api nativa Mistral e perde i retry di trasporto; il recupero resta alla riserva/alla ripresa del turno. Da rivalutare se serve (max 1 riga in un'eventuale 18b).
+
+### Come ho verificato che le variabili d'ambiente non si usano (E2.2)
+
+Su tre livelli, tutti nel test `llm-pi.test.ts` («le variabili d'ambiente NON si usano mai»):
+
+1. **Per costruzione**: ogni Models collection nasce con `InMemoryCredentialStore` VUOTO e un `AuthContext` che risponde `env: async () => undefined`, `fileExists: async () => false` — pi-ai non può leggere `OPENAI_API_KEY` (né alcun altro nome) né file di credenziali dall'ambiente del daemon, qualunque resolve scriva il provider. L'auth dei provider registrati dall'adattatore usa SOLO il `credential.key` della richiesta (la `apiKey` esplicita di `llmStream`).
+2. **Con un provider openai senza chiave + `process.env.OPENAI_API_KEY = 'sk-test-env'`**: la richiesta fallisce PRIMA della rete con «No API key for provider: nokey» e la stringa `sk-test-env` NON compare da nessuna parte (messaggio d'errore incluso).
+3. **Sul filo**, con il server HTTP finto su 127.0.0.1: provider `custom` con chiave `sk-test-explicit` → header `Authorization: Bearer sk-test-explicit`; lo stesso senza chiave → `Bearer not-needed` (la convenzione di sempre per i locali), MAI il valore della variabile d'ambiente. In più: `User-Agent: Homun` esatto, senza piattaforma/architettura né header di attribuzione.
+
+### Dipendenze tolte o rimaste
+
+- **Tolte** da `dependencies`: `openai` (^7.43.0) e `@anthropic-ai/sdk` (^1.3.0) — `llm.ts` era l'unico utente (grep su `src/`, `scripts/`, `eval/`). Restano nel grafo come copie **annidate** di pi-ai (`node_modules/@earendil-works/pi-ai/node_modules/{openai@7.19.0,@anthropic-ai/sdk@0.129.0}`).
+- **Aggiunta**: `@earendil-works/pi-ai` **1.4.0** (versione esatta, ESM). Arrivano come sue dipendenze: `@earendil-works/pi-telemetry` 1.4.0 (solo interfaccia, nessun invio: mai passata alle chiamate), `typebox`, `@google/genai`, `@aws-sdk/client-bedrock-runtime`, `@smithy/node-http-handler`, `http(s)-proxy-agent`, `partial-json`.
+- Invariato tutto il resto del `package.json`.
+
+### Lo script della prova E8 (`/tmp/sandbot-18a-e8.mjs`)
+
+```js
+// Fase 18a (E8): prova del daemon SU DIRECTORY TEMPORANEA NUOVA con un
+// provider openai-compatible che punta a un server HTTP FINTO su 127.0.0.1.
+import { createServer } from 'node:http'
+import { spawn } from 'node:child_process'
+import { mkdtempSync, readFileSync, rmSync, existsSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
+
+const repo = '/Users/fabio/Projects/Bot/sandbot'
+const DATA = mkdtempSync(join(tmpdir(), 'sandbot-18a-e8-'))
+const results = []
+const check = (name, ok, extra = '') => { results.push(ok); console.log(`[e8] ${ok ? 'OK' : 'FAIL'}  ${name}${extra ? ` — ${extra}` : ''}`) }
+
+// il server finto: /v1/chat/completions in SSE (testo, poi send_to_user, poi usage)
+// NB: i tool_calls stanno DENTRO delta (forma canonica OpenAI-compatible)
+const CHAT_CHUNKS = [
+  { choices: [{ index: 0, delta: { role: 'assistant', content: 'Ciao! ' }, finish_reason: null }] },
+  { choices: [{ index: 0, delta: { content: 'Tutto pronto.' }, finish_reason: null }] },
+  { choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_e8', type: 'function', function: { name: 'send_to_user', arguments: '' } }] }, finish_reason: null }] },
+  { choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: '{"text":"Risposta dal provider finto sulla porta locale."}' } }] }, finish_reason: null }] },
+  { choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] },
+  { choices: [], usage: { prompt_tokens: 42, completion_tokens: 7, total_tokens: 49 } }
+]
+let llmCalls = 0
+const fake = createServer((req, res) => {
+  if (req.method === 'POST' && req.url.endsWith('/chat/completions')) {
+    llmCalls++
+    res.writeHead(200, { 'content-type': 'text/event-stream' })
+    for (const c of CHAT_CHUNKS) res.write('data: ' + JSON.stringify({ id: 'chatcmpl-e8', object: 'chat.completion.chunk', created: 1, model: 'finto-1', ...c }) + '\n\n')
+    res.write('data: [DONE]\n\n')
+    res.end()
+  } else res.writeHead(404).end()
+})
+await new Promise((r) => fake.listen(0, '127.0.0.1', r))
+const LLM_PORT = fake.address().port
+
+// avvio del daemon (bundle nuovo) sulla cartella temporanea
+const daemon = spawn(join(repo, 'node_modules/.bin/electron'), [join(repo, 'out/main/daemon.js'), '--data', DATA], {
+  env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: ['ignore', 'pipe', 'pipe']
+})
+let info = null
+for (let i = 0; i < 100 && !info; i++) {
+  await new Promise((r) => setTimeout(r, 200))
+  try { info = JSON.parse(readFileSync(join(DATA, 'daemon.json'), 'utf8')) } catch { /* non ancora */ }
+}
+
+// client WS minimo (framing condiviso: hello {token}, RPC {rpc,id,method,params})
+const ws = new WebSocket(`ws://127.0.0.1:${info.port}`)
+await new Promise((res, rej) => { ws.addEventListener('open', res, { once: true }); ws.addEventListener('error', rej, { once: true }) })
+let rpcId = 0
+const pending = new Map()
+ws.addEventListener('message', (ev) => {
+  const m = JSON.parse(String(ev.data))
+  if (m.rpc === true && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id) }
+})
+const call = (method, params = []) => new Promise((res, rej) => {
+  const id = ++rpcId
+  pending.set(id, res)
+  ws.send(JSON.stringify({ rpc: true, id, method, params }))
+  setTimeout(() => rej(new Error(`timeout RPC ${method}`)), 30_000)
+})
+ws.send(JSON.stringify({ hello: true, token: info.token }))
+await new Promise((r) => setTimeout(r, 300))
+
+// provider finto + agente + messaggio
+await call('providers:save', [{ id: 'finto', name: 'Finto (locale)', kind: 'openai-compatible', baseUrl: `http://127.0.0.1:${LLM_PORT}`, apiKey: '', enabled: true }])
+const agentRes = await call('agents:create', ['Prova 18a'])
+const agent = agentRes.result
+await call('agents:update', [agent.id, { providerId: 'finto', model: 'finto-1' }])
+await call('chat:send', [agent.id, 'come stai?'])
+
+// 1) la risposta in chat (send_to_user della tool call)
+let delivered = null
+for (let i = 0; i < 100 && !delivered; i++) {
+  await new Promise((r) => setTimeout(r, 300))
+  const entries = await call('agents:entries', [agent.id])
+  delivered = (entries.result ?? []).find((e) => e.kind === 'send-message' && (e.content ?? '').includes('provider finto'))
+}
+check('risposta in chat consegnata', !!delivered)
+
+// 2-3) usage:summary e le chiamate al server finto
+const summary = await call('usage:summary', [])
+const row = (summary.result ?? [])[0]
+check('usage:summary ha la riga del modello finto', summary.result?.length === 1 && row?.model === 'finto-1' && row?.providerKind === 'openai-compatible')
+check('usage:summary conta chiamate e token', row?.calls >= 1 && row?.input >= 42 && row?.output >= 7)
+check('modello compatibile locale: costo null', row?.costUsd === null)
+check('chiamate HTTP al server finto', llmCalls >= 1)
+
+// 4) fermo il daemon e leggo la riga grezza; cancello SOLO la mia cartella
+ws.close()
+daemon.kill('SIGTERM')
+await new Promise((r) => daemon.once('exit', r))
+fake.close()
+const db = new DatabaseSync(join(DATA, 'sandbot.db'), { readOnly: true })
+const usage = db.prepare('SELECT * FROM model_usage ORDER BY id').all()
+const cols = usage.length ? Object.keys(usage[0]) : []
+db.close()
+check('model_usage: riga source turn, agent_id, token del finto', usage.some((r) => r.source === 'turn' && r.agent_id === agent.id && r.model === 'finto-1' && r.input >= 42 && r.output >= 7))
+check('model_usage: solo numeri e id, mai testo', !cols.some((k) => /message|content|prompt|text/i.test(k)))
+rmSync(DATA, { recursive: true, force: true })
+check('cartella temporanea rimossa', !existsSync(DATA))
+process.exit(results.every(Boolean) ? 0 : 1)
+```
+
+**Output**: `E8 OK · 8/8 controlli` — risposta consegnata («Risposta dal provider finto sulla porta locale.»), `usage:summary` `[{"providerKind":"openai-compatible","model":"finto-1","calls":3,"input":126,"output":21,"costUsd":null}]`, righe `model_usage` con `input` 42 / `output` 7 e `source` 'turn', 3 chiamate HTTP, colonne solo numeriche, cartella rimossa. (Le 3 chiamate: il finto risponde SEMPRE con la stessa tool call, il loop detection ferma il turno dopo la terza — comportamento corretto.)
+
+### Numeri del catalogo
+
+765 → **780 messaggi** per lingua (+15: 13 `trigger.*` degli errori di forma + 2 `rpc.avatarInvalid{Shape,Color}`); `en` **0 missing**; seconda estrazione senza differenze.
+
+### Output dei check
+
+- `npm run typecheck`: pulito (exit 0).
+- `npx vitest run --maxWorkers=4`: **105 file / 1647 test verdi** (1620 della 17c + 27 nuovi: 23 `llm-pi.test.ts`, 2 in più in `llm-toolcalls` (conversione), 1 positivo D4 ×3 stringhe, trigger/compaction/avatar aggiornati al nuovo contratto).
+- `npx vitest run --config vitest.eval.config.ts eval/language-judges.eval.ts`: 12/12.
+- `npm run build`: ✓ built ×3 — `out/main/daemon.js` 481,30 kB (bundle che importa pi-ai esternamente).
+- `npm run i18n:extract`: `en` 0 missing; seconda estrazione senza differenze.
+- Prova E8: **8/8 controlli OK** (sopra).
+
+### Cosa NON è stato fatto (per specifica)
+
+- **L'eval NON è lanciata** (serve un modello cloud): la misura su flash-Ollama deve rientrare nella varianza della 17c (IT 99/108, EN 96/108), poi kimi-k3 e GLM via API a consumo se c'è credito — con `--provider zai` l'adattatore ora punta all'API a consumo, MAI al coding plan.
+- Le riserve multiple, i livelli di thinking nella UI, il flag visione, il modello per routine, la pagina Uso e costi e la scelta dal catalogo: **della 18b** (qui solo i dati: `modelCapabilities` e `model_usage`).
+- Nessuna migrazione del DB: i provider zai salvati con `https://api.z.ai` (o `/v1`) si correggono in lettura.
+- Nessun Docker, nessun modello cloud, nessuna rete reale (solo 127.0.0.1), niente `npm run dist`; né l'app né il daemon sulla cartella dati vera (il daemon dell'utente è rimasto attivo e indisturbato); nessun segreto vero (solo chiavi finte `sk-test-*`); nessun file dell'utente, volume `sandbot-box`/`sandbot-plugins`/`sandbot-browser` o cartella preesistente di `/var/folders/…/T/` cancellati.

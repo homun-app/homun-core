@@ -739,6 +739,16 @@ msgstr "authorization succeeded but the server does not respond: {error}"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
+msgid "rpc.avatarInvalidShape"
+msgstr "invalid avatar: expected '{' family, color '}' or null"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "rpc.avatarInvalidColor"
+msgstr "invalid avatar: color \"{color}\" (possible: {colors})"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
 msgid "rpc.avatarInvalid"
 msgstr "invalid avatar: family \"{family}\" (the 5 possible: {families})"
 
@@ -833,6 +843,11 @@ msgstr "browser not available without the Homun window"
 #: src/shared/ui-messages.ts
 msgid "notice.onboardingWaitingProvider"
 msgstr "A provider is already active: to get me started choose the role in the message above (with your answer I prepare your bots)."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "trigger.offsetMissing"
+msgstr "calendar_event: missing offsetMinutes (minutes before the event)"
 
 #: src/renderer/src/components/BotDialogs.tsx
 #: src/renderer/src/components/RightPanel.tsx
@@ -1030,6 +1045,26 @@ msgstr "Template setup: {0}"
 #: src/shared/ui-messages.ts
 msgid "rpc.manualPollConfirm"
 msgstr "connector_poll on a manually added server: the user’s explicit confirmation is needed that the tool only reads and changes nothing (userConfirmedReadOnly)"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "trigger.connectorMissing"
+msgstr "connector_poll: missing connector"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "trigger.idFieldInvalid"
+msgstr "connector_poll: invalid idField (\"{value}\", e.g. \"messages[].id\")"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "trigger.intervalMin"
+msgstr "connector_poll: intervalMin must be ≥ 2 minutes"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "trigger.toolMissing"
+msgstr "connector_poll: missing tool"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "connesso"
@@ -2915,6 +2950,41 @@ msgstr "Schedule:"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
+msgid "trigger.atInvalid"
+msgstr "schedule: at must be HH:MM (\"{value}\")"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "trigger.cronMissing"
+msgstr "schedule: missing cron expression"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "trigger.everyHourAt"
+msgstr "schedule: every hour requires at (the minute, e.g. \"09:30\")"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "trigger.everyMonthDay"
+msgstr "schedule: every month requires monthDay 1-31"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "trigger.everyInvalid"
+msgstr "schedule: invalid every (\"{value}\")"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "trigger.everyWeekWeekday"
+msgstr "schedule: every week requires weekday 0-6 (Sunday 0)"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "trigger.modeInvalid"
+msgstr "schedule: invalid mode (\"{value}\")"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
 msgid "approval.rcRedirect"
 msgstr "writes to a file"
 
@@ -3466,3 +3536,8 @@ msgstr "item not found"
 #: src/renderer/src/components/Settings.tsx
 msgid "webhook"
 msgstr "webhook"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "trigger.tokenMissing"
+msgstr "webhook: missing token"

@@ -58,7 +58,9 @@ export function validateTemplate(t: unknown): string[] {
     if (!trigger || typeof trigger !== 'object' || trigger.type !== 'schedule') {
       errors.push(`${where(String(i))}: trigger deve essere di tipo schedule (cron o every)`)
     } else {
-      const shape = triggerShapeErrors(trigger)
+      // fase 18a (E0): shape è UiText[] — qui è validazione al boot per lo
+      // sviluppatore, si formatta in inglese
+      const shape = triggerShapeErrors(trigger).map((e) => formatUi(e, 'en'))
       // il cron vero e proprio si verifica qui: triggerShapeErrors controlla
       // solo la forma (la stessa funzione vale per le routine utente)
       if (trigger.kind === 'cron' && !parseCron(trigger.cron)) shape.unshift(`cron non valido: "${trigger.cron}"`)
