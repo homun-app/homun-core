@@ -297,6 +297,27 @@ export const UI = {
     id: 'rpc.screenControlFailed',
     message: 'Impossibile avviare il controllo dello schermo: riprova.'
   }),
+
+  // ---- fase 19b (T2/T3): terminale, file, attività ----
+  rpcTerminalUnavailable: msg({
+    id: 'rpc.terminalUnavailable',
+    message: 'Il terminale richiede la modalità docker (Impostazioni → Sandbox): non è disponibile qui.'
+  }),
+  rpcTerminalTooMany: msg({
+    id: 'rpc.terminalTooMany',
+    message: 'Troppi terminali aperti: al massimo 3 per bot e 8 in tutto.'
+  }),
+  rpcTerminalBoxFailed: msg({
+    id: 'rpc.terminalBoxFailed',
+    message: 'Il box non è partito, il terminale non è disponibile: riprova.'
+  }),
+  rpcFilesOutside: msg({ id: 'rpc.filesOutside', message: 'Percorso fuori dal computer del bot.' }),
+  rpcFilesNotFound: msg({ id: 'rpc.filesNotFound', message: 'File o cartella inesistente.' }),
+  rpcFilesNotAFile: msg({ id: 'rpc.filesNotAFile', message: 'Si può scaricare solo un file, non una cartella.' }),
+  rpcFilesTooLarge: msg({
+    id: 'rpc.filesTooLarge',
+    message: 'File troppo grande ({size} byte, limite {limit}): non caricato.'
+  }),
   /** il messaggio utente che riapre il turno dopo la presa di controllo (V5) */
   takeoverDoneLine: msg({
     id: 'open.takeoverDone',

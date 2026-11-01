@@ -10,8 +10,8 @@ import { elementAtPointFn, ACTIVE_FIELD_FN, mouseHitArmFn, mouseHitReadFn } from
 /** La sonda costruisce armo e lettura con una chiave casuale: si riconoscono dal corpo. */
 const isArm = (fn: string): boolean => fn.includes("addEventListener('mousemove'")
 const isRead = (fn: string): boolean => fn.includes("removeEventListener('mousemove'")
-import { computerActContextOf, computerExecAction, MOUSE_PROBE_WAIT_MS, type DesktopInfo } from '../computer'
 import { computerActRisk, type ComputerClickProbe } from '../browser-guard'
+import { computerActContextOf, computerExecAction, MOUSE_PROBE_WAIT_MS, type DesktopInfo } from '../computer'
 import { setDockerRunnerForTests } from '../../sandbox'
 import type { ViewportOffset } from '../browser'
 
@@ -151,6 +151,17 @@ const pageObj = (src: string, doc: Partial<FakeDoc>, win?: Record<string, unknow
 }
 
 // ---- L4: elementAtPointFn nel DOM finto ----
+
+describe('fase 19b (T8.3): un click nello SPAZIO VUOTO trova body — nome e testo VUOTI', () => {
+  it('elementFromPoint su body → { role: generic, name: "", text: "" } (prima risaliva all\'innerText del body intero)', () => {
+    const { ret } = runPageFn(elementAtPointFn(400, 300), { elementFromPoint: () => el('body') })
+    expect(ret).toEqual({ kind: 'element', role: 'generic', name: '', text: '' })
+    // stessa cosa per html
+    const html = runPageFn(elementAtPointFn(0, 0), { elementFromPoint: () => el('html') })
+    expect(html.ret).toEqual({ kind: 'element', role: 'generic', name: '', text: '' })
+  })
+
+})
 
 describe('fase 19a correzioni L4: elementAtPointFn risale al controllo VERO', () => {
   it('input type=submit value="Acquista" (innerText vuoto) → button «Acquista», non più nome vuoto', () => {

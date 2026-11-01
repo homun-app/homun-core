@@ -21,6 +21,13 @@ export const DAEMON_RPC_CHANNELS = [
   'agents:entries', 'chat:send', 'chat:interrupt',
   // fase 19a: lo schermo del bot (vista dal vivo e presa di controllo)
   'screen:open', 'screen:release', 'screen:status',
+  // fase 19b: terminale, file e attività del computer del bot. files:export e
+  // files:import NON ci sono: li chiama SOLO il main dopo il dialog del Mac
+  // (il renderer non vede né sceglie mai un path del Mac se non da quelli o
+  // dal trascinamento, che passa da files:import-dropped)
+  'terminal:open',
+  'files:list', 'files:read',
+  'activity:list', 'activity:output',
   'widget:respond', 'draft:send', 'draft:discard', 'draft:update',
   'quickask',
   'routines:list', 'routines:create', 'routines:update', 'routines:delete', 'routines:suggest',
@@ -82,6 +89,64 @@ export function registerIpc(client: DaemonClient, getWindows: () => BrowserWindo
     if (buf.length > 5_000_000) throw new Error(mainStrings().dialogs.imageTooLarge)
     return buf.toString('base64')
   })
+
+  // ---- fase 19b (T3.2): le finestre del Mac della vista File ----
+  // Il macPath lo sceglie SEMPRE l'utente nel dialog: il renderer non vede
+  // né sceglie mai un path del Mac se non da questi dialog o dal
+  // trascinamento (che passa da files:import-dropped col path del drop).
+
+  /** files:download — finestra «Salva», poi files:export del daemon. null = annullato. */
+  ipcMain.handle('files:download', async (_e, agentId: string, path: string) => {
+    const win = getWindows()[0]
+    const name = String(path).split('/').pop() || 'file'
+    const r = await dialog.showSaveDialog(win!, {
+      title: mainStrings().dialogs.saveFile,
+      defaultPath: name
+    })
+    if (r.canceled || !r.filePath) return null
+    return client.call('files:export', [agentId, path, r.filePath])
+  })
+
+  /** files:upload — finestra «Apri» (anche più file), poi files:import per ciascuno. */
+  ipcMain.handle('files:upload', async (_e, agentId: string, dirPath: string) => {
+    const win = getWindows()[0]
+    const r = await dialog.showOpenDialog(win!, {
+      title: mainStrings().dialogs.openFiles,
+      properties: ['openFile', 'multiSelections']
+    })
+    if (r.canceled || !r.filePaths.length) return []
+    const out: Array<{ name: string; ok: boolean; skipped?: boolean; bytes?: number }> = []
+    for (const macPath of r.filePaths) {
+      const name = macPath.split('/').pop() ?? macPath
+      let res = (await client.call('files:import', [agentId, dirPath, macPath])) as
+        | { ok: true; name: string; bytes: number }
+        | { ok: false; reason: string; name: string }
+      if (res.ok === false && res.reason === 'exists') {
+        // «Sostituire?» — il dialog nativo del main, così il path del Mac non
+        // torna mai indietro al renderer
+        const ask = await dialog.showMessageBox(win!, {
+          type: 'question',
+          title: mainStrings().dialogs.replaceTitle,
+          message: mainStrings().dialogs.replaceMessage.replace('{name}', name),
+          buttons: [mainStrings().dialogs.replaceYes, mainStrings().dialogs.replaceNo],
+          defaultId: 1,
+          cancelId: 1
+        })
+        if (ask.response !== 0) {
+          out.push({ name, ok: false, skipped: true })
+          continue
+        }
+        res = (await client.call('files:import', [agentId, dirPath, macPath, true])) as typeof res
+      }
+      out.push(res.ok ? { name: res.name, ok: true, bytes: res.bytes } : { name, ok: false })
+    }
+    return out
+  })
+
+  /** files:import-dropped — il file TRASCINATO dal Finder (path dal drop, preload). */
+  ipcMain.handle('files:import-dropped', (_e, agentId: string, dirPath: string, macPath: string, overwrite?: boolean) =>
+    client.call('files:import', [agentId, dirPath, macPath, overwrite === true ? true : undefined])
+  )
 
   // diagnostica notifiche (F4)
   ipcMain.handle('notify:test', () => {

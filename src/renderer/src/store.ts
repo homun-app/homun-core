@@ -1,6 +1,9 @@
 // State renderer: agenti, transcript dell'agente attivo, eventi dal main.
 import { create } from 'zustand'
 import type { Agent, TranscriptEntry, SandbotEvent, ProviderConfig, PermissionsConfig, ConnectorInfo, TaskInfo, GroupInfo, GroupMessageInfo, SubagentInfo, AgentAvatar, TurnEnd, ScreenStatus } from '../../shared/types'
+
+/** Fase 19b (T1): le schede del pannello «Computer» del bot. */
+export type ComputerTab = 'screen' | 'terminal' | 'files' | 'activity'
 import type { UiTheme } from './theme'
 import { applyTheme, watchSystemTheme } from './theme'
 import { previewOf, type SidebarPreview } from './sidebar-utils'
@@ -78,8 +81,13 @@ interface Store {
   activeLanguage: UiLanguage
   /** pannello destro aperto (setting ui.rightPanel) */
   rightPanel: boolean
-  /** fase 19a (V4): pannello dello schermo del bot aperto, e in che modo */
-  botScreen: { open: boolean; mode: 'view' | 'control' }
+  /**
+   * Fase 19b (T1): il pannello «Computer» del bot — quattro schede (Schermo,
+   * Terminale, File, Attività) e, per lo Schermo, il modo (vista/controllo).
+   */
+  computerPanel: { open: boolean; tab: ComputerTab; mode: 'view' | 'control' }
+  /** fase 19b (T1): l'ultima scheda usata PER BOT (si riparte da lì) */
+  computerTabByAgent: Record<string, ComputerTab>
   /** fase 19a (V3.4): ultimo stato dello schermo per bot (evento screen) */
   screenStatus: Record<string, ScreenStatus>
   /** fase 16 (U3): l'utente sta scrivendo nel composer di QUESTO bot */
@@ -141,8 +149,12 @@ interface Store {
   /** fase 17a: lingua dell'interfaccia — si applica subito e resta nel setting */
   setUiLanguage(l: UiLanguageSetting): void
   setRightPanel(v: boolean): void
-  /** fase 19a (V4): apre/chiude il pannello dello schermo del bot */
-  setBotScreen(open: boolean, mode?: 'view' | 'control'): void
+  /**
+   * Fase 19b (T1): apre/chiude il pannello «Computer». Senza tab esplicita
+   * vale l'ULTIMA usata per il bot attivo (la prima volta: Attività, che
+   * funziona in ogni modalità); la tab scelta si ricorda per bot.
+   */
+  setComputerPanel(open: boolean, tab?: ComputerTab, mode?: 'view' | 'control'): void
   /** fase 16 (U3): il composer di questo bot ha del testo (o no) */
   setTyping(agentId: string | null): void
   /** fase 16 (U5): apre/chiude i pannelli Memoria e Skill */
@@ -178,7 +190,8 @@ export const useStore = create<Store>((set, get) => ({
   uiLanguage: 'system',
   activeLanguage: 'it',
   rightPanel: true,
-  botScreen: { open: false, mode: 'view' },
+  computerPanel: { open: false, tab: 'activity', mode: 'view' },
+  computerTabByAgent: {},
   screenStatus: {},
   typingAgentId: null,
   lastDeltaAt: {},
@@ -570,9 +583,20 @@ export const useStore = create<Store>((set, get) => ({
     void api.settingsSet('ui.rightPanel', v).catch(() => undefined)
   },
 
-  // fase 19a (V4): il pannello dello schermo del bot (vista o controllo)
-  setBotScreen(open, mode) {
-    set({ botScreen: { open, mode: mode ?? get().botScreen.mode } })
+  // fase 19b (T1): il pannello «Computer» — la tab si ricorda per bot
+  setComputerPanel(open, tab, mode) {
+    const s = get()
+    const agentId = s.activeId ?? ''
+    let next = tab
+    if (open && !next && agentId) next = s.computerTabByAgent[agentId] ?? 'activity'
+    set({
+      computerPanel: {
+        open,
+        tab: next ?? s.computerPanel.tab,
+        mode: mode ?? s.computerPanel.mode
+      },
+      ...(open && next && agentId ? { computerTabByAgent: { ...s.computerTabByAgent, [agentId]: next } } : {})
+    })
   },
 
   // fase 16 (U3): solo i cambiamenti di stato passano (niente set per tasto)

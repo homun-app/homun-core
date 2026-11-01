@@ -511,6 +511,10 @@ export type SandbotEvent =
   // fase 19a (V3.4): lo stato dello SCHERMO di un bot è cambiato (browser
   // aperto/chiuso, controllo attivo, richiesta di presa di controllo in attesa)
   | { type: 'screen'; agentId: string; status: ScreenStatus }
+  // fase 19b (T4.1): una nuova riga di computer_actions o un cambio di stato
+  // di shell_jobs — il feed «Attività» e la vista File del PROPRIETARIO
+  // ricaricano (niente payload pesante: la UI legge quello che serve)
+  | { type: 'computer-activity'; ownerId: string }
 
 /** Lo stato dello schermo di un bot per la UI (fase 19a, RPC screen:status). */
 export interface ScreenStatus {
@@ -520,6 +524,55 @@ export interface ScreenStatus {
   control: boolean
   /** richiesta di presa di controllo in attesa (scade dopo 30 minuti) */
   takeoverPending: { reason: string } | null
+}
+
+// ---- fase 19b (T3/T4): i file e l'attività del computer del bot ----
+
+/** Una voce dell'elenco della vista File. */
+export interface FileEntry {
+  name: string
+  kind: 'dir' | 'file' | 'link'
+  size: number
+  /** mtime in ms dall'epoch */
+  mtime: number
+}
+
+/** Il risultato di files:list (path relativi alla radice del box). */
+export interface FilesListResult {
+  path: string
+  entries: FileEntry[]
+  truncated: boolean
+  /** col path vuoto: la home del bot del pannello (la UI apre lì) */
+  home?: string
+}
+
+/** Il risultato di files:read: anteprima testo, immagine, binario o troppo grande. */
+export type FilesReadResult =
+  | { kind: 'text'; content: string }
+  | { kind: 'image'; mime: string; base64: string }
+  | { kind: 'binary'; size: number }
+  | { kind: 'too-large'; size: number }
+
+/** Il risultato di files:import (exists: la UI chiede «Sostituire?»). */
+export type FilesImportResult =
+  | { ok: true; name: string; bytes: number }
+  | { ok: false; reason: 'exists'; name: string }
+
+/** Una voce del feed «Attività» (fase 19b, T4.2). */
+export interface ActivityItem {
+  id: string
+  source: 'shell' | 'action'
+  agentId: string
+  agentName: string
+  actor: 'bot' | 'user'
+  kind: 'shell' | 'write_file' | 'copy_in' | 'copy_out' | 'upload' | 'download'
+  /** il comando o il path, troncato a 500 caratteri */
+  text: string
+  status: 'running' | 'done' | 'killed' | 'lost' | 'expired' | 'ok' | 'error'
+  exitCode: number | null
+  bytes: number | null
+  startedAt: number
+  finishedAt: number | null
 }
 
 export interface SandbotApi {
@@ -615,6 +668,40 @@ export interface SandbotApi {
   screenOpen(agentId: string, mode: 'view' | 'control'): Promise<{ url: string }>
   screenRelease(agentId: string, note?: string): Promise<{ ok: boolean }>
   screenStatus(agentId: string): Promise<ScreenStatus>
+  /**
+   * Fase 19b (T2): il terminale del bot (solo docker). terminal:open torna
+   * l'URL WebSocket con una capability MONOUSO (30 s) per /term/<cap>; il
+   * client incapsula l'input nei frame di shared/terminal-frames.
+   */
+  terminalOpen(agentId: string): Promise<{ url: string }>
+  /** fase 19b (T3): l'elenco di una cartella del box (path relativo alla radice) */
+  filesList(agentId: string, path: string): Promise<FilesListResult>
+  /** fase 19b (T3): l'anteprima di un file (testo, immagine, binario, troppo grande) */
+  filesRead(agentId: string, path: string): Promise<FilesReadResult>
+  /**
+   * Fase 19b (T3.2): il download sul Mac — il MAIN apre la finestra «Salva» e
+   * poi chiama files:export del daemon col macPath scelto dall'utente. Il
+   * renderer non vede né sceglie mai il path del Mac. null = annullato.
+   */
+  filesDownload(agentId: string, path: string): Promise<{ ok: boolean; name?: string; bytes?: number } | null>
+  /**
+   * Fase 19b (T3.2): l'upload dal Mac — il MAIN apre la finestra «Apri»
+   * (anche più file) e chiama files:import per ciascuno; il «Sostituire?» di
+   * un file che esiste già lo chiede il MAIN col dialog nativo.
+   */
+  filesUpload(agentId: string, dirPath: string): Promise<Array<{ name: string; ok: boolean; skipped?: boolean; bytes?: number }>>
+  /**
+   * Fase 19b (T3.2): il file TRASCINATO dal Finder sul pannello — il path
+   * arriva dal drop via webUtils.getPathForFile (preload), mai scelto dal
+   * renderer; exists lo gestisce la UI con «Sostituire?».
+   */
+  filesImportDropped(agentId: string, dirPath: string, macPath: string, overwrite?: boolean): Promise<FilesImportResult>
+  /** fase 19b (T3.2): il path del Mac di un file trascinato (webUtils, preload only) */
+  pathForFile(file: File): string | null
+  /** fase 19b (T4): le ultime voci del feed Attività della famiglia del bot */
+  activityList(agentId: string, limit?: number): Promise<{ owner: string; items: ActivityItem[] }>
+  /** fase 19b (T4): la coda dell'output di UNA voce (shell) o l'errore (azione) */
+  activityOutput(agentId: string, id: string): Promise<{ text: string }>
   // memoria (fase 4): sezione nella vista dell'agente, modifica ed eliminazione
   listMemories(agentId: string): Promise<MemoryInfo[]>
   updateMemory(agentId: string, id: string, content: string): Promise<void>

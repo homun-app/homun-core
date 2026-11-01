@@ -56,6 +56,15 @@ describe('fase 19a (V9): computerActRisk — il confine di OGNI azione', () => {
     }
   })
 
+  it('fase 19b (T8.3): click nello SPAZIO VUOTO della pagina (body/html) → FREE, il div «Acquista» resta ASK', () => {
+    // la sonda su un punto vuoto trova body o html: nome e testo VUOTI
+    // (prima il nome risaliva all'innerText del body intero e ogni pagina con
+    // una parola d'impegno chiedeva la conferma per niente)
+    expect(computerActRisk(click(400, 300), ctx({ click: { kind: 'element', role: 'generic', name: '', text: '', field: null } })).kind).toBe('free')
+    // un div col testo «Acquista» resta ask: il nome dell'ELEMENTO è il suo testo
+    expect(computerActRisk(click(400, 300), ctx({ click: { kind: 'element', role: 'generic', name: 'Acquista', text: 'Acquista', field: null } })).kind).toBe('ask')
+  })
+
   it('L3: click su un link normale → free', () => {
     expect(computerActRisk(click(600, 400), ctx({ click: CLICK_LINK })).kind).toBe('free')
   })

@@ -14,7 +14,17 @@ export interface MainStrings {
   tray: { open: string; quit: string }
   tooltip: string
   notifyTest: { title: string; body: string }
-  dialogs: { images: string; imageTooLarge: string }
+  dialogs: {
+    images: string
+    imageTooLarge: string
+    /** fase 19b (T3.2): le finestre Salva/Apri della vista File e il «Sostituire?» */
+    saveFile: string
+    openFiles: string
+    replaceTitle: string
+    replaceMessage: string
+    replaceYes: string
+    replaceNo: string
+  }
 }
 
 const STRINGS: Record<UiLanguage, MainStrings> = {
@@ -30,7 +40,13 @@ const STRINGS: Record<UiLanguage, MainStrings> = {
     },
     dialogs: {
       images: 'Immagini',
-      imageTooLarge: 'Immagine troppo grande (max 5MB)'
+      imageTooLarge: 'Immagine troppo grande (max 5MB)',
+      saveFile: 'Salva nel box come',
+      openFiles: 'Carica nel computer del bot',
+      replaceTitle: 'Sostituire il file?',
+      replaceMessage: 'Nel computer del bot esiste già «{name}». Sostituirlo?',
+      replaceYes: 'Sostituisci',
+      replaceNo: 'Salta'
     }
   },
   en: {
@@ -45,7 +61,13 @@ const STRINGS: Record<UiLanguage, MainStrings> = {
     },
     dialogs: {
       images: 'Images',
-      imageTooLarge: 'Image too large (max 5MB)'
+      imageTooLarge: 'Image too large (max 5MB)',
+      saveFile: 'Save in the bot\'s computer as',
+      openFiles: 'Upload to the bot\'s computer',
+      replaceTitle: 'Replace the file?',
+      replaceMessage: '"{name}" already exists in the bot\'s computer. Replace it?',
+      replaceYes: 'Replace',
+      replaceNo: 'Skip'
     }
   }
 }

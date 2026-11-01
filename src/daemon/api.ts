@@ -260,6 +260,40 @@ export function buildApiMethods(
       return screenStatus(String(agentId ?? ''))
     },
 
+    // ---- fase 19b (T2/T3/T4): terminale, file e attività del computer ----
+    /** terminal:open — capability monouso per l'endpoint /term/<cap> (solo docker) */
+    'terminal:open': async ([agentId]) => {
+      const { terminalOpen } = await import('../main/agent/terminal')
+      return terminalOpen(String(agentId ?? ''))
+    },
+    'files:list': async ([agentId, path]) => {
+      const { listBotFiles } = await import('../main/agent/computer-files')
+      return listBotFiles(String(agentId ?? ''), path)
+    },
+    'files:read': async ([agentId, path]) => {
+      const { readBotFile } = await import('../main/agent/computer-files')
+      return readBotFile(String(agentId ?? ''), path)
+    },
+    // files:export e files:import NON sono canali della UI: li chiama SOLO il
+    // main dopo il dialog del Mac (il renderer non vede né sceglie mai un
+    // path del Mac se non da quei dialog o dal trascinamento)
+    'files:export': async ([agentId, path, macPath]) => {
+      const { exportBotFile } = await import('../main/agent/computer-files')
+      return exportBotFile(String(agentId ?? ''), path, macPath)
+    },
+    'files:import': async ([agentId, dirPath, macPath, overwrite]) => {
+      const { importMacFile } = await import('../main/agent/computer-files')
+      return importMacFile(String(agentId ?? ''), dirPath, macPath, overwrite === true ? true : undefined)
+    },
+    'activity:list': async ([agentId, limit]) => {
+      const { listComputerActivity } = await import('../main/agent/computer-activity')
+      return listComputerActivity(String(agentId ?? ''), Number(limit) || undefined)
+    },
+    'activity:output': async ([agentId, id]) => {
+      const { computerActivityOutput } = await import('../main/agent/computer-activity')
+      return { text: await computerActivityOutput(String(agentId ?? ''), String(id ?? '')) }
+    },
+
     // ---- fase 3: risposta ai widget ask_user ----
     'widget:respond': ([agentId, entryId, value]) => {
       const widget = store.getEntries(agentId as string).find((e) => e.id === (entryId as number))

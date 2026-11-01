@@ -484,7 +484,7 @@ export function dockerExecBackgroundArgv(
  * 1001:1001 — il server MCP del browser è di pwuser, e un kill come 1000
  * riceverebbe EPERM lasciando l'orfano col SingletonLock del profilo.
  */
-export type DockerKillSignal = 'TERM' | 'KILL' | '0'
+export type DockerKillSignal = 'TERM' | 'KILL' | 'HUP' | '0'
 
 export function dockerKillGroupArgv(container: string, pgid: number, signal: DockerKillSignal, user: string = CONTAINER_USER): string[] {
   return ['exec', '-u', user, container, 'kill', `-${signal}`, '--', `-${pgid}`]
@@ -750,7 +750,10 @@ export const DOCKER_BROWSER_DESKTOP_WRAPPER_SH = [
   'xauth -f ./Xauthority add ":0" . "$cookie" || exit 1',
   'xauth -f ./Xauthority nlist | sed -e \'s/^..../ffff/\' | xauth -f ./Xauthority nmerge -',
   'chmod 600 ./Xauthority',
-  'Xvfb -displayfd 3 -auth ./Xauthority -nolisten tcp -nolisten unix -screen 0 1280x960x24 3>./display &',
+  // T8.1 (fase 19b): lo stderr di Xvfb e dei due x11vnc finisce nei file della
+  // cartella 0700 di 1001, RISCRITTI a ogni avvio (2>): gli avvisi di xkbcomp
+  // riempivano daemon.log. «Xvfb did not start» resta sullo stderr del wrapper.
+  'Xvfb -displayfd 3 -auth ./Xauthority -nolisten tcp -nolisten unix -screen 0 1280x960x24 3>./display 2>./xvfb.log &',
   'ready=0; i=0',
   'while [ "$i" -lt 50 ]; do',
   '  if [ -s ./display ]; then',
@@ -763,7 +766,7 @@ export const DOCKER_BROWSER_DESKTOP_WRAPPER_SH = [
   'done',
   '[ "$ready" = 1 ] || { echo "Xvfb did not start" >&2; exit 1; }',
   'n=$(cat ./display)',
-  'x11vnc -display ":$n" -auth ./Xauthority -rfbport 0 -rfbportv6 -1 -noipv6 -unixsock ./vnc-view.sock -viewonly -shared -forever -nopw -quiet &',
+  'x11vnc -display ":$n" -auth ./Xauthority -rfbport 0 -rfbportv6 -1 -noipv6 -unixsock ./vnc-view.sock -viewonly -shared -forever -nopw -quiet 2>./x11vnc-view.log &',
   'shift',
   'export DISPLAY=":$n"',
   'export XAUTHORITY="$PWD/Xauthority"',
@@ -941,7 +944,9 @@ export function dockerBrowserRmFileArgv(container: string, path: string): string
  */
 export const DOCKER_SCREEN_CONTROL_VNC_SH = [
   'echo $$ >./vnc-control.pid',
-  'exec x11vnc -display ":$1" -auth ./Xauthority -rfbport 0 -rfbportv6 -1 -noipv6 -unixsock ./vnc-control.sock -shared -forever -nopw -quiet'
+  // T8.1 (fase 19b): come la vista, lo stderr del x11vnc di CONTROLLO va nel
+  // suo file (riscritto a ogni avvio), non nel log del daemon
+  'exec x11vnc -display ":$1" -auth ./Xauthority -rfbport 0 -rfbportv6 -1 -noipv6 -unixsock ./vnc-control.sock -shared -forever -nopw -quiet 2>./x11vnc-control.log'
 ].join('\n')
 
 /** L'argv dell'avvio del x11vnc di controllo (V3.1), come 1001, via docker exec -d. */
@@ -1038,5 +1043,191 @@ export function dockerScreenGeometryArgv(display: string, xauthority: string): s
     BOX_CONTAINER,
     'xdotool', 'getdisplaygeometry'
   ]
+}
+
+// ---- fase 19b (T2): il TERMINALE del bot — una shell interattiva nel box ----
+
+/**
+ * La cartella dei pid file dei terminali di un proprietario, nella SUA home
+ * (fase 19b, T2.3): il programma Python scrive lì `<pid>.pid` (il nome È il
+ * pgid: il processo di docker exec è leader di gruppo) e lo cancella
+ * all'uscita; all'avvio del daemon i pid rimasti sono orfani da chiudere.
+ */
+export function terminalPidDir(owner: string): string {
+  return `${boxHomePath(owner)}/.sandbot/terminals`
+}
+
+/**
+ * Il programma del terminale nel box (fase 19b, T2.1): un PTY con una shell di
+ * login BASH che gira con la STESSA identità dei comandi del bot (uid 1000,
+ * HOME nella home del proprietario — la mette l'argv di dockerTerminalArgv).
+ * Ingresso su stdin come frame `[kind:u8][len:u32be][payload]` (kind 0 = byte
+ * per il pty, kind 1 = resize TIOCSWINSZ con cols:u16be rows:u16be, limitati
+ * 1–1000); un frame più grande di 1 MiB chiude la sessione. L'uscita del pty
+ * va su stdout come BYTE GREZZI (os.write, mai print). Alla chiusura (EOF di
+ * stdin o pty morto): SIGHUP al gruppo della shell, attesa del figlio,
+ * rimozione del pid file, uscita.
+ * Adattato da Rakazo (Apache-2.0), src/terminal/server.ts (TERMINAL_SERVER_PROGRAM).
+ */
+export const TERMINAL_PROGRAM_PY = [
+  'import fcntl, os, pty, select, signal, struct, sys, termios',
+  '',
+  'cwd = sys.argv[1] if len(sys.argv) > 1 else ""',
+  'MAX_FRAME = 1 << 20',
+  '',
+  'def write_all(fd, data):',
+  '    while data:',
+  '        data = data[os.write(fd, data):]',
+  '',
+  '# pid file for orphans: the file NAME is the pid (which, with docker exec,',
+  '# is also the pgid); on a clean exit the file is removed here',
+  'pid_dir = os.path.join(cwd or os.path.expanduser("~"), ".sandbot", "terminals")',
+  'pid_file = ""',
+  'try:',
+  '    os.makedirs(pid_dir, exist_ok=True)',
+  '    pid_file = os.path.join(pid_dir, "%d.pid" % os.getpid())',
+  '    with open(pid_file, "w") as h:',
+  '        h.write(str(os.getpid()))',
+  'except OSError:',
+  '    pid_file = ""',
+  '',
+  'pid, fd = pty.fork()',
+  'if pid == 0:',
+  '    try:',
+  '        os.chdir(cwd)',
+  '    except OSError:',
+  '        os.chdir(os.path.expanduser("~"))',
+  '    env = dict(os.environ, TERM="xterm-256color")',
+  '    os.execvpe("/bin/bash", ["bash", "-l"], env)',
+  '',
+  'def cleanup():',
+  '    try:',
+  '        os.killpg(pid, signal.SIGHUP)',
+  '    except OSError:',
+  '        pass',
+  '    try:',
+  '        os.close(fd)',
+  '    except OSError:',
+  '        pass',
+  '    try:',
+  '        os.waitpid(pid, 0)',
+  '    except OSError:',
+  '        pass',
+  '    if pid_file:',
+  '        try:',
+  '            os.unlink(pid_file)',
+  '        except OSError:',
+  '            pass',
+  '',
+  'try:',
+  '    pending = b""',
+  '    while True:',
+  '        ready = select.select([0, fd], [], [])[0]',
+  '        if fd in ready:',
+  '            try:',
+  '                data = os.read(fd, 65536)',
+  '            except OSError:',
+  '                break',
+  '            if not data:',
+  '                break',
+  '            write_all(1, data)',
+  '        if 0 in ready:',
+  '            data = os.read(0, 65536)',
+  '            if not data:',
+  '                break',
+  '            pending += data',
+  '            while len(pending) >= 5:',
+  '                kind = pending[0]',
+  '                size = struct.unpack(">I", pending[1:5])[0]',
+  '                if size > MAX_FRAME:',
+  '                    sys.exit(0)',
+  '                if len(pending) < 5 + size:',
+  '                    break',
+  '                payload, pending = pending[5:5 + size], pending[5 + size:]',
+  '                if kind == 0:',
+  '                    write_all(fd, payload)',
+  '                elif kind == 1 and len(payload) == 4:',
+  '                    cols, rows = struct.unpack(">HH", payload)',
+  '                    cols = min(1000, max(1, cols))',
+  '                    rows = min(1000, max(1, rows))',
+  '                    fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))',
+  'finally:',
+  '    cleanup()'
+].join('\n')
+
+/**
+ * L'argv del terminale (fase 19b, T2.2): docker exec -i COME 1000:1000, con
+ * `-w` e HOME sulla home del PROPRIETARIO (la stessa identità dei comandi del
+ * bot: mai root, mai 1001 — /browser resta illeggibile — e NESSUN
+ * SANDBOT_SECRET_*). Argv puri, nessuna shell intermedia; il programma è la
+ * COSTANTE TERMINAL_PROGRAM_PY e il cwd viaggia come argomento. Q1: la home
+ * esiste PRIMA dell'exec (ensureBotHome, come i comandi del bot).
+ */
+export function dockerTerminalArgv(owner: string): string[] {
+  const home = boxHomePath(owner)
+  return [
+    'exec', '-i',
+    '-u', CONTAINER_USER,
+    '-w', home,
+    '-e', `HOME=${home}`,
+    '-e', 'TERM=xterm-256color',
+    BOX_CONTAINER,
+    'python3', '-c', TERMINAL_PROGRAM_PY, home
+  ]
+}
+
+/** L'elenco dei pid file dei terminali di un proprietario (nomi `<pid>.pid`). */
+export function dockerTermPidListArgv(container: string, owner: string): string[] {
+  return ['exec', '-i', '-u', CONTAINER_USER, '-w', BOX_MOUNT, container, 'find', terminalPidDir(owner), '-maxdepth', '1', '-name', '*.pid', '-printf', '%f\\n']
+}
+
+/** L'eliminazione dei pid file dei terminali di un proprietario (orfani al boot). */
+export function dockerTermPidCleanArgv(container: string, owner: string): string[] {
+  return ['exec', '-i', '-u', CONTAINER_USER, '-w', BOX_MOUNT, container, 'find', terminalPidDir(owner), '-maxdepth', '1', '-name', '*.pid', '-delete']
+}
+
+// ---- fase 19b (T3): i FILE del box — viste dell'utente, argv puri ----
+
+/**
+ * Il PERCORSO REALE di un path del box (fase 19b, T3.1): `realpath -e --` COME
+ * 1000, argv puri — il controllo dei confini si fa sul percorso reale, così un
+ * symlink che esce da /box non passa. `--` qui è accettato (realpath è di
+ * coreutils, NON come il `test` di V3-bis) e il path è ASSOLUTO, costruito
+ * dal daemon. `-e`: un path che non esiste non risolve (è l'errore giusto).
+ */
+export function dockerRealpathArgv(container: string, path: string): string[] {
+  return ['exec', '-i', '-u', CONTAINER_USER, '-w', BOX_MOUNT, container, 'realpath', '-e', '--', path]
+}
+
+/**
+ * L'elenco di una cartella del box (fase 19b, T3.1): `find -mindepth 1
+ * -maxdepth 1 -printf '%y\t%s\t%T@\t%f\n'` COME 1000, argv puri — tipo,
+ * dimensione, mtime e nome separati da TAB (il parse è in computer-files,
+ * puro; i nomi con a capo restano fuori perché rompono le righe).
+ */
+export const FIND_LIST_PRINTF = '%y\\t%s\\t%T@\\t%f\\n'
+
+export function dockerFindListArgv(container: string, path: string): string[] {
+  return ['exec', '-i', '-u', CONTAINER_USER, '-w', BOX_MOUNT, container, 'find', path, '-mindepth', '1', '-maxdepth', '1', '-printf', FIND_LIST_PRINTF]
+}
+
+/**
+ * La lettura dei byte di un file del box come base64 (fase 19b, T3.1), COME
+ * 1000: come dockerBrowserReadB64Argv — il binario nel canale stdout di una
+ * stringa JS si corromperebbe, e l'UTF-8 rigoroso di files:read ha bisogno dei
+ * BYTE veri. `-w 0`: niente a capo ogni 76 colonne.
+ */
+export function dockerBoxReadB64Argv(container: string, path: string): string[] {
+  return ['exec', '-i', '-u', CONTAINER_USER, container, 'base64', '-w', '0', '--', path]
+}
+
+/**
+ * Un controllo `test` su un path ASSOLUTO del box (fase 19b, T3.1): -f per «è
+ * un file» (i download non prendono cartelle), -e per «esiste già» (upload).
+ * V3-bis: il `test` di coreutils NON accetta `--`, ma il path è costruito dal
+ * daemon e inizia SEMPRE con /box — non può mai iniziare per «-».
+ */
+export function dockerTestPathArgv(container: string, flag: '-f' | '-e' | '-d', path: string): string[] {
+  return ['exec', '-u', CONTAINER_USER, container, 'test', flag, path]
 }
 

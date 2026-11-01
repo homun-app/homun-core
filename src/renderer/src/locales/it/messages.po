@@ -468,8 +468,8 @@ msgid "📤 Invio esterno"
 msgstr "📤 Invio esterno"
 
 #: src/renderer/src/components/Chat.tsx
-msgid "🖥 Schermo"
-msgstr "🖥 Schermo"
+msgid "🖥 Computer"
+msgstr "🖥 Computer"
 
 #: src/renderer/src/components/Chat.tsx
 msgid "🗂 Memoria"
@@ -539,6 +539,10 @@ msgstr "Agente occupato: messaggio in coda (posizione {position})."
 #: src/shared/ui-messages.ts
 msgid "notice.agentBusyDiscard"
 msgstr "Agente occupato: messaggio scartato (la coda vive nella tabella jobs del daemon)."
+
+#: src/renderer/src/components/ComputerFiles.tsx
+msgid "Aggiorna"
+msgstr "Aggiorna"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "aggiungi"
@@ -650,6 +654,10 @@ msgstr "Annullata (interrupt)"
 msgid "annullato"
 msgstr "annullato"
 
+#: src/renderer/src/components/ComputerFiles.tsx
+msgid "Anteprima"
+msgstr "Anteprima"
+
 #: src/renderer/src/components/Settings.tsx
 msgid "API key (vuoto per locali)"
 msgstr "API key (vuoto per locali)"
@@ -741,6 +749,7 @@ msgstr "attivare la routine \"{title}\" — prompt: {preview}"
 msgid "attivate"
 msgstr "attivate"
 
+#: src/renderer/src/components/ComputerPanel.tsx
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Attività"
 msgstr "Attività"
@@ -934,10 +943,31 @@ msgstr "Cancellare «{0}» dalla libreria? Anche i file della voce vengono tolti
 msgid "totp.badChar"
 msgstr "carattere base32 non valido: \"{ch}\""
 
+#: src/renderer/src/components/ComputerFiles.tsx
+msgid "Carica qui"
+msgstr "Carica qui"
+
 #: src/renderer/src/components/RightPanel.tsx
 #: src/renderer/src/components/Settings.tsx
 msgid "caricamento…"
 msgstr "caricamento…"
+
+#: src/renderer/src/components/ComputerFiles.tsx
+msgid "Caricati {ok} file, {skipped} saltati."
+msgstr "Caricati {ok} file, {skipped} saltati."
+
+#: src/renderer/src/components/ComputerFiles.tsx
+msgid "Caricati {ok} file."
+msgstr "Caricati {ok} file."
+
+#. placeholder {0}: r.name
+#: src/renderer/src/components/ComputerFiles.tsx
+msgid "Caricato: {0}"
+msgstr "Caricato: {0}"
+
+#: src/renderer/src/components/ComputerFiles.tsx
+msgid "Cartella vuota."
+msgstr "Cartella vuota."
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Cassaforte"
@@ -991,6 +1021,7 @@ msgid "chiudi"
 msgstr "chiudi"
 
 #: src/renderer/src/components/BotScreen.tsx
+#: src/renderer/src/components/ComputerPanel.tsx
 #: src/renderer/src/components/ui/dialog.tsx
 msgid "Chiudi"
 msgstr "Chiudi"
@@ -1064,6 +1095,14 @@ msgstr "Compilo il login «{label}» su {origin}?"
 msgid "completato"
 msgstr "completato"
 
+#: src/renderer/src/components/ComputerPanel.tsx
+msgid "Computer del bot"
+msgstr "Computer del bot"
+
+#: src/renderer/src/components/Chat.tsx
+msgid "Computer del bot: schermo, terminale, file e attività"
+msgstr "Computer del bot: schermo, terminale, file e attività"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "onboarding.help"
@@ -1131,6 +1170,10 @@ msgstr "connector_poll: intervalMin deve essere ≥ 2 minuti"
 #: src/shared/ui-messages.ts
 msgid "trigger.toolMissing"
 msgstr "connector_poll: tool mancante"
+
+#: src/renderer/src/components/ComputerTerminal.tsx
+msgid "Connessione al terminale…"
+msgstr "Connessione al terminale…"
 
 #: src/renderer/src/components/BotScreen.tsx
 msgid "Connessione allo schermo…"
@@ -1218,6 +1261,14 @@ msgstr "coordinatore"
 #: src/renderer/src/components/Settings.tsx
 msgid "copia curl"
 msgstr "copia curl"
+
+#: src/renderer/src/components/ComputerActivity.tsx
+msgid "Copiato dal Mac"
+msgstr "Copiato dal Mac"
+
+#: src/renderer/src/components/ComputerActivity.tsx
+msgid "Copiato sul Mac"
+msgstr "Copiato sul Mac"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Cosa deve fare il Bot a ogni esecuzione"
@@ -1384,6 +1435,11 @@ msgstr "dominio verificato ({0})"
 msgid "kick.4"
 msgstr "Dopo aver creato le routine, chiedi ALL’UTENTE a testo semplice (send_to_user, NON un widget) se vuole attivarle; solo se risponde di sì attivale con update_state action \"resume\" (l’attivazione passa dalla card di approvazione dell’utente)."
 
+#. placeholder {0}: entries.length
+#: src/renderer/src/components/ComputerFiles.tsx
+msgid "Elencazione troncata a {0} voci."
+msgstr "Elencazione troncata a {0} voci."
+
 #: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "elimina"
@@ -1423,6 +1479,7 @@ msgid "notice.modelError"
 msgstr "Errore dal modello: {message}"
 
 #: src/renderer/src/components/BotScreen.tsx
+#: src/renderer/src/components/ComputerTerminal.tsx
 msgid "Errore di connessione."
 msgstr "Errore di connessione."
 
@@ -1464,6 +1521,11 @@ msgstr "Etichetta (es. Portale ASPI)"
 #: src/renderer/src/components/Settings.tsx
 msgid "evento del calendario"
 msgstr "evento del calendario"
+
+#. placeholder {0}: item.exitCode ?? '?'
+#: src/renderer/src/components/ComputerActivity.tsx
+msgid "exit {0}"
+msgstr "exit {0}"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -1509,9 +1571,25 @@ msgstr "fiducia: {trust} · come gira: {runtime}"
 msgid "file"
 msgstr "file"
 
+#: src/renderer/src/components/ComputerPanel.tsx
 #: src/renderer/src/components/LibraryPanel.tsx
 msgid "File"
 msgstr "File"
+
+#. placeholder {0}: formatSize(preview.result.size)
+#: src/renderer/src/components/ComputerFiles.tsx
+msgid "File binario ({0})"
+msgstr "File binario ({0})"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "rpc.filesNotFound"
+msgstr "File o cartella inesistente."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "rpc.filesTooLarge"
+msgstr "File troppo grande ({size} byte, limite {limit}): non caricato."
 
 #. placeholder {0}: item?.fileName
 #. placeholder {1}: item?.fileSize
@@ -1624,6 +1702,18 @@ msgstr "Gruppo non trovato"
 msgid "guida"
 msgstr "guida"
 
+#: src/renderer/src/components/ComputerActivity.tsx
+msgid "Ha scritto file"
+msgstr "Ha scritto file"
+
+#: src/renderer/src/components/ComputerActivity.tsx
+msgid "Hai caricato"
+msgstr "Hai caricato"
+
+#: src/renderer/src/components/ComputerActivity.tsx
+msgid "Hai scaricato"
+msgstr "Hai scaricato"
+
 #: src/renderer/src/components/BotScreen.tsx
 msgid "Ho finito"
 msgstr "Ho finito"
@@ -1679,6 +1769,10 @@ msgstr "Il bot è in attesa: chiudi con «Ho finito» quando hai terminato."
 msgid "Il bot ha provato a usare questa app ma la sessione è scaduta."
 msgstr "Il bot ha provato a usare questa app ma la sessione è scaduta."
 
+#: src/renderer/src/components/ComputerActivity.tsx
+msgid "Il bot non ha ancora usato il suo computer."
+msgstr "Il bot non ha ancora usato il suo computer."
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "rpc.screenNotOpen"
@@ -1696,6 +1790,11 @@ msgstr "Il bot sta lavorando: fermalo prima di prendere il controllo."
 #: src/renderer/src/components/BotScreen.tsx
 msgid "Il bot ti sta chiedendo di intervenire sul suo schermo."
 msgstr "Il bot ti sta chiedendo di intervenire sul suo schermo."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "rpc.terminalBoxFailed"
+msgstr "Il box non è partito, il terminale non è disponibile: riprova."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -1848,6 +1947,15 @@ msgstr "Il sottoagente non ha ancora attività."
 #: src/renderer/src/components/Chat.tsx
 msgid "Il task non ha ancora attività."
 msgstr "Il task non ha ancora attività."
+
+#: src/renderer/src/components/ComputerTerminal.tsx
+msgid "Il terminale non risponde."
+msgstr "Il terminale non risponde."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "rpc.terminalUnavailable"
+msgstr "Il terminale richiede la modalità docker (Impostazioni → Sandbox): non è disponibile qui."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -2322,6 +2430,10 @@ msgstr "Modulo sicuro: {reason}"
 msgid "Molto alto"
 msgstr "Molto alto"
 
+#: src/renderer/src/components/ComputerFiles.tsx
+msgid "Mostra i file nascosti"
+msgstr "Mostra i file nascosti"
+
 #: src/renderer/src/components/Chat.tsx
 msgid "Mostra il pannello destro"
 msgstr "Mostra il pannello destro"
@@ -2339,6 +2451,10 @@ msgstr "name non valido: \"{name}\""
 #: src/shared/ui-messages.ts
 msgid "mp.badName"
 msgstr "name non valido: {name}"
+
+#: src/renderer/src/components/ComputerFiles.tsx
+msgid "Nascondi i file nascosti"
+msgstr "Nascondi i file nascosti"
 
 #: src/renderer/src/components/Chat.tsx
 msgid "Nascondi il pannello destro"
@@ -2403,6 +2519,10 @@ msgstr "nessun comando riconosciuto"
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Nessun documento per ora."
 msgstr "Nessun documento per ora."
+
+#: src/renderer/src/components/ComputerFiles.tsx
+msgid "Nessun file caricato."
+msgstr "Nessun file caricato."
 
 #: src/renderer/src/components/Chat.tsx
 msgid "Nessun messaggio nel gruppo."
@@ -2717,9 +2837,18 @@ msgstr "Per ogni connettore del template NON ancora connesso chiama offer_connec
 msgid "per origine"
 msgstr "per origine"
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "rpc.filesOutside"
+msgstr "Percorso fuori dal computer del bot."
+
 #: src/renderer/src/components/Settings.tsx
 msgid "Permessi"
 msgstr "Permessi"
+
+#: src/renderer/src/components/ComputerActivity.tsx
+msgid "perso"
+msgstr "perso"
 
 #: src/renderer/src/components/BotDialogs.tsx
 msgid "Pixel"
@@ -3015,6 +3144,10 @@ msgstr "revisore non disponibile: {error}"
 msgid "revoca"
 msgstr "revoca"
 
+#: src/renderer/src/components/ComputerTerminal.tsx
+msgid "Riapri"
+msgstr "Riapri"
+
 #: src/renderer/src/components/Settings.tsx
 msgid "riattiva"
 msgstr "riattiva"
@@ -3093,6 +3226,9 @@ msgid "Rinomina"
 msgstr "Rinomina"
 
 #: src/renderer/src/components/BotScreen.tsx
+#: src/renderer/src/components/ComputerActivity.tsx
+#: src/renderer/src/components/ComputerFiles.tsx
+#: src/renderer/src/components/ComputerTerminal.tsx
 msgid "Riprova"
 msgstr "Riprova"
 
@@ -3221,6 +3357,7 @@ msgstr "Sblocca"
 msgid "Scaduta: il bot non aspetta più."
 msgstr "Scaduta: il bot non aspetta più."
 
+#: src/renderer/src/components/ComputerActivity.tsx
 #: src/renderer/src/components/LibraryCards.tsx
 #: src/renderer/src/components/SubagentCard.tsx
 msgid "scaduto"
@@ -3229,6 +3366,15 @@ msgstr "scaduto"
 #: src/renderer/src/components/Settings.tsx
 msgid "Scansiona locale (Ollama / LM Studio)"
 msgstr "Scansiona locale (Ollama / LM Studio)"
+
+#: src/renderer/src/components/ComputerFiles.tsx
+msgid "Scarica sul Mac"
+msgstr "Scarica sul Mac"
+
+#. placeholder {0}: r.name ?? selected
+#: src/renderer/src/components/ComputerFiles.tsx
+msgid "Scaricato: {0}"
+msgstr "Scaricato: {0}"
 
 #: src/renderer/src/components/DraftCard.tsx
 msgid "Scarta"
@@ -3290,13 +3436,13 @@ msgstr "schedule: every week richiede weekday 0-6 (domenica 0)"
 msgid "trigger.modeInvalid"
 msgstr "schedule: mode non valido (\"{value}\")"
 
+#: src/renderer/src/components/ComputerPanel.tsx
+msgid "Schermo"
+msgstr "Schermo"
+
 #: src/renderer/src/components/BotScreen.tsx
 msgid "Schermo del bot"
 msgstr "Schermo del bot"
-
-#: src/renderer/src/components/Chat.tsx
-msgid "Schermo del bot: vista dal vivo del suo computer"
-msgstr "Schermo del bot: vista dal vivo del suo computer"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -3342,6 +3488,10 @@ msgstr "Segreti"
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "Segreto TOTP (opzionale)"
 msgstr "Segreto TOTP (opzionale)"
+
+#: src/renderer/src/components/ComputerFiles.tsx
+msgid "Seleziona un file per vederne il contenuto."
+msgstr "Seleziona un file per vederne il contenuto."
 
 #: src/renderer/src/components/LibraryCards.tsx
 msgid "Sempre per questo sito"
@@ -3448,6 +3598,14 @@ msgstr "Servono il nome e il valore del secret"
 msgid "rpc.loginValuesMissing"
 msgstr "Servono origine, utente e password"
 
+#: src/renderer/src/components/ComputerTerminal.tsx
+msgid "Sessione chiusa per inattività."
+msgstr "Sessione chiusa per inattività."
+
+#: src/renderer/src/components/ComputerTerminal.tsx
+msgid "Sessione chiusa."
+msgstr "Sessione chiusa."
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "conn.sessionExpired"
@@ -3457,6 +3615,10 @@ msgstr "Sessione scaduta: riconnetti"
 msgid "settimana"
 msgstr "settimana"
 
+#: src/renderer/src/components/ComputerTerminal.tsx
+msgid "Shell del bot — stessa identità dei suoi comandi."
+msgstr "Shell del bot — stessa identità dei suoi comandi."
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "install.hostModeCard"
@@ -3465,6 +3627,11 @@ msgstr "si installa solo nel computer dei bot (modalità docker)"
 #: src/renderer/src/components/ConnectorCards13.tsx
 msgid "si installa solo nel computer dei bot (modalità docker)"
 msgstr "si installa solo nel computer dei bot (modalità docker)"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "rpc.filesNotAFile"
+msgstr "Si può scaricare solo un file, non una cartella."
 
 #: src/renderer/src/components/Chat.tsx
 msgid "sistema"
@@ -3511,6 +3678,10 @@ msgstr "sorgente mancante o non riconosciuta: {source}"
 #: src/shared/ui-messages.ts
 msgid "rpc.badSource"
 msgstr "sorgente non valida: usa owner/repo di GitHub oppure un URL git https"
+
+#: src/renderer/src/components/ComputerFiles.tsx
+msgid "Sostituire «{name}»?"
+msgstr "Sostituire «{name}»?"
 
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "sostituisci"
@@ -3612,6 +3783,10 @@ msgstr "Tema"
 msgid "rpc.templateUnknown"
 msgstr "template sconosciuto: {id}"
 
+#: src/renderer/src/components/ComputerPanel.tsx
+msgid "Terminale"
+msgstr "Terminale"
+
 #: src/renderer/src/components/Settings.tsx
 msgid "test"
 msgstr "test"
@@ -3703,6 +3878,16 @@ msgstr "Trigger non valido: {errors}"
 msgid "rpc.triggerInvalidObject"
 msgstr "Trigger non valido: oggetto mancante"
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "rpc.terminalTooMany"
+msgstr "Troppi terminali aperti: al massimo 3 per bot e 8 in tutto."
+
+#. placeholder {0}: formatSize(preview.result.size)
+#: src/renderer/src/components/ComputerFiles.tsx
+msgid "Troppo grande per l'anteprima ({0})"
+msgstr "Troppo grande per l'anteprima ({0})"
+
 #. placeholder {0}: group.members.map((m) => m.name + (m.coordinator ? ' (coord.)' : '')).join(', ')
 #: src/renderer/src/components/Chat.tsx
 msgid "Tu + {0}"
@@ -3769,6 +3954,10 @@ msgstr "Tutti i bot"
 #: src/shared/ui-messages.ts
 msgid "cron.everyDay"
 msgstr "tutti i giorni"
+
+#: src/renderer/src/components/ComputerActivity.tsx
+msgid "ucciso"
+msgstr "ucciso"
 
 #. placeholder {0}: i18n.t(fmtAgo(task.updatedAt, now))
 #. placeholder {1}: status === 'needs_input' ? t` — rispondi dalla vista del task (Apri)` : ''

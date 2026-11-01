@@ -11,6 +11,7 @@ import { join } from 'node:path'
 import { JOBS_DDL } from './jobs'
 import { GROUPS_DDL } from './groups'
 import { SHELL_JOBS_DDL } from './shell-jobs'
+import { COMPUTER_ACTIONS_DDL } from './computer-actions'
 import { SUBAGENTS_DDL } from './subagents'
 import { LIBRARY_DDL } from './library'
 import type { Agent, AgentAvatar, TranscriptEntry, PermissionsConfig, RoutineTrigger, ModelUsageRow } from '../../shared/types'
@@ -123,6 +124,7 @@ function open(): DatabaseSync {
     ${SHELL_JOBS_DDL}
     ${SUBAGENTS_DDL}
     ${LIBRARY_DDL}
+    ${COMPUTER_ACTIONS_DDL}
   `)
   // fase 4: colonne nuove delle routine per i DB esistenti (CREATE TABLE IF
   // NOT EXISTS non le aggiunge); provenance distingue le routine dell'utente
@@ -261,6 +263,17 @@ function rowToAgent(r: AgentRow): Agent {
 export function listAgents(): Agent[] {
   const rows = db().prepare('SELECT * FROM agents WHERE parent_id IS NULL ORDER BY created_at').all() as unknown as AgentRow[]
   return rows.map(rowToAgent)
+}
+
+/**
+ * Fase 19b (T4): la FAMIGLIA di un proprietario — lui e i suoi FIGLI (i figli
+ * sono righe di agents con parent_id, escluse dal roster). Serve al feed
+ * «Attività»: i comandi dei figli compaiono col nome di chi li ha fatti.
+ */
+export function familyAgents(ownerId: string): Array<{ id: string; name: string }> {
+  return db()
+    .prepare('SELECT id, name FROM agents WHERE id = ? OR parent_id = ?')
+    .all(ownerId, ownerId) as Array<{ id: string; name: string }>
 }
 
 export function getAgent(id: string): Agent | null {

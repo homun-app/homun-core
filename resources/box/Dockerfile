@@ -51,6 +51,9 @@ RUN mkdir -p /etc/sandbot \
 # - xdotool: le azioni del computer use nel box (click, digitazione, tasti);
 # - imagemagick: `import -window root` cattura lo schermo per computer_observe;
 # - x11-utils: xdpyinfo, l'attesa che il display risponda nel wrapper.
+# fase 19b (T2): python3 — il programma del TERMINALE del bot (PTY con shell
+# di login, `python3 -c <programma costante>`): l'immagine base non lo
+# garantisce, lo si installa esplicitamente e command -v lo verifica.
 # Le liste di apt si puliscono nello STESSO layer; command -v fa FALLIRE la
 # build in modo chiaro se un binario manca.
 RUN apt-get update \
@@ -61,8 +64,9 @@ RUN apt-get update \
       xdotool \
       imagemagick \
       x11-utils \
+      python3 \
  && rm -rf /var/lib/apt/lists/* \
- && command -v Xvfb x11vnc xauth xdotool import xdpyinfo
+ && command -v Xvfb x11vnc xauth xdotool import xdpyinfo python3
 
 RUN npm install -g @playwright/mcp@0.0.83 \
  && PWCLI="$(npm root -g)/@playwright/mcp/node_modules/playwright/cli.js" \

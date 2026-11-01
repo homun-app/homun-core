@@ -25,6 +25,10 @@ import { sandboxMode, boxDir, boxOwnerOf, readFileInBox, ensureBoxContainer, ens
 import { dockerExecBackgroundArgv, dockerKillGroupArgv, dockerClientEnv, DOCKER_BG_WRAPPER_SH, BOX_CONTAINER, boxHomePath } from '../sandbox/docker-argv'
 import { formatShellDone } from '../../shared/agent-message'
 import { redactSecrets } from './secrets'
+// fase 19b (T4): ogni cambio di stato di shell_jobs spinge l'evento
+// computer-activity (il feed «Attività» ricarica). computer-activity importa
+// shells SOLO dinamicamente: nessun ciclo statico.
+import { emitComputerActivity } from './computer-activity'
 
 /** I path (relativi alla home del bot) di log, exit code e pid di una shell. */
 export function backgroundShellPaths(id: string): { log: string; exit: string; pid: string } {
@@ -121,6 +125,16 @@ async function redactedTail(deps: ShellHostDeps, agentId: string, logPath: strin
     // impossibile verificare la redazione: l'output NON entra nel contesto
     return '(output omitted: unable to redact the command secrets)'
   }
+}
+
+/**
+ * Fase 19b (T4.2): la coda del log di UNA shell per il feed «Attività» —
+ * la STESSA redazione di oggi (redactedTail, ultime 200 righe). La si legge
+ * SU RICHIESTA (activity:output), il log esiste già nel box: niente push
+ * periodici dell'output.
+ */
+export async function shellOutputTail(agentId: string, job: ShellJob): Promise<string> {
+  return redactedTail(defaultDeps(), agentId, job.log_path, 200, job.secret_names)
 }
 
 /**
@@ -235,6 +249,7 @@ export async function startBackgroundShell(
     id, agent_id: agentId, command: rawCommand, secret_names: secretNames,
     mode, pid: started.pid, log_path: paths.log, started_at: deps.now()
   })
+  emitComputerActivity(agentId) // fase 19b (T4): avvio di un comando
   return { ok: true, shellId: id }
 }
 
@@ -395,6 +410,7 @@ export async function runForegroundShell(
     id, agent_id: agentId, command: rawCommand, secret_names: secretNames,
     mode, pid: started.pid, log_path: paths.log, started_at: deps.now()
   })
+  emitComputerActivity(agentId) // fase 19b (T4): avvio di un comando
   // la soglia di promozione: promoteAfterSec, MAI oltre il timeout chiesto
   const promoteAfterMs = Math.min(promoteAfterSec() * 1000, timeoutMs)
   const deadline = deps.now() + promoteAfterMs
@@ -429,6 +445,7 @@ export async function runForegroundShell(
   })()
   const capped = capOutput(redactedLog)
   updateShellJob(database, id, { status: 'done', exit_code: exitCode, finished_at: deps.now(), awaited: true, notified: true })
+  emitComputerActivity(agentId) // fase 19b (T4): comando finito
   return {
     output: `${capped.text}\n[exit ${exitCode ?? '?'}${capped.trimmed ? ' — output trimmed' : ''}]`,
     meta: { exitCode, trimmed: capped.trimmed }
@@ -462,6 +479,7 @@ async function finishShell(deps: ShellHostDeps, job: ShellJob, status: 'done' | 
   const already = getShellJob(deps.db(), job.id)
   if (!already || already.status !== 'running') return
   updateShellJob(deps.db(), job.id, { status, exit_code: exitCode, finished_at: deps.now() })
+  emitComputerActivity(job.agent_id) // fase 19b (T4): fine / kill / perso
   if (already.awaited) return // il bot ha già letto l'esito con await_shell
   const tail = await redactedTail(deps, job.agent_id, job.log_path, 50, job.secret_names)
   // fase 17c (C2, MU): il testo per il modello resta inglese; meta.ui per la
@@ -508,6 +526,7 @@ export async function awaitShell(
     const terminate = deps.terminate ?? defaultTerminate(deps)
     await terminate(agentId, job)
     updateShellJob(database, shellId, { status: 'killed', finished_at: deps.now() })
+    emitComputerActivity(agentId) // fase 19b (T4): comando ucciso
   }
   const deadline = deps.now() + Math.min(60, Math.max(1, Math.floor(opts.timeoutSec ?? 60))) * 1000
   while (job && job.status === 'running' && deps.now() < deadline) {

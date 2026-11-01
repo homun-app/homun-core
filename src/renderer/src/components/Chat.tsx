@@ -19,9 +19,9 @@ import { RuleProposalCard } from './RuleProposalCard'
 import { TaskCard } from './TaskCard'
 import { SubagentCard } from './SubagentCard'
 import { DocumentCard, ChartCard, FillCard, SecureInputCard, ContactCard } from './LibraryCards'
-// fase 19a (V4/V5): il pannello dello schermo del bot e la card della presa
-// di controllo chiesta dal bot
-import { BotScreen } from './BotScreen'
+// fase 19a (V4/V5): la card della presa di controllo chiesta dal bot.
+// fase 19b (T1): il pannello «Computer» (schermo, terminale, file, attività)
+import { ComputerPanel } from './ComputerPanel'
 import { TakeoverCard } from './TakeoverCard'
 import { LibraryPanel } from './LibraryPanel'
 import { MemoryPanel } from './MemoryPanel'
@@ -52,20 +52,11 @@ export function Chat() {
   const setSkillsOpen = useStore((s) => s.setSkillsOpen)
   const rightPanel = useStore((s) => s.rightPanel)
   const setRightPanel = useStore((s) => s.setRightPanel)
-  // fase 19a (V4): il pannello dello schermo del bot e la disponibilità del
-  // browser (docker + rete) per mostrarne il bottone
-  const botScreen = useStore((s) => s.botScreen)
-  const setBotScreen = useStore((s) => s.setBotScreen)
-  const [browserInUi, setBrowserInUi] = useState(false)
-  useEffect(() => {
-    void api.settingsGet<string>('sandbox.mode', 'host')
-      .then(async (mode) => {
-        if (mode !== 'docker') { setBrowserInUi(false); return }
-        const network = await api.settingsGet<string>('sandbox.network', 'bridge')
-        setBrowserInUi(network === 'bridge')
-      })
-      .catch(() => setBrowserInUi(false))
-  }, [])
+  // fase 19b (T1): il pannello «Computer» del bot (sempre visibile: le schede
+  // File e Attività esistono in ogni modalità; Schermo e Terminale compaiono
+  // solo dove esistono davvero)
+  const computerPanel = useStore((s) => s.computerPanel)
+  const setComputerPanel = useStore((s) => s.setComputerPanel)
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
   const setSettingsTab = useStore((s) => s.setSettingsTab)
   // fase 8 (§3bis L7): task aperto nella vista del sotto-transcript
@@ -167,17 +158,16 @@ export function Chat() {
           >
             <Trans>⚡ Chiedi al volo</Trans>
           </button>
-          {/* fase 19a (V4): la vista dal vivo del computer del bot — solo se il
-              browser è disponibile (docker + rete bridge) */}
-          {browserInUi && (
-            <button
-              className={`rounded-lg px-2 py-1 text-xs transition ${botScreen.open ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
-              title={t`Schermo del bot: vista dal vivo del suo computer`}
-              onClick={() => { setBotScreen(!botScreen.open, 'view'); setQuickOpen(false) }}
-            >
-              <Trans>🖥 Schermo</Trans>
-            </button>
-          )}
+          {/* fase 19b (T1): il computer del bot — schermo, terminale, file e
+              attività in un solo pannello (ultima scheda usata; la prima
+              volta: Attività, che funziona in ogni modalità) */}
+          <button
+            className={`rounded-lg px-2 py-1 text-xs transition ${computerPanel.open ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
+            title={t`Computer del bot: schermo, terminale, file e attività`}
+            onClick={() => { setComputerPanel(!computerPanel.open); setQuickOpen(false) }}
+          >
+            <Trans>🖥 Computer</Trans>
+          </button>
           <button
             className={`rounded-lg p-1.5 text-muted-foreground transition hover:bg-muted hover:text-foreground ${rightPanel ? '' : 'opacity-50'}`}
             title={rightPanel ? t`Nascondi il pannello destro` : t`Mostra il pannello destro`}
@@ -191,9 +181,10 @@ export function Chat() {
       {memoryOpen && activeId && <MemoryPanel agentId={activeId} onClose={() => setMemoryOpen(false)} />}
       {skillsOpen && activeId && <SkillsPanel agentId={activeId} onClose={() => setSkillsOpen(false)} />}
 
-      {/* fase 19a (V4): la vista dal vivo dello schermo del bot */}
-      {botScreen.open && activeId && (
-        <BotScreen agentId={activeId} onClose={() => setBotScreen(false, 'view')} />
+      {/* fase 19b (T1): il pannello «Computer» del bot (chiuderlo chiude anche
+          le sessioni: il terminale, lo schermo) */}
+      {computerPanel.open && activeId && (
+        <ComputerPanel key={activeId} agentId={activeId} onClose={() => setComputerPanel(false)} />
       )}
 
       {quickOpen && (

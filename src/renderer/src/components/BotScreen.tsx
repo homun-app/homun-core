@@ -11,19 +11,22 @@ import { useLingui, Trans } from '@lingui/react/macro'
 import RFB from '@novnc/novnc'
 import { api, useStore } from '../store'
 import { useBotInfo } from '../bot/use-bot'
+import { ipcErrorMessage } from '../lib/ipc-error'
 import type { ScreenStatus } from '../../../shared/types'
 
 /** I 15 s entro cui deve arrivare `connect`, o si mostra l'errore. */
 const CONNECT_TIMEOUT_MS = 15_000
 
-export function BotScreen({ agentId, onClose }: { agentId: string; onClose: () => void }) {
+export function BotScreen({ agentId, onClose, inPanel = false }: { agentId: string; onClose?: () => void; inPanel?: boolean }) {
   const { t } = useLingui()
   const agent = useStore((s) => s.agents.find((a) => a.id === agentId))
   const info = useBotInfo(agentId)
   // il colore del bot per il bordo di controllo (token, mai un colore CSS)
   const color = info ? `var(--bot-${info.avatar.color})` : 'var(--foreground)'
   const busy = agent?.status === 'thinking' || agent?.status === 'running' || agent?.status === 'paused-for-approval'
-  const initialMode = useStore((s) => s.botScreen.mode)
+  // fase 19b (T1): il modo iniziale lo decide il pannello (la card della
+  // presa di controllo lo apre GIÀ in controllo)
+  const initialMode = useStore((s) => s.computerPanel.mode)
   const [mode, setMode] = useState<'view' | 'control'>(initialMode)
   const [phase, setPhase] = useState<'idle' | 'opening' | 'connecting' | 'connected' | 'error'>('idle')
   const [error, setError] = useState('')
@@ -86,7 +89,8 @@ export function BotScreen({ agentId, onClose }: { agentId: string; onClose: () =
       }, CONNECT_TIMEOUT_MS)
     } catch (e) {
       setPhase('error')
-      setError(e instanceof Error ? e.message : String(e))
+      // fase 19b (T8.2): niente prefisso grezzo «Error invoking remote method…»
+      setError(ipcErrorMessage(e))
     } finally {
       opening.current = false
     }
@@ -127,8 +131,8 @@ export function BotScreen({ agentId, onClose }: { agentId: string; onClose: () =
 
   return (
     <section
-      className="mx-5 mt-3 flex flex-col overflow-hidden rounded-xl border bg-card shadow-soft"
-      style={{ borderColor: mode === 'control' && phase === 'connected' ? color : undefined }}
+      className={inPanel ? 'flex h-full flex-col' : 'mx-5 mt-3 flex flex-col overflow-hidden rounded-xl border bg-card shadow-soft'}
+      style={inPanel ? { borderColor: mode === 'control' && phase === 'connected' ? color : undefined } : undefined}
     >
       <header className="flex items-center justify-between gap-3 border-b border-border px-4 py-2">
         <div className="min-w-0">
@@ -168,13 +172,15 @@ export function BotScreen({ agentId, onClose }: { agentId: string; onClose: () =
               </button>
             )
           )}
-          <button
-            className="rounded-md px-2 py-1 text-muted-foreground transition hover:text-foreground"
-            title={t`Chiudi`}
-            onClick={() => { destroy(); onClose() }}
-          >
-            ✕
-          </button>
+          {!inPanel && (
+            <button
+              className="rounded-md px-2 py-1 text-muted-foreground transition hover:text-foreground"
+              title={t`Chiudi`}
+              onClick={() => { destroy(); onClose?.() }}
+            >
+              ✕
+            </button>
+          )}
         </div>
       </header>
 

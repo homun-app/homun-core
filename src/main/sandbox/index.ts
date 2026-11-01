@@ -14,7 +14,7 @@
 // Le scritture sono ATOMICHE (file temporaneo nella stessa cartella + rename).
 import { spawn } from 'node:child_process'
 import { mkdirSync, existsSync, writeFileSync, readFileSync, realpathSync as realpathSyncHost } from 'node:fs'
-import { readFile, writeFile, readdir, mkdir, rename, cp, copyFile } from 'node:fs/promises'
+import { readFile, writeFile, readdir, mkdir, rename, cp, copyFile, stat } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { join, resolve, dirname, basename } from 'node:path'
@@ -183,8 +183,13 @@ export function capOutput(text: string): { text: string; trimmed: boolean } {
 
 interface SpawnOptions extends ExecOptions {
   cwd?: string
-  /** Contenuto da scrivere sul stdin del processo (scrittura file via stdin). */
-  input?: string
+  /**
+   * Contenuto da scrivere sul stdin del processo (scrittura file via stdin).
+   * Fase 19b (T0): anche un Buffer — i byte attraversano il canale stdin del
+   * processo docker SENZA conversioni di codifica (la copia Mac → box dei file
+   * binari passa da qui, byte per byte).
+   */
+  input?: string | Buffer
 }
 
 interface SpawnResult {
@@ -317,8 +322,10 @@ async function execDocker(agentId: string, command: string, opts: ExecOptions): 
  * modello (es. `stat -c %s -- <path>`) — nessuna shell, niente interpolazione.
  * `input` (P2, fase 14 correzioni): contenuto da scrivere sul stdin del
  * processo docker (la copia dello screenshot scrive i byte base64 così).
+ * Fase 19b (T0): `input` può essere un BUFFER — byte binari identici, nessuna
+ * conversione di codifica (dockerWriteFileArgv li scrive nel box).
  */
-export async function runDockerArgv(argv: string[], opts: ExecOptions & { input?: string } = {}): Promise<ExecResult> {
+export async function runDockerArgv(argv: string[], opts: ExecOptions & { input?: string | Buffer } = {}): Promise<ExecResult> {
   const r = await docker(argv, opts)
   const o = capOutput(r.stdout)
   const e = capOutput(r.stderr)
@@ -579,13 +586,35 @@ export async function listDirectoryInBox(agentId: string, path: string): Promise
 // ---- fase 11 (punto 4): copia di file tra Mac e box (byte-exact) ----
 
 /**
- * Copia un file dal Mac DENTRO il box (host: fs copyFile; docker: `docker cp`,
- * argv puro). I confini del path del box li ha già validati il chiamante.
+ * Fase 19b (T0): il tetto dei file caricati DENTRO il box in modalità docker
+ * (upload dell'utente e copia Mac → box del bot): 100 MB per file.
+ */
+export const COPY_INTO_BOX_MAX_BYTES = 100 * 1024 * 1024
+
+/**
+ * Copia un file dal Mac DENTRO il box (host: fs copyFile). I confini del path
+ * del box li ha già validati il chiamante.
+ *
+ * Fase 19b (T0, BUG della fase 11): in docker NON si usa più `docker cp` — il
+ * file arrivava con proprietario 501:0 (l'uid del Mac) e permessi 644, e il
+ * bot (uid 1000) non poteva più modificarlo né cancellarlo. Il daemon legge i
+ * byte sul Mac e li scrive con dockerWriteFileArgv (lo script COSTANTE:
+ * temporaneo + rename atomico) passandoli sullo STDIN BINARIO: l'exec gira
+ * come utente di default del container (1000), quindi il file è SUO. Tetto di
+ * COPY_INTO_BOX_MAX_BYTES: oltre, errore chiaro e NESSUNA scrittura. La copia
+ * box → Mac (copyBoxOntoMac) non cambia: sul Mac il file diventa dell'utente.
  */
 export async function copyMacIntoBox(agentId: string, macPath: string, boxAbsPath: string): Promise<void> {
   if (sandboxMode() === 'docker') {
-    const r = await runProcess('docker', ['cp', macPath, `${BOX_CONTAINER}:${boxAbsPath}`], { timeoutMs: 120_000 })
-    if (r.exitCode !== 0) throw new Error(`docker cp fallito: ${r.stderr}`)
+    const size = await stat(macPath).then((s) => s.size).catch(() => {
+      throw new Error(`File not found on the Mac: "${macPath}".`)
+    })
+    if (size > COPY_INTO_BOX_MAX_BYTES) {
+      throw new Error(`File too large (${size} bytes, limit ${COPY_INTO_BOX_MAX_BYTES}): not copied into the box.`)
+    }
+    const bytes = await readFile(macPath) // i byte veri, mai una stringa UTF-8
+    const r = await docker(dockerWriteFileArgv(BOX_CONTAINER, boxAbsPath), { timeoutMs: 120_000, input: bytes })
+    if (r.exitCode !== 0) throw new Error(`write into the box failed: ${r.stderr || `exit ${r.exitCode}`}`)
     return
   }
   await mkdir(dirname(boxAbsPath), { recursive: true })

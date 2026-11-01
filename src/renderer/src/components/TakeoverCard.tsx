@@ -1,15 +1,16 @@
 // Fase 19a (V5): la card della presa di controllo CHIESTA DAL BOT
 // (request_takeover) — il motivo e il bottone «Apri lo schermo», che apre il
-// pannello BotScreen GIÀ in controllo. Lo stato vive nel meta della entry:
-// 'pending' alla richiesta, 'done' quando l'utente ha premuto «Ho finito»,
-// 'expired' dopo 30 minuti senza che nessuno apra lo schermo.
+// pannello Computer GIÀ in controllo sulla scheda Schermo (fase 19b, T1).
+// Lo stato vive nel meta della entry: 'pending' alla richiesta, 'done'
+// quando l'utente ha premuto «Ho finito», 'expired' dopo 30 minuti senza che
+// nessuno apra lo schermo.
 import { useLingui, Trans } from '@lingui/react/macro'
 import { useStore } from '../store'
 import type { TranscriptEntry, SendMessageMeta } from '../../../shared/types'
 
 export function TakeoverCard({ entry }: { entry: TranscriptEntry }) {
   const { t } = useLingui()
-  const setBotScreen = useStore((s) => s.setBotScreen)
+  const setComputerPanel = useStore((s) => s.setComputerPanel)
   const meta = (entry.meta ?? {}) as Partial<SendMessageMeta>
   const message = meta.message as Extract<SendMessageMeta['message'], { type?: string }> | undefined
   const reason = (message as { reason?: string } | undefined)?.reason ?? ''
@@ -25,7 +26,7 @@ export function TakeoverCard({ entry }: { entry: TranscriptEntry }) {
         <div className="mt-3 flex items-center gap-3">
           <button
             className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition hover:bg-primary/90"
-            onClick={() => setBotScreen(true, 'control')}
+            onClick={() => setComputerPanel(true, 'screen', 'control')}
           >
             <Trans>Apri lo schermo</Trans>
           </button>

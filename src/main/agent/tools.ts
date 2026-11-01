@@ -958,7 +958,20 @@ export async function executeTool(
       return { output: content, meta: {} }
     }
     case 'write-file': {
-      await sandbox.writeFileInBox(agentId, String(input.path ?? ''), String(input.content ?? ''))
+      // fase 19b (T4.1): la scrittura finisce nel feed «Attività» (bytes =
+      // lunghezza UTF-8 del contenuto). Un errore nel REGISTRARE non fa
+      // fallire il tool (regola di Rakazo: il feed è una vista)
+      const path = String(input.path ?? '')
+      const content = String(input.content ?? '')
+      try {
+        await sandbox.writeFileInBox(agentId, path, content)
+      } catch (e) {
+        const { recordComputerAction } = await import('./computer-activity')
+        recordComputerAction({ agentId, kind: 'write_file', target: path, error: e instanceof Error ? e.message : String(e) })
+        throw e
+      }
+      const { recordComputerAction } = await import('./computer-activity')
+      recordComputerAction({ agentId, kind: 'write_file', target: path, bytes: Buffer.byteLength(content, 'utf8') })
       return { output: `Written ${input.path}`, meta: {} }
     }
     case 'list-directory': {

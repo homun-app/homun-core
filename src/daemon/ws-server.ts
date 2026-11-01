@@ -34,6 +34,13 @@ const PRE_AUTH_MAX_BYTES = 64 * 1024
  */
 export const SCREEN_CAP_PATH_RE = /^\/screen\/[A-Za-z0-9_-]{43}$/
 
+/**
+ * Fase 19b (T2.3): il percorso dell'endpoint del TERMINALE, stessa forma
+ * rigida della 19a (L8): capability base64url di 32 byte, NESSUNA decodifica
+ * del percorso — `/term/%` e compagnia fanno 404 e chiusura, senza eccezioni.
+ */
+export const TERM_CAP_PATH_RE = /^\/term\/[A-Za-z0-9_-]{43}$/
+
 interface Pending {
   resolve: (v: unknown) => void
   reject: (e: Error) => void
@@ -215,6 +222,13 @@ export function startWsServer(opts: {
    * upgrade non validi.
    */
   onScreenUpgrade?: (cap: string, req: IncomingMessage, socket: Duplex, head: Buffer) => void
+  /**
+   * Fase 19b (T2.3): l'endpoint del TERMINALE del bot, accanto a /screen —
+   * gli upgrade con percorso /term/<cap> passano a questo gestore (il ponte
+   * binario col PTY nel box); la validazione rigida del percorso (regex,
+   * nessuna decodifica) è la stessa di L8.
+   */
+  onTermUpgrade?: (cap: string, req: IncomingMessage, socket: Duplex, head: Buffer) => void
 }): Promise<WsRpcServer> {
   const host = opts.host ?? '127.0.0.1'
   const limits = {
@@ -239,10 +253,12 @@ export function startWsServer(opts: {
   server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
     // fase 19a (V3.2): /screen/<capability> è il ponte binario con il desktop
     // del bot (capability monouso, la consuma il gestore); tutto il resto è il
-    // canale UI di sempre
+    // canale UI di sempre. Fase 19b (T2.3): /term/<capability> è il ponte col
+    // PTY del terminale, accanto allo schermo.
     // correzione L8: NESSUNA decodifica del percorso — valido SOLO se è
     // ESATTAMENTE /screen/<43 caratteri base64url> (SCREEN_CAP_PATH_RE);
-    // `/screen/%` e compagnia fanno 404 e chiusura, senza eccezioni
+    // `/screen/%` e compagnia fanno 404 e chiusura, senza eccezioni. Stessa
+    // regola per /term/ (TERM_CAP_PATH_RE)
     const path = req.url ?? '/'
     if (opts.onScreenUpgrade && path.startsWith('/screen/')) {
       if (!SCREEN_CAP_PATH_RE.test(path)) {
@@ -251,6 +267,16 @@ export function startWsServer(opts: {
         return
       }
       opts.onScreenUpgrade(path.slice('/screen/'.length), req, socket, head)
+      return
+    }
+    // fase 19b (T2.3): /term/<capability> — stessa validazione rigida di L8
+    if (opts.onTermUpgrade && path.startsWith('/term/')) {
+      if (!TERM_CAP_PATH_RE.test(path)) {
+        socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n')
+        socket.destroy()
+        return
+      }
+      opts.onTermUpgrade(path.slice('/term/'.length), req, socket, head)
       return
     }
     const key = req.headers['sec-websocket-key']

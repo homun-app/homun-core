@@ -126,6 +126,16 @@ async function main(): Promise<void> {
     // niente da uccidere
   }
 
+  // fase 19b (T2.3): gli orfani del TERMINALE — i programmi PTY rimasti vivi
+  // dopo un crash si chiudono dai pid file in <home>/.sandbot/terminals/
+  // (stesso schema del browser e delle shell), poi i file si cancellano
+  try {
+    const { killTerminalOrphans } = await import('../main/agent/terminal')
+    await killTerminalOrphans([...listAgents().map((a) => a.id), ...(await import('../main/store/subagents')).allSubagentIds(database)])
+  } catch {
+    // niente da chiudere
+  }
+
   // fase 12 (punto 1): il loop registra qui il suo interrupt, così deleteAgent
   // può fermare i figli di un padre eliminato
   const loopMod = await import('../main/agent/loop')
@@ -191,6 +201,11 @@ async function main(): Promise<void> {
     onScreenUpgrade: (cap, req, socket, head) => {
       void import('../main/agent/screen').then((m) => m.handleScreenUpgrade(cap, req, socket, head))
     },
+    // fase 19b (T2.3): l'endpoint /term/<cap> — il ponte binario col PTY del
+    // terminale del bot (capability monouso, stessa validazione rigida di L8)
+    onTermUpgrade: (cap, req, socket, head) => {
+      void import('../main/agent/terminal').then((m) => m.handleTermUpgrade(cap, req, socket, head))
+    },
     onUiChange: (connected) => {
       if (connected) {
         bridge?.refreshScale()
@@ -205,6 +220,13 @@ async function main(): Promise<void> {
     }
   })
   bridge = attachHostBridge({ callUi: (m, p) => server.callUi(m, p), hasUi: () => server.hasUi() })
+
+  // fase 19b (T2): il terminale del bot — la porta del server ws per gli URL
+  // delle capability (l'orologio è quello reale; i test lo iniettano da soli)
+  {
+    const terminal = await import('../main/agent/terminal')
+    terminal.setTerminalWsPort(server.port)
+  }
 
   // fase 19a (V3): lo schermo del bot — capability monouso, ponte binario,
   // richieste di presa di controllo. Le dipendenze del daemon si registrano
@@ -252,6 +274,14 @@ async function main(): Promise<void> {
     }
   }
   broadcast = emit
+
+  // fase 19b (T4): l'evento computer-activity — il feed «Attività» e la vista
+  // File ricaricano a ogni nuova riga di computer_actions e a ogni cambio di
+  // stato di shell_jobs (nessun payload pesante: la UI ricarica)
+  {
+    const activity = await import('../main/agent/computer-activity')
+    activity.setComputerActivityEmitter(emit)
+  }
 
   // fase 5: connettori MCP+OAuth (store cifrato con chiave Keychain, catalogo,
   // resolver d'autenticazione del client MCP); gli eventi {type:'connectors'}
@@ -417,6 +447,14 @@ async function main(): Promise<void> {
         screen.tickScreen(Date.now())
       } catch (e) {
         console.error('[sandbotd] scadenze schermo:', e)
+      }
+      // fase 19b (T2.3): le scadenze del terminale — capability non usate e
+      // sessioni senza input da 30 minuti (chiuse col codice 4002)
+      try {
+        const terminal = await import('../main/agent/terminal')
+        terminal.tickTerminal(Date.now())
+      } catch (e) {
+        console.error('[sandbotd] scadenze terminale:', e)
       }
       // fase 11 (punto 3): il tick dei comandi in background (exit file comparsi
       // in docker, scadenza delle 6 ore) — le notifiche SHELL_DONE partono da qui

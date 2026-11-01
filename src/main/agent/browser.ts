@@ -732,6 +732,10 @@ for (let i = 0; el.shadowRoot && i < 32; i++) {
 const tag = el.tagName ? el.tagName.toLowerCase() : '';
 if (tag === 'iframe' || tag === 'frame' || tag === 'embed' || tag === 'object') return { kind: 'frame' };
 const ctl = (el.closest && el.closest(${CONTROL_CLOSEST})) || el;
+// fase 19b (T8.3): a click on the EMPTY part of the page finds body or html:
+// empty name and text (before, the name was the whole body innerText)
+const ct0 = ctl.tagName ? ctl.tagName.toLowerCase() : '';
+if (ct0 === 'body' || ct0 === 'html') return { kind: 'element', role: 'generic', name: '', text: '' };
 let name = nameOf(ctl);
 if (ctl.tagName && ctl.tagName.toLowerCase() === 'label' && ctl.control && !name) name = nameOf(ctl.control);
 const ct = ctl.tagName ? ctl.tagName.toLowerCase() : '';

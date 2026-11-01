@@ -75,7 +75,9 @@ import {
 import {
   DOCKER_BROWSER_DESKTOP_WRAPPER_SH, browserViewSocket, browserControlSocket, browserControlPidFile,
   dockerScreenControlVncArgv, DOCKER_SCREEN_CONTROL_VNC_SH, dockerScreenBridgeArgv, SCREEN_BRIDGE_NODE_JS,
-  dockerXdotoolArgv, dockerScreenCaptureArgv, dockerScreenGeometryArgv, dockerScreenSocketReadyArgv
+  dockerXdotoolArgv, dockerScreenCaptureArgv, dockerScreenGeometryArgv, dockerScreenSocketReadyArgv,
+  // fase 19b: gli argv del terminale e dei file
+  dockerRealpathArgv, dockerFindListArgv, dockerBoxReadB64Argv, dockerTestPathArgv
 } from '../docker-argv'
 import { readFileSync as rf } from 'node:fs'
 
@@ -1045,6 +1047,61 @@ describe('Q1: il `-w` di un docker exec è SOLO un percorso che esiste già', ()
       const ws = argv.filter((_, i) => argv[i - 1] === '-w')
       expect(ws).not.toContain(browserStateDir('agent_x'))
       expect(ws).not.toContain(browserStateDir('agent_padre'))
+    }
+  })
+})
+
+// ---- fase 19b: T8.1 (stderr del desktop nei file), T3 (argv dei file), T2 (python3) ----
+
+describe('fase 19b (T8.1): lo stderr del desktop va nei FILE, non nel log del daemon', () => {
+  it('Xvfb e i due x11vnc redirigono lo stderr (riscritto a ogni avvio); «Xvfb did not start» RESTA su stderr', () => {
+    expect(DOCKER_BROWSER_DESKTOP_WRAPPER_SH).toContain('Xvfb -displayfd 3')
+    expect(DOCKER_BROWSER_DESKTOP_WRAPPER_SH).toContain('3>./display 2>./xvfb.log &')
+    expect(DOCKER_BROWSER_DESKTOP_WRAPPER_SH).toMatch(/x11vnc [^\n]*-unixsock \.\/vnc-view\.sock[^\n]*2>\.\/x11vnc-view\.log &/)
+    expect(DOCKER_SCREEN_CONTROL_VNC_SH).toMatch(/x11vnc [^\n]*-unixsock \.\/vnc-control\.sock[^\n]*2>\.\/x11vnc-control\.log/)
+    // l'errore di avvio di Xvfb resta sullo STDERR del wrapper (va nel log del daemon)
+    expect(DOCKER_BROWSER_DESKTOP_WRAPPER_SH).toContain('echo "Xvfb did not start" >&2')
+  })
+})
+
+describe('fase 19b (T3/T6): gli argv dei FILE del box — realpath, find, base64, test', () => {
+  it('dockerRealpathArgv: realpath -e -- COME 1000 (realpath è di coreutils: -- accettato)', () => {
+    expect(dockerRealpathArgv(BOX_CONTAINER, '/box/home/x/f')).toEqual([
+      'exec', '-i', '-u', '1000:1000', '-w', BOX_MOUNT, BOX_CONTAINER,
+      'realpath', '-e', '--', '/box/home/x/f'
+    ])
+  })
+
+  it('dockerFindListArgv: find -mindepth 1 -maxdepth 1 -printf col formato a TAB, COME 1000', () => {
+    expect(dockerFindListArgv(BOX_CONTAINER, '/box/home/x')).toEqual([
+      'exec', '-i', '-u', '1000:1000', '-w', BOX_MOUNT, BOX_CONTAINER,
+      'find', '/box/home/x', '-mindepth', '1', '-maxdepth', '1',
+      '-printf', '%y\\t%s\\t%T@\\t%f\\n'
+    ])
+  })
+
+  it('dockerBoxReadB64Argv: base64 -w 0 -- COME 1000 (il binario nel canale testuale si corromperebbe)', () => {
+    expect(dockerBoxReadB64Argv(BOX_CONTAINER, '/box/home/x/a.png')).toEqual([
+      'exec', '-i', '-u', '1000:1000', BOX_CONTAINER, 'base64', '-w', '0', '--', '/box/home/x/a.png'
+    ])
+  })
+
+  it('dockerTestPathArgv: test -f/-e/-d col path ASSOLUTO del daemon (mai «--»: coreutils test lo rifiuta)', () => {
+    expect(dockerTestPathArgv(BOX_CONTAINER, '-f', '/box/home/x/f')).toEqual([
+      'exec', '-u', '1000:1000', BOX_CONTAINER, 'test', '-f', '/box/home/x/f'
+    ])
+    expect(dockerTestPathArgv(BOX_CONTAINER, '-e', '/box/home/x/g').join(' ')).not.toContain('--')
+  })
+})
+
+describe('fase 19b (T2): il Dockerfile installa python3 per il terminale e NE VERIFICA il binario', () => {
+  it('python3 nei pacchetti apt e nel command -v (il programma del PTY gira con python3 -c)', () => {
+    const dockerfile = rf('resources/box/Dockerfile', 'utf8')
+    expect(dockerfile).toContain('      python3 \\\n')
+    expect(dockerfile).toContain('command -v Xvfb x11vnc xauth xdotool import xdpyinfo python3')
+    // i pacchetti del desktop RESTANO (niente è stato tolto)
+    for (const pkg of ['xvfb', 'x11vnc', 'xauth', 'xdotool', 'imagemagick', 'x11-utils']) {
+      expect(dockerfile, `pacchetto ${pkg}`).toContain(` ${pkg} \\`)
     }
   })
 })

@@ -182,7 +182,7 @@ describe('P2: copia dello screenshot — lettura come 1001, scrittura atomica co
   afterEach(() => setDockerRunnerForTests(null))
 
   it('i TRE argv in ordine: base64 come 1001 → DOCKER_WRITE_B64 come 1000 (stdin col base64) → rm come 1001', async () => {
-    const calls: Array<{ argv: string[]; input?: string }> = []
+    const calls: Array<{ argv: string[]; input?: string | Buffer }> = []
     setDockerRunnerForTests(async (argv, opts) => {
       calls.push({ argv, input: opts?.input })
       // la LETTURA (base64) risponde coi byte codificati; le altre vanno bene

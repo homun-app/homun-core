@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { SandbotApi, SandbotEvent } from '../shared/types'
 
 const api: SandbotApi = {
@@ -18,6 +18,27 @@ const api: SandbotApi = {
   screenOpen: (agentId, mode) => ipcRenderer.invoke('screen:open', agentId, mode),
   screenRelease: (agentId, note) => ipcRenderer.invoke('screen:release', agentId, note),
   screenStatus: (agentId) => ipcRenderer.invoke('screen:status', agentId),
+  // fase 19b (T2): il terminale del bot (solo docker)
+  terminalOpen: (agentId) => ipcRenderer.invoke('terminal:open', agentId),
+  // fase 19b (T3): i file del box — elenco, anteprima e le finestre del Mac
+  // (il path del Mac lo scelgono i dialog del main o il trascinamento)
+  filesList: (agentId, path) => ipcRenderer.invoke('files:list', agentId, path),
+  filesRead: (agentId, path) => ipcRenderer.invoke('files:read', agentId, path),
+  filesDownload: (agentId, path) => ipcRenderer.invoke('files:download', agentId, path),
+  filesUpload: (agentId, dirPath) => ipcRenderer.invoke('files:upload', agentId, dirPath),
+  filesImportDropped: (agentId, dirPath, macPath, overwrite) => ipcRenderer.invoke('files:import-dropped', agentId, dirPath, macPath, overwrite),
+  // fase 19b (T3.2): il path del Mac di un file TRASCINATO dal Finder
+  // (webUtils.getPathForFile è l'unico modo dall'evento drop del renderer)
+  pathForFile: (file) => {
+    try {
+      return webUtils.getPathForFile(file)
+    } catch {
+      return null
+    }
+  },
+  // fase 19b (T4): il feed dell'attività del computer del bot
+  activityList: (agentId, limit) => ipcRenderer.invoke('activity:list', agentId, limit),
+  activityOutput: (agentId, id) => ipcRenderer.invoke('activity:output', agentId, id),
   draftSend: (agentId, entryId, body) => ipcRenderer.invoke('draft:send', agentId, entryId, body),
   draftDiscard: (agentId, entryId) => ipcRenderer.invoke('draft:discard', agentId, entryId),
   draftUpdate: (agentId, entryId, body) => ipcRenderer.invoke('draft:update', agentId, entryId, body),

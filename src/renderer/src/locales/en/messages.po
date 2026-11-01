@@ -468,8 +468,8 @@ msgid "📤 Invio esterno"
 msgstr "📤 External send"
 
 #: src/renderer/src/components/Chat.tsx
-msgid "🖥 Schermo"
-msgstr "🖥 Screen"
+msgid "🖥 Computer"
+msgstr "🖥 Computer"
 
 #: src/renderer/src/components/Chat.tsx
 msgid "🗂 Memoria"
@@ -539,6 +539,10 @@ msgstr "Agent busy: message queued (position {position})."
 #: src/shared/ui-messages.ts
 msgid "notice.agentBusyDiscard"
 msgstr "Agent busy: message discarded (the queue lives in the daemon jobs table)."
+
+#: src/renderer/src/components/ComputerFiles.tsx
+msgid "Aggiorna"
+msgstr "Refresh"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "aggiungi"
@@ -650,6 +654,10 @@ msgstr "Cancelled (interrupt)"
 msgid "annullato"
 msgstr "cancelled"
 
+#: src/renderer/src/components/ComputerFiles.tsx
+msgid "Anteprima"
+msgstr "Preview"
+
 #: src/renderer/src/components/Settings.tsx
 msgid "API key (vuoto per locali)"
 msgstr "API key (empty for local)"
@@ -741,6 +749,7 @@ msgstr "activate the routine \"{title}\" — prompt: {preview}"
 msgid "attivate"
 msgstr "enabled"
 
+#: src/renderer/src/components/ComputerPanel.tsx
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Attività"
 msgstr "Activity"
@@ -934,10 +943,31 @@ msgstr "Delete \"{0}\" from the library? The item's files are removed too."
 msgid "totp.badChar"
 msgstr "invalid base32 character: \"{ch}\""
 
+#: src/renderer/src/components/ComputerFiles.tsx
+msgid "Carica qui"
+msgstr "Upload here"
+
 #: src/renderer/src/components/RightPanel.tsx
 #: src/renderer/src/components/Settings.tsx
 msgid "caricamento…"
 msgstr "loading…"
+
+#: src/renderer/src/components/ComputerFiles.tsx
+msgid "Caricati {ok} file, {skipped} saltati."
+msgstr "Uploaded {ok} files, {skipped} skipped."
+
+#: src/renderer/src/components/ComputerFiles.tsx
+msgid "Caricati {ok} file."
+msgstr "Uploaded {ok} files."
+
+#. placeholder {0}: r.name
+#: src/renderer/src/components/ComputerFiles.tsx
+msgid "Caricato: {0}"
+msgstr "Uploaded: {0}"
+
+#: src/renderer/src/components/ComputerFiles.tsx
+msgid "Cartella vuota."
+msgstr "Empty folder."
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Cassaforte"
@@ -991,6 +1021,7 @@ msgid "chiudi"
 msgstr "close"
 
 #: src/renderer/src/components/BotScreen.tsx
+#: src/renderer/src/components/ComputerPanel.tsx
 #: src/renderer/src/components/ui/dialog.tsx
 msgid "Chiudi"
 msgstr "Close"
@@ -1064,6 +1095,14 @@ msgstr "Fill in the “{label}” login on {origin}?"
 msgid "completato"
 msgstr "completed"
 
+#: src/renderer/src/components/ComputerPanel.tsx
+msgid "Computer del bot"
+msgstr "Bot's computer"
+
+#: src/renderer/src/components/Chat.tsx
+msgid "Computer del bot: schermo, terminale, file e attività"
+msgstr "Bot's computer: screen, terminal, files and activity"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "onboarding.help"
@@ -1131,6 +1170,10 @@ msgstr "connector_poll: intervalMin must be ≥ 2 minutes"
 #: src/shared/ui-messages.ts
 msgid "trigger.toolMissing"
 msgstr "connector_poll: missing tool"
+
+#: src/renderer/src/components/ComputerTerminal.tsx
+msgid "Connessione al terminale…"
+msgstr "Connecting to the terminal…"
 
 #: src/renderer/src/components/BotScreen.tsx
 msgid "Connessione allo schermo…"
@@ -1218,6 +1261,14 @@ msgstr "coordinator"
 #: src/renderer/src/components/Settings.tsx
 msgid "copia curl"
 msgstr "copy curl"
+
+#: src/renderer/src/components/ComputerActivity.tsx
+msgid "Copiato dal Mac"
+msgstr "Copied from the Mac"
+
+#: src/renderer/src/components/ComputerActivity.tsx
+msgid "Copiato sul Mac"
+msgstr "Copied to the Mac"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Cosa deve fare il Bot a ogni esecuzione"
@@ -1384,6 +1435,11 @@ msgstr "verified domain ({0})"
 msgid "kick.4"
 msgstr "After creating the routines, ask THE USER in plain text (send_to_user, NOT a widget) whether they want to activate them; only if they answer yes activate them with update_state action \"resume\" (activation goes through the user’s approval card)."
 
+#. placeholder {0}: entries.length
+#: src/renderer/src/components/ComputerFiles.tsx
+msgid "Elencazione troncata a {0} voci."
+msgstr "Listing truncated to {0} entries."
+
 #: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "elimina"
@@ -1423,6 +1479,7 @@ msgid "notice.modelError"
 msgstr "Error from the model: {message}"
 
 #: src/renderer/src/components/BotScreen.tsx
+#: src/renderer/src/components/ComputerTerminal.tsx
 msgid "Errore di connessione."
 msgstr "Connection error."
 
@@ -1464,6 +1521,11 @@ msgstr "Label (e.g. ASPI portal)"
 #: src/renderer/src/components/Settings.tsx
 msgid "evento del calendario"
 msgstr "calendar event"
+
+#. placeholder {0}: item.exitCode ?? '?'
+#: src/renderer/src/components/ComputerActivity.tsx
+msgid "exit {0}"
+msgstr "exit {0}"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -1509,9 +1571,25 @@ msgstr "trust: {trust} · how it runs: {runtime}"
 msgid "file"
 msgstr "file"
 
+#: src/renderer/src/components/ComputerPanel.tsx
 #: src/renderer/src/components/LibraryPanel.tsx
 msgid "File"
 msgstr "Files"
+
+#. placeholder {0}: formatSize(preview.result.size)
+#: src/renderer/src/components/ComputerFiles.tsx
+msgid "File binario ({0})"
+msgstr "Binary file ({0})"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "rpc.filesNotFound"
+msgstr "File or folder not found."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "rpc.filesTooLarge"
+msgstr "File too large ({size} bytes, limit {limit}): not uploaded."
 
 #. placeholder {0}: item?.fileName
 #. placeholder {1}: item?.fileSize
@@ -1624,6 +1702,18 @@ msgstr "Group not found"
 msgid "guida"
 msgstr "guide"
 
+#: src/renderer/src/components/ComputerActivity.tsx
+msgid "Ha scritto file"
+msgstr "Wrote a file"
+
+#: src/renderer/src/components/ComputerActivity.tsx
+msgid "Hai caricato"
+msgstr "You uploaded"
+
+#: src/renderer/src/components/ComputerActivity.tsx
+msgid "Hai scaricato"
+msgstr "You downloaded"
+
 #: src/renderer/src/components/BotScreen.tsx
 msgid "Ho finito"
 msgstr "I’m done"
@@ -1679,6 +1769,10 @@ msgstr "The bot is waiting: close with “I’m done” when you are finished."
 msgid "Il bot ha provato a usare questa app ma la sessione è scaduta."
 msgstr "The bot tried to use this app but the session has expired."
 
+#: src/renderer/src/components/ComputerActivity.tsx
+msgid "Il bot non ha ancora usato il suo computer."
+msgstr "The bot has not used its computer yet."
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "rpc.screenNotOpen"
@@ -1696,6 +1790,11 @@ msgstr "The bot is working: stop it before taking control."
 #: src/renderer/src/components/BotScreen.tsx
 msgid "Il bot ti sta chiedendo di intervenire sul suo schermo."
 msgstr "The bot is asking you to step in on its screen."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "rpc.terminalBoxFailed"
+msgstr "The box did not start, the terminal is unavailable: try again."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -1848,6 +1947,15 @@ msgstr "The subagent has no activity yet."
 #: src/renderer/src/components/Chat.tsx
 msgid "Il task non ha ancora attività."
 msgstr "The task has no activity yet."
+
+#: src/renderer/src/components/ComputerTerminal.tsx
+msgid "Il terminale non risponde."
+msgstr "The terminal is not responding."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "rpc.terminalUnavailable"
+msgstr "The terminal requires docker mode (Settings → Sandbox): it is not available here."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -2322,6 +2430,10 @@ msgstr "Secure form: {reason}"
 msgid "Molto alto"
 msgstr "Very high"
 
+#: src/renderer/src/components/ComputerFiles.tsx
+msgid "Mostra i file nascosti"
+msgstr "Show hidden files"
+
 #: src/renderer/src/components/Chat.tsx
 msgid "Mostra il pannello destro"
 msgstr "Show the right panel"
@@ -2339,6 +2451,10 @@ msgstr "invalid name: \"{name}\""
 #: src/shared/ui-messages.ts
 msgid "mp.badName"
 msgstr "invalid name: {name}"
+
+#: src/renderer/src/components/ComputerFiles.tsx
+msgid "Nascondi i file nascosti"
+msgstr "Hide hidden files"
 
 #: src/renderer/src/components/Chat.tsx
 msgid "Nascondi il pannello destro"
@@ -2403,6 +2519,10 @@ msgstr "no recognized command"
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Nessun documento per ora."
 msgstr "No documents yet."
+
+#: src/renderer/src/components/ComputerFiles.tsx
+msgid "Nessun file caricato."
+msgstr "No file uploaded."
 
 #: src/renderer/src/components/Chat.tsx
 msgid "Nessun messaggio nel gruppo."
@@ -2717,9 +2837,18 @@ msgstr "For each template connector NOT yet connected call offer_connector: ONE 
 msgid "per origine"
 msgstr "by source"
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "rpc.filesOutside"
+msgstr "Path outside the bot's computer."
+
 #: src/renderer/src/components/Settings.tsx
 msgid "Permessi"
 msgstr "Permissions"
+
+#: src/renderer/src/components/ComputerActivity.tsx
+msgid "perso"
+msgstr "lost"
 
 #: src/renderer/src/components/BotDialogs.tsx
 msgid "Pixel"
@@ -3015,6 +3144,10 @@ msgstr "reviewer unavailable: {error}"
 msgid "revoca"
 msgstr "revoke"
 
+#: src/renderer/src/components/ComputerTerminal.tsx
+msgid "Riapri"
+msgstr "Reopen"
+
 #: src/renderer/src/components/Settings.tsx
 msgid "riattiva"
 msgstr "resume"
@@ -3093,6 +3226,9 @@ msgid "Rinomina"
 msgstr "Rename"
 
 #: src/renderer/src/components/BotScreen.tsx
+#: src/renderer/src/components/ComputerActivity.tsx
+#: src/renderer/src/components/ComputerFiles.tsx
+#: src/renderer/src/components/ComputerTerminal.tsx
 msgid "Riprova"
 msgstr "Retry"
 
@@ -3221,6 +3357,7 @@ msgstr "Unpin"
 msgid "Scaduta: il bot non aspetta più."
 msgstr "Expired: the bot is no longer waiting."
 
+#: src/renderer/src/components/ComputerActivity.tsx
 #: src/renderer/src/components/LibraryCards.tsx
 #: src/renderer/src/components/SubagentCard.tsx
 msgid "scaduto"
@@ -3229,6 +3366,15 @@ msgstr "expired"
 #: src/renderer/src/components/Settings.tsx
 msgid "Scansiona locale (Ollama / LM Studio)"
 msgstr "Scan local (Ollama / LM Studio)"
+
+#: src/renderer/src/components/ComputerFiles.tsx
+msgid "Scarica sul Mac"
+msgstr "Download to the Mac"
+
+#. placeholder {0}: r.name ?? selected
+#: src/renderer/src/components/ComputerFiles.tsx
+msgid "Scaricato: {0}"
+msgstr "Downloaded: {0}"
 
 #: src/renderer/src/components/DraftCard.tsx
 msgid "Scarta"
@@ -3290,13 +3436,13 @@ msgstr "schedule: every week requires weekday 0-6 (Sunday 0)"
 msgid "trigger.modeInvalid"
 msgstr "schedule: invalid mode (\"{value}\")"
 
+#: src/renderer/src/components/ComputerPanel.tsx
+msgid "Schermo"
+msgstr "Screen"
+
 #: src/renderer/src/components/BotScreen.tsx
 msgid "Schermo del bot"
 msgstr "Bot screen"
-
-#: src/renderer/src/components/Chat.tsx
-msgid "Schermo del bot: vista dal vivo del suo computer"
-msgstr "Bot screen: a live view of its computer"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -3342,6 +3488,10 @@ msgstr "Secrets"
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "Segreto TOTP (opzionale)"
 msgstr "TOTP secret (optional)"
+
+#: src/renderer/src/components/ComputerFiles.tsx
+msgid "Seleziona un file per vederne il contenuto."
+msgstr "Select a file to see its content."
 
 #: src/renderer/src/components/LibraryCards.tsx
 msgid "Sempre per questo sito"
@@ -3448,6 +3598,14 @@ msgstr "The secret name and value are required"
 msgid "rpc.loginValuesMissing"
 msgstr "Origin, username and password are required"
 
+#: src/renderer/src/components/ComputerTerminal.tsx
+msgid "Sessione chiusa per inattività."
+msgstr "Session closed for inactivity."
+
+#: src/renderer/src/components/ComputerTerminal.tsx
+msgid "Sessione chiusa."
+msgstr "Session closed."
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "conn.sessionExpired"
@@ -3457,6 +3615,10 @@ msgstr "Session expired: reconnect"
 msgid "settimana"
 msgstr "week"
 
+#: src/renderer/src/components/ComputerTerminal.tsx
+msgid "Shell del bot — stessa identità dei suoi comandi."
+msgstr "Bot's shell — same identity as its commands."
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "install.hostModeCard"
@@ -3465,6 +3627,11 @@ msgstr "it installs only in the bots’ computer (docker mode)"
 #: src/renderer/src/components/ConnectorCards13.tsx
 msgid "si installa solo nel computer dei bot (modalità docker)"
 msgstr "it installs only in the bots’ computer (docker mode)"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "rpc.filesNotAFile"
+msgstr "Only a file can be downloaded, not a folder."
 
 #: src/renderer/src/components/Chat.tsx
 msgid "sistema"
@@ -3511,6 +3678,10 @@ msgstr "missing or unrecognized source: {source}"
 #: src/shared/ui-messages.ts
 msgid "rpc.badSource"
 msgstr "invalid source: use a GitHub owner/repo or an https git URL"
+
+#: src/renderer/src/components/ComputerFiles.tsx
+msgid "Sostituire «{name}»?"
+msgstr "Replace \"{name}\"?"
 
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "sostituisci"
@@ -3612,6 +3783,10 @@ msgstr "Theme"
 msgid "rpc.templateUnknown"
 msgstr "unknown template: {id}"
 
+#: src/renderer/src/components/ComputerPanel.tsx
+msgid "Terminale"
+msgstr "Terminal"
+
 #: src/renderer/src/components/Settings.tsx
 msgid "test"
 msgstr "test"
@@ -3703,6 +3878,16 @@ msgstr "Invalid trigger: {errors}"
 msgid "rpc.triggerInvalidObject"
 msgstr "Invalid trigger: object missing"
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "rpc.terminalTooMany"
+msgstr "Too many terminals open: at most 3 per bot and 8 in total."
+
+#. placeholder {0}: formatSize(preview.result.size)
+#: src/renderer/src/components/ComputerFiles.tsx
+msgid "Troppo grande per l'anteprima ({0})"
+msgstr "Too large to preview ({0})"
+
 #. placeholder {0}: group.members.map((m) => m.name + (m.coordinator ? ' (coord.)' : '')).join(', ')
 #: src/renderer/src/components/Chat.tsx
 msgid "Tu + {0}"
@@ -3769,6 +3954,10 @@ msgstr "All bots"
 #: src/shared/ui-messages.ts
 msgid "cron.everyDay"
 msgstr "every day"
+
+#: src/renderer/src/components/ComputerActivity.tsx
+msgid "ucciso"
+msgstr "killed"
 
 #. placeholder {0}: i18n.t(fmtAgo(task.updatedAt, now))
 #. placeholder {1}: status === 'needs_input' ? t` — rispondi dalla vista del task (Apri)` : ''

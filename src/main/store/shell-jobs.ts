@@ -109,3 +109,17 @@ export function runningShellJobsOf(db: DatabaseSync, agentId: string): ShellJob[
 export function runningShellJobsAll(db: DatabaseSync): ShellJob[] {
   return (db.prepare("SELECT * FROM shell_jobs WHERE status = 'running' ORDER BY started_at").all() as unknown as ShellJobRow[]).map(rowToJob)
 }
+
+/**
+ * Gli ULTIMI comandi di una FAMIGLIA di agenti (fase 19b, T4.2: il feed
+ * «Attività» di un proprietario comprende anche i comandi dei FIGLI), dalla
+ * più recente riga partita.
+ */
+export function recentShellJobsOfAgents(db: DatabaseSync, agentIds: ReadonlyArray<string>, limit: number): ShellJob[] {
+  if (!agentIds.length) return []
+  const marks = agentIds.map(() => '?').join(',')
+  return (
+    db.prepare(`SELECT * FROM shell_jobs WHERE agent_id IN (${marks}) ORDER BY started_at DESC, rowid DESC LIMIT ?`)
+      .all(...agentIds, limit) as unknown as ShellJobRow[]
+  ).map(rowToJob)
+}

@@ -2074,8 +2074,36 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           let out: string
           try {
             out = (await getRunFileExchange()(agentId, pre.plan)).output
+            // fase 19b (T4.1): la copia È AVVENUTA (approvata dall'utente) →
+            // riga nel feed «Attività». La regola di Rakazo vale anche qui:
+            // un errore nel registrare si logga, non ferma il tool
+            try {
+              const { recordComputerAction } = await import('./computer-activity')
+              const macName = pre.plan.macPath.split('/').pop() ?? ''
+              recordComputerAction({
+                agentId,
+                kind: pre.plan.direction === 'to_box' ? 'copy_in' : 'copy_out',
+                target: pre.plan.direction === 'to_box'
+                  ? pre.plan.boxPath
+                  : `${pre.plan.boxPath} → ${macName}`,
+                bytes: pre.plan.size
+              })
+            } catch (recErr) {
+              console.error('[activity] copia non registrata:', recErr)
+            }
           } catch (e) {
             out = `Error in the copy: ${e instanceof Error ? e.message : String(e)}`
+            try {
+              const { recordComputerAction } = await import('./computer-activity')
+              recordComputerAction({
+                agentId,
+                kind: pre.plan.direction === 'to_box' ? 'copy_in' : 'copy_out',
+                target: pre.plan.boxPath,
+                error: e instanceof Error ? e.message : String(e)
+              })
+            } catch {
+              // il feed è una vista
+            }
           }
           const r = add({ agentId, kind: 'tool-result', role: 'system', content: out, meta: { callId: call.id } })
           emit({ type: 'entries', agentId, entries: [r] })
