@@ -11,6 +11,7 @@ import { useLingui, Trans } from '@lingui/react/macro'
 // le card salvate prima della 17c)
 import { api } from '../store'
 import type { TranscriptEntry } from '../../../shared/types'
+import { CardShell } from './DecidedRow'
 
 type McpServerMessage = Extract<
   import('../../../shared/types').SendMessagePayload,
@@ -86,7 +87,7 @@ export function McpServerCard({ entry }: { entry: TranscriptEntry }) {
       : t`nel box: ${message.runtime.command}`
 
   return (
-    <div className="max-w-[75%] rounded-2xl rounded-bl-md border border-border bg-card px-4 py-3 shadow-soft">
+    <CardShell>
       <UntrustedBanner show={message.untrusted === true} />
       <div className="flex items-center gap-2 text-sm text-foreground">
         <span className="font-medium"><Trans>Aggiungi server MCP: {message.name}</Trans></span>
@@ -114,14 +115,14 @@ export function McpServerCard({ entry }: { entry: TranscriptEntry }) {
       ) : (
         <div className="mt-2 flex items-center gap-2">
           <button
-            className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-primary/90 disabled:opacity-50"
+            className="rounded-[10px] bg-foreground px-3.5 py-1.5 text-sm font-semibold text-background transition hover:opacity-90 disabled:opacity-50"
             disabled={status === 'installing'}
             onClick={() => void add()}
           >
             {status === 'installing' ? <Trans>Aggiungo…</Trans> : <Trans>Aggiungi</Trans>}
           </button>
           <button
-            className="rounded-lg border border-border px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground"
+            className="rounded-[10px] px-3 py-1.5 text-sm text-muted-foreground transition hover:text-foreground"
             disabled={status === 'installing'}
             onClick={() => void api.connectorsResolveMcpServer(entry.agentId, entry.id, 'no').catch(() => undefined)}
           >
@@ -129,7 +130,7 @@ export function McpServerCard({ entry }: { entry: TranscriptEntry }) {
           </button>
         </div>
       )}
-    </div>
+    </CardShell>
   )
 }
 
@@ -167,7 +168,7 @@ export function PluginCard({ entry }: { entry: TranscriptEntry }) {
   }
 
   return (
-    <div className="max-w-[75%] rounded-2xl rounded-bl-md border border-border bg-card px-4 py-3 shadow-soft">
+    <CardShell>
       <UntrustedBanner show={message.untrusted === true} />
       <div className="flex items-center gap-2 text-sm text-foreground">
         <span className="font-medium"><Trans>Installa plugin: {message.name}</Trans></span>
@@ -198,14 +199,14 @@ export function PluginCard({ entry }: { entry: TranscriptEntry }) {
       ) : (
         <div className="mt-2 flex items-center gap-2">
           <button
-            className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-primary/90 disabled:opacity-50"
+            className="rounded-[10px] bg-foreground px-3.5 py-1.5 text-sm font-semibold text-background transition hover:opacity-90 disabled:opacity-50"
             disabled={status === 'installing'}
             onClick={() => void install()}
           >
             {status === 'installing' ? <Trans>Installo…</Trans> : <Trans>Installa</Trans>}
           </button>
           <button
-            className="rounded-lg border border-border px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground"
+            className="rounded-[10px] px-3 py-1.5 text-sm text-muted-foreground transition hover:text-foreground"
             disabled={status === 'installing'}
             onClick={() => void api.pluginsResolve(entry.agentId, entry.id, 'no').catch(() => undefined)}
           >
@@ -213,6 +214,6 @@ export function PluginCard({ entry }: { entry: TranscriptEntry }) {
           </button>
         </div>
       )}
-    </div>
+    </CardShell>
   )
 }

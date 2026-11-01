@@ -497,8 +497,12 @@ export type SandbotEvent =
   | { type: 'connectors' }
   // fase 6 (§3bis L9): il turno è finito con un messaggio visibile (done) o
   // l'agente aspetta l'utente (needs-input: ask_user, approval, bozza) — la
-  // decisione se notificare (soppressioni) sta nel daemon
-  | { type: 'agent-notify'; agentId: string; kind: 'done' | 'needs-input'; preview: string; at: number }
+  // decisione se notificare (soppressioni) sta nel daemon.
+  // fase 16b (S1.2): openGroupId dice che il click apre la SQUADRA, non la
+  // chat privata del bot (riepilogo del coordinatore pubblicato nel gruppo)
+  | { type: 'agent-notify'; agentId: string; kind: 'done' | 'needs-input'; preview: string; at: number; openGroupId?: number }
+  // fase 16b (S1.2/S5): apri la squadra (notifica del riepilogo, deep link)
+  | { type: 'open-group'; groupId: number }
   // fase 8 (§3bis L7): lo stato di un task è cambiato — la card in chat e la
   // sidebar (task in corso) si aggiornano
   | { type: 'tasks' }
@@ -579,7 +583,7 @@ export interface SandbotApi {
   // agenti e transcript
   listAgents(): Promise<Agent[]>
   createAgent(name: string, description?: string): Promise<Agent>
-  updateAgent(id: string, patch: Partial<Pick<Agent, 'name' | 'description' | 'providerId' | 'model' | 'avatar' | 'thinking'>>): Promise<void>
+  updateAgent(id: string, patch: Partial<Pick<Agent, 'name' | 'description' | 'providerId' | 'model' | 'avatar' | 'thinking' | 'section'>>): Promise<void>
   deleteAgent(id: string): Promise<void>
   /** fase 7: imposta il bot principale (mainAgentId, unico) */
   setMainAgent(id: string): Promise<void>
@@ -656,6 +660,22 @@ export interface SandbotApi {
   listGroups(): Promise<GroupInfo[]>
   groupMessages(groupId: number): Promise<GroupMessageInfo[]>
   groupSendUser(groupId: number, text: string): Promise<void>
+  /**
+   * Fase 16b (S1.3): squadre create e modificate dalla UI. La creazione è
+   * dell'UTENTE (created_by 'user', niente card di approvazione); le regole
+   * del coordinatore sono quelle di S1.1.
+   */
+  groupCreate(name: string, memberIds: string[], coordinatorId: string, description?: string): Promise<GroupInfo>
+  /** Fase 16b (S1.3): nome, descrizione, membri e coordinatore (regole di S1.1). */
+  groupUpdate(groupId: number, patch: {
+    name?: string
+    description?: string
+    addMemberIds?: string[]
+    removeMemberIds?: string[]
+    coordinatorId?: string
+  }): Promise<GroupInfo>
+  /** Fase 16b (S1.3): cancella squadra e messaggi; i bot restano. */
+  groupDelete(groupId: number): Promise<void>
   // fase 12: sottoagenti del padre (card + pannello) e bottone Ferma
   listSubagents(parentId: string): Promise<SubagentInfo[]>
   stopSubagent(id: string): Promise<void>
@@ -953,7 +973,8 @@ export type GroupAuthorKind = 'user' | 'agent' | 'system'
 
 /**
  * Un gruppo di bot con l'utente (fase 10): stanza di chat con fino a 6 bot;
- * l'utente ne è sempre membro. Il coordinatore (opzionale) è uno dei bot.
+ * l'utente ne è sempre membro. Il coordinatore (obbligatorio dalla 16b, S1.1)
+ * è uno dei bot.
  */
 export interface GroupInfo {
   id: number
@@ -965,6 +986,8 @@ export interface GroupInfo {
   /** i membri BOT (l'utente è sempre membro e non compare qui) */
   members: Array<{ agentId: string; name: string; coordinator: boolean }>
   createdAt: number
+  /** fase 16b (S2): l'attività recente per l'ordinamento della barra (null se vuota) */
+  lastMessageAt: number | null
 }
 
 /** Un messaggio di gruppo come lo vede la UI. */
@@ -977,6 +1000,8 @@ export interface GroupMessageInfo {
   text: string
   replyTo: number | null
   createdAt: number
+  /** fase 16b (S1.2): è il riepilogo di chiusura del coordinatore */
+  summary: boolean
 }
 
 // ---- auto-review delle approvazioni (fase 8, §3bis L5) ----

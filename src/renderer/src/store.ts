@@ -105,6 +105,29 @@ interface Store {
   /** fase 16 (U5): pannelli Memoria e Skill della vista dell'agente (anche dal pannello destro) */
   memoryOpen: boolean
   skillsOpen: boolean
+  /** fase 16b (S3.2): «rispondi citando» — la citazione da inserire nel composer */
+  quote: string | null
+  setQuote(text: string | null): void
+  /**
+   * Fase 16b (S3.3): «Mostra i passaggi in chat» (Impostazioni › Generali,
+   * default spenta) — rimette le righe tool-call/tool-result di oggi.
+   */
+  debugSteps: boolean
+  setDebugSteps(v: boolean): void
+  /** fase 16b (S4): il pannello del bot si apre (o cambia) su una scheda data */
+  botPanelTabRequest: 'profile' | 'computer' | 'routines' | 'advanced' | null
+  openBotAdvanced(): void
+  clearBotPanelTabRequest(): void
+  /** fase 16b (S1.3): crea/modifica/cancella squadre dalla UI */
+  groupCreate(name: string, memberIds: string[], coordinatorId: string, description?: string): Promise<void>
+  groupUpdate(groupId: number, patch: {
+    name?: string
+    description?: string
+    addMemberIds?: string[]
+    removeMemberIds?: string[]
+    coordinatorId?: string
+  }): Promise<void>
+  groupDelete(groupId: number): Promise<void>
   init(): Promise<void>
   select(agentId: string): Promise<void>
   send(text: string, images?: string[]): Promise<void>
@@ -201,6 +224,9 @@ export const useStore = create<Store>((set, get) => ({
   previews: {},
   memoryOpen: false,
   skillsOpen: false,
+  quote: null,
+  botPanelTabRequest: null,
+  debugSteps: false,
 
   async init() {
     const agents = await api.listAgents()
@@ -214,6 +240,9 @@ export const useStore = create<Store>((set, get) => ({
     const theme = await api.settingsGet<UiTheme>('ui.theme', 'system').catch(() => 'system' as UiTheme)
     const rightPanel = await api.settingsGet<boolean>('ui.rightPanel', true).catch(() => true)
     set({ theme, rightPanel })
+    // fase 16b (S3.3): la voce di debug «Mostra i passaggi in chat»
+    const debugSteps = await api.settingsGet<boolean>('ui.debugSteps', false).catch(() => false)
+    set({ debugSteps })
     applyTheme(theme)
     watchSystemTheme(() => applyTheme(get().theme))
     // fase 17a (L2): la lingua del setting (il catalogo l'ha già attivato
@@ -366,6 +395,13 @@ export const useStore = create<Store>((set, get) => ({
           }
           break
         }
+        // fase 16b (S1.2): apri la squadra (notifica del riepilogo del coordinatore)
+        case 'open-group': {
+          s.openGroup(e.groupId)
+          const w = window as unknown as { focus?: () => void }
+          w.focus?.()
+          break
+        }
         // fase 12: lo stato di un sottoagente è cambiato (card + pannello)
         case 'subagents': {
           if (e.parentId === s.activeId) {
@@ -378,8 +414,9 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   async select(agentId) {
-    // fase 16: cambiando bot cambia anche il composer (il typing non resta appeso)
-    set({ activeId: agentId, entries: [], openSubagentId: null, subEntries: [], typingAgentId: null })
+    // fase 16: cambiando bot cambia anche il composer (il typing non resta appeso).
+    // fase 16b (S5): la squadra aperta lascia il posto alla chat del bot
+    set({ activeId: agentId, entries: [], openSubagentId: null, subEntries: [], typingAgentId: null, openGroupId: null, groupMessages: [] })
     set({ entries: await api.getEntries(agentId) })
     // fase 12: i sottoagenti dell'agente scelto
     api.listSubagents(agentId).then((subagents) => set({ subagents })).catch(() => undefined)
@@ -457,7 +494,9 @@ export const useStore = create<Store>((set, get) => ({
     const s = get()
     set({
       entries: s.entries.map((en) =>
-        en.meta?.approvalId === approvalId ? { ...en, meta: { ...en.meta!, status: decision === 'allow' ? 'allowed' : 'denied' } } : en
+        en.meta?.approvalId === approvalId
+          ? { ...en, meta: { ...en.meta!, status: decision === 'allow' ? 'allowed' : 'denied', resolutionMode: mode } }
+          : en
       )
     })
     void api.resolveApproval(id, approvalId, decision, mode)
@@ -604,12 +643,55 @@ export const useStore = create<Store>((set, get) => ({
     if (get().typingAgentId !== agentId) set({ typingAgentId: agentId })
   },
 
+  setQuote(text) {
+    set({ quote: text })
+  },
+
+  // fase 16b (S4): le Impostazioni › Bot rimandano qui
+  openBotAdvanced() {
+    set({ botPanelTabRequest: 'advanced', rightPanel: true })
+  },
+
+  clearBotPanelTabRequest() {
+    set({ botPanelTabRequest: null })
+  },
+
   setMemoryOpen(v) {
     set({ memoryOpen: v })
   },
 
   setSkillsOpen(v) {
     set({ skillsOpen: v })
+  },
+
+  // fase 16b (S3.3): la voce di debug — si applica e resta nel setting
+  setDebugSteps(v) {
+    set({ debugSteps: v })
+    void api.settingsSet('ui.debugSteps', v).catch(() => undefined)
+  },
+
+  // fase 16b (S1.3): squadre dalla UI — dopo ogni azione la lista si ricarica
+  // (l'evento groups del daemon arriva comunque)
+  async groupCreate(name, memberIds, coordinatorId, description) {
+    await api.groupCreate(name, memberIds, coordinatorId, description)
+    const groups = await api.listGroups().catch(() => get().groups)
+    set({ groups })
+  },
+
+  async groupUpdate(groupId, patch) {
+    await api.groupUpdate(groupId, patch)
+    const groups = await api.listGroups().catch(() => get().groups)
+    set({ groups })
+    if (get().openGroupId === groupId) {
+      api.groupMessages(groupId).then((groupMessages) => set({ groupMessages })).catch(() => undefined)
+    }
+  },
+
+  async groupDelete(groupId) {
+    await api.groupDelete(groupId)
+    const groups = await api.listGroups().catch(() => get().groups)
+    // la squadra aperta, se è lei, si chiude
+    set({ groups, ...(get().openGroupId === groupId ? { openGroupId: null, groupMessages: [] } : {}) })
   }
 }))
 

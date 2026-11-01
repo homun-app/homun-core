@@ -8,6 +8,7 @@ import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
 import type { TranscriptEntry, SendMessageMeta, SendMessagePayload, SubagentInfo } from '../../../shared/types'
+import { CardShell } from './DecidedRow'
 
 const STATUS_LABEL: Record<SubagentInfo['status'], MessageDescriptor> = {
   queued: msg`in coda`,
@@ -50,9 +51,9 @@ export function SubagentCard({ entry }: { entry: TranscriptEntry }) {
   const open = status === 'queued' || status === 'running'
 
   return (
-    <div className="max-w-[75%] rounded-2xl rounded-bl-md border border-border bg-card px-4 py-3 shadow-soft">
+    <CardShell>
       <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-medium uppercase tracking-wide text-chart-2"><Trans>Sottoagente</Trans></span>
+        <span className="text-xs font-medium text-muted-foreground"><Trans>Aiutante</Trans></span>
         <span className={`text-[11px] font-medium ${STATUS_CLS[status]}`}>
           {status === 'done' ? '✓' : status === 'failed' ? '⚠' : status === 'stopped' ? '⛔' : status === 'expired' ? '⏱' : '⏳'}
           {' '}{waiting ? t`in attesa di conferma` : i18n.t(STATUS_LABEL[status])}
@@ -66,20 +67,20 @@ export function SubagentCard({ entry }: { entry: TranscriptEntry }) {
       )}
       <div className="mt-2 flex gap-2">
         <button
-          className="rounded-lg border border-foreground bg-foreground px-3 py-1.5 text-xs font-medium text-background hover:opacity-90"
+          className="rounded-[10px] bg-card px-3.5 py-1.5 text-sm transition hover:bg-muted"
           onClick={() => openSubagent(message.subagentId)}
         >
           <Trans>Apri</Trans>
         </button>
         {open && (
           <button
-            className="rounded-lg bg-muted px-3 py-1.5 text-xs text-foreground hover:bg-accent"
+            className="rounded-[10px] px-3 py-1.5 text-sm text-muted-foreground transition hover:text-foreground"
             onClick={() => stopSubagent(message.subagentId)}
           >
             <Trans>Ferma</Trans>
           </button>
         )}
       </div>
-    </div>
+    </CardShell>
   )
 }

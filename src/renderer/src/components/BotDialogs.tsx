@@ -9,7 +9,7 @@ import type { MessageDescriptor } from '@lingui/core'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog'
 import { api, useStore } from '../store'
 import { Bot } from '../bot/Bot'
-import { BOT_FAMILIES, BOT_COLORS } from '../../../shared/avatar'
+import { BOT_FAMILIES, BOT_COLORS, avatarOf } from '../../../shared/avatar'
 import type { BotColor, BotFamily, TemplateInfo } from '../../../shared/types'
 // fase 17c (C5): galleria dei template nella lingua dell'interfaccia
 import { pickLang } from '../../../shared/localized'
@@ -208,6 +208,134 @@ export function ChangeAvatarDialog({ agentId, current, onClose }: { agentId: str
             }}
           >
             <Trans>Salva</Trans>
+          </button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/**
+ * Fase 16b (S5): «Nuova squadra» dal menu Crea — nome, scelta di 1–6 bot
+ * (mascotte cliccabili) e coordinatore obbligatorio (di default il primo
+ * scelto). Chiama groups:create (S1.3): la crea l'UTENTE, niente card.
+ */
+export function NewTeamDialog({ onClose }: { onClose: () => void }) {
+  const { t } = useLingui()
+  const agents = useStore((s) => s.agents)
+  const mainAgentId = useStore((s) => s.mainAgentId)
+  const groupCreate = useStore((s) => s.groupCreate)
+  const openGroup = useStore((s) => s.openGroup)
+  const [name, setName] = useState('')
+  const [picked, setPicked] = useState<string[]>([])
+  const [coordinatorId, setCoordinatorId] = useState<string | null>(null)
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+  const effectiveMain = mainAgentId ?? agents[0]?.id ?? null
+  // i FIGLI non si scelgono (non sono bot) e nemmeno il bot già in squadra?
+  // no: un bot può stare in più squadre — solo i figli restano fuori
+  const candidates = agents.filter((a) => !a.parentId)
+
+  const toggle = (id: string): void => {
+    setPicked((cur) => {
+      if (cur.includes(id)) {
+        const next = cur.filter((x) => x !== id)
+        if (coordinatorId === id) setCoordinatorId(next[0] ?? null)
+        return next
+      }
+      if (cur.length >= 6) return cur
+      const next = [...cur, id]
+      if (coordinatorId === null) setCoordinatorId(id)
+      return next
+    })
+  }
+
+  const create = async (): Promise<void> => {
+    setBusy(true)
+    setError('')
+    try {
+      await groupCreate(name.trim(), picked, coordinatorId ?? picked[0] ?? '')
+      onClose()
+      // la squadra nuova è l'ultima della lista: si apre
+      const groups = await api.listGroups()
+      const last = groups[groups.length - 1]
+      if (last) openGroup(last.id)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="font-display text-2xl"><Trans>Nuova squadra</Trans></DialogTitle>
+        </DialogHeader>
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder={t`Nome della squadra`}
+          aria-label={t`Nome della squadra`}
+          className="rounded-xl bg-muted px-3 py-2 text-sm outline-none placeholder:text-muted-foreground"
+        />
+        <div>
+          <p className="mb-2 text-xs text-muted-foreground">
+            <Trans>Scegli da 1 a 6 bot: il coordinatore risponde quando scrivi senza @.</Trans>
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {candidates.map((a) => {
+              const av = avatarOf(a, agents, effectiveMain)
+              const on = picked.includes(a.id)
+              const coord = coordinatorId === a.id
+              return (
+                <button
+                  key={a.id}
+                  onClick={() => toggle(a.id)}
+                  title={a.name}
+                  aria-pressed={on}
+                  className={`flex flex-col items-center gap-1 rounded-[14px] px-2 py-2 transition ${on ? 'bg-muted' : 'hover:bg-muted/60'}`}
+                >
+                  <span className="relative">
+                    <Bot family={av.family} color={av.color} state={on ? 'happy' : 'idle'} size={44} track={false} />
+                    {coord && (
+                      <span className="absolute -right-1 -top-1 grid size-4 place-items-center rounded-full bg-foreground text-[9px] font-bold text-background">★</span>
+                    )}
+                  </span>
+                  <span className="max-w-16 truncate text-[11px]">{a.name}</span>
+                </button>
+              )
+            })}
+          </div>
+          {picked.length > 0 && (
+            <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+              <span><Trans>Coordinatore</Trans></span>
+              <select
+                className="rounded-lg bg-muted px-2 py-1 text-xs text-foreground outline-none"
+                value={coordinatorId ?? ''}
+                onChange={(e) => setCoordinatorId(e.target.value || null)}
+                aria-label={t`Coordinatore`}
+              >
+                {picked.map((id) => {
+                  const a = agents.find((x) => x.id === id)
+                  return <option key={id} value={id}>{a?.name ?? id}</option>
+                })}
+              </select>
+            </div>
+          )}
+        </div>
+        {error && <p className="text-xs text-destructive">{error}</p>}
+        <DialogFooter>
+          <button className={`${btn} bg-muted`} onClick={onClose}>
+            <Trans>Annulla</Trans>
+          </button>
+          <button
+            disabled={!name.trim() || picked.length < 1 || picked.length > 6 || busy}
+            className={`${btn} bg-foreground text-background disabled:opacity-40`}
+            onClick={() => void create()}
+          >
+            <Trans>Crea squadra</Trans>
           </button>
         </DialogFooter>
       </DialogContent>

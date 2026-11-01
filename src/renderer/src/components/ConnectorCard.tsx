@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { api, useStore } from '../store'
 import type { ConnectorInfo, TranscriptEntry } from '../../../shared/types'
+import { CardShell } from './DecidedRow'
 
 export function ConnectorCard({ entry }: { entry: TranscriptEntry }) {
   const { t } = useLingui()
@@ -38,7 +39,7 @@ export function ConnectorCard({ entry }: { entry: TranscriptEntry }) {
   }
 
   return (
-    <div className="max-w-[75%] rounded-2xl rounded-bl-md border border-border bg-card px-4 py-3 shadow-soft">
+    <CardShell>
       <div className="flex items-center gap-2 text-sm text-foreground">
         <span className="text-base">{connectors.find((c) => c.id === message.connectorId)?.logo ?? '🔌'}</span>
         <span className="font-medium">{message.name ?? message.connectorId}</span>
@@ -49,10 +50,11 @@ export function ConnectorCard({ entry }: { entry: TranscriptEntry }) {
         <p className="mt-1 text-xs text-muted-foreground"><Trans>Il bot ha provato a usare questa app ma la sessione è scaduta.</Trans></p>
       )}
       {status === 'connected' ? (
-        <p className="mt-2 text-xs text-chart-2"><Trans>✓ Connesso — il bot può usarlo</Trans></p>
+        // fase 16b: lo stato «collegato» è testo verde, non un badge
+        <p className="mt-2 text-sm text-chart-2"><Trans>✓ Connesso — il bot può usarlo</Trans></p>
       ) : (
         <button
-          className="mt-2 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-primary/90 disabled:opacity-50"
+          className="mt-2.5 rounded-[10px] bg-foreground px-3.5 py-1.5 text-sm font-semibold text-background transition hover:opacity-90 disabled:opacity-50"
           disabled={status === 'connecting' || status === 'failed'}
           onClick={() => void connect()}
         >
@@ -63,7 +65,7 @@ export function ConnectorCard({ entry }: { entry: TranscriptEntry }) {
               : <Trans>Connetti</Trans>}
         </button>
       )}
-    </div>
+    </CardShell>
   )
 }
 

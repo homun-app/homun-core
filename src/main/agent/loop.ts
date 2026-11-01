@@ -842,6 +842,33 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       emitLastEntry(agentId, emit)
       return messageCapResult()
     }
+    // fase 16b (S1.2): nel turno di CHIUSURA del coordinatore il riepilogo
+    // finisce NEL GRUPPO, dove l'utente ha chiesto (non nella chat privata):
+    // autore il coordinatore, flag summary, automatic. NESSUN nuovo giro —
+    // planGroupTurns ignora i riepiloghi. Dedup e tetti sono già passati; il
+    // result del tool resta IDENTICO (il modello non vede differenze)
+    if (opts.groupTurn?.closing) {
+      const g = getGroup(opts.groupTurn.groupId)
+      if (g) {
+        const depth = nextPostDepth(opts.groupTurn.readMaxDepth)
+        const msg = addGroupMessage({
+          groupId: g.id, authorKind: 'agent', authorId: agentId, authorName: agent.name,
+          text, rootId: opts.groupTurn.rootId ?? null, depth, automatic: true, summary: true
+        })
+        // nella chat privata del coordinatore resta una riga discreta,
+        // cliccabile verso la squadra (meta.groupId + summaryMessageId)
+        const row = add({
+          ...uiSystemEntry(agentId, 'event', ui(UI.groupSummaryPosted, { name: g.name }), { groupId: g.id, summaryMessageId: msg.id })
+        })
+        emit({ type: 'entries', agentId, entries: [row] })
+        emit({ type: 'groups' })
+        // la notifica porta ALLA SQUADRA, non alla chat privata del coordinatore
+        emit({ type: 'agent-notify', agentId, kind: 'done', preview: text.slice(0, 120), at: msg.created_at, openGroupId: g.id })
+        deliveredTexts.push(text)
+        sendsSinceWork++
+        return deliveredResultText(text, { held: false })
+      }
+    }
     const hold = sendToUser(call, input)
     deliveredTexts.push(text)
     sendsSinceWork++

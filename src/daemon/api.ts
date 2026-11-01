@@ -19,6 +19,7 @@ import { llmStream } from '../main/agent/llm'
 import { catalogModelInfos, modelCapabilities } from '../main/agent/llm'
 import { secondaryPrompts } from '../main/agent/prompts'
 import { parseCron } from './cron'
+import { MAX_GROUP_MEMBERS } from '../main/agent/group-turns'
 import { isValidTimeZone } from './tz'
 import { nextScheduleRun, nextPollAt } from './triggers'
 import { triggerShapeErrors, manualServerPollError } from '../shared/triggers'
@@ -179,10 +180,24 @@ export function buildApiMethods(
       store.updateAgent(id as string, patch as Parameters<typeof store.updateAgent>[1])
       emit({ type: 'agents' })
     },
-    'agents:delete': ([id]) => {
+    'agents:delete': async ([id]) => {
       loop.interrupt(id as string)
       cancelAgentJobs(db(), id as string)
-      store.deleteAgent(id as string)
+      const elections = store.deleteAgent(id as string)
+      // fase 16b (S1.1): i gruppi che hanno eletto un nuovo coordinatore
+      // ricevono la riga di sistema nel gruppo
+      if (elections.length) {
+        const groups = await import('../main/store/groups')
+        const { coordinatorNowText } = await import('../main/agent/group-turns')
+        for (const el of elections) {
+          const name = store.getAgent(el.coordinatorId)?.name ?? el.coordinatorId
+          groups.addGroupMessage({
+            groupId: el.groupId, authorKind: 'system', authorId: null, authorName: 'sistema',
+            text: coordinatorNowText(name)
+          })
+        }
+        emit({ type: 'groups' })
+      }
       emit({ type: 'agents' })
     },
     // fase 7: il bot principale è UNO (setting mainAgentId) — si cambia dalle
@@ -613,7 +628,9 @@ export function buildApiMethods(
       const { groupMessages } = await import('../main/store/groups')
       return groupMessages(Number(groupId)).map((m) => ({
         id: m.id, groupId: m.group_id, authorKind: m.author_kind, authorId: m.author_id,
-        authorName: m.author_name, text: m.text, replyTo: m.reply_to, createdAt: m.created_at
+        authorName: m.author_name, text: m.text, replyTo: m.reply_to, createdAt: m.created_at,
+        // fase 16b (S1.2): il riepilogo di chiusura del coordinatore
+        summary: m.summary === 1
       }))
     },
     'groups:send-user': async ([groupId, text]) => {
@@ -635,6 +652,99 @@ export function buildApiMethods(
       emit({ type: 'groups' })
       worker.poke()
       return { ok: true, id: msg.id }
+    },
+
+    // ---- fase 16b (S1.3): squadre create e modificate dalla UI ----
+
+    'groups:create': async ([name, memberIds, coordinatorId, description]) => {
+      const groups = await import('../main/store/groups')
+      const n = String(name ?? '').trim()
+      if (!n) throw uiError(UI.rpcGroupNameMissing)
+      const members = [...new Set((Array.isArray(memberIds) ? memberIds : []).map((m) => String(m)))]
+      const agents = store.listAgents()
+      // fase 12 (punto 1): un id di figlio non è un bot
+      for (const id of members) {
+        const refusal = store.subagentRefusal(id)
+        if (refusal) throw new Error(refusal)
+      }
+      const missing = members.filter((id) => !agents.some((a) => a.id === id))
+      if (missing.length) throw uiError(UI.rpcGroupMemberUnknown, { ids: missing.join(', ') })
+      const coord = String(coordinatorId ?? '')
+      if (!coord) throw uiError(UI.rpcGroupCoordinatorRequired)
+      if (!members.includes(coord)) throw uiError(UI.rpcGroupCoordinatorNotMember)
+      if (members.length < 1 || members.length > MAX_GROUP_MEMBERS) throw uiError(UI.rpcGroupMembersRange)
+      // created_by 'user': la crea l'utente — niente card di approvazione
+      const group = groups.createGroup(n, String(description ?? '').trim(), 'user', members, coord)
+      emit({ type: 'groups' })
+      return groups.groupWithMembers(group)
+    },
+
+    'groups:update': async ([groupId, patch]) => {
+      const groups = await import('../main/store/groups')
+      const gid = Number(groupId)
+      const g = groups.getGroup(gid)
+      if (!g) throw uiError(UI.rpcGroupNotFound)
+      const p = (patch ?? {}) as { name?: string; description?: string; addMemberIds?: string[]; removeMemberIds?: string[]; coordinatorId?: string }
+      if (p.name !== undefined && String(p.name).trim()) groups.updateGroup(gid, { name: String(p.name).trim() })
+      if (p.description !== undefined) groups.updateGroup(gid, { description: String(p.description ?? '').trim() })
+      const add = [...new Set(Array.isArray(p.addMemberIds) ? p.addMemberIds.map((m) => String(m)) : [])]
+      const remove = [...new Set(Array.isArray(p.removeMemberIds) ? p.removeMemberIds.map((m) => String(m)) : [])]
+      const agents = store.listAgents()
+      for (const id of add) {
+        const refusal = store.subagentRefusal(id)
+        if (refusal) throw new Error(refusal)
+      }
+      const missing = add.filter((id) => !agents.some((a) => a.id === id))
+      if (missing.length) throw uiError(UI.rpcGroupMemberUnknown, { ids: missing.join(', ') })
+      for (const id of add) groups.addGroupMember(gid, id)
+      let coordinatorChanged = false
+      for (const id of remove) {
+        // S1.1: se il coordinatore lascia, il primo membro rimasto prende il
+        // posto (removeGroupMember elegge da sé) e la riga di sistema lo dice
+        const r = groups.removeGroupMember(gid, id)
+        groups.cancelMemberGroupJobs(db(), gid, id)
+        if (r.coordinatorChanged) coordinatorChanged = true
+      }
+      const size = groups.groupMemberIds(gid).length
+      if (size > MAX_GROUP_MEMBERS) {
+        // si riportano le aggiunte: il tetto vale a fine giro
+        for (const id of add.reverse()) {
+          groups.removeGroupMember(gid, id)
+          groups.cancelMemberGroupJobs(db(), gid, id)
+          if (groups.groupMemberIds(gid).length <= MAX_GROUP_MEMBERS) break
+        }
+        throw uiError(UI.rpcGroupMembersRange)
+      }
+      if (p.coordinatorId !== undefined) {
+        const coord = String(p.coordinatorId ?? '')
+        if (!coord || !groups.isGroupMember(gid, coord)) throw uiError(UI.rpcGroupCoordinatorNotMember)
+        if (coord !== groups.getGroup(gid)?.coordinator_id) {
+          groups.updateGroup(gid, { coordinator_id: coord })
+          coordinatorChanged = true
+        }
+      }
+      const updated = groups.getGroup(gid)
+      if (!updated) throw uiError(UI.rpcGroupNotFound)
+      if (coordinatorChanged && updated.coordinator_id) {
+        const name = store.getAgent(updated.coordinator_id)?.name ?? updated.coordinator_id
+        const { coordinatorNowText } = await import('../main/agent/group-turns')
+        groups.addGroupMessage({
+          groupId: gid, authorKind: 'system', authorId: null, authorName: 'sistema',
+          text: coordinatorNowText(name)
+        })
+      }
+      emit({ type: 'groups' })
+      return groups.groupWithMembers(updated)
+    },
+
+    'groups:delete': async ([groupId]) => {
+      const groups = await import('../main/store/groups')
+      const gid = Number(groupId)
+      if (!groups.getGroup(gid)) throw uiError(UI.rpcGroupNotFound)
+      // squadra e messaggi; i bot restano (anche i job in coda se ne vanno)
+      groups.deleteGroup(db(), gid)
+      emit({ type: 'groups' })
+      return { ok: true }
     },
 
     // ---- memoria (fase 4): sezione nella vista dell'agente ----
@@ -1134,10 +1244,19 @@ export function buildApiMethods(
     // ---- approvazioni ----
     // fase 8 (punto 2): mode 'once' | 'always' (standing grant) | 'turn' (fino a fine turno)
     'approvals:resolve': ([agentId, approvalId, decision, mode]) => {
-      loop.resolveApproval(
-        agentId as string, approvalId as string, decision as 'allow' | 'deny',
-        mode === 'always' ? 'always' : mode === 'turn' ? 'turn' : 'once'
+      const m = mode === 'always' ? 'always' : mode === 'turn' ? 'turn' : 'once'
+      // fase 16b (S6): la modalità finisce nel meta dell'entry — la riga dopo
+      // la decisione dice «Consentito una volta / per il turno / sempre»
+      const aid = String(agentId)
+      const entry = store.getEntries(aid).findLast(
+        (x) => (x.kind === 'approval' || x.kind === 'send-message') && x.meta?.approvalId === approvalId
       )
+      if (entry) {
+        store.updateEntryMeta(entry.id, { ...entry.meta, resolutionMode: m })
+        const updated = store.getEntries(aid).find((e) => e.id === entry.id)
+        if (updated) emit({ type: 'entries', agentId: aid, entries: [updated] })
+      }
+      loop.resolveApproval(aid, approvalId as string, decision as 'allow' | 'deny', m)
     },
     // debug/test: risolve l'approval pending più recente di un agente
     'approvals:resolve-latest': ([agentId, decision]) => {

@@ -3,7 +3,7 @@
 // E dell'anteprima dell'ultimo messaggio visibile.
 import { describe, expect, it } from 'vitest'
 import { i18n } from '@lingui/core'
-import { matchesQuery, filterSidebar, previewOf, type SidebarPreview } from '../sidebar-utils'
+import { matchesQuery, filterSidebar, previewOf, buildSidebarModel, collapsedVoices, type SidebarPreview } from '../sidebar-utils'
 import type { Agent, GroupInfo, TranscriptEntry } from '../../../shared/types'
 import { itCatalogEntries } from './po-helper'
 
@@ -18,8 +18,8 @@ const agent = (id: string, name: string, section: string | null = null): Agent =
   createdAt: 1, createdBy: null, section, parentId: null, avatar: null
 })
 
-const group = (id: number, name: string): GroupInfo => ({
-  id, name, description: '', createdBy: 'u', coordinatorId: null, members: [], createdAt: 1
+const group = (id: number, name: string, members: GroupInfo['members'] = [], coordinatorId: string | null = null, lastMessageAt: number | null = null): GroupInfo => ({
+  id, name, description: '', createdBy: 'u', coordinatorId, members, createdAt: 1, lastMessageAt
 })
 
 const entry = (over: Partial<TranscriptEntry> & Pick<TranscriptEntry, 'id' | 'kind' | 'role'>): TranscriptEntry => ({
@@ -78,5 +78,137 @@ describe('fase 16 (U4): anteprima dell’ultimo messaggio visibile', () => {
     expect(resolve(previewOf(widget))).toBe('Vuoi il riepilogo?')
     const draft = [entry({ id: 3, kind: 'send-message', role: 'assistant', content: '', meta: { message: { type: 'draft', to: 'x@y.it' } } })]
     expect(resolve(previewOf(draft))).toBe('Bozza per x@y.it')
+  })
+})
+
+
+// ---- fase 16b (S2): buildSidebarModel — chi ti risponde ----
+
+const agent2 = (id: string, name: string, over: Partial<Agent> = {}): Agent => ({
+  ...agent(id, name), ...over
+})
+
+describe('fase 16b (S2): il modello della barra', () => {
+
+  it('senza mainAgentId il principale è il primo bot', () => {
+    const agents = [agent2('1', 'Nina'), agent2('2', 'Moto')]
+    const m = buildSidebarModel(agents, [], null)
+    expect(m.main?.id).toBe('1')
+    // con mainAgentId impostato vince lui
+    expect(buildSidebarModel(agents, [], '2').main?.id).toBe('2')
+  })
+
+  it('un bot in DUE squadre compare come membro sotto ciascuna (e non tra i bot singoli)', () => {
+    const agents = [agent2('n', 'Nina'), agent2('s', 'Scout'), agent2('c', 'Contabile')]
+    const groups = [
+      group(1, 'Weekend', [
+        { agentId: 'n', name: 'Nina', coordinator: true },
+        { agentId: 's', name: 'Scout', coordinator: false }
+      ], 'n'),
+      group(2, 'Amministrazione', [
+        { agentId: 'c', name: 'Contabile', coordinator: true },
+        { agentId: 's', name: 'Scout', coordinator: false }
+      ], 'c')
+    ]
+    const m = buildSidebarModel(agents, groups, 'n')
+    expect(m.teams).toHaveLength(2)
+    expect(m.teams[0]!.members.map((x) => x.id)).toEqual(['s'])
+    expect(m.teams[1]!.members.map((x) => x.id)).toEqual(['s'])
+    expect(m.bots.map((b) => b.agent.id)).toEqual([]) // Scout sta nelle squadre
+  })
+
+  it('i FIGLI (sottoagenti) non compaiono MAI: né come bot né come principale', () => {
+    const agents = [agent2('1', 'Nina'), agent2('figlio', 'Figlio', { parentId: '1' })]
+    const m = buildSidebarModel(agents, [], null)
+    expect(m.main?.id).toBe('1')
+    expect(m.bots).toEqual([])
+  })
+
+  it('le sezioni fanno da titoletto ai bot singoli', () => {
+    const agents = [agent2('n', 'Nina'), agent2('r', 'Ricercatore', { section: 'Lavoro' }), agent2('m', 'Moto', { section: 'Lavoro' })]
+    const m = buildSidebarModel(agents, [], 'n')
+    expect(m.bots.map((b) => b.section)).toEqual(['Lavoro', 'Lavoro'])
+    expect(m.bots.map((b) => b.agent.id)).toEqual(['r', 'm'])
+  })
+
+  it('la ricerca su un MEMBRE tiene la squadra (nome squadra, coordinatore o membro)', () => {
+    const agents = [agent2('n', 'Nina'), agent2('s', 'Scout luoghi'), agent2('x', 'Solo')]
+    const groups = [
+      group(1, 'Weekend', [
+        { agentId: 'n', name: 'Nina', coordinator: true },
+        { agentId: 's', name: 'Scout luoghi', coordinator: false }
+      ], 'n')
+    ]
+    const m = buildSidebarModel(agents, groups, 'n', 'scout')
+    expect(m.teams.map((t) => t.group.id)).toEqual([1])
+    expect(m.bots).toEqual([]) // Solo non combacia
+    // il nome della squadra e del coordinatore valgono come filtro
+    expect(buildSidebarModel(agents, groups, 'n', 'weekend').teams).toHaveLength(1)
+    expect(buildSidebarModel(agents, groups, 'n', 'nina').teams).toHaveLength(1)
+    expect(buildSidebarModel(agents, groups, 'n', 'amministrazione').teams).toHaveLength(0)
+  })
+
+  it('prima le squadre con qualcuno che ti aspetta, poi per attività recente', () => {
+    const mk = (id: number, name: string, waiting: boolean, lastAt: number): GroupInfo =>
+      group(id, name, [
+        { agentId: 'n', name: 'Nina', coordinator: true },
+        { agentId: 's', name: 'Scout', coordinator: false }
+      ], 'n', lastAt)
+    const agents = [
+      agent2('n', 'Nina'),
+      agent2('s1', 'Scout', { status: 'paused-for-approval' }),
+      agent2('s', 'Scout2')
+    ]
+    // dati: vecchia con attesa, recente senza, vecchissima senza
+    const groups = [
+      mk(1, 'Vecchia', true, 100),
+      mk(2, 'Recente', false, 300),
+      mk(3, 'Antica', false, 50)
+    ]
+    // il membro in attesa è nelle squadre 1 e 3 (stessi member ids): costruiamo
+    // squadre con membri distinti per un ordinamento pulito
+    const g1 = group(1, 'Weekend', [
+      { agentId: 'n', name: 'Nina', coordinator: true },
+      { agentId: 'w', name: 'Aspetta', coordinator: false }
+    ], 'n', 100)
+    const g2 = group(2, 'Amministrazione', [
+      { agentId: 'n', name: 'Nina', coordinator: true },
+      { agentId: 'k', name: 'Contabile', coordinator: false }
+    ], 'n', 300)
+    void groups
+    const all = [agent2('n', 'Nina'), agent2('w', 'Aspetta', { status: 'paused-for-approval' }), agent2('k', 'Contabile')]
+    const m = buildSidebarModel(all, [g1, g2], 'n')
+    expect(m.teams.map((t) => t.group.id)).toEqual([1, 2]) // l'attesa vince sull'attività
+    expect(m.teams[0]!.waiting).toBe(true)
+    expect(m.teams[0]!.waitingCount).toBe(1)
+    expect(m.teams[1]!.waiting).toBe(false)
+  })
+})
+
+describe('fase 16b (S2): la barra stretta (collapsedVoices)', () => {
+  it('stesso ordine della barra larga: principale, squadre, bot — col contatore di chi aspetta', () => {
+    const agents = [
+      { ...agent('n', 'Nina') },
+      agent2('w', 'Aspetta', { status: 'paused-for-approval' }),
+      { ...agent('k', 'Contabile') },
+      { ...agent('z', 'Zio') }
+    ] as Agent[]
+    const teams = [
+      group(1, 'Weekend', [
+        { agentId: 'n', name: 'Nina', coordinator: true },
+        { agentId: 'w', name: 'Aspetta', coordinator: false }
+      ], 'n', 10)
+    ]
+    const model = buildSidebarModel(agents, teams, 'n')
+    const voices = collapsedVoices(model)
+    expect(voices.map((v) => v.kind)).toEqual(['main', 'team', 'bot', 'bot'])
+    expect(voices.map((v) => v.name)).toEqual(['Nina', 'Weekend', 'Contabile', 'Zio'])
+    // la squadra con un membro in attesa porta il contatore, lo stato waiting
+    expect(voices[1]!.counter).toBe(1)
+    expect(voices[1]!.status).toBe('waiting')
+    // un bot con non letti porta il contatore
+    const withUnread = [{ ...agents[2]!, unread: 3 }] as Agent[]
+    const m2 = buildSidebarModel([agents[0]!, withUnread[0]!], [], 'n')
+    expect(collapsedVoices(m2)[1]!.counter).toBe(3)
   })
 })

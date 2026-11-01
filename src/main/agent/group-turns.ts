@@ -63,6 +63,26 @@ export const GROUP_HOURLY_CAP_TEXT =
   `Hourly cap reached (${GROUP_HOURLY_POSTS_MAX} bot messages in one hour): group turns resume shortly.`
 
 /**
+ * Fase 16b (S1.1): la riga di sistema del cambio di coordinatore. Il testo
+ * salvato nel registro è inglese col nome in coda (stessa convenzione delle
+ * altre righe: il modello rilegge il registro); la vista riconosce il suffisso
+ * e la mostra nella lingua attiva (id group.nowCoordinates del catalogo UI).
+ */
+export const GROUP_COORDINATOR_NOW_SUFFIX = ' now coordinates the team.'
+
+/** Il testo inglese della riga «X ora coordina la squadra». */
+export function coordinatorNowText(name: string): string {
+  return `${name}${GROUP_COORDINATOR_NOW_SUFFIX}`
+}
+
+/** Il nome dalla riga di sistema del coordinatore (null se non è quella riga). */
+export function parseCoordinatorNowText(text: string): string | null {
+  if (!text.endsWith(GROUP_COORDINATOR_NOW_SUFFIX)) return null
+  const name = text.slice(0, -GROUP_COORDINATOR_NOW_SUFFIX.length)
+  return name || null
+}
+
+/**
  * La regola dei turni di gruppo (fase 10, punto 4): accompagna OGNI apertura
  * di turno — quando parlare, quando tacere, cosa non portare mai nel gruppo.
  * Correzione E1 (terzo giro): la prima riga dice COME si scrive — nel gruppo
@@ -139,7 +159,15 @@ function isWordChar(c: string): boolean {
 export interface GroupPlanInput {
   group: { id: number; coordinatorId: string | null }
   /** il messaggio appena arrivato nel gruppo (utente o bot; mai system) */
-  message: { id: number; authorKind: 'user' | 'agent'; authorId: string | null; text: string; depth: number }
+  message: {
+    id: number
+    authorKind: 'user' | 'agent'
+    authorId: string | null
+    text: string
+    depth: number
+    /** fase 16b (S1.2): è il riepilogo di chiusura del coordinatore — MAI turni */
+    summary?: boolean
+  }
   /** i membri BOT del gruppo (l'utente non riceve turni) */
   members: ReadonlyArray<{ id: string; name: string }>
   /** nonce dei turni di gruppo già PIANIFICATI (non ancora partiti) per questo gruppo */
@@ -193,6 +221,11 @@ export function groupTurnNonce(groupId: number, memberId: string, messageId: num
  */
 export function planGroupTurns(input: GroupPlanInput): GroupPlanResult {
   const { group, message, members } = input
+  // fase 16b (S1.2): il riepilogo di chiusura del coordinatore NON genera
+  // turni — nessun nuovo giro parte da lì (il gruppo lo legge e basta)
+  if (input.message.summary === true) {
+    return { turns: [], skipped: [], systemNotice: null, capNotice: false }
+  }
   // regola 5: il tetto orario viene prima di tutto (oltre non si accoda nulla)
   if (input.postsLastHour >= GROUP_HOURLY_POSTS_MAX) {
     return { turns: [], skipped: [], systemNotice: GROUP_HOURLY_CAP_TEXT, capNotice: true }

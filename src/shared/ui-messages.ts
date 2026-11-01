@@ -234,6 +234,11 @@ export const UI = {
   groupChainClosed: msg({ id: 'group.chainClosed', message: 'Il giro si è chiuso: il coordinatore riferisce all’utente.' }),
   groupRateLimit: msg({ id: 'group.rateLimit', message: 'Il modello non è disponibile (limite del provider): il giro è sospeso. Riprende al prossimo messaggio.' }),
   groupHourlyCap: msg({ id: 'group.hourlyCap', message: 'Tetto orario raggiunto (40 messaggi di bot in un’ora): i turni del gruppo riprendono a breve.' }),
+  // fase 16b (S1.1): il cambio di coordinatore — riga di sistema del gruppo
+  // (testo salvato inglese col nome in coda, la vista la riconosce e la traduce)
+  groupNowCoordinates: msg({ id: 'group.nowCoordinates', message: '{name} ora coordina la squadra' }),
+  // fase 16b (S1.2): la riga discreta nella chat privata del coordinatore
+  groupSummaryPosted: msg({ id: 'group.summaryPosted', message: 'Ho pubblicato il riepilogo nella squadra «{name}»' }),
 
   // ---- notifiche native (C3; l'anteprima resta il testo vero) ----
   notifyNeedsInput: msg({ id: 'notify.needsInput', message: '{agent} ha bisogno di te' }),
@@ -353,6 +358,13 @@ export const UI = {
   rpcTaskNotFound: msg({ id: 'rpc.taskNotFound', message: 'Task non trovato' }),
   rpcSubagentNotFound: msg({ id: 'rpc.subagentNotFound', message: 'Sottoagente non trovato' }),
   rpcGroupNotFound: msg({ id: 'rpc.groupNotFound', message: 'Gruppo non trovato' }),
+  // fase 16b (S1.3): validazioni delle RPC delle squadre (UiError inglese + id)
+  rpcGroupNameMissing: msg({ id: 'rpc.groupNameMissing', message: 'Serve il nome della squadra.' }),
+  rpcGroupMembersRange: msg({ id: 'rpc.groupMembersRange', message: 'Una squadra ha da 1 a 6 bot.' }),
+  rpcGroupCoordinatorRequired: msg({ id: 'rpc.groupCoordinatorRequired', message: 'Scegli il coordinatore: deve essere uno dei membri.' }),
+  rpcGroupCoordinatorNotMember: msg({ id: 'rpc.groupCoordinatorNotMember', message: 'Il coordinatore deve essere un membro della squadra.' }),
+  rpcGroupMemberUnknown: msg({ id: 'rpc.groupMemberUnknown', message: 'Questi id non sono bot: {ids}.' }),
+  rpcGroupNotMember: msg({ id: 'rpc.groupNotMember', message: 'Il bot non è un membro della squadra.' }),
   rpcTextMissing: msg({ id: 'rpc.textMissing', message: 'Testo mancante' }),
   rpcSecretSaveFailed: msg({
     id: 'rpc.secretSaveFailed',

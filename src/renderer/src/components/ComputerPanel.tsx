@@ -13,7 +13,7 @@ import { ComputerTerminal } from './ComputerTerminal'
 import { ComputerFiles } from './ComputerFiles'
 import { ComputerActivity } from './ComputerActivity'
 
-export function ComputerPanel({ agentId, onClose }: { agentId: string; onClose: () => void }) {
+export function ComputerPanel({ agentId, onClose, embedded = false }: { agentId: string; onClose: () => void; embedded?: boolean }) {
   const { t } = useLingui()
   const panel = useStore((s) => s.computerPanel)
   const setPanel = useStore((s) => s.setComputerPanel)
@@ -57,8 +57,16 @@ export function ComputerPanel({ agentId, onClose }: { agentId: string; onClose: 
   ]
 
   return (
-    <section className="mx-5 mt-3 flex max-h-[70vh] min-h-[420px] flex-col overflow-hidden rounded-xl border bg-card shadow-soft">
-      <header className="flex items-center justify-between gap-3 border-b border-border px-4 py-2">
+    <section
+      className={
+        embedded
+          ? // fase 16b (S4): dentro il pannello del bot, la scheda Computer si
+            // allarga a 560 px e il contenuto riempie lo spazio
+            'flex h-full min-h-[420px] flex-col'
+          : 'mx-5 mt-3 flex max-h-[70vh] min-h-[420px] flex-col overflow-hidden rounded-xl border bg-card shadow-soft'
+      }
+    >
+      <header className="flex items-center justify-between gap-3 px-1 py-2">
         <div className="flex min-w-0 items-center gap-1 overflow-x-auto">
           <p className="mr-2 hidden text-[10px] font-medium uppercase tracking-wide text-muted-foreground sm:inline">
             <Trans>Computer del bot</Trans>

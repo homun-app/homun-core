@@ -270,7 +270,8 @@ async function main(): Promise<void> {
     if (decision.deliver) {
       lastNotified.set(e.agentId, Date.now())
       const { title, body } = notifyTexts(agent.name, e)
-      bridge?.notify(title, body)
+      // fase 16b (S1.2): il click porta alla SQUADRA quando è il riepilogo
+      bridge?.notify(title, body, e.openGroupId)
     }
   }
   broadcast = emit

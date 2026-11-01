@@ -9,7 +9,7 @@ import { mkdirSync, rmSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { JOBS_DDL } from './jobs'
-import { GROUPS_DDL } from './groups'
+import { GROUPS_DDL, migrateGroupCoordinators, ensureGroupCoordinator, groupsOfMember } from './groups'
 import { SHELL_JOBS_DDL } from './shell-jobs'
 import { COMPUTER_ACTIONS_DDL } from './computer-actions'
 import { SUBAGENTS_DDL } from './subagents'
@@ -34,6 +34,11 @@ export function dataDir(): string {
 
 function open(): DatabaseSync {
   const db = new DatabaseSync(join(dataDir(), 'sandbot.db'))
+  // fase 16b (S1.1): la connessione si registra SUBITO — le migrazioni in
+  // fondo a open() chiamano funzioni di store che usano db() (per esempio
+  // migrateGroupCoordinators): senza questo, quella chiamata riaprirebbe
+  // open() su una SECONDA connessione, in ricorsione
+  _db = db
   db.exec(`
     PRAGMA journal_mode = WAL;
     PRAGMA busy_timeout = 5000;
@@ -188,6 +193,12 @@ function open(): DatabaseSync {
   // sospeso per limite d'uso del provider) vive accanto all'esito
   const turnCols = db.prepare("SELECT name FROM pragma_table_info('group_turns')").all() as Array<{ name: string }>
   if (!turnCols.some((c) => c.name === 'reason')) db.exec('ALTER TABLE group_turns ADD COLUMN reason TEXT')
+  // fase 16b (S1.2): il flag del riepilogo di chiusura del coordinatore
+  const groupMsgCols = db.prepare("SELECT name FROM pragma_table_info('group_messages')").all() as Array<{ name: string }>
+  if (!groupMsgCols.some((c) => c.name === 'summary')) db.exec('ALTER TABLE group_messages ADD COLUMN summary INTEGER DEFAULT 0')
+  // fase 16b (S1.1, migrazione): ogni gruppo esistente ha un coordinatore
+  // (created_by se è ancora membro, altrimenti il primo membro); idempotente
+  migrateGroupCoordinators()
   return db
 }
 
@@ -337,10 +348,19 @@ export function setAgentStopperForDaemon(fn: ((agentId: string) => void) | null)
   agentStopper = fn
 }
 
-export function deleteAgent(id: string): void {
+/**
+ * Elimina un agente e tutto ciò che gli appartiene. Fase 16b (S1.1): torna i
+ * gruppi che hanno dovuto eleggere un nuovo coordinatore (il chiamante scrive
+ * la riga di sistema nel gruppo).
+ */
+export function deleteAgent(id: string): Array<{ groupId: number; coordinatorId: string }> {
   // fase 5 (residuo 0d): si rimuove solo un agente ESISTENTE (il path della
   // directory si costruisce dal suo id, mai da input libero)
-  if (!getAgent(id)) return
+  if (!getAgent(id)) return []
+  // fase 16b (S1.1): i gruppi di cui era coordinatore eleggono il primo
+  // membro rimasto — la lista torna al chiamante per le righe di sistema
+  const coordinated = groupsOfMember(id).map((g) => g.id)
+  const elections: Array<{ groupId: number; coordinatorId: string }> = []
   // fase 12 (punto 1): i FIGLI muoiono col padre — turno fermato, coda
   // svuotata, righe agents/entry/subagents eliminate. I file del box NON si
   // toccano mai: la home del figlio è quella del padre (il volume è suo)
@@ -360,9 +380,15 @@ export function deleteAgent(id: string): void {
   }
   db().prepare('DELETE FROM routines WHERE agent_id = ?').run(id)
   db().prepare('DELETE FROM outbox WHERE agent_id = ?').run(id)
-  // fase 10: l'agente esce dai gruppi (i gruppi restano, senza di lui)
+  // fase 10: l'agente esce dai gruppi (i gruppi restano, senza di lui).
+  // fase 16b (S1.1): chi perde il coordinatore ne elegge un altro (primo
+  // membro rimasto)
   db().prepare('DELETE FROM group_members WHERE agent_id = ?').run(id)
   db().prepare('DELETE FROM group_cursors WHERE agent_id = ?').run(id)
+  for (const gid of coordinated) {
+    const r = ensureGroupCoordinator(gid)
+    if (r.changed && r.coordinatorId) elections.push({ groupId: gid, coordinatorId: r.coordinatorId })
+  }
   db().prepare('DELETE FROM agents WHERE id=?').run(id)
   db().prepare('DELETE FROM entries WHERE agent_id=?').run(id)
   // memoria e skill su disco non restano orfane
@@ -371,6 +397,7 @@ export function deleteAgent(id: string): void {
   } catch {
     // directory assente o non eliminabile: le righe sono già via
   }
+  return elections
 }
 
 /**

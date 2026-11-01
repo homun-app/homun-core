@@ -207,8 +207,11 @@ export async function runGroupTurnJob(
     (m) => m.author_kind === 'agent' && m.author_id === p.memberId
   )
   // la consegna all'utente del turno di chiusura: un messaggio di TESTO (le
-  // bozze e le card sono attese, non consegne)
+  // bozze e le card sono attese, non consegne). Fase 16b (S1.2): il riepilogo
+  // ora vive nel gruppo — la riga evento della chat privata (summaryMessageId)
+  // conta come consegna, e vale anche il messaggio summary nel gruppo
   const sentToUser = turnEntry.some((e) => {
+    if (e.kind === 'event' && typeof e.meta?.summaryMessageId === 'number') return true
     if (e.kind !== 'send-message') return false
     return ((e.meta?.message ?? null) as { type?: string } | null)?.type === 'text'
   })

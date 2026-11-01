@@ -37,6 +37,7 @@ export const GROUPS_DDL = `
       root_id INTEGER,
       depth INTEGER NOT NULL DEFAULT 0,
       automatic INTEGER DEFAULT 0,
+      summary INTEGER DEFAULT 0,
       created_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_group_messages ON group_messages(group_id, id);
@@ -86,13 +87,15 @@ export interface GroupMessage {
   root_id: number | null
   depth: number
   automatic: number
+  /** fase 16b (S1.2): il riepilogo di chiusura del coordinatore */
+  summary: number
   created_at: number
 }
 
 interface GroupMessageRow {
   id: number; group_id: number; author_kind: string; author_id: string | null; author_name: string
   text: string; reply_to: number | null; root_id: number | null; depth: number
-  automatic: number | null; created_at: number
+  automatic: number | null; summary: number | null; created_at: number
 }
 
 export type GroupTurnOutcome = 'SENT' | 'PASS' | 'TIMEOUT' | 'CANCELLED' | 'ERROR' | 'SKIPPED'
@@ -120,13 +123,17 @@ function rowToMessage(r: GroupMessageRow): GroupMessage {
   return {
     id: r.id, group_id: r.group_id, author_kind: r.author_kind as GroupMessage['author_kind'],
     author_id: r.author_id, author_name: r.author_name, text: r.text, reply_to: r.reply_to,
-    root_id: r.root_id, depth: r.depth, automatic: r.automatic ?? 0, created_at: r.created_at
+    root_id: r.root_id, depth: r.depth, automatic: r.automatic ?? 0, summary: r.summary ?? 0, created_at: r.created_at
   }
 }
 
 // ---- CRUD gruppi e membri ----
 
-/** Crea il gruppo con i membri (il creatore è aggiunto se manca; errore oltre i 6 bot). */
+/**
+ * Crea il gruppo con i membri (il creatore è aggiunto se manca; errore oltre i
+ * 6 bot). Fase 16b (S1.1): senza coordinatorId esplicito il coordinatore è il
+ * bot che crea (sempre membro): un gruppo senza coordinatore non esiste più.
+ */
 export function createGroup(
   name: string,
   description: string,
@@ -134,15 +141,25 @@ export function createGroup(
   memberIds: string[],
   coordinatorId: string | null = null
 ): Group {
-  const members = [...new Set([...memberIds, createdBy])]
+  // fase 16b (S1.3): createdBy 'user' non è un bot — non entra nei membri e
+  // non può essere il coordinatore di default (la RPC lo valida prima)
+  const isUser = createdBy === 'user'
+  const members = [...new Set([...memberIds, ...(isUser ? [] : [createdBy])])]
+  const coordinator = coordinatorId ?? (isUser ? members[0] ?? null : createdBy)
   const now = Date.now()
   const r = db()
     .prepare('INSERT INTO groups(name, description, created_by, coordinator_id, created_at) VALUES(?,?,?,?,?)')
-    .run(name, description, createdBy, coordinatorId, now)
+    .run(name, description, createdBy, coordinator, now)
   const id = Number(r.lastInsertRowid)
   const ins = db().prepare('INSERT INTO group_members(group_id, agent_id, joined_at) VALUES(?,?,?)')
-  for (const m of members) ins.run(id, m, now)
-  return { id, name, description, created_by: createdBy, coordinator_id: coordinatorId, created_at: now }
+  let joined = now
+  for (const m of members) {
+    // ordine di ingresso deterministico anche nello stesso millisecondo (è
+    // l'ordine con cui si elegge il coordinatore, S1.1)
+    ins.run(id, m, joined)
+    joined += 1
+  }
+  return { id, name, description, created_by: createdBy, coordinator_id: coordinator, created_at: now }
 }
 
 export function getGroup(id: number): Group | null {
@@ -159,6 +176,34 @@ export function updateGroup(
   db()
     .prepare('UPDATE groups SET name=?, description=?, coordinator_id=? WHERE id=?')
     .run(patch.name ?? cur.name, patch.description ?? cur.description, patch.coordinator_id ?? cur.coordinator_id, id)
+}
+
+/**
+ * Fase 16b (S1.1): il coordinatore è obbligatorio. Se manca (o non è più
+ * membro) si assegna created_by se è ancora membro, altrimenti il primo
+ * membro rimasto in ordine di ingresso. Pura scrittura: la riga di sistema
+ * la scrive il chiamante (qui non c'è l'emit). Idempotente.
+ */
+export function ensureGroupCoordinator(groupId: number): { changed: boolean; coordinatorId: string | null } {
+  const g = getGroup(groupId)
+  if (!g) return { changed: false, coordinatorId: null }
+  const members = groupMemberIds(groupId)
+  if (g.coordinator_id && members.includes(g.coordinator_id)) {
+    return { changed: false, coordinatorId: g.coordinator_id }
+  }
+  const next = members.includes(g.created_by) ? g.created_by : members[0] ?? null
+  db().prepare('UPDATE groups SET coordinator_id=? WHERE id=?').run(next, groupId)
+  return { changed: true, coordinatorId: next }
+}
+
+/**
+ * Fase 16b (S1.1, migrazione): all'avvio, ai gruppi esistenti con
+ * coordinator_id nullo (o con un coordinatore che non è più membro) si
+ * assegna created_by se è ancora membro, altrimenti il primo membro.
+ * Silenziosa e idempotente: niente righe di sistema per la migrazione.
+ */
+export function migrateGroupCoordinators(): void {
+  for (const g of listGroups()) ensureGroupCoordinator(g.id)
 }
 
 /** Tutti i gruppi (la sidebar li mostra in una sezione propria). */
@@ -186,7 +231,13 @@ export function addGroupMember(groupId: number, agentId: string): void {
   db().prepare('INSERT OR IGNORE INTO group_members(group_id, agent_id, joined_at) VALUES(?,?,?)').run(groupId, agentId, Date.now())
 }
 
-export function removeGroupMember(groupId: number, agentId: string): void {
+/**
+ * Fase 16b (S1.1): la rimozione di un membro riporta anche il cambio di
+ * coordinatore, se il coordinatore era lui — il nuovo è il primo membro
+ * rimasto in ordine di ingresso (ensureGroupCoordinator). Il chiamante
+ * scrive la riga di sistema nel gruppo.
+ */
+export function removeGroupMember(groupId: number, agentId: string): { coordinatorChanged: boolean } {
   db().prepare('DELETE FROM group_members WHERE group_id = ? AND agent_id = ?').run(groupId, agentId)
   db().prepare('DELETE FROM group_cursors WHERE group_id = ? AND agent_id = ?').run(groupId, agentId)
   // i turni PIANIFICATI e non partiti si chiudono: altrimenti resterebbero
@@ -195,12 +246,38 @@ export function removeGroupMember(groupId: number, agentId: string): void {
     UPDATE group_turns SET outcome = 'CANCELLED', ended_at = ?
     WHERE group_id = ? AND member_id = ? AND started_at IS NULL AND outcome IS NULL
   `).run(Date.now(), groupId, agentId)
+  const r = ensureGroupCoordinator(groupId)
+  return { coordinatorChanged: r.changed }
 }
 
-/** Fase 10 (residuo della cascata): l'agente eliminato esce da tutti i gruppi. */
-export function removeAgentMemberships(agentId: string): void {
+/**
+ * Fase 10 (residuo della cascata): l'agente eliminato esce da tutti i gruppi.
+ * Fase 16b (S1.1): i gruppi di cui era coordinatore eleggono il primo membro
+ * rimasto — la lista dei cambi torna al chiamante per le righe di sistema.
+ */
+export function removeAgentMemberships(agentId: string): Array<{ groupId: number; coordinatorId: string | null }> {
+  const affected = groupsOfMember(agentId).map((g) => g.id)
   db().prepare('DELETE FROM group_members WHERE agent_id = ?').run(agentId)
   db().prepare('DELETE FROM group_cursors WHERE agent_id = ?').run(agentId)
+  const changed: Array<{ groupId: number; coordinatorId: string | null }> = []
+  for (const gid of affected) {
+    const r = ensureGroupCoordinator(gid)
+    if (r.changed) changed.push({ groupId: gid, coordinatorId: r.coordinatorId })
+  }
+  return changed
+}
+
+/**
+ * Fase 16b (S1.3): cancella la squadra e i suoi messaggi; i bot restano.
+ * Anche cursori, registro dei turni e job group-turn in coda.
+ */
+export function deleteGroup(dbs: DatabaseSync, groupId: number): void {
+  cancelGroupJobs(dbs, groupId)
+  dbs.prepare('DELETE FROM group_messages WHERE group_id = ?').run(groupId)
+  dbs.prepare('DELETE FROM group_members WHERE group_id = ?').run(groupId)
+  dbs.prepare('DELETE FROM group_cursors WHERE group_id = ?').run(groupId)
+  dbs.prepare('DELETE FROM group_turns WHERE group_id = ?').run(groupId)
+  dbs.prepare('DELETE FROM groups WHERE id = ?').run(groupId)
 }
 
 // ---- messaggi ----
@@ -215,13 +292,15 @@ export interface NewGroupMessage {
   rootId?: number | null
   depth?: number
   automatic?: boolean
+  /** fase 16b (S1.2): il riepilogo di chiusura del coordinatore */
+  summary?: boolean
 }
 
 export function addGroupMessage(m: NewGroupMessage): GroupMessage {
   const r = db()
-    .prepare(`INSERT INTO group_messages(group_id, author_kind, author_id, author_name, text, reply_to, root_id, depth, automatic, created_at)
-              VALUES(?,?,?,?,?,?,?,?,?,?)`)
-    .run(m.groupId, m.authorKind, m.authorId, m.authorName, m.text, m.replyTo ?? null, m.rootId ?? null, m.depth ?? 0, m.automatic ? 1 : 0, Date.now())
+    .prepare(`INSERT INTO group_messages(group_id, author_kind, author_id, author_name, text, reply_to, root_id, depth, automatic, summary, created_at)
+              VALUES(?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(m.groupId, m.authorKind, m.authorId, m.authorName, m.text, m.replyTo ?? null, m.rootId ?? null, m.depth ?? 0, m.automatic ? 1 : 0, m.summary ? 1 : 0, Date.now())
   const id = Number(r.lastInsertRowid)
   // catena: un messaggio a depth 0 SENZA root apre una catena ed è root di sé
   if ((m.depth ?? 0) === 0 && (m.rootId ?? null) === null) {
@@ -242,6 +321,12 @@ export function groupMessages(groupId: number, afterId = 0): GroupMessage[] {
 export function lastGroupMessageId(groupId: number): number {
   const r = db().prepare('SELECT MAX(id) AS max FROM group_messages WHERE group_id = ?').get(groupId) as { max: number | null }
   return r.max ?? 0
+}
+
+/** Fase 16b (S2): l'attività recente del gruppo (null se non ha messaggi). */
+export function lastGroupMessageAt(groupId: number): number | null {
+  const r = db().prepare('SELECT MAX(created_at) AS t FROM group_messages WHERE group_id = ?').get(groupId) as { t: number | null }
+  return r.t ?? null
 }
 
 /** I post di bot del gruppo nell'ultima ora (il tetto orario del planner). */
@@ -339,6 +424,10 @@ export function lastBotPostAtInChain(groupId: number, rootId: number, exceptAuth
  * send arrivano altri post di bot, c'è qualcosa di nuovo da riportare. Un
  * coordinatore che ha solo tacito (pass) NON ha ancora riferito: il turno di
  * chiusura è esattamente per quello.
+ * Fase 16b (S1.2): il riepilogo di chiusura ora vive NEL GRUPPO come
+ * messaggio con summary = 1: anche quelli contano (se contassero solo le
+ * vecchie send private, le consegne non si consumerebbero mai e il runner
+ * riaccoderebbe la chiusura a ogni fine turno).
  */
 export function coordinatorLastSendAt(groupId: number, rootId: number, coordinatorId: string): number | null {
   let sentAt: number | null = null
@@ -347,6 +436,11 @@ export function coordinatorLastSendAt(groupId: number, rootId: number, coordinat
     const c = (e.meta?.groupChain ?? null) as { groupId?: number; rootId?: number | null } | null
     if (c?.groupId === groupId && (c.rootId ?? null) === rootId) sentAt = Math.max(sentAt ?? 0, e.createdAt)
   }
+  const row = db().prepare(`
+    SELECT MAX(created_at) AS t FROM group_messages
+    WHERE group_id = ? AND root_id = ? AND author_kind = 'agent' AND author_id = ? AND summary = 1
+  `).get(groupId, rootId, coordinatorId) as { t: number | null }
+  if (row.t) sentAt = Math.max(sentAt ?? 0, row.t)
   return sentAt
 }
 
@@ -446,7 +540,8 @@ export interface ScheduledTurns {
 export function scheduleTurnsForMessage(message: GroupMessage, emit: (e: { type: 'groups' }) => void, now = Date.now()): ScheduledTurns {
   const group = getGroup(message.group_id)
   const result: ScheduledTurns = { plan: { turns: [], skipped: [], systemNotice: null, capNotice: false }, jobs: [] }
-  if (!group || message.author_kind === 'system') return result
+  // fase 16b (S1.2): un riepilogo NON genera turni (né righe di sistema)
+  if (!group || message.author_kind === 'system' || message.summary === 1) return result
   const memberIds = groupMemberIds(group.id)
   const members = memberIds
     .map((id) => getAgent(id))
@@ -459,7 +554,8 @@ export function scheduleTurnsForMessage(message: GroupMessage, emit: (e: { type:
       authorKind: message.author_kind === 'user' ? 'user' : 'agent',
       authorId: message.author_id,
       text: message.text,
-      depth: message.depth
+      depth: message.depth,
+      summary: message.summary === 1
     },
     members,
     pendingNonces: pendingTurnNonces(group.id),
@@ -509,6 +605,7 @@ export function scheduleTurnsForMessage(message: GroupMessage, emit: (e: { type:
 export function groupWithMembers(group: Group): {
   id: number; name: string; description: string; createdBy: string
   coordinatorId: string | null; members: Array<{ agentId: string; name: string; coordinator: boolean }>; createdAt: number
+  lastMessageAt: number | null
 } {
   const names = new Map(listAgents().map((a) => [a.id, a.name]))
   return {
@@ -517,7 +614,8 @@ export function groupWithMembers(group: Group): {
     members: groupMemberIds(group.id).map((id) => ({
       agentId: id, name: names.get(id) ?? id, coordinator: id === group.coordinator_id
     })),
-    createdAt: group.created_at
+    createdAt: group.created_at,
+    lastMessageAt: lastGroupMessageAt(group.id)
   }
 }
 

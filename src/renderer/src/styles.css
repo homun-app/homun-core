@@ -45,6 +45,8 @@
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
+  /* fase 16b (S2/S6): l'ambra dei "ti aspetta" e delle card di rischio */
+  --color-waiting: var(--waiting);
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-ring-offset-background: var(--background);
@@ -106,6 +108,8 @@
   --sidebar-accent-foreground: oklch(0.208 0.042 265.755);
   --sidebar-border: oklch(0.929 0.013 255.508);
   --sidebar-ring: oklch(0.704 0.04 256.788);
+  /* fase 16b (S2/S6): ambra dei "ti aspetta" e delle card di rischio */
+  --waiting: oklch(0.55 0.12 80);
   /* mascotte e ombra (secondo :root di Lovable) */
   --bot-ink: oklch(0.16 0.01 80);
   --bot-screen: oklch(0.2 0.01 80);
@@ -142,6 +146,7 @@
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.551 0.027 264.364);
+  --waiting: oklch(0.78 0.11 80);
   --chart-1: oklch(0.488 0.243 264.376);
   --chart-2: oklch(0.696 0.17 162.48);
   --chart-3: oklch(0.769 0.188 70.08);

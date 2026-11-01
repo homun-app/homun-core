@@ -1,15 +1,26 @@
+// Chat (fase 16b, S3): niente testata. Al centro in alto un'etichetta sospesa
+// (mascotte 24 px + nome); in alto a destra il bottone tondo del pannello del
+// bot. I chip di oggi escono dalla testata: Memoria e Skill nel Profilo del
+// pannello, Ragionamento nel campo di scrittura, Chiedi al volo con ⌘K,
+// Computer nella scheda del pannello. Le voci tool-call/tool-result NON
+// compaiono più: mentre il bot lavora lo racconta la MASCOTTE con la mezza
+// riga d'attività (activityPhrase) e col popover dei passaggi; dopo il turno
+// restano dietro la «ⓘ» del messaggio (o in Impostazioni › Generali, con la
+// voce di debug che rimette le righe di una volta).
 import { useEffect, useRef, useState } from 'react'
-import { useLingui, Trans } from '@lingui/react/macro'
+import { useLingui, Trans, Plural } from '@lingui/react/macro'
+import { msg } from '@lingui/core/macro'
+import type { MessageDescriptor } from '@lingui/core'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Paperclip, Plug, PanelRight } from 'lucide-react'
+import { Paperclip, PanelRight, ArrowUp, Square, Copy, Quote, Info } from 'lucide-react'
 import { api, useStore } from '../store'
 // fase 17c (C2): il testo di notice/eventi/system dal meta.ui (lingua attiva)
 import { uiTextOf } from '../lib/ui-text'
-import { i18n } from '../lib/i18n'
-import { GROUP_CHAIN_CLOSED_TEXT, GROUP_RATE_LIMIT_TEXT, GROUP_HOURLY_CAP_TEXT } from '../../../main/agent/group-turns'
+import { i18n, formatTime } from '../lib/i18n'
+import { GROUP_CHAIN_CLOSED_TEXT, GROUP_RATE_LIMIT_TEXT, GROUP_HOURLY_CAP_TEXT, parseCoordinatorNowText } from '../../../main/agent/group-turns'
 import { agentMessageDisplay } from '../../../shared/agent-message'
-import type { TranscriptEntry, SendMessageMeta, SendMessagePayload } from '../../../shared/types'
+import type { TranscriptEntry, SendMessageMeta, SendMessagePayload, ThinkingSetting } from '../../../shared/types'
 import { ApprovalCard } from './ApprovalCard'
 import { WidgetCard } from './WidgetCard'
 import { DraftCard } from './DraftCard'
@@ -19,15 +30,125 @@ import { RuleProposalCard } from './RuleProposalCard'
 import { TaskCard } from './TaskCard'
 import { SubagentCard } from './SubagentCard'
 import { DocumentCard, ChartCard, FillCard, SecureInputCard, ContactCard } from './LibraryCards'
-// fase 19a (V4/V5): la card della presa di controllo chiesta dal bot.
-// fase 19b (T1): il pannello «Computer» (schermo, terminale, file, attività)
-import { ComputerPanel } from './ComputerPanel'
+// fase 19a (V4/V5): la card della presa di controllo chiesta dal bot
 import { TakeoverCard } from './TakeoverCard'
-import { LibraryPanel } from './LibraryPanel'
 import { MemoryPanel } from './MemoryPanel'
 import { SkillsPanel } from './SkillsPanel'
 import { Bot } from '../bot/Bot'
 import { useBotInfo } from '../bot/use-bot'
+// fase 16b (S3.3): la mezza riga d'attività e i passaggi del turno
+import { activityPhrase, stepsOfTurn, stepsDurationSeconds, type StepGroup } from '../lib/activity'
+import { THINKING_LABELS } from './ui/ModelPicker'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu'
+
+/** Il popover dei passaggi: «N passaggi · Xs» e l'elenco ✓/○ (S3.3). */
+export function StepsPopover({ group, live }: { group: StepGroup; live: boolean }) {
+  const { i18n } = useLingui()
+  const secs = stepsDurationSeconds(group, Date.now())
+  return (
+    <div className="z-10 mt-1 w-72 rounded-[14px] bg-card p-3 text-[13px] shadow-soft">
+      <p className="mb-1.5 text-xs text-muted-foreground">
+        <Plural value={group.steps.length} one="# passo" other="# passaggi" /> · {secs ?? 0} s
+      </p>
+      {group.steps.length === 0 && <p className="text-muted-foreground">{i18n.t(msg`ancora nessun passo`)}</p>}
+      <div className="space-y-1">
+        {group.steps.map((st, i) => (
+          <p key={i} className={`flex gap-1.5 ${st.done ? 'text-foreground/80' : 'text-muted-foreground'}`}>
+            <span className="shrink-0">{st.done ? '✓' : '○'}</span>
+            <span className="min-w-0 truncate">{i18n.t(activityPhrase({ tool: st.tool, target: st.target }, 'past'))}</span>
+          </p>
+        ))}
+      </div>
+      {!live && <p className="mt-1.5 text-[11px] text-muted-foreground">{i18n.t(msg`i passaggi del turno`)}</p>}
+    </div>
+  )
+}
+
+/** La mascotte che racconta il lavoro: mezza riga + popover dei passaggi. */
+function ActivityRow({ agentId }: { agentId: string }) {
+  const { i18n } = useLingui()
+  const info = useBotInfo(agentId)
+  const activity = useStore((s) => s.activity[agentId])
+  const entries = useStore((s) => s.entries)
+  const [open, setOpen] = useState(false)
+  if (!info) return null
+  const group = stepsOfTurn(entries, 'open')
+  const phrase: MessageDescriptor = info.state === 'thinking' && !activity
+    ? msg`pensa…`
+    : activityPhrase(activity)
+  return (
+    <div className="flex flex-col items-start">
+      <div className="flex items-center gap-3">
+        <button
+          className="flex flex-col items-center"
+          aria-expanded={open}
+          aria-label={i18n.t(msg`Cosa sta facendo ${info.agent.name}`)}
+          onClick={() => setOpen((v) => !v)}
+          onMouseEnter={() => setOpen(true)}
+          onMouseLeave={() => setOpen(false)}
+        >
+          <Bot
+            family={info.avatar.family}
+            color={info.avatar.color}
+            state={info.state === 'thinking' ? 'thinking' : info.state === 'waiting' ? 'waiting' : 'speaking'}
+            size={34}
+            track={false}
+          />
+          {/* l'ombra morbida ovale sotto la mascotte (mai un riquadro) */}
+          <span aria-hidden="true" className="mt-1 h-1.5 w-7 rounded-full bg-foreground/10" />
+        </button>
+        <span aria-live="polite" className="text-sm text-muted-foreground">{i18n.t(phrase)}</span>
+      </div>
+      {open && <StepsPopover group={group} live />}
+    </div>
+  )
+}
+
+/** Le azioni al passaggio su un messaggio del bot: cita, copia, ⓘ passaggi. */
+function MessageActions({ entry }: { entry: TranscriptEntry }) {
+  const { t } = useLingui()
+  const setQuote = useStore((s) => s.setQuote)
+  const [steps, setSteps] = useState(false)
+  const quote = entry.content.slice(0, 160)
+  return (
+    <div className="relative flex flex-col items-center self-end opacity-0 transition group-hover:opacity-100">
+      <div className="flex items-center gap-0.5 text-muted-foreground">
+        <button
+          className="grid size-7 place-items-center rounded-full transition hover:bg-muted hover:text-foreground"
+          title={t`Rispondi citando`}
+          aria-label={t`Rispondi citando`}
+          onClick={() => setQuote(quote)}
+        >
+          <Quote className="size-3.5" />
+        </button>
+        <button
+          className="grid size-7 place-items-center rounded-full transition hover:bg-muted hover:text-foreground"
+          title={t`Copia`}
+          aria-label={t`Copia`}
+          onClick={() => void navigator.clipboard?.writeText(entry.content).catch(() => undefined)}
+        >
+          <Copy className="size-3.5" />
+        </button>
+        <button
+          className="grid size-7 place-items-center rounded-full transition hover:bg-muted hover:text-foreground"
+          title={t`Passaggi del turno`}
+          aria-label={t`Passaggi del turno`}
+          aria-expanded={steps}
+          onClick={() => setSteps((v) => !v)}
+        >
+          <Info className="size-3.5" />
+        </button>
+      </div>
+      {steps && <StepsPopoverBox entry={entry} />}
+    </div>
+  )
+}
+
+/** Il popover dei passaggi agganciato a un messaggio del turno finito. */
+function StepsPopoverBox({ entry }: { entry: TranscriptEntry }) {
+  const entries = useStore((s) => s.entries)
+  return <StepsPopover group={stepsOfTurn(entries, { entryId: entry.id })} live={false} />
+}
 
 export function Chat() {
   const { t, i18n } = useLingui()
@@ -37,29 +158,17 @@ export function Chat() {
   const send = useStore((s) => s.send)
   const interrupt = useStore((s) => s.interrupt)
   const setTyping = useStore((s) => s.setTyping)
-  const [text, setText] = useState('')
-  const [images, setImages] = useState<string[]>([])
-  const [quickOpen, setQuickOpen] = useState(false)
-  const [quickQ, setQuickQ] = useState('')
-  const [quickA, setQuickA] = useState('')
-  const [quickBusy, setQuickBusy] = useState(false)
-  // fase 3: il ragionamento del modello è nascosto di default (§3bis L2)
-  const [showReasoning, setShowReasoning] = useState(false)
-  // fase 16 (U5): pannelli Memoria e Skill (ora nello store: li apre anche il pannello destro)
+  const debugSteps = useStore((s) => s.debugSteps)
+  const quote = useStore((s) => s.quote)
+  const setQuote = useStore((s) => s.setQuote)
   const memoryOpen = useStore((s) => s.memoryOpen)
   const skillsOpen = useStore((s) => s.skillsOpen)
   const setMemoryOpen = useStore((s) => s.setMemoryOpen)
   const setSkillsOpen = useStore((s) => s.setSkillsOpen)
   const rightPanel = useStore((s) => s.rightPanel)
   const setRightPanel = useStore((s) => s.setRightPanel)
-  // fase 19b (T1): il pannello «Computer» del bot (sempre visibile: le schede
-  // File e Attività esistono in ogni modalità; Schermo e Terminale compaiono
-  // solo dove esistono davvero)
-  const computerPanel = useStore((s) => s.computerPanel)
-  const setComputerPanel = useStore((s) => s.setComputerPanel)
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
   const setSettingsTab = useStore((s) => s.setSettingsTab)
-  // fase 8 (§3bis L7): task aperto nella vista del sotto-transcript
   const openTaskId = useStore((s) => s.openTaskId)
   const setOpenTask = useStore((s) => s.openTask)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -67,10 +176,16 @@ export function Chat() {
   const agent = agents.find((a) => a.id === activeId)
   const info = useBotInfo(activeId)
   const busy = agent?.status === 'thinking' || agent?.status === 'running' || agent?.status === 'paused-for-approval'
-  // fase 18b (H4.3 → K3): il modello del bot ha visione conosciuta FALSA →
-  // l'attacco immagini mostra l'avviso (l'allegato NON si blocca; con vision
-  // sconosciuta, niente avviso). Si chiede UN modello con models:capabilities
-  // (nessun elenco completo: niente HTTP vivo né /api/show di massa)
+  const [text, setText] = useState('')
+  const [images, setImages] = useState<string[]>([])
+  const [quickOpen, setQuickOpen] = useState(false)
+  const [quickQ, setQuickQ] = useState('')
+  const [quickA, setQuickA] = useState('')
+  const [quickBusy, setQuickBusy] = useState(false)
+  // fase 3 (§3bis L2): il ragionamento è nascosto di default; il toggle vive
+  // nel menu «Ragiona» del composer (16b, S3.1/S3.4)
+  const [showReasoning, setShowReasoning] = useState(false)
+  // fase 18b (H4.3 → K3): l'avviso per i modelli senza visione
   const [noVision, setNoVision] = useState(false)
   const visionProviderId = agent?.providerId ?? null
   const visionModel = agent?.model ?? null
@@ -81,8 +196,28 @@ export function Chat() {
       .then((caps) => setNoVision(caps.vision === false))
       .catch(() => setNoVision(false))
   }, [visionProviderId, visionModel])
-  // il colore del bot per le bolle utente e i bottoni (token, mai un colore CSS)
-  const color = info ? `var(--bot-${info.avatar.color})` : 'var(--foreground)'
+  // i livelli di ragionamento del modello del bot (S3.4)
+  const [levels, setLevels] = useState<ThinkingSetting[]>([])
+  useEffect(() => {
+    setLevels([])
+    if (!agent?.providerId || !agent.model) return
+    void api.listModels(agent.providerId)
+      .then((ms) => setLevels(ms.find((m) => m.id === agent.model)?.thinkingLevels ?? []))
+      .catch(() => setLevels([]))
+  }, [agent?.providerId, agent?.model])
+
+  // Chiedi al volo con ⌘K (S3.1): la finestra è quella di oggi
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.metaKey && (e.key === 'k' || e.code === 'KeyK')) {
+        e.preventDefault()
+        setQuickOpen((v) => !v)
+        setQuickA('')
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   // draft recovery: il testo non inviato sopravvive al cambio agente/riavvio
   const draftKey = activeId ? `sandbot:draft:${activeId}` : null
@@ -98,6 +233,15 @@ export function Chat() {
       else localStorage.removeItem(draftKey)
     }
   }, [draftKey, text])
+
+  // «rispondi citando»: la citazione finisce nel campo (S3.2)
+  useEffect(() => {
+    if (quote && activeId) {
+      setText((cur) => `${cur ? cur + '\n' : ''}> ${quote.replace(/\n/g, '\n> ')}\n`)
+      setQuote(null)
+      setTyping(activeId)
+    }
+  }, [quote, activeId, setQuote, setTyping])
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
@@ -117,82 +261,35 @@ export function Chat() {
 
   return (
     <main className="relative flex min-w-0 flex-1 flex-col">
-      <header className="flex items-center justify-between gap-3 border-b border-border px-5 pt-9 pb-3">
-        {/* mascotte 40 px con track + nome + testo di stato (U3) */}
-        <div className="flex min-w-0 items-center gap-3">
-          <Bot family={info.avatar.family} color={info.avatar.color} state={info.state} size={40} dimmed={info.dimmed} label={agent.name} />
-          <div className="min-w-0">
-            <h1 className="truncate font-display text-lg leading-tight">{agent.name}</h1>
-            <p className="truncate text-xs text-muted-foreground">{i18n.t(info.statusText)}</p>
-          </div>
+      {/* l'etichetta sospesa al posto della testata (S3.1) */}
+      <div className="pointer-events-none absolute left-1/2 top-3 z-10 -translate-x-1/2">
+        <div className="flex items-center gap-2 rounded-full bg-card/95 py-1.5 pl-1.5 pr-4 shadow-soft">
+          <Bot family={info.avatar.family} color={info.avatar.color} state={info.state} size={24} track={false} dimmed={info.dimmed} />
+          <span className="text-[15px] font-medium">{agent.name}</span>
         </div>
-        <div className="flex items-center gap-3">
-          <span className="hidden text-xs text-muted-foreground xl:inline">
-            {agent.providerId ? `${agent.providerId} · ${agent.model ?? ''}` : t`configura modello → Impostazioni`}
-          </span>
-          <button
-            className={`rounded-lg px-2 py-1 text-xs transition ${memoryOpen ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
-            title={t`Memoria del bot (fatti e regole ricordati)`}
-            onClick={() => { setMemoryOpen(!memoryOpen); setSkillsOpen(false) }}
-          >
-            <Trans>🗂 Memoria</Trans>
-          </button>
-          <button
-            className={`rounded-lg px-2 py-1 text-xs transition ${skillsOpen ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
-            title={t`Skill del bot (procedure riutilizzabili)`}
-            onClick={() => { setSkillsOpen(!skillsOpen); setMemoryOpen(false) }}
-          >
-            <Trans>🛠 Skill</Trans>
-          </button>
-          <button
-            className={`rounded-lg px-2 py-1 text-xs transition ${showReasoning ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
-            title={t`Mostra/nascondi il ragionamento del modello e gli eventi di turno`}
-            onClick={() => setShowReasoning(!showReasoning)}
-          >
-            <Trans>🧠 Ragionamento</Trans>
-          </button>
-          <button
-            className={`rounded-lg px-2 py-1 text-xs transition ${quickOpen ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
-            title={t`Domanda effimera sul contesto (non entra nel transcript)`}
-            onClick={() => { setQuickOpen(!quickOpen); setQuickA('') }}
-          >
-            <Trans>⚡ Chiedi al volo</Trans>
-          </button>
-          {/* fase 19b (T1): il computer del bot — schermo, terminale, file e
-              attività in un solo pannello (ultima scheda usata; la prima
-              volta: Attività, che funziona in ogni modalità) */}
-          <button
-            className={`rounded-lg px-2 py-1 text-xs transition ${computerPanel.open ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
-            title={t`Computer del bot: schermo, terminale, file e attività`}
-            onClick={() => { setComputerPanel(!computerPanel.open); setQuickOpen(false) }}
-          >
-            <Trans>🖥 Computer</Trans>
-          </button>
-          <button
-            className={`rounded-lg p-1.5 text-muted-foreground transition hover:bg-muted hover:text-foreground ${rightPanel ? '' : 'opacity-50'}`}
-            title={rightPanel ? t`Nascondi il pannello destro` : t`Mostra il pannello destro`}
-            onClick={() => setRightPanel(!rightPanel)}
-          >
-            <PanelRight className="size-4" />
-          </button>
-        </div>
-      </header>
+      </div>
+      {/* in alto a destra: il bottone tondo del pannello del bot */}
+      <div className="absolute right-4 top-3 z-10">
+        <button
+          className={`grid size-9 place-items-center rounded-full transition ${rightPanel ? 'bg-muted text-foreground' : 'bg-muted/60 text-muted-foreground hover:text-foreground'}`}
+          aria-label={rightPanel ? t`Nascondi il pannello del bot` : t`Mostra il pannello del bot`}
+          title={rightPanel ? t`Nascondi il pannello del bot` : t`Mostra il pannello del bot`}
+          onClick={() => setRightPanel(!rightPanel)}
+        >
+          <PanelRight className="size-4" />
+        </button>
+      </div>
 
       {memoryOpen && activeId && <MemoryPanel agentId={activeId} onClose={() => setMemoryOpen(false)} />}
       {skillsOpen && activeId && <SkillsPanel agentId={activeId} onClose={() => setSkillsOpen(false)} />}
 
-      {/* fase 19b (T1): il pannello «Computer» del bot (chiuderlo chiude anche
-          le sessioni: il terminale, lo schermo) */}
-      {computerPanel.open && activeId && (
-        <ComputerPanel key={activeId} agentId={activeId} onClose={() => setComputerPanel(false)} />
-      )}
-
+      {/* Chiedi al volo (⌘K): la finestra di oggi, sospesa sotto l'etichetta */}
       {quickOpen && (
-        <div className="mx-5 mt-3 rounded-xl border border-border bg-card px-4 py-3 shadow-soft">
+        <div className="absolute left-1/2 top-16 z-10 w-[36rem] max-w-[80%] -translate-x-1/2 rounded-[18px] bg-card p-4 shadow-soft">
           <div className="flex gap-2">
             <input
               autoFocus
-              className="flex-1 rounded-lg bg-muted px-3 py-1.5 text-sm outline-none placeholder:text-muted-foreground"
+              className="flex-1 rounded-full bg-muted px-4 py-2 text-sm outline-none placeholder:text-muted-foreground"
               placeholder={t`Chiedi qualcosa a ${agent.name} senza inquinare la conversazione…`}
               value={quickQ}
               onChange={(e) => setQuickQ(e.target.value)}
@@ -205,13 +302,20 @@ export function Chat() {
                 }
               }}
             />
+            <button
+              className="grid size-9 shrink-0 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
+              aria-label={t`Chiudi`}
+              onClick={() => { setQuickOpen(false); setQuickA('') }}
+            >
+              ✕
+            </button>
           </div>
           {quickBusy && <p className="mt-2 text-xs text-muted-foreground"><Trans>pensando…</Trans></p>}
           {quickA && <p className="mt-2 whitespace-pre-wrap text-sm">{quickA}</p>}
         </div>
       )}
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto scroll-thin px-5 py-6">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto scroll-thin px-6 pb-4 pt-16">
         {entries.length === 0 && (
           <p className="mt-16 text-center text-sm text-muted-foreground">
             <Trans>Manda un messaggio a {agent.name} per iniziare.</Trans>
@@ -219,22 +323,15 @@ export function Chat() {
         )}
         <div className="mx-auto max-w-3xl space-y-3">
           {/*
-            fase 8 (§3bis L7): la chat principale mostra SOLO le entry senza
-            meta.taskId — le entry dei task vivono nella vista del sotto-transcript.
-            fase 10 (§3): anche le entry dei turni di GRUPPO (meta.groupId) stanno
-            fuori dalla chat diretta — si vedono nella vista gruppo; restano
-            visibili i messaggi all'utente e le card, che groupId non lo portano
+            fase 8/10: solo le entry senza meta.taskId e senza meta.groupId.
+            fase 16b (S3.3): le tool-call/tool-result NON compaiono (le racconta
+            la mascotte); la voce di debug le rimette
           */}
           {entries.filter((e) => !e.meta?.taskId && !e.meta?.groupId).map((e) => (
-            <EntryRow key={e.id} entry={e} showReasoning={showReasoning} />
+            <EntryRow key={e.id} entry={e} showReasoning={showReasoning} debugSteps={debugSteps} />
           ))}
-          {/* indicatore "sta pensando…" con la mascotte 28 px in stato thinking */}
-          {info.state === 'thinking' && (
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Bot family={info.avatar.family} color={info.avatar.color} state="thinking" size={28} track={false} />
-              <Trans>sta pensando…</Trans>
-            </div>
-          )}
+          {/* fase 16b (S3.3): mentre lavora, la mascotte con la mezza riga */}
+          {busy && <ActivityRow agentId={agent.id} />}
         </div>
       </div>
 
@@ -244,22 +341,17 @@ export function Chat() {
       {/* fase 12 (punto 7): vista del transcript del sottoagente aperto */}
       <SubagentPanel />
 
-      {/* fase 10: vista del gruppo aperto (messaggi, membri, scrittura come utente) */}
-      <GroupPanel />
-
-      {/* fase 14: la Libreria (documenti, grafici, file) */}
-      <LibraryPanel />
-
-      {/* composer come Lovable (rounded-2xl border bg-card shadow-soft) */}
-      <footer className="p-4">
+      {/* il campo di scrittura: una pillola sospesa (S3.4) */}
+      <footer className="px-6 pb-4">
         <form
-          className="mx-auto flex max-w-3xl items-end gap-2 rounded-2xl border border-border bg-card p-2 shadow-soft"
+          className="mx-auto flex max-w-3xl items-end gap-2 rounded-full bg-card py-2 pl-2 pr-2 shadow-soft"
           onSubmit={(e) => { e.preventDefault(); sendNow() }}
         >
           <button
             type="button"
-            className="relative grid size-9 shrink-0 place-items-center rounded-xl text-muted-foreground transition hover:bg-muted hover:text-foreground"
-            title={noVision ? t`Allega immagine (per modelli vision) — questo modello non vede le immagini` : t`Allega immagine (per modelli vision)`}
+            className="relative grid size-9 shrink-0 place-items-center rounded-full bg-muted/60 text-muted-foreground transition hover:text-foreground"
+            aria-label={noVision ? t`Allega immagine — questo modello non vede le immagini` : t`Allega immagine`}
+            title={noVision ? t`Allega immagine — questo modello non vede le immagini` : t`Allega immagine`}
             onClick={async () => {
               const img = await api.pickImage()
               if (img) setImages([...images, img])
@@ -267,15 +359,12 @@ export function Chat() {
           >
             <Paperclip className="size-4" />
             {images.length > 0 && (
-              <span className="absolute -top-1 -right-1 grid size-4 place-items-center rounded-full bg-primary text-[10px] text-primary-foreground">{images.length}</span>
+              <span className="absolute -top-1 -right-1 grid size-4 place-items-center rounded-full bg-foreground text-[10px] text-background">{images.length}</span>
             )}
           </button>
-          {noVision && (
-            <span className="shrink-0 self-center text-[10px] text-muted-foreground"><Trans>Questo modello non vede le immagini</Trans></span>
-          )}
           <textarea
-            className="max-h-40 min-h-[44px] flex-1 resize-none rounded-xl bg-transparent px-3 py-2.5 text-sm outline-none placeholder:text-muted-foreground"
-            placeholder={t`Scrivi a ${agent.name}…`}
+            className="max-h-40 min-h-11 flex-1 resize-none bg-transparent px-3 py-2.5 text-sm outline-none placeholder:text-muted-foreground"
+            placeholder={t`Scrivi a ${agent.name}`}
             rows={Math.min(6, text.split('\n').length)}
             value={text}
             onChange={(e) => {
@@ -289,40 +378,58 @@ export function Chat() {
               }
             }}
           />
-          {/* Connetti app: apre Impostazioni → connettori */}
-          <button
-            type="button"
-            className="grid size-9 shrink-0 place-items-center rounded-xl bg-muted text-muted-foreground transition hover:text-foreground"
-            title={t`Connetti app`}
-            onClick={() => { setSettingsTab('connettori'); setSettingsOpen(true) }}
-          >
-            <Plug className="size-4" />
-          </button>
+          {/* Ragiona: <livello> ▾ — il selettore che stava nel chip (S3.4) */}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              className="h-8 shrink-0 rounded-full px-3 text-[13px] text-muted-foreground transition hover:bg-muted hover:text-foreground"
+              aria-label={t`Livello di ragionamento`}
+            >
+              {i18n.t(msg`Ragiona: ${THINKING_LABELS[agent.thinking ?? 'default'] ? i18n.t(THINKING_LABELS[agent.thinking ?? 'default']!) : (agent.thinking ?? 'default')}`)}
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {(['default', ...levels] as ThinkingSetting[]).map((l) => (
+                <DropdownMenuItem key={l} onClick={() => { void api.updateAgent(agent.id, { thinking: l }).catch(() => undefined) }}>
+                  {i18n.t(THINKING_LABELS[l] ?? msg`${l}`)}
+                </DropdownMenuItem>
+              ))}
+              <DropdownMenuItem onClick={() => setShowReasoning(!showReasoning)}>
+                {showReasoning ? '✓ ' : ''}{i18n.t(msg`Mostra il ragionamento in chat`)}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           {busy ? (
             <button
               type="button"
-              className="h-11 shrink-0 rounded-xl bg-muted px-4 text-sm text-foreground transition hover:bg-accent"
+              className="grid size-10 shrink-0 place-items-center rounded-full bg-foreground text-background transition hover:opacity-90"
+              aria-label={t`Ferma`}
+              title={t`Ferma`}
               onClick={interrupt}
             >
-              <Trans>Ferma</Trans>
+              <Square className="size-4" />
             </button>
           ) : (
             <button
               type="submit"
-              className="h-11 shrink-0 rounded-xl px-4 text-sm font-medium text-background transition hover:opacity-90 disabled:opacity-40"
-              style={{ background: color }}
+              className="grid size-10 shrink-0 place-items-center rounded-full bg-foreground text-background transition hover:opacity-90 disabled:opacity-40"
+              aria-label={t`Invia`}
+              title={t`Invia`}
               disabled={!text.trim()}
             >
-              <Trans>Invia</Trans>
+              <ArrowUp className="size-4" />
             </button>
           )}
         </form>
+        {noVision && (
+          <p className="mx-auto mt-1.5 max-w-3xl text-center text-[11px] text-muted-foreground">
+            <Trans>Questo modello non vede le immagini</Trans>
+          </p>
+        )}
       </footer>
     </main>
   )
 }
 
-function EntryRow({ entry, showReasoning }: { entry: TranscriptEntry; showReasoning: boolean }) {
+function EntryRow({ entry, showReasoning, debugSteps }: { entry: TranscriptEntry; showReasoning: boolean; debugSteps: boolean }) {
   const { t } = useLingui()
   const reasoning = useStore((s) => s.reasoning[entry.id])
   // il colore del bot della chat in cui l'entry vive (bolle utente)
@@ -331,39 +438,26 @@ function EntryRow({ entry, showReasoning }: { entry: TranscriptEntry; showReason
   const color = info ? `var(--bot-${info.avatar.color})` : 'var(--foreground)'
   switch (entry.kind) {
     case 'message':
-      // fase 7: messaggio di un ALTRO bot (initiator AGENT) — entry distinta
-      // "Da <nome>", mai mostrato come scritto dall'utente
+      // fase 7: messaggio di un ALTRO bot (initiator AGENT) — riga «Da <nome>»
       if (entry.role === 'user' && entry.meta?.initiator === 'AGENT') {
         return (
-          <div className="max-w-[75%] rounded-2xl rounded-bl-md bg-muted px-4 py-2.5 text-sm">
-            <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+          <div className="max-w-[75%] rounded-[22px] bg-muted px-4 py-2.5 text-sm">
+            <p className="mb-1 text-xs text-muted-foreground">
               <Trans>Da {String(entry.meta?.fromAgentName ?? 'altro bot')}</Trans>
             </p>
             <p className="whitespace-pre-wrap">{agentMessageDisplay(entry.content)}</p>
           </div>
         )
       }
-      // fase 7: il messaggio di kickstart iniettato dal sistema (TEMPLATE_IMPORT)
-      // non è scritto dall'utente: riga espandibile "Configurazione da template"
-      if (entry.role === 'user' && entry.meta?.initiator === 'TEMPLATE_IMPORT') {
+      // fase 7/8: kickstart dei template e report dei task — righe espandibili
+      if (entry.role === 'user' && (entry.meta?.initiator === 'TEMPLATE_IMPORT' || entry.meta?.initiator === 'TASK_DONE')) {
+        const template = entry.meta?.initiator === 'TEMPLATE_IMPORT'
         return (
-          <details className="rounded-lg border border-border bg-card/60 px-3 py-1.5">
+          <details className="rounded-[14px] bg-muted/60 px-3 py-1.5">
             <summary className="cursor-pointer select-none text-xs text-muted-foreground">
-              <Trans>Configurazione da template: {String(entry.meta?.templateName ?? '')}</Trans>
-            </summary>
-            <pre className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap text-[11px] leading-relaxed text-muted-foreground">
-              {entry.content}
-            </pre>
-          </details>
-        )
-      }
-      // fase 8 (§3bis L7): il summary di chiusura di un task (TASK_DONE) non è
-      // scritto dall'utente: riga espandibile col report
-      if (entry.role === 'user' && entry.meta?.initiator === 'TASK_DONE') {
-        return (
-          <details className="rounded-lg border border-border bg-card/60 px-3 py-1.5">
-            <summary className="cursor-pointer select-none text-xs text-muted-foreground">
-              <Trans>Report del task: {String(entry.meta?.taskTitle ?? '')} ({String(entry.meta?.taskRef ?? '')})</Trans>
+              {template
+                ? <Trans>Configurazione da template: {String(entry.meta?.templateName ?? '')}</Trans>
+                : <Trans>Report del task: {String(entry.meta?.taskTitle ?? '')} ({String(entry.meta?.taskRef ?? '')})</Trans>}
             </summary>
             <pre className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap text-[11px] leading-relaxed text-muted-foreground">
               {entry.content}
@@ -372,12 +466,10 @@ function EntryRow({ entry, showReasoning }: { entry: TranscriptEntry; showReason
         )
       }
       return entry.role === 'user' ? (
-        // bolla utente a destra col colore del bot, testo text-background (come Lovable).
-        // fase 17c (C2): i messaggi di sistema ([sistema], aperture di routine e
-        // task, shell completato) mostrano il loro meta.ui nella lingua attiva
+        // bolla utente a destra col colore del bot (S3.2)
         <div className="flex justify-end">
           <div
-            className="max-w-[75%] rounded-2xl rounded-br-md px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap text-background"
+            className="max-w-[75%] rounded-[22px] px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap text-background"
             style={{ background: color }}
           >
             {uiTextOf(entry)}
@@ -385,18 +477,17 @@ function EntryRow({ entry, showReasoning }: { entry: TranscriptEntry; showReason
         </div>
       ) : (
         // messaggi assistant pre-fase 3 (transcript storici)
-        <div className="max-w-[75%] rounded-2xl rounded-bl-md bg-muted px-4 py-2.5 text-sm leading-relaxed">
+        <div className="max-w-[75%] rounded-[22px] bg-muted px-4 py-2.5 text-sm leading-relaxed">
           <div className="max-w-none">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{entry.content || '…'}</ReactMarkdown>
           </div>
         </div>
       )
     case 'thinking': {
-      // fase 3 (§3bis L2): testo libero del modello = ragionamento interno,
-      // mai mostrato in chat a meno che l'utente non attivi il toggle
+      // fase 3 (§3bis L2): il ragionamento resta interno, col toggle
       if (!showReasoning) return null
       return (
-        <details className="rounded-lg border border-border bg-card/60 px-3 py-1.5" open={!entry.content}>
+        <details className="rounded-[14px] bg-muted/60 px-3 py-1.5" open={!entry.content}>
           <summary className="cursor-pointer select-none text-xs text-muted-foreground"><Trans>Ragionamento</Trans></summary>
           <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap text-[11px] leading-relaxed text-muted-foreground">
             {entry.content || reasoning || '…'}
@@ -405,11 +496,10 @@ function EntryRow({ entry, showReasoning }: { entry: TranscriptEntry; showReason
       )
     }
     case 'summary': {
-      // fase 4: riepilogo dei turni più vecchi (compaction) — dettaglio
-      // interno, visibile solo col toggle "mostra ragionamento"
+      // fase 4: riepilogo dei turni più vecchi (compaction)
       if (!showReasoning) return null
       return (
-        <details className="rounded-lg border border-border bg-card/60 px-3 py-1.5">
+        <details className="rounded-[14px] bg-muted/60 px-3 py-1.5">
           <summary className="cursor-pointer select-none text-xs text-muted-foreground"><Trans>Riepilogo turni precedenti</Trans></summary>
           <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap text-[11px] leading-relaxed text-muted-foreground">
             {entry.content || '…'}
@@ -421,15 +511,13 @@ function EntryRow({ entry, showReasoning }: { entry: TranscriptEntry; showReason
       // fase 3: l'UNICO contenuto visibile del bot — text | widget | draft
       const meta = (entry.meta ?? {}) as Partial<SendMessageMeta>
       const message = meta.message as SendMessagePayload | undefined
-      // fase 6: trattenuto nell'outbox (turno automatico non urgent, in
-      // attesa della finestra di consegna) — invisibile finché non consegnato
+      // fase 6: trattenuto nell'outbox — invisibile finché non consegnato
       if (meta.held) return null
-      // fase 7 (correzione A2): delega a un altro bot — entry "A <nome>"
-      // specchiata al "Da <nome>" dei messaggi ricevuti
+      // fase 7 (correzione A2): delega a un altro bot — riga «A <nome>»
       if (meta.agentSend && meta.toAgentName) {
         return (
-          <div className="max-w-[75%] rounded-2xl rounded-bl-md bg-muted px-4 py-2.5 text-sm">
-            <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+          <div className="max-w-[75%] rounded-[22px] bg-muted px-4 py-2.5 text-sm">
+            <p className="mb-1 text-xs text-muted-foreground">
               <Trans>A {meta.toAgentName}</Trans>
             </p>
             <p className="whitespace-pre-wrap">{entry.content}</p>
@@ -437,25 +525,20 @@ function EntryRow({ entry, showReasoning }: { entry: TranscriptEntry; showReason
         )
       }
       // fase 7: widget di sistema che porta alle impostazioni del provider
-      // (onboarding fermo): il bottone apre le Impostazioni, niente turno
       if (message?.type === 'widget' && (entry.meta as Record<string, unknown>)?.onboardingProvider) {
         return <ProviderWidgetCard entry={entry} />
       }
       if (message?.type === 'widget') return <WidgetCard entry={entry} />
       if (message?.type === 'draft') return <DraftCard entry={entry} />
       if (message?.type === 'connector') return <ConnectorCard entry={entry} />
-      // fase 13: proposte di server del registro e di plugin (installano SOLO dal click)
+      // fase 13: proposte di server del registro e di plugin
       if (message?.type === 'mcp-server') return <McpServerCard entry={entry} />
       if (message?.type === 'plugin') return <PluginCard entry={entry} />
-      // fase 8 (§3bis L5): regola di auto-review proposta dal bot — si salva
-      // solo al click dell'utente
+      // fase 8: regola di auto-review proposta dal bot
       if (message?.type === 'rule') return <RuleProposalCard entry={entry} />
-      // fase 8 (§3bis L7): card del task (unica riga del task in chat principale)
+      // fase 8/12/14: task, sottoagenti, documenti, fill, modulo sicuro, contatti
       if (message?.type === 'task') return <TaskCard entry={entry} />
-      // fase 12 (punto 7): card del sottoagente (unica riga del figlio in chat)
       if (message?.type === 'subagent') return <SubagentCard entry={entry} />
-      // fase 14: documenti e grafici in libreria, fill dei login, modulo
-      // sicuro, contatto da salvare
       if (message?.type === 'document') return <DocumentCard entry={entry} />
       if (message?.type === 'chart') return <ChartCard entry={entry} />
       if (message?.type === 'fill') return <FillCard entry={entry} />
@@ -464,20 +547,26 @@ function EntryRow({ entry, showReasoning }: { entry: TranscriptEntry; showReason
       // fase 19a (V5): il bot chiede all'utente di prendere il controllo
       if (message?.type === 'takeover-request') return <TakeoverCard entry={entry} />
       return (
-        // bolla del bot a sinistra su bg-muted (come Lovable)
-        <div className="max-w-[75%] rounded-2xl rounded-bl-md bg-muted px-4 py-2.5 text-sm leading-relaxed">
-          <div className="max-w-none">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{entry.content}</ReactMarkdown>
+        // la bolla del bot: tenue, angoli 22 px, azioni al passaggio (S3.2)
+        <div className="group flex items-end gap-1.5">
+          <div className="max-w-[75%] rounded-[22px] bg-muted px-4 py-2.5 text-sm leading-relaxed">
+            <div className="max-w-none">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{entry.content}</ReactMarkdown>
+            </div>
+            {meta.fallback && <p className="mt-1 text-[10px] text-muted-foreground"><Trans>risposta di ripiego</Trans></p>}
+            {message?.type === 'text' && message.urgent && <p className="mt-1 text-[10px] text-destructive/80"><Trans>urgente</Trans></p>}
           </div>
-          {meta.fallback && <p className="mt-1 text-[10px] text-muted-foreground"><Trans>risposta di ripiego</Trans></p>}
-          {message?.type === 'text' && message.urgent && <p className="mt-1 text-[10px] text-destructive/80"><Trans>urgente</Trans></p>}
+          <MessageActions entry={entry} />
         </div>
       )
     }
     case 'tool-call': {
+      // fase 16b (S3.3): le righe degli strumenti NON compaiono più — la voce
+      // di debug (Impostazioni › Generali) le rimette com'erano
+      if (!debugSteps) return null
       const args = entry.meta?.arguments as string | undefined
       return (
-        <details className="group rounded-lg border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
+        <details className="rounded-[14px] bg-muted/60 px-3 py-2 text-xs text-muted-foreground">
           <summary className="cursor-pointer select-none">
             <span className="font-mono text-foreground">⚙ {entry.content}</span>
           </summary>
@@ -488,8 +577,9 @@ function EntryRow({ entry, showReasoning }: { entry: TranscriptEntry; showReason
       )
     }
     case 'tool-result':
+      if (!debugSteps) return null
       return (
-        <details className="rounded-lg border border-border bg-card/60 px-3 py-2 text-xs">
+        <details className="rounded-[14px] bg-muted/60 px-3 py-2 text-xs">
           <summary className="cursor-pointer select-none text-muted-foreground">
             {t`risultato`} {entry.meta?.error ? t`⚠ errore` : ''}
           </summary>
@@ -501,22 +591,69 @@ function EntryRow({ entry, showReasoning }: { entry: TranscriptEntry; showReason
     case 'approval':
       return <ApprovalCard entry={entry} />
     case 'notice':
-      // fase 17c (C2): la notice si ritraduce dal meta.ui alla lingua attiva
-      return <p className="text-center text-xs text-destructive/90">{uiTextOf(entry)}</p>
-    case 'event':
-      // gli esiti di turno (meta.turnEnd) sono dettaglio interno: visibili
-      // solo col toggle "mostra ragionamento". fase 17c: meta.ui per la lingua
+      // fase 16b (S6): gli errori del modello con una via d'uscita sono un
+      // banner col bottone che li risolve; le notice informative restano righe
+      return <NoticeRow entry={entry} />
+    case 'event': {
+      // la riga discreta del riepilogo pubblicato nella squadra (S1.2)
+      if (entry.meta?.summaryMessageId !== undefined && typeof entry.meta?.groupId === 'number') {
+        return <SummaryPostedRow entry={entry} />
+      }
+      // gli esiti di turno (meta.turnEnd) sono dettaglio interno
       if (entry.meta?.turnEnd && !showReasoning) return null
       return <p className="text-center text-xs text-muted-foreground">{uiTextOf(entry)}</p>
+    }
     default:
       return null
   }
 }
 
+/** Il banner degli errori del modello, con l'azione che li risolve (S6). */
+function NoticeRow({ entry }: { entry: TranscriptEntry }) {
+  const { t } = useLingui()
+  const setSettingsOpen = useStore((s) => s.setSettingsOpen)
+  const setSettingsTab = useStore((s) => s.setSettingsTab)
+  const uiId = (entry.meta?.ui as { id?: string } | undefined)?.id
+  const withAction = uiId === 'notice.modelError' || uiId === 'notice.modelNotResponding'
+  const fallback = uiId === 'notice.modelFallback' || uiId === 'notice.modelFallbackRoute' || uiId === 'notice.modelRouteCooled'
+  if (!withAction && !fallback) {
+    return <p className="text-center text-xs text-destructive/90">{uiTextOf(entry)}</p>
+  }
+  return (
+    <div className="flex items-center gap-3 rounded-[14px] bg-destructive/10 px-4 py-2.5 text-sm text-foreground">
+      <span className="min-w-0 flex-1">{uiTextOf(entry)}</span>
+      {withAction && (
+        <button
+          className="shrink-0 rounded-full bg-muted px-3 py-1.5 text-xs text-foreground transition hover:bg-accent"
+          onClick={() => { setSettingsTab('provider'); setSettingsOpen(true) }}
+        >
+          <Trans>Scegli un modello</Trans>
+        </button>
+      )}
+      <span className="sr-only">{t`errore del modello`}</span>
+    </div>
+  )
+}
+
+/** «Ho pubblicato il riepilogo nella squadra «X»» — cliccabile verso la squadra. */
+function SummaryPostedRow({ entry }: { entry: TranscriptEntry }) {
+  const openGroup = useStore((s) => s.openGroup)
+  const groupId = entry.meta?.groupId as number
+  return (
+    <p className="text-center text-xs text-muted-foreground">
+      <button
+        className="underline-offset-2 transition hover:text-foreground hover:underline"
+        onClick={() => openGroup(groupId)}
+      >
+        {uiTextOf(entry)} ›
+      </button>
+    </p>
+  )
+}
+
 /**
  * Fase 7 (onboarding): widget di sistema che porta alle impostazioni del
- * provider — il bottone apre le Impostazioni (la ripresa dell'onboarding la
- * fa il daemon quando un provider viene salvato), niente turno del modello.
+ * provider — il bottone apre le Impostazioni, niente turno del modello.
  */
 function ProviderWidgetCard({ entry }: { entry: TranscriptEntry }) {
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
@@ -529,14 +666,14 @@ function ProviderWidgetCard({ entry }: { entry: TranscriptEntry }) {
   const responded = meta.respondedValue !== undefined
 
   return (
-    <div className="max-w-[75%] rounded-2xl rounded-bl-md border border-border bg-card px-4 py-3 shadow-soft">
+    <div className="max-w-[75%] rounded-[18px] bg-muted p-4">
       <p className="text-sm font-medium">{widget.prompt}</p>
       {widget.helpText && <p className="mt-1 text-xs text-muted-foreground">{widget.helpText}</p>}
       {responded ? (
         <p className="mt-3 text-xs text-muted-foreground"><Trans>✓ Appena il provider è a posto preparo i tuoi bot.</Trans></p>
       ) : (
         <button
-          className="mt-3 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition hover:bg-primary/90"
+          className="mt-3 rounded-full bg-foreground px-3 py-1.5 text-xs font-medium text-background transition hover:opacity-90"
           onClick={() => {
             setTab('provider')
             setSettingsOpen(true)
@@ -551,127 +688,15 @@ function ProviderWidgetCard({ entry }: { entry: TranscriptEntry }) {
 }
 
 /**
- * Fase 10: la vista del gruppo — i messaggi con il nome dell'autore, le righe
- * di sistema discrete (chiusura della catena, tetti), l'elenco dei membri e il
- * campo per scrivere come utente (le @menzioni funzionano: le legge il daemon).
- */
-function GroupPanel() {
-  const { t } = useLingui()
-  const groups = useStore((s) => s.groups)
-  const openGroupId = useStore((s) => s.openGroupId)
-  const groupMessages = useStore((s) => s.groupMessages)
-  const openGroup = useStore((s) => s.openGroup)
-  const sendGroupMessage = useStore((s) => s.sendGroupMessage)
-  const [text, setText] = useState('')
-  const scrollRef = useRef<HTMLDivElement>(null)
-  const group = groups.find((g) => g.id === openGroupId)
-
-  useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
-  }, [groupMessages.length])
-
-  if (openGroupId === null) return null
-  if (!group) {
-    return (
-      <div className="absolute inset-0 z-20 flex items-center justify-center bg-background/95">
-        <button className="text-sm text-muted-foreground transition hover:text-foreground" onClick={() => openGroup(null)}>
-          <Trans>Gruppo non più disponibile — chiudi</Trans>
-        </button>
-      </div>
-    )
-  }
-
-  return (
-    <div className="absolute inset-0 z-20 flex flex-col bg-background/95 backdrop-blur-sm">
-      <header className="flex items-center justify-between border-b border-border px-5 pt-8 pb-3">
-        <div className="min-w-0">
-          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground"><Trans>Gruppo</Trans></p>
-          <h2 className="truncate font-display text-lg">{group.name}</h2>
-          <p className="truncate text-xs text-muted-foreground">
-            <Trans>Tu + {group.members.map((m) => m.name + (m.coordinator ? ' (coord.)' : '')).join(', ')}</Trans>
-          </p>
-        </div>
-        <button className="rounded-md px-2 py-1 text-muted-foreground transition hover:text-foreground" onClick={() => openGroup(null)}>
-          ✕
-        </button>
-      </header>
-      <div ref={scrollRef} className="flex-1 overflow-y-auto scroll-thin px-5 py-4">
-        <div className="mx-auto max-w-3xl space-y-2">
-          {groupMessages.length === 0 && (
-            <p className="mt-16 text-center text-sm text-muted-foreground"><Trans>Nessun messaggio nel gruppo.</Trans></p>
-          )}
-          {groupMessages.map((m) =>
-            m.authorKind === 'system' ? (
-              // fase 17c (C2, MU): il testo salvato resta la costante inglese
-              // (il modello la rilegge e il dedup orario la confronta); la
-              // vista la riconosce e la traduce, l'autore «sistema» si mostra tradotto
-              <p key={m.id} className="text-center text-xs text-muted-foreground">
-                <Trans>sistema</Trans> · {groupSystemText(m.text)}
-              </p>
-            ) : m.authorKind === 'user' ? (
-              <div key={m.id} className="flex justify-end">
-                <div className="max-w-[75%] rounded-2xl rounded-br-md bg-foreground px-4 py-2.5 text-sm text-background whitespace-pre-wrap">
-                  {m.text}
-                </div>
-              </div>
-            ) : (
-              <div key={m.id} className="max-w-[75%] rounded-2xl rounded-bl-md bg-muted px-4 py-2.5 text-sm">
-                <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                  {m.authorName}
-                  {group.members.find((mem) => mem.agentId === m.authorId)?.coordinator ? t` · coordinatore` : ''}
-                </p>
-                <p className="whitespace-pre-wrap">{m.text}</p>
-              </div>
-            )
-          )}
-        </div>
-      </div>
-      <footer className="p-4">
-        <div className="mx-auto flex max-w-3xl items-end gap-2 rounded-2xl border border-border bg-card p-2 shadow-soft">
-          <textarea
-            className="max-h-40 min-h-[44px] flex-1 resize-none rounded-xl bg-transparent px-3 py-2.5 text-sm outline-none placeholder:text-muted-foreground"
-            placeholder={t`Scrivi nel gruppo (usa @nome per chiamare un bot, @tutti per tutti)`}
-            rows={Math.min(4, text.split('\n').length)}
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault()
-                if (text.trim()) {
-                  sendGroupMessage(text)
-                  setText('')
-                }
-              }
-            }}
-          />
-          <button
-            className="h-11 rounded-xl bg-foreground px-4 text-sm font-medium text-background transition hover:opacity-90 disabled:opacity-40"
-            disabled={!text.trim()}
-            onClick={() => {
-              if (text.trim()) {
-                sendGroupMessage(text)
-                setText('')
-              }
-            }}
-          >
-            <Trans>Invia</Trans>
-          </button>
-        </div>
-      </footer>
-    </div>
-  )
-}
-
-/**
  * Fase 8 (§3bis L7): vista del sotto-transcript di un task — le entry con
- * meta.taskId, con le stesse card della chat principale (widget e approval si
- * rispondono da qui). Il task non vede la conversazione principale e viceversa.
+ * meta.taskId, con le stesse card della chat principale.
  */
 function TaskPanel({ onClose }: { onClose: () => void }) {
   const entries = useStore((s) => s.entries)
   const tasks = useStore((s) => s.tasks)
   const openTaskId = useStore((s) => s.openTaskId)
   const cancelTask = useStore((s) => s.cancelTask)
+  const debugSteps = useStore((s) => s.debugSteps)
   const [showReasoning, setShowReasoning] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const task = tasks.find((t) => t.id === openTaskId)
@@ -686,23 +711,20 @@ function TaskPanel({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="absolute inset-0 z-20 flex flex-col bg-background/95 backdrop-blur-sm">
-      <header className="flex items-center justify-between border-b border-border px-5 pt-8 pb-3">
+      <header className="flex items-center justify-between px-5 pt-8 pb-3">
         <div>
-          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground"><Trans>Task</Trans></p>
-          <h2 className="font-display text-lg">{task?.title ?? `#${openTaskId}`}</h2>
+          <p className="text-[13px] text-muted-foreground"><Trans>Task</Trans></p>
+          <h2 className="truncate font-display text-lg">{task?.title ?? `#${openTaskId}`}</h2>
         </div>
         <div className="flex items-center gap-3">
           <button
-            className={`rounded-lg px-2 py-1 text-xs transition ${showReasoning ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
+            className={`rounded-full px-3 py-1.5 text-xs transition ${showReasoning ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
             onClick={() => setShowReasoning(!showReasoning)}
           >
-            <Trans>🧠 Ragionamento</Trans>
+            <Trans>Ragionamento</Trans>
           </button>
           {open && (
-            <button
-              className="rounded-lg bg-muted px-3 py-1.5 text-xs text-foreground transition hover:bg-accent"
-              onClick={() => cancelTask(openTaskId)}
-            >
+            <button className="rounded-full bg-muted px-3 py-1.5 text-xs text-foreground transition hover:bg-accent" onClick={() => cancelTask(openTaskId)}>
               <Trans>Interrompi task</Trans>
             </button>
           )}
@@ -717,7 +739,7 @@ function TaskPanel({ onClose }: { onClose: () => void }) {
             <p className="mt-16 text-center text-sm text-muted-foreground"><Trans>Il task non ha ancora attività.</Trans></p>
           )}
           {taskEntries.map((e) => (
-            <EntryRow key={e.id} entry={e} showReasoning={showReasoning} />
+            <EntryRow key={e.id} entry={e} showReasoning={showReasoning} debugSteps={debugSteps} />
           ))}
         </div>
       </div>
@@ -725,11 +747,8 @@ function TaskPanel({ onClose }: { onClose: () => void }) {
   )
 }
 
-
 /**
- * Fase 12 (punto 7): la vista del transcript di un FIGLIO — le sue entry
- * (caricate con l'id del figlio, aggiornate dagli eventi), le card di
- * approvazione funzionano con l'id del figlio e in fondo summary e report.
+ * Fase 12 (punto 7): la vista del transcript di un FIGLIO.
  */
 function SubagentPanel() {
   const { t } = useLingui()
@@ -737,6 +756,7 @@ function SubagentPanel() {
   const openSubagent = useStore((s) => s.openSubagent)
   const subagents = useStore((s) => s.subagents)
   const subEntries = useStore((s) => s.subEntries)
+  const debugSteps = useStore((s) => s.debugSteps)
   const [showReasoning, setShowReasoning] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const sub = subagents.find((x) => x.id === openSubagentId)
@@ -750,17 +770,17 @@ function SubagentPanel() {
 
   return (
     <div className="absolute inset-0 z-20 flex flex-col bg-background/95 backdrop-blur-sm">
-      <header className="flex items-center justify-between border-b border-border px-5 pt-8 pb-3">
+      <header className="flex items-center justify-between px-5 pt-8 pb-3">
         <div className="min-w-0">
-          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground"><Trans>Sottoagente</Trans></p>
+          <p className="text-[13px] text-muted-foreground"><Trans>Sottoagente</Trans></p>
           <h2 className="truncate font-display text-lg">{sub?.title ?? openSubagentId}</h2>
         </div>
         <div className="flex items-center gap-3">
           <button
-            className={`rounded-lg px-2 py-1 text-xs transition ${showReasoning ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
+            className={`rounded-full px-3 py-1.5 text-xs transition ${showReasoning ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
             onClick={() => setShowReasoning(!showReasoning)}
           >
-            <Trans>🧠 Ragionamento</Trans>
+            <Trans>Ragionamento</Trans>
           </button>
           <button className="rounded-md px-2 py-1 text-muted-foreground transition hover:text-foreground" onClick={() => openSubagent(null)}>
             ✕
@@ -773,11 +793,11 @@ function SubagentPanel() {
             <p className="mt-16 text-center text-sm text-muted-foreground"><Trans>Il sottoagente non ha ancora attività.</Trans></p>
           )}
           {subEntries.map((e) => (
-            <EntryRow key={e.id} entry={e} showReasoning={showReasoning} />
+            <EntryRow key={e.id} entry={e} showReasoning={showReasoning} debugSteps={debugSteps} />
           ))}
           {sub && (sub.summary || sub.reportPath) && (
-            <div className="rounded-xl border border-border bg-card px-4 py-3 text-sm">
-              <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            <div className="rounded-[18px] bg-muted p-4 text-sm">
+              <p className="text-xs text-muted-foreground">
                 {sub.status === 'done' ? t`Consegnato` : sub.status === 'failed' ? t`Fallito` : t`Esito`}
               </p>
               {sub.summary && <p className="mt-1 whitespace-pre-wrap">{sub.summary}</p>}
@@ -787,7 +807,7 @@ function SubagentPanel() {
         </div>
       </div>
       {open && (
-        <p className="border-t border-border px-5 py-2 text-center text-[11px] text-muted-foreground">
+        <p className="px-5 py-2 text-center text-[11px] text-muted-foreground">
           {sub?.agentStatus === 'paused-for-approval' ? t`In attesa di conferma: rispondi alle card qui sopra.` : t`Al lavoro: le card di approvazione del figlio compaiono qui.`}
         </p>
       )}
@@ -795,17 +815,22 @@ function SubagentPanel() {
   )
 }
 
-
 /**
- * Fase 17c (C2, MU): la traduzione delle righe di sistema del gruppo. Il
- * testo salvato nel registro è la costante inglese (chiave del dedup orario
- * e testo che i bot rileggono): la vista la riconosce e la mostra nella
- * lingua attiva; righe non riconosciute (dati vecchi) restano come sono.
+ * Fase 17c (C2, MU): la traduzione delle righe di sistema del gruppo. Fase
+ * 16b (S1.1): riconosce anche la riga del cambio di coordinatore. Usata dalla
+ * vista squadra.
  */
 export function groupSystemText(text: string): string {
   // gli id vivono nel catalogo UI condiviso (src/shared/ui-messages.ts)
   if (text === GROUP_CHAIN_CLOSED_TEXT) return i18n._('group.chainClosed')
   if (text === GROUP_RATE_LIMIT_TEXT) return i18n._('group.rateLimit')
   if (text === GROUP_HOURLY_CAP_TEXT) return i18n._('group.hourlyCap')
+  const coord = parseCoordinatorNowText(text)
+  if (coord !== null) return i18n._('group.nowCoordinates', { name: coord })
   return text
+}
+
+/** L'ora HH:MM nella lingua attiva (le righe «dopo la decisione» di S6). */
+export function decisionTime(at: number): string {
+  return formatTime(at)
 }

@@ -3,7 +3,7 @@ import type { ToolDef } from './llm'
 import * as sandbox from '../sandbox'
 import { resolveSecretRefs } from './secrets'
 import { formatTaskDone } from '../../shared/agent-message'
-import { MAX_GROUP_MEMBERS } from './group-turns'
+import { MAX_GROUP_MEMBERS, coordinatorNowText } from './group-turns'
 import { WAKE_SUMMARY_MAX_CHARS } from './subagents'
 import {
   writeMemory, updateMemory, deleteMemory, listMemories, searchMemoriesByQuery,
@@ -1300,8 +1300,23 @@ export async function executeTool(
       const loopMod = await import('./loop')
       loopMod.interrupt(target.id)
       cancelAgentJobs(dbMod.db(), target.id)
-      dbMod.deleteAgent(target.id)
-      return { output: `Bot "${target.name}" deleted with its chats, memories and routines.`, meta: { deletedAgentId: target.id } }
+      const elections = dbMod.deleteAgent(target.id)
+      // fase 16b (S1.1): i gruppi che hanno eletto un nuovo coordinatore
+      // ricevono la riga di sistema nel gruppo
+      if (elections.length) {
+        const groupsMod = await import('../store/groups')
+        for (const el of elections) {
+          const name = dbMod.getAgent(el.coordinatorId)?.name ?? el.coordinatorId
+          groupsMod.addGroupMessage({
+            groupId: el.groupId, authorKind: 'system', authorId: null, authorName: 'sistema',
+            text: coordinatorNowText(name)
+          })
+        }
+      }
+      return {
+        output: `Bot "${target.name}" deleted with its chats, memories and routines.`,
+        meta: { deletedAgentId: target.id, ...(elections.length ? { groupChanged: elections[0]!.groupId } : {}) }
+      }
     }
     case 'create_group': {
       // fase 10 (punto 2): max 6 bot + l'utente; il creatore entra se manca
@@ -1331,11 +1346,13 @@ export async function executeTool(
       if (total.size > MAX_GROUP_MEMBERS) {
         return { output: `Too many members: a group has at most ${MAX_GROUP_MEMBERS} bots (including you) besides the user.`, meta: {} }
       }
+      // fase 16b (S1.1): senza coordinatorId il coordinatore è chi crea il
+      // gruppo (già membro automatico): un gruppo senza coordinatore non esiste
       const group = groupsMod.createGroup(name, description, agentId, memberIds, coordinatorId)
       const nameOf = (id: string): string => agents.find((a) => a.id === id)?.name ?? id
       const members = groupsMod.groupMemberIds(group.id).map(nameOf)
       return {
-        output: `Group "${name}" created (group id ${group.id}). Members: ${members.join(', ')} + the user (always in).${coordinatorId ? ` Coordinator: ${nameOf(coordinatorId)}.` : ''} Now write the kickoff message with post_to_group({groupId: ${group.id}, text}): goal, constraints, who does what with @mentions.`,
+        output: `Group "${name}" created (group id ${group.id}). Members: ${members.join(', ')} + the user (always in). Coordinator: ${nameOf(group.coordinator_id ?? agentId)}. Now write the kickoff message with post_to_group({groupId: ${group.id}, text}): goal, constraints, who does what with @mentions.`,
         meta: { groupChanged: group.id }
       }
     }
@@ -1388,14 +1405,42 @@ export async function executeTool(
         }
         return { output: `Too many members: a group has at most ${MAX_GROUP_MEMBERS} bots. The additions were undone; name/description and the removals remain.`, meta: { groupChanged: groupId } }
       }
-      if (input.coordinatorId !== undefined) {
-        const coord = input.coordinatorId === null ? null : String(input.coordinatorId)
-        if (coord && !groupsMod.isGroupMember(groupId, coord)) {
+      // fase 16b (S1.1): il coordinatore non si TOGLIE, si CAMBIA — senza un
+      // nome nuovo il rifiuto spiega la regola; se il coordinatore è uscito
+      // dai membri, il primo rimasto prende il posto (riga di sistema nel gruppo)
+      const coordinatorLeft = group.coordinator_id !== null && remove.includes(group.coordinator_id)
+      if (input.coordinatorId === null && !coordinatorLeft) {
+        return {
+          output: 'A group always has a coordinator: pass the new coordinatorId (a member). To replace the current one just set coordinatorId; if the coordinator leaves the group, the first remaining member takes over.',
+          meta: { groupChanged: groupId }
+        }
+      }
+      let coordinatorNote = ''
+      const noteCoordinator = (): void => {
+        const g2 = groupsMod.getGroup(groupId)
+        const coordId = g2?.coordinator_id ?? null
+        if (!g2 || !coordId) return
+        const coordName = dbMod.getAgent(coordId)?.name ?? coordId
+        groupsMod.addGroupMessage({
+          groupId, authorKind: 'system', authorId: null, authorName: 'sistema',
+          text: coordinatorNowText(coordName)
+        })
+        coordinatorNote = ` ${coordName} now coordinates the team.`
+      }
+      if (input.coordinatorId !== undefined && input.coordinatorId !== null) {
+        const coord = String(input.coordinatorId)
+        if (!groupsMod.isGroupMember(groupId, coord)) {
           return { output: 'The coordinator must be a member of the group (add it first with addMemberIds).', meta: { groupChanged: groupId } }
         }
-        groupsMod.updateGroup(groupId, { coordinator_id: coord })
+        if (coord !== group.coordinator_id) {
+          groupsMod.updateGroup(groupId, { coordinator_id: coord })
+          noteCoordinator()
+        }
+      } else if (coordinatorLeft) {
+        // removeGroupMember ha già eletto il primo membro rimasto
+        noteCoordinator()
       }
-      return { output: `Group "${groupsMod.getGroup(groupId)?.name ?? group.name}" updated.`, meta: { groupChanged: groupId } }
+      return { output: `Group "${groupsMod.getGroup(groupId)?.name ?? group.name}" updated.${coordinatorNote}`, meta: { groupChanged: groupId } }
     }
     case 'update_task': {
       // fase 8 (§3bis L7): chiusura del task — il summary torna alla chat

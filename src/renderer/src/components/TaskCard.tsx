@@ -8,6 +8,7 @@ import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
 import type { TranscriptEntry, SendMessageMeta, SendMessagePayload } from '../../../shared/types'
 import type { TaskInfo } from '../../../shared/types'
+import { CardShell } from './DecidedRow'
 
 const STATUS_LABEL: Record<TaskInfo['status'], MessageDescriptor> = {
   working: msg`in corso`,
@@ -46,9 +47,9 @@ export function TaskCard({ entry }: { entry: TranscriptEntry }) {
   const now = Date.now()
 
   return (
-    <div className="max-w-[75%] rounded-2xl rounded-bl-md border border-border bg-card px-4 py-3 shadow-soft">
+    <CardShell>
       <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-medium uppercase tracking-wide text-primary/80"><Trans>Task</Trans></span>
+        <span className="text-xs font-medium text-muted-foreground"><Trans>Task</Trans></span>
         <span className={`text-[11px] font-medium ${STATUS_CLS[status]}`}>
           {status === 'working' ? '⏳' : status === 'needs_input' ? '❓' : status === 'done' ? '✓' : status === 'failed' ? '⚠' : '⛔'}
           {' '}{i18n.t(STATUS_LABEL[status])}
@@ -62,20 +63,20 @@ export function TaskCard({ entry }: { entry: TranscriptEntry }) {
       )}
       <div className="mt-2 flex gap-2">
         <button
-          className="rounded-lg border border-primary bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+          className="rounded-[10px] bg-card px-3.5 py-1.5 text-sm transition hover:bg-muted"
           onClick={() => openTask(message.taskId)}
         >
           <Trans>Apri</Trans>
         </button>
         {open && (
           <button
-            className="rounded-lg bg-muted px-3 py-1.5 text-xs text-foreground hover:bg-accent"
+            className="rounded-[10px] px-3 py-1.5 text-sm text-muted-foreground transition hover:text-foreground"
             onClick={() => cancelTask(message.taskId)}
           >
             <Trans>Interrompi</Trans>
           </button>
         )}
       </div>
-    </div>
+    </CardShell>
   )
 }

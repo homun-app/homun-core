@@ -95,6 +95,11 @@ const api: SandbotApi = {
   listGroups: () => ipcRenderer.invoke('groups:list'),
   groupMessages: (groupId) => ipcRenderer.invoke('groups:messages', groupId),
   groupSendUser: (groupId, text) => ipcRenderer.invoke('groups:send-user', groupId, text),
+  // fase 16b (S1.3): squadre create e modificate dalla UI
+  groupCreate: (name, memberIds, coordinatorId, description) =>
+    ipcRenderer.invoke('groups:create', name, memberIds, coordinatorId, description),
+  groupUpdate: (groupId, patch) => ipcRenderer.invoke('groups:update', groupId, patch),
+  groupDelete: (groupId) => ipcRenderer.invoke('groups:delete', groupId),
   // fase 12: sottoagenti del padre e bottone Ferma sulla card
   listSubagents: (parentId) => ipcRenderer.invoke('subagents:list', parentId),
   stopSubagent: (id) => ipcRenderer.invoke('subagents:stop', id),

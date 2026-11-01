@@ -80,3 +80,18 @@ export function itCatalogEntries(): Record<string, string> {
   }
   return entries
 }
+
+/**
+ * Fase 16b (S3.3): le entrate del catalogo en pronte per i18n.load — chiave
+ * = msgid sorgente E chiave = id hash; msgstr vuoto ricade sul msgid (test
+ * della mezza riga d'attività in inglese).
+ */
+export function enCatalogEntries(): Record<string, string> {
+  const entries: Record<string, string> = {}
+  for (const [id, str] of parsePo('en')) {
+    const value = str || id
+    entries[id] = value
+    entries[generateMessageId(id)] = value
+  }
+  return entries
+}

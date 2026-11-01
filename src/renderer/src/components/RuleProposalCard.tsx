@@ -3,6 +3,9 @@
 // settings); "Ignora" chiude la proposta senza salvare nulla.
 import { useStore } from '../store'
 import { Trans } from '@lingui/react/macro'
+import { msg } from '@lingui/core/macro'
+import { i18n } from '../lib/i18n'
+import { DecidedRow, CardShell } from './DecidedRow'
 import type { TranscriptEntry, SendMessageMeta, SendMessagePayload } from '../../../shared/types'
 
 type Rule = Extract<SendMessagePayload, { type: 'rule' }>
@@ -14,33 +17,45 @@ export function RuleProposalCard({ entry }: { entry: TranscriptEntry }) {
   if (!rule) return null
   const decided = meta.ruleStatus
 
+  // fase 16b (S6): dopo la decisione, UNA riga riapribile in sola lettura
+  if (decided) {
+    return (
+      <DecidedRow
+        ok={decided === 'added'}
+        label={decided === 'added' ? i18n.t(msg`Regola aggiunta`) : i18n.t(msg`Proposta ignorata`)}
+        at={entry.createdAt}
+      >
+        <CardShell>
+          <p className="text-xs font-medium text-chart-2/90">
+            {rule.kind === 'allow' ? <Trans>⚡ Regola proposta — continuo da solo quando…</Trans> : <Trans>⛔ Regola proposta — mi fermo e chiedo sempre quando…</Trans>}
+          </p>
+          <p className="mt-1 whitespace-pre-wrap text-sm text-foreground">{rule.text}</p>
+          {rule.why && <p className="mt-1 text-xs text-muted-foreground">{rule.why}</p>}
+        </CardShell>
+      </DecidedRow>
+    )
+  }
   return (
-    <div className="max-w-[75%] rounded-2xl rounded-bl-md border border-border bg-card px-4 py-3 shadow-soft">
+    <CardShell>
       <p className="text-xs font-medium text-chart-2/90">
         {rule.kind === 'allow' ? <Trans>⚡ Regola proposta — continuo da solo quando…</Trans> : <Trans>⛔ Regola proposta — mi fermo e chiedo sempre quando…</Trans>}
       </p>
       <p className="mt-1 whitespace-pre-wrap text-sm text-foreground">{rule.text}</p>
       {rule.why && <p className="mt-1 text-xs text-muted-foreground">{rule.why}</p>}
-      {decided ? (
-        <p className="mt-2 text-xs text-muted-foreground">
-          {decided === 'added' ? <Trans>✓ Regola aggiunta (revocabile da Impostazioni → Approvazione automatica)</Trans> : <Trans>Proposta ignorata</Trans>}
-        </p>
-      ) : (
-        <div className="mt-3 flex gap-2">
-          <button
-            className="rounded-lg bg-foreground px-3 py-1.5 text-xs font-medium text-background hover:opacity-90"
-            onClick={() => decide(entry.id, 'add')}
-          >
-            <Trans>Aggiungi regola</Trans>
-          </button>
-          <button
-            className="rounded-lg bg-muted px-3 py-1.5 text-xs text-foreground hover:bg-accent"
-            onClick={() => decide(entry.id, 'dismiss')}
-          >
-            <Trans>Ignora</Trans>
-          </button>
-        </div>
-      )}
-    </div>
+      <div className="mt-3 flex gap-2">
+        <button
+          className="rounded-[10px] bg-foreground px-3.5 py-1.5 text-sm font-semibold text-background transition hover:opacity-90"
+          onClick={() => decide(entry.id, 'add')}
+        >
+          <Trans>Aggiungi regola</Trans>
+        </button>
+        <button
+          className="rounded-[10px] bg-card px-3.5 py-1.5 text-sm transition hover:bg-muted"
+          onClick={() => decide(entry.id, 'dismiss')}
+        >
+          <Trans>Ignora</Trans>
+        </button>
+      </div>
+    </CardShell>
   )
 }

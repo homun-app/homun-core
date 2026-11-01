@@ -45,8 +45,13 @@ export function uiSafeStorage(deps: HostBridgeDeps): SafeStorageLike {
  * Collega il bridge al runtime: safeStorage del vault, scale factor del
  * computer use (cache 60s), notifiche (fase 6: titolo e corpo già decisi
  * dalle regole di soppressione del daemon, agent-done/agent-needs-input).
+ * Fase 16b (S1.2): notify accetta un openGroupId — il click sulla notifica
+ * apre la SQUADRA (riepilogo del coordinatore), non la chat privata.
  */
-export function attachHostBridge(deps: HostBridgeDeps): { notify(title: string, body: string): void; refreshScale(): void } {
+export function attachHostBridge(deps: HostBridgeDeps): {
+  notify(title: string, body: string, openGroupId?: number): void
+  refreshScale(): void
+} {
   setSafeStorage(uiSafeStorage(deps))
 
   /**
@@ -82,10 +87,15 @@ export function attachHostBridge(deps: HostBridgeDeps): { notify(title: string, 
 
   return {
     refreshScale,
-    /** Notifica nativa con la UI aperta (il click riporta alla finestra), osascript senza UI. */
-    notify(title: string, body: string): void {
+    /**
+     * Notifica nativa con la UI aperta (il click riporta alla finestra — e
+     * alla squadra, con openGroupId), osascript senza UI.
+     */
+    notify(title: string, body: string, openGroupId?: number): void {
       if (deps.hasUi()) {
-        void deps.callUi('host.notify', [title, body]).catch(() => osascriptNotify(title, body))
+        void deps.callUi('host.notify', [title, body, ...(openGroupId !== undefined ? [openGroupId] : [])]).catch(() =>
+          osascriptNotify(title, body)
+        )
       } else {
         osascriptNotify(title, body)
       }

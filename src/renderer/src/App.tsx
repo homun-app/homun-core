@@ -2,8 +2,11 @@ import { useEffect } from 'react'
 import { useStore } from './store'
 import { Sidebar } from './components/Sidebar'
 import { Chat } from './components/Chat'
+// fase 16b (S5): la squadra è una vista di prima classe, al posto della chat
+import { TeamChat } from './components/TeamChat'
 import { RightPanel } from './components/RightPanel'
 import { Settings } from './components/Settings'
+import { LibraryPanel } from './components/LibraryPanel'
 import { api } from './store'
 
 /** Minimo intervallo tra due segnali 'active' (il daemon ne scarta uno ogni 30 s). */
@@ -53,11 +56,16 @@ export function App() {
     }
   }, [])
 
-  // fase 16 (U4): la shell a 3 colonne di Lovable — sidebar, chat, pannello destro
+  // fase 16 (U4): la shell a 3 colonne; fase 16b (S5): al centro la chat del
+  // bot OPPURE la squadra selezionata; la Libreria copre l'area centrale
+  const openGroupId = useStore((s) => s.openGroupId)
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground">
       <Sidebar />
-      <Chat />
+      <div className="relative flex min-w-0 flex-1">
+        {openGroupId === null ? <Chat /> : <TeamChat />}
+        <LibraryPanel />
+      </div>
       <RightPanel />
       {settingsOpen && <Settings />}
     </div>

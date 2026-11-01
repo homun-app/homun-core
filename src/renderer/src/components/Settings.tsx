@@ -1195,6 +1195,9 @@ function GeneralTab() {
   // fase 16 (U0): il selettore del tema (setting ui.theme)
   const theme = useStore((s) => s.theme)
   const setTheme = useStore((s) => s.setTheme)
+  // fase 16b (S3.3): la voce di debug che rimette le righe tool-call in chat
+  const debugSteps = useStore((s) => s.debugSteps)
+  const setDebugSteps = useStore((s) => s.setDebugSteps)
   // fase 17a (L6): il selettore della lingua (setting ui.language)
   const uiLanguage = useStore((s) => s.uiLanguage)
   const setUiLanguage = useStore((s) => s.setUiLanguage)
@@ -1280,6 +1283,22 @@ function GeneralTab() {
           ))}
         </div>
       </div>
+
+      {/* fase 16b (S3.3): il debug — le righe tool-call/tool-result in chat */}
+      <button
+        className="flex w-full items-center justify-between rounded-2xl bg-muted px-4 py-3 text-left"
+        onClick={() => setDebugSteps(!debugSteps)}
+      >
+        <span className="pr-4">
+          <span className="block text-sm text-foreground"><Trans>Mostra i passaggi in chat</Trans></span>
+          <span className="block text-xs text-muted-foreground">
+            <Trans>Le chiamate e i risultati dei tool tornano come righe nella conversazione (per il debug).</Trans>
+          </span>
+        </span>
+        <span className={`relative h-6 w-10 shrink-0 rounded-full transition ${debugSteps ? 'bg-foreground' : 'bg-muted-foreground/30'}`}>
+          <span className={`absolute top-0.5 size-5 rounded-full bg-card transition-all ${debugSteps ? 'right-0.5' : 'left-0.5'}`} />
+        </span>
+      </button>
 
       {libStats?.warn && (
         <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
@@ -1712,148 +1731,45 @@ function ProviderForm({ initial, onSave, onCancel }: { initial: ProviderConfig; 
 }
 
 function AgentsTab() {
-  const { t, i18n } = useLingui()
+  const { t } = useLingui()
   const agents = useStore((s) => s.agents)
-  const providers = useStore((s) => s.providers)
-  const mainAgentId = useStore((s) => s.mainAgentId)
-  const setMainAgent = useStore((s) => s.setMainAgent)
-  const [models, setModels] = useState<Record<string, ModelInfo[]>>({})
-  // fase 7: catalogo dei template (creazione bot col kickstart)
-  const [templates, setTemplates] = useState<TemplateInfo[]>([])
-
-  useEffect(() => {
-    for (const p of providers) {
-      if (!models[p.id]) {
-        api.listModels(p.id).then((ms: ModelInfo[]) => setModels((prev) => ({ ...prev, [p.id]: ms }))).catch(() => {})
-      }
-    }
-  }, [providers])
-  useEffect(() => {
-    api.listTemplates().then(setTemplates).catch(() => undefined)
-  }, [])
-
-  // fase 9 (punto 1): il rifiuto della capability "tools" (o qualunque errore
-  // di agents:update) si mostra sotto la riga del bot, non si perde in console
-  const [agentError, setAgentError] = useState<Record<string, string>>({})
-  async function patch(a: Agent, p: Partial<Agent>) {
-    try {
-      await api.updateAgent(a.id, p)
-      setAgentError((prev) => ({ ...prev, [a.id]: '' }))
-    } catch (e) {
-      setAgentError((prev) => ({ ...prev, [a.id]: e instanceof Error ? e.message : String(e) }))
-    }
-  }
-
+  const select = useStore((s) => s.select)
+  const setSettingsOpen = useStore((s) => s.setSettingsOpen)
+  const setRightPanel = useStore((s) => s.setRightPanel)
+  const openBotPanel = useStore((s) => s.openBotAdvanced)
   // fase 7: senza setting mainAgentId il principale è il primo agente
-  const effectiveMain = mainAgentId ?? agents[0]?.id ?? null
+  const effectiveMain = useStore((s) => s.mainAgentId) ?? agents[0]?.id ?? null
 
+  // fase 16b (S4): la sezione resta come RIMANDO — le impostazioni del bot
+  // (modello, ragionamento, istruzioni, sezione, principale, elimina) vivono
+  // nel pannello del bot, scheda Avanzate
   return (
     <div className="space-y-3">
-      <p className="text-xs text-muted-foreground"><Trans>Scegli con quale modello pensa ciascun bot.</Trans></p>
-      {agents.map((a) => (
-        <div key={a.id} className="rounded-2xl border border-border bg-card px-3 py-2.5">
-          <div className="mb-2 flex items-center gap-2">
-            <span className="text-sm font-medium text-foreground">{a.name}</span>
-            {a.id === effectiveMain ? (
-              <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[10px] text-primary" title={t`Punto di contatto principale dell'utente: coordina gli altri bot`}>
-                <Trans>★ principale</Trans>
-              </span>
-            ) : (
-              <button
-                className="rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
-                title={t`Rendi questo bot il punto di contatto principale dell'utente`}
-                onClick={() => void setMainAgent(a.id)}
-              >
-                <Trans>Rendi principale</Trans>
-              </button>
-            )}
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <select
-              className="rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none"
-              value={a.providerId ?? ''}
-              onChange={async (e) => {
-                const pid = e.target.value || null
-                await patch(a, { providerId: pid, model: null })
-              }}
-            >
-              <option value="">{t`— provider —`}</option>
-              {providers.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
-            {/* fase 18b (H5.3): combobox con ricerca, capacità e prezzi */}
-            <ModelPicker
-              models={models[a.providerId ?? ''] ?? []}
-              value={a.model}
-              placeholder={t`— modello —`}
-              disabled={!a.providerId}
-              onChange={(m) => void patch(a, { model: m })}
-            />
-          </div>
-          {/* fase 18b (H3): il livello di ragionamento del bot — Predefinito +
-              i livelli del modello scelto; nascosto se il modello non è
-              controllabile. Se il livello salvato non è più supportato si
-              mostra Predefinito MA il dato non si riscrive (l'adattatore clampa) */}
-          {(() => {
-            const chosen = (models[a.providerId ?? ''] ?? []).find((m) => m.id === a.model)
-            const levels = chosen?.thinkingLevels ?? []
-            if (levels.length === 0) return null
-            const savedLevel = levels.includes((a.thinking ?? 'default') as ThinkingSetting) ? (a.thinking ?? 'default') : 'default'
-            return (
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                <span className="text-[11px] uppercase tracking-wide text-muted-foreground">{t`ragionamento`}</span>
-                <select
-                  className="rounded-lg bg-muted px-2 py-1.5 text-xs outline-none"
-                  value={savedLevel}
-                  onChange={(e) => void patch(a, { thinking: e.target.value as ThinkingSetting })}
-                >
-                  {['default', ...levels].map((l) => (
-                    <option key={l} value={l}>{i18n.t(THINKING_LABELS[l]!)}</option>
-                  ))}
-                </select>
-              </div>
-            )
-          })()}
-          <input
-            className="mt-2 w-full rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none"
-            placeholder={t`Descrizione / ruolo del bot (va nel system prompt)`}
-            defaultValue={a.description}
-            onBlur={async (e) => void patch(a, { description: e.target.value })}
-          />
-          {agentError[a.id] ? (
-            <div className="mt-1.5 text-xs text-destructive">✕ {agentError[a.id]}</div>
-          ) : null}
+      <p className="text-xs text-muted-foreground"><Trans>Le impostazioni dei bot vivono nel pannello del bot, scheda Avanzate.</Trans></p>
+      {agents.filter((a) => !a.parentId).map((a) => (
+        <div key={a.id} className="flex items-center gap-3 rounded-2xl border border-border bg-card px-3 py-2.5">
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-medium text-foreground">
+              {a.name}
+              {a.id === effectiveMain ? <span className="ml-2 rounded bg-primary/15 px-1.5 py-0.5 text-[10px] text-primary" title={t`Punto di contatto principale dell'utente: coordina gli altri bot`}><Trans>★ principale</Trans></span> : null}
+            </span>
+            <span className="block truncate text-xs text-muted-foreground">
+              {a.providerId ? `${a.providerId} · ${a.model ?? ''}` : t`nessun modello`}
+            </span>
+          </span>
+          <button
+            className="shrink-0 rounded-full bg-muted px-3 py-1.5 text-xs text-foreground transition hover:bg-accent"
+            onClick={() => {
+              void select(a.id)
+              openBotPanel()
+              setRightPanel(true)
+              setSettingsOpen(false)
+            }}
+          >
+            <Trans>Apri nel pannello del bot</Trans>
+          </button>
         </div>
       ))}
-
-      {templates.length > 0 && (
-        <div className="space-y-2 border-t border-border pt-3">
-          <p className="text-xs text-muted-foreground">
-            <Trans>Crea un bot da template: parte con un messaggio di configurazione che crea routine (in pausa), memorie e domande di attivazione.</Trans>
-          </p>
-          <div className="grid grid-cols-2 gap-2">
-            {templates.map((t) => (
-              <button
-                key={t.id}
-                className="rounded-2xl border border-border bg-card px-3 py-2 text-left hover:border-border"
-                onClick={async () => {
-                  try {
-                    await api.createAgentFromTemplate(t.id)
-                  } catch (e) {
-                    console.error('createAgentFromTemplate:', e instanceof Error ? e.message : e)
-                  }
-                }}
-                title={pickLang(t.description, uiLang())}
-              >
-                <span className="mr-1">{t.avatar}</span>
-                <span className="text-sm text-foreground">{pickLang(t.name, uiLang())}</span>
-                <span className="mt-0.5 block truncate text-xs text-muted-foreground">{pickLang(t.description, uiLang())}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   )
 }

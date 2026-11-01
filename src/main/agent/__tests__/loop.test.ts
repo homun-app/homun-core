@@ -27,7 +27,7 @@ const h = vi.hoisted(() => {
     groupsState: {
       groups: [] as Array<{ id: number; name: string; description: string; created_by: string; coordinator_id: string | null; created_at: number }>,
       members: new Map<number, string[]>(),
-      messages: [] as Array<{ id: number; group_id: number; author_kind: string; author_id: string | null; author_name: string; text: string; reply_to: number | null; root_id: number | null; depth: number; automatic: number; created_at: number }>,
+      messages: [] as Array<{ id: number; group_id: number; author_kind: string; author_id: string | null; author_name: string; text: string; reply_to: number | null; root_id: number | null; depth: number; automatic: number; summary?: number; created_at: number }>,
       cursors: new Map<string, number>(),
       turns: [] as Array<{ nonce: string; group_id: number; member_id: string; source_message_id: number; outcome: string | null; started_at: number | null; ended_at: number | null; reason?: string | null }>,
       nextGroupId: 1,
@@ -258,7 +258,8 @@ vi.mock('../../store/groups', async () => {
   return {
     createGroup: (name: string, description: string, createdBy: string, memberIds: string[], coordinatorId: string | null = null) => {
       const s = st()
-      const g = { id: s.nextGroupId++, name, description, created_by: createdBy, coordinator_id: coordinatorId, created_at: Date.now() }
+      // fase 16b (S1.1): senza coordinatorId il coordinatore è chi crea
+      const g = { id: s.nextGroupId++, name, description, created_by: createdBy, coordinator_id: coordinatorId ?? createdBy, created_at: Date.now() }
       s.groups.push(g)
       s.members.set(g.id, [...new Set([...memberIds, createdBy])])
       return { ...g }
@@ -276,7 +277,26 @@ vi.mock('../../store/groups', async () => {
       st().members.set(groupId, [...new Set([...cur, agentId])])
     },
     removeGroupMember: (groupId: number, agentId: string) => {
-      st().members.set(groupId, (st().members.get(groupId) ?? []).filter((x) => x !== agentId))
+      const s = st()
+      const g = s.groups.find((x) => x.id === groupId)
+      const wasCoordinator = g?.coordinator_id === agentId
+      s.members.set(groupId, (s.members.get(groupId) ?? []).filter((x) => x !== agentId))
+      // fase 16b (S1.1): chi perde il coordinatore elegge il primo membro rimasto
+      if (g && wasCoordinator) {
+        const members = s.members.get(groupId) ?? []
+        g.coordinator_id = members.includes(g.created_by) ? g.created_by : members[0] ?? null
+        return { coordinatorChanged: true }
+      }
+      return { coordinatorChanged: false }
+    },
+    ensureGroupCoordinator: (groupId: number) => {
+      const s = st()
+      const g = s.groups.find((x) => x.id === groupId)
+      if (!g) return { changed: false, coordinatorId: null }
+      const members = s.members.get(groupId) ?? []
+      if (g.coordinator_id && members.includes(g.coordinator_id)) return { changed: false, coordinatorId: g.coordinator_id }
+      g.coordinator_id = members.includes(g.created_by) ? g.created_by : members[0] ?? null
+      return { changed: true, coordinatorId: g.coordinator_id }
     },
     removeAgentMemberships: (agentId: string) => {
       for (const [gid, ids] of st().members) st().members.set(gid, ids.filter((x) => x !== agentId))
@@ -285,12 +305,12 @@ vi.mock('../../store/groups', async () => {
       const g = st().groups.find((x) => x.id === id)
       if (g) Object.assign(g, patch)
     },
-    addGroupMessage: (m: { groupId: number; authorKind: 'user' | 'agent' | 'system'; authorId: string | null; authorName: string; text: string; replyTo?: number | null; rootId?: number | null; depth?: number; automatic?: boolean }) => {
+    addGroupMessage: (m: { groupId: number; authorKind: 'user' | 'agent' | 'system'; authorId: string | null; authorName: string; text: string; replyTo?: number | null; rootId?: number | null; depth?: number; automatic?: boolean; summary?: boolean }) => {
       const s = st()
       const row = {
         id: s.nextMsgId++, group_id: m.groupId, author_kind: m.authorKind, author_id: m.authorId,
         author_name: m.authorName, text: m.text, reply_to: m.replyTo ?? null, root_id: m.rootId ?? null,
-        depth: m.depth ?? 0, automatic: m.automatic ? 1 : 0, created_at: Date.now()
+        depth: m.depth ?? 0, automatic: m.automatic ? 1 : 0, summary: m.summary ? 1 : 0, created_at: Date.now()
       }
       s.messages.push(row)
       // catena: un depth 0 senza root è root di se stesso (come lo store reale)
@@ -328,10 +348,10 @@ vi.mock('../../store/groups', async () => {
     pendingTurnNonces: (groupId: number) => st().turns.filter((t) => t.group_id === groupId && t.started_at === null && t.outcome === null).map((t) => t.nonce),
     groupTurnNonces: (groupId: number) => st().turns.filter((t) => t.group_id === groupId).map((t) => t.nonce),
     // la colla: usa il planner PURO reale e accoda i job nel mock di jobs
-    scheduleTurnsForMessage: (message: { id: number; group_id: number; author_kind: string; author_id: string | null; text: string; depth: number; root_id?: number | null; automatic: number }, emit: (e: unknown) => void) => {
+    scheduleTurnsForMessage: (message: { id: number; group_id: number; author_kind: string; author_id: string | null; text: string; depth: number; root_id?: number | null; automatic: number; summary?: number }, emit: (e: unknown) => void) => {
       const s = st()
       const group = s.groups.find((g) => g.id === message.group_id)
-      if (!group || message.author_kind === 'system') return { plan: { turns: [], skipped: [], systemNotice: null, capNotice: false }, jobs: [] }
+      if (!group || message.author_kind === 'system' || message.summary === 1) return { plan: { turns: [], skipped: [], systemNotice: null, capNotice: false }, jobs: [] }
       const members = (s.members.get(group.id) ?? [])
         .map((id) => [...h.db.agents.values()].find((a) => a.id === id))
         .filter((a): a is Agent => !!a)
@@ -350,7 +370,7 @@ vi.mock('../../store/groups', async () => {
       }
       const plan = planGroupTurns({
         group: { id: group.id, coordinatorId: group.coordinator_id },
-        message: { id: message.id, authorKind: message.author_kind === 'user' ? 'user' : 'agent', authorId: message.author_id, text: message.text, depth: message.depth },
+        message: { id: message.id, authorKind: message.author_kind === 'user' ? 'user' : 'agent', authorId: message.author_id, text: message.text, depth: message.depth, summary: message.summary === 1 },
         members,
         pendingNonces: s.turns.filter((t) => t.group_id === group.id && t.started_at === null && t.outcome === null).map((t) => t.nonce),
         existingNonces: s.turns.filter((t) => t.group_id === group.id).map((t) => t.nonce),
@@ -360,11 +380,11 @@ vi.mock('../../store/groups', async () => {
       if (plan.capNotice) {
         const recent = s.messages.filter((m) => m.group_id === group.id && m.author_kind === 'system' && m.text === GROUP_HOURLY_CAP_TEXT && m.created_at > now - 3_600_000)
         if (!recent.length) {
-          s.messages.push({ id: s.nextMsgId++, group_id: group.id, author_kind: 'system', author_id: null, author_name: 'sistema', text: GROUP_HOURLY_CAP_TEXT, reply_to: null, root_id: null, depth: 0, automatic: 0, created_at: now })
+          s.messages.push({ id: s.nextMsgId++, group_id: group.id, author_kind: 'system', author_id: null, author_name: 'sistema', text: GROUP_HOURLY_CAP_TEXT, reply_to: null, root_id: null, depth: 0, automatic: 0, summary: 0, created_at: now })
           emit({ type: 'groups' })
         }
       } else if (plan.systemNotice) {
-        s.messages.push({ id: s.nextMsgId++, group_id: group.id, author_kind: 'system', author_id: null, author_name: 'sistema', text: plan.systemNotice, reply_to: null, root_id: null, depth: 0, automatic: 0, created_at: now })
+        s.messages.push({ id: s.nextMsgId++, group_id: group.id, author_kind: 'system', author_id: null, author_name: 'sistema', text: plan.systemNotice, reply_to: null, root_id: null, depth: 0, automatic: 0, summary: 0, created_at: now })
         emit({ type: 'groups' })
       }
       const jobs: Array<{ agentId: string; nonce: string }> = []
@@ -3135,12 +3155,21 @@ describe('fase 10 (§3): post_to_group, pass e turni di gruppo nel loop', () => 
       groupTurn: { groupId: 1, readMaxDepth: 5, rootId: 1, closing: true }, untrusted: true
     })
     // il post è rifiutato con il result esplicito
-    expect(h.db.groupsState.messages.filter((m) => m.author_kind === 'agent')).toHaveLength(0)
     const results = h.llm.calls[h.llm.calls.length - 1]!.filter((m) => m.role === 'tool').map((m) => String(m.content))
     expect(results.some((c) => c.includes('The round is closed'))).toBe(true)
-    // la send all'utente invece passa
-    const send = h.db.entries.find((e) => e.kind === 'send-message')
-    expect(send?.content).toContain('RIEPILOGO')
+    // fase 16b (S1.2): la send del coordinatore diventa il riepilogo NEL GRUPPO
+    // (summary = 1, automatic, autore il coordinatore) — non un messaggio di chat
+    const summary = h.db.groupsState.messages.find((m) => m.author_kind === 'agent')
+    expect(summary?.text).toContain('RIEPILOGO')
+    expect(summary?.summary).toBe(1)
+    expect(summary?.automatic).toBe(1)
+    expect(h.db.entries.some((e) => e.kind === 'send-message')).toBe(false)
+    // il result del tool NON cambia: consegnato all'utente come sempre
+    expect(results.some((c) => c.includes('delivered to the user') && c.includes('RIEPILOGO'))).toBe(true)
+    // nella chat privata resta la riga discreta col rimando alla squadra
+    const row = h.db.entries.find((e) => e.kind === 'event' && e.meta?.summaryMessageId !== undefined)
+    expect(row?.meta?.groupId).toBe(1)
+    expect((row?.meta?.ui as { id?: string })?.id).toBe('group.summaryPosted')
   })
 
   it('C3: nei turni di gruppo al massimo UN messaggio all\'utente per catena; la chiusura ha sempre il suo', async () => {
@@ -3181,7 +3210,8 @@ describe('fase 10 (§3): post_to_group, pass e turni di gruppo nel loop', () => 
     expect(h.db.entries.filter((e) => e.kind === 'send-message')).toHaveLength(2)
     expect(h.db.entries.findLast((e) => e.kind === 'send-message')!.meta?.groupChain).toEqual({ groupId: 1, rootId: 60 })
 
-    // turno di CHIUSURA (stessa catena 50): il riepilogo passa sempre
+    // turno di CHIUSURA (stessa catena 50): il riepilogo passa sempre — e da
+    // fase 16b (S1.2) finisce NEL GRUPPO della catena, come riepilogo
     h.llm.queue = [
       { toolCalls: [{ id: 'c3d', name: 'send_to_user', arguments: JSON.stringify({ text: 'RIEPILOGO FINALE della cena.' }) }] },
       { text: 'fine' }
@@ -3189,9 +3219,54 @@ describe('fase 10 (§3): post_to_group, pass e turni di gruppo nel loop', () => 
     await runTurn(AGENT, '<turno_di_gruppo gruppo="Cena compleanno" chiusura="true">…</turno_di_gruppo>', emit, undefined, {
       groupTurn: { groupId: 1, readMaxDepth: 5, rootId: 50, closing: true }, untrusted: true
     })
-    const finale = h.db.entries.findLast((e) => e.kind === 'send-message')!
-    expect(finale.content).toContain('RIEPILOGO FINALE')
-    expect(finale.meta?.groupChain).toEqual({ groupId: 1, rootId: 50 })
+    expect(h.db.entries.filter((e) => e.kind === 'send-message')).toHaveLength(2) // sempre le due
+    const finale = h.db.groupsState.messages.findLast((m) => m.author_kind === 'agent')!
+    expect(finale.text).toContain('RIEPILOGO FINALE')
+    expect(finale.summary).toBe(1)
+    expect(finale.root_id).toBe(50)
+  })
+
+  // ---- fase 16b (S1.2): il riepilogo del coordinatore compare nella squadra ----
+
+  it('S1.2: la send di chiusura NON genera turni nuovi e la notifica porta alla squadra', async () => {
+    setupGroup()
+    h.db.groupsState.messages.push({ id: 50, group_id: 1, author_kind: 'user', author_id: null, author_name: 'user', text: 'inizio', reply_to: null, root_id: 50, depth: 0, automatic: 0, summary: 0, created_at: 1 })
+    const events: import('../../../shared/types').SandbotEvent[] = []
+    const emit16 = (e: import('../../../shared/types').SandbotEvent): void => { events.push(e) }
+    h.llm.queue = [
+      { toolCalls: [{ id: 's12a', name: 'send_to_user', arguments: JSON.stringify({ text: 'Ecco il weekend: 3 ristoranti e 3 luoghi.' }) }] },
+      { text: 'fine' }
+    ]
+    const turnsBefore = h.db.groupsState.turns.length
+    await runTurn(AGENT, '<turno_di_gruppo gruppo="Cena compleanno" chiusura="true">…</turno_di_gruppo>', emit16, undefined, {
+      groupTurn: { groupId: 1, readMaxDepth: 5, rootId: 50, closing: true }, untrusted: true
+    })
+    // NESSUN nuovo giro: il registro dei turni non cresce (planGroupTurns
+    // ignora i riepiloghi e la send di chiusura non pianifica nulla)
+    expect(h.db.groupsState.turns.length).toBe(turnsBefore)
+    // la notifica porta ALLA SQUADRA (openGroupId), non alla chat privata
+    const notify = events.find((e) => e.type === 'agent-notify') as Extract<import('../../../shared/types').SandbotEvent, { type: 'agent-notify' }> | undefined
+    expect(notify?.openGroupId).toBe(1)
+    expect(notify?.preview).toContain('weekend')
+    // il gruppo è cambiato (evento groups) e la chat privata ha la riga col rimando
+    expect(events.some((e) => e.type === 'groups')).toBe(true)
+    const row = h.db.entries.find((e) => e.kind === 'event' && e.meta?.summaryMessageId !== undefined)
+    expect(row?.meta?.groupId).toBe(1)
+  })
+
+  it('S1.2: FUORI dal turno di chiusura send_to_user resta come oggi (chat privata, meta.groupChain)', async () => {
+    setupGroup()
+    h.llm.queue = [
+      { toolCalls: [{ id: 's12b', name: 'send_to_user', arguments: JSON.stringify({ text: 'una decisione tutta mia.' }) }] },
+      { text: 'fine' }
+    ]
+    await runTurn(AGENT, '<turno_di_gruppo gruppo="Cena compleanno">…</turno_di_gruppo>', emit, undefined, {
+      groupTurn: { groupId: 1, readMaxDepth: 1, rootId: 50 }, untrusted: true
+    })
+    const send = h.db.entries.findLast((e) => e.kind === 'send-message')!
+    expect(send.content).toContain('una decisione')
+    expect(send.meta?.groupChain).toEqual({ groupId: 1, rootId: 50 })
+    expect(h.db.groupsState.messages.some((m) => m.summary === 1)).toBe(false)
   })
 
   // ---- correzioni 3 (E2): il recupero dei turni di gruppo ----
@@ -3337,7 +3412,11 @@ describe('fase 10 (§3): post_to_group, pass e turni di gruppo nel loop', () => 
     })
     expect(h.llm.calls).toHaveLength(3)
     expect([...recoveryTools].sort()).toEqual(['pass', 'send_to_user'])
-    expect(h.db.entries.findLast((e) => e.kind === 'send-message')!.content).toContain('RIEPILOGO')
+    // fase 16b (S1.2): la consegna della chiusura è il riepilogo NEL GRUPPO
+    const summary = h.db.groupsState.messages.findLast((m) => m.author_kind === 'agent')!
+    expect(summary.text).toContain('RIEPILOGO')
+    expect(summary.summary).toBe(1)
+    expect(h.db.entries.some((e) => e.kind === 'send-message')).toBe(false)
   })
 
   it('0b: il recupero del chiamato è UNO — seconda risposta vuota chiude STOPPED senza altri solleciti', async () => {
@@ -3370,10 +3449,13 @@ describe('fase 10 (§3): post_to_group, pass e turni di gruppo nel loop', () => 
     expect(h.llm.calls).toHaveLength(3)
     // nel turno di chiusura il recupero offre SOLO send_to_user e pass
     expect([...recoveryTools].sort()).toEqual(['pass', 'send_to_user'])
-    const send = h.db.entries.findLast((e) => e.kind === 'send-message')!
-    expect(send.content).toContain('RIEPILOGO')
-    // e nel turno di chiusura il post nel gruppo resta rifiutato (stesso percorso)
-    expect(h.db.groupsState.messages.filter((m) => m.author_kind === 'agent')).toHaveLength(0)
+    // fase 16b (S1.2): la consegna è il riepilogo NEL GRUPPO (summary = 1);
+    // nessun messaggio in chat privata, solo la riga col rimando
+    const summary = h.db.groupsState.messages.findLast((m) => m.author_kind === 'agent')!
+    expect(summary.text).toContain('RIEPILOGO')
+    expect(summary.summary).toBe(1)
+    expect(h.db.entries.some((e) => e.kind === 'send-message')).toBe(false)
+    expect(h.db.entries.some((e) => e.kind === 'event' && e.meta?.summaryMessageId !== undefined)).toBe(true)
   })
 
   it('E2: il post del recupero passa dallo STESSO percorso — il tetto per catena (C4) vale anche per la sua pianificazione', async () => {

@@ -39,6 +39,8 @@ export const DAEMON_RPC_CHANNELS = [
   'subagents:list', 'subagents:stop',
   // fase 10: gruppi di bot (sidebar, vista gruppo, scrittura come utente)
   'groups:list', 'groups:messages', 'groups:send-user',
+  // fase 16b (S1.3): squadre create e modificate dalla UI
+  'groups:create', 'groups:update', 'groups:delete',
   'memory:list', 'memory:update', 'memory:delete',
   'skills:list', 'skills:delete',
   'mcp:list', 'mcp:save', 'mcp:delete', 'mcp:test',
@@ -189,14 +191,23 @@ export function registerIpc(client: DaemonClient, getWindows: () => BrowserWindo
 
   // ---- host API: il daemon chiama la UI quando è aperta ----
   // fase 6: titolo/corpo già decisi dalle regole di soppressione del daemon
-  // (agent-done / agent-needs-input); qui resta solo la notifica nativa
-  client.registerHost('host.notify', ([title, body]) => {
+  // (agent-done / agent-needs-input); qui resta solo la notifica nativa.
+  // fase 16b (S1.2): openGroupId dice che il click apre la SQUADRA
+  // (riepilogo del coordinatore), non la chat del bot
+  client.registerHost('host.notify', ([title, body, openGroupId]) => {
     const windows = getWindows()
     const n = new Notification({
       title: String(title ?? 'Homun'),
       body: String(body ?? '').slice(0, 120)
     })
-    n.on('click', () => { const w = windows[0]; w?.show(); w?.focus() })
+    n.on('click', () => {
+      const w = windows[0]
+      w?.show()
+      w?.focus()
+      if (typeof openGroupId === 'number') {
+        w?.webContents.send('sandbot:event', { type: 'open-group', groupId: openGroupId })
+      }
+    })
     n.show()
     return { shown: true }
   })
