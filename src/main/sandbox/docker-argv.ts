@@ -963,7 +963,10 @@ export function dockerScreenControlPidReadArgv(container: string, owner: string)
 
 /** Attesa di un socket unix del desktop: test -S COME 1001 (argv puro). */
 export function dockerScreenSocketReadyArgv(container: string, socketPath: string): string[] {
-  return ['exec', '-u', BROWSER_USER, container, 'test', '-S', '--', socketPath]
+  // verifica dal vivo: `test` di coreutils NON accetta `--` ("binary operator
+  // expected", exit 2: lo schermo non risultava MAI pronto). Il path è
+  // costruito dal daemon ed è sempre assoluto (inizia con /): niente `--`
+  return ['exec', '-u', BROWSER_USER, container, 'test', '-S', socketPath]
 }
 
 /** Lettura del numero di display scelto da -displayfd (file display del wrapper). */

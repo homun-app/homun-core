@@ -449,7 +449,7 @@ describe('fase 19a: il wrapper del DESKTOP (solo browser principale) e i suoi ar
     ])
     expect(dockerScreenGeometryArgv(':42', '/browser/agent_x/Xauthority').slice(-2)).toEqual(['xdotool', 'getdisplaygeometry'])
     expect(dockerScreenSocketReadyArgv('sandbot-box', '/browser/agent_x/vnc-view.sock')).toEqual(
-      ['exec', '-u', '1001:1001', 'sandbot-box', 'test', '-S', '--', '/browser/agent_x/vnc-view.sock']
+      ['exec', '-u', '1001:1001', 'sandbot-box', 'test', '-S', '/browser/agent_x/vnc-view.sock']
     )
   })
 

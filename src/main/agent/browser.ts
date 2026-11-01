@@ -551,18 +551,25 @@ export async function probeViewportOffset(agentId: string): Promise<ViewportOffs
 /**
  * La sonda del punto (fase 19a correzioni, L3): si chiede AL BROWSER dove sta
  * il puntatore, invece di calcolare l'offset dalla finestra. Il daemon installa
- * la cattura one-shot del mousemove, muove il puntatore sul punto con xdotool
- * (doppio mousemove: il primo spostamento garantisce l'evento anche se il
- * puntatore era già lì), aspetta e legge window.__sbHit. Misurato: un
+ * la cattura del mousemove, muove il puntatore sul punto con xdotool (doppio
+ * mousemove: il primo nella barra delle schede, FUORI dalla pagina, così
+ * l'evento parte anche se il puntatore era già lì), aspetta e legge
+ * window.__sbHit. Verifica: la cattura tiene l'ULTIMO evento, non il primo —
+ * con `once` e un pre-spostamento a x−1 dentro la pagina la sonda leggeva il
+ * pixel ACCANTO al punto del click (bypass sul bordo di un bottone). Il
+ * listener si installa una volta per documento. Misurato: un
  * `mousemove` vero di xdotool arriva alla pagina con clientX/clientY esatti;
  * `:hover` invece NON funziona sotto Playwright (mai usarlo). La funzione è la
  * stringa COSTANTE della spec.
  */
 export const MOUSE_HIT_ARM_FN = `() => {
   window.__sbHit = null;
-  addEventListener('mousemove', (e) => {
-    window.__sbHit = { x: e.clientX, y: e.clientY };
-  }, { capture: true, once: true });
+  if (!window.__sbHitArmed) {
+    window.__sbHitArmed = true;
+    addEventListener('mousemove', (e) => {
+      window.__sbHit = { x: e.clientX, y: e.clientY };
+    }, { capture: true });
+  }
   return 1
 }`
 

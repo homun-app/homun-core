@@ -3225,3 +3225,32 @@ Il ponte, le capability, le RPC, la UI, `request_takeover` e l'eval 40–41 sono
 - `npm run i18n:extract`: en 0 missing; **seconda estrazione senza differenze** (nessun catalogo toccato: nessun testo dell'interfaccia nuovo).
 
 Niente Docker (immagine NON costruita), nessun modello cloud né rete reale fuori da 127.0.0.1, niente `npm run dist`, nessuna app o daemon avviato sulla cartella dati vera, nessun segreto vero, nessuna cartella temporanea nuova (i test nuovi non usano il filesystem), nessun file dell'utente, volume (`sandbot-box`/`sandbot-plugins`/`sandbot-browser`) o cartella preesistente cancellati. L'eval NON è stato lanciato, come da vincoli: le prove dal vivo (socket unix funzionanti e zero porte TCP per vista e controllo, offset reale (0,87), sonda del mousemove) le rifà il revisore sul box di prova con `SANDBOT_TEST_BOX_PREFIX`.
+
+## Fase 19a — correzioni fatte in verifica (revisore)
+
+Due difetti trovati SOLO dal vivo (immagine `sandbot-box:81b25bfd31fe`, box di prova `sbtest19`, Electron vero), corretti dal revisore:
+
+| Punto | Dove | Cosa |
+|---|---|---|
+| **L3-bis** la sonda guardava il pixel ACCANTO | `MOUSE_HIT_ARM_FN` in `browser.ts`, `probeClickPoint` in `computer.ts`, test in `computer-probe.test.ts` | Errore della spec: la cattura `once` prendeva il PRIMO evento, quello del pre-spostamento a x−1 dentro la pagina. Sul bordo sinistro di un bottone la sonda guardava fuori dal bottone (click libero). Ora il pre-spostamento va a (0,0) nella barra delle schede (o (1,0) se il punto è (0,0)), FUORI dalla pagina, e il listener (uno per documento) tiene l'ULTIMO evento. Verificato dal vivo: bordo sinistro di «Acquista» → x = 300 esatto, bottone «Acquista» |
+| **V3-bis** lo schermo non era MAI pronto | `dockerScreenSocketReadyArgv` in `docker-argv.ts`, test in `docker-argv.test.ts` | `test -S -- <path>`: il `test` di coreutils non accetta `--` («binary operator expected», exit 2), quindi `screen:open` falliva sempre con «il socket non risponde». Tolto il `--`: il path è costruito dal daemon ed è sempre assoluto |
+
+Verifica dal vivo dopo le correzioni:
+- **Isolamento come uid 1000:** zero listener TCP (5900/5901 chiuse), niente `/tmp/.X11-unix`, `xdpyinfo` senza cookie rifiutato, socket della vista vietato.
+- **Funzioni di pagina vere su Chromium:**
+  - submit «Acquista», svg con aria-label e span in un bottone → risalgono al bottone;
+  - iframe → frame, barra degli indirizzi → outside, shadow DOM letto;
+  - fuoco su campo, password, bottone e pagina riconosciuto.
+- **Electron vero** (`SANDBOT_TEST_BOX_PREFIX=sbtest19`, modello finto): **12/12**:
+  - `computer_act` su «Submit order» di httpbin → card, e il rifiuto torna al modello;
+  - vista dal vivo noVNC con contenuto;
+  - `request_takeover` → card → «Apri lo schermo» in controllo, con Chromium visibile e manovrabile → «Ho finito» con nota → nuovo turno con `[The user finished on your screen.]` e `<nota_utente>`;
+  - `/screen/%` → 404 col daemon vivo.
+
+Controlli: typecheck pulito, 113 file / 1854 test verdi, build ok.
+
+Residui per la 19b:
+- **Log:** gli avvisi di xkbcomp di Xvfb riempiono `daemon.log` (va zittito lo stderr di Xvfb).
+- **Testo d'errore:** quello di `screen:open` nella UI mostra il prefisso grezzo «Error invoking remote method…».
+- **Click nello spazio vuoto:** dà come nome l'`innerText` del body, con ask inutili sulle pagine con parole d'impegno.
+- **Eval:** i casi 40–41 su modello reale non sono ancora stati lanciati.

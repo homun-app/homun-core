@@ -300,16 +300,23 @@ describe('fase 19a correzioni L6: ACTIVE_FIELD_FN vede anche i non-campo', () =>
 // ---- L3: la cattura one-shot del mousemove ----
 
 describe('fase 19a correzioni L3: la cattura one-shot del mousemove', () => {
-  it('MOUSE_HIT_ARM_FN installa la cattura (capture, once) e MOUSE_HIT_READ_FN legge le coordinate esatte', () => {
+  it('MOUSE_HIT_ARM_FN installa la cattura (capture, UNA volta per documento, tiene l\'ULTIMO evento) e MOUSE_HIT_READ_FN legge le coordinate esatte', () => {
     const win: Record<string, unknown> = {}
     const { listeners } = runPageFn(MOUSE_HIT_ARM_FN, {}, win)
     expect(win.__sbHit).toBeNull()
     expect(listeners.length).toBe(1)
     expect(listeners[0]!.type).toBe('mousemove')
-    expect(listeners[0]!.opts).toEqual({ capture: true, once: true })
+    expect(listeners[0]!.opts).toEqual({ capture: true })
     // il mousemove vero di xdotool arriva con clientX/clientY esatti
-    ;(listeners[0] as unknown as { handler: (e: { clientX: number; clientY: number }) => void }).handler({ clientX: 380, clientY: 225 })
+    // verifica: con due eventi vale l'ULTIMO (il punto vero), mai il primo
+    const handler = (listeners[0] as unknown as { handler: (e: { clientX: number; clientY: number }) => void }).handler
+    handler({ clientX: 379, clientY: 225 })
+    handler({ clientX: 380, clientY: 225 })
     expect(win.__sbHit).toEqual({ x: 380, y: 225 })
+    // un secondo armo nello stesso documento azzera ma NON aggiunge listener
+    expect(runPageFn(MOUSE_HIT_ARM_FN, {}, win).listeners.length).toBe(0)
+    expect(win.__sbHit).toBeNull()
+    handler({ clientX: 380, clientY: 225 })
     // e la lettura è la SOLA cosa che fa MOUSE_HIT_READ_FN
     expect(pageObj(MOUSE_HIT_READ_FN, {}, win)).toEqual({ x: 380, y: 225 })
   })
@@ -345,10 +352,10 @@ describe('fase 19a correzioni L3: computerActContextOf — cattura → doppio mo
         sleep: async (ms) => { calls.push(`sleep ${ms}`) }
       }
     })
-    // cattura → mousemove DOPPIO (379 poi 380: x' = x−1) → attesa → lettura → elemento
+    // cattura → mousemove DOPPIO (0,0 nella barra delle schede, poi 380) → attesa → lettura → elemento
     expect(calls).toEqual([
       `eval ${MOUSE_HIT_ARM_FN.slice(0, 46)}`,
-      'docker xdotool mousemove -- 379 312 mousemove -- 380 312',
+      'docker xdotool mousemove -- 0 0 mousemove -- 380 312',
       `sleep ${MOUSE_PROBE_WAIT_MS}`,
       `eval ${MOUSE_HIT_READ_FN.slice(0, 46)}`,
       `eval ${'() => { const cut = (s) => String(s == null ? '.slice(0, 46)}`
@@ -360,10 +367,10 @@ describe('fase 19a correzioni L3: computerActContextOf — cattura → doppio mo
     const err = await computerExecAction('agent_x', DESKTOP, { kind: 'click', x: 380, y: 312 })
     expect(err).toBeNull()
     expect(calls[5]).toBe('docker xdotool mousemove -- 380 312 click 1')
-    expect(calls.slice(0, 5).every((c) => c.startsWith('docker') === false || c.includes('mousemove -- 379'))).toBe(true)
+    expect(calls.slice(0, 5).every((c) => c.startsWith('docker') === false || c.includes('mousemove -- 0 0'))).toBe(true)
   })
 
-  it('x\' = x+1 quando x = 0 (il primo spostamento deve PARTIRE comunque)', async () => {
+  it('il pre-spostamento sta nella barra delle schede: (0,0), o (1,0) se il punto è (0,0)', async () => {
     const moves: string[] = []
     setDockerRunnerForTests(async (argv) => {
       const i = argv.indexOf('xdotool')
@@ -372,11 +379,18 @@ describe('fase 19a correzioni L3: computerActContextOf — cattura → doppio mo
     })
     const evaluate = async (_agentId: string, fn: string): Promise<unknown> =>
       fn === MOUSE_HIT_ARM_FN ? 1 : null // niente evento: si va di formula
-    await computerActContextOf('agent_x', { kind: 'click', x: 0, y: 10 }, VIEW, {
-      challenge: false, userControl: false, desktop: DESKTOP,
-      probe: { evaluate, sleep: async () => undefined }
-    })
-    expect(moves).toEqual(['mousemove -- 1 10 mousemove -- 0 10'])
+    for (const [x, y] of [[0, 10], [0, 0], [301, 287]] as const) {
+      await computerActContextOf('agent_x', { kind: 'click', x, y }, VIEW, {
+        challenge: false, userControl: false, desktop: DESKTOP,
+        probe: { evaluate, sleep: async () => undefined }
+      })
+    }
+    // verifica: MAI x−1 dentro la pagina (l'evento del pixel accanto ingannava la sonda sul bordo)
+    expect(moves).toEqual([
+      'mousemove -- 0 0 mousemove -- 0 10',
+      'mousemove -- 1 0 mousemove -- 0 0',
+      'mousemove -- 0 0 mousemove -- 301 287'
+    ])
   })
 
   it('SENZA evento e punto fuori dal viewport → outside (formula di L2)', async () => {

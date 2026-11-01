@@ -146,10 +146,11 @@ export async function computerActContextOf(
  * sta il puntatore invece di fidarsi della formula dell'offset.
  * 1. browser_evaluate installa la cattura one-shot del mousemove;
  * 2. xdotool (come 1001, stesso argv della 19a) porta il puntatore sul punto
- *    con un DOPPIO mousemove — il primo a x−1 (o x+1 se x = 0) garantisce
- *    l'evento anche se il puntatore era già sul punto;
+ *    con un DOPPIO mousemove — il primo a (0,0) nella barra delle schede (o
+ *    (1,0) se il punto è (0,0)), fuori dalla pagina, garantisce l'evento anche
+ *    se il puntatore era già sul punto;
  * 3. attesa di 150 ms;
- * 4. la lettura di window.__sbHit decide:
+ * 4. la lettura di window.__sbHit (l'ULTIMO evento) decide:
  *    - C'È l'evento → le SUE coordinate (esatte) costruiscono l'elemento con
  *      la funzione di L4; se lì sotto c'è un frame → frame;
  *    - NON c'è → la formula di L2 col viewport: punto fuori → outside; punto
@@ -171,10 +172,15 @@ async function probeClickPoint(
   // 1. la cattura one-shot (un fallimento qui si comporta come nessun evento)
   await evaluate(agentId, MOUSE_HIT_ARM_FN)
   // 2. il doppio mousemove di xdotool,argv puri come 1001 (nessuna shell)
-  const x1 = x === 0 ? x + 1 : x - 1
+  // verifica: il pre-spostamento va nella barra delle schede, FUORI dalla
+  // pagina (L2: finestra a 0,0 e barra alta 87 px) — un pre-spostamento a x−1
+  // DENTRO la pagina dava un evento sul pixel accanto, e sul bordo di un
+  // bottone la sonda guardava fuori dal bottone. Così l'unico evento della
+  // pagina è quello del punto vero (e la cattura tiene comunque l'ultimo)
+  const [x1, y1] = x === 0 && y === 0 ? [1, 0] : [0, 0]
   const exec = probe?.execArgv ?? runDockerArgv
   await exec(dockerXdotoolArgv(desktop.display, desktop.xauthority, [
-    'mousemove', '--', String(x1), String(y),
+    'mousemove', '--', String(x1), String(y1),
     'mousemove', '--', String(x), String(y)
   ]))
   // 3. l'attesa dell'evento
