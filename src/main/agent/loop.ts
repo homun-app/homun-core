@@ -1185,9 +1185,14 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     const routeIncompatible = (r: Route): string | null => {
       const rp = providerById(r.providerId)
       if (!rp) return null
+      // K8: il bisogno di immagini viene SOLO dalle immagini già nei messaggi
+      // (allegati dell'utente e screenshot di use-app, che entrano come
+      // messaggi user con images). NON da use-app tra i tool offerti: è nei
+      // tool base di OGNI turno, e una riserva senza visione verrebbe saltata
+      // sempre. Se la riserva chiama use-app, il gate a metà turno la rifiuta.
       const need = {
         inputTokens: messages.reduce((n, m) => n + estimateTokensOf(m.content), 0),
-        needsImages: messages.some((m) => m.role === 'user' && m.images?.length) || turnTools.some((t) => t.name === 'use-app')
+        needsImages: messages.some((m) => m.role === 'user' && (m.images?.length ?? 0) > 0)
       }
       const reason = routeIncompatibility(routeModelCaps(rp, r.model), need)
       if (reason) console.log(`[sandbot] fallback skipped (incompatible): ${r.providerId}/${r.model}: ${reason}`)

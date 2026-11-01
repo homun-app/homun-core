@@ -3136,3 +3136,11 @@ Sopra il tag `fase-18b` (7695954). Il body con «Predefinito» resta identico al
 - `npm run i18n:extract`: en **0 missing** su 841 (nessuna stringa nuova: K6 e K7 non toccano la UI); **seconda estrazione senza differenze** (verificato con `diff -r` dei cataloghi).
 
 Nessun Docker, nessun modello cloud né rete reale fuori da 127.0.0.1 (server finti e fetch intercettato), niente `npm run dist`, nessun app o daemon avviato sulla cartella dati vera, nessun segreto vero (solo `sk-test-*`), nessuna cartella temporanea fuori da `mkdtemp` in `/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/`, nessun file o cartella preesistente cancellati. L'eval NON è stato lanciato, come da vincoli.
+
+## Fase 18b — correzione K8 (fatta in verifica)
+
+| Punto | Stato | Dove | Note |
+|---|---|---|---|
+| **K8** riserve senza visione saltate sempre | fatto | `routeIncompatible` in `src/main/agent/loop.ts`; commento di `RouteNeed` in `model-fallback.ts`; test in `loop.test.ts` | Errore della spec K7: `needsImages` valeva anche con `use-app` fra i tool offerti, ma `use-app` è nei tool base di ogni turno, quindi una riserva di catalogo senza visione (es. groq `llama-3.3-70b-versatile`) veniva SEMPRE saltata e, col primario in 5xx, il turno si fermava. Ora `needsImages` viene solo dalle immagini già nei messaggi (allegati e screenshot di `use-app`, che entrano come messaggi user con `images`). Se la riserva chiama `use-app`, il gate a metà turno la rifiuta con l'errore inglese di H4. Test: senza immagini la riserva serve il turno e riceve il rifiuto di `use-app`; con un'immagine allegata si salta (log del motivo, nessuna chiamata) |
+
+Controlli: `npm run typecheck` pulito; `npx vitest run` 109 file / 1755 test verdi; `npm run build` ok. Nessun testo dell'interfaccia toccato (estrazione non necessaria).

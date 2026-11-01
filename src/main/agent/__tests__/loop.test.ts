@@ -4928,7 +4928,8 @@ describe('fase 18b (H4): la visione conosciuta', () => {
     expect(seen[0]!.some((n) => n === 'use-app')).toBe(false)
   })
 
-  it('K7: la riserva SENZA visione si SALTA già al passaggio d\'anello (prima ci arrivava e il gate inglese rifiutava use-app a metà turno)', async () => {
+  /** primario m1 (vision sconosciuta) con riserva di catalogo groq SENZA visione. */
+  const setNoVisionFallback = (): void => {
     h.db.providers.push({ id: 'prov', enabled: true, kind: 'groq' })
     h.db.settings.set('providers.modelDefaults', { prov: { fallbackModel: 'llama-3.3-70b-versatile' } })
     h.db.settings.set('permissions', {
@@ -4938,18 +4939,30 @@ describe('fase 18b (H4): la visione conosciuta', () => {
         { tool: 'use-app', pattern: '*', mode: 'always_allow' }
       ]
     })
-    // il primario m1 ha vision sconosciuta → use-app offerto; poi 503 → la
-    // riserva senza visione NON può servire il turno (K7): si salta e il
-    // turno chiude con l'errore originale. Il gate del tool resta come
-    // difesa (il messaggio inglese non cambia), ma non si raggiunge più da qui
+  }
+
+  it('K8: senza immagini nei messaggi la riserva SENZA visione SERVE il turno (use-app offerto non basta a scartarla); se chiama use-app il gate inglese la rifiuta', async () => {
+    setNoVisionFallback()
+    h.llm.queue = [
+      { error: httpError503() },
+      { toolCalls: [{ id: 'ua1', name: 'use-app', arguments: JSON.stringify({ action: 'screenshot' }) }] },
+      { toolCalls: [{ id: 's1', name: 'send_to_user', arguments: JSON.stringify({ text: 'non posso vedere lo schermo' }) }] }
+    ]
+    await runTurn(AGENT, 'clicca', emit)
+    expect(h.llm.models.slice(0, 3)).toEqual(['m1', 'llama-3.3-70b-versatile', 'llama-3.3-70b-versatile'])
+    // il rifiuto arriva al modello come result del tool
+    expect(h.llm.calls[2]!.some((m) => m.role === 'tool' && m.toolCallId === 'ua1')).toBe(true)
+    const refused = h.db.entries.find((e) => e.kind === 'tool-result' && e.meta?.callId === 'ua1')
+    expect(refused?.content).toBe('use-app needs a vision model; the current model cannot see images')
+    expect(refused?.meta?.error).toBe(true)
+  })
+
+  it('K7/K8: con un\'IMMAGINE nei messaggi la riserva senza visione si SALTA (log del motivo, nessuna chiamata)', async () => {
+    setNoVisionFallback()
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined)
     try {
-      h.llm.queue = [
-        { error: httpError503() },
-        { toolCalls: [{ id: 'ua1', name: 'use-app', arguments: JSON.stringify({ action: 'screenshot' }) }] },
-        { text: 'fine' }
-      ]
-      await runTurn(AGENT, 'clicca', emit)
+      h.llm.queue = [{ error: httpError503() }, { text: 'mai' }]
+      await runTurn(AGENT, 'guarda', emit, ['QUJD'])
       expect(h.llm.models).toEqual(['m1'])
       expect(h.db.entries.some((e) => e.kind === 'event' && e.meta?.turnEnd === 'STOPPED')).toBe(true)
       expect(log.mock.calls.some((c) => String(c[0]).includes('cannot see the images'))).toBe(true)
@@ -5167,7 +5180,7 @@ describe('fase 18b K7: le riserve incompatibili si saltano (senza raffreddarle)'
     }
   })
 
-  it('una riserva senza VISIONE si salta quando il turno ha immagini (use-app offerto)', async () => {
+  it('una riserva senza VISIONE si salta quando il turno ha immagini nei messaggi (K8: use-app offerto da solo non basta)', async () => {
     // gpt-4 è anche senza visione, ma qui conta la REGOLA: con una
     // conversazione CORTA il contesto ci sta e scatta solo quella delle immagini
     h.db.providers.push({ id: 'groq-k7', enabled: true, kind: 'groq' })
@@ -5175,7 +5188,8 @@ describe('fase 18b K7: le riserve incompatibili si saltano (senza raffreddarle)'
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined)
     try {
       // il modello attivo (m1, sintetico) ha vision sconosciuta → use-app è
-      // nei tool offerti → la riserva che non vede si salta
+      // nei tool offerti; il turno ha un'IMMAGINE allegata → la riserva che
+      // non vede si salta (K8: senza l'immagine NON si salterebbe)
       const seenTools: string[][] = []
       const origQueue = h.llm.queue
       h.llm.queue = [
@@ -5184,7 +5198,7 @@ describe('fase 18b K7: le riserve incompatibili si saltano (senza raffreddarle)'
           return { error: httpError503() }
         }
       ]
-      await runTurn(AGENT, 'ciao', emit)
+      await runTurn(AGENT, 'ciao', emit, ['QUJD'])
       h.llm.queue = origQueue
       expect(h.llm.models).toEqual(['m1'])
       expect(seenTools[0]!.some((n) => n === 'use-app')).toBe(true)

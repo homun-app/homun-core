@@ -102,8 +102,8 @@ export const MAX_ROUTE_SWITCHES = 3
 /**
  * K7: ciò che il turno CHIEDE a un anello della catena. La stima dei token è
  * quella di sempre (estimateTokensOf di memory.ts); `needsImages` vale se ci
- * sono immagini nei messaggi del turno OPPURE use-app è nei tool offerti
- * (l'unico che restituisce immagini).
+ * sono immagini nei messaggi del turno (allegati o screenshot già ricevuti).
+ * K8: NON se use-app è solo offerto — è nei tool base di ogni turno.
  */
 export interface RouteNeed {
   inputTokens: number
