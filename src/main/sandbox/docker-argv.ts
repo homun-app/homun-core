@@ -10,11 +10,29 @@ export const CONTAINER_USER = '1000:1000'
 
 // ---- fase 11 (punto 1): il box CONDIVISO, un solo container per utente ----
 
-/** Il container unico del box condiviso di tutti i bot. */
-export const BOX_CONTAINER = 'sandbot-box'
+/**
+ * Fase 19a correzioni (L9): il prefisso dei nomi del box di PROVA per la
+ * verifica in Electron (vista e presa di controllo dal vivo). La variabile
+ * d'ambiente SANDBOT_TEST_BOX_PREFIX vale SOLO se rispetta questa regex
+ * (parte OBBLIGATORIAMENTE per `sbtest`): qualunque altro valore si ignora,
+ * così non può mai puntare ai nomi dell'utente (sandbot-box, …). Letta UNA
+ * volta al caricamento del modulo, come SANDBOT_BOX_DOCKERFILE.
+ */
+export const SANDBOT_TEST_BOX_PREFIX_RE = /^sbtest[a-z0-9]{0,12}$/
+
+/** Il prefisso valido dell'ambiente (null = nessun box di prova). */
+function validTestBoxPrefix(env: NodeJS.ProcessEnv): string | null {
+  const v = env.SANDBOT_TEST_BOX_PREFIX
+  return typeof v === 'string' && SANDBOT_TEST_BOX_PREFIX_RE.test(v) ? v : null
+}
+
+const TEST_BOX_PREFIX = validTestBoxPrefix(process.env)
+
+/** Il container unico del box condiviso di tutti i bot (col prefisso di prova se attivo). */
+export const BOX_CONTAINER = TEST_BOX_PREFIX ? `${TEST_BOX_PREFIX}-box` : 'sandbot-box'
 
 /** Il volume persistente del box condiviso, montato su /box. */
-export const BOX_VOLUME = 'sandbot-box'
+export const BOX_VOLUME = BOX_CONTAINER
 
 /**
  * Fase 11b (0c + punto 1): l'immagine del box è NOSTRA, costruita dal
@@ -285,7 +303,7 @@ export function dockerBoxCreateArgv(container: string, volume: string, network: 
 // ---- M4: il volume DEDICATO dei plugin, in SOLA LETTURA dal kernel ----
 
 /** Il volume persistente dei plugin di terzi (montato /plugins:ro nel box). */
-export const PLUGINS_VOLUME = 'sandbot-plugins'
+export const PLUGINS_VOLUME = TEST_BOX_PREFIX ? `${TEST_BOX_PREFIX}-plugins` : 'sandbot-plugins'
 
 /** Punto di montaggio del volume dei plugin nel container del box. */
 export const PLUGINS_MOUNT = '/plugins'
@@ -580,7 +598,7 @@ export const BROWSER_SERVER_IDLE_MS = 60 * 60_000
 export const BROWSERS_PER_BOX_MAX = 3
 
 /** Il volume persistente dello stato del browser (montato /browser rw nel box). */
-export const BROWSER_VOLUME = 'sandbot-browser'
+export const BROWSER_VOLUME = TEST_BOX_PREFIX ? `${TEST_BOX_PREFIX}-browser` : 'sandbot-browser'
 
 /** Punto di montaggio del volume del browser nel container del box. */
 export const BROWSER_MOUNT = '/browser'
@@ -715,6 +733,12 @@ export function browserControlPidFile(owner: string): string {
  * nella cartella 0700 di 1001 (nessuna porta TCP nel container: la shell del
  * bot, uid 1000 nello stesso namespace di rete, non può vedere né comandare
  * lo schermo), poi DISPLAY/XAUTHORITY ed exec playwright-mcp.
+ * Correzione L1 (fase 19a correzioni, misurato sull'immagine noble): x11vnc
+ * 0.9.16 NON ha `-unixsockonly` (lo rifiuta ed esce: visualizzatore morto) e
+ * col ripiego `-rfbport 0 -unixsock` resta in ascolto su `[::]:5900` —
+ * `-noipv6` DA SOLO non la chiude, la chiude `-rfbportv6 -1` (zero listener
+ * TCP in /proc/net/tcp*). Ogni x11vnc parte quindi con
+ * `-rfbport 0 -rfbportv6 -1 -noipv6 -unixsock ./<nome>.sock`.
  * Xvfb e x11vnc restano nello STESSO gruppo di processi del wrapper: il kill
  * di gruppo di oggi (chiusura dopo inattività, orfani) li chiude insieme al
  * browser.
@@ -739,7 +763,7 @@ export const DOCKER_BROWSER_DESKTOP_WRAPPER_SH = [
   'done',
   '[ "$ready" = 1 ] || { echo "Xvfb did not start" >&2; exit 1; }',
   'n=$(cat ./display)',
-  'x11vnc -display ":$n" -auth ./Xauthority -rfbport 0 -unixsockonly ./vnc-view.sock -viewonly -shared -forever -nopw -quiet &',
+  'x11vnc -display ":$n" -auth ./Xauthority -rfbport 0 -rfbportv6 -1 -noipv6 -unixsock ./vnc-view.sock -viewonly -shared -forever -nopw -quiet &',
   'shift',
   'export DISPLAY=":$n"',
   'export XAUTHORITY="$PWD/Xauthority"',
@@ -780,7 +804,11 @@ export function browserMcpFlags(agentId: string, proxyPort: number, opts: { chil
     '--block-service-workers',
     '--proxy-server', `http://host.docker.internal:${proxyPort}`,
     '--timeout-navigation', '30000',
-    '--viewport-size', '1280x800',
+    // correzione L2 (fase 19a correzioni): il PRINCIPALE headful NON ha più
+    // --viewport-size — il viewport segue la finestra (con l'emulazione la
+    // finestra usciva dallo schermo e outerHeight - innerHeight non era più
+    // l'altezza della barra); solo i FIGLI headless lo tengono com'era
+    ...(opts.child ? ['--viewport-size', '1280x800'] : []),
     '--image-responses', 'omit',
     // fase 19a (V2): col desktop aperto la chiusura la decide il daemon (il
     // timer nostro è SOSPESO con vista/controllo in corso): il server del
@@ -820,9 +848,15 @@ export const PLAYWRIGHT_MCP_CONFIG = '/etc/sandbot/playwright-mcp.json'
  * niente misure anti-rilevamento. Il controllo cerca SOLO la stringa
  * "--disable-blink-features": con il nostro arg vuoto la trova e non aggiunge
  * più AutomationControlled.
+ * Correzione L2 (fase 19a correzioni, misurato): in FONDO agli args ci sono
+ * `"--window-position=0,0"` e `"--window-size=1280,960"` — col principale
+ * headful Chromium apriva la finestra a (10,10) grande 1288×931, USCENDO dallo
+ * schermo da 1280; così sta a (0,0) dentro lo schermo e l'offset reale è
+ * outerHeight - innerHeight (0, 87 misurato). Sui figli headless sono innocui.
+ * La STESSA stringa vive nel Dockerfile (il test le confronta).
  */
 export const PLAYWRIGHT_MCP_CONFIG_JSON =
-  '{"browser":{"launchOptions":{"args":["--disable-background-networking","--disable-component-update","--disable-sync","--no-pings","--disable-domain-reliability","--disable-features=OptimizationHints,MediaRouter,Translate,AutofillServerCommunication","--disable-blink-features="]}}}'
+  '{"browser":{"launchOptions":{"args":["--disable-background-networking","--disable-component-update","--disable-sync","--no-pings","--disable-domain-reliability","--disable-features=OptimizationHints,MediaRouter,Translate,AutofillServerCommunication","--disable-blink-features=","--window-position=0,0","--window-size=1280,960"]}}}'
 
 /**
  * L'argv del launcher del browser di un bot (puro): `docker exec -i` col
@@ -901,11 +935,13 @@ export function dockerBrowserRmFileArgv(container: string, path: string): string
  * gruppo): il processo di docker exec è già leader di sessione, quindi il pid
  * scritto è anche il pgid. Il display number viaggia come $1 (il file display
  * lo scrive il wrapper del desktop). Stessa forma di socket unix della vista:
- * NESSUNA porta TCP nel container.
+ * NESSUNA porta TCP nel container (L1: gli stessi flag `-rfbport 0
+ * -rfbportv6 -1 -noipv6 -unixsock`, ché senza `-viewonly` questo è il server
+ * che COMANDA il browser in cui l'utente ha fatto login).
  */
 export const DOCKER_SCREEN_CONTROL_VNC_SH = [
   'echo $$ >./vnc-control.pid',
-  'exec x11vnc -display ":$1" -auth ./Xauthority -rfbport 0 -unixsockonly ./vnc-control.sock -shared -forever -nopw -quiet'
+  'exec x11vnc -display ":$1" -auth ./Xauthority -rfbport 0 -rfbportv6 -1 -noipv6 -unixsock ./vnc-control.sock -shared -forever -nopw -quiet'
 ].join('\n')
 
 /** L'argv dell'avvio del x11vnc di controllo (V3.1), come 1001, via docker exec -d. */

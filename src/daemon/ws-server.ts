@@ -24,6 +24,16 @@ const AUTH_TIMEOUT_MS = 5_000
 /** Tetto pre-autenticazione: buffer + frammenti accumulati non oltre 64 KB. */
 const PRE_AUTH_MAX_BYTES = 64 * 1024
 
+/**
+ * Fase 19a correzioni (L8): il percorso dell'endpoint dello schermo è valido
+ * SOLO in questa forma — capability base64url di 32 byte (43 caratteri), il
+ * percorso NON si decodifica MAI: `decodeURIComponent('/screen/%')` lanciava
+ * URIError DENTRO l'handler dell'upgrade e, senza un gestore
+ * uncaughtException, il processo moriva (lo può tentare qualunque pagina nel
+ * browser dell'utente). Per tutto il resto: 404 e chiusura.
+ */
+export const SCREEN_CAP_PATH_RE = /^\/screen\/[A-Za-z0-9_-]{43}$/
+
 interface Pending {
   resolve: (v: unknown) => void
   reject: (e: Error) => void
@@ -230,15 +240,17 @@ export function startWsServer(opts: {
     // fase 19a (V3.2): /screen/<capability> è il ponte binario con il desktop
     // del bot (capability monouso, la consuma il gestore); tutto il resto è il
     // canale UI di sempre
+    // correzione L8: NESSUNA decodifica del percorso — valido SOLO se è
+    // ESATTAMENTE /screen/<43 caratteri base64url> (SCREEN_CAP_PATH_RE);
+    // `/screen/%` e compagnia fanno 404 e chiusura, senza eccezioni
     const path = req.url ?? '/'
     if (opts.onScreenUpgrade && path.startsWith('/screen/')) {
-      const cap = decodeURIComponent(path.slice('/screen/'.length))
-      if (!cap || cap.includes('/')) {
+      if (!SCREEN_CAP_PATH_RE.test(path)) {
         socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n')
         socket.destroy()
         return
       }
-      opts.onScreenUpgrade(cap, req, socket, head)
+      opts.onScreenUpgrade(path.slice('/screen/'.length), req, socket, head)
       return
     }
     const key = req.headers['sec-websocket-key']

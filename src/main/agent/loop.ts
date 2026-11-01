@@ -1911,13 +1911,16 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           }
           // sfida anti-bot nell'ultimo snapshot noto → ogni azione è negata
           const challenge = guard.snapshotChallenge(browser.lastSnapshotOf(agentId) ?? '')
-          // l'offset del viewport si calcola UNA volta per chiamata
+          // l'offset del viewport si calcola UNA volta per chiamata: dalle
+          // correzioni L3 è solo il RIPIEGO della formula della sonda del punto
           const view = await browser.probeViewportOffset(agentId)
           let executed = 0
           let refused: { index: number; kind: string; reason: string } | null = null
           for (let i = 0; i < prep.actions.length; i++) {
             const action = prep.actions[i]!
-            const ctx = await computer.computerActContextOf(agentId, action, view, { challenge, userControl: false })
+            const ctx = await computer.computerActContextOf(agentId, action, view, {
+              challenge, userControl: false, desktop: info
+            })
             const risk = guard.computerActRisk(action, ctx)
             if (risk.kind === 'deny' || risk.kind === 'error') {
               refused = { index: i, kind: action.kind, reason: risk.reason }
@@ -1938,7 +1941,10 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               }
               if (!autoAllowed) {
                 const url = browser.lastUrlOf(agentId) ?? formatUi(ui(UI.cardNoPageOpen), loopUiLanguage())
-                const elem = ctx.click
+                // L3: la sonda del punto è un'unione — l'etichetta della card
+                // mostra l'elemento solo quando c'è davvero (outside, frame e
+                // unknown restano "the screen")
+                const elem = ctx.click && ctx.click.kind === 'element'
                   ? `${ctx.click.role} "${ctx.click.name || ctx.click.text}"`
                   : action.kind === 'key' ? `key ${action.key}` : 'the screen'
                 const askUi = ui(UI.cardBrowserAsk, {

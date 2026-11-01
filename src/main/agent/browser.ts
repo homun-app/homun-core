@@ -549,23 +549,119 @@ export async function probeViewportOffset(agentId: string): Promise<ViewportOffs
 }
 
 /**
- * Il probe dell'elemento in un punto della pagina (V6): ruolo, nome accessibile
- * e testo (per costruire il RefInfo del confine di computer_act) più il campo
- * (il probe di fase 14, per i click su input). Le coordinate entrano come
- * INTERI validati dal parser delle azioni: nessuna interpolazione pericolosa.
+ * La sonda del punto (fase 19a correzioni, L3): si chiede AL BROWSER dove sta
+ * il puntatore, invece di calcolare l'offset dalla finestra. Il daemon installa
+ * la cattura one-shot del mousemove, muove il puntatore sul punto con xdotool
+ * (doppio mousemove: il primo spostamento garantisce l'evento anche se il
+ * puntatore era già lì), aspetta e legge window.__sbHit. Misurato: un
+ * `mousemove` vero di xdotool arriva alla pagina con clientX/clientY esatti;
+ * `:hover` invece NON funziona sotto Playwright (mai usarlo). La funzione è la
+ * stringa COSTANTE della spec.
+ */
+export const MOUSE_HIT_ARM_FN = `() => {
+  window.__sbHit = null;
+  addEventListener('mousemove', (e) => {
+    window.__sbHit = { x: e.clientX, y: e.clientY };
+  }, { capture: true, once: true });
+  return 1
+}`
+
+/** La lettura della sonda del punto: window.__sbHit (null = nessun evento). */
+export const MOUSE_HIT_READ_FN = '() => window.__sbHit'
+
+/**
+ * Il descrittore di nome e ruolo di un elemento (fase 19a correzioni, L4):
+ * stringa COSTANTE eseguita nella pagina, condivisa dalla sonda del punto
+ * (elementAtPointFn) e dal probe del fuoco attivo (ACTIVE_FIELD_FN).
+ * Il NOME, nell'ordine: aria-label; il testo degli id di aria-labelledby;
+ * per input submit/button/reset/image il value, poi l'alt; l'alt di un'img;
+ * title; innerText — tutto troncato a 120 caratteri. Il RUOLO: esplicito,
+ * altrimenti a→link, button o input submit/button/reset/image→button,
+ * select→combobox, textarea o input di testo→textbox, label→label, il resto
+ * generic. Così un `<input type=submit value="Acquista">` (innerText vuoto) e
+ * un svg dentro un bottone con aria-label non passano più da nome vuoto.
+ */
+const ELEMENT_DESCRIBE_JS = [
+  "const cut = (s) => String(s == null ? '' : s).trim().slice(0, 120);",
+  "const labelText = (el) => ((el.labels && Array.from(el.labels).map((l) => l.textContent || '').join(' ')) || '')",
+  "const labelledBy = (el) => (el.getAttribute('aria-labelledby') || '').split(/\\s+/).filter(Boolean).map((i) => (document.getElementById(i) || {}).textContent || '').join(' ').trim()",
+  "const nameOf = (el) => {",
+  "  const t = el.tagName ? el.tagName.toLowerCase() : '';",
+  "  const isButton = t === 'button' || (t === 'input' && ['submit', 'button', 'reset', 'image'].indexOf(el.type) >= 0);",
+  "  let n = cut(el.getAttribute('aria-label') || '');",
+  "  if (!n) n = cut(labelledBy(el));",
+  "  if (!n && t === 'input' && ['submit', 'button', 'reset', 'image'].indexOf(el.type) >= 0) {",
+  "    n = cut(el.value || '');",
+  "    if (!n) n = cut(el.getAttribute('alt') || '');",
+  "  }",
+  "  if (!n && t === 'img') n = cut(el.getAttribute('alt') || '');",
+  "  if (!n) n = cut(el.title || '');",
+  "  if (!n) n = cut(el.innerText || '');",
+  "  return n;",
+  "}",
+  "const roleOf = (el) => {",
+  "  const t = el.tagName ? el.tagName.toLowerCase() : '';",
+  "  const r = el.getAttribute && el.getAttribute('role');",
+  "  if (r) return r;",
+  "  if (t === 'a') return 'link';",
+  "  if (t === 'button' || (t === 'input' && ['submit', 'button', 'reset', 'image'].indexOf(el.type) >= 0)) return 'button';",
+  "  if (t === 'select') return 'combobox';",
+  "  if (t === 'textarea' || (t === 'input' && ['text', 'search', 'email', 'url', 'tel', 'password'].indexOf(el.type) >= 0)) return 'textbox';",
+  "  if (t === 'label') return 'label';",
+  "  return 'generic';",
+  "}"
+].join('\n')
+
+/** Il selettore del CONTROLLO interattivo da cui risalire (L4). */
+const CONTROL_CLOSEST =
+  "'a[href],button,input,select,textarea,summary,label,[role=button],[role=link],[role=menuitem],[role=tab],[role=checkbox],[role=radio],[role=switch],[role=option],[onclick],[tabindex]:not([tabindex=\"-1\"])'"
+
+/**
+ * Il probe dell'elemento in un punto della pagina (V6 + L4 delle correzioni):
+ * parte da document.elementFromPoint(x, y), scende nei shadowRoot APERTI
+ * ripetendo elementFromPoint, riconosce i frame (IFRAME/FRAME/EMBED/OBJECT →
+ * { kind: 'frame' }) e risale al controllo interattivo vero con closest —
+ * così il nome è quello del BOTTONE, non del svg o dello span profondo.
+ * Il campo (field) si legge sul controllo trovato, non sull'elemento profondo.
+ * Le coordinate entrano come INTERI validati o letti dalla sonda: nessuna
+ * interpolazione pericolosa.
  */
 export function elementAtPointFn(px: number, py: number): string {
-  return `() => { const el = document.elementFromPoint(${px}, ${py}); if (!el) return null;
-const t = el.tagName ? el.tagName.toLowerCase() : '';
-const role = (el.getAttribute && el.getAttribute('role')) || (t === 'a' ? 'link' : t === 'button' ? 'button' : t === 'select' ? 'combobox' : (t === 'textarea' || (t === 'input' && el.type !== 'hidden')) ? 'textbox' : 'generic');
-const name = ((el.getAttribute && el.getAttribute('aria-label')) || el.title || (el.innerText || '').trim()).slice(0, 120);
-const field = (t === 'input' || t === 'textarea') ? { type: el.type || '', autocomplete: el.autocomplete || '', name: el.name || '', id: el.id || '', placeholder: el.placeholder || '', label: Array.from(el.labels || []).map((l) => l.textContent || '').join(' '), aria: el.getAttribute('aria-label') || '', title: el.title || '', origin: location.origin, top: true } : null;
-return { role, name: name.trim(), text: (el.innerText || '').trim().slice(0, 120), field } }`
+  return `() => { ${ELEMENT_DESCRIBE_JS}
+let el = document.elementFromPoint(${px}, ${py});
+if (!el) return null;
+for (let i = 0; el.shadowRoot && i < 32; i++) {
+  const inner = el.shadowRoot.elementFromPoint(${px}, ${py});
+  if (!inner || inner === el) break;
+  el = inner;
+}
+const tag = el.tagName ? el.tagName.toLowerCase() : '';
+if (tag === 'iframe' || tag === 'frame' || tag === 'embed' || tag === 'object') return { kind: 'frame' };
+const ctl = (el.closest && el.closest(${CONTROL_CLOSEST})) || el;
+let name = nameOf(ctl);
+if (ctl.tagName && ctl.tagName.toLowerCase() === 'label' && ctl.control && !name) name = nameOf(ctl.control);
+const ct = ctl.tagName ? ctl.tagName.toLowerCase() : '';
+const field = (ct === 'input' || ct === 'textarea') ? { type: ctl.type || '', autocomplete: ctl.autocomplete || '', name: ctl.name || '', id: ctl.id || '', placeholder: ctl.placeholder || '', label: labelText(ctl).trim(), aria: ctl.getAttribute('aria-label') || '', title: ctl.title || '', origin: location.origin, top: true } : null;
+return { kind: 'element', role: roleOf(ctl), name, text: cut(ctl.innerText || ''), field } }`
 }
 
-/** Il probe del campo ATTIVO (document.activeElement) per type e key (V6). */
-export const ACTIVE_FIELD_FN =
-  '() => { const el = document.activeElement; if (!el || el === document.body || el === document.documentElement) return null; const t = el.tagName ? el.tagName.toLowerCase() : ""; if (t !== "input" && t !== "textarea") return null; return { type: el.type || "", autocomplete: el.autocomplete || "", name: el.name || "", id: el.id || "", placeholder: el.placeholder || "", label: Array.from(el.labels || []).map((l) => l.textContent || "").join(" "), aria: el.getAttribute("aria-label") || "", title: el.title || "", origin: location.origin, top: true } }'
+/**
+ * Il probe del fuoco ATTIVO (document.activeElement) per type e key (V6, L6
+ * delle correzioni). Ora restituisce anche gli elementi che NON sono input o
+ * textarea: contenteditable → campo di testo (le stesse informazioni del
+ * campo); qualunque altro elemento focalizzato (bottone, link) →
+ * { element: { role, name, text } } con la logica di nome e ruolo di L4;
+ * body/html → { page: true } (il fuoco non sta in un controllo: per il
+ * confine è ask, vedi computerActRisk). null resta SOLO per il probe fallito.
+ * Nota misurata: document.hasFocus() resta true anche col fuoco nella barra
+ * degli indirizzi — NON serve a capire dove va la tastiera.
+ */
+export const ACTIVE_FIELD_FN = `() => { ${ELEMENT_DESCRIBE_JS}
+const el = document.activeElement;
+if (!el || el === document.body || el === document.documentElement) return { page: true };
+const t = el.tagName ? el.tagName.toLowerCase() : '';
+if (t === 'input' || t === 'textarea' || el.isContentEditable) return { type: el.type || '', autocomplete: el.autocomplete || '', name: el.name || '', id: el.id || '', placeholder: el.placeholder || '', label: labelText(el).trim(), aria: el.getAttribute('aria-label') || '', title: el.title || '', origin: location.origin, top: true };
+return { element: { role: roleOf(el), name: nameOf(el), text: cut(el.innerText || '') } } }`
 
 /**
  * Esegue un tool del browser mappandolo sulla chiamata MCP (punto 2). I tool

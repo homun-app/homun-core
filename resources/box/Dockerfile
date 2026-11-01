@@ -27,9 +27,15 @@ FROM mcr.microsoft.com/playwright:v1.64.1-noble
 # solo quando NON trova un arg che lo contiene: il flag vuoto lo accontenta SENZA
 # nascondere l'automazione (navigator.webdriver resta true: il browser del bot
 # si presenta come browser automatizzato, niente anti-rilevamento).
+# Fase 19a correzioni (L2, misurato): in FONDO agli args ci sono
+# "--window-position=0,0" e "--window-size=1280,960" — la finestra headful del
+# browser PRINCIPALE sta a (0,0) dentro lo schermo 1280x960 (prima apriva a
+# (10,10) grande 1288x931 e ne usciva); sui figli headless sono innocui. La
+# stringa è la STESSA di PLAYWRIGHT_MCP_CONFIG_JSON (docker-argv.ts), il test
+# la confronta.
 RUN mkdir -p /etc/sandbot \
  && printf '%s\n' \
-      '{"browser":{"launchOptions":{"args":["--disable-background-networking","--disable-component-update","--disable-sync","--no-pings","--disable-domain-reliability","--disable-features=OptimizationHints,MediaRouter,Translate,AutofillServerCommunication","--disable-blink-features="]}}}' \
+      '{"browser":{"launchOptions":{"args":["--disable-background-networking","--disable-component-update","--disable-sync","--no-pings","--disable-domain-reliability","--disable-features=OptimizationHints,MediaRouter,Translate,AutofillServerCommunication","--disable-blink-features=","--window-position=0,0","--window-size=1280,960"]}}}' \
       > /etc/sandbot/playwright-mcp.json \
  && chmod 644 /etc/sandbot/playwright-mcp.json
 

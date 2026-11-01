@@ -1,21 +1,24 @@
-// Fase 19a (V9): il confine di computer_act (computerActRisk, pura) e la
-// validazione delle azioni (parseComputerActions + argv xdotool). Niente
-// Docker, niente browser: il contesto è costruito a mano come lo raccoglie
-// il daemon dai probe interni.
+// Fase 19a (V9) + correzioni L3–L7: il confine di computer_act
+// (computerActRisk, pura) e la validazione delle azioni (parseComputerActions
+// + argv xdotool). Niente Docker, niente browser: il contesto è costruito a
+// mano come lo raccoglie il daemon dai probe interni.
 import { describe, expect, it } from 'vitest'
 import {
   computerActRisk, parseComputerActions, computerActionXdotoolArgs,
+  keyParts, keyIsEnter, keyOpensDevtools,
   SNAPSHOT_BLOCKED_NOTE, CREDENTIAL_DENY_TEXT, USER_CONTROL_ERROR_TEXT,
+  CLICK_OUTSIDE_ASK_TEXT, CLICK_FRAME_ASK_TEXT, DEVTOOLS_DENY_TEXT, RIGHT_CLICK_ASK_TEXT,
   COMPUTER_ACTIONS_MAX, COMPUTER_TYPE_MAX_CHARS,
-  type ComputerAction, type ComputerActContext, type FieldProbeInfo
+  type ComputerAction, type ComputerActContext, type ComputerClickProbe, type ActiveFocus,
+  type FieldProbeInfo
 } from '../browser-guard'
 
 const SCREEN = { width: 1280, height: 960 }
 /** il viewport del browser nella finestra: la pagina inizia a (8, 84). */
 const VIEW = { offX: 8, offY: 84, width: 1280, height: 800 }
-/** un pulsante «Acquista» al punto (600, 400) dello schermo → in pagina (592, 316). */
-const CLICK_ACQUISTA = { role: 'button', name: 'Acquista ora', text: '', field: null }
-const CLICK_LINK = { role: 'link', name: 'Vedi il menu', text: '', field: null }
+/** un pulsante «Acquista» sotto il puntatore, come lo costruisce la sonda di L3/L4. */
+const CLICK_ACQUISTA: ComputerClickProbe = { kind: 'element', role: 'button', name: 'Acquista ora', text: '', field: null }
+const CLICK_LINK: ComputerClickProbe = { kind: 'element', role: 'link', name: 'Vedi il menu', text: '', field: null }
 
 const field = (over: Partial<FieldProbeInfo> = {}): FieldProbeInfo => ({
   type: 'text', autocomplete: '', name: '', id: '', placeholder: '', label: '', aria: '', title: '', origin: 'https://site.example', top: true,
@@ -44,69 +47,168 @@ describe('fase 19a (V9): computerActRisk — il confine di OGNI azione', () => {
     expect(SNAPSHOT_BLOCKED_NOTE).not.toContain('do NOT bypass it, report it to the user')
   })
 
-  it('click su un pulsante «Acquista» DENTRO la pagina → ask (stessa regola di browser_click)', () => {
+  it('L3: click su un pulsante «Acquista» DENTRO la pagina → ask commit (stessa regola di browser_click)', () => {
     const r = computerActRisk(click(600, 400), ctx({ click: CLICK_ACQUISTA }))
     expect(r.kind).toBe('ask')
     if (r.kind === 'ask') {
-      expect(r.ask.kind).toBe('commit')
+      expect(r.ask?.kind).toBe('commit')
       expect(r.reason).toContain('Acquista ora')
     }
   })
 
-  it('click su un link normale → free', () => {
+  it('L3: click su un link normale → free', () => {
     expect(computerActRisk(click(600, 400), ctx({ click: CLICK_LINK })).kind).toBe('free')
   })
 
-  it('click FUORI dalla pagina (barra degli indirizzi, schede) → ammesso (free)', () => {
-    // y=40 è sopra il viewport (la barra del browser), x=1279 oltre il viewport
-    expect(computerActRisk(click(600, 40), ctx({ click: null })).kind).toBe('free')
-    expect(computerActRisk(click(1300, 400), ctx({ click: null })).kind).toBe('free')
+  it('L3: click FUORI dalla pagina (barra, schede, menu di Chromium) → ask, MAI free', () => {
+    const r = computerActRisk(click(600, 40), ctx({ click: { kind: 'outside' } }))
+    expect(r).toEqual({ kind: 'ask', reason: CLICK_OUTSIDE_ASK_TEXT })
+    expect(CLICK_OUTSIDE_ASK_TEXT).toBe('click outside the web page (browser controls or a browser dialog)')
   })
 
-  it('click DENTRO la pagina ma probe dell\'elemento fallito → ask, MAI free', () => {
+  it('L3: click dentro un elemento incorporato (iframe PayPal/Stripe) → ask', () => {
+    const r = computerActRisk(click(600, 400), ctx({ click: { kind: 'frame' } }))
+    expect(r).toEqual({ kind: 'ask', reason: CLICK_FRAME_ASK_TEXT })
+    expect(CLICK_FRAME_ASK_TEXT).toBe('click inside an embedded frame: its content cannot be verified')
+  })
+
+  it('L3: sonda non riuscita (unknown) o probe fallito (null) → ask, MAI free', () => {
+    expect(computerActRisk(click(600, 400), ctx({ click: { kind: 'unknown' } })).kind).toBe('ask')
     const r = computerActRisk(click(600, 400), ctx({ click: null }))
     expect(r.kind).toBe('ask')
     if (r.kind === 'ask') expect(r.ask?.kind).toBe('probe')
   })
 
-  it('probe del viewport fallito → ask anche per un click qualunque', () => {
-    const r = computerActRisk(click(600, 400), ctx({ view: null, click: CLICK_LINK }))
-    expect(r.kind).toBe('ask')
+  it('L5: down e up hanno lo STESSO verdetto del click nel loro punto (down+up è un click completo)', () => {
+    expect(computerActRisk({ kind: 'down', x: 600, y: 400 }, ctx({ click: CLICK_ACQUISTA })).kind).toBe('ask')
+    expect(computerActRisk({ kind: 'up', x: 600, y: 400 }, ctx({ click: CLICK_ACQUISTA })).kind).toBe('ask')
+    // e i verdetti difficili arrivano identici anche per down/up
+    expect(computerActRisk({ kind: 'down', x: 600, y: 40 }, ctx({ click: { kind: 'outside' } })).kind).toBe('ask')
+    expect(computerActRisk({ kind: 'up', x: 600, y: 400 }, ctx({ click: { kind: 'frame' } })).kind).toBe('ask')
+    // move NO: resta senza sonda e free
+    expect(computerActRisk({ kind: 'move', x: 600, y: 400 }, ctx({ click: CLICK_ACQUISTA })).kind).toBe('free')
+  })
+
+  it('move/scroll/wait restano free (nessuna sonda)', () => {
+    expect(computerActRisk({ kind: 'move', x: 1, y: 1 }, ctx()).kind).toBe('free')
+    expect(computerActRisk({ kind: 'scroll', direction: 'down' }, ctx()).kind).toBe('free')
+    expect(computerActRisk({ kind: 'wait', ms: 500 }, ctx()).kind).toBe('free')
+  })
+
+  it('L7: click col tasto DESTRO → ask (menu contestuale del browser)', () => {
+    const r = computerActRisk({ kind: 'click', x: 600, y: 400, button: 'right' }, ctx({ click: CLICK_LINK }))
+    expect(r).toEqual({ kind: 'ask', reason: RIGHT_CLICK_ASK_TEXT })
+    expect(RIGHT_CLICK_ASK_TEXT).toBe('right-click opens the browser context menu')
   })
 
   it('type in un campo password (dal probe) → deny con CREDENTIAL_DENY_TEXT', () => {
-    const r = computerActRisk({ kind: 'type', text: 'segretissima' }, ctx({ activeField: field({ type: 'password' }) }))
+    const r = computerActRisk({ kind: 'type', text: 'segretissima' }, ctx({ activeField: { kind: 'field', field: field({ type: 'password' }) } }))
     expect(r).toEqual({ kind: 'deny', reason: CREDENTIAL_DENY_TEXT })
     // il testo nuovo cita request_takeover come alternativa senza login salvato
     expect(CREDENTIAL_DENY_TEXT).toContain('request_takeover')
   })
 
   it('type in un campo carta (autocomplete cc-*) → deny', () => {
-    const r = computerActRisk({ kind: 'type', text: '4242' }, ctx({ activeField: field({ autocomplete: 'cc-number' }) }))
+    const r = computerActRisk({ kind: 'type', text: '4242' }, ctx({ activeField: { kind: 'field', field: field({ autocomplete: 'cc-number' }) } }))
     expect(r.kind).toBe('deny')
   })
 
   it('type in un campo normale → free; probe fallito → ask', () => {
-    expect(computerActRisk({ kind: 'type', text: 'ricerca' }, ctx({ activeField: field() })).kind).toBe('free')
+    expect(computerActRisk({ kind: 'type', text: 'ricerca' }, ctx({ activeField: { kind: 'field', field: field() } })).kind).toBe('free')
     expect(computerActRisk({ kind: 'type', text: 'ricerca' }, ctx({ activeField: null })).kind).toBe('ask')
   })
 
-  it('key Return su un modulo → ask (come browser_press_key); campo credenziali → deny', () => {
-    const enter = computerActRisk({ kind: 'key', key: 'Return' }, ctx({ activeField: field() }))
-    expect(enter.kind).toBe('ask')
-    if (enter.kind === 'ask') expect(enter.ask.kind).toBe('enter')
-    expect(computerActRisk({ kind: 'key', key: 'KP_Enter' }, ctx({ activeField: field() })).kind).toBe('ask')
-    expect(computerActRisk({ kind: 'key', key: 'Return' }, ctx({ activeField: field({ type: 'password' }) })).kind).toBe('deny')
-    // gli altri tasti sono liberi
-    expect(computerActRisk({ kind: 'key', key: 'Tab' }, ctx({ activeField: field() })).kind).toBe('free')
+  it('L6: type con \\n o \\r nel testo → la STESSA ask di Invio (xdotool lo trasforma in Return e invia il form)', () => {
+    const r = computerActRisk({ kind: 'type', text: 'a\nb' }, ctx({ activeField: { kind: 'field', field: field() } }))
+    expect(r.kind).toBe('ask')
+    if (r.kind === 'ask') expect(r.ask?.kind).toBe('enter')
+    expect(computerActRisk({ kind: 'type', text: 'a\rb' }, ctx({ activeField: { kind: 'field', field: field() } })).kind).toBe('ask')
+    // il controllo credenziali viene PRIMA e resta un deny
+    expect(computerActRisk({ kind: 'type', text: 'a\nb' }, ctx({ activeField: { kind: 'field', field: field({ type: 'password' }) } })).kind).toBe('deny')
+    // il testo senza a capo resta free
+    expect(computerActRisk({ kind: 'type', text: 'ab' }, ctx({ activeField: { kind: 'field', field: field() } })).kind).toBe('free')
   })
 
-  it('move/down/up/scroll/wait → free (il confine sta nei click e nella digitazione)', () => {
-    expect(computerActRisk({ kind: 'move', x: 1, y: 1 }, ctx()).kind).toBe('free')
-    expect(computerActRisk({ kind: 'down', x: 1, y: 1 }, ctx()).kind).toBe('free')
-    expect(computerActRisk({ kind: 'up', x: 1, y: 1 }, ctx()).kind).toBe('free')
-    expect(computerActRisk({ kind: 'scroll', direction: 'down' }, ctx()).kind).toBe('free')
-    expect(computerActRisk({ kind: 'wait', ms: 500 }, ctx()).kind).toBe('free')
+  it('L6: type su un elemento NON campo, o col fuoco su body/html → ask (la digitazione non va in un campo)', () => {
+    const onButton = computerActRisk({ kind: 'type', text: 'ciao' }, ctx({ activeField: { kind: 'element', role: 'button', name: 'Acquista', text: '' } }))
+    expect(onButton.kind).toBe('ask')
+    if (onButton.kind === 'ask') expect(onButton.ask?.kind).toBe('probe')
+    const onPage = computerActRisk({ kind: 'type', text: 'ciao' }, ctx({ activeField: { kind: 'page' } }))
+    expect(onPage.kind).toBe('ask')
+    if (onPage.kind === 'ask') expect(onPage.ask?.kind).toBe('probe')
+  })
+
+  it('L6: key Return/KP_Enter su un campo → ask enter; campo credenziali → deny; altri tasti free', () => {
+    const enter = computerActRisk({ kind: 'key', key: 'Return' }, ctx({ activeField: { kind: 'field', field: field() } }))
+    expect(enter.kind).toBe('ask')
+    if (enter.kind === 'ask') expect(enter.ask?.kind).toBe('enter')
+    expect(computerActRisk({ kind: 'key', key: 'KP_Enter' }, ctx({ activeField: { kind: 'field', field: field() } })).kind).toBe('ask')
+    expect(computerActRisk({ kind: 'key', key: 'ctrl+Return' }, ctx({ activeField: { kind: 'field', field: field() } })).kind).toBe('ask')
+    expect(computerActRisk({ kind: 'key', key: 'ctrl+m' }, ctx({ activeField: { kind: 'field', field: field() } })).kind).toBe('ask')
+    expect(computerActRisk({ kind: 'key', key: 'ctrl+j' }, ctx({ activeField: { kind: 'field', field: field() } })).kind).toBe('ask')
+    expect(computerActRisk({ kind: 'key', key: 'Return' }, ctx({ activeField: { kind: 'field', field: field({ type: 'password' }) } })).kind).toBe('deny')
+    // gli altri tasti sono liberi
+    expect(computerActRisk({ kind: 'key', key: 'Tab' }, ctx({ activeField: { kind: 'field', field: field() } })).kind).toBe('free')
+    expect(computerActRisk({ kind: 'key', key: 'ctrl+shift+m' }, ctx({ activeField: { kind: 'field', field: field() } })).kind).toBe('free')
+  })
+
+  it('L6: focus su un elemento NON campo — spazio/Invio è un click su quell\'elemento (Tab fino a «Acquista» + spazio)', () => {
+    const acquista = computerActRisk({ kind: 'key', key: 'space' }, ctx({ activeField: { kind: 'element', role: 'button', name: 'Acquista', text: '' } }))
+    expect(acquista.kind).toBe('ask')
+    if (acquista.kind === 'ask') expect(acquista.ask?.kind).toBe('commit')
+    // un bottone che non impegna è free
+    expect(computerActRisk({ kind: 'key', key: 'space' }, ctx({ activeField: { kind: 'element', role: 'button', name: 'Dettagli', text: '' } })).kind).toBe('free')
+    // Invio su un bottone attivo è pure un click
+    expect(computerActRisk({ kind: 'key', key: 'Return' }, ctx({ activeField: { kind: 'element', role: 'button', name: 'Acquista', text: '' } })).kind).toBe('ask')
+    // gli altri tasti su un elemento non campo restano liberi
+    expect(computerActRisk({ kind: 'key', key: 'Tab' }, ctx({ activeField: { kind: 'element', role: 'button', name: 'Acquista', text: '' } })).kind).toBe('free')
+  })
+
+  it('L6: key col fuoco su body/html → ask (non si sa dove va la tastiera)', () => {
+    expect(computerActRisk({ kind: 'key', key: 'Tab' }, ctx({ activeField: { kind: 'page' } })).kind).toBe('ask')
+  })
+
+  it('L7: devtools → deny (F12 o ctrl/super + shift + i/j/c/k), qualunque il fuoco', () => {
+    for (const key of ['F12', 'f12', 'ctrl+shift+i', 'ctrl+shift+J', 'ctrl+shift+c', 'ctrl+shift+k', 'super+shift+i']) {
+      const r = computerActRisk({ kind: 'key', key }, ctx({ activeField: { kind: 'field', field: field() } }))
+      expect(r, `key ${key}`).toEqual({ kind: 'deny', reason: DEVTOOLS_DENY_TEXT })
+    }
+    expect(DEVTOOLS_DENY_TEXT).toBe('developer tools are not available to the bot')
+    // deny ANCHE col probe fallito e su un elemento non campo: il confine non dipende dal fuoco
+    expect(computerActRisk({ kind: 'key', key: 'F12' }, ctx({ activeField: null })).kind).toBe('deny')
+    expect(computerActRisk({ kind: 'key', key: 'ctrl+shift+i' }, ctx({ activeField: { kind: 'page' } })).kind).toBe('deny')
+    // combinazioni vicine ma NON devtools restano libere
+    expect(computerActRisk({ kind: 'key', key: 'ctrl+shift+t' }, ctx({ activeField: { kind: 'field', field: field() } })).kind).toBe('free')
+    expect(computerActRisk({ kind: 'key', key: 'F11' }, ctx({ activeField: { kind: 'field', field: field() } })).kind).toBe('free')
+    expect(computerActRisk({ kind: 'key', key: 'shift+i' }, ctx({ activeField: { kind: 'field', field: field() } })).kind).toBe('free')
+  })
+})
+
+describe('fase 19a correzioni (L6/L7): i tasti spezzati su + e confrontati minuscoli', () => {
+  it('keyParts spezza su +, pota i vuoti e abbassa le maiuscole', () => {
+    expect(keyParts('ctrl+Shift+I')).toEqual(['ctrl', 'shift', 'i'])
+    expect(keyParts('Return')).toEqual(['return'])
+    expect(keyParts('ctrl++x')).toEqual(['ctrl', 'x'])
+  })
+
+  it('keyIsEnter: return/kp_enter/iso_enter/linefeed, o la combinazione ESATTA ctrl+m / ctrl+j', () => {
+    for (const k of ['Return', 'return', 'KP_Enter', 'kp_enter', 'iso_enter', 'linefeed', 'ctrl+Return', 'shift+return']) {
+      expect(keyIsEnter(k), k).toBe(true)
+    }
+    expect(keyIsEnter('ctrl+m')).toBe(true)
+    expect(keyIsEnter('ctrl+j')).toBe(true)
+    // la combinazione deve essere ESATTAMENTE ctrl+m/ctrl+j; il pezzo 'enter'
+    // (la sintassi Playwright) NON è un Return di xdotool
+    for (const k of ['ctrl+shift+m', 'm', 'ctrl+l', 'enter', 'ctrl+shift+j', 'alt+m']) {
+      expect(keyIsEnter(k), k).toBe(false)
+    }
+  })
+
+  it('keyOpensDevtools: F12 o ctrl/super + shift + i/j/c/k, non altre combinazioni', () => {
+    for (const k of ['F12', 'f12', 'ctrl+shift+i', 'ctrl+shift+j', 'ctrl+shift+c', 'ctrl+shift+k', 'super+shift+c', 'ctrl+Shift+K']) {
+      expect(keyOpensDevtools(k), k).toBe(true)
+    }
+    for (const k of ['F11', 'ctrl+shift+t', 'ctrl+i', 'shift+i', 'i', 'ctrl+alt+i', 'ctrl+shift']) expect(keyOpensDevtools(k), k).toBe(false)
   })
 })
 

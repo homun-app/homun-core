@@ -169,11 +169,7 @@ export function browserActionRisk(
   if (tool === 'browser_press_key') {
     const key = String(args.key ?? '')
     if (key === 'Enter' || key === 'NumpadEnter') {
-      return {
-        kind: 'ask',
-        reason: 'Enter can submit the form (like browser_type with submit: true): if a form is filled in, this sends it',
-        ask: { kind: 'enter' }
-      }
+      return { kind: 'ask', reason: ENTER_ASK_TEXT, ask: { kind: 'enter' } }
     }
     return { kind: 'free' }
   }
@@ -498,77 +494,201 @@ export function computerActionXdotoolArgs(action: ComputerAction): string[] {
 
 /** Il contesto che il daemon raccoglie per OGNI azione di computer_act (V6). */
 export interface ComputerActContext {
-  /** l'offset del viewport nella finestra (window.screenX/screenY + barra): null = probe fallito */
+  /**
+   * L'offset del viewport nella finestra (window.screenX/screenY + barra):
+   * DALLE correzioni L3 è solo il RIPIEGO della formula, usato quando la sonda
+   * del mousemove non ha dato l'evento. null = probe fallito.
+   */
   view: { offX: number; offY: number; width: number; height: number } | null
-  /** l'elemento sotto il punto del click (ruolo, nome, testo, campo): null = probe fallito o nessun elemento */
-  click: { role: string; name: string; text: string; field: FieldProbeInfo | null } | null
-  /** il campo attivo per type/key (document.activeElement): null = probe fallito */
-  activeField: FieldProbeInfo | null
+  /**
+   * La sonda del PUNTO per click/down/up (L3): l'elemento sotto il puntatore,
+   * oppure outside (fuori dalla pagina), frame (dentro un elemento incorporato)
+   * o unknown (probe non riuscito). null = probe dell'elemento fallito.
+   */
+  click: ComputerClickProbe | null
+  /** Il fuoco attivo per type/key (L6): campo, elemento non-campo, pagina o null (probe fallito). */
+  activeField: ActiveFocus | null
   /** l'ultimo snapshot noto della sessione contiene una sfida anti-bot */
   challenge: boolean
   /** l'utente ha in mano il controllo dello schermo di quel bot */
   userControl: boolean
 }
 
+/**
+ * La sonda del punto di click/down/up (fase 19a correzioni, L3): l'unione che
+ * sostituisce il vecchio elemento-piatto. `element` porta ruolo, nome e testo
+ * del controllo VERO trovato sotto il puntatore (L4); `outside` è un punto che
+ * non sta nella pagina (barra, schede, menu di Chromium); `frame` è un punto
+ * sopra un IFRAME/FRAME/EMBED/OBJECT (il contenuto non si può verificare);
+ * `unknown` è il probe non riuscito (il puntatore sta sopra qualcosa che non
+ * è la pagina: menu contestuale nativo, popup del browser).
+ */
+export type ComputerClickProbe =
+  | { kind: 'element'; role: string; name: string; text: string; field: FieldProbeInfo | null }
+  | { kind: 'outside' }
+  | { kind: 'frame' }
+  | { kind: 'unknown' }
+
+/**
+ * Il fuoco attivo del documento (fase 19a correzioni, L6): un campo di testo
+ * (input, textarea o contenteditable), un elemento NON campo focalizzato
+ * (bottone, link: Tab + spazio/Invio è un click) o la pagina in sé (body/html:
+ * il fuoco non sta in un controllo). null resta SOLO per il probe fallito.
+ */
+export type ActiveFocus =
+  | { kind: 'field'; field: FieldProbeInfo }
+  | { kind: 'element'; role: string; name: string; text: string }
+  | { kind: 'page' }
+
 /** Il verdetto del confine di computer_act (V6): error = controllo utente in corso. */
 export type ComputerActRisk =
   | { kind: 'free' }
-  | { kind: 'ask'; reason: string; ask: BrowserAskInfo }
+  | { kind: 'ask'; reason: string; ask?: BrowserAskInfo }
   | { kind: 'deny'; reason: string }
   | { kind: 'error'; reason: string }
 
 /** Il deny quando l'utente ha in mano lo schermo (V6). */
 export const USER_CONTROL_ERROR_TEXT = 'the user is controlling your screen: wait for them to finish'
 
+/** L'ask di Invio, condivisa da browser_press_key e computer_act (L6). */
+export const ENTER_ASK_TEXT =
+  'Enter can submit the form (like browser_type with submit: true): if a form is filled in, this sends it'
+
+/** L3: il punto non sta nella pagina (barra, schede, menu di Chromium) → ask. */
+export const CLICK_OUTSIDE_ASK_TEXT = 'click outside the web page (browser controls or a browser dialog)'
+
+/** L3: il punto sta sopra un elemento incorporato, il contenuto non si verifica → ask. */
+export const CLICK_FRAME_ASK_TEXT = 'click inside an embedded frame: its content cannot be verified'
+
+/** L7: gli strumenti per sviluppatori eseguono JavaScript fuori da ogni controllo → deny. */
+export const DEVTOOLS_DENY_TEXT = 'developer tools are not available to the bot'
+
+/** L7: il tasto destro apre il menu contestuale del browser → ask. */
+export const RIGHT_CLICK_ASK_TEXT = 'right-click opens the browser context menu'
+
 /**
- * Il confine PURA di OGNI azione di computer_act (fase 19a, decisione 3): un
- * click a coordinate non aggira la classificazione del rischio di browser-guard.
+ * I pezzi di un tasto nella sintassi xdotool (L6/L7): spezzati su `+` e
+ * minuscoli — il confronto dei tasti non distingue maiuscole e combinazioni.
+ */
+export function keyParts(key: string): string[] {
+  return key.split('+').map((p) => p.trim().toLowerCase()).filter(Boolean)
+}
+
+/**
+ * È Invio (L6)? Un pezzo è `return`, `kp_enter`, `iso_enter` o `linefeed`,
+ * oppure la combinazione è ESATTAMENTE ctrl+m o ctrl+j (xdotool li manda come
+ * Return). xdotool trasforma anche i `\n` del `type` in Return: quello lo
+ * controlla computerActRisk sul testo, non qui.
+ */
+export function keyIsEnter(key: string): boolean {
+  const parts = keyParts(key)
+  if (parts.some((p) => p === 'return' || p === 'kp_enter' || p === 'iso_enter' || p === 'linefeed')) return true
+  const combo = new Set(parts)
+  return combo.size === 2 && combo.has('ctrl') && (combo.has('m') || combo.has('j'))
+}
+
+/**
+ * Apre gli strumenti per sviluppatori (L7): F12, oppure una combinazione con
+ * ctrl (o super) + shift + uno tra i, j, c, k. I devtools eseguono JavaScript
+ * nella pagina fuori da ogni controllo: deny, non ask.
+ */
+export function keyOpensDevtools(key: string): boolean {
+  const parts = keyParts(key)
+  if (parts.length === 1 && parts[0] === 'f12') return true
+  const combo = new Set(parts)
+  return ((combo.has('ctrl') || combo.has('super')) && combo.has('shift') &&
+    (combo.has('i') || combo.has('j') || combo.has('c') || combo.has('k')))
+}
+
+/** L'ask di Invio con la reason e l'id del catalogo UI di oggi. */
+const enterAsk = (): ComputerActRisk => ({ kind: 'ask', reason: ENTER_ASK_TEXT, ask: { kind: 'enter' } })
+
+/**
+ * Il rischio di un click su un elemento noto (RefInfo del probe di L4, o del
+ * fuoco attivo per L6): la STESSA classificazione di browser_click. Il ramo ref
+ * di browserActionRisk si accontenta di un ref ben formato: la VERITÀ qui è il
+ * RefInfo costruito dal probe, non ciò che il modello dice dell'elemento (non
+ * esistono ref nel computer use).
+ */
+function clickRefRisk(ref: RefInfo): ComputerActRisk {
+  const risk = browserActionRisk('browser_click', { ref: 'screen' }, ref)
+  if (risk.kind === 'free') return risk
+  if (risk.kind === 'deny') return { kind: 'deny', reason: risk.reason }
+  return risk
+}
+
+/** Il rischio del PUNTO sondato (L3): outside e frame chiedono, l'elemento si classifica. */
+function clickPointRisk(click: ComputerClickProbe | null): ComputerActRisk {
+  if (!click) return { kind: 'ask', reason: FIELD_PROBE_ASK_TEXT, ask: { kind: 'probe' } }
+  if (click.kind === 'outside') return { kind: 'ask', reason: CLICK_OUTSIDE_ASK_TEXT }
+  if (click.kind === 'frame') return { kind: 'ask', reason: CLICK_FRAME_ASK_TEXT }
+  if (click.kind === 'unknown') return { kind: 'ask', reason: FIELD_PROBE_ASK_TEXT, ask: { kind: 'probe' } }
+  return clickRefRisk({ role: click.role, name: click.name, text: click.text })
+}
+
+/**
+ * Il confine PURA di OGNI azione di computer_act (fase 19a, decisione 3 + le
+ * correzioni L3–L7): un click a coordinate non aggira la classificazione del
+ * rischio di browser-guard.
  * - controllo dell'utente in corso → error (nulla viene eseguito);
  * - sfida anti-bot nell'ultimo snapshot noto → deny (la risolve l'utente);
- * - click DENTRO la pagina: browserActionRisk('browser_click', …) sul RefInfo
- *   costruito dall'elemento in quel punto (Acquista → ask, link → free);
- * - click FUORI dalla pagina (barra degli indirizzi, schede) → ammesso (la
- *   rete del browser passa comunque dal proxy);
- * - type/key sul campo attivo: credenziali o pagamento → deny, Return/KP_Enter
- *   → ask (come browser_press_key), il resto free;
- * - probe non riuscito → ask, MAI free.
+ * - click/down/up: la sonda del punto decide — outside → ask (fuori dalla
+ *   pagina ci sono permessi, menu e devtools: per navigare il modello ha
+ *   browser_navigate, browser_tabs e browser_navigate_back), frame → ask (i
+ *   bottoni di pagamento sono iframe), unknown o probe fallito → ask, MAI
+ *   free; elemento leggibile → browserActionRisk('browser_click', …) sul
+ *   RefInfo di L4 (Acquista → ask, link → free). down e up hanno lo STESSO
+ *   verdetto del click nel loro punto (L5: down+up è un click completo);
+ * - click col tasto DESTRO → ask (menu contestuale, L7);
+ * - type/key: devtools → deny (F12, ctrl+shift+i/j/c/k, L7); credenziali o
+ *   pagamento → deny; Invio (Return/KP_Enter/iso_enter/linefeed, ctrl+m/j, o
+ *   un `\n`/`\r` nel testo del type) → ask; su un elemento NON campo, spazio
+ *   o Invio sono un click (Tab fino a «Acquista» + spazio), il type è ask; il
+ *   fuoco su body/html → ask (la digitazione non va in un campo);
+ * - move, scroll e wait restano free.
  */
 export function computerActRisk(action: ComputerAction, ctx: ComputerActContext): ComputerActRisk {
   if (ctx.userControl) return { kind: 'error', reason: USER_CONTROL_ERROR_TEXT }
   if (ctx.challenge) return { kind: 'deny', reason: SNAPSHOT_BLOCKED_NOTE }
-  const probeAsk = (): ComputerActRisk => ({ kind: 'ask', reason: FIELD_PROBE_ASK_TEXT, ask: { kind: 'probe' } })
-  if (action.kind === 'click') {
-    // probe del viewport fallito: non si sa dove finisce la pagina → chiedere
-    if (!ctx.view) return probeAsk()
-    const px = action.x - ctx.view.offX
-    const py = action.y - ctx.view.offY
-    // fuori dal viewport della pagina: barra degli indirizzi, schede, bordi
-    if (px < 0 || py < 0 || px >= ctx.view.width || py >= ctx.view.height) return { kind: 'free' }
-    if (!ctx.click) return probeAsk()
-    const ref: RefInfo = { role: ctx.click.role, name: ctx.click.name, text: ctx.click.text }
-    // il ramo ref di browserActionRisk si accontenta di un ref ben formato:
-    // la VERITÀ qui è il RefInfo costruito dal probe del punto, non ciò che il
-    // modello dice dell'elemento (non esistono ref nel computer use)
-    const risk = browserActionRisk('browser_click', { ref: 'screen' }, ref)
-    if (risk.kind === 'free') return risk
-    if (risk.kind === 'deny') return { kind: 'deny', reason: risk.reason }
-    return risk
+  if (action.kind === 'click' || action.kind === 'down' || action.kind === 'up') {
+    // L7: il tasto destro apre il menu contestuale del browser, comunque ask
+    if (action.kind === 'click' && action.button === 'right') {
+      return { kind: 'ask', reason: RIGHT_CLICK_ASK_TEXT }
+    }
+    return clickPointRisk(ctx.click)
   }
   if (action.kind === 'type') {
-    if (!ctx.activeField) return probeAsk()
-    if (fieldIsCredential(ctx.activeField)) return { kind: 'deny', reason: CREDENTIAL_DENY_TEXT }
+    const focus = ctx.activeField
+    if (!focus) return { kind: 'ask', reason: FIELD_PROBE_ASK_TEXT, ask: { kind: 'probe' } }
+    if (focus.kind !== 'field') {
+      // L6: la digitazione non sta andando in un campo (elemento non campo o
+      // fuoco su body/html) → ask, mai free
+      return { kind: 'ask', reason: FIELD_PROBE_ASK_TEXT, ask: { kind: 'probe' } }
+    }
+    if (fieldIsCredential(focus.field)) return { kind: 'deny', reason: CREDENTIAL_DENY_TEXT }
+    // L6: un \n o \r nel testo è un Invio (xdotool lo trasforma in Return e
+    // invia il form: misurato) — la STESSA ask di Invio
+    if (/[\n\r]/.test(action.text)) return enterAsk()
     return { kind: 'free' }
   }
   if (action.kind === 'key') {
-    if (!ctx.activeField) return probeAsk()
-    if (fieldIsCredential(ctx.activeField)) return { kind: 'deny', reason: CREDENTIAL_DENY_TEXT }
-    if (action.key === 'Return' || action.key === 'KP_Enter') {
-      return {
-        kind: 'ask',
-        reason: 'Enter can submit the form (like browser_type with submit: true): if a form is filled in, this sends it',
-        ask: { kind: 'enter' }
+    // L7: i devtools eseguono JavaScript nella pagina fuori da ogni controllo
+    if (keyOpensDevtools(action.key)) return { kind: 'deny', reason: DEVTOOLS_DENY_TEXT }
+    const focus = ctx.activeField
+    if (!focus) return { kind: 'ask', reason: FIELD_PROBE_ASK_TEXT, ask: { kind: 'probe' } }
+    if (focus.kind === 'element') {
+      // L6: Tab fino a un bottone + spazio (o Invio) è un click su quell'elemento
+      if (keyParts(action.key).includes('space') || keyIsEnter(action.key)) {
+        return clickRefRisk({ role: focus.role, name: focus.name, text: focus.text })
       }
+      return { kind: 'free' }
     }
+    if (focus.kind === 'page') {
+      // L6: il fuoco sta su body/html — non si sa dove va la tastiera → ask
+      return { kind: 'ask', reason: FIELD_PROBE_ASK_TEXT, ask: { kind: 'probe' } }
+    }
+    if (fieldIsCredential(focus.field)) return { kind: 'deny', reason: CREDENTIAL_DENY_TEXT }
+    if (keyIsEnter(action.key)) return enterAsk()
     return { kind: 'free' }
   }
   return { kind: 'free' }

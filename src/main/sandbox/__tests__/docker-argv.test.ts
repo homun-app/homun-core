@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, afterEach, vi } from 'vitest'
 import { spawn, spawnSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, readFileSync, existsSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -272,7 +272,7 @@ describe('il launcher del browser: argv PURI con TUTTI i flag obbligatori e NESS
       ['--output-max-size', '52428800'],
       ['--no-webmcp', null], ['--block-service-workers', null],
       ['--proxy-server', 'http://host.docker.internal:18765'],
-      ['--timeout-navigation', '30000'], ['--viewport-size', '1280x800'],
+      ['--timeout-navigation', '30000'],
       ['--image-responses', 'omit'],
       // fase 19a (V2): col desktop la chiusura la decide il daemon — il
       // --idle-timeout del server PRINCIPALE sale a 60 minuti (rete di sicurezza)
@@ -287,9 +287,13 @@ describe('il launcher del browser: argv PURI con TUTTI i flag obbligatori e NESS
     // fase 19a (V2): il principale è HEADFUL (nessun --headless), il FIGLIO
     // resta headless col tetto breve di oggi
     expect(flags).not.toContain('--headless')
+    // correzione L2: il PRINCIPALE non ha più --viewport-size (il viewport
+    // segue la finestra); i FIGLI headless lo tengono com'era
+    expect(flags).not.toContain('--viewport-size')
     const child = browserMcpFlags('sub_x', 18765, { child: true, owner: 'agent_x' })
     expect(child).toContain('--headless')
     expect(child).toContain('--isolated')
+    expect(child[child.indexOf('--viewport-size') + 1]).toBe('1280x800')
     expect(child[child.indexOf('--idle-timeout') + 1]).toBe('600000')
     expect(child[child.indexOf('--output-dir') + 1]).toBe('/browser/agent_x/output-sub_x')
   })
@@ -334,6 +338,9 @@ describe('il launcher del browser: argv PURI con TUTTI i flag obbligatori e NESS
 
 // ---- fase 19a (V1/V2/V3/V6): il desktop del bot ----
 
+// correzione L1: la guardia scorre TUTTE le stringhe esportate del modulo
+import * as dockerArgv from '../docker-argv'
+
 describe('fase 19a: il wrapper del DESKTOP (solo browser principale) e i suoi argv', () => {
   it('il wrapper contiene i flag di sicurezza del display e i socket del proprietario', () => {
     for (const piece of [
@@ -346,8 +353,10 @@ describe('fase 19a: il wrapper del DESKTOP (solo browser principale) e i suoi ar
       'Xvfb -displayfd 3 -auth ./Xauthority -nolisten tcp -nolisten unix -screen 0 1280x960x24 3>./display',
       // l'attesa del display (max 5 s) con xdpyinfo e il cookie
       'xdpyinfo -display ":$n"',
-      // la vista in SOLA LETTURA su socket unix: NESSUNA porta TCP
-      'x11vnc -display ":$n" -auth ./Xauthority -rfbport 0 -unixsockonly ./vnc-view.sock -viewonly -shared -forever -nopw -quiet',
+      // la vista in SOLA LETTURA su socket unix: NESSUNA porta TCP (L1: i flag
+      // misurati — x11vnc 0.9.16 non ha -unixsockonly e -rfbportv6 -1 chiude
+      // la 5900 IPv6 che -noipv6 da solo lascia aperta)
+      'x11vnc -display ":$n" -auth ./Xauthority -rfbport 0 -rfbportv6 -1 -noipv6 -unixsock ./vnc-view.sock -viewonly -shared -forever -nopw -quiet',
       'export DISPLAY=":$n"',
       'export XAUTHORITY="$PWD/Xauthority"',
       'exec playwright-mcp "$@"'
@@ -403,7 +412,7 @@ describe('fase 19a: il wrapper del DESKTOP (solo browser principale) e i suoi ar
     expect(DOCKER_SCREEN_CONTROL_VNC_SH).toContain('exec x11vnc -display ":$1" -auth ./Xauthority')
     // SENZA -viewonly (è il controllo), sempre socket unix, mai porta TCP
     expect(DOCKER_SCREEN_CONTROL_VNC_SH).not.toContain('-viewonly')
-    expect(DOCKER_SCREEN_CONTROL_VNC_SH).toContain('-unixsockonly ./vnc-control.sock')
+    expect(DOCKER_SCREEN_CONTROL_VNC_SH).toContain('-unixsock ./vnc-control.sock')
     expect(DOCKER_SCREEN_CONTROL_VNC_SH).toContain('-rfbport 0')
   })
 
@@ -453,6 +462,99 @@ describe('fase 19a: il wrapper del DESKTOP (solo browser principale) e i suoi ar
     expect(dockerfile).toContain('rm -rf /var/lib/apt/lists/*')
     // la build FALLISCA in modo chiaro se un binario manca
     expect(dockerfile).toContain('command -v Xvfb x11vnc xauth xdotool import xdpyinfo')
+  })
+})
+
+// ---- fase 19a correzioni: L1 (flag x11vnc), L2 (finestra), L9 (box di prova) ----
+
+describe('fase 19a correzioni L1: OGNI x11vnc con i flag misurati, zero porte TCP', () => {
+  it('TUTTE le righe x11vnc degli script esportati hanno -rfbport 0, -rfbportv6 -1, -noipv6 e -unixsock; NESSUN -unixsockonly', () => {
+    // x11vnc 0.9.16 (noble) NON ha -unixsockonly: lo rifiuta ed esce. E col
+    // ripiego -rfbport 0 -unixsock resta in ascolto [::]:5900: -noipv6 DA SOLO
+    // non basta, la chiude -rfbportv6 -1 (misurato: zero listener TCP)
+    const x11vncLines: string[] = []
+    for (const [name, value] of Object.entries(dockerArgv)) {
+      if (typeof value !== 'string') continue
+      for (const line of value.split('\n')) {
+        if (/\bx11vnc\b/.test(line)) x11vncLines.push(`${name}: ${line.trim()}`)
+      }
+    }
+    // il wrapper del desktop E il x11vnc di controllo: almeno le due righe note
+    expect(x11vncLines.length).toBeGreaterThanOrEqual(2)
+    for (const line of x11vncLines) {
+      expect(line, line).toContain('-rfbport 0')
+      expect(line, line).toContain('-rfbportv6 -1')
+      expect(line, line).toContain('-noipv6')
+      expect(line, line).toContain('-unixsock')
+      expect(line, line).not.toContain('-unixsockonly')
+    }
+  })
+})
+
+describe('fase 19a correzioni L2: la finestra del browser PRINCIPALE dentro lo schermo', () => {
+  it('la stringa di config ha i due flag della finestra IN FONDO agli args, identica nel Dockerfile', () => {
+    const args = JSON.parse(PLAYWRIGHT_MCP_CONFIG_JSON).browser.launchOptions.args as string[]
+    // in FONDO: --window-position=0,0 e --window-size=1280,960 (misurato: la
+    // finestra a (0,0) 1279x959 sta dentro lo schermo, offset = barra)
+    expect(args.slice(-2)).toEqual(['--window-position=0,0', '--window-size=1280,960'])
+    // il Dockerfile crea il file con la STESSA stringa (il test della fase 12
+    // 0e confronta già l'intera stringa: qui si fissano i due flag NUOVI)
+    const dockerfile = readFileSync('resources/box/Dockerfile', 'utf8')
+    expect(dockerfile).toContain(PLAYWRIGHT_MCP_CONFIG_JSON)
+    expect(dockerfile).toContain('"--window-position=0,0"')
+    expect(dockerfile).toContain('"--window-size=1280,960"')
+  })
+
+  it('il PRINCIPALE non ha --viewport-size (il viewport segue la finestra); i FIGLI headless sì', () => {
+    expect(browserMcpFlags('agent_x', 18765)).not.toContain('--viewport-size')
+    const child = browserMcpFlags('sub_x', 18765, { child: true, owner: 'agent_x' })
+    expect(child).toContain('--viewport-size')
+    expect(child[child.indexOf('--viewport-size') + 1]).toBe('1280x800')
+    // i flag della finestra sono innocui sui figli headless: viaggiano nella
+    // config COMUNE (launchOptions.args del file del Dockerfile), non nei flag
+    expect(PLAYWRIGHT_MCP_CONFIG_JSON).toContain('--window-size=1280,960')
+  })
+})
+
+describe('fase 19a correzioni L9: SANDBOT_TEST_BOX_PREFIX — i nomi del box di prova', () => {
+  afterEach(() => {
+    delete process.env.SANDBOT_TEST_BOX_PREFIX
+    vi.resetModules()
+  })
+
+  /** Ricarica il modulo con l'ambiente di adesso e ne legge i QUATTRO nomi. */
+  const loadNames = async (): Promise<{ container: string; box: string; plugins: string; browser: string }> => {
+    vi.resetModules()
+    const m = await import('../docker-argv')
+    return { container: m.BOX_CONTAINER, box: m.BOX_VOLUME, plugins: m.PLUGINS_VOLUME, browser: m.BROWSER_VOLUME }
+  }
+
+  it('senza variabile i nomi restano ESATTAMENTE quelli di oggi', async () => {
+    delete process.env.SANDBOT_TEST_BOX_PREFIX
+    expect(await loadNames()).toEqual({
+      container: 'sandbot-box', box: 'sandbot-box', plugins: 'sandbot-plugins', browser: 'sandbot-browser'
+    })
+  })
+
+  it('sbtest19 → i QUATTRO nomi col prefisso (container e volume del box condividono il nome)', async () => {
+    process.env.SANDBOT_TEST_BOX_PREFIX = 'sbtest19'
+    expect(await loadNames()).toEqual({
+      container: 'sbtest19-box', box: 'sbtest19-box', plugins: 'sbtest19-plugins', browser: 'sbtest19-browser'
+    })
+  })
+
+  it('sandbot, ../x, SBTEST1 o oltre i 12 caratteri → IGNORATA: mai i nomi dell\'utente', async () => {
+    for (const bad of ['sandbot', '../x', 'sbtest-box', 'SBTEST1', 'sbtest0123456789012', 'sbtest_1', 'sbtest box', '']) {
+      process.env.SANDBOT_TEST_BOX_PREFIX = bad
+      expect(await loadNames(), `valore ${JSON.stringify(bad)}`).toEqual({
+        container: 'sandbot-box', box: 'sandbot-box', plugins: 'sandbot-plugins', browser: 'sandbot-browser'
+      })
+    }
+    // il minimo (sbtest solo) e il massimo (sbtest + 12 cifre) valgono
+    process.env.SANDBOT_TEST_BOX_PREFIX = 'sbtest' + '012345678901'
+    expect((await loadNames()).container).toBe('sbtest012345678901-box')
+    process.env.SANDBOT_TEST_BOX_PREFIX = 'sbtest'
+    expect((await loadNames()).container).toBe('sbtest-box')
   })
 })
 

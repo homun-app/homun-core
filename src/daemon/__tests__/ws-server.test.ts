@@ -4,6 +4,7 @@
 // pre-auth non si applica più (resta quello sui frame).
 import { describe, expect, it, afterEach, vi } from 'vitest'
 import { connect as tcpConnect, type Socket } from 'node:net'
+import { randomBytes } from 'node:crypto'
 import { startWsServer, type WsRpcServer } from '../ws-server'
 // fase 17c: la lingua dell'interfaccia dei test è l'italiano (i testi erano italiani prima)
 import { setSetting } from '../../main/store/db'
@@ -101,5 +102,79 @@ describe('R4: connessioni non autenticate', () => {
     c.sock.write(rawFrame(true, 0x1, Buffer.from(big)))
     await vi.waitFor(() => expect(whole(c.parts).includes('metodo sconosciuto')).toBe(true))
     expect(closeCode(c.parts)).toBeNull()
+  })
+})
+
+// ---- fase 19a correzioni (L8): upgrade con percorso malformato NON uccide il daemon ----
+
+describe('L8: /screen/<cap> malformato → 404, nessuna eccezione, il server resta vivo', () => {
+  /** Richiesta di upgrade GREZZA col percorso voluto. */
+  const upgradeAt = (path: string): string =>
+    `GET ${path} HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n` +
+    'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n'
+
+  /** Apre una connessione, scrive l'upgrade e raccoglie la risposta del server. */
+  const rawUpgrade = (port: number, path: string): Promise<{ parts: Buffer[]; sock: Socket }> =>
+    new Promise((resolve, reject) => {
+      const parts: Buffer[] = []
+      const sock = tcpConnect({ port, host: '127.0.0.1' }, () => {
+        sock.write(upgradeAt(path))
+        resolve({ parts, sock })
+      })
+      sock.on('error', reject)
+      sock.on('data', (d: Buffer) => parts.push(d))
+    })
+
+  it('/screen/%, /screen/%zz, /screen/a/b e 44 caratteri → 404, NESSUNA eccezione, seconda connessione OK', async () => {
+    // prima della correzione: decodeURIComponent('/screen/%') lanciava URIError
+    // DENTRO l'handler dell'upgrade e il processo moriva (nessun gestore
+    // uncaughtException). Il test resta in ascolto e verifica che non arrivi nulla.
+    const uncaught: unknown[] = []
+    const onUncaught = (e: unknown): void => { uncaught.push(e) }
+    process.on('uncaughtException', onUncaught)
+    const seen: string[] = []
+    const caps: string[] = []
+    try {
+      server = await startWsServer({
+        token: 'tok',
+        onScreenUpgrade: (cap) => { caps.push(cap) }
+      })
+      for (const bad of ['/screen/%', '/screen/%zz', '/screen/a/b', '/screen/' + 'A'.repeat(44), '/screen/' + '='.repeat(43)]) {
+        const c = await rawUpgrade(server.port, bad)
+        socks.push(c.sock)
+        await vi.waitFor(() => expect(whole(c.parts).toString('latin1').startsWith('HTTP/1.1 404')).toBe(true))
+        seen.push(bad)
+        // il gestore dello schermo NON è mai chiamato
+        expect(caps).toEqual([])
+      }
+      // il server continua a rispondere: il canale UI di sempre fa l'upgrade
+      const ui = await wsConnect(server.port)
+      socks.push(ui.sock)
+      await vi.waitFor(() => expect(whole(ui.parts).toString('latin1').includes('101 Switching Protocols')).toBe(true))
+    } finally {
+      process.off('uncaughtException', onUncaught)
+    }
+    expect(seen).toHaveLength(5)
+    expect(uncaught).toEqual([])
+  })
+
+  it('un percorso di capability BEN FORMATO (43 caratteri base64url) passa al gestore', async () => {
+    const caps: string[] = []
+    server = await startWsServer({
+      token: 'tok',
+      onScreenUpgrade: (cap, _req, socket) => {
+        caps.push(cap)
+        socket.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n' +
+          'Sec-WebSocket-Accept: ' + 'x'.repeat(10) + '\r\n\r\n')
+        socket.destroy()
+      }
+    })
+    // la VERA forma: base64url di 32 byte (43 caratteri), come screenOpen
+    const good = randomBytes(32).toString('base64url')
+    expect(good).toMatch(/^[A-Za-z0-9_-]{43}$/)
+    const c = await rawUpgrade(server.port, `/screen/${good}`)
+    socks.push(c.sock)
+    await vi.waitFor(() => expect(caps).toEqual([good]))
+    expect(whole(c.parts).toString('latin1')).toContain('101 Switching Protocols')
   })
 })
