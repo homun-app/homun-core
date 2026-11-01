@@ -116,6 +116,18 @@ export function mergeToolCallDeltas(
 /** Opzioni facoltative dello stream (fase 8: temperatura 0 per il revisore delle approvazioni). */
 export interface StreamOptions {
   temperature?: number
+  /**
+   * Fase 18b (H3): livello di ragionamento del bot/routine. 'default' o
+   * assente = il comportamento della 18a ESATTO; l'adattatore clampa sul
+   * modello vero di QUESTA chiamata (la riserva che cambia modello si ri-clampa).
+   */
+  thinking?: import('../../shared/types').ThinkingSetting
+  /**
+   * Fase 18b (H1.3): il setting providers.modelPrices, passato dal CHIAMANTE
+   * (il loop legge lo store, l'adattatore no: nessun ciclo di import). Il
+   * prezzo si registra al momento della chiamata: cambiarlo non riscrive lo storico.
+   */
+  modelPrices?: import('../../shared/types').ModelPriceMap
 }
 
 /**
@@ -134,4 +146,4 @@ export function llmStream(
 }
 
 // ---- re-esportazioni utili dell'adattatore (per i chiamanti e i test) ----
-export { LlmProviderError, PiUserAbortError, modelCapabilities } from './llm-pi'
+export { LlmProviderError, PiUserAbortError, modelCapabilities, catalogModelInfos, type ModelCapabilities } from './llm-pi'

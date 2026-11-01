@@ -1,27 +1,20 @@
 // Registry provider + autodiscovery locale (Ollama :11434, LM Studio :1234).
 // Tutti i provider non-Anthropic parlano OpenAI-compatible: un solo codice.
+// Fase 18b (H5.2): l'elenco vivo dei modelli — l'URL e gli header li calcola
+// live-models (modulo puro condiviso con l'adattatore); questo file NON
+// importa pi-ai. Le capability Ollama (/api/show) si cachano per
+// providerId + nome + digest: un modello aggiornato rilegge.
 import { listProviders, saveProviders } from '../store/db'
 // fase 17c (C3): gli errori del check dei tool si mostrano in impostazioni e
 // onboarding — testo del catalogo UI
 import { uiText } from '../ui-language'
 import { UI } from '../../shared/ui-messages'
 import type { ProviderConfig, ProviderKind, ModelInfo } from '../../shared/types'
+import { liveModelsUrl, liveModelsHeaders, ollamaCapabilities, setOllamaCapabilities, isLocalKind, KNOWN_BASE_URLS } from './live-models'
 
-export const KNOWN_BASE_URLS: Partial<Record<ProviderKind, string>> = {
-  ollama: 'http://localhost:11434',
-  lmstudio: 'http://localhost:1234',
-  openai: 'https://api.openai.com',
-  anthropic: 'https://api.anthropic.com',
-  mistral: 'https://api.mistral.ai',
-  openrouter: 'https://openrouter.ai/api',
-  // fase 18a (E2.1): l'API a CONSUMO, mai /api/coding/paas/v4 (GLM Coding
-  // Plan: i termini di z.ai lo vietano agli strumenti di terzi). I provider
-  // salvati con l'url vecchio si correggono in lettura in llm-pi.ts
-  zai: 'https://api.z.ai/api/paas/v4',
-  xai: 'https://api.x.ai',
-  deepseek: 'https://api.deepseek.com',
-  groq: 'https://api.groq.com/openai'
-}
+// fase 18b (H5.2): i base URL noti vivono nel modulo puro live-models (li
+// legge anche l'adattatore); re-esportati per i chiamanti storici
+export { KNOWN_BASE_URLS }
 
 /** Scanner dei servizi LLM locali in ascolto. */
 export async function discoverProviders(): Promise<ProviderConfig[]> {
@@ -56,22 +49,77 @@ export async function discoverProviders(): Promise<ProviderConfig[]> {
   return merged
 }
 
-/** Lista modelli di un provider: /api/tags per Ollama, /v1/models per gli altri. */
-export async function listProviderModels(p: ProviderConfig): Promise<ModelInfo[]> {
-  const base = p.baseUrl.replace(/\/$/, '')
-  if (p.kind === 'ollama') {
-    const r = await fetch(base + '/api/tags', { signal: AbortSignal.timeout(5000) })
-    if (!r.ok) throw new Error(`HTTP ${r.status}`)
-    const j = (await r.json()) as { models?: Array<{ name: string; details?: { parameter_size?: string } }> }
-    return (j.models ?? []).map((m) => ({ id: m.name, label: m.details?.parameter_size ? `${m.name} (${m.details.parameter_size})` : m.name }))
+/** Una voce dell'elenco vivo: capacità SCONOSCIUTE tranne quelle cachate (Ollama). */
+function liveInfo(p: ProviderConfig, id: string, label?: string): ModelInfo {
+  const caps = p.kind === 'ollama' ? ollamaCapabilities(p.id, id) : null
+  return {
+    id,
+    ...(label && label !== id ? { label } : {}),
+    source: 'live',
+    vision: caps ? caps.includes('vision') : null,
+    tools: caps ? caps.includes('tools') : null,
+    thinkingLevels: [],
+    cost: null,
+    costSource: null,
+    local: isLocalKind(p.kind)
   }
-  const r = await fetch(base + '/v1/models', {
-    headers: p.apiKey ? { Authorization: `Bearer ${p.apiKey}` } : {},
+}
+
+/** Massimo 4 /api/show in parallelo (H5.2). */
+async function eachWithConcurrency<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
+  let i = 0
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (i < items.length) {
+      const item = items[i++]!
+      await fn(item)
+    }
+  })
+  await Promise.all(workers)
+}
+
+/**
+ * Fase 18b (H5.2): l'elenco VIVO dei modelli di un provider, corretto per kind:
+ * - ollama: GET /api/tags, poi POST /api/show per le capability (max 4 in
+ *   parallelo, cache per providerId+nome+digest: un modello aggiornato rilegge);
+ * - anthropic: GET /v1/models con x-api-key e anthropic-version: 2023-06-01
+ *   (il vecchio Bearer su …/v1/models era rotto);
+ * - zai: GET https://api.z.ai/api/paas/v4/models con Bearer (MAI /coding/);
+ * - tutti gli altri: GET {base OpenAI-compatible}/models con Bearer se c'è la chiave.
+ * L'unione col catalogo pi-ai vive nell'RPC models:list (H5.1).
+ */
+export async function listProviderModels(p: ProviderConfig): Promise<ModelInfo[]> {
+  if (p.kind === 'ollama') {
+    const base = p.baseUrl.replace(/\/+$/, '')
+    const r = await fetch(liveModelsUrl(p), { signal: AbortSignal.timeout(5000) })
+    if (!r.ok) throw new Error(`HTTP ${r.status}`)
+    const j = (await r.json()) as { models?: Array<{ name: string; digest?: string; details?: { parameter_size?: string } }> }
+    const list = j.models ?? []
+    // le capability mancanti si leggono da /api/show (al massimo 4 in parallelo)
+    const missing = list.filter((m) => !ollamaCapabilities(p.id, m.name, m.digest))
+    await eachWithConcurrency(missing, 4, async (m) => {
+      try {
+        const sr = await fetch(base + '/api/show', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ model: m.name }),
+          signal: AbortSignal.timeout(8000)
+        })
+        if (!sr.ok) return
+        const sj = (await sr.json()) as { capabilities?: string[] }
+        setOllamaCapabilities(p.id, m.name, m.digest, sj.capabilities ?? [])
+      } catch {
+        // capabilities non leggibili: vision/tools restano sconosciuti (null)
+      }
+    })
+    return list.map((m) => liveInfo(p, m.name, m.details?.parameter_size ? `${m.name} (${m.details.parameter_size})` : m.name))
+  }
+  const r = await fetch(liveModelsUrl(p), {
+    headers: liveModelsHeaders(p),
     signal: AbortSignal.timeout(8000)
   })
   if (!r.ok) throw new Error(`HTTP ${r.status}`)
-  const j = (await r.json()) as { data?: Array<{ id: string }> }
-  return (j.data ?? []).map((m) => ({ id: m.id }))
+  const j = (await r.json()) as { data?: Array<{ id: string; display_name?: string }> }
+  return (j.data ?? []).map((m) => liveInfo(p, m.id, m.display_name))
 }
 
 export async function testProvider(p: ProviderConfig): Promise<{ ok: boolean; error?: string; models?: ModelInfo[] }> {
@@ -88,13 +136,18 @@ export async function testProvider(p: ProviderConfig): Promise<{ ok: boolean; er
  * agente (un modello senza tool non può chiamare send_to_user: muto). Ollama
  * espone le capability in /api/show; gli altri provider non le espongono in
  * modo standard e non vengono controllati (checked: false).
+ * Fase 18b (H5.2): usa la STESSA cache di /api/show dell'elenco vivo — se le
+ * capability sono già state lette (elenco, check precedente) non si rifà la
+ * chiamata.
  */
 export async function modelSupportsTools(
   p: ProviderConfig,
   model: string
 ): Promise<{ ok: boolean; checked: boolean; error?: string }> {
-  const base = p.baseUrl.replace(/\/$/, '')
+  const base = p.baseUrl.replace(/\/+$/, '')
   if (p.kind !== 'ollama') return { ok: true, checked: false }
+  const cached = ollamaCapabilities(p.id, model)
+  if (cached) return cached.includes('tools') ? { ok: true, checked: true } : { ok: false, checked: true, error: uiText(UI.providersNoTools, { model }) }
   try {
     const r = await fetch(base + '/api/show', {
       method: 'POST',
@@ -104,7 +157,9 @@ export async function modelSupportsTools(
     })
     if (!r.ok) return { ok: false, checked: true, error: uiText(UI.providersCannotVerify, { model, provider: p.name, error: `HTTP ${r.status}` }) }
     const j = (await r.json()) as { capabilities?: string[] }
-    if (!(j.capabilities ?? []).includes('tools')) {
+    const caps = j.capabilities ?? []
+    setOllamaCapabilities(p.id, model, undefined, caps)
+    if (!caps.includes('tools')) {
       return { ok: false, checked: true, error: uiText(UI.providersNoTools, { model }) }
     }
     return { ok: true, checked: true }

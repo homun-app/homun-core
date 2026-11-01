@@ -33,6 +33,11 @@ export interface Agent {
   parentId?: string | null
   /** fase 16: aspetto scelto dall'utente (NULL = predefinito da hash dell'id) */
   avatar?: AgentAvatar | null
+  /**
+   * Fase 18b (H3): livello di ragionamento del bot. 'default' (o assente) =
+   * il comportamento della 18a ESATTO; l'adattatore clampa sul modello vero.
+   */
+  thinking?: ThinkingSetting | null
 }
 
 export type EntryKind =
@@ -341,9 +346,77 @@ export interface ProviderConfig {
   discovered?: boolean
 }
 
+/**
+ * Fase 18b (H3): il livello di ragionamento. 'default' = il comportamento
+ * della 18a (nessuna opzione reasoning); 'off' è un livello valido di pi-ai.
+ * In thinkingLevels di un modello NON compare mai 'default': è sempre disponibile.
+ */
+export type ThinkingSetting = 'default' | 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+
+/**
+ * Fase 18b (H5.1): una voce dell'elenco modelli — catalogo pi-ai, elenco vivo
+ * del provider o entrambi. I campi sono OBBLIGATORI (null = sconosciuto).
+ */
 export interface ModelInfo {
   id: string
   label?: string
+  /** da dove arriva la voce: catalogo pi-ai, elenco vivo del provider, entrambi */
+  source: 'catalog' | 'live' | 'both'
+  /** finestra di contesto in token (undefined = sconosciuta) */
+  contextWindow?: number
+  /** il modello ci vede (immagini)? null = sconosciuto */
+  vision: boolean | null
+  /** il modello usa i tool? null = sconosciuto */
+  tools: boolean | null
+  /** livelli di ragionamento controllabili ([] = non controllabile da noi) */
+  thinkingLevels: ThinkingSetting[]
+  /** prezzo in dollari per milione di token (null = sconosciuto/locale) */
+  cost: { input: number; output: number; cacheRead: number; cacheWrite: number } | null
+  costSource: 'catalog' | 'custom' | null
+  /** provider tutto locale (ollama, lmstudio…): costo nullo per definizione */
+  local: boolean
+}
+
+/**
+ * Fase 18b (H1.3): prezzo personalizzato di un modello, in DOLLARI PER
+ * MILIONE DI TOKEN — la stessa unità del catalogo pi-ai (ModelCostRates:
+ * "Input cost in USD per million tokens").
+ */
+export interface ModelPrice {
+  input: number
+  output: number
+  cacheRead?: number
+  cacheWrite?: number
+}
+
+/** Setting providers.modelPrices: Record<providerId, Record<modelId, prezzo>>. */
+export type ModelPriceMap = Record<string, Record<string, ModelPrice>>
+
+/** Fase 18b (H2.1): un anello della catena delle riserve. */
+export interface FallbackRoute {
+  providerId: string
+  model: string
+}
+
+/** Fase 18b (H6.1): una riga aggregata di usage:summary. */
+export interface ModelUsageRow {
+  calls: number
+  input: number
+  output: number
+  cacheRead: number
+  cacheWrite: number
+  /** null solo se TUTTE le righe del gruppo hanno costo null */
+  costUsd: number | null
+  /** true se ALCUNE righe del gruppo hanno costo e altre no */
+  costPartial: boolean
+  /** chiave del gruppo: valorizzata secondo groupBy (stringa vuota se non è la chiave) */
+  providerId: string
+  providerKind: string
+  model: string
+  source: string
+  /** solo groupBy 'agent': null per le chiamate senza bot (etichetta «Sistema») */
+  agentId: string | null
+  agentName: string | null
 }
 
 // ---- Permessi (replica del modello originale always_allow | needs_approval | blocked) ----
@@ -403,7 +476,7 @@ export interface SandbotApi {
   // agenti e transcript
   listAgents(): Promise<Agent[]>
   createAgent(name: string, description?: string): Promise<Agent>
-  updateAgent(id: string, patch: Partial<Pick<Agent, 'name' | 'description' | 'providerId' | 'model' | 'avatar'>>): Promise<void>
+  updateAgent(id: string, patch: Partial<Pick<Agent, 'name' | 'description' | 'providerId' | 'model' | 'avatar' | 'thinking'>>): Promise<void>
   deleteAgent(id: string): Promise<void>
   /** fase 7: imposta il bot principale (mainAgentId, unico) */
   setMainAgent(id: string): Promise<void>
@@ -430,6 +503,11 @@ export interface SandbotApi {
   discoverProviders(): Promise<ProviderConfig[]>
   testProvider(id: string): Promise<{ ok: boolean; error?: string; models?: ModelInfo[] }>
   listModels(providerId: string): Promise<ModelInfo[]>
+  /**
+   * Fase 18b (H6): uso e costi aggregati in una finestra [fromMs, toMs]
+   * facoltativa, per modello (default), bot o origine.
+   */
+  usageSummary(fromMs?: number, toMs?: number, groupBy?: 'model' | 'agent' | 'source'): Promise<ModelUsageRow[]>
   /** fase 11: chiave per la ricerca web del provider Ollama — SOLO nel vault sigillato */
   setWebSearchKey(providerId: string, key: string | null): Promise<void>
   webSearchKeySet(providerId: string): Promise<boolean>
@@ -447,11 +525,11 @@ export interface SandbotApi {
   pickImage(): Promise<string | null>
   // routine
   listRoutines(agentId?: string): Promise<RoutineInfo[]>
-  createRoutine(agentId: string, title: string, prompt: string, schedule: string): Promise<RoutineInfo>
+  createRoutine(agentId: string, title: string, prompt: string, schedule: string, model?: RoutineModelPatch): Promise<RoutineInfo>
   /** fase 6: creazione con trigger esteso (schedule every, email, calendar_event, webhook, connector_poll) */
-  createRoutineTrigger(agentId: string, title: string, prompt: string, trigger: RoutineTrigger, timezone?: string): Promise<RoutineInfo>
-  /** fase 6: aggiorna trigger/ora/prompt (il trigger sostituisce la schedule) */
-  updateRoutineTrigger(id: number, patch: { title?: string; prompt?: string; enabled?: number; paused_for_away?: number; trigger?: RoutineTrigger | null; timezone?: string }): Promise<void>
+  createRoutineTrigger(agentId: string, title: string, prompt: string, trigger: RoutineTrigger, timezone?: string, model?: RoutineModelPatch): Promise<RoutineInfo>
+  /** fase 6: aggiorna trigger/ora/prompt (il trigger sostituisce la schedule); fase 18b (H7): anche il modello proprio */
+  updateRoutineTrigger(id: number, patch: { title?: string; prompt?: string; enabled?: number; paused_for_away?: number; trigger?: RoutineTrigger | null; timezone?: string } & RoutineModelPatch): Promise<void>
   updateRoutine(id: number, patch: Partial<Pick<RoutineInfo, 'enabled' | 'schedule' | 'title' | 'prompt'>>): Promise<void>
   deleteRoutine(id: number): Promise<void>
   suggestRoutines(agentId: string): Promise<RoutineSuggestion[]>
@@ -561,6 +639,24 @@ export interface RoutineInfo {
   next_run?: number | null
   /** fase 6: URL del webhook (solo trigger webhook, per copiarlo dalla UI) */
   webhook_url?: string
+  /**
+   * Fase 18b (H7): modello PROPRIo della routine (null = quello del bot).
+   * Vale solo per il turno della routine; le continuazioni di task usano il bot.
+   */
+  providerId?: string | null
+  model?: string | null
+  thinking?: ThinkingSetting | null
+}
+
+/**
+ * Fase 18b (H7): il modello proprio di una routine, come arriva alla RPC.
+ * providerId null (o assente) = modello del bot; con providerId il modello è
+ * obbligatorio (la RPC valida) e thinking è facoltativo.
+ */
+export interface RoutineModelPatch {
+  providerId?: string | null
+  model?: string | null
+  thinking?: ThinkingSetting | null
 }
 
 // ---- trigger delle routine (fase 6, §3bis L3) ----

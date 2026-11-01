@@ -20,10 +20,14 @@ import { pickLang } from '../../../shared/localized'
 import { i18n } from '../lib/i18n'
 import { VaultTab } from './VaultSettings'
 import { choosePollTool, chooseQueryArgName } from '../../../shared/triggers'
-import type { ProviderConfig, ProviderKind, ModelInfo, Agent, RoutineInfo, RoutineSuggestion, ConnectorInfo, McpServerInfo, McpServerSecret, RoutineTrigger, TemplateInfo, AutoReviewSettings, WebSearchStatusRpc, WebSearchProviderStatusRpc } from '../../../shared/types'
+import type { ProviderConfig, ProviderKind, ModelInfo, Agent, RoutineInfo, RoutineSuggestion, ConnectorInfo, McpServerInfo, McpServerSecret, RoutineTrigger, TemplateInfo, AutoReviewSettings, WebSearchStatusRpc, WebSearchProviderStatusRpc, FallbackRoute, ModelUsageRow, ModelPriceMap, ThinkingSetting } from '../../../shared/types'
 import { DEFAULT_AUTO_REVIEW, SECRET_KIND_FOR_NEEDS } from '../../../shared/types'
 // fase 10 (residuo 0d): i default per kind (modulo puro, nessuna dipendenza node)
 import { modelDefaultsFor } from '../../../main/agent/model-defaults'
+// fase 18b (H5.2): i kind locali (costo «locale» nella pagina Uso e costi)
+import { isLocalKind } from '../../../main/agent/live-models'
+// fase 18b (H5.3): il selettore del modello a combobox
+import { ModelPicker, THINKING_LABELS } from './ui/ModelPicker'
 import type { UiTheme } from '../theme'
 import { Dialog, DialogContent, DialogTitle } from './ui/dialog'
 
@@ -34,6 +38,7 @@ const KINDS: ProviderKind[] = [
 /** I tab con i nomi per la UI (gli id interni non cambiano). Fase 17a: descriptor. */
 const TAB_LABELS: Record<string, MessageDescriptor> = {
   provider: msg`Provider`,
+  uso: msg`Uso e costi`,
   agenti: msg`Bot`,
   permessi: msg`Permessi`,
   routine: msg`Routine`,
@@ -55,7 +60,7 @@ export function Settings() {
   const pendingTab = useStore((s) => s.settingsTab)
   const refreshProviders = useStore((s) => s.refreshProviders)
   const refreshPermissions = useStore((s) => s.refreshPermissions)
-  const [tab, setTab] = useState<'provider' | 'agenti' | 'permessi' | 'routine' | 'connettori' | 'autoreview' | 'vault' | 'generale'>('provider')
+  const [tab, setTab] = useState<'provider' | 'uso' | 'agenti' | 'permessi' | 'routine' | 'connettori' | 'autoreview' | 'vault' | 'generale'>('provider')
 
   // fase 7: un widget può chiedere di aprire un tab preciso (es. il provider
   // durante l'onboarding): lo si applica una volta e si consuma
@@ -83,6 +88,7 @@ export function Settings() {
         </nav>
         <div className="min-w-0 flex-1 overflow-y-auto scroll-thin p-6">
           {tab === 'provider' && <ProvidersTab onChanged={refreshProviders} />}
+          {tab === 'uso' && <UsageTab />}
           {tab === 'agenti' && <AgentsTab />}
           {tab === 'permessi' && <PermissionsTab onChanged={refreshPermissions} />}
           {tab === 'routine' && <RoutinesTab />}
@@ -196,15 +202,15 @@ function AutoReviewTab() {
           <option value="">{t`provider del revisore…`}</option>
           {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
-        <select
-          className="rounded-lg bg-muted px-2 py-1.5 text-xs outline-none"
-          value={cfg.model ?? ''}
+        {/* fase 18b (H5.3): combobox con ricerca, capacità e prezzi */}
+        <ModelPicker
+          className="min-w-44"
+          models={models}
+          value={cfg.model}
+          placeholder={t`modello… (vuoto = default del provider)`}
           disabled={!cfg.providerId}
-          onChange={(e) => save({ ...cfg, model: e.target.value || null })}
-        >
-          <option value="">{t`modello… (vuoto = default del provider)`}</option>
-          {models.map((m) => <option key={m.id} value={m.id}>{m.label ?? m.id}</option>)}
-        </select>
+          onChange={(m) => save({ ...cfg, model: m })}
+        />
       </div>
       <RuleList
         title={msg`⚡ Continua da solo quando l'azione rispetta queste regole`}
@@ -224,6 +230,335 @@ function AutoReviewTab() {
         onAdd={() => save({ ...cfg, blockRules: [...cfg.blockRules, newBlock.trim()] })}
         onRemove={(i) => save({ ...cfg, blockRules: cfg.blockRules.filter((_, j) => j !== i) })}
       />
+    </div>
+  )
+}
+
+// ---- fase 18b (H6.2): la pagina Uso e costi ----
+
+/** Le finestre del periodo, calcolate in ora LOCALE nel renderer. */
+type UsagePeriod = 'today' | '7d' | '30d' | 'month'
+
+const PERIOD_LABELS: Record<UsagePeriod, MessageDescriptor> = {
+  today: msg`Oggi`,
+  '7d': msg`7 giorni`,
+  '30d': msg`30 giorni`,
+  month: msg`Questo mese`
+}
+
+/** L'inizio locale del periodo (ms epoch). */
+function periodStart(p: UsagePeriod): number {
+  const now = new Date()
+  if (p === 'today') return new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+  if (p === 'month') return new Date(now.getFullYear(), now.getMonth(), 1).getTime()
+  return now.getTime() - (p === '7d' ? 7 : 30) * 24 * 60 * 60 * 1000
+}
+
+/** Le etichette delle origini delle chiamate (le `source` di model_usage). */
+const SOURCE_LABELS: Record<string, MessageDescriptor> = {
+  turn: msg`turno`,
+  group: msg`gruppo`,
+  subagent: msg`sottoagente`,
+  wake: msg`wake`,
+  review: msg`review`,
+  compaction: msg`compaction`,
+  'quick-ask': msg`quick ask`,
+  'routine-suggest': msg`suggerimento routine`
+}
+
+function UsageTab() {
+  const { t, i18n } = useLingui()
+  const providers = useStore((s) => s.providers)
+  const [period, setPeriod] = useState<UsagePeriod>('7d')
+  const [view, setView] = useState<'model' | 'agent' | 'source'>('model')
+  const [rows, setRows] = useState<ModelUsageRow[]>([])
+  const [modelRows, setModelRows] = useState<ModelUsageRow[]>([])
+  const [prices, setPrices] = useState<ModelPriceMap>({})
+  const [loaded, setLoaded] = useState(false)
+
+  const refresh = () => {
+    const from = periodStart(period)
+    setLoaded(false)
+    void api.usageSummary(from, undefined, view).then((r) => { setRows(r); setLoaded(true) }).catch(() => { setRows([]); setLoaded(true) })
+    // i prezzi personalizzati si propongono sui modelli del periodo (H6.2):
+    // serve la vista per modello anche quando la tabella è su un'altra
+    void api.usageSummary(from, undefined, 'model').then(setModelRows).catch(() => setModelRows([]))
+    void api.settingsGet<ModelPriceMap>('providers.modelPrices', {}).then(setPrices).catch(() => setPrices({}))
+  }
+  useEffect(refresh, [period, view])
+
+  const fmtInt = (n: number): string => n.toLocaleString(i18n.locale === 'en' ? 'en' : 'it')
+  const fmtUsd = (n: number): string => '$' + (n >= 1 ? n.toFixed(2) : n.toFixed(3)).replace('.', ',')
+
+  const totalCalls = rows.reduce((a, r) => a + r.calls, 0)
+  const totalIn = rows.reduce((a, r) => a + r.input, 0)
+  const totalOut = rows.reduce((a, r) => a + r.output, 0)
+  const totalCost = rows.reduce((a, r) => a + (r.costUsd ?? 0), 0)
+  const anyUnknown = rows.some((r) => r.costUsd === null || r.costPartial)
+
+  // il costo di una riga: noto, locale, o sconosciuto
+  const costCell = (r: ModelUsageRow): { text: string; partial: boolean } => {
+    if (r.costUsd !== null) return { text: fmtUsd(r.costUsd), partial: r.costPartial }
+    if (isLocalKind(r.providerKind)) return { text: t`locale`, partial: false }
+    return { text: '—', partial: false }
+  }
+
+  const segBtn = (id: typeof view, label: string): ReactNode => (
+    <button
+      key={id}
+      className={`rounded-lg px-2.5 py-1 text-xs ${view === id ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+      onClick={() => setView(id)}
+    >
+      {label}
+    </button>
+  )
+
+  return (
+    <div className="space-y-3">
+      {/* periodo */}
+      <div className="flex flex-wrap items-center gap-1">
+        {(Object.keys(PERIOD_LABELS) as UsagePeriod[]).map((p) => (
+          <button
+            key={p}
+            className={`rounded-lg px-2.5 py-1 text-xs ${period === p ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+            onClick={() => setPeriod(p)}
+          >
+            {i18n.t(PERIOD_LABELS[p]!)}
+          </button>
+        ))}
+      </div>
+
+      {/* riepilogo */}
+      <div className="grid grid-cols-2 gap-2 rounded-2xl border border-border bg-card px-3 py-2.5 sm:grid-cols-4">
+        <div>
+          <div className="text-[11px] uppercase tracking-wide text-muted-foreground"><Trans>chiamate</Trans></div>
+          <div className="text-sm text-foreground">{fmtInt(totalCalls)}</div>
+        </div>
+        <div>
+          <div className="text-[11px] uppercase tracking-wide text-muted-foreground"><Trans>token in</Trans></div>
+          <div className="text-sm text-foreground">{fmtInt(totalIn)}</div>
+        </div>
+        <div>
+          <div className="text-[11px] uppercase tracking-wide text-muted-foreground"><Trans>token out</Trans></div>
+          <div className="text-sm text-foreground">{fmtInt(totalOut)}</div>
+        </div>
+        <div>
+          <div className="text-[11px] uppercase tracking-wide text-muted-foreground"><Trans>costo totale</Trans></div>
+          <div className="text-sm text-foreground">{anyUnknown ? `≥ ${fmtUsd(totalCost)}` : fmtUsd(totalCost)}</div>
+        </div>
+      </div>
+      {anyUnknown && (
+        <p className="text-xs text-muted-foreground"><Trans>Il costo è un minimo: alcuni modelli non hanno un prezzo.</Trans></p>
+      )}
+
+      {/* tre viste */}
+      <div className="flex items-center gap-1 rounded-lg bg-muted p-1">
+        {segBtn('model', t`per modello`)}
+        {segBtn('agent', t`per bot`)}
+        {segBtn('source', t`per origine`)}
+      </div>
+
+      {/* tabella */}
+      {!loaded ? (
+        <p className="text-xs text-muted-foreground"><Trans>caricamento…</Trans></p>
+      ) : rows.length === 0 ? (
+        <p className="text-xs text-muted-foreground"><Trans>Nessuna chiamata nel periodo.</Trans></p>
+      ) : (
+        <div className="overflow-x-auto rounded-2xl border border-border bg-card">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b border-border text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+                <th className="px-3 py-2">{view === 'model' ? t`modello` : view === 'agent' ? t`bot` : t`origine`}</th>
+                <th className="px-3 py-2 text-right"><Trans>chiamate</Trans></th>
+                <th className="px-3 py-2 text-right"><Trans>token in</Trans></th>
+                <th className="px-3 py-2 text-right"><Trans>token out</Trans></th>
+                <th className="px-3 py-2 text-right"><Trans>cache</Trans></th>
+                <th className="px-3 py-2 text-right"><Trans>costo</Trans></th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => {
+                const cost = costCell(r)
+                const key = view === 'model' ? `${r.providerId}|${r.model}` : view === 'agent' ? (r.agentId ?? 'system') : r.source
+                return (
+                  <tr key={`${key}-${i}`} className="border-b border-border/50 last:border-0">
+                    <td className="px-3 py-2 font-mono">
+                      {view === 'model'
+                        ? `${r.providerKind}:${r.model}`
+                        : view === 'agent'
+                          ? (r.agentName ?? t`Sistema`)
+                          : (SOURCE_LABELS[r.source] ? i18n.t(SOURCE_LABELS[r.source]!) : r.source)}
+                    </td>
+                    <td className="px-3 py-2 text-right">{fmtInt(r.calls)}</td>
+                    <td className="px-3 py-2 text-right">{fmtInt(r.input)}</td>
+                    <td className="px-3 py-2 text-right">{fmtInt(r.output)}</td>
+                    <td className="px-3 py-2 text-right">{fmtInt(r.cacheRead + r.cacheWrite)}</td>
+                    <td className="px-3 py-2 text-right">
+                      {cost.text}
+                      {cost.partial && <span className="ml-1 text-[10px] text-muted-foreground">{t`parziale`}</span>}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* prezzi personalizzati (H1.3): i modelli usati nel periodo SENZA prezzo
+          di catalogo e NON locali */}
+      <PriceSettings
+        modelRows={modelRows}
+        prices={prices}
+        providers={providers}
+        onSaved={refresh}
+      />
+    </div>
+  )
+}
+
+/** Fase 18b (H6.2): i prezzi $/M dei modelli senza catalogo (salvano in providers.modelPrices). */
+function PriceSettings({ modelRows, prices, providers, onSaved }: {
+  modelRows: ModelUsageRow[]
+  prices: ModelPriceMap
+  providers: ProviderConfig[]
+  onSaved(): void
+}) {
+  const { t } = useLingui()
+  const target = modelRows.filter(
+    (r) => !r.costUsd && r.model && r.providerId && !isLocalKind(r.providerKind)
+  )
+  const inputCls = 'w-20 rounded-lg bg-muted px-2 py-1 text-xs outline-none'
+
+  if (target.length === 0) return null
+
+  const save = async (providerId: string, model: string, field: 'input' | 'output', raw: string): Promise<void> => {
+    if (!raw.trim()) return
+    const n = Number(raw.replace(',', '.'))
+    if (!Number.isFinite(n) || n < 0) return
+    const all = await api.settingsGet<ModelPriceMap>('providers.modelPrices', {})
+    const cur = { ...(all[providerId]?.[model] ?? { input: 0, output: 0 }), [field]: n }
+    await api.settingsSet('providers.modelPrices', { ...all, [providerId]: { ...(all[providerId] ?? {}), [model]: cur } })
+    onSaved()
+  }
+
+  return (
+    <div className="space-y-2 rounded-2xl border border-border bg-card px-3 py-2.5">
+      <div className="text-sm text-foreground"><Trans>Prezzi personalizzati</Trans></div>
+      <p className="text-xs text-muted-foreground">
+        <Trans>Questi modelli non hanno un prezzo di catalogo: scrivi quello che paghi (dollari per milione di token). Vale per le chiamate da qui in avanti, lo storico non cambia.</Trans>
+      </p>
+      {target.map((r) => {
+        const cur = prices[r.providerId!]?.[r.model!]
+        const pname = providers.find((p) => p.id === r.providerId)?.name ?? r.providerKind
+        return (
+          <div key={`${r.providerId}|${r.model}`} className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="min-w-0 flex-1 truncate font-mono">{r.model}</span>
+            <span className="text-muted-foreground">{pname}</span>
+            <label className="flex items-center gap-1">
+              <Trans>ingresso $/M</Trans>
+              <input
+                className={inputCls}
+                type="text"
+                defaultValue={cur ? String(cur.input) : ''}
+                onBlur={(e) => void save(r.providerId!, r.model!, 'input', e.target.value)}
+              />
+            </label>
+            <label className="flex items-center gap-1">
+              <Trans>uscita $/M</Trans>
+              <input
+                className={inputCls}
+                type="text"
+                defaultValue={cur ? String(cur.output) : ''}
+                onBlur={(e) => void save(r.providerId!, r.model!, 'output', e.target.value)}
+              />
+            </label>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ---- fase 18b (H5.4): l'editor della catena delle riserve ----
+
+/** Il massimo di voci della catena (H2.1). */
+const MAX_FALLBACK_CHAIN = 4
+
+function FallbackChainSection() {
+  const { t } = useLingui()
+  const providers = useStore((s) => s.providers)
+  const [chain, setChain] = useState<FallbackRoute[] | null>(null)
+  // i modelli per provider (per il ModelPicker di ogni voce)
+  const [models, setModels] = useState<Record<string, ModelInfo[]>>({})
+
+  useEffect(() => {
+    void api.settingsGet<FallbackRoute[]>('models.fallbackChain', []).then(setChain).catch(() => setChain([]))
+  }, [])
+  useEffect(() => {
+    for (const p of providers) {
+      if (!models[p.id]) {
+        api.listModels(p.id).then((ms: ModelInfo[]) => setModels((prev) => ({ ...prev, [p.id]: ms }))).catch(() => {})
+      }
+    }
+  }, [providers])
+
+  if (chain === null) return <div className="text-xs text-muted-foreground"><Trans>riserve…</Trans></div>
+
+  const persist = (next: FallbackRoute[]): void => {
+    setChain(next)
+    void api.settingsSet('models.fallbackChain', next)
+  }
+  const move = (i: number, dir: -1 | 1): void => {
+    const j = i + dir
+    if (j < 0 || j >= chain.length) return
+    const next = [...chain]
+    const [x] = next.splice(i, 1)
+    next.splice(j, 0, x!)
+    persist(next)
+  }
+
+  return (
+    <div className="space-y-2 rounded-2xl border border-border bg-card px-3 py-2.5">
+      <div className="text-sm text-foreground"><Trans>Riserve</Trans></div>
+      <p className="text-xs text-muted-foreground">
+        <Trans>Se il modello di un bot non risponde o raggiunge un limite, il turno passa alla riserva successiva. Con un limite (429) si salta agli altri provider.</Trans>
+      </p>
+      {chain.map((r, i) => {
+        const p = providers.find((x) => x.id === r.providerId)
+        return (
+          <div key={`${r.providerId}|${r.model}|${i}`} className={`flex flex-wrap items-center gap-2 ${p?.enabled ? '' : 'opacity-60'}`}>
+            <span className="text-[11px] uppercase tracking-wide text-muted-foreground">{i + 1}.</span>
+            <select
+              className="rounded-lg bg-muted px-2 py-1.5 text-xs outline-none"
+              value={r.providerId}
+              onChange={(e) => persist(chain.map((x, j) => j === i ? { providerId: e.target.value, model: '' } : x))}
+            >
+              <option value="">{t`— provider —`}</option>
+              {providers.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+            </select>
+            <ModelPicker
+              className="min-w-48 flex-1"
+              models={models[r.providerId] ?? []}
+              value={r.model}
+              placeholder={t`modello…`}
+              onChange={(m) => persist(chain.map((x, j) => j === i ? { providerId: r.providerId, model: m ?? '' } : x))}
+            />
+            <button className="text-xs text-muted-foreground hover:text-foreground disabled:opacity-30" disabled={i === 0} onClick={() => move(i, -1)}>↑</button>
+            <button className="text-xs text-muted-foreground hover:text-foreground disabled:opacity-30" disabled={i === chain.length - 1} onClick={() => move(i, 1)}>↓</button>
+            <button className="text-xs text-muted-foreground hover:text-destructive" onClick={() => persist(chain.filter((_, j) => j !== i))}>✕</button>
+            {p && !p.enabled && <span className="text-[10px] text-destructive line-through">{t`provider disattivato`}</span>}
+          </div>
+        )
+      })}
+      {chain.length < MAX_FALLBACK_CHAIN && (
+        <button
+          className="rounded-lg bg-muted px-3 py-1.5 text-xs hover:bg-accent"
+          onClick={() => persist([...chain, { providerId: '', model: '' }])}
+        >
+          <Trans>Aggiungi riserva</Trans>
+        </button>
+      )}
     </div>
   )
 }
@@ -1045,29 +1380,25 @@ function ModelDefaultsRow({ p }: { p: ProviderConfig }) {
     const eff = effective[role]
     return eff ? t`${fallback}: ${eff}` : t`${fallback}…`
   }
-  const options = (value: string | undefined, label: string): ReactNode => (
-    <>
-      <option value="">{label}</option>
-      {/* il valore salvato potrebbe non essere nell'elenco (es. modelli cloud non ancora tirati): resta visibile */}
-      {value && !(models ?? []).some((m) => m.id === value) && <option value={value}>{value}</option>}
-      {(models ?? []).map((m) => <option key={m.id} value={m.id}>{m.label ?? m.id}</option>)}
-    </>
+  // fase 18b (H5.3): il selettore a combobox (ricerca, capacità e prezzi in
+  // vista); il testo libero resta possibile per i modelli non ancora a catalogo
+  const picker = (role: keyof ModelOverrides, label: string): ReactNode => (
+    <ModelPicker
+      className="min-w-44"
+      models={models ?? []}
+      value={saved[role] ?? ''}
+      placeholder={saved[role] ? label : effLabel(role, label)}
+      onChange={(m) => void save({ [role]: m ?? undefined } as ModelOverrides)}
+    />
   )
-  const sel = 'rounded-lg bg-muted px-2 py-1.5 text-xs outline-none'
 
   if (models === null) return <div className="mt-2 text-xs text-muted-foreground"><Trans>modelli…</Trans></div>
   return (
     <div className="mt-2 flex flex-wrap items-center gap-2">
       <span className="text-[11px] uppercase tracking-wide text-muted-foreground"><Trans>modelli</Trans></span>
-      <select className={sel} value={saved.defaultModel ?? ''} onChange={(e) => void save({ defaultModel: e.target.value || undefined })}>
-        {options(saved.defaultModel, saved.defaultModel ? t`predefinito…` : effLabel('defaultModel', t`predefinito`))}
-      </select>
-      <select className={sel} value={saved.fallbackModel ?? ''} onChange={(e) => void save({ fallbackModel: e.target.value || undefined })}>
-        {options(saved.fallbackModel, saved.fallbackModel ? t`riserva…` : effLabel('fallbackModel', t`riserva`))}
-      </select>
-      <select className={sel} value={saved.autoReviewModel ?? ''} onChange={(e) => void save({ autoReviewModel: e.target.value || undefined })}>
-        {options(saved.autoReviewModel, saved.autoReviewModel ? t`auto-review…` : effLabel('autoReviewModel', t`auto-review`))}
-      </select>
+      {picker('defaultModel', t`predefinito`)}
+      {picker('fallbackModel', t`riserva`)}
+      {picker('autoReviewModel', t`auto-review`)}
     </div>
   )
 }
@@ -1266,6 +1597,9 @@ function ProvidersTab({ onChanged }: { onChanged: () => Promise<void> }) {
         </div>
       ))}
 
+      {/* fase 18b (H5.4): l'editor della catena delle riserve tra provider */}
+      <FallbackChainSection />
+
       {/* fase 15 (S5): la ricerca senza chiave, accanto alla riga della chiave Ollama */}
       <WebSearchSection />
 
@@ -1344,7 +1678,7 @@ function ProviderForm({ initial, onSave, onCancel }: { initial: ProviderConfig; 
 }
 
 function AgentsTab() {
-  const { t } = useLingui()
+  const { t, i18n } = useLingui()
   const agents = useStore((s) => s.agents)
   const providers = useStore((s) => s.providers)
   const mainAgentId = useStore((s) => s.mainAgentId)
@@ -1414,18 +1748,39 @@ function AgentsTab() {
                 <option key={p.id} value={p.id}>{p.name}</option>
               ))}
             </select>
-            <select
-              className="rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none disabled:opacity-40"
+            {/* fase 18b (H5.3): combobox con ricerca, capacità e prezzi */}
+            <ModelPicker
+              models={models[a.providerId ?? ''] ?? []}
+              value={a.model}
+              placeholder={t`— modello —`}
               disabled={!a.providerId}
-              value={a.model ?? ''}
-              onChange={async (e) => void patch(a, { model: e.target.value || null })}
-            >
-              <option value="">{t`— modello —`}</option>
-              {(models[a.providerId ?? ''] ?? []).map((m) => (
-                <option key={m.id} value={m.id}>{m.label ?? m.id}</option>
-              ))}
-            </select>
+              onChange={(m) => void patch(a, { model: m })}
+            />
           </div>
+          {/* fase 18b (H3): il livello di ragionamento del bot — Predefinito +
+              i livelli del modello scelto; nascosto se il modello non è
+              controllabile. Se il livello salvato non è più supportato si
+              mostra Predefinito MA il dato non si riscrive (l'adattatore clampa) */}
+          {(() => {
+            const chosen = (models[a.providerId ?? ''] ?? []).find((m) => m.id === a.model)
+            const levels = chosen?.thinkingLevels ?? []
+            if (levels.length === 0) return null
+            const savedLevel = levels.includes((a.thinking ?? 'default') as ThinkingSetting) ? (a.thinking ?? 'default') : 'default'
+            return (
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <span className="text-[11px] uppercase tracking-wide text-muted-foreground">{t`ragionamento`}</span>
+                <select
+                  className="rounded-lg bg-muted px-2 py-1.5 text-xs outline-none"
+                  value={savedLevel}
+                  onChange={(e) => void patch(a, { thinking: e.target.value as ThinkingSetting })}
+                >
+                  {['default', ...levels].map((l) => (
+                    <option key={l} value={l}>{i18n.t(THINKING_LABELS[l]!)}</option>
+                  ))}
+                </select>
+              </div>
+            )
+          })()}
           <input
             className="mt-2 w-full rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none"
             placeholder={t`Descrizione / ruolo del bot (va nel system prompt)`}
@@ -1692,7 +2047,7 @@ function NewRoutinePicker(props: {
   agentId: string | null
   connectors: ConnectorInfo[]
   manualServers: McpServerInfo[]
-  onCreate(title: string, prompt: string, trigger: RoutineTrigger, timezone: string): Promise<void>
+  onCreate(title: string, prompt: string, trigger: RoutineTrigger, timezone: string, model?: { providerId?: string | null; model?: string | null; thinking?: ThinkingSetting | null }): Promise<void>
   err: string
 }) {
   const [kind, setKind] = useState<TriggerKind | null>(null)
@@ -1731,9 +2086,10 @@ function TriggerEditor(props: {
   manualServers: McpServerInfo[]
   onCancel(): void
   onSaved(): void
-  onCreate?(title: string, prompt: string, trigger: RoutineTrigger, timezone: string): Promise<void>
+  onCreate?(title: string, prompt: string, trigger: RoutineTrigger, timezone: string, model?: { providerId?: string | null; model?: string | null; thinking?: ThinkingSetting | null }): Promise<void>
 }) {
   const { t, i18n } = useLingui()
+  const providers = useStore((s) => s.providers)
   const r = props.routine
   const [kind, setKind] = useState<TriggerKind>(props.initialKind ?? kindOf(r?.trigger, r?.schedule))
   const [title, setTitle] = useState(r?.title ?? '')
@@ -1741,6 +2097,19 @@ function TriggerEditor(props: {
   const [timezone, setTimezone] = useState(r?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
+  // fase 18b (H7): il modello PROPRIo della routine (null = quello del bot)
+  const [modelProvider, setModelProvider] = useState(r?.providerId ?? '')
+  const [modelId, setModelId] = useState(r?.model ?? '')
+  const [modelThinking, setModelThinking] = useState<ThinkingSetting>((r?.thinking as ThinkingSetting) ?? 'default')
+  const [routineModels, setRoutineModels] = useState<ModelInfo[]>([])
+  useEffect(() => {
+    if (modelProvider) api.listModels(modelProvider).then(setRoutineModels).catch(() => setRoutineModels([]))
+    else setRoutineModels([])
+  }, [modelProvider])
+  /** il modello della routine per la RPC (null = quello del bot) */
+  const modelPatch = modelProvider
+    ? { providerId: modelProvider, model: modelId, thinking: modelThinking !== 'default' ? modelThinking : null }
+    : { providerId: null, model: null, thinking: null }
 
   // schedule
   // schedule: il toggle è "cron" se c'è un'espressione, "ogni…" se vuota
@@ -1829,8 +2198,8 @@ function TriggerEditor(props: {
     try {
       const trigger = buildTrigger()
       if (!trigger) throw new Error(t`Argomenti (args) non sono JSON valido`)
-      if (props.onCreate) await props.onCreate(title.trim(), prompt.trim(), trigger, timezone.trim())
-      else await api.updateRoutineTrigger(r!.id, { title: title.trim(), prompt: prompt.trim(), trigger, timezone: timezone.trim() })
+      if (props.onCreate) await props.onCreate(title.trim(), prompt.trim(), trigger, timezone.trim(), modelPatch)
+      else await api.updateRoutineTrigger(r!.id, { title: title.trim(), prompt: prompt.trim(), trigger, timezone: timezone.trim(), ...modelPatch })
       props.onSaved()
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e))
@@ -1969,13 +2338,62 @@ function TriggerEditor(props: {
         <p className="text-[11px] text-muted-foreground"><Trans>La routine gira quando torni al computer dopo un'assenza lunga.</Trans></p>
       )}
 
+      {/* fase 18b (H7): il modello della routine — «Quello del bot» (default)
+          oppure provider + ModelPicker + ragionamento, come per i bot (H3) */}
+      <div className="space-y-2 rounded-lg border border-border bg-card px-2 py-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[11px] uppercase tracking-wide text-muted-foreground">{t`modello`}</span>
+          <select
+            className={inputCls}
+            value={modelProvider}
+            onChange={(e) => { setModelProvider(e.target.value); setModelId(''); setModelThinking('default') }}
+          >
+            <option value="">{t`Quello del bot`}</option>
+            {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+          {modelProvider && (
+            <ModelPicker
+              className="min-w-44 flex-1"
+              models={routineModels}
+              value={modelId || null}
+              placeholder={t`— modello —`}
+              onChange={(m) => setModelId(m ?? '')}
+            />
+          )}
+        </div>
+        {(() => {
+          // il ragionamento del modello della routine (come in H3)
+          const chosen = routineModels.find((m) => m.id === modelId)
+          const levels = chosen?.thinkingLevels ?? []
+          if (levels.length === 0) return null
+          const savedLevel = levels.includes(modelThinking) ? modelThinking : 'default'
+          return (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[11px] uppercase tracking-wide text-muted-foreground">{t`ragionamento`}</span>
+              <select
+                className={inputCls}
+                value={savedLevel}
+                onChange={(e) => setModelThinking(e.target.value as ThinkingSetting)}
+              >
+                {['default', ...levels].map((l) => (
+                  <option key={l} value={l}>{i18n.t(THINKING_LABELS[l]!)}</option>
+                ))}
+              </select>
+            </div>
+          )
+        })()}
+        <p className="text-[11px] text-muted-foreground">
+          <Trans>Vale solo per i turni di questa routine; il resto del bot non cambia.</Trans>
+        </p>
+      </div>
+
       <input className={`w-full ${inputCls}`} placeholder={t`Fuso orario (es. Europe/Rome)`} value={timezone} onChange={(e) => setTimezone(e.target.value)} />
       {err && <p className="text-xs text-destructive">{err}</p>}
       <div className="flex justify-end gap-2 pt-1">
         <button className="rounded-lg px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground" onClick={props.onCancel}><Trans>Annulla</Trans></button>
         <button
           className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-primary/90 disabled:opacity-40"
-          disabled={busy || !title.trim() || !prompt.trim() || !props.agentId}
+          disabled={busy || !title.trim() || !prompt.trim() || !props.agentId || (!!modelProvider && !modelId.trim())}
           onClick={() => void save()}
         >
           {r ? <Trans>Salva</Trans> : <Trans>Crea routine</Trans>}

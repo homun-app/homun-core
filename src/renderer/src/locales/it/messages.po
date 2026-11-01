@@ -120,6 +120,12 @@ msgstr "{0, plural, one {✓ # modello disponibile} other {✓ # modelli disponi
 msgid "{0}"
 msgstr "{0}"
 
+#. placeholder {0}: fmtUsd(m.cost.input)
+#. placeholder {1}: fmtUsd(m.cost.output)
+#: src/renderer/src/components/ui/ModelPicker.tsx
+msgid "{0} / {1} per M"
+msgstr "{0} / {1} per M"
+
 #. placeholder {0}: Math.round(s / 3600)
 #: src/renderer/src/components/SubagentCard.tsx
 msgid "{0} h"
@@ -215,6 +221,11 @@ msgstr "{key} richiede approvazione"
 #: src/shared/ui-messages.ts
 msgid "trigger.calendar"
 msgstr "{minutes} minuti prima di ogni evento del calendario"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "notice.modelRouteCooled"
+msgstr "{model} su {provider} è in pausa fino alle {until} (limite o errore recente): il turno parte da {fallback} su {fallbackProvider}."
 
 #: src/renderer/src/bot/bot-state.ts
 msgid "{name}"
@@ -467,6 +478,14 @@ msgstr "🛠 Skill"
 msgid "🛠 Skill di questo bot"
 msgstr "🛠 Skill di questo bot"
 
+#: src/renderer/src/components/Settings.tsx
+msgid "30 giorni"
+msgstr "30 giorni"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "7 giorni"
+msgstr "7 giorni"
+
 #. placeholder {0}: meta.toAgentName
 #: src/renderer/src/components/Chat.tsx
 msgid "A {0}"
@@ -525,6 +544,10 @@ msgstr "aggiungi gateway"
 msgid "Aggiungi regola"
 msgstr "Aggiungi regola"
 
+#: src/renderer/src/components/Settings.tsx
+msgid "Aggiungi riserva"
+msgstr "Aggiungi riserva"
+
 #. placeholder {0}: message.name
 #: src/renderer/src/components/ConnectorCards13.tsx
 msgid "Aggiungi server MCP: {0}"
@@ -573,6 +596,14 @@ msgstr "alle {times}{extra, select, yes { (+{more} orari)} other {}}"
 #: src/renderer/src/components/Chat.tsx
 msgid "Allega immagine (per modelli vision)"
 msgstr "Allega immagine (per modelli vision)"
+
+#: src/renderer/src/components/Chat.tsx
+msgid "Allega immagine (per modelli vision) — questo modello non vede le immagini"
+msgstr "Allega immagine (per modelli vision) — questo modello non vede le immagini"
+
+#: src/renderer/src/components/ui/ModelPicker.tsx
+msgid "Alto"
+msgstr "Alto"
 
 #: src/renderer/src/components/DraftCard.tsx
 msgid "Altri parametri (verranno inviati così):"
@@ -706,10 +737,6 @@ msgid "autoreview.disabled"
 msgstr "auto-review disattivata"
 
 #: src/renderer/src/components/Settings.tsx
-msgid "auto-review…"
-msgstr "auto-review…"
-
-#: src/renderer/src/components/Settings.tsx
 msgid "autorizza nel browser…"
 msgstr "autorizza nel browser…"
 
@@ -764,6 +791,10 @@ msgstr "avvisa"
 msgid "Base URL (es. https://api.z.ai)"
 msgstr "Base URL (es. https://api.z.ai)"
 
+#: src/renderer/src/components/ui/ModelPicker.tsx
+msgid "Basso"
+msgstr "Basso"
+
 #: src/renderer/src/components/Settings.tsx
 msgid "Bearer token (opzionale — salvato cifrato)"
 msgstr "Bearer token (opzionale — salvato cifrato)"
@@ -781,6 +812,10 @@ msgstr "Blocca"
 #: src/shared/ui-messages.ts
 msgid "notice.deniedByPermissions"
 msgstr "Bloccato dai permessi: {tool}"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "bot"
+msgstr "bot"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Bot"
@@ -844,6 +879,10 @@ msgstr "browser non disponibile senza la finestra di Homun"
 msgid "notice.onboardingWaitingProvider"
 msgstr "C’è già un provider attivo: per farmi partire scegli il ruolo nel messaggio qui sopra (con la risposta preparo i tuoi bot)."
 
+#: src/renderer/src/components/Settings.tsx
+msgid "cache"
+msgstr "cache"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "trigger.offsetMissing"
@@ -897,6 +936,10 @@ msgstr "Cerca bot e gruppi"
 #: src/renderer/src/components/LibraryPanel.tsx
 msgid "Cerca per titolo…"
 msgstr "Cerca per titolo…"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "chiamate"
+msgstr "chiamate"
 
 #: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/Sidebar.tsx
@@ -972,6 +1015,10 @@ msgstr "comando che esegue altri comandi (never-auto)"
 #: src/shared/ui-messages.ts
 msgid "approval.rcUnparsable"
 msgstr "comando non analizzabile con affidabilità"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "compaction"
+msgstr "compaction"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -1152,6 +1199,14 @@ msgstr "copia curl"
 #: src/renderer/src/components/Settings.tsx
 msgid "Cosa deve fare il Bot a ogni esecuzione"
 msgstr "Cosa deve fare il Bot a ogni esecuzione"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "costo"
+msgstr "costo"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "costo totale"
+msgstr "costo totale"
 
 #: src/renderer/src/components/BotDialogs.tsx
 msgid "Crea"
@@ -1517,6 +1572,10 @@ msgstr "grafico non disponibile"
 msgid "Gruppi"
 msgstr "Gruppi"
 
+#: src/renderer/src/components/Settings.tsx
+msgid "gruppo"
+msgstr "gruppo"
+
 #: src/renderer/src/components/Chat.tsx
 msgid "Gruppo"
 msgstr "Gruppo"
@@ -1596,6 +1655,10 @@ msgstr "Il computer dei bot ora è UNO solo, condiviso (radice: {root}).\n"
 "I dati originali restano dove sono: puoi cancellarli tu quando vuoi."
 
 #: src/renderer/src/components/Settings.tsx
+msgid "Il costo è un minimo: alcuni modelli non hanno un prezzo."
+msgstr "Il costo è un minimo: alcuni modelli non hanno un prezzo."
+
+#: src/renderer/src/components/Settings.tsx
 msgid "Il daemon dei Bot parte quando accedi al Mac e resta attivo con la finestra chiusa (LaunchAgent con riavvio automatico dopo un crash). Puoi disattivarlo qui."
 msgstr "Il daemon dei Bot parte quando accedi al Mac e resta attivo con la finestra chiusa (LaunchAgent con riavvio automatico dopo un crash). Puoi disattivarlo qui."
 
@@ -1636,6 +1699,16 @@ msgid "providers.noTools"
 msgstr "il modello \"{model}\" non supporta i tool (capability \"tools\" assente): scegline uno con i tool, altrimenti il bot non può parlarti"
 
 #. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "notice.modelFallbackRoute"
+msgstr "Il modello {model} del provider {provider} non risponde ({why}): passo alla riserva {fallback} su {fallbackProvider}."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "notice.imagesNotSeen"
+msgstr "Il modello {model} non vede le immagini: gli allegati di questo messaggio non saranno guardati."
+
+#. js-lingui-explicit-id
 #: src/renderer/src/components/Chat.tsx
 #: src/shared/ui-messages.ts
 msgid "group.rateLimit"
@@ -1660,6 +1733,16 @@ msgstr "Il modello principale {model} non risponde ({why}): uso la riserva {fall
 #: src/shared/ui-messages.ts
 msgid "rpc.pdfNeedsWindow"
 msgstr "il PDF lo genera la finestra di Homun: aprila e riprova, oppure esporta in html"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "notice.routineModelUnavailable"
+msgstr "Il provider {provider} scelto per questa routine non è più disponibile: uso il modello del bot ({model})."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "rpc.routineModelProvider"
+msgstr "il provider scelto per la routine non esiste: {provider}"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -1725,6 +1808,11 @@ msgstr "Il vault è cifrato a riposo (AES-256-GCM, chiave nel Keychain). I valor
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
+msgid "rpc.modelsListFailed"
+msgstr "impossibile elencare i modelli: {error}"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
 msgid "rpc.secretSaveFailed"
 msgstr "impossibile salvare il segreto del server (Keychain non disponibile): {error}"
 
@@ -1777,6 +1865,10 @@ msgstr "in raffreddamento fino a {0}"
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "Indirizzo"
 msgstr "Indirizzo"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "ingresso $/M"
+msgstr "ingresso $/M"
 
 #: src/renderer/src/components/ConnectorCards13.tsx
 msgid "Installa"
@@ -1951,6 +2043,11 @@ msgstr "Lingua"
 msgid "autoreview.alwaysAsk"
 msgstr "lo scambio di file con il Mac chiede sempre l’utente"
 
+#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/ui/ModelPicker.tsx
+msgid "locale"
+msgstr "locale"
+
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "Login"
 msgstr "Login"
@@ -2013,9 +2110,17 @@ msgstr "marketplace.json non leggibile per {source}"
 msgid "martedì"
 msgstr "martedì"
 
+#: src/renderer/src/components/ui/ModelPicker.tsx
+msgid "Massimo"
+msgstr "Massimo"
+
 #: src/renderer/src/components/Settings.tsx
 msgid "mattina"
 msgstr "mattina"
+
+#: src/renderer/src/components/ui/ModelPicker.tsx
+msgid "Medio"
+msgstr "Medio"
 
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Membri"
@@ -2052,6 +2157,10 @@ msgstr "metodo sconosciuto: {method}"
 msgid "metti in pausa"
 msgstr "metti in pausa"
 
+#: src/renderer/src/components/ui/ModelPicker.tsx
+msgid "Minimo"
+msgstr "Minimo"
+
 #: src/renderer/src/components/Settings.tsx
 msgid "minuti prima dell'evento"
 msgstr "minuti prima dell'evento"
@@ -2067,6 +2176,14 @@ msgstr "modelli"
 #: src/renderer/src/components/Settings.tsx
 msgid "modelli…"
 msgstr "modelli…"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "modello"
+msgstr "modello"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "modello…"
+msgstr "modello…"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "modello… (vuoto = default del provider)"
@@ -2116,6 +2233,10 @@ msgstr "Modulo sicuro (secret {name}): {reason}"
 #: src/shared/ui-messages.ts
 msgid "card.secureInput"
 msgstr "Modulo sicuro: {reason}"
+
+#: src/renderer/src/components/ui/ModelPicker.tsx
+msgid "Molto alto"
+msgstr "Molto alto"
 
 #: src/renderer/src/components/Chat.tsx
 msgid "Mostra il pannello destro"
@@ -2207,6 +2328,10 @@ msgstr "Nessun messaggio nel gruppo."
 msgid "nessun modello"
 msgstr "nessun modello"
 
+#: src/renderer/src/components/ui/ModelPicker.tsx
+msgid "nessun modello in elenco: scrivi l'id e premi Invio"
+msgstr "nessun modello in elenco: scrivi l'id e premi Invio"
+
 #: src/renderer/src/components/Settings.tsx
 msgid "nessun server o plugin installato"
 msgstr "nessun server o plugin installato"
@@ -2226,6 +2351,10 @@ msgstr "nessun tool elencato"
 #: src/renderer/src/components/Settings.tsx
 msgid "nessun tool riconosciuto nel connettore: configura tool e idField a mano"
 msgstr "nessun tool riconosciuto nel connettore: configura tool e idField a mano"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Nessuna chiamata nel periodo."
+msgstr "Nessuna chiamata nel periodo."
 
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "Nessuna concessione: ogni fill chiede la card."
@@ -2255,6 +2384,10 @@ msgstr "Nessuna routine."
 #: src/renderer/src/components/SkillsPanel.tsx
 msgid "Nessuna skill: chiedi al bot di crearne una con update_skill."
 msgstr "Nessuna skill: chiedi al bot di crearne una con update_skill."
+
+#: src/renderer/src/components/ui/ModelPicker.tsx
+msgid "niente tool"
+msgstr "niente tool"
 
 #: src/renderer/src/components/ConnectorCards13.tsx
 msgid "No"
@@ -2360,6 +2493,10 @@ msgstr "Offline"
 msgid "Oggetto:"
 msgstr "Oggetto:"
 
+#: src/renderer/src/components/Settings.tsx
+msgid "Oggi"
+msgstr "Oggi"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "cron.everyNMinutes"
@@ -2429,6 +2566,10 @@ msgstr "orario lavorativo"
 msgid "onboarding.roleOrg"
 msgstr "Organizzazione e calendario"
 
+#: src/renderer/src/components/Settings.tsx
+msgid "origine"
+msgstr "origine"
+
 #: src/renderer/src/components/LibraryCards.tsx
 msgid "Origine https://…"
 msgstr "Origine https://…"
@@ -2440,6 +2581,10 @@ msgstr "Origini https://… (separate da virgola)"
 #: src/renderer/src/components/Settings.tsx
 msgid "owner/repo di GitHub oppure URL git https"
 msgstr "owner/repo di GitHub oppure URL git https"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "parziale"
+msgstr "parziale"
 
 #: src/renderer/src/lib/fill-fields.ts
 msgid "password"
@@ -2459,6 +2604,10 @@ msgid "pensando…"
 msgstr "pensando…"
 
 #: src/renderer/src/components/Settings.tsx
+msgid "per bot"
+msgstr "per bot"
+
+#: src/renderer/src/components/Settings.tsx
 msgid "per bot:"
 msgstr "per bot:"
 
@@ -2467,10 +2616,18 @@ msgstr "per bot:"
 msgid "onboarding.prompt"
 msgstr "Per cosa vuoi usarmi di più?"
 
+#: src/renderer/src/components/Settings.tsx
+msgid "per modello"
+msgstr "per modello"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "kick.6"
 msgstr "Per ogni connettore del template NON ancora connesso chiama offer_connector: UNA sola card per connettore mancante, con il perché (campo why del template). Non collegare nulla da solo: la connessione avviene solo dal click dell’utente."
+
+#: src/renderer/src/components/Settings.tsx
+msgid "per origine"
+msgstr "per origine"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Permessi"
@@ -2520,9 +2677,9 @@ msgstr "preciso"
 msgid "predefinito"
 msgstr "predefinito"
 
-#: src/renderer/src/components/Settings.tsx
-msgid "predefinito…"
-msgstr "predefinito…"
+#: src/renderer/src/components/ui/ModelPicker.tsx
+msgid "Predefinito"
+msgstr "Predefinito"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -2538,6 +2695,10 @@ msgstr "Presentati all’utente con un messaggio breve via send_to_user (chi sei
 #: src/shared/ui-messages.ts
 msgid "rpc.presenceUnavailable"
 msgstr "presenza non disponibile"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Prezzi personalizzati"
+msgstr "Prezzi personalizzati"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -2615,6 +2776,10 @@ msgid "provider del revisore…"
 msgstr "provider del revisore…"
 
 #: src/renderer/src/components/Settings.tsx
+msgid "provider disattivato"
+msgstr "provider disattivato"
+
+#: src/renderer/src/components/Settings.tsx
 msgid "Provider locali e cloud — chiunque parli OpenAI-compatible funziona."
 msgstr "Provider locali e cloud — chiunque parli OpenAI-compatible funziona."
 
@@ -2665,9 +2830,34 @@ msgstr "quando torni al computer"
 msgid "trigger.presence"
 msgstr "quando torni al computer dopo un’assenza"
 
+#: src/renderer/src/components/Settings.tsx
+msgid "Quello del bot"
+msgstr "Quello del bot"
+
 #: src/renderer/src/components/ApprovalCard.tsx
 msgid "Questa azione chiede sempre l'approvazione"
 msgstr "Questa azione chiede sempre l'approvazione"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Questi modelli non hanno un prezzo di catalogo: scrivi quello che paghi (dollari per milione di token). Vale per le chiamate da qui in avanti, lo storico non cambia."
+msgstr "Questi modelli non hanno un prezzo di catalogo: scrivi quello che paghi (dollari per milione di token). Vale per le chiamate da qui in avanti, lo storico non cambia."
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Questo mese"
+msgstr "Questo mese"
+
+#: src/renderer/src/components/Chat.tsx
+msgid "Questo modello non vede le immagini"
+msgstr "Questo modello non vede le immagini"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "quick ask"
+msgstr "quick ask"
+
+#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/ui/ModelPicker.tsx
+msgid "ragionamento"
+msgstr "ragionamento"
 
 #: src/renderer/src/components/Chat.tsx
 msgid "Ragionamento"
@@ -2706,6 +2896,10 @@ msgstr "report: {0}"
 #: src/renderer/src/components/ConnectorCards13.tsx
 msgid "repository"
 msgstr "repository"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "review"
+msgstr "review"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Revisione automatica"
@@ -2802,8 +2996,12 @@ msgid "riserva"
 msgstr "riserva"
 
 #: src/renderer/src/components/Settings.tsx
-msgid "riserva…"
-msgstr "riserva…"
+msgid "Riserve"
+msgstr "Riserve"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "riserve…"
+msgstr "riserve…"
 
 #: src/renderer/src/components/Chat.tsx
 msgid "risposta di ripiego"
@@ -3002,6 +3200,10 @@ msgstr "Scrivi nel gruppo (usa @nome per chiamare un bot, @tutti per tutti)"
 msgid "Scuro"
 msgstr "Scuro"
 
+#: src/renderer/src/components/Settings.tsx
+msgid "Se il modello di un bot non risponde o raggiunge un limite, il turno passa alla riserva successiva. Con un limite (429) si salta agli altri provider."
+msgstr "Se il modello di un bot non risponde o raggiunge un limite, il turno passa alla riserva successiva. Con un limite (429) si salta agli altri provider."
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "kick.9"
@@ -3037,6 +3239,11 @@ msgstr "send_to_agent → {name}: contenuto web non fidato nel turno"
 #: src/shared/ui-messages.ts
 msgid "card.untrustedDelegation"
 msgstr "send_to_agent → {name}: il turno ha letto contenuti web non fidati"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "rpc.routineModelEmpty"
+msgstr "serve anche il modello quando scegli un provider per la routine"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -3188,6 +3395,10 @@ msgstr "sorgente non valida: usa owner/repo di GitHub oppure un URL git https"
 msgid "sostituisci"
 msgstr "sostituisci"
 
+#: src/renderer/src/components/Settings.tsx
+msgid "sottoagente"
+msgstr "sottoagente"
+
 #: src/renderer/src/components/Chat.tsx
 #: src/renderer/src/components/SubagentCard.tsx
 msgid "Sottoagente"
@@ -3201,6 +3412,10 @@ msgstr "Sottoagente non trovato"
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Sottoagenti"
 msgstr "Sottoagenti"
+
+#: src/renderer/src/components/ui/ModelPicker.tsx
+msgid "Spento"
+msgstr "Spento"
 
 #. placeholder {0}: activity.tool
 #. placeholder {1}: activity.target ? ` · ${activity.target}` : ''
@@ -3228,6 +3443,10 @@ msgstr "Sta scrivendo…"
 #: src/renderer/src/components/Settings.tsx
 msgid "stdio (comando locale)"
 msgstr "stdio (comando locale)"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "suggerimento routine"
+msgstr "suggerimento routine"
 
 #: src/renderer/src/components/Chat.tsx
 #: src/renderer/src/components/RightPanel.tsx
@@ -3296,6 +3515,14 @@ msgstr "tipo non valido: {kind}"
 msgid "Titolo (es. Riepilogo email del mattino)"
 msgstr "Titolo (es. Riepilogo email del mattino)"
 
+#: src/renderer/src/components/Settings.tsx
+msgid "token in"
+msgstr "token in"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "token out"
+msgstr "token out"
+
 #: src/renderer/src/components/ConnectorCard.tsx
 msgid "token scaduto"
 msgstr "token scaduto"
@@ -3355,6 +3582,10 @@ msgstr "Tu + {0}"
 #: src/renderer/src/sidebar-utils.ts
 msgid "Tu: {0}"
 msgstr "Tu: {0}"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "turno"
+msgstr "turno"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -3484,6 +3715,14 @@ msgstr "Usa i servizi di ricerca gratuiti senza chiave (You.com, Exa, Tavily)"
 msgid "rpc.useConnectApps"
 msgstr "usa la vista \"Connetti app\" per i connettori del catalogo"
 
+#: src/renderer/src/components/Settings.tsx
+msgid "uscita $/M"
+msgstr "uscita $/M"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Uso e costi"
+msgstr "Uso e costi"
+
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "utente (condivisa)"
 msgstr "utente (condivisa)"
@@ -3491,6 +3730,10 @@ msgstr "utente (condivisa)"
 #: src/renderer/src/components/ApprovalCard.tsx
 msgid "Vale per lo stesso tool fino alla fine di questo turno"
 msgstr "Vale per lo stesso tool fino alla fine di questo turno"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Vale solo per i turni di questa routine; il resto del bot non cambia."
+msgstr "Vale solo per i turni di questa routine; il resto del bot non cambia."
 
 #: src/renderer/src/components/LibraryCards.tsx
 #: src/renderer/src/components/Settings.tsx
@@ -3523,6 +3766,10 @@ msgstr "Versioni:"
 msgid "cron.aroundTime"
 msgstr "verso le {time} (±15 min)"
 
+#: src/renderer/src/components/ui/ModelPicker.tsx
+msgid "visione"
+msgstr "visione"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "rpc.itemInconsistent"
@@ -3532,6 +3779,10 @@ msgstr "voce incoerente"
 #: src/shared/ui-messages.ts
 msgid "rpc.itemNotFound"
 msgstr "voce non trovata"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "wake"
+msgstr "wake"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "webhook"

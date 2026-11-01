@@ -14,6 +14,9 @@ import { listSkills, deleteSkill } from '../main/agent/skills'
 import * as providers from '../main/agent/providers'
 import { suggestRoutines } from '../main/routines'
 import { llmStream } from '../main/agent/llm'
+// fase 18b (H5.1): il catalogo pi-ai per l'unione di models:list (l'adattatore
+// resta l'unico file che importa pi-ai; qui si importa l'adattatore)
+import { catalogModelInfos, modelCapabilities } from '../main/agent/llm'
 import { secondaryPrompts } from '../main/agent/prompts'
 import { parseCron } from './cron'
 import { isValidTimeZone } from './tz'
@@ -30,7 +33,7 @@ import type { JobWorker } from './worker'
 import type { ConnectorsManager } from '../main/connectors'
 import type { Presence } from './presence'
 import type { Onboarding } from './onboarding'
-import type { SandbotEvent, SendMessagePayload, McpServerInfo, McpServerSecret, RoutineInfo, RoutineTrigger, AutoReviewSettings } from '../shared/types'
+import type { SandbotEvent, SendMessagePayload, McpServerInfo, McpServerSecret, RoutineInfo, RoutineTrigger, AutoReviewSettings, ModelInfo, ModelPriceMap, ThinkingSetting } from '../shared/types'
 import { DEFAULT_AUTO_REVIEW } from '../shared/types'
 // fase 17c (C2/C3): testi del catalogo UI — errori RPC nella lingua
 // dell'interfaccia, meta.ui sui messaggi [sistema] (il testo per il modello
@@ -116,6 +119,29 @@ export function buildApiMethods(
     }
     if (errors.length) throw uiError(UI.rpcTriggerInvalid, { errors: errors.join('; ') })
     return t
+  }
+
+  /**
+   * Fase 18b (H7): validazione del modello PROPRIo di una routine — il
+   * provider deve esistere (e non essere un sottoagente) e il modello non
+   * può essere vuoto; altrimenti uiError. providerId nullo = bot del turno.
+   */
+  function routineModelPatch(m?: { providerId?: string | null; model?: string | null; thinking?: string | null }): {
+    providerId: string | null
+    model: string | null
+    thinking: ThinkingSetting | null
+  } {
+    if (m === undefined) return { providerId: null, model: null, thinking: null }
+    if (m.providerId === null || m.providerId === undefined || m.providerId === '') {
+      return { providerId: null, model: null, thinking: null }
+    }
+    const p = providers.getProvider(String(m.providerId))
+    if (!p) throw uiError(UI.rpcRoutineModelProvider, { provider: String(m.providerId) })
+    const model = typeof m.model === 'string' ? m.model.trim() : ''
+    if (!model) throw uiError(UI.rpcRoutineModelEmpty)
+    const levels: ThinkingSetting[] = ['default', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
+    const thinking = m.thinking && levels.includes(m.thinking as ThinkingSetting) ? (m.thinking as ThinkingSetting) : null
+    return { providerId: p.id, model, thinking }
   }
 
   return {
@@ -378,16 +404,18 @@ export function buildApiMethods(
         return { ...r, next_run: next, ...(url ? { webhook_url: url } : {}) }
       })
     },
-    'routines:create': ([agentId, title, prompt, schedule]) => {
+    'routines:create': ([agentId, title, prompt, schedule, model]) => {
       // fase 12 (punto 1): niente routine su un SOTTOAGENTE (non è un bot)
       const refusalUi = store.subagentRefusalUi(String(agentId ?? ''))
       // fase 17c: il rifiuto delle routine è SOLO UI (il modello vede la
       // versione inglese nei result dei tool): testo tradotto subito
       if (refusalUi) throw new Error(formatUi(refusalUi, uiLanguage()))
       if (!parseCron(String(schedule))) throw uiError(UI.rpcScheduleInvalid)
-      return store.createRoutine(agentId as string, title as string, prompt as string, schedule as string)
+      return store.createRoutine(agentId as string, title as string, prompt as string, schedule as string,
+        // fase 18b (H7): modello proprio facoltativo, stessa validazione
+        model !== undefined ? routineModelPatch(model as Parameters<typeof routineModelPatch>[0]) : {})
     },
-    'routines:create-trigger': async ([agentId, title, prompt, trigger, timezone]) => {
+    'routines:create-trigger': async ([agentId, title, prompt, trigger, timezone, model]) => {
       // fase 12 (punto 1): niente routine su un SOTTOAGENTE (non è un bot)
       const refusalUi = store.subagentRefusalUi(String(agentId ?? ''))
       if (refusalUi) throw new Error(formatUi(refusalUi, uiLanguage()))
@@ -400,13 +428,15 @@ export function buildApiMethods(
       if (tz && !isValidTimeZone(tz)) throw uiError(UI.rpcTzInvalid, { tz })
       const created = store.createRoutine(agentId as string, title as string, prompt as string, cronOfTrigger(t), {
         timezone: tz,
-        trigger: t
+        trigger: t,
+        // fase 18b (H7): modello proprio (validato: provider esistente, modello non vuoto)
+        ...(model !== undefined ? routineModelPatch(model as Parameters<typeof routineModelPatch>[0]) : {})
       })
       const url = webhookUrl(created)
       return { ...created, ...(url ? { webhook_url: url } : {}) }
     },
     'routines:update-trigger': async ([id, patch]) => {
-      const p = (patch ?? {}) as { title?: string; prompt?: string; enabled?: number; paused_for_away?: number; trigger?: RoutineTrigger | null; timezone?: string }
+      const p = (patch ?? {}) as { title?: string; prompt?: string; enabled?: number; paused_for_away?: number; trigger?: RoutineTrigger | null; timezone?: string; providerId?: string | null; model?: string | null; thinking?: string | null }
       const cur = store.getRoutine(id as number)
       if (!cur) throw uiError(UI.rpcRoutineNotFound)
       let final: RoutineTrigger | null | undefined
@@ -426,13 +456,23 @@ export function buildApiMethods(
       if (p.timezone !== undefined && p.timezone && !isValidTimeZone(p.timezone)) {
         throw uiError(UI.rpcTzInvalid, { tz: p.timezone })
       }
+      // fase 18b (H7): il modello proprio si aggiorna SOLO se la patch lo tocca
+      const hasModel = p.providerId !== undefined || p.model !== undefined || p.thinking !== undefined
+      const modelPatch = hasModel
+        ? routineModelPatch({
+            providerId: p.providerId !== undefined ? p.providerId : cur.providerId,
+            model: p.model !== undefined ? p.model : cur.model,
+            thinking: p.thinking !== undefined ? p.thinking : cur.thinking
+          })
+        : null
       store.updateRoutine(id as number, {
         ...(p.title !== undefined ? { title: p.title } : {}),
         ...(p.prompt !== undefined ? { prompt: p.prompt } : {}),
         ...(p.enabled !== undefined ? { enabled: p.enabled } : {}),
         ...(p.paused_for_away !== undefined ? { paused_for_away: p.paused_for_away } : {}),
         ...(p.timezone !== undefined ? { timezone: p.timezone } : {}),
-        ...(final !== undefined ? { trigger: final, schedule: cronOfTrigger(final) } : {})
+        ...(final !== undefined ? { trigger: final, schedule: cronOfTrigger(final) } : {}),
+        ...(modelPatch ? modelPatch : {})
       })
       const updated = store.getRoutine(id as number)
       const url = updated ? webhookUrl(updated) : undefined
@@ -1099,18 +1139,62 @@ export function buildApiMethods(
       const p = providers.getProvider(id as string)
       return p ? providers.testProvider(p) : { ok: false, error: uiText(UI.rpcProviderNotFoundLower) }
     },
-    'models:list': ([providerId]) => {
+    'models:list': async ([providerId]) => {
       const p = providers.getProvider(providerId as string)
       if (!p) throw uiError(UI.rpcProviderNotFoundLower)
-      return providers.listProviderModels(p)
+      // fase 18b (H5.1): l'UNIONE del catalogo pi-ai (per i 7 kind che lo
+      // hanno) e dell'elenco vivo del provider; le capacità di ogni voce
+      // vengono da modelCapabilities (cache Ollama e prezzi custom inclusi)
+      const prices = store.getSetting<ModelPriceMap>('providers.modelPrices', {})
+      const catalog = catalogModelInfos(p, prices)
+      let live: ModelInfo[] = []
+      let liveError: unknown = null
+      try {
+        live = await providers.listProviderModels(p)
+      } catch (e) {
+        liveError = e
+      }
+      // il vivo fallisce ma il catalogo c'è → si restituisce il catalogo,
+      // NESSUN errore; si lancia solo se falliscono entrambi (o il kind non
+      // ha catalogo e il vivo fallisce)
+      if (live.length === 0 && catalog.length === 0) {
+        if (liveError) {
+          const error = liveError instanceof Error ? liveError.message : String(liveError)
+          throw uiError(UI.rpcModelsListFailed, { error })
+        }
+        return []
+      }
+      const byId = new Map<string, ModelInfo>()
+      for (const c of catalog) byId.set(c.id, c)
+      for (const l of live) {
+        const cur = byId.get(l.id)
+        byId.set(l.id, cur
+          ? { ...cur, ...(l.label ? { label: l.label } : {}), source: 'both' }
+          : l)
+      }
+      // le capacità di OGNI voce vengono da modelCapabilities (cache Ollama e
+      // prezzi custom inclusi, H1.2/H1.3); la finestra di contesto resta quella
+      // del catalogo (del sintetico sarebbe un reload a caso)
+      return [...byId.values()].map((m) => {
+        const caps = modelCapabilities(p, m.id, prices)
+        return {
+          ...m,
+          vision: caps.vision,
+          tools: caps.tools,
+          thinkingLevels: caps.thinkingLevels,
+          cost: caps.cost,
+          costSource: caps.costSource
+        }
+      })
     },
-    // fase 18a (E4): uso registrato dei modelli, aggregato per provider_kind +
-    // model in una finestra [fromMs, toMs] facoltativa — solo numeri, mai
-    // testo dei messaggi. La pagina Uso e costi è della 18b
-    'usage:summary': ([fromMs, toMs]) =>
+    // fase 18a (E4) → 18b (H6.1): uso registrato dei modelli, aggregato per
+    // provider+modello (default), bot o origine in una finestra [fromMs, toMs]
+    // facoltativa — solo numeri, mai testo dei messaggi
+    'usage:summary': ([fromMs, toMs, groupBy]) =>
       store.modelUsageSummary(
         typeof fromMs === 'number' ? fromMs : undefined,
-        typeof toMs === 'number' ? toMs : undefined
+        typeof toMs === 'number' ? toMs : undefined,
+        groupBy === 'agent' || groupBy === 'source' ? groupBy : 'model'
       ),
     // fase 11 (punto 2): chiave per la ricerca web del provider Ollama — vive
     // SOLO nel vault sigillato (mai nei settings in chiaro, mai nel contesto

@@ -43,6 +43,9 @@ const h = vi.hoisted(() => {
     calls: [] as Array<Array<{ role: string; content: string; toolCallId?: string; images?: string[]; toolCalls?: unknown[] }>>,
     // fase 9 (punto 1): il modello di OGNI chiamata (per i test della riserva)
     models: [] as string[],
+    // fase 18b (H2/H3): il provider di ogni chiamata e le opzioni dello stream
+    provIds: [] as string[],
+    opts: [] as Array<{ thinking?: string; modelPrices?: unknown }>,
     gates: new Set<{ resolve: () => void }>(),
     // fase 8: risposta del revisore delle approvazioni (chiamata separata col
     // tool report_decision — non consuma la coda delle risposte del turno;
@@ -387,11 +390,16 @@ vi.mock('../llm', () => ({
     _p: unknown,
     _model: string,
     messages: Array<{ role: string; content: string; toolCallId?: string; images?: string[]; toolCalls?: unknown[] }>,
-    tools: unknown[] = []
+    tools: unknown[] = [],
+    _signal?: unknown,
+    _opts?: { thinking?: string; modelPrices?: unknown }
   ) => {
     h.llm.calls.push(messages.map((m) => ({ role: m.role, content: m.content, toolCallId: m.toolCallId, images: m.images, toolCalls: m.toolCalls })))
-    // fase 9 (punto 1): quale modello è stato usato per questa chiamata
+    // fase 9 (punto 1): quale modello è stato usato per questa chiamata;
+    // fase 18b (H2/H3): anche il provider e le opzioni (thinking, prezzi)
     h.llm.models.push(String(_model))
+    h.llm.provIds.push(String((_p as { id?: string })?.id ?? ''))
+    h.llm.opts.push({ thinking: _opts?.thinking, modelPrices: _opts?.modelPrices })
     // fase 8: la chiamata del REVISORE (solo tool report_decision) risponde da
     // h.llm.reviewer senza toccare la coda del turno
     if ((tools as Array<{ name?: string }>).some((t) => t?.name === 'report_decision')) {
@@ -634,6 +642,8 @@ vi.mock('../../mcp', () => ({
 }))
 
 const { runTurn, isRunning, resolveApproval, supersedeIfPaused, interrupt, RECOVERY_NUDGE } = await import('../loop')
+// fase 18b (H2.3): il raffreddamento delle rotte è in memoria nel modulo
+const { resetRouteHealth } = await import('../route-health')
 // correzione E2: il tetto per catena dello scheduler (test del recupero)
 const { GROUP_MEMBER_CHAIN_POSTS_MAX } = await import('../group-turns')
 // il modulo mcp mockato (per patcharne callTool nel test della card Riconnetti)
@@ -710,6 +720,11 @@ beforeEach(() => {
   h.llm.queue.length = 0
   h.llm.calls.length = 0
   h.llm.models.length = 0
+  // fase 18b: il raffreddamento delle rotte è in memoria nel modulo — si
+  // azzera tra i test, come il resto dello stato
+  h.llm.provIds.length = 0
+  h.llm.opts.length = 0
+  resetRouteHealth()
   h.llm.reviewer = { text: 'no' }
   h.sandboxMock.exec = { command: '', env: {}, calls: 0 }
   h.sandboxMock.result = { stdout: '', stderr: '', exitCode: 0, signal: null, trimmed: false }
@@ -4727,3 +4742,268 @@ describe('fase 13: add_mcp_server / install_plugin / find_tools / result MCP', (
     setMcpAnnotationsLookup(() => undefined)
   })
 })
+
+// ---- fase 18b: catena delle riserve (H2), ragionamento (H3), visione (H4), routine (H7) ----
+
+describe('fase 18b (H2): la catena delle riserve nel turno', () => {
+  const mkSend = (id: string, text: string): FakeToolCall => ({ id, name: 'send_to_user', arguments: JSON.stringify({ text }) })
+  const rateLimit = (): Error => {
+    const e = new Error('429 Rate limit exceeded: usage limit reached')
+    ;(e as Error & { status?: number }).status = 429
+    return e
+  }
+  const setChain = (chain: Array<{ providerId: string; model: string }>): void => {
+    h.db.settings.set('models.fallbackChain', chain)
+  }
+  const addProvider = (id: string): void => {
+    h.db.providers.push({ id, enabled: true, kind: 'openai-compatible' })
+  }
+
+  it('primario 429 → riserva su ALTRO provider: consegna, notice modelFallbackRoute, uso registrato sulla riserva', async () => {
+    addProvider('prov2')
+    setChain([{ providerId: 'prov2', model: 'm2' }])
+    h.llm.queue = [
+      { error: rateLimit() },
+      { toolCalls: [mkSend('r1', 'dalla riserva')] },
+      { text: 'ok' }
+    ]
+    await runTurn(AGENT, 'ciao', emit)
+    // il primario ha fallito col 429, la riserva è di un ALTRO provider
+    expect(h.llm.models).toEqual(['m1', 'm2', 'm2'])
+    expect(h.llm.provIds).toEqual(['prov', 'prov2', 'prov2'])
+    const notice = h.db.entries.find((e) => e.kind === 'notice' && (e.meta?.ui as { id?: string } | undefined)?.id === 'notice.modelFallbackRoute')
+    expect(notice).toBeTruthy()
+    expect((notice!.meta!.ui as { values?: Record<string, unknown> }).values).toMatchObject({ model: 'm1', fallback: 'm2' })
+    expect(h.db.entries.find((e) => e.kind === 'send-message')!.content).toBe('dalla riserva')
+    expect(h.db.entries.some((e) => e.kind === 'event' && e.meta?.turnEnd === 'FINISHED')).toBe(true)
+  })
+
+  it('429 con riserva sullo STESSO provider: NON si passa (quota dell\'account)', async () => {
+    h.db.settings.set('providers.modelDefaults', { prov: { fallbackModel: 'm-stessa' } })
+    h.llm.queue = [{ error: rateLimit() }, { text: 'mai' }]
+    await runTurn(AGENT, 'ciao', emit)
+    expect(h.llm.models).toEqual(['m1'])
+    expect(h.db.entries.some((e) => e.kind === 'event' && e.meta?.turnEnd === 'STOPPED')).toBe(true)
+    expect(h.db.entries.some((e) => e.kind === 'event' && e.meta?.stopReason === 'rate-limit')).toBe(true)
+  })
+
+  it('il turno SUCCESSIVO parte dalla riserva (raffreddato il primario) con la notice modelRouteCooled', async () => {
+    addProvider('prov2')
+    setChain([{ providerId: 'prov2', model: 'm2' }])
+    h.llm.queue = [
+      { error: rateLimit() },
+      { toolCalls: [mkSend('r1', 'primo turno')] },
+      { text: 'chiuso' }
+    ]
+    await runTurn(AGENT, 'uno', emit)
+    h.db.entries.length = 0
+    h.llm.queue = [
+      { toolCalls: [mkSend('r2', 'secondo turno')] },
+      { text: 'chiuso' }
+    ]
+    await runTurn(AGENT, 'due', emit)
+    // il primario è in pausa (10 minuti): il secondo turno NON lo tocca
+    expect(h.llm.models).toEqual(['m1', 'm2', 'm2', 'm2', 'm2'])
+    const cooled = h.db.entries.find((e) => e.kind === 'notice' && (e.meta?.ui as { id?: string } | undefined)?.id === 'notice.modelRouteCooled')
+    expect(cooled).toBeTruthy()
+    expect((cooled!.meta!.ui as { values?: Record<string, unknown> }).values).toMatchObject({ model: 'm1', fallback: 'm2' })
+    expect(String((cooled!.meta!.ui as { values?: Record<string, unknown> }).values!.until)).toMatch(/^\d{2}:\d{2}$/)
+    // la notice di raffreddamento arriva UNA volta per periodo: il turno dopo non la ripete
+    h.db.entries.length = 0
+    h.llm.queue = [{ toolCalls: [mkSend('r3', 'terzo')] }, { text: 'ok' }]
+    await runTurn(AGENT, 'tre', emit)
+    expect(h.db.entries.some((e) => e.kind === 'notice' && (e.meta?.ui as { id?: string } | undefined)?.id === 'notice.modelRouteCooled')).toBe(false)
+  })
+
+  it('una chiamata RIUSCITA toglie il raffreddamento (markHealthy): dopo la pausa scaduta si riparte da primary', async () => {
+    addProvider('prov2')
+    setChain([{ providerId: 'prov2', model: 'm2' }])
+    h.llm.queue = [
+      { error: rateLimit() },
+      { toolCalls: [mkSend('r1', 'ok')] }
+    ]
+    await runTurn(AGENT, 'uno', emit)
+    // la riserva m2 ha risposto: non è raffreddata; il primario sì (10 minuti)
+    h.llm.queue = [{ text: 'ok' }]
+    await runTurn(AGENT, 'due', emit)
+    expect(h.llm.models[h.llm.models.length - 1]).toBe('m2')
+  })
+
+  it('tutti gli anelli raffreddati → si parte da primary (meglio un tentativo che un turno muto)', async () => {
+    addProvider('prov2')
+    setChain([{ providerId: 'prov2', model: 'm2' }])
+    h.llm.queue = [
+      { error: rateLimit() },
+      { error: rateLimit() },
+      { text: 'mai' }
+    ]
+    await runTurn(AGENT, 'uno', emit)
+    // prov e prov2 sono entrambi in pausa; il turno dopo riparte DA PRIMARY
+    h.llm.queue = [{ text: 'ok' }]
+    await runTurn(AGENT, 'due', emit)
+    expect(h.llm.models[h.llm.models.length - 1]).toBe('m1')
+  })
+
+  it('il turno di GRUPPO con 429 + riserva su altro provider CONSEGNA (non finisce rate-limit)', async () => {
+    h.db.groupsState.groups.push({ id: 1, name: 'G', description: '', created_by: AGENT, coordinator_id: 'c', created_at: 1 })
+    h.db.groupsState.members.set(1, [AGENT, 'c'])
+    h.db.groupsState.messages.push({ id: 50, group_id: 1, author_kind: 'user', author_id: null, author_name: 'user', text: 'inizio', reply_to: null, root_id: 50, depth: 0, automatic: 0, created_at: 1 })
+    addProvider('prov2')
+    setChain([{ providerId: 'prov2', model: 'm2' }])
+    h.llm.queue = [
+      { error: rateLimit() },
+      { toolCalls: [{ id: 'g1', name: 'post_to_group', arguments: JSON.stringify({ text: 'risposta del gruppo' }) }] },
+      { text: 'fine' }
+    ]
+    await runTurn(AGENT, '<turno_di_gruppo gruppo="G">…</turno_di_gruppo>', emit, undefined, {
+      groupTurn: { groupId: 1, readMaxDepth: 0, rootId: 50 }, untrusted: true
+    })
+    expect(h.db.groupsState.messages.some((m) => m.author_kind === 'agent' && m.text === 'risposta del gruppo')).toBe(true)
+    expect(h.llm.models).toEqual(['m1', 'm2', 'm2'])
+    expect(h.db.entries.some((e) => e.kind === 'event' && e.meta?.stopReason === 'rate-limit')).toBe(false)
+  })
+})
+
+describe('fase 18b (H3): il livello di ragionamento passa a ogni chiamata del turno', () => {
+  it('agent.thinking arriva allo stream (chiamata principale); default = nessuna opzione', async () => {
+    h.db.agents.get(AGENT)!.thinking = 'high'
+    h.llm.queue = [{ text: 'ok' }]
+    await runTurn(AGENT, 'ciao', emit)
+    expect(h.llm.opts[0]!.thinking).toBe('high')
+
+    h.db.agents.get(AGENT)!.thinking = 'default'
+    h.llm.opts.length = 0
+    h.llm.queue = [{ text: 'ok' }]
+    await runTurn(AGENT, 'ciao', emit)
+    expect(h.llm.opts[0]!.thinking).toBeUndefined()
+  })
+
+  it('la ROUTINE con thinking proprio vince su quella del bot', async () => {
+    h.db.providers.push({ id: 'prov2', enabled: true, kind: 'openai-compatible' })
+    h.db.agents.get(AGENT)!.thinking = 'low'
+    h.llm.queue = [{ text: 'ok' }]
+    await runTurn(AGENT, '[routine] x', emit, undefined, {
+      source: 'routine', title: 'X', route: { providerId: 'prov2', model: 'm2', thinking: 'off' }
+    })
+    expect(h.llm.opts[0]!.thinking).toBe('off')
+  })
+})
+
+describe('fase 18b (H4): la visione conosciuta', () => {
+  /** il bot sul modello di catalogo groq SENZA visione (vision === false noto). */
+  const setNoVisionModel = (): void => {
+    h.db.providers.push({ id: 'prov', enabled: true, kind: 'groq' })
+    h.db.agents.get(AGENT)!.model = 'llama-3.3-70b-versatile'
+  }
+  it('use-app assente da turnTools con vision FALSA e presente con null (strumenti della chiamata)', async () => {
+    // il mock llm non registra i tool: li si cattura con una coda funzionale
+    const seen: string[][] = []
+    const origQueue = h.llm.queue
+    h.llm.queue = [
+      (_msgs: unknown, tools: unknown) => {
+        seen.push((tools as Array<{ name: string }>).map((t) => t.name))
+        return { text: 'ok' }
+      }
+    ]
+    await runTurn(AGENT, 'ciao', emit)
+    h.llm.queue = origQueue
+    expect(seen[0]!.some((n) => n === 'use-app')).toBe(true)
+
+    // modello del catalogo con vision FALSA: use-app non si offre
+    seen.length = 0
+    setNoVisionModel()
+    h.llm.queue = [
+      (_msgs: unknown, tools: unknown) => {
+        seen.push((tools as Array<{ name: string }>).map((t) => t.name))
+        return { text: 'ok' }
+      }
+    ]
+    await runTurn(AGENT, 'ciao', emit)
+    h.llm.queue = origQueue
+    expect(seen[0]!.some((n) => n === 'use-app')).toBe(false)
+  })
+
+  it('la riserva porta a un modello senza visione a metà turno: use-app resta in lista ma la chiamata riceve l\'errore inglese', async () => {
+    h.db.providers.push({ id: 'prov', enabled: true, kind: 'groq' })
+    h.db.settings.set('providers.modelDefaults', { prov: { fallbackModel: 'llama-3.3-70b-versatile' } })
+    // il gate non deve chiedere: use-app qui NON si esegue davvero (lo
+    // intercetta il filtro della visione prima dell'esecuzione)
+    h.db.settings.set('permissions', {
+      default: 'needs_approval',
+      rules: [
+        { tool: 'send_to_user', pattern: '*', mode: 'always_allow' },
+        { tool: 'use-app', pattern: '*', mode: 'always_allow' }
+      ]
+    })
+    // il primario m1 ha vision sconosciuta → use-app offerto; poi 502 → riserva senza visione
+    h.llm.queue = [
+      { error: httpError503() },
+      { toolCalls: [{ id: 'ua1', name: 'use-app', arguments: JSON.stringify({ action: 'screenshot' }) }] },
+      { text: 'fine' }
+    ]
+    await runTurn(AGENT, 'clicca', emit)
+    // il primario ha fallito, TUTTE le chiamate dopo girano sul modello senza visione
+    expect(h.llm.models[0]).toBe('m1')
+    expect(h.llm.models.slice(1).every((m) => m === 'llama-3.3-70b-versatile')).toBe(true)
+    const res = h.db.entries.find((e) => e.kind === 'tool-result' && e.meta?.callId === 'ua1')
+    expect(res).toBeTruthy()
+    expect(res!.content).toBe('use-app needs a vision model; the current model cannot see images')
+    expect(res!.meta!.error).toBe(true)
+  })
+
+  it('immagini in ingresso con vision FALSA → notice imagesNotSeen (il segnaposto al modello resta)', async () => {
+    setNoVisionModel()
+    h.llm.queue = [{ text: 'ok' }]
+    await runTurn(AGENT, 'guarda', emit, ['QUJD'])
+    const notice = h.db.entries.find((e) => e.kind === 'notice' && (e.meta?.ui as { id?: string } | undefined)?.id === 'notice.imagesNotSeen')
+    expect(notice).toBeTruthy()
+    expect((notice!.meta!.ui as { values?: Record<string, unknown> }).values).toMatchObject({ model: 'llama-3.3-70b-versatile' })
+    // il segnaposto NON si toglie: l'immagine va comunque al modello (decide il server)
+    expect(h.llm.calls[0]!.some((m) => m.role === 'user' && (m.images?.length ?? 0) > 0)).toBe(true)
+  })
+})
+
+describe('fase 18b (H7): il modello per routine', () => {
+  it('opts.route sposta il primario della catena sul provider+modello della routine', async () => {
+    h.db.providers.push({ id: 'prov2', enabled: true, kind: 'openai-compatible' })
+    h.llm.queue = [{ text: 'ok' }]
+    await runTurn(AGENT, '[routine] x', emit, undefined, {
+      source: 'routine', title: 'X', route: { providerId: 'prov2', model: 'm-routine' }
+    })
+    expect(h.llm.provIds[0]).toBe('prov2')
+    expect(h.llm.models[0]).toBe('m-routine')
+  })
+
+  it('provider della routine CANCELLATO → modello del bot + notice routineModelUnavailable', async () => {
+    h.llm.queue = [{ text: 'ok' }]
+    await runTurn(AGENT, '[routine] x', emit, undefined, {
+      source: 'routine', title: 'X', route: { providerId: 'fantasma', model: 'm-fantasma' }
+    })
+    expect(h.llm.provIds[0]).toBe('prov')
+    expect(h.llm.models[0]).toBe('m1')
+    const notice = h.db.entries.find((e) => e.kind === 'notice' && (e.meta?.ui as { id?: string } | undefined)?.id === 'notice.routineModelUnavailable')
+    expect(notice).toBeTruthy()
+    expect((notice!.meta!.ui as { values?: Record<string, unknown> }).values).toMatchObject({ provider: 'fantasma', model: 'm1' })
+  })
+
+  it('la catena di riserva vale anche per la routine (429 sul provider della routine → anello successivo)', async () => {
+    h.db.providers.push({ id: 'prov2', enabled: true, kind: 'openai-compatible' })
+    h.db.settings.set('models.fallbackChain', [{ providerId: 'prov', model: 'm1' }])
+    const err429 = new Error('429 usage limit')
+    ;(err429 as Error & { status?: number }).status = 429
+    h.llm.queue = [{ error: err429 }, { text: 'ok' }]
+    await runTurn(AGENT, '[routine] x', emit, undefined, {
+      source: 'routine', title: 'X', route: { providerId: 'prov2', model: 'm-routine' }
+    })
+    // primario = routine (prov2), 429 → anello su prov (altro provider) → consegna
+    expect(h.llm.models).toEqual(['m-routine', 'm1'])
+    expect(h.db.entries.some((e2) => e2.kind === 'notice' && (e2.meta?.ui as { id?: string } | undefined)?.id === 'notice.modelFallbackRoute')).toBe(true)
+  })
+})
+
+/** Errore 503 con status, come i provider (per il test della visione a metà turno). */
+function httpError503(): Error {
+  const e = new Error('HTTP 503')
+  ;(e as Error & { status?: number }).status = 503
+  return e
+}

@@ -50,6 +50,8 @@ export const DAEMON_RPC_CHANNELS = [
   // fase 8: regole di auto-review proposte dal bot (salvataggio SOLO al click)
   'autoreview:rule-decision',
   'providers:list', 'providers:save', 'providers:delete', 'providers:discover', 'providers:test', 'models:list',
+  // fase 18b (H6): uso e costi aggregati (pagina "Uso e costi")
+  'usage:summary',
   // fase 11: chiave per la ricerca web del provider Ollama (vault sigillato)
   'providers:set-web-search-key', 'providers:web-search-key-set',
   // fase 15: stato dei provider di ricerca (sola lettura, per le Impostazioni)

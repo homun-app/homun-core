@@ -9,6 +9,7 @@ import { join } from 'node:path'
 import { createServer, type Server } from 'node:http'
 import {
   createModels,
+  createProvider,
   fauxProvider,
   fauxAssistantMessage,
   fauxText,
@@ -18,8 +19,9 @@ import {
   type FauxProviderHandle,
   type Models
 } from '@earendil-works/pi-ai'
+import { stream as ocStream, streamSimple as ocStreamSimple } from '@earendil-works/pi-ai/api/openai-completions'
 import type { ProviderConfig } from '../../../shared/types'
-import { streamPi, toPiContext, openAiCompatBase, ZAI_CONSUMPTION_BASE_URL, piModelFor, piCacheEntryFor, modelCapabilities, imageMimeOf, FAUX_TEST_PROVIDER_ID, fauxTestHandle, LlmProviderError, PiUserAbortError, type PiStreamMeta } from '../llm-pi'
+import { streamPi, piLlmStream, toPiContext, openAiCompatBase, ZAI_CONSUMPTION_BASE_URL, piModelFor, piCacheEntryFor, modelCapabilities, catalogModelInfos, imageMimeOf, FAUX_TEST_PROVIDER_ID, fauxTestHandle, LlmProviderError, PiUserAbortError, type PiStreamMeta } from '../llm-pi'
 import { llmStream } from '../llm'
 import { fallbackEligible } from '../model-fallback'
 import { stopReasonOfError } from '../loop-guard'
@@ -502,7 +504,7 @@ describe('fase 18a (E4): uso registrato (model_usage) — un turno VERO col faux
     createAgent: (name: string) => { id: string }
     updateAgent: (id: string, patch: Record<string, unknown>) => void
     recordModelUsage: (r: import('../../store/db').ModelUsageRecord) => void
-    modelUsageSummary: (fromMs?: number, toMs?: number) => import('../../store/db').ModelUsageSummaryRow[]
+    modelUsageSummary: (fromMs?: number, toMs?: number, groupBy?: 'model' | 'agent' | 'source') => import('../../../shared/types').ModelUsageRow[]
   }
 
   beforeAll(async () => {
@@ -564,5 +566,287 @@ describe('fase 18a (E4): uso registrato (model_usage) — un turno VERO col faux
     store.recordModelUsage({ agentId: 'a', providerId: 'p', providerKind: 'custom', model: 'm', source: 'turn', input: 1, output: 1, costUsd: null })
     expect((store.db().prepare('SELECT COUNT(*) AS n FROM model_usage').get() as { n: number }).n).toBe(1)
     expect(store.modelUsageSummary()[0]!.costUsd).toBeNull()
+  })
+
+  it('fase 18b (H6.1): costPartial sui gruppi con costo MISTO; groupBy agent e source', () => {
+    const t0 = 2_000_000
+    store.db().exec('DELETE FROM model_usage')
+    const agentRow = store.createAgent('UsageBot')
+    store.recordModelUsage({ at: t0, agentId: agentRow.id, providerId: 'p1', providerKind: 'groq', model: 'llama', source: 'turn', input: 10, output: 5, costUsd: 0.01 })
+    store.recordModelUsage({ at: t0 + 1, agentId: agentRow.id, providerId: 'p1', providerKind: 'groq', model: 'llama', source: 'turn', input: 1, output: 1, costUsd: null })
+    store.recordModelUsage({ at: t0 + 2, agentId: null, providerId: 'p2', providerKind: 'openai', model: 'gpt-x', source: 'review', input: 2, output: 2, costUsd: 0.5 })
+    // per modello: il gruppo llama ha costo PARZIALE (una riga nota, una no)
+    const byModel = store.modelUsageSummary(t0, t0 + 10, 'model')
+    const llama = byModel.find((r) => r.model === 'llama')!
+    expect(llama.costPartial).toBe(true)
+    expect(llama.costUsd).toBeCloseTo(0.01, 10)
+    expect(llama.providerId).toBe('p1')
+    const gptx = byModel.find((r) => r.model === 'gpt-x')!
+    expect(gptx.costPartial).toBe(false)
+    // per bot: il nome arriva dalla riga agents, le chiamate senza bot restano null («Sistema»)
+    const byAgent = store.modelUsageSummary(t0, t0 + 10, 'agent')
+    expect(byAgent).toHaveLength(2)
+    const named = byAgent.find((r) => r.agentId === agentRow.id)!
+    expect(named.agentName).toBe('UsageBot')
+    expect(named.calls).toBe(2)
+    const system = byAgent.find((r) => r.agentId === null)!
+    expect(system.agentName).toBeNull()
+    expect(system.calls).toBe(1)
+    // per origine: turn vs review
+    const bySource = store.modelUsageSummary(t0, t0 + 10, 'source')
+    expect(bySource.map((r) => r.source).sort()).toEqual(['review', 'turn'])
+    expect(bySource.every((r) => r.costPartial)).toBe(false)
+  })
+})
+
+describe('fase 18b (H1.1): retry di trasporto prima del primo evento (solo mistral-conversations)', () => {
+  // pi-ai 1.4.0: mistral-conversations usa fetch DIRETTO e ignora maxRetries
+  // (verificato in dist/api/*.js); le altre api passano maxRetries all'SDK.
+  // Il retry dell'adattatore vale solo lì, solo prima del primo evento di
+  // contenuto e solo su 429/5xx/rete.
+  let server: Server
+  let port: number
+  const hits: string[] = []
+  let mode: 'fail-twice' | 'break-mid' | 'always-503' = 'fail-twice'
+
+  const sseOk = (): string => [
+    'data: ' + JSON.stringify({ id: 'x', choices: [{ index: 0, delta: { content: 'ok' }, finish_reason: null }] }),
+    '',
+    'data: ' + JSON.stringify({ id: 'x', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 3, completion_tokens: 1 } }),
+    '',
+    'data: [DONE]',
+    ''
+  ].join('\n')
+
+  beforeAll(async () => {
+    server = createServer((req, res) => {
+      hits.push(String(req.url))
+      if (mode === 'fail-twice' && hits.length <= 2) {
+        res.writeHead(503, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ error: { message: 'server busy' } }))
+        return
+      }
+      if (mode === 'always-503') {
+        res.writeHead(503, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ error: { message: 'server busy' } }))
+        return
+      }
+      if (mode === 'break-mid') {
+        // un chunk di contenuto, poi un evento ROTTO → errore DOPO il primo text_delta
+        res.writeHead(200, { 'content-type': 'text/event-stream' })
+        res.write('data: ' + JSON.stringify({ id: 'x', choices: [{ index: 0, delta: { content: 'par' }, finish_reason: null }] }) + '\n\n')
+        res.write('data: {rotto\n\n')
+        res.end()
+        return
+      }
+      // fail-twice, terza richiesta: la risposta buona
+      res.writeHead(200, { 'content-type': 'text/event-stream' })
+      res.end(sseOk())
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    port = (server.address() as { port: number }).port
+  })
+  afterAll(() => new Promise<void>((resolve) => server.close(() => resolve())))
+
+  const mistralConfig = (): ProviderConfig =>
+    ({ id: 'retry-mistral', name: 'Mistral', kind: 'mistral', baseUrl: `http://127.0.0.1:${port}`, apiKey: 'sk-test-mistral', enabled: true })
+
+  it('503, poi 503, poi ok → PASSA: tre richieste al filo, backoff 500/1000 ms', async () => {
+    mode = 'fail-twice'
+    hits.length = 0
+    const text = await drain(llmStream(mistralConfig(), 'mistral-large-latest', [{ role: 'user', content: 'x' }], [], new AbortController().signal))
+    expect(text).toBe('ok')
+    expect(hits).toHaveLength(3)
+    expect(hits.every((u) => u.endsWith('/v1/chat/completions'))).toBe(true)
+  }, 15_000)
+
+  it('errore DOPO il primo text_delta → NESSUN retry (il loop ha già mostrato del testo)', async () => {
+    mode = 'break-mid'
+    hits.length = 0
+    await expect(drain(llmStream(mistralConfig(), 'mistral-large-latest', [{ role: 'user', content: 'x' }], [], new AbortController().signal))).rejects.toThrow()
+    expect(hits).toHaveLength(1)
+  }, 15_000)
+
+  it('dopo i 2 retry il terzo 503 chiude con LlmProviderError 503', async () => {
+    mode = 'always-503'
+    hits.length = 0
+    let err: unknown
+    try {
+      await drain(llmStream(mistralConfig(), 'mistral-large-latest', [{ role: 'user', content: 'x' }], [], new AbortController().signal))
+    } catch (e) {
+      err = e
+    }
+    expect(err).toBeInstanceOf(LlmProviderError)
+    expect((err as LlmProviderError).status).toBe(503)
+    expect(hits).toHaveLength(3)
+  }, 15_000)
+
+  it('le api CON retry propri (faux, openai-completions) non passano dal retry qui: la coda consume UNA risposta', async () => {
+    const handle = fauxProvider()
+    handle.setResponses([
+      fauxAssistantMessage([], { stopReason: 'error', errorMessage: '503 Service Unavailable: busy' }),
+      fauxAssistantMessage('non devi arrivare qui')
+    ])
+    const models = fauxModels(handle)
+    await expect((async () => {
+      for await (const _ of streamPi(models, handle.getModel() as never, CATALOG_META, [{ role: 'user', content: 'x' }], [], new AbortController().signal)) void _
+    })()).rejects.toThrow('503')
+    // nessun retry: la seconda risposta è ancora in coda
+    expect(handle.getPendingResponseCount()).toBe(1)
+  })
+})
+
+describe('fase 18b (H1.3): il costo dai prezzi personalizzati ($/1M token)', () => {
+  it('fuori catalogo e NON locale: (in×p.in + out×p.out + cache) / 1e6', async () => {
+    const handle = fauxProvider()
+    handle.setResponses([fauxAssistantMessage('una risposta con qualche token per il calcolo')])
+    const models = fauxModels(handle)
+    let usage: { input: number; output: number; costUsd: number | null } | undefined
+    for await (const ch of streamPi(models, handle.getModel() as never, { fromCatalog: false, local: false, customPrice: { input: 3, output: 6, cacheRead: 1 } }, [{ role: 'user', content: 'domanda con qualche token' }], [], new AbortController().signal)) {
+      if (ch.usage) usage = ch.usage
+    }
+    expect(usage).toBeTruthy()
+    expect(usage!.costUsd).toBeCloseTo((usage!.input * 3 + usage!.output * 6 + 0 * 1) / 1e6, 12)
+  })
+
+  it('il prezzo del CATALOGO vince sempre; senza prezzo resta null, come oggi', async () => {
+    const handle = fauxProvider()
+    handle.setResponses([fauxAssistantMessage('x'), fauxAssistantMessage('x')])
+    const models = fauxModels(handle)
+    let fromCatalog: number | null | undefined
+    let senza: number | null | undefined
+    for await (const ch of streamPi(models, handle.getModel() as never, { fromCatalog: true, local: false, customPrice: { input: 3, output: 6 } }, [{ role: 'user', content: 'x' }], [], new AbortController().signal)) {
+      if (ch.usage) fromCatalog = ch.usage.costUsd
+    }
+    for await (const ch of streamPi(models, handle.getModel() as never, { fromCatalog: false, local: true, customPrice: { input: 3, output: 6 } }, [{ role: 'user', content: 'x' }], [], new AbortController().signal)) {
+      if (ch.usage) senza = ch.usage.costUsd
+    }
+    expect(fromCatalog).toBe(0) // catalogo faux a costo zero: il custom non lo tocca
+    expect(senza).toBeNull() // locale: mai costo
+  })
+
+  it('piLlmStream risolve il prezzo della coppia provider+modello dal setting passato dal chiamante', async () => {
+    // provider FINTO (entry local: false ma il modello È nel "catalogo" faux):
+    // il prezzo del catalogo vince e il custom non si applica
+    const fauxConfig: ProviderConfig = { id: FAUX_TEST_PROVIDER_ID, name: 'Faux', kind: 'custom', baseUrl: 'http://127.0.0.1:0', apiKey: '', enabled: true }
+    const handle0 = piCacheEntryFor(fauxConfig) && fauxTestHandle()
+    handle0!.setResponses([fauxAssistantMessage('x')])
+    let usage: { costUsd: number | null } | undefined
+    for await (const ch of piLlmStream(fauxConfig, 'faux-1', [{ role: 'user', content: 'x' }], [], new AbortController().signal, {
+      modelPrices: { [FAUX_TEST_PROVIDER_ID]: { 'faux-1': { input: 1, output: 2 } } }
+    })) {
+      if (ch.usage) usage = ch.usage
+    }
+    expect(usage).toBeTruthy()
+    expect(usage!.costUsd).toBe(0) // catalogo faux a costo zero: il custom NON ha effetto
+  })
+})
+
+describe('fase 18b (H3): il livello di ragionamento per bot', () => {
+  let server: Server
+  let port: number
+  const bodies: string[] = []
+
+  beforeAll(async () => {
+    server = createServer((req, res) => {
+      let raw = ''
+      req.on('data', (d) => { raw += d })
+      req.on('end', () => {
+        bodies.push(raw)
+        res.writeHead(200, { 'content-type': 'text/event-stream' })
+        res.end([
+          'data: ' + JSON.stringify({ id: 'x', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { content: 'ok' }, finish_reason: null }] }),
+          '',
+          'data: ' + JSON.stringify({ id: 'x', object: 'chat.completion.chunk', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] }),
+          '',
+          'data: [DONE]',
+          ''
+        ].join('\n'))
+      })
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    port = (server.address() as { port: number }).port
+  })
+  afterAll(() => new Promise<void>((resolve) => server.close(() => resolve())))
+
+  const lastBody = (): Record<string, unknown> => JSON.parse(bodies[bodies.length - 1]!) as Record<string, unknown>
+
+  /** un Models collection con un modello zai SINTETICO puntato al finto (compat zai). */
+  function zaiWireModels(): Models {
+    const model = {
+      id: 'glm-5.3', name: 'glm-5.3', api: 'openai-completions', provider: 'zai-wire',
+      baseUrl: `http://127.0.0.1:${port}/v1`, input: ['text', 'image'], reasoning: false,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128_000, maxTokens: 16_384,
+      compat: { thinkingFormat: 'zai' }
+    }
+    const models = createModels({ credentials: new InMemoryCredentialStore() })
+    models.setProvider(createProvider({
+      id: 'zai-wire', name: 'Z.ai wire', baseUrl: `http://127.0.0.1:${port}/v1`,
+      auth: { apiKey: { name: 'k', resolve: async () => ({ auth: {}, source: 'request' }) } },
+      models: [model] as never,
+      api: { 'openai-completions': { stream: ocStream, streamSimple: ocStreamSimple } } as never
+    }))
+    return models
+  }
+  const zaiModel = (): never =>
+    ({
+      id: 'glm-5.3', name: 'glm-5.3', api: 'openai-completions', provider: 'zai-wire',
+      baseUrl: `http://127.0.0.1:${port}/v1`, input: ['text', 'image'], reasoning: false,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128_000, maxTokens: 16_384,
+      compat: { thinkingFormat: 'zai' }
+    }) as never
+
+  it('zai: qualsiasi livello ≠ off → "thinking":{"type":"enabled"} SUL FILO', async () => {
+    bodies.length = 0
+    await drain(streamPi(zaiWireModels(), zaiModel(), { fromCatalog: false, local: false }, [{ role: 'user', content: 'x' }], [], new AbortController().signal, { apiKey: 'sk-test-zai', thinking: 'high' }))
+    const thinking = lastBody().thinking as { type?: string; clear_thinking?: boolean }
+    expect(thinking).toEqual({ type: 'enabled', clear_thinking: false })
+  })
+
+  it('zai \'off\' → "thinking":{"type":"disabled"}', async () => {
+    bodies.length = 0
+    await drain(streamPi(zaiWireModels(), zaiModel(), { fromCatalog: false, local: false }, [{ role: 'user', content: 'x' }], [], new AbortController().signal, { apiKey: 'sk-test-zai', thinking: 'off' }))
+    expect(lastBody().thinking).toEqual({ type: 'disabled' })
+  })
+
+  it('\'default\' o ASSENTE → il body è IDENTICO alla 18a: nessuna chiave thinking né reasoning', async () => {
+    bodies.length = 0
+    await drain(streamPi(zaiWireModels(), zaiModel(), { fromCatalog: false, local: false }, [{ role: 'user', content: 'x' }], [], new AbortController().signal, { apiKey: 'sk-test-zai' }))
+    const assente = bodies[bodies.length - 1]!
+    await drain(streamPi(zaiWireModels(), zaiModel(), { fromCatalog: false, local: false }, [{ role: 'user', content: 'x' }], [], new AbortController().signal, { apiKey: 'sk-test-zai', thinking: 'default' }))
+    const defaultLevel = bodies[bodies.length - 1]!
+    expect(defaultLevel).toBe(assente)
+    expect('thinking' in lastBody()).toBe(false)
+    expect('reasoning_effort' in lastBody()).toBe(false)
+  })
+
+  it('catalogo: il livello si CLAMPA a quelli che il modello sa esprimere', async () => {
+    // qwen/qwen3.6-27b (groq) sa esprimere solo ['off','high']
+    const groq: ProviderConfig = { id: 'h3-groq', name: 'Groq', kind: 'groq', baseUrl: 'https://api.groq.com/openai', apiKey: 'sk-test-groq', enabled: true }
+    const model = piModelFor(groq, 'qwen/qwen3.6-27b')
+    const captured: unknown[] = []
+    // wrapper intorno a streamSimple: cattura la reasoning che l'adattatore
+    // manda a pi-ai (lo stream sotto è vuoto: qui si verifica SOLO il clamp,
+    // nessuna rete — il payload vero si guarda nei test zai sul filo)
+    const wrap = {
+      streamSimple: (m: unknown, ctx: unknown, opts?: { reasoning?: unknown }) => {
+        captured.push(opts?.reasoning)
+        return (async function* () { /* stream vuoto: nessun evento */ })()
+      }
+    } as unknown as Models
+    const meta = { fromCatalog: true, local: false }
+    for (const thinking of ['max' as const, 'off' as const, 'medium' as const]) {
+      captured.length = 0
+      const it = streamPi(wrap, model, meta, [{ role: 'user', content: 'x' }], [], new AbortController().signal, { thinking })
+      for await (const _ of it) void _ // eslint-disable-line @typescript-eslint/no-unused-vars
+      // 'max' e 'medium' clampano a 'high' (il livello più alto disponibile);
+      // 'off' è un livello valido di pi-ai e passa com'è
+      expect(captured).toEqual([thinking === 'off' ? 'off' : 'high'])
+    }
+    // assente → NESSUNA opzione reasoning: il comportamento della 18a
+    captured.length = 0
+    const it2 = streamPi(wrap, model, meta, [{ role: 'user', content: 'x' }], [], new AbortController().signal)
+    for await (const _ of it2) void _ // eslint-disable-line @typescript-eslint/no-unused-vars
+    expect(captured).toEqual([undefined])
   })
 })

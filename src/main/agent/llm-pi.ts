@@ -18,6 +18,8 @@ import {
   createModels,
   createProvider,
   fauxProvider,
+  getSupportedThinkingLevels,
+  clampThinkingLevel,
   InMemoryCredentialStore,
   type Api,
   type AuthContext,
@@ -45,16 +47,17 @@ import { stream as ocStream, streamSimple as ocStreamSimple } from '@earendil-wo
 import { stream as orStream, streamSimple as orStreamSimple } from '@earendil-works/pi-ai/api/openai-responses'
 import { stream as amStream, streamSimple as amStreamSimple } from '@earendil-works/pi-ai/api/anthropic-messages'
 import { stream as mcStream, streamSimple as mcStreamSimple } from '@earendil-works/pi-ai/api/mistral-conversations'
-import type { ProviderConfig, ProviderKind } from '../../shared/types'
+import type { ModelInfo, ModelPriceMap, ProviderConfig, ProviderKind, ThinkingSetting } from '../../shared/types'
 import type { ChatMessage, LlmChunk, LlmStream, StreamOptions, ToolDef, ToolCall } from './llm'
 import { traceLlmCall } from './llm'
-import { KNOWN_BASE_URLS } from './providers'
+// fase 18b (H5.2): le regole degli URL vivi vivono nel modulo PURO live-models,
+// condiviso con providers.ts (nessun ciclo, nessuna duplicazione); da qui
+// arrivano anche i base URL noti, così questo file non dipende da providers.ts
+import { ZAI_CONSUMPTION_BASE_URL, KNOWN_BASE_URLS, LOCAL_KINDS, openAiCompatBase, ollamaCapabilities } from './live-models'
+import { fallbackEligible } from './model-fallback'
 
-/** L'endpoint a consumo di z.ai (MAI /api/coding/paas/v4: è il Coding Plan). */
-export const ZAI_CONSUMPTION_BASE_URL = 'https://api.z.ai/api/paas/v4'
-
-/** I kind che parlano solo in locale (nessuna chiave, costo nullo). */
-const LOCAL_KINDS: ReadonlySet<ProviderKind> = new Set(['ollama', 'lmstudio', 'openai-compatible', 'custom'])
+// re-esportati per i test e i chiamanti (la regola è una sola, in live-models)
+export { ZAI_CONSUMPTION_BASE_URL, openAiCompatBase }
 
 /** I kind col catalogo pi-ai: factory + ricerca del modello per id. */
 const CATALOG_FACTORIES: Partial<Record<ProviderKind, () => Provider>> = {
@@ -83,20 +86,9 @@ const KIND_APIS: Record<ProviderKind, string> = {
   custom: 'openai-completions'
 }
 
-/**
- * E2.1: il base URL dei provider OpenAI-compatible — la regola di oggi
- * (appende '/v1') ma SOLO se l'URL non finisce già con /v<n> o /api/paas/v4:
- * il bug per cui z.ai finiva su api.z.ai/v1 si chiude qui.
- */
-export function openAiCompatBase(p: Pick<ProviderConfig, 'baseUrl'>): string {
-  const base = p.baseUrl.trim().replace(/\/+$/, '')
-  if (/\/v\d+$/.test(base) || /\/api\/paas\/v4$/.test(base)) return base
-  return base + '/v1'
-}
-
 /** Il baseUrl di un kind col catalogo: quello dell'utente, con z.ai corretto in lettura. */
 function normalizedBaseUrl(p: ProviderConfig): string {
-  const base = p.baseUrl.trim().replace(/\/+$/, '')
+  const base = (typeof p.baseUrl === 'string' ? p.baseUrl : '').trim().replace(/\/+$/, '')
   // correzione in LETTURA dei provider zai salvati con l'url vecchio
   // (https://api.z.ai o https://api.z.ai/v1): il dato nel database non si migra
   if (p.kind === 'zai') return ZAI_CONSUMPTION_BASE_URL
@@ -157,6 +149,8 @@ interface PiCacheEntry {
   baseUrl: string
   /** gli id che vengono dal catalogo pi-ai (costo e finestra veri) */
   catalogIds: ReadonlySet<string>
+  /** i modelli del catalogo ribattezzati su questa configurazione (H5.1) */
+  catalogModels: Model<Api>[]
   /** provider tutto locale (ollama, lmstudio…): costo zero → costUsd null */
   local: boolean
 }
@@ -233,6 +227,7 @@ export function piCacheEntryFor(p: ProviderConfig): PiCacheEntry {
       api: faux.api,
       baseUrl: faux.models[0]!.baseUrl,
       catalogIds: new Set(faux.models.map((m) => m.id)),
+      catalogModels: [...faux.models],
       local: false
     }
     modelsCache.set(key, entry)
@@ -283,6 +278,7 @@ export function piCacheEntryFor(p: ProviderConfig): PiCacheEntry {
     api: KIND_APIS[p.kind],
     baseUrl,
     catalogIds,
+    catalogModels: modelsList,
     local: LOCAL_KINDS.has(p.kind)
   }
   modelsCache.set(key, entry)
@@ -312,34 +308,130 @@ export function fromCatalog(p: ProviderConfig, modelId: string): boolean {
   return piCacheEntryFor(p).catalogIds.has(modelId)
 }
 
-/**
- * E2.1: le capacità del modello per la pagina Uso e costi della 18b — qui
- * solo lette. cost null = sconosciuto (modello fuori catalogo) o locale.
- * G1: vision null = sconosciuta (modello sintetico): il sintetico dice
- * `input: ['text', 'image']` solo per mandare le immagini al server, NON
- * perché sappiamo che il modello ci vede — il flag vero arriva col catalogo.
- */
-export function modelCapabilities(
-  p: ProviderConfig,
-  modelId: string
-): {
+/** Le capacità del modello, come le vede la 18b (H1.2). */
+export interface ModelCapabilities {
   contextWindow: number
+  /** il modello ci vede? null = sconosciuta (sintetico senza cache Ollama) */
   vision: boolean | null
   reasoning: boolean
+  /** il modello usa i tool? null = sconosciuto */
+  tools: boolean | null
+  /** livelli di ragionamento controllabili ([] = non controllabile da noi) */
+  thinkingLevels: ThinkingSetting[]
+  /** prezzo $/1M token (null = sconosciuto o locale) */
   cost: { input: number; output: number; cacheRead: number; cacheWrite: number } | null
+  costSource: 'catalog' | 'custom' | null
   fromCatalog: boolean
-} {
-  const catalog = fromCatalog(p, modelId)
-  const m = piModelFor(p, modelId)
-  const zero = m.cost.input === 0 && m.cost.output === 0 && m.cost.cacheRead === 0 && m.cost.cacheWrite === 0
-  const local = LOCAL_KINDS.has(p.kind)
-  return {
-    contextWindow: m.contextWindow,
-    vision: !catalog ? null : m.input.includes('image'),
-    reasoning: m.reasoning,
-    cost: !catalog || (zero && local) ? null : { input: m.cost.input, output: m.cost.output, cacheRead: m.cost.cacheRead, cacheWrite: m.cost.cacheWrite },
-    fromCatalog: catalog
+}
+
+/**
+ * Fase 18a (E2.1) → 18b (H1.2): le capacità del modello. Le fonti, in ordine:
+ * 1. catalogo pi-ai (vision da input, thinkingLevels da
+ *    getSupportedThinkingLevels, tools: true, costo del catalogo);
+ * 2. cache delle capability Ollama (H5.2) per i provider ollama;
+ * 3. zai sintetico: thinkingLevels ['off','high'] (spento/acceso);
+ * 4. tutto il resto: sconosciuto (null/null/[]).
+ * Il prezzo personalizzato (H1.3) vale quando il modello NON è nel catalogo e
+ * il provider NON è locale; il prezzo del catalogo vince sempre.
+ */
+export function modelCapabilities(p: ProviderConfig, modelId: string, prices?: ModelPriceMap): ModelCapabilities {
+  const entry = piCacheEntryFor(p)
+  const catalog = entry.catalogIds.has(modelId)
+  const local = entry.local
+  const custom = !catalog && !local ? prices?.[p.id]?.[modelId] : undefined
+
+  if (catalog) {
+    const m = piModelFor(p, modelId)
+    const zero = m.cost.input === 0 && m.cost.output === 0 && m.cost.cacheRead === 0 && m.cost.cacheWrite === 0
+    // il costo nullo di un locale resta nullo; il catalogo vince sul custom
+    const cost = zero && local ? null : { input: m.cost.input, output: m.cost.output, cacheRead: m.cost.cacheRead, cacheWrite: m.cost.cacheWrite }
+    return {
+      contextWindow: m.contextWindow,
+      vision: m.input.includes('image'),
+      reasoning: m.reasoning,
+      tools: true,
+      // un modello non-reasoning non è controllabile da noi: 'off' è il suo
+      // comportamento di sempre, non una scelta (getSupportedThinkingLevels
+      // restituirebbe ['off'], che dice nulla)
+      thinkingLevels: m.reasoning ? getSupportedThinkingLevels(m) : [],
+      cost,
+      costSource: cost ? 'catalog' : null,
+      fromCatalog: true
+    }
   }
+
+  // ollama: le capability vere dalla cache di /api/show (H5.2), se già lette
+  if (p.kind === 'ollama') {
+    const caps = ollamaCapabilities(p.id, modelId)
+    return {
+      contextWindow: 128_000,
+      vision: caps ? caps.includes('vision') : null,
+      reasoning: false,
+      tools: caps ? caps.includes('tools') : null,
+      // H3: il controllo del ragionamento su Ollama via API OpenAI-compatible
+      // non lo tocchiamo in questa fase (residuo, non verificabile senza rete)
+      thinkingLevels: [],
+      cost: null,
+      costSource: null,
+      fromCatalog: false
+    }
+  }
+
+  // zai sintetico: ragionamento SPENTO/ACCESO (H3), il resto sconosciuto
+  if (p.kind === 'zai') {
+    return {
+      contextWindow: 128_000,
+      vision: null,
+      reasoning: true,
+      tools: null,
+      thinkingLevels: ['off', 'high'],
+      cost: custom
+        ? { input: custom.input, output: custom.output, cacheRead: custom.cacheRead ?? 0, cacheWrite: custom.cacheWrite ?? 0 }
+        : null,
+      costSource: custom ? 'custom' : null,
+      fromCatalog: false
+    }
+  }
+
+  // gli altri sintetici (modello nuovo non ancora a catalogo, lmstudio,
+  // custom…): tutto sconosciuto; il prezzo personalizzato se c'è (H1.3)
+  return {
+    contextWindow: 128_000,
+    vision: null,
+    reasoning: false,
+    tools: null,
+    thinkingLevels: [],
+    cost: custom
+      ? { input: custom.input, output: custom.output, cacheRead: custom.cacheRead ?? 0, cacheWrite: custom.cacheWrite ?? 0 }
+      : null,
+    costSource: custom ? 'custom' : null,
+    fromCatalog: false
+  }
+}
+
+/**
+ * Fase 18b (H5.1): le voci del catalogo pi-ai per un provider, come ModelInfo
+ * (source 'catalog'). Per i kind senza catalogo (ollama, zai, custom…) è [] —
+ * l'elenco di models:list è l'UNIONE con il vivo, che vive nell'RPC.
+ */
+export function catalogModelInfos(p: ProviderConfig, prices?: ModelPriceMap): ModelInfo[] {
+  // i modelli non-chat sono già esclusi alla costruzione della cache (E2.1)
+  return piCacheEntryFor(p).catalogModels
+    .map((m): ModelInfo => {
+      const caps = modelCapabilities(p, m.id, prices)
+      return {
+        id: m.id,
+        ...(m.name && m.name !== m.id ? { label: m.name } : {}),
+        source: 'catalog',
+        ...(caps.fromCatalog ? { contextWindow: m.contextWindow } : {}),
+        vision: caps.vision,
+        tools: caps.tools,
+        thinkingLevels: caps.thinkingLevels,
+        cost: caps.cost,
+        costSource: caps.costSource,
+        local: LOCAL_KINDS.has(p.kind)
+      }
+    })
 }
 
 // ---- E2.3: da ChatMessage[] a Context pi-ai ----
@@ -486,23 +578,96 @@ function finishReasonOf(reason: string): string {
   return 'stop'
 }
 
-/** Il costo in dollari del chunk finale (null se fuori catalogo o locale a costo zero). */
-function costUsdOf(u: AssistantMessage['usage'], fromCatalog: boolean, local: boolean): number | null {
-  if (!fromCatalog) return null
-  if (u.cost.total === 0 && local) return null
-  return u.cost.total
+/** Il costo in dollari del chunk finale (null se sconosciuto o locale). */
+function costUsdOf(
+  u: AssistantMessage['usage'],
+  meta: PiStreamMeta
+): number | null {
+  // il prezzo del catalogo vince sempre; il custom vale solo fuori catalogo
+  // e su provider non locali (H1.3); senza nessuno dei due resta null
+  if (meta.fromCatalog) {
+    if (u.cost.total === 0 && meta.local) return null
+    return u.cost.total
+  }
+  if (meta.local || !meta.customPrice) return null
+  const p = meta.customPrice
+  return (u.input * p.input + u.output * p.output + u.cacheRead * (p.cacheRead ?? 0) + u.cacheWrite * (p.cacheWrite ?? 0)) / 1e6
 }
 
 /** Che cosa sa lo stream del modello che sta chiamando (per costUsd e trace). */
 export interface PiStreamMeta {
   fromCatalog: boolean
   local: boolean
+  /** fase 18b (H1.3): il prezzo personalizzato $/1M (solo fuori catalogo, non locale) */
+  customPrice?: { input: number; output: number; cacheRead?: number; cacheWrite?: number }
+}
+
+/**
+ * H1.1: le api di pi-ai che NON fanno retry di trasporto proprie (maxRetries
+ * ignorato). Verificato leggendo dist/api/*.js della 1.4.0: openai-completions,
+ * openai-responses e anthropic-messages passano options.maxRetries all'SDK
+ * (FetchHttpClient maxRetries); mistral-conversations usa fetch DIRETTO senza
+ * alcun retry. Se pi-ai aggiunge i retry a mistral, questa lista si svuota.
+ */
+const NO_SELF_RETRY_APIS = new Set(['mistral-conversations'])
+
+/** Il retry di H1.1 vale solo prima del primo evento di contenuto e per 429/5xx/rete. */
+function retryEligibleError(e: LlmProviderError): boolean {
+  // stessa regex di fallbackEligible (rete/scadenza/5xx) più il 429
+  return e.status === 429 || fallbackEligible(e)
+}
+
+/** Il backoff di H1.1, interrompibile dal segnale del turno. */
+function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new PiUserAbortError())
+      return
+    }
+    const t = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    const onAbort = (): void => {
+      clearTimeout(t)
+      reject(new PiUserAbortError())
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+/**
+ * H3: il modello e le opzioni reasoning per il livello scelto dal bot.
+ * 'default' o assente → il comportamento della 18a ESATTO (nessuna opzione
+ * reasoning, modello invariato). Sui sintetici non-zai il livello si ignora
+ * (Ollama via API OpenAI-compatible: residuo di questa fase).
+ */
+function thinkingModelOf(
+  model: Model<Api>,
+  thinking: ThinkingSetting | undefined,
+  zai: boolean
+): { model: Model<Api>; reasoning?: SimpleStreamOptions['reasoning'] } {
+  if (!thinking || thinking === 'default') return { model }
+  if (zai) {
+    // zai sintetico: il modello dichiara reasoning e il compat thinkingFormat
+    // 'zai' manda "thinking":{"type":"enabled"|"disabled"} — 'off' → disabled
+    const clone = { ...model, reasoning: true } as unknown as Model<Api>
+    return thinking === 'off' ? { model: clone, reasoning: 'off' as never } : { model: clone, reasoning: 'high' }
+  }
+  if (model.reasoning) {
+    // catalogo: clampThinkingLevel porta il livello a quelli che il modello
+    // sa esprimere ('off' è un livello valido di pi-ai)
+    return { model, reasoning: clampThinkingLevel(model, thinking) as SimpleStreamOptions['reasoning'] }
+  }
+  return { model }
 }
 
 /**
  * Il cuore dello stream (E2.4): consuma gli eventi pi-ai e li ributta come
  * LlmChunk dello stesso contratto di sempre. Testabile col faux provider con
  * una Models collection qualsiasi.
+ * Fase 18b: retry di trasporto prima del primo evento per le api senza retry
+ * propri (H1.1) e costo dai prezzi personalizzati (H1.3).
  */
 export function streamPi(
   models: Models,
@@ -513,63 +678,87 @@ export function streamPi(
   signal: AbortSignal,
   opts: StreamOptions & { apiKey?: string } = {}
 ): LlmStream {
-  const context = toPiContext(messages, tools, { api: model.api, provider: model.provider, model: model.id })
+  const zai = (model as unknown as { compat?: { thinkingFormat?: string } }).compat?.thinkingFormat === 'zai'
+  const chosen = thinkingModelOf(model, opts.thinking, zai && !meta.fromCatalog)
+  const streamModel = chosen.model
+  const context = toPiContext(messages, tools, { api: streamModel.api, provider: streamModel.provider, model: streamModel.id })
   // E2.2/E2.5: chiave esplicita, 2 retry come l'SDK openai di oggi,
-  // temperatura (E2.6) quando c'è
-  const piOpts: SimpleStreamOptions = {
+  // temperatura (E2.6) quando c'è, ragionamento (H3) quando è scelto
+  const baseOpts: SimpleStreamOptions = {
     signal,
     apiKey: opts.apiKey,
     maxRetries: 2,
-    ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {})
+    ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
+    ...(chosen.reasoning !== undefined ? { reasoning: chosen.reasoning } : {})
   }
-  const eventStream = models.streamSimple(model, context, piOpts)
 
   async function* iterate(): AsyncIterable<LlmChunk> {
-    // accumulo dei tool call in ordine di contentIndex: escono TUTTI alla fine
-    const toolCallsByIndex = new Map<number, ToolCall>()
-    let contentLen = 0
-    let reasoningLen = 0
-    let usage: { input: number; output: number } | null = null
-    let finish = 'stop'
-    for await (const ev of eventStream) {
-      if (ev.type === 'text_delta') {
-        contentLen += ev.delta.length
-        yield { textDelta: ev.delta }
-      } else if (ev.type === 'thinking_delta') {
-        reasoningLen += ev.delta.length
-        yield { reasoningDelta: ev.delta }
-      } else if (ev.type === 'toolcall_end') {
-        toolCallsByIndex.set(ev.contentIndex, {
-          id: ev.toolCall.id,
-          name: ev.toolCall.name,
-          arguments: JSON.stringify(ev.toolCall.arguments)
-        })
-      } else if (ev.type === 'done') {
-        finish = finishReasonOf(ev.reason)
-        const u = ev.message.usage
-        usage = { input: u.input, output: u.output }
-        const ordered = [...toolCallsByIndex.entries()].sort((a, b) => a[0] - b[0]).map(([, v]) => v)
-        const chunk: LlmChunk = {
-          ...(ordered.length ? { toolCalls: ordered } : {}),
-          finishReason: finish,
-          usage: {
-            input: u.input,
-            output: u.output,
-            cacheRead: u.cacheRead,
-            cacheWrite: u.cacheWrite,
-            costUsd: costUsdOf(u, meta.fromCatalog, meta.local)
+    // H1.1: riprova (max 2, backoff 500/1000 ms) SOLO per le api senza retry
+    // propri in pi-ai, SOLO prima di qualsiasi evento di contenuto e SOLO su
+    // 429/5xx/rete. Dopo il primo evento NON si ritenta mai: il loop ha già
+    // mostrato del testo.
+    const selfRetry = !NO_SELF_RETRY_APIS.has(streamModel.api)
+    const backoffs = [500, 1000]
+    for (let attempt = 0; ; attempt++) {
+      const eventStream = models.streamSimple(streamModel, context, baseOpts)
+      // accumulo dei tool call in ordine di contentIndex: escono TUTTI alla fine
+      const toolCallsByIndex = new Map<number, ToolCall>()
+      let contentLen = 0
+      let reasoningLen = 0
+      let usage: { input: number; output: number } | null = null
+      let finish = 'stop'
+      let sawContent = false
+      let retry: { ms: number } | null = null
+      for await (const ev of eventStream) {
+        if (ev.type === 'text_delta') {
+          sawContent = true
+          contentLen += ev.delta.length
+          yield { textDelta: ev.delta }
+        } else if (ev.type === 'thinking_delta') {
+          sawContent = true
+          reasoningLen += ev.delta.length
+          yield { reasoningDelta: ev.delta }
+        } else if (ev.type.startsWith('toolcall_')) {
+          sawContent = true
+          if (ev.type === 'toolcall_end') {
+            toolCallsByIndex.set(ev.contentIndex, {
+              id: ev.toolCall.id,
+              name: ev.toolCall.name,
+              arguments: JSON.stringify(ev.toolCall.arguments)
+            })
           }
+        } else if (ev.type === 'done') {
+          finish = finishReasonOf(ev.reason)
+          const u = ev.message.usage
+          usage = { input: u.input, output: u.output }
+          const ordered = [...toolCallsByIndex.entries()].sort((a, b) => a[0] - b[0]).map(([, v]) => v)
+          const chunk: LlmChunk = {
+            ...(ordered.length ? { toolCalls: ordered } : {}),
+            finishReason: finish,
+            usage: {
+              input: u.input,
+              output: u.output,
+              cacheRead: u.cacheRead,
+              cacheWrite: u.cacheWrite,
+              costUsd: costUsdOf(u, meta)
+            }
+          }
+          traceLlmCall({
+            at: new Date().toISOString(), model: streamModel.id, finishReason: finish,
+            contentLength: contentLen, reasoningLength: reasoningLen,
+            toolCalls: ordered.length, usage
+          })
+          yield chunk
+        } else if (ev.type === 'error') {
+          if (ev.reason === 'aborted') throw new PiUserAbortError()
+          const err = new LlmProviderError(ev.error.errorMessage ?? 'provider error')
+          const canRetry = !selfRetry && !sawContent && attempt < backoffs.length && retryEligibleError(err)
+          if (canRetry) retry = { ms: backoffs[attempt]! }
+          else throw err
         }
-        traceLlmCall({
-          at: new Date().toISOString(), model: model.id, finishReason: finish,
-          contentLength: contentLen, reasoningLength: reasoningLen,
-          toolCalls: ordered.length, usage
-        })
-        yield chunk
-      } else if (ev.type === 'error') {
-        if (ev.reason === 'aborted') throw new PiUserAbortError()
-        throw new LlmProviderError(ev.error.errorMessage ?? 'provider error')
       }
+      if (!retry) return
+      await abortableSleep(retry.ms, signal)
     }
   }
 
@@ -603,7 +792,13 @@ export function piLlmStream(
 ): LlmStream {
   const entry = piCacheEntryFor(p)
   const model = piModelFor(p, modelId)
-  return streamPi(entry.models, model, { fromCatalog: entry.catalogIds.has(modelId), local: entry.local }, messages, tools, signal, {
+  const fromCatalog = entry.catalogIds.has(modelId)
+  // H1.3: il prezzo personalizzato vale SOLO fuori catalogo e SOLO su provider
+  // non locali — il chiamante passa il setting intero (providers.modelPrices)
+  // e l'adattatore risolve la coppia provider+modello della CHIAMATA (così la
+  // riserva che cambia modello rilegge il prezzo giusto)
+  const customPrice = !fromCatalog && !entry.local ? opts.modelPrices?.[p.id]?.[modelId] : undefined
+  return streamPi(entry.models, model, { fromCatalog, local: entry.local, ...(customPrice ? { customPrice } : {}) }, messages, tools, signal, {
     ...opts,
     // E2.2: chiave sempre esplicita; i locali senza chiave mandano
     // 'not-needed' (come l'adattatore di sempre), i provider col catalogo

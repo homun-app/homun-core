@@ -29,6 +29,16 @@ beforeEach(() => {
   // fase 8: il runner legge titolo e ORIGINE del task (correzione B1) dalla
   // propria connessione
   db.exec("CREATE TABLE IF NOT EXISTS tasks (id INTEGER PRIMARY KEY, agent_id TEXT, title TEXT, status TEXT DEFAULT 'working', created_at INTEGER, updated_at INTEGER, summary TEXT, untrusted INTEGER DEFAULT 0, automatic INTEGER DEFAULT 0)")
+  // fase 18b (H7): il runner legge il modello PROPRIo della routine alla
+  // ESECUZIONE (colonne provider_id/model/thinking)
+  db.exec(`CREATE TABLE IF NOT EXISTS routines (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id TEXT NOT NULL, title TEXT NOT NULL,
+    prompt TEXT NOT NULL, schedule TEXT NOT NULL, enabled INTEGER DEFAULT 1,
+    last_run INTEGER, created_at INTEGER, description TEXT DEFAULT '',
+    timezone TEXT DEFAULT '', provenance TEXT DEFAULT 'user', trigger_json TEXT,
+    paused_for_away INTEGER DEFAULT 0, last_poll INTEGER,
+    provider_id TEXT, model TEXT, thinking TEXT
+  )`)
 })
 
 describe('makeJobRunner: user-message', () => {
@@ -335,5 +345,38 @@ describe('makeJobRunner: subagent-run', () => {
     expect(log[0]!.text).toContain('[task no. 3 "Confronto"')
     expect(log[0]!.opts.contaminated).toBe(true)
     expect(log[0]!.opts.automatic).toBe(true)
+  })
+})
+
+describe('makeJobRunner: routine-run con modello proprio (fase 18b, H7)', () => {
+  const routineJob = (routineId: number) =>
+    enqueueJob(db, { agentId: 'a2', kind: 'routine-run', payload: { routineId, title: 'T', prompt: 'p' }, runAt: 0, now: 0 })
+
+  it('la riga con provider_id+model passa la route a runTurn (ALL\'ESECUZIONE, non all\'accodamento)', async () => {
+    const r = db.prepare('INSERT INTO routines(agent_id, title, prompt, schedule, created_at, provider_id, model, thinking) VALUES(?,?,?,?,?,?,?,?)')
+      .run('a2', 'T', 'p', '', 1, 'prov2', 'm-routine', 'high')
+    const log: Seen[] = []
+    await makeJobRunner(db, fakeTurn(log))(routineJob(Number(r.lastInsertRowid)), emit)
+    expect(log[0]!.opts.route).toEqual({ providerId: 'prov2', model: 'm-routine', thinking: 'high' })
+  })
+
+  it('riga senza modello proprio: NESSUNA route (quella del bot)', async () => {
+    const r = db.prepare('INSERT INTO routines(agent_id, title, prompt, schedule, created_at) VALUES(?,?,?,?,?)')
+      .run('a2', 'T', 'p', '', 1)
+    const log: Seen[] = []
+    await makeJobRunner(db, fakeTurn(log))(routineJob(Number(r.lastInsertRowid)), emit)
+    expect(log[0]!.opts.route).toBeUndefined()
+  })
+
+  it('il modello si legge alla ESECUZIONE: la riga cambia tra accodamento e giro del job', async () => {
+    const r = db.prepare('INSERT INTO routines(agent_id, title, prompt, schedule, created_at) VALUES(?,?,?,?,?)')
+      .run('a2', 'T', 'p', '', 1)
+    const id = Number(r.lastInsertRowid)
+    const job = routineJob(id)
+    // DOPO l'accodamento la routine riceve un modello proprio
+    db.prepare('UPDATE routines SET provider_id = ?, model = ? WHERE id = ?').run('prov9', 'm-tardi', id)
+    const log: Seen[] = []
+    await makeJobRunner(db, fakeTurn(log))(job, emit)
+    expect(log[0]!.opts.route).toEqual({ providerId: 'prov9', model: 'm-tardi' })
   })
 })

@@ -144,6 +144,22 @@ export function makeJobRunner(db: DatabaseSync, runTurnFn: RunTurnFn = runTurn) 
       return
     }
     const p = job.payload as { routineId: number; title: string; prompt: string; event?: TriggerEventPayload }
+    // fase 18b (H7): il modello PROPRIo della routine si legge dalla riga
+    // ALL'ESECUZIONE (non all'accodamento: la routine può cambiare in coda).
+    // Vale SOLO per questo turno; le continuazioni di task usano il bot.
+    let route: RunTurnOptions['route'] | undefined
+    if (typeof p.routineId === 'number') {
+      const row = db.prepare('SELECT provider_id, model, thinking FROM routines WHERE id = ?').get(p.routineId) as
+        | { provider_id?: string | null; model?: string | null; thinking?: string | null }
+        | undefined
+      if (row?.provider_id && row?.model) {
+        route = {
+          providerId: row.provider_id,
+          model: row.model,
+          ...(row.thinking ? { thinking: row.thinking as NonNullable<RunTurnOptions['route']>['thinking'] } : {})
+        }
+      }
+    }
     // fase 6: il turno di un trigger parte dall'evento (evidenza nel blocco
     // delimitato <evento>); le routine a schedule restano come prima.
     // Fase 8 (punto 1): il flag dice al loop che il testo che apre il turno
@@ -170,7 +186,8 @@ export function makeJobRunner(db: DatabaseSync, runTurnFn: RunTurnFn = runTurn) 
     await runTurnFn(job.agent_id, text, emit, undefined, {
       source: 'routine', title: p.title, ...opts, onTurnEntry,
       ...(p.event ? { externalEvent: true } : {}),
-      ...(openingUi ? { extraMeta: { ui: openingUi } } : {})
+      ...(openingUi ? { extraMeta: { ui: openingUi } } : {}),
+      ...(route ? { route } : {})
     })
   }
 }

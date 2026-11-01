@@ -30,6 +30,8 @@ const api: SandbotApi = {
   discoverProviders: () => ipcRenderer.invoke('providers:discover'),
   testProvider: (id) => ipcRenderer.invoke('providers:test', id),
   listModels: (providerId) => ipcRenderer.invoke('models:list', providerId),
+  // fase 18b (H6): uso e costi aggregati (per modello/bot/origine)
+  usageSummary: (fromMs, toMs, groupBy) => ipcRenderer.invoke('usage:summary', fromMs, toMs, groupBy),
   // fase 11: chiave per la ricerca web (vault sigillato; il valore non torna mai alla UI)
   setWebSearchKey: (providerId, key) => ipcRenderer.invoke('providers:set-web-search-key', providerId, key),
   webSearchKeySet: (providerId) => ipcRenderer.invoke('providers:web-search-key-set', providerId),
@@ -42,10 +44,10 @@ const api: SandbotApi = {
   quickAsk: (agentId, question) => ipcRenderer.invoke('quickask', agentId, question),
   pickImage: () => ipcRenderer.invoke('dialog:pick-image'),
   listRoutines: (agentId) => ipcRenderer.invoke('routines:list', agentId),
-  createRoutine: (agentId, title, prompt, schedule) => ipcRenderer.invoke('routines:create', agentId, title, prompt, schedule),
+  createRoutine: (agentId, title, prompt, schedule, model) => ipcRenderer.invoke('routines:create', agentId, title, prompt, schedule, model),
   // fase 6: routine con trigger esteso (schedule every, email, calendar_event, webhook, poll)
-  createRoutineTrigger: (agentId, title, prompt, trigger, timezone) =>
-    ipcRenderer.invoke('routines:create-trigger', agentId, title, prompt, trigger, timezone),
+  createRoutineTrigger: (agentId, title, prompt, trigger, timezone, model) =>
+    ipcRenderer.invoke('routines:create-trigger', agentId, title, prompt, trigger, timezone, model),
   updateRoutineTrigger: (id, patch) => ipcRenderer.invoke('routines:update-trigger', id, patch),
   updateRoutine: (id, patch) => ipcRenderer.invoke('routines:update', id, patch),
   deleteRoutine: (id) => ipcRenderer.invoke('routines:delete', id),

@@ -40,6 +40,35 @@ export const UI = {
     id: 'notice.modelFallback',
     message: 'Il modello principale {model} non risponde ({why}): uso la riserva {fallback}.'
   }),
+  // ---- fase 18b (H2/H4/H7): catena delle riserve, visione, routine ----
+  modelFallbackRoute: msg({
+    id: 'notice.modelFallbackRoute',
+    message: 'Il modello {model} del provider {provider} non risponde ({why}): passo alla riserva {fallback} su {fallbackProvider}.'
+  }),
+  modelRouteCooled: msg({
+    id: 'notice.modelRouteCooled',
+    message: '{model} su {provider} è in pausa fino alle {until} (limite o errore recente): il turno parte da {fallback} su {fallbackProvider}.'
+  }),
+  imagesNotSeen: msg({
+    id: 'notice.imagesNotSeen',
+    message: 'Il modello {model} non vede le immagini: gli allegati di questo messaggio non saranno guardati.'
+  }),
+  routineModelUnavailable: msg({
+    id: 'notice.routineModelUnavailable',
+    message: 'Il provider {provider} scelto per questa routine non è più disponibile: uso il modello del bot ({model}).'
+  }),
+  rpcModelsListFailed: msg({
+    id: 'rpc.modelsListFailed',
+    message: 'impossibile elencare i modelli: {error}'
+  }),
+  rpcRoutineModelProvider: msg({
+    id: 'rpc.routineModelProvider',
+    message: 'il provider scelto per la routine non esiste: {provider}'
+  }),
+  rpcRoutineModelEmpty: msg({
+    id: 'rpc.routineModelEmpty',
+    message: 'serve anche il modello quando scegli un provider per la routine'
+  }),
   modelNotResponding: msg({ id: 'notice.modelNotResponding', message: 'Il modello non risponde ({why}): turno interrotto.' }),
   modelError: msg({ id: 'notice.modelError', message: 'Errore dal modello: {message}' }),
   modelEmpty: msg({ id: 'notice.modelEmpty', message: 'Il modello non ha prodotto risposta (vuota).' }),

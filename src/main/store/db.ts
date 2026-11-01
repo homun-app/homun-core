@@ -13,7 +13,7 @@ import { GROUPS_DDL } from './groups'
 import { SHELL_JOBS_DDL } from './shell-jobs'
 import { SUBAGENTS_DDL } from './subagents'
 import { LIBRARY_DDL } from './library'
-import type { Agent, AgentAvatar, TranscriptEntry, PermissionsConfig, RoutineTrigger } from '../../shared/types'
+import type { Agent, AgentAvatar, TranscriptEntry, PermissionsConfig, RoutineTrigger, ModelUsageRow } from '../../shared/types'
 // fase 17c (C3): l'UiText del rifiuto per la UI (foglie shared, nessun ciclo)
 import { ui } from '../../shared/ui-text'
 import { UI } from '../../shared/ui-messages'
@@ -170,6 +170,18 @@ function open(): DatabaseSync {
   // sveglia solo quando anche il turno del padre che l'ha creato è finito
   const subCols = db.prepare("SELECT name FROM pragma_table_info('subagents')").all() as Array<{ name: string }>
   if (!subCols.some((c) => c.name === 'sealed')) db.exec('ALTER TABLE subagents ADD COLUMN sealed INTEGER DEFAULT 0')
+  // fase 18b (H3): il livello di ragionamento del bot ('default' = la 18a)
+  if (!agentPresent.has('thinking')) db.exec("ALTER TABLE agents ADD COLUMN thinking TEXT DEFAULT 'default'")
+  // fase 18b (H7): il modello PROPRIo della routine (null = quello del bot)
+  const routineModelCols = db.prepare("SELECT name FROM pragma_table_info('routines')").all() as Array<{ name: string }>
+  const routineModelPresent = new Set(routineModelCols.map((c) => c.name))
+  for (const [col, ddl] of [
+    ['provider_id', 'ALTER TABLE routines ADD COLUMN provider_id TEXT'],
+    ['model', 'ALTER TABLE routines ADD COLUMN model TEXT'],
+    ['thinking', 'ALTER TABLE routines ADD COLUMN thinking TEXT']
+  ] as const) {
+    if (!routineModelPresent.has(col)) db.exec(ddl)
+  }
   // fase 10 (correzione C5): il motivo di uno SKIPPED di gruppo (il giro
   // sospeso per limite d'uso del provider) vive accanto all'esito
   const turnCols = db.prepare("SELECT name FROM pragma_table_info('group_turns')").all() as Array<{ name: string }>
@@ -211,6 +223,8 @@ interface AgentRow {
   parent_id?: string | null
   /** fase 16: l'aspetto della mascotte (JSON {"family":"…","color":"…"}, NULL = predefinito) */
   avatar?: string | null
+  /** fase 18b (H3): livello di ragionamento ('default' = la 18a) */
+  thinking?: string | null
 }
 
 /** fase 16: parse dell'avatar salvato — un JSON ROTTO diventa null (predefinito), mai un crash. */
@@ -232,7 +246,8 @@ function rowToAgent(r: AgentRow): Agent {
     id: r.id, name: r.name, description: r.description, providerId: r.provider_id,
     model: r.model, status: r.status as Agent['status'], unread: r.unread, createdAt: r.created_at,
     createdBy: r.created_by ?? null, section: r.section ?? null,
-    parentId: r.parent_id ?? null, avatar: parseAvatar(r.avatar)
+    parentId: r.parent_id ?? null, avatar: parseAvatar(r.avatar),
+    thinking: (r.thinking as Agent['thinking']) ?? 'default'
   }
 }
 
@@ -280,18 +295,20 @@ export function createAgent(name: string, description = '', opts: CreateAgentOpt
 
 export function updateAgent(
   id: string,
-  patch: Partial<Pick<Agent, 'name' | 'description' | 'providerId' | 'model' | 'status' | 'unread' | 'section' | 'avatar'>>
+  patch: Partial<Pick<Agent, 'name' | 'description' | 'providerId' | 'model' | 'status' | 'unread' | 'section' | 'avatar' | 'thinking'>>
 ): void {
   const a = getAgent(id)
   if (!a) return
   db()
-    .prepare('UPDATE agents SET name=?, description=?, provider_id=?, model=?, status=?, unread=?, section=?, avatar=? WHERE id=?')
+    .prepare('UPDATE agents SET name=?, description=?, provider_id=?, model=?, status=?, unread=?, section=?, avatar=?, thinking=? WHERE id=?')
     .run(
       patch.name ?? a.name, patch.description ?? a.description, patch.providerId ?? a.providerId,
       patch.model ?? a.model, patch.status ?? a.status, patch.unread ?? a.unread,
       patch.section ?? a.section ?? '',
       // fase 16: null torna al predefinito (colonna NULL)
       patch.avatar === undefined ? (a.avatar ? JSON.stringify(a.avatar) : null) : patch.avatar === null ? null : JSON.stringify(patch.avatar),
+      // fase 18b (H3): 'default' o assente = la 18a (mai NULL: la colonna ha DEFAULT)
+      patch.thinking ?? a.thinking ?? 'default',
       id
     )
 }
@@ -542,6 +559,10 @@ export interface Routine {
   paused_for_away?: number
   /** fase 6: ultimo poll eseguito (trigger connector_poll) */
   last_poll?: number | null
+  /** fase 18b (H7): modello PROPRIo (null = quello del bot) */
+  providerId?: string | null
+  model?: string | null
+  thinking?: import('../../shared/types').ThinkingSetting | null
 }
 
 interface RoutineRow {
@@ -549,6 +570,7 @@ interface RoutineRow {
   enabled: number; last_run: number | null; created_at: number
   description?: string | null; timezone?: string | null; provenance?: string | null
   trigger_json?: string | null; paused_for_away?: number | null; last_poll?: number | null
+  provider_id?: string | null; model?: string | null; thinking?: string | null
 }
 
 function rowToRoutine(r: RoutineRow): Routine {
@@ -559,7 +581,10 @@ function rowToRoutine(r: RoutineRow): Routine {
     provenance: (r.provenance as Routine['provenance']) ?? 'user',
     trigger: r.trigger_json ? (JSON.parse(r.trigger_json) as RoutineTrigger) : null,
     paused_for_away: r.paused_for_away ?? 0,
-    last_poll: r.last_poll ?? null
+    last_poll: r.last_poll ?? null,
+    providerId: r.provider_id ?? null,
+    model: r.model ?? null,
+    thinking: (r.thinking as Routine['thinking']) ?? null
   }
 }
 
@@ -581,39 +606,49 @@ export interface CreateRoutineOpts {
   description?: string
   timezone?: string
   trigger?: RoutineTrigger
+  /** fase 18b (H7): modello proprio (la RPC valida prima di arrivare qui) */
+  providerId?: string | null
+  model?: string | null
+  thinking?: import('../../shared/types').ThinkingSetting | null
 }
 
 export function createRoutine(agentId: string, title: string, prompt: string, schedule: string, opts: CreateRoutineOpts = {}): Routine {
   const now = Date.now()
   const r = db()
-    .prepare('INSERT INTO routines(agent_id, title, prompt, schedule, enabled, created_at, description, timezone, provenance, trigger_json) VALUES(?,?,?,?,?,?,?,?,?,?)')
+    .prepare('INSERT INTO routines(agent_id, title, prompt, schedule, enabled, created_at, description, timezone, provenance, trigger_json, provider_id, model, thinking) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)')
     .run(
       agentId, title, prompt, schedule, opts.enabled ?? 1, now, opts.description ?? '', opts.timezone ?? '',
-      opts.provenance ?? 'user', opts.trigger ? JSON.stringify(opts.trigger) : null
+      opts.provenance ?? 'user', opts.trigger ? JSON.stringify(opts.trigger) : null,
+      opts.providerId ?? null, opts.model ?? null, opts.thinking ?? null
     )
   return {
     id: Number(r.lastInsertRowid), agent_id: agentId, title, prompt, schedule,
     enabled: opts.enabled ?? 1, last_run: null, created_at: now,
     description: opts.description ?? '', timezone: opts.timezone ?? '', provenance: opts.provenance ?? 'user',
-    trigger: opts.trigger ?? null, paused_for_away: 0, last_poll: null
+    trigger: opts.trigger ?? null, paused_for_away: 0, last_poll: null,
+    providerId: opts.providerId ?? null, model: opts.model ?? null, thinking: opts.thinking ?? null
   }
 }
 
 export function updateRoutine(
   id: number,
-  patch: Partial<Pick<Routine, 'enabled' | 'schedule' | 'title' | 'prompt' | 'description' | 'timezone' | 'provenance' | 'trigger' | 'paused_for_away'>>
+  patch: Partial<Pick<Routine, 'enabled' | 'schedule' | 'title' | 'prompt' | 'description' | 'timezone' | 'provenance' | 'trigger' | 'paused_for_away' | 'providerId' | 'model' | 'thinking'>>
 ): void {
   const row = db().prepare('SELECT * FROM routines WHERE id = ?').get(id) as RoutineRow | undefined
   if (!row) return
   const cur = rowToRoutine(row)
   db()
-    .prepare('UPDATE routines SET enabled=?, schedule=?, title=?, prompt=?, description=?, timezone=?, provenance=?, trigger_json=?, paused_for_away=? WHERE id=?')
+    .prepare('UPDATE routines SET enabled=?, schedule=?, title=?, prompt=?, description=?, timezone=?, provenance=?, trigger_json=?, paused_for_away=?, provider_id=?, model=?, thinking=? WHERE id=?')
     .run(
       patch.enabled ?? cur.enabled, patch.schedule ?? cur.schedule, patch.title ?? cur.title,
       patch.prompt ?? cur.prompt, patch.description ?? cur.description ?? '', patch.timezone ?? cur.timezone ?? '',
       patch.provenance ?? cur.provenance ?? 'user',
       patch.trigger !== undefined ? (patch.trigger ? JSON.stringify(patch.trigger) : null) : (cur.trigger ? JSON.stringify(cur.trigger) : null),
-      patch.paused_for_away ?? cur.paused_for_away ?? 0, id
+      patch.paused_for_away ?? cur.paused_for_away ?? 0,
+      patch.providerId !== undefined ? patch.providerId : cur.providerId ?? null,
+      patch.model !== undefined ? patch.model : cur.model ?? null,
+      patch.thinking !== undefined ? patch.thinking : cur.thinking ?? null,
+      id
     )
 }
 
@@ -783,54 +818,65 @@ export function recordModelUsage(rec: ModelUsageRecord): void {
     )
 }
 
-/** Una riga aggregata per provider_kind + model (la RPC usage:summary). */
-export interface ModelUsageSummaryRow {
-  providerKind: string
-  model: string
-  calls: number
-  input: number
-  output: number
-  cacheRead: number
-  cacheWrite: number
-  /** null solo se TUTTE le righe aggregate hanno costo null (locale/sconosciuto) */
-  costUsd: number | null
-}
+/** La chiave di raggruppamento di usage:summary (fase 18b, H6.1). */
+export type UsageGroupBy = 'model' | 'agent' | 'source'
 
-/** L'aggregato per provider_kind + model in una finestra [fromMs, toMs] (facoltativi). */
-export function modelUsageSummary(fromMs?: number, toMs?: number): ModelUsageSummaryRow[] {
+/**
+ * L'aggregato in una finestra [fromMs, toMs] (facoltativi), per
+ * provider_kind + model (default), bot o origine. costUsd è null solo se
+ * TUTTE le righe del gruppo sono null; costPartial segnala i gruppi con
+ * costo MISTO (alcune righe note, altre no — costo sottostimato, H0).
+ */
+export function modelUsageSummary(fromMs?: number, toMs?: number, groupBy: UsageGroupBy = 'model'): ModelUsageRow[] {
   const where = [
-    ...(fromMs !== undefined ? ['at >= ?'] : []),
-    ...(toMs !== undefined ? ['at <= ?'] : [])
+    ...(fromMs !== undefined ? ['mu.at >= ?'] : []),
+    ...(toMs !== undefined ? ['mu.at <= ?'] : [])
   ]
   const params = [
     ...(fromMs !== undefined ? [fromMs] : []),
     ...(toMs !== undefined ? [toMs] : [])
   ]
+  // fase 18b (H6.1): il gruppo per modello diventa provider_id + kind + model
+  // (il prezzo personalizzato vive per providerId); per bot c'è il nome
+  // (LEFT JOIN: le chiamate senza bot → null, etichetta «Sistema» nella UI)
+  const dims =
+    groupBy === 'agent' ? 'mu.agent_id' :
+    groupBy === 'source' ? 'mu.source' :
+    'mu.provider_id, mu.provider_kind, mu.model'
   const rows = db()
     .prepare(
-      `SELECT provider_kind, model,
+      `SELECT mu.provider_id AS providerId, mu.provider_kind AS providerKind, mu.model AS model, mu.source AS source,
+              mu.agent_id AS agentId, a.name AS agentName,
               COUNT(*) AS calls,
-              SUM(input) AS input, SUM(output) AS output,
-              SUM(cache_read) AS cacheRead, SUM(cache_write) AS cacheWrite,
-              SUM(cost_usd) AS knownCost, COUNT(cost_usd) AS costRows
-       FROM model_usage${where.length ? ' WHERE ' + where.join(' AND ') : ''}
-       GROUP BY provider_kind, model
+              SUM(mu.input) AS input, SUM(mu.output) AS output,
+              SUM(mu.cache_read) AS cacheRead, SUM(mu.cache_write) AS cacheWrite,
+              SUM(mu.cost_usd) AS knownCost, COUNT(mu.cost_usd) AS costRows
+       FROM model_usage mu LEFT JOIN agents a ON a.id = mu.agent_id
+       ${where.length ? ' WHERE ' + where.join(' AND ') : ''}
+       GROUP BY ${dims}
        ORDER BY calls DESC`
     )
     .all(...params) as Array<{
-      provider_kind: string; model: string; calls: number
-      input: number; output: number; cacheRead: number; cacheWrite: number
+      providerId: string | null; providerKind: string; model: string; source: string
+      agentId: string | null; agentName: string | null
+      calls: number; input: number; output: number; cacheRead: number; cacheWrite: number
       knownCost: number | null; costRows: number
     }>
   return rows.map((r) => ({
-    providerKind: r.provider_kind,
-    model: r.model,
     calls: r.calls,
     input: r.input,
     output: r.output,
     cacheRead: r.cacheRead,
     cacheWrite: r.cacheWrite,
     // costo noto solo se ALMENO una riga lo aveva; le righe null non pesano
-    costUsd: r.costRows > 0 ? (r.knownCost ?? 0) : null
+    costUsd: r.costRows > 0 ? (r.knownCost ?? 0) : null,
+    // H0: righe MISTE (alcune con costo, altre no) → il totale è parziale
+    costPartial: r.costRows > 0 && r.costRows < r.calls,
+    providerId: groupBy === 'model' ? (r.providerId ?? '') : '',
+    providerKind: groupBy === 'model' ? r.providerKind : '',
+    model: groupBy === 'model' ? r.model : '',
+    source: groupBy === 'source' ? r.source : '',
+    agentId: groupBy === 'agent' ? r.agentId : null,
+    agentName: groupBy === 'agent' ? r.agentName : null
   }))
 }

@@ -42,9 +42,15 @@ import { nextWithDeadline, DEFAULT_STREAM_DEADLINES, StreamDeadlineError } from 
 // fase 9 (punto 0): regole dei send_to_user dentro il turno (dedup, tetto
 // avanzamenti, result col testo consegnato)
 import { deliveredResultText, alreadyDeliveredResult, isDuplicateSend, isWorkTool, messageCapResult, emptySendResult, turnCapResult, MAX_DELIVERED_PER_TURN } from './turn-sends'
-// fase 9 (punto 1): modello di riserva quando il principale non risponde
-import { fallbackModelFor, type ModelDefaultsMap } from './model-defaults'
-import { shouldUseFallback } from './model-fallback'
+// fase 9 (punto 1) → fase 18b (H2): la riserva è una CATENA di anelli
+// provider+modello (modello dei router LLM maturi); il raffreddamento (H2.3)
+// tiene in pausa chi ha appena fallito, in memoria nel processo del daemon
+import { type ModelDefaultsMap } from './model-defaults'
+import { routeChain, nextRoute, fallbackEligible, type Route } from './model-fallback'
+import { coolDown, isCooled, cooledUntil, markHealthy } from './route-health'
+// fase 18b (H4): la visione conosciuta del modello del turno (use-app, immagini)
+import { modelCapabilities } from './llm-pi'
+import type { ThinkingSetting } from '../../shared/types'
 // fase 10: gruppi (store) e regole del turno di gruppo (puro); correzioni C1-C3;
 // correzione E2 (terzo giro): il recupero dei turni di gruppo finiti con la
 // consegna scritta come testo libero
@@ -63,7 +69,7 @@ import {
   findToolsToolDef, rankTools, requiredParamsOf, formatFindToolsResult, toolsDeferred,
   activeToolsFromTranscript, connectorsActiveSection, DEFAULT_MAX_INLINE_TOOLS
 } from '../mcp/find-tools'
-import type { Approval, SandbotEvent, SendMessagePayload, TurnEnd } from '../../shared/types'
+import type { Approval, ProviderConfig, SandbotEvent, SendMessagePayload, TurnEnd } from '../../shared/types'
 // fase 12: sottoagenti — policy pura del figlio, store del registro, formatters
 import {
   subagentToolDenyReason, subagentBriefError, subagentClosure, autoCloseSummary,
@@ -177,6 +183,19 @@ interface Running {
   taskId?: number
 }
 const running = new Map<string, Running>()
+
+/**
+ * Fase 18b (H2.3): le notice di raffreddamento già emesse, per bot e periodo
+ * di raffreddamento (chiave bot|provider|modello → fine della pausa): una
+ * sola notice per pausa, non una a ogni turno. In memoria, come la pausa.
+ */
+const cooledNotices = new Map<string, number>()
+
+/** HH:MM locale della fine del raffreddamento (valore della notice modelRouteCooled). */
+function hhmmOf(ms: number): string {
+  const d = new Date(ms)
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
 
 function setStatus(agentId: string, status: import('../../shared/types').AgentStatus, emit: Emitter): void {
   updateAgent(agentId, { status })
@@ -347,6 +366,14 @@ export interface RunTurnOptions {
    * revoca dei grant di turno, come dopo una lettura web.
    */
   contaminated?: boolean
+  /**
+   * Fase 18b (H7): la rotta di un modello PROPRIo della routine (provider +
+   * modello, ragionamento facoltativo). Con `route` il primario della catena
+   * H2 è QUESTO; se il provider non esiste più o è disabilitato si usa il
+   * modello del bot con la notice routineModelUnavailable. Vale SOLO per il
+   * turno della routine: le continuazioni di task usano il modello del bot.
+   */
+  route?: { providerId: string; model: string; thinking?: ThinkingSetting }
   /**
    * Fase 10 (§3): il turno è un TURNO DI GRUPPO per questo membro. Le entry
    * portano meta.groupId (visibili nella storia del membro, nascoste nella
@@ -1029,9 +1056,6 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     // memoria, skill, bot principale, connettori e sezione connettori attivi
     systemText = withLanguage(systemText, userLang)
     const messages: ChatMessage[] = buildMessages(systemText, scopedEntries(), images)
-    // correzione E2: i tool del passo corrente — la chiamata di recupero di un
-    // turno di gruppo li restringe a quelli del sollecito
-    let turnTools = allTools
 
     // fase 3 (§3bis L5): quali tool MCP sono invii verso l'esterno
     const externalCfg = getSetting<ExternalSendConfig>('externalSendTools', DEFAULT_EXTERNAL_SEND_TOOLS)
@@ -1045,12 +1069,101 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       idleMs: getSetting<number>('llm.streamIdleMs', DEFAULT_STREAM_DEADLINES.idleMs)
     }
 
-    // fase 9 (punto 1): la RISERVA — se il modello principale non risponde
-    // (5xx, timeout, scadenza dello stream) il turno riprova UNA volta col
-    // modello di riserva dello stesso provider; mai sui 4xx
-    const fallbackModel = fallbackModelFor(provider, getSetting<ModelDefaultsMap>('providers.modelDefaults', {}))
-    let activeModel = agent.model
-    let fallbackUsed = false
+    // fase 9 (punto 1) → fase 18b (H2): la CATENA delle riserve —
+    // [primario, fallbackModel dello stesso provider, ...models.fallbackChain].
+    // Il primario è quello della ROUTINE quando c'è (H7); chi non configura
+    // niente ha esattamente il comportamento di oggi (un anello in più al
+    // massimo, sullo stesso provider)
+    const modelDefaults = getSetting<ModelDefaultsMap>('providers.modelDefaults', {})
+    const fallbackChain = getSetting<Route[]>('models.fallbackChain', [])
+    const allProviders = listProviders()
+    const providerById = (id: string): ProviderConfig | undefined =>
+      allProviders.find((x) => x.id === id) ?? (provider.id === id ? provider : undefined)
+    // fase 18b (H2.4): la ROTTA attiva del turno — provider + modello, cambia
+    // quando si passa d'anello. Tutte le chiamate del turno la usano.
+    let activeProvider: ProviderConfig = provider
+    let primary: Route = { providerId: provider.id, model: agent.model }
+    // fase 18b (H3): il livello di ragionamento del turno (la routine può
+    // avere il suo, H7); l'adattatore clampa sul modello di OGNI chiamata.
+    // 'default' o assente NON passa proprio: il comportamento della 18a ESATTO
+    let turnThinking: ThinkingSetting | undefined =
+      agent.thinking && agent.thinking !== 'default' ? agent.thinking : undefined
+    if (opts.route) {
+      const rp = providerById(opts.route.providerId)
+      if (rp?.enabled && opts.route.model) {
+        primary = { providerId: rp.id, model: opts.route.model }
+        if (opts.route.thinking && opts.route.thinking !== 'default') turnThinking = opts.route.thinking
+        else if (opts.route.thinking === 'default') turnThinking = undefined
+        activeProvider = rp
+      } else {
+        // H7: il provider della routine non c'è più (o è disabilitato): si usa
+        // il modello del bot, con una notice — la routine NON si perde
+        add({ ...uiSystemEntry(agentId, 'notice', ui(UI.routineModelUnavailable, { provider: opts.route.providerId, model: agent.model! })) })
+        emitLastEntry(agentId, emit)
+      }
+    }
+    const chain = routeChain(primary, {
+      // il provider del bot entra sempre (è quello di primary: EnabledByConstruction)
+      providers: [...allProviders.filter((x) => x.id !== provider.id), provider],
+      modelDefaults,
+      chain: fallbackChain
+    })
+    // H2.3: il turno parte dal primo anello NON raffreddato; se lo sono
+    // tutti, parte da primary (meglio un tentativo che un turno muto)
+    const now0 = Date.now()
+    let chainIdx = chain.findIndex((r) => !isCooled(r, now0))
+    if (chainIdx < 0) chainIdx = 0
+    let activeRoute: Route = chain[chainIdx]!
+    if (activeProvider.id !== activeRoute.providerId) activeProvider = providerById(activeRoute.providerId) ?? activeProvider
+    let routeSwitches = 0
+    // la notice di raffreddamento: una SOLA volta per periodo di pausa e per
+    // bot (H2.3), per ogni anello in pausa prima di quello attivo
+    if (chainIdx > 0) {
+      const now = Date.now()
+      for (let i = 0; i < chainIdx; i++) {
+        const r = chain[i]!
+        const until = cooledUntil(r, now)
+        if (until === null) continue
+        const key = `${agentId}|${r.providerId}|${r.model}`
+        if (cooledNotices.get(key) === until) continue
+        cooledNotices.set(key, until)
+        const inUse = providerById(activeRoute.providerId)
+        add({
+          ...uiSystemEntry(agentId, 'notice', ui(UI.modelRouteCooled, {
+            model: r.model,
+            provider: providerById(r.providerId)?.name ?? r.providerId,
+            until: hhmmOf(until),
+            fallback: activeRoute.model,
+            fallbackProvider: inUse?.name ?? activeRoute.providerId
+          }))
+        })
+        emitLastEntry(agentId, emit)
+      }
+    }
+    // fase 18b (H1.3): i prezzi personalizzati passano allo stream dal
+    // CHIAMANTE (l'adattatore non legge lo store: nessun ciclo di import)
+    const modelPrices = getSetting<import('../../shared/types').ModelPriceMap>('providers.modelPrices', {})
+
+    // fase 18b (H4): visione conosciuta FALSA del modello del turno → use-app
+    // (l'unico tool che restituisce images) non viene offerto. Con vision
+    // sconosciuta (null) tutto resta come prima. Se la riserva cambia modello
+    // a metà turno la lista non si tocca: un'eventuale chiamata riceve
+    // l'errore inglese al momento dell'esecuzione (giù, nel gate dei tool)
+    if (modelCapabilities(activeProvider, activeRoute.model).vision === false) {
+      allTools = allTools.filter((t) => t.name !== 'use-app')
+    }
+    // fase 18b (H4): il turno parte con IMMAGINI e il modello del turno ha
+    // visione conosciuta FALSA → notice per l'utente. Il segnaposto di pi-ai
+    // al modello resta: non si toglie (con vision sconosciuta, niente notice)
+    if (images?.length && modelCapabilities(activeProvider, activeRoute.model).vision === false) {
+      add({ ...uiSystemEntry(agentId, 'notice', ui(UI.imagesNotSeen, { model: activeRoute.model })) })
+      emitLastEntry(agentId, emit)
+    }
+
+    // correzione E2: i tool del passo corrente — la chiamata di recupero di un
+    // turno di gruppo li restringe a quelli del sollecito (DOPO il filtro
+    // use-app della visione, così anche il recupero non lo offre)
+    let turnTools = allTools
 
     setStatus(agentId, 'thinking', emit)
 
@@ -1065,7 +1178,10 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       const streamAbort = new AbortController()
       const onTurnAbort = (): void => streamAbort.abort()
       controller.signal.addEventListener('abort', onTurnAbort)
-      const stream = llmStream(provider, activeModel, messages, turnTools, AbortSignal.any([controller.signal, streamAbort.signal]))
+      const stream = llmStream(activeProvider, activeRoute.model, messages, turnTools, AbortSignal.any([controller.signal, streamAbort.signal]), {
+        thinking: turnThinking,
+        modelPrices
+      })
       // fase 3: il testo libero è ragionamento interno, non una risposta
       const entry = add({ agentId, kind: 'thinking', role: 'assistant', content: '' })
       emit({ type: 'entries', agentId, entries: [entry] })
@@ -1095,14 +1211,16 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           if (ch.usage) finalUsage = ch.usage
         }
         final = { text: acc, toolCalls: finalToolCalls, finishReason: finalFinish }
+        // fase 18b (H2.3): una chiamata riuscita toglie il raffreddamento
+        markHealthy(activeRoute)
         // fase 18a (E4): uso registrato della chiamata — la riga va al modello
-        // che ha risposto DAVVERO (la riserva cambia activeModel a metà turno)
+        // che ha risposto DAVVERO (la rotta attiva, non il provider del bot)
         if (finalUsage) {
           recordModelUsage({
             agentId,
-            providerId: provider.id,
-            providerKind: provider.kind,
-            model: activeModel,
+            providerId: activeProvider.id,
+            providerKind: activeProvider.kind,
+            model: activeRoute.model,
             source: opts.subagent ? 'subagent' : opts.groupTurn !== undefined ? 'group' : 'turn',
             input: finalUsage.input,
             output: finalUsage.output,
@@ -1114,17 +1232,46 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       } catch (err) {
         streamAbort.abort()
         updateEntryContent(entry.id, acc)
-        // fase 9 (punto 1): il modello principale non risponde → UNA riprova
-        // col modello di riserva (lo step consumato conta nel tetto MAX_STEPS)
-        if (
-          shouldUseFallback(err, {
-            fallbackModel, model: activeModel, fallbackUsed, aborted: controller.signal.aborted
-          })
-        ) {
-          fallbackUsed = true
-          activeModel = fallbackModel!
-          const why = err instanceof Error ? err.message : String(err)
-          add({ ...uiSystemEntry(agentId, 'notice', ui(UI.modelFallback, { model: agent.model, why, fallback: activeModel })) })
+        // fase 18b (H2.2/H2.3): errore transitorio → l'anello che ha fallito si
+        // raffredda (429/limite 10 minuti, 5xx/rete/scadenza 60 secondi) e il
+        // turno passa al primo anello successivo ammesso (mai sui 4xx, mai su
+        // interrupt; col 429 si salta lo stesso provider: la quota è
+        // dell'account). Lo step consumato conta nel tetto MAX_STEPS, come
+        // sempre; al massimo 3 passaggi per turno.
+        const rateLimited = stopReasonOfError(err) === 'rate-limit'
+        if (!controller.signal.aborted && (rateLimited || fallbackEligible(err))) {
+          coolDown(activeRoute, rateLimited ? 'rate-limit' : 'server', Date.now())
+        }
+        const next = nextRoute(err, {
+          chain,
+          current: chainIdx,
+          switches: routeSwitches,
+          cooled: (r) => isCooled(r, Date.now()),
+          aborted: controller.signal.aborted
+        })
+        if (next !== null) {
+          routeSwitches++
+          const failed = activeRoute
+          const failedProvider = activeProvider
+          chainIdx = next
+          activeRoute = chain[next]!
+          activeProvider = providerById(activeRoute.providerId) ?? activeProvider
+          const why = (err instanceof Error ? err.message : String(err)).slice(0, 200)
+          if (activeProvider.id === failedProvider.id) {
+            // lo stesso provider: la notice di sempre (fase 9)
+            add({ ...uiSystemEntry(agentId, 'notice', ui(UI.modelFallback, { model: failed.model, why, fallback: activeRoute.model })) })
+          } else {
+            // fase 18b (H2.4): la riserva è di un ALTRO provider
+            add({
+              ...uiSystemEntry(agentId, 'notice', ui(UI.modelFallbackRoute, {
+                model: failed.model,
+                provider: failedProvider.name ?? failed.providerId,
+                why,
+                fallback: activeRoute.model,
+                fallbackProvider: activeProvider.name ?? activeProvider.id
+              }))
+            })
+          }
           emitLastEntry(agentId, emit)
           continue
         }
@@ -2567,6 +2714,20 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           continue
         }
 
+        // fase 18b (H4): la riserva ha portato il turno su un modello con
+        // visione conosciuta FALSA a metà turno — use-app è RESTATO nella
+        // lista (non si cambia la lista a metà turno), ma la chiamata non si
+        // esegue: il modello non può vedere lo screenshot che riceverebbe
+        if (call.name === 'use-app') {
+        }
+        if (call.name === 'use-app' && modelCapabilities(activeProvider, activeRoute.model).vision === false) {
+          const refused = 'use-app needs a vision model; the current model cannot see images'
+          messages.push({ role: 'tool', toolCallId: call.id, content: refused })
+          const res = add({ agentId, kind: 'tool-result', role: 'system', content: refused, meta: { callId: call.id, error: true } })
+          emit({ type: 'entries', agentId, entries: [res] })
+          continue
+        }
+
         // esecuzione
         try {
           // correzione A5: il contesto del turno (chi lo ha aperto) serve a
@@ -2694,7 +2855,10 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         messages.push({ role: 'user', content: SUBAGENT_RECOVERY_NUDGE })
         setStatus(agentId, 'thinking', emit)
         try {
-          const rstream = llmStream(provider, activeModel, messages, [wakeParentToolDef], controller.signal)
+          const rstream = llmStream(activeProvider, activeRoute.model, messages, [wakeParentToolDef], controller.signal, {
+            thinking: turnThinking,
+            modelPrices
+          })
           let racc = ''
           let recoveryCalls: ToolCall[] = []
           let rusage: import('./llm').LlmChunk['usage'] | undefined
@@ -2713,9 +2877,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           if (rusage) {
             recordModelUsage({
               agentId,
-              providerId: provider.id,
-              providerKind: provider.kind,
-              model: activeModel,
+              providerId: activeProvider.id,
+              providerKind: activeProvider.kind,
+              model: activeRoute.model,
               source: 'wake',
               input: rusage.input,
               output: rusage.output,
@@ -2778,7 +2942,10 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         messages.push({ role: 'user', content: RECOVERY_NUDGE })
         setStatus(agentId, 'thinking', emit)
         try {
-          const rstream = llmStream(provider, activeModel, messages, allTools, controller.signal)
+          const rstream = llmStream(activeProvider, activeRoute.model, messages, allTools, controller.signal, {
+            thinking: turnThinking,
+            modelPrices
+          })
           let acc = ''
           let recoveryCalls: ToolCall[] = []
           let rusage: import('./llm').LlmChunk['usage'] | undefined
@@ -2797,9 +2964,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           if (rusage) {
             recordModelUsage({
               agentId,
-              providerId: provider.id,
-              providerKind: provider.kind,
-              model: activeModel,
+              providerId: activeProvider.id,
+              providerKind: activeProvider.kind,
+              model: activeRoute.model,
               source: 'turn',
               input: rusage.input,
               output: rusage.output,

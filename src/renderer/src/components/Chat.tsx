@@ -58,6 +58,20 @@ export function Chat() {
   const agent = agents.find((a) => a.id === activeId)
   const info = useBotInfo(activeId)
   const busy = agent?.status === 'thinking' || agent?.status === 'running' || agent?.status === 'paused-for-approval'
+  // fase 18b (H4.3): il modello del bot ha visione conosciuta FALSA → l'attacco
+  // immagini mostra l'avviso (l'allegato NON si blocca; con vision
+  // sconosciuta, niente avviso)
+  const providers = useStore((s) => s.providers)
+  const [noVision, setNoVision] = useState(false)
+  const visionProviderId = agent?.providerId ?? null
+  const visionModel = agent?.model ?? null
+  useEffect(() => {
+    setNoVision(false)
+    if (!visionProviderId || !visionModel) return
+    void api.listModels(visionProviderId)
+      .then((ms) => setNoVision(ms.find((m) => m.id === visionModel)?.vision === false))
+      .catch(() => setNoVision(false))
+  }, [visionProviderId, visionModel])
   // il colore del bot per le bolle utente e i bottoni (token, mai un colore CSS)
   const color = info ? `var(--bot-${info.avatar.color})` : 'var(--foreground)'
 
@@ -220,7 +234,7 @@ export function Chat() {
           <button
             type="button"
             className="relative grid size-9 shrink-0 place-items-center rounded-xl text-muted-foreground transition hover:bg-muted hover:text-foreground"
-            title={t`Allega immagine (per modelli vision)`}
+            title={noVision ? t`Allega immagine (per modelli vision) — questo modello non vede le immagini` : t`Allega immagine (per modelli vision)`}
             onClick={async () => {
               const img = await api.pickImage()
               if (img) setImages([...images, img])
@@ -231,6 +245,9 @@ export function Chat() {
               <span className="absolute -top-1 -right-1 grid size-4 place-items-center rounded-full bg-primary text-[10px] text-primary-foreground">{images.length}</span>
             )}
           </button>
+          {noVision && (
+            <span className="shrink-0 self-center text-[10px] text-muted-foreground"><Trans>Questo modello non vede le immagini</Trans></span>
+          )}
           <textarea
             className="max-h-40 min-h-[44px] flex-1 resize-none rounded-xl bg-transparent px-3 py-2.5 text-sm outline-none placeholder:text-muted-foreground"
             placeholder={t`Scrivi a ${agent.name}…`}
