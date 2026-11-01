@@ -560,21 +560,37 @@ export async function probeViewportOffset(agentId: string): Promise<ViewportOffs
  * listener si installa una volta per documento. Misurato: un
  * `mousemove` vero di xdotool arriva alla pagina con clientX/clientY esatti;
  * `:hover` invece NON funziona sotto Playwright (mai usarlo). La funzione è la
- * stringa COSTANTE della spec.
+ * funzione è costruita dal daemon con una CHIAVE casuale per ogni sonda.
+ * Revisione di sicurezza: niente flag globale prevedibile (una pagina poteva
+ * pre-impostare `__sbHitArmed` e impedire la cattura, poi scrivere coordinate
+ * false), solo eventi `isTrusted` (niente mousemove sintetici), e il listener
+ * si toglie alla lettura. Limite noto: la sonda gira nel mondo della PAGINA
+ * (browser_evaluate di Playwright MCP), come le sonde del campo dalla fase 12 —
+ * una pagina ostile che riscrive le API del DOM può ancora ingannarla; il
+ * mondo isolato richiede CDP, che Playwright MCP non espone. Senza evento si
+ * va sul ripiego della formula, che fuori dai frame dà unknown → ask.
  */
-export const MOUSE_HIT_ARM_FN = `() => {
-  window.__sbHit = null;
-  if (!window.__sbHitArmed) {
-    window.__sbHitArmed = true;
-    addEventListener('mousemove', (e) => {
-      window.__sbHit = { x: e.clientX, y: e.clientY };
-    }, { capture: true });
-  }
+export function mouseHitArmFn(key: string): string {
+  return `() => {
+  const k = ${JSON.stringify(key)};
+  const h = (e) => { if (e.isTrusted) window[k] = { x: e.clientX, y: e.clientY } };
+  window[k] = null;
+  window[k + 'h'] = h;
+  addEventListener('mousemove', h, { capture: true });
   return 1
 }`
+}
 
-/** La lettura della sonda del punto: window.__sbHit (null = nessun evento). */
-export const MOUSE_HIT_READ_FN = '() => window.__sbHit'
+/** La lettura della sonda del punto (null = nessun evento); toglie il listener. */
+export function mouseHitReadFn(key: string): string {
+  return `() => {
+  const k = ${JSON.stringify(key)};
+  const v = window[k] ?? null;
+  if (window[k + 'h']) removeEventListener('mousemove', window[k + 'h'], { capture: true });
+  delete window[k]; delete window[k + 'h'];
+  return v
+}`
+}
 
 /**
  * Il descrittore di nome e ruolo di un elemento (fase 19a correzioni, L4):

@@ -24,7 +24,12 @@ const agent: Agent = {
   providerId: 'p', model: 'm', status: 'idle', unread: 0, createdAt: 1
 }
 
-beforeEach(() => { mode.v = 'host' })
+beforeEach(() => {
+  mode.v = 'host'
+  // fase 19a correzioni 2 (M1): i test del browser lo accendono qui e il
+  // reset in beforeEach vale anche se un test fallisce prima di riportarlo a false
+  browserOk.v = false
+})
 
 describe('fase 9 (punto 2): system prompt componibile', () => {
   it('ogni sezione è presente, una volta sola, nell\'ordine dichiarato', () => {
@@ -279,6 +284,62 @@ describe('fase 14 (punto 8): "Documents and credentials"', () => {
     expect(group).not.toContain('request_secure_input')
     // e nel prompt normale le righe ci sono
     expect(systemPrompt(agent)).toContain('fill_credential')
+  })
+})
+
+// ---- fase 19a correzioni 2 (M1): la regola del computer use nei prompt ----
+// Con il browser il login senza credenziale salvata lo fa l'UTENTE sullo
+// schermo del bot (request_takeover); request_secure_input resta per SALVARE
+// un login (o per le routine). Senza browser i testi non cambiano di un byte.
+
+describe('fase 19a correzioni 2 (M1): credenziali e presa di controllo', () => {
+  it('documentsCredentialsSection({ takeover: true }): le righe nuove, con request_takeover e «only when»', () => {
+    const s = documentsCredentialsSection({ takeover: true })
+    expect(s.startsWith('# Documents and credentials')).toBe(true)
+    expect(s).toContain('If no login is saved for the site, call request_takeover: the user signs in on your screen')
+    expect(s).toContain('Use request_secure_input only when the user asks to save the login, or when a routine will have to sign in by itself later')
+    expect(s).toContain('propose request_takeover (they sign in on your screen) or request_secure_input to save it')
+    // le altre regole della sezione non cambiano
+    expect(s).toContain('NEVER passwords, codes or keys in chat or in browser_type')
+    expect(s).toContain('save_contact')
+  })
+
+  it('documentsCredentialsSection({}) è IDENTICA a prima (stringa letterale della fase 14, byte per byte)', () => {
+    expect(documentsCredentialsSection({})).toBe(`# Documents and credentials
+- A report, a plan or a long text goes in write_document, NOT in the message: in the message one or two sentences about what you did (the card already shows the document), without a bullet-point summary. To modify it use edit_document with exact replacements.
+- Charts are made with visualize (Vega-Lite or Mermaid); files produced in the box that the user wants to keep go in save_to_library.
+- A new contact is saved only with save_contact (confirmation card).
+- For a login use list-credentials and fill_credential (the value goes from the vault to the field). NEVER passwords, codes or keys in chat or in browser_type: if they are missing, use request_secure_input.
+- If the user writes a password in chat, it is not used: propose request_secure_input to them.`)
+  })
+
+  it('col browser il prompt principale ha la regola nuova; SENZA browser non nomina mai request_takeover', () => {
+    // senza browser (il default del mock): la fase 14 resta com'era
+    const off = systemPrompt(agent)
+    expect(off).not.toContain('request_takeover')
+    expect(off).toContain('if they are missing, use request_secure_input')
+    // col browser: la riga del BROWSER e le righe delle credenziali cambiano
+    browserOk.v = true
+    const on = systemPrompt(agent)
+    expect(on).toContain('never bypass captchas or blocks yourself (call request_takeover, or report them)')
+    expect(on).toContain('If no login is saved for the site, call request_takeover: the user signs in on your screen')
+    expect(on).not.toContain('if they are missing, use request_secure_input')
+    // il budget di PROMPT_TOKEN_BUDGET è presidiato sulla variante SENZA
+    // browser (già così dalla 11b: la sezione browser la supera da sempre);
+    // qui si presidia il COSTO della regola nuova: le righe takeover pesano
+    // meno di ~65 token in più rispetto a quelle della fase 14
+    const delta = documentsCredentialsSection({ takeover: true }).length - documentsCredentialsSection().length
+    expect(delta).toBeGreaterThan(150) // c'è davvero la regola nuova
+    expect(delta / 4).toBeLessThanOrEqual(65)
+    browserOk.v = false
+  })
+
+  it('il prompt del figlio non nomina request_takeover nemmeno col browser acceso', () => {
+    browserOk.v = true
+    const child = subagentSystemPrompt(agent, { id: 'sub_ab12cd34', title: 't' })
+    expect(child).not.toContain('request_takeover')
+    expect(child).not.toContain('fill_credential')
+    browserOk.v = false
   })
 })
 

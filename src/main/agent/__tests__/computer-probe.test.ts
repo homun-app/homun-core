@@ -5,7 +5,11 @@
 // lettura → elemento, PRIMA dell'esecuzione dell'azione. Niente Docker, solo
 // 127.0.0.1 niente rete.
 import { describe, expect, it, afterEach } from 'vitest'
-import { elementAtPointFn, ACTIVE_FIELD_FN, MOUSE_HIT_ARM_FN, MOUSE_HIT_READ_FN } from '../browser'
+import { elementAtPointFn, ACTIVE_FIELD_FN, mouseHitArmFn, mouseHitReadFn } from '../browser'
+
+/** La sonda costruisce armo e lettura con una chiave casuale: si riconoscono dal corpo. */
+const isArm = (fn: string): boolean => fn.includes("addEventListener('mousemove'")
+const isRead = (fn: string): boolean => fn.includes("removeEventListener('mousemove'")
 import { computerActContextOf, computerExecAction, MOUSE_PROBE_WAIT_MS, type DesktopInfo } from '../computer'
 import { computerActRisk, type ComputerClickProbe } from '../browser-guard'
 import { setDockerRunnerForTests } from '../../sandbox'
@@ -122,18 +126,22 @@ const fakeDoc = (over: Partial<FakeDoc> = {}): Record<string, unknown> => {
 }
 
 /** Esegue una funzione di pagina (stringa) nel DOM finto: ritorno + listener registrati. */
-function runPageFn(src: string, doc: Partial<FakeDoc>, win?: Record<string, unknown>): { ret: Record<string, unknown> | null; listeners: Array<{ type: string; handler: (e: { clientX: number; clientY: number }) => void; opts: unknown }> } {
+function runPageFn(src: string, doc: Partial<FakeDoc>, win?: Record<string, unknown>): { ret: Record<string, unknown> | null; listeners: Array<{ type: string; handler: (e: { clientX: number; clientY: number }) => void; opts: unknown }>; removed: Array<{ type: string; handler: unknown }> } {
   const listeners: Array<{ type: string; handler: (e: { clientX: number; clientY: number }) => void; opts: unknown }> = []
+  const removed: Array<{ type: string; handler: unknown }> = []
   const addEventListener = (type: string, handler: (e: { clientX: number; clientY: number }) => void, opts: unknown): void => {
     listeners.push({ type, handler, opts })
   }
+  const removeEventListener = (type: string, handler: unknown): void => {
+    removed.push({ type, handler })
+  }
   const factory = new Function(
-    'document', 'location', 'window', 'addEventListener',
+    'document', 'location', 'window', 'addEventListener', 'removeEventListener',
     `"use strict"; return (${src});`
   )
-  const fn = factory(fakeDoc(doc), { origin: 'https://site.example' }, win ?? {}, addEventListener)
+  const fn = factory(fakeDoc(doc), { origin: 'https://site.example' }, win ?? {}, addEventListener, removeEventListener)
   const ret = fn()
-  return { ret: ret && typeof ret === 'object' ? (ret as Record<string, unknown>) : null, listeners }
+  return { ret: ret && typeof ret === 'object' ? (ret as Record<string, unknown>) : null, listeners, removed }
 }
 
 /** Il ritorno di una funzione di pagina come oggetto (o null). */
@@ -300,25 +308,34 @@ describe('fase 19a correzioni L6: ACTIVE_FIELD_FN vede anche i non-campo', () =>
 // ---- L3: la cattura one-shot del mousemove ----
 
 describe('fase 19a correzioni L3: la cattura one-shot del mousemove', () => {
-  it('MOUSE_HIT_ARM_FN installa la cattura (capture, UNA volta per documento, tiene l\'ULTIMO evento) e MOUSE_HIT_READ_FN legge le coordinate esatte', () => {
+  it('la cattura usa la chiave della sonda, solo eventi isTrusted, tiene l\'ULTIMO evento; la lettura toglie il listener', () => {
     const win: Record<string, unknown> = {}
-    const { listeners } = runPageFn(MOUSE_HIT_ARM_FN, {}, win)
-    expect(win.__sbHit).toBeNull()
+    const key = '__sbtest123'
+    const { listeners } = runPageFn(mouseHitArmFn(key), {}, win)
+    expect(win[key]).toBeNull()
     expect(listeners.length).toBe(1)
     expect(listeners[0]!.type).toBe('mousemove')
     expect(listeners[0]!.opts).toEqual({ capture: true })
-    // il mousemove vero di xdotool arriva con clientX/clientY esatti
-    // verifica: con due eventi vale l'ULTIMO (il punto vero), mai il primo
-    const handler = (listeners[0] as unknown as { handler: (e: { clientX: number; clientY: number }) => void }).handler
-    handler({ clientX: 379, clientY: 225 })
-    handler({ clientX: 380, clientY: 225 })
-    expect(win.__sbHit).toEqual({ x: 380, y: 225 })
-    // un secondo armo nello stesso documento azzera ma NON aggiunge listener
-    expect(runPageFn(MOUSE_HIT_ARM_FN, {}, win).listeners.length).toBe(0)
-    expect(win.__sbHit).toBeNull()
-    handler({ clientX: 380, clientY: 225 })
-    // e la lettura è la SOLA cosa che fa MOUSE_HIT_READ_FN
-    expect(pageObj(MOUSE_HIT_READ_FN, {}, win)).toEqual({ x: 380, y: 225 })
+    // revisione di sicurezza: nessun flag globale prevedibile
+    expect(Object.keys(win).some((k) => /armed/i.test(k))).toBe(false)
+    const handler = (listeners[0] as unknown as { handler: (e: { clientX: number; clientY: number; isTrusted?: boolean }) => void }).handler
+    // un mousemove SINTETICO della pagina non conta
+    handler({ clientX: 5, clientY: 5, isTrusted: false })
+    expect(win[key]).toBeNull()
+    // con due eventi veri vale l'ULTIMO (il punto vero), mai il primo
+    handler({ clientX: 379, clientY: 225, isTrusted: true })
+    handler({ clientX: 380, clientY: 225, isTrusted: true })
+    expect(win[key]).toEqual({ x: 380, y: 225 })
+    // un armo con un'ALTRA chiave non tocca questa
+    runPageFn(mouseHitArmFn('__sbaltra'), {}, win)
+    expect(win[key]).toEqual({ x: 380, y: 225 })
+    // la lettura restituisce il valore, toglie il listener e pulisce
+    const read = runPageFn(mouseHitReadFn(key), {}, win)
+    expect(read.ret).toEqual({ x: 380, y: 225 })
+    expect(read.removed).toEqual([{ type: 'mousemove', handler }])
+    expect(key in win).toBe(false)
+    // chiavi con caratteri strani restano stringhe JSON (nessuna iniezione)
+    expect(mouseHitArmFn('a"b')).toContain('"a\\"b"')
   })
 })
 
@@ -337,9 +354,9 @@ describe('fase 19a correzioni L3: computerActContextOf — cattura → doppio mo
       return { stdout: '', stderr: '', exitCode: 0, signal: null }
     })
     const evaluate = async (_agentId: string, fn: string): Promise<unknown> => {
-      calls.push(`eval ${fn.slice(0, 46)}`)
-      if (fn === MOUSE_HIT_ARM_FN) return 1
-      if (fn === MOUSE_HIT_READ_FN) return { x: 380, y: 225 } // evento vero: pagina (380,225)
+      calls.push(isArm(fn) ? 'eval arm' : isRead(fn) ? 'eval read' : `eval ${fn.slice(0, 46)}`)
+      if (isArm(fn)) return 1
+      if (isRead(fn)) return { x: 380, y: 225 } // evento vero: pagina (380,225)
       if (fn.startsWith('() => { const cut')) {
         return { kind: 'element', role: 'button', name: 'Acquista ora', text: '', field: null }
       }
@@ -354,10 +371,10 @@ describe('fase 19a correzioni L3: computerActContextOf — cattura → doppio mo
     })
     // cattura → mousemove DOPPIO (0,0 nella barra delle schede, poi 380) → attesa → lettura → elemento
     expect(calls).toEqual([
-      `eval ${MOUSE_HIT_ARM_FN.slice(0, 46)}`,
+      'eval arm',
       'docker xdotool mousemove -- 0 0 mousemove -- 380 312',
       `sleep ${MOUSE_PROBE_WAIT_MS}`,
-      `eval ${MOUSE_HIT_READ_FN.slice(0, 46)}`,
+      'eval read',
       `eval ${'() => { const cut = (s) => String(s == null ? '.slice(0, 46)}`
     ])
     expect(MOUSE_PROBE_WAIT_MS).toBe(150)
@@ -378,7 +395,7 @@ describe('fase 19a correzioni L3: computerActContextOf — cattura → doppio mo
       return { stdout: '', stderr: '', exitCode: 0, signal: null }
     })
     const evaluate = async (_agentId: string, fn: string): Promise<unknown> =>
-      fn === MOUSE_HIT_ARM_FN ? 1 : null // niente evento: si va di formula
+      isArm(fn) ? 1 : null // niente evento: si va di formula
     for (const [x, y] of [[0, 10], [0, 0], [301, 287]] as const) {
       await computerActContextOf('agent_x', { kind: 'click', x, y }, VIEW, {
         challenge: false, userControl: false, desktop: DESKTOP,
@@ -395,7 +412,7 @@ describe('fase 19a correzioni L3: computerActContextOf — cattura → doppio mo
 
   it('SENZA evento e punto fuori dal viewport → outside (formula di L2)', async () => {
     const evaluate = async (_agentId: string, fn: string): Promise<unknown> =>
-      fn === MOUSE_HIT_ARM_FN ? 1 : null
+      isArm(fn) ? 1 : null
     const ctx = await computerActContextOf('agent_x', { kind: 'click', x: 600, y: 40 }, VIEW, {
       challenge: false, userControl: false, desktop: DESKTOP,
       probe: { evaluate, sleep: async () => undefined }
@@ -405,8 +422,8 @@ describe('fase 19a correzioni L3: computerActContextOf — cattura → doppio mo
 
   it('senza evento, punto DENTRO: un frame è frame, qualunque altra cosa è unknown', async () => {
     const mkEvaluate = (element: unknown) => async (_agentId: string, fn: string): Promise<unknown> => {
-      if (fn === MOUSE_HIT_ARM_FN) return 1
-      if (fn === MOUSE_HIT_READ_FN) return null
+      if (isArm(fn)) return 1
+      if (isRead(fn)) return null
       return element
     }
     const frame = await computerActContextOf('agent_x', { kind: 'click', x: 300, y: 200 }, VIEW, {
@@ -429,14 +446,14 @@ describe('fase 19a correzioni L3: computerActContextOf — cattura → doppio mo
 
   it('senza evento e VIEW nulla → unknown; down e up passano dalla STESSA sonda, move no', async () => {
     const evaluate = async (_agentId: string, fn: string): Promise<unknown> =>
-      fn === MOUSE_HIT_ARM_FN ? 1 : null
+      isArm(fn) ? 1 : null
     const opts = { challenge: false, userControl: false, desktop: DESKTOP, probe: { evaluate, sleep: async () => undefined } }
     const noView = await computerActContextOf('agent_x', { kind: 'click', x: 300, y: 200 }, null, opts)
     expect(noView.click).toEqual({ kind: 'unknown' })
     // down e up: la sonda parte (cattura installata), move mai
     let armed = 0
     const evalCounting = async (_agentId: string, fn: string): Promise<unknown> => {
-      if (fn === MOUSE_HIT_ARM_FN) { armed++; return 1 }
+      if (isArm(fn)) { armed++; return 1 }
       return null
     }
     const optsCounting = { challenge: false, userControl: false, desktop: DESKTOP, probe: { evaluate: evalCounting, sleep: async () => undefined } }

@@ -15,7 +15,7 @@
 // BROWSER dove sta il puntatore (cattura one-shot del mousemove + doppio
 // mousemove di xdotool + lettura): il punto controllato e il punto colpito
 // coincidono; la formula dell'offset resta solo come ripiego.
-import { randomUUID } from 'node:crypto'
+import { randomUUID, randomBytes } from 'node:crypto'
 import {
   browserStateDir, dockerScreenCaptureArgv, dockerScreenGeometryArgv, dockerScreenDisplayReadArgv,
   dockerBrowserReadB64Argv, dockerBrowserRmFileArgv, dockerXdotoolArgv, BOX_CONTAINER
@@ -26,7 +26,7 @@ import {
   parseComputerActions, computerActionXdotoolArgs, type ComputerAction, type ComputerActContext,
   type ComputerClickProbe, type ActiveFocus, type FieldProbeInfo
 } from './browser-guard'
-import { evaluateInPage, elementAtPointFn, ACTIVE_FIELD_FN, probeViewportOffset, MOUSE_HIT_ARM_FN, MOUSE_HIT_READ_FN } from './browser'
+import { evaluateInPage, elementAtPointFn, ACTIVE_FIELD_FN, probeViewportOffset, mouseHitArmFn, mouseHitReadFn } from './browser'
 
 /** Il desktop del bot: display + Xauthority del proprietario (null = nessuno schermo). */
 export interface DesktopInfo {
@@ -169,8 +169,10 @@ async function probeClickPoint(
   probe: ComputerProbeDeps | undefined,
   evaluate: (agentId: string, fn: string) => Promise<unknown>
 ): Promise<ComputerClickProbe | null> {
-  // 1. la cattura one-shot (un fallimento qui si comporta come nessun evento)
-  await evaluate(agentId, MOUSE_HIT_ARM_FN)
+  // 1. la cattura, con una chiave casuale per QUESTA sonda (un fallimento qui
+  // si comporta come nessun evento)
+  const key = `__sb${randomBytes(9).toString('hex')}`
+  await evaluate(agentId, mouseHitArmFn(key))
   // 2. il doppio mousemove di xdotool,argv puri come 1001 (nessuna shell)
   // verifica: il pre-spostamento va nella barra delle schede, FUORI dalla
   // pagina (L2: finestra a 0,0 e barra alta 87 px) — un pre-spostamento a x−1
@@ -186,7 +188,7 @@ async function probeClickPoint(
   // 3. l'attesa dell'evento
   await (probe?.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms))))(MOUSE_PROBE_WAIT_MS)
   // 4. la lettura: le coordinate dell'evento sono QUELLE della pagina
-  const hit = await evaluate(agentId, MOUSE_HIT_READ_FN)
+  const hit = await evaluate(agentId, mouseHitReadFn(key))
   const h = hit && typeof hit === 'object' && !Array.isArray(hit) ? hit as Record<string, unknown> : null
   if (h && Number.isFinite(Number(h.x)) && Number.isFinite(Number(h.y))) {
     return elementProbe(agentId, Number(h.x), Number(h.y), evaluate)

@@ -652,7 +652,7 @@ export const toolDefs: ToolDef[] = [
   },
   {
     name: 'request_secure_input',
-    description: "Asks the user for sensitive data WITHOUT passing through chat: a card with a secure form (for a login: origin, username, password, optional TOTP; for a secret: name and value). The fields are encrypted and saved in the vault; you receive only the outcome (saved: login \"label\" (id) / secret NAME). Use it when a credential is missing, NEVER ask for passwords in chat.",
+    description: "Asks the user for sensitive data WITHOUT passing through chat: a card with a secure form (for a login: origin, username, password, optional TOTP; for a secret: name and value). The fields are encrypted and saved in the vault; you receive only the outcome (saved: login \"label\" (id) / secret NAME). Use it to SAVE a credential: when the user asks to save a login, or when a routine will need it later without the user. To sign in once on a site in your browser when no login is saved, call request_takeover instead (if available). NEVER ask for passwords in chat.",
     parameters: {
       type: 'object',
       properties: {
