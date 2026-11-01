@@ -1,6 +1,6 @@
 // State renderer: agenti, transcript dell'agente attivo, eventi dal main.
 import { create } from 'zustand'
-import type { Agent, TranscriptEntry, SandbotEvent, ProviderConfig, PermissionsConfig, ConnectorInfo, TaskInfo, GroupInfo, GroupMessageInfo, SubagentInfo, AgentAvatar, TurnEnd } from '../../shared/types'
+import type { Agent, TranscriptEntry, SandbotEvent, ProviderConfig, PermissionsConfig, ConnectorInfo, TaskInfo, GroupInfo, GroupMessageInfo, SubagentInfo, AgentAvatar, TurnEnd, ScreenStatus } from '../../shared/types'
 import type { UiTheme } from './theme'
 import { applyTheme, watchSystemTheme } from './theme'
 import { previewOf, type SidebarPreview } from './sidebar-utils'
@@ -78,6 +78,10 @@ interface Store {
   activeLanguage: UiLanguage
   /** pannello destro aperto (setting ui.rightPanel) */
   rightPanel: boolean
+  /** fase 19a (V4): pannello dello schermo del bot aperto, e in che modo */
+  botScreen: { open: boolean; mode: 'view' | 'control' }
+  /** fase 19a (V3.4): ultimo stato dello schermo per bot (evento screen) */
+  screenStatus: Record<string, ScreenStatus>
   /** fase 16 (U3): l'utente sta scrivendo nel composer di QUESTO bot */
   typingAgentId: string | null
   /** fase 16 (U3): ultimo delta per agente (testo in streaming → speaking) */
@@ -137,6 +141,8 @@ interface Store {
   /** fase 17a: lingua dell'interfaccia — si applica subito e resta nel setting */
   setUiLanguage(l: UiLanguageSetting): void
   setRightPanel(v: boolean): void
+  /** fase 19a (V4): apre/chiude il pannello dello schermo del bot */
+  setBotScreen(open: boolean, mode?: 'view' | 'control'): void
   /** fase 16 (U3): il composer di questo bot ha del testo (o no) */
   setTyping(agentId: string | null): void
   /** fase 16 (U5): apre/chiude i pannelli Memoria e Skill */
@@ -172,6 +178,8 @@ export const useStore = create<Store>((set, get) => ({
   uiLanguage: 'system',
   activeLanguage: 'it',
   rightPanel: true,
+  botScreen: { open: false, mode: 'view' },
+  screenStatus: {},
   typingAgentId: null,
   lastDeltaAt: {},
   lastSendAt: {},
@@ -330,6 +338,11 @@ export const useStore = create<Store>((set, get) => ({
         // fase 8 (§3bis L7): stato live — quale tool sta girando nel turno
         case 'activity': {
           set({ activity: { ...s.activity, [e.agentId]: e.activity } })
+          break
+        }
+        // fase 19a (V3.4): lo stato dello schermo di un bot è cambiato
+        case 'screen': {
+          set({ screenStatus: { ...s.screenStatus, [e.agentId]: e.status } })
           break
         }
         // fase 10: un gruppo o i suoi messaggi sono cambiati (sidebar + vista)
@@ -555,6 +568,11 @@ export const useStore = create<Store>((set, get) => ({
   setRightPanel(v) {
     set({ rightPanel: v })
     void api.settingsSet('ui.rightPanel', v).catch(() => undefined)
+  },
+
+  // fase 19a (V4): il pannello dello schermo del bot (vista o controllo)
+  setBotScreen(open, mode) {
+    set({ botScreen: { open, mode: mode ?? get().botScreen.mode } })
   },
 
   // fase 16 (U3): solo i cambiamenti di stato passano (niente set per tasto)

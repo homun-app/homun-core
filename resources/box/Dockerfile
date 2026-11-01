@@ -33,6 +33,31 @@ RUN mkdir -p /etc/sandbot \
       > /etc/sandbot/playwright-mcp.json \
  && chmod 644 /etc/sandbot/playwright-mcp.json
 
+# fase 19a (V1): il DESKTOP del bot — il browser principale gira HEADFUL su un
+# display Xvfb suo, visibile dall'utente in sola lettura via x11vnc su socket
+# unix (nessuna porta TCP nel container). Pacchetti, senza raccomandati:
+# - xvfb: il server X virtuale (display per bot, nessun window manager:
+#   c'è solo Chromium);
+# - x11vnc: la vista (sola lettura) e il secondo server della presa di
+#   controllo, entrambi su socket unix nella cartella 0700 di 1001;
+# - xauth: il cookie MIT-MAGIC-COOKIE del display (senza cookie la shell del
+#   bot, uid 1000, non si collega allo schermo del browser);
+# - xdotool: le azioni del computer use nel box (click, digitazione, tasti);
+# - imagemagick: `import -window root` cattura lo schermo per computer_observe;
+# - x11-utils: xdpyinfo, l'attesa che il display risponda nel wrapper.
+# Le liste di apt si puliscono nello STESSO layer; command -v fa FALLIRE la
+# build in modo chiaro se un binario manca.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      xvfb \
+      x11vnc \
+      xauth \
+      xdotool \
+      imagemagick \
+      x11-utils \
+ && rm -rf /var/lib/apt/lists/* \
+ && command -v Xvfb x11vnc xauth xdotool import xdpyinfo
+
 RUN npm install -g @playwright/mcp@0.0.83 \
  && PWCLI="$(npm root -g)/@playwright/mcp/node_modules/playwright/cli.js" \
  && node "$PWCLI" install chromium \

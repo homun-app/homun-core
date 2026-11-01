@@ -24,7 +24,8 @@ import type { ToolDef } from './llm'
 import { checkUrl } from './web-guard'
 import {
   refInfo, truncateSnapshot, snapshotChallenge, browserPageUrl, composeBrowserResult,
-  errorSection, fieldIsCredential, parseEvaluateResult, SNAPSHOT_BLOCKED_NOTE, type RefInfo, type FieldProbeInfo
+  errorSection, fieldIsCredential, parseEvaluateResult, parseEvaluateJson, SNAPSHOT_BLOCKED_NOTE,
+  type RefInfo, type FieldProbeInfo
 } from './browser-guard'
 import {
   dockerBrowserMcpArgv, BOX_CONTAINER, BROWSER_MOUNT, BROWSER_USER,
@@ -39,6 +40,11 @@ import {
 } from '../sandbox'
 import { ensureBrowserProxy } from './browser-proxy'
 import { parseShellPgid } from './shells'
+// fase 19a (V2): il timer di inattività si SOSPENDE mentre lo schermo del bot
+// è in uso (vista, controllo o richiesta di presa di controllo), e la chiusura
+// della sessione revoca connessioni e capability dello schermo. screen.ts
+// importa browser.ts SOLO dinamicamente: nessun ciclo statico.
+import { browserHoldMs, screenBrowserClosed } from './screen'
 import { randomUUID } from 'node:crypto'
 
 /** Il browser è disponibile? (docker + rete bridge; il flag di test attiva il percorso in host). */
@@ -215,24 +221,53 @@ export async function resetBrowserForTests(): Promise<void> {
     clearTimeout(s.closeTimer)
     await s.client.close().catch(() => undefined)
     sessions.delete(id)
+    screenBrowserClosed(id)
   }
 }
 
-/** Chiude l'istanza browser di un bot (idle, fine turno del daemon, test). */
+/** L'istanza browser (PRINCIPALE) di un bot è attiva? (fase 19a: screen:status). */
+export function isBrowserRunning(agentId: string): boolean {
+  return sessions.has(agentId)
+}
+
+/**
+ * Chiude l'istanza browser di un bot (idle, fine turno del daemon, test).
+ * Fase 19a (revoca): a OGNI chiusura le connessioni dello schermo di quel bot
+ * si chiudono e le capability non usate si invalidano (screenBrowserClosed è
+ * idempotente: la chiama anche l'onclose del trasporto).
+ */
 export async function closeBrowser(agentId: string): Promise<void> {
   const s = sessions.get(agentId)
   if (!s) return
   clearTimeout(s.closeTimer)
   sessions.delete(agentId)
+  screenBrowserClosed(agentId)
   await s.client.close().catch(() => undefined)
 }
 
 function touchSession(agentId: string, s: BrowserSession): void {
   s.lastActionAt = Date.now()
+  armCloseTimer(agentId, s)
+}
+
+/**
+ * La chiusura per inattività, lato nostro (10 minuti senza azioni; il server
+ * ha pure il suo --idle-timeout: due sveglie indipendenti). Fase 19a (V2): con
+ * lo schermo aperto quella chiusura la decide il daemon — il timer è SOSPESO
+ * mentre c'è una vista o un controllo aperto sullo schermo di quel bot, o una
+ * richiesta di presa di controllo in attesa; la sospensione dura al massimo
+ * 30 minuti, poi il browser si chiude comunque.
+ */
+function armCloseTimer(agentId: string, s: BrowserSession): void {
   clearTimeout(s.closeTimer)
-  // chiusura dopo 10 minuti senza azioni, lato nostro (il server ha pure
-  // --idle-timeout: due sveglie indipendenti)
   s.closeTimer = setTimeout(() => {
+    const hold = browserHoldMs(agentId, Date.now())
+    if (hold !== null) {
+      // sospeso: ci si riprova entro il resto della sospensione (o un minuto)
+      s.closeTimer = setTimeout(() => armCloseTimer(agentId, s), Math.min(hold, 60_000))
+      s.closeTimer.unref?.()
+      return
+    }
     void closeBrowser(agentId).catch(() => undefined)
   }, BROWSER_IDLE_MS)
   s.closeTimer.unref?.()
@@ -336,10 +371,13 @@ async function startBrowserSession(agentId: string): Promise<BrowserSession> {
   }
   // I4: il trasporto chiuso (server morto o idle timeout del server) toglie la
   // sessione dalla mappa e ferma il suo timer, subito — mai "Not connected"
-  // per i dieci minuti del timer nostro
+  // per i dieci minuti del timer nostro. Fase 19a: revoca anche dello schermo.
   client.onclose = () => {
     clearTimeout(session.closeTimer)
-    if (sessions.get(agentId) === session) sessions.delete(agentId)
+    if (sessions.get(agentId) === session) {
+      sessions.delete(agentId)
+      screenBrowserClosed(agentId)
+    }
   }
   sessions.set(agentId, session)
   touchSession(agentId, session)
@@ -441,6 +479,93 @@ export async function fieldIsCredentialRef(agentId: string, ref: string): Promis
   const probe = await probeFieldType(agentId, ref)
   return probe.ok ? fieldIsCredential(probe.info) : null
 }
+
+// ---- fase 19a (V2/V6): il desktop del bot e i probe del computer use ----
+
+/**
+ * Il browser del bot per lo SCHERMO (V3.1): avvio LAZY col percorso che già
+ * esiste e, se non c'è ancora una pagina nota, navigazione interna su
+ * about:blank perché il desktop mostri la finestra (la chiamata non passa dal
+ * gate del modello: la fa il daemon, come i probe).
+ */
+export async function ensureBrowserForScreen(agentId: string): Promise<void> {
+  const session = await getBrowserSession(agentId)
+  if (session.url) return
+  try {
+    await session.client.callTool({ name: 'browser_navigate', arguments: { url: 'about:blank' } })
+    session.url = 'about:blank'
+  } catch {
+    // il server non accetta la navigazione: il desktop resta com'è
+  }
+}
+
+/**
+ * La valutazione INTERNA nel contesto della pagina (fase 19a, V6): come
+ * probeFieldType ma per funzioni qualunque del daemon (mai del modello). Il
+ * result NON entra nel contesto del modello e non aggiorna lo snapshot.
+ * null su errore MCP o result non leggibile.
+ */
+export async function evaluateInPage(agentId: string, fn: string): Promise<unknown> {
+  try {
+    const session = await getBrowserSession(agentId)
+    const res = await session.client.callTool({ name: 'browser_evaluate', arguments: { function: fn } })
+    if ((res as { isError?: boolean }).isError) return null
+    return parseEvaluateJson(mcpText(res))
+  } catch {
+    return null
+  }
+}
+
+/**
+ * L'offset del viewport nella finestra (V6, decisione 3): window.screenX/screenY
+ * e l'altezza della barra (outerHeight - innerHeight). Il daemon lo calcola
+ * UNA volta per chiamata di computer_act.
+ */
+export const VIEWPORT_OFFSET_FN =
+  '() => ({ screenX: window.screenX, screenY: window.screenY, outerHeight: window.outerHeight, innerHeight: window.innerHeight, innerWidth: window.innerWidth })'
+
+/** La forma dell'offset del viewport (px, py = coordinate in pagina). */
+export interface ViewportOffset {
+  offX: number
+  offY: number
+  width: number
+  height: number
+}
+
+/** Il probe dell'offset del viewport → ViewportOffset (null = fallito). */
+export async function probeViewportOffset(agentId: string): Promise<ViewportOffset | null> {
+  const v = await evaluateInPage(agentId, VIEWPORT_OFFSET_FN)
+  if (!v || typeof v !== 'object') return null
+  const o = v as Record<string, unknown>
+  const nums = ['screenX', 'screenY', 'outerHeight', 'innerHeight', 'innerWidth'].map((k) => Number(o[k]))
+  if (nums.some((n) => !Number.isFinite(n))) return null
+  const [screenX, screenY, outerHeight, innerHeight, innerWidth] = nums as [number, number, number, number, number]
+  return {
+    offX: Math.round(screenX),
+    offY: Math.round(screenY + Math.max(outerHeight - innerHeight, 0)),
+    width: Math.round(innerWidth),
+    height: Math.round(innerHeight)
+  }
+}
+
+/**
+ * Il probe dell'elemento in un punto della pagina (V6): ruolo, nome accessibile
+ * e testo (per costruire il RefInfo del confine di computer_act) più il campo
+ * (il probe di fase 14, per i click su input). Le coordinate entrano come
+ * INTERI validati dal parser delle azioni: nessuna interpolazione pericolosa.
+ */
+export function elementAtPointFn(px: number, py: number): string {
+  return `() => { const el = document.elementFromPoint(${px}, ${py}); if (!el) return null;
+const t = el.tagName ? el.tagName.toLowerCase() : '';
+const role = (el.getAttribute && el.getAttribute('role')) || (t === 'a' ? 'link' : t === 'button' ? 'button' : t === 'select' ? 'combobox' : (t === 'textarea' || (t === 'input' && el.type !== 'hidden')) ? 'textbox' : 'generic');
+const name = ((el.getAttribute && el.getAttribute('aria-label')) || el.title || (el.innerText || '').trim()).slice(0, 120);
+const field = (t === 'input' || t === 'textarea') ? { type: el.type || '', autocomplete: el.autocomplete || '', name: el.name || '', id: el.id || '', placeholder: el.placeholder || '', label: Array.from(el.labels || []).map((l) => l.textContent || '').join(' '), aria: el.getAttribute('aria-label') || '', title: el.title || '', origin: location.origin, top: true } : null;
+return { role, name: name.trim(), text: (el.innerText || '').trim().slice(0, 120), field } }`
+}
+
+/** Il probe del campo ATTIVO (document.activeElement) per type e key (V6). */
+export const ACTIVE_FIELD_FN =
+  '() => { const el = document.activeElement; if (!el || el === document.body || el === document.documentElement) return null; const t = el.tagName ? el.tagName.toLowerCase() : ""; if (t !== "input" && t !== "textarea") return null; return { type: el.type || "", autocomplete: el.autocomplete || "", name: el.name || "", id: el.id || "", placeholder: el.placeholder || "", label: Array.from(el.labels || []).map((l) => l.textContent || "").join(" "), aria: el.getAttribute("aria-label") || "", title: el.title || "", origin: location.origin, top: true } }'
 
 /**
  * Esegue un tool del browser mappandolo sulla chiamata MCP (punto 2). I tool

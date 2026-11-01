@@ -128,10 +128,8 @@ async function main(): Promise<void> {
 
   // fase 12 (punto 1): il loop registra qui il suo interrupt, così deleteAgent
   // può fermare i figli di un padre eliminato
-  {
-    const loop = await import('../main/agent/loop')
-    store_setAgentStopper(loop.interrupt)
-  }
+  const loopMod = await import('../main/agent/loop')
+  store_setAgentStopper(loopMod.interrupt)
 
   // fase 12 (correzione J2): i lotti mai SIGILLATI (crash del padre a metà
   // turno) si sigillano ora — al boot nessun padre ha un turno in corso — e
@@ -188,6 +186,11 @@ async function main(): Promise<void> {
     token,
     // fase 6: i webhook dei trigger sulla stessa porta del ws (spec: porta del daemon)
     httpHandler: (req, res) => handleWebhook(req, res, { db: database, emit: (e) => broadcast(e), now: () => Date.now() }),
+    // fase 19a (V3.2): l'endpoint /screen/<cap> — il ponte binario col desktop
+    // del bot (la capability monouso la consuma il gestore)
+    onScreenUpgrade: (cap, req, socket, head) => {
+      void import('../main/agent/screen').then((m) => m.handleScreenUpgrade(cap, req, socket, head))
+    },
     onUiChange: (connected) => {
       if (connected) {
         bridge?.refreshScale()
@@ -202,6 +205,31 @@ async function main(): Promise<void> {
     }
   })
   bridge = attachHostBridge({ callUi: (m, p) => server.callUi(m, p), hasUi: () => server.hasUi() })
+
+  // fase 19a (V3): lo schermo del bot — capability monouso, ponte binario,
+  // richieste di presa di controllo. Le dipendenze del daemon si registrano
+  // QUI (dopo il server ws: serve la porta per l'URL delle capability); il
+  // flag di test SANDBOT_TEST_FAKE_SCREEN_SOCKET sostituisce docker exec con
+  // un socket unix locale del test.
+  {
+    const screen = await import('../main/agent/screen')
+    screen.initScreen({
+      emit: (e) => broadcast(e),
+      wsPort: server.port,
+      isBusy: (id) => loopMod.isRunning(id),
+      enqueueTurn: (agentId, text, initiator, extraMeta) => {
+        enqueueUserMessage(database, agentId, text, undefined, (e) => broadcast(e), undefined, initiator, extraMeta)
+        pokeWorker()
+      },
+      markTakeoverCard: (agentId, entryId, status) => {
+        const entry = getEntries(agentId).find((e) => e.id === entryId)
+        if (!entry) return
+        updateEntryMeta(entryId, { ...(entry.meta ?? {}), takeover: status })
+        const updated = getEntries(agentId).find((e) => e.id === entryId)
+        if (updated) broadcast({ type: 'entries', agentId, entries: [updated] })
+      }
+    })
+  }
 
   // fase 6 (§3bis L9): ultima notifica consegnata per agente (throttle 5 s)
   const lastNotified = new Map<string, number>()
@@ -382,6 +410,14 @@ async function main(): Promise<void> {
       const paused = presence.maybePauseForAway()
       if (paused > 0) console.log(`[sandbotd] utente assente: ${paused} routine in pausa (pausedForAway)`)
       deliverDueHeld(emit, now, () => presence.lastSeen())
+      // fase 19a (V3/V5): le scadenze dello schermo — capability non usate e
+      // richieste di presa di controllo oltre i 30 minuti
+      try {
+        const screen = await import('../main/agent/screen')
+        screen.tickScreen(Date.now())
+      } catch (e) {
+        console.error('[sandbotd] scadenze schermo:', e)
+      }
       // fase 11 (punto 3): il tick dei comandi in background (exit file comparsi
       // in docker, scadenza delle 6 ore) — le notifiche SHELL_DONE partono da qui
       void import('../main/agent/shells').then((m) => m.tickShellJobs()).catch((e) => console.error('[sandbotd] shell jobs:', e))

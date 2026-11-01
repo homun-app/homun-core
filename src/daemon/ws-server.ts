@@ -197,6 +197,14 @@ export function startWsServer(opts: {
    * risposto; false/undefined → la connessione viene chiusa come oggi.
    */
   httpHandler?: (req: IncomingMessage, res: ServerResponse) => boolean | Promise<boolean>
+  /**
+   * Fase 19a (V3.2): l'endpoint dello SCHERMO del bot. Gli upgrade WebSocket
+   * con percorso /screen/<cap> passano a questo gestore (il ponte binario con
+   * il socket unix del desktop); QUALUNQUE altro percorso resta il canale UI
+   * di oggi. Il gestore consuma la capability monouso e risponde da sé agli
+   * upgrade non validi.
+   */
+  onScreenUpgrade?: (cap: string, req: IncomingMessage, socket: Duplex, head: Buffer) => void
 }): Promise<WsRpcServer> {
   const host = opts.host ?? '127.0.0.1'
   const limits = {
@@ -219,6 +227,20 @@ export function startWsServer(opts: {
   })
 
   server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
+    // fase 19a (V3.2): /screen/<capability> è il ponte binario con il desktop
+    // del bot (capability monouso, la consuma il gestore); tutto il resto è il
+    // canale UI di sempre
+    const path = req.url ?? '/'
+    if (opts.onScreenUpgrade && path.startsWith('/screen/')) {
+      const cap = decodeURIComponent(path.slice('/screen/'.length))
+      if (!cap || cap.includes('/')) {
+        socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n')
+        socket.destroy()
+        return
+      }
+      opts.onScreenUpgrade(cap, req, socket, head)
+      return
+    }
     const key = req.headers['sec-websocket-key']
     if (!key) {
       socket.destroy()

@@ -4,6 +4,7 @@
 // Il nome del tool e il target arrivano dagli ARGOMENTI della chiamata, mai
 // dall'output del modello: la sidebar mostra "sta facendo X…" senza rischio
 // di mostrare testo iniettato.
+import { createHash } from 'node:crypto'
 
 /** Comando abbreviato su una riga (per la sidebar). */
 export function abbreviateCommand(cmd: string, max = 48): string {
@@ -25,6 +26,9 @@ export function activityOf(tool: string, input: Record<string, unknown>): { tool
   // fase 11b: il browser — l'URL per l'apertura, il ref per le azioni
   else if (tool === 'browser_open') target = String(input.url ?? '')
   else if (tool.startsWith('browser_')) target = String(input.ref ?? '')
+  // fase 19a: lo schermo del bot — il motivo della richiesta, il numero di azioni
+  else if (tool === 'request_takeover') target = abbreviateCommand(String(input.reason ?? ''))
+  else if (tool === 'computer_act') target = `${Array.isArray(input.actions) ? input.actions.length : 0} actions`
   return { tool, target }
 }
 
@@ -32,17 +36,37 @@ export function activityOf(tool: string, input: Record<string, unknown>): { tool
 export const TOOL_LOOP_REPEATS = 3
 
 /**
+ * La chiave di ripetizione di una chiamata (pura). Fase 19a (V6): per
+ * computer_act la chiave è l'HASH delle azioni — ripetere le STESSE azioni
+ * con formattazione diversa (spazi, observe, chiavi in altro ordine dentro
+ * gli oggetti è già normalizzato da JSON.stringify) con lo schermo che non
+ * cambia è comunque la stessa chiamata; la regola resta quella delle altre
+ * ripetizioni (3 di fila fermano il turno).
+ */
+export function repeatKeyOf(name: string, args: string): string {
+  if (name !== 'computer_act') return `${name}\u0000${args}`
+  try {
+    const parsed = JSON.parse(args || '{}') as { actions?: unknown }
+    return `computer_act\u0000${createHash('sha256').update(JSON.stringify(parsed.actions ?? null)).digest('hex')}`
+  } catch {
+    return `${name}\u0000${args}`
+  }
+}
+
+/**
  * Loop detection (§3bis L11, puro): la PROSSIMA chiamata sarebbe la terza
- * identica di fila (nome + argomenti identici) nello stesso turno? true = il
- * turno va fermato con una notice leggibile invece di consumare MAX_STEPS.
+ * identica di fila (stessa chiave di ripetizione: nome + argomenti, o l'hash
+ * delle azioni per computer_act) nello stesso turno? true = il turno va
+ * fermato con una notice leggibile invece di consumare MAX_STEPS.
  */
 export function isToolLoop(
   seq: Array<{ name: string; args: string }>,
   next: { name: string; args: string }
 ): boolean {
+  const key = repeatKeyOf(next.name, next.args)
   const last = seq.slice(-(TOOL_LOOP_REPEATS - 1))
   return last.length === TOOL_LOOP_REPEATS - 1 &&
-    last.every((c) => c.name === next.name && c.args === next.args)
+    last.every((c) => repeatKeyOf(c.name, c.args) === key)
 }
 
 /**

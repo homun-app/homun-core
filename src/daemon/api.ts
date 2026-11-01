@@ -246,6 +246,20 @@ export function buildApiMethods(
       loop.interrupt(agentId as string)
     },
 
+    // ---- fase 19a (V3): lo schermo del bot ----
+    'screen:open': async ([agentId, mode]) => {
+      const { screenOpen } = await import('../main/agent/screen')
+      return screenOpen(String(agentId ?? ''), mode === 'control' ? 'control' : 'view')
+    },
+    'screen:release': async ([agentId, note]) => {
+      const { screenRelease } = await import('../main/agent/screen')
+      return screenRelease(String(agentId ?? ''), typeof note === 'string' ? note : undefined)
+    },
+    'screen:status': async ([agentId]) => {
+      const { screenStatus } = await import('../main/agent/screen')
+      return screenStatus(String(agentId ?? ''))
+    },
+
     // ---- fase 3: risposta ai widget ask_user ----
     'widget:respond': ([agentId, entryId, value]) => {
       const widget = store.getEntries(agentId as string).find((e) => e.id === (entryId as number))

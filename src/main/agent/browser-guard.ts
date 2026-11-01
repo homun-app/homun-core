@@ -115,7 +115,7 @@ export type BrowserActionRisk =
 
 /** Il testo del deny sui campi con credenziali o dati di pagamento. */
 export const CREDENTIAL_DENY_TEXT =
-  'I NEVER type passwords, card data or credentials into a site: that step belongs to the user, or to the system with fill_credential if a login is saved for this site (find it with list-credentials).'
+  'I NEVER type passwords, card data or credentials into a site: that step belongs to the user, or to the system with fill_credential if a login is saved for this site (find it with list-credentials). When no login is saved, call request_takeover: the user signs in on your screen.'
 
 /**
  * La classificazione PURA del rischio di un'azione del browser (punto 2, I5 e
@@ -242,10 +242,12 @@ export function fieldIsCredential(info: FieldProbeInfo): boolean {
  * funzione, poi `### Ran Playwright code` col codice e `### Page` con le
  * righe della pagina. Il parser prende il testo dopo `### Result` fino alla
  * prima riga successiva che inizia con `### ` e fa JSON.parse. null se la
- * sezione non c'è o il corpo non è un oggetto (valutazione non leggibile: il
+ * sezione non c'è o il corpo non è JSON (valutazione non leggibile: il
  * chiamante in quel caso chiede all'utente, mai free).
+ * Fase 19a (V6): parseEvaluateJson è la forma GENERICA (la usa evaluateInPage
+ * per i probe del computer use); parseEvaluateResult la restringe al campo.
  */
-export function parseEvaluateResult(mcpResultText: string): FieldProbeInfo | null {
+export function parseEvaluateJson(mcpResultText: string): unknown {
   const lines = mcpResultText.split('\n')
   const start = lines.findIndex((l) => l.trim() === '### Result')
   if (start < 0) return null
@@ -255,18 +257,23 @@ export function parseEvaluateResult(mcpResultText: string): FieldProbeInfo | nul
     body.push(lines[i]!)
   }
   try {
-    const info = JSON.parse(body.join('\n')) as Partial<FieldProbeInfo>
-    // solo un oggetto è un campo: un array o un primitivo non sono leggibili
-    if (typeof info !== 'object' || info === null || Array.isArray(info)) return null
-    return {
-      type: String(info.type ?? ''), autocomplete: String(info.autocomplete ?? ''),
-      name: String(info.name ?? ''), id: String(info.id ?? ''),
-      placeholder: String(info.placeholder ?? ''), label: String(info.label ?? ''),
-      aria: String(info.aria ?? ''), title: String(info.title ?? ''),
-      origin: String(info.origin ?? ''), top: info.top === true
-    }
+    return JSON.parse(body.join('\n'))
   } catch {
     return null
+  }
+}
+
+/** Il result di browser_evaluate come FieldProbeInfo (null se non è un campo leggibile). */
+export function parseEvaluateResult(mcpResultText: string): FieldProbeInfo | null {
+  const info = parseEvaluateJson(mcpResultText) as Partial<FieldProbeInfo> | null
+  // solo un oggetto è un campo: un array o un primitivo non sono leggibili
+  if (typeof info !== 'object' || info === null || Array.isArray(info)) return null
+  return {
+    type: String(info.type ?? ''), autocomplete: String(info.autocomplete ?? ''),
+    name: String(info.name ?? ''), id: String(info.id ?? ''),
+    placeholder: String(info.placeholder ?? ''), label: String(info.label ?? ''),
+    aria: String(info.aria ?? ''), title: String(info.title ?? ''),
+    origin: String(info.origin ?? ''), top: info.top === true
   }
 }
 
@@ -313,9 +320,259 @@ export function snapshotChallenge(snapshotText: string): boolean {
   return CHALLENGE_SIGNATURES.some((s) => low.includes(s)) || challengeBlocked(200, snapshotText, snapshotText)
 }
 
-/** La nota del result quando lo snapshot contiene una sfida. */
+/**
+ * La nota del result quando lo snapshot contiene una sfida. Fase 19a (V5): le
+ * sfide NON si risolvono con computer_act — le risolve l'utente, che è una
+ * persona, sullo schermo del bot (request_takeover).
+ */
 export const SNAPSHOT_BLOCKED_NOTE =
-  'Page blocked by an anti-bot check: do NOT bypass it, report it to the user (the page cannot be read).'
+  'Page blocked by an anti-bot check: do NOT try to bypass it yourself. Call request_takeover so the user can solve it on your screen, or report it.'
+
+// ---- fase 19a (V6): computer use nel box — azioni, validazione e confine ----
+
+/** Un'azione di computer_act (fase 19a, V6): le stesse di Rakazo senza focus. */
+export type ComputerAction =
+  | { kind: 'click'; x: number; y: number; button?: 'left' | 'right'; double?: boolean }
+  | { kind: 'move'; x: number; y: number }
+  | { kind: 'down'; x: number; y: number }
+  | { kind: 'up'; x: number; y: number }
+  | { kind: 'type'; text: string }
+  | { kind: 'key'; key: string }
+  | { kind: 'scroll'; x?: number; y?: number; direction: 'up' | 'down' | 'left' | 'right'; amount?: number }
+  | { kind: 'wait'; ms: number }
+
+/** Al massimo 24 azioni in ordine per chiamata (come Rakazo). */
+export const COMPUTER_ACTIONS_MAX = 24
+
+/** Il testo di type al massimo 2000 caratteri (come Rakazo). */
+export const COMPUTER_TYPE_MAX_CHARS = 2000
+
+/** Il wait al massimo 5 secondi per azione. */
+export const COMPUTER_WAIT_MAX_MS = 5000
+
+/** Lo scroll: 1-20 tacche della rotella, default 3. */
+export const COMPUTER_SCROLL_DEFAULT = 3
+
+/**
+ * Il tasto di `key`, sintassi xdotool (`ctrl+l`, `Return`, `Tab`): permissiva
+ * MAI senza spazi né caratteri di controllo — un tasto è un argomento argv di
+ * xdotool, non una sequenza arbitraria.
+ */
+export const COMPUTER_KEY_RE = /^[A-Za-z0-9+_:.-]{1,64}$/
+
+/**
+ * La validazione PURA delle azioni di computer_act (V6): forma, tipi, coordinate
+ * DENTRO lo schermo (quando la geometria è nota), tasto senza spazi né
+ * caratteri di controllo, testo al massimo 2000 caratteri, wait ≤ 5 s, al
+ * massimo 24 azioni. Torna la lista tipizzata o il primo errore, in inglese
+ * per il modello.
+ */
+export function parseComputerActions(
+  raw: unknown,
+  screenSize: { width: number; height: number } | null
+): { ok: true; actions: ComputerAction[] } | { ok: false; error: string } {
+  if (!Array.isArray(raw) || raw.length === 0) return { ok: false, error: 'actions must be a non-empty array' }
+  if (raw.length > COMPUTER_ACTIONS_MAX) {
+    return { ok: false, error: `too many actions: at most ${COMPUTER_ACTIONS_MAX} per call` }
+  }
+  const actions: ComputerAction[] = []
+  const int = (v: unknown): number | null => (typeof v === 'number' && Number.isInteger(v) ? v : null)
+  for (let i = 0; i < raw.length; i++) {
+    const a = raw[i] as Record<string, unknown>
+    const at = `actions[${i}]`
+    if (!a || typeof a !== 'object' || typeof a.kind !== 'string') return { ok: false, error: `${at}: kind is required` }
+    const inScreen = (x: number, y: number): string | null => {
+      if (x < 0 || y < 0) return `${at}: negative coordinates are not valid`
+      if (screenSize && (x >= screenSize.width || y >= screenSize.height)) {
+        return `${at}: (${x}, ${y}) is outside the screen (${screenSize.width}x${screenSize.height})`
+      }
+      return null
+    }
+    switch (a.kind) {
+      case 'click': {
+        const x = int(a.x), y = int(a.y)
+        if (x === null || y === null) return { ok: false, error: `${at}: click needs integer x and y` }
+        const out = inScreen(x, y)
+        if (out) return { ok: false, error: out }
+        actions.push({ kind: 'click', x, y, ...(a.button === 'right' ? { button: 'right' } : {}), ...(a.double === true ? { double: true } : {}) })
+        break
+      }
+      case 'move':
+      case 'down':
+      case 'up': {
+        const x = int(a.x), y = int(a.y)
+        if (x === null || y === null) return { ok: false, error: `${at}: ${a.kind} needs integer x and y` }
+        const out = inScreen(x, y)
+        if (out) return { ok: false, error: out }
+        actions.push({ kind: a.kind, x, y })
+        break
+      }
+      case 'type': {
+        const text = typeof a.text === 'string' ? a.text : null
+        if (text === null) return { ok: false, error: `${at}: type needs text` }
+        if (text.length > COMPUTER_TYPE_MAX_CHARS) {
+          return { ok: false, error: `${at}: text is too long (at most ${COMPUTER_TYPE_MAX_CHARS} characters)` }
+        }
+        actions.push({ kind: 'type', text })
+        break
+      }
+      case 'key': {
+        const key = typeof a.key === 'string' ? a.key : ''
+        if (!COMPUTER_KEY_RE.test(key)) {
+          return { ok: false, error: `${at}: invalid key "${key.slice(0, 40)}" (xdotool syntax, e.g. ctrl+l, Return, Tab: no spaces)` }
+        }
+        actions.push({ kind: 'key', key })
+        break
+      }
+      case 'scroll': {
+        if (a.direction !== 'up' && a.direction !== 'down' && a.direction !== 'left' && a.direction !== 'right') {
+          return { ok: false, error: `${at}: scroll direction must be up, down, left or right` }
+        }
+        let x: number | undefined, y: number | undefined
+        if (a.x !== undefined || a.y !== undefined) {
+          const xi = int(a.x), yi = int(a.y)
+          if (xi === null || yi === null) return { ok: false, error: `${at}: scroll x and y must be integers together` }
+          const out = inScreen(xi, yi)
+          if (out) return { ok: false, error: out }
+          x = xi; y = yi
+        }
+        let amount = COMPUTER_SCROLL_DEFAULT
+        if (a.amount !== undefined) {
+          const n = int(a.amount)
+          if (n === null || n < 1 || n > 20) return { ok: false, error: `${at}: scroll amount must be an integer 1-20` }
+          amount = n
+        }
+        actions.push({ kind: 'scroll', ...(x !== undefined ? { x, y } : {}), direction: a.direction, amount })
+        break
+      }
+      case 'wait': {
+        const ms = int(a.ms)
+        if (ms === null || ms < 0 || ms > COMPUTER_WAIT_MAX_MS) {
+          return { ok: false, error: `${at}: wait ms must be an integer 0-${COMPUTER_WAIT_MAX_MS}` }
+        }
+        actions.push({ kind: 'wait', ms })
+        break
+      }
+      default:
+        return { ok: false, error: `${at}: unknown kind "${String(a.kind)}" (click, move, down, up, type, key, scroll, wait)` }
+    }
+  }
+  return { ok: true, actions }
+}
+
+/**
+ * La coda dell'argv xdotool di UN'azione (pura, V6): ogni azione diventa argv
+ * di xdotool passato a docker exec, senza shell; il testo di `type` va come
+ * argomento DOPO `--`. `wait` non ha argv (l'attesa la fa il daemon).
+ */
+export function computerActionXdotoolArgs(action: ComputerAction): string[] {
+  switch (action.kind) {
+    case 'click': {
+      const button = action.button === 'right' ? '3' : '1'
+      return [
+        'mousemove', '--', String(action.x), String(action.y),
+        'click', ...(action.double ? ['--repeat', '2', '--delay', '100'] : []), button
+      ]
+    }
+    case 'move':
+      return ['mousemove', '--', String(action.x), String(action.y)]
+    case 'down':
+      return ['mousemove', '--', String(action.x), String(action.y), 'mousedown', '1']
+    case 'up':
+      return ['mousemove', '--', String(action.x), String(action.y), 'mouseup', '1']
+    case 'type':
+      return ['type', '--clearmodifiers', '--', action.text]
+    case 'key':
+      return ['key', '--clearmodifiers', action.key]
+    case 'scroll': {
+      const button = action.direction === 'up' ? '4' : action.direction === 'down' ? '5' : action.direction === 'left' ? '6' : '7'
+      const click = ['click', '--repeat', String(action.amount ?? COMPUTER_SCROLL_DEFAULT), button]
+      return action.x !== undefined && action.y !== undefined
+        ? ['mousemove', '--', String(action.x), String(action.y), ...click]
+        : click
+    }
+    case 'wait':
+      return []
+  }
+}
+
+/** Il contesto che il daemon raccoglie per OGNI azione di computer_act (V6). */
+export interface ComputerActContext {
+  /** l'offset del viewport nella finestra (window.screenX/screenY + barra): null = probe fallito */
+  view: { offX: number; offY: number; width: number; height: number } | null
+  /** l'elemento sotto il punto del click (ruolo, nome, testo, campo): null = probe fallito o nessun elemento */
+  click: { role: string; name: string; text: string; field: FieldProbeInfo | null } | null
+  /** il campo attivo per type/key (document.activeElement): null = probe fallito */
+  activeField: FieldProbeInfo | null
+  /** l'ultimo snapshot noto della sessione contiene una sfida anti-bot */
+  challenge: boolean
+  /** l'utente ha in mano il controllo dello schermo di quel bot */
+  userControl: boolean
+}
+
+/** Il verdetto del confine di computer_act (V6): error = controllo utente in corso. */
+export type ComputerActRisk =
+  | { kind: 'free' }
+  | { kind: 'ask'; reason: string; ask: BrowserAskInfo }
+  | { kind: 'deny'; reason: string }
+  | { kind: 'error'; reason: string }
+
+/** Il deny quando l'utente ha in mano lo schermo (V6). */
+export const USER_CONTROL_ERROR_TEXT = 'the user is controlling your screen: wait for them to finish'
+
+/**
+ * Il confine PURA di OGNI azione di computer_act (fase 19a, decisione 3): un
+ * click a coordinate non aggira la classificazione del rischio di browser-guard.
+ * - controllo dell'utente in corso → error (nulla viene eseguito);
+ * - sfida anti-bot nell'ultimo snapshot noto → deny (la risolve l'utente);
+ * - click DENTRO la pagina: browserActionRisk('browser_click', …) sul RefInfo
+ *   costruito dall'elemento in quel punto (Acquista → ask, link → free);
+ * - click FUORI dalla pagina (barra degli indirizzi, schede) → ammesso (la
+ *   rete del browser passa comunque dal proxy);
+ * - type/key sul campo attivo: credenziali o pagamento → deny, Return/KP_Enter
+ *   → ask (come browser_press_key), il resto free;
+ * - probe non riuscito → ask, MAI free.
+ */
+export function computerActRisk(action: ComputerAction, ctx: ComputerActContext): ComputerActRisk {
+  if (ctx.userControl) return { kind: 'error', reason: USER_CONTROL_ERROR_TEXT }
+  if (ctx.challenge) return { kind: 'deny', reason: SNAPSHOT_BLOCKED_NOTE }
+  const probeAsk = (): ComputerActRisk => ({ kind: 'ask', reason: FIELD_PROBE_ASK_TEXT, ask: { kind: 'probe' } })
+  if (action.kind === 'click') {
+    // probe del viewport fallito: non si sa dove finisce la pagina → chiedere
+    if (!ctx.view) return probeAsk()
+    const px = action.x - ctx.view.offX
+    const py = action.y - ctx.view.offY
+    // fuori dal viewport della pagina: barra degli indirizzi, schede, bordi
+    if (px < 0 || py < 0 || px >= ctx.view.width || py >= ctx.view.height) return { kind: 'free' }
+    if (!ctx.click) return probeAsk()
+    const ref: RefInfo = { role: ctx.click.role, name: ctx.click.name, text: ctx.click.text }
+    // il ramo ref di browserActionRisk si accontenta di un ref ben formato:
+    // la VERITÀ qui è il RefInfo costruito dal probe del punto, non ciò che il
+    // modello dice dell'elemento (non esistono ref nel computer use)
+    const risk = browserActionRisk('browser_click', { ref: 'screen' }, ref)
+    if (risk.kind === 'free') return risk
+    if (risk.kind === 'deny') return { kind: 'deny', reason: risk.reason }
+    return risk
+  }
+  if (action.kind === 'type') {
+    if (!ctx.activeField) return probeAsk()
+    if (fieldIsCredential(ctx.activeField)) return { kind: 'deny', reason: CREDENTIAL_DENY_TEXT }
+    return { kind: 'free' }
+  }
+  if (action.kind === 'key') {
+    if (!ctx.activeField) return probeAsk()
+    if (fieldIsCredential(ctx.activeField)) return { kind: 'deny', reason: CREDENTIAL_DENY_TEXT }
+    if (action.key === 'Return' || action.key === 'KP_Enter') {
+      return {
+        kind: 'ask',
+        reason: 'Enter can submit the form (like browser_type with submit: true): if a form is filled in, this sends it',
+        ask: { kind: 'enter' }
+      }
+    }
+    return { kind: 'free' }
+  }
+  return { kind: 'free' }
+}
 
 // ---- troncamento dello snapshot al modello ----
 

@@ -683,6 +683,67 @@ export const toolDefs: ToolDef[] = [
 ]
 
 /**
+ * Fase 19a (V5/V6/V7): i tool dello SCHERMO del bot — il computer NEL BOX
+ * (dove gira il suo browser), da non confondere con use-app che controlla il
+ * MAC dell'utente. Offerti SOLO dove esiste il browser (il loop li aggiunge
+ * insieme ai browser_*): senza desktop non hanno senso. request_takeover è
+ * per TUTTI i modelli (anche senza visione); computer_observe e computer_act
+ * restituiscono un'immagine e vengono tolti quando la visione è falsa.
+ */
+export const computerToolDefs: ToolDef[] = [
+  {
+    name: 'request_takeover',
+    description:
+      'Ask the user to take over your screen for logins, passwords, 2FA codes, CAPTCHA or anti-bot checks, payments, or other steps a human must do. The turn ends; when the user is done you get a message and can continue. Never ask the user to paste passwords or codes in chat.',
+    parameters: {
+      type: 'object',
+      properties: {
+        reason: { type: 'string', description: 'Short reason shown to the user (e.g. "login needed on example.com")' }
+      },
+      required: ['reason']
+    }
+  },
+  {
+    name: 'computer_observe',
+    description:
+      "Captures the current screen of YOUR OWN computer in the sandbox (where your browser runs — NOT the user's Mac, that is use-app): returns the screen size and the image. Look at it before coordinate-based actions with computer_act.",
+    parameters: { type: 'object', properties: {}, required: [] }
+  },
+  {
+    name: 'computer_act',
+    description:
+      "Performs up to 24 ordered actions on the screen of YOUR OWN computer in the sandbox (NOT the user's Mac): click {x, y, button?, double?}, move, down, up, type {text}, key {key, xdotool syntax like ctrl+l or Return}, scroll {direction, amount?, x?, y?}, wait {ms}. Coordinates are pixels of the screenshot from computer_observe. Ends with a fresh screenshot unless observe: false. Actions that click something that buys, sends or commits ask the user first; typing into password or card fields is refused (call request_takeover).",
+    parameters: {
+      type: 'object',
+      properties: {
+        actions: {
+          type: 'array',
+          description: 'The actions in order',
+          items: {
+            type: 'object',
+            properties: {
+              kind: { type: 'string', enum: ['click', 'move', 'down', 'up', 'type', 'key', 'scroll', 'wait'], description: 'Action kind' },
+              x: { type: 'number', description: 'X in screen pixels (click/move/down/up/scroll)' },
+              y: { type: 'number', description: 'Y in screen pixels (click/move/down/up/scroll)' },
+              button: { type: 'string', enum: ['left', 'right'], description: 'Mouse button (click)' },
+              double: { type: 'boolean', description: 'Double click (click)' },
+              text: { type: 'string', description: 'Text to type (type), max 2000 characters' },
+              key: { type: 'string', description: 'Key or combo in xdotool syntax (key), e.g. ctrl+l, Return, Tab' },
+              direction: { type: 'string', enum: ['up', 'down', 'left', 'right'], description: 'Scroll direction' },
+              amount: { type: 'number', description: 'Wheel notches 1-20 (scroll, default 3)' },
+              ms: { type: 'number', description: 'Milliseconds to wait (wait), max 5000' }
+            },
+            required: ['kind']
+          }
+        },
+        observe: { type: 'boolean', description: 'True (default) to capture the screen at the end' }
+      },
+      required: ['actions']
+    }
+  }
+]
+
+/**
  * Fase 12 (punto 3): wake_parent NON sta in toolDefs — esiste solo nel turno
  * del FIGLIO (il loop lo aggiunge alla lista del figlio; nel padre non
  * compare e, se chiamato, riceve il rifiuto).

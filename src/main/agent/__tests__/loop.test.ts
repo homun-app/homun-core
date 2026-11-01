@@ -5210,3 +5210,137 @@ describe('fase 18b K7: le riserve incompatibili si saltano (senza raffreddarle)'
     }
   })
 })
+
+// ---- fase 19a (V5/V7): request_takeover, i tool del computer use e la visione ----
+
+describe('fase 19a (V5): request_takeover — la presa di controllo chiesta dal bot', async () => {
+  // le dipendenze dello schermo, registrare per le asserzioni (orologio finto)
+  const screenLog = { turns: [] as Array<{ agentId: string; text: string; initiator: string }>, cards: [] as Array<{ agentId: string; entryId: number; status: string }>, now: 1_000_000 }
+  const screen = await import('../screen')
+  const { REQUEST_TAKEOVER_RESULT } = await import('../loop')
+  const { TAKEOVER_DONE_TEXT } = screen
+
+  const initTestScreen = (): void => {
+    screen.initScreen({
+      emit: () => undefined,
+      wsPort: 0,
+      isBusy: () => false,
+      enqueueTurn: (agentId, text, initiator) => { screenLog.turns.push({ agentId, text, initiator }) },
+      markTakeoverCard: (agentId, entryId, status) => {
+        screenLog.cards.push({ agentId, entryId, status })
+        const e = h.db.entries.find((x) => x.id === entryId)
+        if (e) e.meta = { ...e.meta, takeover: status }
+      },
+      now: () => screenLog.now
+    })
+  }
+
+  beforeEach(() => {
+    screen.resetScreenForTests()
+    screenLog.turns.length = 0
+    screenLog.cards.length = 0
+    screenLog.now = 1_000_000
+    initTestScreen()
+    browserState.available = true
+  })
+
+  const takeoverCard = () => h.db.entries.find(
+    (e) => e.kind === 'send-message' && (e.meta?.message as { type?: string } | undefined)?.type === 'takeover-request'
+  )
+
+  it('request_takeover → card takeover-request col motivo, turno AWAITING_USER, takeoverPending', async () => {
+    h.llm.queue = [{ toolCalls: [{ id: 'tk1', name: 'request_takeover', arguments: JSON.stringify({ reason: 'login su sito.example' }) }] }]
+    await runTurn(AGENT, 'compila il modulo sul sito', emit)
+    // la card in chat col motivo e lo stato pending
+    const card = takeoverCard()
+    expect(card).toBeTruthy()
+    expect((card!.meta!.message as { reason: string }).reason).toBe('login su sito.example')
+    expect(card!.meta!.takeover).toBe('pending')
+    // il turno è FINITO in attesa dell'utente (come ask_user)
+    expect(h.db.entries.some((e) => e.meta?.turnEnd === 'AWAITING_USER')).toBe(true)
+    // il daemon ha segnato takeoverPending (30 minuti)
+    expect(screen.takeoverPendingOf(AGENT)).toEqual({ reason: 'login su sito.example' })
+    // la tool-call è nel transcript (come ask_user, il turno finisce lì: il
+    // result fisso lo rileggerà alla ripresa della storia)
+    expect(h.db.entries.some((e) => e.kind === 'tool-call' && e.content === 'request_takeover')).toBe(true)
+    void REQUEST_TAKEOVER_RESULT
+  })
+
+  it('screen:release con NOTA → card «Fatto» e NUOVO turno col messaggio costante e la nota delimitata', async () => {
+    h.llm.queue = [{ toolCalls: [{ id: 'tk2', name: 'request_takeover', arguments: JSON.stringify({ reason: 'captcha' }) }] }]
+    await runTurn(AGENT, 'leggi la pagina', emit)
+    const card = takeoverCard()!
+    await screen.screenRelease(AGENT, 'ho risolto la verifica')
+    // la ripresa: messaggio costante + nota dell\'utente delimitata
+    expect(screenLog.turns).toEqual([{
+      agentId: AGENT,
+      text: TAKEOVER_DONE_TEXT + '\n\n<nota_utente>\nho risolto la verifica\n</nota_utente>',
+      initiator: 'TAKEOVER_DONE'
+    }])
+    // la card passa a «Fatto»
+    expect(screenLog.cards).toEqual([{ agentId: AGENT, entryId: card.id, status: 'done' }])
+    expect(screen.takeoverPendingOf(AGENT)).toBeNull()
+  })
+
+  it('dopo 30 minuti la richiesta SCADDE: card «Scaduta», niente nuovo turno', async () => {
+    h.llm.queue = [{ toolCalls: [{ id: 'tk3', name: 'request_takeover', arguments: JSON.stringify({ reason: '2FA' }) }] }]
+    await runTurn(AGENT, 'accedi', emit)
+    const card = takeoverCard()!
+    screenLog.now += 30 * 60_000 + 1
+    screen.tickScreen(screenLog.now)
+    expect(screen.takeoverPendingOf(AGENT)).toBeNull()
+    expect(screenLog.cards).toEqual([{ agentId: AGENT, entryId: card.id, status: 'expired' }])
+    expect(screenLog.turns).toEqual([]) // scaduta NON riapre il turno
+  })
+
+  it('senza browser il tool è rifiutato col result del browser non disponibile', async () => {
+    browserState.available = false
+    h.llm.queue = [
+      { toolCalls: [{ id: 'tk4', name: 'request_takeover', arguments: JSON.stringify({ reason: 'x' }) }] },
+      { toolCalls: [{ id: 'tk5', name: 'send_to_user', arguments: JSON.stringify({ text: 'non posso' }) }] }
+    ]
+    await runTurn(AGENT, 'fai il login', emit)
+    expect(h.llm.calls.some((msgs) => msgs.some((m) => m.role === 'tool' && m.content.includes('requires docker mode')))).toBe(true)
+    expect(takeoverCard()).toBeUndefined()
+  })
+
+  it('V7: visione FALSA → computer_observe/computer_act ASSENTI dai tool, request_takeover C\'È; con vision null ci sono tutti', async () => {
+    browserState.available = true
+    const seen: string[][] = []
+    const origQueue = h.llm.queue
+    const capture = (): void => {
+      h.llm.queue = [
+        (_msgs: unknown, tools: unknown): FakeResp => {
+          seen.push((tools as Array<{ name: string }>).map((t) => t.name))
+          return { text: 'ok' }
+        }
+      ]
+    }
+    // vision SCONOSCIUTA (m1 non è nel catalogo): tutti e tre offerti
+    capture()
+    await runTurn(AGENT, 'ciao', emit)
+    expect(seen[0]!.some((n) => n === 'computer_observe')).toBe(true)
+    expect(seen[0]!.some((n) => n === 'computer_act')).toBe(true)
+    expect(seen[0]!.some((n) => n === 'request_takeover')).toBe(true)
+    // vision FALSA (modello di catalogo groq): i due computer_* spariscono,
+    // request_takeover resta (è testuale)
+    seen.length = 0
+    h.db.providers.push({ id: 'prov', enabled: true, kind: 'groq' })
+    h.db.agents.get(AGENT)!.model = 'llama-3.3-70b-versatile'
+    capture()
+    await runTurn(AGENT, 'ciao', emit)
+    h.llm.queue = origQueue
+    expect(seen[0]!.some((n) => n === 'computer_observe')).toBe(false)
+    expect(seen[0]!.some((n) => n === 'computer_act')).toBe(false)
+    expect(seen[0]!.some((n) => n === 'request_takeover')).toBe(true)
+    // senza browser NON compaiono affatto (nemmeno request_takeover)
+    seen.length = 0
+    browserState.available = false
+    capture()
+    await runTurn(AGENT, 'ciao', emit)
+    h.llm.queue = origQueue
+    expect(seen[0]!.some((n) => n === 'computer_observe')).toBe(false)
+    expect(seen[0]!.some((n) => n === 'computer_act')).toBe(false)
+    expect(seen[0]!.some((n) => n === 'request_takeover')).toBe(false)
+  })
+})

@@ -251,6 +251,17 @@ export type SendMessagePayload =
       /** proposta nata in un turno contaminato: avviso in card */
       untrusted?: true
     }
+  | {
+      /**
+       * Fase 19a (V5): il bot chiede all'utente di prendere il controllo del
+       * SUO schermo (login, 2FA, CAPTCHA, pagamento). Il turno finisce in
+       * attesa; il bottone «Apri lo schermo» apre il pannello già in controllo
+       * e «Ho finito» (screen:release) riapre il turno del bot.
+       */
+      type: 'takeover-request'
+      /** il motivo breve scritto dal bot (dato, mostrato com'è) */
+      reason: string
+    }
 
 /**
  * meta di una entry 'send-message':
@@ -288,6 +299,11 @@ export interface SendMessageMeta {
   ruleStatus?: 'added' | 'dismissed'
   /** fase 8 (§3bis L7): l'entry appartiene al sotto-transcript di questo task */
   taskId?: number
+  /**
+   * Fase 19a (V5): stato della card takeover-request — 'pending' alla
+   * richiesta, 'done' quando l'utente ha finito, 'expired' dopo 30 minuti.
+   */
+  takeover?: 'pending' | 'done' | 'expired'
 }
 
 export interface TranscriptEntry {
@@ -492,6 +508,19 @@ export type SandbotEvent =
   | { type: 'groups' }
   // fase 12: lo stato di un sottoagente di questo padre è cambiato (card + pannello)
   | { type: 'subagents'; parentId: string }
+  // fase 19a (V3.4): lo stato dello SCHERMO di un bot è cambiato (browser
+  // aperto/chiuso, controllo attivo, richiesta di presa di controllo in attesa)
+  | { type: 'screen'; agentId: string; status: ScreenStatus }
+
+/** Lo stato dello schermo di un bot per la UI (fase 19a, RPC screen:status). */
+export interface ScreenStatus {
+  /** il browser principale del bot (col desktop) è attivo? */
+  browser: 'running' | 'stopped'
+  /** l'utente ha in questo momento il controllo dello schermo del bot */
+  control: boolean
+  /** richiesta di presa di controllo in attesa (scade dopo 30 minuti) */
+  takeoverPending: { reason: string } | null
+}
 
 export interface SandbotApi {
   // agenti e transcript
@@ -577,6 +606,15 @@ export interface SandbotApi {
   // fase 12: sottoagenti del padre (card + pannello) e bottone Ferma
   listSubagents(parentId: string): Promise<SubagentInfo[]>
   stopSubagent(id: string): Promise<void>
+  /**
+   * Fase 19a (V3): lo schermo del bot. screen:open avvia il browser (lazy) e
+   * torna l'URL WebSocket con una capability MONOUSO (scade in 30 s); con
+   * mode 'control' su bot occupato risponde rpcScreenBotBusy. screen:release
+   * chiude il controllo (e riapre il turno se c'era una richiesta in attesa).
+   */
+  screenOpen(agentId: string, mode: 'view' | 'control'): Promise<{ url: string }>
+  screenRelease(agentId: string, note?: string): Promise<{ ok: boolean }>
+  screenStatus(agentId: string): Promise<ScreenStatus>
   // memoria (fase 4): sezione nella vista dell'agente, modifica ed eliminazione
   listMemories(agentId: string): Promise<MemoryInfo[]>
   updateMemory(agentId: string, id: string, content: string): Promise<void>

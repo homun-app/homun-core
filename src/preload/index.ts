@@ -14,6 +14,10 @@ const api: SandbotApi = {
   sendMessage: (agentId, text, images) => ipcRenderer.invoke('chat:send', agentId, text, images),
   interrupt: (agentId) => ipcRenderer.invoke('chat:interrupt', agentId),
   widgetRespond: (agentId, entryId, value) => ipcRenderer.invoke('widget:respond', agentId, entryId, value),
+  // fase 19a: lo schermo del bot (vista dal vivo, presa di controllo, stato)
+  screenOpen: (agentId, mode) => ipcRenderer.invoke('screen:open', agentId, mode),
+  screenRelease: (agentId, note) => ipcRenderer.invoke('screen:release', agentId, note),
+  screenStatus: (agentId) => ipcRenderer.invoke('screen:status', agentId),
   draftSend: (agentId, entryId, body) => ipcRenderer.invoke('draft:send', agentId, entryId, body),
   draftDiscard: (agentId, entryId) => ipcRenderer.invoke('draft:discard', agentId, entryId),
   draftUpdate: (agentId, entryId, body) => ipcRenderer.invoke('draft:update', agentId, entryId, body),

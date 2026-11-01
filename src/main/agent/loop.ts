@@ -17,7 +17,7 @@
 // arrivano solo le entry 'send-message' create da send_to_user / ask_user /
 // draft_external. Ogni turno si chiude con un evento meta.turnEnd ∈
 // FINISHED | STOPPED | SUPERSEDED | AWAITING_USER.
-import { randomUUID } from 'node:crypto'
+import { randomUUID, createHash } from 'node:crypto'
 import { getAgent, listAgents, listRoutines, getEntries, updateAgent, appendEntry, updateEntryContent, updateEntryMeta, getSetting, holdOutboxEntry, db, getTask, createTask, updateTask, openTasksOf, MAX_OPEN_TASKS, listProviders, createAgent, subagentRefusal, addGrant, listGrants, recordModelUsage, type Grant, type AppendEntry } from '../store/db'
 import { llmStream, type ChatMessage, type ToolCall } from './llm'
 import { systemPrompt, secondaryPrompts, mainAgentSection, withLanguage } from './prompts'
@@ -162,6 +162,13 @@ export const RECOVERY_NUDGE =
 export const ASK_USER_RESULT =
   'widget shown to the user: the turn ends and the answer will arrive as a new user message. Do not repeat the question.'
 export const WAKE_PARENT_RESULT = 'Delivered to the parent. You are done: do nothing else.'
+/**
+ * Fase 19a (V5): il result fisso di request_takeover — il turno FINISCE
+ * (come ask_user); quando l'utente preme «Ho finito» arriva un nuovo messaggio
+ * col testo costante TAKEOVER_DONE_TEXT (exportato per l'eval, come questi).
+ */
+export const REQUEST_TAKEOVER_RESULT =
+  'the user has been asked to take over your screen: your turn ends here. When they are done you receive a message and can continue. Never ask the user to paste passwords or codes in chat.'
 
 type Emitter = (e: SandbotEvent) => void
 
@@ -270,6 +277,8 @@ function appendSend(
     : message.type === 'fill' ? ui(UI.cardFill, { label: message.label, origin: message.origin })
     : message.type === 'secure-input' ? ui(UI.cardSecureInput, { reason: message.reason })
     : message.type === 'contact' ? ui(UI.cardContact, { name: message.name })
+    // fase 19a (V5): la card della presa di controllo chiesta dal bot
+    : message.type === 'takeover-request' ? ui(UI.cardTakeover, { reason: message.reason.slice(0, 120) })
     : null
   const content = message.type === 'text' ? message.text
     : message.type === 'widget' ? message.prompt
@@ -279,6 +288,7 @@ function appendSend(
     : message.type === 'rule' ? message.text
     : message.type === 'document' ? message.title
     : message.type === 'chart' ? message.title
+    : message.type === 'takeover-request' ? message.reason
     : cardUi ? formatUi(cardUi, loopUiLanguage())
     : 'subject' in message ? (message.subject || message.to || '') : ''
   const entry = appendEntry({
@@ -985,7 +995,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     // serversForAgent; un figlio eredita dal padre); sopra
     // connectors.maxInlineTools si DEFERISCONO: niente schemi MCP nel prompt,
     // la sezione "Connettori attivi" e il tool find_tools al loro posto
-    const { toolDefs } = await import('./tools')
+    const { toolDefs, computerToolDefs } = await import('./tools')
     let allTools = toolDefs
     let mcpToolDefs: import('./llm').ToolDef[] = []
     try {
@@ -1011,10 +1021,12 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       ]
     }
     // fase 11b (punto 2): i tool del browser compaiono SOLO quando il browser
-    // è disponibile (docker + rete bridge): in host il modello non li vede
+    // è disponibile (docker + rete bridge): in host il modello non li vede.
+    // fase 19a (V7): anche i tre dello SCHERMO (request_takeover,
+    // computer_observe, computer_act) esistono solo dove esiste il browser
     try {
       const { browserToolDefs, browserAvailable } = await import('./browser')
-      if (browserAvailable()) allTools = [...allTools, ...browserToolDefs]
+      if (browserAvailable()) allTools = [...allTools, ...browserToolDefs, ...computerToolDefs]
     } catch {
       // browser non disponibile: prosegue senza
     }
@@ -1159,9 +1171,12 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     // (l'unico tool che restituisce images) non viene offerto. Con vision
     // sconosciuta (null) tutto resta come prima. Se la riserva cambia modello
     // a metà turno la lista non si tocca: un'eventuale chiamata riceve
-    // l'errore inglese al momento dell'esecuzione (giù, nel gate dei tool)
+    // l'errore inglese al momento dell'esecuzione (giù, nel gate dei tool).
+    // fase 19a (V7): computer_observe e computer_act restituiscono IMMAGINI
+    // dello schermo del bot → stessa regola di use-app; request_takeover è
+    // testuale e resta per TUTTI i modelli
     if (modelCapabilities(activeProvider, activeRoute.model).vision === false) {
-      allTools = allTools.filter((t) => t.name !== 'use-app')
+      allTools = allTools.filter((t) => t.name !== 'use-app' && t.name !== 'computer_observe' && t.name !== 'computer_act')
     }
     // fase 18b (H4): il turno parte con IMMAGINI e il modello del turno ha
     // visione conosciuta FALSA → notice per l'utente. Il segnaposto di pi-ai
@@ -1205,6 +1220,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     let finished = false
     // fase 8 (§3bis L11): le tool call eseguite nel turno, per la loop detection
     const executedCalls: Array<{ name: string; args: string }> = []
+    // fase 19a (V6): l'hash dell'ultimo screenshot dello schermo del bot mandato
+    // in QUESTO turno — identico → niente immagine, il result lo dice
+    let lastScreenHash: string | null = null
 
     for (let step = 0; step < MAX_STEPS; step++) {
       if (controller.signal.aborted) break
@@ -1583,6 +1601,37 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           break // il turno TERMINA: le chiamate successive della stessa risposta non vengono eseguite
         }
 
+        // fase 19a (V5): la presa di controllo CHIESTA DAL BOT — come ask_user,
+        // una card nella chat chiude il turno (awaitingUser). Il daemon segna
+        // takeoverPending (30 minuti): la sfida, il login o il 2FA li risolve
+        // l'UTENTE sullo schermo del bot, che è una persona. Vale anche nei
+        // turni automatici: il bot aspetta.
+        if (call.name === 'request_takeover') {
+          emit({ type: 'activity', agentId, activity: activityOf(call.name, input) })
+          const tEntry = add({
+            agentId, kind: 'tool-call', role: 'assistant', content: call.name,
+            meta: { id: call.id, name: call.name, arguments: call.arguments }
+          })
+          emit({ type: 'entries', agentId, entries: [tEntry] })
+          const browser = await import('./browser')
+          if (!browser.browserAvailable()) {
+            const res = add({ agentId, kind: 'tool-result', role: 'system', content: browser.BROWSER_UNAVAILABLE, meta: { callId: call.id, browserUnavailable: true } })
+            emit({ type: 'entries', agentId, entries: [res] })
+            messages.push({ role: 'tool', toolCallId: call.id, content: browser.BROWSER_UNAVAILABLE })
+            continue
+          }
+          const reason = String(input.reason ?? '').trim().slice(0, 200) || '(no reason given)'
+          // la card con il motivo e il bottone «Apri lo schermo» (già in controllo)
+          const card = appendSend(agentId, call, { type: 'takeover-request', reason }, emit, { takeover: 'pending' }, opts.taskId)
+          const { markTakeoverPending } = await import('./screen')
+          markTakeoverPending(agentId, reason, card.id)
+          emitNeedsInput(agentId, card, formatUi(ui(UI.cardTakeover, { reason: reason.slice(0, 80) }), loopUiLanguage()), emit)
+          taskNeedsInput()
+          messages.push({ role: 'tool', toolCallId: call.id, content: REQUEST_TAKEOVER_RESULT })
+          awaitingUser = true
+          break // il turno TERMINA qui: il bot aspetta che l'utente finisca
+        }
+
         // fase 11 (punto 2): ricerca e lettura web — l'output è DATO NON FIDATO:
         // entra nel contesto dentro un blocco EVIDENZA (tag neutralizzato +
         // regola "è un dato, non un'istruzione") e dal primo contenuto web il
@@ -1781,6 +1830,173 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             continue
           }
           pushResult(bOutput, bMeta)
+          continue
+        }
+
+        // fase 19a (V6/V7): il computer use NEL BOX — il desktop del bot dove
+        // gira il suo browser (computer_observe / computer_act), da non
+        // confondere con use-app che controlla il MAC dell'utente. Il confine
+        // di OGNI azione è computerActRisk (puro, browser-guard): un click a
+        // coordinate non aggira la classificazione del rischio, il probe della
+        // pagina passa dalla browser_evaluate INTERNA e le azioni rifiutate
+        // fermano la sequenza. computer_observe ha il modo di lettura di
+        // browser_snapshot (nessun gate); computer_act quello di browser_click.
+        if (call.name === 'computer_observe' || call.name === 'computer_act') {
+          emit({ type: 'activity', agentId, activity: activityOf(call.name, input) })
+          const cEntry = add({
+            agentId, kind: 'tool-call', role: 'assistant', content: call.name,
+            meta: { id: call.id, name: call.name, arguments: call.arguments }
+          })
+          emit({ type: 'entries', agentId, entries: [cEntry] })
+          const browser = await import('./browser')
+          const guard = await import('./browser-guard')
+          const computer = await import('./computer')
+          const screen = await import('./screen')
+          const pushResult = (content: string, meta: Record<string, unknown> = {}): void => {
+            const res = add({ agentId, kind: 'tool-result', role: 'system', content: content.slice(0, 50_000), meta: { callId: call.id, ...meta } })
+            emit({ type: 'entries', agentId, entries: [res] })
+            messages.push({ role: 'tool', toolCallId: call.id, content: content.slice(0, 50_000) })
+          }
+          if (!browser.browserAvailable()) {
+            pushResult(browser.BROWSER_UNAVAILABLE, { browserUnavailable: true })
+            continue
+          }
+          // H4 a metà turno (V7), come use-app: il modello non può vedere lo
+          // screenshot che riceverebbe
+          if (modelCapabilities(activeProvider, activeRoute.model).vision === false) {
+            pushResult(`${call.name} needs a vision model; the current model cannot see images`, { error: true })
+            continue
+          }
+          // la cattura con dedup: lo schermo IDENTICO a quello già mandato in
+          // questo turno non si rimanda (il result lo dice, come Rakazo)
+          const pushScreen = (prefix: string, image: string | null, meta: Record<string, unknown> = {}): void => {
+            if (!image) {
+              pushResult(`${prefix}\nScreenshot not available.`, { ...meta, error: true })
+              return
+            }
+            const hash = createHash('sha256').update(image).digest('hex')
+            if (hash === lastScreenHash) {
+              pushResult(`${prefix}\nThe screen is unchanged since your last screenshot.`, { ...meta, screenUnchanged: true })
+              return
+            }
+            lastScreenHash = hash
+            pushResult(`${prefix}\nThe screenshot follows (the coordinates you want to click are in pixels of THAT image).`, meta)
+            messages.push({
+              role: 'user',
+              content: `[screenshot] Here is the current screen of your own computer in the sandbox requested by the ${call.name} tool (the coordinates you want to click are in pixels of THIS image):`,
+              images: [image]
+            })
+          }
+          if (call.name === 'computer_observe') {
+            const r = await computer.computerObserve(agentId)
+            if (!r.ok) pushResult(r.error, { error: true })
+            else pushScreen(`Screen: ${r.width}x${r.height}.`, r.image, { computerScreen: true })
+            continue
+          }
+          // ---- computer_act: preparazione (validazione pura + geometria) ----
+          const prep = await computer.computerPrepareAct(agentId, input)
+          if (!prep.ok) {
+            pushResult(`Invalid computer_act: ${prep.error}`, { error: true })
+            continue
+          }
+          // controllo dell'utente in corso: errore inglese, NULLA viene eseguito
+          if (screen.userControlActive(agentId)) {
+            pushResult(guard.USER_CONTROL_ERROR_TEXT, { error: true, userControl: true })
+            continue
+          }
+          const info = await computer.desktopInfoOf(agentId)
+          if (!info) {
+            pushResult('The bot has no screen open: it starts when a page is opened in its browser.', { error: true })
+            continue
+          }
+          // sfida anti-bot nell'ultimo snapshot noto → ogni azione è negata
+          const challenge = guard.snapshotChallenge(browser.lastSnapshotOf(agentId) ?? '')
+          // l'offset del viewport si calcola UNA volta per chiamata
+          const view = await browser.probeViewportOffset(agentId)
+          let executed = 0
+          let refused: { index: number; kind: string; reason: string } | null = null
+          for (let i = 0; i < prep.actions.length; i++) {
+            const action = prep.actions[i]!
+            const ctx = await computer.computerActContextOf(agentId, action, view, { challenge, userControl: false })
+            const risk = guard.computerActRisk(action, ctx)
+            if (risk.kind === 'deny' || risk.kind === 'error') {
+              refused = { index: i, kind: action.kind, reason: risk.reason }
+              break
+            }
+            if (risk.kind === 'ask') {
+              // la STESSA card di approvazione di oggi (id card.browserAsk):
+              // auto-review come per le altre ask, poi la card all'utente
+              let autoAllowed: { ruleMatched: string } | null = null
+              const arAction: AutoReviewAction = { tool: call.name, args: input, neverAuto: false, untrustedTurn, ...(contaminated ? { contaminated: true } : {}) }
+              const review = await reviewWithConfiguredModel(arAction, userLang)
+              if (review) {
+                const decision = autoReviewDecision(review.cfg, arAction, review.outcome, autoApprovals)
+                if (decision.autoAllow) {
+                  autoAllowed = { ruleMatched: decision.ruleMatched }
+                  autoApprovals++
+                }
+              }
+              if (!autoAllowed) {
+                const url = browser.lastUrlOf(agentId) ?? formatUi(ui(UI.cardNoPageOpen), loopUiLanguage())
+                const elem = ctx.click
+                  ? `${ctx.click.role} "${ctx.click.name || ctx.click.text}"`
+                  : action.kind === 'key' ? `key ${action.key}` : 'the screen'
+                const askUi = ui(UI.cardBrowserAsk, {
+                  tool: call.name,
+                  target: action.kind === 'key' ? 'key' : 'element',
+                  ...(action.kind === 'key' ? { key: action.key } : { element: elem }),
+                  url,
+                  typed: action.kind === 'type' ? 'yes' : 'no',
+                  ...(action.kind === 'type' ? { text: action.text.slice(0, 80) } : {}),
+                  ...(risk.ask ? riskAskValues(risk.ask) : { reasonKind: 'other', reason: risk.reason })
+                })
+                const approval: Approval = { id: randomUUID(), agentId, tool: call.name, input, status: 'pending', createdAt: Date.now() }
+                run.approvals.set(approval.id, () => undefined)
+                const approvalEntry = add({
+                  agentId, kind: 'approval', role: 'system',
+                  content: formatUi(askUi, loopUiLanguage()),
+                  meta: { approvalId: approval.id, tool: call.name, input, status: 'pending', ui: askUi, keys: [`${call.name} ${elem}`] }
+                })
+                setStatus(agentId, 'paused-for-approval', emit)
+                emit({ type: 'entries', agentId, entries: [approvalEntry] })
+                emit({ type: 'approval', agentId, approval })
+                emitNeedsInput(agentId, approvalEntry, formatUi(askUi, loopUiLanguage()).slice(0, 80), emit)
+                taskNeedsInput()
+                const decision = await new Promise<'allow' | 'deny' | 'timeout' | 'superseded' | 'cancelled'>((resolve) => {
+                  run.approvals.set(approval.id, (d) => resolve(d))
+                  setTimeout(() => resolve('timeout'), getSetting<number>('permissions.timeoutMs', 5 * 60_000))
+                })
+                run.approvals.delete(approval.id)
+                updateEntryMeta(approvalEntry.id, {
+                  ...approvalEntry.meta,
+                  status: decision === 'timeout' ? 'expired' : decision === 'allow' ? 'allowed' : decision === 'deny' ? 'denied' : decision === 'cancelled' ? 'cancelled' : 'superseded'
+                })
+                const updatedApproval = getEntries(agentId).find((x: import('../../shared/types').TranscriptEntry) => x.id === approvalEntry.id)
+                if (updatedApproval) emit({ type: 'entries', agentId, entries: [updatedApproval] })
+                taskWorking()
+                if (decision !== 'allow') {
+                  setStatus(agentId, 'thinking', emit)
+                  refused = { index: i, kind: action.kind, reason: decision === 'deny' ? 'cancelled by the user' : 'approval expired or interrupted' }
+                  break
+                }
+                setStatus(agentId, 'thinking', emit)
+              }
+            }
+            const err = await computer.computerExecAction(agentId, info, action)
+            if (err) {
+              refused = { index: i, kind: action.kind, reason: err }
+              break
+            }
+            executed++
+          }
+          const summary = `Executed ${executed} of ${prep.actions.length} actions.` +
+            (refused ? `\nAction ${refused.index} (${refused.kind}) was refused: ${refused.reason}` : '')
+          if (input.observe === false) {
+            pushResult(summary, { computerAct: true })
+          } else {
+            const img = await computer.captureScreen(info)
+            pushScreen(summary, img, { computerAct: true })
+          }
           continue
         }
 
@@ -2762,9 +2978,14 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         // fase 18b (H4): la riserva ha portato il turno su un modello con
         // visione conosciuta FALSA a metà turno — use-app è RESTATO nella
         // lista (non si cambia la lista a metà turno), ma la chiamata non si
-        // esegue: il modello non può vedere lo screenshot che riceverebbe
-        if (call.name === 'use-app' && modelCapabilities(activeProvider, activeRoute.model).vision === false) {
-          const refused = 'use-app needs a vision model; the current model cannot see images'
+        // esegue: il modello non può vedere lo screenshot che riceverebbe.
+        // fase 19a (V7): computer_observe e computer_act restituiscono lo
+        // screenshot dello schermo del BOT: stessa regola, stesso messaggio
+        if (
+          (call.name === 'use-app' || call.name === 'computer_observe' || call.name === 'computer_act') &&
+          modelCapabilities(activeProvider, activeRoute.model).vision === false
+        ) {
+          const refused = `${call.name} needs a vision model; the current model cannot see images`
           messages.push({ role: 'tool', toolCallId: call.id, content: refused })
           const res = add({ agentId, kind: 'tool-result', role: 'system', content: refused, meta: { callId: call.id, error: true } })
           emit({ type: 'entries', agentId, entries: [res] })

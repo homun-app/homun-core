@@ -51,6 +51,10 @@ const ALLOWED_LITERALS: ReadonlyArray<{ file: string; text: string }> = [
   { file: 'src/shared/agent-message.ts', text: '<messaggio_da' },
   { file: 'src/shared/agent-message.ts', text: 'messaggio_da' },
   { file: 'src/shared/agent-message.ts', text: '</messaggio_da' },
+  // fase 19a (V5): il marcatore invariante della nota dell'utente nella
+  // ripresa dopo la presa di controllo (come <messaggio_da_agente>)
+  { file: 'src/main/agent/screen.ts', text: '\n\n<nota_utente>' },
+  { file: 'src/main/agent/screen.ts', text: '\n</nota_utente>' },
   // descrizione di send_to_agent: cita il marcatore <messaggio_da_agente> (invariante)
   { file: 'src/main/agent/tools.ts', text: 'Sends a message to another bot of the user (delegation' },
   // errori di avvio per lo SVILUPPATORE (lanciano al boot, finiscono nel log)

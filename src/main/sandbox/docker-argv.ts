@@ -559,8 +559,22 @@ export function dockerRmDirArgv(boxPath: string, image: string): string[] {
 // /browser/<owner>`, dove /browser/<owner> lo crea il wrapper. Il test di
 // guardia in docker-argv.test.ts scorre tutti gli argv esportati col `-w`.
 
-/** Chiusura per inattività: 10 minuti senza azioni (lato nostro + --idle-timeout). */
+/**
+ * Chiusura per inattività: 10 minuti senza azioni, lato NOSTRO (il timer della
+ * sessione). Fase 19a (V2): con lo schermo aperto la chiusura la decide il
+ * daemon — il timer può essere SOSPESO (vista/controllo/presa di controllo in
+ * corso, al massimo 30 minuti) — quindi il --idle-timeout del SERVER principale
+ * sale a BROWSER_SERVER_IDLE_MS (rete di sicurezza); i FIGLI restano headless
+ * con il tetto breve di qui.
+ */
 export const BROWSER_IDLE_MS = 10 * 60_000
+
+/**
+ * Fase 19a (V2): il --idle-timeout del server del browser PRINCIPALE, che con
+ * il desktop ha la finestra aperta: 60 minuti di rete di sicurezza. La chiusura
+ * vera la decide il timer nostro (sospeso mentre c'è una vista o un controllo).
+ */
+export const BROWSER_SERVER_IDLE_MS = 60 * 60_000
 
 /** Al massimo 3 browser contemporanei per box (Chromium pesa e il box ha 4g). */
 export const BROWSERS_PER_BOX_MAX = 3
@@ -671,6 +685,67 @@ export const DOCKER_BROWSER_WRAPPER_SH = [
   'exec playwright-mcp "$@"'
 ].join('\n')
 
+// ---- fase 19a (V2): il DESKTOP del bot — solo per il browser PRINCIPALE ----
+
+/** Il socket VNC in sola lettura del desktop di un proprietario (fase 19a, V2.5). */
+export function browserViewSocket(owner: string): string {
+  return `${browserStateDir(owner)}/vnc-view.sock`
+}
+
+/** Il socket VNC di CONTROLLO del desktop di un proprietario (fase 19a, V3.1). */
+export function browserControlSocket(owner: string): string {
+  return `${browserStateDir(owner)}/vnc-control.sock`
+}
+
+/** Il pid file del x11vnc di controllo, nella cartella del proprietario (V3.1). */
+export function browserControlPidFile(owner: string): string {
+  return `${browserStateDir(owner)}/vnc-control.pid`
+}
+
+/**
+ * Il wrapper COSTANTE del desktop del browser PRINCIPALE (fase 19a, V2) — i
+ * FIGLI restano col wrapper headless di oggi. Gira come 1001 nella cartella del
+ * proprietario e, in ordine: le righe di oggi (mkdir+cd con || exit 1, pid nel
+ * file), il cookie MIT-MAGIC-COOKIE casuale di 32 hex VALIDO PER QUALUNQUE
+ * display (trucco di xvfb-run: famiglia `ffff`, così non si può preparare un
+ * display in anticipo cambiando numero), Xvfb SENZA listener tcp né unix
+ * (resta solo il socket astratto di Linux: niente file in /tmp/.X11-unix che
+ * la shell del bot potrebbe preparare o sostituire), l'attesa che il display
+ * risponda (max 5 s), il visualizzatore x11vnc in SOLA LETTURA su socket unix
+ * nella cartella 0700 di 1001 (nessuna porta TCP nel container: la shell del
+ * bot, uid 1000 nello stesso namespace di rete, non può vedere né comandare
+ * lo schermo), poi DISPLAY/XAUTHORITY ed exec playwright-mcp.
+ * Xvfb e x11vnc restano nello STESSO gruppo di processi del wrapper: il kill
+ * di gruppo di oggi (chiusura dopo inattività, orfani) li chiude insieme al
+ * browser.
+ */
+export const DOCKER_BROWSER_DESKTOP_WRAPPER_SH = [
+  'mkdir -p "$(dirname "$1")" && cd "$(dirname "$1")" || exit 1',
+  'echo $$ >"$1"',
+  'if command -v mcookie >/dev/null 2>&1; then cookie="$(mcookie)"; else cookie="$(od -An -N16 -tx1 /dev/urandom | tr -d \' \\n\')"; fi',
+  'xauth -f ./Xauthority add ":0" . "$cookie" || exit 1',
+  'xauth -f ./Xauthority nlist | sed -e \'s/^..../ffff/\' | xauth -f ./Xauthority nmerge -',
+  'chmod 600 ./Xauthority',
+  'Xvfb -displayfd 3 -auth ./Xauthority -nolisten tcp -nolisten unix -screen 0 1280x960x24 3>./display &',
+  'ready=0; i=0',
+  'while [ "$i" -lt 50 ]; do',
+  '  if [ -s ./display ]; then',
+  '    n=$(cat ./display)',
+  '    case "$n" in \'\'|*[!0-9]*) ;; *)',
+  '      if XAUTHORITY=./Xauthority xdpyinfo -display ":$n" >/dev/null 2>&1; then ready=1; break; fi',
+  '    ;; esac',
+  '  fi',
+  '  i=$((i+1)); sleep 0.1',
+  'done',
+  '[ "$ready" = 1 ] || { echo "Xvfb did not start" >&2; exit 1; }',
+  'n=$(cat ./display)',
+  'x11vnc -display ":$n" -auth ./Xauthority -rfbport 0 -unixsockonly ./vnc-view.sock -viewonly -shared -forever -nopw -quiet &',
+  'shift',
+  'export DISPLAY=":$n"',
+  'export XAUTHORITY="$PWD/Xauthority"',
+  'exec playwright-mcp "$@"'
+].join('\n')
+
 /**
  * I flag del server Playwright MCP (puro): tutti quelli OBBLIGATORI e NESSUNO
  * dei vietati. --no-sandbox perché il container hardened non concede gli user
@@ -691,7 +766,10 @@ export const DOCKER_BROWSER_WRAPPER_SH = [
 export function browserMcpFlags(agentId: string, proxyPort: number, opts: { child?: boolean; owner?: string } = {}): string[] {
   const owner = opts.owner ?? agentId
   return [
-    '--headless', '--browser', 'chromium',
+    // fase 19a (V2): il browser PRINCIPALE è HEADFUL sul suo display Xvfb (il
+    // desktop del bot); solo i FIGLI restano --headless col wrapper di oggi
+    ...(opts.child ? ['--headless'] : []),
+    '--browser', 'chromium',
     '--no-sandbox',
     // fase 12 (punto 1): il figlio usa --isolated AL POSTO del profilo
     // persistente (due Chromium sullo stesso profilo si bloccano a vicenda)
@@ -704,7 +782,10 @@ export function browserMcpFlags(agentId: string, proxyPort: number, opts: { chil
     '--timeout-navigation', '30000',
     '--viewport-size', '1280x800',
     '--image-responses', 'omit',
-    '--idle-timeout', String(BROWSER_IDLE_MS),
+    // fase 19a (V2): col desktop aperto la chiusura la decide il daemon (il
+    // timer nostro è SOSPESO con vista/controllo in corso): il server del
+    // principale sale a 60 minuti di rete di sicurezza; i figli restano a 10
+    '--idle-timeout', String(opts.child ? BROWSER_IDLE_MS : BROWSER_SERVER_IDLE_MS),
     '--config', PLAYWRIGHT_MCP_CONFIG
   ]
 }
@@ -762,7 +843,10 @@ export function dockerBrowserMcpArgv(agentId: string, proxyPort: number, opts: {
     '-u', BROWSER_USER,
     '-w', BROWSER_MOUNT,
     BOX_CONTAINER,
-    'sh', '-c', DOCKER_BROWSER_WRAPPER_SH, 'sh',
+    // fase 19a (V2): il PRINCIPALE parte col wrapper del DESKTOP (Xvfb +
+    // x11vnc -viewonly, stesso gruppo di processi del server); i FIGLI restano
+    // col wrapper headless di oggi
+    'sh', '-c', opts.child ? DOCKER_BROWSER_WRAPPER_SH : DOCKER_BROWSER_DESKTOP_WRAPPER_SH, 'sh',
     browserPidFile(owner, opts.child === true ? agentId : undefined),
     ...browserMcpFlags(agentId, proxyPort, opts)
   ]
@@ -806,5 +890,114 @@ export function dockerBrowserWriteB64Argv(container: string, path: string): stri
 /** Cancellazione dell'originale nella copia dello screenshot, COME 1001 (P2). */
 export function dockerBrowserRmFileArgv(container: string, path: string): string[] {
   return ['exec', '-u', BROWSER_USER, container, 'rm', '-f', '--', path]
+}
+
+// ---- fase 19a (V2-V6): il desktop del bot — x11vnc di controllo, xdotool, cattura ----
+
+/**
+ * Il secondo x11vnc, quello di CONTROLLO (senza -viewonly), avviato SOLO durante
+ * la presa di controllo (V3.1) con docker exec -d come 1001 nella cartella del
+ * proprietario. Il pid va nel file (per ucciderlo a fine controllo col kill di
+ * gruppo): il processo di docker exec è già leader di sessione, quindi il pid
+ * scritto è anche il pgid. Il display number viaggia come $1 (il file display
+ * lo scrive il wrapper del desktop). Stessa forma di socket unix della vista:
+ * NESSUNA porta TCP nel container.
+ */
+export const DOCKER_SCREEN_CONTROL_VNC_SH = [
+  'echo $$ >./vnc-control.pid',
+  'exec x11vnc -display ":$1" -auth ./Xauthority -rfbport 0 -unixsockonly ./vnc-control.sock -shared -forever -nopw -quiet'
+].join('\n')
+
+/** L'argv dell'avvio del x11vnc di controllo (V3.1), come 1001, via docker exec -d. */
+export function dockerScreenControlVncArgv(owner: string, display: string): string[] {
+  return [
+    'exec', '-d',
+    '-u', BROWSER_USER,
+    '-w', browserStateDir(owner),
+    BOX_CONTAINER,
+    'sh', '-c', DOCKER_SCREEN_CONTROL_VNC_SH, 'sh',
+    display
+  ]
+}
+
+/** Il pid file del x11vnc di controllo è letto COME 1001 (path come argomento di cat). */
+export function dockerScreenControlPidReadArgv(container: string, owner: string): string[] {
+  return ['exec', '-i', '-u', BROWSER_USER, '-w', BROWSER_MOUNT, container, 'cat', '--', browserControlPidFile(owner)]
+}
+
+/** Attesa di un socket unix del desktop: test -S COME 1001 (argv puro). */
+export function dockerScreenSocketReadyArgv(container: string, socketPath: string): string[] {
+  return ['exec', '-u', BROWSER_USER, container, 'test', '-S', '--', socketPath]
+}
+
+/** Lettura del numero di display scelto da -displayfd (file display del wrapper). */
+export function dockerScreenDisplayReadArgv(container: string, owner: string): string[] {
+  return ['exec', '-i', '-u', BROWSER_USER, '-w', BROWSER_MOUNT, container, 'cat', '--', `${browserStateDir(owner)}/display`]
+}
+
+/**
+ * Il PONTE del desktop (V3.2): script node COSTANTE di poche righe che collega
+ * il socket unix dello schermo allo stdio del `docker exec -i` — net.connect +
+ * pipe nei due sensi, exit alla chiusura. ARGV puri, nessuna shell; `<socket>`
+ * viaggia come argv[1] dello script.
+ */
+export const SCREEN_BRIDGE_NODE_JS = [
+  "const s = require('node:net').connect(process.argv[1]);",
+  's.on(\'error\', () => process.exit(1));',
+  's.on(\'close\', () => process.exit(0));',
+  "s.on('connect', () => { process.stdin.pipe(s); s.pipe(process.stdout); });",
+  "process.stdin.on('end', () => s.end());",
+  "process.stdin.on('error', () => process.exit(1));"
+].join('\n')
+
+/**
+ * L'argv del ponte (V3.2): docker exec -i COME 1001:1001, node -e <PONTE>
+ * <socket>. Lo stdio del processo è il canale binario WebSocket ↔ socket unix
+ * (vnc-view.sock o vnc-control.sock, secondo la capability).
+ */
+export function dockerScreenBridgeArgv(socketPath: string): string[] {
+  return ['exec', '-i', '-u', BROWSER_USER, BOX_CONTAINER, 'node', '-e', SCREEN_BRIDGE_NODE_JS, socketPath]
+}
+
+/**
+ * Il comando di un'azione del computer use nel box (V6): xdotool con
+ * DISPLAY/XAUTHORITY del desktop, argv PURI (nessuna shell). `args` è la coda
+ * dell'argv DOPO xdotool, costruita da computerActionXdotoolArgs (pura).
+ */
+export function dockerXdotoolArgv(display: string, xauthority: string, args: string[]): string[] {
+  return [
+    'exec', '-u', BROWSER_USER,
+    '-e', `DISPLAY=${display}`,
+    '-e', `XAUTHORITY=${xauthority}`,
+    BOX_CONTAINER,
+    'xdotool', ...args
+  ]
+}
+
+/**
+ * La cattura dello schermo del bot (V6): `import -window root png:-` di
+ * ImageMagick scrive su un file nella cartella di 1001 (il PNG binario nel
+ * canale stdout di una stringa JS si corromperebbe: si legge poi in base64 con
+ * dockerBrowserReadB64Argv e si cancella, come copyBrowserScreenshot).
+ */
+export function dockerScreenCaptureArgv(display: string, xauthority: string, owner: string, name: string): string[] {
+  return [
+    'exec', '-u', BROWSER_USER,
+    '-e', `DISPLAY=${display}`,
+    '-e', `XAUTHORITY=${xauthority}`,
+    BOX_CONTAINER,
+    'import', '-window', 'root', `png:${browserStateDir(owner)}/${name}`
+  ]
+}
+
+/** La geometria dello schermo del bot (xdotool getdisplaygeometry → "1280 960"). */
+export function dockerScreenGeometryArgv(display: string, xauthority: string): string[] {
+  return [
+    'exec', '-u', BROWSER_USER,
+    '-e', `DISPLAY=${display}`,
+    '-e', `XAUTHORITY=${xauthority}`,
+    BOX_CONTAINER,
+    'xdotool', 'getdisplaygeometry'
+  ]
 }
 

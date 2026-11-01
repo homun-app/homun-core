@@ -71,6 +71,12 @@ import {
   dockerBrowserReadB64Argv, dockerBrowserWriteB64Argv, DOCKER_WRITE_B64_SH, dockerBrowserRmFileArgv,
   boxHasBrowserMountRw
 } from '../docker-argv'
+// fase 19a: il desktop del bot (wrapper, x11vnc di controllo, ponte, xdotool)
+import {
+  DOCKER_BROWSER_DESKTOP_WRAPPER_SH, browserViewSocket, browserControlSocket, browserControlPidFile,
+  dockerScreenControlVncArgv, DOCKER_SCREEN_CONTROL_VNC_SH, dockerScreenBridgeArgv, SCREEN_BRIDGE_NODE_JS,
+  dockerXdotoolArgv, dockerScreenCaptureArgv, dockerScreenGeometryArgv, dockerScreenSocketReadyArgv
+} from '../docker-argv'
 import { readFileSync as rf } from 'node:fs'
 
 /** 0c: nei test l'immagine del box è un tag qualunque derivato dal contenuto. */
@@ -234,7 +240,7 @@ describe('il launcher del browser: argv PURI con TUTTI i flag obbligatori e NESS
       '-u', '1001:1001',
       '-w', '/browser',
       'sandbot-box',
-      'sh', '-c', DOCKER_BROWSER_WRAPPER_SH, 'sh',
+      'sh', '-c', DOCKER_BROWSER_DESKTOP_WRAPPER_SH, 'sh',
       '/browser/agent_x/mcp.pid'
     ])
     // Q1 (fase 14 correzioni 2): il `-w` è /browser, NON /browser/<owner> —
@@ -242,8 +248,8 @@ describe('il launcher del browser: argv PURI con TUTTI i flag obbligatori e NESS
     // cartella del proprietario NON esiste ancora (la crea il mkdir del
     // wrapper): -w /browser/<owner> faceva fallire ogni avvio con rc 127
     expect(argv[argv.indexOf('-w') + 1]).toBe(BROWSER_MOUNT)
-    // il wrapper COSTANTE è l'elemento sh -c, il pid file è $1 e i flag seguono
-    expect(argv[argv.indexOf('-c') + 1]).toBe(DOCKER_BROWSER_WRAPPER_SH)
+    // fase 19a (V2): il PRINCIPALE parte col wrapper del DESKTOP
+    expect(argv[argv.indexOf('-c') + 1]).toBe(DOCKER_BROWSER_DESKTOP_WRAPPER_SH)
     expect(argv).toContain('/browser/agent_x/mcp.pid')
     // I2: NIENTE setsid (il processo di docker exec è già leader di sessione:
     // setsid forka e il padre chiude lo stdio del client) e il pid si scrive
@@ -260,14 +266,17 @@ describe('il launcher del browser: argv PURI con TUTTI i flag obbligatori e NESS
     // TUTTI i flag obbligatori (valori compresi), con il tetto delle uscite (I8)
     const flags = browserMcpFlags('agent_x', 18765)
     for (const [f, v] of [
-      ['--headless', null], ['--browser', 'chromium'], ['--no-sandbox', null],
+      ['--browser', 'chromium'], ['--no-sandbox', null],
       ['--user-data-dir', '/browser/agent_x/profile'],
       ['--output-dir', '/browser/agent_x/output'],
       ['--output-max-size', '52428800'],
       ['--no-webmcp', null], ['--block-service-workers', null],
       ['--proxy-server', 'http://host.docker.internal:18765'],
       ['--timeout-navigation', '30000'], ['--viewport-size', '1280x800'],
-      ['--image-responses', 'omit'], ['--idle-timeout', '600000'],
+      ['--image-responses', 'omit'],
+      // fase 19a (V2): col desktop la chiusura la decide il daemon — il
+      // --idle-timeout del server PRINCIPALE sale a 60 minuti (rete di sicurezza)
+      ['--idle-timeout', '3600000'],
       // fase 12 (0e): --config obbligatorio, il file del Dockerfile che spegne
       // il traffico di fondo di Chromium
       ['--config', '/etc/sandbot/playwright-mcp.json']
@@ -275,6 +284,14 @@ describe('il launcher del browser: argv PURI con TUTTI i flag obbligatori e NESS
       expect(flags, `flag ${f}`).toContain(f)
       if (v !== null) expect(flags[flags.indexOf(f) + 1]).toBe(v)
     }
+    // fase 19a (V2): il principale è HEADFUL (nessun --headless), il FIGLIO
+    // resta headless col tetto breve di oggi
+    expect(flags).not.toContain('--headless')
+    const child = browserMcpFlags('sub_x', 18765, { child: true, owner: 'agent_x' })
+    expect(child).toContain('--headless')
+    expect(child).toContain('--isolated')
+    expect(child[child.indexOf('--idle-timeout') + 1]).toBe('600000')
+    expect(child[child.indexOf('--output-dir') + 1]).toBe('/browser/agent_x/output-sub_x')
   })
 
   it('fase 12 0e: il Dockerfile crea /etc/sandbot/playwright-mcp.json con la STESSA stringa del flag --config', () => {
@@ -312,6 +329,130 @@ describe('il launcher del browser: argv PURI con TUTTI i flag obbligatori e NESS
     const dockerfile = readFileSync('resources/box/Dockerfile', 'utf8')
     expect(dockerfile).not.toContain('--disable-blink-features=AutomationControlled')
     expect(dockerfile).toContain('"--disable-blink-features="')
+  })
+})
+
+// ---- fase 19a (V1/V2/V3/V6): il desktop del bot ----
+
+describe('fase 19a: il wrapper del DESKTOP (solo browser principale) e i suoi argv', () => {
+  it('il wrapper contiene i flag di sicurezza del display e i socket del proprietario', () => {
+    for (const piece of [
+      'mkdir -p "$(dirname "$1")" && cd "$(dirname "$1")" || exit 1',
+      // il cookie casuale di 32 hex valido per QUALUNQUE display (famiglia ffff)
+      "xauth -f ./Xauthority add \":0\" . \"$cookie\"",
+      "xauth -f ./Xauthority nlist | sed -e 's/^..../ffff/' | xauth -f ./Xauthority nmerge -",
+      'chmod 600 ./Xauthority',
+      // Xvfb senza listener tcp né unix: resta solo il socket astratto
+      'Xvfb -displayfd 3 -auth ./Xauthority -nolisten tcp -nolisten unix -screen 0 1280x960x24 3>./display',
+      // l'attesa del display (max 5 s) con xdpyinfo e il cookie
+      'xdpyinfo -display ":$n"',
+      // la vista in SOLA LETTURA su socket unix: NESSUNA porta TCP
+      'x11vnc -display ":$n" -auth ./Xauthority -rfbport 0 -unixsockonly ./vnc-view.sock -viewonly -shared -forever -nopw -quiet',
+      'export DISPLAY=":$n"',
+      'export XAUTHORITY="$PWD/Xauthority"',
+      'exec playwright-mcp "$@"'
+    ]) {
+      expect(DOCKER_BROWSER_DESKTOP_WRAPPER_SH, `manca: ${piece.slice(0, 50)}`).toContain(piece)
+    }
+    // il cookie: mcookie o od su /dev/urandom (32 hex)
+    expect(DOCKER_BROWSER_DESKTOP_WRAPPER_SH).toContain('mcookie')
+    expect(DOCKER_BROWSER_DESKTOP_WRAPPER_SH).toContain('/dev/urandom')
+    // stesso gruppo di processi: niente setsid nemmeno qui (il kill di gruppo
+    // del wrapper chiude Xvfb e x11vnc insieme al server)
+    expect(DOCKER_BROWSER_DESKTOP_WRAPPER_SH).not.toContain('setsid')
+  })
+
+  it('i FIGLI non usano il wrapper del desktop e restano --headless col wrapper di oggi', () => {
+    const argv = dockerBrowserMcpArgv('sub_x', 18765, { child: true, owner: 'agent_x' })
+    expect(argv[argv.indexOf('-c') + 1]).toBe(DOCKER_BROWSER_WRAPPER_SH)
+    expect(argv[argv.indexOf('-c') + 1]).not.toBe(DOCKER_BROWSER_DESKTOP_WRAPPER_SH)
+    expect(argv).toContain('--headless')
+    expect(argv).not.toContain('--isolated=') // --isolated è un flag a sé
+    expect(argv).toContain('/browser/agent_x/mcp-sub_x.pid')
+    expect(dockerBrowserMcpArgv('agent_x', 18765).some((a) => a === '--headless')).toBe(false)
+  })
+
+  it('NESSUNA porta pubblicata: -p/--publish non compare MAI nel create del box', () => {
+    const argv = dockerBoxCreateArgv(BOX_CONTAINER, BOX_VOLUME, 'bridge', DEFAULT_BOX_LIMITS, IMG)
+    for (const flag of ['-p', '--publish', '-P', '--publish-all']) {
+      expect(argv, `flag ${flag}`).not.toContain(flag)
+      expect(argv.some((a) => a.startsWith(flag + ' ')), `prefisso ${flag}`).toBe(false)
+    }
+    // nessun nuovo listener nel container: il mount di /browser resta l'unico cambio
+    expect(argv.filter((a) => a.startsWith('sandbot-browser')).length).toBe(1)
+  })
+
+  it('i socket e i file del desktop stanno nella cartella del PROPRIETARIO (0700 di 1001)', () => {
+    expect(browserViewSocket('agent_x')).toBe('/browser/agent_x/vnc-view.sock')
+    expect(browserControlSocket('agent_x')).toBe('/browser/agent_x/vnc-control.sock')
+    expect(browserControlPidFile('agent_x')).toBe('/browser/agent_x/vnc-control.pid')
+    expect(browserViewSocket('agent_x')).toContain(browserStateDir('agent_x'))
+  })
+
+  it('il x11vnc di CONTROLLO (senza -viewonly) parte via docker exec -d come 1001, col pid nel file', () => {
+    const argv = dockerScreenControlVncArgv('agent_x', '42')
+    expect(argv).toEqual([
+      'exec', '-d',
+      '-u', '1001:1001',
+      '-w', '/browser/agent_x',
+      'sandbot-box',
+      'sh', '-c', DOCKER_SCREEN_CONTROL_VNC_SH, 'sh',
+      '42'
+    ])
+    expect(DOCKER_SCREEN_CONTROL_VNC_SH).toContain('echo $$ >./vnc-control.pid')
+    expect(DOCKER_SCREEN_CONTROL_VNC_SH).toContain('exec x11vnc -display ":$1" -auth ./Xauthority')
+    // SENZA -viewonly (è il controllo), sempre socket unix, mai porta TCP
+    expect(DOCKER_SCREEN_CONTROL_VNC_SH).not.toContain('-viewonly')
+    expect(DOCKER_SCREEN_CONTROL_VNC_SH).toContain('-unixsockonly ./vnc-control.sock')
+    expect(DOCKER_SCREEN_CONTROL_VNC_SH).toContain('-rfbport 0')
+  })
+
+  it('il PONTE: docker exec -i -u 1001:1001 node -e <PONTE> <socket>, argv puri', () => {
+    const argv = dockerScreenBridgeArgv('/browser/agent_x/vnc-view.sock')
+    expect(argv).toEqual([
+      'exec', '-i', '-u', '1001:1001', 'sandbot-box',
+      'node', '-e', SCREEN_BRIDGE_NODE_JS, '/browser/agent_x/vnc-view.sock'
+    ])
+    // lo script collega il socket unix allo stdio, nei due sensi, ed esce
+    expect(SCREEN_BRIDGE_NODE_JS).toContain("require('node:net').connect(process.argv[1])")
+    expect(SCREEN_BRIDGE_NODE_JS).toContain('process.stdin.pipe(s)')
+    expect(SCREEN_BRIDGE_NODE_JS).toContain('s.pipe(process.stdout)')
+    expect(SCREEN_BRIDGE_NODE_JS).toContain('process.exit(1)')
+    // nessuna shell, nessun comando esterno
+    expect(SCREEN_BRIDGE_NODE_JS).not.toContain('child_process')
+    expect(SCREEN_BRIDGE_NODE_JS).not.toContain('exec(')
+  })
+
+  it('xdotool e la cattura: -u 1001 con DISPLAY/XAUTHORITY, argv puri', () => {
+    expect(dockerXdotoolArgv(':42', '/browser/agent_x/Xauthority', ['type', '--clearmodifiers', '--', 'ciao'])).toEqual([
+      'exec', '-u', '1001:1001',
+      '-e', 'DISPLAY=:42',
+      '-e', 'XAUTHORITY=/browser/agent_x/Xauthority',
+      'sandbot-box',
+      'xdotool', 'type', '--clearmodifiers', '--', 'ciao'
+    ])
+    expect(dockerScreenCaptureArgv(':42', '/browser/agent_x/Xauthority', 'agent_x', 'screen-1.png')).toEqual([
+      'exec', '-u', '1001:1001',
+      '-e', 'DISPLAY=:42',
+      '-e', 'XAUTHORITY=/browser/agent_x/Xauthority',
+      'sandbot-box',
+      'import', '-window', 'root', 'png:/browser/agent_x/screen-1.png'
+    ])
+    expect(dockerScreenGeometryArgv(':42', '/browser/agent_x/Xauthority').slice(-2)).toEqual(['xdotool', 'getdisplaygeometry'])
+    expect(dockerScreenSocketReadyArgv('sandbot-box', '/browser/agent_x/vnc-view.sock')).toEqual(
+      ['exec', '-u', '1001:1001', 'sandbot-box', 'test', '-S', '--', '/browser/agent_x/vnc-view.sock']
+    )
+  })
+
+  it('fase 19a V1: il Dockerfile installa i pacchetti del desktop e NE VERIFICA i binari', () => {
+    const dockerfile = rf('resources/box/Dockerfile', 'utf8')
+    for (const pkg of ['xvfb', 'x11vnc', 'xauth', 'xdotool', 'imagemagick', 'x11-utils']) {
+      expect(dockerfile, `pacchetto ${pkg}`).toContain(` ${pkg} \\`)
+    }
+    expect(dockerfile).toContain('--no-install-recommends')
+    expect(dockerfile).toContain('rm -rf /var/lib/apt/lists/*')
+    // la build FALLISCA in modo chiaro se un binario manca
+    expect(dockerfile).toContain('command -v Xvfb x11vnc xauth xdotool import xdpyinfo')
   })
 })
 

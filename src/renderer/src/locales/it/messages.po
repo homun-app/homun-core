@@ -96,6 +96,11 @@ msgstr "(vuota)"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
+msgid "open.takeoverDone"
+msgstr "[L’utente ha finito sul tuo schermo]"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
 msgid "open.routine"
 msgstr "[routine ricorrente: {title}] {prompt}"
 
@@ -415,6 +420,10 @@ msgstr "✓ consentito"
 msgid "✓ Consentito"
 msgstr "✓ Consentito"
 
+#: src/renderer/src/components/TakeoverCard.tsx
+msgid "✓ Fatto — il bot ha ricevuto il tuo messaggio."
+msgstr "✓ Fatto — il bot ha ricevuto il tuo messaggio."
+
 #. placeholder {0}: labels(meta.respondedValue as string | string[])
 #: src/renderer/src/components/WidgetCard.tsx
 msgid "✓ Hai risposto: {0}"
@@ -457,6 +466,10 @@ msgstr "💬 Slack"
 #: src/renderer/src/components/DraftCard.tsx
 msgid "📤 Invio esterno"
 msgstr "📤 Invio esterno"
+
+#: src/renderer/src/components/Chat.tsx
+msgid "🖥 Schermo"
+msgstr "🖥 Schermo"
 
 #: src/renderer/src/components/Chat.tsx
 msgid "🗂 Memoria"
@@ -659,6 +672,7 @@ msgstr "Approvazione scaduta."
 msgid "onboarding.providerHelp"
 msgstr "Apre le impostazioni: scegli o attiva un provider e torno a completare da solo."
 
+#: src/renderer/src/components/BotScreen.tsx
 #: src/renderer/src/components/LibraryCards.tsx
 #: src/renderer/src/components/SubagentCard.tsx
 #: src/renderer/src/components/TaskCard.tsx
@@ -683,6 +697,10 @@ msgstr "Apri le impostazioni del provider"
 #: src/renderer/src/components/Chat.tsx
 msgid "Apri le impostazioni del provider"
 msgstr "Apri le impostazioni del provider"
+
+#: src/renderer/src/components/TakeoverCard.tsx
+msgid "Apri lo schermo"
+msgstr "Apri lo schermo"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Argomenti (args) non sono JSON valido"
@@ -972,6 +990,7 @@ msgstr "Chiedi qualcosa a {0} senza inquinare la conversazione…"
 msgid "chiudi"
 msgstr "chiudi"
 
+#: src/renderer/src/components/BotScreen.tsx
 #: src/renderer/src/components/ui/dialog.tsx
 msgid "Chiudi"
 msgstr "Chiudi"
@@ -1112,6 +1131,10 @@ msgstr "connector_poll: intervalMin deve essere ≥ 2 minuti"
 #: src/shared/ui-messages.ts
 msgid "trigger.toolMissing"
 msgstr "connector_poll: tool mancante"
+
+#: src/renderer/src/components/BotScreen.tsx
+msgid "Connessione allo schermo…"
+msgstr "Connessione allo schermo…"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "connesso"
@@ -1399,6 +1422,10 @@ msgstr "errore"
 msgid "notice.modelError"
 msgstr "Errore dal modello: {message}"
 
+#: src/renderer/src/components/BotScreen.tsx
+msgid "Errore di connessione."
+msgstr "Errore di connessione."
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "rpc.draftSendError"
@@ -1459,6 +1486,10 @@ msgstr "Fatti e regole che il bot ricorda tra i turni. Scope \"utente\" = condiv
 #: src/renderer/src/components/SubagentCard.tsx
 msgid "Ferma"
 msgstr "Ferma"
+
+#: src/renderer/src/components/BotScreen.tsx
+msgid "Ferma e prendi il controllo"
+msgstr "Ferma e prendi il controllo"
 
 #: src/renderer/src/components/SubagentCard.tsx
 msgid "fermato"
@@ -1593,6 +1624,10 @@ msgstr "Gruppo non trovato"
 msgid "guida"
 msgstr "guida"
 
+#: src/renderer/src/components/BotScreen.tsx
+msgid "Ho finito"
+msgstr "Ho finito"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "presence.awayPrompt"
@@ -1636,9 +1671,31 @@ msgstr "il {days}"
 msgid "cron.monthsOfYear"
 msgstr "il {months} di ogni mese"
 
+#: src/renderer/src/components/TakeoverCard.tsx
+msgid "Il bot è in attesa: chiudi con «Ho finito» quando hai terminato."
+msgstr "Il bot è in attesa: chiudi con «Ho finito» quando hai terminato."
+
 #: src/renderer/src/components/ConnectorCard.tsx
 msgid "Il bot ha provato a usare questa app ma la sessione è scaduta."
 msgstr "Il bot ha provato a usare questa app ma la sessione è scaduta."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "rpc.screenNotOpen"
+msgstr "Il bot non ha uno schermo aperto."
+
+#: src/renderer/src/components/BotScreen.tsx
+msgid "Il bot non ha uno schermo aperto."
+msgstr "Il bot non ha uno schermo aperto."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "rpc.screenBotBusy"
+msgstr "Il bot sta lavorando: fermalo prima di prendere il controllo."
+
+#: src/renderer/src/components/BotScreen.tsx
+msgid "Il bot ti sta chiedendo di intervenire sul suo schermo."
+msgstr "Il bot ti sta chiedendo di intervenire sul suo schermo."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -1808,6 +1865,11 @@ msgstr "Il vault è cifrato a riposo (AES-256-GCM, chiave nel Keychain). I valor
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
+msgid "rpc.screenControlFailed"
+msgstr "Impossibile avviare il controllo dello schermo: riprova."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
 msgid "rpc.modelsListFailed"
 msgstr "impossibile elencare i modelli: {error}"
 
@@ -1906,6 +1968,10 @@ msgstr "installazione in corso"
 msgid "Installo…"
 msgstr "Installo…"
 
+#: src/renderer/src/components/BotScreen.tsx
+msgid "Interrompe il turno del bot e apre il controllo"
+msgstr "Interrompe il turno del bot e apre il controllo"
+
 #: src/renderer/src/components/TaskCard.tsx
 msgid "Interrompi"
 msgstr "Interrompi"
@@ -1976,6 +2042,10 @@ msgstr "La bozza non ha un tool di invio associato: non può essere inviata auto
 msgid "rpc.webKeyOllama"
 msgstr "la chiave per la ricerca web si imposta sul provider Ollama"
 
+#: src/renderer/src/components/BotScreen.tsx
+msgid "La connessione allo schermo si è chiusa."
+msgstr "La connessione allo schermo si è chiusa."
+
 #: src/renderer/src/components/LibraryPanel.tsx
 msgid "La libreria è vuota: i documenti, i grafici e i file che i bot preparano finiscono qui."
 msgstr "La libreria è vuota: i documenti, i grafici e i file che i bot preparano finiscono qui."
@@ -2042,6 +2112,20 @@ msgstr "Lingua"
 #: src/shared/ui-messages.ts
 msgid "autoreview.alwaysAsk"
 msgstr "lo scambio di file con il Mac chiede sempre l’utente"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "rpc.screenNotReady"
+msgstr "Lo schermo del bot non è pronto (il socket non risponde): riprova tra poco."
+
+#: src/renderer/src/components/BotScreen.tsx
+msgid "Lo schermo non risponde."
+msgstr "Lo schermo non risponde."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "rpc.screenUnavailable"
+msgstr "Lo schermo richiede la modalità docker (Impostazioni → Sandbox): non è disponibile qui."
 
 #: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/ui/ModelPicker.tsx
@@ -2469,6 +2553,10 @@ msgstr "non supportato: valore in argv ({0})"
 msgid "non verificato"
 msgstr "non verificato"
 
+#: src/renderer/src/components/BotScreen.tsx
+msgid "Nota per il bot (facoltativa): cosa hai fatto…"
+msgstr "Nota per il bot (facoltativa): cosa hai fatto…"
+
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "Note"
 msgstr "Note"
@@ -2681,10 +2769,23 @@ msgstr "predefinito"
 msgid "Predefinito"
 msgstr "Predefinito"
 
+#: src/renderer/src/components/BotScreen.tsx
+msgid "Prendi il controllo"
+msgstr "Prendi il controllo"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "notice.boxPreparing"
 msgstr "Preparo il computer dei bot (immagine del box con il browser): una volta sola, qualche minuto. I bot riprendono appena è pronta."
+
+#: src/renderer/src/components/TakeoverCard.tsx
+msgid "Presa di controllo dello schermo"
+msgstr "Presa di controllo dello schermo"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "card.takeover"
+msgstr "Presa di controllo dello schermo: {reason}"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -2991,6 +3092,10 @@ msgstr "Rimuovi"
 msgid "Rinomina"
 msgstr "Rinomina"
 
+#: src/renderer/src/components/BotScreen.tsx
+msgid "Riprova"
+msgstr "Riprova"
+
 #: src/renderer/src/components/Settings.tsx
 msgid "riserva"
 msgstr "riserva"
@@ -3112,6 +3217,10 @@ msgstr "Salvo il contatto «{name}» nel vault?"
 msgid "Sblocca"
 msgstr "Sblocca"
 
+#: src/renderer/src/components/TakeoverCard.tsx
+msgid "Scaduta: il bot non aspetta più."
+msgstr "Scaduta: il bot non aspetta più."
+
 #: src/renderer/src/components/LibraryCards.tsx
 #: src/renderer/src/components/SubagentCard.tsx
 msgid "scaduto"
@@ -3180,6 +3289,14 @@ msgstr "schedule: every week richiede weekday 0-6 (domenica 0)"
 #: src/shared/ui-messages.ts
 msgid "trigger.modeInvalid"
 msgstr "schedule: mode non valido (\"{value}\")"
+
+#: src/renderer/src/components/BotScreen.tsx
+msgid "Schermo del bot"
+msgstr "Schermo del bot"
+
+#: src/renderer/src/components/Chat.tsx
+msgid "Schermo del bot: vista dal vivo del suo computer"
+msgstr "Schermo del bot: vista dal vivo del suo computer"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -3372,6 +3489,10 @@ msgstr "Skill del bot (procedure riutilizzabili)"
 msgid "skill: {0}"
 msgstr "skill: {0}"
 
+#: src/renderer/src/components/BotScreen.tsx
+msgid "Sola lettura — il bot non vede il tuo cursore"
+msgstr "Sola lettura — il bot non vede il tuo cursore"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "notice.wakeNudge"
@@ -3439,6 +3560,11 @@ msgstr "Sta pensando…"
 #: src/renderer/src/bot/bot-state.ts
 msgid "Sta scrivendo…"
 msgstr "Sta scrivendo…"
+
+#. placeholder {0}: agent?.name ?? ''
+#: src/renderer/src/components/BotScreen.tsx
+msgid "Stai controllando lo schermo di {0}"
+msgstr "Stai controllando lo schermo di {0}"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "stdio (comando locale)"
@@ -3773,6 +3899,10 @@ msgstr "verso le {time} (±15 min)"
 #: src/renderer/src/components/ui/ModelPicker.tsx
 msgid "visione"
 msgstr "visione"
+
+#: src/renderer/src/components/BotScreen.tsx
+msgid "Vista dal vivo del computer del bot"
+msgstr "Vista dal vivo del computer del bot"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts

@@ -29,6 +29,7 @@
     "@lingui/core": "6.6.0",
     "@lingui/react": "6.6.0",
     "@modelcontextprotocol/sdk": "^1.32.2",
+    "@novnc/novnc": "1.7.0",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "ipaddr.js": "2.2.0",

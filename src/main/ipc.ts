@@ -19,6 +19,8 @@ import type { SandbotEvent } from '../shared/types'
 export const DAEMON_RPC_CHANNELS = [
   'agents:list', 'agents:create', 'agents:update', 'agents:delete', 'agents:set-main',
   'agents:entries', 'chat:send', 'chat:interrupt',
+  // fase 19a: lo schermo del bot (vista dal vivo e presa di controllo)
+  'screen:open', 'screen:release', 'screen:status',
   'widget:respond', 'draft:send', 'draft:discard', 'draft:update',
   'quickask',
   'routines:list', 'routines:create', 'routines:update', 'routines:delete', 'routines:suggest',

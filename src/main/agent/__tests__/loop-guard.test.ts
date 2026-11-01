@@ -82,3 +82,32 @@ describe('stopReasonOfError: rate limit del provider vs errore del modello', () 
     expect(stopReasonOfError(null)).toBe('model-error')
   })
 })
+
+// ---- fase 19a (V6): la ripetizione di computer_act ha per chiave l'HASH delle azioni ----
+import { repeatKeyOf } from '../loop-guard'
+
+describe('fase 19a (V6): computer_act con le stesse azioni ripetute e lo schermo invariato', () => {
+  const act = (actions: unknown, extra: Record<string, unknown> = {}): string =>
+    JSON.stringify({ actions, ...extra })
+  const CLICK = [{ kind: 'click', x: 640, y: 480 }]
+
+  it('la chiave è l\'HASH delle azioni: observe e formattazione diversa NON contano', () => {
+    expect(repeatKeyOf('computer_act', act(CLICK))).toBe(repeatKeyOf('computer_act', act(CLICK)))
+    // observe true/false e spazi diversi: stesse AZIONI → stessa chiave
+    expect(repeatKeyOf('computer_act', act(CLICK, { observe: true }))).toBe(repeatKeyOf('computer_act', act(CLICK, { observe: false })))
+    expect(repeatKeyOf('computer_act', act(CLICK))).toBe(repeatKeyOf('computer_act', JSON.stringify({ actions: CLICK }, null, 2)))
+    // azioni DIVERSE → chiave diversa
+    expect(repeatKeyOf('computer_act', act(CLICK))).not.toBe(repeatKeyOf('computer_act', act([{ kind: 'click', x: 1, y: 2 }])))
+    // gli altri tool restano sulla coppia nome+argomenti
+    expect(repeatKeyOf('browser_open', '{"url":"a"}')).toBe('browser_open\u0000{"url":"a"}')
+  })
+
+  it('la TERZA chiamata identica di fila ferma il turno (la regola delle altre ripetizioni)', () => {
+    const a1 = act(CLICK, { observe: true })
+    const a2 = act(CLICK, { observe: false }) // stessa chiave: il modello crede di variare
+    const seq = [{ name: 'computer_act', args: a1 }, { name: 'computer_act', args: a2 }]
+    expect(isToolLoop(seq, { name: 'computer_act', args: act(CLICK) })).toBe(true)
+    // due e poi una DIVERSA: non è un loop
+    expect(isToolLoop([seq[0]!], { name: 'computer_act', args: act([{ kind: 'key', key: 'Tab' }]) })).toBe(false)
+  })
+})

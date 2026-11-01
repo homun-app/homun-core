@@ -132,6 +132,17 @@ const SUBAGENT_DENY_REASONS: ReadonlyArray<{ test: (tool: string) => boolean; re
     test: (t) => t === 'use-app',
     reason: 'the user\'s computer is not touched from a subagent'
   },
+  // fase 19a (V7): lo schermo del bot è del PADRE — il browser del figlio è
+  // headless (niente desktop) e il suo turno non può chiudersi in attesa
+  // dell'utente: consegna al padre con wake_parent
+  {
+    test: (t) => t === 'computer_observe' || t === 'computer_act',
+    reason: 'the subagent\'s browser is headless: it has no screen of its own, the parent holds the desktop'
+  },
+  {
+    test: (t) => t === 'request_takeover',
+    reason: 'a subagent turn cannot wait for the user: tell the parent with wake_parent'
+  },
   {
     test: (t) => t === 'list_agents' || t === 'list-credentials',
     reason: 'the subagent works on the brief; the roster and the vault belong to the parent'

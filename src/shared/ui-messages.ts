@@ -121,6 +121,11 @@ export const UI = {
     message: 'send_to_agent → {name}: contenuto web non fidato nel turno'
   }),
   cardNoPageOpen: msg({ id: 'card.noPageOpen', message: '(nessuna pagina aperta)' }),
+  // fase 19a (V5): la card della presa di controllo chiesta dal bot
+  cardTakeover: msg({
+    id: 'card.takeover',
+    message: 'Presa di controllo dello schermo: {reason}'
+  }),
   draftAwaiting: msg({ id: 'card.draftAwaiting', message: 'bozza in attesa: {preview}' }),
   cardBrowserAsk: msg({
     id: 'card.browserAsk',
@@ -272,6 +277,30 @@ export const UI = {
     id: 'rpc.manualPollConfirm',
     message:
       'connector_poll su un server aggiunto a mano: serve la conferma esplicita dell’utente che il tool legga soltanto e non modifichi nulla (userConfirmedReadOnly)'
+  }),
+
+  // ---- fase 19a (V3/V5): lo schermo del bot ----
+  rpcScreenBotBusy: msg({
+    id: 'rpc.screenBotBusy',
+    message: 'Il bot sta lavorando: fermalo prima di prendere il controllo.'
+  }),
+  rpcScreenUnavailable: msg({
+    id: 'rpc.screenUnavailable',
+    message: 'Lo schermo richiede la modalità docker (Impostazioni → Sandbox): non è disponibile qui.'
+  }),
+  rpcScreenNotReady: msg({
+    id: 'rpc.screenNotReady',
+    message: 'Lo schermo del bot non è pronto (il socket non risponde): riprova tra poco.'
+  }),
+  rpcScreenNotOpen: msg({ id: 'rpc.screenNotOpen', message: 'Il bot non ha uno schermo aperto.' }),
+  rpcScreenControlFailed: msg({
+    id: 'rpc.screenControlFailed',
+    message: 'Impossibile avviare il controllo dello schermo: riprova.'
+  }),
+  /** il messaggio utente che riapre il turno dopo la presa di controllo (V5) */
+  takeoverDoneLine: msg({
+    id: 'open.takeoverDone',
+    message: '[L’utente ha finito sul tuo schermo]'
   }),
 
   // ---- fase 18a (E0): errori di forma dei trigger, come UiText dal modulo
