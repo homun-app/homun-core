@@ -165,22 +165,25 @@ export function ComputerFiles({ agentId, active }: { agentId: string; active: bo
     }
   }
 
-  // il trascinamento dal Finder: il path arriva dal drop (preload) e il
+  // il trascinamento dal Finder (correzioni U1): si passano al preload i
+  // File dell'evento drop — è IL PRELOAD a ricavarne il path col webUtils,
+  // la UI non lo vede né lo conosce mai (per i messaggi usa file.name); il
   // «Sostituire?» si chiede qui, con la seconda chiamata overwrite
   const onDrop = async (e: React.DragEvent) => {
     e.preventDefault()
     const dropped = Array.from(e.dataTransfer?.files ?? [])
-    const paths = dropped.map((f) => api.pathForFile(f)).filter((p): p is string => !!p)
-    if (!paths.length) return
+    if (!dropped.length) return
     setBusy(true)
     setToast('')
     try {
-      for (const macPath of paths) {
-        const name = macPath.split('/').pop() ?? ''
-        let r = await api.filesImportDropped(agentId, path, macPath)
+      for (const file of dropped) {
+        // per i messaggi si usa il NOME, mai il path del Mac (che la UI non
+        // conosce); la variabile locale tiene il placeholder {name} stabile
+        const name = file.name
+        let r = await api.filesImportDropped(agentId, path, file)
         if (!r.ok && r.reason === 'exists') {
           if (window.confirm(t`Sostituire «${name}»?`)) {
-            r = await api.filesImportDropped(agentId, path, macPath, true)
+            r = await api.filesImportDropped(agentId, path, file, true)
           } else {
             continue
           }

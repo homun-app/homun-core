@@ -5,11 +5,16 @@
 // e il preload NON espone un exportTo(path) libero — solo filesDownload /
 // filesUpload (che aprono i dialog) e filesImportDropped (il trascinamento,
 // col path del drop). Test di TESTO sui sorgenti: niente import di electron.
+//
+// Fase 19b correzioni (U1): il path del trascinamento lo calcola SOLO il
+// preload dall'oggetto File del drop — nessun metodo accetta (o rivela) una
+// stringa col path del Mac scelta dal renderer.
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 
 const ipc = readFileSync('src/main/ipc.ts', 'utf8')
 const preload = readFileSync('src/preload/index.ts', 'utf8')
+const types = readFileSync('src/shared/types.ts', 'utf8')
 
 /** Il blocco DAEMON_RPC_CHANNELS di ipc.ts (i canali inoltrati 1:1 alla UI). */
 function daemonRpcChannels(src: string): string[] {
@@ -55,5 +60,43 @@ describe('fase 19b (T6): files:export e files:import SOLO dal main, mai inoltrat
     // e il preload non inoltra MAI i canali delicati
     expect(preload).not.toContain("'files:export'")
     expect(preload).not.toContain("'files:import'")
+  })
+})
+
+describe('fase 19b correzioni (U1): il path del trascinamento lo calcola SOLO il preload', () => {
+  /** Il blocco della proprietà filesImportDropped del preload. */
+  const droppedBlock = () => /filesImportDropped: \(([\s\S]*?)\n  \},/.exec(preload)?.[0] ?? ''
+
+  it('pathForFile non c\'è più: nessun metodo del preload rivela un path del Mac', () => {
+    expect(preload).not.toContain('pathForFile')
+    expect(types).not.toContain('pathForFile')
+  })
+
+  it('filesImportDropped prende un FILE (non una stringa) e calcola il path DENTRO, col webUtils', () => {
+    const block = droppedBlock()
+    expect(block).toMatch(/filesImportDropped: \(agentId, dirPath, file, overwrite\)/)
+    // il path nasce QUI, dall'oggetto File del drop…
+    expect(block).toContain('webUtils.getPathForFile(file)')
+    // …e l'invoke passa quella variabile, mai un parametro del renderer
+    expect(block).toMatch(/ipcRenderer\.invoke\('files:import-dropped', agentId, dirPath, \w+, overwrite\)/)
+    // il tipo pubblico accetta un File
+    expect(types).toMatch(/filesImportDropped\(agentId: string, dirPath: string, file: File, overwrite\?: boolean\)/)
+  })
+
+  it('un File senza path (costruito dalla pagina) è rifiutato PRIMA di chiamare il main', () => {
+    const block = droppedBlock()
+    expect(block).toContain("Promise.reject(new Error('not a dropped file'))")
+    // il rifiuto viene prima dell'invoke: col path vuoto il main non si tocca
+    expect(block.indexOf('Promise.reject')).toBeLessThan(block.indexOf('ipcRenderer.invoke'))
+  })
+
+  it('nessun metodo del preload accetta una stringa macPath dal renderer', () => {
+    // né come parametro, né come nome locale: l'identificatore non esiste
+    expect(preload).not.toContain('macPath')
+    // e la CHIAMATA a webUtils.getPathForFile compare UNA volta sola, DENTRO
+    // il blocco del trascinamento: fuori da lì nessun metodo calcola o
+    // rivela un path del Mac
+    expect(preload.split('webUtils.getPathForFile(').length - 1).toBe(1)
+    expect(droppedBlock()).toContain('webUtils.getPathForFile(file)')
   })
 })

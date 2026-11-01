@@ -26,15 +26,20 @@ const api: SandbotApi = {
   filesRead: (agentId, path) => ipcRenderer.invoke('files:read', agentId, path),
   filesDownload: (agentId, path) => ipcRenderer.invoke('files:download', agentId, path),
   filesUpload: (agentId, dirPath) => ipcRenderer.invoke('files:upload', agentId, dirPath),
-  filesImportDropped: (agentId, dirPath, macPath, overwrite) => ipcRenderer.invoke('files:import-dropped', agentId, dirPath, macPath, overwrite),
-  // fase 19b (T3.2): il path del Mac di un file TRASCINATO dal Finder
-  // (webUtils.getPathForFile è l'unico modo dall'evento drop del renderer)
-  pathForFile: (file) => {
+  // fase 19b (T3.2, correzioni U1): il file TRASCINATO dal Finder — il path
+  // del Mac lo calcola SOLO il preload dall'oggetto File del drop
+  // (webUtils.getPathForFile); la pagina NON può passare una stringa e un
+  // File costruito col codice dà '' (qui sotto → rifiuto senza chiamare il
+  // main). Il path non torna MAI indietro al renderer.
+  filesImportDropped: (agentId, dirPath, file, overwrite) => {
+    let fromDrop = ''
     try {
-      return webUtils.getPathForFile(file)
+      fromDrop = webUtils.getPathForFile(file)
     } catch {
-      return null
+      fromDrop = ''
     }
+    if (!fromDrop) return Promise.reject(new Error('not a dropped file'))
+    return ipcRenderer.invoke('files:import-dropped', agentId, dirPath, fromDrop, overwrite)
   },
   // fase 19b (T4): il feed dell'attività del computer del bot
   activityList: (agentId, limit) => ipcRenderer.invoke('activity:list', agentId, limit),

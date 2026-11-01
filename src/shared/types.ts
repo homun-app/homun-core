@@ -691,13 +691,14 @@ export interface SandbotApi {
    */
   filesUpload(agentId: string, dirPath: string): Promise<Array<{ name: string; ok: boolean; skipped?: boolean; bytes?: number }>>
   /**
-   * Fase 19b (T3.2): il file TRASCINATO dal Finder sul pannello — il path
-   * arriva dal drop via webUtils.getPathForFile (preload), mai scelto dal
-   * renderer; exists lo gestisce la UI con «Sostituire?».
+   * Fase 19b (T3.2, correzioni U1): il file TRASCINATO dal Finder sul
+   * pannello — si passa l'oggetto File del drop e il path del Mac lo calcola
+   * SOLO il preload con webUtils.getPathForFile: la pagina non può passare
+   * una stringa (un File costruito col codice dà '' e viene rifiutato) e il
+   * path non torna mai al renderer; exists lo gestisce la UI con
+   * «Sostituire?».
    */
-  filesImportDropped(agentId: string, dirPath: string, macPath: string, overwrite?: boolean): Promise<FilesImportResult>
-  /** fase 19b (T3.2): il path del Mac di un file trascinato (webUtils, preload only) */
-  pathForFile(file: File): string | null
+  filesImportDropped(agentId: string, dirPath: string, file: File, overwrite?: boolean): Promise<FilesImportResult>
   /** fase 19b (T4): le ultime voci del feed Attività della famiglia del bot */
   activityList(agentId: string, limit?: number): Promise<{ owner: string; items: ActivityItem[] }>
   /** fase 19b (T4): la coda dell'output di UNA voce (shell) o l'errore (azione) */

@@ -13,6 +13,7 @@ import * as db from './store/db'
 import { isLaunchAgentInstalled, setLaunchAgent, LAUNCH_AGENT_LABEL } from './launchagent'
 import { daemonEntryPath } from './daemon-client'
 import type { DaemonClient } from './daemon-client'
+import { assertDroppedMacPath } from './dropped-file'
 import type { SandbotEvent } from '../shared/types'
 
 /** Canali inoltrati 1:1 al daemon (nomi = metodi RPC). */
@@ -144,9 +145,12 @@ export function registerIpc(client: DaemonClient, getWindows: () => BrowserWindo
   })
 
   /** files:import-dropped — il file TRASCINATO dal Finder (path dal drop, preload). */
-  ipcMain.handle('files:import-dropped', (_e, agentId: string, dirPath: string, macPath: string, overwrite?: boolean) =>
-    client.call('files:import', [agentId, dirPath, macPath, overwrite === true ? true : undefined])
-  )
+  ipcMain.handle('files:import-dropped', async (_e, agentId: string, dirPath: string, macPath: string, overwrite?: boolean) => {
+    // correzioni U1: il path lo calcola il preload dal File del drop; qui il
+    // controllo in più — assoluto, senza byte nulli, file regolare e NON un symlink
+    await assertDroppedMacPath(macPath)
+    return client.call('files:import', [agentId, dirPath, macPath, overwrite === true ? true : undefined])
+  })
 
   // diagnostica notifiche (F4)
   ipcMain.handle('notify:test', () => {

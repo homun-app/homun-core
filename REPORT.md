@@ -3377,3 +3377,28 @@ Sopra il tag `fase-19a-correzioni-3` (11c6c20). Il pannello laterale della 19a d
 - `npm run i18n:extract`: it 913/en 913, en **0 missing**; **seconda estrazione senza differenze** (verificato con `git status` dei cataloghi).
 
 Niente Docker (immagine NON costruita), nessun modello cloud né rete reale fuori da 127.0.0.1 (l'unico `npm install` è delle due dipendenze xterm), niente `npm run dist`, nessuna app o daemon avviato sulla cartella dati vera, nessun segreto vero. Le cartelle temporanee dei test nuovi sono `mkdtemp` in `/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/` (mai `$TMPDIR` né `os.tmpdir()`), rimosse a fine suite. Nessun file dell'utente, volume (`sandbot-box`/`sandbot-plugins`/`sandbot-browser`) o cartella preesistente cancellati. Il Coding Plan resta vietato: nessun provider `zai` di pi-ai, nessun endpoint `/coding/`.
+
+---
+
+# FASE 19b — correzioni (U1)
+
+Sopra il tag `fase-19b` (947f50f). Il buco di sicurezza del trascinamento: il preload esponeva `pathForFile(file)` e `filesImportDropped(…, macPath)` accettava una **stringa** col path del Mac dal renderer, passata al main senza controlli — il codice della pagina poteva fare `window.sandbot.filesImportDropped(id, '', '/Users/<utente>/.ssh/id_rsa')` e copiare nel box qualsiasi file del Mac, dove il bot lo legge e lo può mandare fuori. La spec (T3.2) voleva che il renderer non potesse MAI scegliere un path del Mac; con una stringa libera la garanzia non c'era. Chiuso per costruzione con lo standard di Electron.
+
+## Tabella U1
+
+| Punto | Stato | Dove | Note |
+|---|---|---|---|
+| **U1** il trascinamento accetta un path del Mac qualsiasi dal renderer (SICUREZZA) | fatto | preload `src/preload/index.ts` (`pathForFile` RIMOSSO, `filesImportDropped` riscritto); `assertDroppedMacPath`/`NOT_A_DROPPED_FILE` in `src/main/dropped-file.ts` (NUOVO) + handler `files:import-dropped` in `src/main/ipc.ts`; `onDrop` in `src/renderer/src/components/ComputerFiles.tsx`; `SandbotApi` in `src/shared/types.ts`; test in `src/daemon/__tests__/computer-ipc-guard.test.ts` (describe U1) e `src/main/__tests__/dropped-file.test.ts` (NUOVO) | **Il confine è il preload:** `filesImportDropped(agentId, dirPath, file: File, overwrite?)` prende l'oggetto **File** dell'evento drop e il path del Mac lo calcola SOLO lì, con `webUtils.getPathForFile(file)`; se è vuoto rifiuta con `Promise.reject(new Error('not a dropped file'))` PRIMA di chiamare il main. Un `File` costruito dalla pagina (`new File([...], 'x')`) dà `''`: si importano solo i file che l'utente ha davvero trascinato (o scelto in un `<input type=file>`, comunque un suo gesto). Il path non torna MAI al renderer (la risposta resta `{ok,name,bytes}` o `{ok:false,reason:'exists',name}`). **Controllo in più del main** (difesa in profondità, NON il confine): `assertDroppedMacPath` richiede path assoluto (`path.isAbsolute`), senza byte nulli e — con `lstat`, che NON segue i link — un file REGOLARE: i symlink si rifiutano, così un link nel Desktop non può puntare a `~/.ssh`. **Renderer:** `onDrop` passa i `File` di `e.dataTransfer.files`; la UI non mostra né conosce il path del Mac, i messaggi («Sostituire?», «Caricato») usano `file.name` (variabile locale `name` nel template, così il placeholder `{name}` dei cataloghi non cambia). **Tipi:** `SandbotApi` senza più `pathForFile`, `filesImportDropped` accetta un `File`. **Test:** di TESTO sul preload nello stile della guard T6 — `pathForFile` assente (preload e tipi), la CHIAMATA `webUtils.getPathForFile(file)` compare UNA volta sola e DENTRO il blocco di `filesImportDropped`, il rifiuto viene PRIMA dell'invoke, l'identificatore `macPath` non esiste nel preload e la firma pubblica prende il `File` — e UNIT della validazione del main: relativo → rifiuto, non stringa → rifiuto, byte nullo → rifiuto, symlink VERO in una `mkdtemp` → rifiuto, cartella → rifiuto, file regolare → passa |
+
+## Cosa NON cambia
+
+Tutto il resto della 19b: terminale, file (dialog del main, confini realpath del box, T0), attività, residui. I test esistenti di `files:import` (`computer-files.test.ts`, `daemon-files.test.ts` e il resto della suite) restano verdi senza una riga toccata.
+
+## Output dei controlli
+
+- `npm run typecheck`: pulito (exit 0).
+- `npx vitest run`: **122 file / 1940 test verdi** (alla 19b: 121/1930: +1 file e +10 test). File NUOVO — `dropped-file.test.ts` 6 (path relativo, non stringa, byte nullo, symlink vero, cartella, file regolare) — più `computer-ipc-guard.test.ts` +4 (describe U1: testi di guardia sul preload e sui tipi).
+- `npm run build`: ✓ built (main/preload/renderer).
+- `npm run i18n:extract`: it 913/en 913, en **0 missing**; **seconda estrazione senza differenze** (verificato con `git status` dei cataloghi: nessun testo dell'interfaccia cambia).
+
+Niente Docker (immagine NON costruita), nessun modello cloud né rete reale fuori da 127.0.0.1, niente `npm run dist`, nessuna app o daemon avviato sulla cartella dati vera, nessun segreto vero. L'unica cartella temporanea dei test nuovi è una `mkdtemp` in `/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/` (mai `$TMPDIR` né `os.tmpdir()`), rimossa a fine suite. Nessun file dell'utente, volume (`sandbot-box`/`sandbot-plugins`/`sandbot-browser`) o cartella preesistente cancellati. Il Coding Plan resta vietato: nessun provider `zai` di pi-ai, nessun endpoint `/coding/`. **L'eval NON è stata lanciata**, come da vincoli. Residuo per il revisore: la prova del trascinamento DAL VIVO (drop dal Finder nella scheda File, Electron vero) va rifatta sull'immagine ricreata.
