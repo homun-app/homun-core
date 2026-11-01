@@ -2,7 +2,7 @@
 // Tutto gira col provider FINTO di pi-ai (fauxProvider): nessuna rete, nessun
 // modello vero. Gli unici socket aperti sono su 127.0.0.1 (il server HTTP finto
 // del test della chiave). Le chiavi sono FINTIE (sk-test-…).
-import { describe, expect, it, beforeAll, afterAll, beforeEach } from 'vitest'
+import { describe, expect, it, beforeAll, afterAll, beforeEach, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -20,7 +20,7 @@ import {
   type Models
 } from '@earendil-works/pi-ai'
 import { stream as ocStream, streamSimple as ocStreamSimple } from '@earendil-works/pi-ai/api/openai-completions'
-import type { ProviderConfig } from '../../../shared/types'
+import type { ProviderConfig, ThinkingSetting } from '../../../shared/types'
 import { streamPi, piLlmStream, toPiContext, openAiCompatBase, ZAI_CONSUMPTION_BASE_URL, piModelFor, piCacheEntryFor, modelCapabilities, catalogModelInfos, imageMimeOf, FAUX_TEST_PROVIDER_ID, fauxTestHandle, LlmProviderError, PiUserAbortError, type PiStreamMeta } from '../llm-pi'
 import { llmStream } from '../llm'
 import { fallbackEligible } from '../model-fallback'
@@ -694,6 +694,94 @@ describe('fase 18b (H1.1): retry di trasporto prima del primo evento (solo mistr
     // nessun retry: la seconda risposta è ancora in coda
     expect(handle.getPendingResponseCount()).toBe(1)
   })
+
+  it('K6: maxRetries 0 (riserve disponibili) → NESSUN retry neanche di H1.1: UNA sola richiesta al filo', async () => {
+    mode = 'always-503'
+    hits.length = 0
+    await expect(drain(llmStream(mistralConfig(), 'mistral-large-latest', [{ role: 'user', content: 'x' }], [], new AbortController().signal, { maxRetries: 0 }))).rejects.toThrow()
+    expect(hits).toHaveLength(1)
+  }, 15_000)
+})
+
+describe('fase 18b K6: il retry dell\'SDK comanda il CHIAMANTE (maxRetries)', () => {
+  // server locale su 127.0.0.1: la PRIMA richiesta risponde 500, le altre
+  // SSE buona — così si vede se l'SDK di pi-ai ritenta davvero
+  let server: Server
+  let port: number
+  let hits: number
+  beforeAll(async () => {
+    server = createServer((req, res) => {
+      hits++
+      if (hits === 1) {
+        res.writeHead(500, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ error: { message: 'boom' } }))
+        return
+      }
+      res.writeHead(200, { 'content-type': 'text/event-stream' })
+      res.end([
+        'data: ' + JSON.stringify({ id: 'x', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { content: 'ok' }, finish_reason: null }] }),
+        '',
+        'data: ' + JSON.stringify({ id: 'x', object: 'chat.completion.chunk', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] }),
+        '',
+        'data: [DONE]',
+        ''
+      ].join('\n'))
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    port = (server.address() as { port: number }).port
+  })
+  afterAll(() => new Promise<void>((resolve) => server.close(() => resolve())))
+
+  /** provider openai-completions (SDK CON retry propri) puntato al finto. */
+  const local = (): ProviderConfig =>
+    ({ id: 'k6-local', name: 'Locale', kind: 'openai-compatible', baseUrl: `http://127.0.0.1:${port}/v1`, apiKey: 'sk-test-k6', enabled: true })
+
+  it('catena di UN anello, 500 poi 200: il turno RIESCE col retry dell\'SDK (maxRetries assente = 2)', async () => {
+    hits = 0
+    const text = await drain(llmStream(local(), 'm1', [{ role: 'user', content: 'x' }], [], new AbortController().signal))
+    expect(text).toBe('ok')
+    expect(hits).toBe(2)
+  }, 15_000)
+
+  it('stesso caso con maxRetries 0: UNA sola richiesta, l\'errore sale al loop (che passa d\'anello)', async () => {
+    hits = 0
+    await expect(drain(llmStream(local(), 'm1', [{ role: 'user', content: 'x' }], [], new AbortController().signal, { maxRetries: 0 }))).rejects.toThrow(/500/)
+    expect(hits).toBe(1)
+  }, 15_000)
+
+  it('maxRetries NON va sul filo: il body con «Predefinito» resta identico byte per byte', async () => {
+    const bodies: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (_u: unknown, init?: { body?: unknown }) => {
+      bodies.push(String(init?.body ?? ''))
+      return new Response(JSON.stringify({ error: { message: 'fine del test K6' } }), { status: 400, headers: { 'content-type': 'application/json' } })
+    }))
+    try {
+      const groq: ProviderConfig = { id: 'k6-groq', name: 'Groq', kind: 'groq', baseUrl: 'http://127.0.0.1:9', apiKey: 'sk-test-groq', enabled: true }
+      await drain(llmStream(groq, 'llama-3.3-70b-versatile', [{ role: 'user', content: 'x' }], [], new AbortController().signal)).catch(() => undefined)
+      await drain(llmStream(groq, 'llama-3.3-70b-versatile', [{ role: 'user', content: 'x' }], [], new AbortController().signal, { maxRetries: 0 })).catch(() => undefined)
+      expect(bodies).toHaveLength(2)
+      expect(bodies[1]).toBe(bodies[0])
+      expect('maxRetries' in (JSON.parse(bodies[0]!) as Record<string, unknown>)).toBe(false)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('l\'adattatore passa maxRetries a pi-ai (assente = 2, non cambia il body: è un\'opzione dell\'SDK)', async () => {
+    const captured: Array<number | undefined> = []
+    const wrap = {
+      streamSimple: (_m: unknown, _c: unknown, opts?: { maxRetries?: number }) => {
+        captured.push(opts?.maxRetries)
+        return (async function* () { /* stream vuoto */ })()
+      }
+    } as unknown as Models
+    for (const o of ([{}, { maxRetries: 0 }, { maxRetries: 3 }] as Array<{ maxRetries?: number }>)) {
+      captured.length = 0
+      const it = streamPi(wrap, piModelFor({ id: 'k6-w', name: 'W', kind: 'groq', baseUrl: 'https://api.groq.com/openai', apiKey: 'sk-test', enabled: true }, 'llama-3.3-70b-versatile'), CATALOG_META, [{ role: 'user', content: 'x' }], [], new AbortController().signal, o)
+      for await (const _ of it) void _ // eslint-disable-line @typescript-eslint/no-unused-vars
+      expect(captured).toEqual([o.maxRetries ?? 2])
+    }
+  })
 })
 
 describe('fase 18b (H1.3): il costo dai prezzi personalizzati ($/1M token)', () => {
@@ -840,13 +928,128 @@ describe('fase 18b (H3): il livello di ragionamento per bot', () => {
       const it = streamPi(wrap, model, meta, [{ role: 'user', content: 'x' }], [], new AbortController().signal, { thinking })
       for await (const _ of it) void _ // eslint-disable-line @typescript-eslint/no-unused-vars
       // 'max' e 'medium' clampano a 'high' (il livello più alto disponibile);
-      // 'off' è un livello valido di pi-ai e passa com'è
-      expect(captured).toEqual([thinking === 'off' ? 'off' : 'high'])
+      // K1: 'off' NON si passa a pi-ai — si omette reasoning, come
+      // «Predefinito» (anthropic-messages altrimenti accenderebbe il
+      // ragionamento con qualunque stringa, 'off' compresa)
+      expect(captured).toEqual([thinking === 'off' ? undefined : 'high'])
     }
     // assente → NESSUNA opzione reasoning: il comportamento della 18a
     captured.length = 0
     const it2 = streamPi(wrap, model, meta, [{ role: 'user', content: 'x' }], [], new AbortController().signal)
     for await (const _ of it2) void _ // eslint-disable-line @typescript-eslint/no-unused-vars
     expect(captured).toEqual([undefined])
+  })
+})
+
+describe('fase 18b K1: «Spento» NON accende il ragionamento (il body è quello di «Predefinito»)', () => {
+  // fetch FINTO (nessuna rete): cattura il body della richiesta e risponde
+  // 400 — per questi test conta SOLO il body sul filo, il 400 chiude lo
+  // stream subito dopo (le risposte buone le verificano i test H3 col server
+  // finto). Per OGNI api di catalogo e per lo zai sintetico.
+  const bodies: string[] = []
+  beforeAll(() => {
+    vi.stubGlobal('fetch', vi.fn(async (_input: unknown, init?: { body?: unknown }) => {
+      bodies.push(String(init?.body ?? ''))
+      return new Response(JSON.stringify({ error: { message: 'fine del test K1' } }), {
+        status: 400,
+        headers: { 'content-type': 'application/json' }
+      })
+    }))
+  })
+  afterAll(() => vi.unstubAllGlobals())
+
+  /** una chiamata llmStream col livello dato → il body catturato (grezzo e JSON). */
+  const wireBody = async (
+    p: ProviderConfig,
+    model: string,
+    thinking?: ThinkingSetting
+  ): Promise<{ raw: string; json: Record<string, unknown> }> => {
+    const i = bodies.length
+    await drain(llmStream(p, model, [{ role: 'user', content: 'x' }], [], new AbortController().signal, thinking ? { thinking } : {}))
+      .catch(() => undefined) // il 400 del finto chiude lo stream: il body è già catturato
+    const raw = bodies[i] ?? ''
+    return { raw, json: JSON.parse(raw || '{}') as Record<string, unknown> }
+  }
+
+  it('anthropic-messages: «Spento» = «Predefinito» AL BYTE, thinking disabled, max_tokens NUMERICO (prima: enabled + null → 400)', async () => {
+    const p: ProviderConfig = { id: 'k1-anthropic', name: 'Anthropic', kind: 'anthropic', baseUrl: 'http://127.0.0.1:9', apiKey: 'sk-test-anthropic', enabled: true }
+    const predefinito = await wireBody(p, 'claude-sonnet-4-5')
+    const spento = await wireBody(p, 'claude-sonnet-4-5', 'off')
+    expect(spento.raw).toBe(predefinito.raw)
+    expect((spento.json.thinking as { type?: string })?.type).toBe('disabled')
+    expect(typeof spento.json.max_tokens).toBe('number')
+  })
+
+  it('anthropic-messages: «Basso» ACCENDE il ragionamento col budget del livello (max_tokens resta numerico)', async () => {
+    const p: ProviderConfig = { id: 'k1-anthropic', name: 'Anthropic', kind: 'anthropic', baseUrl: 'http://127.0.0.1:9', apiKey: 'sk-test-anthropic', enabled: true }
+    const basso = await wireBody(p, 'claude-sonnet-4-5', 'low')
+    const thinking = basso.json.thinking as { type?: string; budget_tokens?: number }
+    expect(thinking?.type).toBe('enabled')
+    expect(thinking?.budget_tokens).toBeGreaterThan(0)
+    expect(typeof basso.json.max_tokens).toBe('number')
+  })
+
+  it('openai-responses (gpt-5.1, supporta «off»): «Spento» = «Predefinito» (reasoning.effort none); «Basso» acceso col livello giusto', async () => {
+    const p: ProviderConfig = { id: 'k1-openai', name: 'OpenAI', kind: 'openai', baseUrl: 'http://127.0.0.1:9', apiKey: 'sk-test-openai', enabled: true }
+    const predefinito = await wireBody(p, 'gpt-5.1')
+    const spento = await wireBody(p, 'gpt-5.1', 'off')
+    expect(spento.raw).toBe(predefinito.raw)
+    expect((spento.json.reasoning as { effort?: string })?.effort).toBe('none')
+    const basso = await wireBody(p, 'gpt-5.1', 'low')
+    expect((basso.json.reasoning as { effort?: string })?.effort).toBe('low')
+  })
+
+  it('openai-responses (gpt-5, SENZA «off»): il livello si ALZA al primo supportato e la UI NON offre «Spento»', async () => {
+    const p: ProviderConfig = { id: 'k1-openai', name: 'OpenAI', kind: 'openai', baseUrl: 'http://127.0.0.1:9', apiKey: 'sk-test-openai', enabled: true }
+    const spento = await wireBody(p, 'gpt-5', 'off')
+    expect((spento.json.reasoning as { effort?: string })?.effort).toBe('minimal')
+    // la UI legge thinkingLevels da modelCapabilities: «Spento» non compare
+    const caps = modelCapabilities(p, 'gpt-5')
+    expect(caps.thinkingLevels).not.toContain('off')
+    expect(caps.thinkingLevels).toContain('minimal')
+  })
+
+  it('openai-completions (deepseek-flash, supporta «off»): «Spento» = «Predefinito» (thinking disabled); «Basso» acceso col livello giusto', async () => {
+    const p: ProviderConfig = { id: 'k1-deepseek', name: 'DeepSeek', kind: 'deepseek', baseUrl: 'http://127.0.0.1:9', apiKey: 'sk-test-deepseek', enabled: true }
+    const predefinito = await wireBody(p, 'deepseek-flash')
+    const spento = await wireBody(p, 'deepseek-flash', 'off')
+    expect(spento.raw).toBe(predefinito.raw)
+    expect((spento.json.thinking as { type?: string })?.type).toBe('disabled')
+    const basso = await wireBody(p, 'deepseek-flash', 'low')
+    expect((basso.json.thinking as { type?: string })?.type).toBe('enabled')
+    expect(basso.json.reasoning_effort).toBe('low')
+  })
+
+  it('mistral-conversations (mistral-medium-latest, supporta «off»): «Spento» = «Predefinito» (reasoning_effort none); «Alto» acceso col livello giusto', async () => {
+    const p: ProviderConfig = { id: 'k1-mistral', name: 'Mistral', kind: 'mistral', baseUrl: 'http://127.0.0.1:9', apiKey: 'sk-test-mistral', enabled: true }
+    const predefinito = await wireBody(p, 'mistral-medium-latest')
+    const spento = await wireBody(p, 'mistral-medium-latest', 'off')
+    expect(spento.raw).toBe(predefinito.raw)
+    expect(spento.json.reasoning_effort).toBe('none')
+    const alto = await wireBody(p, 'mistral-medium-latest', 'high')
+    expect(alto.json.reasoning_effort).toBe('high')
+  })
+
+  it('zai sintetico: «Spento» → "thinking":{"type":"disabled"} (SENZA opzione reasoning a pi-ai); ogni altro livello accende', async () => {
+    // il baseUrl di zai viene riscritto sull'API a consumo: con il fetch
+    // finto la richiesta non esce mai, il body si cattura uguale
+    const p: ProviderConfig = { id: 'k1-zai', name: 'Z.ai', kind: 'zai', baseUrl: 'https://api.z.ai', apiKey: 'sk-test-zai', enabled: true }
+    const spento = await wireBody(p, 'glm-5.3', 'off')
+    expect(spento.json.thinking).toEqual({ type: 'disabled' })
+    const alto = await wireBody(p, 'glm-5.3', 'high')
+    expect(alto.json.thinking).toEqual({ type: 'enabled', clear_thinking: false })
+  })
+
+  it('K1: per anthropic-messages la UI NON offre xhigh/max (i budget di pi-ai si fermano a high); le altre api li tengono', () => {
+    // claude-opus-4-7 ha thinkingLevelMap {xhigh,max} (e forceAdaptiveThinking):
+    // getSupportedThinkingLevels li include, ma non si OFFRONO su quell'api
+    const ant: ProviderConfig = { id: 'k1-anthropic', name: 'Anthropic', kind: 'anthropic', baseUrl: 'http://127.0.0.1:9', apiKey: 'sk-test-anthropic', enabled: true }
+    const caps = modelCapabilities(ant, 'claude-opus-4-7')
+    expect(caps.thinkingLevels).toContain('high')
+    expect(caps.thinkingLevels).not.toContain('xhigh')
+    expect(caps.thinkingLevels).not.toContain('max')
+    // su openai-responses il livello xhigh resta offerto (gpt-5.4 lo sa esprimere)
+    const oai: ProviderConfig = { id: 'k1-openai', name: 'OpenAI', kind: 'openai', baseUrl: 'http://127.0.0.1:9', apiKey: 'sk-test-openai', enabled: true }
+    expect(modelCapabilities(oai, 'gpt-5.4').thinkingLevels).toContain('xhigh')
   })
 })

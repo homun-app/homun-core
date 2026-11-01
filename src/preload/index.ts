@@ -30,6 +30,8 @@ const api: SandbotApi = {
   discoverProviders: () => ipcRenderer.invoke('providers:discover'),
   testProvider: (id) => ipcRenderer.invoke('providers:test', id),
   listModels: (providerId) => ipcRenderer.invoke('models:list', providerId),
+  // fase 18b (K3): le capacità di UN modello (nessun elenco completo in chat)
+  modelCapabilities: (providerId, model) => ipcRenderer.invoke('models:capabilities', providerId, model),
   // fase 18b (H6): uso e costi aggregati (per modello/bot/origine)
   usageSummary: (fromMs, toMs, groupBy) => ipcRenderer.invoke('usage:summary', fromMs, toMs, groupBy),
   // fase 11: chiave per la ricerca web (vault sigillato; il valore non torna mai alla UI)

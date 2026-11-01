@@ -47,7 +47,7 @@ import { stream as ocStream, streamSimple as ocStreamSimple } from '@earendil-wo
 import { stream as orStream, streamSimple as orStreamSimple } from '@earendil-works/pi-ai/api/openai-responses'
 import { stream as amStream, streamSimple as amStreamSimple } from '@earendil-works/pi-ai/api/anthropic-messages'
 import { stream as mcStream, streamSimple as mcStreamSimple } from '@earendil-works/pi-ai/api/mistral-conversations'
-import type { ModelInfo, ModelPriceMap, ProviderConfig, ProviderKind, ThinkingSetting } from '../../shared/types'
+import type { ModelCapabilities, ModelInfo, ModelPriceMap, ProviderConfig, ProviderKind, ThinkingSetting } from '../../shared/types'
 import type { ChatMessage, LlmChunk, LlmStream, StreamOptions, ToolDef, ToolCall } from './llm'
 import { traceLlmCall } from './llm'
 // fase 18b (H5.2): le regole degli URL vivi vivono nel modulo PURO live-models,
@@ -308,20 +308,31 @@ export function fromCatalog(p: ProviderConfig, modelId: string): boolean {
   return piCacheEntryFor(p).catalogIds.has(modelId)
 }
 
-/** Le capacità del modello, come le vede la 18b (H1.2). */
-export interface ModelCapabilities {
-  contextWindow: number
-  /** il modello ci vede? null = sconosciuta (sintetico senza cache Ollama) */
-  vision: boolean | null
-  reasoning: boolean
-  /** il modello usa i tool? null = sconosciuto */
-  tools: boolean | null
-  /** livelli di ragionamento controllabili ([] = non controllabile da noi) */
-  thinkingLevels: ThinkingSetting[]
-  /** prezzo $/1M token (null = sconosciuto o locale) */
-  cost: { input: number; output: number; cacheRead: number; cacheWrite: number } | null
-  costSource: 'catalog' | 'custom' | null
-  fromCatalog: boolean
+/**
+ * Le capacità del modello, come le vede la 18b (H1.2). Il tipo vive in
+ * shared/types.ts (K3: lo restituisce l'RPC models:capabilities); qui si
+ * re-esporta per i chiamanti e i test storici.
+ */
+export type { ModelCapabilities }
+
+/**
+ * K1: i livelli di ragionamento OFFERTI per un modello di catalogo. Su
+ * `anthropic-messages` non si offrono mai `xhigh` e `max` (come fa Rakazo con
+ * compatibleThinkingLevels): in pi-ai 1.4.0 il percorso a BUDGET di quell'api
+ * si ferma a `high` — DEFAULT_THINKING_BUDGETS è {minimal:1024, low:2048,
+ * medium:8192, high:16384} e clampReasoning xhigh/max→high (dist/api/
+ * simple-options.js) — quindi i due livelli in più non cambierebbero nulla.
+ * Vale anche per i modelli adaptivi (compat.forceAdaptiveThinking, che in
+ * catalogo sono opus-4-6+, sonnet-4-6+, fable, haiku-5-5): il loro
+ * thinkingLevelMap mappa xhigh/max a effort nativi, ma la UI li offre lo
+ * stesso clamped: chi li ha salvati continua a funzionare (clampThinkingLevel
+ * li tiene se il modello li sa esprimere), semplicemente non si scelgono più.
+ */
+function offeredThinkingLevels(m: Model<Api>): ThinkingSetting[] {
+  const levels = getSupportedThinkingLevels(m) as ThinkingSetting[]
+  return m.api === 'anthropic-messages'
+    ? levels.filter((l) => l !== 'xhigh' && l !== 'max')
+    : levels
 }
 
 /**
@@ -333,6 +344,7 @@ export interface ModelCapabilities {
  * 4. tutto il resto: sconosciuto (null/null/[]).
  * Il prezzo personalizzato (H1.3) vale quando il modello NON è nel catalogo e
  * il provider NON è locale; il prezzo del catalogo vince sempre.
+ * K1: per anthropic-messages i livelli offerti tolgono xhigh/max.
  */
 export function modelCapabilities(p: ProviderConfig, modelId: string, prices?: ModelPriceMap): ModelCapabilities {
   const entry = piCacheEntryFor(p)
@@ -353,7 +365,7 @@ export function modelCapabilities(p: ProviderConfig, modelId: string, prices?: M
       // un modello non-reasoning non è controllabile da noi: 'off' è il suo
       // comportamento di sempre, non una scelta (getSupportedThinkingLevels
       // restituirebbe ['off'], che dice nulla)
-      thinkingLevels: m.reasoning ? getSupportedThinkingLevels(m) : [],
+      thinkingLevels: m.reasoning ? offeredThinkingLevels(m) : [],
       cost,
       costSource: cost ? 'catalog' : null,
       fromCatalog: true
@@ -406,6 +418,27 @@ export function modelCapabilities(p: ProviderConfig, modelId: string, prices?: M
       : null,
     costSource: custom ? 'custom' : null,
     fromCatalog: false
+  }
+}
+
+/**
+ * Fase 18b (K7): i SOLI dati noti che servono a routeIncompatibility (modulo
+ * PURO model-fallback.ts, che non importa pi-ai) per giudicare se una rotta
+ * può servire il turno. `maxTokens` si legge dal modello pi-ai vero: del
+ * catalogo è il valore della scheda, dei sintetici il valore di comodo — ma
+ * sui sintetici la regola del contesto NON vale (fromCatalog false), quindi
+ * resta il dato vero quando serve.
+ */
+export function routeModelCaps(
+  p: ProviderConfig,
+  modelId: string
+): { fromCatalog: boolean; contextWindow: number; vision: boolean | null; maxTokens: number | undefined } {
+  const caps = modelCapabilities(p, modelId)
+  return {
+    fromCatalog: caps.fromCatalog,
+    contextWindow: caps.contextWindow,
+    vision: caps.vision,
+    maxTokens: caps.fromCatalog ? piModelFor(p, modelId).maxTokens : undefined
   }
 }
 
@@ -641,6 +674,12 @@ function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
  * 'default' o assente → il comportamento della 18a ESATTO (nessuna opzione
  * reasoning, modello invariato). Sui sintetici non-zai il livello si ignora
  * (Ollama via API OpenAI-compatible: residuo di questa fase).
+ * K1: 'off' NON si passa MAI a pi-ai come stringa — nel contratto di
+ * streamSimple «spento» si dice OMITTENDO reasoning: openai-responses,
+ * openai-completions e mistral-conversations convertono a mano 'off' in
+ * undefined, ma anthropic-messages con QUALUNQUE stringa accende il
+ * ragionamento (e manderebbe max_tokens null: errore 400 a ogni turno).
+ * Quindi 'off' → { model } senza reasoning, identico a «Predefinito» sul filo.
  */
 function thinkingModelOf(
   model: Model<Api>,
@@ -650,14 +689,18 @@ function thinkingModelOf(
   if (!thinking || thinking === 'default') return { model }
   if (zai) {
     // zai sintetico: il modello dichiara reasoning e il compat thinkingFormat
-    // 'zai' manda "thinking":{"type":"enabled"|"disabled"} — 'off' → disabled
+    // 'zai' manda "thinking":{"type":"enabled"|"disabled"} — 'off' si dice
+    // SENZA l'opzione reasoning (pi-ai riceve reasoningEffort undefined e
+    // manda disabled), gli altri livelli con reasoning 'high' (→ enabled)
     const clone = { ...model, reasoning: true } as unknown as Model<Api>
-    return thinking === 'off' ? { model: clone, reasoning: 'off' as never } : { model: clone, reasoning: 'high' }
+    return thinking === 'off' ? { model: clone } : { model: clone, reasoning: 'high' }
   }
   if (model.reasoning) {
     // catalogo: clampThinkingLevel porta il livello a quelli che il modello
-    // sa esprimere ('off' è un livello valido di pi-ai)
-    return { model, reasoning: clampThinkingLevel(model, thinking) as SimpleStreamOptions['reasoning'] }
+    // sa esprimere (per un modello senza 'off' il livello si ALZA al primo
+    // supportato, come sempre)
+    const level = clampThinkingLevel(model, thinking)
+    return level === 'off' ? { model } : { model, reasoning: level }
   }
   return { model }
 }
@@ -682,12 +725,17 @@ export function streamPi(
   const chosen = thinkingModelOf(model, opts.thinking, zai && !meta.fromCatalog)
   const streamModel = chosen.model
   const context = toPiContext(messages, tools, { api: streamModel.api, provider: streamModel.provider, model: streamModel.id })
-  // E2.2/E2.5: chiave esplicita, 2 retry come l'SDK openai di oggi,
-  // temperatura (E2.6) quando c'è, ragionamento (H3) quando è scelto
+  // K6: il CHIAMANTE decide i retry dell'SDK — il loop passa 0 quando dopo
+  // l'anello attivo c'è ancora una riserva utilizzabile (il passaggio d'anello
+  // sostituisce il retry); assente = 2, come sempre. NON è un campo del body:
+  // opzione dell'SDK, il body resta identico byte per byte.
+  const sdkMaxRetries = opts.maxRetries ?? 2
+  // E2.2/E2.5: chiave esplicita, temperatura (E2.6) quando c'è, ragionamento
+  // (H3) quando è scelto
   const baseOpts: SimpleStreamOptions = {
     signal,
     apiKey: opts.apiKey,
-    maxRetries: 2,
+    maxRetries: sdkMaxRetries,
     ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
     ...(chosen.reasoning !== undefined ? { reasoning: chosen.reasoning } : {})
   }
@@ -697,8 +745,10 @@ export function streamPi(
     // propri in pi-ai, SOLO prima di qualsiasi evento di contenuto e SOLO su
     // 429/5xx/rete. Dopo il primo evento NON si ritenta mai: il loop ha già
     // mostrato del testo.
+    // K6: col maxRetries a 0 (riserve disponibili) niente retry neanche qui —
+    // la stessa regola del loop: il passaggio d'anello sostituisce il retry.
     const selfRetry = !NO_SELF_RETRY_APIS.has(streamModel.api)
-    const backoffs = [500, 1000]
+    const backoffs = sdkMaxRetries > 0 ? [500, 1000] : []
     for (let attempt = 0; ; attempt++) {
       const eventStream = models.streamSimple(streamModel, context, baseOpts)
       // accumulo dei tool call in ordine di contentIndex: escono TUTTI alla fine

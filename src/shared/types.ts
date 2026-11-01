@@ -392,6 +392,27 @@ export interface ModelPrice {
 /** Setting providers.modelPrices: Record<providerId, Record<modelId, prezzo>>. */
 export type ModelPriceMap = Record<string, Record<string, ModelPrice>>
 
+/**
+ * Fase 18b (H1.2 → K3): le capacità di UN modello, come le vede il daemon.
+ * Vive in shared perché la RPC models:capabilities la restituisce alla UI
+ * (il tipo dell'adattatore pi-ai re-esporta questo). Senza prezzo
+ * personalizzato: `cost`/`costSource` parlano solo del catalogo.
+ */
+export interface ModelCapabilities {
+  contextWindow: number
+  /** il modello ci vede? null = sconosciuta (sintetico senza cache Ollama) */
+  vision: boolean | null
+  reasoning: boolean
+  /** il modello usa i tool? null = sconosciuto */
+  tools: boolean | null
+  /** livelli di ragionamento controllabili ([] = non controllabile da noi) */
+  thinkingLevels: ThinkingSetting[]
+  /** prezzo $/1M token (null = sconosciuto o locale) */
+  cost: { input: number; output: number; cacheRead: number; cacheWrite: number } | null
+  costSource: 'catalog' | 'custom' | null
+  fromCatalog: boolean
+}
+
 /** Fase 18b (H2.1): un anello della catena delle riserve. */
 export interface FallbackRoute {
   providerId: string
@@ -503,6 +524,12 @@ export interface SandbotApi {
   discoverProviders(): Promise<ProviderConfig[]>
   testProvider(id: string): Promise<{ ok: boolean; error?: string; models?: ModelInfo[] }>
   listModels(providerId: string): Promise<ModelInfo[]>
+  /**
+   * Fase 18b (K3): le capacità di UN modello, SENZA l'elenco completo e senza
+   * prezzo personalizzato. Nessuna rete per i provider di catalogo; per
+   * ollama al massimo UNA /api/show (1500 ms) se la cache è vuota.
+   */
+  modelCapabilities(providerId: string, model: string): Promise<ModelCapabilities>
   /**
    * Fase 18b (H6): uso e costi aggregati in una finestra [fromMs, toMs]
    * facoltativa, per modello (default), bot o origine.

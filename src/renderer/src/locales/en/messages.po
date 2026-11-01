@@ -3448,6 +3448,10 @@ msgstr "stdio (local command)"
 msgid "suggerimento routine"
 msgstr "routine suggestion"
 
+#: src/renderer/src/components/Settings.tsx
+msgid "Svuota entrambi i campi per togliere un prezzo."
+msgstr "Clear both fields to remove a price."
+
 #: src/renderer/src/components/Chat.tsx
 #: src/renderer/src/components/RightPanel.tsx
 #: src/renderer/src/components/TaskCard.tsx

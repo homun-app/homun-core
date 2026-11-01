@@ -10,7 +10,7 @@ import { listProviders, saveProviders } from '../store/db'
 import { uiText } from '../ui-language'
 import { UI } from '../../shared/ui-messages'
 import type { ProviderConfig, ProviderKind, ModelInfo } from '../../shared/types'
-import { liveModelsUrl, liveModelsHeaders, ollamaCapabilities, setOllamaCapabilities, isLocalKind, KNOWN_BASE_URLS } from './live-models'
+import { liveModelsUrl, liveModelsHeaders, ollamaCapabilities, setOllamaCapabilities, readOllamaCapabilities, isLocalKind, KNOWN_BASE_URLS } from './live-models'
 
 // fase 18b (H5.2): i base URL noti vivono nel modulo puro live-models (li
 // legge anche l'adattatore); re-esportati per i chiamanti storici
@@ -138,34 +138,18 @@ export async function testProvider(p: ProviderConfig): Promise<{ ok: boolean; er
  * modo standard e non vengono controllati (checked: false).
  * Fase 18b (H5.2): usa la STESSA cache di /api/show dell'elenco vivo — se le
  * capability sono già state lette (elenco, check precedente) non si rifà la
- * chiamata.
+ * chiamata. K3: la lettura passa dall'helper CONDIVISO readOllamaCapabilities
+ * (stessa cache di models:capabilities e del loop), qui con timeout lungo.
  */
 export async function modelSupportsTools(
   p: ProviderConfig,
   model: string
 ): Promise<{ ok: boolean; checked: boolean; error?: string }> {
-  const base = p.baseUrl.replace(/\/+$/, '')
   if (p.kind !== 'ollama') return { ok: true, checked: false }
-  const cached = ollamaCapabilities(p.id, model)
-  if (cached) return cached.includes('tools') ? { ok: true, checked: true } : { ok: false, checked: true, error: uiText(UI.providersNoTools, { model }) }
-  try {
-    const r = await fetch(base + '/api/show', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ model }),
-      signal: AbortSignal.timeout(8000)
-    })
-    if (!r.ok) return { ok: false, checked: true, error: uiText(UI.providersCannotVerify, { model, provider: p.name, error: `HTTP ${r.status}` }) }
-    const j = (await r.json()) as { capabilities?: string[] }
-    const caps = j.capabilities ?? []
-    setOllamaCapabilities(p.id, model, undefined, caps)
-    if (!caps.includes('tools')) {
-      return { ok: false, checked: true, error: uiText(UI.providersNoTools, { model }) }
-    }
-    return { ok: true, checked: true }
-  } catch (e) {
-    return { ok: false, checked: true, error: uiText(UI.providersCannotVerify, { model, provider: p.name, error: e instanceof Error ? e.message : String(e) }) }
-  }
+  const { caps, error } = await readOllamaCapabilities(p, model, 8000)
+  if (!caps) return { ok: false, checked: true, error: uiText(UI.providersCannotVerify, { model, provider: p.name, error: error ?? 'unknown' }) }
+  if (!caps.includes('tools')) return { ok: false, checked: true, error: uiText(UI.providersNoTools, { model }) }
+  return { ok: true, checked: true }
 }
 
 export function getProvider(id: string): ProviderConfig | undefined {

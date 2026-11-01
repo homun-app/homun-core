@@ -113,3 +113,41 @@ export function resetOllamaCapabilities(): void {
   capByDigest.clear()
   digestOf.clear()
 }
+
+/** Il risultato di una lettura /api/show: caps null = non lette (errore/scadenza). */
+export interface OllamaShowResult {
+  caps: string[] | null
+  error?: string
+}
+
+/**
+ * Fase 18b (K3): UNA lettura delle capability di UN modello Ollama via
+ * POST /api/show, che riempie la STESSA cache dell'elenco vivo e del check
+ * dei tool (providerId+nome+digest). Se la voce c'è già, NESSUNA chiamata.
+ * Timeout breve di default (1500 ms) per i chiamanti del turno: se la lettura
+ * fallisce o scade, caps resta null e le capability restano sconosciute.
+ */
+export async function readOllamaCapabilities(
+  p: Pick<ProviderConfig, 'id' | 'baseUrl'>,
+  model: string,
+  timeoutMs = 1500
+): Promise<OllamaShowResult> {
+  const cached = ollamaCapabilities(p.id, model)
+  if (cached) return { caps: cached }
+  const base = (typeof p.baseUrl === 'string' ? p.baseUrl : '').replace(/\/+$/, '')
+  try {
+    const r = await fetch(base + '/api/show', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model }),
+      signal: AbortSignal.timeout(timeoutMs)
+    })
+    if (!r.ok) return { caps: null, error: `HTTP ${r.status}` }
+    const j = (await r.json()) as { capabilities?: string[] }
+    const caps = j.capabilities ?? []
+    setOllamaCapabilities(p.id, model, undefined, caps)
+    return { caps }
+  } catch (e) {
+    return { caps: null, error: e instanceof Error ? e.message : String(e) }
+  }
+}

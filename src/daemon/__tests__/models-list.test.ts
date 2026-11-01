@@ -6,8 +6,9 @@ import { describe, expect, it, beforeAll, beforeEach, afterAll, vi, afterEach } 
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { createServer, type Server } from 'node:http'
-import type { SandbotEvent, ModelInfo, ProviderConfig } from '../../shared/types'
+import type { SandbotEvent, ModelInfo, ModelCapabilities, ProviderConfig } from '../../shared/types'
 import { setDataDir, dataDir, db, saveProviders, setSetting, recordModelUsage } from '../../main/store/db'
+import { resetOllamaCapabilities } from '../../main/agent/live-models'
 import { buildApiMethods } from '../api'
 import type { JobWorker } from '../worker'
 
@@ -126,5 +127,59 @@ describe('usage:summary (H6.1): la RPC con groupBy', () => {
     expect(all.every((r) => r.model !== '' && r.agentId === null)).toBe(true)
     const windowed = api['usage:summary']!([150, undefined]) as Array<Record<string, unknown>>
     expect(windowed.map((r) => r.model)).toEqual(['altro'])
+  })
+})
+
+describe('models:capabilities (K3): le capacità di UN modello, senza elenco completo', () => {
+  let ollama: Server
+  let oport = 0
+  const showHits: string[] = []
+
+  // un Ollama FINTO su 127.0.0.1: /api/show risponde capability SENZA vision
+  beforeAll(async () => {
+    ollama = createServer((req, res) => {
+      showHits.push(req.url ?? '')
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ capabilities: ['completion', 'tools'] }))
+    })
+    await new Promise<void>((resolve) => ollama.listen(0, '127.0.0.1', resolve))
+    oport = (ollama.address() as { port: number }).port
+  })
+  afterAll(() => new Promise<void>((resolve) => ollama.close(() => resolve())))
+  beforeEach(() => resetOllamaCapabilities())
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('provider di CATALOGO: NESSUNA rete (il fetch finto fa fallire il test se viene chiamato)', async () => {
+    saveProviders([groqAt('https://api.groq.com/openai')])
+    const fetchFinto = vi.fn(async () => { throw new Error('rete NON attesa: models:capabilities non chiama il vivo') })
+    vi.stubGlobal('fetch', fetchFinto)
+    const caps = await api['models:capabilities']!(['g-live', 'llama-3.3-70b-versatile']) as ModelCapabilities
+    expect(fetchFinto).not.toHaveBeenCalled()
+    expect(caps.fromCatalog).toBe(true)
+    expect(caps.vision).toBe(false) // il flag del catalogo, senza leggere il vivo
+    expect(caps.thinkingLevels).toEqual([]) // modello non-reasoning: non controllabile
+  })
+
+  it('ollama finto: vision FALSE letta dalla /api/show; UNA sola lettura per due chiamate di fila', async () => {
+    saveProviders([{ id: 'o-k3', name: 'Ollama', kind: 'ollama', baseUrl: `http://127.0.0.1:${oport}`, apiKey: '', enabled: true }])
+    const c1 = await api['models:capabilities']!(['o-k3', 'kimi-k3:cloud']) as ModelCapabilities
+    const c2 = await api['models:capabilities']!(['o-k3', 'kimi-k3:cloud']) as ModelCapabilities
+    expect(showHits).toEqual(['/api/show']) // la cache ha evitato la seconda
+    expect(c1.vision).toBe(false)
+    expect(c1.tools).toBe(true)
+    expect(c2.vision).toBe(false)
+  })
+
+  it('ollama SPENTO: vision null ENTRO 2 s (lettura fallita o scaduta, errori ignorati)', async () => {
+    saveProviders([{ id: 'o-off', name: 'Ollama', kind: 'ollama', baseUrl: 'http://127.0.0.1:1', apiKey: '', enabled: true }])
+    const t0 = Date.now()
+    const caps = await api['models:capabilities']!(['o-off', 'kimi-k3:cloud']) as ModelCapabilities
+    expect(Date.now() - t0).toBeLessThan(2000)
+    expect(caps.vision).toBeNull()
+    expect(caps.tools).toBeNull()
+  })
+
+  it('provider inesistente → uiError', async () => {
+    await expect(api['models:capabilities']!(['manca', 'm'])).rejects.toThrow()
   })
 })

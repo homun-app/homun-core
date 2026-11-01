@@ -128,6 +128,15 @@ export interface StreamOptions {
    * prezzo si registra al momento della chiamata: cambiarlo non riscrive lo storico.
    */
   modelPrices?: import('../../shared/types').ModelPriceMap
+  /**
+   * Fase 18b (K6): retry di trasporto dell'SDK dentro pi-ai. Il loop lo mette
+   * a 0 quando dopo l'anello attivo c'è ancora una riserva utilizzabile: il
+   * passaggio d'anello sostituisce il retry (l'SDK rispetta retry-after fino
+   * a 60 s e il turno aspetterebbe fino a ~2 minuti su un provider senza
+   * quota). Assente = 2, come sempre. NON va mai sul filo: è un'opzione
+   * dell'SDK, non un campo del body.
+   */
+  maxRetries?: number
 }
 
 /**

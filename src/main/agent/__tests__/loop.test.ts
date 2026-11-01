@@ -20,8 +20,9 @@ const h = vi.hoisted(() => {
     // untrusted/automatic = origine del turno che li ha creati
     tasks: [] as Array<{ id: number; agent_id: string; title: string; status: string; created_at: number; updated_at: number; summary: string | null; untrusted?: number; automatic?: number }>,
     // fase 10 (residuo 0e): provider attivi (notice di onboarding del loop);
-    // fase 10: anche kind e default, per i test di create_agent
-    providers: [] as Array<{ id: string; enabled: boolean; kind?: string }>,
+    // fase 10: anche kind e default, per i test di create_agent; K3: baseUrl
+    // facoltativo per puntare il provider mockato a un server finto
+    providers: [] as Array<{ id: string; enabled: boolean; kind?: string; baseUrl?: string }>,
     // fase 10: stato in-memory dello store dei gruppi (mock di ../../store/groups)
     groupsState: {
       groups: [] as Array<{ id: number; name: string; description: string; created_by: string; coordinator_id: string | null; created_at: number }>,
@@ -45,7 +46,7 @@ const h = vi.hoisted(() => {
     models: [] as string[],
     // fase 18b (H2/H3): il provider di ogni chiamata e le opzioni dello stream
     provIds: [] as string[],
-    opts: [] as Array<{ thinking?: string; modelPrices?: unknown }>,
+    opts: [] as Array<{ thinking?: string; modelPrices?: unknown; maxRetries?: number }>,
     gates: new Set<{ resolve: () => void }>(),
     // fase 8: risposta del revisore delle approvazioni (chiamata separata col
     // tool report_decision — non consuma la coda delle risposte del turno;
@@ -234,10 +235,11 @@ vi.mock('../../store/jobs', () => ({
 vi.mock('../providers', () => ({
   getProvider: (id: string) => {
     // fase 10: i test possono definire i provider in h.db.providers (col kind,
-    // per i default di modello di create_agent); 'prov' resta il fisso di sempre
+    // per i default di modello di create_agent); 'prov' resta il fisso di sempre.
+    // K3: baseUrl facoltativo (il test della visione Ollama punta al finto)
     const p = h.db.providers.find((x) => x.id === id)
     if (p) {
-      return { id: p.id, name: 'test', kind: (p.kind ?? 'openai-compatible') as 'openai-compatible' | 'ollama', baseUrl: 'http://localhost', apiKey: '', enabled: true }
+      return { id: p.id, name: 'test', kind: (p.kind ?? 'openai-compatible') as 'openai-compatible' | 'ollama', baseUrl: p.baseUrl ?? 'http://localhost', apiKey: '', enabled: true }
     }
     return id === 'prov'
       ? { id: 'prov', name: 'test', kind: 'openai-compatible' as const, baseUrl: 'http://localhost', apiKey: '', enabled: true }
@@ -392,14 +394,15 @@ vi.mock('../llm', () => ({
     messages: Array<{ role: string; content: string; toolCallId?: string; images?: string[]; toolCalls?: unknown[] }>,
     tools: unknown[] = [],
     _signal?: unknown,
-    _opts?: { thinking?: string; modelPrices?: unknown }
+    _opts?: { thinking?: string; modelPrices?: unknown; maxRetries?: number }
   ) => {
     h.llm.calls.push(messages.map((m) => ({ role: m.role, content: m.content, toolCallId: m.toolCallId, images: m.images, toolCalls: m.toolCalls })))
     // fase 9 (punto 1): quale modello è stato usato per questa chiamata;
     // fase 18b (H2/H3): anche il provider e le opzioni (thinking, prezzi)
+    // fase 18b (K6): anche maxRetries (0 = il passaggio d'anello sostituisce il retry)
     h.llm.models.push(String(_model))
     h.llm.provIds.push(String((_p as { id?: string })?.id ?? ''))
-    h.llm.opts.push({ thinking: _opts?.thinking, modelPrices: _opts?.modelPrices })
+    h.llm.opts.push({ thinking: _opts?.thinking, modelPrices: _opts?.modelPrices, maxRetries: _opts?.maxRetries })
     // fase 8: la chiamata del REVISORE (solo tool report_decision) risponde da
     // h.llm.reviewer senza toccare la coda del turno
     if ((tools as Array<{ name?: string }>).some((t) => t?.name === 'report_decision')) {
@@ -644,6 +647,8 @@ vi.mock('../../mcp', () => ({
 const { runTurn, isRunning, resolveApproval, supersedeIfPaused, interrupt, RECOVERY_NUDGE } = await import('../loop')
 // fase 18b (H2.3): il raffreddamento delle rotte è in memoria nel modulo
 const { resetRouteHealth } = await import('../route-health')
+// fase 18b (K3): la cache delle capability Ollama vive nel modulo live-models
+const { resetOllamaCapabilities } = await import('../live-models')
 // correzione E2: il tetto per catena dello scheduler (test del recupero)
 const { GROUP_MEMBER_CHAIN_POSTS_MAX } = await import('../group-turns')
 // il modulo mcp mockato (per patcharne callTool nel test della card Riconnetti)
@@ -4923,11 +4928,9 @@ describe('fase 18b (H4): la visione conosciuta', () => {
     expect(seen[0]!.some((n) => n === 'use-app')).toBe(false)
   })
 
-  it('la riserva porta a un modello senza visione a metà turno: use-app resta in lista ma la chiamata riceve l\'errore inglese', async () => {
+  it('K7: la riserva SENZA visione si SALTA già al passaggio d\'anello (prima ci arrivava e il gate inglese rifiutava use-app a metà turno)', async () => {
     h.db.providers.push({ id: 'prov', enabled: true, kind: 'groq' })
     h.db.settings.set('providers.modelDefaults', { prov: { fallbackModel: 'llama-3.3-70b-versatile' } })
-    // il gate non deve chiedere: use-app qui NON si esegue davvero (lo
-    // intercetta il filtro della visione prima dell'esecuzione)
     h.db.settings.set('permissions', {
       default: 'needs_approval',
       rules: [
@@ -4935,20 +4938,24 @@ describe('fase 18b (H4): la visione conosciuta', () => {
         { tool: 'use-app', pattern: '*', mode: 'always_allow' }
       ]
     })
-    // il primario m1 ha vision sconosciuta → use-app offerto; poi 502 → riserva senza visione
-    h.llm.queue = [
-      { error: httpError503() },
-      { toolCalls: [{ id: 'ua1', name: 'use-app', arguments: JSON.stringify({ action: 'screenshot' }) }] },
-      { text: 'fine' }
-    ]
-    await runTurn(AGENT, 'clicca', emit)
-    // il primario ha fallito, TUTTE le chiamate dopo girano sul modello senza visione
-    expect(h.llm.models[0]).toBe('m1')
-    expect(h.llm.models.slice(1).every((m) => m === 'llama-3.3-70b-versatile')).toBe(true)
-    const res = h.db.entries.find((e) => e.kind === 'tool-result' && e.meta?.callId === 'ua1')
-    expect(res).toBeTruthy()
-    expect(res!.content).toBe('use-app needs a vision model; the current model cannot see images')
-    expect(res!.meta!.error).toBe(true)
+    // il primario m1 ha vision sconosciuta → use-app offerto; poi 503 → la
+    // riserva senza visione NON può servire il turno (K7): si salta e il
+    // turno chiude con l'errore originale. Il gate del tool resta come
+    // difesa (il messaggio inglese non cambia), ma non si raggiunge più da qui
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined)
+    try {
+      h.llm.queue = [
+        { error: httpError503() },
+        { toolCalls: [{ id: 'ua1', name: 'use-app', arguments: JSON.stringify({ action: 'screenshot' }) }] },
+        { text: 'fine' }
+      ]
+      await runTurn(AGENT, 'clicca', emit)
+      expect(h.llm.models).toEqual(['m1'])
+      expect(h.db.entries.some((e) => e.kind === 'event' && e.meta?.turnEnd === 'STOPPED')).toBe(true)
+      expect(log.mock.calls.some((c) => String(c[0]).includes('cannot see the images'))).toBe(true)
+    } finally {
+      log.mockRestore()
+    }
   })
 
   it('immagini in ingresso con vision FALSA → notice imagesNotSeen (il segnaposto al modello resta)', async () => {
@@ -4960,6 +4967,49 @@ describe('fase 18b (H4): la visione conosciuta', () => {
     expect((notice!.meta!.ui as { values?: Record<string, unknown> }).values).toMatchObject({ model: 'llama-3.3-70b-versatile' })
     // il segnaposto NON si toglie: l'immagine va comunque al modello (decide il server)
     expect(h.llm.calls[0]!.some((m) => m.role === 'user' && (m.images?.length ?? 0) > 0)).toBe(true)
+  })
+
+  it('K3: ollama con cache VUOTA → UNA /api/show prima della visione; il modello senza visione NON offre use-app', async () => {
+    // server finto su 127.0.0.1: /api/show risponde capability SENZA vision
+    const hits: string[] = []
+    const server = (await import('node:http')).createServer((req, res) => {
+      hits.push(req.url ?? '')
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ capabilities: ['completion', 'tools'] }))
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const port = (server.address() as { port: number }).port
+    resetOllamaCapabilities()
+    try {
+      // il bot sul provider OLLAMA puntato al finto (cache delle capability vuota)
+      h.db.providers.push({ id: 'prov', enabled: true, kind: 'ollama', baseUrl: `http://127.0.0.1:${port}` })
+      const seen: string[][] = []
+      h.llm.queue = [
+        (_msgs: unknown, tools: unknown) => {
+          seen.push((tools as Array<{ name: string }>).map((t) => t.name))
+          return { text: 'ok' }
+        }
+      ]
+      await runTurn(AGENT, 'ciao', emit)
+      // la lettura c'è stata, UNA sola, e la visione FALSA ha tolto use-app
+      expect(hits).toEqual(['/api/show'])
+      expect(seen[0]!.some((n) => n === 'use-app')).toBe(false)
+      // il secondo turno NON rifà la /api/show (la cache del modulo è piena)
+      hits.length = 0
+      seen.length = 0
+      h.llm.queue = [
+        (_msgs: unknown, tools: unknown) => {
+          seen.push((tools as Array<{ name: string }>).map((t) => t.name))
+          return { text: 'ok' }
+        }
+      ]
+      await runTurn(AGENT, 'ancora', emit)
+      expect(hits).toEqual([])
+      expect(seen[0]!.some((n) => n === 'use-app')).toBe(false)
+    } finally {
+      resetOllamaCapabilities()
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
   })
 })
 
@@ -5007,3 +5057,142 @@ function httpError503(): Error {
   ;(e as Error & { status?: number }).status = 503
   return e
 }
+
+describe('fase 18b K6: niente retry dell\'SDK quando c\'è una riserva dietro', () => {
+  const mkSend = (id: string, text: string): FakeToolCall => ({ id, name: 'send_to_user', arguments: JSON.stringify({ text }) })
+  const setChain = (chain: Array<{ providerId: string; model: string }>): void => {
+    h.db.settings.set('models.fallbackChain', chain)
+  }
+
+  it('catena di 2 anelli, A dà SEMPRE 500: A riceve UNA sola richiesta (maxRetries 0: il passaggio d\'anello sostituisce il retry), poi B consegna', async () => {
+    h.db.providers.push({ id: 'prov2', enabled: true, kind: 'openai-compatible' })
+    setChain([{ providerId: 'prov2', model: 'm2' }])
+    h.llm.queue = [
+      { error: httpError503() },
+      { toolCalls: [mkSend('k6a', 'dalla riserva')] },
+      { text: 'chiuso' }
+    ]
+    await runTurn(AGENT, 'ciao', emit)
+    // UNA chiamata su A (il retry dell'SDK è SPENTO), poi due su B
+    expect(h.llm.models).toEqual(['m1', 'm2', 'm2'])
+    expect(h.llm.opts[0]!.maxRetries).toBe(0)
+    // B è l'ULTIMO anello utile: per lui il retry resta (assente = 2)
+    expect(h.llm.opts[1]!.maxRetries).toBeUndefined()
+    expect(h.db.entries.find((e) => e.kind === 'send-message')!.content).toBe('dalla riserva')
+  })
+
+  it('catena di UN solo anello, A 500 poi 200: maxRetries resta 2 (assente) — senza riserve un blip merita il retry', async () => {
+    // (il retry VERO dell'SDK lo prova il test sul filo in llm-pi.test.ts,
+    // describe K6: qui si verifica che il loop NON lo spenga)
+    h.llm.queue = [{ error: httpError503() }, { text: 'ok' }]
+    await runTurn(AGENT, 'ciao', emit)
+    expect(h.llm.models).toEqual(['m1'])
+    expect(h.llm.opts[0]!.maxRetries).toBeUndefined()
+    expect(h.db.entries.some((e) => e.kind === 'event' && e.meta?.stopReason === 'model-error')).toBe(true)
+  })
+
+  it('con B RAFFREDDATO, A è l\'ultimo anello utile: maxRetries torna 2 (assente)', async () => {
+    h.db.providers.push({ id: 'prov2', enabled: true, kind: 'openai-compatible' })
+    setChain([{ providerId: 'prov2', model: 'm2' }])
+    // primo turno: A 500 → B 500 → entrambi in pausa (60 s ciascuno)
+    h.llm.queue = [{ error: httpError503() }, { error: httpError503() }]
+    await runTurn(AGENT, 'uno', emit)
+    expect(h.llm.opts[0]!.maxRetries).toBe(0)
+    // B era l'ultimo anello utile già nella sua chiamata
+    expect(h.llm.opts[1]!.maxRetries).toBeUndefined()
+    // secondo turno: parte da A (primary, meglio un tentativo che un turno
+    // muto) e B è raffreddato → NESSUN anello utilizzabile dietro: retry attivo
+    h.llm.queue = [{ text: 'ok' }]
+    await runTurn(AGENT, 'due', emit)
+    expect(h.llm.models[h.llm.models.length - 1]).toBe('m1')
+    expect(h.llm.opts[2]!.maxRetries).toBeUndefined()
+  })
+})
+
+describe('fase 18b K7: le riserve incompatibili si saltano (senza raffreddarle)', () => {
+  const mkSend = (id: string, text: string): FakeToolCall => ({ id, name: 'send_to_user', arguments: JSON.stringify({ text }) })
+
+  /** catena [A sintetico 500, B gpt-4 del catalogo openai (ctx 8192 = max 8192), C sintetico] */
+  const setK7Chain = (): void => {
+    h.db.providers.push({ id: 'openai-k7', enabled: true, kind: 'openai' })
+    h.db.providers.push({ id: 'prov3', enabled: true, kind: 'openai-compatible' })
+    h.db.settings.set('models.fallbackChain', [
+      { providerId: 'openai-k7', model: 'gpt-4' },
+      { providerId: 'prov3', model: 'm3' }
+    ])
+  }
+
+  it('A dà 500, B ha il contesto troppo piccolo, C consegna: B NON riceve chiamate e NON si raffredda', async () => {
+    setK7Chain()
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined)
+    try {
+      // conversazione LUNGA: la stima + la riserva d'uscita (min(8192, 8192)) +
+      // il margine superano la finestra 8192 di gpt-4 (di catalogo)
+      h.llm.queue = [
+        { error: httpError503() },
+        { toolCalls: [mkSend('k7a', 'dalla terza')] },
+        { text: 'chiuso' }
+      ]
+      await runTurn(AGENT, 'x'.repeat(60_000), emit)
+      // A ha fallito, B era incompatibile: si passa DIRETTAMENTE a C
+      expect(h.llm.models).toEqual(['m1', 'm3', 'm3'])
+      expect(h.llm.provIds).toEqual(['prov', 'prov3', 'prov3'])
+      // il motivo dello scarto finisce nel log del daemon (inglese, senza testo)
+      const line = log.mock.calls.map((c) => String(c[0])).find((s) => s.includes('fallback skipped'))
+      expect(line).toMatch(/openai-k7\/gpt-4/)
+      expect(line).toMatch(/context window 8192 too small/)
+      // B NON si raffredda (solo chi FALLISCE si raffredda); A sì
+      const { isCooled } = await import('../route-health')
+      expect(isCooled({ providerId: 'openai-k7', model: 'gpt-4' }, Date.now())).toBe(false)
+      expect(isCooled({ providerId: 'prov', model: 'm1' }, Date.now())).toBe(true)
+      expect(h.db.entries.find((e) => e.kind === 'send-message')!.content).toBe('dalla terza')
+    } finally {
+      log.mockRestore()
+    }
+  })
+
+  it('TUTTI gli anelli successivi incompatibili → il turno chiude con l\'errore ORIGINALE, come senza riserve', async () => {
+    h.db.providers.push({ id: 'openai-k7', enabled: true, kind: 'openai' })
+    h.db.settings.set('models.fallbackChain', [{ providerId: 'openai-k7', model: 'gpt-4' }])
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined)
+    try {
+      h.llm.queue = [{ error: httpError503() }]
+      await runTurn(AGENT, 'x'.repeat(60_000), emit)
+      // nessuna chiamata a B, il turno chiude STOPPED con l'errore di A
+      expect(h.llm.models).toEqual(['m1'])
+      expect(h.db.entries.some((e) => e.kind === 'event' && e.meta?.turnEnd === 'STOPPED')).toBe(true)
+      expect(log.mock.calls.some((c) => String(c[0]).includes('context window 8192 too small'))).toBe(true)
+    } finally {
+      log.mockRestore()
+    }
+  })
+
+  it('una riserva senza VISIONE si salta quando il turno ha immagini (use-app offerto)', async () => {
+    // gpt-4 è anche senza visione, ma qui conta la REGOLA: con una
+    // conversazione CORTA il contesto ci sta e scatta solo quella delle immagini
+    h.db.providers.push({ id: 'groq-k7', enabled: true, kind: 'groq' })
+    h.db.settings.set('models.fallbackChain', [{ providerId: 'groq-k7', model: 'llama-3.3-70b-versatile' }])
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined)
+    try {
+      // il modello attivo (m1, sintetico) ha vision sconosciuta → use-app è
+      // nei tool offerti → la riserva che non vede si salta
+      const seenTools: string[][] = []
+      const origQueue = h.llm.queue
+      h.llm.queue = [
+        (_msgs: unknown, tools: unknown): FakeResp => {
+          seenTools.push((tools as Array<{ name: string }>).map((t) => t.name))
+          return { error: httpError503() }
+        }
+      ]
+      await runTurn(AGENT, 'ciao', emit)
+      h.llm.queue = origQueue
+      expect(h.llm.models).toEqual(['m1'])
+      expect(seenTools[0]!.some((n) => n === 'use-app')).toBe(true)
+      const line = log.mock.calls.map((c) => String(c[0])).find((s) => s.includes('fallback skipped'))
+      expect(line).toMatch(/groq-k7\/llama-3\.3-70b-versatile/)
+      expect(line).toMatch(/cannot see the images/)
+    } finally {
+      log.mockRestore()
+    }
+  })
+})

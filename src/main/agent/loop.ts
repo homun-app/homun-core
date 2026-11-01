@@ -28,7 +28,7 @@ import { buildMessages, visibleReplyEntries } from './history'
 import { planResume, INTERRUPTED_TOOL_RESULT } from './resume'
 import { isExternalSend, draftFromExternalCall, prepareDraft, DEFAULT_EXTERNAL_SEND_TOOLS, type ExternalSendConfig } from './external-send'
 import { normalizeOptions, findDismissibleWidgets } from './widgets'
-import { buildMemorySection } from './memory'
+import { buildMemorySection, estimateTokensOf } from './memory'
 import { buildSkillsSection } from './skills'
 import { maybeCompactHistory, summarizeWithLlm } from './compaction'
 import { automationEventText } from './update-state'
@@ -46,10 +46,13 @@ import { deliveredResultText, alreadyDeliveredResult, isDuplicateSend, isWorkToo
 // provider+modello (modello dei router LLM maturi); il raffreddamento (H2.3)
 // tiene in pausa chi ha appena fallito, in memoria nel processo del daemon
 import { type ModelDefaultsMap } from './model-defaults'
-import { routeChain, nextRoute, fallbackEligible, type Route } from './model-fallback'
+import { routeChain, nextRoute, fallbackEligible, routeIncompatibility, type Route } from './model-fallback'
 import { coolDown, isCooled, cooledUntil, markHealthy } from './route-health'
 // fase 18b (H4): la visione conosciuta del modello del turno (use-app, immagini)
-import { modelCapabilities } from './llm-pi'
+// fase 18b (K3): la lettura delle capability Ollama prima di calcolare la visione
+// fase 18b (K7): i dati noti di un anello per la regola pura routeIncompatibility
+import { modelCapabilities, routeModelCaps } from './llm-pi'
+import { readOllamaCapabilities } from './live-models'
 import type { ThinkingSetting } from '../../shared/types'
 // fase 10: gruppi (store) e regole del turno di gruppo (puro); correzioni C1-C3;
 // correzione E2 (terzo giro): il recupero dei turni di gruppo finiti con la
@@ -1144,6 +1147,14 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     // CHIAMANTE (l'adattatore non legge lo store: nessun ciclo di import)
     const modelPrices = getSetting<import('../../shared/types').ModelPriceMap>('providers.modelPrices', {})
 
+    // fase 18b (K3): dopo un riavvio la cache delle capability Ollama è vuota
+    // finché qualcuno non apre le Impostazioni; senza questa lettura un
+    // modello senza visione avrebbe vision null e H4 non scattarebbe mai. UNA
+    // sola /api/show per modello per vita del daemon (stesso helper e stessa
+    // cache dell'elenco e del check dei tool), 1500 ms al massimo, errori
+    // ignorati: la visione resta sconosciuta, come prima
+    if (activeProvider.kind === 'ollama') await readOllamaCapabilities(activeProvider, activeRoute.model)
+
     // fase 18b (H4): visione conosciuta FALSA del modello del turno → use-app
     // (l'unico tool che restituisce images) non viene offerto. Con vision
     // sconosciuta (null) tutto resta come prima. Se la riserva cambia modello
@@ -1165,6 +1176,24 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     // use-app della visione, così anche il recupero non lo offre)
     let turnTools = allTools
 
+    // fase 18b (K7): la regola pura sugli anelli CANDIDATI (i > chainIdx, li
+    // valuta nextRoute quando l'anello attivo fallisce). Il bisogno del turno
+    // si legge AL MOMENTO del passaggio: i messaggi crescono a ogni passo. Il
+    // motivo dello scarto finisce nel log del daemon (inglese, SOLO numeri:
+    // mai testo dei messaggi); l'anello scartato NON si raffredda — al turno
+    // dopo, o con una conversazione più corta, resta utilizzabile.
+    const routeIncompatible = (r: Route): string | null => {
+      const rp = providerById(r.providerId)
+      if (!rp) return null
+      const need = {
+        inputTokens: messages.reduce((n, m) => n + estimateTokensOf(m.content), 0),
+        needsImages: messages.some((m) => m.role === 'user' && m.images?.length) || turnTools.some((t) => t.name === 'use-app')
+      }
+      const reason = routeIncompatibility(routeModelCaps(rp, r.model), need)
+      if (reason) console.log(`[sandbot] fallback skipped (incompatible): ${r.providerId}/${r.model}: ${reason}`)
+      return reason
+    }
+
     setStatus(agentId, 'thinking', emit)
 
     let awaitingUser = false
@@ -1178,9 +1207,18 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       const streamAbort = new AbortController()
       const onTurnAbort = (): void => streamAbort.abort()
       controller.signal.addEventListener('abort', onTurnAbort)
+      // fase 18b (K6): se dopo l'anello attivo c'è almeno un anello ancora
+      // utilizzabile (i > chainIdx NON raffreddato), niente retry dell'SDK
+      // (maxRetries: 0): il passaggio d'anello sostituisce il retry e il turno
+      // non aspetta i backoff dell'SDK (fino a ~2 minuti con retry-after su un
+      // provider che ha già finito la quota). Sull'ULTIMO anello utile resta il
+      // default (2): senza riserve un blip di rete merita il retry. maxRetries
+      // NON va sul filo: è un'opzione dell'SDK, il body non cambia.
+      const usableAhead = chain.some((r, i) => i > chainIdx && !isCooled(r, Date.now()))
       const stream = llmStream(activeProvider, activeRoute.model, messages, turnTools, AbortSignal.any([controller.signal, streamAbort.signal]), {
         thinking: turnThinking,
-        modelPrices
+        modelPrices,
+        ...(usableAhead ? { maxRetries: 0 } : {})
       })
       // fase 3: il testo libero è ragionamento interno, non una risposta
       const entry = add({ agentId, kind: 'thinking', role: 'assistant', content: '' })
@@ -1247,7 +1285,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           current: chainIdx,
           switches: routeSwitches,
           cooled: (r) => isCooled(r, Date.now()),
-          aborted: controller.signal.aborted
+          aborted: controller.signal.aborted,
+          // K7: gli anelli incompatibili si saltano senza raffreddarli
+          incompatible: routeIncompatible
         })
         if (next !== null) {
           routeSwitches++
@@ -2718,8 +2758,6 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         // visione conosciuta FALSA a metà turno — use-app è RESTATO nella
         // lista (non si cambia la lista a metà turno), ma la chiamata non si
         // esegue: il modello non può vedere lo screenshot che riceverebbe
-        if (call.name === 'use-app') {
-        }
         if (call.name === 'use-app' && modelCapabilities(activeProvider, activeRoute.model).vision === false) {
           const refused = 'use-app needs a vision model; the current model cannot see images'
           messages.push({ role: 'tool', toolCallId: call.id, content: refused })

@@ -34,6 +34,8 @@ import type { ConnectorsManager } from '../main/connectors'
 import type { Presence } from './presence'
 import type { Onboarding } from './onboarding'
 import type { SandbotEvent, SendMessagePayload, McpServerInfo, McpServerSecret, RoutineInfo, RoutineTrigger, AutoReviewSettings, ModelInfo, ModelPriceMap, ThinkingSetting } from '../shared/types'
+// fase 18b (K3): la lettura /api/show condivisa col check dei tool e col loop
+import { readOllamaCapabilities } from '../main/agent/live-models'
 import { DEFAULT_AUTO_REVIEW } from '../shared/types'
 // fase 17c (C2/C3): testi del catalogo UI — errori RPC nella lingua
 // dell'interfaccia, meta.ui sui messaggi [sistema] (il testo per il modello
@@ -1186,6 +1188,16 @@ export function buildApiMethods(
           costSource: caps.costSource
         }
       })
+    },
+    // fase 18b (K3): le capacità di UN modello, SENZA l'elenco completo — per
+    // i provider di catalogo nessuna rete (solo modelCapabilities); per
+    // ollama, con la cache vuota, UNA sola /api/show per quel modello
+    // (helper condiviso col check dei tool, 1500 ms; errori ignorati → null)
+    'models:capabilities': async ([providerId, model]) => {
+      const p = providers.getProvider(providerId as string)
+      if (!p) throw uiError(UI.rpcProviderNotFoundLower)
+      if (p.kind === 'ollama') await readOllamaCapabilities(p, model as string)
+      return modelCapabilities(p, model as string)
     },
     // fase 18a (E4) → 18b (H6.1): uso registrato dei modelli, aggregato per
     // provider+modello (default), bot o origine in una finestra [fromMs, toMs]

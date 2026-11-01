@@ -58,18 +58,18 @@ export function Chat() {
   const agent = agents.find((a) => a.id === activeId)
   const info = useBotInfo(activeId)
   const busy = agent?.status === 'thinking' || agent?.status === 'running' || agent?.status === 'paused-for-approval'
-  // fase 18b (H4.3): il modello del bot ha visione conosciuta FALSA → l'attacco
-  // immagini mostra l'avviso (l'allegato NON si blocca; con vision
-  // sconosciuta, niente avviso)
-  const providers = useStore((s) => s.providers)
+  // fase 18b (H4.3 → K3): il modello del bot ha visione conosciuta FALSA →
+  // l'attacco immagini mostra l'avviso (l'allegato NON si blocca; con vision
+  // sconosciuta, niente avviso). Si chiede UN modello con models:capabilities
+  // (nessun elenco completo: niente HTTP vivo né /api/show di massa)
   const [noVision, setNoVision] = useState(false)
   const visionProviderId = agent?.providerId ?? null
   const visionModel = agent?.model ?? null
   useEffect(() => {
     setNoVision(false)
     if (!visionProviderId || !visionModel) return
-    void api.listModels(visionProviderId)
-      .then((ms) => setNoVision(ms.find((m) => m.id === visionModel)?.vision === false))
+    void api.modelCapabilities(visionProviderId, visionModel)
+      .then((caps) => setNoVision(caps.vision === false))
       .catch(() => setNoVision(false))
   }, [visionProviderId, visionModel])
   // il colore del bot per le bolle utente e i bottoni (token, mai un colore CSS)

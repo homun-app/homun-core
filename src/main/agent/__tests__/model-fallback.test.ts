@@ -1,8 +1,9 @@
 // Fase 9 (punto 1) — test puri della decisione della RISERVA:
 // 5xx/timeout/scadenza sì, 4xx mai, una sola volta per turno.
 // Fase 18b (H2): la riserva è una CATENA — test di routeChain e nextRoute.
+// Fase 18b (K7): routeIncompatibility — quando un anello NON può servire il turno.
 import { describe, expect, it } from 'vitest'
-import { fallbackEligible, shouldUseFallback, routeChain, nextRoute, type Route, type NextRouteState } from '../model-fallback'
+import { fallbackEligible, shouldUseFallback, routeChain, nextRoute, routeIncompatibility, type Route, type NextRouteState } from '../model-fallback'
 import type { ModelDefaultsMap } from '../model-defaults'
 
 const httpError = (status: number): Error => {
@@ -126,6 +127,30 @@ describe('routeChain (H2.1)', () => {
     )
     expect(out).toEqual([{ providerId: 'pa', model: 'm1' }])
   })
+
+  it('K4: al massimo le PRIME 4 voci VALIDE della catena configurata (primario e riserva dello stesso provider NON contano)', () => {
+    const pC = { id: 'pc', kind: 'zai', enabled: true }
+    const out = routeChain(
+      { providerId: 'pa', model: 'm1' },
+      chainDeps([pA, pB, pC, pOff], { pa: { fallbackModel: 'm-stessa' } }, [
+        { providerId: 'poff', model: 'no' },   // non valida: NON consuma il tetto
+        { providerId: 'manca', model: 'no' },  // non valida: NON consuma il tetto
+        { providerId: 'pb', model: 'c1' },
+        { providerId: 'pc', model: 'c2' },
+        { providerId: 'pa', model: 'c3' },
+        { providerId: 'pb', model: 'c4' },
+        { providerId: 'pb', model: 'c5' }      // oltre il tetto: ignorata
+      ])
+    )
+    expect(out).toEqual([
+      { providerId: 'pa', model: 'm1' },       // primario: fuori dal tetto
+      { providerId: 'pa', model: 'm-stessa' }, // riserva stesso provider: fuori dal tetto
+      { providerId: 'pb', model: 'c1' },
+      { providerId: 'pc', model: 'c2' },
+      { providerId: 'pa', model: 'c3' },
+      { providerId: 'pb', model: 'c4' }
+    ])
+  })
 })
 
 // ---- fase 18b (H2.2): nextRoute — quando si passa all'anello successivo ----
@@ -199,6 +224,57 @@ describe('nextRoute (H2.2) — tutte le righe della tabella', () => {
     ]
     expect(nextRoute(httpError(503), { chain: chain2, current: 0, switches: 0, cooled: () => false, aborted: false })).toBe(1)
     expect(nextRoute(rateLimit(), { chain: chain2, current: 0, switches: 0, cooled: () => false, aborted: false })).toBeNull()
+  })
+
+  it('K7: un anello INCOMPATIBILE in mezzo si salta (come un raffreddato); se lo sono TUTTI → null', () => {
+    // il PRIMO anello successivo (m2) non può servire il turno: si passa a m3
+    const incompatible = (r: Route): string | null => (r.model === 'm2' ? 'context window too small' : null)
+    expect(next(httpError(503), { incompatible })).toBe(2)
+    // stesso anello dopo un primo passaggio: m3 è il primo buono
+    expect(next(httpError(503), { current: 1, incompatible: (r) => (r.model === 'm3' ? 'no images' : null) })).toBe(3)
+    // tutti i successivi incompatibili → il turno chiude con l'errore originale
+    expect(next(httpError(503), { incompatible: () => 'no' })).toBeNull()
+    // col 429 il filtro provider resta E l'incompatibile si salta: m2 è dello
+    // stesso provider (saltato comunque), m3 incompatibile → m4
+    expect(next(rateLimit(), { incompatible: (r) => (r.model === 'm3' ? 'no images' : null) })).toBe(3)
+  })
+})
+
+// ---- fase 18b (K7): routeIncompatibility — può l'anello servire il turno? ----
+
+describe('routeIncompatibility (K7)', () => {
+  const caps = (patch: Partial<Parameters<typeof routeIncompatibility>[0]> = {}) => ({
+    fromCatalog: true,
+    contextWindow: 128_000,
+    vision: true,
+    maxTokens: 8192,
+    ...patch
+  })
+
+  it('contesto che NON ci sta (catalogo): finestra <= stima + riserva d\'uscita + margine', () => {
+    // 8192 di finestra, 8192 di riserva d'uscita (min(maxTokens, 8192)): non c'è
+    // MAI stanza per l'ingresso — gpt-4 del catalogo openai è così
+    expect(routeIncompatibility(caps({ contextWindow: 8192, maxTokens: 8192 }), { inputTokens: 10, needsImages: false })).toMatch(/context window 8192 too small/)
+    // margine = max(256, 10% della stima): 128k non basta per ~120k token
+    expect(routeIncompatibility(caps(), { inputTokens: 120_000, needsImages: false })).toMatch(/too small/)
+    // con la riserva d'uscita minore la stessa stima ci sta
+    expect(routeIncompatibility(caps({ maxTokens: 4096 }), { inputTokens: 100_000, needsImages: false })).toBeNull()
+  })
+
+  it('stesso caso su un SINTETICO: NON si scarta (il 128k è un valore di comodo, non un dato)', () => {
+    expect(routeIncompatibility(caps({ fromCatalog: false, contextWindow: 128_000 }), { inputTokens: 500_000, needsImages: false })).toBeNull()
+  })
+
+  it('immagini: vision FALSA → incompatibile; vision NULL → si prova (decide il server)', () => {
+    expect(routeIncompatibility(caps({ vision: false }), { inputTokens: 10, needsImages: true })).toMatch(/cannot see the images/)
+    expect(routeIncompatibility(caps({ vision: null }), { inputTokens: 10, needsImages: true })).toBeNull()
+    // il turno NON ha immagini: la visione falsa non scarta nulla
+    expect(routeIncompatibility(caps({ vision: false }), { inputTokens: 10, needsImages: false })).toBeNull()
+  })
+
+  it('il ragionamento NON scarta mai (il livello si clampa per chiamata, come in Rakazo)', () => {
+    // la funzione non riceve nemmeno il livello: non esiste una regola che lo usi
+    expect(routeIncompatibility(caps({ vision: true }), { inputTokens: 10, needsImages: false })).toBeNull()
   })
 })
 

@@ -122,10 +122,13 @@ describe('fase 18b (H8): catena delle riserve sullo stack vero (server finti su 
   it('il turno SUCCESSIVO parte dalla riserva: A non riceve chiamate (raffreddato), notice modelRouteCooled', async () => {
     const agent = store.createAgent('RouteBot2')
     store.updateAgent(agent.id, { providerId: 'pa', model: 'm-a' })
-    // primo turno: 429 su A (con i retry H1.1: 3 richieste ad A), consegna da B
+    // primo turno: 429 su A, consegna da B. K6: con una riserva utilizzabile
+    // dietro, il loop passa maxRetries 0 e NEANCHÉ i retry H1.1 scattano
+    // (mistral-conversations non ha retry propri dell'SDK) → UNA sola
+    // richiesta ad A prima del passaggio d'anello; prima di K6 erano 3
     await runTurn(agent.id, 'uno', emit)
     const aAfterFirst = hits.a
-    expect(aAfterFirst).toBe(3) // 429 + 2 retry di trasporto prima del primo evento
+    expect(aAfterFirst).toBe(1)
     store.db().exec('DELETE FROM entries')
 
     // secondo turno: A è in pausa (10 minuti) — parte da B (risponde testo)

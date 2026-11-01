@@ -38,11 +38,21 @@ export function fallbackEligible(err: unknown): boolean {
 }
 
 /**
+ * K4: il tetto della catena CONFIGURATA (models.fallbackChain): in gira al
+ * massimo il numero di voci valide che la UI stessa permette di salvare. Il
+ * primario e la riserva dello stesso provider NON contano nel tetto (il tetto
+ * è dell'elenco dell'utente, non della catena effettiva).
+ */
+export const MAX_CHAIN_ENTRIES = 4
+
+/**
  * H2.1: la catena effettiva delle rotte di un turno — [primary, fallbackModel
  * del provider di primary (se c'è), ...chain]. Si tolgono i doppioni (stesso
  * providerId + model) e le voci il cui provider non esiste o è disabilitato.
  * Il primo elemento è SEMPRE primary. Catena vuota = [primary]: il
  * comportamento di chi non configura niente è esattamente quello di oggi.
+ * K4: della catena configurata valgono al massimo le PRIME MAX_CHAIN_ENTRIES
+ * voci VALIDE (le altre si ignorano, come se la UI non le avesse permesse).
  */
 export function routeChain(
   primary: Route,
@@ -57,11 +67,19 @@ export function routeChain(
     const p = byId.get(r.providerId)
     return !!p && p.enabled && typeof r.model === 'string' && r.model !== ''
   }
+  // K4: le prime MAX_CHAIN_ENTRIES voci VALIDE della catena configurata; le
+  // voci non valide (provider inesistente/disabilitato, modello vuoto) non
+  // consumano il tetto
+  const capped: Route[] = []
+  for (const r of (Array.isArray(deps.chain) ? deps.chain : [])) {
+    if (capped.length >= MAX_CHAIN_ENTRIES) break
+    if (usable(r)) capped.push(r)
+  }
   const first = deps.modelDefaults[primary.providerId]?.fallbackModel
   const candidates: Route[] = [
     primary,
     ...(first && first !== primary.model ? [{ providerId: primary.providerId, model: first }] : []),
-    ...(Array.isArray(deps.chain) ? deps.chain : [])
+    ...capped
   ]
   const out: Route[] = []
   const seen = new Set<string>()
@@ -81,6 +99,49 @@ export function routeChain(
 /** Al massimo 3 passaggi di anello per turno (H2.2). */
 export const MAX_ROUTE_SWITCHES = 3
 
+/**
+ * K7: ciò che il turno CHIEDE a un anello della catena. La stima dei token è
+ * quella di sempre (estimateTokensOf di memory.ts); `needsImages` vale se ci
+ * sono immagini nei messaggi del turno OPPURE use-app è nei tool offerti
+ * (l'unico che restituisce immagini).
+ */
+export interface RouteNeed {
+  inputTokens: number
+  needsImages: boolean
+}
+
+/**
+ * K7 (pura): un anello può SERVIRE il turno? Usa SOLO dati conosciuti —
+ * niente chiamate, niente stimatori nuovi. Risponde il MOTIVO inglese dello
+ * scarto (finisce nel log del daemon, senza testo dei messaggi) o null.
+ * 1. Contesto: solo per i modelli di CATALOGO (il 128k dei sintetici è un
+ *    valore di comodo, non un dato). Incompatibile se la finestra non basta
+ *    per la stima + la riserva d'uscita + un margine: riserva =
+ *    min(maxTokens, 8192), margine = max(256, 10% della stima) — come in
+ *    Rakazo (fallbackIncompatibility), che però non arrotonda la riserva al
+ *    quarto della finestra: qui segue la spec.
+ * 2. Immagini: il turno ne ha e la visione è conosciuta FALSA → chi non vede
+ *    non può servire. Con vision null si prova (decide il server).
+ * 3. Ragionamento: NON scarta mai — il livello si clampa per chiamata
+ *    (l'adattatore lo fa già); una riserva senza ragionamento gira spenta.
+ */
+export function routeIncompatibility(
+  caps: { fromCatalog: boolean; contextWindow: number; vision: boolean | null; maxTokens?: number },
+  need: RouteNeed
+): string | null {
+  if (caps.fromCatalog) {
+    const outputReserve = Math.min(caps.maxTokens ?? 8192, 8192)
+    const margin = Math.max(256, Math.ceil(need.inputTokens * 0.1))
+    if (caps.contextWindow <= need.inputTokens + outputReserve + margin) {
+      return `context window ${caps.contextWindow} too small for ~${need.inputTokens} input tokens`
+    }
+  }
+  if (need.needsImages && caps.vision === false) {
+    return 'model cannot see the images this turn needs'
+  }
+  return null
+}
+
 export interface NextRouteState {
   /** la catena effettiva (routeChain): chain[0] è il primario del turno */
   chain: Route[]
@@ -92,6 +153,13 @@ export interface NextRouteState {
   cooled: (route: Route) => boolean
   /** il turno è stato interrotto (dall'utente): mai passare d'anello */
   aborted: boolean
+  /**
+   * K7: un anello NON può servire il turno? (routeIncompatibility). Si salta
+   * come uno raffreddato, MA senza raffreddarlo: al turno dopo (o con una
+   * conversazione più corta) resta utilizzabile. Il motivo, quando c'è, va
+   * nel log del daemon.
+   */
+  incompatible?: (route: Route) => string | null
 }
 
 /**
@@ -105,6 +173,10 @@ export interface NextRouteState {
  * | 429 / limite d'uso (stopReasonOfError rate-limit) | primo anello successivo non raffreddato con|
  * |                                                   | providerId DIVERSO (stesso account=quota)  |
  * | altri 4xx                                         | mai (la richiesta è sbagliata)             |
+ *
+ * K7: gli anelli INCOMPATIBILI col turno si saltano come i raffreddati (ma
+ * non si raffreddano); se sono TUTTI incompatibili il turno chiude con
+ * l'errore originale, come oggi senza riserve.
  */
 export function nextRoute(err: unknown, s: NextRouteState): number | null {
   if (s.aborted) return null
@@ -117,6 +189,7 @@ export function nextRoute(err: unknown, s: NextRouteState): number | null {
     const r = s.chain[i]!
     if (rateLimited && r.providerId === failed.providerId) continue
     if (s.cooled(r)) continue
+    if (s.incompatible?.(r)) continue
     return i
   }
   return null

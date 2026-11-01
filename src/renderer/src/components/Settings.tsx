@@ -20,10 +20,14 @@ import { pickLang } from '../../../shared/localized'
 import { i18n } from '../lib/i18n'
 import { VaultTab } from './VaultSettings'
 import { choosePollTool, chooseQueryArgName } from '../../../shared/triggers'
-import type { ProviderConfig, ProviderKind, ModelInfo, Agent, RoutineInfo, RoutineSuggestion, ConnectorInfo, McpServerInfo, McpServerSecret, RoutineTrigger, TemplateInfo, AutoReviewSettings, WebSearchStatusRpc, WebSearchProviderStatusRpc, FallbackRoute, ModelUsageRow, ModelPriceMap, ThinkingSetting } from '../../../shared/types'
+import type { ProviderConfig, ProviderKind, ModelInfo, Agent, RoutineInfo, RoutineSuggestion, ConnectorInfo, McpServerInfo, McpServerSecret, RoutineTrigger, TemplateInfo, AutoReviewSettings, WebSearchStatusRpc, WebSearchProviderStatusRpc, FallbackRoute, ModelUsageRow, ModelPrice, ModelPriceMap, ThinkingSetting } from '../../../shared/types'
 import { DEFAULT_AUTO_REVIEW, SECRET_KIND_FOR_NEEDS } from '../../../shared/types'
+// fase 18b (K2): la selezione delle righe dell'editor dei prezzi (funzione pura)
+import { priceEditorRows } from '../lib/price-editor'
 // fase 10 (residuo 0d): i default per kind (modulo puro, nessuna dipendenza node)
 import { modelDefaultsFor } from '../../../main/agent/model-defaults'
+// fase 18b (K4): il tetto della catena delle riserve, lo stesso del daemon
+import { MAX_CHAIN_ENTRIES } from '../../../main/agent/model-fallback'
 // fase 18b (H5.2): i kind locali (costo «locale» nella pagina Uso e costi)
 import { isLocalKind } from '../../../main/agent/live-models'
 // fase 18b (H5.3): il selettore del modello a combobox
@@ -417,30 +421,22 @@ function UsageTab() {
   )
 }
 
-/** Fase 18b (H6.2): i prezzi $/M dei modelli senza catalogo (salvano in providers.modelPrices). */
+/**
+ * Fase 18b (H6.2 → K2): i prezzi $/M dei modelli senza catalogo (salvano in
+ * providers.modelPrices). Le righe le sceglie la funzione PURA priceEditorRows:
+ * un modello resta nell'editor anche DOPO che le chiamate hanno registrato un
+ * costo (un prezzo sbagliato si corregge), e un prezzo salvato si vede sempre.
+ */
 function PriceSettings({ modelRows, prices, providers, onSaved }: {
   modelRows: ModelUsageRow[]
   prices: ModelPriceMap
   providers: ProviderConfig[]
   onSaved(): void
 }) {
-  const { t } = useLingui()
-  const target = modelRows.filter(
-    (r) => !r.costUsd && r.model && r.providerId && !isLocalKind(r.providerKind)
-  )
+  const target = priceEditorRows(modelRows, prices)
   const inputCls = 'w-20 rounded-lg bg-muted px-2 py-1 text-xs outline-none'
 
   if (target.length === 0) return null
-
-  const save = async (providerId: string, model: string, field: 'input' | 'output', raw: string): Promise<void> => {
-    if (!raw.trim()) return
-    const n = Number(raw.replace(',', '.'))
-    if (!Number.isFinite(n) || n < 0) return
-    const all = await api.settingsGet<ModelPriceMap>('providers.modelPrices', {})
-    const cur = { ...(all[providerId]?.[model] ?? { input: 0, output: 0 }), [field]: n }
-    await api.settingsSet('providers.modelPrices', { ...all, [providerId]: { ...(all[providerId] ?? {}), [model]: cur } })
-    onSaved()
-  }
 
   return (
     <div className="space-y-2 rounded-2xl border border-border bg-card px-3 py-2.5">
@@ -448,42 +444,80 @@ function PriceSettings({ modelRows, prices, providers, onSaved }: {
       <p className="text-xs text-muted-foreground">
         <Trans>Questi modelli non hanno un prezzo di catalogo: scrivi quello che paghi (dollari per milione di token). Vale per le chiamate da qui in avanti, lo storico non cambia.</Trans>
       </p>
-      {target.map((r) => {
-        const cur = prices[r.providerId!]?.[r.model!]
-        const pname = providers.find((p) => p.id === r.providerId)?.name ?? r.providerKind
-        return (
-          <div key={`${r.providerId}|${r.model}`} className="flex flex-wrap items-center gap-2 text-xs">
-            <span className="min-w-0 flex-1 truncate font-mono">{r.model}</span>
-            <span className="text-muted-foreground">{pname}</span>
-            <label className="flex items-center gap-1">
-              <Trans>ingresso $/M</Trans>
-              <input
-                className={inputCls}
-                type="text"
-                defaultValue={cur ? String(cur.input) : ''}
-                onBlur={(e) => void save(r.providerId!, r.model!, 'input', e.target.value)}
-              />
-            </label>
-            <label className="flex items-center gap-1">
-              <Trans>uscita $/M</Trans>
-              <input
-                className={inputCls}
-                type="text"
-                defaultValue={cur ? String(cur.output) : ''}
-                onBlur={(e) => void save(r.providerId!, r.model!, 'output', e.target.value)}
-              />
-            </label>
-          </div>
-        )
-      })}
+      <p className="text-xs text-muted-foreground">
+        <Trans>Svuota entrambi i campi per togliere un prezzo.</Trans>
+      </p>
+      {target.map((r) => (
+        <PriceRow
+          key={`${r.providerId}|${r.model}`}
+          providerId={r.providerId}
+          model={r.model}
+          label={providers.find((p) => p.id === r.providerId)?.name ?? r.providerKind}
+          price={prices[r.providerId]?.[r.model]}
+          inputCls={inputCls}
+          onSaved={onSaved}
+        />
+      ))}
+    </div>
+  )
+}
+
+/** Fase 18b (K2): una riga dell'editor — svuotare ENTRAMBI i campi CANCELLA la voce. */
+function PriceRow({ providerId, model, label, price, inputCls, onSaved }: {
+  providerId: string
+  model: string
+  label: string
+  price?: ModelPrice
+  inputCls: string
+  onSaved(): void
+}) {
+  const [inVal, setInVal] = useState(price ? String(price.input) : '')
+  const [outVal, setOutVal] = useState(price ? String(price.output) : '')
+
+  const commit = async (): Promise<void> => {
+    const all = await api.settingsGet<ModelPriceMap>('providers.modelPrices', {})
+    // K2: entrambi i campi VUOTI → la voce si CANCELLA (un prezzo si può togliere)
+    if (!inVal.trim() && !outVal.trim()) {
+      const rest = { ...(all[providerId] ?? {}) }
+      delete rest[model]
+      await api.settingsSet('providers.modelPrices', { ...all, [providerId]: rest })
+      onSaved()
+      return
+    }
+    // un campo valido si salva, l'altro vuoto resta quello che c'era (o 0)
+    const cur = all[providerId]?.[model] ?? { input: 0, output: 0 }
+    const num = (raw: string, old: number): number => {
+      const n = Number(raw.replace(',', '.'))
+      return raw.trim() && Number.isFinite(n) && n >= 0 ? n : old
+    }
+    const next = { input: num(inVal, cur.input), output: num(outVal, cur.output) }
+    await api.settingsSet('providers.modelPrices', { ...all, [providerId]: { ...(all[providerId] ?? {}), [model]: next } })
+    onSaved()
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-xs">
+      <span className="min-w-0 flex-1 truncate font-mono">{model}</span>
+      <span className="text-muted-foreground">{label}</span>
+      <label className="flex items-center gap-1">
+        <Trans>ingresso $/M</Trans>
+        <input className={inputCls} type="text" value={inVal} onChange={(e) => setInVal(e.target.value)} onBlur={() => void commit()} />
+      </label>
+      <label className="flex items-center gap-1">
+        <Trans>uscita $/M</Trans>
+        <input className={inputCls} type="text" value={outVal} onChange={(e) => setOutVal(e.target.value)} onBlur={() => void commit()} />
+      </label>
     </div>
   )
 }
 
 // ---- fase 18b (H5.4): l'editor della catena delle riserve ----
 
-/** Il massimo di voci della catena (H2.1). */
-const MAX_FALLBACK_CHAIN = 4
+/**
+ * Il massimo di voci della catena (H2.1). K4: la stessa costante del daemon
+ * (routeChain taglia le voci oltre il tetto): una sola verità.
+ */
+const MAX_FALLBACK_CHAIN = MAX_CHAIN_ENTRIES
 
 function FallbackChainSection() {
   const { t } = useLingui()
