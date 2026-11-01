@@ -19,6 +19,10 @@ import { createHmac } from 'node:crypto'
 // testi del catalogo UI; gli errori NON contengono mai i valori
 import { uiText } from '../ui-language'
 import { UI } from '../../shared/ui-messages'
+// fase 19a (correzioni 3, M5): la neutralizzazione dell'etichetta nella nota
+// del form di login è la STESSA con cui i testi che tornano al modello si
+// troncano da sempre (previewOf, modulo puro senza import)
+import { previewOf } from './turn-sends'
 
 // ---- TOTP (RFC 6238) ----
 
@@ -302,4 +306,53 @@ export function filledFieldsLabel(refs: { username?: boolean; password?: boolean
  */
 export function fillResultText(label: string, origin: string, refs: { username?: boolean; password?: boolean; totp?: boolean }): string {
   return `Filled ${filledFieldsLabel(refs)} of "${label}" on ${origin}.`
+}
+
+// ---- la nota sul form di login nel result del browser (fase 19a, correzioni 3) ----
+
+/**
+ * L'etichetta di un login come torna al modello nella nota del form (puro, M5):
+ * una riga sola (niente a capo) e troncata — la stessa neutralizzazione con cui
+ * list-credentials mostra le etichette dei testi che raggiungono il modello
+ * (previewOf: trim, taglio a 120 con ellissi).
+ */
+export function loginLabelShown(label: string): string {
+  return previewOf(label.replace(/\s+/g, ' ').trim())
+}
+
+/**
+ * Il login salvato per l'origine ESATTA della pagina (puro, M5): il PRIMO se ce
+ * ne sono più di uno, null se non c'è. È lo stesso confronto di checkFillOrigin
+ * (origine esatta, niente sottodomini, niente porte diverse).
+ */
+export function findLoginForOrigin(
+  pageUrl: string,
+  logins: Array<{ id: string; label: string; origins: string[] }>
+): { id: string; label: string; origins: string[] } | null {
+  const page = httpsOriginOf(pageUrl)
+  if (!page) return null
+  return logins.find((l) => l.origins.includes(page)) ?? null
+}
+
+/**
+ * La nota da aggiungere in fondo al result del browser quando la pagina ha un
+ * form di login (puro, M5.1): la regola arriva COL DATO, al momento giusto, non
+ * solo nel prompt di sistema — un'istruzione contestuale nel risultato vale
+ * più di una riga del prompt (la stessa tecnica di SNAPSHOT_BLOCKED_NOTE per la
+ * sfida anti-bot, che infatti funziona: caso 40 a 6/6 mentre il 41, con la
+ * regola solo nel prompt, restava 1/6). Pagina non https o URL non valido →
+ * null, niente nota. La nota non contiene MAI valori del vault: solo origine,
+ * etichetta e id, che list-credentials già mostra.
+ */
+export function loginFormNote(
+  pageUrl: string,
+  logins: Array<{ id: string; label: string; origins: string[] }>
+): string | null {
+  const origin = httpsOriginOf(pageUrl)
+  if (!origin) return null
+  const login = findLoginForOrigin(pageUrl, logins)
+  if (login) {
+    return `This page has a sign-in form and a login is saved for ${origin}: "${loginLabelShown(login.label)}" (${login.id}). To sign in, use fill_credential with that id.`
+  }
+  return `This page has a sign-in form and no login is saved for ${origin}. If you need to sign in, call request_takeover: the user signs in on your screen. Never ask for the password in chat.`
 }

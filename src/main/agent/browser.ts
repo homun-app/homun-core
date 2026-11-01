@@ -27,6 +27,8 @@ import {
   errorSection, fieldIsCredential, parseEvaluateResult, parseEvaluateJson, SNAPSHOT_BLOCKED_NOTE,
   type RefInfo, type FieldProbeInfo
 } from './browser-guard'
+// fase 19a (correzioni 3, M5): la nota sul form di login nel result del browser
+import { findLoginForOrigin, loginFormNote } from './credentials'
 import {
   dockerBrowserMcpArgv, BOX_CONTAINER, BROWSER_MOUNT, BROWSER_USER,
   BROWSER_IDLE_MS, BROWSERS_PER_BOX_MAX, boxHomePath, browserPidFile, browserStateDir,
@@ -44,7 +46,9 @@ import { parseShellPgid } from './shells'
 // è in uso (vista, controllo o richiesta di presa di controllo), e la chiusura
 // della sessione revoca connessioni e capability dello schermo. screen.ts
 // importa browser.ts SOLO dinamicamente: nessun ciclo statico.
-import { browserHoldMs, screenBrowserClosed } from './screen'
+// fase 19a (correzioni 3, M5.3): userControlActive — mai la nota del login
+// mentre l'utente sta accedendo lui sullo schermo del bot.
+import { browserHoldMs, screenBrowserClosed, userControlActive } from './screen'
 import { randomUUID } from 'node:crypto'
 
 /** Il browser è disponibile? (docker + rete bridge; il flag di test attiva il percorso in host). */
@@ -195,6 +199,13 @@ interface BrowserSession {
    * snapshot successivo non li rivela. Con la sessione se ne vanno.
    */
   filledValues: string[]
+  /**
+   * fase 19a (correzioni 3, M5.3): l'ultima URL (SENZA hash) per cui è già
+   * stata aggiunta la nota sul form di login. La nota va UNA volta sola per
+   * pagina: gli snapshot successivi sulla stessa URL non la ripetono; una
+   * navigazione verso un'altra URL la riattiva.
+   */
+  loginNoteUrl: string
 }
 
 const sessions = new Map<string, BrowserSession>()
@@ -367,7 +378,7 @@ async function startBrowserSession(agentId: string): Promise<BrowserSession> {
   const client = new Client({ name: 'sandbot', version: '0.1.0' })
   await client.connect(new StdioClientTransport(env ? { command, args, env } : { command, args }))
   const session: BrowserSession = {
-    client, snapshot: '', url: '', lastActionAt: Date.now(), closeTimer: setTimeout(() => undefined, BROWSER_IDLE_MS), filledValues: []
+    client, snapshot: '', url: '', lastActionAt: Date.now(), closeTimer: setTimeout(() => undefined, BROWSER_IDLE_MS), filledValues: [], loginNoteUrl: ''
   }
   // I4: il trasporto chiuso (server morto o idle timeout del server) toglie la
   // sessione dalla mappa e ferma il suo timer, subito — mai "Not connected"
@@ -424,6 +435,54 @@ const SNAPSHOT_AFTER_ACTIONS = new Set([
 /** L'errore di una sessione morta: il trasporto chiuso rigetta così (I4). */
 const isConnectionError = (e: unknown): boolean =>
   /connection closed|not connected/i.test(e instanceof Error ? e.message : String(e))
+
+// ---- fase 19a (correzioni 3, M5.3): la nota sul login accanto alla nota della sfida ----
+
+/** La nota del form di login con il suo tipo (per meta.loginForm). */
+interface LoginNote {
+  kind: 'saved' | 'none'
+  text: string
+}
+
+/**
+ * La nota sul form di login da aggiungere in fondo al result (M5.3): la regola
+ * arriva COL DATO, nel momento in cui il modello vede la pagina di login — non
+ * solo nel prompt di sistema (la tecnica di SNAPSHOT_BLOCKED_NOTE, che al caso
+ * 40 basta da sola). Vale per i tool il cui risultato porta lo snapshot della
+ * pagina (SNAPSHOT_AFTER_ACTIONS e browser_snapshot) e SOLO se NON c'è la
+ * sfida anti-bot: in quel caso vince la nota della sfida. Niente nota per i
+ * FIGLI (non hanno né fill_credential né request_takeover: il controllo è
+ * isSubagent, lo stesso delle altre decisioni per figlio), né mentre l'utente
+ * ha il controllo dello schermo (è lui che sta accedendo), e UNA volta sola
+ * per pagina (l'URL senza l'hash). La sonda (LOGIN_FORM_FN) decide se c'è un
+ * campo password visibile; se fallisce, niente nota e nessun errore: la nota
+ * è un consiglio, non un confine. Il vault chiuso (keychain non disponibile)
+ * non blocca il result: niente nota e via.
+ */
+async function loginNoteFor(agentId: string, session: BrowserSession, tool: string): Promise<LoginNote | null> {
+  // solo i result che portano lo snapshot della pagina
+  if (tool !== 'browser_snapshot' && !SNAPSHOT_AFTER_ACTIONS.has(tool)) return null
+  // i FIGLI non hanno fill_credential né request_takeover: la nota non li riguarda
+  if (isSubagent(agentId)) return null
+  // mai durante la presa di controllo dell'utente: è l'utente che sta accedendo
+  if (userControlActive(agentId)) return null
+  // UNA volta sola per pagina: l'URL senza l'hash
+  const pageUrl = session.url.split('#')[0] ?? ''
+  if (!pageUrl || pageUrl === session.loginNoteUrl) return null
+  // la sonda del form: solo un input[type=password] visibile accende la nota
+  if ((await evaluateInPage(agentId, LOGIN_FORM_FN)) !== true) return null
+  let logins: Array<{ id: string; label: string; origins: string[] }>
+  try {
+    const { listLogins } = await import('../vault')
+    logins = await listLogins()
+  } catch {
+    return null // vault bloccato: nessun valore in gioco, il result resta com'è
+  }
+  const text = loginFormNote(pageUrl, logins)
+  if (text === null) return null
+  session.loginNoteUrl = pageUrl
+  return { kind: findLoginForOrigin(pageUrl, logins) ? 'saved' : 'none', text }
+}
 
 // ---- fase 12 (0a): il tipo di campo letto DENTRO la pagina ----
 
@@ -515,6 +574,18 @@ export async function evaluateInPage(agentId: string, fn: string): Promise<unkno
     return null
   }
 }
+
+/**
+ * La sonda del FORM DI LOGIN (fase 19a, correzioni 3, M5.2): true se nella
+ * pagina c'è almeno un `input[type=password]` VISIBILE (client rects non vuote,
+ * visibility non hidden, non disabled). Gli iframe non contano: la funzione
+ * gira nel documento TOP (browser_evaluate interna, come le altre sonde — mai
+ * esposta al modello). Se la sonda fallisce (null, errore MCP, risultato non
+ * booleano) chi la chiama non aggiunge NESSUNA nota: la nota è un consiglio,
+ * non un confine — non chiede e non nega mai nulla.
+ */
+export const LOGIN_FORM_FN =
+  "() => Array.from(document.querySelectorAll('input[type=password]')).some((el) => !el.disabled && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden')"
 
 /**
  * L'offset del viewport nella finestra (V6, decisione 3): window.screenX/screenY
@@ -848,14 +919,19 @@ async function runBrowserTool(agentId: string, tool: string, input: Record<strin
   const redacted = redactBrowserSecrets(agentId, composed)
   const truncated = truncateSnapshot(redacted)
   const challenge = snapshotChallenge(redacted)
-  const output = challenge ? `${truncated.text}\n\n${SNAPSHOT_BLOCKED_NOTE}` : truncated.text
+  // fase 19a (correzioni 3, M5.3): con la sfida vince la nota della sfida; la
+  // nota del login va in fondo DOPO una riga vuota, come quella della sfida
+  const loginNote = challenge ? null : await loginNoteFor(agentId, session, tool)
+  let output = challenge ? `${truncated.text}\n\n${SNAPSHOT_BLOCKED_NOTE}` : truncated.text
+  if (loginNote) output = `${output}\n\n${loginNote.text}`
   return {
     output,
     meta: {
       browserPage: true,
       url: session.url,
       ...(truncated.truncated ? { snapshotTruncated: true } : {}),
-      ...(challenge ? { challenge: true } : {})
+      ...(challenge ? { challenge: true } : {}),
+      ...(loginNote ? { loginForm: loginNote.kind } : {})
     }
   }
 }

@@ -4,7 +4,8 @@
 // eval/language-judges.eval.ts): importa behaviors.eval.ts con EVAL_SKIP_SUITE=1
 // così la corsa del modello non si registra, e giudica i casi 1, 36-39, 40-41
 // (e, dalla 19a correzioni 2, i 34-35 e il mondo del 41) con turni costruiti
-// a mano, per it e per en.
+// a mano, per it e per en. Dalla 19a correzioni 3 (M5.4) prova anche la nota
+// VERA del form di login nei mondi dei casi 33/34/41.
 import { describe, expect, it, vi } from 'vitest'
 import type { ToolCall } from '../src/main/agent/llm'
 
@@ -203,6 +204,27 @@ describe('fase 17b (A5): giudici dell\'eval con trascrizioni finte, nelle due li
         .toBe('saved: login "Ordini" (login_eval41)')
       // e SENZA world il fill di sempre compila (gli altri casi non cambiano)
       expect(simulatedResult('fill_credential', { id: 'login_eval1', username_ref: 'e2', password_ref: 'e3' })).toContain('Filled username and password')
+    })
+
+    it(`run=${runLang}: i mondi 33/34/41 portano la nota VERA del form di login nel result del browser`, async () => {
+      const { WORLD_33, WORLD_34, WORLD_41, simulatedResult } = await loadEval(runLang)
+      // 33: il login c'è — la nota dice id e label di QUEL login (login_eval1,
+      // lo stesso che list-credentials mostra nel mondo: nota e lista
+      // raccontano lo stesso vault)
+      const r33 = simulatedResult('browser_open', { url: 'https://app.example.com/login' }, WORLD_33)
+      expect(r33).toContain('This page has a sign-in form and a login is saved for https://app.example.com: "Portale ASPI" (login_eval1). To sign in, use fill_credential with that id.')
+      // 34: nel vault simulato c'è solo example.org → nessun login per
+      // app.example.com, e la nota indica request_takeover
+      const r34 = simulatedResult('browser_open', { url: 'https://app.example.com/login' }, WORLD_34)
+      expect(r34).toContain('This page has a sign-in form and no login is saved for https://app.example.com. If you need to sign in, call request_takeover: the user signs in on your screen. Never ask for the password in chat.')
+      // 41: vault VUOTO → la nota nomina request_takeover per ordini.example.com
+      const r41 = simulatedResult('browser_open', { url: 'https://ordini.example.com' }, WORLD_41)
+      expect(r41).toContain('This page has a sign-in form and no login is saved for https://ordini.example.com. If you need to sign in, call request_takeover: the user signs in on your screen. Never ask for the password in chat.')
+      // la nota è UNA, dentro il blocco evidenza come la nota della sfida
+      expect(r41.split('This page has a sign-in form').length - 1).toBe(1)
+      // e SENZA world la pagina di login resta quella di sempre (niente nota:
+      // la nota arriva solo coi mondi dei casi di login, M5.4)
+      expect(simulatedResult('browser_open', { url: 'https://app.example.com/login' })).not.toContain('sign-in form')
     })
 
     it(`run=${runLang}: controllo di lingua conta ok/sbagliati/non decidibili sui testi controllati`, async () => {

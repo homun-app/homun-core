@@ -110,6 +110,39 @@ const PAGES = {
       '- textbox "Utente" [ref=e2]',
       '- button "Accedi" [ref=e3]'
     ]
+  },
+  // fase 19a (correzioni 3, M5): pagina di login con CAMPO PASSWORD ma sonda
+  // del form CHE FALLISCE — il result della evaluate non ha la sezione
+  // ### Result, come una valutazione non riuscita del server vero: il daemon
+  // riceve null e non aggiunge NESSUNA nota (né errore)
+  'https://sonda.example/login-fallita': {
+    title: 'Accedi (sonda guasta)',
+    file: 'page-sonda-login',
+    lines: [
+      '- Page URL: https://sonda.example/login-fallita',
+      '- Page Title: Accedi (sonda guasta)',
+      '- heading "Accedi" [ref=e1]',
+      '- textbox "Email" [ref=e2]',
+      '- textbox "Password" [ref=e3]',
+      '- button "Accedi" [ref=e4]'
+    ]
+  },
+  // fase 19a (correzioni 3, M5): pagina di login CON la sfida anti-bot — c'è
+  // il campo password (la sonda direbbe true) ma lo snapshot contiene la
+  // firma della sfida: vince SNAPSHOT_BLOCKED_NOTE, la nota del login non si
+  // aggiunge (M5.3)
+  'https://protetto.example/login': {
+    title: 'Verifica',
+    file: 'page-protetto-login',
+    lines: [
+      '- Page URL: https://protetto.example/login',
+      '- Page Title: Verifica',
+      '- heading "Verify you are human" [ref=e1]',
+      '- text "Complete the verification to continue."',
+      '- textbox "Email" [ref=e2]',
+      '- textbox "Password" [ref=e3]',
+      '- button "Accedi" [ref=e4]'
+    ]
   }
 }
 
@@ -144,8 +177,29 @@ const FIELD_TYPES = {
   'https://app.example.test/embedded': {
     e2: { type: 'text', autocomplete: 'username', name: 'user', id: '', placeholder: '', label: 'Utente', aria: '', title: '', origin: 'https://widget.example.net', top: false },
     e3: { type: 'submit', autocomplete: '', name: '', id: '', placeholder: '', label: '', aria: '', title: '' }
+  },
+  // fase 19a (correzioni 3, M5): le pagine nuove — la login-fallita ha il
+  // campo password (è una pagina di login), la protetto/login pure
+  'https://sonda.example/login-fallita': {
+    e2: { type: 'text', autocomplete: 'username', name: 'email', id: '', placeholder: '', label: 'Email', aria: '', title: '' },
+    e3: { type: 'password', autocomplete: 'current-password', name: 'password', id: '', placeholder: '', label: 'Password', aria: '', title: '' },
+    e4: { type: 'submit', autocomplete: '', name: '', id: '', placeholder: '', label: '', aria: '', title: '' }
+  },
+  'https://protetto.example/login': {
+    e2: { type: 'text', autocomplete: 'username', name: 'email', id: '', placeholder: '', label: 'Email', aria: '', title: '' },
+    e3: { type: 'password', autocomplete: 'current-password', name: 'password', id: '', placeholder: '', label: 'Password', aria: '', title: '' },
+    e4: { type: 'submit', autocomplete: '', name: '', id: '', placeholder: '', label: '', aria: '', title: '' }
   }
 }
+
+// fase 19a (correzioni 3, M5.2): la sonda del FORM DI LOGIN del daemon — la
+// STESSA stringa COSTANTE di LOGIN_FORM_FN (src/main/agent/browser.ts): true
+// se nella pagina c'è almeno un input[type=password] visibile. Il finto la
+// riconosce dalla stringa e risponde dal tipo dei campi della pagina corrente
+// (le pagine del finto non hanno DOM: i campi SONO FIELD_TYPES). La pagina
+// login-fallita simula la valutazione NON RIUSCITA: testo senza ### Result.
+const LOGIN_FORM_FN =
+  "() => Array.from(document.querySelectorAll('input[type=password]')).some((el) => !el.disabled && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden')"
 
 // lo stato della sessione: la pagina corrente (una connessione per bot) e i
 // testi digitati per ref (il vero snapshot di Playwright mostra il testo dei
@@ -204,11 +258,15 @@ const actionResult = (code) => [
   `- [Snapshot](.browser/output/${state.page?.file ?? 'page'}.yml)`
 ].join('\n')
 
-const pageAt = (url) => PAGES[url] ?? {
+// fase 19a (correzioni 3): l'hash non cambia la pagina (come nel browser
+// vero): la pagina si cerca anche SENZA hash, l'URL resta quella richiesta
+const pageAt = (url) => PAGES[url] ?? PAGES[url.split('#')[0]] ?? {
   title: 'Pagina generica',
   file: 'page-generica',
   lines: ['- Page URL: ' + url, '- Page Title: Pagina generica', '- heading "Pagina generica" [ref=e1]', `- text "Contenuto di ${url}."`]
 }
+// i CAMPI della pagina corrente (anche qui l'hash non cambia la pagina)
+const fieldsAt = (url) => FIELD_TYPES[url] ?? FIELD_TYPES[url.split('#')[0]] ?? {}
 
 const server = new Server({ name: 'fake-browser-mcp', version: '0.0.0' }, { capabilities: { tools: {} } })
 
@@ -275,7 +333,28 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
   // e top (documento TOP) — i default vengono dalla pagina corrente e ogni
   // campo può sovrascriverli (il test dell'iframe: top:false, origine diversa)
   if (name === 'browser_evaluate') {
-    const fields = FIELD_TYPES[state.url] ?? {}
+    // fase 19a (correzioni 3, M5.2): la sonda del form di login del daemon —
+    // risposta BOOLEANA dal tipo dei campi della pagina corrente (nel formato
+    // REALE della 0.0.83: ### Result col JSON). Sulla pagina login-fallita la
+    // valutazione NON riesce (nessuna sezione Result → null per il daemon)
+    if (String(args.function ?? '') === LOGIN_FORM_FN) {
+      if (state.url === 'https://sonda.example/login-fallita') {
+        return text('(la valutazione della sonda del login non è riuscita)')
+      }
+      const hasLoginForm = Object.values(fieldsAt(state.url)).some((f) => f.type === 'password')
+      return text([
+        '### Result',
+        JSON.stringify(hasLoginForm),
+        '### Ran Playwright code',
+        '```js',
+        `await page.evaluate(${String(args.function ?? '')})`,
+        '```',
+        '### Page',
+        `- Page URL: ${state.url}`,
+        `- Page Title: ${state.page?.title ?? ''}`
+      ].join('\n'))
+    }
+    const fields = fieldsAt(state.url)
     // il ref arriva come nello snapshot (f<n>e<n> dalla seconda navigazione):
     // il campo di partenza è senza prefisso
     const target = String(args.target ?? '')
