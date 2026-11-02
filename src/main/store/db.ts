@@ -9,6 +9,8 @@ import { mkdirSync, rmSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { JOBS_DDL } from './jobs'
+// fase 16c (C5): lo storico delle esecuzioni delle routine (Attività globale)
+import { ROUTINE_RUNS_DDL } from './routine-runs'
 import { GROUPS_DDL, migrateGroupCoordinators, ensureGroupCoordinator, groupsOfMember } from './groups'
 import { SHELL_JOBS_DDL } from './shell-jobs'
 import { COMPUTER_ACTIONS_DDL } from './computer-actions'
@@ -125,6 +127,7 @@ function open(): DatabaseSync {
     );
     CREATE INDEX IF NOT EXISTS idx_model_usage_at ON model_usage(at);
     ${JOBS_DDL}
+    ${ROUTINE_RUNS_DDL}
     ${GROUPS_DDL}
     ${SHELL_JOBS_DDL}
     ${SUBAGENTS_DDL}
@@ -326,8 +329,12 @@ export function updateAgent(
   db()
     .prepare('UPDATE agents SET name=?, description=?, provider_id=?, model=?, status=?, unread=?, section=?, avatar=?, thinking=? WHERE id=?')
     .run(
-      patch.name ?? a.name, patch.description ?? a.description, patch.providerId ?? a.providerId,
-      patch.model ?? a.model, patch.status ?? a.status, patch.unread ?? a.unread,
+      patch.name ?? a.name, patch.description ?? a.description,
+      // fase 16c (C3.3): providerId/model NULL sono VALIDI («Come gli altri»):
+      // si distinguono da "assente" — ?? non andrebbe bene
+      patch.providerId !== undefined ? patch.providerId : a.providerId,
+      patch.model !== undefined ? patch.model : a.model,
+      patch.status ?? a.status, patch.unread ?? a.unread,
       patch.section ?? a.section ?? '',
       // fase 16: null torna al predefinito (colonna NULL)
       patch.avatar === undefined ? (a.avatar ? JSON.stringify(a.avatar) : null) : patch.avatar === null ? null : JSON.stringify(patch.avatar),

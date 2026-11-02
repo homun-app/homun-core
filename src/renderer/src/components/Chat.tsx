@@ -658,7 +658,7 @@ function NoticeRow({ entry }: { entry: TranscriptEntry }) {
       {withAction && (
         <button
           className="shrink-0 rounded-full bg-muted px-3 py-1.5 text-xs text-foreground transition hover:bg-accent"
-          onClick={() => { setSettingsTab('provider'); setSettingsOpen(true) }}
+          onClick={() => { setSettingsTab('modelli'); setSettingsOpen(true) }}
         >
           <Trans>Scegli un modello</Trans>
         </button>
@@ -708,7 +708,7 @@ function ProviderWidgetCard({ entry }: { entry: TranscriptEntry }) {
         <button
           className="mt-3 rounded-full bg-foreground px-3 py-1.5 text-xs font-medium text-background transition hover:opacity-90"
           onClick={() => {
-            setTab('provider')
+            setTab('modelli')
             setSettingsOpen(true)
             if (activeId) widgetRespond(entry.id, 'open-provider-settings')
           }}

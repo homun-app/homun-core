@@ -17,6 +17,8 @@ const ACCOUNT = 'sandbot'
 export const CONNECTORS_SERVICE = 'sandbot-connectors-key'
 /** Voce Keychain della chiave master del vault (fase 6: separata dai connettori). */
 export const VAULT_SERVICE = 'sandbot-vault-key'
+/** Fase 16c (C1): voce Keychain PROPRIA delle chiavi API dei provider. */
+export const PROVIDERS_SERVICE = 'sandbot-providers-key'
 
 /** Runner del comando `security` (args + stdin opzionale), iniettabile nei test. */
 export type SecurityRunner = (
@@ -112,4 +114,9 @@ export async function getKeychainKey(service: string, run: SecurityRunner = secu
 /** Chiave dei segreti dei connettori (voce propria, separata dal vault). */
 export function getConnectorsKey(run: SecurityRunner = securityRunnerForEnv()): Promise<Buffer> {
   return getKeychainKey(CONNECTORS_SERVICE, run)
+}
+
+/** Fase 16c (C1): chiave delle chiavi API dei provider (voce propria). */
+export function getProvidersKey(run: SecurityRunner = securityRunnerForEnv()): Promise<Buffer> {
+  return getKeychainKey(PROVIDERS_SERVICE, run)
 }

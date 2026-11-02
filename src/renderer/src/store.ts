@@ -1,6 +1,6 @@
 // State renderer: agenti, transcript dell'agente attivo, eventi dal main.
 import { create } from 'zustand'
-import type { Agent, TranscriptEntry, SandbotEvent, ProviderConfig, PermissionsConfig, ConnectorInfo, TaskInfo, GroupInfo, GroupMessageInfo, SubagentInfo, AgentAvatar, TurnEnd, ScreenStatus } from '../../shared/types'
+import type { Agent, TranscriptEntry, SandbotEvent, ProviderConfig, ProviderPublic, PermissionsConfig, ConnectorInfo, TaskInfo, GroupInfo, GroupMessageInfo, SubagentInfo, AgentAvatar, TurnEnd, ScreenStatus, MainModel } from '../../shared/types'
 
 /** Fase 19b (T1): le schede del pannello «Computer» del bot. */
 export type ComputerTab = 'screen' | 'terminal' | 'files' | 'activity'
@@ -67,7 +67,10 @@ interface Store {
   activeId: string | null
   entries: TranscriptEntry[]
   reasoning: Record<number, string>
-  providers: ProviderConfig[]
+  /** fase 16c (C1): MAI la chiave — la vista pubblica del provider */
+  providers: ProviderPublic[]
+  /** fase 16c (C3.3): il modello principale («il cervello dei bot», models.main) */
+  mainModel: MainModel | null
   permissions: PermissionsConfig | null
   /** fase 5: catalogo "Connetti app" con lo stato di ogni connettore */
   connectors: ConnectorInfo[]
@@ -187,6 +190,16 @@ interface Store {
   openLibrary(id: string | null): void
   /** fase 14: la libreria aperta (null = chiusa, '' = lista, id = voce) */
   openLibraryId: string | null
+  /** fase 16c (C4): la finestra «Collega app» */
+  appsOpen: boolean
+  setAppsOpen(v: boolean): void
+  /** fase 16c (C5): la vista centrale «Attività» (false = chat) */
+  activityOpen: boolean
+  setActivityOpen(v: boolean): void
+  /** fase 16c (C3.2): cambia il modello principale e ricarica i bot che lo seguono */
+  setMainModel(m: MainModel): Promise<void>
+  /** fase 16c: apre il pannello del bot su una scheda data (Routine dalle Impostazioni) */
+  openBotTab(tab: 'profile' | 'computer' | 'routines' | 'advanced'): void
   /** fase 12: bottone Ferma sulla card del sottoagente */
   stopSubagent(id: string): void
   setSettingsOpen(v: boolean): void
@@ -230,6 +243,7 @@ export const useStore = create<Store>((set, get) => ({
   entries: [],
   reasoning: {},
   providers: [],
+  mainModel: null,
   permissions: null,
   connectors: [],
   mainAgentId: null,
@@ -246,6 +260,8 @@ export const useStore = create<Store>((set, get) => ({
   openSubagentId: null,
   subEntries: [],
   openLibraryId: null,
+  appsOpen: false,
+  activityOpen: false,
   // fase 16
   theme: 'system',
   // fase 17a (L2)
@@ -296,7 +312,9 @@ export const useStore = create<Store>((set, get) => ({
     const activeId = agents[0]?.id ?? null
     // fase 7: il bot principale per il badge (null → il primo agente)
     const mainAgentId = await api.settingsGet<string | null>('mainAgentId', null).catch(() => null)
-    set({ agents, providers, permissions, activeId, mainAgentId })
+    // fase 16c (C3.3): il modello principale («Come gli altri»)
+    const mainModel = await api.settingsGet<MainModel | null>('models.main', null).catch(() => null)
+    set({ agents, providers, permissions, activeId, mainAgentId, mainModel })
     // fase 16 (U0): tema e pannello destro; con 'system' si segue il sistema
     const theme = await api.settingsGet<UiTheme>('ui.theme', 'system').catch(() => 'system' as UiTheme)
     const rightPanel = await api.settingsGet<boolean>('ui.rightPanel', true).catch(() => true)
@@ -573,9 +591,10 @@ export const useStore = create<Store>((set, get) => ({
     )
   },
 
-  // fase 8: apre Impostazioni → Approvazione automatica con il testo pronto
+  // fase 8: apre Impostazioni → Approvazioni con il testo pronto
+  // fase 16c (C2): la scheda si chiama Approvazioni
   proposeRule(text) {
-    set({ autoreviewPrefill: text, settingsTab: 'autoreview', settingsOpen: true })
+    set({ autoreviewPrefill: text, settingsTab: 'approvazioni', settingsOpen: true })
   },
 
   // fase 16 (U5): creazione dal dialogo "Crea nuovo bot" — aspetto compreso,
@@ -644,6 +663,28 @@ export const useStore = create<Store>((set, get) => ({
 
   openLibrary(id) {
     set({ openLibraryId: id })
+  },
+
+  // fase 16c (C4): la finestra «Collega app»
+  setAppsOpen(v) {
+    set({ appsOpen: v })
+  },
+
+  // fase 16c (C5): la vista centrale «Attività»
+  setActivityOpen(v) {
+    set({ activityOpen: v })
+  },
+
+  // fase 16c (C3.2): il modello principale cambia → lo ricordano i bot che lo
+  // seguono (il modello eseguito si risolve a ogni turno, nient'altro da fare)
+  async setMainModel(m) {
+    set({ mainModel: m })
+    await api.settingsSet('models.main', m).catch(() => undefined)
+  },
+
+  // fase 16c: il pannello del bot su una scheda data (dalle Impostazioni › Routine)
+  openBotTab(tab) {
+    set({ botPanelTabRequest: tab, rightPanel: true })
   },
 
   // fase 12: il bottone Ferma della card (RPC subagents:stop)

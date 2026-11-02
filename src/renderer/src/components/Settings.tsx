@@ -1,55 +1,50 @@
-// Impostazioni: provider (modelli personalizzati), modello per agente, permessi, routine, connettori, cassaforte, generali.
-// Fase 16 (U5): diventano un Dialog con la colonna di tab a sinistra come in
-// Lovable; il contenuto dei tab resta quello di prima, coi token del nuovo
-// design system. Il meccanismo settingsTab (aprire un tab preciso da un
-// widget) continua a funzionare.
-import { useEffect, useState, type ReactNode } from 'react'
+// Impostazioni (fase 16c, C2): un foglio grande con la colonna di sezioni a
+// sinistra come nella tavola 5 — Generali · Modelli · App e skill ·
+// Approvazioni · Cassaforte · Routine · Uso e costi. La scheda «Bot» sparisce
+// (le impostazioni dei bot vivono nel pannello del bot, Avanzate, dalla 16b).
+// Il meccanismo settingsTab (aprire una sezione precisa da un widget)
+// continua a funzionare con i NUOVI id. Niente bordi: fondi tenui (bg-muted).
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
-import { msg, plural } from '@lingui/core/macro'
+import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
+import { X, ChevronDown, MoreHorizontal } from 'lucide-react'
 import { api, useStore } from '../store'
 import { formatDate, formatTime } from '../lib/i18n'
 import type { UiLanguageSetting } from '../../../shared/ui-language'
-
-/** Il template dei secret nei comandi (fase 17a): costante, così nel messaggio
- *  di Lingui è un segnaposto e non testo con doppie graffe (sintassi ICU). */
-const SECRET_TEMPLATE = '{{secret:NOME}}'
 import { describeTrigger } from '../../../shared/cron-human'
 // fase 17c (C5/C6): lingua attiva per le descrizioni; fiducia e template dai codici
-import { pickLang } from '../../../shared/localized'
 import { i18n } from '../lib/i18n'
 import { VaultTab } from './VaultSettings'
 import { choosePollTool, chooseQueryArgName } from '../../../shared/triggers'
-import type { ProviderConfig, ProviderKind, ModelInfo, Agent, RoutineInfo, RoutineSuggestion, ConnectorInfo, McpServerInfo, McpServerSecret, RoutineTrigger, TemplateInfo, AutoReviewSettings, WebSearchStatusRpc, WebSearchProviderStatusRpc, FallbackRoute, ModelUsageRow, ModelPrice, ModelPriceMap, ThinkingSetting } from '../../../shared/types'
-import { DEFAULT_AUTO_REVIEW, SECRET_KIND_FOR_NEEDS } from '../../../shared/types'
+import type { ProviderKind, ProviderPublic, ModelInfo, RoutineInfo, RoutineSuggestion, ConnectorInfo, McpServerInfo, RoutineTrigger, AutoReviewSettings, WebSearchStatusRpc, WebSearchProviderStatusRpc, FallbackRoute, ModelUsageRow, ModelPrice, ModelPriceMap, ThinkingSetting } from '../../../shared/types'
+import { DEFAULT_AUTO_REVIEW } from '../../../shared/types'
 // fase 18b (K2): la selezione delle righe dell'editor dei prezzi (funzione pura)
 import { priceEditorRows } from '../lib/price-editor'
 // fase 10 (residuo 0d): i default per kind (modulo puro, nessuna dipendenza node)
 import { modelDefaultsFor } from '../../../main/agent/model-defaults'
 // fase 18b (K4): il tetto della catena delle riserve, lo stesso del daemon
 import { MAX_CHAIN_ENTRIES } from '../../../main/agent/model-fallback'
-// fase 18b (H5.2): i kind locali (costo «locale» nella pagina Uso e costi)
-import { isLocalKind } from '../../../main/agent/live-models'
+// fase 16c (C3.4): i base URL noti e la prova «vale solo l'ultima»
+import { KNOWN_BASE_URLS, isLocalKind } from '../../../main/agent/live-models'
+import { nextModelProbe, EMPTY_MODEL_PROBE, type ModelProbeState } from '../lib/model-probe'
 // fase 18b (H5.3): il selettore del modello a combobox
 import { ModelPicker, THINKING_LABELS } from './ui/ModelPicker'
 import type { UiTheme } from '../theme'
 import { Dialog, DialogContent, DialogTitle } from './ui/dialog'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu'
+// fase 16c (C4): la vista condivisa con la finestra «Collega app»
+import { AppsView } from './AppsWindow'
 
-const KINDS: ProviderKind[] = [
-  'ollama', 'lmstudio', 'anthropic', 'mistral', 'openrouter', 'zai', 'xai', 'deepseek', 'groq', 'openai-compatible'
-]
-
-/** I tab con i nomi per la UI (gli id interni non cambiano). Fase 17a: descriptor. */
-const TAB_LABELS: Record<string, MessageDescriptor> = {
-  provider: msg`Provider`,
-  uso: msg`Uso e costi`,
-  agenti: msg`Bot`,
-  permessi: msg`Permessi`,
-  routine: msg`Routine`,
-  connettori: msg`Connettori`,
-  autoreview: msg`Revisione automatica`,
+/** Le sezioni con i nomi per la UI (fase 16c, C2 — tavola 5). */
+const SECTION_LABELS: Record<string, MessageDescriptor> = {
+  generale: msg`Generali`,
+  modelli: msg`Modelli`,
+  app: msg`App e skill`,
+  approvazioni: msg`Approvazioni`,
   vault: msg`Cassaforte`,
-  generale: msg`Generali`
+  routine: msg`Routine`,
+  uso: msg`Uso e costi`
 }
 
 /** La lingua attiva come UiLanguage (fase 17c, C6: descrizioni cron-human). */
@@ -64,76 +59,886 @@ export function Settings() {
   const pendingTab = useStore((s) => s.settingsTab)
   const refreshProviders = useStore((s) => s.refreshProviders)
   const refreshPermissions = useStore((s) => s.refreshPermissions)
-  const [tab, setTab] = useState<'provider' | 'uso' | 'agenti' | 'permessi' | 'routine' | 'connettori' | 'autoreview' | 'vault' | 'generale'>('provider')
+  const [tab, setTab] = useState<string>('generale')
 
-  // fase 7: un widget può chiedere di aprire un tab preciso (es. il provider
-  // durante l'onboarding): lo si applica una volta e si consuma
+  // fase 7: un widget può chiedere di aprire una sezione precisa (es. il
+  // provider durante l'onboarding): lo si applica una volta e si consuma
   useEffect(() => {
     if (pendingTab) {
-      setTab(pendingTab as typeof tab)
+      setTab(pendingTab in SECTION_LABELS ? pendingTab : 'modelli')
       setSettingsTab(null)
     }
   }, [pendingTab, setSettingsTab])
 
   return (
     <Dialog open onOpenChange={(o) => !o && setSettingsOpen(false)}>
-      <DialogContent className="flex h-[600px] max-h-[92vh] max-w-[calc(100%-2rem)] gap-0 p-0 sm:max-w-4xl" showCloseButton={false}>
+      <DialogContent className="flex h-[620px] max-h-[92vh] max-w-[calc(100%-2rem)] gap-0 p-0 sm:max-w-4xl" showCloseButton={false}>
         <DialogTitle className="sr-only"><Trans>Impostazioni</Trans></DialogTitle>
-        <nav className="w-52 shrink-0 space-y-1 overflow-y-auto scroll-thin border-r border-border p-3">
-          {(Object.keys(TAB_LABELS) as Array<keyof typeof TAB_LABELS>).map((t) => (
+        {/* fase 16c (C2): colonna di sezioni a sinistra, testo semplice,
+            selezione su bg-muted, NESSUN bordo */}
+        <nav className="w-52 shrink-0 space-y-0.5 overflow-y-auto scroll-thin p-3">
+          <strong className="block px-3 pb-3 pt-1 font-display text-lg">{i18n._(msg`Impostazioni`)}</strong>
+          {(Object.keys(SECTION_LABELS) as string[]).map((t) => (
             <button
               key={t}
-              className={`w-full rounded-lg px-3 py-2 text-left text-sm transition ${tab === t ? 'bg-muted font-medium' : 'text-muted-foreground hover:text-foreground'}`}
-              onClick={() => setTab(t as typeof tab)}
+              className={`w-full rounded-full px-3 py-2 text-left text-sm transition ${tab === t ? 'bg-muted font-medium text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+              onClick={() => setTab(t)}
             >
-              {i18n.t(TAB_LABELS[t]!)}
+              {i18n.t(SECTION_LABELS[t]!)}
             </button>
           ))}
         </nav>
-        <div className="min-w-0 flex-1 overflow-y-auto scroll-thin p-6">
-          {tab === 'provider' && <ProvidersTab onChanged={refreshProviders} />}
-          {tab === 'uso' && <UsageTab />}
-          {tab === 'agenti' && <AgentsTab />}
-          {tab === 'permessi' && <PermissionsTab onChanged={refreshPermissions} />}
-          {tab === 'routine' && <RoutinesTab />}
-          {tab === 'connettori' && <ConnectorsTab />}
-          {tab === 'autoreview' && <AutoReviewTab />}
-          {tab === 'vault' && <VaultTab />}
-          {tab === 'generale' && <GeneralTab />}
+        <div className="relative min-w-0 flex-1 overflow-y-auto scroll-thin">
+          {/* la ✕ tonda in alto a destra (Esc chiude, come sempre nel Dialog) */}
+          <button
+            className="absolute right-5 top-4 z-10 grid size-9 place-items-center rounded-full bg-muted text-muted-foreground transition hover:text-foreground"
+            aria-label={i18n._(msg`Chiudi`)}
+            onClick={() => setSettingsOpen(false)}
+          >
+            <X className="size-4" />
+          </button>
+          <div className="px-6 py-6">
+            {tab === 'generale' && <GeneralTab />}
+            {tab === 'modelli' && <ModelsTab onOpenUsage={() => setTab('uso')} />}
+            {tab === 'app' && <AppsView />}
+            {tab === 'approvazioni' && <ApprovalsTab onChanged={refreshPermissions} />}
+            {tab === 'vault' && <VaultTab />}
+            {tab === 'routine' && <RoutinesTab />}
+            {tab === 'uso' && <UsageTab />}
+          </div>
         </div>
       </DialogContent>
     </Dialog>
   )
 }
 
-// ---- fase 8 (§3bis L5): auto-review delle approvazioni ----
+// ---- fase 16c (C3): la sezione Modelli (tavola 5) ----
 
-function AutoReviewTab() {
+/** L'inizio del mese corrente in ora locale (il costo «questo mese»). */
+function monthStart(): number {
+  const now = new Date()
+  return new Date(now.getFullYear(), now.getMonth(), 1).getTime()
+}
+
+const KIND_LABELS: Partial<Record<ProviderKind, string>> = {
+  anthropic: 'Anthropic',
+  openai: 'OpenAI',
+  mistral: 'Mistral',
+  zai: 'Z.ai',
+  openrouter: 'OpenRouter',
+  xai: 'xAI',
+  deepseek: 'DeepSeek',
+  groq: 'Groq',
+  'openai-compatible': 'OpenAI-compatible'
+}
+
+/** Le pillole del «Con una chiave API»: le prime quattro visibili, il resto in «Altri ▾». */
+const KEY_KINDS: ProviderKind[] = ['anthropic', 'openai', 'mistral', 'zai', 'openrouter', 'xai', 'deepseek', 'groq']
+
+/** L'esito dell'ultimo providers:test per provider (C3.1). */
+type TestOutcome = { ok: boolean; models?: ModelInfo[]; error?: string }
+
+function ModelsTab({ onOpenUsage }: { onOpenUsage(): void }) {
+  const { t } = useLingui()
+  const providers = useStore((s) => s.providers)
+  const refreshProviders = useStore((s) => s.refreshProviders)
+  const [tests, setTests] = useState<Record<string, TestOutcome>>({})
+  const [testing, setTesting] = useState<string | null>(null)
+  const [monthCost, setMonthCost] = useState<number | null>(null)
+  const [editing, setEditing] = useState<ProviderPublic | null>(null)
+
+  // lo stato arriva dall'ultimo providers:test, rifatto all'apertura senza bloccare
+  const runTests = (): void => {
+    for (const p of providers) {
+      if (!p.enabled) continue
+      void api.testProvider(p.id)
+        .then((r) => setTests((prev) => ({ ...prev, [p.id]: r })))
+        .catch(() => setTests((prev) => ({ ...prev, [p.id]: { ok: false } })))
+    }
+  }
+  useEffect(() => {
+    runTests()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [providers.length])
+  useEffect(() => {
+    void api.usageSummary(monthStart(), undefined, 'model')
+      .then((rows) => setMonthCost(rows.reduce((a, r) => a + (r.costUsd ?? 0), 0)))
+      .catch(() => setMonthCost(null))
+  }, [])
+
+  const fmtUsd = (n: number): string => '$' + (n >= 1 ? n.toFixed(2) : n.toFixed(3)).replace('.', ',')
+  const retry = (id: string): void => {
+    setTesting(id)
+    void api.testProvider(id)
+      .then((r) => setTests((prev) => ({ ...prev, [id]: r })))
+      .catch(() => setTests((prev) => ({ ...prev, [id]: { ok: false } })))
+      .finally(() => setTesting(null))
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="pr-12">
+        <h2 className="font-display text-2xl">{i18n._(msg`Modelli`)}</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          <Trans>Il modello è il cervello dei bot. Ne basta uno; puoi cambiarlo quando vuoi.</Trans>
+        </p>
+      </div>
+
+      <div className="flex flex-col gap-4 lg:flex-row">
+        <div className="min-w-0 flex-1 space-y-6">
+          {/* C3.1 — Collegati */}
+          <section>
+            <p className="mb-1 text-[13px] text-muted-foreground"><Trans>Collegati</Trans></p>
+            {providers.length === 0 && (
+              <p className="py-3 text-sm text-muted-foreground"><Trans>Nessun modello collegato: comincia da qui a destra.</Trans></p>
+            )}
+            {providers.map((p) => {
+              const outcome = tests[p.id]
+              const local = p.discovered || isLocalKind(p.kind)
+              const modelsCount = outcome?.models?.length
+              return (
+                <div key={p.id} className="flex items-center gap-3.5 py-2.5">
+                  <span className="grid size-11 shrink-0 place-items-center rounded-[12px] bg-muted text-base font-bold">
+                    {p.name.slice(0, 1).toUpperCase()}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[15px]">{p.name}</span>
+                    <span className="block truncate text-[13px] text-muted-foreground">
+                      {local
+                        ? <Trans>Trovato da solo · {modelsCount ?? '…'} modelli · gratis e privato</Trans>
+                        : <Trans>Chiave API · a consumo{monthCost !== null ? ` · ${fmtUsd(monthCost)} ` : ''}{monthCost !== null ? <Trans>questo mese</Trans> : ''}</Trans>}
+                    </span>
+                  </span>
+                  {outcome === undefined ? (
+                    <span className="text-[13px] text-muted-foreground">…</span>
+                  ) : outcome.ok ? (
+                    <span className="shrink-0 text-[14px] text-chart-2"><Trans>Collegato</Trans></span>
+                  ) : (
+                    <span className="flex shrink-0 items-center gap-2">
+                      <span className="text-[14px] text-destructive"><Trans>Non risponde</Trans></span>
+                      <button className="rounded-full bg-muted px-2.5 py-1 text-xs transition hover:bg-accent" disabled={testing === p.id} onClick={() => retry(p.id)}>
+                        {testing === p.id ? <Trans>Provo…</Trans> : p.hasKey ? <Trans>Riprova</Trans> : <Trans>Cambia chiave</Trans>}
+                      </button>
+                    </span>
+                  )}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger className="grid size-8 shrink-0 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground" aria-label={t`Altre azioni`}>
+                      <MoreHorizontal className="size-4" />
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => setEditing(p)}><Trans>Modifica</Trans></DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => retry(p.id)}><Trans>Prova</Trans></DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => { void api.deleteProvider(p.id).then(() => refreshProviders()) }}>
+                        <Trans>Rimuovi</Trans>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              )
+            })}
+          </section>
+
+          {/* C3.2 — Chi usa cosa */}
+          <section>
+            <p className="mb-1 text-[13px] text-muted-foreground"><Trans>Chi usa cosa</Trans></p>
+            {/* 1 · il cervello dei bot */}
+            <MainModelRow />
+            {/* 2 · se non risponde */}
+            <div className="flex items-center gap-3 py-2.5">
+              <span className="min-w-0 flex-1">
+                <span className="block text-[15px]"><Trans>Se non risponde</Trans></span>
+                <span className="block text-[13px] text-muted-foreground"><Trans>Si passa da solo alla riserva</Trans></span>
+              </span>
+            </div>
+            <FallbackChainSection />
+            {/* 3 · revisione delle approvazioni */}
+            <ReviewerModelRow />
+          </section>
+
+          <button className="text-sm text-primary transition hover:underline" onClick={onOpenUsage}>
+            {monthCost !== null ? <Trans>Uso e costi: {fmtUsd(monthCost)} questo mese ›</Trans> : <Trans>Uso e costi ›</Trans>}
+          </button>
+
+          {/* fase 15 (S5): la ricerca web e i default per provider restano qui
+              (Opzioni avanzate, chiuse: non si perde nessuna funzione) */}
+          <details className="pt-2">
+            <summary className="cursor-pointer text-[13px] text-muted-foreground transition hover:text-foreground"><Trans>Opzioni avanzate</Trans></summary>
+            <div className="mt-2 space-y-3">
+              <WebSearchSection />
+              {providers.filter((p) => p.kind === 'ollama').map((p) => <WebSearchKeyRow key={p.id} p={p} />)}
+              {providers.map((p) => <ModelDefaultsRow key={p.id} p={p} />)}
+            </div>
+          </details>
+        </div>
+
+        {/* C3.4 — Aggiungi un modello */}
+        <AddModelRail
+          onSaved={() => {
+            void refreshProviders()
+            runTests()
+          }}
+        />
+      </div>
+
+      {editing && (
+        <EditProviderSheet
+          provider={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null)
+            void refreshProviders()
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+/** C3.2.1 — «Il cervello dei bot»: models.main, selettore provider·modello. */
+function MainModelRow() {
   const { t, i18n } = useLingui()
   const providers = useStore((s) => s.providers)
-  const prefill = useStore((s) => s.autoreviewPrefill)
+  const mainModel = useStore((s) => s.mainModel)
+  const setMainModel = useStore((s) => s.setMainModel)
+  const [models, setModels] = useState<ModelInfo[]>([])
+  useEffect(() => {
+    if (mainModel?.providerId) void api.listModels(mainModel.providerId).then(setModels).catch(() => setModels([]))
+    else setModels([])
+  }, [mainModel?.providerId])
+  const chosen = models.find((m) => m.id === mainModel?.model)
+  const levels = chosen?.thinkingLevels ?? []
+  return (
+    <div className="flex flex-wrap items-center gap-3 py-2.5">
+      <span className="min-w-0 flex-1 text-[15px]"><Trans>Il cervello dei bot</Trans></span>
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          className="h-9 rounded-full bg-muted px-3 text-sm outline-none"
+          value={mainModel?.providerId ?? ''}
+          aria-label={t`Provider`}
+          onChange={(e) => {
+            const p = providers.find((x) => x.id === e.target.value)
+            void setMainModel({ providerId: e.target.value, model: p ? (modelDefaultsFor(p).defaultModel ?? '') : '', thinking: null })
+          }}
+        >
+          <option value="">{t`— provider —`}</option>
+          {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        <ModelPicker
+          className="h-9 min-w-44"
+          models={models}
+          value={mainModel?.model ?? ''}
+          placeholder={t`modello…`}
+          disabled={!mainModel?.providerId}
+          onChange={(m) => mainModel && void setMainModel({ ...mainModel, model: m ?? '' })}
+        />
+        {chosen && (chosen.vision === true || levels.length > 0) && (
+          <span className="text-xs text-muted-foreground">
+            {chosen.vision === true ? <Trans>vede</Trans> : null}
+            {chosen.vision === true && levels.length > 0 ? ' · ' : ''}
+            {levels.length > 0 ? <Trans>ragiona</Trans> : null}
+          </span>
+        )}
+        {levels.length > 0 && (
+          <select
+            className="h-9 rounded-full bg-muted px-3 text-xs outline-none"
+            aria-label={t`Ragionamento`}
+            value={levels.includes((mainModel?.thinking ?? 'default') as ThinkingSetting) ? mainModel?.thinking ?? 'default' : 'default'}
+            onChange={(e) => mainModel && void setMainModel({ ...mainModel, thinking: e.target.value as ThinkingSetting })}
+          >
+            {(['default', ...levels] as ThinkingSetting[]).map((l) => (
+              <option key={l} value={l}>{i18n.t(THINKING_LABELS[l] ?? msg`${l}`)}</option>
+            ))}
+          </select>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** C3.2.3 — «Revisione delle approvazioni»: il modello del revisore (le regole stanno in Approvazioni). */
+function ReviewerModelRow() {
+  const { t } = useLingui()
+  const providers = useStore((s) => s.providers)
   const [cfg, setCfg] = useState<AutoReviewSettings | null>(null)
   const [models, setModels] = useState<ModelInfo[]>([])
+  useEffect(() => {
+    void api.settingsGet<AutoReviewSettings>('autoReview', DEFAULT_AUTO_REVIEW).then(setCfg)
+  }, [])
+  useEffect(() => {
+    if (cfg?.providerId) void api.listModels(cfg.providerId).then(setModels).catch(() => setModels([]))
+    else setModels([])
+  }, [cfg?.providerId])
+  if (!cfg) return null
+  const save = (next: AutoReviewSettings): void => {
+    setCfg(next)
+    void api.settingsSet('autoReview', next)
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-3 py-2.5">
+      <span className="min-w-0 flex-1">
+        <span className="block text-[15px]"><Trans>Revisione delle approvazioni</Trans></span>
+        <span className="block text-[13px] text-muted-foreground"><Trans>Un modello piccolo che decide le richieste semplici</Trans></span>
+      </span>
+      <select
+        className="h-9 rounded-full bg-muted px-3 text-sm outline-none"
+        value={cfg.providerId ?? ''}
+        aria-label={t`Provider`}
+        onChange={(e) => save({ ...cfg, providerId: e.target.value || null, model: null })}
+      >
+        <option value="">{t`— provider —`}</option>
+        {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+      </select>
+      <ModelPicker
+        className="h-9 min-w-44"
+        models={models}
+        value={cfg.model}
+        placeholder={t`modello… (vuoto = default del provider)`}
+        disabled={!cfg.providerId}
+        onChange={(m) => save({ ...cfg, model: m })}
+      />
+    </div>
+  )
+}
+
+/** C3.1 — il foglio Modifica: nome, base URL, chiave «•••• a1b2 · cambia», mai il valore. */
+function EditProviderSheet({ provider, onClose, onSaved }: { provider: ProviderPublic; onClose(): void; onSaved(): void }) {
+  const { t } = useLingui()
+  const [name, setName] = useState(provider.name)
+  const [baseUrl, setBaseUrl] = useState(provider.baseUrl)
+  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [key, setKey] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-foreground/20 p-4" onClick={onClose}>
+      <div className="w-full max-w-md space-y-3 rounded-3xl bg-card p-5 shadow-soft" onClick={(e) => e.stopPropagation()}>
+        <strong className="block font-display text-lg">{provider.name}</strong>
+        <input className="w-full rounded-[12px] bg-muted px-3 py-2 text-sm outline-none" placeholder={t`Nome`} value={name} onChange={(e) => setName(e.target.value)} />
+        <div>
+          <button className="text-xs text-muted-foreground transition hover:text-foreground" onClick={() => setShowAdvanced((v) => !v)}>
+            <Trans>Avanzate</Trans> <ChevronDown className={`inline size-3 transition-transform ${showAdvanced ? 'rotate-180' : ''}`} />
+          </button>
+          {showAdvanced && (
+            <input className="mt-1.5 w-full rounded-[12px] bg-muted px-3 py-2 text-sm outline-none" placeholder={t`Base URL`} value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
+          )}
+        </div>
+        {/* C1: la chiave non si rilegge MAI — solo il suggerimento «•••• a1b2» */}
+        {provider.hasKey ? (
+          <div className="space-y-1.5">
+            <p className="text-sm text-muted-foreground">
+              {key ? <Trans>Chiave nuova</Trans> : <Trans>•••• {provider.keyHint ?? ''}</Trans>}{' '}
+              {!key && (
+                <button className="text-primary transition hover:underline" onClick={() => setKey(' ')}>
+                  <Trans>cambia</Trans>
+                </button>
+              )}
+            </p>
+            {key && (
+              <input
+                className="w-full rounded-[12px] bg-muted px-3 py-2 text-sm outline-none"
+                type="password"
+                placeholder={t`Nuova chiave API`}
+                value={key.trim() ? key : ''}
+                onChange={(e) => setKey(e.target.value)}
+              />
+            )}
+          </div>
+        ) : (
+          <input
+            className="w-full rounded-[12px] bg-muted px-3 py-2 text-sm outline-none"
+            type="password"
+            placeholder={t`Chiave API (opzionale)`}
+            value={key}
+            onChange={(e) => setKey(e.target.value)}
+          />
+        )}
+        {err && <p className="text-xs text-destructive">{err}</p>}
+        <div className="flex justify-end gap-2 pt-1">
+          <button className="rounded-full px-3 py-1.5 text-sm text-muted-foreground transition hover:text-foreground" onClick={onClose}>
+            <Trans>Annulla</Trans>
+          </button>
+          <button
+            className="rounded-full bg-foreground px-4 py-1.5 text-sm font-medium text-background transition hover:opacity-90 disabled:opacity-40"
+            disabled={busy || !name.trim()}
+            onClick={() => {
+              setBusy(true)
+              setErr('')
+              api.saveProvider({
+                id: provider.id,
+                name: name.trim(),
+                kind: provider.kind,
+                baseUrl: baseUrl.trim(),
+                enabled: provider.enabled,
+                ...(key.trim() ? { apiKey: key.trim() } : {})
+              })
+                .then(onSaved)
+                .catch((e: unknown) => setErr(e instanceof Error ? e.message : String(e)))
+                .finally(() => setBusy(false))
+            }}
+          >
+            <Trans>Salva</Trans>
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** C3.4 — la colonna «Aggiungi un modello»: sul Mac, con una chiave, un altro server. */
+function AddModelRail({ onSaved }: { onSaved(): void }) {
+  const { t, i18n } = useLingui()
+  const [mode, setMode] = useState<'mac' | 'key' | 'server'>('mac')
+  // — sul Mac —
+  const [scanning, setScanning] = useState(false)
+  const [found, setFound] = useState<ProviderPublic[] | null>(null)
+  // — chiave API / altro server —
+  const [kind, setKind] = useState<ProviderKind>('anthropic')
+  const [showOtherKinds, setShowOtherKinds] = useState(false)
+  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [baseUrl, setBaseUrl] = useState('')
+  const [serverName, setServerName] = useState('')
+  const [apiKey, setApiKey] = useState('')
+  const [probe, setProbe] = useState<ModelProbeState>(EMPTY_MODEL_PROBE)
+  const probeRevision = useRef(0)
+  const probeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const probeErrorText = (code: string): string =>
+    code === 'invalid-key' ? t`La chiave non è valida`
+      : code === 'unreachable' ? t`Il servizio non risponde`
+        : t`La prova non è riuscita`
+
+  /** La prova parte DA SOLA appena la chiave cambia (debounce 400 ms); vale solo l'ultima. */
+  const scheduleProbe = (nextKey: string, url: string): void => {
+    if (probeTimer.current) clearTimeout(probeTimer.current)
+    setProbe(EMPTY_MODEL_PROBE)
+    if (!url.trim()) return
+    probeTimer.current = setTimeout(() => {
+      const revision = ++probeRevision.current
+      setProbe((s) => nextModelProbe(s, { type: 'start', revision }, probeRevision.current))
+      void api.probeProvider({ kind, baseUrl: url.trim(), ...(nextKey.trim() ? { apiKey: nextKey.trim() } : {}) })
+        .then((r) => setProbe((s) => nextModelProbe(
+          s,
+          r.ok
+            ? { type: 'result', revision, ok: true, models: r.models ?? [] }
+            : { type: 'result', revision, ok: false, error: r.error ?? 'error' },
+          probeRevision.current
+        )))
+        .catch(() => setProbe((s) => nextModelProbe(s, { type: 'result', revision, ok: false, error: 'unreachable' }, probeRevision.current)))
+    }, 400)
+  }
+
+  const effectiveBaseUrl = mode === 'key'
+    ? (baseUrl || KNOWN_BASE_URLS[kind] || '')
+    : baseUrl
+  const railButton = (id: typeof mode, title: MessageDescriptor, sub: MessageDescriptor): ReactNode => (
+    <button
+      role="radio"
+      aria-checked={mode === id}
+      className={`rounded-2xl px-3.5 py-3 text-left transition ${mode === id ? 'bg-card shadow-soft' : 'hover:bg-card/60'}`}
+      onClick={() => { setMode(id); setProbe(EMPTY_MODEL_PROBE); setApiKey(''); setBaseUrl(''); setFound(null) }}
+    >
+      <span className={`block text-sm ${mode === id ? 'font-semibold' : ''}`}>{i18n.t(title)}</span>
+      <span className="block text-[13px] text-muted-foreground">{i18n.t(sub)}</span>
+    </button>
+  )
+
+  const connect = async (): Promise<void> => {
+    const name = mode === 'server' ? (serverName.trim() || 'Server') : (KIND_LABELS[kind] ?? String(kind))
+    await api.saveProvider({
+      id: `${mode === 'server' ? 'custom' : kind}_${Date.now()}`,
+      name,
+      kind: mode === 'server' ? 'openai-compatible' : kind,
+      baseUrl: effectiveBaseUrl.trim(),
+      enabled: true,
+      ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {})
+    })
+    setApiKey('')
+    setProbe(EMPTY_MODEL_PROBE)
+    onSaved()
+  }
+
+  return (
+    <div className="w-full shrink-0 space-y-3 rounded-3xl bg-muted p-5 lg:w-[380px]">
+      <strong><Trans>Aggiungi un modello</Trans></strong>
+      <div role="radiogroup" aria-label={t`Come`} className="flex flex-col gap-1">
+        {railButton('mac', msg`Sul tuo Mac`, msg`Ollama, LM Studio · gratis, nessun dato esce`)}
+        {railButton('key', msg`Con una chiave API`, msg`Anthropic, OpenAI, Mistral, Z.ai…`)}
+        {railButton('server', msg`Un altro server`, msg`Qualsiasi servizio compatibile OpenAI`)}
+      </div>
+
+      {mode === 'mac' && (
+        <div className="space-y-2">
+          <button
+            className="w-full rounded-full bg-foreground px-4 py-2 text-sm font-medium text-background transition hover:opacity-90 disabled:opacity-40"
+            disabled={scanning}
+            onClick={() => {
+              setScanning(true)
+              setFound(null)
+              void api.discoverProviders()
+                .then((list) => setFound(list.filter((p) => p.discovered)))
+                .catch(() => setFound([]))
+                .finally(() => setScanning(false))
+            }}
+          >
+            {scanning ? <Trans>Cerco…</Trans> : <Trans>Cerca sul Mac</Trans>}
+          </button>
+          {found !== null && (found.length > 0 ? (
+            <ul className="space-y-1 text-sm">
+              {found.map((p) => <li key={p.id} className="rounded-xl bg-card px-3 py-1.5">{p.name}</li>)}
+            </ul>
+          ) : (
+            <p className="text-[13px] text-muted-foreground">
+              <Trans>Non ho trovato Ollama né LM Studio. Aprili e riprova.</Trans>{' '}
+              <a className="text-primary hover:underline" href="https://ollama.com" target="_blank" rel="noreferrer">{'ollama.com'}</a>
+            </p>
+          ))}
+        </div>
+      )}
+
+      {mode === 'key' && (
+        <div className="space-y-2.5">
+          <div className="flex flex-wrap gap-1.5">
+            {KEY_KINDS.slice(0, 4).map((k) => (
+              <button
+                key={k}
+                className={`h-8 rounded-full px-3 text-[13px] transition ${kind === k ? 'bg-foreground text-background' : 'bg-card hover:bg-card/80'}`}
+                onClick={() => { setKind(k); setBaseUrl(''); setProbe(EMPTY_MODEL_PROBE) }}
+              >
+                {KIND_LABELS[k]}
+              </button>
+            ))}
+            <div className="relative">
+              <button
+                className={`h-8 rounded-full px-3 text-[13px] transition ${KEY_KINDS.slice(4).includes(kind) ? 'bg-foreground text-background' : 'bg-card hover:bg-card/80'}`}
+                onClick={() => setShowOtherKinds((v) => !v)}
+              >
+                <Trans>Altri</Trans> <ChevronDown className="inline size-3" />
+              </button>
+              {showOtherKinds && (
+                <div className="absolute left-0 top-9 z-10 overflow-hidden rounded-xl bg-card py-1 shadow-soft">
+                  {KEY_KINDS.slice(4).map((k) => (
+                    <button
+                      key={k}
+                      className={`block w-full px-4 py-1.5 text-left text-[13px] transition hover:bg-muted ${kind === k ? 'font-semibold' : ''}`}
+                      onClick={() => { setKind(k); setBaseUrl(''); setShowOtherKinds(false); setProbe(EMPTY_MODEL_PROBE) }}
+                    >
+                      {KIND_LABELS[k]}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+          <ModelKeyFields
+            showAdvanced={showAdvanced}
+            setShowAdvanced={setShowAdvanced}
+            baseUrl={baseUrl}
+            setBaseUrl={(v) => { setBaseUrl(v); scheduleProbe(apiKey, v || KNOWN_BASE_URLS[kind] || '') }}
+            effectiveBaseUrl={effectiveBaseUrl}
+            apiKey={apiKey}
+            setApiKey={(v) => { setApiKey(v); scheduleProbe(v, effectiveBaseUrl) }}
+            probe={probe}
+            probeErrorText={probeErrorText}
+          />
+          <p className="text-xs text-muted-foreground"><Trans>La chiave resta nel Portachiavi del Mac.</Trans></p>
+          <button
+            className="w-full rounded-full bg-foreground px-4 py-2 text-sm font-semibold text-background transition hover:opacity-90 disabled:opacity-40"
+            disabled={!probe.ok || !effectiveBaseUrl.trim()}
+            onClick={() => void connect()}
+          >
+            <Trans>Collega {KIND_LABELS[kind]}</Trans>
+          </button>
+        </div>
+      )}
+
+      {mode === 'server' && (
+        <div className="space-y-2.5">
+          <input
+            className="w-full rounded-[12px] bg-card px-3 py-2 text-sm outline-none"
+            placeholder={t`Nome (es. Il mio gateway)`}
+            value={serverName}
+            onChange={(e) => setServerName(e.target.value)}
+          />
+          <ModelKeyFields
+            showAdvanced={showAdvanced}
+            setShowAdvanced={setShowAdvanced}
+            baseUrl={baseUrl}
+            setBaseUrl={(v) => { setBaseUrl(v); scheduleProbe(apiKey, v) }}
+            effectiveBaseUrl={effectiveBaseUrl}
+            apiKey={apiKey}
+            setApiKey={(v) => { setApiKey(v); scheduleProbe(v, effectiveBaseUrl) }}
+            probe={probe}
+            probeErrorText={probeErrorText}
+            urlPlaceholder={t`Indirizzo (es. http://127.0.0.1:8000/v1)`}
+            keyPlaceholder={t`Chiave (facoltativa)`}
+          />
+          <p className="text-xs text-muted-foreground"><Trans>La chiave resta nel Portachiavi del Mac.</Trans></p>
+          <button
+            className="w-full rounded-full bg-foreground px-4 py-2 text-sm font-semibold text-background transition hover:opacity-90 disabled:opacity-40"
+            disabled={!probe.ok || !serverName.trim() || !effectiveBaseUrl.trim()}
+            onClick={() => void connect()}
+          >
+            <Trans>Collega {serverName.trim() || t`il server`}</Trans>
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** I campi condivisi da «Con una chiave API» e «Un altro server» (URL sotto Avanzate, chiave, esito). */
+function ModelKeyFields(props: {
+  showAdvanced: boolean
+  setShowAdvanced(v: boolean): void
+  baseUrl: string
+  setBaseUrl(v: string): void
+  effectiveBaseUrl: string
+  apiKey: string
+  setApiKey(v: string): void
+  probe: ModelProbeState
+  probeErrorText(code: string): string
+  urlPlaceholder?: string
+  keyPlaceholder?: string
+}): ReactNode {
+  const { t } = useLingui()
+  return (
+    <>
+      <div>
+        <button className="text-xs text-muted-foreground transition hover:text-foreground" onClick={() => props.setShowAdvanced(!props.showAdvanced)}>
+          <Trans>Avanzate</Trans> <ChevronDown className={`inline size-3 transition-transform ${props.showAdvanced ? 'rotate-180' : ''}`} />
+        </button>
+        {props.showAdvanced && (
+          <input
+            className="mt-1.5 w-full rounded-[12px] bg-card px-3 py-2 text-sm outline-none"
+            placeholder={props.urlPlaceholder ?? t`Base URL`}
+            value={props.baseUrl}
+            onChange={(e) => props.setBaseUrl(e.target.value)}
+          />
+        )}
+      </div>
+      <label className="block text-[13px] text-muted-foreground" htmlFor="sandbot-api-key"><Trans>Incolla la chiave</Trans></label>
+      <input
+        id="sandbot-api-key"
+        className="h-10 w-full rounded-[12px] bg-card px-3 py-2 text-sm outline-none"
+        type="password"
+        placeholder={props.keyPlaceholder ?? t`sk-…`}
+        value={props.apiKey}
+        onChange={(e) => props.setApiKey(e.target.value)}
+      />
+      {props.probe.probing && <p className="text-[13px] text-muted-foreground"><Trans>Provo la chiave…</Trans></p>}
+      {props.probe.ok === true && (
+        <p className="text-[14px] text-chart-2">
+          <Trans>✓ Funziona · {props.probe.models.length} modelli disponibili</Trans>
+        </p>
+      )}
+      {props.probe.ok === false && (
+        <p className="text-[14px] text-destructive">{props.probeErrorText(props.probe.error ?? 'error')}</p>
+      )}
+    </>
+  )
+}
+
+// ---- fase 9/15/11: le opzioni avanzate dei modelli (default per provider e
+// ricerca web) — non si perde nessuna funzione della 15 ----
+
+interface ModelOverrides { defaultModel?: string; fallbackModel?: string; autoReviewModel?: string }
+
+/**
+ * I tre modelli configurabili per provider: il predefinito va ai bot nuovi
+ * (onboarding e template), la riserva rileva i turni quando il principale non
+ * risponde, il revisore giudica le approvazioni automatiche. Salvati nel
+ * setting 'providers.modelDefaults' (chiave = id del provider).
+ */
+function ModelDefaultsRow({ p }: { p: ProviderPublic }) {
+  const { t } = useLingui()
+  const [models, setModels] = useState<ModelInfo[] | null>(null)
+  const [saved, setSaved] = useState<ModelOverrides>({})
+
+  useEffect(() => {
+    void api.settingsGet<Record<string, ModelOverrides> | undefined>('providers.modelDefaults', undefined)
+      .then((all) => setSaved(all?.[p.id] ?? {}))
+      .catch(() => setSaved({}))
+    void api.listModels(p.id).then(setModels).catch(() => setModels([]))
+  }, [p.id])
+
+  const save = async (patch: ModelOverrides): Promise<void> => {
+    const next = { ...saved, ...patch }
+    setSaved(next)
+    const all = await api.settingsGet<Record<string, ModelOverrides>>('providers.modelDefaults', {})
+    await api.settingsSet('providers.modelDefaults', { ...all, [p.id]: next })
+  }
+
+  const effective = modelDefaultsFor(p)
+  const effLabel = (role: keyof ModelOverrides, fallback: string): string => {
+    const eff = effective[role]
+    return eff ? t`${fallback}: ${eff}` : t`${fallback}…`
+  }
+  const picker = (role: keyof ModelOverrides, label: string): ReactNode => (
+    <ModelPicker
+      className="min-w-44"
+      models={models ?? []}
+      value={saved[role] ?? ''}
+      placeholder={saved[role] ? label : effLabel(role, label)}
+      onChange={(m) => void save({ [role]: m ?? undefined } as ModelOverrides)}
+    />
+  )
+
+  if (models === null) return <div className="text-xs text-muted-foreground"><Trans>modelli…</Trans></div>
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-2xl bg-muted px-3 py-2.5">
+      <span className="text-[11px] uppercase tracking-wide text-muted-foreground">{p.name}</span>
+      {picker('defaultModel', t`predefinito`)}
+      {picker('fallbackModel', t`riserva`)}
+      {picker('autoReviewModel', t`auto-review`)}
+    </div>
+  )
+}
+
+/**
+ * Fase 11 (punto 2): campo «chiave per la ricerca web» del provider Ollama.
+ * Il valore va SOLO nel vault sigillato: la UI non lo rilegge mai.
+ */
+function WebSearchKeyRow({ p }: { p: ProviderPublic }) {
+  const { t } = useLingui()
+  const [set, setSet] = useState<boolean | null>(null)
+  const [value, setValue] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    void api.webSearchKeySet(p.id).then(setSet).catch(() => setSet(null))
+  }, [p.id])
+
+  const save = async (key: string | null): Promise<void> => {
+    setBusy(true)
+    try {
+      await api.setWebSearchKey(p.id, key)
+      setSet(await api.webSearchKeySet(p.id))
+      setValue('')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-2xl bg-muted px-3 py-2.5">
+      <span className="text-[11px] uppercase tracking-wide text-muted-foreground"><Trans>ricerca web</Trans></span>
+      <input
+        className="w-56 rounded-lg bg-card px-2 py-1.5 text-xs outline-none"
+        type="password"
+        placeholder={set ? t`chiave salvata (scrivi per sostituirla)` : t`chiave per la ricerca web di Ollama`}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+      />
+      <button
+        className="rounded-full bg-card px-2.5 py-1.5 text-xs transition hover:bg-card/80 disabled:opacity-50"
+        disabled={busy || !value.trim()}
+        onClick={() => void save(value.trim())}
+      >
+        <Trans>Salva chiave</Trans>
+      </button>
+      {set && (
+        <button
+          className="rounded-full px-2.5 py-1.5 text-xs text-muted-foreground transition hover:text-foreground disabled:opacity-50"
+          disabled={busy}
+          onClick={() => void save(null)}
+        >
+          <Trans>Rimuovi</Trans>
+        </button>
+      )}
+      <span className={`text-xs ${set ? 'text-chart-2' : 'text-muted-foreground'}`}>
+        {set === null ? '' : set ? t`ricerca web attiva (chiave nel vault)` : t`ricerca web non attiva`}
+      </span>
+    </div>
+  )
+}
+
+/**
+ * Fase 15 (S5): sezione «Ricerca web» — l'interruttore dei servizi senza
+ * chiave (You.com, Exa, Tavily), la nota sulla privacy e lo stato per provider.
+ */
+function WebSearchSection() {
+  const { t } = useLingui()
+  const [keyless, setKeyless] = useState<boolean | null>(null)
+  const [status, setStatus] = useState<WebSearchStatusRpc | null>(null)
+
+  const refresh = () => {
+    void api.settingsGet<boolean>('webSearch.keyless', true).then(setKeyless).catch(() => setKeyless(null))
+    void api.webSearchStatus().then(setStatus).catch(() => setStatus(null))
+  }
+  useEffect(refresh, [])
+
+  const toggle = async (v: boolean): Promise<void> => {
+    setKeyless(v)
+    await api.settingsSet('webSearch.keyless', v)
+    refresh()
+  }
+
+  const stateOf = (p: WebSearchProviderStatusRpc): { text: string; cls: string } => {
+    if (p.cooldownUntil) {
+      return {
+        text: t`in raffreddamento fino a ${formatTime(p.cooldownUntil)}`,
+        cls: 'text-destructive'
+      }
+    }
+    if (p.lastError) {
+      return { text: t`ultimo errore: ${p.lastError.kind}${p.lastError.status !== undefined ? t` (HTTP ${p.lastError.status})` : ''}`, cls: 'text-muted-foreground' }
+    }
+    return { text: t`disponibile`, cls: 'text-chart-2' }
+  }
+
+  return (
+    <div className="rounded-2xl bg-muted px-3 py-2.5">
+      <div className="text-sm"><Trans>Ricerca web</Trans></div>
+      <label className="mt-2 flex cursor-pointer items-start gap-3">
+        <input
+          type="checkbox"
+          className="mt-0.5 h-4 w-4 accent-foreground"
+          checked={keyless ?? true}
+          disabled={keyless === null}
+          onChange={(e) => void toggle(e.target.checked)}
+        />
+        <span className="space-y-1">
+          <span className="block text-xs">
+            <Trans>Usa i servizi di ricerca gratuiti senza chiave (You.com, Exa, Tavily)</Trans>
+          </span>
+          <span className="block text-xs text-muted-foreground">
+            <Trans>Le ricerche dei bot vengono inviate a questi servizi, secondo i loro termini d&apos;uso: <a className="text-primary hover:underline" href="https://you.com/acceptable-use-policy-may-2026" target="_blank" rel="noreferrer">You.com</a>{' · '}<a className="text-primary hover:underline" href="https://exa.ai/terms" target="_blank" rel="noreferrer">Exa</a>{' · '}<a className="text-primary hover:underline" href="https://docs.tavily.com/documentation/keyless" target="_blank" rel="noreferrer">Tavily</a></Trans>
+          </span>
+        </span>
+      </label>
+      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+        {(status?.providers ?? []).map((p) => (
+          <span key={p.name} className={`text-xs ${stateOf(p).cls}`}>
+            {p.label}: {stateOf(p).text}
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ---- fase 16c (C2): Approvazioni = permessi + regole (il modello del
+// revisore sta in Modelli, C3.2) ----
+
+function ApprovalsTab({ onChanged }: { onChanged: () => Promise<void> }) {
+  const { t, i18n } = useLingui()
+  const permissions = useStore((s) => s.permissions)
+  const prefill = useStore((s) => s.autoreviewPrefill)
+  const [cfg, setCfg] = useState<AutoReviewSettings | null>(null)
   const [newAllow, setNewAllow] = useState('')
   const [newBlock, setNewBlock] = useState('')
 
   useEffect(() => {
     void api.settingsGet<AutoReviewSettings>('autoReview', DEFAULT_AUTO_REVIEW).then(setCfg)
   }, [])
-  // fase 8: "Crea regola da questa azione" arriva con un testo precompilato
   useEffect(() => {
     if (prefill) {
       setNewAllow(prefill)
       useStore.setState({ autoreviewPrefill: null })
     }
   }, [prefill])
-  // i modelli del provider scelto (per il revisore)
-  useEffect(() => {
-    if (cfg?.providerId) void api.listModels(cfg.providerId).then(setModels).catch(() => setModels([]))
-    else setModels([])
-  }, [cfg?.providerId])
+  if (!permissions || !cfg) return <p className="text-xs text-muted-foreground"><Trans>caricamento…</Trans></p>
 
-  if (!cfg) return <p className="text-xs text-muted-foreground"><Trans>caricamento…</Trans></p>
   const save = (next: AutoReviewSettings): void => {
     setCfg(next)
     void api.settingsSet('autoReview', next)
@@ -149,13 +954,13 @@ function AutoReviewTab() {
     value: string
     setValue(v: string): void
   }) => (
-    <div className="rounded-2xl border border-border bg-card px-3 py-2.5">
-      <div className="text-sm text-foreground">{i18n.t(title)}</div>
+    <div className="rounded-2xl bg-muted px-3 py-2.5">
+      <div className="text-sm">{i18n.t(title)}</div>
       <div className="mt-0.5 text-[11px] text-muted-foreground">{i18n.t(hint)}</div>
       <ul className="mt-2 space-y-1">
         {rules.length === 0 && <li className="text-xs text-muted-foreground"><Trans>(nessuna regola)</Trans></li>}
         {rules.map((r, i) => (
-          <li key={`${r}-${i}`} className="flex items-start gap-2 text-xs text-foreground">
+          <li key={`${r}-${i}`} className="flex items-start gap-2 text-xs">
             <span className="flex-1">{r}</span>
             <button className="shrink-0 text-muted-foreground hover:text-destructive" onClick={() => onRemove(i)}>✕</button>
           </li>
@@ -170,7 +975,7 @@ function AutoReviewTab() {
           onKeyDown={(e) => { if (e.key === 'Enter' && value.trim()) { onAdd(); setValue('') } }}
         />
         <button
-          className="rounded-lg bg-accent px-3 py-1.5 text-xs text-foreground hover:bg-muted-foreground/40 disabled:opacity-40"
+          className="rounded-full bg-card px-3 py-1.5 text-xs transition hover:bg-card/80 disabled:opacity-40"
           disabled={!value.trim()}
           onClick={() => { onAdd(); setValue('') }}
         >
@@ -182,10 +987,53 @@ function AutoReviewTab() {
 
   return (
     <div className="space-y-3">
+      <p className="pr-12 text-xs text-muted-foreground">
+        <Trans>Regole per tool: consenti sempre / chiedi / blocca. «Consenti sempre» nelle card salva una standing grant.</Trans>
+      </p>
+      <div className="rounded-2xl bg-muted px-4 py-3">
+        <label className="flex items-center justify-between text-sm">
+          <span><Trans>Politica predefinita</Trans></span>
+          <select
+            className="rounded-full bg-card px-2.5 py-1.5 text-sm outline-none"
+            value={permissions.default}
+            onChange={async (e) => {
+              await api.setPermissions({ ...permissions, default: e.target.value as typeof permissions.default })
+              await onChanged()
+            }}
+          >
+            <option value="always_allow">{t`Consenti sempre`}</option>
+            <option value="needs_approval">{t`Chiedi approvazione`}</option>
+            <option value="blocked">{t`Blocca`}</option>
+          </select>
+        </label>
+      </div>
+      {permissions.rules.map((r, i) => (
+        <div key={i} className="flex items-center gap-2 rounded-2xl bg-muted px-3 py-2.5">
+          <span className="w-36 font-mono text-xs">{r.tool}</span>
+          <span className="w-24 font-mono text-xs text-muted-foreground">{r.pattern}</span>
+          <div className="flex-1" />
+          <select
+            className="rounded-full bg-card px-2.5 py-1.5 text-xs outline-none"
+            value={r.mode}
+            onChange={async (e) => {
+              const rules = [...permissions.rules]
+              rules[i] = { ...r, mode: e.target.value as typeof r.mode }
+              await api.setPermissions({ ...permissions, rules })
+              await onChanged()
+            }}
+          >
+            <option value="always_allow">{t`Consenti sempre`}</option>
+            <option value="needs_approval">{t`Chiedi approvazione`}</option>
+            <option value="blocked">{t`Blocca`}</option>
+          </select>
+        </div>
+      ))}
+
+      <h3 className="pt-3 font-display text-lg"><Trans>Auto-revisione delle approvazioni</Trans></h3>
       <p className="text-xs text-muted-foreground">
         <Trans>Un modello piccolo rivede le azioni che chiedono approvazione secondo queste regole e può lasciarle passare da solo. Sta dopo il gate dei permessi e non cambia mai i divieti: le azioni che modificano il comportamento futuro del bot, i comandi che eseguono altri comandi e i turni aperti da altri bot o da eventi esterni chiedono comunque.</Trans>
       </p>
-      <label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-border bg-card px-4 py-3">
+      <label className="flex cursor-pointer items-start gap-3 rounded-2xl bg-muted px-4 py-3">
         <input
           type="checkbox"
           className="mt-0.5 h-4 w-4 accent-foreground"
@@ -193,29 +1041,11 @@ function AutoReviewTab() {
           onChange={(e) => save({ ...cfg, enabled: e.target.checked })}
         />
         <span>
-          <span className="block text-sm text-foreground"><Trans>Approvazione automatica</Trans></span>
+          <span className="block text-sm"><Trans>Approvazione automatica</Trans></span>
           <span className="block text-xs text-muted-foreground"><Trans>Al massimo 20 azioni approvate per turno; un dubbio del revisore diventa sempre una card.</Trans></span>
         </span>
       </label>
-      <div className="flex gap-2">
-        <select
-          className="rounded-lg bg-muted px-2 py-1.5 text-xs outline-none"
-          value={cfg.providerId ?? ''}
-          onChange={(e) => save({ ...cfg, providerId: e.target.value || null, model: null })}
-        >
-          <option value="">{t`provider del revisore…`}</option>
-          {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-        </select>
-        {/* fase 18b (H5.3): combobox con ricerca, capacità e prezzi */}
-        <ModelPicker
-          className="min-w-44"
-          models={models}
-          value={cfg.model}
-          placeholder={t`modello… (vuoto = default del provider)`}
-          disabled={!cfg.providerId}
-          onChange={(m) => save({ ...cfg, model: m })}
-        />
-      </div>
+      <p className="text-xs text-muted-foreground"><Trans>Il modello del revisore si sceglie in Modelli › Revisione delle approvazioni.</Trans></p>
       <RuleList
         title={msg`⚡ Continua da solo quando l'azione rispetta queste regole`}
         hint={msg`Se una regola corrisponde (e nessuna regola di fermata), il revisore può approvare l'azione o l'invio della bozza.`}
@@ -238,7 +1068,7 @@ function AutoReviewTab() {
   )
 }
 
-// ---- fase 18b (H6.2): la pagina Uso e costi ----
+// ---- fase 18b (H6.2): la pagina Uso e costi (stile 16c: fondi, niente bordi) ----
 
 /** Le finestre del periodo, calcolate in ora LOCALE nel renderer. */
 type UsagePeriod = 'today' | '7d' | '30d' | 'month'
@@ -310,7 +1140,7 @@ function UsageTab() {
   const segBtn = (id: typeof view, label: string): ReactNode => (
     <button
       key={id}
-      className={`rounded-lg px-2.5 py-1 text-xs ${view === id ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+      className={`rounded-full px-2.5 py-1 text-xs ${view === id ? 'bg-card text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
       onClick={() => setView(id)}
     >
       {label}
@@ -318,13 +1148,13 @@ function UsageTab() {
   )
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 pr-12">
       {/* periodo */}
       <div className="flex flex-wrap items-center gap-1">
         {(Object.keys(PERIOD_LABELS) as UsagePeriod[]).map((p) => (
           <button
             key={p}
-            className={`rounded-lg px-2.5 py-1 text-xs ${period === p ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+            className={`rounded-full px-2.5 py-1 text-xs ${period === p ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
             onClick={() => setPeriod(p)}
           >
             {i18n.t(PERIOD_LABELS[p]!)}
@@ -333,22 +1163,22 @@ function UsageTab() {
       </div>
 
       {/* riepilogo */}
-      <div className="grid grid-cols-2 gap-2 rounded-2xl border border-border bg-card px-3 py-2.5 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2 rounded-2xl bg-muted px-3 py-2.5 sm:grid-cols-4">
         <div>
           <div className="text-[11px] uppercase tracking-wide text-muted-foreground"><Trans>chiamate</Trans></div>
-          <div className="text-sm text-foreground">{fmtInt(totalCalls)}</div>
+          <div className="text-sm">{fmtInt(totalCalls)}</div>
         </div>
         <div>
           <div className="text-[11px] uppercase tracking-wide text-muted-foreground"><Trans>token in</Trans></div>
-          <div className="text-sm text-foreground">{fmtInt(totalIn)}</div>
+          <div className="text-sm">{fmtInt(totalIn)}</div>
         </div>
         <div>
           <div className="text-[11px] uppercase tracking-wide text-muted-foreground"><Trans>token out</Trans></div>
-          <div className="text-sm text-foreground">{fmtInt(totalOut)}</div>
+          <div className="text-sm">{fmtInt(totalOut)}</div>
         </div>
         <div>
           <div className="text-[11px] uppercase tracking-wide text-muted-foreground"><Trans>costo totale</Trans></div>
-          <div className="text-sm text-foreground">{anyUnknown ? `≥ ${fmtUsd(totalCost)}` : fmtUsd(totalCost)}</div>
+          <div className="text-sm">{anyUnknown ? `≥ ${fmtUsd(totalCost)}` : fmtUsd(totalCost)}</div>
         </div>
       </div>
       {anyUnknown && (
@@ -356,7 +1186,7 @@ function UsageTab() {
       )}
 
       {/* tre viste */}
-      <div className="flex items-center gap-1 rounded-lg bg-muted p-1">
+      <div className="flex items-center gap-1 rounded-full bg-muted p-1 w-fit">
         {segBtn('model', t`per modello`)}
         {segBtn('agent', t`per bot`)}
         {segBtn('source', t`per origine`)}
@@ -368,10 +1198,10 @@ function UsageTab() {
       ) : rows.length === 0 ? (
         <p className="text-xs text-muted-foreground"><Trans>Nessuna chiamata nel periodo.</Trans></p>
       ) : (
-        <div className="overflow-x-auto rounded-2xl border border-border bg-card">
+        <div className="overflow-x-auto rounded-2xl bg-muted">
           <table className="w-full text-xs">
             <thead>
-              <tr className="border-b border-border text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+              <tr className="text-left text-[11px] uppercase tracking-wide text-muted-foreground">
                 <th className="px-3 py-2">{view === 'model' ? t`modello` : view === 'agent' ? t`bot` : t`origine`}</th>
                 <th className="px-3 py-2 text-right"><Trans>chiamate</Trans></th>
                 <th className="px-3 py-2 text-right"><Trans>token in</Trans></th>
@@ -385,7 +1215,7 @@ function UsageTab() {
                 const cost = costCell(r)
                 const key = view === 'model' ? `${r.providerId}|${r.model}` : view === 'agent' ? (r.agentId ?? 'system') : r.source
                 return (
-                  <tr key={`${key}-${i}`} className="border-b border-border/50 last:border-0">
+                  <tr key={`${key}-${i}`} className="border-t border-border/30 first:border-0">
                     <td className="px-3 py-2 font-mono">
                       {view === 'model'
                         ? `${r.providerKind}:${r.model}`
@@ -409,8 +1239,7 @@ function UsageTab() {
         </div>
       )}
 
-      {/* prezzi personalizzati (H1.3): i modelli usati nel periodo SENZA prezzo
-          di catalogo e NON locali */}
+      {/* prezzi personalizzati (H1.3) */}
       <PriceSettings
         modelRows={modelRows}
         prices={prices}
@@ -423,14 +1252,12 @@ function UsageTab() {
 
 /**
  * Fase 18b (H6.2 → K2): i prezzi $/M dei modelli senza catalogo (salvano in
- * providers.modelPrices). Le righe le sceglie la funzione PURA priceEditorRows:
- * un modello resta nell'editor anche DOPO che le chiamate hanno registrato un
- * costo (un prezzo sbagliato si corregge), e un prezzo salvato si vede sempre.
+ * providers.modelPrices). Le righe le sceglie la funzione PURA priceEditorRows.
  */
 function PriceSettings({ modelRows, prices, providers, onSaved }: {
   modelRows: ModelUsageRow[]
   prices: ModelPriceMap
-  providers: ProviderConfig[]
+  providers: ProviderPublic[]
   onSaved(): void
 }) {
   const target = priceEditorRows(modelRows, prices)
@@ -439,8 +1266,8 @@ function PriceSettings({ modelRows, prices, providers, onSaved }: {
   if (target.length === 0) return null
 
   return (
-    <div className="space-y-2 rounded-2xl border border-border bg-card px-3 py-2.5">
-      <div className="text-sm text-foreground"><Trans>Prezzi personalizzati</Trans></div>
+    <div className="space-y-2 rounded-2xl bg-muted px-3 py-2.5">
+      <div className="text-sm"><Trans>Prezzi personalizzati</Trans></div>
       <p className="text-xs text-muted-foreground">
         <Trans>Questi modelli non hanno un prezzo di catalogo: scrivi quello che paghi (dollari per milione di token). Vale per le chiamate da qui in avanti, lo storico non cambia.</Trans>
       </p>
@@ -511,11 +1338,10 @@ function PriceRow({ providerId, model, label, price, inputCls, onSaved }: {
   )
 }
 
-// ---- fase 18b (H5.4): l'editor della catena delle riserve ----
+// ---- fase 18b (H5.4): l'editor della catena delle riserve (stile 16c) ----
 
 /**
- * Il massimo di voci della catena (H2.1). K4: la stessa costante del daemon
- * (routeChain taglia le voci oltre il tetto): una sola verità.
+ * Il massimo di voci della catena (H2.1). K4: la stessa costante del daemon.
  */
 const MAX_FALLBACK_CHAIN = MAX_CHAIN_ENTRIES
 
@@ -553,8 +1379,7 @@ function FallbackChainSection() {
   }
 
   return (
-    <div className="space-y-2 rounded-2xl border border-border bg-card px-3 py-2.5">
-      <div className="text-sm text-foreground"><Trans>Riserve</Trans></div>
+    <div className="space-y-2 rounded-2xl bg-muted/60 px-3 py-2.5">
       <p className="text-xs text-muted-foreground">
         <Trans>Se il modello di un bot non risponde o raggiunge un limite, il turno passa alla riserva successiva. Con un limite (429) si salta agli altri provider.</Trans>
       </p>
@@ -564,7 +1389,7 @@ function FallbackChainSection() {
           <div key={`${r.providerId}|${r.model}|${i}`} className={`flex flex-wrap items-center gap-2 ${p?.enabled ? '' : 'opacity-60'}`}>
             <span className="text-[11px] uppercase tracking-wide text-muted-foreground">{i + 1}.</span>
             <select
-              className="rounded-lg bg-muted px-2 py-1.5 text-xs outline-none"
+              className="rounded-full bg-card px-2 py-1.5 text-xs outline-none"
               value={r.providerId}
               onChange={(e) => persist(chain.map((x, j) => j === i ? { providerId: e.target.value, model: '' } : x))}
             >
@@ -587,7 +1412,7 @@ function FallbackChainSection() {
       })}
       {chain.length < MAX_FALLBACK_CHAIN && (
         <button
-          className="rounded-lg bg-muted px-3 py-1.5 text-xs hover:bg-accent"
+          className="rounded-full bg-card px-3 py-1.5 text-xs transition hover:bg-card/80"
           onClick={() => persist([...chain, { providerId: '', model: '' }])}
         >
           <Trans>Aggiungi riserva</Trans>
@@ -597,598 +1422,8 @@ function FallbackChainSection() {
   )
 }
 
-// ---- fase 5: "Connetti app" — catalogo con stato + server MCP manuali ----
-
-const STATUS_DOT: Record<string, string> = {
-  not_connected: 'bg-muted-foreground/40',
-  connected: 'bg-chart-2',
-  needs_auth: 'bg-destructive',
-  error: 'bg-destructive'
-}
-const STATUS_LABEL: Record<string, MessageDescriptor> = {
-  not_connected: msg`non connesso`,
-  connected: msg`connesso`,
-  needs_auth: msg`da autorizzare`,
-  error: msg`errore`
-}
-
-/**
- * Fase 13: Connettori con QUATTRO schede — App (catalogo, come prima),
- * Installati (server del registro/plugin/gateway con enabledFor per bot),
- * Marketplace (elenco, aggiungi/rimuovi) e Gateway (modulo del punto 7).
- */
-function ConnectorsTab() {
-  const { t } = useLingui()
-  const connectors = useStore((s) => s.connectors)
-  const refreshConnectors = useStore((s) => s.refreshConnectors)
-  const [sub, setSub] = useState<'app' | 'installati' | 'marketplace' | 'gateway'>('app')
-  useEffect(() => { void refreshConnectors() }, [refreshConnectors])
-  const subBtn = (id: typeof sub, label: string): ReactNode => (
-    <button
-      key={id}
-      className={`rounded-lg px-2.5 py-1 text-xs ${sub === id ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
-      onClick={() => setSub(id)}
-    >
-      {label}
-    </button>
-  )
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-1">{subBtn('app', t`App`)}{subBtn('installati', t`Installati`)}{subBtn('marketplace', t`Marketplace`)}{subBtn('gateway', t`Gateway`)}</div>
-      {sub === 'app' && (
-        <>
-          <p className="text-xs text-muted-foreground">
-            <Trans>Le app si collegano come server MCP con OAuth: i loro tool diventano <code>mcp__&lt;server&gt;__&lt;tool&gt;</code>. I token stanno cifrati nel Keychain. Il bot può proporre un'app in chat, ma la connessione parte solo dal tuo click.</Trans>
-          </p>
-          <div className="grid grid-cols-2 gap-2">
-            {connectors.map((c) => (
-              <ConnectorTile key={c.id} c={c} />
-            ))}
-          </div>
-          <ManualServers />
-          <ClientMetadataUrlRow />
-        </>
-      )}
-      {sub === 'installati' && <InstalledTab />}
-      {sub === 'marketplace' && <MarketplaceTab />}
-      {sub === 'gateway' && <GatewayTab />}
-    </div>
-  )
-}
-
-/**
- * Fase 13 (punto 6.2): URL del Client ID Metadata Document (CIMD) ospitato
- * dall'utente — vuoto = Dynamic Client Registration. Una riga che spiega.
- */
-function ClientMetadataUrlRow() {
-  const { t } = useLingui()
-  const [url, setUrl] = useState<string | null>(null)
-  useEffect(() => {
-    void api.settingsGet<string>('connectors.oauth.clientMetadataUrl', '').then(setUrl).catch(() => setUrl(''))
-  }, [])
-  if (url === null) return null
-  return (
-    <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
-      <span className="text-[11px] uppercase tracking-wide text-muted-foreground"><Trans>OAuth</Trans></span>
-      <span className="text-[11px] text-muted-foreground"><Trans>Se ospiti un documento dei metadati del client (CIMD, es. su GitHub Pages, https e con percorso), incollalo qui; vuoto = registrazione dinamica (DCR).</Trans></span>
-      <input
-        className="min-w-0 flex-1 rounded-lg bg-muted px-2 py-1.5 text-xs outline-none"
-        placeholder={t`https://utente.github.io/sandbot/client.json`}
-        value={url}
-        onChange={(e) => setUrl(e.target.value)}
-        onBlur={() => void api.connectorsSetClientMetadataUrl(url.trim())}
-      />
-    </div>
-  )
-}
-
-/** Scheda Installati: server del registro/plugin/gateway con fonte, fiducia, stato, enabledFor, disinstalla. */
-function InstalledTab() {
-  const { t } = useLingui()
-  const [data, setData] = useState<{ servers: Array<McpServerInfo & { needsReauth?: boolean; neverAuthorized?: boolean }>; plugins: Array<{ name: string; marketplace: string; sha12: string; skills: Array<{ name: string }>; servers: string[]; enabledFor: string[]; updateAvailable?: boolean }> } | null>(null)
-  const agents = useStore((s) => s.agents)
-  const [values, setValues] = useState<Record<string, string>>({})
-  const [reconnectMsg, setReconnectMsg] = useState('')
-  const refresh = async (): Promise<void> => { setData(await api.connectorsInstalled() as { servers: Array<McpServerInfo & { needsReauth?: boolean; neverAuthorized?: boolean }>; plugins: Array<{ name: string; marketplace: string; sha12: string; skills: Array<{ name: string }>; servers: string[]; enabledFor: string[]; updateAvailable?: boolean }> }) }
-  useEffect(() => { void refresh() }, [])
-  if (data === null) return <p className="text-xs text-muted-foreground"><Trans>installati…</Trans></p>
-
-  const enabledForEditor = (kind: 'server' | 'plugin', id: string, current: string[] | undefined): ReactNode => (
-    <div className="flex flex-wrap items-center gap-2">
-      <span className="text-[11px] text-muted-foreground"><Trans>per bot:</Trans></span>
-      {agents.map((a) => {
-        const on = current?.includes('*') || current?.includes(a.id)
-        return (
-          <label key={a.id} className="flex items-center gap-1 text-[11px] text-muted-foreground">
-            <input
-              type="checkbox"
-              className="h-3 w-3 accent-foreground"
-              checked={on}
-              onChange={() => {
-                const next = current?.includes('*') ? [] : [...(current ?? [])]
-                const i = next.indexOf(a.id)
-                if (i >= 0) next.splice(i, 1)
-                else next.push(a.id)
-                void api.connectorsSetEnabledFor(kind, id, next).then(refresh)
-              }}
-            />
-            {a.name}
-          </label>
-        )
-      })}
-    </div>
-  )
-
-  return (
-    <div className="space-y-3">
-      <p className="text-xs text-muted-foreground">
-        <Trans>Server del registro pubblico e plugin installati. Chiavi, header e variabili stanno cifrati: si compilano qui, MAI in chat.</Trans>
-      </p>
-      {data.servers.length === 0 && data.plugins.length === 0 && <p className="text-xs text-muted-foreground"><Trans>nessun server o plugin installato</Trans></p>}
-      {data.servers.map((sv) => {
-        const src = sv.source as { kind?: string; name?: string; plugin?: string; preset?: string } | undefined
-        const needs = sv.needsAuth as { kind?: string; keys?: string[] } | undefined
-        // fase 17a (K3): tre messaggi interi distinti, scelti col ternario FUORI
-        // dal testo — dentro <Trans> una stringa JS è un segnaposto e resterebbe
-        // italiana anche in inglese
-        const keys = needs?.keys?.join(', ') ?? ''
-        return (
-          <div key={sv.id} className="rounded-2xl border border-border bg-card px-3 py-2.5">
-            <div className="flex items-center gap-2">
-              <span className={`h-2 w-2 rounded-full ${needs ? 'bg-destructive' : 'bg-chart-2'}`} />
-              <span className="text-sm text-foreground">{sv.name}</span>
-              <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">{src?.kind ?? t`manuale`}</span>
-              {sv.trustLabel && (
-                <span className="text-[10px] text-muted-foreground">
-                  {/* fase 17c (C5): la fiducia si traduce dal kind; le righe vecchie mostrano il label com'è */}
-                  {sv.trustKind === 'verified-domain' ? t`dominio verificato`
-                    : sv.trustKind === 'github-account' ? t`account GitHub`
-                    : sv.trustKind === 'unverified' ? t`non verificato`
-                    : sv.trustLabel}
-                </span>
-              )}
-              <span className="flex-1 truncate text-xs text-muted-foreground">{sv.transport === 'http' ? sv.url : `${sv.box?.command ?? ''} ${(sv.box?.args ?? []).join(' ')}`}</span>
-              {/* L1+M2: sessione OAuth da (ri)fare di un server non del catalogo →
-                  authorizeWithLoopback; "Connetti" se non ha mai avuto token
-                  (plugin appena installato), "Riconnetti" se è scaduta */}
-              {sv.needsReauth && (
-                <button
-                  className="rounded-lg bg-accent px-2 py-0.5 text-xs text-white hover:bg-muted-foreground/40"
-                  onClick={async () => {
-                    const r = await api.connectorsReconnectServer(sv.id).catch((e: unknown) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e) }))
-                    setReconnectMsg(r.ok ? (r.message ?? t`riconnesso`) : t`riconnessione non riuscita: ${'error' in r ? r.error ?? '' : ''}`)
-                    await refresh()
-                  }}
-                >
-                  {sv.neverAuthorized ? <Trans>Connetti</Trans> : <Trans>Riconnetti</Trans>}
-                </button>
-              )}
-              <button className="text-xs text-muted-foreground hover:text-destructive" onClick={async () => { await api.connectorsUninstallServer(sv.id); await refresh() }}><Trans>disinstalla</Trans></button>
-            </div>
-            {reconnectMsg && <p className="mt-1 text-[11px] text-muted-foreground">{reconnectMsg}</p>}
-            {enabledForEditor('server', sv.id, sv.enabledFor)}
-            {needs?.keys?.length ? (
-              <div className="mt-2 space-y-1 border-t border-border pt-2">
-                <p className="text-[11px] text-destructive/80">
-                  {needs.kind === 'key' ? (
-                    <Trans>serve: {keys} (header)</Trans>
-                  ) : needs.kind === 'env' ? (
-                    <Trans>serve: {keys} (variabile d’ambiente)</Trans>
-                  ) : (
-                    <Trans>serve: {keys} (impostazione del plugin)</Trans>
-                  )}
-                </p>
-                {needs.keys.map((k) => (
-                  <div key={k} className="flex gap-1">
-                    <input
-                      className="min-w-0 flex-1 rounded-lg bg-muted px-2 py-1 text-xs outline-none"
-                      type="password"
-                      placeholder={k}
-                      value={values[`${sv.id}:${k}`] ?? ''}
-                      onChange={(e) => setValues((p) => ({ ...p, [`${sv.id}:${k}`]: e.target.value }))}
-                    />
-                  </div>
-                ))}
-                <button
-                  className="rounded-lg bg-accent px-2 py-1 text-xs text-white hover:bg-muted-foreground/40"
-                  onClick={async () => {
-                    const vals: Record<string, string> = {}
-                    for (const k of needs.keys ?? []) if (values[`${sv.id}:${k}`]?.trim()) vals[k] = values[`${sv.id}:${k}`]!.trim()
-                    // L1: il kind è quello di SECRET_KIND (mappato da needsAuth.kind) —
-                    // lo STESSO che il resolver legge alla connessione
-                    await api.connectorsSaveServerValues(sv.id, SECRET_KIND_FOR_NEEDS[needs.kind as keyof typeof SECRET_KIND_FOR_NEEDS], vals)
-                    setValues({})
-                    await refresh()
-                  }}
-                >
-                  <Trans>salva cifrato</Trans>
-                </button>
-              </div>
-            ) : null}
-          </div>
-        )
-      })}
-      {data.plugins.map((p) => (
-        <div key={`${p.marketplace}/${p.name}`} className="rounded-2xl border border-border bg-card px-3 py-2.5">
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-foreground">{p.name}</span>
-            <span className="text-xs text-muted-foreground">{p.marketplace} · {p.sha12}</span>
-            <span className="flex-1" />
-            <button className="text-xs text-muted-foreground hover:text-destructive" onClick={async () => { await api.pluginsUninstall(p.name, p.marketplace); await refresh() }}><Trans>disinstalla</Trans></button>
-          </div>
-          <p className="mt-0.5 text-[11px] text-muted-foreground"><Trans>{p.skills.length} skill · {p.servers.length} server{p.updateAvailable ? t` · nuova versione disponibile (aggiorna = nuova card in chat)` : ''}</Trans></p>
-          {enabledForEditor('plugin', p.name, p.enabledFor)}
-        </div>
-      ))}
-    </div>
-  )
-}
-
-/** Scheda Marketplace: elenco dei marketplace registrati, aggiungi (owner/repo o URL git) o rimuovi. Il BOT non può. */
-function MarketplaceTab() {
-  const { t } = useLingui()
-  const [list, setList] = useState<Array<{ name: string; source: string; kind: string; official: boolean }> | null>(null)
-  const [input, setInput] = useState('')
-  const [error, setError] = useState('')
-  const refresh = async (): Promise<void> => setList(await api.marketplaceList())
-  useEffect(() => { void refresh() }, [])
-  return (
-    <div className="space-y-3">
-      <p className="text-xs text-muted-foreground">
-        <Trans>Plugin nel formato di Claude Code. Predefinito: <code>anthropics/claude-plugins-official</code> (puoi rimuoverlo). Di un plugin Homun importa SOLO skill e server MCP; hook, bin/ e comandi non girano mai.</Trans>
-      </p>
-      {(list ?? []).map((m) => (
-        <div key={m.source} className="flex items-center gap-2 rounded-2xl border border-border bg-card px-3 py-2">
-          <span className="text-sm text-foreground">{m.name}</span>
-          {m.official && <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary"><Trans>marketplace ufficiale</Trans></span>}
-          <span className="flex-1 truncate text-xs text-muted-foreground">{m.source}</span>
-          <button className="text-xs text-muted-foreground hover:text-destructive" onClick={async () => { await api.marketplaceRemove(m.source); await refresh() }}><Trans>rimuovi</Trans></button>
-        </div>
-      ))}
-      <div className="flex gap-1">
-        <input
-          className="min-w-0 flex-1 rounded-lg bg-muted px-2.5 py-1.5 text-xs outline-none"
-          placeholder={t`owner/repo di GitHub oppure URL git https`}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-        />
-        <button
-          className="rounded-lg bg-accent px-2.5 py-1.5 text-xs text-white hover:bg-muted-foreground/40 disabled:opacity-40"
-          disabled={!input.trim()}
-          onClick={async () => {
-            setError('')
-            try {
-              await api.marketplaceAdd(input.trim())
-              setInput('')
-              await refresh()
-            } catch (e) {
-              setError(e instanceof Error ? e.message : String(e))
-            }
-          }}
-        >
-          <Trans>aggiungi</Trans>
-        </button>
-      </div>
-      {error && <p className="text-xs text-destructive">{error}</p>}
-    </div>
-  )
-}
-
-/** Scheda Gateway (punto 7): un server MCP remoto di aggregazione, preset come dati, chiavi cifrate. */
-function GatewayTab() {
-  const { t } = useLingui()
-  const [presets, setPresets] = useState<Array<{ id: string; name: string; auth: string; headerName?: string; help: string }> | null>(null)
-  const [warning, setWarning] = useState('')
-  const [name, setName] = useState('')
-  const [url, setUrl] = useState('')
-  const [token, setToken] = useState('')
-  const [error, setError] = useState('')
-  useEffect(() => {
-    void api.connectorsGatewayPresets().then((r) => { setPresets(r.presets); setWarning(r.warning) }).catch(() => setPresets([]))
-  }, [])
-  return (
-    <div className="space-y-3">
-      <p className="text-xs text-muted-foreground">{warning || t`Un gateway custodisce l'accesso a tutte le app che colleghi lì: è un servizio di terzi`}</p>
-      <div className="flex flex-wrap gap-1">
-        {(presets ?? []).map((p) => (
-          <button
-            key={p.id}
-            className="rounded-lg border border-border px-2 py-1 text-[11px] text-foreground hover:border-primary hover:text-primary"
-            onClick={() => { setName(p.name); setUrl(''); setToken('') }}
-            title={p.help}
-          >
-            {p.name}
-          </button>
-        ))}
-      </div>
-      <div className="space-y-2 rounded-2xl border border-border bg-card p-3">
-        <div className="grid grid-cols-2 gap-2">
-          <input className="rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder={t`Nome (es. Composio)`} value={name} onChange={(e) => setName(e.target.value)} />
-          <input className="rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder={t`URL https del server MCP`} value={url} onChange={(e) => setUrl(e.target.value)} />
-        </div>
-        <input className="w-full rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" type="password" placeholder={t`chiave / token Bearer (salvata cifrata)`} value={token} onChange={(e) => setToken(e.target.value)} />
-        {(presets ?? []).find((p) => p.name === name)?.help && (
-          <p className="text-[11px] text-muted-foreground">{presets!.find((p) => p.name === name)!.help}</p>
-        )}
-        <button
-          className="rounded-lg bg-primary px-2.5 py-1.5 text-xs font-medium text-white hover:bg-primary/90 disabled:opacity-40"
-          disabled={!name.trim() || !url.trim().startsWith('https://') || !token.trim()}
-          onClick={async () => {
-            setError('')
-            const preset = (presets ?? []).find((p) => p.name === name)
-            try {
-              // il preset dice SOLO nome header e testo d'aiuto (dati, nessuna chiamata API)
-              await api.connectorsAddGateway({
-                name: name.trim(), url: url.trim(),
-                auth: preset?.auth === 'bearer' ? 'bearer' : 'headers',
-                ...(preset ? { preset: preset.id } : {}),
-                ...(preset?.headerName ? { headerName: preset.headerName, headers: { [preset.headerName]: token.trim() } } : { headers: { Authorization: `Bearer ${token.trim()}` } })
-              })
-              setName(''); setUrl(''); setToken('')
-            } catch (e) {
-              setError(e instanceof Error ? e.message : String(e))
-            }
-          }}
-        >
-          <Trans>aggiungi gateway</Trans>
-        </button>
-        {error && <p className="text-xs text-destructive">{error}</p>}
-      </div>
-    </div>
-  )
-}
-
-function ConnectorTile({ c }: { c: ConnectorInfo }) {
-  const { t, i18n } = useLingui()
-  const [busy, setBusy] = useState(false)
-  const [open, setOpen] = useState(false)
-  const [clientId, setClientId] = useState('')
-  const [clientSecret, setClientSecret] = useState('')
-  const [instructions, setInstructions] = useState(c.state.instructions)
-
-  const toggleTool = async (tool: string, disabled: boolean): Promise<void> => {
-    const next = disabled
-      ? c.state.disabledTools.filter((t) => t !== tool)
-      : [...c.state.disabledTools, tool]
-    await api.connectorsSetTools(c.id, next)
-  }
-
-  return (
-    <div className="rounded-2xl border border-border bg-card px-3 py-2.5">
-      <div className="flex items-center gap-2">
-        <span className="text-base">{c.logo}</span>
-        <span className="text-sm text-foreground">{c.name}</span>
-        <span className={`h-2 w-2 rounded-full ${STATUS_DOT[c.state.status]}`} title={c.state.error ?? i18n.t(STATUS_LABEL[c.state.status] ?? msg`errore`)} />
-        <span className="text-[10px] uppercase text-muted-foreground">{i18n.t(STATUS_LABEL[c.state.status] ?? msg`errore`)}</span>
-        <div className="flex-1" />
-        {c.state.status === 'connected' ? (
-          <>
-            <button className="text-xs text-muted-foreground hover:text-foreground" onClick={() => setOpen(!open)}>
-              {open ? <Trans>chiudi</Trans> : <Trans>tool</Trans>}
-            </button>
-            <button
-              className="text-xs text-muted-foreground hover:text-destructive"
-              disabled={busy}
-              onClick={async () => {
-                setBusy(true)
-                try { await api.connectorsDisconnect(c.id) } finally { setBusy(false) }
-              }}
-            >
-              <Trans>disconnetti</Trans>
-            </button>
-          </>
-        ) : (
-          <button
-            className="rounded-lg bg-primary px-2.5 py-1 text-xs font-medium text-white hover:bg-primary/90 disabled:opacity-50"
-            disabled={busy}
-            onClick={async () => {
-              setBusy(true)
-              try { await api.connectorsConnect(c.id) } finally { setBusy(false) }
-            }}
-          >
-            {busy ? <Trans>autorizza nel browser…</Trans> : c.state.status === 'needs_auth' ? <Trans>riconnetti</Trans> : <Trans>connetti</Trans>}
-          </button>
-        )}
-      </div>
-      {c.state.error && <p className="mt-1 text-[11px] text-destructive/80">{c.state.error}</p>}
-      {/* fase 17c (C5): le note del catalogo nella lingua dell'interfaccia */}
-      {c.state.status !== 'connected' && c.notes && (
-        <p className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">{pickLang(c.notes, uiLang())}</p>
-      )}
-
-      {/* client OAuth statico (Google): credenziali cifrate, guida in docs/google-oauth.md */}
-      {c.clientRegistration === 'static' && c.state.status !== 'connected' && (
-        <div className="mt-2 space-y-1 border-t border-border pt-2">
-          {c.hasStaticCredentials ? (
-            <p className="text-[11px] text-muted-foreground"><Trans>Client OAuth configurato ✓</Trans></p>
-          ) : (
-            <>
-              <p className="text-[11px] text-muted-foreground">
-                <Trans>Serve un client OAuth tuo (tipo "Desktop app"):</Trans>{' '}
-                <a className="text-primary hover:underline" href={c.docsUrl} target="_blank" rel="noreferrer">{t`guida`}</a>{' '}
-                {' · docs/google-oauth.md'}
-              </p>
-              <div className="flex gap-1">
-                <input
-                  className="min-w-0 flex-1 rounded-lg bg-muted px-2 py-1 text-xs outline-none"
-                  placeholder="client_id"
-                  value={clientId}
-                  onChange={(e) => setClientId(e.target.value)}
-                />
-                <input
-                  className="min-w-0 flex-1 rounded-lg bg-muted px-2 py-1 text-xs outline-none"
-                  type="password"
-                  placeholder="client_secret"
-                  value={clientSecret}
-                  onChange={(e) => setClientSecret(e.target.value)}
-                />
-                <button
-                  className="rounded-lg bg-accent px-2 py-1 text-xs text-white hover:bg-muted-foreground/40 disabled:opacity-40"
-                  disabled={!clientId.trim() || !clientSecret.trim()}
-                  onClick={() => void api.connectorsSaveStaticClient(c.id, clientId.trim(), clientSecret.trim())}
-                >
-                  <Trans>salva</Trans>
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-      )}
-
-      {open && (
-        <div className="mt-2 space-y-2 border-t border-border pt-2">
-          {/* tool del connettore: interruttore per ognuno (i disattivati non sono offerti al modello) */}
-          {c.tools.length === 0 && <p className="text-[11px] text-muted-foreground"><Trans>nessun tool elencato</Trans></p>}
-          {c.tools.map((t) => {
-            const disabled = c.state.disabledTools.includes(t.name)
-            return (
-              <label key={t.name} className="flex items-start gap-2">
-                <input
-                  type="checkbox"
-                  className="mt-0.5 h-3.5 w-3.5 accent-foreground"
-                  checked={!disabled}
-                  onChange={() => void toggleTool(t.name, disabled)}
-                />
-                <span className="min-w-0">
-                  <span className="block truncate font-mono text-[11px] text-foreground">{t.name}</span>
-                  <span className="block text-[10px] text-muted-foreground">{t.description}</span>
-                </span>
-              </label>
-            )
-          })}
-          {/* istruzioni personalizzate: iniettate nel system prompt quando il connettore è attivo */}
-          <div>
-            <p className="mb-1 text-[11px] text-muted-foreground"><Trans>Istruzioni personalizzate (vanno nel prompt del bot quando il connettore è attivo)</Trans></p>
-            <textarea
-              className="w-full resize-none rounded-lg bg-muted px-2 py-1.5 text-xs outline-none"
-              rows={3}
-              placeholder={t`es. Usa questo account solo per lavoro; le email in italiano vanno riassunte in bulleted list…`}
-              value={instructions}
-              onChange={(e) => setInstructions(e.target.value)}
-              onBlur={() => void api.connectorsSetInstructions(c.id, instructions)}
-            />
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-/** Server MCP aggiunti a mano: restano nella stessa vista "Connetti app". */
-function ManualServers() {
-  const { t } = useLingui()
-  const [servers, setServers] = useState<McpServerInfo[]>([])
-  const [secrets, setSecrets] = useState<string[]>([])
-  const [edit, setEdit] = useState<McpServerInfo | null>(null)
-  // fase 5: bearer token del server manuale (salvato CIFRATO, mai nei settings)
-  const [editBearer, setEditBearer] = useState('')
-  const [tests, setTests] = useState<Record<string, { ok: boolean; error?: string; tools?: string[] }>>({})
-  const [secName, setSecName] = useState('')
-  const [secValue, setSecValue] = useState('')
-
-  const refresh = async () => {
-    setServers(await api.mcpList())
-    setSecrets(await api.vaultList())
-  }
-  useEffect(() => { void refresh() }, [])
-
-  return (
-    <div className="space-y-3 border-t border-border pt-3">
-      <p className="text-xs text-muted-foreground"><Trans>Server MCP manuali (stdio o HTTP, con header/bearer salvati cifrati).</Trans></p>
-      {servers.map((s) => (
-        <div key={s.id} className="rounded-2xl border border-border bg-card px-3 py-2.5">
-          <div className="flex items-center gap-2">
-            <span className={`h-2 w-2 rounded-full ${s.enabled ? 'bg-chart-2' : 'bg-muted-foreground/40'}`} />
-            <span className="text-sm text-foreground">{s.name}</span>
-            <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">{s.transport}</span>
-            {s.auth && <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase text-primary">{s.auth.kind}</span>}
-            <span className="flex-1 truncate text-xs text-muted-foreground">{s.transport === 'stdio' ? `${s.command} ${(s.args ?? []).join(' ')}` : s.url}</span>
-            <button className="text-xs text-muted-foreground hover:text-foreground" onClick={async () => {
-              setTests((p) => ({ ...p, [s.id]: { ok: true, tools: ['test…'] } }))
-              const r = await api.mcpTest(s.id)
-              setTests((p) => ({ ...p, [s.id]: r }))
-            }}><Trans>test</Trans></button>
-            <button className="text-xs text-muted-foreground hover:text-foreground" onClick={() => { setEdit(s); setEditBearer('') }}><Trans>modifica</Trans></button>
-            <button className="text-xs text-muted-foreground hover:text-destructive" onClick={async () => { await api.mcpDelete(s.id); await refresh() }}><Trans>elimina</Trans></button>
-          </div>
-          {tests[s.id] && (
-            <div className={`mt-2 text-xs ${tests[s.id].ok ? 'text-chart-2' : 'text-destructive'}`}>
-              {tests[s.id].ok ? t`✓ ${tests[s.id].tools?.length ?? 0} tool: ${(tests[s.id].tools ?? []).join(', ').slice(0, 200)}` : t`✕ ${tests[s.id].error ?? ''}`}
-            </div>
-          )}
-        </div>
-      ))}
-      {edit ? (
-        <div className="space-y-2 rounded-2xl border border-border bg-muted p-3">
-          <div className="grid grid-cols-2 gap-2">
-            <input className="rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder={t`Nome (es. weather)`} value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} />
-            <select className="rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" value={edit.transport} onChange={(e) => setEdit({ ...edit, transport: e.target.value as 'stdio' | 'http' })}>
-              <option value="stdio">{t`stdio (comando locale)`}</option>
-              <option value="http">{t`http (URL)`}</option>
-            </select>
-          </div>
-          {edit.transport === 'stdio' ? (
-            <div className="grid grid-cols-2 gap-2">
-              <input className="rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder={t`Comando (es. node)`} value={edit.command ?? ''} onChange={(e) => setEdit({ ...edit, command: e.target.value })} />
-              <input className="rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder={t`Argomenti separati da spazio`} value={(edit.args ?? []).join(' ')} onChange={(e) => setEdit({ ...edit, args: e.target.value ? e.target.value.split(/\s+/) : [] })} />
-            </div>
-          ) : (
-            <>
-              <input className="w-full rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder={t`URL (es. http://localhost:3001/mcp)`} value={edit.url ?? ''} onChange={(e) => setEdit({ ...edit, url: e.target.value })} />
-              <input
-                className="w-full rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none"
-                type="password"
-                placeholder={t`Bearer token (opzionale — salvato cifrato)`}
-                value={editBearer}
-                onChange={(e) => setEditBearer(e.target.value)}
-              />
-            </>
-          )}
-          <div className="flex justify-end gap-2 pt-1">
-            <button className="rounded-lg px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground" onClick={() => setEdit(null)}><Trans>Annulla</Trans></button>
-            <button
-              className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-primary/90"
-              onClick={async () => {
-                const secret: McpServerSecret | undefined = edit.transport === 'http' && editBearer.trim() ? { bearerToken: editBearer.trim() } : undefined
-                await api.mcpSave({ ...edit, id: edit.id || 'mcp_' + Date.now() }, secret)
-                setEdit(null); setEditBearer('')
-                await refresh()
-              }}
-            >
-              <Trans>Salva</Trans>
-            </button>
-          </div>
-        </div>
-      ) : (
-        <button className="w-full rounded-xl border border-dashed border-border px-3 py-2.5 text-sm text-muted-foreground hover:border-muted-foreground hover:text-foreground" onClick={() => { setEdit({ id: '', name: '', transport: 'stdio', command: '', args: [], enabled: true }); setEditBearer('') }}>
-          <Trans>+ Aggiungi server MCP</Trans>
-        </button>
-      )}
-
-      <div className="space-y-2 border-t border-border pt-3">
-        <p className="text-xs text-muted-foreground"><Trans>Vault credenziali (AES-256-GCM, chiave master in safeStorage): il bot vede i nomi col tool <code>list-credentials</code> e li usa scrivendo <code>{SECRET_TEMPLATE}</code> nei comandi — i valori non compaiono mai nel transcript.</Trans></p>
-        {secrets.map((n) => (
-          <div key={n} className="flex items-center gap-2 rounded-lg border border-border px-2 py-2">
-            <span className="text-sm text-foreground">🔐 {n}</span>
-            <div className="flex-1" />
-            <button className="text-xs text-muted-foreground hover:text-destructive" onClick={async () => { await api.vaultDelete(n); await refresh() }}><Trans>elimina</Trans></button>
-          </div>
-        ))}
-        <div className="flex gap-2">
-          <input className="min-w-0 flex-1 rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" placeholder={t`Nome (es. api_key_github)`} value={secName} onChange={(e) => setSecName(e.target.value)} />
-          <input className="min-w-0 flex-1 rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none" type="password" placeholder={t`Valore`} value={secValue} onChange={(e) => setSecValue(e.target.value)} />
-          <button className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-primary/90 disabled:opacity-40" disabled={!secName.trim() || !secValue} onClick={async () => { await api.vaultStore(secName.trim(), secValue); setSecName(''); setSecValue(''); await refresh() }}><Trans>Salva</Trans></button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// Il runtime dei bot vive in un daemon separato: può partire all'accesso del
-// Mac e sopravvivere alla finestra chiusa (LaunchAgent con riavvio sui crash).
-// Fase 6: fuso orario, finestre di consegna, rientro/pausa per assenza e
-// notifiche per agente.
+// fase 6: fuso orario, finestre di consegna, rientro/pausa per assenza e
+// notifiche per agente (stile 16c: fondi tenui, niente bordi)
 function GeneralTab() {
   const { t, i18n } = useLingui()
   const agents = useStore((s) => s.agents)
@@ -1251,10 +1486,10 @@ function GeneralTab() {
   }
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between rounded-xl border border-border px-4 py-3">
+    <div className="space-y-3 pr-12">
+      <div className="flex items-center justify-between rounded-2xl bg-muted px-4 py-3">
         <span className="text-sm"><Trans>Tema</Trans></span>
-        <div className="flex gap-1 rounded-full bg-muted p-1">
+        <div className="flex gap-1 rounded-full bg-card p-1">
           {([['system', msg`Sistema`], ['light', msg`Chiaro`], ['dark', msg`Scuro`]] as const).map(([value, label]) => (
             <button
               key={value}
@@ -1269,9 +1504,9 @@ function GeneralTab() {
 
       {/* fase 17a (L6): le voci delle lingue si scrivono nella LORO lingua e
           non si traducono; solo "Sistema" si traduce */}
-      <div className="flex items-center justify-between rounded-xl border border-border px-4 py-3">
+      <div className="flex items-center justify-between rounded-2xl bg-muted px-4 py-3">
         <span className="text-sm"><Trans>Lingua</Trans></span>
-        <div className="flex gap-1 rounded-full bg-muted p-1">
+        <div className="flex gap-1 rounded-full bg-card p-1">
           {([['system', msg`Sistema`], ['it', msg`Italiano`], ['en', msg`English`]] as const).map(([value, label]) => (
             <button
               key={value}
@@ -1290,7 +1525,7 @@ function GeneralTab() {
         onClick={() => setDebugSteps(!debugSteps)}
       >
         <span className="pr-4">
-          <span className="block text-sm text-foreground"><Trans>Mostra i passaggi in chat</Trans></span>
+          <span className="block text-sm"><Trans>Mostra i passaggi in chat</Trans></span>
           <span className="block text-xs text-muted-foreground">
             <Trans>Le chiamate e i risultati dei tool tornano come righe nella conversazione (per il debug).</Trans>
           </span>
@@ -1301,12 +1536,12 @@ function GeneralTab() {
       </button>
 
       {libStats?.warn && (
-        <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+        <p className="rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">
           <Trans>Libreria: {(libStats.bytes / 1024 / 1024 / 1024).toFixed(1)} GB — oltre i 2 GB consigliati. Valuta cosa cancellare dalla vista Libreria (nessun blocco automatico).</Trans>
         </p>
       )}
 
-      <label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-border bg-card px-4 py-3">
+      <label className="flex cursor-pointer items-start gap-3 rounded-2xl bg-muted px-4 py-3">
         <input
           type="checkbox"
           className="mt-0.5 h-4 w-4 accent-foreground"
@@ -1315,15 +1550,15 @@ function GeneralTab() {
           onChange={(e) => void toggle(e.target.checked)}
         />
         <span className="space-y-1">
-          <span className="block text-sm text-foreground"><Trans>Avvia all'accesso</Trans></span>
+          <span className="block text-sm"><Trans>Avvia all'accesso</Trans></span>
           <span className="block text-xs text-muted-foreground">
             <Trans>Il daemon dei Bot parte quando accedi al Mac e resta attivo con la finestra chiusa (LaunchAgent con riavvio automatico dopo un crash). Puoi disattivarlo qui.</Trans>
           </span>
         </span>
       </label>
 
-      <div className="space-y-2 rounded-2xl border border-border bg-card px-4 py-3">
-        <p className="text-sm text-foreground"><Trans>Consegna e presenza</Trans></p>
+      <div className="space-y-2 rounded-2xl bg-muted px-4 py-3">
+        <p className="text-sm"><Trans>Consegna e presenza</Trans></p>
         <label className="flex items-center justify-between text-xs text-muted-foreground">
           <Trans>Fuso orario</Trans>
           <input
@@ -1376,15 +1611,15 @@ function GeneralTab() {
         </label>
       </div>
 
-      <div className="space-y-2 rounded-2xl border border-border bg-card px-4 py-3">
-        <p className="text-sm text-foreground"><Trans>Notifiche per agente</Trans></p>
+      <div className="space-y-2 rounded-2xl bg-muted px-4 py-3">
+        <p className="text-sm"><Trans>Notifiche per agente</Trans></p>
         {agents.map((a) => {
           const off = disabledNotifications.includes(a.id)
           return (
             <label key={a.id} className="flex items-center justify-between text-xs text-muted-foreground">
-              <span className="text-foreground">{a.name}</span>
+              <span>{a.name}</span>
               <button
-                className={`rounded-lg px-2 py-1 text-[11px] ${off ? 'bg-muted text-muted-foreground' : 'bg-chart-2/15 text-chart-2'}`}
+                className={`rounded-full px-2 py-1 text-[11px] ${off ? 'bg-card text-muted-foreground' : 'bg-chart-2/15 text-chart-2'}`}
                 onClick={() => void toggleAgentNotification(a.id, off)}
               >
                 {off ? t`disattivate` : t`attivate`}
@@ -1397,437 +1632,7 @@ function GeneralTab() {
   )
 }
 
-// ---- fase 9 (punto 1): modelli del provider (predefinito, riserva, auto-review) ----
-
-interface ModelOverrides { defaultModel?: string; fallbackModel?: string; autoReviewModel?: string }
-
-/**
- * I tre modelli configurabili per provider: il predefinito va ai bot nuovi
- * (onboarding e template), la riserva rileva i turni quando il principale non
- * risponde, il revisore giudica le approvazioni automatiche. Salvati nel
- * setting 'providers.modelDefaults' (chiave = id del provider).
- * Fase 10 (residuo 0d): senza override il selettore mostra il default
- * EFFETTIVO del provider (es. "predefinito: kimi-k3:cloud").
- */
-function ModelDefaultsRow({ p }: { p: ProviderConfig }) {
-  const { t } = useLingui()
-  const [models, setModels] = useState<ModelInfo[] | null>(null)
-  const [saved, setSaved] = useState<ModelOverrides>({})
-
-  useEffect(() => {
-    void api.settingsGet<Record<string, ModelOverrides> | undefined>('providers.modelDefaults', undefined)
-      .then((all) => setSaved(all?.[p.id] ?? {}))
-      .catch(() => setSaved({}))
-    void api.listModels(p.id).then(setModels).catch(() => setModels([]))
-  }, [p.id])
-
-  const save = async (patch: ModelOverrides): Promise<void> => {
-    const next = { ...saved, ...patch }
-    setSaved(next)
-    const all = await api.settingsGet<Record<string, ModelOverrides>>('providers.modelDefaults', {})
-    await api.settingsSet('providers.modelDefaults', { ...all, [p.id]: next })
-  }
-
-  const effective = modelDefaultsFor(p)
-  const effLabel = (role: keyof ModelOverrides, fallback: string): string => {
-    const eff = effective[role]
-    return eff ? t`${fallback}: ${eff}` : t`${fallback}…`
-  }
-  // fase 18b (H5.3): il selettore a combobox (ricerca, capacità e prezzi in
-  // vista); il testo libero resta possibile per i modelli non ancora a catalogo
-  const picker = (role: keyof ModelOverrides, label: string): ReactNode => (
-    <ModelPicker
-      className="min-w-44"
-      models={models ?? []}
-      value={saved[role] ?? ''}
-      placeholder={saved[role] ? label : effLabel(role, label)}
-      onChange={(m) => void save({ [role]: m ?? undefined } as ModelOverrides)}
-    />
-  )
-
-  if (models === null) return <div className="mt-2 text-xs text-muted-foreground"><Trans>modelli…</Trans></div>
-  return (
-    <div className="mt-2 flex flex-wrap items-center gap-2">
-      <span className="text-[11px] uppercase tracking-wide text-muted-foreground"><Trans>modelli</Trans></span>
-      {picker('defaultModel', t`predefinito`)}
-      {picker('fallbackModel', t`riserva`)}
-      {picker('autoReviewModel', t`auto-review`)}
-    </div>
-  )
-}
-
-/**
- * Fase 11 (punto 2): campo "chiave per la ricerca web" del provider Ollama.
- * Il valore va SOLO nel vault sigillato: la UI non lo rilegge mai, chiede al
- * daemon se la chiave è impostata (booleano).
- */
-function WebSearchKeyRow({ p }: { p: ProviderConfig }) {
-  const { t } = useLingui()
-  const [set, setSet] = useState<boolean | null>(null)
-  const [value, setValue] = useState('')
-  const [busy, setBusy] = useState(false)
-
-  useEffect(() => {
-    void api.webSearchKeySet(p.id).then(setSet).catch(() => setSet(null))
-  }, [p.id])
-
-  const save = async (key: string | null): Promise<void> => {
-    setBusy(true)
-    try {
-      await api.setWebSearchKey(p.id, key)
-      setSet(await api.webSearchKeySet(p.id))
-      setValue('')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <div className="mt-2 flex flex-wrap items-center gap-2">
-      <span className="text-[11px] uppercase tracking-wide text-muted-foreground"><Trans>ricerca web</Trans></span>
-      <input
-        className="w-56 rounded-lg bg-muted px-2 py-1.5 text-xs outline-none"
-        type="password"
-        placeholder={set ? t`chiave salvata (scrivi per sostituirla)` : t`chiave per la ricerca web di Ollama`}
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-      />
-      <button
-        className="rounded-lg bg-accent px-2.5 py-1.5 text-xs hover:bg-muted-foreground/40 disabled:opacity-50"
-        disabled={busy || !value.trim()}
-        onClick={() => void save(value.trim())}
-      >
-        <Trans>Salva chiave</Trans>
-      </button>
-      {set && (
-        <button
-          className="rounded-lg border border-border px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
-          disabled={busy}
-          onClick={() => void save(null)}
-        >
-          <Trans>Rimuovi</Trans>
-        </button>
-      )}
-      <span className={`text-xs ${set ? 'text-chart-2' : 'text-muted-foreground'}`}>
-        {set === null ? '' : set ? t`ricerca web attiva (chiave nel vault)` : t`ricerca web non attiva`}
-      </span>
-    </div>
-  )
-}
-
-/**
- * Fase 15 (S5): sezione "Ricerca web" — l'interruttore dei servizi senza
- * chiave (You.com, Exa, Tavily), la nota sulla privacy coi link ai termini e
- * lo stato per provider (disponibile / in raffreddamento fino a HH:MM /
- * ultimo errore) dall'RPC di sola lettura websearch:status.
- */
-function WebSearchSection() {
-  const { t } = useLingui()
-  const [keyless, setKeyless] = useState<boolean | null>(null)
-  const [status, setStatus] = useState<WebSearchStatusRpc | null>(null)
-
-  const refresh = () => {
-    void api.settingsGet<boolean>('webSearch.keyless', true).then(setKeyless).catch(() => setKeyless(null))
-    void api.webSearchStatus().then(setStatus).catch(() => setStatus(null))
-  }
-  useEffect(refresh, [])
-
-  const toggle = async (v: boolean): Promise<void> => {
-    setKeyless(v)
-    await api.settingsSet('webSearch.keyless', v)
-    refresh()
-  }
-
-  const stateOf = (p: WebSearchProviderStatusRpc): { text: string; cls: string } => {
-    if (p.cooldownUntil) {
-      return {
-        text: t`in raffreddamento fino a ${formatTime(p.cooldownUntil)}`,
-        cls: 'text-destructive'
-      }
-    }
-    if (p.lastError) {
-      return {
-        text: t`ultimo errore: ${p.lastError.kind}${p.lastError.status !== undefined ? t` (HTTP ${p.lastError.status})` : ''}`,
-        cls: 'text-muted-foreground'
-      }
-    }
-    return { text: t`disponibile`, cls: 'text-chart-2' }
-  }
-
-  return (
-    <div className="rounded-2xl border border-border bg-card px-3 py-2.5">
-      <div className="text-sm text-foreground"><Trans>Ricerca web</Trans></div>
-      <label className="mt-2 flex cursor-pointer items-start gap-3">
-        <input
-          type="checkbox"
-          className="mt-0.5 h-4 w-4 accent-foreground"
-          checked={keyless ?? true}
-          disabled={keyless === null}
-          onChange={(e) => void toggle(e.target.checked)}
-        />
-        <span className="space-y-1">
-          <span className="block text-xs text-foreground">
-            <Trans>Usa i servizi di ricerca gratuiti senza chiave (You.com, Exa, Tavily)</Trans>
-          </span>
-          <span className="block text-xs text-muted-foreground">
-            <Trans>Le ricerche dei bot vengono inviate a questi servizi, secondo i loro termini d&apos;uso: <a className="text-primary hover:underline" href="https://you.com/acceptable-use-policy-may-2026" target="_blank" rel="noreferrer">You.com</a>{' · '}<a className="text-primary hover:underline" href="https://exa.ai/terms" target="_blank" rel="noreferrer">Exa</a>{' · '}<a className="text-primary hover:underline" href="https://docs.tavily.com/documentation/keyless" target="_blank" rel="noreferrer">Tavily</a></Trans>
-          </span>
-        </span>
-      </label>
-      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
-        {(status?.providers ?? []).map((p) => (
-          <span key={p.name} className={`text-xs ${stateOf(p).cls}`}>
-            {p.label}: {stateOf(p).text}
-          </span>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function ProvidersTab({ onChanged }: { onChanged: () => Promise<void> }) {
-  const { t, i18n } = useLingui()
-  const providers = useStore((s) => s.providers)
-  const [edit, setEdit] = useState<ProviderConfig | null>(null)
-  const [testing, setTesting] = useState<string | null>(null)
-  const [testResult, setTestResult] = useState<Record<string, { ok: boolean; error?: string; models?: ModelInfo[] }>>({})
-
-  async function scan() {
-    await api.discoverProviders()
-    await onChanged()
-  }
-
-  async function test(id: string) {
-    setTesting(id)
-    const r = await api.testProvider(id)
-    setTestResult((p) => ({ ...p, [id]: r }))
-    setTesting(null)
-  }
-
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <p className="text-xs text-muted-foreground"><Trans>Provider locali e cloud — chiunque parli OpenAI-compatible funziona.</Trans></p>
-        <button className="rounded-lg bg-muted px-3 py-1.5 text-xs hover:bg-accent" onClick={() => void scan()}>
-          <Trans>Scansiona locale (Ollama / LM Studio)</Trans>
-        </button>
-      </div>
-
-      {providers.map((p) => (
-        <div key={p.id} className="rounded-2xl border border-border bg-card px-3 py-2.5">
-          <div className="flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-chart-2" />
-            <span className="text-sm text-foreground">{p.name}</span>
-            <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">{p.kind}</span>
-            <span className="flex-1 truncate text-xs text-muted-foreground">{p.baseUrl}</span>
-            <button className="text-xs text-muted-foreground hover:text-foreground" onClick={() => setEdit(p)}><Trans>modifica</Trans></button>
-            <button
-              className="text-xs text-muted-foreground hover:text-foreground"
-              onClick={() => void test(p.id)}
-              disabled={testing === p.id}
-            >
-              {testing === p.id ? t`test…` : t`test`}
-            </button>
-            <button
-              className="text-xs text-muted-foreground hover:text-destructive"
-              onClick={async () => {
-                await api.deleteProvider(p.id)
-                await onChanged()
-              }}
-            >
-              <Trans>elimina</Trans>
-            </button>
-          </div>
-          {testResult[p.id] && (
-            <div className={`mt-2 text-xs ${testResult[p.id].ok ? 'text-chart-2' : 'text-destructive'}`}>
-              {testResult[p.id].ok
-                ? i18n.t(plural(testResult[p.id].models?.length ?? 0, { one: '✓ # modello disponibile', other: '✓ # modelli disponibili' }))
-                : t`✕ ${testResult[p.id].error ?? ''}`}
-            </div>
-          )}
-          <ModelDefaultsRow p={p} />
-          {p.kind === 'ollama' && <WebSearchKeyRow p={p} />}
-        </div>
-      ))}
-
-      {/* fase 18b (H5.4): l'editor della catena delle riserve tra provider */}
-      <FallbackChainSection />
-
-      {/* fase 15 (S5): la ricerca senza chiave, accanto alla riga della chiave Ollama */}
-      <WebSearchSection />
-
-      {edit ? (
-        <ProviderForm
-          initial={edit}
-          onSave={async (p) => {
-            await api.saveProvider(p)
-            setEdit(null)
-            await onChanged()
-          }}
-          onCancel={() => setEdit(null)}
-        />
-      ) : (
-        <button
-          className="w-full rounded-xl border border-dashed border-border px-3 py-2.5 text-sm text-muted-foreground hover:border-muted-foreground hover:text-foreground"
-          onClick={() =>
-            setEdit({ id: '', name: '', kind: 'openai-compatible', baseUrl: 'https://', apiKey: '', enabled: true })
-          }
-        >
-          <Trans>+ Aggiungi provider</Trans>
-        </button>
-      )}
-    </div>
-  )
-}
-
-function ProviderForm({ initial, onSave, onCancel }: { initial: ProviderConfig; onSave: (p: ProviderConfig) => Promise<void>; onCancel: () => void }) {
-  const { t } = useLingui()
-  const [p, setP] = useState(initial)
-  return (
-    <div className="space-y-2 rounded-2xl border border-border bg-muted p-3">
-      <div className="grid grid-cols-2 gap-2">
-        <input
-          className="rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none"
-          placeholder={t`Nome (es. Z.ai)`}
-          value={p.name}
-          onChange={(e) => setP({ ...p, name: e.target.value })}
-        />
-        <select
-          className="rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none"
-          value={p.kind}
-          onChange={(e) => setP({ ...p, kind: e.target.value as ProviderKind })}
-        >
-          {KINDS.map((k) => (
-            <option key={k} value={k}>{k}</option>
-          ))}
-        </select>
-      </div>
-      <input
-        className="w-full rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none"
-        placeholder={t`Base URL (es. https://api.z.ai)`}
-        value={p.baseUrl}
-        onChange={(e) => setP({ ...p, baseUrl: e.target.value })}
-      />
-      <input
-        className="w-full rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none"
-        placeholder={t`API key (vuoto per locali)`}
-        type="password"
-        value={p.apiKey}
-        onChange={(e) => setP({ ...p, apiKey: e.target.value })}
-      />
-      <div className="flex justify-end gap-2 pt-1">
-        <button className="rounded-lg px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground" onClick={onCancel}>
-          <Trans>Annulla</Trans>
-        </button>
-        <button
-          className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-primary/90"
-          onClick={() => void onSave({ ...p, id: p.id || p.kind + '_' + Date.now() })}
-        >
-          <Trans>Salva</Trans>
-        </button>
-      </div>
-    </div>
-  )
-}
-
-function AgentsTab() {
-  const { t } = useLingui()
-  const agents = useStore((s) => s.agents)
-  const select = useStore((s) => s.select)
-  const setSettingsOpen = useStore((s) => s.setSettingsOpen)
-  const setRightPanel = useStore((s) => s.setRightPanel)
-  const openBotPanel = useStore((s) => s.openBotAdvanced)
-  // fase 7: senza setting mainAgentId il principale è il primo agente
-  const effectiveMain = useStore((s) => s.mainAgentId) ?? agents[0]?.id ?? null
-
-  // fase 16b (S4): la sezione resta come RIMANDO — le impostazioni del bot
-  // (modello, ragionamento, istruzioni, sezione, principale, elimina) vivono
-  // nel pannello del bot, scheda Avanzate
-  return (
-    <div className="space-y-3">
-      <p className="text-xs text-muted-foreground"><Trans>Le impostazioni dei bot vivono nel pannello del bot, scheda Avanzate.</Trans></p>
-      {agents.filter((a) => !a.parentId).map((a) => (
-        <div key={a.id} className="flex items-center gap-3 rounded-2xl border border-border bg-card px-3 py-2.5">
-          <span className="min-w-0 flex-1">
-            <span className="block text-sm font-medium text-foreground">
-              {a.name}
-              {a.id === effectiveMain ? <span className="ml-2 rounded bg-primary/15 px-1.5 py-0.5 text-[10px] text-primary" title={t`Punto di contatto principale dell'utente: coordina gli altri bot`}><Trans>★ principale</Trans></span> : null}
-            </span>
-            <span className="block truncate text-xs text-muted-foreground">
-              {a.providerId ? `${a.providerId} · ${a.model ?? ''}` : t`nessun modello`}
-            </span>
-          </span>
-          <button
-            className="shrink-0 rounded-full bg-muted px-3 py-1.5 text-xs text-foreground transition hover:bg-accent"
-            onClick={() => {
-              void select(a.id)
-              openBotPanel()
-              setRightPanel(true)
-              setSettingsOpen(false)
-            }}
-          >
-            <Trans>Apri nel pannello del bot</Trans>
-          </button>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function PermissionsTab({ onChanged }: { onChanged: () => Promise<void> }) {
-  const { t } = useLingui()
-  const permissions = useStore((s) => s.permissions)
-  if (!permissions) return null
-  return (
-    <div className="space-y-3">
-      <p className="text-xs text-muted-foreground">
-        <Trans>Regole per tool: consenti sempre / chiedi / blocca. "Consenti sempre" nelle card salva una standing grant.</Trans>
-      </p>
-      <div className="rounded-2xl border border-border bg-card px-3 py-2.5">
-        <label className="flex items-center justify-between text-sm">
-          <span className="text-foreground"><Trans>Politica predefinita</Trans></span>
-          <select
-            className="rounded-lg bg-muted px-2.5 py-1.5 text-sm outline-none"
-            value={permissions.default}
-            onChange={async (e) => {
-              await api.setPermissions({ ...permissions, default: e.target.value as typeof permissions.default })
-              await onChanged()
-            }}
-          >
-            <option value="always_allow">{t`Consenti sempre`}</option>
-            <option value="needs_approval">{t`Chiedi approvazione`}</option>
-            <option value="blocked">{t`Blocca`}</option>
-          </select>
-        </label>
-      </div>
-      {permissions.rules.map((r, i) => (
-        <div key={i} className="flex items-center gap-2 rounded-2xl border border-border bg-card px-3 py-2.5">
-          <span className="w-36 font-mono text-xs text-foreground">{r.tool}</span>
-          <span className="w-24 font-mono text-xs text-muted-foreground">{r.pattern}</span>
-          <div className="flex-1" />
-          <select
-            className="rounded-lg bg-muted px-2.5 py-1.5 text-xs outline-none"
-            value={r.mode}
-            onChange={async (e) => {
-              const rules = [...permissions.rules]
-              rules[i] = { ...r, mode: e.target.value as typeof r.mode }
-              await api.setPermissions({ ...permissions, rules })
-              await onChanged()
-            }}
-          >
-            <option value="always_allow">{t`Consenti sempre`}</option>
-            <option value="needs_approval">{t`Chiedi approvazione`}</option>
-            <option value="blocked">{t`Blocca`}</option>
-          </select>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-// ---- fase 6: tab Routine con trigger in linguaggio naturale, prossima
-// esecuzione, stato (attiva / in pausa / in pausa per assenza) e editor dei
-// tipi di trigger (schedule, email, calendar_event, webhook, poll avanzato) ----
+// ---- fase 6: tab Routine con trigger in linguaggio naturale (stile 16c) ----
 
 type TriggerKind = 'schedule' | 'email' | 'calendar_event' | 'webhook' | 'connector_poll' | 'presence_return'
 
@@ -1851,6 +1656,9 @@ function RoutinesTab() {
   const { t, i18n } = useLingui()
   const activeId = useStore((s) => s.activeId)
   const connectors = useStore((s) => s.connectors)
+  const select = useStore((s) => s.select)
+  const setSettingsOpen = useStore((s) => s.setSettingsOpen)
+  const openBotTab = useStore((s) => s.openBotTab)
   const [routines, setRoutines] = useState<RoutineInfo[]>([])
   const [editing, setEditing] = useState<RoutineInfo | null>(null)
   const [err, setErr] = useState('')
@@ -1872,26 +1680,38 @@ function RoutinesTab() {
 
   const pauseResume = async (r: RoutineInfo): Promise<void> => {
     // la ripresa dalla UI è un'azione dell'utente: nessuna card di approvazione
-    await api.updateRoutineTrigger(r.id, r.enabled ? { enabled: 0 } : { enabled: 1, paused_for_away: 0 })
+    await api.updateRoutine(r.id, r.enabled ? { enabled: 0 } : { enabled: 1 })
     await refresh()
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 pr-12">
       <p className="text-xs text-muted-foreground">
-        <Trans>Le routine sono attività automatiche del Bot: su orario (cron o "ogni giorno alle 9, circa"), su un'email in arrivo, prima di un evento del calendario, da un webhook o quando torni al computer. I loro messaggi non urgenti aspettano la finestra di consegna.</Trans>
+        <Trans>Le routine sono attività automatiche del Bot: su orario (cron o «ogni giorno alle 9, circa»), su un'email in arrivo, prima di un evento del calendario, da un webhook o quando torni al computer. I loro messaggi non urgenti aspettano la finestra di consegna.</Trans>
       </p>
 
       {routines.map((r) => {
         const state = r.enabled ? t`attiva` : r.paused_for_away ? t`in pausa per assenza` : t`in pausa`
         const stateColor = r.enabled ? 'text-chart-2' : r.paused_for_away ? 'text-destructive' : 'text-muted-foreground'
         return (
-          <div key={r.id} className="rounded-2xl border border-border bg-card px-3 py-2.5">
+          <div key={r.id} className="rounded-2xl bg-muted px-3 py-2.5">
             <div className="flex items-center gap-2">
               <span className={`h-2 w-2 rounded-full ${r.enabled ? 'bg-chart-2' : r.paused_for_away ? 'bg-destructive' : 'bg-muted-foreground/40'}`} />
-              <span className="text-sm text-foreground">{r.title}</span>
-              <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">{i18n.t(KIND_LABEL[kindOf(r.trigger)])}</span>
+              <span className="text-sm">{r.title}</span>
+              <span className="rounded-full bg-card px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">{i18n.t(KIND_LABEL[kindOf(r.trigger)])}</span>
               <div className="flex-1" />
+              {/* fase 16c (C2): ogni riga apre anche il pannello del bot su «Routine» */}
+              <button
+                className="text-xs text-muted-foreground transition hover:text-foreground"
+                title={t`Apri nel pannello del bot`}
+                onClick={() => {
+                  void select(r.agent_id)
+                  openBotTab('routines')
+                  setSettingsOpen(false)
+                }}
+              >
+                <Trans>nel bot ›</Trans>
+              </button>
               <button className="text-xs text-muted-foreground hover:text-foreground" onClick={() => setEditing(r)}><Trans>modifica</Trans></button>
               <button className="text-xs text-muted-foreground hover:text-foreground" onClick={() => void pauseResume(r)}>
                 {r.enabled ? <Trans>metti in pausa</Trans> : <Trans>riattiva</Trans>}
@@ -1907,11 +1727,8 @@ function RoutinesTab() {
               {r.last_run && <span>{t`ultima: ${formatDate(r.last_run)}`}</span>}
             </div>
             {r.webhook_url && (
-              <div className="mt-1 flex items-center gap-2 rounded-lg border border-border bg-muted px-2 py-1.5">
+              <div className="mt-1 flex items-center gap-2 rounded-xl bg-card px-2 py-1.5">
                 <code className="min-w-0 flex-1 truncate text-[10px] text-muted-foreground">{r.webhook_url}</code>
-                <code className="hidden truncate text-[10px] text-muted-foreground" title={`Authorization: Bearer ${r.trigger?.type === 'webhook' ? r.trigger.token : ''}`}>
-                  {r.trigger?.type === 'webhook' ? r.trigger.token.slice(0, 10) + '…' : ''}
-                </code>
                 <button
                   className="text-[10px] text-primary hover:text-primary"
                   onClick={() => void navigator.clipboard?.writeText(
@@ -1941,10 +1758,10 @@ function RoutinesTab() {
             agentId={activeId}
             connectors={connectors}
             manualServers={manualServers}
-            onCreate={async (title, prompt, trigger, timezone) => {
+            onCreate={async (title, prompt, trigger, timezone, model) => {
               setErr('')
               try {
-                await api.createRoutineTrigger(activeId!, title, prompt, trigger, timezone || undefined)
+                await api.createRoutineTrigger(activeId!, title, prompt, trigger, timezone || undefined, model)
                 await refresh()
               } catch (e) {
                 setErr(e instanceof Error ? e.message : String(e))
@@ -1952,9 +1769,9 @@ function RoutinesTab() {
             }}
             err={err}
           />
-          <div className="space-y-2 border-t border-border pt-2">
+          <div className="space-y-2 pt-2">
             <button
-              className="rounded-lg bg-muted px-3 py-1.5 text-xs hover:bg-accent disabled:opacity-40"
+              className="rounded-full bg-muted px-3 py-1.5 text-xs transition hover:bg-accent disabled:opacity-40"
               disabled={busy || !activeId}
               onClick={async () => {
                 setBusy(true); setErr(''); setSuggestions([])
@@ -1966,13 +1783,13 @@ function RoutinesTab() {
               {busy ? t`analizzo…` : <Trans>✨ Suggerisci dal transcript</Trans>}
             </button>
             {suggestions.map((s, i) => (
-              <div key={i} className="rounded-lg border border-border px-3 py-2">
+              <div key={i} className="rounded-2xl bg-muted px-3 py-2">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm text-foreground">{s.title}</span>
-                  <code className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{s.schedule}</code>
+                  <span className="text-sm">{s.title}</span>
+                  <code className="rounded-full bg-card px-1.5 py-0.5 text-[10px] text-muted-foreground">{s.schedule}</code>
                   <div className="flex-1" />
                   <button
-                    className="rounded-md bg-chart-2/70 px-2 py-1 text-xs text-white hover:bg-chart-2/80"
+                    className="rounded-full bg-card px-2 py-1 text-xs transition hover:bg-card/80"
                     onClick={async () => {
                       await api.createRoutine(activeId!, s.title, s.description, s.schedule)
                       setSuggestions(suggestions.filter((_, j) => j !== i))
@@ -2005,7 +1822,7 @@ function NewRoutinePicker(props: {
     return (
       <div className="space-y-2">
         <button
-          className="w-full rounded-xl border border-dashed border-border px-3 py-2.5 text-sm text-muted-foreground hover:border-muted-foreground hover:text-foreground"
+          className="w-full rounded-2xl bg-muted px-3 py-2.5 text-sm text-muted-foreground transition hover:text-foreground"
           onClick={() => setKind('schedule')}
         >
           <Trans>+ Nuova routine</Trans>
@@ -2182,12 +1999,12 @@ function TriggerEditor(props: {
   }
 
   return (
-    <div className="space-y-2 rounded-2xl border border-border bg-muted p-3">
-      <div className="flex gap-1">
+    <div className="space-y-2 rounded-2xl bg-muted p-3">
+      <div className="flex flex-wrap gap-1">
         {(Object.keys(KIND_LABEL) as TriggerKind[]).map((k) => (
           <button
             key={k}
-            className={`rounded-lg px-2 py-1 text-[11px] ${kind === k ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+            className={`rounded-full px-2 py-1 text-[11px] ${kind === k ? 'bg-card text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
             onClick={() => setKind(k)}
           >
             {i18n.t(KIND_LABEL[k])}
@@ -2199,9 +2016,9 @@ function TriggerEditor(props: {
 
       {kind === 'schedule' && (
         <div className="space-y-2">
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <button className={`rounded-lg px-2 py-1 ${cron !== '' ? 'bg-accent' : ''}`} onClick={() => { setCron('0 9 * * *') }}>{t`cron`}</button>
-            <button className={`rounded-lg px-2 py-1 ${cron === '' ? 'bg-accent' : ''}`} onClick={() => setCron('')}>{t`ogni…`}</button>
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <button className={`rounded-full px-2 py-1 ${cron !== '' ? 'bg-card text-foreground' : ''}`} onClick={() => { setCron('0 9 * * *') }}>{t`cron`}</button>
+            <button className={`rounded-full px-2 py-1 ${cron === '' ? 'bg-card text-foreground' : ''}`} onClick={() => setCron('')}>{t`ogni…`}</button>
             {cron === '' && (
               <>
                 <select className={inputCls} value={every} onChange={(e) => setEvery(e.target.value as typeof every)}>
@@ -2245,14 +2062,14 @@ function TriggerEditor(props: {
               {props.manualServers.some((s) => s.id === connectorId) && (
                 // fase 7 (residuo 0a): readOnlyHint di un server manuale è
                 // autodichiarato — serve la spunta esplicita dell'utente
-                <label className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-[11px] text-destructive/90">
+                <label className="flex items-start gap-2 rounded-lg bg-destructive/10 px-2 py-1.5 text-[11px] text-destructive/90">
                   <input
                     type="checkbox"
                     className="mt-0.5"
                     checked={confirmReadOnly}
                     onChange={(e) => setConfirmReadOnly(e.target.checked)}
                   />
-                  <Trans>Confermo che questo tool legge soltanto e non modifica nulla (server aggiunto a mano: la dichiarazione "sola lettura" non è verificata)</Trans>
+                  <Trans>Confermo che questo tool legge soltanto e non modifica nulla (server aggiunto a mano: la dichiarazione «sola lettura» non è verificata)</Trans>
                 </label>
               )}
             </>
@@ -2290,7 +2107,7 @@ function TriggerEditor(props: {
 
       {/* fase 18b (H7): il modello della routine — «Quello del bot» (default)
           oppure provider + ModelPicker + ragionamento, come per i bot (H3) */}
-      <div className="space-y-2 rounded-lg border border-border bg-card px-2 py-2">
+      <div className="space-y-2 rounded-xl bg-card/60 px-2 py-2">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-[11px] uppercase tracking-wide text-muted-foreground">{t`modello`}</span>
           <select
@@ -2340,9 +2157,9 @@ function TriggerEditor(props: {
       <input className={`w-full ${inputCls}`} placeholder={t`Fuso orario (es. Europe/Rome)`} value={timezone} onChange={(e) => setTimezone(e.target.value)} />
       {err && <p className="text-xs text-destructive">{err}</p>}
       <div className="flex justify-end gap-2 pt-1">
-        <button className="rounded-lg px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground" onClick={props.onCancel}><Trans>Annulla</Trans></button>
+        <button className="rounded-full px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground" onClick={props.onCancel}><Trans>Annulla</Trans></button>
         <button
-          className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-primary/90 disabled:opacity-40"
+          className="rounded-full bg-foreground px-4 py-1.5 text-xs font-medium text-background transition hover:opacity-90 disabled:opacity-40"
           disabled={busy || !title.trim() || !prompt.trim() || !props.agentId || (!!modelProvider && !modelId.trim())}
           onClick={() => void save()}
         >

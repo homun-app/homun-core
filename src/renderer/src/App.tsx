@@ -7,6 +7,9 @@ import { TeamChat } from './components/TeamChat'
 import { RightPanel } from './components/RightPanel'
 import { Settings } from './components/Settings'
 import { LibraryPanel } from './components/LibraryPanel'
+// fase 16c (C5/C4): la vista Attività e la finestra «Collega app»
+import { ActivityPanel } from './components/ActivityPanel'
+import { AppsWindow } from './components/AppsWindow'
 import { api } from './store'
 // fase 16b correzioni 2 (Q1): il layout a tre colonne è UNA funzione pura
 import { layoutFor } from './layout'
@@ -21,6 +24,8 @@ const RESIZE_DEBOUNCE_MS = 100
 export function App() {
   const init = useStore((s) => s.init)
   const settingsOpen = useStore((s) => s.settingsOpen)
+  // fase 16c (C4): la finestra «Collega app»
+  const appsOpen = useStore((s) => s.appsOpen)
 
   useEffect(() => {
     void init()
@@ -97,9 +102,11 @@ export function App() {
       <div className="relative flex min-w-0 flex-1">
         {openGroupId === null ? <Chat /> : <TeamChat />}
         <LibraryPanel />
+        <ActivityPanel />
       </div>
       <RightPanel layout={layout} />
       {settingsOpen && <Settings />}
+      {appsOpen && <AppsWindow />}
     </div>
   )
 }

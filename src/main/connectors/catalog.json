@@ -5,6 +5,8 @@
     "logo": "☁️",
     "mcpUrl": "https://mcp.cloudflare.com/mcp",
     "clientRegistration": "dynamic",
+    "category": "development",
+    "tagline": { "it": "DNS, worker e cache del tuo sito", "en": "DNS, workers and cache of your site" },
     "docsUrl": "https://developers.cloudflare.com/agents/model-context-protocol/cloudflare/servers-for-cloudflare",
     "notes": {
       "it": "Server MCP ufficiale Cloudflare (API completa, docs, containers, browser). OAuth 2.1 con Dynamic Client Registration. Fonti: https://developers.cloudflare.com/agents/model-context-protocol/cloudflare/servers-for-cloudflare e https://blog.cloudflare.com/remote-model-context-protocol-servers-mcp",
@@ -17,6 +19,8 @@
     "logo": "🛡️",
     "mcpUrl": "https://mcp.sentry.dev/mcp",
     "clientRegistration": "dynamic",
+    "category": "development",
+    "tagline": { "it": "Errori e prestazioni del codice", "en": "Errors and performance of your code" },
     "docsUrl": "https://mcp.sentry.dev",
     "notes": {
       "it": "Server MCP ospitato da Sentry (repo ufficiale getsentry/toolkit): OAuth dal browser, nessuna chiave da creare. Fonti: https://mcp.sentry.dev e https://github.com/getsentry/toolkit",
@@ -29,6 +33,8 @@
     "logo": "💳",
     "mcpUrl": "https://mcp.stripe.com",
     "clientRegistration": "dynamic",
+    "category": "development",
+    "tagline": { "it": "Pagamenti, fatture e abbonamenti", "en": "Payments, invoices and subscriptions" },
     "docsUrl": "https://docs.stripe.com/mcp",
     "notes": {
       "it": "Server MCP ufficiale Stripe (pagamenti, fatture, abbonamenti); OAuth con consenso sulla pagina Stripe (modalità test disponibile). Fonte: https://docs.stripe.com/mcp",
@@ -41,6 +47,8 @@
     "logo": "📓",
     "mcpUrl": "https://mcp.notion.com/mcp",
     "clientRegistration": "dynamic",
+    "category": "documents",
+    "tagline": { "it": "Pagine e database", "en": "Pages and databases" },
     "docsUrl": "https://developers.notion.com/guides/mcp/get-started-with-mcp",
     "notes": {
       "it": "Server MCP remoto ufficiale Notion: lettura e aggiornamento del workspace via OAuth. Fonte: https://developers.notion.com/guides/mcp/overview",
@@ -53,6 +61,8 @@
     "logo": "📐",
     "mcpUrl": "https://mcp.linear.app/mcp",
     "clientRegistration": "dynamic",
+    "category": "development",
+    "tagline": { "it": "Issue, progetti e commenti", "en": "Issues, projects and comments" },
     "docsUrl": "https://linear.app/integrations/claude",
     "notes": {
       "it": "Server MCP remoto ufficiale Linear (issue, progetti, commenti): autenticazione con login Linear. Fonti: https://linear.app/integrations/claude e https://linear.app/integrations/codex-mcp",
@@ -65,6 +75,8 @@
     "logo": "✉️",
     "mcpUrl": "https://gmailmcp.googleapis.com/mcp/v1",
     "clientRegistration": "static",
+    "category": "mail-calendar",
+    "tagline": { "it": "Posta in arrivo e bozze", "en": "Inbox and drafts" },
     "scopes": [
       "https://www.googleapis.com/auth/gmail.readonly",
       "https://www.googleapis.com/auth/gmail.compose"
@@ -81,6 +93,8 @@
     "logo": "📅",
     "mcpUrl": "https://calendarmcp.googleapis.com/mcp/v1",
     "clientRegistration": "static",
+    "category": "mail-calendar",
+    "tagline": { "it": "Appuntamenti e inviti", "en": "Appointments and invites" },
     "docsUrl": "https://docs.cloud.google.com/mcp/supported-products",
     "notes": {
       "it": "Server MCP ufficiale Google per Calendar (Developer Preview). Registrazione statica: client OAuth proprio come per Gmail (docs/google-oauth.md). Endpoint: https://docs.cloud.google.com/mcp/supported-products",
@@ -93,6 +107,8 @@
     "logo": "📂",
     "mcpUrl": "https://drivemcp.googleapis.com/mcp/v1",
     "clientRegistration": "static",
+    "category": "documents",
+    "tagline": { "it": "File e cartelle condivise", "en": "Files and shared folders" },
     "docsUrl": "https://docs.cloud.google.com/mcp/supported-products",
     "notes": {
       "it": "Server MCP ufficiale Google per Drive (Developer Preview). Registrazione statica: client OAuth proprio come per Gmail (docs/google-oauth.md). Endpoint: https://docs.cloud.google.com/mcp/supported-products",

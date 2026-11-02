@@ -16,7 +16,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
-import { Plus, Search, Library as LibraryIcon, LayoutGrid, ChevronRight } from 'lucide-react'
+import { Plus, Search, Library as LibraryIcon, LayoutGrid, ChevronRight, Activity as ActivityIcon } from 'lucide-react'
 import { useStore } from '../store'
 import { buildSidebarModel, collapsedVoices, teamOpenState, type SidebarModel, type SidebarTeam, type SidebarBot, type CollapsedVoice } from '../sidebar-utils'
 // fase 16b correzioni 2 (Q1): il massimo del trascinamento e i limiti della barra
@@ -284,17 +284,24 @@ function VoiceMascot({ agentId, size }: { agentId: string; size: number }) {
   return <Bot family={info.avatar.family} color={info.avatar.color} state={info.state} size={size} track={false} dimmed={info.dimmed} />
 }
 
-/** Il menu account di oggi, adattato: te + Tema/Impostazioni/Connetti app. */
+/** Il menu account di oggi, adattato: te + Tema/Impostazioni/Collega app. */
 function AccountMenu() {
   const { t } = useLingui()
   const agents = useStore((s) => s.agents)
   const mainAgentId = useStore((s) => s.mainAgentId)
+  const mainModel = useStore((s) => s.mainModel)
   const theme = useStore((s) => s.theme)
   const setTheme = useStore((s) => s.setTheme)
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
-  const setSettingsTab = useStore((s) => s.setSettingsTab)
+  const setAppsOpen = useStore((s) => s.setAppsOpen)
   const effectiveMain = mainAgentId ?? agents[0]?.id ?? null
   const main = agents.find((a) => a.id === effectiveMain)
+  // fase 16c (C3.3): il modello mostrato è quello RISOLTO («Come gli altri»)
+  const resolved = main && (main.providerId && main.model
+    ? { providerId: main.providerId, model: main.model }
+    : mainModel
+      ? { providerId: mainModel.providerId, model: mainModel.model }
+      : null)
   return (
     <DropdownMenu>
       <DropdownMenuTrigger className="flex min-w-0 flex-1 items-center gap-2.5 rounded-[14px] px-1.5 py-1.5 text-left transition hover:bg-muted/60 focus:outline-none">
@@ -304,13 +311,13 @@ function AccountMenu() {
         <span className="min-w-0 text-sm">
           <span className="block truncate font-medium leading-tight">{main ? main.name : t`nessun bot`}</span>
           <span className="block truncate text-xs text-muted-foreground">
-            {main ? (main.model ? `${main.providerId ?? ''} · ${main.model}` : t`nessun modello`) : t`nessun bot`}
+            {main ? (resolved ? `${resolved.providerId} · ${resolved.model}` : t`nessun modello`) : t`nessun bot`}
           </span>
         </span>
       </DropdownMenuTrigger>
       <DropdownMenuContent side="top" align="start" className="w-56">
-        <DropdownMenuItem onClick={() => { setSettingsTab('connettori'); setSettingsOpen(true) }}><Trans>Connetti app</Trans></DropdownMenuItem>
-        <DropdownMenuItem onClick={() => { setSettingsTab(null); setSettingsOpen(true) }}><Trans>Impostazioni</Trans></DropdownMenuItem>
+        <DropdownMenuItem onClick={() => setAppsOpen(true)}><Trans>Collega app</Trans></DropdownMenuItem>
+        <DropdownMenuItem onClick={() => { setSettingsOpen(true) }}><Trans>Impostazioni</Trans></DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuSub>
           <DropdownMenuSubTrigger><Trans>Tema</Trans></DropdownMenuSubTrigger>
@@ -336,8 +343,9 @@ function CollapsedColumn({ model, onExpand }: { model: SidebarModel; onExpand():
   const openGroup = useStore((s) => s.openGroup)
   const openLibraryId = useStore((s) => s.openLibraryId)
   const openLibrary = useStore((s) => s.openLibrary)
-  const setSettingsOpen = useStore((s) => s.setSettingsOpen)
-  const setSettingsTab = useStore((s) => s.setSettingsTab)
+  const setActivityOpen = useStore((s) => s.setActivityOpen)
+  const activityOpen = useStore((s) => s.activityOpen)
+  const setAppsOpen = useStore((s) => s.setAppsOpen)
   const agents = useStore((s) => s.agents)
   const voices = collapsedVoices(model)
   const statusLabel = (st: CollapsedVoice['status']): string =>
@@ -383,11 +391,20 @@ function CollapsedColumn({ model, onExpand }: { model: SidebarModel; onExpand():
           )
         })}
         <span className="my-1 h-px w-6 shrink-0 bg-border/60" aria-hidden="true" />
+        {/* fase 16c (C5): la voce Attività, sopra la Libreria */}
+        <button
+          className={`grid size-9 shrink-0 place-items-center rounded-full transition ${activityOpen ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
+          aria-label={i18n.t(msg`Attività`)}
+          title={i18n.t(msg`Attività`)}
+          onClick={() => setActivityOpen(!activityOpen)}
+        >
+          <ActivityIcon className="size-4" />
+        </button>
         <button
           className="grid size-9 shrink-0 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
           aria-label={i18n.t(msg`Libreria`)}
           title={i18n.t(msg`Libreria`)}
-          onClick={() => (openLibraryId === null ? openLibrary('') : openLibrary(null))}
+          onClick={() => { setActivityOpen(false); openLibraryId === null ? openLibrary('') : openLibrary(null) }}
         >
           <LibraryIcon className="size-4" />
         </button>
@@ -396,7 +413,7 @@ function CollapsedColumn({ model, onExpand }: { model: SidebarModel; onExpand():
           className="grid size-9 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground transition hover:text-foreground"
           aria-label={i18n.t(msg`App`)}
           title={i18n.t(msg`App`)}
-          onClick={() => { setSettingsTab('connettori'); setSettingsOpen(true) }}
+          onClick={() => setAppsOpen(true)}
         >
           <LayoutGrid className="size-4" />
         </button>
@@ -424,8 +441,9 @@ export function Sidebar({ layout }: { layout: LayoutResult }) {
   const mainAgentId = useStore((s) => s.mainAgentId)
   const openLibraryId = useStore((s) => s.openLibraryId)
   const openLibrary = useStore((s) => s.openLibrary)
-  const setSettingsOpen = useStore((s) => s.setSettingsOpen)
-  const setSettingsTab = useStore((s) => s.setSettingsTab)
+  const activityOpen = useStore((s) => s.activityOpen)
+  const setActivityOpen = useStore((s) => s.setActivityOpen)
+  const setAppsOpen = useStore((s) => s.setAppsOpen)
   // fase 16b correzioni 2 (Q1): le preferenze vivono nello store (localStorage
   // lì); la barra resa è quella di layoutFor — la rotaia automatica sotto
   // AUTO_RAIL_BELOW non tocca la preferenza dell'utente
@@ -568,12 +586,21 @@ export function Sidebar({ layout }: { layout: LayoutResult }) {
                 ))}
               </div>
             ))}
-            {/* la Libreria resta in basso, sopra di te (16c la farà globale) */}
+            {/* fase 16c (C5/C6): Attività sopra la Libreria, entrambe voci globali */}
             <button
               className={`mt-2 flex w-full items-center gap-2.5 rounded-[14px] px-2.5 py-2 text-left text-sm transition ${
+                activityOpen ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/60'
+              }`}
+              onClick={() => { setActivityOpen(!activityOpen); if (!activityOpen) openLibrary(null) }}
+            >
+              <ActivityIcon className="size-4" />
+              <Trans>Attività</Trans>
+            </button>
+            <button
+              className={`flex w-full items-center gap-2.5 rounded-[14px] px-2.5 py-2 text-left text-sm transition ${
                 openLibraryId !== null ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/60'
               }`}
-              onClick={() => (openLibraryId === null ? openLibrary('') : openLibrary(null))}
+              onClick={() => { openLibraryId === null ? openLibrary('') : openLibrary(null); if (openLibraryId === null) setActivityOpen(false) }}
             >
               <LibraryIcon className="size-4" />
               <Trans>Libreria</Trans>
@@ -588,7 +615,7 @@ export function Sidebar({ layout }: { layout: LayoutResult }) {
               className="grid size-9 shrink-0 place-items-center rounded-full bg-muted/60 text-muted-foreground transition hover:text-foreground"
               aria-label={t`App`}
               title={t`App`}
-              onClick={() => { setSettingsTab('connettori'); setSettingsOpen(true) }}
+              onClick={() => setAppsOpen(true)}
             >
               <LayoutGrid className="size-4" />
             </button>

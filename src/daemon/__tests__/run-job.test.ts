@@ -6,6 +6,8 @@ import { describe, expect, it, beforeEach } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
 import { JOBS_DDL, enqueueJob, getJobById } from '../../main/store/jobs'
 import { SUBAGENTS_DDL } from '../../main/store/subagents'
+// fase 16c (C5): lo storico delle esecuzioni delle routine
+import { ROUTINE_RUNS_DDL } from '../../main/store/routine-runs'
 import { makeJobRunner } from '../run-job'
 import type { RunTurnOptions } from '../../main/agent/loop'
 import type { SandbotEvent } from '../../shared/types'
@@ -26,6 +28,7 @@ let db: DatabaseSync
 beforeEach(() => {
   db = new DatabaseSync(':memory:')
   db.exec(JOBS_DDL)
+  db.exec(ROUTINE_RUNS_DDL)
   // fase 8: il runner legge titolo e ORIGINE del task (correzione B1) dalla
   // propria connessione
   db.exec("CREATE TABLE IF NOT EXISTS tasks (id INTEGER PRIMARY KEY, agent_id TEXT, title TEXT, status TEXT DEFAULT 'working', created_at INTEGER, updated_at INTEGER, summary TEXT, untrusted INTEGER DEFAULT 0, automatic INTEGER DEFAULT 0)")

@@ -12,7 +12,10 @@ const base = {
   mcpUrl: 'https://mcp.test.com/mcp',
   clientRegistration: 'dynamic',
   docsUrl: 'https://test.com/docs',
-  notes: 'fonte: https://test.com/docs'
+  notes: 'fonte: https://test.com/docs',
+  // fase 16c (C4): categoria e tagline {it,en} sono obbligatorie
+  category: 'development',
+  tagline: { it: 'Una riga', en: 'One line' }
 }
 
 describe('validateCatalog', () => {

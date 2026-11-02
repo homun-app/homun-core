@@ -44,6 +44,9 @@ const api: SandbotApi = {
   // fase 19b (T4): il feed dell'attività del computer del bot
   activityList: (agentId, limit) => ipcRenderer.invoke('activity:list', agentId, limit),
   activityOutput: (agentId, id) => ipcRenderer.invoke('activity:output', agentId, id),
+  // fase 16c (C5): il feed globale Attività; (C4) la ricerca nel registro MCP
+  activityGlobal: (limit) => ipcRenderer.invoke('activity:global', limit),
+  connectorsSearchRegistry: (query) => ipcRenderer.invoke('connectors:search-registry', query),
   draftSend: (agentId, entryId, body) => ipcRenderer.invoke('draft:send', agentId, entryId, body),
   draftDiscard: (agentId, entryId) => ipcRenderer.invoke('draft:discard', agentId, entryId),
   draftUpdate: (agentId, entryId, body) => ipcRenderer.invoke('draft:update', agentId, entryId, body),
@@ -59,6 +62,9 @@ const api: SandbotApi = {
   deleteProvider: (id) => ipcRenderer.invoke('providers:delete', id),
   discoverProviders: () => ipcRenderer.invoke('providers:discover'),
   testProvider: (id) => ipcRenderer.invoke('providers:test', id),
+  // fase 16c (C3.4): la prova di una configurazione NON salvata (la chiave va
+  // solo in questa direzione e non torna mai indietro)
+  probeProvider: (config) => ipcRenderer.invoke('providers:probe', config),
   listModels: (providerId) => ipcRenderer.invoke('models:list', providerId),
   // fase 18b (K3): le capacità di UN modello (nessun elenco completo in chat)
   modelCapabilities: (providerId, model) => ipcRenderer.invoke('models:capabilities', providerId, model),

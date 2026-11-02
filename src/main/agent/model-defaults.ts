@@ -4,7 +4,11 @@
 // riserva, glm-5.3-flash:cloud piccolo e veloce → revisore dell'auto-review)
 // e l'utente li cambia per provider dalle impostazioni (setting
 // 'providers.modelDefaults', chiave = id del provider, campo per campo).
-import type { ProviderKind } from '../../shared/types'
+//
+// Fase 16c (C3.3): «Come gli altri» — il modello principale (models.main) e
+// resolveAgentModel, la funzione pura che decide CHE modello esegue un bot:
+// il suo se l'ha scelto, il principale se segue gli altri, niente altrimenti.
+import type { ProviderKind, MainModel, ThinkingSetting } from '../../shared/types'
 
 /** I modelli di un provider: predefinito, riserva, revisore dell'auto-review. */
 export interface ModelDefaults {
@@ -68,4 +72,78 @@ export async function assignDefaultModel(deps: AssignmentDeps): Promise<ModelAss
   const check = await deps.supportsTools(provider, dm)
   if (check.ok) return { providerId: provider.id, model: dm }
   return { providerId: provider.id, model: null, warning: check.error }
+}
+
+// ---- fase 16c (C3.3): «Come gli altri» ----
+
+/** Un bot, per chi legge il modello: i campi che servono a resolveAgentModel. */
+export interface AgentModelView {
+  providerId?: string | null
+  model?: string | null
+  thinking?: ThinkingSetting | null
+}
+
+/** Il modello che un bot ESEGUE: il suo, quello principale, o niente. */
+export interface ResolvedAgentModel {
+  providerId: string
+  model: string
+  thinking?: ThinkingSetting | null
+  /** true quando il bot segue il modello principale («Come gli altri») */
+  followsMain: boolean
+}
+
+/**
+ * Fase 16c (C3.3), PURA: il modello risolto di un bot.
+ * - bot con providerId E model propri → quelli (thinking del bot);
+ * - bot null/null e models.main impostato → il principale (thinking del bot
+ *   se impostato, altrimenti quello del principale);
+ * - altrimenti → null (l'avviso di sempre, notice.configureProviderFirst).
+ * Nessuna migrazione: i bot esistenti tengono il modello esplicito.
+ */
+export function resolveAgentModel(agent: AgentModelView, main: MainModel | null | undefined): ResolvedAgentModel | null {
+  if (agent.providerId && agent.model) {
+    return { providerId: agent.providerId, model: agent.model, thinking: agent.thinking ?? null, followsMain: false }
+  }
+  if (!agent.providerId && !agent.model && main && main.providerId && main.model) {
+    const thinking = agent.thinking && agent.thinking !== 'default' ? agent.thinking : (main.thinking ?? null)
+    return { providerId: main.providerId, model: main.model, thinking, followsMain: true }
+  }
+  return null
+}
+
+/** Dipendenze di assignFirstMainModel (iniettabili nei test). */
+export interface FirstMainDeps {
+  getMain(): MainModel | null
+  setMain(m: MainModel | null): void
+  /** il provider appena salvato (null se sparito/disattivato) */
+  savedProvider(): import('../../shared/types').ProviderConfig | null
+  getOverrides(): ModelDefaultsMap
+  supportsTools(provider: { id: string; kind: string }, model: string): Promise<{ ok: boolean; checked: boolean; error?: string }>
+}
+
+/**
+ * Fase 16c (C3.3): quando si collega il primo provider e models.main non c'è,
+ * il principale diventa il suo modello predefinito (quello che sceglierebbe
+ * oggi assignDefaultModel, capability "tools" verificata). Se il default non
+ * c'è o non passa il check, models.main resta vuoto (lo sceglie l'utente).
+ */
+export async function assignFirstMainModel(deps: FirstMainDeps): Promise<void> {
+  if (deps.getMain()) return
+  const provider = deps.savedProvider()
+  if (!provider || !provider.enabled) return
+  const dm = defaultModelFor(provider, deps.getOverrides())
+  if (!dm) return
+  const check = await deps.supportsTools(provider, dm)
+  if (!check.ok) return
+  deps.setMain({ providerId: provider.id, model: dm, thinking: null })
+}
+
+/**
+ * Fase 16c (C3.3/C7): il modello da ASSEGNARE a un bot nuovo (interfaccia,
+ * template, create_agent del modello). Se models.main esiste il bot nasce
+ * «Come gli altri» (null/null, segue il principale); senza, il turno resta
+ * quello di oggi (assignDefaultModel del chiamante).
+ */
+export function newAgentModel(main: MainModel | null | undefined): 'follows-main' | 'assign-default' {
+  return main && main.providerId && main.model ? 'follows-main' : 'assign-default'
 }

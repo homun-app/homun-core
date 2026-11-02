@@ -1216,43 +1216,51 @@ export async function executeTool(
         return { output: `Bot not created: there are already ${MAX_AGENTS_TOTAL} bots (the cap). Delete one with delete_agent or talk to the user about it.`, meta: {} }
       }
       const created = dbMod.createAgent(name, role, { createdBy: agentId, ...(section ? { section } : {}) })
-      // modello come l'onboarding: defaultModel del provider attivo (capability
-      // "tools" verificata); senza default → provider e modello del creatore
-      const { assignDefaultModel } = await import('./model-defaults')
+      // fase 16c (C3.3): con models.main il bot nuovo nasce «Come gli altri»
+      // (null/null: seguirà il principale quando cambia); senza, il turno di
+      // sempre — defaultModel del provider attivo (capability "tools"
+      // verificata), ripiego sul modello del creatore
+      const { assignDefaultModel, newAgentModel } = await import('./model-defaults')
       type ModelDefaultsMap = import('./model-defaults').ModelDefaultsMap
       let providerId: string | null = null
       let model: string | null = null
+      let followsMain = false
       try {
         const providersMod = await import('./providers')
-        const assignment = await assignDefaultModel({
-          listProviders: dbMod.listProviders,
-          getOverrides: () => dbMod.getSetting<ModelDefaultsMap>('providers.modelDefaults', {}),
-          // come la RPC agents:create-from-template: il provider completo si
-          // risolve per id (la dipendenza accetta la forma ridotta)
-          supportsTools: (p, m) => {
-            const full = providersMod.getProvider(p.id)
-            return full
-              ? providersMod.modelSupportsTools(full, m)
-              : Promise.resolve({ ok: false, checked: false, error: 'provider not found' })
+        const main = dbMod.getSetting<import('../../shared/types').MainModel | null>('models.main', null)
+        if (newAgentModel(main) === 'follows-main') {
+          followsMain = true
+        } else {
+          const assignment = await assignDefaultModel({
+            listProviders: dbMod.listProviders,
+            getOverrides: () => dbMod.getSetting<ModelDefaultsMap>('providers.modelDefaults', {}),
+            // come la RPC agents:create-from-template: il provider completo si
+            // risolve per id (la dipendenza accetta la forma ridotta)
+            supportsTools: (p, m) => {
+              const full = providersMod.getProvider(p.id)
+              return full
+                ? providersMod.modelSupportsTools(full, m)
+                : Promise.resolve({ ok: false, checked: false, error: 'provider not found' })
+            }
+          })
+          if (assignment?.model) {
+            providerId = assignment.providerId
+            model = assignment.model
           }
-        })
-        if (assignment?.model) {
-          providerId = assignment.providerId
-          model = assignment.model
         }
       } catch {
         // verifica non disponibile: sotto col ripiego, i modelli del creatore
       }
-      if (!model) {
+      if (!followsMain && !model) {
         const creator = dbMod.getAgent(agentId)
         if (creator?.providerId && creator.model) {
           providerId = creator.providerId
           model = creator.model
         }
       }
-      if (providerId && model) dbMod.updateAgent(created.id, { providerId, model })
+      if (!followsMain && providerId && model) dbMod.updateAgent(created.id, { providerId, model })
       return {
-        output: `Bot "${name}" created (id ${created.id}${section ? `, section "${section}"` : ''}), provider ${providerId ?? '—'} model ${model ?? 'NOT assigned'}. The role you gave it is its description. It does NOT start on its own and does NOT greet the user: write to it yourself (send_to_agent) or assign it work in the group.`,
+        output: `Bot "${name}" created (id ${created.id}${section ? `, section "${section}"` : ''}), ${followsMain ? 'model follows the main model (same as the others)' : `provider ${providerId ?? '—'} model ${model ?? 'NOT assigned'}`}. The role you gave it is its description. It does NOT start on its own and does NOT greet the user: write to it yourself (send_to_agent) or assign it work in the group.`,
         meta: { createdAgentId: created.id }
       }
     }

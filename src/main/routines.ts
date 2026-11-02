@@ -3,14 +3,16 @@
 // Fase 2: niente più node-cron in-process — la pianificazione la calcola lo
 // scheduler del daemon (src/daemon/scheduler.ts) che accoda job 'routine-run'
 // nella tabella jobs quando scade il prossimo run.
-import { getEntries, getAgent, recordModelUsage } from './store/db'
+import { getEntries, getAgent, getSetting, recordModelUsage } from './store/db'
 import { llmStream } from './agent/llm'
 import { getProvider } from './agent/providers'
+import { resolveAgentModel } from './agent/model-defaults'
 import { secondaryPrompts } from './agent/prompts'
 import { currentUserLanguage } from './agent/user-language'
 // fase 18a (E0): gli errori della suggestion sono per la UI — catalogo UI
 import { uiError } from './ui-language'
 import { UI } from '../shared/ui-messages'
+import type { MainModel } from '../shared/types'
 
 export interface RoutineSuggestion {
   title: string
@@ -21,11 +23,13 @@ export interface RoutineSuggestion {
 /** Suggerisce routine dai comportamenti ricorrenti osservati nel transcript. */
 export async function suggestRoutines(agentId: string): Promise<RoutineSuggestion[]> {
   const agent = getAgent(agentId)
+  // fase 16c (C3.3): il modello risolto — anche per i bot «Come gli altri»
+  const resolved = agent ? resolveAgentModel(agent, getSetting<MainModel | null>('models.main', null)) : null
   // fase 18a (E0): errori della UI dal catalogo, non testo cablato
-  if (!agent?.providerId || !agent.model) throw uiError(UI.rpcConfigureProvider)
-  const provider = getProvider(agent.providerId)
+  if (!resolved) throw uiError(UI.rpcConfigureProvider)
+  const provider = getProvider(resolved.providerId)
   if (!provider) throw uiError(UI.rpcProviderNotFound)
-  const model = agent.model
+  const model = resolved.model
 
   const transcript = getEntries(agentId)
     .slice(-40)

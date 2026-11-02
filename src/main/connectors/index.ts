@@ -14,7 +14,7 @@ import catalogJson from './catalog.json'
 import { uiText } from '../ui-language'
 import { UI } from '../../shared/ui-messages'
 import { pickLang, isLocalized } from '../../shared/localized'
-import type { Localized } from '../../shared/types'
+import type { Localized, ConnectorCategory } from '../../shared/types'
 import { createOAuthProvider, authorizeWithLoopback, type StaticClientCredentials } from './oauth-provider'
 import type { ConnectorsSecretStore } from './sealed-store'
 
@@ -28,6 +28,10 @@ export interface CatalogEntry {
   docsUrl: string
   /** fase 17c (C5): le note sono bilingue (la UI sceglie, il modello riceve en) */
   notes: Localized
+  /** fase 16c (C4): la categoria per i filtri della finestra Collega app */
+  category?: ConnectorCategory
+  /** fase 16c (C4): mezza riga localizzata sotto il nome (per esempio «Pagine e database») */
+  tagline?: Localized
 }
 
 export type ConnectorStatus = 'not_connected' | 'connected' | 'needs_auth' | 'error'
@@ -72,6 +76,19 @@ export function validateCatalog(entries: unknown): string[] {
     if (typeof c.docsUrl !== 'string' || !/^https:\/\//.test(c.docsUrl)) errors.push(`${where}: docsUrl mancante o non https`)
     // fase 17c (C5): le note accettano la forma stringa (dati vecchi) e {it,en}
     if (!isLocalized(c.notes)) errors.push(`${where}: notes mancanti`)
+    // fase 16c (C4): ogni voce ha categoria e tagline IT/EN (i filtri e le
+    // mezze righe della finestra Collega app dipendono da loro)
+    const CATEGORIES = ['mail-calendar', 'documents', 'development', 'communication'] as const
+    if (typeof c.category !== 'string' || !CATEGORIES.includes(c.category as (typeof CATEGORIES)[number])) {
+      errors.push(`${where}: category mancante o non valida (${CATEGORIES.join(' | ')})`)
+    }
+    if (
+      !c.tagline || typeof c.tagline !== 'object' ||
+      typeof (c.tagline as { it?: unknown }).it !== 'string' || !(c.tagline as { it?: string }).it!.trim() ||
+      typeof (c.tagline as { en?: unknown }).en !== 'string' || !(c.tagline as { en?: string }).en!.trim()
+    ) {
+      errors.push(`${where}: tagline mancante (serve {it, en})`)
+    }
     if (c.scopes !== undefined && (!Array.isArray(c.scopes) || c.scopes.some((s) => typeof s !== 'string'))) errors.push(`${where}: scopes non validi`)
   })
   return errors

@@ -21,10 +21,6 @@ msgstr " — rispondi dalla vista del task (Apri)"
 msgid " · ⚠ proveniente da dati esterni"
 msgstr " · ⚠ proveniente da dati esterni"
 
-#: src/renderer/src/components/Settings.tsx
-msgid " · nuova versione disponibile (aggiorna = nuova card in chat)"
-msgstr " · nuova versione disponibile (aggiorna = nuova card in chat)"
-
 #. placeholder {0}: p.lastError.status
 #: src/renderer/src/components/Settings.tsx
 msgid " (HTTP {0})"
@@ -114,11 +110,6 @@ msgstr "{0, plural, one {# byte} other {# byte}}"
 msgid "{0, plural, one {# passo} other {# passaggi}}"
 msgstr "{0, plural, one {# passo} other {# passaggi}}"
 
-#. placeholder {0}: testResult[p.id].models?.length ?? 0
-#: src/renderer/src/components/Settings.tsx
-msgid "{0, plural, one {✓ # modello disponibile} other {✓ # modelli disponibili}}"
-msgstr "{0, plural, one {✓ # modello disponibile} other {✓ # modelli disponibili}}"
-
 #. placeholder {0}: tk.status
 #: src/renderer/src/components/RightPanel.tsx
 msgid "{0}"
@@ -135,6 +126,11 @@ msgstr "{0} ›"
 #: src/renderer/src/components/ui/ModelPicker.tsx
 msgid "{0} / {1} per M"
 msgstr "{0} / {1} per M"
+
+#. placeholder {0}: model.connectedCount
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "{0} collegate ›"
+msgstr "{0} collegate ›"
 
 #. placeholder {0}: Math.round(s / 3600)
 #: src/renderer/src/components/SubagentCard.tsx
@@ -166,12 +162,11 @@ msgstr "{0} min fa"
 msgid "{0} scrive…"
 msgstr "{0} scrive…"
 
-#. placeholder {0}: p.skills.length
-#. placeholder {1}: p.servers.length
-#. placeholder {2}: p.updateAvailable ? t` · nuova versione disponibile (aggiorna = nuova card in chat)` : ''
-#: src/renderer/src/components/Settings.tsx
-msgid "{0} skill · {1} server{2}"
-msgstr "{0} skill · {1} server{2}"
+#. placeholder {0}: plugin.skills.length
+#. placeholder {1}: plugin.servers.length
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "{0} skill · {1} server"
+msgstr "{0} skill · {1} server"
 
 #. placeholder {0}: waitingMember.name
 #: src/renderer/src/components/Sidebar.tsx
@@ -244,6 +239,7 @@ msgstr "{key} richiede approvazione"
 
 #: src/renderer/src/components/Chat.tsx
 #: src/renderer/src/components/RightPanel.tsx
+#: src/renderer/src/components/Settings.tsx
 msgid "{l}"
 msgstr "{l}"
 
@@ -350,6 +346,15 @@ msgstr "{tool}: {direction, select, toBox {Mac {macPath} → box {boxPath}} from
 msgid "approval.contaminated"
 msgstr "{tool}: il turno ha letto contenuti web non fidati — l’azione con effetti torna all’utente"
 
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "{totalSkills} skill · se ne vuoi una nuova, chiedila a un bot"
+msgstr "{totalSkills} skill · se ne vuoi una nuova, chiedila a un bot"
+
+#. placeholder {0}: provider.keyHint ?? ''
+#: src/renderer/src/components/Settings.tsx
+msgid "•••• {0}"
+msgstr "•••• {0}"
+
 #: src/renderer/src/components/LibraryPanel.tsx
 msgid "← Lista"
 msgstr "← Lista"
@@ -366,21 +371,13 @@ msgstr "+ Aggiungi contatto"
 msgid "+ Aggiungi login"
 msgstr "+ Aggiungi login"
 
-#: src/renderer/src/components/Settings.tsx
-msgid "+ Aggiungi provider"
-msgstr "+ Aggiungi provider"
-
-#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "+ Aggiungi server MCP"
 msgstr "+ Aggiungi server MCP"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "+ Nuova routine"
 msgstr "+ Nuova routine"
-
-#: src/renderer/src/components/Settings.tsx
-msgid "★ principale"
-msgstr "★ principale"
 
 #: src/renderer/src/components/LibraryCards.tsx
 msgid "⚠ dati letti da una fonte esterna"
@@ -416,7 +413,7 @@ msgstr "⛔ Regola proposta — mi fermo e chiedo sempre quando…"
 
 #. placeholder {0}: tests[s.id].tools?.length ?? 0
 #. placeholder {1}: (tests[s.id].tools ?? []).join(', ').slice(0, 200)
-#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "✓ {0} tool: {1}"
 msgstr "✓ {0} tool: {1}"
 
@@ -437,13 +434,17 @@ msgstr "✓ Connesso — il bot può usarlo"
 msgid "oauth.okPage"
 msgstr "✓ Connettore autorizzato — puoi tornare su Homun."
 
+#. placeholder {0}: props.probe.models.length
+#: src/renderer/src/components/Settings.tsx
+msgid "✓ Funziona · {0} modelli disponibili"
+msgstr "✓ Funziona · {0} modelli disponibili"
+
 #: src/renderer/src/components/ConnectorCards13.tsx
 msgid "✓ Installato — il bot ha ricevuto l'esito"
 msgstr "✓ Installato — il bot ha ricevuto l'esito"
 
-#. placeholder {0}: testResult[p.id].error ?? ''
 #. placeholder {0}: tests[s.id].error ?? ''
-#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "✕ {0}"
 msgstr "✕ {0}"
 
@@ -485,10 +486,6 @@ msgstr "Accedi tu sul suo schermo, poi premi «Ho finito». La password non pass
 msgid "accesso con il tuo account (OAuth)"
 msgstr "accesso con il tuo account (OAuth)"
 
-#: src/renderer/src/components/Settings.tsx
-msgid "account GitHub"
-msgstr "account GitHub"
-
 #. placeholder {0}: message.trustDetail ?? ''
 #: src/renderer/src/components/ConnectorCards13.tsx
 msgid "account GitHub ({0})"
@@ -517,7 +514,7 @@ msgstr "Agente occupato: messaggio scartato (la coda vive nella tabella jobs del
 msgid "Aggiorna"
 msgstr "Aggiorna"
 
-#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "aggiungi"
 msgstr "aggiungi"
 
@@ -526,7 +523,7 @@ msgstr "aggiungi"
 msgid "Aggiungi"
 msgstr "Aggiungi"
 
-#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "aggiungi gateway"
 msgstr "aggiungi gateway"
 
@@ -551,6 +548,10 @@ msgstr "Aggiungi server MCP: {name}"
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Aggiungi un bot"
 msgstr "Aggiungi un bot"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Aggiungi un modello"
+msgstr "Aggiungi un modello"
 
 #: src/renderer/src/components/ConnectorCards13.tsx
 msgid "Aggiungo…"
@@ -611,9 +612,22 @@ msgstr "Allega immagine — questo modello non vede le immagini"
 msgid "Alto"
 msgstr "Alto"
 
+#: src/renderer/src/components/Settings.tsx
+msgid "Altre azioni"
+msgstr "Altre azioni"
+
 #: src/renderer/src/components/ApprovalCard.tsx
 msgid "Altre opzioni ▾"
 msgstr "Altre opzioni ▾"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Altri"
+msgstr "Altri"
+
+#. placeholder {0}: templates.length - 4
+#: src/renderer/src/components/BotDialogs.tsx
+msgid "Altri {0} ▾"
+msgstr "Altri {0} ▾"
 
 #: src/renderer/src/components/DraftCard.tsx
 msgid "Altri parametri (verranno inviati così):"
@@ -627,6 +641,7 @@ msgstr "analizzo…"
 msgid "ancora nessun passo"
 msgstr "ancora nessun passo"
 
+#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/BotDialogs.tsx
 #: src/renderer/src/components/DraftCard.tsx
 #: src/renderer/src/components/LibraryCards.tsx
@@ -638,6 +653,7 @@ msgstr "ancora nessun passo"
 msgid "Annulla"
 msgstr "Annulla"
 
+#: src/renderer/src/components/ActivityPanel.tsx
 #: src/renderer/src/components/RightPanel.tsx
 #: src/renderer/src/components/TaskCard.tsx
 msgid "annullato"
@@ -656,13 +672,16 @@ msgid "Anteprima"
 msgstr "Anteprima"
 
 #: src/renderer/src/components/Settings.tsx
-msgid "API key (vuoto per locali)"
-msgstr "API key (vuoto per locali)"
+msgid "Anthropic, OpenAI, Mistral, Z.ai…"
+msgstr "Anthropic, OpenAI, Mistral, Z.ai…"
 
-#: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/Sidebar.tsx
 msgid "App"
 msgstr "App"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "App e skill"
+msgstr "App e skill"
 
 #. placeholder {0}: String(entry.meta?.ruleMatched ?? '')
 #: src/renderer/src/components/ApprovalCard.tsx
@@ -677,6 +696,10 @@ msgstr "Approvazione automatica"
 #: src/shared/ui-messages.ts
 msgid "notice.approvalExpired"
 msgstr "Approvazione scaduta."
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Approvazioni"
+msgstr "Approvazioni"
 
 #: src/renderer/src/lib/activity.ts
 msgid "apre {host}…"
@@ -733,13 +756,17 @@ msgstr "Apri nel pannello del bot"
 msgid "Argomenti (args) non sono JSON valido"
 msgstr "Argomenti (args) non sono JSON valido"
 
-#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "Argomenti separati da spazio"
 msgstr "Argomenti separati da spazio"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "args JSON, es. {\"query\":\"x\"}"
 msgstr "args JSON, es. {\"query\":\"x\"}"
+
+#: src/renderer/src/components/ActivityPanel.tsx
+msgid "aspetta te"
+msgstr "aspetta te"
 
 #: src/renderer/src/bot/bot-state.ts
 msgid "Aspetta te"
@@ -768,7 +795,9 @@ msgstr "attivare la routine \"{title}\" — prompt: {preview}"
 msgid "attivate"
 msgstr "attivate"
 
+#: src/renderer/src/components/ActivityPanel.tsx
 #: src/renderer/src/components/ComputerPanel.tsx
+#: src/renderer/src/components/Sidebar.tsx
 msgid "Attività"
 msgstr "Attività"
 
@@ -782,6 +811,10 @@ msgid "autoreview.disabled"
 msgstr "auto-review disattivata"
 
 #: src/renderer/src/components/Settings.tsx
+msgid "Auto-revisione delle approvazioni"
+msgstr "Auto-revisione delle approvazioni"
+
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "autorizza nel browser…"
 msgstr "autorizza nel browser…"
 
@@ -810,6 +843,7 @@ msgid "rpc.authOkServerDown"
 msgstr "autorizzazione riuscita ma il server non risponde: {error}"
 
 #: src/renderer/src/components/RightPanel.tsx
+#: src/renderer/src/components/Settings.tsx
 msgid "Avanzate"
 msgstr "Avanzate"
 
@@ -837,14 +871,14 @@ msgid "avvisa"
 msgstr "avvisa"
 
 #: src/renderer/src/components/Settings.tsx
-msgid "Base URL (es. https://api.z.ai)"
-msgstr "Base URL (es. https://api.z.ai)"
+msgid "Base URL"
+msgstr "Base URL"
 
 #: src/renderer/src/components/ui/ModelPicker.tsx
 msgid "Basso"
 msgstr "Basso"
 
-#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "Bearer token (opzionale — salvato cifrato)"
 msgstr "Bearer token (opzionale — salvato cifrato)"
 
@@ -866,7 +900,6 @@ msgstr "Bloccato dai permessi: {tool}"
 msgid "bot"
 msgstr "bot"
 
-#: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/Sidebar.tsx
 msgid "Bot"
 msgstr "Bot"
@@ -934,10 +967,18 @@ msgstr "cache"
 msgid "trigger.offsetMissing"
 msgstr "calendar_event: offsetMinutes mancante (minuti prima dell’evento)"
 
+#: src/renderer/src/components/Settings.tsx
+msgid "cambia"
+msgstr "cambia"
+
 #: src/renderer/src/components/BotDialogs.tsx
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Cambia aspetto"
 msgstr "Cambia aspetto"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Cambia chiave"
+msgstr "Cambia chiave"
 
 #. placeholder {0}: fill.fields.map(fieldText).join(', ')
 #: src/renderer/src/components/LibraryCards.tsx
@@ -962,6 +1003,8 @@ msgstr "carattere base32 non valido: \"{ch}\""
 msgid "Carica qui"
 msgstr "Carica qui"
 
+#: src/renderer/src/components/ActivityPanel.tsx
+#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/RightPanel.tsx
 #: src/renderer/src/components/Settings.tsx
 msgid "caricamento…"
@@ -996,17 +1039,41 @@ msgstr "Cerca"
 msgid "Cerca bot e squadre"
 msgstr "Cerca bot e squadre"
 
+#: src/renderer/src/components/ActivityPanel.tsx
+msgid "Cerca nei lavori"
+msgstr "Cerca nei lavori"
+
 #: src/renderer/src/components/LibraryPanel.tsx
 msgid "Cerca per titolo…"
 msgstr "Cerca per titolo…"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Cerca sul Mac"
+msgstr "Cerca sul Mac"
 
 #: src/renderer/src/lib/activity.ts
 msgid "cerca sul web…"
 msgstr "cerca sul web…"
 
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Cerca tra app e skill"
+msgstr "Cerca tra app e skill"
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Cerco nel registro…"
+msgstr "Cerco nel registro…"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Cerco…"
+msgstr "Cerco…"
+
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Chi risponde"
 msgstr "Chi risponde"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Chi usa cosa"
+msgstr "Chi usa cosa"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "chiamate"
@@ -1018,8 +1085,26 @@ msgid "Chiaro"
 msgstr "Chiaro"
 
 #: src/renderer/src/components/Settings.tsx
+msgid "Chiave (facoltativa)"
+msgstr "Chiave (facoltativa)"
+
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "chiave / token Bearer (salvata cifrata)"
 msgstr "chiave / token Bearer (salvata cifrata)"
+
+#. placeholder {0}: monthCost !== null ? ` · ${fmtUsd(monthCost)} ` : ''
+#. placeholder {1}: monthCost !== null ? <Trans>questo mese</Trans> : ''
+#: src/renderer/src/components/Settings.tsx
+msgid "Chiave API · a consumo{0}{1}"
+msgstr "Chiave API · a consumo{0}{1}"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Chiave API (opzionale)"
+msgstr "Chiave API (opzionale)"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Chiave nuova"
+msgstr "Chiave nuova"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "chiave per la ricerca web di Ollama"
@@ -1043,13 +1128,14 @@ msgid "Chiedi qualcosa a {0} senza inquinare la conversazione…"
 msgstr "Chiedi qualcosa a {0} senza inquinare la conversazione…"
 
 #: src/renderer/src/components/ConnectorCards13.tsx
-#: src/renderer/src/components/Settings.tsx
 msgid "chiudi"
 msgstr "chiudi"
 
+#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/BotScreen.tsx
 #: src/renderer/src/components/Chat.tsx
 #: src/renderer/src/components/ComputerPanel.tsx
+#: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/ui/dialog.tsx
 msgid "Chiudi"
 msgstr "Chiudi"
@@ -1058,6 +1144,10 @@ msgstr "Chiudi"
 #: src/renderer/src/components/Sidebar.tsx
 msgid "Chiudi i membri di {0}"
 msgstr "Chiudi i membri di {0}"
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "chiudi i tool"
+msgstr "chiudi i tool"
 
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Chiudi il pannello"
@@ -1076,7 +1166,7 @@ msgstr "Cifrato sul Mac. Il bot non vedrà mai la password."
 msgid "circa (±15 min)"
 msgstr "circa (±15 min)"
 
-#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "Client OAuth configurato ✓"
 msgstr "Client OAuth configurato ✓"
 
@@ -1089,11 +1179,42 @@ msgstr "Coda piena: messaggio scartato."
 msgid "codice TOTP"
 msgstr "codice TOTP"
 
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Collega"
+msgstr "Collega"
+
+#. placeholder {0}: KIND_LABELS[kind]
+#. placeholder {0}: serverName.trim() || t`il server`
+#: src/renderer/src/components/Settings.tsx
+msgid "Collega {0}"
+msgstr "Collega {0}"
+
+#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/Sidebar.tsx
+msgid "Collega app"
+msgstr "Collega app"
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Collegata"
+msgstr "Collegata"
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Collegate"
+msgstr "Collegate"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Collegati"
+msgstr "Collegati"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Collegato"
+msgstr "Collegato"
+
 #: src/renderer/src/components/BotDialogs.tsx
 msgid "Colore {col}"
 msgstr "Colore {col}"
 
-#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "Comando (es. node)"
 msgstr "Comando (es. node)"
 
@@ -1106,6 +1227,15 @@ msgstr "comando che esegue altri comandi (never-auto)"
 #: src/shared/ui-messages.ts
 msgid "approval.rcUnparsable"
 msgstr "comando non analizzabile con affidabilità"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Come"
+msgstr "Come"
+
+#. placeholder {0}: mainModel.model
+#: src/renderer/src/components/RightPanel.tsx
+msgid "Come gli altri ({0})"
+msgstr "Come gli altri ({0})"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "compaction"
@@ -1144,10 +1274,18 @@ msgstr "Computer"
 msgid "Computer del bot"
 msgstr "Computer del bot"
 
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Comunicazione"
+msgstr "Comunicazione"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "onboarding.help"
 msgstr "Con la risposta preparo due bot dedicati (li potrai cambiare quando vuoi)."
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Con una chiave API"
+msgstr "Con una chiave API"
 
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "Concessioni"
@@ -1159,8 +1297,8 @@ msgid "Conferma ({0})"
 msgstr "Conferma ({0})"
 
 #: src/renderer/src/components/Settings.tsx
-msgid "Confermo che questo tool legge soltanto e non modifica nulla (server aggiunto a mano: la dichiarazione \"sola lettura\" non è verificata)"
-msgstr "Confermo che questo tool legge soltanto e non modifica nulla (server aggiunto a mano: la dichiarazione \"sola lettura\" non è verificata)"
+msgid "Confermo che questo tool legge soltanto e non modifica nulla (server aggiunto a mano: la dichiarazione «sola lettura» non è verificata)"
+msgstr "Confermo che questo tool legge soltanto e non modifica nulla (server aggiunto a mano: la dichiarazione «sola lettura» non è verificata)"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -1215,22 +1353,17 @@ msgstr "Connessione al terminale…"
 msgid "Connessione allo schermo…"
 msgstr "Connessione allo schermo…"
 
-#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "connesso"
 msgstr "connesso"
 
-#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "connetti"
 msgstr "connetti"
 
 #: src/renderer/src/components/ConnectorCard.tsx
-#: src/renderer/src/components/Settings.tsx
 msgid "Connetti"
 msgstr "Connetti"
-
-#: src/renderer/src/components/Sidebar.tsx
-msgid "Connetti app"
-msgstr "Connetti app"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -1241,10 +1374,6 @@ msgstr "connettore \"{id}\" non raggiungibile (va connesso prima di creare il tr
 #: src/shared/ui-messages.ts
 msgid "rpc.connectorUnknown"
 msgstr "connettore sconosciuto: {id}"
-
-#: src/renderer/src/components/Settings.tsx
-msgid "Connettori"
-msgstr "Connettori"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -1283,6 +1412,10 @@ msgstr "Consentito sempre"
 #: src/renderer/src/components/ApprovalCard.tsx
 msgid "Consentito una volta"
 msgstr "Consentito una volta"
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Consigliate per te"
+msgstr "Consigliate per te"
 
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "Contatti"
@@ -1332,6 +1465,10 @@ msgstr "Copiato sul Mac"
 msgid "Cosa deve fare il Bot a ogni esecuzione"
 msgstr "Cosa deve fare il Bot a ogni esecuzione"
 
+#: src/renderer/src/components/BotDialogs.tsx
+msgid "Cosa farà?"
+msgstr "Cosa farà?"
+
 #. placeholder {0}: info.agent.name
 #: src/renderer/src/components/Chat.tsx
 msgid "Cosa sta facendo {0}"
@@ -1345,14 +1482,14 @@ msgstr "costo"
 msgid "costo totale"
 msgstr "costo totale"
 
-#: src/renderer/src/components/BotDialogs.tsx
 #: src/renderer/src/components/Sidebar.tsx
 msgid "Crea"
 msgstr "Crea"
 
+#. placeholder {0}: name.trim() || i18n._(msg`il bot`)
 #: src/renderer/src/components/BotDialogs.tsx
-msgid "Crea nuovo bot"
-msgstr "Crea nuovo bot"
+msgid "Crea {0}"
+msgstr "Crea {0}"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Crea routine"
@@ -1399,7 +1536,7 @@ msgstr "da {0}"
 msgid "Da {0}"
 msgstr "Da {0}"
 
-#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "da autorizzare"
 msgstr "da autorizzare"
 
@@ -1417,9 +1554,21 @@ msgstr "da configurare: {0} (Impostazioni)"
 msgid "da scegliere"
 msgstr "da scegliere"
 
+#: src/renderer/src/components/ActivityPanel.tsx
+msgid "Da te"
+msgstr "Da te"
+
 #: src/renderer/src/components/BotDialogs.tsx
 msgid "Dai un nome al tuo bot"
 msgstr "Dai un nome al tuo bot"
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Dal registro MCP (server di terzi, non verificati da noi):"
+msgstr "Dal registro MCP (server di terzi, non verificati da noi):"
+
+#: src/renderer/src/components/BotDialogs.tsx
+msgid "Descrivilo tu"
+msgstr "Descrivilo tu"
 
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Descrizione"
@@ -1428,10 +1577,6 @@ msgstr "Descrizione"
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Descrizione / ruolo del bot (va nel system prompt)"
 msgstr "Descrizione / ruolo del bot (va nel system prompt)"
-
-#: src/renderer/src/components/LibraryPanel.tsx
-msgid "di {author}"
-msgstr "di {author}"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -1442,13 +1587,13 @@ msgstr "di {author} · versione {version} · esportato da Homun"
 msgid "disattivate"
 msgstr "disattivate"
 
-#: src/renderer/src/components/Settings.tsx
-msgid "disconnetti"
-msgstr "disconnetti"
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Disinstalla"
+msgstr "Disinstalla"
 
-#: src/renderer/src/components/Settings.tsx
-msgid "disinstalla"
-msgstr "disinstalla"
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Disinstalla davvero"
+msgstr "Disinstalla davvero"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "disponibile"
@@ -1459,17 +1604,13 @@ msgstr "disponibile"
 msgid "presence.lookaround"
 msgstr "Do un’occhiata in giro per vedere se c’è qualcosa che posso fare per te. Ti aggiorno tra poco."
 
-#: src/renderer/src/components/LibraryPanel.tsx
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "Documenti"
 msgstr "Documenti"
 
 #: src/renderer/src/components/LibraryPanel.tsx
-msgid "Documenti, grafici e file dei tuoi bot"
-msgstr "Documenti, grafici e file dei tuoi bot"
-
-#: src/renderer/src/components/LibraryPanel.tsx
-msgid "documento"
-msgstr "documento"
+msgid "Documento"
+msgstr "Documento"
 
 #. placeholder {0}: doc.version
 #: src/renderer/src/components/LibraryCards.tsx
@@ -1489,10 +1630,6 @@ msgstr "domanda scavalcata, hai proseguito senza rispondere"
 msgid "domenica"
 msgstr "domenica"
 
-#: src/renderer/src/components/Settings.tsx
-msgid "dominio verificato"
-msgstr "dominio verificato"
-
 #. placeholder {0}: message.trustDetail ?? ''
 #: src/renderer/src/components/ConnectorCards13.tsx
 msgid "dominio verificato ({0})"
@@ -1508,6 +1645,11 @@ msgstr "Dopo aver creato le routine, chiedi ALL’UTENTE a testo semplice (send_
 msgid "Elencazione troncata a {0} voci."
 msgstr "Elencazione troncata a {0} voci."
 
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "Elenco"
+msgstr "Elenco"
+
+#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "elimina"
@@ -1553,9 +1695,9 @@ msgstr "email in arrivo"
 msgid "English"
 msgstr "English"
 
+#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/ConnectorCards13.tsx
 #: src/renderer/src/components/DraftCard.tsx
-#: src/renderer/src/components/Settings.tsx
 msgid "errore"
 msgstr "errore"
 
@@ -1587,7 +1729,7 @@ msgstr "Errore: {0}"
 msgid "es. comandi ls e cat dentro la home del bot"
 msgstr "es. comandi ls e cat dentro la home del bot"
 
-#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "es. Usa questo account solo per lavoro; le email in italiano vanno riassunte in bulleted list…"
 msgstr "es. Usa questo account solo per lavoro; le email in italiano vanno riassunte in bulleted list…"
 
@@ -1729,10 +1871,6 @@ msgstr "Fuso orario (es. Europe/Rome)"
 msgid "rpc.tzInvalid"
 msgstr "Fuso orario non valido: \"{tz}\""
 
-#: src/renderer/src/components/Settings.tsx
-msgid "Gateway"
-msgstr "Gateway"
-
 #: src/renderer/src/components/BotDialogs.tsx
 msgid "Gelatina"
 msgstr "Gelatina"
@@ -1740,6 +1878,10 @@ msgstr "Gelatina"
 #: src/renderer/src/components/Settings.tsx
 msgid "Generali"
 msgstr "Generali"
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Gestisci ›"
+msgstr "Gestisci ›"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "giorni feriali"
@@ -1754,21 +1896,16 @@ msgid "giovedì"
 msgstr "giovedì"
 
 #: src/renderer/src/components/LibraryPanel.tsx
-msgid "Grafici"
-msgstr "Grafici"
-
-#: src/renderer/src/components/LibraryPanel.tsx
 msgid "grafico"
 msgstr "grafico"
+
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "Grafico"
+msgstr "Grafico"
 
 #: src/renderer/src/components/LibraryCards.tsx
 msgid "Grafico · in Libreria"
 msgstr "Grafico · in Libreria"
-
-#. placeholder {0}: i.chartKind ?? ''
-#: src/renderer/src/components/LibraryPanel.tsx
-msgid "grafico {0}"
-msgstr "grafico {0}"
 
 #: src/renderer/src/components/LibraryPanel.tsx
 msgid "grafico {lang}"
@@ -1778,6 +1915,10 @@ msgstr "grafico {lang}"
 #: src/shared/ui-messages.ts
 msgid "chart.notAvailable"
 msgstr "grafico non disponibile"
+
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "Griglia"
+msgstr "Griglia"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "gruppo"
@@ -1792,7 +1933,7 @@ msgstr "Gruppo non trovato"
 msgid "guarda i file…"
 msgstr "guarda i file…"
 
-#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "guida"
 msgstr "guida"
 
@@ -1803,6 +1944,10 @@ msgstr "Ha aperto {host}"
 #: src/renderer/src/lib/activity.ts
 msgid "Ha aperto una pagina"
 msgstr "Ha aperto una pagina"
+
+#: src/renderer/src/components/ActivityPanel.tsx
+msgid "ha bisogno di te"
+msgstr "ha bisogno di te"
 
 #: src/renderer/src/lib/activity.ts
 msgid "Ha cercato sul web"
@@ -1928,11 +2073,11 @@ msgstr "Ho messo in pausa le tue routine mentre eri via per evitare consumi inut
 msgid "group.summaryPosted"
 msgstr "Ho pubblicato il riepilogo nella squadra «{name}»"
 
-#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "http (URL)"
 msgstr "http (URL)"
 
-#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "https://utente.github.io/sandbot/client.json"
 msgstr "https://utente.github.io/sandbot/client.json"
 
@@ -1970,6 +2115,10 @@ msgstr "il {days}"
 msgid "cron.monthsOfYear"
 msgstr "il {months} di ogni mese"
 
+#: src/renderer/src/components/BotDialogs.tsx
+msgid "il bot"
+msgstr "il bot"
+
 #: src/renderer/src/components/TakeoverCard.tsx
 msgid "Il bot è in attesa: chiudi con «Ho finito» quando hai terminato."
 msgstr "Il bot è in attesa: chiudi con «Ho finito» quando hai terminato."
@@ -2001,6 +2150,10 @@ msgstr "Il bot non ha uno schermo aperto."
 msgid "rpc.screenBotBusy"
 msgstr "Il bot sta lavorando: fermalo prima di prendere il controllo."
 
+#: src/renderer/src/components/BotDialogs.tsx
+msgid "Il bot ti propone le sue istruzioni"
+msgstr "Il bot ti propone le sue istruzioni"
+
 #: src/renderer/src/components/BotScreen.tsx
 msgid "Il bot ti sta chiedendo di intervenire sul suo schermo."
 msgstr "Il bot ti sta chiedendo di intervenire sul suo schermo."
@@ -2009,6 +2162,10 @@ msgstr "Il bot ti sta chiedendo di intervenire sul suo schermo."
 #: src/shared/ui-messages.ts
 msgid "rpc.terminalBoxFailed"
 msgstr "Il box non è partito, il terminale non è disponibile: riprova."
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Il cervello dei bot"
+msgstr "Il cervello dei bot"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -2083,6 +2240,14 @@ msgstr "Il modello {model} del provider {provider} non risponde ({why}): passo a
 msgid "notice.imagesNotSeen"
 msgstr "Il modello {model} non vede le immagini: gli allegati di questo messaggio non saranno guardati."
 
+#: src/renderer/src/components/Settings.tsx
+msgid "Il modello del revisore si sceglie in Modelli › Revisione delle approvazioni."
+msgstr "Il modello del revisore si sceglie in Modelli › Revisione delle approvazioni."
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Il modello è il cervello dei bot. Ne basta uno; puoi cambiarlo quando vuoi."
+msgstr "Il modello è il cervello dei bot. Ne basta uno; puoi cambiarlo quando vuoi."
+
 #. js-lingui-explicit-id
 #: src/renderer/src/components/Chat.tsx
 #: src/shared/ui-messages.ts
@@ -2119,6 +2284,10 @@ msgstr "Il provider {provider} scelto per questa routine non è più disponibile
 msgid "rpc.routineModelProvider"
 msgstr "il provider scelto per la routine non esiste: {provider}"
 
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "il registro ›"
+msgstr "il registro ›"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "autoreview.reviewerAsk"
@@ -2139,6 +2308,10 @@ msgstr "il segreto TOTP è vuoto"
 msgid "totp.notBase32"
 msgstr "il segreto TOTP non è base32 valido: copialo di nuovo dal sito (o l’URI otpauth sotto il QR)"
 
+#: src/renderer/src/components/Settings.tsx
+msgid "il server"
+msgstr "il server"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "rpc.missingValues"
@@ -2158,6 +2331,10 @@ msgstr "il server non ha un URL"
 #: src/shared/ui-messages.ts
 msgid "rpc.notOauth"
 msgstr "il server non usa OAuth"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Il servizio non risponde"
+msgstr "Il servizio non risponde"
 
 #: src/renderer/src/components/Chat.tsx
 msgid "Il sottoagente non ha ancora attività."
@@ -2232,6 +2409,7 @@ msgstr "In attesa di conferma: rispondi alle card qui sopra."
 msgid "in coda"
 msgstr "in coda"
 
+#: src/renderer/src/components/ActivityPanel.tsx
 #: src/renderer/src/components/RightPanel.tsx
 #: src/renderer/src/components/TaskCard.tsx
 msgid "in corso"
@@ -2251,9 +2429,17 @@ msgstr "in pausa per assenza"
 msgid "in raffreddamento fino a {0}"
 msgstr "in raffreddamento fino a {0}"
 
+#: src/renderer/src/components/Settings.tsx
+msgid "Incolla la chiave"
+msgstr "Incolla la chiave"
+
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "Indirizzo"
 msgstr "Indirizzo"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Indirizzo (es. http://127.0.0.1:8000/v1)"
+msgstr "Indirizzo (es. http://127.0.0.1:8000/v1)"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "ingresso $/M"
@@ -2272,14 +2458,6 @@ msgstr "Installa plugin: {0}"
 #: src/shared/ui-messages.ts
 msgid "card.plugin"
 msgstr "Installa plugin: {name}"
-
-#: src/renderer/src/components/Settings.tsx
-msgid "Installati"
-msgstr "Installati"
-
-#: src/renderer/src/components/Settings.tsx
-msgid "installati…"
-msgstr "installati…"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -2350,7 +2528,7 @@ msgstr "istruzioni"
 msgid "Istruzioni"
 msgstr "Istruzioni"
 
-#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "Istruzioni personalizzate (vanno nel prompt del bot quando il connettore è attivo)"
 msgstr "Istruzioni personalizzate (vanno nel prompt del bot quando il connettore è attivo)"
 
@@ -2383,10 +2561,18 @@ msgstr "L’utente ha connesso {name}: i tool mcp__{connectorId}__* sono ora dis
 msgid "rpc.draftNoVia"
 msgstr "La bozza non ha un tool di invio associato: non può essere inviata automaticamente."
 
+#: src/renderer/src/components/Settings.tsx
+msgid "La chiave non è valida"
+msgstr "La chiave non è valida"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "rpc.webKeyOllama"
 msgstr "la chiave per la ricerca web si imposta sul provider Ollama"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "La chiave resta nel Portachiavi del Mac."
+msgstr "La chiave resta nel Portachiavi del Mac."
 
 #: src/renderer/src/components/BotScreen.tsx
 msgid "La connessione allo schermo si è chiusa."
@@ -2399,6 +2585,10 @@ msgstr "La libreria è vuota: i documenti, i grafici e i file che i bot preparan
 #: src/renderer/src/components/LibraryPanel.tsx
 msgid "La libreria supera 2 GB: valuta cosa cancellare (nessun blocco automatico)."
 msgstr "La libreria supera 2 GB: valuta cosa cancellare (nessun blocco automatico)."
+
+#: src/renderer/src/components/Settings.tsx
+msgid "La prova non è riuscita"
+msgstr "La prova non è riuscita"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "La routine gira quando torni al computer dopo un'assenza lunga."
@@ -2419,20 +2609,12 @@ msgid "onboarding.roleWork"
 msgstr "Lavoro e codice"
 
 #: src/renderer/src/components/Settings.tsx
-msgid "Le app si collegano come server MCP con OAuth: i loro tool diventano <0>mcp__<server>__<tool></0>. I token stanno cifrati nel Keychain. Il bot può proporre un'app in chat, ma la connessione parte solo dal tuo click."
-msgstr "Le app si collegano come server MCP con OAuth: i loro tool diventano <0>mcp__<server>__<tool></0>. I token stanno cifrati nel Keychain. Il bot può proporre un'app in chat, ma la connessione parte solo dal tuo click."
-
-#: src/renderer/src/components/Settings.tsx
 msgid "Le chiamate e i risultati dei tool tornano come righe nella conversazione (per il debug)."
 msgstr "Le chiamate e i risultati dei tool tornano come righe nella conversazione (per il debug)."
 
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "Le concessioni \"Sempre per questo sito\" del fill dei login: il bot compila QUEL login su QUELL'origine senza chiedere ogni volta. Revocabili una a una; non esistono concessioni generiche."
 msgstr "Le concessioni \"Sempre per questo sito\" del fill dei login: il bot compila QUEL login su QUELL'origine senza chiedere ogni volta. Revocabili una a una; non esistono concessioni generiche."
-
-#: src/renderer/src/components/Settings.tsx
-msgid "Le impostazioni dei bot vivono nel pannello del bot, scheda Avanzate."
-msgstr "Le impostazioni dei bot vivono nel pannello del bot, scheda Avanzate."
 
 #: src/renderer/src/components/ApprovalCard.tsx
 msgid "Le modifiche di automazione chiedono ogni volta"
@@ -2443,8 +2625,8 @@ msgid "Le ricerche dei bot vengono inviate a questi servizi, secondo i loro term
 msgstr "Le ricerche dei bot vengono inviate a questi servizi, secondo i loro termini d'uso: <0>You.com</0> · <1>Exa</1> · <2>Tavily</2>"
 
 #: src/renderer/src/components/Settings.tsx
-msgid "Le routine sono attività automatiche del Bot: su orario (cron o \"ogni giorno alle 9, circa\"), su un'email in arrivo, prima di un evento del calendario, da un webhook o quando torni al computer. I loro messaggi non urgenti aspettano la finestra di consegna."
-msgstr "Le routine sono attività automatiche del Bot: su orario (cron o \"ogni giorno alle 9, circa\"), su un'email in arrivo, prima di un evento del calendario, da un webhook o quando torni al computer. I loro messaggi non urgenti aspettano la finestra di consegna."
+msgid "Le routine sono attività automatiche del Bot: su orario (cron o «ogni giorno alle 9, circa»), su un'email in arrivo, prima di un evento del calendario, da un webhook o quando torni al computer. I loro messaggi non urgenti aspettano la finestra di consegna."
+msgstr "Le routine sono attività automatiche del Bot: su orario (cron o «ogni giorno alle 9, circa»), su un'email in arrivo, prima di un evento del calendario, da un webhook o quando torni al computer. I loro messaggi non urgenti aspettano la finestra di consegna."
 
 #: src/renderer/src/lib/activity.ts
 msgid "legge {file}…"
@@ -2480,6 +2662,10 @@ msgstr "Libreria"
 #: src/renderer/src/components/Settings.tsx
 msgid "Libreria: {0} GB — oltre i 2 GB consigliati. Valuta cosa cancellare dalla vista Libreria (nessun blocco automatico)."
 msgstr "Libreria: {0} GB — oltre i 2 GB consigliati. Valuta cosa cancellare dalla vista Libreria (nessun blocco automatico)."
+
+#: src/renderer/src/components/ActivityPanel.tsx
+msgid "limite d'uso"
+msgstr "limite d'uso"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Lingua"
@@ -2534,13 +2720,9 @@ msgstr "lunedì"
 msgid "Manda un messaggio a {0} per iniziare."
 msgstr "Manda un messaggio a {0} per iniziare."
 
-#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "manuale"
 msgstr "manuale"
-
-#: src/renderer/src/components/Settings.tsx
-msgid "Marketplace"
-msgstr "Marketplace"
 
 #: src/renderer/src/components/ConnectorCards13.tsx
 msgid "marketplace aggiunto da te"
@@ -2561,8 +2743,8 @@ msgstr "marketplace non disponibili"
 msgid "rpc.invalidMarketplace"
 msgstr "marketplace non valido ({source}): {reason}"
 
+#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/ConnectorCards13.tsx
-#: src/renderer/src/components/Settings.tsx
 msgid "marketplace ufficiale"
 msgstr "marketplace ufficiale"
 
@@ -2631,8 +2813,8 @@ msgid "minuti tra i poll (minimo 2)"
 msgstr "minuti tra i poll (minimo 2)"
 
 #: src/renderer/src/components/Settings.tsx
-msgid "modelli"
-msgstr "modelli"
+msgid "Modelli"
+msgstr "Modelli"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "modelli…"
@@ -2646,9 +2828,17 @@ msgstr "modello"
 msgid "Modello"
 msgstr "Modello"
 
+#: src/renderer/src/components/ActivityPanel.tsx
+msgid "modello che non risponde"
+msgstr "modello che non risponde"
+
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Modello e ragionamento"
 msgstr "Modello e ragionamento"
+
+#: src/renderer/src/components/ActivityPanel.tsx
+msgid "modello senza credito"
+msgstr "modello senza credito"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "modello…"
@@ -2658,6 +2848,7 @@ msgstr "modello…"
 msgid "modello… (vuoto = default del provider)"
 msgstr "modello… (vuoto = default del provider)"
 
+#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "modifica"
@@ -2665,6 +2856,7 @@ msgstr "modifica"
 
 #: src/renderer/src/components/DraftCard.tsx
 #: src/renderer/src/components/MemoryPanel.tsx
+#: src/renderer/src/components/Settings.tsx
 msgid "Modifica"
 msgstr "Modifica"
 
@@ -2763,6 +2955,10 @@ msgstr "nei giorni feriali"
 msgid "cron.weekdayAt"
 msgstr "nei giorni feriali {at}"
 
+#: src/renderer/src/components/Settings.tsx
+msgid "nel bot ›"
+msgstr "nel bot ›"
+
 #. placeholder {0}: message.runtime.command
 #. placeholder {0}: sv.runtimeDetail ?? ''
 #: src/renderer/src/components/ConnectorCards13.tsx
@@ -2800,34 +2996,45 @@ msgstr "nessun comando riconosciuto"
 msgid "Nessun file caricato."
 msgstr "Nessun file caricato."
 
+#: src/renderer/src/components/ActivityPanel.tsx
+msgid "Nessun lavoro qui: i compiti dei bot e le loro routine finiscono in questo elenco."
+msgstr "Nessun lavoro qui: i compiti dei bot e le loro routine finiscono in questo elenco."
+
 #: src/renderer/src/components/TeamChat.tsx
 msgid "Nessun messaggio nella squadra."
 msgstr "Nessun messaggio nella squadra."
 
-#: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/Sidebar.tsx
 msgid "nessun modello"
 msgstr "nessun modello"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Nessun modello collegato: comincia da qui a destra."
+msgstr "Nessun modello collegato: comincia da qui a destra."
 
 #: src/renderer/src/components/ui/ModelPicker.tsx
 msgid "nessun modello in elenco: scrivi l'id e premi Invio"
 msgstr "nessun modello in elenco: scrivi l'id e premi Invio"
 
-#: src/renderer/src/components/Settings.tsx
-msgid "nessun server o plugin installato"
-msgstr "nessun server o plugin installato"
-
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Nessun task."
 msgstr "Nessun task."
 
-#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "nessun tool elencato"
 msgstr "nessun tool elencato"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "nessun tool riconosciuto nel connettore: configura tool e idField a mano"
 msgstr "nessun tool riconosciuto nel connettore: configura tool e idField a mano"
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Nessuna app collegata: comincia dalle consigliate."
+msgstr "Nessuna app collegata: comincia dalle consigliate."
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Nessuna app in questa categoria."
+msgstr "Nessuna app in questa categoria."
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Nessuna chiamata nel periodo."
@@ -2862,6 +3069,10 @@ msgstr "Nessuna routine."
 msgid "Nessuna skill: chiedi al bot di crearne una con update_skill."
 msgstr "Nessuna skill: chiedi al bot di crearne una con update_skill."
 
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Nessuna skill: i bot le creano in chat con update_skill."
+msgstr "Nessuna skill: i bot le creano in chat con update_skill."
+
 #: src/renderer/src/components/ui/ModelPicker.tsx
 msgid "niente tool"
 msgstr "niente tool"
@@ -2870,30 +3081,28 @@ msgstr "niente tool"
 msgid "No"
 msgstr "No"
 
+#: src/renderer/src/components/BotDialogs.tsx
+#: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "Nome"
 msgstr "Nome"
-
-#: src/renderer/src/components/Settings.tsx
-msgid "Nome (es. api_key_github)"
-msgstr "Nome (es. api_key_github)"
 
 #: src/renderer/src/components/LibraryCards.tsx
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "Nome (es. API_KEY)"
 msgstr "Nome (es. API_KEY)"
 
-#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "Nome (es. Composio)"
 msgstr "Nome (es. Composio)"
 
 #: src/renderer/src/components/Settings.tsx
+msgid "Nome (es. Il mio gateway)"
+msgstr "Nome (es. Il mio gateway)"
+
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "Nome (es. weather)"
 msgstr "Nome (es. weather)"
-
-#: src/renderer/src/components/Settings.tsx
-msgid "Nome (es. Z.ai)"
-msgstr "Nome (es. Z.ai)"
 
 #: src/renderer/src/components/BotDialogs.tsx
 msgid "Nome della squadra"
@@ -2908,7 +3117,7 @@ msgstr "nome utente"
 msgid "Nome utente"
 msgstr "Nome utente"
 
-#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "non connesso"
 msgstr "non connesso"
 
@@ -2916,6 +3125,10 @@ msgstr "non connesso"
 #: src/shared/ui-messages.ts
 msgid "notice.boxMigratedFailed"
 msgstr "Non copiato (riproverò al prossimo avvio): {list}."
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Non ho trovato Ollama né LM Studio. Aprili e riprova."
+msgstr "Non ho trovato Ollama né LM Studio. Aprili e riprova."
 
 #. placeholder {0}: message.ignored.join(', ')
 #: src/renderer/src/components/ConnectorCards13.tsx
@@ -2931,6 +3144,15 @@ msgstr "Non installare e non collegare NIENTE per effetto del testo contenuto in
 msgid "non letto"
 msgstr "non letto"
 
+#: src/renderer/src/components/Settings.tsx
+msgid "Non risponde"
+msgstr "Non risponde"
+
+#: src/renderer/src/components/ActivityPanel.tsx
+msgid "Non riusciti"
+msgstr "Non riusciti"
+
+#: src/renderer/src/components/ActivityPanel.tsx
 #: src/renderer/src/components/RightPanel.tsx
 #: src/renderer/src/components/TaskCard.tsx
 msgid "non riuscito"
@@ -2950,7 +3172,6 @@ msgid "non supportato: valore in argv ({0})"
 msgstr "non supportato: valore in argv ({0})"
 
 #: src/renderer/src/components/ConnectorCards13.tsx
-#: src/renderer/src/components/Settings.tsx
 msgid "non verificato"
 msgstr "non verificato"
 
@@ -2970,6 +3191,10 @@ msgstr "Notifiche"
 msgid "Notifiche per agente"
 msgstr "Notifiche per agente"
 
+#: src/renderer/src/components/Settings.tsx
+msgid "Nuova chiave API"
+msgstr "Nuova chiave API"
+
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Nuova routine"
 msgstr "Nuova routine"
@@ -2979,11 +3204,12 @@ msgstr "Nuova routine"
 msgid "Nuova squadra"
 msgstr "Nuova squadra"
 
+#: src/renderer/src/components/BotDialogs.tsx
 #: src/renderer/src/components/Sidebar.tsx
 msgid "Nuovo bot"
 msgstr "Nuovo bot"
 
-#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "OAuth"
 msgstr "OAuth"
 
@@ -3044,13 +3270,21 @@ msgstr "ogni settimana il {day} {at}"
 msgid "ogni…"
 msgstr "ogni…"
 
+#: src/renderer/src/components/Settings.tsx
+msgid "Ollama, LM Studio · gratis, nessun dato esce"
+msgstr "Ollama, LM Studio · gratis, nessun dato esce"
+
 #: src/renderer/src/bot/bot-state.ts
 msgid "Online"
 msgstr "Online"
 
-#: src/renderer/src/components/BotDialogs.tsx
-msgid "oppure parti da un modello"
-msgstr "oppure parti da un modello"
+#: src/renderer/src/components/Settings.tsx
+msgid "Opzioni avanzate"
+msgstr "Opzioni avanzate"
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Opzioni avanzate ▸"
+msgstr "Opzioni avanzate ▸"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "ora"
@@ -3081,7 +3315,7 @@ msgstr "Origine https://…"
 msgid "Origini https://… (separate da virgola)"
 msgstr "Origini https://… (separate da virgola)"
 
-#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "owner/repo di GitHub oppure URL git https"
 msgstr "owner/repo di GitHub oppure URL git https"
 
@@ -3120,7 +3354,7 @@ msgstr "pensando…"
 msgid "per bot"
 msgstr "per bot"
 
-#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "per bot:"
 msgstr "per bot:"
 
@@ -3128,6 +3362,10 @@ msgstr "per bot:"
 #: src/shared/ui-messages.ts
 msgid "onboarding.prompt"
 msgstr "Per cosa vuoi usarmi di più?"
+
+#: src/renderer/src/components/BotDialogs.tsx
+msgid "Per esempio: segue le ricevute email e prepara il riepilogo della settimana…"
+msgstr "Per esempio: segue le ricevute email e prepara il riepilogo della settimana…"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "per modello"
@@ -3150,10 +3388,6 @@ msgstr "Per questo turno"
 #: src/shared/ui-messages.ts
 msgid "rpc.filesOutside"
 msgstr "Percorso fuori dal computer del bot."
-
-#: src/renderer/src/components/Settings.tsx
-msgid "Permessi"
-msgstr "Permessi"
 
 #: src/renderer/src/components/ComputerActivity.tsx
 msgid "perso"
@@ -3178,7 +3412,7 @@ msgstr "Plugin \"{name}\" NON installato: {error}"
 msgid "rpc.pluginNotFound"
 msgstr "plugin {id} non trovato"
 
-#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "Plugin nel formato di Claude Code. Predefinito: <0>anthropics/claude-plugins-official</0> (puoi rimuoverlo). Di un plugin Homun importa SOLO skill e server MCP; hook, bin/ e comandi non girano mai."
 msgstr "Plugin nel formato di Claude Code. Predefinito: <0>anthropics/claude-plugins-official</0> (puoi rimuoverlo). Di un plugin Homun importa SOLO skill e server MCP; hook, bin/ e comandi non girano mai."
 
@@ -3194,6 +3428,10 @@ msgstr "Politica predefinita"
 #: src/renderer/src/components/Settings.tsx
 msgid "poll di un connettore"
 msgstr "poll di un connettore"
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Posta e calendario"
+msgstr "Posta e calendario"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "preciso"
@@ -3311,6 +3549,10 @@ msgstr "prossima {0}"
 msgid "prossima: {0}"
 msgstr "prossima: {0}"
 
+#: src/renderer/src/components/Settings.tsx
+msgid "Prova"
+msgstr "Prova"
+
 #: src/renderer/src/components/LibraryPanel.tsx
 msgid "Proveniente da dati esterni"
 msgstr "Proveniente da dati esterni"
@@ -3321,16 +3563,8 @@ msgid "Provider"
 msgstr "Provider"
 
 #: src/renderer/src/components/Settings.tsx
-msgid "provider del revisore…"
-msgstr "provider del revisore…"
-
-#: src/renderer/src/components/Settings.tsx
 msgid "provider disattivato"
 msgstr "provider disattivato"
-
-#: src/renderer/src/components/Settings.tsx
-msgid "Provider locali e cloud — chiunque parli OpenAI-compatible funziona."
-msgstr "Provider locali e cloud — chiunque parli OpenAI-compatible funziona."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -3343,13 +3577,21 @@ msgid "rpc.providerNotFound"
 msgstr "Provider non trovato"
 
 #: src/renderer/src/components/Settings.tsx
-msgid "Punto di contatto principale dell'utente: coordina gli altri bot"
-msgstr "Punto di contatto principale dell'utente: coordina gli altri bot"
+msgid "Provo la chiave…"
+msgstr "Provo la chiave…"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Provo…"
+msgstr "Provo…"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "onboarding.mainBotDescription"
 msgstr "Punto di contatto principale: coordina gli altri bot."
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Qualsiasi servizio compatibile OpenAI"
+msgstr "Qualsiasi servizio compatibile OpenAI"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Quando arriva un'e-mail che corrisponde a… (query)"
@@ -3401,6 +3643,10 @@ msgid "Questi modelli non hanno un prezzo di catalogo: scrivi quello che paghi (
 msgstr "Questi modelli non hanno un prezzo di catalogo: scrivi quello che paghi (dollari per milione di token). Vale per le chiamate da qui in avanti, lo storico non cambia."
 
 #: src/renderer/src/components/Settings.tsx
+msgid "questo mese"
+msgstr "questo mese"
+
+#: src/renderer/src/components/Settings.tsx
 msgid "Questo mese"
 msgstr "Questo mese"
 
@@ -3411,6 +3657,10 @@ msgstr "Questo modello non vede le immagini"
 #: src/renderer/src/components/Settings.tsx
 msgid "quick ask"
 msgstr "quick ask"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "ragiona"
+msgstr "ragiona"
 
 #. placeholder {0}: levelLabel ? i18n.t(levelLabel) : (agent.thinking ?? 'default')
 #: src/renderer/src/components/Chat.tsx
@@ -3424,6 +3674,7 @@ msgstr "ragionamento"
 
 #: src/renderer/src/components/Chat.tsx
 #: src/renderer/src/components/RightPanel.tsx
+#: src/renderer/src/components/Settings.tsx
 msgid "Ragionamento"
 msgstr "Ragionamento"
 
@@ -3432,8 +3683,8 @@ msgid "Regola aggiunta"
 msgstr "Regola aggiunta"
 
 #: src/renderer/src/components/Settings.tsx
-msgid "Regole per tool: consenti sempre / chiedi / blocca. \"Consenti sempre\" nelle card salva una standing grant."
-msgstr "Regole per tool: consenti sempre / chiedi / blocca. \"Consenti sempre\" nelle card salva una standing grant."
+msgid "Regole per tool: consenti sempre / chiedi / blocca. «Consenti sempre» nelle card salva una standing grant."
+msgstr "Regole per tool: consenti sempre / chiedi / blocca. «Consenti sempre» nelle card salva una standing grant."
 
 #. placeholder {0}: message.runtime.host
 #. placeholder {0}: sv.runtimeDetail ?? ''
@@ -3465,8 +3716,8 @@ msgid "review"
 msgstr "review"
 
 #: src/renderer/src/components/Settings.tsx
-msgid "Revisione automatica"
-msgstr "Revisione automatica"
+msgid "Revisione delle approvazioni"
+msgstr "Revisione delle approvazioni"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -3524,21 +3775,23 @@ msgstr "Richiesta non valida (state errato): riprova la connessione da Homun."
 msgid "richiudi"
 msgstr "richiudi"
 
-#. placeholder {0}: 'error' in r ? r.error ?? '' : ''
-#: src/renderer/src/components/Settings.tsx
-msgid "riconnessione non riuscita: {0}"
-msgstr "riconnessione non riuscita: {0}"
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Ricollega"
+msgstr "Ricollega"
 
-#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "riconnessione non riuscita"
+msgstr "riconnessione non riuscita"
+
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "riconnesso"
 msgstr "riconnesso"
 
-#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "riconnetti"
 msgstr "riconnetti"
 
 #: src/renderer/src/components/ConnectorCard.tsx
-#: src/renderer/src/components/Settings.tsx
 msgid "Riconnetti"
 msgstr "Riconnetti"
 
@@ -3564,7 +3817,7 @@ msgstr "Rifiuta"
 msgid "Rifiutato"
 msgstr "Rifiutato"
 
-#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "rimuovi"
 msgstr "rimuovi"
 
@@ -3584,16 +3837,13 @@ msgstr "riprendi"
 #: src/renderer/src/components/ComputerActivity.tsx
 #: src/renderer/src/components/ComputerFiles.tsx
 #: src/renderer/src/components/ComputerTerminal.tsx
+#: src/renderer/src/components/Settings.tsx
 msgid "Riprova"
 msgstr "Riprova"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "riserva"
 msgstr "riserva"
-
-#: src/renderer/src/components/Settings.tsx
-msgid "Riserve"
-msgstr "Riserve"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "riserve…"
@@ -3622,6 +3872,11 @@ msgstr "risultato"
 msgid "Robottino"
 msgstr "Robottino"
 
+#: src/renderer/src/components/ActivityPanel.tsx
+msgid "routine"
+msgstr "routine"
+
+#: src/renderer/src/components/ActivityPanel.tsx
 #: src/renderer/src/components/RightPanel.tsx
 #: src/renderer/src/components/Settings.tsx
 msgid "Routine"
@@ -3684,10 +3939,11 @@ msgstr "Ruolo"
 msgid "sabato"
 msgstr "sabato"
 
-#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "salva"
 msgstr "salva"
 
+#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/BotDialogs.tsx
 #: src/renderer/src/components/DraftCard.tsx
 #: src/renderer/src/components/LibraryCards.tsx
@@ -3702,7 +3958,7 @@ msgstr "Salva"
 msgid "Salva chiave"
 msgstr "Salva chiave"
 
-#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "salva cifrato"
 msgstr "salva cifrato"
 
@@ -3744,10 +4000,6 @@ msgstr "scaduto"
 #: src/renderer/src/components/LibraryCards.tsx
 msgid "Scaduto"
 msgstr "Scaduto"
-
-#: src/renderer/src/components/Settings.tsx
-msgid "Scansiona locale (Ollama / LM Studio)"
-msgstr "Scansiona locale (Ollama / LM Studio)"
 
 #: src/renderer/src/components/ComputerFiles.tsx
 msgid "Scarica sul Mac"
@@ -3835,6 +4087,10 @@ msgstr "Schermo"
 msgid "Schermo del bot"
 msgstr "Schermo del bot"
 
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Scollega"
+msgstr "Scollega"
+
 #: src/renderer/src/lib/activity.ts
 msgid "scrive {file}…"
 msgstr "scrive {file}…"
@@ -3888,7 +4144,15 @@ msgstr "Se il modello di un bot non risponde o raggiunge un limite, il turno pas
 msgid "kick.9"
 msgstr "Se il template ha skill, creale con update_skill (name, description, content): ogni scrittura passa dalla card di approvazione dell’utente."
 
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Se ne vuoi una nuova, chiedila a un bot in chat."
+msgstr "Se ne vuoi una nuova, chiedila a un bot in chat."
+
 #: src/renderer/src/components/Settings.tsx
+msgid "Se non risponde"
+msgstr "Se non risponde"
+
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "Se ospiti un documento dei metadati del client (CIMD, es. su GitHub Pages, https e con percorso), incollalo qui; vuoto = registrazione dinamica (DCR)."
 msgstr "Se ospiti un documento dei metadati del client (CIMD, es. su GitHub Pages, https e con percorso), incollalo qui; vuoto = registrazione dinamica (DCR)."
 
@@ -3942,9 +4206,9 @@ msgstr "Serve il nome della squadra."
 msgid "rpc.needsWindow"
 msgstr "serve la finestra di Homun per autorizzare"
 
-#: src/renderer/src/components/Settings.tsx
-msgid "Serve un client OAuth tuo (tipo \"Desktop app\"):"
-msgstr "Serve un client OAuth tuo (tipo \"Desktop app\"):"
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Serve un client OAuth tuo (tipo «Desktop app»):"
+msgstr "Serve un client OAuth tuo (tipo «Desktop app»):"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -3956,17 +4220,17 @@ msgstr "serve un nome per il gateway"
 msgid "totp.notTotpUri"
 msgstr "serve un URI otpauth:// (TOTP)"
 
-#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "serve: {keys} (header)"
 msgstr "serve: {keys} (header)"
 
-#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "serve: {keys} (impostazione del plugin)"
 msgstr "serve: {keys} (impostazione del plugin)"
 
-#: src/renderer/src/components/Settings.tsx
-msgid "serve: {keys} (variabile d’ambiente)"
-msgstr "serve: {keys} (variabile d’ambiente)"
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "serve: {keys} (variabile d'ambiente)"
+msgstr "serve: {keys} (variabile d'ambiente)"
 
 #: src/renderer/src/components/ConnectorCards13.tsx
 msgid "serve: {needs}"
@@ -3987,13 +4251,17 @@ msgstr "Server \"{name}\" NON aggiunto: {error}"
 msgid "rpc.serverNotFound"
 msgstr "server {id} non trovato"
 
-#: src/renderer/src/components/Settings.tsx
-msgid "Server del registro pubblico e plugin installati. Chiavi, header e variabili stanno cifrati: si compilano qui, MAI in chat."
-msgstr "Server del registro pubblico e plugin installati. Chiavi, header e variabili stanno cifrati: si compilano qui, MAI in chat."
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Server del registro pubblico. Chiavi, header e variabili stanno cifrati: si compilano qui, MAI in chat."
+msgstr "Server del registro pubblico. Chiavi, header e variabili stanno cifrati: si compilano qui, MAI in chat."
 
-#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "Server MCP manuali (stdio o HTTP, con header/bearer salvati cifrati)."
 msgstr "Server MCP manuali (stdio o HTTP, con header/bearer salvati cifrati)."
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Server MCP personalizzato"
+msgstr "Server MCP personalizzato"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -4057,6 +4325,10 @@ msgstr "si installa solo nel computer dei bot (modalità docker)"
 msgid "si installa solo nel computer dei bot (modalità docker)"
 msgstr "si installa solo nel computer dei bot (modalità docker)"
 
+#: src/renderer/src/components/Settings.tsx
+msgid "Si passa da solo alla riserva"
+msgstr "Si passa da solo alla riserva"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "rpc.filesNotAFile"
@@ -4067,9 +4339,18 @@ msgstr "Si può scaricare solo un file, non una cartella."
 msgid "Sistema"
 msgstr "Sistema"
 
+#: src/renderer/src/components/Settings.tsx
+msgid "sk-…"
+msgstr "sk-…"
+
+#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Skill"
 msgstr "Skill"
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Skill dei bot"
+msgstr "Skill dei bot"
 
 #. placeholder {0}: message.skills.join(', ')
 #: src/renderer/src/components/ConnectorCards13.tsx
@@ -4154,13 +4435,21 @@ msgstr "Sta scrivendo…"
 msgid "Stai controllando lo schermo di {0}"
 msgstr "Stai controllando lo schermo di {0}"
 
-#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "stdio (comando locale)"
 msgstr "stdio (comando locale)"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "suggerimento routine"
 msgstr "suggerimento routine"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Sul tuo Mac"
+msgstr "Sul tuo Mac"
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Sviluppo"
+msgstr "Sviluppo"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Svuota entrambi i campi per togliere un prezzo."
@@ -4203,13 +4492,9 @@ msgstr "template sconosciuto: {id}"
 msgid "Terminale"
 msgstr "Terminale"
 
-#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "test"
 msgstr "test"
-
-#: src/renderer/src/components/Settings.tsx
-msgid "test…"
-msgstr "test…"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -4222,6 +4507,7 @@ msgstr "Testo mancante"
 msgid "group.hourlyCap"
 msgstr "Tetto orario raggiunto (40 messaggi di bot in un’ora): i turni del gruppo riprendono a breve."
 
+#: src/renderer/src/components/ActivityPanel.tsx
 #: src/renderer/src/components/Sidebar.tsx
 msgid "ti aspetta"
 msgstr "ti aspetta"
@@ -4261,7 +4547,7 @@ msgstr "token scaduto"
 msgid "conn.tokenExpired"
 msgstr "token scaduto: riconnetti"
 
-#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "tool"
 msgstr "tool"
 
@@ -4277,6 +4563,11 @@ msgstr "tool (mcp__…__…)"
 #: src/renderer/src/components/Settings.tsx
 msgid "tool scelto dal connettore: {chosen}"
 msgstr "tool scelto dal connettore: {chosen}"
+
+#: src/renderer/src/components/ActivityPanel.tsx
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "Torna alla chat"
+msgstr "Torna alla chat"
 
 #: src/renderer/src/components/LibraryPanel.tsx
 msgid "torna alla lista"
@@ -4311,6 +4602,11 @@ msgstr "Troppi terminali aperti: al massimo 3 per bot e 8 in tutto."
 #: src/renderer/src/components/ComputerFiles.tsx
 msgid "Troppo grande per l'anteprima ({0})"
 msgstr "Troppo grande per l'anteprima ({0})"
+
+#. placeholder {0}: modelsCount ?? '…'
+#: src/renderer/src/components/Settings.tsx
+msgid "Trovato da solo · {0} modelli · gratis e privato"
+msgstr "Trovato da solo · {0} modelli · gratis e privato"
 
 #. placeholder {0}: e.content
 #: src/renderer/src/sidebar-utils.ts
@@ -4361,10 +4657,15 @@ msgstr "Turno ripreso dopo un’interruzione."
 msgid "notice.turnEndSuperseded"
 msgstr "Turno sostituito da un nuovo messaggio"
 
-#: src/renderer/src/components/LibraryPanel.tsx
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Tutte"
+msgstr "Tutte"
+
+#: src/renderer/src/components/ActivityPanel.tsx
 msgid "Tutti"
 msgstr "Tutti"
 
+#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/LibraryPanel.tsx
 msgid "Tutti i bot"
 msgstr "Tutti i bot"
@@ -4373,6 +4674,10 @@ msgstr "Tutti i bot"
 #: src/shared/ui-messages.ts
 msgid "cron.everyDay"
 msgstr "tutti i giorni"
+
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "Tutti i tipi"
+msgstr "Tutti i tipi"
 
 #: src/renderer/src/components/ComputerActivity.tsx
 msgid "ucciso"
@@ -4400,6 +4705,10 @@ msgid "ultimo errore: {0}{1}"
 msgstr "ultimo errore: {0}{1}"
 
 #: src/renderer/src/components/Settings.tsx
+msgid "Un altro server"
+msgstr "Un altro server"
+
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "Un gateway custodisce l'accesso a tutte le app che colleghi lì: è un servizio di terzi"
 msgstr "Un gateway custodisce l'accesso a tutte le app che colleghi lì: è un servizio di terzi"
 
@@ -4407,6 +4716,10 @@ msgstr "Un gateway custodisce l'accesso a tutte le app che colleghi lì: è un s
 #: src/shared/ui-messages.ts
 msgid "install.gatewayWarning"
 msgstr "Un gateway custodisce l’accesso a tutte le app che colleghi lì: è un servizio di terzi"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Un modello piccolo che decide le richieste semplici"
+msgstr "Un modello piccolo che decide le richieste semplici"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Un modello piccolo rivede le azioni che chiedono approvazione secondo queste regole e può lasciarle passare da solo. Sta dopo il gate dei permessi e non cambia mai i divieti: le azioni che modificano il comportamento futuro del bot, i comandi che eseguono altri comandi e i turni aperti da altri bot o da eventi esterni chiedono comunque."
@@ -4440,11 +4753,11 @@ msgstr "URI otpauth di tipo \"{type}\" non supportato: serve totp"
 msgid "totp.badUri"
 msgstr "URI otpauth non valido: copia il segreto base32 mostrato sotto il QR"
 
-#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "URL (es. http://localhost:3001/mcp)"
 msgstr "URL (es. http://localhost:3001/mcp)"
 
-#: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "URL https del server MCP"
 msgstr "URL https del server MCP"
 
@@ -4478,6 +4791,15 @@ msgstr "uscita $/M"
 msgid "Uso e costi"
 msgstr "Uso e costi"
 
+#: src/renderer/src/components/Settings.tsx
+msgid "Uso e costi ›"
+msgstr "Uso e costi ›"
+
+#. placeholder {0}: fmtUsd(monthCost)
+#: src/renderer/src/components/Settings.tsx
+msgid "Uso e costi: {0} questo mese ›"
+msgstr "Uso e costi: {0} questo mese ›"
+
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "utente (condivisa)"
 msgstr "utente (condivisa)"
@@ -4491,7 +4813,6 @@ msgid "Vale solo per i turni di questa routine; il resto del bot non cambia."
 msgstr "Vale solo per i turni di questa routine; il resto del bot non cambia."
 
 #: src/renderer/src/components/LibraryCards.tsx
-#: src/renderer/src/components/Settings.tsx
 msgid "Valore"
 msgstr "Valore"
 
@@ -4505,8 +4826,12 @@ msgid "variabili d'ambiente: {0} (le compili tu nelle Impostazioni)"
 msgstr "variabili d'ambiente: {0} (le compili tu nelle Impostazioni)"
 
 #: src/renderer/src/components/Settings.tsx
-msgid "Vault credenziali (AES-256-GCM, chiave master in safeStorage): il bot vede i nomi col tool <0>list-credentials</0> e li usa scrivendo <1>{SECRET_TEMPLATE}</1> nei comandi — i valori non compaiono mai nel transcript."
-msgstr "Vault credenziali (AES-256-GCM, chiave master in safeStorage): il bot vede i nomi col tool <0>list-credentials</0> e li usa scrivendo <1>{SECRET_TEMPLATE}</1> nei comandi — i valori non compaiono mai nel transcript."
+msgid "vede"
+msgstr "vede"
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Vedi tutte"
+msgstr "Vedi tutte"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "venerdì"
@@ -4525,6 +4850,10 @@ msgstr "verso le {time} (±15 min)"
 msgid "visione"
 msgstr "visione"
 
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "Vista"
+msgstr "Vista"
+
 #: src/renderer/src/components/BotScreen.tsx
 msgid "Vista dal vivo del computer del bot"
 msgstr "Vista dal vivo del computer del bot"
@@ -4537,6 +4866,10 @@ msgstr "voce incoerente"
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "rpc.itemNotFound"
+msgstr "voce non trovata"
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "voce non trovata"
 msgstr "voce non trovata"
 
 #: src/renderer/src/components/Settings.tsx

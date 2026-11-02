@@ -91,7 +91,9 @@ function ProfileTab({ onAvatar }: { onAvatar(): void }) {
   const { i18n } = useLingui()
   const activeId = useStore((s) => s.activeId)
   const agents = useStore((s) => s.agents)
+  const providers = useStore((s) => s.providers)
   const mainAgentId = useStore((s) => s.mainAgentId)
+  const mainModel = useStore((s) => s.mainModel)
   const groups = useStore((s) => s.groups)
   const tasks = useStore((s) => s.tasks)
   const openTask = useStore((s) => s.openTask)
@@ -111,12 +113,20 @@ function ProfileTab({ onAvatar }: { onAvatar(): void }) {
   const effectiveMain = mainAgentId ?? agents[0]?.id ?? null
   const coordinates = groups.filter((g) => g.coordinatorId === agent.id)
   const recent = tasks.filter((tk) => tk.agentId === agent.id).slice(-5).reverse()
+  // fase 16c (C3.3): il Profilo mostra il modello RISOLTO («Come gli altri»)
+  const resolved = agent.providerId && agent.model
+    ? { providerId: agent.providerId, model: agent.model }
+    : mainModel
+      ? { providerId: mainModel.providerId, model: mainModel.model }
+      : null
   return (
     <div className="space-y-2">
       <p className="text-sm leading-relaxed text-foreground/80">{agent.description || <Trans>Nessuna descrizione.</Trans>}</p>
       <div className="mt-2">
         <KvRow label={i18n.t(msg`Modello`)}>
-          {agent.providerId ? `${agent.providerId} · ${agent.model ?? ''}` : <span className="text-muted-foreground"><Trans>da scegliere</Trans></span>}
+          {resolved
+            ? `${providers.find((p) => p.id === resolved.providerId)?.name ?? resolved.providerId} · ${resolved.model}`
+            : <span className="text-muted-foreground"><Trans>da scegliere</Trans></span>}
         </KvRow>
         <KvRow label={i18n.t(msg`Memoria`)}>
           <button className="transition hover:text-foreground" onClick={() => { setMemoryOpen(true); setSkillsOpen(false) }}>
@@ -220,6 +230,7 @@ function AdvancedTab() {
   const activeId = useStore((s) => s.activeId)
   const agents = useStore((s) => s.agents)
   const providers = useStore((s) => s.providers)
+  const mainModel = useStore((s) => s.mainModel)
   const mainAgentId = useStore((s) => s.mainAgentId)
   const setMainAgent = useStore((s) => s.setMainAgent)
   const agent = agents.find((a) => a.id === activeId)
@@ -242,7 +253,14 @@ function AdvancedTab() {
   }, [providers, models])
   if (!agent) return null
   const effectiveMain = mainAgentId ?? agents[0]?.id ?? null
-  const chosen = (models[agent.providerId ?? ''] ?? []).find((m) => m.id === agent.model)
+  const followsMain = !agent.providerId && !agent.model
+  // fase 16c (C3.3): il modello risolto decide i livelli di ragionamento offerti
+  const resolved = agent.providerId && agent.model
+    ? { providerId: agent.providerId, model: agent.model }
+    : mainModel
+      ? { providerId: mainModel.providerId, model: mainModel.model }
+      : null
+  const chosen = resolved ? (models[resolved.providerId] ?? []).find((m) => m.id === resolved.model) : undefined
   const levels = chosen?.thinkingLevels ?? []
   const patch = (p: Partial<Agent>): void => {
     void api.updateAgent(agent.id, p).catch((e) => console.error('updateAgent:', e instanceof Error ? e.message : e))
@@ -271,12 +289,17 @@ function AdvancedTab() {
 
       <SmallTitle><Trans>Modello e ragionamento</Trans></SmallTitle>
       <div className="flex gap-2">
+        {/* fase 16c (C3.3): in testa «Come gli altri (modello principale)»,
+            che salva null/null; poi l'elenco dei modelli per provider */}
         <select
           className="min-w-0 flex-1 rounded-[10px] bg-muted px-2.5 py-2 text-sm outline-none"
-          value={agent.providerId ?? ''}
-          onChange={(e) => patch({ providerId: e.target.value || null, model: null })}
+          value={followsMain ? '__main__' : agent.providerId ?? ''}
+          onChange={(e) => patch(e.target.value === '__main__' ? { providerId: null, model: null } : { providerId: e.target.value || null, model: null })}
           aria-label={t`Provider`}
         >
+          {mainModel && mainModel.providerId && mainModel.model && (
+            <option value="__main__">{t`Come gli altri (${mainModel.model})`}</option>
+          )}
           <option value="">{t`— provider —`}</option>
           {providers.map((p) => (
             <option key={p.id} value={p.id}>{p.name}</option>
@@ -286,7 +309,7 @@ function AdvancedTab() {
           <ModelPicker
             models={models[agent.providerId ?? ''] ?? []}
             value={agent.model}
-            placeholder={t`— modello —`}
+            placeholder={followsMain ? (mainModel ? mainModel.model : t`— modello —`) : t`— modello —`}
             disabled={!agent.providerId}
             onChange={(m) => patch({ model: m })}
           />

@@ -144,6 +144,15 @@ export function makeJobRunner(db: DatabaseSync, runTurnFn: RunTurnFn = runTurn) 
       return
     }
     const p = job.payload as { routineId: number; title: string; prompt: string; event?: TriggerEventPayload }
+    // fase 16c (C5): la riga di routine_runs si apre quando il job parte e si
+    // chiude con l'esito — il feed Attività legge da lì, non dai job
+    const { startRoutineRun, endRoutineRun, routineFailReason } = await import('../main/store/routine-runs')
+    const runId = startRoutineRun(db, {
+      routineId: p.routineId,
+      agentId: job.agent_id,
+      title: p.title,
+      now: Date.now()
+    })
     // fase 18b (H7): il modello PROPRIo della routine si legge dalla riga
     // ALL'ESECUZIONE (non all'accodamento: la routine può cambiare in coda).
     // Vale SOLO per questo turno; le continuazioni di task usano il bot.
@@ -183,11 +192,19 @@ export function makeJobRunner(db: DatabaseSync, runTurnFn: RunTurnFn = runTurn) 
           ...(p.event.item ? { item: p.event.item, withItem: 'yes' } : { withItem: 'no' })
         })
         : null
-    await runTurnFn(job.agent_id, text, emit, undefined, {
-      source: 'routine', title: p.title, ...opts, onTurnEntry,
-      ...(p.event ? { externalEvent: true } : {}),
-      ...(openingUi ? { extraMeta: { ui: openingUi } } : {}),
-      ...(route ? { route } : {})
-    })
+    try {
+      await runTurnFn(job.agent_id, text, emit, undefined, {
+        source: 'routine', title: p.title, ...opts, onTurnEntry,
+        ...(p.event ? { externalEvent: true } : {}),
+        ...(openingUi ? { extraMeta: { ui: openingUi } } : {}),
+        ...(route ? { route } : {})
+      })
+      endRoutineRun(db, runId, 'ok', null, Date.now())
+    } catch (e) {
+      // il motivo è un CODICE: mai il testo grezzo del provider nello storico
+      const reason = routineFailReason(e)
+      endRoutineRun(db, runId, reason === 'cancelled' ? 'cancelled' : 'failed', reason, Date.now())
+      throw e
+    }
   }
 }

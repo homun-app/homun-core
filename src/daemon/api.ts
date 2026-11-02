@@ -34,7 +34,7 @@ import type { JobWorker } from './worker'
 import type { ConnectorsManager } from '../main/connectors'
 import type { Presence } from './presence'
 import type { Onboarding } from './onboarding'
-import type { SandbotEvent, SendMessagePayload, McpServerInfo, McpServerSecret, RoutineInfo, RoutineTrigger, AutoReviewSettings, ModelInfo, ModelPriceMap, ThinkingSetting } from '../shared/types'
+import type { SandbotEvent, SendMessagePayload, McpServerInfo, McpServerSecret, RoutineInfo, RoutineTrigger, AutoReviewSettings, ModelInfo, ModelPriceMap, ThinkingSetting, MainModel, ProviderKind } from '../shared/types'
 // fase 18b (K3): la lettura /api/show condivisa col check dei tool e col loop
 import { readOllamaCapabilities } from '../main/agent/live-models'
 import { DEFAULT_AUTO_REVIEW } from '../shared/types'
@@ -219,19 +219,22 @@ export function buildApiMethods(
       const { pickLang } = await import('../shared/localized')
       const kickLang = currentUserLanguage()
       const a = store.createAgent(pickLang(t.name, kickLang), pickLang(t.description, kickLang))
-      // fase 9 (punto 1): al bot da template vanno il provider attivo e il suo
-      // modello PREDEFINITO (con capability "tools" verificata)
-      const { assignDefaultModel } = await import('../main/agent/model-defaults')
+      // fase 16c (C3.3/C7): con models.main il bot da template nasce «Come gli
+      // altri» (null/null: seguirà il principale); senza, il turno di sempre —
+      // provider attivo e modello PREDEFINITO (capability "tools" verificata)
+      const { assignDefaultModel, newAgentModel } = await import('../main/agent/model-defaults')
       type ModelDefaultsMap = import('../main/agent/model-defaults').ModelDefaultsMap
-      const assignment = await assignDefaultModel({
-        listProviders: () => store.listProviders(),
-        getOverrides: () => store.getSetting<ModelDefaultsMap>('providers.modelDefaults', {}),
-        supportsTools: (p, model) => {
-          const full = providers.getProvider(p.id)
-          return full ? providers.modelSupportsTools(full, model) : Promise.resolve({ ok: false, checked: false, error: uiText(UI.rpcProviderNotFoundLower) })
-        }
-      })
-      if (assignment) store.updateAgent(a.id, { providerId: assignment.providerId, model: assignment.model })
+      if (newAgentModel(store.getSetting<MainModel | null>('models.main', null)) === 'assign-default') {
+        const assignment = await assignDefaultModel({
+          listProviders: () => store.listProviders(),
+          getOverrides: () => store.getSetting<ModelDefaultsMap>('providers.modelDefaults', {}),
+          supportsTools: (p, model) => {
+            const full = providers.getProvider(p.id)
+            return full ? providers.modelSupportsTools(full, model) : Promise.resolve({ ok: false, checked: false, error: uiText(UI.rpcProviderNotFoundLower) })
+          }
+        })
+        if (assignment) store.updateAgent(a.id, { providerId: assignment.providerId, model: assignment.model })
+      }
       // il kickstart parte come job della coda: un riavvio a metà lo riprende
       // come gli altri turni (payload.entryId, fase 2)
       const now = Date.now()
@@ -307,6 +310,48 @@ export function buildApiMethods(
     'activity:output': async ([agentId, id]) => {
       const { computerActivityOutput } = await import('../main/agent/computer-activity')
       return { text: await computerActivityOutput(String(agentId ?? ''), String(id ?? '')) }
+    },
+
+    // ---- fase 16c (C5): l'Attività globale ----
+    /**
+     * I dati del feed Attività: task di tutti i bot, esecuzioni delle routine
+     * (routine_runs) e i bot che aspettano te. L'ordine, i filtri e la ricerca
+     * li fa la funzione pura activityRows del renderer — qui solo i dati.
+     */
+    'activity:global': async ([limit]) => {
+      const { listRoutineRuns } = await import('../main/store/routine-runs')
+      const cap = typeof limit === 'number' && limit > 0 ? Math.min(Math.floor(limit), 500) : 200
+      const tasks = store.listTasks().slice(0, cap).map((t) => ({
+        id: t.id,
+        agentId: t.agent_id,
+        title: t.title,
+        status: t.status as 'working' | 'needs_input' | 'done' | 'failed' | 'cancelled',
+        automatic: (t.automatic ?? 0) === 1 ? (1 as const) : (0 as const),
+        createdAt: t.created_at,
+        updatedAt: t.updated_at,
+        summary: t.summary ?? null
+      }))
+      const runs = listRoutineRuns(db(), Date.now() - 90 * 86_400_000, cap).map((r) => ({
+        id: r.id,
+        routineId: r.routine_id,
+        agentId: r.agent_id,
+        title: r.title,
+        startedAt: r.started_at,
+        endedAt: r.ended_at,
+        outcome: r.outcome,
+        reason: r.reason
+      }))
+      // i bot che aspettano te: approvazione o card in sospeso
+      const waiting = store.listAgents().filter((a) => a.status === 'paused-for-approval').map((a) => a.id)
+      return { tasks, runs, waiting }
+    },
+
+    // ---- fase 16c (C4): la ricerca del registro per la finestra Collega app ----
+    'connectors:search-registry': async ([query]) => {
+      const q = String(query ?? '').trim()
+      if (q.length < 2) return []
+      const { registrySearchRows } = await import('../main/connectors/apps-search')
+      return registrySearchRows(q)
     },
 
     // ---- fase 3: risposta ai widget ask_user ----
@@ -418,8 +463,11 @@ export function buildApiMethods(
       // fase 17b (A2): la domanda della quick ask è testo di una persona
       noteHumanText(String(question ?? ''))
       const agent = store.getAgent(agentId as string)
-      if (!agent?.providerId || !agent.model) throw uiError(UI.rpcConfigureProvider)
-      const provider = providers.getProvider(agent.providerId)
+      // fase 16c (C3.3): il modello risolto («Come gli altri» compreso)
+      const { resolveAgentModel } = await import('../main/agent/model-defaults')
+      const resolved = agent ? resolveAgentModel(agent, store.getSetting<MainModel | null>('models.main', null)) : null
+      if (!resolved) throw uiError(UI.rpcConfigureProvider)
+      const provider = providers.getProvider(resolved.providerId)
       if (!provider) throw uiError(UI.rpcProviderNotFound)
       // fase 3: ciò che il bot ha DETTO all'utente sono le send-message (il
       // testo libero è ragionamento interno e non entra nel contesto)
@@ -430,7 +478,7 @@ export function buildApiMethods(
         .join('\n')
       const prompt = secondaryPrompts.quickAsk(context, question as string, currentUserLanguage())
       const controller = new AbortController()
-      const stream = llmStream(provider, agent.model, [{ role: 'user', content: prompt }], [], controller.signal)
+      const stream = llmStream(provider, resolved.model, [{ role: 'user', content: prompt }], [], controller.signal)
       let acc = ''
       let usage: import('../main/agent/llm').LlmChunk['usage'] | undefined
       for await (const ch of stream) {
@@ -443,7 +491,7 @@ export function buildApiMethods(
           agentId: agentId as string,
           providerId: provider.id,
           providerKind: provider.kind,
-          model: agent.model,
+          model: resolved.model,
           source: 'quick-ask',
           input: usage.input,
           output: usage.output,
@@ -1293,22 +1341,46 @@ export function buildApiMethods(
     },
 
     // ---- provider ----
-    'providers:list': () => store.listProviders(),
-    'providers:save': ([p]) => {
-      const ps = store.listProviders().filter((x) => x.id !== (p as { id: string }).id)
-      ps.push(p as Parameters<typeof store.saveProviders>[0][number])
-      store.saveProviders(ps)
+    // fase 16c (C1): la chiave NON torna mai al renderer — apiKey sempre '',
+    // hasKey e keyHint (ultimi 4) al posto
+    'providers:list': () => providers.publicProviders(),
+    'providers:save': async ([p]) => {
+      await providers.saveProvider(p as import('../main/agent/providers').ProviderSaveInput)
       emit({ type: 'agents' })
+      // fase 16c (C3.3): il PRIMO provider collegato diventa il modello
+      // principale («Come gli altri») se models.main non c'è ancora
+      const { assignFirstMainModel } = await import('../main/agent/model-defaults')
+      await assignFirstMainModel({
+        getMain: () => store.getSetting<MainModel | null>('models.main', null),
+        setMain: (m) => store.setSetting('models.main', m),
+        savedProvider: () => providers.getProvider((p as { id: string }).id) ?? null,
+        getOverrides: () => store.getSetting<import('../main/agent/model-defaults').ModelDefaultsMap>('providers.modelDefaults', {}),
+        supportsTools: (prov, model) => {
+          const full = providers.getProvider(prov.id)
+          return full ? providers.modelSupportsTools(full, model) : Promise.resolve({ ok: false, checked: false })
+        }
+      })
       // fase 7: l'onboarding fermo sul provider riprende appena ce n'è uno
       if (opts.onboarding) void opts.onboarding.resume().catch(() => undefined)
     },
     'providers:delete': ([id]) => {
-      store.saveProviders(store.listProviders().filter((x) => x.id !== id))
+      // fase 16c (C3.3): se era il provider del modello principale, models.main si azzera
+      providers.deleteProvider(id as string)
+      emit({ type: 'agents' })
     },
     'providers:discover': () => providers.discoverProviders(),
     'providers:test': ([id]) => {
       const p = providers.getProvider(id as string)
       return p ? providers.testProvider(p) : { ok: false, error: uiText(UI.rpcProviderNotFoundLower) }
+    },
+    // fase 16c (C3.4): prova una configurazione NON salvata. La chiave va
+    // SOLO in questa direzione: non si salva, non si logga, non torna indietro
+    'providers:probe': ([config]) => {
+      const c = (config ?? {}) as { kind?: string; baseUrl?: string; apiKey?: string }
+      const kind = (typeof c.kind === 'string' && c.kind ? c.kind : 'openai-compatible') as ProviderKind
+      const baseUrl = String(c.baseUrl ?? '').trim()
+      if (!/^https?:\/\//.test(baseUrl)) return { ok: false, error: 'error' }
+      return providers.probeProvider({ kind, baseUrl, apiKey: String(c.apiKey ?? '') })
     },
     'models:list': async ([providerId]) => {
       const p = providers.getProvider(providerId as string)

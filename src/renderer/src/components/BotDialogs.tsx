@@ -79,95 +79,166 @@ function uiLang(): 'it' | 'en' {
   return i18n.locale === 'en' ? 'en' : 'it'
 }
 
+/**
+ * Fase 16c (C7, tavola 7): «Nuovo bot» — la mascotte grande SOSPESA (nessun
+ * riquadro, solo l'ombra ovale), le cinque famiglie a pillola, i colori, il
+ * campo Nome e «Cosa farà?»: i template che esistono (al massimo 4 visibili
+ * più «Altri ▾») più «Descrivilo tu», con il campo che diventa la descrizione
+ * del bot (agents:create — NESSUN messaggio automatico: il kickstart esiste
+ * solo per i template). Il bottone «Crea <Nome>» è attivo con un nome. Il
+ * modello: il bot nasce «Come gli altri» se models.main c'è (C3.3).
+ */
 export function NewBotDialog({ onClose }: { onClose: () => void }) {
-  const { t } = useLingui()
-  const createAgent = useStore((s) => s.createAgent)
+  const { t, i18n } = useLingui()
   const select = useStore((s) => s.select)
   const [name, setName] = useState('')
   const [family, setFamily] = useState<BotFamily>('h-creature')
   const [color, setColor] = useState<BotColor>('c1')
   const [busy, setBusy] = useState(false)
-  // i template esistenti (come nella scheda Bot delle Impostazioni)
+  const [err, setErr] = useState('')
+  // i template che esistono (nessuno nuovo in questa fase)
   const [templates, setTemplates] = useState<TemplateInfo[]>([])
-  const [showTemplates, setShowTemplates] = useState(false)
+  const [showAllTemplates, setShowAllTemplates] = useState(false)
+  // «Cosa farà?» — un template scelto, oppure «Descrivilo tu»
+  const [chosenTemplate, setChosenTemplate] = useState<TemplateInfo | null>(null)
+  const [describe, setDescribe] = useState(false)
+  const [description, setDescription] = useState('')
   useEffect(() => {
     api.listTemplates().then(setTemplates).catch(() => setTemplates([]))
   }, [])
   const c = `var(--bot-${color})`
 
+  const create = async (): Promise<void> => {
+    setBusy(true)
+    setErr('')
+    try {
+      if (chosenTemplate) {
+        // il template crea nome/descrizione/kickstart; nome e aspetto scelti
+        // qui si applicano DOPO (updateAgent)
+        const a = await api.createAgentFromTemplate(chosenTemplate.id)
+        await api.updateAgent(a.id, { ...(name.trim() ? { name: name.trim() } : {}), avatar: { family, color } })
+        await select(a.id)
+      } else {
+        // «Descrivilo tu»: la descrizione è il testo del campo; NESSUN
+        // messaggio automatico (il kickstart è solo dei template)
+        const a = await api.createAgent(name.trim(), describe ? description.trim() : '')
+        await api.updateAgent(a.id, { avatar: { family, color } })
+        await select(a.id)
+      }
+      onClose()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const visibleTemplates = showAllTemplates ? templates : templates.slice(0, 4)
+  const canCreate = !busy && name.trim().length > 0 && (!describe || !chosenTemplate)
+
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-h-[92vh] max-w-xl overflow-y-auto scroll-thin">
         <DialogHeader>
-          <DialogTitle className="font-display text-2xl"><Trans>Crea nuovo bot</Trans></DialogTitle>
+          <DialogTitle className="font-display text-2xl"><Trans>Nuovo bot</Trans></DialogTitle>
         </DialogHeader>
-        <div className="grid place-items-center rounded-3xl bg-muted p-5">
-          <Bot family={family} color={color} state="happy" size={130} />
+
+        {/* la mascotte grande sospesa: niente riquadro, solo l'ombra ovale */}
+        <div className="flex flex-col items-center pt-2">
+          <Bot family={family} color={color} state="happy" size={112} />
+          <span aria-hidden="true" className="mt-1.5 h-2.5 w-20 rounded-full bg-foreground/10" />
         </div>
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder={t`Dai un nome al tuo bot`}
-          className="rounded-xl border border-border bg-background px-3 py-2 text-sm outline-none placeholder:text-muted-foreground"
-        />
-        <AvatarPicker family={family} color={color} onFamily={setFamily} onColor={setColor} />
+
+        {/* le cinque famiglie a pillola + i colori + il nome */}
+        <div className="flex flex-wrap justify-center gap-1.5">
+          {BOT_FAMILIES.map((f) => (
+            <button
+              key={f}
+              className={`h-8 rounded-full px-3 text-[13px] transition ${family === f ? 'bg-foreground text-background' : 'bg-muted text-foreground hover:bg-accent'}`}
+              onClick={() => setFamily(f)}
+            >
+              {i18n.t(FAMILY_NAMES[f])}
+            </button>
+          ))}
+        </div>
+        <div className="flex flex-wrap justify-center gap-2">
+          {BOT_COLORS.map((col) => (
+            <button
+              key={col}
+              aria-label={t`Colore ${col}`}
+              className={`size-7 rounded-full transition ${color === col ? 'ring-2 ring-foreground ring-offset-2 ring-offset-background' : ''}`}
+              style={{ background: `var(--bot-${col})` }}
+              onClick={() => setColor(col)}
+            />
+          ))}
+        </div>
+        <div className="space-y-1">
+          <label htmlFor="sandbot-new-bot-name" className="block text-[13px] text-muted-foreground"><Trans>Nome</Trans></label>
+          <input
+            id="sandbot-new-bot-name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder={t`Dai un nome al tuo bot`}
+            className="w-full rounded-xl border border-border bg-background px-3 py-2 text-base outline-none placeholder:text-muted-foreground"
+          />
+        </div>
+
+        {/* «Cosa farà?» — i template che esistono + «Descrivilo tu» */}
+        <div className="space-y-2">
+          <strong className="block text-base"><Trans>Cosa farà?</Trans></strong>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {visibleTemplates.map((tpl) => (
+              <button
+                key={tpl.id}
+                className={`rounded-2xl px-3.5 py-3 text-left transition ${chosenTemplate?.id === tpl.id ? 'border-2 border-foreground bg-muted' : 'border border-border hover:border-muted-foreground'}`}
+                onClick={() => { setChosenTemplate(tpl); setDescribe(false) }}
+              >
+                <span className="mr-1">{tpl.avatar}</span>
+                <span className="text-sm font-semibold">{pickLang(tpl.name, uiLang())}</span>
+                <span className="mt-0.5 block line-clamp-2 text-[13px] text-muted-foreground">{pickLang(tpl.description, uiLang())}</span>
+              </button>
+            ))}
+            {/* «Descrivilo tu» — il bot ti propone le sue istruzioni */}
+            <button
+              className={`rounded-2xl border-dashed px-3.5 py-3 text-left transition ${describe ? 'border-2 border-foreground bg-muted' : 'border border-border hover:border-muted-foreground'}`}
+              onClick={() => { setDescribe(true); setChosenTemplate(null) }}
+            >
+              <span className="text-sm font-semibold"><Trans>Descrivilo tu</Trans></span>
+              <span className="mt-0.5 block text-[13px] text-muted-foreground"><Trans>Il bot ti propone le sue istruzioni</Trans></span>
+            </button>
+          </div>
+          {templates.length > 4 && !showAllTemplates && (
+            <button
+              className="mx-auto block rounded-full bg-muted px-3 py-1 text-xs transition hover:bg-accent"
+              onClick={() => setShowAllTemplates(true)}
+            >
+              <Trans>Altri {templates.length - 4} ▾</Trans>
+            </button>
+          )}
+          {describe && (
+            <textarea
+              className="min-h-20 w-full rounded-2xl bg-muted px-3 py-2 text-sm outline-none"
+              placeholder={t`Per esempio: segue le ricevute email e prepara il riepilogo della settimana…`}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+          )}
+        </div>
+
+        {err && <p className="text-xs text-destructive">{err}</p>}
         <DialogFooter>
           <button className={`${btn} bg-muted`} onClick={onClose}>
             <Trans>Annulla</Trans>
           </button>
           <button
-            disabled={!name.trim() || busy}
+            disabled={!canCreate}
             className={`${btn} text-background disabled:opacity-40`}
             style={{ background: c }}
-            onClick={async () => {
-              setBusy(true)
-              try {
-                await createAgent(name.trim(), { family, color })
-                onClose()
-              } finally {
-                setBusy(false)
-              }
-            }}
+            onClick={() => void create()}
           >
-            <Trans>Crea</Trans>
+            <Trans>Crea {name.trim() || i18n._(msg`il bot`)}</Trans>
           </button>
         </DialogFooter>
-        {/* i template di bot che la UI offre già oggi (Settings → Bot) */}
-        {templates.length > 0 && (
-          <div className="border-t border-border pt-3 text-center">
-            <button
-              className="text-xs text-muted-foreground underline-offset-2 hover:underline"
-              onClick={() => setShowTemplates((v) => !v)}
-            >
-              <Trans>oppure parti da un modello</Trans>
-            </button>
-            {showTemplates && (
-              <div className="mt-2 grid grid-cols-2 gap-2 text-left">
-                {templates.map((t) => (
-                  <button
-                    key={t.id}
-                    className="rounded-xl border border-border px-3 py-2 transition hover:border-muted-foreground"
-                    title={pickLang(t.description, uiLang())}
-                    onClick={async () => {
-                      try {
-                        const a = await api.createAgentFromTemplate(t.id)
-                        await select(a.id)
-                        onClose()
-                      } catch (e) {
-                        console.error('createAgentFromTemplate:', e instanceof Error ? e.message : e)
-                      }
-                    }}
-                  >
-                    <span className="mr-1">{t.avatar}</span>
-                    {/* fase 17c (C5): la galleria mostra la lingua dell'interfaccia */}
-                    <span className="text-sm">{pickLang(t.name, uiLang())}</span>
-                    <span className="mt-0.5 block truncate text-xs text-muted-foreground">{pickLang(t.description, uiLang())}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
       </DialogContent>
     </Dialog>
   )

@@ -299,10 +299,12 @@ export async function runReviewer(
  * Ritorna null se l'auto-review è spenta o l'azione è fuori ambito a prescindere.
  */
 export async function reviewWithConfiguredModel(action: AutoReviewAction, lang: Lang = 'en'): Promise<{ cfg: AutoReviewSettings; outcome: ReviewerOutcome } | null> {
-  const { getSetting, listProviders } = await import('../store/db')
+  const { getSetting } = await import('../store/db')
   const cfg = getSetting<AutoReviewSettings>('autoReview', (await import('../../shared/types')).DEFAULT_AUTO_REVIEW)
   if (!cfg.enabled) return null
-  const { getProvider } = await import('./providers')
+  // fase 16c (C1): i provider si leggono dal modulo providers — la vista del
+  // daemon, CON la chiave in memoria (lo store grezzo non ce l'ha più)
+  const { getProvider, listProviders } = await import('./providers')
   const { autoReviewModelFor } = await import('./model-defaults')
   type ModelDefaultsMap = import('./model-defaults').ModelDefaultsMap
   const overrides = getSetting<ModelDefaultsMap>('providers.modelDefaults', {})

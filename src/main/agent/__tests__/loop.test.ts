@@ -245,6 +245,10 @@ vi.mock('../providers', () => ({
       ? { id: 'prov', name: 'test', kind: 'openai-compatible' as const, baseUrl: 'http://localhost', apiKey: '', enabled: true }
       : null
   },
+  // fase 16c (C1/C3.3): il loop legge i provider dal modulo providers (vista
+  // del daemon, chiavi in memoria) — i test li definiscono in h.db.providers
+  listProviders: () => h.db.providers.map((p: { id: string; kind?: string; baseUrl?: string }) =>
+    ({ id: p.id, name: 'test', kind: p.kind ?? 'openai-compatible', baseUrl: p.baseUrl ?? 'http://localhost', apiKey: '', enabled: true })),
   // fase 10: la capability "tools" è data per vera (nessuna rete nei test)
   modelSupportsTools: async () => ({ ok: true, checked: false })
 }))

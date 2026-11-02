@@ -18,12 +18,16 @@
 // draft_external. Ogni turno si chiude con un evento meta.turnEnd ∈
 // FINISHED | STOPPED | SUPERSEDED | AWAITING_USER.
 import { randomUUID, createHash } from 'node:crypto'
-import { getAgent, listAgents, listRoutines, getEntries, updateAgent, appendEntry, updateEntryContent, updateEntryMeta, getSetting, holdOutboxEntry, db, getTask, createTask, updateTask, openTasksOf, MAX_OPEN_TASKS, listProviders, createAgent, subagentRefusal, addGrant, listGrants, recordModelUsage, type Grant, type AppendEntry } from '../store/db'
+import { getAgent, listAgents, listRoutines, getEntries, updateAgent, appendEntry, updateEntryContent, updateEntryMeta, getSetting, holdOutboxEntry, db, getTask, createTask, updateTask, openTasksOf, MAX_OPEN_TASKS, createAgent, subagentRefusal, addGrant, listGrants, recordModelUsage, type Grant, type AppendEntry } from '../store/db'
 import { llmStream, type ChatMessage, type ToolCall } from './llm'
 import { systemPrompt, secondaryPrompts, mainAgentSection, withLanguage } from './prompts'
 import { toolDefs, executeTool } from './tools'
 import * as permissions from './permissions'
-import { getProvider } from './providers'
+// fase 16c (C1/C3.3): i provider si leggono dal modulo providers (vista del
+// daemon, chiavi in memoria) — MAI dallo store grezzo, che non ha la chiave
+import { getProvider, listProviders } from './providers'
+// fase 16c (C3.3): il modello risolto («Come gli altri»)
+import { resolveAgentModel, type ResolvedAgentModel } from './model-defaults'
 import { buildMessages, visibleReplyEntries } from './history'
 import { planResume, INTERRUPTED_TOOL_RESULT } from './resume'
 import { isExternalSend, draftFromExternalCall, prepareDraft, DEFAULT_EXTERNAL_SEND_TOOLS, type ExternalSendConfig } from './external-send'
@@ -624,7 +628,13 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
   const agent = getAgent(agentId)
   // fase 18a (E0): errore interno in inglese (la UI ha rpc.agentNotFound)
   if (!agent) throw new Error('agent not found')
-  if (!agent.providerId || !agent.model) {
+  // fase 16c (C3.3): il modello risolto — quello del bot se l'ha scelto, il
+  // principale se segue gli altri («Come gli altri»), niente altrimenti
+  const resolved: ResolvedAgentModel | null = resolveAgentModel(
+    agent,
+    getSetting<import('../../shared/types').MainModel | null>('models.main', null)
+  )
+  if (!resolved) {
     // fase 10 (residuo 0e): durante l'onboarding, se il provider ESISTE ma il
     // widget del ruolo è ancora in attesa, il problema non è la configurazione:
     // chiedere di configurare porta fuori strada
@@ -638,7 +648,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     emitLastEntry(agentId, emit)
     return
   }
-  const provider = getProvider(agent.providerId)
+  const provider = getProvider(resolved.providerId)
   // fase 18a (E0): errore interno in inglese (la UI ha rpc.providerNotFound)
   if (!provider) throw new Error('provider not found')
 
@@ -964,8 +974,8 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     // compaction della chat principale non li tocca
     if (opts.taskId === undefined) {
       await maybeCompactHistory(
-        agentId, provider.id, agent.model,
-        (digest) => summarizeWithLlm(provider, agent.model!, digest, secondaryPrompts.compaction, agentId),
+        agentId, provider.id, resolved.model,
+        (digest) => summarizeWithLlm(provider, resolved.model, digest, secondaryPrompts.compaction, agentId),
         emit
       )
     }
@@ -1134,12 +1144,14 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     // fase 18b (H2.4): la ROTTA attiva del turno — provider + modello, cambia
     // quando si passa d'anello. Tutte le chiamate del turno la usano.
     let activeProvider: ProviderConfig = provider
-    let primary: Route = { providerId: provider.id, model: agent.model }
+    let primary: Route = { providerId: provider.id, model: resolved.model }
     // fase 18b (H3): il livello di ragionamento del turno (la routine può
-    // avere il suo, H7); l'adattatore clampa sul modello di OGNI chiamata.
+    // avere il suo, H7); l'adattatore clamps sul modello di OGNI chiamata.
     // 'default' o assente NON passa proprio: il comportamento della 18a ESATTO
+    // fase 16c (C3.3): il thinking è quello RISOLTO (del bot se l'ha scelto,
+    // altrimenti quello del principale)
     let turnThinking: ThinkingSetting | undefined =
-      agent.thinking && agent.thinking !== 'default' ? agent.thinking : undefined
+      resolved.thinking && resolved.thinking !== 'default' ? resolved.thinking : undefined
     if (opts.route) {
       const rp = providerById(opts.route.providerId)
       if (rp?.enabled && opts.route.model) {
@@ -1150,7 +1162,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       } else {
         // H7: il provider della routine non c'è più (o è disabilitato): si usa
         // il modello del bot, con una notice — la routine NON si perde
-        add({ ...uiSystemEntry(agentId, 'notice', ui(UI.routineModelUnavailable, { provider: opts.route.providerId, model: agent.model! })) })
+        add({ ...uiSystemEntry(agentId, 'notice', ui(UI.routineModelUnavailable, { provider: opts.route.providerId, model: resolved.model })) })
         emitLastEntry(agentId, emit)
       }
     }

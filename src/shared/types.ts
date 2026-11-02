@@ -363,6 +363,52 @@ export interface ProviderConfig {
 }
 
 /**
+ * Fase 16c (C1): envelope cifrato della chiave API di un provider — a riposo
+ * nel setting 'providers' c'è SOLO questo, mai il chiaro.
+ */
+export interface SealedKey {
+  sandVault: 1
+  data: string
+}
+
+/**
+ * Fase 16c (C1): un provider come lo vede il RENDERER: `apiKey` sempre vuota,
+ * `hasKey` dice se c'è una chiave e `keyHint` ne mostra gli ultimi 4 caratteri
+ * («…a1b2»). Nessuna RPC restituisce mai la chiave intera.
+ */
+export type ProviderPublic = Omit<ProviderConfig, 'apiKey'> & {
+  apiKey: ''
+  hasKey: boolean
+  keyHint?: string
+}
+
+/**
+ * Fase 16c (C1): il salvataggio di un provider — `apiKey` vuota o assente
+ * CONSERVA la chiave esistente; una chiave nuova la sostituisce; `clearKey`
+ * la toglie.
+ */
+export type ProviderSaveInput = Omit<ProviderConfig, 'apiKey'> & {
+  apiKey?: string
+  clearKey?: boolean
+}
+
+/** Fase 16c (C3.4): l'esito di providers:probe — error è un CODICE leggibile, mai la chiave. */
+export interface ProviderProbeResult {
+  ok: boolean
+  /** gli id dei modelli visti (solo quando ok) */
+  models?: string[]
+  /** 'invalid-key' | 'unreachable' | 'error' (solo quando !ok) */
+  error?: string
+}
+
+/** Fase 16c (C3.3): il modello principale («il cervello dei bot»). Setting models.main. */
+export interface MainModel {
+  providerId: string
+  model: string
+  thinking?: ThinkingSetting | null
+}
+
+/**
  * Fase 18b (H3): il livello di ragionamento. 'default' = il comportamento
  * della 18a (nessuna opzione reasoning); 'off' è un livello valido di pi-ai.
  * In thinkingLevels di un modello NON compare mai 'default': è sempre disponibile.
@@ -604,11 +650,19 @@ export interface SandbotApi {
   /** fase 8: mode 'once' (una volta), 'always' (standing grant), 'turn' (fino a fine turno, in memoria) */
   resolveApproval(agentId: string, approvalId: string, decision: 'allow' | 'deny', mode: 'once' | 'always' | 'turn'): Promise<void>
   // provider e modelli
-  listProviders(): Promise<ProviderConfig[]>
-  saveProvider(p: ProviderConfig): Promise<void>
+  /** fase 16c (C1): MAI la chiave — apiKey sempre '', hasKey e keyHint al posto */
+  listProviders(): Promise<ProviderPublic[]>
+  /** fase 16c (C1): apiKey vuota conserva la chiave, nuova la sostituisce, clearKey la toglie */
+  saveProvider(p: ProviderSaveInput): Promise<void>
   deleteProvider(id: string): Promise<void>
-  discoverProviders(): Promise<ProviderConfig[]>
+  discoverProviders(): Promise<ProviderPublic[]>
   testProvider(id: string): Promise<{ ok: boolean; error?: string; models?: ModelInfo[] }>
+  /**
+   * Fase 16c (C3.4): prova una configurazione NON salvata (stessa logica di
+   * providers:test). La chiave viaggia SOLO in questa direzione: il daemon non
+   * la salva, non la scrive nei log e non la rimanda indietro.
+   */
+  probeProvider(config: { kind: ProviderKind; baseUrl: string; apiKey?: string }): Promise<ProviderProbeResult>
   listModels(providerId: string): Promise<ModelInfo[]>
   /**
    * Fase 18b (K3): le capacità di UN modello, SENZA l'elenco completo e senza
@@ -723,6 +777,10 @@ export interface SandbotApi {
   activityList(agentId: string, limit?: number): Promise<{ owner: string; items: ActivityItem[] }>
   /** fase 19b (T4): la coda dell'output di UNA voce (shell) o l'errore (azione) */
   activityOutput(agentId: string, id: string): Promise<{ text: string }>
+  /** fase 16c (C5): i dati del feed globale Attività (task, routine, attese) */
+  activityGlobal(limit?: number): Promise<GlobalActivityData>
+  /** fase 16c (C4): ricerca di sola lettura nel registro MCP (finestra Collega app) */
+  connectorsSearchRegistry(query: string): Promise<AppsRegistryResult[]>
   // memoria (fase 4): sezione nella vista dell'agente, modifica ed eliminazione
   listMemories(agentId: string): Promise<MemoryInfo[]>
   updateMemory(agentId: string, id: string, content: string): Promise<void>
@@ -1206,6 +1264,10 @@ export interface ConnectorInfo {
   scopes?: string[]
   docsUrl: string
   notes: string
+  /** fase 16c (C4): la categoria per i filtri della finestra Collega app */
+  category?: ConnectorCategory
+  /** fase 16c (C4): mezza riga localizzata sotto il nome (per esempio «Pagine e database») */
+  tagline?: Localized
   state: {
     status: ConnectorStatusInfo
     error?: string
@@ -1233,3 +1295,47 @@ export interface WebSearchStatusRpc {
   keyedConfigured: boolean
   providers: WebSearchProviderStatusRpc[]
 }
+
+// ---- fase 16c: attività globale (C5) e ricerca del registro (C4) ----
+
+/** Fase 16c (C5): il motivo di un fallimento, in CODICE — la UI lo traduce, mai il testo grezzo del provider. */
+export type ActivityFailReason = 'credit' | 'not-responding' | 'rate-limit' | 'cancelled' | 'other'
+
+/** Fase 16c (C5): i dati grezzi di activity:global (l'ordine e i filtri li fa la funzione pura del renderer). */
+export interface GlobalActivityData {
+  tasks: Array<{
+    id: number
+    agentId: string
+    title: string
+    status: 'working' | 'needs_input' | 'done' | 'failed' | 'cancelled'
+    automatic: 0 | 1
+    createdAt: number
+    updatedAt: number
+    summary: string | null
+  }>
+  runs: Array<{
+    id: number
+    routineId: number
+    agentId: string
+    title: string
+    startedAt: number
+    endedAt: number | null
+    outcome: 'ok' | 'failed' | 'cancelled'
+    reason: ActivityFailReason | null
+  }>
+  /** i bot che aspettano te (approvazione o card in sospeso): i loro id */
+  waiting: string[]
+}
+
+/** Fase 16c (C4): una riga «dal registro» della ricerca in Collega app. */
+export interface AppsRegistryResult {
+  id: string
+  name: string
+  trustKind: 'verified-domain' | 'github-account' | 'unverified'
+  description: string
+  /** come gira: remote-oauth | remote-key | box-npm | not-installable */
+  runtime: string
+}
+
+/** Fase 16c (C4): la categoria di un connettore del catalogo (i filtri della finestra Collega app). */
+export type ConnectorCategory = 'mail-calendar' | 'documents' | 'development' | 'communication'

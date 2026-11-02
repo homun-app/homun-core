@@ -71,6 +71,26 @@ async function main(): Promise<void> {
 
   const database = db()
 
+  // fase 16c (C1): migrazione delle chiavi API dei provider — il chiaro nel
+  // setting 'providers' si cifra (voce Keychain PROPRIA sandbot-providers-key)
+  // e si toglie. Idempotente; se il Portachiavi non risponde il chiaro resta
+  // (avviso SENZA la chiave) e si riprova al prossimo avvio.
+  {
+    const { migrateProviderKeys } = await import('../main/agent/providers')
+    try {
+      await migrateProviderKeys()
+    } catch (e) {
+      console.error('[sandbotd] migrazione chiavi provider rimandata al prossimo avvio:', e instanceof Error ? e.message : e)
+    }
+  }
+
+  // fase 16c (C5): lo storico delle routine si pota all'avvio (90 giorni)
+  {
+    const { pruneRoutineRuns } = await import('../main/store/routine-runs')
+    const pruned = pruneRoutineRuns(database, Date.now())
+    if (pruned > 0) console.log(`[sandbotd] ${pruned} esecuzioni di routine oltre i 90 giorni rimosse`)
+  }
+
   // fase 12: il broadcast si riempie quando il server ws esiste; il boot lo
   // usa per il risveglio dei lotti (gli eventi persi prima della connessione
   // della UI si ricaricano comunque al primo 'agents'/'subagents')
