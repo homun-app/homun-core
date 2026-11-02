@@ -66,11 +66,16 @@ export function ComputerPanel({ agentId, onClose, embedded = false }: { agentId:
           : 'mx-5 mt-3 flex max-h-[70vh] min-h-[420px] flex-col overflow-hidden rounded-xl border bg-card shadow-soft'
       }
     >
-      <header className="flex items-center justify-between gap-3 px-1 py-2">
+      {/* fase 16b correzioni (P5): in modalità embedded (dentro il pannello del
+          bot) NIENTE titolo «COMPUTER DEL BOT» e NIENTE ✕ — la chiusura è
+          quella tonda del pannello del bot; restano solo le schede interne */}
+      <header className={`flex items-center gap-3 px-1 py-2 ${embedded ? '' : 'justify-between'}`}>
         <div className="flex min-w-0 items-center gap-1 overflow-x-auto">
-          <p className="mr-2 hidden text-[10px] font-medium uppercase tracking-wide text-muted-foreground sm:inline">
-            <Trans>Computer del bot</Trans>
-          </p>
+          {!embedded && (
+            <p className="mr-2 hidden text-[10px] font-medium uppercase tracking-wide text-muted-foreground sm:inline">
+              <Trans>Computer del bot</Trans>
+            </p>
+          )}
           {tabs.filter((x) => x.on).map((x) => (
             <button
               key={x.id}
@@ -81,13 +86,15 @@ export function ComputerPanel({ agentId, onClose, embedded = false }: { agentId:
             </button>
           ))}
         </div>
-        <button
-          className="rounded-md px-2 py-1 text-muted-foreground transition hover:text-foreground"
-          title={t`Chiudi`}
-          onClick={onClose}
-        >
-          ✕
-        </button>
+        {!embedded && (
+          <button
+            className="rounded-md px-2 py-1 text-muted-foreground transition hover:text-foreground"
+            title={t`Chiudi`}
+            onClick={onClose}
+          >
+            ✕
+          </button>
+        )}
       </header>
 
       <div className="relative flex-1 overflow-hidden">

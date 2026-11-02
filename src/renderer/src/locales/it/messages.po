@@ -1029,6 +1029,10 @@ msgstr "chiave per la ricerca web di Ollama"
 msgid "chiave salvata (scrivi per sostituirla)"
 msgstr "chiave salvata (scrivi per sostituirla)"
 
+#: src/renderer/src/lib/activity.ts
+msgid "chiede a un aiutante…"
+msgstr "chiede a un aiutante…"
+
 #: src/renderer/src/components/Settings.tsx
 msgid "Chiedi approvazione"
 msgstr "Chiedi approvazione"
@@ -1111,6 +1115,10 @@ msgstr "compaction"
 #: src/shared/ui-messages.ts
 msgid "card.fill"
 msgstr "Compila il login «{label}» su {origin}"
+
+#: src/renderer/src/lib/activity.ts
+msgid "compila l'accesso…"
+msgstr "compila l'accesso…"
 
 #. placeholder {0}: fill.label
 #. placeholder {1}: fill.origin
@@ -1801,6 +1809,14 @@ msgid "Ha cercato sul web"
 msgstr "Ha cercato sul web"
 
 #: src/renderer/src/lib/activity.ts
+msgid "Ha chiesto a un aiutante"
+msgstr "Ha chiesto a un aiutante"
+
+#: src/renderer/src/lib/activity.ts
+msgid "Ha compilato l'accesso"
+msgstr "Ha compilato l'accesso"
+
+#: src/renderer/src/lib/activity.ts
 msgid "Ha eseguito un comando"
 msgstr "Ha eseguito un comando"
 
@@ -1829,6 +1845,10 @@ msgid "Ha letto {host}"
 msgstr "Ha letto {host}"
 
 #: src/renderer/src/lib/activity.ts
+msgid "Ha letto un documento"
+msgstr "Ha letto un documento"
+
+#: src/renderer/src/lib/activity.ts
 msgid "Ha letto un file"
 msgstr "Ha letto un file"
 
@@ -1839,6 +1859,18 @@ msgstr "Ha letto una pagina web"
 #: src/renderer/src/lib/activity.ts
 msgid "Ha navigato"
 msgstr "Ha navigato"
+
+#: src/renderer/src/lib/activity.ts
+msgid "Ha preso nota"
+msgstr "Ha preso nota"
+
+#: src/renderer/src/lib/activity.ts
+msgid "Ha ricordato"
+msgstr "Ha ricordato"
+
+#: src/renderer/src/lib/activity.ts
+msgid "Ha salvato nella Libreria"
+msgstr "Ha salvato nella Libreria"
 
 #: src/renderer/src/lib/activity.ts
 msgid "Ha scritto {file}"
@@ -2426,6 +2458,10 @@ msgstr "legge {host}…"
 #: src/shared/ui-messages.ts
 msgid "approval.readsOutsideBox"
 msgstr "legge fuori dal box condiviso"
+
+#: src/renderer/src/lib/activity.ts
+msgid "legge un documento…"
+msgstr "legge un documento…"
 
 #: src/renderer/src/lib/activity.ts
 msgid "legge un file…"
@@ -3171,6 +3207,10 @@ msgstr "predefinito"
 msgid "Predefinito"
 msgstr "Predefinito"
 
+#: src/renderer/src/lib/activity.ts
+msgid "prende nota…"
+msgstr "prende nota…"
+
 #: src/renderer/src/components/BotScreen.tsx
 msgid "Prendi il controllo"
 msgstr "Prendi il controllo"
@@ -3502,6 +3542,10 @@ msgstr "riconnetti"
 msgid "Riconnetti"
 msgstr "Riconnetti"
 
+#: src/renderer/src/lib/activity.ts
+msgid "ricorda…"
+msgstr "ricorda…"
+
 #: src/renderer/src/components/TeamChat.tsx
 msgid "riepilogo per te"
 msgstr "riepilogo per te"
@@ -3670,6 +3714,10 @@ msgstr "Salva il contatto «{name}»"
 #: src/renderer/src/components/LibraryCards.tsx
 msgid "Salva nel vault"
 msgstr "Salva nel vault"
+
+#: src/renderer/src/lib/activity.ts
+msgid "salva nella Libreria…"
+msgstr "salva nella Libreria…"
 
 #: src/renderer/src/components/LibraryCards.tsx
 msgid "Salvato nel vault"

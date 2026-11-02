@@ -67,6 +67,21 @@ export function sendResultText(e: TranscriptEntry): string {
   return deliveredResultText(e.content, { held: m?.held === true })
 }
 
+/**
+ * Fase 16b correzioni (P1): la event discreta del riepilogo di chiusura nella
+ * chat privata del coordinatore (meta.summaryMessageId numerico + meta.call
+ * valida) — per il modello è una send_to_user: torna {call, resultText} se la
+ * entry deve entrare nella storia, null altrimenti (tutte le altre event e le
+ * righe scritte prima della correzione restano fuori, come sempre).
+ */
+function summaryEventOf(e: TranscriptEntry): { call: { name: string; arguments: string }; resultText: string } | null {
+  if (e.kind !== 'event' || typeof e.meta?.summaryMessageId !== 'number' || !e.meta.call) return null
+  const c = e.meta.call as { name?: unknown; arguments?: unknown }
+  if (typeof c.name !== 'string' || !c.name || typeof c.arguments !== 'string') return null
+  if (typeof e.meta.resultText !== 'string') return null
+  return { call: { name: c.name, arguments: c.arguments }, resultText: e.meta.resultText }
+}
+
 /** entries → messaggi: i tool-call si aggregano al messaggio assistant, i result diventano messaggi tool. */
 function toMessages(entries: TranscriptEntry[]): ChatMessage[] {
   const msgs: ChatMessage[] = []
@@ -94,6 +109,21 @@ function toMessages(entries: TranscriptEntry[]): ChatMessage[] {
         msgs.push({ role: 'assistant', content: '', toolCalls: [call] })
       }
       msgs.push({ role: 'tool', toolCallId: call.id, content: sendResultText(e) })
+    } else if (e.kind === 'event' && summaryEventOf(e)) {
+      // fase 16b correzioni (P1): il riepilogo di chiusura del coordinatore è
+      // una event discreta nella SUA chat privata, ma il modello l'ha detto
+      // con send_to_user — la storia ricostruisce la coppia chiamata/risultato
+      // col result IDENTICO a quello visto nel turno (meta.resultText, salvato
+      // alla consegna). Le altre event restano fuori.
+      const s = summaryEventOf(e)!
+      const call = { id: `send_${e.id}`, name: s.call.name, arguments: s.call.arguments }
+      const prev = msgs[msgs.length - 1]
+      if (prev && prev.role === 'assistant') {
+        prev.toolCalls = [...(prev.toolCalls ?? []), call]
+      } else {
+        msgs.push({ role: 'assistant', content: '', toolCalls: [call] })
+      }
+      msgs.push({ role: 'tool', toolCallId: call.id, content: s.resultText })
     } else if (e.kind === 'summary') {
       // fase 4: riepilogo dei turni più vecchi (compaction) — entra come
       // messaggio utente di contesto al posto delle entry che copre
@@ -109,7 +139,8 @@ function toMessages(entries: TranscriptEntry[]): ChatMessage[] {
     } else if (e.kind === 'tool-result') {
       msgs.push({ role: 'tool', toolCallId: String(e.meta?.callId ?? ''), content: e.content })
     }
-    // notice/approval/event non entrano nella storia del modello
+    // notice/approval/event non entrano nella storia del modello — tranne la
+    // event del riepilogo di chiusura, gestita sopra (P1, fase 16b correzioni)
   }
   return msgs
 }

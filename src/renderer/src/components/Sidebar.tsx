@@ -14,7 +14,7 @@ import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
 import { Plus, Search, Library as LibraryIcon, LayoutGrid, ChevronRight } from 'lucide-react'
 import { useStore } from '../store'
-import { buildSidebarModel, collapsedVoices, type SidebarModel, type SidebarTeam, type SidebarBot, type CollapsedVoice } from '../sidebar-utils'
+import { buildSidebarModel, collapsedVoices, teamOpenState, type SidebarModel, type SidebarTeam, type SidebarBot, type CollapsedVoice } from '../sidebar-utils'
 import { avatarOf } from '../../../shared/avatar'
 import type { Agent } from '../../../shared/types'
 import { Bot } from '../bot/Bot'
@@ -50,22 +50,42 @@ const writeLS = (key: string, value: string): void => {
     // localStorage non disponibile: la scelta dura finché la finestra vive
   }
 }
+/** fase 16b correzioni (P3): riaprire una squadra cancella il ricordo della chiusura */
+const removeLS = (key: string): void => {
+  try {
+    localStorage.removeItem(key)
+  } catch {
+    // come sopra: la scelta dura finché la finestra vive
+  }
+}
 
 /** Titoletto semplice e grigio, niente maiuscole (S2). */
 function Title({ children }: { children: React.ReactNode }) {
   return <p className="px-2.5 pb-1 pt-3 text-[13px] text-muted-foreground">{children}</p>
 }
 
-/** Il grappolo della squadra: la mascotte del coordinatore + i membri piccoli. */
-function TeamCluster({ team, size = 34 }: { team: SidebarTeam; size?: number }) {
+/**
+ * Il grappolo della squadra: la mascotte del coordinatore + i membri piccoli.
+ * Nella barra LARGA i cerchietti sporgono a destra (c'è il testo accanto);
+ * con narrow (fase 16b correzioni, P3) le stesse misure stanno in un BOX di
+ * 40×40 — coordinatore davanti, cerchietti dei membri in basso a destra
+ * sovrapposti alla mascotte ma DENTRO il box: la voce occupa la sua altezza
+ * e non tocca la voce sotto.
+ */
+function TeamCluster({ team, size = 34, narrow = false }: { team: SidebarTeam; size?: number; narrow?: boolean }) {
   const agents = useStore((s) => s.agents)
   const mainAgentId = useStore((s) => s.mainAgentId)
   const effectiveMain = mainAgentId ?? agents[0]?.id ?? null
   const coordInfo = useBotInfo(team.coordinator?.id ?? null)
-  const dots = team.members.slice(0, 3)
+  // nel box da 40 px della barra stretta ci stanno due cerchietti e il +N;
+  // nella barra larga i cerchietti sono tre (e possono sporgere a destra)
+  const dots = team.members.slice(0, narrow ? 2 : 3)
   const extra = team.members.length - dots.length
   return (
-    <span className="relative shrink-0" style={{ width: size + 8, height: size + 8 }}>
+    <span
+      className="relative block shrink-0"
+      style={narrow ? { width: 40, height: 40 } : { width: size + 8, height: size + 8 }}
+    >
       {coordInfo ? (
         <span className="absolute left-0 top-0">
           <Bot family={coordInfo.avatar.family} color={coordInfo.avatar.color} state={coordInfo.state} size={size} track={false} dimmed={coordInfo.dimmed} />
@@ -75,7 +95,7 @@ function TeamCluster({ team, size = 34 }: { team: SidebarTeam; size?: number }) 
           <span className="text-xs text-muted-foreground">{team.group.name.slice(0, 1)}</span>
         </span>
       )}
-      <span className="absolute bottom-0 right-0 flex translate-x-[6px] items-center">
+      <span className={`absolute bottom-0 right-0 flex items-center ${narrow ? '' : 'translate-x-[6px]'}`}>
         {dots.map((m, i) => {
           const av = avatarOf(m, agents, effectiveMain)
           return (
@@ -133,7 +153,9 @@ function TeamRows({ team }: { team: SidebarTeam }) {
   const openGroup = useStore((s) => s.openGroup)
   const select = useStore((s) => s.select)
   const coordInfo = useBotInfo(team.coordinator?.id ?? null)
-  const [open, setOpen] = useState(() => readLS(`${TEAM_OPEN_PREFIX}${team.group.id}`) === '1')
+  // fase 16b correzioni (P3): le squadre sono APERTE di default — si ricorda
+  // solo la chiusura scelta dall'utente ('0'), riaprire cancella il ricordo
+  const [open, setOpen] = useState(() => teamOpenState(readLS(`${TEAM_OPEN_PREFIX}${team.group.id}`)))
   // lo stato più importante: chi ti aspetta vince; poi il coordinatore al lavoro
   const waitingMember = [team.coordinator, ...team.members].find((a) => a && a.status === 'paused-for-approval')
   const coordBusy = coordInfo?.state === 'thinking' || coordInfo?.state === 'speaking' || coordInfo?.state === 'listening'
@@ -167,7 +189,9 @@ function TeamRows({ team }: { team: SidebarTeam }) {
             onClick={() => {
               const next = !open
               setOpen(next)
-              writeLS(`${TEAM_OPEN_PREFIX}${team.group.id}`, next ? '1' : '0')
+              const key = `${TEAM_OPEN_PREFIX}${team.group.id}`
+              if (next) removeLS(key)
+              else writeLS(key, '0')
             }}
           >
             <ChevronRight className={`size-4 transition-transform ${open ? 'rotate-90' : ''}`} />
@@ -337,7 +361,7 @@ function CollapsedColumn({ model, onExpand }: { model: SidebarModel; onExpand():
               }}
             >
               {v.kind === 'team' ? (
-                <TeamCluster team={model.teams.find((t) => `g${t.group.id}` === v.key)!} size={34} />
+                <TeamCluster team={model.teams.find((t) => `g${t.group.id}` === v.key)!} narrow />
               ) : (
                 <VoiceMascot agentId={v.key} size={v.kind === 'main' ? 42 : 34} />
               )}

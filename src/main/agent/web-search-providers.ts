@@ -174,6 +174,13 @@ export function youKeylessProvider(deps: KeylessProviderDeps = {}): WebSearchPro
 // ---- Exa (secondo): server MCP ospitato ----
 
 /**
+ * Il nome del tool di ricerca chiamato sul server MCP ospitato di Exa —
+ * nome VERO del daemon (fase 16b correzioni, P2: il test di coerenza della
+ * tabella delle famiglie della mascotte lo verifica).
+ */
+export const EXA_MCP_SEARCH_TOOL = 'web_search_exa'
+
+/**
  * Il testo di web_search_exa è una sequenza di blocchi separati da
  * "\n\n---\n\n": riga "Title:", riga "URL:", estratto dopo "Highlights:".
  * Un blocco senza URL valido si scarta (S1/Exa parsing).
@@ -228,7 +235,7 @@ export function exaMcpKeylessProvider(deps: KeylessProviderDeps = {}): WebSearch
         ])
         const res = await Promise.race([
           client.callTool({
-            name: 'web_search_exa',
+            name: EXA_MCP_SEARCH_TOOL,
             arguments: { query, objective: query, numResults: maxResults }
           }),
           new Promise<never>((_, reject) => {

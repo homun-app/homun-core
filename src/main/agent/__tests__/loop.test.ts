@@ -670,7 +670,9 @@ const { resetRouteHealth } = await import('../route-health')
 // fase 18b (K3): la cache delle capability Ollama vive nel modulo live-models
 const { resetOllamaCapabilities } = await import('../live-models')
 // correzione E2: il tetto per catena dello scheduler (test del recupero)
-const { GROUP_MEMBER_CHAIN_POSTS_MAX } = await import('../group-turns')
+const { GROUP_MEMBER_CHAIN_POSTS_MAX, hasSentToUserInChain } = await import('../group-turns')
+// fase 16b correzioni (P1): il result esatto della send consegnata
+const { deliveredResultText } = await import('../turn-sends')
 // il modulo mcp mockato (per patcharne callTool nel test della card Riconnetti)
 const mcpMock = await import('../../mcp')
 // fase 10: il modulo db mockato (createAgent con createdBy/section nei test)
@@ -3267,6 +3269,46 @@ describe('fase 10 (§3): post_to_group, pass e turni di gruppo nel loop', () => 
     expect(send.content).toContain('una decisione')
     expect(send.meta?.groupChain).toEqual({ groupId: 1, rootId: 50 })
     expect(h.db.groupsState.messages.some((m) => m.summary === 1)).toBe(false)
+  })
+
+  // ---- fase 16b correzioni (P1): il coordinatore RILEGGE il proprio riepilogo ----
+
+  it('P1: dopo la chiusura la storia del coordinatore contiene il riepilogo come send_to_user, col result identico al turno', async () => {
+    setupGroup()
+    const SUMMARY = 'RIEPILOGO: 3 ristoranti e 3 luoghi.'
+    const SUMMARY_ARGS = JSON.stringify({ text: SUMMARY })
+    h.llm.queue = [
+      { toolCalls: [{ id: 'p1a', name: 'send_to_user', arguments: SUMMARY_ARGS }] },
+      { text: 'fine' }
+    ]
+    await runTurn(AGENT, '<turno_di_gruppo gruppo="Cena compleanno" chiusura="true">…</turno_di_gruppo>', emit, undefined, {
+      groupTurn: { groupId: 1, readMaxDepth: 5, rootId: 50, closing: true }, untrusted: true
+    })
+    // la riga discreta porta ciò che serve alla storia: meta.call, meta.message
+    // e meta.resultText (il result ESATTO restituito dal tool nel turno)
+    const row = h.db.entries.find((e) => e.kind === 'event' && e.meta?.summaryMessageId !== undefined)!
+    expect(row.meta?.call).toEqual({ id: 'p1a', name: 'send_to_user', arguments: SUMMARY_ARGS })
+    expect(row.meta?.message).toEqual({ type: 'text', text: SUMMARY })
+    expect(row.meta?.resultText).toBe(deliveredResultText(SUMMARY, { held: false }))
+    // NESSUNA send-message: la chat privata non ha bolle, l'outbox e i
+    // contatori non vedono nulla, e la catena C3 non cambia comportamento
+    expect(h.db.entries.some((e) => e.kind === 'send-message')).toBe(false)
+    expect(hasSentToUserInChain(h.db.entries, { groupId: 1, rootId: 50 })).toBe(false)
+    // il turno DOPO, in privato: la richiesta al modello contiene la tool
+    // call send_to_user col testo del riepilogo e il result identico al turno
+    h.llm.queue = [
+      { toolCalls: [{ id: 'p1b', name: 'send_to_user', arguments: JSON.stringify({ text: 'ecco di nuovo il riepilogo.' }) }] },
+      { text: 'fine' }
+    ]
+    await runTurn(AGENT, 'mi ricordi il riepilogo?', emit)
+    const msgs = h.llm.calls[h.llm.calls.length - 1]!
+    const call = msgs
+      .flatMap((m) => (m.toolCalls as Array<{ id: string; name: string; arguments: string }> | undefined) ?? [])
+      .find((c) => c.name === 'send_to_user' && c.arguments.includes('RIEPILOGO'))
+    expect(call).toBeDefined()
+    expect(String(call!.arguments)).toBe(SUMMARY_ARGS)
+    const result = msgs.find((m) => m.role === 'tool' && m.toolCallId === call!.id)
+    expect(String(result?.content)).toBe(deliveredResultText(SUMMARY, { held: false }))
   })
 
   // ---- correzioni 3 (E2): il recupero dei turni di gruppo ----

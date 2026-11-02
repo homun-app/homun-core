@@ -1367,14 +1367,23 @@ export async function executeTool(
       if (group.created_by !== agentId && !groupsMod.isGroupMember(groupId, agentId)) {
         return { output: `You are not a member of the group "${group.name}": you cannot modify it.`, meta: {} }
       }
+      const add = [...new Set(Array.isArray(input.addMemberIds) ? input.addMemberIds.map((m) => String(m)) : [])]
+      const remove = [...new Set(Array.isArray(input.removeMemberIds) ? input.removeMemberIds.map((m) => String(m)) : [])]
+      // fase 16b correzioni (P4): l'ESITO si valida PRIMA di modificare —
+      // membri finali = (attuali + aggiunte − rimozioni), 1 ≤ n ≤ 6. Vale per
+      // TUTTE le squadre (anche create dall'utente, dove la regola «il creatore
+      // non si toglie» non protegge nessuno): al rifiuto non si applica NIENTE,
+      // nemmeno nome e descrizione.
+      const finalMembers = new Set([...groupsMod.groupMemberIds(groupId), ...add].filter((id) => !remove.includes(id)))
+      if (finalMembers.size < 1 || finalMembers.size > MAX_GROUP_MEMBERS) {
+        return { output: `A group needs between 1 and ${MAX_GROUP_MEMBERS} bots: nothing was changed.`, meta: {} }
+      }
       if (input.name !== undefined || input.description !== undefined) {
         groupsMod.updateGroup(groupId, {
           ...(input.name !== undefined && String(input.name).trim() ? { name: String(input.name).trim() } : {}),
           ...(input.description !== undefined && String(input.description).trim() ? { description: String(input.description).trim() } : {})
         })
       }
-      const add = [...new Set(Array.isArray(input.addMemberIds) ? input.addMemberIds.map((m) => String(m)) : [])]
-      const remove = [...new Set(Array.isArray(input.removeMemberIds) ? input.removeMemberIds.map((m) => String(m)) : [])]
       const agents = dbMod.listAgents()
       if (add.length) {
         // fase 12 (punto 1): un id di figlio non è un bot — messaggio esplicito
@@ -1394,16 +1403,6 @@ export async function executeTool(
       for (const id of remove) {
         groupsMod.removeGroupMember(groupId, id)
         groupsMod.cancelMemberGroupJobs(dbMod.db(), groupId, id)
-      }
-      const size = groupsMod.groupMemberIds(groupId).length
-      if (size > MAX_GROUP_MEMBERS) {
-        // si riportano le aggiunte dell'ultima riga: il tetto vale a fine giro
-        for (const id of add.reverse()) {
-          groupsMod.removeGroupMember(groupId, id)
-          groupsMod.cancelMemberGroupJobs(dbMod.db(), groupId, id)
-          if (groupsMod.groupMemberIds(groupId).length <= MAX_GROUP_MEMBERS) break
-        }
-        return { output: `Too many members: a group has at most ${MAX_GROUP_MEMBERS} bots. The additions were undone; name/description and the removals remain.`, meta: { groupChanged: groupId } }
       }
       // fase 16b (S1.1): il coordinatore non si TOGLIE, si CAMBIA — senza un
       // nome nuovo il rifiuto spiega la regola; se il coordinatore è uscito

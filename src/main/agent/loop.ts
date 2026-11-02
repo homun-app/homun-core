@@ -855,10 +855,20 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           groupId: g.id, authorKind: 'agent', authorId: agentId, authorName: agent.name,
           text, rootId: opts.groupTurn.rootId ?? null, depth, automatic: true, summary: true
         })
-        // nella chat privata del coordinatore resta una riga discreta,
-        // cliccabile verso la squadra (meta.groupId + summaryMessageId)
+        // fase 16b correzioni (P1): la riga discreta della chat privata salva
+        // anche ciò che serve alla STORIA del modello — meta.call e meta.message
+        // come una send-message, e in meta.resultText il result ESATTO che il
+        // modello ha visto nel turno (così resta identico anche se la funzione
+        // cambierà). Resta una event: niente bolla in chat privata, niente
+        // effetto su outbox, contatori o notifiche.
+        const resultText = deliveredResultText(text, { held: false })
         const row = add({
-          ...uiSystemEntry(agentId, 'event', ui(UI.groupSummaryPosted, { name: g.name }), { groupId: g.id, summaryMessageId: msg.id })
+          ...uiSystemEntry(agentId, 'event', ui(UI.groupSummaryPosted, { name: g.name }), {
+            groupId: g.id, summaryMessageId: msg.id,
+            call: { id: call.id, name: call.name, arguments: call.arguments },
+            message: { type: 'text', text },
+            resultText
+          })
         })
         emit({ type: 'entries', agentId, entries: [row] })
         emit({ type: 'groups' })
@@ -866,7 +876,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         emit({ type: 'agent-notify', agentId, kind: 'done', preview: text.slice(0, 120), at: msg.created_at, openGroupId: g.id })
         deliveredTexts.push(text)
         sendsSinceWork++
-        return deliveredResultText(text, { held: false })
+        return resultText
       }
     }
     const hold = sendToUser(call, input)

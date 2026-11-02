@@ -3,7 +3,7 @@
 // E dell'anteprima dell'ultimo messaggio visibile.
 import { describe, expect, it } from 'vitest'
 import { i18n } from '@lingui/core'
-import { matchesQuery, filterSidebar, previewOf, buildSidebarModel, collapsedVoices, type SidebarPreview } from '../sidebar-utils'
+import { matchesQuery, filterSidebar, previewOf, buildSidebarModel, collapsedVoices, teamOpenState, type SidebarPreview } from '../sidebar-utils'
 import type { Agent, GroupInfo, TranscriptEntry } from '../../../shared/types'
 import { itCatalogEntries } from './po-helper'
 
@@ -210,5 +210,17 @@ describe('fase 16b (S2): la barra stretta (collapsedVoices)', () => {
     const withUnread = [{ ...agents[2]!, unread: 3 }] as Agent[]
     const m2 = buildSidebarModel([agents[0]!, withUnread[0]!], [], 'n')
     expect(collapsedVoices(m2)[1]!.counter).toBe(3)
+  })
+})
+
+// fase 16b correzioni (P3): le squadre sono APERTE di default — in localStorage
+// si ricorda solo la CHIUSURA scelta dall'utente
+describe('fase 16b correzioni (P3): teamOpenState — una squadra senza stato salvato è aperta', () => {
+  it('senza stato salvato (null) la squadra è APERTA', () => {
+    expect(teamOpenState(null)).toBe(true)
+  })
+  it('si ricorda solo la chiusura: \'0\' è chiusa, ogni altro valore è aperta', () => {
+    expect(teamOpenState('0')).toBe(false)
+    expect(teamOpenState('1')).toBe(true)
   })
 })

@@ -31,10 +31,10 @@ vi.mock('../../main/agent/tools', () => ({
 }))
 
 const {
-  setDataDir, dataDir, db, createAgent, updateAgent
+  setDataDir, dataDir, db, createAgent, updateAgent, appendEntry, getEntries
 } = await import('../../main/store/db')
 const storeGroups = await import('../../main/store/groups')
-const { planGroupTurns, coordinatorNowText, parseCoordinatorNowText } = await import('../../main/agent/group-turns')
+const { planGroupTurns, coordinatorNowText, parseCoordinatorNowText, hasSentToUserInChain, MAX_GROUP_MEMBERS } = await import('../../main/agent/group-turns')
 const { buildApiMethods } = await import('../api')
 import type { JobWorker } from '../worker'
 import type { SandbotEvent, GroupInfo } from '../../shared/types'
@@ -235,5 +235,73 @@ describe('S1.3: RPC groups:create / groups:update / groups:delete', () => {
     expect(db().prepare('SELECT COUNT(*) AS n FROM agents WHERE id IN (?,?)').get(a, b) as { n: number }).toEqual({ n: 2 })
     const e = await errOf(() => api['groups:delete']!([g.id]))
     expect((e as Error).message).toContain('not found')
+  })
+})
+
+// ---- fase 16b correzioni: P4 (una squadra non resta senza bot) e P1 ----
+
+describe('fase 16b correzioni (P4): i membri finali si validano PRIMA di modificare', () => {
+  it('RPC: togliere TUTTI i bot → rifiuto, squadra intatta (membri, nome e coordinatore)', async () => {
+    const { a, b } = threeBots()
+    const g = await api['groups:create']!(['Ricerca', [a, b], a, 'descrizione iniziale']) as GroupInfo
+    const e = await errOf(() => api['groups:update']!([g.id, { removeMemberIds: [a, b], name: 'Nome nuovo' }]))
+    expect((e as Error).message).toContain('1 to 6')
+    // niente è stato toccato: membri, nome, descrizione e coordinatore
+    expect(storeGroups.groupMemberIds(g.id).sort()).toEqual([a, b].sort())
+    expect(storeGroups.getGroup(g.id)?.name).toBe('Ricerca')
+    expect(storeGroups.getGroup(g.id)?.description).toBe('descrizione iniziale')
+    expect(storeGroups.getGroup(g.id)?.coordinator_id).toBe(a)
+  })
+
+  it('RPC: il coordinatorId della patch deve stare fra i membri FINALI (dopo aggiunte e rimozioni)', async () => {
+    const { a, b } = threeBots()
+    const g = await api['groups:create']!(['Cena', [a, b], a]) as GroupInfo
+    const e = await errOf(() => api['groups:update']!([g.id, { removeMemberIds: [b], coordinatorId: b }]))
+    expect((e as Error).message).toContain('member')
+    expect(storeGroups.groupMemberIds(g.id).sort()).toEqual([a, b].sort())
+  })
+
+  it('tool: togliere TUTTI i bot da una squadra dell\'UTENTE → rifiuto, squadra intatta', async () => {
+    const { a, b } = threeBots()
+    const g = await api['groups:create']!(['Squadra utente', [a, b], a]) as GroupInfo
+    expect(g.createdBy).toBe('user')
+    const { executeTool } = await vi.importActual<typeof import('../../main/agent/tools')>('../../main/agent/tools')
+    const r = await executeTool(a, 'update_group', { groupId: g.id, removeMemberIds: [a, b] })
+    expect(r.output).toBe(`A group needs between 1 and ${MAX_GROUP_MEMBERS} bots: nothing was changed.`)
+    expect(storeGroups.groupMemberIds(g.id).sort()).toEqual([a, b].sort())
+    expect(storeGroups.getGroup(g.id)?.coordinator_id).toBe(a)
+  })
+
+  it('aggiungere e togliere insieme restando nel range → applicato', async () => {
+    const { a, b } = threeBots()
+    const { c } = threeBots()
+    const g = await api['groups:create']!(['Mista', [a, b], a]) as GroupInfo
+    const updated = await api['groups:update']!([g.id, { addMemberIds: [c], removeMemberIds: [b] }]) as GroupInfo
+    expect(updated.members.map((m) => m.agentId).sort()).toEqual([a, c].sort())
+    expect(updated.coordinatorId).toBe(a)
+  })
+})
+
+describe('fase 16b correzioni (P1): la event del riepilogo non cambia catena né consumi', () => {
+  it('la riga discreta NON è una send-message: hasSentToUserInChain e coordinatorLastSendAt restano come prima', () => {
+    const { a, b } = threeBots()
+    const g = storeGroups.createGroup('Cena P1', 'menu', a, [b], a)
+    appendEntry({
+      agentId: a, kind: 'event', role: 'system',
+      content: 'Ho pubblicato il riepilogo nella squadra «Cena P1»',
+      meta: {
+        groupId: g.id, summaryMessageId: 77,
+        call: { id: 'p1', name: 'send_to_user', arguments: JSON.stringify({ text: 'RIEPILOGO' }) },
+        message: { type: 'text', text: 'RIEPILOGO' },
+        resultText: 'delivered to the user: "RIEPILOGO". Do not repeat it.'
+      }
+    })
+    const entries = getEntries(a)
+    expect(entries.some((e) => e.kind === 'event' && e.meta?.summaryMessageId === 77)).toBe(true)
+    // C3: la event non conta come messaggio all'utente nella catena
+    expect(hasSentToUserInChain(entries, { groupId: g.id, rootId: 50 })).toBe(false)
+    // e non consuma le consegne del coordinatore (conto solo le send-message
+    // con meta.groupChain e i riepiloghi NEL GRUPPO, summary = 1)
+    expect(storeGroups.coordinatorLastSendAt(g.id, 50, a)).toBeNull()
   })
 })

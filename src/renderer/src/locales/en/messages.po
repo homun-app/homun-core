@@ -1029,6 +1029,10 @@ msgstr "key for Ollama's web search"
 msgid "chiave salvata (scrivi per sostituirla)"
 msgstr "key saved (type to replace it)"
 
+#: src/renderer/src/lib/activity.ts
+msgid "chiede a un aiutante…"
+msgstr "asks a helper…"
+
 #: src/renderer/src/components/Settings.tsx
 msgid "Chiedi approvazione"
 msgstr "Ask for approval"
@@ -1111,6 +1115,10 @@ msgstr "compaction"
 #: src/shared/ui-messages.ts
 msgid "card.fill"
 msgstr "Fill in the “{label}” login on {origin}"
+
+#: src/renderer/src/lib/activity.ts
+msgid "compila l'accesso…"
+msgstr "fills in the login…"
 
 #. placeholder {0}: fill.label
 #. placeholder {1}: fill.origin
@@ -1801,6 +1809,14 @@ msgid "Ha cercato sul web"
 msgstr "Searched the web"
 
 #: src/renderer/src/lib/activity.ts
+msgid "Ha chiesto a un aiutante"
+msgstr "Asked a helper"
+
+#: src/renderer/src/lib/activity.ts
+msgid "Ha compilato l'accesso"
+msgstr "Filled in the login"
+
+#: src/renderer/src/lib/activity.ts
 msgid "Ha eseguito un comando"
 msgstr "Ran a command"
 
@@ -1829,6 +1845,10 @@ msgid "Ha letto {host}"
 msgstr "Read {host}"
 
 #: src/renderer/src/lib/activity.ts
+msgid "Ha letto un documento"
+msgstr "Read a document"
+
+#: src/renderer/src/lib/activity.ts
 msgid "Ha letto un file"
 msgstr "Read a file"
 
@@ -1839,6 +1859,18 @@ msgstr "Read a web page"
 #: src/renderer/src/lib/activity.ts
 msgid "Ha navigato"
 msgstr "Browsed"
+
+#: src/renderer/src/lib/activity.ts
+msgid "Ha preso nota"
+msgstr "Took note"
+
+#: src/renderer/src/lib/activity.ts
+msgid "Ha ricordato"
+msgstr "Remembered"
+
+#: src/renderer/src/lib/activity.ts
+msgid "Ha salvato nella Libreria"
+msgstr "Saved to the Library"
 
 #: src/renderer/src/lib/activity.ts
 msgid "Ha scritto {file}"
@@ -2426,6 +2458,10 @@ msgstr "reads {host}…"
 #: src/shared/ui-messages.ts
 msgid "approval.readsOutsideBox"
 msgstr "reads outside the shared box"
+
+#: src/renderer/src/lib/activity.ts
+msgid "legge un documento…"
+msgstr "reads a document…"
 
 #: src/renderer/src/lib/activity.ts
 msgid "legge un file…"
@@ -3171,6 +3207,10 @@ msgstr "default"
 msgid "Predefinito"
 msgstr "Default"
 
+#: src/renderer/src/lib/activity.ts
+msgid "prende nota…"
+msgstr "takes note…"
+
 #: src/renderer/src/components/BotScreen.tsx
 msgid "Prendi il controllo"
 msgstr "Take control"
@@ -3375,7 +3415,7 @@ msgstr "quick ask"
 #. placeholder {0}: THINKING_LABELS[agent.thinking ?? 'default'] ? i18n.t(THINKING_LABELS[agent.thinking ?? 'default']!) : (agent.thinking ?? 'default')
 #: src/renderer/src/components/Chat.tsx
 msgid "Ragiona: {0}"
-msgstr "Reason: {0}"
+msgstr "Thinking: {0}"
 
 #: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/ui/ModelPicker.tsx
@@ -3501,6 +3541,10 @@ msgstr "reconnect"
 #: src/renderer/src/components/Settings.tsx
 msgid "Riconnetti"
 msgstr "Reconnect"
+
+#: src/renderer/src/lib/activity.ts
+msgid "ricorda…"
+msgstr "remembers…"
 
 #: src/renderer/src/components/TeamChat.tsx
 msgid "riepilogo per te"
@@ -3670,6 +3714,10 @@ msgstr "Save contact “{name}”"
 #: src/renderer/src/components/LibraryCards.tsx
 msgid "Salva nel vault"
 msgstr "Save to vault"
+
+#: src/renderer/src/lib/activity.ts
+msgid "salva nella Libreria…"
+msgstr "saves to the Library…"
 
 #: src/renderer/src/components/LibraryCards.tsx
 msgid "Salvato nel vault"

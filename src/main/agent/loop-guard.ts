@@ -23,6 +23,9 @@ export function activityOf(tool: string, input: Record<string, unknown>): { tool
   else if (tool === 'read-file' || tool === 'write-file' || tool === 'list-directory') target = String(input.path ?? '')
   else if (tool.startsWith('mcp__')) target = tool.split('__')[1] ?? tool
   else if (tool === 'use-app') target = String(input.action ?? '')
+  // fase 16b correzioni (P2): anche web_fetch porta l'URL letto — la mascotte
+  // dice «legge <host>…» invece della pagina web generica
+  else if (tool === 'web_fetch') target = String(input.url ?? '')
   // fase 11b: il browser — l'URL per l'apertura, il ref per le azioni
   else if (tool === 'browser_open') target = String(input.url ?? '')
   else if (tool.startsWith('browser_')) target = String(input.ref ?? '')

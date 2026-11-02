@@ -1,10 +1,15 @@
 // Fase 16b (S3.3) — test della mezza riga d'attività (activityPhrase) e del
 // raggruppamento dei passaggi per turno (stepsOfTurn). Puri, nei due cataloghi.
+// Fase 16b correzioni (P2): le famiglie nuove del daemon + il test di
+// coerenza fra la tabella TOOL_FAMILIES e i nomi dei tool definiti nel daemon.
 import { describe, expect, it } from 'vitest'
 import { i18n } from '@lingui/core'
-import { activityPhrase, stepsOfTurn, targetOfArguments, hostOf, fileNameOf, stepsDurationSeconds } from '../activity'
+import { activityPhrase, stepsOfTurn, targetOfArguments, hostOf, fileNameOf, stepsDurationSeconds, TOOL_FAMILIES } from '../activity'
 import type { TranscriptEntry } from '../../../../shared/types'
 import { itCatalogEntries, enCatalogEntries } from '../../__tests__/po-helper'
+import { toolDefs, computerToolDefs, wakeParentToolDef } from '../../../../main/agent/tools'
+import { findToolsToolDef } from '../../../../main/mcp/find-tools'
+import { youKeylessProvider, exaMcpKeylessProvider, tavilyKeylessProvider, EXA_MCP_SEARCH_TOOL } from '../../../../main/agent/web-search-providers'
 
 const entry = (over: Partial<TranscriptEntry> & Pick<TranscriptEntry, 'id' | 'kind' | 'role'>): TranscriptEntry => ({
   agentId: 'a', content: '', meta: null, createdAt: 1, ...over
@@ -17,7 +22,7 @@ describe('fase 16b (S3.3): activityPhrase', () => {
     ['it', 'legge report.md…', { tool: 'read-file', target: '/box/workspace/report.md' }],
     ['it', 'cerca sul web…', { tool: 'web_search', target: 'normativa smart working' }],
     ['it', 'usa il computer…', { tool: 'use-app', target: 'calcolatrice' }],
-    ['it', 'scrive un documento…', { tool: 'save_document', target: 'riepilogo' }],
+    ['it', 'scrive un documento…', { tool: 'write_document', target: 'riepilogo' }],
     ['it', 'naviga…', { tool: 'browser_click', target: 'ref=e5' }],
     ['it', 'lavora…', { tool: 'tool_sconosciuto', target: 'x' }],
     ['it', 'lavora…', null]
@@ -28,6 +33,25 @@ describe('fase 16b (S3.3): activityPhrase', () => {
     expect(i18n.t(activityPhrase(activity as never))).toBe(expected)
   })
 
+  it('fase 16b correzioni (P2): le famiglie nuove del daemon, in italiano', () => {
+    i18n.load('it', itCatalogEntries())
+    i18n.activate('it')
+    expect(i18n.t(activityPhrase({ tool: 'web_fetch', target: 'https://fibrapro.it/brand' }))).toBe('legge fibrapro.it…')
+    expect(i18n.t(activityPhrase({ tool: 'list-directory', target: '/box' }))).toBe('guarda i file…')
+    expect(i18n.t(activityPhrase({ tool: 'edit_document', target: 'x' }))).toBe('scrive un documento…')
+    expect(i18n.t(activityPhrase({ tool: 'read_document', target: 'x' }))).toBe('legge un documento…')
+    expect(i18n.t(activityPhrase({ tool: 'visualize', target: 'x' }))).toBe('fa un grafico…')
+    expect(i18n.t(activityPhrase({ tool: 'exa', target: 'x' }))).toBe('cerca sul web…')
+    expect(i18n.t(activityPhrase({ tool: 'tavily', target: 'x' }))).toBe('cerca sul web…')
+    expect(i18n.t(activityPhrase({ tool: 'web_search_exa', target: 'x' }))).toBe('cerca sul web…')
+    expect(i18n.t(activityPhrase({ tool: 'save_to_library', target: 'x' }))).toBe('salva nella Libreria…')
+    expect(i18n.t(activityPhrase({ tool: 'recall_memory', target: 'x' }))).toBe('ricorda…')
+    expect(i18n.t(activityPhrase({ tool: 'update_memory', target: 'x' }))).toBe('prende nota…')
+    expect(i18n.t(activityPhrase({ tool: 'spawn_subagent', target: 'x' }))).toBe('chiede a un aiutante…')
+    expect(i18n.t(activityPhrase({ tool: 'message_subagent', target: 'x' }))).toBe('chiede a un aiutante…')
+    expect(i18n.t(activityPhrase({ tool: 'fill_credential', target: 'x' }))).toBe('compila l\'accesso…')
+  })
+
   it('inglese: le stesse famiglie nel catalogo en', () => {
     i18n.load('en', enCatalogEntries())
     i18n.activate('en')
@@ -35,6 +59,17 @@ describe('fase 16b (S3.3): activityPhrase', () => {
     expect(i18n.t(activityPhrase({ tool: 'run-command', target: 'rm -rf /box' }))).toBe('runs a command…')
     expect(i18n.t(activityPhrase({ tool: 'web_search', target: 'q' }))).toBe('searches the web…')
     expect(i18n.t(activityPhrase(null))).toBe('working…')
+    // fase 16b correzioni (P2): le famiglie nuove anche in inglese
+    expect(i18n.t(activityPhrase({ tool: 'web_fetch', target: 'https://fibrapro.it/brand' }))).toBe('reads fibrapro.it…')
+    expect(i18n.t(activityPhrase({ tool: 'list-directory', target: '/box' }))).toBe('looks through the files…')
+    expect(i18n.t(activityPhrase({ tool: 'write_document', target: 'x' }))).toBe('writes a document…')
+    expect(i18n.t(activityPhrase({ tool: 'visualize', target: 'x' }))).toBe('makes a chart…')
+    expect(i18n.t(activityPhrase({ tool: 'exa', target: 'x' }))).toBe('searches the web…')
+    expect(i18n.t(activityPhrase({ tool: 'save_to_library', target: 'x' }))).toBe('saves to the Library…')
+    expect(i18n.t(activityPhrase({ tool: 'recall_memory', target: 'x' }))).toBe('remembers…')
+    expect(i18n.t(activityPhrase({ tool: 'update_memory', target: 'x' }))).toBe('takes note…')
+    expect(i18n.t(activityPhrase({ tool: 'spawn_subagent', target: 'x' }))).toBe('asks a helper…')
+    expect(i18n.t(activityPhrase({ tool: 'fill_credential', target: 'x' }))).toBe('fills in the login…')
     i18n.load('it', itCatalogEntries())
     i18n.activate('it')
   })
@@ -44,6 +79,8 @@ describe('fase 16b (S3.3): activityPhrase', () => {
     i18n.activate('it')
     // URL malformato: niente host → la pagina generica, MAI l'URL intero
     expect(i18n.t(activityPhrase({ tool: 'browser_navigate', target: 'not a url' }))).toBe('apre una pagina…')
+    // web_fetch senza URL valido: la pagina web generica
+    expect(i18n.t(activityPhrase({ tool: 'web_fetch', target: '' }))).toBe('legge una pagina web…')
     // percorso lungo: solo il nome del file
     expect(i18n.t(activityPhrase({ tool: 'write-file', target: '/box/livello1/livello2/livello3/relazione.md' }))).toBe('scrive relazione.md…')
     // il testo del comando NON compare MAI
@@ -58,6 +95,17 @@ describe('fase 16b (S3.3): activityPhrase', () => {
     expect(i18n.t(activityPhrase({ tool: 'browser_navigate', target: 'https://museivaticani.va' }, 'past'))).toBe('Ha aperto museivaticani.va')
     expect(i18n.t(activityPhrase({ tool: 'run-command', target: 'ls' }, 'past'))).toBe('Ha eseguito un comando')
     expect(i18n.t(activityPhrase({ tool: 'read-file', target: '/a/b/report.md' }, 'past'))).toBe('Ha letto report.md')
+    // fase 16b correzioni (P2): dove la tabella non prevedeva il passato, si
+    // forma come per le famiglie esistenti
+    expect(i18n.t(activityPhrase({ tool: 'list-directory', target: '/box' }, 'past'))).toBe('Ha guardato i file')
+    expect(i18n.t(activityPhrase({ tool: 'read_document', target: 'x' }, 'past'))).toBe('Ha letto un documento')
+    expect(i18n.t(activityPhrase({ tool: 'visualize', target: 'x' }, 'past'))).toBe('Ha fatto un grafico')
+    expect(i18n.t(activityPhrase({ tool: 'write_document', target: 'x' }, 'past'))).toBe('Ha scritto un documento')
+    expect(i18n.t(activityPhrase({ tool: 'tavily', target: 'x' }, 'past'))).toBe('Ha cercato sul web')
+    expect(i18n.t(activityPhrase({ tool: 'save_to_library', target: 'x' }, 'past'))).toBe('Ha salvato nella Libreria')
+    expect(i18n.t(activityPhrase({ tool: 'update_memory', target: 'x' }, 'past'))).toBe('Ha preso nota')
+    expect(i18n.t(activityPhrase({ tool: 'spawn_subagent', target: 'x' }, 'past'))).toBe('Ha chiesto a un aiutante')
+    expect(i18n.t(activityPhrase({ tool: 'fill_credential', target: 'x' }, 'past'))).toBe('Ha compilato l\'accesso')
   })
 
   it('helper: host e nome del file', () => {
@@ -65,6 +113,35 @@ describe('fase 16b (S3.3): activityPhrase', () => {
     expect(hostOf('fibrapro.it')).toBeNull()
     expect(fileNameOf('/box/workspace/report.md')).toBe('report.md')
     expect(fileNameOf('')).toBe('')
+  })
+})
+
+// fase 16b correzioni (P2): la tabella non si disallinea dal daemon — ogni
+// nome deve esistere fra i tool definiti nel daemon (toolDefs, computer e
+// find_tools, i provider della catena di ricerca), salvo i prefissi mcp__ e
+// browser_ (dinamici/non verificabili staticamente)
+describe('fase 16b correzioni (P2): coerenza TOOL_FAMILIES ↔ nomi dei tool del daemon', () => {
+  it('ogni nome della tabella esiste nel daemon', () => {
+    const names = new Set<string>([
+      ...toolDefs.map((t) => t.name),
+      ...computerToolDefs.map((t) => t.name),
+      wakeParentToolDef.name,
+      findToolsToolDef.name,
+      // i nomi della catena di ricerca keyless (provider + tool MCP di Exa)
+      youKeylessProvider().name,
+      exaMcpKeylessProvider().name,
+      tavilyKeylessProvider().name,
+      EXA_MCP_SEARCH_TOOL
+    ])
+    const ghosts = TOOL_FAMILIES.flatMap((f) => f.tools).filter(
+      (t) => !t.startsWith('mcp__') && !t.startsWith('browser_') && !names.has(t)
+    )
+    expect(ghosts).toEqual([])
+  })
+
+  it('la tabella non ha doppioni fra famiglie', () => {
+    const all = TOOL_FAMILIES.flatMap((f) => f.tools)
+    expect(new Set(all).size).toBe(all.length)
   })
 })
 

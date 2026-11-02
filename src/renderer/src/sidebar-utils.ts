@@ -165,6 +165,17 @@ export function collapsedVoices(model: SidebarModel): CollapsedVoice[] {
 }
 
 /**
+ * Fase 16b correzioni (P3): una squadra della barra è APERTA di default (i
+ * membri si vedono sotto il coordinatore — «chi lavora per lui sta sotto,
+ * rientrato»). In localStorage si ricorda solo la CHIUSURA scelta
+ * dall'utente ('0'); riaprire cancella il ricordo e si torna al default.
+ * saved = ciò che restituisce localStorage per la squadra (null se assente).
+ */
+export function teamOpenState(saved: string | null): boolean {
+  return saved !== '0'
+}
+
+/**
  * L'anteprima dell'ultimo messaggio visibile di un transcript: i send-message
  * (non trattenuti), i widget con la loro domanda, le bozze col destinatario e
  * i messaggi dell'utente (con "Tu:"). '' se non c'è niente di visibile.

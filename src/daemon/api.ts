@@ -685,10 +685,22 @@ export function buildApiMethods(
       const g = groups.getGroup(gid)
       if (!g) throw uiError(UI.rpcGroupNotFound)
       const p = (patch ?? {}) as { name?: string; description?: string; addMemberIds?: string[]; removeMemberIds?: string[]; coordinatorId?: string }
-      if (p.name !== undefined && String(p.name).trim()) groups.updateGroup(gid, { name: String(p.name).trim() })
-      if (p.description !== undefined) groups.updateGroup(gid, { description: String(p.description ?? '').trim() })
       const add = [...new Set(Array.isArray(p.addMemberIds) ? p.addMemberIds.map((m) => String(m)) : [])]
       const remove = [...new Set(Array.isArray(p.removeMemberIds) ? p.removeMemberIds.map((m) => String(m)) : [])]
+      // fase 16b correzioni (P4): l'ESITO si valida PRIMA di modificare —
+      // membri finali = (attuali + aggiunte − rimozioni), 1 ≤ n ≤ 6: una
+      // squadra non può restare senza bot né scavalcare il tetto. Rifiuto
+      // senza toccare nulla (nome e descrizione compresi).
+      const finalMembers = new Set([...groups.groupMemberIds(gid), ...add].filter((id) => !remove.includes(id)))
+      if (finalMembers.size < 1 || finalMembers.size > MAX_GROUP_MEMBERS) throw uiError(UI.rpcGroupMembersRange)
+      // seconda regola: se la patch porta un coordinatorId, il nuovo
+      // coordinatore deve stare fra i membri FINALI
+      if (p.coordinatorId !== undefined) {
+        const coord = String(p.coordinatorId ?? '')
+        if (!coord || !finalMembers.has(coord)) throw uiError(UI.rpcGroupCoordinatorNotMember)
+      }
+      if (p.name !== undefined && String(p.name).trim()) groups.updateGroup(gid, { name: String(p.name).trim() })
+      if (p.description !== undefined) groups.updateGroup(gid, { description: String(p.description ?? '').trim() })
       const agents = store.listAgents()
       for (const id of add) {
         const refusal = store.subagentRefusal(id)
@@ -704,16 +716,6 @@ export function buildApiMethods(
         const r = groups.removeGroupMember(gid, id)
         groups.cancelMemberGroupJobs(db(), gid, id)
         if (r.coordinatorChanged) coordinatorChanged = true
-      }
-      const size = groups.groupMemberIds(gid).length
-      if (size > MAX_GROUP_MEMBERS) {
-        // si riportano le aggiunte: il tetto vale a fine giro
-        for (const id of add.reverse()) {
-          groups.removeGroupMember(gid, id)
-          groups.cancelMemberGroupJobs(db(), gid, id)
-          if (groups.groupMemberIds(gid).length <= MAX_GROUP_MEMBERS) break
-        }
-        throw uiError(UI.rpcGroupMembersRange)
       }
       if (p.coordinatorId !== undefined) {
         const coord = String(p.coordinatorId ?? '')

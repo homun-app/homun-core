@@ -370,13 +370,16 @@ function BotPanel({ onClose }: { onClose(): void }) {
           <span aria-hidden="true" className="mt-1 h-2 w-16 rounded-full bg-foreground/10" />
         </div>
         <h2 className="mt-3 font-display text-[26px] leading-tight">{info.agent.name}</h2>
+        {/* fase 16b correzioni (P5): le quattro pillole stanno dentro i 340 px
+            del pannello (292 utilizzabili col padding interno) — testo 14 px e
+            padding 8 px: misurate 288 px sul font Figtree, senza scorrimento */}
         <div role="tablist" className="mt-3 flex gap-1">
           {(Object.keys(TAB_LABEL) as PanelTab[]).map((id) => (
             <button
               key={id}
               role="tab"
               aria-selected={tab === id}
-              className={`h-8 rounded-full px-3 text-[15px] transition ${tab === id ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+              className={`h-8 rounded-full px-2 text-sm transition ${tab === id ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
               onClick={() => setTab(id)}
             >
               {i18n.t(TAB_LABEL[id])}

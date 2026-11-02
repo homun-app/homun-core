@@ -36,47 +36,125 @@ export function hostOf(target: string): string | null {
   }
 }
 
+/**
+ * Fase 16b correzioni (P2): le famiglie di tool sono una TABELLA esportata —
+ * nome del tool → frase presente/passata, più l'eventuale uso di host o file.
+ * Solo nomi VERO del daemon (il test di coerenza in activity.test.ts lo
+ * verifica contro le definizioni dei tool); dove il passato non era previsto,
+ * si forma come per le famiglie esistenti. Il parametro si chiama SEMPRE
+ * host/file: è il nome che finisce nel msgid Lingui (catalogo stabile).
+ */
+export interface ToolFamily {
+  /** i nomi dei tool del daemon che usano questa famiglia */
+  tools: readonly string[]
+  /** la famiglia mostra l'host dell'URL o il nome del file nel testo */
+  target?: 'host' | 'file'
+  /** la frase presente; con target, l'host/il file risolto ('' se assente) */
+  present: (host: string) => MessageDescriptor
+  /** la frase passata; con target, l'host/il file risolto ('' se assente) */
+  past: (host: string) => MessageDescriptor
+}
+
+export const TOOL_FAMILIES: readonly ToolFamily[] = [
+  {
+    // i comandi NON mostrano mai il testo: solo «esegue un comando»
+    tools: ['run-command'],
+    present: () => msg`esegue un comando…`,
+    past: () => msg`Ha eseguito un comando`
+  },
+  {
+    // exa/tavily/web_search_exa: i nomi della catena di ricerca del daemon
+    tools: ['web_search', 'exa', 'tavily', 'web_search_exa'],
+    present: () => msg`cerca sul web…`,
+    past: () => msg`Ha cercato sul web`
+  },
+  {
+    tools: ['web_fetch'],
+    target: 'host',
+    present: (host) => (host ? msg`legge ${host}…` : msg`legge una pagina web…`),
+    past: (host) => (host ? msg`Ha letto ${host}` : msg`Ha letto una pagina web`)
+  },
+  {
+    // browser_navigate: il nome MCP vero usato dentro browser.ts
+    tools: ['browser_open', 'browser_navigate'],
+    target: 'host',
+    present: (host) => (host ? msg`apre ${host}…` : msg`apre una pagina…`),
+    past: (host) => (host ? msg`Ha aperto ${host}` : msg`Ha aperto una pagina`)
+  },
+  {
+    tools: ['read-file'],
+    target: 'file',
+    present: (file) => (file ? msg`legge ${file}…` : msg`legge un file…`),
+    past: (file) => (file ? msg`Ha letto ${file}` : msg`Ha letto un file`)
+  },
+  {
+    tools: ['write-file'],
+    target: 'file',
+    present: (file) => (file ? msg`scrive ${file}…` : msg`scrive un file…`),
+    past: (file) => (file ? msg`Ha scritto ${file}` : msg`Ha scritto un file`)
+  },
+  {
+    tools: ['list-directory'],
+    present: () => msg`guarda i file…`,
+    past: () => msg`Ha guardato i file`
+  },
+  {
+    tools: ['write_document', 'edit_document'],
+    present: () => msg`scrive un documento…`,
+    past: () => msg`Ha scritto un documento`
+  },
+  {
+    tools: ['read_document'],
+    present: () => msg`legge un documento…`,
+    past: () => msg`Ha letto un documento`
+  },
+  {
+    tools: ['visualize'],
+    present: () => msg`fa un grafico…`,
+    past: () => msg`Ha fatto un grafico`
+  },
+  {
+    tools: ['save_to_library'],
+    present: () => msg`salva nella Libreria…`,
+    past: () => msg`Ha salvato nella Libreria`
+  },
+  {
+    tools: ['recall_memory'],
+    present: () => msg`ricorda…`,
+    past: () => msg`Ha ricordato`
+  },
+  {
+    tools: ['update_memory'],
+    present: () => msg`prende nota…`,
+    past: () => msg`Ha preso nota`
+  },
+  {
+    tools: ['spawn_subagent', 'message_subagent'],
+    present: () => msg`chiede a un aiutante…`,
+    past: () => msg`Ha chiesto a un aiutante`
+  },
+  {
+    tools: ['fill_credential'],
+    present: () => msg`compila l'accesso…`,
+    past: () => msg`Ha compilato l'accesso`
+  }
+]
+
+const FAMILY_BY_TOOL = new Map<string, ToolFamily>(TOOL_FAMILIES.flatMap((f) => f.tools.map((t) => [t, f] as const)))
+
 /** La famiglia di tool: verbo presente e passato (descriptor Lingui). */
 function familyPhrase(tool: string, target: string, past: boolean): MessageDescriptor {
-  const host = hostOf(target)
-  const file = fileNameOf(target)
-  // i comandi NON mostrano mai il testo: solo «esegue un comando»
-  if (tool === 'run-command' || tool === 'run_command') {
-    return past ? msg`Ha eseguito un comando` : msg`esegue un comando…`
+  const row = FAMILY_BY_TOOL.get(tool)
+  if (row) {
+    const t = row.target === 'host' ? (hostOf(target) ?? '') : row.target === 'file' ? fileNameOf(target) : ''
+    return (past ? row.past : row.present)(t)
   }
-  if (tool === 'web_search' || tool === 'web-search') {
-    return past ? msg`Ha cercato sul web` : msg`cerca sul web…`
-  }
-  if (tool === 'web_fetch' || tool === 'web-fetch') {
-    if (host) return past ? msg`Ha letto ${host}` : msg`legge ${host}…`
-    return past ? msg`Ha letto una pagina web` : msg`legge una pagina web…`
-  }
-  if (tool === 'browser_navigate' || tool === 'browser_open' || tool === 'browser_navigate_to') {
-    if (host) return past ? msg`Ha aperto ${host}` : msg`apre ${host}…`
-    return past ? msg`Ha aperto una pagina` : msg`apre una pagina…`
-  }
+  // il resto del browser, azioni sulla pagina aperta (prefisso browser_)
   if (tool.startsWith('browser_')) {
     return past ? msg`Ha navigato` : msg`naviga…`
   }
-  if (tool === 'read-file' || tool === 'read_file') {
-    if (file) return past ? msg`Ha letto ${file}` : msg`legge ${file}…`
-    return past ? msg`Ha letto un file` : msg`legge un file…`
-  }
-  if (tool === 'write-file' || tool === 'write_file' || tool === 'edit-file' || tool === 'edit_file') {
-    if (file) return past ? msg`Ha scritto ${file}` : msg`scrive ${file}…`
-    return past ? msg`Ha scritto un file` : msg`scrive un file…`
-  }
-  if (tool === 'list-dir' || tool === 'list_dir' || tool === 'search_files') {
-    return past ? msg`Ha guardato i file` : msg`guarda i file…`
-  }
-  if (tool === 'save_document' || tool === 'save-document') {
-    return past ? msg`Ha scritto un documento` : msg`scrive un documento…`
-  }
-  if (tool === 'save_chart' || tool === 'save-chart') {
-    return past ? msg`Ha fatto un grafico` : msg`fa un grafico…`
-  }
   // il computer del bot (use-app e i tool di computer use)
-  if (tool === 'use-app' || tool === 'computer' || tool.startsWith('computer_')) {
+  if (tool === 'use-app' || tool.startsWith('computer_')) {
     return past ? msg`Ha usato il computer` : msg`usa il computer…`
   }
   // i tool dei connettori MCP: mcp__<connettore>__<tool>

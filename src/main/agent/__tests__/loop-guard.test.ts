@@ -52,6 +52,12 @@ describe('activityOf: nome del tool e target, mai testo del modello', () => {
     expect(activityOf('recall_memory', { query: 'x' })).toEqual({ tool: 'recall_memory', target: '' })
   })
 
+  it('fase 16b correzioni (P2): web_fetch → l\'URL letto (la mascotte dice «legge <host>…»)', () => {
+    expect(activityOf('web_fetch', { url: 'https://fibrapro.it/login' })).toEqual({ tool: 'web_fetch', target: 'https://fibrapro.it/login' })
+    // senza url: target vuoto, la frase resta sulla pagina generica
+    expect(activityOf('web_fetch', {})).toEqual({ tool: 'web_fetch', target: '' })
+  })
+
   it('abbreviateCommand tronca oltre il massimo', () => {
     expect(abbreviateCommand('ls')).toBe('ls')
     expect(abbreviateCommand('a'.repeat(60), 10)).toBe('aaaaaaaaaa…')

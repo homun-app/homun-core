@@ -614,7 +614,9 @@ function NoticeRow({ entry }: { entry: TranscriptEntry }) {
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
   const setSettingsTab = useStore((s) => s.setSettingsTab)
   const uiId = (entry.meta?.ui as { id?: string } | undefined)?.id
-  const withAction = uiId === 'notice.modelError' || uiId === 'notice.modelNotResponding'
+  // fase 16b correzioni (P6): anche l'avviso «configura prima un provider e
+  // un modello» ha la via d'uscita — stesso bottone «Scegli un modello»
+  const withAction = uiId === 'notice.modelError' || uiId === 'notice.modelNotResponding' || uiId === 'notice.configureProviderFirst'
   const fallback = uiId === 'notice.modelFallback' || uiId === 'notice.modelFallbackRoute' || uiId === 'notice.modelRouteCooled'
   if (!withAction && !fallback) {
     return <p className="text-center text-xs text-destructive/90">{uiTextOf(entry)}</p>

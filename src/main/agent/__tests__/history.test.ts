@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { buildMessages, visibleReplyEntries, sendResultText } from '../history'
+import { deliveredResultText } from '../turn-sends'
 import type { TranscriptEntry } from '../../../shared/types'
 
 let nextId = 1
@@ -326,5 +327,41 @@ describe('fase 8: sendCallOf per card task e regole proposte', () => {
     // e buildMessages li usa come coppie chiamata/risultato coerenti
     const msgs = buildMessages(sys, [task])
     expect(msgs[1]?.toolCalls?.[0]?.name).toBe('create_task')
+  })
+})
+
+// fase 16b correzioni (P1): il riepilogo di chiusura del coordinatore è una
+// event discreta nella chat privata, ma nella storia del modello torna come
+// send_to_user — tool call + result IDENTICO a quello visto nel turno
+describe('fase 16b correzioni (P1): la event del riepilogo di chiusura nella storia', () => {
+  const ARGS = '{"text":"RIEPILOGO: menu e luoghi pronti."}'
+  const TEXT = 'RIEPILOGO: menu e luoghi pronti.'
+  const summaryRow = mk('event', 'system', 'Ho pubblicato il riepilogo nella squadra «Cena»', {
+    ui: { id: 'group.summaryPosted', values: { name: 'Cena' } },
+    groupId: 1, summaryMessageId: 42,
+    call: { id: 'cl2', name: 'send_to_user', arguments: ARGS },
+    message: { type: 'text', text: TEXT },
+    resultText: deliveredResultText(TEXT, { held: false })
+  })
+
+  it('buildMessages: tool call send_to_user col testo del riepilogo + result identico a quello del turno', () => {
+    const msgs = buildMessages(sys, [mk('message', 'user', 'chiudi'), summaryRow, mk('message', 'user', 'mi ricordi il riepilogo?')])
+    // [system, user, assistant(toolCalls), tool, user]
+    expect(msgs[2]?.toolCalls).toHaveLength(1)
+    expect(msgs[2]?.toolCalls?.[0]).toMatchObject({ id: `send_${summaryRow.id}`, name: 'send_to_user', arguments: ARGS })
+    expect(msgs[3]).toMatchObject({ role: 'tool', toolCallId: `send_${summaryRow.id}` })
+    expect(msgs[3]?.content).toBe(deliveredResultText(TEXT, { held: false }))
+    expect(msgs[3]?.content).toContain(TEXT)
+  })
+
+  it('una event QUALSIASI senza summaryMessageId resta fuori (anche con meta)', () => {
+    const turnEnd = mk('event', 'system', 'Turno chiuso', { turnEnd: 'FINISHED' })
+    const msgs = buildMessages(sys, [mk('message', 'user', 'ciao'), turnEnd])
+    expect(msgs.map((m) => m.role)).toEqual(['system', 'user'])
+    // e la event del riepilogo SENZA meta.call (righe scritte prima della
+    // correzione) resta fuori come le altre
+    const old = mk('event', 'system', 'Ho pubblicato il riepilogo nella squadra «Cena»', { groupId: 1, summaryMessageId: 42 })
+    const msgs2 = buildMessages(sys, [mk('message', 'user', 'ciao'), old])
+    expect(msgs2.map((m) => m.role)).toEqual(['system', 'user'])
   })
 })
