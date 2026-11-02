@@ -6,6 +6,10 @@
 // alla larghezza normale sulle altre. Con una SQUADRA aperta il pannello
 // mostra «Membri»: elenco, coordinatore, aggiungi/togli, descrizione,
 // eliminazione. La Libreria è uscita dal pannello (16c la farà globale).
+// correzioni 2 (Q1): la larghezza la decide layoutFor — quando la chat non
+// può restare ≥ CHAT_MIN il pannello galleggia in OVERLAY sopra di essa
+// (ombra morbida, nessun bordo, si chiude con Esc, con la ✕ o clicando
+// fuori) invece di tagliarsi oltre il bordo della finestra.
 import { useEffect, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
@@ -17,10 +21,38 @@ import { Bot } from '../bot/Bot'
 import { useBotInfo } from '../bot/use-bot'
 import type { GroupInfo, LibraryItemInfo, ModelInfo, RoutineInfo, ThinkingSetting, Agent } from '../../../shared/types'
 import { ChangeAvatarDialog } from './BotDialogs'
+// fase 16b correzioni 2 (Q1): il risultato di layoutFor
+import type { LayoutResult } from '../layout'
 // fase 19b (T1) → fase 16b (S4): il pannello «Computer» vive QUI come scheda
 import { ComputerPanel } from './ComputerPanel'
 import { ModelPicker, THINKING_LABELS } from './ui/ModelPicker'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu'
+
+/** L'etichetta ✕ del pannello, sulla riga comune (fase 16b correzioni 2, Q3). */
+function PanelClose({ onClose }: { onClose(): void }) {
+  const { i18n } = useLingui()
+  return (
+    <button
+      className="no-drag grid size-9 place-items-center rounded-full bg-muted/60 text-muted-foreground transition hover:text-foreground"
+      aria-label={i18n.t(msg`Chiudi il pannello`)}
+      title={i18n.t(msg`Chiudi il pannello`)}
+      onClick={onClose}
+    >
+      <X className="size-4" />
+    </button>
+  )
+}
+
+/** La fascia alta del pannello: trascinamento della finestra + ✕ a y 12 (Q3). */
+function PanelTopBand({ onClose }: { onClose(): void }) {
+  return (
+    <div className="drag-region absolute inset-x-0 top-0 z-10 flex h-[60px] flex-col">
+      <div className="mt-3 flex h-9 items-center justify-end px-4">
+        <PanelClose onClose={onClose} />
+      </div>
+    </div>
+  )
+}
 
 const TASK_LABEL: Record<string, MessageDescriptor> = {
   working: msg`in corso`,
@@ -326,12 +358,18 @@ function AdvancedTab() {
 }
 
 /** Il pannello del bot: mascotte sospesa, schede, contenuto. */
-function BotPanel({ onClose }: { onClose(): void }) {
+function BotPanel({ layout, onClose }: { layout: LayoutResult; onClose(): void }) {
   const { i18n } = useLingui()
   const activeId = useStore((s) => s.activeId)
   const info = useBotInfo(activeId)
   const computerPanel = useStore((s) => s.computerPanel)
-  const [tab, setTab] = useState<PanelTab>('profile')
+  // fase 16b correzioni 2 (Q1): la scheda aperta vive nello store — è lei che
+  // dice a layoutFor quanto dev'essere largo il pannello (Computer = wide)
+  const setPanelTab = useStore((s) => s.setPanelTab)
+  const [tab, setTab] = useState<PanelTab>(() => {
+    const t = useStore.getState().panelTab
+    return t === 'members' ? 'profile' : t
+  })
   const [avatarOpen, setAvatarOpen] = useState(false)
   const tabRequest = useStore((s) => s.botPanelTabRequest)
   const clearTabRequest = useStore((s) => s.clearBotPanelTabRequest)
@@ -346,25 +384,24 @@ function BotPanel({ onClose }: { onClose(): void }) {
       clearTabRequest()
     }
   }, [tabRequest, clearTabRequest])
+  useEffect(() => {
+    setPanelTab(tab)
+  }, [tab, setPanelTab])
   if (!info) return null
-  const wide = tab === 'computer'
+  const overlay = layout.panel === 'overlay'
   return (
     <aside
-      className="flex shrink-0 flex-col border-l border-border/50 bg-card transition-[width]"
-      style={{ width: wide ? 560 : 340 }}
+      className={
+        overlay
+          ? // Q1: il pannello galleggia sopra la chat — ombra morbida, nessun bordo
+            'absolute bottom-0 right-0 top-0 z-10 flex flex-col bg-card shadow-soft'
+          : 'relative flex shrink-0 flex-col border-l border-border/50 bg-card transition-[width]'
+      }
+      style={{ width: layout.panelWidth }}
     >
-      <div className="flex justify-end px-4 pt-4">
-        <button
-          className="grid size-9 place-items-center rounded-full bg-muted/60 text-muted-foreground transition hover:text-foreground"
-          aria-label={i18n.t(msg`Chiudi il pannello`)}
-          title={i18n.t(msg`Chiudi il pannello`)}
-          onClick={onClose}
-        >
-          <X className="size-4" />
-        </button>
-      </div>
+      <PanelTopBand onClose={onClose} />
       {/* la mascotte grande sospesa: niente riquadro, solo l'ombra ovale */}
-      <div className="flex flex-col items-center px-6">
+      <div className="flex flex-col items-center px-6 pt-14">
         <div className="flex flex-col items-center">
           <Bot family={info.avatar.family} color={info.avatar.color} state={info.state} size={110} dimmed={info.dimmed} label={info.agent.name} />
           <span aria-hidden="true" className="mt-1 h-2 w-16 rounded-full bg-foreground/10" />
@@ -403,7 +440,7 @@ function BotPanel({ onClose }: { onClose(): void }) {
 }
 
 /** Il pannello della SQUADRA: Membri (S4). */
-function MembersPanel({ group, onClose }: { group: GroupInfo; onClose(): void }) {
+function MembersPanel({ layout, group, onClose }: { layout: LayoutResult; group: GroupInfo; onClose(): void }) {
   const { i18n } = useLingui()
   const agents = useStore((s) => s.agents)
   const groupUpdate = useStore((s) => s.groupUpdate)
@@ -414,19 +451,18 @@ function MembersPanel({ group, onClose }: { group: GroupInfo; onClose(): void })
   useEffect(() => setDescription(group.description), [group.id, group.description])
   const memberAgent = (id: string): Agent | undefined => agents.find((a) => a.id === id)
   const notIn = agents.filter((a) => !a.parentId && !group.members.some((m) => m.agentId === a.id))
+  const overlay = layout.panel === 'overlay'
   return (
-    <aside className="flex w-[340px] shrink-0 flex-col border-l border-border/50 bg-card">
-      <div className="flex justify-end px-4 pt-4">
-        <button
-          className="grid size-9 place-items-center rounded-full bg-muted/60 text-muted-foreground transition hover:text-foreground"
-          aria-label={i18n.t(msg`Chiudi il pannello`)}
-          title={i18n.t(msg`Chiudi il pannello`)}
-          onClick={onClose}
-        >
-          <X className="size-4" />
-        </button>
-      </div>
-      <div className="flex-1 overflow-y-auto scroll-thin px-5 pb-5">
+    <aside
+      className={
+        overlay
+          ? 'absolute bottom-0 right-0 top-0 z-10 flex flex-col bg-card shadow-soft'
+          : 'relative flex shrink-0 flex-col border-l border-border/50 bg-card transition-[width]'
+      }
+      style={{ width: layout.panelWidth }}
+    >
+      <PanelTopBand onClose={onClose} />
+      <div className="flex-1 overflow-y-auto scroll-thin px-5 pb-5 pt-14">
         <h2 className="font-display text-[22px]">{group.name}</h2>
         <p className="mt-3 text-[13px] text-muted-foreground"><Trans>Membri</Trans></p>
         <div className="mt-1 space-y-1">
@@ -509,16 +545,47 @@ function MembersPanel({ group, onClose }: { group: GroupInfo; onClose(): void })
   )
 }
 
-export function RightPanel() {
+export function RightPanel({ layout }: { layout: LayoutResult }) {
   const rightPanel = useStore((s) => s.rightPanel)
   const setRightPanel = useStore((s) => s.setRightPanel)
+  const setPanelTab = useStore((s) => s.setPanelTab)
   const openGroupId = useStore((s) => s.openGroupId)
   const groups = useStore((s) => s.groups)
+  // fase 16b correzioni 2 (Q1): chiudere torna alla scheda Profilo, come
+  // quando il pannello si riapre — così layoutFor non resta sul wide
+  const close = (): void => {
+    setPanelTab('profile')
+    setRightPanel(false)
+  }
+  // il pannello in overlay si chiude anche con Esc (con la ✕ e col clic fuori
+  // ci sono già); se un altro gestore ha già consumato l'Esc (menu,
+  // autocompletamento @) qui non si fa niente
+  useEffect(() => {
+    if (layout.panel !== 'overlay') return
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape' && !e.defaultPrevented) close()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layout.panel, setRightPanel, setPanelTab])
   if (!rightPanel) return null
   const group = groups.find((g) => g.id === openGroupId)
-  return group ? (
-    <MembersPanel group={group} onClose={() => setRightPanel(false)} />
+  const body = group ? (
+    <MembersPanel layout={layout} group={group} onClose={close} />
   ) : (
-    <BotPanel onClose={() => setRightPanel(false)} />
+    <BotPanel layout={layout} onClose={close} />
   )
+  // Q1: quando galleggia, un velo invisibile copre il resto della finestra —
+  // un clic fuori chiude il pannello; la chat lì sotto resta larga tutto lo
+  // spazio (il pannello non la spinge)
+  if (layout.panel === 'overlay') {
+    return (
+      <div className="absolute inset-0 z-40">
+        <div className="absolute inset-0" aria-hidden="true" onClick={close} />
+        {body}
+      </div>
+    )
+  }
+  return body
 }

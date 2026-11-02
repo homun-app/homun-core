@@ -8,6 +8,10 @@
 // STRETTA (76 px): trascinando il bordo destro sotto i 200 px o con ⌘\ —
 // solo mascotte nello stesso ordine, contatore nero per chi ti aspetta,
 // tooltip e aria-label «Nome, stato». La scelta si ricorda (localStorage).
+// correzioni 2 (Q1/Q3): la larghezza la decide layoutFor (rotaia anche da
+// sola sotto AUTO_RAIL_BELOW, senza toccare la preferenza); Cerca e Crea
+// salgono sulla riga comune a y 12, il primo contenuto parte a 64 px e la
+// riga dell'utente in fondo ha centro 46 px come la pillola della chat.
 import { useEffect, useRef, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
@@ -15,6 +19,8 @@ import type { MessageDescriptor } from '@lingui/core'
 import { Plus, Search, Library as LibraryIcon, LayoutGrid, ChevronRight } from 'lucide-react'
 import { useStore } from '../store'
 import { buildSidebarModel, collapsedVoices, teamOpenState, type SidebarModel, type SidebarTeam, type SidebarBot, type CollapsedVoice } from '../sidebar-utils'
+// fase 16b correzioni 2 (Q1): il massimo del trascinamento e i limiti della barra
+import { sidebarMaxFor, SIDEBAR_MIN, type LayoutResult } from '../layout'
 import { avatarOf } from '../../../shared/avatar'
 import type { Agent } from '../../../shared/types'
 import { Bot } from '../bot/Bot'
@@ -32,8 +38,6 @@ import {
 
 /** La larghezza sotto cui la barra diventa STRETTA (S2). */
 export const SIDEBAR_COLLAPSE_BELOW = 200
-const WIDTH_KEY = 'sandbot:sidebar.width'
-const COLLAPSED_KEY = 'sandbot:sidebar.collapsed'
 const TEAM_OPEN_PREFIX = 'sandbot:sidebar.teamOpen.'
 
 const readLS = (key: string): string | null => {
@@ -340,71 +344,80 @@ function CollapsedColumn({ model, onExpand }: { model: SidebarModel; onExpand():
     st === 'waiting' ? i18n.t(msg`ti aspetta`) : st === 'busy' ? i18n.t(msg`sta lavorando`) : i18n.t(msg`fermo`)
   let separated = false
   return (
-    <div className="flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto scroll-thin px-2 pt-10">
-      {voices.map((v) => {
-        const newSection = v.kind !== 'main' && !separated
-        if (newSection) separated = true
-        return (
-          <div key={v.key} className="contents">
-            {newSection && <span className="my-1 h-px w-6 shrink-0 bg-border/60" aria-hidden="true" />}
-            <button
-              className="relative my-0.5 shrink-0"
-              aria-label={`${v.name}, ${statusLabel(v.status)}`}
-              title={`${v.name}, ${statusLabel(v.status)}`}
-              onClick={() => {
-                const team = model.teams.find((t) => `g${t.group.id}` === v.key)
-                if (team) openGroup(team.group.id)
-                else {
-                  const agent = [model.main, ...model.bots.map((b) => b.agent)].find((a) => a?.id === v.key)
-                  if (agent) { openGroup(null); void select(agent.id) }
-                }
-              }}
-            >
-              {v.kind === 'team' ? (
-                <TeamCluster team={model.teams.find((t) => `g${t.group.id}` === v.key)!} narrow />
-              ) : (
-                <VoiceMascot agentId={v.key} size={v.kind === 'main' ? 42 : 34} />
-              )}
-              {v.counter > 0 && (
-                <span className="absolute -right-1 -top-1 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-foreground px-1 text-[11px] font-bold text-background">
-                  {v.counter}
-                </span>
-              )}
-            </button>
-          </div>
-        )
-      })}
-      <span className="my-1 h-px w-6 shrink-0 bg-border/60" aria-hidden="true" />
-      <button
-        className="grid size-9 shrink-0 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
-        aria-label={i18n.t(msg`Libreria`)}
-        title={i18n.t(msg`Libreria`)}
-        onClick={() => (openLibraryId === null ? openLibrary('') : openLibrary(null))}
-      >
-        <LibraryIcon className="size-4" />
-      </button>
-      <div className="flex-1" />
-      <button
-        className="grid size-9 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground transition hover:text-foreground"
-        aria-label={i18n.t(msg`App`)}
-        title={i18n.t(msg`App`)}
-        onClick={() => { setSettingsTab('connettori'); setSettingsOpen(true) }}
-      >
-        <LayoutGrid className="size-4" />
-      </button>
-      <button
-        className="mb-3 mt-1 grid size-9 shrink-0 place-items-center rounded-full bg-muted text-sm font-semibold text-foreground"
-        aria-label={i18n.t(msg`Allarga la barra`)}
-        title={i18n.t(msg`Allarga la barra (⌘\\)`)}
-        onClick={onExpand}
-      >
-        {model.main ? model.main.name.slice(0, 1).toUpperCase() : '·'}
-      </button>
-    </div>
+    <>
+      {/* fase 16b correzioni 2 (Q3): in rotaia i semafori occupano la cima —
+          la fascia di trascinamento finisce dove inizia la prima mascotte */}
+      <div className="drag-region h-12 shrink-0" aria-hidden="true" />
+      <div className="flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto scroll-thin px-2 pt-2">
+        {voices.map((v) => {
+          const newSection = v.kind !== 'main' && !separated
+          if (newSection) separated = true
+          return (
+            <div key={v.key} className="contents">
+              {newSection && <span className="my-1 h-px w-6 shrink-0 bg-border/60" aria-hidden="true" />}
+              <button
+                className="relative my-0.5 shrink-0"
+                aria-label={`${v.name}, ${statusLabel(v.status)}`}
+                title={`${v.name}, ${statusLabel(v.status)}`}
+                onClick={() => {
+                  const team = model.teams.find((t) => `g${t.group.id}` === v.key)
+                  if (team) openGroup(team.group.id)
+                  else {
+                    const agent = [model.main, ...model.bots.map((b) => b.agent)].find((a) => a?.id === v.key)
+                    if (agent) { openGroup(null); void select(agent.id) }
+                  }
+                }}
+              >
+                {v.kind === 'team' ? (
+                  <TeamCluster team={model.teams.find((t) => `g${t.group.id}` === v.key)!} narrow />
+                ) : (
+                  <VoiceMascot agentId={v.key} size={v.kind === 'main' ? 42 : 34} />
+                )}
+                {v.counter > 0 && (
+                  <span className="absolute -right-1 -top-1 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-foreground px-1 text-[11px] font-bold text-background">
+                    {v.counter}
+                  </span>
+                )}
+              </button>
+            </div>
+          )
+        })}
+        <span className="my-1 h-px w-6 shrink-0 bg-border/60" aria-hidden="true" />
+        <button
+          className="grid size-9 shrink-0 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
+          aria-label={i18n.t(msg`Libreria`)}
+          title={i18n.t(msg`Libreria`)}
+          onClick={() => (openLibraryId === null ? openLibrary('') : openLibrary(null))}
+        >
+          <LibraryIcon className="size-4" />
+        </button>
+        <div className="flex-1" />
+        <button
+          className="grid size-9 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground transition hover:text-foreground"
+          aria-label={i18n.t(msg`App`)}
+          title={i18n.t(msg`App`)}
+          onClick={() => { setSettingsTab('connettori'); setSettingsOpen(true) }}
+        >
+          <LayoutGrid className="size-4" />
+        </button>
+        {/* fase 16b correzioni 2 (Q3): la riga dell'utente, alta 60 con 16 di
+            margine sotto — lo stesso centro verticale della pillola della chat */}
+        <div className="mb-4 flex h-[60px] shrink-0 items-center justify-center">
+          <button
+            className="grid size-9 shrink-0 place-items-center rounded-full bg-muted text-sm font-semibold text-foreground"
+            aria-label={i18n.t(msg`Allarga la barra`)}
+            title={i18n.t(msg`Allarga la barra (⌘\\)`)}
+            onClick={onExpand}
+          >
+            {model.main ? model.main.name.slice(0, 1).toUpperCase() : '·'}
+          </button>
+        </div>
+      </div>
+    </>
   )
 }
 
-export function Sidebar() {
+export function Sidebar({ layout }: { layout: LayoutResult }) {
   const { t } = useLingui()
   const agents = useStore((s) => s.agents)
   const groups = useStore((s) => s.groups)
@@ -413,15 +426,16 @@ export function Sidebar() {
   const openLibrary = useStore((s) => s.openLibrary)
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
   const setSettingsTab = useStore((s) => s.setSettingsTab)
+  // fase 16b correzioni 2 (Q1): le preferenze vivono nello store (localStorage
+  // lì); la barra resa è quella di layoutFor — la rotaia automatica sotto
+  // AUTO_RAIL_BELOW non tocca la preferenza dell'utente
+  const setSidebarCollapsed = useStore((s) => s.setSidebarCollapsed)
+  const setSidebarWidth = useStore((s) => s.setSidebarWidth)
   const [query, setQuery] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
   const [newBotOpen, setNewBotOpen] = useState(false)
   const [newTeamOpen, setNewTeamOpen] = useState(false)
-  const [collapsed, setCollapsed] = useState(() => readLS(COLLAPSED_KEY) === '1')
-  const [width, setWidth] = useState(() => {
-    const v = Number(readLS(WIDTH_KEY))
-    return Number.isFinite(v) && v >= 220 && v <= 420 ? v : 264
-  })
+  const collapsed = layout.sidebar === 'rail'
   const dragging = useRef(false)
 
   // ⌘\ apre/chiude la barra stretta; la scelta si ricorda
@@ -429,34 +443,32 @@ export function Sidebar() {
     const onKey = (e: KeyboardEvent): void => {
       if (e.metaKey && (e.key === '\\' || e.code === 'Backslash')) {
         e.preventDefault()
-        setCollapsed((v) => {
-          writeLS(COLLAPSED_KEY, v ? '0' : '1')
-          return !v
-        })
+        const s = useStore.getState()
+        s.setSidebarCollapsed(!s.sidebarCollapsed)
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  // trascinamento del bordo destro: sotto i 200 px la barra diventa stretta
+  // trascinamento del bordo destro: sotto i 200 px la barra diventa stretta;
+  // il massimo è sidebarMaxFor (Q1 regola 3) — barra + pannello docked +
+  // CHAT_MIN non superano mai la finestra
   const startDrag = (e: React.MouseEvent): void => {
     e.preventDefault()
     dragging.current = true
     const startX = e.clientX
-    const startWidth = width
+    const startWidth = useStore.getState().sidebarWidth
     const onMove = (ev: MouseEvent): void => {
       if (!dragging.current) return
       const next = startWidth + (ev.clientX - startX)
       if (next < SIDEBAR_COLLAPSE_BELOW) {
-        setCollapsed(true)
-        writeLS(COLLAPSED_KEY, '1')
+        setSidebarCollapsed(true)
       } else {
-        setCollapsed(false)
-        writeLS(COLLAPSED_KEY, '0')
-        const clamped = Math.min(420, Math.max(220, next))
-        setWidth(clamped)
-        writeLS(WIDTH_KEY, String(clamped))
+        setSidebarCollapsed(false)
+        const s = useStore.getState()
+        const max = sidebarMaxFor(s.windowWidth, s.rightPanel, s.openGroupId !== null ? 'members' : s.panelTab)
+        setSidebarWidth(Math.min(max, Math.max(SIDEBAR_MIN, next)))
       }
     }
     const onUp = (): void => {
@@ -475,47 +487,48 @@ export function Sidebar() {
   return (
     <aside
       className="relative flex shrink-0 select-none flex-col border-r border-border/50 bg-card"
-      style={{ width: collapsed ? 76 : width }}
+      style={{ width: layout.sidebarWidth }}
     >
-      {/* il bordo trascinabile */}
-      {!collapsed && <div className="absolute right-0 top-0 z-10 h-full w-1.5 cursor-col-resize" onMouseDown={startDrag} aria-hidden="true" />}
+      {/* il bordo trascinabile (nascosto in rotaia, anche automatica) */}
+      {layout.sidebar === 'full' && <div className="absolute right-0 top-0 z-10 h-full w-1.5 cursor-col-resize" onMouseDown={startDrag} aria-hidden="true" />}
 
       {collapsed ? (
         <CollapsedColumn
           model={model}
-          onExpand={() => {
-            setCollapsed(false)
-            writeLS(COLLAPSED_KEY, '0')
-          }}
+          onExpand={() => setSidebarCollapsed(false)}
         />
       ) : (
         <>
-          {/* in alto: solo Cerca e Crea (pt-10 per i traffic lights) */}
-          <div className="flex items-center justify-end gap-2 px-3 pt-10 pb-1.5">
-            <button
-              className={`grid size-9 place-items-center rounded-full transition ${searchOpen ? 'bg-muted text-foreground' : 'bg-muted/60 text-muted-foreground hover:text-foreground'}`}
-              aria-label={t`Cerca`}
-              title={t`Cerca`}
-              onClick={() => {
-                setSearchOpen((v) => !v)
-                if (searchOpen) setQuery('')
-              }}
-            >
-              <Search className="size-4" />
-            </button>
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                className="grid size-9 place-items-center rounded-full bg-muted/60 text-muted-foreground transition hover:text-foreground"
-                aria-label={t`Crea`}
-                title={t`Crea`}
+          {/* fase 16b correzioni 2 (Q3): Cerca e Crea sulla riga comune (y
+              12–48, centro 30) dentro la fascia di trascinamento di 60 px;
+              allineati a destra — a sinistra restano i semafori di macOS */}
+          <div className="drag-region h-[60px] shrink-0">
+            <div className="mt-3 flex h-9 items-center justify-end gap-2 px-3">
+              <button
+                className={`no-drag grid size-9 place-items-center rounded-full transition ${searchOpen ? 'bg-muted text-foreground' : 'bg-muted/60 text-muted-foreground hover:text-foreground'}`}
+                aria-label={t`Cerca`}
+                title={t`Cerca`}
+                onClick={() => {
+                  setSearchOpen((v) => !v)
+                  if (searchOpen) setQuery('')
+                }}
               >
-                <Plus className="size-4" />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => setNewBotOpen(true)}><Trans>Nuovo bot</Trans></DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setNewTeamOpen(true)}><Trans>Nuova squadra</Trans></DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+                <Search className="size-4" />
+              </button>
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  className="no-drag grid size-9 place-items-center rounded-full bg-muted/60 text-muted-foreground transition hover:text-foreground"
+                  aria-label={t`Crea`}
+                  title={t`Crea`}
+                >
+                  <Plus className="size-4" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => setNewBotOpen(true)}><Trans>Nuovo bot</Trans></DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setNewTeamOpen(true)}><Trans>Nuova squadra</Trans></DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </div>
           {searchOpen && (
             <div className="px-3 pb-2">
@@ -531,12 +544,13 @@ export function Sidebar() {
                 }}
                 placeholder={t`Cerca bot e squadre`}
                 aria-label={t`Cerca bot e squadre`}
-                className="w-full rounded-xl bg-muted px-3 py-2 text-sm outline-none placeholder:text-muted-foreground"
+                className="no-drag w-full rounded-xl bg-muted px-3 py-2 text-sm outline-none placeholder:text-muted-foreground"
               />
             </div>
           )}
 
-          <nav className="flex-1 space-y-0.5 overflow-y-auto scroll-thin px-2 pb-2">
+          {/* pt-1 (Q3): il principale parte a 64 px come il primo messaggio */}
+          <nav className="flex-1 space-y-0.5 overflow-y-auto scroll-thin px-2 pb-2 pt-1">
             {model.main && <MainRow agent={model.main} />}
             {model.teams.length > 0 && <Title><Trans>Squadre</Trans></Title>}
             {model.teams.map((team) => (
@@ -566,7 +580,9 @@ export function Sidebar() {
             </button>
           </nav>
 
-          <div className="flex items-center gap-1.5 px-3 pb-3 pt-1">
+          {/* fase 16b correzioni 2 (Q3): riga alta 60 con 16 di margine sotto —
+              lo stesso centro verticale della pillola del campo di scrittura */}
+          <div className="mb-4 flex h-[60px] shrink-0 items-center gap-1.5 px-3">
             <AccountMenu />
             <button
               className="grid size-9 shrink-0 place-items-center rounded-full bg-muted/60 text-muted-foreground transition hover:text-foreground"

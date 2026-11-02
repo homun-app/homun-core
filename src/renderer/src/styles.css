@@ -8,6 +8,27 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
+ * Fase 16b correzioni 2 (Q2): la soglia container-query del campo di scrittura
+ * — sotto i 560 px di contenitore «Ragiona: …» diventa un bottone tondo con
+ * l'icona (varianti @max-pill sul <footer> dichiarato @container).
+ */
+@theme {
+  --container-pill: 35rem;
+}
+
+/*
+ * Fase 16b correzioni 2 (Q3): la finestra si trascina dalla fascia alta (la
+ * barra del titolo è nascosta, titleBarStyle: 'hiddenInset'). Ogni bottone,
+ * campo e menu dentro la fascia porta no-drag.
+ */
+.drag-region {
+  -webkit-app-region: drag;
+}
+.no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/*
  * Design system Homun (fase 16): i colori sono quelli del progetto Lovable
  * "Bot & Motion Redesign", alla lettera. Il blocco @theme inline mappa le
  * variabili CSS alle utility Tailwind (--color-primary → bg-primary, …).

@@ -13,7 +13,7 @@ import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Paperclip, PanelRight, ArrowUp, Square, Copy, Quote, Info } from 'lucide-react'
+import { Paperclip, PanelRight, ArrowUp, Square, Copy, Quote, Info, Brain } from 'lucide-react'
 import { api, useStore } from '../store'
 // fase 17c (C2): il testo di notice/eventi/system dal meta.ui (lingua attiva)
 import { uiTextOf } from '../lib/ui-text'
@@ -41,12 +41,15 @@ import { activityPhrase, stepsOfTurn, stepsDurationSeconds, type StepGroup } fro
 import { THINKING_LABELS } from './ui/ModelPicker'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu'
 
-/** Il popover dei passaggi: «N passaggi · Xs» e l'elenco ✓/○ (S3.3). */
+/** Il popover dei passaggi: «N passaggi · Xs» e l'elenco ✓/○ (S3.3).
+ *  correzioni 2 (Q4): chi lo posiziona lo aggancia al suo bordo (pt-1 dentro
+ *  il wrapper, così il passaggio col mouse non lo chiude) e resta nella
+ *  finestra anche a 900×600 — max la larghezza meno il margine. */
 export function StepsPopover({ group, live }: { group: StepGroup; live: boolean }) {
   const { i18n } = useLingui()
   const secs = stepsDurationSeconds(group, Date.now())
   return (
-    <div className="z-10 mt-1 w-72 rounded-[14px] bg-card p-3 text-[13px] shadow-soft">
+    <div className="w-72 max-w-[calc(100vw-1.5rem)] rounded-[14px] bg-card p-3 text-[13px] shadow-soft">
       <p className="mb-1.5 text-xs text-muted-foreground">
         <Plural value={group.steps.length} one="# passo" other="# passaggi" /> · {secs ?? 0} s
       </p>
@@ -77,7 +80,7 @@ function ActivityRow({ agentId }: { agentId: string }) {
     ? msg`pensa…`
     : activityPhrase(activity)
   return (
-    <div className="flex flex-col items-start">
+    <div className="relative flex flex-col items-start">
       <div className="flex items-center gap-3">
         <button
           className="flex flex-col items-center"
@@ -99,7 +102,11 @@ function ActivityRow({ agentId }: { agentId: string }) {
         </button>
         <span aria-live="polite" className="text-sm text-muted-foreground">{i18n.t(phrase)}</span>
       </div>
-      {open && <StepsPopover group={group} live />}
+      {open && (
+        <div className="absolute left-0 top-full z-10 pt-1">
+          <StepsPopover group={group} live />
+        </div>
+      )}
     </div>
   )
 }
@@ -144,10 +151,15 @@ function MessageActions({ entry }: { entry: TranscriptEntry }) {
   )
 }
 
-/** Il popover dei passaggi agganciato a un messaggio del turno finito. */
+/** Il popover dei passaggi agganciato a un messaggio del turno finito —
+ *  correzioni 2 (Q4): ancorato a destra alle azioni, dentro la finestra. */
 function StepsPopoverBox({ entry }: { entry: TranscriptEntry }) {
   const entries = useStore((s) => s.entries)
-  return <StepsPopover group={stepsOfTurn(entries, { entryId: entry.id })} live={false} />
+  return (
+    <div className="absolute right-0 top-full z-10 pt-1">
+      <StepsPopover group={stepsOfTurn(entries, { entryId: entry.id })} live={false} />
+    </div>
+  )
 }
 
 export function Chat() {
@@ -259,25 +271,37 @@ export function Chat() {
     return <main className="flex flex-1 items-center justify-center text-muted-foreground"><Trans>Nessun agente</Trans></main>
   }
 
+  // fase 16b correzioni 2 (Q2): il testo del selettore «Ragiona» — calcolato
+  // una volta, resta l'etichetta (e il tooltip) anche quando il trigger
+  // mostra solo l'icona
+  const levelLabel = THINKING_LABELS[agent.thinking ?? 'default']
+  const reasonLabel = i18n.t(msg`Ragiona: ${levelLabel ? i18n.t(levelLabel) : (agent.thinking ?? 'default')}`)
+
   return (
     <main className="relative flex min-w-0 flex-1 flex-col">
-      {/* l'etichetta sospesa al posto della testata (S3.1) */}
-      <div className="pointer-events-none absolute left-1/2 top-3 z-10 -translate-x-1/2">
-        <div className="flex items-center gap-2 rounded-full bg-card/95 py-1.5 pl-1.5 pr-4 shadow-soft">
-          <Bot family={info.avatar.family} color={info.avatar.color} state={info.state} size={24} track={false} dimmed={info.dimmed} />
-          <span className="text-[15px] font-medium">{agent.name}</span>
+      {/* fase 16b correzioni 2 (Q3): la fascia alta di 60 px — trascina la
+          finestra — con UNA riga di controlli (y 12–48, centro 30): etichetta
+          sospesa al centro (S3.1, decorativa: i clic passano alla fascia) e
+          bottone del pannello a destra. L'etichetta tronca il nome quando la
+          chat è al minimo (Q4) */}
+      <div className="drag-region absolute inset-x-0 top-0 z-10 flex h-[60px] flex-col">
+        <div className="mt-3 flex h-9 items-center gap-3 px-4">
+          <span className="w-9 shrink-0" aria-hidden="true" />
+          <span className="pointer-events-none flex min-w-0 flex-1 justify-center">
+            <span className="flex min-w-0 max-w-full items-center gap-2 rounded-full bg-card/95 py-1.5 pl-1.5 pr-4 shadow-soft">
+              <Bot family={info.avatar.family} color={info.avatar.color} state={info.state} size={24} track={false} dimmed={info.dimmed} />
+              <span className="truncate text-[15px] font-medium">{agent.name}</span>
+            </span>
+          </span>
+          <button
+            className={`no-drag grid size-9 shrink-0 place-items-center rounded-full transition ${rightPanel ? 'bg-muted text-foreground' : 'bg-muted/60 text-muted-foreground hover:text-foreground'}`}
+            aria-label={rightPanel ? t`Nascondi il pannello del bot` : t`Mostra il pannello del bot`}
+            title={rightPanel ? t`Nascondi il pannello del bot` : t`Mostra il pannello del bot`}
+            onClick={() => setRightPanel(!rightPanel)}
+          >
+            <PanelRight className="size-4" />
+          </button>
         </div>
-      </div>
-      {/* in alto a destra: il bottone tondo del pannello del bot */}
-      <div className="absolute right-4 top-3 z-10">
-        <button
-          className={`grid size-9 place-items-center rounded-full transition ${rightPanel ? 'bg-muted text-foreground' : 'bg-muted/60 text-muted-foreground hover:text-foreground'}`}
-          aria-label={rightPanel ? t`Nascondi il pannello del bot` : t`Mostra il pannello del bot`}
-          title={rightPanel ? t`Nascondi il pannello del bot` : t`Mostra il pannello del bot`}
-          onClick={() => setRightPanel(!rightPanel)}
-        >
-          <PanelRight className="size-4" />
-        </button>
       </div>
 
       {memoryOpen && activeId && <MemoryPanel agentId={activeId} onClose={() => setMemoryOpen(false)} />}
@@ -341,8 +365,11 @@ export function Chat() {
       {/* fase 12 (punto 7): vista del transcript del sottoagente aperto */}
       <SubagentPanel />
 
-      {/* il campo di scrittura: una pillola sospesa (S3.4) */}
-      <footer className="px-6 pb-4">
+      {/* il campo di scrittura: una pillola sospesa (S3.4). correzioni 2 (Q2):
+          il footer è un @container — sotto i 560 px «Ragiona: …» diventa un
+          bottone tondo con l'icona, il campo non scende mai sotto 120 px e
+          allega/invia restano DENTRO la pillola anche con la chat al minimo */}
+      <footer className="@container px-6 pb-4">
         <form
           className="mx-auto flex max-w-3xl items-end gap-2 rounded-full bg-card py-2 pl-2 pr-2 shadow-soft"
           onSubmit={(e) => { e.preventDefault(); sendNow() }}
@@ -363,7 +390,7 @@ export function Chat() {
             )}
           </button>
           <textarea
-            className="max-h-40 min-h-11 flex-1 resize-none bg-transparent px-3 py-2.5 text-sm outline-none placeholder:text-muted-foreground"
+            className="max-h-40 min-h-11 min-w-[120px] flex-1 resize-none bg-transparent px-3 py-2.5 text-sm outline-none placeholder:text-muted-foreground"
             placeholder={t`Scrivi a ${agent.name}`}
             rows={Math.min(6, text.split('\n').length)}
             value={text}
@@ -378,13 +405,17 @@ export function Chat() {
               }
             }}
           />
-          {/* Ragiona: <livello> ▾ — il selettore che stava nel chip (S3.4) */}
+          {/* Ragiona: <livello> ▾ — il selettore che stava nel chip (S3.4).
+              Q2: sotto i 560 px di contenitore resta solo l'icona (Brain), il
+              testo vive in aria-label e tooltip; il menu è identico */}
           <DropdownMenu>
             <DropdownMenuTrigger
-              className="h-8 shrink-0 rounded-full px-3 text-[13px] text-muted-foreground transition hover:bg-muted hover:text-foreground"
+              className="grid h-9 shrink-0 place-items-center rounded-full px-3 text-[13px] text-muted-foreground transition hover:bg-muted hover:text-foreground"
               aria-label={t`Livello di ragionamento`}
+              title={reasonLabel}
             >
-              {i18n.t(msg`Ragiona: ${THINKING_LABELS[agent.thinking ?? 'default'] ? i18n.t(THINKING_LABELS[agent.thinking ?? 'default']!) : (agent.thinking ?? 'default')}`)}
+              <span className="@max-pill:hidden">{reasonLabel}</span>
+              <Brain className="hidden size-4 @max-pill:block" aria-hidden="true" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               {(['default', ...levels] as ThinkingSetting[]).map((l) => (

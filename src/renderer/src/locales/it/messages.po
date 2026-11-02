@@ -3412,7 +3412,7 @@ msgstr "Questo modello non vede le immagini"
 msgid "quick ask"
 msgstr "quick ask"
 
-#. placeholder {0}: THINKING_LABELS[agent.thinking ?? 'default'] ? i18n.t(THINKING_LABELS[agent.thinking ?? 'default']!) : (agent.thinking ?? 'default')
+#. placeholder {0}: levelLabel ? i18n.t(levelLabel) : (agent.thinking ?? 'default')
 #: src/renderer/src/components/Chat.tsx
 msgid "Ragiona: {0}"
 msgstr "Ragiona: {0}"

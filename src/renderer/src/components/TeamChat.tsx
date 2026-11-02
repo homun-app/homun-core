@@ -186,24 +186,29 @@ export function TeamChat() {
 
   return (
     <main className="relative flex min-w-0 flex-1 flex-col">
-      {/* l'etichetta sospesa: nome della squadra + chi risponde */}
-      <div className="pointer-events-none absolute left-1/2 top-3 z-10 -translate-x-1/2">
-        <div className="flex items-center gap-2 rounded-full bg-card/95 py-1.5 pl-4 pr-4 shadow-soft">
-          <span className="text-[15px] font-medium">{group.name}</span>
-          {coordinator && (
-            <span className="text-[13px] text-muted-foreground">· <Trans>Risponde {coordinator.name}</Trans></span>
-          )}
+      {/* fase 16b correzioni 2 (Q3): la fascia alta di 60 px come nella chat —
+          etichetta sospesa (nome della squadra + chi risponde, che tronca)
+          sulla riga comune y 12–48 e bottone del pannello a destra */}
+      <div className="drag-region absolute inset-x-0 top-0 z-10 flex h-[60px] flex-col">
+        <div className="mt-3 flex h-9 items-center gap-3 px-4">
+          <span className="w-9 shrink-0" aria-hidden="true" />
+          <span className="pointer-events-none flex min-w-0 flex-1 justify-center">
+            <span className="flex min-w-0 max-w-full items-center gap-2 rounded-full bg-card/95 py-1.5 pl-4 pr-4 shadow-soft">
+              <span className="truncate text-[15px] font-medium">{group.name}</span>
+              {coordinator && (
+                <span className="truncate text-[13px] text-muted-foreground">· <Trans>Risponde {coordinator.name}</Trans></span>
+              )}
+            </span>
+          </span>
+          <button
+            className={`no-drag grid size-9 shrink-0 place-items-center rounded-full transition ${rightPanel ? 'bg-muted text-foreground' : 'bg-muted/60 text-muted-foreground hover:text-foreground'}`}
+            aria-label={rightPanel ? t`Nascondi il pannello dei membri` : t`Mostra il pannello dei membri`}
+            title={rightPanel ? t`Nascondi il pannello dei membri` : t`Mostra il pannello dei membri`}
+            onClick={() => setRightPanel(!rightPanel)}
+          >
+            <PanelRight className="size-4" />
+          </button>
         </div>
-      </div>
-      <div className="absolute right-4 top-3 z-10">
-        <button
-          className={`grid size-9 place-items-center rounded-full transition ${rightPanel ? 'bg-muted text-foreground' : 'bg-muted/60 text-muted-foreground hover:text-foreground'}`}
-          aria-label={rightPanel ? t`Nascondi il pannello dei membri` : t`Mostra il pannello dei membri`}
-          title={rightPanel ? t`Nascondi il pannello dei membri` : t`Mostra il pannello dei membri`}
-          onClick={() => setRightPanel(!rightPanel)}
-        >
-          <PanelRight className="size-4" />
-        </button>
       </div>
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto scroll-thin px-6 pb-4 pt-16">
@@ -234,11 +239,14 @@ export function TeamChat() {
         </div>
       </div>
 
-      {/* il campo: segnaposto di S3.4, autocompletamento @ sui membri */}
-      <footer className="px-6 pb-4">
+      {/* il campo: segnaposto di S3.4, autocompletamento @ sui membri.
+          correzioni 2 (Q2): @container sul footer, il campo non scende mai
+          sotto 120 px e il bottone Invia resta DENTRO la pillola; il popup @
+          non supera mai il bordo (Q4) */}
+      <footer className="@container px-6 pb-4">
         <div className="relative mx-auto max-w-3xl">
           {mentionOptions.length > 0 && (
-            <div className="absolute bottom-full left-4 mb-2 w-64 rounded-[14px] bg-card p-1 shadow-soft">
+            <div className="absolute bottom-full left-4 mb-2 w-64 max-w-[calc(100vw-1.5rem)] rounded-[14px] bg-card p-1 shadow-soft">
               {mentionOptions.map((m, i) => (
                 <button
                   key={m.agentId}
@@ -257,7 +265,7 @@ export function TeamChat() {
           >
             <textarea
               ref={taRef}
-              className="max-h-40 min-h-11 flex-1 resize-none bg-transparent py-2.5 text-sm outline-none placeholder:text-muted-foreground"
+              className="max-h-40 min-h-11 min-w-[120px] flex-1 resize-none bg-transparent py-2.5 text-sm outline-none placeholder:text-muted-foreground"
               placeholder={placeholder}
               rows={Math.min(4, text.split('\n').length)}
               value={text}

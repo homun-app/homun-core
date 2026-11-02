@@ -9,8 +9,32 @@ import { applyTheme, watchSystemTheme } from './theme'
 import { previewOf, type SidebarPreview } from './sidebar-utils'
 import { activateUiLanguage } from './lib/i18n'
 import { resolveUiLanguage, type UiLanguageSetting, type UiLanguage } from '../../shared/ui-language'
+// fase 16b correzioni 2 (Q1): lo store tiene ciò che layoutFor legge
+import { SIDEBAR_MIN, SIDEBAR_MAX, type PanelTabId } from './layout'
 
 const api = (window as unknown as { sandbot: import('../../shared/types').SandbotApi }).sandbot
+
+/**
+ * Fase 16b correzioni 2 (Q1): le preferenze della barra (larghezza e rotaia)
+ * restano nel localStorage come prima, ma vivono nello store — così App,
+ * Sidebar e RightPanel leggono lo STESSO layoutFor, ciascuno la sua no.
+ */
+const SIDEBAR_WIDTH_KEY = 'sandbot:sidebar.width'
+const SIDEBAR_COLLAPSED_KEY = 'sandbot:sidebar.collapsed'
+const readLS = (key: string): string | null => {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+const writeLS = (key: string, value: string): void => {
+  try {
+    localStorage.setItem(key, value)
+  } catch {
+    // localStorage non disponibile: la scelta dura finché la finestra vive
+  }
+}
 
 /**
  * Fase 16 (U3): il "happy" dura 1,5 s e poi torna idle. UN solo timer qui
@@ -183,6 +207,21 @@ interface Store {
   /** fase 16 (U5): apre/chiude i pannelli Memoria e Skill */
   setMemoryOpen(v: boolean): void
   setSkillsOpen(v: boolean): void
+  /**
+   * Fase 16b correzioni 2 (Q1): la larghezza della finestra (listener resize
+   * con debounce leggero in App) e le preferenze della barra — larghezza
+   * scelta trascinando (220–420) e rotaia chiesta con ⌘\ o trascinamento.
+   * La rotaia AUTOMATICA sotto AUTO_RAIL_BELOW non tocca sidebarCollapsed.
+   */
+  windowWidth: number
+  sidebarCollapsed: boolean
+  sidebarWidth: number
+  /** la scheda aperta nel pannello del bot (decide la larghezza wide di Computer) */
+  panelTab: PanelTabId
+  setWindowWidth(w: number): void
+  setSidebarWidth(w: number): void
+  setSidebarCollapsed(v: boolean): void
+  setPanelTab(t: PanelTabId): void
 }
 
 export const useStore = create<Store>((set, get) => ({
@@ -227,6 +266,28 @@ export const useStore = create<Store>((set, get) => ({
   quote: null,
   botPanelTabRequest: null,
   debugSteps: false,
+  // fase 16b correzioni 2 (Q1): le letture dal localStorage sono le stesse
+  // chiavi che usava Sidebar.tsx — la preferenza dell'utente sopravvive
+  windowWidth: typeof window !== 'undefined' ? window.innerWidth : 1280,
+  sidebarCollapsed: readLS(SIDEBAR_COLLAPSED_KEY) === '1',
+  sidebarWidth: (() => {
+    const v = Number(readLS(SIDEBAR_WIDTH_KEY))
+    return Number.isFinite(v) && v >= SIDEBAR_MIN && v <= SIDEBAR_MAX ? v : 264
+  })(),
+  panelTab: 'profile',
+
+  // ---- fase 16b correzioni 2 (Q1) ----
+  setWindowWidth: (w) => set({ windowWidth: w }),
+  setSidebarWidth: (w) => {
+    const clamped = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, w))
+    writeLS(SIDEBAR_WIDTH_KEY, String(clamped))
+    set({ sidebarWidth: clamped })
+  },
+  setSidebarCollapsed: (v) => {
+    writeLS(SIDEBAR_COLLAPSED_KEY, v ? '1' : '0')
+    set({ sidebarCollapsed: v })
+  },
+  setPanelTab: (t) => set({ panelTab: t }),
 
   async init() {
     const agents = await api.listAgents()
