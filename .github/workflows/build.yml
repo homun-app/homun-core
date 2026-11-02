@@ -42,6 +42,21 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Mai una release da codice rosso: typecheck e test prima di tutto
+      # (pretest prepara i .wasm di tree-sitter).
+      - name: Typecheck and tests
+        run: |
+          npm run typecheck
+          npm test
+
+      # out/ non è nel repo: electron-builder impacchetta SOLO ciò che
+      # electron-vite ha compilato (senza questo passo l'asar è senza
+      # out/main/index.js e il pacchetto fallisce).
+      - name: Build app (electron-vite)
+        run: |
+          node scripts/prepare-wasm.mjs
+          npm run build
+
       # Su un tag di release il TAG è la fonte unica della versione: si
       # stampa in package.json così installer e latest-mac.yml coincidono.
       - name: Set version from tag
@@ -94,10 +109,13 @@ jobs:
         run: |
           APP_PATH="$(find dist-installers -maxdepth 3 -type d -iname Homun.app -print -quit)"
           test -n "$APP_PATH"
+          VERSION="$(node -p "require('./package.json').version")"
+          # lo script npm release:verify ha già percorso e versione fissi:
+          # qui si chiama lo script diretto col percorso trovato
           if [ "${GITHUB_REF#refs/tags/v}" != "$GITHUB_REF" ] && [ "${{ steps.signing.outputs.has_cert }}" = "true" ]; then
-            npm run release:verify -- "$APP_PATH" --expected-arch arm64 --signed
+            node scripts/verify-release.mjs "$APP_PATH" --expected-arch arm64 --expected-version "$VERSION" --signed
           else
-            npm run release:verify -- "$APP_PATH" --expected-arch arm64
+            node scripts/verify-release.mjs "$APP_PATH" --expected-arch arm64 --expected-version "$VERSION"
           fi
 
       - name: Create installer checksums

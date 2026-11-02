@@ -5,7 +5,7 @@ pubblicata finisce nel corpo della GitHub Release (da cui l'app mostra il
 «cosa cambia» quando propone un aggiornamento). Formato: `## [x.y.z] — data`,
 sezioni H2 e un punto per riga.
 
-## [0.3.0] — 2026-11-02
+## [0.3.1000] — 2026-11-02
 
 Homun torna: questa versione è il rinnovo completo di Homun 2, con la squadra
 di bot che vive sul tuo Mac. **Le conversazioni e i bot di Homun 2 non vengono

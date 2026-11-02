@@ -2,7 +2,7 @@
 // adattato da homun2 scripts-verify-release.mjs.txt; niente receipt del
 // motore: qui si controlla l'app ELECTRON).
 //
-//   node scripts/verify-release.mjs <percorso-Homun.app> [--expected-arch arm64] [--signed] [--expected-version 0.3.0]
+//   node scripts/verify-release.mjs <percorso-Homun.app> [--expected-arch arm64] [--signed] [--expected-version 0.3.1000]
 //
 // - architettura dell'eseguibile (arm64);
 // - Info.plist: CFBundleIdentifier app.homun.desktop e versione attesa;
@@ -33,7 +33,7 @@ function option(name) {
 const expectedArch = option('--expected-arch') ?? 'arm64'
 const signed = process.argv.includes('--signed')
 if (!appPath) {
-  console.error('Usage: verify-release.mjs <Homun.app> [--expected-arch arm64] [--expected-version 0.3.0] [--signed]')
+  console.error('Usage: verify-release.mjs <Homun.app> [--expected-arch arm64] [--expected-version 0.3.1000] [--signed]')
   process.exit(2)
 }
 

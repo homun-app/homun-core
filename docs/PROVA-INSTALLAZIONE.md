@@ -79,12 +79,12 @@
       (`security find-generic-password -s sandbot-vault-key` → non trovata).
 - [ ] Il segreto creato prima si rilegge (vault funziona).
 
-## 6. Aggiornamento da Homun 2 (0.2.1004 → 0.3.0) dal feed
+## 6. Aggiornamento da Homun 2 (0.2.1004 → 0.3.1000) dal feed
 
 - [ ] Nell'utente di prova installa Homun 2 0.2.1004 (l'ultima) e
       avviala una volta.
-- [ ] Pubblica la draft della 0.3.0 (il feed è pubblico solo dopo publish).
-- [ ] Apri Homun 2: entro poco arriva «È disponibile Homun 0.3.0» con le
+- [ ] Pubblica la draft della 0.3.1000 (il feed è pubblico solo dopo publish).
+- [ ] Apri Homun 2: entro poco arriva «È disponibile Homun 0.3.1000» con le
       note dal CHANGELOG → «Scarica» → avanzamento visibile → «Riavria ora».
 - [ ] Dopo l'installazione: la nuova app si apre al posto della vecchia
       (stesso bundle id, stessa cartella di installazione), la riga del
@@ -92,13 +92,13 @@
 - [ ] Il daemon della vecchia versione non resta in giro:
       `ps aux | grep -i homun` mostra solo processi della 0.3.
 
-## 7. Aggiornamento 0.3.0 → 0.3.1
+## 7. Aggiornamento 0.3.1000 → 0.3.1001
 
-- [ ] Tagga e pubblica una 0.3.1 qualsiasi (anche solo changelog).
-- [ ] Apri la 0.3.0: entro 6 ore (o subito con «Controlla aggiornamenti» in
+- [ ] Tagga e pubblica una 0.3.1001 qualsiasi (anche solo changelog).
+- [ ] Apri la 0.3.1000: entro 6 ore (o subito con «Controlla aggiornamenti» in
       Impostazioni › Generali) arriva la proposta con le note.
 - [ ] «Scarica» → avanzamento (finestra + Dock) → «Alla chiusura»:
-      chiudi l'app, RIAPRI: la versione in Impostazioni è 0.3.1.
+      chiudi l'app, RIAPRI: la versione in Impostazioni è 0.3.1001.
 - [ ] Durante un aggiornamento con un turno del bot IN CORSO: il daemon dà
       al turno fino a 10 s per chiudersi; se non basta, il turno riprende
       dopo il riavvio come dopo un crash (niente lavoro perso).
@@ -122,8 +122,8 @@
 | 3 Elementi login | ⏸ | |
 | 4 Docker | ⏸ | |
 | 5 Migrazione chiavi | ⏸ | |
-| 6 0.2.1004 → 0.3.0 | ⏸ | |
-| 7 0.3.0 → 0.3.1 | ⏸ | |
+| 6 0.2.1004 → 0.3.1000 | ⏸ | |
+| 7 0.3.1000 → 0.3.1001 | ⏸ | |
 | 8 Disinstallazione | ⏸ | |
 
 Ogni ❌ blocca la pubblicazione della draft: niente «poi si sistema».

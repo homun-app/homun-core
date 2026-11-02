@@ -1,8 +1,8 @@
 {
   "name": "homun",
   "productName": "Homun",
-  "version": "0.3.0",
-  "description": "Homun \u2014 il tuo spazio di lavoro con la squadra AI",
+  "version": "0.3.1000",
+  "description": "Homun — il tuo spazio di lavoro con la squadra AI",
   "main": "./out/main/index.js",
   "scripts": {
     "prepare-wasm": "node scripts/prepare-wasm.mjs",
