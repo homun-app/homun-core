@@ -30,9 +30,10 @@ import type { SafeStorageLike } from '../../main/vault'
 import type { SecurityRunner } from '../keychain'
 // il lato TIPO della classe (il valore arriva dalla destrutturazione sopra)
 import type { MasterKeyUnavailableError as MasterKeyUnavailable } from '../master-keys'
+import { TEST_TMP_BASE } from '../../test-tmp'
 
 // cartelle temporanee SOLO con mkdtemp nella directory fissata
-const TMP_BASE = '/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T'
+const TMP_BASE = TEST_TMP_BASE
 
 /** Keychain finto in memoria: find/add/delete-generic-password. */
 function fakeKeychain() {

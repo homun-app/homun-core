@@ -11,9 +11,10 @@ import type { ProviderConfig } from '../../../shared/types'
 import * as store from '../../store/db'
 import { runTurn } from '../loop'
 import { resetRouteHealth } from '../route-health'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 
 /** Il percorso esplicito richiesto dai vincoli (MAI $TMPDIR né os.tmpdir()). */
-const TMP_ROOT = '/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/'
+const TMP_ROOT = TEST_TMP_BASE + '/'
 
 let dir: string
 let serverA: Server

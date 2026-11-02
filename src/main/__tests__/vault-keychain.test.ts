@@ -12,7 +12,7 @@ import { join } from 'node:path'
 import { randomBytes, createCipheriv } from 'node:crypto'
 
 // cartelle temporanee SOLO con mkdtemp nella directory fissata
-const TMP_BASE = '/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T'
+const TMP_BASE = TEST_TMP_BASE
 
 const { setDataDir, dataDir, db, getSetting, setSetting } = await import('../store/db')
 const vault = await import('../vault')
@@ -21,6 +21,7 @@ const { VAULT_SERVICE, CONNECTORS_SERVICE } = await import('../../daemon/keychai
 // safeStorage — il backend del test si registra qui
 const masterKeys = await import('../../daemon/master-keys')
 import type { SecurityRunner } from '../../daemon/keychain'
+import { TEST_TMP_BASE } from '../../test-tmp'
 
 /**
  * Runner `security` finto: un Keychain in memoria per servizio. Registra ogni

@@ -15,7 +15,7 @@ import { randomBytes } from 'node:crypto'
 // i flag di test vanno impostati prima dell'import: il finto browser MCP
 // (come nell'eval) rende disponibile il browser senza docker; il finto
 // schermo sostituisce docker exec con un socket unix locale del test
-const FAKE_DIR = mkdtempSync(join('/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T', 'sandbot-screen-'))
+const FAKE_DIR = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-screen-'))
 process.env.SANDBOT_TEST_FAKE_SCREEN_SOCKET = FAKE_DIR
 process.env.SANDBOT_TEST_FAKE_BROWSER_MCP ??= new URL('../../../scripts/fake-browser-mcp.mjs', import.meta.url).pathname
 
@@ -39,6 +39,7 @@ import {
 } from '../../main/agent/screen'
 import { UiError } from '../../shared/ui-text'
 import { resetBrowserForTests } from '../../main/agent/browser'
+import { TEST_TMP_BASE } from '../../test-tmp'
 
 /** Un finto server RFB su socket unix: handshake RFB + echo dei byte. */
 function fakeRfbServer(path: string): Promise<{ close: () => void; received: Buffer[]; sockets: Socket[] }> {

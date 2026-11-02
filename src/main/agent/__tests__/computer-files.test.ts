@@ -10,8 +10,9 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync, symlinkSync, readFileSyn
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { COMPUTER_ACTIONS_DDL } from '../../store/computer-actions'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 
-const TMP = mkdtempSync(join('/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T', 'sandbot-files-test-'))
+const TMP = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-files-test-'))
 const mode = vi.hoisted(() => ({ value: 'host' as string }))
 // il db del daemon è FINTO: un :memory: con computer_actions
 const mem = new DatabaseSync(':memory:')
@@ -95,7 +96,7 @@ describe('fase 19b (T6): i file del box in host — confini sul PERCORSO REALE',
   // radice, una cartella che fa da «browser» (sul Mac /browser non esiste:
   // il realpath di un symlink a destinazione ASSENTE darebbe «not found»,
   // qui si prova il caso VERO: la destinazione esiste ED è fuori)
-  const OUTSIDE = mkdtempSync(join('/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T', 'sandbot-files-outside-'))
+  const OUTSIDE = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-files-outside-'))
   beforeAll(() => {
     mkdirSync(join(TMP, 'box', 'home', 'agent_x'), { recursive: true })
     writeFileSync(join(TMP, 'box', 'home', 'agent_x', 'testo.txt'), 'ciao\nàè\n')

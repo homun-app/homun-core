@@ -74,7 +74,8 @@ describe('fase rilascio (A7): cache di resolveTool', () => {
     invalidateToolCache()
     const docker = resolveTool('docker')
     expect(typeof docker).toBe('string')
-    expect(docker.length).toBeGreaterThan('docker'.length) // su questa macchina c'è davvero
+    // dove Docker non c'è (la CI) resta il nome semplice: il limite inferiore
+    expect(docker === 'docker' || docker.startsWith('/')).toBe(true)
     invalidateToolCache()
     const git = resolveTool('git')
     expect(git.length).toBeGreaterThan('git'.length)

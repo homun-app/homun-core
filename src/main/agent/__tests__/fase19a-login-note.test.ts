@@ -9,9 +9,10 @@
 import { describe, expect, it, beforeAll, afterAll, beforeEach, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 
 // la temporanea della suite: mkdtemp nella directory voluta (mai $TMPDIR)
-const TMP = mkdtempSync(join('/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T', 'sandbot-login-note-'))
+const TMP = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-login-note-'))
 const { setDataDir } = await import('../../store/db')
 setDataDir(TMP)
 

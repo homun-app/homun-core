@@ -11,9 +11,10 @@ import { setDataDir, dataDir, db, saveProviders, setSetting, recordModelUsage } 
 import { resetOllamaCapabilities } from '../../main/agent/live-models'
 import { buildApiMethods } from '../api'
 import type { JobWorker } from '../worker'
+import { TEST_TMP_BASE } from '../../test-tmp'
 
 /** Il percorso esplicito richiesto dai vincoli (MAI $TMPDIR né os.tmpdir()). */
-const TMP_ROOT = '/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/'
+const TMP_ROOT = TEST_TMP_BASE + '/'
 
 const events: SandbotEvent[] = []
 const emit: (e: SandbotEvent) => void = (e) => events.push(e)

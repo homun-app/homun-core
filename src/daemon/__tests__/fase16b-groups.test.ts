@@ -10,7 +10,7 @@ import { join } from 'node:path'
 
 // fase 16b: le cartelle temporanee dei test di questa fase nascono con
 // mkdtemp nella directory fissata per il lavoro (mai $TMPDIR/os.tmpdir)
-const TMP_ROOT = '/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/'
+const TMP_ROOT = TEST_TMP_BASE + '/'
 
 const h = vi.hoisted(() => ({
   tools: { calls: [] as Array<{ tool: string; args: Record<string, unknown> }> }
@@ -38,6 +38,7 @@ const { planGroupTurns, coordinatorNowText, parseCoordinatorNowText, hasSentToUs
 const { buildApiMethods } = await import('../api')
 import type { JobWorker } from '../worker'
 import type { SandbotEvent, GroupInfo } from '../../shared/types'
+import { TEST_TMP_BASE } from '../../test-tmp'
 
 let events: SandbotEvent[]
 const emit: (e: SandbotEvent) => void = (e) => events.push(e)

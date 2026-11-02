@@ -8,11 +8,12 @@
 import { describe, expect, it, beforeAll, afterAll, afterEach, vi } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync, truncateSync, readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
+import { TEST_TMP_BASE } from '../../../test-tmp'
 
 // come bot-home.test.ts: directory dati iniettata (MAI la home reale) e
 // sandbox.mode pilotabile dal test — le cartelle temporanee sono mkdtemp
 // dentro /var/folders/nb/…, mai $TMPDIR né os.tmpdir()
-const TMP = mkdtempSync(join('/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T', 'sandbot-copyin-test-'))
+const TMP = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-copyin-test-'))
 const mode = vi.hoisted(() => ({ value: 'host' as string }))
 vi.mock('../../store/db', () => ({
   getSetting: (key: string, fallback: unknown) => (key === 'sandbox.mode' ? mode.value : fallback),

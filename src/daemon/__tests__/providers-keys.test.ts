@@ -18,9 +18,10 @@ import { buildApiMethods } from '../api'
 import { setMasterKeyStorage, safeStorageBackendForEnv } from '../master-keys'
 import type { JobWorker } from '../worker'
 import type { SandbotEvent, ProviderProbeResult } from '../../shared/types'
+import { TEST_TMP_BASE } from '../../test-tmp'
 
 /** Il percorso esplicito richiesto dai vincoli (MAI $TMPDIR né os.tmpdir()). */
-const TMP_ROOT = '/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/'
+const TMP_ROOT = TEST_TMP_BASE + '/'
 
 const events: SandbotEvent[] = []
 const emit: (e: SandbotEvent) => void = (e) => events.push(e)

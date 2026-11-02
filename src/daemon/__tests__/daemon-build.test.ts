@@ -10,9 +10,10 @@ import { daemonMatchesBuild, writeDaemonInfo, readDaemonInfo, type DaemonBuild }
 import { askDaemonToRestart } from '../../main/daemon-client'
 import { startWsServer } from '../ws-server'
 import { spawn } from 'node:child_process'
+import { TEST_TMP_BASE } from '../../test-tmp'
 
 // cartelle temporanee SOLO con mkdtemp nella directory fissata
-const TMP_BASE = '/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T'
+const TMP_BASE = TEST_TMP_BASE
 
 describe('fase rilascio (A2): confronto version/build (puro)', () => {
   const mine: DaemonBuild = { version: '0.3.0', build: 'b1' }

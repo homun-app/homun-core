@@ -7,8 +7,9 @@ import { afterAll, describe, expect, it } from 'vitest'
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { assertDroppedMacPath, NOT_A_DROPPED_FILE } from '../dropped-file'
+import { TEST_TMP_BASE } from '../../test-tmp'
 
-const TMP = mkdtempSync(join('/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/', 'sandbot-u1-drop-'))
+const TMP = mkdtempSync(join(TEST_TMP_BASE + '/', 'sandbot-u1-drop-'))
 afterAll(() => rmSync(TMP, { recursive: true, force: true }))
 
 describe('fase 19b correzioni (U1): il main valida il macPath del trascinamento', () => {
