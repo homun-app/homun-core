@@ -10,7 +10,14 @@
 // - i FUSE letti dall'eseguibile (@electron/fuses) coi valori attesi;
 // - app.asar presente e NESSUN sorgente sciolto in Contents/Resources/app;
 // - con --signed: codesign --verify --deep --strict e stapler validate.
-import { readFile, stat } from 'node:fs/promises'
+//
+// FASE RILASCIO — CORREZIONI (K3):
+// - il bundle si chiama Homun.app CON LA MAIUSCOLA (una volta copiata in
+//   /Applications non deve sostituire Homun.app di Homun 2 cambiando forma);
+// - CFBundleIconFile non è electron.icns (l'icona è quella di Homun);
+// - NESSUNA descrizione di microfono/camera in Info.plist (nessuna funzione
+//   le usa, i permessi sono negati in A5).
+import { readFile, stat, readdir } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -24,11 +31,18 @@ function option(name) {
   return index >= 0 ? process.argv[index + 1] : undefined
 }
 const expectedArch = option('--expected-arch') ?? 'arm64'
-const expectedVersion = option('--expected-version') ?? null
 const signed = process.argv.includes('--signed')
 if (!appPath) {
   console.error('Usage: verify-release.mjs <Homun.app> [--expected-arch arm64] [--expected-version 0.3.0] [--signed]')
   process.exit(2)
+}
+
+// versione attesa: flag esplicito, altrimenti quella del package.json del repo
+// (lo script npm release:verify la passa con $npm_package_version)
+const repoPackage = JSON.parse(await readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf8'))
+const expectedVersion = option('--expected-version') ?? repoPackage.version
+if (expectedVersion !== repoPackage.version) {
+  die(`versione attesa ${expectedVersion} diversa da quella del package.json (${repoPackage.version})`)
 }
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
@@ -48,9 +62,22 @@ function die(msg) {
 }
 
 // ---- 1. struttura e Info.plist ----
+// K3: il bundle si chiama Homun.app, con la maiuscola esatta. Il nome si
+// legge DAL DISCO: APFS è case-insensitive, il percorso passato potrebbe
+// aprire homun.app anche scrivendo Homun.app
+const normalized = path.normalize(appPath).replace(/\/+$/, '')
+const givenName = path.basename(normalized)
+const parentEntries = await readdir(path.dirname(normalized)).catch(() => [])
+const onDisk = parentEntries.find((e) => e === givenName)
+if (!onDisk) {
+  const ci = parentEntries.find((e) => e.toLowerCase() === givenName.toLowerCase())
+  die(`il bundle non esiste col nome esatto «${givenName}» (su disco: ${ci ?? 'niente con quel nome'})`)
+}
+const bundleName = onDisk
+if (bundleName !== 'Homun.app') die(`il bundle si chiama «${bundleName}» e non «Homun.app»: una volta copiata in /Applications sostituirebbe Homun.app di Homun 2 cambiando la forma del nome (K3)`)
 const contents = path.join(appPath, 'Contents')
 const resources = path.join(contents, 'Resources')
-const exe = path.join(contents, 'MacOS', 'homun')
+const exe = path.join(contents, 'MacOS', 'Homun')
 if (!(await stat(exe).catch(() => null))) die(`manca l'eseguibile ${exe}`)
 if (!(await stat(path.join(resources, 'app.asar')).catch(() => null))) die('manca Resources/app.asar')
 // niente sorgenti sciolti: l'app sta tutta nell'asar
@@ -66,12 +93,20 @@ if (bundleId !== 'app.homun.desktop') die(`CFBundleIdentifier inatteso: ${bundle
 const shortVersion = (/<key>CFBundleShortVersionString<\/key>\s*<string>([^<]+)<\/string>/.exec(info) ?? [])[1]
 if (expectedVersion && shortVersion !== expectedVersion) die(`versione inattesa: ${shortVersion} (attesa ${expectedVersion})`)
 const asarIntegrity = info.includes('ElectronAsarIntegrity')
+// K3: l'icona non è quella di Electron…
+const iconFile = (/<key>CFBundleIconFile<\/key>\s*<string>([^<]+)<\/string>/.exec(info) ?? [])[1]
+if (!iconFile) die('CFBundleIconFile assente in Info.plist')
+if (iconFile === 'electron.icns') die(`CFBundleIconFile è electron.icns: l'icona dell'app è quella di Electron (K3)`)
+if (!(await stat(path.join(resources, iconFile)).catch(() => null))) die(`l'icona del bundle manca: Resources/${iconFile}`)
+// …e nessuna descrizione di microfono/camera (funzioni inesistenti, permessi negati in A5)
+if (info.includes('NSMicrophoneUsageDescription')) die('NSMicrophoneUsageDescription in Info.plist: nessuna funzione usa il microfono (K3)')
+if (info.includes('NSCameraUsageDescription')) die('NSCameraUsageDescription in Info.plist: nessuna funzione usa la camera (K3)')
 
 // ---- 2. il plist del LaunchAgent (A3) ----
 const agentPlist = path.join(contents, 'Library', 'LaunchAgents', 'app.homun.desktop.daemon.plist')
 const agentRaw = await readFile(agentPlist, 'utf8').catch(() => null)
 if (agentRaw === null) die(`manca il plist del servizio nel bundle: ${agentPlist}`)
-for (const needle of ['app.homun.desktop.daemon', 'Contents/MacOS/homun', '--homun-daemon', '<key>SuccessfulExit</key>']) {
+for (const needle of ['app.homun.desktop.daemon', 'Contents/MacOS/Homun', '--homun-daemon', '<key>SuccessfulExit</key>']) {
   if (!agentRaw.includes(needle)) die(`il plist A3 non contiene ${needle}`)
 }
 
@@ -131,7 +166,9 @@ console.log(
       mode: signed ? 'signed' : 'unsigned',
       arch,
       bundleId,
+      bundleName,
       version: shortVersion,
+      icon: iconFile,
       asarIntegrityInInfoPlist: asarIntegrity,
       launchAgentPlist: true,
       fuses: fuseReport,

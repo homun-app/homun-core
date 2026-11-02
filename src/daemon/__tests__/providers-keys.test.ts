@@ -13,6 +13,9 @@ import {
   setProviderKeychainRunner, storedProviders, vacuumAfterKeyMigration, type StoredProvider
 } from '../../main/agent/providers'
 import { buildApiMethods } from '../api'
+// fase rilascio — correzioni (K1): il backend safeStorage FINTO, registrato
+// come fa il daemon (mai il vero)
+import { setMasterKeyStorage, safeStorageBackendForEnv } from '../master-keys'
 import type { JobWorker } from '../worker'
 import type { SandbotEvent, ProviderProbeResult } from '../../shared/types'
 
@@ -37,6 +40,9 @@ beforeAll(async () => {
   db()
   // Keychain FINTO su file (SANDBOT_TEST_FAKE_KEYCHAIN: mai il Portachiavi vero)
   process.env.SANDBOT_TEST_FAKE_KEYCHAIN = join(dir, 'fake-keychain.json')
+  // safeStorage FINTA (SANDBOT_TEST_FAKE_SAFESTORAGE: mai il vero) — le chiavi
+  // master nascono in <dir>/keys.json, come nel daemon (K1)
+  setMasterKeyStorage(safeStorageBackendForEnv(null, { SANDBOT_TEST_FAKE_SAFESTORAGE: join(dir, 'fake-safestorage.json') }))
   // il server finto controlla l'header e risponde come OpenAI-compatible
   server = createServer((req, res) => {
     if (req.headers.authorization !== `Bearer ${GOOD_KEY}`) {
@@ -91,7 +97,7 @@ describe('migrazione all\'avvio (idempotente, non si perde mai una chiave)', () 
     expect(getProvider('p1')?.apiKey).toBe('sk-in-chiaro-9876')
   })
 
-  it('Portachiavi che non risponde: il chiaro RESTA (avviso senza la chiave) e si riprova al prossimo avvio', async () => {
+  it('runner `security` giù (nessuna voce vecchia): la chiave si sigilla LO STESSO in keys.json (K1)', async () => {
     setSetting('providers', [{
       id: 'p2', name: 'Beta', kind: 'mistral', baseUrl: 'https://api.mistral.ai',
       apiKey: 'sk-chiave-che-resta-42', enabled: true
@@ -99,7 +105,8 @@ describe('migrazione all\'avvio (idempotente, non si perde mai una chiave)', () 
     const warnings: string[] = []
     const origWarn = console.warn
     console.warn = (...args: unknown[]) => { warnings.push(args.join(' ')) }
-    // runner che fallisce SEMPRE (Keychain giù)
+    // runner che fallisce SEMPRE (Keychain giù): senza voce vecchia da
+    // migrare, keys.json basta — il Portachiavi non serve più (fase rilascio)
     setProviderKeychainRunner(async () => ({ out: '', err: 'keychain down', code: 1 }))
     try {
       await migrateProviderKeys()
@@ -108,15 +115,12 @@ describe('migrazione all\'avvio (idempotente, non si perde mai una chiave)', () 
       console.warn = origWarn
     }
     const raw = storedProviders()
-    expect((raw[0] as StoredProvider).apiKey).toBe('sk-chiave-che-resta-42')
-    expect(JSON.stringify(raw)).not.toContain('apiKeySealed')
-    // l'avviso NON contiene la chiave
+    expect((raw[0] as StoredProvider).apiKey).toBeUndefined()
+    expect((raw[0] as StoredProvider).apiKeySealed).toBeDefined()
+    // nessun avviso contiene la chiave in chiaro
     expect(warnings.join('\n')).not.toContain('sk-chiave-che-resta-42')
-    // al "prossimo avvio" (Keychain su) la migrazione va a buon fine
-    await migrateProviderKeys()
-    const raw2 = storedProviders()
-    expect((raw2[0] as StoredProvider).apiKey).toBeUndefined()
-    expect((raw2[0] as StoredProvider).apiKeySealed).toBeDefined()
+    // e il daemon rivede il chiaro in memoria
+    expect(getProvider('p2')?.apiKey).toBe('sk-chiave-che-resta-42')
   })
 })
 
@@ -277,30 +281,29 @@ describe('R2.1 — i byte della chiave non restano nei file di SQLite', () => {
 })
 
 describe('R2.2 — saveProvider non butta il chiaro non ancora migrato', () => {
-  it('Portachiavi giù: si rinomina senza chiave nuova, si riavvia e si migra — la chiave c\'è ed è sigillata', async () => {
+  it('runner `security` giù: si rinomina senza chiave nuova, si riavvia e si migra — la chiave c\'è ed è sigillata (K1)', async () => {
     const KEY = 'sk-finta-sopravvive-99'
     setSetting('providers', [{
       id: 'keep', name: 'Prima', kind: 'openai', baseUrl: 'https://api.example.com',
       apiKey: KEY, enabled: true
     }])
-    // avvio col Portachiavi GIÙ: la migrazione non riesce, il chiaro resta
+    // avvio col runner `security` GIÙ: la migrazione riesce LO STESSO (K1:
+    // keys.json è la fonte, il Portachiavi serve solo alle voci vecchie)
     setProviderKeychainRunner(async () => ({ out: '', err: 'keychain down', code: 1 }))
-    expect(await migrateProviderKeys()).toBe(false)
-    expect((storedProviders()[0] as StoredProvider).apiKey).toBe(KEY)
+    expect(await migrateProviderKeys()).toBe(true)
+    const sealed = (storedProviders()[0] as StoredProvider).apiKeySealed
+    expect(sealed).toBeDefined()
     // l'utente modifica nome e URL SENZA ridigitare la chiave
     await saveProvider({
       id: 'keep', name: 'Dopo', kind: 'openai', baseUrl: 'https://new.example.com', enabled: true
     })
-    // R2.2: il chiaro sopravvive nel setting (prima spariva: chiave persa)
-    expect((storedProviders()[0] as StoredProvider).apiKey).toBe(KEY)
+    // R2.2: la chiave sigillata sopravvive (prima il chiaro spariva: persa)
     expect((storedProviders()[0] as StoredProvider).name).toBe('Dopo')
-    // «riavvio» col Portachiavi su: la migrazione riesce
-    setProviderKeychainRunner(undefined)
-    expect(await migrateProviderKeys()).toBe(true)
-    const raw = storedProviders()[0] as StoredProvider
-    expect(raw.apiKey).toBeUndefined()
-    expect(raw.apiKeySealed).toBeDefined()
+    expect((storedProviders()[0] as StoredProvider).apiKeySealed).toStrictEqual(sealed)
     expect(getProvider('keep')?.apiKey).toBe(KEY)
+    // «riavvio»: niente più chiaro da migrare, idempotente
+    setProviderKeychainRunner(undefined)
+    expect(await migrateProviderKeys()).toBe(false)
   })
 
   it('una chiave NUOVA scritta col Portachiavi giù non si salva; clearKey toglie anche il chiaro', async () => {

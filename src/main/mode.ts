@@ -20,7 +20,7 @@ export function resolveDataDirArgv(argv: string[]): string | null {
 /**
  * La riga di comando di un processo è il NOSTRO daemon? (A1: le sonde E2E
  * cercano il processo proprio così). Il flag è untoken ambiguo-raro: vale
- * per l'app impacchettata (…/MacOS/homun --homun-daemon) e per lo sviluppo
+ * per l'app impacchettata (…/MacOS/Homun --homun-daemon) e per lo sviluppo
  * (…/Electron <repo> --homun-daemon).
  */
 export function isDaemonCommandLine(cmd: string): boolean {

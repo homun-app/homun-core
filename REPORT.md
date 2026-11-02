@@ -1,3 +1,89 @@
+# REPORT FASE RILASCIO — correzioni
+
+**Data:** 2026-11-02 · **Base:** `fase-rilascio` (c812143) · **Commit:** `rilascio: correzioni` · **Tag:** `fase-rilascio-correzioni`. Nessun push.
+**Verifica:** `typecheck` pulito · `vitest` **145 file / 2233 test verdi** (erano 144/2214) · `build` verde · `i18n` **1115/1115, en 0 mancanti**, due estrazioni consecutive identiche (md5 dei cataloghi `1de29f8b…` prima e dopo) · `release:local` (non firmato) + `release:verify` verde: `Homun.app`, arm64, `app.homun.desktop` 0.3.0, icona `icon.icns`, plist A3 nel bundle, tutti i fuse attesi (RunAsNode off, asar integrity ON su hash in Info.plist), integrità dell'asar.
+Durante il lavoro ho rimosso i bundle `homun.app`/`Homun.app` dentro `dist-installers/mac-arm64/` prodotti dalle build precedenti di questa stessa fase (artefatti di build, non file dell'utente) per rigenerarli col nome giusto. Dati veri mai toccati: nessuna lettura/scrittura di `keys.json` o backup dell'utente, mai Portachiavi né safeStorage veri; l'unica prova dal vivo della `.app` è corsa con `env -i HOME=$HOME PATH=/usr/bin:/bin:/usr/sbin:/sbin SANDBOT_TEST_USER_DATA=<mkdtemp in /var/folders/nb/…> SANDBOT_TEST_FAKE_KEYCHAIN=<file> SANDBOT_TEST_FAKE_SAFESTORAGE=<file>` e chiusa subito dopo le catture.
+
+## K1 — `getMasterKey` non sostituisce MAI una chiave esistente (grave)
+
+**Dove:** `src/daemon/master-keys.ts` (riscritto), `src/daemon/sealed-data.ts` (nuovo), `src/daemon/runtime.ts` (cablaggio sonda), `src/daemon/keychain.ts` (commento: il ripiego non esiste più), `src/main/vault.ts` e `src/main/agent/providers.ts` e `src/daemon/api.ts` (`mcp:save`) passano l'errore tipizzato alla UI senza incapsularlo, `src/shared/ui-messages.ts` (`rpc.masterKeyUnavailable`), `src/main/index.ts` (bridge `host.safeStorage` sulle API asincrone).
+
+**Le regole nuove, in codice:**
+1. **Serializzazione per servizio** (`withServiceLock`): una promessa per servizio; dentro la lock si **rilegge** `keys.json`. Le scritture del file sono serializzate anche fra servizi (`serializeKeysWrite`): nessun read-modify-write sopra un altro.
+2. **Entry presente ma illeggibile** (decifratura fallita, chiave ≠ 32 byte, safeStorage non disponibile): nessuna scrittura, nessuna generazione, niente `getKeychainKey`. Si prova solo `readKeychainKey` in lettura; se non c'è → `MasterKeyUnavailableError(service, motivo)`.
+3. **Generazione SOLO** se mancano insieme: entry in `keys.json`, voce nel Portachiavi, **dati sigillati** (callback `hasSealedData`, cablata dal runtime a `daemonHasSealedData`: `connectors.secrets` non vuoto → connettori; segreti/login/contatti del vault non vuoti → vault; un provider con `apiKeySealed` → provider). La generazione ora è **verificata in rilettura**: se non decifra, non si restituisce.
+4. **Il ripiego «crea se manca» sparisce da `getMasterKey`**: dopo la 0.3 nessuna chiave master nasce più con `security` (restano solo lettura/migrazione/cancellazione delle voci vecchie).
+5. **Log veritieri**: dopo `delete-generic-password` si **rilegge** l'esistenza della voce e il log dice ciò che è vero («was removed» / «still present: will retry at the next start»), anche quando il runner mente sul codice d'uscita.
+6. **Solo il daemon tocca le chiavi**: `getMasterKey` senza backend registrato lancia un errore di programmazione, senza MAI chiamare il runner.
+7. **safeStorage asincrone** di Electron 45 (`isAsyncEncryptionAvailable`/`encryptStringAsync`/`decryptStringAsync`, verificate in `electron.d.ts`: `decryptStringAsync` restituisce `{shouldReEncrypt, result}` — si usa `result`); il tipo `SafeStorageLike` le accetta come opzionali, il finto dei test non cambia.
+8. **In UI**: `MasterKeyUnavailableError` viaggia com'è fino ai punti dove compaiono gli errori di connettori, Cassaforte e provider; il testo del catalogo (IT sorgente / EN tradotto) è: «Homun non riesce a leggere le chiavi che proteggono i tuoi segreti. Se macOS ha chiesto l'accesso al Portachiavi, consentilo e premi Riprova.» I turni senza segreti continuano.
+
+**Test** (`src/daemon/__tests__/master-keys.test.ts`, tutti con keychain finto e backend finto, ciascuno con attesa su file e Portachiavi):
+- entry non decifrabile + nessuna voce → errore, `keys.json` **identico byte per byte**, nessuna voce creata;
+- safeStorage non disponibile + entry presente → errore, nessuna voce nel finto;
+- dati sigillati + nessuna chiave → errore `sealed-data`, nessuna generazione;
+- 10 chiamate in parallelo su una migrazione → una sola chiave per tutti, voce cancellata **una volta**;
+- due servizi migrati in parallelo → entrambi in `keys.json`;
+- runner che cancella ma restituisce ≠ 0 → log «was removed» (verità riletta, non codice d'uscita); più il gemello: cancellazione che non avviene → «still present»;
+- nessun backend → errore di programmazione, **zero chiamate** al runner (spy);
+- la sonda `daemonHasSealedData` (connettore/vault/provider, login e contatti contano, servizi ignoti → false).
+Adattati al contratto nuovo: `keychain.test.ts` (ora prova `getKeychainKey` direttamente), `providers-keys.test.ts` e `vault-keychain.test.ts` e `fase14-fill`/`fase19a-login-note` (backend finto registrato come fa il daemon; niente più nascita delle chiavi nel Portachiavi).
+
+## K2 — I dati veri non si toccano
+
+Sui dati veri non ho letto, aperto né spostato niente. Lo stato (entry `sandbot-connectors-key` presente, voce vecchia già cancellata, `connectors.secrets` non vuoto) è riprodotto nel test **«il codice nuovo USA l'entry esistente e non genera nulla»** (`master-keys.test.ts`, describe K2): la chiave restituita È quella dell'entry, `keys.json` resta identico byte per byte, nessuna voce generata o cancellata, nessun avviso. Il gemello «la STESSA entry non si decifra, con dati sigillati → errore» copre il caso dell'incidente K1 su quello stato: errore e file intatto, mai una chiave nuova.
+
+## K3 — Nome del bundle, icona, Info.plist
+
+**Dove:** `package.json`, `build/icon.png` (nuovo, l'icona 1024×1024 di Homun 2), `build/launchagent/app.homun.desktop.daemon.plist`, `src/main/launchagent.ts`, `scripts/after-pack.mjs`, `scripts/verify-release.mjs`, script npm `release:verify`.
+
+- `"productName": "Homun"` **a livello radice** (come homun2 riga 3): in sviluppo `app.getName()` è «Homun», la voce di safeStorage resta «Homun Safe Storage»; la cartella dati resta `sandbot` (`paths.ts`, test incluso).
+- **Scoperta chiave:** in electron-builder `productFilename = executableName ?? productName`, quindi `executableName: "homun"` rinominava anche la **cartella** in `homun.app`. Tolto `executableName`: cartella ed eseguibile ora sono «Homun». Aggiornati di conseguenza il plist A3 (`Contents/MacOS/Homun`, argomento `Homun`), `APP_EXECUTABLE_NAME` e i test collegati.
+- Icona: `build/icon.png` + `"icon": "build/icon.png"` sotto `build.mac` → `CFBundleIconFile: icon.icns`.
+- Tolte da `extendInfo` le descrizioni microfono/camera. **Nota:** Electron le scrive DI SUO nell'Info.plist anche senza configurazione («This app needs access to the microphone»): `after-pack` le rimuove dal bundle prima della firma.
+- `verify-release.mjs` controlla: bundle **`Homun.app` con la maiuscola esatta letta da disco** (APFS è case-insensitive: il percorso passato può aprire `homun.app` anche scrivendo `Homun.app`), `CFBundleIconFile` ≠ `electron.icns` (e il file esiste), nessuna `NSMicrophoneUsageDescription`/`NSCameraUsageDescription`.
+- `release:verify` ora passa da solo `dist-installers/mac-arm64/Homun.app --expected-arch arm64 --expected-version $npm_package_version` (e lo script rifiuta una versione attesa diversa dal package.json).
+- **Test:** `src/main/__tests__/release-config.test.ts` (productName radice, niente executableName, icona, niente descrizioni, cartella dati fissa) + `launchagent-release.test.ts` aggiornato + `mode.test.ts` con l'eseguibile `Homun`.
+
+## K4 — La riga «Homun è stato rinnovato» sotto i semafori
+
+**Dove:** `src/renderer/src/App.tsx` (`LegacyHomun2Notice`), `src/renderer/src/layout.ts` (costante `TRAFFIC_LIGHT_INSET = 80`), `src/renderer/src/components/Sidebar.tsx` (la testata usa la STESSA costante).
+
+La riga lascia libero lo spazio dei semafori (`padding-left: TRAFFIC_LIGHT_INSET`, ~80 px come l'inset della barra laterale, stessa costante della Sidebar); è una fascia di trascinamento (`drag-region`) e i suoi bottoni no (`no-drag`); il percorso completo è diventato «nella cartella di Homun 2» (il percorso lo apre già «Mostra nel Finder», che lo mostra nel `title`); a 900 px sta su **una** riga, troncata con `title` col testo intero.
+
+**Cattura vera della finestra della `.app`** (dati temporanei, `screencapture -R`, non Playwright): `docs/k4-riga-rinnovo-dettaglio.png` (1200 px) — semafori liberi, testo su una riga, «Mostra nel Finder» e ✕ a destra; `docs/k4-riga-rinnovo-900.png` (900 px) — una riga sola troncata con «…», bottoni presenti; `docs/k4-riga-rinnovo-1200.png` (finestra intera).
+
+## K5 — Impostazioni › Modelli: le righe di «Chi usa cosa»
+
+**Dove:** `src/renderer/src/components/Settings.tsx` (`MainModelRow`, `ReviewerModelRow`, soglia delle colonne).
+
+- Tutte le righe di «Chi usa cosa» ora hanno **etichetta (e descrizione) SOPRA e controlli sotto, a tutta larghezza**: «Il cervello dei bot» non si schiaccia più una parola per riga.
+- «Revisione delle approvazioni»: provider e modello su una riga sotto l'etichetta con `grid-cols-[minmax(0,1fr)_minmax(0,1fr)]`, che sotto i 420 px di contenuto si impilano.
+- **Soglia due colonne a 960 px di contenuto** (era 820). Scelta: la colonna «Aggiungi un modello» resta a destra ma solo quando il contenuto è largo — **perché** a 1440 px di finestra il contenuto è 824 px: con soglia 820 saremmo stati a due colonne con la sinistra a ~440 px (etichette sotto i 160 px); a 960 a 1440 si sta su UNA colonna a tutta larghezza e, quando le colonne partono (contenuto ≥ 960), la sinistra non scende mai sotto 584 px (960 − 360 − spazi): nessuna etichetta sotto i 160 px a nessuna larghezza.
+- Segnaposto breve: «Modello (vuoto: quello del provider)» / EN «Model (blank: the provider's own)».
+
+## K6 — Updater nelle build `--dir`
+
+**Dove:** `src/main/updater.ts` (`hasUpdateConfig` + `shouldAutoCheckUpdates` con terzo parametro), `src/main/index.ts`, `src/main/ipc.ts` (`updater:status` ora porta `canUpdate`), `src/shared/types.ts`, `src/renderer/src/components/Settings.tsx`.
+
+`shouldAutoCheckUpdates` dice no anche quando `Resources/app-update.yml` manca (esistenza iniettabile): niente «Checking for update», niente `ENOENT`. In Impostazioni, quando `canUpdate` è false, al posto del bottone compare «Questa build non riceve aggiornamenti» (EN tradotto). **Test puri** in `src/main/__tests__/updater.test.ts` (due casi nuovi). **Prova dal vivo:** la `.app` di `release:local` avviata con le variabili di prova non ha scritto nemmeno una riga sugli aggiornamenti nel log.
+
+## K1.6 — Punti del processo UI controllati (grep)
+
+Il processo UI (main di `src/main/index.ts`) **non arriva mai** a `vault`/`getProvidersKey`/`getConnectorsKey`: nessuna import in `ipc.ts`, `tray.ts`, `daemon-client.ts`, `daemon-context.ts`, `protocol.ts`, `legacy-homun2.ts`. I punti che toccano le chiavi girano tutti nel processo daemon:
+- `src/daemon/runtime.ts:42,140,359` — wiring connettori e `setWebSearchKeyGetter`;
+- `src/daemon/api.ts:845,1486,1495` — `mcp:save` e chiave ricerca web;
+- `src/daemon/keychain.ts:142–149` — `getConnectorsKey`/`getProvidersKey`;
+- `src/main/connectors/wiring.ts:193` e `src/main/agent/providers.ts:57` — caricati dal runtime del daemon;
+- `src/main/vault.ts` — usato dalle RPC `vault:*` di `api.ts.
+L'unica cosa che la UI fa con safeStorage è il **ponte** `host.safeStorage.encrypt/decrypt` (ora asincrono) verso il daemon: cifratura a richiesta, mai accesso alle chiavi master.
+
+## Non è un difetto (conferme)
+
+Restano come da prompt: «squadra: Carlo resta thinking» è un tempo della sonda; le Impostazioni it-light a 1100 non aprirsi era il click della sonda (dark 1100 OK).
+
+---
+
 # REPORT — Fase 1: sicurezza e correttezza
 
 **Data:** 2026-10-26 · **Commit:** `fase 1: sicurezza e correttezza` · **Tag:** `fase-1`

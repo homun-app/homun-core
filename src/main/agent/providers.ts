@@ -20,6 +20,7 @@ export type { ProviderSaveInput } from '../../shared/types'
 import { liveModelsUrl, liveModelsHeaders, ollamaCapabilities, setOllamaCapabilities, readOllamaCapabilities, isLocalKind, KNOWN_BASE_URLS } from './live-models'
 import { sealProviderKey, openProviderKey, keyHintOf, isSealedKey, type ProviderKeyDeps } from './provider-keys'
 import { getProvidersKey, type SecurityRunner } from '../../daemon/keychain'
+import { isMasterKeyUnavailableError } from '../../daemon/master-keys'
 
 // fase 18b (H5.2): i base URL noti vivono nel modulo puro live-models (li
 // legge anche l'adattatore); re-esportati per i chiamanti storici
@@ -183,8 +184,12 @@ export async function saveProvider(input: ProviderSaveInput): Promise<void> {
       // la chiave nuova è sigillata: il chiaro (eventuale) del precedente si toglie
       delete next.apiKey
       plainKeys.set(input.id, newKey)
-    } catch {
-      // il Portachiavi non risponde: la chiave VECCHIA resta al suo posto
+    } catch (e) {
+      // K1.8 (fase rilascio — correzioni): MasterKeyUnavailableError porta il
+      // testo del catalogo così com'è (arriva dove arrivano gli errori dei
+      // provider); per il resto il Portachiavi non risponde e la chiave VECCHIA
+      // resta al suo posto
+      if (isMasterKeyUnavailableError(e)) throw e
       throw uiError(UI.rpcKeychainUnavailable)
     }
   } else if (prev?.apiKey) {

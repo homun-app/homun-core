@@ -851,7 +851,7 @@ export interface SandbotApi {
   boxDockerStatus(): Promise<{ installed: boolean; running: boolean; path: string }>
   boxDockerRetry(): Promise<{ installed: boolean; running: boolean; path: string }>
   // fase rilascio (A8): l'aggiornamento (main process)
-  updaterStatus(): Promise<{ current: string }>
+  updaterStatus(): Promise<{ current: string; canUpdate: boolean }>
   updaterCheck(): Promise<{ current: string; available: boolean; version: string | null; error?: string }>
   // fase rilascio (A8): la riga del rinnovo da Homun 2 (una volta)
   legacyHomun2(): Promise<{ dir: string } | null>

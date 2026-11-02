@@ -57,7 +57,9 @@ import { join } from 'node:path'
 import type { SandbotEvent } from '../shared/types'
 import { currentUserLanguage } from '../main/agent/user-language'
 // fase rilascio (A6): le chiavi master passano da keys.json/safeStorage
-import { setMasterKeyStorage, safeStorageBackendForEnv } from './master-keys'
+import { setMasterKeyStorage, setMasterKeySealedDataProbe, safeStorageBackendForEnv } from './master-keys'
+// fase rilascio — correzioni (K1.3): la sonda dei dati sigillati del daemon
+import { daemonHasSealedData } from './sealed-data'
 import type { SafeStorageLike } from '../main/vault'
 // fase rilascio (A7): docker si trova anche fuori dal Terminale
 import { resolveTool, dockerChildEnv } from '../main/tool-paths'
@@ -84,6 +86,9 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
   // A6: il backend delle chiavi master si registra PRIMA delle migrazioni che
   // ne hanno bisogno (providers, vault); nei test mai il Portachiavi vero
   setMasterKeyStorage(safeStorageBackendForEnv(opts.safeStorage ?? null))
+  // K1.3: con dati sigillati e nessuna chiave recuperabile il daemon si
+  // rifiuta di generare (una chiave nuova renderebbe i segreti illeggibili)
+  setMasterKeySealedDataProbe(daemonHasSealedData)
 
   const lock = acquireDaemonLock(dataDir())
   if (!lock.ok) {

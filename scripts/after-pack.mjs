@@ -58,6 +58,23 @@ export default async function afterPack(context) {
     // lo si dice a schermo: verify-release approfondisce (A4.3)
     console.warn('after-pack: ElectronAsarIntegrity ASSENTE in Info.plist — il fuse di integrità resta spento')
   }
+  // K3 (fase rilascio — correzioni): Electron scrive di SUO le descrizioni
+  // NSMicrophoneUsageDescription / NSCameraUsageDescription di default
+  // nell'Info.plist dell'app («This app needs access to the microphone»),
+  // anche quando la config non le chiede. Nessuna funzione le usa e i
+  // permessi sono negati in A5: si tolgono DAL BUNDLE, prima della firma.
+  {
+    const infoPath = path.join(resources, '..', 'Info.plist')
+    const before = await readFile(infoPath, 'utf8')
+    const cleaned = before
+      .replace(/\s*<key>NSMicrophoneUsageDescription<\/key>\s*<string>[^<]*<\/string>/g, '')
+      .replace(/\s*<key>NSCameraUsageDescription<\/key>\s*<string>[^<]*<\/string>/g, '')
+    if (cleaned !== before) {
+      const { writeFile } = await import('node:fs/promises')
+      await writeFile(infoPath, cleaned)
+      console.log('after-pack: tolte le descrizioni microfono/camera di default di Electron (K3)')
+    }
+  }
   await flipFuses(electronBinaryPath(context), {
     version: FuseVersion.V1,
     // A1: spegni il vettore "usami come Node" — con il fuse acceso,

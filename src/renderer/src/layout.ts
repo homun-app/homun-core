@@ -15,6 +15,14 @@ export const AUTO_RAIL_BELOW = 1000
 export const SIDEBAR_MIN = 220
 export const SIDEBAR_MAX = 420
 
+/**
+ * Fase rilascio — correzioni (K4): lo spazio orizzontale che i semafori di
+ * macOS occupano sulla cima della finestra (titleBarStyle hiddenInset). La
+ * riga «Homun è stato rinnovato» e la testata della Sidebar lo lasciano
+ * libero: è la STESSA costante, così i semafori non coprono mai nulla.
+ */
+export const TRAFFIC_LIGHT_INSET = 80
+
 /** La scheda del pannello destro: larga solo «computer»; «members» = squadra. */
 export type PanelTabId = 'profile' | 'computer' | 'routines' | 'advanced' | 'members'
 

@@ -1,9 +1,13 @@
 // Test della chiave Keychain dei connettori (fase 5): la chiave NON compare
 // mai nell'argv del comando `security` (i comandi partono da stdin con -i),
 // la lettura usa find-generic-password -w, e la creazione è idempotente.
+// FASE RILASCIO — CORREZIONI (K1): getConnectorsKey passa da master-keys
+// (keys.json + safeStorage, provato in master-keys.test.ts); qui si prova
+// DIRETTAMENTE getKeychainKey, la via storica del runner `security` che
+// resta per la lettura/migrazione delle voci vecchie.
 import { describe, expect, it } from 'vitest'
 import { randomBytes } from 'node:crypto'
-import { getConnectorsKey, type SecurityRunner } from '../keychain'
+import { getKeychainKey, CONNECTORS_SERVICE, type SecurityRunner } from '../keychain'
 
 /** Runner finto: registra ogni argv e stdin; risponde come il Keychain. */
 function fakeSecurity(): { run: SecurityRunner; argvs: string[][]; stdins: string[]; store: Map<string, string> } {
@@ -35,7 +39,7 @@ function fakeSecurity(): { run: SecurityRunner; argvs: string[][]; stdins: strin
 describe('chiave AES dei connettori nel Keychain', () => {
   it('prima occorrenza: genera 32 byte, li scrive via `security -i` (stdin) e NON nell\'argv', async () => {
     const f = fakeSecurity()
-    const key = await getConnectorsKey(f.run)
+    const key = await getKeychainKey(CONNECTORS_SERVICE, f.run)
     expect(key).toHaveLength(32)
     // la scrittura passa da stdin di `security -i`
     expect(f.argvs.some((a) => a[0] === '-i')).toBe(true)
@@ -51,7 +55,7 @@ describe('chiave AES dei connettori nel Keychain', () => {
     const f = fakeSecurity()
     const existing = randomBytes(32)
     f.store.set('sandbot|sandbot-connectors-key', existing.toString('base64'))
-    const key = await getConnectorsKey(f.run)
+    const key = await getKeychainKey(CONNECTORS_SERVICE, f.run)
     expect(key.equals(existing)).toBe(true)
     expect(f.argvs[0]).toEqual(['find-generic-password', '-a', 'sandbot', '-s', 'sandbot-connectors-key', '-w'])
     expect(f.argvs.length).toBe(1) // nessuna scrittura
@@ -73,7 +77,7 @@ describe('chiave AES dei connettori nel Keychain', () => {
       }
       return { out: '', err: '', code: 1 }
     }
-    const key = await getConnectorsKey(run)
+    const key = await getKeychainKey(CONNECTORS_SERVICE, run)
     expect(key.equals(raced)).toBe(true)
   })
 })

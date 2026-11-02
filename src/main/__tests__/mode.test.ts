@@ -7,8 +7,8 @@ import { isDaemonMode, resolveDataDirArgv, daemonSpawnSpec, isDaemonCommandLine,
 
 describe('fase rilascio (A1): modalità di avvio', () => {
   it('--homun-daemon accende la modalità daemon, senza resta la UI', () => {
-    expect(isDaemonMode(['/Applications/Homun.app/Contents/MacOS/homun', DAEMON_FLAG])).toBe(true)
-    expect(isDaemonMode(['/Applications/Homun.app/Contents/MacOS/homun'])).toBe(false)
+    expect(isDaemonMode(['/Applications/Homun.app/Contents/MacOS/Homun', DAEMON_FLAG])).toBe(true)
+    expect(isDaemonMode(['/Applications/Homun.app/Contents/MacOS/Homun'])).toBe(false)
     expect(isDaemonMode(['/usr/local/bin/electron', '/Users/x/sandbot', DAEMON_FLAG])).toBe(true)
     // il flag si cerca OVUNQUE in argv: in dev l'app path viene prima
     expect(isDaemonMode(['electron', '.', DAEMON_FLAG, '--other'])).toBe(true)
@@ -21,21 +21,21 @@ describe('fase rilascio (A1): modalità di avvio', () => {
   })
 
   it('riconoscere il processo del daemon dalla riga di comando (per le sonde E2E)', () => {
-    expect(isDaemonCommandLine('/Applications/Homun.app/Contents/MacOS/homun --homun-daemon')).toBe(true)
+    expect(isDaemonCommandLine('/Applications/Homun.app/Contents/MacOS/Homun --homun-daemon')).toBe(true)
     expect(isDaemonCommandLine('/opt/electron/Electron.app/Contents/MacOS/Electron /Users/fabio/Projects/Bot/sandbot --homun-daemon')).toBe(true)
     expect(isDaemonCommandLine('/usr/local/bin/node out/main/daemon.js --data /tmp/x')).toBe(false)
   })
 
   it('riconoscere il daemon VECCHIO (fase ≤16c, daemon.js in ELECTRON_RUN_AS_NODE)', () => {
     expect(isLegacyDaemonCommandLine('/usr/local/bin/node out/main/daemon.js --data /tmp/x')).toBe(true)
-    expect(isLegacyDaemonCommandLine('/Applications/Homun.app/Contents/MacOS/homun --homun-daemon')).toBe(false)
+    expect(isLegacyDaemonCommandLine('/Applications/Homun.app/Contents/MacOS/Homun --homun-daemon')).toBe(false)
   })
 })
 
 describe('fase rilascio (A1): riga di comando del spawn', () => {
   it('impacchettata: solo --homun-daemon (l\'eseguibile porta l\'app con sé)', () => {
-    const spec = daemonSpawnSpec({ execPath: '/Applications/Homun.app/Contents/MacOS/homun', isPackaged: true, appPath: '/ignored', env: {} })
-    expect(spec.command).toBe('/Applications/Homun.app/Contents/MacOS/homun')
+    const spec = daemonSpawnSpec({ execPath: '/Applications/Homun.app/Contents/MacOS/Homun', isPackaged: true, appPath: '/ignored', env: {} })
+    expect(spec.command).toBe('/Applications/Homun.app/Contents/MacOS/Homun')
     expect(spec.args).toEqual([DAEMON_FLAG])
   })
 

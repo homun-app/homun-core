@@ -13,7 +13,7 @@ import { ActivityPanel } from './components/ActivityPanel'
 import { AppsWindow } from './components/AppsWindow'
 import { api } from './store'
 // fase 16b correzioni 2 (Q1): il layout a tre colonne è UNA funzione pura
-import { layoutFor } from './layout'
+import { layoutFor, TRAFFIC_LIGHT_INSET } from './layout'
 
 /** Minimo intervallo tra due segnali 'active' (il daemon ne scarta uno ogni 30 s). */
 const ACTIVE_EVERY_MS = 30_000
@@ -25,6 +25,12 @@ const RESIZE_DEBOUNCE_MS = 100
 // fase rilascio (A8): la riga UNA VOLTA del passaggio da Homun 2 — le
 // conversazioni e i bot di Homun 2 NON vengono importati; la cartella si può
 // aprire nel Finder. Niente si legge e niente si tocca là dentro.
+// FASE RILASCIO — CORREZIONI (K4): la riga sta nella zona del titolo, dove
+// i semafori di macOS coprono l'inizio — lascia libero il loro spazio
+// (TRAFFIC_LIGHT_INSET, la stessa costante della testata della Sidebar), è
+// una fascia di trascinamento (i bottoni no), il percorso completo diventa
+// «nella cartella di Homun 2» (il percorso lo apre già «Mostra nel Finder»)
+// e a finestra stretta sta su UNA riga, troncata, col testo intero nel title.
 function LegacyHomun2Notice() {
   const { t } = useLingui()
   const [dir, setDir] = useState<string | null>(null)
@@ -32,22 +38,25 @@ function LegacyHomun2Notice() {
     void api.legacyHomun2().then((r) => setDir(r ? r.dir : null)).catch(() => setDir(null))
   }, [])
   if (!dir) return null
+  const text = t`Homun è stato rinnovato. Le conversazioni e i bot di Homun 2 non sono stati importati: restano sul tuo Mac nella cartella di Homun 2.`
   return (
-    <div className="flex items-start justify-between gap-3 border-b bg-muted px-4 py-2 text-xs text-muted-foreground">
-      <p className="min-w-0">
-        <Trans>
-          Homun è stato rinnovato. Le conversazioni e i bot di Homun 2 non sono stati importati: restano sul tuo Mac in {dir}.
-        </Trans>
+    <div
+      className="drag-region flex items-center justify-between gap-3 border-b bg-muted py-2 pr-4 text-xs text-muted-foreground"
+      style={{ paddingLeft: TRAFFIC_LIGHT_INSET }}
+    >
+      <p className="min-w-0 flex-1 truncate" title={text}>
+        {text}
       </p>
       <span className="flex shrink-0 items-center gap-2">
         <button
-          className="rounded-full bg-foreground px-3 py-1 text-[11px] text-background"
+          className="no-drag rounded-full bg-foreground px-3 py-1 text-[11px] text-background"
+          title={dir}
           onClick={() => void api.revealInFinder(dir)}
         >
           <Trans>Mostra nel Finder</Trans>
         </button>
         <button
-          className="rounded-full px-2 py-1 text-[11px] hover:text-foreground"
+          className="no-drag rounded-full px-2 py-1 text-[11px] hover:text-foreground"
           title={t`Non mostrare più`}
           onClick={() => {
             setDir(null)

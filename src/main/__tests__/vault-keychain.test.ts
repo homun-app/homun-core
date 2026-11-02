@@ -1,13 +1,18 @@
-// Test del vault con chiave master nel Keychain (fase 6, residuo 0b): il
-// daemon usa le credenziali anche a finestra chiusa. Runner `security` finto
-// in memoria: la chiave non compare mai nell'argv di un processo, i comandi
-// di scrittura partono da stdin (`security -i`). Store reale su directory
+// Test del vault con la chiave master (fase 6 → fase rilascio A6 + K1): la
+// chiave vive in keys.json cifrata con safeStorage; il daemon usa le
+// credenziali anche a finestra chiusa. Runner `security` finto in memoria
+// (serve solo alla migrazione dalla voce vecchia). Store reale su directory
 // temporanea, safeStorage finta per la migrazione.
+// FASE RILASCIO — CORREZIONI (K1): senza backend registrato il vault resta
+// BLOCCATO (errore di programmazione: solo il daemon tocca le chiavi) e dopo
+// la 0.3 nessuna chiave master nasce più nel Portachiavi.
 import { describe, expect, it, beforeAll, beforeEach, afterAll } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomBytes, createCipheriv } from 'node:crypto'
+
+// cartelle temporanee SOLO con mkdtemp nella directory fissata
+const TMP_BASE = '/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T'
 
 const { setDataDir, dataDir, db, getSetting, setSetting } = await import('../store/db')
 const vault = await import('../vault')
@@ -76,7 +81,7 @@ async function seedLegacyKey(): Promise<string> {
 let kc: ReturnType<typeof fakeKeychain>
 
 beforeAll(() => {
-  const dir = mkdtempSync(join(tmpdir(), 'sandbot-vault-test-'))
+  const dir = mkdtempSync(join(TMP_BASE, 'sandbot-vault-test-'))
   setDataDir(dir)
   dataDir()
   db()
@@ -97,31 +102,39 @@ beforeEach(() => {
   }
 })
 
-describe('chiave master nel Keychain (senza UI)', () => {
-  it('storeSecret senza safeStorage: la chiave nasce nel Keychain e il segreto si rilegge', async () => {
+/** Il backend dei test: safeStorage finta REGISTRATA (come fa il daemon). */
+function registerStorage() {
+  const fake = fakeSafeStorage(() => true)
+  masterKeys.setMasterKeyStorage(fake)
+  vault.setSafeStorage(fake)
+}
+
+describe('chiave master senza UI (fase rilascio — correzioni K1)', () => {
+  it('senza backend registrato il vault resta BLOCCATO e non si scrive nulla (solo il daemon tocca le chiavi)', async () => {
+    await expect(vault.storeSecret('API_KEY', 'valore-segreto')).rejects.toThrow('Vault locked')
+    expect(getSetting<Array<unknown>>('vault.secrets', [])).toEqual([])
+    expect(existsSync(join(dataDir(), 'keys.json'))).toBe(false) // nessuna generazione
+    expect(kc.calls).toHaveLength(0) // il Portachiavi non viene toccato
+  })
+
+  it('storeSecret col backend del daemon: la chiave nasce in keys.json e il segreto si rilegge', async () => {
+    registerStorage()
     await vault.storeSecret('API_KEY', 'valore-segreto')
-    expect(kc.has(VAULT_SERVICE)).toBe(true)
+    expect(kc.has(VAULT_SERVICE)).toBe(false) // NIENTE più voce nel Keychain
+    const parsed = JSON.parse(readFileSync(join(dataDir(), 'keys.json'), 'utf8')) as Record<string, unknown>
+    expect(typeof parsed[VAULT_SERVICE]).toBe('string')
     expect(await vault.revealSecret('API_KEY')).toBe('valore-segreto')
   })
 
-  it('la chiave non compare MAI negli argv del comando security (solo da stdin)', async () => {
+  it('vault e connettori hanno chiavi SEPARATE (campi distinti di keys.json)', async () => {
+    registerStorage()
     await vault.storeSecret('API_KEY', 'v')
-    const keyB64 = kc.value(VAULT_SERVICE)!
-    expect(keyB64).toMatch(/^[A-Za-z0-9+/=]{44}$/) // 32 byte in base64
-    for (const c of kc.calls) {
-      // il valore può stare solo nello stdin dei comandi `-i`, mai negli argv
-      // (il `-w` della lettura è il flag "stampa su stdout", senza valore)
-      expect(c.args.join(' ')).not.toContain(keyB64)
-    }
-    const write = kc.calls.find((c) => c.args[0] === '-i')
-    expect(write?.input).toContain(keyB64) // da stdin, come i connettori
-  })
-
-  it('la voce del vault è SEPARATA da quella dei connettori', async () => {
     const { getConnectorsKey } = await import('../../daemon/keychain')
-    await vault.storeSecret('API_KEY', 'v')
     await getConnectorsKey(kc.run)
-    expect(kc.value(VAULT_SERVICE)).not.toBe(kc.value(CONNECTORS_SERVICE))
+    const parsed = JSON.parse(readFileSync(join(dataDir(), 'keys.json'), 'utf8')) as Record<string, string>
+    expect(parsed[VAULT_SERVICE]).not.toBe(parsed[CONNECTORS_SERVICE])
+    // il runner `security` vede SOLO letture della voce vecchia (find), mai scritture
+    for (const c of kc.calls) expect(c.args[0]).toBe('find-generic-password')
   })
 
   it('Keychain non disponibile e nessuna chiave legacy → vault bloccato, nessun segreto scritto', async () => {

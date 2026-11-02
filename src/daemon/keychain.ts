@@ -123,8 +123,10 @@ export async function deleteKeychainKey(service: string, run: SecurityRunner = s
 /**
  * Chiave per una voce del Keychain: letta o generata alla prima occorrenza
  * (32 byte casuali). Se la scrittura fallisce perché una voce è stata creata
- * concorrentemente, rilegge: un solo processo vince la gara. (Oggi è il
- * FALLBACK di getMasterKey e la via delle generazioni PRE-migrazione.)
+ * concorrentemente, rilegge: un solo processo vince la gara.
+ * (FASE RILASCIO — CORREZIONI K1: NON è più il ripiego di getMasterKey e
+ * dopo la 0.3 nessuna chiave master nasce più da qui; resta per la storia
+ * del codice e per i test del runner `security`.)
  */
 export async function getKeychainKey(service: string, run: SecurityRunner = securityRunnerForEnv()): Promise<Buffer> {
   const existing = await readKeychainKey(service, run)

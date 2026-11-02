@@ -11,13 +11,15 @@
 // non è un segnale di iframe), l'iframe lo scopre solo il probe (top:false).
 import { describe, expect, it, beforeAll, afterAll, beforeEach } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+
+// cartelle temporanee SOLO con mkdtemp nella directory fissata
+const TMP_BASE = '/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T'
 // fase 17c: la lingua dell'interfaccia dei test è l'italiano (i testi erano italiani prima)
 import { setSetting } from '../../store/db'
 setSetting('ui.activeLanguage', 'it')
 
-const TMP = mkdtempSync(join(tmpdir(), 'sandbot-fill-test-'))
+const TMP = mkdtempSync(join(TMP_BASE, 'sandbot-fill-test-'))
 const { setDataDir, dataDir, getSetting } = await import('../../store/db')
 setDataDir(TMP)
 
@@ -29,6 +31,15 @@ const { runFillCredential } = await import('../fill')
 const vault = await import('../../vault')
 const browser = await import('../browser')
 const { setVaultKeychainRunner } = vault
+// fase rilascio — correzioni (K1): il backend delle chiavi master FINTO
+// (come registra il daemon): senza, il vault resta bloccato
+const { setMasterKeyStorage } = await import('../../../daemon/master-keys')
+setMasterKeyStorage({
+  isEncryptionAvailable: () => true,
+  encryptString: async (plain: string) => Buffer.from('FAKE:' + plain),
+  decryptString: async (enc: Buffer) => enc.toString().replace(/^FAKE:/, '')
+})
+
 
 // keychain finto come vault-keychain.test.ts (chiave mai negli argv)
 const fakeKeychain = (): import('../../../daemon/keychain').SecurityRunner => {

@@ -35,7 +35,7 @@ import { canOpenExternally } from './external-url'
 import { permissionAllowed } from './permissions'
 import { cleanupLegacyLaunchAgent } from './launchagent'
 import { findLegacyHomun2Dir, legacyNoticeMarkerPath } from './legacy-homun2'
-import { initUpdater, setUpdaterDaemonStopper, shouldAutoCheckUpdates } from './updater'
+import { initUpdater, setUpdaterDaemonStopper, shouldAutoCheckUpdates, hasUpdateConfig } from './updater'
 import { safeStorageBackendForEnv } from '../daemon/master-keys'
 
 // fase 16 (U0b): la cartella dati reale dell'utente è …/Application
@@ -195,10 +195,12 @@ if (isDaemonMode(process.argv)) {
       // client del daemon: lo avvia se non attivo, inoltra RPC/host API/eventi
       const client = new DaemonClient()
       client.registerHost('host.screen.scaleFactor', () => screen.getPrimaryDisplay().scaleFactor || 1)
-      client.registerHost('host.safeStorage.encrypt', ([plain]) =>
-        safeStorage.encryptString(String(plain)).toString('base64'))
-      client.registerHost('host.safeStorage.decrypt', ([b64]) =>
-        safeStorage.decryptString(Buffer.from(String(b64), 'base64')))
+      // K1.7 (fase rilascio — correzioni): le API ASINCRONE di safeStorage
+      // (Electron 45 depreca le sincrone e avvisa nel log)
+      client.registerHost('host.safeStorage.encrypt', async ([plain]) =>
+        (await safeStorage.encryptStringAsync(String(plain))).toString('base64'))
+      client.registerHost('host.safeStorage.decrypt', async ([b64]) =>
+        await safeStorage.decryptStringAsync(Buffer.from(String(b64), 'base64')))
       // fase 5: apre il browser di sistema per l'autorizzazione OAuth dei connettori
       client.registerHost('host.openExternal', ([url]) => {
         if (!canOpenExternally(String(url))) return Promise.reject(new Error('URL non apribile'))
@@ -250,8 +252,9 @@ if (isDaemonMode(process.argv)) {
       })
 
       // A8: l'aggiornamento si controlla solo nell'app impacchettata e mai
-      // quando ci sono variabili SANDBOT_TEST_* (le prove non toccano la rete)
-      if (shouldAutoCheckUpdates(app.isPackaged, process.env)) initUpdater()
+      // quando ci sono variabili SANDBOT_TEST_* (le prove non toccano la rete).
+      // K6: e mai quando manca app-update.yml (build --dir): niente ENOENT nel log
+      if (shouldAutoCheckUpdates(app.isPackaged, process.env, hasUpdateConfig())) initUpdater()
     })
 
     app.on('window-all-closed', () => {

@@ -2105,8 +2105,13 @@ msgid "Homun è aggiornato"
 msgstr "Homun è aggiornato"
 
 #: src/renderer/src/App.tsx
-msgid "Homun è stato rinnovato. Le conversazioni e i bot di Homun 2 non sono stati importati: restano sul tuo Mac in {dir}."
-msgstr "Homun è stato rinnovato. Le conversazioni e i bot di Homun 2 non sono stati importati: restano sul tuo Mac in {dir}."
+msgid "Homun è stato rinnovato. Le conversazioni e i bot di Homun 2 non sono stati importati: restano sul tuo Mac nella cartella di Homun 2."
+msgstr "Homun è stato rinnovato. Le conversazioni e i bot di Homun 2 non sono stati importati: restano sul tuo Mac nella cartella di Homun 2."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "rpc.masterKeyUnavailable"
+msgstr "Homun non riesce a leggere le chiavi che proteggono i tuoi segreti. Se macOS ha chiesto l’accesso al Portachiavi, consentilo e premi Riprova."
 
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "http (URL)"
@@ -2868,6 +2873,10 @@ msgstr "modello"
 msgid "Modello"
 msgstr "Modello"
 
+#: src/renderer/src/components/Settings.tsx
+msgid "Modello (vuoto: quello del provider)"
+msgstr "Modello (vuoto: quello del provider)"
+
 #: src/renderer/src/components/ActivityPanel.tsx
 msgid "modello che non risponde"
 msgstr "modello che non risponde"
@@ -2883,10 +2892,6 @@ msgstr "modello senza credito"
 #: src/renderer/src/components/Settings.tsx
 msgid "modello…"
 msgstr "modello…"
-
-#: src/renderer/src/components/Settings.tsx
-msgid "modello… (vuoto = default del provider)"
-msgstr "modello… (vuoto = default del provider)"
 
 #: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/Settings.tsx
@@ -3712,6 +3717,10 @@ msgstr "Quello del bot"
 #: src/renderer/src/components/ApprovalCard.tsx
 msgid "Questa azione chiede sempre l'approvazione"
 msgstr "Questa azione chiede sempre l'approvazione"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Questa build non riceve aggiornamenti"
+msgstr "Questa build non riceve aggiornamenti"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts

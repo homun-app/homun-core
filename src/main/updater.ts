@@ -11,6 +11,8 @@
 // installare, il daemon si ferma BENE (RPC daemon:restart di A2: la coda è
 // durevole, un turno interrotto riprende come dopo un crash).
 import { app, BrowserWindow, dialog, shell } from 'electron'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 // electron-updater è CommonJS: l'import CON NOME non è rilevabile dal lexer
 // CJS nel bundle (errori a runtime nell'app impacchettata) — si destruttura
 // dal default export
@@ -31,12 +33,28 @@ const RELEASES_URL = 'https://github.com/homun-app/homun-releases/releases'
 export const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
 
 /**
+ * K6 (fase rilascio — correzioni): il file di configurazione del feed c'è?
+ * Le build `--dir` (release:local) non hanno Resources/app-update.yml:
+ * controllare il feed produce solo un ENOENT nel log. Puro, con il percorso
+ * e l'esistenza iniettabili per i test.
+ */
+export function hasUpdateConfig(
+  resourcesPath: string = (globalThis.process?.resourcesPath ?? ''),
+  exists: (p: string) => boolean = existsSync
+): boolean {
+  if (!resourcesPath) return false
+  return exists(join(resourcesPath, 'app-update.yml'))
+}
+
+/**
  * Puro (A8): il controllo automatico è ammesso solo nell'app impacchettata,
  * mai in sviluppo e mai quando c'è una variabile SANDBOT_TEST_* (le prove con
- * dati temporanei non devono nemmeno pensare alla rete).
+ * dati temporanei non devono nemmeno pensare alla rete). K6: e mai quando
+ * manca app-update.yml (build `--dir`): niente controllo, niente errore.
  */
-export function shouldAutoCheckUpdates(isPackaged: boolean, env: NodeJS.ProcessEnv): boolean {
+export function shouldAutoCheckUpdates(isPackaged: boolean, env: NodeJS.ProcessEnv, updateConfigExists = true): boolean {
   if (!isPackaged) return false
+  if (!updateConfigExists) return false
   return !Object.keys(env).some((k) => k.startsWith('SANDBOT_TEST_'))
 }
 

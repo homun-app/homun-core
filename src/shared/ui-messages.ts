@@ -442,6 +442,12 @@ export const UI = {
     message: 'il PDF lo genera la finestra di Homun: aprila e riprova, oppure esporta in html'
   }),
   rpcKeychainUnavailable: msg({ id: 'rpc.keychainUnavailable', message: 'Keychain non disponibile: impossibile conservare la chiave' }),
+  /** K1.8 (fase rilascio — correzioni): la chiave master non si riesce a leggere e NON si rigenera. */
+  rpcMasterKeyUnavailable: msg({
+    id: 'rpc.masterKeyUnavailable',
+    message:
+      'Homun non riesce a leggere le chiavi che proteggono i tuoi segreti. Se macOS ha chiesto l’accesso al Portachiavi, consentilo e premi Riprova.'
+  }),
   rpcInstallUnavailable: msg({ id: 'rpc.installUnavailable', message: 'installazione dei connettori non disponibile in questo contesto' }),
   mpNotObject: msg({ id: 'mp.notObject', message: 'il marketplace non è un oggetto' }),
   mpBadName: msg({ id: 'mp.badName', message: 'name non valido: {name}' }),

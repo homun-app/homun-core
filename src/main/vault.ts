@@ -13,12 +13,19 @@
 import { randomBytes, createCipheriv, createDecipheriv } from 'node:crypto'
 import { getSetting, setSetting, deleteSetting } from './store/db'
 import { VAULT_SERVICE, type SecurityRunner } from '../daemon/keychain'
+import { isMasterKeyUnavailableError } from '../daemon/master-keys'
 
 /** Subset di electron.safeStorage che serve al vault (encrypt/decrypt possono essere async nel daemon: passano dall'RPC). */
 export interface SafeStorageLike {
   isEncryptionAvailable(): boolean
   encryptString(plain: string): Buffer | Promise<Buffer>
   decryptString(encrypted: Buffer): string | Promise<string>
+  // K1.7 (fase rilascio — correzioni): Electron 45 fornisce le varianti
+  // ASINCRONE (le sincrone sono deprecate); master-keys le usa quando ci sono.
+  // decryptStringAsync restituisce { shouldReEncrypt, result }: qui interessa result.
+  isAsyncEncryptionAvailable?(): Promise<boolean>
+  encryptStringAsync?(plain: string): Promise<Buffer>
+  decryptStringAsync?(encrypted: Buffer): Promise<{ shouldReEncrypt: boolean; result: string }>
 }
 
 // Fase 17b correzioni (B2): MU — lo vede il modello nei result di
@@ -166,7 +173,11 @@ async function getMasterKey(): Promise<Buffer> {
   }
   try {
     return await masterKeyOf(VAULT_SERVICE, keychainRun ? { run: keychainRun } : {})
-  } catch {
+  } catch (e) {
+    // K1.8 (fase rilascio — correzioni): il testo del catalogo di
+    // MasterKeyUnavailableError arriva alla persona così com'è, dove arrivano
+    // gli errori della Cassaforte
+    if (isMasterKeyUnavailableError(e)) throw e
     throw new Error('Vault locked: Keychain not available (cannot store the master key)')
   }
 }

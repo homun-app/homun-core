@@ -32,6 +32,15 @@ const browser = await import('../browser')
 const vault = await import('../../vault')
 const { createAgent } = await import('../../store/db')
 const { setVaultKeychainRunner } = vault
+// fase rilascio — correzioni (K1): il backend delle chiavi master FINTO
+// (come registra il daemon): senza, il vault resta bloccato
+const { setMasterKeyStorage } = await import('../../../daemon/master-keys')
+setMasterKeyStorage({
+  isEncryptionAvailable: () => true,
+  encryptString: async (plain: string) => Buffer.from('FAKE:' + plain),
+  decryptString: async (enc: Buffer) => enc.toString().replace(/^FAKE:/, '')
+})
+
 
 // keychain finto come vault-keychain.test.ts (chiave mai negli argv)
 const fakeKeychain = (): import('../../../daemon/keychain').SecurityRunner => {

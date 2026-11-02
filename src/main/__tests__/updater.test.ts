@@ -2,8 +2,10 @@
 // quando il controllo automatico è ammesso (mai in sviluppo, mai con variabili
 // SANDBOT_TEST_*), il confronto delle versioni, e il riconoscimento della
 // cartella di Homun 2 (solo existsSync: non si legge niente là dentro).
+// FASE RILASCIO — CORREZIONI (K6): mai nemmeno quando manca app-update.yml
+// (le build --dir): niente controllo, niente ENOENT nel log.
 import { describe, expect, it } from 'vitest'
-import { shouldAutoCheckUpdates, isNewerVersion } from '../updater'
+import { shouldAutoCheckUpdates, isNewerVersion, hasUpdateConfig } from '../updater'
 import { findLegacyHomun2Dir, isLegacyHomun2DataDir, legacyNoticeMarkerPath } from '../legacy-homun2'
 
 const APP_DATA = '/Users/fabio/Library/Application Support'
@@ -21,6 +23,23 @@ describe('fase rilascio (A8): quando si controlla il feed (puro)', () => {
     expect(shouldAutoCheckUpdates(true, { SANDBOT_TEST_USER_DATA: '/tmp/x' })).toBe(false)
     expect(shouldAutoCheckUpdates(true, { SANDBOT_TEST_FAKE_KEYCHAIN: '/tmp/kc' })).toBe(false)
     expect(shouldAutoCheckUpdates(true, { SANDBOT_TEST_FAKE_SAFESTORAGE: '/tmp/ss' })).toBe(false)
+  })
+
+  it('K6: MAI quando manca Resources/app-update.yml (build --dir), senza errore', () => {
+    expect(shouldAutoCheckUpdates(true, { HOME: '/Users/fabio' }, false)).toBe(false)
+    // anche l'ordine non conta: sviluppo o prove restano comunque fuori
+    expect(shouldAutoCheckUpdates(false, {}, false)).toBe(false)
+    expect(shouldAutoCheckUpdates(true, { SANDBOT_TEST_USER_DATA: '/tmp/x' }, false)).toBe(false)
+    // col file presente, il giudizio di prima resta
+    expect(shouldAutoCheckUpdates(true, { HOME: '/Users/fabio' }, true)).toBe(true)
+  })
+
+  it('K6: hasUpdateConfig guarda Resources/app-update.yml (puro, esistenza iniettata)', () => {
+    const yes = (p: string) => p === '/Applications/Homun.app/Contents/Resources/app-update.yml'
+    expect(hasUpdateConfig('/Applications/Homun.app/Contents/Resources', yes)).toBe(true)
+    expect(hasUpdateConfig('/Applications/Homun.app/Contents/Resources', () => false)).toBe(false)
+    // senza percorso (test/Node puro): non c'è niente da controllare
+    expect(hasUpdateConfig('', yes)).toBe(false)
   })
 })
 

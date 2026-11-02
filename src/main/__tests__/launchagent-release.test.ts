@@ -26,10 +26,10 @@ describe('fase rilascio (A3): il plist del servizio DENTRO il bundle', () => {
     expect(AGENT_SERVICE_NAME).toBe('app.homun.desktop.daemon.plist')
   })
 
-  it('BundleProgram RELATIVO al bundle e argomenti ["homun", "--homun-daemon"]', () => {
+  it('BundleProgram RELATIVO al bundle e argomenti ["Homun", "--homun-daemon"]', () => {
     expect(plist).toContain('<key>BundleProgram</key>')
-    expect(plist).toContain('<string>Contents/MacOS/homun</string>')
-    expect(plist).toMatch(/<string>homun<\/string>\s*<string>--homun-daemon<\/string>/)
+    expect(plist).toContain('<string>Contents/MacOS/Homun</string>')
+    expect(plist).toMatch(/<string>Homun<\/string>\s*<string>--homun-daemon<\/string>/)
     expect(plist).not.toContain('/Applications/') // nessun percorso assoluto
   })
 

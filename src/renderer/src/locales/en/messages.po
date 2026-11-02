@@ -2105,8 +2105,13 @@ msgid "Homun è aggiornato"
 msgstr "Homun is up to date"
 
 #: src/renderer/src/App.tsx
-msgid "Homun è stato rinnovato. Le conversazioni e i bot di Homun 2 non sono stati importati: restano sul tuo Mac in {dir}."
-msgstr "Homun has been renewed. Homun 2 conversations and bots were not imported: they stay on your Mac in {dir}."
+msgid "Homun è stato rinnovato. Le conversazioni e i bot di Homun 2 non sono stati importati: restano sul tuo Mac nella cartella di Homun 2."
+msgstr "Homun has been renewed. Homun 2’s conversations and bots were not imported: they remain on your Mac in the Homun 2 folder."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "rpc.masterKeyUnavailable"
+msgstr "Homun can’t read the keys that protect your secrets. If macOS asked for Keychain access, allow it and press Retry."
 
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "http (URL)"
@@ -2868,6 +2873,10 @@ msgstr "model"
 msgid "Modello"
 msgstr "Model"
 
+#: src/renderer/src/components/Settings.tsx
+msgid "Modello (vuoto: quello del provider)"
+msgstr "Model (blank: the provider’s own)"
+
 #: src/renderer/src/components/ActivityPanel.tsx
 msgid "modello che non risponde"
 msgstr "model not responding"
@@ -2883,10 +2892,6 @@ msgstr "model out of credit"
 #: src/renderer/src/components/Settings.tsx
 msgid "modello…"
 msgstr "model…"
-
-#: src/renderer/src/components/Settings.tsx
-msgid "modello… (vuoto = default del provider)"
-msgstr "model… (empty = provider default)"
 
 #: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/Settings.tsx
@@ -3712,6 +3717,10 @@ msgstr "The bot’s one"
 #: src/renderer/src/components/ApprovalCard.tsx
 msgid "Questa azione chiede sempre l'approvazione"
 msgstr "This action always asks for approval"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Questa build non riceve aggiornamenti"
+msgstr "This build does not receive updates"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts

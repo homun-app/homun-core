@@ -17,8 +17,12 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { DAEMON_FLAG } from './mode'
 
-/** Il nome dell'eseguibile dentro il bundle (build.executableName). */
-export const APP_EXECUTABLE_NAME = 'homun'
+/**
+ * Il nome dell'eseguibile dentro il bundle. K3 (fase rilascio — correzioni):
+ * senza executableName la cartella E il binario prendono il productName
+ * («Homun») — homun.app minuscolo avrebbe sostituito Homun.app di Homun 2.
+ */
+export const APP_EXECUTABLE_NAME = 'Homun'
 /** Il bundle id dell'app (build.appId). */
 export const APP_BUNDLE_ID = 'app.homun.desktop'
 

@@ -20,7 +20,7 @@ import { Plus, Search, Library as LibraryIcon, LayoutGrid, ChevronRight, Activit
 import { useStore, useResolvedModel } from '../store'
 import { buildSidebarModel, collapsedVoices, teamOpenState, type SidebarModel, type SidebarTeam, type SidebarBot, type CollapsedVoice } from '../sidebar-utils'
 // fase 16b correzioni 2 (Q1): il massimo del trascinamento e i limiti della barra
-import { sidebarMaxFor, SIDEBAR_MIN, AUTO_RAIL_BELOW, type LayoutResult } from '../layout'
+import { sidebarMaxFor, SIDEBAR_MIN, AUTO_RAIL_BELOW, TRAFFIC_LIGHT_INSET, type LayoutResult } from '../layout'
 import { avatarOf } from '../../../shared/avatar'
 import type { Agent } from '../../../shared/types'
 import { Bot } from '../bot/Bot'
@@ -588,9 +588,12 @@ export function Sidebar({ layout }: { layout: LayoutResult }) {
         <>
           {/* fase 16b correzioni 2 (Q3): Cerca e Crea sulla riga comune (y
               12–48, centro 30) dentro la fascia di trascinamento di 60 px;
-              allineati a destra — a sinistra restano i semafori di macOS */}
+              allineati a destra — a sinistra restano i semafori di macOS.
+              K4 (fase rilascio — correzioni): il loro spazio è la STESSA
+              costante (TRAFFIC_LIGHT_INSET) che lascia libero la riga del
+              rinnovo in cima alla finestra */}
           <div className="drag-region h-[60px] shrink-0">
-            <div className="mt-3 flex h-9 items-center justify-end gap-2 px-3">
+            <div className="mt-3 flex h-9 items-center justify-end gap-2 px-3" style={{ paddingLeft: TRAFFIC_LIGHT_INSET }}>
               <button
                 className={`no-drag grid size-9 place-items-center rounded-full transition ${searchOpen ? 'bg-muted text-foreground' : 'bg-muted/60 text-muted-foreground hover:text-foreground'}`}
                 aria-label={t`Cerca`}

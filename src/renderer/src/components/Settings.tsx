@@ -200,16 +200,20 @@ function ModelsTab({ onOpenUsage }: { onOpenUsage(): void }) {
       </div>
 
       {/* fase 16c correzioni (R6.2): le colonne si decidono dal CONTENUTO
-          della sezione (@container): affiancate da 820 px, sotto una sola —
+          della sezione (@container): affiancate da 960 px, sotto una sola —
           in cima a «Collegati» il bottone «+ Aggiungi un modello» che apre le
-          stesse tre strade QUI sotto e si richiude */}
-      <div className="flex flex-col gap-4 @[820px]:flex-row">
+          stesse tre strade QUI sotto e si richiude.
+          FASE RILASCIO — CORREZIONI (K5): la soglia sale da 820 a 960 px di
+          contenuto — a 1440 di finestra (contenuto 824) resta UNA colonna a
+          tutta larghezza e nessuna etichetta scende sotto i 160 px; affiancate,
+          la colonna sinistra non scende mai sotto 584 px (960 − 360 − spazi) */}
+      <div className="flex flex-col gap-4 @[960px]:flex-row">
         <div className="min-w-0 flex-1 space-y-6">
           {/* C3.1 — Collegati */}
           <section>
             <p className="mb-1 text-[13px] text-muted-foreground"><Trans>Collegati</Trans></p>
             <button
-              className="mb-2 flex w-full items-center gap-2 rounded-[14px] bg-muted/60 px-3 py-2 text-left text-sm transition hover:bg-muted @[820px]:hidden"
+              className="mb-2 flex w-full items-center gap-2 rounded-[14px] bg-muted/60 px-3 py-2 text-left text-sm transition hover:bg-muted @[960px]:hidden"
               aria-expanded={addOpen}
               onClick={() => setAddOpen((v) => !v)}
             >
@@ -218,7 +222,7 @@ function ModelsTab({ onOpenUsage }: { onOpenUsage(): void }) {
               <ChevronDown className={`size-4 shrink-0 transition-transform ${addOpen ? 'rotate-180' : ''}`} />
             </button>
             {addOpen && (
-              <div className="mb-3 @[820px]:hidden">
+              <div className="mb-3 @[960px]:hidden">
                 <AddModelRail
                   onSaved={() => {
                     void refreshProviders()
@@ -320,9 +324,9 @@ function ModelsTab({ onOpenUsage }: { onOpenUsage(): void }) {
           </details>
         </div>
 
-        {/* C3.4 — Aggiungi un modello: colonna a destra da 820 px del
-            contenuto (R6.2); sotto, il bottone in cima a «Collegati» */}
-        <div className="hidden shrink-0 @[820px]:block @[820px]:w-[360px]">
+        {/* C3.4 — Aggiungi un modello: colonna a destra da 960 px del
+            contenuto (R6.2, K5); sotto, il bottone in cima a «Collegati» */}
+        <div className="hidden shrink-0 @[960px]:block @[960px]:w-[360px]">
           <AddModelRail
             onSaved={() => {
               void refreshProviders()
@@ -387,11 +391,14 @@ function MainModelRow() {
   const levels = chosen?.m.thinkingLevels ?? []
   const providerName = (id: string): string => providers.find((p) => p.id === id)?.name ?? id
   return (
-    <div className="flex flex-wrap items-center gap-3 py-2.5">
-      <span className="min-w-0 flex-1 text-[15px]"><Trans>Il cervello dei bot</Trans></span>
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
+    // K5 (fase rilascio — correzioni): l'etichetta STA SOPRA e i controlli
+    // sotto, a tutta larghezza — mai più il selettore che schiaccia il testo
+    // fino a una parola per riga
+    <div className="py-2.5">
+      <span className="block text-[15px]"><Trans>Il cervello dei bot</Trans></span>
+      <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2">
         <select
-          className="h-9 max-w-full truncate rounded-full bg-muted px-3 text-sm outline-none"
+          className="h-9 min-w-0 flex-1 basis-52 truncate rounded-full bg-muted px-3 text-sm outline-none"
           value={value}
           aria-label={t`Provider e modello`}
           onChange={(e) => {
@@ -415,7 +422,7 @@ function MainModelRow() {
         </select>
         {levels.length > 0 && (
           <select
-            className="h-9 rounded-full bg-muted px-3 text-xs outline-none"
+            className="h-9 shrink-0 rounded-full bg-muted px-3 text-xs outline-none"
             aria-label={t`Ragionamento`}
             value={levels.includes((mainModel?.thinking ?? 'default') as ThinkingSetting) ? mainModel?.thinking ?? 'default' : 'default'}
             onChange={(e) => mainModel && void setMainModel({ ...mainModel, thinking: e.target.value as ThinkingSetting })}
@@ -449,28 +456,31 @@ function ReviewerModelRow() {
     void api.settingsSet('autoReview', next)
   }
   return (
-    <div className="flex flex-wrap items-center gap-3 py-2.5">
-      <span className="min-w-0 flex-1">
-        <span className="block text-[15px]"><Trans>Revisione delle approvazioni</Trans></span>
-        <span className="block text-[13px] text-muted-foreground"><Trans>Un modello piccolo che decide le richieste semplici</Trans></span>
-      </span>
-      <select
-        className="h-9 rounded-full bg-muted px-3 text-sm outline-none"
-        value={cfg.providerId ?? ''}
-        aria-label={t`Provider`}
-        onChange={(e) => save({ ...cfg, providerId: e.target.value || null, model: null })}
-      >
-        <option value="">{t`— provider —`}</option>
-        {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-      </select>
-      <ModelPicker
-        className="h-9 min-w-44"
-        models={models}
-        value={cfg.model}
-        placeholder={t`modello… (vuoto = default del provider)`}
-        disabled={!cfg.providerId}
-        onChange={(m) => save({ ...cfg, model: m })}
-      />
+    // K5 (fase rilascio — correzioni): etichetta e descrizione SOPRA, controlli
+    // sotto a tutta larghezza; provider e modello su UNA riga di due colonne
+    // (minmax(0,1fr) ciascuna) che sotto i 420 px di contenuto si impilano
+    <div className="py-2.5">
+      <span className="block text-[15px]"><Trans>Revisione delle approvazioni</Trans></span>
+      <span className="block text-[13px] text-muted-foreground"><Trans>Un modello piccolo che decide le richieste semplici</Trans></span>
+      <div className="mt-2 grid grid-cols-1 gap-2 @[420px]:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        <select
+          className="h-9 min-w-0 truncate rounded-full bg-muted px-3 text-sm outline-none"
+          value={cfg.providerId ?? ''}
+          aria-label={t`Provider`}
+          onChange={(e) => save({ ...cfg, providerId: e.target.value || null, model: null })}
+        >
+          <option value="">{t`— provider —`}</option>
+          {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        <ModelPicker
+          className="min-w-0"
+          models={models}
+          value={cfg.model}
+          placeholder={t`Modello (vuoto: quello del provider)`}
+          disabled={!cfg.providerId}
+          onChange={(m) => save({ ...cfg, model: m })}
+        />
+      </div>
     </div>
   )
 }
@@ -1564,6 +1574,9 @@ function GeneralTab() {
   const [atLogin, setAtLogin] = useState<{ enabled: boolean; requiresApproval: boolean; mechanism: 'agentService' | 'plist' }>({ enabled: false, requiresApproval: false, mechanism: 'plist' })
   const [busy, setBusy] = useState(false)
   const [appVersion, setAppVersion] = useState('')
+  // K6 (fase rilascio — correzioni): le build senza app-update.yml (le --dir)
+  // non ricevono aggiornamenti: lo si dice in parole, niente bottone
+  const [canUpdate, setCanUpdate] = useState(true)
   const [updateBusy, setUpdateBusy] = useState(false)
   const [updateResult, setUpdateResult] = useState<'none' | 'available' | 'current' | 'error'>('none')
   const [tz, setTz] = useState('')
@@ -1580,7 +1593,7 @@ function GeneralTab() {
 
   useEffect(() => {
     void api.getLaunchAtLogin().then(setAtLogin)
-    void api.updaterStatus().then((s) => setAppVersion(s.current)).catch(() => undefined)
+    void api.updaterStatus().then((s) => { setAppVersion(s.current); setCanUpdate(s.canUpdate) }).catch(() => undefined)
     void api.settingsGet('userTimeZone', '').then(setTz)
     void api.settingsGet('deliveryWindow', { mode: 'morning', morning: { start: '08:30', end: '09:30' }, working: { start: '09:00', end: '19:00' } })
       .then((w) => {
@@ -1716,22 +1729,30 @@ function GeneralTab() {
         </div>
       )}
 
-      {/* fase rilascio (A8): la versione e il controllo manuale degli aggiornamenti */}
+      {/* fase rilascio (A8): la versione e il controllo manuale degli aggiornamenti.
+          K6 (correzioni): senza app-update.yml (build --dir) lo si DICE, il
+          bottone non c'è — un controllo non può riuscire */}
       <div className="flex items-center justify-between gap-3 rounded-2xl bg-muted px-4 py-3">
         <span className="min-w-0 text-sm">
           <Trans>Versione</Trans> <span className="text-muted-foreground">{appVersion || '—'}</span>
         </span>
         <span className="flex shrink-0 items-center gap-2">
-          {updateResult === 'current' && <span className="text-xs text-muted-foreground"><Trans>Homun è aggiornato</Trans></span>}
-          {updateResult === 'available' && <span className="text-xs text-muted-foreground"><Trans>Versione nuova disponibile</Trans></span>}
-          {updateResult === 'error' && <span className="text-xs text-muted-foreground"><Trans>Controllo non riuscito</Trans></span>}
-          <button
-            className="rounded-full bg-foreground px-3 py-1.5 text-xs text-background disabled:opacity-40"
-            disabled={updateBusy}
-            onClick={() => void checkUpdates()}
-          >
-            <Trans>Controlla aggiornamenti</Trans>
-          </button>
+          {!canUpdate ? (
+            <span className="text-xs text-muted-foreground"><Trans>Questa build non riceve aggiornamenti</Trans></span>
+          ) : (
+            <>
+              {updateResult === 'current' && <span className="text-xs text-muted-foreground"><Trans>Homun è aggiornato</Trans></span>}
+              {updateResult === 'available' && <span className="text-xs text-muted-foreground"><Trans>Versione nuova disponibile</Trans></span>}
+              {updateResult === 'error' && <span className="text-xs text-muted-foreground"><Trans>Controllo non riuscito</Trans></span>}
+              <button
+                className="rounded-full bg-foreground px-3 py-1.5 text-xs text-background disabled:opacity-40"
+                disabled={updateBusy}
+                onClick={() => void checkUpdates()}
+              >
+                <Trans>Controlla aggiornamenti</Trans>
+              </button>
+            </>
+          )}
         </span>
       </div>
 

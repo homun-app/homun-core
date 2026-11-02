@@ -1,5 +1,6 @@
 {
   "name": "homun",
+  "productName": "Homun",
   "version": "0.3.0",
   "description": "Homun \u2014 il tuo spazio di lavoro con la squadra AI",
   "main": "./out/main/index.js",
@@ -16,7 +17,7 @@
     "start": "electron-vite preview",
     "dist": "electron-vite build && electron-builder --mac",
     "release:local": "node scripts/prepare-wasm.mjs && electron-vite build && electron-builder --mac --dir --publish never -c.mac.identity=null",
-    "release:verify": "node scripts/verify-release.mjs",
+    "release:verify": "node scripts/verify-release.mjs dist-installers/mac-arm64/Homun.app --expected-arch arm64 --expected-version $npm_package_version",
     "release:checksums": "node scripts/create-artifact-checksums.mjs",
     "release:notes": "node scripts/extract-release-notes.mjs",
     "typecheck": "tsc --noEmit",
@@ -81,7 +82,6 @@
   "build": {
     "appId": "app.homun.desktop",
     "productName": "Homun",
-    "executableName": "homun",
     "artifactName": "${productName}-${version}-${arch}.${ext}",
     "asar": true,
     "afterPack": "./scripts/after-pack.mjs",
@@ -117,6 +117,7 @@
       "category": "public.app-category.productivity",
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
+      "icon": "build/icon.png",
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
       "target": [
@@ -132,11 +133,7 @@
             "arm64"
           ]
         }
-      ],
-      "extendInfo": {
-        "NSMicrophoneUsageDescription": "Homun usa il microfono solo se abiliti l'input vocale",
-        "NSCameraUsageDescription": "Homun usa la camera solo se richiesta da una funzione"
-      }
+      ]
     },
     "dmg": {
       "writeUpdateInfo": false

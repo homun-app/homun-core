@@ -42,6 +42,8 @@ import { DEFAULT_AUTO_REVIEW } from '../shared/types'
 // dell'interfaccia, meta.ui sui messaggi [sistema] (il testo per il modello
 // resta inglese) e sulle notice
 import { uiLanguage, uiText, formatUi, ui, uiError } from '../main/ui-language'
+// K1.8 (fase rilascio — correzioni): l'errore tipizzato delle chiavi master
+import { isMasterKeyUnavailableError } from './master-keys'
 import { UI } from '../shared/ui-messages'
 import { UiError } from '../shared/ui-text'
 // fase rilascio (A7): lo stato di docker per la UI (percorso risolto, senza spawn)
@@ -858,6 +860,9 @@ export function buildApiMethods(
             x.saveServers(x.listServers())
           }
         } catch (e) {
+          // K1.8 (fase rilascio — correzioni): il testo del catalogo di
+          // MasterKeyUnavailableError arriva intero, non incapsulato
+          if (isMasterKeyUnavailableError(e)) throw e
           throw uiError(UI.rpcSecretSaveFailed, { error: e instanceof Error ? e.message : String(e) })
         }
       }

@@ -5,10 +5,10 @@
     <key>Label</key>
     <string>app.homun.desktop.daemon</string>
     <key>BundleProgram</key>
-    <string>Contents/MacOS/homun</string>
+    <string>Contents/MacOS/Homun</string>
     <key>ProgramArguments</key>
     <array>
-        <string>homun</string>
+        <string>Homun</string>
         <string>--homun-daemon</string>
     </array>
     <key>AssociatedBundleIdentifiers</key>

@@ -19,7 +19,7 @@ import { findLegacyHomun2Dir, legacyNoticeMarkerPath } from './legacy-homun2'
 import { daemonSpawnContext } from './daemon-context'
 import { DAEMON_FLAG } from './mode'
 import type { DaemonClient } from './daemon-client'
-import { checkNow } from './updater'
+import { checkNow, hasUpdateConfig } from './updater'
 import { assertDroppedMacPath } from './dropped-file'
 import type { SandbotEvent } from '../shared/types'
 
@@ -223,7 +223,9 @@ export function registerIpc(client: DaemonClient, getWindows: () => BrowserWindo
   })
 
   // ---- fase rilascio (A8): l'aggiornamento (le RPC stanno in updater.ts) ----
-  ipcMain.handle('updater:status', () => ({ current: app.getVersion() }))
+  // K6 (fase rilascio — correzioni): canUpdate dice alla UI se QUESTA build
+  // riceve aggiornamenti (le --dir non hanno app-update.yml)
+  ipcMain.handle('updater:status', () => ({ current: app.getVersion(), canUpdate: app.isPackaged && hasUpdateConfig() }))
   ipcMain.handle('updater:check', () => checkNow())
 
   // ---- fase rilascio (A8): il passaggio da Homun 2 e il Finder ----
