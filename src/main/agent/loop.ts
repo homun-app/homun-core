@@ -205,6 +205,13 @@ const running = new Map<string, Running>()
  */
 const cooledNotices = new Map<string, number>()
 
+/**
+ * Fase 16c correzioni (R3.6): per quale provider era già stata mostrata la
+ * notice ownModelUnavailable di un bot (agentId → providerId mancante). Serve
+ * a mostrarla UNA volta per situazione, non a ogni turno.
+ */
+const lastOwnModelMissing = new Map<string, string>()
+
 /** HH:MM locale della fine del raffreddamento (valore della notice modelRouteCooled). */
 function hhmmOf(ms: number): string {
   const d = new Date(ms)
@@ -505,6 +512,11 @@ async function runSubagentTool(
     const childId = newSubagentId()
     // il figlio: riga agents NASCOSTA (parent_id), nome "<padre> · <title>",
     // modello e provider COPIATI dal padre
+    // fase 16c correzioni (R3.3): NON passa da resolveAgentModel e va bene così
+    // — è una COPIA dei CAMPI del padre (providerId e model, anche null/null),
+    // non una risoluzione: un padre «Come gli altri» genera un figlio
+    // null/null che a sua volta segue il principale quando il suo turno gira
+    // (runTurn → resolveAgentModel, l'unico punto che decide)
     createAgent(`${parent?.name ?? agentId} · ${title}`, title, { parentId: agentId, id: childId })
     updateAgent(childId, { providerId: parent?.providerId ?? null, model: parent?.model ?? null })
     insertSubagent(database, {
@@ -629,10 +641,14 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
   // fase 18a (E0): errore interno in inglese (la UI ha rpc.agentNotFound)
   if (!agent) throw new Error('agent not found')
   // fase 16c (C3.3): il modello risolto — quello del bot se l'ha scelto, il
-  // principale se segue gli altri («Come gli altri»), niente altrimenti
+  // principale se segue gli altri («Come gli altri»), niente altrimenti.
+  // Fase 16c correzioni (R3.6): resolveAgentModel riceve anche i provider
+  // ATTIVI — il modello proprio di un bot vale solo se il suo provider è
+  // ancora collegato; se no si segue il principale (ownModelMissing)
   const resolved: ResolvedAgentModel | null = resolveAgentModel(
     agent,
-    getSetting<import('../../shared/types').MainModel | null>('models.main', null)
+    getSetting<import('../../shared/types').MainModel | null>('models.main', null),
+    listProviders().map((p) => ({ id: p.id, enabled: p.enabled }))
   )
   if (!resolved) {
     // fase 10 (residuo 0e): durante l'onboarding, se il provider ESISTE ma il
@@ -647,6 +663,24 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     ))
     emitLastEntry(agentId, emit)
     return
+  }
+  if (resolved.ownModelMissing) {
+    // fase 16c correzioni (R3.6): il provider del modello PROPRIO non c'è più
+    // (o è disattivato): il turno parte col principale. La notice si mostra
+    // UNA volta per situazione — finché quel provider resta giù non si ripete
+    // a ogni turno; se il provider torna (e poi ricasca), si rivede
+    if (lastOwnModelMissing.get(agentId) !== agent.providerId) {
+      lastOwnModelMissing.set(agentId, agent.providerId ?? '')
+      appendEntry(uiSystemEntry(
+        agentId, 'notice',
+        ui(UI.ownModelUnavailable, { provider: agent.providerId ?? '', model: resolved.model })
+      ))
+      emitLastEntry(agentId, emit)
+    }
+  } else {
+    // il modello proprio è tornato attivo (o il bot segue e basta): il
+    // ricordo della notice si azzera, così un'eventuale ricaduta si rivede
+    lastOwnModelMissing.delete(agentId)
   }
   const provider = getProvider(resolved.providerId)
   // fase 18a (E0): errore interno in inglese (la UI ha rpc.providerNotFound)

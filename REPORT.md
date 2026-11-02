@@ -3583,3 +3583,87 @@ Il campo diventa la `description` del bot via `agents:create(name, description)`
 - `npm run i18n:extract`: it 1090 / en 1090, **en 0 missing**; **seconda estrazione senza differenze** (confronto byte-byte dei .po it/en prima/dopo).
 
 Niente Docker (immagine NON costruita), nessun modello cloud né rete reale fuori da 127.0.0.1 (i server finti dei test sono su 127.0.0.1; il `providers:discover` dei test non gira perché nessun daemon è stato avviato), niente `npm run dist`, nessuna app o daemon avviato sulla cartella dati vera (l'app NON è stata lanciata: la verifica in Electron resta all'utente), **mai il Portachiavi vero** (solo `SANDBOT_TEST_FAKE_KEYCHAIN` su file nella cartella mkdtemp), nessun segreto vero (solo chiavi finte `sk-finta-…`). Le cartelle temporanee dei test nascono con `mkdtempSync` dentro `/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/` e vengono rimosse (mai `$TMPDIR` né `os.tmpdir()`). Nessun file dell'utente, volume (`sandbot-box`/`sandbot-plugins`/`sandbot-browser`) o cartella preesistente cancellati (la `out-review/` non tracciata è intatta). Nessun provider `zai` di pi-ai, nessun endpoint `/coding/`. **L'eval NON è stata lanciata.**
+
+# REPORT FASE RILASCIO — NON ESEGUITA: dipendenza mancante
+
+**Data:** 2026-11-02 · **Richiesto:** fase A0–A9 sopra il tag `fase-16c-correzioni`, commit `rilascio: homun 0.3 firmabile e aggiornabile`, tag `fase-rilascio`.
+**Esito: FERMATA AL CONTROLLO PRELIMINARE.** Nessuna parte di A0–A9 è stata eseguita; nessun file del progetto toccato; **nessun commit, nessun tag** (il commit di chiusura previsionato sarebbe falso: niente è stato reso firmabile né aggiornabile).
+
+## Il blocco: `electron-updater` non è installato
+
+Il prompt della fase è esplicito: «`electron-updater` (6.8.9, la stessa di Homun 2) la installo io prima che tu parta. […] Se `node_modules/electron-updater` manca, **fermati e scrivilo nel REPORT**: non hai rete, non provare a installarla.»
+
+Verificato più volte, in momenti diversi della sessione:
+
+- `node_modules/electron-updater/` **non esiste** (`find node_modules -maxdepth 2 -iname "*updater*"` → vuoto);
+- `package.json` **non dichiara** `electron-updater` né in `dependencies` né in `devDependencies`;
+- `@electron/fuses` e `electron-builder` (26.x) sono presenti, come previsto dal prompt.
+
+Con l'updater assente la fase non è eseguibile nei suoi controlli di chiusura: l'import di `electron-updater` in A8 (updater) farebbe fallire `typecheck`, `build` e di conseguenza `release:local`/`release:verify`. Non è stata tentata alcuna installazione (istruzione esplicita; senza rete).
+
+**Per sbloccare:** `npm install electron-updater@6.8.9 --save` (o salvataggio in `dependencies`, come in Homun 2) a cura dell'utente, poi rilanciare la fase.
+
+## Nota anche sul punto di partenza richiesto
+
+Il tag `fase-16c-correzioni` **non esiste** nel repo. Situazione reale al momento della fermata:
+
+- `main` è a `a31bc4b` = tag **`fase-16c`** («fase 16c: impostazioni, app, attività e libreria»); la storia è lineare e sotto di essa ci sono tutti i tag `fase-17a`…`fase-19b-correzioni`;
+- sull'albero di lavoro ci sono **modifiche non committate** (25 file modificati tra daemon, agent, ipc, renderer e cataloghi, più i nuovi `src/main/__tests__/ipc-rpc-coherence.test.ts` e `src/shared/agent-model.ts`, e la `out-review/` non tracciata): con ogni probabilità le correzioni 16c stesse, mai fissate con commit e tag.
+
+La fase andrebbe quindi fatta partire dopo aver committato le correzioni 16c e creato il tag `fase-16c-correzioni` (o dopo aver detto su quale base partire al posto suo). Nessuna di queste modifiche è stata toccata.
+
+## Vincoli rispettati durante la fermata
+
+Niente Docker, nessuna rete reale, nessuna installazione tentata, nessuna build, nessun'app o daemon avviati, mai il Portachiavi vero né `safeStorage` vero, nessun segreto, nessun file dell'utente toccato o cancellato (`/Applications/Homun.app` e le cartelle di Homun 2 intatti), niente provider `zai`, nessun eval, nessun push. L'unica modifica di questa fermata è la presente sezione del REPORT.
+
+# REPORT FASE 16c — correzioni
+
+**Base:** `fase-16c` (a31bc4b) · **Commit:** `fase 16c: correzioni` · **Tag:** `fase-16c-correzioni`.
+Le prove dal vivo dell'utente (sonda Electron) avevano trovato 12 KO su 60: i tre canali RPC mancanti, la chiave nei file SQLite, i bot «Come gli altri» muti nelle squadre, le viste sotto i 1000 px e l'impaginazione dei Modelli.
+
+## Tabella R1–R8 — dove e quale test
+
+| # | Cosa | Dove | Test |
+|---|------|------|------|
+| **R1** | I tre canali (`providers:probe`, `activity:global`, `connectors:search-registry`) nell'elenco inoltrato di `ipc.ts`; **test di coerenza** che legge i sorgenti come AST (preload `ipcRenderer.invoke` ⊆ inoltrati ∪ `ipcMain.handle` locali; inoltrati ⊆ handler di `buildApiMethods`); niente vuoti silenziosi: Attività, Libreria, ricerca nel registro e scansione «Cerca sul Mac» mostrano una riga d'errore «Non riesco a … · Riprova» | `src/main/ipc.ts:64`, `src/main/__tests__/ipc-rpc-coherence.test.ts` (5 test, regressione verificata togliendo i canali), `ActivityPanel.tsx`, `LibraryPanel.tsx`, `AppsWindow.tsx`, `Settings.tsx` | `ipc-rpc-coherence.test.ts` |
+| **R2.1** | `PRAGMA secure_delete = ON` su ogni connessione (`open()` di db.ts); dopo una migrazione che ha cifrato qualcosa: `PRAGMA wal_checkpoint(TRUNCATE)` + `VACUUM` una volta sola (flag `providers.migrationVacuumed`), al fallimento si logga senza dati e si riprova al prossimo avvio | `src/main/store/db.ts:44`, `src/main/agent/providers.ts` (`vacuumAfterKeyMigration`), `src/daemon/index.ts:74` | `providers-keys.test.ts` (3 test: i byte grezzi di `sandbot.db`/`-wal`/`-shm` su DB **su file** in mkdtemp non contengono più la chiave; sanity che c'erano prima; idempotenza e riprovo al riavvio) |
+| **R2.2** | `saveProvider` conserva anche il chiaro non ancora migrato del precedente (`next.apiKey`): modificare nome/URL senza ridigitare la chiave non la cancella più; `clearKey` toglie anche quello | `src/main/agent/providers.ts` (`saveProvider`) | `providers-keys.test.ts` (2 test con Portachiavi giù → rinomina → riavvio → migrazione riuscita) |
+| **R2.3** | `providers:probe` accetta `{ providerId }`: senza `apiKey` nella richiesta usa la chiave già salvata, presa dalla memoria del daemon (mai in risposta); la chiave nella richiesta vince | `src/daemon/api.ts` (`providers:probe`), `EditProviderSheet` (prova automatica nel foglio «Modifica», debounce 400 ms, chiave salvata) | `providers-keys.test.ts` (2 test al livello RPC) |
+| **R3** | Il giro di squadra non ha più un controllo suo del modello: `resolveAgentModel` (stessa funzione di `runTurn`) con `models.main` e i provider attivi; se è null il turno finisce SKIPPED **con una riga di sistema visibile** nella squadra (`group.memberNoModel`, una per membro/ora); ogni uscita SKIPPED/ERROR **spegne** lo status thinking/running rimasto (evento `status` alla UI); il provider proprio sparito/disattivato → si segue il principale (`followsMain` + `ownModelMissing`, nessuna migrazione) con la notice `notice.ownModelUnavailable` una volta per situazione | `src/daemon/group-runner.ts:96` (check + `quietMember`), `src/shared/agent-model.ts` (puro, unico punto), `src/main/agent/loop.ts:645`, `src/main/agent/group-turns.ts` (`memberNoModelText`), `src/main/agent/tools.ts:1254` (create_agent), commento «perché no» in `run-job.ts` (la rotta della routine la valida `runTurn`, H7) e `loop.ts:509` (il figlio copia i CAMPI del padre) | `group-runner.test.ts` (5 test nuovi: due null/null + main → entrambi i turni partono; SKIPPED con riga visibile non ripetuta; status spento con evento; provider rimosso e disattivato → turno col principale), `agent-model.test.ts` (8 puri), `loop.test.ts` (3: notice una volta, provider che torna, senza main) |
+| **R4** | `resolveAgentModel` e i tipi in `src/shared/agent-model.ts` (puro, zero dipendenze; `model-defaults.ts` re-esporta); nel renderer il selettore **unico** `resolvedModelOf`/`useResolvedModel` dello store, usato da Chat (visione + livelli «Ragiona»), RightPanel (Profilo e Avanzate, «Come gli altri» anche per il provider sparito) e Sidebar (menu account): nessuna copia a mano della regola | `src/shared/agent-model.ts`, `src/renderer/src/store.ts`, `Chat.tsx:202`, `RightPanel.tsx:117/256`, `Sidebar.tsx:300` | `resolved-model.test.ts` (4), `agent-model.test.ts` |
+| **R5.1** | Modulo puro `src/shared/network-host.ts` (predicati adattati da Rakazo, Apache-2.0: loopback, rete privata, metadata cloud, parser IPv4/IPv6) e `providerPlace(p) → 'mac' \| 'rete' \| 'internet'` deciso dall'HOST del baseUrl; mezza riga a tre casi («Sul tuo Mac · N modelli · gratis e privato» / «Sulla tua rete · N modelli» senza promesse di privacy / «Chiave API · a consumo · $X questo mese» o «Server esterno»); `isLocalKind` resta ai prezzi | `src/shared/network-host.ts`, `Settings.tsx:196` | `network-host.test.ts` (12: Ollama scoperto, 127.0.0.1/127.0.0.2, `[::1]`, `foo.localhost`, 192.168.1.5, nas.local, 169.254.169.259→internet, api.example.com, mapped, trailing dot) |
+| **R5.2** | Ogni riga mostra il costo **del suo provider** (l'aggregate `usage:summary(monthStart, …, 'model'` porta `providerId`: si somma per provider nel client); la riga in fondo «Uso e costi» resta il totale | `Settings.tsx` ModelsTab | coperto da `fmt.test.ts` + logica in `ModelsTab` (somma per provider dalla stessa risposta) |
+| **R5.3** | `fmtUsd` con `Intl.NumberFormat(locale, USD)`: «$0,012» it, «$0.012» en, stesse cifre decimali di oggi (2 ≥ 1, 3 sotto), simbolo in testa | `src/renderer/src/lib/fmt.ts` (usata in ModelsTab e nella pagina Uso e costi) | `fmt.test.ts` (3) |
+| **R6** | Finestra Impostazioni `min(1080px, 100vw−48px)` × `min(760px, 100vh−48px)`; le due colonne di Modelli con **container query** sul contenuto (`@[820px]`: affiancate, «Aggiungi» larga 360 px; sotto: una colonna con «+ Aggiungi un modello» in cima a «Collegati» che espande le stesse tre strade e si richiude); riga del provider: nome su una riga troncato con title, mezza riga troncata, stato `shrink-0` (gap 14 px ≥ 12), menu ⋯ sempre visibile; «Il cervello dei bot» è **un solo selettore provider · modello** con le voci di `models:list` di tutti i provider attivi e le capacità («vede · ragiona»), «Ragionamento» solo se il modello ha livelli | `Settings.tsx` (`DialogContent`, `@container`, `ModelsTab`, `MainModelRow`) | misure a 1440/1100/900 chiaro/scuro: vedi «Come ho controllato R6.5» |
+| **R7** | Rotaia: «+» col MEDESIMO menu Crea e lente di Cerca (ricerca sospesa in alto a sinistra, filtra le voci); il bottone in fondo apre il **menu account** (Impostazioni/tema/Collega app); «Allarga la barra» è una voce del menu SOLO quando la rotaia non è forzata; **⌘, apre le Impostazioni** (nessun menu Electron: scorciatoia nel renderer; Esc chiude come sempre) | `Sidebar.tsx` (`CollapsedColumn`, `AccountMenu` variante rail, ricerca sospesa), `App.tsx` (⌘,) | `rail-functions.test.ts` (6: layoutFor a 900 → rotaia forzata + guarda sul codice di Sidebar/App; vitest gira in node, niente DOM) |
+| **R8.1** | La lista sotto «Consigliate per te» diventa «**Altre app**» ed esclude le consigliate; «Consigliate» esiste solo con pillola Tutte e nessuna ricerca; con categoria o ricerca si vede tutto ciò che corrisponde, senza doppioni | `src/renderer/src/lib/apps-view.ts`, `AppsWindow.tsx:669` | `fase16c-view.test.ts` (4 test nuovi in `R8.1`) |
+| **R8.2** | «Cosa farà?» come la tavola 7: righe senza bordo su `bg-muted/60`, emoji e titolo a 8 px, descrizione su UNA riga troncata (intera nel `title`), max 4 visibili + «Altri N ▾», selezione = fondo più scuro (`bg-accent`) + spunta; la pillola della famiglia non ha anello da click (solo `focus-visible`); a 1440×900 la finestra non scorre con «Descrivilo tu» chiuso | `BotDialogs.tsx` (NewBotDialog) | struttura verificata nel codice (righe `truncate` + `title`, `Check`, `focus-visible:ring`); la non-rotazione è per costruzione: 4 righe ~52 px + testata/mascotte/famiglie/colori/nome/footer ≈ 690 px < 828 px utili |
+
+**Non cambia:** `git diff fase-16c -- src/main/agent/prompts.ts` è vuoto; in `tools.ts` cambia solo la logica del ripiego create_agent (nessuna descrizione). Formato `apiKeySealed`, voce `sandbot-providers-key`, `hasKey`/`keyHint` come la 16c. Nessun kind, app o template nuovo.
+
+## Come ho controllato R6.5 (impaginazione)
+
+Vitest gira in node (niente DOM/jsdom): le misure pixel non sono state possibili nei test. Ho controllato così:
+
+- la larghezza disponibile è **per costruzione**: finestra `min(1080, vw−48)`, colonna sezioni fissa 208 px, padding 48 → contenuto ≥ 824 px a 1440 e ~844 px a 1100 sopra la soglia; sotto gli 820 px del contenuto le colonne si impilano (container query, non più breakpoint finestra): la colonna «Collegati» non condivide più lo spazio con «Aggiungi»;
+- il nome del provider è `truncate` su una riga (intero nel `title` della riga) e la mezza riga `truncate`: un testo non può andare a capo né toccare lo stato perché lo stato è `shrink-0` e il gap di colonna è 14 px (> 12); il menu ⋯ è sempre nel flusso (`shrink-0`);
+- a 900 px di finestra il contenuto sta sotto gli 820 → colonna singola: «Mock rinominato» e «Ollama (locale)» hanno tutta la larghezza.
+
+La verifica visiva a 1440/1100/900 chiaro e scuro, IT e EN resta alla sonda Electron dell'utente (come per la 16c).
+
+## La riga onesta sui backup (R2.1)
+
+`secure_delete`, checkpoint `TRUNCATE` e `VACUUM` ripuliscono **i file attuali** della cartella dati. I **backup fatti prima di questa correzione** (Time Machine compreso) possono ancora contenere la chiave API in chiaro nei vecchi `sandbot.db`/`sandbot.db-wal`: chi vuole la massima prudenza **rigenera la chiave presso il provider** e revoca la vecchia. Nessun testo nuovo è stato aggiunto all'interfaccia per questo.
+
+## Output dei controlli
+
+- `npm run typecheck`: pulito (0 errori).
+- `npx vitest run`: **136 file / 2143 test verdi** (baseline 16c: 130/2085 → +6 file, +58 test; un test esistente aggiornato alla regola R3.6 — il creatore senza provider attivo non passa più il modello al figlio — e le fixture di group-runner registrano il provider 'prov' nello store, come nell'app vera).
+- `npm run build`: ✓ (main/preload/renderer).
+- `npm run i18n:extract`: it 1101 / en 1101, **en 0 missing**; **seconda estrazione identica byte-byte**.
+
+## Vincoli rispettati
+
+Niente Docker né `npm run dist`; nessun modello cloud né rete reale fuori da 127.0.0.1 (i server finti nei test ascoltano su 127.0.0.1); nessuna app o daemon avviati (nessuna cartella dati toccata); **mai il Portachiavi vero** (solo `SANDBOT_TEST_FAKE_KEYCHAIN` su file nella mkdtemp); nessun segreto vero (solo chiavi `sk-finta-…`); cartelle temporanee solo `mkdtempSync` dentro `/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/` e rimosse a fine corsa (mai `$TMPDIR` né `os.tmpdir()`); nessun file dell'utente, volume `sandbot-box`/`sandbot-plugins`/`sandbot-browser` o cartella preesistente cancellati (`out-review/` resta non tracciata e intatta); nessun provider `zai` di pi-ai né endpoint `/coding/`; **eval non lanciata**.
+
+Nota: nel REPORT sopra resta la sezione «FASE RILASCIO — NON ESEGUITA» scritta da una sessione precedente ferma per mancanza di `electron-updater`: non è di questa fase e non è stata modificata.

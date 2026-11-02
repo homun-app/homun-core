@@ -661,8 +661,10 @@ export interface SandbotApi {
    * Fase 16c (C3.4): prova una configurazione NON salvata (stessa logica di
    * providers:test). La chiave viaggia SOLO in questa direzione: il daemon non
    * la salva, non la scrive nei log e non la rimanda indietro.
+   * Correzioni (R2.3): `providerId` = prova di un provider GIÀ salvato senza
+   * ridigitare la chiave — usa quella in memoria nel daemon (mai in risposta).
    */
-  probeProvider(config: { kind: ProviderKind; baseUrl: string; apiKey?: string }): Promise<ProviderProbeResult>
+  probeProvider(config: { kind: ProviderKind; baseUrl: string; apiKey?: string; providerId?: string }): Promise<ProviderProbeResult>
   listModels(providerId: string): Promise<ModelInfo[]>
   /**
    * Fase 18b (K3): le capacità di UN modello, SENZA l'elenco completo e senza

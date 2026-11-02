@@ -180,3 +180,42 @@ describe('libraryRows (C6): filtri e ordine (fissati in cima, poi updatedAt)', (
     expect(libraryRows(items, '', 'document').map((i) => i.id)).toEqual(['a'])
   })
 })
+
+// ---- fase 16c correzioni (R8.1): «Altre app» senza doppioni ----
+
+describe('R8.1 — appsViewModel: la lista sotto le consigliate non ripete nulla', () => {
+  // stesse fixture del describe C4 qui sopra
+  const catalog = [cat('linear', 'Linear', 'development'), cat('gmail', 'Gmail', 'mail-calendar'),
+    cat('notion', 'Notion', 'documents'), cat('gcalendar', 'Google Calendar', 'mail-calendar'),
+    cat('gdrive', 'Google Drive', 'documents'), cat('stripe', 'Stripe', 'development')]
+  const agents = [
+    { id: 'a1', name: 'Nina' }, { id: 'a2', name: 'Contabile' }, { id: 'a3', name: 'Ricercatore' }, { id: 'a4', name: 'Sesto' }
+  ]
+
+  it('pillola Tutte, ricerca vuota: la lista ESCLUDE le consigliate (diventa «Altre app»)', () => {
+    const vm = appsViewModel({ catalog, connectors: [], installed: null, agents, filter: 'all', query: '', lang: 'it' })
+    expect(vm.featured.map((f) => f.id)).toEqual(['gmail', 'gcalendar', 'gdrive', 'notion'])
+    // la lista sotto NON contiene le consigliate: restano solo le altre
+    expect(vm.catalogRows.map((c) => c.id)).toEqual(['linear', 'stripe'])
+  })
+
+  it('con una CATEGORIA scelta si vede TUTTO ciò che corrisponde (consigliate comprese), senza doppioni', () => {
+    const vm = appsViewModel({ catalog, connectors: [], installed: null, agents, filter: 'documents', query: '', lang: 'it' })
+    expect(vm.catalogRows.map((c) => c.id).sort()).toEqual(['gdrive', 'notion'])
+    // la sezione consigliate non c'è (lo sa la finestra: pillola Tutte)
+    expect(vm.featured.length).toBe(4) // il modello le calcola comunque
+  })
+
+  it('con una RICERCA si vede TUTTO ciò che corrisponde, anche le consigliate', () => {
+    const vm = appsViewModel({ catalog, connectors: [], installed: null, agents, filter: 'all', query: 'notion', lang: 'it' })
+    expect(vm.catalogRows.map((c) => c.id)).toEqual(['notion'])
+  })
+
+  it('nessuna voce compare MAI due volte fra consigliate e lista (Tutte + ricerca vuota)', () => {
+    const vm = appsViewModel({ catalog, connectors: [], installed: null, agents, filter: 'all', query: '', lang: 'it' })
+    const ids = [...vm.featured.map((f) => f.id), ...vm.catalogRows.map((c) => c.id)]
+    expect(new Set(ids).size).toBe(ids.length)
+    // e tutte le voci del catalogo non collegate sono sullo schermo una volta
+    expect(ids.sort()).toEqual(['gcalendar', 'gdrive', 'gmail', 'linear', 'notion', 'stripe'])
+  })
+})

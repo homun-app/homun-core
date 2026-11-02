@@ -16,7 +16,7 @@
 // needsGroupRecovery, la stessa del recupero nel loop).
 // Le dipendenze sono iniettabili: nei test LLM finto e orologio finto.
 import type { DatabaseSync } from 'node:sqlite'
-import { getAgent, getEntries } from '../main/store/db'
+import { getAgent, getEntries, getSetting, updateAgent } from '../main/store/db'
 import {
   getGroup, groupMemberIds, groupMessages, getGroupCursor, setGroupCursor,
   getGroupMessage, startGroupTurn, finishGroupTurn, addGroupMessage,
@@ -27,8 +27,11 @@ import {
 import {
   buildGroupTurnOpening, GROUP_WINDING_DOWN_DEPTH, GROUP_RATE_LIMIT_TEXT, GROUP_RATE_LIMIT_SKIP_REASON,
   shouldScheduleClosingTurn, memberWaitingForUser, closingTurnNonce, readChainDepth,
-  needsGroupRecovery, parseMentions
+  needsGroupRecovery, parseMentions, memberNoModelText
 } from '../main/agent/group-turns'
+import { resolveAgentModel } from '../main/agent/model-defaults'
+import { listProviders } from '../main/agent/providers'
+import type { MainModel } from '../shared/types'
 import { setJobEntryId, getJobById, type Job } from '../main/store/jobs'
 import type { runTurn, RunTurnOptions } from '../main/agent/loop'
 import type { SandbotEvent } from '../shared/types'
@@ -94,12 +97,51 @@ export async function runGroupTurnJob(
     closing?: boolean; rootId?: number
   }
   const finish = (outcome: GroupTurnOutcome, reason?: string): void => finishGroupTurn(p.nonce, outcome, deps.now(), reason)
+  /**
+   * fase 16c correzioni (R3.2): un turno SKIPPED (o finito male) non lascia
+   * il membro «al lavoro» nella squadra — lo status thinking/running rimasto
+   * da un giro precedente interrotto (crash, kill) tiene accesa la barra
+   * «Risponde X» per sempre, ricaricamenti compresi: qui si spegne, con
+   * l'evento alla UI. paused-for-approval NON si tocca: «X ti aspetta» è
+   * voluto.
+   */
+  const quietMember = (): void => {
+    const a = getAgent(p.memberId)
+    if (a && (a.status === 'thinking' || a.status === 'running')) {
+      updateAgent(p.memberId, { status: 'idle' })
+      emit({ type: 'status', agentId: p.memberId, status: 'idle' })
+    }
+  }
   const group = getGroup(p.groupId)
-  if (!group) return finish('SKIPPED')
+  if (!group) { quietMember(); return finish('SKIPPED') }
   const memberIds = groupMemberIds(group.id)
-  if (!memberIds.includes(p.memberId)) return finish('SKIPPED')
+  if (!memberIds.includes(p.memberId)) { quietMember(); return finish('SKIPPED') }
   const me = getAgent(p.memberId)
-  if (!me || !me.providerId || !me.model) return finish('SKIPPED')
+  if (!me) return finish('SKIPPED')
+  // fase 16c correzioni (R3.1/R3.5): UN SOLO punto decide il modello —
+  // resolveAgentModel, la STESSA funzione del turno (runTurn). Il controllo
+  // duplicato che c'era qui («me.providerId && me.model») saltava in silenzio
+  // ogni bot «Come gli altri» (null/null: il caso normale di un bot nuovo).
+  // Il controllo preventivo resta SOLO per chiudere il turno prima di aprirlo
+  // e per dirlo nella squadra con una riga di sistema: niente logica doppia.
+  const resolved = resolveAgentModel(
+    me,
+    getSetting<MainModel | null>('models.main', null),
+    listProviders().map((x) => ({ id: x.id, enabled: x.enabled }))
+  )
+  if (!resolved) {
+    const text = memberNoModelText(me.name)
+    // una riga sola per membro nell'ultima ora (come il tetto orario)
+    const recent = groupMessages(group.id).filter(
+      (m) => m.author_kind === 'system' && m.text === text && m.created_at > deps.now() - 3_600_000
+    )
+    if (!recent.length) {
+      addGroupMessage({ groupId: group.id, authorKind: 'system', authorId: null, authorName: 'sistema', text })
+      emit({ type: 'groups' })
+    }
+    quietMember()
+    return finish('SKIPPED')
+  }
 
   // la finestra di lettura: i messaggi DOPO il cursore del membro. Il turno di
   // CHIUSURA parte anche a finestra vuota (C2): il coordinatore ha già letto
@@ -108,7 +150,7 @@ export async function runGroupTurnJob(
   // fallback quando della catena non resta nulla da leggere
   const sourceDepth = getGroupMessage(p.sourceMessageId)?.depth ?? null
   const win = readWindow(group.id, p.memberId, sourceDepth)
-  if (!win.messages.length && !p.closing) return finish('SKIPPED')
+  if (!win.messages.length && !p.closing) { quietMember(); return finish('SKIPPED') }
 
   startGroupTurn(p.nonce, deps.now())
 
@@ -187,6 +229,8 @@ export async function runGroupTurnJob(
   } catch (e) {
     cancelTimer()
     finish('ERROR')
+    // R3.2: il turno è saltato con errore — il membro non sta lavorando
+    quietMember()
     throw e
   }
   cancelTimer()

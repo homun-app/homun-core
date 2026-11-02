@@ -57,6 +57,12 @@ export const UI = {
     id: 'notice.routineModelUnavailable',
     message: 'Il provider {provider} scelto per questa routine non è più disponibile: uso il modello del bot ({model}).'
   }),
+  // fase 16c correzioni (R3.6): il provider del modello PROPRIO del bot non è
+  // più collegato → si segue il principale (che resta finché non torna)
+  ownModelUnavailable: msg({
+    id: 'notice.ownModelUnavailable',
+    message: 'Il provider {provider} del modello di questo bot non è più collegato: uso il modello principale ({model}).'
+  }),
   rpcModelsListFailed: msg({
     id: 'rpc.modelsListFailed',
     message: 'impossibile elencare i modelli: {error}'
@@ -237,6 +243,9 @@ export const UI = {
   // fase 16b (S1.1): il cambio di coordinatore — riga di sistema del gruppo
   // (testo salvato inglese col nome in coda, la vista la riconosce e la traduce)
   groupNowCoordinates: msg({ id: 'group.nowCoordinates', message: '{name} ora coordina la squadra' }),
+  // fase 16c correzioni (R3): il membro senza NESSUN modello — riga di sistema
+  // del giro saltato con un motivo visibile (stessa convenzione col nome in coda)
+  groupMemberNoModel: msg({ id: 'group.memberNoModel', message: '{name} non ha un modello con cui rispondere: imposta il modello principale (o il suo) perché riprenda a parlare.' }),
   // fase 16b (S1.2): la riga discreta nella chat privata del coordinatore
   groupSummaryPosted: msg({ id: 'group.summaryPosted', message: 'Ho pubblicato il riepilogo nella squadra «{name}»' }),
 

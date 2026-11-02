@@ -75,12 +75,21 @@ async function main(): Promise<void> {
   // setting 'providers' si cifra (voce Keychain PROPRIA sandbot-providers-key)
   // e si toglie. Idempotente; se il Portachiavi non risponde il chiaro resta
   // (avviso SENZA la chiave) e si riprova al prossimo avvio.
+  // Fase 16c correzioni (R2.1): se la migrazione ha cifrato qualcosa, i byte
+  // del chiaro restano nel WAL e nelle pagine libere del file — checkpoint
+  // TRUNCATE + VACUUM una volta sola (flag 'providers.migrationVacuumed').
   {
-    const { migrateProviderKeys } = await import('../main/agent/providers')
+    const { migrateProviderKeys, vacuumAfterKeyMigration } = await import('../main/agent/providers')
+    let changed = false
     try {
-      await migrateProviderKeys()
+      changed = await migrateProviderKeys()
     } catch (e) {
       console.error('[sandbotd] migrazione chiavi provider rimandata al prossimo avvio:', e instanceof Error ? e.message : e)
+    }
+    try {
+      vacuumAfterKeyMigration(database, changed)
+    } catch (e) {
+      console.error('[sandbotd] pulizia post-migrazione rimandata al prossimo avvio:', e instanceof Error ? e.message : e)
     }
   }
 

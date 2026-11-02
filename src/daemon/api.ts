@@ -1374,13 +1374,21 @@ export function buildApiMethods(
       return p ? providers.testProvider(p) : { ok: false, error: uiText(UI.rpcProviderNotFoundLower) }
     },
     // fase 16c (C3.4): prova una configurazione NON salvata. La chiave va
-    // SOLO in questa direzione: non si salva, non si logga, non torna indietro
+    // SOLO in questa direzione: non si salva, non si logga, non torna indietro.
+    // Fase 16c correzioni (R2.3): accetta anche { providerId } — per provare
+    // un provider GIÀ salvato (per esempio dopo averne cambiato l'indirizzo)
+    // senza ridigitare la chiave: si usa quella in memoria nel daemon, che
+    // non torna mai indietro
     'providers:probe': ([config]) => {
-      const c = (config ?? {}) as { kind?: string; baseUrl?: string; apiKey?: string }
+      const c = (config ?? {}) as { kind?: string; baseUrl?: string; apiKey?: string; providerId?: string }
       const kind = (typeof c.kind === 'string' && c.kind ? c.kind : 'openai-compatible') as ProviderKind
       const baseUrl = String(c.baseUrl ?? '').trim()
       if (!/^https?:\/\//.test(baseUrl)) return { ok: false, error: 'error' }
-      return providers.probeProvider({ kind, baseUrl, apiKey: String(c.apiKey ?? '') })
+      let apiKey = String(c.apiKey ?? '')
+      if (!apiKey && typeof c.providerId === 'string') {
+        apiKey = providers.getProvider(c.providerId)?.apiKey ?? ''
+      }
+      return providers.probeProvider({ kind, baseUrl, apiKey })
     },
     'models:list': async ([providerId]) => {
       const p = providers.getProvider(providerId as string)

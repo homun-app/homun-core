@@ -17,10 +17,10 @@ import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
 import { Plus, Search, Library as LibraryIcon, LayoutGrid, ChevronRight, Activity as ActivityIcon } from 'lucide-react'
-import { useStore } from '../store'
+import { useStore, useResolvedModel } from '../store'
 import { buildSidebarModel, collapsedVoices, teamOpenState, type SidebarModel, type SidebarTeam, type SidebarBot, type CollapsedVoice } from '../sidebar-utils'
 // fase 16b correzioni 2 (Q1): il massimo del trascinamento e i limiti della barra
-import { sidebarMaxFor, SIDEBAR_MIN, type LayoutResult } from '../layout'
+import { sidebarMaxFor, SIDEBAR_MIN, AUTO_RAIL_BELOW, type LayoutResult } from '../layout'
 import { avatarOf } from '../../../shared/avatar'
 import type { Agent } from '../../../shared/types'
 import { Bot } from '../bot/Bot'
@@ -284,8 +284,13 @@ function VoiceMascot({ agentId, size }: { agentId: string; size: number }) {
   return <Bot family={info.avatar.family} color={info.avatar.color} state={info.state} size={size} track={false} dimmed={info.dimmed} />
 }
 
-/** Il menu account di oggi, adattato: te + Tema/Impostazioni/Collega app. */
-function AccountMenu() {
+/**
+ * Il menu account di oggi, adattato: te + Tema/Impostazioni/Collega app.
+ * Fase 16c correzioni (R7): in ROTAI lo stesso menu pende dal bottone in
+ * fondo — con la voce «Allarga la barra» SOLO quando la rotaia non è forzata
+ * (sotto AUTO_RAIL_BELOW allargarla non si può: la voce non c'è, il menu sì).
+ */
+function AccountMenu(props?: { rail?: { forced: boolean; onExpand(): void }; triggerClassName?: string }) {
   const { t } = useLingui()
   const agents = useStore((s) => s.agents)
   const mainAgentId = useStore((s) => s.mainAgentId)
@@ -296,28 +301,37 @@ function AccountMenu() {
   const setAppsOpen = useStore((s) => s.setAppsOpen)
   const effectiveMain = mainAgentId ?? agents[0]?.id ?? null
   const main = agents.find((a) => a.id === effectiveMain)
-  // fase 16c (C3.3): il modello mostrato è quello RISOLTO («Come gli altri»)
-  const resolved = main && (main.providerId && main.model
-    ? { providerId: main.providerId, model: main.model }
-    : mainModel
-      ? { providerId: mainModel.providerId, model: mainModel.model }
-      : null)
+  // fase 16c correzioni (R4): il modello mostrato è quello RISOLTO, dal
+  // selettore UNICO («Come gli altri» compreso)
+  const resolved = useResolvedModel(main?.id ?? null)
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className="flex min-w-0 flex-1 items-center gap-2.5 rounded-[14px] px-1.5 py-1.5 text-left transition hover:bg-muted/60 focus:outline-none">
-        <span className="grid size-8 shrink-0 place-items-center rounded-full bg-muted text-sm font-semibold text-foreground">
+      <DropdownMenuTrigger
+        className={
+          props?.triggerClassName ??
+          'flex min-w-0 flex-1 items-center gap-2.5 rounded-[14px] px-1.5 py-1.5 text-left transition hover:bg-muted/60 focus:outline-none'
+        }
+      >
+        {/* in rotaia solo l'iniziale (come il vecchio bottone), nel resto
+            della barra la riga nome + modello risolto */}
+        <span className={`grid shrink-0 place-items-center rounded-full bg-muted text-sm font-semibold text-foreground ${props?.rail ? 'size-9' : 'size-8'}`}>
           {main ? main.name.slice(0, 1).toUpperCase() : '·'}
         </span>
-        <span className="min-w-0 text-sm">
-          <span className="block truncate font-medium leading-tight">{main ? main.name : t`nessun bot`}</span>
-          <span className="block truncate text-xs text-muted-foreground">
-            {main ? (resolved ? `${resolved.providerId} · ${resolved.model}` : t`nessun modello`) : t`nessun bot`}
+        {!props?.rail && (
+          <span className="min-w-0 text-sm">
+            <span className="block truncate font-medium leading-tight">{main ? main.name : t`nessun bot`}</span>
+            <span className="block truncate text-xs text-muted-foreground">
+              {main ? (resolved ? `${resolved.providerId} · ${resolved.model}` : t`nessun modello`) : t`nessun bot`}
+            </span>
           </span>
-        </span>
+        )}
       </DropdownMenuTrigger>
-      <DropdownMenuContent side="top" align="start" className="w-56">
+      <DropdownMenuContent side="top" align={props?.rail ? 'end' : 'start'} className="w-56">
         <DropdownMenuItem onClick={() => setAppsOpen(true)}><Trans>Collega app</Trans></DropdownMenuItem>
         <DropdownMenuItem onClick={() => { setSettingsOpen(true) }}><Trans>Impostazioni</Trans></DropdownMenuItem>
+        {props?.rail && !props.rail.forced && (
+          <DropdownMenuItem onClick={props.rail.onExpand}><Trans>Allarga la barra</Trans></DropdownMenuItem>
+        )}
         <DropdownMenuSeparator />
         <DropdownMenuSub>
           <DropdownMenuSubTrigger><Trans>Tema</Trans></DropdownMenuSubTrigger>
@@ -334,8 +348,31 @@ function AccountMenu() {
   )
 }
 
-/** La barra STRETTA: solo mascotte nello stesso ordine, contatore e tooltip. */
-function CollapsedColumn({ model, onExpand }: { model: SidebarModel; onExpand(): void }) {
+/**
+ * La barra STRETTA: solo mascotte nello stesso ordine, contatore e tooltip.
+ * Fase 16c correzioni (R7): sotto i bot CI SONO ANCHE il bottone «+» col
+ * menu Crea (Nuovo bot, Nuova squadra) e la lente di Cerca; il bottone in
+ * fondo apre il menu ACCOUNT (non più «Allarga la barra»: sotto AUTO_RAIL_BELOW
+ * non può funzionare — la voce vive nel menu, solo quando non è forzata).
+ */
+function CollapsedColumn({
+  model,
+  onExpand,
+  forced,
+  onSearch,
+  searchOpen,
+  onNewBot,
+  onNewTeam
+}: {
+  model: SidebarModel
+  onExpand(): void
+  /** la rotaia è FORZATA dalla finestra (sotto AUTO_RAIL_BELOW) */
+  forced: boolean
+  onSearch(): void
+  searchOpen: boolean
+  onNewBot(): void
+  onNewTeam(): void
+}) {
   const { i18n } = useLingui()
   const select = useStore((s) => s.select)
   const activeId = useStore((s) => s.activeId)
@@ -408,6 +445,30 @@ function CollapsedColumn({ model, onExpand }: { model: SidebarModel; onExpand():
         >
           <LibraryIcon className="size-4" />
         </button>
+        {/* R7: la lente di Cerca — apre la ricerca sospesa in alto a sinistra */}
+        <button
+          className={`grid size-9 shrink-0 place-items-center rounded-full transition ${searchOpen ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
+          aria-label={i18n.t(msg`Cerca`)}
+          title={i18n.t(msg`Cerca`)}
+          onClick={onSearch}
+        >
+          <Search className="size-4" />
+        </button>
+        {/* R7: «+» col MEDESIMO menu Crea della barra larga (nessuna funzione
+            sparisce sotto i 1000 px) */}
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            className="grid size-9 shrink-0 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
+            aria-label={i18n.t(msg`Crea`)}
+            title={i18n.t(msg`Crea`)}
+          >
+            <Plus className="size-4" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" side="right">
+            <DropdownMenuItem onClick={onNewBot}><Trans>Nuovo bot</Trans></DropdownMenuItem>
+            <DropdownMenuItem onClick={onNewTeam}><Trans>Nuova squadra</Trans></DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <div className="flex-1" />
         <button
           className="grid size-9 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground transition hover:text-foreground"
@@ -420,14 +481,10 @@ function CollapsedColumn({ model, onExpand }: { model: SidebarModel; onExpand():
         {/* fase 16b correzioni 2 (Q3): la riga dell'utente, alta 60 con 16 di
             margine sotto — lo stesso centro verticale della pillola della chat */}
         <div className="mb-4 flex h-[60px] shrink-0 items-center justify-center">
-          <button
-            className="grid size-9 shrink-0 place-items-center rounded-full bg-muted text-sm font-semibold text-foreground"
-            aria-label={i18n.t(msg`Allarga la barra`)}
-            title={i18n.t(msg`Allarga la barra (⌘\\)`)}
-            onClick={onExpand}
-          >
-            {model.main ? model.main.name.slice(0, 1).toUpperCase() : '·'}
-          </button>
+          <AccountMenu
+            rail={{ forced, onExpand }}
+            triggerClassName="grid size-9 shrink-0 place-items-center rounded-full bg-muted text-sm font-semibold text-foreground transition hover:bg-muted/70 focus:outline-none"
+          />
         </div>
       </div>
     </>
@@ -454,6 +511,10 @@ export function Sidebar({ layout }: { layout: LayoutResult }) {
   const [newBotOpen, setNewBotOpen] = useState(false)
   const [newTeamOpen, setNewTeamOpen] = useState(false)
   const collapsed = layout.sidebar === 'rail'
+  // fase 16c correzioni (R7): la rotaia è FORZATA quando la finestra scende
+  // sotto AUTO_RAIL_BELOW — «Allarga la barra» può comparire solo se non lo è
+  const windowWidth = useStore((s) => s.windowWidth)
+  const railForced = windowWidth < AUTO_RAIL_BELOW
   const dragging = useRef(false)
 
   // ⌘\ apre/chiude la barra stretta; la scelta si ricorda
@@ -514,6 +575,14 @@ export function Sidebar({ layout }: { layout: LayoutResult }) {
         <CollapsedColumn
           model={model}
           onExpand={() => setSidebarCollapsed(false)}
+          forced={railForced}
+          searchOpen={searchOpen}
+          onSearch={() => {
+            setSearchOpen((v) => !v)
+            if (searchOpen) setQuery('')
+          }}
+          onNewBot={() => setNewBotOpen(true)}
+          onNewTeam={() => setNewTeamOpen(true)}
         />
       ) : (
         <>
@@ -621,6 +690,27 @@ export function Sidebar({ layout }: { layout: LayoutResult }) {
             </button>
           </div>
         </>
+      )}
+
+      {/* fase 16c correzioni (R7): la ricerca della rotaia, sospesa in alto a
+          sinistra (sopra le mascotte); filtra le voci come nella barra larga */}
+      {collapsed && searchOpen && (
+        <div className="absolute left-2 top-14 z-30 w-60">
+          <input
+            autoFocus
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                setQuery('')
+                setSearchOpen(false)
+              }
+            }}
+            placeholder={t`Cerca bot e squadre`}
+            aria-label={t`Cerca bot e squadre`}
+            className="no-drag w-full rounded-xl bg-card px-3 py-2 text-sm shadow-soft outline-none placeholder:text-muted-foreground"
+          />
+        </div>
       )}
 
       {newBotOpen && <NewBotDialog onClose={() => setNewBotOpen(false)} />}

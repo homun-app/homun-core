@@ -8,7 +8,7 @@
 // Fase 16c (C3.3): «Come gli altri» — il modello principale (models.main) e
 // resolveAgentModel, la funzione pura che decide CHE modello esegue un bot:
 // il suo se l'ha scelto, il principale se segue gli altri, niente altrimenti.
-import type { ProviderKind, MainModel, ThinkingSetting } from '../../shared/types'
+import type { ProviderKind, MainModel } from '../../shared/types'
 
 /** I modelli di un provider: predefinito, riserva, revisore dell'auto-review. */
 export interface ModelDefaults {
@@ -75,41 +75,10 @@ export async function assignDefaultModel(deps: AssignmentDeps): Promise<ModelAss
 }
 
 // ---- fase 16c (C3.3): «Come gli altri» ----
-
-/** Un bot, per chi legge il modello: i campi che servono a resolveAgentModel. */
-export interface AgentModelView {
-  providerId?: string | null
-  model?: string | null
-  thinking?: ThinkingSetting | null
-}
-
-/** Il modello che un bot ESEGUE: il suo, quello principale, o niente. */
-export interface ResolvedAgentModel {
-  providerId: string
-  model: string
-  thinking?: ThinkingSetting | null
-  /** true quando il bot segue il modello principale («Come gli altri») */
-  followsMain: boolean
-}
-
-/**
- * Fase 16c (C3.3), PURA: il modello risolto di un bot.
- * - bot con providerId E model propri → quelli (thinking del bot);
- * - bot null/null e models.main impostato → il principale (thinking del bot
- *   se impostato, altrimenti quello del principale);
- * - altrimenti → null (l'avviso di sempre, notice.configureProviderFirst).
- * Nessuna migrazione: i bot esistenti tengono il modello esplicito.
- */
-export function resolveAgentModel(agent: AgentModelView, main: MainModel | null | undefined): ResolvedAgentModel | null {
-  if (agent.providerId && agent.model) {
-    return { providerId: agent.providerId, model: agent.model, thinking: agent.thinking ?? null, followsMain: false }
-  }
-  if (!agent.providerId && !agent.model && main && main.providerId && main.model) {
-    const thinking = agent.thinking && agent.thinking !== 'default' ? agent.thinking : (main.thinking ?? null)
-    return { providerId: main.providerId, model: main.model, thinking, followsMain: true }
-  }
-  return null
-}
+// Fase 16c correzioni (R3/R4): resolveAgentModel e i suoi tipi vivono in
+// src/shared/agent-model.ts (puro, zero dipendenze) così lo usa anche il
+// renderer; qui restano i re-esport per i chiamanti storici del main/daemon.
+export { resolveAgentModel, type AgentModelView, type ResolvedAgentModel, type ActiveProviders } from '../../shared/agent-model'
 
 /** Dipendenze di assignFirstMainModel (iniettabili nei test). */
 export interface FirstMainDeps {

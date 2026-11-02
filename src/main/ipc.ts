@@ -62,6 +62,13 @@ export const DAEMON_RPC_CHANNELS = [
   // fase 8: regole di auto-review proposte dal bot (salvataggio SOLO al click)
   'autoreview:rule-decision',
   'providers:list', 'providers:save', 'providers:delete', 'providers:discover', 'providers:test', 'models:list',
+  // fase 16c correzioni (R1): le tre RPC nuove della 16c mancavano qui — in
+  // Electron rispondevano «No handler registered» (la prova della chiave, la
+  // ricerca nel registro MCP e l'Attività globale sempre vuota). Il test di
+  // coerenza ipc-rpc-coherence.test.ts le tiene d'occhio: ogni canale del
+  // preload dev'essere inoltrato o gestito dal main, e ogni canale inoltrato
+  // dev'avere un handler nel daemon.
+  'providers:probe', 'activity:global', 'connectors:search-registry',
   // fase 18b (K3): le capacità di UN modello, senza l'elenco completo
   'models:capabilities',
   // fase 18b (H6): uso e costi aggregati (pagina "Uso e costi")

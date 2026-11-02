@@ -83,6 +83,21 @@ export function App() {
     }
   }, [setWindowWidth])
 
+  // fase 16c correzioni (R7.3): ⌘, apre le Impostazioni, lo standard di macOS
+  // (l'app non ha un menu di Electron: la scorciatoia vive qui nel renderer;
+  // Esc chiude come sempre, la gestisce il Dialog)
+  const setSettingsOpen = useStore((s) => s.setSettingsOpen)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.metaKey && e.key === ',') {
+        e.preventDefault()
+        setSettingsOpen(true)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [setSettingsOpen])
+
   // fase 16 (U4): la shell a 3 colonne; fase 16b (S5): al centro la chat del
   // bot OPPURE la squadra selezionata; la Libreria copre l'area centrale.
   // correzioni 2 (Q1): Sidebar e RightPanel ricevono lo STESSO layout — con

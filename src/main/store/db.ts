@@ -41,9 +41,13 @@ function open(): DatabaseSync {
   // migrateGroupCoordinators): senza questo, quella chiamata riaprirebbe
   // open() su una SECONDA connessione, in ricorsione
   _db = db
+  // fase 16c correzioni (R2.1): secure_delete su OGNI connessione — il DB tiene
+  // dati sensibili (chiavi API prima della migrazione, segreti del vault) e
+  // senza di lui SQLite lascia i byte cancellati nelle pagine e nel WAL
   db.exec(`
     PRAGMA journal_mode = WAL;
     PRAGMA busy_timeout = 5000;
+    PRAGMA secure_delete = ON;
     CREATE TABLE IF NOT EXISTS agents (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,

@@ -14,11 +14,11 @@ import type { MessageDescriptor } from '@lingui/core'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Paperclip, PanelRight, ArrowUp, Square, Copy, Quote, Info, Brain } from 'lucide-react'
-import { api, useStore } from '../store'
+import { api, useStore, useResolvedModel } from '../store'
 // fase 17c (C2): il testo di notice/eventi/system dal meta.ui (lingua attiva)
 import { uiTextOf } from '../lib/ui-text'
 import { i18n, formatTime } from '../lib/i18n'
-import { GROUP_CHAIN_CLOSED_TEXT, GROUP_RATE_LIMIT_TEXT, GROUP_HOURLY_CAP_TEXT, parseCoordinatorNowText } from '../../../main/agent/group-turns'
+import { GROUP_CHAIN_CLOSED_TEXT, GROUP_RATE_LIMIT_TEXT, GROUP_HOURLY_CAP_TEXT, parseCoordinatorNowText, parseMemberNoModelText } from '../../../main/agent/group-turns'
 import { agentMessageDisplay } from '../../../shared/agent-message'
 import type { TranscriptEntry, SendMessageMeta, SendMessagePayload, ThinkingSetting } from '../../../shared/types'
 import { ApprovalCard } from './ApprovalCard'
@@ -197,10 +197,14 @@ export function Chat() {
   // fase 3 (§3bis L2): il ragionamento è nascosto di default; il toggle vive
   // nel menu «Ragiona» del composer (16b, S3.1/S3.4)
   const [showReasoning, setShowReasoning] = useState(false)
-  // fase 18b (H4.3 → K3): l'avviso per i modelli senza visione
+  // fase 18b (H4.3 → K3): l'avviso per i modelli senza visione.
+  // Fase 16c correzioni (R4): provider e modello del bot passano dal
+  // selettore resolvedModelOf — anche un bot «Come gli altri» (null/null)
+  // vede le immagini del PRINCIPALE e ne ha i livelli di «Ragiona»
   const [noVision, setNoVision] = useState(false)
-  const visionProviderId = agent?.providerId ?? null
-  const visionModel = agent?.model ?? null
+  const resolvedModel = useResolvedModel(agent?.id ?? null)
+  const visionProviderId = resolvedModel?.providerId ?? null
+  const visionModel = resolvedModel?.model ?? null
   useEffect(() => {
     setNoVision(false)
     if (!visionProviderId || !visionModel) return
@@ -208,15 +212,15 @@ export function Chat() {
       .then((caps) => setNoVision(caps.vision === false))
       .catch(() => setNoVision(false))
   }, [visionProviderId, visionModel])
-  // i livelli di ragionamento del modello del bot (S3.4)
+  // i livelli di ragionamento del modello risolto (S3.4)
   const [levels, setLevels] = useState<ThinkingSetting[]>([])
   useEffect(() => {
     setLevels([])
-    if (!agent?.providerId || !agent.model) return
-    void api.listModels(agent.providerId)
-      .then((ms) => setLevels(ms.find((m) => m.id === agent.model)?.thinkingLevels ?? []))
+    if (!resolvedModel) return
+    void api.listModels(resolvedModel.providerId)
+      .then((ms) => setLevels(ms.find((m) => m.id === resolvedModel.model)?.thinkingLevels ?? []))
       .catch(() => setLevels([]))
-  }, [agent?.providerId, agent?.model])
+  }, [resolvedModel])
 
   // Chiedi al volo con ⌘K (S3.1): la finestra è quella di oggi
   useEffect(() => {
@@ -860,6 +864,9 @@ export function groupSystemText(text: string): string {
   if (text === GROUP_HOURLY_CAP_TEXT) return i18n._('group.hourlyCap')
   const coord = parseCoordinatorNowText(text)
   if (coord !== null) return i18n._('group.nowCoordinates', { name: coord })
+  // fase 16c correzioni (R3): il membro senza modello (giro saltato, motivo visibile)
+  const noModel = parseMemberNoModelText(text)
+  if (noModel !== null) return i18n._('group.memberNoModel', { name: noModel })
   return text
 }
 

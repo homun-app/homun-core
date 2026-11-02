@@ -7,6 +7,8 @@ import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog'
+// fase 16c correzioni (R8.2): la spunta della riga scelta e l'idea di «Descrivilo tu»
+import { Check, PenLine } from 'lucide-react'
 import { api, useStore } from '../store'
 import { Bot } from '../bot/Bot'
 import { BOT_FAMILIES, BOT_COLORS, avatarOf } from '../../../shared/avatar'
@@ -154,7 +156,7 @@ export function NewBotDialog({ onClose }: { onClose: () => void }) {
           {BOT_FAMILIES.map((f) => (
             <button
               key={f}
-              className={`h-8 rounded-full px-3 text-[13px] transition ${family === f ? 'bg-foreground text-background' : 'bg-muted text-foreground hover:bg-accent'}`}
+              className={`h-8 rounded-full px-3 text-[13px] transition outline-none focus-visible:ring-2 focus-visible:ring-foreground focus-visible:ring-offset-2 focus-visible:ring-offset-background ${family === f ? 'bg-foreground text-background' : 'bg-muted text-foreground hover:bg-accent'}`}
               onClick={() => setFamily(f)}
             >
               {i18n.t(FAMILY_NAMES[f])}
@@ -183,28 +185,40 @@ export function NewBotDialog({ onClose }: { onClose: () => void }) {
           />
         </div>
 
-        {/* «Cosa farà?» — i template che esistono + «Descrivilo tu» */}
+        {/* «Cosa farà?» — i template che esistono + «Descrivilo tu».
+            Fase 16c correzioni (R8.2, tavola 7): RIGHE senza bordo su
+            bg-muted/60, emoji e titolo a 8 px, descrizione su UNA riga
+            troncata (l'intera nel title), selezione = fondo più scuro +
+            spunta; massimo 4 visibili più «Altri N ▾» */}
         <div className="space-y-2">
           <strong className="block text-base"><Trans>Cosa farà?</Trans></strong>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <div className="flex flex-col gap-1.5">
             {visibleTemplates.map((tpl) => (
               <button
                 key={tpl.id}
-                className={`rounded-2xl px-3.5 py-3 text-left transition ${chosenTemplate?.id === tpl.id ? 'border-2 border-foreground bg-muted' : 'border border-border hover:border-muted-foreground'}`}
+                title={`${pickLang(tpl.name, uiLang())} — ${pickLang(tpl.description, uiLang())}`}
+                className={`flex w-full items-center gap-2 rounded-[14px] px-3 py-2 text-left transition outline-none focus-visible:ring-2 focus-visible:ring-foreground ${chosenTemplate?.id === tpl.id ? 'bg-accent' : 'bg-muted/60 hover:bg-muted'}`}
                 onClick={() => { setChosenTemplate(tpl); setDescribe(false) }}
               >
-                <span className="mr-1">{tpl.avatar}</span>
-                <span className="text-sm font-semibold">{pickLang(tpl.name, uiLang())}</span>
-                <span className="mt-0.5 block line-clamp-2 text-[13px] text-muted-foreground">{pickLang(tpl.description, uiLang())}</span>
+                <span className="shrink-0 text-base">{tpl.avatar}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-semibold">{pickLang(tpl.name, uiLang())}</span>
+                  <span className="block truncate text-[13px] text-muted-foreground">{pickLang(tpl.description, uiLang())}</span>
+                </span>
+                {chosenTemplate?.id === tpl.id && <Check className="size-4 shrink-0 text-foreground" aria-hidden="true" />}
               </button>
             ))}
             {/* «Descrivilo tu» — il bot ti propone le sue istruzioni */}
             <button
-              className={`rounded-2xl border-dashed px-3.5 py-3 text-left transition ${describe ? 'border-2 border-foreground bg-muted' : 'border border-border hover:border-muted-foreground'}`}
+              className={`flex w-full items-center gap-2 rounded-[14px] px-3 py-2 text-left transition outline-none focus-visible:ring-2 focus-visible:ring-foreground ${describe ? 'bg-accent' : 'bg-muted/60 hover:bg-muted'}`}
               onClick={() => { setDescribe(true); setChosenTemplate(null) }}
             >
-              <span className="text-sm font-semibold"><Trans>Descrivilo tu</Trans></span>
-              <span className="mt-0.5 block text-[13px] text-muted-foreground"><Trans>Il bot ti propone le sue istruzioni</Trans></span>
+              <PenLine className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-semibold"><Trans>Descrivilo tu</Trans></span>
+                <span className="block truncate text-[13px] text-muted-foreground"><Trans>Il bot ti propone le sue istruzioni</Trans></span>
+              </span>
+              {describe && <Check className="size-4 shrink-0 text-foreground" aria-hidden="true" />}
             </button>
           </div>
           {templates.length > 4 && !showAllTemplates && (

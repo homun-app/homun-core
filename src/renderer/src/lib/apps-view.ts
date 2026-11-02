@@ -185,10 +185,18 @@ export function appsViewModel(input: AppsViewInput): AppsViewModel {
   }
 
   // -- il catalogo per filtro e ricerca (viste Tutte / categoria) --
+  // fase 16c correzioni (R8.1): la sezione «Consigliate per te» esiste SOLO
+  // con la pillola Tutte e nessuna ricerca; in quel caso la lista qui sotto
+  // ESCLUDE quelle voci e diventa «Altre app» — prima le quattro consigliate
+  // comparivano DUE volte. Con una categoria scelta o una ricerca la sezione
+  // consigliate non c'è e si vede TUTTO ciò che corrisponde, senza doppioni
+  const featuredSectionVisible = !q && input.filter === 'all' && featured.length > 0
+  const featuredIds = new Set(featured.map((f) => f.id))
   const catalogRows = input.catalog.filter((c) => {
     if (connectedStates.has(c.id)) return false
     if (input.filter !== 'all' && input.filter !== 'connected' && c.category !== input.filter) return false
     if (q && !matchesQuery(`${c.name} ${c.id} ${taglineOf(c.tagline, lang) ?? ''}`.toLowerCase(), q)) return false
+    if (featuredSectionVisible && featuredIds.has(c.id)) return false
     return true
   })
 

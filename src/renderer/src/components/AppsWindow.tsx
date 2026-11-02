@@ -515,6 +515,9 @@ export function AppsView({ embedded = false }: { embedded?: boolean }) {
   const [query, setQuery] = useState('')
   const [installed, setInstalled] = useState<{ servers: InstalledServerLike[]; plugins: InstalledPluginLike[] } | null>(null)
   const [registry, setRegistry] = useState<AppsRegistryResult[] | null>(null)
+  // fase 16c correzioni (R1): la ricerca nel registro fallita non è «nessun
+  // risultato» — riga d'errore con Riprova, mai il silenzio
+  const [registryFailed, setRegistryFailed] = useState(false)
   const [manualOpen, setManualOpen] = useState(false)
   const [detail, setDetail] = useState<ConnectedRow | null>(null)
   const [skillsOpen, setSkillsOpen] = useState(false)
@@ -534,15 +537,16 @@ export function AppsView({ embedded = false }: { embedded?: boolean }) {
   }, [refreshConnectors])
 
   // la ricerca nel registro parte con 2+ caratteri e NESSUN risultato nel catalogo
+  const runRegistrySearch = (q: string, alive: () => boolean): void => {
+    void api.connectorsSearchRegistry(q)
+      .then((rows) => { if (alive()) { setRegistry(rows); setRegistryFailed(false) } })
+      .catch(() => { if (alive()) { setRegistry(null); setRegistryFailed(true) } })
+  }
   useEffect(() => {
     const q = query.trim()
-    if (q.length < 2 || catalogMatch(connectors, q)) { setRegistry(null); return }
+    if (q.length < 2 || catalogMatch(connectors, q)) { setRegistry(null); setRegistryFailed(false); return }
     let alive = true
-    const timer = setTimeout(() => {
-      void api.connectorsSearchRegistry(q)
-        .then((rows) => { if (alive) setRegistry(rows) })
-        .catch(() => { if (alive) setRegistry([]) })
-    }, 350)
+    const timer = setTimeout(() => runRegistrySearch(q, () => alive), 350)
     return () => { alive = false; clearTimeout(timer) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, connectors])
@@ -637,8 +641,10 @@ export function AppsView({ embedded = false }: { embedded?: boolean }) {
         {filters.map(pill)}
       </div>
 
-      {/* Consigliate per te (non nel filtro Collegate né nelle ricerche a vuoto) */}
-      {(filter === 'all' || filter === 'mail-calendar' || filter === 'documents' || filter === 'development') && !query && model.featured.length > 0 && (
+      {/* Consigliate per te — R8.1: SOLO con la pillola Tutte e nessuna
+          ricerca; con una categoria o una ricerca si vede tutto lì sotto,
+          senza doppioni */}
+      {filter === 'all' && !query && model.featured.length > 0 && (
         <section>
           <div className="flex items-baseline justify-between">
             <strong className="text-[15px] font-medium"><Trans>Consigliate per te</Trans></strong>
@@ -662,9 +668,16 @@ export function AppsView({ embedded = false }: { embedded?: boolean }) {
       {/* il catalogo (filtro Tutte o categoria) */}
       {(filter === 'all' || ['mail-calendar', 'documents', 'development', 'communication'].includes(filter)) && (
         <section className="space-y-1">
-          {filter === 'all' && !query && model.featured.length > 0 && <strong className="text-[15px] font-medium"><Trans>Tutte</Trans></strong>}
-          {model.catalogRows.length === 0 && query && registry === null && (
+          {/* R8.1: la lista sotto le consigliate esclude quelle voci → «Altre app» */}
+          {filter === 'all' && !query && model.featured.length > 0 && <strong className="text-[15px] font-medium"><Trans>Altre app</Trans></strong>}
+          {model.catalogRows.length === 0 && query && registry === null && !registryFailed && (
             <p className="py-2 text-sm text-muted-foreground"><Trans>Cerco nel registro…</Trans></p>
+          )}
+          {model.catalogRows.length === 0 && query && registryFailed && (
+            <div className="flex items-center gap-2 py-2 text-sm text-muted-foreground">
+              <Trans>Non riesco a cercare nel registro</Trans>
+              <button className="text-primary hover:underline" onClick={() => runRegistrySearch(query.trim(), () => true)}><Trans>Riprova</Trans></button>
+            </div>
           )}
           {model.catalogRows.length === 0 && !query && (
             <p className="py-2 text-sm text-muted-foreground"><Trans>Nessuna app in questa categoria.</Trans></p>

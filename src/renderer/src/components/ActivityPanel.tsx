@@ -99,8 +99,11 @@ export function ActivityPanel() {
   const [filter, setFilter] = useState<ActivityFilter>('all')
   const [query, setQuery] = useState('')
   const [data, setData] = useState<GlobalActivityData | null>(null)
+  // fase 16c correzioni (R1): un RPC che fallisce non è «nessun lavoro» —
+  // si mostra una riga d'errore con Riprova, mai lo stato vuoto in silenzio
+  const [failed, setFailed] = useState(false)
   const load = (): void => {
-    void api.activityGlobal(300).then(setData).catch(() => setData({ tasks: [], runs: [], waiting: [] }))
+    void api.activityGlobal(300).then((d) => { setData(d); setFailed(false) }).catch(() => setFailed(true))
   }
   useEffect(() => {
     if (!activityOpen) return
@@ -154,13 +157,21 @@ export function ActivityPanel() {
         </div>
       </div>
       <div className="mx-auto mt-4 w-full max-w-3xl flex-1 overflow-y-auto scroll-thin">
-        {data === null ? (
+        {/* fase 16c correzioni (R1): un RPC fallito non è «nessun lavoro» —
+            riga d'errore in parole con Riprova, mai lo stato vuoto in silenzio */}
+        {failed && (
+          <div className={`flex items-center gap-2 text-sm text-muted-foreground ${data ? 'justify-start pb-3' : 'justify-center pt-10'}`}>
+            <Trans>Non riesco a leggere le attività</Trans>
+            <button className="text-primary hover:underline" onClick={load}><Trans>Riprova</Trans></button>
+          </div>
+        )}
+        {!failed && data === null ? (
           <p className="text-sm text-muted-foreground"><Trans>caricamento…</Trans></p>
-        ) : rows.length === 0 ? (
+        ) : data !== null && rows.length === 0 ? (
           <p className="px-2 pt-10 text-center text-sm text-muted-foreground">
             <Trans>Nessun lavoro qui: i compiti dei bot e le loro routine finiscono in questo elenco.</Trans>
           </p>
-        ) : (
+        ) : data !== null && (
           <div className="flex flex-col gap-0.5">
             {rows.map((row) => <ActivityListRow key={row.key} row={row} onOpen={open} />)}
           </div>

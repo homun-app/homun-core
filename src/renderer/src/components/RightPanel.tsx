@@ -16,7 +16,7 @@ import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
 import { formatDate } from '../lib/i18n'
 import { X, Plus } from 'lucide-react'
-import { api, useStore } from '../store'
+import { api, useStore, useResolvedModel } from '../store'
 import { Bot } from '../bot/Bot'
 import { useBotInfo } from '../bot/use-bot'
 import type { GroupInfo, LibraryItemInfo, ModelInfo, RoutineInfo, ThinkingSetting, Agent } from '../../../shared/types'
@@ -109,16 +109,12 @@ function ProfileTab({ onAvatar }: { onAvatar(): void }) {
     void api.listMemories(activeId).then((m) => setMemories(m.length)).catch(() => setMemories(0))
     void api.listSkills(activeId).then((s) => setSkills(s.length)).catch(() => setSkills(0))
   }, [activeId])
+  // fase 16c correzioni (R4): il modello risolto passa dal selettore UNICO
+  const resolved = useResolvedModel(agent?.id ?? null)
   if (!agent) return null
   const effectiveMain = mainAgentId ?? agents[0]?.id ?? null
   const coordinates = groups.filter((g) => g.coordinatorId === agent.id)
   const recent = tasks.filter((tk) => tk.agentId === agent.id).slice(-5).reverse()
-  // fase 16c (C3.3): il Profilo mostra il modello RISOLTO («Come gli altri»)
-  const resolved = agent.providerId && agent.model
-    ? { providerId: agent.providerId, model: agent.model }
-    : mainModel
-      ? { providerId: mainModel.providerId, model: mainModel.model }
-      : null
   return (
     <div className="space-y-2">
       <p className="text-sm leading-relaxed text-foreground/80">{agent.description || <Trans>Nessuna descrizione.</Trans>}</p>
@@ -251,15 +247,13 @@ function AdvancedTab() {
       }
     }
   }, [providers, models])
+  // fase 16c correzioni (R4): il modello risolto passa dal selettore UNICO;
+  // followsMain viene da lì (vale anche per il provider proprio sparito, R3.6:
+  // finché l'utente non sceglie, il pannello mostra «Come gli altri»)
+  const resolved = useResolvedModel(agent?.id ?? null)
   if (!agent) return null
   const effectiveMain = mainAgentId ?? agents[0]?.id ?? null
-  const followsMain = !agent.providerId && !agent.model
-  // fase 16c (C3.3): il modello risolto decide i livelli di ragionamento offerti
-  const resolved = agent.providerId && agent.model
-    ? { providerId: agent.providerId, model: agent.model }
-    : mainModel
-      ? { providerId: mainModel.providerId, model: mainModel.model }
-      : null
+  const followsMain = resolved?.followsMain === true
   const chosen = resolved ? (models[resolved.providerId] ?? []).find((m) => m.id === resolved.model) : undefined
   const levels = chosen?.thinkingLevels ?? []
   const patch = (p: Partial<Agent>): void => {

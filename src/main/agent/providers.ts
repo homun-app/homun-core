@@ -96,8 +96,10 @@ export function publicProviders(): ProviderPublic[] {
  * cifrano e il chiaro si toglie; le sigillate si aprono in memoria. Se il
  * Portachiavi non risponde, il chiaro RESTA (avviso SENZA la chiave) e si
  * riprova al prossimo avvio: non si perde mai una chiave.
+ * Fase 16c correzioni (R2.1): torna `changed` — ha cifrato qualcosa? Allora
+ * il boot fa checkpoint+VACUUM (vacuumAfterKeyMigration).
  */
-export async function migrateProviderKeys(): Promise<void> {
+export async function migrateProviderKeys(): Promise<boolean> {
   const list = storedProviders()
   let changed = false
   for (const p of list) {
@@ -121,6 +123,30 @@ export async function migrateProviderKeys(): Promise<void> {
     }
   }
   if (changed) saveStoredProviders(list)
+  return changed
+}
+
+/**
+ * Fase 16c correzioni (R2.1): dopo una migrazione che ha cifrato chiavi, i
+ * byte del chiaro restano nel WAL (le pagine vecchie) e nello spazio libero
+ * del file principale finché non vengono sovrascritte. Checkpoint TRUNCATE +
+ * VACUUM, UNA volta sola (setting 'providers.migrationVacuumed'); il VACUUM
+ * riscrive il file e toglie anche i resti nelle pagine libere. Se fallisce
+ * (database occupato) si logga SENZA dati e si riprova al prossimo avvio:
+ * il flag resta spento finché la pulizia non è riuscita.
+ */
+export function vacuumAfterKeyMigration(db: { exec(sql: string): unknown }, changed: boolean): void {
+  if (getSetting<boolean>('providers.migrationVacuumed', false)) return
+  // niente di cambiato e nessuna chiave sigillata nella memoria: non c'è mai
+  // stato un chiaro da ripulire (il flag scatta solo quando serve davvero)
+  if (!changed && !storedProviders().some((p) => isSealedKey(p.apiKeySealed))) return
+  try {
+    db.exec('PRAGMA wal_checkpoint(TRUNCATE)')
+    db.exec('VACUUM')
+    setSetting('providers.migrationVacuumed', true)
+  } catch (e) {
+    console.error(`[providers] pulizia del database dopo la migrazione rimandata al prossimo avvio: ${e instanceof Error ? e.message : String(e)}`)
+  }
 }
 
 /**
@@ -140,15 +166,22 @@ export async function saveProvider(input: ProviderSaveInput): Promise<void> {
     baseUrl: input.baseUrl,
     enabled: input.enabled,
     ...(input.discovered ? { discovered: true } : {}),
-    ...(prev?.apiKeySealed ? { apiKeySealed: prev.apiKeySealed } : {})
+    ...(prev?.apiKeySealed ? { apiKeySealed: prev.apiKeySealed } : {}),
+    // fase 16c correzioni (R2.2): il chiaro NON ancora migrato (Portachiavi
+    // giù all'avvio) resta nel setting — senza questa riga modificare nome o
+    // URL senza ridigitare la chiave la cancellava dal disco: persa per sempre
+    ...(prev?.apiKey ? { apiKey: prev.apiKey } : {})
   }
   const newKey = typeof input.apiKey === 'string' ? input.apiKey.trim() : ''
   if (input.clearKey === true) {
     delete next.apiKeySealed
+    delete next.apiKey
     plainKeys.delete(input.id)
   } else if (newKey) {
     try {
       next.apiKeySealed = await sealProviderKey(keyDeps(), newKey)
+      // la chiave nuova è sigillata: il chiaro (eventuale) del precedente si toglie
+      delete next.apiKey
       plainKeys.set(input.id, newKey)
     } catch {
       // il Portachiavi non risponde: la chiave VECCHIA resta al suo posto

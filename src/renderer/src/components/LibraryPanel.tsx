@@ -125,12 +125,20 @@ function LibraryList() {
   const [author, setAuthor] = useState('')
   const [stats, setStats] = useState<{ bytes: number; warn: boolean } | null>(null)
   const [view, setView] = useState<LibraryView>(readLibraryView)
+  // fase 16c correzioni (R1): un RPC che fallisce non è «libreria vuota» —
+  // riga d'errore con Riprova, mai lo stato vuoto in silenzio
+  const [failed, setFailed] = useState(false)
   const agents = useStore((s) => s.agents)
   const openLibrary = useStore((s) => s.openLibrary)
   const [q, setQ] = useState('')
 
   const refresh = async () => {
-    setItems(await api.libraryList(q || undefined, undefined))
+    try {
+      setItems(await api.libraryList(q || undefined, undefined))
+      setFailed(false)
+    } catch {
+      setFailed(true)
+    }
     setStats(await api.libraryStats().catch(() => null))
   }
   useEffect(() => { void refresh() }, [q]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -201,7 +209,12 @@ function LibraryList() {
             <Trans>La libreria supera 2 GB: valuta cosa cancellare (nessun blocco automatico).</Trans>
           </p>
         )}
-        {shown.length === 0 && <p className="pt-16 text-center text-sm text-muted-foreground"><Trans>La libreria è vuota: i documenti, i grafici e i file che i bot preparano finiscono qui.</Trans></p>}
+        {failed ? (
+          <div className={`flex items-center gap-2 text-sm text-muted-foreground ${items.length ? 'justify-start' : 'pt-16 justify-center'}`}>
+            <Trans>Non riesco a leggere la libreria</Trans>
+            <button className="text-primary hover:underline" onClick={() => { void refresh() }}><Trans>Riprova</Trans></button>
+          </div>
+        ) : shown.length === 0 && <p className="pt-16 text-center text-sm text-muted-foreground"><Trans>La libreria è vuota: i documenti, i grafici e i file che i bot preparano finiscono qui.</Trans></p>}
         {/* la griglia (tavola 4): card senza bordo su bg-muted */}
         {view === 'grid' ? (
           <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(220px,1fr))]">

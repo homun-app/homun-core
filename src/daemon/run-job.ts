@@ -156,6 +156,10 @@ export function makeJobRunner(db: DatabaseSync, runTurnFn: RunTurnFn = runTurn) 
     // fase 18b (H7): il modello PROPRIo della routine si legge dalla riga
     // ALL'ESECUZIONE (non all'accodamento: la routine può cambiare in coda).
     // Vale SOLO per questo turno; le continuazioni di task usano il bot.
+    // Fase 16c correzioni (R3.3): questo NON è un controllo del modello del
+    // bot (quello vive SOLO in resolveAgentModel): qui si passa la ROTTA della
+    // routine al turno; se il suo provider non è più attivo lo decide runTurn
+    // (H7: notice routineModelUnavailable e si usa il modello del bot).
     let route: RunTurnOptions['route'] | undefined
     if (typeof p.routineId === 'number') {
       const row = db.prepare('SELECT provider_id, model, thinking FROM routines WHERE id = ?').get(p.routineId) as

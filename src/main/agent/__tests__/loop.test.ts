@@ -246,9 +246,17 @@ vi.mock('../providers', () => ({
       : null
   },
   // fase 16c (C1/C3.3): il loop legge i provider dal modulo providers (vista
-  // del daemon, chiavi in memoria) — i test li definiscono in h.db.providers
-  listProviders: () => h.db.providers.map((p: { id: string; kind?: string; baseUrl?: string }) =>
-    ({ id: p.id, name: 'test', kind: p.kind ?? 'openai-compatible', baseUrl: p.baseUrl ?? 'http://localhost', apiKey: '', enabled: true })),
+  // del daemon, chiavi in memoria) — i test li definiscono in h.db.providers.
+  // Correzioni R3: 'prov' (il fisso di getProvider) è ATTIVO anche qui — il
+  // loop risolve il modello con l'elenco dei provider attivi e i bot di test
+  // col proprio modello su 'prov' devono vederlo, come nell'app vera
+  listProviders: () => [
+    ...h.db.providers.map((p: { id: string; kind?: string; baseUrl?: string }) =>
+      ({ id: p.id, name: 'test', kind: p.kind ?? 'openai-compatible', baseUrl: p.baseUrl ?? 'http://localhost', apiKey: '', enabled: true })),
+    ...(!h.db.providers.some((p: { id: string }) => p.id === 'prov')
+      ? [{ id: 'prov', name: 'test', kind: 'openai-compatible' as const, baseUrl: 'http://localhost', apiKey: '', enabled: true }]
+      : [])
+  ],
   // fase 10: la capability "tools" è data per vera (nessuna rete nei test)
   modelSupportsTools: async () => ({ ok: true, checked: false })
 }))
@@ -2676,6 +2684,9 @@ describe('fase 10 (punto 1): create_agent', () => {
 
   it('senza default del provider il bot nuovo eredita provider e modello del creatore', async () => {
     h.db.settings.set('permissions', PERMS)
+    // correzioni R3.6: il creatore ('prov'/'m1') passa da resolveAgentModel —
+    // la copia avviene solo se il suo provider è ATTIVO
+    h.db.providers = [{ id: 'prov', enabled: true }]
     h.llm.queue = [
       { toolCalls: [{ id: 'ca2', name: 'create_agent', arguments: JSON.stringify({ name: 'Erede', role: 'Fai quello che dico io.' }) }] },
       { text: 'ok' }
@@ -2684,6 +2695,21 @@ describe('fase 10 (punto 1): create_agent', () => {
     const created = [...h.db.agents.values()].find((a) => a.name === 'Erede')
     expect(created!.providerId).toBe('prov')
     expect(created!.model).toBe('m1')
+  })
+
+  it('correzioni R3.6: se il provider del creatore non è più attivo, il bot nuovo nasce senza modello proprio', async () => {
+    h.db.settings.set('permissions', PERMS)
+    // il creatore punta a un provider RIMOSSO: la copia non avviene (provider,
+    // modello e credenziale vincono insieme — regola di Rakazo selectConfiguredModel)
+    h.db.providers = []
+    h.llm.queue = [
+      { toolCalls: [{ id: 'ca2b', name: 'create_agent', arguments: JSON.stringify({ name: 'Erede 2', role: 'Fai quello che dico io.' }) }] },
+      { text: 'ok' }
+    ]
+    await runTurn(AGENT, 'crea', emit)
+    const created = [...h.db.agents.values()].find((a) => a.name === 'Erede 2')
+    expect(created!.providerId).toBeNull()
+    expect(created!.model).toBeNull()
   })
 
   it('oltre 6 create_agent per turno il settimo è rifiutato con errore leggibile', async () => {
@@ -5470,5 +5496,66 @@ describe('fase 19a (V5): request_takeover — la presa di controllo chiesta dal 
     expect(seen[0]!.some((n) => n === 'computer_observe')).toBe(false)
     expect(seen[0]!.some((n) => n === 'computer_act')).toBe(false)
     expect(seen[0]!.some((n) => n === 'request_takeover')).toBe(false)
+  })
+})
+
+// ---- fase 16c correzioni (R3.6): il provider proprio sparito → il principale ----
+
+describe('R3.6 — il modello proprio su un provider rimosso segue il principale', () => {
+  it('notice ownModelUnavailable UNA volta, e il turno gira col modello principale', async () => {
+    // il bot ha il suo modello su un provider RIMOSSO; il principale c'è
+    h.db.providers = [{ id: 'mainprov', enabled: true }]
+    h.db.settings.set('models.main', { providerId: 'mainprov', model: 'modello-a', thinking: null })
+    h.db.agents.get(AGENT)!.providerId = 'andato'
+    h.llm.queue = [{ text: 'rispondo' }, { text: 'ancora' }]
+    await runTurn(AGENT, 'ciao', emit)
+    // il turno È PARTITO col principale (provider e modello giusti per llm)
+    expect(h.llm.provIds[0]).toBe('mainprov')
+    expect(h.llm.models[0]).toBe('modello-a')
+    // la notice c'è, UNA volta, e nomina il provider mancante e il modello usato
+    const notices = h.db.entries.filter((e) => e.kind === 'notice' && e.content.includes('non è più collegato'))
+    expect(notices).toHaveLength(1)
+    expect(notices[0]!.content).toContain('andato')
+    expect(notices[0]!.content).toContain('modello-a')
+    // il turno FINISCE normalmente
+    await vi.waitFor(() => expect(isRunning(AGENT)).toBe(false))
+    // un SECONDO turno: la notice NON si ripete (stessa situazione) e il
+    // modello resta il principale (il revisore d'auto-review può aggiungere
+    // chiamate: si guardano le chiamate NUOVE di questo turno)
+    const callsBefore = h.llm.models.length
+    h.llm.queue = [{ text: 'di nuovo' }]
+    await runTurn(AGENT, 'ancora', emit)
+    expect(h.db.entries.filter((e) => e.kind === 'notice' && e.content.includes('non è più collegato'))).toHaveLength(1)
+    expect(h.llm.models.slice(callsBefore)).toContain('modello-a')
+  })
+
+  it('quando il provider TORNA, il bot riprende il SUO modello e la notice si azzera', async () => {
+    h.db.settings.set('models.main', { providerId: 'mainprov', model: 'modello-a', thinking: null })
+    h.db.providers = [{ id: 'mainprov', enabled: true }]
+    h.db.agents.get(AGENT)!.providerId = 'torna'
+    h.llm.queue = [{ text: 'rispondo' }]
+    await runTurn(AGENT, 'ciao', emit)
+    expect(h.llm.models[0]).toBe('modello-a') // seguiva il principale
+    // il provider rientra
+    h.db.providers = [{ id: 'mainprov', enabled: true }, { id: 'torna', enabled: true }]
+    const callsBefore = h.llm.models.length
+    h.llm.queue = [{ text: 'di nuovo' }]
+    await runTurn(AGENT, 'ancora', emit)
+    expect(h.llm.provIds.slice(callsBefore)).toContain('torna')
+    expect(h.llm.models.slice(callsBefore)).toContain('m1') // il modello PROPRIO, tornato
+    // e se ricasca, la notice si rivede (il ricordo si era azzerato)
+    h.db.providers = [{ id: 'mainprov', enabled: true }]
+    h.llm.queue = [{ text: 'e ancora' }]
+    await runTurn(AGENT, 'sempre', emit)
+    expect(h.db.entries.filter((e) => e.kind === 'notice' && e.content.includes('non è più collegato'))).toHaveLength(2)
+  })
+
+  it('senza models.main il modello su provider rimosso dà la notice di configurazione (come prima)', async () => {
+    h.db.providers = []
+    h.db.agents.get(AGENT)!.providerId = 'andato'
+    await runTurn(AGENT, 'ciao', emit)
+    const notice = h.db.entries.find((e) => e.kind === 'notice')
+    expect(notice?.content).toContain('Configura prima un provider')
+    expect(h.llm.calls).toHaveLength(0)
   })
 })

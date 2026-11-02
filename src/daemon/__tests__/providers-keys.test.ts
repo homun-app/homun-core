@@ -4,13 +4,13 @@
 // (mai il Portachiavi vero). Server finto su 127.0.0.1 per providers:test e
 // providers:probe — controlla l'header Authorization.
 import { describe, expect, it, beforeAll, afterAll, beforeEach } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createServer, type Server } from 'node:http'
 import { setDataDir, dataDir, db, setSetting, getSetting } from '../../main/store/db'
 import {
   migrateProviderKeys, saveProvider, deleteProvider, getProvider, publicProviders,
-  setProviderKeychainRunner, storedProviders, type StoredProvider
+  setProviderKeychainRunner, storedProviders, vacuumAfterKeyMigration, type StoredProvider
 } from '../../main/agent/providers'
 import { buildApiMethods } from '../api'
 import type { JobWorker } from '../worker'
@@ -58,7 +58,18 @@ afterAll(() => {
 beforeEach(() => {
   setSetting('providers', [])
   setSetting('models.main', null)
+  setSetting('providers.migrationVacuumed', false)
 })
+
+/** I byte GREZZI di sandbot.db, -wal e -shm (se esistono): contengono la chiave? */
+function keyInDbFiles(key: string): string[] {
+  const hits: string[] = []
+  for (const f of ['sandbot.db', 'sandbot.db-wal', 'sandbot.db-shm']) {
+    const p = join(dir, f)
+    if (existsSync(p) && readFileSync(p).toString('latin1').includes(key)) hits.push(f)
+  }
+  return hits
+}
 
 describe('migrazione all\'avvio (idempotente, non si perde mai una chiave)', () => {
   it('cifra il chiaro e lo toglie dal setting; rifatta non cambia nulla', async () => {
@@ -193,5 +204,155 @@ describe('providers:test e providers:probe (server finto su 127.0.0.1)', () => {
     const down = await (api['providers:probe']!([{ kind: 'openai', baseUrl: 'http://127.0.0.1:1/v1', apiKey: 'qualsiasi' }]) as Promise<ProviderProbeResult>)
     expect(down.ok).toBe(false)
     expect(down.error).toBe('unreachable')
+  })
+})
+
+// ---- fase 16c correzioni: R2.1 residui su disco, R2.2 chiaro conservato, R2.3 prova col providerId ----
+
+describe('R2.1 — i byte della chiave non restano nei file di SQLite', () => {
+  // DB su FILE dentro mkdtemp (mai :memory:): il test legge i byte grezzi di
+  // sandbot.db, sandbot.db-wal e sandbot.db-shm
+  it('dopo la migrazione + checkpoint TRUNCATE + VACUUM nessun file contiene la chiave', async () => {
+    const KEY = 'sk-finta-residui-42'
+    // la 16b scriveva il chiaro nel setting 'providers'
+    setSetting('providers', [{
+      id: 'vac', name: 'Vecchio', kind: 'openai', baseUrl: 'https://api.example.com',
+      apiKey: KEY, enabled: true
+    }])
+    // SANITY: prima della migrazione la chiave È nei file (è il problema reale)
+    expect(keyInDbFiles(KEY).length).toBeGreaterThan(0)
+    // il boot del daemon: migrazione (cifra e cambia il setting)…
+    const changed = await migrateProviderKeys()
+    expect(changed).toBe(true)
+    // …e la pulizia una volta sola
+    vacuumAfterKeyMigration(db(), changed)
+    expect(keyInDbFiles(KEY)).toEqual([])
+    // il flag la rende idempotente: ripeterla non fa niente (e non rompe nulla)
+    vacuumAfterKeyMigration(db(), true)
+    expect(keyInDbFiles(KEY)).toEqual([])
+    expect(getSetting<boolean>('providers.migrationVacuumed', false)).toBe(true)
+    // e la chiave sigillata c'è, il chiaro no
+    expect((storedProviders()[0] as StoredProvider).apiKeySealed).toBeDefined()
+    expect(getProvider('vac')?.apiKey).toBe(KEY)
+  })
+
+  it('senza migrazione né chiavi sigillate non tocca il database (flag spento)', () => {
+    setSetting('providers', [])
+    const broken = { exec: () => { throw new Error('must not run') } }
+    vacuumAfterKeyMigration(broken, false) // non lancia: non c'è niente da pulire
+    expect(getSetting<boolean>('providers.migrationVacuumed', false)).toBe(false)
+  })
+
+  it('se il VACUUM fallisce si logga SENZA dati e si riprova al prossimo avvio', async () => {
+    const KEY = 'sk-finta-vacuum-fail-7'
+    setSetting('providers', [{
+      id: 'vac2', name: 'Vecchio 2', kind: 'openai', baseUrl: 'https://api.example.com',
+      apiKey: KEY, enabled: true
+    }])
+    await migrateProviderKeys()
+    setSetting('providers.migrationVacuumed', false)
+    // un DB «occupato»: il checkpoint fallisce
+    const busy = {
+      exec: (sql: string) => {
+        if (sql.includes('checkpoint') || sql.includes('VACUUM')) throw new Error('database is locked')
+        return undefined
+      }
+    }
+    const errors: string[] = []
+    const orig = console.error
+    console.error = (...args: unknown[]) => { errors.push(args.join(' ')) }
+    try {
+      vacuumAfterKeyMigration(busy, true)
+    } finally {
+      console.error = orig
+    }
+    // flag NON scritto: si riprova al prossimo avvio; il log non porta dati
+    expect(getSetting<boolean>('providers.migrationVacuumed', false)).toBe(false)
+    expect(errors.join('\n')).not.toContain(KEY)
+    // al «prossimo avvio» il DB vero risponde: la pulizia riesce
+    vacuumAfterKeyMigration(db(), false)
+    expect(keyInDbFiles(KEY)).toEqual([])
+    expect(getSetting<boolean>('providers.migrationVacuumed', false)).toBe(true)
+  })
+})
+
+describe('R2.2 — saveProvider non butta il chiaro non ancora migrato', () => {
+  it('Portachiavi giù: si rinomina senza chiave nuova, si riavvia e si migra — la chiave c\'è ed è sigillata', async () => {
+    const KEY = 'sk-finta-sopravvive-99'
+    setSetting('providers', [{
+      id: 'keep', name: 'Prima', kind: 'openai', baseUrl: 'https://api.example.com',
+      apiKey: KEY, enabled: true
+    }])
+    // avvio col Portachiavi GIÙ: la migrazione non riesce, il chiaro resta
+    setProviderKeychainRunner(async () => ({ out: '', err: 'keychain down', code: 1 }))
+    expect(await migrateProviderKeys()).toBe(false)
+    expect((storedProviders()[0] as StoredProvider).apiKey).toBe(KEY)
+    // l'utente modifica nome e URL SENZA ridigitare la chiave
+    await saveProvider({
+      id: 'keep', name: 'Dopo', kind: 'openai', baseUrl: 'https://new.example.com', enabled: true
+    })
+    // R2.2: il chiaro sopravvive nel setting (prima spariva: chiave persa)
+    expect((storedProviders()[0] as StoredProvider).apiKey).toBe(KEY)
+    expect((storedProviders()[0] as StoredProvider).name).toBe('Dopo')
+    // «riavvio» col Portachiavi su: la migrazione riesce
+    setProviderKeychainRunner(undefined)
+    expect(await migrateProviderKeys()).toBe(true)
+    const raw = storedProviders()[0] as StoredProvider
+    expect(raw.apiKey).toBeUndefined()
+    expect(raw.apiKeySealed).toBeDefined()
+    expect(getProvider('keep')?.apiKey).toBe(KEY)
+  })
+
+  it('una chiave NUOVA scritta col Portachiavi giù non si salva; clearKey toglie anche il chiaro', async () => {
+    const KEY = 'sk-finta-vecchia-3'
+    setSetting('providers', [{
+      id: 'swap', name: 'Swap', kind: 'openai', baseUrl: 'https://api.example.com',
+      apiKey: KEY, enabled: true
+    }])
+    setProviderKeychainRunner(async () => ({ out: '', err: 'keychain down', code: 1 }))
+    // il chiaro sopravvive al salvataggio senza chiave…
+    await saveProvider({ id: 'swap', name: 'Swap', kind: 'openai', baseUrl: 'https://api.example.com', enabled: true })
+    expect((storedProviders()[0] as StoredProvider).apiKey).toBe(KEY)
+    // …clearKey lo toglie davvero
+    await saveProvider({ id: 'swap', name: 'Swap', kind: 'openai', baseUrl: 'https://api.example.com', enabled: true, clearKey: true })
+    const raw = storedProviders()[0] as StoredProvider
+    expect(raw.apiKey).toBeUndefined()
+    expect(raw.apiKeySealed).toBeUndefined()
+    setProviderKeychainRunner(undefined)
+  })
+})
+
+describe('R2.3 — providers:probe con { providerId } usa la chiave già salvata', () => {
+  it('senza apiKey nella richiesta prova con la chiave del provider (mai in risposta)', async () => {
+    await saveProvider({
+      id: 'saved', name: 'Salvato', kind: 'openai', baseUrl: `http://127.0.0.1:${port}/v1`,
+      enabled: true, apiKey: GOOD_KEY
+    })
+    // l'indirizzo è cambiato, la chiave NON è stata ridigitata: la prova usa
+    // quella in memoria nel daemon
+    const r = await (api['providers:probe']!([{ kind: 'openai', baseUrl: `http://127.0.0.1:${port}/v1`, providerId: 'saved' }]) as Promise<ProviderProbeResult>)
+    expect(r.ok).toBe(true)
+    expect(r.models).toEqual(['alpha', 'beta', 'gamma'])
+    expect(JSON.stringify(r)).not.toContain(GOOD_KEY)
+  })
+
+  it('l\'apiKey nella richiesta vince; un providerId senza chiave non inventa niente', async () => {
+    await saveProvider({
+      id: 'saved2', name: 'Salvato 2', kind: 'openai', baseUrl: `http://127.0.0.1:${port}/v1`,
+      enabled: true, apiKey: GOOD_KEY
+    })
+    // chiave SBAGLIATA nella richiesta: vince lei (invalid-key), mai la salvata
+    const wrong = await (api['providers:probe']!([{ kind: 'openai', baseUrl: `http://127.0.0.1:${port}/v1`, providerId: 'saved2', apiKey: 'sk-sbagliata-req' }]) as Promise<ProviderProbeResult>)
+    expect(wrong.ok).toBe(false)
+    expect(wrong.error).toBe('invalid-key')
+    // provider senza chiave salvata e senza apiKey: il server finto risponde 401
+    await saveProvider({ id: 'nokey', name: 'Senza chiave', kind: 'openai', baseUrl: `http://127.0.0.1:${port}/v1`, enabled: true })
+    const noKey = await (api['providers:probe']!([{ kind: 'openai', baseUrl: `http://127.0.0.1:${port}/v1`, providerId: 'nokey' }]) as Promise<ProviderProbeResult>)
+    expect(noKey.ok).toBe(false)
+    expect(noKey.error).toBe('invalid-key')
+    // un providerId che non esiste: prova senza chiave (non è un errore interno)
+    const ghost = await (api['providers:probe']!([{ kind: 'openai', baseUrl: `http://127.0.0.1:${port}/v1`, providerId: 'ghost' }]) as Promise<ProviderProbeResult>)
+    expect(ghost.ok).toBe(false)
+    expect(ghost.error).toBe('invalid-key')
   })
 })

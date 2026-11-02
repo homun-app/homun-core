@@ -13,7 +13,7 @@ import { describe, expect, it, beforeAll, afterAll, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { setDataDir, db, createAgent, updateAgent, appendEntry } from '../../main/store/db'
+import { setDataDir, db, createAgent, updateAgent, appendEntry, setSetting, getAgent } from '../../main/store/db'
 import { enqueueJob, getJobById, listJobs } from '../../main/store/jobs'
 import {
   createGroup, addGroupMessage, groupMessages, getGroupCursor, groupTurnByNonce, setGroupCursor,
@@ -46,6 +46,11 @@ interface Seen {
 
 /** Fixture: gruppo con Bot (il membro che riceve i turni) e Coordinatore. */
 function fixture() {
+  // fase 16c correzioni (R3): il giro di squadra risolve il modello con
+  // resolveAgentModel e l'elenco dei provider ATTIVI — il provider 'prov'
+  // dei bot deve esistere nello store, come nell'app vera
+  setSetting('providers', [{ id: 'prov', name: 'Prov', kind: 'openai', baseUrl: 'http://127.0.0.1:9', enabled: true }])
+  setSetting('models.main', null)
   const bot = createAgent('Cercatore Cena', 'Trova i ristoranti')
   updateAgent(bot.id, { providerId: 'prov', model: 'm1' })
   const coord = createAgent('Coordinatore', 'Assegna i compiti')
@@ -533,5 +538,117 @@ describe('correzione E2: il motivo del PASS senza pass esplicito nel registro', 
     const r2 = groupTurnByNonce((j2.payload as { nonce: string }).nonce)!
     expect(r2.outcome).toBe('PASS')
     expect(r2.reason).toBeFalsy()
+  })
+})
+
+// ---- fase 16c correzioni (R3): i bot «Come gli altri» parlano nelle squadre ----
+
+describe('R3 — i bot null/null nel giro di squadra', () => {
+  it('due membri null/null con models.main impostato: ENTRAMBI i turni partono col modello principale', async () => {
+    setSetting('providers', [{ id: 'mainprov', name: 'Main', kind: 'openai', baseUrl: 'http://127.0.0.1:9', enabled: true }])
+    setSetting('models.main', { providerId: 'mainprov', model: 'modello-a', thinking: null })
+    const bea = createAgent('Bea', 'Come gli altri')
+    const carlo = createAgent('Carlo', 'Come gli altri')
+    // null/null: il caso normale di ogni bot nuovo (nessun modello proprio)
+    const g = createGroup('Ufficio', 'Squadra di prova', bea.id, [bea.id, carlo.id], bea.id)
+    const u = addGroupMessage({ groupId: g.id, authorKind: 'user', authorId: null, authorName: 'Fabio', text: '@tutti ci siete?', depth: 0 })
+    const seen: Seen[] = []
+    await runGroupTurnJob(db(), deps(seen), jobFor(bea.id, g, u.id), emit)
+    await runGroupTurnJob(db(), deps(seen), jobFor(carlo.id, g, u.id), emit)
+    // prima della correzione entrambi finivano SKIPPED in silenzio
+    expect(seen.map((s) => s.agentId).sort()).toEqual([bea.id, carlo.id].sort())
+    // il modello lo decide il turno (runTurn → resolveAgentModel): qui si
+    // verifica la PURE — null/null + main → il principale
+    const { resolveAgentModel } = await import('../../shared/agent-model')
+    expect(resolveAgentModel(bea, { providerId: 'mainprov', model: 'modello-a', thinking: null },
+      [{ id: 'mainprov', enabled: true }])).toMatchObject({ providerId: 'mainprov', model: 'modello-a', followsMain: true })
+    // nessuna riga di sistema «senza modello»: il giro parla
+    expect(groupMessages(g.id).some((m) => m.author_kind === 'system')).toBe(false)
+  })
+
+  it('null/null SENZA models.main: SKIPPED ma con UNA riga di sistema visibile (mai un salto muto)', async () => {
+    setSetting('providers', [{ id: 'mainprov', name: 'Main', kind: 'openai', baseUrl: 'http://127.0.0.1:9', enabled: true }])
+    setSetting('models.main', null)
+    const solo = createAgent('Solo', 'Nessun modello')
+    const g = createGroup('Vuota', 'Squadra senza modelli', solo.id, [solo.id], solo.id)
+    const u = addGroupMessage({ groupId: g.id, authorKind: 'user', authorId: null, authorName: 'Fabio', text: '@tutti ci siete?', depth: 0 })
+    const seen: Seen[] = []
+    const events: SandbotEvent[] = []
+    const job = jobFor(solo.id, g, u.id)
+    await runGroupTurnJob(db(), deps(seen), job, (e) => events.push(e))
+    expect(seen).toEqual([]) // il turno non parte…
+    // …ma la squadra LO VEDE: riga di sistema col nome, emessa una volta
+    const rows = groupMessages(g.id).filter((m) => m.author_kind === 'system' && m.text.endsWith('has no model to answer with (no own model and no main model set).'))
+    expect(rows).toHaveLength(1)
+    expect(rows[0]!.text.startsWith('Solo')).toBe(true)
+    expect(events.some((e) => e.type === 'groups')).toBe(true)
+    // un secondo giro nello stesso turno NON ripete la riga (una per ora)
+    const job2 = enqueueJob(db(), {
+      agentId: solo.id, kind: 'group-turn',
+      payload: { groupId: g.id, memberId: solo.id, nonce: `g${g.id}:${solo.id}:again`, sourceMessageId: u.id },
+      runAt: 0, now: 0
+    })
+    await runGroupTurnJob(db(), deps(seen), job2, emit)
+    expect(groupMessages(g.id).filter((m) => m.author_kind === 'system')).toHaveLength(1)
+    // e l'esito nel registro è SKIPPED
+    expect(groupTurnByNonce((job.payload as { nonce: string }).nonce)?.outcome).toBe('SKIPPED')
+  })
+
+  it('R3.2 — SKIPPED spegne «Risponde X»: lo status thinking rimasto si azzera, con l\'evento alla UI', async () => {
+    setSetting('providers', [{ id: 'mainprov', name: 'Main', kind: 'openai', baseUrl: 'http://127.0.0.1:9', enabled: true }])
+    setSetting('models.main', null)
+    const spaesato = createAgent('Spaesato', 'Status rimasto acceso')
+    updateAgent(spaesato.id, { providerId: 'mainprov', model: 'tolto' }) // modello proprio su provider… main niente
+    // provider tolto dallo store E nessun main: turno SKIPPED
+    setSetting('providers', [])
+    updateAgent(spaesato.id, { status: 'thinking' }) // bar «Risponde X» accesa da un giro interrotto
+    const g = createGroup('Spera', 'Squadra', spaesato.id, [spaesato.id], spaesato.id)
+    const u = addGroupMessage({ groupId: g.id, authorKind: 'user', authorId: null, authorName: 'Fabio', text: 'ci sei?', depth: 0 })
+    const events: SandbotEvent[] = []
+    const seen: Seen[] = []
+    await runGroupTurnJob(db(), deps(seen), jobFor(spaesato.id, g, u.id), (e) => events.push(e))
+    expect(getAgent(spaesato.id)?.status).toBe('idle')
+    expect(events).toContainEqual({ type: 'status', agentId: spaesato.id, status: 'idle' })
+    // idempotente: un membro già idle non genera evento
+    const events2: SandbotEvent[] = []
+    const u2 = addGroupMessage({ groupId: g.id, authorKind: 'user', authorId: null, authorName: 'Fabio', text: 'e ora?', depth: 0 })
+    await runGroupTurnJob(db(), deps(seen), jobFor(spaesato.id, g, u2.id), (e) => events2.push(e))
+    expect(events2).not.toContainEqual({ type: 'status', agentId: spaesato.id, status: 'idle' })
+  })
+
+  it('R3.6 — il provider proprio sparito → si segue il principale: il turno PARTE', async () => {
+    setSetting('providers', [{ id: 'mainprov', name: 'Main', kind: 'openai', baseUrl: 'http://127.0.0.1:9', enabled: true }])
+    setSetting('models.main', { providerId: 'mainprov', model: 'modello-a', thinking: null })
+    const orfano = createAgent('Orfano', 'Modello su provider rimosso')
+    // modello proprio su un provider che NON c'è più (rimosso, non disattivato)
+    updateAgent(orfano.id, { providerId: 'andato', model: 'suo-modello' })
+    const g = createGroup('Rete', 'Squadra', orfano.id, [orfano.id], orfano.id)
+    const u = addGroupMessage({ groupId: g.id, authorKind: 'user', authorId: null, authorName: 'Fabio', text: 'avanti', depth: 0 })
+    const seen: Seen[] = []
+    await runGroupTurnJob(db(), deps(seen), jobFor(orfano.id, g, u.id), emit)
+    // prima della correzione: SKIPPED (o «provider not found» nel turno)
+    expect(seen).toHaveLength(1)
+    // il bot NON è migrato: tiene il suo providerId (se il provider torna, torna il suo modello)
+    expect(getAgent(orfano.id)?.providerId).toBe('andato')
+    expect(getAgent(orfano.id)?.model).toBe('suo-modello')
+    // la pure: ownModelMissing con il principale
+    const { resolveAgentModel } = await import('../../shared/agent-model')
+    expect(resolveAgentModel(getAgent(orfano.id)!, { providerId: 'mainprov', model: 'modello-a', thinking: null },
+      [{ id: 'mainprov', enabled: true }])).toMatchObject({ providerId: 'mainprov', model: 'modello-a', followsMain: true, ownModelMissing: true })
+  })
+
+  it('R3.6 — provider proprio DISATTIVATO: stessa regola (si segue il principale)', async () => {
+    setSetting('providers', [
+      { id: 'mainprov', name: 'Main', kind: 'openai', baseUrl: 'http://127.0.0.1:9', enabled: true },
+      { id: 'spento', name: 'Spento', kind: 'openai', baseUrl: 'http://127.0.0.1:9', enabled: false }
+    ])
+    setSetting('models.main', { providerId: 'mainprov', model: 'modello-a', thinking: null })
+    const orfano2 = createAgent('Orfano 2', 'Modello su provider disattivato')
+    updateAgent(orfano2.id, { providerId: 'spento', model: 'suo-modello' })
+    const g = createGroup('Rete 2', 'Squadra', orfano2.id, [orfano2.id], orfano2.id)
+    const u = addGroupMessage({ groupId: g.id, authorKind: 'user', authorId: null, authorName: 'Fabio', text: 'avanti', depth: 0 })
+    const seen: Seen[] = []
+    await runGroupTurnJob(db(), deps(seen), jobFor(orfano2.id, g, u.id), emit)
+    expect(seen).toHaveLength(1)
   })
 })

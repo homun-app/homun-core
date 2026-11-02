@@ -1252,10 +1252,22 @@ export async function executeTool(
         // verifica non disponibile: sotto col ripiego, i modelli del creatore
       }
       if (!followsMain && !model) {
+        // fase 16c correzioni (R3.3): il ripiego sul modello del CREATORE
+        // passa da resolveAgentModel (main = null: qui interessa SOLO il
+        // modello proprio) — con l'elenco dei provider attivi la copia avviene
+        // solo se il provider del creatore è ancora collegato (regola R3.6:
+        // provider, modello e credenziale vincono insieme); se no il figlio
+        // nasce null/null e segue il principale, come un bot nuovo
+        const { resolveAgentModel } = await import('../../shared/agent-model')
         const creator = dbMod.getAgent(agentId)
-        if (creator?.providerId && creator.model) {
-          providerId = creator.providerId
-          model = creator.model
+        const resolvedCreator = resolveAgentModel(
+          creator ?? {},
+          null,
+          dbMod.listProviders().map((x) => ({ id: x.id, enabled: x.enabled }))
+        )
+        if (resolvedCreator && !resolvedCreator.followsMain) {
+          providerId = resolvedCreator.providerId
+          model = resolvedCreator.model
         }
       }
       if (!followsMain && providerId && model) dbMod.updateAgent(created.id, { providerId, model })

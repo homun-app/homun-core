@@ -8,7 +8,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
-import { X, ChevronDown, MoreHorizontal } from 'lucide-react'
+import { X, ChevronDown, MoreHorizontal, Plus } from 'lucide-react'
 import { api, useStore } from '../store'
 import { formatDate, formatTime } from '../lib/i18n'
 import type { UiLanguageSetting } from '../../../shared/ui-language'
@@ -27,6 +27,10 @@ import { modelDefaultsFor } from '../../../main/agent/model-defaults'
 import { MAX_CHAIN_ENTRIES } from '../../../main/agent/model-fallback'
 // fase 16c (C3.4): i base URL noti e la prova «vale solo l'ultima»
 import { KNOWN_BASE_URLS, isLocalKind } from '../../../main/agent/live-models'
+// fase 16c correzioni (R5): il POSTO fisico di un provider (host, non kind) e
+// la valuta nella lingua dell'interfaccia
+import { providerPlace } from '../../../shared/network-host'
+import { fmtUsd as fmtUsdIn } from '../lib/fmt'
 import { nextModelProbe, EMPTY_MODEL_PROBE, type ModelProbeState } from '../lib/model-probe'
 // fase 18b (H5.3): il selettore del modello a combobox
 import { ModelPicker, THINKING_LABELS } from './ui/ModelPicker'
@@ -72,7 +76,7 @@ export function Settings() {
 
   return (
     <Dialog open onOpenChange={(o) => !o && setSettingsOpen(false)}>
-      <DialogContent className="flex h-[620px] max-h-[92vh] max-w-[calc(100%-2rem)] gap-0 p-0 sm:max-w-4xl" showCloseButton={false}>
+      <DialogContent className="flex h-[min(760px,calc(100vh-48px))] w-[min(1080px,calc(100vw-48px))] max-w-[calc(100vw-48px)] gap-0 p-0" showCloseButton={false}>
         <DialogTitle className="sr-only"><Trans>Impostazioni</Trans></DialogTitle>
         {/* fase 16c (C2): colonna di sezioni a sinistra, testo semplice,
             selezione su bg-muted, NESSUN bordo */}
@@ -88,7 +92,7 @@ export function Settings() {
             </button>
           ))}
         </nav>
-        <div className="relative min-w-0 flex-1 overflow-y-auto scroll-thin">
+        <div className="@container relative min-w-0 flex-1 overflow-y-auto scroll-thin">
           {/* la ✕ tonda in alto a destra (Esc chiude, come sempre nel Dialog) */}
           <button
             className="absolute right-5 top-4 z-10 grid size-9 place-items-center rounded-full bg-muted text-muted-foreground transition hover:text-foreground"
@@ -145,7 +149,15 @@ function ModelsTab({ onOpenUsage }: { onOpenUsage(): void }) {
   const [tests, setTests] = useState<Record<string, TestOutcome>>({})
   const [testing, setTesting] = useState<string | null>(null)
   const [monthCost, setMonthCost] = useState<number | null>(null)
+  // fase 16c correzioni (R5.2): il costo del mese PER PROVIDER — la stessa
+  // aggregate 'model' (le righe portano providerId) si somma per provider
+  const [providerCosts, setProviderCosts] = useState<Record<string, number>>({})
   const [editing, setEditing] = useState<ProviderPublic | null>(null)
+  // R6.2: «+ Aggiungi un modello» aperto sotto «Collegati» (colonna singola)
+  const [addOpen, setAddOpen] = useState(false)
+  const { i18n } = useLingui()
+  const locale = i18n.locale
+  const usd = (n: number): string => fmtUsdIn(n, locale)
 
   // lo stato arriva dall'ultimo providers:test, rifatto all'apertura senza bloccare
   const runTests = (): void => {
@@ -162,11 +174,14 @@ function ModelsTab({ onOpenUsage }: { onOpenUsage(): void }) {
   }, [providers.length])
   useEffect(() => {
     void api.usageSummary(monthStart(), undefined, 'model')
-      .then((rows) => setMonthCost(rows.reduce((a, r) => a + (r.costUsd ?? 0), 0)))
+      .then((rows) => {
+        setMonthCost(rows.reduce((a, r) => a + (r.costUsd ?? 0), 0))
+        const byProvider: Record<string, number> = {}
+        for (const r of rows) byProvider[r.providerId] = (byProvider[r.providerId] ?? 0) + (r.costUsd ?? 0)
+        setProviderCosts(byProvider)
+      })
       .catch(() => setMonthCost(null))
   }, [])
-
-  const fmtUsd = (n: number): string => '$' + (n >= 1 ? n.toFixed(2) : n.toFixed(3)).replace('.', ',')
   const retry = (id: string): void => {
     setTesting(id)
     void api.testProvider(id)
@@ -184,33 +199,66 @@ function ModelsTab({ onOpenUsage }: { onOpenUsage(): void }) {
         </p>
       </div>
 
-      <div className="flex flex-col gap-4 lg:flex-row">
+      {/* fase 16c correzioni (R6.2): le colonne si decidono dal CONTENUTO
+          della sezione (@container): affiancate da 820 px, sotto una sola —
+          in cima a «Collegati» il bottone «+ Aggiungi un modello» che apre le
+          stesse tre strade QUI sotto e si richiude */}
+      <div className="flex flex-col gap-4 @[820px]:flex-row">
         <div className="min-w-0 flex-1 space-y-6">
           {/* C3.1 — Collegati */}
           <section>
             <p className="mb-1 text-[13px] text-muted-foreground"><Trans>Collegati</Trans></p>
+            <button
+              className="mb-2 flex w-full items-center gap-2 rounded-[14px] bg-muted/60 px-3 py-2 text-left text-sm transition hover:bg-muted @[820px]:hidden"
+              aria-expanded={addOpen}
+              onClick={() => setAddOpen((v) => !v)}
+            >
+              <Plus className="size-4 shrink-0" />
+              <span className="min-w-0 flex-1"><Trans>Aggiungi un modello</Trans></span>
+              <ChevronDown className={`size-4 shrink-0 transition-transform ${addOpen ? 'rotate-180' : ''}`} />
+            </button>
+            {addOpen && (
+              <div className="mb-3 @[820px]:hidden">
+                <AddModelRail
+                  onSaved={() => {
+                    void refreshProviders()
+                    runTests()
+                  }}
+                />
+              </div>
+            )}
             {providers.length === 0 && (
-              <p className="py-3 text-sm text-muted-foreground"><Trans>Nessun modello collegato: comincia da qui a destra.</Trans></p>
+              <p className="py-3 text-sm text-muted-foreground"><Trans>Nessun modello collegato: comincia da qui sopra.</Trans></p>
             )}
             {providers.map((p) => {
               const outcome = tests[p.id]
-              const local = p.discovered || isLocalKind(p.kind)
+              // fase 16c correzioni (R5.1): il posto lo decide l'HOST del
+              // baseUrl (mac | rete | internet), non discovered né il kind
+              const place = providerPlace(p)
               const modelsCount = outcome?.models?.length
+              const cost = providerCosts[p.id]
               return (
-                <div key={p.id} className="flex items-center gap-3.5 py-2.5">
+                <div key={p.id} className="flex items-center gap-3.5 py-2.5" title={p.name}>
                   <span className="grid size-11 shrink-0 place-items-center rounded-[12px] bg-muted text-base font-bold">
                     {p.name.slice(0, 1).toUpperCase()}
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="block text-[15px]">{p.name}</span>
+                    {/* R6.3: il nome su UNA riga, troncato con «…» (intero nel
+                        title della riga); la mezza riga troncata su una riga */}
+                    <span className="block truncate text-[15px]">{p.name}</span>
                     <span className="block truncate text-[13px] text-muted-foreground">
-                      {local
-                        ? <Trans>Trovato da solo · {modelsCount ?? '…'} modelli · gratis e privato</Trans>
-                        : <Trans>Chiave API · a consumo{monthCost !== null ? ` · ${fmtUsd(monthCost)} ` : ''}{monthCost !== null ? <Trans>questo mese</Trans> : ''}</Trans>}
+                      {place === 'mac'
+                        ? <Trans>Sul tuo Mac · {modelsCount ?? '…'} modelli · gratis e privato</Trans>
+                        : place === 'rete'
+                          // rete: i dati escono dal Mac — NON si dice «privato»
+                          ? <Trans>Sulla tua rete · {modelsCount ?? '…'} modelli</Trans>
+                          : p.hasKey
+                            ? <Trans>Chiave API · a consumo{cost !== undefined ? ` · ${usd(cost)} ` : ''}{cost !== undefined ? <Trans>questo mese</Trans> : ''}</Trans>
+                            : <Trans>Server esterno</Trans>}
                     </span>
                   </span>
                   {outcome === undefined ? (
-                    <span className="text-[13px] text-muted-foreground">…</span>
+                    <span className="shrink-0 text-[13px] text-muted-foreground">…</span>
                   ) : outcome.ok ? (
                     <span className="shrink-0 text-[14px] text-chart-2"><Trans>Collegato</Trans></span>
                   ) : (
@@ -256,7 +304,8 @@ function ModelsTab({ onOpenUsage }: { onOpenUsage(): void }) {
           </section>
 
           <button className="text-sm text-primary transition hover:underline" onClick={onOpenUsage}>
-            {monthCost !== null ? <Trans>Uso e costi: {fmtUsd(monthCost)} questo mese ›</Trans> : <Trans>Uso e costi ›</Trans>}
+            {/* R5.2: la riga in fondo resta il TOTALE del mese (tutti i provider) */}
+            {monthCost !== null ? <Trans>Uso e costi: {usd(monthCost)} questo mese ›</Trans> : <Trans>Uso e costi ›</Trans>}
           </button>
 
           {/* fase 15 (S5): la ricerca web e i default per provider restano qui
@@ -271,13 +320,16 @@ function ModelsTab({ onOpenUsage }: { onOpenUsage(): void }) {
           </details>
         </div>
 
-        {/* C3.4 — Aggiungi un modello */}
-        <AddModelRail
-          onSaved={() => {
-            void refreshProviders()
-            runTests()
-          }}
-        />
+        {/* C3.4 — Aggiungi un modello: colonna a destra da 820 px del
+            contenuto (R6.2); sotto, il bottone in cima a «Collegati» */}
+        <div className="hidden shrink-0 @[820px]:block @[820px]:w-[360px]">
+          <AddModelRail
+            onSaved={() => {
+              void refreshProviders()
+              runTests()
+            }}
+          />
+        </div>
       </div>
 
       {editing && (
@@ -294,50 +346,73 @@ function ModelsTab({ onOpenUsage }: { onOpenUsage(): void }) {
   )
 }
 
-/** C3.2.1 — «Il cervello dei bot»: models.main, selettore provider·modello. */
+/**
+ * C3.2.1 — «Il cervello dei bot». Fase 16c correzioni (R6.4): UN solo
+ * selettore «provider · modello» (niente più campo di testo libero), con le
+ * voci di models:list di TUTTI i provider attivi e le capacità accanto
+ * («vede · ragiona»); sotto, «Ragionamento» solo se il modello ha livelli.
+ */
 function MainModelRow() {
   const { t, i18n } = useLingui()
   const providers = useStore((s) => s.providers)
   const mainModel = useStore((s) => s.mainModel)
   const setMainModel = useStore((s) => s.setMainModel)
-  const [models, setModels] = useState<ModelInfo[]>([])
+  // i modelli di TUTTI i provider attivi (un selettore solo, nessun cambio
+  // di provider a parte); chiave `providerId::modelId`
+  const active = providers.filter((p) => p.enabled)
+  const [byProvider, setByProvider] = useState<Record<string, ModelInfo[]>>({})
   useEffect(() => {
-    if (mainModel?.providerId) void api.listModels(mainModel.providerId).then(setModels).catch(() => setModels([]))
-    else setModels([])
-  }, [mainModel?.providerId])
-  const chosen = models.find((m) => m.id === mainModel?.model)
-  const levels = chosen?.thinkingLevels ?? []
+    let alive = true
+    for (const p of active) {
+      if (byProvider[p.id]) continue
+      void api.listModels(p.id)
+        .then((ms) => { if (alive) setByProvider((prev) => ({ ...prev, [p.id]: ms })) })
+        .catch(() => { if (alive) setByProvider((prev) => ({ ...prev, [p.id]: [] })) })
+    }
+    return () => { alive = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [providers])
+  /** le capacità accanto al nome del modello («vede · ragiona») */
+  const capsOf = (m: ModelInfo): string => {
+    const caps: string[] = []
+    if (m.vision === true) caps.push(i18n._(msg`vede`))
+    if (m.thinkingLevels.length > 0) caps.push(i18n._(msg`ragiona`))
+    return caps.length ? ` · ${caps.join(' · ')}` : ''
+  }
+  const entries = active.flatMap((p) =>
+    (byProvider[p.id] ?? []).map((m) => ({ key: `${p.id}::${m.id}`, p, m }))
+  )
+  const value = mainModel?.providerId && mainModel.model ? `${mainModel.providerId}::${mainModel.model}` : ''
+  const chosen = entries.find((e) => e.key === value)
+  const levels = chosen?.m.thinkingLevels ?? []
+  const providerName = (id: string): string => providers.find((p) => p.id === id)?.name ?? id
   return (
     <div className="flex flex-wrap items-center gap-3 py-2.5">
       <span className="min-w-0 flex-1 text-[15px]"><Trans>Il cervello dei bot</Trans></span>
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
         <select
-          className="h-9 rounded-full bg-muted px-3 text-sm outline-none"
-          value={mainModel?.providerId ?? ''}
-          aria-label={t`Provider`}
+          className="h-9 max-w-full truncate rounded-full bg-muted px-3 text-sm outline-none"
+          value={value}
+          aria-label={t`Provider e modello`}
           onChange={(e) => {
-            const p = providers.find((x) => x.id === e.target.value)
-            void setMainModel({ providerId: e.target.value, model: p ? (modelDefaultsFor(p).defaultModel ?? '') : '', thinking: null })
+            if (!e.target.value) {
+              void setMainModel(null)
+              return
+            }
+            const [providerId, modelId] = e.target.value.split('::')
+            void setMainModel({ providerId: providerId ?? '', model: modelId ?? '', thinking: null })
           }}
         >
-          <option value="">{t`— provider —`}</option>
-          {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          <option value="">{t`— provider · modello —`}</option>
+          {/* il valore attuale resta scegliibile anche mentre models:list
+              carica (o se il provider non risponde) */}
+          {value && !chosen && mainModel && (
+            <option value={value}>{`${providerName(mainModel.providerId)} · ${mainModel.model}`}</option>
+          )}
+          {entries.map((e) => (
+            <option key={e.key} value={e.key}>{`${e.p.name} · ${e.m.label ?? e.m.id}${capsOf(e.m)}`}</option>
+          ))}
         </select>
-        <ModelPicker
-          className="h-9 min-w-44"
-          models={models}
-          value={mainModel?.model ?? ''}
-          placeholder={t`modello…`}
-          disabled={!mainModel?.providerId}
-          onChange={(m) => mainModel && void setMainModel({ ...mainModel, model: m ?? '' })}
-        />
-        {chosen && (chosen.vision === true || levels.length > 0) && (
-          <span className="text-xs text-muted-foreground">
-            {chosen.vision === true ? <Trans>vede</Trans> : null}
-            {chosen.vision === true && levels.length > 0 ? ' · ' : ''}
-            {levels.length > 0 ? <Trans>ragiona</Trans> : null}
-          </span>
-        )}
         {levels.length > 0 && (
           <select
             className="h-9 rounded-full bg-muted px-3 text-xs outline-none"
@@ -409,6 +484,40 @@ function EditProviderSheet({ provider, onClose, onSaved }: { provider: ProviderP
   const [key, setKey] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  // fase 16c correzioni (R2.3): la prova nel foglio «Modifica» — se l'utente
+  // cambia l'indirizzo senza ridigitare la chiave, la prova usa quella GIÀ
+  // SALVATA del provider (providerId: la chiave non torna mai indietro)
+  const [probe, setProbe] = useState<ModelProbeState>(EMPTY_MODEL_PROBE)
+  const probeRevision = useRef(0)
+  const probeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    if (probeTimer.current) clearTimeout(probeTimer.current)
+    const url = baseUrl.trim()
+    if (!/^https?:\/\//.test(url)) { setProbe(EMPTY_MODEL_PROBE); return }
+    probeTimer.current = setTimeout(() => {
+      const revision = ++probeRevision.current
+      setProbe((s) => nextModelProbe(s, { type: 'start', revision }, probeRevision.current))
+      void api.probeProvider({
+        kind: provider.kind,
+        baseUrl: url,
+        providerId: provider.id,
+        ...(key.trim() ? { apiKey: key.trim() } : {})
+      })
+        .then((r) => setProbe((s) => nextModelProbe(
+          s,
+          r.ok
+            ? { type: 'result', revision, ok: true, models: r.models ?? [] }
+            : { type: 'result', revision, ok: false, error: r.error ?? 'error' },
+          probeRevision.current
+        )))
+        .catch(() => setProbe((s) => nextModelProbe(s, { type: 'result', revision, ok: false, error: 'unreachable' }, probeRevision.current)))
+    }, 400)
+    return () => { if (probeTimer.current) clearTimeout(probeTimer.current) }
+  }, [baseUrl, key, provider.id, provider.kind])
+  const probeErrorText = (code: string): string =>
+    code === 'invalid-key' ? t`La chiave non è valida`
+      : code === 'unreachable' ? t`Il servizio non risponde`
+        : t`La prova non è riuscita`
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-foreground/20 p-4" onClick={onClose}>
       <div className="w-full max-w-md space-y-3 rounded-3xl bg-card p-5 shadow-soft" onClick={(e) => e.stopPropagation()}>
@@ -422,6 +531,12 @@ function EditProviderSheet({ provider, onClose, onSaved }: { provider: ProviderP
             <input className="mt-1.5 w-full rounded-[12px] bg-muted px-3 py-2 text-sm outline-none" placeholder={t`Base URL`} value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
           )}
         </div>
+        {/* R2.3: l'esito della prova (con la chiave salvata se non se ne digita una nuova) */}
+        {probe.probing && <p className="text-[13px] text-muted-foreground"><Trans>Provo l'indirizzo…</Trans></p>}
+        {probe.ok === true && (
+          <p className="text-[14px] text-chart-2"><Trans>✓ Funziona · {probe.models.length} modelli disponibili</Trans></p>
+        )}
+        {probe.ok === false && <p className="text-[14px] text-destructive">{probeErrorText(probe.error ?? 'error')}</p>}
         {/* C1: la chiave non si rilegge MAI — solo il suggerimento «•••• a1b2» */}
         {provider.hasKey ? (
           <div className="space-y-1.5">
@@ -491,6 +606,8 @@ function AddModelRail({ onSaved }: { onSaved(): void }) {
   // — sul Mac —
   const [scanning, setScanning] = useState(false)
   const [found, setFound] = useState<ProviderPublic[] | null>(null)
+  // fase 16c correzioni (R1): la scansione fallita si vede (non è «vuoto»)
+  const [scanError, setScanError] = useState(false)
   // — chiave API / altro server —
   const [kind, setKind] = useState<ProviderKind>('anthropic')
   const [showOtherKinds, setShowOtherKinds] = useState(false)
@@ -558,7 +675,7 @@ function AddModelRail({ onSaved }: { onSaved(): void }) {
   }
 
   return (
-    <div className="w-full shrink-0 space-y-3 rounded-3xl bg-muted p-5 lg:w-[380px]">
+    <div className="w-full shrink-0 space-y-3 rounded-3xl bg-muted p-5">
       <strong><Trans>Aggiungi un modello</Trans></strong>
       <div role="radiogroup" aria-label={t`Come`} className="flex flex-col gap-1">
         {railButton('mac', msg`Sul tuo Mac`, msg`Ollama, LM Studio · gratis, nessun dato esce`)}
@@ -574,14 +691,20 @@ function AddModelRail({ onSaved }: { onSaved(): void }) {
             onClick={() => {
               setScanning(true)
               setFound(null)
+              setScanError(false)
               void api.discoverProviders()
                 .then((list) => setFound(list.filter((p) => p.discovered)))
-                .catch(() => setFound([]))
+                .catch(() => setScanError(true))
                 .finally(() => setScanning(false))
             }}
           >
             {scanning ? <Trans>Cerco…</Trans> : <Trans>Cerca sul Mac</Trans>}
           </button>
+          {/* fase 16c correzioni (R1): un RPC fallito non è «non ho trovato
+              niente» — riga d'errore in parole, il Riprova è il bottone stesso */}
+          {scanError && (
+            <p className="text-[13px] text-muted-foreground"><Trans>Non riesco a cercare sul Mac: riprova.</Trans></p>
+          )}
           {found !== null && (found.length > 0 ? (
             <ul className="space-y-1 text-sm">
               {found.map((p) => <li key={p.id} className="rounded-xl bg-card px-3 py-1.5">{p.name}</li>)}
@@ -1122,7 +1245,8 @@ function UsageTab() {
   useEffect(refresh, [period, view])
 
   const fmtInt = (n: number): string => n.toLocaleString(i18n.locale === 'en' ? 'en' : 'it')
-  const fmtUsd = (n: number): string => '$' + (n >= 1 ? n.toFixed(2) : n.toFixed(3)).replace('.', ',')
+  // fase 16c correzioni (R5.3): la valuta nella lingua dell'interfaccia
+  const fmtUsd = (n: number): string => fmtUsdIn(n, i18n.locale)
 
   const totalCalls = rows.reduce((a, r) => a + r.calls, 0)
   const totalIn = rows.reduce((a, r) => a + r.input, 0)

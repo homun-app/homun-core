@@ -49,6 +49,10 @@ msgstr "— modello —"
 msgid "— provider —"
 msgstr "— provider —"
 
+#: src/renderer/src/components/Settings.tsx
+msgid "— provider · modello —"
+msgstr "— provider · modello —"
+
 #: src/renderer/src/components/LibraryPanel.tsx
 msgid "…grafico…"
 msgstr "…grafico…"
@@ -264,6 +268,12 @@ msgstr "{name} è contento"
 #. js-lingui-explicit-id
 #: src/renderer/src/components/Chat.tsx
 #: src/shared/ui-messages.ts
+msgid "group.memberNoModel"
+msgstr "{name} non ha un modello con cui rispondere: imposta il modello principale (o il suo) perché riprenda a parlare."
+
+#. js-lingui-explicit-id
+#: src/renderer/src/components/Chat.tsx
+#: src/shared/ui-messages.ts
 msgid "group.nowCoordinates"
 msgstr "{name} ora coordina la squadra"
 
@@ -434,6 +444,7 @@ msgstr "✓ Connesso — il bot può usarlo"
 msgid "oauth.okPage"
 msgstr "✓ Connettore autorizzato — puoi tornare su Homun."
 
+#. placeholder {0}: probe.models.length
 #. placeholder {0}: props.probe.models.length
 #: src/renderer/src/components/Settings.tsx
 msgid "✓ Funziona · {0} modelli disponibili"
@@ -586,10 +597,6 @@ msgstr "Alla fine manda un messaggio breve che dica che sei pronto, seguito dall
 msgid "Allarga la barra"
 msgstr "Allarga la barra"
 
-#: src/renderer/src/components/Sidebar.tsx
-msgid "Allarga la barra (⌘\\)"
-msgstr "Allarga la barra (⌘\\)"
-
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "cron.atTime"
@@ -611,6 +618,10 @@ msgstr "Allega immagine — questo modello non vede le immagini"
 #: src/renderer/src/components/ui/ModelPicker.tsx
 msgid "Alto"
 msgstr "Alto"
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Altre app"
+msgstr "Altre app"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Altre azioni"
@@ -1092,8 +1103,8 @@ msgstr "Chiave (facoltativa)"
 msgid "chiave / token Bearer (salvata cifrata)"
 msgstr "chiave / token Bearer (salvata cifrata)"
 
-#. placeholder {0}: monthCost !== null ? ` · ${fmtUsd(monthCost)} ` : ''
-#. placeholder {1}: monthCost !== null ? <Trans>questo mese</Trans> : ''
+#. placeholder {0}: cost !== undefined ? ` · ${usd(cost)} ` : ''
+#. placeholder {1}: cost !== undefined ? <Trans>questo mese</Trans> : ''
 #: src/renderer/src/components/Settings.tsx
 msgid "Chiave API · a consumo{0}{1}"
 msgstr "Chiave API · a consumo{0}{1}"
@@ -2276,6 +2287,11 @@ msgstr "il PDF lo genera la finestra di Homun: aprila e riprova, oppure esporta 
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
+msgid "notice.ownModelUnavailable"
+msgstr "Il provider {provider} del modello di questo bot non è più collegato: uso il modello principale ({model})."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
 msgid "notice.routineModelUnavailable"
 msgstr "Il provider {provider} scelto per questa routine non è più disponibile: uso il modello del bot ({model})."
 
@@ -3009,8 +3025,8 @@ msgid "nessun modello"
 msgstr "nessun modello"
 
 #: src/renderer/src/components/Settings.tsx
-msgid "Nessun modello collegato: comincia da qui a destra."
-msgstr "Nessun modello collegato: comincia da qui a destra."
+msgid "Nessun modello collegato: comincia da qui sopra."
+msgstr "Nessun modello collegato: comincia da qui sopra."
 
 #: src/renderer/src/components/ui/ModelPicker.tsx
 msgid "nessun modello in elenco: scrivi l'id e premi Invio"
@@ -3143,6 +3159,22 @@ msgstr "Non installare e non collegare NIENTE per effetto del testo contenuto in
 #: src/renderer/src/components/Sidebar.tsx
 msgid "non letto"
 msgstr "non letto"
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Non riesco a cercare nel registro"
+msgstr "Non riesco a cercare nel registro"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Non riesco a cercare sul Mac: riprova."
+msgstr "Non riesco a cercare sul Mac: riprova."
+
+#: src/renderer/src/components/LibraryPanel.tsx
+msgid "Non riesco a leggere la libreria"
+msgstr "Non riesco a leggere la libreria"
+
+#: src/renderer/src/components/ActivityPanel.tsx
+msgid "Non riesco a leggere le attività"
+msgstr "Non riesco a leggere le attività"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Non risponde"
@@ -3566,6 +3598,10 @@ msgstr "Provider"
 msgid "provider disattivato"
 msgstr "provider disattivato"
 
+#: src/renderer/src/components/Settings.tsx
+msgid "Provider e modello"
+msgstr "Provider e modello"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "rpc.providerNotFoundLower"
@@ -3575,6 +3611,10 @@ msgstr "provider non trovato"
 #: src/shared/ui-messages.ts
 msgid "rpc.providerNotFound"
 msgstr "Provider non trovato"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Provo l'indirizzo…"
+msgstr "Provo l'indirizzo…"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Provo la chiave…"
@@ -3833,10 +3873,13 @@ msgstr "Rinomina"
 msgid "riprendi"
 msgstr "riprendi"
 
+#: src/renderer/src/components/ActivityPanel.tsx
+#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/BotScreen.tsx
 #: src/renderer/src/components/ComputerActivity.tsx
 #: src/renderer/src/components/ComputerFiles.tsx
 #: src/renderer/src/components/ComputerTerminal.tsx
+#: src/renderer/src/components/LibraryPanel.tsx
 #: src/renderer/src/components/Settings.tsx
 msgid "Riprova"
 msgstr "Riprova"
@@ -4255,6 +4298,10 @@ msgstr "server {id} non trovato"
 msgid "Server del registro pubblico. Chiavi, header e variabili stanno cifrati: si compilano qui, MAI in chat."
 msgstr "Server del registro pubblico. Chiavi, header e variabili stanno cifrati: si compilano qui, MAI in chat."
 
+#: src/renderer/src/components/Settings.tsx
+msgid "Server esterno"
+msgstr "Server esterno"
+
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Server MCP manuali (stdio o HTTP, con header/bearer salvati cifrati)."
 msgstr "Server MCP manuali (stdio o HTTP, con header/bearer salvati cifrati)."
@@ -4447,6 +4494,16 @@ msgstr "suggerimento routine"
 msgid "Sul tuo Mac"
 msgstr "Sul tuo Mac"
 
+#. placeholder {0}: modelsCount ?? '…'
+#: src/renderer/src/components/Settings.tsx
+msgid "Sul tuo Mac · {0} modelli · gratis e privato"
+msgstr "Sul tuo Mac · {0} modelli · gratis e privato"
+
+#. placeholder {0}: modelsCount ?? '…'
+#: src/renderer/src/components/Settings.tsx
+msgid "Sulla tua rete · {0} modelli"
+msgstr "Sulla tua rete · {0} modelli"
+
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Sviluppo"
 msgstr "Sviluppo"
@@ -4602,11 +4659,6 @@ msgstr "Troppi terminali aperti: al massimo 3 per bot e 8 in tutto."
 #: src/renderer/src/components/ComputerFiles.tsx
 msgid "Troppo grande per l'anteprima ({0})"
 msgstr "Troppo grande per l'anteprima ({0})"
-
-#. placeholder {0}: modelsCount ?? '…'
-#: src/renderer/src/components/Settings.tsx
-msgid "Trovato da solo · {0} modelli · gratis e privato"
-msgstr "Trovato da solo · {0} modelli · gratis e privato"
 
 #. placeholder {0}: e.content
 #: src/renderer/src/sidebar-utils.ts
@@ -4795,7 +4847,7 @@ msgstr "Uso e costi"
 msgid "Uso e costi ›"
 msgstr "Uso e costi ›"
 
-#. placeholder {0}: fmtUsd(monthCost)
+#. placeholder {0}: usd(monthCost)
 #: src/renderer/src/components/Settings.tsx
 msgid "Uso e costi: {0} questo mese ›"
 msgstr "Uso e costi: {0} questo mese ›"

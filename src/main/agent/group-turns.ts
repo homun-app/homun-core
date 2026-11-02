@@ -83,6 +83,26 @@ export function parseCoordinatorNowText(text: string): string | null {
 }
 
 /**
+ * Fase 16c correzioni (R3): la riga di sistema quando il turno di un membro
+ * finisce SKIPPED perché non c'è NESSUN modello (né suo né principale). Stessa
+ * convenzione del coordinatore: inglese col nome in coda, la vista riconosce
+ * il suffisso e la mostra nella lingua attiva (id group.memberNoModel).
+ */
+export const GROUP_MEMBER_NO_MODEL_SUFFIX = ' has no model to answer with (no own model and no main model set).'
+
+/** Il testo inglese della riga «X non ha un modello con cui rispondere». */
+export function memberNoModelText(name: string): string {
+  return `${name}${GROUP_MEMBER_NO_MODEL_SUFFIX}`
+}
+
+/** Il nome dalla riga di sistema del membro senza modello (null se non è quella riga). */
+export function parseMemberNoModelText(text: string): string | null {
+  if (!text.endsWith(GROUP_MEMBER_NO_MODEL_SUFFIX)) return null
+  const name = text.slice(0, -GROUP_MEMBER_NO_MODEL_SUFFIX.length)
+  return name || null
+}
+
+/**
  * La regola dei turni di gruppo (fase 10, punto 4): accompagna OGNI apertura
  * di turno — quando parlare, quando tacere, cosa non portare mai nel gruppo.
  * Correzione E1 (terzo giro): la prima riga dice COME si scrive — nel gruppo

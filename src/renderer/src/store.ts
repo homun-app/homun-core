@@ -1,6 +1,9 @@
 // State renderer: agenti, transcript dell'agente attivo, eventi dal main.
+import { useMemo } from 'react'
 import { create } from 'zustand'
 import type { Agent, TranscriptEntry, SandbotEvent, ProviderConfig, ProviderPublic, PermissionsConfig, ConnectorInfo, TaskInfo, GroupInfo, GroupMessageInfo, SubagentInfo, AgentAvatar, TurnEnd, ScreenStatus, MainModel } from '../../shared/types'
+// fase 16c correzioni (R4): la regola del modello risolto, condivisa col daemon
+import { resolveAgentModel, type ResolvedAgentModel } from '../../shared/agent-model'
 
 /** Fase 19b (T1): le schede del pannello «Computer» del bot. */
 export type ComputerTab = 'screen' | 'terminal' | 'files' | 'activity'
@@ -197,7 +200,7 @@ interface Store {
   activityOpen: boolean
   setActivityOpen(v: boolean): void
   /** fase 16c (C3.2): cambia il modello principale e ricarica i bot che lo seguono */
-  setMainModel(m: MainModel): Promise<void>
+  setMainModel(m: MainModel | null): Promise<void>
   /** fase 16c: apre il pannello del bot su una scheda data (Routine dalle Impostazioni) */
   openBotTab(tab: 'profile' | 'computer' | 'routines' | 'advanced'): void
   /** fase 12: bottone Ferma sulla card del sottoagente */
@@ -798,3 +801,31 @@ export const useStore = create<Store>((set, get) => ({
 }))
 
 export { api }
+
+// ---- fase 16c correzioni (R4): il modello risolto, UN solo punto anche nel renderer ----
+
+/**
+ * Il selettore del modello risolto di un bot: la STESSA resolveAgentModel del
+ * daemon (src/shared/agent-model.ts) con i dati dello store — il modello
+ * proprio se il suo provider è attivo, il principale se segue («Come gli
+ * altri») o se il suo provider è sparito (ownModelMissing), null altrimenti.
+ * Chat, RightPanel e Sidebar passano tutti da qui: nessuna copia a mano
+ * della regola «null/null → models.main».
+ */
+export function resolvedModelOf(agentId: string | null | undefined): ResolvedAgentModel | null {
+  const s = useStore.getState()
+  const agent = s.agents.find((a) => a.id === agentId)
+  if (!agent) return null
+  return resolveAgentModel(agent, s.mainModel, s.providers.map((p) => ({ id: p.id, enabled: p.enabled })))
+}
+
+/** Il selettore come hook: si ricalcola quando cambiano il bot, il principale o i provider. */
+export function useResolvedModel(agentId: string | null | undefined): ResolvedAgentModel | null {
+  const agent = useStore((s) => (agentId ? s.agents.find((a) => a.id === agentId) ?? null : null))
+  const mainModel = useStore((s) => s.mainModel)
+  const providers = useStore((s) => s.providers)
+  return useMemo(
+    () => (agent ? resolveAgentModel(agent, mainModel, providers.map((p) => ({ id: p.id, enabled: p.enabled }))) : null),
+    [agent, mainModel, providers]
+  )
+}
