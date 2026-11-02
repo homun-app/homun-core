@@ -1,0 +1,138 @@
+name: Build installers
+
+# Build degli installer di Homun (fase rilascio A4 — adattato da homun2
+# .github/workflows/build.yml, solo il job macOS, senza motore Python e senza
+# Linux/Windows).
+# - Push di un tag v* → macOS arm64 FIRMATO + NOTARIZZATO e pubblicato come
+#   DRAFT su homun-app/homun-releases (il feed di aggiornamento di
+#   electron-updater), con note dal CHANGELOG e SHA256SUMS-mac.txt. Rivedi la
+#   draft e pubblicala.
+# - PR su main / esecuzione manuale → build NON firmata, solo artifact: prova
+#   la pipeline senza taggare.
+#
+# Security note: nessun input non fidato github.event.* è interpolato negli
+# step run. Le uniche espressioni ${{ }} dentro comandi sono secrets e valori
+# statici → nessuna superficie di workflow-injection.
+
+on:
+  push:
+    tags:
+      - "v*"
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read # la pubblicazione va su homun-releases via RELEASES_TOKEN
+
+jobs:
+  build:
+    name: Build (macOS arm64)
+    runs-on: macos-14
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Su un tag di release il TAG è la fonte unica della versione: si
+      # stampa in package.json così installer e latest-mac.yml coincidono.
+      - name: Set version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version --allow-same-version
+
+      # Il gate della firma sta su un output di step, NON su un'espressione
+      # env a livello job: in uno step run il secret c'è davvero.
+      - name: Detect macOS signing creds
+        id: signing
+        env:
+          MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+        run: |
+          if [ -n "$MAC_CSC_LINK" ]; then
+            echo "has_cert=true" >> "$GITHUB_OUTPUT"
+            echo "Developer ID cert present (${#MAC_CSC_LINK} chars) -> signed + notarized build"
+          else
+            echo "has_cert=false" >> "$GITHUB_OUTPUT"
+            # Mai una build NON firmata nel feed di aggiornamento: su un tag
+            # ci si rifiuta. Le non firmate restano per PR/dispatch, che non
+            # pubblicano.
+            if [ "${GITHUB_REF}" != "${GITHUB_REF#refs/tags/v}" ]; then
+              echo "::error::Refusing to cut an UNSIGNED macOS release. Set MAC_CSC_LINK before tagging."
+              exit 1
+            fi
+            echo "No MAC_CSC_LINK secret -> unsigned build (dispatch only; will not publish)"
+          fi
+
+      - name: Build installer (signed + notarized)
+        if: steps.signing.outputs.has_cert == 'true' && startsWith(github.ref, 'refs/tags/v')
+        run: npx electron-builder --mac --publish always -c.mac.notarize=true
+        env:
+          # il token di pubblicazione vive SOLO su questo step e SOLO sui tag
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Build installer (unsigned — no cert or non-release build)
+        if: steps.signing.outputs.has_cert != 'true' || !startsWith(github.ref, 'refs/tags/v')
+        run: npx electron-builder --mac --publish never -c.mac.identity=null
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: Verify packaged app
+        shell: bash
+        run: |
+          APP_PATH="$(find dist-installers -maxdepth 3 -type d -iname Homun.app -print -quit)"
+          test -n "$APP_PATH"
+          if [ "${GITHUB_REF#refs/tags/v}" != "$GITHUB_REF" ] && [ "${{ steps.signing.outputs.has_cert }}" = "true" ]; then
+            npm run release:verify -- "$APP_PATH" --expected-arch arm64 --signed
+          else
+            npm run release:verify -- "$APP_PATH" --expected-arch arm64
+          fi
+
+      - name: Create installer checksums
+        run: npm run release:checksums -- --directory dist-installers --output "dist-installers/SHA256SUMS-mac.txt"
+
+      # Le note vengono da CHANGELOG.md (fonte unica): extract-release-notes
+      # esce non-zero se il tag non ha sezione — mai una release senza note.
+      - name: Set release notes from CHANGELOG.md
+        if: steps.signing.outputs.has_cert == 'true' && startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: |
+          node scripts/extract-release-notes.mjs "${GITHUB_REF_NAME#v}" > "$RUNNER_TEMP/release-notes.md"
+          gh release edit "$GITHUB_REF_NAME" \
+            --repo homun-app/homun-releases \
+            --notes-file "$RUNNER_TEMP/release-notes.md"
+
+      - name: Upload checksums to draft release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: |
+          gh release upload "$GITHUB_REF_NAME" \
+            "dist-installers/SHA256SUMS-mac.txt" \
+            --repo homun-app/homun-releases \
+            --clobber
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: homun-macos-arm64
+          path: |
+            dist-installers/*.dmg
+            dist-installers/*.zip
+            dist-installers/*.yml
+            dist-installers/SHA256SUMS-*.txt
+          if-no-files-found: error

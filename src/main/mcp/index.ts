@@ -15,6 +15,8 @@
 // (cfg.source) NON hanno auto-consenso dalle annotazioni (niente catalogId);
 // un server in attesa di chiavi/variabili (needsAuth) non è offerto al modello.
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+// fase rilascio (A7): docker fuori dal PATH del Terminale
+import { resolveTool, dockerChildEnv } from '../tool-paths'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js'
@@ -223,8 +225,8 @@ async function connect(cfg: McpServerConfig): Promise<Client> {
       const argv = boxStdioArgv(cfg, a.stdioEnv)
       await client.connect(
         a.stdioEnv && Object.keys(a.stdioEnv).length
-          ? new StdioClientTransport({ command: 'docker', args: argv, env: { ...process.env, ...a.stdioEnv } as Record<string, string> })
-          : new StdioClientTransport({ command: 'docker', args: argv })
+          ? new StdioClientTransport({ command: resolveTool('docker'), args: argv, env: { ...dockerChildEnv(process.env), ...a.stdioEnv } as Record<string, string> })
+          : new StdioClientTransport({ command: resolveTool('docker'), args: argv })
       )
       return client
     }

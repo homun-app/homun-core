@@ -44,6 +44,20 @@ import { DEFAULT_AUTO_REVIEW } from '../shared/types'
 import { uiLanguage, uiText, formatUi, ui, uiError } from '../main/ui-language'
 import { UI } from '../shared/ui-messages'
 import { UiError } from '../shared/ui-text'
+// fase rilascio (A7): lo stato di docker per la UI (percorso risolto, senza spawn)
+import { isToolResolved, resolveTool, invalidateToolCache } from '../main/tool-paths'
+import { existsSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
+
+function dockerToolStatus(): { installed: boolean; running: boolean; path: string } {
+  const installed = isToolResolved('docker')
+  const home = homedir()
+  const socket = Boolean(process.env.DOCKER_HOST) ||
+    existsSync('/var/run/docker.sock') ||
+    existsSync(join(home, '.docker', 'run', 'docker.sock'))
+  return { installed, running: installed && socket, path: resolveTool('docker') }
+}
 import type { UiText } from '../shared/types'
 
 type Emitter = (e: SandbotEvent) => void
@@ -1489,6 +1503,17 @@ export function buildApiMethods(
     'permissions:set': ([cfg]) => store.setPermissions(cfg as Parameters<typeof store.setPermissions>[0]),
     'settings:get': ([key, fallback]) => store.getSetting(key as string, fallback),
     'settings:set': ([key, value]) => store.setSetting(key as string, value),
+
+    // ---- fase rilascio (A7): docker c'è? si è avviato? ----
+    // Lo stato del tool per la UI: installed = trovato su disco (PATH o i
+    // posti noti di Docker Desktop); running = c'è un socket/context a cui
+    // parlare (NIENTE spawn: il controllo è a costo zero e senza rete).
+    'box:docker-status': () => dockerToolStatus(),
+    // «Riprova»: la cache dei percorsi si azzera e si rilegge lo stato
+    'box:docker-retry': () => {
+      invalidateToolCache()
+      return dockerToolStatus()
+    },
 
     // diagnostica
     ping: () => ({ pong: true, pid: process.pid })

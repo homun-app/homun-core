@@ -12,6 +12,9 @@ import { randomBytes, createCipheriv } from 'node:crypto'
 const { setDataDir, dataDir, db, getSetting, setSetting } = await import('../store/db')
 const vault = await import('../vault')
 const { VAULT_SERVICE, CONNECTORS_SERVICE } = await import('../../daemon/keychain')
+// fase rilascio (A6): le chiavi master vivono in keys.json cifrate con
+// safeStorage — il backend del test si registra qui
+const masterKeys = await import('../../daemon/master-keys')
 import type { SecurityRunner } from '../../daemon/keychain'
 
 /**
@@ -63,7 +66,9 @@ function fakeSafeStorage(available: () => boolean) {
 /** Predisponde la chiave legacy nei settings, cifrata con la safeStorage finta (formato delle fasi 1–5). */
 async function seedLegacyKey(): Promise<string> {
   const legacy = Buffer.from('a'.repeat(32), 'utf8').toString('base64')
-  vault.setSafeStorage(fakeSafeStorage(() => true))
+  const fake = fakeSafeStorage(() => true)
+  vault.setSafeStorage(fake)
+  masterKeys.setMasterKeyStorage(fake)
   setSetting('vault.masterKeySafe', Buffer.from('FAKE:' + legacy).toString('base64'))
   return legacy
 }
@@ -82,7 +87,14 @@ beforeEach(() => {
   kc = fakeKeychain()
   vault.setVaultKeychainRunner(kc.run)
   vault.setSafeStorage(null)
+  masterKeys.setMasterKeyStorage(null)
   db().exec('DELETE FROM settings')
+  // keys.json nuovo a ogni test (i segreti cifrano con chiavi fresche)
+  try {
+    require('node:fs').rmSync(join(dataDir(), 'keys.json'), { force: true })
+  } catch {
+    // non esiste
+  }
 })
 
 describe('chiave master nel Keychain (senza UI)', () => {
@@ -120,11 +132,13 @@ describe('chiave master nel Keychain (senza UI)', () => {
   })
 })
 
-describe('migrazione dalla chiave safeStorage (fasi 1–5)', () => {
-  it('con la UI aperta la chiave legacy passa nel Keychain e il setting viene rimosso', async () => {
+describe('migrazione dalla chiave safeStorage (fasi 1–5) — fase rilascio A6: verso keys.json', () => {
+  it('con la UI aperta la chiave legacy passa in keys.json e il setting viene rimosso', async () => {
     const legacy = await seedLegacyKey()
     expect(await vault.migrateVaultKeyToKeychain()).toBe(true)
-    expect(kc.value(VAULT_SERVICE)).toBe(legacy)
+    // la chiave si rilegge da keys.json via master-keys (safeStorage finto)
+    const key = await masterKeys.getMasterKey(VAULT_SERVICE, { run: kc.run })
+    expect(key.equals(Buffer.from(legacy, 'base64'))).toBe(true)
     expect(getSetting('vault.masterKeySafe', null)).toBeNull()
   })
 
@@ -140,9 +154,9 @@ describe('migrazione dalla chiave safeStorage (fasi 1–5)', () => {
     }
     setSetting('vault.secrets', [{ name: 'VECCHIA', sealed, createdAt: 1 }])
     await seedLegacyKey()
-    // migrazione (UI aperta) e poi vault senza safeStorage: la chiave sta nel Keychain
+    // migrazione (UI aperta); poi la chiave si legge da keys.json, come fa il
+    // daemon (fase rilascio A1: Electron anche senza finestra → safeStorage c'è)
     expect(await vault.migrateVaultKeyToKeychain()).toBe(true)
-    vault.setSafeStorage(null)
     expect(await vault.revealSecret('VECCHIA')).toBe('valore-vecchio')
   })
 
@@ -158,6 +172,8 @@ describe('migrazione dalla chiave safeStorage (fasi 1–5)', () => {
     await seedLegacyKey()
     await vault.storeSecret('NUOVA', 'v2') // getMasterKey migra da solo
     expect(getSetting('vault.masterKeySafe', null)).toBeNull()
-    expect(kc.value(VAULT_SERVICE)).toBeDefined()
+    // la chiave STA in keys.json (A6), non nel Keychain
+    const key = await masterKeys.getMasterKey(VAULT_SERVICE, { run: kc.run })
+    expect(key.equals(Buffer.from('a'.repeat(32), 'utf8'))).toBe(true)
   })
 })

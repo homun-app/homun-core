@@ -1,7 +1,7 @@
 {
-  "name": "sandbot",
-  "version": "0.1.0",
-  "description": "Clone locale di Grok Bot con modelli personalizzati",
+  "name": "homun",
+  "version": "0.3.0",
+  "description": "Homun \u2014 il tuo spazio di lavoro con la squadra AI",
   "main": "./out/main/index.js",
   "scripts": {
     "prepare-wasm": "node scripts/prepare-wasm.mjs",
@@ -15,11 +15,16 @@
     "build": "electron-vite build",
     "start": "electron-vite preview",
     "dist": "electron-vite build && electron-builder --mac",
+    "release:local": "node scripts/prepare-wasm.mjs && electron-vite build && electron-builder --mac --dir --publish never -c.mac.identity=null",
+    "release:verify": "node scripts/verify-release.mjs",
+    "release:checksums": "node scripts/create-artifact-checksums.mjs",
+    "release:notes": "node scripts/extract-release-notes.mjs",
     "typecheck": "tsc --noEmit",
     "i18n:compile": "lingui compile --namespace es"
   },
   "keywords": [],
-  "author": "",
+  "author": "Fabio Cantone",
+  "homepage": "https://github.com/homun-app/homun-core",
   "license": "ISC",
   "type": "module",
   "dependencies": {
@@ -34,6 +39,7 @@
     "@xterm/xterm": "6.0.0",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
+    "electron-updater": "6.8.9",
     "ipaddr.js": "2.2.0",
     "lucide-react": "1.64.0",
     "mermaid": "12.2.0",
@@ -73,12 +79,23 @@
     "vitest": "^5.0.5"
   },
   "build": {
-    "appId": "com.fabio.sandbot",
+    "appId": "app.homun.desktop",
     "productName": "Homun",
-    "asar": "true",
-    "files": "out/**/*",
-    "asarUnpack": [
-      "out/main/daemon.js"
+    "executableName": "homun",
+    "artifactName": "${productName}-${version}-${arch}.${ext}",
+    "asar": true,
+    "afterPack": "./scripts/after-pack.mjs",
+    "publish": {
+      "provider": "github",
+      "owner": "homun-app",
+      "repo": "homun-releases"
+    },
+    "directories": {
+      "output": "dist-installers",
+      "buildResources": "build"
+    },
+    "files": [
+      "out/**/*"
     ],
     "extraResources": [
       {
@@ -90,13 +107,39 @@
         "to": "box"
       }
     ],
+    "extraFiles": [
+      {
+        "from": "build/launchagent/app.homun.desktop.daemon.plist",
+        "to": "Library/LaunchAgents/app.homun.desktop.daemon.plist"
+      }
+    ],
     "mac": {
       "category": "public.app-category.productivity",
-      "target": "dmg",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
       "extendInfo": {
         "NSMicrophoneUsageDescription": "Homun usa il microfono solo se abiliti l'input vocale",
         "NSCameraUsageDescription": "Homun usa la camera solo se richiesta da una funzione"
       }
+    },
+    "dmg": {
+      "writeUpdateInfo": false
     }
   }
 }

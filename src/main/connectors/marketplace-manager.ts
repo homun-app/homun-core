@@ -12,6 +12,8 @@
 // riavvii col TTL di 1 h; un re-clone avviene in una cartella NUOVA e poi
 // sostituisce la vecchia.
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+// fase rilascio (A7): git di /usr/bin o Homebrew, non il nome semplice
+import { resolveTool } from '../tool-paths'
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
@@ -273,7 +275,7 @@ export type MarketplaceManager = ReturnType<typeof createMarketplaceManager>
 /** runner git di ripiego per i test che iniettano solo runGit nel marketplace */
 export function spawnGit(args: string[], opts: { cwd?: string } = {}): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((res, rej) => {
-    const child = spawn('git', args, { stdio: ['ignore', 'pipe', 'pipe'], ...(opts.cwd ? { cwd: opts.cwd } : {}) })
+    const child = spawn(resolveTool('git'), args, { stdio: ['ignore', 'pipe', 'pipe'], ...(opts.cwd ? { cwd: opts.cwd } : {}) })
     let stdout = ''
     let stderr = ''
     child.stdout.on('data', (d: Buffer) => { stdout += d.toString() })

@@ -11,6 +11,26 @@ export interface DaemonInfo {
   port: number
   token: string
   startedAt: number
+  /** fase rilascio (A2): versione dell'app del daemon (app.getVersion()). */
+  version?: string
+  /** fase rilascio (A2): id di build del bundle del daemon. */
+  build?: string
+}
+
+/** L'identità di build che la UI si aspetta dal daemon (A2). */
+export interface DaemonBuild {
+  version: string
+  build: string
+}
+
+/**
+ * Fase rilascio (A2, puro): il daemon descritto da daemon.json è della STESSA
+ * versione/build della UI che lo legge? Un daemon.json senza versione/build
+ * (fase ≤16c) non coincide mai: dopo un aggiornamento il daemon vecchio va
+ * fatto uscire bene e rilanciato, non riusato.
+ */
+export function daemonMatchesBuild(info: Pick<DaemonInfo, 'version' | 'build'>, expected: DaemonBuild): boolean {
+  return info.version === expected.version && info.build === expected.build
 }
 
 /** true se il processo esiste (signal 0); false se morto o pid invalido. */
@@ -83,7 +103,11 @@ export function readDaemonInfo(dataDir: string): DaemonInfo | null {
   try {
     const v = JSON.parse(readFileSync(p, 'utf8')) as Partial<DaemonInfo>
     if (typeof v.pid !== 'number' || typeof v.port !== 'number' || typeof v.token !== 'string') return null
-    return { pid: v.pid, port: v.port, token: v.token, startedAt: v.startedAt ?? 0 }
+    return {
+      pid: v.pid, port: v.port, token: v.token, startedAt: v.startedAt ?? 0,
+      ...(typeof v.version === 'string' ? { version: v.version } : {}),
+      ...(typeof v.build === 'string' ? { build: v.build } : {})
+    }
   } catch {
     return null
   }

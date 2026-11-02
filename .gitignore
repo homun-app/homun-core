@@ -4,3 +4,6 @@ dist
 *.dmg
 *.blockmap
 .DS_Store
+
+# fase rilascio: gli artifact di electron-builder non si committano
+dist-installers

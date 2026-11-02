@@ -20,6 +20,8 @@ import { homedir } from 'node:os'
 import { join, resolve, dirname, basename } from 'node:path'
 import { getSetting, dataDir, getAgent } from '../store/db'
 import { resolveBoxPath } from './box-paths'
+// fase rilascio (A7): percorso di docker e DOCKER_HOST per i figli
+import { resolveTool, dockerChildEnv } from '../tool-paths'
 import {
   dockerExecArgv,
   dockerReadFileArgv,
@@ -258,11 +260,16 @@ async function docker(argv: string[], opts: SpawnOptions = {}): Promise<SpawnRes
  */
 export type DockerRunner = (argv: string[], opts?: SpawnOptions) => Promise<SpawnResult>
 
-let dockerRunner: DockerRunner = (argv, opts) => runProcess('docker', argv, opts ?? {})
+// fase rilascio (A7): il PERCORSO risolto di docker (le app da Finder/launchd
+// non hanno /usr/local/bin nel PATH) e DOCKER_HOST quando serve il socket di
+// Docker Desktop
+let dockerRunner: DockerRunner = (argv, opts) =>
+  runProcess(resolveTool('docker'), argv, { ...opts, env: dockerChildEnv(opts?.env ? { ...process.env, ...opts.env } : process.env) })
 
 /** Solo per i test: sostituisce (o ripristina) il runner dei comandi docker. */
 export function setDockerRunnerForTests(runner: DockerRunner | null): void {
-  dockerRunner = runner ?? ((argv, opts) => runProcess('docker', argv, opts ?? {}))
+  dockerRunner = runner ?? ((argv, opts) =>
+    runProcess(resolveTool('docker'), argv, { ...opts, env: dockerChildEnv(opts?.env ? { ...process.env, ...opts.env } : process.env) }))
 }
 
 /** Solo per i test: azzera la memoria delle home assicurate (container fresco). */

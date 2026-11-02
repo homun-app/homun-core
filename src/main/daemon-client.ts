@@ -1,30 +1,30 @@
 // Client del daemon nel main Electron: assicura che il processo esista (lo
-// avvia con l'eseguibile Electron in ELECTRON_RUN_AS_NODE=1 se non attivo),
-// si connette via WebSocket col token di daemon.json, inoltra le RPC della
-// UI, riceve gli eventi push e risponde alle chiamate host.* del daemon
-// (notifiche native, safeStorage, screen). Riconnette automaticamente.
+// avvia come STESSO eseguibile Electron con --homun-daemon — fase rilascio
+// A1: niente più ELECTRON_RUN_AS_NODE, il fuse RunAsNode va spento nella
+// build pubblicata), si connette via WebSocket col token di daemon.json,
+// inoltra le RPC della UI, riceve gli eventi push e risponde alle chiamate
+// host.* del daemon (notifiche native, safeStorage, screen).
+//
+// Fase rilascio (A2): se il daemon attivo è di versione o build DIVERSA
+// (dopo un aggiornamento), la UI gli chiede di uscire BENE (RPC
+// daemon:restart: smette di prendere job, dà ai turni in corso fino a 10 s
+// per chiudere — la coda è durevole — ed esce con 0) e poi lo rilancia.
+// Riconnette automaticamente.
 import { spawn, execFile, type ChildProcess } from 'node:child_process'
 import { openSync, closeSync, existsSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { WsClient } from './ws-client'
-import { readDaemonInfo, removeDaemonInfo, pidAlive, releaseDaemonLock, type DaemonInfo } from '../daemon/daemon-files'
+import { readDaemonInfo, removeDaemonInfo, pidAlive, releaseDaemonLock, daemonMatchesBuild, type DaemonInfo, type DaemonBuild } from '../daemon/daemon-files'
 import { parseMessage, serializeRpcRequest, serializeRpcOk, serializeRpcError, serializeHello } from '../daemon/rpc'
+import { daemonSpawnSpec, isDaemonCommandLine, isLegacyDaemonCommandLine, DAEMON_FLAG } from './mode'
+import { daemonSpawnContext } from './daemon-context'
 import { dataDir } from './store/db'
 import type { SandbotEvent } from '../shared/types'
 
 const RECONNECT_DELAY_MS = 2000
 const SPAWN_TIMEOUT_MS = 15_000
-
-/** Percorso del bundle del daemon: in dev sta accanto a out/main/index.js, nella build impacchettata è unpacked fuori dall'asar (ELECTRON_RUN_AS_NODE non legge gli asar). */
-export function daemonEntryPath(): string {
-  const beside = join(__dirname, 'daemon.js')
-  if (existsSync(beside) && !process.resourcesPath) return beside
-  if (process.resourcesPath) {
-    const unpacked = join(process.resourcesPath, 'app.asar.unpacked', 'main', 'daemon.js')
-    if (existsSync(unpacked)) return unpacked
-  }
-  return beside
-}
+/** Quanto si aspetta l'uscita del daemon vecchio dopo la richiesta (drain A2 + margine). */
+const RESTART_WAIT_MS = 20_000
 
 /** Riga di comando di un processo (per capire se un pid è davvero il nostro daemon). */
 function processCommand(pid: number): Promise<string | null> {
@@ -39,24 +39,85 @@ async function sleep(ms: number): Promise<void> {
   await new Promise((r) => setTimeout(r, ms))
 }
 
+/** Aspetta che il pid del daemon sparisca (o che daemon.json cambi custode). */
+export async function waitDaemonPidGone(dir: string, pid: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (!pidAlive(pid)) return true
+    const info = readDaemonInfo(dir)
+    if (info && info.pid !== pid) return true
+    await sleep(200)
+  }
+  return !pidAlive(pid)
+}
+
+/**
+ * Chiede a un daemon VIVO di uscire bene per l'aggiornamento (A2): una
+ * connessione ws di una sola RPC, hello col token, daemon:restart, poi si
+ * aspetta l'uscita. Se il daemon non risponde, SIGTERM (la coda è durevole).
+ */
+export async function askDaemonToRestart(dir: string, info: DaemonInfo, timeoutMs = RESTART_WAIT_MS): Promise<void> {
+  let replied: (() => void) | null = null
+  const reply = new Promise<void>((resolve) => {
+    replied = resolve
+  })
+  const ws = new WsClient({
+    host: '127.0.0.1',
+    port: info.port,
+    onText: (text) => {
+      const msg = parseMessage(text)
+      if (msg && 'rpc' in msg) replied?.()
+    },
+    onClose: () => replied?.()
+  })
+  try {
+    await ws.connect()
+    ws.send(serializeHello(info.token))
+    ws.send(serializeRpcRequest(1, 'daemon:restart', []))
+    // la risposta può arrivare o meno (daemon occupato, token vecchio): si
+    // aspetta poco, poi conta solo l'uscita del processo
+    await Promise.race([reply, sleep(3_000)])
+  } catch {
+    // daemon già andato o irraggiungibile: sotto si valuta il pid
+  }
+  const gone = await waitDaemonPidGone(dir, info.pid, timeoutMs)
+  ws.close()
+  if (!gone && pidAlive(info.pid)) {
+    try {
+      process.kill(info.pid, 'SIGTERM')
+    } catch {
+      // già uscito
+    }
+    await waitDaemonPidGone(dir, info.pid, 5000)
+  }
+}
+
 /**
  * Avvia il daemon se non è già attivo e ne aspetta il daemon.json fresco.
  * Un daemon.json con pid morto o con pid appartenente ad altro processo è
- * stantio: viene rimosso (col lock) e il daemon riparte.
+ * stantio: viene rimosso (col lock) e il daemon riparte. Un daemon VIVO ma
+ * di versione/build diversa (A2) — o VECCHIO stile (fase ≤16c) — esce bene
+ * e viene rilanciato.
  */
-export async function ensureDaemonRunning(): Promise<DaemonInfo> {
+export async function ensureDaemonRunning(expected?: DaemonBuild): Promise<DaemonInfo> {
   const dir = dataDir()
   const logPath = join(dir, 'daemon.log')
   const existing = readDaemonInfo(dir)
   if (existing && pidAlive(existing.pid)) {
     const cmd = existing.pid === process.pid ? '' : await processCommand(existing.pid)
-    // il pid è vivo ed è un nostro daemon (node <bundle> --data …): riusalo
-    if (existing.pid === process.pid || (cmd && cmd.includes('daemon') && cmd.includes('sandbot'))) {
-      return existing
+    if (existing.pid === process.pid) return existing
+    if (cmd && isLegacyDaemonCommandLine(cmd)) {
+      // daemon della ≤16c (ELECTRON_RUN_AS_NODE): fermalo, entra quello nuovo
+      await askDaemonToRestart(dir, existing)
+    } else if (cmd && isDaemonCommandLine(cmd)) {
+      if (!expected || daemonMatchesBuild(existing, expected)) return existing
+      // versione/build diversi: il daemon esce BENE (A2) e si rilancia
+      await askDaemonToRestart(dir, existing)
+    } else {
+      // pid riusato dal SO per un altro processo: info stantia
+      removeDaemonInfo(dir)
+      releaseDaemonLock(dir)
     }
-    // pid riusato dal SO per un altro processo: info stantia
-    removeDaemonInfo(dir)
-    releaseDaemonLock(dir)
   } else if (existing) {
     removeDaemonInfo(dir)
     releaseDaemonLock(dir)
@@ -65,8 +126,10 @@ export async function ensureDaemonRunning(): Promise<DaemonInfo> {
   const startedAt = Date.now()
   const out = openSync(logPath, 'a')
   try {
-    const child: ChildProcess = spawn(process.execPath, [daemonEntryPath(), '--data', dir], {
-      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', SANDBOT_DATA_DIR: dir },
+    const ctx = daemonSpawnContext()
+    const spec = daemonSpawnSpec({ execPath: process.execPath, isPackaged: ctx.isPackaged, appPath: ctx.appPath, env: process.env })
+    const child: ChildProcess = spawn(spec.command, spec.args, {
+      env: spec.env,
       detached: true,
       stdio: ['ignore', out, out]
     })
@@ -79,7 +142,15 @@ export async function ensureDaemonRunning(): Promise<DaemonInfo> {
   for (;;) {
     await sleep(200)
     const info = readDaemonInfo(dir)
-    if (info && info.startedAt >= startedAt) return info
+    if (info && info.startedAt >= startedAt) {
+      if (expected && !daemonMatchesBuild(info, expected)) {
+        // è partito ma non è della build attesa (es. spawn che ha riusato un
+        // vecchio bundle): si riparte dal principio una volta
+        if (pidAlive(info.pid)) await askDaemonToRestart(dir, info)
+        continue
+      }
+      return info
+    }
     if (Date.now() > deadline) throw new Error('il daemon non ha scritto daemon.json entro il timeout (vedi data/daemon.log)')
   }
 }
@@ -98,7 +169,9 @@ export interface DaemonClientDeps {
   /** Fabbrica della connessione ws (default: WsClient reale su 127.0.0.1). */
   makeWs?: (opts: { host: string; port: number; onText: (text: string) => void; onClose: () => void }) => WsLike
   /** Assicura il daemon attivo e ne restituisce indirizzo+token (default: ensureDaemonRunning). */
-  ensure?: () => Promise<DaemonInfo>
+  ensure?: (expected?: DaemonBuild) => Promise<DaemonInfo>
+  /** Versione/build attesa del daemon (A2; default: il contesto del main). */
+  expectedBuild?: DaemonBuild
 }
 
 /**
@@ -123,10 +196,13 @@ export class DaemonClient {
   private everConnected = false
   private readonly makeWs: NonNullable<DaemonClientDeps['makeWs']>
   private readonly ensure: NonNullable<DaemonClientDeps['ensure']>
+  private readonly expectedBuild: DaemonBuild
 
   constructor(deps: DaemonClientDeps = {}) {
     this.makeWs = deps.makeWs ?? ((opts) => new WsClient(opts))
     this.ensure = deps.ensure ?? ensureDaemonRunning
+    const ctx = daemonSpawnContext()
+    this.expectedBuild = deps.expectedBuild ?? { version: ctx.version, build: ctx.buildId }
   }
 
   /** Registra un metodo host.* che il daemon può chiamare quando la UI è aperta. */
@@ -153,6 +229,13 @@ export class DaemonClient {
     return this.ws?.isConnected ?? false
   }
 
+  /** Aspetta che il processo del daemon esca (A8: prima di installare un aggiornamento). */
+  async waitDaemonExit(timeoutMs = 15_000): Promise<void> {
+    const dir = dataDir()
+    const info = readDaemonInfo(dir)
+    if (info) await waitDaemonPidGone(dir, info.pid, timeoutMs)
+  }
+
   private ensureConnected(): Promise<void> {
     if (this.connected) return Promise.resolve()
     if (!this.connecting) {
@@ -166,7 +249,7 @@ export class DaemonClient {
   private async connectWithRetry(): Promise<void> {
     while (!this.stopped) {
       try {
-        const info = await this.ensure()
+        const info = await this.ensure(this.expectedBuild)
         await this.connectOnce(info)
         return
       } catch (e) {
@@ -295,3 +378,6 @@ export class DaemonClient {
 export function resetDaemonFiles(): void {
   rmSync(join(dataDir(), 'daemon.json'), { force: true })
 }
+
+/** Il flag della modalità daemon, esposto per i test e i probe (A1). */
+export { DAEMON_FLAG }

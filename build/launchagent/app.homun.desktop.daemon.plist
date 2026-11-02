@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>app.homun.desktop.daemon</string>
+    <key>BundleProgram</key>
+    <string>Contents/MacOS/homun</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>homun</string>
+        <string>--homun-daemon</string>
+    </array>
+    <key>AssociatedBundleIdentifiers</key>
+    <array>
+        <string>app.homun.desktop</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+    <key>ProcessType</key>
+    <string>Interactive</string>
+</dict>
+</plist>

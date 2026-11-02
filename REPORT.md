@@ -3584,37 +3584,152 @@ Il campo diventa la `description` del bot via `agents:create(name, description)`
 
 Niente Docker (immagine NON costruita), nessun modello cloud né rete reale fuori da 127.0.0.1 (i server finti dei test sono su 127.0.0.1; il `providers:discover` dei test non gira perché nessun daemon è stato avviato), niente `npm run dist`, nessuna app o daemon avviato sulla cartella dati vera (l'app NON è stata lanciata: la verifica in Electron resta all'utente), **mai il Portachiavi vero** (solo `SANDBOT_TEST_FAKE_KEYCHAIN` su file nella cartella mkdtemp), nessun segreto vero (solo chiavi finte `sk-finta-…`). Le cartelle temporanee dei test nascono con `mkdtempSync` dentro `/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/` e vengono rimosse (mai `$TMPDIR` né `os.tmpdir()`). Nessun file dell'utente, volume (`sandbot-box`/`sandbot-plugins`/`sandbot-browser`) o cartella preesistente cancellati (la `out-review/` non tracciata è intatta). Nessun provider `zai` di pi-ai, nessun endpoint `/coding/`. **L'eval NON è stata lanciata.**
 
-# REPORT FASE RILASCIO — NON ESEGUITA: dipendenza mancante
+# REPORT FASE RILASCIO — Homun 0.3: SandBot diventa Homun
 
-**Data:** 2026-11-02 · **Richiesto:** fase A0–A9 sopra il tag `fase-16c-correzioni`, commit `rilascio: homun 0.3 firmabile e aggiornabile`, tag `fase-rilascio`.
-**Esito: FERMATA AL CONTROLLO PRELIMINARE.** Nessuna parte di A0–A9 è stata eseguita; nessun file del progetto toccato; **nessun commit, nessun tag** (il commit di chiusura previsionato sarebbe falso: niente è stato reso firmabile né aggiornabile).
+**Data:** 2026-11-02 · **Base:** `fase-16c-correzioni` (0fe2526) · **Commit:** `rilascio: homun 0.3 firmabile e aggiornabile` · **Tag:** `fase-rilascio`.
+`electron-updater` 6.8.9 era già in `package.json`/`package-lock.json` (modifiche non committate: incluse nel commit). Nessun push (il repo non ha remote).
 
-## Il blocco: `electron-updater` non è installato
+## A0 — Cosa ho letto e quali API esistono davvero
 
-Il prompt della fase è esplicito: «`electron-updater` (6.8.9, la stessa di Homun 2) la installo io prima che tu parta. […] Se `node_modules/electron-updater` manca, **fermati e scrivilo nel REPORT**: non hai rete, non provare a installarla.»
+**Dai riferimenti homun2-7555a45/rilascio/** (dati, adattati di volta in volta con la scritta «adattato da homun2» in testa): `build.yml`, `after-pack`, `verify-release`, `extract-release-notes`, `create-artifact-checksums`, `updater.cjs` + finestra d'avanzamento, `main.cjs` (protocollo `homun://` e protezioni), entitlements, sezione `build` del package.json, `docs/release.md`, lista Homunbot. **Non presi:** motore Python, PyInstaller/`build_engine_bundle`, receipt, Linux/Windows.
 
-Verificato più volte, in momenti diversi della sessione:
+**Da SandBot:** `main/index.ts`, `daemon-client.ts`, `launchagent.ts`, `paths.ts`, `ipc.ts`, `preload/index.ts`, `daemon/index.ts`, `daemon/keychain.ts`, `main/sandbox/*`, `electron.vite.config.ts`, `package.json`, più `vault.ts`, `worker.ts`, `api.ts`, `ws-server.ts`, `daemon-files.ts` dove la fase le toccava.
 
-- `node_modules/electron-updater/` **non esiste** (`find node_modules -maxdepth 2 -iname "*updater*"` → vuoto);
-- `package.json` **non dichiara** `electron-updater` né in `dependencies` né in `devDependencies`;
-- `@electron/fuses` e `electron-builder` (26.x) sono presenti, come previsto dal prompt.
+**Tipi di Electron 45 verificati SUL FILE** (`node_modules/electron/electron.d.ts`): `app.setLoginItemSettings`/`getLoginItemSettings` con `type: 'mainAppService' | 'agentService' | 'daemonService' | 'loginItemService'` e `serviceName`, stato `'not-registered' | 'enabled' | 'requires-approval' | 'not-found'` ✓; `app.setActivationPolicy('regular' | 'accessory' | 'prohibited')` ✓; `safeStorage` ✓; `utilityProcess` esiste ma non serve (il daemon gira nel main). Due aggiustamenti trovati sui tipi: `app.dock.setProgress` di homun2 **non esiste** in Electron 45 (la barra del Dock si mette sulla finestra: `BrowserWindow.setProgressBar`); `@electron/fuses` 1.8 legge con `getCurrentFuseWire` (niente `currentFuses`).
 
-Con l'updater assente la fase non è eseguibile nei suoi controlli di chiusura: l'import di `electron-updater` in A8 (updater) farebbe fallire `typecheck`, `build` e di conseguenza `release:local`/`release:verify`. Non è stata tentata alcuna installazione (istruzione esplicita; senza rete).
+## P0 — Le finestre di dialogo (correzioni della 16c)
 
-**Per sbloccare:** `npm install electron-updater@6.8.9 --save` (o salvataggio in `dependencies`, come in Homun 2) a cura dell'utente, poi rilanciare la fase.
+**Cosa ho cambiato** (la BASE, non i chiamanti):
 
-## Nota anche sul punto di partenza richiesto
+- tolta la `sm:max-w-lg` dalla base di `DialogContent`: il default di larghezza ora è `max-w-[min(32rem,calc(100%-2rem))]` SENZA variante — ogni `max-w-*` passato da fuori lo sostituisce davvero via tailwind-merge (prima la variante `sm:` vinceva sopra i 640 px e le Impostazioni restavano 512 px);
+- aggiunta `grid-cols-[minmax(0,1fr)]` alla base: la colonna della griglia non prende più la larghezza minima del contenuto, quindi «Nuovo bot» non sborda in orizzontale (niente `overflow-x` nascosto a coprire);
+- Impostazioni ora esplicite: `w-[min(1080px,calc(100vw-48px))] max-w-[min(1080px,calc(100vw-48px))] h-[min(760px,calc(100vh-48px))]` (R6);
+- gli altri `DialogContent` ripassati: «Nuovo bot» `max-w-xl`, «Cambia aspetto» e «Nuova squadra» `max-w-lg`, «Collega app» `max-w-[calc(100%-2rem)] sm:max-w-5xl` (il suo `sm:` è del CHIAMANTE e continua a funzionare).
 
-Il tag `fase-16c-correzioni` **non esiste** nel repo. Situazione reale al momento della fermata:
+**Test:** `src/renderer/src/__tests__/dialog-width-guard.test.ts` (3): la base non contiene `sm:max-w-*`, contiene `grid-cols-[minmax(0,1fr)]` e il default `max-w-[min(32rem,calc(100%-2rem))]`. La verifica a pixel resta alla sonda dell'utente.
 
-- `main` è a `a31bc4b` = tag **`fase-16c`** («fase 16c: impostazioni, app, attività e libreria»); la storia è lineare e sotto di essa ci sono tutti i tag `fase-17a`…`fase-19b-correzioni`;
-- sull'albero di lavoro ci sono **modifiche non committate** (25 file modificati tra daemon, agent, ipc, renderer e cataloghi, più i nuovi `src/main/__tests__/ipc-rpc-coherence.test.ts` e `src/shared/agent-model.ts`, e la `out-review/` non tracciata): con ogni probabilità le correzioni 16c stesse, mai fissate con commit e tag.
+## A1 — Il daemon gira come Electron normale
 
-La fase andrebbe quindi fatta partire dopo aver committato le correzioni 16c e creato il tag `fase-16c-correzioni` (o dopo aver detto su quale base partire al posto suo). Nessuna di queste modifiche è stata toccata.
+- `src/main/mode.ts` (puro): `isDaemonMode(argv)` (`--homun-daemon`), `resolveDataDirArgv`, `daemonSpawnSpec` (impacchettata: `[--homun-daemon]`; dev: `[<percorso app>, --homun-daemon]`; `ELECTRON_RUN_AS_NODE` cancellata dall'env), `isDaemonCommandLine`/`isLegacyDaemonCommandLine`.
+- `src/main/index.ts`: la stessa app con `--homun-daemon` chiama `app.setActivationPolicy('accessory')` prima del ready, niente finestre/tray/lock d'istanza, e manda il runtime del daemon NEL PROCESSO MAIN (`runDaemonRuntime`): `asarUnpack` del daemon tolto dal package.json (il main bundle sta nell'asar e Electron lo legge).
+- `src/daemon/runtime.ts`: il corpo dell'entrypoint estratto (iniettati `dataDir`, `getVersion`, `buildId`, `safeStorage`); `src/daemon/index.ts` resta entry Node legacy per i probe (`--data`/env), versione `node-legacy`.
+- `src/main/daemon-client.ts`: spawn di `process.execPath` con `--homun-daemon` (contesto `isPackaged`/`appPath` da `src/main/daemon-context.ts`, cablato dal main con `app.isPackaged`/`app.getAppPath()`); il riconoscimento del pid vivo passa da «cmd contiene daemon e sandbot» a `--homun-daemon` in riga di comando; un daemon VECCHIO stile (fase ≤16c) viene fermato per far posto al nuovo.
+- Stesse RPC, stesso `daemon.json`, stesso log, sopravvivenza alla chiusura della finestra: nessuna modifica a `api.ts`/`ws-server.ts` per questo.
 
-## Vincoli rispettati durante la fermata
+**Come riconoscere il processo del daemon (per le sonde E2E):** la riga di comando contiene **`--homun-daemon`** — nell'app installata `/Applications/Homun.app/Contents/MacOS/homun --homun-daemon`, in sviluppo `…/Electron <repo> --homun-daemon`. I daemon vecchi (≤16c) si riconoscono da `daemon.js` in riga di comando. `ps aux | grep -F -- '--homun-daemon'`.
 
-Niente Docker, nessuna rete reale, nessuna installazione tentata, nessuna build, nessun'app o daemon avviati, mai il Portachiavi vero né `safeStorage` vero, nessun segreto, nessun file dell'utente toccato o cancellato (`/Applications/Homun.app` e le cartelle di Homun 2 intatti), niente provider `zai`, nessun eval, nessun push. L'unica modifica di questa fermata è la presente sezione del REPORT.
+**Test:** `src/main/__tests__/mode.test.ts` (8): parsing del flag in qualunque posizione, `--data` accettato, riconoscimento daemon nuovo/vecchio, spec dello spawn nelle due modalità, **mai `ELECTRON_RUN_AS_NODE`** (né argv né env). `daemon-client` esistente (riconnessione) rifunziona uguale.
+
+## A2 — Il daemon riparte quando l'app si aggiorna
+
+- `daemon.json` ora porta `version` (app.getVersion() del daemon) e `build` (id generato a OGNI build da electron-vite, `define __BUILD_ID__` — `src/main/build-id.ts`, randomUUID per sessione di build; in vitest vale 'test').
+- `daemon-files.ts`: `daemonMatchesBuild(info, expected)` (puro) — un file senza versione/build non coincide MAI.
+- `daemon-client.ts`: `ensureDaemonRunning(expected)` riusa il daemon solo se versione E build coincidono; altrimenti `askDaemonToRestart` (connessione ws di una RPC + attesa risposta, poi attesa dell'uscita; SIGTERM solo se non esce) e si rilancia.
+- `runtime.ts`: RPC **`daemon:restart`** — il daemon smette di prendere job (`worker.stop()`), dà ai turni in corso fino a `RESTART_DRAIN_MS` (10 s, `worker.drain()`), poi esce con 0 (il `KeepAlive SuccessfulExit=false` di launchd NON lo rilancia: ci pensa la UI nuova; un crash invece sì). RPC **`daemon:describe`** espone `{pid, version, build}`.
+- L'updater (A8) prima di installare chiama `daemon:restart` e aspetta l'uscita (≤15 s).
+
+**Test:** `src/daemon/__tests__/daemon-build.test.ts` (7): confronto puro (uguale/diverso/legacy), giro di scrittura/lettura di daemon.json con version+build, file vecchi senza campi, e la **sequenza con daemon finto** (server ws reale su 127.0.0.1): la richiesta `daemon:restart` arriva e l'attesa dell'uscita funziona anche con pid già morto.
+
+## A3 — Avvio all'accesso con SMAppService
+
+- `buildLaunchAgentPlist` è pura come prima; **il plist del servizio** `buildAgentServicePlist()` (puro) sta DENTRO il bundle: `Contents/Library/LaunchAgents/app.homun.desktop.daemon.plist` (electron-builder `extraFiles`; su mac la base è `Contents`), con `Label app.homun.desktop.daemon`, `BundleProgram Contents/MacOS/homun`, `ProgramArguments ["homun","--homun-daemon"]`, `AssociatedBundleIdentifiers [app.homun.desktop]`, `RunAtLoad`, `KeepAlive {SuccessfulExit:false}` e `ProcessType Interactive`. `after-pack` ne verifica la presenza; `release:verify` pure.
+- Nell'app **impacchettata**: `app.setLoginItemSettings({ openAtLogin, type: 'agentService', serviceName: 'app.homun.desktop.daemon.plist' })`, stato da `getLoginItemSettings` (le API esistono in Electron 45, vedi A0). Se lo stato è `requires-approval`, la UI lo dice in parole e offre **«Apri Elementi login»** (`x-apple.systempreferences:com.apple.LoginItems-Settings.extension`).
+- In **sviluppo** resta il plist scritto a mano, con label e nome file NUOVI (`app.homun.desktop.daemon`), programma `process.execPath` e argomenti `[<repo>, --homun-daemon]` — senza `ELECTRON_RUN_AS_NODE`.
+- **Pulizia del vecchio:** `cleanupLegacyLaunchAgent()` al primo avvio fa `launchctl bootout gui/<uid>/com.fabio.sandbot.daemon` (+`unload`) e toglie **solo** `~/Library/LaunchAgents/com.fabio.sandbot.daemon.plist`, esatto.
+- IPC `launch-at-login:get` ora torna `{enabled, requiresApproval, mechanism}`; la voce nelle Impostazioni segue. «Avvia all'accesso» NON è stato toccato su questa macchina (le prove usano solo i test del plist).
+
+**Test:** `src/main/__tests__/launchagent-release.test.ts` (11): contenuto del plist di servizio (label, BundleProgram relativo, argomenti, associazione, KeepAlive solo-crash, Interactive, mai RUN_AS_NODE), plist di sviluppo con la nuova label e senza env, scelta del meccanismo, pulizia del vecchio (comandi esatti + idempotenza + senza uid) e **guardia che il plist nel bundle coincide carattere per carattere con `buildAgentServicePlist()`**.
+
+## A4 — La build: identità, firma, fuse, verifica
+
+**`package.json`:** `name` `homun`, `version` `0.3.0` (> 0.2.1004), `appId` `app.homun.desktop`, `productName` `Homun`, `executableName` `homun`, `artifactName` `${productName}-${version}-${arch}.${ext}`, `publish` github `homun-app/homun-releases`, `mac.target` dmg+zip **arm64**, `hardenedRuntime: true`, `gatekeeperAssess: false`, entitlements/inherit su `build/entitlements.mac.plist`, `afterPack` collegato, `asarUnpack` rimosso. Script nuovi: `release:local`, `release:verify`, `release:checksums`, `release:notes`.
+
+**Entitlements finali** (`build/entitlements.mac.plist`) e perché ognuno resta:
+
+| Entitlement | Perché |
+|---|---|
+| `com.apple.security.cs.allow-jit` | Electron/V8 compilano JS a runtime (JIT): senza, il processo muore. |
+| `com.apple.security.cs.allow-unsigned-executable-memory` | V8 scrive codice nelle pagine W^X: requisito documentato di Electron su macOS. |
+| `com.apple.security.network.server` | il daemon serve ws/webhook/ponti schermo-terminale su 127.0.0.1 (porte casuali). |
+| `com.apple.security.network.client` | i provider (openai-compat con base URL remoto), il registro dei connettori e i marketplace git si raggiungono in uscita. |
+| ~~`disable-library-validation`~~ **tolto** | serviva a Homun 2 per le dylib del motore Python; qui non ci sono librerie di terzi. |
+| ~~`allow-dyld-environment-variables`~~ **tolto** | niente dyld/env passati a binari esterni (il fuse NODE_OPTIONS è comunque spento). |
+
+**`scripts/after-pack.mjs`** (adattato da homun2, senza engine): verifica il plist A3 nel bundle, gira i fuse con `RunAsNode: false`, `EnableNodeCliInspectArguments: false`, `EnableNodeOptionsEnvironmentVariable: false`, `EnableCookieEncryption: true`, `OnlyLoadAppFromAsar: true`, **`EnableEmbeddedAsarIntegrityValidation: true` quando electron-builder scrive `ElectronAsarIntegrity` in Info.plist** (e LO SCRIVE: l'output di verify dice `asarIntegrityInInfoPlist: true`; se non ci fosse, il fuse resterebbe spento con l'avviso in console — un fuse acceso senza hash bloccherebbe l'avvio), `resetAdHocDarwinSignature`. Ordine: fuse PRIMA della firma.
+
+**`scripts/verify-release.mjs`** (adattato): architettura (`file` → arm64), Info.plist (`CFBundleIdentifier app.homun.desktop`, versione attesa), plist A3 nel bundle, **fuse letti dall'eseguibile** (`getCurrentFuseWire` di `@electron/fuses`) con i valori attesi, `app.asar` presente, NESSUN sorgente sciolto e nessun `daemon.js` unpacked, con `--signed` anche `codesign --verify --deep --strict` + `xcrun stapler validate`. **Output della `.app` di `release:local`:** arch arm64, bundleId `app.homun.desktop`, version `0.3.0`, `launchAgentPlist: true`, fuse `RunAsNode:false · EnableCookieEncryption:true · EnableNodeOptionsEnvironmentVariable:false · EnableNodeCliInspectArguments:false · OnlyLoadAppFromAsar:true · EnableEmbeddedAsarIntegrityValidation:true`, mode unsigned (niente `--signed`: non firmata).
+
+**`extract-release-notes.mjs`** e **`create-artifact-checksums.mjs`**: come homun2, percorsi adattati (CHANGELOG alla radice). **`CHANGELOG.md`** alla radice con `## [0.3.0] — 2026-11-02` in italiano semplice: cosa cambia e che **i dati di Homun 2 non si importano**.
+
+**`.github/workflows/build.yml`** (solo job macOS, niente engine/Linux): tag `v*` → versione dal tag, firmata+notarizzata (`CSC_LINK`/`APPLE_*`), **draft** su homun-releases con note dal CHANGELOG (errore se la sezione manca) e `SHA256SUMS-mac.txt`; tag senza certificato → **errore voluto** (gate su output di step, non su env di job); PR/dispatch → non firmata (`-c.mac.identity=null` + `CSC_IDENTITY_AUTO_DISCOVERY=false`), solo artifact; verify sempre. Il commento di sicurezza resta vero: nessun `github.event.*` interpolato negli step run, solo secrets e valori statici. **La CI non è stata lanciata.**
+
+**`npm run release:local`** (eccezione autorizzata; `CSC_IDENTITY_AUTO_DISCOVERY=false`, identity null, `--dir`, `--publish never`): buildata. electron-builder ha scaricato/estratto lo zip di Electron 45 arm64 riusando la cache locale (`~/Library/Caches/electron`, hash già presente): nessun download bloccato, nessuna firma chiesta. Ritrovato e corretto un **bug reale** grazie alla prova a mano: `import { autoUpdater } from 'electron-updater'` (CJS) nell'app impacchettata moriva con «Named export 'autoUpdater' not found» — ora default import + accesso lazy (`au()`).
+
+## A5 — Le protezioni di Electron
+
+1. **`sandbox: true`** sulla finestra: il preload esce **CommonJS** (`out/preload/index.cjs`, `rollupOptions.output.format 'cjs'` in electron.vite.config) e resta solo `contextBridge` + `ipcRenderer`; il renderer gira davvero col sandbox (si vede in `ps`: `--enable-sandbox`).
+2. `setWindowOpenHandler` → **deny** sempre; i link `http(s)`/`mailto` via `shell.openExternal` SOLO dopo il controllo dello schema (`canOpenExternally`, puro: mai `file:`, `javascript:`, schemi dell'app) — vale anche per `host.openExternal` del daemon.
+3. `will-navigate` e `will-redirect` → `preventDefault` salvo l'origine dell'app (`homun://app/` in produzione, il dev server in sviluppo).
+4. `will-attach-webview` → impedito (`webviewTag: false`).
+5. Permessi del browser: `setPermissionRequestHandler`/`setPermissionCheckHandler` — **tutto negato** salvo la scrittura degli appunti (`clipboard-sanitized-write`/`clipboard-write`, i bottoni «copia»); microfono e camera negati (nessuna funzione li usa; le descrizioni Info.plist restano dichiarate ma non vengono mai chieste). `src/main/permissions.ts` puro.
+6. **Pagina servita dal protocollo dell'app**: `homun://app/` registrato `standard`+`secure` (+fetch/cors/stream) PRIMA del ready; handler (`src/main/protocol.ts`, adattato da homun2) che serve SOLO i file della cartella renderer con percorso normalizzato (decode, rifiuto di `..`, byte nulli, symlink fuori via realpath) e header CSP+nosniff. **CSP** (uguale nel meta di dev e nell'header): `connect-src 'self' ws://127.0.0.1:*` — il ws del daemon SOLO lì; worker/immagini blob per vega/mermaid; `frame-src 'none'`, `object-src 'none'`, `base-uri 'none'`. Viste: chat, squadra, pannello Computer (noVNC → ws 127.0.0.1 ✓), Terminale (xterm → ws ✓), grafici vega e mermaid (worker blob ✓), libreria, impostazioni, Collega app — nessuna connessione fuori da 'self' e ws://127.0.0.1.
+7. **Istanza singola**: `requestSingleInstanceLock` solo per la UI (il daemon NON lo prende); il secondo avvio porta le finestre esistenti in primo piano.
+
+**Test:** `src/main/__tests__/protocol.test.ts` (13): percorsi del protocollo (dentro la radice ok; `..` assoluto/encodato/byte nulli → 403 senza eccezioni), CSP (ws solo 127.0.0.1, frame/object none), MIME; `canOpenExternally` (http/https/mailto sì; file/javascript/sandbot:// /homun:// /data: no); schema permessi (clipboard-write sì, tutto il resto no).
+
+## A6 — Le chiavi master legate alla firma dell'app (safeStorage)
+
+- `src/daemon/master-keys.ts`: **`getMasterKey(service)`** è l'unica strada. Le chiavi (32 byte) vivono cifrate con `safeStorage.encryptString` in **`<data>/keys.json`** — `{version:1, "sandbot-vault-key":…, "sandbot-connectors-key":…, "sandbot-providers-key":…}` (i nomi di oggi come chiavi), scrittura atomica (tmp 0600 + fsync + rename).
+- **Migrazione idempotente e senza perdite** per ogni servizio presente nel Portachiavi vecchio e non in keys.json: lettura col metodo di oggi → cifratura → scrittura → **rilettura e confronto** → solo allora `security delete-generic-password -a sandbot -s <servizio>` (solo quei tre, esatti). Se `safeStorage.isEncryptionAvailable()` è falso o qualcosa fallisce: avviso nel log **senza segreti** e si continua a leggere dal Portachiavi come prima (la chiave non si perde mai); si riprova al prossimo avvio.
+- Chiamanti: `getConnectorsKey`/`getProvidersKey` (keychain.ts) passano da `getMasterKey`; il vault usa `getMasterKey(VAULT_SERVICE)` e la migrazione del setting legacy (`vault.masterKeySafe`) finisce in keys.json via `saveMasterKey`. Il vecchio `writeKeychainKey` con «quit» non serve più (la migrazione legge e cancella soltanto); il codice `security` resta per migrazione+fallback.
+- Il daemon (ora Electron, A1) registra il backend safeStorage VERO dopo ready — oppure il **finto** quando c'è `SANDBOT_TEST_FAKE_SAFESTORAGE=<file>` (AES-256-GCM con chiave fissa di test, round-trip stabile fra processi); mai il Portachiavi vero nei test (il finto del keychain ora supporta anche `delete-generic-password`).
+
+**Test:** `src/daemon/__tests__/master-keys.test.ts` (13): prima generazione (cifrata davvero, 600, version 1, campi separati coi nomi di oggi, keychain intatto), migrazione completa (voce vecchia cancellata SOLO dopo la verifica), **ripresa dopo errore a metà** (scritto ma non verificato → niente cancellazione, chiave restituita dal keychain), safeStorage non disponibile (nulla cambia), **nessun segreto negli avvisi**, finti via env (incluso round-trip fra due backend), `saveMasterKey`. Aggiornati i test del vault (`vault-keychain.test.ts`) alla nuova destinazione (keys.json). Nella prova a mano della .app i finti erano attivi (A8/prova).
+
+## A7 — `docker` e `git` anche fuori dal Terminale
+
+- `src/main/tool-paths.ts`: **`resolveTool('docker'|'git')`** (sync, cache invalidabile con «Riprova» via `invalidateToolCache`): env esplicita (`HOMUN_DOCKER_PATH`/`HOMUN_GIT_PATH`) → PATH → i posti noti. docker: `/usr/local/bin`, `/opt/homebrew/bin`, `~/.docker/bin`, `/Applications/Docker.app/Contents/Resources/bin`; git: `/usr/bin/git` (Xcode CLT), `/opt/homebrew/bin`, `/usr/local/bin`. Solo file eseguibili accettati (`pickExecutable`, puro con sonda iniettabile); se non c'è nulla si torna al nome semplice (comportamento di oggi come limite inferiore).
+- **Sostituiti TUTTI i punti d'uso** (grep): `sandbox/index.ts` (il runner di default dei comandi docker), `shells.ts`, `terminal.ts`, `screen.ts`, `browser.ts`, `mcp/index.ts` (transport stdio), `library.ts` (docker cp), `runDocker` di install-connectors in `runtime.ts`, `marketplace.ts` e `marketplace-manager.ts` (git).
+- **Socket:** il CLI recente trova Docker Desktop da solo via contesto (`~/.docker`); quando manca il contesto, manca `DOCKER_HOST` e manca `/var/run/docker.sock`, i figli docker ricevono `DOCKER_HOST=unix://~/.docker/run/docker.sock` (`dockerHostDefault`, puro; `dockerChildEnv`).
+- **L'onboarding/sezione del box:** RPC `box:docker-status` (installato? c'è un socket? MAI spawn) e `box:docker-retry` (azzera la cache); il pannello Computer in modalità docker mostra la riga in parole «Per il computer dei bot serve Docker Desktop: installalo e aprilo, poi Riprova» con il link docker.com e il bottone **Riprova** (IT/EN via Lingui).
+
+**Test:** `src/main/__tests__/tool-paths.test.ts` (9): ordine dei candidati docker/git (env esplicita vince, PATH, posti noti, nessun doppione), primo eseguibile, `dockerHostDefault` (i 4 casi), link ufficiale, cache.
+
+## A8 — Primo avvio della 0.3 e aggiornamenti
+
+- **`SANDBOT_TEST_USER_DATA`** rispettato anche dall'app impacchettata (`paths.ts`, test in `paths.test.ts`: vince sul percorso storico) e **guardia che la cartella dati non coincida mai** con `…/Homun` né `…/Homun2` (case-insensitive, come APFS). La cartella dati resta `…/sandbot`.
+- **La riga del rinnovo:** `src/main/legacy-homun2.ts` (puro) riconosce la sede dati di Homun 2 (`…/Homun2/engine` o `…/Homun/engine`) con SOLO existsSync — niente si legge o tocca là dentro. Al primo avvio (marker `legacy-homun2-noticed` nell'userData) compare una volta la riga in cima «Homun è stato rinnovato. Le conversazioni e i bot di Homun 2 non sono stati importati: restano sul tuo Mac in …» con **«Mostra nel Finder»** (`shell.showItemInFolder` sulla sola cartella riconosciuta) e ✕ per sempre.
+- **L'updater** (`src/main/updater.ts`, adattato da homun2): feed `homun-app/homun-releases` (publish di electron-builder → app-update.yml). Regola: **niente in silenzio** — controllo all'avvio poi ogni 6 ore, SOLO impacchettata e MAI con variabili `SANDBOT_TEST_*` (`shouldAutoCheckUpdates`, puro); «È disponibile Homun X.Y.Z» con le note della release → «Scarica» / «Apri le note» / «Più tardi»; avanzamento in finestra dedicata (HTML autonomo sandboxed) e barra sul Dock (`setProgressBar` della finestra); «Riavvia ora» (prima ferma bene il daemon, A2) o «Alla chiusura»; uno staged uguale alla versione corrente non viene riproposto (`isNewerVersion`, puro). In Impostazioni › Generali: la **versione** e **«Controlla aggiornamenti»**; i dialoghi nativi sono nel dizionario IT/EN del main.
+- IPC `updater:status`/`updater:check` in `ipc.ts` (il test di coerenza dei canali li vede).
+
+**Test:** `src/main/__tests__/updater.test.ts` (9): quando il check è ammesso (mai in dev, mai con SANDBOT_TEST_*), confronto versioni (maggiore e non solo diversa, pre-release, malformate), cartella di Homun 2 (solo engine, precedenza Homun2, marker).
+
+## A9 — La lista della prova d'installazione
+
+`docs/PROVA-INSTALLAZIONE.md`: presa dalla lista Homunbot e riscritta per la 0.3 (utente/mac pulito, build firmata): Gatekeeper (Safari+quarantina, `codesign -dv`, `spctl`, checksum), primo avvio (riga del rinnovo con «Mostra nel Finder» e dati di Homun 2 intatti), Elementi login (approvazione, riavvio, spegnimento), Docker assente→presente (riga in parole + Riprova), permessi solo-quando-servono, **migrazione chiavi con dato vero creato prima**, aggiornamento 0.2.1004→0.3.0 dal feed, 0.3.0→0.3.1 (con turno in corso: drain ≤10 s o ripresa come crash), disinstallazione (cosa resta e come toglierlo), tabella esiti. **Non eseguita da me** (serve la build firmata): è scritta per l'utente.
+
+## Prova a mano della `.app` (dati temporanei, come da chiusura)
+
+`release:local` → `dist-installers/mac-arm64/homun.app`, lanciata con `env -i HOME=$HOME PATH=/usr/bin:/bin:/usr/sbin:/sbin SANDBOT_TEST_USER_DATA=$(mkdtemp …/T/homun-app-test.XXXXXX) SANDBOT_TEST_FAKE_KEYCHAIN=… SANDBOT_TEST_FAKE_SAFESTORAGE=…`:
+
+- **il daemon parte in modalità `--homun-daemon`**: `ps` mostra `…/homun.app/Contents/MacOS/homun --homun-daemon` (niente ELECTRON_RUN_AS_NODE), `daemon.json` scritto con `version 0.3.0` e `build` fresh, log `[sandbotd] attivo: pid N, ws 127.0.0.1:PORT`;
+- **la finestra si apre** (System Events: 1 finestra; renderer con `--enable-sandbox` e schema `homun` privilegiato negli argomenti del processo);
+- **`docker` trovato col PATH minimo**: `/usr/local/bin/docker` e `/Applications/Docker.app/Contents/Resources/bin/docker` esistono, socket presenti (`/var/run/docker.sock` e `~/.docker/run/docker.sock`) → niente riga d'errore, né container avviati;
+- **`ELECTRON_RUN_AS_NODE=1 …/homun -e "console.log(2+2)"` NON dà un Node** (output vuoto: il fuse RunAsNode è spento);
+- **i dati veri mai toccati**: tutto (db, box, daemon.json) è nato nella mkdtemp, poi rimossa col relativo processo fermato; chiusura pulita (lock e daemon.json spariti);
+- **«Avvia all'accesso» mai usato** su questa macchina (basta il test del plist); l'updater non ha contattato la rete (`SANDBOT_TEST_*` presente → controllo disattivato).
+
+## Output dei controlli
+
+- `npm run typecheck`: pulito (0 errori).
+- `npx vitest run`: **144 file / 2214 test verdi** (baseline 16c-correzioni: 137/2149 → +7 file, +65 test: mode 8, daemon-build 7, launchagent-release 11, protocol 13, master-keys 13, tool-paths 9, updater 9, dialog-width-guard 3, paths +3, vault-keychain 3 aggiornati alla migrazione in keys.json).
+- `npm run build`: ✓ (main con runtime daemon dentro, preload **.cjs**, renderer).
+- `npm run i18n:extract`: it 1113 / en 1113, **en 0 missing** (13 nuove stringhe tradotte: Elementi login, Controlla aggiornamenti, riga del rinnovo, Docker, versione…); **seconda estrazione identica byte-byte** (md5 dei .po/.mjs prima/dopo).
+- `npm run release:local` + `release:verify`: `.app` non firmata **passa tutta la verifica** (output sopra: arch, Info.plist, plist A3, fuse, asar).
+
+## Vincoli rispettati
+
+Niente Docker (immagine non costruita, container non avviati; solo `existsSync` sui percorsi del CLI); nessun modello cloud né rete reale (le socket dei test sono 127.0.0.1; l'updater spento nelle prove per `SANDBOT_TEST_*`); `npm run dist` MAI (l'unica build è `release:local` non firmato: `--dir --publish never -c.mac.identity=null` + `CSC_IDENTITY_AUTO_DISCOVERY=false`); app/daemon mai sulla cartella dati vera (SOLO mkdtemp in `/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/`, mai `$TMPDIR`/`os.tmpdir()`, rimosse a fine prova); **mai il Portachiavi vero né safeStorage vero** (solo i finti; l'app di prova li aveva attivi); nessun segreto vero; nessun file dell'utente, volume o cartella preesistente cancellati (`out-review/` intatta; `/Applications/Homun.app` e le cartelle `…/Homun`/`…/Homun2` solo LETTE con existsSync); niente provider `zai` né endpoint `/coding/`; **eval non lanciata**; CI non lanciata; **nessun push**.
 
 # REPORT FASE 16c — correzioni
 
@@ -3666,4 +3781,4 @@ La verifica visiva a 1440/1100/900 chiaro e scuro, IT e EN resta alla sonda Elec
 
 Niente Docker né `npm run dist`; nessun modello cloud né rete reale fuori da 127.0.0.1 (i server finti nei test ascoltano su 127.0.0.1); nessuna app o daemon avviati (nessuna cartella dati toccata); **mai il Portachiavi vero** (solo `SANDBOT_TEST_FAKE_KEYCHAIN` su file nella mkdtemp); nessun segreto vero (solo chiavi `sk-finta-…`); cartelle temporanee solo `mkdtempSync` dentro `/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/` e rimosse a fine corsa (mai `$TMPDIR` né `os.tmpdir()`); nessun file dell'utente, volume `sandbot-box`/`sandbot-plugins`/`sandbot-browser` o cartella preesistente cancellati (`out-review/` resta non tracciata e intatta); nessun provider `zai` di pi-ai né endpoint `/coding/`; **eval non lanciata**.
 
-Nota: nel REPORT sopra resta la sezione «FASE RILASCIO — NON ESEGUITA» scritta da una sessione precedente ferma per mancanza di `electron-updater`: non è di questa fase e non è stata modificata.
+Nota: la sezione «REPORT FASE RILASCIO — NON ESEGUITA» che stava qui sopra (scritta da una sessione ferma per mancanza di `electron-updater`) è stata SOSTITUITA dalla sezione reale della fase di rilascio, come richiesto dal prompt.

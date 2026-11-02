@@ -168,6 +168,17 @@ const api: SandbotApi = {
   libraryRestoreVersion: (id, version) => ipcRenderer.invoke('library:restore-version', id, version),
   getLaunchAtLogin: () => ipcRenderer.invoke('launch-at-login:get'),
   setLaunchAtLogin: (enabled) => ipcRenderer.invoke('launch-at-login:set', enabled),
+  // fase rilascio (A3): apre Impostazioni › Elementi login
+  openLoginItemsSettings: () => ipcRenderer.invoke('open-login-items-settings'),
+  // fase rilascio (A7): stato di docker
+  boxDockerStatus: () => ipcRenderer.invoke('box:docker-status'),
+  boxDockerRetry: () => ipcRenderer.invoke('box:docker-retry'),
+  // fase rilascio (A8): aggiornamento e rinnovo da Homun 2
+  updaterStatus: () => ipcRenderer.invoke('updater:status'),
+  updaterCheck: () => ipcRenderer.invoke('updater:check'),
+  legacyHomun2: () => ipcRenderer.invoke('app:legacy-homun2'),
+  legacyHomun2Dismiss: () => ipcRenderer.invoke('app:legacy-homun2-dismiss'),
+  revealInFinder: (dir) => ipcRenderer.invoke('app:reveal-in-finder', dir),
   // fase 17a (L5): il main ricostruisce il tray nella lingua scelta
   uiLanguageChanged: (lang) => ipcRenderer.invoke('ui:language-changed', lang),
   onEvent: (cb) => {

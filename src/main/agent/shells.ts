@@ -17,6 +17,8 @@
 // test non dipendono da Docker; i processi figlio in host sono veri ma
 // innocui (echo/sleep su directory temporanea).
 import { spawn } from 'node:child_process'
+// fase rilascio (A7): docker fuori dal PATH del Terminale
+import { resolveTool, dockerChildEnv } from '../tool-paths'
 import { randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
 import { db as dbFn } from '../store/db'
@@ -174,7 +176,7 @@ async function dockerArgvExit(argv: string[]): Promise<number | null> {
 async function dockerArgvRun(argv: string[], env?: Record<string, string>): Promise<{ exitCode: number | null; stderr: string }> {
   const { spawn: sp } = await import('node:child_process')
   return new Promise((resolve) => {
-    const p = sp('docker', argv, { env: env ? { ...process.env, ...env } : process.env, stdio: ['ignore', 'ignore', 'pipe'] })
+    const p = sp(resolveTool('docker'), argv, { env: dockerChildEnv(env ? { ...process.env, ...env } : process.env), stdio: ['ignore', 'ignore', 'pipe'] })
     let err = ''
     p.stderr?.on('data', (d: Buffer) => {
       if (err.length < 100_000) err += d.toString()

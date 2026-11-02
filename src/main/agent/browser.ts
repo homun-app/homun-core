@@ -19,6 +19,8 @@
 // di test SANDBOT_TEST_FAKE_BROWSER_MCP=<path> sostituisce `docker exec …`
 // con `node <path>` (verifica d'integrazione, non esiste in produzione).
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+// fase rilascio (A7): docker fuori dal PATH del Terminale
+import { resolveTool } from '../tool-paths'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import type { ToolDef } from './llm'
 import { checkUrl } from './web-guard'
@@ -331,7 +333,8 @@ async function startBrowserSession(agentId: string): Promise<BrowserSession> {
     throw new Error(`Limit reached: at most ${BROWSERS_PER_BOX_MAX} browsers at the same time per computer (Chromium is heavy and the computer has shared memory). Close one with browser_close or try again later.`)
   }
   const proxyPort = await ensureBrowserProxy()
-  let command = 'docker'
+  // fase rilascio (A7): il PERCORSO risolto, non il nome semplice
+  let command = resolveTool('docker')
   let args: string[]
   let env: Record<string, string> | undefined
   const fakeMcp = fakeBrowserMcpPath()

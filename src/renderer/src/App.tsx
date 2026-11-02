@@ -1,4 +1,5 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
+import { useLingui, Trans } from '@lingui/react/macro'
 import { useStore } from './store'
 import { Sidebar } from './components/Sidebar'
 import { Chat } from './components/Chat'
@@ -20,6 +21,45 @@ const ACTIVE_EVERY_MS = 30_000
 const TYPING_EVERY_MS = 5_000
 /** Debounce del listener resize (Q1): il layout si ricalcola una volta sola. */
 const RESIZE_DEBOUNCE_MS = 100
+
+// fase rilascio (A8): la riga UNA VOLTA del passaggio da Homun 2 — le
+// conversazioni e i bot di Homun 2 NON vengono importati; la cartella si può
+// aprire nel Finder. Niente si legge e niente si tocca là dentro.
+function LegacyHomun2Notice() {
+  const { t } = useLingui()
+  const [dir, setDir] = useState<string | null>(null)
+  useEffect(() => {
+    void api.legacyHomun2().then((r) => setDir(r ? r.dir : null)).catch(() => setDir(null))
+  }, [])
+  if (!dir) return null
+  return (
+    <div className="flex items-start justify-between gap-3 border-b bg-muted px-4 py-2 text-xs text-muted-foreground">
+      <p className="min-w-0">
+        <Trans>
+          Homun è stato rinnovato. Le conversazioni e i bot di Homun 2 non sono stati importati: restano sul tuo Mac in {dir}.
+        </Trans>
+      </p>
+      <span className="flex shrink-0 items-center gap-2">
+        <button
+          className="rounded-full bg-foreground px-3 py-1 text-[11px] text-background"
+          onClick={() => void api.revealInFinder(dir)}
+        >
+          <Trans>Mostra nel Finder</Trans>
+        </button>
+        <button
+          className="rounded-full px-2 py-1 text-[11px] hover:text-foreground"
+          title={t`Non mostrare più`}
+          onClick={() => {
+            setDir(null)
+            void api.legacyHomun2Dismiss()
+          }}
+        >
+          ✕
+        </button>
+      </span>
+    </div>
+  )
+}
 
 export function App() {
   const init = useStore((s) => s.init)
@@ -112,7 +152,9 @@ export function App() {
   const panelTab = useStore((s) => (s.openGroupId !== null ? ('members' as const) : s.panelTab))
   const layout = layoutFor({ windowWidth, sidebarCollapsedByUser: sidebarCollapsed, sidebarWidthPref: sidebarWidth, panelOpen: rightPanel, panelTab })
   return (
-    <div className="relative flex h-screen w-screen overflow-hidden bg-background text-foreground">
+    <div className="relative flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
+      <LegacyHomun2Notice />
+      <div className="relative flex min-h-0 flex-1">
       <Sidebar layout={layout} />
       <div className="relative flex min-w-0 flex-1">
         {openGroupId === null ? <Chat /> : <TeamChat />}
@@ -122,6 +164,7 @@ export function App() {
       <RightPanel layout={layout} />
       {settingsOpen && <Settings />}
       {appsOpen && <AppsWindow />}
+      </div>
     </div>
   )
 }

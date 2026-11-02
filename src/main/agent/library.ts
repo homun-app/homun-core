@@ -13,6 +13,8 @@
 //
 // Il bot NON cancella: delete/rename/pin sono della UI (store/library).
 import { createHash } from 'node:crypto'
+// fase rilascio (A7): docker fuori dal PATH del Terminale
+import { resolveTool, dockerChildEnv } from '../tool-paths'
 import { join, extname, basename } from 'node:path'
 import { mkdirSync, readFileSync, writeFileSync, statSync, readdirSync, createReadStream, existsSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
@@ -420,7 +422,7 @@ export async function saveFileFromBox(
       const { BOX_CONTAINER } = await import('../sandbox/docker-argv')
       const { execFile } = await import('node:child_process')
       await new Promise<void>((resolveP, rejectP) => {
-        execFile('docker', ['cp', `${BOX_CONTAINER}:${boxPath}`, dest], (err) => (err ? rejectP(err) : resolveP()))
+        execFile(resolveTool('docker'), ['cp', `${BOX_CONTAINER}:${boxPath}`, dest], { env: dockerChildEnv(process.env) }, (err) => (err ? rejectP(err) : resolveP()))
       })
     })
     try {

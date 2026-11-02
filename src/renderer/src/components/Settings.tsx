@@ -76,7 +76,7 @@ export function Settings() {
 
   return (
     <Dialog open onOpenChange={(o) => !o && setSettingsOpen(false)}>
-      <DialogContent className="flex h-[min(760px,calc(100vh-48px))] w-[min(1080px,calc(100vw-48px))] max-w-[calc(100vw-48px)] gap-0 p-0" showCloseButton={false}>
+      <DialogContent className="flex h-[min(760px,calc(100vh-48px))] w-[min(1080px,calc(100vw-48px))] max-w-[min(1080px,calc(100vw-48px))] gap-0 p-0" showCloseButton={false}>
         <DialogTitle className="sr-only"><Trans>Impostazioni</Trans></DialogTitle>
         {/* fase 16c (C2): colonna di sezioni a sinistra, testo semplice,
             selezione su bg-muted, NESSUN bordo */}
@@ -1560,8 +1560,12 @@ function GeneralTab() {
   // fase 17a (L6): il selettore della lingua (setting ui.language)
   const uiLanguage = useStore((s) => s.uiLanguage)
   const setUiLanguage = useStore((s) => s.setUiLanguage)
-  const [atLogin, setAtLogin] = useState(false)
+  // fase rilascio (A3): stato con requiresApproval; (A8) versione e check
+  const [atLogin, setAtLogin] = useState<{ enabled: boolean; requiresApproval: boolean; mechanism: 'agentService' | 'plist' }>({ enabled: false, requiresApproval: false, mechanism: 'plist' })
   const [busy, setBusy] = useState(false)
+  const [appVersion, setAppVersion] = useState('')
+  const [updateBusy, setUpdateBusy] = useState(false)
+  const [updateResult, setUpdateResult] = useState<'none' | 'available' | 'current' | 'error'>('none')
   const [tz, setTz] = useState('')
   const [winMode, setWinMode] = useState<'morning' | 'working'>('morning')
   const [morning, setMorning] = useState({ start: '08:30', end: '09:30' })
@@ -1576,6 +1580,7 @@ function GeneralTab() {
 
   useEffect(() => {
     void api.getLaunchAtLogin().then(setAtLogin)
+    void api.updaterStatus().then((s) => setAppVersion(s.current)).catch(() => undefined)
     void api.settingsGet('userTimeZone', '').then(setTz)
     void api.settingsGet('deliveryWindow', { mode: 'morning', morning: { start: '08:30', end: '09:30' }, working: { start: '09:00', end: '19:00' } })
       .then((w) => {
@@ -1596,6 +1601,21 @@ function GeneralTab() {
       setAtLogin(await api.getLaunchAtLogin())
     } finally {
       setBusy(false)
+    }
+  }
+
+  // fase rilascio (A8): «Controlla aggiornamenti» — il dialogo di scarico lo
+  // apre il main se c'è davvero una versione nuova; qui lo stato in parole
+  async function checkUpdates(): Promise<void> {
+    setUpdateBusy(true)
+    setUpdateResult('none')
+    try {
+      const r = await api.updaterCheck()
+      setUpdateResult(r.available ? 'available' : r.error ? 'error' : 'current')
+    } catch {
+      setUpdateResult('error')
+    } finally {
+      setUpdateBusy(false)
     }
   }
 
@@ -1669,17 +1689,51 @@ function GeneralTab() {
         <input
           type="checkbox"
           className="mt-0.5 h-4 w-4 accent-foreground"
-          checked={atLogin}
+          checked={atLogin.enabled}
           disabled={busy}
           onChange={(e) => void toggle(e.target.checked)}
         />
         <span className="space-y-1">
           <span className="block text-sm"><Trans>Avvia all'accesso</Trans></span>
           <span className="block text-xs text-muted-foreground">
-            <Trans>Il daemon dei Bot parte quando accedi al Mac e resta attivo con la finestra chiusa (LaunchAgent con riavvio automatico dopo un crash). Puoi disattivarlo qui.</Trans>
+            <Trans>Il daemon dei Bot parte quando accedi al Mac e resta attivo con la finestra chiusa (riavvio automatico dopo un crash). Puoi disattivarlo qui.</Trans>
           </span>
         </span>
       </label>
+
+      {/* fase rilascio (A3): macOS aspetta il via dell'utente in Elementi login */}
+      {atLogin.requiresApproval && (
+        <div className="flex items-center justify-between gap-3 rounded-2xl bg-muted px-4 py-3">
+          <span className="text-xs text-muted-foreground">
+            <Trans>Per attivare l'avvio all'accesso, macOS chiede il tuo via: aprì Elementi login e attiva Homun.</Trans>
+          </span>
+          <button
+            className="shrink-0 rounded-full bg-foreground px-3 py-1.5 text-xs text-background"
+            onClick={() => void api.openLoginItemsSettings()}
+          >
+            <Trans>Apri Elementi login</Trans>
+          </button>
+        </div>
+      )}
+
+      {/* fase rilascio (A8): la versione e il controllo manuale degli aggiornamenti */}
+      <div className="flex items-center justify-between gap-3 rounded-2xl bg-muted px-4 py-3">
+        <span className="min-w-0 text-sm">
+          <Trans>Versione</Trans> <span className="text-muted-foreground">{appVersion || '—'}</span>
+        </span>
+        <span className="flex shrink-0 items-center gap-2">
+          {updateResult === 'current' && <span className="text-xs text-muted-foreground"><Trans>Homun è aggiornato</Trans></span>}
+          {updateResult === 'available' && <span className="text-xs text-muted-foreground"><Trans>Versione nuova disponibile</Trans></span>}
+          {updateResult === 'error' && <span className="text-xs text-muted-foreground"><Trans>Controllo non riuscito</Trans></span>}
+          <button
+            className="rounded-full bg-foreground px-3 py-1.5 text-xs text-background disabled:opacity-40"
+            disabled={updateBusy}
+            onClick={() => void checkUpdates()}
+          >
+            <Trans>Controlla aggiornamenti</Trans>
+          </button>
+        </span>
+      </div>
 
       <div className="space-y-2 rounded-2xl bg-muted px-4 py-3">
         <p className="text-sm"><Trans>Consegna e presenza</Trans></p>

@@ -12,7 +12,7 @@
 // Nessuna chiave in chiaro su disco, mai nell'argv di un processo.
 import { randomBytes, createCipheriv, createDecipheriv } from 'node:crypto'
 import { getSetting, setSetting, deleteSetting } from './store/db'
-import { getKeychainKey, readKeychainKey, writeKeychainKey, VAULT_SERVICE, type SecurityRunner } from '../daemon/keychain'
+import { VAULT_SERVICE, type SecurityRunner } from '../daemon/keychain'
 
 /** Subset di electron.safeStorage che serve al vault (encrypt/decrypt possono essere async nel daemon: passano dall'RPC). */
 export interface SafeStorageLike {
@@ -125,18 +125,19 @@ export function validHttpsOrigin(origin: string): boolean {
 }
 
 /**
- * Migrazione della chiave safeStorage → Keychain: possibile solo con la UI
- * aperta (la decifratura passa dall'HostBridge). True se la chiave ora sta
- * nel Keychain (c'era già o la migrazione è riuscita).
+ * Migrazione della chiave safeStorage legacy → keys.json (fase rilascio A6;
+ * prima: verso il Keychain): possibile solo con la UI aperta (la decifratura
+ * passa dall'HostBridge). True se non c'è niente da migrare o la migrazione
+ * è riuscita.
  */
 export async function migrateVaultKeyToKeychain(): Promise<boolean> {
-  if (await readKeychainKey(VAULT_SERVICE, keychainRun)) return true
   const enc = getSetting<string | null>(KEY_SETTING, null)
-  if (!enc) return false
+  if (!enc) return true // niente di legacy: getMasterKey porta già la chiave in keys.json
   try {
     const key = Buffer.from(await safe().decryptString(Buffer.from(enc, 'base64')), 'base64')
     if (key.length !== 32) return false
-    if (!(await writeKeychainKey(VAULT_SERVICE, key, keychainRun))) return false
+    const { saveMasterKey } = await import('../daemon/master-keys')
+    if (!(await saveMasterKey(VAULT_SERVICE, key, keychainRun ? { run: keychainRun } : {}))) return false
     deleteSetting(KEY_SETTING)
     return true
   } catch {
@@ -147,22 +148,24 @@ export async function migrateVaultKeyToKeychain(): Promise<boolean> {
 }
 
 async function getMasterKey(): Promise<Buffer> {
-  // 1. chiave già nel Keychain
-  const inKeychain = await readKeychainKey(VAULT_SERVICE, keychainRun)
-  if (inKeychain) return inKeychain
-  // 2. chiave legacy cifrata con safeStorage (fasi 1–5): si DEVE riutilizzare
-  //    quella — generarne una nuova renderebbe i segreti esistenti
-  //    indecifrabili. Serve la UI (decifratura via HostBridge); appena
-  //    riesce, la chiave passa nel Keychain e il setting viene rimosso
+  // fase rilascio (A6): la chiave master vive in <data>/keys.json cifrata con
+  // safeStorage (l'accesso è legato alla firma dell'app); la migrazione dal
+  // Portachiavi vecchio e la generazione avvengono DENTRO master-keys. Come
+  // prima, il fallback resta la via del Keychain quando safeStorage non c'è:
+  // la chiave non si perde mai.
+  const { getMasterKey: masterKeyOf, saveMasterKey } = await import('../daemon/master-keys')
+  // chiave legacy cifrata con safeStorage (fasi 1–5): si DEVE riutilizzare
+  // quella — generarne una nuova renderebbe i segreti esistenti indecifrabili.
+  // Serve la UI (decifratura via HostBridge); appena riesce, la chiave passa
+  // in keys.json e il setting viene rimosso
   const enc = getSetting<string | null>(KEY_SETTING, null)
   if (enc) {
     const key = Buffer.from(await safe().decryptString(Buffer.from(enc, 'base64')), 'base64')
-    if (await writeKeychainKey(VAULT_SERVICE, key, keychainRun)) deleteSetting(KEY_SETTING)
+    if (await saveMasterKey(VAULT_SERVICE, key, keychainRun ? { run: keychainRun } : {})) deleteSetting(KEY_SETTING)
     return key
   }
-  // 3. prima generazione: chiave nuova nel Keychain (funziona anche senza UI)
   try {
-    return await getKeychainKey(VAULT_SERVICE, keychainRun)
+    return await masterKeyOf(VAULT_SERVICE, keychainRun ? { run: keychainRun } : {})
   } catch {
     throw new Error('Vault locked: Keychain not available (cannot store the master key)')
   }

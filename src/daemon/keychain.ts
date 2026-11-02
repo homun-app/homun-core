@@ -1,8 +1,14 @@
 // Chiavi AES-256 nel Keychain macOS (fase 5: segreti dei connettori MCP —
 // token OAuth, header statici, client Google; fase 6 residuo 0b: chiave master
-// del vault). Il daemon le legge anche a finestra chiusa — per questo NON si
-// usa safeStorage come faceva il vault: le routine girano senza UI e i segreti
-// devono restare usabili (safeStorage senza finestra bloccherebbe tutto).
+// del vault; fase 16c C1: chiavi API dei provider).
+//
+// FASE RILASCIO (A6): le chiavi master NON nascono più qui — vivono cifrate
+// con safeStorage in <data>/keys.json (src/daemon/master-keys.ts), dove
+// l'accesso è legato alla firma dell'app. Questa pagina resta per due scopi:
+// 1) la MIGRAZIONE legge (e poi cancella, servizio per servizio) le voci
+//    vecchie create col comando `security`;
+// 2) il fallback quando safeStorage non è disponibile (la chiave non si perde
+//    mai: si continua a leggere dal Portachiavi come prima).
 //
 // I comandi partono da stdin (`security -i`, un comando per riga): la chiave
 // non compare mai nell'argv di un processo, dove sarebbe visibile a `ps`
@@ -42,6 +48,9 @@ export const execSecurity: SecurityRunner = (args, input) =>
  * (né in lettura: l'ACL della voce vera potrebbe negare l'accesso a un
  * processo diverso dal daemon vero e far comparire un dialogo). Variabile
  * SANDBOT_TEST_*: in produzione non esiste.
+ * Fase rilascio (A6): il finto supporta anche delete-generic-password, così
+ * la migrazione delle chiavi master si prova dal vivo senza il Portachiavi
+ * vero.
  */
 export function securityRunnerForEnv(): SecurityRunner {
   const fakePath = process.env.SANDBOT_TEST_FAKE_KEYCHAIN
@@ -60,6 +69,13 @@ export function securityRunnerForEnv(): SecurityRunner {
       const svc = args[args.indexOf('-s') + 1] ?? ''
       const v = map[svc]
       return v ? { out: v + '\n', err: '', code: 0 } : { out: '', err: 'not found', code: 1 }
+    }
+    if (args[0] === 'delete-generic-password') {
+      const svc = args[args.indexOf('-s') + 1] ?? ''
+      if (!(svc in map)) return { out: '', err: 'not found', code: 1 }
+      delete map[svc]
+      writeFileSync(fakePath, JSON.stringify(map))
+      return { out: '', err: '', code: 0 }
     }
     if (args[0] === '-i') {
       for (const line of String(input ?? '').split('\n')) {
@@ -89,15 +105,26 @@ export async function readKeychainKey(service: string, run: SecurityRunner = sec
 export async function writeKeychainKey(service: string, key: Buffer, run: SecurityRunner = securityRunnerForEnv()): Promise<boolean> {
   // -U aggiorna la voce se esiste già; il valore base64 è sicuro in una riga
   // di comando di `security -i` (charset [A-Za-z0-9+/=], niente quoting)
-  const cmd = `add-generic-password -a ${ACCOUNT} -s ${service} -w ${key.toString('base64')} -U\nquit\n`
+  const cmd = `add-generic-password -a ${ACCOUNT} -s ${service} -w ${key.toString('base64')} -U\n`
   const r = await run(['-i'], cmd)
+  return r.code === 0
+}
+
+/**
+ * Cancella la voce del Portachiavi di UN servizio esatto (A6: la migrazione
+ * la chiama solo dopo la verifica di keys.json — solo i servizi
+ * sandbot-*-key, mai nient'altro).
+ */
+export async function deleteKeychainKey(service: string, run: SecurityRunner = securityRunnerForEnv()): Promise<boolean> {
+  const r = await run(['delete-generic-password', '-a', ACCOUNT, '-s', service])
   return r.code === 0
 }
 
 /**
  * Chiave per una voce del Keychain: letta o generata alla prima occorrenza
  * (32 byte casuali). Se la scrittura fallisce perché una voce è stata creata
- * concorrentemente, rilegge: un solo processo vince la gara.
+ * concorrentemente, rilegge: un solo processo vince la gara. (Oggi è il
+ * FALLBACK di getMasterKey e la via delle generazioni PRE-migrazione.)
  */
 export async function getKeychainKey(service: string, run: SecurityRunner = securityRunnerForEnv()): Promise<Buffer> {
   const existing = await readKeychainKey(service, run)
@@ -111,12 +138,12 @@ export async function getKeychainKey(service: string, run: SecurityRunner = secu
   throw uiError(UI.rpcKeychainUnavailable)
 }
 
-/** Chiave dei segreti dei connettori (voce propria, separata dal vault). */
-export function getConnectorsKey(run: SecurityRunner = securityRunnerForEnv()): Promise<Buffer> {
-  return getKeychainKey(CONNECTORS_SERVICE, run)
+/** Chiave dei segreti dei connettori (A6: passa da keys.json/safeStorage; Portachiavi solo fallback/migrazione). */
+export function getConnectorsKey(run?: SecurityRunner): Promise<Buffer> {
+  return import('./master-keys').then((m) => m.getMasterKey(CONNECTORS_SERVICE, run ? { run } : {}))
 }
 
-/** Fase 16c (C1): chiave delle chiavi API dei provider (voce propria). */
-export function getProvidersKey(run: SecurityRunner = securityRunnerForEnv()): Promise<Buffer> {
-  return getKeychainKey(PROVIDERS_SERVICE, run)
+/** Fase 16c (C1): chiave delle chiavi API dei provider (A6: come i connettori). */
+export function getProvidersKey(run?: SecurityRunner): Promise<Buffer> {
+  return import('./master-keys').then((m) => m.getMasterKey(PROVIDERS_SERVICE, run ? { run } : {}))
 }

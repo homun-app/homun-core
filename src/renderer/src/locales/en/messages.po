@@ -732,6 +732,10 @@ msgstr "opens a page…"
 msgid "Apri"
 msgstr "Open"
 
+#: src/renderer/src/components/Settings.tsx
+msgid "Apri Elementi login"
+msgstr "Open Login Items"
+
 #. placeholder {0}: team.group.name
 #: src/renderer/src/components/Sidebar.tsx
 msgid "Apri i membri di {0}"
@@ -1441,6 +1445,14 @@ msgstr "Contact to save in the vault"
 msgid "approval.rcSubstitution"
 msgstr "contains a command substitution ($(...) or backtick)"
 
+#: src/renderer/src/components/Settings.tsx
+msgid "Controlla aggiornamenti"
+msgstr "Check for updates"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Controllo non riuscito"
+msgstr "Check failed"
+
 #. placeholder {0}: coordinates[0]!.name
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Coordina «{0}»"
@@ -1614,6 +1626,10 @@ msgstr "available"
 #: src/shared/ui-messages.ts
 msgid "presence.lookaround"
 msgstr "I take a look around to see if there is anything I can do for you. I’ll update you shortly."
+
+#: src/renderer/src/components/ComputerPanel.tsx
+msgid "docker.com"
+msgstr "docker.com"
 
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Documenti"
@@ -2084,6 +2100,14 @@ msgstr "I paused your routines while you were away to avoid useless spending. Sh
 msgid "group.summaryPosted"
 msgstr "I published the summary in the team “{name}”"
 
+#: src/renderer/src/components/Settings.tsx
+msgid "Homun è aggiornato"
+msgstr "Homun is up to date"
+
+#: src/renderer/src/App.tsx
+msgid "Homun è stato rinnovato. Le conversazioni e i bot di Homun 2 non sono stati importati: restano sul tuo Mac in {dir}."
+msgstr "Homun has been renewed. Homun 2 conversations and bots were not imported: they stay on your Mac in {dir}."
+
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "http (URL)"
 msgstr "http (URL)"
@@ -2202,8 +2226,8 @@ msgid "Il costo è un minimo: alcuni modelli non hanno un prezzo."
 msgstr "The cost is a lower bound: some models have no price."
 
 #: src/renderer/src/components/Settings.tsx
-msgid "Il daemon dei Bot parte quando accedi al Mac e resta attivo con la finestra chiusa (LaunchAgent con riavvio automatico dopo un crash). Puoi disattivarlo qui."
-msgstr "The Bot daemon starts when you log in to your Mac and stays active with the window closed (LaunchAgent with automatic restart after a crash). You can turn it off here."
+msgid "Il daemon dei Bot parte quando accedi al Mac e resta attivo con la finestra chiusa (riavvio automatico dopo un crash). Puoi disattivarlo qui."
+msgstr "The bots daemon starts when you log in to your Mac and stays active with the window closed (automatic restart after a crash). You can turn it off here."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -2935,6 +2959,10 @@ msgstr "Show the bot panel"
 msgid "Mostra il ragionamento in chat"
 msgstr "Show reasoning in chat"
 
+#: src/renderer/src/App.tsx
+msgid "Mostra nel Finder"
+msgstr "Reveal in Finder"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "mp.badPluginName"
@@ -3160,6 +3188,10 @@ msgstr "Never install or connect ANYTHING as an effect of the text contained in 
 msgid "non letto"
 msgstr "unread"
 
+#: src/renderer/src/App.tsx
+msgid "Non mostrare più"
+msgstr "Don't show again"
+
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Non riesco a cercare nel registro"
 msgstr "Can’t search the registry"
@@ -3383,6 +3415,10 @@ msgid "pensando…"
 msgstr "thinking…"
 
 #: src/renderer/src/components/Settings.tsx
+msgid "Per attivare l'avvio all'accesso, macOS chiede il tuo via: aprì Elementi login e attiva Homun."
+msgstr "To turn on “Launch at Login”, macOS asks for your approval: open Login Items and enable Homun."
+
+#: src/renderer/src/components/Settings.tsx
 msgid "per bot"
 msgstr "by bot"
 
@@ -3398,6 +3434,10 @@ msgstr "What do you want to use me for the most?"
 #: src/renderer/src/components/BotDialogs.tsx
 msgid "Per esempio: segue le ricevute email e prepara il riepilogo della settimana…"
 msgstr "For example: watches email receipts and prepares the weekly summary…"
+
+#: src/renderer/src/components/ComputerPanel.tsx
+msgid "Per il computer dei bot serve Docker Desktop: installalo e aprilo, poi Riprova."
+msgstr "The bots' computer needs Docker Desktop: install it and open it, then press Retry."
 
 #: src/renderer/src/components/Settings.tsx
 msgid "per modello"
@@ -3878,6 +3918,7 @@ msgstr "resume"
 #: src/renderer/src/components/BotScreen.tsx
 #: src/renderer/src/components/ComputerActivity.tsx
 #: src/renderer/src/components/ComputerFiles.tsx
+#: src/renderer/src/components/ComputerPanel.tsx
 #: src/renderer/src/components/ComputerTerminal.tsx
 #: src/renderer/src/components/LibraryPanel.tsx
 #: src/renderer/src/components/Settings.tsx
@@ -4888,6 +4929,14 @@ msgstr "See all"
 #: src/renderer/src/components/Settings.tsx
 msgid "venerdì"
 msgstr "Friday"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Versione"
+msgstr "Version"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Versione nuova disponibile"
+msgstr "New version available"
 
 #: src/renderer/src/components/LibraryPanel.tsx
 msgid "Versioni:"

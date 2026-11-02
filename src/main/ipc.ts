@@ -2,17 +2,24 @@
 // vengono inoltrati così come sono (stessi nomi e argomenti posizionali di
 // fase 1), gli eventi push del daemon arrivano sul canale 'sandbot:event'.
 // Restano locali solo le API che dipendono da finestre e dialoghi: pick-image,
-// test notifiche e gestione del LaunchAgent "Avvia all'accesso".
-import { ipcMain, BrowserWindow, Notification, dialog } from 'electron'
+// test notifiche, "Avvia all'accesso", il rinnovo da Homun 2 e l'aggiornamento.
+import { ipcMain, BrowserWindow, Notification, dialog, app, shell } from 'electron'
 import { readFile } from 'node:fs/promises'
+import { existsSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { refreshTray } from './tray'
 import { mainStrings, setMainLanguage, publishActiveLanguage } from './i18n'
 import type { UiLanguage } from '../shared/ui-language'
 import * as db from './store/db'
-import { isLaunchAgentInstalled, setLaunchAgent, LAUNCH_AGENT_LABEL } from './launchagent'
-import { daemonEntryPath } from './daemon-client'
+import {
+  isLaunchAgentInstalled, setLaunchAgent, loginItemMechanism,
+  LAUNCH_AGENT_LABEL, AGENT_SERVICE_NAME
+} from './launchagent'
+import { findLegacyHomun2Dir, legacyNoticeMarkerPath } from './legacy-homun2'
+import { daemonSpawnContext } from './daemon-context'
+import { DAEMON_FLAG } from './mode'
 import type { DaemonClient } from './daemon-client'
+import { checkNow } from './updater'
 import { assertDroppedMacPath } from './dropped-file'
 import type { SandbotEvent } from '../shared/types'
 
@@ -78,6 +85,8 @@ export const DAEMON_RPC_CHANNELS = [
   // fase 15: stato dei provider di ricerca (sola lettura, per le Impostazioni)
   'websearch:status',
   'permissions:get', 'permissions:set', 'settings:get', 'settings:set',
+  // fase rilascio (A7): lo stato di docker per la UI (installato? avviato?)
+  'box:docker-status', 'box:docker-retry',
   // fase 7: template dei bot (catalogo + creazione col kickstart)
   'templates:list', 'agents:create-from-template'
 ] as const
@@ -178,17 +187,65 @@ export function registerIpc(client: DaemonClient, getWindows: () => BrowserWindo
     refreshTray()
   })
 
-  // ---- "Avvia all'accesso": LaunchAgent del daemon ----
-  ipcMain.handle('launch-at-login:get', () => isLaunchAgentInstalled())
-  ipcMain.handle('launch-at-login:set', (_e, enabled: boolean) =>
-    setLaunchAgent(enabled, {
+  // ---- "Avvia all'accesso" (fase rilascio A3) ----
+  // Nell'app impacchettata: SMAppService (app.setLoginItemSettings con type
+  // agentService) — il plist sta nel bundle, l'utente lo governa in Impostazioni
+  // di Sistema › Elementi login. In sviluppo: il plist scritto a mano.
+  // Se lo stato è «richiede approvazione», la UI lo dice e offre di aprire
+  // le Impostazioni giuste.
+  const mechanism = loginItemMechanism(daemonSpawnContext().isPackaged)
+  const loginItemSettingsArgs = { type: 'agentService' as const, serviceName: AGENT_SERVICE_NAME }
+  ipcMain.handle('launch-at-login:get', () => {
+    if (mechanism === 'agentService') {
+      const s = app.getLoginItemSettings(loginItemSettingsArgs)
+      return { enabled: s.openAtLogin, requiresApproval: s.status === 'requires-approval', mechanism }
+    }
+    return { enabled: isLaunchAgentInstalled(), requiresApproval: false, mechanism }
+  })
+  ipcMain.handle('launch-at-login:set', (_e, enabled: boolean) => {
+    if (mechanism === 'agentService') {
+      app.setLoginItemSettings({ openAtLogin: enabled, ...loginItemSettingsArgs })
+      return
+    }
+    const ctx = daemonSpawnContext()
+    return setLaunchAgent(enabled, {
       label: LAUNCH_AGENT_LABEL,
       program: process.execPath,
-      args: [daemonEntryPath(), '--data', db.dataDir()],
-      env: { ELECTRON_RUN_AS_NODE: '1', SANDBOT_DATA_DIR: db.dataDir() },
+      args: [...(ctx.isPackaged ? [] : [ctx.appPath]), DAEMON_FLAG],
+      env: {},
       logPath: join(db.dataDir(), 'daemon.log')
     })
-  )
+  })
+  ipcMain.handle('open-login-items-settings', () => {
+    // «Apri Elementi login» (A3): apre la pagina giusta delle Impostazioni
+    void shell.openExternal('x-apple.systempreferences:com.apple.LoginItems-Settings.extension')
+    return { opened: true }
+  })
+
+  // ---- fase rilascio (A8): l'aggiornamento (le RPC stanno in updater.ts) ----
+  ipcMain.handle('updater:status', () => ({ current: app.getVersion() }))
+  ipcMain.handle('updater:check', () => checkNow())
+
+  // ---- fase rilascio (A8): il passaggio da Homun 2 e il Finder ----
+  ipcMain.handle('app:legacy-homun2', () => {
+    // NON si legge niente dentro le cartelle di Homun 2: si controlla solo
+    // che esistano, una volta (marker nell'userData)
+    const marker = legacyNoticeMarkerPath(app.getPath('userData'))
+    if (existsSync(marker)) return null
+    const dir = findLegacyHomun2Dir(app.getPath('appData'))
+    return dir ? { dir } : null
+  })
+  ipcMain.handle('app:legacy-homun2-dismiss', () => {
+    writeFileSync(legacyNoticeMarkerPath(app.getPath('userData')), String(Date.now()) + '\n', { mode: 0o600 })
+    return { ok: true }
+  })
+  ipcMain.handle('app:reveal-in-finder', (_e, dir: string) => {
+    // solo la cartella indicata dalla riga del rinnovo (main-decisa)
+    const legacy = findLegacyHomun2Dir(app.getPath('appData'))
+    if (dir !== legacy) return { ok: false }
+    shell.showItemInFolder(dir)
+    return { ok: true }
+  })
 
   // ---- eventi push del daemon → renderer (+ tray e notifiche) ----
   client.onEvent((e) => {

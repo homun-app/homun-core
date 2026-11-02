@@ -25,6 +25,8 @@
 // -- -<pgid> come 1000 e i file si cancellano (lo schema degli orfani del
 // browser e delle shell).
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+// fase rilascio (A7): docker fuori dal PATH del Terminale
+import { resolveTool, dockerChildEnv } from '../tool-paths'
 import { randomBytes } from 'node:crypto'
 import type { Duplex } from 'node:stream'
 import type { IncomingMessage } from 'node:http'
@@ -337,7 +339,7 @@ function closeIdle(conn: TermConn): void {
 function spawnTerminalBridge(owner: string): ChildProcessWithoutNullStreams {
   const child = fakeTerminalEnabled()
     ? spawn('node', ['-e', FAKE_TERMINAL_BRIDGE_JS], { stdio: ['pipe', 'pipe', 'pipe'] })
-    : spawn('docker', dockerTerminalArgv(owner), { stdio: ['pipe', 'pipe', 'pipe'] })
+    : spawn(resolveTool('docker'), dockerTerminalArgv(owner), { env: dockerChildEnv(process.env), stdio: ['pipe', 'pipe', 'pipe'] })
   return child as ChildProcessWithoutNullStreams
 }
 

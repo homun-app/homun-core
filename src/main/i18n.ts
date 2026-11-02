@@ -25,6 +25,26 @@ export interface MainStrings {
     replaceYes: string
     replaceNo: string
   }
+  /** fase rilascio (A8): i dialoghi nativi dell'aggiornamento */
+  updater: {
+    availableTitle: string
+    availableBody: string
+    download: string
+    openNotes: string
+    later: string
+    downloadingTitle: string
+    downloadFailed: string
+    readyTitle: string
+    readyBody: string
+    restartNow: string
+    onQuit: string
+    progressTitle: string
+    progressBody: string
+    upToDate: string
+    checkFailed: string
+  }
+  /** fase rilascio (A8): la riga del rinnovo da Homun 2 */
+  legacy: { renewed: string }
 }
 
 const STRINGS: Record<UiLanguage, MainStrings> = {
@@ -47,7 +67,25 @@ const STRINGS: Record<UiLanguage, MainStrings> = {
       replaceMessage: 'Nel computer del bot esiste già «{name}». Sostituirlo?',
       replaceYes: 'Sostituisci',
       replaceNo: 'Salta'
-    }
+    },
+    updater: {
+      availableTitle: 'È disponibile Homun {version}',
+      availableBody: 'Puoi scaricarla adesso: vedrai l\'avanzamento e al termine decidi se riavviare subito. Le note complete sono nella pagina delle release.',
+      download: 'Scarica',
+      openNotes: 'Apri le note',
+      later: 'Più tardi',
+      downloadingTitle: 'Download della versione {version}',
+      downloadFailed: 'Download non riuscito',
+      readyTitle: 'Aggiornamento pronto',
+      readyBody: 'La nuova versione è stata scaricata. Posso chiudere e riavviare Homun adesso per installarla, oppure installarla quando chiudi l\'app.',
+      restartNow: 'Riavvia ora',
+      onQuit: 'Alla chiusura',
+      progressTitle: 'Aggiornamento Homun',
+      progressBody: 'Homun continua a funzionare: l\'aggiornamento si installa solo con il tuo consenso.',
+      upToDate: 'Homun è aggiornato ({version})',
+      checkFailed: 'Controllo non riuscito'
+    },
+    legacy: { renewed: 'Homun è stato rinnovato' }
   },
   en: {
     tray: {
@@ -68,7 +106,25 @@ const STRINGS: Record<UiLanguage, MainStrings> = {
       replaceMessage: '"{name}" already exists in the bot\'s computer. Replace it?',
       replaceYes: 'Replace',
       replaceNo: 'Skip'
-    }
+    },
+    updater: {
+      availableTitle: 'Homun {version} is available',
+      availableBody: 'You can download it now: you will see the progress and then choose whether to restart right away. The full notes are on the releases page.',
+      download: 'Download',
+      openNotes: 'Open the notes',
+      later: 'Later',
+      downloadingTitle: 'Downloading version {version}',
+      downloadFailed: 'Download failed',
+      readyTitle: 'Update ready',
+      readyBody: 'The new version has been downloaded. Homun can close and restart now to install it, or install it when you quit the app.',
+      restartNow: 'Restart now',
+      onQuit: 'On quit',
+      progressTitle: 'Homun update',
+      progressBody: 'Homun keeps working: the update installs only with your consent.',
+      upToDate: 'Homun is up to date ({version})',
+      checkFailed: 'Check failed'
+    },
+    legacy: { renewed: 'Homun has been renewed' }
   }
 }
 

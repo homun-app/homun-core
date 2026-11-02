@@ -841,9 +841,22 @@ export interface SandbotApi {
   libraryExport(id: string, format: string): Promise<{ ok: boolean; path: string; output: string }>
   libraryRestoreVersion(id: string, version: number): Promise<{ ok: boolean; version: number }>
   libraryStats(): Promise<{ bytes: number; warn: boolean; warnBytes: number }>
-  // daemon all'accesso (LaunchAgent)
-  getLaunchAtLogin(): Promise<boolean>
+  // daemon all'accesso — fase rilascio (A3): nell'app impacchettata è
+  // SMAppService; requiresApproval dice che macOS aspetta il via dell'utente
+  // in Impostazioni › Elementi login (il bottone le apre)
+  getLaunchAtLogin(): Promise<{ enabled: boolean; requiresApproval: boolean; mechanism: 'agentService' | 'plist' }>
   setLaunchAtLogin(enabled: boolean): Promise<void>
+  openLoginItemsSettings(): Promise<{ opened: boolean }>
+  // fase rilascio (A7): stato di docker per la UI (installato? avviato?)
+  boxDockerStatus(): Promise<{ installed: boolean; running: boolean; path: string }>
+  boxDockerRetry(): Promise<{ installed: boolean; running: boolean; path: string }>
+  // fase rilascio (A8): l'aggiornamento (main process)
+  updaterStatus(): Promise<{ current: string }>
+  updaterCheck(): Promise<{ current: string; available: boolean; version: string | null; error?: string }>
+  // fase rilascio (A8): la riga del rinnovo da Homun 2 (una volta)
+  legacyHomun2(): Promise<{ dir: string } | null>
+  legacyHomun2Dismiss(): Promise<{ ok: boolean }>
+  revealInFinder(dir: string): Promise<{ ok: boolean }>
   // fase 17a: il renderer avvisa che la lingua dell'interfaccia è cambiata
   // (il main ricostruisce tray e notifiche nella lingua attiva)
   uiLanguageChanged(lang: 'it' | 'en'): Promise<void>

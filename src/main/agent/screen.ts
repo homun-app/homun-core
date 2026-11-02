@@ -20,6 +20,8 @@
 // sostituisce docker exec con un socket unix locale del test (come
 // SANDBOT_TEST_FAKE_BROWSER_MCP, non esiste in produzione).
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+// fase rilascio (A7): docker fuori dal PATH del Terminale
+import { resolveTool, dockerChildEnv } from '../tool-paths'
 import { randomBytes } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { basename, join } from 'node:path'
@@ -385,7 +387,7 @@ function spawnBridge(socketPath: string): ChildProcessWithoutNullStreams {
   const fake = fakeScreenSocketDir()
   const child = fake
     ? spawn('node', ['-e', SCREEN_BRIDGE_NODE_JS, join(fake, basename(socketPath))], { stdio: ['pipe', 'pipe', 'pipe'] })
-    : spawn('docker', dockerScreenBridgeArgv(socketPath), { stdio: ['pipe', 'pipe', 'pipe'] })
+    : spawn(resolveTool('docker'), dockerScreenBridgeArgv(socketPath), { env: dockerChildEnv(process.env), stdio: ['pipe', 'pipe', 'pipe'] })
   return child as ChildProcessWithoutNullStreams
 }
 

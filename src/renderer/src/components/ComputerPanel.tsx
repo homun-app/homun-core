@@ -8,6 +8,8 @@
 import { useEffect, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { api, useStore, type ComputerTab } from '../store'
+// fase rilascio (A7): docker trovato e avviato?
+export const DOCKER_DESKTOP_URL = 'https://www.docker.com/products/docker-desktop/'
 import { BotScreen } from './BotScreen'
 import { ComputerTerminal } from './ComputerTerminal'
 import { ComputerFiles } from './ComputerFiles'
@@ -37,6 +39,28 @@ export function ComputerPanel({ agentId, onClose, embedded = false }: { agentId:
         setHasScreen(false)
         setHasTerminal(false)
       })
+  }, [])
+
+  // fase rilascio (A7): docker mancante o fermo → una riga in parole, non un
+  // errore tecnico (vale solo in modalità docker: in host non serve)
+  const [dockerMode, setDockerMode] = useState(false)
+  const [dockerOk, setDockerOk] = useState(true)
+  const [dockerBusy, setDockerBusy] = useState(false)
+  const readDockerStatus = (retry: boolean): void => {
+    setDockerBusy(true)
+    void (retry ? api.boxDockerRetry() : api.boxDockerStatus())
+      .then((r) => {
+        setDockerMode(true)
+        setDockerOk(r.installed && r.running)
+      })
+      .catch(() => undefined)
+      .finally(() => setDockerBusy(false))
+  }
+  useEffect(() => {
+    void api.settingsGet<string>('sandbox.mode', 'host').then((mode) => {
+      if (mode === 'docker') readDockerStatus(false)
+      else setDockerMode(false)
+    }).catch(() => setDockerMode(false))
   }, [])
 
   const available = (tab: ComputerTab): boolean =>
@@ -96,6 +120,25 @@ export function ComputerPanel({ agentId, onClose, embedded = false }: { agentId:
           </button>
         )}
       </header>
+
+      {/* fase rilascio (A7): Docker Desktop serve per schermo e terminale */}
+      {dockerMode && !dockerOk && (
+        <div className="mx-2 mb-1 flex items-center justify-between gap-3 rounded-xl bg-muted px-3 py-2 text-xs text-muted-foreground">
+          <p>
+            <Trans>Per il computer dei bot serve Docker Desktop: installalo e aprilo, poi Riprova.</Trans>{' '}
+            <a className="underline" href={DOCKER_DESKTOP_URL} target="_blank" rel="noreferrer">
+              <Trans>docker.com</Trans>
+            </a>
+          </p>
+          <button
+            className="shrink-0 rounded-full bg-foreground px-3 py-1 text-[11px] text-background disabled:opacity-40"
+            disabled={dockerBusy}
+            onClick={() => readDockerStatus(true)}
+          >
+            <Trans>Riprova</Trans>
+          </button>
+        </div>
+      )}
 
       <div className="relative flex-1 overflow-hidden">
         {/* ogni scheda visitata resta MONTATA: la sessione (terminale, anteprima)

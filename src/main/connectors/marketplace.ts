@@ -10,6 +10,8 @@
 // flag di test), tetti di dimensione/file/tempo e rifiuto dei symlink che
 // escono dalla cartella.
 import { spawn } from 'node:child_process'
+// fase rilascio (A7): git di /usr/bin o Homebrew, non il nome semplice
+import { resolveTool } from '../tool-paths'
 import { existsSync, lstatSync, mkdtempSync, cpSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { isAbsolute, join, relative, resolve } from 'node:path'
@@ -195,7 +197,7 @@ export function githubRepoUrl(repo: string): string {
 
 const defaultRun: NonNullable<GitCloneDeps['run']> = (args, opts = {}) =>
   new Promise((res, rej) => {
-    const child = spawn('git', args, { stdio: ['ignore', 'pipe', 'pipe'], ...(opts.cwd ? { cwd: opts.cwd } : {}) })
+    const child = spawn(resolveTool('git'), args, { stdio: ['ignore', 'pipe', 'pipe'], ...(opts.cwd ? { cwd: opts.cwd } : {}) })
     let stdout = ''
     let stderr = ''
     const timer = opts.timeoutMs ? setTimeout(() => child.kill('SIGKILL'), opts.timeoutMs) : null
