@@ -70,6 +70,13 @@ describe('isExternalSend (config di default + nome)', () => {
     expect(isExternalSend('mcp__blog__get_post', undefined, {})).toBe(false)
   })
 
+  it('verifica 0.3.1001: verbo di lettura seguito da send/forward resta un invio (fail closed)', () => {
+    for (const name of ['fetch_and_send', 'read_and_forward', 'getAndSendReport', 'get_send_status']) {
+      expect(sendLikeName(name)).toBe(true)
+    }
+    expect(isExternalSend('mcp__x__fetch_and_send', { readOnlyHint: true }, {})).toBe(false)
+  })
+
   it('M1: readOnlyHint true ESCLUDE sempre (le annotazioni servono a escludere, non a includere)', () => {
     expect(isExternalSend('mcp__ufficio__send_email', { readOnlyHint: true }, {})).toBe(false)
     // openWorldHint da solo NON basta: molti server lo mettono anche sulle letture

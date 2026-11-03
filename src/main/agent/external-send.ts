@@ -68,7 +68,11 @@ export function sendLikeName(original: string): boolean {
   if (SEND_EXTRA_NAMES.has(original)) return true
   const segs = nameSegments(original)
   if (segs.length === 0) return false
-  if (READ_FIRST_VERBS.has(segs[0]!)) return false
+  // verbo di lettura in testa: «post»/«reply» più avanti sono di solito nomi
+  // (get_post, read_reply), ma «send»/«forward» restano verbi
+  // (fetch_and_send, read_and_forward): nel dubbio è un invio (fail closed),
+  // readOnlyHint può sempre escluderlo
+  if (READ_FIRST_VERBS.has(segs[0]!)) return segs.slice(1).some((s) => s === 'send' || s === 'forward')
   if (SEND_FIRST_VERBS.has(segs[0]!)) return true
   return segs.slice(1).some((s) => SEND_LATER_VERBS.has(s))
 }
