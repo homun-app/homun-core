@@ -163,3 +163,21 @@ describe('sanitizeComposioError / redactComposioSecrets (A5)', () => {
     expect(redactComposioSecrets('Channel not found: #generale')).toBe('Channel not found: #generale')
   })
 })
+
+describe('verifica fase app: nomi accorciati classificati sullo slug completo', () => {
+  it('un\'azione lunga composta con cancellazione non passa per lettura', () => {
+    const name = composioToolName('googledrive', 'GOOGLEDRIVE_FIND_FILE_IN_SHARED_DRIVE_AND_MOVE_TO_TRASH_FOLDER')
+    expect(name.length).toBe(64)
+    expect(classifyComposioToolName(name)).toBe('destructive')
+  })
+  it('lettura lunga e semplice resta lettura se lo slug completo è noto', () => {
+    const name = composioToolName('googlecalendar', 'GOOGLECALENDAR_LIST_EVENTS_FOR_A_SPECIFIC_CALENDAR_WITH_PAGING')
+    expect(name.length).toBe(64)
+    expect(classifyComposioToolName(name)).toBe('read')
+  })
+  it('un nome accorciato sconosciuto non è mai lettura (fail closed)', () => {
+    const unknown = 'composio__salesforce__SALESFORCE_GET_ACCOUNT_DETAILS_BY_I_abcdef'
+    expect(unknown.length).toBe(64)
+    expect(classifyComposioToolName(unknown)).toBe('write')
+  })
+})

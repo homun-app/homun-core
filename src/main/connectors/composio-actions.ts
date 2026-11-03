@@ -47,16 +47,28 @@ export function stripToolkitPrefix(toolkitSlug: string, actionSlug: string): str
   return upper.startsWith(prefix) ? actionSlug.slice(prefix.length) : actionSlug
 }
 
+/**
+ * Verifica fase app: i nomi accorciati (oltre COMPOSIO_TOOL_NAME_MAX) perdono
+ * la coda dell'azione, dove possono stare «_AND_DELETE…». composioToolName
+ * ricorda qui il nome completo, così la classificazione lavora sempre sullo
+ * slug intero; un nome accorciato che non si trova qui è «truncated» e non
+ * passa mai per lettura (fail closed).
+ */
+const fullActionOfShortName = new Map<string, string>()
+const SHORTENED_NAME = /_[0-9a-f]{6}$/
+
 /** Il nome dell'azione SENZA prefisso del toolkit, dal nome COMPLETO dello strumento. */
-export function composioActionOfToolName(toolName: string): { toolkit: string; action: string } | null {
+export function composioActionOfToolName(toolName: string): { toolkit: string; action: string; truncated?: boolean } | null {
   if (!toolName.startsWith(COMPOSIO_TOOL_PREFIX)) return null
   const rest = toolName.slice(COMPOSIO_TOOL_PREFIX.length)
   const sep = rest.indexOf('__')
   if (sep <= 0) return null
   const toolkit = rest.slice(0, sep)
-  const action = rest.slice(sep + 2)
+  const full = fullActionOfShortName.get(toolName)
+  const action = full ?? rest.slice(sep + 2)
   if (!toolkit || !action) return null
-  return { toolkit, action: stripToolkitPrefix(toolkit, action) }
+  const truncated = full === undefined && toolName.length === COMPOSIO_TOOL_NAME_MAX && SHORTENED_NAME.test(toolName)
+  return { toolkit, action: stripToolkitPrefix(toolkit, action), ...(truncated ? { truncated: true } : {}) }
 }
 
 /**
@@ -71,6 +83,9 @@ export function composioActionOfToolName(toolName: string): { toolkit: string; a
 export function classifyComposioAction(name: string): ComposioActionKind {
   const stripped = composioActionOfToolName(name)
   const bare = stripped ? stripped.action : name
+  // nome accorciato senza lo slug completo: la coda persa può essere una
+  // modifica, quindi mai «lettura»
+  if (stripped?.truncated) return DESTRUCTIVE_COMPOSIO_ACTION_PATTERN.test(bare) ? 'destructive' : 'write'
   if (COMPOUND_COMPOSIO_ACTION_PATTERN.test(bare)) {
     // composta: contiene _and_/_or_/_then_ → sempre card (e distruttiva se
     // dentro c'è anche un verbo distruttivo)
@@ -148,7 +163,9 @@ export function composioToolName(toolkitSlug: string, actionSlug: string): strin
   const hash = createHash('sha256').update(action).digest('hex').slice(0, 6)
   const head = `${COMPOSIO_TOOL_PREFIX}${toolkit}__`
   const room = COMPOSIO_TOOL_NAME_MAX - head.length - hash.length - 1
-  return `${head}${action.slice(0, Math.max(1, room))}_${hash}`
+  const short = `${head}${action.slice(0, Math.max(1, room))}_${hash}`
+  fullActionOfShortName.set(short, action)
+  return short
 }
 
 /** Lo slug reso leggibile: SEND_EMAIL → «Send email» (ripiego senza nome umano). */
