@@ -112,6 +112,13 @@ interface Store {
   /** pannello destro aperto (setting ui.rightPanel) */
   rightPanel: boolean
   /**
+   * G2 (fase 0.3.1001 grafica): contatore delle richieste di riportare il
+   * focus al bottone PanelRight dopo la chiusura del pannello (✕, Esc, velo)
+   * — Chat e TeamChat lo guardano e mettono a fuoco il bottone ricomparso.
+   */
+  panelFocusRestore: number
+  requestPanelFocusRestore(): void
+  /**
    * Fase 19b (T1): il pannello «Computer» del bot — quattro schede (Schermo,
    * Terminale, File, Attività) e, per lo Schermo, il modo (vista/controllo).
    */
@@ -271,6 +278,8 @@ export const useStore = create<Store>((set, get) => ({
   uiLanguage: 'system',
   activeLanguage: 'it',
   rightPanel: true,
+  // G2 (fase 0.3.1001 grafica)
+  panelFocusRestore: 0,
   computerPanel: { open: false, tab: 'activity', mode: 'view' },
   computerTabByAgent: {},
   screenStatus: {},
@@ -725,6 +734,12 @@ export const useStore = create<Store>((set, get) => ({
   setRightPanel(v) {
     set({ rightPanel: v })
     void api.settingsSet('ui.rightPanel', v).catch(() => undefined)
+  },
+
+  // G2 (fase 0.3.1001 grafica): il pannello è stato chiuso → il focus torna
+  // al bottone PanelRight che ricompare nella fascia alta
+  requestPanelFocusRestore() {
+    set({ panelFocusRestore: get().panelFocusRestore + 1 })
   },
 
   // fase 19b (T1): il pannello «Computer» — la tab si ricorda per bot

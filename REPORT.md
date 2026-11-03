@@ -1,3 +1,49 @@
+# REPORT FASE 0.3.1001 — grafica
+
+**Data:** 2026-11-03 · **Base:** `main` @ cf8871b (tag `fase-0.3.1001`) · **Commit:** `0.3.1001: ritocchi grafici (bolle, pannello, pillola del bot)` · **Tag:** `fase-0.3.1001-grafica`. Nessun push, nessun tag `v*`; la versione resta 0.3.1001 (questi ritocchi escono insieme a M1–M10).
+**Verifica:** `typecheck` pulito · `vitest` **148 file / 2311 test verdi** (nuovo file `user-bubble.test.ts`, 6 test) · `build` verde · `i18n:extract` due estrazioni consecutive **identiche** (en 1134/1134, **0 mancanti**) · **sonda Electron 21/21** (v. sotto).
+Dati veri mai toccati: ogni avvio dell'app è corso con `env -i HOME=$HOME PATH=/usr/bin:/bin:/usr/sbin:/sbin SANDBOT_TEST_USER_DATA=<mkdtemp in /var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/> SANDBOT_TEST_FAKE_KEYCHAIN=<file> SANDBOT_TEST_FAKE_SAFESTORAGE=<file>`; mai Portachiavi/safeStorage veri, mai `keys.json` dell'utente, niente Docker, provider finto su 127.0.0.1, nessuna rete reale, **eval non lanciato**. **A fine sonda il daemon di sviluppo è stato chiuso** (pid da `daemon.lock` della cartella temporanea): la sonda della 0.3.1001 lo lasciava acceso — corretto anche `scripts/fase-0.3.1001-probe.mjs` con la stessa chiusura.
+
+## Sonda Electron (build di sviluppo, dati temporanei) — 21/21 OK
+
+`node scripts/fase-0.3.1001-grafica-probe.mjs`: l'app reale da `out/`, provider finto openai-compatible su 127.0.0.1, pilota il renderer via CDP col **bridge vero** (`window.sandbot`). Crea un bot **arancione** (c1) e uno **blu-violetto** (c4) e una squadra con entrambi. Controlli: **G2a–e** (PanelRight assente a pannello aperto docked e overlay; alla chiusura con ✕ il bottone ricompare **e prende il focus**; apertura → focus alla ✕ del pannello; dopo Esc l'overlay è chiuso e il focus è sul bottone) · **G3a–h** (clic sulla pillola apre/chiude, `elementFromPoint` 40 px a sinistra della pillola dà la fascia `drag-region` e non un bottone, hit-test al centro della pillola, tutto ripetuto sulla pillola della squadra) · **G1a–f** (bolle utente visibili nelle due chat; **stesso colore calcolato** con i due bot diversi, in chiaro e in scuro; il colore è **il token neutro** `--bubble-user`, non l'arancione). Catture in `docs/catture/0.3.1001-grafica/`: `g-{1440,900}-{chiaro,scuro}-{aperto,chiuso}.png` (8, bot arancione); verifica ai pixel: la bolla in chiaro è `rgb(16,23,38)`, in scuro `rgb(222,229,238)`, nessuna traccia dell'arancione `rgb(247,100,0)`.
+
+## G1 — La bolla dei messaggi dell'utente ha sempre lo stesso colore
+
+**Dove:** `src/renderer/src/styles.css` (nuovi token `--bubble-user` / `--bubble-user-foreground` in `:root` e `.dark`, valore iniziale = `--primary` / `--primary-foreground`: si ritoccano in un punto solo), `src/renderer/src/components/Chat.tsx` (`EntryRow`: la bolla utente è `bg-[var(--bubble-user)] text-[var(--bubble-user-foreground)]`; tolto il colore del bot), `src/renderer/src/components/TeamChat.tsx` (bolla utente della squadra sugli stessi token, prima `bg-foreground text-background`). Le bolle del bot (`bg-muted`) non cambiano.
+**Rapporti di contrasto** (calcolati dai valori oklch, oklch → oklab → linear sRGB → luminanza relativa WCAG 2.1):
+- chiaro: testo `oklch(0.984 0.003 247.858)` su `oklch(0.208 0.042 265.755)` → **17,05:1** (rgb 248,250,252 su 15,23,43);
+- scuro: testo `oklch(0.208 0.042 265.755)` su `oklch(0.929 0.013 255.508)` → **14,49:1** (rgb 15,23,43 su 226,232,240).
+Per riferimento, la vecchia bolla col bot arancione (c1, `oklch(0.68 0.2 45)` = rgb 247,100,0) col testo di prima (`--background`) era a **2,89:1** in chiaro: sotto soglia.
+**Test:** puro in `src/renderer/src/__tests__/user-bubble.test.ts` (6 test: token presenti in entrambi i temi; valore iniziale = `--primary`/`--primary-foreground`; contrasto ≥ 4,5:1 in chiaro e scuro calcolato dagli oklch; Chat e TeamChat usano i token; nessun `var(--bot-` rimasto in Chat.tsx e in TeamChat.tsx solo per l'identità). Sonda: G1a–f.
+
+### Tutti gli usi di `--bot-*` e le decisioni
+
+| Dove | Uso | Decisione |
+| --- | --- | --- |
+| `Chat.tsx` (~475, ~524) | bolla utente a destra col colore del bot | **cambiato**: token neutri `--bubble-user` (G1) |
+| `TeamChat.tsx` (bolla utente) | `bg-foreground text-background` (già neutra ma fuori token) | **cambiato**: stessi token `--bubble-user` (un punto solo per ritoccare) |
+| `TeamChat.tsx:47` | pillola @menzione col colore del bot menzionato (+ `--bot-ink` sul testo) | resta: identità del bot menzionato (è un riferimento al nome) |
+| `TeamChat.tsx:68` | nome dell'autore nel suo colore; bolla del riepilogo del coordinatore tinta al 12% | resta: nome = identità; la tinta leggera marca l'autore, il testo dentro è neutro |
+| `ActivityPanel.tsx:78` | nome del bot nella riga di attività | resta: identità (nome) |
+| `TakeoverCard.tsx:25` | card della presa di controllo tinta al 10% e bottone «Apri lo schermo» nel colore del bot | resta: accento d'identità del bot autore della card; non colora contenuto dell'utente né testo della conversazione |
+| `BotDialogs.tsx:71,111,172,266` | campioni dei colori e anteprima avatar | restano: identità (scelta dell'aspetto) |
+| `Sidebar.tsx:109` | mini-pallini avatar dei membri della squadra | resta: identità (avatar) |
+| `BotScreen.tsx:25` | bordo di controllo dello schermo del bot | resta: identità |
+| `Bot.tsx:171` (+ `--bot-ink/screen/blush`) | fill della mascotte | resta: identità (mascotte) |
+
+## G2 — Pannello aperto: resta solo la ✕
+
+**Dove:** `src/renderer/src/components/Chat.tsx` e `TeamChat.tsx` (a `rightPanel` aperto, docked **o** overlay, il bottone `PanelRight` **non si renderizza**: al suo posto uno spacer `w-9` così la pillola al centro non salta; a pannello chiuso torna con l'aspetto «inattivo» di oggi), `src/renderer/src/store.ts` (nuovo `panelFocusRestore` + `requestPanelFocusRestore()`), `src/renderer/src/components/RightPanel.tsx` (`close()` — ✕, Esc e velo — chiede il focus al bottone ricomparso; `BotPanel` e `MembersPanel` all'apertura mettono il focus sul primo controllo del pannello, la ✕, come già faceva l'overlay).
+**Test:** sonda G2a–e (bottone assente/presente nel DOM; focus dopo ✕ e dopo Esc sul bottone `PanelRight` ricomparso; focus all'apertura sulla ✕; a 900 il pannello aperto è overlay).
+
+## G3 — Clic sulla pillola del bot al centro: apre o chiude il pannello
+
+**Dove:** `src/renderer/src/components/Chat.tsx` e `TeamChat.tsx`: la pillola (mascotte + nome / nome squadra + «Risponde …») è ora un `<button>` `no-drag` con `aria-expanded`, `aria-label`/`title` «Mostra/Nascondi il pannello del bot/dei membri» (stringhe già esistenti) e `onClick={() => setRightPanel(!rightPanel)}`; hover leggero (`bg-card` pieno + `cursor-pointer`), stesso aspetto e troncamento del nome (Q4). Solo la pillola è cliccabile: il resto della fascia da 60 px resta `drag-region` (lo span centrale ha perso `pointer-events-none`, il trascinamento resta perché il bottone porta `no-drag` e la fascia attorno no). Tastiera: Tab la raggiunge, Enter/Spazio la attivano (è un `<button>`).
+**Test:** sonda G3a–h (apri/chiudi col clic, anche nella squadra; `elementFromPoint` 40 px a sinistra della pillola → fascia `drag-region` e non un bottone, in entrambe le viste; hit-test al centro → la pillola).
+
+---
+
 # REPORT FASE 0.3.1001
 
 **Data:** 2026-11-03 · **Base:** `main` @ c769084 (tag `v0.3.1000`) · **Commit:** `0.3.1001: correzioni dal confronto e dalla prova d'installazione` · **Tag:** `fase-0.3.1001`. Nessun push, nessun tag `v*`.

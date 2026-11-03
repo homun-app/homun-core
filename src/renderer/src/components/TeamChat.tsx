@@ -124,6 +124,13 @@ export function TeamChat() {
   const sendGroupMessage = useStore((s) => s.sendGroupMessage)
   const rightPanel = useStore((s) => s.rightPanel)
   const setRightPanel = useStore((s) => s.setRightPanel)
+  // G2 (fase 0.3.1001 grafica): pannello chiuso → il focus torna al bottone
+  // PanelRight che ricompare
+  const panelFocusRestore = useStore((s) => s.panelFocusRestore)
+  const panelBtnRef = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    if (panelFocusRestore > 0) panelBtnRef.current?.focus()
+  }, [panelFocusRestore])
   const [text, setText] = useState('')
   const [mentionIdx, setMentionIdx] = useState(0)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -187,27 +194,43 @@ export function TeamChat() {
   return (
     <main className="relative flex min-w-0 flex-1 flex-col">
       {/* fase 16b correzioni 2 (Q3): la fascia alta di 60 px come nella chat —
-          etichetta sospesa (nome della squadra + chi risponde, che tronca)
-          sulla riga comune y 12–48 e bottone del pannello a destra */}
+          pillola della squadra (nome + chi risponde, che tronca) sulla riga
+          comune y 12–48 e bottone del pannello a destra.
+          G3 (fase 0.3.1001 grafica): la pillola è un BOTTONE che apre/chiude
+          il pannello dei membri (no-drag; attorno resta il trascinamento).
+          G2: a pannello APERTO il bottone PanelRight sparisce — resta la ✕ —
+          ma il posto w-9 resta occupato, così la pillola non salta */}
       <div className="drag-region absolute inset-x-0 top-0 z-10 flex h-[60px] flex-col">
         <div className="mt-3 flex h-9 items-center gap-3 px-4">
           <span className="w-9 shrink-0" aria-hidden="true" />
-          <span className="pointer-events-none flex min-w-0 flex-1 justify-center">
-            <span className="flex min-w-0 max-w-full items-center gap-2 rounded-full bg-card/95 py-1.5 pl-4 pr-4 shadow-soft">
+          <span className="flex min-w-0 flex-1 justify-center">
+            <button
+              type="button"
+              className="no-drag flex min-w-0 max-w-full cursor-pointer items-center gap-2 rounded-full bg-card/95 py-1.5 pl-4 pr-4 text-left shadow-soft transition hover:bg-card"
+              aria-expanded={rightPanel}
+              aria-label={rightPanel ? t`Nascondi il pannello dei membri` : t`Mostra il pannello dei membri`}
+              title={rightPanel ? t`Nascondi il pannello dei membri` : t`Mostra il pannello dei membri`}
+              onClick={() => setRightPanel(!rightPanel)}
+            >
               <span className="truncate text-[15px] font-medium">{group.name}</span>
               {coordinator && (
                 <span className="truncate text-[13px] text-muted-foreground">· <Trans>Risponde {coordinator.name}</Trans></span>
               )}
-            </span>
+            </button>
           </span>
-          <button
-            className={`no-drag grid size-9 shrink-0 place-items-center rounded-full transition ${rightPanel ? 'bg-muted text-foreground' : 'bg-muted/60 text-muted-foreground hover:text-foreground'}`}
-            aria-label={rightPanel ? t`Nascondi il pannello dei membri` : t`Mostra il pannello dei membri`}
-            title={rightPanel ? t`Nascondi il pannello dei membri` : t`Mostra il pannello dei membri`}
-            onClick={() => setRightPanel(!rightPanel)}
-          >
-            <PanelRight className="size-4" />
-          </button>
+          {rightPanel ? (
+            <span className="w-9 shrink-0" aria-hidden="true" />
+          ) : (
+            <button
+              ref={panelBtnRef}
+              className="no-drag grid size-9 shrink-0 place-items-center rounded-full bg-muted/60 text-muted-foreground transition hover:text-foreground"
+              aria-label={t`Mostra il pannello dei membri`}
+              title={t`Mostra il pannello dei membri`}
+              onClick={() => setRightPanel(true)}
+            >
+              <PanelRight className="size-4" />
+            </button>
+          )}
         </div>
       </div>
 
@@ -221,7 +244,9 @@ export function TeamChat() {
               <p key={m.id} className="text-center text-xs text-muted-foreground">{groupSystemText(m.text)}</p>
             ) : m.authorKind === 'user' ? (
               <div key={m.id} className="flex justify-end">
-                <div className="max-w-[75%] rounded-[20px] rounded-br-md bg-foreground px-4 py-2.5 text-sm whitespace-pre-wrap text-background">
+                {/* G1 (fase 0.3.1001 grafica): bolla utente NEUTRA, gli stessi
+                    token --bubble-user della chat uno-a-uno */}
+                <div className="max-w-[75%] rounded-[20px] rounded-br-md bg-[var(--bubble-user)] px-4 py-2.5 text-sm whitespace-pre-wrap text-[var(--bubble-user-foreground)]">
                   {m.text}
                 </div>
               </div>

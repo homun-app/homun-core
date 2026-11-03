@@ -30,6 +30,17 @@ Correzioni dal confronto con Rakazo e dalla prova d'installazione della
 - **Il pannello del bot non copre più la chat.** Con la finestra stretta il
   pannello si affianca stringendo la barra laterale; quando proprio non c'è
   spazio, diventa un foglio sopra la chat, con il resto oscurato.
+- **I tuoi messaggi hanno sempre lo stesso colore.** Le bolle a destra della
+  chat non prendono più il colore del bot: la chat resta neutra come nelle
+  app di messaggistica, e il colore del bot resta alla mascotte e
+  all'identità del bot.
+- **Con il pannello aperto resta solo la ✕.** Il bottone in alto a destra
+  sparisce quando il pannello è già aperto (non due comandi per la stessa
+  cosa) e alla chiusura il focus torna a lui.
+- **La pillola col nome del bot apre e chiude il pannello.** Un clic sulla
+  scritta in alto al centro mostra o nasconde il pannello del bot (nella
+  squadra, quello dei membri); il resto della fascia continua a
+  trascinare la finestra.
 
 ## [0.3.1000] — 2026-11-02
 

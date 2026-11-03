@@ -185,6 +185,13 @@ export function Chat() {
   const setSettingsTab = useStore((s) => s.setSettingsTab)
   const openTaskId = useStore((s) => s.openTaskId)
   const setOpenTask = useStore((s) => s.openTask)
+  // G2 (fase 0.3.1001 grafica): il pannello si chiude (✕, Esc, velo) → il
+  // focus torna al bottone PanelRight che ricompare
+  const panelFocusRestore = useStore((s) => s.panelFocusRestore)
+  const panelBtnRef = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    if (panelFocusRestore > 0) panelBtnRef.current?.focus()
+  }, [panelFocusRestore])
   const scrollRef = useRef<HTMLDivElement>(null)
 
   const agent = agents.find((a) => a.id === activeId)
@@ -286,27 +293,43 @@ export function Chat() {
   return (
     <main className="relative flex min-w-0 flex-1 flex-col">
       {/* fase 16b correzioni 2 (Q3): la fascia alta di 60 px — trascina la
-          finestra — con UNA riga di controlli (y 12–48, centro 30): etichetta
-          sospesa al centro (S3.1, decorativa: i clic passano alla fascia) e
-          bottone del pannello a destra. L'etichetta tronca il nome quando la
-          chat è al minimo (Q4) */}
+          finestra — con UNA riga di controlli (y 12–48, centro 30): pillola
+          del bot al centro e bottone del pannello a destra. La pillola tronca
+          il nome quando la chat è al minimo (Q4).
+          G3 (fase 0.3.1001 grafica): la pillola è un BOTTONE che apre/chiude
+          il pannello destro (no-drag; lo spazio attorno resta fascia di
+          trascinamento). G2: a pannello APERTO il bottone PanelRight sparisce
+          — resta la ✕ del pannello — ma il posto w-9 resta occupato, così la
+          pillola al centro non salta di posizione */}
       <div className="drag-region absolute inset-x-0 top-0 z-10 flex h-[60px] flex-col">
         <div className="mt-3 flex h-9 items-center gap-3 px-4">
           <span className="w-9 shrink-0" aria-hidden="true" />
-          <span className="pointer-events-none flex min-w-0 flex-1 justify-center">
-            <span className="flex min-w-0 max-w-full items-center gap-2 rounded-full bg-card/95 py-1.5 pl-1.5 pr-4 shadow-soft">
+          <span className="flex min-w-0 flex-1 justify-center">
+            <button
+              type="button"
+              className="no-drag flex min-w-0 max-w-full cursor-pointer items-center gap-2 rounded-full bg-card/95 py-1.5 pl-1.5 pr-4 text-left shadow-soft transition hover:bg-card"
+              aria-expanded={rightPanel}
+              aria-label={rightPanel ? t`Nascondi il pannello del bot` : t`Mostra il pannello del bot`}
+              title={rightPanel ? t`Nascondi il pannello del bot` : t`Mostra il pannello del bot`}
+              onClick={() => setRightPanel(!rightPanel)}
+            >
               <Bot family={info.avatar.family} color={info.avatar.color} state={info.state} size={24} track={false} dimmed={info.dimmed} />
               <span className="truncate text-[15px] font-medium">{agent.name}</span>
-            </span>
+            </button>
           </span>
-          <button
-            className={`no-drag grid size-9 shrink-0 place-items-center rounded-full transition ${rightPanel ? 'bg-muted text-foreground' : 'bg-muted/60 text-muted-foreground hover:text-foreground'}`}
-            aria-label={rightPanel ? t`Nascondi il pannello del bot` : t`Mostra il pannello del bot`}
-            title={rightPanel ? t`Nascondi il pannello del bot` : t`Mostra il pannello del bot`}
-            onClick={() => setRightPanel(!rightPanel)}
-          >
-            <PanelRight className="size-4" />
-          </button>
+          {rightPanel ? (
+            <span className="w-9 shrink-0" aria-hidden="true" />
+          ) : (
+            <button
+              ref={panelBtnRef}
+              className="no-drag grid size-9 shrink-0 place-items-center rounded-full bg-muted/60 text-muted-foreground transition hover:text-foreground"
+              aria-label={t`Mostra il pannello del bot`}
+              title={t`Mostra il pannello del bot`}
+              onClick={() => setRightPanel(true)}
+            >
+              <PanelRight className="size-4" />
+            </button>
+          )}
         </div>
       </div>
 
@@ -469,10 +492,6 @@ export function Chat() {
 function EntryRow({ entry, showReasoning, debugSteps }: { entry: TranscriptEntry; showReasoning: boolean; debugSteps: boolean }) {
   const { t } = useLingui()
   const reasoning = useStore((s) => s.reasoning[entry.id])
-  // il colore del bot della chat in cui l'entry vive (bolle utente)
-  const activeId = useStore((s) => s.activeId)
-  const info = useBotInfo(activeId)
-  const color = info ? `var(--bot-${info.avatar.color})` : 'var(--foreground)'
   switch (entry.kind) {
     case 'message': {
       // M2 (fase 0.3.1001): una entry utente CON un qualsiasi initiator non è
@@ -520,12 +539,11 @@ function EntryRow({ entry, showReasoning, debugSteps }: { entry: TranscriptEntry
         )
       }
       return entry.role === 'user' ? (
-        // bolla utente a destra col colore del bot (S3.2)
+        // bolla utente a destra — NEUTRA (G1, fase 0.3.1001 grafica): colore
+        // fisso della chat, mai il colore del bot (che resta a mascotte,
+        // pillola e avatar); si ritocca dai token --bubble-user in styles.css
         <div className="flex justify-end">
-          <div
-            className="max-w-[75%] rounded-[22px] px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap text-background"
-            style={{ background: color }}
-          >
+          <div className="max-w-[75%] rounded-[22px] bg-[var(--bubble-user)] px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap text-[var(--bubble-user-foreground)]">
             {uiTextOf(entry)}
           </div>
         </div>

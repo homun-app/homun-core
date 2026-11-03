@@ -390,6 +390,12 @@ function BotPanel({ layout, onClose }: { layout: LayoutResult; onClose(): void }
   const [avatarOpen, setAvatarOpen] = useState(false)
   const tabRequest = useStore((s) => s.botPanelTabRequest)
   const clearTabRequest = useStore((s) => s.clearBotPanelTabRequest)
+  const asideRef = useRef<HTMLElement>(null)
+  // G2 (fase 0.3.1001 grafica): aprendo, il focus va al primo controllo del
+  // pannello (la ✕) — come già faceva l'overlay, anche quando è docked
+  useEffect(() => {
+    asideRef.current?.querySelector<HTMLElement>('button')?.focus()
+  }, [])
   // «Guarda lo schermo» delle card e la TakeoverCard aprono il pannello sulla
   // scheda Computer (S4); le Impostazioni › Bot rimandano ad Avanzate
   useEffect(() => {
@@ -408,6 +414,7 @@ function BotPanel({ layout, onClose }: { layout: LayoutResult; onClose(): void }
   const overlay = layout.panel === 'overlay'
   return (
     <aside
+      ref={asideRef}
       className={
         overlay
           ? // Q1: il pannello galleggia sopra la chat — ombra morbida, nessun bordo
@@ -465,12 +472,19 @@ function MembersPanel({ layout, group, onClose }: { layout: LayoutResult; group:
   const [description, setDescription] = useState(group.description)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [busy, setBusy] = useState(false)
+  const asideRef = useRef<HTMLElement>(null)
+  // G2 (fase 0.3.1001 grafica): anche il pannello dei membri docked prende il
+  // focus sul primo controllo all'apertura, come l'overlay
+  useEffect(() => {
+    asideRef.current?.querySelector<HTMLElement>('button')?.focus()
+  }, [])
   useEffect(() => setDescription(group.description), [group.id, group.description])
   const memberAgent = (id: string): Agent | undefined => agents.find((a) => a.id === id)
   const notIn = agents.filter((a) => !a.parentId && !group.members.some((m) => m.agentId === a.id))
   const overlay = layout.panel === 'overlay'
   return (
     <aside
+      ref={asideRef}
       className={
         overlay
           ? 'absolute bottom-0 right-0 top-0 z-10 flex flex-col bg-card shadow-soft'
@@ -570,9 +584,12 @@ export function RightPanel({ layout }: { layout: LayoutResult }) {
   const groups = useStore((s) => s.groups)
   // fase 16b correzioni 2 (Q1): chiudere torna alla scheda Profilo, come
   // quando il pannello si riapre — così layoutFor non resta sul wide
+  // G2 (fase 0.3.1001 grafica): il focus torna al bottone PanelRight della
+  // fascia alta, che con la chiusura ricompare (✕, Esc e velo passano qui)
   const close = (): void => {
     setPanelTab('profile')
     setRightPanel(false)
+    useStore.getState().requestPanelFocusRestore()
   }
   // il pannello in overlay si chiude anche con Esc (con la ✕ e col clic fuori
   // ci sono già); se un altro gestore ha già consumato l'Esc (menu,

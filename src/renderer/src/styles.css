@@ -131,6 +131,11 @@
   --sidebar-ring: oklch(0.704 0.04 256.788);
   /* fase 16b (S2/S6): ambra dei "ti aspetta" e delle card di rischio */
   --waiting: oklch(0.55 0.12 80);
+  /* fase 0.3.1001 grafica (G1): la bolla dei messaggi dell'UTENTE — neutra,
+     gli stessi valori di --primary / --primary-foreground (contrasto ≥ 4,5:1);
+     il colore del bot resta all'identità (mascotte, pillola, avatar) */
+  --bubble-user: oklch(0.208 0.042 265.755);
+  --bubble-user-foreground: oklch(0.984 0.003 247.858);
   /* mascotte e ombra (secondo :root di Lovable) */
   --bot-ink: oklch(0.16 0.01 80);
   --bot-screen: oklch(0.2 0.01 80);
@@ -168,6 +173,10 @@
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.551 0.027 264.364);
   --waiting: oklch(0.78 0.11 80);
+  /* fase 0.3.1001 grafica (G1): bolla utente in scuro, gli stessi valori di
+     --primary / --primary-foreground (contrasto ≥ 4,5:1) */
+  --bubble-user: oklch(0.929 0.013 255.508);
+  --bubble-user-foreground: oklch(0.208 0.042 265.755);
   --chart-1: oklch(0.488 0.243 264.376);
   --chart-2: oklch(0.696 0.17 162.48);
   --chart-3: oklch(0.769 0.188 70.08);

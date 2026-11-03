@@ -98,6 +98,26 @@ app.stdout.on('data', (d) => { appLog += d.toString() })
 app.stderr.on('data', (d) => { appLog += d.toString() })
 const stopApp = () => { try { app.kill('SIGTERM') } catch { /* già via */ } }
 
+/** Il pid del daemon di QUESA cartella dati (daemon.lock), se già scritto.
+ *  Correzione fase 0.3.1001 grafica (Vincoli): la sonda chiudeva l'app ma
+ *  lasciava ACCESO il daemon di sviluppo sui dati temporanei. */
+const daemonPid = () => {
+  try {
+    const v = JSON.parse(readFileSync(join(DATA, 'data', 'daemon.lock'), 'utf8'))
+    return Number.isInteger(v.pid) && v.pid > 1 && v.pid !== process.pid ? v.pid : null
+  } catch { return null }
+}
+/** A fine sonda chiude ANCHE il daemon di sviluppo. */
+const stopDaemon = async () => {
+  const pid = daemonPid()
+  if (!pid) return
+  try { process.kill(pid, 'SIGTERM') } catch { /* già via */ }
+  for (let i = 0; i < 30; i++) {
+    try { process.kill(pid, 0); await sleep(200) } catch { return }
+  }
+  try { process.kill(pid, 'SIGKILL') } catch { /* già via */ }
+}
+
 // ---- CDP: pagina del renderer + finestra (bounds) ----
 const httpJson = async (path) => (await fetch(`http://127.0.0.1:${DEBUG_PORT}${path}`).then((r) => r.json()))
 async function openCdp(url) {
@@ -488,6 +508,9 @@ try {
   try { providerServer.closeAllConnections?.(); providerServer.close() } catch { /* già chiusa */ }
   stopApp()
   await sleep(800)
+  // correzione fase 0.3.1001 grafica: chiude ANCHE il daemon di sviluppo
+  // lasciato acceso dalla sonda originale
+  await stopDaemon()
   try { rmSync(TMP, { recursive: true, force: true }) } catch { /* l'app può essere ancora viva */ }
   process.exit(failures ? 1 : 0)
 }
