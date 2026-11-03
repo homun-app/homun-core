@@ -1,5 +1,24 @@
 [
   {
+    "id": "composio",
+    "name": "Composio",
+    "logo": "🌐",
+    "mcpUrl": "https://connect.composio.dev/mcp",
+    "clientRegistration": "dynamic",
+    "scopes": ["openid", "profile", "email", "offline_access"],
+    "category": "communication",
+    "tagline": {
+      "it": "Più di mille app con un solo accesso",
+      "en": "A thousand apps with one sign-in"
+    },
+    "docsUrl": "https://docs.composio.dev",
+    "notes": {
+      "it": "Server MCP «For You» di Composio (mille e più app con un solo login): OAuth 2.1 standard di MCP dal browser, registrazione dinamica del client (DCR) e PKCE S256, refresh token con lo scope offline_access. Nessuna chiave da creare. Verificato sul server vero il 2026-11-03: 401 con resource_metadata → authorization_servers → endpoint autorizzazione connect.composio.dev, token e registrazione login.composio.dev, token_endpoint_auth_methods [none] (client pubblico). Fonti: https://connect.composio.dev/.well-known/oauth-protected-resource e https://docs.composio.dev",
+      "en": "Composio's «For You» MCP server (a thousand+ apps with one sign-in): standard MCP OAuth 2.1 from the browser, dynamic client registration (DCR) and PKCE S256, refresh token via the offline_access scope. No key to create. Verified against the real server on 2026-11-03: 401 with resource_metadata → authorization_servers → authorize endpoint on connect.composio.dev, token and registration on login.composio.dev, token_endpoint_auth_methods [none] (public client). Sources: https://connect.composio.dev/.well-known/oauth-protected-resource and https://docs.composio.dev"
+    },
+    "gateway": true
+  },
+  {
     "id": "cloudflare",
     "name": "Cloudflare",
     "logo": "☁️",

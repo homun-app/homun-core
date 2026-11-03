@@ -10,6 +10,12 @@ import type { PermissionMode } from '../../shared/types'
 import { targetKey, runCommandVerdict, commandKey, isNeverAuto, ruleToolMatches, mcpAnnotationMode, serverReadGrantCovers, type McpAnnotationsLike } from './permission-rules'
 // fase app (A6): la classificazione delle azioni di Composio (pura)
 import { classifyComposioToolName } from '../connectors/composio-actions'
+// fase Composio OAuth (C2/C3/C5/C4): il gate del blocco e degli strumenti
+// del server «For You», riconosciuti PER NOME su qualunque server MCP
+import {
+  composioBatchGate, manageConnectionsGate, proxyExecuteGate, toolBatchOf
+} from '../connectors/tool-batch'
+import { connectorReadRequiresApproval, composioTrustKeyOfToolName } from './composio-trust'
 import { analyzeCommand } from './shell-ast'
 import { updateStateVerdict, memoryScopeVerdict, type UpdateStateArgs } from './update-state'
 // fase 17c (C2): l'UiText accanto a reason — la card mostra la lingua dell'utente
@@ -32,6 +38,18 @@ export interface McpAnnotationInfo {
   /** M4: il nome del server come lo vede l'utente (per la card delle letture) */
   serverName?: string
 }
+
+/**
+ * Fase Composio OAuth (C4): la fiducia del turno che il loop passa al gate —
+ * `tainted` dice se nel turno è entrato contenuto esterno, `trustedApps` i
+ * toolkit Composio già usati o approvati nel turno (una lettura su un
+ * toolkit NUOVO, dopo la contaminazione, chiede la card).
+ */
+export interface ComposioTurnTrust {
+  tainted: boolean
+  trustedApps: string[]
+}
+
 let mcpAnnotationsLookup: (tool: string) => McpAnnotationInfo | undefined = () => undefined
 
 export function setMcpAnnotationsLookup(fn: (tool: string) => McpAnnotationInfo | undefined): void {
@@ -74,6 +92,20 @@ export type Verdict =
    * («Gmail · Invia email») e la riga «tramite Composio» stanno nella card.
    */
   composio?: { destructive: boolean }
+  /**
+   * Fase Composio OAuth (C7): le azioni del blocco (o le voci di
+   * MANAGE_CONNECTIONS / PROXY_EXECUTE) per la card — titolo dalle azioni,
+   * argomenti per azione, «…» se una voce non ha nome. `noAlways` toglie
+   * «Consenti sempre» (incomplete, distruttive, proxy, collegamenti).
+   */
+  composioBatch?: {
+    actions: import('../connectors/tool-batch').ComposioBatchActionInfo[]
+    incomplete: boolean
+    destructive: boolean
+    noAlways: boolean
+    /** il motivo in codice: azione | voce senza nome | fiducia (C4) | regola */
+    reason: 'action' | 'incomplete' | 'trust' | 'rule'
+  }
 }
   | { kind: 'deny'; reason: string }
 
@@ -116,12 +148,14 @@ async function currentMemoryScope(agentId: string | undefined, id: unknown): Pro
  * M3 (fase 0.3.1001): `turn.userDirectTurn` dice se il turno è aperto da un
  * messaggio diretto dell'utente (niente initiator, non automatico, non
  * contaminato) — serve a update_state create activate:true.
+ * Fase Composio OAuth (C4): `turn.composioTrust` porta la fiducia del turno
+ * per le letture Composio (toolkit usati/approvati e contaminazione).
  */
 export async function check(
   tool: string,
   input: Record<string, unknown>,
   agentId?: string,
-  turn: { userDirectTurn?: boolean } = {}
+  turn: { userDirectTurn?: boolean; composioTrust?: ComposioTurnTrust } = {}
 ): Promise<Verdict> {
   const cfg = getPermissions()
 
@@ -219,7 +253,24 @@ export async function check(
       return { kind: 'allow', via: 'grant' }
     }
     const kind = classifyComposioToolName(tool)
-    if (kind === 'read') return { kind: 'allow', via: 'rule' }
+    if (kind === 'read') {
+      // C4: la fiducia per app nel turno — dopo la contaminazione una lettura
+      // su un toolkit NON ancora usato né approvato chiede (un testo iniettato
+      // potrebbe sceglierne gli argomenti); su un toolkit già usato resta libera
+      const trustKey = composioTrustKeyOfToolName(tool)
+      if (
+        trustKey && turn.composioTrust &&
+        connectorReadRequiresApproval({ tainted: turn.composioTrust.tainted, trusted: turn.composioTrust.trustedApps.includes(trustKey) })
+      ) {
+        return {
+          kind: 'ask',
+          reason: `${tool} reads a Composio app this turn has not used yet, after untrusted content entered it`,
+          ui: ui(UI.approvalComposioTrust, { tool }),
+          composio: { destructive: false }
+        }
+      }
+      return { kind: 'allow', via: 'rule' }
+    }
     return {
       kind: 'ask',
       reason: `${tool} acts towards the outside (Composio app action)`,
@@ -229,6 +280,65 @@ export async function check(
   }
 
   if (tool.startsWith('mcp__')) {
+    // fase Composio OAuth (C2/C3/C5): gli strumenti del server Composio che
+    // si giudicano per CONTENUTO — il blocco azione per azione, le
+    // connessioni per voce di toolkits[], il proxy sempre card. Riconosciuti
+    // PER NOME ORIGINALE su qualunque server MCP (come Rakazo).
+    const originalName = tool.split('__').slice(2).join('__')
+    if (toolBatchOf(originalName) || originalName === 'COMPOSIO_MANAGE_CONNECTIONS' || originalName === 'COMPOSIO_PROXY_EXECUTE') {
+      const grants = listGrants().filter((g) => g.target === '*').map((g) => g.tool)
+      const { uiLanguage } = await import('../ui-language')
+      const { composioGateway } = await import('../connectors/composio-gateway')
+      const gateInput = {
+        toolName: tool,
+        args: input,
+        rules: cfg.rules,
+        grants,
+        ...(turn.composioTrust ? { trust: turn.composioTrust } : {}),
+        ...(composioGateway() ? { connectedSlugs: composioGateway()!.connectedSlugs() } : {}),
+        uiLang: uiLanguage()
+      }
+      const outcome = toolBatchOf(originalName)
+        ? composioBatchGate(gateInput)
+        : originalName === 'COMPOSIO_MANAGE_CONNECTIONS'
+          ? manageConnectionsGate(gateInput)
+          : proxyExecuteGate(gateInput)
+      if (outcome.kind === 'allow') return { kind: 'allow', via: outcome.via }
+      if (outcome.kind === 'deny') return { kind: 'deny', reason: 'Command blocked by permissions configuration' }
+      const count = outcome.actions.length
+      const reasonText =
+        outcome.reason === 'trust'
+          ? `${tool} reads a Composio app this turn has not used yet, after untrusted content entered it`
+          : outcome.reason === 'incomplete'
+            ? `${tool} runs a Composio batch with an unnamed action`
+            : originalName === 'COMPOSIO_PROXY_EXECUTE'
+              ? `${tool} sends a raw HTTP request to a connected app's API`
+              : originalName === 'COMPOSIO_MANAGE_CONNECTIONS'
+                ? `${tool} changes the apps connected through Composio`
+                : `${tool} runs ${count} Composio action${count === 1 ? '' : 's'} that act towards the outside`
+      return {
+        kind: 'ask',
+        reason: reasonText,
+        ui: ui(
+          outcome.reason === 'trust'
+            ? UI.approvalComposioTrust
+            : originalName === 'COMPOSIO_PROXY_EXECUTE'
+              ? UI.approvalComposioProxy
+              : originalName === 'COMPOSIO_MANAGE_CONNECTIONS'
+                ? UI.approvalComposioConnect
+                : UI.approvalComposioBatch,
+          { tool, count }
+        ),
+        composio: { destructive: outcome.destructive },
+        composioBatch: {
+          actions: outcome.actions,
+          incomplete: outcome.incomplete,
+          destructive: outcome.destructive,
+          noAlways: outcome.noAlways,
+          reason: outcome.reason
+        }
+      }
+    }
     const matching = cfg.rules.filter((r) => ruleToolMatches(r.tool, tool))
     if (matching.some((r) => r.mode === 'blocked')) {
       return { kind: 'deny', reason: 'Command blocked by permissions configuration' }
@@ -328,6 +438,18 @@ export async function grantStanding(tool: string, input: Record<string, unknown>
     if (analysis.secretRefs.length) return
     for (const key of new Set(analysis.commands.filter((c) => !isNeverAuto(c)).map(commandKey))) addGrant(tool, key)
     return
+  }
+  // fase Composio OAuth (C7 punto 2): «Consenti sempre» su un blocco salva un
+  // consenso PER AZIONE (composio-action:<SLUG>), mai per lo strumento del
+  // blocco (Rakazo packages/db/src/events.ts:1033–1049)
+  if (tool.startsWith('mcp__')) {
+    const shape = toolBatchOf(tool.split('__').slice(2).join('__'))
+    if (shape) {
+      const { batchActions, composioActionKey } = await import('../connectors/tool-batch')
+      const parsed = batchActions(shape, input)
+      for (const slug of parsed.actions) addGrant(composioActionKey(slug), '*')
+      return
+    }
   }
   addGrant(tool, targetKey(tool, input))
 }

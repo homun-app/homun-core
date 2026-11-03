@@ -318,6 +318,12 @@ export interface SendMessageMeta {
    * richiesta, 'done' quando l'utente ha finito, 'expired' dopo 30 minuti.
    */
   takeover?: 'pending' | 'done' | 'expired'
+  /**
+   * Fase Composio OAuth (C5): la chiave del link di collegamento di una card
+   * «Collega <app> tramite Composio» — il clic dell'utente la apre nel
+   * browser e il daemon aspetta il login (WAIT_FOR_CONNECTIONS).
+   */
+  gatewayKey?: string
 }
 
 export interface TranscriptEntry {
@@ -817,7 +823,7 @@ export interface SandbotApi {
   mcpTest(id: string): Promise<{ ok: boolean; error?: string; tools?: string[] }>
   // fase 5: connettori del catalogo ("Connetti app")
   connectorsList(): Promise<ConnectorInfo[]>
-  connectorsConnect(id: string): Promise<{ started: boolean; status: string; message?: string }>
+  connectorsConnect(id: string): Promise<{ started: boolean; status: string; message?: string; conflict?: 'composio-key' }>
   connectorsDisconnect(id: string): Promise<void>
   connectorsSetTools(id: string, disabledTools: string[]): Promise<void>
   connectorsSetInstructions(id: string, instructions: string): Promise<void>
@@ -839,13 +845,21 @@ export interface SandbotApi {
   // fase app (A2): attivazione di Composio con la chiave dell'utente
   composioStatus(): Promise<ComposioStatusInfo>
   composioSetKey(key: string): Promise<{ ok: boolean }>
-  composioTest(): Promise<{ ok: boolean; reason?: 'invalid-key' | 'unreachable' | 'consumer-key'; error?: string }>
+  composioTest(): Promise<{ ok: boolean; reason?: 'invalid-key' | 'unreachable' | 'consumer-key' | 'gateway-active'; error?: string }>
   composioDisable(): Promise<{ ok: boolean }>
   // fase app (A3): il catalogo Composio (curate escluse) con ricerca locale
   composioCatalog(query?: string): Promise<ComposioCatalogInfo>
   // fase app (A4): collega (browser o subito) e scollega un toolkit
   composioConnect(slug: string): Promise<{ started: boolean; developerConfig?: boolean; error?: string }>
   composioDisconnect(slug: string): Promise<{ ok: boolean }>
+  // fase Composio OAuth (C5): le app dentro il server Composio collegato col login
+  composioGatewayStatus(): Promise<ComposioGatewayStatusInfo>
+  composioGatewayRefresh(): Promise<ComposioGatewayStatusInfo>
+  composioGatewayConnect(slug: string, name?: string): Promise<{ ok: boolean; error?: string }>
+  composioGatewayRemove(slug: string): Promise<{ ok: boolean; error?: string }>
+  composioGatewayCancel(): Promise<{ ok: boolean }>
+  /** il clic su «Collega» della card in chat: apre il link e aspetta il login */
+  composioGatewayCardConnect(key: string): Promise<{ ok: boolean; error?: string }>
   marketplaceList(): Promise<Array<{ name: string; source: string; kind: 'github' | 'git'; official: boolean }>>
   marketplaceAdd(source: string): Promise<{ name: string; source: string }>
   marketplaceRemove(source: string): Promise<{ ok: boolean }>
@@ -1314,6 +1328,8 @@ export interface ConnectorInfo {
   category?: ConnectorCategory
   /** fase 16c (C4): mezza riga localizzata sotto il nome (per esempio «Pagine e database») */
   tagline?: Localized
+  /** fase Composio OAuth (C1/C6): la voce è un «gateway» di app (dentro si collegano altre app) */
+  gateway?: boolean
   state: {
     status: ConnectorStatusInfo
     error?: string
@@ -1382,6 +1398,25 @@ export interface ComposioCatalogInfo {
   count: number
   rows: ComposioCatalogRow[]
   error?: string
+}
+
+// ---- fase Composio OAuth (C5): le app collegate DENTRO il server Composio ----
+
+/** Un'app collegata tramite il server Composio (login C1, non la chiave di progetto). */
+export interface ComposioGatewayAppInfo {
+  slug: string
+  name: string
+  status: 'ACTIVE' | 'RECONNECT' | 'FAILED'
+  accountId: string | null
+}
+
+/** Lo stato del gateway Composio per la UI (mai link, mai token). */
+export interface ComposioGatewayStatusInfo {
+  /** il server Composio è collegato con il login */
+  active: boolean
+  connected: ComposioGatewayAppInfo[]
+  /** il collegamento in attesa del login nel browser (Annulla = cancel) */
+  pending: { slug: string; name: string; since: number; failed?: boolean } | null
 }
 
 // ---- fase 15 (S5): stato dei provider di ricerca web (RPC websearch:status) ----

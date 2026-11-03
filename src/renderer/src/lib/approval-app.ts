@@ -4,6 +4,11 @@
 // questa azione su Slack.») e il nome tecnico vive solo dentro il
 // «Dettagli tecnici» chiuso, insieme a server/toolkit e versione.
 //
+// Fase Composio OAuth (C7 punto 1): il modello del BLOCCO — titolo dalle
+// azioni («Gmail · Invia email, Slack · Invia messaggio», con «…» se una
+// voce non ha nome), per ogni azione gli argomenti BREVI prima e i testi
+// lunghi dopo (argumentLines di Rakazo), l'account quando c'è.
+//
 // I test usano questo modello come snapshot (come opening-rows): ciò che la
 // card mostra FUORI dai dettagli non contiene mai i prefissi tecnici.
 import { msg } from '@lingui/core/macro'
@@ -21,6 +26,25 @@ export interface ComposioActionMeta {
   original?: string
 }
 
+/** Un'azione del blocco nel meta.composioBatch (argomenti già ripuliti dal daemon). */
+export interface ComposioBatchActionMeta {
+  slug: string
+  app: string
+  action: string
+  kind: 'read' | 'send' | 'write' | 'destructive' | 'connect'
+  arguments: Record<string, unknown>
+  account?: string
+}
+
+/** Il meta.composioBatch scritto dal loop (gate C2/C3/C5). */
+export interface ComposioBatchMeta {
+  actions: ComposioBatchActionMeta[]
+  incomplete: boolean
+  destructive: boolean
+  noAlways: boolean
+  reason: 'action' | 'incomplete' | 'trust' | 'rule'
+}
+
 /** I dati umani di uno strumento Composio o MCP (null per gli altri tool). */
 export interface ApprovalAppInfo {
   kind: 'composio' | 'mcp'
@@ -36,12 +60,15 @@ export interface ApprovalAppInfo {
   original?: string
   /** azione che non si può annullare (niente «Consenti sempre») */
   destructive: boolean
+  /** fase Composio OAuth: il blocco (o le connessioni/proxy) con le sue azioni */
+  batch?: ComposioBatchMeta
 }
 
 /** Che card è? Composio (meta.composioAction o nome composio__), MCP (mcp__), altro (null). */
 export function approvalAppOf(tool: string, meta: Record<string, unknown> | null | undefined): ApprovalAppInfo | null {
   const composioAction = (meta as { composioAction?: ComposioActionMeta } | null | undefined)?.composioAction
-  if (composioAction || tool.startsWith('composio__')) {
+  const batch = (meta as { composioBatch?: ComposioBatchMeta } | null | undefined)?.composioBatch
+  if (batch || composioAction || tool.startsWith('composio__')) {
     return {
       kind: 'composio',
       app: (composioAction?.app || tool.split('__')[1] || '').trim(),
@@ -49,7 +76,9 @@ export function approvalAppOf(tool: string, meta: Record<string, unknown> | null
       slug: composioAction?.slug ?? (tool.startsWith('composio__') ? tool : undefined),
       version: composioAction?.version,
       original: composioAction?.original,
-      destructive: (meta as { composioDestructive?: boolean } | null | undefined)?.composioDestructive === true
+      destructive:
+        (meta as { composioDestructive?: boolean } | null | undefined)?.composioDestructive === true,
+      ...(batch ? { batch } : {})
     }
   }
   if (tool.startsWith('mcp__')) {
@@ -73,6 +102,24 @@ export function approvalActionName(info: ApprovalAppInfo, uiLang: UiLanguage): s
   return info.original ?? info.action ?? localizedActionName(info.slug ?? '', 'it') ?? ''
 }
 
+/**
+ * Il titolo del BLOCCO (C7 punto 1): un'azione «Gmail · Invia email», più
+ * azioni «Gmail · Invia email, Slack · Invia messaggio», con «…» se una voce
+ * non ha nome. Il nome dell'azione si ri-localizza dallo slug quando cambia
+ * lingua (come approvalActionName).
+ */
+export function approvalBatchTitle(info: ApprovalAppInfo, uiLang: UiLanguage): string {
+  const batch = info.batch
+  if (!batch) return ''
+  const names = batch.actions.map((a) => {
+    const action = uiLang === 'it'
+      ? localizedActionName(a.slug, 'it') ?? a.action
+      : a.action
+    return action ? `${a.app} · ${action}` : a.app
+  })
+  return [...names, ...(batch.incomplete ? ['…'] : [])].join(', ')
+}
+
 /** Il titolo umano della card per Composio e MCP (null → il titolo generico di askTitle). */
 export function approvalTitleOf(
   info: ApprovalAppInfo | null,
@@ -81,6 +128,7 @@ export function approvalTitleOf(
 ): string | MessageDescriptor | null {
   if (!info) return null
   if (info.kind === 'composio') {
+    if (info.batch) return approvalBatchTitle(info, uiLang)
     const action = approvalActionName(info, uiLang)
     return action ? `${info.app} · ${action}` : info.app
   }
@@ -89,6 +137,13 @@ export function approvalTitleOf(
 
 /** La frase umana del motivo per Composio e MCP (scrittura o distruttiva). */
 export function approvalReasonPhrase(info: ApprovalAppInfo): MessageDescriptor {
+  // fase Composio OAuth (C7): per il blocco la frase nomina le APP delle azioni
+  if (info.batch) {
+    const apps = [...new Set(info.batch.actions.map((a) => a.app))].filter(Boolean).join(', ') || 'Composio'
+    return info.destructive
+      ? msg`Vuole fare azioni che non si possono annullare su ${apps}.`
+      : msg`Vuole fare questa azione su ${apps}.`
+  }
   return info.destructive
     ? msg`Vuole fare un'azione che non si può annullare su ${info.app}.`
     : msg`Vuole fare questa azione su ${info.app}.`
@@ -101,4 +156,33 @@ export function approvalTechnicalLine(info: ApprovalAppInfo, tool: string): stri
     return `${tool}\n${parts.filter(Boolean).join(' · ')}`
   }
   return `${tool}\nserver ${info.app}`
+}
+
+// ---- il blocco: le righe degli argomenti per azione (C7 punto 1) ----
+
+/** Più lungo di così è un «testo lungo»: va DOPO i valori brevi (argumentLines di Rakazo). */
+export const BATCH_SHORT_ARGUMENT_LENGTH = 200
+
+/** Le righe brevi e i testi lunghi degli argomenti di un'azione del blocco. */
+export function approvalBatchArgumentLines(args: Record<string, unknown>): { first: Array<[string, string]>; last: Array<[string, string]> } {
+  const first: Array<[string, string]> = []
+  const last: Array<[string, string]> = []
+  for (const [key, raw] of Object.entries(args)) {
+    const text = batchArgumentText(raw)
+    if (!text) continue
+    const line: [string, string] = [key, text]
+    if (text.length <= BATCH_SHORT_ARGUMENT_LENGTH) first.push(line)
+    else last.push(line)
+  }
+  return { first, last }
+}
+
+function batchArgumentText(value: unknown): string {
+  if (value == null) return ''
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  if (Array.isArray(value) && value.every((item) => item === null || typeof item !== 'object')) {
+    return value.map(String).join(', ')
+  }
+  return JSON.stringify(value) ?? ''
 }

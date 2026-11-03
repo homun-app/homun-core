@@ -20,7 +20,15 @@
 import { randomUUID, createHash } from 'node:crypto'
 import { getAgent, listAgents, listRoutines, getEntries, updateAgent, appendEntry, updateEntryContent, updateEntryMeta, getSetting, holdOutboxEntry, db, getTask, createTask, updateTask, openTasksOf, MAX_OPEN_TASKS, createAgent, subagentRefusal, addGrant, listGrants, recordModelUsage, type Grant, type AppendEntry } from '../store/db'
 // R2 (fase app — ritocchi): l'esito degli invii automatici si ripulisce come gli errori Composio
-import { redactComposioSecrets } from '../connectors/composio-actions'
+import { redactComposioSecrets, composioActionOfToolName } from '../connectors/composio-actions'
+// fase Composio OAuth (C2/C4/C5/C7): il blocco, la fiducia per app, le bozze estratte
+import {
+  batchActions, batchResultData, composioResultError, forceSyncResponseToWorkbenchOff,
+  extractBatchSends, toolBatchOf, composioActionKey, composioToolkitOfSlug,
+  manageConnectionsEntries
+} from '../connectors/tool-batch'
+import { composioGateway } from '../connectors/composio-gateway'
+import { deniedRepeatRefusal, repeatsDeniedAction } from './composio-trust'
 import { llmStream, type ChatMessage, type ToolCall } from './llm'
 import { systemPrompt, secondaryPrompts, mainAgentSection, withLanguage } from './prompts'
 import { toolDefs, executeTool } from './tools'
@@ -32,7 +40,7 @@ import { getProvider, listProviders } from './providers'
 import { resolveAgentModel, type ResolvedAgentModel } from './model-defaults'
 import { buildMessages, visibleReplyEntries } from './history'
 import { planResume, INTERRUPTED_TOOL_RESULT } from './resume'
-import { isExternalSend, draftFromExternalCall, prepareDraft, DEFAULT_EXTERNAL_SEND_TOOLS, type ExternalSendConfig, type SendCandidate } from './external-send'
+import { isExternalSend, draftFromExternalCall, draftFromBatchSend, prepareDraft, DEFAULT_EXTERNAL_SEND_TOOLS, type ExternalSendConfig, type SendCandidate } from './external-send'
 import { normalizeOptions, findDismissibleWidgets } from './widgets'
 import { buildMemorySection, estimateTokensOf } from './memory'
 import { buildSkillsSection } from './skills'
@@ -227,6 +235,14 @@ interface Running {
   pendingTurnGrant?: Promise<void>
   /** fase 8 (§3bis L7): il turno gira nel sotto-transcript di questo task. */
   taskId?: number
+  /**
+   * Fase Composio OAuth (C4): i toolkit Composio usati o approvati nel turno
+   * (la fiducia per app di Rakazo run-trust.ts) e le chiamate negate
+   * (repeatsDeniedAction: un blocco che contiene uno slug già negato si
+   * rifiuta da solo).
+   */
+  composioTrustedApps: Set<string>
+  composioDenied: Array<{ toolName: string; args: unknown }>
 }
 const running = new Map<string, Running>()
 
@@ -513,6 +529,17 @@ async function turnGrantKey(tool: string, input: Record<string, unknown>): Promi
     if (!analysis.commands.length || analysis.commands.some((c) => isNeverAuto(c))) return null
     return [...new Set(analysis.commands.map(commandKey))].sort().join(';')
   }
+  // fase Composio OAuth (C7): il grant di turno di un blocco vale per le SUE
+  // azioni (chiavi composio-action:…), come «Consenti sempre»; un blocco
+  // incompleto non è turn-grantabile (non si vede cosa concederebbe)
+  if (tool.startsWith('mcp__')) {
+    const shape = toolBatchOf(tool.split('__').slice(2).join('__'))
+    if (shape) {
+      const actions = batchActions(shape, input).actions
+      if (!actions.length) return null
+      return [...new Set(actions.map(composioActionKey))].sort().join(';')
+    }
+  }
   return `${tool}|${permissions.targetKey(tool, input)}`
 }
 
@@ -755,7 +782,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
   if (!provider) throw new Error('provider not found')
 
   const controller = new AbortController()
-  const run: Running = { controller, approvals: new Map(), turnAllows: new Set(), turnGrantEpoch: 0 }
+  const run: Running = { controller, approvals: new Map(), turnAllows: new Set(), turnGrantEpoch: 0, composioTrustedApps: new Set(), composioDenied: [] }
   if (opts.taskId !== undefined) run.taskId = opts.taskId
   running.set(agentId, run)
 
@@ -3058,8 +3085,54 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         })
         emit({ type: 'entries', agentId, entries: [callEntry] })
 
-        // §5.1: il gate run-command analizza OGNI comando della riga (tree-sitter);
-        // agentId serve al gate C5 (letture dentro/fuori dalla box in host).
+        // ---- fase Composio OAuth: il blocco e le connessioni, PRIMA del gate ----
+
+        // helper: gli slug dei toolkit collegati via gateway (per fiducia e nomi)
+        const gateway = composioGateway()
+        const gatewaySlugs = gateway?.connectedSlugs() ?? []
+
+        // C4: la chiamata ripete un'azione che l'utente ha GIÀ negato nel
+        // turno? Un blocco che contiene uno slug già negato si rifiuta da
+        // solo (Rakazo repeatsDeniedAction: «Telling the model not to retry
+        // did not stop it»)
+        if (call.name.startsWith('mcp__') || call.name.startsWith('composio__')) {
+          const repeated = repeatsDeniedAction({ toolName: call.name, args: input, denied: run.composioDenied })
+          if (repeated) {
+            const refused = deniedRepeatRefusal(repeated)
+            messages.push({ role: 'tool', toolCallId: call.id, content: refused })
+            const res = add({ agentId, kind: 'tool-result', role: 'system', content: refused, meta: { callId: call.id, denied: true } })
+            emit({ type: 'entries', agentId, entries: [res] })
+            continue
+          }
+        }
+
+        // C7 punto 3 + C3: le voci d'invio del blocco escono e diventano
+        // bozze; sync_response_to_workbench è SEMPRE false (la workbench non
+        // è offerta); il risultato dirà quali azioni sono diventate bozze
+        let composioDraftsNote = ''
+        if (call.name.startsWith('mcp__') && toolBatchOf(call.name.split('__').slice(2).join('__'))) {
+          input = forceSyncResponseToWorkbenchOff(input)
+          const extraction = extractBatchSends(input, gatewaySlugs)
+          for (const item of extraction.sends) {
+            const draft = appendSend(agentId, call, draftFromBatchSend(call.name, item), emit, { status: 'pending' }, opts.taskId)
+            emitNeedsInput(agentId, draft, formatUi(ui(UI.draftAwaiting, { preview: draft.content.slice(0, 80) }), loopUiLanguage()), emit)
+            taskNeedsInput()
+          }
+          if (extraction.sends.length > 0) {
+            const slugs = extraction.sends.map((s) => s.slug).join(', ')
+            composioDraftsNote = `Note: ${extraction.sends.length} outbound send action(s) (${slugs}) were turned into drafts awaiting the user's confirmation.`
+            if (extraction.rest.length === 0) {
+              // tutto il blocco era invii: nessuna esecuzione, solo bozze
+              messages.push({ role: 'tool', toolCallId: call.id, content: composioDraftsNote })
+              const res = add({ agentId, kind: 'tool-result', role: 'system', content: composioDraftsNote, meta: { callId: call.id } })
+              emit({ type: 'entries', agentId, entries: [res] })
+              continue
+            }
+            input = extraction.restArgs!
+          }
+        }
+
+        // §5.1: il gate run-command analizza OGNI comando della riga (tree-sitter);        // agentId serve al gate C5 (letture dentro/fuori dalla box in host).
         // fase 10 (punti 1-2): permessi PER ORIGINE — creare bot e gruppi parte
         // senza card SOLO nei turni dell'utente; nei turni automatici, di altri
         // bot, di gruppo o con contenuto esterno la card è SEMPRE (mai
@@ -3092,7 +3165,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           const userDirectTurn =
             source === 'user' && opts.initiator === undefined && !automatic && !untrustedTurn && !contaminated
           verdict = await permissions.check(call.name, input, agentId, {
-            ...(userDirectTurn ? { userDirectTurn: true } : {})
+            ...(userDirectTurn ? { userDirectTurn: true } : {}),
+            // C4: la fiducia per app del turno (toolkit usati/approvati + contaminazione)
+            composioTrust: { tainted: contaminated, trustedApps: [...run.composioTrustedApps] }
           })
         }
         // F8: nel turno contaminato un allow (regola dell'utente o bypass del
@@ -3190,12 +3265,21 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
                 // «Consenti sempre» (come le installazioni). R4 (ritocchi):
                 // describeTool porta anche slug e versione per la lingua e i
                 // Dettagli tecnici; R3: i tool MCP portano il nome del server
-                ...(verdict.composio
+                ...(verdict.composio && !verdict.composioBatch
                   ? {
                       composioAction: (await describeComposio(call.name)) ?? { app: '', action: '', slug: '' },
                       ...(verdict.composio.destructive ? { composioDestructive: true } : {})
                     }
-                  : await mcpAppMetaOf(call.name))
+                  : await mcpAppMetaOf(call.name)),
+                // fase Composio OAuth (C7 punto 1): le azioni del blocco per la
+                // card (titolo, argomenti per azione, «…» se incompleto)
+                ...(verdict.composioBatch
+                  ? {
+                      composioBatch: verdict.composioBatch,
+                      ...(verdict.composioBatch.destructive ? { composioDestructive: true } : {}),
+                      ...(verdict.composioBatch.noAlways ? { composioNoAlways: true } : {})
+                    }
+                  : {})
               }
             })
             setStatus(agentId, 'paused-for-approval', emit)
@@ -3239,6 +3323,11 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               emitLastEntry(agentId, emit)
             }
             if (decision !== 'allow') {
+              // C4: la negazione si ricorda per il turno — un blocco nuovo che
+              // contiene uno slug già negato si rifiuta da solo
+              if (decision === 'deny' && (call.name.startsWith('mcp__') || call.name.startsWith('composio__'))) {
+                run.composioDenied.push({ toolName: call.name, args: input })
+              }
               messages.push({
                 role: 'tool', toolCallId: call.id,
                 content: decision === 'deny' ? 'Denied by user: action refused.' : 'Approval expired.'
@@ -3253,6 +3342,24 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             setStatus(agentId, 'thinking', emit)
           }
           // turnGranted: esecuzione senza chiedere di nuovo (grant di turno)
+        }
+
+        // C4: la chiamata autorizzata (dal gate, dall'utente o dall'auto-review)
+        // rende fidati i suoi toolkit per il resto del turno — «elenca poi
+        // leggi» non chiede due volte, ma un blocco Gmail non rende fidato Slack
+        if (call.name.startsWith('composio__')) {
+          const tk = composioActionOfToolName(call.name)?.toolkit
+          if (tk) run.composioTrustedApps.add(tk)
+        } else if (call.name.startsWith('mcp__')) {
+          const originalNow = call.name.split('__').slice(2).join('__')
+          const shape = toolBatchOf(originalNow)
+          if (shape) {
+            for (const slug of batchActions(shape, input).actions) {
+              run.composioTrustedApps.add(composioToolkitOfSlug(slug, gatewaySlugs))
+            }
+          } else if (originalNow === 'COMPOSIO_PROXY_EXECUTE' && typeof input.toolkit_slug === 'string') {
+            run.composioTrustedApps.add(String(input.toolkit_slug).toLowerCase())
+          }
         }
 
         // fase 13 (punto 5): in modalità differita un tool MCP NON attivo non si
@@ -3314,10 +3421,48 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           let finalOutput = output
           if (call.name.startsWith('mcp__') || call.name.startsWith('composio__')) {
             const [prefix, slugPart] = call.name.split('__')
-            finalOutput = formatExternalDataEvidence(
-              prefix === 'composio' ? `composio:${slugPart ?? 'app'}` : `mcp:${slugPart ?? 'server'}`,
-              output
-            )
+            const originalName = call.name.split('__').slice(2).join('__')
+            const shape = prefix === 'mcp' ? toolBatchOf(originalName) : undefined
+            if (shape) {
+              // fase Composio OAuth (C7 punto 4): il risultato del blocco è un
+              // dato esterno con la fonte composio:<toolkit> (i toolkit delle
+              // azioni, non il server); gli errori VERI di ogni azione da
+              // data.results («N out of M tools failed», Rakazo
+              // composioResultError) e la nota sulle azioni diventate bozze
+              const executed = batchActions(shape, input)
+              const toolkits = [...new Set(executed.actions.map((slug) => composioToolkitOfSlug(slug, gatewaySlugs)))]
+              let batchOutput = output
+              if (/out of \d+ tools? failed/i.test(output)) {
+                batchOutput = composioResultError(output, batchResultData(output))
+              }
+              if (composioDraftsNote) batchOutput = `${batchOutput}\n${composioDraftsNote}`
+              finalOutput = formatExternalDataEvidence(`composio:${toolkits.join('+') || 'app'}`, batchOutput)
+            } else {
+              finalOutput = formatExternalDataEvidence(
+                prefix === 'composio' ? `composio:${slugPart ?? 'app'}` : `mcp:${slugPart ?? 'server'}`,
+                composioDraftsNote ? `${output}\n${composioDraftsNote}` : output
+              )
+            }
+            // fase Composio OAuth (C5 punto 1): il risultato `add` di
+            // MANAGE_CONNECTIONS NON passa il link nel testo libero — sta
+            // nella card di collegamento, il modello aspetta la conferma
+            if (prefix === 'mcp' && originalName === 'COMPOSIO_MANAGE_CONNECTIONS') {
+              const hasAdd = manageConnectionsEntries(input).some((e) => e.action === 'add')
+              const gw = composioGateway()
+              if (hasAdd && gw) {
+                const handled = gw.handleAgentManageResult(input, output)
+                finalOutput = formatExternalDataEvidence('composio:connections', handled.output)
+                for (const card of handled.cards) {
+                  appendSend(
+                    agentId, call,
+                    { type: 'connector', connectorId: `composio-app:${card.slug}`, name: card.name },
+                    emit,
+                    { status: 'pending', gatewayKey: card.key },
+                    opts.taskId
+                  )
+                }
+              }
+            }
             if (!contaminated) {
               run.turnAllows.clear()
               run.turnGrantEpoch++

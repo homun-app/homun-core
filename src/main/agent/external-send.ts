@@ -12,7 +12,11 @@
 // sono sempre visibili ("Altri parametri"): nessun campo nascosto.
 import type { SendMessagePayload, DraftFieldMap, DraftExtraArg } from '../../shared/types'
 // fase app (A6): il classificatore degli invii degli strumenti Composio
-import { composioSendLikeName } from '../connectors/composio-actions'
+import { composioSendLikeName, stripToolkitPrefix } from '../connectors/composio-actions'
+// fase Composio OAuth (C7 punto 3): le voci d'invio dentro il blocco
+import {
+  batchItemIsSend, batchSendViaArgs, composioToolkitOfSlug, type ComposioBatchItem
+} from '../connectors/tool-batch'
 
 /** server MCP (slug, come nel nome mcp__<slug>__<tool>) → nomi originali dei tool di invio */
 export type ExternalSendConfig = Record<string, string[]>
@@ -95,7 +99,7 @@ export function sendLikeName(original: string): boolean {
  * prefisso del toolkit — la via della bozza è lo strumento Composio stesso e
  * draft:send lo esegue con tools.execute (stesso classificatore).
  */
-export function isExternalSend(tool: string, annotations: SendAnnotationsLike | undefined, cfg: ExternalSendConfig): boolean {
+export function isExternalSend(tool: string, annotations: SendAnnotationsLike | undefined, cfg: ExternalSendConfig, args?: Record<string, unknown>): boolean {
   const parts = tool.split('__')
   if (parts.length < 3) return false
   if (parts[0] === 'composio') {
@@ -106,8 +110,41 @@ export function isExternalSend(tool: string, annotations: SendAnnotationsLike | 
   const server = parts[1]!
   const original = parts.slice(2).join('__')
   if ((cfg[server] ?? []).includes(original)) return true
+  // fase Composio OAuth (C7 punto 3): il blocco di Composio con UNA SOLA
+  // voce d'invio è un invio esterno (la via della bozza estratta dal blocco
+  // si esegue davvero). L'annotazione del WRAPPER non conta: decide il
+  // contenuto della voce. Senza argomenti il blocco NON è un invio.
+  if (original === 'COMPOSIO_MULTI_EXECUTE_TOOL') {
+    if (!args) return false
+    return singleSendItemOf(args) !== null
+  }
   if (annotations?.readOnlyHint === true) return false
   return sendLikeName(original)
+}
+
+/** L'unica voce d'invio di un blocco, se il blocco ne ha ESATTAMENTE una (e nessun'altra). */
+function singleSendItemOf(args: Record<string, unknown>): ComposioBatchItem | null {
+  const tools = args.tools
+  if (!Array.isArray(tools) || tools.length !== 1) return null
+  const entry = tools[0] as Record<string, unknown> | null
+  const slug = entry?.tool_slug
+  if (!entry || typeof slug !== 'string' || !slug.trim()) return null
+  let itemArgs: Record<string, unknown> = {}
+  if (entry.arguments && typeof entry.arguments === 'object' && !Array.isArray(entry.arguments)) {
+    itemArgs = entry.arguments as Record<string, unknown>
+  } else if (typeof entry.arguments === 'string') {
+    try {
+      const parsed = JSON.parse(entry.arguments) as unknown
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) itemArgs = parsed as Record<string, unknown>
+    } catch { /* non JSON: niente via */ }
+  }
+  const account = entry.account
+  const item: ComposioBatchItem = {
+    slug: slug.trim(),
+    arguments: itemArgs,
+    ...(typeof account === 'string' && account.trim() ? { account: account.trim() } : {})
+  }
+  return batchItemIsSend(item) ? item : null
 }
 
 /** Canale della bozza dedotto dal server MCP (slug). */
@@ -403,4 +440,48 @@ export function draftFromExternalCall(
 ): DraftMessage {
   // M1: il canale arriva dal server e, se resta «other», dal nome del tool
   return draftPayloadFromVia(channelForTool(tool), tool, args)
+}
+
+/**
+ * Fase Composio OAuth (C7 punto 3): la bozza di UNA voce d'invio estratta
+ * dal blocco. La VIA è lo stesso strumento MCP del blocco con quella sola
+ * voce (e sync_response_to_workbench false); i campi visibili si leggono
+ * dalla fieldMap sugli ARGOMENTI DELLA VOCE (non del guscio del blocco); il
+ * canale dal toolkit (gmail/outlook → email, slack → slack).
+ */
+export function draftFromBatchSend(
+  tool: string,
+  item: ComposioBatchItem
+): DraftMessage {
+  const toolkit = composioToolkitOfSlug(item.slug)
+  const bare = stripToolkitPrefix(toolkit, item.slug)
+  const byToolkit = channelForServer(toolkit)
+  const channel = byToolkit !== 'other'
+    ? byToolkit
+    : nameSegments(bare).some((s) => s === 'email' || s === 'mail')
+      ? 'email'
+      : nameSegments(bare).some((s) => s === 'slack')
+        ? 'slack'
+        : 'other'
+  const viaArgs = batchSendViaArgs(item)
+  const fieldMap = fieldMapForArgs(item.arguments)
+  // i valori visibili si leggono dagli argomenti della VOCE; via.args resta
+  // il guscio del blocco (ciò che verrà davvero eseguito). L'account, quando
+  // c'è, è un extra SEMPRE visibile (come D1: nessun campo nascosto).
+  const subject = fieldMap.subject ? readableArg(item.arguments[fieldMap.subject]) : undefined
+  const extraArgs: DraftExtraArg[] = Object.entries(item.arguments)
+    .filter(([k]) => k !== fieldMap.to && k !== fieldMap.subject && k !== fieldMap.body)
+    .map(([key, v]) => ({ key, value: typeof v === 'string' ? v : JSON.stringify(v) }))
+  if (item.account) extraArgs.push({ key: 'account', value: item.account })
+  return {
+    type: 'draft',
+    channel,
+    to: fieldMap.to ? (readableArg(item.arguments[fieldMap.to]) ?? '') : '',
+    ...(subject !== undefined ? { subject } : {}),
+    body: fieldMap.body ? (readableArg(item.arguments[fieldMap.body]) ?? '') : JSON.stringify(item.arguments),
+    via: { tool, args: viaArgs },
+    fieldMap,
+    ...(extraArgs.length ? { extraArgs } : {}),
+    ...(fieldMap.body ? {} : { bodyLocked: true })
+  }
 }

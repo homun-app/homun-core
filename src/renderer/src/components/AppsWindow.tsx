@@ -18,6 +18,7 @@ import { api, useStore } from '../store'
 import { pickLang } from '../../../shared/localized'
 import { i18n } from '../lib/i18n'
 import { localizedActionName } from '../../../shared/composio-names'
+import { COMMON_COMPOSIO_TOOLKITS } from '../../../shared/composio-names'
 import { CURATED_COMPOSIO_SLUGS } from '../../../shared/types'
 import type { ConnectorInfo, McpServerInfo, McpServerSecret, AppsRegistryResult, SecretKind, ComposioCatalogRow, ComposioConnectedApp } from '../../../shared/types'
 import { SECRET_KIND_FOR_NEEDS } from '../../../shared/types'
@@ -575,7 +576,7 @@ function ComposioActivationSheet({ onClose, onDone }: { onClose(): void; onDone(
   const [key, setKey] = useState('')
   const [testing, setTesting] = useState(false)
   const [testError, setTestError] = useState('')
-  const [status, setStatus] = useState<'idle' | 'ok' | 'invalid-key' | 'unreachable' | 'consumer-key' | 'error'>('idle')
+  const [status, setStatus] = useState<'idle' | 'ok' | 'invalid-key' | 'unreachable' | 'consumer-key' | 'gateway-active' | 'error'>('idle')
 
   const runTest = async (): Promise<void> => {
     setTesting(true)
@@ -670,6 +671,20 @@ function ComposioActivationSheet({ onClose, onDone }: { onClose(): void; onDone(
             {status === 'ok' && <p className="mt-2 text-[13px] text-chart-2" data-testid="composio-active"><Trans>Composio attivo</Trans></p>}
             {status === 'invalid-key' && <p className="mt-2 text-[13px] text-destructive"><Trans>Chiave non valida: controllala e riprova.</Trans></p>}
             {status === 'unreachable' && <p className="mt-2 text-[13px] text-destructive"><Trans>Composio non raggiungibile: controlla la connessione e riprova.</Trans></p>}
+            {status === 'gateway-active' && (
+              <div className="mt-2 rounded-2xl bg-card px-3 py-2 text-[13px]">
+                <p><Trans>Composio è già collegato con il login. Le due strade non possono stare insieme: disattivo il login e uso la chiave di progetto?</Trans></p>
+                <button
+                  className="mt-1.5 rounded-full bg-foreground px-3.5 py-1.5 text-xs font-medium text-background transition hover:opacity-90"
+                  onClick={async () => {
+                    await api.connectorsDisconnect('composio').catch(() => undefined)
+                    await runTest()
+                  }}
+                >
+                  <Trans>Disattiva il login e riprova</Trans>
+                </button>
+              </div>
+            )}
             {status === 'consumer-key' && (
               <p className="mt-2 text-[13px] text-destructive">
                 <Trans>Questa è una chiave di Composio «For You» (inizia con ck_). Homun usa la chiave di un progetto Composio: su composio.dev apri il pannello per sviluppatori, crea un progetto e copia la sua chiave API da Settings → API Keys (inizia con ak_).</Trans>
@@ -910,6 +925,296 @@ function ComposioBotToggle({ slug, agentId, agentName, enabledFor, allIds, onDon
   )
 }
 
+// ---- fase Composio OAuth (C6): «Accedi con Composio», un solo passo ----
+
+/**
+ * La card in cima a «Tutte le app» (C6): UN solo passo — il login nel
+ * browser — poi «Composio collegato». Niente campo chiave: la chiave di
+ * progetto resta nel foglio «Per sviluppatori». Le due strade non possono
+ * essere attive insieme: attivarne una chiede di disattivare l'altra.
+ */
+function ComposioGatewayCard({ connected, onStart }: { connected: boolean; onStart(): void }) {
+  const { t } = useLingui()
+  const refreshConnectors = useStore((s) => s.refreshConnectors)
+  const refreshComposioGateway = useStore((s) => s.refreshComposioGateway)
+  const composio = useStore((s) => s.composio)
+  const [phase, setPhase] = useState<'idle' | 'connecting' | 'conflict' | 'error'>('idle')
+  const [error, setError] = useState('')
+
+  // il flusso OAuth col browser dura qualche minuto: gli eventi {type:'connectors'}
+  // aggiornano i connettori dello store; quando il server è connesso la card
+  // mostra «Composio collegato» (AppsView la toglie poco dopo)
+  useEffect(() => {
+    if (phase === 'connecting') {
+      const timer = setInterval(() => {
+        void refreshConnectors()
+        void refreshComposioGateway()
+      }, 2000)
+      return () => clearInterval(timer)
+    }
+  }, [phase, refreshConnectors, refreshComposioGateway])
+
+  const start = async (deactivateKey: boolean): Promise<void> => {
+    setPhase('connecting')
+    setError('')
+    onStart()
+    try {
+      if (deactivateKey && composio?.active) await api.composioDisable().catch(() => undefined)
+      const r = await api.connectorsConnect('composio')
+      if (!r.started && r.conflict === 'composio-key') {
+        setPhase('conflict')
+        return
+      }
+      if (!r.started) {
+        setPhase('error')
+        setError(t`non riesco a partire`)
+      }
+    } catch (e) {
+      setPhase('error')
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  return (
+    <div className="rounded-2xl bg-muted p-4" data-testid="composio-login-card">
+      <strong className="block font-display text-[15px]"><Trans>Più di mille app con Composio</Trans></strong>
+      <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
+        <Trans>Composio è un servizio di terzi: i login e le azioni delle app che colleghi lì passano dai suoi server, non restano solo sul tuo Mac. Ha un piano gratuito.</Trans>
+      </p>
+      {phase === 'conflict' ? (
+        <div className="mt-2 rounded-2xl bg-card px-3 py-2 text-[13px]" data-testid="composio-conflict">
+          <p><Trans>Composio è già attivo con la chiave di progetto (sviluppatori). Le due strade non possono stare insieme: disattivo la chiave e collego con il login?</Trans></p>
+          <div className="mt-2 flex gap-2">
+            <button
+              className="rounded-full bg-foreground px-3.5 py-1.5 text-xs font-medium text-background transition hover:opacity-90"
+              onClick={() => void start(true)}
+            >
+              <Trans>Disattiva la chiave e accedi</Trans>
+            </button>
+            <button className="rounded-full px-3 py-1.5 text-xs text-muted-foreground transition hover:text-foreground" onClick={() => setPhase('idle')}>
+              <Trans>Annulla</Trans>
+            </button>
+          </div>
+        </div>
+      ) : connected ? (
+        <p className="mt-2 text-[13px] text-chart-2" data-testid="composio-linked"><Trans>Composio collegato</Trans></p>
+      ) : phase === 'connecting' ? (
+        <p className="mt-2.5 text-[13px] text-muted-foreground" data-testid="composio-login-waiting">
+          <Trans>Apri il browser e accedi a Composio: la card si aggiorna da sola.</Trans>
+        </p>
+      ) : (
+        <button
+          className="mt-2.5 rounded-full bg-foreground px-4 py-1.5 text-[13px] font-medium text-background transition hover:opacity-90"
+          onClick={() => void start(false)}
+        >
+          <Trans>Accedi</Trans>
+        </button>
+      )}
+      {phase === 'error' && error && <p className="mt-2 text-[13px] text-destructive">{error}</p>}
+    </div>
+  )
+}
+
+/**
+ * Il dettaglio di Composio collegato col login (C5/C6): le app collegate
+ * («Tramite Composio»), il campo «Collega un'app» con la lista dei toolkit
+ * comuni e la ricerca libera dello slug, Rimuovi con conferma e Disattiva
+ * (revoca LOCALE del token: le app restano sull'account Composio).
+ */
+function ComposioGatewayDetail({ onClose }: { onClose(): void }) {
+  const { t } = useLingui()
+  const composioGateway = useStore((s) => s.composioGateway)
+  const refreshComposioGateway = useStore((s) => s.refreshComposioGateway)
+  const [pick, setPick] = useState('')
+  const [confirmRemove, setConfirmRemove] = useState<string | null>(null)
+  const [confirmOff, setConfirmOff] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  // C5 punto 3: all'apertura si rilegge lo stato delle app collegate da Homun
+  useEffect(() => {
+    void api.composioGatewayRefresh().then(() => refreshComposioGateway()).catch(() => undefined)
+  }, [refreshComposioGateway])
+  // mentre aspetta il login si rilegge ogni 2 s
+  useEffect(() => {
+    if (!composioGateway?.pending) return
+    const timer = setInterval(() => { void refreshComposioGateway() }, 2000)
+    return () => clearInterval(timer)
+  }, [composioGateway?.pending, refreshComposioGateway])
+
+  const connectApp = async (slug: string): Promise<void> => {
+    setBusy(true)
+    setError('')
+    try {
+      const name = COMMON_COMPOSIO_TOOLKITS.find((x) => x.slug === slug)?.name ?? slug
+      const r = await api.composioGatewayConnect(slug, name)
+      if (!r.ok) setError(r.error ?? t`non riesco a collegare`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-foreground/20 p-4" onClick={onClose}>
+      <div className="max-h-[85vh] w-full max-w-lg overflow-y-auto scroll-thin rounded-3xl bg-card p-5 shadow-soft" onClick={(e) => e.stopPropagation()} data-testid="composio-gateway-detail">
+        <div className="flex items-center gap-3">
+          <span className="grid size-10 shrink-0 place-items-center rounded-[11px] bg-muted text-base">🌐</span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-[15px] font-medium"><Trans>Composio</Trans></span>
+            <span className="block truncate text-[13px] text-muted-foreground"><Trans>Più di mille app con un solo accesso</Trans></span>
+          </span>
+          <span className={`h-2 w-2 rounded-full ${composioGateway?.active ? 'bg-chart-2' : 'bg-destructive'}`} />
+        </div>
+        <div className="mt-2"><ProvenanceTag via="composio" /></div>
+        {error && <p className="mt-2 text-[13px] text-destructive">{error}</p>}
+
+        {/* l'attesa del login (annullabile) */}
+        {composioGateway?.pending && (
+          <div className="mt-3 rounded-2xl bg-muted px-3 py-2.5" data-testid="composio-gateway-waiting">
+            <p className="text-sm font-medium">{composioGateway.pending.name}</p>
+            <p className="mt-1 text-[13px] text-muted-foreground">
+              {composioGateway.pending.failed
+                ? <Trans>Non riuscito: riprova a collegarla.</Trans>
+                : <Trans>In attesa del login nel browser…</Trans>}
+            </p>
+            <button
+              className="mt-1.5 rounded-full px-3 py-1 text-xs text-muted-foreground transition hover:text-foreground"
+              onClick={async () => {
+                await api.composioGatewayCancel().catch(() => undefined)
+                await refreshComposioGateway()
+              }}
+            >
+              <Trans>Annulla</Trans>
+            </button>
+          </div>
+        )}
+
+        {/* le app collegate tramite Composio (C5 punto 3) */}
+        <p className="mt-3 text-[13px] font-medium"><Trans>App collegate tramite Composio</Trans></p>
+        {(composioGateway?.connected ?? []).length === 0 && (
+          <p className="mt-1 text-[13px] text-muted-foreground"><Trans>Nessuna app collegata: comincia dall'elenco qui sotto.</Trans></p>
+        )}
+        {(composioGateway?.connected ?? []).map((app) => (
+          <div key={app.slug} className="mt-1 flex items-center gap-2 rounded-2xl bg-muted px-3 py-2" data-testid={`gateway-app-${app.slug}`}>
+            <span className={`h-2 w-2 rounded-full ${app.status === 'ACTIVE' ? 'bg-chart-2' : 'bg-destructive'}`} />
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm">{app.name}</span>
+              <span className="block text-[11px] text-muted-foreground">
+                {app.status === 'ACTIVE'
+                  ? <Trans>Collegata</Trans>
+                  : app.status === 'RECONNECT'
+                    ? <Trans>da ricollegare</Trans>
+                    : <Trans>non riuscita</Trans>}
+              </span>
+            </span>
+            {confirmRemove === app.slug ? (
+              <button
+                className="rounded-full px-2.5 py-1 text-xs text-destructive transition hover:bg-destructive/10"
+                onClick={async () => {
+                  setConfirmRemove(null)
+                  setBusy(true)
+                  const r = await api.composioGatewayRemove(app.slug).catch(() => ({ ok: false, error: 'errore' }))
+                  setBusy(false)
+                  if (!r.ok) setError(r.error ?? '')
+                  await refreshComposioGateway()
+                }}
+              >
+                <Trans>Rimuovi davvero</Trans>
+              </button>
+            ) : (
+              <button
+                className="rounded-full px-2.5 py-1 text-xs text-muted-foreground transition hover:text-destructive"
+                disabled={busy}
+                onClick={() => setConfirmRemove(app.slug)}
+              >
+                <Trans>Rimuovi</Trans>
+              </button>
+            )}
+          </div>
+        ))}
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          <Trans>Le app collegate fuori da Homun non si vedono qui: </Trans>
+          <a className="text-primary hover:underline" href="https://dashboard.composio.dev/~/org/connect/apps" target="_blank" rel="noreferrer"><Trans>gestiscile su Composio</Trans></a>.
+        </p>
+
+        {/* Collega un'app (C5 punto 2): lista dei comuni + ricerca libera dello slug */}
+        <div className="mt-3 rounded-2xl bg-muted p-3">
+          <p className="text-[13px] font-medium"><Trans>Collega un'app</Trans></p>
+          <div className="mt-1.5 flex gap-1">
+            <input
+              className="min-w-0 flex-1 rounded-lg bg-card px-2.5 py-1.5 text-sm outline-none"
+              placeholder={t`slug dell'app (es. gmail)`}
+              list="composio-toolkit-slugs"
+              value={pick}
+              onChange={(e) => setPick(e.target.value)}
+            />
+            <datalist id="composio-toolkit-slugs">
+              {COMMON_COMPOSIO_TOOLKITS.map((x) => (
+                <option key={x.slug} value={x.slug}>{x.name}</option>
+              ))}
+            </datalist>
+            <button
+              className="rounded-full bg-foreground px-3.5 py-1.5 text-xs font-medium text-background transition hover:opacity-90 disabled:opacity-40"
+              disabled={busy || !pick.trim()}
+              onClick={() => {
+                void connectApp(pick.trim().toLowerCase())
+                setPick('')
+              }}
+            >
+              <Trans>Collega</Trans>
+            </button>
+          </div>
+          <div className="mt-2 flex flex-wrap gap-1">
+            {COMMON_COMPOSIO_TOOLKITS.slice(0, 10).map((x) => (
+              <button
+                key={x.slug}
+                className="rounded-full bg-card px-2.5 py-1 text-[11px] transition hover:bg-card/80"
+                disabled={busy}
+                onClick={() => void connectApp(x.slug)}
+              >
+                {x.name}
+              </button>
+            ))}
+          </div>
+          <p className="mt-1.5 text-[11px] text-muted-foreground">
+            <Trans>Il bottone apre la pagina di login dell'app nel browser: finisci lì, poi la riga compare sopra.</Trans>
+          </p>
+        </div>
+
+        <div className="mt-4 flex items-center justify-between">
+          {confirmOff ? (
+            <button
+              className="rounded-full px-3 py-1.5 text-xs text-destructive transition hover:bg-destructive/10"
+              onClick={async () => {
+                setConfirmOff(false)
+                await api.connectorsDisconnect('composio').catch(() => undefined)
+                await refreshComposioGateway()
+                onClose()
+              }}
+            >
+              <Trans>Disattiva davvero</Trans>
+            </button>
+          ) : (
+            <button
+              className="rounded-full px-3 py-1.5 text-xs text-destructive transition hover:bg-destructive/10"
+              onClick={() => setConfirmOff(true)}
+            >
+              <Trans>Disattiva</Trans>
+            </button>
+          )}
+          <button className="rounded-full px-3 py-1.5 text-sm text-muted-foreground transition hover:text-foreground" onClick={onClose}>
+            <Trans>Chiudi</Trans>
+          </button>
+        </div>
+        <p className="mt-1.5 text-[11px] text-muted-foreground">
+          <Trans>Disattivare toglie il server e revoca il token sul tuo Mac: le app collegate restano sul tuo account Composio, le togli da</Trans>{' '}
+          <a className="text-primary hover:underline" href="https://dashboard.composio.dev/~/org/connect/apps" target="_blank" rel="noreferrer"><Trans>dashboard.composio.dev</Trans></a>.
+        </p>
+      </div>
+    </div>
+  )
+}
+
 // ---- A1/A9: il foglio «Per sviluppatori» ----
 
 /**
@@ -945,6 +1250,10 @@ function DevelopersSheet({ onClose }: { onClose(): void }) {
         <strong className="block font-display text-lg"><Trans>Per sviluppatori</Trans></strong>
         <p className="mt-1 text-xs text-muted-foreground"><Trans>Server personalizzati, plugin, gateway e registro: chi sa cos'è un server MCP lo trova qui.</Trans></p>
         <div className="mt-4 space-y-6">
+          {/* fase Composio OAuth (C6): la strada della CHIAVE resta, ma solo
+              qui — per la maggior parte delle persone c'è «Accedi» nella
+              vista principale; le due strade non insieme */}
+          <ComposioKeySection />
           <ManualServers />
           <GatewayTab />
           <MarketplaceTab />
@@ -983,6 +1292,51 @@ function DevelopersSheet({ onClose }: { onClose(): void }) {
   )
 }
 
+/** C6: la strada della chiave di progetto, solo nel foglio sviluppatori. */
+function ComposioKeySection() {
+  const { t } = useLingui()
+  const composio = useStore((s) => s.composio)
+  const refreshComposio = useStore((s) => s.refreshComposio)
+  const [open, setOpen] = useState(false)
+  if (composio?.active) {
+    return (
+      <div className="space-y-1">
+        <p className="text-[13px] font-medium"><Trans>Chiave di progetto Composio (sviluppatori)</Trans></p>
+        <p className="text-xs text-muted-foreground"><Trans>Attiva con la chiave ak_ del tuo progetto.</Trans></p>
+        <button
+          className="rounded-full px-3 py-1.5 text-xs text-destructive transition hover:bg-destructive/10"
+          onClick={async () => {
+            await api.composioDisable().catch(() => undefined)
+            await refreshComposio()
+          }}
+        >
+          <Trans>Disattiva la chiave</Trans>
+        </button>
+      </div>
+    )
+  }
+  return (
+    <div className="space-y-1">
+      <p className="text-[13px] font-medium"><Trans>Chiave di progetto Composio (sviluppatori)</Trans></p>
+      <p className="text-xs text-muted-foreground">
+        <Trans>Per la maggior parte delle persone è meglio «Accedi con Composio» nella vista principale: un clic nel browser, niente chiavi. La chiave ak_ di un progetto la usano gli sviluppatori.</Trans>
+      </p>
+      <button
+        className="rounded-full bg-foreground px-3.5 py-1.5 text-xs font-medium text-background transition hover:opacity-90"
+        onClick={() => setOpen(true)}
+      >
+        {t`Usa la chiave di progetto`}
+      </button>
+      {open && (
+        <ComposioActivationSheet
+          onClose={() => setOpen(false)}
+          onDone={() => { setOpen(false); void refreshComposio() }}
+        />
+      )}
+    </div>
+  )
+}
+
 // ---- la vista vera e propria (A1) ----
 
 /**
@@ -996,6 +1350,8 @@ export function AppsView({ embedded = false }: { embedded?: boolean }) {
   const refreshConnectors = useStore((s) => s.refreshConnectors)
   const composio = useStore((s) => s.composio)
   const refreshComposio = useStore((s) => s.refreshComposio)
+  const composioGateway = useStore((s) => s.composioGateway)
+  const refreshComposioGateway = useStore((s) => s.refreshComposioGateway)
   const agents = useStore((s) => s.agents)
   const setAppsOpen = useStore((s) => s.setAppsOpen)
   const [filter, setFilter] = useState<AppsFilter>('all')
@@ -1005,6 +1361,19 @@ export function AppsView({ embedded = false }: { embedded?: boolean }) {
   const [composioRows, setComposioRows] = useState<ComposioCatalogRow[] | null>(null)
   const [activationOpen, setActivationOpen] = useState(false)
   const [developersOpen, setDevelopersOpen] = useState(false)
+  // fase Composio OAuth (C6): il dettaglio di Composio collegato col login
+  const [gatewayDetailOpen, setGatewayDetailOpen] = useState(false)
+  const [gatewayCard, setGatewayCard] = useState(false)
+  // fase Composio OAuth (C6): il server Composio del catalogo è collegato col login
+  const gatewayConnected = connectors.find((c) => c.id === 'composio')?.state.status === 'connected'
+  // dopo «Composio collegato» la card resta un momento, poi lascia il posto
+  // alla riga di «Collegate» (l'utente vede CHIUSO il cerchio del login).
+  // La conferma appare solo se il login è partito DA QUI, non a ogni apertura.
+  useEffect(() => {
+    if (!gatewayConnected || !gatewayCard) return
+    const t = setTimeout(() => setGatewayCard(false), 2500)
+    return () => clearTimeout(t)
+  }, [gatewayConnected, gatewayCard])
   const [detail, setDetail] = useState<ConnectedRow | null>(null)
   const [composioDetail, setComposioDetail] = useState<{ app: ComposioConnectedApp | null; row: { slug: string; name: string; tagline: string | null; logo: string | null; connectable: 'yes' | 'no-auth' | 'developer-config' } | null } | null>(null)
   const [waitingFor, setWaitingFor] = useState<{ slug: string; name: string } | null>(null)
@@ -1059,9 +1428,10 @@ export function AppsView({ embedded = false }: { embedded?: boolean }) {
       query,
       lang: uiLang(),
       composio,
-      composioRows: composioRows ?? []
+      composioRows: composioRows ?? [],
+      composioGateway
     }),
-    [connectors, installed, agents, skillsByOwner, filter, query, composio, composioRows]
+    [connectors, installed, agents, skillsByOwner, filter, query, composio, composioRows, composioGateway]
   )
 
   const botsHalfLine = (label: ConnectedRow['botsLabel']): string => {
@@ -1129,7 +1499,13 @@ export function AppsView({ embedded = false }: { embedded?: boolean }) {
             <button
               key={row.key}
               className="flex items-center gap-3 rounded-[14px] px-1 py-2 text-left transition hover:bg-muted/60"
-              onClick={() => (row.source === 'composio' ? openComposioDetail(row) : setDetail(row))}
+              onClick={() => (
+                row.gateway || row.gatewaySlug
+                  ? setGatewayDetailOpen(true)
+                  : row.source === 'composio'
+                    ? openComposioDetail(row)
+                    : setDetail(row)
+              )}
             >
               <AppLogo logo={row.logo} name={row.name} />
               <span className="min-w-0 flex-1">
@@ -1164,10 +1540,12 @@ export function AppsView({ embedded = false }: { embedded?: boolean }) {
       {/* 3. «Tutte le app»: la card di attivazione, le consigliate, le curate e le Composio */}
       <section className="space-y-1">
         <strong className="text-[15px] font-medium"><Trans>Tutte le app</Trans></strong>
-        {/* A2: la card in cima finché Composio non è attivo */}
-        {!composio?.active && !activationOpen && (
+        {/* fase Composio OAuth (C6): la card in cima è il LOGIN (un solo
+            passo, niente campo chiave); la chiave di progetto sta nel foglio
+            «Per sviluppatori». Con la chiave GIÀ attiva la card non c'è. */}
+        {!composio?.active && (!gatewayConnected || gatewayCard) && (
           <div className="mt-2">
-            <ComposioActivationCard onOpen={() => setActivationOpen(true)} />
+            <ComposioGatewayCard connected={gatewayConnected} onStart={() => setGatewayCard(true)} />
           </div>
         )}
         {/* le consigliate (solo senza ricerca) */}
@@ -1224,7 +1602,7 @@ export function AppsView({ embedded = false }: { embedded?: boolean }) {
         </div>
         {/* la ricerca senza risultati (A1) */}
         {nothingFound && (
-          composio?.active ? (
+          composio?.active || gatewayConnected ? (
             <p className="py-2 text-sm text-muted-foreground"><Trans>Nessuna app trovata</Trans></p>
           ) : (
             <div className="flex items-center justify-between gap-2 py-2 text-sm text-muted-foreground">
@@ -1256,6 +1634,15 @@ export function AppsView({ embedded = false }: { embedded?: boolean }) {
         />
       )}
       {developersOpen && <DevelopersSheet onClose={() => setDevelopersOpen(false)} />}
+      {gatewayDetailOpen && (
+        <ComposioGatewayDetail
+          onClose={() => {
+            setGatewayDetailOpen(false)
+            void refreshConnectors()
+            void refreshComposioGateway()
+          }}
+        />
+      )}
       {waitingFor && (
         <ComposioWaitingSheet
           pending={{ slug: waitingFor.slug, name: waitingFor.name, since: Date.now() }}

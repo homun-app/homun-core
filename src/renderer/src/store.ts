@@ -1,7 +1,7 @@
 // State renderer: agenti, transcript dell'agente attivo, eventi dal main.
 import { useMemo } from 'react'
 import { create } from 'zustand'
-import type { Agent, TranscriptEntry, SandbotEvent, ProviderConfig, ProviderPublic, PermissionsConfig, ConnectorInfo, TaskInfo, GroupInfo, GroupMessageInfo, SubagentInfo, AgentAvatar, TurnEnd, ScreenStatus, MainModel, ComposioStatusInfo } from '../../shared/types'
+import type { Agent, TranscriptEntry, SandbotEvent, ProviderConfig, ProviderPublic, PermissionsConfig, ConnectorInfo, TaskInfo, GroupInfo, GroupMessageInfo, SubagentInfo, AgentAvatar, TurnEnd, ScreenStatus, MainModel, ComposioStatusInfo, ComposioGatewayStatusInfo } from '../../shared/types'
 // fase 16c correzioni (R4): la regola del modello risolto, condivisa col daemon
 import { resolveAgentModel, type ResolvedAgentModel } from '../../shared/agent-model'
 
@@ -79,6 +79,8 @@ interface Store {
   connectors: ConnectorInfo[]
   /** fase app: lo stato di Composio (chiave, collegamenti in corso, app collegate) */
   composio: ComposioStatusInfo | null
+  /** fase Composio OAuth (C5): le app dentro il server Composio collegato col login */
+  composioGateway: ComposioGatewayStatusInfo | null
   /** fase 7: setting mainAgentId (null → il primo agente è quello principale) */
   mainAgentId: string | null
   settingsOpen: boolean
@@ -190,6 +192,8 @@ interface Store {
   refreshConnectors(): Promise<void>
   /** fase app: ricarica lo stato Composio (collegamenti, attesa del login) */
   refreshComposio(): Promise<void>
+  /** fase Composio OAuth (C5): ricarica lo stato del gateway (app dentro il server Composio) */
+  refreshComposioGateway(): Promise<void>
   /** fase 8 (§3bis L7): apre/chiude la vista del sotto-transcript di un task */
   openTask(id: number | null): void
   /** fase 8 (§3bis L7): interrompe un task dal bottone sulla card */
@@ -261,6 +265,7 @@ export const useStore = create<Store>((set, get) => ({
   permissions: null,
   connectors: [],
   composio: null,
+  composioGateway: null,
   mainAgentId: null,
   settingsOpen: false,
   settingsTab: null,
@@ -379,6 +384,8 @@ export const useStore = create<Store>((set, get) => ({
           api.connectorsList().then((connectors) => set({ connectors })).catch(() => undefined)
           // fase app: anche lo stato Composio (collegamento, ricollegamento, …)
           api.composioStatus().then((composio) => set({ composio })).catch(() => undefined)
+          // fase Composio OAuth: anche le app dentro il server Composio
+          api.composioGatewayStatus().then((composioGateway) => set({ composioGateway })).catch(() => undefined)
           break
         }
         case 'reconnected': {
@@ -643,6 +650,12 @@ export const useStore = create<Store>((set, get) => ({
     set({ connectors: await api.connectorsList() })
     // fase app: lo stato Composio insieme ai connettori (la vista App li usa insieme)
     await api.composioStatus().then((composio) => set({ composio })).catch(() => undefined)
+    await api.composioGatewayStatus().then((composioGateway) => set({ composioGateway })).catch(() => undefined)
+  },
+
+  // fase Composio OAuth (C5): lo stato del gateway da solo (il foglio di attesa lo chiama in loop)
+  async refreshComposioGateway() {
+    await api.composioGatewayStatus().then((composioGateway) => set({ composioGateway })).catch(() => undefined)
   },
 
   // fase app: lo stato Composio da solo (il foglio di attivazione lo chiama

@@ -80,6 +80,9 @@ export const DAEMON_RPC_CHANNELS = [
   // prova, disattivazione, catalogo, collega e scollega (tutto nel daemon)
   'composio:status', 'composio:set-key', 'composio:test', 'composio:disable',
   'composio:catalog', 'composio:connect', 'composio:disconnect',
+  // fase Composio OAuth (C5): le app dentro il server Composio collegato col login
+  'composio-gateway:status', 'composio-gateway:refresh', 'composio-gateway:connect',
+  'composio-gateway:remove', 'composio-gateway:cancel', 'composio-gateway:card-connect',
   // fase 18b (K3): le capacità di UN modello, senza l'elenco completo
   'models:capabilities',
   // fase 18b (H6): uso e costi aggregati (pagina "Uso e costi")

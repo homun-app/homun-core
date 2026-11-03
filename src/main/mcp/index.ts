@@ -23,6 +23,9 @@ import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js'
 import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js'
 import { getSetting, setSetting } from '../store/db'
 import { setMcpAnnotationsLookup } from '../agent/permissions'
+// fase Composio OAuth (C3): l'elenco CHIUSO degli strumenti del server Composio
+import { composioToolPolicy } from '../connectors/composio-meta'
+import { COMPOSIO_MULTI_EXECUTE_TOOL, forceSyncResponseToWorkbenchOff } from '../connectors/tool-batch'
 import { dockerStdioMcpArgv } from '../sandbox/docker-argv'
 import { boxOwnerOf, ensureBoxContainer, ensureBotHome } from '../sandbox'
 import type { ToolDef } from '../agent/llm'
@@ -265,7 +268,13 @@ async function ensure(cfg: McpServerConfig, force = false): Promise<Cached> {
     if (e instanceof UnauthorizedError) markNeedsAuth(cfg, uiText(UI.connTokenExpired))
     throw e
   }
-  const tools: McpToolInfo[] = (res.tools ?? []).map((t) => ({
+  // fase Composio OAuth (C3): il server Composio dichiara tools.listChanged:
+  // uno strumento NUOVO, che non è nella tabella, NON si offre al modello
+  // (fail closed) — lo si classifica prima. Vale per il modello E per la UI.
+  const offered = cfg.catalogId === 'composio'
+    ? (res.tools ?? []).filter((t) => composioToolPolicy(t.name).offered)
+    : res.tools ?? []
+  const tools: McpToolInfo[] = offered.map((t) => ({
     serverId: cfg.id,
     serverName: cfg.name,
     originalName: t.name,
@@ -381,6 +390,16 @@ export async function appsForAgent(agentId?: string): Promise<string[]> {
   const owner = agentId !== undefined ? boxOwnerOf(agentId) : undefined
   const servers = agentId !== undefined ? serversForAgent(listServers(), agentId, owner) : listServers()
   for (const cfg of servers.filter((s) => s.enabled && !skippedByConnectorState(s))) {
+    // fase Composio OAuth (C8): per il server Composio si elencano i TOOLKIT
+    // collegati («app: Gmail, Slack (tramite Composio)»), non «Composio»
+    if (cfg.catalogId === 'composio') {
+      const { composioGateway } = await import('../connectors/composio-gateway')
+      const apps = (composioGateway()?.status().connected ?? [])
+        .filter((a) => a.status === 'ACTIVE')
+        .map((a) => a.name)
+      names.push(apps.length ? `${apps.join(', ')} (tramite Composio)` : cfg.name)
+      continue
+    }
     names.push(cfg.name)
   }
   const { composioAppsOf } = await import('../connectors/composio')
@@ -398,8 +417,15 @@ export class McpNeedsReconnectError extends Error {
   }
 }
 
-/** Esegue mcp__<server>__<tool> (e, fase app A5, composio__<toolkit>__<ACTION>). */
-export async function callTool(fullName: string, args: Record<string, unknown>): Promise<string> {
+/**
+ * Esegue mcp__<server>__<tool> (e, fase app A5, composio__<toolkit>__<ACTION>).
+ * Fase Composio OAuth: `timeoutMs` per le attese lunghe (WAIT_FOR_CONNECTIONS
+ * può durare 5 minuti); gli strumenti NASCOSTI del server Composio (C3), se
+ * il modello li nomina lo stesso, si rifiutano con «not available in Homun»;
+ * gli argomenti del blocco partono SEMPRE con sync_response_to_workbench
+ * false (l'ultima difesa: la workbench non è offerta).
+ */
+export async function callTool(fullName: string, args: Record<string, unknown>, opts?: { timeoutMs?: number }): Promise<string> {
   // fase app (A5): l'esecuzione passa dal modulo Composio del daemon, con la
   // STESSA versione dello schema mostrato e gli errori ripuliti
   if (fullName.startsWith('composio__')) {
@@ -409,16 +435,30 @@ export async function callTool(fullName: string, args: Record<string, unknown>):
   const parts = fullName.split('__')
   if (parts.length < 3) throw new Error(`malformed MCP tool name: ${fullName}`)
   const serverSlug = parts[1]
+  const originalName = parts.slice(2).join('__')
   for (const cfg of listServers().filter((s) => s.enabled)) {
     if (slug(cfg.name) !== serverSlug) continue
+    // C3: uno strumento del server Composio che non offriamo, chiamato per
+    // nome dal modello lo stesso, si rifiuta (mai un'esecuzione nascosta)
+    if (cfg.catalogId === 'composio' && !composioToolPolicy(originalName).offered) {
+      return `${originalName} is not available in Homun.`
+    }
     const c = await ensure(cfg)
     const tool = c.tools.find((t) => t.def.name === fullName)
     if (!tool) throw new Error(`tool ${fullName} no longer available (reconnect)`)
     if ((connectorStateOf(cfg).disabledTools ?? []).includes(fullName)) {
       throw new Error(`tool ${fullName} disabled by the user for this connector`)
     }
+    // C3: il blocco non salva la risposta nella workbench del cloud Composio
+    const callArgs = tool.originalName === COMPOSIO_MULTI_EXECUTE_TOOL
+      ? forceSyncResponseToWorkbenchOff(args)
+      : args
     try {
-      const res = await c.client.callTool({ name: tool.originalName, arguments: args })
+      const res = await c.client.callTool(
+        { name: tool.originalName, arguments: callArgs },
+        undefined,
+        opts?.timeoutMs ? { timeout: opts.timeoutMs } : undefined
+      )
       const content = res.content as Array<{ type: string; text?: string }> | undefined
       const text = (content ?? []).filter((p) => p.type === 'text').map((p) => p.text ?? '').join('\n')
       return text || JSON.stringify(res).slice(0, 4000)

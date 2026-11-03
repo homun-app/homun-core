@@ -391,6 +391,25 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
   // sulle tre fonti e migrazione enabledFor dei server esistenti (restano per
   // tutti: per l'utente non cambia nulla)
   const mcpServers = await import('../main/mcp')
+
+  // fase Composio OAuth (C5): il gateway delle app dentro il server Composio
+  // collegato col login (C1) — MANAGE_CONNECTIONS/WAIT_FOR_CONNECTIONS con i
+  // link nelle card, mai nel testo libero. Il manager si registra come
+  // setActiveComposio, così loop e permissions lo raggiungono.
+  const { createComposioGatewayManager, setActiveComposioGateway } = await import('../main/connectors/composio-gateway')
+  const composioGatewayActive = (): boolean =>
+    connectors.stateOf('composio').status === 'connected' && mcpServers.listServers().some((s) => s.catalogId === 'composio')
+  const composioGatewayManager = createComposioGatewayManager({
+    callMcp: (tool, args, opts) => mcpServers.callTool(tool, args, opts),
+    gatewayActive: composioGatewayActive,
+    getSetting,
+    setSetting,
+    openExternal: (url) => server.callUi('host.openExternal', [url]).then(() => undefined),
+    hasUi: () => server.hasUi(),
+    emit: (e) => emit(e)
+  })
+  setActiveComposioGateway(composioGatewayManager)
+
   const marketplaces = createMarketplaceManager()
   const installDeps: import('../main/connectors/install').InstallDeps = {
     store: createConnectorsSecretStore({
@@ -558,7 +577,7 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
   }
 
   server.methods = {
-    ...buildApiMethods(emit, worker, connectors, presence, { webhookPort: server.port, onboarding, marketplaces, composio }),
+    ...buildApiMethods(emit, worker, connectors, presence, { webhookPort: server.port, onboarding, marketplaces, composio, composioGateway: composioGatewayManager }),
     // fase rilascio (A2): la UI chiede CHI sei (versione/build) e di uscire bene
     'daemon:describe': () => ({ pid: process.pid, version: opts.getVersion(), build: opts.buildId }),
     'daemon:restart': async () => {
@@ -616,6 +635,9 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
     // fase app (A4): lo stato degli account Composio si rilegge ogni 10 minuti
     // mentre la finestra è aperta (throttle interno del manager; senza UI no-op)
     composio.maybeRefreshAccounts()
+    // fase Composio OAuth (C5): anche le app collegate DENTRO il server
+    // Composio si rileggono (list tollerante, mai un'eccezione)
+    void composioGatewayManager.refreshAccounts().catch(() => undefined)
     })()
   }, 30_000)
   schedulerTimer.unref()

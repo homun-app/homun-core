@@ -155,6 +155,13 @@ const api: SandbotApi = {
   composioCatalog: (query) => ipcRenderer.invoke('composio:catalog', query),
   composioConnect: (slug) => ipcRenderer.invoke('composio:connect', slug),
   composioDisconnect: (slug) => ipcRenderer.invoke('composio:disconnect', slug),
+  // fase Composio OAuth (C5): le app dentro il server Composio collegato col login
+  composioGatewayStatus: () => ipcRenderer.invoke('composio-gateway:status'),
+  composioGatewayRefresh: () => ipcRenderer.invoke('composio-gateway:refresh'),
+  composioGatewayConnect: (slug, name) => ipcRenderer.invoke('composio-gateway:connect', slug, name),
+  composioGatewayRemove: (slug) => ipcRenderer.invoke('composio-gateway:remove', slug),
+  composioGatewayCancel: () => ipcRenderer.invoke('composio-gateway:cancel'),
+  composioGatewayCardConnect: (key) => ipcRenderer.invoke('composio-gateway:card-connect', key),
   marketplaceList: () => ipcRenderer.invoke('marketplace:list'),
   marketplaceAdd: (source) => ipcRenderer.invoke('marketplace:add', source),
   marketplaceRemove: (source) => ipcRenderer.invoke('marketplace:remove', source),

@@ -104,6 +104,8 @@ export function buildApiMethods(
     marketplaces?: import('../main/connectors/marketplace-manager').MarketplaceManager
     /** fase app: il manager Composio del daemon (niente RPC senza) */
     composio?: import('../main/connectors/composio').ComposioManager
+    /** fase Composio OAuth (C5): il gateway delle app dentro il server Composio */
+    composioGateway?: import('../main/connectors/composio-gateway').ComposioGatewayManager
   } = {}
 ): Record<string, (params: unknown[]) => unknown> {
   const mcp = () => import('../main/mcp')
@@ -464,7 +466,10 @@ export function buildApiMethods(
       // nome, cfg come sovrascrittura), non più il solo elenco fisso — una
       // bozza con via mcp__ufficio__send_email si può davvero inviare
       const externalCfg = store.getSetting<ExternalSendConfig>('externalSendTools', DEFAULT_EXTERNAL_SEND_TOOLS)
-      if (!isExternalSend(via.tool, permissions.mcpAnnotationsOf(via.tool), externalCfg)) {
+      // fase Composio OAuth (C7 punto 3): la via di una bozza estratta dal
+      // blocco è il blocco stesso con UNA sola voce d'invio — si passa anche
+      // via.args, così il classificatore la riconosce
+      if (!isExternalSend(via.tool, permissions.mcpAnnotationsOf(via.tool), externalCfg, via.args)) {
         // R2 (ritocchi): testo umano col nome dell'app, mai l'id dello strumento
         const app = await sendAppName(via.tool)
         notice(ui(UI.rpcDraftViaRejected, { known: app ? 'yes' : 'no', ...(app ? { app } : {}) }))
@@ -924,10 +929,16 @@ export function buildApiMethods(
       if (!connectors) throw uiError(UI.rpcConnectorsUnavailable)
       return connectors.list()
     },
-    'connectors:connect': ([id]) => {
+    'connectors:connect': async ([id]) => {
       if (!connectors) throw uiError(UI.rpcConnectorsUnavailable)
       const entry = connectors.catalog.find((e) => e.id === id)
       if (!entry) throw uiError(UI.rpcConnectorUnknown, { id: String(id) })
+      // fase Composio OAuth (C6): le due strade di Composio non possono essere
+      // attive insieme (gli strumenti si doppiano) — attivare il login chiede
+      // prima di disattivare la chiave di progetto
+      if (entry.id === 'composio' && opts.composio && (await opts.composio.status()).active) {
+        return { started: false, conflict: 'composio-key' as const }
+      }
       // il flusso OAuth dura fino a 10 minuti (browser): parte in parallelo e
       // la UI segue gli eventi {type:'connectors'}
       void connectors.runConnect(entry).then(async (r) => {
@@ -1206,8 +1217,13 @@ export function buildApiMethods(
       if (!r.ok) throw uiError(UI.composioKeyInvalid)
       return r
     },
-    'composio:test': () => {
+    'composio:test': async () => {
       if (!opts.composio) throw uiError(UI.composioNotActive)
+      // fase Composio OAuth (C6): le due strade non insieme — con il login
+      // attivo la prova della chiave chiede prima di disattivarlo
+      if (opts.composioGateway && opts.composioGateway.status().active) {
+        return { ok: false, reason: 'gateway-active' as const }
+      }
       return opts.composio.test()
     },
     'composio:disable': () => {
@@ -1227,6 +1243,33 @@ export function buildApiMethods(
     'composio:disconnect': ([slug]) => {
       if (!opts.composio) throw uiError(UI.composioNotActive)
       return opts.composio.disconnect(String(slug ?? ''))
+    },
+
+    // ---- fase Composio OAuth (C5): le app dentro il server Composio ----
+    'composio-gateway:status': () => {
+      if (!opts.composioGateway) throw uiError(UI.composioNotActive)
+      return opts.composioGateway.status()
+    },
+    'composio-gateway:refresh': () => {
+      if (!opts.composioGateway) throw uiError(UI.composioNotActive)
+      return opts.composioGateway.refreshAccounts().then(() => opts.composioGateway!.status())
+    },
+    'composio-gateway:connect': ([slug, name]) => {
+      if (!opts.composioGateway) throw uiError(UI.composioNotActive)
+      return opts.composioGateway.connectApp(String(slug ?? ''), typeof name === 'string' ? name : undefined)
+    },
+    'composio-gateway:remove': ([slug]) => {
+      if (!opts.composioGateway) throw uiError(UI.composioNotActive)
+      return opts.composioGateway.removeApp(String(slug ?? ''))
+    },
+    'composio-gateway:cancel': () => {
+      if (!opts.composioGateway) throw uiError(UI.composioNotActive)
+      opts.composioGateway.cancelWait()
+      return { ok: true }
+    },
+    'composio-gateway:card-connect': ([key]) => {
+      if (!opts.composioGateway) throw uiError(UI.composioNotActive)
+      return opts.composioGateway.cardConnect(String(key ?? ''))
     },
 
     // ---- vault credenziali ----

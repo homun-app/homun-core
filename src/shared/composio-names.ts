@@ -184,3 +184,60 @@ export function localizedActionName(actionSlug: string, uiLang: UiLanguage): str
   }
   return `${verb} ${parts.join(' ')}`
 }
+
+// ---- fase Composio OAuth (C5): i toolkit comuni ----
+// La lista del campo «Collega un'app» nel dettaglio di Composio della
+// finestra App (slug del server + nome da mostrare), circa 30 voci; la
+// ricerca libera dello slug passa comunque al server. In shared perché la
+// usa anche il renderer (datalist del campo).
+
+/** Una voce della lista dei toolkit comuni: slug, nome da mostrare. */
+export interface ComposioToolkitRef {
+  slug: string
+  name: string
+}
+
+export const COMMON_COMPOSIO_TOOLKITS: readonly ComposioToolkitRef[] = [
+  { slug: 'gmail', name: 'Gmail' },
+  { slug: 'gcal', name: 'Google Calendar' },
+  { slug: 'gdrive', name: 'Google Drive' },
+  { slug: 'gsheets', name: 'Google Sheets' },
+  { slug: 'slack', name: 'Slack' },
+  { slug: 'notion', name: 'Notion' },
+  { slug: 'github', name: 'GitHub' },
+  { slug: 'linear', name: 'Linear' },
+  { slug: 'hubspot', name: 'HubSpot' },
+  { slug: 'outlook', name: 'Outlook' },
+  { slug: 'microsoft_teams', name: 'Teams' },
+  { slug: 'trello', name: 'Trello' },
+  { slug: 'asana', name: 'Asana' },
+  { slug: 'jira', name: 'Jira' },
+  { slug: 'dropbox', name: 'Dropbox' },
+  { slug: 'spotify', name: 'Spotify' },
+  { slug: 'x_twitter', name: 'X' },
+  { slug: 'instagram', name: 'Instagram' },
+  { slug: 'zoom', name: 'Zoom' },
+  { slug: 'discord', name: 'Discord' },
+  { slug: 'telegram', name: 'Telegram' },
+  { slug: 'whatsapp', name: 'WhatsApp' },
+  { slug: 'calendar', name: 'Calendar' },
+  { slug: 'clickup', name: 'ClickUp' },
+  { slug: 'airtable', name: 'Airtable' },
+  { slug: 'salesforce', name: 'Salesforce' },
+  { slug: 'zendesk', name: 'Zendesk' },
+  { slug: 'intercom', name: 'Intercom' },
+  { slug: 'figma', name: 'Figma' },
+  { slug: 'youtube', name: 'YouTube' },
+  { slug: 'linkedin', name: 'LinkedIn' }
+]
+
+/** Gli slug noti (toolkit comuni + i collegati): per ricavare il toolkit dallo slug di un'azione (C2). */
+export function knownToolkitSlugs(extra: readonly string[] = []): string[] {
+  return [...new Set([...COMMON_COMPOSIO_TOOLKITS.map((t) => t.slug), ...extra.map((s) => s.toLowerCase())])]
+}
+
+/** Il nome umano di uno slug noto, o lo slug stesso. */
+export function composioToolkitName(slug: string): string {
+  const key = slug.toLowerCase()
+  return COMMON_COMPOSIO_TOOLKITS.find((t) => t.slug === key)?.name ?? slug
+}

@@ -1,0 +1,319 @@
+{
+  "protocolVersion": "2025-06-18",
+  "capabilities": {
+    "tools": {
+      "listChanged": true
+    }
+  },
+  "tools": [
+    {
+      "name": "COMPOSIO_GET_TOOL_SCHEMAS",
+      "title": "Get Tool Schemas",
+      "annotations": {
+        "scopes": [],
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "updateHint": false
+      }
+    },
+    {
+      "name": "COMPOSIO_MANAGE_CONNECTIONS",
+      "title": "Manage connections",
+      "annotations": {
+        "scopes": [],
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "updateHint": false
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "toolkits": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "Toolkit slug (e.g. 'gmail', 'slack'). Must be a valid toolkit slug; never invent."
+                },
+                "action": {
+                  "type": "string",
+                  "enum": [
+                    "add",
+                    "rename",
+                    "list",
+                    "remove"
+                  ],
+                  "description": "Action to perform on this toolkit:\n- \"add\" (default): Add a connection. Always creates a new auth link. Enforces max account limit.\n- \"rename\": Rename the alias on an existing account. Requires account_id and alias.\n- \"list\": List all connected accounts. Returns IDs, aliases, and statuses. No side effects.\n- \"remove\": Remove/delete a connected account. Requires account_id.",
+                  "default": "add"
+                },
+                "alias": {
+                  "type": "string",
+                  "maxLength": 255,
+                  "description": "Optional human-readable alias for the connection (e.g. \"work\", \"personal\")."
+                },
+                "account_id": {
+                  "type": "string",
+                  "description": "Target a specific account by its ID (from a previous response). Required for \"rename\" and \"remove\"."
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "additionalProperties": false,
+              "description": "ToolkitItem"
+            },
+            "description": "List of toolkit connection operations. Each entry specifies a toolkit and the action to perform."
+          },
+          "session_id": {
+            "type": "string",
+            "description": "Pass the session_id if you received one from a prior COMPOSIO_SEARCH_TOOLS call."
+          }
+        },
+        "required": [
+          "toolkits"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "COMPOSIO_MULTI_EXECUTE_TOOL",
+      "title": "Multi Execute Composio Tools",
+      "annotations": {
+        "scopes": [],
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "updateHint": false
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tools": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "tool_slug": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "The slug of the tool to execute — must be a valid tool slug; never invent.\nExamples:\n  \"GMAIL_SEND_EMAIL\"\n  \"SLACK_SEND_MESSAGE\"\n  \"GITHUB_CREATE_AN_ISSUE\""
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": true,
+                  "description": "The arguments to pass to the tool. Use exact field names and types; do not diverge from the tool's argument schema.\nExamples:\n  {\"body\":\"This is a test\",\"subject\":\"Hello\",\"to\":\"test@gmail.com\"}\n  {\"channel\":\"#general\",\"text\":\"Hello from Composio!\"}\n  {\"body\":\"Description of the issue\",\"labels\":[\"bug\"],\"title\":\"Bug Report\"}"
+                },
+                "account": {
+                  "type": "string",
+                  "description": "When multiple accounts are connected, you MUST specify which account to use. Use the alias (e.g. \"work\") or account ID (e.g. \"coup_hurricane_dal_analytical\")."
+                }
+              },
+              "required": [
+                "tool_slug",
+                "arguments"
+              ],
+              "additionalProperties": false,
+              "description": "MultiExecuteToolItem"
+            },
+            "minItems": 1,
+            "maxItems": 50,
+            "description": "List of logically independent tools to execute in parallel."
+          },
+          "thought": {
+            "type": "string",
+            "description": "One-sentence, concise, high-level rationale (no step-by-step)."
+          },
+          "sync_response_to_workbench": {
+            "type": "boolean",
+            "description": "Predictively set true when the response may be large or needed for later scripting. Saves the full response to the workbench while returning an inline preview. If the result is small, keep it inline. Default false."
+          },
+          "current_step": {
+            "type": "string",
+            "description": "Short enum for current step of the workflow execution. Eg FETCHING_EMAILS, GENERATING_REPLIES. Always include to keep execution aligned with the workflow."
+          },
+          "current_step_metric": {
+            "type": "string",
+            "description": "Progress metrics for the current step - use to track how far execution has advanced. Format as a string \"done/total units\" - example \"10/100 emails\", \"0/n messages\", \"3/10 pages\"."
+          },
+          "session_id": {
+            "type": "string",
+            "description": "Pass the session_id if you received one from a prior COMPOSIO_SEARCH_TOOLS call."
+          }
+        },
+        "required": [
+          "tools",
+          "sync_response_to_workbench"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "COMPOSIO_PROXY_EXECUTE",
+      "title": "Proxy execute",
+      "annotations": {
+        "scopes": [],
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "updateHint": false
+      }
+    },
+    {
+      "name": "COMPOSIO_REMOTE_BASH_TOOL",
+      "title": "Run bash commands",
+      "annotations": {
+        "scopes": [],
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "updateHint": false
+      }
+    },
+    {
+      "name": "COMPOSIO_REMOTE_WORKBENCH",
+      "title": "Execute Code remotely in work bench",
+      "annotations": {
+        "scopes": [],
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "updateHint": false
+      }
+    },
+    {
+      "name": "COMPOSIO_SEARCH_TOOLS",
+      "title": "Search Composio Tools",
+      "annotations": {
+        "scopes": [],
+        "readOnlyHint": true,
+        "openWorldHint": true,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "updateHint": false
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "queries": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "use_case": {
+                  "type": "string",
+                  "maxLength": 1024,
+                  "description": "Provide a normalized English description of the complete use case to enable precise planning. Focus on the specific action and intended outcome. Include any specific apps if mentioned by user in each use_case. Do NOT include personal identifiers (names, emails, IDs) here — put those in known_fields.\nExamples:\n  \"send an email to someone\"\n  \"search issues with label in jira toolkit\"\n  \"put issue details in a google sheet\"\n  \"post a formatted message to slack channel\""
+                },
+                "known_fields": {
+                  "type": "string",
+                  "description": "Provide known workflow inputs as a single English string of comma-separated key:value pairs (not an array). Keep 1-2 short, structured items - stable identifiers, names, emails, or settings only. Omit if not relevant. No free-form or long text (messages, notes, descriptions).\nExamples:\n  \"channel_name:pod-sdk\"\n  \"channel_id:123\"\n  \"invitee_names:John,Maria, timezone:Asia/Kolkata\""
+                }
+              },
+              "required": [
+                "use_case"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 1,
+            "description": "Structured English search queries to process in parallel. Split independent app/API actions into separate queries, including hidden prerequisites. Each query returns 4-6 tools."
+          },
+          "session": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Existing session identifier for the current workflow to reuse across calls."
+              },
+              "generate_id": {
+                "type": "boolean",
+                "description": "Set to true for the first search call of a new usecase/workflow to generate a new session ID. When user pivots to a different task, set this true. If omitted or false with an existing session.id, the provided session ID will be reused."
+              }
+            },
+            "additionalProperties": false,
+            "description": "Session context for correlating meta tool calls within a workflow. Always pass this parameter. Use {generate_id: true} for new workflows or {id: \"EXISTING_ID\"} to continue existing workflows."
+          },
+          "model": {
+            "type": "string",
+            "description": "Client LLM model name (recommended). Used to optimize planning/search behavior. Ignored if omitted or invalid.\nExamples:\n  \"gpt-5.2\"\n  \"claude-4.5-sonnet\""
+          },
+          "search_strategy": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "tool_search"
+            ],
+            "description": "Search path to use. Use auto normally. If the returned plan does not match the current request or an expected tool is missing, retry with tool_search to bypass cached plans and run direct tool search.",
+            "default": "auto"
+          }
+        },
+        "required": [
+          "queries"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    {
+      "name": "COMPOSIO_SUBMIT_FEEDBACK",
+      "title": "Submit tool feedback",
+      "annotations": {
+        "scopes": [],
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "updateHint": false
+      }
+    },
+    {
+      "name": "COMPOSIO_WAIT_FOR_CONNECTIONS",
+      "title": "Wait for connection",
+      "annotations": {
+        "scopes": [],
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "updateHint": false
+      }
+    },
+    {
+      "name": "COMPOSIO_MANAGE_SKILL",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "COMPOSIO_SEARCH_SKILLS",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "COMPOSIO_USE_SKILL",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    }
+  ]
+}

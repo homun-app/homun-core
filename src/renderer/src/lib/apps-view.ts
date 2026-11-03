@@ -7,7 +7,7 @@
 // stesso servizio (l'esclusione la fa il daemon con la tabella di slug);
 // «Collegate» comprende anche le app Composio, con lo stato «da ricollegare».
 // Ogni riga porta la PROVENIENZA (A7): 'direct' (curata) o 'composio'.
-import type { ConnectorInfo, ComposioCatalogRow, ComposioStatusInfo, Localized } from '../../../shared/types'
+import type { ConnectorInfo, ComposioCatalogRow, ComposioStatusInfo, ComposioGatewayStatusInfo, Localized } from '../../../shared/types'
 
 /** L'ordine fisso delle consigliate (l'idea di featured-connectors di Rakazo). */
 export const FEATURED_ORDER = ['gmail', 'gcalendar', 'gdrive', 'notion', 'linear'] as const
@@ -63,6 +63,8 @@ export interface AppsViewInput {
   composio?: ComposioStatusInfo | null
   /** fase app: le righe del catalogo Composio già filtrate dal daemon (curate escluse) */
   composioRows?: ComposioCatalogRow[]
+  /** fase Composio OAuth (C5): le app dentro il server Composio collegato col login */
+  composioGateway?: ComposioGatewayStatusInfo | null
 }
 
 export interface FeaturedRow {
@@ -88,6 +90,10 @@ export interface ConnectedRow {
   via: AppProvenance
   /** solo source 'composio': lo slug del toolkit (Collega/Scollega/Ricollega) */
   composioSlug?: string
+  /** fase Composio OAuth (C5): lo slug di un'app del GATEWAY (login, non chiave) */
+  gatewaySlug?: string
+  /** fase Composio OAuth (C6): la riga apre il dettaglio del gateway Composio */
+  gateway?: boolean
 }
 
 /** Una riga Composio di «Tutte le app» (A3). */
@@ -182,7 +188,10 @@ export function appsViewModel(input: AppsViewInput): AppsViewModel {
       logo: c.logo,
       botsLabel: { all: true, names: [], extra: 0 },
       status: c.state.status === 'connected' ? 'connected' : 'reconnect',
-      via: 'direct'
+      via: 'direct',
+      // fase Composio OAuth (C6): la voce Composio del catalogo apre il
+      // dettaglio del gateway (app collegate, Collega un'app, Disattiva)
+      ...(c.gateway ? { gateway: true } : {})
     })
   }
   // -- i server MCP installati (registro, plugin, gateway, manuale) --
@@ -213,6 +222,23 @@ export function appsViewModel(input: AppsViewInput): AppsViewModel {
       botsLabel: botsLabelOf(p.enabledFor ?? null, agents),
       status: 'connected',
       via: 'direct'
+    })
+  }
+  // -- fase Composio OAuth (C5): le app dentro il server Composio (login) --
+  const gatewayApps = input.composioGateway?.connected ?? []
+  for (const app of gatewayApps) {
+    if (q && !matchesQuery(`${app.name} ${app.slug}`.toLowerCase(), q)) continue
+    connected.push({
+      kind: 'connected',
+      key: `gateway-app:${app.slug}`,
+      source: 'composio',
+      id: app.slug,
+      name: app.name,
+      logo: '🌐',
+      botsLabel: { all: true, names: [], extra: 0 },
+      status: app.status === 'ACTIVE' ? 'connected' : 'reconnect',
+      via: 'composio',
+      gatewaySlug: app.slug
     })
   }
   // -- le app Composio collegate (o «da ricollegare») --

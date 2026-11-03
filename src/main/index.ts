@@ -201,10 +201,25 @@ if (isDaemonMode(process.argv)) {
         (await safeStorage.encryptStringAsync(String(plain))).toString('base64'))
       client.registerHost('host.safeStorage.decrypt', async ([b64]) =>
         await safeStorage.decryptStringAsync(Buffer.from(String(b64), 'base64')))
-      // fase 5: apre il browser di sistema per l'autorizzazione OAuth dei connettori
-      client.registerHost('host.openExternal', ([url]) => {
-        if (!canOpenExternally(String(url))) return Promise.reject(new Error('URL non apribile'))
-        return shell.openExternal(String(url))
+      // fase 5: apre il browser di sistema per l'autorizzazione OAuth dei connettori.
+      // fase Composio OAuth (sonda): con SANDBOT_TEST_FAKE_BROWSER=1 (valido
+      // SOLO insieme a SANDBOT_TEST_USER_DATA) l'URL si segue con fetch fino
+      // al callback di loopback — il «browser finto» della sonda, mai il
+      // browser vero dell'utente per un login su 127.0.0.1
+      client.registerHost('host.openExternal', async ([url]) => {
+        let current = String(url)
+        if (!canOpenExternally(current)) throw new Error('URL non apribile')
+        if (process.env.SANDBOT_TEST_FAKE_BROWSER === '1' && process.env.SANDBOT_TEST_USER_DATA) {
+          for (let hop = 0; hop < 5; hop++) {
+            const res = await fetch(current, { redirect: 'manual' })
+            const location = res.headers.get('location')
+            if (!location) return
+            if (!canOpenExternally(location)) throw new Error('redirect non apribile')
+            current = location
+          }
+          return
+        }
+        return shell.openExternal(current)
       })
       registerIpc(client, () => BrowserWindow.getAllWindows())
       // A8: prima di installare un aggiornamento il daemon si ferma BENE

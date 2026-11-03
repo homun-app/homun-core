@@ -149,6 +149,15 @@ export const UI = {
   // fase app (A6): il motivo della card di un'azione Composio (la card mostra
   // anche «Gmail · Invia email» e la riga piccola «tramite Composio», A7)
   approvalComposioAction: msg({ id: 'approval.composioAction', message: '{tool} agisce verso l’esterno (azione di un’app collegata)' }),
+  // fase Composio OAuth: il blocco (C2), la fiducia per app (C4), il
+  // collegamento di un'app (C5) e il proxy HTTP grezzo (C3)
+  approvalComposioBatch: msg({ id: 'approval.composioBatch', message: '{count, plural, one {un’azione} other {# azioni}} di app collegate tramite Composio agiscono verso l’esterno' }),
+  approvalComposioTrust: msg({
+    id: 'approval.composioTrust',
+    message: 'legge da un’app di Composio che questo turno non ha ancora usato, dopo che c’è entrato contenuto non fidato'
+  }),
+  approvalComposioConnect: msg({ id: 'approval.composioConnect', message: 'vuole collegare o cambiare le app connesse tramite Composio' }),
+  approvalComposioProxy: msg({ id: 'approval.composioProxy', message: 'chiama direttamente l’API di un’app collegata (richiesta HTTP grezza tramite Composio)' }),
   approvalReadsOutsideBox: msg({ id: 'approval.readsOutsideBox', message: 'legge fuori dal box condiviso' }),
   approvalForcedOrigin: msg({
     id: 'approval.forcedOrigin',

@@ -14,7 +14,8 @@ import { describeCron } from '../../../shared/cron-human'
 import { uiTextOfMeta } from '../lib/ui-text'
 import { i18n } from '../lib/i18n'
 // R3 (fase app — ritocchi): il modello puro della card per Composio e MCP
-import { approvalAppOf, approvalTitleOf, approvalReasonPhrase, approvalTechnicalLine } from '../lib/approval-app'
+// fase Composio OAuth (C7): anche il modello del blocco
+import { approvalAppOf, approvalTitleOf, approvalReasonPhrase, approvalTechnicalLine, approvalBatchArgumentLines, type ComposioBatchActionMeta } from '../lib/approval-app'
 import type { TranscriptEntry } from '../../../shared/types'
 import { DecidedRow, CardShell } from './DecidedRow'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu'
@@ -136,13 +137,16 @@ export function ApprovalCard({ entry, readOnly = false }: { entry: TranscriptEnt
   // nemmeno «per questo turno»; fase app (A6): le azioni Composio DISTRUTTIVE
   // non offrono «Sempre» (come le installazioni)
   const composioAction = entry.meta?.composioAction as { app?: string; action?: string } | undefined
-  const noAlways = tool === 'update_state' || entry.meta?.composioDestructive === true
+  // fase Composio OAuth (C7): le azioni del blocco (o le voci di
+  // MANAGE_CONNECTIONS / PROXY_EXECUTE) — il titolo viene da loro
+  const composioBatch = entry.meta?.composioBatch as { actions: ComposioBatchActionMeta[]; incomplete: boolean; reason?: 'action' | 'incomplete' | 'trust' | 'rule' } | undefined
+  const noAlways = tool === 'update_state' || entry.meta?.composioDestructive === true || entry.meta?.composioNoAlways === true
   const noTurn = noAlways || entry.meta?.neverAuto === true
   const command = typeof input?.command === 'string' ? input.command : null
   const filePath = typeof input?.path === 'string' ? input.path : null
   // fase app (A6/A7): gli argomenti dell'azione, TUTTI visibili (come D1:
   // nessun campo nascosto) + la riga piccola «tramite Composio»
-  const composioArgs = composioAction && input && typeof input === 'object'
+  const composioArgs = !composioBatch && composioAction && input && typeof input === 'object'
     ? Object.entries(input).filter(([, v]) => v !== undefined && v !== null && (typeof v !== 'object' || Array.isArray(v)))
     : null
 
@@ -151,8 +155,42 @@ export function ApprovalCard({ entry, readOnly = false }: { entry: TranscriptEnt
       <p className="text-[15px] font-semibold">
         {resolvedTitle ?? askTitle(tool, agentName)}
       </p>
-      {composioAction && (
+      {(composioAction || composioBatch) && (
         <p className="mt-0.5 text-[11px] text-muted-foreground"><Trans>tramite Composio</Trans></p>
+      )}
+      {composioBatch && composioBatch.actions.length > 0 && (
+        // C7 punto 1: per ogni azione gli argomenti BREVI prima (destinatari e
+        // posti), i testi lunghi DOPO (argumentLines di Rakazo), l'account se c'è
+        <div className="mt-2 space-y-1.5 rounded-[10px] bg-card px-3 py-2 text-xs" data-testid="composio-batch-actions">
+          {composioBatch.actions.map((a) => {
+            const lines = approvalBatchArgumentLines(a.arguments ?? {})
+            return (
+              <div key={`${a.slug}-${a.app}`}>
+                <div className="font-medium">
+                  {a.app} · {a.action}
+                  {a.account ? <span className="ml-1 text-muted-foreground">({a.account})</span> : null}
+                </div>
+                {lines.first.map(([k, v]) => (
+                  <div key={k} className="flex gap-2">
+                    <span className="shrink-0 text-muted-foreground">{k}:</span>
+                    <span className="min-w-0 break-all">{v}</span>
+                  </div>
+                ))}
+              </div>
+            )
+          })}
+          {composioBatch.actions.flatMap((a) =>
+            approvalBatchArgumentLines(a.arguments ?? {}).last.map(([k, v]) => (
+              <div key={`${a.slug}-${k}`} className="flex gap-2">
+                <span className="shrink-0 text-muted-foreground">{a.action || a.slug} {k}:</span>
+                <span className="min-w-0 whitespace-pre-wrap break-all">{v}</span>
+              </div>
+            ))
+          )}
+          {composioBatch.incomplete && (
+            <div className="text-muted-foreground"><Trans>…e una voce senza nome: chiede sempre l'approvazione</Trans></div>
+          )}
+        </div>
       )}
       {composioArgs && composioArgs.length > 0 && (
         <div className="mt-2 space-y-0.5 rounded-[10px] bg-card px-3 py-2 text-xs">
@@ -171,8 +209,12 @@ export function ApprovalCard({ entry, readOnly = false }: { entry: TranscriptEnt
         <code className="mt-2 block overflow-hidden rounded-[10px] bg-card px-3 py-2 font-mono text-[13px]">{filePath}</code>
       )}
       {/* R3: per Composio e MCP la frase umana; gli altri motivi del gate
-          restano i testi di sempre (sono già umani) */}
-      {humanReason ? (
+          restano i testi di sempre (sono già umani). C7: per il blocco la
+          frase nomina le app (e dice quando non si può annullare); il motivo
+          SPECIFICO del gate (fiducia C4, voce senza nome) vince sulla frase */}
+      {composioBatch && composioBatch.reason === 'trust' && reasonText && reasonText !== tool ? (
+        <p className="mt-2 text-sm leading-relaxed text-foreground/80">{reasonText}</p>
+      ) : humanReason ? (
         <p className="mt-2 text-sm leading-relaxed text-foreground/80">{i18n.t(humanReason)}</p>
       ) : reasonText && reasonText !== tool && (
         <p className="mt-2 text-sm leading-relaxed text-foreground/80">{reasonText}</p>

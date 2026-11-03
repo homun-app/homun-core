@@ -32,6 +32,12 @@ export interface CatalogEntry {
   category?: ConnectorCategory
   /** fase 16c (C4): mezza riga localizzata sotto il nome (per esempio «Pagine e database») */
   tagline?: Localized
+  /**
+   * Fase Composio OAuth (C1): la voce è un «gateway» di app — non un servizio
+   * solo: dentro ci si collegano altre app (Composio). La UI la tratta come
+   * la card «Accedi» di A2/A7 e il dettaglio elenca le app collegate (C5).
+   */
+  gateway?: boolean
 }
 
 export type ConnectorStatus = 'not_connected' | 'connected' | 'needs_auth' | 'error'
@@ -90,15 +96,25 @@ export function validateCatalog(entries: unknown): string[] {
       errors.push(`${where}: tagline mancante (serve {it, en})`)
     }
     if (c.scopes !== undefined && (!Array.isArray(c.scopes) || c.scopes.some((s) => typeof s !== 'string'))) errors.push(`${where}: scopes non validi`)
+    // fase Composio OAuth (C1): il flag gateway (facoltativo, booleano)
+    if (c.gateway !== undefined && typeof c.gateway !== 'boolean') errors.push(`${where}: gateway non booleano`)
   })
   return errors
 }
 
-/** Catalogo verificato (vedi "notes" di ogni voce per la fonte ufficiale). */
+/**
+ * Catalogo verificato (vedi "notes" di ogni voce per la fonte ufficiale).
+ * Fase Composio OAuth (C1): nella SONDA la voce di Composio punta al server
+ * MCP finto locale con SANDBOT_TEST_COMPOSIO_MCP_URL — valida SOLO insieme a
+ * SANDBOT_TEST_USER_DATA (mai un https di produzione verso una sonda).
+ */
 export function loadCatalog(): CatalogEntry[] {
   const errors = validateCatalog(catalogJson)
   if (errors.length) throw new Error(`catalogo connettori non valido: ${errors.join('; ')}`)
-  return catalogJson as CatalogEntry[]
+  const entries = catalogJson as CatalogEntry[]
+  const testUrl = process.env.SANDBOT_TEST_COMPOSIO_MCP_URL
+  if (!testUrl || !process.env.SANDBOT_TEST_USER_DATA) return entries
+  return entries.map((e) => (e.id === 'composio' ? { ...e, mcpUrl: testUrl } : e))
 }
 
 // ---- ricerca nel catalogo (search_connectors del modello) ----

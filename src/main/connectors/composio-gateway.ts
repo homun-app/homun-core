@@ -1,0 +1,338 @@
+// Fase Composio OAuth (C5): collegare le APP dentro il server Composio
+// collegato con il login (C1). COMPOSIO_MANAGE_CONNECTIONS crea i link di
+// autorizzazione (redirect_url): qui sta tutto il flusso —
+// - DAL BOT: quando il modello chiama `add`, Homun NON passa il link nel
+//   testo libero (lo toglie dal risultato al modello) e mostra una CARD DI
+//   COLLEGAMENTO come offer_connector («Collega Gmail tramite Composio»).
+//   Il clic è dell'utente: apre il link nel browser di sistema (lo stesso
+//   controllo canOpenExternally di host.openExternal). Dopo il clic Homun
+//   chiama da solo COMPOSIO_WAIT_FOR_CONNECTIONS per quel toolkit (timeout
+//   5 minuti, annullabile) e aggiorna la card a «Collegata» o «Non riuscito»;
+// - DALLA FINESTRA APP: il dettaglio di Composio elenca «App collegate
+//   tramite Composio» e ha il campo «Collega un'app» (lista dei toolkit
+//   comuni + ricerca libera dello slug); Collega → MANAGE_CONNECTIONS add →
+//   stesso flusso (il clic nella finestra È dell'utente: il link si apre
+//   subito e la finestra mostra l'attesa). Rimuovi → remove con account_id.
+//
+// L'ELENCO delle app collegate (C5 punto 3): MANAGE_CONNECTIONS `list`
+// lavora per toolkit; Homun tiene in memoria e su disco i toolkit che
+// l'utente ha collegato DA HOMUN e fa `list` su quelli all'apertura del
+// dettaglio. Il formato esatto della risposta va letto dal risultato VERO
+// (lo verifichiamo con l'account vero): qui il parsing è TOLLERANTE (cerca
+// redirect_url, id e stati nei campi del JSON, vedi parseConnectionsResult)
+// e quando lo stato non si deduce la riga dice «Gestisci su Composio».
+//
+// Le dipendenze sono INIETTABILI (callMcp, openExternal, settings): i test
+// girano senza daemon. Nessuna chiamata a Composio fuori dai flussi di qui.
+import { randomUUID } from 'node:crypto'
+import type { SandbotEvent } from '../../shared/types'
+import {
+  manageConnectionsAgentResult, manageConnectionsEntries, parseConnectionsResult
+} from './tool-batch'
+
+/** Il nome completo degli strumenti del server Composio nella pipeline (slug del server: composio). */
+export const COMPOSIO_SERVER_TOOLS = {
+  manageConnections: 'mcp__composio__COMPOSIO_MANAGE_CONNECTIONS',
+  waitForConnections: 'mcp__composio__COMPOSIO_WAIT_FOR_CONNECTIONS'
+} as const
+
+/** L'attesa del login: 5 minuti, annullabile (C5 punto 1). */
+export const COMPOSIO_GATEWAY_WAIT_MS = 5 * 60_000
+/** Ogni quanti secondi la UI rilegge lo stato mentre aspetta (il suo timer). */
+const S_SETTING_APPS = 'composioGateway.apps'
+
+export type ComposioGatewayAppStatus = 'ACTIVE' | 'RECONNECT' | 'FAILED'
+
+interface StoredGatewayApp {
+  name: string
+  accountId: string | null
+  status: ComposioGatewayAppStatus
+  connectedAt: number
+}
+
+/** Lo stato locale delle app collegate tramite il server Composio. */
+type GatewayAppsSetting = Record<string, StoredGatewayApp>
+
+export interface ComposioGatewayAppRpc {
+  slug: string
+  name: string
+  status: ComposioGatewayAppStatus
+  accountId: string | null
+}
+
+export interface ComposioGatewayStatusRpc {
+  /** il server Composio è collegato (login C1 riuscito) */
+  active: boolean
+  connected: ComposioGatewayAppRpc[]
+  /** il collegamento in attesa del login nel browser (Annulla = cancel) */
+  pending: { slug: string; name: string; since: number; failed?: boolean } | null
+}
+
+export interface ComposioGatewayDeps {
+  /** esegue uno strumento del server Composio (mcp.callTool, iniettabile). */
+  callMcp(tool: string, args: Record<string, unknown>, opts?: { timeoutMs?: number }): Promise<string>
+  /** il server Composio è attivo (connettore collegato, non needs_auth). */
+  gatewayActive(): boolean
+  getSetting<T>(key: string, fallback: T): T
+  setSetting(key: string, value: unknown): void
+  /** Apre il browser di sistema (HostBridge: stesso controllo canOpenExternally). */
+  openExternal(url: string): Promise<void>
+  hasUi(): boolean
+  emit(e: SandbotEvent): void
+  now?(): number
+}
+
+export type ComposioGatewayManager = ReturnType<typeof createComposioGatewayManager>
+
+/** Un link di autorizzazione in attesa del clic dell'utente (la card lo chiama per chiave). */
+interface PendingLink {
+  key: string
+  slug: string
+  name: string
+  url: string
+  at: number
+}
+
+export function createComposioGatewayManager(deps: ComposioGatewayDeps) {
+  const now = (): number => deps.now?.() ?? Date.now()
+  /** i link creati da `add`, in attesa del clic dell'utente sulla card */
+  const pendingLinks = new Map<string, PendingLink>()
+  /** l'attesa del login in corso (annullabile) */
+  let waiting: { slug: string; name: string; since: number; cancelled: boolean; failed?: boolean } | null = null
+
+  const apps = (): GatewayAppsSetting => deps.getSetting<GatewayAppsSetting>(S_SETTING_APPS, {})
+  const setApps = (next: GatewayAppsSetting): void => {
+    deps.setSetting(S_SETTING_APPS, next)
+    deps.emit({ type: 'connectors' })
+  }
+  const setApp = (slug: string, patch: StoredGatewayApp): void => {
+    setApps({ ...apps(), [slug.toLowerCase()]: patch })
+  }
+  const appOf = (slug: string): StoredGatewayApp | undefined => apps()[slug.toLowerCase()]
+
+  /** Gli slug collegati localmente (per il classificatore C2 e le ricerche). */
+  const connectedSlugs = (): string[] => Object.keys(apps())
+
+  // ---- l'esecuzione di MANAGE_CONNECTIONS e il parsing tollerante ----
+
+  /**
+   * Chiama COMPOSIO_MANAGE_CONNECTIONS e torna il risultato con i link
+   * trovati (parseConnectionsResult: tollerante sul formato vero).
+   */
+  async function runManageConnections(args: Record<string, unknown>): Promise<{ output: string; links: Array<{ url: string; toolkit?: string }> }> {
+    const output = await deps.callMcp(COMPOSIO_SERVER_TOOLS.manageConnections, args)
+    const parsed = parseConnectionsResult(output)
+    return { output, links: parsed.redirectUrls }
+  }
+
+  /**
+   * Il risultato di una chiamata `add` DEL MODELLO (C5 punto 1): i link NON
+   * passano nel testo libero — restano qui, la card li apre al clic. Torna
+   * l'output PULITO per il modello e le card da creare in chat.
+   */
+  function handleAgentManageResult(
+    args: Record<string, unknown>,
+    output: string
+  ): { output: string; cards: Array<{ key: string; slug: string; name: string }> } {
+    const entries = manageConnectionsEntries(args).filter((e) => e.named && e.action === 'add')
+    const parsed = parseConnectionsResult(output)
+    const cards: Array<{ key: string; slug: string; name: string }> = []
+    for (const link of parsed.redirectUrls) {
+      const slug = (link.toolkit ?? entries[0]?.name ?? '').toLowerCase()
+      if (!slug) continue
+      const key = randomUUID()
+      pendingLinks.set(key, { key, slug, name: link.toolkit ?? slug, url: link.url, at: now() })
+      cards.push({ key, slug, name: link.toolkit ?? slug })
+    }
+    // voci `add` senza link trovato: niente card, il modello lo sa dal testo
+    return { output: manageConnectionsAgentResult(output, parsed.redirectUrls), cards }
+  }
+
+  // ---- l'attesa del login (WAIT_FOR_CONNECTIONS, 5 minuti, annullabile) ----
+
+  /**
+   * Chiama COMPOSIO_WAIT_FOR_CONNECTIONS per un toolkit e aggiorna lo stato
+   * locale («Collegata» o «Non riuscito»). Il timeout del turno non c'entra:
+   * è l'attesa del login dell'utente, annullabile dalla UI.
+   */
+  async function waitForApp(slugRaw: string, name: string): Promise<'connected' | 'failed' | 'cancelled'> {
+    const slug = slugRaw.toLowerCase()
+    const state = { slug, name, since: now(), cancelled: false }
+    waiting = state
+    deps.emit({ type: 'connectors' })
+    let outcome: 'connected' | 'failed' | 'cancelled'
+    try {
+      const output = await deps.callMcp(
+        COMPOSIO_SERVER_TOOLS.waitForConnections,
+        { toolkits: [slug], mode: 'any' },
+        { timeoutMs: COMPOSIO_GATEWAY_WAIT_MS }
+      )
+      if (state.cancelled) {
+        outcome = 'cancelled'
+      } else {
+        // WAIT aspetta lo stato terminale (ACTIVE/FAILED); se il formato vero
+        // non si lascia dedurre, il collegamento si considera riuscito (la
+        // verifica col risultato vero la facciamo con l'account dell'utente)
+        const parsed = parseConnectionsResult(output)
+        const account = parsed.accounts.find((a) => (a.toolkit ?? '').toLowerCase() === slug)
+        const status = String(account?.status ?? '').toUpperCase()
+        if (status === 'FAILED') {
+          setApp(slug, { name, accountId: account?.id ?? null, status: 'FAILED', connectedAt: now() })
+          outcome = 'failed'
+        } else {
+          setApp(slug, { name, accountId: account?.id ?? null, status: 'ACTIVE', connectedAt: now() })
+          outcome = 'connected'
+        }
+      }
+    } catch {
+      if (state.cancelled) {
+        outcome = 'cancelled'
+      } else {
+        setApp(slug, { name, accountId: null, status: 'FAILED', connectedAt: now() })
+        outcome = 'failed'
+      }
+    }
+    // l'attesa visibile finisce col esito; il flag failed resta per la card
+    // finché non parte un collegamento nuovo
+    if (waiting === state) waiting = outcome === 'failed' ? { ...state, failed: true } : null
+    deps.emit({ type: 'connectors' })
+    return outcome
+  }
+
+  return {
+    /** Gli slug collegati (per il classificatore del blocco, C2). */
+    connectedSlugs,
+
+    /** Lo stato per la UI (C5 punto 3) — mai i link, mai i token. */
+    status(): ComposioGatewayStatusRpc {
+      const rows: ComposioGatewayAppRpc[] = Object.entries(apps()).map(([slug, a]) => ({
+        slug,
+        name: a.name,
+        status: a.status,
+        accountId: a.accountId
+      }))
+      rows.sort((a, b) => a.name.localeCompare(b.name))
+      return {
+        active: deps.gatewayActive(),
+        connected: rows,
+        pending: waiting ? { slug: waiting.slug, name: waiting.name, since: waiting.since, ...(waiting.failed ? { failed: true } : {}) } : null
+      }
+    },
+
+    /** Il flusso DAL BOT (C5 punto 1): il risultato `add` del modello → card. */
+    handleAgentManageResult,
+
+    /**
+     * Il clic su «Collega» della card in chat: apre il link nel browser di
+     * sistema e aspetta il login (WAIT_FOR_CONNECTIONS, 5 min, annullabile).
+     */
+    async cardConnect(key: string): Promise<{ ok: boolean; error?: string }> {
+      const link = pendingLinks.get(key)
+      if (!link) return { ok: false, error: 'link no longer valid' }
+      pendingLinks.delete(key)
+      try {
+        await deps.openExternal(link.url)
+      } catch (e) {
+        return { ok: false, error: e instanceof Error ? e.message : String(e) }
+      }
+      void waitForApp(link.slug, link.name)
+      return { ok: true }
+    },
+
+    /**
+     * Il flusso DALLA FINESTRA APP (C5 punto 2): Collega → add per lo slug →
+     * il link si apre subito (il clic nella finestra è dell'utente) → attesa.
+     */
+    async connectApp(slugRaw: string, nameHint?: string): Promise<{ ok: boolean; error?: string }> {
+      const slug = slugRaw.toLowerCase()
+      if (!deps.gatewayActive()) return { ok: false, error: 'not-active' }
+      try {
+        const { links } = await runManageConnections({
+          toolkits: [{ name: slug, action: 'add' }]
+        })
+        const link = links[0]?.url
+        if (!link) return { ok: false, error: 'no authorization link in the response' }
+        await deps.openExternal(link)
+        void waitForApp(slug, nameHint ?? slug)
+        return { ok: true }
+      } catch (e) {
+        return { ok: false, error: e instanceof Error ? e.message : String(e) }
+      }
+    },
+
+    /** Rimuovi (C5 punto 2): remove con account_id, conferma chiesta dalla UI. */
+    async removeApp(slugRaw: string): Promise<{ ok: boolean; error?: string }> {
+      const slug = slugRaw.toLowerCase()
+      const app = appOf(slug)
+      if (!app) return { ok: false, error: 'app not connected from Homun' }
+      try {
+        if (app.accountId) {
+          await deps.callMcp(COMPOSIO_SERVER_TOOLS.manageConnections, {
+            toolkits: [{ name: slug, action: 'remove', account_id: app.accountId }]
+          })
+        }
+      } catch (e) {
+        return { ok: false, error: e instanceof Error ? e.message : String(e) }
+      } finally {
+        const next = { ...apps() }
+        delete next[slug]
+        setApps(next)
+      }
+      return { ok: true }
+    },
+
+    /** Annulla l'attesa del login (il bottone Annulla della UI). */
+    cancelWait(): void {
+      if (waiting) {
+        waiting.cancelled = true
+        waiting = null
+        deps.emit({ type: 'connectors' })
+      }
+    },
+
+    /**
+     * C5 punto 3: `list` sui toolkit collegati da Homun, tollerante sul
+     * formato vero; lo stato non deducibile lascia la riga com'è (la UI
+     * mostra «Gestisci su Composio» quando serve).
+     */
+    async refreshAccounts(): Promise<void> {
+      if (!deps.gatewayActive()) return
+      const local = apps()
+      for (const [slug, stored] of Object.entries(local)) {
+        try {
+          const output = await deps.callMcp(COMPOSIO_SERVER_TOOLS.manageConnections, {
+            toolkits: [{ name: slug, action: 'list' }]
+          })
+          const parsed = parseConnectionsResult(output)
+          const account = parsed.accounts.find((a) => (a.toolkit ?? '').toLowerCase() === slug)
+          if (!account) continue // formato non deducibile: la riga resta com'è
+          const status = String(account.status ?? '').toUpperCase()
+          if (status === 'ACTIVE') local[slug] = { ...stored, status: 'ACTIVE', accountId: account.id ?? stored.accountId }
+          else if (status === 'FAILED' || status === 'EXPIRED') local[slug] = { ...stored, status: 'RECONNECT' }
+        } catch {
+          // senza rete o server giù: la riga resta com'è, mai un'eccezione alla UI
+        }
+      }
+      setApps(local)
+    },
+
+    /** Lo stato per il modello/loop: il link di una card è ancora apribile? */
+    hasPendingLink(key: string): boolean {
+      return pendingLinks.has(key)
+    }
+  }
+}
+
+// ---- i punti d'ingresso per il loop (niente import inversi) ----
+
+let active: ComposioGatewayManager | null = null
+
+/** Il daemon registra QUI il manager (runtime.ts); null = server Composio non attivo. */
+export function setActiveComposioGateway(manager: ComposioGatewayManager | null): void {
+  active = manager
+}
+
+/** C5: il gestore attivo (null se il server Composio non è collegato). */
+export function composioGateway(): ComposioGatewayManager | null {
+  return active
+}
