@@ -839,7 +839,7 @@ export interface SandbotApi {
   // fase app (A2): attivazione di Composio con la chiave dell'utente
   composioStatus(): Promise<ComposioStatusInfo>
   composioSetKey(key: string): Promise<{ ok: boolean }>
-  composioTest(): Promise<{ ok: boolean; reason?: 'invalid-key' | 'unreachable'; error?: string }>
+  composioTest(): Promise<{ ok: boolean; reason?: 'invalid-key' | 'unreachable' | 'consumer-key'; error?: string }>
   composioDisable(): Promise<{ ok: boolean }>
   // fase app (A3): il catalogo Composio (curate escluse) con ricerca locale
   composioCatalog(query?: string): Promise<ComposioCatalogInfo>

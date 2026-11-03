@@ -744,9 +744,16 @@ export function createComposioManager(deps: ComposioManagerDeps) {
     },
 
     /** A2 passo 3: il daemon crea il client e chiama toolkits.get con limite minimo. */
-    async test(): Promise<{ ok: boolean; reason?: 'invalid-key' | 'unreachable'; error?: string }> {
+    async test(): Promise<{ ok: boolean; reason?: 'invalid-key' | 'unreachable' | 'consumer-key'; error?: string }> {
       const key = pendingKey ?? (await storedKey())
       if (!key) return { ok: false, reason: 'invalid-key' }
+      // prova con chiave vera: le chiavi ck_ sono di Composio «For You» (MCP
+      // consumer, header x-consumer-api-key), non della piattaforma: l'SDK le
+      // rifiuta con 401. Lo si dice subito invece di chiamare Composio.
+      if (/^ck_/i.test(key)) {
+        pendingKey = null
+        return { ok: false, reason: 'consumer-key' }
+      }
       try {
         // finto (env sonda) o iniettato (test) → activeClient; altrimenti SDK
         const fakeOrInjected = !!deps.clientFactory || !!process.env.SANDBOT_TEST_FAKE_COMPOSIO
@@ -767,11 +774,20 @@ export function createComposioManager(deps: ComposioManagerDeps) {
       } catch (e) {
         // fallito: la chiave NON resta salvata (pendingKey resta in memoria per
         // riprovare senza ridigitare, ma in nessun setting né store)
-        const message = e instanceof Error ? e.message : String(e)
-        const reason = /fetch|network|ENOTFOUND|ECONNREFUSED|timeout|timed out|abort/i.test(message)
-          ? 'unreachable'
-          : 'invalid-key'
-        return { ok: false, reason, error: sanitizeComposioError(e) }
+        // prova con chiave vera: l'SDK avvolge tutto in «Failed to fetch
+        // toolkits», anche un 401 — la causa vera (stato HTTP, errore di rete)
+        // sta in e.cause. «fetch» nel messaggio NON vuol dire rete.
+        const cause = (e as { cause?: unknown })?.cause as { status?: unknown; code?: unknown; message?: unknown } | undefined
+        const status = Number(cause?.status ?? (e as { status?: unknown })?.status)
+        const causeText = `${String(cause?.code ?? '')} ${String(cause?.message ?? '')} ${e instanceof Error ? e.message : String(e)}`
+        const reason = status === 401 || status === 403
+          ? 'invalid-key'
+          : !Number.isFinite(status) && /ENOTFOUND|ECONNREFUSED|ECONNRESET|EAI_AGAIN|ETIMEDOUT|network|timed out|aborted|abort/i.test(causeText)
+            ? 'unreachable'
+            : undefined
+        const detail = sanitizeComposioError(cause instanceof Error ? cause : e)
+        console.warn(`[composio] prova della chiave non riuscita (${Number.isFinite(status) ? status : 'senza stato'}): ${detail.slice(0, 300)}`)
+        return { ok: false, ...(reason ? { reason } : {}), error: detail.slice(0, 300) }
       }
     },
 

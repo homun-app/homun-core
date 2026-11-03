@@ -3952,6 +3952,10 @@ msgstr "Questa azione chiede sempre l'approvazione"
 msgid "Questa build non riceve aggiornamenti"
 msgstr "Questa build non riceve aggiornamenti"
 
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Questa è una chiave di Composio «For You» (inizia con ck_). Homun usa la chiave di un progetto Composio: su composio.dev apri il pannello per sviluppatori, crea un progetto e copia la sua chiave API da Settings → API Keys (inizia con ak_)."
+msgstr "Questa è una chiave di Composio «For You» (inizia con ck_). Homun usa la chiave di un progetto Composio: su composio.dev apri il pannello per sviluppatori, crea un progetto e copia la sua chiave API da Settings → API Keys (inizia con ak_)."
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "rpc.groupMemberUnknown"

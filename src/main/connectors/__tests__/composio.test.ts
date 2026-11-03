@@ -570,3 +570,43 @@ describe('registro modulo: setActiveComposio', () => {
     expect(composioAppsOf('bot9')).toEqual(['Slack'])
   })
 })
+
+describe('prova con chiave vera: le cause degli errori della prova', () => {
+  const mk = (err: unknown) => createComposioManager({
+    store: { read: async () => undefined, write: async () => undefined, remove: async () => undefined } as never,
+    getSetting: <T>(_k: string, fb: T): T => fb,
+    setSetting: () => undefined,
+    openExternal: async () => undefined,
+    hasUi: () => true,
+    emit: () => undefined,
+    dataDir: () => '/nonexistent-composio-test',
+    now: () => 0,
+    clientFactory: async () => { throw err }
+  })
+  it('«Failed to fetch toolkits» con causa 401 è una chiave rifiutata, non la rete', async () => {
+    const e = Object.assign(new Error('Failed to fetch toolkits'), { cause: Object.assign(new Error('401 Invalid API key: ak_**0000'), { status: 401 }) })
+    const m = mk(e)
+    m.setKey('ak_sbagliata_000000')
+    const r = await m.test()
+    expect(r.reason).toBe('invalid-key')
+    expect(r.error).toContain('Invalid API key')
+  })
+  it('una chiave ck_ (Composio «For You») si riconosce senza chiamare Composio', async () => {
+    let called = false
+    const m = createComposioManager({
+      store: { read: async () => undefined, write: async () => undefined, remove: async () => undefined } as never,
+      getSetting: <T>(_k: string, fb: T): T => fb,
+      setSetting: () => undefined,
+      openExternal: async () => undefined,
+      hasUi: () => true,
+      emit: () => undefined,
+      dataDir: () => '/nonexistent-composio-test',
+      now: () => 0,
+      clientFactory: async () => { called = true; throw new Error('no') }
+    })
+    m.setKey('ck_qualcosa_000000')
+    const r = await m.test()
+    expect(r.reason).toBe('consumer-key')
+    expect(called).toBe(false)
+  })
+})

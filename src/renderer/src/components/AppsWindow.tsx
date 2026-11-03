@@ -575,7 +575,7 @@ function ComposioActivationSheet({ onClose, onDone }: { onClose(): void; onDone(
   const [key, setKey] = useState('')
   const [testing, setTesting] = useState(false)
   const [testError, setTestError] = useState('')
-  const [status, setStatus] = useState<'idle' | 'ok' | 'invalid-key' | 'unreachable' | 'error'>('idle')
+  const [status, setStatus] = useState<'idle' | 'ok' | 'invalid-key' | 'unreachable' | 'consumer-key' | 'error'>('idle')
 
   const runTest = async (): Promise<void> => {
     setTesting(true)
@@ -590,7 +590,7 @@ function ComposioActivationSheet({ onClose, onDone }: { onClose(): void; onDone(
         setStatus('ok')
         await refreshComposio()
       } else {
-        setStatus(r.reason === 'unreachable' ? 'unreachable' : r.reason === 'invalid-key' ? 'invalid-key' : 'error')
+        setStatus(r.reason ?? 'error')
         if (r.error && r.reason === undefined) setTestError(r.error)
       }
     } catch (e) {
@@ -670,6 +670,11 @@ function ComposioActivationSheet({ onClose, onDone }: { onClose(): void; onDone(
             {status === 'ok' && <p className="mt-2 text-[13px] text-chart-2" data-testid="composio-active"><Trans>Composio attivo</Trans></p>}
             {status === 'invalid-key' && <p className="mt-2 text-[13px] text-destructive"><Trans>Chiave non valida: controllala e riprova.</Trans></p>}
             {status === 'unreachable' && <p className="mt-2 text-[13px] text-destructive"><Trans>Composio non raggiungibile: controlla la connessione e riprova.</Trans></p>}
+            {status === 'consumer-key' && (
+              <p className="mt-2 text-[13px] text-destructive">
+                <Trans>Questa è una chiave di Composio «For You» (inizia con ck_). Homun usa la chiave di un progetto Composio: su composio.dev apri il pannello per sviluppatori, crea un progetto e copia la sua chiave API da Settings → API Keys (inizia con ak_).</Trans>
+              </p>
+            )}
             {status === 'error' && testError && <p className="mt-2 text-[13px] text-destructive">{testError}</p>}
             {status !== 'ok' && status !== 'idle' && (
               <p className="mt-1 text-[11px] text-muted-foreground"><Trans>La chiave non è stata salvata.</Trans></p>
