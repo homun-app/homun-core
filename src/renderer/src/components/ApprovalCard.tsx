@@ -277,7 +277,14 @@ export function ApprovalCard({ entry, readOnly = false }: { entry: TranscriptEnt
             ? i18n.t(msg`Annullato (interrupt)`)
             : status
     return (
-      <DecidedRow ok={status === 'allowed'} label={rowLabel} summary={approvalSummary(tool, input)} at={entry.createdAt}>
+      <DecidedRow
+        ok={status === 'allowed'}
+        label={rowLabel}
+        // R3: anche la riga dopo la decisione è umana per Composio e MCP
+        // («Slack · Crea promemoria»), mai il nome tecnico dello strumento
+        summary={appInfo ? (appInfo.kind === 'composio' && resolvedTitle ? resolvedTitle : appInfo.app) : approvalSummary(tool, input)}
+        at={entry.createdAt}
+      >
         <CardShell tone="waiting">{body}</CardShell>
       </DecidedRow>
     )

@@ -161,7 +161,9 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
     // notice di migrazione senza toccare la home vera
     const migration = await migrateLegacyBoxes(
       listAgents(),
-      process.env.SANDBOT_TEST_LEGACY_BOX_ROOT ? { legacyRoot: process.env.SANDBOT_TEST_LEGACY_BOX_ROOT } : {}
+      process.env.SANDBOT_TEST_LEGACY_BOX_ROOT && process.env.SANDBOT_TEST_USER_DATA
+        ? { legacyRoot: process.env.SANDBOT_TEST_LEGACY_BOX_ROOT }
+        : {}
     )
     if (migration.migrated.length || migration.failed.length) {
       const main = mainAgentOf(listAgents(), getSetting<string | null>('mainAgentId', null))
