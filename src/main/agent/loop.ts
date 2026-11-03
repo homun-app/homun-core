@@ -148,6 +148,17 @@ function verdictReasonText(verdict: import('./permissions').Verdict): string {
   return verdict.ui ? formatUi(verdict.ui, loopUiLanguage()) : verdict.reason
 }
 
+/**
+ * Fase app (A6/A7): il nome umano di uno strumento Composio per la card
+ * («Gmail · Invia email»); null se non è uno strumento Composio o il daemon
+ * non lo conosce (il fallback dello slug leggibile lo fa la UI).
+ */
+async function describeComposio(toolName: string): Promise<{ app: string; action: string } | null> {
+  if (!toolName.startsWith('composio__')) return null
+  const { describeComposioTool } = await import('../connectors/composio')
+  return describeComposioTool(toolName)
+}
+
 // §5.3: buildMessages vive in history.ts (modulo puro, testabile senza Electron)
 export { buildMessages } from './history'
 
@@ -1175,8 +1186,13 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       initiator: opts.initiator
     })
     // i nomi dei tool MCP attivi del turno: in modalità differita un mcp__*
-    // fuori da questo insieme NON si esegue ("strumento non attivo")
-    const activeMcpNames = new Set(allTools.filter((t) => t.name.startsWith('mcp__')).map((t) => t.name))
+    // (o composio__*, fase app A5) fuori da questo insieme NON si esegue
+    // ("strumento non attivo")
+    const activeMcpNames = new Set(
+      allTools
+        .filter((t) => t.name.startsWith('mcp__') || t.name.startsWith('composio__'))
+        .map((t) => t.name)
+    )
     // fase 13 (punto 5): in modalità differita il prompt porta la sezione
     // "Connettori attivi" al posto degli schemi MCP (una riga per server)
     if (deferredMcp && !opts.subagent) {
@@ -2596,6 +2612,31 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         if (call.name === 'offer_connector') {
           // fase 13: search_connectors mostra gli id come 'catalog:<id>' — si accetta anche quello
           const wanted = String(input.id ?? '').replace(/^catalog:/, '')
+          // fase app (A4 punto 6): può proporre anche un'app Composio
+          // (id 'composio:<slug>'): la card ha lo stesso bottone Collega, ma
+          // il click chiama l'attivazione Composio — il bot NON collega mai
+          if (String(input.id ?? '').startsWith('composio:')) {
+            const slug = String(input.id ?? '').slice('composio:'.length).toLowerCase()
+            const { searchComposioApps } = await import('../connectors/composio')
+            const app = (await searchComposioApps(slug)).find((a) => a.slug.toLowerCase() === slug)
+            if (!app) {
+              messages.push({
+                role: 'tool', toolCallId: call.id,
+                content: `Composio app "${String(input.id ?? '')}" does not exist: find the right one with search_connectors.`
+              })
+              continue
+            }
+            const message: SendMessagePayload = {
+              type: 'connector', connectorId: `composio:${app.slug}`, name: app.name,
+              ...(input.reason !== undefined ? { reason: String(input.reason) } : {})
+            }
+            appendSend(agentId, call, message, emit, { status: 'pending' }, opts.taskId)
+            messages.push({
+              role: 'tool', toolCallId: call.id,
+              content: `offer shown to the user: connecting ${app.name} happens ONLY from their click on the Connect button (it goes through Composio, with the user's own Composio key).`
+            })
+            continue
+          }
           const entry2 = (await import('../connectors')).loadCatalog().find((c) => c.id === wanted)
           if (!entry2) {
             messages.push({
@@ -3116,7 +3157,17 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
                 ...(verdictUiOf(verdict) ? { ui: verdictUiOf(verdict)! } : {}),
                 ...(verdict.secretRefs?.length ? { secretRefs: verdict.secretRefs } : {}),
                 ...(verdict.mcpServerRead ? { mcpServerRead: verdict.mcpServerRead } : {}),
-                ...(neverAutoCmd ? { neverAuto: true } : {})
+                ...(neverAutoCmd ? { neverAuto: true } : {}),
+                // fase app (A6/A7): la card di un'azione Composio mostra
+                // «Gmail · Invia email» (dal nome umano dei dati di Composio),
+                // la riga piccola «tramite Composio» e, se DISTRUTTIVA, niente
+                // «Consenti sempre» (come le installazioni)
+                ...(verdict.composio
+                  ? {
+                      composioAction: (await describeComposio(call.name)) ?? { app: '', action: '' },
+                      ...(verdict.composio.destructive ? { composioDestructive: true } : {})
+                    }
+                  : {})
               }
             })
             setStatus(agentId, 'paused-for-approval', emit)
@@ -3178,8 +3229,12 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
 
         // fase 13 (punto 5): in modalità differita un tool MCP NON attivo non si
         // esegue — niente esecuzione cieca di un nome indovinato: il result
-        // dice di cercarlo con find_tools
-        if (deferredMcp && call.name.startsWith('mcp__') && !activeMcpNames.has(call.name)) {
+        // dice di cercarlo con find_tools (vale anche per composio__*, fase app)
+        if (
+          deferredMcp &&
+          (call.name.startsWith('mcp__') || call.name.startsWith('composio__')) &&
+          !activeMcpNames.has(call.name)
+        ) {
           const refused = 'tool not active: find it with find_tools({query}) and call it from the next step'
           messages.push({ role: 'tool', toolCallId: call.id, content: refused })
           const res = add({ agentId, kind: 'tool-result', role: 'system', content: refused, meta: { callId: call.id, inactive: true } })
@@ -3226,10 +3281,15 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           // CONTAMINAZIONE del turno, con le stesse conseguenze di web_fetch
           // (le regole "consenti" tornano a chiedere, l'auto-review non
           // approva le azioni con effetti). Nessuna eccezione in questa fase.
+          // Fase app (A5): i result degli strumenti Composio sono dati esterni
+          // ALLO STESSO MODO, con la fonte composio:<toolkit>.
           let finalOutput = output
-          if (call.name.startsWith('mcp__')) {
-            const serverSlug = call.name.split('__')[1] ?? 'server'
-            finalOutput = formatExternalDataEvidence(`mcp:${serverSlug}`, output)
+          if (call.name.startsWith('mcp__') || call.name.startsWith('composio__')) {
+            const [prefix, slugPart] = call.name.split('__')
+            finalOutput = formatExternalDataEvidence(
+              prefix === 'composio' ? `composio:${slugPart ?? 'app'}` : `mcp:${slugPart ?? 'server'}`,
+              output
+            )
             if (!contaminated) {
               run.turnAllows.clear()
               run.turnGrantEpoch++
@@ -3259,7 +3319,12 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           const res = add({
             agentId, kind: 'tool-result', role: 'system',
             content: finalOutput.slice(0, 50_000),
-            meta: { callId: call.id, ...meta, ...(call.name.startsWith('mcp__') ? { webEvidence: true, mcpEvidence: true } : {}) }
+            meta: {
+              callId: call.id, ...meta,
+              ...(call.name.startsWith('mcp__') || call.name.startsWith('composio__')
+                ? { webEvidence: true, mcpEvidence: true }
+                : {})
+            }
           })
           emit({ type: 'entries', agentId, entries: [res] })
           // fase 14 (punti 2-3): la card del documento/grafico salvato in

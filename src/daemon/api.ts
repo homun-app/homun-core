@@ -73,7 +73,13 @@ export function buildApiMethods(
   worker: JobWorker,
   connectors?: ConnectorsManager,
   presence?: Presence,
-  opts: { webhookPort?: number; onboarding?: Onboarding; marketplaces?: import('../main/connectors/marketplace-manager').MarketplaceManager } = {}
+  opts: {
+    webhookPort?: number
+    onboarding?: Onboarding
+    marketplaces?: import('../main/connectors/marketplace-manager').MarketplaceManager
+    /** fase app: il manager Composio del daemon (niente RPC senza) */
+    composio?: import('../main/connectors/composio').ComposioManager
+  } = {}
 ): Record<string, (params: unknown[]) => unknown> {
   const mcp = () => import('../main/mcp')
   const vault = () => import('../main/vault')
@@ -1058,10 +1064,15 @@ export function buildApiMethods(
       deps.onChange()
       return { ok: true }
     },
-    /** Abilitazione per bot: server MCP o plugin (scheda Installati). */
+    /** Abilitazione per bot: server MCP, plugin (scheda Installati) o toolkit Composio (fase app A5). */
     'connectors:set-enabled-for': async ([kind, id, agentIds]) => {
       const ids = Array.isArray(agentIds) ? agentIds.map(String) : []
       const mcpMod = await mcp()
+      if (kind === 'composio') {
+        if (!opts.composio) throw uiError(UI.composioNotActive)
+        opts.composio.setEnabledFor(String(id ?? ''), ids)
+        return { ok: true }
+      }
       if (kind === 'server') {
         const servers = mcpMod.listServers()
         const cfg = servers.find((x) => x.id === id)
@@ -1148,6 +1159,42 @@ export function buildApiMethods(
     'connectors:set-client-metadata-url': ([url]) => {
       store.setSetting('connectors.oauth.clientMetadataUrl', String(url ?? ''))
       return { ok: true }
+    },
+
+    // ---- fase app: Composio con la chiave dell'utente (A2–A4) ----
+    // Tutta la logica sta nel manager del daemon (connectors/composio.ts); la
+    // chiave NON torna MAI al renderer (solo hasKey e le ultime 4 cifre)
+    'composio:status': () => {
+      if (!opts.composio) throw uiError(UI.composioNotActive)
+      return opts.composio.status()
+    },
+    'composio:set-key': ([key]) => {
+      if (!opts.composio) throw uiError(UI.composioNotActive)
+      const r = opts.composio.setKey(String(key ?? ''))
+      if (!r.ok) throw uiError(UI.composioKeyInvalid)
+      return r
+    },
+    'composio:test': () => {
+      if (!opts.composio) throw uiError(UI.composioNotActive)
+      return opts.composio.test()
+    },
+    'composio:disable': () => {
+      if (!opts.composio) throw uiError(UI.composioNotActive)
+      return opts.composio.disable()
+    },
+    'composio:catalog': ([query]) => {
+      if (!opts.composio) return { count: 0, rows: [] }
+      return opts.composio.catalog(typeof query === 'string' ? query : '')
+    },
+    'composio:connect': ([slug]) => {
+      if (!opts.composio) throw uiError(UI.composioNotActive)
+      const r = opts.composio.connect(String(slug ?? ''))
+      if (r.error === 'not-active') throw uiError(UI.composioNotActive)
+      return r
+    },
+    'composio:disconnect': ([slug]) => {
+      if (!opts.composio) throw uiError(UI.composioNotActive)
+      return opts.composio.disconnect(String(slug ?? ''))
     },
 
     // ---- vault credenziali ----

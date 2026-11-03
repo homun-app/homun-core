@@ -146,6 +146,15 @@ const api: SandbotApi = {
   connectorsSetClientMetadataUrl: (url) => ipcRenderer.invoke('connectors:set-client-metadata-url', url),
   pluginsResolve: (agentId, entryId, decision) => ipcRenderer.invoke('plugins:resolve', agentId, entryId, decision),
   pluginsUninstall: (name, marketplace) => ipcRenderer.invoke('plugins:uninstall', name, marketplace),
+  // fase app (A2–A4): Composio con la chiave dell'utente (la chiave NON torna
+  // mai indietro: status porta solo hasKey e le ultime 4 cifre)
+  composioStatus: () => ipcRenderer.invoke('composio:status'),
+  composioSetKey: (key) => ipcRenderer.invoke('composio:set-key', key),
+  composioTest: () => ipcRenderer.invoke('composio:test'),
+  composioDisable: () => ipcRenderer.invoke('composio:disable'),
+  composioCatalog: (query) => ipcRenderer.invoke('composio:catalog', query),
+  composioConnect: (slug) => ipcRenderer.invoke('composio:connect', slug),
+  composioDisconnect: (slug) => ipcRenderer.invoke('composio:disconnect', slug),
   marketplaceList: () => ipcRenderer.invoke('marketplace:list'),
   marketplaceAdd: (source) => ipcRenderer.invoke('marketplace:add', source),
   marketplaceRemove: (source) => ipcRenderer.invoke('marketplace:remove', source),

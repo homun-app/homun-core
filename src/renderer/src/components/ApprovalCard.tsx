@@ -119,15 +119,39 @@ export function ApprovalCard({ entry, readOnly = false }: { entry: TranscriptEnt
   // quest'unico consenso: la card lo dice e mostra anche il fuso della schedule
   const isCreateActive = isRoutine && st?.action === 'create' && st?.activate === true
   // fase 5 (M1)/fase 8: update_state non offre «sempre»; i comandi never-auto
-  // nemmeno «per questo turno»
-  const noAlways = tool === 'update_state'
+  // nemmeno «per questo turno»; fase app (A6): le azioni Composio DISTRUTTIVE
+  // non offrono «Sempre» (come le installazioni)
+  const composioAction = entry.meta?.composioAction as { app?: string; action?: string } | undefined
+  const noAlways = tool === 'update_state' || entry.meta?.composioDestructive === true
   const noTurn = noAlways || entry.meta?.neverAuto === true
   const command = typeof input?.command === 'string' ? input.command : null
   const filePath = typeof input?.path === 'string' ? input.path : null
+  // fase app (A6/A7): gli argomenti dell'azione, TUTTI visibili (come D1:
+  // nessun campo nascosto) + la riga piccola «tramite Composio»
+  const composioArgs = composioAction && input && typeof input === 'object'
+    ? Object.entries(input).filter(([, v]) => v !== undefined && v !== null && (typeof v !== 'object' || Array.isArray(v)))
+    : null
 
   const body = (
     <>
-      <p className="text-[15px] font-semibold">{askTitle(tool, agentName)}</p>
+      <p className="text-[15px] font-semibold">
+        {composioAction?.app
+          ? `${composioAction.app} · ${composioAction.action || tool}`
+          : askTitle(tool, agentName)}
+      </p>
+      {composioAction && (
+        <p className="mt-0.5 text-[11px] text-muted-foreground"><Trans>tramite Composio</Trans></p>
+      )}
+      {composioArgs && composioArgs.length > 0 && (
+        <div className="mt-2 space-y-0.5 rounded-[10px] bg-card px-3 py-2 text-xs">
+          {composioArgs.map(([k, v]) => (
+            <div key={k} className="flex gap-2">
+              <span className="shrink-0 text-muted-foreground">{k}:</span>
+              <span className="min-w-0 break-all">{typeof v === 'string' ? v : JSON.stringify(v)}</span>
+            </div>
+          ))}
+        </div>
+      )}
       {command !== null && (
         <code className="mt-2 block overflow-hidden rounded-[10px] bg-card px-3 py-2 font-mono text-[13px]">{command}</code>
       )}
@@ -184,7 +208,7 @@ export function ApprovalCard({ entry, readOnly = false }: { entry: TranscriptEnt
               </DropdownMenuItem>
               <DropdownMenuItem
                 disabled={noAlways}
-                title={noAlways ? t`Le modifiche di automazione chiedono ogni volta` : undefined}
+                title={noAlways ? (entry.meta?.composioDestructive === true ? t`Questa azione chiede sempre l'approvazione` : t`Le modifiche di automazione chiedono ogni volta`) : undefined}
                 onClick={() => resolve(approvalId, 'allow', 'always')}
               >
                 <Trans>Sempre</Trans>

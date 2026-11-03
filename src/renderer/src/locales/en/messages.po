@@ -144,6 +144,11 @@ msgstr "{0} ›"
 msgid "{0} / {1} per M"
 msgstr "{0} / {1} per M"
 
+#. placeholder {0}: app.toolsCount
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "{0} azioni disponibili ai bot abilitati"
+msgstr "{0} actions available to the enabled bots"
+
 #. placeholder {0}: model.connectedCount
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "{0} collegate ›"
@@ -184,6 +189,11 @@ msgstr "{0} is writing…"
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "{0} skill · {1} server"
 msgstr "{0} skills · {1} servers"
+
+#. placeholder {0}: model.skills.reduce((a, s) => a + s.skills.length, 0) + (installed?.plugins.reduce((a, p) => a + p.skills.length, 0) ?? 0)
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "{0} skill · se ne vuoi una nuova, chiedila a un bot"
+msgstr "{0} skills · ask a bot if you want a new one"
 
 #. placeholder {0}: waitingMember.name
 #: src/renderer/src/components/Sidebar.tsx
@@ -274,9 +284,19 @@ msgstr "{model} on {provider} is paused until {until} (recent limit or error): t
 msgid "{name}"
 msgstr "{name}"
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "composio.connected"
+msgstr "{name} connected: its actions are available to the enabled bots."
+
 #: src/renderer/src/bot/bot-state.ts
 msgid "{name} è contento"
 msgstr "{name} is happy"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "composio.reconnect"
+msgstr "{name} is no longer active: reconnect it to use its actions again."
 
 #. js-lingui-explicit-id
 #: src/renderer/src/components/Chat.tsx
@@ -289,6 +309,11 @@ msgstr "{name} has no model to answer with: set the main model (or their own) so
 #: src/shared/ui-messages.ts
 msgid "group.nowCoordinates"
 msgstr "{name} now coordinates the team"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "composio.disconnected"
+msgstr "{name} disconnected."
 
 #: src/renderer/src/components/ApprovalCard.tsx
 msgid "{name} vuole cambiare un'automazione"
@@ -351,6 +376,11 @@ msgstr "{tool} acts towards the outside (MCP server annotation)"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
+msgid "approval.composioAction"
+msgstr "{tool} acts towards the outside (a connected app action)"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
 msgid "autoreview.futureChanging"
 msgstr "{tool} changes the bot’s future behaviour"
 
@@ -368,10 +398,6 @@ msgstr "{tool}: {direction, select, toBox {Mac {macPath} → box {boxPath}} from
 #: src/shared/ui-messages.ts
 msgid "approval.contaminated"
 msgstr "{tool}: the turn has read untrusted web content — the action with effects goes back to the user"
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "{totalSkills} skill · se ne vuoi una nuova, chiedila a un bot"
-msgstr "{totalSkills} skills · want a new one? Ask a bot"
 
 #. placeholder {0}: provider.keyHint ?? ''
 #: src/renderer/src/components/Settings.tsx
@@ -636,10 +662,6 @@ msgstr "Attach image — this model cannot see images"
 msgid "Alto"
 msgstr "High"
 
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Altre app"
-msgstr "Other apps"
-
 #: src/renderer/src/components/Settings.tsx
 msgid "Altre azioni"
 msgstr "More actions"
@@ -703,6 +725,7 @@ msgstr "Preview"
 msgid "Anthropic, OpenAI, Mistral, Z.ai…"
 msgstr "Anthropic, OpenAI, Mistral, Z.ai…"
 
+#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/Sidebar.tsx
 msgid "App"
 msgstr "Apps"
@@ -752,6 +775,10 @@ msgstr "opens a page…"
 #: src/renderer/src/components/TaskCard.tsx
 msgid "Apri"
 msgstr "Open"
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Apri Composio"
+msgstr "Open Composio"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Apri Elementi login"
@@ -822,6 +849,14 @@ msgstr "Warning: I could not assign the model to the bots ({warning}). Pick a va
 msgid "attiva"
 msgstr "active"
 
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Attiva"
+msgstr "Activate"
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Attiva più app con Composio"
+msgstr "Activate more apps with Composio"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "approval.usResume"
@@ -877,6 +912,10 @@ msgstr "authorization failed ({error})"
 #: src/shared/ui-messages.ts
 msgid "rpc.authOkServerDown"
 msgstr "authorization succeeded but the server does not respond: {error}"
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Avanti"
+msgstr "Next"
 
 #: src/renderer/src/components/RightPanel.tsx
 #: src/renderer/src/components/Settings.tsx
@@ -1083,6 +1122,14 @@ msgstr "Search bots and teams"
 msgid "Cerca nei lavori"
 msgstr "Search jobs"
 
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "cerca nel registro (2+ lettere)"
+msgstr "search the registry (2+ letters)"
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Cerca nel registro MCP"
+msgstr "Search the MCP registry"
+
 #: src/renderer/src/components/LibraryPanel.tsx
 msgid "Cerca per titolo…"
 msgstr "Search by title…"
@@ -1141,6 +1188,19 @@ msgstr "API key · pay-as-you-go{0}{1}"
 #: src/renderer/src/components/Settings.tsx
 msgid "Chiave API (opzionale)"
 msgstr "API key (optional)"
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "chiave API di Composio"
+msgstr "Composio API key"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "composio.keyInvalid"
+msgstr "Invalid key: check it and try again."
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Chiave non valida: controllala e riprova."
+msgstr "Invalid key: check it and try again."
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Chiave nuova"
@@ -1229,14 +1289,30 @@ msgstr "Connect"
 msgid "Collega {0}"
 msgstr "Connect {0}"
 
-#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/Sidebar.tsx
 msgid "Collega app"
 msgstr "Connect apps"
 
 #: src/renderer/src/components/AppsWindow.tsx
+msgid "Collega Gmail, Slack, HubSpot e molte altre con un account Composio gratuito"
+msgstr "Connect Gmail, Slack, HubSpot and many more with a free Composio account"
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Collega tramite Composio"
+msgstr "Connect through Composio"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "composio.cancelled"
+msgstr "Connection of {name} cancelled."
+
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "Collegata"
 msgstr "Connected"
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Collegata anche tramite Composio: scollegala dalla riga di Composio in «Collegate»."
+msgstr "Also connected through Composio: disconnect it from the Composio row under “Connected”."
 
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Collegate"
@@ -1306,6 +1382,32 @@ msgstr "Fill in the “{label}” login on {origin}?"
 msgid "completato"
 msgstr "completed"
 
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Composio attivo"
+msgstr "Composio active"
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Composio è un servizio di terzi: i login e le azioni delle app collegate tramite Composio passano dai suoi server, non restano solo sul tuo Mac."
+msgstr "Composio is a third-party service: logins and actions of apps connected through Composio pass through its servers, they do not stay only on your Mac."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "composio.notActive"
+msgstr "Composio is not active: activate it with your key to connect more apps."
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Composio non è attivo: attivalo con la tua chiave per collegare altre app."
+msgstr "Composio is not active: activate it with your key to connect more apps."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "composio.unreachable"
+msgstr "Composio unreachable: check your connection and try again."
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Composio non raggiungibile: controlla la connessione e riprova."
+msgstr "Composio unreachable: check your connection and try again."
+
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Computer"
 msgstr "Computer"
@@ -1313,10 +1415,6 @@ msgstr "Computer"
 #: src/renderer/src/components/ComputerPanel.tsx
 msgid "Computer del bot"
 msgstr "Bot's computer"
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Comunicazione"
-msgstr "Communication"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -1624,10 +1722,6 @@ msgstr "By you"
 msgid "Dai un nome al tuo bot"
 msgstr "Give your bot a name"
 
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Dal registro MCP (server di terzi, non verificati da noi):"
-msgstr "From the MCP registry (third-party servers, not verified by us):"
-
 #: src/renderer/src/components/BotDialogs.tsx
 msgid "Descrivilo tu"
 msgstr "Describe it yourself"
@@ -1644,6 +1738,10 @@ msgstr "Bot description / role (goes in the system prompt)"
 #: src/shared/ui-messages.ts
 msgid "chart.metaLine"
 msgstr "by {author} · version {version} · exported by Homun"
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Diretta: il permesso resta sul tuo Mac"
+msgstr "Direct: the permission stays on your Mac"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "disattivate"
@@ -1669,10 +1767,6 @@ msgstr "I take a look around to see if there is anything I can do for you. I’l
 #: src/renderer/src/components/ComputerPanel.tsx
 msgid "docker.com"
 msgstr "docker.com"
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Documenti"
-msgstr "Documents"
 
 #: src/renderer/src/components/LibraryPanel.tsx
 msgid "Documento"
@@ -1705,6 +1799,10 @@ msgstr "verified domain ({0})"
 #: src/shared/ui-messages.ts
 msgid "kick.4"
 msgstr "After creating the routines, ask THE USER in plain text (send_to_user, NOT a widget) whether they want to activate them; only if they answer yes activate them with update_state action \"resume\" (activation goes through the user’s approval card)."
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Dove la trovo? Copia la chiave API dalle impostazioni del tuo progetto su Composio (composio.dev → Settings → API Keys)."
+msgstr "Where do I find it? Copy the API key from your Composio project settings (composio.dev → Settings → API Keys)."
 
 #. placeholder {0}: entries.length
 #: src/renderer/src/components/ComputerFiles.tsx
@@ -1849,6 +1947,10 @@ msgstr "Failed"
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "Fatti e regole che il bot ricorda tra i turni. Scope \"utente\" = condivisi da tutti i bot."
 msgstr "Facts and rules the bot remembers across turns. \"User\" scope = shared by all bots."
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Fatto"
+msgstr "Done"
 
 #: src/renderer/src/components/Chat.tsx
 #: src/renderer/src/components/SubagentCard.tsx
@@ -2099,6 +2201,10 @@ msgstr "Wrote a document"
 msgid "Ha scritto un file"
 msgstr "Wrote a file"
 
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Ha un piano gratuito."
+msgstr "It has a free plan."
+
 #: src/renderer/src/lib/activity.ts
 msgid "Ha usato il computer"
 msgstr "Used the computer"
@@ -2138,6 +2244,10 @@ msgstr "I paused your routines while you were away to avoid useless spending. Sh
 #: src/shared/ui-messages.ts
 msgid "group.summaryPosted"
 msgstr "I published the summary in the team “{name}”"
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Homun crea il client e chiede a Composio l'elenco delle app: se riesce, la chiave viene salvata cifrata sul tuo Mac."
+msgstr "Homun creates the client and asks Composio for the list of apps: if it works, the key is saved encrypted on your Mac."
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Homun è aggiornato"
@@ -2476,6 +2586,10 @@ msgstr "cannot verify \"{model}\" on {provider}: {error}"
 msgid "Impostazioni"
 msgstr "Settings"
 
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "In attesa del login nel browser…"
+msgstr "Waiting for you to log in in the browser…"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "notice.turnEndAwaitingUser"
@@ -2513,6 +2627,7 @@ msgstr "paused for absence"
 msgid "in raffreddamento fino a {0}"
 msgstr "cooling down until {0}"
 
+#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/Settings.tsx
 msgid "Incolla la chiave"
 msgstr "Paste the key"
@@ -2644,6 +2759,10 @@ msgstr "The user connected {name}: its mcp__{connectorId}__* tools are now avail
 #: src/shared/ui-messages.ts
 msgid "rpc.draftNoVia"
 msgstr "The draft has no send tool attached: it cannot be sent automatically."
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "La chiave non è stata salvata."
+msgstr "The key was not saved."
 
 #: src/renderer/src/components/Settings.tsx
 msgid "La chiave non è valida"
@@ -2795,6 +2914,11 @@ msgstr "local"
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "Login"
 msgstr "Logins"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "composio.loginTimeout"
+msgstr "Login not completed within 5 minutes: try connecting the app again."
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Look-around al rientro dopo (ore di assenza)"
@@ -3113,6 +3237,10 @@ msgstr "No models connected: start right above."
 msgid "nessun modello in elenco: scrivi l'id e premi Invio"
 msgstr "no model in the list: type the id and press Enter"
 
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Nessun server trovato."
+msgstr "No server found."
+
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Nessun task."
 msgstr "No tasks."
@@ -3130,8 +3258,8 @@ msgid "Nessuna app collegata: comincia dalle consigliate."
 msgstr "No apps connected: start from the recommended ones."
 
 #: src/renderer/src/components/AppsWindow.tsx
-msgid "Nessuna app in questa categoria."
-msgstr "No apps in this category."
+msgid "Nessuna app trovata"
+msgstr "No app found"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Nessuna chiamata nel periodo."
@@ -3224,6 +3352,10 @@ msgid "Nome utente"
 msgstr "Username"
 
 #: src/renderer/src/components/AppsWindow.tsx
+msgid "Non c'è?"
+msgstr "Not there?"
+
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "non connesso"
 msgstr "not connected"
 
@@ -3253,6 +3385,10 @@ msgstr "unread"
 #: src/renderer/src/App.tsx
 msgid "Non mostrare più"
 msgstr "Don't show again"
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "non più attiva: ricollega per riavere le sue azioni"
+msgstr "no longer active: reconnect to get its actions back"
 
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Non riesco a cercare nel registro"
@@ -3404,13 +3540,14 @@ msgstr "Ollama, LM Studio · free, no data leaves"
 msgid "Online"
 msgstr "Online"
 
+#. placeholder {0}: c.name
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Oppure collega {0} tramite Composio (più app, un account):"
+msgstr "Or connect {0} through Composio (more apps, one account):"
+
 #: src/renderer/src/components/Settings.tsx
 msgid "Opzioni avanzate"
 msgstr "Advanced options"
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Opzioni avanzate ▸"
-msgstr "Advanced options ▸"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "ora"
@@ -3522,6 +3659,14 @@ msgstr "by source"
 msgid "Per questo turno"
 msgstr "For this turn"
 
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Per sviluppatori"
+msgstr "For developers"
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Per sviluppatori: server personalizzati, plugin, registro"
+msgstr "For developers: custom servers, plugins, registry"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "rpc.filesOutside"
@@ -3530,6 +3675,10 @@ msgstr "Path outside the bot's computer."
 #: src/renderer/src/components/ComputerActivity.tsx
 msgid "perso"
 msgstr "lost"
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Più di mille app con Composio"
+msgstr "More than a thousand apps with Composio"
 
 #: src/renderer/src/components/DraftCard.tsx
 msgid "Più strumenti d'invio per questo canale: chiedi al bot di sceglierne uno"
@@ -3570,10 +3719,6 @@ msgstr "Default policy"
 #: src/renderer/src/components/Settings.tsx
 msgid "poll di un connettore"
 msgstr "connector poll"
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Posta e calendario"
-msgstr "Mail and calendar"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "preciso"
@@ -3695,9 +3840,14 @@ msgstr "next {0}"
 msgid "prossima: {0}"
 msgstr "next: {0}"
 
+#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/Settings.tsx
 msgid "Prova"
 msgstr "Test"
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Prova la chiave"
+msgstr "Test the key"
 
 #: src/renderer/src/components/LibraryPanel.tsx
 msgid "Proveniente da dati esterni"
@@ -3733,6 +3883,10 @@ msgstr "Testing the address…"
 #: src/renderer/src/components/Settings.tsx
 msgid "Provo la chiave…"
 msgstr "Testing the key…"
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "provo…"
+msgstr "testing…"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Provo…"
@@ -3782,6 +3936,10 @@ msgstr "when you come back to the computer after an absence"
 #: src/renderer/src/components/Settings.tsx
 msgid "Quello del bot"
 msgstr "The bot’s one"
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Questa app su Composio va configurata dallo sviluppatore: per ora non si può collegare da Homun."
+msgstr "This app on Composio must be configured by the developer: for now it cannot be connected from Homun."
 
 #: src/renderer/src/components/ApprovalCard.tsx
 msgid "Questa azione chiede sempre l'approvazione"
@@ -3996,7 +4154,6 @@ msgid "riprendi"
 msgstr "resume"
 
 #: src/renderer/src/components/ActivityPanel.tsx
-#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/BotScreen.tsx
 #: src/renderer/src/components/ComputerActivity.tsx
 #: src/renderer/src/components/ComputerFiles.tsx
@@ -4267,6 +4424,10 @@ msgstr "Bot screen"
 msgid "Scollega"
 msgstr "Disconnect"
 
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Scollegare NON cancella l'account su Composio: si gestisce da composio.dev."
+msgstr "Disconnecting does NOT delete the account on Composio: manage it at composio.dev."
+
 #: src/renderer/src/lib/activity.ts
 msgid "scrive {file}…"
 msgstr "writes {file}…"
@@ -4448,6 +4609,10 @@ msgstr "Custom MCP server"
 msgid "rpc.serverNotFoundPlain"
 msgstr "server not found: {id}"
 
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Server personalizzati, plugin, gateway e registro: chi sa cos'è un server MCP lo trova qui."
+msgstr "Custom servers, plugins, gateways and the registry: those who know what an MCP server is will find it here."
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "install.thirdParty"
@@ -4523,7 +4688,6 @@ msgstr "System"
 msgid "sk-…"
 msgstr "sk-…"
 
-#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Skill"
 msgstr "Skills"
@@ -4636,10 +4800,6 @@ msgstr "On your Mac · {0} models · free and private"
 #: src/renderer/src/components/Settings.tsx
 msgid "Sulla tua rete · {0} modelli"
 msgstr "On your network · {0} models"
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Sviluppo"
-msgstr "Development"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Svuota entrambi i campi per togliere un prezzo."
@@ -4768,6 +4928,15 @@ msgstr "back to the list"
 msgid "totp.unsupported"
 msgstr "TOTP not supported (algorithm {algorithm}, digits {digits}, period {period}): only SHA1, 6 digits, 30 seconds"
 
+#: src/renderer/src/components/ApprovalCard.tsx
+msgid "tramite Composio"
+msgstr "via Composio"
+
+#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/ConnectorCard.tsx
+msgid "Tramite Composio: login e azioni passano dai suoi server"
+msgstr "Via Composio: logins and actions pass through its servers"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "kick.2"
@@ -4843,8 +5012,8 @@ msgid "notice.turnEndSuperseded"
 msgstr "Turn superseded by a new message"
 
 #: src/renderer/src/components/AppsWindow.tsx
-msgid "Tutte"
-msgstr "All"
+msgid "Tutte le app"
+msgstr "All apps"
 
 #: src/renderer/src/components/ActivityPanel.tsx
 msgid "Tutti"
@@ -5013,10 +5182,6 @@ msgstr "environment variables: {0} (you fill them in Settings)"
 #: src/renderer/src/components/Settings.tsx
 msgid "vede"
 msgstr "sees"
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Vedi tutte"
-msgstr "See all"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "venerdì"

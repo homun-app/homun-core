@@ -39,6 +39,16 @@ import type { SandbotEvent } from '../shared/types'
 type Emitter = (e: SandbotEvent) => void
 type RunTurnFn = typeof runTurn
 
+/**
+ * A8: le app abilitate per un bot (curate collegate, server installati, app
+ * Composio) con nomi umani — per la riga dei pari del coordinatore. Da
+ * mcp/appsForAgent, che unisce le tre fonti.
+ */
+async function appsOfPeer(agentId: string): Promise<string[]> {
+  const { appsForAgent } = await import('../main/mcp')
+  return appsForAgent(agentId)
+}
+
 /** La scadenza di un turno di gruppo (spec §3): 5 minuti, poi TIMEOUT. */
 export const GROUP_TURN_TIMEOUT_MS = 5 * 60_000
 
@@ -170,9 +180,18 @@ export async function runGroupTurnJob(
   const opening = buildGroupTurnOpening({
     group: { id: group.id, name: group.name, description: group.description },
     me: { name: me.name },
-    peers: agents
-      .filter((a) => a.id !== p.memberId)
-      .map((a) => ({ name: a.name, role: a.description, coordinator: a.id === group.coordinator_id })),
+    // A8: la riga di ogni pari porta anche le APP abilitate per quel bot
+    // (curate, server, Composio) — nomi umani, tetto e «…» in peerLine
+    peers: await Promise.all(
+      agents
+        .filter((a) => a.id !== p.memberId)
+        .map(async (a) => ({
+          name: a.name,
+          role: a.description,
+          coordinator: a.id === group.coordinator_id,
+          apps: await appsOfPeer(a.id).catch(() => [] as string[])
+        }))
+    ),
     newMessages: win.messages.map((m) => ({
       id: m.id,
       authorKind: m.author_kind,

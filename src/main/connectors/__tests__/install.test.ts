@@ -443,7 +443,9 @@ describe('gateway (punto 7)', () => {
     expect(ids).toEqual(expect.arrayContaining(['composio', 'zapier', 'pipedream']))
     const composio = GATEWAY_PRESETS.find((p) => p.id === 'composio')!
     expect(composio.headerName).toBe('x-api-key')
-    expect(composio.help).toContain('sessione Tool Router')
+    // fase app (A9): il preset indirizza le persone comuni alla vista principale
+    expect(composio.help).toContain('Più app con Composio')
+    expect(composio.help).toContain('sessioni Tool Router proprie')
   })
 
   it('addGateway: https obbligatorio, token CIFRATO nello store, source gateway, abilitato a tutti', async () => {

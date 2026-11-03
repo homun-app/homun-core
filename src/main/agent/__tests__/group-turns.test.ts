@@ -12,6 +12,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   parseMentions, planGroupTurns, groupTurnNonce, memberOfNonce, buildGroupTurnOpening,
+  peerLine, PEER_APPS_MAX,
   GROUP_WINDING_DOWN_DEPTH, GROUP_CHAIN_MAX_DEPTH, GROUP_HOURLY_POSTS_MAX,
   GROUP_CHAIN_CLOSED_TEXT, GROUP_HOURLY_CAP_TEXT, GROUP_TURN_RULE,
   GROUP_MEMBER_CHAIN_POSTS_MAX, GROUP_CLOSING_LINE,
@@ -610,5 +611,46 @@ describe('correzione E2: needsGroupRecovery e i tool del recupero (puri)', () =>
     expect(GROUP_CALLED_RECOVERY_NUDGE).toContain('post_to_group')
     expect(GROUP_CALLED_CLOSING_RECOVERY_NUDGE).toContain('You were called and did not answer')
     expect(GROUP_CALLED_CLOSING_RECOVERY_NUDGE).toContain('send_to_user')
+  })
+})
+// ---- fase app (A8): la riga dei pari porta le APP del bot ----
+
+describe('peerLine (A8, pura)', () => {
+  it('la riga finisce con «· app: Gmail, Slack» dopo il ruolo', () => {
+    expect(peerLine({ name: 'Bot', role: 'Il bot principale', coordinator: false, apps: ['Gmail', 'Slack'] }))
+      .toBe('- Bot: Il bot principale · app: Gmail, Slack')
+  })
+  it('il coordinatore mantiene il marker tra nome e ruolo', () => {
+    expect(peerLine({ name: 'Coordinatore', role: 'Assegna i compiti', coordinator: true, apps: ['Linear'] }))
+      .toBe('- Coordinatore (coordinator): Assegna i compiti · app: Linear')
+  })
+  it('un bot SENZA app non ha «app:» (la riga resta quella di prima)', () => {
+    expect(peerLine({ name: 'Bot', role: 'ruolo', coordinator: false })).toBe('- Bot: ruolo')
+    expect(peerLine({ name: 'Bot', role: 'ruolo', coordinator: false, apps: [] })).toBe('- Bot: ruolo')
+  })
+  it('al massimo 8 app, poi «…»', () => {
+    const apps = Array.from({ length: 11 }, (_, i) => `App${i + 1}`)
+    const line = peerLine({ name: 'Bot', role: 'ruolo', coordinator: false, apps })
+    expect(line).toContain(`app: ${apps.slice(0, 8).join(', ')}, …`)
+    expect(line).not.toContain('App9, App10')
+    expect(PEER_APPS_MAX).toBe(8)
+  })
+})
+
+describe('buildGroupTurnOpening con le app dei pari (A8)', () => {
+  it('l\'apertura contiene la riga app di ogni pari', () => {
+    const o = buildGroupTurnOpening({
+      group: { id: 3, name: 'Cena compleanno', description: 'Organizzare la cena.' },
+      me: { name: 'Cercatore Cena' },
+      newMessages: [],
+      windingDown: false,
+      peers: [
+        { name: 'Bot', role: 'Il bot principale', coordinator: false, apps: ['Gmail', 'Slack'] },
+        { name: 'Coordinatore', role: 'Assegna i compiti e riepiloga per Fabio', coordinator: true, apps: [] }
+      ]
+    })
+    expect(o).toContain('- Bot: Il bot principale · app: Gmail, Slack')
+    expect(o).toContain('- Coordinatore (coordinator): Assegna i compiti e riepiloga per Fabio')
+    expect(o).not.toContain('Coordinatore (coordinator): Assegna i compiti e riepiloga per Fabio · app:')
   })
 })

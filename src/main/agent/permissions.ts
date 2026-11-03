@@ -8,6 +8,8 @@ import { sandboxMode, boxRoot, boxDir } from '../sandbox'
 import { resolveBoxPath } from '../sandbox/box-paths'
 import type { PermissionMode } from '../../shared/types'
 import { targetKey, runCommandVerdict, commandKey, isNeverAuto, ruleToolMatches, mcpAnnotationMode, serverReadGrantCovers, type McpAnnotationsLike } from './permission-rules'
+// fase app (A6): la classificazione delle azioni di Composio (pura)
+import { classifyComposioToolName } from '../connectors/composio-actions'
 import { analyzeCommand } from './shell-ast'
 import { updateStateVerdict, memoryScopeVerdict, type UpdateStateArgs } from './update-state'
 // fase 17c (C2): l'UiText accanto a reason — la card mostra la lingua dell'utente
@@ -60,13 +62,19 @@ export type Verdict =
       secretRefs?: string[]
       ui?: UiText
       uis?: UiText[]
-      /**
-       * M4 (fase 0.3.1001): la card di un tool MCP con readOnlyHint true (e
-       * non destructive) di un server MANUALE può offrire «Consenti sempre le
-       * letture di <server>» — slug del server e nome da mostrare.
-       */
-      mcpServerRead?: { slug: string; name: string }
-    }
+  /**
+   * M4 (fase 0.3.1001): la card di un tool MCP con readOnlyHint true (e
+   * non destructive) di un server MANUALE può offrire «Consenti sempre le
+   * letture di <server>» — slug del server e nome da mostrare.
+   */
+  mcpServerRead?: { slug: string; name: string }
+  /**
+   * Fase app (A6): l'azione Composio della card — il modo (distruttivo o
+   * meno) decide se offrire «Consenti sempre»; il nome umano
+   * («Gmail · Invia email») e la riga «tramite Composio» stanno nella card.
+   */
+  composio?: { destructive: boolean }
+}
   | { kind: 'deny'; reason: string }
 
 function matchRule(tool: string, target: string, rules: ReturnType<typeof getPermissions>['rules']): PermissionMode | null {
@@ -190,6 +198,36 @@ export async function check(
   // consentito, destructiveHint/openWorldHint → chiede. Le regole blocked
   // vincono sempre; una regola specifica dell'utente batte le annotazioni;
   // gli invii esterni (externalSendTools) restano bozze a monte del gate.
+  // fase app (A6 punto 4): gli strumenti di Composio (composio__<tk>__<ACTION>).
+  // L'utente ha collegato l'app con la procedura guidata: le LETTURE passano
+  // senza card; gli INVI diventano bozze a monte di qui (isExternalSend); le
+  // altre scritture chiedono con la card; le distruttive chiedono SENZA
+  // «Consenti sempre» (meta.composio.destructive). Le regole dell'utente
+  // vincono come per i server (blocked nega, una regola specifica decide).
+  if (tool.startsWith('composio__')) {
+    const matching = cfg.rules.filter((r) => ruleToolMatches(r.tool, tool))
+    if (matching.some((r) => r.mode === 'blocked')) {
+      return { kind: 'deny', reason: 'Command blocked by permissions configuration' }
+    }
+    const specific = matching.find((r) => r.tool !== '*' && r.tool !== 'composio__*')
+    if (specific) {
+      return specific.mode === 'always_allow'
+        ? { kind: 'allow', via: 'rule' }
+        : { kind: 'ask', reason: `${tool} requires approval`, ui: ui(UI.approvalToolRequires, { tool }), composio: { destructive: false } }
+    }
+    if (listGrants().some((g) => g.tool === tool && g.target === '*')) {
+      return { kind: 'allow', via: 'grant' }
+    }
+    const kind = classifyComposioToolName(tool)
+    if (kind === 'read') return { kind: 'allow', via: 'rule' }
+    return {
+      kind: 'ask',
+      reason: `${tool} acts towards the outside (Composio app action)`,
+      ui: ui(UI.approvalComposioAction, { tool }),
+      composio: { destructive: kind === 'destructive' }
+    }
+  }
+
   if (tool.startsWith('mcp__')) {
     const matching = cfg.rules.filter((r) => ruleToolMatches(r.tool, tool))
     if (matching.some((r) => r.mode === 'blocked')) {

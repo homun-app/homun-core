@@ -820,7 +820,8 @@ export interface SandbotApi {
   connectorsInstalled(): Promise<{ servers: McpServerInfo[]; plugins: unknown[] }>
   connectorsResolveMcpServer(agentId: string, entryId: number, decision: 'add' | 'no'): Promise<{ ok: boolean; installed?: boolean; message?: string; error?: string }>
   connectorsSaveServerValues(serverId: string, kind: SecretKind, values: Record<string, string>): Promise<{ ok: boolean }>
-  connectorsSetEnabledFor(kind: 'server' | 'plugin', id: string, agentIds: string[]): Promise<{ ok: boolean }>
+  /** fase app (A5): kind 'composio' = toolkit Composio (per-bot, come i server) */
+  connectorsSetEnabledFor(kind: 'server' | 'plugin' | 'composio', id: string, agentIds: string[]): Promise<{ ok: boolean }>
   connectorsUninstallServer(id: string): Promise<{ ok: boolean }>
   /** fase 13 (correzione L1): rifà l'OAuth di un server del registro/plugin la cui sessione è scaduta */
   connectorsReconnectServer(id: string): Promise<{ ok: boolean; message?: string; error?: string }>
@@ -829,6 +830,16 @@ export interface SandbotApi {
   connectorsSetClientMetadataUrl(url: string): Promise<{ ok: boolean }>
   pluginsResolve(agentId: string, entryId: number, decision: 'install' | 'no'): Promise<{ ok: boolean; installed?: boolean; message?: string; error?: string }>
   pluginsUninstall(name: string, marketplace: string): Promise<{ ok: boolean }>
+  // fase app (A2): attivazione di Composio con la chiave dell'utente
+  composioStatus(): Promise<ComposioStatusInfo>
+  composioSetKey(key: string): Promise<{ ok: boolean }>
+  composioTest(): Promise<{ ok: boolean; reason?: 'invalid-key' | 'unreachable'; error?: string }>
+  composioDisable(): Promise<{ ok: boolean }>
+  // fase app (A3): il catalogo Composio (curate escluse) con ricerca locale
+  composioCatalog(query?: string): Promise<ComposioCatalogInfo>
+  // fase app (A4): collega (browser o subito) e scollega un toolkit
+  composioConnect(slug: string): Promise<{ started: boolean; developerConfig?: boolean; error?: string }>
+  composioDisconnect(slug: string): Promise<{ ok: boolean }>
   marketplaceList(): Promise<Array<{ name: string; source: string; kind: 'github' | 'git'; official: boolean }>>
   marketplaceAdd(source: string): Promise<{ name: string; source: string }>
   marketplaceRemove(source: string): Promise<{ ok: boolean }>
@@ -1305,6 +1316,64 @@ export interface ConnectorInfo {
   }
   tools: ConnectorToolInfoShared[]
   hasStaticCredentials?: boolean
+}
+
+// ---- fase app: Composio con la chiave dell'utente (A2–A5) ----
+
+/** La definizione di uno strumento come la costruisce il daemon (stessa forma dei ToolDef del loop). */
+export interface ToolDefLike {
+  name: string
+  description: string
+  parameters: Record<string, unknown>
+}
+
+/** A3: le curate vincono — id della curata → slug del toolkit Composio (tabella in codice). */
+export const CURATED_COMPOSIO_SLUGS: Record<string, string> = {
+  gmail: 'gmail',
+  gcalendar: 'googlecalendar',
+  gdrive: 'googledrive',
+  notion: 'notion',
+  linear: 'linear',
+  stripe: 'stripe',
+  sentry: 'sentry',
+  cloudflare: 'cloudflare'
+}
+
+/** Un toolkit Composio collegato (A4): ACTIVE o «da ricollegare». */
+export interface ComposioConnectedApp {
+  slug: string
+  name: string
+  status: 'ACTIVE' | 'RECONNECT'
+  accountId: string | null
+  toolsCount: number
+  /** per quali bot è abilitato il toolkit (['*'] = tutti, predefinito) */
+  enabledFor: string[]
+}
+
+/** A2: lo stato di Composio per la UI (mai la chiave: solo hasKey e le ultime 4). */
+export interface ComposioStatusInfo {
+  active: boolean
+  hasKey: boolean
+  keyHint: string | null
+  /** il collegamento in attesa del login nel browser (Annulla = composioDisconnect) */
+  pending: { slug: string; name: string; since: number } | null
+  connected: ComposioConnectedApp[]
+}
+
+/** A3: una riga del catalogo Composio (il logo è già un data: URL). */
+export interface ComposioCatalogRow {
+  slug: string
+  name: string
+  tagline: string | null
+  category: string | null
+  logo: string | null
+  connectable: 'yes' | 'no-auth' | 'developer-config'
+}
+
+export interface ComposioCatalogInfo {
+  count: number
+  rows: ComposioCatalogRow[]
+  error?: string
 }
 
 // ---- fase 15 (S5): stato dei provider di ricerca web (RPC websearch:status) ----

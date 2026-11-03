@@ -356,6 +356,27 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
     () => emit({ type: 'connectors' })
   )
 
+  // fase app (A2–A5): Composio con la chiave dell'utente — tutto nel daemon,
+  // client iniettabile (SANDBOT_TEST_FAKE_COMPOSIO per la sonda); la chiave
+  // nello STESSO store cifrato dei connettori. Il manager si registra in
+  // connectors/composio.ts così loop/mcp/permissions lo raggiungono senza
+  // import inversi.
+  const { createComposioManager, setActiveComposio } = await import('../main/connectors/composio')
+  const composio = createComposioManager({
+    store: createConnectorsSecretStore({
+      getKey: () => getConnectorsKey(),
+      getSetting,
+      setSetting
+    }),
+    getSetting,
+    setSetting,
+    openExternal: (url) => server.callUi('host.openExternal', [url]).then(() => undefined),
+    hasUi: () => server.hasUi(),
+    emit: (e) => emit(e),
+    dataDir
+  })
+  setActiveComposio(composio)
+
   // fase 13 (punti 1, 2, 4, 5, 7): connettori su larga scala — marketplace dei
   // plugin, deps d'installazione (registro/plugin/gateway), ricerca unificata
   // sulle tre fonti e migrazione enabledFor dei server esistenti (restano per
@@ -397,10 +418,12 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
   setInstallDeps(installDeps)
   // la ricerca unificata: catalogo + plugin dei marketplace + registro (host
   // fisso, fetch con guardia SSRF, cache 10 minuti); il registro giù non
-  // ferma le altre fonti
+  // ferma le altre fonti. Fase app (A4 punto 6): anche le app Composio
+  // (id composio:<slug> per offer_connector), subito dopo le curate.
   setConnectorsSearchRunner(async (query) => {
     const { loadCatalog } = await import('../main/connectors')
     const { mergeConnectorResults, formatSearchResults } = await import('../main/connectors/search')
+    const { searchComposioApps } = await import('../main/connectors/composio')
     const states = getSetting<Record<string, import('../main/connectors').ConnectorState>>('connectors.state', {})
     const catalog = loadCatalog().map((entry) => ({ entry, state: states[entry.id] }))
     const { ok } = await marketplaces.catalogs()
@@ -409,10 +432,15 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
     )
     const registry = await fetchRegistryEntries(query).catch(() => null)
     const out = mergeConnectorResults({ catalog, plugins, registry }, query)
-    // le descrizioni di registro e marketplace sono testo di TERZI: il result
-    // va nel blocco dati esterni e contamina il turno (punto 1)
-    const thirdParty = out.rows.some((r) => r.source !== 'catalog')
-    return { text: formatSearchResults(out), thirdParty }
+    const composioApps = await searchComposioApps(query).catch(() => [])
+    const composioLines = composioApps.map(
+      (a) => `- composio:${a.slug} — ${a.name} · source: Composio (the user's own key) · trust: verified · remote (OAuth via Composio): ${a.description ?? ''}`
+    )
+    // le descrizioni di registro, marketplace e Composio sono testo di TERZI:
+    // il result va nel blocco dati esterni e contamina il turno (punto 1)
+    const thirdParty = out.rows.some((r) => r.source !== 'catalog') || composioLines.length > 0
+    const text = [formatSearchResults(out), ...composioLines].filter((l) => l).join('\n')
+    return { text, thirdParty }
   })
   // migrazione enabledFor: i server GIÀ ESISTENTI restano abilitati a tutti
   {
@@ -521,7 +549,7 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
   }
 
   server.methods = {
-    ...buildApiMethods(emit, worker, connectors, presence, { webhookPort: server.port, onboarding, marketplaces }),
+    ...buildApiMethods(emit, worker, connectors, presence, { webhookPort: server.port, onboarding, marketplaces, composio }),
     // fase rilascio (A2): la UI chiede CHI sei (versione/build) e di uscire bene
     'daemon:describe': () => ({ pid: process.pid, version: opts.getVersion(), build: opts.buildId }),
     'daemon:restart': async () => {
@@ -576,6 +604,9 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
     void tickConnectorPolls({ db: database, emit, now: () => Date.now(), callMcpTool: pollMcpTool }, Date.now())
       .then(() => worker.poke())
       .catch((e) => console.error('[sandbotd] poll connettori:', e))
+    // fase app (A4): lo stato degli account Composio si rilegge ogni 10 minuti
+    // mentre la finestra è aperta (throttle interno del manager; senza UI no-op)
+    composio.maybeRefreshAccounts()
     })()
   }, 30_000)
   schedulerTimer.unref()

@@ -11,6 +11,8 @@
 // tramite una fieldMap calcolata alla creazione; gli argomenti non mappati
 // sono sempre visibili ("Altri parametri"): nessun campo nascosto.
 import type { SendMessagePayload, DraftFieldMap, DraftExtraArg } from '../../shared/types'
+// fase app (A6): il classificatore degli invii degli strumenti Composio
+import { composioSendLikeName } from '../connectors/composio-actions'
 
 /** server MCP (slug, come nel nome mcp__<slug>__<tool>) → nomi originali dei tool di invio */
 export type ExternalSendConfig = Record<string, string[]>
@@ -31,11 +33,14 @@ export interface SendAnnotationsLike {
 }
 
 /**
- * Fase 0.3.1001 (M1): verbi d'invio. Un nome originale di tool è un invio se
+ * * Fase 0.3.1001 (M1): verbi d'invio. Un nome originale di tool è un invio se
  * COMINCIA con uno di questi verbi (segmento _) oppure se uno dei segmenti
  * SUCCESSIVI è un verbo d'invio corto (gmail_send_message, slack_send_message,
  * message_post…). Classificazione per NOME, non per elenco di server: vale
  * anche per i server aggiunti a mano.
+ * Fase app (A6 punto 3): lo STESSO classificatore decide per gli strumenti
+ * Composio (composio__<toolkit>__<ACTION>), sul nome dell'azione SENZA il
+ * prefisso del toolkit (GMAIL_SEND_EMAIL → SEND_EMAIL).
  */
 const SEND_FIRST_VERBS = new Set(['send', 'reply', 'forward', 'post', 'publish', 'share', 'invite', 'notify'])
 const SEND_LATER_VERBS = new Set(['send', 'reply', 'forward', 'post'])
@@ -85,10 +90,19 @@ export function sendLikeName(original: string): boolean {
  *    servono a ESCLUDERE: openWorldHint da solo non basta, molti server lo
  *    mettono anche sulle letture web);
  * 3. espressione di invio sul nome originale (sendLikeName).
+ * Fase app (A6 punto 3): vale ANCHE per gli strumenti Composio
+ * (composio__<toolkit>__<ACTION>), con il nome dell'azione privato del
+ * prefisso del toolkit — la via della bozza è lo strumento Composio stesso e
+ * draft:send lo esegue con tools.execute (stesso classificatore).
  */
 export function isExternalSend(tool: string, annotations: SendAnnotationsLike | undefined, cfg: ExternalSendConfig): boolean {
   const parts = tool.split('__')
-  if (parts.length < 3 || parts[0] !== 'mcp') return false
+  if (parts.length < 3) return false
+  if (parts[0] === 'composio') {
+    // A6: il prefisso del toolkit si toglie PRIMA (GMAIL_SEND_EMAIL → SEND_EMAIL)
+    return composioSendLikeName(tool)
+  }
+  if (parts[0] !== 'mcp') return false
   const server = parts[1]!
   const original = parts.slice(2).join('__')
   if ((cfg[server] ?? []).includes(original)) return true
@@ -106,9 +120,18 @@ export function channelForServer(serverSlug: string): 'email' | 'slack' | 'other
 /**
  * M1: il canale di un tool, dal server e — se resta «other» — dal NOME del
  * tool (send_email su un server che non si chiama "mail" resta una email).
+ * Fase app: per gli strumenti Composio il «server» è il TOOLKIT (gmail,
+ * slack…); il nome dell'azione perde il prefisso del toolkit.
  */
 export function channelForTool(tool: string): 'email' | 'slack' | 'other' {
   const parts = tool.split('__')
+  if (parts[0] === 'composio') {
+    const byToolkit = channelForServer(parts[1] ?? '')
+    if (byToolkit !== 'other') return byToolkit
+    const original = parts.slice(2).join('__').replace(new RegExp(`^${parts[1] ?? ''}_`, 'i'), '')
+    if (nameSegments(original).some((s) => s === 'email' || s === 'mail')) return 'email'
+    return 'other'
+  }
   const byServer = channelForServer(parts[1] ?? '')
   if (byServer !== 'other') return byServer
   const original = parts.slice(2).join('__')

@@ -5,6 +5,18 @@ pubblicata finisce nel corpo della GitHub Release (da cui l'app mostra il
 «cosa cambia» quando propone un aggiornamento). Formato: `## [x.y.z] — data`,
 sezioni H2 e un punto per riga.
 
+## [Prossima]
+
+### App
+
+- La finestra «App» è più semplice: cerca, collegate, tutte le app e le skill
+  dei bot — le opzioni da sviluppatore stanno nel foglio «Per sviluppatori».
+- Con la tua chiave Composio (piano gratuito) colleghi più di mille app:
+  Gmail, Slack, HubSpot e molte altre, attivate una volta sola.
+- Ogni app dice da dove passano i suoi dati («Diretta» o «Tramite Composio»),
+  e le azioni seguono le regole di sempre: letture libere, invii in bozza,
+  scritture con carta di approvazione.
+
 ## [0.3.1001] — 2026-11-03
 
 Correzioni dal confronto con Rakazo e dalla prova d'installazione della

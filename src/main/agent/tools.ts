@@ -1536,7 +1536,7 @@ export async function executeTool(
       return { output: `Task "${t.title}" closed (${status}): the summary returned to the main chat, which will report to the user.`, meta: { task: id } }
     }
     default: {
-      if (tool.startsWith('mcp__')) {
+      if (tool.startsWith('mcp__') || tool.startsWith('composio__')) {
         const { callTool, McpNeedsReconnectError } = await import('../mcp')
         try {
           const out = await callTool(tool, input)
@@ -1548,6 +1548,12 @@ export async function executeTool(
               output: e.message,
               meta: { mcp: true, needsReconnect: { serverName: e.serverName, connectorId: e.serverId } }
             }
+          }
+          // fase app (A5): una chiamata Composio senza rete NON blocca il
+          // turno — l'errore ripulito torna al modello come risultato
+          if (tool.startsWith('composio__')) {
+            const { sanitizeComposioError } = await import('../connectors/composio-actions')
+            return { output: `Error: ${sanitizeComposioError(e)}`, meta: { mcp: true, error: true } }
           }
           throw e
         }

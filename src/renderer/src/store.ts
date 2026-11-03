@@ -1,7 +1,7 @@
 // State renderer: agenti, transcript dell'agente attivo, eventi dal main.
 import { useMemo } from 'react'
 import { create } from 'zustand'
-import type { Agent, TranscriptEntry, SandbotEvent, ProviderConfig, ProviderPublic, PermissionsConfig, ConnectorInfo, TaskInfo, GroupInfo, GroupMessageInfo, SubagentInfo, AgentAvatar, TurnEnd, ScreenStatus, MainModel } from '../../shared/types'
+import type { Agent, TranscriptEntry, SandbotEvent, ProviderConfig, ProviderPublic, PermissionsConfig, ConnectorInfo, TaskInfo, GroupInfo, GroupMessageInfo, SubagentInfo, AgentAvatar, TurnEnd, ScreenStatus, MainModel, ComposioStatusInfo } from '../../shared/types'
 // fase 16c correzioni (R4): la regola del modello risolto, condivisa col daemon
 import { resolveAgentModel, type ResolvedAgentModel } from '../../shared/agent-model'
 
@@ -77,6 +77,8 @@ interface Store {
   permissions: PermissionsConfig | null
   /** fase 5: catalogo "Connetti app" con lo stato di ogni connettore */
   connectors: ConnectorInfo[]
+  /** fase app: lo stato di Composio (chiave, collegamenti in corso, app collegate) */
+  composio: ComposioStatusInfo | null
   /** fase 7: setting mainAgentId (null → il primo agente è quello principale) */
   mainAgentId: string | null
   settingsOpen: boolean
@@ -186,6 +188,8 @@ interface Store {
   refreshProviders(): Promise<void>
   refreshPermissions(): Promise<void>
   refreshConnectors(): Promise<void>
+  /** fase app: ricarica lo stato Composio (collegamenti, attesa del login) */
+  refreshComposio(): Promise<void>
   /** fase 8 (§3bis L7): apre/chiude la vista del sotto-transcript di un task */
   openTask(id: number | null): void
   /** fase 8 (§3bis L7): interrompe un task dal bottone sulla card */
@@ -256,6 +260,7 @@ export const useStore = create<Store>((set, get) => ({
   mainModel: null,
   permissions: null,
   connectors: [],
+  composio: null,
   mainAgentId: null,
   settingsOpen: false,
   settingsTab: null,
@@ -372,6 +377,8 @@ export const useStore = create<Store>((set, get) => ({
         case 'connectors': {
           // fase 5: lo stato di un connettore è cambiato (OAuth completato, …)
           api.connectorsList().then((connectors) => set({ connectors })).catch(() => undefined)
+          // fase app: anche lo stato Composio (collegamento, ricollegamento, …)
+          api.composioStatus().then((composio) => set({ composio })).catch(() => undefined)
           break
         }
         case 'reconnected': {
@@ -634,6 +641,14 @@ export const useStore = create<Store>((set, get) => ({
 
   async refreshConnectors() {
     set({ connectors: await api.connectorsList() })
+    // fase app: lo stato Composio insieme ai connettori (la vista App li usa insieme)
+    await api.composioStatus().then((composio) => set({ composio })).catch(() => undefined)
+  },
+
+  // fase app: lo stato Composio da solo (il foglio di attivazione lo chiama
+  // in loop mentre aspetta il login nel browser)
+  async refreshComposio() {
+    await api.composioStatus().then((composio) => set({ composio })).catch(() => undefined)
   },
 
   // fase 8 (§3bis L7): vista del sotto-transcript di un task

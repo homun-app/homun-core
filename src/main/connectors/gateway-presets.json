@@ -4,7 +4,7 @@
     "name": "Composio Tool Router",
     "auth": "header",
     "headerName": "x-api-key",
-    "help": "crea una sessione Tool Router dalla dashboard o dall'SDK e incolla qui l'URL MCP e la chiave del progetto"
+    "help": "Per la maggior parte delle persone è meglio «Più app con Composio» nella vista principale. Questo preset è per chi gestisce sessioni Tool Router proprie: creane una dalla dashboard o dall'SDK e incolla qui l'URL MCP e la chiave del progetto"
   },
   {
     "id": "zapier",

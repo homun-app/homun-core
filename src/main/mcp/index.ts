@@ -324,6 +324,8 @@ export async function toolsOfServer(id: string): Promise<
  * Fase 13 (punto 5): con agentId restano solo i server abilitati PER QUEL BOT
  * (serversForAgent; un figlio eredita dal padre via boxOwnerOf). Senza agentId
  * (compatibilità) restano tutti.
+ * Fase app (A5): in CODA anche gli strumenti Composio (composio__<tk>__<ACTION>),
+ * stessa pipeline (enabledFor per toolkit, defer con find_tools oltre la soglia).
  */
 export async function activeTools(agentId?: string): Promise<ToolDef[]> {
   const out: ToolDef[] = []
@@ -338,6 +340,8 @@ export async function activeTools(agentId?: string): Promise<ToolDef[]> {
       // server non raggiungibile: lo saltiamo senza rompere il turno
     }
   }
+  const { composioToolsForAgent } = await import('../connectors/composio')
+  out.push(...composioToolsForAgent(agentId))
   return out
 }
 
@@ -359,7 +363,29 @@ export async function activeServersForAgent(agentId?: string): Promise<Array<{ i
       // server non raggiungibile: saltato
     }
   }
+  // fase app (A5): le app Composio come le altre nella sezione «Connettori attivi»
+  const { composioServersForAgent } = await import('../connectors/composio')
+  for (const s of composioServersForAgent(agentId)) {
+    if (s.tools.length) out.push({ id: s.id, name: s.name, tools: s.tools as unknown as ToolDef[] })
+  }
   return out
+}
+
+/**
+ * Fase app (A8): i nomi umani delle APP di un bot — curate collegate, server
+ * installati e app Composio — per la riga dei pari del coordinatore (max 8
+ * nel prompt; il tetto lo applica group-turns, qui solo i nomi veri).
+ */
+export async function appsForAgent(agentId?: string): Promise<string[]> {
+  const names: string[] = []
+  const owner = agentId !== undefined ? boxOwnerOf(agentId) : undefined
+  const servers = agentId !== undefined ? serversForAgent(listServers(), agentId, owner) : listServers()
+  for (const cfg of servers.filter((s) => s.enabled && !skippedByConnectorState(s))) {
+    names.push(cfg.name)
+  }
+  const { composioAppsOf } = await import('../connectors/composio')
+  names.push(...composioAppsOf(agentId))
+  return [...new Set(names)]
 }
 
 /** Errore di un tool MCP che richiede la riconnessione del connettore (card "Riconnetti"). */
@@ -372,8 +398,14 @@ export class McpNeedsReconnectError extends Error {
   }
 }
 
-/** Esegue mcp__<server>__<tool>. */
+/** Esegue mcp__<server>__<tool> (e, fase app A5, composio__<toolkit>__<ACTION>). */
 export async function callTool(fullName: string, args: Record<string, unknown>): Promise<string> {
+  // fase app (A5): l'esecuzione passa dal modulo Composio del daemon, con la
+  // STESSA versione dello schema mostrato e gli errori ripuliti
+  if (fullName.startsWith('composio__')) {
+    const { callComposioTool } = await import('../connectors/composio')
+    return callComposioTool(fullName, args)
+  }
   const parts = fullName.split('__')
   if (parts.length < 3) throw new Error(`malformed MCP tool name: ${fullName}`)
   const serverSlug = parts[1]

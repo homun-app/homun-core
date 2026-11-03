@@ -147,6 +147,9 @@ export const UI = {
   approvalToolRequires: msg({ id: 'approval.toolRequires', message: '{tool} richiede approvazione' }),
   approvalToolTargetRequires: msg({ id: 'approval.toolTargetRequires', message: '{tool} ({target}) richiede approvazione' }),
   approvalMcpOutward: msg({ id: 'approval.mcpOutward', message: '{tool} agisce verso l’esterno (annotazione del server MCP)' }),
+  // fase app (A6): il motivo della card di un'azione Composio (la card mostra
+  // anche «Gmail · Invia email» e la riga piccola «tramite Composio», A7)
+  approvalComposioAction: msg({ id: 'approval.composioAction', message: '{tool} agisce verso l’esterno (azione di un’app collegata)' }),
   approvalReadsOutsideBox: msg({ id: 'approval.readsOutsideBox', message: 'legge fuori dal box condiviso' }),
   approvalForcedOrigin: msg({
     id: 'approval.forcedOrigin',
@@ -510,6 +513,16 @@ export const UI = {
     id: 'install.gatewayWarning',
     message: 'Un gateway custodisce l’accesso a tutte le app che colleghi lì: è un servizio di terzi'
   }),
+
+  // ---- fase app: Composio con la chiave dell’utente (A2/A4) ----
+  composioKeyInvalid: msg({ id: 'composio.keyInvalid', message: 'Chiave non valida: controllala e riprova.' }),
+  composioUnreachable: msg({ id: 'composio.unreachable', message: 'Composio non raggiungibile: controlla la connessione e riprova.' }),
+  composioNotActive: msg({ id: 'composio.notActive', message: 'Composio non è attivo: attivalo con la tua chiave per collegare altre app.' }),
+  composioLoginTimeout: msg({ id: 'composio.loginTimeout', message: 'Login non completato entro 5 minuti: riprova a collegare l’app.' }),
+  composioConnected: msg({ id: 'composio.connected', message: '{name} collegata: i suoi strumenti sono disponibili ai bot abilitati.' }),
+  composioDisconnected: msg({ id: 'composio.disconnected', message: '{name} scollegata.' }),
+  composioReconnect: msg({ id: 'composio.reconnect', message: '{name} non è più attiva: ricollegalamente per usare di nuovo i suoi strumenti.' }),
+  composioCancelled: msg({ id: 'composio.cancelled', message: 'Collegamento di {name} annullato.' }),
   installThirdParty: msg({
     id: 'install.thirdParty',
     message: 'Server pubblicato da terzi: può leggere e fare quello che gli permettono i suoi strumenti'

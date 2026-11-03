@@ -16,12 +16,19 @@ export function ConnectorCard({ entry }: { entry: TranscriptEntry }) {
     entry.meta?.connected ? 'connected' : 'pending'
   )
   const connectors = useStore((s) => s.connectors)
+  // fase app (A4 punto 6): la card può proporre anche un'app Composio — il
+  // bottone chiama l'attivazione Composio, il click resta dell'utente
+  const composio = useStore((s) => s.composio)
+  const isComposio = (message.connectorId ?? '').startsWith('composio:')
+  const composioSlug = isComposio ? (message.connectorId ?? '').slice('composio:'.length) : null
 
   // lo stato reale del connettore (la connessione può avvenire anche dalle Impostazioni)
   useEffect(() => {
     const live = connectors.find((c) => c.id === message.connectorId)
     if (live?.state.status === 'connected') setStatus('connected')
-  }, [connectors, message.connectorId])
+    // fase app: lo stato reale di un'app Composio (collegata anche dalla finestra App)
+    if (composioSlug && composio?.connected.some((a) => a.slug === composioSlug && a.status === 'ACTIVE')) setStatus('connected')
+  }, [connectors, message.connectorId, composio, composioSlug])
 
   if (!message.connectorId) return null
   const needsAuth = Boolean(entry.meta?.needsAuth)
@@ -29,6 +36,13 @@ export function ConnectorCard({ entry }: { entry: TranscriptEntry }) {
   const connect = async (): Promise<void> => {
     setStatus('connecting')
     try {
+      // fase app: l'app Composio si collega col flusso Composio (chiave già
+      // attiva o foglio di attivazione dalla finestra App)
+      if (composioSlug) {
+        const r = await api.composioConnect(composioSlug)
+        if (!r.started && r.error) setStatus('failed')
+        return
+      }
       await api.connectorsConnect(message.connectorId!)
       // il flusso OAuth col browser dura qualche minuto: gli eventi
       // {type:'connectors'} aggiorneranno lo stato qui e nella vista Impostazioni
@@ -46,6 +60,9 @@ export function ConnectorCard({ entry }: { entry: TranscriptEntry }) {
         {needsAuth && <span className="rounded bg-destructive/15 px-1.5 py-0.5 text-[10px] text-destructive">{t`token scaduto`}</span>}
       </div>
       {message.reason && <p className="mt-1 text-sm text-foreground">{message.reason}</p>}
+      {isComposio && (
+        <p className="mt-1 text-[11px] text-muted-foreground"><Trans>Tramite Composio: login e azioni passano dai suoi server</Trans></p>
+      )}
       {needsAuth && !entry.meta?.connected && (
         <p className="mt-1 text-xs text-muted-foreground"><Trans>Il bot ha provato a usare questa app ma la sessione è scaduta.</Trans></p>
       )}

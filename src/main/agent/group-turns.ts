@@ -450,13 +450,31 @@ export interface GroupTurnEvidence {
   group: { id: number; name: string; description: string }
   /** il membro che riceve il turno (per nome, nel testo) */
   me: { name: string }
-  /** i pari (membri bot tranne lui): nome, ruolo (description), coordinatore */
-  peers: ReadonlyArray<{ name: string; role: string; coordinator: boolean }>
+  /** i pari (membri bot tranne lui): nome, ruolo (description), coordinatore e app abilitate (A8) */
+  peers: ReadonlyArray<{ name: string; role: string; coordinator: boolean; apps?: string[] }>
   /** i messaggi nuovi da leggere (già filtrati dal cursore) */
   newMessages: ReadonlyArray<GroupTurnMessageEvidence>
   windingDown: boolean
   /** correzione C2: è il turno di CHIUSURA del coordinatore (solo riepilogo all'utente) */
   closing?: boolean
+}
+
+/** A8: quante app al massimo nella riga di un pari (poi «…»). */
+export const PEER_APPS_MAX = 8
+
+/**
+ * A8 (pura): la riga di un pari nel prompt del coordinatore:
+ * `- Nome (coordinator): ruolo · app: Gmail, Slack`. Le app sono quelle
+ * abilitate per quel bot (curate, server, Composio), nomi umani, al massimo
+ * 8 più «…». Un bot senza app NON ha «app:» — la riga resta quella di prima.
+ */
+export function peerLine(peer: { name: string; role: string; coordinator: boolean; apps?: string[] }): string {
+  const head = `- ${peer.name}${peer.coordinator ? ' (coordinator)' : ''}: ${peer.role || '(no role)'}`
+  const apps = (peer.apps ?? []).filter((a) => a.trim())
+  if (apps.length === 0) return head
+  const shown = apps.slice(0, PEER_APPS_MAX).join(', ')
+  const more = apps.length > PEER_APPS_MAX ? ', …' : ''
+  return `${head} · app: ${shown}${more}`
 }
 
 /**
@@ -466,7 +484,9 @@ export interface GroupTurnEvidence {
  * per <messaggio_da_agente>: il testo del gruppo può venire da fonti esterne.
  */
 export function buildGroupTurnOpening(ev: GroupTurnEvidence): string {
-  const peers = ev.peers.map((p) => `- ${p.name}${p.coordinator ? ' (coordinator)' : ''}: ${p.role || '(no role)'}`)
+  // A8: la riga di ogni pari finisce con «· app: Gmail, Slack» (al massimo 8
+  // più «…»): il coordinatore assegna il lavoro anche in base agli strumenti
+  const peers = ev.peers.map(peerLine)
   const msgs = ev.newMessages.map((m) => {
     const tag = m.authorKind === 'user' ? 'user' : m.authorKind === 'system' ? 'system' : 'bot'
     const reply = m.replyTo ? ` (in reply to ${m.replyTo.authorName}: "${m.replyTo.quote}")` : ''

@@ -2,7 +2,12 @@
 // FUNZIONE PURA (tavola 6): le consigliate (ordine fisso, al massimo 4, non
 // collegate), le collegate (connettore del catalogo, server MCP installato,
 // plugin) con i nomi dei bot e il «+N», il filtro per categoria e la ricerca.
-import type { ConnectorInfo, Localized } from '../../../shared/types'
+// Fase app (A1/A3/A4): UNA lista sola — le curate PRIMA e le app Composio
+// DOPO in ordine alfabetico; le curate vincono sui toolkit Composio dello
+// stesso servizio (l'esclusione la fa il daemon con la tabella di slug);
+// «Collegate» comprende anche le app Composio, con lo stato «da ricollegare».
+// Ogni riga porta la PROVENIENZA (A7): 'direct' (curata) o 'composio'.
+import type { ConnectorInfo, ComposioCatalogRow, ComposioStatusInfo, Localized } from '../../../shared/types'
 
 /** L'ordine fisso delle consigliate (l'idea di featured-connectors di Rakazo). */
 export const FEATURED_ORDER = ['gmail', 'gcalendar', 'gdrive', 'notion', 'linear'] as const
@@ -40,6 +45,9 @@ export interface SkillsByOwner {
   skills: string[]
 }
 
+/** A7: da dove passano i dati dell'app. */
+export type AppProvenance = 'direct' | 'composio'
+
 export interface AppsViewInput {
   catalog: ConnectorInfo[]
   connectors: ConnectorInfo[]
@@ -51,6 +59,10 @@ export interface AppsViewInput {
   query: string
   /** la lingua attiva per i tagline Localized */
   lang: 'it' | 'en'
+  /** fase app: lo stato Composio (null = RPC non disponibile) */
+  composio?: ComposioStatusInfo | null
+  /** fase app: le righe del catalogo Composio già filtrate dal daemon (curate escluse) */
+  composioRows?: ComposioCatalogRow[]
 }
 
 export interface FeaturedRow {
@@ -64,23 +76,38 @@ export interface FeaturedRow {
 export interface ConnectedRow {
   kind: 'connected'
   key: string
-  /** connettore del catalogo | server MCP | plugin */
-  source: 'connector' | 'server' | 'plugin'
+  /** connettore del catalogo | server MCP | plugin | app Composio */
+  source: 'connector' | 'server' | 'plugin' | 'composio'
   id: string
   name: string
   logo: string
   /** quali bot la usano: «Tutti i bot» (all) o i primi 2 nomi + +N */
   botsLabel: { all: boolean; names: string[]; extra: number }
   status: 'connected' | 'reconnect'
+  /** A7: la provenienza (le curate/server sono dirette, Composio passa dai suoi server) */
+  via: AppProvenance
+  /** solo source 'composio': lo slug del toolkit (Collega/Scollega/Ricollega) */
+  composioSlug?: string
+}
+
+/** Una riga Composio di «Tutte le app» (A3). */
+export interface ComposioAppRow {
+  slug: string
+  name: string
+  tagline: string | null
+  logo: string | null
+  connectable: 'yes' | 'no-auth' | 'developer-config'
 }
 
 export interface AppsViewModel {
   /** «Consigliate per te»: al massimo 4, non collegate, ordine fisso */
   featured: FeaturedRow[]
-  /** «Collegate»: connettori collegati + server installati + plugin */
+  /** «Collegate»: connettori collegati + server installati + plugin + app Composio */
   connected: ConnectedRow[]
   /** le voci del catalogo NON collegate che passano filtro e ricerca */
   catalogRows: ConnectorInfo[]
+  /** fase app: le app Composio non collegate (dopo le curate, ordine del daemon) */
+  composioApps: ComposioAppRow[]
   /** quante app sono collegate in tutto (per «N collegate ›») */
   connectedCount: number
   /** le skill di tutti i bot (riga «Skill dei bot») */
@@ -113,8 +140,9 @@ export function botsLabelOf(enabledFor: string[] | null | undefined, agents: Age
 /**
  * PURA (tavola 6): il modello della vista. Le consigliate sono al massimo 4
  * voci NON collegate del catalogo nell'ordine fisso FEATURED_ORDER; le
- * collegate uniscono connettori collegati, server installati e plugin; la
- * ricerca filtra catalogo e collegate per nome (e id per il catalogo).
+ * collegate uniscono connettori collegati, server installati, plugin e app
+ * Composio (con lo stato); la ricerca filtra catalogo, Composio e collegate
+ * per nome (e id per il catalogo, slug per Composio).
  */
 export function appsViewModel(input: AppsViewInput): AppsViewModel {
   const q = input.query.trim().toLowerCase()
@@ -123,6 +151,7 @@ export function appsViewModel(input: AppsViewInput): AppsViewModel {
     input.connectors.filter((c) => c.state.status === 'connected' || c.state.status === 'needs_auth').map((c) => c.id)
   )
   const agents = input.agents
+  const composio = input.composio ?? null
 
   // -- le consigliate: ordine fisso, non collegate, al massimo 4 --
   const featured: FeaturedRow[] = []
@@ -152,7 +181,8 @@ export function appsViewModel(input: AppsViewInput): AppsViewModel {
       name: c.name,
       logo: c.logo,
       botsLabel: { all: true, names: [], extra: 0 },
-      status: c.state.status === 'connected' ? 'connected' : 'reconnect'
+      status: c.state.status === 'connected' ? 'connected' : 'reconnect',
+      via: 'direct'
     })
   }
   // -- i server MCP installati (registro, plugin, gateway, manuale) --
@@ -166,7 +196,8 @@ export function appsViewModel(input: AppsViewInput): AppsViewModel {
       name: s.name,
       logo: '✦',
       botsLabel: botsLabelOf(s.enabledFor ?? null, agents),
-      status: s.needsReauth ? 'reconnect' : 'connected'
+      status: s.needsReauth ? 'reconnect' : 'connected',
+      via: 'direct'
     })
   }
   // -- i plugin (con le loro skill) --
@@ -180,7 +211,24 @@ export function appsViewModel(input: AppsViewInput): AppsViewModel {
       name: p.name,
       logo: '🧩',
       botsLabel: botsLabelOf(p.enabledFor ?? null, agents),
-      status: 'connected'
+      status: 'connected',
+      via: 'direct'
+    })
+  }
+  // -- le app Composio collegate (o «da ricollegare») --
+  for (const app of composio?.connected ?? []) {
+    if (q && !matchesQuery(`${app.name} ${app.slug}`.toLowerCase(), q)) continue
+    connected.push({
+      kind: 'connected',
+      key: `composio:${app.slug}`,
+      source: 'composio',
+      id: app.slug,
+      name: app.name,
+      logo: '🌐',
+      botsLabel: { all: true, names: [], extra: 0 },
+      status: app.status === 'ACTIVE' ? 'connected' : 'reconnect',
+      via: 'composio',
+      composioSlug: app.slug
     })
   }
 
@@ -200,6 +248,11 @@ export function appsViewModel(input: AppsViewInput): AppsViewModel {
     return true
   })
 
+  // -- le app Composio non collegate (A3: dopo le curate, ordine del daemon) --
+  const composioApps: ComposioAppRow[] = (input.composioRows ?? [])
+    .filter((r) => matchesQuery(`${r.name} ${r.slug} ${r.tagline ?? ''}`.toLowerCase(), q))
+    .map((r) => ({ slug: r.slug, name: r.name, tagline: r.tagline, logo: r.logo, connectable: r.connectable }))
+
   // -- le skill dei bot (la riga «Skill dei bot · N skill») --
   const skills = (input.skillsByOwner ?? []).filter((row) => row.skills.length > 0)
 
@@ -207,6 +260,7 @@ export function appsViewModel(input: AppsViewInput): AppsViewModel {
     featured,
     connected,
     catalogRows,
+    composioApps,
     connectedCount: connected.length,
     skills,
     hasCommunication: input.catalog.some((c) => c.category === 'communication')

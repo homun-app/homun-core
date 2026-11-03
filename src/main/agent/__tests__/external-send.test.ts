@@ -331,3 +331,29 @@ describe('D1: applyDraftBody — la modifica aggiorna anche gli argomenti che ve
     expect(message.body).toBe('a@z, c@w non è il body — nuovo testo')
   })
 })
+
+// ---- fase app (A6 punto 3): gli strumenti Composio sono invii in BOZZA ----
+
+describe('isExternalSend sugli strumenti Composio (composio__<tk>__<ACTION>)', () => {
+  it('SEND dopo il prefisso del toolkit → invio (bozza), via lo strumento stesso', () => {
+    expect(isExternalSend('composio__gmail__GMAIL_SEND_EMAIL', undefined, DEFAULT_EXTERNAL_SEND_TOOLS)).toBe(true)
+    expect(isExternalSend('composio__slack__SLACK_SEND_MESSAGE', undefined, DEFAULT_EXTERNAL_SEND_TOOLS)).toBe(true)
+  })
+  it('letture e scritture normali NON sono invii (passano dal gate: card o consentite)', () => {
+    expect(isExternalSend('composio__gmail__GMAIL_LIST_THREADS', undefined, DEFAULT_EXTERNAL_SEND_TOOLS)).toBe(false)
+    expect(isExternalSend('composio__github__GITHUB_CREATE_ISSUE', undefined, DEFAULT_EXTERNAL_SEND_TOOLS)).toBe(false)
+  })
+  it('il canale della bozza arriva dal toolkit (gmail → email, slack → slack)', () => {
+    expect(channelForTool('composio__gmail__GMAIL_SEND_EMAIL')).toBe('email')
+    expect(channelForTool('composio__slack__SLACK_SEND_MESSAGE')).toBe('slack')
+  })
+  it('draftFromExternalCall costruisce la bozza con via = strumento Composio', () => {
+    const d = draftFromExternalCall('composio__slack__SLACK_SEND_MESSAGE', {
+      channel: '#generale', text: 'ciao a tutti'
+    })
+    expect(d.type).toBe('draft')
+    expect(d.channel).toBe('slack')
+    expect(d.via?.tool).toBe('composio__slack__SLACK_SEND_MESSAGE')
+    expect(d.via?.args).toEqual({ channel: '#generale', text: 'ciao a tutti' })
+  })
+})

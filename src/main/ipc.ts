@@ -76,6 +76,10 @@ export const DAEMON_RPC_CHANNELS = [
   // preload dev'essere inoltrato o gestito dal main, e ogni canale inoltrato
   // dev'avere un handler nel daemon.
   'providers:probe', 'activity:global', 'connectors:search-registry',
+  // fase app (A2–A4): Composio con la chiave dell'utente — stato, chiave,
+  // prova, disattivazione, catalogo, collega e scollega (tutto nel daemon)
+  'composio:status', 'composio:set-key', 'composio:test', 'composio:disable',
+  'composio:catalog', 'composio:connect', 'composio:disconnect',
   // fase 18b (K3): le capacità di UN modello, senza l'elenco completo
   'models:capabilities',
   // fase 18b (H6): uso e costi aggregati (pagina "Uso e costi")
