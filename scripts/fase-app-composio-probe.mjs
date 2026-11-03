@@ -17,6 +17,18 @@
 //       composio__slack__SLACK_SEND_MESSAGE → BOZZA → Invia → UNA execute
 //       sul finto (letta dal log <file>.calls.log); una LETTURA che passa
 //       senza card; una SCRITTTURA che produce la card d'approvazione.
+// RITOCCHI (R1–R4):
+//   R1: la notice della MIGRAZIONE dei box (info, grigia) e quella di un
+//       INVIO FALLITO (error, rossa) con colori calcolati DIVERSI — la
+//       migrazione si provoca riavviando l'app con SANDBOT_TEST_LEGACY_BOX_ROOT
+//       puntato a una cartella DENTRO il temporaneo (mai la home vera);
+//   R2: dopo un invio RIUSCITO nessuna notice nuova e l'esito nei
+//       «Dettagli» della card; l'invio FALLITO (server MCP «spalto» su stdio
+//       che muore alla chiamata) fa UNA notice senza nomi tecnici;
+//   R3: nella card d'approvazione visibile nessun composio__/mcp__ (il nome
+//       tecnico vive nei «Dettagli tecnici» chiusi);
+//   R4: il titolo «Slack · Crea promemoria» in italiano e «Slack · Create
+//       reminder» in inglese (cambio lingua a caldo + ricarica).
 // A FINE SONDA si chiude ANCHE il daemon di sviluppo (pid in daemon.lock
 // dentro la cartella dati temporanea), la cartella viene rimossa, nessun push.
 import { spawn } from 'node:child_process'
@@ -28,6 +40,36 @@ const ROOT = resolve(import.meta.dirname, '..')
 // Vincoli della fase: temporanei SOLO con mkdtemp nella cartella indicata
 const TMP = mkdtempSync('/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/sandbot-fase-app-composio-')
 const DATA = join(TMP, 'data')
+// ritocchi (R1–R4): le catture della fase corrente
+const RITOCCHI = join(ROOT, 'docs', 'catture', 'app-composio-ritocchi')
+mkdirSync(RITOCCHI, { recursive: true })
+
+// ---- il server MCP FINTO «spalto» (R2/R1): risponde a initialize e
+// tools/list, poi alla PRIMA tools/call MUORE — così l'invio della bozza
+// fallisce con un errore vero (throw) e la notice esce ROSSA. Solo stdio,
+// nessuna rete.
+const SPALTO = join(TMP, 'spalto-server.mjs')
+writeFileSync(SPALTO, `#!/usr/bin/env node
+import { createInterface } from 'node:readline'
+const send = (obj) => process.stdout.write(JSON.stringify(obj) + '\\n')
+const rl = createInterface({ input: process.stdin })
+rl.on('line', (line) => {
+  let msg = null
+  try { msg = JSON.parse(line) } catch { return }
+  if (msg.method === 'initialize') {
+    send({ jsonrpc: '2.0', id: msg.id, result: { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'spalto', version: '1' } } })
+  } else if (msg.method === 'tools/list') {
+    send({ jsonrpc: '2.0', id: msg.id, result: { tools: [{
+      name: 'send_message',
+      description: 'Invia un messaggio (finto della sonda, muore alla chiamata)',
+      inputSchema: { type: 'object', properties: { to: { type: 'string' }, subject: { type: 'string' }, body: { type: 'string' } }, required: ['to', 'body'] }
+    }] } })
+  } else if (msg.method === 'tools/call') {
+    // qui MUORE: la pipe si spezza e la chiamata del daemon fallisce
+    process.exit(1)
+  }
+})
+`)
 const SHOTS = join(ROOT, 'docs', 'catture', 'app-composio')
 mkdirSync(DATA, { recursive: true })
 mkdirSync(SHOTS, { recursive: true })
@@ -103,25 +145,43 @@ providerPort = providerServer.address().port
 
 // ---- l'app Electron (build di sviluppo) con dati temporanei ----
 // Vincoli: env -i HOME/PATH + SANDBOT_TEST_USER_DATA/FAKE_KEYCHAIN/
-// FAKE_SAFESTORAGE + SANDBOT_TEST_FAKE_COMPOSIO (il client Composio finto)
+// FAKE_SAFESTORAGE + SANDBOT_TEST_FAKE_COMPOSIO (il client Composio finto).
+// R1 (ritocchi): launchApp riavvia l'app col MEDESIMO env (+extra, es.
+// SANDBOT_TEST_LEGACY_BOX_ROOT dentro il temporaneo) per provare la notice
+// della migrazione dei box.
 const ELECTRON = join(ROOT, 'node_modules', 'electron', 'dist', 'Electron.app', 'Contents', 'MacOS', 'Electron')
 const DEBUG_PORT = 9339
-const app = spawn(ELECTRON, ['.', `--remote-debugging-port=${DEBUG_PORT}`], {
-  cwd: ROOT,
-  env: {
-    HOME: process.env.HOME,
-    PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
-    SANDBOT_TEST_USER_DATA: DATA,
-    SANDBOT_TEST_FAKE_KEYCHAIN: join(DATA, 'keychain-finta.json'),
-    SANDBOT_TEST_FAKE_SAFESTORAGE: join(DATA, 'safestorage-finta.json'),
-    SANDBOT_TEST_FAKE_COMPOSIO: FAKE_COMPOSIO
-  },
-  stdio: ['ignore', 'pipe', 'pipe']
-})
 let appLog = ''
-app.stdout.on('data', (d) => { appLog += d.toString() })
-app.stderr.on('data', (d) => { appLog += d.toString() })
-const stopApp = () => { try { app.kill('SIGTERM') } catch { /* già via */ } }
+let app = null
+const launchApp = (extraEnv = {}) => {
+  const proc = spawn(ELECTRON, ['.', `--remote-debugging-port=${DEBUG_PORT}`], {
+    cwd: ROOT,
+    env: {
+      HOME: process.env.HOME,
+      PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
+      SANDBOT_TEST_USER_DATA: DATA,
+      SANDBOT_TEST_FAKE_KEYCHAIN: join(DATA, 'keychain-finta.json'),
+      SANDBOT_TEST_FAKE_SAFESTORAGE: join(DATA, 'safestorage-finta.json'),
+      SANDBOT_TEST_FAKE_COMPOSIO: FAKE_COMPOSIO,
+      ...extraEnv
+    },
+    stdio: ['ignore', 'pipe', 'pipe']
+  })
+  proc.stdout.on('data', (d) => { appLog += d.toString() })
+  proc.stderr.on('data', (d) => { appLog += d.toString() })
+  return proc
+}
+app = launchApp()
+const stopApp = () => { try { app?.kill('SIGTERM') } catch { /* già via */ } }
+/** Aspetta che il processo esca davvero (SIGTERM → exit). */
+const waitAppExit = async (proc, timeoutMs = 15_000) => {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    try { process.kill(proc.pid, 0); await sleep(250) } catch { return true }
+  }
+  try { proc.kill('SIGKILL') } catch { /* già via */ }
+  return false
+}
 
 /** Il pid del daemon di QUESTA cartella dati (daemon.lock), se già scritto. */
 const daemonPid = () => {
@@ -160,19 +220,19 @@ async function openCdp(url) {
     })
   }
 }
-let page = null
-for (let i = 0; i < 150; i++) {
-  try {
-    const list = await httpJson('/json/list')
-    const target = list.find((t) => t.type === 'page')
-    if (target) {
-      page = await openCdp(target.webSocketDebuggerUrl)
-      break
-    }
-  } catch { /* il debugger non è ancora su */ }
-  await sleep(200)
+/** La pagina del renderer via CDP (riusata anche dopo il riavvio R1). */
+const waitForPage = async () => {
+  for (let i = 0; i < 150; i++) {
+    try {
+      const list = await httpJson('/json/list')
+      const target = list.find((t) => t.type === 'page')
+      if (target) return await openCdp(target.webSocketDebuggerUrl)
+    } catch { /* il debugger non è ancora su */ }
+    await sleep(200)
+  }
+  throw new Error('nessuna pagina CDP: log app:\n' + appLog.slice(-1500))
 }
-if (!page) throw new Error('nessuna pagina CDP: log app:\n' + appLog.slice(-1500))
+let page = await waitForPage()
 log('CDP collegato al renderer')
 
 const pageEval = async (expr) => {
@@ -194,6 +254,12 @@ const setWindowWidth = async (width, height = 800) => {
 const shot = async (name) => {
   const r = await page.send('Page.captureScreenshot', { format: 'png' })
   writeFileSync(join(SHOTS, name), Buffer.from(r.data, 'base64'))
+  log('cattura', name)
+}
+/** Le catture dei RITOCCHI finiscono nella loro cartella. */
+const shotR = async (name) => {
+  const r = await page.send('Page.captureScreenshot', { format: 'png' })
+  writeFileSync(join(RITOCCHI, name), Buffer.from(r.data, 'base64'))
   log('cattura', name)
 }
 const waitDom = async (exprTrue, timeoutMs = 30_000, step = 300) => {
@@ -475,6 +541,8 @@ try {
   check('A5a la chiamata diretta all\'invio diventa BOZZA (card Invia/Scarta)',
     await waitDom(`!![...document.querySelectorAll('button')].some((b) => b.offsetParent !== null && b.textContent.trim() === 'Invia')`, 30_000))
   check('A5b nessuna execute sul finto PRIMA del click su Invia', fakeCalls().length === 0)
+  const noticesOf = async () => (await rpc(`getEntries(${JSON.stringify(bot.id)})`)).filter((e) => e.kind === 'notice')
+  const noticesBeforeSend = (await noticesOf()).length
   await clickByText('Invia')
   check('A5c dopo «Invia» c\'è UNA execute sul finto, con la versione dello schema',
     (await waitFakeCalls(1)) && !!fakeCalls()[0] && fakeCalls()[0].includes('SLACK_SEND_MESSAGE') && fakeCalls()[0].includes('20260101_00'))
@@ -483,6 +551,47 @@ try {
   check('A5d il log del finto ha ESATTAMENTE una riga (una execute sola)',
     calls1.length === 1, `righe: ${calls1.length}`)
   check('A5e gli argomenti sono quelli della bozza', calls1[0]?.includes('#sonda') && calls1[0]?.includes('ciao dalla sonda'))
+
+  // ============ R2 (ritocchi): invio riuscito → NESSUNA notice, esito nei Dettagli ============
+  const noticesAfterSend = await noticesOf()
+  check('R2a invio riuscito: NESSUNA notice nuova (la card è l\'unica conferma)',
+    noticesAfterSend.length === noticesBeforeSend,
+    `notice dopo: ${noticesAfterSend.length} (prima ${noticesBeforeSend}) — ultime: ${noticesAfterSend.slice(-2).map((n) => n.content.slice(0, 60)).join(' | ')}`)
+  const sentEntry = (await rpc(`getEntries(${JSON.stringify(bot.id)})`)).findLast((e) => e.meta?.message?.type === 'draft')
+  check('R2b l\'esito è nel meta.sendResult della card (non in chat)',
+    sentEntry?.meta?.status === 'sent' && typeof sentEntry?.meta?.sendResult === 'string' && sentEntry.meta.sendResult.includes('"ok":true'),
+    JSON.stringify({ status: sentEntry?.meta?.status, sendResult: sentEntry?.meta?.sendResult?.slice(0, 60) }))
+  // la riga «✓ Inviata a …» si riapre in sola lettura: DENTRO, il «Dettagli» CHIUSO
+  check('R2c la bozza inviata diventa la riga «Inviata a …»',
+    await waitDom(`[...document.querySelectorAll('button')].some((b) => b.offsetParent !== null && b.textContent.includes('Inviata a'))`, 10_000))
+  await pageEval(`
+    const row = [...document.querySelectorAll('button')].find((b) => b.offsetParent !== null && b.textContent.includes('Inviata a'))
+    if (!row) throw new Error('riga della bozza inviata non trovata')
+    row.click()
+    return 'card riaperta in sola lettura'
+  `)
+  await sleep(350)
+  const draftDetails = await pageEval(`
+    const d = document.querySelector('[data-testid="draft-details"]')
+    return d ? { closed: !d.open, text: d.textContent } : null
+  `)
+  check('R2d la card riaprata ha il «Dettagli» CHIUSO col nome tecnico e l\'esito',
+    !!draftDetails && draftDetails.closed &&
+    draftDetails.text.includes('composio__slack__SLACK_SEND_MESSAGE') && draftDetails.text.includes('"ok":true'),
+    JSON.stringify(draftDetails)?.slice(0, 120))
+  // si APRE il Dettagli per le catture: l'esito in monospazio, mai JSON in chat
+  await pageEval(`document.querySelector('[data-testid="draft-details"] summary').click(); return 'dettagli aperti'`)
+  await sleep(300)
+  const dettagliVisible = await pageEval(`return document.querySelector('[data-testid="draft-details"]').innerText`)
+  check('R2e i Dettagli aperti mostrano l\'esito dell\'invio', dettagliVisible.includes('"ok":true') && dettagliVisible.includes('SLACK_SEND_MESSAGE'))
+  // catture: bozza inviata con dettagli aperti (1440/900 × chiaro/scuro)
+  for (const [w, dark, tag] of VARIANTS) {
+    await setWindowWidth(w)
+    await setDark(dark)
+    await shotR(`bozza-dettagli-${tag}.png`)
+  }
+  await setDark(false)
+  await setWindowWidth(1440)
 
   // --- la lettura: SLACK_LIST_CHANNELS passa SENZA card ---
   pushTool('composio__slack__SLACK_LIST_CHANNELS', {})
@@ -505,13 +614,59 @@ try {
     const card = [...document.querySelectorAll('div')].find((d) => d.offsetParent !== null && d.textContent.includes('tramite Composio'))
     return card ? card.textContent : ''
   `)
-  check('A6d la card mostra «Slack · Create reminder» (nome umano) e gli argomenti',
-    cardText.includes('Slack · Create reminder') && cardText.includes('#sonda'), cardText.slice(0, 80))
+  check('A6d la card mostra «Slack · Crea promemoria» (nome umano, R4) e gli argomenti',
+    cardText.includes('Slack · Crea promemoria') && cardText.includes('#sonda'), cardText.slice(0, 80))
   check('A6e la card non ha eseguito nulla (il log è fermo a 2)', fakeCalls().length === 2, `righe: ${fakeCalls().length}`)
+
+  // ============ R3 (ritocchi): la card visibile senza riga tecnica ============
+  // innerText NON include il contenuto dei <details> CHIUSI: è ciò che l'utente
+  // VEDE. La card si riconosce dal suo guscio (rounded-18) che CONTIENE i
+  // «Dettagli tecnici» — non dai testi, che cambiano con la lingua
+  const cardVisible = await pageEval(`
+    const card = document.querySelector('[data-testid="approval-tech-details"]')?.closest('.rounded-\\\\[18px\\\\]')
+    return card ? card.innerText : ''
+  `)
+  check('R3a nel VISIBLE della card non compare né composio__ né mcp__',
+    !/composio__|mcp__/.test(cardVisible), cardVisible.slice(0, 140))
+  check('R3b il motivo è la frase umana «Vuole fare questa azione su Slack.»',
+    cardVisible.includes('Vuole fare questa azione su Slack.'), cardVisible.slice(0, 140))
+  const techDetails = await pageEval(`
+    const d = document.querySelector('[data-testid="approval-tech-details"]')
+    return d ? { closed: !d.open, text: d.textContent } : null
+  `)
+  check('R3c il nome tecnico sta nei «Dettagli tecnici» CHIUSI (con toolkit e versione)',
+    !!techDetails && techDetails.closed &&
+    techDetails.text.includes('composio__slack__SLACK_CREATE_REMINDER') &&
+    techDetails.text.includes('Composio · Slack · versione 20260101_00'),
+    JSON.stringify(techDetails)?.slice(0, 140))
+
+  // ============ R4 (ritocchi): il titolo cambia con la lingua della UI ============
+  await rpc(`settingsSet('ui.language', 'en')`)
+  await page.send('Page.reload')
+  check('R4a ricarica in inglese', await waitDom(`!!document.querySelector('form textarea')`, 25_000))
+  await sleep(1_200)
+  const cardEn = await pageEval(`
+    const card = document.querySelector('[data-testid="approval-tech-details"]')?.closest('.rounded-\\\\[18px\\\\]')
+    return card ? card.innerText : ''
+  `)
+  check('R4b in inglese il titolo è «Slack · Create reminder» (nome originale di Composio)',
+    cardEn.includes('Slack · Create reminder') && !cardEn.includes('Crea promemoria'), cardEn.slice(0, 80))
+  await rpc(`settingsSet('ui.language', 'it')`)
+  await page.send('Page.reload')
+  check('R4c ricarica in italiano', await waitDom(`!!document.querySelector('form textarea')`, 25_000))
+  await sleep(1_200)
+  const cardIt = await pageEval(`
+    const card = document.querySelector('[data-testid="approval-tech-details"]')?.closest('.rounded-\\\\[18px\\\\]')
+    return card ? card.innerText : ''
+  `)
+  check('R4d di nuovo in italiano il titolo è «Slack · Crea promemoria»',
+    cardIt.includes('Slack · Crea promemoria') && !cardIt.includes('Create reminder'), cardIt.slice(0, 80))
+
+  // catture (ritocchi): la card d'approvazione (1440/900 × chiaro/scuro)
   for (const [w, dark, tag] of VARIANTS) {
     await setWindowWidth(w)
     await setDark(dark)
-    await shot(`card-${tag}.png`)
+    await shotR(`card-${tag}.png`)
   }
   await setDark(false)
   await setWindowWidth(1440)
@@ -520,11 +675,121 @@ try {
   const calls3 = fakeCalls()
   check('A6f rifiutata: NESSUNA execute per il promemoria (il log resta a 2)', calls3.length === 2, `righe: ${calls3.length}`)
 
+  // ============ R2/R1 (ritocchi): l'invio FALLITO — UNA notice error, umana ============
+  // il server «spalto» risponde a initialize/tools/list e MUORE alla chiamata:
+  // l'execute del daemon fallisce con un errore VERO (throw) e l'invio della
+  // bozza produce la notice rossa senza nomi tecnici
+  log('collego il server MCP «spalto» (muore alla chiamata)…')
+  await rpc(`mcpSave(${JSON.stringify({
+    id: 'srv-spalto', name: 'spalto', transport: 'stdio',
+    command: process.execPath, args: [SPALTO],
+    enabled: true, enabledFor: ['*']
+  })})`)
+  const spaltoTest = await rpc(`mcpTest('srv-spalto')`)
+  check('R2f setup server MCP «spalto» collegato (tools list, muore alla chiamata)',
+    spaltoTest?.ok === true && (spaltoTest.tools ?? []).some((t) => t.includes('send_message')), JSON.stringify(spaltoTest))
+  pushTool('mcp__spalto__send_message', { to: 'capo@spalto.prova', subject: 'Errore voluto', body: 'questa partenza non arriva' })
+  pushText('bozza pronta, ma il server è giù')
+  await uiSend('Manda il messaggio che fallirà.')
+  check('R2g la chiamata all\'invio giù diventa BOZZA (card Invia/Scarta)',
+    await waitDom(`!![...document.querySelectorAll('button')].some((b) => b.offsetParent !== null && b.textContent.trim() === 'Invia')`, 30_000))
+  const noticesBeforeFail = (await noticesOf()).length
+  await clickByText('Invia')
+  check('R2h l\'invio fallito produce la notice «Invio non riuscito»',
+    await waitDom(`[...document.querySelectorAll('p')].some((p) => p.offsetParent !== null && p.innerText.includes('Invio non riuscito'))`, 20_000))
+  await sleep(800)
+  const failNotices = (await noticesOf()).filter((e) => e.kind === 'notice' && e.content.includes('Invio non riuscito'))
+  check('R2i la notice d\'errore è UNA, senza composio__/mcp__ nel testo',
+    failNotices.length === 1 && !/composio__|mcp__/.test(failNotices[0]?.content ?? ''),
+    `${failNotices.length} — ${failNotices[0]?.content?.slice(0, 90)}`)
+  const errEntry = (await rpc(`getEntries(${JSON.stringify(bot.id)})`)).findLast((e) => e.meta?.message?.type === 'draft')
+  check('R2l la card della bozza fallita passa a stato error',
+    errEntry?.meta?.status === 'error', JSON.stringify({ status: errEntry?.meta?.status }))
+  const errDetails = await pageEval(`
+    const d = [...document.querySelectorAll('[data-testid="draft-details"]')].filter((x) => x.offsetParent !== null).pop()
+    return d ? d.textContent : ''
+  `)
+  check('R2m il nome tecnico del tool sta nei Dettagli della card d\'errore',
+    errDetails.includes('mcp__spalto__send_message'), errDetails.slice(0, 120))
+
   // ---- Scollega: la riga torna in «Tutte le app» ----
   await rpc('composioDisconnect(' + JSON.stringify('slack') + ')')
   await sleep(600)
   const status3 = await rpc('composioStatus()')
   check('A4g Scollega: Slack non è più in «Collegate»', !(status3.connected ?? []).some((a) => a.slug === 'slack'))
+
+  // ============ R1 (ritocchi): la notice della MIGRAZIONE dei box, grigia ============
+  // La migrazione gira all'avvio del daemon una volta sola (marker nel box):
+  // per provare la notice si RIAVVIA l'app col MEDESIMO env più
+  // SANDBOT_TEST_LEGACY_BOX_ROOT puntato a una cartella DENTRO il temporaneo
+  // (mai la home vera), dopo aver tolto il marker scritto al primo avvio (la
+  // cartella dati è tutta della sonda) e messo un vecchio box da copiare.
+  log('riavvio dell\'app per la notice di migrazione dei box…')
+  stopApp()
+  await waitAppExit(app)
+  await stopDaemon()
+  const migrationMarker = join(DATA, 'data', 'box', '.migrated-v1')
+  try { rmSync(migrationMarker) } catch { /* nessun marker: la migrazione riparte comunque */ }
+  const legacyRoot = join(TMP, 'legacy-home')
+  mkdirSync(join(legacyRoot, bot.id, 'box'), { recursive: true })
+  writeFileSync(join(legacyRoot, bot.id, 'box', 'vecchio-file.txt'), 'dato del vecchio box')
+  app = launchApp({ SANDBOT_TEST_LEGACY_BOX_ROOT: legacyRoot })
+  page = await waitForPage()
+  log('CDP riagganciato al renderer')
+  check('R1a dopo il riavvio il renderer è su', await waitDom(`!!document.querySelector('form textarea')`, 30_000))
+  // la notice va al bot PRINCIPALE: se la chat è su un altro bot, si apre il suo
+  const mainId = await rpc(`settingsGet('mainAgentId')`).catch(() => null)
+  const agents2 = await rpc('listAgents()')
+  const mainAgent = agents2.find((a) => a.id === mainId) ?? agents2[0]
+  if (mainAgent && mainAgent.id !== bot.id) {
+    await clickSidebar(mainAgent.name ?? 'Bot')
+    await sleep(700)
+  }
+  const MIGRATION_TEXT = 'Il computer dei bot ora è UNO solo'
+  const migrationEntries = (await rpc(`getEntries(${JSON.stringify(mainAgent?.id ?? bot.id)})`))
+    .filter((e) => e.kind === 'notice' && e?.meta?.ui?.id === 'notice.boxMigrated')
+  check('R1b la notice della migrazione compare nel transcript del bot principale',
+    migrationEntries.length === 1,
+    `notice di migrazione: ${migrationEntries.length} — ${migrationEntries[0]?.content?.slice(0, 80)}`)
+  check('R1b2 la notice della migrazione è VISIBILE in chat',
+    await waitDom(`[...document.querySelectorAll('p')].some((p) => p.offsetParent !== null && p.innerText.includes(${JSON.stringify(MIGRATION_TEXT)}))`, 15_000))
+  // i COLORI CALCOLATI: la notice di migrazione (info) grigia come le righe di
+  // sistema, quella d'invio fallito (error) rossa come text-destructive
+  const noticeColors = await pageEval(`
+    const probe = (cls) => {
+      const p = document.createElement('p')
+      p.className = cls
+      document.body.appendChild(p)
+      const c = getComputedStyle(p).color
+      p.remove()
+      return c
+    }
+    const find = (text) => [...document.querySelectorAll('p')].find((p) => p.offsetParent !== null && p.innerText.includes(text))
+    return {
+      info: (() => { const el = find(${JSON.stringify(MIGRATION_TEXT)}); return el ? getComputedStyle(el).color : null })(),
+      error: (() => { const el = find('Invio non riuscito'); return el ? getComputedStyle(el).color : null })(),
+      mutedRef: probe('text-muted-foreground'),
+      errorRef: probe('text-destructive/90')
+    }
+  `)
+  check('R1c la notice di migrazione è GRIGIA (info): il colore calcolato è quello di text-muted-foreground',
+    !!noticeColors.info && noticeColors.info === noticeColors.mutedRef, JSON.stringify(noticeColors))
+  check('R1d la notice d\'invio fallito è ROSSA (error): il colore calcolato è quello di text-destructive',
+    !!noticeColors.error && noticeColors.error === noticeColors.errorRef, JSON.stringify(noticeColors))
+  check('R1e i due colori calcolati sono DIVERSI (info grigio ≠ error rosso)',
+    noticeColors.info !== noticeColors.error, JSON.stringify(noticeColors))
+  // catture (ritocchi): notice info (migrazione) ed error (invio fallito)
+  for (const [text, name] of [[MIGRATION_TEXT, 'notice-info'], ['Invio non riuscito', 'notice-error']]) {
+    for (const [w, dark, tag] of VARIANTS) {
+      await setWindowWidth(w)
+      await setDark(dark)
+      await pageEval(`[...document.querySelectorAll('p')].find((p) => p.offsetParent !== null && p.innerText.includes(${JSON.stringify(text)}))?.scrollIntoView({ block: 'center' })`)
+      await sleep(250)
+      await shotR(`${name}-${tag}.png`)
+    }
+    await setDark(false)
+    await setWindowWidth(1440)
+  }
 } catch (e) {
   failures++
   console.error('\n[sonda] ERRORE:', e.message ?? e)
@@ -532,7 +797,7 @@ try {
   console.error(appLog.slice(-1200))
 } finally {
   console.log(`\n${failures === 0 ? 'TUTTI I CONTROLLI OK' : 'CONTROLLI FALLITI'}: ${checks.filter((c) => c.ok).length}/${checks.length}`)
-  console.log(`catture in ${SHOTS}`)
+  console.log(`catture in ${SHOTS} e ${RITOCCHI}`)
   try { providerServer.closeAllConnections?.(); providerServer.close() } catch { /* già chiusa */ }
   stopApp()
   await sleep(800)

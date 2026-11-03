@@ -84,8 +84,9 @@ beforeEach(() => {
 })
 
 describe('draft:send — l\'invio avviene SOLO al click, via gate', () => {
-  it('click su Invia: esegue via.tool, status sent, esito come notice', async () => {
+  it('click su Invia: esegue via.tool, status sent, esito nel meta (R2: NESSUNA notice)', async () => {
     const d = mkDraft()
+    const noticesBefore = getEntries(AGENT).filter((e) => e.kind === 'notice').length
     const r = await api['draft:send']!([AGENT, d.id, 'corpo modificato inline']) as { ok: boolean }
     expect(r.ok).toBe(true)
     // D1: il tool MCP riceve il body MODIFICATO — via.args aggiornato dal campo visibile
@@ -93,22 +94,26 @@ describe('draft:send — l\'invio avviene SOLO al click, via gate', () => {
     const after = getEntries(AGENT).find((e) => e.id === d.id)!
     expect(after.meta?.status).toBe('sent')
     expect((after.meta?.message as { body: string }).body).toBe('corpo modificato inline') // body editato persistito
-    const notice = getEntries(AGENT).findLast((e) => e.kind === 'notice')!
-    expect(notice.content).toContain('Bozza inviata')
-    expect(notice.content).toContain('email inviata (id 123)')
+    // R2: l'esito vive nel meta.sendResult (per i «Dettagli» della card)…
+    expect(after.meta?.sendResult).toBe('email inviata (id 123)')
+    // …e NESSUNA notice nuova: la card della bozza è l'unica conferma
+    expect(getEntries(AGENT).filter((e) => e.kind === 'notice').length).toBe(noticesBefore)
   })
 
-  it('gate deny: il tool NON parte, la bozza resta pending, notice di blocco', async () => {
+  it('gate deny: il tool NON parte, la bozza resta pending, notice di blocco senza nome tecnico', async () => {
     h.perm.verdict = { kind: 'deny', reason: 'regola blocked' }
     const d = mkDraft()
     const r = await api['draft:send']!([AGENT, d.id]) as { ok: boolean }
     expect(r.ok).toBe(false)
     expect(h.tools.calls).toHaveLength(0)
     expect(getEntries(AGENT).find((e) => e.id === d.id)?.meta?.status).toBe('pending')
-    expect(getEntries(AGENT).findLast((e) => e.kind === 'notice')?.content).toContain('bloccato dai permessi')
+    const notice = getEntries(AGENT).findLast((e) => e.kind === 'notice')!
+    expect(notice.content).toContain('bloccato dai permessi')
+    // R2: mai il nome tecnico dello strumento nel testo che vede l'utente
+    expect(notice.content).not.toMatch(/composio__|mcp__/)
   })
 
-  it('errore del tool: status error, notice con l\'errore, nessun crash', async () => {
+  it('errore del tool: status error, notice «Invio non riuscito» con l\'errore, nessun crash', async () => {
     h.tools.throwWith = 'quota Gmail esaurita'
     const d = mkDraft()
     const r = await api['draft:send']!([AGENT, d.id]) as { ok: boolean }
@@ -116,7 +121,10 @@ describe('draft:send — l\'invio avviene SOLO al click, via gate', () => {
     expect(h.tools.calls).toHaveLength(1) // ci ha provato
     expect(getEntries(AGENT).find((e) => e.id === d.id)?.meta?.status).toBe('error')
     const notice = getEntries(AGENT).findLast((e) => e.kind === 'notice')!
+    expect(notice.content).toContain('Invio non riuscito')
     expect(notice.content).toContain('quota Gmail esaurita')
+    // R2: nessun nome tecnico nella notice (il nome tecnico va nei Dettagli della card)
+    expect(notice.content).not.toMatch(/composio__|mcp__/)
     // e si può riprovare: status error non chiude la bozza
     h.tools.throwWith = null
     const again = await api['draft:send']!([AGENT, d.id]) as { ok: boolean }
@@ -132,7 +140,7 @@ describe('draft:send — l\'invio avviene SOLO al click, via gate', () => {
     const r = await api['draft:send']!([AGENT, d.id]) as { ok: boolean }
     expect(r.ok).toBe(false)
     expect(h.tools.calls).toHaveLength(0)
-    expect(getEntries(AGENT).findLast((e) => e.kind === 'notice')?.content).toContain('non ha un tool di invio')
+    expect(getEntries(AGENT).findLast((e) => e.kind === 'notice')?.content).toContain('non ha uno strumento d')
   })
 })
 
@@ -175,7 +183,7 @@ describe('D1 (review fase 3): via solo per tool di invio esterno — ciò che ve
     const r = await api['draft:send']!([AGENT, d.id]) as { ok: boolean }
     expect(r.ok).toBe(false)
     expect(h.tools.calls).toHaveLength(0) // il tool finto NON è mai stato eseguito
-    expect(getEntries(AGENT).findLast((e) => e.kind === 'notice')?.content).toContain('non ha un tool di invio')
+    expect(getEntries(AGENT).findLast((e) => e.kind === 'notice')?.content).toContain('non ha uno strumento d')
   })
 
   it('bozza vecchia nel DB con via.tool non di invio (dato precedente alla correzione): draft:send rifiuta in difesa in profondità', async () => {
@@ -189,7 +197,10 @@ describe('D1 (review fase 3): via solo per tool di invio esterno — ciò che ve
     const r = await api['draft:send']!([AGENT, d.id]) as { ok: boolean }
     expect(r.ok).toBe(false)
     expect(h.tools.calls).toHaveLength(0)
-    expect(getEntries(AGENT).findLast((e) => e.kind === 'notice')?.content).toContain('non è un tool di invio esterno')
+    // R2: testo umano «Invio non riuscito», MAI il nome tecnico dello strumento
+    const notice = getEntries(AGENT).findLast((e) => e.kind === 'notice')!
+    expect(notice.content).toContain('Invio non riuscito')
+    expect(notice.content).not.toMatch(/composio__|mcp__|run-command/)
     // la bozza resta pending: rifiuto, non scarto
     expect(getEntries(AGENT).find((e) => e.id === d.id)?.meta?.status).toBe('pending')
   })

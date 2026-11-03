@@ -81,6 +81,9 @@ const ALLOWED_LITERALS: ReadonlyArray<{ file: string; text: string }> = [
 const ALLOWED_SYMBOLS: Record<string, string[]> = {
   // il rilevatore stesso contiene le parole italiane (lista per costruzione)
   'src/shared/language.ts': ['IT_WORDS'],
+  // R4 (fase app — ritocchi): il glossario degli oggetti delle azioni Composio
+  // in italiano (lista per costruzione, come IT_WORDS del rilevatore)
+  'src/shared/composio-names.ts': ['ACTION_OBJECTS'],
   // lista di riconoscimento dei campi con credenziali (legge la pagina, C7);
   // COMMIT_WORDS non scatta più e NON è in lista: una voce morta fallirebbe
   'src/main/agent/browser-guard.ts': ['CREDENTIAL_FIELD_WORDS'],

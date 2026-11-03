@@ -155,7 +155,14 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
   // la decide l'utente). Idempotente: un marker nel box evita di rifarla.
   try {
     const { migrateLegacyBoxes } = await import('../main/sandbox')
-    const migration = await migrateLegacyBoxes(listAgents())
+    // R1 (fase app — ritocchi, sonda): la cartella dei vecchi box si può
+    // spostare SOLO nei test (SANDBOT_TEST_LEGACY_BOX_ROOT, come le altre
+    // SANDBOT_TEST_*: in produzione non esiste) — così la sonda provoca la
+    // notice di migrazione senza toccare la home vera
+    const migration = await migrateLegacyBoxes(
+      listAgents(),
+      process.env.SANDBOT_TEST_LEGACY_BOX_ROOT ? { legacyRoot: process.env.SANDBOT_TEST_LEGACY_BOX_ROOT } : {}
+    )
     if (migration.migrated.length || migration.failed.length) {
       const main = mainAgentOf(listAgents(), getSetting<string | null>('mainAgentId', null))
       if (main) {

@@ -50,6 +50,8 @@ import { UiError } from '../shared/ui-text'
 import { isToolResolved, resolveTool, invalidateToolCache } from '../main/tool-paths'
 // M10 (fase 0.3.1001): prefisso dei nomi del box di prova non valido → riga nella UI
 import { INVALID_TEST_BOX_PREFIX } from '../main/sandbox/docker-argv'
+// R2 (fase app — ritocchi): l'esito degli invii si ripulisce come gli errori Composio
+import { redactComposioSecrets } from '../main/connectors/composio-actions'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -67,6 +69,29 @@ function dockerToolStatus(): { installed: boolean; running: boolean; path: strin
 import type { UiText } from '../shared/types'
 
 type Emitter = (e: SandbotEvent) => void
+
+/**
+ * R2 (fase app — ritocchi): il nome umano dell'app di uno strumento d'invio —
+ * il toolkit per Composio (describeTool), il nome del server per MCP — per i
+ * testi delle notice delle bozze. MAI l'id dello strumento: se il nome non si
+ * conosce si torna '' e il messaggio dice «l'app collegata».
+ */
+async function sendAppName(tool: string): Promise<string> {
+  try {
+    if (tool.startsWith('composio__')) {
+      const { describeComposioTool } = await import('../main/connectors/composio')
+      return describeComposioTool(tool)?.app ?? tool.split('__')[1] ?? ''
+    }
+    if (tool.startsWith('mcp__')) {
+      const { listServers } = await import('../main/mcp')
+      const id = tool.split('__')[1] ?? ''
+      return listServers().find((s) => s.id === id)?.name ?? ''
+    }
+  } catch {
+    // elenco non disponibile: il messaggio resta generico
+  }
+  return ''
+}
 
 export function buildApiMethods(
   emit: Emitter,
@@ -440,7 +465,9 @@ export function buildApiMethods(
       // bozza con via mcp__ufficio__send_email si può davvero inviare
       const externalCfg = store.getSetting<ExternalSendConfig>('externalSendTools', DEFAULT_EXTERNAL_SEND_TOOLS)
       if (!isExternalSend(via.tool, permissions.mcpAnnotationsOf(via.tool), externalCfg)) {
-        notice(ui(UI.rpcDraftViaRejected, { tool: via.tool }))
+        // R2 (ritocchi): testo umano col nome dell'app, mai l'id dello strumento
+        const app = await sendAppName(via.tool)
+        notice(ui(UI.rpcDraftViaRejected, { known: app ? 'yes' : 'no', ...(app ? { app } : {}) }))
         return { ok: false }
       }
       // il click su Invia è il consenso esplicito dell'utente (ha visto tutto il
@@ -448,19 +475,24 @@ export function buildApiMethods(
       // nega comunque l'invio
       const verdict = await permissions.check(via.tool, via.args, aid)
       if (verdict.kind === 'deny') {
-        notice(ui(UI.rpcDraftBlocked, { tool: via.tool }))
+        const app = await sendAppName(via.tool)
+        notice(ui(UI.rpcDraftBlocked, { known: app ? 'yes' : 'no', ...(app ? { app } : {}) }))
         return { ok: false }
       }
       try {
         const { output } = await executeTool(aid, via.tool, via.args)
-        store.updateEntryMeta(entry.id, { ...meta, message, status: 'sent' })
+        // R2 (ritocchi): l'esito (troncato a 2 KB, ripulito) vive nel meta della
+        // card; NESSUNA notice di conferma — la card è l'unica conferma
+        store.updateEntryMeta(entry.id, {
+          ...meta, message, status: 'sent',
+          sendResult: redactComposioSecrets(output.slice(0, 2048))
+        })
         emitUpdatedEntry(aid, entry.id)
-        notice(ui(UI.rpcDraftSent, { tool: via.tool, output: output.slice(0, 300) }))
         return { ok: true }
       } catch (e) {
         store.updateEntryMeta(entry.id, { ...meta, message, status: 'error' })
         emitUpdatedEntry(aid, entry.id)
-        notice(ui(UI.rpcDraftSendError, { error: e instanceof Error ? e.message : String(e) }))
+        notice(ui(UI.rpcDraftSendError, { error: redactComposioSecrets(e instanceof Error ? e.message : String(e)) }))
         return { ok: false }
       }
     },

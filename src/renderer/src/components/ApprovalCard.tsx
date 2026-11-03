@@ -13,6 +13,8 @@ import { describeCron } from '../../../shared/cron-human'
 // fase 17c (C2): il motivo della card si ritraduce dal meta.ui
 import { uiTextOfMeta } from '../lib/ui-text'
 import { i18n } from '../lib/i18n'
+// R3 (fase app — ritocchi): il modello puro della card per Composio e MCP
+import { approvalAppOf, approvalTitleOf, approvalReasonPhrase, approvalTechnicalLine } from '../lib/approval-app'
 import type { TranscriptEntry } from '../../../shared/types'
 import { DecidedRow, CardShell } from './DecidedRow'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu'
@@ -87,6 +89,13 @@ export function ApprovalCard({ entry, readOnly = false }: { entry: TranscriptEnt
   const agentName = agents.find((a) => a.id === activeId)?.name ?? ''
   const input = entry.meta?.input as Record<string, unknown> | undefined
 
+  // R3 (fase app — ritocchi): per gli strumenti Composio e MCP il motivo è
+  // una frase umana e il nome tecnico vive nei «Dettagli tecnici» chiusi
+  const appInfo = approvalAppOf(tool, entry.meta)
+  const humanTitle = approvalTitleOf(appInfo, agentName, activeLang)
+  const resolvedTitle = typeof humanTitle === 'string' ? humanTitle : humanTitle ? i18n.t(humanTitle) : null
+  const humanReason = appInfo ? approvalReasonPhrase(appInfo) : null
+
   // fase 17c (C2): il testo del motivo nella lingua attiva (meta.ui)
   const reasonText = uiTextOfMeta(entry.meta) ?? entry.content
 
@@ -100,8 +109,13 @@ export function ApprovalCard({ entry, readOnly = false }: { entry: TranscriptEnt
     return (
       <DecidedRow ok label={i18n.t(msg`Approvato automaticamente: ${String(entry.meta?.ruleMatched ?? '')}`)} at={entry.createdAt}>
         <CardShell>
-          <p className="text-sm">{tool}</p>
-          <p className="mt-1 text-xs text-muted-foreground">{reasonText && reasonText !== tool ? reasonText : ''}</p>
+          {/* R3: anche qui il titolo umano per Composio/MCP, mai il nome tecnico nudo */}
+          <p className="text-sm">
+            {resolvedTitle ?? tool}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {humanReason ? i18n.t(humanReason) : reasonText && reasonText !== tool ? reasonText : ''}
+          </p>
         </CardShell>
       </DecidedRow>
     )
@@ -135,9 +149,7 @@ export function ApprovalCard({ entry, readOnly = false }: { entry: TranscriptEnt
   const body = (
     <>
       <p className="text-[15px] font-semibold">
-        {composioAction?.app
-          ? `${composioAction.app} · ${composioAction.action || tool}`
-          : askTitle(tool, agentName)}
+        {resolvedTitle ?? askTitle(tool, agentName)}
       </p>
       {composioAction && (
         <p className="mt-0.5 text-[11px] text-muted-foreground"><Trans>tramite Composio</Trans></p>
@@ -158,8 +170,20 @@ export function ApprovalCard({ entry, readOnly = false }: { entry: TranscriptEnt
       {filePath !== null && (
         <code className="mt-2 block overflow-hidden rounded-[10px] bg-card px-3 py-2 font-mono text-[13px]">{filePath}</code>
       )}
-      {reasonText && reasonText !== tool && (
+      {/* R3: per Composio e MCP la frase umana; gli altri motivi del gate
+          restano i testi di sempre (sono già umani) */}
+      {humanReason ? (
+        <p className="mt-2 text-sm leading-relaxed text-foreground/80">{i18n.t(humanReason)}</p>
+      ) : reasonText && reasonText !== tool && (
         <p className="mt-2 text-sm leading-relaxed text-foreground/80">{reasonText}</p>
+      )}
+      {appInfo && (
+        <details className="mt-2 rounded-[10px] bg-card px-3 py-1.5" data-testid="approval-tech-details">
+          <summary className="cursor-pointer select-none text-[11px] text-muted-foreground"><Trans>Dettagli tecnici</Trans></summary>
+          <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed text-muted-foreground">
+            {approvalTechnicalLine(appInfo, tool)}
+          </pre>
+        </details>
       )}
       {isRoutine && (
         <div className="mt-2 space-y-1 rounded-[10px] bg-card px-3 py-2 text-xs">

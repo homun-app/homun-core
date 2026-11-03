@@ -17,6 +17,7 @@ import { Search, X } from 'lucide-react'
 import { api, useStore } from '../store'
 import { pickLang } from '../../../shared/localized'
 import { i18n } from '../lib/i18n'
+import { localizedActionName } from '../../../shared/composio-names'
 import { CURATED_COMPOSIO_SLUGS } from '../../../shared/types'
 import type { ConnectorInfo, McpServerInfo, McpServerSecret, AppsRegistryResult, SecretKind, ComposioCatalogRow, ComposioConnectedApp } from '../../../shared/types'
 import { SECRET_KIND_FOR_NEEDS } from '../../../shared/types'
@@ -828,6 +829,21 @@ function ComposioAppSheet({ app, row, onClose, onWaiting }: {
                 ? t`${app.toolsCount} azioni disponibili ai bot abilitati`
                 : t`non più attiva: ricollega per riavere le sue azioni`}
             </p>
+            {/* R4 (ritocchi): le azioni del toolkit col nome nella lingua della
+                UI (ri-localizzato qui dallo slug: cambia al volo con la
+                lingua); lo slug tecnico resta nel title della riga */}
+            {app.status === 'ACTIVE' && app.tools.length > 0 && (
+              <div className="mt-2 max-h-40 overflow-y-auto scroll-thin rounded-2xl bg-muted p-2.5" data-testid="composio-actions-table">
+                {app.tools.map((tool) => {
+                  const local = localizedActionName(tool.slug, uiLang()) ?? tool.name
+                  return (
+                    <p key={tool.slug} className="truncate px-1 py-0.5 text-[12px]" title={`${tool.slug}${local !== tool.name ? ` — ${tool.name}` : ''}`}>
+                      {local}
+                    </p>
+                  )
+                })}
+              </div>
+            )}
             {/* per quali bot (enabledFor per toolkit, predefinito tutti) */}
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <span className="text-[11px] text-muted-foreground"><Trans>per bot:</Trans></span>

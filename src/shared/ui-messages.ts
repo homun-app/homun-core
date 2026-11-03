@@ -79,7 +79,6 @@ export const UI = {
   modelError: msg({ id: 'notice.modelError', message: 'Errore dal modello: {message}' }),
   modelEmpty: msg({ id: 'notice.modelEmpty', message: 'Il modello non ha prodotto risposta (vuota).' }),
   toolLoop: msg({ id: 'notice.toolLoop', message: 'Turno interrotto: la stessa identica chiamata si ripete (loop).' }),
-  draftAutoSent: msg({ id: 'notice.draftAutoSent', message: 'Bozza inviata automaticamente ({tool}). Esito: {output}' }),
   taskCancelled: msg({ id: 'notice.taskCancelled', message: 'Task {id} annullato: esecuzione saltata.' }),
   approvalExpired: msg({ id: 'notice.approvalExpired', message: 'Approvazione scaduta.' }),
   wakeNudge: msg({ id: 'notice.wakeNudge', message: 'Sollecito di consegna al padre (wake_parent).' }),
@@ -274,14 +273,22 @@ export const UI = {
   rpcDraftAlreadySent: msg({ id: 'rpc.draftAlreadySent', message: 'Bozza già inviata' }),
   rpcDraftAlreadyDiscarded: msg({ id: 'rpc.draftAlreadyDiscarded', message: 'Bozza già scartata' }),
   rpcDraftAlreadyClosed: msg({ id: 'rpc.draftAlreadyClosed', message: 'Bozza già chiusa' }),
+  // R2 (fase app — ritocchi): i messaggi delle bozze non mostrano MAI il nome
+  // tecnico dello strumento (composio__/mcp__): il nome umano dell'app — il
+  // toolkit Composio o il server MCP — e il nome tecnico nei «Dettagli» della card
   rpcDraftNoVia: msg({
     id: 'rpc.draftNoVia',
-    message: 'La bozza non ha un tool di invio associato: non può essere inviata automaticamente.'
+    message: 'La bozza non ha uno strumento d’invio associato: non può essere inviata automaticamente.'
   }),
-  rpcDraftViaRejected: msg({ id: 'rpc.draftViaRejected', message: 'Invio rifiutato: {tool} non è un tool di invio esterno configurato.' }),
-  rpcDraftBlocked: msg({ id: 'rpc.draftBlocked', message: 'Invio bloccato dai permessi: {tool}' }),
-  rpcDraftSent: msg({ id: 'rpc.draftSent', message: 'Bozza inviata ({tool}). Esito: {output}' }),
-  rpcDraftSendError: msg({ id: 'rpc.draftSendError', message: 'Errore nell’invio della bozza: {error}' }),
+  rpcDraftViaRejected: msg({
+    id: 'rpc.draftViaRejected',
+    message: '{known, select, yes {Invio non riuscito: {app} non può inviare questo messaggio.} other {Invio non riuscito: l’app collegata non può inviare questo messaggio.}}'
+  }),
+  rpcDraftBlocked: msg({
+    id: 'rpc.draftBlocked',
+    message: '{known, select, yes {Invio non riuscito: bloccato dai permessi di {app}.} other {Invio non riuscito: bloccato dai permessi.}}'
+  }),
+  rpcDraftSendError: msg({ id: 'rpc.draftSendError', message: 'Invio non riuscito: {error}' }),
   rpcScheduleInvalid: msg({ id: 'rpc.scheduleInvalid', message: 'Schedule non valida: usare un cron a 5 campi, es. "0 9 * * *"' }),
   rpcTzInvalid: msg({ id: 'rpc.tzInvalid', message: 'Fuso orario non valido: "{tz}"' }),
   rpcRoutineNotFound: msg({ id: 'rpc.routineNotFound', message: 'Routine non trovata' }),

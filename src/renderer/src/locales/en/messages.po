@@ -221,6 +221,11 @@ msgstr "{agent} needs you"
 msgid "notify.done"
 msgstr "{agent} replied"
 
+#. placeholder {0}: info.app
+#: src/renderer/src/lib/approval-app.ts
+msgid "{agentName} vuole usare uno strumento di {0}"
+msgstr "{agentName} wants to use a tool of {0}"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "conn.toolsAvailable"
@@ -263,6 +268,16 @@ msgstr "{key} changes the command’s environment"
 #: src/shared/ui-messages.ts
 msgid "approval.rcRequires"
 msgstr "{key} requires approval"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "rpc.draftViaRejected"
+msgstr "{known, select, yes {Send failed: {app} cannot send this message.} other {Send failed: the connected app cannot send this message.}}"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "rpc.draftBlocked"
+msgstr "{known, select, yes {Send failed: blocked by the permissions of {app}.} other {Send failed: blocked by permissions.}}"
 
 #: src/renderer/src/components/Chat.tsx
 #: src/renderer/src/components/RightPanel.tsx
@@ -1009,16 +1024,6 @@ msgstr "draft awaiting your click: {preview}"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
-msgid "rpc.draftSent"
-msgstr "Draft sent ({tool}). Outcome: {output}"
-
-#. js-lingui-explicit-id
-#: src/shared/ui-messages.ts
-msgid "notice.draftAutoSent"
-msgstr "Draft sent automatically ({tool}). Outcome: {output}"
-
-#. js-lingui-explicit-id
-#: src/shared/ui-messages.ts
 msgid "rpc.draftNotFound"
 msgstr "Draft not found"
 
@@ -1734,6 +1739,14 @@ msgstr "Description"
 msgid "Descrizione / ruolo del bot (va nel system prompt)"
 msgstr "Bot description / role (goes in the system prompt)"
 
+#: src/renderer/src/components/DraftCard.tsx
+msgid "Dettagli"
+msgstr "Details"
+
+#: src/renderer/src/components/ApprovalCard.tsx
+msgid "Dettagli tecnici"
+msgstr "Technical details"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "chart.metaLine"
@@ -1878,11 +1891,6 @@ msgstr "model error"
 #: src/renderer/src/components/ComputerTerminal.tsx
 msgid "Errore di connessione."
 msgstr "Connection error."
-
-#. js-lingui-explicit-id
-#: src/shared/ui-messages.ts
-msgid "rpc.draftSendError"
-msgstr "Error sending the draft: {error}"
 
 #. placeholder {0}: err instanceof Error ? err.message : String(err)
 #: src/renderer/src/components/Chat.tsx
@@ -2705,19 +2713,14 @@ msgstr "Sent to {0}"
 msgid "Inviata automaticamente dalla regola: {0}"
 msgstr "Sent automatically by the rule: {0}"
 
-#. js-lingui-explicit-id
-#: src/shared/ui-messages.ts
-msgid "rpc.draftBlocked"
-msgstr "Send blocked by permissions: {tool}"
-
 #: src/renderer/src/components/DraftCard.tsx
 msgid "invio esterno"
 msgstr "external send"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
-msgid "rpc.draftViaRejected"
-msgstr "Send refused: {tool} is not a configured external-send tool."
+msgid "rpc.draftSendError"
+msgstr "Send failed: {error}"
 
 #: src/renderer/src/components/SkillsPanel.tsx
 msgid "istruzioni"
@@ -2758,7 +2761,7 @@ msgstr "The user connected {name}: its mcp__{connectorId}__* tools are now avail
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "rpc.draftNoVia"
-msgstr "The draft has no send tool attached: it cannot be sent automatically."
+msgstr "The draft has no send tool associated: it cannot be sent automatically."
 
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "La chiave non è stata salvata."
@@ -5229,6 +5232,16 @@ msgstr "item not found"
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "voce non trovata"
 msgstr "item not found"
+
+#. placeholder {0}: info.app
+#: src/renderer/src/lib/approval-app.ts
+msgid "Vuole fare questa azione su {0}."
+msgstr "It wants to perform this action on {0}."
+
+#. placeholder {0}: info.app
+#: src/renderer/src/lib/approval-app.ts
+msgid "Vuole fare un'azione che non si può annullare su {0}."
+msgstr "It wants to perform an action that cannot be undone on {0}."
 
 #: src/renderer/src/components/Settings.tsx
 msgid "wake"

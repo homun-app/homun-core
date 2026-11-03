@@ -19,6 +19,8 @@
 // FINISHED | STOPPED | SUPERSEDED | AWAITING_USER.
 import { randomUUID, createHash } from 'node:crypto'
 import { getAgent, listAgents, listRoutines, getEntries, updateAgent, appendEntry, updateEntryContent, updateEntryMeta, getSetting, holdOutboxEntry, db, getTask, createTask, updateTask, openTasksOf, MAX_OPEN_TASKS, createAgent, subagentRefusal, addGrant, listGrants, recordModelUsage, type Grant, type AppendEntry } from '../store/db'
+// R2 (fase app — ritocchi): l'esito degli invii automatici si ripulisce come gli errori Composio
+import { redactComposioSecrets } from '../connectors/composio-actions'
 import { llmStream, type ChatMessage, type ToolCall } from './llm'
 import { systemPrompt, secondaryPrompts, mainAgentSection, withLanguage } from './prompts'
 import { toolDefs, executeTool } from './tools'
@@ -149,11 +151,30 @@ function verdictReasonText(verdict: import('./permissions').Verdict): string {
 }
 
 /**
+ * R3 (fase app — ritocchi): i dati umani della card per i tool MCP — il nome
+ * del server e l'annotazione distruttiva — così la frase del motivo può dire
+ * «su Ufficio» e il nome tecnico mcp__server__tool resta nei Dettagli
+ * tecnici chiusi. Vuoto per gli strumenti non MCP.
+ */
+async function mcpAppMetaOf(toolName: string): Promise<Record<string, unknown>> {
+  if (!toolName.startsWith('mcp__')) return {}
+  const serverId = toolName.split('__')[1] ?? ''
+  let name = serverId
+  try {
+    const { listServers } = await import('../mcp')
+    name = listServers().find((s) => s.id === serverId)?.name ?? serverId
+  } catch { /* elenco non disponibile: resta l'id del server */ }
+  return { mcpApp: name, ...(permissions.mcpAnnotationsOf(toolName)?.destructiveHint ? { mcpDestructive: true } : {}) }
+}
+
+/**
  * Fase app (A6/A7): il nome umano di uno strumento Composio per la card
  * («Gmail · Invia email»); null se non è uno strumento Composio o il daemon
- * non lo conosce (il fallback dello slug leggibile lo fa la UI).
+ * non lo conosce (il fallback dello slug leggibile lo fa la UI). R4
+ * (ritocchi): porta anche slug e versione (nome nella lingua della UI,
+ * Dettagli tecnici della card).
  */
-async function describeComposio(toolName: string): Promise<{ app: string; action: string } | null> {
+async function describeComposio(toolName: string): Promise<{ app: string; action: string; slug: string; version?: string; original?: string } | null> {
   if (!toolName.startsWith('composio__')) return null
   const { describeComposioTool } = await import('../connectors/composio')
   return describeComposioTool(toolName)
@@ -1722,14 +1743,16 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
                   autoApprovals++
                   try {
                     const { output } = await executeTool(agentId, via.tool, via.args, { turnInitiator: opts.initiator })
+                    // R2 (fase app — ritocchi): anche l'invio automatico NON
+                    // fa notice (la card dice «Inviata automaticamente dalla
+                    // regola»): l'esito, ripulito e troncato, vive nel meta
                     updateEntryMeta(draft.id, {
                       ...draft.meta, status: 'sent',
-                      autoApproved: true, ruleMatched: decision.ruleMatched
+                      autoApproved: true, ruleMatched: decision.ruleMatched,
+                      sendResult: redactComposioSecrets(output.slice(0, 2048))
                     })
                     const updated = getEntries(agentId).find((e) => e.id === draft.id)
                     if (updated) emit({ type: 'entries', agentId, entries: [updated] })
-                    add({ ...uiSystemEntry(agentId, 'notice', ui(UI.draftAutoSent, { tool: via.tool, output: output.slice(0, 300) })) })
-                    emitLastEntry(agentId, emit)
                     autoSend = { ok: true, ruleMatched: decision.ruleMatched }
                   } catch (e) {
                     const msg = e instanceof Error ? e.message : String(e)
@@ -3135,7 +3158,10 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
                 ...(verdictUiOf(verdict) ? { ui: verdictUiOf(verdict)! } : {}),
                 autoApproved: true, ruleMatched: autoAllowed.ruleMatched,
                 ...(autoAllowed.reason ? { reason: autoAllowed.reason } : {}),
-                ...(verdict.secretRefs?.length ? { secretRefs: verdict.secretRefs } : {})
+                ...(verdict.secretRefs?.length ? { secretRefs: verdict.secretRefs } : {}),
+                // R3 (ritocchi): anche le auto-approvate MCP portano il nome
+                // del server, mai il solo nome tecnico
+                ...(await mcpAppMetaOf(call.name))
               }
             })
             emit({ type: 'entries', agentId, entries: [approvalEntry] })
@@ -3161,13 +3187,15 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
                 // fase app (A6/A7): la card di un'azione Composio mostra
                 // «Gmail · Invia email» (dal nome umano dei dati di Composio),
                 // la riga piccola «tramite Composio» e, se DISTRUTTIVA, niente
-                // «Consenti sempre» (come le installazioni)
+                // «Consenti sempre» (come le installazioni). R4 (ritocchi):
+                // describeTool porta anche slug e versione per la lingua e i
+                // Dettagli tecnici; R3: i tool MCP portano il nome del server
                 ...(verdict.composio
                   ? {
-                      composioAction: (await describeComposio(call.name)) ?? { app: '', action: '' },
+                      composioAction: (await describeComposio(call.name)) ?? { app: '', action: '', slug: '' },
                       ...(verdict.composio.destructive ? { composioDestructive: true } : {})
                     }
-                  : {})
+                  : await mcpAppMetaOf(call.name))
               }
             })
             setStatus(agentId, 'paused-for-approval', emit)

@@ -302,6 +302,12 @@ export interface SendMessageMeta {
    */
   autoApproved?: boolean
   ruleMatched?: string
+  /**
+   * R2 (fase app — ritocchi): l'esito dell'invio di una bozza (output dello
+   * strumento, troncato a 2 KB e ripulito) — si vede nei «Dettagli» della
+   * card, mai come notice né JSON grezzo in chat.
+   */
+  sendResult?: string
   reason?: string
   /** fase 8: esito della regola proposta dall'agente (aggiunta o scartata dall'utente) */
   ruleStatus?: 'added' | 'dismissed'
@@ -1348,6 +1354,8 @@ export interface ComposioConnectedApp {
   toolsCount: number
   /** per quali bot è abilitato il toolkit (['*'] = tutti, predefinito) */
   enabledFor: string[]
+  /** R4 (ritocchi): le azioni del toolkit per la tabella del dettaglio (nome nella lingua della UI) */
+  tools: Array<{ slug: string; name: string }>
 }
 
 /** A2: lo stato di Composio per la UI (mai la chiave: solo hasKey e le ultime 4). */

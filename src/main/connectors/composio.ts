@@ -17,6 +17,8 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import type { SandbotEvent, ToolDefLike } from '../../shared/types'
 import { CURATED_COMPOSIO_SLUGS } from '../../shared/types'
+import type { UiLanguage } from '../../shared/ui-language'
+import { localizedActionName } from '../../shared/composio-names'
 import type { ConnectorsSecretStore } from './sealed-store'
 import {
   composioToolName, readableActionSlug, sanitizeComposioError, redactComposioSecrets
@@ -216,6 +218,8 @@ export interface ComposioConnectedAppRpc {
   toolsCount: number
   /** per quali bot è abilitato il toolkit (['*'] = tutti, predefinito) */
   enabledFor: string[]
+  /** R4 (ritocchi): le azioni del toolkit per la tabella del dettaglio (nome nella lingua della UI) */
+  tools: Array<{ slug: string; name: string }>
 }
 
 export interface ComposioStatusRpc {
@@ -387,14 +391,45 @@ export function createComposioManager(deps: ComposioManagerDeps) {
         return `data:${mime};base64,${buf.toString('base64')}`
       }
       const fetchImpl = deps.fetchImpl ?? fetch
-      const res = await fetchImpl(url, { signal: TIMEOUT_SIGNAL() })
-      if (!res.ok) return null
+      // R5 (ritocchi): i redirect NON si seguono — un URL del dominio Composio
+      // potrebbe finire su un altro host. Si accetta SOLO una risposta 200
+      // diretta, e l'host finale (res.url) si ricontrolla con la allowlist
+      const res = await fetchImpl(url, { signal: TIMEOUT_SIGNAL(), redirect: 'manual' })
+      if (res.status !== 200 || !res.ok) return null
+      try {
+        if (!LOGO_ALLOWED_HOSTS.test(new URL(res.url || url).hostname)) return null
+      } catch {
+        return null
+      }
       const type = res.headers.get('content-type') ?? ''
       if (!type.startsWith('image/')) return null
       const length = Number(res.headers.get('content-length') ?? 0)
       if (length > LOGO_MAX_BYTES) return null
-      const buf = Buffer.from(await res.arrayBuffer())
-      if (buf.length === 0 || buf.length > LOGO_MAX_BYTES) return null
+      // R5: senza content-length si legge IN STREAMING fermandosi al limite —
+      // un corpo enorme non si scarica per intero per poi scartarlo
+      const chunks: Buffer[] = []
+      let total = 0
+      let tooBig = false
+      const reader = res.body?.getReader?.()
+      if (reader) {
+        for (;;) {
+          const { done, value } = await reader.read()
+          if (done) break
+          total += value.byteLength
+          if (total > LOGO_MAX_BYTES) {
+            tooBig = true
+            await reader.cancel().catch(() => undefined)
+            break
+          }
+          chunks.push(Buffer.from(value))
+        }
+      } else {
+        const raw = Buffer.from(await res.arrayBuffer())
+        total = raw.byteLength
+        chunks.push(raw)
+      }
+      if (tooBig || total === 0 || total > LOGO_MAX_BYTES) return null
+      const buf = Buffer.concat(chunks)
       if (!existsSync(logosDir())) mkdirSync(logosDir(), { recursive: true })
       writeFileSync(file, buf)
       return `data:${type.split(';')[0]};base64,${buf.toString('base64')}`
@@ -466,6 +501,16 @@ export function createComposioManager(deps: ComposioManagerDeps) {
     Object.entries(accounts())
       .filter(([, a]) => a.status === 'ACTIVE')
       .map(([slug]) => slug)
+
+  /** R4: la lingua attiva dell'interfaccia per i nomi delle azioni (come ui-language, dal setting iniettato). */
+  const activeUiLanguage = (): UiLanguage => {
+    const v = deps.getSetting<unknown>('ui.activeLanguage', null)
+    return v === 'it' ? 'it' : 'en'
+  }
+
+  /** R4: il nome di un'azione nella lingua della UI — localizzato PER INTERO o il nome originale di Composio. */
+  const localizedToolName = (tool: ComposioRawTool, lang: UiLanguage): string =>
+    localizedActionName(tool.slug, lang) ?? tool.name ?? readableActionSlug(tool.slug)
 
   /** nome completo → entry (la mappa nome ↔ slug del daemon, A5). */
   const registry = (): Map<string, RegistryEntry> => {
@@ -657,13 +702,19 @@ export function createComposioManager(deps: ComposioManagerDeps) {
     async status(): Promise<ComposioStatusRpc> {
       maybeRefreshAccounts()
       const key = pendingKey ?? (await storedKey())
+      const lang = activeUiLanguage()
       const rows: ComposioConnectedAppRpc[] = Object.entries(accounts()).map(([slug, a]) => ({
         slug,
         name: a.name,
         status: a.status,
         accountId: a.accountId,
         toolsCount: a.status === 'ACTIVE' ? toolsOf(slug).length : 0,
-        enabledFor: enabledForOf(slug)
+        enabledFor: enabledForOf(slug),
+        // R4: le azioni col nome nella lingua della UI per la tabella del
+        // dettaglio dell'app (slug per la ri-localizzazione nel renderer)
+        tools: a.status === 'ACTIVE'
+          ? toolsOf(slug).map((t) => ({ slug: t.slug, name: localizedToolName(t, lang) }))
+          : []
       }))
       rows.sort((a, b) => a.name.localeCompare(b.name))
       const pendingRow = pending.size > 0 ? [...pending.entries()][0] : undefined
@@ -846,12 +897,22 @@ export function createComposioManager(deps: ComposioManagerDeps) {
         .map((slug) => accountOf(slug)?.name ?? slug)
     },
 
-    /** La descrizione di uno strumento per la card (A6/A7: «Gmail · Invia email»). */
-    describeTool(toolName: string): { app: string; action: string } | null {
+    /** La descrizione di uno strumento per la card (A6/A7: «Gmail · Invia email»).
+     *  R4 (ritocchi): l'azione è nella lingua della UI quando la traduzione è
+     *  PER INTERO (verbo + oggetto), altrimenti il nome originale di Composio;
+     *  lo slug, la versione e il nome ORIGINALE viaggiano col nome localizzato
+     *  per la card (che in inglese torna al nome di Composio). */
+    describeTool(toolName: string): { app: string; action: string; slug: string; version?: string; original?: string } | null {
       const entry = registry().get(toolName)
       if (!entry) return null
       const tool = toolsOf(entry.toolkit).find((t) => t.slug === entry.slug)
-      return { app: entry.toolkitName, action: tool?.name ?? readableActionSlug(entry.slug) }
+      return {
+        app: entry.toolkitName,
+        action: tool ? localizedToolName(tool, activeUiLanguage()) : readableActionSlug(entry.slug),
+        slug: entry.slug,
+        ...(entry.version ? { version: entry.version } : {}),
+        ...(tool?.name ? { original: tool.name } : {})
+      }
     },
 
     /** A4 punto 6: il catalogo per offer_connector / search_connectors. */
@@ -913,8 +974,9 @@ export function composioAppsOf(agentId?: string): string[] {
   }
 }
 
-/** A6/A7: «Gmail · Invia email» per la card d'approvazione (null se non Composio). */
-export function describeComposioTool(name: string): { app: string; action: string } | null {
+/** A6/A7: «Gmail · Invia email» per la card d'approvazione (null se non Composio).
+ *  R4 (ritocchi): porta anche slug e versione per la lingua e i Dettagli tecnici. */
+export function describeComposioTool(name: string): { app: string; action: string; slug: string; version?: string; original?: string } | null {
   try {
     if (!active) return null
     return active.describeTool(name)

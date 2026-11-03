@@ -19,6 +19,8 @@ import { api, useStore, useResolvedModel } from '../store'
 import { uiTextOf } from '../lib/ui-text'
 // M2 (fase 0.3.1001): l'apertura di un turno con initiator è una riga di sistema
 import { openingRowFor } from '../lib/opening-rows'
+// R1 (fase app — ritocchi): le notice in chat non sono tutte errori
+import { noticeSeverity } from '../lib/notice-severity'
 import { i18n, formatTime } from '../lib/i18n'
 import { GROUP_CHAIN_CLOSED_TEXT, GROUP_RATE_LIMIT_TEXT, GROUP_HOURLY_CAP_TEXT, parseCoordinatorNowText, parseMemberNoModelText } from '../../../main/agent/group-turns'
 import { agentMessageDisplay } from '../../../shared/agent-message'
@@ -692,7 +694,17 @@ function NoticeRow({ entry }: { entry: TranscriptEntry }) {
   const withAction = uiId === 'notice.modelError' || uiId === 'notice.modelNotResponding' || uiId === 'notice.configureProviderFirst'
   const fallback = uiId === 'notice.modelFallback' || uiId === 'notice.modelFallbackRoute' || uiId === 'notice.modelRouteCooled'
   if (!withAction && !fallback) {
-    return <p className="text-center text-xs text-destructive/90">{uiTextOf(entry)}</p>
+    // R1 (fase app — ritocchi): le notice non sono tutte errori — info grigia
+    // come le righe di sistema, warning ambra (token --waiting ≥ 4,5:1), solo
+    // gli errori restano rossi
+    const severity = noticeSeverity(uiId)
+    if (severity === 'error') {
+      return <p className="text-center text-xs text-destructive/90">{uiTextOf(entry)}</p>
+    }
+    if (severity === 'warning') {
+      return <p className="text-center text-xs text-waiting">{uiTextOf(entry)}</p>
+    }
+    return <p className="text-center text-xs text-muted-foreground">{uiTextOf(entry)}</p>
   }
   return (
     <div className="flex items-center gap-3 rounded-[14px] bg-destructive/10 px-4 py-2.5 text-sm text-foreground">

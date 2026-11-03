@@ -246,6 +246,75 @@ describe('A3 — catalogo in cache, paginazione, unione con le curate', () => {
     const c2 = await m2.catalog()
     expect(c2.rows.find((r) => r.slug === 'hubspot')?.logo).toBeNull()
   })
+
+  // ---- R5 (ritocchi): niente redirect fuori dominio, lettura in streaming ----
+
+  it('R5 un redirect verso un altro host NON si segue: 3xx → logo null', async () => {
+    const withLogo = spec()
+    withLogo.toolkits[1] = { ...withLogo.toolkits[1]!, logo: 'https://cdn.composio.dev/slack.png' }
+    const fetchRedirect = (async (url: string | URL | Request) => {
+      const href = String(url)
+      // redirect «manual»: la risposta È il 302 con il Location verso l'host estraneo
+      if (href === 'https://cdn.composio.dev/slack.png') {
+        return new Response('', { status: 302, headers: { location: 'https://evil.example.com/slack.png' } })
+      }
+      return new Response('', { status: 404 })
+    }) as unknown as typeof fetch
+    const m = makeManager(withLogo, fetchRedirect)
+    await activate(m)
+    const c = await m.catalog()
+    expect(c.rows.find((r) => r.slug === 'slack')?.logo).toBeNull()
+  })
+
+  it('R5 anche un 200 che finisce su un altro host (res.url) viene rifiutato', async () => {
+    const withLogo = spec()
+    withLogo.toolkits[1] = { ...withLogo.toolkits[1]!, logo: 'https://cdn.composio.dev/slack.png' }
+    const fetchOtherHost = (async (url: string | URL | Request) => {
+      const href = String(url)
+      if (href === 'https://cdn.composio.dev/slack.png') {
+        const r = new Response(Buffer.from('png'), { status: 200, headers: { 'content-type': 'image/png' } })
+        return { ...r, url: 'https://evil.example.com/slack.png' }
+      }
+      return new Response('', { status: 404 })
+    }) as unknown as typeof fetch
+    const m = makeManager(withLogo, fetchOtherHost)
+    await activate(m)
+    const c = await m.catalog()
+    expect(c.rows.find((r) => r.slug === 'slack')?.logo).toBeNull()
+  })
+
+  it('R5 corpo da 1 MB SENZA content-length → null, senza leggerlo tutto (stream interrotto a 256 KB)', async () => {
+    const withLogo = spec()
+    withLogo.toolkits[1] = { ...withLogo.toolkits[1]!, logo: 'https://cdn.composio.dev/big.png' }
+    const CHUNK = 4096
+    let pulled = 0 // chunk generati dallo stream
+    const fetchHuge = (async (url: string | URL | Request) => {
+      if (String(url) !== 'https://cdn.composio.dev/big.png') return new Response('', { status: 404 })
+      // 1 MB di corpo, NESSUN content-length; corpo nudo (senza il pump di
+      // Response) così i chunk contati sono ESATTAMENTE quelli letti dal logo
+      const stream = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          pulled++
+          controller.enqueue(new Uint8Array(CHUNK))
+        },
+        cancel() { /* il consumer ha smesso: niente altri chunk */ }
+      })
+      return {
+        status: 200, ok: true, url: String(url),
+        headers: new Headers({ 'content-type': 'image/png' }),
+        body: stream
+      }
+    }) as unknown as typeof fetch
+    const m = makeManager(withLogo, fetchHuge)
+    await activate(m)
+    pulled = 0 // activate() scalda già il catalogo: si conta UNA passata
+    const c = await m.catalog()
+    expect(c.rows.find((r) => r.slug === 'slack')?.logo).toBeNull()
+    // il limite è 256 KB: chunk letti al massimo limite/CHUNK + 2 di abbondo,
+    // mai tutto il megabyte (256 chunk da 4 KB)
+    expect(pulled).toBeGreaterThanOrEqual(Math.ceil((256 * 1024) / CHUNK))
+    expect(pulled).toBeLessThan(70)
+  })
 })
 
 // ---- A4: collegare e scollegare ----
@@ -426,6 +495,60 @@ describe('A5 — execute con la versione dello schema', () => {
     await activate(m)
     const out = await m.execute('composio__slack__SLACK_SEND_MESSAGE', {})
     expect(out).toContain('not available')
+  })
+})
+
+// ---- R4 (ritocchi): describeTool e lo status col nome delle azioni localizzato ----
+
+describe('R4 — describeTool e status: nomi delle azioni nella lingua della UI', () => {
+  it('describeTool: in italiano «Invia messaggio», con slug e versione per la card', async () => {
+    settings.set('ui.activeLanguage', 'it')
+    const m = makeManager()
+    await activate(m)
+    m.connect('slack')
+    await sleep(150)
+    const d = m.describeTool('composio__slack__SLACK_SEND_MESSAGE')
+    expect(d).toEqual({ app: 'Slack', action: 'Invia messaggio', slug: 'SLACK_SEND_MESSAGE', version: '20260101_00', original: 'Send message' })
+  })
+
+  it('describeTool: in inglese il nome originale di Composio («Send message»)', async () => {
+    settings.set('ui.activeLanguage', 'en')
+    const m = makeManager()
+    await activate(m)
+    m.connect('slack')
+    await sleep(150)
+    const d = m.describeTool('composio__slack__SLACK_SEND_MESSAGE')
+    expect(d?.action).toBe('Send message')
+  })
+
+  it('describeTool: parola fuori glossario → il nome originale, mai una mezza traduzione', async () => {
+    settings.set('ui.activeLanguage', 'it')
+    const withCanvas = spec()
+    withCanvas.tools = {
+      ...(withCanvas.tools ?? {}),
+      SLACK: [
+        ...(withCanvas.tools?.SLACK ?? []),
+        { slug: 'SLACK_CREATE_CANVAS_SECTION', name: 'Create canvas section', description: 'x', version: '20260101_00', inputParameters: { type: 'object', properties: {} } }
+      ]
+    }
+    const m = makeManager(withCanvas)
+    await activate(m)
+    m.connect('slack')
+    await sleep(150)
+    const d = m.describeTool('composio__slack__SLACK_CREATE_CANVAS_SECTION')
+    expect(d?.action).toBe('Create canvas section')
+  })
+
+  it('status: le azioni del toolkit collegato col nome localizzato (per la tabella del dettaglio)', async () => {
+    settings.set('ui.activeLanguage', 'it')
+    const m = makeManager()
+    await activate(m)
+    m.connect('slack')
+    await sleep(150)
+    const s = await m.status()
+    const slack = s.connected.find((a) => a.slug === 'slack')
+    expect(slack?.tools.map((t) => t.name)).toEqual(['Invia messaggio', 'Elenca canali', 'Failing action'])
+    expect(slack?.tools.map((t) => t.slug)).toEqual(['SLACK_SEND_MESSAGE', 'SLACK_LIST_CHANNELS', 'SLACK_FAIL'])
   })
 })
 

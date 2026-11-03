@@ -78,6 +78,20 @@ export function DraftCard({ entry }: { entry: TranscriptEntry }) {
         </div>
       )}
 
+      {/* R2 (fase app — ritocchi): l'esito dell'invio e il nome tecnico dello
+          strumento vivono in un «Dettagli» CHIUSO — mai JSON grezzo in chat */}
+      {(status === 'sent' || status === 'error') && (draft.via?.tool || typeof meta.sendResult === 'string') && (
+        <details className="mt-2 rounded-[10px] bg-card px-3 py-1.5" data-testid="draft-details">
+          <summary className="cursor-pointer select-none text-[11px] text-muted-foreground"><Trans>Dettagli</Trans></summary>
+          {draft.via?.tool && (
+            <p className="mt-1 break-all font-mono text-[11px] leading-relaxed text-muted-foreground">{draft.via.tool}</p>
+          )}
+          {typeof meta.sendResult === 'string' && meta.sendResult && (
+            <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed text-muted-foreground">{meta.sendResult}</pre>
+          )}
+        </details>
+      )}
+
       {editing ? (
         <div className="mt-2">
           <textarea

@@ -221,6 +221,11 @@ msgstr "{agent} ha bisogno di te"
 msgid "notify.done"
 msgstr "{agent} ha risposto"
 
+#. placeholder {0}: info.app
+#: src/renderer/src/lib/approval-app.ts
+msgid "{agentName} vuole usare uno strumento di {0}"
+msgstr "{agentName} vuole usare uno strumento di {0}"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "conn.toolsAvailable"
@@ -263,6 +268,16 @@ msgstr "{key} modifica l’ambiente del comando"
 #: src/shared/ui-messages.ts
 msgid "approval.rcRequires"
 msgstr "{key} richiede approvazione"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "rpc.draftViaRejected"
+msgstr "{known, select, yes {Invio non riuscito: {app} non può inviare questo messaggio.} other {Invio non riuscito: l’app collegata non può inviare questo messaggio.}}"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "rpc.draftBlocked"
+msgstr "{known, select, yes {Invio non riuscito: bloccato dai permessi di {app}.} other {Invio non riuscito: bloccato dai permessi.}}"
 
 #: src/renderer/src/components/Chat.tsx
 #: src/renderer/src/components/RightPanel.tsx
@@ -1009,16 +1024,6 @@ msgstr "bozza in attesa: {preview}"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
-msgid "rpc.draftSent"
-msgstr "Bozza inviata ({tool}). Esito: {output}"
-
-#. js-lingui-explicit-id
-#: src/shared/ui-messages.ts
-msgid "notice.draftAutoSent"
-msgstr "Bozza inviata automaticamente ({tool}). Esito: {output}"
-
-#. js-lingui-explicit-id
-#: src/shared/ui-messages.ts
 msgid "rpc.draftNotFound"
 msgstr "Bozza non trovata"
 
@@ -1734,6 +1739,14 @@ msgstr "Descrizione"
 msgid "Descrizione / ruolo del bot (va nel system prompt)"
 msgstr "Descrizione / ruolo del bot (va nel system prompt)"
 
+#: src/renderer/src/components/DraftCard.tsx
+msgid "Dettagli"
+msgstr "Dettagli"
+
+#: src/renderer/src/components/ApprovalCard.tsx
+msgid "Dettagli tecnici"
+msgstr "Dettagli tecnici"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "chart.metaLine"
@@ -1878,11 +1891,6 @@ msgstr "errore del modello"
 #: src/renderer/src/components/ComputerTerminal.tsx
 msgid "Errore di connessione."
 msgstr "Errore di connessione."
-
-#. js-lingui-explicit-id
-#: src/shared/ui-messages.ts
-msgid "rpc.draftSendError"
-msgstr "Errore nell’invio della bozza: {error}"
 
 #. placeholder {0}: err instanceof Error ? err.message : String(err)
 #: src/renderer/src/components/Chat.tsx
@@ -2705,19 +2713,14 @@ msgstr "Inviata a {0}"
 msgid "Inviata automaticamente dalla regola: {0}"
 msgstr "Inviata automaticamente dalla regola: {0}"
 
-#. js-lingui-explicit-id
-#: src/shared/ui-messages.ts
-msgid "rpc.draftBlocked"
-msgstr "Invio bloccato dai permessi: {tool}"
-
 #: src/renderer/src/components/DraftCard.tsx
 msgid "invio esterno"
 msgstr "invio esterno"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
-msgid "rpc.draftViaRejected"
-msgstr "Invio rifiutato: {tool} non è un tool di invio esterno configurato."
+msgid "rpc.draftSendError"
+msgstr "Invio non riuscito: {error}"
 
 #: src/renderer/src/components/SkillsPanel.tsx
 msgid "istruzioni"
@@ -2758,7 +2761,7 @@ msgstr "L’utente ha connesso {name}: i tool mcp__{connectorId}__* sono ora dis
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "rpc.draftNoVia"
-msgstr "La bozza non ha un tool di invio associato: non può essere inviata automaticamente."
+msgstr "La bozza non ha uno strumento d’invio associato: non può essere inviata automaticamente."
 
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "La chiave non è stata salvata."
@@ -5229,6 +5232,16 @@ msgstr "voce non trovata"
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "voce non trovata"
 msgstr "voce non trovata"
+
+#. placeholder {0}: info.app
+#: src/renderer/src/lib/approval-app.ts
+msgid "Vuole fare questa azione su {0}."
+msgstr "Vuole fare questa azione su {0}."
+
+#. placeholder {0}: info.app
+#: src/renderer/src/lib/approval-app.ts
+msgid "Vuole fare un'azione che non si può annullare su {0}."
+msgstr "Vuole fare un'azione che non si può annullare su {0}."
 
 #: src/renderer/src/components/Settings.tsx
 msgid "wake"
