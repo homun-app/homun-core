@@ -10,7 +10,7 @@
 // può restare ≥ CHAT_MIN il pannello galleggia in OVERLAY sopra di essa
 // (ombra morbida, nessun bordo, si chiude con Esc, con la ✕ o clicando
 // fuori) invece di tagliarsi oltre il bordo della finestra.
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
@@ -593,16 +593,55 @@ export function RightPanel({ layout }: { layout: LayoutResult }) {
   ) : (
     <BotPanel layout={layout} onClose={close} />
   )
-  // Q1: quando galleggia, un velo invisibile copre il resto della finestra —
-  // un clic fuori chiude il pannello; la chat lì sotto resta larga tutto lo
-  // spazio (il pannello non la spinge)
+  // M6 (fase 0.3.1001): l'overlay è un VERO foglio sovrapposto — velo visibile
+  // sulla chat (niente testo leggibile coperto a metà), Esc e clic sul velo
+  // chiudono, il focus resta dentro il pannello, aria-modal
   if (layout.panel === 'overlay') {
-    return (
-      <div className="absolute inset-0 z-40">
-        <div className="absolute inset-0" aria-hidden="true" onClick={close} />
-        {body}
-      </div>
-    )
+    return <OverlaySheet onClose={close}>{body}</OverlaySheet>
   }
   return body
+}
+
+/**
+ * M6: il foglio sovrapposto del pannello. Velo che oscura la chat sottostante,
+ * dialogo aria-modal, focus intrappolato dentro (Tab si ricicla) e primo
+ * controllo messo a fuoco all'apertura.
+ */
+function OverlaySheet({ onClose, children }: { onClose(): void; children: React.ReactNode }) {
+  const { i18n } = useLingui()
+  const rootRef = useRef<HTMLDivElement>(null)
+  // all'apertura il focus ENTRA nel foglio (il bottone ✕ del pannello)
+  useEffect(() => {
+    const first = rootRef.current?.querySelector<HTMLElement>('button')
+    first?.focus()
+  }, [])
+  const onKeyDown = (e: React.KeyboardEvent): void => {
+    if (e.key !== 'Tab' || !rootRef.current) return
+    const focusables = Array.from(
+      rootRef.current.querySelectorAll<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')
+    ).filter((el) => !(el as HTMLButtonElement).disabled && el.offsetParent !== null)
+    if (focusables.length === 0) return
+    const first = focusables[0]!
+    const last = focusables[focusables.length - 1]!
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault()
+      last.focus()
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault()
+      first.focus()
+    }
+  }
+  return (
+    <div
+      ref={rootRef}
+      role="dialog"
+      aria-modal="true"
+      aria-label={i18n.t(msg`Pannello del bot`)}
+      className="absolute inset-0 z-40"
+      onKeyDown={onKeyDown}
+    >
+      <div className="absolute inset-0 bg-foreground/25 backdrop-blur-[2px]" aria-hidden="true" onClick={onClose} />
+      {children}
+    </div>
+  )
 }

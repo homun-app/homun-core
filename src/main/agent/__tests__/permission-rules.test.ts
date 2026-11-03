@@ -2,10 +2,7 @@ import { describe, expect, it, afterAll } from 'vitest'
 import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync, rmSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import {
-  targetKey, commandKey, commandRuleMatches, runCommandVerdict,
-  isNeverAuto, NEVER_AUTO, isInsideBox
-} from '../permission-rules'
+import { targetKey, commandKey, commandRuleMatches, runCommandVerdict, isNeverAuto, NEVER_AUTO, isInsideBox, serverReadGrantCovers, mcpServerReadGrantKey } from '../permission-rules'
 import { analyzeCommand } from '../shell-ast'
 import type { PermissionMode, PermissionRule } from '../../../shared/types'
 
@@ -380,5 +377,44 @@ describe('C5: isInsideBox (puro, realpath reale)', () => {
     expect(isInsideBox('nuovo/file.txt', BOX, realpathSync)).toBe(true)
     // anche se la directory interna non esiste ancora
     expect(isInsideBox('nuova-dir/file.txt', BOX, realpathSync)).toBe(true)
+  })
+})
+
+// ---- M4 (fase 0.3.1001): la grant «Consenti sempre le letture di <server>» ----
+
+describe('M4: serverReadGrantCovers (pura)', () => {
+  const RO = { readOnlyHint: true }
+  const WRITE = { destructiveHint: true }
+
+  it('copre la lettura: grant del server giusto, scope readOnly, readOnlyHint true', () => {
+    expect(serverReadGrantCovers('mcp__ufficio__*', 'readOnly', 'mcp__ufficio__list_emails', RO)).toBe(true)
+  })
+
+  it('NON copre la scrittura: annotazioni senza readOnlyHint (o destructive)', () => {
+    expect(serverReadGrantCovers('mcp__ufficio__*', 'readOnly', 'mcp__ufficio__send_email', undefined)).toBe(false)
+    expect(serverReadGrantCovers('mcp__ufficio__*', 'readOnly', 'mcp__ufficio__send_email', WRITE)).toBe(false)
+    // readOnly ma destructive: mai
+    expect(serverReadGrantCovers('mcp__ufficio__*', 'readOnly', 'mcp__ufficio__wipe', { readOnlyHint: true, destructiveHint: true })).toBe(false)
+  })
+
+  it('NON copre un altro server (la grant è per server, non globale)', () => {
+    expect(serverReadGrantCovers('mcp__ufficio__*', 'readOnly', 'mcp__casa__list_emails', RO)).toBe(false)
+  })
+
+  it('NON copre dopo un cambio di annotazione: il controllo è a ogni chiamata', () => {
+    // prima era readOnly e copriva…
+    expect(serverReadGrantCovers('mcp__ufficio__*', 'readOnly', 'mcp__ufficio__list_emails', RO)).toBe(true)
+    // …il server toglie readOnlyHint (o aggiunge destructive): stessa grant, tool non più coperto
+    expect(serverReadGrantCovers('mcp__ufficio__*', 'readOnly', 'mcp__ufficio__list_emails', undefined)).toBe(false)
+    expect(serverReadGrantCovers('mcp__ufficio__*', 'readOnly', 'mcp__ufficio__list_emails', { readOnlyHint: true, destructiveHint: true })).toBe(false)
+  })
+
+  it('scope diverso da readOnly non copre mai (grant piena = altro percorso del gate)', () => {
+    expect(serverReadGrantCovers('mcp__ufficio__*', null, 'mcp__ufficio__list_emails', RO)).toBe(false)
+    expect(serverReadGrantCovers('mcp__ufficio__*', undefined, 'mcp__ufficio__list_emails', RO)).toBe(false)
+  })
+
+  it('mcpServerReadGrantKey', () => {
+    expect(mcpServerReadGrantKey('ufficio')).toBe('mcp__ufficio__*')
   })
 })

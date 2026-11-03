@@ -30,7 +30,7 @@ import { getProvider, listProviders } from './providers'
 import { resolveAgentModel, type ResolvedAgentModel } from './model-defaults'
 import { buildMessages, visibleReplyEntries } from './history'
 import { planResume, INTERRUPTED_TOOL_RESULT } from './resume'
-import { isExternalSend, draftFromExternalCall, prepareDraft, DEFAULT_EXTERNAL_SEND_TOOLS, type ExternalSendConfig } from './external-send'
+import { isExternalSend, draftFromExternalCall, prepareDraft, DEFAULT_EXTERNAL_SEND_TOOLS, type ExternalSendConfig, type SendCandidate } from './external-send'
 import { normalizeOptions, findDismissibleWidgets } from './widgets'
 import { buildMemorySection, estimateTokensOf } from './memory'
 import { buildSkillsSection } from './skills'
@@ -197,6 +197,42 @@ interface Running {
   taskId?: number
 }
 const running = new Map<string, Running>()
+
+/**
+ * M5 (fase 0.3.1001): i messaggi «in consegna» al turno in corso. Un messaggio
+ * DIRETTO dell'utente (niente initiator, niente respondedTo) che arriva mentre
+ * un turno è attivo — e non è fermo su un'approvazione — si consegna al confine
+ * di passo: entra nella storia come entry utente visibile e la chiamata al
+ * modello successiva lo vede. Nessuno stream viene troncato e nessuno
+ * strumento interrotto a metà. Il job della coda corrispondente (se c'è) si
+ * consuma QUI: se il turno finisce prima di arrivare al confine, il job resta
+ * e il messaggio parte in un turno nuovo (gara) — nessun messaggio perso né
+ * letto due volte.
+ */
+interface MidTurnDelivery {
+  /** il job della coda da consumare quando il turno prende la consegna (null = nessuno) */
+  jobId: number | null
+  text: string
+  images?: string[]
+}
+const midTurnDeliveries = new Map<string, MidTurnDelivery[]>()
+
+/**
+ * M5: registra un messaggio per la consegna al turno in corso. Torna false se
+ * non c'è un turno che può prenderlo (libero, fermo su un'approval, in
+ * corse di chiusura): il chiamante lo lascia in coda come oggi.
+ */
+export function deliverToRunningTurn(agentId: string, delivery: MidTurnDelivery): boolean {
+  const run = running.get(agentId)
+  if (!run || run.controller.signal.aborted) return false
+  // fermo su un'approval → NON si consegna: vale la supersede di sempre
+  // (il messaggio sostituisce il turno, enqueue.ts lo gestisce)
+  if (run.approvals.size > 0) return false
+  const list = midTurnDeliveries.get(agentId) ?? []
+  list.push(delivery)
+  midTurnDeliveries.set(agentId, list)
+  return true
+}
 
 /**
  * Fase 18b (H2.3): le notice di raffreddamento già emesse, per bot e periodo
@@ -1087,6 +1123,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     }
     const maxInlineTools = getSetting<number>('connectors.maxInlineTools', DEFAULT_MAX_INLINE_TOOLS)
     const deferredMcp = toolsDeferred(mcpToolDefs.length, maxInlineTools)
+    let offeredMcpDefs = mcpToolDefs
     if (!deferredMcp) {
       allTools = [...toolDefs, ...mcpToolDefs]
     } else {
@@ -1095,12 +1132,21 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       // ultimi 20), aggiunti in FONDO in ordine stabile (cache del prompt)
       const prevActive = activeToolsFromTranscript(scopedEntries())
       const prevSet = new Set(prevActive)
+      offeredMcpDefs = mcpToolDefs.filter((t) => prevSet.has(t.name))
       allTools = [
         ...toolDefs,
         findToolsToolDef,
-        ...mcpToolDefs.filter((t) => prevSet.has(t.name))
+        ...offeredMcpDefs
       ]
     }
+    // M1: i tool MCP offerti in QUESTO turno, con annotazioni e schema —
+    // servono a compilare la via di un draft_external senza via quando per
+    // il canale c'è esattamente un invio esterno
+    const sendCandidates: SendCandidate[] = offeredMcpDefs.map((t) => ({
+      name: t.name,
+      ...(permissions.mcpAnnotationsOf(t.name) ? { annotations: permissions.mcpAnnotationsOf(t.name)! } : {}),
+      parameters: t.parameters
+    }))
     // fase 11b (punto 2): i tool del browser compaiono SOLO quando il browser
     // è disponibile (docker + rete bridge): in host il modello non li vede.
     // fase 19a (V7): anche i tre dello SCHERMO (request_takeover,
@@ -1153,8 +1199,13 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     systemText = withLanguage(systemText, userLang)
     const messages: ChatMessage[] = buildMessages(systemText, scopedEntries(), images)
 
-    // fase 3 (§3bis L5): quali tool MCP sono invii verso l'esterno
+    // fase 3 (§3bis L5): quali tool MCP sono invii verso l'esterno.
+    // Fase 0.3.1001 (M1): classificazione per annotazioni e NOME (funzione
+    // pura external-send.ts), l'elenco resta come sovrascrittura esplicita
+    // dell'utente — anche i server aggiunti a mano (es. "ufficio" con
+    // send_email) diventano bozze, mai invii diretti del modello
     const externalCfg = getSetting<ExternalSendConfig>('externalSendTools', DEFAULT_EXTERNAL_SEND_TOOLS)
+    const extSend = (tool: string): boolean => isExternalSend(tool, permissions.mcpAnnotationsOf(tool), externalCfg)
 
     // fase 8 (§3bis L11): scadenze dello stream — 150 s per il primo token,
     // 90 s di inattività tra due chunk (configurabili): scaduto si abortisce
@@ -1309,6 +1360,28 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
 
     for (let step = 0; step < MAX_STEPS; step++) {
       if (controller.signal.aborted) break
+      // M5 (fase 0.3.1001): consegna al confine di passo — i messaggi utente
+      // diretti arrivati mentre il turno lavorava entrano nella storia come
+      // entry visibili e la chiamata al modello che sta per partire li vede.
+      // Il job della coda corrispondente si consuma QUI (completeJob): se il
+      // turno fosse finito prima, la consegna sarebbe stata buttata via alla
+      // chiusura del turno e il job sarebbe partito come turno nuovo.
+      const due = midTurnDeliveries.get(agentId)
+      if (due?.length) {
+        midTurnDeliveries.delete(agentId)
+        for (const d of due) {
+          add({
+            agentId, kind: 'message', role: 'user', content: d.text,
+            meta: { ...(d.images?.length ? { images: d.images.length } : {}) }
+          })
+          emitLastEntry(agentId, emit)
+          messages.push({ role: 'user', content: d.text, ...(d.images?.length ? { images: d.images } : {}) })
+          if (d.jobId !== null) {
+            const { completeJob } = await import('../store/jobs')
+            completeJob(db(), d.jobId)
+          }
+        }
+      }
       // lo stream ha un abort dedicato: la scadenza ferma SOLO lui, non il turno
       const streamAbort = new AbortController()
       const onTurnAbort = (): void => streamAbort.abort()
@@ -1564,7 +1637,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         // ---- fase 3 (§3bis L2/L5): comunicazione e invii esterni, gestiti dal loop ----
 
         // invio esterno chiamato direttamente: MAI eseguito, diventa una bozza
-        if (isExternalSend(call.name, externalCfg)) {
+        // (M1: il classificatore ora riconosce per nome anche i server aggiunti
+        // a mano — readOnlyHint true resta sempre fuori)
+        if (extSend(call.name)) {
           const draft = appendSend(agentId, call, draftFromExternalCall(call.name, input), emit, { status: 'pending' }, opts.taskId)
           emitNeedsInput(agentId, draft, formatUi(ui(UI.draftAwaiting, { preview: draft.content.slice(0, 80) }), loopUiLanguage()), emit)
           taskNeedsInput()
@@ -1586,15 +1661,20 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         if (call.name === 'draft_external') {
           const channel = input.channel === 'email' || input.channel === 'slack' ? input.channel : 'other'
           // D1 (review fase 3): il via del modello è tenuto SOLO se è un invio
-          // esterno configurato; to/subject/body entrano in via.args secondo la
-          // fieldMap, così la card mostra esattamente ciò che verrà inviato
+          // esterno secondo il classificatore (M1); to/subject/body entrano in
+          // via.args secondo la fieldMap, così la card mostra esattamente ciò
+          // che verrà inviato. M1: senza via del modello, la via si compila dai
+          // tool del bot se per il canale c'è ESATTAMENTE un invio disponibile
+          const viaTool = (input.via as { tool?: unknown } | undefined)?.tool
           const prepared = prepareDraft({
             channel,
             to: String(input.to ?? ''),
             ...(input.subject !== undefined ? { subject: String(input.subject) } : {}),
             body: String(input.body ?? ''),
             via: input.via,
-            cfg: externalCfg
+            cfg: externalCfg,
+            ...(typeof viaTool === 'string' && viaTool ? { viaAnnotations: permissions.mcpAnnotationsOf(viaTool) } : {}),
+            candidates: sendCandidates
           })
           const draft = appendSend(agentId, call, prepared.message, emit, { status: 'pending' }, opts.taskId)
           // fase 8 (punto 1): l'auto-review può approvare l'INVIO della bozza
@@ -1654,12 +1734,18 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           messages.push({
             role: 'tool', toolCallId: call.id,
             content: prepared.viaRejected
-              ? `text-only draft created: "via" discarded because ${prepared.viaRejected} is not a configured external-send tool (no send channel connected).`
+              ? `text-only draft created: "via" discarded because ${prepared.viaRejected} is not an external-send tool (no send channel connected).`
               : autoSend?.ok
                 ? `draft SENT automatically under the user's auto-review rule "${autoSend.ruleMatched}": outcome reported in chat.`
                 : autoSend && !autoSend.ok
                   ? `automatic send of the draft failed (${autoSend.error}): the draft waits for the user's click.`
-                  : 'draft created and shown to the user: it will be sent only if the user clicks Send'
+                  : prepared.viaAuto && prepared.message.via
+                    ? `draft created with via ${prepared.message.via.tool} (chosen automatically: it is the only send tool for this channel); it will be sent only if the user clicks Send.`
+                    : prepared.message.sendHint === 'pick'
+                      ? `text-only draft created: more than one send tool exists for this channel, choose one in via.tool (candidates: ${prepared.sendCandidates?.join(', ')}).`
+                      : prepared.message.sendHint === 'missing-required'
+                        ? `text-only draft created: the only send tool for this channel (${prepared.sendCandidates?.join(', ')}) requires arguments that the draft fields cannot fill; call it directly or fill via.args yourself.`
+                        : 'draft created and shown to the user: it will be sent only if the user clicks Send'
           })
           continue
         }
@@ -2935,7 +3021,15 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         } else if (ownGroup && ownGroup.created_by === agentId) {
           verdict = { kind: 'allow', via: 'rule' }
         } else {
-          verdict = await permissions.check(call.name, input, agentId)
+          // M3 (fase 0.3.1001): il turno è aperto da un messaggio diretto
+          // dell'utente? (niente initiator, non automatico, non contaminato —
+          // il criterio dei turni fidati) — serve a update_state create
+          // activate:true, che solo qui può nascere attiva con una card
+          const userDirectTurn =
+            source === 'user' && opts.initiator === undefined && !automatic && !untrustedTurn && !contaminated
+          verdict = await permissions.check(call.name, input, agentId, {
+            ...(userDirectTurn ? { userDirectTurn: true } : {})
+          })
         }
         // F8: nel turno contaminato un allow (regola dell'utente o bypass del
         // proprio target) dei tool con effetti torna a chiedere — contenuto
@@ -3021,6 +3115,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
                 approvalId: approval.id, tool: call.name, input, status: 'pending', keys: verdict.keys,
                 ...(verdictUiOf(verdict) ? { ui: verdictUiOf(verdict)! } : {}),
                 ...(verdict.secretRefs?.length ? { secretRefs: verdict.secretRefs } : {}),
+                ...(verdict.mcpServerRead ? { mcpServerRead: verdict.mcpServerRead } : {}),
                 ...(neverAutoCmd ? { neverAuto: true } : {})
               }
             })
@@ -3120,7 +3215,11 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             turnInitiator: opts.initiator,
             ...(opts.taskId !== undefined ? { taskId: opts.taskId } : {}),
             ...(contaminated ? { contaminated: true } : {}),
-            ...(source === 'user' && !automatic && !untrustedTurn ? { userTurn: true } : {})
+            ...(source === 'user' && !automatic && !untrustedTurn ? { userTurn: true } : {}),
+            // M3: activate on update_state create only in the user's direct turn
+            ...(source === 'user' && opts.initiator === undefined && !automatic && !untrustedTurn && !contaminated
+              ? { routineActivateOk: true }
+              : {})
           })
           // fase 13 (punto 8): OGNI result MCP è un DATO ESTERNO (email, pagine
           // Notion, issue): blocco evidenza con la fonte mcp:<server> e
@@ -3184,8 +3283,10 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           // fase 4 (§3ter T2/T4): ogni azione su routine produce l'evento
           // "automation-changed" in chat (meta.automation: azione, id, nome)
           if (meta.automation && typeof meta.automation === 'object') {
-            const a = meta.automation as { action?: unknown; id?: unknown; name?: unknown }
-            const autoUi = automationEventText(String(a.action ?? ''), String(a.name ?? ''))
+            const a = meta.automation as { action?: unknown; id?: unknown; name?: unknown; active?: unknown }
+            const autoUi = automationEventText(String(a.action ?? ''), String(a.name ?? ''), {
+              ...(a.active === true ? { active: true } : {})
+            })
             add({
               agentId, kind: 'event', role: 'system',
               content: formatUi(autoUi, loopUiLanguage()),
@@ -3408,6 +3509,10 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     // prima consegna arrivata a metà turno
     if (turnBatchId) sealTurnBatch(db(), turnBatchId, emit)
     running.delete(agentId)
+    // M5: consegne rimaste indietro (il turno è finito prima del confine di
+    // passo) — si buttano via QUI: i job corrispondenti restano in coda e i
+    // messaggi partiranno come turni nuovi (gara), senza doppioni
+    midTurnDeliveries.delete(agentId)
     // fase 8 (§3bis L7): fine del turno = niente attività in corso
     emit({ type: 'activity', agentId, activity: null })
     if (getAgent(agentId)?.status !== 'offline') setStatus(agentId, 'idle', emit)

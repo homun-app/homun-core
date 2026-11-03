@@ -55,6 +55,8 @@ import {
   boxHasPluginsMountRo,
   boxHasBrowserMountRw,
   dockerClientEnv,
+  INVALID_TEST_BOX_PREFIX,
+  invalidTestBoxPrefixError,
   BOX_CONTAINER,
   BOX_VOLUME,
   BOX_MOUNT,
@@ -429,6 +431,10 @@ function ensureBoxImage(): Promise<boolean> {
  */
 export async function ensureBoxContainer(): Promise<void> {
   if (sandboxMode() !== 'docker') return
+  // M10 (fase 0.3.1001): prefisso di prova PRESENTE ma non valido → la
+  // sandbox NON parte, MAI coi nomi dell'utente (prima veniva ignorato in
+  // silenzio e il box girava come sandbot-box)
+  if (INVALID_TEST_BOX_PREFIX) throw new Error(invalidTestBoxPrefixError(INVALID_TEST_BOX_PREFIX))
   if (boxNotWritableError) throw new Error(boxNotWritableError)
   // punto 1: l'immagine del box esiste (o viene costruita) PRIMA di tutto
   const image = boxImage()

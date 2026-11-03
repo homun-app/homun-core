@@ -34,6 +34,8 @@ import { fmtUsd as fmtUsdIn } from '../lib/fmt'
 import { nextModelProbe, EMPTY_MODEL_PROBE, type ModelProbeState } from '../lib/model-probe'
 // fase 18b (H5.3): il selettore del modello a combobox
 import { ModelPicker, THINKING_LABELS } from './ui/ModelPicker'
+// M8 (fase 0.3.1001): la select comune, gemella dell'Input (h-9, stessa baseline)
+import { Select } from './ui/select'
 import type { UiTheme } from '../theme'
 import { Dialog, DialogContent, DialogTitle } from './ui/dialog'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu'
@@ -458,22 +460,25 @@ function ReviewerModelRow() {
   return (
     // K5 (fase rilascio — correzioni): etichetta e descrizione SOPRA, controlli
     // sotto a tutta larghezza; provider e modello su UNA riga di due colonne
-    // (minmax(0,1fr) ciascuna) che sotto i 420 px di contenuto si impilano
+    // (minmax(0,1fr) ciascuna) che sotto i 420 px di contenuto si impilano.
+    // M8 (fase 0.3.1001): i due campi usano i componenti ui/ comuni (Select e
+    // ModelPicker size md) — stessa altezza h-9 e stessa linea di base
     <div className="py-2.5">
       <span className="block text-[15px]"><Trans>Revisione delle approvazioni</Trans></span>
       <span className="block text-[13px] text-muted-foreground"><Trans>Un modello piccolo che decide le richieste semplici</Trans></span>
-      <div className="mt-2 grid grid-cols-1 gap-2 @[420px]:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <select
-          className="h-9 min-w-0 truncate rounded-full bg-muted px-3 text-sm outline-none"
+      <div className="mt-2 grid grid-cols-1 items-start gap-2 @[420px]:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        <Select
+          className="min-w-0 truncate"
           value={cfg.providerId ?? ''}
           aria-label={t`Provider`}
           onChange={(e) => save({ ...cfg, providerId: e.target.value || null, model: null })}
         >
           <option value="">{t`— provider —`}</option>
           {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-        </select>
+        </Select>
         <ModelPicker
           className="min-w-0"
+          size="md"
           models={models}
           value={cfg.model}
           placeholder={t`Modello (vuoto: quello del provider)`}
@@ -1060,6 +1065,15 @@ function ApprovalsTab({ onChanged }: { onChanged: () => Promise<void> }) {
   const [cfg, setCfg] = useState<AutoReviewSettings | null>(null)
   const [newAllow, setNewAllow] = useState('')
   const [newBlock, setNewBlock] = useState('')
+  // M4 (fase 0.3.1001): le standing grant («Consenti sempre» delle card) —
+  // elenco e revoca, con le grant di sola lettura per server etichettate
+  const [grants, setGrants] = useState<Array<{ id: number; tool: string; target: string; createdAt: number; scope?: 'readOnly' | null }> | null>(null)
+  const loadGrants = (): void => {
+    void api.grantsList().then(setGrants).catch(() => setGrants([]))
+  }
+  useEffect(() => {
+    loadGrants()
+  }, [])
 
   useEffect(() => {
     void api.settingsGet<AutoReviewSettings>('autoReview', DEFAULT_AUTO_REVIEW).then(setCfg)
@@ -1161,6 +1175,36 @@ function ApprovalsTab({ onChanged }: { onChanged: () => Promise<void> }) {
           </select>
         </div>
       ))}
+
+      {/* M4 (fase 0.3.1001): le standing grant — riga per riga, revocabili */}
+      <div className="rounded-2xl bg-muted px-4 py-3">
+        <div className="text-sm"><Trans>Consensi salvati</Trans></div>
+        <div className="mt-0.5 text-[11px] text-muted-foreground">
+          <Trans>«Consenti sempre» dati nelle card. Le letture di un server valgono solo per i tool che restano dichiarati in sola lettura.</Trans>
+        </div>
+        <ul className="mt-2 space-y-1">
+          {grants === null && <li className="text-xs text-muted-foreground">…</li>}
+          {grants?.length === 0 && <li className="text-xs text-muted-foreground"><Trans>(nessun consenso salvato)</Trans></li>}
+          {grants?.map((g) => (
+            <li key={g.id} className="flex items-center gap-2 text-xs">
+              <span className="min-w-0 flex-1 truncate">
+                {g.scope === 'readOnly' && /^mcp__[^_]+__\*$/.test(g.tool) ? (
+                  <Trans>Letture di {g.tool.slice(5, -3)}</Trans>
+                ) : (
+                  <span className="font-mono">{g.tool}{g.target !== '*' ? ` (${g.target})` : ''}</span>
+                )}
+              </span>
+              <button
+                className="shrink-0 text-muted-foreground hover:text-destructive"
+                title={t`Revoca`}
+                onClick={() => { void api.grantRevoke(g.id).then(loadGrants).catch(() => undefined) }}
+              >
+                ✕
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
 
       <h3 className="pt-3 font-display text-lg"><Trans>Auto-revisione delle approvazioni</Trans></h3>
       <p className="text-xs text-muted-foreground">

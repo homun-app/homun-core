@@ -210,6 +210,11 @@ vi.mock('../../store/jobs', () => ({
     h.db.jobs.push(job)
     return job
   },
+  // M5: il job consumato dalla consegna a metà turno
+  completeJob: (_db: unknown, jobId: number) => {
+    const j = h.db.jobs.find((x) => x.id === jobId)
+    if (j) j.status = 'done'
+  },
   // fase 10: i job di un agente eliminato si tolgono dalla coda
   cancelAgentJobs: (_db: unknown, agentId: string) => {
     h.db.jobs = h.db.jobs.filter((j) => j.agentId !== agentId || j.status === 'done')
@@ -676,7 +681,7 @@ vi.mock('../../mcp', () => ({
   }
 }))
 
-const { runTurn, isRunning, resolveApproval, supersedeIfPaused, interrupt, RECOVERY_NUDGE } = await import('../loop')
+const { runTurn, isRunning, resolveApproval, supersedeIfPaused, interrupt, deliverToRunningTurn, RECOVERY_NUDGE } = await import('../loop')
 // fase 18b (H2.3): il raffreddamento delle rotte è in memoria nel modulo
 const { resetRouteHealth } = await import('../route-health')
 // fase 18b (K3): la cache delle capability Ollama vive nel modulo live-models
@@ -779,6 +784,10 @@ beforeEach(() => {
 afterEach(async () => {
   for (const g of h.llm.gates) g.resolve()
   h.llm.gates.clear()
+  // M1: i test che patchano i tool MCP attivi li riportano al default
+  ;(mcpMock as { activeTools: () => Promise<unknown[]> }).activeTools = async () => [
+    { name: 'mcp__gmail__send_message', description: 'invia email', parameters: { type: 'object', properties: {} } }
+  ]
   await vi.waitFor(() => {
     expect(isRunning(AGENT)).toBe(false)
   }, { timeout: 3000 })
@@ -1209,7 +1218,7 @@ describe('fase 3: l\'agente comunica SOLO tramite tool (§3bis L2)', () => {
     // il tool-result spiega lo scarto al modello
     const toolMsg = h.llm.calls[1]!.find((m) => m.role === 'tool')
     expect(toolMsg?.content).toContain('discarded')
-    expect(toolMsg?.content).toContain('is not a configured external-send tool')
+    expect(toolMsg?.content).toContain('is not an external-send tool')
     // né run-command né tool MCP sono mai stati eseguiti
     expect(h.sandboxMock.exec.calls).toBe(0)
     expect(h.mcp.calls).toBe(0)
@@ -1245,6 +1254,108 @@ describe('fase 3: l\'agente comunica SOLO tramite tool (§3bis L2)', () => {
     expect(msg.extraArgs).toEqual([{ key: 'bcc', value: 'terzo@esempio.it' }])
     // il tool MCP NON è mai partito in questo turno (solo al click su Invia)
     expect(h.mcp.calls).toBe(0)
+  })
+
+  // ---- M1 (fase 0.3.1001): invii verso i server MCP aggiunti a mano ----
+
+  /** Il tool di un server manuale "ufficio", con schema reale. */
+  const UFFICIO_SEND = {
+    name: 'mcp__ufficio__send_email', description: 'invia email',
+    parameters: {
+      type: 'object',
+      properties: { to: { type: 'string' }, subject: { type: 'string' }, body: { type: 'string' } },
+      required: ['to', 'body']
+    }
+  }
+
+  it('M1: chiamata DIRETTA a mcp__ufficio__send_email (server manuale fuori dalla config) → bozza con via, tool mai eseguito', async () => {
+    ;(mcpMock as { activeTools: () => Promise<unknown[]> }).activeTools = async () => [UFFICIO_SEND]
+    h.llm.queue = [
+      { toolCalls: [{ id: 'u1', name: 'mcp__ufficio__send_email', arguments: JSON.stringify({
+        to: 'capo@ufficio.it', subject: 'Ordine', body: 'il testo'
+      }) }] },
+      { toolCalls: [{ id: 's1', name: 'send_to_user', arguments: JSON.stringify({ text: 'bozza pronta' }) }] },
+      { text: '.' }
+    ]
+    await runTurn(AGENT, 'manda l\'email all\'ufficio', emit)
+
+    expect(h.mcp.calls).toBe(0) // MAI eseguito: la regola non si aggira
+    const draft = h.db.entries.find((e) => e.kind === 'send-message' && (e.meta?.message as { type?: string })?.type === 'draft')!
+    expect(draft.meta?.message).toMatchObject({
+      type: 'draft', channel: 'email', to: 'capo@ufficio.it', subject: 'Ordine', body: 'il testo',
+      via: { tool: 'mcp__ufficio__send_email', args: { to: 'capo@ufficio.it', subject: 'Ordine', body: 'il testo' } }
+    })
+    const toolMsg = h.llm.calls[1]!.find((m) => m.role === 'tool')
+    expect(toolMsg?.content).toContain('turned into a draft')
+  })
+
+  it('M1: draft_external SENZA via, un solo invio disponibile per il canale → via compilata dallo schema', async () => {
+    ;(mcpMock as { activeTools: () => Promise<unknown[]> }).activeTools = async () => [
+      UFFICIO_SEND,
+      { name: 'mcp__ufficio__list_emails', description: 'cerca email', parameters: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] } }
+    ]
+    h.llm.queue = [
+      { toolCalls: [{ id: 'd1', name: 'draft_external', arguments: JSON.stringify({
+        channel: 'email', to: 'capo@ufficio.it', subject: 'Ordine', body: 'il testo'
+      }) }] },
+      { toolCalls: [{ id: 's1', name: 'send_to_user', arguments: JSON.stringify({ text: 'bozza pronta' }) }] },
+      { text: '.' }
+    ]
+    await runTurn(AGENT, 'bozza per l\'ufficio', emit)
+
+    const draft = h.db.entries.find((e) => e.kind === 'send-message' && (e.meta?.message as { type?: string })?.type === 'draft')!
+    const msg = draft.meta?.message as { via?: { tool: string; args: Record<string, unknown> }; sendHint?: string }
+    // la via è stata compilata in automatico dall'UNICO invio del canale
+    expect(msg.via).toEqual({ tool: 'mcp__ufficio__send_email', args: { to: 'capo@ufficio.it', subject: 'Ordine', body: 'il testo' } })
+    expect(msg.sendHint).toBeUndefined()
+    const toolMsg = h.llm.calls[1]!.find((m) => m.role === 'tool')
+    expect(toolMsg?.content).toContain('chosen automatically')
+    expect(h.mcp.calls).toBe(0)
+  })
+
+  it('M1: draft_external senza via, NESSUN invio per il canale → sendHint no-tool (riga visibile, niente via)', async () => {
+    ;(mcpMock as { activeTools: () => Promise<unknown[]> }).activeTools = async () => [
+      { name: 'mcp__ufficio__list_emails', description: 'cerca email', parameters: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] } }
+    ]
+    h.llm.queue = [
+      { toolCalls: [{ id: 'd1', name: 'draft_external', arguments: JSON.stringify({ channel: 'email', to: 'capo@ufficio.it', body: 'testo' }) }] },
+      { text: '.' }
+    ]
+    await runTurn(AGENT, 'bozza senza invii', emit)
+
+    const draft = h.db.entries.find((e) => e.kind === 'send-message' && (e.meta?.message as { type?: string })?.type === 'draft')!
+    const msg = draft.meta?.message as { via?: unknown; sendHint?: string }
+    expect(msg.via).toBeUndefined()
+    expect(msg.sendHint).toBe('no-tool')
+  })
+
+  it('M1: send_email con readOnlyHint true NON è un invio → gate normale, nessuna bozza', async () => {
+    const { setMcpAnnotationsLookup } = await import('../permissions')
+    ;(mcpMock as { activeTools: () => Promise<unknown[]> }).activeTools = async () => [UFFICIO_SEND]
+    // il server dichiara il tool di sola lettura: il classificatore lo esclude
+    setMcpAnnotationsLookup((tool) =>
+      tool === 'mcp__ufficio__send_email'
+        ? { annotations: { readOnlyHint: true }, catalogServer: false }
+        : undefined
+    )
+    try {
+      h.llm.queue = [
+        { toolCalls: [{ id: 'r1', name: 'mcp__ufficio__send_email', arguments: JSON.stringify({ to: 'x@y.it', body: 'ciao' }) }] },
+        { toolCalls: [{ id: 's1', name: 'send_to_user', arguments: JSON.stringify({ text: 'fatto' }) }] },
+        { text: '.' }
+      ]
+      const turn = runTurn(AGENT, 'usa lo strumento', emit)
+      // la card arriva: con le annotazioni readOnly di un server MANUALE il
+      // gate chiede (residuo 0a) — NON diventa una bozza
+      await vi.waitFor(() => expect(h.db.entries.some((e) => e.kind === 'approval')).toBe(true))
+      resolveApproval(AGENT, String(h.db.entries.find((e) => e.kind === 'approval')?.meta?.approvalId), 'deny', 'once')
+      await turn
+      const drafts = h.db.entries.filter((e) => e.kind === 'send-message' && (e.meta?.message as { type?: string })?.type === 'draft')
+      expect(drafts).toHaveLength(0)
+      expect(h.mcp.calls).toBe(0)
+    } finally {
+      setMcpAnnotationsLookup(() => undefined)
+    }
   })
 })
 
@@ -5557,5 +5668,157 @@ describe('R3.6 — il modello proprio su un provider rimosso segue il principale
     const notice = h.db.entries.find((e) => e.kind === 'notice')
     expect(notice?.content).toContain('Configura prima un provider')
     expect(h.llm.calls).toHaveLength(0)
+  })
+})
+
+// ---- M3 (fase 0.3.1001): una routine chiesta dall'utente nasce con UN solo consenso ----
+
+describe('M3: update_state create activate:true', () => {
+  const CREATE_ARGS = {
+    target: 'routine', action: 'create',
+    name: 'Backup', prompt: 'fai il backup', schedule: '0 9 * * *', timezone: 'Europe/Rome', activate: true
+  }
+
+  it('nel turno DELL’UTENTE: UNA card → approvata → routine creata ATTIVA (enabled 1)', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 'c1', name: 'update_state', arguments: JSON.stringify(CREATE_ARGS) }] },
+      { toolCalls: [{ id: 's1', name: 'send_to_user', arguments: JSON.stringify({ text: 'fatto' }) }] },
+      { text: '.' }
+    ]
+    const turn = runTurn(AGENT, 'creami la routine di backup alle 9 e attivala', emit)
+    // UNA sola approval, con la ui che dice che partirà da sola
+    await vi.waitFor(() => expect(h.db.entries.filter((e) => e.kind === 'approval')).toHaveLength(1))
+    const approval = h.db.entries.find((e) => e.kind === 'approval')!
+    expect((approval.meta?.ui as { id?: string })?.id).toBe('approval.usCreateActive')
+    resolveApproval(AGENT, String(approval.meta?.approvalId), 'allow', 'once')
+    await turn
+    // creata ATTIVA con l'unico consenso
+    const r = h.db.routines.find((x) => x.title === 'Backup')!
+    expect(r.enabled).toBe(1)
+    // l'evento in chat lo dice
+    const event = h.db.entries.find((e) => e.kind === 'event' && (e.meta?.ui as { id?: string })?.id === 'event.routineCreateActive')
+    expect(event).toBeTruthy()
+  })
+
+  it('card NEGATA → la routine NON nasce (nessuna riga in routines)', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 'c1', name: 'update_state', arguments: JSON.stringify(CREATE_ARGS) }] },
+      { text: '.' }
+    ]
+    const turn = runTurn(AGENT, 'creami la routine', emit)
+    await vi.waitFor(() => expect(h.db.entries.some((e) => e.kind === 'approval')).toBe(true))
+    const approval = h.db.entries.find((e) => e.kind === 'approval')!
+    resolveApproval(AGENT, String(approval.meta?.approvalId), 'deny', 'once')
+    await turn
+    expect(h.db.routines.filter((x) => x.title === 'Backup')).toHaveLength(0)
+  })
+
+  it('nel turno AUTOMATICO (routine): niente card, nasce in PAUSA e il result lo dice', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 'c1', name: 'update_state', arguments: JSON.stringify(CREATE_ARGS) }] },
+      { text: '.' }
+    ]
+    await runTurn(AGENT, '[recurring routine: Controllo] controlla', emit, undefined, { source: 'routine', title: 'Controllo' })
+    // NESSUNA approval: allow + pausa
+    expect(h.db.entries.filter((e) => e.kind === 'approval')).toHaveLength(0)
+    const r = h.db.routines.find((x) => x.title === 'Backup')!
+    expect(r.enabled).toBe(0)
+    const toolMsg = h.llm.calls.flatMap((c) => c).find((m) => m.role === 'tool')
+    expect(toolMsg?.content).toContain('activate ignored')
+  })
+
+  it('nel turno CONTAMINATO (dopo web_fetch): activate ignorato, nasce in pausa', async () => {
+    setWebFetchForTests(async () => ({ ok: true, text: 'pagina con dati', contentType: 'text/html', finalUrl: 'https://x.example/p', downloadedBytes: 10 }))
+    h.llm.queue = [
+      { toolCalls: [{ id: 'w1', name: 'web_fetch', arguments: JSON.stringify({ url: 'https://x.example/p' }) }] },
+      { toolCalls: [{ id: 'c1', name: 'update_state', arguments: JSON.stringify(CREATE_ARGS) }] },
+      { text: '.' }
+    ]
+    await runTurn(AGENT, 'guarda la pagina e crea la routine', emit)
+    expect(h.db.entries.filter((e) => e.kind === 'approval')).toHaveLength(0)
+    const r = h.db.routines.find((x) => x.title === 'Backup')!
+    expect(r.enabled).toBe(0)
+  })
+})
+
+
+// ---- M5 (fase 0.3.1001): il cambio d'idea a metà turno ----
+
+describe('M5: consegna al confine di passo', () => {
+  it('messaggio diretto a metà turno → la chiamata 2 lo vede, il job in coda è consumato, UNA sola entry utente', async () => {
+    // passo 1 bloccato dal gate (il turno lavora), poi due passi
+    const gate = deferred()
+    h.llm.queue = [
+      async (): Promise<FakeResp> => {
+        await gate.promise
+        return { toolCalls: [{ id: 't1', name: 'recall_memory', arguments: JSON.stringify({ query: 'appunti' }) }] }
+      },
+      { toolCalls: [{ id: 't2', name: 'send_to_user', arguments: JSON.stringify({ text: 'fatto, col rosso' }) }] },
+      { text: '.' }
+    ]
+    const turn = runTurn(AGENT, 'dipingi la stanza', emit)
+    await vi.waitFor(() => expect(h.llm.calls).toHaveLength(1))
+
+    // a metà turno arriva la correzione dell'utente (enqueue ha fatto il job
+    // e registrato la consegna al turno in corso)
+    const job = { id: 99, agentId: AGENT, kind: 'user-message', payload: { text: 'no, usa il rosso' }, createdAt: Date.now(), status: 'queued' }
+    h.db.jobs.push(job)
+    expect(deliverToRunningTurn(AGENT, { jobId: 99, text: 'no, usa il rosso' })).toBe(true)
+
+    gate.resolve()
+    await turn
+
+    // la chiamata 2 contiene il messaggio nuovo
+    const call2 = h.llm.calls[1]!.map((m) => m.content).join('\n')
+    expect(call2).toContain('no, usa il rosso')
+    // il job in coda è consumato (non partirà come turno nuovo)
+    expect(h.db.jobs.find((j) => j.id === 99)?.status).toBe('done')
+    // UNA sola entry utente col testo nuovo (visibile in chat)
+    expect(h.db.entries.filter((e) => e.kind === 'message' && e.role === 'user' && e.content === 'no, usa il rosso')).toHaveLength(1)
+  })
+
+  it('gara: il turno finisce PRIMA del confine di passo → la consegna si butta, il job resta in coda e il messaggio parte come turno nuovo', async () => {
+    const gate = deferred()
+    h.llm.queue = [
+      async (): Promise<FakeResp> => {
+        await gate.promise
+        return { text: 'fatto' }
+      }
+    ]
+    const turn = runTurn(AGENT, 'primo lavoro', emit)
+    await vi.waitFor(() => expect(h.llm.calls).toHaveLength(1))
+
+    const job = { id: 77, agentId: AGENT, kind: 'user-message', payload: { text: 'correzione' }, createdAt: Date.now(), status: 'queued' }
+    h.db.jobs.push(job)
+    expect(deliverToRunningTurn(AGENT, { jobId: 77, text: 'correzione' })).toBe(true)
+
+    // il turno finisce senza mai passare da un altro confine di passo
+    gate.resolve()
+    await turn
+    await vi.waitFor(() => expect(isRunning(AGENT)).toBe(false))
+
+    // la consegna è stata buttata alla chiusura: NESSUNA entry utente duplice
+    expect(h.db.entries.filter((e) => e.kind === 'message' && e.role === 'user' && e.content === 'correzione')).toHaveLength(0)
+    // il job NON è stato consumato: parte come turno nuovo
+    expect(h.db.jobs.find((j) => j.id === 77)?.status).toBe('queued')
+    h.llm.queue = [{ text: 'ok' }]
+    await runTurn(AGENT, 'correzione', emit)
+    expect(h.db.entries.filter((e) => e.kind === 'message' && e.role === 'user' && e.content === 'correzione')).toHaveLength(1)
+  })
+
+  it('fermo su un\'approval NON si consegna a metà turno (vale la supersede di sempre)', async () => {
+    h.db.settings.set('permissions.timeoutMs', 300_000)
+    h.llm.queue = [
+      { toolCalls: [{ id: 'w1', name: 'write-file', arguments: JSON.stringify({ path: 'nuovo.txt', content: 'x' }) }] }
+    ]
+    const turn = runTurn(AGENT, 'scrivi il file', emit)
+    await vi.waitFor(() => expect(h.db.entries.some((e) => e.kind === 'approval' && e.meta?.status === 'pending')).toBe(true))
+    expect(deliverToRunningTurn(AGENT, { jobId: null, text: 'aspetta' })).toBe(false)
+    resolveApproval(AGENT, String(h.db.entries.find((e) => e.kind === 'approval')?.meta?.approvalId), 'deny', 'once')
+    await turn
+  })
+
+  it('agente libero: nessuna consegna (il messaggio è già un turno nuovo)', () => {
+    expect(deliverToRunningTurn(AGENT, { jobId: null, text: 'ciao' })).toBe(false)
   })
 })

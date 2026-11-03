@@ -168,6 +168,12 @@ export const UI = {
   approvalRcRequires: msg({ id: 'approval.rcRequires', message: '{key} richiede approvazione' }),
   approvalRcRedirect: msg({ id: 'approval.rcRedirect', message: 'scrive su un file' }),
   approvalUsResume: msg({ id: 'approval.usResume', message: 'attivare la routine "{title}" — prompt: {preview}' }),
+  // M3 (fase 0.3.1001): la routine chiesta dall'utente nasce con UN solo
+  // consenso informato — la card dice che partirà da sola
+  approvalUsCreateActive: msg({
+    id: 'approval.usCreateActive',
+    message: 'creare la routine "{title}" ATTIVA: partirà da sola alla sua schedule — prompt: {preview}'
+  }),
   approvalUsUpdate: msg({ id: 'approval.usUpdate', message: 'modificare l’esecuzione della routine attiva "{title}"' }),
   approvalUsUpdateWithPrompt: msg({
     id: 'approval.usUpdateWithPrompt',
@@ -199,6 +205,7 @@ export const UI = {
 
   // ---- eventi meta.automation (update-state, C2) ----
   eventRoutineCreate: msg({ id: 'event.routineCreate', message: 'Routine creata (in pausa): {name}' }),
+  eventRoutineCreateActive: msg({ id: 'event.routineCreateActive', message: 'Routine creata ATTIVA: {name}' }),
   eventRoutineUpdate: msg({ id: 'event.routineUpdate', message: 'Routine aggiornata: {name}' }),
   eventRoutinePause: msg({ id: 'event.routinePause', message: 'Routine messa in pausa: {name}' }),
   eventRoutineResume: msg({ id: 'event.routineResume', message: 'Routine attivata: {name}' }),
@@ -260,6 +267,7 @@ export const UI = {
   rpcTemplateUnknown: msg({ id: 'rpc.templateUnknown', message: 'template sconosciuto: {id}' }),
   rpcConfigureProvider: msg({ id: 'rpc.configureProvider', message: 'Configura prima provider e modello.' }),
   rpcDraftNotFound: msg({ id: 'rpc.draftNotFound', message: 'Bozza non trovata' }),
+  rpcInvalidServerSlug: msg({ id: 'rpc.invalidServerSlug', message: 'Nome del server non valido' }),
   rpcDraftAlreadySent: msg({ id: 'rpc.draftAlreadySent', message: 'Bozza già inviata' }),
   rpcDraftAlreadyDiscarded: msg({ id: 'rpc.draftAlreadyDiscarded', message: 'Bozza già scartata' }),
   rpcDraftAlreadyClosed: msg({ id: 'rpc.draftAlreadyClosed', message: 'Bozza già chiusa' }),

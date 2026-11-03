@@ -6,7 +6,7 @@
 // turno, sempre, crea una regola). DOPO la decisione la card diventa UNA riga
 // grigia cliccabile in sola lettura. La logica NON cambia: stesse RPC.
 import { useState } from 'react'
-import { useStore } from '../store'
+import { useStore, api } from '../store'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import { describeCron } from '../../../shared/cron-human'
@@ -90,6 +90,11 @@ export function ApprovalCard({ entry, readOnly = false }: { entry: TranscriptEnt
   // fase 17c (C2): il testo del motivo nella lingua attiva (meta.ui)
   const reasonText = uiTextOfMeta(entry.meta) ?? entry.content
 
+  // M4 (fase 0.3.1001): tool MCP readOnly di un server manuale — la card offre
+  // «Consenti sempre le letture di <server>» (grant scope readOnly, controllata
+  // sulle annotazioni a ogni chiamata); dopo il click QUESTA chiamata passa once
+  const mcpServerRead = entry.meta?.mcpServerRead as { slug?: string; name?: string } | undefined
+
   // fase 8: auto-approvata dall'auto-review — riga compressa, espandibile
   if (entry.meta?.autoApproved) {
     return (
@@ -107,9 +112,12 @@ export function ApprovalCard({ entry, readOnly = false }: { entry: TranscriptEnt
   const secretRefs = Array.isArray(entry.meta?.secretRefs) ? (entry.meta!.secretRefs as string[]) : []
   // fase 4: input di update_state su routine (nome/schedule/prompt per la card)
   const st = entry.meta?.input as
-    | { target?: string; action?: string; name?: string; schedule?: string; prompt?: string; id?: number }
+    | { target?: string; action?: string; name?: string; schedule?: string; prompt?: string; id?: number; timezone?: string; activate?: boolean }
     | undefined
   const isRoutine = tool === 'update_state' && st?.target === 'routine'
+  // M3 (fase 0.3.1001): create activate — la routine nascerà ATTIVA con
+  // quest'unico consenso: la card lo dice e mostra anche il fuso della schedule
+  const isCreateActive = isRoutine && st?.action === 'create' && st?.activate === true
   // fase 5 (M1)/fase 8: update_state non offre «sempre»; i comandi never-auto
   // nemmeno «per questo turno»
   const noAlways = tool === 'update_state'
@@ -134,11 +142,15 @@ export function ApprovalCard({ entry, readOnly = false }: { entry: TranscriptEnt
           <div><span className="text-muted-foreground">{t`Routine:`} </span>{st?.name ?? (st?.id !== undefined ? `#${st.id}` : '?')}</div>
           {st?.schedule && (
             <div>
-              <span className="text-muted-foreground">{t`Schedule:`} </span>{describeCron(st.schedule, activeLang)}{' '}
+              <span className="text-muted-foreground">{t`Schedule:`} </span>{describeCron(st.schedule, activeLang)}
+              {st.timezone ? <Trans>, fuso {st.timezone}</Trans> : ''}{' '}
               <span className="font-mono text-muted-foreground">({st.schedule})</span>
             </div>
           )}
           {st?.prompt && <div className="whitespace-pre-wrap"><span className="text-muted-foreground">{t`Prompt:`} </span>{st.prompt}</div>}
+          {isCreateActive && (
+            <div className="pt-1 font-medium"><Trans>Approvata, la routine nasce attiva e partirà da sola.</Trans></div>
+          )}
         </div>
       )}
       {secretRefs.length > 0 && (
@@ -177,6 +189,17 @@ export function ApprovalCard({ entry, readOnly = false }: { entry: TranscriptEnt
               >
                 <Trans>Sempre</Trans>
               </DropdownMenuItem>
+              {mcpServerRead?.slug && (
+                <DropdownMenuItem
+                  title={t`Le letture di questo server non chiederanno più (solo i tool dichiarati in sola lettura)`}
+                  onClick={() => {
+                    void api.grantServerReads(mcpServerRead.slug!).catch(() => undefined)
+                    resolve(approvalId, 'allow', 'once')
+                  }}
+                >
+                  <Trans>Consenti sempre le letture di {mcpServerRead.name ?? mcpServerRead.slug}</Trans>
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem
                 title={t`Apri Impostazioni → Approvazione automatica con una regola precompilata`}
                 onClick={() => proposeRule(suggestedRule(tool, input))}

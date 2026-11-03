@@ -7,7 +7,7 @@ import { getPermissions, listGrants, addGrant, getRoutine } from '../store/db'
 import { sandboxMode, boxRoot, boxDir } from '../sandbox'
 import { resolveBoxPath } from '../sandbox/box-paths'
 import type { PermissionMode } from '../../shared/types'
-import { targetKey, runCommandVerdict, commandKey, isNeverAuto, ruleToolMatches, mcpAnnotationMode, type McpAnnotationsLike } from './permission-rules'
+import { targetKey, runCommandVerdict, commandKey, isNeverAuto, ruleToolMatches, mcpAnnotationMode, serverReadGrantCovers, type McpAnnotationsLike } from './permission-rules'
 import { analyzeCommand } from './shell-ast'
 import { updateStateVerdict, memoryScopeVerdict, type UpdateStateArgs } from './update-state'
 // fase 17c (C2): l'UiText accanto a reason — la card mostra la lingua dell'utente
@@ -27,11 +27,23 @@ export { targetKey }
 export interface McpAnnotationInfo {
   annotations: McpAnnotationsLike | undefined
   catalogServer: boolean
+  /** M4: il nome del server come lo vede l'utente (per la card delle letture) */
+  serverName?: string
 }
 let mcpAnnotationsLookup: (tool: string) => McpAnnotationInfo | undefined = () => undefined
 
 export function setMcpAnnotationsLookup(fn: (tool: string) => McpAnnotationInfo | undefined): void {
   mcpAnnotationsLookup = fn
+}
+
+/**
+ * Fase 0.3.1001 (M1): le annotazioni CORRENTI di un tool MCP, lette dalla
+ * stessa lookup del gate (il client MCP del daemon le tiene aggiornate) —
+ * servono al classificatore degli invii esterni, che con readOnlyHint true
+ * non classifica mai un tool come invio.
+ */
+export function mcpAnnotationsOf(tool: string): McpAnnotationsLike | undefined {
+  return mcpAnnotationsLookup(tool)?.annotations
 }
 
 /**
@@ -41,7 +53,20 @@ export function setMcpAnnotationsLookup(fn: (tool: string) => McpAnnotationInfo 
  */
 export type Verdict =
   | { kind: 'allow'; via: 'rule' | 'grant' }
-  | { kind: 'ask'; reason: string; keys?: string[]; secretRefs?: string[]; ui?: UiText; uis?: UiText[] }
+  | {
+      kind: 'ask'
+      reason: string
+      keys?: string[]
+      secretRefs?: string[]
+      ui?: UiText
+      uis?: UiText[]
+      /**
+       * M4 (fase 0.3.1001): la card di un tool MCP con readOnlyHint true (e
+       * non destructive) di un server MANUALE può offrire «Consenti sempre le
+       * letture di <server>» — slug del server e nome da mostrare.
+       */
+      mcpServerRead?: { slug: string; name: string }
+    }
   | { kind: 'deny'; reason: string }
 
 function matchRule(tool: string, target: string, rules: ReturnType<typeof getPermissions>['rules']): PermissionMode | null {
@@ -80,11 +105,15 @@ async function currentMemoryScope(agentId: string | undefined, id: unknown): Pro
 /**
  * Verdetto per una chiamata tool. Async: run-command richiede l'analisi shell.
  * `agentId` serve al gate C5 (lettura file dentro/fuori dalla box in host).
+ * M3 (fase 0.3.1001): `turn.userDirectTurn` dice se il turno è aperto da un
+ * messaggio diretto dell'utente (niente initiator, non automatico, non
+ * contaminato) — serve a update_state create activate:true.
  */
 export async function check(
   tool: string,
   input: Record<string, unknown>,
-  agentId?: string
+  agentId?: string,
+  turn: { userDirectTurn?: boolean } = {}
 ): Promise<Verdict> {
   const cfg = getPermissions()
 
@@ -134,7 +163,7 @@ export async function check(
     const routine = Number.isInteger(Number(input.id)) && Number(input.id) > 0
       ? getRoutine(Number(input.id))
       : null
-    const v = updateStateVerdict(input as UpdateStateArgs, routine)
+    const v = updateStateVerdict(input as UpdateStateArgs, routine, { userDirectTurn: turn.userDirectTurn === true })
     if (v.kind === 'ask') return { kind: 'ask', reason: v.reason, ui: v.ui }
     return { kind: 'allow', via: 'rule' }
   }
@@ -177,6 +206,13 @@ export async function check(
       return { kind: 'allow', via: 'grant' }
     }
     const info = mcpAnnotationsLookup(tool)
+    // M4 (fase 0.3.1001): la grant «Consenti sempre le letture di <server>»
+    // (mcp__<server>__* scope readOnly) copre QUESTA chiamata solo se le
+    // annotazioni CORRENTI del tool sono readOnly e non destructive — il
+    // controllo è a ogni chiamata, non alla concessione
+    if (info && listGrants().some((g) => serverReadGrantCovers(g.tool, g.scope, tool, info.annotations))) {
+      return { kind: 'allow', via: 'grant' }
+    }
     const annotated = mcpAnnotationMode(info?.annotations, info?.catalogServer ?? false)
     if (annotated === 'always_allow') return { kind: 'allow', via: 'rule' }
     if (annotated === 'needs_approval') {
@@ -189,6 +225,20 @@ export async function check(
     // annotazioni assenti: regola di default (mcp__* → needs_approval) o default globale
     const mode = matchRule(tool, '*', cfg.rules) ?? cfg.default
     if (mode === 'always_allow') return { kind: 'allow', via: 'rule' }
+    // M4: il tool di un server manuale dichiara readOnly (e non destructive) →
+    // la card offre «Consenti sempre le letture di <server>»
+    if (
+      info && !info.catalogServer &&
+      info.annotations?.readOnlyHint === true && info.annotations.destructiveHint !== true
+    ) {
+      const slug = tool.split('__')[1] ?? ''
+      return {
+        kind: 'ask',
+        reason: `${tool} requires approval`,
+        ui: ui(UI.approvalToolRequires, { tool }),
+        mcpServerRead: { slug, name: info.serverName ?? slug }
+      }
+    }
     return { kind: 'ask', reason: `${tool} requires approval`, ui: ui(UI.approvalToolRequires, { tool }) }
   }
 

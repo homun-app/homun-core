@@ -46,12 +46,15 @@ export function ComputerPanel({ agentId, onClose, embedded = false }: { agentId:
   const [dockerMode, setDockerMode] = useState(false)
   const [dockerOk, setDockerOk] = useState(true)
   const [dockerBusy, setDockerBusy] = useState(false)
+  // M10 (fase 0.3.1001): prefisso dei nomi del box di prova non valido
+  const [prefixInvalid, setPrefixInvalid] = useState(false)
   const readDockerStatus = (retry: boolean): void => {
     setDockerBusy(true)
     void (retry ? api.boxDockerRetry() : api.boxDockerStatus())
-      .then((r) => {
+      .then((r: { installed: boolean; running: boolean; path: string; testPrefixInvalid?: boolean }) => {
         setDockerMode(true)
         setDockerOk(r.installed && r.running)
+        setPrefixInvalid(r.testPrefixInvalid === true)
       })
       .catch(() => undefined)
       .finally(() => setDockerBusy(false))
@@ -137,6 +140,14 @@ export function ComputerPanel({ agentId, onClose, embedded = false }: { agentId:
           >
             <Trans>Riprova</Trans>
           </button>
+        </div>
+      )}
+
+      {/* M10 (fase 0.3.1001): prefisso dei nomi del box di prova non valido —
+          la riga Docker lo dice; la sandbox non parte mai coi nomi dell'utente */}
+      {dockerMode && prefixInvalid && (
+        <div className="mx-2 mb-1 rounded-xl bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          <Trans>Prefisso di prova non valido: correggi SANDBOT_TEST_BOX_PREFIX (deve partire per «sbtest») o toglierla, poi riavvia.</Trans>
         </div>
       )}
 

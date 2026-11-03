@@ -196,10 +196,15 @@ describe('makeJobRunner: routine-run', () => {
     expect(log[0]!.text).toBe('[recurring routine: Backup] fai il backup')
     expect(log[0]!.opts.source).toBe('routine')
     expect(log[0]!.opts.title).toBe('Backup')
+    // M2 (fase 0.3.1001): il turno di routine porta initiator 'ROUTINE' — in
+    // chat è una riga di sistema, mai un fumetto dell'utente
+    expect(log[0]!.opts.initiator).toBe('ROUTINE')
     expect(log[0]!.opts.resume).toEqual({ entryId: 9 })
-    // fase 17c (C2): l'apertura della routine a schedule ha la sua bolla UI
+    // fase 17c (C2): l'apertura della routine a schedule ha la sua bolla UI;
+    // M2: meta.routineTitle per la riga «⏱ Routine «Backup»»
     expect(log[0]!.opts.extraMeta).toEqual({
-      ui: { id: 'open.routine', values: { title: 'Backup', prompt: 'fai il backup' } }
+      ui: { id: 'open.routine', values: { title: 'Backup', prompt: 'fai il backup' } },
+      routineTitle: 'Backup'
     })
   })
 
@@ -221,7 +226,8 @@ describe('makeJobRunner: routine-run', () => {
     expect(log[0]!.opts.externalEvent).toBe(true)
     // la bolla UI dice cosa è arrivato: il blocco grezzo NON è la bolla
     expect(log[0]!.opts.extraMeta).toEqual({
-      ui: { id: 'open.triggerEvent', values: { title: 'Posta', kind: 'newEmail', item: 'Fattura', withItem: 'yes' } }
+      ui: { id: 'open.triggerEvent', values: { title: 'Posta', kind: 'newEmail', item: 'Fattura', withItem: 'yes' } },
+      routineTitle: 'Posta'
     })
   })
 
@@ -237,7 +243,8 @@ describe('makeJobRunner: routine-run', () => {
     const log: Seen[] = []
     await makeJobRunner(db, fakeTurn(log))(job, emit)
     expect(log[0]!.opts.extraMeta).toEqual({
-      ui: { id: 'open.triggerEvent', values: { title: 'Rientri', kind: 'presenceReturn', withItem: 'no' } }
+      ui: { id: 'open.triggerEvent', values: { title: 'Rientri', kind: 'presenceReturn', withItem: 'no' } },
+      routineTitle: 'Rientri'
     })
   })
 
@@ -255,7 +262,9 @@ describe('makeJobRunner: routine-run', () => {
     await makeJobRunner(db, fakeTurn(log))(job, emit)
     expect(log[0]!.text).toContain('[routine "Vecchia": Webhook ricevuto]')
     expect(log[0]!.opts.externalEvent).toBe(true)
-    expect(log[0]!.opts.extraMeta).toBeUndefined()
+    // niente meta.ui (payload vecchio), ma M2 porta comunque initiator e titolo
+    expect(log[0]!.opts.initiator).toBe('ROUTINE')
+    expect(log[0]!.opts.extraMeta).toEqual({ routineTitle: 'Vecchia' })
   })
 })
 

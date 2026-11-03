@@ -5,6 +5,32 @@ pubblicata finisce nel corpo della GitHub Release (da cui l'app mostra il
 «cosa cambia» quando propone un aggiornamento). Formato: `## [x.y.z] — data`,
 sezioni H2 e un punto per riga.
 
+## [0.3.1001] — 2026-11-03
+
+Correzioni dal confronto con Rakazo e dalla prova d'installazione della
+0.3.1000.
+
+## Fixes
+
+- **Le email verso i server di posta aggiunti a mano partono davvero.** Se
+  colleghi un server che non è nel catalogo, ogni invio diventa comunque una
+  bozza che vedi prima di confermare; e se c'è un solo strumento d'invio per
+  quel canale, la bozza sa già come usarlo. Prima l'email restava ferma e
+  l'errore arrivava solo al clic su Invia.
+- **I messaggi automatici non passano più per tuoi.** Il giro che il bot fa
+  al tuo rientro e le routine programmate compaiono in chat come piccole
+  righe di sistema («⏱ Routine «Backup»», «Al tuo rientro»), non come se li
+  avessi scritti tu.
+- **Una routine che chiedi tu nasce con un solo consenso.** Prima il bot la
+  creava in pausa e poi serviva un'altra conferma per attivarla; adesso una
+  sola scheda ti mostra nome, orario e prompt, e approvando la routine parte.
+- **Le correzioni a metà lavoro arrivano subito.** Se scrivi mentre un bot è
+  occupato, il messaggio entra nel lavoro in corso invece di aspettare la
+  fine in coda.
+- **Il pannello del bot non copre più la chat.** Con la finestra stretta il
+  pannello si affianca stringendo la barra laterale; quando proprio non c'è
+  spazio, diventa un foglio sopra la chat, con il resto oscurato.
+
 ## [0.3.1000] — 2026-11-02
 
 Homun torna: questa versione è il rinnovo completo di Homun 2, con la squadra

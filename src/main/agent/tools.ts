@@ -59,7 +59,7 @@ export const toolDefs: ToolDef[] = [
   },
   {
     name: 'draft_external',
-    description: "Prepares an outbound send (email, Slack, other) as a DRAFT with Send/Discard/Edit buttons: the actual send happens ONLY if the user clicks Send. Outbound sends ALWAYS go through a draft.",
+    description: "Prepares an outbound send (email, Slack, other) as a DRAFT with Send/Discard/Edit buttons: the actual send happens ONLY if the user clicks Send. Outbound sends ALWAYS go through a draft. If a send tool exists for the channel, set `via` to it; the user clicks Send to execute it.",
     parameters: {
       type: 'object',
       properties: {
@@ -69,7 +69,7 @@ export const toolDefs: ToolDef[] = [
         body: { type: 'string', description: 'Message body' },
         via: {
           type: 'object',
-          description: 'The send tool to execute on confirmation (optional: without it the draft is text only)',
+          description: 'The send tool to execute on confirmation (optional: without it, one is filled automatically when exactly one send tool exists for the channel)',
           properties: {
             tool: { type: 'string', description: 'Name of the MCP send tool (e.g. mcp__gmail__send_message)' },
             args: { type: 'object', description: 'Arguments of the send tool', additionalProperties: true }
@@ -517,7 +517,7 @@ export const toolDefs: ToolDef[] = [
   },
   {
     name: 'update_state',
-    description: "Modifies your state. target 'memory' → like update_memory (action write/update/delete). target 'routine' → action: create (fields name, description, prompt, 5-field cron schedule OR a schedule-type trigger, timezone, provenance 'template' if you create a template's routines; the routine is ALWAYS born paused: ask the user whether to activate it, activation requires their approval), update (id + fields to change), pause, resume, delete (id).",
+    description: "Modifies your state. target 'memory' → like update_memory (action write/update/delete). target 'routine' → action: create (fields name, description, prompt, 5-field cron schedule OR a schedule-type trigger, timezone, provenance 'template' if you create a template's routines, activate). When the user asked for the routine in this message, create it with activate: true (one approval card): approved, it is born active; otherwise it is born paused. Without activate the routine is ALWAYS born paused: ask the user whether to activate it, activation requires their approval. Also: update (id + fields to change), pause, resume, delete (id).",
     parameters: {
       type: 'object',
       properties: {
@@ -531,6 +531,7 @@ export const toolDefs: ToolDef[] = [
         trigger: { type: 'object', description: "As an alternative to cron: a schedule-type trigger ({type:'schedule', kind:'cron', cron} or {type:'schedule', kind:'every', every, at, mode}); schedule ONLY: email/webhook/poll are configured by the user", additionalProperties: true },
         provenance: { type: 'string', enum: ['template', 'agent'], description: "'template' ONLY in a template's kickstart turn (default and only other value: agent)" },
         timezone: { type: 'string', description: 'Schedule time zone (e.g. Europe/Rome)' },
+        activate: { type: 'boolean', description: 'create only: true to create the routine ACTIVE with ONE approval card (valid when the user asked for it in this message)' },
         content: { type: 'string', description: 'Content (for target memory)' },
         tier: { type: 'string', enum: ['core', 'log'], description: 'Memory tier (for target memory)' },
         scope: { type: 'string', enum: ['agent', 'user'], description: 'Memory scope (for target memory)' }
@@ -807,6 +808,13 @@ export interface ToolTurnContext {
   contaminated?: boolean
   /** fase 14 (punto 6): il turno è nato da un messaggio diretto dell'utente (solo una sua scrittura pulita toglie tainted). */
   userTurn?: boolean
+  /**
+   * M3 (fase 0.3.1001): il turno è aperto da un messaggio diretto dell'utente
+   * (niente initiator, non automatico, non contaminato) — solo qui
+   * update_state create activate:true crea la routine GIÀ ATTIVA dopo la
+   * card. Altrove activate è ignorato e la routine nasce in pausa.
+   */
+  routineActivateOk?: boolean
 }
 
 /** Azione su una routine (update_state target 'routine'): validazione cron con parseCron del daemon. */
@@ -848,15 +856,29 @@ async function runRoutineAction(agentId: string, input: Record<string, unknown>,
     // le routine dell'agente nascono SEMPRE in pausa; correzione A5: la
     // provenance 'template' è accettata SOLO nel turno di kickstart di un
     // template (initiator TEMPLATE_IMPORT) — da qualsiasi altro turno la
-    // routine è dell'agente
+    // routine è dell'agente.
+    // M3 (fase 0.3.1001): create activate:true nel turno DELL'UTENTE nasce
+    // GIÀ ATTIVA dopo la card di consenso informato (ask nel gate); le
+    // routine da template restano comunque in pausa, e fuori dal turno
+    // dell'utente activate è ignorato
     const provenance = input.provenance === 'template' && ctx.turnInitiator === 'TEMPLATE_IMPORT' ? 'template' : 'agent'
+    const activate = input.activate === true && ctx.routineActivateOk === true && provenance !== 'template'
     const r = createRoutine(agentId, name, prompt, schedule, {
-      enabled: 0, provenance,
+      enabled: activate ? 1 : 0, provenance,
       description: str(input.description) ?? '', timezone: str(input.timezone) ?? '',
       ...(trigger ? { trigger } : {})
     })
+    if (activate) {
+      return {
+        output: `Routine "${name}" created ACTIVE (id ${r.id}, provenance ${provenance}, schedule "${schedule || 'from trigger'}"): the user approved it with one card and it will run by itself.`,
+        meta: { automation: { action: 'create', id: r.id, name, active: true } }
+      }
+    }
+    const why = input.activate === true
+      ? ' (activate ignored: the routine was not requested in a direct message from the user, so it is born paused)'
+      : ''
     return {
-      output: `Routine "${name}" created PAUSED (id ${r.id}, provenance ${provenance}, schedule "${schedule || 'from trigger'}"): it will not run until the user activates it with resume.`,
+      output: `Routine "${name}" created PAUSED (id ${r.id}, provenance ${provenance}, schedule "${schedule || 'from trigger'}"): it will not run until the user activates it with resume.${why}`,
       meta: { automation: { action: 'create', id: r.id, name } }
     }
   }

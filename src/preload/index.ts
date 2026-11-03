@@ -77,6 +77,10 @@ const api: SandbotApi = {
   webSearchStatus: () => ipcRenderer.invoke('websearch:status'),
   getPermissions: () => ipcRenderer.invoke('permissions:get'),
   setPermissions: (cfg) => ipcRenderer.invoke('permissions:set', cfg),
+  // M4 (fase 0.3.1001): standing grant in elenco/revoca + «sempre le letture di <server>»
+  grantsList: () => ipcRenderer.invoke('grants:list'),
+  grantRevoke: (id) => ipcRenderer.invoke('grants:revoke', id),
+  grantServerReads: (slug) => ipcRenderer.invoke('permissions:grant-server-reads', slug),
   settingsGet: <T,>(key: string, fallback: T) => ipcRenderer.invoke('settings:get', key, fallback) as Promise<T>,
   settingsSet: (key, value) => ipcRenderer.invoke('settings:set', key, value),
   quickAsk: (agentId, question) => ipcRenderer.invoke('quickask', agentId, question),

@@ -179,6 +179,8 @@ export function teamOpenState(saved: string | null): boolean {
  * L'anteprima dell'ultimo messaggio visibile di un transcript: i send-message
  * (non trattenuti), i widget con la loro domanda, le bozze col destinatario e
  * i messaggi dell'utente (con "Tu:"). '' se non c'è niente di visibile.
+ * M2 (fase 0.3.1001): una entry utente CON un qualsiasi initiator è un avvio
+ * automatico (routine, rientro, risvegli) — non è "Tu:" e non si anteprime.
  */
 export function previewOf(entries: TranscriptEntry[]): SidebarPreview {
   for (let i = entries.length - 1; i >= 0; i--) {
@@ -193,7 +195,7 @@ export function previewOf(entries: TranscriptEntry[]): SidebarPreview {
     }
     if (e.kind === 'message' && e.role === 'user') {
       const initiator = (e.meta as { initiator?: string } | null)?.initiator
-      if (initiator === 'AGENT' || initiator === 'TEMPLATE_IMPORT' || initiator === 'TASK_DONE') continue
+      if (initiator !== undefined && initiator !== '') continue
       return msg`Tu: ${e.content}`
     }
   }

@@ -73,7 +73,8 @@ function open(): DatabaseSync {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       tool TEXT NOT NULL,
       target TEXT NOT NULL,
-      created_at INTEGER
+      created_at INTEGER,
+      scope TEXT
     );
     CREATE TABLE IF NOT EXISTS approvals (
       id TEXT PRIMARY KEY,
@@ -200,6 +201,10 @@ function open(): DatabaseSync {
   // sospeso per limite d'uso del provider) vive accanto all'esito
   const turnCols = db.prepare("SELECT name FROM pragma_table_info('group_turns')").all() as Array<{ name: string }>
   if (!turnCols.some((c) => c.name === 'reason')) db.exec('ALTER TABLE group_turns ADD COLUMN reason TEXT')
+  // fase 0.3.1001 (M4): lo scope delle grant (readOnly = solo le letture di
+  // un server MCP, ricontrollate sulle annotazioni a ogni chiamata)
+  const grantCols = db.prepare("SELECT name FROM pragma_table_info('grants')").all() as Array<{ name: string }>
+  if (!grantCols.some((c) => c.name === 'scope')) db.exec('ALTER TABLE grants ADD COLUMN scope TEXT')
   // fase 16b (S1.2): il flag del riepilogo di chiusura del coordinatore
   const groupMsgCols = db.prepare("SELECT name FROM pragma_table_info('group_messages')").all() as Array<{ name: string }>
   if (!groupMsgCols.some((c) => c.name === 'summary')) db.exec('ALTER TABLE group_messages ADD COLUMN summary INTEGER DEFAULT 0')
@@ -476,14 +481,20 @@ export function updateEntryMeta(id: number, meta: Record<string, unknown>): void
 }
 
 // ---- grants (standing grants come l'originale) ----
-export interface Grant { id: number; tool: string; target: string; createdAt: number }
+/**
+ * Fase 0.3.1001 (M4): scope di una grant. Assente/null = grant piena (il
+ * "Consenti sempre" di sempre); 'readOnly' = copre SOLO i tool con
+ * readOnlyHint true e destructiveHint diverso da true, controllati a OGNI
+ * chiamata sulle annotazioni correnti (grant `mcp__<server>__*`).
+ */
+export interface Grant { id: number; tool: string; target: string; createdAt: number; scope?: 'readOnly' | null }
 
 export function listGrants(): Grant[] {
   return db().prepare('SELECT * FROM grants').all() as unknown as Grant[]
 }
 
-export function addGrant(tool: string, target: string): void {
-  db().prepare('INSERT INTO grants(tool, target, created_at) VALUES(?,?,?)').run(tool, target, Date.now())
+export function addGrant(tool: string, target: string, scope?: 'readOnly'): void {
+  db().prepare('INSERT INTO grants(tool, target, created_at, scope) VALUES(?,?,?,?)').run(tool, target, Date.now(), scope ?? null)
 }
 
 export function removeGrant(id: number): void {

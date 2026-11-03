@@ -58,21 +58,28 @@ export default async function afterPack(context) {
     // lo si dice a schermo: verify-release approfondisce (A4.3)
     console.warn('after-pack: ElectronAsarIntegrity ASSENTE in Info.plist — il fuse di integrità resta spento')
   }
-  // K3 (fase rilascio — correzioni): Electron scrive di SUO le descrizioni
-  // NSMicrophoneUsageDescription / NSCameraUsageDescription di default
-  // nell'Info.plist dell'app («This app needs access to the microphone»),
-  // anche quando la config non le chiede. Nessuna funzione le usa e i
-  // permessi sono negati in A5: si tolgono DAL BUNDLE, prima della firma.
+  // K3 (fase rilascio — correzioni) + M7 (fase 0.3.1001): Electron scrive di
+  // SUO le descrizioni d'uso generiche in inglese nell'Info.plist («This app
+  // needs access to…»), anche quando la config non le chiede: microfono,
+  // camera, Bluetooth, AudioCapture… Nessuna funzione di Homun le usa e i
+  // permessi sono negati: si tolgono TUTTE DAL BUNDLE, prima della firma,
+  // tranne quelle dell'elenco esplicito (oggi vuoto: se una serve davvero,
+  // la si aggiunge qui e la si motiva nel REPORT). verify-release fallisce
+  // se nel plist resta una NS*UsageDescription fuori elenco.
   {
+    const ALLOWED_USAGE_KEYS = new Set()
     const infoPath = path.join(resources, '..', 'Info.plist')
     const before = await readFile(infoPath, 'utf8')
-    const cleaned = before
-      .replace(/\s*<key>NSMicrophoneUsageDescription<\/key>\s*<string>[^<]*<\/string>/g, '')
-      .replace(/\s*<key>NSCameraUsageDescription<\/key>\s*<string>[^<]*<\/string>/g, '')
+    const removed = []
+    const cleaned = before.replace(/\s*<key>(NS[A-Za-z]+UsageDescription)<\/key>\s*<string>[^<]*<\/string>/g, (_m, key) => {
+      if (ALLOWED_USAGE_KEYS.has(key)) return _m
+      removed.push(key)
+      return ''
+    })
     if (cleaned !== before) {
       const { writeFile } = await import('node:fs/promises')
       await writeFile(infoPath, cleaned)
-      console.log('after-pack: tolte le descrizioni microfono/camera di default di Electron (K3)')
+      console.log(`after-pack: tolte le descrizioni d'uso di default di Electron (K3+M7): ${removed.join(', ')}`)
     }
   }
   await flipFuses(electronBinaryPath(context), {

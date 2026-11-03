@@ -44,27 +44,41 @@ export interface LayoutResult {
 }
 
 /**
- * Le regole, in ordine. 1) Barra: rotaia se l'utente l'ha chiusa o se la
- * finestra scende sotto AUTO_RAIL_BELOW (la preferenza NON si tocca: ri-
- * allargando la finestra la barra torna com'era). 2) Pannello: largo quanto
- * vuole se la chat resta ≥ CHAT_MIN; sulla scheda Computer prova a stringerlo
- * fino a PANEL_WIDE_MIN; altrimenti overlay (galleggia sopra la chat, largo
- * min(voluta, finestra − barra − 24), non spinge la chat). Per costruzione
- * barra + pannello docked + CHAT_MIN non superano mai la finestra.
+ * Le regole, in ordine (M6, fase 0.3.1001 — mai più testo leggibile coperto a
+ * metà dal pannello). 1) Barra: rotaia se l'utente l'ha chiusa o se la
+ * finestra scende sotto AUTO_RAIL_BELOW (la preferenza NON si tocca). 2)
+ * Pannello DOCKED, in questo ordine: alla sua larghezza con la barra com'è;
+ * sulla scheda Computer stretto fino a PANEL_WIDE_MIN; con la barra a ROTAIA
+ * TEMPORANEA (preferenza intatta: ri-allargando la finestra la barra torna
+ * com'era), di nuovo alla sua larghezza e poi stretto. 3) Solo allora
+ * OVERLAY: un vero foglio sovrapposto (velo sulla chat, Esc e clic sul velo
+ * lo chiudono, aria-modal) — non un pannello che copre il testo di lato.
+ * Per costruzione barra + pannello docked + CHAT_MIN non superano mai la
+ * finestra.
  */
 export function layoutFor({ windowWidth, sidebarCollapsedByUser, sidebarWidthPref, panelOpen, panelTab }: LayoutInput): LayoutResult {
-  const rail = sidebarCollapsedByUser || windowWidth < AUTO_RAIL_BELOW
-  const sidebarWidth = rail ? RAIL : Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, sidebarWidthPref))
-  const sidebar: LayoutResult['sidebar'] = rail ? 'rail' : 'full'
-  if (!panelOpen) return { sidebar, sidebarWidth, panel: 'hidden', panelWidth: 0 }
+  const railByPref = sidebarCollapsedByUser || windowWidth < AUTO_RAIL_BELOW
+  const fullSidebarWidth = railByPref ? RAIL : Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, sidebarWidthPref))
+  const sidebarByPref: LayoutResult['sidebar'] = railByPref ? 'rail' : 'full'
+  if (!panelOpen) return { sidebar: sidebarByPref, sidebarWidth: fullSidebarWidth, panel: 'hidden', panelWidth: 0 }
   const wanted = panelTab === 'computer' ? PANEL_WIDE : PANEL
-  if (windowWidth - sidebarWidth - wanted >= CHAT_MIN) {
-    return { sidebar, sidebarWidth, panel: 'docked', panelWidth: wanted }
+  /** Il pannello docked con QUESTA larghezza di barra: la sua larghezza, o null. */
+  const dockedWidth = (sidebarWidth: number): number | null => {
+    if (windowWidth - sidebarWidth - wanted >= CHAT_MIN) return wanted
+    if (panelTab === 'computer' && windowWidth - sidebarWidth - PANEL_WIDE_MIN >= CHAT_MIN) {
+      return Math.max(PANEL_WIDE_MIN, Math.min(wanted, windowWidth - sidebarWidth - CHAT_MIN))
+    }
+    return null
   }
-  if (panelTab === 'computer' && windowWidth - sidebarWidth - PANEL_WIDE_MIN >= CHAT_MIN) {
-    return { sidebar, sidebarWidth, panel: 'docked', panelWidth: windowWidth - sidebarWidth - CHAT_MIN }
+  const withFull = dockedWidth(fullSidebarWidth)
+  if (withFull !== null) return { sidebar: sidebarByPref, sidebarWidth: fullSidebarWidth, panel: 'docked', panelWidth: withFull }
+  // barra a rotaia TEMPORARIA (solo se la preferenza la voleva piena): il
+  // pannello resta accanto alla chat invece di coprirla
+  if (!railByPref) {
+    const withRail = dockedWidth(RAIL)
+    if (withRail !== null) return { sidebar: 'rail', sidebarWidth: RAIL, panel: 'docked', panelWidth: withRail }
   }
-  return { sidebar, sidebarWidth, panel: 'overlay', panelWidth: Math.max(0, Math.min(wanted, windowWidth - sidebarWidth - 24)) }
+  return { sidebar: sidebarByPref, sidebarWidth: fullSidebarWidth, panel: 'overlay', panelWidth: Math.max(0, Math.min(wanted, windowWidth - fullSidebarWidth - 24)) }
 }
 
 /**

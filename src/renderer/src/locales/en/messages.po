@@ -53,9 +53,22 @@ msgstr "— provider —"
 msgid "— provider · modello —"
 msgstr "— provider · model —"
 
+#. placeholder {0}: st.timezone
+#: src/renderer/src/components/ApprovalCard.tsx
+msgid ", fuso {0}"
+msgstr ", {0} time zone"
+
 #: src/renderer/src/components/LibraryPanel.tsx
 msgid "…grafico…"
 msgstr "…chart…"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "«Consenti sempre» dati nelle card. Le letture di un server valgono solo per i tool che restano dichiarati in sola lettura."
+msgstr "\"Always allow\" choices made on cards. A server's reads only cover tools that stay declared read-only."
+
+#: src/renderer/src/components/Settings.tsx
+msgid "(nessun consenso salvato)"
+msgstr "(no saved consents)"
 
 #: src/renderer/src/components/DraftCard.tsx
 msgid "(nessun destinatario)"
@@ -584,6 +597,10 @@ msgstr "At work: the child's approval cards appear here."
 msgid "Al massimo 20 azioni approvate per turno; un dubbio del revisore diventa sempre una card."
 msgstr "At most 20 actions approved per turn; any reviewer doubt always becomes a card."
 
+#: src/renderer/src/lib/opening-rows.ts
+msgid "Al tuo rientro"
+msgstr "When you came back"
+
 #: src/renderer/src/components/Settings.tsx
 msgid "All'uscita trovi l'URL con il token da copiare: qualunque sistema può far scattare la routine con un POST."
 msgstr "On save you get the URL with the token to copy: any system can trigger the routine with a POST."
@@ -693,6 +710,10 @@ msgstr "Apps"
 #: src/renderer/src/components/Settings.tsx
 msgid "App e skill"
 msgstr "Apps and skills"
+
+#: src/renderer/src/components/ApprovalCard.tsx
+msgid "Approvata, la routine nasce attiva e partirà da sola."
+msgstr "Approved, the routine is born active and will run by itself."
 
 #. placeholder {0}: String(entry.meta?.ruleMatched ?? '')
 #: src/renderer/src/components/ApprovalCard.tsx
@@ -880,6 +901,10 @@ msgstr "invalid avatar: family \"{family}\" (the 5 possible: {families})"
 #: src/renderer/src/components/Settings.tsx
 msgid "Avvia all'accesso"
 msgstr "Start at login"
+
+#: src/renderer/src/lib/opening-rows.ts
+msgid "Avvio automatico"
+msgstr "Automatic start"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "avvisa"
@@ -1403,6 +1428,10 @@ msgstr "Delivery and presence"
 msgid "Consegnato"
 msgstr "Delivered"
 
+#: src/renderer/src/components/Settings.tsx
+msgid "Consensi salvati"
+msgstr "Saved consents"
+
 #: src/renderer/src/components/ApprovalCard.tsx
 #: src/renderer/src/components/LibraryCards.tsx
 msgid "Consenti"
@@ -1411,6 +1440,11 @@ msgstr "Allow"
 #: src/renderer/src/components/Settings.tsx
 msgid "Consenti sempre"
 msgstr "Always allow"
+
+#. placeholder {0}: mcpServerRead.name ?? mcpServerRead.slug
+#: src/renderer/src/components/ApprovalCard.tsx
+msgid "Consenti sempre le letture di {0}"
+msgstr "Always allow reads from {0}"
 
 #: src/renderer/src/components/LibraryCards.tsx
 msgid "Consentito"
@@ -1525,6 +1559,11 @@ msgstr "Create team"
 #: src/renderer/src/components/ApprovalCard.tsx
 msgid "Crea una regola"
 msgstr "Create a rule"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "approval.usCreateActive"
+msgstr "create the routine \"{title}\" ACTIVE: it will run by itself on its schedule — prompt: {preview}"
 
 #: src/renderer/src/components/BotDialogs.tsx
 msgid "Creatura"
@@ -2662,6 +2701,10 @@ msgid "Le concessioni \"Sempre per questo sito\" del fill dei login: il bot comp
 msgstr "The \"Always for this site\" grants for login fills: the bot fills THAT login on THAT origin without asking every time. Revocable one by one; generic grants don't exist."
 
 #: src/renderer/src/components/ApprovalCard.tsx
+msgid "Le letture di questo server non chiederanno più (solo i tool dichiarati in sola lettura)"
+msgstr "Reads from this server will not ask again (only tools declared read-only)"
+
+#: src/renderer/src/components/ApprovalCard.tsx
 msgid "Le modifiche di automazione chiedono ogni volta"
 msgstr "Automation changes ask every time"
 
@@ -2697,6 +2740,11 @@ msgstr "reads a file…"
 #: src/renderer/src/lib/activity.ts
 msgid "legge una pagina web…"
 msgstr "reads a web page…"
+
+#. placeholder {0}: g.tool.slice(5, -3)
+#: src/renderer/src/components/Settings.tsx
+msgid "Letture di {0}"
+msgstr "Reads from {0}"
 
 #: src/renderer/src/components/LibraryPanel.tsx
 #: src/renderer/src/components/Sidebar.tsx
@@ -3122,6 +3170,10 @@ msgstr "No skills: ask the bot to create one with update_skill."
 msgid "Nessuna skill: i bot le creano in chat con update_skill."
 msgstr "No skills: bots create them in chat with update_skill."
 
+#: src/renderer/src/components/DraftCard.tsx
+msgid "Nessuno strumento d'invio per questo canale: copia il testo"
+msgstr "No send tool for this channel: copy the text"
+
 #: src/renderer/src/components/ui/ModelPicker.tsx
 msgid "niente tool"
 msgstr "no tools"
@@ -3152,6 +3204,11 @@ msgstr "Name (e.g. My gateway)"
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Nome (es. weather)"
 msgstr "Name (e.g. weather)"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "rpc.invalidServerSlug"
+msgstr "Invalid server name"
 
 #: src/renderer/src/components/BotDialogs.tsx
 msgid "Nome della squadra"
@@ -3388,6 +3445,10 @@ msgstr "Origins https://… (comma separated)"
 msgid "owner/repo di GitHub oppure URL git https"
 msgstr "GitHub owner/repo or https git URL"
 
+#: src/renderer/src/components/RightPanel.tsx
+msgid "Pannello del bot"
+msgstr "Bot panel"
+
 #: src/renderer/src/components/Settings.tsx
 msgid "parziale"
 msgstr "partial"
@@ -3470,6 +3531,10 @@ msgstr "Path outside the bot's computer."
 msgid "perso"
 msgstr "lost"
 
+#: src/renderer/src/components/DraftCard.tsx
+msgid "Più strumenti d'invio per questo canale: chiedi al bot di sceglierne uno"
+msgstr "Multiple send tools for this channel: ask the bot to pick one"
+
 #: src/renderer/src/components/BotDialogs.tsx
 msgid "Pixel"
 msgstr "Pixel"
@@ -3521,6 +3586,10 @@ msgstr "default"
 #: src/renderer/src/components/ui/ModelPicker.tsx
 msgid "Predefinito"
 msgstr "Default"
+
+#: src/renderer/src/components/ComputerPanel.tsx
+msgid "Prefisso di prova non valido: correggi SANDBOT_TEST_BOX_PREFIX (deve partire per «sbtest») o toglierla, poi riavvia."
+msgstr "Invalid test prefix: fix SANDBOT_TEST_BOX_PREFIX (it must start with \"sbtest\") or remove it, then restart."
 
 #: src/renderer/src/lib/activity.ts
 msgid "prende nota…"
@@ -3817,6 +3886,10 @@ msgstr "reviewer unavailable: {error}"
 msgid "revoca"
 msgstr "revoke"
 
+#: src/renderer/src/components/Settings.tsx
+msgid "Revoca"
+msgstr "Revoke"
+
 #: src/renderer/src/components/ComputerTerminal.tsx
 msgid "Riapri"
 msgstr "Reopen"
@@ -3972,6 +4045,7 @@ msgstr "routine"
 #: src/renderer/src/components/ActivityPanel.tsx
 #: src/renderer/src/components/RightPanel.tsx
 #: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/lib/opening-rows.ts
 msgid "Routine"
 msgstr "Routines"
 
@@ -3984,6 +4058,10 @@ msgstr "Routine \"{title}\" started: {kind, select, newEmail {new email} newItem
 #: src/shared/ui-messages.ts
 msgid "notice.routineSkipped"
 msgstr "Routine \"{title}\" skipped: the agent is busy."
+
+#: src/renderer/src/lib/opening-rows.ts
+msgid "Routine «{title}»"
+msgstr "Routine \"{title}\""
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -3999,6 +4077,11 @@ msgstr "Routine activated: {name}"
 #: src/shared/ui-messages.ts
 msgid "event.routineCreate"
 msgstr "Routine created (paused): {name}"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "event.routineCreateActive"
+msgstr "Routine created ACTIVE: {name}"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts

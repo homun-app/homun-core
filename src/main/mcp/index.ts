@@ -414,10 +414,10 @@ export function toolNameToOriginal(fullName: string): string {
  */
 export function annotationsFor(
   fullName: string
-): { annotations: McpAnnotations | undefined; catalogServer: boolean } | undefined {
+): { annotations: McpAnnotations | undefined; catalogServer: boolean; serverName?: string } | undefined {
   for (const c of cache.values()) {
     const t = c.tools.find((x) => x.def.name === fullName)
-    if (t) return { annotations: t.annotations, catalogServer: !!c.config.catalogId }
+    if (t) return { annotations: t.annotations, catalogServer: !!c.config.catalogId, serverName: c.config.name }
   }
   return undefined
 }

@@ -48,17 +48,21 @@ import { UI } from '../shared/ui-messages'
 import { UiError } from '../shared/ui-text'
 // fase rilascio (A7): lo stato di docker per la UI (percorso risolto, senza spawn)
 import { isToolResolved, resolveTool, invalidateToolCache } from '../main/tool-paths'
+// M10 (fase 0.3.1001): prefisso dei nomi del box di prova non valido → riga nella UI
+import { INVALID_TEST_BOX_PREFIX } from '../main/sandbox/docker-argv'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-function dockerToolStatus(): { installed: boolean; running: boolean; path: string } {
+function dockerToolStatus(): { installed: boolean; running: boolean; path: string; testPrefixInvalid: boolean } {
   const installed = isToolResolved('docker')
   const home = homedir()
   const socket = Boolean(process.env.DOCKER_HOST) ||
     existsSync('/var/run/docker.sock') ||
     existsSync(join(home, '.docker', 'run', 'docker.sock'))
-  return { installed, running: installed && socket, path: resolveTool('docker') }
+  // M10: il prefisso dei nomi del box di prova, se PRESENTE e non valido,
+  // compare come riga nella UI (la sandbox non parte)
+  return { installed, running: installed && socket, path: resolveTool('docker'), testPrefixInvalid: INVALID_TEST_BOX_PREFIX !== null }
 }
 import type { UiText } from '../shared/types'
 
@@ -424,9 +428,12 @@ export function buildApiMethods(
       }
       // D1 (difesa in profondità): si eseguono SOLO tool di invio esterno,
       // anche per le bozze salvate nel DB prima della correzione — il click su
-      // Invia non può mai eseguire un tool arbitrario lasciato dal modello
+      // Invia non può mai eseguire un tool arbitrario lasciato dal modello.
+      // Fase 0.3.1001 (M1): lo STESSO classificatore del loop (annotazioni +
+      // nome, cfg come sovrascrittura), non più il solo elenco fisso — una
+      // bozza con via mcp__ufficio__send_email si può davvero inviare
       const externalCfg = store.getSetting<ExternalSendConfig>('externalSendTools', DEFAULT_EXTERNAL_SEND_TOOLS)
-      if (!isExternalSend(via.tool, externalCfg)) {
+      if (!isExternalSend(via.tool, permissions.mcpAnnotationsOf(via.tool), externalCfg)) {
         notice(ui(UI.rpcDraftViaRejected, { tool: via.tool }))
         return { ok: false }
       }
@@ -1506,6 +1513,26 @@ export function buildApiMethods(
     // ---- permessi & impostazioni ----
     'permissions:get': () => store.getPermissions(),
     'permissions:set': ([cfg]) => store.setPermissions(cfg as Parameters<typeof store.setPermissions>[0]),
+    // M4 (fase 0.3.1001): le standing grant («Consenti sempre» delle card) si
+    // vedono e si revocano da Impostazioni → Approvazioni
+    'grants:list': () => store.listGrants(),
+    'grants:revoke': ([id]) => {
+      store.removeGrant(Number(id))
+      return { ok: true }
+    },
+    /**
+     * M4: «Consenti sempre le letture di <server>» dalla card di un tool MCP
+     * con readOnlyHint true — grant `mcp__<server>__*` scope 'readOnly',
+     * ricontrollata sulle annotazioni a OGNI chiamata dal gate.
+     */
+    'permissions:grant-server-reads': ([slug]) => {
+      const serverSlug = String(slug ?? '')
+      if (!/^[a-z0-9-]+$/.test(serverSlug)) throw uiError(UI.rpcInvalidServerSlug)
+      if (!store.listGrants().some((g) => g.tool === `mcp__${serverSlug}__*` && g.scope === 'readOnly')) {
+        store.addGrant(`mcp__${serverSlug}__*`, '*', 'readOnly')
+      }
+      return { ok: true }
+    },
     'settings:get': ([key, fallback]) => store.getSetting(key as string, fallback),
     'settings:set': ([key, value]) => store.setSetting(key as string, value),
 

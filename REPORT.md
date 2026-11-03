@@ -1,3 +1,79 @@
+# REPORT FASE 0.3.1001
+
+**Data:** 2026-11-03 · **Base:** `main` @ c769084 (tag `v0.3.1000`) · **Commit:** `0.3.1001: correzioni dal confronto e dalla prova d'installazione` · **Tag:** `fase-0.3.1001`. Nessun push, nessun tag `v*`.
+**Verifica:** `typecheck` pulito · `vitest` **147 file / 2302 test verdi** (alla base erano 145 file / 2233: +69 test, quasi tutti nuovi di questa fase) · `build` verde · `i18n:extract` due estrazioni consecutive **identiche** (en 1134/1134, **0 mancanti**) · `release:local` (non firmato) + `release:verify` verde **col nuovo controllo M7** (zero `NS*UsageDescription` nel plist) · **sonda Electron 26/26** (v. sotto).
+Dati veri mai toccati: ogni avvio dell'app è corso con `env -i HOME=$HOME PATH=/usr/bin:/bin:/usr/sbin:/sbin SANDBOT_TEST_USER_DATA=<mkdtemp in /var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/> SANDBOT_TEST_FAKE_KEYCHAIN=<file> SANDBOT_TEST_FAKE_SAFESTORAGE=<file>`; mai Portachiavi/safeStorage veri, mai `keys.json` dell'utente, niente Docker, provider e MCP finti su 127.0.0.1/stdio, nessuna rete reale. **L'eval non è stato lanciato** (vincolo della fase).
+
+## Sonda Electron (build di sviluppo, dati temporanei) — 26/26 OK
+
+`node scripts/fase-0.3.1001-probe.mjs` (riferibile così in futuro): lancia l'app reale da `out/` con l'env di prova qui sopra, il provider finto openai-compatible su 127.0.0.1 (risposte a script) e il server MCP **manuale** «ufficio» (`scripts/fake-ufficio-mcp.mjs`, stdio: `send_email` + `list_emails` readOnly). Il daemon accetta una sola connessione UI: la sonda pilota il renderer via CDP usando il **bridge vero** dell'app (`window.sandbot`). Risultati: M1a–e, M2a–e, M3a–d, M5a–d, M6a–d, M8a–b tutti OK. Catture in `docs/catture/0.3.1001/`: `m6-915-overlay.png`, `m6-915-chiuso.png`, `m6-1100-computer.png`, `m8-1440-chiaro/scuro.png`, `m8-900-chiaro/scuro.png`.
+Nota M6 (misura dal vivo): la finestra fisica restava 1200 px (Electron non espone `Browser.setWindowBounds` su CDP), quindi la sonda emula il **viewport** a 915/1100/900/1440 (`Emulation.setDeviceMetricsOverride`): il layout decide su `window.innerWidth`, che l'emulazione riporta davvero — le catture mostrano il layout alla larghezza voluta. A 915 il foglio sovrapposto copre il testo col velo (come da progetto: `elementFromPoint` sul bordo destro della bolla dà il contenuto del pannello), il **clic sul velo chiude** e lo stesso punto torna a dare la **chat**; a 1100 + Computer la barra va a rotaia e il pannello è **docked** (position relative, bordo destro a 1100): lo stesso punto dà sempre la chat.
+
+## M1 — Invii verso i server MCP aggiunti a mano (grave)
+
+**Dove:** `src/main/agent/external-send.ts` (classificatore per **annotazioni e nome** + `autoViaForChannel`/`channelForTool`/`sendHint`), `src/main/agent/loop.ts` (classificatore con annotazioni correnti via `permissions.mcpAnnotationsOf`, candidati `sendCandidates` del turno, via automatica in `draft_external`, tool-result estesi), `src/main/agent/permissions.ts` (`mcpAnnotationsOf`), `src/daemon/api.ts` (`draft:send` usa lo stesso classificatore), `src/shared/types.ts` (`DraftSendHint`/`sendHint`), `src/renderer/src/components/DraftCard.tsx` (riga visibile «Nessuno strumento d'invio per questo canale: copia il testo» / «Più strumenti d'invio…»).
+**Regole:** config = sovrascrittura esplicita; `readOnlyHint: true` **esclude** sempre; altrimenti espressione di invio sul nome (verbi `send/reply/forward/post/publish/share/invite/notify` in testa, `send/reply/forward/post` come segmento interno — copre `gmail_send_message`/`slack_send_message`; extra `send_draft`, `create_message`, `chat_postMessage`). Canale dal server e, se «other», dal nome (`email|mail` → email). `draft_external` senza `via`: con **esattamente un** invio per canale la `via` si compila dal suo `inputSchema` (TO/SUBJECT/BODY_KEYS al contrario, tipi rispettati); `required` senza valore → niente via + riga in card; più candidati → riga in card e tool-result con l'elenco.
+**Test:** puri in `src/main/agent/__tests__/external-send.test.ts` (nomi: `send_email`, `gmail_send_message`, `reply`, `slack_send_message`, `post_message` → invio; `list_emails`, `read_email`, `search`, `create_event`, `send_email` con `readOnlyHint: true` → non invio; autoVia: unico/pick/no-tool/missing-required, canale dal nome); loop in `src/main/agent/__tests__/loop.test.ts` (chiamata diretta a `mcp__ufficio__send_email` → bozza con via e tool mai eseguito; `draft_external` senza via → via automatica; senza invii → `sendHint: 'no-tool'`; `readOnlyHint: true` → gate normale, nessuna bozza); daemon in `src/daemon/__tests__/draft-actions.test.ts` (`draft:send` su via `mcp__ufficio__send_email` fuori config → **una** esecuzione con gli argomenti mostrati; via non invio e readOnly → rifiutati). Sonda: M1a–e (il clic su Invia → **1** chiamata all'MCP finto).
+
+## M2 — I messaggi automatici come righe di sistema
+
+**Dove:** `src/daemon/run-job.ts` (routine → `initiator: 'ROUTINE'` + `routineTitle` in meta), `src/renderer/src/lib/opening-rows.ts` (nuovo, puro: `openingRowFor`), `src/renderer/src/components/Chat.tsx` (regola rovesciata: entry utente CON initiator → riga di sistema breve, testo del modello in `<details>` chiuso; `ROUTINE` → «⏱ Routine «titolo»», `LOOK_AROUND` → «Al tuo rientro», altri → «Avvio automatico»; AGENT/TEMPLATE_IMPORT/TASK_DONE come prima), `src/renderer/src/sidebar-utils.ts` (anteprima: ogni initiator salta «Tu:»). TeamChat usa il proprio rendering dei messaggi di squadra (nessuna entry di transcript): niente da cambiare lì.
+**Test:** `src/renderer/src/__tests__/opening-rows.test.ts` (tabella per ogni initiator + `undefined` → fumetto utente, e snapshot inline del modello della riga — il repo non ha infrastruttura DOM di test, lo snapshot è del modello puro che Chat rende punto per punto); `sidebar-utils.test.ts` (ogni initiator salta l'anteprima); `src/daemon/__tests__/run-job.test.ts` (initiator/routineTitle ai turni di routine). Sonda: M2a–e (LOOK_AROUND e routine come righe in chat, prompt interno mai a fumetto).
+
+## M3 — Routine con un solo consenso
+
+**Dove:** `src/main/agent/update-state.ts` (`updateStateVerdict` con `userDirectTurn`: `create` + `activate: true` → ask con `approval.usCreateActive`), `src/main/agent/permissions.ts` (`check(..., turn)`: `userDirectTurn` in più), `src/main/agent/loop.ts` (stesso criterio al gate e in `executeTool` → `routineActivateOk`), `src/main/agent/tools.ts` (`runRoutineAction`: `activate` crea **attiva** solo con `routineActivateOk` e provenance ≠ template; result «created ACTIVE»/«activate ignored»), `src/renderer/src/components/ApprovalCard.tsx` (card: fuso orario sulla schedule e riga «Approvata, la routine nasce attiva e partirà da sola»), `src/shared/ui-messages.ts` (`approval.usCreateActive`, `event.routineCreateActive`). Negata → non nasce (il gate non esegue). Niente «Consenti sempre» su update_state (invariato).
+**Test:** puri/esecuzione in `src/main/agent/__tests__/update-state.test.ts` (ask nel turno utente, allow altrove, senza activate resta allow; attiva/pausa/template all'esecuzione); loop in `loop.test.ts` (ask → allow → enabled 1 con UNA card; deny → nessuna riga; turno automatico e contaminato → pausa e result che lo dice). Sonda: M3a–d (una card, routine attiva, prima esecuzione pianificata).
+
+## M4 — Letture di un server MCP manuale: grant per server
+
+**Dove:** `src/main/agent/permission-rules.ts` (purI: `mcpServerReadGrantKey`, `serverReadGrantCovers`), `src/main/agent/permissions.ts` (gate: grant `mcp__<server>__*` scope `readOnly` copre solo tool con `readOnlyHint === true && destructiveHint !== true` **controllato a ogni chiamata**; ask con `mcpServerRead` per la card), `src/main/mcp/index.ts` (`serverName` in `annotationsFor`), `src/main/store/db.ts` (colonna `scope` su `grants` + migrazione), `src/daemon/api.ts` + `src/main/ipc.ts` + preload (`grants:list`, `grants:revoke`, `permissions:grant-server-reads`), `src/renderer/src/components/ApprovalCard.tsx` (azione «Consenti sempre le letture di <server>» nel menu), `Settings.tsx` (Approvazioni → «Consensi salvati»: elenco e revoca, le readOnly etichettate «Letture di <server>»).
+**Test:** puri in `src/main/agent/__tests__/permission-rules.test.ts` (copre la lettura; non la scrittura; non un altro server; non copre più dopo il cambio di annotazione; scope ≠ readOnly mai).
+
+## M5 — Cambio d'idea a metà turno
+
+**Dove:** `src/main/agent/loop.ts` (`midTurnDeliveries` + `deliverToRunningTurn`, presa in consegna al confine di passo con `completeJob` del job, consegne buttate alla chiusura del turno), `src/daemon/enqueue.ts` (messaggio diretto su agente occupato non fermo su card → consegna al turno in corso; notice «in coda (posizione N)» solo se resta davvero in coda). Nessuno stream troncato, nessuno strumento interrotto; supersede/risposte a widget/altri bot invariati.
+**Test:** loop in `loop.test.ts` (3 passi con provider finto: la chiamata 2 contiene il messaggio nuovo, job consumato, UNA sola entry utente; gara: turno finito prima del confine → consegna buttata, job resta in coda e il messaggio parte come turno nuovo senza doppioni; fermo su approval → nessuna consegna; agente libero → nessuna consegna). Sonda: M5a–d (UNA entry, nessuna notice «in coda», la 2ª chiamata al modello contiene la correzione, nessuna ripartenza).
+
+## M6 — Il pannello destro copre la chat
+
+**Dove:** `src/renderer/src/layout.ts` (nuovo ordine in `layoutFor`: pannello alla sua larghezza → stretto su Computer fino a `PANEL_WIDE_MIN` → **barra a rotaia temporanea** (preferenza intatta) e di nuovo i due tentativi → solo allora overlay), `src/renderer/src/components/RightPanel.tsx` (overlay = **foglio**: velo visibile `bg-foreground/25 backdrop-blur`, `role="dialog" aria-modal`, focus intrappolato col Tab, primo controllo a fuoco, Esc/clic sul velo chiudono — c'era già Esc e il clic, ora con velo visibile e focus).
+**Test:** `src/renderer/src/__tests__/layout.test.ts` (tabella della spec 820/915/1000/1100/1200/1440 × Profilo/Computer × barra 256/420, invarianti sulla matrice; 1100 + Computer + barra piena → rotaia + docked 504). Sonda: M6a–d + catture (v. sopra).
+
+## M7 — Info.plist senza descrizioni predefinite
+
+**Dove:** `scripts/after-pack.mjs` (rimozione generica di OGNI `NS*UsageDescription` fuori da un elenco esplicito — oggi **vuoto**; dalla 0.3.1000 rimuove microfono/camera, ora anche `NSAudioCaptureUsageDescription`, `NSBluetoothAlwaysUsageDescription`, `NSBluetoothPeripheralUsageDescription`), `scripts/verify-release.mjs` (**fallisce** con ogni `NS*UsageDescription` fuori elenco). Elencate dal plist della `release:local` della 0.3.1000 (le tre sopra erano tutto ciò che restava). Nessuna chiave consentita: non ne ho trovata una che serva (Homun non usa Bluetooth/audio/camera/microfono; i permessi sono negati in A5) — se in futuro una servirà, va aggiunta a `ALLOWED_USAGE_KEYS` e motivata qui.
+**Verifica:** `release:local` + `release:verify` verdi: log after-pack «tolte le descrizioni d'uso di default di Electron (K3+M7): NSAudioCapture…, NSBluetoothAlways…, NSBluetoothPeripheral…, NSCamera…, NSMicrophone…»; `grep -c UsageDescription` sul plist = 0.
+
+## M8 — Revisione delle approvazioni: stessa altezza
+
+**Dove:** nuovo `src/renderer/src/components/ui/select.tsx` (la select comune, gemella dell'`Input`: h-9, stesso padding/corpo), `Settings.tsx` `ReviewerModelRow` (Select + `ModelPicker size="md"`), `src/renderer/src/components/ui/ModelPicker.tsx (prop `size`: 'md' = h-9/text-sm, default 'sm' invariato).
+**Verifica:** sonda M8a–b (a 1440 e 900 selettore e campo h 36/36 px, top identico) + catture chiaro/scuro (`m8-1440-*.png`, `m8-900-*.png`).
+
+## M9 — dmg firmato e notarizzato (solo scrittura, verifica in CI)
+
+**Dove:** `package.json` → `build.dmg.sign: true`; `.github/workflows/build.yml` → solo nel ramo firmato (tag `v*` + certificato), dopo electron-builder: step **«Notarize and staple DMG»** con `xcrun notarytool submit <dmg> --wait` (stesse credenziali `APPLE_ID`/`APPLE_APP_SPECIFIC_PASSWORD`/`APPLE_TEAM_ID` della notarizzazione dell'app), `xcrun stapler staple <dmg>`, `spctl -a -t open --context context:primary-signature -v <dmg>` e **ricarica del dmg graffato** sulla draft release (`gh release upload --clobber`: electron-builder pubblica quello pre-graffaggio). I checksum (`release:checksums`) girano DOPO, quindi sono calcolati sul dmg graffato.
+**Non provabile qui** (niente build firmate). Il workflow l'ho fatto girare solo nel ragionamento. **Da controllare alla prima build firmata:** 1) `notarytool submit --wait` esce 0 con `status: Accepted` (id ricevuta nel log); 2) `stapler staple` esce 0 e `stapler validate <dmg>` passa; 3) `spctl -a -t open` dice `accepted, source=Notarized Developer ID`; 4) il dmg nella draft release è quello graffato (dimensione/hash = SHA256SUMS); 5) `latest-mac.yml` punta ancora allo **zip** e il suo hash non cambia (su mac l'update usa lo zip: `dmg.sign` tocca solo il dmg); 6) l'app dentro il dmg resta firmata/notarizzata/graffata come prima.
+
+## M10 — Prefisso del box di prova non valido: errore
+
+**Dove:** `src/main/sandbox/docker-argv.ts` (`testBoxPrefixState` pura: absent/valid/invalid; `INVALID_TEST_BOX_PREFIX`; `invalidTestBoxPrefixError` in inglese — finisce nei result che legge il modello), `src/main/sandbox/index.ts` (`ensureBoxContainer` rifiuta di partire), `src/daemon/runtime.ts` (errore chiaro nel log del daemon al boot), `src/daemon/api.ts` (`box:docker-status`/`retry` con `testPrefixInvalid`), `src/renderer/src/components/ComputerPanel.tsx` (riga «Prefisso di prova non valido…»).
+**Test:** puri in `src/main/sandbox/__tests__/test-box-prefix.test.ts` (stato absent/valid/invalid per `cfbox` e compagnie; `INVALID_TEST_BOX_PREFIX`; `ensureBoxContainer` rifiuta in docker e ignora in host; i nomi restano quelli dell'utente).
+
+## Versione e note
+
+- `package.json`/lock a **0.3.1001**; `CHANGELOG.md` con `## [0.3.1001]` (M1/M2/M3/M5/M6 in parole semplici); `docs/PROVA-INSTALLAZIONE.md`: la prova d'aggiornamento è la 0.3.1000 → 0.3.1001 (sezione 7, già predisposta, ora è la versione reale).
+
+## Righe dei testi per il modello cambiate (l'eval non è stato lanciato — decide l'utente)
+
+1. `src/main/agent/tools.ts` — descrizione di `draft_external`: aggiunta «If a send tool exists for the channel, set `via` to it; the user clicks Send to execute it.»
+2. `src/main/agent/tools.ts` — descrizione del parametro `via` di `draft_external`: ora «(optional: without it, one is filled automatically when exactly one send tool exists for the channel)».
+3. `src/main/agent/tools.ts` — descrizione di `update_state`: aggiunta «When the user asked for the routine in this message, create it with activate: true (one approval card): approved, it is born active; otherwise it is born paused.»
+4. `src/main/agent/tools.ts` — nuovo parametro `activate` di `update_state` («create only: true to create the routine ACTIVE with ONE approval card…»).
+5. Nuovi tool-result (inglese, visibili al modello, non prompt): «draft created with via … (chosen automatically…)», «text-only draft created: more than one send tool exists… (candidates: …)», «…requires arguments that the draft fields cannot fill…», «Routine "…" created ACTIVE (…): the user approved it with one card…», «…created PAUSED (…): … (activate ignored: the routine was not requested in a direct message from the user…)», e l'errore M10 «invalid SANDBOT_TEST_BOX_PREFIX…». (M5 non cambia testi fissi: il messaggio a metà turno entra nella storia come messaggio utente.)
+
+---
+
 # REPORT FASE RILASCIO — correzioni
 
 **Data:** 2026-11-02 · **Base:** `fase-rilascio` (c812143) · **Commit:** `rilascio: correzioni` · **Tag:** `fase-rilascio-correzioni`. Nessun push.

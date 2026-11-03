@@ -185,7 +185,10 @@ export function makeJobRunner(db: DatabaseSync, runTurnFn: RunTurnFn = runTurn) 
     // correzioni (D1): anche l'apertura con evento ha la sua bolla tradotta
     // (open.triggerEvent) — il blocco <evento> grezzo NON entra nella bolla.
     // Un payload vecchio SENZA kind non riceve meta.ui: mostra il content
-    // com'è (niente migrazione, niente crash)
+    // com'è (niente migrazione, niente crash).
+    // M2 (fase 0.3.1001): il turno di routine porta initiator 'ROUTINE' e il
+    // titolo in meta — in chat è una riga di sistema («⏱ Routine «titolo»»),
+    // mai un fumetto dell'utente
     const { ui, UI } = await import('../main/ui-language')
     const openingUi = !p.event
       ? ui(UI.openRoutine, { title: p.title, prompt: p.prompt })
@@ -198,9 +201,9 @@ export function makeJobRunner(db: DatabaseSync, runTurnFn: RunTurnFn = runTurn) 
         : null
     try {
       await runTurnFn(job.agent_id, text, emit, undefined, {
-        source: 'routine', title: p.title, ...opts, onTurnEntry,
+        source: 'routine', title: p.title, initiator: 'ROUTINE', ...opts, onTurnEntry,
         ...(p.event ? { externalEvent: true } : {}),
-        ...(openingUi ? { extraMeta: { ui: openingUi } } : {}),
+        extraMeta: { ...(openingUi ? { ui: openingUi } : {}), routineTitle: p.title },
         ...(route ? { route } : {})
       })
       endRoutineRun(db, runId, 'ok', null, Date.now())

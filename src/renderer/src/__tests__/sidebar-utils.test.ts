@@ -71,6 +71,19 @@ describe('fase 16 (U4): anteprima dell’ultimo messaggio visibile', () => {
     ]
     expect(resolve(previewOf(es))).toBe('Tu: mio')
   })
+  it('M2: OGNI initiator salta l’anteprima (routine, rientro, risvegli), non solo i tre di prima', () => {
+    const es = [
+      entry({ id: 1, kind: 'message', role: 'user', content: 'routine', meta: { initiator: 'ROUTINE', routineTitle: 'Backup' } }),
+      entry({ id: 2, kind: 'message', role: 'user', content: 'rientro', meta: { initiator: 'LOOK_AROUND' } }),
+      entry({ id: 3, kind: 'message', role: 'user', content: 'gruppo', meta: { initiator: 'GROUP_TURN' } }),
+      entry({ id: 4, kind: 'message', role: 'user', content: 'shell', meta: { initiator: 'SHELL_DONE' } }),
+      entry({ id: 5, kind: 'message', role: 'user', content: 'sottoagenti', meta: { initiator: 'SUBAGENTS_DONE' } }),
+      entry({ id: 6, kind: 'message', role: 'user', content: 'mio' })
+    ]
+    expect(resolve(previewOf(es))).toBe('Tu: mio')
+    const onlyAuto = es.slice(0, 5)
+    expect(resolve(previewOf(onlyAuto))).toBe('')
+  })
   it('i send-message trattenuti (outbox) e le card non fanno anteprima; il widget mostra la domanda', () => {
     const held = [entry({ id: 1, kind: 'send-message', role: 'assistant', content: 'in attesa', meta: { held: true, message: { type: 'text', text: 'in attesa' } } })]
     expect(resolve(previewOf(held))).toBe('')

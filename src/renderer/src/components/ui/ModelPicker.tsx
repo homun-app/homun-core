@@ -43,9 +43,15 @@ export interface ModelPickerProps {
   placeholder?: string
   disabled?: boolean
   className?: string
+  /**
+   * M8 (fase 0.3.1001): 'md' porta il campo a h-9 con text-sm, gemello della
+   * <select> comune (ui/select) — sulla stessa riga, stessa altezza e baseline.
+   * Default 'sm': l'aspetto compatto di sempre.
+   */
+  size?: 'sm' | 'md'
 }
 
-export function ModelPicker({ models, value, onChange, placeholder, disabled, className }: ModelPickerProps) {
+export function ModelPicker({ models, value, onChange, placeholder, disabled, className, size = 'sm' }: ModelPickerProps) {
   const { t } = useLingui()
   const [open, setOpen] = useState(false)
   // null = il campo mostra il valore scelto; stringa = l'utente sta cercando
@@ -90,7 +96,12 @@ export function ModelPicker({ models, value, onChange, placeholder, disabled, cl
         aria-controls={listId}
         aria-autocomplete="list"
         aria-activedescendant={open && filtered[hi] ? `${listId}-${hi}` : undefined}
-        className="w-full rounded-lg bg-muted px-2 py-1.5 text-xs outline-none disabled:opacity-40"
+        className={
+          size === 'md'
+            ? // M8: gemello della <select> comune (ui/select) — h-9, text-sm
+              'h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] disabled:opacity-50'
+            : 'w-full rounded-lg bg-muted px-2 py-1.5 text-xs outline-none disabled:opacity-40'
+        }
         disabled={disabled}
         placeholder={placeholder}
         value={text}

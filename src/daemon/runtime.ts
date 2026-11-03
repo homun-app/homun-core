@@ -141,6 +141,14 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
     setWebSearchKeyGetter(() => getConnectorsKey())
   }
 
+  // M10 (fase 0.3.1001): prefisso dei nomi del box di prova PRESENTE ma non
+  // valido → errore chiaro nel log del daemon fin dal boot (la sandbox non
+  // partirà mai coi nomi dell'utente; la riga Docker della UI lo ripete)
+  {
+    const { INVALID_TEST_BOX_PREFIX, invalidTestBoxPrefixError } = await import('../main/sandbox/docker-argv')
+    if (INVALID_TEST_BOX_PREFIX) console.error('[sandbotd]', invalidTestBoxPrefixError(INVALID_TEST_BOX_PREFIX))
+  }
+
   // fase 11 (punto 1): migrazione una tantum dei vecchi box (uno per agente)
   // nel box CONDIVISO — COPIA, niente cancellazioni; notice al bot principale
   // con cosa è stato migrato e dove restano i vecchi dati (la cancellazione

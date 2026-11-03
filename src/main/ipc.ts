@@ -85,6 +85,8 @@ export const DAEMON_RPC_CHANNELS = [
   // fase 15: stato dei provider di ricerca (sola lettura, per le Impostazioni)
   'websearch:status',
   'permissions:get', 'permissions:set', 'settings:get', 'settings:set',
+  // M4 (fase 0.3.1001): standing grant in elenco/revoca + «sempre le letture di <server>»
+  'grants:list', 'grants:revoke', 'permissions:grant-server-reads',
   // fase rilascio (A7): lo stato di docker per la UI (installato? avviato?)
   'box:docker-status', 'box:docker-retry',
   // fase 7: template dei bot (catalogo + creazione col kickstart)

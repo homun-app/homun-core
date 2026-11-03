@@ -170,6 +170,36 @@ export function mcpAnnotationMode(
 }
 
 /**
+ * Fase 0.3.1001 (M4): la chiave della grant «Consenti sempre le letture di
+ * <server>» — un grant per server, non per tool.
+ */
+export function mcpServerReadGrantKey(serverSlug: string): string {
+  return `mcp__${serverSlug}__*`
+}
+
+/**
+ * M4 (pura): una grant `mcp__<server>__*` con scope 'readOnly' copre QUESTO
+ * tool? Vale solo se:
+ * - la grant è di quel server (mcp__<altro>__* non copre);
+ * - lo scope è esattamente 'readOnly';
+ * - le annotazioni CORRENTI del tool dicono readOnlyHint true e
+ *   destructiveHint non true — il controllo è a OGNI chiamata: se il server
+ *   cambia l'annotazione, la grant non copre più quel tool.
+ */
+export function serverReadGrantCovers(
+  grantTool: string,
+  grantScope: string | null | undefined,
+  tool: string,
+  annotations: McpAnnotationsLike | undefined
+): boolean {
+  if (grantScope !== 'readOnly') return false
+  const parts = tool.split('__')
+  if (parts.length < 3 || parts[0] !== 'mcp') return false
+  if (grantTool !== mcpServerReadGrantKey(parts[1]!)) return false
+  return annotations?.readOnlyHint === true && annotations.destructiveHint !== true
+}
+
+/**
  * C5 (lettura file): il path sta dentro la cartella del bot? Funzione PURA:
  * il filesystem passa da parametro (realpath per neutralizzare ../ e i
  * symlink). Un path ancora inesistente resta al solo resolve (realpath della

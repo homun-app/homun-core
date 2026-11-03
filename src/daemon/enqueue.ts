@@ -11,7 +11,7 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { appendEntry, getEntries, updateAgent, updateEntryMeta } from '../main/store/db'
 import { activeJobForAgent, pendingUserMessages, enqueueJob, MAX_USER_MESSAGE_QUEUE, type Job } from '../main/store/jobs'
-import { emitLastEntry, supersedeIfPaused, dismissPendingWidgets } from '../main/agent/loop'
+import { emitLastEntry, supersedeIfPaused, dismissPendingWidgets, deliverToRunningTurn } from '../main/agent/loop'
 import { noteHumanText } from '../main/agent/user-language'
 // fase 17c (C2): le notice portano meta.ui e il content nella lingua dell'interfaccia
 import { uiLanguage, formatUi, ui } from '../main/ui-language'
@@ -56,13 +56,20 @@ export function enqueueUserMessage(
   if (respondedTo === undefined && findDismissibleWidgets(getEntries(agentId)).length) {
     dismissPendingWidgets(agentId, emit)
   }
+  // M5 (fase 0.3.1001): quando l'agente è occupato ma NON fermo su
+  // un'approval, un messaggio DIRETTO dell'utente si consegna al turno in
+  // corso (entra nella storia al confine di passo; il job qui sotto si
+  // consuma lì). La notice «in coda (posizione N)» resta solo quando il
+  // messaggio resta DAVVERO in coda.
+  let busyWithoutCard = false
   if (activeJobForAgent(db, agentId)) {
     // fase 3: l'agente è fermo su un'approval → il nuovo messaggio sostituisce
     // il turno (SUPERSEDED) e parte subito, non in coda
     if (supersedeIfPaused(agentId)) {
-      // il job in corso completa da solo (il controller è abortito): il
+      // il job in corso completa da solo (il controller è abortato): il
       // nuovo job viene reclamato al tick successivo del worker
     } else {
+      busyWithoutCard = true
       const waiting = pendingUserMessages(db, agentId)
       if (waiting >= MAX_QUEUE) {
         const full = ui(UI.queueFull)
@@ -70,9 +77,6 @@ export function enqueueUserMessage(
         emitLastEntry(agentId, emit)
         return null
       }
-      const queued = ui(UI.agentBusyQueued, { position: waiting + 1 })
-      appendEntry({ agentId, kind: 'notice', role: 'system', content: formatUi(queued, uiLanguage()), meta: { ui: queued } })
-      emitLastEntry(agentId, emit)
     }
   }
   const now = Date.now()
@@ -82,13 +86,27 @@ export function enqueueUserMessage(
   // fase 5: chi ha avviato il turno (es. CONNECTOR_CONNECTED dopo il click su
   // "Connetti" di una card offerta dal bot) — finisce in meta.initiator
   if (initiator) payload.initiator = initiator
-  return enqueueJob(db, {
+  const job = enqueueJob(db, {
     agentId,
     kind: 'user-message',
     payload,
     runAt: now,
     now
   })
+  if (busyWithoutCard) {
+    const directUserMessage = initiator === undefined && respondedTo === undefined
+    // M5: il job si consuma al confine di passo del turno in corso; se il
+    // turno finisse prima, la consegna si butta via e il job parte come
+    // turno nuovo (nessun messaggio perso né letto due volte)
+    if (directUserMessage && deliverToRunningTurn(agentId, { jobId: job.id, text, images })) {
+      return job
+    }
+    const waiting = pendingUserMessages(db, agentId)
+    const queued = ui(UI.agentBusyQueued, { position: waiting })
+    appendEntry({ agentId, kind: 'notice', role: 'system', content: formatUi(queued, uiLanguage()), meta: { ui: queued } })
+    emitLastEntry(agentId, emit)
+  }
+  return job
 }
 
 /**

@@ -86,6 +86,12 @@ export interface DraftExtraArg {
   value: string
 }
 
+/**
+ * Fase 0.3.1001 (M1): perché una bozza è senza via — riga visibile nella
+ * card, così l'utente lo scopre subito e non al clic su Invia.
+ */
+export type DraftSendHint = 'no-tool' | 'pick' | 'missing-required'
+
 export type SendMessagePayload =
   | { type: 'text'; text: string; urgent?: boolean }
   | {
@@ -110,6 +116,8 @@ export type SendMessagePayload =
       extraArgs?: DraftExtraArg[]
       /** D1: true se nessun argomento è mappato sul corpo: modifica del testo disabilitata, argomenti grezzi */
       bodyLocked?: true
+      /** M1: la bozza non ha una via e questo è il motivo (riga visibile in card) */
+      sendHint?: DraftSendHint
     }
   | {
       /** fase 5: offerta di connessione (funnel §3ter T2-T3) — il bottone "Connetti" è dell'utente */
@@ -685,6 +693,12 @@ export interface SandbotApi {
   // permessi
   getPermissions(): Promise<PermissionsConfig>
   setPermissions(cfg: PermissionsConfig): Promise<void>
+  /** M4 (fase 0.3.1001): le standing grant salvate («Consenti sempre» delle card) */
+  grantsList(): Promise<Array<{ id: number; tool: string; target: string; createdAt: number; scope?: 'readOnly' | null }>>
+  /** M4: revoca una standing grant da Impostazioni → Approvazioni */
+  grantRevoke(id: number): Promise<{ ok: boolean }>
+  /** M4: «Consenti sempre le letture di <server>» (grant mcp__<server>__* scope readOnly) */
+  grantServerReads(slug: string): Promise<{ ok: boolean }>
   // impostazioni generiche (fase 6: fuso orario, finestre di consegna, assenza, notifiche)
   settingsGet<T>(key: string, fallback: T): Promise<T>
   settingsSet(key: string, value: unknown): Promise<void>
@@ -848,8 +862,8 @@ export interface SandbotApi {
   setLaunchAtLogin(enabled: boolean): Promise<void>
   openLoginItemsSettings(): Promise<{ opened: boolean }>
   // fase rilascio (A7): stato di docker per la UI (installato? avviato?)
-  boxDockerStatus(): Promise<{ installed: boolean; running: boolean; path: string }>
-  boxDockerRetry(): Promise<{ installed: boolean; running: boolean; path: string }>
+  boxDockerStatus(): Promise<{ installed: boolean; running: boolean; path: string; testPrefixInvalid: boolean }>
+  boxDockerRetry(): Promise<{ installed: boolean; running: boolean; path: string; testPrefixInvalid: boolean }>
   // fase rilascio (A8): l'aggiornamento (main process)
   updaterStatus(): Promise<{ current: string; canUpdate: boolean }>
   updaterCheck(): Promise<{ current: string; available: boolean; version: string | null; error?: string }>

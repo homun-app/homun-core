@@ -35,6 +35,44 @@ describe('verdetto (puro)', () => {
     expect(updateStateVerdict({ target: 'routine', action: 'delete', id: 1 }, routine())).toEqual({ kind: 'allow' })
   })
 
+  // ---- M3 (fase 0.3.1001): create activate:true, un solo consenso informato ----
+
+  it('create activate:true nel turno DELL’UTENTE → ask con la card che dice che partirà da sola', () => {
+    const v = updateStateVerdict(
+      { target: 'routine', action: 'create', name: 'Backup', prompt: 'fai il backup', schedule: '0 9 * * *', timezone: 'Europe/Rome', activate: true },
+      null,
+      { userDirectTurn: true }
+    )
+    expect(v.kind).toBe('ask')
+    if (v.kind === 'ask') {
+      expect(v.reason).toContain('Backup')
+      expect(v.reason).toContain('ACTIVE')
+      expect(v.reason).toContain('Europe/Rome')
+      expect(v.reason).toContain('fai il backup')
+      expect(v.ui?.id).toBe('approval.usCreateActive')
+    }
+  })
+
+  it('create activate:true FUORI dal turno dell’utente → allow: nasce in pausa come oggi', () => {
+    expect(updateStateVerdict(
+      { target: 'routine', action: 'create', name: 'Backup', prompt: 'p', schedule: '0 9 * * *', activate: true },
+      null
+    )).toEqual({ kind: 'allow' })
+    expect(updateStateVerdict(
+      { target: 'routine', action: 'create', name: 'Backup', prompt: 'p', schedule: '0 9 * * *', activate: true },
+      null,
+      { userDirectTurn: false }
+    )).toEqual({ kind: 'allow' })
+  })
+
+  it('create SENZA activate resta allow anche nel turno dell’utente', () => {
+    expect(updateStateVerdict(
+      { target: 'routine', action: 'create', name: 'X', prompt: 'p', schedule: '0 9 * * *' },
+      null,
+      { userDirectTurn: true }
+    )).toEqual({ kind: 'allow' })
+  })
+
   it('resume → ask con nome, schedule in linguaggio naturale e prompt', () => {
     const r = routine()
     const v = updateStateVerdict({ target: 'routine', action: 'resume', id: r.id }, r)
@@ -94,6 +132,42 @@ describe('esecuzione (store reale)', () => {
     expect(output).toContain('"0 9 * * *"')
     expect(meta.automation).toBeUndefined()
     expect((await import('../../store/db')).listRoutines(AGENT)).toHaveLength(before)
+  })
+
+  // ---- M3 (fase 0.3.1001): create activate, esecuzione ----
+
+  it('create activate:true con routineActivateOk → nasce ATTIVA, evento «creata ATTIVA»', async () => {
+    const { output, meta } = await executeTool(AGENT, 'update_state', {
+      target: 'routine', action: 'create',
+      name: 'Backup attivo', prompt: 'fai il backup', schedule: '0 9 * * *', timezone: 'Europe/Rome',
+      activate: true
+    }, { routineActivateOk: true })
+    expect(output).toContain('ACTIVE')
+    expect(output).not.toContain('PAUSED')
+    const r = getRoutine((meta.automation as { id: number }).id)!
+    expect(r.enabled).toBe(1)
+    expect(formatUi(automationEventText('create', 'Backup attivo', { active: true }), 'it')).toBe('Routine creata ATTIVA: Backup attivo')
+  })
+
+  it('create activate:true SENZA routineActivateOk → ignorato: nasce in PAUSA e il result lo dice', async () => {
+    const { output, meta } = await executeTool(AGENT, 'update_state', {
+      target: 'routine', action: 'create', name: 'Backup forzato', prompt: 'p', schedule: '0 9 * * *', activate: true
+    })
+    expect(output).toContain('PAUSED')
+    expect(output).toContain('activate ignored')
+    const r = getRoutine((meta.automation as { id: number }).id)!
+    expect(r.enabled).toBe(0)
+  })
+
+  it('create activate:true con provenance template → resta in pausa anche nel turno giusto', async () => {
+    const { output, meta } = await executeTool(AGENT, 'update_state', {
+      target: 'routine', action: 'create', name: 'Da template attiva', prompt: 'p',
+      trigger: { type: 'schedule', kind: 'cron', cron: '0 9 * * *' }, provenance: 'template', activate: true
+    }, { turnInitiator: 'TEMPLATE_IMPORT', routineActivateOk: true })
+    expect(output).toContain('PAUSED')
+    const r = getRoutine((meta.automation as { id: number }).id)!
+    expect(r.enabled).toBe(0)
+    expect(r.provenance).toBe('template')
   })
 
   // ---- fase 7: create con trigger schedule opzionale e provenance template ----

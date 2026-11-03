@@ -16,7 +16,8 @@
 //   /Applications non deve sostituire Homun.app di Homun 2 cambiando forma);
 // - CFBundleIconFile non è electron.icns (l'icona è quella di Homun);
 // - NESSUNA descrizione di microfono/camera in Info.plist (nessuna funzione
-//   le usa, i permessi sono negati in A5).
+//   le usa, i permessi sono negati in A5); M7: NESSUNA NS*UsageDescription
+//   fuori da un elenco esplicito (oggi vuoto).
 import { readFile, stat, readdir } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
 import path from 'node:path'
@@ -98,9 +99,15 @@ const iconFile = (/<key>CFBundleIconFile<\/key>\s*<string>([^<]+)<\/string>/.exe
 if (!iconFile) die('CFBundleIconFile assente in Info.plist')
 if (iconFile === 'electron.icns') die(`CFBundleIconFile è electron.icns: l'icona dell'app è quella di Electron (K3)`)
 if (!(await stat(path.join(resources, iconFile)).catch(() => null))) die(`l'icona del bundle manca: Resources/${iconFile}`)
-// …e nessuna descrizione di microfono/camera (funzioni inesistenti, permessi negati in A5)
-if (info.includes('NSMicrophoneUsageDescription')) die('NSMicrophoneUsageDescription in Info.plist: nessuna funzione usa il microfono (K3)')
-if (info.includes('NSCameraUsageDescription')) die('NSCameraUsageDescription in Info.plist: nessuna funzione usa la camera (K3)')
+// …e nessuna descrizione di microfono/camera (funzioni inesistenti, permessi negati in A5).
+// M7 (fase 0.3.1001): NESSUNA NS*UsageDescription fuori da un elenco esplicito
+// (oggi vuoto): Electron ne scrive di generiche in inglese che Homun non usa
+const ALLOWED_USAGE_KEYS = new Set([])
+const usageKeys = [...info.matchAll(/<key>(NS[A-Za-z]+UsageDescription)<\/key>/g)].map((m) => m[1])
+const unexpectedUsage = usageKeys.filter((k) => !ALLOWED_USAGE_KEYS.has(k))
+if (unexpectedUsage.length > 0) {
+  die(`NS*UsageDescription in Info.plist fuori dall'elenco consentito: ${unexpectedUsage.join(', ')} (M7 — nessuna funzione di Homun le usa; se una serve, aggiungerla ad ALLOWED_USAGE_KEYS e motivarla nel REPORT)`)
+}
 
 // ---- 2. il plist del LaunchAgent (A3) ----
 const agentPlist = path.join(contents, 'Library', 'LaunchAgents', 'app.homun.desktop.daemon.plist')

@@ -545,7 +545,7 @@ describe('fase 19a correzioni L9: SANDBOT_TEST_BOX_PREFIX — i nomi del box di 
     })
   })
 
-  it('sandbot, ../x, SBTEST1 o oltre i 12 caratteri → IGNORATA: mai i nomi dell\'utente', async () => {
+  it('sandbot, ../x, SBTEST1 o oltre i 12 caratteri → i nomi NON cambiano (M10: la sandbox rifiuta di partire, vedi test-box-prefix.test.ts)', async () => {
     for (const bad of ['sandbot', '../x', 'sbtest-box', 'SBTEST1', 'sbtest0123456789012', 'sbtest_1', 'sbtest box', '']) {
       process.env.SANDBOT_TEST_BOX_PREFIX = bad
       expect(await loadNames(), `valore ${JSON.stringify(bad)}`).toEqual({

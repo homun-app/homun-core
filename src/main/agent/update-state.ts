@@ -27,6 +27,9 @@ export interface UpdateStateArgs {
   content?: unknown
   tier?: unknown
   scope?: unknown
+  /** M3 (fase 0.3.1001): crea la routine GIÀ ATTIVA con un solo consenso informato */
+  activate?: unknown
+  provenance?: unknown
 }
 
 export type StateVerdict = { kind: 'allow' } | { kind: 'ask'; reason: string; ui: UiText }
@@ -41,11 +44,33 @@ function promptPreview(prompt: string): string {
  * Verdetto per update_state (puro). `routine` è la routine esistente per gli
  * id dell'argomento (null se assente/solo per create): chi chiede la card
  * deve passare la routine corrente letta dallo store.
+ *
+ * M3 (fase 0.3.1001): `create` con activate:true chiede UNA sola volta con
+ * una card che mostra tutto (nome, quando, prompt) — approvata la routine
+ * nasce GIÀ ATTIVA, negata NON nasce. Vale SOLO nei turni aperti da un
+ * messaggio diretto dell'utente (`userDirectTurn`): altrove si crea in pausa
+ * come sempre, e il risultato del tool lo dice al modello.
  */
-export function updateStateVerdict(args: UpdateStateArgs, routine: Routine | null): StateVerdict {
+export function updateStateVerdict(
+  args: UpdateStateArgs,
+  routine: Routine | null,
+  opts: { userDirectTurn?: boolean } = {}
+): StateVerdict {
   if (args.target !== 'routine') return { kind: 'allow' } // memory: come update_memory
 
   const action = String(args.action ?? '')
+  if (action === 'create' && args.activate === true && opts.userDirectTurn) {
+    const title = typeof args.name === 'string' && args.name.trim() ? args.name : '(senza nome)'
+    const schedule = typeof args.schedule === 'string' && args.schedule ? args.schedule : ''
+    const preview = typeof args.prompt === 'string' && args.prompt ? promptPreview(args.prompt) : ''
+    const when = schedule ? describeCron(schedule, 'en') : 'from its trigger'
+    const tz = typeof args.timezone === 'string' && args.timezone ? ` (${args.timezone})` : ''
+    return {
+      kind: 'ask',
+      reason: `create the routine "${title}" ACTIVE (it will run by itself): ${when}${tz} — prompt: ${preview}`,
+      ui: ui(UI.approvalUsCreateActive, { title, ...(preview ? { preview } : {}) })
+    }
+  }
   if (action === 'resume' && routine) {
     const schedule = typeof args.schedule === 'string' && args.schedule ? args.schedule : routine.schedule
     const prompt = typeof args.prompt === 'string' && args.prompt ? args.prompt : routine.prompt
@@ -100,9 +125,11 @@ export function memoryScopeVerdict(
 }
 
 /** Il UiText dell'entry event meta.automation per un'azione su routine (§3ter T2/T4, fase 17c). */
-export function automationEventText(action: string, name: string): UiText {
+export function automationEventText(action: string, name: string, opts: { active?: boolean } = {}): UiText {
   switch (action) {
-    case 'create': return ui(UI.eventRoutineCreate, { name })
+    case 'create':
+      // M3 (fase 0.3.1001): la create approvata con activate nasce ATTIVA
+      return opts.active === true ? ui(UI.eventRoutineCreateActive, { name }) : ui(UI.eventRoutineCreate, { name })
     case 'update': return ui(UI.eventRoutineUpdate, { name })
     case 'pause': return ui(UI.eventRoutinePause, { name })
     case 'resume': return ui(UI.eventRoutineResume, { name })

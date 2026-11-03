@@ -67,6 +67,17 @@ export function DraftCard({ entry }: { entry: TranscriptEntry }) {
         </div>
       ) : null}
 
+      {/* M1: la bozza non ha uno strumento d'invio — lo si vede SUBITO, non al clic */}
+      {draft.sendHint && status === 'pending' && (
+        <div className="mt-2 rounded-[10px] bg-card px-3 py-2 text-[11px] text-muted-foreground">
+          {draft.sendHint === 'no-tool' || draft.sendHint === 'missing-required' ? (
+            <Trans>Nessuno strumento d'invio per questo canale: copia il testo</Trans>
+          ) : (
+            <Trans>Più strumenti d'invio per questo canale: chiedi al bot di sceglierne uno</Trans>
+          )}
+        </div>
+      )}
+
       {editing ? (
         <div className="mt-2">
           <textarea

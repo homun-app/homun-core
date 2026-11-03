@@ -17,6 +17,8 @@ import { Paperclip, PanelRight, ArrowUp, Square, Copy, Quote, Info, Brain } from
 import { api, useStore, useResolvedModel } from '../store'
 // fase 17c (C2): il testo di notice/eventi/system dal meta.ui (lingua attiva)
 import { uiTextOf } from '../lib/ui-text'
+// M2 (fase 0.3.1001): l'apertura di un turno con initiator è una riga di sistema
+import { openingRowFor } from '../lib/opening-rows'
 import { i18n, formatTime } from '../lib/i18n'
 import { GROUP_CHAIN_CLOSED_TEXT, GROUP_RATE_LIMIT_TEXT, GROUP_HOURLY_CAP_TEXT, parseCoordinatorNowText, parseMemberNoModelText } from '../../../main/agent/group-turns'
 import { agentMessageDisplay } from '../../../shared/agent-message'
@@ -472,9 +474,13 @@ function EntryRow({ entry, showReasoning, debugSteps }: { entry: TranscriptEntry
   const info = useBotInfo(activeId)
   const color = info ? `var(--bot-${info.avatar.color})` : 'var(--foreground)'
   switch (entry.kind) {
-    case 'message':
+    case 'message': {
+      // M2 (fase 0.3.1001): una entry utente CON un qualsiasi initiator non è
+      // un fumetto dell'utente — è una riga di sistema breve (il testo per il
+      // modello resta nel transcript, visibile solo nei dettagli chiusi)
+      const opening = openingRowFor(entry)
       // fase 7: messaggio di un ALTRO bot (initiator AGENT) — riga «Da <nome>»
-      if (entry.role === 'user' && entry.meta?.initiator === 'AGENT') {
+      if (opening.kind === 'agent') {
         return (
           <div className="max-w-[75%] rounded-[22px] bg-muted px-4 py-2.5 text-sm">
             <p className="mb-1 text-xs text-muted-foreground">
@@ -485,17 +491,30 @@ function EntryRow({ entry, showReasoning, debugSteps }: { entry: TranscriptEntry
         )
       }
       // fase 7/8: kickstart dei template e report dei task — righe espandibili
-      if (entry.role === 'user' && (entry.meta?.initiator === 'TEMPLATE_IMPORT' || entry.meta?.initiator === 'TASK_DONE')) {
-        const template = entry.meta?.initiator === 'TEMPLATE_IMPORT'
+      if (opening.kind === 'details') {
         return (
           <details className="rounded-[14px] bg-muted/60 px-3 py-1.5">
             <summary className="cursor-pointer select-none text-xs text-muted-foreground">
-              {template
+              {opening.template
                 ? <Trans>Configurazione da template: {String(entry.meta?.templateName ?? '')}</Trans>
                 : <Trans>Report del task: {String(entry.meta?.taskTitle ?? '')} ({String(entry.meta?.taskRef ?? '')})</Trans>}
             </summary>
             <pre className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap text-[11px] leading-relaxed text-muted-foreground">
               {entry.content}
+            </pre>
+          </details>
+        )
+      }
+      // M2: routine, giro al rientro, risvegli di sistema — riga breve col
+      // testo del modello chiuso nei dettagli
+      if (opening.kind === 'system') {
+        return (
+          <details className="rounded-[14px] bg-muted/40 px-3 py-1.5">
+            <summary className="cursor-pointer select-none text-center text-xs text-muted-foreground">
+              {opening.icon} {i18n.t(opening.label)}
+            </summary>
+            <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap text-[11px] leading-relaxed text-muted-foreground">
+              {uiTextOf(entry)}
             </pre>
           </details>
         )
@@ -518,6 +537,7 @@ function EntryRow({ entry, showReasoning, debugSteps }: { entry: TranscriptEntry
           </div>
         </div>
       )
+    }
     case 'thinking': {
       // fase 3 (§3bis L2): il ragionamento resta interno, col toggle
       if (!showReasoning) return null

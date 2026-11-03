@@ -14,16 +14,46 @@ export const CONTAINER_USER = '1000:1000'
  * Fase 19a correzioni (L9): il prefisso dei nomi del box di PROVA per la
  * verifica in Electron (vista e presa di controllo dal vivo). La variabile
  * d'ambiente SANDBOT_TEST_BOX_PREFIX vale SOLO se rispetta questa regex
- * (parte OBBLIGATORIAMENTE per `sbtest`): qualunque altro valore si ignora,
- * così non può mai puntare ai nomi dell'utente (sandbot-box, …). Letta UNA
- * volta al caricamento del modulo, come SANDBOT_BOX_DOCKERFILE.
+ * (parte OBBLIGATORIAMENTE per `sbtest`). Letta UNA volta al caricamento del
+ * modulo, come SANDBOT_BOX_DOCKERFILE.
+ * M10 (fase 0.3.1001): un valore PRESENTE ma NON valido NON si ignora più in
+ * silenzio (nel confronto era successo col prefisso `cfbox`: il box girava
+ * coi nomi VERI dell'utente) — la sandbox NON parte, con errore chiaro nel
+ * log del daemon e nella UI.
  */
 export const SANDBOT_TEST_BOX_PREFIX_RE = /^sbtest[a-z0-9]{0,12}$/
 
+/** Lo stato della variabile d'ambiente del prefisso di prova (PURO). */
+export type TestBoxPrefixState =
+  | { kind: 'absent' }
+  | { kind: 'valid'; prefix: string }
+  | { kind: 'invalid'; value: string }
+
+export function testBoxPrefixState(env: NodeJS.ProcessEnv): TestBoxPrefixState {
+  const v = env.SANDBOT_TEST_BOX_PREFIX
+  if (v === undefined || v === '') return { kind: 'absent' }
+  return SANDBOT_TEST_BOX_PREFIX_RE.test(v) ? { kind: 'valid', prefix: v } : { kind: 'invalid', value: v }
+}
+
+const TEST_BOX_PREFIX_STATE = testBoxPrefixState(process.env)
+
 /** Il prefisso valido dell'ambiente (null = nessun box di prova). */
 function validTestBoxPrefix(env: NodeJS.ProcessEnv): string | null {
-  const v = env.SANDBOT_TEST_BOX_PREFIX
-  return typeof v === 'string' && SANDBOT_TEST_BOX_PREFIX_RE.test(v) ? v : null
+  const s = testBoxPrefixState(env)
+  return s.kind === 'valid' ? s.prefix : null
+}
+
+/** M10: il valore NON valido della variabile (null = assente o valida). */
+export const INVALID_TEST_BOX_PREFIX: string | null =
+  TEST_BOX_PREFIX_STATE.kind === 'invalid' ? TEST_BOX_PREFIX_STATE.value : null
+
+/**
+ * M10: l'errore chiaro quando il prefisso di prova non è valido (inglese:
+ * finisce nei log tecnici e nei result che legge il modello; la riga della
+ * UI ha il suo testo nel catalogo).
+ */
+export function invalidTestBoxPrefixError(value: string): string {
+  return `invalid SANDBOT_TEST_BOX_PREFIX ("${value}"): it must start with "sbtest" followed by up to 12 lowercase letters/digits — the test sandbox will NOT start and will NEVER use the user's container names. Fix or unset the variable.`
 }
 
 const TEST_BOX_PREFIX = validTestBoxPrefix(process.env)

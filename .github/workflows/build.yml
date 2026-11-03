@@ -98,6 +98,36 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
+      # M9 (fase 0.3.1001): lo stato dell'arte per una distribuzione Developer
+      # ID è il DMG firmato, notarizzato e GRAFFATO. electron-builder firma il
+      # dmg (build.dmg.sign) e notarizza l'APP; il dmg va notarizzato e
+      # graffato a parte, con le stesse credenziali dell'app. Il graffaggio
+      # avviene PRIMA dei checksum (lo step successivo li calcola).
+      - name: Notarize and staple DMG
+        if: steps.signing.outputs.has_cert == 'true' && startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: |
+          DMG="$(find dist-installers -maxdepth 2 -name '*.dmg' -print -quit)"
+          test -n "$DMG" || { echo "::error::nessun dmg in dist-installers"; exit 1; }
+          echo "notarize: $DMG"
+          xcrun notarytool submit "$DMG" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+          xcrun stapler staple "$DMG"
+          spctl -a -t open --context context:primary-signature -v "$DMG"
+          # electron-builder ha già pubblicato il dmg PRE-graffaggio: si ricarica
+          # quello graffato sulla draft release (i checksum si calcolano dopo)
+          gh release upload "$GITHUB_REF_NAME" "$DMG" \
+            --repo homun-app/homun-releases \
+            --clobber
+
       - name: Build installer (unsigned — no cert or non-release build)
         if: steps.signing.outputs.has_cert != 'true' || !startsWith(github.ref, 'refs/tags/v')
         run: npx electron-builder --mac --publish never -c.mac.identity=null

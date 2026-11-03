@@ -3,45 +3,131 @@
 // Sezione D1 (review fase 3): "ciò che l'utente vede è esattamente ciò che
 // viene inviato" — via ammesso solo per tool di invio, campi visibili letti
 // da via.args tramite la fieldMap, nessun argomento nascosto.
+// Fase 0.3.1001 (M1): classificazione per annotazioni e NOME, non per elenco
+// di server — anche i server aggiunti a mano ("ufficio" con send_email).
 import { describe, expect, it } from 'vitest'
 import {
-  DEFAULT_EXTERNAL_SEND_TOOLS, isExternalSend, channelForServer, draftFromExternalCall,
-  prepareDraft, applyDraftBody
+  DEFAULT_EXTERNAL_SEND_TOOLS, isExternalSend, channelForServer, channelForTool, draftFromExternalCall,
+  prepareDraft, applyDraftBody, sendLikeName, autoViaForChannel
 } from '../external-send'
 
-describe('isExternalSend (config di default)', () => {
+describe('isExternalSend (config di default + nome)', () => {
   it('gmail e slack: i tool di invio della config sono invii esterni', () => {
-    expect(isExternalSend('mcp__gmail__send_message', DEFAULT_EXTERNAL_SEND_TOOLS)).toBe(true)
-    expect(isExternalSend('mcp__gmail__reply', DEFAULT_EXTERNAL_SEND_TOOLS)).toBe(true)
-    expect(isExternalSend('mcp__gmail__forward', DEFAULT_EXTERNAL_SEND_TOOLS)).toBe(true)
-    expect(isExternalSend('mcp__slack__slack_send_message', DEFAULT_EXTERNAL_SEND_TOOLS)).toBe(true)
-    expect(isExternalSend('mcp__slack__slack_schedule_message', DEFAULT_EXTERNAL_SEND_TOOLS)).toBe(true)
+    expect(isExternalSend('mcp__gmail__send_message', undefined, DEFAULT_EXTERNAL_SEND_TOOLS)).toBe(true)
+    expect(isExternalSend('mcp__gmail__reply', undefined, DEFAULT_EXTERNAL_SEND_TOOLS)).toBe(true)
+    expect(isExternalSend('mcp__gmail__forward', undefined, DEFAULT_EXTERNAL_SEND_TOOLS)).toBe(true)
+    expect(isExternalSend('mcp__slack__slack_send_message', undefined, DEFAULT_EXTERNAL_SEND_TOOLS)).toBe(true)
+    expect(isExternalSend('mcp__slack__slack_schedule_message', undefined, DEFAULT_EXTERNAL_SEND_TOOLS)).toBe(true)
   })
 
   it('i tool di LETTURA dello stesso server NON sono invii esterni', () => {
-    expect(isExternalSend('mcp__gmail__search_threads', DEFAULT_EXTERNAL_SEND_TOOLS)).toBe(false)
-    expect(isExternalSend('mcp__gmail__read_thread', DEFAULT_EXTERNAL_SEND_TOOLS)).toBe(false)
-    expect(isExternalSend('mcp__slack__list_channels', DEFAULT_EXTERNAL_SEND_TOOLS)).toBe(false)
+    expect(isExternalSend('mcp__gmail__search_threads', undefined, DEFAULT_EXTERNAL_SEND_TOOLS)).toBe(false)
+    expect(isExternalSend('mcp__gmail__read_thread', undefined, DEFAULT_EXTERNAL_SEND_TOOLS)).toBe(false)
+    expect(isExternalSend('mcp__slack__list_channels', undefined, DEFAULT_EXTERNAL_SEND_TOOLS)).toBe(false)
   })
 
-  it('tool interni e nomi malformati mai; config personalizzata sostituisce le default', () => {
-    expect(isExternalSend('run-command', DEFAULT_EXTERNAL_SEND_TOOLS)).toBe(false)
-    expect(isExternalSend('send_to_user', DEFAULT_EXTERNAL_SEND_TOOLS)).toBe(false)
-    expect(isExternalSend('gmail__send_message', DEFAULT_EXTERNAL_SEND_TOOLS)).toBe(false)
-    // l'utente configura i suoi server: la config data vince sulle default
-    const custom = { outlook: ['send_mail'] }
-    expect(isExternalSend('mcp__outlook__send_mail', custom)).toBe(true)
-    expect(isExternalSend('mcp__gmail__send_message', custom)).toBe(false)
+  it('tool interni e nomi malformati mai; la config dell’utente è una sovrascrittura esplicita', () => {
+    expect(isExternalSend('run-command', undefined, DEFAULT_EXTERNAL_SEND_TOOLS)).toBe(false)
+    expect(isExternalSend('send_to_user', undefined, DEFAULT_EXTERNAL_SEND_TOOLS)).toBe(false)
+    expect(isExternalSend('gmail__send_message', undefined, DEFAULT_EXTERNAL_SEND_TOOLS)).toBe(false)
+    // l'utente configura i suoi server: la config data AGGIUNGE (sovrascrittura
+    // esplicita) — e il nome continua a valere per tutti gli altri server
+    const custom = { outlook: ['spedisci'] }
+    expect(isExternalSend('mcp__outlook__spedisci', undefined, custom)).toBe(true)
+    expect(isExternalSend('mcp__gmail__send_message', undefined, custom)).toBe(true)
+    expect(isExternalSend('mcp__gmail__search_threads', undefined, custom)).toBe(false)
+  })
+
+  it('M1: server aggiunti a mano — l’espressione di invio sul nome li classifica da sola', () => {
+    for (const name of ['send_email', 'gmail_send_message', 'reply', 'slack_send_message', 'post_message']) {
+      expect(sendLikeName(name)).toBe(true)
+    }
+    for (const name of ['list_emails', 'read_email', 'search', 'create_event']) {
+      expect(sendLikeName(name)).toBe(false)
+    }
+    expect(isExternalSend('mcp__ufficio__send_email', undefined, {})).toBe(true)
+    expect(isExternalSend('mcp__ufficio__gmail_send_message', undefined, {})).toBe(true)
+    expect(isExternalSend('mcp__ufficio__post_message', undefined, {})).toBe(true)
+    expect(isExternalSend('mcp__ufficio__list_emails', undefined, {})).toBe(false)
+    expect(isExternalSend('mcp__ufficio__read_email', undefined, {})).toBe(false)
+    expect(isExternalSend('mcp__ufficio__search', undefined, {})).toBe(false)
+    expect(isExternalSend('mcp__ufficio__create_event', undefined, {})).toBe(false)
+  })
+
+  it('M1: readOnlyHint true ESCLUDE sempre (le annotazioni servono a escludere, non a includere)', () => {
+    expect(isExternalSend('mcp__ufficio__send_email', { readOnlyHint: true }, {})).toBe(false)
+    // openWorldHint da solo NON basta: molti server lo mettono anche sulle letture
+    expect(isExternalSend('mcp__ufficio__list_emails', { openWorldHint: true }, {})).toBe(false)
+    expect(isExternalSend('mcp__ufficio__send_email', { openWorldHint: true }, {})).toBe(true)
   })
 })
 
-describe('channelForServer', () => {
+describe('channelForServer / channelForTool', () => {
   it('deduce il canale dallo slug del server', () => {
     expect(channelForServer('gmail')).toBe('email')
     expect(channelForServer('workspace-mail')).toBe('email')
     expect(channelForServer('slack')).toBe('slack')
     expect(channelForServer('azienda-slack-mcp')).toBe('slack')
     expect(channelForServer('notion')).toBe('other')
+  })
+
+  it('M1: server sconosciuto → canale dal NOME del tool (email/mail → email)', () => {
+    expect(channelForTool('mcp__ufficio__send_email')).toBe('email')
+    expect(channelForTool('mcp__ufficio__send_mail')).toBe('email')
+    expect(channelForTool('mcp__ufficio__post_message')).toBe('other')
+    expect(channelForTool('mcp__gmail__send_message')).toBe('email')
+  })
+})
+
+describe('M1: autoViaForChannel — la via di una bozza senza via', () => {
+  const schema = {
+    type: 'object',
+    properties: { to: { type: 'string' }, subject: { type: 'string' }, body: { type: 'string' } },
+    required: ['to', 'body']
+  }
+  const candidates = [
+    { name: 'mcp__ufficio__send_email', parameters: schema },
+    { name: 'mcp__ufficio__list_emails', parameters: schema }
+  ]
+
+  it('un solo invio per il canale: via compilata dallo schema, argomenti dai campi visibili', () => {
+    const r = autoViaForChannel('email', { to: 'x@y.it', subject: 'Oggetto', body: 'ciao' }, candidates, {})
+    expect(r.via).toEqual({ tool: 'mcp__ufficio__send_email', args: { to: 'x@y.it', subject: 'Oggetto', body: 'ciao' } })
+    expect(r.hint).toBeUndefined()
+  })
+
+  it('nessun invio per il canale: hint no-tool', () => {
+    const r = autoViaForChannel('slack', { to: '#generale', body: 'ciao' }, candidates, {})
+    expect(r.via).toBeUndefined()
+    expect(r.hint).toBe('no-tool')
+  })
+
+  it('più invii per il canale: hint pick con i candidati (sceglie il modello)', () => {
+    const two = [...candidates, { name: 'mcp__ufficio__send_mail', parameters: schema }]
+    const r = autoViaForChannel('email', { to: 'x@y.it', body: 'ciao' }, two, {})
+    expect(r.via).toBeUndefined()
+    expect(r.hint).toBe('pick')
+    expect(r.candidates).toEqual(['mcp__ufficio__send_email', 'mcp__ufficio__send_mail'])
+  })
+
+  it('required senza valore dai campi visibili: niente via, hint missing-required', () => {
+    const strict = {
+      type: 'object',
+      properties: { to: { type: 'string' }, body: { type: 'string' }, threadId: { type: 'string' } },
+      required: ['to', 'body', 'threadId']
+    }
+    const r = autoViaForChannel('email', { to: 'x@y.it', body: 'ciao' }, [{ name: 'mcp__ufficio__send_email', parameters: strict }], {})
+    expect(r.via).toBeUndefined()
+    expect(r.hint).toBe('missing-required')
+  })
+
+  it('prepareDraft senza via compila la via e la riporta (viaAuto); con hint la mette in sendHint', () => {
+    const ok = prepareDraft({ channel: 'email', to: 'x@y.it', subject: 'Oggetto', body: 'ciao', cfg: {}, candidates })
+    expect(ok.viaAuto).toBe(true)
+    expect(ok.message.via).toEqual({ tool: 'mcp__ufficio__send_email', args: { to: 'x@y.it', subject: 'Oggetto', body: 'ciao' } })
+    const none = prepareDraft({ channel: 'slack', to: '#generale', body: 'ciao', cfg: {}, candidates })
+    expect(none.message.via).toBeUndefined()
+    expect(none.message.sendHint).toBe('no-tool')
   })
 })
 

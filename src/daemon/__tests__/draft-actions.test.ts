@@ -10,7 +10,9 @@ import { join } from 'node:path'
 // stato condiviso coi mock (hoisted)
 const h = vi.hoisted(() => ({
   perm: {
-    verdict: { kind: 'allow', via: 'rule' } as { kind: 'allow' | 'deny' | 'ask'; reason?: string; via?: string }
+    verdict: { kind: 'allow', via: 'rule' } as { kind: 'allow' | 'deny' | 'ask'; reason?: string; via?: string },
+    // M1: annotazioni correnti del tool che draft:send sta per eseguire
+    annotations: undefined as { readOnlyHint?: boolean; destructiveHint?: boolean; openWorldHint?: boolean } | undefined
   },
   tools: { calls: [] as Array<{ tool: string; args: Record<string, unknown> }>, output: 'email inviata (id 123)', throwWith: null as string | null }
 }))
@@ -18,7 +20,8 @@ const h = vi.hoisted(() => ({
 vi.mock('../../main/agent/permissions', () => ({
   check: async () => h.perm.verdict,
   grantStanding: async () => undefined,
-  targetKey: (tool: string) => tool
+  targetKey: (tool: string) => tool,
+  mcpAnnotationsOf: (tool: string) => h.perm.annotations
 }))
 
 vi.mock('../../main/agent/tools', () => ({
@@ -71,6 +74,7 @@ function mkDraft(): TranscriptEntry {
 beforeEach(() => {
   events = []
   h.perm.verdict = { kind: 'allow', via: 'rule' }
+  h.perm.annotations = undefined
   h.tools.calls = []
   h.tools.output = 'email inviata (id 123)'
   h.tools.throwWith = null
@@ -211,5 +215,50 @@ describe('D1 (review fase 3): via solo per tool di invio esterno — ciò che ve
     const r = await api['draft:send']!([AGENT, d.id]) as { ok: boolean }
     expect(r.ok).toBe(true)
     expect(h.tools.calls).toEqual([{ tool: 'mcp__gmail__send_message', args: { to: 'x@esempio.it', subject: 'Oggetto di prova', body: 'corpo ritoccato' } }])
+  })
+})
+
+describe('M1 (fase 0.3.1001): il classificatore per nome vale anche per i server aggiunti a mano', () => {
+  /** Bozza con via verso un server manuale "ufficio" NON presente in config. */
+  function mkUfficioDraft(): TranscriptEntry {
+    const { message } = prepareDraft({
+      channel: 'email', to: 'capo@ufficio.it', subject: 'Ordine', body: 'testo',
+      via: { tool: 'mcp__ufficio__send_email', args: { to: 'capo@ufficio.it', subject: 'Ordine', body: 'testo' } },
+      cfg: DEFAULT_EXTERNAL_SEND_TOOLS
+    })
+    return appendEntry({
+      agentId: AGENT, kind: 'send-message', role: 'assistant', content: 'Ordine',
+      meta: { message, status: 'pending' }
+    })
+  }
+
+  it('draft:send su una bozza via mcp__ufficio__send_email: ESATTAMENTE una esecuzione con gli argomenti mostrati', async () => {
+    const d = mkUfficioDraft()
+    expect((getEntries(AGENT).find((e) => e.id === d.id)?.meta?.message as { via?: { tool: string } }).via?.tool).toBe('mcp__ufficio__send_email')
+    const r = await api['draft:send']!([AGENT, d.id]) as { ok: boolean }
+    expect(r.ok).toBe(true)
+    expect(h.tools.calls).toEqual([{ tool: 'mcp__ufficio__send_email', args: { to: 'capo@ufficio.it', subject: 'Ordine', body: 'testo' } }])
+    expect(getEntries(AGENT).find((e) => e.id === d.id)?.meta?.status).toBe('sent')
+  })
+
+  it('via verso un tool che il nome NON classifica come invio (list_emails): rifiutato anche fuori dalla config', async () => {
+    const d = appendEntry({
+      agentId: AGENT, kind: 'send-message', role: 'assistant', content: 'lettura',
+      meta: {
+        message: { type: 'draft', channel: 'email', to: 'x@y.it', body: 'ciao', via: { tool: 'mcp__ufficio__list_emails', args: { query: 'x' } } },
+        status: 'pending'
+      }
+    })
+    const r = await api['draft:send']!([AGENT, d.id]) as { ok: boolean }
+    expect(r.ok).toBe(false)
+    expect(h.tools.calls).toHaveLength(0)
+  })
+
+  it('annotazione readOnlyHint true sul via: il classificatore lo esclude, draft:send rifiuta', async () => {
+    h.perm.annotations = { readOnlyHint: true }
+    const d = mkUfficioDraft()
+    const r = await api['draft:send']!([AGENT, d.id]) as { ok: boolean }
+    expect(r.ok).toBe(false)
+    expect(h.tools.calls).toHaveLength(0)
   })
 })
