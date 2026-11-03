@@ -54,6 +54,22 @@ describe('isExternalSend (config di default + nome)', () => {
     expect(isExternalSend('mcp__ufficio__create_event', undefined, {})).toBe(false)
   })
 
+  it('verifica 0.3.1001: camelCase e kebab-case sono invii come lo snake_case', () => {
+    for (const name of ['sendEmail', 'sendMessage', 'postMessage', 'send-email', 'SendEmail', 'replyToThread', 'chat_postMessage', 'messages.send']) {
+      expect(sendLikeName(name)).toBe(true)
+    }
+    expect(isExternalSend('mcp__telegram__sendMessage', undefined, {})).toBe(true)
+    expect(channelForTool('mcp__ufficio__sendEmail')).toBe('email')
+    expect(channelForTool('mcp__ufficio__send-mail')).toBe('email')
+  })
+
+  it('verifica 0.3.1001: un nome che comincia con un verbo di lettura non è mai un invio', () => {
+    for (const name of ['get_post', 'read_post', 'getPost', 'list_sent_messages', 'search_posts', 'fetch-reply', 'findReplies', 'list_posts']) {
+      expect(sendLikeName(name)).toBe(false)
+    }
+    expect(isExternalSend('mcp__blog__get_post', undefined, {})).toBe(false)
+  })
+
   it('M1: readOnlyHint true ESCLUDE sempre (le annotazioni servono a escludere, non a includere)', () => {
     expect(isExternalSend('mcp__ufficio__send_email', { readOnlyHint: true }, {})).toBe(false)
     // openWorldHint da solo NON basta: molti server lo mettono anche sulle letture

@@ -39,14 +39,36 @@ export interface SendAnnotationsLike {
  */
 const SEND_FIRST_VERBS = new Set(['send', 'reply', 'forward', 'post', 'publish', 'share', 'invite', 'notify'])
 const SEND_LATER_VERBS = new Set(['send', 'reply', 'forward', 'post'])
+/**
+ * Verifica 0.3.1001: un nome che COMINCIA con un verbo di lettura non è mai un
+ * invio, anche se più avanti c'è un verbo d'invio usato come nome
+ * (get_post, read_post, list_sent_messages…).
+ */
+const READ_FIRST_VERBS = new Set(['get', 'read', 'list', 'search', 'fetch', 'find', 'query', 'describe', 'view', 'show'])
 /** nomi che l'espressione non copre ma che sono invii (casi noti dei server). */
 const SEND_EXTRA_NAMES = new Set(['send_draft', 'create_message', 'chat_postMessage'])
 
-/** Il nome originale (segmenti _) contiene un verbo d'invio (M1). */
+/**
+ * Verifica 0.3.1001: i segmenti di un nome di tool, in minuscolo. I server
+ * MCP usano snake_case, kebab-case e camelCase (sendEmail, postMessage): si
+ * spezza su _ - . e sui confini delle maiuscole, così il classificatore vede
+ * gli stessi verbi in tutte le grafie.
+ */
+export function nameSegments(original: string): string[] {
+  return original
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
+    .split(/[_\-.\s]+/)
+    .filter(Boolean)
+    .map((s) => s.toLowerCase())
+}
+
+/** Il nome originale (in qualsiasi grafia) contiene un verbo d'invio (M1). */
 export function sendLikeName(original: string): boolean {
   if (SEND_EXTRA_NAMES.has(original)) return true
-  const segs = original.split('_').filter(Boolean)
+  const segs = nameSegments(original)
   if (segs.length === 0) return false
+  if (READ_FIRST_VERBS.has(segs[0]!)) return false
   if (SEND_FIRST_VERBS.has(segs[0]!)) return true
   return segs.slice(1).some((s) => SEND_LATER_VERBS.has(s))
 }
@@ -86,7 +108,7 @@ export function channelForTool(tool: string): 'email' | 'slack' | 'other' {
   const byServer = channelForServer(parts[1] ?? '')
   if (byServer !== 'other') return byServer
   const original = parts.slice(2).join('__')
-  if (/(^|_)(e?mail)(_|$)/.test(original)) return 'email'
+  if (nameSegments(original).some((s) => s === 'email' || s === 'mail')) return 'email'
   return 'other'
 }
 
