@@ -27,6 +27,18 @@
 .no-drag {
   -webkit-app-region: no-drag;
 }
+/*
+ * Le fasce di trascinamento IGNORANO lo z-index (Electron): un dialogo o un
+ * menu disegnato sopra una fascia perde i clic che ci cadono sopra — la ✕
+ * delle Impostazioni finiva sulla fascia del pannello destro e «non
+ * chiudeva». Dialoghi, il loro velo e i menu sospesi (portali Radix, in fondo
+ * al body) bucano le fasce sotto di loro.
+ */
+[data-slot='dialog-overlay'],
+[data-slot='dialog-content'],
+[data-radix-popper-content-wrapper] {
+  -webkit-app-region: no-drag;
+}
 
 /*
  * Design system Homun (fase 16): i colori sono quelli del progetto Lovable

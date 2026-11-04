@@ -244,10 +244,18 @@ export function registerIpc(client: DaemonClient, getWindows: () => BrowserWindo
   ipcMain.handle('app:legacy-homun2', () => {
     // NON si legge niente dentro le cartelle di Homun 2: si controlla solo
     // che esistano, una volta (marker nell'userData)
+    // verifica 2026-11-04: nelle prove su cartella dati temporanea la riga
+    // compariva a OGNI avvio (marker sempre assente) — in modalità di prova
+    // solo se chiesta esplicitamente (SANDBOT_TEST_LEGACY_NOTICE=1)
+    if (process.env.SANDBOT_TEST_USER_DATA && process.env.SANDBOT_TEST_LEGACY_NOTICE !== '1') return null
     const marker = legacyNoticeMarkerPath(app.getPath('userData'))
     if (existsSync(marker)) return null
     const dir = findLegacyHomun2Dir(app.getPath('appData'))
-    return dir ? { dir } : null
+    if (!dir) return null
+    // «compare UNA VOLTA» (A8): il marker si scrive quando la riga si mostra,
+    // non solo alla ✕ — al prossimo avvio non torna anche se non l'ha chiusa
+    try { writeFileSync(marker, String(Date.now()) + '\n', { mode: 0o600 }) } catch { /* resta per la ✕ */ }
+    return { dir }
   })
   ipcMain.handle('app:legacy-homun2-dismiss', () => {
     writeFileSync(legacyNoticeMarkerPath(app.getPath('userData')), String(Date.now()) + '\n', { mode: 0o600 })
