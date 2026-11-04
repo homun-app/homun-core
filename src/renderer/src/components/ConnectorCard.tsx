@@ -12,6 +12,7 @@ import { useEffect, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { api, useStore } from '../store'
 import type { ConnectorInfo, TranscriptEntry } from '../../../shared/types'
+import { logoUrlForSlug } from '../lib/app-logos'
 import { CardShell } from './DecidedRow'
 
 export function ConnectorCard({ entry }: { entry: TranscriptEntry }) {
@@ -58,6 +59,9 @@ export function ConnectorCard({ entry }: { entry: TranscriptEntry }) {
 
   if (!message.connectorId) return null
   const needsAuth = Boolean(entry.meta?.needsAuth)
+  // fase catalogo app (P7): il logo VERO del catalogo quando c'è (per le app
+  // Composio; le curate dirette restano con l'emoji del connettore)
+  const catalogLogo = composioSlug ?? gatewaySlug ? logoUrlForSlug((composioSlug ?? gatewaySlug)!) : null
 
   const connect = async (): Promise<void> => {
     setStatus('connecting')
@@ -92,7 +96,11 @@ export function ConnectorCard({ entry }: { entry: TranscriptEntry }) {
   return (
     <CardShell testid="connector-card">
       <div className="flex items-center gap-2 text-sm text-foreground">
-        <span className="text-base">{connectors.find((c) => c.id === message.connectorId)?.logo ?? '🔌'}</span>
+        {catalogLogo ? (
+          <img src={catalogLogo} alt="" className="size-5 shrink-0 rounded-[6px] object-cover" />
+        ) : (
+          <span className="text-base">{connectors.find((c) => c.id === message.connectorId)?.logo ?? '🔌'}</span>
+        )}
         {isGatewayApp ? (
           // C5 punto 1: «Collega <app> tramite Composio» — il link NON sta nel testo
           <span className="font-medium">{t`Collega ${message.name ?? ''} tramite Composio`}</span>

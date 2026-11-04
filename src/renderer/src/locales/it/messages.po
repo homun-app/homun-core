@@ -148,15 +148,10 @@ msgstr "{0} ›"
 msgid "{0} / {1} per M"
 msgstr "{0} / {1} per M"
 
-#. placeholder {0}: app.toolsCount
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "{0} azioni disponibili ai bot abilitati"
-msgstr "{0} azioni disponibili ai bot abilitati"
-
 #. placeholder {0}: model.connectedCount
 #: src/renderer/src/components/AppsWindow.tsx
-msgid "{0} collegate ›"
-msgstr "{0} collegate ›"
+msgid "{0} connesse ›"
+msgstr "{0} connesse ›"
 
 #. placeholder {0}: Math.round(s / 3600)
 #: src/renderer/src/components/SubagentCard.tsx
@@ -194,7 +189,7 @@ msgstr "{0} scrive…"
 msgid "{0} skill · {1} server"
 msgstr "{0} skill · {1} server"
 
-#. placeholder {0}: model.skills.reduce((a, s) => a + s.skills.length, 0) + (installed?.plugins.reduce((a, p) => a + p.skills.length, 0) ?? 0)
+#. placeholder {0}: linked.skills.reduce((a, s) => a + s.skills.length, 0) + (installed?.plugins.reduce((a, p) => a + p.skills.length, 0) ?? 0)
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "{0} skill · se ne vuoi una nuova, chiedila a un bot"
 msgstr "{0} skill · se ne vuoi una nuova, chiedila a un bot"
@@ -564,8 +559,8 @@ msgid "A: {0}"
 msgstr "A: {0}"
 
 #: src/renderer/src/components/AppsWindow.tsx
-msgid "Accedi"
-msgstr "Accedi"
+msgid "Accedi a Composio nel browser…"
+msgstr "Accedi a Composio nel browser…"
 
 #: src/renderer/src/components/TakeoverCard.tsx
 msgid "Accedi tu sul suo schermo, poi premi «Ho finito». La password non passa dal bot."
@@ -574,6 +569,18 @@ msgstr "Accedi tu sul suo schermo, poi premi «Ho finito». La password non pass
 #: src/renderer/src/components/ConnectorCards13.tsx
 msgid "accesso con il tuo account (OAuth)"
 msgstr "accesso con il tuo account (OAuth)"
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "account"
+msgstr "account"
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Account Composio"
+msgstr "Account Composio"
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Account Composio · connesso"
+msgstr "Account Composio · connesso"
 
 #. placeholder {0}: message.trustDetail ?? ''
 #: src/renderer/src/components/ConnectorCards13.tsx
@@ -722,6 +729,10 @@ msgstr "Altri {0} ▾"
 msgid "Altri parametri (verranno inviati così):"
 msgstr "Altri parametri (verranno inviati così):"
 
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Altro ▾"
+msgstr "Altro ▾"
+
 #: src/renderer/src/components/Settings.tsx
 msgid "analizzo…"
 msgstr "analizzo…"
@@ -768,10 +779,6 @@ msgstr "Anthropic, OpenAI, Mistral, Z.ai…"
 #: src/renderer/src/components/Sidebar.tsx
 msgid "App"
 msgstr "App"
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "App collegate tramite Composio"
-msgstr "App collegate tramite Composio"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "App e skill"
@@ -832,10 +839,6 @@ msgstr "Apri Elementi login"
 msgid "Apri i membri di {0}"
 msgstr "Apri i membri di {0}"
 
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Apri il browser e accedi a Composio: la card si aggiorna da sola."
-msgstr "Apri il browser e accedi a Composio: la card si aggiorna da sola."
-
 #: src/renderer/src/components/ApprovalCard.tsx
 msgid "Apri Impostazioni → Approvazione automatica con una regola precompilata"
 msgstr "Apri Impostazioni → Approvazione automatica con una regola precompilata"
@@ -867,8 +870,8 @@ msgid "Argomenti (args) non sono JSON valido"
 msgstr "Argomenti (args) non sono JSON valido"
 
 #: src/renderer/src/components/AppsWindow.tsx
-msgid "Argomenti separati da spazio"
-msgstr "Argomenti separati da spazio"
+msgid "Argomenti separati per spazio"
+msgstr "Argomenti separati per spazio"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "args JSON, es. {\"query\":\"x\"}"
@@ -897,16 +900,8 @@ msgid "attiva"
 msgstr "attiva"
 
 #: src/renderer/src/components/AppsWindow.tsx
-msgid "Attiva"
-msgstr "Attiva"
-
-#: src/renderer/src/components/AppsWindow.tsx
 msgid "Attiva con la chiave ak_ del tuo progetto."
 msgstr "Attiva con la chiave ak_ del tuo progetto."
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Attiva più app con Composio"
-msgstr "Attiva più app con Composio"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -1291,10 +1286,6 @@ msgstr "Chiudi"
 msgid "Chiudi i membri di {0}"
 msgstr "Chiudi i membri di {0}"
 
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "chiudi i tool"
-msgstr "chiudi i tool"
-
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Chiudi il pannello"
 msgstr "Chiudi il pannello"
@@ -1312,10 +1303,6 @@ msgstr "Cifrato sul Mac. Il bot non vedrà mai la password."
 msgid "circa (±15 min)"
 msgstr "circa (±15 min)"
 
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Client OAuth configurato ✓"
-msgstr "Client OAuth configurato ✓"
-
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "notice.queueFull"
@@ -1325,7 +1312,6 @@ msgstr "Coda piena: messaggio scartato."
 msgid "codice TOTP"
 msgstr "codice TOTP"
 
-#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/ConnectorCard.tsx
 msgid "Collega"
 msgstr "Collega"
@@ -1345,18 +1331,6 @@ msgstr "Collega {0} tramite Composio"
 msgid "Collega app"
 msgstr "Collega app"
 
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Collega Gmail, Slack, HubSpot e molte altre con un account Composio gratuito"
-msgstr "Collega Gmail, Slack, HubSpot e molte altre con un account Composio gratuito"
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Collega tramite Composio"
-msgstr "Collega tramite Composio"
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Collega un'app"
-msgstr "Collega un'app"
-
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "composio.cancelled"
@@ -1365,10 +1339,6 @@ msgstr "Collegamento di {name} annullato."
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Collegata"
 msgstr "Collegata"
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Collegata anche tramite Composio: scollegala dalla riga di Composio in «Collegate»."
-msgstr "Collegata anche tramite Composio: scollegala dalla riga di Composio in «Collegate»."
 
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Collegate"
@@ -1433,22 +1403,19 @@ msgstr "Compilo il login «{0}» su <0>{1}</0>?"
 msgid "card.fillAsk"
 msgstr "Compilo il login «{label}» su {origin}?"
 
+#. placeholder {0}: row.app.name
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Completa il login di {0} nel browser…"
+msgstr "Completa il login di {0} nel browser…"
+
 #: src/renderer/src/components/RightPanel.tsx
 #: src/renderer/src/components/TaskCard.tsx
 msgid "completato"
 msgstr "completato"
 
 #: src/renderer/src/components/AppsWindow.tsx
-msgid "Composio"
-msgstr "Composio"
-
-#: src/renderer/src/components/AppsWindow.tsx
 msgid "Composio attivo"
 msgstr "Composio attivo"
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Composio collegato"
-msgstr "Composio collegato"
 
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Composio è già attivo con la chiave di progetto (sviluppatori). Le due strade non possono stare insieme: disattivo la chiave e collego con il login?"
@@ -1469,10 +1436,6 @@ msgstr "Composio è un servizio di terzi: i login e le azioni delle app collegat
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "composio.notActive"
-msgstr "Composio non è attivo: attivalo con la tua chiave per collegare altre app."
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Composio non è attivo: attivalo con la tua chiave per collegare altre app."
 msgstr "Composio non è attivo: attivalo con la tua chiave per collegare altre app."
 
 #. js-lingui-explicit-id
@@ -1559,6 +1522,14 @@ msgstr "connector_poll: intervalMin deve essere ≥ 2 minuti"
 msgid "trigger.toolMissing"
 msgstr "connector_poll: tool mancante"
 
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Connessa"
+msgstr "Connessa"
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Connesse"
+msgstr "Connesse"
+
 #: src/renderer/src/components/ComputerTerminal.tsx
 msgid "Connessione al terminale…"
 msgstr "Connessione al terminale…"
@@ -1572,9 +1543,6 @@ msgid "connesso"
 msgstr "connesso"
 
 #: src/renderer/src/components/AppsWindow.tsx
-msgid "connetti"
-msgstr "connetti"
-
 #: src/renderer/src/components/ConnectorCard.tsx
 msgid "Connetti"
 msgstr "Connetti"
@@ -1786,10 +1754,6 @@ msgstr "da autorizzare (Impostazioni → Installati → Connetti)"
 msgid "da configurare: {0} (Impostazioni)"
 msgstr "da configurare: {0} (Impostazioni)"
 
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "da ricollegare"
-msgstr "da ricollegare"
-
 #: src/renderer/src/components/RightPanel.tsx
 msgid "da scegliere"
 msgstr "da scegliere"
@@ -1852,8 +1816,8 @@ msgid "Disattiva la chiave"
 msgstr "Disattiva la chiave"
 
 #: src/renderer/src/components/AppsWindow.tsx
-msgid "Disattiva la chiave e accedi"
-msgstr "Disattiva la chiave e accedi"
+msgid "Disattiva la chiave e collega"
+msgstr "Disattiva la chiave e collega"
 
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Disattivare toglie il server e revoca il token sul tuo Mac: le app collegate restano sul tuo account Composio, le togli da"
@@ -2003,10 +1967,6 @@ msgstr "Errore: {0}"
 #: src/renderer/src/components/Settings.tsx
 msgid "es. comandi ls e cat dentro la home del bot"
 msgstr "es. comandi ls e cat dentro la home del bot"
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "es. Usa questo account solo per lavoro; le email in italiano vanno riassunte in bulleted list…"
-msgstr "es. Usa questo account solo per lavoro; le email in italiano vanno riassunte in bulleted list…"
 
 #: src/renderer/src/lib/activity.ts
 msgid "esegue un comando…"
@@ -2163,6 +2123,10 @@ msgid "Gestisci ›"
 msgstr "Gestisci ›"
 
 #: src/renderer/src/components/AppsWindow.tsx
+msgid "Gestisci su Composio"
+msgstr "Gestisci su Composio"
+
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "gestiscile su Composio"
 msgstr "gestiscile su Composio"
 
@@ -2215,10 +2179,6 @@ msgstr "Gruppo non trovato"
 #: src/renderer/src/lib/activity.ts
 msgid "guarda i file…"
 msgstr "guarda i file…"
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "guida"
-msgstr "guida"
 
 #: src/renderer/src/lib/activity.ts
 msgid "Ha aperto {host}"
@@ -2466,10 +2426,6 @@ msgstr "Il bot ti sta chiedendo di intervenire sul suo schermo."
 msgid "Il bottone apre la pagina di login dell'app nel browser: finisci lì, poi la card si aggiorna da sola."
 msgstr "Il bottone apre la pagina di login dell'app nel browser: finisci lì, poi la card si aggiorna da sola."
 
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Il bottone apre la pagina di login dell'app nel browser: finisci lì, poi la riga compare sopra."
-msgstr "Il bottone apre la pagina di login dell'app nel browser: finisci lì, poi la riga compare sopra."
-
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "rpc.terminalBoxFailed"
@@ -2709,7 +2665,6 @@ msgstr "impossibile verificare \"{model}\" su {provider}: {error}"
 msgid "Impostazioni"
 msgstr "Impostazioni"
 
-#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/ConnectorCard.tsx
 msgid "In attesa del login nel browser…"
 msgstr "In attesa del login nel browser…"
@@ -2846,10 +2801,6 @@ msgstr "istruzioni"
 msgid "Istruzioni"
 msgstr "Istruzioni"
 
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Istruzioni personalizzate (vanno nel prompt del bot quando il connettore è attivo)"
-msgstr "Istruzioni personalizzate (vanno nel prompt del bot quando il connettore è attivo)"
-
 #: src/renderer/src/components/Settings.tsx
 msgid "Italiano"
 msgstr "Italiano"
@@ -2900,6 +2851,10 @@ msgstr "La chiave resta nel Portachiavi del Mac."
 msgid "La connessione allo schermo si è chiusa."
 msgstr "La connessione allo schermo si è chiusa."
 
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "La descrizione arriva dal catalogo Composio: per ora è in inglese."
+msgstr "La descrizione arriva dal catalogo Composio: per ora è in inglese."
+
 #: src/renderer/src/components/LibraryPanel.tsx
 msgid "La libreria è vuota: i documenti, i grafici e i file che i bot preparano finiscono qui."
 msgstr "La libreria è vuota: i documenti, i grafici e i file che i bot preparano finiscono qui."
@@ -2933,6 +2888,10 @@ msgstr "Lavoro e codice"
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Le app collegate fuori da Homun non si vedono qui: "
 msgstr "Le app collegate fuori da Homun non si vedono qui: "
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Le app dell'elenco che passano da qui"
+msgstr "Le app dell'elenco che passano da qui"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Le chiamate e i risultati dei tool tornano come righe nella conversazione (per il debug)."
@@ -3373,25 +3332,17 @@ msgstr "Nessun server trovato."
 msgid "Nessun task."
 msgstr "Nessun task."
 
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "nessun tool elencato"
-msgstr "nessun tool elencato"
-
 #: src/renderer/src/components/Settings.tsx
 msgid "nessun tool riconosciuto nel connettore: configura tool e idField a mano"
 msgstr "nessun tool riconosciuto nel connettore: configura tool e idField a mano"
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Nessuna app collegata: comincia dall'elenco qui sotto."
-msgstr "Nessuna app collegata: comincia dall'elenco qui sotto."
 
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Nessuna app collegata: comincia dalle consigliate."
 msgstr "Nessuna app collegata: comincia dalle consigliate."
 
 #: src/renderer/src/components/AppsWindow.tsx
-msgid "Nessuna app trovata"
-msgstr "Nessuna app trovata"
+msgid "Nessuna app trovata. Prova con un altro nome."
+msgstr "Nessuna app trovata. Prova con un altro nome."
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Nessuna chiamata nel periodo."
@@ -3484,10 +3435,6 @@ msgid "Nome utente"
 msgstr "Nome utente"
 
 #: src/renderer/src/components/AppsWindow.tsx
-msgid "Non c'è?"
-msgstr "Non c'è?"
-
-#: src/renderer/src/components/AppsWindow.tsx
 msgid "non connesso"
 msgstr "non connesso"
 
@@ -3519,8 +3466,8 @@ msgid "Non mostrare più"
 msgstr "Non mostrare più"
 
 #: src/renderer/src/components/AppsWindow.tsx
-msgid "non più attiva: ricollega per riavere le sue azioni"
-msgstr "non più attiva: ricollega per riavere le sue azioni"
+msgid "Non più attiva: ricollega per riavere le sue azioni."
+msgstr "Non più attiva: ricollega per riavere le sue azioni."
 
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Non riesco a cercare nel registro"
@@ -3530,10 +3477,6 @@ msgstr "Non riesco a cercare nel registro"
 msgid "Non riesco a cercare sul Mac: riprova."
 msgstr "Non riesco a cercare sul Mac: riprova."
 
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "non riesco a collegare"
-msgstr "non riesco a collegare"
-
 #: src/renderer/src/components/LibraryPanel.tsx
 msgid "Non riesco a leggere la libreria"
 msgstr "Non riesco a leggere la libreria"
@@ -3542,17 +3485,9 @@ msgstr "Non riesco a leggere la libreria"
 msgid "Non riesco a leggere le attività"
 msgstr "Non riesco a leggere le attività"
 
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "non riesco a partire"
-msgstr "non riesco a partire"
-
 #: src/renderer/src/components/Settings.tsx
 msgid "Non risponde"
 msgstr "Non risponde"
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "non riuscita"
-msgstr "non riuscita"
 
 #: src/renderer/src/components/ActivityPanel.tsx
 msgid "Non riusciti"
@@ -3564,13 +3499,13 @@ msgstr "Non riusciti"
 msgid "non riuscito"
 msgstr "non riuscito"
 
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Non riuscito"
+msgstr "Non riuscito"
+
 #: src/renderer/src/components/ConnectorCard.tsx
 msgid "Non riuscito: chiedi al bot di riprovare il collegamento."
 msgstr "Non riuscito: chiedi al bot di riprovare il collegamento."
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Non riuscito: riprova a collegarla."
-msgstr "Non riuscito: riprova a collegarla."
 
 #: src/renderer/src/components/LibraryCards.tsx
 msgid "Non salvare"
@@ -3691,11 +3626,6 @@ msgstr "Ollama, LM Studio · gratis, nessun dato esce"
 #: src/renderer/src/bot/bot-state.ts
 msgid "Online"
 msgstr "Online"
-
-#. placeholder {0}: c.name
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Oppure collega {0} tramite Composio (più app, un account):"
-msgstr "Oppure collega {0} tramite Composio (più app, un account):"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Opzioni avanzate"
@@ -3835,10 +3765,6 @@ msgstr "perso"
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Più di mille app con Composio"
 msgstr "Più di mille app con Composio"
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Più di mille app con un solo accesso"
-msgstr "Più di mille app con un solo accesso"
 
 #: src/renderer/src/components/DraftCard.tsx
 msgid "Più strumenti d'invio per questo canale: chiedi al bot di sceglierne uno"
@@ -4097,10 +4023,6 @@ msgstr "quando torni al computer dopo un’assenza"
 msgid "Quello del bot"
 msgstr "Quello del bot"
 
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Questa app su Composio va configurata dallo sviluppatore: per ora non si può collegare da Homun."
-msgstr "Questa app su Composio va configurata dallo sviluppatore: per ora non si può collegare da Homun."
-
 #: src/renderer/src/components/ApprovalCard.tsx
 msgid "Questa azione chiede sempre l'approvazione"
 msgstr "Questa azione chiede sempre l'approvazione"
@@ -4271,10 +4193,6 @@ msgstr "riconnessione non riuscita"
 msgid "riconnesso"
 msgstr "riconnesso"
 
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "riconnetti"
-msgstr "riconnetti"
-
 #: src/renderer/src/components/ConnectorCard.tsx
 msgid "Riconnetti"
 msgstr "Riconnetti"
@@ -4305,14 +4223,9 @@ msgstr "Rifiutato"
 msgid "rimuovi"
 msgstr "rimuovi"
 
-#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/Settings.tsx
 msgid "Rimuovi"
 msgstr "Rimuovi"
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Rimuovi davvero"
-msgstr "Rimuovi davvero"
 
 #: src/renderer/src/components/LibraryPanel.tsx
 msgid "Rinomina"
@@ -4441,10 +4354,6 @@ msgstr "Ruolo"
 #: src/renderer/src/components/Settings.tsx
 msgid "sabato"
 msgstr "sabato"
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "salva"
-msgstr "salva"
 
 #: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/BotDialogs.tsx
@@ -4595,6 +4504,10 @@ msgid "Scollega"
 msgstr "Scollega"
 
 #: src/renderer/src/components/AppsWindow.tsx
+msgid "Scollega davvero"
+msgstr "Scollega davvero"
+
+#: src/renderer/src/components/AppsWindow.tsx
 msgid "Scollegare NON cancella l'account su Composio: si gestisce da composio.dev."
 msgstr "Scollegare NON cancella l'account su Composio: si gestisce da composio.dev."
 
@@ -4712,10 +4625,6 @@ msgstr "Serve il nome della squadra."
 #: src/shared/ui-messages.ts
 msgid "rpc.needsWindow"
 msgstr "serve la finestra di Homun per autorizzare"
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Serve un client OAuth tuo (tipo «Desktop app»):"
-msgstr "Serve un client OAuth tuo (tipo «Desktop app»):"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -4870,10 +4779,6 @@ msgstr "Skill dei bot"
 #: src/renderer/src/components/ConnectorCards13.tsx
 msgid "skill: {0}"
 msgstr "skill: {0}"
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "slug dell'app (es. gmail)"
-msgstr "slug dell'app (es. gmail)"
 
 #: src/renderer/src/components/BotScreen.tsx
 msgid "Sola lettura — il bot non vede il tuo cursore"
@@ -5071,10 +4976,6 @@ msgstr "token scaduto"
 msgid "conn.tokenExpired"
 msgstr "token scaduto: riconnetti"
 
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "tool"
-msgstr "tool"
-
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "rpc.toolUnavailable"
@@ -5186,8 +5087,8 @@ msgid "notice.turnEndSuperseded"
 msgstr "Turno sostituito da un nuovo messaggio"
 
 #: src/renderer/src/components/AppsWindow.tsx
-msgid "Tutte le app"
-msgstr "Tutte le app"
+msgid "Tutte"
+msgstr "Tutte"
 
 #: src/renderer/src/components/ActivityPanel.tsx
 msgid "Tutti"
@@ -5393,6 +5294,10 @@ msgstr "Vista"
 #: src/renderer/src/components/BotScreen.tsx
 msgid "Vista dal vivo del computer del bot"
 msgstr "Vista dal vivo del computer del bot"
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Visualizza tutto"
+msgstr "Visualizza tutto"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts

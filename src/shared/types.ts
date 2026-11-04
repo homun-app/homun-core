@@ -847,9 +847,8 @@ export interface SandbotApi {
   composioSetKey(key: string): Promise<{ ok: boolean }>
   composioTest(): Promise<{ ok: boolean; reason?: 'invalid-key' | 'unreachable' | 'consumer-key' | 'gateway-active'; error?: string }>
   composioDisable(): Promise<{ ok: boolean }>
-  // fase app (A3): il catalogo Composio (curate escluse) con ricerca locale
-  composioCatalog(query?: string): Promise<ComposioCatalogInfo>
   // fase app (A4): collega (browser o subito) e scollega un toolkit
+  // (il catalogo per la UI è il file curato nel repo: fase catalogo app P7)
   composioConnect(slug: string): Promise<{ started: boolean; developerConfig?: boolean; error?: string }>
   composioDisconnect(slug: string): Promise<{ ok: boolean }>
   // fase Composio OAuth (C5): le app dentro il server Composio collegato col login
@@ -860,6 +859,15 @@ export interface SandbotApi {
   composioGatewayCancel(): Promise<{ ok: boolean }>
   /** il clic su «Collega» della card in chat: apre il link e aspetta il login */
   composioGatewayCardConnect(key: string): Promise<{ ok: boolean; error?: string }>
+  /**
+   * fase catalogo app (P4): «Connetti» in un passo. La riga decide la strada:
+   * diretta, login di Composio (phase 'login', poi il daemon prosegue da solo
+   * con l'app scelta) o collegamento dell'app (phase 'app'). Con la chiave di
+   * progetto attiva risponde conflict (le due strade non stanno insieme).
+   */
+  appsConnect(appId: string): Promise<{ started: boolean; phase?: 'direct' | 'login' | 'app'; conflict?: 'composio-key'; reason?: 'unknown-app' }>
+  /** Annulla sempre disponibile durante l'attesa del «Connetti» in un passo */
+  appsCancelConnect(appId: string): Promise<{ ok: boolean }>
   marketplaceList(): Promise<Array<{ name: string; source: string; kind: 'github' | 'git'; official: boolean }>>
   marketplaceAdd(source: string): Promise<{ name: string; source: string }>
   marketplaceRemove(source: string): Promise<{ ok: boolean }>
@@ -1384,21 +1392,10 @@ export interface ComposioStatusInfo {
   connected: ComposioConnectedApp[]
 }
 
-/** A3: una riga del catalogo Composio (il logo è già un data: URL). */
-export interface ComposioCatalogRow {
-  slug: string
-  name: string
-  tagline: string | null
-  category: string | null
-  logo: string | null
-  connectable: 'yes' | 'no-auth' | 'developer-config'
-}
-
-export interface ComposioCatalogInfo {
-  count: number
-  rows: ComposioCatalogRow[]
-  error?: string
-}
+// fase catalogo app (P7): le righe del catalogo Composio per la UI stavano
+// qui (A3) — ora l'elenco è il file CURATO nel repo (shared/app-catalog) e
+// non serve una RPC che lo scarichi; il bot continua a usare il metodo
+// catalog() del manager (tipo ComposioCatalogRowRpc lì dove serve).
 
 // ---- fase Composio OAuth (C5): le app collegate DENTRO il server Composio ----
 

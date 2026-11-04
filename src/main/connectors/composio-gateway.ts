@@ -89,6 +89,12 @@ export interface ComposioGatewayDeps {
   emit(e: SandbotEvent): void
   now?(): number
   /**
+   * Fase catalogo app (P4): quanto aspettare fra i TENTATIVI di una chiamata
+   * MCP che trova la connessione ancora aperta male (default 600 ms; i test
+   * la azzerano).
+   */
+  retryDelayMs?(): number
+  /**
    * K6 (ritocchi): i nomi completi degli strumenti del server Composio,
    * ricavati dal nome VERO del server con catalogId 'composio' (il default
    * resta lo slug storico «composio»: vedi COMPOSIO_SERVER_TOOLS).
@@ -201,16 +207,28 @@ export function createComposioGatewayManager(deps: ComposioGatewayDeps) {
 
   async function runWait(slug: string, name: string): Promise<'connected' | 'failed' | 'cancelled'> {
     const state = { slug, name, since: now(), cancelled: false }
-    const promise = (async () => {
+      const promise = (async () => {
       let outcome: 'connected' | 'failed' | 'cancelled'
       waiting = state
       deps.emit({ type: 'connectors' })
       try {
-        const output = await deps.callMcp(
-          serverTools().waitForConnections,
-          { toolkits: [slug], mode: 'any' },
-          { timeoutMs: COMPOSIO_GATEWAY_WAIT_MS }
-        )
+        // P4 (catalogo app): la PRIMA chiamata dopo il login di Composio può
+        // trovare la connessione MCP ancora aperta male («Connection closed»)
+        // — si ritenta un paio di volte prima di dichiarare l'attesa fallita
+        let output = ''
+        for (let attempt = 0; ; attempt++) {
+          try {
+            output = await deps.callMcp(
+              serverTools().waitForConnections,
+              { toolkits: [slug], mode: 'any' },
+              { timeoutMs: COMPOSIO_GATEWAY_WAIT_MS }
+            )
+            break
+          } catch (e) {
+            if (state.cancelled || attempt >= 2) throw e
+            await new Promise((r) => setTimeout(r, deps.retryDelayMs?.() ?? 600))
+          }
+        }
         if (state.cancelled) {
           outcome = 'cancelled'
         } else {
@@ -296,23 +314,36 @@ export function createComposioGatewayManager(deps: ComposioGatewayDeps) {
     /**
      * Il flusso DALLA FINESTRA APP (C5 punto 2): Collega → add per lo slug →
      * il link si apre subito (il clic nella finestra è dell'utente) → attesa.
+     * Fase catalogo app (P4): subito dopo il LOGIN di Composio la prima
+     * chiamata può trovare la connessione MCP ancora aperta male («Connection
+     * closed»): l'add si ritenta un paio di volte prima di arrendersi.
      */
     async connectApp(slugRaw: string, nameHint?: string): Promise<{ ok: boolean; error?: string }> {
       const slug = slugRaw.toLowerCase()
       if (!deps.gatewayActive()) return { ok: false, error: 'not-active' }
+      let link: string | undefined
+      let lastError = ''
+      for (let attempt = 0; attempt < 3 && !link; attempt++) {
+        try {
+          const { links } = await runManageConnections({
+            toolkits: [{ name: slug, action: 'add' }]
+          })
+          link = links[0]?.url
+          if (!link) return { ok: false, error: 'no authorization link in the response' }
+        } catch (e) {
+          lastError = e instanceof Error ? e.message : String(e)
+          if (attempt < 2) await new Promise((r) => setTimeout(r, deps.retryDelayMs?.() ?? 600))
+        }
+      }
+      if (!link) return { ok: false, error: lastError || 'connection error' }
       try {
-        const { links } = await runManageConnections({
-          toolkits: [{ name: slug, action: 'add' }]
-        })
-        const link = links[0]?.url
-        if (!link) return { ok: false, error: 'no authorization link in the response' }
         await deps.openExternal(link)
-        // K3 (ritocchi): il nome dell'attesa è umano anche senza hint
-        void waitForApp(slug, composioToolkitName(nameHint ?? slug))
-        return { ok: true }
       } catch (e) {
         return { ok: false, error: e instanceof Error ? e.message : String(e) }
       }
+      // K3 (ritocchi): il nome dell'attesa è umano anche senza hint
+      void waitForApp(slug, composioToolkitName(nameHint ?? slug))
+      return { ok: true }
     },
 
     /** Rimuovi (C5 punto 2): remove con account_id, conferma chiesta dalla UI. */

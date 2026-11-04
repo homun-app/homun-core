@@ -30,7 +30,10 @@ const makeManager = (respond: FakeMcp['respond']) => {
       opened.push(url)
     },
     hasUi: () => true,
-    emit: (e) => emitted.push(e)
+    emit: (e) => emitted.push(e),
+    // fase catalogo app (P4): i tentativi di una chiamata MCP rotta partono
+    // subito nei test (nel daemon vero aspettano 600 ms)
+    retryDelayMs: () => 0
   })
   return { manager, fake, opened, settings }
 }

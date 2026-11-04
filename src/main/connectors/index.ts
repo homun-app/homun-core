@@ -379,6 +379,14 @@ export function createConnectorsManager(deps: ConnectorsManagerDeps) {
       deps.onChange()
     },
 
+    /**
+     * Fase catalogo app (P2/P4): il client OAuth statico di una curata è salvato?
+     * Decide se la strada DIRETTA è «pronta senza configurazione» (apps:connect).
+     */
+    async hasStaticClient(id: string): Promise<boolean> {
+      return !!(await deps.store.read(id, 'staticClient'))
+    },
+
     /** Sezione istruzioni per i server connessi (system prompt). */
     instructionsSection(): string {
       const connected = catalog

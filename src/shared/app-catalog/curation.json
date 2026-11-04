@@ -1,0 +1,27 @@
+{
+  "featured": ["gmail", "googlecalendar", "googledrive", "notion", "slack", "googlesheets"],
+  "hidden": [],
+  "categories": {
+    "communication": "communication",
+    "productivity": "productivity",
+    "developer": "development",
+    "sales": "sales",
+    "marketing": "sales",
+    "finance": "finance",
+    "social_media": "social",
+    "design": "productivity",
+    "e_commerce": "sales",
+    "artificial_intelligence": "productivity"
+  },
+  "overrides": {
+    "slack": { "tagline": { "it": "Canali e messaggi del team", "en": "Team channels and messages" } },
+    "googlesheets": { "tagline": { "it": "Fogli e tabelle", "en": "Spreadsheets and tables" } }
+  },
+  "brands": {
+    "gmail": { "direct": "gmail", "composio": "gmail" },
+    "gcalendar": { "direct": "gcalendar", "composio": "googlecalendar" },
+    "gdrive": { "direct": "gdrive", "composio": "googledrive" },
+    "notion": { "direct": "notion", "composio": "notion" },
+    "linear": { "direct": "linear", "composio": "linear" }
+  }
+}

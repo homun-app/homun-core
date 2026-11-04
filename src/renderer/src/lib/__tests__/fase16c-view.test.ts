@@ -1,9 +1,11 @@
 // Fase 16c: le funzioni PURE del renderer — la prova «vale solo l'ultima»
-// (model-probe), il modello della finestra Collega app (apps-view), le righe
-// dell'Attività (activity-rows) e i filtri della Libreria (library-view).
+// (model-probe), il modello della finestra Collega app (apps-view, ridotta
+// dalla fase catalogo app ai soli server/plugin), le righe dell'Attività
+// (activity-rows) e i filtri della Libreria (library-view). Il modello
+// dell'elenco unico delle app sta in catalogo-app-view.test.ts.
 import { describe, expect, it } from 'vitest'
 import { nextModelProbe, EMPTY_MODEL_PROBE } from '../model-probe'
-import { appsViewModel, botsLabelOf, FEATURED_ORDER } from '../apps-view'
+import { appsViewModel, botsLabelOf } from '../apps-view'
 import { activityRows } from '../activity-rows'
 import { libraryRows } from '../library-view'
 import type { ConnectorInfo, GlobalActivityData } from '../../../../shared/types'
@@ -33,79 +35,39 @@ describe('nextModelProbe (C3.4): vale solo l\'ultima prova', () => {
   })
 })
 
-// ---- C4: appsViewModel ----
+// ---- C4: appsViewModel (server e plugin di «Collegate») ----
 
-const cat = (id: string, name: string, category: ConnectorInfo['category']): ConnectorInfo => ({
-  id, name, logo: '·', mcpUrl: 'https://example.com', clientRegistration: 'dynamic', docsUrl: 'https://docs.example.com',
-  notes: 'n', category, tagline: { it: `tagline ${id}`, en: `tagline en ${id}` },
-  state: { status: 'not_connected', disabledTools: [], instructions: '' }, tools: []
-})
-
-const connected = (id: string): ConnectorInfo => ({
-  ...cat(id, id, 'documents'), state: { status: 'connected', disabledTools: [], instructions: '' }
-})
-
-describe('appsViewModel (C4)', () => {
-  const catalog = [cat('linear', 'Linear', 'development'), cat('gmail', 'Gmail', 'mail-calendar'),
-    cat('notion', 'Notion', 'documents'), cat('gcalendar', 'Google Calendar', 'mail-calendar'),
-    cat('gdrive', 'Google Drive', 'documents'), cat('stripe', 'Stripe', 'development')]
+describe('appsViewModel (C4, ridotta): le collegate uniscono server e plugin', () => {
   const agents = [
     { id: 'a1', name: 'Nina' }, { id: 'a2', name: 'Contabile' }, { id: 'a3', name: 'Ricercatore' }, { id: 'a4', name: 'Sesto' }
   ]
 
-  it('le consigliate: al massimo 4 NON collegate nell\'ordine fisso gmail, gcalendar, gdrive, notion, linear', () => {
-    const vm = appsViewModel({ catalog, connectors: [], installed: null, agents, filter: 'all', query: '', lang: 'it' })
-    expect(vm.featured.map((f) => f.id)).toEqual(['gmail', 'gcalendar', 'gdrive', 'notion'])
-    expect(vm.featured[0]!.tagline).toBe('tagline gmail')
-  })
-
-  it('una consigliata già collegata si salta (linear subentra se c\'è posto)', () => {
-    const vm = appsViewModel({ catalog, connectors: [connected('gmail')], installed: null, agents, filter: 'all', query: '', lang: 'it' })
-    expect(vm.featured.map((f) => f.id)).toEqual(['gcalendar', 'gdrive', 'notion', 'linear'])
-  })
-
-  it('le collegate uniscono connettori, server e plugin, coi nomi dei bot (max 2 + +N) e «Tutti i bot»', () => {
+  it('le collegate uniscono server e plugin, coi nomi dei bot (max 2 + +N) e «Tutti i bot»', () => {
     const vm = appsViewModel({
-      catalog, connectors: [connected('gmail')],
+      connectors: [],
       installed: {
         servers: [{ id: 'srv1', name: 'Registro X', enabledFor: ['a1', 'a2', 'a3', 'a4'] }, { id: 'srv2', name: 'Manuale', enabledFor: ['*'] }],
         plugins: [{ name: 'plug', marketplace: 'official', skills: [], servers: [] }]
       },
       agents, filter: 'all', query: '', lang: 'it'
     })
-    expect(vm.connectedCount).toBe(4)
+    expect(vm.connected).toHaveLength(3)
     const srv1 = vm.connected.find((r) => r.id === 'srv1')!
     expect(srv1.botsLabel).toEqual({ all: false, names: ['Nina', 'Contabile'], extra: 2 })
+    expect(srv1.source).toBe('server')
     const srv2 = vm.connected.find((r) => r.id === 'srv2')!
     expect(srv2.botsLabel.all).toBe(true)
+    expect(vm.connected.find((r) => r.id === 'plug')?.source).toBe('plugin')
   })
 
-  it('il filtro per categoria lascia solo le voci di quella categoria (non collegate)', () => {
-    const vm = appsViewModel({ catalog, connectors: [], installed: null, agents, filter: 'documents', query: '', lang: 'it' })
-    expect(vm.catalogRows.map((c) => c.id).sort()).toEqual(['gdrive', 'notion'])
-  })
-
-  it('la ricerca filtra il catalogo per nome, id e tagline (in entrambe le lingue)', () => {
-    const it = appsViewModel({ catalog, connectors: [], installed: null, agents, filter: 'all', query: 'tagline en notion', lang: 'en' })
-    expect(it.catalogRows.map((c) => c.id)).toEqual(['notion'])
-    const byName = appsViewModel({ catalog, connectors: [], installed: null, agents, filter: 'all', query: 'stripe', lang: 'it' })
-    expect(byName.catalogRows.map((c) => c.id)).toEqual(['stripe'])
-  })
-
-  it('botsLabelOf: id che non sono bot restano com\'erano (mai silenziosi)', () => {
-    expect(botsLabelOf(['a1', 'ghost'], agents)).toEqual({ all: false, names: ['Nina', 'ghost'], extra: 0 })
-  })
-
-  it('la categoria Comunicazione compare solo se il catalogo ne ha una voce', () => {
-    expect(appsViewModel({ catalog, connectors: [], installed: null, agents, filter: 'all', query: '', lang: 'it' }).hasCommunication).toBe(false)
-    const withComm = appsViewModel({
-      catalog: [...catalog, cat('slack', 'Slack', 'communication')], connectors: [], installed: null, agents, filter: 'all', query: '', lang: 'it'
+  it('la ricerca filtra le collegate per nome; botsLabelOf non inventa nomi', () => {
+    const vm = appsViewModel({
+      connectors: [],
+      installed: { servers: [{ id: 'srv1', name: 'Registro X' }], plugins: [] },
+      agents, filter: 'all', query: 'registro', lang: 'it'
     })
-    expect(withComm.hasCommunication).toBe(true)
-  })
-
-  it('FEATURED_ORDER non contiene voci inventate fuori dal catalogo di oggi', () => {
-    expect(FEATURED_ORDER).toEqual(['gmail', 'gcalendar', 'gdrive', 'notion', 'linear'])
+    expect(vm.connected.map((r) => r.id)).toEqual(['srv1'])
+    expect(botsLabelOf(['a1', 'ghost'], agents)).toEqual({ all: false, names: ['Nina', 'ghost'], extra: 0 })
   })
 })
 
@@ -178,87 +140,5 @@ describe('libraryRows (C6): filtri e ordine (fissati in cima, poi updatedAt)', (
   it('filtro per bot (authorAgentId, client-side) e per tipo', () => {
     expect(libraryRows(items, 'a1', '').map((i) => i.id)).toEqual(['c', 'a'])
     expect(libraryRows(items, '', 'document').map((i) => i.id)).toEqual(['a'])
-  })
-})
-
-// ---- fase 16c correzioni (R8.1): «Altre app» senza doppioni ----
-
-describe('R8.1 — appsViewModel: la lista sotto le consigliate non ripete nulla', () => {
-  // stesse fixture del describe C4 qui sopra
-  const catalog = [cat('linear', 'Linear', 'development'), cat('gmail', 'Gmail', 'mail-calendar'),
-    cat('notion', 'Notion', 'documents'), cat('gcalendar', 'Google Calendar', 'mail-calendar'),
-    cat('gdrive', 'Google Drive', 'documents'), cat('stripe', 'Stripe', 'development')]
-  const agents = [
-    { id: 'a1', name: 'Nina' }, { id: 'a2', name: 'Contabile' }, { id: 'a3', name: 'Ricercatore' }, { id: 'a4', name: 'Sesto' }
-  ]
-
-  it('pillola Tutte, ricerca vuota: la lista ESCLUDE le consigliate (diventa «Altre app»)', () => {
-    const vm = appsViewModel({ catalog, connectors: [], installed: null, agents, filter: 'all', query: '', lang: 'it' })
-    expect(vm.featured.map((f) => f.id)).toEqual(['gmail', 'gcalendar', 'gdrive', 'notion'])
-    // la lista sotto NON contiene le consigliate: restano solo le altre
-    expect(vm.catalogRows.map((c) => c.id)).toEqual(['linear', 'stripe'])
-  })
-
-  it('con una CATEGORIA scelta si vede TUTTO ciò che corrisponde (consigliate comprese), senza doppioni', () => {
-    const vm = appsViewModel({ catalog, connectors: [], installed: null, agents, filter: 'documents', query: '', lang: 'it' })
-    expect(vm.catalogRows.map((c) => c.id).sort()).toEqual(['gdrive', 'notion'])
-    // la sezione consigliate non c'è (lo sa la finestra: pillola Tutte)
-    expect(vm.featured.length).toBe(4) // il modello le calcola comunque
-  })
-
-  it('con una RICERCA si vede TUTTO ciò che corrisponde, anche le consigliate', () => {
-    const vm = appsViewModel({ catalog, connectors: [], installed: null, agents, filter: 'all', query: 'notion', lang: 'it' })
-    expect(vm.catalogRows.map((c) => c.id)).toEqual(['notion'])
-  })
-
-  it('nessuna voce compare MAI due volte fra consigliate e lista (Tutte + ricerca vuota)', () => {
-    const vm = appsViewModel({ catalog, connectors: [], installed: null, agents, filter: 'all', query: '', lang: 'it' })
-    const ids = [...vm.featured.map((f) => f.id), ...vm.catalogRows.map((c) => c.id)]
-    expect(new Set(ids).size).toBe(ids.length)
-    // e tutte le voci del catalogo non collegate sono sullo schermo una volta
-    expect(ids.sort()).toEqual(['gcalendar', 'gdrive', 'gmail', 'linear', 'notion', 'stripe'])
-  })
-})
-
-// ---- K4/K5 (fase Composio OAuth — ritocchi): la voce gateway ha la SUA card ----
-
-describe('K4/K5 — la voce gateway (composio) nella finestra App', () => {
-  const gateway = (): ConnectorInfo => ({
-    ...cat('composio', 'Composio', 'communication'),
-    gateway: true,
-    tagline: { it: 'Più di mille app con un solo accesso', en: 'A thousand apps with one sign-in' }
-  })
-  const agents = [{ id: 'a1', name: 'Nina' }]
-
-  it('K4: la voce gateway NON sta in catalogRows né in featured (ha la sua card in cima), senza ricerca', () => {
-    const catalog = [gateway(), cat('stripe', 'Stripe', 'development')]
-    const vm = appsViewModel({ catalog, connectors: [], installed: null, agents, filter: 'all', query: '', lang: 'it' })
-    expect(vm.catalogRows.map((c) => c.id)).toEqual(['stripe'])
-    expect(vm.featured.map((f) => f.id)).toEqual([])
-  })
-
-  it('K4: vale ANCHE con una ricerca o una categoria scelta (cercando «composio» niente riga)', () => {
-    const catalog = [gateway(), cat('stripe', 'Stripe', 'development')]
-    const byQuery = appsViewModel({ catalog, connectors: [], installed: null, agents, filter: 'all', query: 'composio', lang: 'it' })
-    expect(byQuery.catalogRows.map((c) => c.id)).toEqual([])
-    const byCategory = appsViewModel({ catalog, connectors: [], installed: null, agents, filter: 'communication', query: '', lang: 'it' })
-    expect(byCategory.catalogRows.map((c) => c.id)).toEqual([])
-  })
-
-  it('K5: collegata, la riga porta via «composio» (Tramite Composio), non «Diretta»', () => {
-    const catalog = [gateway(), cat('stripe', 'Stripe', 'development')]
-    const linkedGateway: ConnectorInfo = {
-      ...gateway(), state: { status: 'connected', disabledTools: [], instructions: '' }
-    }
-    const vm = appsViewModel({ catalog, connectors: [linkedGateway], installed: null, agents, filter: 'all', query: '', lang: 'it' })
-    const row = vm.connected.find((r) => r.id === 'composio')
-    expect(row?.via).toBe('composio')
-    expect(row?.gateway).toBe(true)
-    // le curate collegate restano dirette
-    const linkedLinear: ConnectorInfo = {
-      ...cat('linear', 'Linear', 'development'), state: { status: 'connected', disabledTools: [], instructions: '' }
-    }
-    const vm2 = appsViewModel({ catalog, connectors: [linkedLinear], installed: null, agents, filter: 'all', query: '', lang: 'it' })
-    expect(vm2.connected.find((r) => r.id === 'linear')?.via).toBe('direct')
   })
 })

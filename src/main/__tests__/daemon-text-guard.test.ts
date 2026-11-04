@@ -84,6 +84,9 @@ const ALLOWED_SYMBOLS: Record<string, string[]> = {
   // R4 (fase app — ritocchi): il glossario degli oggetti delle azioni Composio
   // in italiano (lista per costruzione, come IT_WORDS del rilevatore)
   'src/shared/composio-names.ts': ['ACTION_OBJECTS'],
+  // fase catalogo app (P2): le etichette it/en delle categorie nostre — POche
+  // e FISSE, dati per costruzione (non testi della UI, che passano da Trans)
+  'src/shared/app-catalog/index.ts': ['APP_CATEGORY_LABELS'],
   // lista di riconoscimento dei campi con credenziali (legge la pagina, C7);
   // COMMIT_WORDS non scatta più e NON è in lista: una voce morta fallirebbe
   'src/main/agent/browser-guard.ts': ['CREDENTIAL_FIELD_WORDS'],

@@ -8,7 +8,17 @@
 // Modulo PURO in shared: lo usano il daemon (describeTool, lo status delle
 // app collegate) e il renderer (il titolo della card d'approvazione, che si
 // ri-localizza quando cambia lingua). Nessuna dipendenza: solo tabelle.
+// Fase catalogo app (P7): i nomi umani degli APP arrivano dal catalogo curato
+// nel repo (app-catalog/composio-catalog.json); la tabella dei comuni resta
+// il ripiego per gli slug fuori catalogo.
 import type { UiLanguage } from './ui-language'
+import composioCatalogJson from './app-catalog/composio-catalog.json'
+
+/** I nomi del catalogo curato, per slug (P7). */
+const CATALOG_NAMES = new Map(
+  (composioCatalogJson as unknown as Array<{ slug: string; name: string }>)
+    .map((e) => [e.slug.toLowerCase(), e.name])
+)
 
 /** I verbi delle azioni (il PRIMO segmento dello slug), in italiano. */
 const ACTION_VERBS: Readonly<Record<string, string>> = {
@@ -237,13 +247,16 @@ export function knownToolkitSlugs(extra: readonly string[] = []): string[] {
 }
 
 /**
- * Il nome umano di uno slug: nome della tabella se c'è, altrimenti la forma
- * leggibile (K3 dei ritocchi: mai lo slug grezzo all'utente — «slack» non è
- * un nome, «x_twitter» nemmeno). «x_twitter» è in tabella («X»); uno slug
- * ignoto «foo_bar» diventa «Foo bar».
+ * Il nome umano di uno slug: il nome del CATALOGO CURATO nel repo (fase
+ * catalogo app, P7) se c'è, altrimenti la tabella dei comuni qui accanto,
+ * altrimenti la forma leggibile (K3 dei ritocchi: mai lo slug grezzo
+ * all'utente — «slack» non è un nome, «x_twitter» nemmeno). «x_twitter» è in
+ * tabella («X»); uno slug ignoto «foo_bar» diventa «Foo bar».
  */
 export function composioToolkitName(slug: string): string {
   const key = slug.toLowerCase()
+  const fromCatalog = CATALOG_NAMES.get(key)
+  if (fromCatalog) return fromCatalog
   const known = COMMON_COMPOSIO_TOOLKITS.find((t) => t.slug === key)?.name
   if (known) return known
   const readable = key.replace(/[_\-.]+/g, ' ').trim()

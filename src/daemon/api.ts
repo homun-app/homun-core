@@ -200,6 +200,60 @@ export function buildApiMethods(
     return { providerId: p.id, model, thinking }
   }
 
+  // ---- fase catalogo app (P4): lo stato del collegamento «in un passo» ----
+
+  /** L'intenzione di collegare un'app appena il login di Composio riesce (10 minuti, UNA sola). */
+  let appConnectIntent: { appId: string; slug: string; name: string; at: number } | null = null
+  const APP_INTENT_TTL_MS = 10 * 60_000
+  /** il login di Composio in corso (un secondo clic lo RIUSA, non lo doppia) */
+  let composioLoginInFlight: Promise<unknown> | null = null
+
+  /**
+   * La riga dell'elenco app per id: la stessa fusione PUra di loadAppCatalog,
+   * con le curate static «pronte» solo se il client OAuth è davvero salvato.
+   */
+  const resolveAppRow = async (appId: string) => {
+    const { loadAppCatalog } = await import('../shared/app-catalog')
+    const staticReady = new Set<string>()
+    if (connectors) {
+      for (const e of connectors.catalog) {
+        if (e.gateway || e.clientRegistration !== 'static') continue
+        if (await connectors.hasStaticClient(e.id)) staticReady.add(e.id)
+      }
+    }
+    return loadAppCatalog({ staticClientsReady: staticReady }).find((r) => r.id === appId) ?? null
+  }
+
+  /**
+   * Il login di Composio con l'intenzione in mano: quando il connettore risulta
+   * connesso (e l'intenzione è ancora viva e non scaduta) il daemon prosegue
+   * DA SOLO con connectApp per l'app scelta. Un secondo clic mentre il login
+   * gira non parte un secondo flusso: sostituisce l'intenzione e aspetta.
+   */
+  const runComposioLoginWithIntent = async (): Promise<void> => {
+    if (composioLoginInFlight || !connectors) return
+    const entry = connectors.catalog.find((e) => e.id === 'composio')
+    if (!entry) return
+    const promise = connectors.runConnect(entry)
+    composioLoginInFlight = promise
+    try {
+      const r = await promise
+      if (r.status === 'connected') await notifyConnectorConnected(entry.id, entry.name, emit, worker)
+      const intent = appConnectIntent
+      if (r.status === 'connected' && intent && Date.now() - intent.at <= APP_INTENT_TTL_MS && opts.composioGateway) {
+        appConnectIntent = null
+        await opts.composioGateway.connectApp(intent.slug, intent.name)
+        return
+      }
+      appConnectIntent = null
+    } catch {
+      appConnectIntent = null
+    } finally {
+      composioLoginInFlight = null
+    }
+    emit({ type: 'connectors' })
+  }
+
   return {
     // ---- agenti ----
     'agents:list': () => store.listAgents(),
@@ -1230,10 +1284,9 @@ export function buildApiMethods(
       if (!opts.composio) throw uiError(UI.composioNotActive)
       return opts.composio.disable()
     },
-    'composio:catalog': ([query]) => {
-      if (!opts.composio) return { count: 0, rows: [] }
-      return opts.composio.catalog(typeof query === 'string' ? query : '')
-    },
+    // fase catalogo app (P7): niente più 'composio:catalog' per la finestra
+    // App — l'elenco è il file CURATO nel repo (shared/app-catalog); il
+    // metodo catalog() del manager resta per il bot (offer_connector/search)
     'composio:connect': ([slug]) => {
       if (!opts.composio) throw uiError(UI.composioNotActive)
       const r = opts.composio.connect(String(slug ?? ''))
@@ -1270,6 +1323,59 @@ export function buildApiMethods(
     'composio-gateway:card-connect': ([key]) => {
       if (!opts.composioGateway) throw uiError(UI.composioNotActive)
       return opts.composioGateway.cardConnect(String(key ?? ''))
+    },
+
+    // ---- fase catalogo app (P4): «Connetti» in un passo ----
+    // La RIGA dell'elenco decide la strada: la diretta se è pronta senza
+    // configurazione (dynamic, o static col client OAuth salvato), altrimenti
+    // Composio. Se Composio non è ancora «entrato», parte il login e
+    // l'intenzione di collegare l'app scelta sta NEL DEMONTE (il renderer può
+    // chiudere la finestra): scade dopo 10 minuti ed è UNA sola alla volta —
+    // un secondo clic la sostituisce.
+    'apps:connect': async ([appId]) => {
+      if (!connectors) throw uiError(UI.rpcConnectorsUnavailable)
+      const row = await resolveAppRow(String(appId ?? ''))
+      if (!row) return { started: false as const, reason: 'unknown-app' as const }
+      if (row.via === 'direct' && row.directId) {
+        const entry = connectors.catalog.find((e) => e.id === row.directId)
+        if (!entry) return { started: false as const, reason: 'unknown-app' as const }
+        void connectors.runConnect(entry).then(async (r) => {
+          if (r.status === 'connected') await notifyConnectorConnected(entry.id, entry.name, emit, worker)
+        })
+        return { started: true as const, phase: 'direct' as const }
+      }
+      const slug = row.composioSlug
+      if (!slug) return { started: false as const, reason: 'unknown-app' as const }
+      // C6: con la chiave di progetto attiva le due strade non stanno insieme
+      // — la risposta dice «conflict» e la UI propone di disattivarla
+      if (opts.composio && (await opts.composio.status()).active) {
+        return { started: false as const, conflict: 'composio-key' as const }
+      }
+      if (opts.composioGateway?.status().active) {
+        void opts.composioGateway.connectApp(slug, row.name)
+        return { started: true as const, phase: 'app' as const }
+      }
+      // non ancora entrato: login di Composio ora, l'app appena il login riesce
+      appConnectIntent = { appId: row.id, slug, name: row.name, at: Date.now() }
+      emit({ type: 'connectors' })
+      void runComposioLoginWithIntent()
+      return { started: true as const, phase: 'login' as const }
+    },
+
+    /** Annulla sempre disponibile durante l'attesa: l'intenzione se ne va, l'attesa dell'app si ferma. */
+    'apps:cancel-connect': async ([appId]) => {
+      if (!connectors) throw uiError(UI.rpcConnectorsUnavailable)
+      const row = await resolveAppRow(String(appId ?? ''))
+      const slug = row?.composioSlug ?? null
+      const mine = appConnectIntent !== null && (appConnectIntent.appId === String(appId ?? '') || appConnectIntent.slug === slug)
+      if (mine) appConnectIntent = null
+      if (slug && opts.composioGateway?.status().pending?.slug === slug) opts.composioGateway.cancelWait()
+      else if (mine && connectors.stateOf('composio').status !== 'connected') {
+        // il login era partito per l'app annullata: si ferma anche quello
+        void connectors.disconnect('composio')
+      }
+      emit({ type: 'connectors' })
+      return { ok: true }
     },
 
     // ---- vault credenziali ----

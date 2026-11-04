@@ -1,19 +1,16 @@
-// Fase 16c (C4): il modello della finestra «Collega app e skill» come
-// FUNZIONE PURA (tavola 6): le consigliate (ordine fisso, al massimo 4, non
-// collegate), le collegate (connettore del catalogo, server MCP installato,
-// plugin) con i nomi dei bot e il «+N», il filtro per categoria e la ricerca.
-// Fase app (A1/A3/A4): UNA lista sola — le curate PRIMA e le app Composio
-// DOPO in ordine alfabetico; le curate vincono sui toolkit Composio dello
-// stesso servizio (l'esclusione la fa il daemon con la tabella di slug);
-// «Collegate» comprende anche le app Composio, con lo stato «da ricollegare».
-// Ogni riga porta la PROVENIENZA (A7): 'direct' (curata) o 'composio'.
-import type { ConnectorInfo, ComposioCatalogRow, ComposioStatusInfo, ComposioGatewayStatusInfo, Localized } from '../../../shared/types'
+// Fase catalogo app (P2/P3): il modello della finestra «App» come FUNZIONE
+// PURA. L'elenco UNICO delle app arriva da shared/app-catalog (loadAppCatalog);
+// qui si aggiunge lo STATO di collegamento (diretta dal catalogo connettori,
+// app Composio del gateway o della chiave), le sezioni (Connesse in cima,
+// Consigliate per te, una per categoria) e la griglia di ricerca/filtro.
+// La sezione «Collegate» dei server e dei plugin resta quella di fase 16c:
+// righe con stato, nomi dei bot e «+N».
+import type { ConnectorInfo, ComposioStatusInfo, ComposioGatewayStatusInfo } from '../../../shared/types'
+import type { AppCatalogRow, AppCategoryId } from '../../../shared/app-catalog'
+import { APP_CATEGORIES, appTaglineOf, searchApps } from '../../../shared/app-catalog'
 
-/** L'ordine fisso delle consigliate (l'idea di featured-connectors di Rakazo). */
-export const FEATURED_ORDER = ['gmail', 'gcalendar', 'gdrive', 'notion', 'linear'] as const
-
-/** I filtri a pillola della finestra. */
-export type AppsFilter = 'all' | 'connected' | 'mail-calendar' | 'documents' | 'development' | 'communication' | 'skills'
+/** I filtri a pillola della finestra: Tutte, Connesse, le categorie nostre. */
+export type AppsFilter = 'all' | 'connected' | AppCategoryId
 
 export interface InstalledServerLike {
   id: string
@@ -45,11 +42,10 @@ export interface SkillsByOwner {
   skills: string[]
 }
 
-/** A7: da dove passano i dati dell'app. */
+/** A7/P5: da dove passano i dati dell'app. */
 export type AppProvenance = 'direct' | 'composio'
 
 export interface AppsViewInput {
-  catalog: ConnectorInfo[]
   connectors: ConnectorInfo[]
   installed: { servers: InstalledServerLike[]; plugins: InstalledPluginLike[] } | null
   agents: AgentLike[]
@@ -59,80 +55,73 @@ export interface AppsViewInput {
   query: string
   /** la lingua attiva per i tagline Localized */
   lang: 'it' | 'en'
-  /** fase app: lo stato Composio (null = RPC non disponibile) */
-  composio?: ComposioStatusInfo | null
-  /** fase app: le righe del catalogo Composio già filtrate dal daemon (curate escluse) */
-  composioRows?: ComposioCatalogRow[]
-  /** fase Composio OAuth (C5): le app dentro il server Composio collegato col login */
-  composioGateway?: ComposioGatewayStatusInfo | null
-}
-
-export interface FeaturedRow {
-  kind: 'featured'
-  id: string
-  name: string
-  logo: string
-  tagline: string | null
 }
 
 export interface ConnectedRow {
   kind: 'connected'
   key: string
-  /** connettore del catalogo | server MCP | plugin | app Composio */
-  source: 'connector' | 'server' | 'plugin' | 'composio'
+  /** server MCP | plugin (le app del catalogo stanno nell'elenco unico) */
+  source: 'server' | 'plugin'
   id: string
   name: string
   logo: string
   /** quali bot la usano: «Tutti i bot» (all) o i primi 2 nomi + +N */
   botsLabel: { all: boolean; names: string[]; extra: number }
   status: 'connected' | 'reconnect'
-  /** A7: la provenienza (le curate/server sono dirette, Composio passa dai suoi server) */
+  /** A7: la provenienza (i server e i plugin stanno sul Mac) */
   via: AppProvenance
-  /** solo source 'composio': lo slug del toolkit (Collega/Scollega/Ricollega) */
-  composioSlug?: string
-  /** fase Composio OAuth (C5): lo slug di un'app del GATEWAY (login, non chiave) */
-  gatewaySlug?: string
-  /** fase Composio OAuth (C6): la riga apre il dettaglio del gateway Composio */
-  gateway?: boolean
 }
 
-/** Una riga Composio di «Tutte le app» (A3). */
-export interface ComposioAppRow {
-  slug: string
-  name: string
+/** Una riga dell'elenco unico con il suo stato di collegamento. */
+export interface CatalogRowView {
+  app: AppCatalogRow
+  /** la mezza riga nella lingua attiva (null = niente) */
   tagline: string | null
-  logo: string | null
-  connectable: 'yes' | 'no-auth' | 'developer-config'
+  connected: 'connected' | 'reconnect' | null
 }
 
 export interface AppsViewModel {
-  /** «Consigliate per te»: al massimo 4, non collegate, ordine fisso */
-  featured: FeaturedRow[]
-  /** «Collegate»: connettori collegati + server installati + plugin + app Composio */
+  /** «Collegate»: server MCP installati + plugin (le app stanno nell'elenco) */
   connected: ConnectedRow[]
-  /** le voci del catalogo NON collegate che passano filtro e ricerca */
-  catalogRows: ConnectorInfo[]
-  /** fase app: le app Composio non collegate (dopo le curate, ordine del daemon) */
-  composioApps: ComposioAppRow[]
-  /** quante app sono collegate in tutto (per «N collegate ›») */
-  connectedCount: number
   /** le skill di tutti i bot (riga «Skill dei bot») */
   skills: SkillsByOwner[]
-  /** la categoria «Comunicazione» esiste solo se il catalogo ha voci di quel tipo */
-  hasCommunication: boolean
 }
 
-function matchesQuery(hay: string, query: string): boolean {
-  const q = query.trim().toLowerCase()
-  if (!q) return true
-  // le parole della ricerca devono esserci TUTTE (le frasi trovano le frasi)
-  return q.split(/\s+/).every((w) => hay.includes(w))
+/** Una sezione per categoria (P3): le prime 6 per rank e il totale. */
+export interface CatalogSection {
+  category: AppCategoryId
+  rows: CatalogRowView[]
+  total: number
 }
 
-/** Il tagline nella lingua scelta (le stringhe semplici restano com'erano). */
-export function taglineOf(tagline: Localized | undefined, lang: 'it' | 'en'): string | null {
-  if (!tagline) return null
-  return typeof tagline === 'string' ? tagline : tagline[lang]
+export interface AppsCatalogInput {
+  /** l'elenco unico (loadAppCatalog) già calcolato con le static pronte */
+  apps: AppCatalogRow[]
+  connectors: ConnectorInfo[]
+  composio?: ComposioStatusInfo | null
+  composioGateway?: ComposioGatewayStatusInfo | null
+  filter: AppsFilter
+  query: string
+  lang: 'it' | 'en'
+}
+
+export interface AppsCatalogModel {
+  /** tutte le righe con lo stato di collegamento */
+  rows: CatalogRowView[]
+  /** «Consigliate per te»: le featured NON connesse, al massimo 6 (Tutte, senza ricerca) */
+  featured: CatalogRowView[]
+  /** la sezione «Connesse» compatta (Tutte, senza ricerca) */
+  connectedRows: CatalogRowView[]
+  /** le sezioni per categoria (Tutte, senza ricerca; le connesse stanno in cima) */
+  sections: CatalogSection[]
+  /** la griglia sola di ricerca/filtro (null = si vedono le sezioni) */
+  grid: CatalogRowView[] | null
+  /** quante app sono collegate (testata «N connesse ›» e pillola Connesse) */
+  connectedCount: number
+  /** le categorie che hanno almeno un'app, nell'ordine fisso (le pillole) */
+  categoriesPresent: AppCategoryId[]
+  /** ricerca senza risultati (il messaggio vuoto gentile) */
+  nothingFound: boolean
 }
 
 /** I nomi dei bot che usano la voce («Tutti i bot» quando c'è '*'), max 2 + +N. */
@@ -144,60 +133,14 @@ export function botsLabelOf(enabledFor: string[] | null | undefined, agents: Age
 }
 
 /**
- * PURA (tavola 6): il modello della vista. Le consigliate sono al massimo 4
- * voci NON collegate del catalogo nell'ordine fisso FEATURED_ORDER; le
- * collegate uniscono connettori collegati, server installati, plugin e app
- * Composio (con lo stato); la ricerca filtra catalogo, Composio e collegate
- * per nome (e id per il catalogo, slug per Composio).
+ * PURA (16c, ridotta alla sezione «Collegate»): i server MCP installati e i
+ * plugin con lo stato e i nomi dei bot. Le APP del catalogo non stanno più
+ * qui: l'elenco unico di appsCatalogModel le copre con la loro provenienza.
  */
 export function appsViewModel(input: AppsViewInput): AppsViewModel {
   const q = input.query.trim().toLowerCase()
-  const lang = input.lang
-  const connectedStates = new Set(
-    input.connectors.filter((c) => c.state.status === 'connected' || c.state.status === 'needs_auth').map((c) => c.id)
-  )
   const agents = input.agents
-  const composio = input.composio ?? null
-
-  // -- le consigliate: ordine fisso, non collegate, al massimo 4 --
-  // K4 (ritocchi): le voci GATEWAY del catalogo (composio) non stanno qui:
-  // hanno la LORO card in cima, non la riga normale
-  const featured: FeaturedRow[] = []
-  for (const id of FEATURED_ORDER) {
-    if (featured.length >= 4) break
-    const entry = input.catalog.find((c) => c.id === id)
-    if (!entry || connectedStates.has(entry.id) || entry.gateway) continue
-    featured.push({
-      kind: 'featured',
-      id: entry.id,
-      name: entry.name,
-      logo: entry.logo,
-      tagline: taglineOf(entry.tagline, lang)
-    })
-  }
-
-  // -- le collegate: connettori del catalogo collegati (o da ricollegare) --
   const connected: ConnectedRow[] = []
-  for (const c of input.connectors) {
-    if (c.state.status !== 'connected' && c.state.status !== 'needs_auth') continue
-    if (q && !matchesQuery(`${c.name} ${c.id}`.toLowerCase(), q)) continue
-    connected.push({
-      kind: 'connected',
-      key: `connector:${c.id}`,
-      source: 'connector',
-      id: c.id,
-      name: c.name,
-      logo: c.logo,
-      botsLabel: { all: true, names: [], extra: 0 },
-      status: c.state.status === 'connected' ? 'connected' : 'reconnect',
-      // K5 (ritocchi): Composio NON è diretta — login e azioni passano dai
-      // suoi server, la riga porta «Tramite Composio» come le app dentro
-      via: c.gateway ? 'composio' : 'direct',
-      // fase Composio OAuth (C6): la voce Composio del catalogo apre il
-      // dettaglio del gateway (app collegate, Collega un'app, Disattiva)
-      ...(c.gateway ? { gateway: true } : {})
-    })
-  }
   // -- i server MCP installati (registro, plugin, gateway, manuale) --
   for (const s of input.installed?.servers ?? []) {
     if (q && !matchesQuery(s.name.toLowerCase(), q)) continue
@@ -228,74 +171,92 @@ export function appsViewModel(input: AppsViewInput): AppsViewModel {
       via: 'direct'
     })
   }
-  // -- fase Composio OAuth (C5): le app dentro il server Composio (login) --
-  const gatewayApps = input.composioGateway?.connected ?? []
-  for (const app of gatewayApps) {
-    if (q && !matchesQuery(`${app.name} ${app.slug}`.toLowerCase(), q)) continue
-    connected.push({
-      kind: 'connected',
-      key: `gateway-app:${app.slug}`,
-      source: 'composio',
-      id: app.slug,
-      name: app.name,
-      logo: '🌐',
-      botsLabel: { all: true, names: [], extra: 0 },
-      status: app.status === 'ACTIVE' ? 'connected' : 'reconnect',
-      via: 'composio',
-      gatewaySlug: app.slug
-    })
-  }
-  // -- le app Composio collegate (o «da ricollegare») --
-  for (const app of composio?.connected ?? []) {
-    if (q && !matchesQuery(`${app.name} ${app.slug}`.toLowerCase(), q)) continue
-    connected.push({
-      kind: 'connected',
-      key: `composio:${app.slug}`,
-      source: 'composio',
-      id: app.slug,
-      name: app.name,
-      logo: '🌐',
-      botsLabel: { all: true, names: [], extra: 0 },
-      status: app.status === 'ACTIVE' ? 'connected' : 'reconnect',
-      via: 'composio',
-      composioSlug: app.slug
-    })
-  }
-
-  // -- il catalogo per filtro e ricerca (viste Tutte / categoria) --
-  // fase 16c correzioni (R8.1): la sezione «Consigliate per te» esiste SOLO
-  // con la pillola Tutte e nessuna ricerca; in quel caso la lista qui sotto
-  // ESCLUDE quelle voci e diventa «Altre app» — prima le quattro consigliate
-  // comparivano DUE volte. Con una categoria scelta o una ricerca la sezione
-  // consigliate non c'è e si vede TUTTO ciò che corrisponde, senza doppioni
-  const featuredSectionVisible = !q && input.filter === 'all' && featured.length > 0
-  const featuredIds = new Set(featured.map((f) => f.id))
-  const catalogRows = input.catalog.filter((c) => {
-    if (connectedStates.has(c.id)) return false
-    // K4 (ritocchi): le voci GATEWAY non diventano MAI riga normale (con la
-    // ricerca o la categoria scelta come senza): Composio ha la sua card
-    if (c.gateway) return false
-    if (input.filter !== 'all' && input.filter !== 'connected' && c.category !== input.filter) return false
-    if (q && !matchesQuery(`${c.name} ${c.id} ${taglineOf(c.tagline, lang) ?? ''}`.toLowerCase(), q)) return false
-    if (featuredSectionVisible && featuredIds.has(c.id)) return false
-    return true
-  })
-
-  // -- le app Composio non collegate (A3: dopo le curate, ordine del daemon) --
-  const composioApps: ComposioAppRow[] = (input.composioRows ?? [])
-    .filter((r) => matchesQuery(`${r.name} ${r.slug} ${r.tagline ?? ''}`.toLowerCase(), q))
-    .map((r) => ({ slug: r.slug, name: r.name, tagline: r.tagline, logo: r.logo, connectable: r.connectable }))
-
-  // -- le skill dei bot (la riga «Skill dei bot · N skill») --
   const skills = (input.skillsByOwner ?? []).filter((row) => row.skills.length > 0)
+  return { connected, skills }
+}
+
+function matchesQuery(hay: string, query: string): boolean {
+  const q = query.trim().toLowerCase()
+  if (!q) return true
+  // le parole della ricerca devono esserci TUTTE (le frasi trovano le frasi)
+  return q.split(/\s+/).every((w) => hay.includes(w))
+}
+
+/**
+ * PURA (P3): il modello dell'elenco unico. Le righe portano lo stato di
+ * collegamento (diretta, gateway o chiave); con «Tutte» e senza ricerca si
+ * vedono la sezione «Connesse», le consigliate e le sezioni per categoria
+ * (prime 6 per rank); con una ricerca o un filtro, UNA griglia con tutto ciò
+ * che corrisponde, senza doppioni.
+ */
+export function appsCatalogModel(input: AppsCatalogInput): AppsCatalogModel {
+  const { filter, query, lang } = input
+  const directState = new Map(input.connectors.map((c) => [c.id, c.state.status]))
+  const gatewayApp = new Map((input.composioGateway?.connected ?? []).map((a) => [a.slug, a]))
+  const keyApp = new Map((input.composio?.connected ?? []).map((a) => [a.slug, a]))
+
+  const connectedOf = (app: AppCatalogRow): CatalogRowView['connected'] => {
+    if (app.directId && !app.composioSlug) {
+      const s = directState.get(app.directId)
+      if (s === 'connected') return 'connected'
+      if (s === 'needs_auth') return 'reconnect'
+      return null
+    }
+    const slug = app.composioSlug
+    if (!slug) return null
+    const g = gatewayApp.get(slug)
+    if (g) return g.status === 'ACTIVE' ? 'connected' : 'reconnect'
+    const k = keyApp.get(slug)
+    if (k) return k.status === 'ACTIVE' ? 'connected' : 'reconnect'
+    return null
+  }
+
+  const rows: CatalogRowView[] = input.apps.map((app) => ({
+    app,
+    tagline: appTaglineOf(app, lang),
+    connected: connectedOf(app)
+  }))
+  const connectedRows = rows.filter((r) => r.connected !== null)
+  const browsing = filter === 'all' && !query.trim()
+
+  // la griglia di ricerca/filtro: TUTTO ciò che corrisponde, con lo stato
+  let grid: CatalogRowView[] | null = null
+  if (!browsing) {
+    let match: CatalogRowView[]
+    if (query.trim()) match = searchApps(rows.map((r) => r.app), query, lang)
+      .map((app) => rows.find((r) => r.app === app)!)
+    else match = rows
+    if (filter === 'connected') grid = match.filter((r) => r.connected !== null)
+    else if (filter !== 'all') grid = match.filter((r) => r.app.category === filter)
+    else grid = match
+  }
+
+  // le categorie presenti (le pillole): anche delle app collegate
+  const present = new Set(rows.map((r) => r.app.category))
+  const categoriesPresent = APP_CATEGORIES.filter((c) => present.has(c))
+
+  const featured = browsing
+    ? rows.filter((r) => r.app.featured && r.connected === null).slice(0, 6)
+    : []
+  const featuredIds = new Set(featured.map((r) => r.app.id))
+  const sections: CatalogSection[] = browsing
+    ? APP_CATEGORIES.map((category) => {
+      const ofCat = rows.filter((r) => r.app.category === category && !featuredIds.has(r.app.id) && r.connected === null)
+      return { category, rows: ofCat.slice(0, 6), total: ofCat.length }
+    }).filter((s) => s.rows.length > 0)
+    : []
+
+  const nothingFound = Boolean(query.trim())
+    && (grid?.length ?? 0) === 0
 
   return {
+    rows,
     featured,
-    connected,
-    catalogRows,
-    composioApps,
-    connectedCount: connected.length,
-    skills,
-    hasCommunication: input.catalog.some((c) => c.category === 'communication')
+    connectedRows,
+    sections,
+    grid,
+    connectedCount: connectedRows.length,
+    categoriesPresent,
+    nothingFound
   }
 }

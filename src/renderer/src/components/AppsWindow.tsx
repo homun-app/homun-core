@@ -1,28 +1,26 @@
-// Fase app (A1): la finestra «App» — UNA lista curata, senza parole tecniche.
-// Dall'alto in basso: ricerca, «Collegate» (con stato e «da ricollegare»),
-// «Tutte le app» (curate prima, Composio dopo, vedi A3) e «Skill dei bot».
-// Ogni riga: logo, nome, una frase, l'ETICHETTA DI PROVENIENZA (A7) e Collega.
-// La parola «MCP» non compare MAI nella vista principale: marketplace dei
-// plugin, gateway, OAuth/CIMD, server manuali e risultati del registro stanno
-// nel foglio «Per sviluppatori», aperto dal link piccolo in fondo.
-// Fase app (A2): la card «Più di mille app con Composio» finché Composio non
-// è attivo; il foglio di attivazione ha tre passi (cos'è, incolla la chiave,
-// prova). La chiave va nel sealed store del daemon: la UI riceve SOLO hasKey
-// e le ultime 4 cifre.
+// Fase catalogo app (P3–P7): la finestra «App» — UN elenco unico, senza la
+// riga «Composio», senza il campo slug e senza la card «Più di mille app».
+// Il catalogo è CURATO nel repo (shared/app-catalog): l'app non chiama nessuna
+// API per sfogliarlo. In alto la testata con i loghi delle prime 4 app connesse
+// e «N connesse ›»; poi ricerca, pillole (Tutte · Connesse · categorie), la
+// sezione «Connesse», «Consigliate per te» e una sezione per categoria con
+// «Visualizza tutto». Ogni riga: logo, nome, tagline e Connetti in UN passo
+// (apps:connect decide la strada). La provenienza sta nel foglio del dettaglio,
+// non sulle righe. Composio è un ACCOUNT, non un'app: in fondo una riga
+// discreta «Account Composio · connesso». Il mercato dei plugin, i gateway, i
+// server manuali e la chiave di progetto stanno nel foglio «Per sviluppatori».
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
 import { Search, X } from 'lucide-react'
 import { api, useStore } from '../store'
-import { pickLang } from '../../../shared/localized'
 import { i18n } from '../lib/i18n'
-import { localizedActionName } from '../../../shared/composio-names'
-import { COMMON_COMPOSIO_TOOLKITS } from '../../../shared/composio-names'
-import { CURATED_COMPOSIO_SLUGS } from '../../../shared/types'
-import type { ConnectorInfo, McpServerInfo, McpServerSecret, AppsRegistryResult, SecretKind, ComposioCatalogRow, ComposioConnectedApp } from '../../../shared/types'
+import { loadAppCatalog, appCategoryLabel, type AppCatalogRow, type AppCategoryId } from '../../../shared/app-catalog'
+import type { McpServerInfo, McpServerSecret, AppsRegistryResult, SecretKind } from '../../../shared/types'
 import { SECRET_KIND_FOR_NEEDS } from '../../../shared/types'
-import { appsViewModel, taglineOf, type AppsFilter, type InstalledServerLike, type InstalledPluginLike, type ConnectedRow } from '../lib/apps-view'
+import { appsViewModel, appsCatalogModel, type AppsFilter, type InstalledServerLike, type InstalledPluginLike, type ConnectedRow, type CatalogRowView } from '../lib/apps-view'
+import { catalogLogoUrl } from '../lib/app-logos'
 import { Dialog, DialogContent, DialogTitle } from './ui/dialog'
 
 /** La lingua attiva come UiLanguage. */
@@ -45,7 +43,7 @@ const STATUS_LABEL: Record<string, MessageDescriptor> = {
   error: msg`errore`
 }
 
-/** A7: l'etichetta piccola sulla provenienza dei dati di ogni app. */
+/** A7: l'etichetta piccola sulla provenienza dei dati (sta nel dettaglio, non sulle righe). */
 export function ProvenanceTag({ via }: { via: 'direct' | 'composio' }) {
   return (
     <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${via === 'composio' ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'}`}>
@@ -56,157 +54,17 @@ export function ProvenanceTag({ via }: { via: 'direct' | 'composio' }) {
   )
 }
 
-/** Il logo di una riga: immagine (data: URL) o l'iniziale su un cerchio. */
+/** Il logo di una riga: il file del catalogo, un data: URL, un'emoji o l'iniziale su un fondo tenue. */
 function AppLogo({ logo, name, className = 'size-10 text-base' }: { logo: string | null; name: string; className?: string }) {
-  if (logo && logo.startsWith('data:')) {
-    return <img src={logo} alt="" className={`shrink-0 rounded-[11px] object-cover ${className}`} />
+  const url = catalogLogoUrl(logo)
+  if (url || logo?.startsWith('data:')) {
+    return <img src={url ?? logo!} alt="" className={`shrink-0 rounded-[11px] object-cover ${className}`} />
   }
-  const emoji = logo && !logo.startsWith('data:') && logo.length <= 4 ? logo : null
+  const emoji = logo && logo.length <= 4 ? logo : null
   return (
     <span className={`grid ${className} shrink-0 place-items-center rounded-[11px] bg-muted font-bold ${emoji ? '' : 'text-foreground/70'}`}>
       {emoji ?? name.slice(0, 1).toUpperCase()}
     </span>
-  )
-}
-
-/** Il dettaglio di un connettore del catalogo: tool on/off, istruzioni, Scollega (ciò che faceva ConnectorTile). */
-function ConnectorDetail({ c, onDone, onComposio }: { c: ConnectorInfo; onDone(): void; onComposio(slug: string, name: string): void }) {
-  const { t, i18n } = useLingui()
-  const [busy, setBusy] = useState(false)
-  const [open, setOpen] = useState(true)
-  const [clientId, setClientId] = useState('')
-  const [clientSecret, setClientSecret] = useState('')
-  const [instructions, setInstructions] = useState(c.state.instructions)
-  const composio = useStore((s) => s.composio)
-  // A3: «Collega tramite Composio» come alternativa secondaria nel dettaglio
-  // della curata (solo se Composio è attivo e quel toolkit non è collegato)
-  const composioSlug = CURATED_COMPOSIO_SLUGS[c.id]
-  const composioConnected = composio?.connected.find((a) => a.slug === composioSlug)
-
-  const toggleTool = async (tool: string, disabled: boolean): Promise<void> => {
-    const next = disabled
-      ? c.state.disabledTools.filter((x) => x !== tool)
-      : [...c.state.disabledTools, tool]
-    await api.connectorsSetTools(c.id, next)
-  }
-
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-2">
-        <span className="text-base">{c.logo}</span>
-        <span className="text-sm font-medium">{c.name}</span>
-        <span className={`h-2 w-2 rounded-full ${STATUS_DOT[c.state.status]}`} title={c.state.error ?? i18n.t(STATUS_LABEL[c.state.status] ?? msg`errore`)} />
-        <span className="text-[10px] uppercase text-muted-foreground">{i18n.t(STATUS_LABEL[c.state.status] ?? msg`errore`)}</span>
-        <div className="flex-1" />
-        {c.state.status === 'connected' ? (
-          <button
-            className="rounded-full px-3 py-1.5 text-xs text-destructive transition hover:bg-destructive/10"
-            disabled={busy}
-            onClick={async () => {
-              setBusy(true)
-              try { await api.connectorsDisconnect(c.id) } finally { setBusy(false) }
-              onDone()
-            }}
-          >
-            <Trans>Scollega</Trans>
-          </button>
-        ) : (
-          <button
-            className="rounded-full bg-foreground px-3.5 py-1.5 text-xs font-medium text-background transition hover:opacity-90 disabled:opacity-50"
-            disabled={busy}
-            onClick={async () => {
-              setBusy(true)
-              try { await api.connectorsConnect(c.id) } finally { setBusy(false) }
-            }}
-          >
-            {busy ? <Trans>autorizza nel browser…</Trans> : c.state.status === 'needs_auth' ? <Trans>riconnetti</Trans> : <Trans>connetti</Trans>}
-          </button>
-        )}
-      </div>
-      {/* K5 (ritocchi): la voce gateway non è diretta — login e azioni passano dai server di Composio */}
-      <ProvenanceTag via={c.gateway ? 'composio' : 'direct'} />
-      {c.state.error && <p className="text-[11px] text-destructive/80">{c.state.error}</p>}
-      {c.state.status !== 'connected' && c.notes && (
-        <p className="line-clamp-3 text-[11px] text-muted-foreground">{pickLang(c.notes, uiLang())}</p>
-      )}
-      {/* A3: l'alternativa secondaria «Collega tramite Composio» */}
-      {composioSlug && composio?.active && (
-        <div className="rounded-2xl bg-muted px-3 py-2.5">
-          {composioConnected ? (
-            <p className="text-[11px] text-muted-foreground">
-              <Trans>Collegata anche tramite Composio: scollegala dalla riga di Composio in «Collegate».</Trans>
-            </p>
-          ) : (
-            <>
-              <p className="text-[11px] text-muted-foreground"><Trans>Oppure collega {c.name} tramite Composio (più app, un account):</Trans></p>
-              <button
-                className="mt-1.5 rounded-full bg-card px-3 py-1 text-xs transition hover:bg-card/80"
-                onClick={() => onComposio(composioSlug, c.name)}
-              >
-                <Trans>Collega tramite Composio</Trans>
-              </button>
-            </>
-          )}
-        </div>
-      )}
-      {/* client OAuth statico (Google): credenziali cifrate, guida in docs/google-oauth.md */}
-      {c.clientRegistration === 'static' && c.state.status !== 'connected' && (
-        <div className="space-y-1 rounded-2xl bg-muted p-3">
-          {c.hasStaticCredentials ? (
-            <p className="text-[11px] text-muted-foreground"><Trans>Client OAuth configurato ✓</Trans></p>
-          ) : (
-            <>
-              <p className="text-[11px] text-muted-foreground">
-                <Trans>Serve un client OAuth tuo (tipo «Desktop app»):</Trans>{' '}
-                <a className="text-primary hover:underline" href={c.docsUrl} target="_blank" rel="noreferrer">{t`guida`}</a>
-              </p>
-              <div className="flex gap-1">
-                <input className="min-w-0 flex-1 rounded-lg bg-card px-2 py-1 text-xs outline-none" placeholder="client_id" value={clientId} onChange={(e) => setClientId(e.target.value)} />
-                <input className="min-w-0 flex-1 rounded-lg bg-card px-2 py-1 text-xs outline-none" type="password" placeholder="client_secret" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} />
-                <button
-                  className="rounded-full bg-card px-3 py-1 text-xs transition hover:bg-card/80 disabled:opacity-40"
-                  disabled={!clientId.trim() || !clientSecret.trim()}
-                  onClick={() => void api.connectorsSaveStaticClient(c.id, clientId.trim(), clientSecret.trim())}
-                >
-                  <Trans>salva</Trans>
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-      )}
-      {open && (
-        <div className="space-y-2 rounded-2xl bg-muted p-3">
-          <button className="text-xs text-muted-foreground transition hover:text-foreground" onClick={() => setOpen(!open)}>
-            {open ? <Trans>chiudi i tool</Trans> : <Trans>tool</Trans>}
-          </button>
-          {c.tools.length === 0 && <p className="text-[11px] text-muted-foreground"><Trans>nessun tool elencato</Trans></p>}
-          {c.tools.map((t2) => {
-            const disabled = c.state.disabledTools.includes(t2.name)
-            return (
-              <label key={t2.name} className="flex items-start gap-2">
-                <input type="checkbox" className="mt-0.5 h-3.5 w-3.5 accent-foreground" checked={!disabled} onChange={() => void toggleTool(t2.name, disabled)} />
-                <span className="min-w-0">
-                  <span className="block truncate font-mono text-[11px]">{t2.name}</span>
-                  <span className="block text-[10px] text-muted-foreground">{t2.description}</span>
-                </span>
-              </label>
-            )
-          })}
-          <div>
-            <p className="mb-1 text-[11px] text-muted-foreground"><Trans>Istruzioni personalizzate (vanno nel prompt del bot quando il connettore è attivo)</Trans></p>
-            <textarea
-              className="w-full resize-none rounded-lg bg-card px-2 py-1.5 text-xs outline-none"
-              rows={3}
-              placeholder={t`es. Usa questo account solo per lavoro; le email in italiano vanno riassunte in bulleted list…`}
-              value={instructions}
-              onChange={(e) => setInstructions(e.target.value)}
-              onBlur={() => void api.connectorsSetInstructions(c.id, instructions)}
-            />
-          </div>
-        </div>
-      )}
-    </div>
   )
 }
 
@@ -371,7 +229,7 @@ function ManualServers() {
           {edit.transport === 'stdio' ? (
             <div className="grid grid-cols-2 gap-2">
               <input className="rounded-lg bg-card px-2.5 py-1.5 text-sm outline-none" placeholder={t`Comando (es. node)`} value={edit.command ?? ''} onChange={(e) => setEdit({ ...edit, command: e.target.value })} />
-              <input className="rounded-lg bg-card px-2.5 py-1.5 text-sm outline-none" placeholder={t`Argomenti separati da spazio`} value={(edit.args ?? []).join(' ')} onChange={(e) => setEdit({ ...edit, args: e.target.value ? e.target.value.split(/\s+/) : [] })} />
+              <input className="rounded-lg bg-card px-2.5 py-1.5 text-sm outline-none" placeholder={t`Argomenti separati per spazio`} value={(edit.args ?? []).join(' ')} onChange={(e) => setEdit({ ...edit, args: e.target.value ? e.target.value.split(/\s+/) : [] })} />
             </div>
           ) : (
             <>
@@ -545,25 +403,7 @@ function ClientMetadataUrlRow() {
   )
 }
 
-// ---- fase app (A2): l'attivazione guidata di Composio ----
-
-/** La card in cima a «Tutte le app» finché Composio non è attivo. */
-function ComposioActivationCard({ onOpen }: { onOpen(): void }) {
-  return (
-    <div className="rounded-2xl bg-muted p-4" data-testid="composio-card">
-      <strong className="block font-display text-[15px]"><Trans>Più di mille app con Composio</Trans></strong>
-      <p className="mt-1 text-[13px] text-muted-foreground">
-        <Trans>Collega Gmail, Slack, HubSpot e molte altre con un account Composio gratuito</Trans>
-      </p>
-      <button
-        className="mt-2.5 rounded-full bg-foreground px-4 py-1.5 text-[13px] font-medium text-background transition hover:opacity-90"
-        onClick={onOpen}
-      >
-        <Trans>Attiva</Trans>
-      </button>
-    </div>
-  )
-}
+// ---- fase app (A2): l'attivazione guidata di Composio (solo «Per sviluppatori») ----
 
 /**
  * Il foglio di attivazione (A2): tre passi con un'azione chiara ciascuno.
@@ -708,195 +548,6 @@ function ComposioActivationSheet({ onClose, onDone }: { onClose(): void; onDone(
   )
 }
 
-/** A4: il foglio d'attesa del login nel browser (annullabile), con la provenienza (A7). */
-function ComposioWaitingSheet({ pending, onDone }: { pending: { slug: string; name: string; since: number }; onDone(): void }) {
-  const composio = useStore((s) => s.composio)
-  const refreshComposio = useStore((s) => s.refreshComposio)
-  // il pending arriva allo store con l'evento {type:'connectors'}: PRIMA di
-  // vederlo non si chiude (gara col montaggio), dopo sì — appena sparisce o
-  // cambia slug il flusso è finito (login completato, annullato o fallito)
-  const [seen, setSeen] = useState(false)
-  useEffect(() => {
-    const timer = setInterval(() => { void refreshComposio() }, 2000)
-    return () => clearInterval(timer)
-  }, [refreshComposio])
-  useEffect(() => {
-    if (!composio) return
-    if (composio.pending?.slug === pending.slug) {
-      if (!seen) setSeen(true)
-      return
-    }
-    if (composio.pending) { onDone(); return }
-    if (seen) onDone()
-  }, [composio, pending.slug, seen, onDone])
-  return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-foreground/20 p-4">
-      <div className="w-full max-w-md rounded-3xl bg-card p-5 shadow-soft" data-testid="composio-waiting">
-        <strong className="block font-display text-lg">{pending.name}</strong>
-        <p className="mt-2 text-sm text-muted-foreground"><Trans>In attesa del login nel browser…</Trans></p>
-        <p className="mt-2 rounded-2xl bg-muted px-3 py-2 text-[11px] text-muted-foreground">
-          <Trans>Tramite Composio: login e azioni passano dai suoi server</Trans>
-        </p>
-        <div className="mt-4 flex justify-end">
-          <button
-            className="rounded-full px-3 py-1.5 text-sm text-muted-foreground transition hover:text-foreground"
-            onClick={async () => {
-              await api.composioDisconnect(pending.slug).catch(() => undefined)
-              await refreshComposio()
-              onDone()
-            }}
-          >
-            <Trans>Annulla</Trans>
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-/** A4: il dettaglio di un'app Composio (collegata o da collegare). */
-function ComposioAppSheet({ app, row, onClose, onWaiting }: {
-  app: ComposioConnectedApp | null
-  row: { slug: string; name: string; tagline: string | null; logo: string | null; connectable: 'yes' | 'no-auth' | 'developer-config' } | null
-  onClose(): void
-  onWaiting(slug: string, name: string): void
-}) {
-  const { t } = useLingui()
-  const agents = useStore((s) => s.agents)
-  const refreshComposio = useStore((s) => s.refreshComposio)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
-  const name = app?.name ?? row?.name ?? ''
-  const logo = row?.logo ?? null
-  const tagline = row?.tagline ?? null
-  const connectable = row?.connectable ?? 'yes'
-
-  const connect = async (): Promise<void> => {
-    setBusy(true)
-    setError('')
-    try {
-      const r = await api.composioConnect(app?.slug ?? row!.slug)
-      if (r.started) onWaiting(app?.slug ?? row!.slug, name)
-      else if (r.developerConfig) setError(t`Questa app su Composio va configurata dallo sviluppatore: per ora non si può collegare da Homun.`)
-      else setError(t`Composio non è attivo: attivalo con la tua chiave per collegare altre app.`)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-foreground/20 p-4" onClick={onClose}>
-      <div className="max-h-[85vh] w-full max-w-lg overflow-y-auto scroll-thin rounded-3xl bg-card p-5 shadow-soft" onClick={(e) => e.stopPropagation()} data-testid="composio-app-sheet">
-        <div className="flex items-center gap-3">
-          <AppLogo logo={logo} name={name} />
-          <span className="min-w-0 flex-1">
-            <span className="block text-[15px] font-medium">{name}</span>
-            {tagline && <span className="block truncate text-[13px] text-muted-foreground">{tagline}</span>}
-          </span>
-        </div>
-        <div className="mt-2"><ProvenanceTag via="composio" /></div>
-        {error && <p className="mt-2 text-[13px] text-destructive">{error}</p>}
-        {connectable === 'developer-config' && !app && (
-          <p className="mt-2 rounded-2xl bg-muted px-3 py-2 text-[13px] text-muted-foreground">
-            <Trans>Questa app su Composio va configurata dallo sviluppatore: per ora non si può collegare da Homun.</Trans>
-          </p>
-        )}
-        <div className="mt-3 flex items-center gap-2">
-          <div className="flex-1" />
-          {app ? (
-            <>
-              {app.status === 'RECONNECT' && (
-                <button
-                  className="rounded-full bg-foreground px-3.5 py-1.5 text-xs font-medium text-background transition hover:opacity-90 disabled:opacity-50"
-                  disabled={busy}
-                  onClick={() => void connect()}
-                >
-                  <Trans>Ricollega</Trans>
-                </button>
-              )}
-              <button
-                className="rounded-full px-3 py-1.5 text-xs text-destructive transition hover:bg-destructive/10"
-                disabled={busy}
-                onClick={async () => {
-                  setBusy(true)
-                  try {
-                    await api.composioDisconnect(app.slug)
-                    await refreshComposio()
-                    onClose()
-                  } finally { setBusy(false) }
-                }}
-              >
-                <Trans>Scollega</Trans>
-              </button>
-            </>
-          ) : (
-            connectable !== 'developer-config' && (
-              <button
-                className="rounded-full bg-foreground px-3.5 py-1.5 text-xs font-medium text-background transition hover:opacity-90 disabled:opacity-50"
-                disabled={busy}
-                onClick={() => void connect()}
-              >
-                {busy ? t`autorizza nel browser…` : <Trans>Collega</Trans>}
-              </button>
-            )
-          )}
-        </div>
-        {app && (
-          <>
-            <p className="mt-3 text-[11px] text-muted-foreground">
-              {app.status === 'ACTIVE'
-                ? t`${app.toolsCount} azioni disponibili ai bot abilitati`
-                : t`non più attiva: ricollega per riavere le sue azioni`}
-            </p>
-            {/* R4 (ritocchi): le azioni del toolkit col nome nella lingua della
-                UI (ri-localizzato qui dallo slug: cambia al volo con la
-                lingua); lo slug tecnico resta nel title della riga */}
-            {app.status === 'ACTIVE' && app.tools.length > 0 && (
-              <div className="mt-2 max-h-40 overflow-y-auto scroll-thin rounded-2xl bg-muted p-2.5" data-testid="composio-actions-table">
-                {app.tools.map((tool) => {
-                  const local = localizedActionName(tool.slug, uiLang()) ?? tool.name
-                  return (
-                    <p key={tool.slug} className="truncate px-1 py-0.5 text-[12px]" title={`${tool.slug}${local !== tool.name ? ` — ${tool.name}` : ''}`}>
-                      {local}
-                    </p>
-                  )
-                })}
-              </div>
-            )}
-            {/* per quali bot (enabledFor per toolkit, predefinito tutti) */}
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <span className="text-[11px] text-muted-foreground"><Trans>per bot:</Trans></span>
-              {agents.map((a) => (
-                <ComposioBotToggle
-                  key={a.id}
-                  slug={app.slug}
-                  agentId={a.id}
-                  agentName={a.name}
-                  enabledFor={app.enabledFor}
-                  allIds={agents.map((x) => x.id)}
-                  onDone={() => void refreshComposio()}
-                />
-              ))}
-            </div>
-          </>
-        )}
-        {app && (
-          <p className="mt-3 text-[11px] text-muted-foreground">
-            <Trans>Scollegare NON cancella l'account su Composio: si gestisce da composio.dev.</Trans>
-          </p>
-        )}
-        <div className="mt-4 flex justify-end">
-          <button className="rounded-full px-3 py-1.5 text-sm text-muted-foreground transition hover:text-foreground" onClick={onClose}>
-            <Trans>Chiudi</Trans>
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 /** La casella per bot di un toolkit Composio (enabledFor, predefinito tutti). */
 function ComposioBotToggle({ slug, agentId, agentName, enabledFor, allIds, onDone }: {
   slug: string
@@ -923,320 +574,6 @@ function ComposioBotToggle({ slug, agentId, agentName, enabledFor, allIds, onDon
       />
       {agentName}
     </label>
-  )
-}
-
-// ---- fase Composio OAuth (C6): «Accedi con Composio», un solo passo ----
-
-/**
- * La card in cima a «Tutte le app» (C6): UN solo passo — il login nel
- * browser — poi «Composio collegato». Niente campo chiave: la chiave di
- * progetto resta nel foglio «Per sviluppatori». Le due strade non possono
- * essere attive insieme: attivarne una chiede di disattivare l'altra.
- */
-function ComposioGatewayCard({ connected, onStart }: { connected: boolean; onStart(): void }) {
-  const { t } = useLingui()
-  const refreshConnectors = useStore((s) => s.refreshConnectors)
-  const refreshComposioGateway = useStore((s) => s.refreshComposioGateway)
-  const composio = useStore((s) => s.composio)
-  const [phase, setPhase] = useState<'idle' | 'connecting' | 'conflict' | 'error'>('idle')
-  const [error, setError] = useState('')
-
-  // il flusso OAuth col browser dura qualche minuto: gli eventi {type:'connectors'}
-  // aggiornano i connettori dello store; quando il server è connesso la card
-  // mostra «Composio collegato» (AppsView la toglie poco dopo)
-  useEffect(() => {
-    if (phase === 'connecting') {
-      const timer = setInterval(() => {
-        void refreshConnectors()
-        void refreshComposioGateway()
-      }, 2000)
-      return () => clearInterval(timer)
-    }
-  }, [phase, refreshConnectors, refreshComposioGateway])
-
-  const start = async (deactivateKey: boolean): Promise<void> => {
-    setPhase('connecting')
-    setError('')
-    onStart()
-    try {
-      if (deactivateKey && composio?.active) await api.composioDisable().catch(() => undefined)
-      const r = await api.connectorsConnect('composio')
-      if (!r.started && r.conflict === 'composio-key') {
-        setPhase('conflict')
-        return
-      }
-      if (!r.started) {
-        setPhase('error')
-        setError(t`non riesco a partire`)
-      }
-    } catch (e) {
-      setPhase('error')
-      setError(e instanceof Error ? e.message : String(e))
-    }
-  }
-
-  return (
-    <div className="rounded-2xl bg-muted p-4" data-testid="composio-login-card">
-      <strong className="block font-display text-[15px]"><Trans>Più di mille app con Composio</Trans></strong>
-      <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
-        <Trans>Composio è un servizio di terzi: i login e le azioni delle app che colleghi lì passano dai suoi server, non restano solo sul tuo Mac. Ha un piano gratuito.</Trans>
-      </p>
-      {phase === 'conflict' ? (
-        <div className="mt-2 rounded-2xl bg-card px-3 py-2 text-[13px]" data-testid="composio-conflict">
-          <p><Trans>Composio è già attivo con la chiave di progetto (sviluppatori). Le due strade non possono stare insieme: disattivo la chiave e collego con il login?</Trans></p>
-          <div className="mt-2 flex gap-2">
-            <button
-              className="rounded-full bg-foreground px-3.5 py-1.5 text-xs font-medium text-background transition hover:opacity-90"
-              onClick={() => void start(true)}
-            >
-              <Trans>Disattiva la chiave e accedi</Trans>
-            </button>
-            <button className="rounded-full px-3 py-1.5 text-xs text-muted-foreground transition hover:text-foreground" onClick={() => setPhase('idle')}>
-              <Trans>Annulla</Trans>
-            </button>
-          </div>
-        </div>
-      ) : connected ? (
-        <p className="mt-2 text-[13px] text-chart-2" data-testid="composio-linked"><Trans>Composio collegato</Trans></p>
-      ) : phase === 'connecting' ? (
-        <p className="mt-2.5 text-[13px] text-muted-foreground" data-testid="composio-login-waiting">
-          <Trans>Apri il browser e accedi a Composio: la card si aggiorna da sola.</Trans>
-        </p>
-      ) : (
-        <button
-          className="mt-2.5 rounded-full bg-foreground px-4 py-1.5 text-[13px] font-medium text-background transition hover:opacity-90"
-          onClick={() => void start(false)}
-        >
-          <Trans>Accedi</Trans>
-        </button>
-      )}
-      {phase === 'error' && error && <p className="mt-2 text-[13px] text-destructive">{error}</p>}
-    </div>
-  )
-}
-
-/**
- * Il dettaglio di Composio collegato col login (C5/C6): le app collegate
- * («Tramite Composio»), il campo «Collega un'app» con la lista dei toolkit
- * comuni e la ricerca libera dello slug, Rimuovi con conferma e Disattiva
- * (revoca LOCALE del token: le app restano sull'account Composio).
- */
-function ComposioGatewayDetail({ onClose }: { onClose(): void }) {
-  const { t } = useLingui()
-  const composioGateway = useStore((s) => s.composioGateway)
-  const refreshComposioGateway = useStore((s) => s.refreshComposioGateway)
-  const [pick, setPick] = useState('')
-  const [confirmRemove, setConfirmRemove] = useState<string | null>(null)
-  const [confirmOff, setConfirmOff] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
-
-  // C5 punto 3: all'apertura si rilegge lo stato delle app collegate da Homun
-  useEffect(() => {
-    void api.composioGatewayRefresh().then(() => refreshComposioGateway()).catch(() => undefined)
-  }, [refreshComposioGateway])
-  // mentre aspetta il login si rilegge ogni 2 s
-  useEffect(() => {
-    if (!composioGateway?.pending) return
-    const timer = setInterval(() => { void refreshComposioGateway() }, 2000)
-    return () => clearInterval(timer)
-  }, [composioGateway?.pending, refreshComposioGateway])
-
-  const connectApp = async (slug: string): Promise<void> => {
-    setBusy(true)
-    setError('')
-    try {
-      const name = COMMON_COMPOSIO_TOOLKITS.find((x) => x.slug === slug)?.name ?? slug
-      const r = await api.composioGatewayConnect(slug, name)
-      if (!r.ok) setError(r.error ?? t`non riesco a collegare`)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-foreground/20 p-4" onClick={onClose}>
-      <div className="max-h-[85vh] w-full max-w-lg overflow-y-auto scroll-thin rounded-3xl bg-card p-5 shadow-soft" onClick={(e) => e.stopPropagation()} data-testid="composio-gateway-detail">
-        <div className="flex items-center gap-3">
-          <span className="grid size-10 shrink-0 place-items-center rounded-[11px] bg-muted text-base">🌐</span>
-          <span className="min-w-0 flex-1">
-            <span className="block text-[15px] font-medium"><Trans>Composio</Trans></span>
-            <span className="block truncate text-[13px] text-muted-foreground"><Trans>Più di mille app con un solo accesso</Trans></span>
-          </span>
-          <span className={`h-2 w-2 rounded-full ${composioGateway?.active ? 'bg-chart-2' : 'bg-destructive'}`} />
-        </div>
-        <div className="mt-2"><ProvenanceTag via="composio" /></div>
-        {error && <p className="mt-2 text-[13px] text-destructive">{error}</p>}
-
-        {/* l'attesa del login (annullabile). K2 (ritocchi): se il toolkit in
-            attesa è GIÀ collegato con stato ACTIVE, il riquadro non si mostra
-            (niente «Non riuscito» accanto alla riga «Collegata») */}
-        {composioGateway?.pending && !composioGateway.connected.some((a) => a.slug === composioGateway.pending!.slug && a.status === 'ACTIVE') && (
-          <div className="mt-3 rounded-2xl bg-muted px-3 py-2.5" data-testid="composio-gateway-waiting">
-            <p className="text-sm font-medium">{composioGateway.pending.name}</p>
-            <p className="mt-1 text-[13px] text-muted-foreground">
-              {composioGateway.pending.failed
-                ? <Trans>Non riuscito: riprova a collegarla.</Trans>
-                : <Trans>In attesa del login nel browser…</Trans>}
-            </p>
-            {composioGateway.pending.failed ? (
-              // K2 (ritocchi): dopo l'esito il riquadro ha Riprova (riparte il
-              // collegamento) e Chiudi (azzera lo stato), non «Annulla»
-              <div className="mt-1.5 flex gap-3">
-                <button
-                  className="rounded-full px-3 py-1 text-xs text-foreground transition hover:bg-card"
-                  onClick={() => { void connectApp(composioGateway.pending!.slug) }}
-                >
-                  <Trans>Riprova</Trans>
-                </button>
-                <button
-                  className="rounded-full px-3 py-1 text-xs text-muted-foreground transition hover:text-foreground"
-                  onClick={async () => {
-                    await api.composioGatewayCancel().catch(() => undefined)
-                    await refreshComposioGateway()
-                  }}
-                >
-                  <Trans>Chiudi</Trans>
-                </button>
-              </div>
-            ) : (
-              <button
-                className="mt-1.5 rounded-full px-3 py-1 text-xs text-muted-foreground transition hover:text-foreground"
-                onClick={async () => {
-                  await api.composioGatewayCancel().catch(() => undefined)
-                  await refreshComposioGateway()
-                }}
-              >
-                <Trans>Annulla</Trans>
-              </button>
-            )}
-          </div>
-        )}
-
-        {/* le app collegate tramite Composio (C5 punto 3) */}
-        <p className="mt-3 text-[13px] font-medium"><Trans>App collegate tramite Composio</Trans></p>
-        {(composioGateway?.connected ?? []).length === 0 && (
-          <p className="mt-1 text-[13px] text-muted-foreground"><Trans>Nessuna app collegata: comincia dall'elenco qui sotto.</Trans></p>
-        )}
-        {(composioGateway?.connected ?? []).map((app) => (
-          <div key={app.slug} className="mt-1 flex items-center gap-2 rounded-2xl bg-muted px-3 py-2" data-testid={`gateway-app-${app.slug}`}>
-            <span className={`h-2 w-2 rounded-full ${app.status === 'ACTIVE' ? 'bg-chart-2' : 'bg-destructive'}`} />
-            <span className="min-w-0 flex-1">
-              <span className="block text-sm">{app.name}</span>
-              <span className="block text-[11px] text-muted-foreground">
-                {app.status === 'ACTIVE'
-                  ? <Trans>Collegata</Trans>
-                  : app.status === 'RECONNECT'
-                    ? <Trans>da ricollegare</Trans>
-                    : <Trans>non riuscita</Trans>}
-              </span>
-            </span>
-            {confirmRemove === app.slug ? (
-              <button
-                className="rounded-full px-2.5 py-1 text-xs text-destructive transition hover:bg-destructive/10"
-                onClick={async () => {
-                  setConfirmRemove(null)
-                  setBusy(true)
-                  const r = await api.composioGatewayRemove(app.slug).catch(() => ({ ok: false, error: 'errore' }))
-                  setBusy(false)
-                  if (!r.ok) setError(r.error ?? '')
-                  await refreshComposioGateway()
-                }}
-              >
-                <Trans>Rimuovi davvero</Trans>
-              </button>
-            ) : (
-              <button
-                className="rounded-full px-2.5 py-1 text-xs text-muted-foreground transition hover:text-destructive"
-                disabled={busy}
-                onClick={() => setConfirmRemove(app.slug)}
-              >
-                <Trans>Rimuovi</Trans>
-              </button>
-            )}
-          </div>
-        ))}
-        <p className="mt-1 text-[11px] text-muted-foreground">
-          <Trans>Le app collegate fuori da Homun non si vedono qui: </Trans>
-          <a className="text-primary hover:underline" href="https://dashboard.composio.dev/~/org/connect/apps" target="_blank" rel="noreferrer"><Trans>gestiscile su Composio</Trans></a>.
-        </p>
-
-        {/* Collega un'app (C5 punto 2): lista dei comuni + ricerca libera dello slug */}
-        <div className="mt-3 rounded-2xl bg-muted p-3">
-          <p className="text-[13px] font-medium"><Trans>Collega un'app</Trans></p>
-          <div className="mt-1.5 flex gap-1">
-            <input
-              className="min-w-0 flex-1 rounded-lg bg-card px-2.5 py-1.5 text-sm outline-none"
-              placeholder={t`slug dell'app (es. gmail)`}
-              list="composio-toolkit-slugs"
-              value={pick}
-              onChange={(e) => setPick(e.target.value)}
-            />
-            <datalist id="composio-toolkit-slugs">
-              {COMMON_COMPOSIO_TOOLKITS.map((x) => (
-                <option key={x.slug} value={x.slug}>{x.name}</option>
-              ))}
-            </datalist>
-            <button
-              className="rounded-full bg-foreground px-3.5 py-1.5 text-xs font-medium text-background transition hover:opacity-90 disabled:opacity-40"
-              disabled={busy || !pick.trim()}
-              onClick={() => {
-                void connectApp(pick.trim().toLowerCase())
-                setPick('')
-              }}
-            >
-              <Trans>Collega</Trans>
-            </button>
-          </div>
-          <div className="mt-2 flex flex-wrap gap-1">
-            {COMMON_COMPOSIO_TOOLKITS.slice(0, 10).map((x) => (
-              <button
-                key={x.slug}
-                className="rounded-full bg-card px-2.5 py-1 text-[11px] transition hover:bg-card/80"
-                disabled={busy}
-                onClick={() => void connectApp(x.slug)}
-              >
-                {x.name}
-              </button>
-            ))}
-          </div>
-          <p className="mt-1.5 text-[11px] text-muted-foreground">
-            <Trans>Il bottone apre la pagina di login dell'app nel browser: finisci lì, poi la riga compare sopra.</Trans>
-          </p>
-        </div>
-
-        <div className="mt-4 flex items-center justify-between">
-          {confirmOff ? (
-            <button
-              className="rounded-full px-3 py-1.5 text-xs text-destructive transition hover:bg-destructive/10"
-              onClick={async () => {
-                setConfirmOff(false)
-                await api.connectorsDisconnect('composio').catch(() => undefined)
-                await refreshComposioGateway()
-                onClose()
-              }}
-            >
-              <Trans>Disattiva davvero</Trans>
-            </button>
-          ) : (
-            <button
-              className="rounded-full px-3 py-1.5 text-xs text-destructive transition hover:bg-destructive/10"
-              onClick={() => setConfirmOff(true)}
-            >
-              <Trans>Disattiva</Trans>
-            </button>
-          )}
-          <button className="rounded-full px-3 py-1.5 text-sm text-muted-foreground transition hover:text-foreground" onClick={onClose}>
-            <Trans>Chiudi</Trans>
-          </button>
-        </div>
-        <p className="mt-1.5 text-[11px] text-muted-foreground">
-          <Trans>Disattivare toglie il server e revoca il token sul tuo Mac: le app collegate restano sul tuo account Composio, le togli da</Trans>{' '}
-          <a className="text-primary hover:underline" href="https://dashboard.composio.dev/~/org/connect/apps" target="_blank" rel="noreferrer"><Trans>dashboard.composio.dev</Trans></a>.
-        </p>
-      </div>
-    </div>
   )
 }
 
@@ -1276,8 +613,8 @@ function DevelopersSheet({ onClose }: { onClose(): void }) {
         <p className="mt-1 text-xs text-muted-foreground"><Trans>Server personalizzati, plugin, gateway e registro: chi sa cos'è un server MCP lo trova qui.</Trans></p>
         <div className="mt-4 space-y-6">
           {/* fase Composio OAuth (C6): la strada della CHIAVE resta, ma solo
-              qui — per la maggior parte delle persone c'è «Accedi» nella
-              vista principale; le due strade non insieme */}
+              qui — per la maggior parte delle persone c'è il «Connetti» delle
+              app dell'elenco; le due strade non insieme */}
           <ComposioKeySection />
           <ManualServers />
           <GatewayTab />
@@ -1362,7 +699,118 @@ function ComposioKeySection() {
   )
 }
 
-// ---- la vista vera e propria (A1) ----
+// ---- fase catalogo app (P3): le pillole e la riga di un'app ----
+
+/** Una pillola dei filtri (Tutte · Connesse · categorie · Altro ▾). */
+function FilterPill({ active, onClick, children }: { active: boolean; onClick(): void; children: ReactNode }) {
+  return (
+    <button
+      className={`rounded-full px-3 py-1 text-[12px] transition ${active ? 'bg-foreground text-background' : 'bg-muted text-muted-foreground hover:text-foreground'}`}
+      onClick={onClick}
+    >
+      {children}
+    </button>
+  )
+}
+
+/** Le fasi visibili della riga durante «Connetti» in un passo (P4). */
+export type AppFlowKind = 'direct' | 'login' | 'app' | 'failed' | 'conflict'
+
+/**
+ * La riga di un'app dell'elenco unico: logo, nome, tagline (o lo stato del
+ * flusso) e a destra Connetti / Connessa / Ricollega / l'attesa con Annulla.
+ * NIENTE etichetta di provenienza: quella sta nel foglio del dettaglio. Il
+ * clic sulla riga apre il dettaglio; il clic sul bottone collega.
+ */
+function AppRow({ row, flow, onConnect, onCancel, onConflictResolve, onOpen }: {
+  row: CatalogRowView
+  flow: AppFlowKind | null
+  onConnect(row: CatalogRowView): void
+  onCancel(row: CatalogRowView): void
+  onConflictResolve(row: CatalogRowView): void
+  onOpen(row: CatalogRowView): void
+}) {
+  const { t } = useLingui()
+  const stop = (e: { stopPropagation(): void }): void => e.stopPropagation()
+  const statusLine =
+    flow === 'login' ? t`Accedi a Composio nel browser…`
+    : flow === 'app' ? t`Completa il login di ${row.app.name} nel browser…`
+    : row.tagline
+  return (
+    <div
+      className={`flex cursor-pointer items-center gap-3 rounded-[14px] px-1 py-1.5 text-left transition hover:bg-muted/60 ${flow === 'conflict' ? 'flex-wrap' : ''}`}
+      data-testid={`app-row-${row.app.id}`}
+      onClick={() => onOpen(row)}
+    >
+      <AppLogo logo={row.app.logo} name={row.app.name} />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[15px]">{row.app.name}</span>
+        {statusLine !== null && (
+          <span className={`block truncate text-[13px] ${flow === 'login' || flow === 'app' ? 'text-muted-foreground' : 'text-muted-foreground'}`}>
+            {statusLine}
+          </span>
+        )}
+      </span>
+      {flow === null && row.connected === 'connected' && (
+        <span className="shrink-0 text-sm text-chart-2"><Trans>Connessa</Trans></span>
+      )}
+      {flow === null && row.connected === 'reconnect' && (
+        <button
+          className="h-8 shrink-0 rounded-full bg-muted px-4 text-[13px] transition hover:bg-accent"
+          data-testid={`app-connect-${row.app.id}`}
+          onClick={(e) => { stop(e); onConnect(row) }}
+        >
+          <Trans>Ricollega</Trans>
+        </button>
+      )}
+      {flow === null && row.connected === null && (
+        <button
+          className="h-8 shrink-0 rounded-full bg-muted px-4 text-[13px] transition hover:bg-accent"
+          data-testid={`app-connect-${row.app.id}`}
+          onClick={(e) => { stop(e); onConnect(row) }}
+        >
+          <Trans>Connetti</Trans>
+        </button>
+      )}
+      {flow === 'direct' && <span className="shrink-0 text-[13px] text-muted-foreground">{t`autorizza nel browser…`}</span>}
+      {(flow === 'login' || flow === 'app') && (
+        <button
+          className="shrink-0 text-[13px] text-muted-foreground transition hover:text-foreground"
+          data-testid={`app-cancel-${row.app.id}`}
+          onClick={(e) => { stop(e); onCancel(row) }}
+        >
+          <Trans>Annulla</Trans>
+        </button>
+      )}
+      {flow === 'failed' && (
+        <>
+          <span className="shrink-0 text-[13px] text-destructive"><Trans>Non riuscito</Trans></span>
+          <button className="h-8 shrink-0 rounded-full bg-muted px-4 text-[13px] transition hover:bg-accent" onClick={(e) => { stop(e); onConnect(row) }}>
+            <Trans>Riprova</Trans>
+          </button>
+        </>
+      )}
+      {flow === 'conflict' && (
+        <div className="w-full rounded-2xl bg-muted px-3 py-2 text-[13px]" onClick={stop} data-testid={`app-conflict-${row.app.id}`}>
+          <p><Trans>Composio è già attivo con la chiave di progetto (sviluppatori). Le due strade non possono stare insieme: disattivo la chiave e collego con il login?</Trans></p>
+          <div className="mt-1.5 flex gap-2">
+            <button
+              className="rounded-full bg-foreground px-3.5 py-1.5 text-xs font-medium text-background transition hover:opacity-90"
+              onClick={() => onConflictResolve(row)}
+            >
+              <Trans>Disattiva la chiave e collega</Trans>
+            </button>
+            <button className="rounded-full px-3 py-1.5 text-xs text-muted-foreground transition hover:text-foreground" onClick={() => onCancel(row)}>
+              <Trans>Annulla</Trans>
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---- la vista vera e propria ----
 
 /**
  * AppsView: la vista condivisa dalla finestra «App» e da Impostazioni › App e
@@ -1382,27 +830,16 @@ export function AppsView({ embedded = false }: { embedded?: boolean }) {
   const [filter, setFilter] = useState<AppsFilter>('all')
   const [query, setQuery] = useState('')
   const [installed, setInstalled] = useState<{ servers: InstalledServerLike[]; plugins: InstalledPluginLike[] } | null>(null)
-  // fase app: le righe del catalogo Composio (ricerca LOCALE nel daemon)
-  const [composioRows, setComposioRows] = useState<ComposioCatalogRow[] | null>(null)
-  const [activationOpen, setActivationOpen] = useState(false)
   const [developersOpen, setDevelopersOpen] = useState(false)
-  // fase Composio OAuth (C6): il dettaglio di Composio collegato col login
-  const [gatewayDetailOpen, setGatewayDetailOpen] = useState(false)
-  const [gatewayCard, setGatewayCard] = useState(false)
-  // fase Composio OAuth (C6): il server Composio del catalogo è collegato col login
-  const gatewayConnected = connectors.find((c) => c.id === 'composio')?.state.status === 'connected'
-  // dopo «Composio collegato» la card resta un momento, poi lascia il posto
-  // alla riga di «Collegate» (l'utente vede CHIUSO il cerchio del login).
-  // La conferma appare solo se il login è partito DA QUI, non a ogni apertura.
-  useEffect(() => {
-    if (!gatewayConnected || !gatewayCard) return
-    const t = setTimeout(() => setGatewayCard(false), 2500)
-    return () => clearTimeout(t)
-  }, [gatewayConnected, gatewayCard])
-  const [detail, setDetail] = useState<ConnectedRow | null>(null)
-  const [composioDetail, setComposioDetail] = useState<{ app: ComposioConnectedApp | null; row: { slug: string; name: string; tagline: string | null; logo: string | null; connectable: 'yes' | 'no-auth' | 'developer-config' } | null } | null>(null)
-  const [waitingFor, setWaitingFor] = useState<{ slug: string; name: string } | null>(null)
   const [skillsOpen, setSkillsOpen] = useState(false)
+  const [detailId, setDetailId] = useState<string | null>(null)
+  const [linkedDetail, setLinkedDetail] = useState<ConnectedRow | null>(null)
+  const [accountOpen, setAccountOpen] = useState(false)
+  const [overflowOpen, setOverflowOpen] = useState(false)
+  // P4: le righe con un flusso in corso, per id ('login' → 'app' da sole)
+  const [connecting, setConnecting] = useState<Record<string, 'direct' | 'login' | 'app' | 'conflict'>>({})
+  // il server Composio del catalogo è collegato col login (l'ACCOUNT è attivo)
+  const gatewayConnected = connectors.find((c) => c.id === 'composio')?.state.status === 'connected'
 
   const refreshInstalled = async (): Promise<void> => {
     try {
@@ -1417,21 +854,6 @@ export function AppsView({ embedded = false }: { embedded?: boolean }) {
     void refreshInstalled()
   }, [refreshConnectors])
 
-  // il catalogo Composio: solo se attivo; la query viaggia al daemon (ricerca
-  // locale sulla cache, curate già escluse)
-  useEffect(() => {
-    if (!composio?.active) { setComposioRows(null); return }
-    let alive = true
-    const timer = setTimeout(() => {
-      void api.composioCatalog(query)
-        .then((r) => { if (alive) setComposioRows(r.rows) })
-        .catch(() => { if (alive) setComposioRows([]) })
-    }, query ? 250 : 0)
-    return () => { alive = false; clearTimeout(timer) }
-  }, [composio?.active, query])
-
-  // A4: il registro MCP non si cerca qui — solo nel foglio sviluppatori
-
   const [skillsByOwner, setSkillsByOwner] = useState<Array<{ ownerId: string; ownerName: string; skills: string[] }>>([])
   useEffect(() => {
     let alive = true
@@ -1442,22 +864,90 @@ export function AppsView({ embedded = false }: { embedded?: boolean }) {
     return () => { alive = false }
   }, [agents])
 
-  const model = useMemo(
-    () => appsViewModel({
-      catalog: connectors,
-      connectors,
-      installed,
-      agents,
-      skillsByOwner,
-      filter,
-      query,
-      lang: uiLang(),
-      composio,
-      composioRows: composioRows ?? [],
-      composioGateway
-    }),
-    [connectors, installed, agents, skillsByOwner, filter, query, composio, composioRows, composioGateway]
+  // l'elenco unico delle app: le curate static sono «pronte» solo col client salvato
+  const staticReady = useMemo(
+    () => new Set(connectors.filter((c) => c.clientRegistration === 'static' && c.hasStaticCredentials).map((c) => c.id)),
+    [connectors]
   )
+  const apps = useMemo(() => loadAppCatalog({ staticClientsReady: staticReady }), [staticReady])
+
+  const model = useMemo(
+    () => appsCatalogModel({ apps, connectors, composio, composioGateway, filter, query, lang: uiLang() }),
+    [apps, connectors, composio, composioGateway, filter, query]
+  )
+  const linked = useMemo(
+    () => appsViewModel({ connectors, installed, agents, skillsByOwner, filter, query, lang: uiLang() }),
+    [connectors, installed, agents, skillsByOwner, filter, query]
+  )
+
+  // mentre un flusso è in corsa (o un collegamento è in attesa) si rilegge lo
+  // stato ogni 2 s: gli eventi {type:'connectors'} arrivano, il polling chiude
+  const flowBusy = Object.keys(connecting).length > 0 || Boolean(composioGateway?.pending)
+  useEffect(() => {
+    if (!flowBusy) return
+    const timer = setInterval(() => {
+      void refreshConnectors()
+      void refreshComposioGateway()
+    }, 2000)
+    return () => clearInterval(timer)
+  }, [flowBusy, refreshConnectors, refreshComposioGateway])
+
+  // una riga COLLEGATA chiude il suo flusso; il login riuscito promuove «app»
+  useEffect(() => {
+    setConnecting((prev) => {
+      let changed = false
+      const next: typeof prev = {}
+      for (const [id, phase] of Object.entries(prev)) {
+        const row = model.rows.find((r) => r.app.id === id)
+        if (row?.connected === 'connected') { changed = true; continue }
+        if (phase === 'login' && gatewayConnected) { next[id] = 'app'; changed = true; continue }
+        next[id] = phase
+      }
+      return changed ? next : prev
+    })
+  }, [model, gatewayConnected])
+
+  /** La fase visibile di una riga (null = stato fermo: Connetti/Connessa/Ricollega). */
+  const flowOf = (row: CatalogRowView): AppFlowKind | null => {
+    const phase = connecting[row.app.id]
+    if (!phase) return null
+    if (phase === 'conflict') return 'conflict'
+    if (phase === 'direct') return 'direct'
+    const slug = row.app.composioSlug
+    const pending = composioGateway?.pending
+    // solo il collegamento FATTO chiude il flusso: uno stato «da ricollegare»
+    // arrivato a metà flusso non deve spezzare l'attesa visibile all'utente
+    if (row.connected === 'connected') return null
+    if (phase === 'login' && !gatewayConnected) return 'login'
+    if (slug && pending?.slug === slug && pending.failed) return 'failed'
+    return 'app'
+  }
+
+  const connect = async (row: CatalogRowView): Promise<void> => {
+    const r = await api.appsConnect(row.app.id).catch((): Awaited<ReturnType<typeof api.appsConnect>> => ({ started: false, reason: 'unknown-app' }))
+    if (r.started) setConnecting((p) => ({ ...p, [row.app.id]: r.phase ?? 'direct' }))
+    else if (r.conflict) setConnecting((p) => ({ ...p, [row.app.id]: 'conflict' }))
+    void refreshConnectors()
+    void refreshComposioGateway()
+  }
+  const cancel = async (row: CatalogRowView): Promise<void> => {
+    setConnecting((p) => {
+      const next = { ...p }
+      delete next[row.app.id]
+      return next
+    })
+    await api.appsCancelConnect(row.app.id).catch(() => undefined)
+    void refreshConnectors()
+    void refreshComposioGateway()
+  }
+  const onConflictResolve = async (row: CatalogRowView): Promise<void> => {
+    await api.composioDisable().catch(() => undefined)
+    await refreshComposio()
+    await connect(row)
+  }
+
+  const openDetail = (row: CatalogRowView): void => setDetailId(row.app.id)
+  const detail = detailId ? (model.rows.find((r) => r.app.id === detailId) ?? null) : null
 
   const botsHalfLine = (label: ConnectedRow['botsLabel']): string => {
     if (label.all) return t`Tutti i bot`
@@ -1465,32 +955,43 @@ export function AppsView({ embedded = false }: { embedded?: boolean }) {
     return label.extra > 0 ? `${names} +${label.extra}` : names
   }
 
-  // la ricerca senza risultati (A1): Composio spento → la riga che lo attiva;
-  // acceso → «Nessuna app trovata»
-  const nothingFound =
-    query.trim().length > 0 &&
-    model.connected.length === 0 &&
-    model.catalogRows.length === 0 &&
-    model.composioApps.length === 0 &&
-    model.featured.length === 0 &&
-    composioRows !== null // il catalogo Composio è stato interrogato (o è vuoto)
+  // le pillole: al massimo 5 categorie in riga, le altre dentro «Altro ▾»
+  const MAX_CATEGORY_PILLS = 5
+  const visibleCategories = model.categoriesPresent.slice(0, MAX_CATEGORY_PILLS)
+  const overflowCategories = model.categoriesPresent.slice(MAX_CATEGORY_PILLS)
+  const browsing = filter === 'all' && !query.trim()
+  // P3: due colonne sopra i 1024 px — a 900 (la finestra minima) diventa UNA
+  const rowGrid = 'grid grid-cols-1 gap-1.5 lg:grid-cols-2 lg:gap-x-8'
+
+  const renderRow = (row: CatalogRowView): ReactNode => (
+    <AppRow
+      key={row.app.id}
+      row={row}
+      flow={flowOf(row)}
+      onConnect={(r) => void connect(r)}
+      onCancel={(r) => void cancel(r)}
+      onConflictResolve={(r) => void onConflictResolve(r)}
+      onOpen={openDetail}
+    />
+  )
 
   return (
     <div className={embedded ? 'space-y-5 pr-12' : 'space-y-5'}>
-      {/* testata (solo finestra): pila delle icone + N collegate + ✕ */}
+      {/* testata (solo finestra): pila dei loghi + N connesse + ✕ */}
       {!embedded && (
         <div className="flex items-center gap-3">
           <h2 className="flex-1 font-display text-2xl">{i18n._(msg`App`)}</h2>
           <button
             className="flex items-center gap-2 text-sm text-muted-foreground transition hover:text-foreground"
+            data-testid="connected-summary"
             onClick={() => setFilter('connected')}
           >
             <span className="flex">
-              {model.connected.slice(0, 3).map((c, i) => (
-                <AppLogo key={c.key} logo={c.logo} name={c.name} className={`size-6 text-[11px] ${i > 0 ? '-ml-1.5' : ''}`} />
+              {model.connectedRows.slice(0, 4).map((r, i) => (
+                <AppLogo key={r.app.id} logo={r.app.logo} name={r.app.name} className={`size-6 text-[11px] ${i > 0 ? '-ml-1.5' : ''}`} />
               ))}
             </span>
-            <Trans>{model.connectedCount} collegate ›</Trans>
+            <Trans>{model.connectedCount} connesse ›</Trans>
           </button>
           <button
             className="grid size-9 place-items-center rounded-full bg-muted text-muted-foreground transition hover:text-foreground"
@@ -1513,135 +1014,133 @@ export function AppsView({ embedded = false }: { embedded?: boolean }) {
         />
       </label>
 
-      {/* 2. «Collegate» (con stato e «da ricollegare») */}
-      <section>
-        <strong className="text-[15px] font-medium"><Trans>Collegate</Trans></strong>
-        {model.connected.length === 0 && !query && (
-          <p className="py-2 text-sm text-muted-foreground"><Trans>Nessuna app collegata: comincia dalle consigliate.</Trans></p>
-        )}
-        <div className="mt-2 grid grid-cols-1 gap-x-8 sm:grid-cols-2">
-          {model.connected.map((row) => (
-            <button
-              key={row.key}
-              className="flex items-center gap-3 rounded-[14px] px-1 py-2 text-left transition hover:bg-muted/60"
-              onClick={() => (
-                row.gateway || row.gatewaySlug
-                  ? setGatewayDetailOpen(true)
-                  : row.source === 'composio'
-                    ? openComposioDetail(row)
-                    : setDetail(row)
-              )}
+      {/* 2. le pillole: Tutte · Connesse · le categorie con almeno un'app · Altro ▾ */}
+      <div className="flex flex-wrap items-center gap-1.5" data-testid="app-filters">
+        <FilterPill active={filter === 'all'} onClick={() => setFilter('all')}><Trans>Tutte</Trans></FilterPill>
+        <FilterPill active={filter === 'connected'} onClick={() => setFilter('connected')}><Trans>Connesse</Trans></FilterPill>
+        {visibleCategories.map((c) => (
+          <FilterPill key={c} active={filter === c} onClick={() => setFilter(c)}>{appCategoryLabel(c, uiLang())}</FilterPill>
+        ))}
+        {overflowCategories.length > 0 && (
+          <div className="relative">
+            <FilterPill
+              active={filter !== 'all' && filter !== 'connected' && overflowCategories.includes(filter as AppCategoryId)}
+              onClick={() => setOverflowOpen((o) => !o)}
             >
-              <AppLogo logo={row.logo} name={row.name} />
+              <Trans>Altro ▾</Trans>
+            </FilterPill>
+            {overflowOpen && (
+              <div className="absolute left-0 top-full z-20 mt-1 flex flex-col gap-0.5 rounded-2xl bg-card p-1.5 shadow-soft">
+                {overflowCategories.map((c) => (
+                  <button
+                    key={c}
+                    className={`rounded-full px-3 py-1 text-left text-[12px] transition hover:bg-muted ${filter === c ? 'text-foreground' : 'text-muted-foreground'}`}
+                    onClick={() => { setFilter(c); setOverflowOpen(false) }}
+                  >
+                    {appCategoryLabel(c, uiLang())}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* 3. «Collegate»: i server e i plugin (le app stanno nell'elenco unico) */}
+      {(linked.connected.length > 0 || !query) && (
+        <section>
+          <strong className="text-[15px] font-medium"><Trans>Collegate</Trans></strong>
+          {linked.connected.length === 0 && !query && (
+            <p className="py-2 text-sm text-muted-foreground"><Trans>Nessuna app collegata: comincia dalle consigliate.</Trans></p>
+          )}
+          <div className={`mt-2 ${rowGrid}`}>
+            {linked.connected.map((row) => (
+              <button
+                key={row.key}
+                className="flex items-center gap-3 rounded-[14px] px-1 py-2 text-left transition hover:bg-muted/60"
+                onClick={() => setLinkedDetail(row)}
+              >
+                <AppLogo logo={row.logo} name={row.name} />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[15px]">{row.name}</span>
+                  <span className="block truncate text-[13px] text-muted-foreground">{botsHalfLine(row.botsLabel)}</span>
+                  <ProvenanceTag via={row.via} />
+                </span>
+                {row.status === 'reconnect' ? (
+                  <span className="shrink-0 rounded-full bg-foreground px-3 py-1 text-xs text-background"><Trans>Ricollega</Trans></span>
+                ) : (
+                  <span className="shrink-0 text-sm text-chart-2"><Trans>Collegata</Trans></span>
+                )}
+              </button>
+            ))}
+            {/* la riga delle skill dei bot */}
+            <button
+              className="flex items-center gap-3 rounded-[14px] px-1 py-2 text-left transition hover:bg-muted/60"
+              onClick={() => setSkillsOpen(true)}
+            >
+              <span className="grid size-10 shrink-0 place-items-center rounded-[11px] bg-muted text-base">✦</span>
               <span className="min-w-0 flex-1">
-                <span className="block text-[15px]">{row.name}</span>
-                <span className="block truncate text-[13px] text-muted-foreground">{botsHalfLine(row.botsLabel)}</span>
-                <ProvenanceTag via={row.via} />
+                <span className="block text-[15px]"><Trans>Skill dei bot</Trans></span>
+                <span className="block truncate text-[13px] text-muted-foreground">
+                  <Trans>{linked.skills.reduce((a, s) => a + s.skills.length, 0) + (installed?.plugins.reduce((a, p) => a + p.skills.length, 0) ?? 0)} skill · se ne vuoi una nuova, chiedila a un bot</Trans>
+                </span>
               </span>
-              {row.status === 'reconnect' ? (
-                <span className="shrink-0 rounded-full bg-foreground px-3 py-1 text-xs text-background"><Trans>Ricollega</Trans></span>
-              ) : (
-                <span className="shrink-0 text-sm text-chart-2"><Trans>Collegata</Trans></span>
-              )}
+              <span className="shrink-0 text-sm text-muted-foreground"><Trans>Gestisci ›</Trans></span>
             </button>
-          ))}
-          {/* 4. la riga delle skill dei bot */}
-          <button
-            className="flex items-center gap-3 rounded-[14px] px-1 py-2 text-left transition hover:bg-muted/60"
-            onClick={() => setSkillsOpen(true)}
-          >
-            <span className="grid size-10 shrink-0 place-items-center rounded-[11px] bg-muted text-base">✦</span>
-            <span className="min-w-0 flex-1">
-              <span className="block text-[15px]"><Trans>Skill dei bot</Trans></span>
-              <span className="block truncate text-[13px] text-muted-foreground">
-                <Trans>{model.skills.reduce((a, s) => a + s.skills.length, 0) + (installed?.plugins.reduce((a, p) => a + p.skills.length, 0) ?? 0)} skill · se ne vuoi una nuova, chiedila a un bot</Trans>
-              </span>
-            </span>
-            <span className="shrink-0 text-sm text-muted-foreground"><Trans>Gestisci ›</Trans></span>
-          </button>
-        </div>
+          </div>
+        </section>
+      )}
+
+      {/* 4. l'elenco unico (P3): Connesse in cima, consigliate, sezioni per categoria */}
+      <section className="space-y-4">
+        {browsing && model.connectedRows.length > 0 && (
+          <div>
+            <p className="mb-1 text-[13px] text-muted-foreground"><Trans>Connesse</Trans></p>
+            <div className={rowGrid}>{model.connectedRows.map(renderRow)}</div>
+          </div>
+        )}
+        {browsing && model.featured.length > 0 && (
+          <div>
+            <p className="mb-1 text-[13px] text-muted-foreground"><Trans>Consigliate per te</Trans></p>
+            <div className={rowGrid}>{model.featured.map(renderRow)}</div>
+          </div>
+        )}
+        {browsing && model.sections.map((s) => (
+          <div key={s.category}>
+            <div className="mb-1 flex items-baseline justify-between">
+              <p className="text-[13px] text-muted-foreground">{appCategoryLabel(s.category, uiLang())}</p>
+              {s.total > s.rows.length && (
+                <button
+                  className="text-[12px] text-muted-foreground transition hover:text-foreground"
+                  data-testid={`view-all-${s.category}`}
+                  onClick={() => setFilter(s.category)}
+                >
+                  <Trans>Visualizza tutto</Trans>
+                </button>
+              )}
+            </div>
+            <div className={rowGrid}>{s.rows.map(renderRow)}</div>
+          </div>
+        ))}
+        {model.grid && (model.grid.length > 0 ? (
+          <div className={rowGrid}>{model.grid.map(renderRow)}</div>
+        ) : (
+          <p className="py-2 text-sm text-muted-foreground"><Trans>Nessuna app trovata. Prova con un altro nome.</Trans></p>
+        ))}
       </section>
 
-      {/* 3. «Tutte le app»: la card di attivazione, le consigliate, le curate e le Composio */}
-      <section className="space-y-1">
-        <strong className="text-[15px] font-medium"><Trans>Tutte le app</Trans></strong>
-        {/* fase Composio OAuth (C6): la card in cima è il LOGIN (un solo
-            passo, niente campo chiave); la chiave di progetto sta nel foglio
-            «Per sviluppatori». Con la chiave GIÀ attiva la card non c'è. */}
-        {!composio?.active && (!gatewayConnected || gatewayCard) && (
-          <div className="mt-2">
-            <ComposioGatewayCard connected={gatewayConnected} onStart={() => setGatewayCard(true)} />
-          </div>
-        )}
-        {/* le consigliate (solo senza ricerca) */}
-        {!query && model.featured.length > 0 && (
-          <div className="mt-2">
-            <p className="mb-1 text-[13px] text-muted-foreground"><Trans>Consigliate per te</Trans></p>
-            <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2 sm:gap-x-8">
-              {model.featured.map((f) => (
-                <div key={f.id} className="flex items-center gap-3 rounded-[14px] px-1 py-1.5">
-                  <AppLogo logo={null} name={f.name} />
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-[15px]">{f.name}</span>
-                    <span className="block truncate text-[13px] text-muted-foreground">{f.tagline}</span>
-                    <ProvenanceTag via="direct" />
-                  </span>
-                  <ConnectButton id={f.id} />
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-        {/* le curate (dirette) */}
-        <div className="mt-2 grid grid-cols-1 gap-1.5 sm:grid-cols-2 sm:gap-x-8">
-          {model.catalogRows.map((c) => (
-            <div key={c.id} className="flex items-center gap-3 rounded-[14px] px-1 py-1.5">
-              <AppLogo logo={null} name={c.name} />
-              <span className="min-w-0 flex-1">
-                <span className="block text-[15px]">{c.name}</span>
-                <span className="block truncate text-[13px] text-muted-foreground">{taglineOf(c.tagline, uiLang())}</span>
-                <ProvenanceTag via="direct" />
-              </span>
-              <ConnectButton id={c.id} />
-            </div>
-          ))}
-          {/* le app Composio (dopo le curate, ordine del daemon) */}
-          {model.composioApps.map((a) => (
-            <div key={`composio:${a.slug}`} className="flex items-center gap-3 rounded-[14px] px-1 py-1.5" data-testid={`composio-row-${a.slug}`}>
-              <AppLogo logo={a.logo} name={a.name} />
-              <span className="min-w-0 flex-1">
-                <span className="block text-[15px]">{a.name}</span>
-                <span className="block truncate text-[13px] text-muted-foreground">{a.tagline ?? ''}</span>
-                <ProvenanceTag via="composio" />
-              </span>
-              <button
-                className="h-8 shrink-0 rounded-full bg-muted px-4 text-[13px] transition hover:bg-accent disabled:opacity-50"
-                disabled={a.connectable === 'developer-config'}
-                title={a.connectable === 'developer-config' ? t`Questa app su Composio va configurata dallo sviluppatore: per ora non si può collegare da Homun.` : undefined}
-                onClick={() => setComposioDetail({ app: null, row: a })}
-              >
-                <Trans>Collega</Trans>
-              </button>
-            </div>
-          ))}
-        </div>
-        {/* la ricerca senza risultati (A1) */}
-        {nothingFound && (
-          composio?.active || gatewayConnected ? (
-            <p className="py-2 text-sm text-muted-foreground"><Trans>Nessuna app trovata</Trans></p>
-          ) : (
-            <div className="flex items-center justify-between gap-2 py-2 text-sm text-muted-foreground">
-              <Trans>Non c'è?</Trans>
-              <button
-                className="rounded-full bg-foreground px-3.5 py-1.5 text-[13px] font-medium text-background transition hover:opacity-90"
-                onClick={() => setActivationOpen(true)}
-              >
-                <Trans>Attiva più app con Composio</Trans>
-              </button>
-            </div>
-          )
-        )}
-      </section>
+      {/* P6: l'account di Composio, una riga discreta in fondo */}
+      {gatewayConnected && (
+        <button
+          className="flex items-center gap-2 rounded-full bg-muted/60 px-3 py-1.5 text-[12px] text-muted-foreground transition hover:text-foreground"
+          data-testid="composio-account-row"
+          onClick={() => setAccountOpen(true)}
+        >
+          <span className="grid size-5 place-items-center rounded-full bg-card text-[11px]">🌐</span>
+          <span><Trans>Account Composio · connesso</Trans></span>
+          <span>›</span>
+        </button>
+      )}
 
       {/* A1/A9: il link piccolo in fondo al foglio «Per sviluppatori» */}
       <button
@@ -1652,99 +1151,265 @@ export function AppsView({ embedded = false }: { embedded?: boolean }) {
         <Trans>Per sviluppatori: server personalizzati, plugin, registro</Trans>
       </button>
 
-      {activationOpen && (
-        <ComposioActivationSheet
-          onClose={() => setActivationOpen(false)}
-          onDone={() => { setActivationOpen(false); void refreshComposio() }}
-        />
-      )}
       {developersOpen && <DevelopersSheet onClose={() => setDevelopersOpen(false)} />}
-      {gatewayDetailOpen && (
-        <ComposioGatewayDetail
-          onClose={() => {
-            setGatewayDetailOpen(false)
-            void refreshConnectors()
-            void refreshComposioGateway()
-          }}
-        />
-      )}
-      {waitingFor && (
-        <ComposioWaitingSheet
-          pending={{ slug: waitingFor.slug, name: waitingFor.name, since: Date.now() }}
-          onDone={() => { setWaitingFor(null); void refreshComposio() }}
-        />
-      )}
-      {composioDetail && (
-        <ComposioAppSheet
-          app={composioDetail.app}
-          row={composioDetail.row}
-          onClose={() => setComposioDetail(null)}
-          onWaiting={(slug, name) => { setComposioDetail(null); setWaitingFor({ slug, name }) }}
+      {accountOpen && (
+        <ComposioAccountSheet
+          onClose={() => setAccountOpen(false)}
+          onChanged={() => { void refreshConnectors(); void refreshComposioGateway() }}
         />
       )}
       {skillsOpen && <SkillsSheet onClose={() => setSkillsOpen(false)} />}
       {detail && (
-        <ConnectedDetailSheet
+        <AppDetailSheet
           row={detail}
           installed={installed}
-          connectors={connectors}
-          onClose={() => setDetail(null)}
-          onChanged={() => {
-            void refreshConnectors()
-            void refreshInstalled()
-          }}
-          onWaiting={(slug, name) => { setDetail(null); setWaitingFor({ slug, name }) }}
+          onClose={() => setDetailId(null)}
+          onChanged={() => { void refreshConnectors(); void refreshInstalled(); void refreshComposio(); void refreshComposioGateway() }}
+          onConnect={(r) => { setDetailId(null); void connect(r) }}
+        />
+      )}
+      {linkedDetail && (
+        <ConnectedDetailSheet
+          row={linkedDetail}
+          installed={installed}
+          onClose={() => setLinkedDetail(null)}
+          onChanged={() => { void refreshConnectors(); void refreshInstalled() }}
         />
       )}
     </div>
   )
-
-  /** A4: il dettaglio di un'app Composio collegata, dalla riga di «Collegate». */
-  function openComposioDetail(row: ConnectedRow): void {
-    const app = composio?.connected.find((a) => a.slug === row.composioSlug) ?? null
-    setComposioDetail({ app, row: { slug: row.composioSlug ?? row.id, name: row.name, tagline: null, logo: row.logo.startsWith('data:') ? row.logo : null, connectable: 'yes' } })
-  }
 }
 
-/** Il bottone Collega di una voce del catalogo (il flusso OAuth di oggi). */
-function ConnectButton({ id }: { id: string }) {
+// ---- fase catalogo app (P5): il foglio del dettaglio di un'app ----
+
+/**
+ * Il dettaglio di un'app dell'elenco: logo grande, nome, descrizione,
+ * categoria, la riga di PROVENIENZA (diretta o tramite Composio), lo stato,
+ * l'account Composio se c'è, Scollega con conferma e quali bot la usano.
+ * Niente slug, niente nomi di strumenti.
+ */
+function AppDetailSheet({ row, installed, onClose, onChanged, onConnect }: {
+  row: CatalogRowView
+  installed: { servers: InstalledServerLike[]; plugins: InstalledPluginLike[] } | null
+  onClose(): void
+  onChanged(): void
+  onConnect(row: CatalogRowView): void
+}) {
   const { t } = useLingui()
+  const agents = useStore((s) => s.agents)
+  const composio = useStore((s) => s.composio)
+  const composioGateway = useStore((s) => s.composioGateway)
+  const [confirm, setConfirm] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const app = row.app
+
+  // dove sta il collegamento di quest'app (la stessa regola dell'elenco)
+  const gatewayApp = app.composioSlug ? (composioGateway?.connected.find((a) => a.slug === app.composioSlug) ?? null) : null
+  const keyApp = app.composioSlug ? (composio?.connected.find((a) => a.slug === app.composioSlug) ?? null) : null
+  // le curate static non ancora pronte mostrano il client OAuth nel dettaglio? No:
+  // con il marchio su Composio la strada è una sola; la configurazione del client
+  // resta una questione da «Per sviluppatori» (docs/google-oauth.md).
+
+  const disconnect = async (): Promise<void> => {
+    setBusy(true)
+    setError('')
+    try {
+      if (gatewayApp) await api.composioGatewayRemove(app.composioSlug!)
+      else if (keyApp) await api.composioDisconnect(app.composioSlug!)
+      else if (app.directId) await api.connectorsDisconnect(app.directId)
+      onChanged()
+      onClose()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
-    <button
-      className="h-8 shrink-0 rounded-full bg-muted px-4 text-[13px] transition hover:bg-accent disabled:opacity-50"
-      disabled={busy}
-      onClick={async () => {
-        setBusy(true)
-        try { await api.connectorsConnect(id) } finally { setBusy(false) }
-      }}
-    >
-      {busy ? t`autorizza nel browser…` : <Trans>Collega</Trans>}
-    </button>
+    <div className="fixed inset-0 z-50 grid place-items-center bg-foreground/20 p-4" onClick={onClose}>
+      <div className="max-h-[85vh] w-full max-w-lg overflow-y-auto scroll-thin rounded-3xl bg-card p-5 shadow-soft" onClick={(e) => e.stopPropagation()} data-testid={`app-detail-${app.id}`}>
+        <div className="flex items-center gap-3">
+          <AppLogo logo={app.logo} name={app.name} className="size-14 text-xl" />
+          <span className="min-w-0 flex-1">
+            <span className="block text-lg font-medium">{app.name}</span>
+            <span className="block text-[13px] text-muted-foreground">{appCategoryLabel(app.category, uiLang())}</span>
+          </span>
+        </div>
+        <div className="mt-2"><ProvenanceTag via={app.via} /></div>
+        {app.description && <p className="mt-3 text-[13px] leading-relaxed text-muted-foreground">{app.description}</p>}
+        {error && <p className="mt-2 text-[13px] text-destructive">{error}</p>}
+        {row.connected === 'connected' && <p className="mt-3 text-sm text-chart-2"><Trans>Connessa</Trans></p>}
+        {row.connected === 'reconnect' && <p className="mt-3 text-sm text-muted-foreground"><Trans>Non più attiva: ricollega per riavere le sue azioni.</Trans></p>}
+        {gatewayApp?.accountId && (
+          <p className="mt-1 text-[11px] text-muted-foreground">{t`account`} {gatewayApp.accountId}</p>
+        )}
+        <div className="mt-3 flex items-center gap-2">
+          <div className="flex-1" />
+          {row.connected ? (
+            confirm ? (
+              <button
+                className="rounded-full px-3 py-1.5 text-xs text-destructive transition hover:bg-destructive/10"
+                disabled={busy}
+                onClick={() => void disconnect()}
+              >
+                <Trans>Scollega davvero</Trans>
+              </button>
+            ) : (
+              <button
+                className="rounded-full px-3 py-1.5 text-xs text-destructive transition hover:bg-destructive/10"
+                onClick={() => setConfirm(true)}
+              >
+                <Trans>Scollega</Trans>
+              </button>
+            )
+          ) : (
+            <button
+              className="rounded-full bg-foreground px-3.5 py-1.5 text-xs font-medium text-background transition hover:opacity-90 disabled:opacity-50"
+              disabled={busy}
+              onClick={() => onConnect(row)}
+            >
+              {row.connected === 'reconnect' ? <Trans>Ricollega</Trans> : <Trans>Connetti</Trans>}
+            </button>
+          )}
+          <button className="rounded-full px-3 py-1.5 text-sm text-muted-foreground transition hover:text-foreground" onClick={onClose}>
+            <Trans>Chiudi</Trans>
+          </button>
+        </div>
+        {/* quali bot la usano, come oggi per i connettori */}
+        {row.connected && (keyApp || app.directId) && (
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span className="text-[11px] text-muted-foreground"><Trans>per bot:</Trans></span>
+            {keyApp ? (
+              agents.map((a) => (
+                <ComposioBotToggle
+                  key={a.id}
+                  slug={keyApp.slug}
+                  agentId={a.id}
+                  agentName={a.name}
+                  enabledFor={keyApp.enabledFor}
+                  allIds={agents.map((x) => x.id)}
+                  onDone={onChanged}
+                />
+              ))
+            ) : (
+              agents.map((a) => {
+                const server = installed?.servers.find((s) => s.id === app.directId)
+                const cur = server?.enabledFor ?? []
+                const on = cur.includes('*') || cur.includes(a.id)
+                return (
+                  <label key={a.id} className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      className="h-3 w-3 accent-foreground"
+                      checked={on}
+                      onChange={() => {
+                        const next = cur.includes('*') ? [] : [...cur]
+                        const i = next.indexOf(a.id)
+                        if (i >= 0) next.splice(i, 1)
+                        else next.push(a.id)
+                        void api.connectorsSetEnabledFor('server', app.directId!, next).then(onChanged)
+                      }}
+                    />
+                    {a.name}
+                  </label>
+                )
+              })
+            )}
+          </div>
+        )}
+        {app.via === 'composio' && (
+          <p className="mt-3 text-[11px] text-muted-foreground">
+            <Trans>Scollegare NON cancella l'account su Composio: si gestisce da composio.dev.</Trans>
+          </p>
+        )}
+        <p className="mt-2 text-[11px] text-muted-foreground">{t`La descrizione arriva dal catalogo Composio: per ora è in inglese.`}</p>
+      </div>
+    </div>
   )
 }
 
-/** Il foglio del dettaglio di una voce collegata (ciò che facevano ConnectorTile e InstalledTab). */
-function ConnectedDetailSheet({ row, installed, connectors, onClose, onChanged, onWaiting }: {
+// ---- fase catalogo app (P6): Composio come ACCOUNT, non come app ----
+
+/**
+ * Il foglio piccolo dell'account Composio (riga discreta in fondo alla
+ * finestra App): una frase su cos'è (servizio di terzi, piano gratuito),
+ * «Gestisci su Composio» e Disattiva con la conferma e il testo di oggi.
+ */
+function ComposioAccountSheet({ onClose, onChanged }: { onClose(): void; onChanged(): void }) {
+  const [confirmOff, setConfirmOff] = useState(false)
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-foreground/20 p-4" onClick={onClose}>
+      <div className="max-h-[85vh] w-full max-w-md overflow-y-auto scroll-thin rounded-3xl bg-card p-5 shadow-soft" onClick={(e) => e.stopPropagation()} data-testid="composio-account-sheet">
+        <div className="flex items-center gap-3">
+          <span className="grid size-10 shrink-0 place-items-center rounded-[11px] bg-muted text-base">🌐</span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-[15px] font-medium"><Trans>Account Composio</Trans></span>
+            <span className="block truncate text-[13px] text-muted-foreground"><Trans>Le app dell'elenco che passano da qui</Trans></span>
+          </span>
+          <span className="h-2 w-2 rounded-full bg-chart-2" />
+        </div>
+        <p className="mt-3 text-[13px] leading-relaxed text-muted-foreground">
+          <Trans>Composio è un servizio di terzi: i login e le azioni delle app che colleghi lì passano dai suoi server, non restano solo sul tuo Mac. Ha un piano gratuito.</Trans>
+        </p>
+        <p className="mt-2 text-[11px] text-muted-foreground">
+          <Trans>Le app collegate fuori da Homun non si vedono qui: </Trans>
+          <a className="text-primary hover:underline" href="https://dashboard.composio.dev/~/org/connect/apps" target="_blank" rel="noreferrer"><Trans>gestiscile su Composio</Trans></a>.
+        </p>
+        <div className="mt-4 flex items-center justify-between">
+          {confirmOff ? (
+            <button
+              className="rounded-full px-3 py-1.5 text-xs text-destructive transition hover:bg-destructive/10"
+              onClick={async () => {
+                await api.connectorsDisconnect('composio').catch(() => undefined)
+                onChanged()
+                onClose()
+              }}
+            >
+              <Trans>Disattiva davvero</Trans>
+            </button>
+          ) : (
+            <button
+              className="rounded-full px-3 py-1.5 text-xs text-destructive transition hover:bg-destructive/10"
+              onClick={() => setConfirmOff(true)}
+            >
+              <Trans>Disattiva</Trans>
+            </button>
+          )}
+          <a
+            className="rounded-full bg-card px-3.5 py-1.5 text-xs transition hover:bg-card/80"
+            href="https://dashboard.composio.dev/~/org/connect/apps"
+            target="_blank"
+            rel="noreferrer"
+          >
+            <Trans>Gestisci su Composio</Trans>
+          </a>
+        </div>
+        <p className="mt-1.5 text-[11px] text-muted-foreground">
+          <Trans>Disattivare toglie il server e revoca il token sul tuo Mac: le app collegate restano sul tuo account Composio, le togli da</Trans>{' '}
+          <a className="text-primary hover:underline" href="https://dashboard.composio.dev/~/org/connect/apps" target="_blank" rel="noreferrer"><Trans>dashboard.composio.dev</Trans></a>.
+        </p>
+      </div>
+    </div>
+  )
+}
+
+/** Il foglio del dettaglio di un server o plugin collegato (ciò che restava di ConnectorTile e InstalledTab). */
+function ConnectedDetailSheet({ row, installed, onClose, onChanged }: {
   row: ConnectedRow
   installed: { servers: InstalledServerLike[]; plugins: InstalledPluginLike[] } | null
-  connectors: ConnectorInfo[]
   onClose(): void
   onChanged(): void
-  /** fase app: il dettaglio di una curata può aprire il collegamento Composio */
-  onWaiting(slug: string, name: string): void
 }) {
   const { t } = useLingui()
   const agents = useStore((s) => s.agents)
   const [confirm, setConfirm] = useState(false)
-  const [composioVia, setComposioVia] = useState<{ slug: string; name: string } | null>(null)
-  const connector = connectors.find((c) => c.id === row.id)
   const server = row.source === 'server' ? installed?.servers.find((s) => s.id === row.id) : undefined
   const plugin = row.source === 'plugin' ? installed?.plugins.find((p) => p.name === row.id) : undefined
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-foreground/20 p-4" onClick={onClose}>
       <div className="max-h-[85vh] w-full max-w-lg overflow-y-auto scroll-thin rounded-3xl bg-card p-5 shadow-soft" onClick={(e) => e.stopPropagation()}>
-        {connector && <ConnectorDetail c={connector} onDone={onChanged} onComposio={(slug, name) => setComposioVia({ slug, name })} />}
         {server && <ServerDetail sv={server as never} onDone={onChanged} />}
         {plugin && (
           <div className="space-y-3">
@@ -1789,20 +1454,12 @@ function ConnectedDetailSheet({ row, installed, connectors, onClose, onChanged, 
             </div>
           </div>
         )}
-        {!connector && !server && !plugin && <p className="text-sm text-muted-foreground">{t`voce non trovata`}</p>}
+        {!server && !plugin && <p className="text-sm text-muted-foreground">{t`voce non trovata`}</p>}
         <div className="mt-4 flex justify-end">
           <button className="rounded-full px-3 py-1.5 text-sm text-muted-foreground transition hover:text-foreground" onClick={onClose}>
             <Trans>Chiudi</Trans>
           </button>
         </div>
-        {composioVia && (
-          <ComposioAppSheet
-            app={null}
-            row={{ slug: composioVia.slug, name: composioVia.name, tagline: null, logo: null, connectable: 'yes' }}
-            onClose={() => setComposioVia(null)}
-            onWaiting={(slug, name) => { setComposioVia(null); onWaiting(slug, name) }}
-          />
-        )}
       </div>
     </div>
   )

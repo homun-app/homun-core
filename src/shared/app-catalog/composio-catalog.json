@@ -1,0 +1,371 @@
+[
+  {
+    "slug": "gmail",
+    "name": "Gmail",
+    "description": "Send, read and search your Gmail inbox and drafts.",
+    "categories": ["communication"],
+    "toolsCount": 24,
+    "logo": null,
+    "auth": "managed"
+  },
+  {
+    "slug": "slack",
+    "name": "Slack",
+    "description": "Search messages, send DMs and manage channels in Slack.",
+    "categories": ["communication"],
+    "toolsCount": 31,
+    "logo": null,
+    "auth": "managed"
+  },
+  {
+    "slug": "googlecalendar",
+    "name": "Google Calendar",
+    "description": "Create events, read your agenda and manage invitations.",
+    "categories": ["productivity"],
+    "toolsCount": 12,
+    "logo": null,
+    "auth": "managed"
+  },
+  {
+    "slug": "googledrive",
+    "name": "Google Drive",
+    "description": "Browse, search and manage files and folders on Drive.",
+    "categories": ["productivity"],
+    "toolsCount": 15,
+    "logo": null,
+    "auth": "managed"
+  },
+  {
+    "slug": "googlesheets",
+    "name": "Google Sheets",
+    "description": "Read and update spreadsheets, rows and cells.",
+    "categories": ["productivity"],
+    "toolsCount": 19,
+    "logo": null,
+    "auth": "managed"
+  },
+  {
+    "slug": "notion",
+    "name": "Notion",
+    "description": "Search, read and update pages and databases in Notion.",
+    "categories": ["productivity"],
+    "toolsCount": 22,
+    "logo": null,
+    "auth": "managed"
+  },
+  {
+    "slug": "github",
+    "name": "GitHub",
+    "description": "Issues, pull requests, repositories and code search.",
+    "categories": ["developer"],
+    "toolsCount": 48,
+    "logo": null,
+    "auth": "managed"
+  },
+  {
+    "slug": "linear",
+    "name": "Linear",
+    "description": "Issues, projects, cycles and comments in Linear.",
+    "categories": ["developer"],
+    "toolsCount": 26,
+    "logo": null,
+    "auth": "managed"
+  },
+  {
+    "slug": "jira",
+    "name": "Jira",
+    "description": "Browse and update Jira issues and projects.",
+    "categories": ["developer"],
+    "toolsCount": 33,
+    "logo": null,
+    "auth": "managed"
+  },
+  {
+    "slug": "gitlab",
+    "name": "GitLab",
+    "description": "Issues, merge requests and pipelines in GitLab.",
+    "categories": ["developer"],
+    "toolsCount": 21,
+    "logo": null,
+    "auth": "managed"
+  },
+  {
+    "slug": "discord",
+    "name": "Discord",
+    "description": "Send messages and manage channels on Discord.",
+    "categories": ["communication"],
+    "toolsCount": 14,
+    "logo": null,
+    "auth": "managed"
+  },
+  {
+    "slug": "telegram",
+    "name": "Telegram",
+    "description": "Send and read messages on Telegram.",
+    "categories": ["communication"],
+    "toolsCount": 9,
+    "logo": null,
+    "auth": "managed"
+  },
+  {
+    "slug": "whatsapp",
+    "name": "WhatsApp",
+    "description": "Send and read WhatsApp messages.",
+    "categories": ["communication"],
+    "toolsCount": 8,
+    "logo": null,
+    "auth": "managed"
+  },
+  {
+    "slug": "microsoft_teams",
+    "name": "Teams",
+    "description": "Messages, channels and meetings in Microsoft Teams.",
+    "categories": ["communication"],
+    "toolsCount": 17,
+    "logo": null,
+    "auth": "managed"
+  },
+  {
+    "slug": "zoom",
+    "name": "Zoom",
+    "description": "Manage meetings and recordings on Zoom.",
+    "categories": ["communication"],
+    "toolsCount": 11,
+    "logo": null,
+    "auth": "managed"
+  },
+  {
+    "slug": "outlook",
+    "name": "Outlook",
+    "description": "Read and send email from Outlook.",
+    "categories": ["communication"],
+    "toolsCount": 16,
+    "logo": null,
+    "auth": "managed"
+  },
+  {
+    "slug": "trello",
+    "name": "Trello",
+    "description": "Boards, lists and cards in Trello.",
+    "categories": ["productivity"],
+    "toolsCount": 13,
+    "logo": null,
+    "auth": "managed"
+  },
+  {
+    "slug": "asana",
+    "name": "Asana",
+    "description": "Tasks, projects and sections in Asana.",
+    "categories": ["productivity"],
+    "toolsCount": 18,
+    "logo": null,
+    "auth": "managed"
+  },
+  {
+    "slug": "clickup",
+    "name": "ClickUp",
+    "description": "Tasks, lists and spaces in ClickUp.",
+    "categories": ["productivity"],
+    "toolsCount": 15,
+    "logo": null,
+    "auth": "managed"
+  },
+  {
+    "slug": "airtable",
+    "name": "Airtable",
+    "description": "Bases, tables and records in Airtable.",
+    "categories": ["productivity"],
+    "toolsCount": 20,
+    "logo": null,
+    "auth": "managed"
+  },
+  {
+    "slug": "dropbox",
+    "name": "Dropbox",
+    "description": "Browse and share files on Dropbox.",
+    "categories": ["productivity"],
+    "toolsCount": 10,
+    "logo": null,
+    "auth": "managed"
+  },
+  {
+    "slug": "calendly",
+    "name": "Calendly",
+    "description": "Schedule events and check availability with Calendly.",
+    "categories": ["productivity"],
+    "toolsCount": 7,
+    "logo": null,
+    "auth": "managed"
+  },
+  {
+    "slug": "figma",
+    "name": "Figma",
+    "description": "Read files, frames and comments in Figma.",
+    "categories": ["design"],
+    "toolsCount": 12,
+    "logo": null,
+    "auth": "managed"
+  },
+  {
+    "slug": "hubspot",
+    "name": "HubSpot",
+    "description": "Contacts, deals and marketing in HubSpot.",
+    "categories": ["sales"],
+    "toolsCount": 41,
+    "logo": null,
+    "auth": "managed"
+  },
+  {
+    "slug": "salesforce",
+    "name": "Salesforce",
+    "description": "Leads, contacts and opportunities in Salesforce.",
+    "categories": ["sales"],
+    "toolsCount": 37,
+    "logo": null,
+    "auth": "managed"
+  },
+  {
+    "slug": "zendesk",
+    "name": "Zendesk",
+    "description": "Tickets and customers in Zendesk.",
+    "categories": ["sales"],
+    "toolsCount": 23,
+    "logo": null,
+    "auth": "managed"
+  },
+  {
+    "slug": "intercom",
+    "name": "Intercom",
+    "description": "Conversations and customers in Intercom.",
+    "categories": ["sales"],
+    "toolsCount": 19,
+    "logo": null,
+    "auth": "managed"
+  },
+  {
+    "slug": "mailchimp",
+    "name": "Mailchimp",
+    "description": "Audiences, campaigns and templates in Mailchimp.",
+    "categories": ["marketing"],
+    "toolsCount": 25,
+    "logo": null,
+    "auth": "managed"
+  },
+  {
+    "slug": "stripe",
+    "name": "Stripe",
+    "description": "Payments, invoices and subscriptions in Stripe.",
+    "categories": ["finance"],
+    "toolsCount": 29,
+    "logo": null,
+    "auth": "managed"
+  },
+  {
+    "slug": "paypal",
+    "name": "PayPal",
+    "description": "Payments and transactions in PayPal.",
+    "categories": ["finance"],
+    "toolsCount": 14,
+    "logo": null,
+    "auth": "managed"
+  },
+  {
+    "slug": "quickbooks",
+    "name": "QuickBooks",
+    "description": "Invoices, customers and accounts in QuickBooks.",
+    "categories": ["finance"],
+    "toolsCount": 31,
+    "logo": null,
+    "auth": "managed"
+  },
+  {
+    "slug": "xero",
+    "name": "Xero",
+    "description": "Invoices and contacts in Xero.",
+    "categories": ["finance"],
+    "toolsCount": 18,
+    "logo": null,
+    "auth": "managed"
+  },
+  {
+    "slug": "shopify",
+    "name": "Shopify",
+    "description": "Products, orders and customers in Shopify.",
+    "categories": ["e_commerce"],
+    "toolsCount": 34,
+    "logo": null,
+    "auth": "managed"
+  },
+  {
+    "slug": "woocommerce",
+    "name": "WooCommerce",
+    "description": "Products and orders in WooCommerce.",
+    "categories": ["e_commerce"],
+    "toolsCount": 16,
+    "logo": null,
+    "auth": "managed"
+  },
+  {
+    "slug": "x_twitter",
+    "name": "X",
+    "description": "Post and search on X.",
+    "categories": ["social_media"],
+    "toolsCount": 11,
+    "logo": null,
+    "auth": "managed"
+  },
+  {
+    "slug": "instagram",
+    "name": "Instagram",
+    "description": "Post and read on Instagram.",
+    "categories": ["social_media"],
+    "toolsCount": 9,
+    "logo": null,
+    "auth": "managed"
+  },
+  {
+    "slug": "linkedin",
+    "name": "LinkedIn",
+    "description": "Post, search and message on LinkedIn.",
+    "categories": ["social_media"],
+    "toolsCount": 13,
+    "logo": null,
+    "auth": "managed"
+  },
+  {
+    "slug": "facebook",
+    "name": "Facebook",
+    "description": "Pages, posts and events on Facebook.",
+    "categories": ["social_media"],
+    "toolsCount": 15,
+    "logo": null,
+    "auth": "managed"
+  },
+  {
+    "slug": "youtube",
+    "name": "YouTube",
+    "description": "Search videos, channels and playlists on YouTube.",
+    "categories": ["social_media"],
+    "toolsCount": 10,
+    "logo": null,
+    "auth": "managed"
+  },
+  {
+    "slug": "reddit",
+    "name": "Reddit",
+    "description": "Read and post on Reddit.",
+    "categories": ["social_media"],
+    "toolsCount": 8,
+    "logo": null,
+    "auth": "managed"
+  },
+  {
+    "slug": "spotify",
+    "name": "Spotify",
+    "description": "Search and manage music on Spotify.",
+    "categories": ["other"],
+    "toolsCount": 6,
+    "logo": null,
+    "auth": "managed"
+  }
+]

@@ -152,7 +152,6 @@ const api: SandbotApi = {
   composioSetKey: (key) => ipcRenderer.invoke('composio:set-key', key),
   composioTest: () => ipcRenderer.invoke('composio:test'),
   composioDisable: () => ipcRenderer.invoke('composio:disable'),
-  composioCatalog: (query) => ipcRenderer.invoke('composio:catalog', query),
   composioConnect: (slug) => ipcRenderer.invoke('composio:connect', slug),
   composioDisconnect: (slug) => ipcRenderer.invoke('composio:disconnect', slug),
   // fase Composio OAuth (C5): le app dentro il server Composio collegato col login
@@ -162,6 +161,9 @@ const api: SandbotApi = {
   composioGatewayRemove: (slug) => ipcRenderer.invoke('composio-gateway:remove', slug),
   composioGatewayCancel: () => ipcRenderer.invoke('composio-gateway:cancel'),
   composioGatewayCardConnect: (key) => ipcRenderer.invoke('composio-gateway:card-connect', key),
+  // fase catalogo app (P4): «Connetti» in un passo dalla riga dell'elenco
+  appsConnect: (appId) => ipcRenderer.invoke('apps:connect', appId),
+  appsCancelConnect: (appId) => ipcRenderer.invoke('apps:cancel-connect', appId),
   marketplaceList: () => ipcRenderer.invoke('marketplace:list'),
   marketplaceAdd: (source) => ipcRenderer.invoke('marketplace:add', source),
   marketplaceRemove: (source) => ipcRenderer.invoke('marketplace:remove', source),
