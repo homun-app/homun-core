@@ -2129,6 +2129,64 @@ describe('fase impostazioni (I4): i tre modi nel gate del turno', () => {
     await turn
   })
 
+  it('Non chiedere + bozza con via + revisore ACCESO e favorevole → resta bozza (il modo è la fonte, non enabled)', async () => {
+    h.db.settings.set('approvals.mode', 'never')
+    // enabled rimasto true (dati incoerenti): il revisore NON deve girare
+    enableAutoReview({ allowRules: [AR_DRAFT_RULE] })
+    reviewerAllow(AR_DRAFT_RULE)
+    h.llm.queue = [
+      {
+        toolCalls: [{
+          id: 'd1', name: 'draft_external',
+          arguments: JSON.stringify({
+            channel: 'email', to: 'team@example.com', subject: 'report', body: 'ecco il report',
+            via: { tool: 'mcp__gmail__send_message', args: { to: 'team@example.com', body: 'ecco il report' } }
+          })
+        }]
+      },
+      { text: 'ok' }
+    ]
+    await runTurn(AGENT, 'manda il report', emit)
+    expect(h.mcp.calls).toBe(0)
+    const draft = h.db.entries.find((e) => e.kind === 'send-message' && (e.meta?.message as { type?: string } | undefined)?.type === 'draft')!
+    expect(draft.meta?.status).toBe('pending')
+    expect(h.llm.calls.some((c) => c.length === 1 && c[0]!.role === 'user' && c[0]!.content.includes('<azione>'))).toBe(false)
+  })
+
+  it('Chiedi + autoReview.enabled rimasto true → card, il revisore non gira', async () => {
+    h.db.settings.set('approvals.mode', 'ask')
+    enableAutoReview()
+    reviewerAllow(AR_RULE)
+    h.llm.queue = [{ toolCalls: [CMD] }, { text: 'ok' }]
+    const turn = runTurn(AGENT, 'elenca i file', emit)
+    await vi.waitFor(() => {
+      expect(h.db.entries.some((e) => e.kind === 'approval' && e.meta?.status === 'pending')).toBe(true)
+    })
+    const appr = h.db.entries.findLast((e) => e.kind === 'approval')!
+    resolveApproval(AGENT, String(appr.meta?.approvalId), 'deny', 'once')
+    await turn
+    expect(h.sandboxMock.exec.calls).toBe(0)
+  })
+
+  it('Automatico SENZA revisore scelto → card, nessun ripiego silenzioso sul default del provider (I3.2)', async () => {
+    h.db.settings.set('approvals.mode', 'auto')
+    h.db.settings.set('autoReview', { enabled: true, allowRules: [AR_RULE], blockRules: [], providerId: null, model: null })
+    // il provider HA un revisore di default (override di ieri): prima della
+    // correzione il motore lo usava in silenzio, ora no
+    h.db.settings.set('providers.modelDefaults', { prov: { autoReviewModel: 'm-revisore' } })
+    reviewerAllow(AR_RULE)
+    h.llm.queue = [{ toolCalls: [CMD] }, { text: 'ok' }]
+    const turn = runTurn(AGENT, 'elenca i file', emit)
+    await vi.waitFor(() => {
+      expect(h.db.entries.some((e) => e.kind === 'approval' && e.meta?.status === 'pending')).toBe(true)
+    })
+    expect(h.llm.calls.some((c) => c.length === 1 && c[0]!.role === 'user' && c[0]!.content.includes('<azione>'))).toBe(false)
+    const appr = h.db.entries.findLast((e) => e.kind === 'approval')!
+    resolveApproval(AGENT, String(appr.meta?.approvalId), 'deny', 'once')
+    await turn
+    expect(h.sandboxMock.exec.calls).toBe(0)
+  })
+
   it('compatibilità: senza approvals.mode, autoReview.enabled=true vale Automatico', async () => {
     enableAutoReview()
     reviewerAllow(AR_RULE)

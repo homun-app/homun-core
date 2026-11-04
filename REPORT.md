@@ -68,6 +68,16 @@ Tutte e tre le migrazioni girano al primo avvio del daemon (`runtime.ts`), sono 
 - **L'inglese della sezione «App e skill»** (AppsView, non toccata da questa fase) non è stato catturato in inglese.
 - La nota della visione sulle catture: il pannello del bot dietro il dialogo resta nella lingua precedente finché non si ricarica — comportamento di oggi, non di questa fase.
 
+## Verifica (2026-11-04, revisore)
+
+Tre difetti corretti dopo la consegna:
+
+1. **I3.2 non era fatto nel motore.** `reviewWithConfiguredModel` ricadeva ancora in silenzio su `autoReviewModelFor` (provider e modello di default) quando il revisore non era scelto: «Nessuno» nella pagina, ma `glm-5.3-flash:cloud` nel turno. Ora il revisore è SOLO `autoReview.providerId` + `model`; senza, Automatico chiede.
+2. **Il modo non era la fonte nel motore.** Il revisore partiva su `autoReview.enabled`, non su `approvals.mode`: «Non chiedere» lasciava le bozze bozze solo perché la UI spegneva `enabled`. Con dati incoerenti (`mode: never`/`ask` ed `enabled: true`) il revisore avrebbe girato e potuto **inviare una bozza**. Ora `reviewWithConfiguredModel` gira solo se `approvalsMode(...) === 'auto'` (compatibilità invariata: senza `approvals.mode` vale `enabled`). Il test della bozza in «Non chiedere» passava banalmente (revisore spento): +3 test in `loop.test.ts` che falliscono sul codice consegnato (bozza con via + revisore acceso e favorevole in «Non chiedere»; «Chiedi» con `enabled` rimasto acceso; Automatico senza revisore con un default di provider presente).
+3. **Anello arancione attorno a tutto il dialogo** in molte catture (`i2-riserve`, `i4-*`…): il contorno di fuoco predefinito di Chromium sul contenitore del dialogo quando il fuoco ci torna (chiusura di un popover/menu). `outline-none` su `DialogContent` (contenitore `tabIndex=-1`, mai bersaglio da tastiera; gli anelli `:focus-visible` dei controlli restano).
+
+In più le catture consegnate erano **più vecchie della compilazione delle traduzioni**: «LM Studio (finto)» mostrava l'id Lingui `wc2uRO` al posto di «Sul tuo Mac · 1 modello…». Build rifatta e sonda rilanciata: **36/36**, 48 catture rigenerate e riguardate. Suite **2685** verdi, typecheck pulito.
+
 ## Due bug veri trovati guardando le catture (corretti)
 
 1. Le voci «Come gli altri»/«Nessuno» **sparivano** dal popover quando un modello era già scelto — servono per TORNARE indietro; ora ci sono sempre (I1.3, provato da I6c).

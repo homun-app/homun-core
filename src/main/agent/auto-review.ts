@@ -343,31 +343,31 @@ export async function runReviewer(
  * Adattatore di produzione: legge le impostazioni e chiama il modello piccolo
  * del revisore (temperatura 0, tool forzato). Provider/modello mancanti o
  * qualunque errore della chiamata diventano { ok: false } → ask.
- * Fase 9 (punto 1): modello del revisore non scelto → il default del provider
- * (per Ollama glm-5.3-flash:cloud); anche il provider, se non scelto, è il
- * primo attivo che abbia un default di revisore.
- * Ritorna null se l'auto-review è spenta o l'azione è fuori ambito a prescindere.
+ * Fase impostazioni (I3.2, verifica): il revisore è SOLO quello scelto
+ * (autoReview.providerId + model) — niente più ripiego silenzioso sul default
+ * del provider: la migrazione una tantum l'ha scritto nei setting. Senza
+ * revisore → null, e Automatico chiede (la card va all'utente).
+ * La fonte del modo è approvals.mode: il revisore gira SOLO su «Automatico»
+ * (senza approvals.mode vale autoReview.enabled, dati di ieri). Così «Chiedi»
+ * e «Non chiedere» non passano mai di qui, nemmeno con enabled rimasto acceso:
+ * in «Non chiedere» le bozze restano bozze per costruzione.
+ * Ritorna null se il modo non è Automatico, se il revisore manca o l'azione è
+ * fuori ambito a prescindere.
  */
 export async function reviewWithConfiguredModel(action: AutoReviewAction, lang: Lang = 'en'): Promise<{ cfg: AutoReviewSettings; outcome: ReviewerOutcome } | null> {
   const { getSetting } = await import('../store/db')
-  const cfg = getSetting<AutoReviewSettings>('autoReview', (await import('../../shared/types')).DEFAULT_AUTO_REVIEW)
-  if (!cfg.enabled) return null
+  if (approvalsMode({ getSetting }) !== 'auto') return null
+  const stored = { ...DEFAULT_AUTO_REVIEW, ...getSetting<AutoReviewSettings>('autoReview', DEFAULT_AUTO_REVIEW) }
+  // il modo è la fonte: autoReviewDecision legge cfg.enabled, quindi qui vale
+  // sempre true (enabled è derivato da approvals.mode === 'auto')
+  const cfg: AutoReviewSettings = { ...stored, enabled: true }
+  if (!cfg.providerId || !cfg.model) return null
   // fase 16c (C1): i provider si leggono dal modulo providers — la vista del
   // daemon, CON la chiave in memoria (lo store grezzo non ce l'ha più)
-  const { getProvider, listProviders } = await import('./providers')
-  const { autoReviewModelFor } = await import('./model-defaults')
-  type ModelDefaultsMap = import('./model-defaults').ModelDefaultsMap
-  const overrides = getSetting<ModelDefaultsMap>('providers.modelDefaults', {})
-  let provider: ReturnType<typeof getProvider> = undefined
-  if (cfg.providerId) {
-    provider = getProvider(cfg.providerId)
-    if (!provider) return { cfg, outcome: { ok: false, error: 'reviewer provider not found' } }
-  } else {
-    provider = listProviders().find((p) => p.enabled && autoReviewModelFor(p, overrides))
-    if (!provider) return null
-  }
-  const reviewerModel = cfg.model ?? autoReviewModelFor(provider, overrides)
-  if (!reviewerModel) return null
+  const { getProvider } = await import('./providers')
+  const provider = getProvider(cfg.providerId)
+  if (!provider) return { cfg, outcome: { ok: false, error: 'reviewer provider not found' } }
+  const reviewerModel = cfg.model
   const { llmStream } = await import('./llm')
   const controller = new AbortController()
   const model: ReviewerModel = {
