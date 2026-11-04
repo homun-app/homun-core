@@ -41,6 +41,12 @@ export function ConnectorCard({ entry }: { entry: TranscriptEntry }) {
   useEffect(() => {
     const live = connectors.find((c) => c.id === message.connectorId)
     if (live?.state.status === 'connected') setStatus('connected')
+    // verifica impostazioni: il flusso può fermarsi PRIMA del browser (per
+    // esempio un connettore Google senza client OAuth): lo stato vero passa a
+    // 'error' e la card non deve restare «In attesa del login…» per sempre.
+    // L'effetto rigira solo quando arriva un evento {type:'connectors'}, quindi
+    // un errore vecchio non chiude subito un nuovo tentativo
+    if (live?.state.status === 'error') setStatus((s) => (s === 'connecting' ? 'failed' : s))
     // fase app: lo stato reale di un'app Composio (collegata anche dalla finestra App)
     if (composioSlug && composio?.connected.some((a) => a.slug === composioSlug && a.status === 'ACTIVE')) setStatus('connected')
   }, [connectors, message.connectorId, composio, composioSlug])
@@ -76,6 +82,7 @@ export function ConnectorCard({ entry }: { entry: TranscriptEntry }) {
 
   if (!message.connectorId) return null
   const needsAuth = Boolean(entry.meta?.needsAuth)
+  const liveError = connectors.find((c) => c.id === message.connectorId)?.state.error
   // fase catalogo app (P7): il logo VERO del catalogo quando c'è (per le app
   // Composio; le curate dirette restano con l'emoji del connettore)
   const catalogLogo = composioSlug ?? gatewaySlug ? logoUrlForSlug((composioSlug ?? gatewaySlug)!) : null
@@ -179,7 +186,12 @@ export function ConnectorCard({ entry }: { entry: TranscriptEntry }) {
           </button>
         </div>
       ) : status === 'failed' ? (
-        <p className="mt-2 text-sm text-destructive"><Trans>Non riuscito: chiedi al bot di riprovare il collegamento.</Trans></p>
+        // verifica impostazioni: il motivo vero (dallo stato del connettore),
+        // non solo «non riuscito»
+        <div className="mt-2 space-y-1.5">
+          <p className="text-sm text-destructive"><Trans>Non riuscito: chiedi al bot di riprovare il collegamento.</Trans></p>
+          {liveError && <p className="text-xs text-muted-foreground">{liveError}</p>}
+        </div>
       ) : status === 'connecting' && isGatewayApp ? (
         // V6 (prova vera): durante l'attesa c'è ANNULLA — la card torna a «Collega»
         <div className="mt-2.5 flex items-center gap-3">
