@@ -98,6 +98,14 @@ vi.mock('../../store/db', () => ({
     const r = h.db.entries.find((x) => x.id === id)
     if (r) r.content = content
   },
+  // fase risposta (R6): la entry dello stream promossa a risposta finale
+  updateEntryKindRole: (id: number, kind: TranscriptEntry['kind'], role: TranscriptEntry['role']) => {
+    const r = h.db.entries.find((x) => x.id === id)
+    if (r) {
+      r.kind = kind
+      r.role = role
+    }
+  },
   updateEntryMeta: (id: number, meta: Record<string, unknown>) => {
     const r = h.db.entries.find((x) => x.id === id)
     if (r) r.meta = { ...meta }
@@ -822,8 +830,6 @@ describe('§5.7 concorrenza: un turno per agente (fase 2: la coda vive nella tab
   it('un secondo messaggio utente su agente occupato viene scartato con notice (nessuna coda qui)', async () => {
     const g = gated('primo fatto')
     h.llm.queue = [g.response]
-    // seconda risposta per la chiamata di recupero (il turno finisce senza send_to_user)
-    h.llm.queue.push({ text: 'recupero' })
 
     const first = runTurn(AGENT, 'primo', emit)
     await vi.waitFor(() => expect(h.llm.calls).toHaveLength(1))
@@ -840,13 +846,15 @@ describe('§5.7 concorrenza: un turno per agente (fase 2: la coda vive nella tab
     g.resolve()
     await first
     await vi.waitFor(() => expect(isRunning(AGENT)).toBe(false))
-    // nel transcript resta un solo turno: un messaggio utente, il testo libero
-    // come thinking nascosto e il fallback della chiamata di recupero
+    // nel transcript resta un solo turno: un messaggio utente e, da fase
+    // risposta, il testo finale CONSEGNATO come risposta (niente recupero,
+    // niente fallback: il testo è la risposta)
     const userMsgs = h.db.entries.filter((e) => e.kind === 'message').map((e) => `${e.role}:${e.content}`)
     expect(userMsgs).toEqual(['user:primo'])
-    expect(h.db.entries.some((e) => e.kind === 'thinking' && e.content === 'primo fatto')).toBe(true)
-    const fallback = h.db.entries.find((e) => e.kind === 'send-message' && e.meta?.fallback)
-    expect(fallback?.content).toBe('recupero')
+    const sent = h.db.entries.find((e) => e.kind === 'send-message')!
+    expect(sent.content).toBe('primo fatto')
+    expect(sent.meta?.final).toBe(true)
+    expect(h.llm.calls).toHaveLength(1)
   })
 })
 
@@ -936,9 +944,11 @@ describe('§5.1+approval: gate asincrono e standing grant esatta', () => {
     h.db.settings.set('permissions.timeoutMs', SECRET_TIMEOUT)
     h.llm.queue = [
       { toolCalls: [{ id: 'c1', name: 'run-command', arguments: JSON.stringify({ command: 'curl https://esempio' }) }] },
-      // fase 3: la risposta finale all'utente passa da send_to_user
+      // fase risposta: il progresso passa da message_user (send_to_user
+      // chiamato per abitudine viene trattato allo stesso modo, R2.4)…
       { toolCalls: [{ id: 'c2', name: 'send_to_user', arguments: JSON.stringify({ text: 'completato' }) }] },
-      { text: 'ok' } // fine turno: thinking non visibile
+      // …e la risposta finale vuota va bene: l'utente ha già visto (R5)
+      { text: '' }
     ]
 
     const turn = runTurn(AGENT, 'scarica', emit)
@@ -1025,8 +1035,11 @@ describe('R1: ripresa del turno dopo crash/retry (payload.entryId)', () => {
     })
     expect(savedId).toBe(h.db.entries.find((e) => e.kind === 'message' && e.role === 'user')!.id)
     expect(savedAtLlmCalls).toBe(0) // salvato prima della prima chiamata al modello
-    // fase 3: turno utente senza send_to_user → UNA chiamata di recupero in più
-    expect(h.llm.calls).toHaveLength(2)
+    // fase risposta: il testo finale È la risposta — consegnato, nessun recupero
+    expect(h.llm.calls).toHaveLength(1)
+    const sent = h.db.entries.find((e) => e.kind === 'send-message')!
+    expect(sent.content).toBe('ok')
+    expect(sent.meta?.final).toBe(true)
     // il messaggio utente compare UNA volta sola nella storia del modello
     expect(h.llm.calls[0]!.filter((m) => m.role === 'user' && m.content === 'ciao')).toHaveLength(1)
   })
@@ -1078,11 +1091,11 @@ describe('R1: ripresa del turno dopo crash/retry (payload.entryId)', () => {
   })
 })
 
-describe('fase 3: l\'agente comunica SOLO tramite tool (§3bis L2)', () => {
-  it('send_to_user crea una send-message visibile; il testo libero resta thinking nascosto', async () => {
+describe('fase 3 → fase risposta: message_user per i progressi, il testo finale è la risposta', () => {
+  it('send_to_user chiamato in privato è trattato come message_user; il testo libero resta thinking nascosto', async () => {
     h.llm.queue = [
       { text: 'sto verificando…', toolCalls: [{ id: 'c1', name: 'send_to_user', arguments: JSON.stringify({ text: 'Ecco il **risultato**' }) }] },
-      { text: 'finito' }
+      { text: '' }
     ]
     await runTurn(AGENT, 'dimmi', emit)
 
@@ -1091,29 +1104,30 @@ describe('fase 3: l\'agente comunica SOLO tramite tool (§3bis L2)', () => {
     const sent = h.db.entries.find((e) => e.kind === 'send-message')!
     expect(sent.content).toBe('Ecco il **risultato**')
     expect(sent.meta?.message).toMatchObject({ type: 'text', text: 'Ecco il **risultato**' })
-    // meta.call ricostruisce la chiamata originale per la storia del modello
-    expect(sent.meta?.call).toMatchObject({ id: 'c1', name: 'send_to_user' })
-    // urgent finisce in meta (servirà alla fase 6)
+    // fase risposta (R2.4): fuori dai gruppi send_to_user È message_user —
+    // meta.call porta il nome del percorso vero (R9: mai lo schema vecchio)
+    expect(sent.meta?.call).toMatchObject({ id: 'c1', name: 'message_user' })
     expect(h.db.entries.findLast((e) => e.kind === 'event')?.meta?.turnEnd).toBe('FINISHED')
     // nessuna tool-call entry nel transcript per i tool di comunicazione
-    expect(h.db.entries.some((e) => e.kind === 'tool-call' && e.content === 'send_to_user')).toBe(false)
+    expect(h.db.entries.some((e) => e.kind === 'tool-call' && ['send_to_user', 'message_user'].includes(e.content))).toBe(false)
   })
 
-  it('turno ROUTINE senza send_to_user: silenzio (nessuna send-message) e nessuna chiamata di recupero', async () => {
-    h.llm.queue = [{ text: 'analisi interna, niente da segnalare' }]
+  it('turno ROUTINE con NO_RESPONSE: silenzio (nessuna send-message, nessun outbox) e nessuna chiamata di recupero', async () => {
+    h.llm.queue = [{ text: 'NO_RESPONSE' }]
     await runTurn(AGENT, 'routine check', emit, undefined, { source: 'routine', title: 'Check' })
 
     expect(h.llm.calls).toHaveLength(1) // NESSUN recupero per le routine
     expect(h.db.entries.filter((e) => e.kind === 'send-message')).toHaveLength(0)
+    expect(h.db.outbox).toHaveLength(0)
     expect(h.db.entries.findLast((e) => e.kind === 'event')?.meta?.turnEnd).toBe('FINISHED')
     // il testo libero resta interno
-    expect(h.db.entries.some((e) => e.kind === 'thinking')).toBe(true)
+    expect(h.db.entries.some((e) => e.kind === 'thinking' && e.content === 'NO_RESPONSE')).toBe(true)
   })
 
-  it('turno UTENTE senza send_to_user: UNA chiamata di recupero; se usa send_to_user viene mostrata', async () => {
+  it('turno UTENTE con risposta vuota: UNA chiamata di recupero SENZA strumenti; il suo testo è la risposta', async () => {
     h.llm.queue = [
-      { text: 'penso tra me' },
-      { toolCalls: [{ id: 'r1', name: 'send_to_user', arguments: JSON.stringify({ text: 'ecco la risposta' }) }] }
+      { text: '' },
+      { text: 'ecco la risposta' }
     ]
     await runTurn(AGENT, 'domanda', emit)
 
@@ -1121,22 +1135,29 @@ describe('fase 3: l\'agente comunica SOLO tramite tool (§3bis L2)', () => {
     // la seconda chiamata porta il sollecito di recupero come messaggio utente
     const second = h.llm.calls[1]!
     expect(second[second.length - 1]).toMatchObject({ role: 'user', content: RECOVERY_NUDGE })
+    // R5: il recupero va al modello SENZA strumenti
+    expect(h.llm.toolsList[1]).toEqual([])
     const sent = h.db.entries.find((e) => e.kind === 'send-message')!
     expect(sent.content).toBe('ecco la risposta')
-    expect(sent.meta?.fallback).toBeUndefined() // NON è un fallback
+    expect(sent.meta?.final).toBe(true) // la risposta finale, non un fallback
+    expect(sent.meta?.fallback).toBeUndefined()
     expect(h.db.entries.findLast((e) => e.kind === 'event')?.meta?.turnEnd).toBe('FINISHED')
   })
 
-  it('recupero senza send_to_user nemmeno alla seconda: fallback col testo libero, meta.fallback=true', async () => {
+  it('recupero vuoto anche alla seconda: fallback col testo libero della chiamata con strumenti, meta.fallback=true', async () => {
     h.llm.queue = [
-      { text: 'prima risposta' },
-      { text: 'testo dell\'ultima risposta' }
+      { text: 'controllo la memoria', toolCalls: [{ id: 'c1', name: 'recall_memory', arguments: JSON.stringify({ query: 'preferenze' }) }] },
+      { text: '' },
+      { text: '' }
     ]
     await runTurn(AGENT, 'ciao', emit)
 
-    expect(h.llm.calls).toHaveLength(2)
+    expect(h.llm.calls).toHaveLength(3)
+    // la chiamata di recupero è la TERZA e porta il sollecito in coda, SENZA tool
+    expect(h.llm.calls[2]!.at(-1)).toMatchObject({ role: 'user', content: RECOVERY_NUDGE })
+    expect(h.llm.toolsList[2]).toEqual([])
     const fallback = h.db.entries.findLast((e) => e.kind === 'send-message')!
-    expect(fallback.content).toBe('testo dell\'ultima risposta')
+    expect(fallback.content).toBe('controllo la memoria')
     expect(fallback.meta?.fallback).toBe(true)
     expect(fallback.meta?.message).toMatchObject({ type: 'text' })
     expect(h.db.entries.findLast((e) => e.kind === 'event')?.meta?.turnEnd).toBe('FINISHED')
@@ -1657,7 +1678,7 @@ describe('fase 6: outbox dei turni automatici', () => {
   it('turno routine con send_to_user non urgente: entry trattenuta (meta.held) e in outbox', async () => {
     h.llm.queue = [
       { toolCalls: [mkSend('s1', '{"text":"riepilogo notturno"}')] },
-      { text: 'fatto' }
+      { text: '' }
     ]
     await runTurn(AGENT, '[routine] notturna', emit, undefined, { source: 'routine', title: 'Notturna' })
     const send = h.db.entries.find((e) => e.kind === 'send-message')!
@@ -1674,7 +1695,7 @@ describe('fase 6: outbox dei turni automatici', () => {
   it('urgent bypassa l\'outbox: entry visibile subito e notifica agent-done', async () => {
     h.llm.queue = [
       { toolCalls: [mkSend('s2', '{"text":"servono le credenziali SCADUTE","urgent":true}')] },
-      { text: 'ok' }
+      { text: '' }
     ]
     const events: import('../../../shared/types').SandbotEvent[] = []
     await runTurn(AGENT, '[routine] urgente', emit, undefined, { source: 'routine', title: 'Urgente' })
@@ -1690,7 +1711,7 @@ describe('fase 6: outbox dei turni automatici', () => {
     h.llm.queue = [
       { toolCalls: [mkSend('u1', '{"text":"primo: agisci entro stasera","urgent":true}')] },
       { toolCalls: [{ id: 'lc1', name: 'list-credentials', arguments: '{}' }, mkSend('u2', '{"text":"secondo: altro avviso","urgent":true}')] },
-      { text: 'fatto' }
+      { text: '' }
     ]
     await runTurn(AGENT, '[routine] due urgent', emit, undefined, { source: 'routine', title: 'Urgentissime' })
     const sends = h.db.entries.filter((e) => e.kind === 'send-message')
@@ -1711,7 +1732,7 @@ describe('fase 6: outbox dei turni automatici', () => {
     h.llm.queue = [
       { toolCalls: [mkSend('v1', '{"text":"uno","urgent":true}')] },
       { toolCalls: [{ id: 'lc2', name: 'list-credentials', arguments: '{}' }, mkSend('v2', '{"text":"due","urgent":true}')] },
-      { text: 'ok' }
+      { text: '' }
     ]
     await runTurn(AGENT, 'domanda con urgenze', emit)
     const sends = h.db.entries.filter((e) => e.kind === 'send-message')
@@ -1723,7 +1744,7 @@ describe('fase 6: outbox dei turni automatici', () => {
   it('i turni avviati dall\'utente NON passano mai dall\'outbox', async () => {
     h.llm.queue = [
       { toolCalls: [mkSend('s3', '{"text":"ecco la risposta"}')] },
-      { text: 'ok' }
+      { text: '' }
     ]
     await runTurn(AGENT, 'domanda normale', emit)
     const send = h.db.entries.find((e) => e.kind === 'send-message')!
@@ -1883,16 +1904,21 @@ describe('fase 7: send_to_agent', () => {
       id: `m${i + 1}`, name: 'send_to_agent',
       arguments: JSON.stringify({ agentId: OTHER, text: `msg ${i + 1}` })
     }))
-    h.llm.queue = [{ toolCalls: calls }, { text: 'ok' }, { toolCalls: [{ id: 'r1', name: 'send_to_user', arguments: JSON.stringify({ text: 'ho delegato a Specialista' }) }] }]
+    h.llm.queue = [{ toolCalls: calls }, { text: '' }, { text: 'ho delegato a Specialista' }]
     await runTurn(AGENT, 'delega a raffica', emit)
     expect(h.db.jobs).toHaveLength(10)
-    // fase 8 (residuo 0a): le deleghe non sono messaggi all'utente → la
-    // chiamata di recupero PARTE anche in un turno che ha solo delegato
-    // (terza chiamata); i tool result delle 11 call stanno nella seconda
+    // fase 8 (residuo 0a) → fase risposta (R5): le deleghe non sono messaggi
+    // all'utente → la chiamata di recupero PARTE anche in un turno che ha
+    // solo delegato; il SUO testo è la risposta (terza chiamata, senza tool);
+    // i tool result delle 11 call stanno nella seconda
     expect(h.llm.calls).toHaveLength(3)
+    expect(h.llm.toolsList[2]).toEqual([])
     const toolResults = h.llm.calls[1]!.filter((m) => m.role === 'tool').map((m) => String(m.content))
     expect(toolResults.filter((c) => c.includes('Message queued for Specialista'))).toHaveLength(10)
     expect(toolResults.some((c) => c.includes('in the last hour'))).toBe(true)
+    const sent = h.db.entries.findLast((e) => e.kind === 'send-message' && !e.meta?.agentSend)!
+    expect(sent.content).toBe('ho delegato a Specialista')
+    expect(sent.meta?.final).toBe(true)
   })
 
   it('correzione A1: la coda del destinatario ha lo stesso tetto dei messaggi utente (10 in attesa → rifiuto, niente entry)', async () => {
@@ -2377,10 +2403,11 @@ describe('fase 8 (§3bis L11): scadenze dello stream', () => {
     // la ripresa è normale: il messaggio successivo gira senza tracce della scadenza
     h.llm.queue = [
       { toolCalls: [{ id: 's1', name: 'send_to_user', arguments: JSON.stringify({ text: 'ora va' }) }] },
-      { text: '.' }
+      { text: '' }
     ]
     await runTurn(AGENT, 'e ora?', emit)
-    expect(h.db.entries.filter((e) => e.kind === 'send-message' && (e.meta?.call as { name?: string } | undefined)?.name === 'send_to_user')).toHaveLength(1)
+    // fase risposta: fuori dai gruppi la chiamata è trattata come message_user
+    expect(h.db.entries.filter((e) => e.kind === 'send-message' && (e.meta?.call as { name?: string } | undefined)?.name === 'message_user')).toHaveLength(1)
   })
 
   it('inattività tra due chunk oltre la soglia → stesso esito (abort del solo stream)', async () => {
@@ -2557,7 +2584,7 @@ describe('fase 9 (punto 0): più messaggi per una sola azione', () => {
       // passi 3-4: i riempitivi del DB ("Attivata." / "OK.")
       { toolCalls: [mkSend('s3', '{"text":"Attivata."}')] },
       { toolCalls: [mkSend('s4', '{"text":"OK."}')] },
-      { text: 'fine' }
+      { text: '' }
     ]
     await runTurn(AGENT, 'Per favore crea una routine chiamata "Riepilogo mattina"', emit)
     // UNA sola send visibile: quella buona, col testo integro (virgolette e a capo)
@@ -2579,19 +2606,20 @@ describe('fase 9 (punto 0): più messaggi per una sola azione', () => {
   it('il turno successivo rivede la chiamata INTATTA: arguments identici con virgolette e a capo', async () => {
     h.llm.queue = [
       { toolCalls: [mkSend('s1', ARGS)] },
-      { text: 'fatto' }
+      { text: '' }
     ]
     await runTurn(AGENT, 'crea la routine', emit)
     h.llm.queue.length = 0
     h.llm.calls.length = 0
     h.llm.queue = [{ text: 'grazie' }]
     await runTurn(AGENT, 'e adesso?', emit)
-    // la chiamata ricostruita dal transcript ha gli ARGOMENTI identici…
+    // fase risposta (R9): il progresso message_user resta coppia chiamata/
+    // risultato con gli ARGOMENTI identici (virgolette e a capo compresi)…
     const call2 = h.llm.calls[0]!
     const calls = call2.flatMap(
       (m) => ((m.toolCalls as Array<{ id: string; name: string; arguments: string }> | undefined) ?? [])
     )
-    const sendCall = calls.find((tc) => tc.name === 'send_to_user')
+    const sendCall = calls.find((tc) => tc.name === 'message_user')
     expect(sendCall?.arguments).toBe(ARGS)
     // …e il result della ricostruzione riporta l'inizio del testo consegnato
     expect(call2.some((m) => m.role === 'tool' && String(m.content).includes('delivered to the user: "Routine'))).toBe(true)
@@ -2602,7 +2630,7 @@ describe('fase 9 (punto 0): più messaggi per una sola azione', () => {
       { toolCalls: [mkSend('a1', '{"text":"Sto controllando la posta, un attimo."}')] },
       { toolCalls: [{ id: 'lc3', name: 'list-credentials', arguments: '{}' }] },
       { toolCalls: [mkSend('a2', '{"text":"Fatto: nessuna email in sospeso."}')] },
-      { text: 'ok' }
+      { text: '' }
     ]
     await runTurn(AGENT, 'controlla la posta', emit)
     const sends = h.db.entries.filter((e) => e.kind === 'send-message')
@@ -2610,18 +2638,16 @@ describe('fase 9 (punto 0): più messaggi per una sola azione', () => {
     expect(h.db.entries.some((e) => e.kind === 'thinking' && e.content.includes('Fatto:'))).toBe(false)
   })
 
-  it('la chiamata di recupero segue le stesse regole: due send dal recupero → solo la prima è in chat', async () => {
+  it('fase risposta (R1): la risposta finale che ripete un message_user già consegnato → una sola entry', async () => {
     h.llm.queue = [
-      // il turno risponde senza send: scatta il recupero
-      { text: 'ho pensato molto' },
-      // il recupero prova a mandare DUE messaggi (il caso "esattamente UN send")
-      { toolCalls: [mkSend('r1', '{"text":"Routine attivata."}'), mkSend('r2', '{"text":"Fatto."}')] }
+      { toolCalls: [mkSend('r1', '{"text":"Routine attivata."}')] },
+      { text: 'Routine attivata.' }
     ]
     await runTurn(AGENT, 'attiva la routine', emit)
     const sends = h.db.entries.filter((e) => e.kind === 'send-message')
     expect(sends.map((s) => s.content)).toEqual(['Routine attivata.'])
-    // il secondo è diventato ragionamento, non chat
-    expect(h.db.entries.some((e) => e.kind === 'thinking' && e.content === 'Fatto.')).toBe(true)
+    // il doppione NON è consegnato: resta ragionamento nella entry dello stream
+    expect(h.db.entries.some((e) => e.kind === 'thinking' && e.content === 'Routine attivata.')).toBe(true)
   })
 })
 
@@ -2704,7 +2730,7 @@ describe('fase 9: send senza testo', () => {
       { toolCalls: [{ id: 'e1', name: 'send_to_user', arguments: '{"text":""}' }] },
       { toolCalls: [{ id: 'e2', name: 'send_to_user', arguments: '{}' }, { id: 'e3', name: 'send_to_user', arguments: '{"text":"   "}' }] },
       { toolCalls: [{ id: 'e4', name: 'send_to_user', arguments: '{"text":"adesso sul serio"}' }] },
-      { text: 'fine' }
+      { text: '' }
     ]
     await runTurn(AGENT, 'ciao', emit)
     const sends = h.db.entries.filter((e) => e.kind === 'send-message')
@@ -4943,7 +4969,7 @@ describe('fase 13: add_mcp_server / install_plugin / find_tools / result MCP', (
     fakeInstallDeps()
     h.llm.queue = [
       { toolCalls: [{ id: 'n1', name: 'add_mcp_server', arguments: JSON.stringify({ id: 'registry:com.notion/mcp', reason: 'x' }) }] },
-      { text: 'fine' }
+      { text: '' }
     ]
     await runTurn(AGENT, '[routine] controlla', emit, undefined, { source: 'routine', title: 'R' })
     expect(h.db.entries.find((e) => e.kind === 'send-message')).toBeFalsy()
@@ -6085,5 +6111,184 @@ describe('fase velocità (S5): il prompt di sistema non cambia tra le chiamate d
     expect(after.slice(0, after.indexOf(MEM))).toBe(beforeVar)
     // la sezione Language resta l'ULTIMA anche con la memoria
     expect(after.lastIndexOf('# Language')).toBeGreaterThan(after.indexOf(MEM))
+  })
+})
+
+// ---- fase risposta (R1–R9): il testo finale del modello è la risposta ----
+
+describe('fase risposta: il testo finale è la risposta (R1/R4/R5/R6)', () => {
+  it('R1: «recall_memory → testo finale» fa DUE chiamate, consegna una sola send-message final e NESSUNA chiamata di controllo', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 'k1', name: 'recall_memory', arguments: JSON.stringify({ query: 'preferenze' }) }] },
+      { text: 'Preferisci le risposte brevi: ecco fatto.' }
+    ]
+    await runTurn(AGENT, 'come rispondo?', emit)
+    // il turno finisce con la risposta: NESSUNA chiamata in più per controllare
+    expect(h.llm.calls).toHaveLength(2)
+    const sends = h.db.entries.filter((e) => e.kind === 'send-message')
+    expect(sends).toHaveLength(1)
+    expect(sends[0]!.content).toBe('Preferisci le risposte brevi: ecco fatto.')
+    expect(sends[0]!.meta?.final).toBe(true)
+    expect(sends[0]!.meta?.message).toMatchObject({ type: 'text' })
+    expect(sends[0]!.meta?.call).toBeUndefined()
+    expect(h.db.entries.findLast((e) => e.kind === 'event')?.meta?.turnEnd).toBe('FINISHED')
+  })
+
+  it('R1: turno di routine con testo finale → passa dall\'OUTBOX con la finestra di consegna, come una send non urgente', async () => {
+    h.llm.queue = [{ text: 'Riepilogo: tutto nella norma.' }]
+    await runTurn(AGENT, '[routine] check', emit, undefined, { source: 'routine', title: 'Check' })
+    const send = h.db.entries.find((e) => e.kind === 'send-message')!
+    expect(send.content).toBe('Riepilogo: tutto nella norma.')
+    expect(send.meta?.held).toBe(true)
+    expect(send.meta?.final).toBe(true)
+    expect(h.db.outbox).toEqual([{ entry_id: send.id, agent_id: AGENT, created_at: send.createdAt }])
+  })
+
+  it('R4: routine con «Tutto ok. NO_RESPONSE» → consegna «Tutto ok.» (il segnale spaiato si toglie)', async () => {
+    h.llm.queue = [{ text: 'Tutto ok. NO_RESPONSE' }]
+    await runTurn(AGENT, '[routine] check', emit, undefined, { source: 'routine', title: 'Check' })
+    const send = h.db.entries.find((e) => e.kind === 'send-message')!
+    expect(send.content).toBe('Tutto ok.')
+    expect(send.meta?.held).toBe(true)
+  })
+
+  it('R4/R5: turno privato con solo «.» → vale vuoto: UN recupero senza strumenti', async () => {
+    h.llm.queue = [{ text: '.' }, { text: 'Ecco la risposta vera.' }]
+    await runTurn(AGENT, 'dimmi', emit)
+    expect(h.llm.calls).toHaveLength(2)
+    expect(h.llm.calls[1]!.at(-1)).toMatchObject({ role: 'user', content: RECOVERY_NUDGE })
+    expect(h.llm.toolsList[1]).toEqual([])
+    const sends = h.db.entries.filter((e) => e.kind === 'send-message')
+    expect(sends.map((s) => s.content)).toEqual(['Ecco la risposta vera.'])
+    expect(sends[0]!.meta?.final).toBe(true)
+  })
+
+  it('R4.5: risposta di un turno aperto da un altro bot col solo segnale → «Nothing new to add.», mai il letterale', async () => {
+    h.llm.queue = [{ text: 'NO_RESPONSE' }]
+    await runTurn(AGENT, '<messaggio_da_agente nome="Altro">ecco</messaggio_da_agente>', emit, undefined, {
+      source: 'user', initiator: 'AGENT',
+      agentMessage: { fromAgentId: 'agent_o', fromAgentName: 'Altro', hop: 1 }
+    })
+    const send = h.db.entries.find((e) => e.kind === 'send-message')!
+    expect(send.content).toBe('Nothing new to add.')
+    expect(send.meta?.final).toBe(true)
+  })
+
+  it('R6: la risposta in diretta compare durante lo stream e si chiude a fine chiamata', async () => {
+    const events: import('../../../shared/types').SandbotEvent[] = []
+    const collect = (e: import('../../../shared/types').SandbotEvent): void => { events.push(e) }
+    h.llm.queue = [{ text: 'Ecco la risposta che arriva in diretta.' }]
+    await runTurn(AGENT, 'ciao', collect)
+    const live = events.filter((e) => e.type === 'live-reply') as Array<{ type: 'live-reply'; text: string; entryId: number }>
+    // il testo appare con il primo token e la bolla si chiude a fine chiamata
+    expect(live.some((e) => e.text === 'Ecco la risposta che arriva in diretta.')).toBe(true)
+    expect(live.at(-1)!.text).toBe('')
+    // la entry promossa è la STESSA che trasmetteva la diretta
+    const promoted = h.db.entries.find((e) => e.kind === 'send-message')!
+    expect(live[0]!.entryId).toBe(promoted.id)
+  })
+
+  it('R6/R3: chiamata con testo E strumenti: la diretta si chiude, il testo resta thinking (riga di lavoro), niente send', async () => {
+    const events: import('../../../shared/types').SandbotEvent[] = []
+    const collect = (e: import('../../../shared/types').SandbotEvent): void => { events.push(e) }
+    h.llm.queue = [
+      { text: 'cerco nelle memorie le preferenze', toolCalls: [{ id: 'q1', name: 'recall_memory', arguments: JSON.stringify({ query: 'pref' }) }] },
+      { text: 'Trovato: risposte brevi.' }
+    ]
+    await runTurn(AGENT, 'le mie preferenze?', collect)
+    const live = events.filter((e) => e.type === 'live-reply') as Array<{ type: 'live-reply'; text: string }>
+    expect(live[0]!.text).toBe('cerco nelle memorie le preferenze')
+    expect(live[1]!.text).toBe('') // la bolla sparisce: c'erano strumenti
+    // il testo a metà turno NON è un messaggio: resta thinking
+    expect(h.db.entries.some((e) => e.kind === 'thinking' && e.content === 'cerco nelle memorie le preferenze')).toBe(true)
+    const sends = h.db.entries.filter((e) => e.kind === 'send-message')
+    expect(sends.map((s) => s.content)).toEqual(['Trovato: risposte brevi.'])
+  })
+})
+
+describe('fase risposta: message_user — solo progressi (R2)', () => {
+  const mu = (id: string, args: Record<string, unknown>): FakeToolCall => ({ id, name: 'message_user', arguments: JSON.stringify(args) })
+
+  it('800 caratteri → consegnati 500 e il result LO DICE', async () => {
+    const lungo = 'a'.repeat(800)
+    h.llm.queue = [
+      { toolCalls: [mu('p1', { text: lungo })] },
+      { text: '' }
+    ]
+    await runTurn(AGENT, 'lavoro lungo', emit)
+    const send = h.db.entries.find((e) => e.kind === 'send-message')!
+    expect(send.content.length).toBe(500)
+    expect(send.content.endsWith('…')).toBe(true)
+    expect(send.meta?.call).toMatchObject({ name: 'message_user' })
+    // il result dichiara il taglio
+    const results = h.llm.calls[1]!.filter((m) => m.role === 'tool').map((m) => String(m.content))
+    expect(results.some((c) => c.includes('longer than 500 characters'))).toBe(true)
+    // e il meta salva il result ESATTO per la storia (R9)
+    expect(String(send.meta?.resultText)).toContain('longer than 500 characters')
+  })
+
+  it('il QUARTO message_user consegnato del turno → ragionamento, come oggi', async () => {
+    const work = (id: string): FakeToolCall => ({ id, name: 'list-credentials', arguments: '{}' })
+    h.llm.queue = [
+      { toolCalls: [mu('m1', { text: 'uno' }), work('w1')] },
+      { toolCalls: [mu('m2', { text: 'due' }), work('w2')] },
+      { toolCalls: [mu('m3', { text: 'tre' }), work('w3')] },
+      { toolCalls: [mu('m4', { text: 'quattro' })] },
+      { text: '' }
+    ]
+    await runTurn(AGENT, 'tanti progressi', emit)
+    const sends = h.db.entries.filter((e) => e.kind === 'send-message')
+    expect(sends.map((s) => s.content)).toEqual(['uno', 'due', 'tre'])
+    expect(h.db.entries.some((e) => e.kind === 'thinking' && e.content === 'quattro')).toBe(true)
+  })
+
+  it('R5: message_user consegnato + risposta finale vuota → NESSUN recupero, chiusura pulita', async () => {
+    h.llm.queue = [
+      { toolCalls: [mu('m1', { text: 'ci vorranno cinque minuti' })] },
+      { text: '' }
+    ]
+    await runTurn(AGENT, 'lavoro', emit)
+    expect(h.llm.calls).toHaveLength(2) // NESSUNA chiamata di recupero
+    expect(h.db.entries.filter((e) => e.kind === 'send-message')).toHaveLength(1)
+    expect(h.db.entries.findLast((e) => e.kind === 'event')?.meta?.turnEnd).toBe('FINISHED')
+    expect(h.db.entries.some((e) => e.kind === 'notice' && e.meta?.ui && String((e.meta?.ui as { id?: string }).id).includes('modelEmpty'))).toBe(false)
+  })
+
+  it('R2.5: nel FIGLIO message_user è rifiutato come send_to_user', async () => {
+    const CHILD = 'sub_r2'
+    h.db.agents.set(CHILD, {
+      id: CHILD, name: 'Figlio', description: '', providerId: 'prov', model: 'm1',
+      status: 'idle', unread: 0, createdAt: 1, createdBy: null, section: '', parentId: AGENT
+    })
+    h.llm.queue = [
+      { toolCalls: [{ id: 'x1', name: 'message_user', arguments: '{"text":"ciao"}' }, { id: 'x2', name: 'send_to_user', arguments: '{"text":"ciao"}' }] },
+      { toolCalls: [{ id: 'x3', name: 'wake_parent', arguments: JSON.stringify({ status: 'done', summary: 'fatto' }) }] }
+    ]
+    await runTurn(CHILD, 'brief', emit, undefined, { source: 'user', subagent: { id: CHILD, parentId: AGENT } })
+    const refused = h.db.entries.filter((e) => e.kind === 'tool-result' && e.meta?.error !== true)
+    const contents = refused.map((r) => r.content)
+    expect(contents.some((c) => c.includes('not available to subagents: the subagent does not talk with the user'))).toBe(true)
+    expect(h.db.entries.filter((e) => e.kind === 'send-message')).toHaveLength(0)
+  })
+})
+
+describe('fase risposta: il recupero senza strumenti non esegue chiamate inventate (R5)', () => {
+  it('il recupero risponde con testo E una chiamata di strumento: la chiamata non parte, il testo è la risposta', async () => {
+    h.llm.queue = [
+      { text: '' },
+      { text: 'Ecco cosa serve.', toolCalls: [{ id: 'h1', name: 'run-command', arguments: JSON.stringify({ command: 'ls' }) }] }
+    ]
+    await runTurn(AGENT, 'fai', emit)
+    expect(h.llm.calls).toHaveLength(2)
+    expect(h.llm.toolsList[1]).toEqual([])
+    // la chiamata inventata NON è stata eseguita: nessuna entry tool-call
+    expect(h.db.entries.some((e) => e.kind === 'tool-call')).toBe(false)
+    expect(h.sandboxMock.exec.calls).toBe(0)
+    // il result del rifiuto è nella storia della chiamata successiva... che
+    // non c'è: il testo del recupero è la risposta e il turno FINISCE lì
+    const sends = h.db.entries.filter((e) => e.kind === 'send-message')
+    expect(sends.map((s) => s.content)).toEqual(['Ecco cosa serve.'])
+    expect(sends[0]!.meta?.final).toBe(true)
+    expect(h.db.entries.findLast((e) => e.kind === 'event')?.meta?.turnEnd).toBe('FINISHED')
   })
 })

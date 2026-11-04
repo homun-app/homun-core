@@ -12,13 +12,20 @@
 // routine; se runTurn viene chiamato su un agente occupato (invariante violata)
 // il turno viene scartato con una notice, mai sovrascritto.
 //
-// Fase 3 (§3bis L2): l'agente comunica SOLO tramite tool. Il testo libero del
-// modello è ragionamento (entry 'thinking', nascosto in chat): all'utente
-// arrivano solo le entry 'send-message' create da send_to_user / ask_user /
-// draft_external. Ogni turno si chiude con un evento meta.turnEnd ∈
+// Fase 3 (§3bis L2) → fase risposta (R1): la risposta all'utente è il TESTO
+// FINALE del modello, non più una chiamata di strumento. Una chiamata che
+// finisce senza tool consegna il suo testo come entry 'send-message'
+// (meta.final); il testo delle chiamate CON tool resta ragionamento (entry
+// 'thinking', nascosto in chat) e nei turni in chat privata ne diventa la
+// riga di lavoro (R3). message_user (fuori dai gruppi) porta solo i progressi
+// dei lavori lunghi; nei turni automatici NO_RESPONSE è il silenzio esplicito
+// (R4); un turno privato che finisce senza niente visto ha UN recupero senza
+// strumenti (R5). Nei turni di GRUPPO (R7) e nei figli (R8) nulla cambia:
+// send_to_user resta send_to_user, il testo libero resta ragionamento.
+// Ogni turno si chiude con un evento meta.turnEnd ∈
 // FINISHED | STOPPED | SUPERSEDED | AWAITING_USER.
 import { randomUUID, createHash } from 'node:crypto'
-import { getAgent, listAgents, listRoutines, getEntries, updateAgent, appendEntry, updateEntryContent, updateEntryMeta, getSetting, holdOutboxEntry, db, getTask, createTask, updateTask, openTasksOf, MAX_OPEN_TASKS, createAgent, subagentRefusal, addGrant, listGrants, recordModelUsage, type Grant, type AppendEntry } from '../store/db'
+import { getAgent, listAgents, listRoutines, getEntries, updateAgent, appendEntry, updateEntryContent, updateEntryMeta, updateEntryKindRole, getSetting, holdOutboxEntry, db, getTask, createTask, updateTask, openTasksOf, MAX_OPEN_TASKS, createAgent, subagentRefusal, addGrant, listGrants, recordModelUsage, type Grant, type AppendEntry } from '../store/db'
 // R2 (fase app — ritocchi): l'esito degli invii automatici si ripulisce come gli errori Composio
 import { redactComposioSecrets, composioActionOfToolName } from '../connectors/composio-actions'
 // fase Composio OAuth (C2/C4/C5/C7): il blocco, la fiducia per app, le bozze estratte
@@ -30,7 +37,7 @@ import {
 import { composioGateway } from '../connectors/composio-gateway'
 import { deniedRepeatRefusal, repeatsDeniedAction } from './composio-trust'
 import { llmStream, type ChatMessage, type ToolCall } from './llm'
-import { systemPrompt, secondaryPrompts, mainAgentSection, withLanguage } from './prompts'
+import { systemPrompt, secondaryPrompts, mainAgentSection, withLanguage, ROUTINE_SILENT_REPLY_GUIDANCE } from './prompts'
 import { toolDefs, executeTool } from './tools'
 import * as permissions from './permissions'
 // fase 16c (C1/C3.3): i provider si leggono dal modulo providers (vista del
@@ -55,7 +62,13 @@ import { activityOf, isToolLoop, stopReasonOfError } from './loop-guard'
 import { nextWithDeadline, DEFAULT_STREAM_DEADLINES, StreamDeadlineError } from './stream-deadline'
 // fase 9 (punto 0): regole dei send_to_user dentro il turno (dedup, tetto
 // avanzamenti, result col testo consegnato)
-import { deliveredResultText, alreadyDeliveredResult, isDuplicateSend, isWorkTool, messageCapResult, emptySendResult, turnCapResult, MAX_DELIVERED_PER_TURN } from './turn-sends'
+// fase risposta (R2): clamp e result dei progressi message_user
+import {
+  deliveredResultText, alreadyDeliveredResult, isDuplicateSend, isWorkTool, messageCapResult, emptySendResult, turnCapResult,
+  MAX_DELIVERED_PER_TURN, clampProgressMessage, progressResultText, MESSAGE_USER_MAX_CHARS
+} from './turn-sends'
+// fase risposta (R4): il silenzio esplicito dei turni automatici (da Rakazo)
+import { NO_RESPONSE, isExactNoResponse, isPlaceholderText, couldBecomeNoResponse, stripStrayNoResponse, peerReplyWithoutSentinel } from './silent-reply'
 // fase 9 (punto 1) → fase 18b (H2): la riserva è una CATENA di anelli
 // provider+modello (modello dei router LLM maturi); il raffreddamento (H2.3)
 // tiene in pausa chi ha appena fallito, in memoria nel processo del daemon
@@ -216,9 +229,20 @@ export { buildMessages } from './history'
 /** I passi di un turno (correzione J4: l'eval lo IMPORTA, così il figlio eval ha lo stesso budget del loop vero). */
 export const MAX_STEPS = 24
 
-/** Fase 3: il sollecito della chiamata di recupero quando un turno utente finisce senza send_to_user. */
+/**
+ * Fase 3 → fase risposta (R5): il sollecito dell'UNICA chiamata di recupero
+ * quando un turno in chat privata finisce con una risposta vuota. SENZA
+ * strumenti: il testo della risposta È la risposta.
+ */
 export const RECOVERY_NUDGE =
-  "You called neither send_to_user nor ask_user: the user has seen no answer. Answer NOW by calling send_to_user (that only, no other tool)."
+  'Your reply was empty: write your answer to the user now, as plain text.'
+
+/**
+ * Fase risposta (R5): il result delle chiamate di strumento che un modello
+ * inventa comunque nella chiamata di recupero (che va al modello SENZA tool).
+ */
+export const RECOVERY_NO_TOOLS_RESULT =
+  'Not executed: this recovery call has no tools. Write your answer to the user as plain text.'
 
 /**
  * Fase 17b correzioni (B4): i result fissi di ask_user e wake_parent, esportati
@@ -846,6 +870,24 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
   // se è stato aperto da una catena tra bot a sua volta automatica: outbox e
   // tetto urgent valgono per TUTTI i suoi send_to_user (recupero compreso)
   const automatic = source === 'routine' || opts.automatic === true
+  // fase risposta (R1/R4/R5/R6): le tre nature del turno per il protocollo
+  // della risposta finale —
+  // replyTurn: il testo finale È la risposta (turni non di gruppo e non figli)
+  const replyTurn = opts.groupTurn === undefined && opts.subagent === undefined
+  // sentinelAllowed: il silenzio esplicito NO_RESPONSE è ammesso nei turni
+  // automatici e nei risvegli di sistema (R4.1); mai nei turni aperti da un
+  // messaggio diretto dell'utente, mai verso un altro bot (R4.5)
+  const sentinelAllowed =
+    automatic ||
+    ['ROUTINE', 'SHELL_DONE', 'SUBAGENTS_DONE', 'LOOK_AROUND', 'CONNECTOR_CONNECTED'].includes(String(opts.initiator ?? ''))
+  // privateHumanTurn: aperto da un messaggio DIRETTO dell'utente in chat —
+  // l'unico dove una risposta vuota ha UN recupero senza strumenti (R5)
+  const privateHumanTurn =
+    source === 'user' && opts.initiator === undefined && opts.agentMessage === undefined
+  // liveReplyTurn: la risposta si mostra in diretta (R6) — chat privata, mai
+  // turni automatici (passano dall'outbox), mai gruppi, figli o task
+  const liveReplyTurn =
+    source === 'user' && !automatic && opts.groupTurn === undefined && opts.subagent === undefined && opts.taskId === undefined
 
   // fase 8 (punto 1): i turni aperti da un altro bot o da un evento esterno
   // restano fuori dall'auto-review (prompt injection: l'ultimo controllo
@@ -881,6 +923,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
   let groupPosted = false
   let passedSilence = false
   let groupRecoveryDone = false
+  // fase risposta (R5): l'UNICA chiamata di recupero di un turno privato con
+  // risposta vuota è già partita (la seconda volta vale il ripiego)
+  let recoveryDone = false
   // fase 12 (punti 2-3): il lotto del turno del padre (una sola spawn batch per
   // turno) e la chiusura del figlio (ha consegnato? il sollecito è già stato?)
   let turnBatchId: string | null = null
@@ -974,9 +1019,13 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
    * il primo urgent passa, i successivi diventano non urgenti, e i non urgenti
    * restano in outbox fino alla finestra di consegna o all'apertura della chat.
    * Correzione A3: lo usa anche la chiamata di recupero, così nemmeno quella
-   * svuota l'outbox di una catena automatica. Torna true se trattenuto.
+   * svuota l'outbox di una catena automatica. Torna l'entry creata e se è
+   * trattenuta nell'outbox.
    */
-  const sendToUser = (call: { id: string; name: string; arguments: string }, input: Record<string, unknown>): boolean => {
+  const sendToUser = (
+    call: { id: string; name: string; arguments: string },
+    input: Record<string, unknown>
+  ): { sent: import('../../shared/types').TranscriptEntry; hold: boolean } => {
     let urgent = input.urgent === true
     if (urgent && automatic) {
       if (urgentUsed) urgent = false
@@ -992,7 +1041,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     }
     const sent = appendSend(agentId, call, message, emit, extra, opts.taskId)
     if (hold) holdOutboxEntry(sent.id, agentId, sent.createdAt)
-    return hold
+    return { sent, hold }
   }
 
   /**
@@ -1069,10 +1118,82 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         return resultText
       }
     }
-    const hold = sendToUser(call, input)
+    const { hold } = sendToUser(call, input)
     deliveredTexts.push(text)
     sendsSinceWork++
     return deliveredResultText(text, { held: hold })
+  }
+
+  /**
+   * Fase risposta (R2): consegna un progresso message_user con le regole di
+   * oggi di deliverSend (dedup 0c, tetto di 3 consegnati, «niente due
+   * messaggi senza lavoro in mezzo», outbox e tetto urgent dei turni
+   * automatici) più il tetto di 500 caratteri: oltre si taglia e il result
+   * lo dice. Il result ESATTO finisce in meta.resultText della entry (R9:
+   * la storia lo ricostruisce identico a come il modello l'ha visto).
+   */
+  const deliverMessageUser = (call: { id: string; name: string; arguments: string }, input: Record<string, unknown>): string => {
+    const raw = String(input.text ?? '')
+    // testo vuoto: come oggi per send_to_user, niente messaggio vuoto in chat
+    if (!raw.trim()) return emptySendResult()
+    const text = clampProgressMessage(raw)
+    const truncated = raw.trim().length > MESSAGE_USER_MAX_CHARS
+    if (isDuplicateSend(deliveredTexts, text)) return alreadyDeliveredResult(text)
+    if (deliveredTexts.length >= MAX_DELIVERED_PER_TURN) {
+      add({ agentId, kind: 'thinking', role: 'assistant', content: text })
+      emitLastEntry(agentId, emit)
+      return turnCapResult()
+    }
+    if (sendsSinceWork >= 1) {
+      add({ agentId, kind: 'thinking', role: 'assistant', content: text })
+      emitLastEntry(agentId, emit)
+      return messageCapResult()
+    }
+    const { sent, hold } = sendToUser(call, { ...input, text })
+    deliveredTexts.push(text)
+    sendsSinceWork++
+    const result = progressResultText(text, { held: hold, truncated })
+    updateEntryMeta(sent.id, { ...(sent.meta ?? {}), resultText: result })
+    return result
+  }
+
+  /**
+   * Fase risposta (R1): consegna la RISPOSTA FINALE — il testo della chiamata
+   * senza strumenti — con le regole comuni di deliverSend (dedup rispetto ai
+   * testi già consegnati nel turno, tetto dei 3 consegnati, outbox e finestra
+   * di consegna dei turni automatici), MAI come chiamata di strumento: la
+   * entry dello stream DIVENTA la send-message con lo STESSO id (R6: la bolla
+   * della diretta non salta e non raddoppia) e porta meta.final. Torna false
+   * se le regole del turno la declinano (il testo resta ragionamento).
+   * Il «niente due messaggi senza lavoro in mezzo» qui NON vale: progresso →
+   * risultato è il pattern dei lavori lunghi, e la risposta è ciò che
+   * l'utente aspetta (R5 non la sostituisce con niente).
+   */
+  const deliverFinalText = (
+    text: string,
+    streamEntry: import('../../shared/types').TranscriptEntry
+  ): boolean => {
+    if (!text.trim()) return false
+    if (isDuplicateSend(deliveredTexts, text)) return false
+    if (deliveredTexts.length >= MAX_DELIVERED_PER_TURN) return false
+    // come una send non urgente dei turni automatici: la risposta finale non
+    // ha flag urgent, il tetto resta quello di sempre
+    const hold = automatic
+    // il content è la risposta PULITA (i segnali spaiati tolti, R4.2): lo
+    // stream può aver lasciato il testo grezzo
+    updateEntryContent(streamEntry.id, text)
+    updateEntryKindRole(streamEntry.id, 'send-message', 'assistant')
+    updateEntryMeta(streamEntry.id, {
+      ...(streamEntry.meta ?? {}),
+      message: { type: 'text', text },
+      final: true,
+      ...(hold ? { held: true } : {})
+    })
+    const promoted = getEntries(agentId).find((e) => e.id === streamEntry.id)
+    if (promoted) emit({ type: 'entries', agentId, entries: [promoted] })
+    if (hold) holdOutboxEntry(streamEntry.id, agentId, streamEntry.createdAt)
+    deliveredTexts.push(text)
+    return true
   }
 
   try {
@@ -1095,6 +1216,16 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       opts.taskId === undefined
         ? getEntries(agentId).filter((e) => e.meta?.taskId === undefined)
         : getEntries(agentId).filter((e) => e.meta?.taskId === opts.taskId)
+
+    /**
+     * Fase risposta (R5): l'utente ha VISTO qualcosa nel turno? Una risposta
+     * finale, un message_user / send_to_user, una domanda ask_user, una
+     * card (bozza, fill, modulo sicuro, offerta, controllo dello schermo) o
+     * un'approval: le entry visibili di oggi più le card di approvazione.
+     */
+    const userSawSomething = (): boolean =>
+      visibleReplyEntries(scopedEntries(), turnEntryId).length > 0 ||
+      scopedEntries().some((e) => e.id > turnEntryId && e.kind === 'approval')
 
     if (opts.resume) {
       // R1: ripresa dal transcript — il messaggio utente NON viene riscritto;
@@ -1343,6 +1474,12 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         // MCP non disponibile: nessuna sezione
       }
     }
+    // fase risposta (R4.1): nei turni dove il silenzio esplicito è ammesso
+    // (automatici e risvegli di sistema, mai gruppi e figli) la frase del
+    // NO_RESPONSE va in coda al sistema, prima della sezione Language
+    if (sentinelAllowed && opts.groupTurn === undefined && opts.subagent === undefined) {
+      systemText += '\n\n' + ROUTINE_SILENT_REPLY_GUIDANCE
+    }
     // fase 17b (A3): la sezione Language è l'ULTIMA cosa del systemText, in
     // tutte e tre le varianti (bot normale, turno di gruppo, figlio) e DOPO
     // memoria, skill, bot principale, connettori e sezione connettori attivi
@@ -1555,6 +1692,11 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       // fase 3: il testo libero è ragionamento interno, non una risposta
       const entry = add({ agentId, kind: 'thinking', role: 'assistant', content: '' })
       emit({ type: 'entries', agentId, entries: [entry] })
+      // fase risposta (R3): mentre il MODELLO lavora nessuno strumento gira —
+      // l'attività dell'ultimo tool si azzera e nella chat privata la mezza
+      // riga passa alla riga di lavoro (il testo scritto prima dello
+      // strumento), finché il passo successivo non riparte
+      if (replyTurn) emit({ type: 'activity', agentId, activity: null })
 
       let acc = ''
       let final: { text: string; toolCalls: ToolCall[]; finishReason: string }
@@ -1572,6 +1714,13 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           if (ch.textDelta) {
             acc += ch.textDelta
             emit({ type: 'delta', agentId, entryId: entry.id, text: ch.textDelta })
+            // fase risposta (R6): nei turni in chat privata il testo della
+            // chiamata in corso si mostra in DIRETTA in una bolla provvisoria.
+            // Se può ancora diventare NO_RESPONSE (R4.6) o è solo un
+            // segnaposto (R4.3) non si mostra: si aspetta
+            if (liveReplyTurn && !couldBecomeNoResponse(acc) && !isPlaceholderText(acc)) {
+              emit({ type: 'live-reply', agentId, entryId: entry.id, text: acc })
+            }
           }
           if (ch.reasoningDelta) {
             emit({ type: 'delta', agentId, entryId: entry.id, text: ch.reasoningDelta, reasoning: true })
@@ -1602,6 +1751,8 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       } catch (err) {
         streamAbort.abort()
         updateEntryContent(entry.id, acc)
+        // fase risposta (R6): lo stream si è rotto — niente bolla appesa
+        if (liveReplyTurn) emit({ type: 'live-reply', agentId, entryId: entry.id, text: '' })
         // fase 18b (H2.2/H2.3): errore transitorio → l'anello che ha fallito si
         // raffredda (429/limite 10 minuti, 5xx/rete/scadenza 60 secondi) e il
         // turno passa al primo anello successivo ammesso (mai sui 4xx, mai su
@@ -1672,72 +1823,150 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       } finally {
         controller.signal.removeEventListener('abort', onTurnAbort)
       }
+      // fase risposta (R5): la chiamata di recupero è SENZA strumenti — le
+      // eventuali chiamate che il modello inventa lo stesso non si eseguono:
+      // valgono un result che lo dice, e resta la risposta di testo
+      if (!turnTools.length && final.toolCalls?.length) {
+        for (const c of final.toolCalls) {
+          messages.push({
+            role: 'tool', toolCallId: c.id,
+            content: RECOVERY_NO_TOOLS_RESULT
+          })
+        }
+        final = { text: final.text, toolCalls: [], finishReason: 'stop' }
+      }
       const text = final.text
       updateEntryContent(entry.id, text)
       if (text.trim()) lastFreeText = text
-
-      if (!text && !final.toolCalls?.length) {
-        // fase 11 (residuo 0b): risposta VUOTA in un turno di gruppo del membro
-        // CHIAMATO (menzionato nella finestra o turno di chiusura) → UNA chiamata
-        // di recupero col sollecito dedicato, lo stesso passo in più di E2 per il
-        // testo libero non pubblicato; il chiamato che non risponde non lascia la
-        // richiesta senza risposta
-        if (
-          opts.groupTurn !== undefined && !groupRecoveryDone &&
-          needsGroupRecovery({
-            finished: true,
-            passed: passedSilence,
-            posted: groupPosted,
-            userContact: scopedEntries().some((e) => e.id > turnEntryId && (e.kind === 'send-message' || e.kind === 'approval')),
-            freeText: '',
-            called: opts.groupTurn.called
-          })
-        ) {
-          groupRecoveryDone = true
-          turnTools = groupRecoveryTools(allTools, opts.groupTurn.closing === true)
-          messages.push({
-            role: 'user',
-            content: opts.groupTurn.closing ? GROUP_CALLED_CLOSING_RECOVERY_NUDGE : GROUP_CALLED_RECOVERY_NUDGE
-          })
-          continue
-        }
-        add({ ...uiSystemEntry(agentId, 'notice', ui(UI.modelEmpty)) })
-        emitLastEntry(agentId, emit)
-        // fase 12 (punto 3): flash a volte risponde vuoto — la chiusura del
-        // figlio non dipende dal modello: sollecito e chiusura automatica
-        if (opts.subagent) break
-        endTurn(agentId, 'STOPPED', emit, opts.taskId, 'model-error')
-        setStatus(agentId, 'idle', emit)
-        return
-      }
+      // fase risposta (R6): la diretta finisce qui — la bolla provvisoria si
+      // chiude; senza strumenti la entry promossa la sostituisce senza salto
+      // né doppione, con strumenti il testo va nella riga di lavoro (R3)
+      if (liveReplyTurn) emit({ type: 'live-reply', agentId, entryId: entry.id, text: '' })
 
       if (!final.toolCalls?.length) {
-        // correzione E2 (terzo giro): un turno di gruppo FINISHED senza post,
-        // senza pass e senza contatto con l'utente, ma CON testo libero, è una
-        // consegna scritta come ragionamento che nessuno ha letto — UNA
-        // chiamata di recupero col sollecito, SOLO coi tool del sollecito
-        // (post_to_group e pass; nella chiusura send_to_user e pass). Le
-        // chiamate che produce passano dallo STESSO percorso del turno (depth,
-        // rootId, tetti, rifiuto del post nella chiusura); se anche il recupero
-        // risponde solo testo il turno resta PASS: il testo NON diventa mai un
-        // post (il registro segna il motivo).
-        if (
-          opts.groupTurn !== undefined && !groupRecoveryDone &&
-          needsGroupRecovery({
-            finished: true,
-            passed: passedSilence,
-            posted: groupPosted,
-            userContact: scopedEntries().some((e) => e.id > turnEntryId && (e.kind === 'send-message' || e.kind === 'approval')),
-            freeText: text,
-            called: opts.groupTurn.called
-          })
-        ) {
-          groupRecoveryDone = true
-          turnTools = groupRecoveryTools(allTools, opts.groupTurn.closing === true)
-          messages.push({ role: 'user', content: opts.groupTurn.closing ? GROUP_CLOSING_RECOVERY_NUDGE : GROUP_RECOVERY_NUDGE })
-          continue
+        // ---- fase risposta (R1–R5): il testo finale È la risposta ----
+        if (replyTurn) {
+          // R4.1: il silenzio esplicito dei turni automatici — il segnale
+          // esatto, anche ripetuto o con spazi: nessun messaggio, turno
+          // FINISHED come oggi quando non si chiama send_to_user
+          if (sentinelAllowed && isExactNoResponse(text)) {
+            finished = true
+            break
+          }
+          // R4.5: verso un altro bot il segnale diventa parole, mai letterale;
+          // R4.2: un segnale spaiato ai bordi di una risposta vera si toglie;
+          // R4.3: solo segnaposto («.» «…» invisibili) vale vuoto; R4.4: il
+          // segnale dove non è ammesso vale vuoto (e il vuoto in chat privata
+          // vale il recupero di R5)
+          const reply = opts.agentMessage !== undefined ? peerReplyWithoutSentinel(text) : stripStrayNoResponse(text)
+          if (reply.trim() && !isPlaceholderText(reply) && !isExactNoResponse(reply)) {
+            // R1: consegna con le regole comuni; se il turno la declina
+            // (doppione, tetto) il testo resta ragionamento nella entry
+            deliverFinalText(reply, entry)
+            finished = true
+            break
+          }
+          // risposta vuota per l'utente: in chat privata UNA chiamata di
+          // recupero SENZA strumenti (R5) col sollecito riscritto; il suo
+          // testo sarà la risposta al giro dopo
+          if (privateHumanTurn && !recoveryDone && !userSawSomething()) {
+            recoveryDone = true
+            turnTools = []
+            messages.push({ role: 'user', content: RECOVERY_NUDGE })
+            continue
+          }
+          // il recupero c'è già stato e anche stavolta niente: il ripiego di
+          // oggi, col testo libero dell'ultima risposta non vuota
+          if (recoveryDone && lastFreeText.trim()) {
+            const fallback = lastFreeText.trim()
+            add({
+              agentId, kind: 'send-message', role: 'assistant', content: fallback,
+              meta: { message: { type: 'text', text: fallback }, fallback: true }
+            })
+            emitLastEntry(agentId, emit)
+            finished = true
+            break
+          }
+          // R5: l'utente ha già visto qualcosa nel turno (un message_user, una
+          // domanda, una card): una risposta finale vuota va bene, chiusura
+          // pulita senza recupero né notice di errore
+          if (userSawSomething()) {
+            finished = true
+            break
+          }
+          // modello muto (o dove il recupero non è previsto): come oggi
+          add({ ...uiSystemEntry(agentId, 'notice', ui(UI.modelEmpty)) })
+          emitLastEntry(agentId, emit)
+          endTurn(agentId, 'STOPPED', emit, opts.taskId, 'model-error')
+          setStatus(agentId, 'idle', emit)
+          return
         }
-        // turno concluso senza tool: fine
+
+        // ---- gruppi e figli: invariati in questa fase (R7/R8) ----
+        if (!text) {
+          // fase 11 (residuo 0b): risposta VUOTA in un turno di gruppo del membro
+          // CHIAMATO (menzionato nella finestra o turno di chiusura) → UNA chiamata
+          // di recupero col sollecito dedicato, lo stesso passo in più di E2 per il
+          // testo libero non pubblicato; il chiamato che non risponde non lascia la
+          // richiesta senza risposta
+          if (
+            opts.groupTurn !== undefined && !groupRecoveryDone &&
+            needsGroupRecovery({
+              finished: true,
+              passed: passedSilence,
+              posted: groupPosted,
+              userContact: scopedEntries().some((e) => e.id > turnEntryId && (e.kind === 'send-message' || e.kind === 'approval')),
+              freeText: '',
+              called: opts.groupTurn.called
+            })
+          ) {
+            groupRecoveryDone = true
+            turnTools = groupRecoveryTools(allTools, opts.groupTurn.closing === true)
+            messages.push({
+              role: 'user',
+              content: opts.groupTurn.closing ? GROUP_CALLED_CLOSING_RECOVERY_NUDGE : GROUP_CALLED_RECOVERY_NUDGE
+            })
+            continue
+          }
+          add({ ...uiSystemEntry(agentId, 'notice', ui(UI.modelEmpty)) })
+          emitLastEntry(agentId, emit)
+          // fase 12 (punto 3): flash a volte risponde vuoto — la chiusura del
+          // figlio non dipende dal modello: sollecito e chiusura automatica
+          if (opts.subagent) break
+          endTurn(agentId, 'STOPPED', emit, opts.taskId, 'model-error')
+          setStatus(agentId, 'idle', emit)
+          return
+        }
+
+        if (opts.groupTurn !== undefined) {
+          // correzione E2 (terzo giro): un turno di gruppo FINISHED senza post,
+          // senza pass e senza contatto con l'utente, ma CON testo libero, è una
+          // consegna scritta come ragionamento che nessuno ha letto — UNA
+          // chiamata di recupero col sollecito, SOLO coi tool del sollecito
+          // (post_to_group e pass; nella chiusura send_to_user e pass). Le
+          // chiamate che produce passano dallo STESSO percorso del turno (depth,
+          // rootId, tetti, rifiuto del post nella chiusura); se anche il recupero
+          // risponde solo testo il turno resta PASS: il testo NON diventa mai un
+          // post (il registro segna il motivo).
+          if (
+            !groupRecoveryDone &&
+            needsGroupRecovery({
+              finished: true,
+              passed: passedSilence,
+              posted: groupPosted,
+              userContact: scopedEntries().some((e) => e.id > turnEntryId && (e.kind === 'send-message' || e.kind === 'approval')),
+              freeText: text,
+              called: opts.groupTurn.called
+            })
+          ) {
+            groupRecoveryDone = true
+            turnTools = groupRecoveryTools(allTools, opts.groupTurn.closing === true)
+            messages.push({ role: 'user', content: opts.groupTurn.closing ? GROUP_CLOSING_RECOVERY_NUDGE : GROUP_RECOVERY_NUDGE })
+            continue
+          }
+        }
+        // turno concluso senza tool: fine (nei gruppi e nei figli il testo
+        // libero resta ragionamento, R7/R8)
         finished = true
         break
       }
@@ -1795,6 +2024,19 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           }
           call = { ...call, name: target, arguments: JSON.stringify(args) }
           input = args
+        }
+
+        // fase risposta (R2.4): send_to_user chiamato fuori da un gruppo
+        // (abitudine lasciata dalla storia vecchia) è TRATTATO come
+        // message_user — stesso percorso, nessun errore, nessuna risposta
+        // persa; e message_user chiamato in un gruppo è trattato come
+        // send_to_user (lì il protocollo è quello di sempre, R7). Il meta
+        // della entry porta il nome del percorso VERO (R9: la storia non
+        // mostra mai al modello lo schema vecchio dei turni privati)
+        if (call.name === 'send_to_user' && opts.groupTurn === undefined) {
+          call = { ...call, name: 'message_user' }
+        } else if (call.name === 'message_user' && opts.groupTurn !== undefined) {
+          call = { ...call, name: 'send_to_user' }
         }
 
         // fase 8 (§3bis L11): loop detection — la stessa identica chiamata
@@ -1856,10 +2098,19 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           continue
         }
 
+        if (call.name === 'message_user') {
+          // fase risposta (R2): SOLO progressi — stesse regole di consegna di
+          // send_to_user (dedup, tetti, outbox/tetto urgent automatici) più il
+          // taglio a 500 caratteri, che il result dichiara
+          messages.push({ role: 'tool', toolCallId: call.id, content: deliverMessageUser(call, input) })
+          continue
+        }
+
         if (call.name === 'send_to_user') {
           // fase 6/7: tetto urgent e outbox dei turni automatici vivono in
           // sendToUser (dentro deliverSend); fase 9 (0b/0c/0d): result col
-          // testo consegnato, dedup e tetto degli avanzamenti
+          // testo consegnato, dedup e tetto degli avanzamenti.
+          // fase risposta: resta solo nei turni di GRUPPO (R7)
           messages.push({ role: 'tool', toolCallId: call.id, content: deliverSend(call, input) })
           continue
         }
@@ -3799,82 +4050,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       }
       endTurn(agentId, 'STOPPED', emit, opts.taskId, 'loop')
     } else {
-      // turno FINISHED: se l'UTENTE non ha visto nulla (nessuna send-message nel
-      // turno) una chiamata di recupero chiede al modello send_to_user; se non
-      // lo fa nemmeno ora, il testo libero diventa send-message con fallback.
-      // Fase 8: nel contesto di un task valgono le SOLE entry del task.
-      // Fase 10 (§3): nei turni di GRUPPO niente recupero — il silenzio è un
-      // esito valido (PASS) e il testo libero non diventa mai un messaggio
-      if (source === 'user' && opts.groupTurn === undefined && opts.subagent === undefined && visibleReplyEntries(scopedEntries(), turnEntryId).length === 0) {
-        messages.push({ role: 'user', content: RECOVERY_NUDGE })
-        setStatus(agentId, 'thinking', emit)
-        try {
-          const rstream = llmStream(activeProvider, activeRoute.model, messages, allTools, controller.signal, {
-            thinking: turnThinking,
-            modelPrices,
-            sessionId,
-            trace: { turnId: traceTurnId, callIndex: traceCallIndex++ }
-          })
-          let acc = ''
-          let recoveryCalls: ToolCall[] = []
-          let rusage: import('./llm').LlmChunk['usage'] | undefined
-          const rit = rstream[Symbol.asyncIterator]()
-          let rfirst = false
-          for (;;) {
-            const r = await nextWithDeadline(rit, rfirst, deadlines)
-            if (r.done) break
-            const ch = r.value
-            rfirst = true
-            if (ch.textDelta) acc += ch.textDelta
-            if (ch.toolCalls) recoveryCalls = ch.toolCalls
-            if (ch.usage) rusage = ch.usage
-          }
-          // fase 18a (E4): uso registrato della chiamata di recupero del turno
-          if (rusage) {
-            recordModelUsage({
-              agentId,
-              providerId: activeProvider.id,
-              providerKind: activeProvider.kind,
-              model: activeRoute.model,
-              source: 'turn',
-              input: rusage.input,
-              output: rusage.output,
-              cacheRead: rusage.cacheRead ?? 0,
-              cacheWrite: rusage.cacheWrite ?? 0,
-              costUsd: rusage.costUsd ?? null
-            })
-          }
-          const sends = recoveryCalls.filter((c) => c.name === 'send_to_user')
-          if (sends.length) {
-            for (const call of sends) {
-              let input: Record<string, unknown>
-              try { input = JSON.parse(call.arguments || '{}') } catch { input = {} }
-              // correzione A3: anche il recupero di una catena automatica passa
-              // dall'outbox (stesso tetto urgent dei turni di routine);
-              // fase 9 (0c/0d): stesse regole di consegna del turno
-              deliverSend(call, { ...input, text: String(input.text ?? acc) })
-            }
-          } else {
-            const fallback = (acc.trim() ? acc : lastFreeText).trim()
-            if (fallback) {
-              add({
-                agentId, kind: 'send-message', role: 'assistant', content: fallback,
-                meta: { message: { type: 'text', text: fallback }, fallback: true }
-              })
-              emitLastEntry(agentId, emit)
-            }
-          }
-        } catch {
-          // la chiamata di recupero stessa fallisce: si prova il fallback col testo già avuto
-          if (lastFreeText.trim()) {
-            add({
-              agentId, kind: 'send-message', role: 'assistant', content: lastFreeText.trim(),
-              meta: { message: { type: 'text', text: lastFreeText.trim() }, fallback: true }
-            })
-            emitLastEntry(agentId, emit)
-          }
-        }
-      }
+      // fase risposta (R1/R5): il recupero di un turno privato senza risposta
+      // vive DENTRO il loop (una sola chiamata, senza strumenti, con lo stesso
+      // percorso della risposta finale) — qui la chiusura FINISHED è pulita
       endTurn(agentId, 'FINISHED', emit, opts.taskId)
       // fase 6 (§3bis L9): agent-done = turno finito con almeno un messaggio
       // visibile (quelli trattenuti in outbox non contano: l'utente non lo
@@ -3900,6 +4078,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     // passo) — si buttano via QUI: i job corrispondenti restano in coda e i
     // messaggi partiranno come turni nuovi (gara), senza doppioni
     midTurnDeliveries.delete(agentId)
+    // fase risposta (R6): a fine turno, con qualunque esito, nessuna bolla di
+    // diretta resta appesa (la entry promossa, quando c'è, è già in chat)
+    emit({ type: 'live-reply', agentId, entryId: 0, text: '' })
     // fase 8 (§3bis L7): fine del turno = niente attività in corso
     emit({ type: 'activity', agentId, activity: null })
     if (getAgent(agentId)?.status !== 'offline') setStatus(agentId, 'idle', emit)

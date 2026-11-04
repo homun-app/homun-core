@@ -645,8 +645,10 @@ export function buildApiMethods(
       if (refusalUi) throw new Error(formatUi(refusalUi, uiLanguage()))
       if (!parseCron(String(schedule))) throw uiError(UI.rpcScheduleInvalid)
       return store.createRoutine(agentId as string, title as string, prompt as string, schedule as string,
-        // fase 18b (H7): modello proprio facoltativo, stessa validazione
-        model !== undefined ? routineModelPatch(model as Parameters<typeof routineModelPatch>[0]) : {})
+        // fase 18b (H7): modello proprio facoltativo, stessa validazione.
+        // fase risposta (sonda): l'ipc serializza undefined → null, e null
+        // vale come «nessun modello proprio» (prima: TypeError su .providerId)
+        model != null ? routineModelPatch(model as Parameters<typeof routineModelPatch>[0]) : {})
     },
     'routines:create-trigger': async ([agentId, title, prompt, trigger, timezone, model]) => {
       // fase 12 (punto 1): niente routine su un SOTTOAGENTE (non è un bot)
@@ -663,7 +665,7 @@ export function buildApiMethods(
         timezone: tz,
         trigger: t,
         // fase 18b (H7): modello proprio (validato: provider esistente, modello non vuoto)
-        ...(model !== undefined ? routineModelPatch(model as Parameters<typeof routineModelPatch>[0]) : {})
+        ...(model != null ? routineModelPatch(model as Parameters<typeof routineModelPatch>[0]) : {})
       })
       const url = webhookUrl(created)
       return { ...created, ...(url ? { webhook_url: url } : {}) }

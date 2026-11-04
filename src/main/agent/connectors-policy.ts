@@ -19,6 +19,15 @@ export const CONNECTOR_PROPOSAL_TOOLS = new Set(['add_mcp_server', 'install_plug
  */
 export const GROUP_EXCLUDED_TOOLS = new Set(['fill_credential'])
 
+// fase risposta (R2): fuori dai gruppi si offre message_user (i progressi dei
+// lavori lunghi) e NON send_to_user — la risposta all'utente è il testo
+// normale della risposta finale; nei turni di GRUPPO resta send_to_user
+// com'è oggi (R7: i gruppi non cambiano in questa fase). Se il modello chiama
+// lo stesso send_to_user fuori da un gruppo, il loop lo tratta come
+// message_user: nessuna risposta persa.
+const PRIVATE_ONLY_TOOLS = new Set(['message_user'])
+const GROUP_ONLY_TOOLS = new Set(['send_to_user'])
+
 /** I fatti del turno che decidono se i tool di proposta ci sono. */
 export interface TurnSourceFacts {
   source: 'user' | 'routine' | 'group' | string
@@ -61,7 +70,12 @@ export function connectorProposalOffered(f: TurnSourceFacts): boolean {
 export function toolsForTurnSource(tools: ToolDef[], f: TurnSourceFacts): ToolDef[] {
   // fase 14 (7d): nei turni di gruppo niente fill_credential (accessi e dati
   // sensibili restano fuori dai gruppi)
-  const base = f.groupTurn !== undefined ? tools.filter((t) => !GROUP_EXCLUDED_TOOLS.has(t.name)) : tools
+  // fase risposta (R2): la coppia send_to_user / message_user si divide sul
+  // gruppo — fuori dai gruppi si offre SOLO message_user, nei gruppi SOLO
+  // send_to_user (l'elenco resta fisso per tutto il turno, fase velocità)
+  const base = f.groupTurn !== undefined
+    ? tools.filter((t) => !GROUP_EXCLUDED_TOOLS.has(t.name) && !PRIVATE_ONLY_TOOLS.has(t.name))
+    : tools.filter((t) => !GROUP_ONLY_TOOLS.has(t.name))
   if (connectorProposalOffered(f)) return base
   return base.filter((t) => !CONNECTOR_PROPOSAL_TOOLS.has(t.name))
 }

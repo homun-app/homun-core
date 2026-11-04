@@ -42,6 +42,8 @@ import { Bot } from '../bot/Bot'
 import { useBotInfo } from '../bot/use-bot'
 // fase 16b (S3.3): la mezza riga d'attività e i passaggi del turno
 import { activityPhrase, stepsOfTurn, stepsDurationSeconds, type StepGroup } from '../lib/activity'
+// fase risposta (R3): la riga di lavoro dal testo a metà turno
+import { narrationStatusLine } from '../../../shared/narration'
 import { THINKING_LABELS } from './ui/ModelPicker'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu'
 
@@ -119,17 +121,55 @@ function PopoverBox({ up, setUp, align, children }: {
   )
 }
 
+/**
+ * Fase risposta (R3): la riga di lavoro — l'ultima riga del testo che il
+ * modello ha scritto nella chiamata con strumenti del turno APERTO, ripulita
+ * e tagliata a 60 caratteri. Solo nei turni di chat privata: l'apertura è un
+ * messaggio utente senza initiator (routine, risvegli e gruppi non la
+ * mostrano). Mai un messaggio: sostituisce «pensa…» finché arriva il passo.
+ */
+function narrationLineOfTurn(entries: TranscriptEntry[], liveEntryId: number | null): string {
+  const end = entries.length
+  let start = 0
+  for (let i = end - 1; i >= 0; i--) {
+    const e = entries[i]!
+    // l'apertura del turno: l'ultimo messaggio utente DIRETTO in chat
+    // privata (niente initiator, gruppo o task: routine, risvegli di sistema
+    // e turni di gruppo non narrano)
+    if (e.kind === 'message' && e.role === 'user') {
+      if (e.meta?.initiator || e.meta?.groupId || e.meta?.taskId) return ''
+      start = i + 1
+      break
+    }
+  }
+  for (let i = end - 1; i >= start; i--) {
+    const e = entries[i]!
+    // la entry che STA trasmettendo in diretta non entra: la mostra la bolla
+    // (R6); la riga di lavoro è il testo delle chiamate CON strumenti, fermo
+    if (e.id === liveEntryId) continue
+    if (e.kind === 'thinking' && e.content.trim() && !e.meta?.groupId && !e.meta?.taskId) {
+      return narrationStatusLine(e.content)
+    }
+  }
+  return ''
+}
+
 /** La mascotte che racconta il lavoro: mezza riga + popover dei passaggi. */
 function ActivityRow({ agentId }: { agentId: string }) {
   const { i18n } = useLingui()
   const info = useBotInfo(agentId)
   const activity = useStore((s) => s.activity[agentId])
   const entries = useStore((s) => s.entries)
+  const liveEntryId = useStore((st) => st.liveReply[agentId]?.entryId ?? null)
   const [open, setOpen] = useState(false)
   const [up, setUp] = useState(false)
   if (!info) return null
   const group = stepsOfTurn(entries, 'open')
-  const phrase: MessageDescriptor = info.state === 'thinking' && !activity
+  // fase risposta (R3): la riga di lavoro del testo a metà turno, quando non
+  // c'è un'attività di strumento da raccontare (la entry in diretta non conta:
+  // la mostra già la bolla di R6)
+  const narration = !activity ? narrationLineOfTurn(entries, liveEntryId) : ''
+  const phrase: MessageDescriptor = info.state === 'thinking' && !activity && !narration
     ? msg`pensa…`
     : activityPhrase(activity, 'present', i18n.locale === 'en' ? 'en' : 'it')
   return (
@@ -153,13 +193,35 @@ function ActivityRow({ agentId }: { agentId: string }) {
           {/* l'ombra morbida ovale sotto la mascotte (mai un riquadro) */}
           <span aria-hidden="true" className="mt-1 h-1.5 w-7 rounded-full bg-foreground/10" />
         </button>
-        <span aria-live="polite" className="text-sm text-muted-foreground">{i18n.t(phrase)}</span>
+        <span aria-live="polite" className="text-sm text-muted-foreground">
+          {narration || i18n.t(phrase)}
+        </span>
       </div>
       {open && (
         <PopoverBox up={up} setUp={setUp} align="left">
           <StepsPopover group={group} live />
         </PopoverBox>
       )}
+    </div>
+  )
+}
+
+/**
+ * Fase risposta (R6): la bolla provvisoria della risposta in diretta — il
+ * testo della chiamata in corso, con lo stile di una risposta del bot. A fine
+ * chiamata la entry promossa la sostituisce senza salto (stesso testo), o
+ * sparisce (chiamata con strumenti: il testo va nella riga di lavoro).
+ */
+function LiveReplyBubble({ agentId }: { agentId: string }) {
+  const live = useStore((s) => s.liveReply[agentId])
+  if (!live?.text) return null
+  return (
+    <div className="flex justify-start">
+      <div className="max-w-[75%] rounded-[22px] bg-muted px-4 py-2.5 text-sm leading-relaxed">
+        <div className="max-w-none">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{live.text}</ReactMarkdown>
+        </div>
+      </div>
     </div>
   )
 }
@@ -439,6 +501,8 @@ export function Chat() {
           {entries.filter((e) => !e.meta?.taskId && !e.meta?.groupId).map((e) => (
             <EntryRow key={e.id} entry={e} showReasoning={showReasoning} debugSteps={debugSteps} />
           ))}
+          {/* fase risposta (R6): la risposta in diretta, bolla provvisoria */}
+          <LiveReplyBubble agentId={agent.id} />
           {/* fase 16b (S3.3): mentre lavora, la mascotte con la mezza riga */}
           {busy && <ActivityRow agentId={agent.id} />}
         </div>

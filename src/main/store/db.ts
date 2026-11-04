@@ -480,6 +480,16 @@ export function updateEntryMeta(id: number, meta: Record<string, unknown>): void
   db().prepare('UPDATE entries SET meta = ? WHERE id = ?').run(JSON.stringify(meta), id)
 }
 
+/**
+ * Fase risposta (R6): la entry dello stream (kind 'thinking') DIVENTA la
+ * risposta (kind 'send-message') con lo STESSO id — la bolla della diretta
+ * non salta e non raddoppia in chat. Il meta si aggiorna a parte con
+ * updateEntryMeta (qui cambia solo la natura della riga).
+ */
+export function updateEntryKindRole(id: number, kind: TranscriptEntry['kind'], role: TranscriptEntry['role']): void {
+  db().prepare('UPDATE entries SET kind = ?, role = ? WHERE id = ?').run(kind, role, id)
+}
+
 // ---- grants (standing grants come l'originale) ----
 /**
  * Fase 0.3.1001 (M4): scope di una grant. Assente/null = grant piena (il

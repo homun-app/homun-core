@@ -84,6 +84,8 @@ const commitClickDenied = (snapshot: string, ref: string): boolean => {
 // (MAX_STEPS importato, non un numero a parte) e la chiusura robusta col
 // sollecito del figlio è quella del loop
 import { RECOVERY_NUDGE, MAX_STEPS as LOOP_MAX_STEPS, ASK_USER_RESULT, WAKE_PARENT_RESULT, REQUEST_TAKEOVER_RESULT } from '../src/main/agent/loop'
+// fase risposta (R4): il silenzio esplicito e i segnali spaiati, come il loop
+import { isExactNoResponse, isPlaceholderText, stripStrayNoResponse } from '../src/main/agent/silent-reply'
 // fase 10: l'apertura dei turni di gruppo è quella VERA del runner (blocco
 // evidenza + regola dei turni), così i casi 8/9/11 misurano il comportamento
 // sul testo che il membro riceve davvero
@@ -610,8 +612,21 @@ function makeDeliverer(world: WorldResults = {}) {
   let lastSnapshot = ''
   return {
     delivered,
+    /**
+     * Fase risposta (R1): la consegna della RISPOSTA FINALE — le regole del
+     * loop (dedup, tetto dei consegnati) SENZA il cap dei progressi: la
+     * risposta è ciò che l'utente aspetta.
+     */
+    final(text: string): boolean {
+      if (!text.trim()) return false
+      if (isDuplicateSend(delivered, text)) return false
+      if (delivered.length >= MAX_DELIVERED_PER_TURN) return false
+      delivered.push(text)
+      return true
+    },
     run(name: string, args: Record<string, unknown>): { result: string; endTurn: boolean } {
-      if (name === 'send_to_user') {
+      // fase risposta (R2): message_user ha le STESSE regole di send_to_user
+      if (name === 'send_to_user' || name === 'message_user') {
         const text = String(args.text ?? '')
         if (!text.trim()) return { result: emptySendResult(), endTurn: false }
         if (isDuplicateSend(delivered, text)) return { result: alreadyDeliveredResult(text), endTurn: false }
@@ -661,6 +676,19 @@ function makeDeliverer(world: WorldResults = {}) {
       return { result, endTurn: false }
     }
   }
+}
+
+/**
+ * Fase risposta (R4): il testo finale diventa la risposta ai fini
+ * dell'utente — il silenzio esplicito dei turni automatici, i segnali
+ * spaiati ai bordi tolti, i segnaposto e il segnale dove non è ammesso
+ * valgono vuoto (nei turni utente il vuoto vale il recupero di R5).
+ */
+function finalReplyOfEval(text: string, source: 'user' | 'routine' | 'group'): string {
+  if (source === 'routine' && isExactNoResponse(text)) return ''
+  const reply = stripStrayNoResponse(text)
+  if (!reply.trim() || isPlaceholderText(reply) || isExactNoResponse(reply)) return ''
+  return reply
 }
 
 // ---- un "turno" contro il modello vero: max 4 passi (8 per i casi con team),
@@ -722,7 +750,13 @@ async function evalTurn(
       const drained = await drainOnce()
       if (drained.text.trim()) lastFreeText = drained.text
       steps.push(drained)
-      if (!drained.toolCalls.length) break
+      if (!drained.toolCalls.length) {
+        // fase risposta (R1/R4): il testo finale È la risposta — nei turni
+        // utente e di routine (mai gruppi e figli), col silenzio esplicito
+        // dei turni automatici e i segnali spaiati tolti
+        if (source !== 'group' && !child) deliverer.final(finalReplyOfEval(drained.text, source))
+        break
+      }
       messages.push({ role: 'assistant', content: drained.text, toolCalls: drained.toolCalls })
       // fase 13 (caso 28): i tool attivati dal find_tools di QUESTO passo entrano
       // in fondo alla lista, in ordine stabile, dal PASSO SUCCESSIVO
@@ -793,16 +827,18 @@ async function evalTurn(
     // dell'ultima risposta diventa il messaggio di fallback. MAI nel figlio:
     // lui consegna al padre (wake_parent), non parla con l'utente
     if (source === 'user' && !child && deliverer.delivered.length === 0 && !endedWithAsk) {
+      // fase risposta (R5): UNA chiamata di recupero SENZA strumenti; il suo
+      // testo è la risposta (stesse regole di R1). Solo se è vuoto anche
+      // quello vale il ripiego di prima col testo libero
       messages.push({ role: 'user', content: RECOVERY_NUDGE })
-      const recovery = await drainOnce()
+      recoveryUsed = true
+      const recovery = await drainOnce([])
       if (recovery.text.trim()) lastFreeText = recovery.text
-      const sends = recovery.toolCalls.filter((c) => c.name === 'send_to_user')
-      for (const c of sends) {
-        let args: Record<string, unknown> = {}
-        try { args = JSON.parse(c.arguments || '{}') as Record<string, unknown> } catch { /* args vuoti */ }
-        deliverer.run('send_to_user', { ...args, text: String(args.text ?? recovery.text) })
+      steps.push(recovery)
+      messages.push({ role: 'assistant', content: recovery.text, toolCalls: recovery.toolCalls })
+      if (!deliverer.final(finalReplyOfEval(recovery.text, 'user')) && lastFreeText.trim()) {
+        deliverer.delivered.push(lastFreeText.trim())
       }
-      if (!sends.length && lastFreeText.trim()) deliverer.delivered.push(lastFreeText.trim())
     }
   } catch (e) {
     return { steps, delivered: deliverer.delivered, allCalls: steps.flatMap((s) => s.toolCalls), error: e instanceof Error ? e.message : String(e), endedWithAsk }
@@ -1516,8 +1552,8 @@ export const CASES: EvalCase[] = [
       // send_to_user CONSEGNATI più il fallback del recupero (come il caso
       // 3): ESATTAMENTE un resoconto. Il recupero vale ✓r
       if (t.delivered.length !== 1) {
-        const sends = t.allCalls.filter((c) => c.name === 'send_to_user').length
-        return { pass: false, reason: `${sends} send_to_user / ${t.delivered.length} consegnati all'utente (atteso 1)` }
+        const sends = t.allCalls.filter((c) => c.name === 'send_to_user' || c.name === 'message_user').length
+        return { pass: false, reason: `${sends} send / ${t.delivered.length} consegnati all'utente, finale compreso (atteso 1)` }
       }
       const d = t.delivered[0]!
       const has = [/astro/i.test(d), /sveltekit|svelte/i.test(d), /remix/i.test(d)]

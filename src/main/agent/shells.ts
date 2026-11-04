@@ -489,7 +489,9 @@ async function finishShell(deps: ShellHostDeps, job: ShellJob, status: 'done' | 
   const { ui, UI } = await import('../ui-language')
   deps.enqueue?.(job.agent_id, [
     formatShellDone(job.command, job.id, exitCode, tail, status),
-    "The background command has finished: decide whether to continue the work, notify the user with send_to_user, or stay silent."
+    // fase risposta: la risposta all'utente è il testo finale; il silenzio è
+    // il segnale esatto (R4)
+    'The background command has finished: decide whether to continue the work, or reply to the user with your final reply text; if there is nothing to report, reply with exactly NO_RESPONSE.'
   ].join('\n'), { shellId: job.id, shellStatus: status, ui: ui(UI.shellDoneLine) })
   updateShellJob(deps.db(), job.id, { notified: true })
 }

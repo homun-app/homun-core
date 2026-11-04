@@ -41,6 +41,28 @@ export function sendCallOf(e: TranscriptEntry): { name: string; arguments: strin
   return { name: 'send_to_user', arguments: JSON.stringify({ text: e.content }) }
 }
 
+/**
+ * Fase risposta (R9): una send-message di TESTO torna al modello come TESTO
+ * assistant — la risposta finale (meta.final), i ripieghi e le vecchie send
+ * prodotte da send_to_user in chat privata. Restano coppie chiamata/risultato
+ * solo message_user (meta.call.name) e le send dei turni di GRUPPO
+ * (meta.groupChain); le deleghe send_to_agent (meta.agentSend) restano
+ * coppie come oggi (il loro result è l'esito della coda, non «consegnato»).
+ */
+function textSendAsAssistantText(e: TranscriptEntry): boolean {
+  const m = payloadOf(e)
+  if (!m) return false
+  const p = m.message
+  if (p?.type !== 'text') return false
+  if (m.agentSend) return false
+  // correzione C3: le send dei turni di gruppo portano la catena in meta
+  if ((e.meta as { groupChain?: unknown } | null)?.groupChain) return false
+  // message_user resta coppia chiamata/risultato (è un tool vero); le send
+  // senza call (finali, ripieghi) e le vecchie send_to_user in privato sono
+  // testo assistant
+  return m.call === undefined || m.call.name === 'send_to_user'
+}
+
 /** Il tool result che il modello vede per una send-message: cosa sa l'utente e come è finita. */
 export function sendResultText(e: TranscriptEntry): string {
   const m = payloadOf(e)
@@ -60,6 +82,11 @@ export function sendResultText(e: TranscriptEntry): string {
     if (m.status === 'discarded') return "draft discarded by the user"
     return "draft created and shown to the user: it will be sent only if the user confirms"
   }
+  // fase risposta (R9): il result ESATTO che il modello ha visto nel turno,
+  // quando la consegna l'ha salvato (message_user: tetto dei 500 caratteri e
+  // trattenute dichiarate) — la storia ricostruita resta identica a quella
+  // letta, anche se la funzione dovesse cambiare
+  if (typeof m?.resultText === 'string') return m.resultText
   // fase 9 (punto 0b): per le send di TESTO il result riporta l'inizio di ciò
   // che l'utente ha ricevuto — il modello può verificare che è arrivato intero
   // (il bug dei messaggi multipli nasceva da un result senza riscontro);
@@ -99,16 +126,24 @@ function toMessages(entries: TranscriptEntry[]): ChatMessage[] {
       // contenuto assistant per il modello, MAI visibile all'utente in chat
       if (e.content.trim()) msgs.push({ role: 'assistant', content: e.content })
     } else if (e.kind === 'send-message') {
-      // fase 3 (§3bis L2): ciò che il bot ha detto all'utente torna al modello
-      // come tool call + tool result, non come testo assistant
-      const call = { id: `send_${e.id}`, ...sendCallOf(e) }
-      const prev = msgs[msgs.length - 1]
-      if (prev && prev.role === 'assistant') {
-        prev.toolCalls = [...(prev.toolCalls ?? []), call]
+      // fase 3 (§3bis L2) → fase risposta (R9): le send di TESTO tornano al
+      // modello come TESTO assistant (la risposta finale, i ripieghi e le
+      // vecchie send_to_user delle chat private: il modello non vede mai lo
+      // schema vecchio da abbandonare). Le altre (widget, bozze, card,
+      // message_user, le send dei gruppi e le deleghe) restano coppie
+      // chiamata/risultato, come sempre
+      if (textSendAsAssistantText(e)) {
+        if (e.content.trim()) msgs.push({ role: 'assistant', content: e.content })
       } else {
-        msgs.push({ role: 'assistant', content: '', toolCalls: [call] })
+        const call = { id: `send_${e.id}`, ...sendCallOf(e) }
+        const prev = msgs[msgs.length - 1]
+        if (prev && prev.role === 'assistant') {
+          prev.toolCalls = [...(prev.toolCalls ?? []), call]
+        } else {
+          msgs.push({ role: 'assistant', content: '', toolCalls: [call] })
+        }
+        msgs.push({ role: 'tool', toolCallId: call.id, content: sendResultText(e) })
       }
-      msgs.push({ role: 'tool', toolCallId: call.id, content: sendResultText(e) })
     } else if (e.kind === 'event' && summaryEventOf(e)) {
       // fase 16b correzioni (P1): il riepilogo di chiusura del coordinatore è
       // una event discreta nella SUA chat privata, ma il modello l'ha detto

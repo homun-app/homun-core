@@ -15,7 +15,8 @@ import {
   systemPrompt, identitySection, computerSection, talkingSection, initiativeSection,
   externalContentSection, transparencySection, workSection, connectorsSection,
   agentsSection, teamGroupsSection, memorySkillsSection, tasksSection, limitsSection,
-  languageSection, withLanguage, mainAgentSection, PROMPT_SECTION_TITLES, PROMPT_TOKEN_BUDGET
+  languageSection, withLanguage, mainAgentSection, PROMPT_SECTION_TITLES, PROMPT_TOKEN_BUDGET,
+  ROUTINE_SILENT_REPLY_GUIDANCE
 } from '../prompts'
 import type { Agent } from '../../../shared/types'
 
@@ -77,21 +78,31 @@ describe('fase 9 (punto 2): system prompt componibile', () => {
     expect(s).toContain('{{secret:NAME}}')
   })
 
-  it('come parli: solo tool, un messaggio per risultato, un solo avanzamento, niente nomi interni', () => {
+  it('come parli: la risposta è il testo finale, message_user solo per i progressi', () => {
     const s = talkingSection()
-    expect(s).toContain('send_to_user')
+    // fase risposta (R1/R2): la risposta all'utente è il testo della risposta
+    // finale; message_user porta SOLO i progressi; niente nomi interni
+    expect(s).toContain('Your reply to the user is the TEXT of your final answer')
+    expect(s).toContain('message_user is ONLY for short progress notes')
     expect(s).toContain('ask_user')
-    expect(s).toContain('AT MOST a brief progress note')
+    expect(s).toContain('private reasoning')
     expect(s).toContain('Do not repeat')
     expect(s).toContain('Tool names, routines or execution times')
   })
 
-  it('iniziativa: solo il concreto, silenzio nelle routine senza novità', () => {
+  it('iniziativa: solo il concreto, silenzio NO_RESPONSE nelle routine senza novità', () => {
     const s = initiativeSection()
     expect(s).toContain('deadline')
     expect(s).toContain('pending work that is not moving')
     expect(s).toContain('decision')
-    expect(s).toContain('NO message')
+    // fase risposta (R4): il silenzio dei turni automatici è il segnale esatto
+    expect(s).toContain('exactly NO_RESPONSE')
+  })
+
+  it('fase risposta (R4): la frase del silenzio dei turni automatici', () => {
+    expect(ROUTINE_SILENT_REPLY_GUIDANCE).toContain('your ENTIRE final reply must be exactly NO_RESPONSE')
+    expect(ROUTINE_SILENT_REPLY_GUIDANCE).toContain('Do not call message_user unless you have something to report')
+    expect(ROUTINE_SILENT_REPLY_GUIDANCE).not.toContain('per turn')
   })
 
   it('contenuti esterni: dati, istruzioni non eseguite e avviso in una riga', () => {

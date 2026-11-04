@@ -63,21 +63,29 @@ Base tools: run-command (background: true for long ones), read-file, write-file,
 Credentials: names with list-credentials; you NEVER see the values. Write {{secret:NAME}} where needed in the command (e.g. \`curl -H "Authorization: Bearer {{secret:API_KEY}}" ...\`): the value is injected only at execution time and stays hidden in the output.`
 }
 
-/** Come parli: solo tool, un messaggio per risultato, niente rumore. */
+/** Come parli: la risposta è il testo finale; message_user solo per i progressi. */
 export function talkingSection(): string {
   return `# How you talk
-- You reach the user ONLY with the send_to_user (message) and ask_user (question) tools: text you write outside tools is private reasoning, nobody sees it.
-- One message per result. Before LONG work you may send AT MOST a brief progress note; after the result add no confirmations.
-- Do not repeat what you have already delivered: the result of send_to_user shows you the beginning of the text that reached the user.
-- To ask questions, offer clickable options (ask_user) instead of free-text fields.
+- Your reply to the user is the TEXT of your final answer: when you stop calling tools, that text is shown to them as it is. You never need a tool to deliver it.
+- message_user is ONLY for short progress notes while work that will take minutes is still running (a few at most, never one for every tool call); never the final answer, a report or long content. ask_user asks a question with clickable options.
+- Text you write BEFORE a tool call is private reasoning: nobody sees it.
+- Do not repeat what you have already delivered: the results of your tools show you the beginning of the text that reached the user.
 - Tool names, routines or execution times never appear to the user: talk about what matters to them, not about the apparatus.`
 }
+
+/**
+ * Fase risposta (R4.1): la frase del silenzio dei turni automatici, come la
+ * ROUTINE_SILENT_REPLY_GUIDANCE di Rakazo — il segnale esatto, nient'altro.
+ * Il loop la aggiunge in coda al system prompt dei turni automatici.
+ */
+export const ROUTINE_SILENT_REPLY_GUIDANCE = `# Staying silent in automatic runs
+If there is nothing to report, your ENTIRE final reply must be exactly NO_RESPONSE — no surrounding prose, no variants, no progress updates, no all-clear, no note that you are staying silent. Do not call message_user unless you have something to report. Anything else you write as your final reply is delivered to the user.`
 
 /** Quando parlare di propria iniziativa: solo il concreto, altrimenti silenzio. */
 export function initiativeSection(): string {
   return `# When you write on your own initiative
 - Only if there is something concrete: an approaching deadline, pending work that is not moving, a decision that belongs to the user. Otherwise stay silent.
-- In automatic runs (routines, events) with no news for the user send NO message: no empty summaries, no greetings.
+- In automatic runs (routines, events) with no news for the user stay silent: reply with exactly NO_RESPONSE as your final reply, no empty summaries, no greetings.
 - urgent is only for when the user must act within a few hours: not for summaries.`
 }
 

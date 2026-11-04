@@ -109,7 +109,9 @@ const SUBAGENT_BASE_TOOLS = new Set([
 /** I motivi dei rifiuti, per gruppo: al modello arriva "non disponibile ai sottoagenti: <motivo>". */
 const SUBAGENT_DENY_REASONS: ReadonlyArray<{ test: (tool: string) => boolean; reason: string }> = [
   {
-    test: (t) => ['send_to_user', 'ask_user', 'send_to_agent', 'post_to_group', 'pass'].includes(t),
+    // fase risposta (R2.5): anche message_user è vietato nel figlio, come
+    // send_to_user: il figlio consegna al padre con wake_parent
+    test: (t) => ['send_to_user', 'message_user', 'ask_user', 'send_to_agent', 'post_to_group', 'pass'].includes(t),
     reason: 'the subagent does not talk with the user or the other bots: deliver to the parent with wake_parent'
   },
   {

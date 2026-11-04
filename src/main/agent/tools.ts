@@ -28,6 +28,22 @@ export const toolDefs: ToolDef[] = [
       required: ['text']
     }
   },
+  // fase risposta (R2): il progresso dei lavori lunghi, fuori dai gruppi —
+  // la descrizione segue il senso di Rakazo (longWorkProgressGuidance): mai
+  // la risposta finale, mai un report; la risposta completa va nel testo
+  // normale della risposta
+  {
+    name: 'message_user',
+    description: "Sends the user a SHORT progress message while work that will take minutes is still running. Only for that: a few brief updates at most in a turn (a sentence or two), never one for every tool call, never to announce that you are starting. NEVER the final answer, a report or long content: the complete answer always goes in the text of your final reply, which the user sees directly. Messages are capped at 500 characters and cut beyond that.",
+    parameters: {
+      type: 'object',
+      properties: {
+        text: { type: 'string', description: 'The progress note to show in chat (max 500 characters)' },
+        urgent: { type: 'boolean', description: 'True only if the user must act within a few hours; non-urgent messages from automatic runs wait for the delivery window' }
+      },
+      required: ['text']
+    }
+  },
   {
     name: 'ask_user',
     description: "Asks the user a question with clickable choices. Creates a widget in chat and ENDS the turn: the answer arrives as a new user message. Prefer options over free text: never ask free-text when you can offer choices.",
@@ -1519,7 +1535,9 @@ export async function executeTool(
           // esterno) — come per <messaggio_da_agente>
           text: [
             formatTaskDone(t.title, id, status, summary),
-            'The task has ended: report to the user with a SHORT MESSAGE (send_to_user) about the outcome and at most one next step, without repeating all the work.'
+            // fase risposta: la risposta all'utente è il testo normale della
+            // risposta finale, non più una chiamata di strumento
+            'The task has ended: write the user a SHORT final reply about the outcome and at most one next step, without repeating all the work.'
           ].join('\n'),
           initiator: 'TASK_DONE',
           // taskRef (NON taskId): il loop filtra le entry dei task per

@@ -70,6 +70,12 @@ interface Store {
   activeId: string | null
   entries: TranscriptEntry[]
   reasoning: Record<number, string>
+  /**
+   * Fase risposta (R6): la risposta in diretta per agente — il testo
+   * accumulato della chiamata in corso nei turni in chat privata, per la
+   * bolla provvisoria. Assente/text '' = nessuna diretta.
+   */
+  liveReply: Record<string, { entryId: number; text: string }>
   /** fase 16c (C1): MAI la chiave — la vista pubblica del provider */
   providers: ProviderPublic[]
   /** fase 16c (C3.3): il modello principale («il cervello dei bot», models.main) */
@@ -260,6 +266,7 @@ export const useStore = create<Store>((set, get) => ({
   activeId: null,
   entries: [],
   reasoning: {},
+  liveReply: {},
   providers: [],
   mainModel: null,
   permissions: null,
@@ -457,6 +464,22 @@ export const useStore = create<Store>((set, get) => ({
               en.id === e.entryId ? { ...en, content: en.content + e.text } : en
             )
           })
+          break
+        }
+        case 'live-reply': {
+          // fase risposta (R6): la risposta in diretta — testo pieno finché
+          // arriva, via quando la chiamata finisce (consegnata → la entry
+          // promossa la sostituisce; con strumenti → resta la riga di lavoro)
+          if (e.agentId !== s.activeId) break
+          if (!e.text) {
+            if (s.liveReply[e.agentId]) {
+              const cleared = { ...s.liveReply }
+              delete cleared[e.agentId]
+              set({ liveReply: cleared })
+            }
+            break
+          }
+          set({ liveReply: { ...s.liveReply, [e.agentId]: { entryId: e.entryId, text: e.text } } })
           break
         }
         case 'approval': {

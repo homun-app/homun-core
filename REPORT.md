@@ -1,3 +1,90 @@
+# REPORT FASE RISPOSTA — il testo finale del modello è la risposta (R1–R9)
+
+**Data:** 2026-11-04 · **Base:** `main` @ 6d1dbe32 (tag `fase-velocita`) · **Tag:** `fase-risposta`. Nessun push, nessun tag `v*`, versione invariata (0.3.1001), **nessuna dipendenza nuova**.
+**Verifica:** `typecheck` pulito · `vitest` **166 file / 2621 test verdi** (**+33** rispetto alla base 2588/164: nuovi `src/main/agent/__tests__/silent-reply.test.ts` 15 e `src/shared/__tests__/narration.test.ts` 4, `loop.test.ts` +12 (blocco «fase risposta» + recupero senza strumenti), `history.test.ts` +3 (R9), `connectors-policy.test.ts` +1 e `prompts.test.ts` +1; i test del protocollo vecchio adaptati uno per uno, **gruppi e figli verdi senza toccare le loro attese**) · `build` verde · `i18n:extract` due estrazioni consecutive **identiche** (en **0 mancanti**, 1204 voci) · **sonda Electron `scripts/fase-risposta-probe.mjs` 18/18** (8 PNG + `riassunto-trace.txt` in `docs/catture/fase-risposta/`, hash tutti diversi; le PNG sono state guardate una per una: a metà stream la bolla è davvero parziale con la mascotte che lavora, nella cattura della riga di lavoro la mezza riga dice davvero «Sto cercando le preferenze nel catalogo dei ricordi» mentre la bolla trasmette «Trovato:») · la misura «prima» viene dalla **build del commit di base** fatta in un `git worktree` temporaneo su 127.0.0.1 con la stessa sonda in modalità `--baseline`.
+Dati veri mai toccati: ogni avvio è corso con `env -i HOME=$HOME PATH=/usr/bin:/bin:/usr/sbin:/sbin SANDBOT_TEST_USER_DATA=<mkdtemp in /var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/> SANDBOT_TEST_FAKE_KEYCHAIN=<file> SANDBOT_TEST_FAKE_SAFESTORAGE=<file> SANDBOT_LLM_TRACE=1`. **Il «modello» della sonda è solo un server OpenAI-compatible finto su 127.0.0.1** che registra le richieste e risponde da copione (anche a pezzi, con pause, per la diretta): nessuna chiamata a Ollama vero, a ollama.com o a modelli cloud. Mai Portachiavi/safeStorage veri, mai `keys.json`, niente Docker, niente `npm run dist`, **eval adattato ma non lanciato** (i testi letti dal modello sono elencati qui sotto), nessuna dipendenza nuova, rete solo 127.0.0.1. **A fine sonda il daemon di sviluppo è chiuso** (nessun lock residuo, cartella temporanea rimossa).
+
+## Le chiamate per turno — prima e dopo (traccia della sonda, `riassunto-trace.mjs`)
+
+Lo stesso turno normale («ricorda le preferenze, poi rispondi»), stesso bot, stessi 33 strumenti offerti:
+
+| | chiamate per turno | cosa succede |
+|---|---|---|
+| **prima** (build di `main` @ 6d1dbe32, `--baseline`) | **3** | `recall_memory` → `send_to_user` → chiamata di controllo (il loop richiama il modello dopo la consegna per sapere se ha finito) |
+| **dopo** (build di questa fase) | **2** | `recall_memory` → testo finale: la risposta È il testo, il turno finisce lì |
+
+Riassunto della traccia prodotta dalla sonda (salvato in `docs/catture/fase-risposta/riassunto-trace.txt`):
+
+```
+turno  chiamate  modelli  somma ms  1° token ms (media/max)  tools (n)  tools byte (media)  sistema byte (media)  messaggi byte (somma)
+t-1    2         finto    18        7/7                      33+33      23928               9193                  333      ← T1 turno normale (prima: 3)
+t-2    1         finto    4509      3/3                      33         23928               9193                  432      ← T2 risposta in diretta (lenta)
+t-3    2         finto    1810      4/4                      33+33      23928               9193                  1446     ← T3 riga di lavoro
+t-4    1         finto    4         4/4                      33         23872               9553                  1067     ← T4 routine zitta (NO_RESPONSE)
+t-5    1         finto    3         3/3                      33         23872               9553                  1240     ← T4 routine con novità (outbox)
+t-6    2         finto    4         2/2                      33+0       11965               9193                  2870     ← T5 recupero senza strumenti
+totale: 9 chiamate in 6 turni
+```
+
+E il guadagno di velocità percepita più grande non si vede nella tabella: **il primo testo compare col primo token** (catture a metà stream in chiaro e scuro), non alla fine della chiamata.
+
+## R per R — dove, test e prova
+
+**R1 — il testo finale è la risposta.** `src/main/agent/loop.ts` (ramo `!final.toolCalls?.length` dei turni non di gruppo/non figli: consegna, silenzio o recupero; `deliverFinalText`), `turn-sends.ts` (le regole comuni), `src/daemon/outbox.ts` (invariato: la risposta finale non urgente dei turni automatici passa dalle sue finestre).
+Consegna con le stesse regole estratte in comune: dedup rispetto ai testi già consegnati nel turno, tetto dei 3 consegnati, outbox+finestra dei turni automatici, tetto urgent invariato; la entry è `kind: 'send-message'` con `meta.message = {type:'text'}` e `meta.final: true`, **senza** `meta.call`; nessuna chiamata di controllo dopo. Prova: test «R1: recall → testo finale fa DUE chiamate» (2 chiamate, 1 final, niente controllo), «dedup: finale che ripete un message_user → una sola entry», «routine con testo finale → outbox (meta.held)»; sonda T1 (2 chiamate in traccia, 1 sola send `final`) e T4 (novità consegnata `held`).
+
+**R2 — `message_user`, solo progressi.** `tools.ts` (def + descrizione), `core-tools.ts` (core), `connectors-policy.ts` (`toolsForTurnSource`: fuori dai gruppi si offre `message_user` e non `send_to_user`; nei gruppi il contrario), `loop.ts` (`deliverMessageUser` + alias R2.4: `send_to_user` chiamato fuori da un gruppo è trattato come `message_user`, senza errore), `subagents.ts` (vietato nel figlio), `turn-sends.ts` (tetto 500 col result che lo dice, `clampProgressMessage`; `isWorkTool` aggiornato), `activity.ts` non ha famiglie per i tool di conversazione (niente da aggiungere: coerenza verificata dal test esistente).
+Prova: test 800 caratteri → 500 col result che lo dice (e `meta.resultText` per R9), quarto message_user → ragionamento, alias in privato, rifiuto nel figlio; sonda T1 (offerti `message_user`+`ask_user`, mai `send_to_user`).
+
+**R3 — la riga di lavoro.** `src/shared/narration.ts` (puro: `narrationStatusLine`, 60 caratteri, da Rakazo `user-progress.ts`), `Chat.tsx` (`narrationLineOfTurn` + ActivityRow: la riga sostituisce «pensa…» nel turno aperto da un messaggio diretto, mai nei turni di gruppo/automatici, mai un messaggio), `loop.ts` (l'attività dell'ultimo tool si azzera quando il modello inizia a scrivere: la mezza riga passa al testo del modello finché riparte il passo).
+Prova: test puri della riga (spazi compattati, ultima riga, taglio a 60 con «…»); sonda T3 (la cattura mostra la riga col testo scritto prima dello strumento e NESSUNA send per quel testo).
+
+**R4 — `NO_RESPONSE`.** `src/main/agent/silent-reply.ts` (nuovo modulo puro, funzioni portate da Rakazo `silent-reply.ts` con attribuzione), `loop.ts` (silenzio dei turni automatici/risvegli di sistema, segnali spaiati tolti, segnaposto = vuoto, verso altri bot «Nothing new to add.»), `prompts.ts` (`ROUTINE_SILENT_REPLY_GUIDANCE`, aggiunta in coda al system dei turni col silenzio ammesso).
+Prova: test puri delle funzioni portate (i casi di Rakazo tradotti: segnale esatto ripetuto/con spazi, `NO_RESPONSE_POLICY` che è parola, segnaposto, `couldBecomeNoResponse`, bordi spaiati, peer); test del loop (routine `NO_RESPONSE` → niente send né outbox; «Tutto ok. NO_RESPONSE» → consegna «Tutto ok.»; turno privato «.» → recupero R5; catena tra bot col solo segnale → «Nothing new to add.»); sonda T4.
+
+**R5 — un solo recupero, solo testo.** `loop.ts` (ramo vuoto dei turni privati: UNA chiamata con `tools: []` e il sollecito nuovo; le eventuali chiamate di strumento inventate non si eseguono — `RECOVERY_NO_TOOLS_RESULT` — e il testo del recupero è la risposta; se è vuoto pure quello vale il ripiego `lastFreeText`/`meta.fallback`; se l'utente ha già visto qualcosa — message_user, ask_user, card, bozza, takeover — nessun recupero e chiusura pulita).
+Prova: test (risposta vuota → recupero con 0 strumenti offerti, il testo diventa la risposta `final`; message_user + finale vuoto → NESSUN recupero; recupero con chiamata inventata → non eseguita; recupero vuoto → fallback); sonda T5 (2 chiamate, 0 strumenti alla seconda, entry finale).
+
+**R6 — la risposta si vede mentre arriva.** `loop.ts` (eventi `live-reply` col testo accumulato durante lo stream, solo nei turni di chat privata; guardia `couldBecomeNoResponse`/segnaposto; clear a fine chiamata, su errore e a fine turno), `shared/types.ts` (evento), `store.ts` (`liveReply`), `Chat.tsx` (`LiveReplyBubble`: bolla provvisoria con lo stile di una risposta; a fine chiamata senza strumenti la entry promossa LA SOSTITUISCE — stesso id, niente salto né doppione — con strumenti sparisce e il testo va nella riga di R3).
+Prova: test del loop (gli eventi live arrivano col testo e si chiudono; con strumenti la bolla si chiude e il testo resta thinking); sonda T2 (catture a metà stream in chiaro e scuro con bolla PARZIALE, a fine stream UNA sola bolla col testo intero, entry `final`).
+
+**R7 — gruppi invariati.** `group-turns.ts` e i rami `opts.groupTurn` non toccati (prompt, recuperi, `send_to_user`, `pass`, riepilogo: tutto com'era; `message_user` chiamato in un gruppo è trattato come `send_to_user`). Test di gruppi e figli verdi **senza modifiche alle attese** (verificato: `group-turns.test.ts`, `group-runner.test.ts`, `fase16b-groups.test.ts` intatti).
+
+**R8 — figli invariati.** `subagents.ts`: `message_user` aggiunto alla riga del rifiuto («does not talk with the user»), come `send_to_user`; la chiusura con `wake_parent` non cambia. Test del figlio verde + nuovo test del rifiuto.
+
+**R9 — la storia del modello.** `history.ts` (`textSendAsAssistantText`: le send di testo senza catena di gruppo e non-message_user tornano come TESTO assistant — finali, ripieghi e vecchie `send_to_user` private incluse: il modello non vede mai lo schema vecchio; `message_user` resta coppia chiamata/risultato col result ESATTO salvato in `meta.resultText`; le send dei gruppi e le deleghe restano coppie; mai assistant vuoto, coppie complete, ricostruzione pura = identica in due chiamate). Prova: test nuova storia mista + determinismo; sonda T3 (la seconda richiesta del turno mostra la storia ricostruita: le risposte finali come `assistant` testo, il progresso come coppia).
+
+## I testi letti dal modello cambiati — uno per uno, prima e dopo
+
+| Dove | Prima | Dopo |
+|---|---|---|
+| `prompts.ts` `talkingSection` (1ª riga) | «You reach the user ONLY with the send_to_user (message) and ask_user (question) tools: text you write outside tools is private reasoning, nobody sees it.» | «Your reply to the user is the TEXT of your final answer: when you stop calling tools, that text is shown to them as it is. You never need a tool to deliver it.» |
+| `prompts.ts` `talkingSection` (2ª riga) | «One message per result. Before LONG work you may send AT MOST a brief progress note; after the result add no confirmations.» | «message_user is ONLY for short progress notes while work that will take minutes is still running (a few at most, never one for every tool call); never the final answer, a report or long content. ask_user asks a question with clickable options.» |
+| `prompts.ts` `talkingSection` (3ª riga) | «Do not repeat what you have already delivered: the result of send_to_user shows you the beginning of the text that reached the user.» | «Text you write BEFORE a tool call is private reasoning: nobody sees it.» + «Do not repeat what you have already delivered: the results of your tools show you the beginning of the text that reached the user.» |
+| `prompts.ts` `initiativeSection` | «In automatic runs (routines, events) with no news for the user send NO message: no empty summaries, no greetings.» | «In automatic runs (routines, events) with no news for the user stay silent: reply with exactly NO_RESPONSE as your final reply, no empty summaries, no greetings.» |
+| `prompts.ts` — NUOVA `ROUTINE_SILENT_REPLY_GUIDANCE` (in coda al system dei turni col silenzio ammesso) | — | «# Staying silent in automatic runs\nIf there is nothing to report, your ENTIRE final reply must be exactly NO_RESPONSE — no surrounding prose, no variants, no progress updates, no all-clear, no note that you are staying silent. Do not call message_user unless you have something to report. Anything else you write as your final reply is delivered to the user.» |
+| `tools.ts` — NUOVA descrizione di `message_user` | — | «Sends the user a SHORT progress message while work that will take minutes is still running. Only for that: a few brief updates at most in a turn (a sentence or two), never one for every tool call, never to announce that you are starting. NEVER the final answer, a report or long content: the complete answer always goes in the text of your final reply, which the user sees directly. Messages are capped at 500 characters and cut beyond that.» |
+| `tools.ts` descrizione di `send_to_user` | «It is the ONLY way to talk to the user…» | **invariata di proposito**: resta solo nei turni di GRUPPO (R7), dove è ancora l'unico modo; nei turni privati lo schema non viene più offerto |
+| `tools.ts` `ask_user` (descrizione) | non nominava `send_to_user` | invariata |
+| `loop.ts` `RECOVERY_NUDGE` | «You called neither send_to_user nor ask_user: the user has seen no answer. Answer NOW by calling send_to_user (that only, no other tool).» | «Your reply was empty: write your answer to the user now, as plain text.» (+ nuova costante `RECOVERY_NO_TOOLS_RESULT` per le chiamate inventate nel recupero) |
+| `shells.ts` riga 492 (risveglio comandi finiti) | «The background command has finished: decide whether to continue the work, notify the user with send_to_user, or stay silent.» | «The background command has finished: decide whether to continue the work, or reply to the user with your final reply text; if there is nothing to report, reply with exactly NO_RESPONSE.» |
+| `src/shared/agent-message.ts` riga 186 (`agentSendGuard`, catena troppo lunga) | «…answer the user with send_to_user, not other bots.» | «…answer the user in the text of your final reply, not with other bots.» |
+| `src/shared/agent-message.ts` riga 274 (risveglio sottoagenti) | «…write the user ONE SINGLE report that integrates the results (send_to_user), without relaunching the work.» | «…write the user ONE SINGLE report that integrates the results as your final reply text, without relaunching the work.» |
+| `tools.ts` riga ~1522 (TASK_DONE) | «The task has ended: report to the user with a SHORT MESSAGE (send_to_user) about the outcome…» | «The task has ended: write the user a SHORT final reply about the outcome and at most one next step, without repeating all the work.» |
+| testi dei gruppi (`group-turns.ts` ecc.) | — | **non cambiano** (R7) |
+
+`eval/behaviors.eval.ts` adattato perché compili e riconosca il protocollo nuovo (il deliverer tratta `message_user` come `send_to_user`, ha il metodo `final` con le regole di R1, il testo finale senza tool viene consegnato come risposta con i silenzi di R4, il recupero dei turni utente va senza strumenti e il suo testo è la risposta): **non lanciato**, come da consegna.
+
+## Cosa NON ho potuto provare
+
+- **Il modello vero.** Tutto gira su un server finto che recita il protocollo: se un modello reale seguirà le istruzioni nuove (rispondere a testo invece di chiamare lo strumento, usare `NO_RESPONSE` nelle routine, non mettere i report nei progressi) **lo dirà l'eval**, che ho adattato ma non lanciato. In particolare: la frequenza con cui glm-5.3/gemma sbagliano schema (per quello restano l'alias R2.4 e il recupero R5) e se il sollecito nuovo basta a smuovere un modello che risponde vuoto.
+- La consegna dell'outbox **alla finestra vera** (cron reale della finestra mattutina): la sonda prova che la entry resta `held` con la riga in outbox; lo scadere della finestra è coperto dai test esistenti di `outbox.test.ts` (non toccati).
+- Le catene lunghe `send_to_agent`→`NO_RESPONSE`→«Nothing new to add.»: provate nel test del loop con il messaggio di un altro bot; non c'è una catena vera a 3 bot nella sonda.
+
+## Riferimento Rakazo
+
+Clone in mkdtemp (letto al commit d481ac0, Apache 2.0), **nessun codice copiato se non le funzioni portate con attribuzione nei commenti**: `src/main/agent/silent-reply.ts` («da Rakazo (Apache 2.0), packages/adapters/src/silent-reply.ts») e la riga di lavoro in `src/shared/narration.ts` più il tetto 500 in `turn-sends.ts` («da Rakazo (Apache 2.0), packages/adapters/src/user-progress.ts»). Prese le idee di `run-replies.ts` (la risposta è il testo finale; `message_user` mai per la risposta finale) e della `ROUTINE_SILENT_REPLY_GUIDANCE`; **non** presi: il ripiego «done.» (da noi resta il recupero R5), la promozione dei messaggi intermedi dopo 60 s (da noi solo `message_user` fa messaggi), la diretta nei turni automatici (da noi passano dall'outbox). Clone rimosso a fine lavoro.
+
 # REPORT FASE VELOCITÀ — misura, ragionamento su Ollama, strumenti «core» (S1–S5)
 
 **Data:** 2026-11-04 · **Base:** `main` @ 02cadc34 (tag `fase-composio-prova-vera`) · **Tag:** `fase-velocita`. Nessun push, nessun tag `v*`, versione invariata (0.3.1001), **nessuna dipendenza nuova**.

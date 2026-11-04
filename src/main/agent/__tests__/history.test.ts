@@ -170,23 +170,23 @@ describe('buildMessages (§5.3)', () => {
 })
 
 describe('fase 3 (§3bis L2): send-message e thinking nella storia del modello', () => {
-  it('send-message text → tool call send_to_user + tool result, non testo assistant', () => {
+  it('fase risposta (R9): le send di testo delle chat private tornano come TESTO assistant', () => {
     const entries = [
       mk('message', 'user', 'ciao'),
       mk('thinking', 'assistant', 'ragiono tra me'),
+      // la vecchia send_to_user di una chat privata (meta.call, niente catena)
       mk('send-message', 'assistant', 'Ecco la risposta', {
         call: { id: 'call_1', name: 'send_to_user', arguments: '{"text":"Ecco la risposta"}' },
         message: { type: 'text', text: 'Ecco la risposta' }
       }),
       mk('message', 'user', 'grazie')
     ]
-    const sentId = entries[2]!.id
     const msgs = buildMessages(sys, entries)
     // thinking resta contenuto assistant…
     expect(msgs[2]).toMatchObject({ role: 'assistant', content: 'ragiono tra me' })
-    // …e la send-message aggrega la sua call su quel messaggio assistant
-    expect(msgs[2].toolCalls?.[0]).toMatchObject({ id: `send_${sentId}`, name: 'send_to_user', arguments: '{"text":"Ecco la risposta"}' })
-    expect(msgs[3]).toEqual({ role: 'tool', toolCallId: `send_${sentId}`, content: 'delivered to the user: "Ecco la risposta". Do not repeat it.' })
+    // …e la vecchia send è DIVENTATA testo assistant: il modello non vede mai
+    // lo schema vecchio che deve abbandonare (niente coppia chiamata/risultato)
+    expect(msgs[3]).toEqual({ role: 'assistant', content: 'Ecco la risposta' })
     expect(msgs[4]).toEqual({ role: 'user', content: 'grazie' })
   })
 
@@ -363,5 +363,85 @@ describe('fase 16b correzioni (P1): la event del riepilogo di chiusura nella sto
     const old = mk('event', 'system', 'Ho pubblicato il riepilogo nella squadra «Cena»', { groupId: 1, summaryMessageId: 42 })
     const msgs2 = buildMessages(sys, [mk('message', 'user', 'ciao'), old])
     expect(msgs2.map((m) => m.role)).toEqual(['system', 'user'])
+  })
+})
+
+describe('fase risposta (R9): la storia del protocollo nuovo', () => {
+  it('storia mista: vecchia send_to_user e finale come testo, message_user e send di gruppo come coppie', () => {
+    const entries = [
+      mk('message', 'user', 'pronto?'),
+      // vecchia send_to_user di chat privata → testo assistant
+      mk('send-message', 'assistant', 'vecchia risposta', {
+        call: { id: 'c1', name: 'send_to_user', arguments: '{"text":"vecchia risposta"}' },
+        message: { type: 'text', text: 'vecchia risposta' }
+      }),
+      mk('message', 'user', 'un lavoro lungo'),
+      // progresso message_user → coppia chiamata/risultato col result ESATTO
+      mk('send-message', 'assistant', 'sto lavorando, cinque minuti', {
+        call: { id: 'c2', name: 'message_user', arguments: '{"text":"sto lavorando, cinque minuti"}' },
+        message: { type: 'text', text: 'sto lavorando, cinque minuti' },
+        resultText: 'delivered to the user: "sto lavorando, cinque minuti". Do not repeat it.'
+      }),
+      mk('tool-call', 'assistant', 'run-command', { id: 'c3', name: 'run-command', arguments: '{}' }),
+      mk('tool-result', 'system', 'ok', { callId: 'c3' }),
+      // la risposta finale (meta.final, senza call) → testo assistant
+      mk('send-message', 'assistant', 'fatto: tutto a posto', {
+        message: { type: 'text', text: 'fatto: tutto a posto' },
+        final: true
+      }),
+      mk('message', 'user', 'e nella squadra?'),
+      // la send di un turno di GRUPPO (meta.groupChain) → resta coppia
+      mk('send-message', 'assistant', 'riepilogo per l\'utente', {
+        call: { id: 'c4', name: 'send_to_user', arguments: '{"text":"riepilogo per l\'utente"}' },
+        message: { type: 'text', text: 'riepilogo per l\'utente' },
+        groupChain: { groupId: 7, rootId: null }
+      }),
+      mk('message', 'user', 'grazie')
+    ]
+    const msgs = buildMessages(sys, entries)
+    // la vecchia send privata è testo assistant
+    expect(msgs).toContainEqual({ role: 'assistant', content: 'vecchia risposta' })
+    // il progresso message_user è coppia con il result salvato
+    const c2 = msgs.flatMap((m) => m.toolCalls ?? []).find((tc) => tc.id === `send_${entries[3]!.id}`)
+    expect(c2).toMatchObject({ name: 'message_user', arguments: '{"text":"sto lavorando, cinque minuti"}' })
+    expect(msgs).toContainEqual({
+      role: 'tool', toolCallId: `send_${entries[3]!.id}`,
+      content: 'delivered to the user: "sto lavorando, cinque minuti". Do not repeat it.'
+    })
+    // la risposta finale è testo assistant
+    expect(msgs).toContainEqual({ role: 'assistant', content: 'fatto: tutto a posto' })
+    // la send di gruppo resta coppia send_to_user
+    const c4 = msgs.flatMap((m) => m.toolCalls ?? []).find((tc) => tc.id === `send_${entries[8]!.id}`)
+    expect(c4).toMatchObject({ name: 'send_to_user' })
+    expect(msgs).toContainEqual({
+      role: 'tool', toolCallId: `send_${entries[8]!.id}`,
+      content: 'delivered to the user: "riepilogo per l\'utente". Do not repeat it.'
+    })
+    // MAI un messaggio assistant vuoto
+    expect(msgs.filter((m) => m.role === 'assistant' && !m.content && !m.toolCalls?.length)).toEqual([])
+  })
+
+  it('la ricostruzione è la STESSA in due chiamate successive (cache del prefisso)', () => {
+    const entries = [
+      mk('message', 'user', 'ciao'),
+      mk('send-message', 'assistant', 'risposta', { message: { type: 'text', text: 'risposta' }, final: true }),
+      mk('message', 'user', 'ancora'),
+      mk('send-message', 'assistant', 'progresso', {
+        call: { id: 'p1', name: 'message_user', arguments: '{"text":"progresso"}' },
+        message: { type: 'text', text: 'progresso' }
+      })
+    ]
+    const first = JSON.stringify(buildMessages(sys, entries))
+    const second = JSON.stringify(buildMessages(sys, entries))
+    expect(second).toBe(first)
+  })
+
+  it('sendResultText: il result ESATTO salvato vince sul calcolato (message_user col taglio)', () => {
+    const e = mk('send-message', 'assistant', 'testo tagliato…', {
+      call: { id: 'm1', name: 'message_user', arguments: '{}' },
+      message: { type: 'text', text: 'testo tagliato…' },
+      resultText: 'delivered to the user: "testo tagliato…". Do not repeat it. (your message was longer than 500 characters and was cut: never put a report or long content in message_user — the complete answer goes in your final reply text).'
+    })
+    expect(sendResultText(e)).toContain('longer than 500 characters')
   })
 })

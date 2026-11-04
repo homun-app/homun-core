@@ -324,6 +324,17 @@ export interface SendMessageMeta {
    * browser e il daemon aspetta il login (WAIT_FOR_CONNECTIONS).
    */
   gatewayKey?: string
+  /**
+   * Fase risposta (R1): la entry È la risposta finale del turno (il testo
+   * della chiamata senza strumenti, promosso da thinking a send-message).
+   */
+  final?: boolean
+  /**
+   * Fase risposta (R9): il result ESATTO che il modello ha visto per la
+   * consegna di questa entry (message_user: tetto dei 500 caratteri
+   * dichiarato) — la storia lo ricostruisce identico.
+   */
+  resultText?: string
 }
 
 export interface TranscriptEntry {
@@ -550,6 +561,10 @@ export interface Approval {
 export type SandbotEvent =
   | { type: 'entries'; agentId: string; entries: TranscriptEntry[] }
   | { type: 'delta'; agentId: string; entryId: number; text: string; reasoning?: boolean }
+  // fase risposta (R6): la risposta in diretta dei turni in chat privata — il
+  // testo accumulato della chiamata in corso (text '' = fine della diretta:
+  // consegnata come risposta o tornata riga di lavoro)
+  | { type: 'live-reply'; agentId: string; entryId: number; text: string }
   | { type: 'status'; agentId: string; status: AgentStatus }
   | { type: 'agents' }
   | { type: 'approval'; agentId: string; approval: Approval }

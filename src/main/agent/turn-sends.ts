@@ -55,11 +55,12 @@ export function alreadyDeliveredResult(text: string): string {
 
 /**
  * Un tool è "lavoro" quando fa qualcosa DIVERSO dal parlare con l'utente:
- * qualunque tool tranne send_to_user e ask_user (le deleghe, le bozze, le
- * card di offerta e i task contano come lavoro: producono effetti o carte).
+ * qualunque tool tranne i tool di conversazione (send_to_user, message_user e
+ * ask_user; le deleghe, le bozze, le card di offerta e i task contano come
+ * lavoro: producono effetti o carte).
  */
 export function isWorkTool(name: string): boolean {
-  return name !== 'send_to_user' && name !== 'ask_user'
+  return name !== 'send_to_user' && name !== 'message_user' && name !== 'ask_user'
 }
 
 /**
@@ -89,4 +90,30 @@ export function turnCapResult(): string {
  */
 export function emptySendResult(): string {
   return 'Not delivered: the text field is empty. Write the message in the text field of send_to_user, or do not call it if you have nothing to say.'
+}
+
+// ---- fase risposta (R2): message_user — solo progressi, tetto di caratteri ----
+// Tetto e taglio sono la clampUserProgressMessage di Rakazo.
+// da Rakazo (Apache 2.0), packages/adapters/src/user-progress.ts
+/** Il tetto di caratteri di un progresso message_user (fase risposta R2). */
+export const MESSAGE_USER_MAX_CHARS = 500
+
+/** Il testo di un progresso: trimmato e tagliato a 500 caratteri con «…». */
+export function clampProgressMessage(text: string, max = MESSAGE_USER_MAX_CHARS): string {
+  const trimmed = text.trim()
+  if (!trimmed) return ''
+  if (trimmed.length <= max) return trimmed
+  return `${trimmed.slice(0, max - 1).trimEnd()}…`
+}
+
+/**
+ * Il result di message_user: come deliveredResultText (il modello può
+ * VERIFICARE che il testo è arrivato), e quando il tetto ha tagliato lo DICE
+ * — il progresso lungo non passerà inosservato.
+ */
+export function progressResultText(text: string, opts: { held?: boolean; truncated?: boolean } = {}): string {
+  const base = deliveredResultText(text, opts)
+  return opts.truncated
+    ? `${base} (your message was longer than ${MESSAGE_USER_MAX_CHARS} characters and was cut: never put a report or long content in message_user — the complete answer goes in your final reply text).`
+    : base
 }

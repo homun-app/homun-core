@@ -25,6 +25,9 @@ export const CORE_TOOL_NAMES: ReadonlySet<string> = new Set([
   'list-credentials',
   // la proposta di partenza della fase
   'send_to_user',
+  // fase risposta (R2): il progresso dei lavori lunghi nei turni non di
+  // gruppo (nei gruppi si offre solo send_to_user, R7)
+  'message_user',
   'ask_user',
   'draft_external',
   'web_search',

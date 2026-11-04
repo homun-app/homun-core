@@ -182,8 +182,9 @@ export type AgentSendGuard =
 export function agentSendGuard(input: { incomingHop: number; pairLastHour: number }): AgentSendGuard {
   if (input.incomingHop >= AGENT_HOP_MAX) {
     return {
+      // fase risposta: la risposta all'utente è il testo normale della risposta
       ok: false,
-      error: `Bot-to-bot message chain too long (maximum hop ${AGENT_HOP_MAX}): answer the user with send_to_user, not other bots.`
+      error: `Bot-to-bot message chain too long (maximum hop ${AGENT_HOP_MAX}): answer the user in the text of your final reply, not with other bots.`
     }
   }
   if (input.pairLastHour >= AGENT_PAIR_HOURLY_MAX) {
@@ -271,7 +272,8 @@ export function formatSubagentsDone(
     '<risultati_sottoagenti>',
     neutralizeClosingTag(per.join('\n'), 'risultati_sottoagenti'),
     '</risultati_sottoagenti>',
-    'The subagents have finished: read the reports if needed and write the user ONE SINGLE report that integrates the results (send_to_user), without relaunching the work.',
+    // fase risposta: la risposta all'utente è il testo normale della risposta
+    'The subagents have finished: read the reports if needed and write the user ONE SINGLE report that integrates the results as your final reply text, without relaunching the work.',
     SUBAGENTS_DONE_RULE
   ].join('\n')
 }

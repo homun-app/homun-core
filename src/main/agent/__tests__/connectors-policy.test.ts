@@ -42,11 +42,25 @@ describe('toolsForTurnSource (pura): la lista dei tool per sorgente di turno', (
     expect(has(toolsForTurnSource(toolDefs, { ...base, initiator: 'SUBAGENTS_DONE' }))).toBe(false)
     expect(has(toolsForTurnSource(toolDefs, { ...base, initiator: 'SHELL_DONE' }))).toBe(false)
   })
-  it('gli ALTRI tool restano (si tolgono solo i due di proposta)', () => {
+  it('gli ALTRI tool restano (si tolgono solo i due di proposta, più la coppia R2)', () => {
+    // fase risposta (R2): fuori dai gruppi si offre message_user e NON
+    // send_to_user; nei gruppi il contrario. Il resto resta.
     const kept = toolsForTurnSource(toolDefs, { source: 'routine' })
-    expect(kept.some((t) => t.name === 'send_to_user')).toBe(true)
+    expect(kept.some((t) => t.name === 'message_user')).toBe(true)
+    expect(kept.some((t) => t.name === 'send_to_user')).toBe(false)
     expect(kept.some((t) => t.name === 'search_connectors')).toBe(true)
-    expect(kept.length).toBe(toolDefs.filter((t) => !CONNECTOR_PROPOSAL_TOOLS.has(t.name)).length)
+    expect(kept.length).toBe(
+      toolDefs.filter((t) => !CONNECTOR_PROPOSAL_TOOLS.has(t.name) && t.name !== 'send_to_user').length
+    )
+  })
+
+  it('fase risposta (R2): nei turni di GRUPPO resta send_to_user, mai message_user', () => {
+    const group = toolsForTurnSource(toolDefs, { ...base, groupTurn: { groupId: 1, readMaxDepth: 0, rootId: null } })
+    expect(group.some((t) => t.name === 'send_to_user')).toBe(true)
+    expect(group.some((t) => t.name === 'message_user')).toBe(false)
+    const plain = toolsForTurnSource(toolDefs, base)
+    expect(plain.some((t) => t.name === 'message_user')).toBe(true)
+    expect(plain.some((t) => t.name === 'send_to_user')).toBe(false)
   })
   it('il testo del rifiuto è quello della specifica', () => {
     expect(CONNECTOR_PROPOSAL_DENIED).toBe('you may propose connectors only when the user asks you in chat')
