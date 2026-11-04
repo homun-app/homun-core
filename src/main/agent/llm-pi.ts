@@ -202,10 +202,17 @@ function syntheticModel(
   const thinkingLevelMap = ollama
     ? {
         off: ollama.levels.includes('off') ? 'none' : null,
+        // i livelli non offerti: null (pi-ai li esclude e il clamp sale);
+        // xhigh/max offerti vanno NOMINATI: pi-ai li considera supportati
+        // solo con un valore esplicito nella mappa, altrimenti «max»
+        // scenderebbe a high sul filo
         ...Object.fromEntries(
           (['minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const)
             .filter((l) => !ollama.levels.includes(l))
             .map((l) => [l, null])
+        ),
+        ...Object.fromEntries(
+          (['xhigh', 'max'] as const).filter((l) => ollama.levels.includes(l)).map((l) => [l, l])
         )
       }
     : undefined
@@ -753,9 +760,12 @@ interface ThinkingChoice {
  * «spento» viaggia come reasoning_effort "none" tramite la thinkingLevelMap
  * del sintetico (off → "none": openai-completions la legge quando l'opzione
  * reasoning non c'è). «Predefinito» manda medium se è tra i livelli offerti,
- * altrimenti NESSUNA opzione (S2.4: vale il predefinito del modello); per i
- * modelli solo acceso/spento «Predefinito» non manda niente (medium non c'è).
+ * altrimenti il livello più basso con nome (glm-5.3: low invece del suo max);
+ * per i modelli solo acceso/spento «Predefinito» non manda niente.
  */
+/** I livelli con nome, dal più basso al più alto (per il «Predefinito» Ollama). */
+const OLLAMA_NAMED_LEVELS = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const
+
 function thinkingModelOf(
   model: Model<Api>,
   thinking: ThinkingSetting | undefined,
@@ -768,11 +778,17 @@ function thinkingModelOf(
   // (la thinkingLevelMap del sintetico esclude quelli che /api/show non dà)
   if (ollamaOffered?.length) {
     if (!requested) {
-      return ollamaOffered.includes('medium')
-        ? { model, reasoning: 'medium', reasoningWire: 'medium' }
-        : // niente medium tra i livelli: NESSUNA opzione sul filo. La mappa
-          // del sintetico va tolta: openai-completions leggerebbe
-          // thinkingLevelMap.off ("none") anche senza opzione reasoning
+      const named = OLLAMA_NAMED_LEVELS.filter((l) => ollamaOffered.includes(l))
+      // «Predefinito»: medium se c'è; altrimenti il livello PIÙ BASSO con
+      // nome — mai il predefinito del modello, che per glm-5.3 è max (misura
+      // vera 2026-11-04: a max chiamate da 8–15 s, a low nessuna sopra 4 s).
+      // Un modello solo acceso/spento (unico livello: high) resta senza opzione.
+      const pick = named.includes('medium') ? 'medium' : named.length === 1 && named[0] === 'high' ? undefined : named[0]
+      return pick
+        ? { model, reasoning: pick, reasoningWire: pick }
+        : // NESSUNA opzione sul filo. La mappa del sintetico va tolta:
+          // openai-completions leggerebbe thinkingLevelMap.off ("none")
+          // anche senza opzione reasoning
           { model: { ...model, thinkingLevelMap: undefined }, reasoningWire: null }
     }
     const level = clampThinkingLevel(model, requested)

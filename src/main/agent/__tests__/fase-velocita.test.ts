@@ -278,6 +278,24 @@ describe('S2 sul filo: reasoning_effort verso /v1/chat/completions (server finto
     expect(bodies.at(-1)!.reasoning_effort).toBe('medium')
   })
 
+  it('senza medium tra i livelli: «Predefinito» manda il livello PIÙ BASSO con nome (glm-5.3: low, mai il max del modello)', async () => {
+    // glm-5.3:cloud e glm-5.3-flash:cloud: values [low, high, max], default max
+    // (misura vera 2026-11-04: a max chiamate da 8–15 s, a low nessuna sopra 4 s)
+    setOllamaCapabilities('wire4', 'glm', undefined, ['tools'], { values: ['low', 'high', 'max'], default: 'max' })
+    const p: ProviderConfig = { id: 'wire4', name: 'Ollama', kind: 'ollama', baseUrl: `http://127.0.0.1:${port}`, apiKey: '', enabled: true }
+    const msgs: ChatMessage[] = [{ role: 'user', content: 'x' }]
+    await drain(piLlmStream(p, 'glm', msgs, [], new AbortController().signal, { thinking: 'default' }))
+    expect(bodies.at(-1)!.reasoning_effort).toBe('low')
+    // la scelta esplicita resta quella dell'utente
+    await drain(piLlmStream(p, 'glm', msgs, [], new AbortController().signal, { thinking: 'max' }))
+    expect(bodies.at(-1)!.reasoning_effort).toBe('max')
+    // solo livelli alti: il più basso è high
+    setOllamaCapabilities('wire5', 'alto', undefined, ['tools'], { values: ['high', 'max'] })
+    const p5: ProviderConfig = { ...p, id: 'wire5' }
+    await drain(piLlmStream(p5, 'alto', msgs, [], new AbortController().signal, { thinking: 'default' }))
+    expect(bodies.at(-1)!.reasoning_effort).toBe('high')
+  })
+
   it('modello solo acceso/spento: «Predefinito» NON manda niente; «Spento» manda "none"', async () => {
     setOllamaCapabilities('wire2', 'onoff', undefined, ['tools'], { values: [true, false] })
     const p: ProviderConfig = { id: 'wire2', name: 'Ollama', kind: 'ollama', baseUrl: `http://127.0.0.1:${port}`, apiKey: '', enabled: true }
