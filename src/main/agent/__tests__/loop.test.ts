@@ -1990,7 +1990,8 @@ describe('fase 7: send_to_agent', () => {
         { id: 'b0c', name: 'list-credentials', arguments: '{}' },
         { id: 'b3', name: 'send_to_user', arguments: JSON.stringify({ text: 'secondo urgent', urgent: true }) }
       ] },
-      { text: 'fatto' }
+      // fase risposta (verifica): nulla da aggiungere → il silenzio esplicito
+      { text: 'NO_RESPONSE' }
     ]
     await runTurn(OTHER, '<messaggio_da_agente nome="TestBot">controlla la posta</messaggio_da_agente>', emit, undefined, {
       agentMessage: { fromAgentId: AGENT, fromAgentName: 'TestBot', hop: 1 }, automatic: true
@@ -2762,7 +2763,9 @@ describe('fase 10 (residuo 0c): al massimo 3 send consegnati per turno', () => {
     ]
     await runTurn(AGENT, 'lavoro lungo', emit)
     const sends = h.db.entries.filter((e) => e.kind === 'send-message')
-    expect(sends.map((s) => s.content)).toEqual(['primo messaggio', 'secondo messaggio', 'terzo messaggio'])
+    // fase risposta (verifica): il tetto frena i progressi, la risposta finale passa
+    expect(sends.map((s) => s.content)).toEqual(['primo messaggio', 'secondo messaggio', 'terzo messaggio', 'fine'])
+    expect(sends.at(-1)!.meta?.final).toBe(true)
     expect(h.db.entries.some((e) => e.kind === 'thinking' && e.content === 'quarto messaggio')).toBe(true)
     // il result spiega il tetto del turno (diverso dal cap di fila 0d)
     const lastCall = h.llm.calls[h.llm.calls.length - 1]!
@@ -6163,15 +6166,45 @@ describe('fase risposta: il testo finale è la risposta (R1/R4/R5/R6)', () => {
     expect(sends[0]!.meta?.final).toBe(true)
   })
 
-  it('R4.5: risposta di un turno aperto da un altro bot col solo segnale → «Nothing new to add.», mai il letterale', async () => {
+  it('verifica R4.5: turno aperto da un altro bot col solo segnale → SILENZIO nella chat dell\'utente (niente «Nothing new to add.»)', async () => {
     h.llm.queue = [{ text: 'NO_RESPONSE' }]
     await runTurn(AGENT, '<messaggio_da_agente nome="Altro">ecco</messaggio_da_agente>', emit, undefined, {
       source: 'user', initiator: 'AGENT',
       agentMessage: { fromAgentId: 'agent_o', fromAgentName: 'Altro', hop: 1 }
     })
-    const send = h.db.entries.find((e) => e.kind === 'send-message')!
-    expect(send.content).toBe('Nothing new to add.')
-    expect(send.meta?.final).toBe(true)
+    expect(h.db.entries.filter((e) => e.kind === 'send-message')).toEqual([])
+    expect(h.db.entries.some((e) => e.content.includes('Nothing new to add'))).toBe(false)
+    expect(h.llm.calls).toHaveLength(1)
+  })
+
+  it('verifica R1: dopo TRE message_user la risposta finale arriva lo stesso (il tetto frena i progressi, non la risposta)', async () => {
+    const work = (id: string) => ({ id, name: 'recall_memory', arguments: JSON.stringify({ query: id }) })
+    const mu = (id: string, text: string) => ({ id, name: 'message_user', arguments: JSON.stringify({ text }) })
+    h.llm.queue = [
+      { text: '', toolCalls: [work('w1')] },
+      { text: '', toolCalls: [mu('m1', 'Primo passo fatto.')] },
+      { text: '', toolCalls: [work('w2')] },
+      { text: '', toolCalls: [mu('m2', 'Secondo passo fatto.')] },
+      { text: '', toolCalls: [work('w3')] },
+      { text: '', toolCalls: [mu('m3', 'Terzo passo fatto.')] },
+      { text: '', toolCalls: [work('w4')] },
+      { text: 'Ecco il risultato completo.' }
+    ]
+    await runTurn(AGENT, 'lavoro lungo', emit)
+    const sends = h.db.entries.filter((e) => e.kind === 'send-message')
+    expect(sends.map((s) => s.content)).toEqual(['Primo passo fatto.', 'Secondo passo fatto.', 'Terzo passo fatto.', 'Ecco il risultato completo.'])
+    expect(sends.at(-1)!.meta?.final).toBe(true)
+  })
+
+  it('verifica R6: senza strumenti la bolla si chiude DOPO che la entry promossa è arrivata (nessun fotogramma vuoto)', async () => {
+    const events: import('../../../shared/types').SandbotEvent[] = []
+    const collect = (e: import('../../../shared/types').SandbotEvent): void => { events.push(e) }
+    h.llm.queue = [{ text: 'Risposta in diretta.' }]
+    await runTurn(AGENT, 'ciao', collect)
+    const promotedAt = events.findIndex((e) => e.type === 'entries' && e.entries.some((x) => x.kind === 'send-message'))
+    const firstClear = events.findIndex((e) => e.type === 'live-reply' && e.text === '')
+    expect(promotedAt).toBeGreaterThanOrEqual(0)
+    expect(firstClear).toBeGreaterThan(promotedAt)
   })
 
   it('R6: la risposta in diretta compare durante lo stream e si chiude a fine chiamata', async () => {

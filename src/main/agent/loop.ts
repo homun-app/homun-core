@@ -68,7 +68,7 @@ import {
   MAX_DELIVERED_PER_TURN, clampProgressMessage, progressResultText, MESSAGE_USER_MAX_CHARS
 } from './turn-sends'
 // fase risposta (R4): il silenzio esplicito dei turni automatici (da Rakazo)
-import { NO_RESPONSE, isExactNoResponse, isPlaceholderText, couldBecomeNoResponse, stripStrayNoResponse, peerReplyWithoutSentinel } from './silent-reply'
+import { NO_RESPONSE, isExactNoResponse, isPlaceholderText, couldBecomeNoResponse, stripStrayNoResponse } from './silent-reply'
 // fase 9 (punto 1) → fase 18b (H2): la riserva è una CATENA di anelli
 // provider+modello (modello dei router LLM maturi); il raffreddamento (H2.3)
 // tiene in pausa chi ha appena fallito, in memoria nel processo del daemon
@@ -877,8 +877,10 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
   // sentinelAllowed: il silenzio esplicito NO_RESPONSE è ammesso nei turni
   // automatici e nei risvegli di sistema (R4.1); mai nei turni aperti da un
   // messaggio diretto dell'utente, mai verso un altro bot (R4.5)
+  // verifica: anche i turni aperti da un ALTRO BOT — il loro testo finale va
+  // all'utente di questo bot, e «niente da dirgli» è il silenzio
   const sentinelAllowed =
-    automatic ||
+    automatic || opts.agentMessage !== undefined ||
     ['ROUTINE', 'SHELL_DONE', 'SUBAGENTS_DONE', 'LOOK_AROUND', 'CONNECTOR_CONNECTED'].includes(String(opts.initiator ?? ''))
   // privateHumanTurn: aperto da un messaggio DIRETTO dell'utente in chat —
   // l'unico dove una risposta vuota ha UN recupero senza strumenti (R5)
@@ -1175,7 +1177,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
   ): boolean => {
     if (!text.trim()) return false
     if (isDuplicateSend(deliveredTexts, text)) return false
-    if (deliveredTexts.length >= MAX_DELIVERED_PER_TURN) return false
+    // verifica: il tetto dei 3 consegnati NON vale per la risposta finale —
+    // frena i progressi, ma dopo tre message_user la risposta (ciò che
+    // l'utente aspetta) andava persa in silenzio come ragionamento
     // come una send non urgente dei turni automatici: la risposta finale non
     // ha flag urgent, il tetto resta quello di sempre
     const hold = automatic
@@ -1838,10 +1842,12 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       const text = final.text
       updateEntryContent(entry.id, text)
       if (text.trim()) lastFreeText = text
-      // fase risposta (R6): la diretta finisce qui — la bolla provvisoria si
-      // chiude; senza strumenti la entry promossa la sostituisce senza salto
-      // né doppione, con strumenti il testo va nella riga di lavoro (R3)
-      if (liveReplyTurn) emit({ type: 'live-reply', agentId, entryId: entry.id, text: '' })
+      // fase risposta (R6): con strumenti la diretta finisce qui — la bolla
+      // provvisoria si chiude e il testo va nella riga di lavoro (R3). Senza
+      // strumenti la bolla resta finché la entry promossa non è in chat
+      // (verifica: chiuderla PRIMA della promozione lasciava un fotogramma
+      // senza né bolla né risposta); la chiude la fine del turno o il recupero
+      if (liveReplyTurn && final.toolCalls?.length) emit({ type: 'live-reply', agentId, entryId: entry.id, text: '' })
 
       if (!final.toolCalls?.length) {
         // ---- fase risposta (R1–R5): il testo finale È la risposta ----
@@ -1858,7 +1864,11 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           // R4.3: solo segnaposto («.» «…» invisibili) vale vuoto; R4.4: il
           // segnale dove non è ammesso vale vuoto (e il vuoto in chat privata
           // vale il recupero di R5)
-          const reply = opts.agentMessage !== undefined ? peerReplyWithoutSentinel(text) : stripStrayNoResponse(text)
+          // verifica: il testo finale di un turno aperto da un altro bot NON
+          // torna al mittente (a lui si risponde con send_to_agent): va nella
+          // chat dell'UTENTE di questo bot — lì il segnale è il silenzio
+          // (sentinelAllowed), mai «Nothing new to add.» davanti all'utente
+          const reply = stripStrayNoResponse(text)
           if (reply.trim() && !isPlaceholderText(reply) && !isExactNoResponse(reply)) {
             // R1: consegna con le regole comuni; se il turno la declina
             // (doppione, tetto) il testo resta ragionamento nella entry
@@ -1872,6 +1882,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           if (privateHumanTurn && !recoveryDone && !userSawSomething()) {
             recoveryDone = true
             turnTools = []
+            if (liveReplyTurn) emit({ type: 'live-reply', agentId, entryId: entry.id, text: '' })
             messages.push({ role: 'user', content: RECOVERY_NUDGE })
             continue
           }

@@ -614,13 +614,13 @@ function makeDeliverer(world: WorldResults = {}) {
     delivered,
     /**
      * Fase risposta (R1): la consegna della RISPOSTA FINALE — le regole del
-     * loop (dedup, tetto dei consegnati) SENZA il cap dei progressi: la
+     * loop (dedup) SENZA i tetti dei progressi: la
      * risposta è ciò che l'utente aspetta.
      */
     final(text: string): boolean {
       if (!text.trim()) return false
       if (isDuplicateSend(delivered, text)) return false
-      if (delivered.length >= MAX_DELIVERED_PER_TURN) return false
+      // verifica: come nel loop, il tetto dei consegnati non vale per la risposta finale
       delivered.push(text)
       return true
     },
