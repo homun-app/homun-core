@@ -204,6 +204,17 @@ msgstr "{0} skills · ask a bot if you want a new one"
 msgid "{0} ti aspetta"
 msgstr "{0} is waiting for you"
 
+#. placeholder {0}: composioVia.app
+#: src/renderer/src/components/DraftCard.tsx
+msgid "{0} tramite Composio"
+msgstr "{0} via Composio"
+
+#. placeholder {0}: composioVia.app
+#. placeholder {1}: composioVia.account
+#: src/renderer/src/components/DraftCard.tsx
+msgid "{0} tramite Composio ({1})"
+msgstr "{0} via Composio ({1})"
+
 #. placeholder {0}: i18n.t(fmtAgo(sub.startedAt ?? sub.createdAt, now))
 #. placeholder {1}: sub.status === 'done' && sub.summary ? ` — ${sub.summary.slice(0, 120)}` : ''
 #: src/renderer/src/components/SubagentCard.tsx
@@ -4312,6 +4323,7 @@ msgid "riprendi"
 msgstr "resume"
 
 #: src/renderer/src/components/ActivityPanel.tsx
+#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/BotScreen.tsx
 #: src/renderer/src/components/ComputerActivity.tsx
 #: src/renderer/src/components/ComputerFiles.tsx

@@ -219,3 +219,46 @@ describe('R8.1 — appsViewModel: la lista sotto le consigliate non ripete nulla
     expect(ids.sort()).toEqual(['gcalendar', 'gdrive', 'gmail', 'linear', 'notion', 'stripe'])
   })
 })
+
+// ---- K4/K5 (fase Composio OAuth — ritocchi): la voce gateway ha la SUA card ----
+
+describe('K4/K5 — la voce gateway (composio) nella finestra App', () => {
+  const gateway = (): ConnectorInfo => ({
+    ...cat('composio', 'Composio', 'communication'),
+    gateway: true,
+    tagline: { it: 'Più di mille app con un solo accesso', en: 'A thousand apps with one sign-in' }
+  })
+  const agents = [{ id: 'a1', name: 'Nina' }]
+
+  it('K4: la voce gateway NON sta in catalogRows né in featured (ha la sua card in cima), senza ricerca', () => {
+    const catalog = [gateway(), cat('stripe', 'Stripe', 'development')]
+    const vm = appsViewModel({ catalog, connectors: [], installed: null, agents, filter: 'all', query: '', lang: 'it' })
+    expect(vm.catalogRows.map((c) => c.id)).toEqual(['stripe'])
+    expect(vm.featured.map((f) => f.id)).toEqual([])
+  })
+
+  it('K4: vale ANCHE con una ricerca o una categoria scelta (cercando «composio» niente riga)', () => {
+    const catalog = [gateway(), cat('stripe', 'Stripe', 'development')]
+    const byQuery = appsViewModel({ catalog, connectors: [], installed: null, agents, filter: 'all', query: 'composio', lang: 'it' })
+    expect(byQuery.catalogRows.map((c) => c.id)).toEqual([])
+    const byCategory = appsViewModel({ catalog, connectors: [], installed: null, agents, filter: 'communication', query: '', lang: 'it' })
+    expect(byCategory.catalogRows.map((c) => c.id)).toEqual([])
+  })
+
+  it('K5: collegata, la riga porta via «composio» (Tramite Composio), non «Diretta»', () => {
+    const catalog = [gateway(), cat('stripe', 'Stripe', 'development')]
+    const linkedGateway: ConnectorInfo = {
+      ...gateway(), state: { status: 'connected', disabledTools: [], instructions: '' }
+    }
+    const vm = appsViewModel({ catalog, connectors: [linkedGateway], installed: null, agents, filter: 'all', query: '', lang: 'it' })
+    const row = vm.connected.find((r) => r.id === 'composio')
+    expect(row?.via).toBe('composio')
+    expect(row?.gateway).toBe(true)
+    // le curate collegate restano dirette
+    const linkedLinear: ConnectorInfo = {
+      ...cat('linear', 'Linear', 'development'), state: { status: 'connected', disabledTools: [], instructions: '' }
+    }
+    const vm2 = appsViewModel({ catalog, connectors: [linkedLinear], installed: null, agents, filter: 'all', query: '', lang: 'it' })
+    expect(vm2.connected.find((r) => r.id === 'linear')?.via).toBe('direct')
+  })
+})

@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-// Sonda Electron della fase Composio OAuth (C1–C7). L'app VERA (build di
-// sviluppo in out/) su cartella dati TEMPORANEA, provider FINTO
-// openai-compatible su 127.0.0.1 e — la novità della fase — un SERVER MCP
-// FINTO che imita Composio «For You»: gli stessi 12 strumenti con gli schemi
-// della fixture ridotta del repo, MULTI_EXECUTE che registra le chiamate su
-// file, MANAGE_CONNECTIONS che restituisce un redirect_url finto e un OAuth
-// FINTO con discovery (RFC 9728), DCR e PKCE S256. La voce di catalogo punta
-// lì con SANDBOT_TEST_COMPOSIO_MCP_URL (solo insieme a SANDBOT_TEST_USER_DATA)
+// Sonda Electron della fase Composio OAuth (C1–C7) + RITOCCI (K1–K7). L'app
+// VERA (build di sviluppo in out/) su cartella dati TEMPORANEA, provider
+// FINTO openai-compatible su 127.0.0.1 e un SERVER MCP FINTO che imita
+// Composio «For You»: gli stessi 12 strumenti con gli schemi della fixture
+// ridotta del repo, MULTI_EXECUTE che registra le chiamate su file,
+// MANAGE_CONNECTIONS che restituisce un redirect_url finto e un OAuth FINTO
+// con discovery (RFC 9728), DCR e PKCE S256. La voce di catalogo punta lì
+// con SANDBOT_TEST_COMPOSIO_MCP_URL (solo insieme a SANDBOT_TEST_USER_DATA)
 // e il «browser» è finto anche lui: SANDBOT_TEST_FAKE_BROWSER=1 fa seguire i
 // redirect con fetch fino al callback di loopback, mai il browser vero.
 // Copre:
@@ -22,12 +22,24 @@
 //   C5: MANAGE_CONNECTIONS add → card di collegamento → Collega apre il link
 //       (registrato dal finto, non dal browser vero) → card «Collegata»;
 //   C6: la strada della chiave sta SOLO nel foglio «Per sviluppatori».
+// RITOCCI K1–K7 verificati QUI:
+//   K1: la finestra App si CHIUDE prima di ogni turno in chat e ogni cattura
+//       è preceduta da visibleOnTop (elementFromPoint DENTRO l'elemento);
+//       C2e riscritto (non più tautologia); a fine sonda due PNG con nomi
+//       diversi non possono avere lo stesso hash;
+//   K2: nel dettaglio del gateway niente «Non riuscito» accanto a
+//       «Collegata»;
+//   K3: la card dice «Collega Slack tramite Composio», la card d'approvazione
+//       «Slack · Collega» e la riga decisa pure;
+//   K4: nessuna riga normale di Composio sotto la card (con e senza ricerca);
+//   K5: la riga Composio in «Collegate» non dice «Diretta»;
+//   K7: la bozza estratta contiene «Gmail tramite Composio».
 // A FINE SONDA si chiude ANCHE il daemon di sviluppo (pid in daemon.lock
 // dentro la cartella dati temporanea), la cartella viene rimossa, nessun push.
 import { spawn } from 'node:child_process'
 import { createServer } from 'node:http'
 import { createHash, randomBytes } from 'node:crypto'
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, appendFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, readFileSync, readdirSync, writeFileSync, mkdirSync, appendFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 const ROOT = resolve(import.meta.dirname, '..')
@@ -428,6 +440,51 @@ const clickSidebar = (name) => pageEval(`
   return 'selezionato'
 `)
 const APP_DIALOG = `[...document.querySelectorAll('[role="dialog"]')].find((d) => d.textContent.includes('Tutte le app'))`
+
+/**
+ * K1 (ritocchi): chiude la finestra App (Esc, col bottone × come ripiego)
+ * PRIMA di ogni turno in chat — ieri le catture card-fiducia-* e
+ * card-blocco-* mostravano la finestra APERTA SOPRA la chat. Fallisce se un
+ * dialogo resta aperto: le card si devono fotografare in chat, scoperte.
+ */
+const closeAppWindow = async () => {
+  await pageEval(`
+    for (let i = 0; i < 8; i++) {
+      const dialog = document.querySelector('[role="dialog"]')
+      if (!dialog) break
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+      const x = dialog.querySelector('button[aria-label="Chiudi"]')
+      if (x) x.click()
+      await new Promise((r) => setTimeout(r, 250))
+    }
+    return 'cicli fatti'
+  `)
+  await sleep(400)
+  const open = await pageEval(`return document.querySelectorAll('[role="dialog"]').length`)
+  if (open) throw new Error(`K1: la finestra App non si è chiusa (${open} dialoghi ancora aperti)`)
+  return 'chiusa'
+}
+
+/**
+ * K1 (ritocchi): l'elemento è VISIBILE IN CIMA? Lo porta in vista
+ * (scrollIntoView al centro) e controlla che elementFromPoint del suo centro
+ * cada DENTRO l'elemento — non basta offsetParent (quello coperto dalla
+ * finestra App lo aveva comunque). true, o il motivo per cui NON lo è.
+ */
+const visibleOnTop = (selector) => pageEval(`
+  const el = document.querySelector(${JSON.stringify(selector)})
+  if (!el) return 'non trovato: ' + ${JSON.stringify(selector)}
+  if (el.offsetParent === null) return 'non renderizzato (offsetParent nullo)'
+  el.scrollIntoView({ block: 'center' })
+  await new Promise((r) => setTimeout(r, 300))
+  const r = el.getBoundingClientRect()
+  const cx = Math.round(r.left + r.width / 2)
+  const cy = Math.round(r.top + r.height / 2)
+  if (cx < 0 || cy < 0 || cx >= window.innerWidth || cy >= window.innerHeight) return 'fuori viewport: ' + cx + ',' + cy
+  const hit = document.elementFromPoint(cx, cy)
+  if (hit && el.contains(hit)) return true
+  return 'coperto: ' + (hit ? hit.tagName + '.' + String(hit.className).slice(0, 60) : 'niente')
+`)
 const setDark = async (dark) => {
   await pageEval(`document.documentElement.classList.${dark ? 'add' : 'remove'}('dark')`)
   await sleep(350)
@@ -496,6 +553,34 @@ try {
   // ---- catture: la card Accedi (1440/900 × chiaro/scuro) ----
   await shotsOf('accedi-card')
 
+  // ============ K4: Composio NON compare due volte in «Tutte le app» ============
+  // sotto la card «Più di mille app con Composio» non ci deve essere ANCHE la
+  // riga normale del catalogo («Composio — Più di mille app con un solo
+  // accesso · Collega»), né senza ricerca né cercando «composio»
+  const k4aText = await pageEval(`return (${APP_DIALOG}).textContent`)
+  check('K4a nessuna riga normale di Composio sotto la card (tagline «un solo accesso» assente)',
+    !k4aText.includes('un solo accesso'))
+  await pageEval(`
+    const input = document.querySelector('input[placeholder="Cerca tra app e skill"]')
+    if (!input) throw new Error('campo di ricerca non trovato')
+    const set = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+    set.call(input, 'composio')
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    return 'ricerca: composio'
+  `)
+  await sleep(700)
+  const k4bText = await pageEval(`return (${APP_DIALOG}).textContent`)
+  check('K4b cercando «composio» resta la CARD, non la riga',
+    k4bText.includes('Più di mille app con Composio') && !k4bText.includes('un solo accesso'))
+  await pageEval(`
+    const input = document.querySelector('input[placeholder="Cerca tra app e skill"]')
+    const set = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+    set.call(input, '')
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    return 'ricerca pulita'
+  `)
+  await sleep(500)
+
   // ============ C1: Accedi → login finto → Composio collegato ============
   await clickTestid('composio-login-card') // il bottone Accedi sta dentro la card
   check('C1a la card passa ad «Apri il browser e accedi a Composio»',
@@ -524,6 +609,7 @@ try {
   // ============ C3: il modello vede SOLO i 6 strumenti offerti ============
   // un turno qualsiasi: la prima richiesta al provider finto porta gli strumenti
   pushText('Ciao.')
+  await closeAppWindow() // K1: da qui in poi la chat dev'essere SCOPERTA
   await uiSend('Ciao!')
   await waitDom(`[...document.querySelectorAll('div')].some((d) => d.textContent.trim() === 'Ciao.')`, 30_000).catch(() => undefined)
   await sleep(1_200)
@@ -539,6 +625,7 @@ try {
   // ============ C2: blocco di sole letture → NESSUNA card ============
   pushTool(BATCH, { tools: [{ tool_slug: 'GMAIL_LIST_THREADS', arguments: { max: 5 } }], thought: 'elenca', sync_response_to_workbench: true })
   pushText('Fatto: 5 conversazioni.')
+  await closeAppWindow() // K1
   await uiSend('Elencami le conversazioni di Gmail.')
   await waitDom(`[...document.querySelectorAll('div')].some((d) => d.textContent.includes('5 conversazioni'))`, 30_000).catch(() => undefined)
   await sleep(1_000)
@@ -558,6 +645,7 @@ try {
   pushTool(BATCH, { tools: [{ tool_slug: 'SLACK_SEARCH_MESSAGES', arguments: { query: 'sonda' } }], sync_response_to_workbench: false })
   pushTool(BATCH, { tools: [{ tool_slug: 'NOTION_GET_PAGES', arguments: {} }], sync_response_to_workbench: false })
   pushText('Fatto.')
+  await closeAppWindow() // K1
   await uiSend('Cerca su Slack e poi dimmi le pagine di Notion.')
   check('C4 dopo il risultato di Slack, la lettura su Notion (app nuova) chiede la card',
     await waitDom(`!![...document.querySelectorAll('div')].some((d) => d.offsetParent !== null && d.textContent.includes('tramite Composio'))`, 30_000))
@@ -565,6 +653,9 @@ try {
   const c4Approval = (await pendingApprovals(bot.id)).at(-1)
   check('C4b la card è quella di fiducia (motivo dell\'id approval.composioTrust)',
     c4Approval?.meta?.ui?.id === 'approval.composioTrust', JSON.stringify(c4Approval?.meta?.ui?.id))
+  // K1: la card di fiducia dev'essere VISIBILE IN CIMA prima della cattura
+  const k1fiducia = await visibleOnTop('[data-testid="approval-tech-details"]')
+  check('K1 la card di fiducia è scoperta (elementFromPoint dentro la card)', k1fiducia === true, String(k1fiducia))
   await shotsOf('card-fiducia')
   // si chiude la card per proseguire puliti
   await clickByText('Rifiuta')
@@ -579,15 +670,34 @@ try {
     sync_response_to_workbench: false
   })
   pushText('aspetto il consenso')
+  await closeAppWindow() // K1
   await uiSend('Leggi Gmail e crea un promemoria su Slack.')
   check('C2c lettura + scrittura → card d\'approvazione con le DUE azioni',
     await waitDom(`!![...document.querySelectorAll('[data-testid="composio-batch-actions"]')].some((x) => x.offsetParent !== null && x.textContent.includes('Gmail · Elenca conversazioni') && x.textContent.includes('Slack · Crea promemoria'))`, 30_000))
   const batchCardText = await pageEval(`return [...document.querySelectorAll('[data-testid="composio-batch-actions"]')].filter((x) => x.offsetParent !== null).pop()?.textContent ?? ''`)
   check('C2d la card mostra gli argomenti brevi dell\'azione (canale e testo)',
     batchCardText.includes('#sonda') && batchCardText.includes('ricordati la sonda'), batchCardText.slice(0, 100))
-  check('C2e la card ha la riga «tramite Composio» e il nome tecnico nei Dettagli chiusi',
-    await pageEval(`return (() => { const card = document.querySelector('[data-testid="approval-tech-details"]')?.closest('.rounded-\\\\[18px\\\\]'); return { via: card?.innerText.includes('tramite Composio') ?? false, tech: card?.innerText ?? '' } })()`)
-      .then((r) => r.via && /composio__composio__COMPOSIO_MULTI_EXECUTE_TOOL/.test(r.tech) === false)) // il nome tecnico è nei dettagli CHIUSI
+  // K1 (ritocchi): C2e riscritto — la vecchia era una tautologia (un nome che
+  // non esiste non può comparire). Ora: riga «tramite Composio» visibile,
+  // Dettagli tecnici CHIUSI (un <details> senza open) col nome tecnico DENTRO,
+  // e il testo visibile della card SENZA i dettagli che non lo contiene
+  const c2e = await pageEval(`return (() => {
+    const details = [...document.querySelectorAll('[data-testid="approval-tech-details"]')].filter((x) => x.offsetParent !== null).pop()
+    if (!details) return 'dettagli non trovati'
+    if (details.tagName !== 'DETAILS') return 'non è un <details>: ' + details.tagName
+    if (details.open || details.hasAttribute('open')) return 'i dettagli sono APERTI'
+    const card = details.closest('.rounded-\\\\[18px\\\\]')
+    if (!card) return 'card non trovata'
+    if (!card.innerText.includes('tramite Composio')) return 'manca la riga «tramite Composio»'
+    if (!details.textContent.includes('COMPOSIO_MULTI_EXECUTE_TOOL')) return 'il nome tecnico non è nei dettagli'
+    const senzaDettagli = card.cloneNode(true)
+    senzaDettagli.querySelectorAll('details').forEach((d) => d.remove())
+    return senzaDettagli.innerText.includes('COMPOSIO_MULTI_EXECUTE_TOOL') ? 'il nome tecnico è VISIBILE fuori dai dettagli' : true
+  })()`)
+  check('C2e la card ha la riga «tramite Composio»; il nome tecnico sta SOLO nei Dettagli chiusi', c2e === true, String(c2e))
+  // K1: la card del blocco dev'essere VISIBILE IN CIMA prima della cattura
+  const k1blocco = await visibleOnTop('[data-testid="composio-batch-actions"]')
+  check('K1 la card del blocco è scoperta (elementFromPoint dentro la card)', k1blocco === true, String(k1blocco))
   await shotsOf('card-blocco')
   await clickByText('Consenti')
   check('C2f dopo il consenso il blocco intero è eseguito (una sola chiamata con le due voci)',
@@ -598,9 +708,13 @@ try {
   // ============ C2: distruttiva senza «Sempre» ============
   pushTool(BATCH, { tools: [{ tool_slug: 'NOTION_DELETE_PAGE', arguments: { page_id: 'p1' } }], sync_response_to_workbench: false })
   pushText('aspetto')
+  await closeAppWindow() // K1
   await uiSend('Elimina la pagina p1 su Notion.')
   check('C2g distruttiva → card',
     await waitDom(`!![...document.querySelectorAll('div')].some((d) => d.offsetParent !== null && /non si (può|possono) annullare/.test(d.textContent))`, 30_000))
+  // K1: anche senza cattura, la card dev'essere VISIBILE IN CIMA
+  const k1distruttiva = await visibleOnTop('[data-testid="approval-tech-details"]')
+  check('K1 la card distruttiva è scoperta (elementFromPoint dentro la card)', k1distruttiva === true, String(k1distruttiva))
   const sembreDisabled = await pageEval(`
     const card = [...document.querySelectorAll('div')].filter((d) => d.offsetParent !== null && /non si (può|possono) annullare/.test(d.textContent)).pop()
     const menu = card?.querySelector('[aria-haspopup="menu"]')
@@ -628,9 +742,17 @@ try {
     sync_response_to_workbench: false
   })
   pushText('Bozza pronta.')
+  await closeAppWindow() // K1
   await uiSend('Leggi Gmail e manda un\'email al capo.')
   check('C7a la voce d\'invio diventa BOZZA (card Invia/Scarta)',
     await waitDom(`!![...document.querySelectorAll('button')].some((b) => b.offsetParent !== null && b.textContent.trim() === 'Invia')`, 30_000))
+  // K7: la bozza dice da DOVE parte («Gmail tramite Composio», regola A7)
+  const bozzaText = await pageEval(`return [...document.querySelectorAll('[data-testid="draft-card"]')].filter((x) => x.offsetParent !== null).pop()?.innerText ?? ''`)
+  check('K7 la bozza contiene «Gmail tramite Composio» (la riga della via)',
+    bozzaText.includes('Gmail tramite Composio'), bozzaText.split('\\n').slice(0, 3).join(' | '))
+  // K1: la bozza dev'essere VISIBILE IN CIMA prima della cattura
+  const k1bozza = await visibleOnTop('[data-testid="draft-card"]')
+  check('K1 la bozza è scoperta (elementFromPoint dentro la card)', k1bozza === true, String(k1bozza))
   check('C7b la lettura è passata SENZA card ed è stata eseguita da sola (chiamata con la SOLA lettura)',
     (await waitFakeCalls(callsBefore + 1)) && fakeCalls().at(-1)?.args?.tools?.length === 1 && fakeCalls().at(-1)?.args?.tools[0]?.tool_slug === 'GMAIL_LIST_THREADS',
     `voci: ${fakeCalls().at(-1)?.args?.tools?.length}`)
@@ -656,14 +778,23 @@ try {
   // «sempre»), poi l'esecuzione crea la card di collegamento col link
   pushTool(MANAGE, { toolkits: [{ name: 'slack', action: 'add' }] })
   pushText('Link pronto in card.')
+  await closeAppWindow() // K1
   await uiSend('Collega Slack.')
-  const c5approval = await waitDom(`!![...document.querySelectorAll('div')].some((d) => d.offsetParent !== null && (d.textContent.includes('vuole collegare o cambiare le app connesse tramite Composio') || /Slack · add/.test(d.textContent)))`, 30_000)
+  // K3: l'azione della card è LOCALIZZATA («Slack · Collega», non «Slack · add»)
+  const c5approval = await waitDom(`!![...document.querySelectorAll('div')].some((d) => d.offsetParent !== null && (d.textContent.includes('vuole collegare o cambiare le app connesse tramite Composio') || /Slack · Collega/.test(d.textContent)))`, 30_000)
   check('C5a il modello chiama add → la CARD D\'APPROVAZIONE del collegamento (id approval.composioConnect)',
     c5approval,
     c5approval ? '' : `chat: ${String(await pageEval('return document.body.innerText.slice(-1200)')).slice(-600)}`)
+  const c5cardText = await pageEval(`return [...document.querySelectorAll('[data-testid="composio-batch-actions"]')].filter((x) => x.offsetParent !== null).pop()?.innerText ?? ''`)
+  check('K3 la card d\'approvazione del collegamento dice «Slack · Collega» (azione localizzata)',
+    c5cardText.includes('Slack · Collega') && !c5cardText.includes('Slack · add'), c5cardText.split('\\n')[0] ?? '')
   await clickByText('Consenti')
-  const c5card = await waitDom(`!![...document.querySelectorAll('div')].some((d) => d.offsetParent !== null && d.textContent.includes('Collega slack tramite Composio'))`, 20_000)
-  check('C5a2 dopo il consenso → card di collegamento «Collega slack tramite Composio»',
+  await sleep(800)
+  // K3: la riga decisa dice «Slack · Collega», non «Slack · add»
+  const k3decisa = await waitDom(`!![...document.querySelectorAll('button, div')].some((d) => d.offsetParent !== null && d.textContent.includes('Consentito una volta') && d.textContent.includes('Slack · Collega'))`, 15_000)
+  check('K3 la riga decisa dice «Slack · Collega»', k3decisa)
+  const c5card = await waitDom(`!![...document.querySelectorAll('div')].some((d) => d.offsetParent !== null && d.textContent.includes('Collega Slack tramite Composio'))`, 20_000)
+  check('C5a2 dopo il consenso → card di collegamento «Collega Slack tramite Composio» (nome umano, K3)',
     c5card,
     c5card ? '' : `testo card: ${String(await pageEval(`return (() => { const cards = [...document.querySelectorAll('div')].filter((d) => d.textContent.includes('composio-app')); return document.body.innerText.split('\\n').filter((l) => l.includes('Collega') || l.includes('tramite Composio')).join(' | ').slice(-400) })()`))}`)
   // il risultato al modello NON contiene il link
@@ -673,6 +804,9 @@ try {
   })
   check('C5b il risultato al modello NON contiene il link (sta solo nella card)',
     modelSawLink === false)
+  // K1: la card di collegamento dev'essere VISIBILE IN CIMA prima della cattura
+  const k1collegamento = await visibleOnTop('[data-testid="connector-card"]')
+  check('K1 la card di collegamento è scoperta (elementFromPoint dentro la card)', k1collegamento === true, String(k1collegamento))
   await shotsOf('card-collegamento')
   await clickByText('Collega')
   check('C5c il clic apre il link nel «browser finto» (registrato, mai il browser vero)',
@@ -692,6 +826,16 @@ try {
   // ---- la finestra App: il dettaglio di Composio con le app collegate ----
   await clickByLabel('App')
   check('C5e la riga Composio sta in «Collegate»', await waitDom(`!!(${APP_DIALOG}) && ${APP_DIALOG}.textContent.includes('Composio')`, 10_000))
+  // K5: la riga Composio dice «Tramite Composio», MAI «Diretta» (login e
+  // azioni passano dai server di Composio, non restano sul Mac)
+  const k5row = await pageEval(`
+    const dialog = ${APP_DIALOG}
+    const row = [...((dialog ?? document).querySelectorAll('button'))].find((b) => b.textContent.includes('Composio'))
+    if (!row) throw new Error('riga Composio non trovata')
+    return row.textContent
+  `)
+  check('K5 la riga Composio in «Collegate» non contiene «Diretta» (dice Tramite Composio)',
+    k5row.includes('Tramite Composio') && !k5row.includes('Diretta'), k5row.slice(0, 140))
   await pageEval(`
     const dialog = ${APP_DIALOG}
     const row = [...((dialog ?? document).querySelectorAll('button'))].find((b) => b.textContent.includes('Composio'))
@@ -701,6 +845,11 @@ try {
   `)
   check('C5f il dettaglio del gateway elenca «App collegate tramite Composio» con Slack Collegata',
     await waitDom(`!!document.querySelector('[data-testid="composio-gateway-detail"]') && [...document.querySelectorAll('[data-testid="gateway-app-slack"]')].some((x) => x.offsetParent !== null && x.textContent.includes('Collegata'))`, 15_000))
+  // K2: quando slack è Collegata, nel dettaglio NON c'è più il riquadro
+  // «Non riuscito» della sua attesa (ieri convivevano)
+  const k2detail = await pageEval(`return document.querySelector('[data-testid="composio-gateway-detail"]')?.textContent ?? ''`)
+  check('K2 nel dettaglio non c\'è «Non riuscito» quando slack è Collegata',
+    !k2detail.includes('Non riuscito'), k2detail.split('\\n').filter((l) => l.includes('Slack') || l.includes('riuscito')).join(' | ').slice(0, 160))
   await shotsOf('dettaglio-gateway')
 
   // ============ C8: la riga dei pari dice le app, non «Composio» ============
@@ -708,6 +857,18 @@ try {
   check('C8 lo status del gateway ha slack ACTIVE (la riga dei pari la legge con appsForAgent)',
     appsLine?.connected?.some((a) => a.slug === 'slack' && a.status === 'ACTIVE') === true,
     JSON.stringify(appsLine?.connected?.map((a) => `${a.slug}:${a.status}`)))
+
+  // ---- K1: due PNG con NOMI diversi non possono avere lo stesso hash ----
+  // (ieri card-fiducia-900-* e card-blocco-900-* erano byte per byte uguali:
+  // il sintomo della finestra App sopra la chat; se torna, la sonda fallisce)
+  const byHash = new Map()
+  const dup = []
+  for (const name of readdirSync(SHOTS).filter((n) => n.endsWith('.png')).sort()) {
+    const h = createHash('sha256').update(readFileSync(join(SHOTS, name))).digest('hex')
+    if (byHash.has(h)) dup.push(`${name} ≡ ${byHash.get(h)}`)
+    else byHash.set(h, name)
+  }
+  check('K1 nessuna cattura duplicata (stesso hash con nomi diversi)', dup.length === 0, dup.join('; '))
 } catch (e) {
   failures++
   console.error('\n[sonda] ERRORE:', e.message ?? e)

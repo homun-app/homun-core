@@ -63,10 +63,10 @@ describe('C5 punto 1 — il flusso DAL BOT (add → card → clic → attesa)', 
     const wait = fake.calls.find((c) => c.tool.includes('WAIT_FOR_CONNECTIONS'))
     expect(wait?.args.toolkits).toEqual(['gmail'])
     expect(wait?.opts?.timeoutMs).toBe(5 * 60_000)
-    // la risposta ACTIVE del server → riga collegata
+    // la risposta ACTIVE del server → riga collegata (K3: nome UMANO)
     await vi.waitFor(() => {
       expect(manager.status().connected).toEqual([
-        { slug: 'gmail', name: 'gmail', status: 'ACTIVE', accountId: 'acc_9' }
+        { slug: 'gmail', name: 'Gmail', status: 'ACTIVE', accountId: 'acc_9' }
       ])
     })
   })
@@ -182,5 +182,48 @@ describe('C5 — lo stato che vede la UI', () => {
       expect(st.connected.map((a) => a.name)).toEqual(['Alpha', 'Beta'])
       expect(st.connected.every((a) => a.status === 'FAILED')).toBe(true)
     })
+  })
+
+  // ---- K2 (ritocchi): le attese non si accavallano, «Non riuscito» sparisce ----
+
+  it('K2: due attese sullo stesso toolkit → UNA sola chiamata WAIT_FOR_CONNECTIONS', async () => {
+    const { manager, fake } = makeManager((tool) =>
+      original(tool) === 'COMPOSIO_WAIT_FOR_CONNECTIONS'
+        ? JSON.stringify({ toolkits: [{ toolkit: 'slack', accounts: [{ id: 'a1', status: 'ACTIVE' }] }] })
+        : addResult('slack')
+    )
+    // la card in chat e la finestra App partono INSIEME per lo stesso toolkit
+    await Promise.all([manager.connectApp('slack', 'Slack'), manager.connectApp('slack', 'Slack')])
+    await vi.waitFor(() => {
+      expect(manager.status().connected.find((a) => a.slug === 'slack')?.status).toBe('ACTIVE')
+    })
+    expect(fake.calls.filter((c) => original(c.tool) === 'COMPOSIO_WAIT_FOR_CONNECTIONS')).toHaveLength(1)
+  })
+
+  it('K2: un\'attesa fallita seguita da ACTIVE dello stesso toolkit → pending assente', async () => {
+    const waitFailed = JSON.stringify({ toolkits: [{ toolkit: 'slack', accounts: [{ status: 'FAILED' }] }] })
+    const listActive = JSON.stringify({ toolkits: [{ toolkit: 'slack', accounts: [{ id: 'a1', status: 'ACTIVE' }] }] })
+    const { manager } = makeManager((tool, args) => {
+      if (original(tool) === 'COMPOSIO_WAIT_FOR_CONNECTIONS') return waitFailed
+      const action = (args.toolkits as Array<{ action?: string }> | undefined)?.[0]?.action
+      return action === 'list' ? listActive : addResult('slack')
+    })
+    await manager.connectApp('slack', 'Slack')
+    // l'attesa è finita MALE: il riquadro dice «Non riuscito»
+    await vi.waitFor(() => {
+      expect(manager.status().pending?.failed).toBe(true)
+    })
+    // ma nel frattempo il toolkit è diventato ACTIVE (qui: refreshAccounts):
+    // il riquadro sparisce, resta la riga «Collegata»
+    await manager.refreshAccounts()
+    expect(manager.status().pending).toBeNull()
+    expect(manager.status().connected.find((a) => a.slug === 'slack')).toMatchObject({ status: 'ACTIVE' })
+  })
+
+  it('K3: un nome salvato UGUALE allo slug (dati vecchi) si legge col nome umano', async () => {
+    const { manager, settings } = makeManager(() => addResult('x'))
+    // lo stato su disco di una sonda vecchia: name = slug
+    settings.set('composioGateway.apps', { slack: { name: 'slack', accountId: null, status: 'ACTIVE', connectedAt: 1 } })
+    expect(manager.status().connected[0]?.name).toBe('Slack')
   })
 })

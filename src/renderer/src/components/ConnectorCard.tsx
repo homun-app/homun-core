@@ -90,7 +90,7 @@ export function ConnectorCard({ entry }: { entry: TranscriptEntry }) {
   }
 
   return (
-    <CardShell>
+    <CardShell testid="connector-card">
       <div className="flex items-center gap-2 text-sm text-foreground">
         <span className="text-base">{connectors.find((c) => c.id === message.connectorId)?.logo ?? '🔌'}</span>
         {isGatewayApp ? (

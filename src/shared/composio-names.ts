@@ -236,8 +236,96 @@ export function knownToolkitSlugs(extra: readonly string[] = []): string[] {
   return [...new Set([...COMMON_COMPOSIO_TOOLKITS.map((t) => t.slug), ...extra.map((s) => s.toLowerCase())])]
 }
 
-/** Il nome umano di uno slug noto, o lo slug stesso. */
+/**
+ * Il nome umano di uno slug: nome della tabella se c'è, altrimenti la forma
+ * leggibile (K3 dei ritocchi: mai lo slug grezzo all'utente — «slack» non è
+ * un nome, «x_twitter» nemmeno). «x_twitter» è in tabella («X»); uno slug
+ * ignoto «foo_bar» diventa «Foo bar».
+ */
 export function composioToolkitName(slug: string): string {
   const key = slug.toLowerCase()
-  return COMMON_COMPOSIO_TOOLKITS.find((t) => t.slug === key)?.name ?? slug
+  const known = COMMON_COMPOSIO_TOOLKITS.find((t) => t.slug === key)?.name
+  if (known) return known
+  const readable = key.replace(/[_\-.]+/g, ' ').trim()
+  if (!readable) return slug
+  return readable.charAt(0).toUpperCase() + readable.slice(1)
+}
+
+/**
+ * Il toolkit di uno slug d'azione (A6 punto 1 / C2, qui da K6 dei ritocchi
+ * perché serve anche al renderer): il prefisso più LUNGO fra gli slug noti
+ * (i toolkit collegati + la tabella dei comuni), altrimenti il primo
+ * segmento. GMAIL_SEND_EMAIL → gmail, MICROSOFT_TEAMS_LIST_CHANNELS →
+ * microsoft_teams (se noto), CRMXYZ_PUSH_LEAD → crmxyz.
+ */
+export function composioToolkitOfSlug(slug: string, connectedSlugs: readonly string[] = []): string {
+  const action = slug.trim().toLowerCase()
+  const known = knownToolkitSlugs(connectedSlugs)
+    .filter((k) => action !== k && action.startsWith(`${k}_`) && action.length > k.length + 1)
+    .sort((a, b) => b.length - a.length)[0]
+  if (known) return known
+  return action.split('_')[0] ?? action
+}
+
+// ---- K3 (fase Composio OAuth — ritocchi): le azioni MANAGE_CONNECTIONS e
+// PROXY nella lingua della UI, come localizedActionName: tabelle pure in
+// shared, mai la parola del server («add», «PROXY») nella card o nella riga
+// decisa. Il daemon passa la lingua della UI al gate.
+
+/** Le azioni di COMPOSIO_MANAGE_CONNECTIONS per la card (it/en). */
+export type ComposioConnectionsAction = 'add' | 'list' | 'rename' | 'remove'
+
+const CONNECTIONS_ACTIONS_IT: Readonly<Record<ComposioConnectionsAction, string>> = {
+  add: 'Collega',
+  list: 'Elenca collegamenti',
+  rename: 'Rinomina collegamento',
+  remove: 'Scollega'
+}
+
+const CONNECTIONS_ACTIONS_EN: Readonly<Record<ComposioConnectionsAction, string>> = {
+  add: 'Connect',
+  list: 'List connections',
+  rename: 'Rename connection',
+  remove: 'Disconnect'
+}
+
+/** L'azione di una voce di toolkits[] nella lingua della UI (K3). */
+export function localizedConnectionsAction(action: ComposioConnectionsAction, uiLang: UiLanguage): string {
+  return (uiLang === 'en' ? CONNECTIONS_ACTIONS_EN : CONNECTIONS_ACTIONS_IT)[action]
+}
+
+/** L'azione di COMPOSIO_PROXY_EXECUTE nella lingua della UI: mai «PROXY» (K3). */
+export function localizedProxyRequestAction(method: string, endpoint: string, uiLang: UiLanguage): string {
+  const label = uiLang === 'en' ? 'Direct request' : 'Richiesta diretta'
+  return `${label} ${method} ${endpoint}`.trim()
+}
+
+// ---- K7 (fase Composio OAuth — ritocchi): da dove parte una bozza ----
+
+/** L'app (nome umano) e l'account della via di una bozza che passa da Composio. */
+export interface ComposioViaInfo {
+  app: string
+  account?: string
+}
+
+/**
+ * K7: se la via di una bozza è il blocco di Composio (o uno strumento
+ * composio__ del vecchio flusso SDK), l'app e l'account della voce da
+ * mostrare nella riga «<app> tramite Composio». Null per ogni altra via:
+ * la riga riguarda SOLO le superfici Composio (regola A7).
+ */
+export function composioViaInfo(via: { tool: string; args?: Record<string, unknown> } | null | undefined): ComposioViaInfo | null {
+  if (!via) return null
+  if (via.tool.startsWith('composio__')) return { app: composioToolkitName(via.tool.split('__')[1] ?? '') }
+  if (via.tool.split('__').slice(2).join('__') === 'COMPOSIO_MULTI_EXECUTE_TOOL') {
+    const tools = via.args?.tools
+    const item = Array.isArray(tools) && tools[0] && typeof tools[0] === 'object'
+      ? (tools[0] as { tool_slug?: unknown; account?: unknown })
+      : null
+    const slug = typeof item?.tool_slug === 'string' ? item.tool_slug : ''
+    const account = typeof item?.account === 'string' && item.account.trim() ? item.account.trim() : undefined
+    const app = slug ? composioToolkitName(composioToolkitOfSlug(slug)) : 'Composio'
+    return { app, ...(account ? { account } : {}) }
+  }
+  return null
 }

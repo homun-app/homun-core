@@ -245,10 +245,43 @@ describe('C5/C3 — il gate di MANAGE_CONNECTIONS e PROXY_EXECUTE', () => {
       expect(get.severity).toBe('read')
       expect(get.noAlways).toBe(true)
       expect(get.actions[0]!.app).toBe('GitHub')
-      expect(get.actions[0]!.action).toBe('GET /user/repos')
+      // K3 (ritocchi): «Richiesta diretta GET /…», mai «PROXY»
+      expect(get.actions[0]!.action).toBe('Richiesta diretta GET /user/repos')
     }
     const post = proxyExecuteGate({ toolName: PROXY_TOOL, args: { toolkit_slug: 'github', endpoint: '/repos', method: 'POST', body: { name: 'x' } }, rules: [], grants: [], uiLang: 'it' })
     if (post.kind === 'ask') expect(post.severity).toBe('write')
+  })
+
+  // ---- K3 (ritocchi): nomi umani e azioni LOCALIZZATE, mai slug o parole del server ----
+
+  it('K3: le azioni di MANAGE_CONNECTIONS nella lingua della UI (add → Collega/Connect, …)', () => {
+    const cases = [
+      ['add', 'Collega', 'Connect'],
+      ['list', 'Elenca collegamenti', 'List connections'],
+      ['rename', 'Rinomina collegamento', 'Rename connection'],
+      ['remove', 'Scollega', 'Disconnect']
+    ] as const
+    for (const [action, it, en] of cases) {
+      const itGate = gate({ toolkits: [{ name: 'slack', action }] })
+      expect(itGate.kind).toBe(action === 'list' ? 'allow' : 'ask')
+      if (itGate.kind === 'ask') expect(itGate.actions[0]!.action).toBe(it)
+      if (action !== 'list') {
+        const enGate = manageConnectionsGate({ toolName: CONNECTIONS_TOOL, args: { toolkits: [{ name: 'slack', action }] }, rules: [], grants: [], uiLang: 'en' })
+        if (enGate.kind === 'ask') expect(enGate.actions[0]!.action).toBe(en)
+      }
+    }
+  })
+
+  it('K3: l\'app della card è il nome umano (slug noto) o la forma leggibile (slug ignoto)', () => {
+    const known = gate({ toolkits: [{ name: 'slack', action: 'add' }] })
+    if (known.kind === 'ask') expect(known.actions[0]!.app).toBe('Slack')
+    const unknown = gate({ toolkits: [{ name: 'crm_xyz', action: 'add' }] })
+    if (unknown.kind === 'ask') expect(unknown.actions[0]!.app).toBe('Crm xyz')
+  })
+
+  it('K3: la richiesta diretta del proxy è localizzata anche in inglese, mai «PROXY»', () => {
+    const en = proxyExecuteGate({ toolName: PROXY_TOOL, args: { toolkit_slug: 'gmail', endpoint: '/v1/send', method: 'POST' }, rules: [], grants: [], uiLang: 'en' })
+    if (en.kind === 'ask') expect(en.actions[0]!.action).toBe('Direct request POST /v1/send')
   })
 })
 

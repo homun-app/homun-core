@@ -109,6 +109,37 @@ export interface McpAnnotations {
   openWorldHint?: boolean
 }
 
+// ---- fase Composio OAuth (C3) + K6 (ritocchi): la tabella degli strumenti
+// di Composio vale PER NOME su OGNI server, come il gate del blocco: chi
+// aggiunge a mano un server MCP verso Composio non riporta i tool nascosti
+// (REMOTE_WORKBENCH…). Un nome COMPOSIO_* non in tabella resta NASCOSTO
+// (fail closed); i tool senza quel prefisso non si toccano.
+
+/** Uno strumento COMPOSIO_* è tra quelli che Homun offre al modello? */
+export function composioToolOffered(originalName: string): boolean {
+  return !originalName.startsWith('COMPOSIO_') || composioToolPolicy(originalName).offered
+}
+
+/** I tool di UN qualunque server dopo la tabella C3 (fail closed per nome). */
+export function offeredMcpTools<T extends { name: string }>(tools: T[]): T[] {
+  return tools.filter((t) => composioToolOffered(t.name))
+}
+
+/**
+ * K6 (ritocchi): i nomi completi degli strumenti del server Composio del
+ * catalogo, dal nome VERO del server (mcp__&lt;slug del nome&gt;__…) — il
+ * gateway non scrive più lo slug a mano e non si rompe se il server ha un
+ * altro nome. Senza server collegato vale lo slug storico «composio».
+ */
+export function composioServerTools(): { manageConnections: string; waitForConnections: string } {
+  const cfg = listServers().find((s) => s.catalogId === 'composio')
+  const prefix = `mcp__${cfg ? slug(cfg.name) : 'composio'}`
+  return {
+    manageConnections: `${prefix}__COMPOSIO_MANAGE_CONNECTIONS`,
+    waitForConnections: `${prefix}__COMPOSIO_WAIT_FOR_CONNECTIONS`
+  }
+}
+
 const CACHE_TTL = 5 * 60_000
 interface Cached { client: Client; tools: McpToolInfo[]; at: number; config: McpServerConfig }
 const cache = new Map<string, Cached>()
@@ -268,12 +299,12 @@ async function ensure(cfg: McpServerConfig, force = false): Promise<Cached> {
     if (e instanceof UnauthorizedError) markNeedsAuth(cfg, uiText(UI.connTokenExpired))
     throw e
   }
-  // fase Composio OAuth (C3): il server Composio dichiara tools.listChanged:
-  // uno strumento NUOVO, che non è nella tabella, NON si offre al modello
-  // (fail closed) — lo si classifica prima. Vale per il modello E per la UI.
-  const offered = cfg.catalogId === 'composio'
-    ? (res.tools ?? []).filter((t) => composioToolPolicy(t.name).offered)
-    : res.tools ?? []
+  // fase Composio OAuth (C3) + K6 (ritocchi): la tabella degli strumenti di
+  // Composio vale PER NOME su OGNI server (come il gate del blocco). Il
+  // server dichiara tools.listChanged: uno strumento COMPOSIO_* NUOVO, che
+  // non è in tabella, NON si offre al modello (fail closed) — lo si
+  // classifica prima. I nomi senza prefisso restano come sono.
+  const offered = offeredMcpTools(res.tools ?? [])
   const tools: McpToolInfo[] = offered.map((t) => ({
     serverId: cfg.id,
     serverName: cfg.name,
@@ -420,10 +451,11 @@ export class McpNeedsReconnectError extends Error {
 /**
  * Esegue mcp__<server>__<tool> (e, fase app A5, composio__<toolkit>__<ACTION>).
  * Fase Composio OAuth: `timeoutMs` per le attese lunghe (WAIT_FOR_CONNECTIONS
- * può durare 5 minuti); gli strumenti NASCOSTI del server Composio (C3), se
- * il modello li nomina lo stesso, si rifiutano con «not available in Homun»;
- * gli argomenti del blocco partono SEMPRE con sync_response_to_workbench
- * false (l'ultima difesa: la workbench non è offerta).
+ * può durare 5 minuti); gli strumenti NASCOSTI di Composio (C3 + K6: per
+ * NOME, su qualunque server), se il modello li nomina lo stesso, si
+ * rifiutano con «not available in Homun»; gli argomenti del blocco partono
+ * SEMPRE con sync_response_to_workbench false (l'ultima difesa: la workbench
+ * non è offerta).
  */
 export async function callTool(fullName: string, args: Record<string, unknown>, opts?: { timeoutMs?: number }): Promise<string> {
   // fase app (A5): l'esecuzione passa dal modulo Composio del daemon, con la
@@ -438,9 +470,10 @@ export async function callTool(fullName: string, args: Record<string, unknown>, 
   const originalName = parts.slice(2).join('__')
   for (const cfg of listServers().filter((s) => s.enabled)) {
     if (slug(cfg.name) !== serverSlug) continue
-    // C3: uno strumento del server Composio che non offriamo, chiamato per
-    // nome dal modello lo stesso, si rifiuta (mai un'esecuzione nascosta)
-    if (cfg.catalogId === 'composio' && !composioToolPolicy(originalName).offered) {
+    // C3 + K6 (ritocchi): uno strumento COMPOSIO_* che non offriamo, chiamato
+    // per nome dal modello lo stesso, si rifiuta su OGNI server (per nome,
+    // come il gate): mai un'esecuzione nascosta
+    if (!composioToolOffered(originalName)) {
       return `${originalName} is not available in Homun.`
     }
     const c = await ensure(cfg)

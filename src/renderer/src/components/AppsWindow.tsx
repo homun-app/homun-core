@@ -123,7 +123,8 @@ function ConnectorDetail({ c, onDone, onComposio }: { c: ConnectorInfo; onDone()
           </button>
         )}
       </div>
-      <ProvenanceTag via="direct" />
+      {/* K5 (ritocchi): la voce gateway non è diretta — login e azioni passano dai server di Composio */}
+      <ProvenanceTag via={c.gateway ? 'composio' : 'direct'} />
       {c.state.error && <p className="text-[11px] text-destructive/80">{c.state.error}</p>}
       {c.state.status !== 'connected' && c.notes && (
         <p className="line-clamp-3 text-[11px] text-muted-foreground">{pickLang(c.notes, uiLang())}</p>
@@ -1068,8 +1069,10 @@ function ComposioGatewayDetail({ onClose }: { onClose(): void }) {
         <div className="mt-2"><ProvenanceTag via="composio" /></div>
         {error && <p className="mt-2 text-[13px] text-destructive">{error}</p>}
 
-        {/* l'attesa del login (annullabile) */}
-        {composioGateway?.pending && (
+        {/* l'attesa del login (annullabile). K2 (ritocchi): se il toolkit in
+            attesa è GIÀ collegato con stato ACTIVE, il riquadro non si mostra
+            (niente «Non riuscito» accanto alla riga «Collegata») */}
+        {composioGateway?.pending && !composioGateway.connected.some((a) => a.slug === composioGateway.pending!.slug && a.status === 'ACTIVE') && (
           <div className="mt-3 rounded-2xl bg-muted px-3 py-2.5" data-testid="composio-gateway-waiting">
             <p className="text-sm font-medium">{composioGateway.pending.name}</p>
             <p className="mt-1 text-[13px] text-muted-foreground">
@@ -1077,15 +1080,37 @@ function ComposioGatewayDetail({ onClose }: { onClose(): void }) {
                 ? <Trans>Non riuscito: riprova a collegarla.</Trans>
                 : <Trans>In attesa del login nel browser…</Trans>}
             </p>
-            <button
-              className="mt-1.5 rounded-full px-3 py-1 text-xs text-muted-foreground transition hover:text-foreground"
-              onClick={async () => {
-                await api.composioGatewayCancel().catch(() => undefined)
-                await refreshComposioGateway()
-              }}
-            >
-              <Trans>Annulla</Trans>
-            </button>
+            {composioGateway.pending.failed ? (
+              // K2 (ritocchi): dopo l'esito il riquadro ha Riprova (riparte il
+              // collegamento) e Chiudi (azzera lo stato), non «Annulla»
+              <div className="mt-1.5 flex gap-3">
+                <button
+                  className="rounded-full px-3 py-1 text-xs text-foreground transition hover:bg-card"
+                  onClick={() => { void connectApp(composioGateway.pending!.slug) }}
+                >
+                  <Trans>Riprova</Trans>
+                </button>
+                <button
+                  className="rounded-full px-3 py-1 text-xs text-muted-foreground transition hover:text-foreground"
+                  onClick={async () => {
+                    await api.composioGatewayCancel().catch(() => undefined)
+                    await refreshComposioGateway()
+                  }}
+                >
+                  <Trans>Chiudi</Trans>
+                </button>
+              </div>
+            ) : (
+              <button
+                className="mt-1.5 rounded-full px-3 py-1 text-xs text-muted-foreground transition hover:text-foreground"
+                onClick={async () => {
+                  await api.composioGatewayCancel().catch(() => undefined)
+                  await refreshComposioGateway()
+                }}
+              >
+                <Trans>Annulla</Trans>
+              </button>
+            )}
           </div>
         )}
 

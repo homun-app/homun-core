@@ -406,7 +406,10 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
     setSetting,
     openExternal: (url) => server.callUi('host.openExternal', [url]).then(() => undefined),
     hasUi: () => server.hasUi(),
-    emit: (e) => emit(e)
+    emit: (e) => emit(e),
+    // K6 (ritocchi): i nomi degli strumenti dal nome VERO del server Composio
+    // del catalogo (mcp__<slug>__…), non più lo slug scritto a mano
+    serverTools: () => mcpServers.composioServerTools()
   })
   setActiveComposioGateway(composioGatewayManager)
 

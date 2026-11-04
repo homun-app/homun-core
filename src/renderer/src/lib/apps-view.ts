@@ -160,11 +160,13 @@ export function appsViewModel(input: AppsViewInput): AppsViewModel {
   const composio = input.composio ?? null
 
   // -- le consigliate: ordine fisso, non collegate, al massimo 4 --
+  // K4 (ritocchi): le voci GATEWAY del catalogo (composio) non stanno qui:
+  // hanno la LORO card in cima, non la riga normale
   const featured: FeaturedRow[] = []
   for (const id of FEATURED_ORDER) {
     if (featured.length >= 4) break
     const entry = input.catalog.find((c) => c.id === id)
-    if (!entry || connectedStates.has(entry.id)) continue
+    if (!entry || connectedStates.has(entry.id) || entry.gateway) continue
     featured.push({
       kind: 'featured',
       id: entry.id,
@@ -188,7 +190,9 @@ export function appsViewModel(input: AppsViewInput): AppsViewModel {
       logo: c.logo,
       botsLabel: { all: true, names: [], extra: 0 },
       status: c.state.status === 'connected' ? 'connected' : 'reconnect',
-      via: 'direct',
+      // K5 (ritocchi): Composio NON è diretta — login e azioni passano dai
+      // suoi server, la riga porta «Tramite Composio» come le app dentro
+      via: c.gateway ? 'composio' : 'direct',
       // fase Composio OAuth (C6): la voce Composio del catalogo apre il
       // dettaglio del gateway (app collegate, Collega un'app, Disattiva)
       ...(c.gateway ? { gateway: true } : {})
@@ -268,6 +272,9 @@ export function appsViewModel(input: AppsViewInput): AppsViewModel {
   const featuredIds = new Set(featured.map((f) => f.id))
   const catalogRows = input.catalog.filter((c) => {
     if (connectedStates.has(c.id)) return false
+    // K4 (ritocchi): le voci GATEWAY non diventano MAI riga normale (con la
+    // ricerca o la categoria scelta come senza): Composio ha la sua card
+    if (c.gateway) return false
     if (input.filter !== 'all' && input.filter !== 'connected' && c.category !== input.filter) return false
     if (q && !matchesQuery(`${c.name} ${c.id} ${taglineOf(c.tagline, lang) ?? ''}`.toLowerCase(), q)) return false
     if (featuredSectionVisible && featuredIds.has(c.id)) return false

@@ -50,10 +50,13 @@ export function DecidedRow({
 export function CardShell({
   tone = 'muted',
   className = '',
+  testid,
   children
 }: {
   tone?: 'muted' | 'waiting' | 'error' | 'bot'
   className?: string
+  /** K1 (ritocchi): ancora stabile per la sonda (la card dev'essere VISIBILE in cima) */
+  testid?: string
   children: React.ReactNode
 }) {
   const toneCls =
@@ -63,7 +66,7 @@ export function CardShell({
         ? 'bg-destructive/10'
         : 'bg-muted'
   return (
-    <div className={`max-w-[85%] rounded-[18px] p-4 ${toneCls} ${className}`}>
+    <div className={`max-w-[85%] rounded-[18px] p-4 ${toneCls} ${className}`} {...(testid ? { 'data-testid': testid } : {})}>
       {children}
     </div>
   )

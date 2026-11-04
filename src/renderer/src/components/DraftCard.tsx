@@ -10,6 +10,8 @@ import { Mail, MessageSquare, Send as SendIcon } from 'lucide-react'
 import { useStore } from '../store'
 import { i18n } from '../lib/i18n'
 import type { TranscriptEntry, SendMessageMeta, SendMessagePayload } from '../../../shared/types'
+// K7 (ritocchi): la riga «<app> tramite Composio» quando la via è il blocco
+import { composioViaInfo } from '../../../shared/composio-names'
 import { DecidedRow, CardShell } from './DecidedRow'
 
 type Draft = Extract<SendMessagePayload, { type: 'draft' }>
@@ -35,6 +37,9 @@ export function DraftCard({ entry }: { entry: TranscriptEntry }) {
   const noChannel = !draft.via
   const bodyLocked = draft.bodyLocked === true
   const Icon = CHANNEL_ICON[draft.channel]
+  // K7 (ritocchi): se l'invio passa da Composio (il blocco o un composio__),
+  // la regola A7 vuole l'etichetta su OGNI superficie — anche sulla bozza
+  const composioVia = composioViaInfo(draft.via)
 
   const startEdit = (): void => {
     setBody(draft.body)
@@ -50,6 +55,15 @@ export function DraftCard({ entry }: { entry: TranscriptEntry }) {
           {status === 'pending' ? t`bozza — si invia solo se confermi` : status === 'sent' ? t`inviata` : status === 'error' ? t`errore` : t`scartata`}
         </span>
       </div>
+      {/* K7 (ritocchi): come la card d'approvazione, la riga dice da DOVE
+          parte l'invio — app umana, e l'account quando c'è */}
+      {composioVia && (
+        <p className="mt-0.5 text-[11px] text-muted-foreground">
+          {composioVia.account
+            ? t`${composioVia.app} tramite Composio (${composioVia.account})`
+            : t`${composioVia.app} tramite Composio`}
+        </p>
+      )}
       <div className="mt-1 text-xs text-muted-foreground">
         <Trans>A: {draft.to || t`(nessun destinatario)`}</Trans>
         {draft.subject && (<><br /><Trans>Oggetto: {draft.subject}</Trans></>)}
@@ -166,10 +180,10 @@ export function DraftCard({ entry }: { entry: TranscriptEntry }) {
         }
         at={entry.createdAt}
       >
-        <CardShell>{content}</CardShell>
+        <CardShell testid="draft-card">{content}</CardShell>
       </DecidedRow>
     )
   }
 
-  return <CardShell>{content}</CardShell>
+  return <CardShell testid="draft-card">{content}</CardShell>
 }

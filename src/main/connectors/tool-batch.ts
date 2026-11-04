@@ -18,8 +18,9 @@
 //
 // Modulo PURO: nessuna dipendenza dal daemon, testabile in nodo puro.
 import { classifyComposioToolName, composioActionOfToolName, composioSendLikeName, redactComposioSecrets, stripToolkitPrefix } from './composio-actions'
-import { composioToolkitName, knownToolkitSlugs } from './composio-meta'
-import { localizedActionName } from '../../shared/composio-names'
+import { composioToolkitName } from './composio-meta'
+// K6 (ritocchi): composioToolkitOfSlug vive in shared (lo usa anche il renderer)
+import { composioToolkitOfSlug, localizedActionName, localizedConnectionsAction, localizedProxyRequestAction } from '../../shared/composio-names'
 
 /** Lo strumento del blocco di Composio (nome originale, su qualunque server MCP). */
 export const COMPOSIO_MULTI_EXECUTE_TOOL = 'COMPOSIO_MULTI_EXECUTE_TOOL'
@@ -112,18 +113,13 @@ export function batchActions(shape: ComposioBatchShape, args: unknown): Composio
 /**
  * Il toolkit di uno slug d'azione (A6 punto 1 / C2): il prefisso più lungo
  * fra gli slug noti (i toolkit collegati + la tabella dei comuni),
- * altrimenti il primo segmento. Il prefisso si TOGLIE prima di
- * classificare (GMAIL_SEND_EMAIL → SEND_EMAIL); sugli slug interi i
- * pattern valgono comunque (SEND_EMAIL contiene «send» con o senza GMAIL_).
+ * altrimenti il primo segmento. Il prefisso si TOGLIE prima di classificare
+ * (GMAIL_SEND_EMAIL → SEND_EMAIL); sugli slug interi i pattern valgono
+ * comunque (SEND_EMAIL contiene «send» con o senza GMAIL_). Da K6 dei
+ * ritocchi l'implementazione sta in shared/composio-names.ts (la usa anche
+ * il renderer) e qui si riesporta.
  */
-export function composioToolkitOfSlug(slug: string, connectedSlugs: readonly string[] = []): string {
-  const action = slug.trim().toLowerCase()
-  const known = knownToolkitSlugs(connectedSlugs)
-    .filter((k) => action !== k && action.startsWith(`${k}_`) && action.length > k.length + 1)
-    .sort((a, b) => b.length - a.length)[0]
-  if (known) return known
-  return action.split('_')[0] ?? action
-}
+export { composioToolkitOfSlug }
 
 /** La classificazione di una voce del blocco: sullo slug SENZA il prefisso del toolkit. */
 export function classifyBatchAction(slug: string, connectedSlugs: readonly string[] = []): 'read' | 'send' | 'write' | 'destructive' {
@@ -635,7 +631,9 @@ export function manageConnectionsGate(input: ComposioGateInput): ComposioGateOut
   const apps = entries.filter((e) => e.named).map((e) => ({
     slug: e.name,
     app: composioToolkitName(e.name),
-    action: e.action,
+    // K3 (ritocchi): l'azione nella lingua della UI (add → «Collega»), mai
+    // la parola del server nella card o nella riga decisa
+    action: localizedConnectionsAction(e.action, input.uiLang),
     kind: manageConnectionsEntryKind(e.action),
     arguments: redactBatchLeaves(
       e.action === 'add'
@@ -668,13 +666,15 @@ export function proxyExecuteGate(input: ComposioGateInput): ComposioGateOutcome 
   if (rules.some((r) => r.mode === 'blocked' && ruleMatchesTool(r.tool, toolName))) return { kind: 'deny' }
   const method = typeof args.method === 'string' ? args.method.toUpperCase() : 'GET'
   const toolkit = typeof args.toolkit_slug === 'string' ? args.toolkit_slug : ''
+  const endpoint = typeof args.endpoint === 'string' ? args.endpoint : ''
   return {
     kind: 'ask',
     severity: method === 'GET' || method === 'HEAD' ? 'read' : 'write',
     actions: [{
       slug: 'PROXY',
       app: composioToolkitName(toolkit || 'app'),
-      action: `${method} ${typeof args.endpoint === 'string' ? args.endpoint : ''}`.trim(),
+      // K3 (ritocchi): «Gmail · Richiesta diretta GET /…», mai «PROXY»
+      action: localizedProxyRequestAction(method, endpoint, input.uiLang),
       kind: method === 'GET' || method === 'HEAD' ? 'read' : 'write',
       arguments: redactBatchLeaves({
         ...(toolkit ? { toolkit_slug: toolkit } : {}),

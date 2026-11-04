@@ -79,5 +79,5 @@ export const COMPOSIO_CODE_TOOLS: ReadonlySet<string> = new Set([
 // La tabella vive in shared/composio-names.ts (la usa anche il renderer per
 // la lista del campo): qui si riesporta per i moduli del daemon.
 
-export { COMMON_COMPOSIO_TOOLKITS, knownToolkitSlugs, composioToolkitName } from '../../shared/composio-names'
+export { COMMON_COMPOSIO_TOOLKITS, knownToolkitSlugs, composioToolkitName, composioToolkitOfSlug } from '../../shared/composio-names'
 export type { ComposioToolkitRef } from '../../shared/composio-names'

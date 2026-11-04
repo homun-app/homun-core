@@ -26,11 +26,19 @@
 // girano senza daemon. Nessuna chiamata a Composio fuori dai flussi di qui.
 import { randomUUID } from 'node:crypto'
 import type { SandbotEvent } from '../../shared/types'
+// K3 (ritocchi): il nome umano del toolkit, mai lo slug grezzo nella UI
+import { composioToolkitName } from '../../shared/composio-names'
 import {
   manageConnectionsAgentResult, manageConnectionsEntries, parseConnectionsResult
 } from './tool-batch'
 
-/** Il nome completo degli strumenti del server Composio nella pipeline (slug del server: composio). */
+/**
+ * Il nome completo degli strumenti del server Composio nella pipeline. È il
+ * DEFAULT (slug del server «composio»): da K6 dei ritocchi il runtime
+ * inietta `serverTools` che ricava il prefisso dal nome VERO del server con
+ * `catalogId === 'composio'` (mcp__<slug del nome>__…), così il gateway non
+ * si rompe se il server ha un altro nome.
+ */
 export const COMPOSIO_SERVER_TOOLS = {
   manageConnections: 'mcp__composio__COMPOSIO_MANAGE_CONNECTIONS',
   waitForConnections: 'mcp__composio__COMPOSIO_WAIT_FOR_CONNECTIONS'
@@ -80,6 +88,12 @@ export interface ComposioGatewayDeps {
   hasUi(): boolean
   emit(e: SandbotEvent): void
   now?(): number
+  /**
+   * K6 (ritocchi): i nomi completi degli strumenti del server Composio,
+   * ricavati dal nome VERO del server con catalogId 'composio' (il default
+   * resta lo slug storico «composio»: vedi COMPOSIO_SERVER_TOOLS).
+   */
+  serverTools?(): { manageConnections: string; waitForConnections: string }
 }
 
 export type ComposioGatewayManager = ReturnType<typeof createComposioGatewayManager>
@@ -99,6 +113,14 @@ export function createComposioGatewayManager(deps: ComposioGatewayDeps) {
   const pendingLinks = new Map<string, PendingLink>()
   /** l'attesa del login in corso (annullabile) */
   let waiting: { slug: string; name: string; since: number; cancelled: boolean; failed?: boolean } | null = null
+  /**
+   * K2 (ritocchi): l'attesa IN CORSO per slug — card in chat e finestra App
+   * possono avviare il collegamento dello stesso toolkit insieme: si RIUSA
+   * l'attesa già partita (una sola chiamata WAIT_FOR_CONNECTIONS), non se ne
+   * crea una seconda che, finita male per conto suo, lascerebbe un
+   * «Non riuscito» accanto a un collegamento riuscito.
+   */
+  let inFlight: { slug: string; promise: Promise<'connected' | 'failed' | 'cancelled'> } | null = null
 
   const apps = (): GatewayAppsSetting => deps.getSetting<GatewayAppsSetting>(S_SETTING_APPS, {})
   const setApps = (next: GatewayAppsSetting): void => {
@@ -107,8 +129,15 @@ export function createComposioGatewayManager(deps: ComposioGatewayDeps) {
   }
   const setApp = (slug: string, patch: StoredGatewayApp): void => {
     setApps({ ...apps(), [slug.toLowerCase()]: patch })
+    // K2 (ritocchi): un toolkit diventato ACTIVE azzera la SUA attesa — il
+    // riquadro «Non riuscito» non può restare accanto alla riga «Collegata»
+    // anche se l'ACTIVE l'ha portato un'altra via (refreshAccounts, la card)
+    if (patch.status === 'ACTIVE' && waiting?.slug === slug.toLowerCase()) waiting = null
   }
   const appOf = (slug: string): StoredGatewayApp | undefined => apps()[slug.toLowerCase()]
+  /** K6 (ritocchi): i nomi degli strumenti del server Composio (di default lo slug storico). */
+  const serverTools = (): { manageConnections: string; waitForConnections: string } =>
+    deps.serverTools?.() ?? COMPOSIO_SERVER_TOOLS
 
   /** Gli slug collegati localmente (per il classificatore C2 e le ricerche). */
   const connectedSlugs = (): string[] => Object.keys(apps())
@@ -120,7 +149,7 @@ export function createComposioGatewayManager(deps: ComposioGatewayDeps) {
    * trovati (parseConnectionsResult: tollerante sul formato vero).
    */
   async function runManageConnections(args: Record<string, unknown>): Promise<{ output: string; links: Array<{ url: string; toolkit?: string }> }> {
-    const output = await deps.callMcp(COMPOSIO_SERVER_TOOLS.manageConnections, args)
+    const output = await deps.callMcp(serverTools().manageConnections, args)
     const parsed = parseConnectionsResult(output)
     return { output, links: parsed.redirectUrls }
   }
@@ -141,8 +170,11 @@ export function createComposioGatewayManager(deps: ComposioGatewayDeps) {
       const slug = (link.toolkit ?? entries[0]?.name ?? '').toLowerCase()
       if (!slug) continue
       const key = randomUUID()
-      pendingLinks.set(key, { key, slug, name: link.toolkit ?? slug, url: link.url, at: now() })
-      cards.push({ key, slug, name: link.toolkit ?? slug })
+      // K3 (ritocchi): il nome della card è UMANO («Collega Slack tramite
+      // Composio»), mai lo slug del server
+      const name = composioToolkitName(slug)
+      pendingLinks.set(key, { key, slug, name, url: link.url, at: now() })
+      cards.push({ key, slug, name })
     }
     // voci `add` senza link trovato: niente card, il modello lo sa dal testo
     return { output: manageConnectionsAgentResult(output, parsed.redirectUrls), cards }
@@ -154,49 +186,69 @@ export function createComposioGatewayManager(deps: ComposioGatewayDeps) {
    * Chiama COMPOSIO_WAIT_FOR_CONNECTIONS per un toolkit e aggiorna lo stato
    * locale («Collegata» o «Non riuscito»). Il timeout del turno non c'entra:
    * è l'attesa del login dell'utente, annullabile dalla UI.
+   *
+   * K2 (ritocchi): se per quel toolkit c'è GIÀ un'attesa in corso, la si
+   * riusa — una sola chiamata WAIT_FOR_CONNECTIONS anche se card in chat e
+   * finestra App partono insieme.
    */
-  async function waitForApp(slugRaw: string, name: string): Promise<'connected' | 'failed' | 'cancelled'> {
+  function waitForApp(slugRaw: string, name: string): Promise<'connected' | 'failed' | 'cancelled'> {
     const slug = slugRaw.toLowerCase()
+    if (inFlight?.slug === slug) return inFlight.promise
+    const promise = runWait(slug, name)
+    void promise.catch(() => undefined) // mai un unhandled rejection nel daemon
+    return promise
+  }
+
+  async function runWait(slug: string, name: string): Promise<'connected' | 'failed' | 'cancelled'> {
     const state = { slug, name, since: now(), cancelled: false }
-    waiting = state
-    deps.emit({ type: 'connectors' })
-    let outcome: 'connected' | 'failed' | 'cancelled'
-    try {
-      const output = await deps.callMcp(
-        COMPOSIO_SERVER_TOOLS.waitForConnections,
-        { toolkits: [slug], mode: 'any' },
-        { timeoutMs: COMPOSIO_GATEWAY_WAIT_MS }
-      )
-      if (state.cancelled) {
-        outcome = 'cancelled'
-      } else {
-        // WAIT aspetta lo stato terminale (ACTIVE/FAILED); se il formato vero
-        // non si lascia dedurre, il collegamento si considera riuscito (la
-        // verifica col risultato vero la facciamo con l'account dell'utente)
-        const parsed = parseConnectionsResult(output)
-        const account = parsed.accounts.find((a) => (a.toolkit ?? '').toLowerCase() === slug)
-        const status = String(account?.status ?? '').toUpperCase()
-        if (status === 'FAILED') {
-          setApp(slug, { name, accountId: account?.id ?? null, status: 'FAILED', connectedAt: now() })
-          outcome = 'failed'
+    const promise = (async () => {
+      let outcome: 'connected' | 'failed' | 'cancelled'
+      waiting = state
+      deps.emit({ type: 'connectors' })
+      try {
+        const output = await deps.callMcp(
+          serverTools().waitForConnections,
+          { toolkits: [slug], mode: 'any' },
+          { timeoutMs: COMPOSIO_GATEWAY_WAIT_MS }
+        )
+        if (state.cancelled) {
+          outcome = 'cancelled'
         } else {
-          setApp(slug, { name, accountId: account?.id ?? null, status: 'ACTIVE', connectedAt: now() })
-          outcome = 'connected'
+          // WAIT aspetta lo stato terminale (ACTIVE/FAILED); se il formato vero
+          // non si lascia dedurre, il collegamento si considera riuscito (la
+          // verifica col risultato vero la facciamo con l'account dell'utente)
+          const parsed = parseConnectionsResult(output)
+          const account = parsed.accounts.find((a) => (a.toolkit ?? '').toLowerCase() === slug)
+          const status = String(account?.status ?? '').toUpperCase()
+          if (status === 'FAILED') {
+            setApp(slug, { name, accountId: account?.id ?? null, status: 'FAILED', connectedAt: now() })
+            outcome = 'failed'
+          } else {
+            setApp(slug, { name, accountId: account?.id ?? null, status: 'ACTIVE', connectedAt: now() })
+            outcome = 'connected'
+          }
+        }
+      } catch {
+        if (state.cancelled) {
+          outcome = 'cancelled'
+        } else {
+          setApp(slug, { name, accountId: null, status: 'FAILED', connectedAt: now() })
+          outcome = 'failed'
         }
       }
-    } catch {
-      if (state.cancelled) {
-        outcome = 'cancelled'
-      } else {
-        setApp(slug, { name, accountId: null, status: 'FAILED', connectedAt: now() })
-        outcome = 'failed'
-      }
+      // l'attesa visibile finisce con l'esito; il flag failed resta per la
+      // card finché non parte un collegamento nuovo (o lo stesso toolkit
+      // diventa ACTIVE, K2: setApp lo azzera)
+      if (waiting === state) waiting = outcome === 'failed' ? { ...state, failed: true } : null
+      deps.emit({ type: 'connectors' })
+      return outcome
+    })()
+    inFlight = { slug, promise }
+    try {
+      return await promise
+    } finally {
+      if (inFlight?.promise === promise) inFlight = null
     }
-    // l'attesa visibile finisce col esito; il flag failed resta per la card
-    // finché non parte un collegamento nuovo
-    if (waiting === state) waiting = outcome === 'failed' ? { ...state, failed: true } : null
-    deps.emit({ type: 'connectors' })
-    return outcome
   }
 
   return {
@@ -207,7 +259,9 @@ export function createComposioGatewayManager(deps: ComposioGatewayDeps) {
     status(): ComposioGatewayStatusRpc {
       const rows: ComposioGatewayAppRpc[] = Object.entries(apps()).map(([slug, a]) => ({
         slug,
-        name: a.name,
+        // K3 (ritocchi): un nome salvato UGUALE allo slug (dati delle sonde
+        // vecchie) si sostituisce col nome umano alla lettura
+        name: a.name === slug ? composioToolkitName(slug) : a.name,
         status: a.status,
         accountId: a.accountId
       }))
@@ -253,7 +307,8 @@ export function createComposioGatewayManager(deps: ComposioGatewayDeps) {
         const link = links[0]?.url
         if (!link) return { ok: false, error: 'no authorization link in the response' }
         await deps.openExternal(link)
-        void waitForApp(slug, nameHint ?? slug)
+        // K3 (ritocchi): il nome dell'attesa è umano anche senza hint
+        void waitForApp(slug, composioToolkitName(nameHint ?? slug))
         return { ok: true }
       } catch (e) {
         return { ok: false, error: e instanceof Error ? e.message : String(e) }
@@ -267,7 +322,7 @@ export function createComposioGatewayManager(deps: ComposioGatewayDeps) {
       if (!app) return { ok: false, error: 'app not connected from Homun' }
       try {
         if (app.accountId) {
-          await deps.callMcp(COMPOSIO_SERVER_TOOLS.manageConnections, {
+          await deps.callMcp(serverTools().manageConnections, {
             toolkits: [{ name: slug, action: 'remove', account_id: app.accountId }]
           })
         }
@@ -281,11 +336,14 @@ export function createComposioGatewayManager(deps: ComposioGatewayDeps) {
       return { ok: true }
     },
 
-    /** Annulla l'attesa del login (il bottone Annulla della UI). */
+    /** Annulla l'attesa del login (il bottone Annulla della UI; K2: anche «Chiudi» di un attesa non riuscita). */
     cancelWait(): void {
       if (waiting) {
         waiting.cancelled = true
         waiting = null
+        // K2: l'attesa annullata non si riusa — un collegamento ripartito
+        // subito dopo deve chiamare di nuovo WAIT_FOR_CONNECTIONS
+        inFlight = null
         deps.emit({ type: 'connectors' })
       }
     },
@@ -293,27 +351,28 @@ export function createComposioGatewayManager(deps: ComposioGatewayDeps) {
     /**
      * C5 punto 3: `list` sui toolkit collegati da Homun, tollerante sul
      * formato vero; lo stato non deducibile lascia la riga com'è (la UI
-     * mostra «Gestisci su Composio» quando serve).
+     * mostra «Gestisci su Composio» quando serve). K2 (ritocchi): passa da
+     * setApp, così un ACTIVE del toolkit azzera la sua attesa «Non riuscito».
      */
     async refreshAccounts(): Promise<void> {
       if (!deps.gatewayActive()) return
-      const local = apps()
-      for (const [slug, stored] of Object.entries(local)) {
+      for (const slug of Object.keys(apps())) {
+        const stored = appOf(slug)
+        if (!stored) continue
         try {
-          const output = await deps.callMcp(COMPOSIO_SERVER_TOOLS.manageConnections, {
+          const output = await deps.callMcp(serverTools().manageConnections, {
             toolkits: [{ name: slug, action: 'list' }]
           })
           const parsed = parseConnectionsResult(output)
           const account = parsed.accounts.find((a) => (a.toolkit ?? '').toLowerCase() === slug)
           if (!account) continue // formato non deducibile: la riga resta com'è
           const status = String(account.status ?? '').toUpperCase()
-          if (status === 'ACTIVE') local[slug] = { ...stored, status: 'ACTIVE', accountId: account.id ?? stored.accountId }
-          else if (status === 'FAILED' || status === 'EXPIRED') local[slug] = { ...stored, status: 'RECONNECT' }
+          if (status === 'ACTIVE') setApp(slug, { ...stored, status: 'ACTIVE', accountId: account.id ?? stored.accountId })
+          else if (status === 'FAILED' || status === 'EXPIRED') setApp(slug, { ...stored, status: 'RECONNECT' })
         } catch {
           // senza rete o server giù: la riga resta com'è, mai un'eccezione alla UI
         }
       }
-      setApps(local)
     },
 
     /** Lo stato per il modello/loop: il link di una card è ancora apribile? */
