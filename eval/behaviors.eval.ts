@@ -20,7 +20,7 @@ const EVAL_DIR = mkdtempSync(join(tmpdir(), 'sandbot-eval-'))
 setDataDir(EVAL_DIR)
 
 import { llmStream, type ChatMessage, type ToolCall, type ToolDef } from '../src/main/agent/llm'
-import { systemPrompt, withLanguage } from '../src/main/agent/prompts'
+import { systemPrompt, withLanguage, ROUTINE_SILENT_REPLY_GUIDANCE } from '../src/main/agent/prompts'
 import { toolDefs } from '../src/main/agent/tools'
 // fase 11: i result web simulati usano gli stessi FORMATTER REALI del loop
 // (blocchi evidenza con regola del dato), così i casi 15-16 misurano il
@@ -691,6 +691,48 @@ function finalReplyOfEval(text: string, source: 'user' | 'routine' | 'group'): s
   return reply
 }
 
+/**
+ * Fase risposta (verifica): il turno dell'eval come quello VERO del loop —
+ * fuori dai gruppi e dai figli si offre message_user e NON send_to_user (nei
+ * gruppi il contrario, toolsForTurnSource); nelle routine la frase del
+ * NO_RESPONSE va prima della sezione Language; e la storia mostra le vecchie
+ * send_to_user di testo come TESTO assistant (R9: buildMessages non presenta
+ * mai al modello lo schema vecchio dei turni privati).
+ */
+function replyTurnTools(list: ToolDef[], source: 'user' | 'routine' | 'group', child: boolean): ToolDef[] {
+  if (child) return list
+  return source === 'group' ? list.filter((t) => t.name !== 'message_user') : list.filter((t) => t.name !== 'send_to_user')
+}
+function replyTurnHistory(history: ChatMessage[], source: 'user' | 'routine' | 'group', child: boolean): ChatMessage[] {
+  if (child || source === 'group') return history
+  const out: ChatMessage[] = []
+  for (let i = 0; i < history.length; i++) {
+    const m = history[i]!
+    const calls = m.role === 'assistant' ? (m.toolCalls ?? []) : []
+    const next = history[i + 1]
+    if (calls.length === 1 && calls[0]!.name === 'send_to_user' && next?.role === 'tool' && next.toolCallId === calls[0]!.id) {
+      let text = ''
+      try { text = String((JSON.parse(calls[0]!.arguments || '{}') as { text?: unknown }).text ?? '') } catch { /* niente */ }
+      const content = [m.content, text].filter((x) => x && x.trim()).join('\n\n')
+      if (content.trim()) out.push({ role: 'assistant', content })
+      i++
+      continue
+    }
+    out.push(m)
+  }
+  if (source === 'routine' && out[0]?.role === 'system' && typeof out[0].content === 'string') {
+    const sysText = out[0].content
+    const at = sysText.lastIndexOf('\n\n# Language')
+    out[0] = {
+      ...out[0],
+      content: at >= 0
+        ? `${sysText.slice(0, at)}\n\n${ROUTINE_SILENT_REPLY_GUIDANCE}${sysText.slice(at)}`
+        : `${sysText}\n\n${ROUTINE_SILENT_REPLY_GUIDANCE}`
+    }
+  }
+  return out
+}
+
 // ---- un "turno" contro il modello vero: max 4 passi (8 per i casi con team),
 // result simulati, e per i turni UTENTE la stessa coda di recupero/fallback
 // del loop reale; i turni di GRUPPO hanno il recupero VERO del loop (0b):
@@ -719,7 +761,7 @@ async function evalTurn(
   /** K3: il turno si è chiuso su un ask_user (domanda all'utente, nessun recupero) */
   endedWithAsk: boolean
 }> {
-  const messages: ChatMessage[] = [history[0]!, ...history.slice(1)]
+  const messages: ChatMessage[] = replyTurnHistory([history[0]!, ...history.slice(1)], source, child)
   const deliverer = makeDeliverer(world)
   const steps: Array<{ text: string; toolCalls: ToolCall[] }> = []
   let lastFreeText = ''
@@ -734,7 +776,7 @@ async function evalTurn(
   activatedGw = []
   const drainOnce = async (tools?: ToolDef[]): Promise<{ text: string; toolCalls: ToolCall[] }> => {
     // con tool dinamici la lista del passo è QUELLA (find_tools può averla allungata)
-    const list = dynamicTools ? dynamicTools.current : (tools ?? turnToolsAll)
+    const list = tools ?? replyTurnTools(dynamicTools ? dynamicTools.current : turnToolsAll, source, child)
     const ctrl = new AbortController()
     const timer = setTimeout(() => ctrl.abort(), 120_000)
     try {
@@ -2129,7 +2171,7 @@ export function controlledTexts(t: Awaited<ReturnType<typeof evalTurn>>): Array<
   for (const c of t.allCalls) {
     let a: Record<string, unknown> = {}
     try { a = JSON.parse(c.arguments || '{}') as Record<string, unknown> } catch { /* args vuoti */ }
-    if (c.name === 'send_to_user') out.push(['send_to_user', String(a.text ?? '')])
+    if (c.name === 'send_to_user' || c.name === 'message_user') out.push([c.name, String(a.text ?? '')])
     else if (c.name === 'ask_user') {
       out.push(['ask_user', String(a.prompt ?? '')])
       for (const o of Array.isArray(a.options) ? a.options : []) {
