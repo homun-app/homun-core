@@ -4,7 +4,7 @@
 // transcript: il prompt contiene solo le regole e l'azione in un blocco DATO.
 import { describe, expect, it } from 'vitest'
 import {
-  autoReviewDecision, runReviewer, reviewerPrompt, describeActionForReviewer,
+  autoReviewDecision, neverAskDecision, approvalsMode, runReviewer, reviewerPrompt, describeActionForReviewer,
   liftContaminatedAllow, CONTAMINATED_ASK_TOOLS,
   AUTO_REVIEW_MAX_PER_TURN, type AutoReviewAction, type ReviewerModel
 } from '../auto-review'
@@ -167,4 +167,68 @@ describe('runReviewer: normalizzazione e fallback (modello finto)', () => {
     expect(out.ok).toBe(false)
     expect((out as { error: string }).error).toContain('timeout')
   }, 5_000)
+})
+
+// ---- fase impostazioni (I4.3): il modo «Non chiedere» — la sorella pura ----
+
+describe('neverAskDecision (I4.3): ask → allow tranne le esclusioni fisse', () => {
+  const clean: AutoReviewAction = { tool: 'write-file', args: { path: 'a.txt' }, neverAuto: false, untrustedTurn: false }
+
+  it('azione normale → allow sintetico (senza regole, senza revisore, senza tetto)', () => {
+    const d = neverAskDecision(clean)
+    expect(d.allow).toBe(true)
+    if (d.allow) expect(d.reason).toContain('never ask')
+  })
+
+  it('il tetto per turno NON esiste: 100 azioni di fila restano allow', () => {
+    for (let i = 0; i < 100; i++) {
+      expect(neverAskDecision(clean).allow, `azione ${i}`).toBe(true)
+    }
+  })
+
+  it('turno aperto da un altro bot o evento esterno → card', () => {
+    expect(neverAskDecision({ ...clean, untrustedTurn: true }).allow).toBe(false)
+  })
+
+  it('turno contaminato + azione con effetti (CONTAMINATED_ASK_TOOLS) → card', () => {
+    for (const tool of [...CONTAMINATED_ASK_TOOLS]) {
+      const d = neverAskDecision({ ...clean, tool, contaminated: true })
+      expect(d.allow, tool).toBe(false)
+    }
+    // i tool SENZA effetti di un turno contaminato passano (come liftContaminatedAllow)
+    expect(neverAskDecision({ ...clean, tool: 'write-file', contaminated: true }).allow).toBe(true)
+  })
+
+  it('comando never-auto → card (la chiave non dice cosa eseguirà davvero)', () => {
+    expect(neverAskDecision({ ...clean, neverAuto: true }).allow).toBe(false)
+  })
+
+  it('azioni che cambiano il comportamento futuro del bot → card', () => {
+    for (const tool of ['update_skill', 'update_memory', 'update_state']) {
+      expect(neverAskDecision({ ...clean, tool }).allow, tool).toBe(false)
+    }
+  })
+
+  it('lo scambio di file col Mac → card (protezione fissa, come ALWAYS_ASK_TOOLS)', () => {
+    expect(neverAskDecision({ ...clean, tool: 'copy_to_box' }).allow).toBe(false)
+    expect(neverAskDecision({ ...clean, tool: 'copy_from_box' }).allow).toBe(false)
+  })
+})
+
+describe('approvalsMode (I4.1): il modo dai setting, con compatibilità', () => {
+  const mkSettings = (map: Record<string, unknown>) => ({
+    getSetting: <T,>(key: string, fallback: T): T => (key in map ? map[key] as T : fallback)
+  })
+
+  it('approvals.mode è la fonte', () => {
+    expect(approvalsMode(mkSettings({ 'approvals.mode': 'never' }))).toBe('never')
+    expect(approvalsMode(mkSettings({ 'approvals.mode': 'auto' }))).toBe('auto')
+    expect(approvalsMode(mkSettings({ 'approvals.mode': 'ask' }))).toBe('ask')
+  })
+
+  it('senza approvals.mode (dati di ieri): autoReview.enabled decide', () => {
+    expect(approvalsMode(mkSettings({ autoReview: { ...DEFAULT_AUTO_REVIEW, enabled: true } }))).toBe('auto')
+    expect(approvalsMode(mkSettings({ autoReview: { ...DEFAULT_AUTO_REVIEW, enabled: false } }))).toBe('ask')
+    expect(approvalsMode(mkSettings({}))).toBe('ask')
+  })
 })

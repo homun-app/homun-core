@@ -19,13 +19,13 @@ import { X, Plus } from 'lucide-react'
 import { api, useStore, useResolvedModel } from '../store'
 import { Bot } from '../bot/Bot'
 import { useBotInfo } from '../bot/use-bot'
-import type { GroupInfo, LibraryItemInfo, ModelInfo, RoutineInfo, ThinkingSetting, Agent } from '../../../shared/types'
+import type { GroupInfo, LibraryItemInfo, RoutineInfo, ThinkingSetting, Agent } from '../../../shared/types'
 import { ChangeAvatarDialog } from './BotDialogs'
 // fase 16b correzioni 2 (Q1): il risultato di layoutFor
 import type { LayoutResult } from '../layout'
 // fase 19b (T1) → fase 16b (S4): il pannello «Computer» vive QUI come scheda
 import { ComputerPanel } from './ComputerPanel'
-import { ModelPicker, THINKING_LABELS } from './ui/ModelPicker'
+import { ModelSelect } from './ui/ModelSelect'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu'
 
 /** L'etichetta ✕ del pannello, sulla riga comune (fase 16b correzioni 2, Q3). */
@@ -230,7 +230,6 @@ function AdvancedTab() {
   const mainAgentId = useStore((s) => s.mainAgentId)
   const setMainAgent = useStore((s) => s.setMainAgent)
   const agent = agents.find((a) => a.id === activeId)
-  const [models, setModels] = useState<Record<string, ModelInfo[]>>({})
   const [notifOff, setNotifOff] = useState<boolean | null>(null)
   const [section, setSection] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -240,13 +239,6 @@ function AdvancedTab() {
     setNotifOff(null)
     void api.settingsGet<string[]>('notifications.disabledAgents', []).then((v) => setNotifOff(v.includes(activeId ?? ''))).catch(() => setNotifOff(false))
   }, [activeId, agent?.section])
-  useEffect(() => {
-    for (const p of providers) {
-      if (!models[p.id]) {
-        api.listModels(p.id).then((ms: ModelInfo[]) => setModels((prev) => ({ ...prev, [p.id]: ms }))).catch(() => undefined)
-      }
-    }
-  }, [providers, models])
   // fase 16c correzioni (R4): il modello risolto passa dal selettore UNICO;
   // followsMain viene da lì (vale anche per il provider proprio sparito, R3.6:
   // finché l'utente non sceglie, il pannello mostra «Come gli altri»)
@@ -254,8 +246,6 @@ function AdvancedTab() {
   if (!agent) return null
   const effectiveMain = mainAgentId ?? agents[0]?.id ?? null
   const followsMain = resolved?.followsMain === true
-  const chosen = resolved ? (models[resolved.providerId] ?? []).find((m) => m.id === resolved.model) : undefined
-  const levels = chosen?.thinkingLevels ?? []
   const patch = (p: Partial<Agent>): void => {
     void api.updateAgent(agent.id, p).catch((e) => console.error('updateAgent:', e instanceof Error ? e.message : e))
   }
@@ -282,45 +272,23 @@ function AdvancedTab() {
       </button>
 
       <SmallTitle><Trans>Modello e ragionamento</Trans></SmallTitle>
-      <div className="flex gap-2">
-        {/* fase 16c (C3.3): in testa «Come gli altri (modello principale)»,
-            che salva null/null; poi l'elenco dei modelli per provider */}
-        <select
-          className="min-w-0 flex-1 rounded-[10px] bg-muted px-2.5 py-2 text-sm outline-none"
-          value={followsMain ? '__main__' : agent.providerId ?? ''}
-          onChange={(e) => patch(e.target.value === '__main__' ? { providerId: null, model: null } : { providerId: e.target.value || null, model: null })}
-          aria-label={t`Provider`}
-        >
-          {mainModel && mainModel.providerId && mainModel.model && (
-            <option value="__main__">{t`Come gli altri (${mainModel.model})`}</option>
-          )}
-          <option value="">{t`— provider —`}</option>
-          {providers.map((p) => (
-            <option key={p.id} value={p.id}>{p.name}</option>
-          ))}
-        </select>
-        <div className="min-w-0 flex-1">
-          <ModelPicker
-            models={models[agent.providerId ?? ''] ?? []}
-            value={agent.model}
-            placeholder={followsMain ? (mainModel ? mainModel.model : t`— modello —`) : t`— modello —`}
-            disabled={!agent.providerId}
-            onChange={(m) => patch({ model: m })}
-          />
-        </div>
-      </div>
-      {levels.length > 0 && (
-        <select
-          className="mt-2 w-full rounded-[10px] bg-muted px-2.5 py-2 text-sm outline-none"
-          value={levels.includes((agent.thinking ?? 'default') as ThinkingSetting) ? agent.thinking ?? 'default' : 'default'}
-          onChange={(e) => patch({ thinking: e.target.value as ThinkingSetting })}
-          aria-label={t`Ragionamento`}
-        >
-          {(['default', ...levels] as ThinkingSetting[]).map((l) => (
-            <option key={l} value={l}>{i18n.t(THINKING_LABELS[l] ?? msg`${l}`)}</option>
-          ))}
-        </select>
-      )}
+      {/* fase impostazioni (I6): UN solo ModelSelect al posto di select dei
+          provider + ModelPicker; «Come gli altri · <modello principale>» è la
+          prima voce (salva null/null, come sempre) e il ragionamento sta nel
+          «⋯» della riga (I1.4) */}
+      <ModelSelect
+        value={followsMain || !agent.providerId || !agent.model
+          ? null
+          : { providerId: agent.providerId, model: agent.model }}
+        onChange={(r) => patch(r ? { providerId: r.providerId, model: r.model } : { providerId: null, model: null })}
+        allowFollowMain
+        thinking={agent.thinking ?? 'default'}
+        onThinking={(level) => patch({ thinking: level })}
+        // «Come gli altri»: i livelli del ragionamento vengono dal modello
+        // principale risolto (il ⋯ resta offerto anche seguendo)
+        followModel={followsMain && resolved ? { providerId: resolved.providerId, model: resolved.model } : null}
+        aria-label={t`Modello del bot`}
+      />
 
       <SmallTitle><Trans>Istruzioni</Trans></SmallTitle>
       <textarea

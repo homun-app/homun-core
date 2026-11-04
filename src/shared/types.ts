@@ -548,6 +548,16 @@ export interface PermissionsConfig {
 }
 
 // ---- Approvazioni ----
+
+/**
+ * Fase impostazioni (I4): il modo delle approvazioni, la prima scelta della
+ * pagina. 'ask' = la politica di oggi (card per ciò che cambia qualcosa);
+ * 'auto' = l'auto-revisione di oggi (autoReview.enabled === true);
+ * 'never' = ogni ask del gate parte, tranne le esclusioni fisse (vedi
+ * neverAskDecision in auto-review.ts). Setting approvals.mode.
+ */
+export type ApprovalsMode = 'ask' | 'auto' | 'never'
+
 export interface Approval {
   id: string
   agentId: string
@@ -1170,6 +1180,17 @@ export const DEFAULT_AUTO_REVIEW: AutoReviewSettings = {
   blockRules: [],
   providerId: null,
   model: null
+}
+
+/**
+ * Fase impostazioni (I4): autoReview.enabled è DERIVATO dal modo
+ * (approvals.mode === 'auto'): la UI scrive entrambi, il motore continua a
+ * leggere cfg.enabled come sempre. Senza approvals.mode (dati di ieri) il
+ * modo si ricava da enabled — compatibilità in lettura.
+ */
+export function approvalsModeOf(autoReview: AutoReviewSettings, mode: ApprovalsMode | undefined): ApprovalsMode {
+  if (mode === 'ask' || mode === 'auto' || mode === 'never') return mode
+  return autoReview.enabled ? 'auto' : 'ask'
 }
 
 // ---- libreria (fase 14, punti 1-5) ----

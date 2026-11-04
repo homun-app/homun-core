@@ -518,8 +518,11 @@ export function getPermissions(): PermissionsConfig {
     rules: [
       // fase 3: i tool di comunicazione sono sempre consentiti (il gate non
       // serve: sono l'unico modo che il modello ha di parlare con l'utente e
-      // non hanno effetti fuori dal transcript)
+      // non hanno effetti fuori dal transcript).
+      // fase impostazioni (I4.5): anche message_user (i progressi della fase
+      // risposta) — send_to_user resta (serve ai turni di GRUPPO)
       { tool: 'send_to_user', pattern: '*', mode: 'always_allow' },
+      { tool: 'message_user', pattern: '*', mode: 'always_allow' },
       { tool: 'ask_user', pattern: '*', mode: 'always_allow' },
       { tool: 'draft_external', pattern: '*', mode: 'always_allow' },
       { tool: 'read-file', pattern: '*', mode: 'always_allow' },

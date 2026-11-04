@@ -4,7 +4,6 @@
 // Fase 18b (K7): routeIncompatibility — quando un anello NON può servire il turno.
 import { describe, expect, it } from 'vitest'
 import { fallbackEligible, shouldUseFallback, routeChain, nextRoute, routeIncompatibility, type Route, type NextRouteState } from '../model-fallback'
-import type { ModelDefaultsMap } from '../model-defaults'
 
 const httpError = (status: number): Error => {
   const e = new Error(`HTTP ${status}`)
@@ -77,26 +76,30 @@ describe('shouldUseFallback', () => {
 })
 
 // ---- fase 18b (H2.1): routeChain — la catena effettiva del turno ----
+// Fase impostazioni (I3): la catena è SOLO quella visibile
+// (models.fallbackChain) — il fallbackModel implicito del provider NON si
+// inserisce più (la migrazione una tantum l'ha scritto in catena).
 
-const chainDeps = (providers: Array<{ id: string; kind: string; enabled: boolean }>, modelDefaults: ModelDefaultsMap = {}, chain: Route[] = []) =>
-  ({ providers, modelDefaults, chain })
+const chainDeps = (providers: Array<{ id: string; kind: string; enabled: boolean }>, chain: Route[] = []) =>
+  ({ providers, chain })
 const pA = { id: 'pa', kind: 'groq', enabled: true }
 const pB = { id: 'pb', kind: 'openai', enabled: true }
 const pOff = { id: 'poff', kind: 'ollama', enabled: false }
 
 describe('routeChain (H2.1)', () => {
-  it('catena vuota e senza fallbackModel = [primary]: il comportamento di oggi', () => {
+  it('catena vuota = [primary]: il comportamento di chi non configura niente', () => {
     expect(routeChain({ providerId: 'pa', model: 'm1' }, chainDeps([pA]))).toEqual([{ providerId: 'pa', model: 'm1' }])
   })
 
-  it('fallbackModel del provider di primary è il PRIMO anello dopo il primario', () => {
+  it('I3: NESSUNA riserva implicita — la catena configurata è l’unica fonte', () => {
+    // anche se il provider avrebbe un fallbackModel (nel setting o nel kind),
+    // la catena effettiva resta [primary, ...chain]
     const out = routeChain(
       { providerId: 'pa', model: 'm1' },
-      chainDeps([pA, pB], { pa: { fallbackModel: 'm-stessa' } }, [{ providerId: 'pb', model: 'x' }])
+      chainDeps([pA, pB], [{ providerId: 'pb', model: 'x' }])
     )
     expect(out).toEqual([
       { providerId: 'pa', model: 'm1' },
-      { providerId: 'pa', model: 'm-stessa' },
       { providerId: 'pb', model: 'x' }
     ])
   })
@@ -104,15 +107,14 @@ describe('routeChain (H2.1)', () => {
   it('i DOPPIONI (stesso providerId + model) si tolgono — vince la prima posizione', () => {
     const out = routeChain(
       { providerId: 'pa', model: 'm1' },
-      chainDeps([pA, pB], { pa: { fallbackModel: 'x' } }, [
-        { providerId: 'pa', model: 'x' },
+      chainDeps([pA, pB], [
+        { providerId: 'pa', model: 'm1' },  // doppione del primario: via
         { providerId: 'pb', model: 'x' },
         { providerId: 'pb', model: 'x' }
       ])
     )
     expect(out).toEqual([
       { providerId: 'pa', model: 'm1' },
-      { providerId: 'pa', model: 'x' },
       { providerId: 'pb', model: 'x' }
     ])
   })
@@ -120,7 +122,7 @@ describe('routeChain (H2.1)', () => {
   it('le voci con provider inesistente o DISABILITATO si tolgono; primary resta SEMPRE primo', () => {
     const out = routeChain(
       { providerId: 'pa', model: 'm1' },
-      chainDeps([pA, pOff], {}, [
+      chainDeps([pA, pOff], [
         { providerId: 'poff', model: 'y' },
         { providerId: 'manca', model: 'z' }
       ])
@@ -128,11 +130,11 @@ describe('routeChain (H2.1)', () => {
     expect(out).toEqual([{ providerId: 'pa', model: 'm1' }])
   })
 
-  it('K4: al massimo le PRIME 4 voci VALIDE della catena configurata (primario e riserva dello stesso provider NON contano)', () => {
+  it('K4: al massimo le PRIME 4 voci VALIDE della catena configurata (il primario NON conta)', () => {
     const pC = { id: 'pc', kind: 'zai', enabled: true }
     const out = routeChain(
       { providerId: 'pa', model: 'm1' },
-      chainDeps([pA, pB, pC, pOff], { pa: { fallbackModel: 'm-stessa' } }, [
+      chainDeps([pA, pB, pC, pOff], [
         { providerId: 'poff', model: 'no' },   // non valida: NON consuma il tetto
         { providerId: 'manca', model: 'no' },  // non valida: NON consuma il tetto
         { providerId: 'pb', model: 'c1' },
@@ -144,7 +146,6 @@ describe('routeChain (H2.1)', () => {
     )
     expect(out).toEqual([
       { providerId: 'pa', model: 'm1' },       // primario: fuori dal tetto
-      { providerId: 'pa', model: 'm-stessa' }, // riserva stesso provider: fuori dal tetto
       { providerId: 'pb', model: 'c1' },
       { providerId: 'pc', model: 'c2' },
       { providerId: 'pa', model: 'c3' },

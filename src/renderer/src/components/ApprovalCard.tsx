@@ -105,10 +105,15 @@ export function ApprovalCard({ entry, readOnly = false }: { entry: TranscriptEnt
   // sulle annotazioni a ogni chiamata); dopo il click QUESTA chiamata passa once
   const mcpServerRead = entry.meta?.mcpServerRead as { slug?: string; name?: string } | undefined
 
-  // fase 8: auto-approvata dall'auto-review — riga compressa, espandibile
+  // fase 8: auto-approvata dall'auto-review — riga compressa, espandibile.
+  // fase impostazioni (I4.3): nel modo «Non chiedere» non c'è regola — la
+  // riga dice QUALE impostazione ha fatto passare l'azione
   if (entry.meta?.autoApproved) {
+    const autoLabel = entry.meta?.autoNever
+      ? i18n.t(msg`Eseguito senza chiedere (Approvazioni: non chiedere)`)
+      : i18n.t(msg`Approvato automaticamente: ${String(entry.meta?.ruleMatched ?? '')}`)
     return (
-      <DecidedRow ok label={i18n.t(msg`Approvato automaticamente: ${String(entry.meta?.ruleMatched ?? '')}`)} at={entry.createdAt}>
+      <DecidedRow ok label={autoLabel} at={entry.createdAt}>
         <CardShell>
           {/* R3: anche qui il titolo umano per Composio/MCP, mai il nome tecnico nudo */}
           <p className="text-sm">

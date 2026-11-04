@@ -1,16 +1,21 @@
 // Fase 9 (punto 1) → fase 18b (H2): la RISERVA è diventata una CATENA ordinata
 // di anelli provider+modello (il modello dei router LLM maturi: LiteLLM,
 // OpenRouter `models: [...]`). Il vecchio fallbackModel dello stesso provider
-// resta il PRIMO anello dopo il primario; models.fallbackChain (H2.1) ne
-// aggiunge altri, anche su provider diversi — il caso reale che la riserva
+// restava il PRIMO anello dopo il primario; models.fallbackChain (H2.1) ne
+// aggiungeva altri, anche su provider diversi — il caso reale che la riserva
 // sullo stesso account non risolve (il limite settimanale di Ollama cloud).
 // Modulo PURO, testato senza rete.
+//
+// Fase impostazioni (I3): «quello che si vede è quello che gira». La catena
+// effettiva è SOLO [primary, ...models.fallbackChain]: il vecchio
+// fallbackModel implicito (override utente o default del kind) non si
+// inserisce più in silenzio — la migrazione una tantum lo scrive in
+// models.fallbackChain, così la pagina mostra la catena VERA.
 //
 // Nota: gli errori di rete del provider (connessione rifiutata/reset) valgono
 // come "il modello principale non risponde": la riprova costa poco, ed è
 // esattamente il caso in cui la riserva serve.
 import type { FallbackRoute } from '../../shared/types'
-import type { ModelDefaultsMap } from './model-defaults'
 import { stopReasonOfError } from './loop-guard'
 
 export type Route = FallbackRoute
@@ -25,6 +30,8 @@ export interface FallbackState {
   /** Il turno è stato interrotto (dall'utente): mai riserva. */
   aborted: boolean
 }
+// (FallbackState e shouldUseFallback restano per i test della fase 9: la
+// decisione è la stessa di sempre, riscritta su nextRoute.)
 
 /** L'errore ammette la riserva? (5xx / timeout / scadenza dello stream / rete) */
 export function fallbackEligible(err: unknown): boolean {
@@ -46,19 +53,19 @@ export function fallbackEligible(err: unknown): boolean {
 export const MAX_CHAIN_ENTRIES = 4
 
 /**
- * H2.1: la catena effettiva delle rotte di un turno — [primary, fallbackModel
- * del provider di primary (se c'è), ...chain]. Si tolgono i doppioni (stesso
- * providerId + model) e le voci il cui provider non esiste o è disabilitato.
- * Il primo elemento è SEMPRE primary. Catena vuota = [primary]: il
- * comportamento di chi non configura niente è esattamente quello di oggi.
+ * H2.1: la catena effettiva delle rotte di un turno — [primary, ...chain].
+ * Si tolgono i doppioni (stesso providerId + model) e le voci il cui provider
+ * non esiste o è disabilitato. Il primo elemento è SEMPRE primary. Catena
+ * vuota = [primary].
  * K4: della catena configurata valgono al massimo le PRIME MAX_CHAIN_ENTRIES
  * voci VALIDE (le altre si ignorano, come se la UI non le avesse permesse).
+ * Fase impostazioni (I3): la catena è SOLO quella visibile
+ * (models.fallbackChain) — niente più riserva implicita del provider.
  */
 export function routeChain(
   primary: Route,
   deps: {
     providers: Array<{ id: string; kind: string; enabled: boolean }>
-    modelDefaults: ModelDefaultsMap
     chain: Route[]
   }
 ): Route[] {
@@ -75,15 +82,9 @@ export function routeChain(
     if (capped.length >= MAX_CHAIN_ENTRIES) break
     if (usable(r)) capped.push(r)
   }
-  const first = deps.modelDefaults[primary.providerId]?.fallbackModel
-  const candidates: Route[] = [
-    primary,
-    ...(first && first !== primary.model ? [{ providerId: primary.providerId, model: first }] : []),
-    ...capped
-  ]
   const out: Route[] = []
   const seen = new Set<string>()
-  for (const r of candidates) {
+  for (const r of [primary, ...capped]) {
     // primary è SEMPRE primo, anche se il suo provider fosse disabilitato
     // dopo la costruzione (la catena si valuta una volta a inizio turno)
     if (r === primary || usable(r)) {

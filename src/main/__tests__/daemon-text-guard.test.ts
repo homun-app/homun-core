@@ -87,6 +87,9 @@ const ALLOWED_SYMBOLS: Record<string, string[]> = {
   // fase catalogo app (P2): le etichette it/en delle categorie nostre — POche
   // e FISSE, dati per costruzione (non testi della UI, che passano da Trans)
   'src/shared/app-catalog/index.ts': ['APP_CATEGORY_LABELS'],
+  // fase impostazioni (I4.5): i nomi umani degli strumenti per la pagina
+  // Approvazioni — tabella bilingue per costruzione, come ACTION_OBJECTS
+  'src/shared/tool-names.ts': ['NAMES', 'PREFIX_NAMES'],
   // lista di riconoscimento dei campi con credenziali (legge la pagina, C7);
   // COMMIT_WORDS non scatta più e NON è in lista: una voce morta fallirebbe
   'src/main/agent/browser-guard.ts': ['CREDENTIAL_FIELD_WORDS'],

@@ -57,7 +57,7 @@ import { formatAgentMessage, agentSendGuard, countPairMessagesLastHour, AGENT_HO
 import { mainAgentOf } from '../../daemon/presence'
 import { analyzeCommand } from './shell-ast'
 import { commandKey, isNeverAuto } from './permission-rules'
-import { autoReviewDecision, reviewWithConfiguredModel, liftContaminatedAllow, AUTO_REVIEW_MAX_PER_TURN, type AutoReviewAction } from './auto-review'
+import { autoReviewDecision, neverAskDecision, approvalsMode, reviewWithConfiguredModel, liftContaminatedAllow, AUTO_REVIEW_MAX_PER_TURN, type AutoReviewAction } from './auto-review'
 import { activityOf, isToolLoop, stopReasonOfError } from './loop-guard'
 import { nextWithDeadline, DEFAULT_STREAM_DEADLINES, StreamDeadlineError } from './stream-deadline'
 // fase 9 (punto 0): regole dei send_to_user dentro il turno (dedup, tetto
@@ -72,7 +72,6 @@ import { NO_RESPONSE, isExactNoResponse, isPlaceholderText, couldBecomeNoRespons
 // fase 9 (punto 1) → fase 18b (H2): la riserva è una CATENA di anelli
 // provider+modello (modello dei router LLM maturi); il raffreddamento (H2.3)
 // tiene in pausa chi ha appena fallito, in memoria nel processo del daemon
-import { type ModelDefaultsMap } from './model-defaults'
 import { routeChain, nextRoute, fallbackEligible, routeIncompatibility, type Route } from './model-fallback'
 import { coolDown, isCooled, cooledUntil, markHealthy } from './route-health'
 // fase 18b (H4): la visione conosciuta del modello del turno (use-app, immagini)
@@ -1510,12 +1509,25 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     }
 
     // fase 9 (punto 1) → fase 18b (H2): la CATENA delle riserve —
-    // [primario, fallbackModel dello stesso provider, ...models.fallbackChain].
-    // Il primario è quello della ROUTINE quando c'è (H7); chi non configura
-    // niente ha esattamente il comportamento di oggi (un anello in più al
-    // massimo, sullo stesso provider)
-    const modelDefaults = getSetting<ModelDefaultsMap>('providers.modelDefaults', {})
+    // [primario, ...models.fallbackChain]. Il primario è quello della ROUTINE
+    // quando c'è (H7); chi non configura niente ha esattamente il
+    // comportamento di oggi (un anello in più al massimo, sullo stesso
+    // provider). Fase impostazioni (I3): la catena è SOLO quella visibile —
+    // la riserva implicita del provider non si inserisce più in silenzio (la
+    // migrazione una tantum l'ha scritta in models.fallbackChain).
     const fallbackChain = getSetting<Route[]>('models.fallbackChain', [])
+    // fase impostazioni (I4.1): il modo delle approvazioni del turno —
+    // 'never' trasforma gli ask del gate in allow (tranne le esclusioni
+    // fisse, neverAskDecision); 'auto' è l'auto-review di sempre
+    const mode = approvalsMode({ getSetting })
+    // I4.3: nel modo «Non chiedere» restituisce il motivo dell'allow
+    // sintetico (niente tetto per turno), altrimenti null e si segue la via
+    // di sempre (auto-review o card)
+    const neverAllow = (action: AutoReviewAction): string | null => {
+      if (mode !== 'never') return null
+      const d = neverAskDecision(action)
+      return d.allow ? d.reason : null
+    }
     const allProviders = listProviders()
     const providerById = (id: string): ProviderConfig | undefined =>
       allProviders.find((x) => x.id === id) ?? (provider.id === id ? provider : undefined)
@@ -1547,7 +1559,6 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     const chain = routeChain(primary, {
       // il provider del bot entra sempre (è quello di primary: EnabledByConstruction)
       providers: [...allProviders.filter((x) => x.id !== provider.id), provider],
-      modelDefaults,
       chain: fallbackChain
     })
     // H2.3: il turno parte dal primo anello NON raffreddato; se lo sono
@@ -2372,18 +2383,25 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           if (risk.kind === 'ask') {
             // auto-review come per le altre ask; nel turno contaminato (dopo
             // una pagina letta lo è SEMPRE) CONTAMINATED_ASK_TOOLS non lascia
-            // approvare da sola: la card va all'utente
+            // approvare da sola: la card va all'utente.
+            // Fase impostazioni (I4.3): nel modo «Non chiedere» le esclusioni
+            // fisse valgono uguale — neverAllow le rispetta
             let autoAllowed: { ruleMatched: string; reason?: string } | null = null
             const action: AutoReviewAction = {
               tool: call.name, args: input, neverAuto: false, untrustedTurn,
               ...(contaminated ? { contaminated: true } : {})
             }
-            const review = await reviewWithConfiguredModel(action, userLang)
-            if (review) {
-              const decision = autoReviewDecision(review.cfg, action, review.outcome, autoApprovals)
-              if (decision.autoAllow) {
-                autoAllowed = { ruleMatched: decision.ruleMatched, ...(decision.reason ? { reason: decision.reason } : {}) }
-                autoApprovals++
+            const neverReason = neverAllow(action)
+            if (neverReason !== null) {
+              autoAllowed = { ruleMatched: '', reason: neverReason }
+            } else {
+              const review = await reviewWithConfiguredModel(action, userLang)
+              if (review) {
+                const decision = autoReviewDecision(review.cfg, action, review.outcome, autoApprovals)
+                if (decision.autoAllow) {
+                  autoAllowed = { ruleMatched: decision.ruleMatched, ...(decision.reason ? { reason: decision.reason } : {}) }
+                  autoApprovals++
+                }
               }
             }
             if (!autoAllowed) {
@@ -2569,15 +2587,22 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             }
             if (risk.kind === 'ask') {
               // la STESSA card di approvazione di oggi (id card.browserAsk):
-              // auto-review come per le altre ask, poi la card all'utente
+              // auto-review come per le altre ask, poi la card all'utente.
+              // Fase impostazioni (I4.3): il modo «Non chiedere» rispetta le
+              // stesse esclusioni fisse (neverAllow)
               let autoAllowed: { ruleMatched: string } | null = null
               const arAction: AutoReviewAction = { tool: call.name, args: input, neverAuto: false, untrustedTurn, ...(contaminated ? { contaminated: true } : {}) }
-              const review = await reviewWithConfiguredModel(arAction, userLang)
-              if (review) {
-                const decision = autoReviewDecision(review.cfg, arAction, review.outcome, autoApprovals)
-                if (decision.autoAllow) {
-                  autoAllowed = { ruleMatched: decision.ruleMatched }
-                  autoApprovals++
+              const neverReason = neverAllow(arAction)
+              if (neverReason !== null) {
+                autoAllowed = { ruleMatched: '' }
+              } else {
+                const review = await reviewWithConfiguredModel(arAction, userLang)
+                if (review) {
+                  const decision = autoReviewDecision(review.cfg, arAction, review.outcome, autoApprovals)
+                  if (decision.autoAllow) {
+                    autoAllowed = { ruleMatched: decision.ruleMatched }
+                    autoApprovals++
+                  }
                 }
               }
               if (!autoAllowed) {
@@ -3612,7 +3637,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           const turnGranted = tKey !== null && run.turnAllows.has(tKey)
           // fase 8 (punto 1): l'auto-review sta DOPO il gate e può SOLO
           // trasformare ask in allow, secondo le regole dell'utente
-          let autoAllowed: { ruleMatched: string; reason?: string } | null = null
+          let autoAllowed: { ruleMatched: string; reason?: string; never?: boolean } | null = null
           // per la UI: i comandi never-auto non offrono "per questo turno"
           const neverAutoCmd = call.name === 'run-command'
             ? (await analyzeCommand(String(input.command ?? ''))).commands.some((c) => isNeverAuto(c))
@@ -3625,12 +3650,19 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               tool: call.name, args: input, neverAuto: neverAutoCmd || forcedOriginAsk, untrustedTurn,
               ...(contaminated ? { contaminated: true } : {})
             }
-            const review = await reviewWithConfiguredModel(action, userLang)
-            if (review) {
-              const decision = autoReviewDecision(review.cfg, action, review.outcome, autoApprovals)
-              if (decision.autoAllow) {
-                autoAllowed = { ruleMatched: decision.ruleMatched, ...(decision.reason ? { reason: decision.reason } : {}) }
-                autoApprovals++
+            // fase impostazioni (I4.3): modo «Non chiedere» — allow sintetico,
+            // senza tetto per turno, tranne le esclusioni fisse di sempre
+            const neverReason = neverAllow(action)
+            if (neverReason !== null) {
+              autoAllowed = { ruleMatched: '', reason: neverReason, never: true }
+            } else {
+              const review = await reviewWithConfiguredModel(action, userLang)
+              if (review) {
+                const decision = autoReviewDecision(review.cfg, action, review.outcome, autoApprovals)
+                if (decision.autoAllow) {
+                  autoAllowed = { ruleMatched: decision.ruleMatched, ...(decision.reason ? { reason: decision.reason } : {}) }
+                  autoApprovals++
+                }
               }
             }
           }
@@ -3644,7 +3676,10 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               meta: {
                 tool: call.name, input, status: 'allowed', keys: verdict.keys,
                 ...(verdictUiOf(verdict) ? { ui: verdictUiOf(verdict)! } : {}),
-                autoApproved: true, ruleMatched: autoAllowed.ruleMatched,
+                autoApproved: true,
+                // I4.3: nel modo «Non chiedere» non c'è regola — il marker dice
+                // QUALE impostazione ha fatto passare l'azione
+                ...(autoAllowed.never ? { autoNever: true } : { ruleMatched: autoAllowed.ruleMatched }),
                 ...(autoAllowed.reason ? { reason: autoAllowed.reason } : {}),
                 ...(verdict.secretRefs?.length ? { secretRefs: verdict.secretRefs } : {}),
                 // R3 (ritocchi): anche le auto-approvate MCP portano il nome

@@ -1,9 +1,13 @@
 // Fase 9 (punto 1): modello predefinito e modello di riserva per provider.
 // Modulo PURO: i default sono per kind (la scelta è del revisore, con prove sui
 // comportamenti: kimi-k3:cloud 15/15 → predefinito, glm-5.3:cloud 14/15 →
-// riserva, glm-5.3-flash:cloud piccolo e veloce → revisore dell'auto-review)
-// e l'utente li cambia per provider dalle impostazioni (setting
-// 'providers.modelDefaults', chiave = id del provider, campo per campo).
+// riserva, glm-5.3-flash:cloud piccolo e veloce → revisore dell'auto-review).
+//
+// Fase impostazioni (I3): i default del kind restano SOLO interni — servono a
+// scegliere il primo modello principale (assignDefaultModel /
+// assignFirstMainModel) e il modello dei bot nuovi quando models.main manca.
+// L'interfaccia non li scrive più in providers.modelDefaults (il setting
+// resta nel database per compatibilità, ma è solo lettura del passato).
 //
 // Fase 16c (C3.3): «Come gli altri» — il modello principale (models.main) e
 // resolveAgentModel, la funzione pura che decide CHE modello esegue un bot:
@@ -88,6 +92,11 @@ export interface FirstMainDeps {
   savedProvider(): import('../../shared/types').ProviderConfig | null
   getOverrides(): ModelDefaultsMap
   supportsTools(provider: { id: string; kind: string }, model: string): Promise<{ ok: boolean; checked: boolean; error?: string }>
+  // fase impostazioni (I3): riserve e revisore visibili fin dal collegamento
+  getChain(): import('../../shared/types').FallbackRoute[]
+  setChain(chain: import('../../shared/types').FallbackRoute[]): void
+  getReviewer(): import('../../shared/types').AutoReviewSettings
+  setReviewer(cfg: import('../../shared/types').AutoReviewSettings): void
 }
 
 /**
@@ -95,16 +104,38 @@ export interface FirstMainDeps {
  * il principale diventa il suo modello predefinito (quello che sceglierebbe
  * oggi assignDefaultModel, capability "tools" verificata). Se il default non
  * c'è o non passa il check, models.main resta vuoto (lo sceglie l'utente).
+ *
+ * Fase impostazioni (I3): quello che si vede è quello che gira — quando
+ * assegna il principale, scrive ANCHE la riserva del tipo (se c'è e supporta
+ * i tool) come prima voce di models.fallbackChain, e il revisore del tipo
+ * (se l'utente non ne ha ancora scelto uno) in autoReview. Così la pagina
+ * Modelli mostra da subito la catena vera, senza riserve nascoste.
  */
 export async function assignFirstMainModel(deps: FirstMainDeps): Promise<void> {
   if (deps.getMain()) return
   const provider = deps.savedProvider()
   if (!provider || !provider.enabled) return
-  const dm = defaultModelFor(provider, deps.getOverrides())
+  const overrides = deps.getOverrides()
+  const dm = defaultModelFor(provider, overrides)
   if (!dm) return
   const check = await deps.supportsTools(provider, dm)
   if (!check.ok) return
   deps.setMain({ providerId: provider.id, model: dm, thinking: null })
+  // I3.1: la riserva del tipo diventa la PRIMA voce della catena (se non c'è
+  // già: il dedup di routeChain tollera comunque i doppioni)
+  const fb = fallbackModelFor(provider, overrides)
+  if (fb && fb !== dm) {
+    const chain = deps.getChain()
+    if (!chain.some((r) => r.providerId === provider.id && r.model === fb)) {
+      deps.setChain([{ providerId: provider.id, model: fb }, ...chain])
+    }
+  }
+  // I3.2: il revisore del tipo, se l'utente non ne ha scelto uno
+  const reviewer = deps.getReviewer()
+  const ar = autoReviewModelFor(provider, overrides)
+  if (ar && !reviewer.providerId && !reviewer.model) {
+    deps.setReviewer({ ...reviewer, providerId: provider.id, model: ar })
+  }
 }
 
 /**

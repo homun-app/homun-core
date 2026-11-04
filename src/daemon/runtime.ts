@@ -127,6 +127,18 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
     if (pruned > 0) console.log(`[sandbotd] ${pruned} esecuzioni di routine oltre i 90 giorni rimosse`)
   }
 
+  // fase impostazioni (I3/I4/I8): migrazioni dei SETTING, una tantum con flag
+  // (idempotenti) — riserva implicita e revisore silenzioso diventano visibili,
+  // approvals.mode nasce da autoReview.enabled
+  {
+    const { migrateImpostazioniSettings } = await import('../main/store/settings-migrations')
+    try {
+      migrateImpostazioniSettings()
+    } catch (e) {
+      console.error('[sandbotd] migrazione impostazioni rimandata al prossimo avvio:', e instanceof Error ? e.message : e)
+    }
+  }
+
   // fase 12: il broadcast si riempie quando il server ws esiste; il boot lo
   // usa per il risveglio dei lotti (gli eventi persi prima della connessione
   // della UI si ricaricano comunque al primo 'agents'/'subagents')

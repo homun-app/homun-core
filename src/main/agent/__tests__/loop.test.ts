@@ -2040,6 +2040,105 @@ describe('fase 7: send_to_agent', () => {
   })
 })
 
+// ---- fase impostazioni (I4.3): i tre modi delle approvazioni nel gate ----
+
+describe('fase impostazioni (I4): i tre modi nel gate del turno', () => {
+  // la STESSA azione per tutti i test: un comando innocuo che il gate segna ask
+  const CMD = { id: 'c1', name: 'run-command', arguments: JSON.stringify({ command: 'ls -la' }) }
+
+  it('Chiedi (il default): la stessa azione diventa card (nessun revisore)', async () => {
+    h.llm.queue = [{ toolCalls: [CMD] }, { text: 'ok' }]
+    const turn = runTurn(AGENT, 'elenca i file', emit)
+    await vi.waitFor(() => {
+      expect(h.db.entries.some((e) => e.kind === 'approval' && e.meta?.status === 'pending')).toBe(true)
+    })
+    // il revisore non viene chiamato: il modo non è Automatico
+    expect(h.llm.calls.some((c) => c.length === 1 && c[0]!.role === 'user' && c[0]!.content.includes('<azione>'))).toBe(false)
+    const appr = h.db.entries.findLast((e) => e.kind === 'approval')!
+    resolveApproval(AGENT, String(appr.meta?.approvalId), 'deny', 'once')
+    await turn
+    expect(h.sandboxMock.exec.calls).toBe(0)
+  })
+
+  it('Automatico: il revisore che cita la regola fa passare l’azione (autoApproved + regola)', async () => {
+    h.db.settings.set('approvals.mode', 'auto')
+    enableAutoReview()
+    reviewerAllow(AR_RULE)
+    h.llm.queue = [{ toolCalls: [CMD] }, { text: 'ok' }]
+    await runTurn(AGENT, 'elenca i file', emit)
+    expect(h.sandboxMock.exec.calls).toBe(1)
+    const appr = h.db.entries.findLast((e) => e.kind === 'approval')!
+    expect(appr.meta).toMatchObject({ autoApproved: true, ruleMatched: AR_RULE, status: 'allowed' })
+    expect(appr.meta?.autoNever).toBeUndefined()
+  })
+
+  it('Non chiedere: la stessa azione parte SENZA card né revisore (entry autoNever)', async () => {
+    h.db.settings.set('approvals.mode', 'never')
+    h.llm.queue = [{ toolCalls: [CMD] }, { text: 'ok' }]
+    await runTurn(AGENT, 'elenca i file', emit)
+    expect(h.sandboxMock.exec.calls).toBe(1)
+    const appr = h.db.entries.findLast((e) => e.kind === 'approval')!
+    expect(appr.meta).toMatchObject({ autoApproved: true, autoNever: true, status: 'allowed' })
+    expect(appr.meta?.ruleMatched).toBeUndefined()
+    // niente revisore: l'allow è sintetico
+    expect(h.llm.calls.some((c) => c.length === 1 && c[0]!.role === 'user' && c[0]!.content.includes('<azione>'))).toBe(false)
+  })
+
+  it('Non chiedere + turno aperto da un ALTRO BOT → la card resta (esclusione fissa)', async () => {
+    h.db.settings.set('approvals.mode', 'never')
+    h.llm.queue = [{ toolCalls: [CMD] }, { text: 'ok' }]
+    const turn = runTurn(AGENT, '<messaggio_da_agente nome="Altro">controlla</messaggio_da_agente>', emit, undefined, {
+      agentMessage: { fromAgentId: 'agent_o', fromAgentName: 'Altro', hop: 1 }, initiator: 'AGENT'
+    })
+    await vi.waitFor(() => {
+      expect(h.db.entries.some((e) => e.kind === 'approval' && e.meta?.status === 'pending')).toBe(true)
+    })
+    const appr = h.db.entries.findLast((e) => e.kind === 'approval')!
+    resolveApproval(AGENT, String(appr.meta?.approvalId), 'deny', 'once')
+    await turn
+    expect(h.sandboxMock.exec.calls).toBe(0)
+  })
+
+  it('Non chiedere + regola BLOCKED → rifiutato, mai eseguito (blocked resta blocked)', async () => {
+    h.db.settings.set('approvals.mode', 'never')
+    h.db.settings.set('permissions', {
+      default: 'needs_approval',
+      rules: [{ tool: 'run-command', pattern: '*', mode: 'blocked' }]
+    })
+    h.llm.queue = [{ toolCalls: [CMD] }, { text: 'ok' }]
+    await runTurn(AGENT, 'elenca i file', emit)
+    expect(h.sandboxMock.exec.calls).toBe(0)
+    expect(h.db.entries.some((e) => e.kind === 'approval')).toBe(false)
+    expect(h.db.entries.some((e) => e.kind === 'notice' && e.meta?.denied === true)).toBe(true)
+  })
+
+  it('Non chiedere + bozza esterna → resta BOZZA da confermare (la promessa di sicurezza)', async () => {
+    h.db.settings.set('approvals.mode', 'never')
+    h.llm.queue = [
+      { toolCalls: [{ id: 'd1', name: 'draft_external', arguments: JSON.stringify({ channel: 'email', to: 'team@example.com', body: 'report' }) }] },
+      { text: 'ok' }
+    ]
+    const turn = runTurn(AGENT, 'manda il report', emit)
+    await vi.waitFor(() => {
+      expect(h.db.entries.some((e) => e.kind === 'send-message' && e.meta?.status === 'pending')).toBe(true)
+    })
+    // né inviata né approvata: aspetta il click dell'utente
+    expect(h.db.entries.some((e) => e.kind === 'send-message' && e.meta?.status === 'sent')).toBe(false)
+    expect(h.db.entries.some((e) => e.kind === 'approval' && e.meta?.autoApproved)).toBe(false)
+    resolveApproval // (nessuna approval da risolvere)
+    await turn
+  })
+
+  it('compatibilità: senza approvals.mode, autoReview.enabled=true vale Automatico', async () => {
+    enableAutoReview()
+    reviewerAllow(AR_RULE)
+    h.llm.queue = [{ toolCalls: [CMD] }, { text: 'ok' }]
+    await runTurn(AGENT, 'elenca i file', emit)
+    expect(h.sandboxMock.exec.calls).toBe(1)
+    expect(h.db.entries.findLast((e) => e.kind === 'approval')!.meta).toMatchObject({ autoApproved: true, ruleMatched: AR_RULE })
+  })
+})
+
 // ---- fase 8 (punto 1): auto-review delle approvazioni ----
 
 const AR_RULE = 'comandi ls e cat dentro la home del bot'
@@ -2661,8 +2760,11 @@ describe('fase 9 (punto 1): riserva del modello', () => {
     ;(e as Error & { status?: number }).status = status
     return e
   }
+  // fase impostazioni (I3): la riserva visibile è l'unica fonte — si scrive in
+  // models.fallbackChain (il vecchio providers.modelDefaults non lo legge più
+  // il motore; la migrazione una tantum l'ha materializzato qui)
   const setRiserva = (model: string): void => {
-    h.db.settings.set('providers.modelDefaults', { prov: { fallbackModel: model } })
+    h.db.settings.set('models.fallbackChain', [{ providerId: 'prov', model }])
   }
 
   it('5xx → UNA riprova col modello di riserva, notice di sistema, consegna normale', async () => {
@@ -5107,7 +5209,8 @@ describe('fase 18b (H2): la catena delle riserve nel turno', () => {
   })
 
   it('429 con riserva sullo STESSO provider: NON si passa (quota dell\'account)', async () => {
-    h.db.settings.set('providers.modelDefaults', { prov: { fallbackModel: 'm-stessa' } })
+    // fase impostazioni (I3): la riserva visibile sta in models.fallbackChain
+    setChain([{ providerId: 'prov', model: 'm-stessa' }])
     h.llm.queue = [{ error: rateLimit() }, { text: 'mai' }]
     await runTurn(AGENT, 'ciao', emit)
     expect(h.llm.models).toEqual(['m1'])
@@ -5251,10 +5354,11 @@ describe('fase 18b (H4): la visione conosciuta', () => {
     expect(seen[0]!.some((n) => n === 'use-app')).toBe(false)
   })
 
-  /** primario m1 (vision sconosciuta) con riserva di catalogo groq SENZA visione. */
+  /** primario m1 (vision sconosciuta) con riserva di catalogo groq SENZA visione.
+   *  fase impostazioni (I3): la riserva si configura in models.fallbackChain. */
   const setNoVisionFallback = (): void => {
     h.db.providers.push({ id: 'prov', enabled: true, kind: 'groq' })
-    h.db.settings.set('providers.modelDefaults', { prov: { fallbackModel: 'llama-3.3-70b-versatile' } })
+    h.db.settings.set('models.fallbackChain', [{ providerId: 'prov', model: 'llama-3.3-70b-versatile' }])
     h.db.settings.set('permissions', {
       default: 'needs_approval',
       rules: [

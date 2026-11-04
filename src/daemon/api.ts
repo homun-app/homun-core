@@ -1604,7 +1604,10 @@ export function buildApiMethods(
       await providers.saveProvider(p as import('../main/agent/providers').ProviderSaveInput)
       emit({ type: 'agents' })
       // fase 16c (C3.3): il PRIMO provider collegato diventa il modello
-      // principale («Come gli altri») se models.main non c'è ancora
+      // principale («Come gli altri») se models.main non c'è ancora.
+      // Fase impostazioni (I3): insieme al principale si scrivono anche la
+      // RISERVA del tipo (prima voce di models.fallbackChain) e il REVISORE
+      // del tipo (autoReview), così la pagina mostra la catena vera
       const { assignFirstMainModel } = await import('../main/agent/model-defaults')
       await assignFirstMainModel({
         getMain: () => store.getSetting<MainModel | null>('models.main', null),
@@ -1614,7 +1617,11 @@ export function buildApiMethods(
         supportsTools: (prov, model) => {
           const full = providers.getProvider(prov.id)
           return full ? providers.modelSupportsTools(full, model) : Promise.resolve({ ok: false, checked: false })
-        }
+        },
+        getChain: () => store.getSetting<import('../shared/types').FallbackRoute[]>('models.fallbackChain', []),
+        setChain: (chain) => store.setSetting('models.fallbackChain', chain),
+        getReviewer: () => ({ ...DEFAULT_AUTO_REVIEW, ...store.getSetting<AutoReviewSettings>('autoReview', DEFAULT_AUTO_REVIEW) }),
+        setReviewer: (cfg) => store.setSetting('autoReview', cfg)
       })
       // fase 7: l'onboarding fermo sul provider riprende appena ce n'è uno
       if (opts.onboarding) void opts.onboarding.resume().catch(() => undefined)

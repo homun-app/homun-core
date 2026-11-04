@@ -22,7 +22,8 @@
 // LLM iniettabile e timeout: il revisore riceve SOLO le regole e l'azione
 // (argomenti in un blocco delimitato marcato come DATO), mai il transcript né
 // i risultati dei tool — nessun testo esterno che possa convincerlo.
-import type { AutoReviewSettings, UiText } from '../../shared/types'
+import type { ApprovalsMode, AutoReviewSettings, UiText } from '../../shared/types'
+import { approvalsModeOf, DEFAULT_AUTO_REVIEW } from '../../shared/types'
 import type { Verdict } from './permissions'
 import { languageName, type Lang } from '../../shared/language'
 // fase 17c (C2): le decisioni portano l'UiText del motivo per la card
@@ -165,6 +166,55 @@ export function autoReviewDecision(
     return { autoAllow: false, reason: 'the reviewer did not quote a valid allow rule', ui: ui(UI.autoReviewNoRule) }
   }
   return { autoAllow: true, ruleMatched: rule, ...(reviewer.reason ? { reason: reviewer.reason } : {}) }
+}
+
+/**
+ * Fase impostazioni (I4.3): la sorella di autoReviewDecision per il modo
+ * «Non chiedere» (approvals.mode = 'never'). Un verdetto ask del gate diventa
+ * allow con un esito SINTETICO (niente revisore, niente regole, NIENTE TETO
+ * per turno: non è auto-review) — TRANNIE le esclusioni fisse di oggi, che
+ * restano card anche qui:
+ * - i turni aperti da un altro bot o da un evento esterno (untrustedTurn);
+ * - le azioni con effetti di un turno contaminato da contenuti web
+ *   (CONTAMINATED_ASK_TOOLS, la stessa rete di liftContaminatedAllow);
+ * - i comandi never-auto (ne verificherebbe solo la prima parola);
+ * - le azioni che cambiano il comportamento futuro del bot;
+ * - lo scambio di file col Mac (ALWAYS_ASK_TOOLS).
+ * I verdetti BLOCKED restano blocked (il gate li nega PRIMA di qui) e le
+ * bozze verso l'esterno restano bozze: sono le due differenze da Rakazo e
+ * stanno scritte anche nella conferma della pagina Approvazioni.
+ */
+export function neverAskDecision(action: AutoReviewAction): { allow: true; reason: string } | { allow: false; reason: string } {
+  if (action.untrustedTurn) {
+    return { allow: false, reason: 'turn opened by another bot or an external event' }
+  }
+  if (action.contaminated && CONTAMINATED_ASK_TOOLS.has(action.tool)) {
+    return { allow: false, reason: 'turn contaminated by web content: the action goes back to the user' }
+  }
+  if (action.neverAuto) {
+    return { allow: false, reason: 'command that runs other commands (never-auto)' }
+  }
+  if (FUTURE_CHANGING_TOOLS.has(action.tool)) {
+    return { allow: false, reason: `${action.tool} changes the bot's future behaviour` }
+  }
+  if (ALWAYS_ASK_TOOLS.has(action.tool)) {
+    return { allow: false, reason: 'the file exchange with the Mac always asks the user' }
+  }
+  return { allow: true, reason: 'approvals mode: never ask' }
+}
+
+/**
+ * Fase impostazioni (I4.1): il modo delle approvazioni dai setting veri.
+ * approvals.mode è la fonte; senza (dati di ieri) si ricava da
+ * autoReview.enabled — compatibilità in lettura. Le dipendenze sono
+ * iniettabili nei test.
+ */
+export function approvalsMode(deps: {
+  getSetting<T>(key: string, fallback: T): T
+}): ApprovalsMode {
+  const mode = deps.getSetting<ApprovalsMode | undefined>('approvals.mode', undefined)
+  const cfg = { ...DEFAULT_AUTO_REVIEW, ...deps.getSetting<AutoReviewSettings>('autoReview', DEFAULT_AUTO_REVIEW) }
+  return approvalsModeOf(cfg, mode)
 }
 
 // ---- la chiamata al revisore (LLM piccolo, temperatura 0, output strutturato) ----
