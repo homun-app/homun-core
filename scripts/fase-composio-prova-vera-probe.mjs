@@ -792,6 +792,10 @@ try {
     toolTexts.includes('La richiesta di prova'))
 
   // ---- V5: il passo passato del riquadro dice l'azione («Gmail · Legge email») ----
+  // V4 (verifica): finestra BASSA, così l'ultimo messaggio sta vicino alla
+  // casella e sotto non c'è spazio: è il caso in cui il riquadro DEVE aprirsi
+  // verso l'alto (a 800 di altezza c'era spazio e il caso non si provava)
+  await setWindowWidth(1440, 520)
   await pageEval(`
     const scroller = [...document.querySelectorAll('div')].find((d) => d.scrollHeight > d.clientHeight && d.clientHeight > 300 && d.contains(document.querySelector('form textarea')))
     if (scroller) { scroller.scrollTop = scroller.scrollHeight }
@@ -817,7 +821,20 @@ try {
   check('V4a (messaggio finito) il riquadro è interamente sopra la casella', v4msg === true, String(v4msg))
   const k1pop = await visibleOnTop('[data-testid="steps-popover"]')
   check('K1 il riquadro dei passaggi è scoperto', k1pop === true, String(k1pop))
-  await shotsOf('passaggi-in-basso')
+  // la direzione è STABILE (prima si invertiva a ogni render) e verso l'alto
+  const dirOf = () => pageEval(`
+    const pop = [...document.querySelectorAll('[data-testid="steps-popover"]')].filter((x) => x.offsetParent !== null).pop()
+    return pop?.parentElement?.className.includes('bottom-full') ? 'su' : pop ? 'giù' : 'nessuno'
+  `)
+  const dirs = []
+  for (let i = 0; i < 5; i++) { dirs.push(await dirOf()); await sleep(200) }
+  check('V4d il riquadro si apre verso l\'alto e ci resta (finestra bassa)', dirs.every((d) => d === 'su'), dirs.join(','))
+  for (const dark of [false, true]) {
+    await setDark(dark)
+    await shot(`passaggi-in-basso-1440x520-${dark ? 'scuro' : 'chiaro'}.png`)
+  }
+  await setDark(false)
+  await setWindowWidth(1440)
   await pageEval(`document.body.click()`)
   await sleep(400)
 

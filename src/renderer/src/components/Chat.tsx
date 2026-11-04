@@ -103,7 +103,11 @@ function PopoverBox({ up, setUp, align, children }: {
     const anchor = el.parentElement?.getBoundingClientRect()
     if (!anchor) return
     const spaceBelow = popoverLowerLimit() - anchor.bottom
-    setUp((v) => (v !== spaceBelow < height))
+    // la direzione dipende solo da ancora e altezza, non da quella attuale:
+    // `v !== (spaceBelow < height)` la invertiva a ogni render (su↔giù senza
+    // fine) proprio quando doveva aprirsi verso l'alto
+    const wantUp = spaceBelow < height
+    setUp((v) => (v === wantUp ? v : wantUp))
   })
   return (
     <div
@@ -167,7 +171,9 @@ function MessageActions({ entry }: { entry: TranscriptEntry }) {
   const [steps, setSteps] = useState(false)
   const quote = entry.content.slice(0, 160)
   return (
-    <div className="relative flex flex-col items-center self-end opacity-0 transition group-hover:opacity-100">
+    // il riquadro dei passaggi vive dentro questa riga: aperto, la riga resta
+    // visibile anche senza il mouse sopra il messaggio (prima spariva aperto)
+    <div className={`relative flex flex-col items-center self-end transition ${steps ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
       <div className="flex items-center gap-0.5 text-muted-foreground">
         <button
           className="grid size-7 place-items-center rounded-full transition hover:bg-muted hover:text-foreground"
