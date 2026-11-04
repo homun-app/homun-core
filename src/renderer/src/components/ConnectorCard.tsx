@@ -139,7 +139,7 @@ export function ConnectorCard({ entry }: { entry: TranscriptEntry }) {
     <CardShell testid="connector-card">
       <div className="flex items-center gap-2 text-sm text-foreground">
         {catalogLogo ? (
-          <img src={catalogLogo} alt="" className="size-5 shrink-0 rounded-[6px] object-cover" />
+          <img src={catalogLogo} alt="" className="size-5 shrink-0 rounded-[6px] object-cover dark:bg-white" />
         ) : (
           <span className="text-base">{connectors.find((c) => c.id === message.connectorId)?.logo ?? '🔌'}</span>
         )}

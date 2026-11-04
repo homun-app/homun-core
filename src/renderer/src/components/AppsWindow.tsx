@@ -58,7 +58,10 @@ export function ProvenanceTag({ via }: { via: 'direct' | 'composio' }) {
 function AppLogo({ logo, name, className = 'size-10 text-base' }: { logo: string | null; name: string; className?: string }) {
   const url = catalogLogoUrl(logo)
   if (url || logo?.startsWith('data:')) {
-    return <img src={url ?? logo!} alt="" className={`shrink-0 rounded-[11px] object-cover ${className}`} />
+    // nel tema scuro una piastrella chiara dietro il logo: i marchi neri su
+    // fondo trasparente (Apaleo, FreshBooks…) altrimenti spariscono; i loghi
+    // pieni la coprono del tutto e restano identici
+    return <img src={url ?? logo!} alt="" className={`shrink-0 rounded-[11px] object-cover dark:bg-white ${className}`} />
   }
   const emoji = logo && logo.length <= 4 ? logo : null
   return (
