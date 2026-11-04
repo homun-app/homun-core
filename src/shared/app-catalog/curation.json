@@ -1,12 +1,84 @@
 {
-  "featured": ["gmail", "googlecalendar", "googledrive", "notion", "slack", "googlesheets"],
-  "hidden": [],
+  "featured": [
+    "gmail",
+    "googlecalendar",
+    "googledrive",
+    "notion",
+    "slack",
+    "googlesheets"
+  ],
+  "hidden": [
+    "test_app",
+    "composio",
+    "composio_search",
+    "browser_tool"
+  ],
   "categories": {
+    "email": "mail-calendar",
+    "calendar": "mail-calendar",
+    "scheduling-&-booking": "mail-calendar",
+    "documents": "documents",
+    "notes": "documents",
+    "spreadsheets": "documents",
+    "file-management-&-storage": "documents",
+    "signatures": "documents",
+    "forms-&-surveys": "documents",
     "communication": "communication",
+    "team-chat": "communication",
+    "team-collaboration": "communication",
+    "video-conferencing": "communication",
+    "phone-&-sms": "communication",
+    "call-tracking": "communication",
+    "notifications": "communication",
+    "transcription": "communication",
+    "ai-meeting-assistants": "communication",
     "productivity": "productivity",
+    "project-management": "productivity",
+    "task-management": "productivity",
+    "time-tracking-software": "productivity",
+    "product-management": "productivity",
+    "images-&-design": "productivity",
+    "bookmark-managers": "productivity",
+    "ai-assistants": "productivity",
+    "ai-content-generation": "productivity",
+    "artificial-intelligence": "productivity",
+    "ai-agents": "productivity",
+    "education": "productivity",
+    "human-resources": "productivity",
+    "hr-talent-&-recruitment": "productivity",
+    "developer-tools": "development",
+    "databases": "development",
+    "server-monitoring": "development",
+    "it-operations": "development",
+    "analytics": "development",
+    "business-intelligence": "development",
+    "ai-models": "development",
+    "ai-web-scraping": "development",
+    "website-builders": "development",
+    "website-&-app-building": "development",
+    "security-&-identity-tools": "development",
+    "url-shortener": "development",
+    "crm": "sales",
+    "contact-management": "sales",
+    "marketing-automation": "sales",
+    "email-newsletters": "sales",
+    "ads-&-conversion": "sales",
+    "customer-support": "sales",
+    "ecommerce": "sales",
+    "commerce": "sales",
+    "ai-sales-tools": "sales",
+    "marketing": "sales",
+    "reviews": "sales",
+    "social-media-marketing": "sales",
+    "accounting": "finance",
+    "payment-processing": "finance",
+    "taxes": "finance",
+    "fundraising": "finance",
+    "proposal-&-invoice-management": "finance",
+    "social-media-accounts": "social",
+    "gaming": "social",
     "developer": "development",
     "sales": "sales",
-    "marketing": "sales",
     "finance": "finance",
     "social_media": "social",
     "design": "productivity",
@@ -14,14 +86,39 @@
     "artificial_intelligence": "productivity"
   },
   "overrides": {
-    "slack": { "tagline": { "it": "Canali e messaggi del team", "en": "Team channels and messages" } },
-    "googlesheets": { "tagline": { "it": "Fogli e tabelle", "en": "Spreadsheets and tables" } }
+    "slack": {
+      "tagline": {
+        "it": "Canali e messaggi del team",
+        "en": "Team channels and messages"
+      }
+    },
+    "googlesheets": {
+      "tagline": {
+        "it": "Fogli e tabelle",
+        "en": "Spreadsheets and tables"
+      }
+    }
   },
   "brands": {
-    "gmail": { "direct": "gmail", "composio": "gmail" },
-    "gcalendar": { "direct": "gcalendar", "composio": "googlecalendar" },
-    "gdrive": { "direct": "gdrive", "composio": "googledrive" },
-    "notion": { "direct": "notion", "composio": "notion" },
-    "linear": { "direct": "linear", "composio": "linear" }
+    "gmail": {
+      "direct": "gmail",
+      "composio": "gmail"
+    },
+    "gcalendar": {
+      "direct": "gcalendar",
+      "composio": "googlecalendar"
+    },
+    "gdrive": {
+      "direct": "gdrive",
+      "composio": "googledrive"
+    },
+    "notion": {
+      "direct": "notion",
+      "composio": "notion"
+    },
+    "linear": {
+      "direct": "linear",
+      "composio": "linear"
+    }
   }
 }

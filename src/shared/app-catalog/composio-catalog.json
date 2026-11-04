@@ -2,370 +2,1987 @@
   {
     "slug": "gmail",
     "name": "Gmail",
-    "description": "Send, read and search your Gmail inbox and drafts.",
-    "categories": ["communication"],
-    "toolsCount": 24,
-    "logo": null,
+    "description": "Gmail is Google’s email service, featuring spam protection, search functions, and seamless integration with other G Suite apps for productivity",
+    "categories": [
+      "email"
+    ],
+    "toolsCount": 61,
+    "logo": "gmail.svg",
     "auth": "managed"
   },
   {
-    "slug": "slack",
-    "name": "Slack",
-    "description": "Search messages, send DMs and manage channels in Slack.",
-    "categories": ["communication"],
-    "toolsCount": 31,
-    "logo": null,
+    "slug": "composio",
+    "name": "Composio",
+    "description": "Composio enables AI Agents and LLMs to authenticate and integrate with various tools via function calling.",
+    "categories": [
+      "ai-agents",
+      "developer-tools"
+    ],
+    "toolsCount": 17,
+    "logo": "composio.svg",
+    "auth": "none"
+  },
+  {
+    "slug": "github",
+    "name": "GitHub",
+    "description": "GitHub is a code hosting platform for version control and collaboration, offering Git-based repository management, issue tracking, and continuous integration features",
+    "categories": [
+      "developer-tools"
+    ],
+    "toolsCount": 877,
+    "logo": "github.svg",
     "auth": "managed"
   },
   {
     "slug": "googlecalendar",
     "name": "Google Calendar",
-    "description": "Create events, read your agenda and manage invitations.",
-    "categories": ["productivity"],
-    "toolsCount": 12,
-    "logo": null,
-    "auth": "managed"
-  },
-  {
-    "slug": "googledrive",
-    "name": "Google Drive",
-    "description": "Browse, search and manage files and folders on Drive.",
-    "categories": ["productivity"],
-    "toolsCount": 15,
-    "logo": null,
-    "auth": "managed"
-  },
-  {
-    "slug": "googlesheets",
-    "name": "Google Sheets",
-    "description": "Read and update spreadsheets, rows and cells.",
-    "categories": ["productivity"],
-    "toolsCount": 19,
-    "logo": null,
+    "description": "Google Calendar is a time management tool providing scheduling features, event reminders, and integration with email and other apps for streamlined organization",
+    "categories": [
+      "scheduling-&-booking"
+    ],
+    "toolsCount": 47,
+    "logo": "googlecalendar.svg",
     "auth": "managed"
   },
   {
     "slug": "notion",
     "name": "Notion",
-    "description": "Search, read and update pages and databases in Notion.",
-    "categories": ["productivity"],
-    "toolsCount": 22,
-    "logo": null,
+    "description": "Notion centralizes notes, docs, wikis, and tasks in a unified workspace, letting teams build custom workflows for collaboration and knowledge management",
+    "categories": [
+      "documents",
+      "notes",
+      "project-management"
+    ],
+    "toolsCount": 57,
+    "logo": "notion.svg",
     "auth": "managed"
   },
   {
-    "slug": "github",
-    "name": "GitHub",
-    "description": "Issues, pull requests, repositories and code search.",
-    "categories": ["developer"],
-    "toolsCount": 48,
-    "logo": null,
+    "slug": "googlesheets",
+    "name": "Google Sheets",
+    "description": "Google Sheets is a cloud-based spreadsheet tool enabling real-time collaboration, data analysis, and integration with other Google Workspace apps",
+    "categories": [
+      "spreadsheets"
+    ],
+    "toolsCount": 50,
+    "logo": "googlesheets.svg",
     "auth": "managed"
   },
   {
-    "slug": "linear",
-    "name": "Linear",
-    "description": "Issues, projects, cycles and comments in Linear.",
-    "categories": ["developer"],
-    "toolsCount": 26,
-    "logo": null,
+    "slug": "slack",
+    "name": "Slack",
+    "description": "Slack is a channel-based messaging platform. With Slack, people can work together more effectively, connect all their software tools and services, and find the information they need to do their best work - all within a secure, enterprise-grade environment.",
+    "categories": [
+      "team-chat",
+      "team-collaboration"
+    ],
+    "toolsCount": 162,
+    "logo": "slack.svg",
     "auth": "managed"
   },
   {
-    "slug": "jira",
-    "name": "Jira",
-    "description": "Browse and update Jira issues and projects.",
-    "categories": ["developer"],
-    "toolsCount": 33,
-    "logo": null,
-    "auth": "managed"
-  },
-  {
-    "slug": "gitlab",
-    "name": "GitLab",
-    "description": "Issues, merge requests and pipelines in GitLab.",
-    "categories": ["developer"],
-    "toolsCount": 21,
-    "logo": null,
-    "auth": "managed"
-  },
-  {
-    "slug": "discord",
-    "name": "Discord",
-    "description": "Send messages and manage channels on Discord.",
-    "categories": ["communication"],
-    "toolsCount": 14,
-    "logo": null,
-    "auth": "managed"
-  },
-  {
-    "slug": "telegram",
-    "name": "Telegram",
-    "description": "Send and read messages on Telegram.",
-    "categories": ["communication"],
-    "toolsCount": 9,
-    "logo": null,
-    "auth": "managed"
-  },
-  {
-    "slug": "whatsapp",
-    "name": "WhatsApp",
-    "description": "Send and read WhatsApp messages.",
-    "categories": ["communication"],
-    "toolsCount": 8,
-    "logo": null,
-    "auth": "managed"
-  },
-  {
-    "slug": "microsoft_teams",
-    "name": "Teams",
-    "description": "Messages, channels and meetings in Microsoft Teams.",
-    "categories": ["communication"],
-    "toolsCount": 17,
-    "logo": null,
-    "auth": "managed"
-  },
-  {
-    "slug": "zoom",
-    "name": "Zoom",
-    "description": "Manage meetings and recordings on Zoom.",
-    "categories": ["communication"],
-    "toolsCount": 11,
-    "logo": null,
+    "slug": "supabase",
+    "name": "Supabase",
+    "description": "Supabase is an open-source backend-as-a-service providing a Postgres database, authentication, storage, and real-time subscription APIs for building modern applications",
+    "categories": [
+      "databases",
+      "developer-tools"
+    ],
+    "toolsCount": 230,
+    "logo": "supabase.svg",
     "auth": "managed"
   },
   {
     "slug": "outlook",
     "name": "Outlook",
-    "description": "Read and send email from Outlook.",
-    "categories": ["communication"],
-    "toolsCount": 16,
-    "logo": null,
+    "description": "Outlook is Microsoft's email and calendaring platform integrating contacts and scheduling, enabling users to manage communications and events in a unified workspace",
+    "categories": [
+      "calendar",
+      "email"
+    ],
+    "toolsCount": 312,
+    "logo": "outlook.svg",
     "auth": "managed"
   },
   {
-    "slug": "trello",
-    "name": "Trello",
-    "description": "Boards, lists and cards in Trello.",
-    "categories": ["productivity"],
-    "toolsCount": 13,
-    "logo": null,
+    "slug": "googledrive",
+    "name": "Google Drive",
+    "description": "Google Drive is a cloud storage solution for uploading, sharing, and collaborating on files across devices, with robust search and offline access",
+    "categories": [
+      "file-management-&-storage"
+    ],
+    "toolsCount": 92,
+    "logo": "googledrive.svg",
     "auth": "managed"
   },
   {
-    "slug": "asana",
-    "name": "Asana",
-    "description": "Tasks, projects and sections in Asana.",
-    "categories": ["productivity"],
-    "toolsCount": 18,
-    "logo": null,
-    "auth": "managed"
-  },
-  {
-    "slug": "clickup",
-    "name": "ClickUp",
-    "description": "Tasks, lists and spaces in ClickUp.",
-    "categories": ["productivity"],
-    "toolsCount": 15,
-    "logo": null,
-    "auth": "managed"
-  },
-  {
-    "slug": "airtable",
-    "name": "Airtable",
-    "description": "Bases, tables and records in Airtable.",
-    "categories": ["productivity"],
-    "toolsCount": 20,
-    "logo": null,
-    "auth": "managed"
-  },
-  {
-    "slug": "dropbox",
-    "name": "Dropbox",
-    "description": "Browse and share files on Dropbox.",
-    "categories": ["productivity"],
-    "toolsCount": 10,
-    "logo": null,
-    "auth": "managed"
-  },
-  {
-    "slug": "calendly",
-    "name": "Calendly",
-    "description": "Schedule events and check availability with Calendly.",
-    "categories": ["productivity"],
-    "toolsCount": 7,
-    "logo": null,
-    "auth": "managed"
-  },
-  {
-    "slug": "figma",
-    "name": "Figma",
-    "description": "Read files, frames and comments in Figma.",
-    "categories": ["design"],
-    "toolsCount": 12,
-    "logo": null,
+    "slug": "googledocs",
+    "name": "Google Docs",
+    "description": "Google Docs is a cloud-based word processor with real-time collaboration, version history, and integration with other Google Workspace apps",
+    "categories": [
+      "documents"
+    ],
+    "toolsCount": 46,
+    "logo": "googledocs.svg",
     "auth": "managed"
   },
   {
     "slug": "hubspot",
     "name": "HubSpot",
-    "description": "Contacts, deals and marketing in HubSpot.",
-    "categories": ["sales"],
-    "toolsCount": 41,
-    "logo": null,
+    "description": "HubSpot is an inbound marketing, sales, and customer service platform integrating CRM, email automation, and analytics to facilitate lead nurturing and seamless customer experiences",
+    "categories": [
+      "crm",
+      "marketing-automation"
+    ],
+    "toolsCount": 335,
+    "logo": "hubspot.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "linear",
+    "name": "Linear",
+    "description": "Linear is a streamlined issue tracking and project planning tool for modern teams, featuring fast workflows, keyboard shortcuts, and GitHub integrations",
+    "categories": [
+      "project-management",
+      "task-management"
+    ],
+    "toolsCount": 47,
+    "logo": "linear.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "airtable",
+    "name": "Airtable",
+    "description": "Airtable merges spreadsheet functionality with database power, enabling teams to organize projects, track tasks, and collaborate through customizable views, automation, and integrations for data management",
+    "categories": [
+      "databases",
+      "productivity",
+      "spreadsheets"
+    ],
+    "toolsCount": 26,
+    "logo": "airtable.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "jira",
+    "name": "Jira",
+    "description": "A tool for bug tracking, issue tracking, and agile project management.",
+    "categories": [
+      "project-management",
+      "task-management"
+    ],
+    "toolsCount": 120,
+    "logo": "jira.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "youtube",
+    "name": "YouTube",
+    "description": "YouTube is a video-sharing platform with user-generated content, live streaming, and monetization opportunities, widely used for marketing, education, and entertainment",
+    "categories": [
+      "social-media-accounts",
+      "video-&-audio"
+    ],
+    "toolsCount": 59,
+    "logo": "youtube.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "slackbot",
+    "name": "Slackbot",
+    "description": "Slackbot gives agents workspace-wide read access to a Slack workspace on behalf of the installing user - search messages and files, browse channel and thread history, and look up users and channels - while continuing to post and react as the bot. Includes direct messages and user email addresses so agents can search across DMs and resolve users by email.",
+    "categories": [
+      "team-chat",
+      "team-collaboration"
+    ],
+    "toolsCount": 101,
+    "logo": "slackbot.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "bitbucket",
+    "name": "Bitbucket",
+    "description": "Bitbucket is a Git-based code hosting and collaboration platform supporting private and public repositories, enabling teams to manage and review code through pull requests and integrations",
+    "categories": [
+      "developer-tools"
+    ],
+    "toolsCount": 116,
+    "logo": "bitbucket.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "googletasks",
+    "name": "Google Tasks",
+    "description": "Google Tasks provides a simple to-do list and task management system integrated into Gmail and Google Calendar for quick and easy tracking",
+    "categories": [
+      "task-management"
+    ],
+    "toolsCount": 16,
+    "logo": "googletasks.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "discord",
+    "name": "Discord",
+    "description": "An instant messaging and VoIP social platform.",
+    "categories": [
+      "team-chat",
+      "team-collaboration"
+    ],
+    "toolsCount": 23,
+    "logo": "discord.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "figma",
+    "name": "Figma",
+    "description": "A collaborative interface design tool.",
+    "categories": [
+      "images-&-design",
+      "team-collaboration"
+    ],
+    "toolsCount": 52,
+    "logo": "figma.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "composio_search",
+    "name": "Composio Search",
+    "description": "Composio Search provides comprehensive web search across travel (flights, hotels, events), e-commerce (Amazon, Walmart, shopping), financial markets, news, academic research, images, and location services.",
+    "categories": [
+      "ai-agents",
+      "developer-tools"
+    ],
+    "toolsCount": 21,
+    "logo": "composio_search.svg",
+    "auth": "none"
+  },
+  {
+    "slug": "reddit",
+    "name": "Reddit",
+    "description": "Reddit is a social news platform with user-driven communities (subreddits), offering content sharing, discussions, and viral marketing opportunities for brands",
+    "categories": [
+      "social-media-accounts",
+      "social-media-marketing"
+    ],
+    "toolsCount": 34,
+    "logo": "reddit.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "cal",
+    "name": "Cal",
+    "description": "Cal simplifies meeting coordination by providing shareable booking pages, calendar syncing, and availability management to streamline the scheduling process",
+    "categories": [
+      "calendar",
+      "scheduling-&-booking"
+    ],
+    "toolsCount": 168,
+    "logo": "cal.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "wrike",
+    "name": "Wrike",
+    "description": "Wrike is a project management and collaboration tool offering customizable workflows, Gantt charts, reporting, and resource management to boost team productivity",
+    "categories": [
+      "project-management",
+      "team-collaboration"
+    ],
+    "toolsCount": 144,
+    "logo": "wrike.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "sentry",
+    "name": "Sentry",
+    "description": "Integrate Sentry to manage your error tracking and monitoring.",
+    "categories": [
+      "developer-tools",
+      "server-monitoring"
+    ],
+    "toolsCount": 209,
+    "logo": "sentry.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "hackernews",
+    "name": "Hacker News",
+    "description": "Hacker News is a tech-focused news aggregator by Y Combinator, featuring user-submitted stories and discussions on startups, programming, and emerging trends",
+    "categories": [
+      "news-&-lifestyle"
+    ],
+    "toolsCount": 14,
+    "logo": "hackernews.svg",
+    "auth": "none"
+  },
+  {
+    "slug": "microsoft_teams",
+    "name": "Microsoft Teams",
+    "description": "Microsoft Teams integrates chat, video meetings, and file storage within Microsoft 365, providing virtual collaboration and communication for distributed teams",
+    "categories": [
+      "team-chat",
+      "team-collaboration",
+      "video-conferencing"
+    ],
+    "toolsCount": 230,
+    "logo": "microsoft_teams.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "asana",
+    "name": "Asana",
+    "description": "Tool to help teams organize, track, and manage their work.",
+    "categories": [
+      "project-management",
+      "task-management"
+    ],
+    "toolsCount": 157,
+    "logo": "asana.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "linkedin",
+    "name": "LinkedIn",
+    "description": "LinkedIn is a professional networking platform enabling job seekers, companies, and thought leaders to connect, share content, and discover business opportunities",
+    "categories": [
+      "marketing-automation",
+      "social-media-accounts"
+    ],
+    "toolsCount": 25,
+    "logo": "linkedin.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "google_maps",
+    "name": "Google Maps",
+    "description": "Integrate Google Maps to access location data, geocoding, directions, and mapping services in your application.",
+    "categories": [
+      "developer-tools",
+      "places-&-weather"
+    ],
+    "toolsCount": 20,
+    "logo": "google_maps.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "one_drive",
+    "name": "OneDrive",
+    "description": "OneDrive is Microsoft’s cloud storage solution enabling users to store, sync, and share files across devices, offering offline access, real-time collaboration, and enterprise-grade security",
+    "categories": [
+      "file-management-&-storage"
+    ],
+    "toolsCount": 100,
+    "logo": "one_drive.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "discordbot",
+    "name": "Discord Bot",
+    "description": "Discordbot refers to automated programs on Discord servers, performing tasks like moderation, music playback, and user engagement to enhance community interactions",
+    "categories": [
+      "team-chat",
+      "team-collaboration"
+    ],
+    "toolsCount": 157,
+    "logo": "discordbot.svg",
     "auth": "managed"
   },
   {
     "slug": "salesforce",
     "name": "Salesforce",
-    "description": "Leads, contacts and opportunities in Salesforce.",
-    "categories": ["sales"],
-    "toolsCount": 37,
-    "logo": null,
+    "description": "Salesforce is a leading CRM platform integrating sales, service, marketing, and analytics to build customer relationships and drive business growth",
+    "categories": [
+      "contact-management",
+      "crm"
+    ],
+    "toolsCount": 286,
+    "logo": "salesforce.svg",
     "auth": "managed"
   },
   {
-    "slug": "zendesk",
-    "name": "Zendesk",
-    "description": "Tickets and customers in Zendesk.",
-    "categories": ["sales"],
-    "toolsCount": 23,
-    "logo": null,
+    "slug": "calendly",
+    "name": "Calendly",
+    "description": "Calendly is an appointment scheduling tool that automates meeting invitations, availability checks, and reminders, helping individuals and teams avoid email back-and-forth",
+    "categories": [
+      "calendar",
+      "scheduling-&-booking"
+    ],
+    "toolsCount": 53,
+    "logo": "calendly.svg",
     "auth": "managed"
   },
   {
-    "slug": "intercom",
-    "name": "Intercom",
-    "description": "Conversations and customers in Intercom.",
-    "categories": ["sales"],
-    "toolsCount": 19,
-    "logo": null,
+    "slug": "trello",
+    "name": "Trello",
+    "description": "A web-based, kanban-style, list-making application.",
+    "categories": [
+      "project-management",
+      "task-management"
+    ],
+    "toolsCount": 324,
+    "logo": "trello.svg",
     "auth": "managed"
   },
   {
-    "slug": "mailchimp",
-    "name": "Mailchimp",
-    "description": "Audiences, campaigns and templates in Mailchimp.",
-    "categories": ["marketing"],
-    "toolsCount": 25,
-    "logo": null,
+    "slug": "weathermap",
+    "name": "OpenWeatherMap",
+    "description": "WeatherMap provides visual weather data, forecasts, and mappings, helping users understand climate patterns or track severe weather conditions",
+    "categories": [
+      "developer-tools",
+      "places-&-weather"
+    ],
+    "toolsCount": 2,
+    "logo": "weathermap.svg",
+    "auth": "none"
+  },
+  {
+    "slug": "clickup",
+    "name": "ClickUp",
+    "description": "ClickUp unifies tasks, docs, goals, and chat in a single platform, allowing teams to plan, organize, and collaborate across projects with customizable workflows",
+    "categories": [
+      "productivity",
+      "project-management",
+      "task-management"
+    ],
+    "toolsCount": 163,
+    "logo": "clickup.svg",
     "auth": "managed"
   },
   {
     "slug": "stripe",
     "name": "Stripe",
-    "description": "Payments, invoices and subscriptions in Stripe.",
-    "categories": ["finance"],
+    "description": "Stripe offers online payment infrastructure, fraud prevention, and APIs enabling businesses to accept and manage payments globally",
+    "categories": [
+      "ecommerce",
+      "payment-processing"
+    ],
+    "toolsCount": 428,
+    "logo": "stripe.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "mailchimp",
+    "name": "Mailchimp",
+    "description": "Mailchimp is an email marketing and automation platform providing campaign templates, audience segmentation, and performance analytics to drive engagement and conversions",
+    "categories": [
+      "email-newsletters",
+      "marketing-automation"
+    ],
+    "toolsCount": 274,
+    "logo": "mailchimp.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "attio",
+    "name": "Attio",
+    "description": "Attio is a fully customizable workspace for your team's relationships and workflows.",
+    "categories": [
+      "crm"
+    ],
+    "toolsCount": 105,
+    "logo": "attio.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "googlemeet",
+    "name": "Google Meet",
+    "description": "Google Meet is a secure video conferencing platform that integrates with Google Workspace, facilitating remote meetings, screen sharing, and chat",
+    "categories": [
+      "video-conferencing"
+    ],
+    "toolsCount": 25,
+    "logo": "googlemeet.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "text_to_pdf",
+    "name": "Text to PDF",
+    "description": "Convert text to PDF",
+    "categories": [
+      "documents"
+    ],
+    "toolsCount": 6,
+    "logo": "text_to_pdf.svg",
+    "auth": "none"
+  },
+  {
+    "slug": "zoho",
+    "name": "Zoho",
+    "description": "Zoho is a suite of cloud applications including CRM, email marketing, and collaboration tools, enabling businesses to automate and scale operations",
+    "categories": [
+      "crm",
+      "marketing-automation"
+    ],
+    "toolsCount": 103,
+    "logo": "zoho.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "dropbox",
+    "name": "Dropbox",
+    "description": "Dropbox is a cloud storage service offering file syncing, sharing, and collaboration across devices with version control and robust integrations",
+    "categories": [
+      "file-management-&-storage"
+    ],
+    "toolsCount": 175,
+    "logo": "dropbox.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "confluence",
+    "name": "Confluence",
+    "description": "A tool for team collaboration and knowledge management.",
+    "categories": [
+      "documents",
+      "team-collaboration"
+    ],
+    "toolsCount": 70,
+    "logo": "confluence.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "googlebigquery",
+    "name": "Google BigQuery",
+    "description": "Google BigQuery is a fully managed data warehouse for large-scale data analytics, offering fast SQL queries and machine learning capabilities on massive datasets",
+    "categories": [
+      "analytics",
+      "databases"
+    ],
+    "toolsCount": 63,
+    "logo": "googlebigquery.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "monday",
+    "name": "Monday",
+    "description": "monday.com is a customizable work management platform for project planning, collaboration, and automation, supporting agile, sales, marketing, and more",
+    "categories": [
+      "project-management",
+      "task-management"
+    ],
+    "toolsCount": 122,
+    "logo": "monday.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "whatsapp",
+    "name": "WhatsApp",
+    "description": "Enables interaction with customers through the WhatsApp Business API for messaging and automation. Only supports WhatsApp Business accounts, not WhatsApp Personal accounts.",
+    "categories": [
+      "communication",
+      "phone-&-sms"
+    ],
+    "toolsCount": 58,
+    "logo": "whatsapp.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "dynamics365",
+    "name": "Dynamics 365",
+    "description": "Dynamics 365 from Microsoft combines CRM, ERP, and productivity apps to streamline sales, marketing, customer service, and operations in one integrated platform",
+    "categories": [
+      "crm",
+      "project-management"
+    ],
+    "toolsCount": 119,
+    "logo": "dynamics365.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "zendesk",
+    "name": "Zendesk",
+    "description": "Zendesk provides customer support software with ticketing, live chat, and knowledge base features, enabling efficient helpdesk operations and customer engagement",
+    "categories": [
+      "crm",
+      "customer-support"
+    ],
+    "toolsCount": 456,
+    "logo": "zendesk.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "googlephotos",
+    "name": "Google Photos",
+    "description": "Google Photos is a cloud-based photo storage and organization service offering automatic backups, AI-assisted search, and shared albums for personal and collaborative media management",
+    "categories": [
+      "file-management-&-storage",
+      "images-&-design"
+    ],
+    "toolsCount": 13,
+    "logo": "googlephotos.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "googlesuper",
+    "name": "Google Super",
+    "description": "Google Super App combines all Google services including Drive, Calendar, Gmail, Sheets, Analytics, Ads, and more, providing a unified platform for seamless integration and management of your digital life.",
+    "categories": [
+      "calendar",
+      "file-management-&-storage",
+      "spreadsheets"
+    ],
+    "toolsCount": 522,
+    "logo": "googlesuper.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "browser_tool",
+    "name": "Browser Tool",
+    "description": "Composio Browser Tool enables AI Agents and LLMs to automate web interactions, perform web scraping, and conduct automated testing. Use cases include data extraction, form automation, website monitoring, and intelligent web navigation.",
+    "categories": [
+      "ai-agents",
+      "ai-web-scraping"
+    ],
+    "toolsCount": 5,
+    "logo": "browser_tool.svg",
+    "auth": "none"
+  },
+  {
+    "slug": "zoom",
+    "name": "Zoom",
+    "description": "Zoom is a video conferencing and online meeting platform featuring breakout rooms, screen sharing, and integrations with various enterprise tools",
+    "categories": [
+      "team-collaboration",
+      "video-conferencing"
+    ],
+    "toolsCount": 90,
+    "logo": "zoom.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "entelligence",
+    "name": "Entelligence",
+    "description": "Entelligence leverages artificial intelligence to provide insights, recommendations, and predictive analytics for businesses seeking data-driven decision-making capabilities",
+    "categories": [
+      "analytics",
+      "artificial-intelligence"
+    ],
+    "toolsCount": 2,
+    "logo": "entelligence.svg",
+    "auth": "none"
+  },
+  {
+    "slug": "googleads",
+    "name": "Google Ads",
+    "description": "Google Ads, is an online advertising platform developed by Google, where advertisers bid to display brief advertisements, service offerings, product listings, and videos to web users.",
+    "categories": [
+      "ads-&-conversion"
+    ],
+    "toolsCount": 78,
+    "logo": "googleads.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "pagerduty",
+    "name": "PagerDuty",
+    "description": "PagerDuty helps you proactively manage your digital operations by collecting data signals from anywhere, interpreting those signals using machine learning, automatically engaging the right people, and accelerating resolution and learning.",
+    "categories": [
+      "notifications",
+      "server-monitoring"
+    ],
+    "toolsCount": 356,
+    "logo": "pagerduty.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "miro",
+    "name": "Miro",
+    "description": "Miro is a collaborative online whiteboard enabling teams to brainstorm ideas, design wireframes, plan workflows, and manage projects visually",
+    "categories": [
+      "project-management",
+      "team-collaboration"
+    ],
+    "toolsCount": 85,
+    "logo": "miro.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "share_point",
+    "name": "SharePoint",
+    "description": "SharePoint is a Microsoft platform for document management and intranets, enabling teams to collaborate, store, and organize content securely and effectively",
+    "categories": [
+      "documents",
+      "team-collaboration"
+    ],
+    "toolsCount": 146,
+    "logo": "share_point.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "contentful",
+    "name": "Contentful",
+    "description": "Contentful is a headless CMS allowing developers to create, manage, and distribute content across multiple channels and devices with an API-first approach",
+    "categories": [
+      "developer-tools",
+      "website-builders"
+    ],
+    "toolsCount": 124,
+    "logo": "contentful.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "apaleo",
+    "name": "Apaleo",
+    "description": "Apaleo is a cloud-based property management platform handling reservations, billing, and daily operations for hospitality businesses",
+    "categories": [
+      "accounting",
+      "scheduling-&-booking"
+    ],
     "toolsCount": 29,
+    "logo": "apaleo.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "zoho_books",
+    "name": "Zoho Books",
+    "description": "Zoho Books handles accounting, invoicing, and expense tracking, offering real-time collaboration and integrations within the Zoho ecosystem",
+    "categories": [
+      "accounting"
+    ],
+    "toolsCount": 270,
+    "logo": "zoho_books.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "zoho_inventory",
+    "name": "Zoho Inventory",
+    "description": "Zoho Inventory helps businesses track stock, manage orders, and sync inventory across multiple sales channels, streamlining supply chain operations",
+    "categories": [
+      "accounting",
+      "ecommerce"
+    ],
+    "toolsCount": 83,
+    "logo": "zoho_inventory.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "facebook",
+    "name": "Facebook",
+    "description": "Facebook is a social media and advertising platform used by individuals and businesses to connect, share content, and promote products or services. Only supports Facebook Pages, not Facebook Personal accounts.",
+    "categories": [
+      "social-media-accounts",
+      "social-media-marketing"
+    ],
+    "toolsCount": 60,
+    "logo": "facebook.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "webex",
+    "name": "Webex",
+    "description": "Webex is a Cisco-powered video conferencing and collaboration platform offering online meetings, webinars, screen sharing, and team messaging",
+    "categories": [
+      "team-collaboration",
+      "video-conferencing"
+    ],
+    "toolsCount": 26,
+    "logo": "webex.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "canva",
+    "name": "Canva",
+    "description": "Canva offers a drag-and-drop design suite for creating social media graphics, presentations, and marketing materials with prebuilt templates and a vast element library",
+    "categories": [
+      "images-&-design"
+    ],
+    "toolsCount": 49,
+    "logo": "canva.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "amazon",
+    "name": "Amazon",
+    "description": "Amazon is an e-commerce giant delivering a massive online marketplace, cloud services, and digital products that connect retailers, consumers, and businesses worldwide for seamless transactions",
+    "categories": [
+      "ecommerce"
+    ],
+    "toolsCount": 0,
+    "logo": "amazon.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "linkhut",
+    "name": "Linkhut",
+    "description": "LinkHut manages bookmarked links in a minimalistic, shareable interface, helping teams organize URLs and track references in one place",
+    "categories": [
+      "bookmark-managers"
+    ],
+    "toolsCount": 4,
+    "logo": "linkhut.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "timely",
+    "name": "Timely",
+    "description": "Timely is an automatic time-tracking platform capturing activity across applications, calendars, and devices, creating detailed timesheets for billing or productivity insights",
+    "categories": [
+      "productivity",
+      "time-tracking-software"
+    ],
+    "toolsCount": 41,
+    "logo": "timely.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "box",
+    "name": "Box",
+    "description": "Box is a cloud content management platform for secure file storage, sharing, collaboration, and governance.",
+    "categories": [
+      "documents",
+      "file-management-&-storage"
+    ],
+    "toolsCount": 284,
+    "logo": "box.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "productboard",
+    "name": "Productboard",
+    "description": "Productboard is a product management platform that gathers feedback, prioritizes features, and aligns roadmaps based on customer insights and strategic goals",
+    "categories": [
+      "product-management"
+    ],
+    "toolsCount": 99,
+    "logo": "productboard.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "blackbaud",
+    "name": "Blackbaud",
+    "description": "Blackbaud offers cloud-based software for nonprofits, schools, and healthcare institutions, supporting fundraising, financial management, and donor engagement in mission-driven organizations",
+    "categories": [
+      "crm",
+      "fundraising"
+    ],
+    "toolsCount": 5,
+    "logo": "blackbaud.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "freshbooks",
+    "name": "FreshBooks",
+    "description": "FreshBooks is a cloud-based accounting software service designed for small and medium-sized businesses, offering features like invoicing, expense tracking, and time management.",
+    "categories": [
+      "accounting",
+      "proposal-&-invoice-management"
+    ],
+    "toolsCount": 10,
+    "logo": "freshbooks.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "zoho_bigin",
+    "name": "Zoho Bigin",
+    "description": "Zoho Bigin is a simplified CRM solution from Zoho tailored for small businesses, focusing on pipeline tracking and relationship management",
+    "categories": [
+      "contact-management",
+      "crm"
+    ],
+    "toolsCount": 54,
+    "logo": "zoho_bigin.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "gorgias",
+    "name": "Gorgias",
+    "description": "Gorgias is a helpdesk and live chat platform specializing in e-commerce, offering automated support, order management, and unified customer communication",
+    "categories": [
+      "crm",
+      "customer-support"
+    ],
+    "toolsCount": 51,
+    "logo": "gorgias.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "google_analytics",
+    "name": "Google Analytics",
+    "description": "Google Analytics tracks and reports website traffic, user behavior, and conversion data, enabling marketers to optimize online performance and customer journeys",
+    "categories": [
+      "analytics"
+    ],
+    "toolsCount": 67,
+    "logo": "google_analytics.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "todoist",
+    "name": "Todoist",
+    "description": "Todoist is a task management tool allowing users to create to-do lists, set deadlines, and collaborate on projects with reminders and cross-platform syncing",
+    "categories": [
+      "productivity",
+      "task-management"
+    ],
+    "toolsCount": 76,
+    "logo": "todoist.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "zoho_desk",
+    "name": "Zoho Desk",
+    "description": "Zoho Desk is a context-aware helpdesk platform enabling support teams to track tickets, automate workflows, and gain insights on customer interactions",
+    "categories": [
+      "crm",
+      "customer-support"
+    ],
+    "toolsCount": 36,
+    "logo": "zoho_desk.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "square",
+    "name": "Square",
+    "description": "Square provides payment processing, POS systems, invoicing, and e-commerce tools, enabling sellers to accept card payments and manage their business",
+    "categories": [
+      "ecommerce",
+      "payment-processing"
+    ],
+    "toolsCount": 122,
+    "logo": "square.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "yandex",
+    "name": "Yandex",
+    "description": "Yandex is a Russian internet services provider offering search, email, navigation, and other web-based solutions, often referred to as “Russia’s Google”",
+    "categories": [
+      "email"
+    ],
+    "toolsCount": 21,
+    "logo": "yandex.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "dialpad",
+    "name": "Dialpad",
+    "description": "Dialpad is a cloud-based business phone system and contact center platform that enables voice, video, messages and meetings across your existing devices",
+    "categories": [
+      "communication",
+      "phone-&-sms",
+      "video-conferencing"
+    ],
+    "toolsCount": 192,
+    "logo": "dialpad.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "ynab",
+    "name": "YNAB",
+    "description": "YNAB (You Need A Budget) is a budgeting tool helping users track expenses, plan finances, and gain control over spending to reduce debt",
+    "categories": [
+      "accounting"
+    ],
+    "toolsCount": 27,
+    "logo": "ynab.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "gumroad",
+    "name": "Gumroad",
+    "description": "Gumroad simplifies selling digital goods, physical products, and memberships by offering a streamlined checkout, marketing tools, and direct payout options",
+    "categories": [
+      "ecommerce"
+    ],
+    "toolsCount": 7,
+    "logo": "gumroad.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "gong",
+    "name": "Gong",
+    "description": "Gong is a platform for video meetings, call recording, and team collaboration.",
+    "categories": [
+      "ai-sales-tools",
+      "analytics"
+    ],
+    "toolsCount": 57,
+    "logo": "gong.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "servicem8",
+    "name": "Servicem8",
+    "description": "ServiceM8 helps field service businesses schedule jobs, send quotes, and manage invoices, offering staff mobile apps and real-time job status tracking",
+    "categories": [
+      "proposal-&-invoice-management",
+      "scheduling-&-booking"
+    ],
+    "toolsCount": 61,
+    "logo": "servicem8.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "harvest",
+    "name": "Harvest",
+    "description": "Harvest is a time-tracking and invoicing tool designed for teams and freelancers, helping them log billable hours, manage projects, and streamline payments",
+    "categories": [
+      "proposal-&-invoice-management",
+      "time-tracking-software"
+    ],
+    "toolsCount": 57,
+    "logo": "harvest.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "wakatime",
+    "name": "WakaTime",
+    "description": "WakaTime offers automatic time tracking for developers, integrating with code editors and delivering dashboards on coding activity, project progress, and productivity",
+    "categories": [
+      "developer-tools",
+      "time-tracking-software"
+    ],
+    "toolsCount": 17,
+    "logo": "wakatime.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "boldsign",
+    "name": "Boldsign",
+    "description": "BoldSign delivers eSignature solutions, letting organizations create, send, and manage legally binding documents through streamlined digital signing workflows",
+    "categories": [
+      "documents",
+      "signatures"
+    ],
+    "toolsCount": 14,
+    "logo": "boldsign.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "zoho_mail",
+    "name": "Zoho Mail",
+    "description": "Zoho Mail is a secure and ad-free email hosting platform with collaboration tools, calendar integration, and extensive administrative controls",
+    "categories": [
+      "email",
+      "team-collaboration"
+    ],
+    "toolsCount": 45,
+    "logo": "zoho_mail.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "mural",
+    "name": "Mural",
+    "description": "Mural is a digital whiteboard platform enabling distributed teams to visually brainstorm, map ideas, and collaborate in real time with sticky notes and diagrams",
+    "categories": [
+      "images-&-design",
+      "team-collaboration"
+    ],
+    "toolsCount": 40,
+    "logo": "mural.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "intercom",
+    "name": "Intercom",
+    "description": "Intercom provides live chat, messaging, and customer engagement tools, enabling businesses to drive conversions, handle support, and personalize communication at scale",
+    "categories": [
+      "crm",
+      "customer-support"
+    ],
+    "toolsCount": 133,
+    "logo": "intercom.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "eventbrite",
+    "name": "Eventbrite",
+    "description": "Eventbrite enables organizers to plan, promote, and manage events, selling tickets and providing attendee tools for conferences, concerts, and gatherings",
+    "categories": [
+      "event-management"
+    ],
+    "toolsCount": 95,
+    "logo": "eventbrite.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "exist",
+    "name": "Exist",
+    "description": "Exist is a personal analytics app that combines data from various services to help users understand and improve their lives.",
+    "categories": [
+      "analytics",
+      "fitness"
+    ],
+    "toolsCount": 12,
+    "logo": "exist.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "zoho_invoice",
+    "name": "Zoho Invoice",
+    "description": "Zoho Invoice simplifies billing, recurring payments, and expense management, helping freelancers and small businesses send professional invoices",
+    "categories": [
+      "accounting",
+      "proposal-&-invoice-management"
+    ],
+    "toolsCount": 137,
+    "logo": "zoho_invoice.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "stack_exchange",
+    "name": "Stack Exchange",
+    "description": "Stack Exchange is a network of Q&A communities where users ask questions, share knowledge, and collaborate on topics like coding, math, and more",
+    "categories": [
+      "developer-tools"
+    ],
+    "toolsCount": 121,
+    "logo": "stack_exchange.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "twitch",
+    "name": "Twitch",
+    "description": "Twitch is a live streaming platform popular with gamers, creators, and communities, offering real-time interaction and monetization through subscriptions and donations",
+    "categories": [
+      "gaming",
+      "video-&-audio"
+    ],
+    "toolsCount": 129,
+    "logo": "twitch.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "aircall",
+    "name": "Aircall",
+    "description": "Aircall is a cloud-based phone and call-center platform. This toolkit manages users, teams, phone numbers, calls, contacts, and tags on a single Aircall company account via the Public API.",
+    "categories": [
+      "call-tracking",
+      "communication",
+      "phone-&-sms"
+    ],
+    "toolsCount": 48,
+    "logo": "aircall.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "aiwyn_tax_mcp",
+    "name": "Aiwyn Tax MCP",
+    "description": "Aiwyn Tax (formerly Column Tax) estimates federal and state taxes with Aiwyn's tax engine.",
+    "categories": [
+      "accounting",
+      "model-context-protocol",
+      "taxes"
+    ],
+    "toolsCount": 10,
+    "logo": "aiwyn_tax_mcp.svg",
+    "auth": "none"
+  },
+  {
+    "slug": "alltrails_mcp",
+    "name": "AllTrails MCP",
+    "description": "Find hiking, biking, and running trails with reviews, photos, and route details from AllTrails.",
+    "categories": [
+      "fitness",
+      "lifestyle-&-entertainment",
+      "model-context-protocol"
+    ],
+    "toolsCount": 5,
+    "logo": "alltrails_mcp.svg",
+    "auth": "none"
+  },
+  {
+    "slug": "aws_marketplace_mcp",
+    "name": "AWS Marketplace MCP",
+    "description": "Discover, evaluate, and procure cloud solutions across AWS Marketplace's 30K+ software, data, and service listings.",
+    "categories": [
+      "commerce",
+      "it-operations",
+      "model-context-protocol"
+    ],
+    "toolsCount": 6,
+    "logo": "aws_marketplace_mcp.svg",
+    "auth": "none"
+  },
+  {
+    "slug": "basecamp",
+    "name": "Basecamp",
+    "description": "Project management and team collaboration tool by 37signals",
+    "categories": [
+      "project-management",
+      "team-collaboration"
+    ],
+    "toolsCount": 141,
+    "logo": "basecamp.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "bench",
+    "name": "Bench",
+    "description": "Benchmarking tool",
+    "categories": [
+      "developer-tools"
+    ],
+    "toolsCount": 1,
+    "logo": "bench.svg",
+    "auth": "none"
+  },
+  {
+    "slug": "capsule_crm",
+    "name": "Capsule CRM",
+    "description": "Capsule CRM is a simple yet powerful CRM platform designed to help businesses manage customer relationships, sales pipelines, and tasks efficiently.",
+    "categories": [
+      "contact-management",
+      "crm"
+    ],
+    "toolsCount": 109,
+    "logo": "capsule_crm.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "clarity_ai_mcp",
+    "name": "Clarity AI MCP",
+    "description": "Simulate SFDR 2.0 fund classifications from name, ISIN, or CUSIP using Clarity AI's disclosure data and modeling.",
+    "categories": [
+      "analytics",
+      "business-intelligence",
+      "model-context-protocol"
+    ],
+    "toolsCount": 6,
+    "logo": "clarity_ai_mcp.svg",
+    "auth": "none"
+  },
+  {
+    "slug": "crowdin",
+    "name": "Crowdin",
+    "description": "Crowdin is a localization management platform that streamlines the translation process, offering tools for collaboration, content centralization, and workflow automation.",
+    "categories": [
+      "developer-tools",
+      "team-collaboration"
+    ],
+    "toolsCount": 232,
+    "logo": "crowdin.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "cve_now_mcp",
+    "name": "cve.now MCP",
+    "description": "cve.now by Sazabi provides a free public vulnerability feed, CVE/GHSA/OSV lookups, and exact package-version checks against its indexed catalog. No authentication required. No matches do not guarantee safety; model-written summaries are labeled and published under CC-BY 4.0, while upstream data retains its own licensing and attribution.",
+    "categories": [
+      "developer-tools",
+      "model-context-protocol"
+    ],
+    "toolsCount": 3,
+    "logo": "cve_now_mcp.svg",
+    "auth": "none"
+  },
+  {
+    "slug": "dart",
+    "name": "Dart",
+    "description": "The ultimate AI project management tool.",
+    "categories": [
+      "artificial-intelligence",
+      "project-management"
+    ],
+    "toolsCount": 18,
+    "logo": "dart.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "daytona",
+    "name": "Daytona",
+    "description": "Daytona is a development environment management platform that provides cloud-based development workspaces with API access for automation",
+    "categories": [
+      "developer-tools"
+    ],
+    "toolsCount": 114,
+    "logo": "daytona.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "deepwiki_mcp",
+    "name": "DeepWiki MCP",
+    "description": "Free AI-powered access to public GitHub repository documentation and codebase analysis via DeepWiki. No authentication required.",
+    "categories": [
+      "ai-assistants",
+      "developer-tools",
+      "model-context-protocol"
+    ],
+    "toolsCount": 3,
+    "logo": "deepwiki_mcp.svg",
+    "auth": "none"
+  },
+  {
+    "slug": "dice_mcp",
+    "name": "Dice MCP",
+    "description": "Search Dice's tech-job database with conversational filters for role, company, location, and employment type.",
+    "categories": [
+      "hr-talent-&-recruitment",
+      "model-context-protocol"
+    ],
+    "toolsCount": 3,
+    "logo": "dice_mcp.svg",
+    "auth": "none"
+  },
+  {
+    "slug": "dub",
+    "name": "Dub",
+    "description": "Short link management platform with analytics and API for creating, managing, and tracking branded short links",
+    "categories": [
+      "analytics",
+      "url-shortener"
+    ],
+    "toolsCount": 17,
+    "logo": "dub.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "excalidraw_mcp",
+    "name": "Excalidraw MCP",
+    "description": "Create hand-drawn style diagrams in Excalidraw with viewport camera control and fullscreen editing.",
+    "categories": [
+      "images-&-design",
+      "model-context-protocol",
+      "productivity"
+    ],
+    "toolsCount": 5,
+    "logo": "excalidraw_mcp.svg",
+    "auth": "none"
+  },
+  {
+    "slug": "excel",
+    "name": "Excel",
+    "description": "Microsoft Excel is a powerful spreadsheet application for data analysis, calculations, and visualization, enabling users to organize and process data with formulas, charts, and pivot tables",
+    "categories": [
+      "spreadsheets"
+    ],
+    "toolsCount": 125,
+    "logo": "excel.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "fathom",
+    "name": "Fathom",
+    "description": "AI meeting assistant that records, transcribes, and summarizes meetings",
+    "categories": [
+      "ai-meeting-assistants",
+      "transcription"
+    ],
+    "toolsCount": 10,
+    "logo": "fathom.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "freeagent",
+    "name": "Freeagent",
+    "description": "Cloud-based accounting software for freelancers and small businesses",
+    "categories": [
+      "accounting"
+    ],
+    "toolsCount": 76,
+    "logo": "freeagent.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "gemini",
+    "name": "Gemini",
+    "description": "Comprehensive Gemini integration supporting Veo 3 video generation, Gemini Flash text generation (Nano Banana), chat completions, and multimodal AI capabilities via the Google Gemini API.",
+    "categories": [
+      "ai-content-generation",
+      "ai-models",
+      "artificial-intelligence"
+    ],
+    "toolsCount": 8,
+    "logo": "gemini.svg",
+    "auth": "none"
+  },
+  {
+    "slug": "gitlab",
+    "name": "GitLab",
+    "description": "A web-based DevOps lifecycle tool that provides a Git repository manager providing wiki, issue-tracking, and CI/CD pipeline features.",
+    "categories": [
+      "developer-tools"
+    ],
+    "toolsCount": 316,
+    "logo": "gitlab.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "gleif",
+    "name": "GLEIF API",
+    "description": "GLEIF provides free public access to Legal Entity Identifier records, ownership relationships, identifier mappings, and related reference data.",
+    "categories": [
+      "business-intelligence",
+      "databases",
+      "legal-&-public-records"
+    ],
+    "toolsCount": 20,
+    "logo": "gleif.svg",
+    "auth": "none"
+  },
+  {
+    "slug": "godaddy_mcp",
+    "name": "GoDaddy MCP",
+    "description": "Search available domains and get AI-powered suggestions based on keywords or business ideas.",
+    "categories": [
+      "it-operations",
+      "model-context-protocol",
+      "website-&-app-building"
+    ],
+    "toolsCount": 2,
+    "logo": "godaddy_mcp.svg",
+    "auth": "none"
+  },
+  {
+    "slug": "google_classroom",
+    "name": "Google Classroom",
+    "description": "Google Classroom is a free web service developed by Google for schools that aims to simplify creating, distributing, and grading assignments",
+    "categories": [
+      "education"
+    ],
+    "toolsCount": 62,
+    "logo": "google_classroom.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "google_search_console",
+    "name": "Google Search Console",
+    "description": "Google Search Console provides tools to monitor, maintain, and troubleshoot your site's presence in Google Search results.",
+    "categories": [
+      "analytics"
+    ],
+    "toolsCount": 9,
+    "logo": "google_search_console.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "googleslides",
+    "name": "Google Slides",
+    "description": "Google Slides is a cloud-based presentation editor with real-time collaboration, template gallery, and integration with other Google Workspace apps",
+    "categories": [
+      "documents"
+    ],
+    "toolsCount": 7,
+    "logo": "googleslides.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "granted_mcp",
+    "name": "Granted MCP",
+    "description": "Discover grant opportunities across funders, with eligibility and deadline details.",
+    "categories": [
+      "fundraising",
+      "model-context-protocol"
+    ],
+    "toolsCount": 5,
+    "logo": "granted_mcp.svg",
+    "auth": "none"
+  },
+  {
+    "slug": "greenhouse",
+    "name": "Greenhouse",
+    "description": "Applicant tracking and recruiting software to optimize your entire recruiting process",
+    "categories": [
+      "hr-talent-&-recruitment",
+      "human-resources"
+    ],
+    "toolsCount": 134,
+    "logo": "greenhouse.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "hugging_face",
+    "name": "Hugging Face",
+    "description": "Build, train and deploy state of the art models powered by the reference open source in machine learning.",
+    "categories": [
+      "ai-models",
+      "artificial-intelligence",
+      "developer-tools"
+    ],
+    "toolsCount": 135,
+    "logo": "hugging_face.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "inspo_mcp",
+    "name": "Inspo MCP",
+    "description": "Inspo MCP provides read-only design-reference search across captured production websites, components, color palettes, typography, and page structure for coding agents.",
+    "categories": [
+      "developer-tools",
+      "images-&-design",
+      "model-context-protocol"
+    ],
+    "toolsCount": 15,
+    "logo": "inspo_mcp.svg",
+    "auth": "none"
+  },
+  {
+    "slug": "instagram",
+    "name": "Instagram",
+    "description": "Instagram is a social media platform for sharing photos, videos, and stories. Only supports Instagram Business and Creator accounts, not Instagram Personal accounts.",
+    "categories": [
+      "social-media-accounts",
+      "social-media-marketing"
+    ],
+    "toolsCount": 33,
+    "logo": "instagram.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "kit",
+    "name": "Kit",
+    "description": "Kit is a platform that allows creators to automate tasks and developers to build apps for the Kit App Store.",
+    "categories": [
+      "email-newsletters",
+      "marketing-automation"
+    ],
+    "toolsCount": 42,
+    "logo": "kit.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "malwarebytes_mcp",
+    "name": "Malwarebytes MCP",
+    "description": "Verify links, emails, phone numbers, and domains against Malwarebytes threat intelligence.",
+    "categories": [
+      "model-context-protocol",
+      "security-&-identity-tools"
+    ],
+    "toolsCount": 6,
+    "logo": "malwarebytes_mcp.svg",
+    "auth": "none"
+  },
+  {
+    "slug": "mermaid_chart_mcp",
+    "name": "Mermaid Chart MCP",
+    "description": "Validates Mermaid syntax, renders diagrams as high-quality SVG, and displays them in an interactive UI for preview, zoom, and real-time iteration.",
+    "categories": [
+      "developer-tools",
+      "images-&-design",
+      "model-context-protocol"
+    ],
+    "toolsCount": 1,
+    "logo": "mermaid_chart_mcp.svg",
+    "auth": "none"
+  },
+  {
+    "slug": "onenote",
+    "name": "Microsoft OneNote",
+    "description": "Digital notebook for capturing and organizing notes, drawings, and information",
+    "categories": [
+      "notes",
+      "productivity"
+    ],
+    "toolsCount": 87,
+    "logo": "onenote.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "moneybird",
+    "name": "Moneybird",
+    "description": "Moneybird is an online invoicing and accounting platform designed for small businesses and freelancers, offering features like invoicing, expense tracking, and financial reporting.",
+    "categories": [
+      "accounting",
+      "proposal-&-invoice-management"
+    ],
+    "toolsCount": 21,
+    "logo": "moneybird.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "mospi_mcp",
+    "name": "MoSPI MCP",
+    "description": "India's official statistics from the Ministry of Statistics and Programme Implementation, queryable via natural language.",
+    "categories": [
+      "analytics",
+      "business-intelligence",
+      "model-context-protocol"
+    ],
+    "toolsCount": 4,
+    "logo": "mospi_mcp.svg",
+    "auth": "none"
+  },
+  {
+    "slug": "notebook_lm",
+    "name": "NotebookLM",
+    "description": "NotebookLM Enterprise is Google's licensed, source-grounded notebook service for organizing sources in global-location deployments.",
+    "categories": [
+      "ai-assistants",
+      "education",
+      "notes"
+    ],
+    "toolsCount": 11,
+    "logo": "notebook_lm.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "omnisend",
+    "name": "Omnisend",
+    "description": "Omnisend is a marketing automation platform for ecommerce businesses, focusing on email and SMS marketing.",
+    "categories": [
+      "email-newsletters",
+      "marketing-automation"
+    ],
+    "toolsCount": 43,
+    "logo": "omnisend.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "osv",
+    "name": "OSV",
+    "description": "OSV provides an open vulnerability database and API for querying vulnerabilities by package, version, commit, or vulnerability identifier.",
+    "categories": [
+      "developer-tools",
+      "security-&-identity-tools"
+    ],
+    "toolsCount": 5,
+    "logo": "osv.svg",
+    "auth": "none"
+  },
+  {
+    "slug": "pinterest",
+    "name": "Pinterest",
+    "description": "Pinterest is a visual discovery platform for finding ideas like recipes, home and style inspiration, and more.",
+    "categories": [
+      "marketing",
+      "social-media-accounts"
+    ],
+    "toolsCount": 27,
+    "logo": "pinterest.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "pinterest_ads",
+    "name": "Pinterest Ads",
+    "description": "Pinterest Ads API for managing advertising accounts, campaigns, ad groups, ads, targeting, and reporting.",
+    "categories": [
+      "ads-&-conversion",
+      "marketing"
+    ],
+    "toolsCount": 10,
+    "logo": "pinterest_ads.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "pophive_mcp",
+    "name": "PopHIVE MCP",
+    "description": "Yale's harmonized US public health surveillance data, covering disease, vaccination, and health outcome trends.",
+    "categories": [
+      "analytics",
+      "business-intelligence",
+      "model-context-protocol"
+    ],
+    "toolsCount": 7,
+    "logo": "pophive_mcp.svg",
+    "auth": "none"
+  },
+  {
+    "slug": "prisma",
+    "name": "Prisma",
+    "description": "Prisma Data Platform provides database tools including Accelerate (global database cache), Optimize (AI-driven query analysis), and Prisma Postgres (managed PostgreSQL). Manage workspaces, projects, environments, and API keys programmatically.",
+    "categories": [
+      "databases",
+      "developer-tools"
+    ],
+    "toolsCount": 22,
+    "logo": "prisma.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "pushbullet",
+    "name": "Pushbullet",
+    "description": "Pushbullet enables seamless sharing of notifications and files across devices.",
+    "categories": [
+      "file-management-&-storage",
+      "notifications"
+    ],
+    "toolsCount": 15,
+    "logo": "pushbullet.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "quickbooks",
+    "name": "QuickBooks",
+    "description": "Quickbooks is a cloud-based accounting software that helps you manage your finances, track your income and expenses, and get insights into your business",
+    "categories": [
+      "accounting",
+      "payment-processing"
+    ],
+    "toolsCount": 114,
+    "logo": "quickbooks.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "reddit_ads",
+    "name": "Reddit Ads",
+    "description": "Reddit Ads API for managing advertising campaigns, conversions, and account data on Reddit.",
+    "categories": [
+      "ads-&-conversion",
+      "marketing"
+    ],
+    "toolsCount": 83,
+    "logo": "reddit_ads.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "roam",
+    "name": "Roam",
+    "description": "Roam HQ provides APIs for secure messaging, chat, file sharing, and collaboration with enterprise-grade security and compliance features.",
+    "categories": [
+      "communication",
+      "productivity"
+    ],
+    "toolsCount": 39,
+    "logo": "roam.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "seat_geek",
+    "name": "Seat Geek",
+    "description": "SeatGeek Platform API provides access to events, venues, and performers data for concerts, sports, theater, and other live entertainment",
+    "categories": [
+      "event-management",
+      "lifestyle-&-entertainment"
+    ],
+    "toolsCount": 10,
     "logo": null,
+    "auth": "none"
+  },
+  {
+    "slug": "shippo",
+    "name": "Shippo",
+    "description": "Shipping API for e-commerce merchants to create labels, track packages, and manage shipping operations.",
+    "categories": [
+      "ecommerce"
+    ],
+    "toolsCount": 95,
+    "logo": "shippo.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "slidesgpt_mcp",
+    "name": "SlidesGPT MCP",
+    "description": "Generate presentations and slide decks from a prompt and export them to PowerPoint.",
+    "categories": [
+      "ai-content-generation",
+      "documents",
+      "model-context-protocol"
+    ],
+    "toolsCount": 2,
+    "logo": "slidesgpt_mcp.svg",
+    "auth": "none"
+  },
+  {
+    "slug": "splitwise",
+    "name": "Splitwise",
+    "description": "Splitwise helps you split bills and expenses with friends and family.",
+    "categories": [
+      "accounting"
+    ],
+    "toolsCount": 27,
+    "logo": "splitwise.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "taskrabbit_mcp",
+    "name": "Taskrabbit MCP",
+    "description": "Find and book local Taskrabbit services for home repair, moving, cleaning, and handyman tasks.",
+    "categories": [
+      "model-context-protocol",
+      "scheduling-&-booking"
+    ],
+    "toolsCount": 3,
+    "logo": "taskrabbit_mcp.svg",
+    "auth": "none"
+  },
+  {
+    "slug": "test_app",
+    "name": "Test app",
+    "description": "...",
+    "categories": [
+      "tag1",
+      "tag2"
+    ],
+    "toolsCount": 2,
+    "logo": "test_app.png",
+    "auth": "none"
+  },
+  {
+    "slug": "ticketmaster",
+    "name": "Ticketmaster",
+    "description": "Ticketmaster provides APIs for event discovery, inventory management, and ticketing solutions.",
+    "categories": [
+      "event-management",
+      "lifestyle-&-entertainment"
+    ],
+    "toolsCount": 15,
+    "logo": "ticketmaster.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "ticktick",
+    "name": "Ticktick",
+    "description": "TickTick is a cross-platform task management and to-do list application designed to help users organize their tasks and schedules efficiently.",
+    "categories": [
+      "productivity",
+      "task-management"
+    ],
+    "toolsCount": 22,
+    "logo": "ticktick.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "tiktok_ads",
+    "name": "TikTok Ads",
+    "description": "Use TikTok API for Business actions to read advertisers, campaigns, ad groups, ads, audiences, creatives, catalogs, Business Centers, balances, billing, and transactions; manage advertiser settings, Asset Groups, disabled-by-default Smart+ and GMV Max resources, catalog feeds and videos, creative sharing, Pangle block lists, and selected compliance workflows; and retrieve MMM, GMV Max, and Smart+ reports.",
+    "categories": [
+      "ads-&-conversion",
+      "analytics",
+      "marketing"
+    ],
+    "toolsCount": 400,
+    "logo": "tiktok_ads.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "trivago_mcp",
+    "name": "Trivago MCP",
+    "description": "Compare hotel prices across booking sites and find accommodation deals with Trivago.",
+    "categories": [
+      "lifestyle-&-entertainment",
+      "model-context-protocol",
+      "scheduling-&-booking"
+    ],
+    "toolsCount": 3,
+    "logo": "trivago_mcp.svg",
+    "auth": "none"
+  },
+  {
+    "slug": "typeform",
+    "name": "Typeform",
+    "description": "Build beautiful, interactive forms that people love to fill out. Collect data, accept payments, and integrate with your favorite tools.",
+    "categories": [
+      "forms-&-surveys",
+      "productivity"
+    ],
+    "toolsCount": 35,
+    "logo": "typeform.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "viator_mcp",
+    "name": "Viator MCP",
+    "description": "Search and book tours, activities, and travel experiences around the world with Viator.",
+    "categories": [
+      "lifestyle-&-entertainment",
+      "model-context-protocol",
+      "scheduling-&-booking"
+    ],
+    "toolsCount": 2,
+    "logo": "viator_mcp.svg",
+    "auth": "none"
+  },
+  {
+    "slug": "yelp",
+    "name": "Yelp",
+    "description": "Yelp Fusion API provides access to business search, reviews, ratings, and local business information with rich data for location-based services",
+    "categories": [
+      "reviews"
+    ],
+    "toolsCount": 12,
+    "logo": "yelp.svg",
+    "auth": "none"
+  },
+  {
+    "slug": "zeplin",
+    "name": "Zeplin",
+    "description": "Zeplin is a design delivery platform that connects designers and developers, enabling access to design resources like projects, screens, components, and assets.",
+    "categories": [
+      "images-&-design",
+      "team-collaboration"
+    ],
+    "toolsCount": 24,
+    "logo": "zeplin.svg",
+    "auth": "managed"
+  },
+  {
+    "slug": "ziprecruiter_mcp",
+    "name": "ZipRecruiter MCP",
+    "description": "Search job listings across ZipRecruiter's marketplace by role, location, and salary.",
+    "categories": [
+      "hr-talent-&-recruitment",
+      "model-context-protocol"
+    ],
+    "toolsCount": 1,
+    "logo": "ziprecruiter_mcp.svg",
+    "auth": "none"
+  },
+  {
+    "slug": "telegram",
+    "name": "Telegram",
+    "description": "Send and read messages on Telegram.",
+    "categories": [
+      "communication"
+    ],
+    "toolsCount": 9,
+    "logo": "telegram.svg",
     "auth": "managed"
   },
   {
     "slug": "paypal",
     "name": "PayPal",
     "description": "Payments and transactions in PayPal.",
-    "categories": ["finance"],
+    "categories": [
+      "finance"
+    ],
     "toolsCount": 14,
-    "logo": null,
-    "auth": "managed"
-  },
-  {
-    "slug": "quickbooks",
-    "name": "QuickBooks",
-    "description": "Invoices, customers and accounts in QuickBooks.",
-    "categories": ["finance"],
-    "toolsCount": 31,
-    "logo": null,
+    "logo": "paypal.svg",
     "auth": "managed"
   },
   {
     "slug": "xero",
     "name": "Xero",
     "description": "Invoices and contacts in Xero.",
-    "categories": ["finance"],
+    "categories": [
+      "finance"
+    ],
     "toolsCount": 18,
-    "logo": null,
+    "logo": "xero.svg",
     "auth": "managed"
   },
   {
     "slug": "shopify",
     "name": "Shopify",
     "description": "Products, orders and customers in Shopify.",
-    "categories": ["e_commerce"],
+    "categories": [
+      "e_commerce"
+    ],
     "toolsCount": 34,
-    "logo": null,
+    "logo": "shopify.svg",
     "auth": "managed"
   },
   {
     "slug": "woocommerce",
     "name": "WooCommerce",
     "description": "Products and orders in WooCommerce.",
-    "categories": ["e_commerce"],
+    "categories": [
+      "e_commerce"
+    ],
     "toolsCount": 16,
-    "logo": null,
+    "logo": "woocommerce.svg",
     "auth": "managed"
   },
   {
     "slug": "x_twitter",
     "name": "X",
     "description": "Post and search on X.",
-    "categories": ["social_media"],
+    "categories": [
+      "social_media"
+    ],
     "toolsCount": 11,
-    "logo": null,
-    "auth": "managed"
-  },
-  {
-    "slug": "instagram",
-    "name": "Instagram",
-    "description": "Post and read on Instagram.",
-    "categories": ["social_media"],
-    "toolsCount": 9,
-    "logo": null,
-    "auth": "managed"
-  },
-  {
-    "slug": "linkedin",
-    "name": "LinkedIn",
-    "description": "Post, search and message on LinkedIn.",
-    "categories": ["social_media"],
-    "toolsCount": 13,
-    "logo": null,
-    "auth": "managed"
-  },
-  {
-    "slug": "facebook",
-    "name": "Facebook",
-    "description": "Pages, posts and events on Facebook.",
-    "categories": ["social_media"],
-    "toolsCount": 15,
-    "logo": null,
-    "auth": "managed"
-  },
-  {
-    "slug": "youtube",
-    "name": "YouTube",
-    "description": "Search videos, channels and playlists on YouTube.",
-    "categories": ["social_media"],
-    "toolsCount": 10,
-    "logo": null,
-    "auth": "managed"
-  },
-  {
-    "slug": "reddit",
-    "name": "Reddit",
-    "description": "Read and post on Reddit.",
-    "categories": ["social_media"],
-    "toolsCount": 8,
-    "logo": null,
+    "logo": "x_twitter.svg",
     "auth": "managed"
   },
   {
     "slug": "spotify",
     "name": "Spotify",
     "description": "Search and manage music on Spotify.",
-    "categories": ["other"],
+    "categories": [
+      "other"
+    ],
     "toolsCount": 6,
-    "logo": null,
+    "logo": "spotify.svg",
     "auth": "managed"
   }
 ]

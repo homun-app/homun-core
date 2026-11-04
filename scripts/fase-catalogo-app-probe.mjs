@@ -4,7 +4,7 @@
 // gli stessi server FINTI della sonda OAuth: AS con discovery (RFC 9728), DCR
 // e PKCE S256, server MCP «Composio For You» con MANAGE_CONNECTIONS che
 // restituisce un redirect_url finto e il «browser» finto che lo segue. Il
-// catalogo è quello DI PROVA nel repo (composio-catalog.json, logo: null):
+// catalogo è quello curato nel repo (composio-catalog.json, coi loghi veri):
 // NESSUNA RETE VERA, tutto su 127.0.0.1.
 // Copre:
 //   P3: nessuna riga «Composio» nell'elenco e nessun campo slug; filtri a
@@ -563,9 +563,9 @@ try {
   // P3n: la testata dice «1 connesse ›» col logo
   const summary = await pageEval(`
     const s = document.querySelector('[data-testid="connected-summary"]')
-    return s ? { text: s.textContent.trim(), logos: s.querySelectorAll('span.grid').length, html: s.innerHTML.slice(0, 260) } : null
+    return s ? { text: s.textContent.trim(), logos: s.querySelectorAll('span.grid, img').length, html: s.innerHTML.slice(0, 260) } : null
   `)
-  check('P3n la testata dice «1 connesse ›» col logo', summary?.text?.includes('1 connesse') === true && (summary?.logos ?? 0) >= 1,
+  check('P3n la testata dice «1 connesse ›» col logo', /1 conness[ae]/.test(summary?.text ?? '') && (summary?.logos ?? 0) >= 1,
     JSON.stringify(summary))
 
   // ============ P5: il dettaglio di Gmail ============

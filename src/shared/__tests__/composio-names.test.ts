@@ -77,7 +77,7 @@ describe('K3 — composioToolkitName: mai slug grezzi', () => {
     expect(composioToolkitName('googledrive')).toBe('Google Drive')
     expect(composioToolkitName('googlesheets')).toBe('Google Sheets')
     expect(composioToolkitName('googledocs')).toBe('Google Docs')
-    expect(composioToolkitName('microsoft_teams')).toBe('Teams')
+    expect(composioToolkitName('microsoft_teams')).toBe('Microsoft Teams')
     expect(composioToolkitName('stripe')).toBe('Stripe')
   })
 

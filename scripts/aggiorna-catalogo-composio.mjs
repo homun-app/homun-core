@@ -21,7 +21,9 @@
 // <url> (default https://backend.composio.dev; per la prova col server finto)
 // · --dry-run (non scrive nulla, stampa solo le differenze) · --prune (tolge
 // anche le app sparite) · --out <dir> (cartella d'uscita per la prova:
-// <dir>/composio-catalog.json e <dir>/app-logos/).
+// <dir>/composio-catalog.json e <dir>/app-logos/) · --solo-loghi (SENZA
+// chiave: tiene il catalogo com'è e scarica solo i loghi pubblici da
+// logos.composio.dev/api/<slug>, riempiendo il campo logo).
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -49,9 +51,13 @@ const baseUrl = (optValue('--base-url') ?? DEFAULT_BASE).replace(/\/+$/, '')
 const dryRun = hasFlag('--dry-run')
 const prune = hasFlag('--prune')
 const outDir = optValue('--out')
+const logosOnly = hasFlag('--solo-loghi')
+/** Il logo pubblico di Composio per uno slug: serve quando meta.logo manca e per --solo-loghi. */
+const LOGO_CDN = 'https://logos.composio.dev/api/'
+const publicLogoUrl = (slug) => `${LOGO_CDN}${encodeURIComponent(slug)}`
 
 const KEY = process.env.COMPOSIO_CATALOG_KEY ?? ''
-if (!KEY) {
+if (!KEY && !logosOnly) {
   console.error('Manca COMPOSIO_CATALOG_KEY: esporta la chiave API di un progetto Composio (composio.dev → Settings → API Keys) e rilancia. Non faccio nulla.')
   process.exit(1)
 }
@@ -61,7 +67,7 @@ const logosDir = outDir ? join(outDir, 'app-logos') : join(ROOT, 'src/renderer/s
 const curationPath = join(ROOT, 'src/shared/app-catalog/curation.json')
 
 /** La chiave non compare mai nell'output: il corpo di un errore si mostra solo se non la contiene. */
-const safeExcerpt = (body) => (body && !body.includes(KEY) ? ` — ${body.slice(0, 200)}` : '')
+const safeExcerpt = (body) => (body && (!KEY || !body.includes(KEY)) ? ` — ${body.slice(0, 200)}` : '')
 
 // ---- il download delle pagine di toolkit ----
 
@@ -101,7 +107,7 @@ function toEntry(item) {
   const meta = item.meta ?? {}
   const categories = [...new Set(
     (Array.isArray(meta.categories) ? meta.categories : [])
-      .map((c) => (typeof c === 'string' ? c : c?.slug))
+      .map((c) => (typeof c === 'string' ? c : (c?.slug ?? c?.id ?? c?.name)))
       .filter((s) => typeof s === 'string' && s.length > 0)
   )].sort()
   return {
@@ -152,7 +158,26 @@ async function downloadLogo(entry, metaLogo) {
 
 const log = (...a) => console.log('[catalogo]', ...a)
 
+// --solo-loghi: il catalogo resta com'è, si riempiono solo i loghi (niente chiave)
+async function logosOnlyRun() {
+  const catalog = JSON.parse(readFileSync(catalogPath, 'utf8'))
+  if (!Array.isArray(catalog)) throw new Error(`${catalogPath} non è un elenco`)
+  if (!dryRun) mkdirSync(logosDir, { recursive: true })
+  let ok = 0
+  const missing = []
+  for (const entry of catalog) {
+    const logo = await downloadLogo(entry, publicLogoUrl(entry.slug))
+    if (!logo) { missing.push(entry.slug); continue }
+    entry.logo = `${entry.slug}.${logo.ext}`
+    ok++
+    if (!dryRun) writeFileSync(join(logosDir, entry.logo), logo.bytes)
+  }
+  if (!dryRun) writeFileSync(catalogPath, `${JSON.stringify(catalog, null, 2)}\n`)
+  log(`loghi: ${ok}/${catalog.length}${missing.length ? ` · senza logo: ${missing.join(', ')}` : ''}${dryRun ? ' (dry-run: nulla scritto)' : ''}`)
+}
+
 try {
+  if (logosOnly) { await logosOnlyRun(); process.exit(0) }
   // 1. le pagine, finché non ci sono `limit` voci collegabili
   const entries = []
   const seen = new Set()
@@ -167,7 +192,10 @@ try {
       const entry = toEntry(item)
       if (!entry.slug || seen.has(entry.slug)) continue
       seen.add(entry.slug)
-      entries.push({ entry, logoUrl: typeof (item.meta ?? {}).logo === 'string' ? item.meta.logo : null })
+      // senza meta.logo si prova il logo pubblico dello slug — SOLO verso il
+      // Composio vero (col server finto dei test niente rete esterna)
+      const metaLogo = typeof (item.meta ?? {}).logo === 'string' ? item.meta.logo : null
+      entries.push({ entry, logoUrl: metaLogo ?? (baseUrl === DEFAULT_BASE ? publicLogoUrl(entry.slug) : null) })
     }
     if (!next) break
     cursor = next
