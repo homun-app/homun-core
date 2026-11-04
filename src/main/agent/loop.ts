@@ -80,14 +80,14 @@ import {
 import { MAX_CREATE_AGENTS_PER_TURN, wakeParentToolDef } from './tools'
 // fase 13 (punto 3): add_mcp_server/install_plugin SOLO nei turni dell'utente;
 // (punto 5): tool MCP deferiti oltre connectors.maxInlineTools
-import { toolsForTurnSource, connectorProposalOffered, CONNECTOR_PROPOSAL_DENIED } from './connectors-policy'
+import { toolsForTurnSource, connectorProposalOffered, CONNECTOR_PROPOSAL_DENIED, GROUP_EXCLUDED_TOOLS } from './connectors-policy'
 import { PROPOSAL_RESULT } from '../connectors/install'
 import {
   findToolsDef, rankTools, requiredParamsOf, formatFindToolsResult, formatBuiltinToolsResult, toolsDeferred,
   activeToolsFromTranscript, connectorsActiveSection, DEFAULT_MAX_INLINE_TOOLS
 } from '../mcp/find-tools'
 // fase velocità (S3): elenco core fisso + integrati differiti dietro find_tools/use_tool
-import { partitionTools, useToolDef, formatNameIndexText } from './core-tools'
+import { partitionTools, useToolDef, formatNameIndexText, DEFERRED_TOOL_NAMES } from './core-tools'
 import type { Approval, ProviderConfig, SandbotEvent, SendMessagePayload, TurnEnd } from '../../shared/types'
 // fase 12: sottoagenti — policy pura del figlio, store del registro, formatters
 import {
@@ -1769,13 +1769,20 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           const args = rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs)
             ? (rawArgs as Record<string, unknown>)
             : {}
-          if (!target || target === 'use_tool' || target === 'find_tools') {
+          // use_tool esegue SOLO gli integrati differiti (l'elenco statico):
+          // i core si chiamano per nome, gli MCP pure — così use_tool non
+          // diventa una porta per nomi tolti dall'elenco del turno. Le
+          // regole del turno (figli, gruppi, proposte) restano ai controlli
+          // per chiamata più giù, uguali alla chiamata diretta.
+          if (!target || target === 'use_tool' || target === 'find_tools' || !DEFERRED_TOOL_NAMES.has(target)) {
             // use_tool non può chiamare sé stesso né find_tools (e senza nome
             // non c'è niente da srotolare): rifiuto fisso, come farebbe la
             // chiamata diretta di uno strumento che non si esegue
             const refused = !target
               ? 'use_tool requires the name of a built-in tool (find it with find_tools)'
-              : `use_tool cannot call ${target}: it runs built-in tools found with find_tools, not itself or find_tools`
+              : target === 'use_tool' || target === 'find_tools'
+                ? `use_tool cannot call ${target}: it runs built-in tools found with find_tools, not itself or find_tools`
+                : `use_tool cannot call ${target}: it runs only the built-in tools listed by find_tools (other tools are called directly by name)`
             const uEntry = add({
               agentId, kind: 'tool-call', role: 'assistant', content: call.name,
               meta: { id: call.id, name: call.name, arguments: call.arguments }
@@ -1819,6 +1826,18 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             messages.push({ role: 'tool', toolCallId: call.id, content: refused })
             continue
           }
+        }
+
+        // fase velocità (verifica): nei turni di GRUPPO i tool esclusi
+        // (fill_credential) non compaiono nella lista; se il modello li chiama
+        // lo stesso — direttamente o con use_tool — il rifiuto è qui, per
+        // chiamata, come per i figli
+        if (opts.groupTurn !== undefined && GROUP_EXCLUDED_TOOLS.has(call.name)) {
+          const refused = `not available in group turns: ${call.name} (credentials and sensitive data stay out of groups)`
+          const res = add({ agentId, kind: 'tool-result', role: 'system', content: refused, meta: { callId: call.id, error: true } })
+          emit({ type: 'entries', agentId, entries: [res] })
+          messages.push({ role: 'tool', toolCallId: call.id, content: refused })
+          continue
         }
 
         // ---- fase 3 (§3bis L2/L5): comunicazione e invii esterni, gestiti dal loop ----

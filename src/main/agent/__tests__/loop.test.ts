@@ -5980,6 +5980,34 @@ describe('fase velocità (S3): elenco core fisso, differiti dietro find_tools/us
     expect(results[1]).toContain('cannot call find_tools')
   })
 
+  it('use_tool esegue SOLO gli integrati differiti: un core o un nome inventato è rifiutato', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 'c1', name: 'use_tool', arguments: JSON.stringify({ name: 'run-command', arguments: { command: 'echo x' } }) }] },
+      { toolCalls: [{ id: 'c2', name: 'use_tool', arguments: JSON.stringify({ name: 'inventato', arguments: {} }) }] },
+      { text: 'fine' }
+    ]
+    await runTurn(AGENT, 'core via use_tool', emit)
+    const results = h.db.entries.filter((e) => e.kind === 'tool-result').map((e) => String(e.content))
+    expect(results[0]).toContain('use_tool cannot call run-command')
+    expect(results[1]).toContain('use_tool cannot call inventato')
+    // niente è stato eseguito col nome vero
+    expect(h.db.entries.some((e) => e.kind === 'tool-call' && e.meta?.name === 'run-command')).toBe(false)
+  })
+
+  it('turno di GRUPPO: fill_credential rifiutato per chiamata, diretta o via use_tool', async () => {
+    h.db.groupsState.groups.push({ id: 7, name: 'G', description: 'd', created_by: AGENT, coordinator_id: null, created_at: 1 })
+    h.db.groupsState.members.set(7, [AGENT])
+    h.llm.queue = [
+      { toolCalls: [{ id: 'f1', name: 'fill_credential', arguments: JSON.stringify({ loginId: 'x', origin: 'https://esempio.it' }) }] },
+      { text: 'fine' }
+    ]
+    await runTurn(AGENT, '<turno_di_gruppo gruppo="G">…</turno_di_gruppo>', emit, undefined, {
+      groupTurn: { groupId: 7, readMaxDepth: 0, rootId: 1 }, untrusted: true
+    })
+    const res = h.db.entries.findLast((e) => e.kind === 'tool-result')
+    expect(String(res?.content)).toContain('not available in group turns: fill_credential')
+  })
+
   it('find_tools trova un integrato differito e dice di chiamarlo con use_tool', async () => {
     h.llm.queue = [
       { toolCalls: [{ id: 'f1', name: 'find_tools', arguments: JSON.stringify({ query: 'create agent' }) }] },
