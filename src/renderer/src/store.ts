@@ -544,7 +544,9 @@ export const useStore = create<Store>((set, get) => ({
   async select(agentId) {
     // fase 16: cambiando bot cambia anche il composer (il typing non resta appeso).
     // fase 16b (S5): la squadra aperta lascia il posto alla chat del bot
-    set({ activeId: agentId, entries: [], openSubagentId: null, subEntries: [], typingAgentId: null, openGroupId: null, groupMessages: [] })
+    // verifica impostazioni (navigazione): scegliere un bot riporta alla sua
+    // chat — Attività e Libreria si chiudono (prima restavano sopra la chat)
+    set({ activeId: agentId, entries: [], openSubagentId: null, subEntries: [], typingAgentId: null, openGroupId: null, groupMessages: [], activityOpen: false, openLibraryId: null })
     set({ entries: await api.getEntries(agentId) })
     // fase 12: i sottoagenti dell'agente scelto
     api.listSubagents(agentId).then((subagents) => set({ subagents })).catch(() => undefined)
@@ -701,7 +703,10 @@ export const useStore = create<Store>((set, get) => ({
 
   // fase 10: vista gruppo — i messaggi del gruppo, l'utente scrive con le
   // @menzioni (le legge il daemon quando pianifica i turni)
-  openGroup(id) {    set({ openGroupId: id, groupMessages: [] })
+  openGroup(id) {
+    // verifica impostazioni (navigazione): aprire una squadra riporta alla
+    // chat; chiuderla (null) non tocca Attività né Libreria
+    set(id !== null ? { openGroupId: id, groupMessages: [], activityOpen: false, openLibraryId: null } : { openGroupId: id, groupMessages: [] })
     if (id !== null) {
       void api.groupMessages(id).then((groupMessages) => set({ groupMessages })).catch(() => undefined)
     }

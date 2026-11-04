@@ -121,8 +121,11 @@ export function ActivityPanel() {
     setActivityOpen(false)
   }
 
+  // verifica impostazioni: la vista sta SOPRA la fascia di trascinamento della
+  // chat, che Electron calcola ignorando lo z-index — no-drag, o la freccia ‹
+  // in alto cade dentro la fascia e il clic trascina la finestra
   return (
-    <div className="absolute inset-0 z-20 flex flex-col bg-background px-8 py-6">
+    <div className="no-drag absolute inset-0 z-20 flex flex-col bg-background px-8 py-6">
       {/* la testa della vista: ‹ Attività, la ricerca e le pillole (tavola 4) */}
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
         <div className="flex items-center gap-2">

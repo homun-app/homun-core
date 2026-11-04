@@ -69,8 +69,11 @@ const KIND_LABEL: Record<LibraryItemInfo['kind'], MessageDescriptor> = {
 export function LibraryPanel() {
   const openLibraryId = useStore((s) => s.openLibraryId)
   if (openLibraryId === null) return null
+  // verifica impostazioni: la vista sta SOPRA la fascia di trascinamento della
+  // chat, che Electron calcola ignorando lo z-index — no-drag, o la freccia ‹
+  // in alto cade dentro la fascia e il clic trascina la finestra
   return (
-    <div className="absolute inset-0 z-20 flex flex-col bg-background">
+    <div className="no-drag absolute inset-0 z-20 flex flex-col bg-background">
       {openLibraryId === '' ? <LibraryList /> : <LibraryItemView id={openLibraryId} />}
     </div>
   )
