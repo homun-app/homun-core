@@ -83,9 +83,11 @@ import { MAX_CREATE_AGENTS_PER_TURN, wakeParentToolDef } from './tools'
 import { toolsForTurnSource, connectorProposalOffered, CONNECTOR_PROPOSAL_DENIED } from './connectors-policy'
 import { PROPOSAL_RESULT } from '../connectors/install'
 import {
-  findToolsToolDef, rankTools, requiredParamsOf, formatFindToolsResult, toolsDeferred,
+  findToolsDef, rankTools, requiredParamsOf, formatFindToolsResult, formatBuiltinToolsResult, toolsDeferred,
   activeToolsFromTranscript, connectorsActiveSection, DEFAULT_MAX_INLINE_TOOLS
 } from '../mcp/find-tools'
+// fase velocità (S3): elenco core fisso + integrati differiti dietro find_tools/use_tool
+import { partitionTools, useToolDef, formatNameIndexText } from './core-tools'
 import type { Approval, ProviderConfig, SandbotEvent, SendMessagePayload, TurnEnd } from '../../shared/types'
 // fase 12: sottoagenti — policy pura del figlio, store del registro, formatters
 import {
@@ -736,8 +738,42 @@ async function runSubagentTool(
   return { output: `Unknown tool: ${call.name}` }
 }
 
+// ---- fase velocità: traccia (S1) e sessione stabile (S4) ----
+
+/** Il contatore dei turnId della traccia (S1): t-1, t-2, … per vita del daemon. */
+let nextTraceTurnId = 0
+
+/**
+ * Fase velocità (S4), pura: la chiave di sessione di pi-ai, STABILE per tutte
+ * le chiamate della stessa conversazione (affinità e cache del prefisso dei
+ * provider): `<conversazione>:<bot>`, `group:<gruppo>:<membro>` nei turni di
+ * gruppo e `<padre>:<figlio>` nei figli (che hanno transcript proprio).
+ * Non va mai in log o traccia oltre all'hash corto di 8 caratteri (S1).
+ */
+export function sessionKeyOf(facts: {
+  agentId: string
+  groupTurn?: { groupId: number } | unknown
+  subagent?: { id: string; parentId: string } | unknown
+}): string {
+  if (facts.groupTurn !== undefined) {
+    const groupId = (facts.groupTurn as { groupId?: unknown } | null)?.groupId
+    return `group:${typeof groupId === 'number' ? groupId : '?'}:${facts.agentId}`
+  }
+  if (facts.subagent !== undefined) {
+    const sub = facts.subagent as { id?: unknown; parentId?: unknown }
+    return `${typeof sub.parentId === 'string' ? sub.parentId : '?'}:${facts.agentId}`
+  }
+  return `${facts.agentId}:${facts.agentId}`
+}
+
 export async function runTurn(agentId: string, userText: string, emit: Emitter, images?: string[], opts: RunTurnOptions = {}): Promise<void> {
   const source = opts.source ?? 'user'
+  // fase velocità (S1): il turno della traccia e l'indice della chiamata nel
+  // turno (le chiamate di compaction/revisore restano fuori: turnId nullo);
+  // fase velocità (S4): la chiave di sessione STABILE per conversazione
+  const traceTurnId = `t-${++nextTraceTurnId}`
+  let traceCallIndex = 0
+  const sessionId = sessionKeyOf({ agentId, groupTurn: opts.groupTurn, subagent: opts.subagent })
 
   // §5.7: un turno per agente — mai due run concurrently sulla stessa mappa.
   // In produzione il worker della coda jobs garantisce la serializzazione per
@@ -1129,6 +1165,10 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     // l'elenco degli altri bot (nome, descrizione, routine attive)
     let mainSection = ''
     let connectorsSection = ''
+    // fase velocità (S5): le sezioni VARIABILI vanno in FONDO al sistema,
+    // dopo la parte fissa e in ordine di frequenza (memoria per ultima: è
+    // quella che cambia più spesso, a ogni update_memory); la sezione
+    // Language resta l'ULTIMA (fase 17b A3)
     let systemText: string
     // fase 17b (A3): la lingua del turno si legge QUI, all'inizio della
     // composizione: se il turno nasce da un messaggio umano, noteHumanText è
@@ -1144,7 +1184,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       // correzione J1: anche il ripiego porta l'id — il path del report nel
       // prompt è sempre quello VERO del figlio
       systemText = subagentSystemPrompt(parent ?? agent, subRow ?? { id: opts.subagent.id, title: '' }) +
-        buildMemorySection(opts.subagent.parentId) + buildSkillsSection(opts.subagent.parentId)
+        buildSkillsSection(opts.subagent.parentId) + buildMemorySection(opts.subagent.parentId)
     } else {
       try {
         const agents = listAgents()
@@ -1176,16 +1216,65 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       // nei turni di gruppo (lì si coordina col gruppo)
       // fase 14 (punto 8): le righe delle credenziali solo nei turni NON di gruppo
       systemText = systemPrompt(agent, { subagents: opts.groupTurn === undefined, connectors: opts.groupTurn === undefined, credentials: opts.groupTurn === undefined }) +
-        mainSection + buildMemorySection(agentId) + buildSkillsSection(agentId) + connectorsSection
+        mainSection + buildSkillsSection(agentId) + connectorsSection + buildMemorySection(agentId)
     }
 
     // tool statici + tool MCP attivi (server esterni → mcp__<server>__<tool>)
     // fase 13 (punto 5): i tool MCP sono PER BOT (enabledFor via
     // serversForAgent; un figlio eredita dal padre); sopra
     // connectors.maxInlineTools si DEFERISCONO: niente schemi MCP nel prompt,
-    // la sezione "Connettori attivi" e il tool find_tools al loro posto
+    // la sezione "Connettori attivi" e il tool find_tools al loro posto.
+    // fase velocità (S3): anche gli integrati si dividono — un elenco CORE
+    // fisso nel prompt, i differiti dietro la RICERCA UNICA find_tools e
+    // l'esecutore use_tool; l'elenco del turno non cambia durante il turno e
+    // ha un ordine stabile (core in ordine di toolDefs, poi find_tools/use_tool,
+    // poi browser/computer, poi gli MCP inline: cache del prefisso)
     const { toolDefs, computerToolDefs } = await import('./tools')
-    let allTools = toolDefs
+    // fase 11b (punto 2): i tool del browser compaiono SOLO quando il browser
+    // è disponibile (docker + rete bridge): in host il modello non li vede.
+    // fase 19a (V7): anche i tre dello SCHERMO (request_takeover,
+    // computer_observe, computer_act) esistono solo dove esiste il browser
+    let browserDefs: import('./llm').ToolDef[] = []
+    try {
+      const { browserToolDefs, browserAvailable } = await import('./browser')
+      if (browserAvailable()) browserDefs = [...browserToolDefs, ...computerToolDefs]
+    } catch {
+      // browser non disponibile: prosegue senza
+    }
+    // fase velocità (S3.7): le regole del turno PRIMA della divisione
+    // core/differiti — un figlio non trova con find_tools ciò che la sua
+    // lista bianca esclude, e i tool di proposta restano nei soli turni
+    // dell'utente
+    let builtins: import('./llm').ToolDef[] = toolDefs
+    if (opts.subagent) {
+      // fase 12 (punto 3): nel FIGLIO solo i tool della whitelist (run-command,
+      // file, web, browser, memoria/skill in LETTURA, connettori via gate) più
+      // wake_parent; i tool del padre non compaiono proprio
+      builtins = builtins.filter((t) => subagentToolDenyReason(t.name) === null)
+      browserDefs = browserDefs.filter((t) => subagentToolDenyReason(t.name) === null)
+    }
+    builtins = toolsForTurnSource(builtins, {
+      source,
+      groupTurn: opts.groupTurn,
+      subagent: opts.subagent,
+      taskId: opts.taskId,
+      automatic,
+      agentMessage: opts.agentMessage,
+      initiator: opts.initiator
+    })
+    browserDefs = toolsForTurnSource(browserDefs, {
+      source,
+      groupTurn: opts.groupTurn,
+      subagent: opts.subagent,
+      taskId: opts.taskId,
+      automatic,
+      agentMessage: opts.agentMessage,
+      initiator: opts.initiator
+    })
+    // la divisione core/differiti (fase velocità S3): l'elenco differito è
+    // fisso per tutto il turno, l'ordine resta quello di toolDefs
+    const { core: coreDefs, deferred: deferredBuiltinDefs } = partitionTools(builtins)
+    let allTools: import('./llm').ToolDef[] = coreDefs
     let mcpToolDefs: import('./llm').ToolDef[] = []
     try {
       const { activeTools } = await import('../mcp')
@@ -1195,9 +1284,22 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     }
     const maxInlineTools = getSetting<number>('connectors.maxInlineTools', DEFAULT_MAX_INLINE_TOOLS)
     const deferredMcp = toolsDeferred(mcpToolDefs.length, maxInlineTools)
+    // find_tools c'è sempre quando esiste almeno un integrato differito nel
+    // turno, o quando i tool MCP sono differiti; use_tool solo per gli
+    // integrati differiti (i tool MCP si chiamano per nome, come sempre)
+    if (deferredBuiltinDefs.length > 0 || deferredMcp) {
+      allTools = [
+        ...allTools,
+        findToolsDef(deferredBuiltinDefs.map((t) => t.name), deferredMcp, formatNameIndexText),
+        ...(deferredBuiltinDefs.length > 0 ? [useToolDef] : [])
+      ]
+    }
+    // poi browser/computer, in fondo all'elenco degli integrati
+    allTools = [...allTools, ...browserDefs]
     let offeredMcpDefs = mcpToolDefs
     if (!deferredMcp) {
-      allTools = [...toolDefs, ...mcpToolDefs]
+      // gli MCP inline chiudono l'elenco (dopo core, ricerca e browser)
+      allTools = [...allTools, ...mcpToolDefs]
     } else {
       // nessuno schema MCP nel prompt: restano attivi solo quelli già
       // attivati con find_tools in QUESTA conversazione (dal transcript,
@@ -1205,12 +1307,10 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       const prevActive = activeToolsFromTranscript(scopedEntries())
       const prevSet = new Set(prevActive)
       offeredMcpDefs = mcpToolDefs.filter((t) => prevSet.has(t.name))
-      allTools = [
-        ...toolDefs,
-        findToolsToolDef,
-        ...offeredMcpDefs
-      ]
+      allTools = [...allTools, ...offeredMcpDefs]
     }
+    // nel FIGLIO wake_parent esiste e chiude l'elenco
+    if (opts.subagent) allTools = [...allTools, wakeParentToolDef]
     // M1: i tool MCP offerti in QUESTO turno, con annotazioni e schema —
     // servono a compilare la via di un draft_external senza via quando per
     // il canale c'è esattamente un invio esterno
@@ -1219,33 +1319,6 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       ...(permissions.mcpAnnotationsOf(t.name) ? { annotations: permissions.mcpAnnotationsOf(t.name)! } : {}),
       parameters: t.parameters
     }))
-    // fase 11b (punto 2): i tool del browser compaiono SOLO quando il browser
-    // è disponibile (docker + rete bridge): in host il modello non li vede.
-    // fase 19a (V7): anche i tre dello SCHERMO (request_takeover,
-    // computer_observe, computer_act) esistono solo dove esiste il browser
-    try {
-      const { browserToolDefs, browserAvailable } = await import('./browser')
-      if (browserAvailable()) allTools = [...allTools, ...browserToolDefs, ...computerToolDefs]
-    } catch {
-      // browser non disponibile: prosegue senza
-    }
-    // fase 12 (punto 3): nel FIGLIO solo i tool della whitelist (run-command,
-    // file, web, browser, memoria/skill in LETTURA, connettori via gate) più
-    // wake_parent; i tool del padre non compaiono proprio
-    if (opts.subagent) {
-      allTools = [...allTools.filter((t) => subagentToolDenyReason(t.name) === null), wakeParentToolDef]
-    }
-    // fase 13 (punto 3): add_mcp_server e install_plugin SOLO nei turni nati
-    // da un messaggio diretto dell'utente in chat (regola 9 dell'onboarding)
-    allTools = toolsForTurnSource(allTools, {
-      source,
-      groupTurn: opts.groupTurn,
-      subagent: opts.subagent,
-      taskId: opts.taskId,
-      automatic,
-      agentMessage: opts.agentMessage,
-      initiator: opts.initiator
-    })
     // i nomi dei tool MCP attivi del turno: in modalità differita un mcp__*
     // (o composio__*, fase app A5) fuori da questo insieme NON si esegue
     // ("strumento non attivo")
@@ -1474,7 +1547,10 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       const stream = llmStream(activeProvider, activeRoute.model, messages, turnTools, AbortSignal.any([controller.signal, streamAbort.signal]), {
         thinking: turnThinking,
         modelPrices,
-        ...(usableAhead ? { maxRetries: 0 } : {})
+        ...(usableAhead ? { maxRetries: 0 } : {}),
+        // fase velocità (S1/S4): traccia del turno e sessione stabile
+        sessionId,
+        trace: { turnId: traceTurnId, callIndex: traceCallIndex++ }
       })
       // fase 3: il testo libero è ragionamento interno, non una risposta
       const entry = add({ agentId, kind: 'thinking', role: 'assistant', content: '' })
@@ -1671,13 +1747,47 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       setStatus(agentId, 'running', emit)
       let paused = false
 
-      for (const call of final.toolCalls) {
+      for (let call of final.toolCalls) {
         if (controller.signal.aborted) break
         let input: Record<string, unknown>
         try {
           input = JSON.parse(call.arguments || '{}')
         } catch {
           input = {}
+        }
+
+        // fase velocità (S3.5): use_tool si SROTOLA prima di ogni controllo:
+        // da qui in poi la chiamata è IDENTICA a una chiamata diretta di
+        // name con arguments — permessi, gate, card d'approvazione, bozze,
+        // regole di toolsForTurnSource, whitelist dei figli, transcript,
+        // attività e Dettagli tecnici vedono il nome VERO, mai use_tool.
+        // Un nome inesistente, non differito o vietato in questo turno
+        // riceve l'errore che darebbe la chiamata diretta (più giù).
+        if (call.name === 'use_tool') {
+          const target = typeof input.name === 'string' ? input.name : ''
+          const rawArgs = input.arguments
+          const args = rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs)
+            ? (rawArgs as Record<string, unknown>)
+            : {}
+          if (!target || target === 'use_tool' || target === 'find_tools') {
+            // use_tool non può chiamare sé stesso né find_tools (e senza nome
+            // non c'è niente da srotolare): rifiuto fisso, come farebbe la
+            // chiamata diretta di uno strumento che non si esegue
+            const refused = !target
+              ? 'use_tool requires the name of a built-in tool (find it with find_tools)'
+              : `use_tool cannot call ${target}: it runs built-in tools found with find_tools, not itself or find_tools`
+            const uEntry = add({
+              agentId, kind: 'tool-call', role: 'assistant', content: call.name,
+              meta: { id: call.id, name: call.name, arguments: call.arguments }
+            })
+            emit({ type: 'entries', agentId, entries: [uEntry] })
+            messages.push({ role: 'tool', toolCallId: call.id, content: refused })
+            const res = add({ agentId, kind: 'tool-result', role: 'system', content: refused, meta: { callId: call.id, error: true } })
+            emit({ type: 'entries', agentId, entries: [res] })
+            continue
+          }
+          call = { ...call, name: target, arguments: JSON.stringify(args) }
+          input = args
         }
 
         // fase 8 (§3bis L11): loop detection — la stessa identica chiamata
@@ -2425,28 +2535,44 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           continue
         }
 
-        // fase 13 (punto 5): find_tools — cerca fra i tool MCP DEFERITI del
-        // bot e li ATTIVA dal passo successivo (in fondo, ordine stabile)
+        // fase 13 (punto 5) → fase velocità (S3.3): find_tools è la RICERCA
+        // UNICA — cerca fra gli INTEGRATI DIFFERITI (nome, descrizione e
+        // parametri: si chiamano con use_tool dal passo dopo) e, quando la
+        // modalità differita MCP è attiva, anche fra i tool MCP DEFERITI del
+        // bot, che ATTIVA dal passo successivo (in fondo, ordine stabile)
         if (call.name === 'find_tools') {
           const fEntry = add({
             agentId, kind: 'tool-call', role: 'assistant', content: 'find_tools',
             meta: { id: call.id, name: call.name, arguments: call.arguments }
           })
           emit({ type: 'entries', agentId, entries: [fEntry] })
-          const found = rankTools(
-            mcpToolDefs.map((t) => ({ name: t.name, description: t.description, requiredParams: requiredParamsOf(t) })),
-            String(input.query ?? '')
+          const query = String(input.query ?? '')
+          const foundBuiltins = rankTools(
+            deferredBuiltinDefs.map((t) => ({ name: t.name, description: t.description, requiredParams: requiredParamsOf(t) })),
+            query
           )
-          const text = formatFindToolsResult(found)
+          const foundMcp = deferredMcp
+            ? rankTools(
+              mcpToolDefs.map((t) => ({ name: t.name, description: t.description, requiredParams: requiredParamsOf(t) })),
+              query
+            )
+            : []
+          const parts = [
+            formatBuiltinToolsResult(foundBuiltins),
+            // la parte MCP solo quando la ricerca MCP è attiva in questo turno
+            ...(deferredMcp ? [formatFindToolsResult(foundMcp)] : [])
+          ].filter(Boolean)
+          const text = parts.length ? parts.join('\n\n') : 'No tools found with this search: try again with other words or tell the user.'
           const res = add({
             agentId, kind: 'tool-result', role: 'system', content: text,
-            meta: { callId: call.id, activated: found.map((t) => t.name) }
+            // attivati (dal transcript, per i turni futuri): SOLO i tool MCP
+            meta: { callId: call.id, activated: foundMcp.map((t) => t.name) }
           })
           emit({ type: 'entries', agentId, entries: [res] })
           messages.push({ role: 'tool', toolCallId: call.id, content: text })
-          // i tool trovati diventano ATTIVI dal passo successivo e restano
+          // i tool MCP trovati diventano ATTIVI dal passo successivo e restano
           // nella lista, in FONDO e in ordine stabile (cache del prompt)
-          for (const t of found) {
+          for (const t of foundMcp) {
             activeMcpNames.add(t.name)
             const def = mcpToolDefs.find((x) => x.name === t.name)
             if (def && !turnTools.some((x) => x.name === t.name)) turnTools = [...turnTools, def]
@@ -3577,7 +3703,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         try {
           const rstream = llmStream(activeProvider, activeRoute.model, messages, [wakeParentToolDef], controller.signal, {
             thinking: turnThinking,
-            modelPrices
+            modelPrices,
+            sessionId,
+            trace: { turnId: traceTurnId, callIndex: traceCallIndex++ }
           })
           let racc = ''
           let recoveryCalls: ToolCall[] = []
@@ -3664,7 +3792,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         try {
           const rstream = llmStream(activeProvider, activeRoute.model, messages, allTools, controller.signal, {
             thinking: turnThinking,
-            modelPrices
+            modelPrices,
+            sessionId,
+            trace: { turnId: traceTurnId, callIndex: traceCallIndex++ }
           })
           let acc = ''
           let recoveryCalls: ToolCall[] = []

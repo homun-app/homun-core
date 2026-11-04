@@ -109,7 +109,7 @@ import { mergeConnectorResults, formatSearchResults } from '../src/main/connecto
 import { parseRegistryResponse } from '../src/main/connectors/registry'
 import { loadCatalog } from '../src/main/connectors'
 import registryNotionFixture from '../src/main/connectors/__tests__/fixtures/registry-notion.json'
-import { findToolsToolDef, rankTools, requiredParamsOf, formatFindToolsResult } from '../src/main/mcp/find-tools'
+import { findToolsDef, rankTools, requiredParamsOf, formatFindToolsResult } from '../src/main/mcp/find-tools'
 import { subagentToolAllowed, briefTarget, SUBAGENT_RECOVERY_NUDGE } from '../src/main/agent/subagents'
 // fase 14 (punto 9): i result dei tool di documenti/credenziali usano i
 // FORMATTER e i CONTROLLI VERI (checkFillOrigin per il rifiuto d'origine)
@@ -2264,7 +2264,7 @@ describe(`eval dei comportamenti (fasi 9-11) su modello reale (${MODEL} × ${RUN
         const caseSystem = c.child ? sysChild : c.source === 'group' ? sysGroup : sys
         // fase 13 (caso 28): col gateway i 60 tool MCP sono DEFERITI — nel turno
         // c'è find_tools e la lista cresce con gli attivati (come il loop)
-        const dyn = c.dynamic ? { current: [...EVAL_TOOLS, findToolsToolDef as ToolDef] } : undefined
+        const dyn = c.dynamic ? { current: [...EVAL_TOOLS, findToolsDef([], true, () => '') as ToolDef] } : undefined
         const t = await evalTurn(
           [{ role: 'system', content: caseSystem }, ...c.history],
           c.source ?? 'user',

@@ -46,7 +46,9 @@ const h = vi.hoisted(() => {
     models: [] as string[],
     // fase 18b (H2/H3): il provider di ogni chiamata e le opzioni dello stream
     provIds: [] as string[],
-    opts: [] as Array<{ thinking?: string; modelPrices?: unknown; maxRetries?: number }>,
+    opts: [] as Array<{ thinking?: string; modelPrices?: unknown; maxRetries?: number; sessionId?: string }>,
+    /** fase velocità (S3): i tool offerti ad OGNI chiamata (ordine stabile) */
+    toolsList: [] as unknown[][],
     gates: new Set<{ resolve: () => void }>(),
     // fase 8: risposta del revisore delle approvazioni (chiamata separata col
     // tool report_decision — non consuma la coda delle risposte del turno;
@@ -431,15 +433,18 @@ vi.mock('../llm', () => ({
     messages: Array<{ role: string; content: string; toolCallId?: string; images?: string[]; toolCalls?: unknown[] }>,
     tools: unknown[] = [],
     _signal?: unknown,
-    _opts?: { thinking?: string; modelPrices?: unknown; maxRetries?: number }
+    _opts?: { thinking?: string; modelPrices?: unknown; maxRetries?: number; sessionId?: string; trace?: { turnId: string; callIndex: number } }
   ) => {
     h.llm.calls.push(messages.map((m) => ({ role: m.role, content: m.content, toolCallId: m.toolCallId, images: m.images, toolCalls: m.toolCalls })))
+    // fase velocità (S3/S4): i tool offerti e la sessione stabile della chiamata
+    ;(h.llm as { toolsList?: unknown[][] }).toolsList ??= []
+    ;(h.llm as { toolsList?: unknown[][] }).toolsList!.push(tools)
     // fase 9 (punto 1): quale modello è stato usato per questa chiamata;
     // fase 18b (H2/H3): anche il provider e le opzioni (thinking, prezzi)
     // fase 18b (K6): anche maxRetries (0 = il passaggio d'anello sostituisce il retry)
     h.llm.models.push(String(_model))
     h.llm.provIds.push(String((_p as { id?: string })?.id ?? ''))
-    h.llm.opts.push({ thinking: _opts?.thinking, modelPrices: _opts?.modelPrices, maxRetries: _opts?.maxRetries })
+    h.llm.opts.push({ thinking: _opts?.thinking, modelPrices: _opts?.modelPrices, maxRetries: _opts?.maxRetries, sessionId: _opts?.sessionId })
     // fase 8: la chiamata del REVISORE (solo tool report_decision) risponde da
     // h.llm.reviewer senza toccare la coda del turno
     if ((tools as Array<{ name?: string }>).some((t) => t?.name === 'report_decision')) {
@@ -768,6 +773,7 @@ beforeEach(() => {
   // azzera tra i test, come il resto dello stato
   h.llm.provIds.length = 0
   h.llm.opts.length = 0
+  ;((h.llm as { toolsList?: unknown[][] }).toolsList ??= []).length = 0
   resetRouteHealth()
   h.llm.reviewer = { text: 'no' }
   h.sandboxMock.exec = { command: '', env: {}, calls: 0 }
@@ -5843,5 +5849,213 @@ describe('M5: consegna al confine di passo', () => {
 
   it('agente libero: nessuna consegna (il messaggio è già un turno nuovo)', () => {
     expect(deliverToRunningTurn(AGENT, { jobId: null, text: 'ciao' })).toBe(false)
+  })
+})
+
+// ---- fase velocità: strumenti core/differiti (S3), sessione stabile (S4),
+// prefisso di sistema stabile (S5) ----
+
+describe('fase velocità (S3): elenco core fisso, differiti dietro find_tools/use_tool', () => {
+  const namesOf = (i: number): string[] =>
+    ((h.llm as { toolsList?: Array<Array<{ name?: string }>> }).toolsList ?? [])[i]!.map((t) => String(t?.name))
+
+  it('un turno normale NON offre gli integrati differiti; find_tools e use_tool ci sono, l\'ordine è quello deciso', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 'a1', name: 'recall_memory', arguments: JSON.stringify({ query: 'x' }) }] },
+      { text: 'fine' }
+    ]
+    await runTurn(AGENT, 'ciao', emit)
+    const offered = namesOf(0)
+    // gli integrati differiti NON sono nella lista
+    for (const deferred of ['create_agent', 'delete_agent', 'send_to_agent', 'list_agents', 'save_to_library', 'copy_to_box', 'propose_rule_change', 'add_mcp_server', 'install_plugin', 'update_skill']) {
+      expect(offered, deferred).not.toContain(deferred)
+    }
+    // la ricerca unica e l'esecutore ci sono, dopo i core e prima degli MCP inline
+    expect(offered).toContain('find_tools')
+    expect(offered).toContain('use_tool')
+    expect(offered.indexOf('use_tool')).toBeGreaterThan(offered.indexOf('find_tools'))
+    expect(offered.indexOf('find_tools')).toBeGreaterThan(offered.indexOf('send_to_user'))
+    // l'MCP inline (gmail, sotto soglia) chiude l'elenco
+    expect(offered[offered.length - 1]).toBe('mcp__gmail__send_message')
+    // la descrizione di find_tools porta l'INDICE dei nomi differiti per area
+    const findDef = ((h.llm as { toolsList?: Array<Array<{ name?: string; description?: string }>> }).toolsList ?? [])[0]!
+      .find((t) => t?.name === 'find_tools')!
+    expect(findDef.description).toContain('Other bots and groups: create_agent, create_group, delete_agent')
+    expect(findDef.description).toContain('Library: export_from_library, list_library, save_to_library')
+  })
+
+  it('l\'elenco del turno NON cambia durante il turno (due chiamate, stesso elenco)', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 's1', name: 'send_to_user', arguments: JSON.stringify({ text: 'passo uno' }) }] },
+      { toolCalls: [{ id: 's2', name: 'send_to_user', arguments: JSON.stringify({ text: 'passo due' }) }] },
+      { text: 'fine' }
+    ]
+    await runTurn(AGENT, 'due passi', emit)
+    expect(h.llm.calls.length).toBeGreaterThanOrEqual(3)
+    expect(namesOf(0)).toEqual(namesOf(1))
+    expect(namesOf(1)).toEqual(namesOf(2))
+  })
+
+  it('use_tool { name: "delete_agent" }: STESSA card e STESSA riga di transcript della chiamata diretta', async () => {
+    h.db.settings.set('permissions', {
+      default: 'needs_approval',
+      rules: [{ tool: 'delete_agent', pattern: '*', mode: 'needs_approval' }]
+    } as const)
+    const snapshot = (): { approvals: unknown[]; toolCalls: unknown[] } => ({
+      approvals: h.db.entries
+        .filter((e) => e.kind === 'approval')
+        .map((e) => ({ tool: (e.meta as { tool?: string } | null)?.tool ?? '', ui: (e.meta as { ui?: unknown } | null)?.ui ?? null })),
+      toolCalls: h.db.entries
+        .filter((e) => e.kind === 'tool-call')
+        .map((e) => ({ content: e.content, name: (e.meta as { name?: string } | null)?.name }))
+    })
+    // chiamata DIRETTA
+    const mio = dbm.createAgent('Diretto', 'r', { createdBy: AGENT })
+    h.llm.queue = [
+      { toolCalls: [{ id: 'dd1', name: 'delete_agent', arguments: JSON.stringify({ agentId: mio.id }) }] },
+      { text: 'fine' }
+    ]
+    let turn = runTurn(AGENT, 'elimina diretto', emit)
+    await vi.waitFor(() => expect(h.db.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending')).toBeTruthy())
+    const directApproval = h.db.entries.find((e) => e.kind === 'approval')!
+    resolveApproval(AGENT, String(directApproval.meta?.approvalId), 'allow', 'once')
+    await turn
+    const direct = snapshot()
+    expect(direct.approvals).toHaveLength(1)
+    expect(direct.approvals[0]).toMatchObject({ tool: 'delete_agent' })
+    expect(direct.toolCalls.some((c) => (c as { name?: string }).name === 'delete_agent')).toBe(true)
+
+    // la STESSA chiamata via use_tool
+    const mio2 = dbm.createAgent('Srotolato', 'r', { createdBy: AGENT })
+    h.db.entries.length = 0
+    h.llm.queue = [
+      { toolCalls: [{ id: 'du1', name: 'use_tool', arguments: JSON.stringify({ name: 'delete_agent', arguments: { agentId: mio2.id } }) }] },
+      { text: 'fine' }
+    ]
+    turn = runTurn(AGENT, 'elimina srotolato', emit)
+    await vi.waitFor(() => expect(h.db.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending')).toBeTruthy())
+    const unwrappedApproval = h.db.entries.find((e) => e.kind === 'approval')!
+    resolveApproval(AGENT, String(unwrappedApproval.meta?.approvalId), 'allow', 'once')
+    await turn
+    const unwrapped = snapshot()
+    // la card è QUELLA di delete_agent (mai use_tool), la riga di transcript
+    // dice delete_agent, e il bot è stato eliminato davvero
+    expect(unwrapped.approvals[0]).toEqual(direct.approvals[0])
+    expect(unwrapped.toolCalls.some((c) => (c as { name?: string }).name === 'use_tool')).toBe(false)
+    expect(unwrapped.toolCalls.some((c) => (c as { name?: string }).name === 'delete_agent')).toBe(true)
+    expect(h.db.agents.has(mio2.id)).toBe(false)
+  })
+
+  it('use_tool { name: "add_mcp_server" } in un turno automatico: rifiutato COME la chiamata diretta', async () => {
+    const refusalOf = async (viaUseTool: boolean): Promise<string> => {
+      h.db.entries.length = 0
+      const args = { id: 'un-server', reason: 'per il test' }
+      h.llm.queue = [
+        {
+          toolCalls: [viaUseTool
+            ? { id: 'x1', name: 'use_tool', arguments: JSON.stringify({ name: 'add_mcp_server', arguments: args }) }
+            : { id: 'x1', name: 'add_mcp_server', arguments: JSON.stringify(args) }]
+        },
+        { text: 'fine' }
+      ]
+      await runTurn(AGENT, 'collega', emit, undefined, { source: 'routine', title: 'Routine' })
+      const res = h.db.entries.findLast((e) => e.kind === 'tool-result')
+      return String(res?.content ?? '')
+    }
+    const direct = await refusalOf(false)
+    const unwrapped = await refusalOf(true)
+    expect(direct).toContain('you may propose connectors only when the user asks you in chat')
+    expect(unwrapped).toBe(direct)
+  })
+
+  it('use_tool non chiama sé stesso né find_tools', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 'u1', name: 'use_tool', arguments: JSON.stringify({ name: 'use_tool', arguments: { name: 'create_agent', arguments: {} } }) }] },
+      { toolCalls: [{ id: 'u2', name: 'use_tool', arguments: JSON.stringify({ name: 'find_tools', arguments: { query: 'bot' } }) }] },
+      { text: 'fine' }
+    ]
+    await runTurn(AGENT, 'ricorsione', emit)
+    const results = h.db.entries.filter((e) => e.kind === 'tool-result').map((e) => e.content)
+    expect(results[0]).toContain('cannot call use_tool')
+    expect(results[1]).toContain('cannot call find_tools')
+  })
+
+  it('find_tools trova un integrato differito e dice di chiamarlo con use_tool', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 'f1', name: 'find_tools', arguments: JSON.stringify({ query: 'create agent' }) }] },
+      { text: 'fine' }
+    ]
+    await runTurn(AGENT, 'cerca', emit)
+    const res = h.db.entries.findLast((e) => e.kind === 'tool-result')
+    expect(res?.content).toContain('create_agent')
+    expect(res?.content).toContain('use_tool({name, arguments})')
+    // e NON attiva nulla: gli attivati (meta.activated) restano vuoti (solo MCP)
+    expect((res?.meta as { activated?: string[] } | null)?.activated).toEqual([])
+  })
+})
+
+describe('fase velocità (S4): sessionId stabile per conversazione', () => {
+  it('tutte le chiamate dello stesso turno e della stessa conversazione hanno lo stesso sessionId; due bot diversi no', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 'k1', name: 'recall_memory', arguments: JSON.stringify({ query: 'x' }) }] },
+      { toolCalls: [{ id: 'k2', name: 'send_to_user', arguments: JSON.stringify({ text: 'uno' }) }] },
+      { text: 'fine' }
+    ]
+    await runTurn(AGENT, 'primo turno', emit)
+    const first = h.llm.opts.map((o) => o.sessionId)
+    expect(new Set(first).size).toBe(1)
+    expect(first[0]).toBe(`${AGENT}:${AGENT}`)
+
+    h.llm.queue = [{ text: 'ok' }]
+    await runTurn(AGENT, 'secondo turno', emit)
+    expect(h.llm.opts.every((o) => o.sessionId === `${AGENT}:${AGENT}`)).toBe(true)
+
+    const altro = 'agent_altro_chat'
+    h.db.agents.set(altro, { id: altro, name: 'Altro', description: '', providerId: 'prov', model: 'm1', status: 'idle', unread: 0, createdAt: 2 })
+    h.llm.queue = [{ text: 'ok' }]
+    await runTurn(altro, 'altro bot', emit)
+    expect(h.llm.opts.at(-1)!.sessionId).toBe(`${altro}:${altro}`)
+    expect(h.llm.opts.at(-1)!.sessionId).not.toBe(first[0])
+  })
+})
+
+describe('fase velocità (S5): il prompt di sistema non cambia tra le chiamate del turno', () => {
+  it('due chiamate dello stesso turno vedono lo STESSO systemText', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 'p1', name: 'recall_memory', arguments: JSON.stringify({ query: 'x' }) }] },
+      { text: 'fine' }
+    ]
+    await runTurn(AGENT, 'turno', emit)
+    const systems = h.llm.calls.map((msgs) => msgs.find((m) => m.role === 'system')!.content)
+    expect(systems.length).toBeGreaterThanOrEqual(2)
+    expect(systems[1]).toBe(systems[0])
+  })
+
+  it('tra due turni la parte PRIMA della prima sezione variabile è identica (la memoria cresce in fondo)', async () => {
+    h.llm.queue = [{ text: 'ok' }]
+    await runTurn(AGENT, 'primo', emit)
+    const before = h.llm.calls[0]!.find((m) => m.role === 'system')!.content
+
+    // una memoria NUOVA tra i turni: la sezione variabile più frequente
+    const { writeMemory } = await import('../memory')
+    writeMemory(AGENT, { content: 'l\'utente preferisce le risposte brevi', tier: 'core', scope: 'agent', source: 'agent' })
+
+    h.llm.queue = [{ text: 'ok' }]
+    await runTurn(AGENT, 'secondo', emit)
+    const after = h.llm.calls.at(-1)!.find((m) => m.role === 'system')!.content
+
+    // la sezione Memory c'è nel secondo turno (marcatore di riga intera:
+    // '# Memory, skills and routines' della base è un'altra sezione)
+    const MEM = '# Memory\n'
+    expect(after).toContain(MEM)
+    // ...sta DOPO le sezioni fisse di sistema e DOPO skill/connettori, e la
+    // parte prima della prima sezione variabile è identica byte per byte
+    expect(after.indexOf(MEM)).toBeGreaterThan(after.indexOf('# Limits'))
+    // nel primo turno non c'è memoria: il prefisso variabile è tutto il
+    // sistema meno la sezione Language (che sta sempre in coda)
+    const beforeVar = before.includes(MEM) ? before.slice(0, before.indexOf(MEM)) : before.slice(0, before.indexOf('\n\n# Language'))
+    expect(after.slice(0, after.indexOf(MEM))).toBe(beforeVar)
+    // la sezione Language resta l'ULTIMA anche con la memoria
+    expect(after.lastIndexOf('# Language')).toBeGreaterThan(after.indexOf(MEM))
   })
 })

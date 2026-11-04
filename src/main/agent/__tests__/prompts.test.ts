@@ -260,11 +260,12 @@ describe('fase 14 (punto 8): "Documents and credentials"', () => {
     expect(s).toContain('request_secure_input')
     expect(s).toContain('it is not used')
     expect(s).toContain('save_contact')
-    // ~200 token stimati (caratteri/4)
-    expect(s.length / 4).toBeLessThanOrEqual(200)
+    // ~200 token stimati (caratteri/4); fase velocità (S3.6): +15 per i
+    // puntatori a find_tools + use_tool di save_to_library e save_contact
+    expect(s.length / 4).toBeLessThanOrEqual(215)
   })
 
-  it('il prompt principale la contiene; il budget resta ≤ 2000 token', () => {
+  it('il prompt principale la contiene; il budget resta ≤ PROMPT_TOKEN_BUDGET', () => {
     const p = systemPrompt(agent)
     expect(p).toContain('# Documents and credentials')
     expect(p.length / 4).toBeLessThanOrEqual(PROMPT_TOKEN_BUDGET)
@@ -304,11 +305,11 @@ describe('fase 19a correzioni 2 (M1): credenziali e presa di controllo', () => {
     expect(s).toContain('save_contact')
   })
 
-  it('documentsCredentialsSection({}) è IDENTICA a prima (stringa letterale della fase 14, byte per byte)', () => {
+  it('documentsCredentialsSection({}): stringa letterale, byte per byte (fase 14 + i puntatori S3.6 a find_tools/use_tool)', () => {
     expect(documentsCredentialsSection({})).toBe(`# Documents and credentials
 - A report, a plan or a long text goes in write_document, NOT in the message: in the message one or two sentences about what you did (the card already shows the document), without a bullet-point summary. To modify it use edit_document with exact replacements.
-- Charts are made with visualize (Vega-Lite or Mermaid); files produced in the box that the user wants to keep go in save_to_library.
-- A new contact is saved only with save_contact (confirmation card).
+- Charts are made with visualize (Vega-Lite or Mermaid); files produced in the box that the user wants to keep go in save_to_library (via find_tools + use_tool).
+- A new contact is saved only with save_contact (confirmation card, via find_tools + use_tool).
 - For a login use list-credentials and fill_credential (the value goes from the vault to the field). NEVER passwords, codes or keys in chat or in browser_type: if they are missing, use request_secure_input.
 - If the user writes a password in chat, it is not used: propose request_secure_input to them.`)
   })

@@ -3,6 +3,9 @@
 // prompt — al loro posto la sezione "Connettori attivi" e il tool find_tools,
 // che attiva i tool che servono (come il tool search di Anthropic con
 // defer_loading e i meta-tool dei gateway: non tutti gli schemi nel prompt).
+// Fase velocità (S3): find_tools è la RICERCA UNICA — cerca anche gli
+// strumenti integrati DIFFERITI (core-tools.ts) e l'indice dei loro nomi
+// sta nella sua descrizione; gli integrati si eseguono con use_tool.
 // Tutto PURO: BM25 semplice su nome/descrizione/parametri, pareggio in ordine
 // alfabetico, gli attivati si ricostruiscono dal TRANSCRIPT (niente stato nuovo).
 import type { ToolDef } from '../agent/llm'
@@ -20,9 +23,15 @@ export const ACTIVE_TOOLS_MEMORY = 20
 /** La descrizione del server nella sezione "Connettori attivi": 80 caratteri. */
 export const SERVER_DESC_CHARS = 80
 
-/** I token di una stringa: minuscoli, parole alfanumeriche (puro). */
+/**
+ * I token di una stringa: minuscole, parole alfanumeriche (puro). Fase
+ * velocità (S3): si spezzano anche i nomi snake_case (create_agent →
+ * «create», «agent»): find_tools cerca anche gli integrati differiti, e i
+ * loro nomi sono tutti snake_case — un token unico non matchava mai
+ * «create agent».
+ */
 function tokens(s: string): string[] {
-  return (s.toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}_.-]*/gu) ?? []).filter((t) => t.length > 1 || /\d/.test(t))
+  return (s.toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}]*/gu) ?? []).filter((t) => t.length > 1 || /\d/.test(t))
 }
 
 export interface RankableTool {
@@ -90,6 +99,21 @@ export function formatFindToolsResult(found: Array<{ name: string; description?:
 }
 
 /**
+ * Fase velocità (S3): il result di find_tools per gli INTEGRATI differiti —
+ * nome, descrizione, parametri obbligatori e l'istruzione di chiamarli con
+ * use_tool (puro).
+ */
+export function formatBuiltinToolsResult(found: Array<{ name: string; description?: string; requiredParams?: string[] }>): string {
+  if (!found.length) return ''
+  const lines = found.map((t) => {
+    const desc = (t.description ?? '').replace(/\s+/g, ' ').trim().slice(0, 200)
+    const req = t.requiredParams?.length ? ` · required parameters: ${t.requiredParams.join(', ')}` : ''
+    return `- ${t.name}: ${desc}${req}`
+  })
+  return ['Built-in tools (call them with use_tool({name, arguments})):', ...lines].join('\n')
+}
+
+/**
  * I tool MCP attivati con find_tools nella CONVERSAZIONE (pura sul
  * transcript): le entry tool-result dei find_tools portano meta.activated
  * coi nomi attivati; si tengono gli ULTIMI 20 (ordine di attivazione, senza
@@ -122,16 +146,50 @@ export function connectorsActiveSection(servers: Array<{ name: string; toolCount
   ].join('\n')
 }
 
-/** La definizione del tool find_tools (aggiunta dal loop SOLO in modalità differita). */
-export const findToolsToolDef: ToolDef = {
-  name: 'find_tools',
-  description: 'Searches among the MCP tools of the active connectors (linked servers, plugins, gateways) and ACTIVATES up to 8 tools: from the following step you can call them by name. Use it before saying you cannot do something.',
-  parameters: {
-    type: 'object',
-    properties: {
-      query: { type: 'string', description: 'Keywords of the tool you are looking for (e.g. "issue linear crea")' }
-    },
-    required: ['query']
+/**
+ * Fase velocità (S3): la descrizione del tool find_tools, la RICERCA UNICA —
+ * cerca tra gli integrati differiti (il loro indice di nomi per area sta
+ * qui, così il modello sa che esistono anche senza cercare: come
+ * formatNameIndexText di Rakazo) e, quando la modalità differita MCP è
+ * attiva, anche tra i tool MCP dei connettori (che ATTIVA: dal passo dopo
+ * si chiamano per nome). Puro.
+ */
+export function findToolsDescription(deferredBuiltinNames: string[], deferredMcp: boolean, nameIndex: (names: string[]) => string): string {
+  const parts: string[] = []
+  if (deferredBuiltinNames.length) {
+    parts.push(
+      'Searches the built-in tools that are NOT in your tool list and tells you how to call them (name, description, parameters). ' +
+        'More built-in tools exist beyond your list; their names by area:\n' +
+        nameIndex(deferredBuiltinNames) +
+        '.'
+    )
+  }
+  if (deferredMcp) {
+    parts.push(
+      'Searches among the MCP tools of the active connectors (linked servers, plugins, gateways) and ACTIVATES up to 8 of them: from the following step you can call them by name.'
+    )
+  }
+  parts.push('Use it before saying you cannot do something.')
+  return parts.join(' ')
+}
+
+/**
+ * La definizione del tool find_tools del turno: la ricerca unica (S3). La
+ * descrizione porta l'indice dei nomi degli integrati differiti presenti nel
+ * turno; il loop la aggiunge quando c'è almeno un integrato differito o la
+ * modalità differita MCP è attiva.
+ */
+export function findToolsDef(deferredBuiltinNames: string[], deferredMcp: boolean, nameIndex: (names: string[]) => string): ToolDef {
+  return {
+    name: 'find_tools',
+    description: findToolsDescription(deferredBuiltinNames, deferredMcp, nameIndex),
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Keywords of the tool you are looking for (e.g. "issue linear crea", "crea un bot")' }
+      },
+      required: ['query']
+    }
   }
 }
 

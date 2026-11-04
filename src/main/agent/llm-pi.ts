@@ -33,6 +33,8 @@ import {
   type SimpleStreamOptions,
   type Tool as PiTool
 } from '@earendil-works/pi-ai'
+// fase velocità (S1): l'hash corto del sessionId per la traccia (mai l'id vero)
+import { createHash } from 'node:crypto'
 // solo le sette factory dei kind col catalogo, MAI providers/all
 import { openaiProvider } from '@earendil-works/pi-ai/providers/openai'
 import { anthropicProvider } from '@earendil-works/pi-ai/providers/anthropic'
@@ -53,7 +55,9 @@ import { traceLlmCall } from './llm'
 // fase 18b (H5.2): le regole degli URL vivi vivono nel modulo PURO live-models,
 // condiviso con providers.ts (nessun ciclo, nessuna duplicazione); da qui
 // arrivano anche i base URL noti, così questo file non dipende da providers.ts
-import { ZAI_CONSUMPTION_BASE_URL, KNOWN_BASE_URLS, LOCAL_KINDS, openAiCompatBase, ollamaCapabilities } from './live-models'
+// fase velocità (S2): ollamaThinkingLevels/ollamaThinkingInfo leggono la
+// parte `thinking` di /api/show dalla STESSA cache delle capability.
+import { ZAI_CONSUMPTION_BASE_URL, KNOWN_BASE_URLS, LOCAL_KINDS, openAiCompatBase, ollamaCapabilities, ollamaThinkingInfo, ollamaThinkingLevels } from './live-models'
 import { fallbackEligible } from './model-fallback'
 
 // re-esportati per i test e i chiamanti (la regola è una sola, in live-models)
@@ -181,8 +185,30 @@ export function fauxTestHandle(id: string = FAUX_TEST_PROVIDER_ID): FauxProvider
  * catalogo, e gli screenshot del computer use e le immagini dell'utente
  * sparivano. Il flag visione VERO (che spegne o accende) arriva col catalogo
  * della 18b; i modelli DEL catalogo pi-ai restano come sono.
+ * Fase velocità (S2): un sintetico Ollama che ragiona dichiara
+ * `reasoning: true` e una thinkingLevelMap che mappa `off` → `"none"` ed
+ * esclude i livelli non offerti — così il clamp di pi-ai sale al primo
+ * livello offerto e `off` parte davvero come `reasoning_effort: "none"`
+ * (openai-completions legge thinkingLevelMap.off quando l'opzione reasoning
+ * non c'è: su Ollama l'omissione varrebbe «predefinito del modello», non
+ * «spento»).
  */
-function syntheticModel(e: PiCacheEntry, modelId: string, compat?: Record<string, unknown>): Model<Api> {
+function syntheticModel(
+  e: PiCacheEntry,
+  modelId: string,
+  compat?: Record<string, unknown>,
+  ollama?: { levels: ThinkingSetting[] }
+): Model<Api> {
+  const thinkingLevelMap = ollama
+    ? {
+        off: ollama.levels.includes('off') ? 'none' : null,
+        ...Object.fromEntries(
+          (['minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const)
+            .filter((l) => !ollama.levels.includes(l))
+            .map((l) => [l, null])
+        )
+      }
+    : undefined
   return {
     id: modelId,
     name: modelId,
@@ -190,11 +216,12 @@ function syntheticModel(e: PiCacheEntry, modelId: string, compat?: Record<string
     provider: e.providerId,
     baseUrl: e.baseUrl,
     input: ['text', 'image'],
-    reasoning: false,
+    reasoning: !!ollama,
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 128_000,
     maxTokens: 16_384,
-    ...(compat ? { compat } : {})
+    ...(compat ? { compat } : {}),
+    ...(thinkingLevelMap ? { thinkingLevelMap } : {})
   } as unknown as Model<Api>
 }
 
@@ -285,18 +312,40 @@ export function piCacheEntryFor(p: ProviderConfig): PiCacheEntry {
   return entry
 }
 
+/**
+ * Fase velocità (S2): i livelli di ragionamento offerti da un sintetico
+ * Ollama secondo la cache di /api/show (null se il modello non ragiona o le
+ * informazioni non sono ancora lette). Pura rispetto alla cache.
+ */
+export function ollamaOfferedLevels(p: ProviderConfig, modelId: string): ThinkingSetting[] | null {
+  if (p.kind !== 'ollama') return null
+  const { levels } = ollamaThinkingLevels(ollamaThinkingInfo(p.id, modelId))
+  return levels.length ? levels : null
+}
+
 /** E2.1: il modello pi-ai di una configurazione (catalogo, o sintetico). */
 export function piModelFor(p: ProviderConfig, modelId: string): Model<Api> {
   const e = piCacheEntryFor(p)
   const fromCatalog = e.models.getModel(e.providerId, modelId)
   if (fromCatalog) return fromCatalog
-  return syntheticModel(e, modelId, e.local ? localCompatOf(p) : zaiCompatOf(p))
+  // fase velocità (S2): il sintetico Ollama che ragiona porta compat e
+  // thinkingLevelMap (niente invece se /api/show non ha dichiarato thinking)
+  const ollama = ollamaOfferedLevels(p, modelId)
+  return syntheticModel(e, modelId, e.local ? localCompatOf(p, !!ollama) : zaiCompatOf(p), ollama ? { levels: ollama } : undefined)
 }
 
-function localCompatOf(p: ProviderConfig): Record<string, unknown> | undefined {
-  return p.kind === 'ollama' || p.kind === 'lmstudio' || p.kind === 'openai-compatible' || p.kind === 'custom'
-    ? { supportsDeveloperRole: false, supportsReasoningEffort: false, supportsStore: false }
-    : undefined
+/**
+ * Il compat dei sintetici locali. Fase velocità (S2): un Ollama che ragiona
+ * a livelli accende `supportsReasoningEffort` con `thinkingFormat: 'openai'`
+ * (stessa idea di Rakazo, pi-openai-compatible-provider.ts): reasoning_effort
+ * parte col valore del livello e «spento» si dice con "none".
+ */
+function localCompatOf(p: ProviderConfig, ollamaThinking: boolean): Record<string, unknown> | undefined {
+  if (p.kind !== 'ollama' && p.kind !== 'lmstudio' && p.kind !== 'openai-compatible' && p.kind !== 'custom') return undefined
+  if (p.kind === 'ollama' && ollamaThinking) {
+    return { supportsDeveloperRole: false, supportsReasoningEffort: true, thinkingFormat: 'openai', supportsStore: false }
+  }
+  return { supportsDeveloperRole: false, supportsReasoningEffort: false, supportsStore: false }
 }
 
 function zaiCompatOf(p: ProviderConfig): Record<string, unknown> | undefined {
@@ -372,17 +421,18 @@ export function modelCapabilities(p: ProviderConfig, modelId: string, prices?: M
     }
   }
 
-  // ollama: le capability vere dalla cache di /api/show (H5.2), se già lette
+  // ollama: le capability vere dalla cache di /api/show (H5.2), se già lette.
+  // Fase velocità (S2): anche il ragionamento, dal campo thinking di /api/show
+  // (livelli offerti + reasoning true/false; niente come oggi se non letto)
   if (p.kind === 'ollama') {
     const caps = ollamaCapabilities(p.id, modelId)
+    const t = ollamaThinkingLevels(ollamaThinkingInfo(p.id, modelId))
     return {
       contextWindow: 128_000,
       vision: caps ? caps.includes('vision') : null,
-      reasoning: false,
+      reasoning: t.reasoning,
       tools: caps ? caps.includes('tools') : null,
-      // H3: il controllo del ragionamento su Ollama via API OpenAI-compatible
-      // non lo tocchiamo in questa fase (residuo, non verificabile senza rete)
-      thinkingLevels: [],
+      thinkingLevels: t.levels,
       cost: null,
       costSource: null,
       fromCatalog: false
@@ -633,6 +683,12 @@ export interface PiStreamMeta {
   local: boolean
   /** fase 18b (H1.3): il prezzo personalizzato $/1M (solo fuori catalogo, non locale) */
   customPrice?: { input: number; output: number; cacheRead?: number; cacheWrite?: number }
+  /**
+   * Fase velocità (S2): i livelli di ragionamento offerti da /api/show per un
+   * sintetico Ollama (assente per tutto il resto): decide la mappa
+   * off → "none" e il predefinito medium di S2.4.
+   */
+  ollamaOffered?: ThinkingSetting[] | null
 }
 
 /**
@@ -669,40 +725,82 @@ function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
   })
 }
 
+/** Il risultato di thinkingModelOf: modello, opzione reasoning e cosa va sul filo. */
+interface ThinkingChoice {
+  model: Model<Api>
+  reasoning?: SimpleStreamOptions['reasoning']
+  /**
+   * Fase velocità (S1/S2): il valore di reasoning_effort partito sul filo
+   * (per la traccia): il livello, "none" per «spento» su Ollama, null se
+   * nessuna opzione di ragionamento è partita.
+   */
+  reasoningWire: string | null
+}
+
 /**
  * H3: il modello e le opzioni reasoning per il livello scelto dal bot.
  * 'default' o assente → il comportamento della 18a ESATTO (nessuna opzione
- * reasoning, modello invariato). Sui sintetici non-zai il livello si ignora
- * (Ollama via API OpenAI-compatible: residuo di questa fase).
+ * reasoning, modello invariato). Sui sintetici non-zai non-ollama il livello
+ * si ignora (modello che non dichiara reasoning).
  * K1: 'off' NON si passa MAI a pi-ai come stringa — nel contratto di
  * streamSimple «spento» si dice OMITTENDO reasoning: openai-responses,
  * openai-completions e mistral-conversations convertono a mano 'off' in
  * undefined, ma anthropic-messages con QUALUNQUE stringa accende il
  * ragionamento (e manderebbe max_tokens null: errore 400 a ogni turno).
  * Quindi 'off' → { model } senza reasoning, identico a «Predefinito» sul filo.
+ * Fase velocità (S2) — Ollama che ragiona (ollamaOffered non vuoto): qui
+ * l'omissione NON è neutra (varrebbe «predefinito del modello»), quindi
+ * «spento» viaggia come reasoning_effort "none" tramite la thinkingLevelMap
+ * del sintetico (off → "none": openai-completions la legge quando l'opzione
+ * reasoning non c'è). «Predefinito» manda medium se è tra i livelli offerti,
+ * altrimenti NESSUNA opzione (S2.4: vale il predefinito del modello); per i
+ * modelli solo acceso/spento «Predefinito» non manda niente (medium non c'è).
  */
 function thinkingModelOf(
   model: Model<Api>,
   thinking: ThinkingSetting | undefined,
-  zai: boolean
-): { model: Model<Api>; reasoning?: SimpleStreamOptions['reasoning'] } {
-  if (!thinking || thinking === 'default') return { model }
+  zai: boolean,
+  ollamaOffered?: ThinkingSetting[] | null
+): ThinkingChoice {
+  // il livello CONCRETTO scelto dal bot ('default'/assente non è un livello)
+  const requested = thinking && thinking !== 'default' ? thinking : undefined
+  // il sintetico Ollama con livelli: il clamp sale al primo livello offerto
+  // (la thinkingLevelMap del sintetico esclude quelli che /api/show non dà)
+  if (ollamaOffered?.length) {
+    if (!requested) {
+      return ollamaOffered.includes('medium')
+        ? { model, reasoning: 'medium', reasoningWire: 'medium' }
+        : // niente medium tra i livelli: NESSUNA opzione sul filo. La mappa
+          // del sintetico va tolta: openai-completions leggerebbe
+          // thinkingLevelMap.off ("none") anche senza opzione reasoning
+          { model: { ...model, thinkingLevelMap: undefined }, reasoningWire: null }
+    }
+    const level = clampThinkingLevel(model, requested)
+    return level === 'off'
+      ? { model, reasoningWire: 'none' }
+      : { model, reasoning: level, reasoningWire: level }
+  }
+  if (!requested) return { model, reasoningWire: null }
   if (zai) {
     // zai sintetico: il modello dichiara reasoning e il compat thinkingFormat
     // 'zai' manda "thinking":{"type":"enabled"|"disabled"} — 'off' si dice
     // SENZA l'opzione reasoning (pi-ai riceve reasoningEffort undefined e
     // manda disabled), gli altri livelli con reasoning 'high' (→ enabled)
     const clone = { ...model, reasoning: true } as unknown as Model<Api>
-    return thinking === 'off' ? { model: clone } : { model: clone, reasoning: 'high' }
+    return requested === 'off'
+      ? { model: clone, reasoningWire: null }
+      : { model: clone, reasoning: 'high', reasoningWire: 'high' }
   }
   if (model.reasoning) {
     // catalogo: clampThinkingLevel porta il livello a quelli che il modello
     // sa esprimere (per un modello senza 'off' il livello si ALZA al primo
     // supportato, come sempre)
-    const level = clampThinkingLevel(model, thinking)
-    return level === 'off' ? { model } : { model, reasoning: level }
+    const level = clampThinkingLevel(model, requested)
+    return level === 'off'
+      ? { model, reasoningWire: null }
+      : { model, reasoning: level, reasoningWire: level }
   }
-  return { model }
+  return { model, reasoningWire: null }
 }
 
 /**
@@ -722,7 +820,7 @@ export function streamPi(
   opts: StreamOptions & { apiKey?: string } = {}
 ): LlmStream {
   const zai = (model as unknown as { compat?: { thinkingFormat?: string } }).compat?.thinkingFormat === 'zai'
-  const chosen = thinkingModelOf(model, opts.thinking, zai && !meta.fromCatalog)
+  const chosen = thinkingModelOf(model, opts.thinking, zai && !meta.fromCatalog, meta.ollamaOffered)
   const streamModel = chosen.model
   const context = toPiContext(messages, tools, { api: streamModel.api, provider: streamModel.provider, model: streamModel.id })
   // K6: il CHIAMANTE decide i retry dell'SDK — il loop passa 0 quando dopo
@@ -731,14 +829,23 @@ export function streamPi(
   // opzione dell'SDK, il body resta identico byte per byte.
   const sdkMaxRetries = opts.maxRetries ?? 2
   // E2.2/E2.5: chiave esplicita, temperatura (E2.6) quando c'è, ragionamento
-  // (H3) quando è scelto
+  // (H3) quando è scelto. Fase velocità (S4): sessionId stabile per
+  // conversazione (affinità/cache del provider); cacheRetention NON si tocca
+  // (pi-ai ha già «short» come predefinito)
   const baseOpts: SimpleStreamOptions = {
     signal,
     apiKey: opts.apiKey,
     maxRetries: sdkMaxRetries,
     ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
-    ...(chosen.reasoning !== undefined ? { reasoning: chosen.reasoning } : {})
+    ...(chosen.reasoning !== undefined ? { reasoning: chosen.reasoning } : {}),
+    ...(opts.sessionId ? { sessionId: opts.sessionId } : {})
   }
+  // fase velocità (S1): i numeri della chiamata per la traccia — SOLO numeri
+  // e nomi, mai il contenuto (le lunghezze sono dei JSON serializzati)
+  const systemBytes = messages.filter((m) => m.role === 'system').reduce((n, m) => n + m.content.length, 0)
+  const messagesBytes = JSON.stringify(messages.filter((m) => m.role !== 'system')).length
+  const toolsBytes = JSON.stringify(tools).length
+  const sessionHash = opts.sessionId ? createHash('sha256').update(opts.sessionId).digest('hex').slice(0, 8) : null
 
   async function* iterate(): AsyncIterable<LlmChunk> {
     // H1.1: riprova (max 2, backoff 500/1000 ms) SOLO per le api senza retry
@@ -750,22 +857,31 @@ export function streamPi(
     const selfRetry = !NO_SELF_RETRY_APIS.has(streamModel.api)
     const backoffs = sdkMaxRetries > 0 ? [500, 1000] : []
     for (let attempt = 0; ; attempt++) {
+      // fase velocità (S1): i tempi si misurano dall'invio di QUESTO tentativo
+      const sentAt = Date.now()
       const eventStream = models.streamSimple(streamModel, context, baseOpts)
       // accumulo dei tool call in ordine di contentIndex: escono TUTTI alla fine
       const toolCallsByIndex = new Map<number, ToolCall>()
       let contentLen = 0
       let reasoningLen = 0
-      let usage: { input: number; output: number } | null = null
+      let usage: { input: number; output: number; cacheRead?: number; cacheWrite?: number } | null = null
       let finish = 'stop'
       let sawContent = false
+      let firstTokenMs: number | null = null
+      let firstTokenWasReasoning = false
       let retry: { ms: number } | null = null
       for await (const ev of eventStream) {
         if (ev.type === 'text_delta') {
           sawContent = true
+          if (firstTokenMs === null) firstTokenMs = Date.now() - sentAt
           contentLen += ev.delta.length
           yield { textDelta: ev.delta }
         } else if (ev.type === 'thinking_delta') {
           sawContent = true
+          if (firstTokenMs === null) {
+            firstTokenMs = Date.now() - sentAt
+            firstTokenWasReasoning = true
+          }
           reasoningLen += ev.delta.length
           yield { reasoningDelta: ev.delta }
         } else if (ev.type.startsWith('toolcall_')) {
@@ -780,7 +896,7 @@ export function streamPi(
         } else if (ev.type === 'done') {
           finish = finishReasonOf(ev.reason)
           const u = ev.message.usage
-          usage = { input: u.input, output: u.output }
+          usage = { input: u.input, output: u.output, cacheRead: u.cacheRead, cacheWrite: u.cacheWrite }
           const ordered = [...toolCallsByIndex.entries()].sort((a, b) => a[0] - b[0]).map(([, v]) => v)
           const chunk: LlmChunk = {
             ...(ordered.length ? { toolCalls: ordered } : {}),
@@ -796,7 +912,19 @@ export function streamPi(
           traceLlmCall({
             at: new Date().toISOString(), model: streamModel.id, finishReason: finish,
             contentLength: contentLen, reasoningLength: reasoningLen,
-            toolCalls: ordered.length, usage
+            toolCalls: ordered.length, usage,
+            // fase velocità (S1): dove siamo nel turno e cosa è partito
+            turnId: opts.trace?.turnId ?? null,
+            callIndex: opts.trace?.callIndex ?? null,
+            firstTokenMs,
+            totalMs: Date.now() - sentAt,
+            ...(firstTokenWasReasoning ? { reasoningFirstMs: firstTokenMs } : {}),
+            toolsCount: tools.length,
+            toolsBytes,
+            systemBytes,
+            messagesBytes,
+            thinkingSent: chosen.reasoningWire,
+            sessionHash
           })
           yield chunk
         } else if (ev.type === 'error') {
@@ -848,7 +976,9 @@ export function piLlmStream(
   // e l'adattatore risolve la coppia provider+modello della CHIAMATA (così la
   // riserva che cambia modello rilegge il prezzo giusto)
   const customPrice = !fromCatalog && !entry.local ? opts.modelPrices?.[p.id]?.[modelId] : undefined
-  return streamPi(entry.models, model, { fromCatalog, local: entry.local, ...(customPrice ? { customPrice } : {}) }, messages, tools, signal, {
+  // fase velocità (S2): i livelli offerti da /api/show per il sintetico Ollama
+  const ollamaOffered = !fromCatalog && p.kind === 'ollama' ? ollamaOfferedLevels(p, modelId) : null
+  return streamPi(entry.models, model, { fromCatalog, local: entry.local, ...(customPrice ? { customPrice } : {}), ...(ollamaOffered ? { ollamaOffered } : {}) }, messages, tools, signal, {
     ...opts,
     // E2.2: chiave sempre esplicita; i locali senza chiave mandano
     // 'not-needed' (come l'adattatore di sempre), i provider col catalogo

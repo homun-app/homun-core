@@ -13,7 +13,14 @@ import { piLlmStream } from './llm-pi'
 
 // ---- fase 11 (residuo 0a): traccia diagnostica delle chiamate ----
 
-/** I numeri di una chiamata completata (MAI il contenuto dei messaggi, mai segreti). */
+/**
+ * I numeri di una chiamata completata (MAI il contenuto dei messaggi, mai
+ * segreti). Fase velocità (S1): in più turnId/callIndex (quale chiamata di
+ * quale turno), i tempi (primo token, totale), i byte sul filo (strumenti,
+ * sistema, messaggi: lunghezze serializzate, mai il testo), cosa è partito
+ * per il ragionamento (thinkingSent: il valore di reasoning_effort o null),
+ * l'hash corto della sessione (S4) e cacheRead/cacheWrite dell'usage.
+ */
 export interface LlmTraceRecord {
   at: string
   model: string
@@ -21,7 +28,26 @@ export interface LlmTraceRecord {
   contentLength: number
   reasoningLength: number
   toolCalls: number
-  usage: { input: number; output: number } | null
+  usage: { input: number; output: number; cacheRead?: number; cacheWrite?: number } | null
+  /** fase velocità (S1): il turno e l'indice della chiamata nel turno (null per le chiamate fuori turno: compaction, revisore) */
+  turnId?: string | null
+  callIndex?: number | null
+  /** ms dall'invio al primo chunk (testo o ragionamento) */
+  firstTokenMs?: number | null
+  /** ms dall'invio alla fine */
+  totalMs?: number | null
+  /** ms al primo chunk QUANDO è ragionamento (il modello ragiona prima di rispondere) */
+  reasoningFirstMs?: number | null
+  /** quanti strumenti e quanti byte di JSON.stringify(schemi) sono partiti */
+  toolsCount?: number
+  toolsBytes?: number
+  /** lunghezza serializzata del prompt di sistema e dei messaggi (non il contenuto) */
+  systemBytes?: number
+  messagesBytes?: number
+  /** cosa è partito sul filo per il ragionamento: il valore di reasoning_effort, null se nessuna opzione */
+  thinkingSent?: string | null
+  /** fase velocità (S4): hash di 8 caratteri del sessionId (mai l'id vero) */
+  sessionHash?: string | null
 }
 
 /**
@@ -137,6 +163,18 @@ export interface StreamOptions {
    * dell'SDK, non un campo del body.
    */
   maxRetries?: number
+  /**
+   * Fase velocità (S1): il turno e l'indice della chiamata nel turno, per la
+   * traccia (solo numeri e nomi). Assente = chiamata fuori turno
+   * (compaction, revisore): turnId nullo nella traccia.
+   */
+  trace?: { turnId: string; callIndex: number }
+  /**
+   * Fase velocità (S4): chiave di affinità/cache di pi-ai, STABILE per tutte
+   * le chiamate della stessa conversazione (prompt cache dei provider). Non
+   * impostare cacheRetention: pi-ai ha già «short» come predefinito.
+   */
+  sessionId?: string
 }
 
 /**

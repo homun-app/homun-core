@@ -1,12 +1,16 @@
 // Test PURI dei tool MCP deferiti (fase 13, punto 5): rankTools (BM25
 // semplice), il result di find_tools, gli attivati ricostruiti dal
 // TRANSCRIPT, la sezione "Connettori attivi" e serversForAgent (enabledFor,
-// il figlio eredita dal padre). Nessun Electron, nessuna rete.
+// il figlio eredita dal padre). Fase velocità (S3): find_tools è la RICERCA
+// UNICA (integrati differiti + MCP) e la sua descrizione porta l'indice dei
+// nomi. Nessun Electron, nessuna rete.
 import { describe, expect, it } from 'vitest'
 import {
-  rankTools, formatFindToolsResult, activeToolsFromTranscript, connectorsActiveSection,
-  toolsDeferred, findToolsToolDef, DEFAULT_MAX_INLINE_TOOLS, FIND_TOOLS_LIMIT
+  rankTools, formatFindToolsResult, formatBuiltinToolsResult, activeToolsFromTranscript, connectorsActiveSection,
+  toolsDeferred, findToolsDef, DEFAULT_MAX_INLINE_TOOLS, FIND_TOOLS_LIMIT
 } from '../find-tools'
+import { CORE_TOOL_NAMES, DEFERRED_TOOL_NAMES, DEFERRED_TOOL_AREAS, formatNameIndexText, partitionTools, useToolDef } from '../../agent/core-tools'
+import { toolDefs, computerToolDefs } from '../../agent/tools'
 import { serversForAgent, migrateEnabledFor, type McpServerConfig } from '../index'
 
 const tools = [
@@ -63,9 +67,86 @@ describe('formatFindToolsResult + soglia', () => {
     expect(toolsDeferred(30, 30)).toBe(false)
     expect(toolsDeferred(31, 30)).toBe(true)
   })
-  it('la definizione del tool find_tools esiste (la aggiunge il loop in modalità differita)', () => {
-    expect(findToolsToolDef.name).toBe('find_tools')
-    expect(findToolsToolDef.parameters).toHaveProperty('required', ['query'])
+  it('la definizione del tool find_tools esiste (la aggiunge il loop quando serve)', () => {
+    const def = findToolsDef(['create_agent'], false, formatNameIndexText)
+    expect(def.name).toBe('find_tools')
+    expect(def.parameters).toHaveProperty('required', ['query'])
+  })
+})
+
+// ---- fase velocità (S3): la ricerca unica e l'indice dei nomi ----
+
+describe('S3: la divisione core/differiti (partitionTools, pura)', () => {
+  it('ogni tool del daemon è o core o differito: nessun nome sconosciuto alle due liste', () => {
+    for (const t of toolDefs) {
+      const known = CORE_TOOL_NAMES.has(t.name) || DEFERRED_TOOL_NAMES.has(t.name)
+      expect(known, t.name).toBe(true)
+    }
+    // i tool del browser e dello schermo (prefissi) non sono MAI differiti
+    for (const t of [...computerToolDefs]) {
+      expect(DEFERRED_TOOL_NAMES.has(t.name), t.name).toBe(false)
+    }
+  })
+  it('core e differiti non si intersecano; l\'ordine di ingresso resta invariato', () => {
+    const { core, deferred } = partitionTools(toolDefs)
+    for (const t of deferred) expect(CORE_TOOL_NAMES.has(t.name), t.name).toBe(false)
+    for (const t of core) expect(DEFERRED_TOOL_NAMES.has(t.name), t.name).toBe(false)
+    // stessa popolazione (nessun tool perso) e ordine RELATIVO invariato in
+    // ogni gruppo: due chiamate con la stessa lista danno lo stesso risultato
+    expect([...core, ...deferred].map((t) => t.name).sort()).toEqual(toolDefs.map((t) => t.name).sort())
+    const again = partitionTools(toolDefs)
+    expect(again.core.map((t) => t.name)).toEqual(core.map((t) => t.name))
+    expect(again.deferred.map((t) => t.name)).toEqual(deferred.map((t) => t.name))
+  })
+  it('i nomi differiti hanno tutti un\'area nell\'indice (niente «Other» per il daemon)', () => {
+    const covered = new Set(DEFERRED_TOOL_AREAS.flatMap((a) => [...a.tools]))
+    for (const t of toolDefs) {
+      if (DEFERRED_TOOL_NAMES.has(t.name)) expect(covered.has(t.name), t.name).toBe(true)
+    }
+    // e l'indice non contiene nomi che non siano differiti del daemon
+    for (const name of covered) expect(DEFERRED_TOOL_NAMES.has(name), name).toBe(true)
+  })
+  it('find_tools trova create_agent con «crea un bot» e con «create agent»', () => {
+    const deferred = partitionTools(toolDefs).deferred
+      .map((t) => ({ name: t.name, description: t.description, requiredParams: (t.parameters as { required?: string[] }).required ?? [] }))
+    for (const query of ['crea un bot', 'create agent']) {
+      const found = rankTools(deferred, query)
+      expect(found.map((t) => t.name), query).toContain('create_agent')
+    }
+  })
+})
+
+describe('S3: la descrizione di find_tools (ricerca unica) e l\'indice dei nomi', () => {
+  it('con integrati differiti la descrizione porta l\'indice dei nomi per area', () => {
+    const def = findToolsDef(['create_agent', 'delete_agent', 'save_to_library'], false, formatNameIndexText)
+    expect(def.description).toContain('built-in tools')
+    expect(def.description).toContain('Other bots and groups: create_agent, delete_agent')
+    expect(def.description).toContain('Library: save_to_library')
+    expect(def.description).not.toContain('MCP')
+  })
+  it('con la modalità differita MCP la descrizione parla anche dei tool MCP attivabili', () => {
+    const def = findToolsDef([], true, formatNameIndexText)
+    expect(def.description).toContain('MCP tools')
+    expect(def.description).toContain('ACTIVATES')
+    expect(def.description).not.toContain('built-in tools that are NOT')
+  })
+  it('formatNameIndexText: solo le aree presenti, nomi in ordine alfabetico', () => {
+    const idx = formatNameIndexText(['send_to_agent', 'list_agents', 'copy_to_box'])
+    expect(idx.split('\n')).toEqual([
+      'Other bots and groups: list_agents, send_to_agent',
+      'Files with the Mac: copy_to_box'
+    ])
+  })
+  it('formatBuiltinToolsResult: nome, parametri e l\'istruzione use_tool; vuoto senza risultati', () => {
+    const text = formatBuiltinToolsResult([{ name: 'create_agent', description: 'Creates another bot', requiredParams: ['name', 'role'] }])
+    expect(text).toContain('- create_agent: Creates another bot · required parameters: name, role')
+    expect(text).toContain('use_tool({name, arguments})')
+    expect(formatBuiltinToolsResult([])).toBe('')
+  })
+  it('use_tool: nome e argomenti obbligatori, e non può chiamare sé stesso', () => {
+    expect(useToolDef.name).toBe('use_tool')
+    expect(useToolDef.parameters).toHaveProperty('required', ['name', 'arguments'])
+    expect(useToolDef.description).toContain('cannot call itself')
   })
 })
 

@@ -1,0 +1,7 @@
+turno  chiamate  modelli     somma ms  1° token ms (media/max)  tools (n)    tools byte (media)  sistema byte (media)  messaggi byte (somma)  ragionamento (caratteri)  token in  token out  cache r/w  reasoning_effort
+t-1    3         finto       20        5/5                      33+33+33     23715               9031                  885                    0                         0         0          —          —               
+t-2    4         finto       10        2/2                      33+33+33+33  23715               9031                  8142                   0                         0         0          —          —               
+t-3    2         kimi-finto  5         3/3                      32+32        22788               9133                  5944                   0                         0         0          —          medium          
+t-4    2         kimi-finto  7         3/3                      32+32        22788               9133                  6546                   0                         0         0          —          none            
+
+totale: 11 chiamate in 4 turni · modelli: finto, kimi-finto

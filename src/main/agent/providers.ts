@@ -17,7 +17,7 @@ import { uiText, uiError } from '../ui-language'
 import { UI } from '../../shared/ui-messages'
 import type { ProviderConfig, ProviderKind, ProviderPublic, ProviderSaveInput, ModelInfo, SealedKey, MainModel } from '../../shared/types'
 export type { ProviderSaveInput } from '../../shared/types'
-import { liveModelsUrl, liveModelsHeaders, ollamaCapabilities, setOllamaCapabilities, readOllamaCapabilities, isLocalKind, KNOWN_BASE_URLS } from './live-models'
+import { liveModelsUrl, liveModelsHeaders, ollamaCapabilities, setOllamaCapabilities, readOllamaCapabilities, parseOllamaShow, isLocalKind, KNOWN_BASE_URLS } from './live-models'
 import { sealProviderKey, openProviderKey, keyHintOf, isSealedKey, type ProviderKeyDeps } from './provider-keys'
 import { getProvidersKey, type SecurityRunner } from '../../daemon/keychain'
 import { isMasterKeyUnavailableError } from '../../daemon/master-keys'
@@ -296,8 +296,9 @@ export async function listProviderModels(p: ProviderConfig): Promise<ModelInfo[]
           signal: AbortSignal.timeout(8000)
         })
         if (!sr.ok) return
-        const sj = (await sr.json()) as { capabilities?: string[] }
-        setOllamaCapabilities(p.id, m.name, m.digest, sj.capabilities ?? [])
+        // fase velocità (S2): il parse condiviso legge anche thinking
+        const { caps, thinking } = parseOllamaShow(await sr.json())
+        setOllamaCapabilities(p.id, m.name, m.digest, caps, thinking)
       } catch {
         // capabilities non leggibili: vision/tools restano sconosciuti (null)
       }
