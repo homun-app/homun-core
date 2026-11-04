@@ -172,7 +172,7 @@ function ServerDetail({ sv, onDone }: { sv: InstalledServerLike & { needsAuth?: 
 /** Server MCP aggiunti a mano: il form di oggi, dentro un foglio. */
 export function ManualServersSheet({ onClose }: { onClose(): void }) {
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-foreground/20 p-4" onClick={onClose}>
+    <div className="no-drag fixed inset-0 z-50 grid place-items-center bg-foreground/20 p-4" onClick={onClose}>
       <div className="max-h-[85vh] w-full max-w-xl overflow-y-auto scroll-thin rounded-3xl bg-card p-5 shadow-soft" onClick={(e) => e.stopPropagation()}>
         <ManualServers />
       </div>
@@ -448,7 +448,7 @@ function ComposioActivationSheet({ onClose, onDone }: { onClose(): void; onDone(
 
   const stepBox = 'rounded-2xl bg-muted p-4'
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-foreground/20 p-4" onClick={onClose}>
+    <div className="no-drag fixed inset-0 z-50 grid place-items-center bg-foreground/20 p-4" onClick={onClose}>
       <div className="max-h-[85vh] w-full max-w-lg overflow-y-auto scroll-thin rounded-3xl bg-card p-5 shadow-soft" onClick={(e) => e.stopPropagation()} data-testid="composio-activation">
         <strong className="block font-display text-lg"><Trans>Più di mille app con Composio</Trans></strong>
 
@@ -581,7 +581,7 @@ function DevelopersSheet({ onClose }: { onClose(): void }) {
   }, [query])
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-foreground/20 p-4" onClick={onClose}>
+    <div className="no-drag fixed inset-0 z-50 grid place-items-center bg-foreground/20 p-4" onClick={onClose}>
       <div className="max-h-[85vh] w-full max-w-2xl overflow-y-auto scroll-thin rounded-3xl bg-card p-5 shadow-soft" onClick={(e) => e.stopPropagation()} data-testid="developers-sheet">
         <strong className="block font-display text-lg"><Trans>Per sviluppatori</Trans></strong>
         <p className="mt-1 text-xs text-muted-foreground"><Trans>Server personalizzati, plugin, gateway e registro: chi sa cos'è un server MCP lo trova qui.</Trans></p>
@@ -1214,7 +1214,7 @@ function AppDetailSheet({ row, installed, onClose, onChanged, onConnect }: {
   }
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-foreground/20 p-4" onClick={onClose}>
+    <div className="no-drag fixed inset-0 z-50 grid place-items-center bg-foreground/20 p-4" onClick={onClose}>
       <div className="max-h-[85vh] w-full max-w-lg overflow-y-auto scroll-thin rounded-3xl bg-card p-5 shadow-soft" onClick={(e) => e.stopPropagation()} data-testid={`app-detail-${app.id}`}>
         <div className="flex items-center gap-3">
           <AppLogo logo={app.logo} name={app.name} className="size-14 text-xl" />
@@ -1382,7 +1382,7 @@ function AppDetailSheet({ row, installed, onClose, onChanged, onConnect }: {
 function ComposioAccountSheet({ onClose, onChanged }: { onClose(): void; onChanged(): void }) {
   const [confirmOff, setConfirmOff] = useState(false)
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-foreground/20 p-4" onClick={onClose}>
+    <div className="no-drag fixed inset-0 z-50 grid place-items-center bg-foreground/20 p-4" onClick={onClose}>
       <div className="max-h-[85vh] w-full max-w-md overflow-y-auto scroll-thin rounded-3xl bg-card p-5 shadow-soft" onClick={(e) => e.stopPropagation()} data-testid="composio-account-sheet">
         <div className="flex items-center gap-3">
           <span className="grid size-10 shrink-0 place-items-center rounded-[11px] bg-muted text-base">🌐</span>
@@ -1450,7 +1450,7 @@ function ConnectedDetailSheet({ row, installed, onClose, onChanged }: {
   const server = row.source === 'server' ? installed?.servers.find((s) => s.id === row.id) : undefined
   const plugin = row.source === 'plugin' ? installed?.plugins.find((p) => p.name === row.id) : undefined
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-foreground/20 p-4" onClick={onClose}>
+    <div className="no-drag fixed inset-0 z-50 grid place-items-center bg-foreground/20 p-4" onClick={onClose}>
       <div className="max-h-[85vh] w-full max-w-lg overflow-y-auto scroll-thin rounded-3xl bg-card p-5 shadow-soft" onClick={(e) => e.stopPropagation()}>
         {server && <ServerDetail sv={server as never} onDone={onChanged} />}
         {plugin && (
@@ -1521,7 +1521,7 @@ function SkillsSheet({ onClose }: { onClose(): void }) {
   }
   useEffect(() => { void load() }, [agents])
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-foreground/20 p-4" onClick={onClose}>
+    <div className="no-drag fixed inset-0 z-50 grid place-items-center bg-foreground/20 p-4" onClick={onClose}>
       <div className="max-h-[85vh] w-full max-w-lg overflow-y-auto scroll-thin rounded-3xl bg-card p-5 shadow-soft" onClick={(e) => e.stopPropagation()}>
         <strong className="block font-display text-lg"><Trans>Skill dei bot</Trans></strong>
         <p className="mt-1 text-xs text-muted-foreground"><Trans>Se ne vuoi una nuova, chiedila a un bot in chat.</Trans></p>

@@ -915,7 +915,9 @@ function TaskPanel({ onClose }: { onClose: () => void }) {
   const open = task?.status === 'working' || task?.status === 'needs_input'
 
   return (
-    <div className="absolute inset-0 z-20 flex flex-col bg-background/95 backdrop-blur-sm">
+    // verifica impostazioni: sopra la fascia di trascinamento (60 px) della chat
+    // la testata cadrebbe dentro la fascia: no-drag (Electron ignora lo z-index)
+    <div className="no-drag absolute inset-0 z-20 flex flex-col bg-background/95 backdrop-blur-sm">
       <header className="flex items-center justify-between px-5 pt-8 pb-3">
         <div>
           <p className="text-[13px] text-muted-foreground"><Trans>Task</Trans></p>
@@ -974,7 +976,9 @@ function SubagentPanel() {
   const open = sub?.status === 'queued' || sub?.status === 'running'
 
   return (
-    <div className="absolute inset-0 z-20 flex flex-col bg-background/95 backdrop-blur-sm">
+    // verifica impostazioni: sopra la fascia di trascinamento (60 px) della chat
+    // la testata cadrebbe dentro la fascia: no-drag (Electron ignora lo z-index)
+    <div className="no-drag absolute inset-0 z-20 flex flex-col bg-background/95 backdrop-blur-sm">
       <header className="flex items-center justify-between px-5 pt-8 pb-3">
         <div className="min-w-0">
           <p className="text-[13px] text-muted-foreground"><Trans>Sottoagente</Trans></p>
