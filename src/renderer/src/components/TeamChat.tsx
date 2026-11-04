@@ -101,7 +101,7 @@ function MemberActivity({ agentId }: { agentId: string }) {
   const info = useBotInfo(agentId)
   const activity = useStore((s) => s.activity[agentId])
   if (!info) return null
-  const d = info.state === 'thinking' && !activity ? msg`pensa…` : activityPhrase(activity)
+  const d = info.state === 'thinking' && !activity ? msg`pensa…` : activityPhrase(activity, 'present', i18n.locale === 'en' ? 'en' : 'it')
   return (
     <div className="flex items-center gap-3">
       <span className="flex flex-col items-center">

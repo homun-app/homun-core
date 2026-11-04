@@ -17,11 +17,37 @@ export function abbreviateCommand(cmd: string, max = 48): string {
  * path per i file, comando abbreviato per la shell, nome del connettore
  * per i tool MCP, il nome del tool altrimenti.
  */
-export function activityOf(tool: string, input: Record<string, unknown>): { tool: string; target: string } {
+export function activityOf(
+  tool: string,
+  input: Record<string, unknown>,
+  serverName?: string
+): { tool: string; target: string; app?: string; args?: string } {
   let target = ''
+  let args: string | undefined
+  let app: string | undefined
   if (tool === 'run-command') target = abbreviateCommand(String(input.command ?? ''))
   else if (tool === 'read-file' || tool === 'write-file' || tool === 'list-directory') target = String(input.path ?? '')
-  else if (tool.startsWith('mcp__')) target = tool.split('__')[1] ?? tool
+  else if (tool.startsWith('mcp__')) {
+    target = tool.split('__')[1] ?? tool
+    app = serverName
+    // V5 (prova vera): gli argomenti COMPATTI degli strumenti meta di Composio
+    // (SOLO i nomi delle azioni e dei toolkit, mai i valori: destinatari e
+    // testi non si mostrano) — così la mascotte dice «usa Gmail · Elenca email…»
+    const original = tool.split('__').slice(2).join('__')
+    if (original === 'COMPOSIO_MULTI_EXECUTE_TOOL' && Array.isArray(input.tools)) {
+      const slugs = input.tools
+        .map((t) => (t && typeof t === 'object' ? String((t as { tool_slug?: unknown }).tool_slug ?? '') : ''))
+        .filter(Boolean)
+      if (slugs.length > 0) args = JSON.stringify({ tools: slugs.map((x) => ({ tool_slug: x })) })
+    } else if (original === 'COMPOSIO_MANAGE_CONNECTIONS' && Array.isArray(input.toolkits)) {
+      const entries = input.toolkits
+        .map((t) => (t && typeof t === 'object'
+          ? { name: String((t as { name?: unknown }).name ?? ''), action: String((t as { action?: unknown }).action ?? 'add') }
+          : null))
+        .filter((t): t is { name: string; action: string } => !!t)
+      if (entries.length > 0) args = JSON.stringify({ toolkits: entries })
+    }
+  }
   else if (tool === 'use-app') target = String(input.action ?? '')
   // fase 16b correzioni (P2): anche web_fetch porta l'URL letto — la mascotte
   // dice «legge <host>…» invece della pagina web generica
@@ -32,7 +58,7 @@ export function activityOf(tool: string, input: Record<string, unknown>): { tool
   // fase 19a: lo schermo del bot — il motivo della richiesta, il numero di azioni
   else if (tool === 'request_takeover') target = abbreviateCommand(String(input.reason ?? ''))
   else if (tool === 'computer_act') target = `${Array.isArray(input.actions) ? input.actions.length : 0} actions`
-  return { tool, target }
+  return { tool, target, ...(app ? { app } : {}), ...(args ? { args } : {}) }
 }
 
 /** Quante chiamate identiche di fila fanno scattare la loop detection. */

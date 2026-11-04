@@ -114,6 +114,71 @@ describe('fase 16b (S3.3): activityPhrase', () => {
     expect(fileNameOf('/box/workspace/report.md')).toBe('report.md')
     expect(fileNameOf('')).toBe('')
   })
+
+  // ---- V5 (prova vera): «usa un'app» dice QUALE app e COSA ----
+
+  it('V5: il blocco di Composio — le azioni coi nomi della card («Gmail · Elenca email»), la prima e «+N»', () => {
+    i18n.load('it', itCatalogEntries())
+    i18n.activate('it')
+    const batch = (slugs: string[]) => ({
+      tool: 'mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL',
+      target: 'composio',
+      args: JSON.stringify({ tools: slugs.map((s) => ({ tool_slug: s })) })
+    })
+    expect(i18n.t(activityPhrase(batch(['GMAIL_LIST_THREADS'])))).toBe('usa Gmail · Elenca conversazioni…')
+    expect(i18n.t(activityPhrase(batch(['GMAIL_LIST_THREADS']), 'past'))).toBe('Ha usato Gmail · Elenca conversazioni')
+    // due azioni: la prima e «+1»
+    expect(i18n.t(activityPhrase(batch(['GMAIL_LIST_THREADS', 'SLACK_SEARCH_MESSAGES'])))).toBe('usa Gmail · Elenca conversazioni +1…')
+    // senza azioni leggibili: la frase generica di prima
+    expect(i18n.t(activityPhrase({ tool: 'mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL', target: 'composio' }))).toBe('usa un’app…')
+  })
+
+  it('V5: SEARCH_TOOLS e GET_TOOL_SCHEMAS — «cerca lo strumento giusto»', () => {
+    i18n.load('it', itCatalogEntries())
+    i18n.activate('it')
+    expect(i18n.t(activityPhrase({ tool: 'mcp__composio__COMPOSIO_SEARCH_TOOLS', target: 'composio' }))).toBe('cerca lo strumento giusto…')
+    expect(i18n.t(activityPhrase({ tool: 'mcp__composio__COMPOSIO_GET_TOOL_SCHEMAS', target: 'composio' }, 'past'))).toBe('Ha cercato lo strumento giusto')
+  })
+
+  it('V5: MANAGE_CONNECTIONS — «controlla le app collegate» (list) e «collega <App>» (add)', () => {
+    i18n.load('it', itCatalogEntries())
+    i18n.activate('it')
+    const manage = (entries: Array<{ name: string; action: string }>) => ({
+      tool: 'mcp__composio__COMPOSIO_MANAGE_CONNECTIONS',
+      target: 'composio',
+      args: JSON.stringify({ toolkits: entries })
+    })
+    expect(i18n.t(activityPhrase(manage([{ name: 'gmail', action: 'list' }])))).toBe('controlla le app collegate…')
+    expect(i18n.t(activityPhrase(manage([{ name: 'gmail', action: 'list' }]), 'past'))).toBe('Ha controllato le app collegate')
+    expect(i18n.t(activityPhrase(manage([{ name: 'slack', action: 'add' }])))).toBe('collega Slack…')
+    expect(i18n.t(activityPhrase(manage([{ name: 'slack', action: 'add' }]), 'past'))).toBe('Ha collegato Slack')
+  })
+
+  it('V5: gli altri server MCP dicono il NOME del server, mai il nome tecnico dello strumento', () => {
+    i18n.load('it', itCatalogEntries())
+    i18n.activate('it')
+    expect(i18n.t(activityPhrase({ tool: 'mcp__linear__create_issue', target: 'linear', app: 'Linear' }))).toBe('usa Linear…')
+    expect(i18n.t(activityPhrase({ tool: 'mcp__linear__create_issue', target: 'linear', app: 'Linear' }, 'past'))).toBe('Ha usato Linear')
+    // senza nome dal daemon: lo slug del server reso leggibile
+    expect(i18n.t(activityPhrase({ tool: 'mcp__ufficio_posta__invia', target: 'ufficio_posta' }, 'past'))).toBe('Ha usato Ufficio posta')
+    // il vecchio flusso SDK composio__gmail__…: l'app umana
+    expect(i18n.t(activityPhrase({ tool: 'composio__gmail__GMAIL_SEND_EMAIL', target: '' }))).toBe('usa Gmail…')
+  })
+
+  it('V5: le stesse frasi nel catalogo en', () => {
+    i18n.load('en', enCatalogEntries())
+    i18n.activate('en')
+    const batch = (slugs: string[]) => ({
+      tool: 'mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL',
+      target: 'composio',
+      args: JSON.stringify({ tools: slugs.map((s) => ({ tool_slug: s })) })
+    })
+    expect(i18n.t(activityPhrase(batch(['GMAIL_LIST_THREADS']), 'past', 'en'))).toBe('Used Gmail · List threads')
+    expect(i18n.t(activityPhrase({ tool: 'mcp__composio__COMPOSIO_SEARCH_TOOLS', target: 'composio' }, 'present', 'en'))).toBe('searches for the right tool…')
+    expect(i18n.t(activityPhrase({ tool: 'mcp__linear__create_issue', target: 'linear', app: 'Linear' }, 'past', 'en'))).toBe('Used Linear')
+    i18n.load('it', itCatalogEntries())
+    i18n.activate('it')
+  })
 })
 
 // fase 16b correzioni (P2): la tabella non si disallinea dal daemon — ogni

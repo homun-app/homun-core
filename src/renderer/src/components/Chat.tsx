@@ -7,7 +7,7 @@
 // riga d'attività (activityPhrase) e col popover dei passaggi; dopo il turno
 // restano dietro la «ⓘ» del messaggio (o in Impostazioni › Generali, con la
 // voce di debug che rimette le righe di una volta).
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useLingui, Trans, Plural } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
@@ -51,9 +51,10 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
  *  finestra anche a 900×600 — max la larghezza meno il margine. */
 export function StepsPopover({ group, live }: { group: StepGroup; live: boolean }) {
   const { i18n } = useLingui()
+  const lang = i18n.locale === 'en' ? 'en' : 'it'
   const secs = stepsDurationSeconds(group, Date.now())
   return (
-    <div className="w-72 max-w-[calc(100vw-1.5rem)] rounded-[14px] bg-card p-3 text-[13px] shadow-soft">
+    <div data-testid="steps-popover" className="w-72 max-w-[calc(100vw-1.5rem)] rounded-[14px] bg-card p-3 text-[13px] shadow-soft">
       <p className="mb-1.5 text-xs text-muted-foreground">
         <Plural value={group.steps.length} one="# passo" other="# passaggi" /> · {secs ?? 0} s
       </p>
@@ -62,11 +63,54 @@ export function StepsPopover({ group, live }: { group: StepGroup; live: boolean 
         {group.steps.map((st, i) => (
           <p key={i} className={`flex gap-1.5 ${st.done ? 'text-foreground/80' : 'text-muted-foreground'}`}>
             <span className="shrink-0">{st.done ? '✓' : '○'}</span>
-            <span className="min-w-0 truncate">{i18n.t(activityPhrase({ tool: st.tool, target: st.target }, 'past'))}</span>
+            <span className="min-w-0 truncate">{i18n.t(activityPhrase({ tool: st.tool, target: st.target, ...(st.args ? { args: st.args } : {}) }, 'past', lang))}</span>
           </p>
         ))}
       </div>
       {!live && <p className="mt-1.5 text-[11px] text-muted-foreground">{i18n.t(msg`i passaggi del turno`)}</p>}
+    </div>
+  )
+}
+
+/**
+ * V4 (prova vera): il confine INFERIORE del popover — il bordo superiore
+ * della casella di scrittura, o della finestra se non si trova.
+ */
+function popoverLowerLimit(): number {
+  const composer = document.querySelector('form textarea')?.closest('form')
+  const top = composer?.getBoundingClientRect().top
+  return typeof top === 'number' ? Math.min(top, window.innerHeight) : window.innerHeight
+}
+
+/**
+ * V4 (prova vera): il contenitore del popover dei passaggi — si apre verso
+ * l'ALTO quando sotto l'ancora non c'è spazio per la sua altezza (misurato
+ * con getBoundingClientRect fino al bordo superiore della casella di
+ * scrittura, o della finestra): `bottom-full` invece di `top-full`, così il
+ * riquadro non finisce mai sotto la casella, dove non si legge.
+ */
+function PopoverBox({ up, setUp, align, children }: {
+  up: boolean
+  setUp(fn: (v: boolean) => boolean): void
+  align: 'left' | 'right'
+  children: React.ReactNode
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const height = el.getBoundingClientRect().height
+    const anchor = el.parentElement?.getBoundingClientRect()
+    if (!anchor) return
+    const spaceBelow = popoverLowerLimit() - anchor.bottom
+    setUp((v) => (v !== spaceBelow < height))
+  })
+  return (
+    <div
+      ref={ref}
+      className={`absolute ${align === 'left' ? 'left-0' : 'right-0'} z-10 ${up ? 'bottom-full pb-1' : 'top-full pt-1'}`}
+    >
+      {children}
     </div>
   )
 }
@@ -78,11 +122,12 @@ function ActivityRow({ agentId }: { agentId: string }) {
   const activity = useStore((s) => s.activity[agentId])
   const entries = useStore((s) => s.entries)
   const [open, setOpen] = useState(false)
+  const [up, setUp] = useState(false)
   if (!info) return null
   const group = stepsOfTurn(entries, 'open')
   const phrase: MessageDescriptor = info.state === 'thinking' && !activity
     ? msg`pensa…`
-    : activityPhrase(activity)
+    : activityPhrase(activity, 'present', i18n.locale === 'en' ? 'en' : 'it')
   return (
     <div className="relative flex flex-col items-start">
       <div className="flex items-center gap-3">
@@ -107,9 +152,9 @@ function ActivityRow({ agentId }: { agentId: string }) {
         <span aria-live="polite" className="text-sm text-muted-foreground">{i18n.t(phrase)}</span>
       </div>
       {open && (
-        <div className="absolute left-0 top-full z-10 pt-1">
+        <PopoverBox up={up} setUp={setUp} align="left">
           <StepsPopover group={group} live />
-        </div>
+        </PopoverBox>
       )}
     </div>
   )
@@ -156,13 +201,16 @@ function MessageActions({ entry }: { entry: TranscriptEntry }) {
 }
 
 /** Il popover dei passaggi agganciato a un messaggio del turno finito —
- *  correzioni 2 (Q4): ancorato a destra alle azioni, dentro la finestra. */
+ *  correzioni 2 (Q4): ancorato a destra alle azioni, dentro la finestra.
+ *  V4 (prova vera): verso l'ALTO quando sotto non c'è spazio, come quello
+ *  della mascotte (PopoverBox). */
 function StepsPopoverBox({ entry }: { entry: TranscriptEntry }) {
   const entries = useStore((s) => s.entries)
+  const [up, setUp] = useState(false)
   return (
-    <div className="absolute right-0 top-full z-10 pt-1">
+    <PopoverBox up={up} setUp={setUp} align="right">
       <StepsPopover group={stepsOfTurn(entries, { entryId: entry.id })} live={false} />
-    </div>
+    </PopoverBox>
   )
 }
 

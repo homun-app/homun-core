@@ -106,15 +106,27 @@ export function validateCatalog(entries: unknown): string[] {
  * Catalogo verificato (vedi "notes" di ogni voce per la fonte ufficiale).
  * Fase Composio OAuth (C1): nella SONDA la voce di Composio punta al server
  * MCP finto locale con SANDBOT_TEST_COMPOSIO_MCP_URL — valida SOLO insieme a
- * SANDBOT_TEST_USER_DATA (mai un https di produzione verso una sonda).
+ * SANDBOT_TEST_USER_DATA (mai un https di produzione verso una sonda); V13
+ * (prova vera): SANDBOT_TEST_MCP_URLS estende l'override ad altre voci.
  */
 export function loadCatalog(): CatalogEntry[] {
   const errors = validateCatalog(catalogJson)
   if (errors.length) throw new Error(`catalogo connettori non valido: ${errors.join('; ')}`)
   const entries = catalogJson as CatalogEntry[]
-  const testUrl = process.env.SANDBOT_TEST_COMPOSIO_MCP_URL
-  if (!testUrl || !process.env.SANDBOT_TEST_USER_DATA) return entries
-  return entries.map((e) => (e.id === 'composio' ? { ...e, mcpUrl: testUrl } : e))
+  if (!process.env.SANDBOT_TEST_USER_DATA) return entries
+  // V13 (prova vera): SANDBOT_TEST_MCP_URLS (mappa JSON id → url) fa puntare
+  // anche i connettori DIRETTI della sonda al server finto (notion), così il
+  // dettaglio con «Avanzate» si prova senza mai toccare gli URL veri
+  let testUrls: Record<string, string> = {}
+  try {
+    testUrls = JSON.parse(process.env.SANDBOT_TEST_MCP_URLS ?? '{}') as Record<string, string>
+  } catch {
+    testUrls = {}
+  }
+  const composioUrl = process.env.SANDBOT_TEST_COMPOSIO_MCP_URL
+  if (composioUrl) testUrls.composio = composioUrl
+  if (Object.keys(testUrls).length === 0) return entries
+  return entries.map((e) => (testUrls[e.id] ? { ...e, mcpUrl: testUrls[e.id]! } : e))
 }
 
 // ---- ricerca nel catalogo (search_connectors del modello) ----

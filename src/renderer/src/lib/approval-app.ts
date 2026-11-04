@@ -136,13 +136,15 @@ export function approvalTitleOf(
 }
 
 /** La frase umana del motivo per Composio e MCP (scrittura o distruttiva). */
-export function approvalReasonPhrase(info: ApprovalAppInfo): MessageDescriptor {
-  // fase Composio OAuth (C7): per il blocco la frase nomina le APP delle azioni
+export function approvalReasonPhrase(info: ApprovalAppInfo): MessageDescriptor | null {
+  // fase Composio OAuth (C7): per il blocco la frase nomina le APP delle azioni.
+  // V9 (prova vera): per il blocco NON distruttivo niente frase generica qui —
+  // vince il testo del catalogo UI (approval.composioBatch) col plurale giusto
+  // e il CONTEGGIO: «Vuole fare 1 azione su Gmail» / «2 azioni su Gmail e Slack»
   if (info.batch) {
     const apps = [...new Set(info.batch.actions.map((a) => a.app))].filter(Boolean).join(', ') || 'Composio'
-    return info.destructive
-      ? msg`Vuole fare azioni che non si possono annullare su ${apps}.`
-      : msg`Vuole fare questa azione su ${apps}.`
+    if (info.destructive) return msg`Vuole fare azioni che non si possono annullare su ${apps}.`
+    return null
   }
   return info.destructive
     ? msg`Vuole fare un'azione che non si può annullare su ${info.app}.`

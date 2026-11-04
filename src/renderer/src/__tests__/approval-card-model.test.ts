@@ -19,7 +19,7 @@ function rendered(tool: string, meta: Record<string, unknown> | null | undefined
   return {
     kind: info?.kind ?? null,
     title: title === null ? null : typeof title === 'string' ? title : i18n.t(title),
-    reason: info ? i18n.t(approvalReasonPhrase(info)) : null,
+    reason: info ? (approvalReasonPhrase(info) ? i18n.t(approvalReasonPhrase(info)!) : null) : null,
     technical: info ? approvalTechnicalLine(info, tool) : null
   }
 }

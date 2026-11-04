@@ -196,10 +196,12 @@ export function localizedActionName(actionSlug: string, uiLang: UiLanguage): str
 }
 
 // ---- fase Composio OAuth (C5): i toolkit comuni ----
-// La lista del campo «Collega un'app» nel dettaglio di Composio della
-// finestra App (slug del server + nome da mostrare), circa 30 voci; la
-// ricerca libera dello slug passa comunque al server. In shared perché la
-// usa anche il renderer (datalist del campo).
+// V7 (prova vera): gli slug VERI di Composio. La tabella della faseOAuth
+// aveva slug inventati («gcal», «gsheets», «calendar») e la card diceva
+// «Collega Googlecalendar tramite Composio»; lo slug vero visto dal
+// risultato di MANAGE_CONNECTIONS è «googlecalendar». La tabella è il
+// RIPIEGO per gli slug fuori catalogo (il catalogo curato P7 ha i nomi);
+// gli alias vecchi restano SOLO per leggere dati già salvati.
 
 /** Una voce della lista dei toolkit comuni: slug, nome da mostrare. */
 export interface ComposioToolkitRef {
@@ -209,9 +211,10 @@ export interface ComposioToolkitRef {
 
 export const COMMON_COMPOSIO_TOOLKITS: readonly ComposioToolkitRef[] = [
   { slug: 'gmail', name: 'Gmail' },
-  { slug: 'gcal', name: 'Google Calendar' },
-  { slug: 'gdrive', name: 'Google Drive' },
-  { slug: 'gsheets', name: 'Google Sheets' },
+  { slug: 'googlecalendar', name: 'Google Calendar' },
+  { slug: 'googledrive', name: 'Google Drive' },
+  { slug: 'googlesheets', name: 'Google Sheets' },
+  { slug: 'googledocs', name: 'Google Docs' },
   { slug: 'slack', name: 'Slack' },
   { slug: 'notion', name: 'Notion' },
   { slug: 'github', name: 'GitHub' },
@@ -223,23 +226,45 @@ export const COMMON_COMPOSIO_TOOLKITS: readonly ComposioToolkitRef[] = [
   { slug: 'asana', name: 'Asana' },
   { slug: 'jira', name: 'Jira' },
   { slug: 'dropbox', name: 'Dropbox' },
-  { slug: 'spotify', name: 'Spotify' },
-  { slug: 'x_twitter', name: 'X' },
-  { slug: 'instagram', name: 'Instagram' },
-  { slug: 'zoom', name: 'Zoom' },
+  { slug: 'airtable', name: 'Airtable' },
   { slug: 'discord', name: 'Discord' },
+  { slug: 'linkedin', name: 'LinkedIn' },
+  { slug: 'youtube', name: 'YouTube' },
+  { slug: 'calendly', name: 'Calendly' },
+  { slug: 'zoom', name: 'Zoom' },
+  { slug: 'salesforce', name: 'Salesforce' },
+  { slug: 'shopify', name: 'Shopify' },
+  { slug: 'stripe', name: 'Stripe' },
+  { slug: 'figma', name: 'Figma' },
+  { slug: 'todoist', name: 'Todoist' },
+  { slug: 'clickup', name: 'ClickUp' },
+  { slug: 'spotify', name: 'Spotify' },
   { slug: 'telegram', name: 'Telegram' },
   { slug: 'whatsapp', name: 'WhatsApp' },
-  { slug: 'calendar', name: 'Calendar' },
-  { slug: 'clickup', name: 'ClickUp' },
-  { slug: 'airtable', name: 'Airtable' },
-  { slug: 'salesforce', name: 'Salesforce' },
+  { slug: 'instagram', name: 'Instagram' },
+  { slug: 'x_twitter', name: 'X' },
   { slug: 'zendesk', name: 'Zendesk' },
   { slug: 'intercom', name: 'Intercom' },
-  { slug: 'figma', name: 'Figma' },
-  { slug: 'youtube', name: 'YouTube' },
-  { slug: 'linkedin', name: 'LinkedIn' }
+  { slug: 'gitlab', name: 'GitLab' }
 ]
+
+/**
+ * V7: gli alias della vecchia tabella inventata, tenuti SOLO per leggere
+ * dati già salvati (le chiavi di composioGateway.apps e i nomi scritti
+ * nelle sonde di ieri). MAI per crearne di nuovi.
+ */
+export const LEGACY_TOOLKIT_ALIASES: Readonly<Record<string, string>> = {
+  gcal: 'googlecalendar',
+  gdrive: 'googledrive',
+  gsheets: 'googlesheets',
+  calendar: 'googlecalendar'
+}
+
+/** V7: lo slug canonico di uno slug vecchio (gli alias diventano lo slug vero); gli altri passano. */
+export function canonicalToolkitSlug(slug: string): string {
+  const key = slug.trim().toLowerCase()
+  return LEGACY_TOOLKIT_ALIASES[key] ?? key
+}
 
 /** Gli slug noti (toolkit comuni + i collegati): per ricavare il toolkit dallo slug di un'azione (C2). */
 export function knownToolkitSlugs(extra: readonly string[] = []): string[] {
@@ -251,10 +276,11 @@ export function knownToolkitSlugs(extra: readonly string[] = []): string[] {
  * catalogo app, P7) se c'è, altrimenti la tabella dei comuni qui accanto,
  * altrimenti la forma leggibile (K3 dei ritocchi: mai lo slug grezzo
  * all'utente — «slack» non è un nome, «x_twitter» nemmeno). «x_twitter» è in
- * tabella («X»); uno slug ignoto «foo_bar» diventa «Foo bar».
+ * tabella («X»); uno slug ignoto «foo_bar» diventa «Foo bar». V7: gli alias
+ * vecchi si canonicalizzano prima («gcal» → «Google Calendar»).
  */
 export function composioToolkitName(slug: string): string {
-  const key = slug.toLowerCase()
+  const key = canonicalToolkitSlug(slug)
   const fromCatalog = CATALOG_NAMES.get(key)
   if (fromCatalog) return fromCatalog
   const known = COMMON_COMPOSIO_TOOLKITS.find((t) => t.slug === key)?.name
@@ -311,6 +337,21 @@ export function localizedConnectionsAction(action: ComposioConnectionsAction, ui
 export function localizedProxyRequestAction(method: string, endpoint: string, uiLang: UiLanguage): string {
   const label = uiLang === 'en' ? 'Direct request' : 'Richiesta diretta'
   return `${label} ${method} ${endpoint}`.trim()
+}
+
+// ---- V9 (prova vera): le app della card del blocco ----
+
+/**
+ * I nomi (già umani) delle app di una card del blocco, uniti nella lingua
+ * della UI: «Gmail e Slack» / «Gmail and Slack». VUOTO → «Composio» (una
+ * voce senza nome non dice quale app: meglio il servizio che un elenco finto).
+ */
+export function composioAppsLabel(apps: readonly string[], uiLang: UiLanguage): string {
+  const unique = [...new Set(apps.map((a) => a.trim()).filter(Boolean))]
+  if (unique.length === 0) return 'Composio'
+  if (unique.length === 1) return unique[0]!
+  const last = uiLang === 'en' ? ' and ' : ' e '
+  return `${unique.slice(0, -1).join(', ')}${last}${unique[unique.length - 1]!}`
 }
 
 // ---- K7 (fase Composio OAuth — ritocchi): da dove parte una bozza ----

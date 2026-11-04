@@ -93,7 +93,7 @@ interface Store {
   /** fase 8 (§3bis L7): task aperto nella vista del sotto-transcript */
   openTaskId: number | null
   /** fase 8 (§3bis L7): stato live "sta facendo X…" per agente */
-  activity: Record<string, { tool: string; target: string } | null>
+  activity: Record<string, { tool: string; target: string; app?: string; args?: string } | null>
   /** fase 10: gruppi (sidebar) */
   groups: GroupInfo[]
   /** fase 10: gruppo aperto nella vista gruppo */

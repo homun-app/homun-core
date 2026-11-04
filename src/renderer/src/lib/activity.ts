@@ -7,14 +7,27 @@
 //   i fatti e ○ per quello in corso.
 // Mai testo del modello: i target arrivano dal registro (nome del file, host
 // dell'URL), il testo dei comandi NON si mostra.
+// V5 (prova vera): gli strumenti MCP dicono QUALE app e COSA — il blocco di
+// Composio mostra le azioni coi nomi localizzati della card («Gmail · Elenca
+// email»), gli meta strumenti di Composio la loro frase, gli altri server il
+// NOME del server («Ha usato Linear»), mai il nome tecnico dello strumento.
 import type { MessageDescriptor } from '@lingui/core'
 import { msg } from '@lingui/core/macro'
 import type { TranscriptEntry } from '../../../shared/types'
+import { composioToolkitName, composioToolkitOfSlug, localizedActionName } from '../../../shared/composio-names'
 
 /** L'attività in corso di un bot, come la manda il daemon (store.activity). */
 export interface BotActivity {
   tool: string
   target: string
+  /** V5: il nome umano del server MCP (il daemon lo risolve); assente nei passaggi vecchi */
+  app?: string
+  /**
+   * V5: gli argomenti COMPATTI (solo nomi, mai i valori) degli strumenti
+   * meta di Composio — il blocco (tools[].tool_slug) e MANAGE_CONNECTIONS
+   * (toolkits[].name/action) — perché la frase può dire cosa fa.
+   */
+  args?: string
 }
 
 /** Il nome del file dal target (mai il percorso intero). */
@@ -142,8 +155,65 @@ export const TOOL_FAMILIES: readonly ToolFamily[] = [
 
 const FAMILY_BY_TOOL = new Map<string, ToolFamily>(TOOL_FAMILIES.flatMap((f) => f.tools.map((t) => [t, f] as const)))
 
+/** Il nome leggibile di uno slug di server (linear → Linear, il_mio_server → Il mio server). */
+function readableServerName(slug: string): string {
+  const words = slug.trim().replace(/[_\-.]+/g, ' ').trim()
+  if (!words) return 'app'
+  return words.charAt(0).toUpperCase() + words.slice(1)
+}
+
+/**
+ * V5: il nome della prima azione del blocco, come nella card —
+ * «Gmail · Elenca email» — con «+N» quando le azioni sono di più.
+ */
+function batchActionsLabel(slugs: readonly string[], lang: 'it' | 'en'): string | null {
+  const named = slugs.filter((s) => typeof s === 'string' && s.trim())
+  if (named.length === 0) return null
+  const first = named[0]!
+  const app = composioToolkitName(composioToolkitOfSlug(first))
+  const action = localizedActionName(first, lang) ?? readableServerName(
+    first.toLowerCase().split(/[_\-.]+/).filter(Boolean).slice(1).join(' ')
+  )
+  const label = `${app} · ${action}`
+  return named.length > 1 ? `${label} +${named.length - 1}` : label
+}
+
+/** V5: gli slug delle azioni del blocco dagli argomenti compatti (tools[].tool_slug). */
+function batchSlugsOf(argsJson: string | undefined): string[] {
+  if (!argsJson) return []
+  try {
+    const parsed = JSON.parse(argsJson) as { tools?: unknown }
+    if (!Array.isArray(parsed.tools)) return []
+    return parsed.tools
+      .map((t) => (t && typeof t === 'object' ? String((t as { tool_slug?: unknown }).tool_slug ?? '') : ''))
+      .filter(Boolean)
+  } catch {
+    return []
+  }
+}
+
+/** V5: le voci di MANAGE_CONNECTIONS dagli argomenti (toolkits[].name/action). */
+function manageEntriesOf(argsJson: string | undefined): Array<{ name: string; action: string }> {
+  if (!argsJson) return []
+  try {
+    const parsed = JSON.parse(argsJson) as { toolkits?: unknown }
+    if (!Array.isArray(parsed.toolkits)) return []
+    return parsed.toolkits
+      .map((t) => (t && typeof t === 'object' ? { name: String((t as { name?: unknown }).name ?? ''), action: String((t as { action?: unknown }).action ?? 'add') } : null))
+      .filter((t): t is { name: string; action: string } => !!t)
+  } catch {
+    return []
+  }
+}
+
 /** La famiglia di tool: verbo presente e passato (descriptor Lingui). */
-function familyPhrase(tool: string, target: string, past: boolean): MessageDescriptor {
+function familyPhrase(
+  tool: string,
+  target: string,
+  past: boolean,
+  activity: BotActivity,
+  lang: 'it' | 'en'
+): MessageDescriptor {
   const row = FAMILY_BY_TOOL.get(tool)
   if (row) {
     const t = row.target === 'host' ? (hostOf(target) ?? '') : row.target === 'file' ? fileNameOf(target) : ''
@@ -157,9 +227,37 @@ function familyPhrase(tool: string, target: string, past: boolean): MessageDescr
   if (tool === 'use-app' || tool.startsWith('computer_')) {
     return past ? msg`Ha usato il computer` : msg`usa il computer…`
   }
-  // i tool dei connettori MCP: mcp__<connettore>__<tool>
+  // V5: gli strumenti Composio del VECCHIO flusso SDK (composio__gmail__…) — l'app umana
+  if (tool.startsWith('composio__')) {
+    const app = composioToolkitName(tool.split('__')[1] ?? '')
+    return past ? msg`Ha usato ${app}` : msg`usa ${app}…`
+  }
+  // i tool dei connettori MCP: mcp__<server>__<tool> — V5: QUALE app, COSA fa
   if (tool.startsWith('mcp__')) {
-    return past ? msg`Ha usato un’app` : msg`usa un’app…`
+    const original = tool.split('__').slice(2).join('__')
+    // il blocco di Composio (su qualunque server): le azioni come nella card
+    if (original === 'COMPOSIO_MULTI_EXECUTE_TOOL') {
+      const label = batchActionsLabel(batchSlugsOf(activity.args), lang)
+      if (label) return past ? msg`Ha usato ${label}` : msg`usa ${label}…`
+      return past ? msg`Ha usato un’app` : msg`usa un’app…`
+    }
+    if (original === 'COMPOSIO_SEARCH_TOOLS' || original === 'COMPOSIO_GET_TOOL_SCHEMAS') {
+      return past ? msg`Ha cercato lo strumento giusto` : msg`cerca lo strumento giusto…`
+    }
+    if (original === 'COMPOSIO_MANAGE_CONNECTIONS') {
+      const entries = manageEntriesOf(activity.args)
+      const firstAdd = entries.find((e) => e.action === 'add' && e.name)
+      if (firstAdd) {
+        const app = composioToolkitName(firstAdd.name)
+        return past ? msg`Ha collegato ${app}` : msg`collega ${app}…`
+      }
+      return past ? msg`Ha controllato le app collegate` : msg`controlla le app collegate…`
+    }
+    // gli altri server MCP: il NOME del server («Ha usato Linear»), mai il
+    // nome tecnico dello strumento (se il daemon ha passato solo lo slug, si
+    // rende leggibile)
+    const app = activity.app && activity.app !== target ? activity.app : readableServerName(target)
+    return past ? msg`Ha usato ${app}` : msg`usa ${app}…`
   }
   return past ? msg`Ha lavorato` : msg`lavora…`
 }
@@ -167,16 +265,18 @@ function familyPhrase(tool: string, target: string, past: boolean): MessageDescr
 /**
  * activityPhrase (pura, testata): la frase della mezza riga. `tense`:
  * 'present' per «apre fibrapro.it…», 'past' per l'elenco dei passaggi
- * («Ha aperto fibrapro.it»). I descriptor li traduce chi li mostra.
+ * («Ha aperto fibrapro.it»). `lang` decide i nomi localizzati delle azioni
+ * Composio (V5); i descriptor li traduce chi li mostra.
  */
 export function activityPhrase(
   activity: BotActivity | null | undefined,
-  tense: 'present' | 'past' = 'present'
+  tense: 'present' | 'past' = 'present',
+  lang: 'it' | 'en' = 'it'
 ): MessageDescriptor {
   if (!activity || !activity.tool) {
     return tense === 'past' ? msg`Ha lavorato` : msg`lavora…`
   }
-  return familyPhrase(activity.tool, activity.target ?? '', tense === 'past')
+  return familyPhrase(activity.tool, activity.target ?? '', tense === 'past', activity, lang)
 }
 
 // ---- il raggruppamento dei passaggi per turno ----
@@ -189,6 +289,8 @@ export interface TurnStep {
   at: number
   /** quando è arrivato il risultato (null se il passo è in corso) */
   doneAt: number | null
+  /** V5: gli argomenti COMPATTI degli strumenti meta di Composio (solo nomi) */
+  args?: string
 }
 
 export interface StepGroup {
@@ -211,6 +313,35 @@ export function targetOfArguments(argsJson: string | undefined): string {
     // argomenti non JSON: niente bersaglio
   }
   return ''
+}
+
+/**
+ * V5: gli argomenti COMPATTI di una chiamata agli strumenti meta di Composio
+ * (il blocco e MANAGE_CONNECTIONS) — SOLO i nomi delle azioni e dei toolkit,
+ * mai i valori (destinatari, testi) che non si mostrano. Vuoto per tutto il resto.
+ */
+export function composioArgsOf(tool: string, argsJson: string | undefined): string | undefined {
+  if (!tool.startsWith('mcp__')) return undefined
+  const original = tool.split('__').slice(2).join('__')
+  if (original !== 'COMPOSIO_MULTI_EXECUTE_TOOL' && original !== 'COMPOSIO_MANAGE_CONNECTIONS') return undefined
+  if (!argsJson) return undefined
+  try {
+    const a = JSON.parse(argsJson) as Record<string, unknown>
+    if (original === 'COMPOSIO_MULTI_EXECUTE_TOOL') {
+      if (!Array.isArray(a.tools)) return undefined
+      const slugs = a.tools
+        .map((t) => (t && typeof t === 'object' ? String((t as { tool_slug?: unknown }).tool_slug ?? '') : ''))
+        .filter(Boolean)
+      return slugs.length ? JSON.stringify({ tools: slugs.map((s) => ({ tool_slug: s })) }) : undefined
+    }
+    if (!Array.isArray(a.toolkits)) return undefined
+    const entries = a.toolkits
+      .map((t) => (t && typeof t === 'object' ? { name: String((t as { name?: unknown }).name ?? ''), action: String((t as { action?: unknown }).action ?? 'add') } : null))
+      .filter((t): t is { name: string; action: string } => !!t)
+    return entries.length ? JSON.stringify({ toolkits: entries }) : undefined
+  } catch {
+    return undefined
+  }
 }
 
 const isOpener = (e: TranscriptEntry): boolean =>
@@ -254,12 +385,15 @@ export function stepsOfTurn(entries: TranscriptEntry[], upto: 'open' | { entryId
   for (const e of window) {
     if (e.kind !== 'tool-call') continue
     const meta = (e.meta ?? {}) as { id?: unknown; arguments?: string }
+    // V5: i nomi (solo i nomi) degli strumenti meta di Composio, per la frase
+    const stepArgs = composioArgsOf(e.content, meta.arguments)
     steps.push({
       tool: e.content,
       target: targetOfArguments(meta.arguments),
       done: meta.id !== undefined && doneAt.has(meta.id),
       at: e.createdAt,
-      doneAt: meta.id !== undefined ? doneAt.get(meta.id) ?? null : null
+      doneAt: meta.id !== undefined ? doneAt.get(meta.id) ?? null : null,
+      ...(stepArgs ? { args: stepArgs } : {})
     })
   }
   let endedAt: number | null = null

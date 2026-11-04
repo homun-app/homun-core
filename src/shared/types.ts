@@ -573,7 +573,9 @@ export type SandbotEvent =
   // sidebar (task in corso) si aggiornano
   | { type: 'tasks' }
   // fase 8 (§3bis L7): stato live — quale tool sta girando nel turno dell'agente
-  | { type: 'activity'; agentId: string; activity: { tool: string; target: string } | null }
+  // V5 (prova vera): app = nome umano del server MCP, args = i SOLI NOMI
+  // delle azioni degli strumenti meta di Composio (mai i valori)
+  | { type: 'activity'; agentId: string; activity: { tool: string; target: string; app?: string; args?: string } | null }
   // fase 10: i messaggi o i membri di un gruppo sono cambiati (sidebar + vista gruppo)
   | { type: 'groups' }
   // fase 12: lo stato di un sottoagente di questo padre è cambiato (card + pannello)
@@ -854,7 +856,8 @@ export interface SandbotApi {
   // fase Composio OAuth (C5): le app dentro il server Composio collegato col login
   composioGatewayStatus(): Promise<ComposioGatewayStatusInfo>
   composioGatewayRefresh(): Promise<ComposioGatewayStatusInfo>
-  composioGatewayConnect(slug: string, name?: string): Promise<{ ok: boolean; error?: string }>
+  // V8 (prova vera): already = c'era GIÀ un account attivo, nessun add
+  composioGatewayConnect(slug: string, name?: string): Promise<{ ok: boolean; already?: boolean; error?: string }>
   composioGatewayRemove(slug: string): Promise<{ ok: boolean; error?: string }>
   composioGatewayCancel(): Promise<{ ok: boolean }>
   /** il clic su «Collega» della card in chat: apre il link e aspetta il login */
@@ -1405,6 +1408,8 @@ export interface ComposioGatewayAppInfo {
   name: string
   status: 'ACTIVE' | 'RECONNECT' | 'FAILED'
   accountId: string | null
+  /** V8 (prova vera): l'email dell'account quando `list` la dà (user_info.email) */
+  email?: string
 }
 
 /** Lo stato del gateway Composio per la UI (mai link, mai token). */

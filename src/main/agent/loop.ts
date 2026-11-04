@@ -25,7 +25,7 @@ import { redactComposioSecrets, composioActionOfToolName } from '../connectors/c
 import {
   batchActions, batchResultData, composioResultError, forceSyncResponseToWorkbenchOff,
   extractBatchSends, toolBatchOf, composioActionKey, composioToolkitOfSlug,
-  manageConnectionsEntries
+  manageConnectionsEntries, workbenchSpillOf
 } from '../connectors/tool-batch'
 import { composioGateway } from '../connectors/composio-gateway'
 import { deniedRepeatRefusal, repeatsDeniedAction } from './composio-trust'
@@ -156,6 +156,26 @@ function verdictReasonText(verdict: import('./permissions').Verdict): string {
   if (verdict.kind !== 'ask') return ''
   if (verdict.uis?.length) return verdict.uis.map((u) => formatUi(u, loopUiLanguage())).join('; ')
   return verdict.ui ? formatUi(verdict.ui, loopUiLanguage()) : verdict.reason
+}
+
+/**
+ * V2 (prova vera): lo stato dell'entry di UNA card decisa. Il meta si RILEGGE
+ * al momento dell'aggiornamento e si cambia SOLO status: l'RPC
+ * approvals:resolve scrive resolutionMode nel meta PRIMA di sbloccare il
+ * loop, e la vecchia copia locale (`{ ...entry.meta, status }`) lo cancellava
+ * — «Sempre» risultava «Consentito una volta». Vale per OGNI punto del loop
+ * che chiude una card (approval e send-message con approvalId).
+ */
+export function setApprovalStatus(agentId: string, entryId: number, status: string, emit: (e: SandbotEvent) => void): void {
+  const freshMeta = getEntries(agentId).find((x) => x.id === entryId)?.meta ?? {}
+  updateEntryMeta(entryId, { ...freshMeta, status })
+  const updated = getEntries(agentId).find((x) => x.id === entryId)
+  if (updated) emit({ type: 'entries', agentId, entries: [updated] })
+}
+
+/** La decisione dell'utente come stato dell'entry della card (V2: unico punto). */
+export function approvalStatusOfDecision(decision: 'allow' | 'deny' | 'timeout' | 'superseded' | 'cancelled'): string {
+  return decision === 'timeout' ? 'expired' : decision === 'allow' ? 'allowed' : decision === 'deny' ? 'denied' : decision === 'cancelled' ? 'cancelled' : 'superseded'
 }
 
 /**
@@ -904,15 +924,10 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       setTimeout(() => resolve('timeout'), getSetting<number>('permissions.timeoutMs', 5 * 60_000))
     })
     run.approvals.delete(approval.id)
-    // il meta si RILEGGE: l'RPC può aver già scritto esiti (secureinput:submit
-    // salva savedOutcome prima di risolvere) e non vanno persi
-    const freshMeta = getEntries(agentId).find((x) => x.id === entry.id)?.meta ?? entry.meta
-    updateEntryMeta(entry.id, {
-      ...freshMeta,
-      status: decision === 'timeout' ? 'expired' : decision === 'allow' ? 'allowed' : decision === 'deny' ? 'denied' : decision === 'cancelled' ? 'cancelled' : 'superseded'
-    })
-    const updated = getEntries(agentId).find((x) => x.id === entry.id)
-    if (updated) emit({ type: 'entries', agentId, entries: [updated] })
+    // V2: il meta si RILEGGE e cambia SOLO status — l'RPC può aver già scritto
+    // resolutionMode o esiti (secureinput:submit salva savedOutcome prima di
+    // risolvere) e non vanno persi
+    setApprovalStatus(agentId, entry.id, approvalStatusOfDecision(decision), emit)
     taskWorking()
     setStatus(agentId, 'thinking', emit)
     return decision
@@ -1063,9 +1078,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         return
       }
       for (const appr of plan.pendingApprovals) {
-        updateEntryMeta(appr.id, { ...appr.meta, status: 'expired' })
-        const updated = getEntries(agentId).find((e) => e.id === appr.id)
-        if (updated) emit({ type: 'entries', agentId, entries: [updated] })
+        setApprovalStatus(agentId, appr.id, 'expired', emit)
       }
       for (const call of plan.interruptedToolCalls) {
         const res = add({
@@ -2023,12 +2036,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
                 setTimeout(() => resolve('timeout'), getSetting<number>('permissions.timeoutMs', 5 * 60_000))
               })
               run.approvals.delete(approval.id)
-              updateEntryMeta(approvalEntry.id, {
-                ...approvalEntry.meta,
-                status: decision === 'timeout' ? 'expired' : decision === 'allow' ? 'allowed' : decision === 'deny' ? 'denied' : decision === 'cancelled' ? 'cancelled' : 'superseded'
-              })
-              const updatedApproval = getEntries(agentId).find((x: import('../../shared/types').TranscriptEntry) => x.id === approvalEntry.id)
-              if (updatedApproval) emit({ type: 'entries', agentId, entries: [updatedApproval] })
+              setApprovalStatus(agentId, approvalEntry.id, approvalStatusOfDecision(decision), emit)
               taskWorking()
               if (decision !== 'allow') {
                 setStatus(agentId, 'thinking', emit)
@@ -2208,12 +2216,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
                   setTimeout(() => resolve('timeout'), getSetting<number>('permissions.timeoutMs', 5 * 60_000))
                 })
                 run.approvals.delete(approval.id)
-                updateEntryMeta(approvalEntry.id, {
-                  ...approvalEntry.meta,
-                  status: decision === 'timeout' ? 'expired' : decision === 'allow' ? 'allowed' : decision === 'deny' ? 'denied' : decision === 'cancelled' ? 'cancelled' : 'superseded'
-                })
-                const updatedApproval = getEntries(agentId).find((x: import('../../shared/types').TranscriptEntry) => x.id === approvalEntry.id)
-                if (updatedApproval) emit({ type: 'entries', agentId, entries: [updatedApproval] })
+                setApprovalStatus(agentId, approvalEntry.id, approvalStatusOfDecision(decision), emit)
                 taskWorking()
                 if (decision !== 'allow') {
                   setStatus(agentId, 'thinking', emit)
@@ -2290,12 +2293,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             setTimeout(() => resolve('timeout'), getSetting<number>('permissions.timeoutMs', 5 * 60_000))
           })
           run.approvals.delete(approval.id)
-          updateEntryMeta(approvalEntry.id, {
-            ...approvalEntry.meta,
-            status: decision === 'timeout' ? 'expired' : decision === 'allow' ? 'allowed' : decision === 'deny' ? 'denied' : decision === 'cancelled' ? 'cancelled' : 'superseded'
-          })
-          const updatedApproval = getEntries(agentId).find((x: import('../../shared/types').TranscriptEntry) => x.id === approvalEntry.id)
-          if (updatedApproval) emit({ type: 'entries', agentId, entries: [updatedApproval] })
+          setApprovalStatus(agentId, approvalEntry.id, approvalStatusOfDecision(decision), emit)
           taskWorking()
           if (decision !== 'allow') {
             const msg = decision === 'deny' ? 'Copy denied by the user.' : 'Approval expired or interrupted: copy not executed.'
@@ -2932,12 +2930,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               setTimeout(() => resolve('timeout'), getSetting<number>('permissions.timeoutMs', 5 * 60_000))
             })
             run.approvals.delete(approval.id)
-            updateEntryMeta(approvalEntry.id, {
-              ...approvalEntry.meta,
-              status: decision === 'timeout' ? 'expired' : decision === 'allow' ? 'allowed' : decision === 'deny' ? 'denied' : decision === 'cancelled' ? 'cancelled' : 'superseded'
-            })
-            const updatedApproval = getEntries(agentId).find((x: import('../../shared/types').TranscriptEntry) => x.id === approvalEntry.id)
-            if (updatedApproval) emit({ type: 'entries', agentId, entries: [updatedApproval] })
+            setApprovalStatus(agentId, approvalEntry.id, approvalStatusOfDecision(decision), emit)
             taskWorking()
             if (decision !== 'allow') {
               messages.push({
@@ -3076,8 +3069,13 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         // ---- tool normali: entry tool-call, gate permessi, esecuzione ----
 
         // fase 8 (§3bis L7): stato live — nome del tool e target (dai SOLI
-        // argomenti, mai testo generato dal modello) per la sidebar
-        emit({ type: 'activity', agentId, activity: activityOf(call.name, input) })
+        // argomenti, mai testo generato dal modello) per la sidebar.
+        // V5 (prova vera): per i tool MCP il nome UMANO del server, così la
+        // mezza riga dice «usa Linear…» e non il nome tecnico dello strumento
+        const mcpServerName = call.name.startsWith('mcp__')
+          ? ((await mcpAppMetaOf(call.name)).mcpApp as string | undefined)
+          : undefined
+        emit({ type: 'activity', agentId, activity: activityOf(call.name, input, mcpServerName) })
 
         const callEntry = add({
           agentId, kind: 'tool-call', role: 'assistant', content: `${call.name}`,
@@ -3296,12 +3294,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               setTimeout(() => resolve('timeout'), getSetting<number>('permissions.timeoutMs', 5 * 60_000))
             })
             run.approvals.delete(approval.id)
-            updateEntryMeta(approvalEntry.id, {
-              ...approvalEntry.meta,
-              status: decision === 'timeout' ? 'expired' : decision === 'allow' ? 'allowed' : decision === 'deny' ? 'denied' : decision === 'cancelled' ? 'cancelled' : 'superseded'
-            })
-            const updatedApproval = getEntries(agentId).find((x: import('../../shared/types').TranscriptEntry) => x.id === approvalEntry.id)
-            if (updatedApproval) emit({ type: 'entries', agentId, entries: [updatedApproval] })
+            setApprovalStatus(agentId, approvalEntry.id, approvalStatusOfDecision(decision), emit)
             // fase 8: la decisione dell'utente sblocca il task (working)
             taskWorking()
             if (decision === 'cancelled') {
@@ -3436,6 +3429,12 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               if (/out of \d+ tools? failed/i.test(output)) {
                 batchOutput = composioResultError(output, batchResultData(output))
               }
+              // V3 (prova vera): la risposta grande «salvata nella workbench»
+              // remota si ripulisce — niente next_steps né istruzioni sul codice
+              // o sui file (il bot non deve cercare il file SUL MAC), resta
+              // l'anteprima e arriva la nota fissa
+              const spill = workbenchSpillOf(batchOutput)
+              if (spill) batchOutput = spill
               if (composioDraftsNote) batchOutput = `${batchOutput}\n${composioDraftsNote}`
               finalOutput = formatExternalDataEvidence(`composio:${toolkits.join('+') || 'app'}`, batchOutput)
             } else {

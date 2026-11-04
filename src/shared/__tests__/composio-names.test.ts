@@ -53,7 +53,9 @@ describe('R4 — localizedActionName', () => {
 
 // ---- K3/K7 (fase Composio OAuth — ritocchi): nomi umani e via delle bozze ----
 
-import { composioToolkitName, composioToolkitOfSlug, composioViaInfo, localizedConnectionsAction, localizedProxyRequestAction } from '../composio-names'
+import { composioToolkitName, composioToolkitOfSlug, composioViaInfo, localizedConnectionsAction, localizedProxyRequestAction, canonicalToolkitSlug, knownToolkitSlugs, COMMON_COMPOSIO_TOOLKITS, composioAppsLabel } from '../composio-names'
+import { formatUi, ui } from '../ui-text'
+import { UI } from '../ui-messages'
 
 describe('K3 — composioToolkitName: mai slug grezzi', () => {
   it('slug noto → il nome della tabella (x_twitter → «X»)', () => {
@@ -66,6 +68,40 @@ describe('K3 — composioToolkitName: mai slug grezzi', () => {
     expect(composioToolkitName('foo_bar')).toBe('Foo bar')
     expect(composioToolkitName('crmxyz')).toBe('Crmxyz')
     expect(composioToolkitName('')).toBe('')
+  })
+
+  // ---- V7 (prova vera): slug VERI di Composio e alias vecchi ----
+
+  it('V7: composioToolkitName degli slug veri visti nella prova', () => {
+    expect(composioToolkitName('googlecalendar')).toBe('Google Calendar')
+    expect(composioToolkitName('googledrive')).toBe('Google Drive')
+    expect(composioToolkitName('googlesheets')).toBe('Google Sheets')
+    expect(composioToolkitName('googledocs')).toBe('Google Docs')
+    expect(composioToolkitName('microsoft_teams')).toBe('Teams')
+    expect(composioToolkitName('stripe')).toBe('Stripe')
+  })
+
+  it('V7: gli alias vecchi si leggono ma si canonicalizzano (mai per crearne di nuovi)', () => {
+    expect(canonicalToolkitSlug('gcal')).toBe('googlecalendar')
+    expect(canonicalToolkitSlug('gsheets')).toBe('googlesheets')
+    expect(canonicalToolkitSlug('calendar')).toBe('googlecalendar')
+    expect(canonicalToolkitSlug('gmail')).toBe('gmail')
+    // dati GIÀ SALVATI con lo slug inventato di ieri → il nome vero
+    expect(composioToolkitName('gcal')).toBe('Google Calendar')
+    expect(composioToolkitName('gdrive')).toBe('Google Drive')
+    // ma gli slug inventati NON sono più slug noti per il classificatore
+    expect(knownToolkitSlugs().includes('gcal')).toBe(false)
+    expect(knownToolkitSlugs().includes('googlecalendar')).toBe(true)
+  })
+
+  it('V7: la tabella dei comuni non ha doppioni (né slug né nomi)', () => {
+    const slugs = COMMON_COMPOSIO_TOOLKITS.map((t) => t.slug)
+    const names = COMMON_COMPOSIO_TOOLKITS.map((t) => t.name)
+    expect(new Set(slugs).size).toBe(slugs.length)
+    expect(new Set(names).size).toBe(names.length)
+    expect(slugs.includes('gcal')).toBe(false)
+    expect(slugs.includes('gsheets')).toBe(false)
+    expect(slugs.includes('calendar')).toBe(false)
   })
 })
 
@@ -92,6 +128,26 @@ describe('K3 — le azioni di MANAGE_CONNECTIONS e del proxy nella lingua della 
   it('il proxy dice «Richiesta diretta GET /…» in it e «Direct request …» in en, mai «PROXY»', () => {
     expect(localizedProxyRequestAction('GET', '/v1/threads', 'it')).toBe('Richiesta diretta GET /v1/threads')
     expect(localizedProxyRequestAction('POST', '/v1/send', 'en')).toBe('Direct request POST /v1/send')
+  })
+
+  // ---- V9 (prova vera): le app della card del blocco ----
+
+  it('V9: composioAppsLabel unisce i nomi nella lingua della UI (vuoto → Composio)', () => {
+    expect(composioAppsLabel(['Gmail'], 'it')).toBe('Gmail')
+    expect(composioAppsLabel(['Gmail', 'Slack'], 'it')).toBe('Gmail e Slack')
+    expect(composioAppsLabel(['Gmail', 'Slack', 'Notion'], 'it')).toBe('Gmail, Slack e Notion')
+    expect(composioAppsLabel(['Gmail', 'Slack'], 'en')).toBe('Gmail and Slack')
+    // doppi nomi (più azioni sulla stessa app) → una volta sola
+    expect(composioAppsLabel(['Gmail', 'Gmail'], 'it')).toBe('Gmail')
+    expect(composioAppsLabel([], 'it')).toBe('Composio')
+    expect(composioAppsLabel(['', '  '], 'en')).toBe('Composio')
+  })
+
+  it('V9: la frase della card del blocco per 1 e 2 azioni, in it e en', () => {
+    expect(formatUi(ui(UI.approvalComposioBatch, { count: 1, apps: 'Gmail' }), 'it')).toBe('Vuole fare 1 azione su Gmail')
+    expect(formatUi(ui(UI.approvalComposioBatch, { count: 2, apps: 'Gmail e Slack' }), 'it')).toBe('Vuole fare 2 azioni su Gmail e Slack')
+    expect(formatUi(ui(UI.approvalComposioBatch, { count: 1, apps: 'Gmail' }), 'en')).toBe('Wants to run 1 action on Gmail')
+    expect(formatUi(ui(UI.approvalComposioBatch, { count: 2, apps: 'Gmail and Slack' }), 'en')).toBe('Wants to run 2 actions on Gmail and Slack')
   })
 })
 

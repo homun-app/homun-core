@@ -1,0 +1,26 @@
+{
+  "successful": true,
+  "data": {
+    "results": [
+      {
+        "tool_slug": "GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID",
+        "successful": true,
+        "data": {
+          "data_preview": "Da: persona@esempio.it\nA: utente@esempio.it\nOggetto: La richiesta di prova\n\nCiao, ti scrivo per la richiesta di prova che avevamo\nanticipato: i punti sono tre e…",
+          "structure_info": {
+            "mime_type": "message/rfc822",
+            "size_bytes": 174521,
+            "preview_chars": 400
+          },
+          "saved_response_path": "/var/composio/workbench/sessions/finta/responses/GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID_7f3a2b.json",
+          "next_steps": "The full response was saved to a file. Read the saved response file, then write code to parse it and run the analysis."
+        }
+      }
+    ],
+    "session": {
+      "id": "sessione-finta",
+      "instructions": "REQUIRED: Pass session_id \"sessione-finta\" in ALL subsequent meta tool calls for this workflow."
+    }
+  },
+  "error": null
+}

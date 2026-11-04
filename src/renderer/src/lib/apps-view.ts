@@ -196,19 +196,21 @@ export function appsCatalogModel(input: AppsCatalogInput): AppsCatalogModel {
   const keyApp = new Map((input.composio?.connected ?? []).map((a) => [a.slug, a]))
 
   const connectedOf = (app: AppCatalogRow): CatalogRowView['connected'] => {
+    // V13 (prova vera): per le righe a doppio marchio (Notion, Linear…) lo
+    // stato DIRETTO conta — collegando la diretta la riga dice «Connessa»
+    const s = app.directId ? directState.get(app.directId) : undefined
+    if (s === 'connected') return 'connected'
     if (app.directId && !app.composioSlug) {
-      const s = directState.get(app.directId)
-      if (s === 'connected') return 'connected'
       if (s === 'needs_auth') return 'reconnect'
       return null
     }
     const slug = app.composioSlug
-    if (!slug) return null
+    if (!slug) return s === 'needs_auth' ? 'reconnect' : null
     const g = gatewayApp.get(slug)
     if (g) return g.status === 'ACTIVE' ? 'connected' : 'reconnect'
     const k = keyApp.get(slug)
     if (k) return k.status === 'ACTIVE' ? 'connected' : 'reconnect'
-    return null
+    return s === 'needs_auth' ? 'reconnect' : null
   }
 
   const rows: CatalogRowView[] = input.apps.map((app) => ({

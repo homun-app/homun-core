@@ -126,6 +126,11 @@ msgstr "[task n. {id}{hasTitle, select, yes { \"{title}\"} other {}} — per chi
 msgid "{0, plural, one {# byte} other {# byte}}"
 msgstr "{0, plural, one {# byte} other {# byte}}"
 
+#. placeholder {0}: model.connectedCount
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "{0, plural, one {# connessa ›} other {# connesse ›}}"
+msgstr "{0, plural, one {# connessa ›} other {# connesse ›}}"
+
 #. placeholder {0}: group.steps.length
 #: src/renderer/src/components/Chat.tsx
 msgid "{0, plural, one {# passo} other {# passaggi}}"
@@ -147,11 +152,6 @@ msgstr "{0} ›"
 #: src/renderer/src/components/ui/ModelPicker.tsx
 msgid "{0} / {1} per M"
 msgstr "{0} / {1} per M"
-
-#. placeholder {0}: model.connectedCount
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "{0} connesse ›"
-msgstr "{0} connesse ›"
 
 #. placeholder {0}: Math.round(s / 3600)
 #: src/renderer/src/components/SubagentCard.tsx
@@ -254,7 +254,7 @@ msgstr "{count, plural, one {Routine riattivata: 1.} other {Routine riattivate: 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "approval.composioBatch"
-msgstr "{count, plural, one {un’azione} other {# azioni}} di app collegate tramite Composio agiscono verso l’esterno"
+msgstr "{count, plural, one {Vuole fare 1 azione su {apps}} other {Vuole fare # azioni su {apps}}}"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "{fallback}: {eff}"
@@ -571,10 +571,6 @@ msgid "accesso con il tuo account (OAuth)"
 msgstr "accesso con il tuo account (OAuth)"
 
 #: src/renderer/src/components/AppsWindow.tsx
-msgid "account"
-msgstr "account"
-
-#: src/renderer/src/components/AppsWindow.tsx
 msgid "Account Composio"
 msgstr "Account Composio"
 
@@ -743,6 +739,7 @@ msgstr "ancora nessun passo"
 
 #: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/BotDialogs.tsx
+#: src/renderer/src/components/ConnectorCard.tsx
 #: src/renderer/src/components/DraftCard.tsx
 #: src/renderer/src/components/LibraryCards.tsx
 #: src/renderer/src/components/LibraryPanel.tsx
@@ -959,6 +956,7 @@ msgstr "autorizzazione riuscita ma il server non risponde: {error}"
 msgid "Avanti"
 msgstr "Avanti"
 
+#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/RightPanel.tsx
 #: src/renderer/src/components/Settings.tsx
 msgid "Avanzate"
@@ -1150,6 +1148,10 @@ msgstr "Cerca"
 msgid "Cerca bot e squadre"
 msgstr "Cerca bot e squadre"
 
+#: src/renderer/src/lib/activity.ts
+msgid "cerca lo strumento giusto…"
+msgstr "cerca lo strumento giusto…"
+
 #: src/renderer/src/components/ActivityPanel.tsx
 msgid "Cerca nei lavori"
 msgstr "Cerca nei lavori"
@@ -1193,11 +1195,6 @@ msgstr "Chi risponde"
 #: src/renderer/src/components/Settings.tsx
 msgid "Chi usa cosa"
 msgstr "Chi usa cosa"
-
-#. js-lingui-explicit-id
-#: src/shared/ui-messages.ts
-msgid "approval.composioProxy"
-msgstr "chiama direttamente l’API di un’app collegata (richiesta HTTP grezza tramite Composio)"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "chiamate"
@@ -1327,6 +1324,10 @@ msgstr "Collega {0}"
 msgid "Collega {0} tramite Composio"
 msgstr "Collega {0} tramite Composio"
 
+#: src/renderer/src/lib/activity.ts
+msgid "collega {app}…"
+msgstr "collega {app}…"
+
 #: src/renderer/src/components/Sidebar.tsx
 msgid "Collega app"
 msgstr "Collega app"
@@ -1335,14 +1336,6 @@ msgstr "Collega app"
 #: src/shared/ui-messages.ts
 msgid "composio.cancelled"
 msgstr "Collegamento di {name} annullato."
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Collegata"
-msgstr "Collegata"
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Collegate"
-msgstr "Collegate"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Collegati"
@@ -1624,6 +1617,10 @@ msgstr "contiene una sostituzione di comando ($(...) o backtick)"
 #: src/renderer/src/components/Settings.tsx
 msgid "Controlla aggiornamenti"
 msgstr "Controlla aggiornamenti"
+
+#: src/renderer/src/lib/activity.ts
+msgid "controlla le app collegate…"
+msgstr "controlla le app collegate…"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Controllo non riuscito"
@@ -1968,6 +1965,10 @@ msgstr "Errore: {0}"
 msgid "es. comandi ls e cat dentro la home del bot"
 msgstr "es. comandi ls e cat dentro la home del bot"
 
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "es. Usa questo account solo per lavoro; le email in italiano vanno riassunte in bulleted list…"
+msgstr "es. Usa questo account solo per lavoro; le email in italiano vanno riassunte in bulleted list…"
+
 #: src/renderer/src/lib/activity.ts
 msgid "esegue un comando…"
 msgstr "esegue un comando…"
@@ -2193,6 +2194,10 @@ msgid "ha bisogno di te"
 msgstr "ha bisogno di te"
 
 #: src/renderer/src/lib/activity.ts
+msgid "Ha cercato lo strumento giusto"
+msgstr "Ha cercato lo strumento giusto"
+
+#: src/renderer/src/lib/activity.ts
 msgid "Ha cercato sul web"
 msgstr "Ha cercato sul web"
 
@@ -2201,8 +2206,16 @@ msgid "Ha chiesto a un aiutante"
 msgstr "Ha chiesto a un aiutante"
 
 #: src/renderer/src/lib/activity.ts
+msgid "Ha collegato {app}"
+msgstr "Ha collegato {app}"
+
+#: src/renderer/src/lib/activity.ts
 msgid "Ha compilato l'accesso"
 msgstr "Ha compilato l'accesso"
+
+#: src/renderer/src/lib/activity.ts
+msgid "Ha controllato le app collegate"
+msgstr "Ha controllato le app collegate"
 
 #: src/renderer/src/lib/activity.ts
 msgid "Ha eseguito un comando"
@@ -2279,6 +2292,14 @@ msgstr "Ha scritto un file"
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Ha un piano gratuito."
 msgstr "Ha un piano gratuito."
+
+#: src/renderer/src/lib/activity.ts
+msgid "Ha usato {app}"
+msgstr "Ha usato {app}"
+
+#: src/renderer/src/lib/activity.ts
+msgid "Ha usato {label}"
+msgstr "Ha usato {label}"
 
 #: src/renderer/src/lib/activity.ts
 msgid "Ha usato il computer"
@@ -2801,6 +2822,10 @@ msgstr "istruzioni"
 msgid "Istruzioni"
 msgstr "Istruzioni"
 
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Istruzioni personalizzate (vanno nel prompt del bot quando il connettore è attivo)"
+msgstr "Istruzioni personalizzate (vanno nel prompt del bot quando il connettore è attivo)"
+
 #: src/renderer/src/components/Settings.tsx
 msgid "Italiano"
 msgstr "Italiano"
@@ -2850,10 +2875,6 @@ msgstr "La chiave resta nel Portachiavi del Mac."
 #: src/renderer/src/components/BotScreen.tsx
 msgid "La connessione allo schermo si è chiusa."
 msgstr "La connessione allo schermo si è chiusa."
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "La descrizione arriva dal catalogo Composio: per ora è in inglese."
-msgstr "La descrizione arriva dal catalogo Composio: per ora è in inglese."
 
 #: src/renderer/src/components/LibraryPanel.tsx
 msgid "La libreria è vuota: i documenti, i grafici e i file che i bot preparano finiscono qui."
@@ -2924,11 +2945,6 @@ msgstr "legge {file}…"
 #: src/renderer/src/lib/activity.ts
 msgid "legge {host}…"
 msgstr "legge {host}…"
-
-#. js-lingui-explicit-id
-#: src/shared/ui-messages.ts
-msgid "approval.composioTrust"
-msgstr "legge da un’app di Composio che questo turno non ha ancora usato, dopo che c’è entrato contenuto non fidato"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -3332,13 +3348,17 @@ msgstr "Nessun server trovato."
 msgid "Nessun task."
 msgstr "Nessun task."
 
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "nessun tool elencato"
+msgstr "nessun tool elencato"
+
 #: src/renderer/src/components/Settings.tsx
 msgid "nessun tool riconosciuto nel connettore: configura tool e idField a mano"
 msgstr "nessun tool riconosciuto nel connettore: configura tool e idField a mano"
 
 #: src/renderer/src/components/AppsWindow.tsx
-msgid "Nessuna app collegata: comincia dalle consigliate."
-msgstr "Nessuna app collegata: comincia dalle consigliate."
+msgid "Nessuna app connessa: comincia dalle consigliate."
+msgstr "Nessuna app connessa: comincia dalle consigliate."
 
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Nessuna app trovata. Prova con un altro nome."
@@ -3500,6 +3520,7 @@ msgid "non riuscito"
 msgstr "non riuscito"
 
 #: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/ConnectorCard.tsx
 msgid "Non riuscito"
 msgstr "Non riuscito"
 
@@ -4242,6 +4263,7 @@ msgstr "riprendi"
 #: src/renderer/src/components/ComputerFiles.tsx
 #: src/renderer/src/components/ComputerPanel.tsx
 #: src/renderer/src/components/ComputerTerminal.tsx
+#: src/renderer/src/components/ConnectorCard.tsx
 #: src/renderer/src/components/LibraryPanel.tsx
 #: src/renderer/src/components/Settings.tsx
 msgid "Riprova"
@@ -5190,6 +5212,14 @@ msgstr "URL (es. http://localhost:3001/mcp)"
 msgid "URL https del server MCP"
 msgstr "URL https del server MCP"
 
+#: src/renderer/src/lib/activity.ts
+msgid "usa {app}…"
+msgstr "usa {app}…"
+
+#: src/renderer/src/lib/activity.ts
+msgid "usa {label}…"
+msgstr "usa {label}…"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "approval.rcCredentials"
@@ -5315,8 +5345,13 @@ msgstr "voce non trovata"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
+msgid "approval.composioProxy"
+msgstr "Vuole chiamare direttamente l’API di un’app collegata (richiesta HTTP grezza tramite Composio)"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
 msgid "approval.composioConnect"
-msgstr "vuole collegare o cambiare le app connesse tramite Composio"
+msgstr "Vuole collegare o cambiare le app connesse tramite Composio"
 
 #: src/renderer/src/lib/approval-app.ts
 msgid "Vuole fare azioni che non si possono annullare su {apps}."
@@ -5327,14 +5362,15 @@ msgstr "Vuole fare azioni che non si possono annullare su {apps}."
 msgid "Vuole fare questa azione su {0}."
 msgstr "Vuole fare questa azione su {0}."
 
-#: src/renderer/src/lib/approval-app.ts
-msgid "Vuole fare questa azione su {apps}."
-msgstr "Vuole fare questa azione su {apps}."
-
 #. placeholder {0}: info.app
 #: src/renderer/src/lib/approval-app.ts
 msgid "Vuole fare un'azione che non si può annullare su {0}."
 msgstr "Vuole fare un'azione che non si può annullare su {0}."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "approval.composioTrust"
+msgstr "Vuole leggere da un’app di Composio che questo turno non ha ancora usato, dopo che c’è entrato contenuto non fidato"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "wake"

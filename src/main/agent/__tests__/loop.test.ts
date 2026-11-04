@@ -966,6 +966,29 @@ describe('§5.1+approval: gate asincrono e standing grant esatta', () => {
     expect(res.content).toContain('Refused by the user')
   })
 
+  it('V2 (prova vera): «Consenti sempre» → meta finale con status allowed E resolutionMode always', async () => {
+    h.db.settings.set('permissions.timeoutMs', 60_000)
+    h.llm.queue = [
+      { toolCalls: [{ id: 'c1', name: 'run-command', arguments: JSON.stringify({ command: 'curl https://esempio' }) }] },
+      { text: 'fatto' }
+    ]
+    const turn = runTurn(AGENT, 'scarica', emit)
+    await vi.waitFor(() => {
+      expect(h.db.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending')).toBeTruthy()
+    })
+    const appr = h.db.entries.find((e) => e.kind === 'approval')!
+    // come l'RPC approvals:resolve: il mode finisce nel meta PRIMA che il loop
+    // scriva lo stato (qui simulato scrivendolo direttamente nel db)
+    const dbMod = await import('../../store/db')
+    dbMod.updateEntryMeta(appr.id, { ...(appr.meta ?? {}), resolutionMode: 'always' })
+    resolveApproval(AGENT, String(appr.meta?.approvalId), 'allow', 'always')
+    await turn
+    const decided = h.db.entries.find((e) => e.id === appr.id)!
+    expect(decided.meta?.status).toBe('allowed')
+    // il bug V2: il loop ricopiava il suo meta VECCHIO e cancellava il mode
+    expect(decided.meta?.resolutionMode).toBe('always')
+  })
+
   it('`ls; rm -rf /` con grant solo su "ls" → approval che mostra ENTRAMBE le chiavi', async () => {
     h.db.grants.push({ tool: 'run-command', target: 'ls' })
     h.db.settings.set('permissions.timeoutMs', 30)

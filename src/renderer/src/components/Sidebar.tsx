@@ -229,7 +229,7 @@ function MemberRow({ member }: { member: Agent }) {
       case 'speaking':
         return msg`scrive…`
       case 'listening':
-        return activityPhrase(activity)
+        return activityPhrase(activity, 'present', i18n.locale === 'en' ? 'en' : 'it')
       case 'happy':
         return msg`ha finito`
       default:

@@ -173,6 +173,72 @@ export function forceSyncResponseToWorkbenchOff(args: Record<string, unknown>): 
   return { ...args, sync_response_to_workbench: false }
 }
 
+// ---- la risposta «salvata nella workbench» (V3 della prova vera) ----
+
+/**
+ * V3 (grave, dalla prova vera): anche con sync_response_to_workbench false,
+ * per una risposta grande Composio restituisce solo un'anteprima
+ * (data_preview, structure_info), il percorso di un file REMOTO e un
+ * next_steps che dice di scrivere codice per leggere il file salvato — e il
+ * bot è andato a cercare il file SUL MAC dell'utente. La workbench non è
+ * offerta (C3): la nota fissa dice al modello che il file è remoto, che non
+ * sta su questo computer e di NON cercarlo mai in locale.
+ */
+export const WORKBENCH_SPILL_NOTE =
+  "The full response was stored in Composio's remote workbench, which is not available in Homun and is not on this computer: never search for it locally. Use the preview above, or call the action again asking for less data (for example fewer results, metadata only, or a narrower query)."
+
+/** Un campo stringa è un percorso di file remoto della workbench? */
+function isRemoteFilePath(key: string, value: string): boolean {
+  if (!value.startsWith('/')) return false
+  return /(?:file|path|response)/i.test(key) || /\/workbench\//i.test(value)
+}
+
+/** Un nodo del risultato è «salvato nella workbench»? (anteprima, struttura, file remoto o next_steps che parla di codice) */
+function isWorkbenchSpillNode(record: Record<string, unknown>): boolean {
+  if ('data_preview' in record || 'structure_info' in record) return true
+  const nextSteps = typeof record.next_steps === 'string' ? record.next_steps : ''
+  if (nextSteps && /\b(code|parse|saved|workbench|file)\b/i.test(nextSteps)) return true
+  for (const [key, value] of Object.entries(record)) {
+    if (typeof value === 'string' && isRemoteFilePath(key, value)) return true
+  }
+  return false
+}
+
+/**
+ * V3: riconosce una risposta «salvata nella workbench» e la PULISCE per il
+ * modello: tolti next_steps, structure_info e i percorsi di file remoti
+ * (le istruzioni sul codice e sui file), tenuta l'anteprima (data_preview),
+ * e in coda la nota fissa WORKBENCH_SPILL_NOTE. Null per una risposta
+ * normale: il chiamante mantiene il testo identico.
+ */
+export function workbenchSpillOf(output: string): string | null {
+  let root: unknown
+  try {
+    root = JSON.parse(output)
+  } catch {
+    return null
+  }
+  let spilled = false
+  const clean = (node: unknown): unknown => {
+    if (Array.isArray(node)) return node.map(clean)
+    if (!node || typeof node !== 'object') return node
+    const record = node as Record<string, unknown>
+    const spill = isWorkbenchSpillNode(record)
+    if (spill) spilled = true
+    const out: Record<string, unknown> = {}
+    for (const [key, value] of Object.entries(record)) {
+      // tolto dal testo per il modello: le istruzioni sul codice e sui file
+      if (spill && (key === 'next_steps' || key === 'structure_info')) continue
+      if (spill && typeof value === 'string' && isRemoteFilePath(key, value)) continue
+      out[key] = clean(value)
+    }
+    return out
+  }
+  const cleaned = clean(root)
+  if (!spilled) return null
+  return `${JSON.stringify(cleaned)}\n${WORKBENCH_SPILL_NOTE}`
+}
+
 // ---- gli errori del blocco (C7 punto 4) ----
 
 /**
@@ -379,16 +445,61 @@ export function manageConnectionsEntryKind(action: 'add' | 'rename' | 'list' | '
 }
 
 /**
- * Il risultato tollerante di COMPOSIO_MANAGE_CONNECTIONS (C5 punto 3): il
- * formato ESATTO va letto dal risultato vero (lo verifichiamo con l'account
- * vero). Qui si cercano `redirect_url` e gli id/stati nei campi del JSON,
- * ricorsivamente, senza assumere la forma.
+ * Il risultato tollerante di COMPOSIO_MANAGE_CONNECTIONS (C5 punto 3). V8
+ * (prova vera): la forma VERA — `data.results.<toolkit>.status` con
+ * `accounts[].id/status/is_default` e `user_info.email`, stati in
+ * minuscolo — si legge PER PRIMA; il walk ricorsivo resta come ripiego
+ * tollerante per le altre forme.
  */
+export interface ParsedConnectionsAccount {
+  id?: string
+  status?: string
+  alias?: string
+  toolkit?: string
+  /** la forma vera lo dice: l'account da preferire per quel toolkit */
+  isDefault?: boolean
+  /** l'email dell'account quando `list` la dà (user_info.email) */
+  email?: string
+}
+
 export interface ParsedConnectionsResult {
   /** i link di autorizzazione trovati (redirect_url), con il toolkit vicino se c'è */
   redirectUrls: Array<{ url: string; toolkit?: string }>
-  /** gli account trovati: id, stato e alias quando ci sono */
-  accounts: Array<{ id?: string; status?: string; alias?: string; toolkit?: string }>
+  /** gli account trovati: id, stato, alias, is_default ed email quando ci sono */
+  accounts: ParsedConnectionsAccount[]
+  /** il session_id che il server chiede di ripassare nelle chiamate successive */
+  sessionId?: string
+}
+
+/** La forma VERA di `list` (V8): data.results.<toolkit> con status e accounts[]. */
+function parseRealConnectionsShape(root: unknown, out: ParsedConnectionsResult): boolean {
+  const data = (root as { data?: unknown } | null | undefined)?.data
+  const results = (data as { results?: unknown } | null | undefined)?.results
+  if (!results || typeof results !== 'object' || Array.isArray(results)) return false
+  let any = false
+  for (const [toolkit, raw] of Object.entries(results as Record<string, unknown>)) {
+    if (!raw || typeof raw !== 'object') continue
+    const v = raw as Record<string, unknown>
+    const status = typeof v.status === 'string' ? v.status.toLowerCase() : undefined
+    if (status !== undefined) any = true
+    if (Array.isArray(v.accounts)) {
+      for (const accRaw of v.accounts) {
+        if (!accRaw || typeof accRaw !== 'object') continue
+        const acc = accRaw as Record<string, unknown>
+        out.accounts.push({
+          toolkit,
+          ...(typeof acc.id === 'string' && acc.id ? { id: acc.id } : {}),
+          ...(typeof acc.status === 'string' && acc.status ? { status: acc.status.toLowerCase() } : {}),
+          ...(acc.is_default === true ? { isDefault: true } : {}),
+          ...(typeof (acc.user_info as { email?: unknown } | null | undefined)?.email === 'string'
+            ? { email: (acc.user_info as { email: string }).email }
+            : {})
+        })
+        any = true
+      }
+    }
+  }
+  return any
 }
 
 /** Cerca ricorsivamente le chiavi note in un JSON qualsiasi (tollerante). */
@@ -399,40 +510,65 @@ export function parseConnectionsResult(output: string): ParsedConnectionsResult 
   } catch {
     return { redirectUrls: [], accounts: [] }
   }
-  const redirectUrls: ParsedConnectionsResult['redirectUrls'] = []
-  const accounts: ParsedConnectionsResult['accounts'] = []
-  const walk = (node: unknown, toolkitHint?: string): void => {
-    if (Array.isArray(node)) {
-      for (const item of node) walk(item, toolkitHint)
-      return
-    }
-    if (!node || typeof node !== 'object') return
-    const record = node as Record<string, unknown>
-    const toolkit =
-      typeof record.toolkit === 'string'
-        ? record.toolkit
-        : typeof record.toolkit_slug === 'string'
-          ? record.toolkit_slug
-          : typeof record.name === 'string' && !('redirect_url' in record)
-            ? record.name
-            : toolkitHint
-    for (const [key, value] of Object.entries(record)) {
-      if ((key === 'redirect_url' || key === 'redirectUrl' || key === 'auth_url') && typeof value === 'string' && /^https?:\/\//.test(value)) {
-        redirectUrls.push({ url: value, ...(toolkit ? { toolkit } : {}) })
-      }
-    }
-    const id = typeof record.account_id === 'string' ? record.account_id : typeof record.id === 'string' && record.status !== undefined ? record.id : undefined
-    const status = typeof record.status === 'string' ? record.status : undefined
-    const alias = typeof record.alias === 'string' ? record.alias : undefined
-    if ((id !== undefined || status !== undefined) && (toolkit !== undefined || alias !== undefined || id !== undefined)) {
-      accounts.push({ ...(id !== undefined ? { id } : {}), ...(status !== undefined ? { status } : {}), ...(alias !== undefined ? { alias } : {}), ...(toolkit !== undefined ? { toolkit } : {}) })
-    }
-    for (const value of Object.values(record)) {
-      if (value && typeof value === 'object') walk(value, toolkit)
+  const out: ParsedConnectionsResult = { redirectUrls: [], accounts: [] }
+  // V8: il session_id del workflow (data.session.id) quando c'è
+  const session = (root as { data?: { session?: { id?: unknown } } } | null | undefined)?.data?.session
+  if (session && typeof session.id === 'string' && session.id) out.sessionId = session.id
+  // V8: la forma VERA per prima — i suoi account stanno in testa (il chiamante
+  // li preferisce: is_default, email, stato in minuscolo)
+  if (parseRealConnectionsShape(root, out)) {
+    walkTolerant(root, out, undefined)
+    return out
+  }
+  walkTolerant(root, out, undefined)
+  return out
+}
+
+function walkTolerant(node: unknown, out: ParsedConnectionsResult, toolkitHint?: string): void {
+  if (Array.isArray(node)) {
+    for (const item of node) walkTolerant(item, out, toolkitHint)
+    return
+  }
+  if (!node || typeof node !== 'object') return
+  const record = node as Record<string, unknown>
+  const toolkit =
+    typeof record.toolkit === 'string'
+      ? record.toolkit
+      : typeof record.toolkit_slug === 'string'
+        ? record.toolkit_slug
+        : typeof record.name === 'string' && !('redirect_url' in record)
+          ? record.name
+          : toolkitHint
+  for (const [key, value] of Object.entries(record)) {
+    if ((key === 'redirect_url' || key === 'redirectUrl' || key === 'auth_url') && typeof value === 'string' && /^https?:\/\//.test(value)) {
+      out.redirectUrls.push({ url: value, ...(toolkit ? { toolkit } : {}) })
     }
   }
-  walk(root)
-  return { redirectUrls, accounts }
+  const id = typeof record.account_id === 'string' ? record.account_id : typeof record.id === 'string' && record.status !== undefined ? record.id : undefined
+  const status = typeof record.status === 'string' ? record.status : undefined
+  const alias = typeof record.alias === 'string' ? record.alias : undefined
+  if ((id !== undefined || status !== undefined) && (toolkit !== undefined || alias !== undefined || id !== undefined)) {
+    out.accounts.push({ ...(id !== undefined ? { id } : {}), ...(status !== undefined ? { status } : {}), ...(alias !== undefined ? { alias } : {}), ...(toolkit !== undefined ? { toolkit } : {}) })
+  }
+  for (const value of Object.values(record)) {
+    if (value && typeof value === 'object') walkTolerant(value, out, toolkit)
+  }
+}
+
+/**
+ * V8: gli account di un toolkit dal risultato di `list`, nell'ordine che
+ * interessa al gateway: prima l'account is_default, poi gli attivi, poi il
+ * resto (la forma vera li mette in testa; il ripiego tollerante segue).
+ */
+export function connectionsAccountsOf(parsed: ParsedConnectionsResult, toolkit: string): ParsedConnectionsAccount[] {
+  const slug = toolkit.toLowerCase()
+  const ofToolkit = parsed.accounts.filter((a) => (a.toolkit ?? '').toLowerCase() === slug)
+  const rank = (a: ParsedConnectionsAccount): number => {
+    if (a.isDefault) return 0
+    if (String(a.status ?? '').toLowerCase() === 'active') return 1
+    return 2
+  }
+  return ofToolkit.sort((a, b) => rank(a) - rank(b))
 }
 
 /**
@@ -611,7 +747,9 @@ function composioTrustKeys(parsed: ComposioBatchActions, connectedSlugs: readonl
  * Il gate di COMPOSIO_MANAGE_CONNECTIONS (C5, puro): per VOCE di toolkits[] —
  * list è lettura, add è la card di collegamento, rename chiede, remove è
  * distruttiva SENZA «sempre». Decide la voce più severa; una voce senza nome
- * chiede sempre (non si vede QUALE app).
+ * chiede sempre (non si vede QUALE app), tranne una `list` senza nome che
+ * resta una lettura (V8: il server risponderà con l'errore «Required … name»
+ * e il modello correggerà da solo).
  */
 export function manageConnectionsGate(input: ComposioGateInput): ComposioGateOutcome {
   const { toolName, args, rules } = input
@@ -628,6 +766,8 @@ export function manageConnectionsGate(input: ComposioGateInput): ComposioGateOut
     return kind === 'connect' ? ('write' as const) : kind
   })
   const severity = batchSeverity(kinds)
+  // V8: solo le voci CON EFFETTI senza nome chiedono (una list senza name è una lettura)
+  const unnamedBlocking = entries.some((e) => !e.named && e.action !== 'list')
   const apps = entries.filter((e) => e.named).map((e) => ({
     slug: e.name,
     app: composioToolkitName(e.name),
@@ -645,12 +785,12 @@ export function manageConnectionsGate(input: ComposioGateInput): ComposioGateOut
     kind: 'ask',
     severity,
     actions: apps,
-    incomplete: entries.some((e) => !e.named),
+    incomplete: unnamedBlocking,
     reason,
-    noAlways: entries.some((e) => !e.named) || severity === 'destructive' || entries.some((e) => e.action === 'add'),
+    noAlways: unnamedBlocking || severity === 'destructive' || entries.some((e) => e.action === 'add'),
     destructive: severity === 'destructive'
   })
-  if (entries.some((e) => !e.named)) return ask('incomplete')
+  if (unnamedBlocking) return ask('incomplete')
   if (kinds.every((k) => k === 'read')) return { kind: 'allow', via: 'rule' }
   return ask('action')
 }

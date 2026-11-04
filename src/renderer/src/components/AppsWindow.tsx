@@ -10,13 +10,13 @@
 // discreta «Account Composio · connesso». Il mercato dei plugin, i gateway, i
 // server manuali e la chiave di progetto stanno nel foglio «Per sviluppatori».
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { useLingui, Trans } from '@lingui/react/macro'
+import { useLingui, Trans, Plural } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
 import { Search, X } from 'lucide-react'
 import { api, useStore } from '../store'
 import { i18n } from '../lib/i18n'
-import { loadAppCatalog, appCategoryLabel, type AppCatalogRow, type AppCategoryId } from '../../../shared/app-catalog'
+import { loadAppCatalog, appCategoryLabel, appTaglineOf, type AppCatalogRow, type AppCategoryId } from '../../../shared/app-catalog'
 import type { McpServerInfo, McpServerSecret, AppsRegistryResult, SecretKind } from '../../../shared/types'
 import { SECRET_KIND_FOR_NEEDS } from '../../../shared/types'
 import { appsViewModel, appsCatalogModel, type AppsFilter, type InstalledServerLike, type InstalledPluginLike, type ConnectedRow, type CatalogRowView } from '../lib/apps-view'
@@ -548,35 +548,6 @@ function ComposioActivationSheet({ onClose, onDone }: { onClose(): void; onDone(
   )
 }
 
-/** La casella per bot di un toolkit Composio (enabledFor, predefinito tutti). */
-function ComposioBotToggle({ slug, agentId, agentName, enabledFor, allIds, onDone }: {
-  slug: string
-  agentId: string
-  agentName: string
-  enabledFor: string[]
-  allIds: string[]
-  onDone(): void
-}) {
-  const all = enabledFor.includes('*') || enabledFor.length === 0
-  const on = all || enabledFor.includes(agentId)
-  return (
-    <label className="flex items-center gap-1 text-[11px] text-muted-foreground">
-      <input
-        type="checkbox"
-        className="h-3 w-3 accent-foreground"
-        checked={on}
-        onChange={async () => {
-          // dal default «tutti» il primo scatto OFF tiene SOLO gli altri bot
-          const current = all ? allIds.filter((id) => id !== agentId) : (on ? enabledFor.filter((id) => id !== agentId) : [...enabledFor, agentId])
-          await api.connectorsSetEnabledFor('composio', slug, current).catch(() => undefined)
-          onDone()
-        }}
-      />
-      {agentName}
-    </label>
-  )
-}
-
 // ---- A1/A9: il foglio «Per sviluppatori» ----
 
 /**
@@ -981,18 +952,21 @@ export function AppsView({ embedded = false }: { embedded?: boolean }) {
       {!embedded && (
         <div className="flex items-center gap-3">
           <h2 className="flex-1 font-display text-2xl">{i18n._(msg`App`)}</h2>
-          <button
-            className="flex items-center gap-2 text-sm text-muted-foreground transition hover:text-foreground"
-            data-testid="connected-summary"
-            onClick={() => setFilter('connected')}
-          >
-            <span className="flex">
-              {model.connectedRows.slice(0, 4).map((r, i) => (
-                <AppLogo key={r.app.id} logo={r.app.logo} name={r.app.name} className={`size-6 text-[11px] ${i > 0 ? '-ml-1.5' : ''}`} />
-              ))}
-            </span>
-            <Trans>{model.connectedCount} connesse ›</Trans>
-          </button>
+          {/* V11 (prova vera): «0 connesse ›» non si mostra; «1 connessa ›» / «N connesse ›» col plurale */}
+          {model.connectedCount > 0 && (
+            <button
+              className="flex items-center gap-2 text-sm text-muted-foreground transition hover:text-foreground"
+              data-testid="connected-summary"
+              onClick={() => setFilter('connected')}
+            >
+              <span className="flex">
+                {model.connectedRows.slice(0, 4).map((r, i) => (
+                  <AppLogo key={r.app.id} logo={r.app.logo} name={r.app.name} className={`size-6 text-[11px] ${i > 0 ? '-ml-1.5' : ''}`} />
+                ))}
+              </span>
+              <Plural value={model.connectedCount} one="# connessa ›" other="# connesse ›" />
+            </button>
+          )}
           <button
             className="grid size-9 place-items-center rounded-full bg-muted text-muted-foreground transition hover:text-foreground"
             aria-label={t`Chiudi`}
@@ -1046,14 +1020,19 @@ export function AppsView({ embedded = false }: { embedded?: boolean }) {
         )}
       </div>
 
-      {/* 3. «Collegate»: i server e i plugin (le app stanno nell'elenco unico) */}
-      {(linked.connected.length > 0 || !query) && (
-        <section>
-          <strong className="text-[15px] font-medium"><Trans>Collegate</Trans></strong>
-          {linked.connected.length === 0 && !query && (
-            <p className="py-2 text-sm text-muted-foreground"><Trans>Nessuna app collegata: comincia dalle consigliate.</Trans></p>
+      {/* 3. UNA sola sezione «Connesse» (V10 della prova vera): le app connesse
+          del catalogo, i server e i plugin installati e, in fondo, la riga
+          «Skill dei bot». Niente sezione «Collegate» separata: due titoli per
+          la stessa cosa, e il primo diceva il falso con Gmail collegata. */}
+      {(filter === 'all' || filter === 'connected') && (linked.connected.length > 0 || !query) && (
+        <section data-testid="connected-section">
+          <strong className="text-[15px] font-medium"><Trans>Connesse</Trans></strong>
+          {/* il testo vuoto SOLO se non c'è nessuna app, nessun server e nessun plugin */}
+          {model.connectedCount === 0 && linked.connected.length === 0 && !query && (
+            <p className="py-2 text-sm text-muted-foreground"><Trans>Nessuna app connessa: comincia dalle consigliate.</Trans></p>
           )}
           <div className={`mt-2 ${rowGrid}`}>
+            {(browsing || filter === 'connected') && model.connectedRows.map(renderRow)}
             {linked.connected.map((row) => (
               <button
                 key={row.key}
@@ -1069,36 +1048,33 @@ export function AppsView({ embedded = false }: { embedded?: boolean }) {
                 {row.status === 'reconnect' ? (
                   <span className="shrink-0 rounded-full bg-foreground px-3 py-1 text-xs text-background"><Trans>Ricollega</Trans></span>
                 ) : (
-                  <span className="shrink-0 text-sm text-chart-2"><Trans>Collegata</Trans></span>
+                  <span className="shrink-0 text-sm text-chart-2"><Trans>Connessa</Trans></span>
                 )}
               </button>
             ))}
             {/* la riga delle skill dei bot */}
-            <button
-              className="flex items-center gap-3 rounded-[14px] px-1 py-2 text-left transition hover:bg-muted/60"
-              onClick={() => setSkillsOpen(true)}
-            >
-              <span className="grid size-10 shrink-0 place-items-center rounded-[11px] bg-muted text-base">✦</span>
-              <span className="min-w-0 flex-1">
-                <span className="block text-[15px]"><Trans>Skill dei bot</Trans></span>
-                <span className="block truncate text-[13px] text-muted-foreground">
-                  <Trans>{linked.skills.reduce((a, s) => a + s.skills.length, 0) + (installed?.plugins.reduce((a, p) => a + p.skills.length, 0) ?? 0)} skill · se ne vuoi una nuova, chiedila a un bot</Trans>
+            {!query && (
+              <button
+                className="flex items-center gap-3 rounded-[14px] px-1 py-2 text-left transition hover:bg-muted/60"
+                onClick={() => setSkillsOpen(true)}
+              >
+                <span className="grid size-10 shrink-0 place-items-center rounded-[11px] bg-muted text-base">✦</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[15px]"><Trans>Skill dei bot</Trans></span>
+                  <span className="block truncate text-[13px] text-muted-foreground">
+                    <Trans>{linked.skills.reduce((a, s) => a + s.skills.length, 0) + (installed?.plugins.reduce((a, p) => a + p.skills.length, 0) ?? 0)} skill · se ne vuoi una nuova, chiedila a un bot</Trans>
+                  </span>
                 </span>
-              </span>
-              <span className="shrink-0 text-sm text-muted-foreground"><Trans>Gestisci ›</Trans></span>
-            </button>
+                <span className="shrink-0 text-sm text-muted-foreground"><Trans>Gestisci ›</Trans></span>
+              </button>
+            )}
           </div>
         </section>
       )}
 
-      {/* 4. l'elenco unico (P3): Connesse in cima, consigliate, sezioni per categoria */}
+      {/* 4. l'elenco unico (P3): consigliate e sezioni per categoria (le
+          connesse stanno tutte nella sezione UNICA qui sopra, V10) */}
       <section className="space-y-4">
-        {browsing && model.connectedRows.length > 0 && (
-          <div>
-            <p className="mb-1 text-[13px] text-muted-foreground"><Trans>Connesse</Trans></p>
-            <div className={rowGrid}>{model.connectedRows.map(renderRow)}</div>
-          </div>
-        )}
         {browsing && model.featured.length > 0 && (
           <div>
             <p className="mb-1 text-[13px] text-muted-foreground"><Trans>Consigliate per te</Trans></p>
@@ -1122,7 +1098,7 @@ export function AppsView({ embedded = false }: { embedded?: boolean }) {
             <div className={rowGrid}>{s.rows.map(renderRow)}</div>
           </div>
         ))}
-        {model.grid && (model.grid.length > 0 ? (
+        {model.grid && filter !== 'connected' && (model.grid.length > 0 ? (
           <div className={rowGrid}>{model.grid.map(renderRow)}</div>
         ) : (
           <p className="py-2 text-sm text-muted-foreground"><Trans>Nessuna app trovata. Prova con un altro nome.</Trans></p>
@@ -1199,10 +1175,17 @@ function AppDetailSheet({ row, installed, onClose, onChanged, onConnect }: {
   const agents = useStore((s) => s.agents)
   const composio = useStore((s) => s.composio)
   const composioGateway = useStore((s) => s.composioGateway)
+  // V13 (prova vera): i dati del connettore DIRETTO — strumenti disattivati e
+  // istruzioni tornano raggiungibili dal dettaglio (la sezione «Avanzate»)
+  const connectors = useStore((s) => s.connectors)
   const [confirm, setConfirm] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  // V13: la sezione richiudibile «Avanzate», chiusa di default
+  const [advancedOpen, setAdvancedOpen] = useState(false)
   const app = row.app
+  const directConnector = app.directId ? connectors.find((c) => c.id === app.directId) ?? null : null
+  const [instructions, setInstructions] = useState(directConnector?.state.instructions ?? '')
 
   // dove sta il collegamento di quest'app (la stessa regola dell'elenco)
   const gatewayApp = app.composioSlug ? (composioGateway?.connected.find((a) => a.slug === app.composioSlug) ?? null) : null
@@ -1238,12 +1221,17 @@ function AppDetailSheet({ row, installed, onClose, onChanged, onConnect }: {
           </span>
         </div>
         <div className="mt-2"><ProvenanceTag via={app.via} /></div>
-        {app.description && <p className="mt-3 text-[13px] leading-relaxed text-muted-foreground">{app.description}</p>}
+        {/* V11 (prova vera): la descrizione si mostra SOLO nella lingua attiva
+            (tagline curata o descrizione inglese solo in inglese — la regola
+            di P2 vale anche qui); niente nota per sviluppatori */}
+        {appTaglineOf(app, uiLang()) && <p className="mt-3 text-[13px] leading-relaxed text-muted-foreground">{appTaglineOf(app, uiLang())}</p>}
         {error && <p className="mt-2 text-[13px] text-destructive">{error}</p>}
         {row.connected === 'connected' && <p className="mt-3 text-sm text-chart-2"><Trans>Connessa</Trans></p>}
         {row.connected === 'reconnect' && <p className="mt-3 text-sm text-muted-foreground"><Trans>Non più attiva: ricollega per riavere le sue azioni.</Trans></p>}
-        {gatewayApp?.accountId && (
-          <p className="mt-1 text-[11px] text-muted-foreground">{t`account`} {gatewayApp.accountId}</p>
+        {/* V11 (prova vera): MAI l'id tecnico dell'account — l'email quando
+            `list` la dà (user_info.email), altrimenti nulla */}
+        {gatewayApp?.email && (
+          <p className="mt-1 text-[11px] text-muted-foreground">{gatewayApp.email}</p>
         )}
         <div className="mt-3 flex items-center gap-2">
           <div className="flex-1" />
@@ -1277,46 +1265,41 @@ function AppDetailSheet({ row, installed, onClose, onChanged, onConnect }: {
             <Trans>Chiudi</Trans>
           </button>
         </div>
-        {/* quali bot la usano, come oggi per i connettori */}
-        {row.connected && (keyApp || app.directId) && (
+        {/* quali bot la usano — V11 (prova vera): per le app Composio la
+            scelta per singola app NON esiste (il server vale per tutti i
+            bot): testo «Tutti i bot», senza casella; la casella resta dove
+            funziona davvero (connettori diretti e server) */}
+        {row.connected && app.via === 'composio' && (
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <span className="text-[11px] text-muted-foreground"><Trans>per bot:</Trans></span>
-            {keyApp ? (
-              agents.map((a) => (
-                <ComposioBotToggle
-                  key={a.id}
-                  slug={keyApp.slug}
-                  agentId={a.id}
-                  agentName={a.name}
-                  enabledFor={keyApp.enabledFor}
-                  allIds={agents.map((x) => x.id)}
-                  onDone={onChanged}
-                />
-              ))
-            ) : (
-              agents.map((a) => {
-                const server = installed?.servers.find((s) => s.id === app.directId)
-                const cur = server?.enabledFor ?? []
-                const on = cur.includes('*') || cur.includes(a.id)
-                return (
-                  <label key={a.id} className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                    <input
-                      type="checkbox"
-                      className="h-3 w-3 accent-foreground"
-                      checked={on}
-                      onChange={() => {
-                        const next = cur.includes('*') ? [] : [...cur]
-                        const i = next.indexOf(a.id)
-                        if (i >= 0) next.splice(i, 1)
-                        else next.push(a.id)
-                        void api.connectorsSetEnabledFor('server', app.directId!, next).then(onChanged)
-                      }}
-                    />
-                    {a.name}
-                  </label>
-                )
-              })
-            )}
+            <span className="text-[11px] text-muted-foreground"><Trans>Tutti i bot</Trans></span>
+          </div>
+        )}
+        {row.connected && app.via === 'direct' && app.directId && (
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span className="text-[11px] text-muted-foreground"><Trans>per bot:</Trans></span>
+            {agents.map((a) => {
+              const server = installed?.servers.find((s) => s.id === app.directId)
+              const cur = server?.enabledFor ?? []
+              const on = cur.includes('*') || cur.includes(a.id)
+              return (
+                <label key={a.id} className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    className="h-3 w-3 accent-foreground"
+                    checked={on}
+                    onChange={() => {
+                      const next = cur.includes('*') ? [] : [...cur]
+                      const i = next.indexOf(a.id)
+                      if (i >= 0) next.splice(i, 1)
+                      else next.push(a.id)
+                      void api.connectorsSetEnabledFor('server', app.directId!, next).then(onChanged)
+                    }}
+                  />
+                  {a.name}
+                </label>
+              )
+            })}
           </div>
         )}
         {app.via === 'composio' && (
@@ -1324,7 +1307,63 @@ function AppDetailSheet({ row, installed, onClose, onChanged, onConnect }: {
             <Trans>Scollegare NON cancella l'account su Composio: si gestisce da composio.dev.</Trans>
           </p>
         )}
-        <p className="mt-2 text-[11px] text-muted-foreground">{t`La descrizione arriva dal catalogo Composio: per ora è in inglese.`}</p>
+        {/* V13 (prova vera): le funzioni perse col vecchio dettaglio dei
+            connettori — strumenti attivabili/disattivabili e istruzioni — in
+            una sezione richiudibile «Avanzate», chiusa di default, SOLO per
+            le app DIRETTE (gli strumenti delle app Composio sono del server
+            Composio). Il form del client OAuth statico resta fuori. */}
+        {app.via === 'direct' && directConnector && (
+          <div className="mt-3 rounded-2xl bg-muted p-3" data-testid="app-advanced">
+            <button
+              className="flex w-full items-center justify-between text-xs text-muted-foreground transition hover:text-foreground"
+              aria-expanded={advancedOpen}
+              onClick={() => setAdvancedOpen((v) => !v)}
+            >
+              <span className="font-medium"><Trans>Avanzate</Trans></span>
+              <span>{advancedOpen ? '▾' : '▸'}</span>
+            </button>
+            {advancedOpen && (
+              <div className="mt-2 space-y-2">
+                {directConnector.tools.length === 0 && (
+                  <p className="text-[11px] text-muted-foreground"><Trans>nessun tool elencato</Trans></p>
+                )}
+                {directConnector.tools.map((t2) => {
+                  const disabled = directConnector.state.disabledTools.includes(t2.name)
+                  return (
+                    <label key={t2.name} className="flex items-start gap-2">
+                      <input
+                        type="checkbox"
+                        className="mt-0.5 h-3.5 w-3.5 accent-foreground"
+                        checked={!disabled}
+                        onChange={() => {
+                          const next = disabled
+                            ? directConnector.state.disabledTools.filter((x) => x !== t2.name)
+                            : [...directConnector.state.disabledTools, t2.name]
+                          void api.connectorsSetTools(directConnector.id, next).then(onChanged)
+                        }}
+                      />
+                      <span className="min-w-0">
+                        <span className="block truncate font-mono text-[11px]">{t2.name}</span>
+                        <span className="block text-[10px] text-muted-foreground">{t2.description}</span>
+                      </span>
+                    </label>
+                  )
+                })}
+                <div>
+                  <p className="mb-1 text-[11px] text-muted-foreground"><Trans>Istruzioni personalizzate (vanno nel prompt del bot quando il connettore è attivo)</Trans></p>
+                  <textarea
+                    className="w-full resize-none rounded-lg bg-card px-2 py-1.5 text-xs outline-none"
+                    rows={3}
+                    placeholder={t`es. Usa questo account solo per lavoro; le email in italiano vanno riassunte in bulleted list…`}
+                    value={instructions}
+                    onChange={(e) => setInstructions(e.target.value)}
+                    onBlur={() => void api.connectorsSetInstructions(directConnector.id, instructions)}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )

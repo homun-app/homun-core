@@ -23,8 +23,16 @@ export const COMPOSIO_TOOL_PREFIX = 'composio__'
 export const MUTATING_COMPOSIO_ACTION_PATTERN =
   /(^|[_-])(accept|add|approve|archive|assign|buy|cancel|charge|checkout|close|commit|copy|create|delete|deploy|disable|enable|execute|forward|grant|invite|link|mark|merge|modify|move|patch|pay|post|publish|purchase|put|register|reject|remove|rename|replace|reply|reset|revoke|run|schedule|send|set|share|start|stop|submit|subscribe|trigger|unassign|unlink|unsubscribe|update|upload|upsert|write)([_-]|$)/i
 
-/** Verbi di lettura (Rakazo action-approval.ts:79): get|list|search|find|read come segmento. */
-export const READ_COMPOSIO_ACTION_PATTERN = /(^|[_-])(get|list|search|find|read)([_-]|$)/i
+/**
+ * Verbi di lettura (Rakazo action-approval.ts:79: get|list|search|find|read),
+ * estesi con i verbi delle API Composio più usati per LEGGERE (V1 della prova
+ * vera: GMAIL_FETCH_EMAILS chiedeva la card perché «fetch» non era qui):
+ * fetch|retrieve|query|view|describe|show|lookup|count. La regola NON cambia:
+ * un verbo di modifica o una composta (_and_/_or_/_then_) vince sempre, quindi
+ * FETCH_AND_DELETE resta scrittura e lo slug troncato resta fail closed.
+ */
+export const READ_COMPOSIO_ACTION_PATTERN =
+  /(^|[_-])(get|list|search|find|read|fetch|retrieve|query|view|describe|show|lookup|count)([_-]|$)/i
 
 /** Azioni composte (_and_ / _or_ / _then_): mai lettura, sempre card. */
 export const COMPOUND_COMPOSIO_ACTION_PATTERN = /[_-](and|or|then)[_-]/i
@@ -108,7 +116,12 @@ export function classifyComposioAction(name: string): ComposioActionKind {
  */
 const SEND_FIRST_VERBS = new Set(['send', 'reply', 'forward', 'post', 'publish', 'share', 'invite', 'notify'])
 const SEND_LATER_VERBS = new Set(['send', 'reply', 'forward', 'post'])
-const READ_FIRST_VERBS = new Set(['get', 'read', 'list', 'search', 'fetch', 'find', 'query', 'describe', 'view', 'show'])
+// V1: allineato ai verbi di lettura del READ_COMPOSIO_ACTION_PATTERN (un verbo
+// di lettura in testa lascia invio solo a send/forward: fetch_and_send)
+const READ_FIRST_VERBS = new Set([
+  'get', 'read', 'list', 'search', 'fetch', 'find', 'query', 'describe', 'view', 'show',
+  'retrieve', 'lookup', 'count'
+])
 const SEND_EXTRA_NAMES = new Set(['send_draft', 'create_message', 'chat_postmessage'])
 
 function segments(name: string): string[] {

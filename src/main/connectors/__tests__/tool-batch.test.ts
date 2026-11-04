@@ -14,7 +14,8 @@ import {
   composioToolkitOfSlug, forceSyncResponseToWorkbenchOff, composioResultError,
   batchResultData, redactBatchLeaves, extractBatchSends, batchSendViaArgs,
   composioBatchGate, manageConnectionsGate, proxyExecuteGate,
-  manageConnectionsEntries, parseConnectionsResult, manageConnectionsAgentResult
+  manageConnectionsEntries, parseConnectionsResult, manageConnectionsAgentResult,
+  workbenchSpillOf, WORKBENCH_SPILL_NOTE, connectionsAccountsOf
 } from '../tool-batch'
 import { composioToolPolicy, COMPOSIO_TOOL_POLICIES, COMPOSIO_CODE_TOOLS, COMMON_COMPOSIO_TOOLKITS } from '../composio-meta'
 import { toPiContext } from '../../agent/llm-pi'
@@ -99,9 +100,12 @@ describe('C2 punto 1 — il toolkit dallo slug e la classificazione', () => {
   it('la classificazione toglie il prefisso, ma i pattern valgono ANCHE sullo slug intero', () => {
     // senza prefisso (A6): FETCH_EMAILS NON è lettura (fetch non è un verbo di
     // lettura nella tabella di Rakazo: fail closed → card)
-    expect(classifyBatchAction('FETCH_EMAILS')).toBe('write')
-    // con il prefisso del toolkit davanti: stesso verdetto (C2 punto 1)
-    expect(classifyBatchAction('GMAIL_FETCH_EMAILS')).toBe('write')
+    // V1 (prova vera): FETCH è un verbo di lettura — nel blocco lo slug
+    // arriva COL prefisso del toolkit (il primo segmento nudo verrebbe
+    // scambiato per il toolkit: FETCH_EMAILS → «toolkit fetch»)
+    expect(classifyBatchAction('GMAIL_FETCH_EMAILS')).toBe('read')
+    expect(classifyBatchAction('GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID')).toBe('read')
+    expect(classifyBatchAction('GMAIL_FETCH_AND_DELETE_EMAIL')).toBe('destructive')
     expect(classifyBatchAction('GMAIL_LIST_THREADS')).toBe('read')
     expect(classifyBatchAction('SLACK_SEARCH_MESSAGES')).toBe('read')
     // SEND restituirebbe bozza a monte; nel blocco classificato come send
@@ -233,9 +237,14 @@ describe('C5/C3 — il gate di MANAGE_CONNECTIONS e PROXY_EXECUTE', () => {
     }
   })
 
-  it('voce senza nome (o toolkits assente): chiede sempre', () => {
-    expect(gate({ toolkits: [{ action: 'list' }] }).kind).toBe('ask')
+  it('voce senza nome (o toolkits assente): chiede sempre — tranne una list senza nome (V8, resta lettura)', () => {
+    expect(gate({ toolkits: [{ action: 'add' }] }).kind).toBe('ask')
+    expect(gate({ toolkits: [{ action: 'remove' }] }).kind).toBe('ask')
     expect(gate({}).kind).toBe('ask')
+    // V8 (prova vera): una list senza name NON chiede la card — è una lettura;
+    // il server risponderà con l'errore «Required at toolkits[0].name» e il
+    // modello correggerà da solo
+    expect(gate({ toolkits: [{ action: 'list' }] })).toEqual({ kind: 'allow', via: 'rule' })
   })
 
   it('proxyExecuteGate: SEMPRE card, mai «sempre»; GET è lettura, POST scrittura', () => {
@@ -316,9 +325,12 @@ describe('C3 — la tabella degli strumenti (elenco chiuso, fail closed)', () =>
 
   it('la lista dei toolkit comuni ha una trentina di voci con slug e nome', () => {
     expect(COMMON_COMPOSIO_TOOLKITS.length).toBeGreaterThanOrEqual(28)
-    expect(COMMON_COMPOSIO_TOOLKITS.length).toBeLessThanOrEqual(34)
+    expect(COMMON_COMPOSIO_TOOLKITS.length).toBeLessThanOrEqual(40)
     expect(COMMON_COMPOSIO_TOOLKITS.some((t) => t.slug === 'gmail')).toBe(true)
     expect(COMMON_COMPOSIO_TOOLKITS.some((t) => t.slug === 'spotify')).toBe(true)
+    // V7: gli slug VERI di Composio, non più quelli inventati
+    expect(COMMON_COMPOSIO_TOOLKITS.some((t) => t.slug === 'googlecalendar')).toBe(true)
+    expect(COMMON_COMPOSIO_TOOLKITS.some((t) => t.slug === 'gcal')).toBe(false)
   })
 })
 
@@ -362,6 +374,29 @@ describe('C3/C7 — sync_response_to_workbench e i risultati del blocco', () => 
     expect(batchResultData('{"data":{"results":[1]}}')).toEqual({ results: [1] })
     expect(batchResultData('{"results":[2]}')).toEqual({ results: [2] })
     expect(batchResultData('non json')).toBeUndefined()
+  })
+
+  // ---- V3 (prova vera): la risposta grande «salvata nella workbench» ----
+
+  it('V3: la risposta della prova vera (dati sostituiti) viene riconosciuta e ripulita', () => {
+    const spill = readFileSync(join(import.meta.dirname, 'fixtures/composio-workbench-spill.json'), 'utf8')
+    const cleaned = workbenchSpillOf(spill)
+    expect(cleaned).not.toBeNull()
+    // niente next_steps né istruzioni sul codice o sui file, niente percorso remoto
+    expect(cleaned).not.toContain('next_steps')
+    expect(cleaned).not.toContain('write code')
+    expect(cleaned).not.toContain('saved response')
+    expect(cleaned).not.toContain('/var/composio/workbench/')
+    // l'anteprima resta e la nota fissa arriva
+    expect(cleaned).toContain('data_preview')
+    expect(cleaned).toContain('La richiesta di prova')
+    expect(cleaned).toContain(WORKBENCH_SPILL_NOTE)
+  })
+
+  it('V3: una risposta normale resta identica (null: il chiamante non tocca nulla)', () => {
+    expect(workbenchSpillOf('{"data":{"results":[{"tool_slug":"GMAIL_FETCH_EMAILS","data":{"ok":true}}]}}')).toBeNull()
+    expect(workbenchSpillOf('non json')).toBeNull()
+    expect(workbenchSpillOf('')).toBeNull()
   })
 
   it('redactBatchLeaves maschera i segreti in OGNI foglia', () => {
@@ -416,6 +451,53 @@ describe('C5 — MANAGE_CONNECTIONS: voci, parsing tollerante, risultato al mode
     expect(parsed.accounts.some((a) => a.id === 'acc_1' && a.status === 'ACTIVE' && a.alias === 'work')).toBe(true)
     // formato non JSON: vuoto, mai un'eccezione
     expect(parseConnectionsResult('non json')).toEqual({ redirectUrls: [], accounts: [] })
+  })
+
+  // ---- V8 (prova vera): il formato VERO di `list`, letto per primo ----
+
+  /** La risposta vera di `list` vista nella prova (dati personali sostituiti). */
+  const REAL_LIST = JSON.stringify({
+    successful: true,
+    data: {
+      message: 'Processed 2 toolkits: 1 active, 1 initiated',
+      results: {
+        gmail: {
+          toolkit: 'gmail',
+          status: 'active',
+          accounts: [
+            { id: 'gmail_aaa-bbb', status: 'active', is_default: true, user_info: { email: 'utente@example.com' }, account_type: 'PRIVATE' },
+            { id: 'gmail_ccc-ddd', status: 'active', is_default: false }
+          ]
+        },
+        github: { toolkit: 'github', status: 'initiated', accounts: [] }
+      },
+      summary: { total_toolkits: 2, active_connections: 1, initiated_connections: 1, failed_connections: 0 },
+      session: { id: 'zulu', instructions: 'REQUIRED: Pass session_id "zulu" in ALL subsequent meta tool calls for this workflow.' }
+    },
+    error: null
+  })
+
+  it('V8: la forma vera data.results.<toolkit> si legge PER PRIMA (stato minuscolo, is_default, email)', () => {
+    const parsed = parseConnectionsResult(REAL_LIST)
+    expect(parsed.sessionId).toBe('zulu')
+    const gmail = connectionsAccountsOf(parsed, 'gmail')
+    // l'account is_default viene prima, con id, stato minuscolo ed email
+    expect(gmail[0]).toMatchObject({ id: 'gmail_aaa-bbb', status: 'active', isDefault: true, email: 'utente@example.com', toolkit: 'gmail' })
+    expect(gmail.some((a) => a.id === 'gmail_ccc-ddd')).toBe(true)
+    // github: initiated, nessun account
+    const github = connectionsAccountsOf(parsed, 'github')
+    expect(github.every((a) => !a.id)).toBe(true)
+  })
+
+  it('V8: connectionsAccountsOf preferisce is_default, poi gli attivi (il gateway prende da qui)', () => {
+    const parsed = parseConnectionsResult(JSON.stringify({
+      data: { results: { linear: { toolkit: 'linear', status: 'active', accounts: [
+        { id: 'lin_secondo', status: 'active' },
+        { id: 'lin_predefinito', status: 'active', is_default: true }
+      ] } } }
+    }))
+    expect(connectionsAccountsOf(parsed, 'linear')[0]?.id).toBe('lin_predefinito')
+    expect(connectionsAccountsOf(parsed, 'gmail')).toEqual([])
   })
 
   it('manageConnectionsAgentResult NON passa il link al modello: dice che sta nella card', () => {

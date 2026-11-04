@@ -316,6 +316,11 @@ export async function check(
               : originalName === 'COMPOSIO_MANAGE_CONNECTIONS'
                 ? `${tool} changes the apps connected through Composio`
                 : `${tool} runs ${count} Composio action${count === 1 ? '' : 's'} that act towards the outside`
+      // V9 (prova vera): la frase del blocco dice QUALI app («Vuole fare 2
+      // azioni su Gmail e Slack») — i nomi umani delle azioni del gate
+      const { composioAppsLabel } = await import('../../shared/composio-names')
+      const uiLang = gateInput.uiLang
+      const apps = composioAppsLabel(outcome.actions.map((a) => a.app), uiLang)
       return {
         kind: 'ask',
         reason: reasonText,
@@ -327,7 +332,7 @@ export async function check(
               : originalName === 'COMPOSIO_MANAGE_CONNECTIONS'
                 ? UI.approvalComposioConnect
                 : UI.approvalComposioBatch,
-          { tool, count }
+          { count, apps }
         ),
         composio: { destructive: outcome.destructive },
         composioBatch: {

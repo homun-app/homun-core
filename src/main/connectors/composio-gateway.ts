@@ -29,7 +29,7 @@ import type { SandbotEvent } from '../../shared/types'
 // K3 (ritocchi): il nome umano del toolkit, mai lo slug grezzo nella UI
 import { composioToolkitName } from '../../shared/composio-names'
 import {
-  manageConnectionsAgentResult, manageConnectionsEntries, parseConnectionsResult
+  manageConnectionsAgentResult, manageConnectionsEntries, parseConnectionsResult, connectionsAccountsOf
 } from './tool-batch'
 
 /**
@@ -56,6 +56,8 @@ interface StoredGatewayApp {
   accountId: string | null
   status: ComposioGatewayAppStatus
   connectedAt: number
+  /** V8: l'email dell'account quando `list` la dà (user_info.email) */
+  email?: string
 }
 
 /** Lo stato locale delle app collegate tramite il server Composio. */
@@ -66,6 +68,8 @@ export interface ComposioGatewayAppRpc {
   name: string
   status: ComposioGatewayAppStatus
   accountId: string | null
+  /** V8: l'email dell'account da mostrare nel dettaglio (mai l'id tecnico) */
+  email?: string
 }
 
 export interface ComposioGatewayStatusRpc {
@@ -127,6 +131,13 @@ export function createComposioGatewayManager(deps: ComposioGatewayDeps) {
    * «Non riuscito» accanto a un collegamento riuscito.
    */
   let inFlight: { slug: string; promise: Promise<'connected' | 'failed' | 'cancelled'> } | null = null
+  /**
+   * V8 (prova vera): il session_id del workflow — il server lo manda nella
+   * risposta (data.session.id) e chiede di ripassarlo nelle chiamate
+   * successive. Il gateway lo tiene e lo ripassa nelle SUE chiamate; il
+   * modello lo gestisce da sé (i risultati gli passano invariati).
+   */
+  let sessionId: string | null = null
 
   const apps = (): GatewayAppsSetting => deps.getSetting<GatewayAppsSetting>(S_SETTING_APPS, {})
   const setApps = (next: GatewayAppsSetting): void => {
@@ -150,14 +161,44 @@ export function createComposioGatewayManager(deps: ComposioGatewayDeps) {
 
   // ---- l'esecuzione di MANAGE_CONNECTIONS e il parsing tollerante ----
 
+  /** V8: gli argomenti con il session_id del workflow, quando il server lo ha dato. */
+  const withSession = (args: Record<string, unknown>): Record<string, unknown> =>
+    sessionId ? { ...args, session_id: sessionId } : args
+
   /**
    * Chiama COMPOSIO_MANAGE_CONNECTIONS e torna il risultato con i link
-   * trovati (parseConnectionsResult: tollerante sul formato vero).
+   * trovati (parseConnectionsResult: la forma VERA di V8 per prima, poi il
+   * walk tollerante; il session_id si tiene per le chiamate successive).
    */
   async function runManageConnections(args: Record<string, unknown>): Promise<{ output: string; links: Array<{ url: string; toolkit?: string }> }> {
-    const output = await deps.callMcp(serverTools().manageConnections, args)
+    const output = await deps.callMcp(serverTools().manageConnections, withSession(args))
     const parsed = parseConnectionsResult(output)
+    if (parsed.sessionId) sessionId = parsed.sessionId
     return { output, links: parsed.redirectUrls }
+  }
+
+  /**
+   * V8: lo stato VERITÀ di un toolkit lo dice `list` — l'account da tenere è
+   * l'is_default, altrimenti il primo attivo. Ritenta un paio di volte: la
+   * connessione MCP appena aperta può rispondere «Connection closed» (P4).
+   */
+  async function listToolkit(slug: string, cancelled: () => boolean): Promise<{ active: boolean; accountId: string | null; email?: string }> {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const { output } = await runManageConnections({ toolkits: [{ name: slug, action: 'list' }] })
+        const parsed = parseConnectionsResult(output)
+        const accounts = connectionsAccountsOf(parsed, slug)
+        const chosen = accounts[0]
+        return {
+          active: accounts.some((a) => String(a.status ?? '').toLowerCase() === 'active'),
+          accountId: chosen?.id ?? null,
+          ...(chosen?.email ? { email: chosen.email } : {})
+        }
+      } catch (e) {
+        if (cancelled() || attempt >= 2) throw e
+        await new Promise((r) => setTimeout(r, deps.retryDelayMs?.() ?? 600))
+      }
+    }
   }
 
   /**
@@ -193,6 +234,15 @@ export function createComposioGatewayManager(deps: ComposioGatewayDeps) {
    * locale («Collegata» o «Non riuscito»). Il timeout del turno non c'entra:
    * è l'attesa del login dell'utente, annullabile dalla UI.
    *
+   * V8 (prova vera): il formato vero di WAIT non lo conosciamo ancora, quindi
+   * l'esito NON si deduce dalla sua risposta — dopo l'attesa il gateway chiama
+   * SEMPRE `list` per quel toolkit e prende stato e account da lì (l'account
+   * is_default, altrimenti il primo attivo). Se `list` non dice active, il
+   * collegamento NON è riuscito.
+   * V12: nemmeno un errore di WAIT basta per «Non riuscito» — prima si
+   * verifica con `list`: finché ci sono tentativi o verifica in corso la riga
+   * resta «Completa il login…», l'esito definitivo conta soltanto.
+   *
    * K2 (ritocchi): se per quel toolkit c'è GIÀ un'attesa in corso, la si
    * riusa — una sola chiamata WAIT_FOR_CONNECTIONS anche se card in chat e
    * finestra App partono insieme.
@@ -207,20 +257,29 @@ export function createComposioGatewayManager(deps: ComposioGatewayDeps) {
 
   async function runWait(slug: string, name: string): Promise<'connected' | 'failed' | 'cancelled'> {
     const state = { slug, name, since: now(), cancelled: false }
-      const promise = (async () => {
+    const promise = (async () => {
       let outcome: 'connected' | 'failed' | 'cancelled'
       waiting = state
       deps.emit({ type: 'connectors' })
+      /** V8: chiude il collegamento con l'esito della verifica `list`. */
+      const finishByList = async (): Promise<'connected' | 'failed'> => {
+        const v = await listToolkit(slug, () => state.cancelled)
+        if (v.active) {
+          setApp(slug, { name, accountId: v.accountId, status: 'ACTIVE', connectedAt: now(), ...(v.email ? { email: v.email } : {}) })
+          return 'connected'
+        }
+        setApp(slug, { name, accountId: null, status: 'FAILED', connectedAt: now() })
+        return 'failed'
+      }
       try {
         // P4 (catalogo app): la PRIMA chiamata dopo il login di Composio può
         // trovare la connessione MCP ancora aperta male («Connection closed»)
-        // — si ritenta un paio di volte prima di dichiarare l'attesa fallita
-        let output = ''
+        // — si ritenta un paio di volte prima di arrendersi
         for (let attempt = 0; ; attempt++) {
           try {
-            output = await deps.callMcp(
+            await deps.callMcp(
               serverTools().waitForConnections,
-              { toolkits: [slug], mode: 'any' },
+              withSession({ toolkits: [slug], mode: 'any' }),
               { timeoutMs: COMPOSIO_GATEWAY_WAIT_MS }
             )
             break
@@ -229,29 +288,21 @@ export function createComposioGatewayManager(deps: ComposioGatewayDeps) {
             await new Promise((r) => setTimeout(r, deps.retryDelayMs?.() ?? 600))
           }
         }
-        if (state.cancelled) {
-          outcome = 'cancelled'
-        } else {
-          // WAIT aspetta lo stato terminale (ACTIVE/FAILED); se il formato vero
-          // non si lascia dedurre, il collegamento si considera riuscito (la
-          // verifica col risultato vero la facciamo con l'account dell'utente)
-          const parsed = parseConnectionsResult(output)
-          const account = parsed.accounts.find((a) => (a.toolkit ?? '').toLowerCase() === slug)
-          const status = String(account?.status ?? '').toUpperCase()
-          if (status === 'FAILED') {
-            setApp(slug, { name, accountId: account?.id ?? null, status: 'FAILED', connectedAt: now() })
-            outcome = 'failed'
-          } else {
-            setApp(slug, { name, accountId: account?.id ?? null, status: 'ACTIVE', connectedAt: now() })
-            outcome = 'connected'
-          }
-        }
+        outcome = state.cancelled ? 'cancelled' : await finishByList()
       } catch {
+        // V12: WAIT finita male (errore di connessione, timeout) NON è ancora
+        // un fallimento definitivo: il login può essere riuscito lo stesso e
+        // `list` lo dice (così un collegamento riuscito non passa mai per
+        // «Non riuscito», nemmeno un istante)
         if (state.cancelled) {
           outcome = 'cancelled'
         } else {
-          setApp(slug, { name, accountId: null, status: 'FAILED', connectedAt: now() })
-          outcome = 'failed'
+          try {
+            outcome = await finishByList()
+          } catch {
+            setApp(slug, { name, accountId: null, status: 'FAILED', connectedAt: now() })
+            outcome = 'failed'
+          }
         }
       }
       // l'attesa visibile finisce con l'esito; il flag failed resta per la
@@ -281,7 +332,8 @@ export function createComposioGatewayManager(deps: ComposioGatewayDeps) {
         // vecchie) si sostituisce col nome umano alla lettura
         name: a.name === slug ? composioToolkitName(slug) : a.name,
         status: a.status,
-        accountId: a.accountId
+        accountId: a.accountId,
+        ...(a.email ? { email: a.email } : {})
       }))
       rows.sort((a, b) => a.name.localeCompare(b.name))
       return {
@@ -317,10 +369,28 @@ export function createComposioGatewayManager(deps: ComposioGatewayDeps) {
      * Fase catalogo app (P4): subito dopo il LOGIN di Composio la prima
      * chiamata può trovare la connessione MCP ancora aperta male («Connection
      * closed»): l'add si ritenta un paio di volte prima di arrendersi.
+     * V8 (prova vera): PRIMA dell'add si chiama `list` per quel toolkit — se
+     * c'è GIÀ un account attivo, niente add (mai account doppi sullo stesso
+     * utente): la riga diventa «Collegata» e la risposta lo dice. Il modello
+     * resta libero di chiedere un SECONDO account (la sua chiamata add passa
+     * dalla card, come oggi).
      */
-    async connectApp(slugRaw: string, nameHint?: string): Promise<{ ok: boolean; error?: string }> {
+    async connectApp(slugRaw: string, nameHint?: string): Promise<{ ok: boolean; already?: boolean; error?: string }> {
       const slug = slugRaw.toLowerCase()
       if (!deps.gatewayActive()) return { ok: false, error: 'not-active' }
+      try {
+        const v = await listToolkit(slug, () => false)
+        if (v.active) {
+          setApp(slug, {
+            name: composioToolkitName(nameHint ?? slug),
+            accountId: v.accountId,
+            status: 'ACTIVE',
+            connectedAt: now(),
+            ...(v.email ? { email: v.email } : {})
+          })
+          return { ok: true, already: true }
+        }
+      } catch { /* list non risponde: si prova l'add come oggi */ }
       let link: string | undefined
       let lastError = ''
       for (let attempt = 0; attempt < 3 && !link; attempt++) {
@@ -353,7 +423,7 @@ export function createComposioGatewayManager(deps: ComposioGatewayDeps) {
       if (!app) return { ok: false, error: 'app not connected from Homun' }
       try {
         if (app.accountId) {
-          await deps.callMcp(serverTools().manageConnections, {
+          await runManageConnections({
             toolkits: [{ name: slug, action: 'remove', account_id: app.accountId }]
           })
         }
@@ -380,10 +450,11 @@ export function createComposioGatewayManager(deps: ComposioGatewayDeps) {
     },
 
     /**
-     * C5 punto 3: `list` sui toolkit collegati da Homun, tollerante sul
-     * formato vero; lo stato non deducibile lascia la riga com'è (la UI
-     * mostra «Gestisci su Composio» quando serve). K2 (ritocchi): passa da
-     * setApp, così un ACTIVE del toolkit azzera la sua attesa «Non riuscito».
+     * C5 punto 3: `list` sui toolkit collegati da Homun — V8: si legge la
+     * forma VERA (data.results.<toolkit>, l'account is_default con l'email);
+     * lo stato non deducibile lascia la riga com'è (la UI mostra «Gestisci su
+     * Composio» quando serve). K2 (ritocchi): passa da setApp, così un ACTIVE
+     * del toolkit azzera la sua attesa «Non riuscito».
      */
     async refreshAccounts(): Promise<void> {
       if (!deps.gatewayActive()) return
@@ -391,15 +462,14 @@ export function createComposioGatewayManager(deps: ComposioGatewayDeps) {
         const stored = appOf(slug)
         if (!stored) continue
         try {
-          const output = await deps.callMcp(serverTools().manageConnections, {
-            toolkits: [{ name: slug, action: 'list' }]
-          })
-          const parsed = parseConnectionsResult(output)
-          const account = parsed.accounts.find((a) => (a.toolkit ?? '').toLowerCase() === slug)
-          if (!account) continue // formato non deducibile: la riga resta com'è
-          const status = String(account.status ?? '').toUpperCase()
-          if (status === 'ACTIVE') setApp(slug, { ...stored, status: 'ACTIVE', accountId: account.id ?? stored.accountId })
-          else if (status === 'FAILED' || status === 'EXPIRED') setApp(slug, { ...stored, status: 'RECONNECT' })
+          const v = await listToolkit(slug, () => false)
+          if (v.active) {
+            setApp(slug, { ...stored, status: 'ACTIVE', accountId: v.accountId ?? stored.accountId, ...(v.email ? { email: v.email } : {}) })
+          } else {
+            // V8: stati che non sono active → da ricollegare (o FALLITA del
+            // server: la riga dice «Ricollega», non resta «Collegata» fissa)
+            setApp(slug, { ...stored, status: 'RECONNECT' })
+          }
         } catch {
           // senza rete o server giù: la riga resta com'è, mai un'eccezione alla UI
         }

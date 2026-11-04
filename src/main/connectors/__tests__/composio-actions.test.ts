@@ -52,6 +52,15 @@ describe('i pattern portati da Rakazo (costanti con test)', () => {
     }
     expect(READ_COMPOSIO_ACTION_PATTERN.test('GETALL')).toBe(false)
   })
+  it('V1 (prova vera): fetch|retrieve|query|view|describe|show|lookup|count come segmento', () => {
+    for (const v of ['FETCH', 'RETRIEVE', 'QUERY', 'VIEW', 'DESCRIBE', 'SHOW', 'LOOKUP', 'COUNT']) {
+      expect(READ_COMPOSIO_ACTION_PATTERN.test(v), v).toBe(true)
+      expect(READ_COMPOSIO_ACTION_PATTERN.test(`${v}_USER`), v).toBe(true)
+    }
+    // il verbo vale solo come SEGMENTO: LOOKUPS non è lookup
+    expect(READ_COMPOSIO_ACTION_PATTERN.test('LOOKUPS')).toBe(false)
+    expect(READ_COMPOSIO_ACTION_PATTERN.test('COUNTERS')).toBe(false)
+  })
   it('COMPOUND: _and_ / _or_ / _then_', () => {
     expect(COMPOUND_COMPOSIO_ACTION_PATTERN.test('GET_AND_UPDATE_CONTACT')).toBe(true)
     expect(COMPOUND_COMPOSIO_ACTION_PATTERN.test('FETCH_OR_SEARCH')).toBe(true)
@@ -67,9 +76,8 @@ describe('i pattern portati da Rakazo (costanti con test)', () => {
 })
 
 describe('classifyComposioToolName — i casi della spec (A6 punto 6)', () => {
-  it('GMAIL_FETCH_EMAILS → non lettura secondo il pattern di Rakazo → card', () => {
-    // FETCH non è nella lista dei verbi di lettura di Rakazo (get|list|search|find|read)
-    expect(classifyComposioToolName('composio__gmail__GMAIL_FETCH_EMAILS')).toBe('write')
+  it('V1 (prova vera): GMAIL_FETCH_EMAILS → lettura (fetch è un verbo di lettura)', () => {
+    expect(classifyComposioToolName('composio__gmail__GMAIL_FETCH_EMAILS')).toBe('read')
   })
   it('GMAIL_LIST_THREADS → lettura', () => {
     expect(classifyComposioToolName('composio__gmail__GMAIL_LIST_THREADS')).toBe('read')
@@ -108,8 +116,19 @@ describe('classifyComposioAction — regole di lettura e fail-closed', () => {
     expect(classifyComposioAction('LIST_AND_DELETE')).toBe('destructive')
   })
   it('senza verbi riconosciuti → scrittura (fail closed)', () => {
-    expect(classifyComposioAction('FETCH_EMAILS')).toBe('write')
     expect(classifyComposioAction('EXPORT_REPORT')).toBe('write')
+    expect(classifyComposioAction('BATCH_STUFF')).toBe('write')
+  })
+  it('V1 (prova vera): la tabella della prova — letture e scritture', () => {
+    // letture viste o attese nella prova vera
+    expect(classifyComposioAction('FETCH_EMAILS')).toBe('read')
+    expect(classifyComposioAction('FETCH_MESSAGE_BY_MESSAGE_ID')).toBe('read')
+    expect(classifyComposioAction('EVENTS_LIST')).toBe('read')
+    expect(classifyComposioAction('QUERY_DATABASE')).toBe('read')
+    expect(classifyComposioAction('RETRIEVE_PULL_REQUEST')).toBe('read')
+    // la regola NON cambia: composta o verbo di modifica vincono sempre
+    expect(classifyComposioAction('FETCH_AND_DELETE_EMAIL')).toBe('destructive')
+    expect(classifyComposioAction('COUNT_AND_CHARGE')).toBe('write')
   })
   it('il prefisso del toolkit non confonde la classificazione (già tolto)', () => {
     // GMAIL_ sarebbe il primo segmento: senza lo strip, LIST_THREADS dopo
