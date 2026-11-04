@@ -694,7 +694,7 @@ vi.mock('../../mcp', () => ({
   }
 }))
 
-const { runTurn, isRunning, resolveApproval, supersedeIfPaused, interrupt, deliverToRunningTurn, RECOVERY_NUDGE } = await import('../loop')
+const { runTurn, isRunning, resolveApproval, supersedeIfPaused, interrupt, deliverToRunningTurn, RECOVERY_NUDGE, RECOVERY_NO_TOOLS_RESULT } = await import('../loop')
 // fase 18b (H2.3): il raffreddamento delle rotte è in memoria nel modulo
 const { resetRouteHealth } = await import('../route-health')
 // fase 18b (K3): la cache delle capability Ollama vive nel modulo live-models
@@ -6323,5 +6323,34 @@ describe('fase risposta: il recupero senza strumenti non esegue chiamate inventa
     expect(sends.map((s) => s.content)).toEqual(['Ecco cosa serve.'])
     expect(sends[0]!.meta?.final).toBe(true)
     expect(h.db.entries.findLast((e) => e.kind === 'event')?.meta?.turnEnd).toBe('FINISHED')
+  })
+
+  it('verifica (eval glm-5.3): il recupero inventa SOLO una chiamata, testo vuoto → UN giro in più senza strumenti, poi la risposta', async () => {
+    h.llm.queue = [
+      { text: '' },
+      { text: '', toolCalls: [{ id: 'h1', name: 'run-command', arguments: JSON.stringify({ command: 'date' }) }] },
+      { text: 'A Tokyo sono le 6:30.' }
+    ]
+    await runTurn(AGENT, 'che ore sono a Tokyo?', emit)
+    expect(h.llm.calls).toHaveLength(3)
+    expect(h.llm.toolsList[1]).toEqual([])
+    expect(h.llm.toolsList[2]).toEqual([])
+    expect(h.sandboxMock.exec.calls).toBe(0)
+    // la terza richiesta ha la coppia chiamata/result «non eseguito», mai un tool orfano
+    const third = h.llm.calls[2]!
+    const ai = third.findIndex((m) => m.role === 'assistant' && (m.toolCalls as Array<{ id: string }> | undefined)?.some((c) => c.id === 'h1'))
+    expect(ai).toBeGreaterThan(0)
+    expect(third[ai + 1]).toMatchObject({ role: 'tool', toolCallId: 'h1', content: RECOVERY_NO_TOOLS_RESULT })
+    const sends = h.db.entries.filter((e) => e.kind === 'send-message')
+    expect(sends.map((s) => s.content)).toEqual(['A Tokyo sono le 6:30.'])
+  })
+
+  it('verifica: il giro in più è UNO solo — se inventa di nuovo, notice e nessun ciclo', async () => {
+    const inv = (id: string) => ({ text: '', toolCalls: [{ id, name: 'run-command', arguments: JSON.stringify({ command: 'date' }) }] })
+    h.llm.queue = [{ text: '' }, inv('h1'), inv('h2'), inv('h3')]
+    await runTurn(AGENT, 'fai', emit)
+    expect(h.llm.calls).toHaveLength(3)
+    expect(h.sandboxMock.exec.calls).toBe(0)
+    expect(h.db.entries.filter((e) => e.kind === 'send-message')).toHaveLength(0)
   })
 })

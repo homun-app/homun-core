@@ -928,6 +928,8 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
   // fase risposta (R5): l'UNICA chiamata di recupero di un turno privato con
   // risposta vuota è già partita (la seconda volta vale il ripiego)
   let recoveryDone = false
+  // verifica: il recupero che inventa uno strumento ha UN giro in più
+  let recoveryRetried = false
   // fase 12 (punti 2-3): il lotto del turno del padre (una sola spawn batch per
   // turno) e la chiusura del figlio (ha consegnato? il sollecito è già stato?)
   let turnBatchId: string | null = null
@@ -1829,13 +1831,18 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       }
       // fase risposta (R5): la chiamata di recupero è SENZA strumenti — le
       // eventuali chiamate che il modello inventa lo stesso non si eseguono:
-      // valgono un result che lo dice, e resta la risposta di testo
+      // valgono un result che lo dice. Verifica (eval glm-5.3): con la storia
+      // piena di chiamate il modello inventa lo strumento e lascia il testo
+      // VUOTO — allora UN solo giro in più, sempre senza strumenti, con la
+      // coppia chiamata/result «non eseguito» in storia (mai tool orfani)
       if (!turnTools.length && final.toolCalls?.length) {
-        for (const c of final.toolCalls) {
-          messages.push({
-            role: 'tool', toolCallId: c.id,
-            content: RECOVERY_NO_TOOLS_RESULT
-          })
+        if (!final.text.trim() && !recoveryRetried) {
+          recoveryRetried = true
+          messages.push({ role: 'assistant', content: '', toolCalls: final.toolCalls })
+          for (const c of final.toolCalls) {
+            messages.push({ role: 'tool', toolCallId: c.id, content: RECOVERY_NO_TOOLS_RESULT })
+          }
+          continue
         }
         final = { text: final.text, toolCalls: [], finishReason: 'stop' }
       }

@@ -83,7 +83,7 @@ const commitClickDenied = (snapshot: string, ref: string): boolean => {
 // Correzione J4 (caso 24): anche il budget di passi del FIGLIO è quello VERO
 // (MAX_STEPS importato, non un numero a parte) e la chiusura robusta col
 // sollecito del figlio è quella del loop
-import { RECOVERY_NUDGE, MAX_STEPS as LOOP_MAX_STEPS, ASK_USER_RESULT, WAKE_PARENT_RESULT, REQUEST_TAKEOVER_RESULT } from '../src/main/agent/loop'
+import { RECOVERY_NUDGE, RECOVERY_NO_TOOLS_RESULT, MAX_STEPS as LOOP_MAX_STEPS, ASK_USER_RESULT, WAKE_PARENT_RESULT, REQUEST_TAKEOVER_RESULT } from '../src/main/agent/loop'
 // fase risposta (R4): il silenzio esplicito e i segnali spaiati, come il loop
 import { isExactNoResponse, isPlaceholderText, stripStrayNoResponse } from '../src/main/agent/silent-reply'
 // fase 10: l'apertura dei turni di gruppo è quella VERA del runner (blocco
@@ -874,10 +874,18 @@ async function evalTurn(
       // quello vale il ripiego di prima col testo libero
       messages.push({ role: 'user', content: RECOVERY_NUDGE })
       recoveryUsed = true
-      const recovery = await drainOnce([])
-      if (recovery.text.trim()) lastFreeText = recovery.text
+      let recovery = await drainOnce([])
       steps.push(recovery)
       messages.push({ role: 'assistant', content: recovery.text, toolCalls: recovery.toolCalls })
+      // verifica: come nel loop, se il recupero inventa SOLO una chiamata
+      // (testo vuoto) c'è UN giro in più senza strumenti col result «non eseguito»
+      if (!recovery.text.trim() && recovery.toolCalls.length) {
+        for (const c of recovery.toolCalls) messages.push({ role: 'tool', toolCallId: c.id, content: RECOVERY_NO_TOOLS_RESULT })
+        recovery = await drainOnce([])
+        steps.push(recovery)
+        messages.push({ role: 'assistant', content: recovery.text, toolCalls: recovery.toolCalls })
+      }
+      if (recovery.text.trim()) lastFreeText = recovery.text
       if (!deliverer.final(finalReplyOfEval(recovery.text, 'user')) && lastFreeText.trim()) {
         deliverer.delivered.push(lastFreeText.trim())
       }
@@ -2389,6 +2397,12 @@ describe(`eval dei comportamenti (fasi 9-11) su modello reale (${MODEL} × ${RUN
             calls: t.allCalls.map((call) => [call.name, call.arguments.slice(0, 2000)]),
             delivered: t.delivered,
             endedWithAsk: t.endedWithAsk,
+            // fase risposta (verifica): il testo di ogni passo, il recupero e
+            // l'errore — senza, un «nessun messaggio» non dice se il modello
+            // ha finito i passi, ha risposto vuoto o il recupero è fallito
+            texts: t.steps.map((st) => st.text.slice(0, 500)),
+            ...(t.recoveryUsed ? { recoveryUsed: true } : {}),
+            ...(t.error ? { error: t.error.slice(0, 500) } : {}),
             // fase 17b (A5): i testi fuori lingua di questo caso × run
             ...(runLangWrong.length ? { langWrong: runLangWrong } : {})
           }) + '\n')
