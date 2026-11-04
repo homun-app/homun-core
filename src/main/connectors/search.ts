@@ -10,7 +10,7 @@
 import type { CatalogEntry, ConnectorState } from './index'
 import { searchCatalog } from './index'
 import {
-  fetchRegistryEntries, registryRuntime, registrySiteUrl, registryTrust,
+  fetchRegistryEntries, registryRuntime, registrySiteUrl, registryTitle, registryTrust,
   type RegistryEntry
 } from './registry'
 import type { MarketplacePlugin } from './marketplace'
@@ -149,9 +149,13 @@ export function mergeConnectorResults(input: MergeInput, query: string): MergeOu
     for (const e of input.registry) {
       const rt = registryRuntime(e)
       const trust = registryTrust(e.server.name)
+      // fase mcp-setup (M2): la riga mostra il TITOLO («Mattermost»); il nome
+      // tecnico resta nell'id. (M1.2): «remote-key» SOLO con l'header
+      // OBBLIGATORIO — header facoltativi = OAuth, il token è l'alternativa
+      const needsKey = rt?.kind === 'remote' && rt.auth === 'headers'
       rows.push({
         id: `registry:${e.server.name}`,
-        name: e.server.name.split('/').pop() ?? e.server.name,
+        name: registryTitle(e),
         source: 'registry',
         sourceLabel: 'MCP registry',
         trust: registryTrustEnLabel(trust),
@@ -159,12 +163,12 @@ export function mergeConnectorResults(input: MergeInput, query: string): MergeOu
         runtime: rt === null
           ? 'not-installable'
           : rt.kind === 'remote'
-            ? rt.secretHeader ? 'remote-key' : 'remote-oauth'
+            ? needsKey ? 'remote-key' : 'remote-oauth'
             : rt.kind === 'box-npm' ? 'box-npm' : 'not-installable',
         runtimeLabel: rt === null
           ? RUNTIME_LABELS['not-installable']
           : rt.kind === 'remote'
-            ? RUNTIME_LABELS[rt.secretHeader ? 'remote-key' : 'remote-oauth']
+            ? RUNTIME_LABELS[needsKey ? 'remote-key' : 'remote-oauth']
             : RUNTIME_LABELS[rt.kind === 'box-npm' ? 'box-npm' : 'not-installable'],
         description: truncateDescription(e.server.description ?? e.server.name)
       })

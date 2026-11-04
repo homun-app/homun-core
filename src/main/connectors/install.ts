@@ -14,13 +14,20 @@ import { createHash, randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import type { SendMessagePayload, SecretKind } from '../../shared/types'
 import { SECRET_KIND } from '../../shared/types'
+// fase mcp-setup (M3): i tipi dello spec del modulo (condivisi col renderer)
+import type { McpServerConnectResult, McpServerSetupField, McpServerSetupSpec, McpServerSetupTokenHeader } from '../../shared/types'
+// fase mcp-setup (M1): i template `{var}` dei remoti del registro (puri, condivisi col renderer)
+import {
+  cleanHostValue, cleanSecretValue, fillTemplate, hostValueError, missingTemplateVars, templateVarNames, urlVarIsRequired,
+  type RegistryVarSpec
+} from '../../shared/registry-vars'
 import type { McpServerConfig } from '../mcp'
 import { boxHomePath, dockerRmDirArgv } from '../sandbox/docker-argv'
 import { createOAuthProvider, authorizeWithLoopback } from './oauth-provider'
 import type { ConnectorsSecretStore } from './sealed-store'
 import {
-  findRegistryEntry, registryEnvVars, registryRuntime, registrySiteUrl, registryTrust,
-  type RegistryEntry
+  findRegistryEntry, registryEnvVars, registryRuntime, registrySiteUrl, registryTitle, registryTrust, registryIconDataUrl,
+  type RegistryEntry, type RemoteHeaderRuntime
 } from './registry'
 import {
   argvPlaceholdersOf, inspectPlugin, sourceSupported, stagePlugin, substitutePluginRoot, substituteUserConfig, userConfigKeysOf,
@@ -110,6 +117,10 @@ export interface InstallDeps {
  * buildMcpServerCard (punto 2): la card "Aggiungi server MCP", TUTTA in
  * codice. pypi/oci/altro → NESSUNA card (l'errore torna al modello); stdio in
  * modalità host → card col bottone disattivato.
+ * Fase mcp-setup (M2): il nome mostrato è il TITOLO del registro («Mattermost»),
+ * non il nome tecnico — che resta piccolo e grigio solo nel dettaglio.
+ * (M1): il remote porta `setup` (variabili dell'URL e accesso) così la card,
+ * dopo «Aggiungi», diventa il MODULO di configurazione senza altre richieste.
  */
 export async function buildMcpServerCard(
   id: string,
@@ -145,14 +156,16 @@ export async function buildMcpServerCard(
   const base = {
     type: 'mcp-server' as const,
     id: `registry:${entry.server.name}`,
-    // L2: il nome mostrato è quello COMPLETO del registro (com.notion/mcp),
-    // non l'ultimo segmento: "Server mcp aggiunto" non distingueva nulla
-    name: entry.server.name,
+    // fase mcp-setup (M2): nome umano dal title del registro; il nome tecnico
+    // resta nell'id (e piccolo/grigio nel dettaglio del foglio)
+    name: registryTitle(entry),
+    technicalName: entry.server.name,
     publisher: entry.server.name.includes('/') ? entry.server.name.slice(0, entry.server.name.indexOf('/')) : undefined,
     trust: trust.label,
     trustKind: trust.kind === 'verified-domain' ? 'verified-domain' as const : trust.kind === 'github-account' ? 'github-account' as const : 'unverified' as const,
     ...(trust.kind === 'verified-domain' ? { trustDetail: trust.domain } : trust.kind === 'github-account' ? { trustDetail: trust.user } : {}),
     ...(registrySiteUrl(entry) ? { siteUrl: registrySiteUrl(entry)! } : {}),
+    ...(registryIconDataUrl(entry) ? { logo: registryIconDataUrl(entry)! } : {}),
     ...(reason ? { reason } : {})
   }
   if (rt.kind === 'remote') {
@@ -160,8 +173,12 @@ export async function buildMcpServerCard(
       ok: true,
       card: {
         ...base,
-        runtime: { kind: 'remote', host: new URL(rt.url).host },
-        needs: rt.secretHeader ? { kind: 'key', header: rt.secretHeader } : { kind: 'oauth' },
+        // l'id del server che l'installazione crea (la card lo usa per leggere
+        // lo stato VERO alla riapertura, M4.4)
+        serverId: serverIdFor({ kind: 'registry', name: entry.server.name }),
+        runtime: { kind: 'remote', host: hostOfTemplate(rt.url) },
+        needs: rt.auth === 'headers' && rt.secretHeader ? { kind: 'key', header: rt.secretHeader } : { kind: 'oauth' },
+        ...(setupPayloadOf(rt) ? { setup: setupPayloadOf(rt)! } : {}),
         ...(trust.kind !== 'verified-domain' ? { thirdPartyWarning: true as const } : {})
       }
     }
@@ -176,6 +193,54 @@ export async function buildMcpServerCard(
       ...(trust.kind !== 'verified-domain' ? { thirdPartyWarning: true as const } : {}),
       ...(deps.dockerMode() ? {} : { disabledReason: HOST_MODE_DISABLED_REASON })
     }
+  }
+}
+
+/** L'host di un URL anche col segnaposto: `https://{host}/x` → `{host}` (puro). */
+function hostOfTemplate(url: string): string {
+  try {
+    return new URL(url).host
+  } catch {
+    return url.replace(/^https?:\/\//, '').split('/')[0]!
+  }
+}
+
+/** Il payload `setup` della card (M1/M3): le variabili dell'URL e l'accesso. */
+function setupPayloadOf(rt: { urlTemplate?: string; urlVariables?: RegistryVarSpec[]; headers?: RemoteHeaderRuntime[]; auth?: 'oauth' | 'headers' }): {
+  urlVariables: Array<{ name: string; description?: string; placeholder?: string; isRequired: boolean; isSecret: boolean; default?: string }>
+  auth: 'oauth' | 'headers'
+  tokenHeader?: { name: string; valueTemplate: string; description?: string; variable: string; variableDescription?: string }
+} | null {
+  const urlVars = (rt.urlVariables ?? []).map((v) => ({
+    name: v.name,
+    ...(v.description ? { description: v.description } : {}),
+    ...(v.placeholder ? { placeholder: v.placeholder } : {}),
+    isRequired: urlVarIsRequired(v, rt.urlTemplate ?? ''),
+    isSecret: v.isSecret === true,
+    ...(v.default !== undefined && v.default !== '' ? { default: v.default } : {})
+  }))
+  // il campo del token: la prima variabile SEGRETA del primo header col template
+  const tokenHeader = (() => {
+    for (const h of rt.headers ?? []) {
+      const secretVar = h.variables.find((v) => v.isSecret === true)
+      if (secretVar) {
+        return {
+          name: h.name,
+          valueTemplate: h.valueTemplate,
+          ...(h.description ? { description: h.description } : {}),
+          variable: secretVar.name,
+          ...(secretVar.description ? { variableDescription: secretVar.description } : {})
+        }
+      }
+    }
+    return null
+  })()
+  const hasSetup = urlVars.some((v) => v.isRequired) || rt.auth === 'headers' || tokenHeader !== null
+  if (!hasSetup && urlVars.length === 0) return null
+  return {
+    urlVariables: urlVars,
+    auth: rt.auth ?? 'oauth',
+    ...(tokenHeader ? { tokenHeader } : {})
   }
 }
 
@@ -237,19 +302,51 @@ function saveServerCfg(cfg: McpServerConfig, deps: InstallDeps): string | null {
   return null
 }
 
-/** Server id e nome (COMPLETO: L2) per una voce del registro. */
+/**
+ * Server id e config per una voce del registro. Fase mcp-setup: il NOME è il
+ * titolo umano (M2) e il nome tecnico sta in `source.name` (l'id NON cambia:
+ * gli strumenti si chiamano mcp__&lt;slug del nome&gt;__… e il serverId è hash
+ * del nome tecnico). M1: il remote porta i TEMPLATE (url, header) e i valori
+ * non segreti in `vars`; i segreti vanno solo nello store cifrato.
+ */
 function registryServerCfg(entry: RegistryEntry, agentId: string): McpServerConfig {
   const rt = registryRuntime(entry)
   if (rt === null || rt.kind === 'not-installable') throw new Error('registry entry not installable')
   const trust = registryTrust(entry.server.name)
   const id = serverIdFor({ kind: 'registry', name: entry.server.name })
+  const source = { kind: 'registry' as const, name: entry.server.name, ...(entry.server.version ? { version: entry.server.version } : {}) }
   if (rt.kind === 'remote') {
+    // i default del registro entrano in vars già ora: una voce dichiarata
+    // completa parte senza chiedere niente
+    const vars: Record<string, string> = {}
+    for (const v of rt.urlVariables ?? []) {
+      if (v.default !== undefined && v.default !== '') vars[v.name] = v.default
+    }
+    const resolvedUrl = rt.urlTemplate ? fillTemplate(rt.urlTemplate, vars) : rt.url
+    const hasHoles = missingTemplateVars(resolvedUrl).length > 0
     return {
       id,
-      name: entry.server.name, transport: 'http', url: rt.url, enabled: true,
-      auth: rt.secretHeader ? { kind: 'headers' } : { kind: 'oauth' },
+      name: registryTitle(entry), transport: 'http', enabled: true,
+      // senza buchi l'URL risolto; coi buchi solo il TEMPLATE (mai un URL con
+      // le graffe: la connessione parte quando i valori ci sono)
+      ...(hasHoles ? {} : { url: resolvedUrl }),
+      ...(rt.urlTemplate ? { urlTemplate: rt.urlTemplate } : {}),
+      ...(Object.keys(vars).length ? { vars } : {}),
+      ...((rt.headers ?? []).length
+        ? {
+            headerTemplates: (rt.headers ?? []).map((h) => ({
+              name: h.name,
+              valueTemplate: h.valueTemplate,
+              ...(h.isRequired !== undefined ? { isRequired: h.isRequired } : {}),
+              ...(h.isSecret !== undefined ? { isSecret: h.isSecret } : {}),
+              ...(h.description ? { description: h.description } : {}),
+              ...(h.variables.length ? { variables: h.variables.map(({ name, description, isSecret }) => ({ name, ...(description ? { description } : {}), ...(isSecret !== undefined ? { isSecret } : {}) })) } : {})
+            }))
+          }
+        : {}),
+      auth: rt.auth === 'headers' ? { kind: 'headers' } : { kind: 'oauth' },
       enabledFor: [agentId],
-      source: { kind: 'registry', name: entry.server.name, ...(entry.server.version ? { version: entry.server.version } : {}) },
+      source,
       trustLabel: trust.label,
       trustKind: trust.kind
     }
@@ -257,7 +354,7 @@ function registryServerCfg(entry: RegistryEntry, agentId: string): McpServerConf
   const vars = registryEnvVars(entry)
   return {
     id,
-    name: entry.server.name, transport: 'stdio', enabled: true,
+    name: registryTitle(entry), transport: 'stdio', enabled: true,
     box: {
       workdir: boxHomePath(agentId),
       home: boxHomePath(agentId),
@@ -266,7 +363,7 @@ function registryServerCfg(entry: RegistryEntry, agentId: string): McpServerConf
       envKeys: vars.map((v) => v.name)
     },
     enabledFor: [agentId],
-    source: { kind: 'registry', name: entry.server.name, ...(entry.server.version ? { version: entry.server.version } : {}) },
+    source,
     trustLabel: trust.label,
     trustKind: trust.kind
   }
@@ -276,6 +373,29 @@ function registryServerCfg(entry: RegistryEntry, agentId: string): McpServerConf
 export function serverInstalledMessage(name: string, tools: Array<{ annotations?: { readOnlyHint?: boolean } }>): string {
   const read = tools.filter((t) => t.annotations?.readOnlyHint === true).length
   return `Server ${name} added: ${tools.length} tools (read: ${read}, write: ${tools.length - read})`
+}
+
+/**
+ * Fase mcp-setup (M5.1): il result di add_mcp_server quando serve
+ * configurazione — il bot NON manda l'utente nelle Impostazioni e NON chiede
+ * nulla in chat: la card stessa è il modulo e l'esito arriva col messaggio di
+ * sistema. `what` dice cosa manca («server address, then sign-in»).
+ */
+export function setupResultMessage(name: string, what: string): string {
+  return `${name} added: the user completes the setup in the card (${what}). Do not ask for tokens or addresses in chat; wait for the system message.`
+}
+
+/**
+ * Le chiavi di configurazione che mancano a un server del registro (M1):
+ * le variabili dell'URL senza valore e l'header OBBLIGATORIO senza token
+ * salvato. Puro rispetto a cfg + valori già salvati.
+ */
+export function missingSetupKeys(cfg: McpServerConfig, savedHeaders: Record<string, string> | null): { urlVars: string[]; requiredHeader: string | null } {
+  const urlVars = (cfg.urlTemplate ? templateVarNames(cfg.urlTemplate) : [])
+    .filter((name) => !(cfg.vars?.[name] ?? '').trim())
+  const required = (cfg.headerTemplates ?? []).find((h) => h.isRequired === true && h.isSecret !== false)
+  const requiredHeader = required && !(savedHeaders?.[required.name] ?? '').trim() ? required.name : null
+  return { urlVars, requiredHeader }
 }
 
 /**
@@ -313,14 +433,14 @@ export async function installMcpServer(
   if (slot) return { ok: false, error: slot }
   if (rt.kind === 'box-npm') {
     if (!deps.dockerMode()) return { ok: false, error: HOST_MODE_DISABLED }
-    // le env obbligatorie chiedono il valore nelle Impostazioni PRIMA del
-    // primo avvio; le facoltative passano solo se l'utente le ha compilate
+    // le env obbligatorie chiedono il valore PRIMA del primo avvio; le
+    // facoltative passano solo se l'utente le ha compilate
     const saved = (await deps.store.read<Record<string, string>>(cfg.id, SECRET_KIND.env)) ?? {}
     const missing = registryEnvVars(entry).filter((v) => v.required && !saved[v.name]).map((v) => v.name)
     if (missing.length) {
       cfg.needsAuth = { kind: 'env', keys: missing }
       deps.onChange()
-      return { ok: true, message: `Server ${cfg.name} registered, but before starting it the variables ${missing.join(', ')} are needed: the user enters them in Settings.` }
+      return { ok: true, message: `${cfg.name} added: the user completes the setup in the App window (the variables ${missing.join(', ')}). Do not ask for variables in chat; wait for the system message.` }
     }
     deps.onChange()
     try {
@@ -330,15 +450,24 @@ export async function installMcpServer(
       return { ok: false, error: `Server ${cfg.name} registered but does not start: ${e instanceof Error ? e.message : String(e)}` }
     }
   }
-  // remoto: regola 1 (OAuth) o regola 2 (header isSecret)
-  if (rt.secretHeader) {
-    const saved = (await deps.store.read<Record<string, string>>(cfg.id, SECRET_KIND.headers)) ?? {}
-    if (!saved[rt.secretHeader]) cfg.needsAuth = { kind: 'key', keys: [rt.secretHeader] }
+  // remoto (M1): se manca l'indirizzo o il token OBBLIGATORIO, la card diventa
+  // il modulo e il bot lo sa dal result (M5.1) — niente «enters it in Settings»
+  const savedHeaders = (await deps.store.read<Record<string, string>>(cfg.id, SECRET_KIND.headers)) ?? {}
+  const missing = missingSetupKeys(cfg, savedHeaders)
+  if (missing.urlVars.length || missing.requiredHeader) {
+    cfg.needsAuth = { kind: 'setup', keys: [...missing.urlVars, ...(missing.requiredHeader ? [missing.requiredHeader] : [])] }
     deps.saveServers([...deps.listServers().filter((s) => s.id !== cfg.id), cfg])
     deps.onChange()
-    if (cfg.needsAuth) {
-      return { ok: true, message: `Server ${cfg.name} registered: the key is needed (${rt.secretHeader}), the user enters it in Settings.` }
-    }
+    const what = missing.urlVars.length
+      ? 'server address, then sign-in'
+      : `access token ${missing.requiredHeader ?? ''}`.trim()
+    return { ok: true, message: setupResultMessage(cfg.name, what) }
+  }
+  // OAuth di default (M1.2): gli header facoltativi sono l'ALTERNATIVA del
+  // modulo (token sotto «Avanzate»), non più la via obbligatoria di isSecret
+  if (rt.auth === 'headers' && rt.secretHeader) {
+    deps.saveServers([...deps.listServers().filter((s) => s.id !== cfg.id), cfg])
+    deps.onChange()
     try {
       const tools = await deps.toolsOfServer(cfg.id)
       return { ok: true, message: serverInstalledMessage(cfg.name, tools) }
@@ -882,6 +1011,288 @@ export function pluginSkillBody(record: InstalledPlugin, dataDir: string, skillN
   } catch {
     return null
   }
+}
+
+// ---- fase mcp-setup (M3): il modulo di configurazione, uno solo ----
+// I tipi dello spec e dell'esito vivono in shared/types (li legge il
+// renderer); qui sono soltanto rinominati per il codice del daemon.
+export type ServerSetupField = McpServerSetupField
+export type ServerSetupTokenHeader = McpServerSetupTokenHeader
+export type ServerSetupSpec = McpServerSetupSpec
+
+/**
+ * L'URL RISOLTO di un server coi template (puro): i valori non segreti di
+ * cfg.vars; le graffe restano se manca il valore (servono al modulo). È
+ * l'indirizzo che il foglio mostra in «Avanzate» (M6.2), mai il template
+ * grezzo quando c'è di meglio.
+ */
+export function resolvedServerUrl(cfg: McpServerConfig): string {
+  if (!cfg.urlTemplate) return cfg.url ?? ''
+  return fillTemplate(cfg.urlTemplate, cfg.vars ?? {})
+}
+
+/**
+ * Lo spec del modulo (M3) di un server installato. Le descrizioni si
+ * rileggono dalla voce del registro ALLA PRIMA APERTURA (M7): se il registro
+ * non risponde, le variabili si ricavano dai nomi tra graffe, senza
+ * descrizione. I SEGRETI non tornano mai: solo un flag `saved`.
+ */
+export async function serverSetupSpec(id: string, deps: InstallDeps): Promise<ServerSetupSpec | null> {
+  const cfg = deps.listServers().find((s) => s.id === id)
+  if (!cfg) return null
+  // la voce del registro, se si trova (descrizioni e placeholder veri)
+  let entry: RegistryEntry | null = null
+  if (cfg.source?.kind === 'registry') {
+    try { entry = await deps.findRegistryEntry(cfg.source.name) } catch { entry = null }
+  }
+  const rt = entry ? registryRuntime(entry) : null
+  if (cfg.transport === 'stdio') {
+    // M6.3: i server stdio (registro/plugin) con variabili d'ambiente usano lo
+    // STESSO modulo: le variabili d'ambiente al posto di quelle dell'URL
+    const declared = entry && rt?.kind === 'box-npm' ? registryEnvVars(entry) : []
+    const keys = cfg.box?.envKeys ?? []
+    const variables: ServerSetupField[] = keys.map((name) => {
+      const d = declared.find((v) => v.name === name)
+      return {
+        name,
+        ...(d?.description ? { description: d.description } : {}),
+        isRequired: d ? d.required : (cfg.needsAuth?.keys ?? []).includes(name),
+        isSecret: true
+      }
+    })
+    return {
+      serverId: cfg.id,
+      name: cfg.name,
+      transport: 'stdio',
+      variables,
+      auth: 'env',
+      needsSetup: cfg.needsAuth !== undefined
+    }
+  }
+  // http: le variabili del template (dichiarazioni del registro se ci sono)
+  const declaredVars = rt?.kind === 'remote' ? rt.urlVariables ?? [] : []
+  const headerDecls = rt?.kind === 'remote' ? rt.headers ?? [] : []
+  const savedHeaders = (await deps.store.read<Record<string, string>>(cfg.id, SECRET_KIND.headers).catch(() => null)) ?? {}
+  const secretUrlVarSaved = async (name: string): Promise<boolean> => {
+    const values = (await deps.store.read<Record<string, string>>(cfg.id, SECRET_KIND.env).catch(() => null)) ?? {}
+    return Boolean((values[name] ?? '').trim())
+  }
+  const variables: ServerSetupField[] = []
+  for (const name of cfg.urlTemplate ? templateVarNames(cfg.urlTemplate) : []) {
+    const d = declaredVars.find((v) => v.name === name)
+    const isSecret = d?.isSecret === true
+    variables.push({
+      name,
+      ...(d?.description ? { description: d.description } : {}),
+      ...(d?.placeholder ? { placeholder: d.placeholder } : {}),
+      isRequired: d ? urlVarIsRequired(d, cfg.urlTemplate ?? '') : true,
+      isSecret,
+      ...(!isSecret && (cfg.vars?.[name] ?? '').trim() ? { value: cfg.vars![name]! } : {}),
+      ...(isSecret && (await secretUrlVarSaved(name)) ? { saved: true } : {})
+    })
+  }
+  // il campo del token: il primo header SEGRETTO col template (M3.2)
+  const headerVarNames = (h: { valueTemplate: string; variables?: Array<{ name: string }> }): string[] =>
+    templateVarNames(h.valueTemplate)
+  const tokenHeaderDecl = (cfg.headerTemplates ?? []).find((h) => headerVarNames(h).length > 0)
+  const tokenHeaderOf = (h: NonNullable<typeof tokenHeaderDecl>): ServerSetupTokenHeader => {
+    const variable = h.variables?.find((v) => v.isSecret === true)?.name ?? headerVarNames(h)[0] ?? h.name
+    const declDesc = headerDecls.find((x) => x.name === h.name)
+    const variableDescription = h.variables?.find((v) => v.name === variable)?.description
+      ?? declDesc?.variables.find((v) => v.name === variable)?.description
+    return {
+      name: h.name,
+      valueTemplate: h.valueTemplate,
+      ...(h.description ? { description: h.description } : {}),
+      variable,
+      ...(variableDescription ? { variableDescription } : {}),
+      saved: Boolean((savedHeaders[h.name] ?? '').trim())
+    }
+  }
+  const missing = missingSetupKeys(cfg, savedHeaders)
+  return {
+    serverId: cfg.id,
+    name: cfg.name,
+    transport: 'http',
+    variables,
+    auth: cfg.auth?.kind === 'headers' ? 'headers' : 'oauth',
+    ...(tokenHeaderDecl ? { tokenHeader: tokenHeaderOf(tokenHeaderDecl) } : {}),
+    needsSetup: cfg.needsAuth !== undefined || missing.urlVars.length > 0 || missing.requiredHeader !== null
+  }
+}
+
+/** L'esito del collegamento dal modulo (M3.3): codice per la UI, dettaglio tecnico. */
+export type ServerConnectResult = McpServerConnectResult
+
+/**
+ * Il clic su «Accedi con <Nome>» / «Collega» del modulo (M3): salva i valori
+ * (non segreti in cfg.vars, il token come header RISOLTO nello store cifrato),
+ * pulisce needsAuth e prova a connettersi — OAuth col browser quando serve
+ * (finishRemoteInstall/connettori di oggi), altrimenti l'header del token.
+ * M7: alla prima connessione riuscita il nome tecnico diventa il titolo del
+ * registro, se il registro lo dà.
+ */
+export async function connectServerSetup(
+  id: string,
+  input: { vars?: Record<string, string>; token?: string },
+  deps: InstallDeps,
+  getSetting: <T>(key: string, fallback: T) => T,
+  setSetting: (key: string, value: unknown) => void
+): Promise<ServerConnectResult> {
+  const servers = deps.listServers()
+  const cfg = servers.find((s) => s.id === id)
+  if (!cfg) return { ok: false, error: 'server not found' }
+  const spec = await serverSetupSpec(id, deps)
+  if (!spec) return { ok: false, error: 'server not found' }
+
+  // 1. validazione dei valori (M1.4): gli INDIRIZZI si ripuliscono e si
+  // validano da host (niente / @ o spazi, schema incollato via); le altre
+  // variabili si prendono ripulite degli spazi soltanto
+  const fieldErrors: Record<string, string> = {}
+  const vars: Record<string, string> = { ...(cfg.vars ?? {}) }
+  const isHostVar = (name: string): boolean => cfg.transport === 'http' && /host|url/i.test(name)
+  for (const f of spec.variables) {
+    const raw = (input.vars ?? {})[f.name]
+    if (raw === undefined || f.isSecret) continue // i segreti non passano da cfg.vars
+    if (!raw.trim()) {
+      if (f.isRequired) fieldErrors[f.name] = 'empty'
+      continue
+    }
+    if (isHostVar(f.name)) {
+      const bad = hostValueError(raw)
+      if (bad) {
+        fieldErrors[f.name] = bad
+        continue
+      }
+      vars[f.name] = cleanHostValue(raw)
+    } else {
+      vars[f.name] = raw.trim()
+    }
+  }
+  if (Object.keys(fieldErrors).length) return { ok: false, error: 'invalid values', reason: 'invalid-value', fieldErrors }
+
+  // 2. il token: SOLO il valore della variabile — «Bearer » lo mette il
+  // template; un «Bearer » già incollato si toglie (M3.2)
+  const headerTemplates = cfg.headerTemplates ?? []
+  const tokenHeader = headerTemplates.find((h) => (spec.tokenHeader?.name ?? '') === h.name)
+  if (input.token !== undefined && input.token.trim() && tokenHeader && spec.tokenHeader) {
+    const value = fillTemplate(tokenHeader.valueTemplate, { [spec.tokenHeader.variable]: cleanSecretValue(input.token) })
+    const saved = (await deps.store.read<Record<string, string>>(cfg.id, SECRET_KIND.headers).catch(() => null)) ?? {}
+    await deps.store.write(cfg.id, SECRET_KIND.headers, { ...saved, [tokenHeader.name]: value })
+  }
+
+  // 3. salvataggio e prova. M6.3: i server STDIO salvano le variabili
+  // d'ambiente nello store cifrato (kind env, come le Impostazioni di ieri) e
+  // la prova è il collegamento del box; gli HTTP salvano cfg.vars e seguono
+  // la via del token o di OAuth.
+  const tryTools = async (): Promise<ServerConnectResult> => {
+    try {
+      const tools = await deps.toolsOfServer(cfg.id)
+      return { ok: true, tools: tools.map((t) => t.name) }
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  }
+  const finishOk = async (r: ServerConnectResult): Promise<ServerConnectResult> => {
+    markServerConnected(setSetting, getSetting, cfg.id)
+    await fixTitleFromRegistry(cfg, deps)
+    return r
+  }
+  if (cfg.transport === 'stdio') {
+    const envValues: Record<string, string> = {}
+    for (const f of spec.variables) {
+      const raw = (input.vars ?? {})[f.name]
+      if (raw?.trim()) envValues[f.name] = raw.trim()
+    }
+    if (Object.keys(envValues).length) {
+      const savedEnv = (await deps.store.read<Record<string, string>>(cfg.id, SECRET_KIND.env).catch(() => null)) ?? {}
+      await deps.store.write(cfg.id, SECRET_KIND.env, { ...savedEnv, ...envValues })
+    }
+    const savedNow = (await deps.store.read<Record<string, string>>(cfg.id, SECRET_KIND.env).catch(() => null)) ?? {}
+    if (cfg.needsAuth?.kind === 'env' && cfg.needsAuth.keys.every((k) => (savedNow[k] ?? '').trim())) cfg.needsAuth = undefined
+    deps.saveServers([...deps.listServers().filter((s) => s.id !== cfg.id), cfg])
+    deps.onChange()
+    const r = await tryTools()
+    return r.ok ? finishOk(r) : { ...r, reason: classifyConnectError(r.error) }
+  }
+  // http: i valori non segreti in cfg.vars, il token come header risolto
+  cfg.vars = vars
+  const url = cfg.urlTemplate ? fillTemplate(cfg.urlTemplate, vars) : (cfg.url ?? '')
+  const missingUrl = missingTemplateVars(url)
+  const savedHeaders = (await deps.store.read<Record<string, string>>(cfg.id, SECRET_KIND.headers).catch(() => null)) ?? {}
+  const missing = missingSetupKeys(cfg, savedHeaders)
+  cfg.needsAuth = missingUrl.length || missing.requiredHeader
+    ? { kind: 'setup', keys: [...missingUrl, ...(missing.requiredHeader ? [missing.requiredHeader] : [])] }
+    : undefined
+  if (cfg.urlTemplate && !missingUrl.length) cfg.url = url
+  // il token appena salvato vale l'header: OAuth resta per chi non lo usa
+  if (input.token !== undefined && input.token.trim() && tokenHeader) cfg.auth = { kind: 'headers' }
+  else if (cfg.auth?.kind === undefined && !input.token) cfg.auth = { kind: 'oauth' }
+  deps.saveServers([...deps.listServers().filter((s) => s.id !== cfg.id), cfg])
+  deps.onChange()
+
+  // 4. la prova: prima il collegamento diretto (header del token se c'è)
+  let result = await tryTools()
+  if (result.ok) return finishOk(result)
+  // 5. OAuth col browser quando è la via del server e non c'è header attivo
+  const hasHeader = Object.values(savedHeaders).some((v) => v.trim())
+  if (cfg.auth?.kind === 'oauth' && !hasHeader) {
+    if (!deps.hasUi()) return { ...result, reason: 'needs-window' }
+    try {
+      const authorize = deps.authorize ?? authorizeWithLoopback
+      await authorize(url, (redirectUrl, stateFactory) =>
+        createOAuthProvider(
+          {
+            serverId: cfg.id, redirectUrl, openExternal: deps.openExternal, store: deps.store, stateFactory,
+            ...(deps.clientMetadataUrl?.() ?? '' ? { clientMetadataUrl: deps.clientMetadataUrl!() } : {})
+          }
+        )
+      )
+      result = await tryTools()
+      if (result.ok) return finishOk(result)
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e), reason: 'oauth' }
+    }
+  }
+  return { ...result, reason: classifyConnectError(result.error) }
+}
+
+/** Lo stato 'connected' del connettore: la riga della finestra App lo usa (M6.1). */
+function markServerConnected(setSetting: (key: string, value: unknown) => void, getSetting: <T>(key: string, fallback: T) => T, id: string): void {
+  const states = getSetting<Record<string, Record<string, unknown>>>('connectors.state', {})
+  const cur = (states[id] ?? {}) as Record<string, unknown>
+  setSetting('connectors.state', { ...states, [id]: { ...cur, status: 'connected', error: undefined } })
+}
+
+/**
+ * M7: un cfg.name rimasto al nome TECNICO diventa il titolo del registro alla
+ * prima connessione riuscita (il registro lo dà). Gli strumenti cambiano
+ * prefisso: la cache del client si chiude, alla prossima connessione i nomi
+ * sono quelli nuovi.
+ */
+async function fixTitleFromRegistry(cfg: McpServerConfig, deps: InstallDeps): Promise<void> {
+  if (cfg.source?.kind !== 'registry' || cfg.name !== cfg.source.name) return
+  try {
+    const entry = await deps.findRegistryEntry(cfg.source.name)
+    if (!entry) return
+    const title = registryTitle(entry)
+    if (!title || title === cfg.name) return
+    if (!deps.listServers().some((s) => s.id === cfg.id)) return
+    // MAI mutare l'array vivo di listServers: una nuova lista (l'aliasing
+    // svuoterebbe i server quando listServers restituisce il vivo)
+    deps.saveServers(deps.listServers().map((s) => (s.id === cfg.id ? { ...s, name: title } : s)))
+    const { disconnectServer } = await import('../mcp')
+    disconnectServer(cfg.id)
+  } catch { /* il registro non risponde: il nome resta, si riproverà */ }
+}
+
+/** L'errore di connessione → codice umano per il modulo (puro). */
+export function classifyConnectError(error: string | undefined): 'unreachable' | 'unauthorized' | 'not-mcp' | undefined {
+  const e = (error ?? '').toLowerCase()
+  if (e.includes('401') || e.includes('unauthorized')) return 'unauthorized'
+  if (e.includes('fetch failed') || e.includes('econnrefused') || e.includes('enotfound') || e.includes('could not connect') || e.includes('connection refused')) return 'unreachable'
+  if (e.includes('-32600') || e.includes('json') || e.includes('mcp')) return 'not-mcp'
+  return undefined
 }
 
 // ---- gateway (punto 7) ----

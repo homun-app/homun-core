@@ -27,7 +27,7 @@ import {
 import { requeueAllLeased, enqueueJob } from '../main/store/jobs'
 import { acquireDaemonLock, releaseDaemonLock, writeDaemonInfo, removeDaemonInfo } from './daemon-files'
 import { startWsServer, generateToken } from './ws-server'
-import { buildApiMethods } from './api'
+import { buildApiMethods, notifyComposioAppConnected } from './api'
 import { JobWorker } from './worker'
 import { tickScheduler, tickConnectorPolls, enqueueRoutineRun } from './scheduler'
 import { attachHostBridge } from './host-bridge'
@@ -136,6 +136,18 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
       migrateImpostazioniSettings()
     } catch (e) {
       console.error('[sandbotd] migrazione impostazioni rimandata al prossimo avvio:', e instanceof Error ? e.message : e)
+    }
+  }
+
+  // fase mcp-setup (M7): i server del registro salvati con l'URL coi
+  // segnaposto letterali diventano urlTemplate + needsAuth 'setup' (una
+  // tantum, flag idempotente)
+  {
+    const { migrateMcpServers } = await import('../main/store/mcp-migrations')
+    try {
+      migrateMcpServers()
+    } catch (e) {
+      console.error('[sandbotd] migrazione server del registro rimandata al prossimo avvio:', e instanceof Error ? e.message : e)
     }
   }
 
@@ -407,8 +419,11 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
   // fase Composio OAuth (C5): il gateway delle app dentro il server Composio
   // collegato col login (C1) — MANAGE_CONNECTIONS/WAIT_FOR_CONNECTIONS con i
   // link nelle card, mai nel testo libero. Il manager si registra come
-  // setActiveComposio, così loop e permissions lo raggiungono.
+  // setActiveComposioGateway, così loop e permissions lo raggiungono.
   const { createComposioGatewayManager, setActiveComposioGateway } = await import('../main/connectors/composio-gateway')
+  // fase mcp-setup (M5.3): il worker nasce DOPO il gateway; il richiamo di
+  // onAppActive lo legge quando serve (un'app diventa ACTIVE più tardi)
+  let gatewayWorker: import('./worker').JobWorker | null = null
   const composioGatewayActive = (): boolean =>
     connectors.stateOf('composio').status === 'connected' && mcpServers.listServers().some((s) => s.catalogId === 'composio')
   const composioGatewayManager = createComposioGatewayManager({
@@ -421,7 +436,14 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
     emit: (e) => emit(e),
     // K6 (ritocchi): i nomi degli strumenti dal nome VERO del server Composio
     // del catalogo (mcp__<slug>__…), non più lo slug scritto a mano
-    serverTools: () => mcpServers.composioServerTools()
+    serverTools: () => mcpServers.composioServerTools(),
+    // fase mcp-setup (M5.3): un'app diventata ACTIVE che chiude l'offerta
+    // pendente di una curata DIRETTA dello stesso marchio avvisa il bot
+    // (CONNECTOR_CONNECTED, coi nomi degli strumenti di Composio)
+    onAppActive: (slug, name) => {
+      if (!gatewayWorker) return
+      void notifyComposioAppConnected(slug, name, (e) => emit(e), gatewayWorker).catch(() => undefined)
+    }
   })
   setActiveComposioGateway(composioGatewayManager)
 
@@ -501,6 +523,8 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
     emit
   )
   pokeWorker = () => worker.poke()
+  // fase mcp-setup (M5.3): il gateway può finalmente svegliare il worker
+  gatewayWorker = worker
 
   // fase 7: onboarding al primo avvio — bot principale "Bot" + widget di
   // sistema sul ruolo; i due bot da template partono col kickstart in coda.

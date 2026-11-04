@@ -149,7 +149,13 @@ export type SendMessagePayload =
       /** registry:<nome> oppure url:https://… */
       id: string
       name: string
+      /** fase mcp-setup (M2): il nome tecnico del registro (piccolo e grigio nel dettaglio) */
+      technicalName?: string
       publisher?: string
+      /** fase mcp-setup (M2): icona data: del registro, se c'è (nessuna fetch nuova) */
+      logo?: string
+      /** fase mcp-setup (M4): l'id del server creato dall'installazione (lo stato si legge da lui) */
+      serverId?: string
       /** label di fiducia per il modello (inglese); la UI traduce da trustKind */
       trust: string
       trustKind: 'verified-domain' | 'github-account' | 'unverified'
@@ -161,6 +167,29 @@ export type SendMessagePayload =
         | { kind: 'oauth' }
         | { kind: 'key'; header: string }
         | { kind: 'env'; vars: Array<{ name: string; required: boolean; description?: string }> }
+      /**
+       * fase mcp-setup (M1/M3): il modulo che la card diventa dopo «Aggiungi»
+       * (variabili dell'URL e accesso). Solo i server del registro col remote.
+       */
+      setup?: {
+        urlVariables: Array<{
+          name: string
+          description?: string
+          placeholder?: string
+          isRequired: boolean
+          isSecret: boolean
+          default?: string
+        }>
+        auth: 'oauth' | 'headers'
+        /** l'header col token facoltativo/obbligatorio (template + variabile segreta) */
+        tokenHeader?: {
+          name: string
+          valueTemplate: string
+          description?: string
+          variable: string
+          variableDescription?: string
+        }
+      }
       /** fiducia ≠ dominio verificato: l'avviso che il server è di terzi */
       thirdPartyWarning?: true
       /** proposta nata in un turno contaminato: avviso in cima alla card */
@@ -864,6 +893,10 @@ export interface SandbotApi {
   connectorsUninstallServer(id: string): Promise<{ ok: boolean }>
   /** fase 13 (correzione L1): rifà l'OAuth di un server del registro/plugin la cui sessione è scaduta */
   connectorsReconnectServer(id: string): Promise<{ ok: boolean; message?: string; error?: string }>
+  /** fase mcp-setup (M3): lo spec del modulo di configurazione di un server (variabili, accesso, token salvato) */
+  connectorsServerSetup(id: string): Promise<McpServerSetupSpec | null>
+  /** fase mcp-setup (M3): il clic su «Accedi con <Nome>»/«Collega» del modulo (i segreti NON tornano mai) */
+  connectorsServerConnect(id: string, input: { vars?: Record<string, string>; token?: string }): Promise<McpServerConnectResult>
   connectorsAddGateway(input: { name: string; url: string; auth: 'oauth' | 'bearer' | 'headers'; preset?: string; headerName?: string; token?: string; headers?: Record<string, string> }): Promise<McpServerInfo>
   connectorsGatewayPresets(): Promise<{ presets: Array<{ id: string; name: string; auth: string; headerName?: string; help: string }>; warning: string }>
   connectorsSetClientMetadataUrl(url: string): Promise<{ ok: boolean }>
@@ -1325,8 +1358,15 @@ export interface McpServerInfo {
    * url, headers ed env si ricalcolano alla connessione con i valori dello store.
    */
   pluginSpec?: { url?: string; headers?: Record<string, string>; env?: Record<string, string> }
-  /** fase 13: installato ma in attesa di valori dalle Impostazioni */
-  needsAuth?: { kind: 'key' | 'env' | 'settings'; keys: string[] }
+  /**
+   * fase mcp-setup (M1): template `{var}` dell'URL del registro + valori NON
+   * segreti; i segreti vivono solo nello store cifrato
+   */
+  urlTemplate?: string
+  vars?: Record<string, string>
+  headerTemplates?: Array<{ name: string; valueTemplate: string; isRequired?: boolean; isSecret?: boolean; description?: string; variables?: Array<{ name: string; description?: string; isSecret?: boolean }> }>
+  /** fase 13: installato ma in attesa di valori; fase mcp-setup: 'setup' = il modulo della card/foglio */
+  needsAuth?: { kind: 'key' | 'env' | 'settings' | 'setup'; keys: string[] }
   /** fase 13: fiducia della scheda Installati */
   trustLabel?: string
   /** fase 17c (C5): il kind della fiducia — la UI lo traduce */
@@ -1339,6 +1379,59 @@ export interface McpServerInfo {
    * invece di "Riconnetti" (che resta per la sessione scaduta).
    */
   neverAuthorized?: boolean
+}
+
+// ---- fase mcp-setup (M3): il modulo di configurazione di un server ----
+
+/** Un campo del modulo: variabile dell'URL (http) o d'ambiente (stdio). */
+export interface McpServerSetupField {
+  name: string
+  description?: string
+  placeholder?: string
+  isRequired: boolean
+  isSecret: boolean
+  /** il valore NON segreto già salvato nella config (i segreti non tornano MAI) */
+  value?: string
+  /** una variabile segreta già salvata si mostra «•••• salvato · cambia» */
+  saved?: boolean
+}
+
+/** Il campo del token: l'header col template e la sua variabile segreta. */
+export interface McpServerSetupTokenHeader {
+  name: string
+  valueTemplate: string
+  description?: string
+  variable: string
+  variableDescription?: string
+  /** c'è già un valore risolto nello store cifrato */
+  saved: boolean
+}
+
+/** Lo spec del modulo di un server installato (per la card M4 e il foglio M6). */
+export interface McpServerSetupSpec {
+  serverId: string
+  name: string
+  transport: 'http' | 'stdio'
+  /** variabili dell'URL (http) o d'ambiente (stdio, M6.3) */
+  variables: McpServerSetupField[]
+  auth: 'oauth' | 'headers' | 'env'
+  tokenHeader?: McpServerSetupTokenHeader
+  /** true quando manca qualcosa: il modulo si apre, il server non è partito */
+  needsSetup: boolean
+  /** fase mcp-setup (M6.1): lo stato dell'ultima prova (connectors.state) */
+  stateStatus?: string
+}
+
+/** L'esito del collegamento dal modulo: codice per la UI, dettaglio tecnico. */
+export interface McpServerConnectResult {
+  ok: boolean
+  /** i nomi completi degli strumenti quando il collegamento riesce */
+  tools?: string[]
+  error?: string
+  /** il codice dell'errore UMANO (la UI lo traduce) */
+  reason?: 'invalid-value' | 'unreachable' | 'unauthorized' | 'not-mcp' | 'oauth' | 'needs-window'
+  /** campo → errore di validazione (M1.4) */
+  fieldErrors?: Record<string, string>
 }
 
 /**

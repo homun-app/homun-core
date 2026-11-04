@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { SendMessagePayload } from '../../../shared/types'
 import fixture from './fixtures/registry-notion.json'
+import mattermostFixture from './fixtures/registry-mattermost.json'
 import { parseRegistryResponse } from '../registry'
 import type { RegistryEntry } from '../registry'
 import {
@@ -18,6 +19,7 @@ import {
   serverIdFor, serverSlotError, resolvePluginServerPlaceholders, unresolvedUserConfigKeys,
   reconnectServer, discardPluginProposal, PENDING_PLUGIN_TTL_MS, SECRET_KIND,
   GATEWAY_PRESETS, GATEWAY_WARNING_UI, PROPOSAL_RESULT, HOST_MODE_DISABLED, HOST_MODE_DISABLED_REASON,
+  setupResultMessage, missingSetupKeys, serverSetupSpec, connectServerSetup, resolvedServerUrl, classifyConnectError,
   type InstallDeps, type InstalledPlugin
 } from '../install'
 import type { McpServerConfig } from '../../mcp'
@@ -62,6 +64,17 @@ function makeDeps(over: Partial<InstallDeps> = {}): InstallDeps {
   }
 }
 
+/** getSetting/setSetting in memoria (per connectors.state di connectServerSetup). */
+type GetSetting = <T>(key: string, fallback: T) => T
+type SetSetting = (key: string, value: unknown) => void
+function mkSettings(): [GetSetting, SetSetting] {
+  const m = new Map<string, unknown>()
+  return [
+    <T,>(key: string, fallback: T): T => (m.has(key) ? m.get(key) as T : fallback),
+    (key: string, value: unknown): void => { m.set(key, value) }
+  ]
+}
+
 let DATA: string
 beforeAll(() => {
   DATA = mkdtempSync(join(tmpdir(), 'sandbot-install-test-'))
@@ -92,11 +105,14 @@ describe('parseMcpServerId e i testi fissi delle card', () => {
 // ---- buildMcpServerCard (punto 2) ----
 
 describe('buildMcpServerCard (pura a deps iniettati)', () => {
-  it('remoto senza header: card remoto OAuth con host, fiducia dominio verificato, NESSUN avviso terzi, NOME COMPLETO (L2)', async () => {
+  it('remoto senza header: card remoto OAuth con host, fiducia dominio verificato, NESSUN avviso terzi, NOME UMANO (M2)', async () => {
     const r = await buildMcpServerCard('registry:com.notion/mcp', 'per leggere le pagine', makeDeps())
     expect(r.ok).toBe(true)
     if (!r.ok) return
-    expect(r.card.name).toBe('com.notion/mcp')
+    // fase mcp-setup (M2): il nome mostrato è il TITOLO (com.notion/mcp →
+    // «Notion»); il tecnico resta in technicalName e nell'id
+    expect(r.card.name).toBe('Notion')
+    expect(r.card.technicalName).toBe('com.notion/mcp')
     expect(r.card.trust).toBe('verified domain (notion.com)')
     expect(r.card.runtime).toEqual({ kind: 'remote', host: 'mcp.notion.com' })
     expect(r.card.needs).toEqual({ kind: 'oauth' })
@@ -178,11 +194,11 @@ describe('installMcpServer (regole 1-3)', () => {
     const r = await installMcpServer(card.card, 'agent_alice', deps)
     expect(r.ok).toBe(true)
     if (!r.ok) return
-    expect(r.message).toBe('Server com.notion/mcp added: 3 tools (read: 2, write: 1)')
+    expect(r.message).toBe('Server Notion added: 3 tools (read: 2, write: 1)')
     // il server è registrato col source registry e abilitato SOLO per chi l'ha proposto
     const cfg = deps.listServers()[0]!
     expect(cfg.id).toBe(serverIdFor({ kind: 'registry', name: 'com.notion/mcp' }))
-    expect(cfg.name).toBe('com.notion/mcp') // L2: nome COMPLETO, non l'ultimo segmento
+    expect(cfg.name).toBe('Notion') // M2: il titolo umano; il tecnico sta in source.name
     expect(cfg.source).toEqual({ kind: 'registry', name: 'com.notion/mcp', version: '1.0.1' })
     expect(cfg.enabledFor).toEqual(['agent_alice'])
     expect(cfg.catalogId).toBeUndefined() // niente auto-consenso readOnlyHint (governance punto 2)
@@ -197,14 +213,19 @@ describe('installMcpServer (regole 1-3)', () => {
     if (!r.ok) expect(r.error).toContain('OAuth')
   })
 
-  it('regola 2: remoto con header isSecret → stato needs_auth e "serve la chiave: l\'utente la inserisce nelle Impostazioni"', async () => {
+  it('regola 2 (M5): header OBBLIGATORIO → needsAuth setup e "the user completes the setup in the card" (mai Settings, mai "the key is needed")', async () => {
     const deps = makeDeps({ toolsOfServer: async () => { throw new Error('401') } })
     const card = await buildMcpServerCard('registry:ai.smithery/smithery-notion', '', deps)
     if (!card.ok) throw new Error('card')
     const r = await installMcpServer(card.card, 'agent_alice', deps)
     expect(r.ok).toBe(true)
-    if (r.ok) expect(r.message).toContain('the key is needed')
-    expect(deps.listServers()[0]!.needsAuth).toEqual({ kind: 'key', keys: ['Authorization'] })
+    if (r.ok) {
+      expect(r.message).toContain('completes the setup in the card')
+      expect(r.message).toContain('access token Authorization')
+      expect(r.message).not.toContain('Settings')
+      expect(r.message).not.toContain('the key is needed')
+    }
+    expect(deps.listServers()[0]!.needsAuth).toEqual({ kind: 'setup', keys: ['Authorization'] })
   })
 
   it('regola 3: npm stdio si registra nel BOX (docker exec); le env obbligatorie mancanti → needs_auth env', async () => {
@@ -235,7 +256,7 @@ describe('installMcpServer (regole 1-3)', () => {
     const card = await buildMcpServerCard('registry:com.foreverworks/notion', '', deps)
     if (!card.ok) throw new Error('card')
     const r = await installMcpServer(card.card, 'agent_alice', deps)
-    expect(r).toEqual({ ok: true, message: 'Server com.foreverworks/notion added: 1 tools (read: 1, write: 0)' })
+    expect(r).toEqual({ ok: true, message: 'Server Notion added: 1 tools (read: 1, write: 0)' })
     expect(deps.listServers()[0]!.needsAuth).toBeUndefined()
   })
 
@@ -249,6 +270,199 @@ describe('installMcpServer (regole 1-3)', () => {
 
   it('serverInstalledMessage conta lettura/scrittura dalle annotazioni', () => {
     expect(serverInstalledMessage('x', [{ annotations: { readOnlyHint: true } }, {}, {}])).toBe('Server x added: 3 tools (read: 1, write: 2)')
+  })
+})
+
+// ---- fase mcp-setup (M1/M3/M5): Mattermost, la prova dell'utente ----
+
+describe('mcp-setup: la voce vera di Mattermost', () => {
+  const MATTERMOST = parseRegistryResponse(mattermostFixture)[0]!
+  const makeMmDeps = (over: Partial<InstallDeps> = {}): InstallDeps => makeDeps({
+    findRegistryEntry: async (name) => name === MATTERMOST.server.name ? MATTERMOST : null,
+    ...over
+  })
+
+  it('M2: la card si chiama «Mattermost», porta serverId e il setup (variabile obbligatoria + token facoltativo)', async () => {
+    const r = await buildMcpServerCard(`registry:${MATTERMOST.server.name}`, 'collega mattermost', makeMmDeps())
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.card.name).toBe('Mattermost')
+    expect(r.card.technicalName).toBe('io.github.mattermost/mattermost-plugin-agents')
+    expect(r.card.serverId).toBe(serverIdFor({ kind: 'registry', name: MATTERMOST.server.name }))
+    // M1.2: OAuth è la via; l'header Authorization è l'ALTERNATIVA
+    expect(r.card.needs).toEqual({ kind: 'oauth' })
+    expect(r.card.setup?.auth).toBe('oauth')
+    expect(r.card.setup?.urlVariables).toEqual([
+      expect.objectContaining({ name: 'mattermost_host', isRequired: true, placeholder: 'chat.example.com' })
+    ])
+    expect(r.card.setup?.tokenHeader).toEqual(expect.objectContaining({
+      name: 'Authorization',
+      valueTemplate: 'Bearer {personal_access_token}',
+      variable: 'personal_access_token'
+    }))
+    // la fiducia dell'account GitHub: avviso terzi
+    expect(r.card.trustKind).toBe('github-account')
+    expect(r.card.thirdPartyWarning).toBe(true)
+  })
+
+  it('M5.1: «Aggiungi» senza indirizzo → needsAuth setup e il result dice la CARD (mai Impostazioni, mai "the key is needed")', async () => {
+    const deps = makeMmDeps()
+    const card = await buildMcpServerCard(`registry:${MATTERMOST.server.name}`, '', deps)
+    if (!card.ok) throw new Error('card')
+    const r = await installMcpServer(card.card, 'agent_alice', deps)
+    expect(r).toEqual({
+      ok: true,
+      message: setupResultMessage('Mattermost', 'server address, then sign-in')
+    })
+    expect(r.ok && r.message).toContain('Do not ask for tokens or addresses in chat; wait for the system message.')
+    expect(r.ok && r.message).not.toContain('Settings')
+    expect(r.ok && r.message).not.toContain('the key is needed')
+    const cfg = deps.listServers()[0]!
+    expect(cfg.needsAuth).toEqual({ kind: 'setup', keys: ['mattermost_host'] })
+    // il template resta in config, MAI un URL con le graffe in cfg.url
+    expect(cfg.urlTemplate).toBe('https://{mattermost_host}/plugins/mattermost-ai/mcp-server/mcp')
+    expect(cfg.url).toBeUndefined()
+    expect(cfg.name).toBe('Mattermost')
+    // il token NON è obbligatorio: auth oauth
+    expect(cfg.auth).toEqual({ kind: 'oauth' })
+    // i template degli header (pubblici) stanno in config
+    expect(cfg.headerTemplates).toEqual([
+      expect.objectContaining({ name: 'Authorization', valueTemplate: 'Bearer {personal_access_token}', isSecret: true })
+    ])
+  })
+
+  it('M1.4+M3: connectServerSetup pulisce l\'indirizzo incollato per intero e rifiuta i valori sporchi', async () => {
+    const deps = makeMmDeps({ toolsOfServer: async () => [{ name: 'search' }] })
+    const card = await buildMcpServerCard(`registry:${MATTERMOST.server.name}`, '', deps)
+    if (!card.ok) throw new Error('card')
+    await installMcpServer(card.card, 'a', deps)
+    const id = deps.listServers()[0]!.id
+    const bad = await connectServerSetup(id, { vars: { mattermost_host: 'chat.example.com/percorso' } }, deps, ...mkSettings())
+    expect(bad.ok).toBe(false)
+    expect(bad.reason).toBe('invalid-value')
+    expect(bad.fieldErrors?.mattermost_host).toBe('/')
+    // il valore pulito si salva in cfg.vars e l'URL si risolve SENZA graffe
+    const ok = await connectServerSetup(id, { vars: { mattermost_host: 'https://chat.example.com/' } }, deps, ...mkSettings())
+    expect(ok.ok).toBe(true)
+    const cfg = deps.listServers()[0]!
+    expect(cfg.vars).toEqual({ mattermost_host: 'chat.example.com' })
+    expect(cfg.url).toBe('https://chat.example.com/plugins/mattermost-ai/mcp-server/mcp')
+    expect(cfg.needsAuth).toBeUndefined()
+    expect(resolvedServerUrl(cfg)).toBe('https://chat.example.com/plugins/mattermost-ai/mcp-server/mcp')
+  })
+
+  it('M3.2: col token, l\'utente scrive SOLO il valore: «Bearer » lo mette il template (e un doppio si toglie)', async () => {
+    const seen: string[] = []
+    const deps = makeMmDeps({
+      toolsOfServer: async (id) => {
+        const headers = (await deps.store.read<Record<string, string>>(id, SECRET_KIND.headers)) ?? {}
+        seen.push(JSON.stringify(headers))
+        return [{ name: 'search' }, { name: 'post' }]
+      }
+    })
+    const card = await buildMcpServerCard(`registry:${MATTERMOST.server.name}`, '', deps)
+    if (!card.ok) throw new Error('card')
+    await installMcpServer(card.card, 'a', deps)
+    const id = deps.listServers()[0]!.id
+    // l'utente incolla «Bearer xyz» per abitudine: il prefisso si toglie
+    const r = await connectServerSetup(id, { vars: { mattermost_host: 'chat.example.com' }, token: 'Bearer mm_pat_123' }, deps, ...mkSettings())
+    expect(r.ok).toBe(true)
+    // l'header salvato (cifrato) è ESATTAMENTE «Bearer mm_pat_123» col template risolto
+    expect(await deps.store.read(id, SECRET_KIND.headers)).toEqual({ Authorization: 'Bearer mm_pat_123' })
+    // e il messaggio per la UI porta i nomi degli strumenti
+    expect(r.tools).toEqual(['search', 'post'])
+    // con il token la via diventa l'header (non OAuth)
+    expect(deps.listServers()[0]!.auth).toEqual({ kind: 'headers' })
+  })
+
+  it('M3.3: senza token segue OAuth (authorizeWithLoopback del flusso di oggi) e l\'errore diventa reason oauth', async () => {
+    let opened = ''
+    const deps = makeMmDeps({
+      toolsOfServer: async () => { throw new Error('401 Unauthorized') },
+      authorize: (async (url: string) => { opened = url }) as never
+    })
+    const card = await buildMcpServerCard(`registry:${MATTERMOST.server.name}`, '', deps)
+    if (!card.ok) throw new Error('card')
+    await installMcpServer(card.card, 'a', deps)
+    const id = deps.listServers()[0]!.id
+    const r = await connectServerSetup(id, { vars: { mattermost_host: 'chat.example.com' } }, deps, ...mkSettings())
+    // il flusso OAuth è partito sull'URL RISOLTO
+    expect(opened).toBe('https://chat.example.com/plugins/mattermost-ai/mcp-server/mcp')
+    expect(r.ok).toBe(false)
+    // la prova dopo il flusso fallisce ancora (401) → errore classificato
+    expect(r.reason).toBe('unauthorized')
+  })
+
+  it('M3.3: quando l\'OAuth non parte (niente DCR) il reason è oauth per la UI', async () => {
+    const deps = makeMmDeps({
+      toolsOfServer: async () => { throw new Error('fetch failed') },
+      authorize: (async () => { throw new Error('registration endpoint not supported') }) as never
+    })
+    const card = await buildMcpServerCard(`registry:${MATTERMOST.server.name}`, '', deps)
+    if (!card.ok) throw new Error('card')
+    await installMcpServer(card.card, 'a', deps)
+    const id = deps.listServers()[0]!.id
+    const r = await connectServerSetup(id, { vars: { mattermost_host: 'chat.example.com' } }, deps, ...mkSettings())
+    expect(r.ok).toBe(false)
+    expect(r.reason).toBe('oauth')
+  })
+
+  it('M3: serverSetupSpec — le descrizioni tornano, i SEGRETI mai (solo «salvato»)', async () => {
+    const deps = makeMmDeps({ toolsOfServer: async () => [{ name: 'x' }] })
+    const card = await buildMcpServerCard(`registry:${MATTERMOST.server.name}`, '', deps)
+    if (!card.ok) throw new Error('card')
+    await installMcpServer(card.card, 'a', deps)
+    const id = deps.listServers()[0]!.id
+    const spec = await serverSetupSpec(id, deps)
+    expect(spec?.name).toBe('Mattermost')
+    expect(spec?.variables).toEqual([
+      expect.objectContaining({ name: 'mattermost_host', isRequired: true, placeholder: 'chat.example.com' })
+    ])
+    expect(spec?.tokenHeader).toEqual(expect.objectContaining({
+      name: 'Authorization',
+      variable: 'personal_access_token',
+      variableDescription: 'Mattermost Personal Access Token (User Settings > Security > Personal Access Tokens).',
+      saved: false
+    }))
+    expect(spec?.needsSetup).toBe(true)
+    // dopo il collegamento col token: saved true, needsSetup false
+    await connectServerSetup(id, { vars: { mattermost_host: 'chat.example.com' }, token: 'VALORE-SEGRETO-PAT' }, deps, ...mkSettings())
+    const spec2 = await serverSetupSpec(id, deps)
+    expect(spec2?.tokenHeader?.saved).toBe(true)
+    expect(spec2?.needsSetup).toBe(false)
+    // MAI il valore del segreto nello spec
+    expect(JSON.stringify(spec2)).not.toContain('VALORE-SEGRETO-PAT')
+  })
+
+  it('M7.3: alla prima connessione riuscita il nome tecnico resta (già titolo); un nome VECCHIO diventa titolo', async () => {
+    // il server come lo salvava IERI: nome tecnico, url col buco, needsAuth key
+    const deps = makeMmDeps({ toolsOfServer: async () => [{ name: 'x' }] })
+    const id = serverIdFor({ kind: 'registry', name: MATTERMOST.server.name })
+    deps.saveServers([{
+      id, name: MATTERMOST.server.name, transport: 'http', enabled: true,
+      urlTemplate: 'https://{mattermost_host}/plugins/mattermost-ai/mcp-server/mcp',
+      headerTemplates: [{ name: 'Authorization', valueTemplate: 'Bearer {personal_access_token}', isSecret: true, variables: [{ name: 'personal_access_token', isSecret: true }] }],
+      auth: { kind: 'oauth' }, enabledFor: ['*'],
+      source: { kind: 'registry', name: MATTERMOST.server.name },
+      needsAuth: { kind: 'setup', keys: ['mattermost_host'] }
+    }])
+    await connectServerSetup(id, { vars: { mattermost_host: 'chat.example.com' } }, deps, ...mkSettings())
+    // il titolo del registro arriva alla prima connessione RIUSCITA
+    expect(deps.listServers()[0]!.name).toBe('Mattermost')
+    expect(deps.listServers()[0]!.source).toEqual(expect.objectContaining({ name: MATTERMOST.server.name }))
+  })
+
+  it('missingSetupKeys e classifyConnectError (puri)', () => {
+    const cfg = {
+      id: 'x', name: 'X', transport: 'http' as const, enabled: true,
+      urlTemplate: 'https://{a}/{b}',
+      headerTemplates: [{ name: 'Authorization', valueTemplate: 'Bearer {t}', isRequired: true, isSecret: true }]
+    }
+    expect(missingSetupKeys(cfg, null)).toEqual({ urlVars: ['a', 'b'], requiredHeader: 'Authorization' })
+    expect(missingSetupKeys({ ...cfg, vars: { a: 'x', b: 'y' } }, { Authorization: 'Bearer k' })).toEqual({ urlVars: [], requiredHeader: null })
+    expect(classifyConnectError('401 Unauthorized')).toBe('unauthorized')
+    expect(classifyConnectError('fetch failed')).toBe('unreachable')
+    expect(classifyConnectError('Error POST /mcp: -32600 not a valid mcp')).toBe('not-mcp')
   })
 })
 
@@ -504,8 +718,9 @@ describe('L2: serverIdFor e le collisioni', () => {
     expect(ids).toHaveLength(2)
     expect(new Set(ids).size).toBe(2)
     const cfg2 = deps.listServers().find((s) => s.source?.kind === 'registry' && s.source.name === 'ai.ai-advisors/mcp')!
-    // il SECONDO chiede la SUA chiave (nessuna eredità dal primo)
-    expect(cfg2.needsAuth).toEqual({ kind: 'key', keys: ['Authorization'] })
+    // il SECONDO chiede la SUA chiave (nessuna eredità dal primo) — fase
+    // mcp-setup: setup, si completa dalla card
+    expect(cfg2.needsAuth).toEqual({ kind: 'setup', keys: ['Authorization'] })
     expect(await deps.store.read(cfg2.id, 'staticHeaders')).toBeUndefined()
     expect(cfg2.url).toBe('https://app.ai-advisors.ai/api/mcp')
   })

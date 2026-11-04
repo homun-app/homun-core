@@ -7,6 +7,9 @@
 // lettura di rete usa il fetch con guardia SSRF della fase 11, host FISSO,
 // timeout 8 s e cache di 10 minuti per query.
 import { webFetchCached, type WebFetchOutcome } from '../agent/web-tools'
+// fase mcp-setup (M1): i template `{var}` dei remoti — puri, condivisi col renderer
+import { templateVarNames } from '../../shared/registry-vars'
+import type { RegistryHeaderSpec, RegistryVarSpec } from '../../shared/registry-vars'
 
 /** L'host fisso del registro: l'unico che questo modulo contatta (hook di test per la verifica d'integrazione). */
 export const REGISTRY_BASE = process.env.SANDBOT_TEST_REGISTRY_URL || 'https://registry.modelcontextprotocol.io'
@@ -21,13 +24,27 @@ export const REGISTRY_CACHE_MS = 10 * 60_000
 export interface RegistryEntry {
   server: {
     name: string
+    /** fase mcp-setup (M2): il nome umano della voce («Mattermost»), quando il registro lo dà */
+    title?: string
     description?: string
     version?: string
-    repository?: { url?: string } | Record<string, unknown>
+    repository?: { url?: string; source?: string } | Record<string, unknown>
+    /** schema 2025-12: le icone della voce (si usa solo un `data:` già dentro la risposta) */
+    icons?: Array<{ src?: string; sizes?: string; mimeType?: string }>
     remotes?: Array<{
       type?: string
       url?: string
-      headers?: Array<{ name?: string; value?: string; isSecret?: boolean; isRequired?: boolean; description?: string }>
+      headers?: Array<{
+        name?: string
+        value?: string
+        isSecret?: boolean
+        isRequired?: boolean
+        description?: string
+        /** fase mcp-setup (M1): le variabili del valore dell'header */
+        variables?: Record<string, { description?: string; isSecret?: boolean; isRequired?: boolean; placeholder?: string; default?: string }>
+      }>
+      /** fase mcp-setup (M1): le variabili dell'URL */
+      variables?: Record<string, { description?: string; isRequired?: boolean; isSecret?: boolean; placeholder?: string; default?: string }>
     }>
     packages?: Array<{
       registryType?: string
@@ -164,8 +181,34 @@ export async function findRegistryEntry(
 
 // ---- come gira una voce del registro (puro, usato da ricerca e card) ----
 
+/** L'header di un remote, coi template e le sue variabili (M1). */
+export interface RemoteHeaderRuntime extends RegistryHeaderSpec {
+  /** le variabili del template, in ordine di comparsa */
+  varNames: string[]
+}
+
+/** Un remote letto TUTTO (M1): URL, variabili e header coi template. */
+export interface RemoteRuntime {
+  url: string
+  /** l'URL coi segnaposto (c'è SOLO quando ha variabili: senza, coincide con url) */
+  urlTemplate?: string
+  /** le variabili dell'URL col loro spec (M1.1; assenti = URL senza `{var}`) */
+  urlVariables?: RegistryVarSpec[]
+  /** gli header col template del valore e le loro variabili (M1.1) */
+  headers?: RemoteHeaderRuntime[]
+  /**
+   * Il modo di autenticarsi (M1.2): 'headers' quando un header è `isRequired`
+   * (il registro dichiara che senza non si entra); header solo facoltativi →
+   * 'oauth' con l'header come ALTERNATIVA (M3). Assente = nessun header, OAuth
+   * come sempre (le voci di ieri danno lo stesso risultato di prima).
+   */
+  auth?: 'oauth' | 'headers'
+  /** il primo header segreto (compatibilità: la chiave della card di ieri) */
+  secretHeader?: string
+}
+
 export type RegistryRuntime =
-  | { kind: 'remote'; url: string; secretHeader?: string }
+  | ({ kind: 'remote' } & RemoteRuntime)
   | { kind: 'box-npm'; identifier: string; version: string }
   | { kind: 'not-installable'; registryType: string; reason?: string }
 
@@ -175,17 +218,54 @@ const remoteUrlOk = (u: string): boolean =>
 
 /**
  * La modalità di esecuzione di una voce del registro (pura): i `remotes`
- * vincono sui `packages` (il server ufficiale espone entrambi); un remote con
- * header `isSecret` richiede una chiave; un pacchetto npm stdio gira NEL BOX
- * (docker exec) con la versione FISSATA a quella dichiarata — un pacchetto
- * senza `version` NON si installa (con "latest" il codice girato cambierebbe
- * in silenzio); pypi/oci/altro non si installano in questa fase.
+ * vincono sui `packages` (il server ufficiale espone entrambi); il remote si
+ * legge TUTTO (M1): template dell'URL, variabili e header coi loro template.
+ * L'autenticazione: un header `isRequired` → 'headers'; header solo
+ * facoltativi → 'oauth' (l'header è l'alternativa di M3, mai più la via
+ * obbligatoria di un semplice `isSecret`); nessun header → 'oauth' come
+ * prima. Un pacchetto npm stdio gira NEL BOX (docker exec) con la versione
+ * FISSATA a quella dichiarata — un pacchetto senza `version` NON si installa;
+ * pypi/oci/altro non si installano in questa fase.
  */
 export function registryRuntime(e: RegistryEntry): RegistryRuntime | null {
   const remote = (e.server.remotes ?? []).find((r) => typeof r.url === 'string' && remoteUrlOk(r.url))
   if (remote) {
-    const secret = (remote.headers ?? []).find((h) => h.isSecret === true && h.name)
-    return { kind: 'remote', url: remote.url!, ...(secret ? { secretHeader: secret.name! } : {}) }
+    const url = remote.url!
+    const declaredVars = remote.variables ?? {}
+    // le variabili dell'URL in ordine di comparsa, arricchite dalla
+    // DICHIARAZIONE del registro (description/placeholder/isRequired/…)
+    const urlVars: RegistryVarSpec[] = templateVarNames(url).map((name) => ({ name, ...(declaredVars[name] ?? {}) }))
+    const headers: RemoteHeaderRuntime[] = (remote.headers ?? [])
+      .filter((h) => typeof h.name === 'string')
+      .map((h) => {
+        // un header SENZA value (il caso di ieri): l'utente scrive il valore
+        // intero — il template è la variabile col nome dell'header stesso
+        const valueTemplate = typeof h.value === 'string' ? h.value : `{${h.name!}}`
+        const declared = h.variables ?? {}
+        const varNames = templateVarNames(valueTemplate)
+        const variables: RegistryVarSpec[] = varNames.map((name) => ({
+          name,
+          // le variabili dell'header ereditano isSecret dall'header stesso
+          ...(declared[name] ?? {}),
+          isSecret: declared[name]?.isSecret ?? h.isSecret === true
+        }))
+        return { name: h.name!, valueTemplate, varNames, variables, ...(h.isRequired !== undefined ? { isRequired: h.isRequired } : {}), ...(h.isSecret !== undefined ? { isSecret: h.isSecret } : {}), ...(h.description ? { description: h.description } : {}) }
+      })
+    // M1.2: 'headers' SOLO se un header è isRequired (smithery); OAuth è il
+    // default anche con header facoltativi (Mattermost)
+    const requiredHeader = headers.find((h) => h.isRequired === true)
+    const secret = headers.find((h) => h.isSecret === true)
+    return {
+      kind: 'remote',
+      url,
+      // i campi nuovi si aggiungono SOLO quando c'è qualcosa da dire: le voci
+      // di ieri (senza variabili né header) danno lo STESSO risultato di prima
+      ...(urlVars.length || headers.length ? { urlTemplate: url } : {}),
+      ...(urlVars.length ? { urlVariables: urlVars } : {}),
+      ...(headers.length ? { headers } : {}),
+      ...(headers.length ? { auth: requiredHeader ? 'headers' as const : 'oauth' as const } : {}),
+      ...(secret ? { secretHeader: secret.name } : {})
+    }
   }
   const pkg = (e.server.packages ?? []).find((p) => p.transport?.type === 'stdio' && p.registryType === 'npm' && p.identifier)
   if (pkg) {
@@ -194,6 +274,52 @@ export function registryRuntime(e: RegistryEntry): RegistryRuntime | null {
   }
   const other = (e.server.packages ?? [])[0]
   if (other?.registryType) return { kind: 'not-installable', registryType: other.registryType }
+  return null
+}
+
+// ---- il nome umano della voce (M2) ----
+
+/** Le etichette DNS inverse in testa a un segmento: com.notion → Notion. */
+const DNS_LABELS = new Set(['com', 'io', 'org', 'net', 'ai', 'dev', 'app', 'co', 'gov', 'edu'])
+
+/**
+ * Il titolo dell'ultima parte del nome tecnico, pulito (puro):
+ * «mattermost-plugin-agents» → «Mattermost Plugin Agents». L'ultima parte è
+ * quasi sempre il repository — ma quando è SOLO «mcp» (com.notion/mcp: nel
+ * registro vero decine di voci finiscono così) dice nulla: si prende la parte
+ * PRIMA, il nome del progetto (com.notion → «Notion»).
+ */
+export function titleFromName(name: string): string {
+  const parts = name.split('/').filter(Boolean)
+  let last = parts[parts.length - 1] ?? name
+  if (/^mcp$/i.test(last) && parts.length >= 2) last = parts[parts.length - 2]!
+  const words = last.split(/[-_.]+/).filter(Boolean)
+  while (words.length > 1 && DNS_LABELS.has(words[0]!.toLowerCase())) words.shift()
+  return words
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ')
+}
+
+/**
+ * Il nome UMANO della voce (M2, puro): `server.title` quando il registro lo
+ * dà («Mattermost»), altrimenti il titolo ricavato dall'ultima parte del nome.
+ */
+export function registryTitle(e: RegistryEntry): string {
+  const t = e.server.title?.trim()
+  if (t) return t
+  return titleFromName(e.server.name)
+}
+
+/**
+ * M2: il logo della voce, SOLO senza rete nuova — un'icona `data:` è già
+ * dentro la risposta del registro; le src https si usano soltanto se sono
+ * già in cache nel renderer (qui non si sa: si passa il candidato e decide
+ * chi mostra). null = l'iniziale, come oggi.
+ */
+export function registryIconDataUrl(e: RegistryEntry): string | null {
+  for (const ic of e.server.icons ?? []) {
+    if (ic.src?.startsWith('data:')) return ic.src
+  }
   return null
 }
 

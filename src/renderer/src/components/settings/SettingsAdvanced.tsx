@@ -5,8 +5,8 @@ import { useState, type ReactNode } from 'react'
 import { Trans } from '@lingui/react/macro'
 import { ChevronDown } from 'lucide-react'
 
-export function SettingsAdvanced({ children, label }: { children: ReactNode; label?: ReactNode }) {
-  const [open, setOpen] = useState(false)
+export function SettingsAdvanced({ children, label, defaultOpen = false }: { children: ReactNode; label?: ReactNode; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen)
   return (
     <div className="pt-1">
       <button

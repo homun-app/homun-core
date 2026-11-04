@@ -424,6 +424,10 @@ msgstr "{tool}: il turno ha letto contenuti web non fidati — l’azione con ef
 msgid "•••• {0}"
 msgstr "•••• {0}"
 
+#: src/renderer/src/components/ServerSetup.tsx
+msgid "•••• salvato"
+msgstr "•••• salvato"
+
 #: src/renderer/src/components/LibraryPanel.tsx
 msgid "← Lista"
 msgstr "← Lista"
@@ -472,6 +476,16 @@ msgstr "⚡ Regola proposta — continuo da solo quando…"
 msgid "⛔ Regola proposta — mi fermo e chiedo sempre quando…"
 msgstr "⛔ Regola proposta — mi fermo e chiedo sempre quando…"
 
+#. placeholder {0}: message.name
+#: src/renderer/src/components/ConnectorCards13.tsx
+msgid "✓ {0} collegato"
+msgstr "✓ {0} collegato"
+
+#. placeholder {0}: message.name
+#: src/renderer/src/components/ConnectorCards13.tsx
+msgid "✓ {0} collegato · {toolsCount} strumenti"
+msgstr "✓ {0} collegato · {toolsCount} strumenti"
+
 #. placeholder {0}: tests[s.id].tools?.length ?? 0
 #. placeholder {1}: (tests[s.id].tools ?? []).join(', ').slice(0, 200)
 #: src/renderer/src/components/AppsWindow.tsx
@@ -489,6 +503,11 @@ msgstr "✓ Appena il provider è a posto preparo i tuoi bot."
 #: src/renderer/src/components/ConnectorCard.tsx
 msgid "✓ Collegata — il bot può usarla"
 msgstr "✓ Collegata — il bot può usarla"
+
+#. placeholder {0}: (result?.tools ?? []).length
+#: src/renderer/src/components/ServerSetup.tsx
+msgid "✓ Collegato · {0} strumenti"
+msgstr "✓ Collegato · {0} strumenti"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -544,13 +563,30 @@ msgstr "A: {0}"
 msgid "Accedi a Composio nel browser…"
 msgstr "Accedi a Composio nel browser…"
 
+#. placeholder {0}: spec.name
+#: src/renderer/src/components/ServerSetup.tsx
+msgid "Accedi con {0}"
+msgstr "Accedi con {0}"
+
 #: src/renderer/src/components/TakeoverCard.tsx
 msgid "Accedi tu sul suo schermo, poi premi «Ho finito». La password non passa dal bot."
 msgstr "Accedi tu sul suo schermo, poi premi «Ho finito». La password non passa dal bot."
 
+#: src/renderer/src/components/ServerSetup.tsx
+msgid "Accesso"
+msgstr "Accesso"
+
+#: src/renderer/src/components/ServerSetup.tsx
+msgid "Accesso rifiutato: il token non è valido."
+msgstr "Accesso rifiutato: il token non è valido."
+
 #: src/renderer/src/components/ConnectorCards13.tsx
-msgid "accesso con il tuo account (OAuth)"
-msgstr "accesso con il tuo account (OAuth)"
+msgid "Accesso: con il tuo account (si apre il browser)"
+msgstr "Accesso: con il tuo account (si apre il browser)"
+
+#: src/renderer/src/components/ConnectorCards13.tsx
+msgid "Accesso: con un token"
+msgstr "Accesso: con un token"
 
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Account Composio"
@@ -559,11 +595,6 @@ msgstr "Account Composio"
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Account Composio · connesso"
 msgstr "Account Composio · connesso"
-
-#. placeholder {0}: message.trustDetail ?? ''
-#: src/renderer/src/components/ConnectorCards13.tsx
-msgid "account GitHub ({0})"
-msgstr "account GitHub ({0})"
 
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "agente"
@@ -637,6 +668,10 @@ msgstr "Aggiungi un bot"
 msgid "Aggiungo…"
 msgstr "Aggiungo…"
 
+#: src/renderer/src/components/ServerSheet.tsx
+msgid "aggiunto da te"
+msgstr "aggiunto da te"
+
 #: src/renderer/src/components/SubagentCard.tsx
 msgid "Aiutante"
 msgstr "Aiutante"
@@ -652,6 +687,10 @@ msgstr "Al lavoro: le card di approvazione del figlio compaiono qui."
 #: src/renderer/src/lib/opening-rows.ts
 msgid "Al tuo rientro"
 msgstr "Al tuo rientro"
+
+#: src/renderer/src/components/ServerSetup.tsx
+msgid "Alcuni valori non vanno bene: correggili e riprova."
+msgstr "Alcuni valori non vanno bene: correggili e riprova."
 
 #: src/renderer/src/components/Settings.tsx
 msgid "All’avvio"
@@ -826,6 +865,10 @@ msgstr "Apri i membri di {0}"
 #: src/renderer/src/components/ApprovalCard.tsx
 msgid "Apri Impostazioni → Approvazione automatica con una regola precompilata"
 msgstr "Apri Impostazioni → Approvazione automatica con una regola precompilata"
+
+#: src/renderer/src/components/ServerSetup.tsx
+msgid "Apri la finestra dell'app per autorizzare."
+msgstr "Apri la finestra dell'app per autorizzare."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -1008,6 +1051,10 @@ msgstr "bot"
 msgid "Bot"
 msgstr "Bot"
 
+#: src/renderer/src/components/ServerSheet.tsx
+msgid "Bot che lo usano"
+msgstr "Bot che lo usano"
+
 #: src/renderer/src/components/DraftCard.tsx
 msgid "bozza — si invia solo se confermi"
 msgstr "bozza — si invia solo se confermi"
@@ -1061,6 +1108,7 @@ msgstr "cache"
 msgid "trigger.offsetMissing"
 msgstr "calendar_event: offsetMinutes mancante (minuti prima dell’evento)"
 
+#: src/renderer/src/components/ServerSetup.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "cambia"
 msgstr "cambia"
@@ -1319,6 +1367,7 @@ msgid "codice TOTP"
 msgstr "codice TOTP"
 
 #: src/renderer/src/components/ConnectorCard.tsx
+#: src/renderer/src/components/ServerSetup.tsx
 #: src/renderer/src/components/settings/AddProviderSheet.tsx
 #: src/renderer/src/components/ui/ModelSelect.tsx
 msgid "Collega"
@@ -1356,6 +1405,10 @@ msgstr "Collegato"
 #: src/renderer/src/components/BotDialogs.tsx
 msgid "Colore {col}"
 msgstr "Colore {col}"
+
+#: src/renderer/src/components/ServerSheet.tsx
+msgid "Comando"
+msgstr "Comando"
 
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Comando (es. node)"
@@ -1456,6 +1509,10 @@ msgstr "Computer"
 msgid "Computer del bot"
 msgstr "Computer del bot"
 
+#: src/renderer/src/components/ServerSetup.tsx
+msgid "Con il tuo account"
+msgstr "Con il tuo account"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "onboarding.help"
@@ -1524,6 +1581,7 @@ msgid "trigger.toolMissing"
 msgstr "connector_poll: tool mancante"
 
 #: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/ServerSheet.tsx
 msgid "Connessa"
 msgstr "Connessa"
 
@@ -1758,6 +1816,11 @@ msgstr "da autorizzare"
 msgid "conn.needsAuthSettings"
 msgstr "da autorizzare (Impostazioni → Installati → Connetti)"
 
+#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/ServerSheet.tsx
+msgid "Da completare"
+msgstr "Da completare"
+
 #. placeholder {0}: message.settings.map((st) => st.key).join(', ')
 #: src/renderer/src/components/ConnectorCards13.tsx
 msgid "da configurare: {0} (Impostazioni)"
@@ -1892,11 +1955,6 @@ msgstr "domanda scavalcata, hai proseguito senza rispondere"
 msgid "domenica"
 msgstr "domenica"
 
-#. placeholder {0}: message.trustDetail ?? ''
-#: src/renderer/src/components/ConnectorCards13.tsx
-msgid "dominio verificato ({0})"
-msgstr "dominio verificato ({0})"
-
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "kick.4"
@@ -1909,6 +1967,11 @@ msgstr "Dopo queste ore di assenza, il bot guarda cosa è cambiato."
 #: src/renderer/src/components/Settings.tsx
 msgid "Dopo questi giorni di assenza, le routine si fermano."
 msgstr "Dopo questi giorni di assenza, le routine si fermano."
+
+#. placeholder {0}: message.name
+#: src/renderer/src/components/ConnectorCards13.tsx
+msgid "Dove gira: sul server {0} che indichi tu"
+msgstr "Dove gira: sul server {0} che indichi tu"
 
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Dove la trovo? Copia la chiave API dalle impostazioni del tuo progetto su Composio (composio.dev → Settings → API Keys)."
@@ -2089,10 +2152,6 @@ msgstr "fermo"
 msgid "fiducia: {pluginTrust} · commit {0}{1}"
 msgstr "fiducia: {pluginTrust} · commit {0}{1}"
 
-#: src/renderer/src/components/ConnectorCards13.tsx
-msgid "fiducia: {trust} · come gira: {runtime}"
-msgstr "fiducia: {trust} · come gira: {runtime}"
-
 #: src/renderer/src/components/LibraryPanel.tsx
 msgid "file"
 msgstr "file"
@@ -2140,6 +2199,10 @@ msgstr "finito"
 msgid "Fissa"
 msgstr "Fissa"
 
+#: src/renderer/src/components/ServerSheet.tsx
+msgid "Fonte"
+msgstr "Fonte"
+
 #: src/renderer/src/components/Settings.tsx
 msgid "Fuso orario"
 msgstr "Fuso orario"
@@ -2152,6 +2215,10 @@ msgstr "Fuso orario (es. Europe/Rome)"
 #: src/shared/ui-messages.ts
 msgid "rpc.tzInvalid"
 msgstr "Fuso orario non valido: \"{tz}\""
+
+#: src/renderer/src/components/ServerSheet.tsx
+msgid "gateway"
+msgstr "gateway"
 
 #: src/renderer/src/components/BotDialogs.tsx
 msgid "Gelatina"
@@ -2440,6 +2507,10 @@ msgstr "i passaggi del turno"
 msgid "I secret servono ai COMANDI dei bot (<0>{SECRET_TEMPLATE}</0>): il valore entra solo nell'env del processo, mai nel transcript."
 msgstr "I secret servono ai COMANDI dei bot (<0>{SECRET_TEMPLATE}</0>): il valore entra solo nell'env del processo, mai nel transcript."
 
+#: src/renderer/src/components/ServerSheet.tsx
+msgid "I token stanno cifrati sul tuo Mac."
+msgstr "I token stanno cifrati sul tuo Mac."
+
 #: src/renderer/src/components/Settings.tsx
 msgid "idField (es. \"messages[].id\")"
 msgstr "idField (es. \"messages[].id\")"
@@ -2662,6 +2733,11 @@ msgstr "il server"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
+msgid "conn.serverNeedsSetup"
+msgstr "il server \"{name}\" non è ancora configurato ({keys}): si completa dalla sua card"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
 msgid "rpc.missingValues"
 msgstr "il server \"{name}\" richiede i valori {keys}: l’utente li inserisce nelle Impostazioni"
 
@@ -2795,6 +2871,7 @@ msgstr "Incolla la chiave"
 msgid "Indietro"
 msgstr "Indietro"
 
+#: src/renderer/src/components/ServerSheet.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "Indirizzo"
@@ -2804,9 +2881,18 @@ msgstr "Indirizzo"
 msgid "Indirizzo (es. http://127.0.0.1:8000/v1)"
 msgstr "Indirizzo (es. http://127.0.0.1:8000/v1)"
 
+#. placeholder {0}: label.addressOf
+#: src/renderer/src/components/ServerSetup.tsx
+msgid "Indirizzo del server {0}"
+msgstr "Indirizzo del server {0}"
+
 #: src/renderer/src/components/Settings.tsx
 msgid "ingresso $/M"
 msgstr "ingresso $/M"
+
+#: src/renderer/src/components/ServerSetup.tsx
+msgid "Inserisci un valore"
+msgstr "Inserisci un valore"
 
 #: src/renderer/src/components/ConnectorCards13.tsx
 msgid "Installa"
@@ -2899,6 +2985,10 @@ msgstr "Italiano"
 msgid "rpc.keychainUnavailable"
 msgstr "Keychain non disponibile: impossibile conservare la chiave"
 
+#: src/renderer/src/components/ServerSetup.tsx
+msgid "L'indirizzo non risponde: controllalo e riprova."
+msgstr "L'indirizzo non risponde: controllalo e riprova."
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "totp.noSecret"
@@ -2908,6 +2998,16 @@ msgstr "l’URI otpauth non contiene il parametro secret"
 #: src/shared/ui-messages.ts
 msgid "rpc.gatewayHttps"
 msgstr "l’URL del gateway deve essere https"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "sistema.composioAppConnected"
+msgstr "L’utente ha collegato {name} (tramite Composio): i suoi strumenti composio__{slug}__* sono ora disponibili."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "sistema.serverConnected"
+msgstr "L’utente ha collegato {name}: i suoi strumenti {prefix}__* sono ora disponibili."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -3100,10 +3200,6 @@ msgstr "lunedì"
 #: src/renderer/src/components/Chat.tsx
 msgid "Manda un messaggio a {0} per iniziare."
 msgstr "Manda un messaggio a {0} per iniziare."
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "manuale"
-msgstr "manuale"
 
 #: src/renderer/src/components/ConnectorCards13.tsx
 msgid "marketplace aggiunto da te"
@@ -3435,9 +3531,9 @@ msgstr "Nessuna chiamata nel periodo."
 msgid "Nessuna concessione: ogni fill chiede la card."
 msgstr "Nessuna concessione: ogni fill chiede la card."
 
-#: src/renderer/src/components/ConnectorCards13.tsx
-msgid "nessuna credenziale"
-msgstr "nessuna credenziale"
+#: src/renderer/src/components/ServerSheet.tsx
+msgid "Nessuna configurazione in attesa."
+msgstr "Nessuna configurazione in attesa."
 
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Nessuna descrizione."
@@ -3476,6 +3572,18 @@ msgstr "Nessuno strumento d'invio per questo canale: copia il testo"
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 msgid "Nessuno: senza, Automatico chiede sempre."
 msgstr "Nessuno: senza, Automatico chiede sempre."
+
+#: src/renderer/src/components/ServerSetup.tsx
+msgid "Niente «@»: serve l'indirizzo del server, non un account"
+msgstr "Niente «@»: serve l'indirizzo del server, non un account"
+
+#: src/renderer/src/components/ServerSetup.tsx
+msgid "Niente «/»: serve il solo indirizzo, non un percorso"
+msgstr "Niente «/»: serve il solo indirizzo, non un percorso"
+
+#: src/renderer/src/components/ServerSetup.tsx
+msgid "Niente spazi nell'indirizzo"
+msgstr "Niente spazi nell'indirizzo"
 
 #: src/renderer/src/components/ui/ModelPicker.tsx
 msgid "niente tool"
@@ -3516,6 +3624,10 @@ msgstr "Nome del server non valido"
 #: src/renderer/src/components/BotDialogs.tsx
 msgid "Nome della squadra"
 msgstr "Nome della squadra"
+
+#: src/renderer/src/components/ServerSheet.tsx
+msgid "Nome tecnico"
+msgstr "Nome tecnico"
 
 #: src/renderer/src/lib/fill-fields.ts
 msgid "nome utente"
@@ -3581,6 +3693,10 @@ msgstr "Non riesco a cercare nel registro"
 msgid "Non riesco a cercare sul Mac: riprova."
 msgstr "Non riesco a cercare sul Mac: riprova."
 
+#: src/renderer/src/components/ServerSetup.tsx
+msgid "Non riesco a collegarmi: riprova."
+msgstr "Non riesco a collegarmi: riprova."
+
 #: src/renderer/src/components/LibraryPanel.tsx
 msgid "Non riesco a leggere la libreria"
 msgstr "Non riesco a leggere la libreria"
@@ -3625,6 +3741,10 @@ msgstr "Non salvato"
 #: src/renderer/src/components/ConnectorCards13.tsx
 msgid "non supportato: valore in argv ({0})"
 msgstr "non supportato: valore in argv ({0})"
+
+#: src/renderer/src/components/ServerSetup.tsx
+msgid "Non valido"
+msgstr "Non valido"
 
 #: src/renderer/src/components/ConnectorCards13.tsx
 msgid "non verificato"
@@ -3827,6 +3947,10 @@ msgstr "Per cosa vuoi usarmi di più?"
 msgid "Per esempio: segue le ricevute email e prepara il riepilogo della settimana…"
 msgstr "Per esempio: segue le ricevute email e prepara il riepilogo della settimana…"
 
+#: src/renderer/src/components/ServerSetup.tsx
+msgid "Per farlo partire"
+msgstr "Per farlo partire"
+
 #: src/renderer/src/components/ComputerPanel.tsx
 msgid "Per il computer dei bot serve Docker Desktop: installalo e aprilo, poi Riprova."
 msgstr "Per il computer dei bot serve Docker Desktop: installalo e aprilo, poi Riprova."
@@ -3880,6 +4004,10 @@ msgstr "Più strumenti d'invio per questo canale: chiedi al bot di sceglierne un
 #: src/renderer/src/components/BotDialogs.tsx
 msgid "Pixel"
 msgstr "Pixel"
+
+#: src/renderer/src/components/ServerSheet.tsx
+msgid "plugin"
+msgstr "plugin"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -4071,6 +4199,10 @@ msgstr "provider non trovato"
 msgid "rpc.providerNotFound"
 msgstr "Provider non trovato"
 
+#: src/renderer/src/components/ServerSetup.tsx
+msgid "Provo a collegarmi…"
+msgstr "Provo a collegarmi…"
+
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Provo l’indirizzo…"
 msgstr "Provo l’indirizzo…"
@@ -4086,6 +4218,16 @@ msgstr "provo…"
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Provo…"
 msgstr "Provo…"
+
+#. placeholder {0}: message.trustDetail ?? ''
+#: src/renderer/src/components/ConnectorCards13.tsx
+msgid "Pubblicato da {0} (dominio verificato)"
+msgstr "Pubblicato da {0} (dominio verificato)"
+
+#. placeholder {0}: message.trustDetail ?? ''
+#: src/renderer/src/components/ConnectorCards13.tsx
+msgid "Pubblicato da {0} su GitHub"
+msgstr "Pubblicato da {0} su GitHub"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -4165,6 +4307,14 @@ msgstr "Questo mese"
 msgid "Questo modello non vede le immagini"
 msgstr "Questo modello non vede le immagini"
 
+#: src/renderer/src/components/ServerSetup.tsx
+msgid "Questo non sembra un server MCP: controlla l'indirizzo."
+msgstr "Questo non sembra un server MCP: controlla l'indirizzo."
+
+#: src/renderer/src/components/ServerSetup.tsx
+msgid "Questo server non permette l'accesso dal browser: usa un token di accesso."
+msgstr "Questo server non permette l'accesso dal browser: usa un token di accesso."
+
 #: src/renderer/src/components/Settings.tsx
 msgid "quick ask"
 msgstr "quick ask"
@@ -4191,6 +4341,10 @@ msgstr "Ragionamento"
 #: src/renderer/src/components/ui/ModelSelect.tsx
 msgid "Ragionamento: Predefinito"
 msgstr "Ragionamento: Predefinito"
+
+#: src/renderer/src/components/ServerSheet.tsx
+msgid "registro MCP"
+msgstr "registro MCP"
 
 #: src/renderer/src/components/RuleProposalCard.tsx
 msgid "Regola aggiunta"
@@ -4279,14 +4433,15 @@ msgid "richiudi"
 msgstr "richiudi"
 
 #: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/ServerSheet.tsx
 msgid "Ricollega"
 msgstr "Ricollega"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/ServerSheet.tsx
 msgid "riconnessione non riuscita"
 msgstr "riconnessione non riuscita"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/ServerSheet.tsx
 msgid "riconnesso"
 msgstr "riconnesso"
 
@@ -4320,9 +4475,14 @@ msgstr "Rifiutato"
 msgid "rimuovi"
 msgstr "rimuovi"
 
+#: src/renderer/src/components/ServerSheet.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Rimuovi"
 msgstr "Rimuovi"
+
+#: src/renderer/src/components/ServerSheet.tsx
+msgid "Rimuovi davvero"
+msgstr "Rimuovi davvero"
 
 #: src/renderer/src/components/LibraryPanel.tsx
 msgid "Rinomina"
@@ -4466,10 +4626,6 @@ msgstr "Salva"
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Salva chiave"
 msgstr "Salva chiave"
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "salva cifrato"
-msgstr "salva cifrato"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -4739,22 +4895,6 @@ msgstr "serve un nome per il gateway"
 msgid "totp.notTotpUri"
 msgstr "serve un URI otpauth:// (TOTP)"
 
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "serve: {keys} (header)"
-msgstr "serve: {keys} (header)"
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "serve: {keys} (impostazione del plugin)"
-msgstr "serve: {keys} (impostazione del plugin)"
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "serve: {keys} (variabile d'ambiente)"
-msgstr "serve: {keys} (variabile d'ambiente)"
-
-#: src/renderer/src/components/ConnectorCards13.tsx
-msgid "serve: {needs}"
-msgstr "serve: {needs}"
-
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "sistema.serverAdded"
@@ -4770,13 +4910,22 @@ msgstr "Server \"{name}\" NON aggiunto: {error}"
 msgid "rpc.serverNotFound"
 msgstr "server {id} non trovato"
 
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Server del registro pubblico. Chiavi, header e variabili stanno cifrati: si compilano qui, MAI in chat."
-msgstr "Server del registro pubblico. Chiavi, header e variabili stanno cifrati: si compilano qui, MAI in chat."
+#: src/renderer/src/components/ConnectorCards13.tsx
+msgid "Server di terzi: può leggere e fare quello che gli permettono i suoi strumenti"
+msgstr "Server di terzi: può leggere e fare quello che gli permettono i suoi strumenti"
 
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Server esterno"
 msgstr "Server esterno"
+
+#: src/renderer/src/components/ServerSheet.tsx
+msgid "Server MCP"
+msgstr "Server MCP"
+
+#. placeholder {0}: publisherLine(sv)
+#: src/renderer/src/components/ServerSheet.tsx
+msgid "Server MCP · Pubblicato da {0}"
+msgstr "Server MCP · Pubblicato da {0}"
 
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Server MCP manuali (stdio o HTTP, con header/bearer salvati cifrati)."
@@ -4798,10 +4947,6 @@ msgstr "Server personalizzati, plugin, gateway e registro: chi sa cos'è un serv
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "install.thirdParty"
-msgstr "Server pubblicato da terzi: può leggere e fare quello che gli permettono i suoi strumenti"
-
-#: src/renderer/src/components/ConnectorCards13.tsx
-msgid "Server pubblicato da terzi: può leggere e fare quello che gli permettono i suoi strumenti"
 msgstr "Server pubblicato da terzi: può leggere e fare quello che gli permettono i suoi strumenti"
 
 #: src/renderer/src/components/ConnectorCards13.tsx
@@ -4847,6 +4992,10 @@ msgstr "Sezione"
 msgid "Shell del bot — stessa identità dei suoi comandi."
 msgstr "Shell del bot — stessa identità dei suoi comandi."
 
+#: src/renderer/src/components/ServerSetup.tsx
+msgid "Si apre il browser per accedere: è la via più semplice."
+msgstr "Si apre il browser per accedere: è la via più semplice."
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "install.hostModeCard"
@@ -4860,6 +5009,10 @@ msgstr "si installa solo nel computer dei bot (modalità docker)"
 #: src/shared/ui-messages.ts
 msgid "rpc.filesNotAFile"
 msgstr "Si può scaricare solo un file, non una cartella."
+
+#: src/renderer/src/components/ServerSetup.tsx
+msgid "Si salvano cifrate sul tuo Mac quando premi Collega."
+msgstr "Si salvano cifrate sul tuo Mac quando premi Collega."
 
 #: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/Sidebar.tsx
@@ -5074,6 +5227,14 @@ msgstr "Titolo (es. Riepilogo email del mattino)"
 msgid "Togli"
 msgstr "Togli"
 
+#: src/renderer/src/components/ServerSetup.tsx
+msgid "Token di accesso"
+msgstr "Token di accesso"
+
+#: src/renderer/src/components/ServerSetup.tsx
+msgid "Token di accesso (facoltativo)"
+msgstr "Token di accesso (facoltativo)"
+
 #: src/renderer/src/components/Settings.tsx
 msgid "token in"
 msgstr "token in"
@@ -5211,6 +5372,7 @@ msgstr "Tutti"
 
 #: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/LibraryPanel.tsx
+#: src/renderer/src/components/ServerSheet.tsx
 msgid "Tutti i bot"
 msgstr "Tutti i bot"
 
@@ -5252,6 +5414,11 @@ msgstr "ultimo errore"
 msgid "ultimo errore: {0}{1}"
 msgstr "ultimo errore: {0}{1}"
 
+#. placeholder {0}: message.name
+#: src/renderer/src/components/ConnectorCards13.tsx
+msgid "Ultimo passo: collega {0}"
+msgstr "Ultimo passo: collega {0}"
+
 #: src/renderer/src/components/settings/AddProviderSheet.tsx
 msgid "Un altro server"
 msgstr "Un altro server"
@@ -5268,11 +5435,6 @@ msgstr "Un gateway custodisce l’accesso a tutte le app che colleghi lì: è un
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 msgid "Un modello controlla ogni azione contro le tue regole: quelle semplici passano, per le altre il bot chiede."
 msgstr "Un modello controlla ogni azione contro le tue regole: quelle semplici passano, per le altre il bot chiede."
-
-#. placeholder {0}: message.needs.header
-#: src/renderer/src/components/ConnectorCards13.tsx
-msgid "una chiave ({0}): la inserisci tu nelle Impostazioni"
-msgstr "una chiave ({0}): la inserisci tu nelle Impostazioni"
 
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 msgid "Una di queste regole vince sempre sulle altre: l’azione diventa una card."
@@ -5373,10 +5535,9 @@ msgstr "Valore"
 msgid "Valore (sostituisce)"
 msgstr "Valore (sostituisce)"
 
-#. placeholder {0}: message.needs.vars.filter((v) => v.required).map((v) => v.name).join(', ')
-#: src/renderer/src/components/ConnectorCards13.tsx
-msgid "variabili d'ambiente: {0} (le compili tu nelle Impostazioni)"
-msgstr "variabili d'ambiente: {0} (le compili tu nelle Impostazioni)"
+#: src/renderer/src/components/ServerSetup.tsx
+msgid "Variabili d'ambiente"
+msgstr "Variabili d'ambiente"
 
 #: src/renderer/src/components/ui/ModelSelect.tsx
 msgid "vede (immagini)"

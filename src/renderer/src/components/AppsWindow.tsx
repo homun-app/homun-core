@@ -17,10 +17,10 @@ import { Search, X } from 'lucide-react'
 import { api, useStore } from '../store'
 import { i18n } from '../lib/i18n'
 import { loadAppCatalog, appCategoryLabel, appTaglineOf, type AppCatalogRow, type AppCategoryId } from '../../../shared/app-catalog'
-import type { McpServerInfo, McpServerSecret, AppsRegistryResult, SecretKind } from '../../../shared/types'
-import { SECRET_KIND_FOR_NEEDS } from '../../../shared/types'
+import type { McpServerInfo, McpServerSecret, AppsRegistryResult } from '../../../shared/types'
 import { appsViewModel, appsCatalogModel, type AppsFilter, type InstalledServerLike, type InstalledPluginLike, type ConnectedRow, type CatalogRowView } from '../lib/apps-view'
 import { catalogLogoUrl } from '../lib/app-logos'
+import { ServerSheet } from './ServerSheet'
 import { Dialog, DialogContent, DialogTitle } from './ui/dialog'
 
 /** La lingua attiva come UiLanguage. */
@@ -71,102 +71,9 @@ function AppLogo({ logo, name, className = 'size-10 text-base' }: { logo: string
   )
 }
 
-/** Il dettaglio di un server MCP installato: per quali bot, chiavi, disinstalla (ciò che faceva InstalledTab). */
-function ServerDetail({ sv, onDone }: { sv: InstalledServerLike & { needsAuth?: { kind?: string; keys?: string[] } | null; transport?: string; url?: string; command?: string; args?: string[]; box?: { command?: string; args?: string[] } }; onDone(): void }) {
-  const { t } = useLingui()
-  const agents = useStore((s) => s.agents)
-  const [values, setValues] = useState<Record<string, string>>({})
-  const [msg, setMsg] = useState('')
-  const needs = sv.needsAuth as { kind?: string; keys?: string[] } | null | undefined
-  const keys = needs?.keys?.join(', ') ?? ''
-  const enabledForEditor = (current: string[] | undefined): ReactNode => (
-    <div className="flex flex-wrap items-center gap-2">
-      <span className="text-[11px] text-muted-foreground"><Trans>per bot:</Trans></span>
-      {agents.map((a) => {
-        const on = current?.includes('*') || current?.includes(a.id)
-        return (
-          <label key={a.id} className="flex items-center gap-1 text-[11px] text-muted-foreground">
-            <input
-              type="checkbox"
-              className="h-3 w-3 accent-foreground"
-              checked={on}
-              onChange={() => {
-                const next = current?.includes('*') ? [] : [...(current ?? [])]
-                const i = next.indexOf(a.id)
-                if (i >= 0) next.splice(i, 1)
-                else next.push(a.id)
-                void api.connectorsSetEnabledFor('server', sv.id, next).then(() => onDone())
-              }}
-            />
-            {a.name}
-          </label>
-        )
-      })}
-    </div>
-  )
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-2">
-        <span className={`h-2 w-2 rounded-full ${needs ? 'bg-destructive' : 'bg-chart-2'}`} />
-        <span className="text-sm font-medium">{sv.name}</span>
-        <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">{sv.source?.kind ?? t`manuale`}</span>
-        <div className="flex-1" />
-        <button
-          className="rounded-full px-3 py-1.5 text-xs text-destructive transition hover:bg-destructive/10"
-          onClick={async () => { await api.connectorsUninstallServer(sv.id); onDone() }}
-        >
-          <Trans>Disinstalla</Trans>
-        </button>
-      </div>
-      <p className="truncate text-xs text-muted-foreground">{sv.transport === 'http' ? (sv.url ?? '') : `${sv.box?.command ?? sv.command ?? ''} ${(sv.box?.args ?? sv.args ?? []).join(' ')}`}</p>
-      {sv.needsReauth && (
-        <button
-          className="rounded-full bg-foreground px-3.5 py-1.5 text-xs font-medium text-background transition hover:opacity-90"
-          onClick={async () => {
-            const r = await api.connectorsReconnectServer(sv.id).catch((e: unknown) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e) }))
-            setMsg(r.ok ? (r.message ?? t`riconnesso`) : t`riconnessione non riuscita`)
-            onDone()
-          }}
-        >
-          <Trans>Ricollega</Trans>
-        </button>
-      )}
-      {msg && <p className="text-[11px] text-muted-foreground">{msg}</p>}
-      {enabledForEditor(sv.enabledFor ?? undefined)}
-      {needs?.keys?.length ? (
-        <div className="space-y-1 rounded-2xl bg-muted p-3">
-          <p className="text-[11px] text-destructive/80">
-            {needs.kind === 'key' ? <Trans>serve: {keys} (header)</Trans> : needs.kind === 'env' ? <Trans>serve: {keys} (variabile d'ambiente)</Trans> : <Trans>serve: {keys} (impostazione del plugin)</Trans>}
-          </p>
-          {needs.keys.map((k) => (
-            <input
-              key={k}
-              className="min-w-0 flex-1 rounded-lg bg-card px-2 py-1 text-xs outline-none"
-              type="password"
-              placeholder={k}
-              value={values[`${sv.id}:${k}`] ?? ''}
-              onChange={(e) => setValues((p) => ({ ...p, [`${sv.id}:${k}`]: e.target.value }))}
-            />
-          ))}
-          <button
-            className="rounded-full bg-card px-3 py-1 text-xs transition hover:bg-card/80"
-            onClick={async () => {
-              const vals: Record<string, string> = {}
-              for (const k of needs.keys ?? []) if (values[`${sv.id}:${k}`]?.trim()) vals[k] = values[`${sv.id}:${k}`]!.trim()
-              await api.connectorsSaveServerValues(sv.id, SECRET_KIND_FOR_NEEDS[needs.kind as keyof typeof SECRET_KIND_FOR_NEEDS] as SecretKind, vals)
-              setValues({})
-              onDone()
-            }}
-          >
-            <Trans>salva cifrato</Trans>
-          </button>
-        </div>
-      ) : null}
-      <p className="text-[11px] text-muted-foreground">
-        <Trans>Server del registro pubblico. Chiavi, header e variabili stanno cifrati: si compilano qui, MAI in chat.</Trans>
-      </p>
-    </div>
-  )
+/** Il dettaglio di un server MCP installato: il foglio M6 (ServerSheet). */
+function ServerDetail({ sv, onDone }: { sv: InstalledServerLike & Record<string, unknown>; onDone(): void }): ReactNode {
+  return <ServerSheet sv={sv as never} onDone={onDone} />
 }
 
 /** Server MCP aggiunti a mano: il form di oggi, dentro un foglio. */
@@ -1041,6 +948,7 @@ export function AppsView({ embedded = false }: { embedded?: boolean }) {
                 key={row.key}
                 className="flex items-center gap-3 rounded-[14px] px-1 py-2 text-left transition hover:bg-muted/60"
                 onClick={() => setLinkedDetail(row)}
+                data-testid={`server-row-${row.id}`}
               >
                 <AppLogo logo={row.logo} name={row.name} />
                 <span className="min-w-0 flex-1">
@@ -1048,7 +956,10 @@ export function AppsView({ embedded = false }: { embedded?: boolean }) {
                   <span className="block truncate text-[13px] text-muted-foreground">{botsHalfLine(row.botsLabel)}</span>
                   <ProvenanceTag via={row.via} />
                 </span>
-                {row.status === 'reconnect' ? (
+                {row.status === 'setup' ? (
+                  // fase mcp-setup (M6.1): mai partito — la configurazione manca
+                  <span className="shrink-0 rounded-full bg-amber-500/15 px-3 py-1 text-xs text-amber-600 dark:text-amber-400" data-testid="server-status-setup"><Trans>Da completare</Trans></span>
+                ) : row.status === 'reconnect' ? (
                   <span className="shrink-0 rounded-full bg-foreground px-3 py-1 text-xs text-background"><Trans>Ricollega</Trans></span>
                 ) : (
                   <span className="shrink-0 text-sm text-chart-2"><Trans>Connessa</Trans></span>

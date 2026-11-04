@@ -5112,7 +5112,7 @@ describe('fase 13: add_mcp_server / install_plugin / find_tools / result MCP', (
     const card = h.db.entries.find((e) => e.kind === 'send-message')
     expect(card).toBeTruthy()
     expect(card?.meta?.message).toMatchObject({
-      type: 'mcp-server', id: 'registry:com.notion/mcp', name: 'com.notion/mcp',
+      type: 'mcp-server', id: 'registry:com.notion/mcp', name: 'Notion', technicalName: 'com.notion/mcp',
       // fase 17c (C5): il label di fiducia per il modello è inglese; la UI
       // traduce da trustKind + trustDetail
       trust: 'verified domain (notion.com)',

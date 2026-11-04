@@ -56,6 +56,7 @@ export const DAEMON_RPC_CHANNELS = [
   // fase 13: connettori su larga scala (registro, plugin, gateway)
   'connectors:installed', 'connectors:resolve-mcp-server', 'connectors:save-server-values',
   'connectors:set-enabled-for', 'connectors:uninstall-server', 'connectors:reconnect-server', 'connectors:add-gateway',
+  'connectors:server-setup', 'connectors:server-connect',
   'connectors:gateway-presets', 'connectors:set-client-metadata-url',
   'plugins:resolve', 'plugins:uninstall',
   'marketplace:list', 'marketplace:add', 'marketplace:remove',

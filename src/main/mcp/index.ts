@@ -67,8 +67,27 @@ export interface McpServerConfig {
    * Mai un valore dell'utente qui dentro.
    */
   pluginSpec?: { url?: string; headers?: Record<string, string>; env?: Record<string, string> }
-  /** fase 13: installato ma in attesa di valori che l'utente inserisce nelle Impostazioni */
-  needsAuth?: { kind: 'key' | 'env' | 'settings'; keys: string[] }
+  /**
+   * fase mcp-setup (M1): il template `{var}` dell'URL di un remote del
+   * registro (pubblico, dal registro stesso) e i valori NON segreti delle
+   * variabili. I segreti stanno nello store cifrato; l'URL si risolve alla
+   * connessione (buildMcpAuthResolver). Mai un segreto qui dentro.
+   */
+  urlTemplate?: string
+  /** fase mcp-setup (M1): i valori NON segreti delle variabili del template (per esempio mattermost_host) */
+  vars?: Record<string, string>
+  /**
+   * fase mcp-setup (M1): i template degli header del registro (pubblici). Il
+   * VALORE risolto di un header segreto si salva nello store cifrato (kind
+   * headers); qui resta solo il template.
+   */
+  headerTemplates?: Array<{ name: string; valueTemplate: string; isRequired?: boolean; isSecret?: boolean; description?: string; variables?: Array<{ name: string; description?: string; isSecret?: boolean }> }>
+  /**
+   * fase 13: installato ma in attesa di valori che l'utente inserisce nelle
+   * Impostazioni; fase mcp-setup (M1): 'setup' = il modulo della card/foglio
+   * (variabili dell'URL o accesso da fare).
+   */
+  needsAuth?: { kind: 'key' | 'env' | 'settings' | 'setup'; keys: string[] }
   /** fase 13: fiducia mostrata nella scheda Installati (dominio verificato, …) */
   trustLabel?: string
   /** fase 17c (C5): il kind della fiducia — la UI lo traduce */
@@ -219,6 +238,15 @@ export function saveServers(s: McpServerConfig[]): void {
 
 function slug(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+}
+
+/**
+ * Fase mcp-setup (M5.2): il prefisso degli strumenti di un server nella
+ * pipeline (mcp__&lt;slug del nome&gt;) — per il messaggio di sistema che dice
+ * al bot che l'utente ha completato il collegamento.
+ */
+export function serverToolsPrefix(serverName: string): string {
+  return `mcp__${slug(serverName)}`
 }
 
 /** Stato del connettore collegato al server (fase 5), se ce n'è uno. */

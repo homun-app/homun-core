@@ -136,7 +136,7 @@ export function Settings() {
 }
 
 /** I5.3: L'unico interruttore delle impostazioni (quello di «Mostra i passaggi»). */
-function Toggle({ checked, onChange, disabled, label }: {
+export function Toggle({ checked, onChange, disabled, label }: {
   checked: boolean
   onChange(v: boolean): void
   disabled?: boolean

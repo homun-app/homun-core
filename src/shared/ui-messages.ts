@@ -238,6 +238,14 @@ export const UI = {
     message:
       'L’utente ha connesso {name}: i tool mcp__{connectorId}__* sono ora disponibili (i nomi esatti li trovi coi tuoi tool o chiedendo all’utente).'
   }),
+  sistemaServerConnected: msg({
+    id: 'sistema.serverConnected',
+    message: 'L’utente ha collegato {name}: i suoi strumenti {prefix}__* sono ora disponibili.'
+  }),
+  sistemaComposioAppConnected: msg({
+    id: 'sistema.composioAppConnected',
+    message: 'L’utente ha collegato {name} (tramite Composio): i suoi strumenti composio__{slug}__* sono ora disponibili.'
+  }),
 
   // ---- aperture dei turni di routine/task e shell (MU, C2) ----
   openRoutine: msg({ id: 'open.routine', message: '[routine ricorrente: {title}] {prompt}' }),
@@ -460,6 +468,10 @@ export const UI = {
   connPluginNeedsAuth: msg({
     id: 'conn.pluginNeedsAuth',
     message: 'il server "{name}" richiede i valori {keys}: l’utente li inserisce nelle Impostazioni'
+  }),
+  connServerNeedsSetup: msg({
+    id: 'conn.serverNeedsSetup',
+    message: 'il server "{name}" non è ancora configurato ({keys}): si completa dalla sua card'
   }),
   rpcAuthFailed: msg({ id: 'rpc.authFailed', message: 'autorizzazione non riuscita ({error})' }),
   rpcAuthOkServerDown: msg({ id: 'rpc.authOkServerDown', message: 'autorizzazione riuscita ma il server non risponde: {error}' }),

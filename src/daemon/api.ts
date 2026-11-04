@@ -1040,7 +1040,10 @@ export function buildApiMethods(
         const needsReauth = s.auth?.kind === 'oauth' && !s.catalogId && states[s.id]?.status === 'needs_auth'
         let neverAuthorized: boolean | undefined
         if (needsReauth && storeRead) neverAuthorized = !(await storeRead(s.id, 'oauth.tokens'))
-        servers.push({ ...s, needsReauth, ...(neverAuthorized !== undefined ? { neverAuthorized } : {}) })
+        // fase mcp-setup (M6.1): lo stato dell'ULTIMA PROVA del server — la
+        // riga della finestra App dice «Connessa» solo se è davvero partito
+        const stateStatus = states[s.id]?.status
+        servers.push({ ...s, needsReauth, stateStatus, ...(neverAuthorized !== undefined ? { neverAuthorized } : {}) })
       }
       // punto 4: "nuova versione disponibile" se lo sha del marketplace è
       // cambiato rispetto a quello installato (aggiornare = nuova card)
@@ -1089,6 +1092,19 @@ export function buildApiMethods(
       }
       store.updateEntryMeta(entry.id, { ...entry.meta, status: r.ok ? 'installed' : 'error', ...(r.ok ? {} : { error: r.error }) })
       emitUpdatedEntry(aid, entry.id)
+      // fase mcp-setup (M5.2): se il server è GIÀ partito (niente da
+      // configurare), il bot riceve subito CONNECTOR_CONNECTED; se invece
+      // serve il modulo, la notifica arriva dal clic di «Accedi con…»
+      if (r.ok) {
+        const { serverIdFor, parseMcpServerId } = await import('../main/connectors/install')
+        const parsed = parseMcpServerId(message.id)
+        const sid = message.serverId
+          ?? ('error' in parsed ? null
+            : parsed.kind === 'registry' ? serverIdFor({ kind: 'registry', name: parsed.name })
+              : serverIdFor({ kind: 'url', url: parsed.url }))
+        const cfg = sid ? (await mcp()).listServers().find((s) => s.id === sid) : null
+        if (cfg && !cfg.needsAuth) await notifyMcpServerConnected([message.id], cfg.name, emit, worker)
+      }
       // fase 17c (C2, MU): il testo per il modello resta inglese; meta.ui
       // dice alla UI cosa mostrare nella lingua dell'interfaccia
       const text = r.ok ? `[sistema] ${r.message}` : `[sistema] Server "${message.name}" NOT added: ${r.error}`
@@ -1204,6 +1220,38 @@ export function buildApiMethods(
       const { reconnectServer } = await import('../main/connectors/install')
       const r = await reconnectServer(String(id), (await installBridge()).getInstallDeps(), store.getSetting, store.setSetting)
       emit({ type: 'connectors' })
+      return r
+    },
+    /**
+     * Fase mcp-setup (M3): lo spec del modulo di configurazione di un server
+     * installato (card M4 e foglio M6). Le variabili si rileggono dalla voce
+     * del registro; i SEGRETI non tornano mai (solo il flag «salvato»).
+     */
+    'connectors:server-setup': async ([id]) => {
+      const { serverSetupSpec } = await import('../main/connectors/install')
+      const spec = await serverSetupSpec(String(id), (await installBridge()).getInstallDeps())
+      // M6.1: lo stato dell'ultima prova — la card dice «✓ collegato» solo se
+      // il server è partito DAVVERO (prove fatte altrove comprese)
+      if (spec) spec.stateStatus = store.getSetting<Record<string, { status?: string }>>('connectors.state', {})[String(id)]?.status
+      return spec
+    },
+    /**
+     * Fase mcp-setup (M3): il clic su «Accedi con <Nome>» / «Collega» del
+     * modulo — salva i valori (i segreti SOLO nello store cifrato), prova la
+     * connessione (OAuth col browser quando serve) e avvisa il bot (M5.2).
+     */
+    'connectors:server-connect': async ([id, input]) => {
+      const { connectServerSetup } = await import('../main/connectors/install')
+      const i = (input ?? {}) as { vars?: Record<string, string>; token?: string }
+      const r = await connectServerSetup(String(id), i, (await installBridge()).getInstallDeps(), store.getSetting, store.setSetting)
+      emit({ type: 'connectors' })
+      if (r.ok) {
+        // M5.2: il bot che ha proposto il server riceve CONNECTOR_CONNECTED
+        const cfg = (await mcp()).listServers().find((s) => s.id === id)
+        if (cfg?.source?.kind === 'registry') {
+          await notifyMcpServerConnected([`registry:${cfg.source.name}`, `url:${cfg.source.name}`], cfg.name, emit, worker)
+        }
+      }
       return r
     },
     /** Disinstallazione di un plugin: cartelle (Mac e box), server, skill. */
@@ -1822,6 +1870,88 @@ export async function notifyConnectorConnected(
       'CONNECTOR_CONNECTED',
       // fase 17c (C2, MU): la UI mostra la lingua dell'interfaccia
       { ui: ui(UI.sistemaConnectorConnected, { name, connectorId }) }
+    )
+    worker.poke()
+  }
+}
+
+/**
+ * Fase mcp-setup (M5.2): l'utente ha completato il collegamento di un server
+ * MCP proposto dal bot (add_mcp_server). Ogni agente con la card ancora
+ * aperta riceve il messaggio initiator CONNECTOR_CONNECTED col prefisso dei
+ * suoi strumenti (mcp__&lt;slug&gt;__*) e le card si marcano meta.connected
+ * (una sola notifica per offerta). `cardIds` sono gli id delle card
+ * («registry:&lt;nome&gt;» / «url:&lt;url&gt;»).
+ */
+export async function notifyMcpServerConnected(
+  cardIds: string[],
+  name: string,
+  emit: Emitter,
+  worker: JobWorker
+): Promise<void> {
+  const { serverToolsPrefix } = await import('../main/mcp')
+  const prefix = serverToolsPrefix(name)
+  for (const agent of store.listAgents()) {
+    const offers = store.getEntries(agent.id).filter(
+      (e) =>
+        e.kind === 'send-message' &&
+        (e.meta?.message as SendMessagePayload | undefined)?.type === 'mcp-server' &&
+        cardIds.includes(String((e.meta?.message as { id?: string }).id ?? '')) &&
+        !e.meta?.connected
+    )
+    if (!offers.length) continue
+    for (const e of offers) store.updateEntryMeta(e.id, { ...e.meta, connected: true })
+    enqueueUserMessage(
+      db(),
+      agent.id,
+      `[sistema] The user connected ${name}: its ${prefix}__* tools are now available.`,
+      undefined,
+      emit,
+      undefined,
+      'CONNECTOR_CONNECTED',
+      // fase 17c (C2, MU): la UI mostra la lingua dell'interfaccia
+      { ui: ui(UI.sistemaServerConnected, { name, prefix }) }
+    )
+    worker.poke()
+  }
+}
+
+/**
+ * Fase mcp-setup (M5.3): un'app collegata VIA COMPOSIO dalla card di un
+ * connettore DIRETTO dello stesso marchio (composioRouteFor, e926502c). Quando
+ * il gateway la vede ACTIVE e c'è un'offerta pendente per la curata diretta,
+ * il bot lo sa — con i nomi degli strumenti di Composio (composio__&lt;slug&gt;__*),
+ * non mcp__&lt;id&gt;__*. Una volta sola per offerta (meta.connected).
+ */
+export async function notifyComposioAppConnected(
+  slug: string,
+  name: string,
+  emit: Emitter,
+  worker: JobWorker
+): Promise<void> {
+  const { loadAppCatalog } = await import('../shared/app-catalog')
+  // la curata DIRETTA dello stesso marchio (la riga a doppia strada)
+  const row = loadAppCatalog({ staticClientsReady: [] }).find((r) => r.composioSlug === slug && r.directId)
+  if (!row?.directId) return
+  for (const agent of store.listAgents()) {
+    const offers = store.getEntries(agent.id).filter(
+      (e) =>
+        e.kind === 'send-message' &&
+        (e.meta?.message as SendMessagePayload | undefined)?.type === 'connector' &&
+        ((e.meta?.message as { connectorId?: string }).connectorId === row.directId) &&
+        !e.meta?.connected
+    )
+    if (!offers.length) continue
+    for (const e of offers) store.updateEntryMeta(e.id, { ...e.meta, connected: true })
+    enqueueUserMessage(
+      db(),
+      agent.id,
+      `[sistema] The user connected ${name} (via Composio): its composio__${slug}__* tools are now available (find the exact names with find_tools).`,
+      undefined,
+      emit,
+      undefined,
+      'CONNECTOR_CONNECTED',
+      { ui: ui(UI.sistemaComposioAppConnected, { name, slug }) }
     )
     worker.poke()
   }

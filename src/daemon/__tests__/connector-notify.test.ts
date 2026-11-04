@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const { setDataDir, dataDir, createAgent, appendEntry, updateEntryMeta, getEntries, db } = await import('../../main/store/db')
-const { notifyConnectorConnected } = await import('../api')
+const { notifyConnectorConnected, notifyMcpServerConnected, notifyComposioAppConnected } = await import('../api')
 
 let root: string
 beforeAll(() => {
@@ -57,5 +57,67 @@ describe('notifyConnectorConnected (CONNECTOR_CONNECTED)', () => {
     expect(getEntries(a1.id).find((x) => x.kind === 'send-message')?.meta?.connected).toBe(true)
     // il worker è stato svegliato (il job parte al prossimo tick)
     expect(pokes).toBe(1)
+  })
+})
+
+
+/** Una card "Aggiungi server MCP" nel transcript di un agente (fase mcp-setup). */
+function mcpCardEntry(agentId: string, cardId: string, name: string): number {
+  return appendEntry({
+    agentId, kind: 'send-message', role: 'assistant', content: name,
+    meta: { message: { type: 'mcp-server', id: cardId, name, trust: 'unverified', trustKind: 'github-account', runtime: { kind: 'remote', host: '{mattermost_host}' }, needs: { kind: 'oauth' }, setup: { urlVariables: [], auth: 'oauth' } }, call: { id: 'c', name: 'add_mcp_server', arguments: '{}' }, status: 'installed' }
+  }).id
+}
+
+describe('fase mcp-setup (M5.2): notifyMcpServerConnected', () => {
+  it('le card del server collegato si marcano connected e il bot riceve CONNECTOR_CONNECTED col prefisso mcp__', async () => {
+    const a1 = createAgent('Con card Mattermost')
+    const a2 = createAgent('Card già soddisfatta')
+    mcpCardEntry(a1.id, 'registry:io.github.mattermost/mattermost-plugin-agents', 'Mattermost')
+    const done = mcpCardEntry(a2.id, 'registry:io.github.mattermost/mattermost-plugin-agents', 'Mattermost')
+    const e = getEntries(a2.id).find((x) => x.id === done)!
+    updateEntryMeta(done, { ...e.meta, connected: true })
+    // una card di ALTRO server non c'entra
+    mcpCardEntry(a1.id, 'registry:altro/server', 'Altro')
+
+    let pokes = 0
+    await notifyMcpServerConnected(['registry:io.github.mattermost/mattermost-plugin-agents'], 'Mattermost', () => undefined, { poke: () => pokes++ } as never)
+
+    // il db dei job è condiviso col test di prima: si filtrano per agente
+    const rows = db().prepare("SELECT agent_id, payload_json FROM jobs WHERE kind = 'user-message' AND agent_id = ?").all(a1.id) as Array<{ agent_id: string; payload_json: string }>
+    expect(rows).toHaveLength(1)
+    const payload = JSON.parse(rows[0]!.payload_json) as { initiator?: string; text: string; extraMeta?: { ui?: { id: string; values?: Record<string, string> } } }
+    expect(payload.initiator).toBe('CONNECTOR_CONNECTED')
+    expect(payload.text).toBe('[sistema] The user connected Mattermost: its mcp__mattermost__* tools are now available.')
+    expect(payload.extraMeta?.ui?.id).toBe('sistema.serverConnected')
+    expect(payload.extraMeta?.ui?.values).toEqual({ name: 'Mattermost', prefix: 'mcp__mattermost' })
+    // la card pendente è connessa, le altre no
+    const entries = getEntries(a1.id).filter((x) => x.kind === 'send-message')
+    expect(entries.find((x) => (x.meta?.message as { id?: string }).id === 'registry:io.github.mattermost/mattermost-plugin-agents')?.meta?.connected).toBe(true)
+    expect(entries.find((x) => (x.meta?.message as { id?: string }).id === 'registry:altro/server')?.meta?.connected).toBeUndefined()
+    expect(pokes).toBe(1)
+  })
+})
+
+describe('fase mcp-setup (M5.3): notifyComposioAppConnected (via Composio dalla card di una curata diretta)', () => {
+  it('un\'app ACTIVE con offerta pendente per la DIRETTA dello stesso marchio: notifica UNA volta sola, con i nomi composio__', async () => {
+    const a1 = createAgent('Con offerta Gmail diretta')
+    offerEntry(a1.id, 'gmail', 'Gmail')
+    const worker = { poke: () => undefined } as never
+    await notifyComposioAppConnected('gmail', 'Gmail', () => undefined, worker)
+    let rows = db().prepare("SELECT payload_json FROM jobs WHERE kind = 'user-message'").all() as Array<{ payload_json: string }>
+    const mine = rows.map((r) => JSON.parse(r.payload_json) as { text: string; initiator?: string; extraMeta?: { ui?: { id: string } } })
+      .filter((p) => p.initiator === 'CONNECTOR_CONNECTED' && p.text.includes('via Composio'))
+    expect(mine).toHaveLength(1)
+    expect(mine[0]!.text).toBe('[sistema] The user connected Gmail (via Composio): its composio__gmail__* tools are now available (find the exact names with find_tools).')
+    expect(mine[0]!.extraMeta?.ui?.id).toBe('sistema.composioAppConnected')
+    // la seconda volta NESSUNA nuova notifica (l'offerta è già connessa)
+    await notifyComposioAppConnected('gmail', 'Gmail', () => undefined, worker)
+    rows = db().prepare("SELECT payload_json FROM jobs WHERE kind = 'user-message'").all() as Array<{ payload_json: string }>
+    expect(rows.map((r) => JSON.parse(r.payload_json) as { text: string }).filter((p) => p.text.includes('via Composio'))).toHaveLength(1)
+    // uno slug SENZA curata diretta dello stesso marchio non notifica nessuno
+    await notifyComposioAppConnected('slug-senza-diretta', 'X', () => undefined, worker)
+    rows = db().prepare("SELECT payload_json FROM jobs WHERE kind = 'user-message'").all() as Array<{ payload_json: string }>
+    expect(rows.map((r) => JSON.parse(r.payload_json) as { text: string }).filter((p) => p.text.includes('via Composio'))).toHaveLength(1)
   })
 })

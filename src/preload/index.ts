@@ -141,6 +141,9 @@ const api: SandbotApi = {
     ipcRenderer.invoke('connectors:set-enabled-for', kind, id, agentIds),
   connectorsUninstallServer: (id) => ipcRenderer.invoke('connectors:uninstall-server', id),
   connectorsReconnectServer: (id) => ipcRenderer.invoke('connectors:reconnect-server', id),
+  // fase mcp-setup (M3): il modulo di configurazione del server (card e foglio)
+  connectorsServerSetup: (id) => ipcRenderer.invoke('connectors:server-setup', id),
+  connectorsServerConnect: (id, input) => ipcRenderer.invoke('connectors:server-connect', id, input),
   connectorsAddGateway: (input) => ipcRenderer.invoke('connectors:add-gateway', input),
   connectorsGatewayPresets: () => ipcRenderer.invoke('connectors:gateway-presets'),
   connectorsSetClientMetadataUrl: (url) => ipcRenderer.invoke('connectors:set-client-metadata-url', url),

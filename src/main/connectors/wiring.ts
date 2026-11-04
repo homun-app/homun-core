@@ -15,6 +15,8 @@ import { getConnectorsKey } from '../../daemon/keychain'
 import { getSetting, setSetting } from '../store/db'
 import { listServers, saveServers, setMcpAuthResolver, type McpServerConfig, type McpAuth, type McpAuthResolver } from '../mcp'
 import { SECRET_KIND } from '../../shared/types'
+// fase mcp-setup (M1.3): i template `{var}` dei server del registro
+import { fillTemplate, missingTemplateVars } from '../../shared/registry-vars'
 import { resolvePluginServerPlaceholders, unresolvedUserConfigKeys } from './install'
 // fase 17c correzioni (D2): il rifiuto è un UiError — message inglese per il
 // modello, id del catalogo UI per la UI (confine RPC di ws-server)
@@ -99,6 +101,23 @@ export function buildMcpAuthResolver(deps: AuthResolverDeps): McpAuthResolver {
     )
   }
 
+  /**
+   * Fase mcp-setup (M1.3): una variabile `{var}` dell'URL senza valore lascia
+   * needsAuth 'setup' (il modulo della card/foglio) e la connessione rifiuta
+   * di partire — niente URL con le graffe verso il server.
+   */
+  const templateNeedsAuth = (cfg: McpServerConfig, missing: string[]): never => {
+    if (deps.listServers().some((s) => s.id === cfg.id)) {
+      // una NUOVA lista (mai mutare l'array vivo di listServers: l'aliasing
+      // svuoterebbe i server quando restituisce il vivo)
+      deps.saveServers(deps.listServers().map((s) => (s.id === cfg.id ? { ...s, needsAuth: { kind: 'setup' as const, keys: missing } } : s)))
+    }
+    throw new UiError(
+      `server "${cfg.name}" is not configured yet (${missing.join(', ')}): the user completes the setup in its card`,
+      ui(UI.connServerNeedsSetup, { name: cfg.name, keys: missing.join(', ') })
+    )
+  }
+
   return async (cfg): Promise<McpAuth> => {
     if (cfg.auth?.kind === 'oauth' && cfg.catalogId) {
       const entry = deps.catalog.find((e) => e.id === cfg.catalogId)
@@ -157,6 +176,23 @@ export function buildMcpAuthResolver(deps: AuthResolverDeps): McpAuthResolver {
       return {
         ...(resolved.url ? { url: resolved.url } : {}),
         ...(resolved.headers ? { headers: resolved.headers } : {}),
+        ...(authProvider ? { authProvider } : {})
+      }
+    }
+    // fase mcp-setup (M1.3): server del REGISTRO con template — l'URL si
+    // risolve coi valori NON segreti di cfg.vars; gli header segreti arrivano
+    // RISOLTI dallo store (il modulo salva «Bearer <token>» col template);
+    // OAuth resta la via quando non c'è header. Un `{var}` senza valore
+    // lascia needsAuth 'setup' e la connessione non parte.
+    if (cfg.urlTemplate) {
+      const url = fillTemplate(cfg.urlTemplate, cfg.vars ?? {})
+      const missing = missingTemplateVars(url)
+      if (missing.length) templateNeedsAuth(cfg, missing)
+      const headers = await deps.store.read<Record<string, string>>(cfg.id, SECRET_KIND.headers)
+      const authProvider = cfg.auth?.kind === 'oauth' && !(headers && Object.keys(headers).length) ? nonCatalogOAuthProvider(cfg) : undefined
+      return {
+        url,
+        ...(headers && Object.keys(headers).length ? { headers } : {}),
         ...(authProvider ? { authProvider } : {})
       }
     }

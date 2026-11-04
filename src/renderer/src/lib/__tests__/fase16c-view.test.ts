@@ -5,7 +5,7 @@
 // dell'elenco unico delle app sta in catalogo-app-view.test.ts.
 import { describe, expect, it } from 'vitest'
 import { nextModelProbe, EMPTY_MODEL_PROBE } from '../model-probe'
-import { appsViewModel, botsLabelOf } from '../apps-view'
+import { appsViewModel, botsLabelOf, serverRowStatus } from '../apps-view'
 import { activityRows } from '../activity-rows'
 import { libraryRows } from '../library-view'
 import type { ConnectorInfo, GlobalActivityData } from '../../../../shared/types'
@@ -140,5 +140,24 @@ describe('libraryRows (C6): filtri e ordine (fissati in cima, poi updatedAt)', (
   it('filtro per bot (authorAgentId, client-side) e per tipo', () => {
     expect(libraryRows(items, 'a1', '').map((i) => i.id)).toEqual(['c', 'a'])
     expect(libraryRows(items, '', 'document').map((i) => i.id)).toEqual(['a'])
+  })
+})
+
+// ---- fase mcp-setup (M6.1): lo stato VERO della riga di un server ----
+
+describe('serverRowStatus (M6.1)', () => {
+  const base = { id: 'x', name: 'X' }
+  it('needsAuth → setup («Da completare»), mai «Connessa» a un server mai partito', () => {
+    expect(serverRowStatus({ ...base, needsAuth: { kind: 'setup', keys: ['mattermost_host'] } })).toBe('setup')
+    expect(serverRowStatus({ ...base, needsAuth: { kind: 'env', keys: ['K'] } })).toBe('setup')
+  })
+  it('needsReauth o errore dell\'ultima prova → reconnect', () => {
+    expect(serverRowStatus({ ...base, needsReauth: true })).toBe('reconnect')
+    expect(serverRowStatus({ ...base }, 'needs_auth')).toBe('reconnect')
+    expect(serverRowStatus({ ...base }, 'error')).toBe('reconnect')
+  })
+  it('senza needsAuth e senza errore → connected (verde solo se davvero partito)', () => {
+    expect(serverRowStatus({ ...base })).toBe('connected')
+    expect(serverRowStatus({ ...base }, 'connected')).toBe('connected')
   })
 })

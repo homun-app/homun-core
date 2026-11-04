@@ -17,6 +17,10 @@ export interface InstalledServerLike {
   name: string
   enabledFor?: string[] | null
   needsReauth?: boolean
+  /** fase mcp-setup (M6.1): il server non è mai partito — manca la configurazione */
+  needsAuth?: { kind: string; keys: string[] } | null
+  /** fase mcp-setup (M6.1): lo stato dell'ultima prova (connectors.state) */
+  stateStatus?: string
   source?: { kind?: string; name?: string } | null
 }
 
@@ -67,9 +71,23 @@ export interface ConnectedRow {
   logo: string
   /** quali bot la usano: «Tutti i bot» (all) o i primi 2 nomi + +N */
   botsLabel: { all: boolean; names: string[]; extra: number }
-  status: 'connected' | 'reconnect'
+  status: 'connected' | 'reconnect' | 'setup'
   /** A7: la provenienza (i server e i plugin stanno sul Mac) */
   via: AppProvenance
+}
+
+/**
+ * Fase mcp-setup (M6.1): lo stato VERO di un server installato.
+ * «Connessa» solo se il server è partito (niente needsAuth/needsReauth e
+ * l'ultima connessione riuscita); needsAuth → «Da completare» (il clic apre
+ * il foglio sul modulo); needsReauth → «Ricollega». `stateError` è l'errore
+ * dell'ultima prova (connectors.state): anche quello toglie il verde.
+ */
+export function serverRowStatus(s: InstalledServerLike, stateStatus?: string): ConnectedRow['status'] {
+  if (s.needsAuth) return 'setup'
+  if (s.needsReauth) return 'reconnect'
+  if (stateStatus === 'error' || stateStatus === 'needs_auth') return 'reconnect'
+  return 'connected'
 }
 
 /** Una riga dell'elenco unico con il suo stato di collegamento. */
@@ -127,7 +145,10 @@ export interface AppsCatalogModel {
 /** I nomi dei bot che usano la voce («Tutti i bot» quando c'è '*'), max 2 + +N. */
 export function botsLabelOf(enabledFor: string[] | null | undefined, agents: AgentLike[]): ConnectedRow['botsLabel'] {
   const ids = enabledFor ?? []
-  if (ids.includes('*') || ids.length === 0) return { all: true, names: [], extra: 0 }
+  // fase mcp-setup: la lista VUOTA non è più «tutti» (il foglio può toglierli
+  // tutti); «tutti» è SOLO '*' — i server di prima della migrazione arrivano
+  // già con ['*'] dal daemon
+  if (ids.includes('*')) return { all: true, names: [], extra: 0 }
   const names = ids.map((id) => agents.find((a) => a.id === id)?.name ?? id)
   return { all: false, names: names.slice(0, 2), extra: Math.max(0, names.length - 2) }
 }
@@ -152,7 +173,7 @@ export function appsViewModel(input: AppsViewInput): AppsViewModel {
       name: s.name,
       logo: '✦',
       botsLabel: botsLabelOf(s.enabledFor ?? null, agents),
-      status: s.needsReauth ? 'reconnect' : 'connected',
+      status: serverRowStatus(s, s.stateStatus),
       via: 'direct'
     })
   }

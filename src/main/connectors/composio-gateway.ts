@@ -104,6 +104,12 @@ export interface ComposioGatewayDeps {
    * resta lo slug storico «composio»: vedi COMPOSIO_SERVER_TOOLS).
    */
   serverTools?(): { manageConnections: string; waitForConnections: string }
+  /**
+   * Fase mcp-setup (M5.3): un'app è appena diventata ACTIVE (transizione, non
+   * il refresh di una già attiva) — il daemon può avvisare i bot con
+   * un'offerta pendente per la curata DIRETTA dello stesso marchio.
+   */
+  onAppActive?(slug: string, name: string): void
 }
 
 export type ComposioGatewayManager = ReturnType<typeof createComposioGatewayManager>
@@ -145,11 +151,16 @@ export function createComposioGatewayManager(deps: ComposioGatewayDeps) {
     deps.emit({ type: 'connectors' })
   }
   const setApp = (slug: string, patch: StoredGatewayApp): void => {
-    setApps({ ...apps(), [slug.toLowerCase()]: patch })
+    const key = slug.toLowerCase()
+    const wasActive = apps()[key]?.status === 'ACTIVE'
+    setApps({ ...apps(), [key]: patch })
     // K2 (ritocchi): un toolkit diventato ACTIVE azzera la SUA attesa — il
     // riquadro «Non riuscito» non può restare accanto alla riga «Collegata»
     // anche se l'ACTIVE l'ha portato un'altra via (refreshAccounts, la card)
-    if (patch.status === 'ACTIVE' && waiting?.slug === slug.toLowerCase()) waiting = null
+    if (patch.status === 'ACTIVE' && waiting?.slug === key) waiting = null
+    // fase mcp-setup (M5.3): SOLO la transizione a ACTIVE (il refresh di una
+    // già attiva non ri-notifica — e le offerte soddisfatte non si ripetono)
+    if (patch.status === 'ACTIVE' && !wasActive) deps.onAppActive?.(key, patch.name)
   }
   const appOf = (slug: string): StoredGatewayApp | undefined => apps()[slug.toLowerCase()]
   /** K6 (ritocchi): i nomi degli strumenti del server Composio (di default lo slug storico). */
