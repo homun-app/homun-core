@@ -27,15 +27,15 @@ const LOGO_TYPES = { 'image/svg+xml': 'svg', 'image/png': 'png', 'image/webp': '
 // kind → slug candidati su logos.composio.dev (vince il primo che risponde)
 const KINDS = [
   { kind: 'ollama', slugs: ['ollama'] },
-  { kind: 'lmstudio', slugs: ['lm_studio', 'lmstudio', 'lm-studio'] },
-  { kind: 'anthropic', slugs: ['anthropic'] },
+  { kind: 'lmstudio', slugs: ['lm_studio', 'lmstudio', 'lm-studio'] }, // nessuno esiste (2026-11-04): iniziale
+  { kind: 'anthropic', slugs: ['anthropic', 'claude'] },
   { kind: 'openai', slugs: ['openai'] },
   { kind: 'mistral', slugs: ['mistral_ai', 'mistral'] },
-  { kind: 'zai', slugs: ['z_ai', 'zai', 'z-ai'] },
+  { kind: 'zai', slugs: ['z_ai', 'zai', 'z-ai', 'zhipu'] }, // nessuno esiste (2026-11-04): iniziale
   { kind: 'openrouter', slugs: ['openrouter'] },
   { kind: 'xai', slugs: ['xai', 'grok'] },
   { kind: 'deepseek', slugs: ['deepseek'] },
-  { kind: 'groq', slugs: ['groq'] }
+  { kind: 'groq', slugs: ['groq', 'groqcloud'] }
 ]
 
 const args = process.argv.slice(2)
@@ -70,6 +70,9 @@ async function downloadFirst(slugs) {
     if (!ext) continue
     const buf = Buffer.from(await res.arrayBuffer())
     if (buf.byteLength === 0 || buf.byteLength > LOGO_MAX_BYTES) continue
+    // logos.composio.dev risponde 200 ANCHE agli slug sconosciuti, con un
+    // segnaposto grigio a griglia: non è un logo, si prova lo slug dopo
+    if (ext === 'svg' && /composio-fallback-grid/.test(buf.toString('utf8'))) continue
     const bytes = ext === 'svg' ? Buffer.from(sanitizeSvg(buf.toString('utf8')), 'utf8') : buf
     if (bytes.byteLength === 0) continue
     return { slug, ext, bytes }

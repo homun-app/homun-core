@@ -24,7 +24,7 @@
 // <dir>/composio-catalog.json e <dir>/app-logos/) · --solo-loghi (SENZA
 // chiave: tiene il catalogo com'è e scarica solo i loghi pubblici da
 // logos.composio.dev/api/<slug>, riempiendo il campo logo).
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -149,9 +149,17 @@ async function downloadLogo(entry, metaLogo) {
   if (!ext) return null
   const buf = Buffer.from(await res.arrayBuffer())
   if (buf.byteLength === 0 || buf.byteLength > LOGO_MAX_BYTES) return null
+  // logos.composio.dev risponde 200 ANCHE agli slug che non conosce, con un
+  // segnaposto grigio a griglia: non è un logo, vale l'iniziale
+  if (ext === 'svg' && isComposioPlaceholder(buf.toString('utf8'))) return null
   const bytes = ext === 'svg' ? Buffer.from(sanitizeSvg(buf.toString('utf8')), 'utf8') : buf
   if (bytes.byteLength === 0) return null
   return { ext, bytes }
+}
+
+/** Il segnaposto che logos.composio.dev dà (con 200) agli slug sconosciuti. */
+export function isComposioPlaceholder(svg) {
+  return /composio-fallback-grid/.test(svg)
 }
 
 // ---- il corpo dello script ----
@@ -167,7 +175,13 @@ async function logosOnlyRun() {
   const missing = []
   for (const entry of catalog) {
     const logo = await downloadLogo(entry, publicLogoUrl(entry.slug))
-    if (!logo) { missing.push(entry.slug); continue }
+    if (!logo) {
+      // niente logo vero (o solo il segnaposto): via il file vecchio, vale l'iniziale
+      missing.push(entry.slug)
+      if (!dryRun && entry.logo) rmSync(join(logosDir, entry.logo), { force: true })
+      delete entry.logo
+      continue
+    }
     entry.logo = `${entry.slug}.${logo.ext}`
     ok++
     if (!dryRun) writeFileSync(join(logosDir, entry.logo), logo.bytes)
