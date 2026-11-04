@@ -8,11 +8,12 @@
 // del server Composio — il clic apre il link nel browser e il daemon aspetta
 // il login (WAIT_FOR_CONNECTIONS, 5 minuti, annullabile), la card si aggiorna
 // a «Collegata» o «Non riuscito».
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { api, useStore } from '../store'
 import type { ConnectorInfo, TranscriptEntry } from '../../../shared/types'
 import { logoUrlForSlug } from '../lib/app-logos'
+import { composioRouteFor } from '../lib/connector-route'
 import { CardShell } from './DecidedRow'
 
 export function ConnectorCard({ entry }: { entry: TranscriptEntry }) {
@@ -37,6 +38,14 @@ export function ConnectorCard({ entry }: { entry: TranscriptEntry }) {
   // il flag distingue l'annullo volontario dall'attesa finita male (Riprova)
   const cancelledHere = useRef(false)
 
+  // Verifica impostazioni: una curata diretta che non può aprire il login
+  // (Gmail di Google senza client OAuth) segue la strada della finestra App —
+  // apps:connect, cioè il login di Composio e poi l'app. Null = strada diretta.
+  const route = useMemo(
+    () => (isComposio || isGatewayApp ? null : composioRouteFor(message.connectorId, connectors)),
+    [isComposio, isGatewayApp, message.connectorId, connectors]
+  )
+
   // lo stato reale del connettore (la connessione può avvenire anche dalle Impostazioni)
   useEffect(() => {
     const live = connectors.find((c) => c.id === message.connectorId)
@@ -46,10 +55,12 @@ export function ConnectorCard({ entry }: { entry: TranscriptEntry }) {
     // 'error' e la card non deve restare «In attesa del login…» per sempre.
     // L'effetto rigira solo quando arriva un evento {type:'connectors'}, quindi
     // un errore vecchio non chiude subito un nuovo tentativo
-    if (live?.state.status === 'error') setStatus((s) => (s === 'connecting' ? 'failed' : s))
+    // (solo sulla strada diretta: su quella di Composio l'errore vecchio del
+    // connettore diretto non dice niente del tentativo in corso)
+    if (!route && live?.state.status === 'error') setStatus((s) => (s === 'connecting' ? 'failed' : s))
     // fase app: lo stato reale di un'app Composio (collegata anche dalla finestra App)
     if (composioSlug && composio?.connected.some((a) => a.slug === composioSlug && a.status === 'ACTIVE')) setStatus('connected')
-  }, [connectors, message.connectorId, composio, composioSlug])
+  }, [connectors, message.connectorId, composio, composioSlug, route])
 
   // C5: lo stato reale di un'app del gateway — collegata, in attesa o fallita;
   // mentre l'attesa è viva si rilegge ogni 2 s (il daemon emette {type:'connectors'}).
@@ -80,9 +91,29 @@ export function ConnectorCard({ entry }: { entry: TranscriptEntry }) {
     return () => clearInterval(timer)
   }, [gatewaySlug, status, refreshComposioGateway])
 
+  const refreshConnectors = useStore((s) => s.refreshConnectors)
+  useEffect(() => {
+    if (!route) return
+    if (composioGateway?.connected.some((a) => a.slug === route.composioSlug && a.status === 'ACTIVE')) {
+      setStatus('connected')
+      return
+    }
+    const pending = composioGateway?.pending
+    if (pending?.slug === route.composioSlug && pending.failed) setStatus((s) => (s === 'connecting' ? 'failed' : s))
+  }, [route, composioGateway])
+  useEffect(() => {
+    if (!route || status !== 'connecting') return
+    // come la finestra App: durante il login e l'attesa dell'app si rilegge
+    const timer = setInterval(() => {
+      void refreshConnectors()
+      void refreshComposioGateway()
+    }, 2000)
+    return () => clearInterval(timer)
+  }, [route, status, refreshConnectors, refreshComposioGateway])
+
   if (!message.connectorId) return null
   const needsAuth = Boolean(entry.meta?.needsAuth)
-  const liveError = connectors.find((c) => c.id === message.connectorId)?.state.error
+  const liveError = route ? undefined : connectors.find((c) => c.id === message.connectorId)?.state.error
   // fase catalogo app (P7): il logo VERO del catalogo quando c'è (per le app
   // Composio; le curate dirette restano con l'emoji del connettore)
   const catalogLogo = composioSlug ?? gatewaySlug ? logoUrlForSlug((composioSlug ?? gatewaySlug)!) : null
@@ -109,6 +140,15 @@ export function ConnectorCard({ entry }: { entry: TranscriptEntry }) {
         if (!r.ok) setStatus('failed')
         return
       }
+      // la strada della finestra App (login di Composio, poi l'app): il
+      // collegamento lo decide apps:connect, come il «Connetti» delle App
+      if (route) {
+        const r = await api.appsConnect(route.appId)
+        if (!r.started) setStatus('failed')
+        void refreshConnectors()
+        void refreshComposioGateway()
+        return
+      }
       await api.connectorsConnect(message.connectorId!)
       // il flusso OAuth col browser dura qualche minuto: gli eventi
       // {type:'connectors'} aggiorneranno lo stato qui e nella vista Impostazioni
@@ -124,6 +164,14 @@ export function ConnectorCard({ entry }: { entry: TranscriptEntry }) {
     cancelledHere.current = true
     try { await api.composioGatewayCancel() } catch { /* il gateway può essere già fermo */ }
     await refreshComposioGateway().catch(() => undefined)
+    setStatus('pending')
+  }
+
+  const cancelRoute = async (): Promise<void> => {
+    if (!route) return
+    try { await api.appsCancelConnect(route.appId) } catch { /* già fermo */ }
+    void refreshConnectors()
+    void refreshComposioGateway()
     setStatus('pending')
   }
 
@@ -159,7 +207,7 @@ export function ConnectorCard({ entry }: { entry: TranscriptEntry }) {
         {needsAuth && <span className="rounded bg-destructive/15 px-1.5 py-0.5 text-[10px] text-destructive">{t`token scaduto`}</span>}
       </div>
       {message.reason && <p className="mt-1 text-sm text-foreground">{message.reason}</p>}
-      {(isComposio || isGatewayApp) && (
+      {(isComposio || isGatewayApp || route) && (
         <p className="mt-1 text-[11px] text-muted-foreground"><Trans>Tramite Composio: login e azioni passano dai suoi server</Trans></p>
       )}
       {needsAuth && !entry.meta?.connected && (
@@ -191,6 +239,17 @@ export function ConnectorCard({ entry }: { entry: TranscriptEntry }) {
         <div className="mt-2 space-y-1.5">
           <p className="text-sm text-destructive"><Trans>Non riuscito: chiedi al bot di riprovare il collegamento.</Trans></p>
           {liveError && <p className="text-xs text-muted-foreground">{liveError}</p>}
+        </div>
+      ) : status === 'connecting' && route ? (
+        // la strada della finestra App: anche qui Annulla durante l'attesa
+        <div className="mt-2.5 flex items-center gap-3">
+          <span className="text-sm text-muted-foreground"><Trans>In attesa del login nel browser…</Trans></span>
+          <button
+            className="rounded-[10px] px-3 py-1.5 text-sm text-muted-foreground transition hover:text-foreground"
+            onClick={() => void cancelRoute()}
+          >
+            <Trans>Annulla</Trans>
+          </button>
         </div>
       ) : status === 'connecting' && isGatewayApp ? (
         // V6 (prova vera): durante l'attesa c'è ANNULLA — la card torna a «Collega»
