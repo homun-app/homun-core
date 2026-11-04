@@ -3132,7 +3132,8 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           }
         }
 
-        // §5.1: il gate run-command analizza OGNI comando della riga (tree-sitter);        // agentId serve al gate C5 (letture dentro/fuori dalla box in host).
+        // §5.1: il gate run-command analizza OGNI comando della riga (tree-sitter);
+        // agentId serve al gate C5 (letture dentro/fuori dalla box in host).
         // fase 10 (punti 1-2): permessi PER ORIGINE — creare bot e gruppi parte
         // senza card SOLO nei turni dell'utente; nei turni automatici, di altri
         // bot, di gruppo o con contenuto esterno la card è SEMPRE (mai

@@ -15,7 +15,7 @@ import type { SendMessagePayload, DraftFieldMap, DraftExtraArg } from '../../sha
 import { composioSendLikeName, stripToolkitPrefix } from '../connectors/composio-actions'
 // fase Composio OAuth (C7 punto 3): le voci d'invio dentro il blocco
 import {
-  batchItemIsSend, batchSendViaArgs, composioToolkitOfSlug, type ComposioBatchItem
+  batchItemIsSend, batchSendViaArgs, composioToolkitOfSlug, objectArguments, COMPOSIO_MULTI_EXECUTE_TOOL, type ComposioBatchItem
 } from '../connectors/tool-batch'
 
 /** server MCP (slug, come nel nome mcp__<slug>__<tool>) → nomi originali dei tool di invio */
@@ -418,6 +418,28 @@ export function prepareDraft(input: {
 export function applyDraftBody(message: DraftMessage, body: string): void {
   message.body = body
   if (!message.via) return
+  // fase Composio OAuth (C7 punto 3): la bozza estratta da un blocco ha la
+  // fieldMap sugli argomenti della VOCE, non del guscio — il corpo va scritto
+  // dentro tools[0].arguments, altrimenti partirebbe il testo del modello
+  const batchTools = message.via.args.tools
+  if (
+    message.via.tool.split('__').slice(2).join('__') === COMPOSIO_MULTI_EXECUTE_TOOL &&
+    Array.isArray(batchTools) && batchTools.length === 1
+  ) {
+    const item = (batchTools[0] ?? {}) as Record<string, unknown>
+    const itemArgs = objectArguments(item.arguments)
+    const itemMap = message.fieldMap ?? fieldMapForArgs(itemArgs)
+    if (itemMap.body) {
+      message.via = {
+        ...message.via,
+        args: {
+          ...message.via.args,
+          tools: [{ ...item, arguments: { ...itemArgs, [itemMap.body]: coerceVisibleValue(itemArgs[itemMap.body], body) } }]
+        }
+      }
+    }
+    return
+  }
   const fieldMap = message.fieldMap ?? fieldMapForArgs(message.via.args)
   if (fieldMap.body) {
     message.via = {

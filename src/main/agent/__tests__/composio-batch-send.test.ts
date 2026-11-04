@@ -75,3 +75,20 @@ describe('C7 punto 3 — la bozza estratta dal blocco', () => {
     expect(draft.body).toBe('{"id":7}')
   })
 })
+
+describe('C7 punto 3 — il corpo modificato di una bozza estratta dal blocco', () => {
+  it('applyDraftBody scrive DENTRO la voce del blocco, non nel guscio', async () => {
+    const { applyDraftBody } = await import('../external-send')
+    const draft = draftFromBatchSend(BATCH, {
+      slug: 'GMAIL_SEND_EMAIL',
+      arguments: { recipient_email: 'a@b.c', subject: 'Ciao', body: 'testo del modello' }
+    })
+    applyDraftBody(draft, 'testo corretto dall’utente')
+    const tools = draft.via!.args.tools as Array<{ arguments: Record<string, unknown> }>
+    expect(tools).toHaveLength(1)
+    expect(tools[0]!.arguments.body).toBe('testo corretto dall’utente')
+    expect(draft.via!.args).not.toHaveProperty('body')
+    expect(draft.via!.args.sync_response_to_workbench).toBe(false)
+    expect(draft.body).toBe('testo corretto dall’utente')
+  })
+})
