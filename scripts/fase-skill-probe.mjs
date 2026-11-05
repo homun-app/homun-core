@@ -288,6 +288,16 @@ const setupBot = async (r) => {
 }
 
 const SKILLS_WINDOW = `(document.querySelector('[data-testid="skills-window"]') ?? document)`
+/** B1 (fase skill · sfoglia): il bottone della barra non c'è più — la finestra
+ *  si apre dal MENU dell'account: trigger in fondo, voce «Skill» sotto
+ *  «Collega app». */
+const openSkillsFromMenu = async (r) => {
+  await pointerClick(r.pageEval, `[...document.querySelectorAll('[data-testid="account-menu-trigger"]')].find((b) => b.offsetParent !== null)`)
+  await sleep(250)
+  await clickText(r.pageEval, 'Skill', '[data-testid="menu-skills"]', true)
+  await sleep(250)
+  return true
+}
 const closeSkillsWindow = async (r) => {
   await clickText(r.pageEval, '✕', '[data-testid="skills-window"] button')
   await sleep(400)
@@ -371,10 +381,9 @@ try {
   check('migrazione: le cartelle VECCHIE non ci sono più', !existsSync(join(DATA, 'agents', ALFA, 'skills', 'triage')))
 
   // ============ 2. la FINESTRA (S4): elenco, filtri, dettaglio, nuova, ============
-  // ============ versioni, bot, rimozione (dalla barra, accanto ad App) ============
-  check('finestra: si apre dalla voce della barra (accanto ad App)',
-    await pointerClick(r.pageEval, `[...document.querySelectorAll('[data-testid="sidebar-skills"]')].find((b) => b.offsetParent !== null)`) === 'cliccato' &&
-    await r.waitDom(`!!document.querySelector('[data-testid="skills-window"]')`, 8000))
+  // ============ versioni, bot, rimozione (dal MENU in fondo, B1) ============
+  check('finestra: si apre dal menu in fondo (voce «Skill» sotto «Collega app»)',
+    (await openSkillsFromMenu(r)) && await r.waitDom(`!!document.querySelector('[data-testid="skills-window"]')`, 8000))
   await sleep(500)
   check('finestra: l\'elenco mostra il nome umanizzato e l\'origine',
     await r.waitDom(`${SKILLS_WINDOW}.textContent.includes('Riassunto riunione') && ${SKILLS_WINDOW}.textContent.includes('migrata')`, 6000))
@@ -394,7 +403,7 @@ try {
     await r.setWindowWidth(w)
     await setDark(r.pageEval, dark)
     await closeSkillsWindow(r)
-    await pointerClick(r.pageEval, `[...document.querySelectorAll('[data-testid="sidebar-skills"]')].find((b) => b.offsetParent !== null)`)
+    await openSkillsFromMenu(r)
     await r.waitDom(`!!document.querySelector('[data-testid="skills-window"]')`, 5000)
     await sleep(400)
     await r.shot(`finestra-${w}-${dark ? 'scuro' : 'chiaro'}.png`)
@@ -439,7 +448,7 @@ try {
   await closeSkillsWindow(r)
 
   // NUOVA SKILL (S4.3): il nome si propone dalla descrizione; nasce per Tutti i bot
-  await pointerClick(r.pageEval, `[...document.querySelectorAll('[data-testid="sidebar-skills"]')].find((b) => b.offsetParent !== null)`)
+  await openSkillsFromMenu(r)
   await r.waitDom(`!!document.querySelector('[data-testid="skills-window"]')`, 5000)
   await clickText(r.pageEval, 'Nuova skill', 'button', true)
   check('nuova skill: l\'editor vuoto si apre',
@@ -469,7 +478,7 @@ try {
   await closeSkillsWindow(r)
 
   // ============ 3. l'IMPORT da GitHub (S6): anteprima, errori, aggiunta ============
-  await pointerClick(r.pageEval, `[...document.querySelectorAll('[data-testid="sidebar-skills"]')].find((b) => b.offsetParent !== null)`)
+  await openSkillsFromMenu(r)
   await r.waitDom(`!!document.querySelector('[data-testid="skills-window"]')`, 5000)
   // errore UMANO: indirizzo non GitHub
   await clickText(r.pageEval, 'Da GitHub', 'button', true)
@@ -601,7 +610,7 @@ try {
   await sleep(300)
   // l'elenco `/` si ricarica quando la finestra Skill si CHIUDE (K2): la si
   // apre e chiude, come farebbe l'utente dopo aver cambiato le skill
-  await pointerClick(r.pageEval, `[...document.querySelectorAll('[data-testid="sidebar-skills"]')].find((b) => b.offsetParent !== null)`)
+  await openSkillsFromMenu(r)
   await r.waitDom(`!!document.querySelector('[data-testid="skills-window"]')`, 5000)
   await closeSkillsWindow(r)
   await r.pageEval(`document.querySelector('form textarea')?.focus(); return 'focus'`)
@@ -716,7 +725,7 @@ try {
   await r.rpc('skillsDelete("esporta-prova")').catch(() => undefined)
 
   // catture finali: dettaglio e nuova skill nella matrice
-  await pointerClick(r.pageEval, `[...document.querySelectorAll('[data-testid="sidebar-skills"]')].find((b) => b.offsetParent !== null)`)
+  await openSkillsFromMenu(r)
   await r.waitDom(`!!document.querySelector('[data-testid="skills-window"]')`, 5000)
   await r.pageEval(`return [...document.querySelectorAll('[data-testid^="skills-row-"]')].find((x) => x.textContent.includes('Riassunto'))?.click() ?? false`)
   await r.waitDom(`!!document.querySelector('[data-testid="skill-editor"]')`, 5000)
@@ -731,7 +740,7 @@ try {
   await setDark(r.pageEval, false)
   await r.setWindowWidth(1440)
   await closeSkillsWindow(r)
-  await pointerClick(r.pageEval, `[...document.querySelectorAll('[data-testid="sidebar-skills"]')].find((b) => b.offsetParent !== null)`)
+  await openSkillsFromMenu(r)
   await r.waitDom(`!!document.querySelector('[data-testid="skills-window"]')`, 5000)
   await clickText(r.pageEval, 'Nuova skill', 'button', true)
   await r.waitDom(`!!document.querySelector('[data-testid="skill-editor-new"]')`, 5000)

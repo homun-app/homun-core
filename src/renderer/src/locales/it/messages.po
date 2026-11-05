@@ -150,6 +150,7 @@ msgid "{0, plural, one {# passo} other {# passaggi}}"
 msgstr "{0, plural, one {# passo} other {# passaggi}}"
 
 #. placeholder {0}: agentName(filterAgent)
+#. placeholder {0}: preview.card.marketplace
 #. placeholder {0}: tk.status
 #: src/renderer/src/components/RightPanel.tsx
 #: src/renderer/src/components/SkillsWindow.tsx
@@ -208,6 +209,11 @@ msgstr "{0} min fa"
 #: src/renderer/src/components/Sidebar.tsx
 msgid "{0} scrive…"
 msgstr "{0} scrive…"
+
+#. placeholder {0}: pack.skillCount
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "{0} skill"
+msgstr "{0} skill"
 
 #. placeholder {0}: plugin.skills.length
 #. placeholder {1}: plugin.servers.length
@@ -700,6 +706,10 @@ msgstr "Aggiungi un bot"
 msgid "Aggiungo…"
 msgstr "Aggiungo…"
 
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "Aggiunto"
+msgstr "Aggiunto"
+
 #: src/renderer/src/components/ServerSheet.tsx
 msgid "aggiunto da te"
 msgstr "aggiunto da te"
@@ -719,6 +729,10 @@ msgstr "Al lavoro: le card di approvazione del figlio compaiono qui."
 #: src/renderer/src/lib/opening-rows.ts
 msgid "Al tuo rientro"
 msgstr "Al tuo rientro"
+
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "Alcuni pacchetti non si sono caricati."
+msgstr "Alcuni pacchetti non si sono caricati."
 
 #: src/renderer/src/components/ServerSetup.tsx
 msgid "Alcuni valori non vanno bene: correggili e riprova."
@@ -3168,6 +3182,21 @@ msgstr "Italiano"
 msgid "rpc.keychainUnavailable"
 msgstr "Keychain non disponibile: impossibile conservare la chiave"
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "skill.browse.previewMissing"
+msgstr "L’anteprima non è più valida: chiudi e riapri il pacchetto."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "skill.browse.previewFailed"
+msgstr "L’anteprima non è riuscita: il pacchetto non si può scaricare o non è valido."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "skill.browse.badEnabledFor"
+msgstr "L’elenco dei bot non è valido."
+
 #: src/renderer/src/components/ServerSetup.tsx
 msgid "L'indirizzo non risponde: controllalo e riprova."
 msgstr "L'indirizzo non risponde: controllalo e riprova."
@@ -3737,6 +3766,10 @@ msgstr "nessun modello in elenco: scrivi l'id e premi Invio"
 msgid "Nessun modello trovato."
 msgstr "Nessun modello trovato."
 
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "Nessun pacchetto trovato"
+msgstr "Nessun pacchetto trovato"
+
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Nessun server trovato."
 msgstr "Nessun server trovato."
@@ -4005,6 +4038,10 @@ msgstr "Non salvato"
 #: src/renderer/src/components/ConnectorCards13.tsx
 msgid "non supportato: valore in argv ({0})"
 msgstr "non supportato: valore in argv ({0})"
+
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "non usate:"
+msgstr "non usate:"
 
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "non valida"
@@ -4598,6 +4635,11 @@ msgstr "Questo modello non vede le immagini"
 msgid "Questo non sembra un server MCP: controlla l'indirizzo."
 msgstr "Questo non sembra un server MCP: controlla l'indirizzo."
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "skill.browse.hasConnectors"
+msgstr "Questo pacchetto contiene anche connettori: aggiungilo da Collega app."
+
 #: src/renderer/src/components/ServerSetup.tsx
 msgid "Questo server non permette l'accesso dal browser: usa un token di accesso."
 msgstr "Questo server non permette l'accesso dal browser: usa un token di accesso."
@@ -4796,6 +4838,7 @@ msgstr "Ripristina"
 #: src/renderer/src/components/ConnectorCard.tsx
 #: src/renderer/src/components/LibraryPanel.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
+#: src/renderer/src/components/SkillsWindow.tsx
 #: src/renderer/src/components/ui/ModelSelect.tsx
 msgid "Riprova"
 msgstr "Riprova"
@@ -5288,6 +5331,10 @@ msgstr "settimana"
 msgid "Sezione"
 msgstr "Sezione"
 
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "Sfoglia"
+msgstr "Sfoglia"
+
 #: src/renderer/src/components/ComputerTerminal.tsx
 msgid "Shell del bot — stessa identità dei suoi comandi."
 msgstr "Shell del bot — stessa identità dei suoi comandi."
@@ -5724,6 +5771,10 @@ msgstr "Tutti i tipi"
 #: src/renderer/src/components/ComputerActivity.tsx
 msgid "ucciso"
 msgstr "ucciso"
+
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "ufficiale"
+msgstr "ufficiale"
 
 #. placeholder {0}: i18n.t(fmtAgo(task.updatedAt, now))
 #. placeholder {1}: status === 'needs_input' ? t` — rispondi dalla vista del task (Apri)` : ''

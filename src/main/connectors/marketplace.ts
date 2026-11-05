@@ -430,8 +430,8 @@ export function pluginSkillName(plugin: string, skill: string): string {
 }
 
 /** Le cartelle/sezioni del plugin che SandBot NON importa mai (elenco per la card). */
-const IGNORED_DIRS = ['commands', 'agents', 'hooks', 'bin', 'monitors', 'outputStyles', 'themes', 'workflows'] as const
-const IGNORED_LABELS: Record<(typeof IGNORED_DIRS)[number], string> = {
+export const IGNORED_DIRS = ['commands', 'agents', 'hooks', 'bin', 'monitors', 'outputStyles', 'themes', 'workflows'] as const
+export const IGNORED_LABELS: Record<(typeof IGNORED_DIRS)[number], string> = {
   commands: 'commands', agents: 'agents', hooks: 'hooks', bin: 'bin/',
   monitors: 'monitors', outputStyles: 'outputStyles', themes: 'themes', workflows: 'workflows'
 }

@@ -20,6 +20,8 @@ import {
 import {
   previewSkillsFromGithub, addSkillsFromStaging, previewSkillUpdate, applySkillUpdate
 } from '../main/agent/skill-github'
+// fase skill · Sfoglia (B2): i plugin installati per l'etichetta «Aggiunto»
+import { installedPlugins } from '../main/connectors/install'
 import { skillMdIssues, isValidSkillName, parseSkillMd } from '../shared/skill-md'
 import * as providers from '../main/agent/providers'
 import { suggestRoutines } from '../main/routines'
@@ -93,6 +95,24 @@ const pruneSkillImports = (): void => {
 /** I test (e la sonda) clonano da file:// col flag; in produzione MAI. */
 const testSkillCloneDeps = (): { allowFileUrlsForTests?: boolean } =>
   process.env.SANDBOT_TEST_ALLOW_FILE_URLS === '1' ? { allowFileUrlsForTests: true } : {}
+
+// ---- fase skill · Sfoglia (B2/B3): il browser del catalogo (uno per daemon)
+// e le anteprime vive finché l'utente decide (lo staging scade comunque col
+// TTL delle card, sweepPendingPlugins) ----
+interface PendingSkillBrowse {
+  /** la card dell'anteprima (id + sha12 approvati: il controllo L6 resta) */
+  card: import('../shared/types').SendMessagePayload & { type: 'plugin'; id: string; sha12: string }
+  at: number
+}
+const skillBrowses = new Map<string, PendingSkillBrowse>()
+let skillBrowseSeq = 0
+const pruneSkillBrowses = (): void => {
+  const cutoff = Date.now() - 30 * 60_000 // come PENDING_PLUGIN_TTL_MS
+  for (const [id, pending] of skillBrowses) {
+    if (pending.at < cutoff) skillBrowses.delete(id)
+  }
+}
+let skillBrowserInst: ReturnType<typeof import('../main/agent/skill-browse').createSkillBrowser> | null = null
 
 function dockerToolStatus(): { installed: boolean; running: boolean; path: string; testPrefixInvalid: boolean } {
   const installed = isToolResolved('docker')
@@ -1067,6 +1087,70 @@ export function buildApiMethods(
       // K6: l'errore umano del rifiuto (skill non valida, origine persa…)
       if (!r.ok) throw new UiError('skill update failed', r.error)
       return true
+    },
+
+    // ---- fase skill · Sfoglia (B2): il catalogo dei pacchetti di sole skill
+    // dei marketplace registrati; retry true = la «Riprova» della finestra
+    // (niente cache: si rileggono catalogo e alberi) ----
+    'skills:browse': async ([query, browseOpts]) => {
+      if (!opts.marketplaces) throw uiError(UI.rpcMarketplacesUnavailable)
+      skillBrowserInst ??= (await import('../main/agent/skill-browse')).createSkillBrowser({
+        marketplaces: opts.marketplaces,
+        dataDir: store.dataDir,
+        installedPlugins: () => installedPlugins({ getSetting: store.getSetting }),
+        ...testSkillCloneDeps()
+      })
+      return skillBrowserInst.browse(String(query ?? ''), {
+        retry: (browseOpts as { retry?: boolean } | undefined)?.retry === true
+      })
+    },
+    // ---- (B3): l'anteprima dalla finestra — lo STESSO percorso della card
+    // (staging, sha fissato, tetti, symlink), ma senza proposta in chat ----
+    'skills:browse-preview': async ([id]) => {
+      const { buildPluginCard, pluginProposalDetails } = await import('../main/connectors/install')
+      const built = await buildPluginCard(String(id ?? ''), '', (await installBridge()).getInstallDeps(), testSkillCloneDeps())
+      if (!built.ok) throw new UiError(`browse preview failed: ${built.error}`, ui(UI.skillBrowsePreviewFailed))
+      // il marketplace è CAMBIATO dopo il catalogo: il pacchetto ora porta
+      // connettori → si rifiuta (si aggiunge da Collega app)
+      if (built.card.servers.length) throw uiError(UI.skillBrowseHasConnectors)
+      const details = pluginProposalDetails(built.card.id)
+      if (!details) throw uiError(UI.skillBrowsePreviewMissing)
+      const previewId = `skill-browse-${++skillBrowseSeq}`
+      skillBrowses.set(previewId, { card: built.card, at: Date.now() })
+      pruneSkillBrowses()
+      return {
+        previewId,
+        card: built.card,
+        skills: details.skills,
+        ignored: details.ignored,
+        sha12: details.sha12,
+        size: details.size
+      }
+    },
+    // ---- (B3): l'installazione dalla finestra — enabledFor scelto dall'utente
+    // («Tutti i bot» o un elenco), NESSUNA voce in chat e nessun [sistema] ----
+    'skills:browse-install': async ([previewId, enabledFor]) => {
+      const pending = skillBrowses.get(String(previewId))
+      if (!pending) throw uiError(UI.skillBrowsePreviewMissing)
+      const ids = Array.isArray(enabledFor) ? enabledFor.map(String).filter(Boolean) : []
+      if (!ids.length) throw uiError(UI.skillBrowseBadEnabledFor)
+      const { installPlugin } = await import('../main/connectors/install')
+      const r = await installPlugin(
+        pending.card, '', (await installBridge()).getInstallDeps(), store.setSetting, store.getSetting,
+        testSkillCloneDeps(), { enabledFor: ids.includes('*') ? ['*'] : ids }
+      )
+      if (r.ok) skillBrowses.delete(String(previewId))
+      return r
+    },
+    // ---- (B3): «Annulla» butta lo staging (scade comunque col TTL delle card) ----
+    'skills:browse-discard': async ([previewId]) => {
+      const pending = skillBrowses.get(String(previewId))
+      if (pending) {
+        const { discardPluginProposal } = await import('../main/connectors/install')
+        discardPluginProposal(pending.card.id)
+        skillBrowses.delete(String(previewId))
+      }
+      return { ok: true }
     },
 
     // ---- MCP ----

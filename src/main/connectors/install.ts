@@ -33,7 +33,7 @@ import {
   type RegistryEntry, type RemoteHeaderRuntime
 } from './registry'
 import {
-  argvPlaceholdersOf, inspectPlugin, sourceSupported, stagePlugin, substitutePluginRoot, substituteUserConfig, userConfigKeysOf,
+  argvPlaceholdersOf, dirStats, inspectPlugin, sourceSupported, stagePlugin, substitutePluginRoot, substituteUserConfig, userConfigKeysOf,
   type MarketplacePlugin, type PluginInspection, type PluginMcpServer
 } from './marketplace'
 import type { MarketplaceManager } from './marketplace-manager'
@@ -728,6 +728,28 @@ function serverRuntimeInfo(s: PluginMcpServer): { name: string; runtimeKind: 'un
 }
 
 /**
+ * Fase skill · Sfoglia (B3): i dettagli di una proposta in attesa, per
+ * l'anteprima della finestra «Skill» — skill CON DESCRIZIONE, parti non
+ * usate, sha12 e dimensione dello staging. Null se non c'è (installata,
+ * scartata o scaduta).
+ */
+export function pluginProposalDetails(id: string): {
+  skills: Array<{ name: string; description: string }>
+  ignored: string[]
+  sha12: string
+  size: number
+} | null {
+  const p = pendingPlugins.get(id)
+  if (!p) return null
+  return {
+    skills: p.inspection.skills.map((s) => ({ name: s.name, description: s.description })),
+    ignored: p.inspection.ignored,
+    sha12: p.sha12,
+    size: dirStats(p.staging).bytes
+  }
+}
+
+/**
  * installPlugin (su Installa — codice del daemon): lo staging si sposta in
  * <dataDir>/plugins/<marketplace>/<nome>/<sha12>/ e (in docker) si copia nel
  * box in SOLA LETTURA; i server MCP si registrano (http come punto 2, stdio
@@ -736,6 +758,9 @@ function serverRuntimeInfo(s: PluginMcpServer): { name: string; runtimeKind: 'un
  * box è una sequenza controllata (container → mkdir → cp → chmod) e un passo
  * fallito blocca l'installazione — tranne i plugin di sole skill, per i quali
  * la copia nel box non serve.
+ * Fase skill · Sfoglia (B3): opts.enabledFor arriva dalla FINESTRA («Tutti i
+ * bot» o un elenco di bot) invece che dal bot della card — il percorso dello
+ * staging e il controllo L6 sullo sha NON cambiano.
  */
 export async function installPlugin(
   card: PluginCard,
@@ -743,8 +768,10 @@ export async function installPlugin(
   deps: InstallDeps,
   setSetting: (key: string, value: unknown) => void,
   getSetting: <T>(key: string, fallback: T) => T,
-  cloneDeps: { allowFileUrlsForTests?: boolean; mkdtemp?: (prefix: string) => string } = testCloneDeps()
+  cloneDeps: { allowFileUrlsForTests?: boolean; mkdtemp?: (prefix: string) => string } = testCloneDeps(),
+  opts: { enabledFor?: string[] } = {}
 ): Promise<{ ok: true; message: string } | { ok: false; error: string }> {
+  const enabledFor = opts.enabledFor ?? [agentId]
   let pending = pendingPlugins.get(card.id)
   if (!pending) {
     // daemon riavviato (o proposta vecchia): si ri-scarica lo stesso plugin
@@ -855,7 +882,7 @@ export async function installPlugin(
       const cfg: McpServerConfig = {
         id: serverId, name: s.name, transport: 'http', url: s.url, enabled: true,
         toolSlug: toolSlugKeeping(deps.listServers(), serverId, s.name),
-        auth: { kind: 'oauth' }, enabledFor: [agentId],
+        auth: { kind: 'oauth' }, enabledFor,
         source,
         pluginSpec: {
           url: s.url,
@@ -884,7 +911,7 @@ export async function installPlugin(
           args: (s.args ?? []).map((a) => substitutePluginRoot(a, boxDir)),
           envKeys: Object.keys(s.env ?? {})
         },
-        enabledFor: [agentId],
+        enabledFor,
         source,
         pluginSpec: {
           ...(s.env && Object.keys(s.env).length ? { env: s.env } : {})
@@ -914,7 +941,7 @@ export async function installPlugin(
     ...(deps.dockerMode() && boxCopied ? { boxDir } : {}),
     skills: pending.inspection.skills,
     servers: serverIds,
-    enabledFor: [agentId],
+    enabledFor,
     installedAt: (deps.now ?? Date.now)()
   }
   setSetting(PLUGINS_SETTING, [...installedPlugins({ getSetting }).filter((p) => !(p.name === record.name && p.marketplace === record.marketplace)), record])

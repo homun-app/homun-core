@@ -16,7 +16,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
-import { Plus, Search, Library as LibraryIcon, LayoutGrid, ChevronRight, Activity as ActivityIcon, Sparkles } from 'lucide-react'
+import { Plus, Search, Library as LibraryIcon, LayoutGrid, ChevronRight, Activity as ActivityIcon } from 'lucide-react'
 import { useStore, useResolvedModel } from '../store'
 import { buildSidebarModel, collapsedVoices, teamOpenState, type SidebarModel, type SidebarTeam, type SidebarBot, type CollapsedVoice } from '../sidebar-utils'
 // fase 16b correzioni 2 (Q1): il massimo del trascinamento e i limiti della barra
@@ -285,7 +285,8 @@ function VoiceMascot({ agentId, size }: { agentId: string; size: number }) {
 }
 
 /**
- * Il menu account di oggi, adattato: te + Tema/Impostazioni/Collega app.
+ * Il menu account di oggi, adattato: te + Collega app/Skill/Impostazioni/Tema
+ * (fase skill · sfoglia, B1: «Skill» vive QUI, sotto «Collega app»).
  * Fase 16c correzioni (R7): in ROTAI lo stesso menu pende dal bottone in
  * fondo — con la voce «Allarga la barra» SOLO quando la rotaia non è forzata
  * (sotto AUTO_RAIL_BELOW allargarla non si può: la voce non c'è, il menu sì).
@@ -308,6 +309,7 @@ function AccountMenu(props?: { rail?: { forced: boolean; onExpand(): void }; tri
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
+        data-testid="account-menu-trigger"
         className={
           props?.triggerClassName ??
           'flex min-w-0 flex-1 items-center gap-2.5 rounded-[14px] px-1.5 py-1.5 text-left transition hover:bg-muted/60 focus:outline-none'
@@ -329,6 +331,9 @@ function AccountMenu(props?: { rail?: { forced: boolean; onExpand(): void }; tri
       </DropdownMenuTrigger>
       <DropdownMenuContent side="top" align={props?.rail ? 'end' : 'start'} className="w-56">
         <DropdownMenuItem onClick={() => setAppsOpen(true)}><Trans>Collega app</Trans></DropdownMenuItem>
+        {/* fase skill · sfoglia (B1): «Skill» sta QUI nel menu, sotto Collega
+            app — non più come bottone nella barra accanto ad App */}
+        <DropdownMenuItem data-testid="menu-skills" onClick={() => setSkillsOpen(true)}><Trans>Skill</Trans></DropdownMenuItem>
         <DropdownMenuItem onClick={() => { setSettingsOpen(true) }}><Trans>Impostazioni</Trans></DropdownMenuItem>
         {props?.rail && !props.rail.forced && (
           <DropdownMenuItem onClick={props.rail.onExpand}><Trans>Allarga la barra</Trans></DropdownMenuItem>
@@ -384,7 +389,6 @@ function CollapsedColumn({
   const setActivityOpen = useStore((s) => s.setActivityOpen)
   const activityOpen = useStore((s) => s.activityOpen)
   const setAppsOpen = useStore((s) => s.setAppsOpen)
-  const setSkillsOpen = useStore((s) => s.setSkillsOpen)
   const agents = useStore((s) => s.agents)
   const voices = collapsedVoices(model)
   const statusLabel = (st: CollapsedVoice['status']): string =>
@@ -474,15 +478,6 @@ function CollapsedColumn({
         <div className="flex-1" />
         <button
           className="grid size-9 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground transition hover:text-foreground"
-          aria-label={i18n.t(msg`Skill`)}
-          title={i18n.t(msg`Skill`)}
-          data-testid="sidebar-skills"
-          onClick={() => setSkillsOpen(true)}
-        >
-          <Sparkles className="size-4" />
-        </button>
-        <button
-          className="grid size-9 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground transition hover:text-foreground"
           aria-label={i18n.t(msg`App`)}
           title={i18n.t(msg`App`)}
           onClick={() => setAppsOpen(true)}
@@ -505,8 +500,6 @@ function CollapsedColumn({
 export function Sidebar({ layout }: { layout: LayoutResult }) {
   const { t } = useLingui()
   const agents = useStore((s) => s.agents)
-  // fase skill (S4): apre la finestra «Skill» dalla barra
-  const setSkillsOpen = useStore((s) => s.setSkillsOpen)
   const groups = useStore((s) => s.groups)
   const mainAgentId = useStore((s) => s.mainAgentId)
   const openLibraryId = useStore((s) => s.openLibraryId)
@@ -693,7 +686,9 @@ export function Sidebar({ layout }: { layout: LayoutResult }) {
           </nav>
 
           {/* fase 16b correzioni 2 (Q3): riga alta 60 con 16 di margine sotto —
-              lo stesso centro verticale della pillola del campo di scrittura */}
+              lo stesso centro verticale della pillola del campo di scrittura.
+              fase skill · sfoglia (B1): «Skill» non è più un bottone qui
+              accanto ad App: sta nel menu dell'account, sotto Collega app */}
           <div className="mb-4 flex h-[60px] shrink-0 items-center gap-1.5 px-3">
             <AccountMenu />
             <button
@@ -703,17 +698,6 @@ export function Sidebar({ layout }: { layout: LayoutResult }) {
               onClick={() => setAppsOpen(true)}
             >
               <LayoutGrid className="size-4" />
-            </button>
-            {/* fase skill (S4): la voce «Skill» accanto ad App — apre la
-                finestra della libreria unica */}
-            <button
-              className="grid size-9 shrink-0 place-items-center rounded-full bg-muted/60 text-muted-foreground transition hover:text-foreground"
-              aria-label={t`Skill`}
-              title={t`Skill`}
-              data-testid="sidebar-skills"
-              onClick={() => setSkillsOpen(true)}
-            >
-              <Sparkles className="size-4" />
             </button>
           </div>
         </>

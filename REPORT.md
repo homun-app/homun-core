@@ -1,3 +1,79 @@
+# REPORT FASE SKILL · SFOGLIA — «SKILL» NEL MENU IN BASSO E LA SEZIONE «SFOGLIA» COME RAKAZO (B1–B6)
+
+**Data:** 2026-11-05 · **Base:** `main` @ 5eae81a9 (tag `fase-skill-ritocchi`) · **Tag di chiusura:** `fase-skill-sfoglia`. Nessun push, nessun tag `v*`, nessuna dipendenza nuova, niente Docker, niente eval, niente `npm run dist`; rete solo su 127.0.0.1 (provider finto) e repository git `file://` locali con `SANDBOT_TEST_ALLOW_FILE_URLS=1`; mai github.com: nella sonda il marketplace ufficiale è **tolto** dal seed di `connectors.marketplaces`. App/daemon avviati solo con env pulita (`HOME`, `PATH` di sistema, `SANDBOT_TEST_USER_DATA`, keychain e safestorage finti); temporanei solo con mkdtemp nella cartella dei vincoli. Riferimento Rakazo (Apache 2.0, sola lettura) letto prima di scrivere codice; attribuzione nell'intestazione di `src/main/agent/skill-browse.ts`.
+**Verifica finale:** `typecheck` pulito · `vitest` **186 file / 2915 test verdi** (4 file di test nuovi, +33 rispetto ai 2882 del report precedente) · `build` (electron-vite) verde · **sonda sfoglia 28/28 — tre corse verdi complete**, ognuna con **0 daemon rimasti** · **sonda mcp-setup 61/61** (una corsa, 0 daemon) · **sonda skill aggiornata al menu: 49/49** (una corsa, 0 daemon) · catture rigenerate e **guardate** (sotto, §5) · cataloghi it/en rigenerati (`i18n:extract`, en 0 non tradotti).
+
+## Cosa è cambiato, in una riga
+
+«Skill» lascia la barra e sta nel menu dell'account, sotto «Collega app» (B1); il daemon costruisce il catalogo dei **pacchetti di sole skill** dei marketplace già registrati — niente registro aperto, ciò che non si sa classificare si scarta — con un clone parziale `--filter=blob:none --no-checkout` e `git ls-tree`/`git show` al posto delle API di GitHub (B2); dalla finestra si aggiunge un pacchetto con lo STESSO percorso delle card (staging, sha fissato, controllo L6) ma senza voce in chat, con `enabledFor` scelto dall'utente (B3); la finestra Skill ha la terza sezione «Sfoglia» con ricerca, griglia a 2 colonne, stati e anteprima — e il toggle «Tutti i bot» ora spegne e disattiva i bot singoli anche nell'import da GitHub (B4); la sonda `fase-skill-sfoglia-probe.mjs` copre tutto con marketplace git locale a cinque plugin (B5).
+
+---
+
+## 1. I test visti fallire PRIMA della correzione
+
+Per ogni punto: il test scritto prima, visto rosso sul codice di `5eae81a9`, poi la correzione. Riga = la prima asserzione fallita.
+
+| Punto | Test (file) | Fallimento visto (test · riga · errore) |
+|---|---|---|
+| **B1** | `src/renderer/src/__tests__/skills-menu-guard.test.ts` | «Skill sta nel menu subito sotto Collega app e prima di Impostazioni» · riga **22** · `expected -1 to be greater than 61` (nessuna voce «Skill» nel menu); «la voce del menu apre la finestra Skill» · riga **34** · `expected null not to be null` (nessun item `menu-skills` con `setSkillsOpen(true)`); «nella barra non c'è più il bottone Skill» · riga **40** · `not to contain 'sidebar-skills'` (i due bottoni — barra larga e rotaia — c'erano ancora) |
+| **B2** | `src/main/agent/__tests__/skill-browse.test.ts` | intera suite · riga **10** (import) · `Error: Cannot find module '../skill-browse'` — il modulo non esisteva; poi, con il modulo scritto: i 6 test del catalogo in **timeout a 5006 ms**: `manager.add()` rifiutava `file://` senza `SANDBOT_TEST_ALLOW_FILE_URLS` nell'env (guarda solo l'env, non il flag iniettato), il `.catch` lo ingoiava e `list()` tornava il **default = marketplace ufficiale** → tentativo di lettura di raw.githubusercontent.com dal test (bloccato dal timeout). Corretto seminando `connectors.marketplaces` direttamente nel setting (come la sonda): ufficiale mai nei test. Due attese poi aggiustate perché sbagliate in partenza: la cache dell'**albero** dura 1 h (il re-clone dopo i 10 min del catalogo NON c'è) e la cache su disco è condivisa fra le prove (per i conteggi servono dir dati vergini) |
+| **B3** | `src/main/connectors/__tests__/skill-browse-install.test.ts` | «l'anteprima del pacchetto di sole skill: card SENZA server…» · riga **~97** · `TypeError: pluginProposalDetails is not a function` (funzione da esportare); «installa con enabledFor della FINESTRA (solo Alfa)» · `expected [ '' ] to deeply equal [ 'agent_alfa' ]` (installPlugin ignorava l'opzione); «SICUREZZA: skill DI TERZI» · `expected undefined to be true`; «lo scarto (Annulla) butta lo staging» · riga **142** · `pluginProposalDetails is not a function`. Nota: il primo giro vedeva anche `expected [ 'due--due', 'uno--uno' ]` — la fixture non aveva il manifest del plugin e `inspectPlugin` nomina le skill dalla cartella: corretto il fixture (manifest realistico), non il codice |
+| **B4** | `src/renderer/src/__tests__/skills-browse-section.test.ts` | 8/8 rossi · primo: riga **33** · `expected -1 to be greater than 12377` (nessuna sezione `skills-browse` dopo l'elenco); poi `Error: sezione Sfoglia non trovata in SkillsWindow.tsx`; e i due del campo/griglia per la regex multilinea (il `=>` di `onChange` interrompe `[^>]*`) — asserzioni riscritte puntate su testid e classi, il comportamento era quello giusto |
+| **RPC** | `src/main/__tests__/ipc-rpc-coherence.test.ts` | tenuto d'occhio, mai rosso: i 4 canali nuovi (`skills:browse`, `skills:browse-preview`, `skills:browse-install`, `skills:browse-discard`) sono stati aggiunti insieme in daemon (`api.ts`), preload e `ipc.ts` |
+
+## 2. Le voci scartate dal catalogo, e perché
+
+Il catalogo parte da `parsed.plugins` di ogni marketplace registrato e scarta una voce per una di queste ragioni (restano in `skills:browse().skipped`, la sonda le stampa):
+
+- **sorgente esterna** (github/url/git-subdir/npm/archive/command): senza scaricarle non si può sapere cosa contengono — la scelta di Rakazo. Vista nella sonda: `esterno` → `external source (github): not vendored in the marketplace`;
+- **connettore**: c'è `.mcp.json` o `mcpServers` nel manifest (anche solo il file presente, o illeggibile). Vista: `con-connettore` → `contains MCP servers (.mcp.json): it is a connector, add it from Connect apps`;
+- **path che esce dalla cartella** (stesse regole di `inspectPlugin`): `fuori` → `a manifest skill path leaves the folder: ../altrove`;
+- in più, dal codice: sorgente relativa malformata (`./` mancante o `..`), cartella del plugin assente nell'albero, **nessuna** `skills/<nome>/SKILL.md` né path dichiarati, manifest `.claude-plugin/plugin.json` non JSON (ciò che non si riesce a leggere si esclude), elenco dell'albero oltre i 50 000 file.
+
+Le parti che Homun ignora sempre (commands, agents, hooks, bin…) **non** escludono: compaiono nell'anteprima come «non usate» (sonda: `non usate: commands`).
+
+## 3. Il clone parziale NON riusa quello del catalogo — e perché
+
+Un clone dedicato per marketplace, `<dataDir>/cache/marketplaces/<hash-della-sorgente>-tree`, stesso schema M6 della fase 13 (sidecar `.at`, TTL di 1 h, re-clone in cartella nuova e sostituzione atomica, pulizia delle `.tree-clone-*` alla creazione). Non si riusa il clone del catalogo perché: (1) i marketplace **github** non hanno NESSUN clone del catalogo — il `marketplace.json` arriva da raw.githubusercontent.com — e Sfoglia deve elencare i file di TUTTI i marketplace; (2) il clone del catalogo dei marketplace git è sparse-checkout del solo `.claude-plugin/`, col ciclo di vita (TTL, rimozione) gestito dal manager per i cataloghi; l'albero intero serve qui. Comandi: `git clone --depth 1 --filter=blob:none --no-checkout` con le stesse regole sicure di `gitCloneArgv`/`checkGitUrl` (hook disattivati, `protocol.file.allow=never` fuori dai test, niente submoduli, https solo), elenco con `git ls-tree -r --name-only HEAD` (nessun blob), i pochi file serviti (manifest 64 KB, `.mcp.json` 256 KB) con `git show HEAD:<path>` — niente limite orario di api.github.com, e nei test funziona con `file://`. Cache del catalogo classificato: 10 minuti; **gli errori non vanno mai in cache** (verificato dal test e dalla sonda); due richieste contemporanee condividono lo stesso lavoro (un solo clone, verificato contando le invocazioni di git).
+
+**Nota sull'id:** la spec chiedeva `id = <marketplace>/<plugin>` «cioè lo stesso id che usa `buildPluginCard`»; l'id che `buildPluginCard` accetta davvero è `plugin:<plugin>@<marketplace>` (come `search_connectors`). Ho usato quest'ultimo, così `skills:browse-preview` lo passa a `buildPluginCard` senza rimappature.
+
+## 4. Il conteggio dei daemon (dopo OGNI corsa)
+
+Con `scripts/lib/probe-daemons.mjs` (`ps eww -ax`, ambiente dei processi):
+
+| Corsa | Esito | Daemon |
+|---|---|---|
+| sonda **sfoglia** · corsa 1 | 21/25 (visti i difetti: `Aggiungi` non chiudeva l'anteprima, staging contato male, flusso punto 7) | 1 trovato, 1 chiuso → **0 rimasti** |
+| sonda sfoglia · corsa 2 | interrotta da eccezione transiente al punto 5 (il click sulla card durante un re-render: aggiunto retry) | **0 rimasti** |
+| sonda sfoglia · corsa 3 | **28/28 OK** | 1+0 → **0 rimasti** |
+| sonda sfoglia · corsa 4 | **28/28 OK** | 1+0 → **0 rimasti** |
+| sonda sfoglia · corsa 5 | interrotta dallo stesso transiente (prima del fix) | **0 rimasti** |
+| sonda sfoglia · corsa 6 (catture del menu corrette: Radix non si chiude con `body.click()`, serve Escape) | **28/28 OK** | 1+0 → **0 rimasti** |
+| sonda **mcp-setup** (una, richiesta) | **61/61 OK** | 1+0 → **0 rimasti** |
+| sonda **skill** (vecchia, aggiornata al menu B1) | prima 48/49 (return undefined dell'helper rifattorizzato), poi **49/49 OK** | 1+0 → **0 rimasti** |
+
+**Tre corse verdi complete della sonda sfoglia** come da spec, tutte a 0 daemon. La vecchia `fase-skill-probe.mjs` è stata aggiornata perché i bottoni della barra non esistono più: apre dal menu dell'account (`account-menu-trigger` → voce `Skill`) ed è rifatta verde per intero.
+
+## 5. Le catture, guardate
+
+In `docs/catture/skill/`, matrice 1440/900 × chiaro/scuro (PNG 2×, 2880×1800 e 1800×1800, verificate con il modello di visione):
+
+- **menu-skill-***: menu dell'account aperto con l'ordine giusto «Collega app / Skill / Impostazioni / Tema», nessun testo tagliato. Alla prima descrizione risultava vuote: il `document.body.click()` non chiude i menu Radix e il click successivo sul trigger li RIAPPIVA chiudendoli (toggle) — corretto con Escape + attesa della voce «Skill» prima dello scatto;
+- **sfoglia-***: sezione con titoletto, campo «Cerca skill» e le due card («Due Skill · 2 skill», «Con Comandi · 1 skill») su **2 colonne** (900 px > 640), in scuro ben contrastate, nessun difetto segnalato;
+- **sfoglia-anteprima-***: nome, marketplace `mp-di-prova`, sha12 (`b149bbccc68f`), la skill con descrizione, «non usate: commands», «Tutti i bot» acceso e i toggle di Alfa/Beta **spenti e disattivati**, bottoni «Aggiungi»/«Annulla». Nota: nelle righe `SettingsRow` fuori dal dialogo Impostazioni il controllo sta SOTTO l'etichetta (manca il contesto `@container`): è il comportamento pre-esistente del componente condiviso — l'anteprima di import della fase scorsa è identica — e non l'ho toccato (fuori portata).
+
+## 6. Il resto, in breve
+
+- **RPC nuove** (`daemon api.ts` + `ipc.ts` + preload + `shared/types.ts`): `skills:browse([query, {retry}])` → `{entries, unavailable, skipped}`; `skills:browse-preview([id])` → `{previewId, card, skills, ignored, sha12, size}` — rifiuta col testo umano «Questo pacchetto contiene anche connettori: aggiungilo da Collega app» se il marketplace è cambiato; `skills:browse-install([previewId, enabledFor])` — refactor minimo di `installPlugin` (settimo argomento `{enabledFor}`), **il controllo L6 sullo sha resta**, nessuna voce in chat né `[sistema]`; `skills:browse-discard([previewId])`. La finestra legge FRESCO all'apertura e sulla «Riprova» (`retry`), così un marketplace diventato illeggibile si vede subito (sonda, punto 7);
+- **sicurezza** (test dedicato): le skill di un pacchetto installato dalla finestra arrivano al `/` con `imported: true` SOLO per i bot scelti (sonda: Alfa sì, Beta no) e il tool `skill` le marca `webContent` → `<dato_esterno>`; il turno verificato sul provider finto porta la riga d'invocazione e il corpo della skill;
+- **ricerca** pura e CONDIVISA (`src/shared/skill-browse-search.ts`): maiuscole e accenti non contano, batte nome/displayName/descrizione/keywords/categoria; ufficiali prima, poi per nome;
+- **i18n**: cataloghi it/en rigenerati con gli script del progetto; testi pochi, niente spiegazioni che ripetono l'interfaccia;
+- **nessun testo letto dal modello è cambiato** (niente eval): l'espansione `/`, i prompt e i messaggi `[sistema]` sono intatti; il messaggio di installazione torna solo alla finestra;
+- file nuovi: `src/main/agent/skill-browse.ts`, `src/shared/skill-browse-search.ts`, `scripts/fase-skill-sfoglia-probe.mjs` + 4 file di test; toccati: `Sidebar.tsx`, `SkillsWindow.tsx`, `api.ts`, `ipc.ts`, `preload/index.ts`, `install.ts` (opzione `enabledFor` + `pluginProposalDetails`), `marketplace.ts` (`IGNORED_DIRS` esportati), `marketplace-manager` invariato, `shared/types.ts`, `ui-messages.ts`, cataloghi, `fase-skill-probe.mjs`.
+
+---
+
 # REPORT FASE SKILL · RITOCCHI — FORMATTO CHE SI ROMPE AL SALVATAGGIO, `/` DEI PLUGIN, SICUREZZA DELLA LIBRERIA, SONDA CIECA, EVAL RIFATTO (K1–K10)
 
 **Data:** 2026-11-05 · **Base:** `main` @ cad6c7d9 (tag `fase-skill`) · **Tag di chiusura:** `fase-skill-ritocchi`. Nessun push, nessun tag `v*`, versione invariata (0.3.1001), nessuna dipendenza nuova (js-yaml 4.3.2 era già in `dependencies`), niente Docker, niente eval (lo lancio io), niente `npm run dist`; rete solo 127.0.0.1 e repository git `file://` locali col flag di test.

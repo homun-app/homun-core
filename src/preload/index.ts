@@ -134,6 +134,11 @@ const api: SandbotApi = {
   skillsGithubAdd: (id, choices, enabledFor) => ipcRenderer.invoke('skills:github-add', id, choices, enabledFor),
   skillsGithubUpdatePreview: (name) => ipcRenderer.invoke('skills:github-update-preview', name),
   skillsGithubUpdateApply: (id, name) => ipcRenderer.invoke('skills:github-update-apply', id, name),
+  // fase skill · Sfoglia (B2/B3): pacchetti di sole skill dei marketplace
+  skillsBrowse: (query, opts) => ipcRenderer.invoke('skills:browse', query, opts),
+  skillsBrowsePreview: (id) => ipcRenderer.invoke('skills:browse-preview', id),
+  skillsBrowseInstall: (previewId, enabledFor) => ipcRenderer.invoke('skills:browse-install', previewId, enabledFor),
+  skillsBrowseDiscard: (previewId) => ipcRenderer.invoke('skills:browse-discard', previewId),
   mcpList: () => ipcRenderer.invoke('mcp:list'),
   mcpSave: (s, secret) => ipcRenderer.invoke('mcp:save', s, secret),
   mcpDelete: (id) => ipcRenderer.invoke('mcp:delete', id),

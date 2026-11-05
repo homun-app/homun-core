@@ -150,6 +150,7 @@ msgid "{0, plural, one {# passo} other {# passaggi}}"
 msgstr "{0, plural, one {# step} other {# steps}}"
 
 #. placeholder {0}: agentName(filterAgent)
+#. placeholder {0}: preview.card.marketplace
 #. placeholder {0}: tk.status
 #: src/renderer/src/components/RightPanel.tsx
 #: src/renderer/src/components/SkillsWindow.tsx
@@ -208,6 +209,11 @@ msgstr "{0} min ago"
 #: src/renderer/src/components/Sidebar.tsx
 msgid "{0} scrive…"
 msgstr "{0} is writing…"
+
+#. placeholder {0}: pack.skillCount
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "{0} skill"
+msgstr "{0} skill"
 
 #. placeholder {0}: plugin.skills.length
 #. placeholder {1}: plugin.servers.length
@@ -700,6 +706,10 @@ msgstr "Add a bot"
 msgid "Aggiungo…"
 msgstr "Adding…"
 
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "Aggiunto"
+msgstr "Added"
+
 #: src/renderer/src/components/ServerSheet.tsx
 msgid "aggiunto da te"
 msgstr "added by you"
@@ -719,6 +729,10 @@ msgstr "At work: the child's approval cards appear here."
 #: src/renderer/src/lib/opening-rows.ts
 msgid "Al tuo rientro"
 msgstr "When you came back"
+
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "Alcuni pacchetti non si sono caricati."
+msgstr "Some packages could not be loaded."
 
 #: src/renderer/src/components/ServerSetup.tsx
 msgid "Alcuni valori non vanno bene: correggili e riprova."
@@ -3168,6 +3182,21 @@ msgstr "Italiano"
 msgid "rpc.keychainUnavailable"
 msgstr "Keychain unavailable: cannot store the key"
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "skill.browse.previewMissing"
+msgstr "The preview is no longer valid: close and reopen the package."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "skill.browse.previewFailed"
+msgstr "The preview failed: the package cannot be downloaded or is not valid."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "skill.browse.badEnabledFor"
+msgstr "The bot list is not valid."
+
 #: src/renderer/src/components/ServerSetup.tsx
 msgid "L'indirizzo non risponde: controllalo e riprova."
 msgstr "The address does not answer: check it and try again."
@@ -3737,6 +3766,10 @@ msgstr "no model in the list: type the id and press Enter"
 msgid "Nessun modello trovato."
 msgstr "No model found."
 
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "Nessun pacchetto trovato"
+msgstr "No packages found"
+
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Nessun server trovato."
 msgstr "No server found."
@@ -4005,6 +4038,10 @@ msgstr "Not saved"
 #: src/renderer/src/components/ConnectorCards13.tsx
 msgid "non supportato: valore in argv ({0})"
 msgstr "unsupported: value in argv ({0})"
+
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "non usate:"
+msgstr "not used:"
 
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "non valida"
@@ -4598,6 +4635,11 @@ msgstr "This model cannot see images"
 msgid "Questo non sembra un server MCP: controlla l'indirizzo."
 msgstr "This does not look like an MCP server: check the address."
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "skill.browse.hasConnectors"
+msgstr "This package also contains connectors: add it from Connect apps."
+
 #: src/renderer/src/components/ServerSetup.tsx
 msgid "Questo server non permette l'accesso dal browser: usa un token di accesso."
 msgstr "This server does not allow browser sign-in: use an access token."
@@ -4796,6 +4838,7 @@ msgstr "Restore"
 #: src/renderer/src/components/ConnectorCard.tsx
 #: src/renderer/src/components/LibraryPanel.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
+#: src/renderer/src/components/SkillsWindow.tsx
 #: src/renderer/src/components/ui/ModelSelect.tsx
 msgid "Riprova"
 msgstr "Retry"
@@ -5288,6 +5331,10 @@ msgstr "week"
 msgid "Sezione"
 msgstr "Section"
 
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "Sfoglia"
+msgstr "Browse"
+
 #: src/renderer/src/components/ComputerTerminal.tsx
 msgid "Shell del bot — stessa identità dei suoi comandi."
 msgstr "Bot's shell — same identity as its commands."
@@ -5724,6 +5771,10 @@ msgstr "All types"
 #: src/renderer/src/components/ComputerActivity.tsx
 msgid "ucciso"
 msgstr "killed"
+
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "ufficiale"
+msgstr "official"
 
 #. placeholder {0}: i18n.t(fmtAgo(task.updatedAt, now))
 #. placeholder {1}: status === 'needs_input' ? t` — rispondi dalla vista del task (Apri)` : ''

@@ -896,6 +896,12 @@ export interface SandbotApi {
   skillsGithubAdd(id: string, choices: Array<{ path: string; name?: string }>, enabledFor: string[]): Promise<Array<{ name?: string; path: string; error?: { english: string; uiId: string; values?: Record<string, string | number> } }>>
   skillsGithubUpdatePreview(name: string): Promise<{ id: string; diff: SkillGithubUpdatePreview }>
   skillsGithubUpdateApply(id: string, name: string): Promise<boolean>
+  // fase skill · Sfoglia (B2/B3): il catalogo dei pacchetti di sole skill dei
+  // marketplace e l'aggiunta dalla finestra (senza card in chat)
+  skillsBrowse(query?: string, opts?: { retry?: boolean }): Promise<SkillBrowseResult>
+  skillsBrowsePreview(id: string): Promise<SkillBrowsePreview>
+  skillsBrowseInstall(previewId: string, enabledFor: string[]): Promise<{ ok: boolean; message?: string; error?: string }>
+  skillsBrowseDiscard(previewId: string): Promise<{ ok: boolean }>
   // MCP
   mcpList(): Promise<McpServerInfo[]>
   mcpSave(s: McpServerInfo, secret?: McpServerSecret): Promise<McpServerInfo[]>
@@ -1215,6 +1221,48 @@ export interface SkillVersion {
   ts: number
   origin: string
   by?: string
+}
+
+// ---- fase skill · Sfoglia (B2/B3): i pacchetti di sole skill dei marketplace ----
+
+/** Una voce del catalogo «Sfoglia»: un plugin di sole skill di un marketplace. */
+export interface SkillBrowseEntry {
+  /** l'id che usa l'installazione: plugin:<nome>@<marketplace> */
+  id: string
+  name: string
+  displayName: string
+  description: string
+  category: string
+  keywords: string[]
+  homepage: string
+  marketplace: string
+  official: boolean
+  skillCount: number
+  skillNames: string[]
+  /** «Aggiunto»: il pacchetto è già installato */
+  installed: boolean
+}
+
+/** Il catalogo Sfoglia: le voci e i marketplace che non si sono letti. */
+export interface SkillBrowseResult {
+  entries: SkillBrowseEntry[]
+  unavailable: Array<{ source: string }>
+  /** le voci scartate col motivo (diagnostica) */
+  skipped: Array<{ plugin: string; reason: string }>
+}
+
+/** L'anteprima di un pacchetto dalla finestra (lo stesso percorso della card, senza chat). */
+export interface SkillBrowsePreview {
+  previewId: string
+  /** la card del plugin (senza proposta in chat) */
+  card: Extract<SendMessagePayload, { type: 'plugin' }>
+  /** le skill CON la descrizione (per l'elenco dell'anteprima) */
+  skills: Array<{ name: string; description: string }>
+  /** le parti che Homun non usa (commands, agents…), mostrate come «non usate» */
+  ignored: string[]
+  sha12: string
+  /** byte dello staging */
+  size: number
 }
 
 /** Le skill dei plugin per la finestra «Skill» (sola lettura). */

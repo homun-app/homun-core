@@ -3,7 +3,7 @@
 // Impostazioni (SettingsGroup, SettingsRow, SettingsAdvanced, Toggle); il
 // foglio del dettaglio segue il modello di ServerSheet. Ci si arriva dalla
 // riga «Skill · N» della finestra App, dal pannello Skill della chat (rimando
-// filtrato sul bot) e dalla voce nella barra accanto ad App.
+// filtrato sul bot) e dalla voce nel menu in basso (B1).
 //
 //   elenco     ricerca, filtri (Tutte · Mie · Create dai bot · Importate ·
 //              Da plugin), nome umanizzato + descrizione + origine + «Bot
@@ -16,6 +16,10 @@
 //   plugin     in sola lettura («si aggiorna aggiornando il plugin»);
 //   importate  modificabili: diventano source 'user' con origin conservato;
 //              «Aggiorna da GitHub» avvisa che sovrascrive le modifiche.
+//   sfoglia    (fase skill · Sfoglia, B4) la terza sezione: i PACCHETTI DI
+//              SOLE SKILL dei marketplace registrati (niente registro aperto),
+//              griglia a 2 colonne come il Browse di Rakazo; l'anteprima
+//              mostra skill e parti non usate e aggiunge SENZA card in chat.
 import { useEffect, useMemo, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
@@ -24,9 +28,11 @@ import { Dialog, DialogContent, DialogTitle } from './ui/dialog'
 import { ChevronLeft, Plus, Upload, Search, Sparkles } from 'lucide-react'
 import { api, useStore } from '../store'
 import type {
-  SkillLibraryItem, SkillGithubPreview, SkillGithubPreviewItem, SkillGithubUpdatePreview, SkillVersion
+  SkillLibraryItem, SkillGithubPreview, SkillGithubPreviewItem, SkillGithubUpdatePreview, SkillVersion,
+  SkillBrowseResult, SkillBrowsePreview
 } from '../../../shared/types'
 import { humanizeSkillName, parseSkillMd } from '../../../shared/skill-md'
+import { matchesSkillPackQuery } from '../../../shared/skill-browse-search'
 import { SettingsAdvanced } from './settings/SettingsAdvanced'
 import { SettingsGroup } from './settings/SettingsGroup'
 import { SettingsRow } from './settings/SettingsRow'
@@ -67,11 +73,33 @@ export function SkillsWindow(): React.ReactNode {
   const [detail, setDetail] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [importing, setImporting] = useState(false)
+  // fase skill · Sfoglia (B4): il catalogo dei pacchetti di sole skill
+  const [browseId, setBrowseId] = useState<string | null>(null)
+  const [browseData, setBrowseData] = useState<SkillBrowseResult | null>(null)
+  const [browseLoading, setBrowseLoading] = useState(true)
+  const [browseQuery, setBrowseQuery] = useState('')
+  const [browseRetryAt, setBrowseRetryAt] = useState(0)
 
   const reload = (): void => {
     void api.skillsLibrary().then(setData).catch(() => setData({ library: [], plugins: [] }))
   }
   useEffect(reload, [])
+  // all'apertura (e sulla «Riprova») si legge FRESCO: un marketplace diventato
+  // illeggibile si vede subito; dopo l'aggiunta basta la cache («Aggiunto» si
+  // calcola a ogni chiamata comunque)
+  const loadBrowse = (retry = false): void => {
+    setBrowseLoading(true)
+    void api.skillsBrowse('', retry ? { retry: true } : undefined)
+      .then(setBrowseData)
+      // anche un errore mostra la riga «non si sono caricati» con Riprova
+      .catch(() => setBrowseData({ entries: [], unavailable: [{ source: '' }], skipped: [] }))
+      .finally(() => setBrowseLoading(false))
+  }
+  useEffect(() => { loadBrowse(true) }, [browseRetryAt])
+  const browsePacks = useMemo(
+    () => (browseData?.entries ?? []).filter((e) => matchesSkillPackQuery(e, browseQuery)),
+    [browseData, browseQuery]
+  )
   // il filtro bot del pannello della chat vale per la PRIMA apertura
   useEffect(() => {
     if (filterAgent && data) {
@@ -155,12 +183,19 @@ export function SkillsWindow(): React.ReactNode {
             <div className="min-h-0 flex-1 overflow-y-auto scroll-thin px-6 pb-6 pt-4">
               {creating && <SkillEditor folder={null} onDone={() => { setCreating(false); reload() }} onCancel={() => setCreating(false)} />}
               {importing && <GithubImport onDone={() => { setImporting(false); reload() }} onCancel={() => setImporting(false)} />}
-              {detail !== null && !creating && !importing && (
+              {browseId !== null && !creating && !importing && (
+                <BrowsePreview
+                  id={browseId}
+                  onClose={() => setBrowseId(null)}
+                  onAdded={() => { reload(); loadBrowse() }}
+                />
+              )}
+              {detail !== null && !creating && !importing && browseId === null && (
                 data?.library.find((s) => s.folder === detail)
                   ? <SkillDetailSheet folder={detail} onDone={() => { reload() }} onClose={() => setDetail(null)} />
                   : <PluginDetail name={detail} plugins={data?.plugins ?? []} onClose={() => setDetail(null)} />
               )}
-              {detail === null && !creating && !importing && (
+              {detail === null && !creating && !importing && browseId === null && (
                 <>
                   <div className="flex items-center gap-2">
                     <div className="flex h-9 flex-1 items-center gap-2 rounded-full bg-muted px-3">
@@ -240,6 +275,69 @@ export function SkillsWindow(): React.ReactNode {
                       </button>
                     ))}
                   </div>
+
+                  {/* fase skill · Sfoglia (B4): la terza sezione — i pacchetti
+                      di sole skill dei marketplace, come il Browse di Rakazo */}
+                  <section className="mt-7 space-y-2" data-testid="skills-browse">
+                    <h3 className="text-[14px] font-medium text-muted-foreground"><Trans>Sfoglia</Trans></h3>
+                    <input
+                      className="h-9 w-full rounded-xl bg-muted px-3 text-sm outline-none placeholder:text-muted-foreground"
+                      placeholder={t`Cerca skill`}
+                      aria-label={t`Cerca skill`}
+                      maxLength={200}
+                      value={browseQuery}
+                      onChange={(e) => setBrowseQuery(e.target.value)}
+                      data-testid="skills-browse-search"
+                    />
+                    {browseLoading && (
+                      <p className="grid place-items-center py-8" data-testid="skills-browse-loading">
+                        <span className="size-5 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" aria-label={t`caricamento…`} />
+                      </p>
+                    )}
+                    {!browseLoading && (browseData?.unavailable.length ?? 0) > 0 && (
+                      <div role="alert" className="flex items-center gap-3 py-1 text-sm text-muted-foreground" data-testid="skills-browse-unavailable">
+                        <Trans>Alcuni pacchetti non si sono caricati.</Trans>
+                        <button
+                          type="button"
+                          className="rounded-full bg-muted px-3 py-1 text-xs text-foreground transition hover:bg-accent"
+                          data-testid="skills-browse-retry"
+                          onClick={() => setBrowseRetryAt(Date.now())}
+                        >
+                          <Trans>Riprova</Trans>
+                        </button>
+                      </div>
+                    )}
+                    {!browseLoading && browsePacks.length === 0 ? (
+                      <p className="py-6 text-center text-sm text-muted-foreground" data-testid="skills-browse-empty">
+                        <Trans>Nessun pacchetto trovato</Trans>
+                      </p>
+                    ) : (
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2" data-testid="skills-browse-grid">
+                        {browsePacks.map((pack) => (
+                          <button
+                            key={pack.id}
+                            type="button"
+                            className="flex min-w-0 items-start gap-3 rounded-[14px] px-2.5 py-2 text-left transition hover:bg-muted/60"
+                            onClick={() => setBrowseId(pack.id)}
+                            data-testid={`skills-browse-entry-${pack.name}`}
+                          >
+                            <span className="grid size-10 shrink-0 place-items-center rounded-[11px] bg-muted text-base">✦</span>
+                            <span className="min-w-0 flex-1">
+                              <span className="flex items-center gap-1.5">
+                                <span className="truncate text-[15px]">{pack.displayName}</span>
+                                {pack.official && <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"><Trans>ufficiale</Trans></span>}
+                                {pack.installed && <span className="shrink-0 rounded-full bg-foreground px-1.5 py-0.5 text-[10px] text-background"><Trans>Aggiunto</Trans></span>}
+                              </span>
+                              <span className="line-clamp-2 text-[13px] leading-snug text-muted-foreground">{pack.description.replace(/\s+/g, ' ') || '—'}</span>
+                              <span className="mt-0.5 block text-[12px] text-muted-foreground">
+                                <Trans>{pack.skillCount} skill</Trans>
+                              </span>
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </section>
                 </>
               )}
             </div>
@@ -681,6 +779,127 @@ function SkillEditor({ folder, onDone, onCancel, embedded = false }: {
   )
 }
 
+/**
+ * L'anteprima di un pacchetto di Sfoglia (B4): nome, marketplace e sha12,
+ * l'elenco delle skill con la descrizione, le parti «non usate», «Bot che la
+ * usano» (predefinito «Tutti i bot»). «Aggiungi» installa SENZA card in chat;
+ * «Annulla» butta lo staging (browse-discard). Quando «Tutti i bot» è acceso
+ * i toggle dei singoli bot si SPENGONO e si DISATTIVANO (B4: così si corregge
+ * anche il difetto dell'anteprima di import).
+ */
+function BrowsePreview({ id, onClose, onAdded }: { id: string; onClose(): void; onAdded(): void }): React.ReactNode {
+  const { t } = useLingui()
+  const agents = useStore((s) => s.agents)
+  const [preview, setPreview] = useState<SkillBrowsePreview | null>(null)
+  const [error, setError] = useState('')
+  const [enabledFor, setEnabledFor] = useState<string[]>(['*'])
+  const [adding, setAdding] = useState(false)
+
+  useEffect(() => {
+    setError('')
+    setPreview(null)
+    void api.skillsBrowsePreview(id)
+      .then(setPreview)
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+  }, [id])
+
+  const allBots = enabledFor.includes('*')
+  const toggleBot = (agentId: string, on: boolean): void => {
+    if (allBots) { setEnabledFor(on ? ['*'] : [agentId]); return }
+    const next = on ? [...new Set([...enabledFor, agentId])] : enabledFor.filter((x) => x !== agentId)
+    setEnabledFor(next.length === agents.length ? ['*'] : next)
+  }
+
+  const cancel = (): void => {
+    if (preview) void api.skillsBrowseDiscard(preview.previewId).catch(() => undefined)
+    onClose()
+  }
+
+  const add = (): void => {
+    if (!preview) return
+    setAdding(true)
+    void api.skillsBrowseInstall(preview.previewId, enabledFor)
+      .then((r) => {
+        if (r.ok) {
+          onAdded()
+          onClose()
+        } else {
+          setError(r.error ?? '')
+        }
+      })
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setAdding(false))
+  }
+
+  return (
+    <div className="space-y-4" data-testid="skills-browse-preview">
+      <button type="button" className="flex items-center gap-1 text-[13px] text-muted-foreground transition hover:text-foreground" onClick={cancel}>
+        <ChevronLeft className="size-4" /><Trans>Annulla</Trans>
+      </button>
+      {error && <p role="alert" className="rounded-lg bg-destructive/10 px-3 py-2 text-[13px] text-destructive" data-testid="skills-browse-preview-error">{error}</p>}
+      {!preview && !error && <p className="py-6 text-center text-sm text-muted-foreground"><Trans>caricamento…</Trans></p>}
+      {preview && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-3">
+            <span className="grid size-12 shrink-0 place-items-center rounded-[12px] bg-muted text-lg">✦</span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-lg font-medium">{preview.card.name}</span>
+              <span className="block truncate text-[13px] text-muted-foreground">
+                <Trans>{preview.card.marketplace}</Trans> · <span className="font-mono" data-testid="skills-browse-sha">{preview.sha12}</span>
+              </span>
+            </span>
+          </div>
+          <div className="space-y-1.5">
+            {preview.skills.map((s) => (
+              <div key={s.name} className="rounded-[14px] bg-muted/60 px-3 py-2" data-testid={`skills-browse-skill-${s.name}`}>
+                <span className="block truncate text-[14px]">{humanizeSkillName(s.name)}</span>
+                <span className="block truncate text-[12px] text-muted-foreground">{s.description.replace(/\s+/g, ' ')}</span>
+              </div>
+            ))}
+          </div>
+          {preview.ignored.length > 0 && (
+            <p className="rounded-xl bg-muted/60 px-3 py-2 text-[13px] text-muted-foreground" data-testid="skills-browse-ignored">
+              <Trans>non usate:</Trans> {preview.ignored.join(', ')}
+            </p>
+          )}
+          <SettingsGroup label={<Trans>Bot che la usano</Trans>}>
+            <SettingsRow
+              title={<Trans>Tutti i bot</Trans>}
+              control={<Toggle label={t`Tutti i bot`} checked={allBots} onChange={(v) => setEnabledFor(v ? ['*'] : [])} />}
+            />
+            {agents.map((a) => (
+              <SettingsRow
+                key={a.id}
+                title={a.name}
+                control={<Toggle label={a.name} checked={allBots ? false : enabledFor.includes(a.id)} disabled={allBots} onChange={(v) => toggleBot(a.id, v)} />}
+              />
+            ))}
+          </SettingsGroup>
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              className="rounded-full px-4 py-1.5 text-xs text-muted-foreground transition hover:text-foreground"
+              data-testid="skills-browse-cancel"
+              onClick={cancel}
+            >
+              <Trans>Annulla</Trans>
+            </button>
+            <button
+              type="button"
+              className="rounded-full bg-foreground px-4 py-1.5 text-xs font-medium text-background transition hover:opacity-90 disabled:opacity-40"
+              disabled={adding}
+              data-testid="skills-browse-add"
+              onClick={add}
+            >
+              <Trans>Aggiungi</Trans>
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 /** L'import da GitHub (S6): URL → anteprima → scelta → Aggiungi. */
 function GithubImport({ onDone, onCancel }: { onDone(): void; onCancel(): void }): React.ReactNode {
   const { i18n, t } = useLingui()
@@ -815,7 +1034,7 @@ function GithubImport({ onDone, onCancel }: { onDone(): void; onCancel(): void }
               control={<Toggle label={t`Tutti i bot`} checked={allBots} onChange={(v) => setEnabledFor(v ? ['*'] : [])} />}
             />
             {agents.map((a) => (
-              <SettingsRow key={a.id} title={a.name} control={<Toggle label={a.name} checked={allBots || enabledFor.includes(a.id)} onChange={(v) => toggleBot(a.id, v)} />} />
+              <SettingsRow key={a.id} title={a.name} control={<Toggle label={a.name} checked={allBots ? false : enabledFor.includes(a.id)} disabled={allBots} onChange={(v) => toggleBot(a.id, v)} />} />
             ))}
           </SettingsGroup>
           <div className="flex justify-end">
