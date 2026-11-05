@@ -9,7 +9,7 @@ import {
   writeMemory, updateMemory, deleteMemory, listMemories, searchMemoriesByQuery,
   type MemoryTier, type MemoryScope
 } from './memory'
-import { readSkillBody, writeSkill, listSkills } from './skills'
+import { readSkillFor, readSkillFileFor, writeSkillFromBot } from './skills'
 
 /** Fase 10 (punto 1): limiti della creazione di bot da parte di un bot. */
 export const MAX_CREATE_AGENTS_PER_TURN = 6
@@ -247,23 +247,24 @@ export const toolDefs: ToolDef[] = [
   },
   {
     name: 'skill',
-    description: "Loads the full instructions of an available skill (in the system prompt you only see name and description). Call it when a skill serves the current task, then follow its instructions.",
+    description: "Loads an available skill (in the system prompt you only see name and description). Without file: the full instructions and, when the skill has them, the list of its support files. With file: that file's content — file must be EXACTLY one of the listed paths. Call it when a skill serves the current task, then follow its instructions.",
     parameters: {
       type: 'object',
       properties: {
-        name: { type: 'string', description: 'Skill name (as listed in "# Available skills")' }
+        name: { type: 'string', description: 'Skill name (as listed in "# Available skills")' },
+        file: { type: 'string', description: 'Optional support file to read (exactly one of the listed paths)' }
       },
       required: ['name']
     }
   },
   {
     name: 'update_skill',
-    description: "Creates or updates a skill (reusable procedure with complete instructions). Requires the user's approval: a skill changes your future behavior. name only [a-z0-9-], max 64 characters.",
+    description: "Creates or updates a skill (reusable procedure with complete instructions). Requires the user's approval: a skill changes your future behavior. name: 1-64 characters, only lowercase letters, digits and single hyphens. A skill you create is enabled for this bot only: the user chooses which other bots use it. Imported (GitHub) and plugin skills cannot be changed here.",
     parameters: {
       type: 'object',
       properties: {
-        name: { type: 'string', description: 'Skill name ([a-z0-9-], max 64)' },
-        description: { type: 'string', description: 'When to use the skill (one line, shown in the system prompt)' },
+        name: { type: 'string', description: 'Skill name (1-64 chars, [a-z0-9-], single hyphens)' },
+        description: { type: 'string', description: 'When to use the skill — what it does AND when (one line, shown in the system prompt)' },
         content: { type: 'string', description: 'The complete skill instructions (markdown)' }
       },
       required: ['name', 'description', 'content']
@@ -1184,26 +1185,44 @@ export async function executeTool(
       return { output: lines.join('\n'), meta: { memoryIds: found.map((r) => r.id) } }
     }
     case 'skill': {
-      // fase 12 (punto 1): le skill del figlio sono quelle del PADRE
-      const body = readSkillBody(sandbox.boxOwnerOf(agentId), String(input.name ?? ''))
-      return { output: body, meta: { skill: String(input.name ?? '') } }
+      // fase skill (S3.2): senza file le istruzioni + l'elenco dei file di
+      // supporto; con file SOLO se il percorso è esattamente uno dell'elenco.
+      // fase 12: le skill del figlio sono quelle del PADRE. Una skill
+      // importata (GitHub o plugin) è testo NON FIDATO: meta.webContent → il
+      // loop mette il blocco dati esterni e contamina il turno (decisione 3)
+      const name = String(input.name ?? '')
+      const file = input.file === undefined ? undefined : String(input.file)
+      if (file === undefined) {
+        const r = readSkillFor(agentId, name)
+        if (!r) return { output: `Skill "${name}" not found (or not enabled for this bot).`, meta: {} }
+        return { output: r.output, meta: { skill: name, ...(r.webContent ? { webContent: true } : {}) } }
+      }
+      const f = readSkillFileFor(agentId, name, file)
+      if (!f) {
+        const base = readSkillFor(agentId, name)
+        return {
+          output: base
+            ? `No file "${file}" in this skill. The files are:\n${base.files.map((x) => `- ${x}`).join('\n')}`
+            : `Skill "${name}" not found (or not enabled for this bot).`,
+          meta: {}
+        }
+      }
+      return { output: f.output, meta: { skill: name, file, ...(f.webContent ? { webContent: true } : {}) } }
     }
     case 'update_skill': {
-      const name = String(input.name ?? '')
-      // fase 13 (punto 4): le skill dei PLUGIN sono in sola lettura — si
-      // cambiano aggiornando il plugin, non scrivendoci sopra
-      const { pluginSkillsOf, PLUGIN_SKILL_REFUSAL } = await import('./skills')
-      if (pluginSkillsOf(agentId).some((x) => x.name === name)) {
-        return { output: PLUGIN_SKILL_REFUSAL, meta: {} }
-      }
-      // l'esistenza si guarda PRIMA della scrittura (dopo ci sarebbe sempre)
-      const existed = listSkills(agentId).some((x) => x.name === name)
-      const s = writeSkill(agentId, {
-        name,
+      // fase skill (S3.3): la libreria unica — crea con enabledFor [questo
+      // bot] e source 'bot'; aggiorna mantenendo enabledFor; rifiuta plugin
+      // e importate; un nome già usato da una skill NON visibile è un errore
+      const r = writeSkillFromBot(agentId, {
+        name: String(input.name ?? ''),
         description: String(input.description ?? ''),
         content: String(input.content ?? '')
       })
-      return { output: `Skill "${s.name}" ${existed ? 'updated' : 'created'} (immediately available in "# Available skills").`, meta: { skill: s.name } }
+      if (!r.ok) return { output: r.error, meta: {} }
+      return {
+        output: `Skill "${r.name}" ${r.created ? 'created (enabled for this bot only: the user chooses which other bots use it)' : 'updated'} — immediately available in "# Available skills".`,
+        meta: { skill: r.name }
+      }
     }
     case 'search_connectors': {
       // fase 13 (punto 1): la porta unica su tre fonti — il runner del daemon

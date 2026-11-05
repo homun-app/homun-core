@@ -7,7 +7,7 @@
 // riga d'attività (activityPhrase) e col popover dei passaggi; dopo il turno
 // restano dietro la «ⓘ» del messaggio (o in Impostazioni › Generali, con la
 // voce di debug che rimette le righe di una volta).
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useLingui, Trans, Plural } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
@@ -37,7 +37,6 @@ import { DocumentCard, ChartCard, FillCard, SecureInputCard, ContactCard } from 
 // fase 19a (V4/V5): la card della presa di controllo chiesta dal bot
 import { TakeoverCard } from './TakeoverCard'
 import { MemoryPanel } from './MemoryPanel'
-import { SkillsPanel } from './SkillsPanel'
 import { Bot } from '../bot/Bot'
 import { useBotInfo } from '../bot/use-bot'
 // fase 16b (S3.3): la mezza riga d'attività e i passaggi del turno
@@ -317,6 +316,45 @@ export function Chat() {
   const busy = agent?.status === 'thinking' || agent?.status === 'running' || agent?.status === 'paused-for-approval'
   const [text, setText] = useState('')
   const [images, setImages] = useState<string[]>([])
+  // fase skill (S7): le skill visibili a QUESTO bot (libreria + plugin) per
+  // l'elenco `/` del compositore; il highlight della selezione
+  const [botSkills, setBotSkills] = useState<Array<{ name: string; description: string }>>([])
+  const [slashOpen, setSlashOpen] = useState(false)
+  const [slashIndex, setSlashIndex] = useState(0)
+  useEffect(() => {
+    setBotSkills([])
+    if (!activeId) return
+    let alive = true
+    void api.skillsLibrary()
+      .then((r) => {
+        if (!alive) return
+        setBotSkills([
+          ...r.library
+            .filter((sk) => sk.enabledFor.includes('*') || sk.enabledFor.includes(activeId))
+            .map((sk) => ({ name: sk.name, description: sk.description })),
+          ...r.plugins
+            .filter((g) => g.enabledFor.includes('*') || g.enabledFor.includes(activeId))
+            .flatMap((g) => g.skills)
+        ])
+      })
+      .catch(() => undefined)
+    return () => { alive = false }
+  }, [activeId])
+  // l'elenco `/` si apre SOLO quando il messaggio comincia con / e resta su
+  // una riga (la query è tutto ciò che segue); filtra nome e descrizione
+  const slashQuery = /^\/([^\n]*)$/.exec(text)?.[1] ?? null
+  const slashOptions = useMemo(() => {
+    if (slashQuery === null || !botSkills.length) return []
+    const q = slashQuery.trim().toLowerCase()
+    return botSkills
+      .filter((sk) => !q || sk.name.toLowerCase().includes(q) || sk.description.toLowerCase().includes(q))
+      .slice(0, 8)
+  }, [slashQuery, botSkills])
+  useEffect(() => { setSlashOpen(slashOptions.length > 0); setSlashIndex(0) }, [slashOptions.length])
+  const insertSkill = (name: string): void => {
+    setText(`/${name} `)
+    setSlashOpen(false)
+  }
   const [quickOpen, setQuickOpen] = useState(false)
   const [quickQ, setQuickQ] = useState('')
   const [quickA, setQuickA] = useState('')
@@ -452,7 +490,6 @@ export function Chat() {
       </div>
 
       {memoryOpen && activeId && <MemoryPanel agentId={activeId} onClose={() => setMemoryOpen(false)} />}
-      {skillsOpen && activeId && <SkillsPanel agentId={activeId} onClose={() => setSkillsOpen(false)} />}
 
       {/* Chiedi al volo (⌘K): la finestra di oggi, sospesa sotto l'etichetta */}
       {quickOpen && (
@@ -519,6 +556,23 @@ export function Chat() {
           bottone tondo con l'icona, il campo non scende mai sotto 120 px e
           allega/invia restano DENTRO la pillola anche con la chat al minimo */}
       <footer className="@container px-6 pb-4">
+        {/* fase skill (S7.1): l'elenco delle skill quando il messaggio comincia con / */}
+        {slashOpen && slashOptions.length > 0 && (
+          <div className="mx-auto mb-2 max-w-3xl overflow-hidden rounded-2xl bg-card p-1.5 shadow-soft" data-testid="slash-picker">
+            {slashOptions.map((sk, i) => (
+              <button
+                key={sk.name}
+                type="button"
+                className={`flex w-full items-center gap-3 rounded-xl px-3 py-1.5 text-left ${i === slashIndex ? 'bg-muted' : ''}`}
+                onMouseEnter={() => setSlashIndex(i)}
+                onClick={() => insertSkill(sk.name)}
+              >
+                <span className="font-mono text-xs text-foreground">/{sk.name}</span>
+                <span className="min-w-0 flex-1 truncate text-[12px] text-muted-foreground">{sk.description.replace(/\s+/g, ' ').slice(0, 120)}</span>
+              </button>
+            ))}
+          </div>
+        )}
         <form
           className="mx-auto flex max-w-3xl items-end gap-2 rounded-full bg-card py-2 pl-2 pr-2 shadow-soft"
           onSubmit={(e) => { e.preventDefault(); sendNow() }}
@@ -548,6 +602,30 @@ export function Chat() {
               setTyping(e.target.value ? agent.id : null)
             }}
             onKeyDown={(e) => {
+              // fase skill (S7.1): l'elenco `/` si attraversa con le frecce,
+              // Invio SCEGLIE e Esc chiude — solo finché è aperto
+              if (slashOpen && slashOptions.length > 0) {
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault()
+                  setSlashIndex((i) => (i + 1) % slashOptions.length)
+                  return
+                }
+                if (e.key === 'ArrowUp') {
+                  e.preventDefault()
+                  setSlashIndex((i) => (i - 1 + slashOptions.length) % slashOptions.length)
+                  return
+                }
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  insertSkill(slashOptions[slashIndex]!.name)
+                  return
+                }
+                if (e.key === 'Escape') {
+                  e.preventDefault()
+                  setSlashOpen(false)
+                  return
+                }
+              }
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault()
                 sendNow()
@@ -609,6 +687,19 @@ export function Chat() {
   )
 }
 
+/** fase skill (S7.2): il corpo della bolla utente — con l'etichetta compatta
+ *  /nome quando il messaggio invoca una skill, poi il resto del testo. */
+function UserBubbleBody({ entry }: { entry: TranscriptEntry }): React.ReactNode {
+  const invoked = /^\/([a-z0-9]+(?:-[a-z0-9]+)*)(?:[ \t\n]+([\s\S]*))?$/.exec(entry.content)
+  if (!invoked) return uiTextOf(entry)
+  return (
+    <>
+      <span className="mb-1 inline-block rounded-full bg-black/10 px-2 py-0.5 font-mono text-[11px] dark:bg-white/10">/{invoked[1]}</span>
+      {invoked[2] ?? ''}
+    </>
+  )
+}
+
 function EntryRow({ entry, showReasoning, debugSteps }: { entry: TranscriptEntry; showReasoning: boolean; debugSteps: boolean }) {
   const { t } = useLingui()
   const reasoning = useStore((s) => s.reasoning[entry.id])
@@ -664,7 +755,9 @@ function EntryRow({ entry, showReasoning, debugSteps }: { entry: TranscriptEntry
         // pillola e avatar); si ritocca dai token --bubble-user in styles.css
         <div className="flex justify-end">
           <div className="max-w-[75%] rounded-[22px] bg-[var(--bubble-user)] px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap text-[var(--bubble-user-foreground)]">
-            {uiTextOf(entry)}
+            {/* fase skill (S7.2): un messaggio che comincia con /nome mostra
+                l'etichetta compatta della skill, poi il resto del testo */}
+            <UserBubbleBody entry={entry} />
           </div>
         </div>
       ) : (

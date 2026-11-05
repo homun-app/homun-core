@@ -16,7 +16,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
-import { Plus, Search, Library as LibraryIcon, LayoutGrid, ChevronRight, Activity as ActivityIcon } from 'lucide-react'
+import { Plus, Search, Library as LibraryIcon, LayoutGrid, ChevronRight, Activity as ActivityIcon, Sparkles } from 'lucide-react'
 import { useStore, useResolvedModel } from '../store'
 import { buildSidebarModel, collapsedVoices, teamOpenState, type SidebarModel, type SidebarTeam, type SidebarBot, type CollapsedVoice } from '../sidebar-utils'
 // fase 16b correzioni 2 (Q1): il massimo del trascinamento e i limiti della barra
@@ -299,6 +299,7 @@ function AccountMenu(props?: { rail?: { forced: boolean; onExpand(): void }; tri
   const setTheme = useStore((s) => s.setTheme)
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
   const setAppsOpen = useStore((s) => s.setAppsOpen)
+  const setSkillsOpen = useStore((s) => s.setSkillsOpen)
   const effectiveMain = mainAgentId ?? agents[0]?.id ?? null
   const main = agents.find((a) => a.id === effectiveMain)
   // fase 16c correzioni (R4): il modello mostrato è quello RISOLTO, dal
@@ -383,6 +384,7 @@ function CollapsedColumn({
   const setActivityOpen = useStore((s) => s.setActivityOpen)
   const activityOpen = useStore((s) => s.activityOpen)
   const setAppsOpen = useStore((s) => s.setAppsOpen)
+  const setSkillsOpen = useStore((s) => s.setSkillsOpen)
   const agents = useStore((s) => s.agents)
   const voices = collapsedVoices(model)
   const statusLabel = (st: CollapsedVoice['status']): string =>
@@ -472,6 +474,15 @@ function CollapsedColumn({
         <div className="flex-1" />
         <button
           className="grid size-9 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground transition hover:text-foreground"
+          aria-label={i18n.t(msg`Skill`)}
+          title={i18n.t(msg`Skill`)}
+          data-testid="sidebar-skills"
+          onClick={() => setSkillsOpen(true)}
+        >
+          <Sparkles className="size-4" />
+        </button>
+        <button
+          className="grid size-9 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground transition hover:text-foreground"
           aria-label={i18n.t(msg`App`)}
           title={i18n.t(msg`App`)}
           onClick={() => setAppsOpen(true)}
@@ -494,6 +505,8 @@ function CollapsedColumn({
 export function Sidebar({ layout }: { layout: LayoutResult }) {
   const { t } = useLingui()
   const agents = useStore((s) => s.agents)
+  // fase skill (S4): apre la finestra «Skill» dalla barra
+  const setSkillsOpen = useStore((s) => s.setSkillsOpen)
   const groups = useStore((s) => s.groups)
   const mainAgentId = useStore((s) => s.mainAgentId)
   const openLibraryId = useStore((s) => s.openLibraryId)
@@ -690,6 +703,17 @@ export function Sidebar({ layout }: { layout: LayoutResult }) {
               onClick={() => setAppsOpen(true)}
             >
               <LayoutGrid className="size-4" />
+            </button>
+            {/* fase skill (S4): la voce «Skill» accanto ad App — apre la
+                finestra della libreria unica */}
+            <button
+              className="grid size-9 shrink-0 place-items-center rounded-full bg-muted/60 text-muted-foreground transition hover:text-foreground"
+              aria-label={t`Skill`}
+              title={t`Skill`}
+              data-testid="sidebar-skills"
+              onClick={() => setSkillsOpen(true)}
+            >
+              <Sparkles className="size-4" />
             </button>
           </div>
         </>

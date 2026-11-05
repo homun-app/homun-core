@@ -98,6 +98,19 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
 
   const database = db()
 
+  // fase skill (S2.4): migrazione una tantum delle skill PER BOT nella
+  // LIBRERIA UNICA — PRIMA di tutto ciò che legge le skill (prompt, tool,
+  // finestra). Idempotente per flag; un errore lascia tutto com'era e si
+  // riprova al prossimo avvio.
+  {
+    const { migrateAgentSkills } = await import('../main/store/skills-migrations')
+    try {
+      migrateAgentSkills()
+    } catch (e) {
+      console.error('[sandbotd] migrazione skill rimandata al prossimo avvio:', e instanceof Error ? e.message : e)
+    }
+  }
+
   // fase 16c (C1): migrazione delle chiavi API dei provider — il chiaro nel
   // setting 'providers' si cifra (chiave master del servizio providers, oggi
   // keys.json) e si toglie. Idempotente; se il Portachiavi non risponde il

@@ -99,6 +99,7 @@ function ProfileTab({ onAvatar }: { onAvatar(): void }) {
   const openTask = useStore((s) => s.openTask)
   const setMemoryOpen = useStore((s) => s.setMemoryOpen)
   const setSkillsOpen = useStore((s) => s.setSkillsOpen)
+  const setSkillsFilterAgent = useStore((s) => s.setSkillsFilterAgent)
   const [memories, setMemories] = useState<number | null>(null)
   const [skills, setSkills] = useState<number | null>(null)
   const agent = agents.find((a) => a.id === activeId)
@@ -107,7 +108,10 @@ function ProfileTab({ onAvatar }: { onAvatar(): void }) {
     setSkills(null)
     if (!activeId) return
     void api.listMemories(activeId).then((m) => setMemories(m.length)).catch(() => setMemories(0))
-    void api.listSkills(activeId).then((s) => setSkills(s.length)).catch(() => setSkills(0))
+    // fase skill (S2): il conteggio viene dalla libreria unica (una chiamata)
+    void api.skillsLibrary()
+      .then((r) => setSkills(r.library.filter((sk) => sk.enabledFor.includes('*') || sk.enabledFor.includes(activeId)).length))
+      .catch(() => setSkills(0))
   }, [activeId])
   // fase 16c correzioni (R4): il modello risolto passa dal selettore UNICO
   const resolved = useResolvedModel(agent?.id ?? null)
@@ -129,8 +133,14 @@ function ProfileTab({ onAvatar }: { onAvatar(): void }) {
             <Trans>{memories === null ? '…' : `${memories} note`} ›</Trans>
           </button>
         </KvRow>
+        {/* fase skill (S4): il pannello diventa un RIMANDO alla finestra
+            «Skill» filtrata sul bot */}
         <KvRow label={i18n.t(msg`Skill`)}>
-          <button className="transition hover:text-foreground" onClick={() => { setSkillsOpen(true); setMemoryOpen(false) }}>
+          <button
+            className="transition hover:text-foreground"
+            data-testid="rightpanel-skills"
+            onClick={() => { setSkillsFilterAgent(activeId); setSkillsOpen(true); setMemoryOpen(false) }}
+          >
             <Trans>{skills === null ? '…' : `${skills}`} ›</Trans>
           </button>
         </KvRow>

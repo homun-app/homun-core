@@ -701,7 +701,36 @@ export const UI = {
   triggerTool: msg({
     id: 'trigger.tool',
     message: 'quando il tool {tool} del connettore {connector} vede un nuovo elemento ({field})'
-  })
+  }),
+
+  // ---- fase skill (S1): gli errori del formato Agent Skills, bilingui —
+  // message inglese per il modello nei result dei tool, UiText per la UI
+  skillNoFrontmatter: msg({ id: 'skill.noFrontmatter', message: 'SKILL.md deve iniziare col frontmatter YAML (--- … ---).' }),
+  skillYamlInvalid: msg({ id: 'skill.yamlInvalid', message: 'Il frontmatter non è YAML valido: {reason}' }),
+  skillNameMissing: msg({ id: 'skill.nameMissing', message: 'Il frontmatter richiede «name».' }),
+  skillNameInvalid: msg({ id: 'skill.nameInvalid', message: 'Nome non valido «{name}»: 1–64 caratteri, solo minuscole, cifre e trattini singoli (niente trattino iniziale o finale, niente «--»).' }),
+  skillNameFolderMismatch: msg({ id: 'skill.nameFolderMismatch', message: 'Il nome «{name}» non coincide con la cartella «{folder}».' }),
+  skillDescriptionMissing: msg({ id: 'skill.descriptionMissing', message: 'Il frontmatter richiede una «description» non vuota.' }),
+  skillDescriptionTooLong: msg({ id: 'skill.descriptionTooLong', message: 'La descrizione può essere al massimo 1024 caratteri (ora {n}).' }),
+  skillCompatibilityTooLong: msg({ id: 'skill.compatibilityTooLong', message: '«compatibility» può essere al massimo 500 caratteri (ora {n}).' }),
+  skillMetadataInvalid: msg({ id: 'skill.metadataInvalid', message: '«metadata» dev\'essere una mappa di stringhe (ogni valore una stringa).' }),
+  skillTooManyFiles: msg({ id: 'skill.tooManyFiles', message: 'Troppi file di supporto: {n} (al massimo 50 oltre a SKILL.md).' }),
+  skillFileTooLarge: msg({ id: 'skill.fileTooLarge', message: 'Il file «{file}» è troppo grande: {n} KB (massimo 256 KB).' }),
+  skillLibraryTooLarge: msg({ id: 'skill.libraryTooLarge', message: 'La cartella della skill è troppo grande: {n} KB (massimo 2 MB in tutto).' }),
+  skillNotText: msg({ id: 'skill.notText', message: 'Il file «{file}» non è un file di testo UTF-8 valido.' }),
+  skillSymlink: msg({ id: 'skill.symlink', message: 'La cartella della skill contiene un link simbolico: «{file}».' }),
+  skillEscapingPath: msg({ id: 'skill.escapingPath', message: 'Il percorso «{file}» esce dalla cartella della skill.' }),
+  skillBodyTooLarge: msg({ id: 'skill.bodyTooLarge', message: 'SKILL.md è troppo grande: al massimo 100000 caratteri (ora {n}).' }),
+
+  // ---- fase skill (S6): gli errori UMANI dell'import da GitHub ----
+  skillErrNotGithub: msg({ id: 'skill.err.notGithub', message: 'Non è un indirizzo GitHub: incolla un URL https://github.com/…' }),
+  skillErrRepoNotFound: msg({ id: 'skill.err.repoNotFound', message: 'Repository non trovato (o non raggiungibile). Controlla l\'indirizzo.' }),
+  skillErrNoSkills: msg({ id: 'skill.err.noSkills', message: 'Nessuna skill trovata in questo repository: servono cartelle con uno SKILL.md.' }),
+  skillErrTooLarge: msg({ id: 'skill.err.tooLarge', message: 'Il repository è troppo grande da importare.' }),
+  skillErrSymlink: msg({ id: 'skill.err.symlink', message: 'Il repository contiene link simbolici: non si può importare.' }),
+  skillErrNoOrigin: msg({ id: 'skill.err.noOrigin', message: 'Questa skill non ha un\'origine GitHub da cui aggiornarsi.' }),
+  skillErrInvalidName: msg({ id: 'skill.err.invalidName', message: 'Nome non valido: 1–64 caratteri, solo minuscole, cifre e trattini singoli.' }),
+  skillErrNotFound: msg({ id: 'skill.err.notFound', message: 'Skill non trovata.' })
 } as const
 
 export type UiMessage = (typeof UI)[keyof typeof UI]

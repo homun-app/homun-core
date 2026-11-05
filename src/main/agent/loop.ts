@@ -50,7 +50,7 @@ import { planResume, INTERRUPTED_TOOL_RESULT } from './resume'
 import { isExternalSend, draftFromExternalCall, draftFromBatchSend, prepareDraft, DEFAULT_EXTERNAL_SEND_TOOLS, type ExternalSendConfig, type SendCandidate } from './external-send'
 import { normalizeOptions, findDismissibleWidgets } from './widgets'
 import { buildMemorySection, estimateTokensOf } from './memory'
-import { buildSkillsSection } from './skills'
+import { buildSkillsSection, skillInvocationExpansion, invocableSkillsOf, mayInvokeSkill } from './skills'
 import { maybeCompactHistory, summarizeWithLlm } from './compaction'
 import { automationEventText } from './update-state'
 import { formatAgentMessage, agentSendGuard, countPairMessagesLastHour, AGENT_HOP_MAX, formatWebSearchEvidence, formatWebFetchEvidence, formatWebBrowserEvidence, formatExternalDataEvidence } from '../../shared/agent-message'
@@ -1491,6 +1491,39 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     systemText = withLanguage(systemText, userLang)
     const messages: ChatMessage[] = buildMessages(systemText, scopedEntries(), images)
 
+    // fase skill (S7.3): il `/nome` all'inizio del messaggio dell'utente (o
+    // del prompt di una routine) porta le istruzioni DENTRO il turno. Il
+    // testo nel transcript resta quello dell'utente; qui si trasforma SOLO
+    // il contenuto per il modello (l'ultimo messaggio utente è quello che
+    // apre il turno). Una skill importata contamina il turno (decisione 3).
+    // Nei gruppi niente `/` per ora (fuori da questa fase). Su ripresa dopo
+    // un crash vale il testo dell'entry che ha aperto il turno.
+    if (opts.groupTurn === undefined && opts.subagent === undefined) {
+      const openingText = opts.resume
+        ? String(scopedEntries().find((e) => e.id === opts.resume!.entryId)?.content ?? '')
+        : userText
+      if (mayInvokeSkill(openingText)) {
+        try {
+          const inv = skillInvocationExpansion(openingText, invocableSkillsOf(agentId))
+          if (inv) {
+            for (let i = messages.length - 1; i >= 0; i--) {
+              if (messages[i]!.role === 'user') {
+                messages[i] = { ...messages[i]!, content: inv.content }
+                break
+              }
+            }
+            if (inv.imported && !contaminated) {
+              run.turnAllows.clear()
+              run.turnGrantEpoch++
+              contaminated = true
+            }
+          }
+        } catch {
+          // le skill non devono mai rompere il turno
+        }
+      }
+    }
+
     // fase 3 (§3bis L5): quali tool MCP sono invii verso l'esterno.
     // Fase 0.3.1001 (M1): classificazione per annotazioni e NOME (funzione
     // pura external-send.ts), l'elenco resta come sovrascrittura esplicita
@@ -2764,6 +2797,44 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           const r = add({ agentId, kind: 'tool-result', role: 'system', content: out, meta: { callId: call.id } })
           emit({ type: 'entries', agentId, entries: [r] })
           messages.push({ role: 'tool', toolCallId: call.id, content: out })
+          continue
+        }
+
+        // fase skill (S3.2, decisione 3): il tool skill — le istruzioni di una
+        // skill IMPORTATA (GitHub o plugin) sono testo di TERZI: blocco dati
+        // esterni e CONTAMINAZIONE del turno, come dopo una lettura web. Le
+        // skill dell'utente e dei bot restano un result normale.
+        if (call.name === 'skill') {
+          emit({ type: 'activity', agentId, activity: activityOf(call.name, input) })
+          const skEntry = add({
+            agentId, kind: 'tool-call', role: 'assistant', content: call.name,
+            meta: { id: call.id, name: call.name, arguments: call.arguments }
+          })
+          emit({ type: 'entries', agentId, entries: [skEntry] })
+          let output = ''
+          let imported = false
+          try {
+            const r = await executeTool(agentId, call.name, input, { turnInitiator: opts.initiator })
+            output = r.output
+            imported = r.meta.webContent === true
+          } catch (e) {
+            output = `Error: ${e instanceof Error ? e.message : String(e)}`
+          }
+          let content = output
+          if (imported) {
+            if (!contaminated) {
+              run.turnAllows.clear()
+              run.turnGrantEpoch++
+            }
+            contaminated = true
+            content = formatExternalDataEvidence(`skill:${String(input.name ?? '')}`, output)
+          }
+          const res = add({
+            agentId, kind: 'tool-result', role: 'system', content: content.slice(0, 50_000),
+            meta: { callId: call.id, ...(imported ? { webEvidence: true } : {}) }
+          })
+          emit({ type: 'entries', agentId, entries: [res] })
+          messages.push({ role: 'tool', toolCallId: call.id, content: content.slice(0, 50_000) })
           continue
         }
 

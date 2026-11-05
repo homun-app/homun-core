@@ -10,7 +10,16 @@ import * as permissions from '../main/agent/permissions'
 import { executeTool } from '../main/agent/tools'
 import { isExternalSend, applyDraftBody, DEFAULT_EXTERNAL_SEND_TOOLS, type ExternalSendConfig } from '../main/agent/external-send'
 import { listMemories, updateMemory, deleteMemory } from '../main/agent/memory'
-import { listSkills, deleteSkill } from '../main/agent/skills'
+// fase skill: la libreria unica (finestra «Skill»), le versioni e l'import
+import {
+  libraryItemsForUi, pluginSkillGroups, readSkillMd, deleteLibrarySkill, setSkillEnabledFor,
+  readSupportFile, listSkillVersions, restoreSkillVersion, exportSkillFolder,
+  libraryDir, skillsLibrary, writeLibrarySkill, saveSkillVersion
+} from '../main/agent/skills'
+import {
+  previewSkillsFromGithub, addSkillsFromStaging, previewSkillUpdate, applySkillUpdate
+} from '../main/agent/skill-github'
+import { skillMdIssues, isValidSkillName, parseSkillMd } from '../shared/skill-md'
 import * as providers from '../main/agent/providers'
 import { suggestRoutines } from '../main/routines'
 import { llmStream } from '../main/agent/llm'
@@ -53,8 +62,36 @@ import { INVALID_TEST_BOX_PREFIX } from '../main/sandbox/docker-argv'
 // R2 (fase app — ritocchi): l'esito degli invii si ripulisce come gli errori Composio
 import { redactComposioSecrets } from '../main/connectors/composio-actions'
 import { existsSync } from 'node:fs'
+import { readFileSync, renameSync, rmSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+
+// ---- fase skill (S6): gli staging delle anteprime GitHub, vivi finché
+// l'utente decide (o 10 minuti); mai path al renderer, solo id opachi ----
+interface PendingSkillImport {
+  staging: string
+  at: number
+  preview?: import('../shared/types').SkillGithubPreview
+  diff?: import('../shared/types').SkillGithubUpdatePreview
+}
+const skillImports = new Map<string, PendingSkillImport>()
+let skillImportSeq = 0
+const releaseSkillImport = (id: string): void => {
+  const pending = skillImports.get(id)
+  if (pending) {
+    try { rmSync(pending.staging, { recursive: true, force: true }) } catch { /* già via */ }
+    skillImports.delete(id)
+  }
+}
+const pruneSkillImports = (): void => {
+  const cutoff = Date.now() - 10 * 60_000
+  for (const [id, pending] of skillImports) {
+    if (pending.at < cutoff) releaseSkillImport(id)
+  }
+}
+/** I test (e la sonda) clonano da file:// col flag; in produzione MAI. */
+const testSkillCloneDeps = (): { allowFileUrlsForTests?: boolean } =>
+  process.env.SANDBOT_TEST_ALLOW_FILE_URLS === '1' ? { allowFileUrlsForTests: true } : {}
 
 function dockerToolStatus(): { installed: boolean; running: boolean; path: string; testPrefixInvalid: boolean } {
   const installed = isToolResolved('docker')
@@ -928,10 +965,96 @@ export function buildApiMethods(
       deleteMemory(agentId as string, id as string)
     },
 
-    // ---- skill (fase 4): elenco con visualizzazione ed eliminazione ----
-    'skills:list': ([agentId]) => listSkills(agentId as string),
-    'skills:delete': ([agentId, name]) => {
-      deleteSkill(agentId as string, name as string)
+    // ---- fase skill (S2/S4/S5/S6): la finestra «Skill» ----
+    // la libreria unica: voci con metadati, validità e file; più i plugin
+    'skills:library': () => ({
+      library: libraryItemsForUi(),
+      plugins: pluginSkillGroups()
+    }),
+    // lo SKILL.md intero per l'editor
+    'skills:get': ([name]) => readSkillMd(String(name)),
+    /**
+     * Il salvataggio dalla finestra: validazione S1 (le issue tornano al
+     * campo, non come errore generico), versione precedente in .versions/,
+     * rename cartella+nome insieme, enabledFor quando arriva. Le importate
+     * MODIFICATE diventano source 'user' con origin conservato (S4.2).
+     */
+    'skills:save': ([rec]) => {
+      const r = rec as {
+        folder?: string; name: string; description: string; body: string
+        frontmatter?: Record<string, unknown>; enabledFor?: string[]
+      }
+      const issues = skillMdIssues({ name: r.name, description: r.description, frontmatter: { ...(r.frontmatter ?? {}) } })
+      if (issues.length) return { ok: false as const, issues: issues.map((i) => ({ english: i.english, uiId: i.ui.id, ...(i.ui.values ? { values: i.ui.values } : {}) })) }
+      const name = String(r.name).trim()
+      const folder = r.folder && isValidSkillName(r.folder) ? r.folder : name
+      const skillDir = join(libraryDir(), folder)
+      const entry = skillsLibrary()[folder]
+      // nome già usato da UN'ALTRA skill → errore (mai sovrascrittura silenziosa)
+      if (name !== folder && existsSync(join(libraryDir(), name))) {
+        throw uiError(UI.skillErrInvalidName)
+      }
+      if (existsSync(skillDir) && existsSync(join(skillDir, 'SKILL.md'))) saveSkillVersion(skillDir, 'user')
+      if (name !== folder && existsSync(skillDir)) renameSync(skillDir, join(libraryDir(), name))
+      const parsedOld = existsSync(join(libraryDir(), name, 'SKILL.md'))
+        ? parseSkillMd(readFileSync(join(libraryDir(), name, 'SKILL.md'), 'utf8'))
+        : null
+      const frontmatter = r.frontmatter ?? (parsedOld?.ok ? parsedOld.skill.frontmatter : undefined)
+      writeLibrarySkill(
+        { name, description: String(r.description ?? ''), body: String(r.body ?? ''), ...(frontmatter ? { frontmatter } : {}) },
+        {
+          folder: name,
+          entry: {
+            // un'importata modificata diventa 'user', l'origin resta (S4.2)
+            ...(entry?.source === 'github' ? { source: 'user' as const } : {}),
+            ...(r.enabledFor ? { enabledFor: r.enabledFor } : {})
+          }
+        }
+      )
+      return { ok: true as const, name }
+    },
+    'skills:delete': ([name]) => {
+      if (!deleteLibrarySkill(String(name))) throw uiError(UI.skillErrNotFound)
+    },
+    'skills:set-enabled-for': ([name, ids]) => setSkillEnabledFor(String(name), ids as string[]),
+    'skills:read-file': ([folder, file]) => readSupportFile(String(folder), String(file)),
+    'skills:versions': ([name]) => listSkillVersions(String(name)),
+    'skills:restore-version': ([name, file]) => {
+      if (!restoreSkillVersion(String(name), String(file))) throw uiError(UI.skillErrNotFound)
+    },
+    'skills:export': ([name]) => exportSkillFolder(String(name)),
+    // ---- l'import da GitHub (S6): l'anteprima NON salva niente; lo staging
+    // resta vivo finché l'utente decide (o scade dopo 10 minuti) ----
+    'skills:github-preview': async ([url]) => {
+      const out = await previewSkillsFromGithub(String(url), testSkillCloneDeps())
+      if (!out.ok) throw new UiError('skill import failed', out.error)
+      const id = `skill-import-${++skillImportSeq}`
+      skillImports.set(id, { staging: out.staging, preview: out.preview, at: Date.now() })
+      pruneSkillImports()
+      return { id, preview: out.preview }
+    },
+    'skills:github-add': ([id, choices, enabledFor]) => {
+      const pending = skillImports.get(String(id))
+      if (!pending?.preview) throw uiError(UI.skillErrNoSkills)
+      const added = addSkillsFromStaging(pending.staging, pending.preview, choices as Array<{ path: string; name?: string }>, (enabledFor as string[]) ?? ['*'])
+      releaseSkillImport(String(id))
+      return added
+    },
+    'skills:github-update-preview': async ([name]) => {
+      const out = await previewSkillUpdate(String(name), testSkillCloneDeps())
+      if (!out.ok) throw new UiError('skill update failed', out.error)
+      const id = `skill-update-${++skillImportSeq}`
+      skillImports.set(id, { staging: out.staging, diff: out.diff, at: Date.now() })
+      pruneSkillImports()
+      return { id, diff: out.diff }
+    },
+    'skills:github-update-apply': ([id, name]) => {
+      const pending = skillImports.get(String(id))
+      if (!pending?.diff) throw uiError(UI.skillErrNoOrigin)
+      const r = applySkillUpdate(String(name), pending.staging, pending.diff)
+      releaseSkillImport(String(id))
+      if (!r.ok) throw uiError(UI.skillErrRepoNotFound)
+      return true
     },
 
     // ---- MCP ----

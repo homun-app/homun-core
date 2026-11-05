@@ -872,8 +872,28 @@ export interface SandbotApi {
   updateMemory(agentId: string, id: string, content: string): Promise<void>
   deleteMemory(agentId: string, id: string): Promise<void>
   // skill (fase 4): elenco con visualizzazione ed eliminazione
-  listSkills(agentId: string): Promise<SkillInfo[]>
-  deleteSkill(agentId: string, name: string): Promise<void>
+  /** fase skill: il SALVATAGGIO dalla finestra — validazione S1, versioni, rename */
+  skillsSave(rec: {
+    folder?: string
+    name: string
+    description: string
+    body: string
+    frontmatter?: Record<string, unknown>
+    enabledFor?: string[]
+  }): Promise<{ ok: true; name: string } | { ok: false; issues: Array<{ english: string; uiId: string; values?: Record<string, string | number> }> }>
+  skillsLibrary(): Promise<{ library: SkillLibraryItem[]; plugins: PluginSkillGroup[] }>
+  skillsGet(name: string): Promise<string>
+  skillsDelete(name: string): Promise<void>
+  skillsSetEnabledFor(name: string, agentIds: string[]): Promise<void>
+  skillsReadFile(folder: string, file: string): Promise<string | null>
+  skillsVersions(name: string): Promise<SkillVersion[]>
+  skillsRestoreVersion(name: string, file: string): Promise<void>
+  skillsExport(name: string): Promise<{ ok: boolean; path: string }>
+  skillsShowInFinder(name: string): Promise<boolean>
+  skillsGithubPreview(url: string): Promise<{ id: string; preview: SkillGithubPreview }>
+  skillsGithubAdd(id: string, choices: Array<{ path: string; name?: string }>, enabledFor: string[]): Promise<Array<{ name: string; path: string }>>
+  skillsGithubUpdatePreview(name: string): Promise<{ id: string; diff: SkillGithubUpdatePreview }>
+  skillsGithubUpdateApply(id: string, name: string): Promise<boolean>
   // MCP
   mcpList(): Promise<McpServerInfo[]>
   mcpSave(s: McpServerInfo, secret?: McpServerSecret): Promise<McpServerInfo[]>
@@ -1112,6 +1132,93 @@ export interface SkillInfo {
   name: string
   description: string
   content: string
+}
+
+// ---- fase skill: la libreria unica (S2) ----
+
+/** Da dove arriva una skill della libreria. */
+export type SkillSourceKind = 'user' | 'bot' | 'github' | 'migrated'
+
+/** L'origine di una skill importata da GitHub (S6). */
+export interface SkillOrigin {
+  repo: string
+  commit: string
+  path: string
+}
+
+/** I metadati di Homun di una skill (NON stanno in SKILL.md: setting `skills.library`). */
+export interface SkillLibraryEntry {
+  /** id dei bot che la usano ('*' = tutti) */
+  enabledFor: string[]
+  source: SkillSourceKind
+  createdBy?: string
+  origin?: SkillOrigin
+  createdAt: number
+  updatedAt: number
+}
+
+export type SkillLibrarySettings = Record<string, SkillLibraryEntry>
+
+/** Una voce dell'elenco della finestra «Skill» (senza il corpo). */
+export interface SkillLibraryItem {
+  name: string
+  folder: string
+  description: string
+  enabledFor: string[]
+  source: SkillSourceKind
+  createdBy?: string
+  origin?: SkillOrigin
+  createdAt: number
+  updatedAt: number
+  files: string[]
+  valid: boolean
+  issues: Array<{ english: string; uiId: string; values?: Record<string, string | number> }>
+}
+
+/** L'anteprima di una skill trovata in un repository GitHub (S6.3). */
+export interface SkillGithubPreviewItem {
+  /** il nome nel frontmatter (validato S1) */
+  name: string
+  description: string
+  /** percorso della cartella della skill nel repository */
+  path: string
+  fileCount: number
+  license?: string
+  valid: boolean
+  issues: Array<{ english: string; uiId: string; values?: Record<string, string | number> }>
+}
+
+export interface SkillGithubPreview {
+  repo: string
+  commit: string
+  skills: SkillGithubPreviewItem[]
+}
+
+/** La differenza fra la skill installata e quella del repository (S6.5). */
+export interface SkillGithubUpdatePreview {
+  repo: string
+  oldCommit: string
+  newCommit: string
+  added: string[]
+  removed: string[]
+  changed: string[]
+  skill: SkillGithubPreviewItem
+}
+
+/** Una versione precedente di SKILL.md (S5). */
+export interface SkillVersion {
+  file: string
+  ts: number
+  origin: string
+  by?: string
+}
+
+/** Le skill dei plugin per la finestra «Skill» (sola lettura). */
+export interface PluginSkillGroup {
+  plugin: string
+  /** i bot per cui il plugin è abilitato ('*' = tutti) */
+  enabledFor: string[]
+  skills: Array<{ name: string; description: string }>
 }
 
 export interface RoutineSuggestion {

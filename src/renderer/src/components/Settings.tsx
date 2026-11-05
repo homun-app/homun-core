@@ -421,7 +421,11 @@ function GeneralTab() {
             control={
               <span className="flex items-center gap-1.5">
                 <NumberField ariaLabel={t`Look-around al rientro dopo (ore di assenza)`} min={1} value={minAwayHours}
-                  onChange={setMinAwayHours} />
+                  onChange={(v) => {
+                    // fase skill (S10.1): il valore si SALVA, non resta solo nello stato locale
+                    setMinAwayHours(v)
+                    void api.settingsSet('minAwayHours', v)
+                  }} />
                 <span className="text-xs text-muted-foreground"><Trans>ore</Trans></span>
               </span>
             }
@@ -432,7 +436,11 @@ function GeneralTab() {
             control={
               <span className="flex items-center gap-1.5">
                 <NumberField ariaLabel={t`Pausa delle routine dopo (giorni di assenza)`} min={1} value={awayPauseDays}
-                  onChange={setAwayPauseDays} />
+                  onChange={(v) => {
+                    // fase skill (S10.1): il valore si SALVA, non resta solo nello stato locale
+                    setAwayPauseDays(v)
+                    void api.settingsSet('awayPauseDays', v)
+                  }} />
                 <span className="text-xs text-muted-foreground"><Trans>giorni</Trans></span>
               </span>
             }
@@ -1131,6 +1139,9 @@ function TriggerEditor(props: {
       </div>
       <input className={`w-full ${inputCls} text-sm`} placeholder={t`Titolo (es. Riepilogo email del mattino)`} value={title} onChange={(e) => setTitle(e.target.value)} />
       <input className={`w-full ${inputCls} text-sm`} placeholder={t`Cosa deve fare il Bot a ogni esecuzione`} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
+      {/* fase skill (S7.4): il prompt può COMINCIARE con /nome — la skill si
+          carica al momento dell'esecuzione, come nel compositore */}
+      <p className="text-[11px] text-muted-foreground"><Trans>Può cominciare con /nome di una skill: il bot la caricherà a ogni esecuzione.</Trans></p>
 
       {kind === 'schedule' && (
         <div className="space-y-2">

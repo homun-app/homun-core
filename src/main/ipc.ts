@@ -49,7 +49,12 @@ export const DAEMON_RPC_CHANNELS = [
   // fase 16b (S1.3): squadre create e modificate dalla UI
   'groups:create', 'groups:update', 'groups:delete',
   'memory:list', 'memory:update', 'memory:delete',
-  'skills:list', 'skills:delete',
+  // fase skill (S2/S4/S6): la finestra «Skill» — libreria unica, editor,
+  // versioni, abilitazione per bot, import e aggiornamento da GitHub
+  'skills:library', 'skills:get', 'skills:save', 'skills:delete', 'skills:set-enabled-for',
+  'skills:read-file', 'skills:versions', 'skills:restore-version', 'skills:export',
+  'skills:github-preview', 'skills:github-add',
+  'skills:github-update-preview', 'skills:github-update-apply',
   'mcp:list', 'mcp:save', 'mcp:delete', 'mcp:test',
   'connectors:list', 'connectors:connect', 'connectors:disconnect',
   'connectors:set-tools', 'connectors:set-instructions', 'connectors:save-static',
@@ -111,6 +116,15 @@ export function registerIpc(client: DaemonClient, getWindows: () => BrowserWindo
   }
 
   // ---- API locali (finestre/dialoghi/sistema) ----
+  // fase skill (S4): «Mostra nel Finder» — apre la cartella della skill nella
+  // libreria (shell è di Electron, sta qui e non nel daemon RPC)
+  ipcMain.handle('skills:show-in-finder', (_e, name: string) => {
+    const dir = join(db.dataDir(), 'skills', String(name))
+    if (!existsSync(dir)) throw new Error('skill not found')
+    void shell.openPath(dir)
+    return true
+  })
+
   ipcMain.handle('dialog:pick-image', async () => {
     const r = await dialog.showOpenDialog({
       properties: ['openFile'],

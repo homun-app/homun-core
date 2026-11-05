@@ -1457,8 +1457,8 @@ describe('fase 4: memoria e skill nel system prompt', () => {
   })
 
   it('nel system solo nome e descrizione delle skill; il corpo arriva col tool skill()', async () => {
-    const { writeSkill } = await import('../skills')
-    writeSkill(AGENT, { name: 'triage', description: 'smista la posta', content: 'CORPO SEGRETO della skill' })
+    const { writeSkillFromBot } = await import('../skills')
+    writeSkillFromBot(AGENT, { name: 'triage', description: 'smista la posta', content: 'CORPO SEGRETO della skill' })
     h.llm.queue = [
       { toolCalls: [{ id: 'k1', name: 'skill', arguments: JSON.stringify({ name: 'triage' }) }] },
       { toolCalls: [{ id: 's1', name: 'send_to_user', arguments: JSON.stringify({ text: 'fatto' }) }] },

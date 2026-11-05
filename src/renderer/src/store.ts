@@ -152,6 +152,9 @@ interface Store {
   /** fase 16 (U5): pannelli Memoria e Skill della vista dell'agente (anche dal pannello destro) */
   memoryOpen: boolean
   skillsOpen: boolean
+  /** fase skill: il filtro bot della finestra «Skill» (null = tutti i bot) */
+  skillsFilterAgent: string | null
+  setSkillsFilterAgent(v: string | null): void
   /** fase 16b (S3.2): «rispondi citando» — la citazione da inserire nel composer */
   quote: string | null
   setQuote(text: string | null): void
@@ -308,6 +311,7 @@ export const useStore = create<Store>((set, get) => ({
   previews: {},
   memoryOpen: false,
   skillsOpen: false,
+  skillsFilterAgent: null,
   quote: null,
   botPanelTabRequest: null,
   debugSteps: false,
@@ -838,6 +842,11 @@ export const useStore = create<Store>((set, get) => ({
 
   setSkillsOpen(v) {
     set({ skillsOpen: v })
+  },
+
+  // fase skill: il filtro bot della finestra «Skill»
+  setSkillsFilterAgent(v) {
+    set({ skillsFilterAgent: v })
   },
 
   // fase 16b (S3.3): la voce di debug — si applica e resta nel setting

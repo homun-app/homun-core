@@ -12,9 +12,12 @@
 // Fase 18a (E5): la chiave API arriva SOLO dalla variabile d'ambiente
 // SANDBOT_EVAL_API_KEY — mai da argv (comparirebbe in ps e nello history),
 // mai stampata.
-// La soglia --min di default scala sui casi totali: round(casi × runs × 0,9) —
-// fase 17b: 40 casi (1, 2b, 3-39) × 3 run = 120 → 108, stesso rapporto ~0,9
-// della fase 14 (97 su 36 × 3 = 108).
+// La soglia --min di default scala sui casi CHE GIRERANNO: round(casi × runs
+// × 0,9). Fase skill (S9): il numero dei casi si CHIEDE alla suite (passata
+// di conteggio con EVAL_COUNT_ONLY, nessuna chiamata al modello) — non più
+// scritto a mano: oggi c'erano 40 scritti a mano e i casi erano 41, più
+// questi; e con --cases la soglia si calcola sui casi SCELTI (prima, con 5
+// casi, chiedeva comunque 108 pass).
 import { spawnSync } from 'node:child_process'
 
 const args = process.argv.slice(2)
@@ -24,13 +27,35 @@ const flag = (name, fallback) => {
 }
 const model = flag('model', 'kimi-k3:cloud')
 const runs = flag('runs', '3')
-// fase 17b (A5): la soglia di default si RICALCOLA sui casi totali con la
-// stessa formula — Math.round(TOTAL_CASES × runs × 0,9) — così l'aggiunta dei
-// casi 36-39 (40 casi) non chiede di aggiornare un numero a mano.
-// Conta il TOTALE (sistema): il recupero dei turni fa parte del sistema (il
-// "modello nudo" lo stampa la suite, solo informativo)
-const TOTAL_CASES = 40
-const min = flag('min', String(Math.round(TOTAL_CASES * Number(runs) * 0.9)))
+// fase 11 (residuo 0a): filtro sui casi (es. --cases 9,11,13,14) — passa il
+// filtro a EVAL_ONLY della suite, che seleziona gli id corrispondenti
+const cases = flag('cases', '')
+/**
+ * La corsa di CONTEGGIO: la suite stampa «CASI ESEGUITE: n» (i casi scelti
+ * da --cases, come la corsa vera) senza chiamare modelli. Fallisce → errore
+ * chiaro, mai un numero inventato.
+ */
+const countChosenCases = () => {
+  const r = spawnSync('npx', ['vitest', 'run', '--config', 'vitest.eval.config.ts'], {
+    encoding: 'utf8',
+    env: {
+      ...process.env, EVAL_COUNT_ONLY: '1', EVAL_RUNS: '1',
+      ...(cases ? { EVAL_ONLY: cases } : {})
+    }
+  })
+  const out = `${r.stdout ?? ''}\n${r.stderr ?? ''}`
+  const m = /CASI ESEGUITE: (\d+)/.exec(out)
+  if (!m) {
+    console.error('conteggio dei casi fallito — output della suite di conteggio:\n' + out.slice(-1500))
+    process.exit(1)
+  }
+  return Number(m[1])
+}
+const chosen = countChosenCases()
+// fase 17b (A5): Math.round(casi scelti × runs × 0,9), stessa formula di
+// sempre — ma sui casi CHE GIRERANNO (il recupero dei turni fa parte del
+// sistema: il "modello nudo" lo stampa la suite, solo informativo)
+const min = flag('min', String(Math.round(chosen * Number(runs) * 0.9)))
 // fase 18a (E5): il provider di default è Ollama; gli URL noti sono gli
 // stessi KNOWN_BASE_URLS di src/main/agent/providers.ts (il runner è .mjs,
 // non importa il TS: la copia vive qui e il runner la valida)
@@ -55,9 +80,6 @@ if (!(provider in KNOWN_BASE_URLS)) {
   process.exit(1)
 }
 const baseUrl = flag('base-url', KNOWN_BASE_URLS[provider])
-// fase 11 (residuo 0a): filtro sui casi (es. --cases 9,11,13,14) — passa il
-// filtro a EVAL_ONLY della suite, che seleziona gli id corrispondenti
-const cases = flag('cases', '')
 // fase 17b (A5): la lingua del run (default it) e la soglia del controllo lingua
 const lang = flag('lang', 'it')
 const minLang = flag('min-lang', '0.95')
@@ -73,7 +95,7 @@ if (!KEYLESS_KINDS.has(provider) && !hasKey) {
   console.error(`il provider "${provider}" richiede una chiave: impostala nella variabile d'ambiente SANDBOT_EVAL_API_KEY (mai da riga di comando)`)
   process.exit(1)
 }
-console.log(`soglia: almeno ${min} pass · lingua: quota ≥ ${minLang} (il totale casi × run lo stampa la suite)\n`)
+console.log(`casi che gireranno: ${chosen} (contati dalla suite) × ${runs} run → soglia: almeno ${min} pass · lingua: quota ≥ ${minLang}\n`)
 
 const r = spawnSync('npx', ['vitest', 'run', '--config', 'vitest.eval.config.ts'], {
   stdio: 'inherit',

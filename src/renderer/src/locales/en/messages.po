@@ -49,6 +49,10 @@ msgstr "— model —"
 msgid ", fuso {0}"
 msgstr ", {0} time zone"
 
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "…"
+msgstr "…"
+
 #: src/renderer/src/components/ApprovalCard.tsx
 msgid "…e una voce senza nome: chiede sempre l'approvazione"
 msgstr "…and an unnamed entry: it always asks for approval"
@@ -57,9 +61,23 @@ msgstr "…and an unnamed entry: it always asks for approval"
 msgid "…grafico…"
 msgstr "…chart…"
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "skill.compatibilityTooLong"
+msgstr "\"compatibility\" must be at most 500 characters (now {n})."
+
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 msgid "«Consenti sempre» dati nelle card. Le letture di un server valgono solo per i tool che restano dichiarati in sola lettura."
 msgstr "\"Always allow\" choices made on cards. A server's reads only cover tools that stay declared read-only."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "skill.metadataInvalid"
+msgstr "\"metadata\" must be a map of strings (each value a string)."
+
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "(le istruzioni complete le vede il bot col tool skill)"
+msgstr "(the bot sees the full instructions with the skill tool)"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "(nessun bot)"
@@ -100,10 +118,6 @@ msgstr "(unnamed)"
 msgid "(server manuale)"
 msgstr "(manual server)"
 
-#: src/renderer/src/components/SkillsPanel.tsx
-msgid "(vuota)"
-msgstr "(empty)"
-
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "open.takeoverDone"
@@ -135,8 +149,10 @@ msgstr "{0, plural, one {# connected ›} other {# connected ›}}"
 msgid "{0, plural, one {# passo} other {# passaggi}}"
 msgstr "{0, plural, one {# step} other {# steps}}"
 
+#. placeholder {0}: agentName(filterAgent)
 #. placeholder {0}: tk.status
 #: src/renderer/src/components/RightPanel.tsx
+#: src/renderer/src/components/SkillsWindow.tsx
 msgid "{0}"
 msgstr "{0}"
 
@@ -146,11 +162,22 @@ msgstr "{0}"
 msgid "{0} ›"
 msgstr "{0} ›"
 
+#. placeholder {0}: preview.repo
+#. placeholder {1}: preview.commit.slice(0, 8)
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "{0} @ {1}"
+msgstr "{0} @ {1}"
+
 #. placeholder {0}: fmtUsd(m.cost.input)
 #. placeholder {1}: fmtUsd(m.cost.output)
 #: src/renderer/src/components/ui/ModelPicker.tsx
 msgid "{0} / {1} per M"
 msgstr "{0} / {1} per M"
+
+#. placeholder {0}: s.fileCount
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "{0} file"
+msgstr "{0} file"
 
 #. placeholder {0}: Math.round(s / 3600)
 #: src/renderer/src/components/SubagentCard.tsx
@@ -187,11 +214,6 @@ msgstr "{0} is writing…"
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "{0} skill · {1} server"
 msgstr "{0} skills · {1} servers"
-
-#. placeholder {0}: linked.skills.reduce((a, s) => a + s.skills.length, 0) + (installed?.plugins.reduce((a, p) => a + p.skills.length, 0) ?? 0)
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "{0} skill · se ne vuoi una nuova, chiedila a un bot"
-msgstr "{0} skills · want a new one? ask a bot in chat"
 
 #. placeholder {0}: waitingMember.name
 #: src/renderer/src/components/Sidebar.tsx
@@ -419,6 +441,10 @@ msgstr "{tool}: {direction, select, toBox {Mac {macPath} → box {boxPath}} from
 msgid "approval.contaminated"
 msgstr "{tool}: the turn has read untrusted web content — the action with effects goes back to the user"
 
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "{x}"
+msgstr "{x}"
+
 #. placeholder {0}: provider.keyHint ?? ''
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "•••• {0}"
@@ -537,10 +563,6 @@ msgstr "✨ Suggest from transcript"
 msgid "🗂 Memoria di questo bot"
 msgstr "🗂 This bot's memory"
 
-#: src/renderer/src/components/SkillsPanel.tsx
-msgid "🛠 Skill di questo bot"
-msgstr "🛠 This bot's skills"
-
 #: src/renderer/src/components/Settings.tsx
 msgid "30 giorni"
 msgstr "30 days"
@@ -616,8 +638,17 @@ msgid "notice.agentBusyDiscard"
 msgstr "Agent busy: message discarded (the queue lives in the daemon jobs table)."
 
 #: src/renderer/src/components/ComputerFiles.tsx
+#: src/renderer/src/components/SkillsWindow.tsx
 msgid "Aggiorna"
 msgstr "Refresh"
+
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "Aggiorna da GitHub"
+msgstr "Update from GitHub"
+
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "aggiornata da GitHub"
+msgstr "updated from GitHub"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Aggiornato"
@@ -630,6 +661,7 @@ msgstr "add"
 #: src/renderer/src/components/ConnectorCards13.tsx
 #: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
+#: src/renderer/src/components/SkillsWindow.tsx
 msgid "Aggiungi"
 msgstr "Add"
 
@@ -771,6 +803,7 @@ msgstr "no steps yet"
 #: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
+#: src/renderer/src/components/SkillsWindow.tsx
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "Annulla"
 msgstr "Cancel"
@@ -789,7 +822,12 @@ msgstr "Cancelled"
 msgid "Annullato (interrupt)"
 msgstr "Cancelled (interrupt)"
 
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "anteprima"
+msgstr "preview"
+
 #: src/renderer/src/components/ComputerFiles.tsx
+#: src/renderer/src/components/SkillsWindow.tsx
 msgid "Anteprima"
 msgstr "Preview"
 
@@ -838,8 +876,13 @@ msgstr "It opens the settings: choose or activate a provider and I finish on my 
 msgid "apre una pagina…"
 msgstr "opens a page…"
 
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "apri"
+msgstr "open"
+
 #: src/renderer/src/components/BotScreen.tsx
 #: src/renderer/src/components/LibraryCards.tsx
+#: src/renderer/src/components/SkillsWindow.tsx
 #: src/renderer/src/components/SubagentCard.tsx
 #: src/renderer/src/components/TaskCard.tsx
 msgid "Apri"
@@ -1044,12 +1087,17 @@ msgid "notice.deniedByPermissions"
 msgstr "Blocked by permissions: {tool}"
 
 #: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/SkillsWindow.tsx
 msgid "bot"
 msgstr "bot"
 
 #: src/renderer/src/components/Sidebar.tsx
 msgid "Bot"
 msgstr "Bots"
+
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "Bot che la usano"
+msgstr "Bots that use it"
 
 #: src/renderer/src/components/ServerSheet.tsx
 msgid "Bot che lo usano"
@@ -1146,10 +1194,10 @@ msgid "Carica qui"
 msgstr "Upload here"
 
 #: src/renderer/src/components/ActivityPanel.tsx
-#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/RightPanel.tsx
 #: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
+#: src/renderer/src/components/SkillsWindow.tsx
 msgid "caricamento…"
 msgstr "loading…"
 
@@ -1209,6 +1257,10 @@ msgstr "Search the MCP registry"
 #: src/renderer/src/components/LibraryPanel.tsx
 msgid "Cerca per titolo…"
 msgstr "Search by title…"
+
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "Cerca skill"
+msgstr "Search skills"
 
 #: src/renderer/src/lib/activity.ts
 msgid "cerca sul web…"
@@ -1322,6 +1374,7 @@ msgid "Chiedi qualcosa a {0} senza inquinare la conversazione…"
 msgstr "Ask {0} something without polluting the conversation…"
 
 #: src/renderer/src/components/ConnectorCards13.tsx
+#: src/renderer/src/components/SkillsWindow.tsx
 msgid "chiudi"
 msgstr "close"
 
@@ -1331,6 +1384,7 @@ msgstr "close"
 #: src/renderer/src/components/ComputerPanel.tsx
 #: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
+#: src/renderer/src/components/SkillsWindow.tsx
 #: src/renderer/src/components/ui/dialog.tsx
 msgid "Chiudi"
 msgstr "Close"
@@ -1689,6 +1743,7 @@ msgid "Continua da solo quando…"
 msgstr "Continue on your own when…"
 
 #: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/SkillsWindow.tsx
 msgid "Controlla aggiornamenti"
 msgstr "Check for updates"
 
@@ -1722,6 +1777,10 @@ msgstr "Copy"
 #: src/renderer/src/components/Settings.tsx
 msgid "copia curl"
 msgstr "copy curl"
+
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "Copia la cartella in ~/Downloads/Homun/skills/"
+msgstr "Copies the folder to ~/Downloads/Homun/skills/"
 
 #: src/renderer/src/components/ComputerActivity.tsx
 msgid "Copiato dal Mac"
@@ -1778,6 +1837,19 @@ msgstr "Create a rule"
 msgid "approval.usCreateActive"
 msgstr "create the routine \"{title}\" ACTIVE: it will run by itself on its schedule — prompt: {preview}"
 
+#. placeholder {0}: agentName(meta.createdBy)
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "creata da {0}"
+msgstr "created by {0}"
+
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "creata da un bot"
+msgstr "created by a bot"
+
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "Create dai bot"
+msgstr "Created by bots"
+
 #: src/renderer/src/components/BotDialogs.tsx
 msgid "Creatura"
 msgstr "Creature"
@@ -1830,6 +1902,18 @@ msgstr "To complete"
 msgid "da configurare: {0} (Impostazioni)"
 msgstr "to configure: {0} (Settings)"
 
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "da GitHub"
+msgstr "from GitHub"
+
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "Da GitHub"
+msgstr "From GitHub"
+
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "Da plugin"
+msgstr "From plugins"
+
 #: src/renderer/src/components/RightPanel.tsx
 msgid "da scegliere"
 msgstr "to be chosen"
@@ -1861,6 +1945,10 @@ msgstr "Describe it yourself"
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Descrizione"
 msgstr "Description"
+
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "Descrizione (cosa fa e quando usarla)"
+msgstr "Description (what it does and when to use it)"
 
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Descrizione / ruolo del bot (va nel system prompt)"
@@ -1997,7 +2085,6 @@ msgid "elimina"
 msgstr "delete"
 
 #: src/renderer/src/components/MemoryPanel.tsx
-#: src/renderer/src/components/SkillsPanel.tsx
 msgid "Elimina"
 msgstr "Delete"
 
@@ -2082,6 +2169,7 @@ msgid "Esito"
 msgstr "Result"
 
 #: src/renderer/src/components/LibraryPanel.tsx
+#: src/renderer/src/components/SkillsWindow.tsx
 msgid "Esporta"
 msgstr "Export"
 
@@ -2162,18 +2250,34 @@ msgstr "file"
 
 #: src/renderer/src/components/ComputerPanel.tsx
 #: src/renderer/src/components/LibraryPanel.tsx
+#: src/renderer/src/components/SkillsWindow.tsx
 msgid "File"
 msgstr "Files"
+
+#. placeholder {0}: updatePreview.diff.added.join(', ')
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "File aggiunti: {0}"
+msgstr "Added files: {0}"
 
 #. placeholder {0}: formatSize(preview.result.size)
 #: src/renderer/src/components/ComputerFiles.tsx
 msgid "File binario ({0})"
 msgstr "Binary file ({0})"
 
+#. placeholder {0}: updatePreview.diff.changed.join(', ')
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "File cambiati: {0}"
+msgstr "Changed files: {0}"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "rpc.filesNotFound"
 msgstr "File or folder not found."
+
+#. placeholder {0}: updatePreview.diff.removed.join(', ')
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "File tolti: {0}"
+msgstr "Removed files: {0}"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -2259,6 +2363,17 @@ msgstr "day"
 #: src/renderer/src/components/Settings.tsx
 msgid "giovedì"
 msgstr "Thursday"
+
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "GitHub"
+msgstr "GitHub"
+
+#. placeholder {0}: meta.origin.repo
+#. placeholder {1}: meta.origin.commit.slice(0, 8)
+#. placeholder {2}: meta.origin.path
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "GitHub · {0} @ {1} · {2}"
+msgstr "GitHub · {0} @ {1} · {2}"
 
 #: src/renderer/src/components/LibraryPanel.tsx
 msgid "grafico"
@@ -2487,6 +2602,10 @@ msgstr "http://127.0.0.1:11434"
 msgid "http://127.0.0.1:1234"
 msgstr "http://127.0.0.1:1234"
 
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "https://github.com/owner/repo"
+msgstr "https://github.com/owner/repo"
+
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "https://utente.github.io/sandbot/client.json"
 msgstr "https://user.github.io/sandbot/client.json"
@@ -2622,6 +2741,31 @@ msgstr "The cost is a lower bound: some models have no price."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
+msgid "skill.fileTooLarge"
+msgstr "The file \"{file}\" is too large: {n} KB (max 256 KB)."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "skill.notText"
+msgstr "The file \"{file}\" is not a valid UTF-8 text file."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "skill.yamlInvalid"
+msgstr "The frontmatter is not valid YAML: {reason}"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "skill.nameMissing"
+msgstr "The frontmatter requires \"name\"."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "skill.descriptionMissing"
+msgstr "The frontmatter requires a non-empty \"description\"."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
 msgid "cron.monthlyAt"
 msgstr "on day {day} of every month {at}"
 
@@ -2689,8 +2833,18 @@ msgstr "The main model {model} is not responding ({why}): switching to the fallb
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
+msgid "skill.nameFolderMismatch"
+msgstr "The name \"{name}\" does not match the folder name \"{folder}\"."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
 msgid "rpc.pdfNeedsWindow"
 msgstr "the PDF is generated by the Homun window: open it and try again, or export as html"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "skill.escapingPath"
+msgstr "The path \"{file}\" leaves the skill folder."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -2710,6 +2864,16 @@ msgstr "the provider chosen for the routine does not exist: {provider}"
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "il registro ›"
 msgstr "the registry ›"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "skill.err.symlink"
+msgstr "The repository contains symbolic links: it cannot be imported."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "skill.err.tooLarge"
+msgstr "The repository is too large to import."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -2796,6 +2960,10 @@ msgstr "the turn is not the user’s — creating bots or groups requires their 
 msgid "Il vault è cifrato a riposo (AES-256-GCM, chiave nel Keychain). I valori non si rileggono mai in chiaro: si possono solo sostituire. I bot vedono i nomi con <0>list-credentials</0> e i login si compilano con <1>fill_credential</1>, sempre col tuo consenso."
 msgstr "The vault is encrypted at rest (AES-256-GCM, key in the Keychain). Values are never read back in clear: they can only be replaced. Bots see names with <0>list-credentials</0> and logins are filled with <1>fill_credential</1>, always with your consent."
 
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "Importate"
+msgstr "Imported"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "rpc.screenControlFailed"
@@ -2872,6 +3040,7 @@ msgid "Incolla la chiave"
 msgstr "Paste the key"
 
 #: src/renderer/src/components/settings/AddProviderSheet.tsx
+#: src/renderer/src/components/SkillsWindow.tsx
 msgid "Indietro"
 msgstr "Back"
 
@@ -2968,13 +3137,14 @@ msgstr "external send"
 msgid "rpc.draftSendError"
 msgstr "Send failed: {error}"
 
-#: src/renderer/src/components/SkillsPanel.tsx
-msgid "istruzioni"
-msgstr "instructions"
-
 #: src/renderer/src/components/RightPanel.tsx
+#: src/renderer/src/components/SkillsWindow.tsx
 msgid "Istruzioni"
 msgstr "Instructions"
+
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "Istruzioni (markdown)"
+msgstr "Instructions (markdown)"
 
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Istruzioni personalizzate (vanno nel prompt del bot quando il connettore è attivo)"
@@ -3023,6 +3193,16 @@ msgstr "The user connected {name}: its mcp__{connectorId}__* tools are now avail
 msgid "rpc.draftNoVia"
 msgstr "The draft has no send tool associated: it cannot be sent automatically."
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "skill.symlink"
+msgstr "The skill folder contains a symbolic link: \"{file}\"."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "skill.libraryTooLarge"
+msgstr "The skill folder is too large: {n} KB (max 2 MB in total)."
+
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "La chiave non è stata salvata."
 msgstr "The key was not saved."
@@ -3044,6 +3224,15 @@ msgstr "The key stays in the Mac’s Keychain."
 #: src/renderer/src/components/BotScreen.tsx
 msgid "La connessione allo schermo si è chiusa."
 msgstr "The screen connection closed."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "skill.descriptionTooLong"
+msgstr "The description must be at most 1024 characters (now {n})."
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "la libreria dei bot: chi le usa, le versioni, l'import da GitHub"
+msgstr "the bots' library: who uses them, versions, GitHub import"
 
 #: src/renderer/src/components/LibraryPanel.tsx
 msgid "La libreria è vuota: i documenti, i grafici e i file che i bot preparano finiscono qui."
@@ -3104,6 +3293,10 @@ msgstr "Automation changes ask every time"
 msgid "Le ricerche dei bot vengono inviate a questi servizi, secondo i loro termini d'uso: <0>You.com</0> · <1>Exa</1> · <2>Tavily</2>"
 msgstr "Bot searches are sent to these services under their terms of use: <0>You.com</0> · <1>Exa</1> · <2>Tavily</2>"
 
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "Le versioni precedenti si conservano in .versions/ (le ultime 10)."
+msgstr "Previous versions are kept in .versions/ (the last 10)."
+
 #: src/renderer/src/lib/activity.ts
 msgid "legge {file}…"
 msgstr "reads {file}…"
@@ -3138,6 +3331,10 @@ msgstr "Library"
 #: src/renderer/src/components/Settings.tsx
 msgid "Libreria: {0} GB — oltre i 2 GB consigliati. Valuta cosa cancellare dalla vista Libreria (nessun blocco automatico)."
 msgstr "Library: {0} GB — above the recommended 2 GB. Consider deleting something from the Library view (no automatic blocking)."
+
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "Licenza"
+msgstr "License"
 
 #: src/renderer/src/components/ActivityPanel.tsx
 msgid "limite d'uso"
@@ -3281,6 +3478,18 @@ msgstr "unknown method: {method}"
 msgid "metti in pausa"
 msgstr "pause"
 
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "Mie"
+msgstr "Mine"
+
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "migrata"
+msgstr "migrated"
+
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "migrata dalla libreria per bot"
+msgstr "migrated from the per-bot library"
+
 #: src/renderer/src/components/ui/ModelPicker.tsx
 msgid "Minimo"
 msgstr "Minimal"
@@ -3334,6 +3543,7 @@ msgstr "model out of credit"
 
 #: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/Settings.tsx
+#: src/renderer/src/components/SkillsWindow.tsx
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "modifica"
 msgstr "edit"
@@ -3403,6 +3613,7 @@ msgid "Mostra il ragionamento in chat"
 msgstr "Show reasoning in chat"
 
 #: src/renderer/src/App.tsx
+#: src/renderer/src/components/SkillsWindow.tsx
 msgid "Mostra nel Finder"
 msgstr "Reveal in Finder"
 
@@ -3483,6 +3694,10 @@ msgstr "no recognized command"
 msgid "Nessun file caricato."
 msgstr "No file uploaded."
 
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "Nessun file di supporto."
+msgstr "No support files."
+
 #: src/renderer/src/components/ActivityPanel.tsx
 msgid "Nessun lavoro qui: i compiti dei bot e le loro routine finiscono in questo elenco."
 msgstr "No jobs here: the bots’ tasks and their routines end up in this list."
@@ -3552,13 +3767,18 @@ msgstr "No routines to resume."
 msgid "Nessuna routine."
 msgstr "No routines."
 
-#: src/renderer/src/components/SkillsPanel.tsx
-msgid "Nessuna skill: chiedi al bot di crearne una con update_skill."
-msgstr "No skills: ask the bot to create one with update_skill."
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "skill.err.noSkills"
+msgstr "No skills found in this repository: it needs folders with a SKILL.md."
 
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Nessuna skill: i bot le creano in chat con update_skill."
-msgstr "No skills: bots create them in chat with update_skill."
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "Nessuna skill. Scrivine una, importala da GitHub, o chiedi a un bot di salvare come skill un lavoro che ha appena fatto."
+msgstr "No skills yet. Write one, import it from GitHub, or ask a bot to save a finished job as a skill."
+
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "Nessuna versione precedente."
+msgstr "No previous versions."
 
 #: src/renderer/src/components/settings/ModelsPage.tsx
 #: src/renderer/src/components/ui/ModelSelect.tsx
@@ -3595,6 +3815,7 @@ msgstr "No"
 
 #: src/renderer/src/components/BotDialogs.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
+#: src/renderer/src/components/SkillsWindow.tsx
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "Nome"
 msgstr "Name"
@@ -3616,6 +3837,10 @@ msgstr "Name (e.g. My gateway)"
 msgid "Nome (es. weather)"
 msgstr "Name (e.g. weather)"
 
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "Nome cartella"
+msgstr "Folder name"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "rpc.invalidServerSlug"
@@ -3625,7 +3850,22 @@ msgstr "Invalid server name"
 msgid "Nome della squadra"
 msgstr "Team name"
 
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "Nome già presente: salva come"
+msgstr "Name already in use: save as"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "skill.nameInvalid"
+msgstr "Invalid name \"{name}\": 1-64 characters, only lowercase letters, digits and single hyphens (no leading/trailing hyphen, no \"--\")."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "skill.err.invalidName"
+msgstr "Invalid name: 1-64 characters, only lowercase letters, digits and single hyphens."
+
 #: src/renderer/src/components/ServerSheet.tsx
+#: src/renderer/src/components/SkillsWindow.tsx
 msgid "Nome tecnico"
 msgstr "Technical name"
 
@@ -3658,6 +3898,11 @@ msgstr "not connected"
 #: src/shared/ui-messages.ts
 msgid "notice.boxMigratedFailed"
 msgstr "Not copied (will retry at next launch): {list}."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "skill.err.notGithub"
+msgstr "This is not a GitHub address: paste an https://github.com/… URL."
 
 #. placeholder {0}: message.ignored.join(', ')
 #: src/renderer/src/components/ConnectorCards13.tsx
@@ -3742,6 +3987,10 @@ msgstr "Not saved"
 msgid "non supportato: valore in argv ({0})"
 msgstr "unsupported: value in argv ({0})"
 
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "non valida"
+msgstr "invalid"
+
 #: src/renderer/src/components/ServerSetup.tsx
 msgid "Non valido"
 msgstr "Not valid"
@@ -3770,6 +4019,10 @@ msgstr "New API key"
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Nuova routine"
 msgstr "New routine"
+
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "Nuova skill"
+msgstr "New skill"
 
 #: src/renderer/src/components/BotDialogs.tsx
 #: src/renderer/src/components/Sidebar.tsx
@@ -3874,6 +4127,10 @@ msgstr "Organization and calendar"
 #: src/renderer/src/components/Settings.tsx
 msgid "origine"
 msgstr "source"
+
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "Origine"
+msgstr "Origin"
 
 #: src/renderer/src/components/LibraryCards.tsx
 msgid "Origine https://…"
@@ -4002,6 +4259,7 @@ msgid "Pixel"
 msgstr "Pixel"
 
 #: src/renderer/src/components/ServerSheet.tsx
+#: src/renderer/src/components/SkillsWindow.tsx
 msgid "plugin"
 msgstr "plugin"
 
@@ -4014,6 +4272,11 @@ msgstr "Plugin \"{name}\" installed: the bot has received the outcome."
 #: src/shared/ui-messages.ts
 msgid "sistema.pluginInstallFailed"
 msgstr "Plugin \"{name}\" NOT installed: {error}"
+
+#. placeholder {0}: s.plugin
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "plugin {0}"
+msgstr "plugin {0}"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -4106,10 +4369,6 @@ msgstr "Before preparing your bots I need a provider (the model that makes them 
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Principale"
 msgstr "Main"
-
-#: src/renderer/src/components/SkillsPanel.tsx
-msgid "Procedure riutilizzabili che il bot carica con il tool skill(). Crearle o aggiornarle richiede la tua approvazione."
-msgstr "Reusable procedures the bot loads with the skill() tool. Creating or updating them needs your approval."
 
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Profilo"
@@ -4230,6 +4489,10 @@ msgstr "Published by {0} on GitHub"
 msgid "onboarding.mainBotDescription"
 msgstr "Main point of contact: coordinates the other bots."
 
+#: src/renderer/src/components/Settings.tsx
+msgid "Può cominciare con /nome di una skill: il bot la caricherà a ogni esecuzione."
+msgstr "It can start with a skill's /name: the bot will load it on every run."
+
 #: src/renderer/src/components/settings/AddProviderSheet.tsx
 msgid "qualsiasi servizio compatibile OpenAI"
 msgstr "any OpenAI-compatible service"
@@ -4289,6 +4552,15 @@ msgstr "This build does not receive updates"
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Questa è una chiave di Composio «For You» (inizia con ck_). Homun usa la chiave di un progetto Composio: su composio.dev apri il pannello per sviluppatori, crea un progetto e copia la sua chiave API da Settings → API Keys (inizia con ak_)."
 msgstr "This is a Composio “For You” key (it starts with ck_). Homun uses a Composio project key: on composio.dev open the developer dashboard, create a project and copy its API key from Settings → API Keys (it starts with ak_)."
+
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "Questa skill è stata modificata: l'aggiornamento sovrascrive le modifiche (la versione attuale va nelle precedenti)."
+msgstr "This skill has been edited: updating overwrites your edits (the current version goes to the previous ones)."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "skill.err.noOrigin"
+msgstr "This skill has no GitHub origin to update from."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -4375,6 +4647,11 @@ msgstr "report: {0}"
 msgid "repository"
 msgstr "repository"
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "skill.err.repoNotFound"
+msgstr "Repository not found (or not reachable). Check the address."
+
 #: src/renderer/src/components/Settings.tsx
 msgid "review"
 msgstr "review"
@@ -4424,10 +4701,6 @@ msgstr "Web search"
 msgid "oauth.errPage"
 msgstr "Invalid request (wrong state): try the connection again from Homun."
 
-#: src/renderer/src/components/SkillsPanel.tsx
-msgid "richiudi"
-msgstr "close"
-
 #: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/ServerSheet.tsx
 msgid "Ricollega"
@@ -4473,10 +4746,12 @@ msgstr "remove"
 
 #: src/renderer/src/components/ServerSheet.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
+#: src/renderer/src/components/SkillsWindow.tsx
 msgid "Rimuovi"
 msgstr "Remove"
 
 #: src/renderer/src/components/ServerSheet.tsx
+#: src/renderer/src/components/SkillsWindow.tsx
 msgid "Rimuovi davvero"
 msgstr "Really remove"
 
@@ -4487,6 +4762,10 @@ msgstr "Rename"
 #: src/renderer/src/components/RightPanel.tsx
 msgid "riprendi"
 msgstr "resume"
+
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "Ripristina"
+msgstr "Restore"
 
 #: src/renderer/src/components/ActivityPanel.tsx
 #: src/renderer/src/components/AppsWindow.tsx
@@ -4615,6 +4894,7 @@ msgstr "Saturday"
 #: src/renderer/src/components/MemoryPanel.tsx
 #: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
+#: src/renderer/src/components/SkillsWindow.tsx
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "Salva"
 msgstr "Save"
@@ -4635,6 +4915,10 @@ msgstr "Save to vault"
 #: src/renderer/src/lib/activity.ts
 msgid "salva nella Libreria…"
 msgstr "saves to the Library…"
+
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "salvata"
+msgstr "saved"
 
 #: src/renderer/src/components/LibraryCards.tsx
 msgid "Salvato nel vault"
@@ -4822,10 +5106,6 @@ msgstr "If the model does not answer, bots switch to the fallback."
 #: src/shared/ui-messages.ts
 msgid "kick.9"
 msgstr "If the template has skills, create them with update_skill (name, description, content): every write goes through the user’s approval card."
-
-#: src/renderer/src/components/AppsWindow.tsx
-msgid "Se ne vuoi una nuova, chiedila a un bot in chat."
-msgstr "Want a new one? Ask a bot in chat."
 
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Se ospiti un documento dei metadati del client (CIMD, es. su GitHub Pages, https e con percorso), incollalo qui; vuoto = registrazione dinamica (DCR)."
@@ -5025,17 +5305,34 @@ msgid "sk-…"
 msgstr "sk-…"
 
 #: src/renderer/src/components/RightPanel.tsx
+#: src/renderer/src/components/Sidebar.tsx
+#: src/renderer/src/components/SkillsWindow.tsx
 msgid "Skill"
 msgstr "Skills"
 
 #: src/renderer/src/components/AppsWindow.tsx
-msgid "Skill dei bot"
-msgstr "Bot skills"
+msgid "Skill · {skillsCount}"
+msgstr "Skill · {skillsCount}"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "skill.err.notFound"
+msgstr "Skill not found."
 
 #. placeholder {0}: message.skills.join(', ')
 #: src/renderer/src/components/ConnectorCards13.tsx
 msgid "skill: {0}"
 msgstr "skill: {0}"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "skill.noFrontmatter"
+msgstr "SKILL.md must start with the YAML frontmatter (--- … ---)."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "skill.bodyTooLarge"
+msgstr "SKILL.md is too large: at most 100000 characters (now {n})."
 
 #: src/renderer/src/components/BotScreen.tsx
 msgid "Sola lettura — il bot non vede il tuo cursore"
@@ -5045,6 +5342,10 @@ msgstr "Read-only — the bot cannot see your cursor"
 #: src/shared/ui-messages.ts
 msgid "notice.wakeNudge"
 msgstr "Delivery reminder to the parent (wake_parent)."
+
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "Solo istruzioni: gli script inclusi non vengono eseguiti."
+msgstr "Instructions only: any included scripts are never run."
 
 #: src/renderer/src/components/Sidebar.tsx
 msgid "solo tu"
@@ -5306,6 +5607,11 @@ msgstr "Invalid trigger: object missing"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
+msgid "skill.tooManyFiles"
+msgstr "Too many support files: {n} (max 50 besides SKILL.md)."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
 msgid "rpc.terminalTooMany"
 msgstr "Too many terminals open: at most 3 per bot and 8 in total."
 
@@ -5314,10 +5620,18 @@ msgstr "Too many terminals open: at most 3 per bot and 8 in total."
 msgid "Troppo grande per l'anteprima ({0})"
 msgstr "Too large to preview ({0})"
 
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "tu"
+msgstr "you"
+
 #. placeholder {0}: e.content
 #: src/renderer/src/sidebar-utils.ts
 msgid "Tu: {0}"
 msgstr "You: {0}"
+
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "tua"
+msgstr "yours"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "turno"
@@ -5364,6 +5678,7 @@ msgid "notice.turnEndSuperseded"
 msgstr "Turn superseded by a new message"
 
 #: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/SkillsWindow.tsx
 msgid "Tutte"
 msgstr "All"
 
@@ -5374,6 +5689,7 @@ msgstr "All"
 #: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/LibraryPanel.tsx
 #: src/renderer/src/components/ServerSheet.tsx
+#: src/renderer/src/components/SkillsWindow.tsx
 msgid "Tutti i bot"
 msgstr "All bots"
 
@@ -5556,6 +5872,14 @@ msgstr "Version and updates"
 msgid "Versione nuova disponibile"
 msgstr "New version available"
 
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "versione ripristinata"
+msgstr "version restored"
+
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "Versioni precedenti"
+msgstr "Previous versions"
+
 #: src/renderer/src/components/LibraryPanel.tsx
 msgid "Versioni:"
 msgstr "Versions:"
@@ -5564,6 +5888,11 @@ msgstr "Versions:"
 #: src/shared/ui-messages.ts
 msgid "cron.aroundTime"
 msgstr "around {time} (±15 min)"
+
+#. placeholder {0}: group?.plugin
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "Viene dal plugin {0}: si aggiorna aggiornando il plugin."
+msgstr "It comes from plugin {0}: it updates when the plugin updates."
 
 #: src/renderer/src/components/ui/ModelPicker.tsx
 msgid "visione"

@@ -712,7 +712,9 @@ export function AppsView({ embedded = false }: { embedded?: boolean }) {
   const [query, setQuery] = useState('')
   const [installed, setInstalled] = useState<{ servers: InstalledServerLike[]; plugins: InstalledPluginLike[] } | null>(null)
   const [developersOpen, setDevelopersOpen] = useState(false)
-  const [skillsOpen, setSkillsOpen] = useState(false)
+  // fase skill (S4): la riga «Skill · N» apre la finestra «Skill» (negozio)
+  const openSkillsWindow = useStore((s) => s.setSkillsOpen)
+  const [skillsCount, setSkillsCount] = useState(0)
   const [detailId, setDetailId] = useState<string | null>(null)
   const [linkedDetail, setLinkedDetail] = useState<ConnectedRow | null>(null)
   const [accountOpen, setAccountOpen] = useState(false)
@@ -735,15 +737,15 @@ export function AppsView({ embedded = false }: { embedded?: boolean }) {
     void refreshInstalled()
   }, [refreshConnectors])
 
-  const [skillsByOwner, setSkillsByOwner] = useState<Array<{ ownerId: string; ownerName: string; skills: string[] }>>([])
+  // fase skill (S2): il conteggio della riga «Skill · N» — la libreria unica
+  // più le skill dei plugin, UNA chiamata
   useEffect(() => {
     let alive = true
-    void Promise.all(agents.map(async (a) => {
-      const skills = await api.listSkills(a.id).catch(() => [])
-      return { ownerId: a.id, ownerName: a.name, skills: skills.map((s) => s.name) }
-    })).then((rows) => { if (alive) setSkillsByOwner(rows) })
+    void api.skillsLibrary()
+      .then((r) => { if (alive) setSkillsCount(r.library.length + r.plugins.reduce((a, g) => a + g.skills.length, 0)) })
+      .catch(() => undefined)
     return () => { alive = false }
-  }, [agents])
+  }, [])
 
   // l'elenco unico delle app: le curate static sono «pronte» solo col client salvato
   const staticReady = useMemo(
@@ -757,8 +759,8 @@ export function AppsView({ embedded = false }: { embedded?: boolean }) {
     [apps, connectors, composio, composioGateway, filter, query]
   )
   const linked = useMemo(
-    () => appsViewModel({ connectors, installed, agents, skillsByOwner, filter, query, lang: uiLang() }),
-    [connectors, installed, agents, skillsByOwner, filter, query]
+    () => appsViewModel({ connectors, installed, agents, filter, query, lang: uiLang() }),
+    [connectors, installed, agents, filter, query]
   )
 
   // mentre un flusso è in corsa (o un collegamento è in attesa) si rilegge lo
@@ -970,17 +972,18 @@ export function AppsView({ embedded = false }: { embedded?: boolean }) {
                 )}
               </button>
             ))}
-            {/* la riga delle skill dei bot */}
+            {/* fase skill (S4): la riga «Skill · N» apre la finestra «Skill» */}
             {!query && (
               <button
                 className="flex items-center gap-3 rounded-[14px] px-1 py-2 text-left transition hover:bg-muted/60"
-                onClick={() => setSkillsOpen(true)}
+                data-testid="apps-skills-row"
+                onClick={() => openSkillsWindow(true)}
               >
                 <span className="grid size-10 shrink-0 place-items-center rounded-[11px] bg-muted text-base">✦</span>
                 <span className="min-w-0 flex-1">
-                  <span className="block text-[15px]"><Trans>Skill dei bot</Trans></span>
+                  <span className="block text-[15px]"><Trans>Skill · {skillsCount}</Trans></span>
                   <span className="block truncate text-[13px] text-muted-foreground">
-                    <Trans>{linked.skills.reduce((a, s) => a + s.skills.length, 0) + (installed?.plugins.reduce((a, p) => a + p.skills.length, 0) ?? 0)} skill · se ne vuoi una nuova, chiedila a un bot</Trans>
+                    <Trans>la libreria dei bot: chi le usa, le versioni, l'import da GitHub</Trans>
                   </span>
                 </span>
                 <span className="shrink-0 text-sm text-muted-foreground"><Trans>Gestisci ›</Trans></span>
@@ -1052,7 +1055,6 @@ export function AppsView({ embedded = false }: { embedded?: boolean }) {
           onChanged={() => { void refreshConnectors(); void refreshComposioGateway() }}
         />
       )}
-      {skillsOpen && <SkillsSheet onClose={() => setSkillsOpen(false)} />}
       {detail && (
         <AppDetailSheet
           row={detail}
@@ -1415,65 +1417,6 @@ function ConnectedDetailSheet({ row, installed, onClose, onChanged }: {
           </div>
         )}
         {!server && !plugin && <p className="text-sm text-muted-foreground">{t`voce non trovata`}</p>}
-        <div className="mt-4 flex justify-end">
-          <button className="rounded-full px-3 py-1.5 text-sm text-muted-foreground transition hover:text-foreground" onClick={onClose}>
-            <Trans>Chiudi</Trans>
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-/** Il foglio delle skill di TUTTI i bot, raggruppate per bot (con eliminazione). */
-function SkillsSheet({ onClose }: { onClose(): void }) {
-  const agents = useStore((s) => s.agents)
-  const [rows, setRows] = useState<Array<{ agentId: string; skills: Array<{ name: string; description: string }> }> | null>(null)
-  const load = async (): Promise<void> => {
-    const out = []
-    for (const a of agents) {
-      const skills = await api.listSkills(a.id).catch(() => [])
-      out.push({ agentId: a.id, skills })
-    }
-    setRows(out)
-  }
-  useEffect(() => { void load() }, [agents])
-  return (
-    <div className="no-drag fixed inset-0 z-50 grid place-items-center bg-foreground/20 p-4" onClick={onClose}>
-      <div className="max-h-[85vh] w-full max-w-lg overflow-y-auto scroll-thin rounded-3xl bg-card p-5 shadow-soft" onClick={(e) => e.stopPropagation()}>
-        <strong className="block font-display text-lg"><Trans>Skill dei bot</Trans></strong>
-        <p className="mt-1 text-xs text-muted-foreground"><Trans>Se ne vuoi una nuova, chiedila a un bot in chat.</Trans></p>
-        {rows === null ? (
-          <p className="mt-3 text-sm text-muted-foreground"><Trans>caricamento…</Trans></p>
-        ) : rows.every((r) => r.skills.length === 0) ? (
-          <p className="mt-3 text-sm text-muted-foreground"><Trans>Nessuna skill: i bot le creano in chat con update_skill.</Trans></p>
-        ) : (
-          <div className="mt-3 space-y-3">
-            {rows.map((r) => {
-              const agent = agents.find((a) => a.id === r.agentId)
-              if (r.skills.length === 0) return null
-              return (
-                <div key={r.agentId}>
-                  <p className="text-[13px] text-muted-foreground">{agent?.name ?? r.agentId}</p>
-                  {r.skills.map((s) => (
-                    <div key={s.name} className="flex items-center gap-2 rounded-[12px] bg-muted px-3 py-1.5">
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm">{s.name}</span>
-                        <span className="block truncate text-xs text-muted-foreground">{s.description}</span>
-                      </span>
-                      <button
-                        className="shrink-0 text-xs text-muted-foreground transition hover:text-destructive"
-                        onClick={async () => { await api.deleteSkill(r.agentId, s.name); void load() }}
-                      >
-                        <Trans>elimina</Trans>
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )
-            })}
-          </div>
-        )}
         <div className="mt-4 flex justify-end">
           <button className="rounded-full px-3 py-1.5 text-sm text-muted-foreground transition hover:text-foreground" onClick={onClose}>
             <Trans>Chiudi</Trans>

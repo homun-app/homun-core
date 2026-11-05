@@ -11,6 +11,7 @@ import { LibraryPanel } from './components/LibraryPanel'
 // fase 16c (C5/C4): la vista Attività e la finestra «Collega app»
 import { ActivityPanel } from './components/ActivityPanel'
 import { AppsWindow } from './components/AppsWindow'
+import { SkillsWindow } from './components/SkillsWindow'
 import { api } from './store'
 // fase 16b correzioni 2 (Q1): il layout a tre colonne è UNA funzione pura
 import { layoutFor, TRAFFIC_LIGHT_INSET } from './layout'
@@ -75,6 +76,8 @@ export function App() {
   const settingsOpen = useStore((s) => s.settingsOpen)
   // fase 16c (C4): la finestra «Collega app»
   const appsOpen = useStore((s) => s.appsOpen)
+  // fase skill (S4): la finestra «Skill» (libreria unica)
+  const skillsOpen = useStore((s) => s.skillsOpen)
 
   useEffect(() => {
     void init()
@@ -173,6 +176,7 @@ export function App() {
       <RightPanel layout={layout} />
       {settingsOpen && <Settings />}
       {appsOpen && <AppsWindow />}
+      {skillsOpen && <SkillsWindow />}
       </div>
     </div>
   )

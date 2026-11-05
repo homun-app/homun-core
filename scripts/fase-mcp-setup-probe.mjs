@@ -52,7 +52,7 @@
 // A FINE SONDA si chiude ANCHE il daemon di sviluppo (pid in daemon.lock
 // dentro la cartella dati temporanea; mai il Portachiavi vero, mai la
 // cartella dati vera: env SANDBOT_TEST_*), niente Docker, nessun push.
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { createServer } from 'node:http'
 import { createHash, randomBytes } from 'node:crypto'
 import { mkdtempSync, rmSync, readFileSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs'
@@ -366,14 +366,33 @@ const daemonPid = (dataDir) => {
     return Number.isInteger(v.pid) && v.pid > 1 && v.pid !== process.pid ? v.pid : null
   } catch { return null }
 }
+/**
+ * S10.2 (fase skill): la sonda chiude TUTTI i daemon che ha avviato — per
+ * ogni cartella usata si legge daemon.lock, si termina il pid, si CONTROLLA
+ * che sia sparito (SIGKILL se serve) e il pgrep finale non deve trovare
+ * nessun sandbot nelle cartelle della sonda (nella verifica di fase
+ * mcp-setup ne era rimasto vivo uno su tre corse).
+ */
 const stopDaemon = async (dataDir) => {
   const pid = daemonPid(dataDir)
-  if (!pid) return
+  if (!pid) return true
   try { process.kill(pid, 'SIGTERM') } catch { /* già via */ }
   for (let i = 0; i < 30; i++) {
-    try { process.kill(pid, 0); await sleep(200) } catch { return }
+    try { process.kill(pid, 0); await sleep(200) } catch { return true }
   }
   try { process.kill(pid, 'SIGKILL') } catch { /* già via */ }
+  for (let i = 0; i < 15; i++) {
+    try { process.kill(pid, 0); await sleep(200) } catch { return true }
+  }
+  return false
+}
+/** La verifica finale: NESSUN daemon vivo nelle cartelle della sonda. */
+const assertNoDaemonLeft = (prefix) => {
+  const out = spawnSync('/usr/bin/pgrep', ['-fl', 'sandbot'], { encoding: 'utf8' })
+  const alive = (out.stdout ?? '')
+    .split('\n')
+    .filter((line) => line.includes(prefix))
+  return alive
 }
 
 // ---- CDP ----
@@ -1176,7 +1195,23 @@ try {
   failures++
   console.error('\n[sonda] ERRORE:', e.message ?? e)
 } finally {
-  // le cartelle temporanee delle corse si puliscono (l'app è già chiusa)
+  // le cartelle temporanee delle corse si puliscono (l'app è già chiusa);
+  // PRIMA si chiude ogni daemon ancora vivo delle cartelle della sonda e lo
+  // si VERIFICA col pgrep (S10.2): nessun sandbot-fase-mcp-setup-* deve restare
+  for (const entry of readdirSync(TMP_BASE).filter((f) => f.startsWith('sandbot-fase-mcp-setup-'))) {
+    await stopDaemon(join(TMP_BASE, entry, 'data')).catch(() => undefined)
+  }
+  const left = assertNoDaemonLeft('sandbot-fase-mcp-setup')
+  if (left.length) {
+    failures++
+    console.error('[sonda] daemon rimasti vivi dopo la chiusura:\n' + left.join('\n'))
+    for (const line of left) {
+      const pid = Number(line.split(' ')[0])
+      if (Number.isInteger(pid)) { try { process.kill(pid, 'SIGKILL') } catch { /* già via */ } }
+    }
+  } else {
+    console.log('[sonda] nessun daemon vivo nelle cartelle della sonda (pgrep)')
+  }
   for (const entry of readdirSync(TMP_BASE).filter((f) => f.startsWith('sandbot-fase-mcp-setup-'))) {
     try { rmSync(TMP_BASE + entry, { recursive: true, force: true }) } catch { /* l'app può essere ancora viva */ }
   }

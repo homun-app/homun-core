@@ -283,7 +283,7 @@ describe('esecuzione (store reale)', () => {
 // e createRoutine sono già importati in testa al file
 const { addGrant, createAgent, deleteAgent, getAgent } = await import('../../store/db')
 const { writeMemory, listMemories } = await import('../memory')
-const { writeSkill } = await import('../skills')
+const { writeSkillFromBot, listLibrarySkills } = await import('../skills')
 const { check } = await import('../permissions')
 
 describe('fase 5 — residui (M1, M3, 0d) con store reale', () => {
@@ -318,7 +318,10 @@ describe('fase 5 — residui (M1, M3, 0d) con store reale', () => {
   it('0d: agents:delete rimuove anche la directory agents/<id>/ (memoria e skill)', async () => {
     const a = createAgent('Eliminami')
     writeMemory(a.id, { content: 'ricordo', tier: 'core' })
-    writeSkill(a.id, { name: 'prova', description: 'd', content: 'istruzioni' })
+    writeSkillFromBot(a.id, { name: 'prova', description: 'd', content: 'istruzioni' })
+    // fase skill (S2): la skill del bot nasce nella LIBRERIA unica, abilitata
+    // solo per lui
+    expect(listLibrarySkills().some((sk) => sk.name === 'prova' && sk.entry.enabledFor.includes(a.id))).toBe(true)
     const dir = join(root, 'agents', a.id)
     expect(existsSync(dir)).toBe(true)
     deleteAgent(a.id)
