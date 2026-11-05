@@ -3819,6 +3819,10 @@ msgstr "Nessuna routine da riattivare."
 msgid "Nessuna routine."
 msgstr "Nessuna routine."
 
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "Nessuna skill trovata"
+msgstr "Nessuna skill trovata"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "skill.err.noSkills"

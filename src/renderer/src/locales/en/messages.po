@@ -3819,6 +3819,10 @@ msgstr "No routines to resume."
 msgid "Nessuna routine."
 msgstr "No routines."
 
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "Nessuna skill trovata"
+msgstr "No skills found"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "skill.err.noSkills"

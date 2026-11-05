@@ -20,6 +20,11 @@
 //              SOLE SKILL dei marketplace registrati (niente registro aperto),
 //              griglia a 2 colonne come il Browse di Rakazo; l'anteprima
 //              mostra skill e parti non usate e aggiunge SENZA card in chat.
+//   ritocchi   (fase skill · Sfoglia, T1–T5) un solo campo di ricerca (il
+//              campo in alto filtra ANCHE i pacchetti), il contenuto della
+//              finestra è un @container (le righe col controllo a destra),
+//              l'anteprima col displayName della griglia e «‹ Indietro» in
+//              alto (UN solo «Annulla»), focus d'apertura sul campo.
 import { useEffect, useMemo, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
@@ -77,7 +82,6 @@ export function SkillsWindow(): React.ReactNode {
   const [browseId, setBrowseId] = useState<string | null>(null)
   const [browseData, setBrowseData] = useState<SkillBrowseResult | null>(null)
   const [browseLoading, setBrowseLoading] = useState(true)
-  const [browseQuery, setBrowseQuery] = useState('')
   const [browseRetryAt, setBrowseRetryAt] = useState(0)
 
   const reload = (): void => {
@@ -96,10 +100,14 @@ export function SkillsWindow(): React.ReactNode {
       .finally(() => setBrowseLoading(false))
   }
   useEffect(() => { loadBrowse(true) }, [browseRetryAt])
+  // T1: UN solo campo di ricerca (quello in alto) — la stessa query filtra
+  // le tue skill, quelle dei plugin e i pacchetti di Sfoglia
   const browsePacks = useMemo(
-    () => (browseData?.entries ?? []).filter((e) => matchesSkillPackQuery(e, browseQuery)),
-    [browseData, browseQuery]
+    () => (browseData?.entries ?? []).filter((e) => matchesSkillPackQuery(e, query)),
+    [browseData, query]
   )
+  // T3: la voce cliccata della griglia — l'anteprima mostra il suo displayName
+  const browseEntry = browseId !== null ? (browseData?.entries ?? []).find((e) => e.id === browseId) : undefined
   // il filtro bot del pannello della chat vale per la PRIMA apertura
   useEffect(() => {
     if (filterAgent && data) {
@@ -109,9 +117,15 @@ export function SkillsWindow(): React.ReactNode {
   }, [filterAgent, data])
 
   const agentName = (id: string): string => agents.find((a) => a.id === id)?.name ?? id
+  // T1: i due messaggi vuoti — l'invito lungo («Scrivine una…») solo a
+  // libreria DAVVERO vuota e senza ricerca; se una ricerca (o un filtro) non
+  // trova niente nelle tue skill, basta il corto «Nessuna skill trovata»
+  const queryTrimmed = query.trim()
+  const libEmpty = (data?.library.length ?? 0) === 0 && (data?.plugins.length ?? 0) === 0
+  const longEmpty = libEmpty && !queryTrimmed
   const library = useMemo(() => {
     const rows = data?.library ?? []
-    const q = query.trim().toLowerCase()
+    const q = queryTrimmed.toLowerCase()
     return rows.filter((s) => {
       if (q && !s.name.toLowerCase().includes(q) && !s.description.toLowerCase().includes(q)) return false
       if (filter === 'mine') return s.source === 'user' || s.source === 'migrated'
@@ -121,13 +135,13 @@ export function SkillsWindow(): React.ReactNode {
       if (filter === 'plugin') return false
       return true
     })
-  }, [data, query, filter])
+  }, [data, queryTrimmed, filter])
   const pluginRows = useMemo(() => {
     if (filter !== 'all' && filter !== 'plugin') return []
-    const q = query.trim().toLowerCase()
+    const q = queryTrimmed.toLowerCase()
     return (data?.plugins ?? []).flatMap((g) => g.skills.map((s) => ({ ...s, plugin: g.plugin })))
       .filter((s) => !q || s.name.toLowerCase().includes(q) || s.description.toLowerCase().includes(q))
-  }, [data, query, filter])
+  }, [data, queryTrimmed, filter])
   // con il filtro sul bot (dal pannello della chat) si vedono le sue skill
   const visibleLibrary = useMemo(() => {
     if (!filterAgent || filter === 'plugin') return library
@@ -148,6 +162,16 @@ export function SkillsWindow(): React.ReactNode {
         className="flex max-h-[88vh] max-w-[calc(100%-2rem)] flex-col gap-0 overflow-hidden rounded-3xl bg-card p-0 shadow-soft sm:max-w-3xl"
         showCloseButton={false}
         data-testid="skills-window"
+        onOpenAutoFocus={(e) => {
+          // T5: niente anello di focus all'apertura — Radix di default focalizza
+          // il primo bottone («Nuova skill») e si accende l'anello arancione;
+          // il focus va al campo di ricerca, che non ha anello. Con Tab l'anello
+          // resta (focus-visible), per l'accessibilità. Nel frame DOPO: se la
+          // finestra si apre da un menu Radix, la chiusura del menu restituisce
+          // il focus al trigger — il nostro focus deve arrivare DOPO quello
+          e.preventDefault()
+          requestAnimationFrame(() => document.querySelector<HTMLInputElement>('[data-testid="skills-search"]')?.focus())
+        }}
       >
           <DialogTitle className="sr-only">{i18n._(msg`Skill`)}</DialogTitle>
           <div className="flex max-h-[88vh] flex-col">
@@ -180,12 +204,16 @@ export function SkillsWindow(): React.ReactNode {
                 ✕
               </button>
             </div>
-            <div className="min-h-0 flex-1 overflow-y-auto scroll-thin px-6 pb-6 pt-4">
+            {/* T2: @container sul contenitore del contenuto, in UN punto solo —
+                così le righe SettingsRow (dettaglio, editor e anteprime) mettono
+                il controllo a destra come nel dialogo Impostazioni */}
+            <div className="@container min-h-0 flex-1 overflow-y-auto scroll-thin px-6 pb-6 pt-4" data-testid="skills-content">
               {creating && <SkillEditor folder={null} onDone={() => { setCreating(false); reload() }} onCancel={() => setCreating(false)} />}
               {importing && <GithubImport onDone={() => { setImporting(false); reload() }} onCancel={() => setImporting(false)} />}
               {browseId !== null && !creating && !importing && (
                 <BrowsePreview
                   id={browseId}
+                  displayName={browseEntry?.displayName ?? browseEntry?.name ?? ''}
                   onClose={() => setBrowseId(null)}
                   onAdded={() => { reload(); loadBrowse() }}
                 />
@@ -203,6 +231,7 @@ export function SkillsWindow(): React.ReactNode {
                       <input
                         className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
                         placeholder={t`Cerca skill`}
+                        maxLength={200}
                         value={query}
                         onChange={(e) => setQuery(e.target.value)}
                         data-testid="skills-search"
@@ -231,11 +260,15 @@ export function SkillsWindow(): React.ReactNode {
                     )}
                   </div>
                   <div className="mt-4 space-y-1.5" data-testid="skills-list">
-                    {(data?.library.length ?? 0) === 0 && (data?.plugins.length ?? 0) === 0 && (
+                    {data !== null && visibleLibrary.length === 0 && pluginRows.length === 0 && (longEmpty ? (
                       <p className="py-6 text-center text-sm text-muted-foreground" data-testid="skills-empty">
                         <Trans>Nessuna skill. Scrivine una, importala da GitHub, o chiedi a un bot di salvare come skill un lavoro che ha appena fatto.</Trans>
                       </p>
-                    )}
+                    ) : (
+                      <p className="py-6 text-center text-sm text-muted-foreground" data-testid="skills-empty-filtered">
+                        <Trans>Nessuna skill trovata</Trans>
+                      </p>
+                    ))}
                     {visibleLibrary.map((s) => (
                       <button
                         key={s.folder}
@@ -277,18 +310,10 @@ export function SkillsWindow(): React.ReactNode {
                   </div>
 
                   {/* fase skill · Sfoglia (B4): la terza sezione — i pacchetti
-                      di sole skill dei marketplace, come il Browse di Rakazo */}
+                      di sole skill dei marketplace, come il Browse di Rakazo.
+                      T1: nessun campo qui — filtra il campo in alto */}
                   <section className="mt-7 space-y-2" data-testid="skills-browse">
                     <h3 className="text-[14px] font-medium text-muted-foreground"><Trans>Sfoglia</Trans></h3>
-                    <input
-                      className="h-9 w-full rounded-xl bg-muted px-3 text-sm outline-none placeholder:text-muted-foreground"
-                      placeholder={t`Cerca skill`}
-                      aria-label={t`Cerca skill`}
-                      maxLength={200}
-                      value={browseQuery}
-                      onChange={(e) => setBrowseQuery(e.target.value)}
-                      data-testid="skills-browse-search"
-                    />
                     {browseLoading && (
                       <p className="grid place-items-center py-8" data-testid="skills-browse-loading">
                         <span className="size-5 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" aria-label={t`caricamento…`} />
@@ -783,11 +808,14 @@ function SkillEditor({ folder, onDone, onCancel, embedded = false }: {
  * L'anteprima di un pacchetto di Sfoglia (B4): nome, marketplace e sha12,
  * l'elenco delle skill con la descrizione, le parti «non usate», «Bot che la
  * usano» (predefinito «Tutti i bot»). «Aggiungi» installa SENZA card in chat;
- * «Annulla» butta lo staging (browse-discard). Quando «Tutti i bot» è acceso
- * i toggle dei singoli bot si SPENGONO e si DISATTIVANO (B4: così si corregge
- * anche il difetto dell'anteprima di import).
+ * «Annulla» butta lo staging (browse-discard). Ritocchi: il titolo è il
+ * displayName della griglia (T3, lo slug nella riga piccola accanto a
+ * marketplace e sha12) e in alto c'è «‹ Indietro» come nel dettaglio (T4,
+ * stesso effetto dell'«Annulla»: scarta lo staging). Quando «Tutti i bot» è
+ * acceso i toggle dei singoli bot si SPENGONO e si DISATTIVANO (B4: così si
+ * corregge anche il difetto dell'anteprima di import).
  */
-function BrowsePreview({ id, onClose, onAdded }: { id: string; onClose(): void; onAdded(): void }): React.ReactNode {
+function BrowsePreview({ id, displayName, onClose, onAdded }: { id: string; displayName: string; onClose(): void; onAdded(): void }): React.ReactNode {
   const { t } = useLingui()
   const agents = useStore((s) => s.agents)
   const [preview, setPreview] = useState<SkillBrowsePreview | null>(null)
@@ -833,8 +861,8 @@ function BrowsePreview({ id, onClose, onAdded }: { id: string; onClose(): void; 
 
   return (
     <div className="space-y-4" data-testid="skills-browse-preview">
-      <button type="button" className="flex items-center gap-1 text-[13px] text-muted-foreground transition hover:text-foreground" onClick={cancel}>
-        <ChevronLeft className="size-4" /><Trans>Annulla</Trans>
+      <button type="button" className="flex items-center gap-1 text-[13px] text-muted-foreground transition hover:text-foreground" onClick={cancel} data-testid="skills-browse-back">
+        <ChevronLeft className="size-4" /><Trans>Indietro</Trans>
       </button>
       {error && <p role="alert" className="rounded-lg bg-destructive/10 px-3 py-2 text-[13px] text-destructive" data-testid="skills-browse-preview-error">{error}</p>}
       {!preview && !error && <p className="py-6 text-center text-sm text-muted-foreground"><Trans>caricamento…</Trans></p>}
@@ -843,9 +871,11 @@ function BrowsePreview({ id, onClose, onAdded }: { id: string; onClose(): void; 
           <div className="flex items-center gap-3">
             <span className="grid size-12 shrink-0 place-items-center rounded-[12px] bg-muted text-lg">✦</span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-lg font-medium">{preview.card.name}</span>
+              {/* T3: il titolo è lo STESSO nome della griglia (displayName);
+                  lo slug scende nella riga piccola, con marketplace e sha12 */}
+              <span className="block truncate text-lg font-medium" data-testid="skills-browse-preview-title">{displayName || preview.card.name}</span>
               <span className="block truncate text-[13px] text-muted-foreground">
-                <Trans>{preview.card.marketplace}</Trans> · <span className="font-mono" data-testid="skills-browse-sha">{preview.sha12}</span>
+                <span className="font-mono">{preview.card.name}</span> · <Trans>{preview.card.marketplace}</Trans> · <span className="font-mono" data-testid="skills-browse-sha">{preview.sha12}</span>
               </span>
             </span>
           </div>

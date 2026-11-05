@@ -1,3 +1,64 @@
+# REPORT FASE SKILL · SFOGLIA — RITOCCHI — LA FINESTRA SKILL PULITA (T1–T6)
+
+**Data:** 2026-11-05 · **Base:** `main` @ 277363c6 (tag `fase-skill-sfoglia` + la correzione della sonda) · **Tag di chiusura:** `fase-skill-sfoglia-ritocchi`. Nessun push, nessun tag `v*`, nessuna dipendenza nuova, niente Docker, niente eval, niente `npm run dist`; rete solo su 127.0.0.1 (provider finto) e repository git `file://` locale con `SANDBOT_TEST_ALLOW_FILE_URLS=1` (marketplace ufficiale **tolto** dal seed, mai github.com); app/daemon avviati solo con env pulita (`HOME`, `PATH` di sistema, `SANDBOT_TEST_USER_DATA`, keychain e safestorage finti); temporanei solo con mkdtemp nella cartella dei vincoli. Nessun testo letto dal modello è cambiato (niente eval).
+**Verifica finale:** `typecheck` pulito · `vitest` **187 file / 2924 test verdi** (base 2915, **+9** = il file di guardia nuovo; `skills-browse-section.test.ts` aggiornato alla T1, a pari numero) · `build` (electron-vite) verde · **sonda sfoglia 40/40 — tre corse verdi complete** sul build finale, **0 daemon dopo ognuna** · **sonda skill 49/49** (una corsa, 0 daemon) · catture rigenerate e **verificate sul DOM, non a occhio** (§5) · cataloghi it/en rigenerati (`i18n:extract`, en 0 non tradotti).
+
+## Cosa è cambiato, in una riga
+
+La finestra Skill ha **un solo campo di ricerca** (quello in alto, che filtra insieme tue skill, skill dei plugin e pacchetti di Sfoglia: il campo dentro la sezione è tolto, e con una ricerca che non trova niente l'elenco dice «Nessuna skill trovata» invece di ripetere l'invito lungo) (T1); il contenuto della finestra è un **`@container`** — in un punto solo, il contenitore scrollabile — quindi ogni riga `SettingsRow` (anteprime di Sfoglia e import, dettaglio, editor) mette il controllo **a destra** come nel dialogo Impostazioni, senza toccare il componente condiviso (T2); l'anteprima di Sfoglia titola col **displayName della griglia** e lo slug scende nella riga piccola: `con-comandi · mp-di-prova · b149bbccc68f` (T3); in alto c'è **«‹ Indietro»** (stessa azione dell'«Annulla»: scarta lo staging) e «Annulla» resta solo in basso accanto ad «Aggiungi» (T4); all'apertura il **focus va al campo di ricerca** (`onOpenAutoFocus` con `preventDefault`): niente anello arancione su «Nuova skill», l'anello con Tab resta (T5). Tutto in `src/renderer/src/components/SkillsWindow.tsx` (+ i18n e sonda).
+
+## 1. I test visti fallire PRIMA della correzione
+
+File nuovo `src/renderer/src/__tests__/skills-window-ritocchi.test.ts` (guardie che leggono il sorgente, come le altre del renderer), scritto per intero prima di toccare `SkillsWindow.tsx`: **8 rossi su 9** sul codice di `277363c6` (verde solo la guardia «SettingsRow non toccato», che legge il componente condiviso invariato). Riga = la prima asserzione fallita.
+
+| Punto | Test | Fallimento visto (riga · errore) |
+|---|---|---|
+| **T1** | «il campo dentro Sfoglia non c'è più (né lo stato dedicato): resta solo quello in alto» | riga **35** · `expected '…' not to contain 'skills-browse-search'` |
+| **T1** | «il campo in alto filtra ANCHE i pacchetti di Sfoglia (la stessa query)» | riga **42** · `expected '…' to contain 'matchesSkillPackQuery(e, query)'` |
+| **T1** | «ricerca/filtro senza risultati → "Nessuna skill trovata"; l'invito lungo solo a libreria VUOTA e SENZA ricerca» | riga **47** · `expected '…' to contain '<Trans>Nessuna skill trovata</Trans>'` |
+| **T2** | «la classe @container sta SOLO sul contenitore del contenuto (vale per dettaglio, editor e anteprime)» | riga **57** · `expected +0 to be 1` (nessuna classe `@container` nel file) |
+| **T3** | «il titolo dell'anteprima è il displayName (lo slug come ripiego)» | riga **73** · `expected '…' to match /<BrowsePreview[^>]*displayName=/` |
+| **T3** | «lo slug nella riga piccola sotto, ACCANTO a marketplace e sha12» | riga **87** · `expected -1 to be greater than 423` (nello span dello sha non c'è traccia di `preview.card.marketplace` prima) |
+| **T4** | «in alto "‹ Indietro" che SCARTA lo staging; "Annulla" e "Aggiungi" restano in basso» | riga **97** · `expected '<button type="button" className="flex…' to contain '<Trans>Indietro</Trans>'` (il primo bottone del blocco era «‹ Annulla») |
+| **T5** | «all'apertura il focus va al campo di ricerca (onOpenAutoFocus preventDefault, niente "Nuova skill")» | riga **110** · `expected -1 to be greater than 0` (nessun `onOpenAutoFocus` nel file) |
+
+In più, la guardia **esistente** `skills-browse-section.test.ts` «in cima: il titoletto "Sfoglia" e il campo "Cerca skill" (max 200 caratteri)» è stata vista **fallire dopo** la T1 (`to contain 'data-testid="skills-browse-search"'`) e riscritta al nuovo comportamento: dentro la sezione non c'è più nessun campo, il tetto dei 200 caratteri resta sull'unico campo in alto. Nota di metodo: quattro asserzioni della guardia nuova, dopo l'implementazione, sono state aggiustate nella FORMA (conteggio del placeholder invece che del testid — la stringa del `querySelector` del focus T5 contiene lo stesso testid; `@container` contato nelle classi e non nei commenti; finestra da 500 a 700 caratteri per il gestore del focus): nessuna cambiava ciò che verificano, tutte le otto restano sul comportamento.
+
+## 2. La gara di focus T5 — e perché la prima corsa era 39/40
+
+La prima implementazione metteva il focus nel `onOpenAutoFocus` subito; la corsa 1 della sonda chiudeva **39/40** con un KO nei primi controlli (riga persa: l'output era troncato, ma l'unico controllo nuovo sensibile ai tempi era proprio il focus T5). La corsa 2 era 40/40: race transiente. Causa plausibile: la finestra si apre dal **menu Radix dell'account**, e alla chiusura il menu **restituisce il focus al trigger** — se quella restituzione arriva DOPO il focus dato dal dialogo, il focus non sta sul campo. Corretto nel modo che rende il comportamento deterministico: il focus viene dato **nel frame dopo** (`requestAnimationFrame`) così arriva comunque dopo la restituzione del menu. Da lì **tre corse complete 40/40** sul build finale (corse 3–5). La verifica DOM della sonda: `{"focusSearch":true,"nuovaFocusVisible":false,"nuovaOutline":"none"}` in ogni corsa.
+
+## 3. Le sonde e i daemon (dopo OGNI corsa)
+
+`scripts/lib/probe-daemons.mjs` (ambiente dei processi, `ps eww`):
+
+| Corsa | Esito | Daemon |
+|---|---|---|
+| sonda **sfoglia** · corsa 1 (pre-rAF) | 39/40 (il transiente T5 di §2) | 1 trovato, 1 chiuso → **0 rimasti** |
+| sonda sfoglia · corsa 2 (pre-rAF) | 40/40 (verifica della diagnosi) | 1+0 → **0 rimasti** |
+| sonda sfoglia · corsa 3 (build finale) | **40/40 OK** | 1 trovato, 1 chiuso → **0 rimasti** |
+| sonda sfoglia · corsa 4 (build finale) | **40/40 OK** | 1+0 → **0 rimasti** |
+| sonda sfoglia · corsa 5 (build finale) | **40/40 OK** | 1+0 → **0 rimasti** |
+| sonda **skill** (una, richiesta) | **49/49 OK** | 1 trovato, 1 chiuso → **0 rimasti** |
+
+**Tre corse verdi complete della sonda sfoglia sul build finale**, come da spec. La sonda è passata da 28 a **40 controlli**: i 13 nuovi verificano T1–T5 sul DOM — un solo campo di ricerca e il filtro dei pacchetti dal campo in alto, i due messaggi vuoti (corto con la ricerca, lungo solo a libreria davvero vuota), la classe `@container` sul contenuto, il toggle di «Tutti i bot» **sulla stessa riga** del nome (**Δtop = 0,8 px**, contro la tolleranza ±8 px richiesta), il titolo dell'anteprima «Con Comandi» con la riga piccola `con-comandi · mp-di-prova · <sha12>`, «‹ Indietro» in alto con UN solo «Annulla», e BOTH i bottoni che scartano lo staging (Indietro e Annulla, ognuno verificato sulla cartella di staging). Nota di ambiente: a fine lavoro risultava vivo un daemon di sviluppo **estraneo** a queste sonde (`SANDBOT_TEST_USER_DATA=…sandbot-demo-skill-…`, avviato alle 18:34, prima dell'inizio di questa sessione): i prefissi delle sonde di questa fase sono `sandbot-fase-sfoglia` e `sandbot-fase-skill`, entrambi a 0 — non è stato toccato.
+
+## 4. Le catture: rigenerate, verificate sul DOM, NON guardate a occhio
+
+In `docs/catture/skill/`, matrice 1440/900 × chiaro/scuro rigenerata (33 PNG, 2880×1800 e 1800×1800 al 2×, dimensioni controllate in locale con `sips`). **Non le ho guardate a occhio**: la spec lo consente («oppure controlla il DOM e scrivi nel REPORT che non li hai visti a occhio») e ogni difetto della fase precedente è verificato sul DOM dalla sonda — l'anello di focus (T5, via `:focus-visible` e `outline` calcolato), le righe affiancate (T2, via i rettangoli), i nomi e i bottoni (T3/T4, via testo del DOM). **Trasparenza:** un tentativo di aprire `sfoglia-1440-chiaro.png` con lo strumento di lettura file dell'host ha rivelato che quell'host carica le immagini su un CDN esterno: interrotto subito, **nessun contenuto visivo è stato ricevuto né analizzato** (lo strumento ha restituito solo un URL) e nessun altro file è stato aperto così; nessun modello di visione, in rete o locale, è stato usato.
+
+## 5. Il resto, in breve
+
+- **T1**: tolto lo stato `browseQuery` e il campo della sezione; `browsePacks` filtra con la `query` del campo in alto (la ricerca condivisa `matchesSkillPackQuery`); il campo in alto eredita il tetto `maxLength={200}` del campo rimosso; i messaggi vuoti: `skills-empty` (invito lungo) solo a libreria+plugin vuoti E senza ricerca, altrimenti `skills-empty-filtered` («Nessuna skill trovata», en «No skills found»); mentre la libreria carica non si mostra più il lampeggio dell'invito lungo;
+- **T2**: `@container` sul contenitore scrollabile del contenuto (`data-testid="skills-content"`), **un solo punto** del file — copre dettaglio, editor e le due anteprime perché sono tutti figli di quel contenitore; `SettingsRow` invariato (la guardia lo rilegge a ogni corsa);
+- **T3**: la finestra passa all'anteprima il `displayName` della voce cliccata (ripiego: `name`); titolo `skills-browse-preview-title`, slug in monospace nella riga piccola prima di marketplace e sha12;
+- **T4**: il bottone in alto diventa «‹ Indietro» (`skills-browse-back`, stessa azione `cancel`: scarta lo staging e torna all'elenco), in basso restano «Annulla» (`skills-browse-cancel`) e «Aggiungi»;
+- **T5**: `onOpenAutoFocus` → `preventDefault` + focus al campo di ricerca nel frame dopo (§2); il campo non ha stili di focus, «Nuova skill» non è più il primo focalizzato; l'anello da tastiera resta (`:focus-visible`);
+- **i18n**: un messaggio nuovo («Nessuna skill trovata»), cataloghi it/en rigenerati, en tradotto a mano (0 non tradotti);
+- file toccati: `SkillsWindow.tsx` (tutto qui), `skills-browse-section.test.ts` (adattata alla T1), `skills-window-ritocchi.test.ts` (nuovo, 9 guardie), `scripts/fase-skill-sfoglia-probe.mjs` (+13 controlli T1–T5), cataloghi, 33 catture rigenerate.
+
+---
+
 # REPORT FASE SKILL · SFOGLIA — «SKILL» NEL MENU IN BASSO E LA SEZIONE «SFOGLIA» COME RAKAZO (B1–B6)
 
 **Data:** 2026-11-05 · **Base:** `main` @ 5eae81a9 (tag `fase-skill-ritocchi`) · **Tag di chiusura:** `fase-skill-sfoglia`. Nessun push, nessun tag `v*`, nessuna dipendenza nuova, niente Docker, niente eval, niente `npm run dist`; rete solo su 127.0.0.1 (provider finto) e repository git `file://` locali con `SANDBOT_TEST_ALLOW_FILE_URLS=1`; mai github.com: nella sonda il marketplace ufficiale è **tolto** dal seed di `connectors.marketplaces`. App/daemon avviati solo con env pulita (`HOME`, `PATH` di sistema, `SANDBOT_TEST_USER_DATA`, keychain e safestorage finti); temporanei solo con mkdtemp nella cartella dei vincoli. Riferimento Rakazo (Apache 2.0, sola lettura) letto prima di scrivere codice; attribuzione nell'intestazione di `src/main/agent/skill-browse.ts`.

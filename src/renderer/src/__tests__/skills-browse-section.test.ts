@@ -30,13 +30,14 @@ describe('B4: la sezione «Sfoglia» nella finestra Skill', () => {
     expect(atBrowse).toBeGreaterThan(atList)
   })
 
-  it('in cima: il titoletto «Sfoglia» e il campo «Cerca skill» (max 200 caratteri)', () => {
+  it('in cima: il titoletto «Sfoglia» e NESSUN campo di ricerca dentro (T1: filtra il campo in alto)', () => {
     const sec = browseSection()
     expect(sec).toContain('<Trans>Sfoglia</Trans>')
-    // il campo di ricerca della sezione (testid + tetto dei 200 caratteri)
-    expect(sec).toContain('data-testid="skills-browse-search"')
-    expect(sec).toContain('maxLength={200}')
-    expect(sec).toContain('Cerca skill')
+    // T1 (ritocchi): il campo dentro la sezione non c'è più — resta solo
+    // quello in alto, che filta ANCHE i pacchetti (tetto dei 200 conservato)
+    expect(src).not.toContain('skills-browse-search')
+    expect((src.match(/maxLength=\{200\}/g) ?? []).length).toBe(1)
+    expect(src).toContain('data-testid="skills-search"')
   })
 
   it('la griglia: 2 colonne sopra i 640 px, 1 sotto', () => {

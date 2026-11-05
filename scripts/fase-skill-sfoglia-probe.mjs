@@ -24,6 +24,14 @@
 //   7. marketplace illeggibile (cartella rinominata) → «Alcuni pacchetti non
 //      si sono caricati.» e «Riprova» funziona dopo il ripristino.
 //
+// Fase ritocchi (T1–T5): un solo campo di ricerca (il campo in alto filtra
+// ANCHE i pacchetti; «Nessuna skill trovata» al posto dell'invito lungo),
+// il contenuto della finestra è un @container (toggle e righe ADESSO
+// affiancati, ±8 px sul top), l'anteprima col displayName della griglia e
+// lo slug nella riga piccola, «‹ Indietro» in alto (UN solo «Annulla»,
+// entrambi scartano lo staging) e il focus d'apertura sul campo di ricerca
+// (niente anello su «Nuova skill»).
+//
 // Catture in docs/catture/skill/: sfoglia-* e menu-skill-* (1440 e 900,
 // chiaro e scuro). A FINE SONDA si chiude OGNI daemon avviato (dall'AMBIENTE,
 // helper probe-daemons) e le cartelle temporanee si cancellano SOLO DOPO.
@@ -388,6 +396,32 @@ try {
   // ============ 2. SFOGLIA mostra SOLO (a) e (d) (B4/B2) ============
   await openSkillsFromMenu(r)
   if (!(await r.waitDom(`!!document.querySelector('[data-testid="skills-window"]')`, 8000))) throw new Error('la finestra Skill non si apre dal menu')
+  // ---- ritocchi T5/T2/T1: come si presenta la finestra ALL'APERTURA ----
+  // T5: il focus va al campo di ricerca (che non ha anello); «Nuova skill»
+  // non focalizzato → niente anello arancione/chiaro nelle catture
+  await r.waitDom(`document.activeElement === document.querySelector('[data-testid="skills-search"]')`, 3000)
+  const focusApertura = await r.pageEval(`
+    const search = document.querySelector('[data-testid="skills-search"]')
+    const nuova = document.querySelector('[data-testid="skills-new"]')
+    return {
+      focusSearch: document.activeElement === search,
+      nuovaFocusVisible: nuova ? nuova.matches(':focus-visible') : null,
+      nuovaOutline: nuova ? getComputedStyle(nuova).outlineStyle : null
+    }
+  `)
+  check('apertura (T5): il focus va al campo di ricerca, «Nuova skill» senza anello',
+    focusApertura.focusSearch === true && focusApertura.nuovaFocusVisible === false,
+    JSON.stringify(focusApertura))
+  // T2: il contenuto della finestra è un @container (le righe SettingsRow
+  // mettono il controllo a destra, come nel dialogo Impostazioni)
+  check('finestra (T2): il contenuto è un @container',
+    await r.pageEval(`const c = document.querySelector('[data-testid="skills-content"]'); return !!c && c.classList.contains('@container')`))
+  // T1: UN solo campo «Cerca skill» (quello in alto), nessuno dentro Sfoglia
+  check('sfoglia (T1): un solo campo di ricerca, NESSUNO dentro la sezione',
+    await r.pageEval(`return document.querySelectorAll('[data-testid="skills-window"] input').length === 1 && !!document.querySelector('[data-testid="skills-search"]') && !document.querySelector('[data-testid="skills-browse-search"]')`))
+  // T1: qui la libreria è DAVVERO vuota e non c'è ricerca → l'invito lungo
+  check('elenco (T1): libreria davvero vuota senza ricerca → l\'invito lungo',
+    await r.waitDom(`!!document.querySelector('[data-testid="skills-empty"]') && !document.querySelector('[data-testid="skills-empty-filtered"]')`, 6000))
   const browseOk = await r.waitDom(`!!document.querySelector('[data-testid="skills-browse-entry-due-skill"]') && !!document.querySelector('[data-testid="skills-browse-entry-con-comandi"]')`, 30_000)
   check('sfoglia: mostra (a) due-skill e (d) con-comandi', browseOk)
   const entriesText = await r.pageEval(`return [...document.querySelectorAll('[data-testid^="skills-browse-entry-"]')].map((x) => x.dataset.testid + ' :: ' + x.textContent.replace(/\\s+/g, ' ').trim()).join(' | ')`)
@@ -404,18 +438,25 @@ try {
     browse0.skipped.some((s) => s.plugin === 'con-connettore' && /MCP/.test(s.reason)) &&
     browse0.skipped.some((s) => s.plugin === 'fuori' && /leave/i.test(s.reason)))
 
-  // ============ 3. la ricerca filtra ============
-  await scrollIntoView(r.pageEval, `document.querySelector('[data-testid="skills-browse-search"]')`)
-  await setInput(r.pageEval, '[data-testid="skills-browse-search"]', 'comandi')
+  // ============ 3. la ricerca filtra (T1: dal campo IN ALTO, insieme ============
+  // ============ alle skill dei plugin e ai pacchetti di Sfoglia)    ============
+  await scrollIntoView(r.pageEval, `document.querySelector('[data-testid="skills-search"]')`)
+  await setInput(r.pageEval, '[data-testid="skills-search"]', 'comandi')
   await sleep(400)
   const filtered = await r.pageEval(`return [...document.querySelectorAll('[data-testid^="skills-browse-entry-"]')].filter((x) => x.offsetParent !== null).map((x) => x.dataset.testid).join(',')`)
-  check('sfoglia: la ricerca filtra (solo con-comandi per «comandi»)', filtered === 'skills-browse-entry-con-comandi', filtered)
-  await setInput(r.pageEval, '[data-testid="skills-browse-search"]', 'zzz-non-esiste')
+  check('sfoglia (T1): la ricerca IN ALTO filtra i pacchetti (solo con-comandi per «comandi»)', filtered === 'skills-browse-entry-con-comandi', filtered)
+  check('elenco (T1): ricerca senza skill → «Nessuna skill trovata», NON l\'invito lungo',
+    await r.waitDom(`!!document.querySelector('[data-testid="skills-empty-filtered"]') && !document.querySelector('[data-testid="skills-empty"]')`, 4000))
+  await setInput(r.pageEval, '[data-testid="skills-search"]', 'zzz-non-esiste')
   await sleep(400)
   check('sfoglia: nessun risultato → «Nessun pacchetto trovato»',
     await r.waitDom(`!!document.querySelector('[data-testid="skills-browse-empty"]')`, 4000))
-  await setInput(r.pageEval, '[data-testid="skills-browse-search"]', '')
+  check('elenco (T1): ricerca totalmente vuota → resta il messaggio corto',
+    await r.waitDom(`!!document.querySelector('[data-testid="skills-empty-filtered"]') && !document.querySelector('[data-testid="skills-empty"]')`, 4000))
+  await setInput(r.pageEval, '[data-testid="skills-search"]', '')
   await sleep(400)
+  check('elenco (T1): senza ricerca e libreria VUOTA torna l\'invito lungo',
+    await r.waitDom(`!!document.querySelector('[data-testid="skills-empty"]') && !document.querySelector('[data-testid="skills-empty-filtered"]')`, 4000))
 
   // catture della sezione (dopo le prove di ricerca, elenco pieno)
   for (const [w, dark] of [[1440, false], [1440, true], [900, false], [900, true]]) {
@@ -447,6 +488,36 @@ try {
   check('anteprima: «Tutti i bot» acceso → i toggle dei bot SPENTI e DISATTIVATI',
     togglesStato.n >= 3 && togglesStato.tutti === 'true' && togglesStato.botSpenti && togglesStato.botDisattivati,
     JSON.stringify(togglesStato))
+  // ---- ritocchi T2/T3/T4, verificati SUL DOM dell'anteprima ----
+  // T2: il toggle di «Tutti i bot» sta SULLA STESSA RIGA del nome (prima il
+  // controllo finiva sotto: righe altissime) — si confronta il top, ±8 px
+  const rowSame = await r.pageEval(`
+    const sw = document.querySelector('[data-testid="skills-browse-preview"] [role="switch"]')
+    const title = sw.parentElement.previousElementSibling
+    return { diff: Math.abs(sw.getBoundingClientRect().top - title.getBoundingClientRect().top) }
+  `)
+  check('anteprima (T2): «Tutti i bot» col toggle SULLA STESSA RIGA del nome (±8 px)', rowSame.diff <= 8, `Δtop = ${rowSame.diff.toFixed(1)} px`)
+  // T4: in alto «‹ Indietro», UN solo «Annulla» (in basso, accanto ad «Aggiungi»)
+  const btnCounts = await r.pageEval(`
+    const vis = [...document.querySelectorAll('[data-testid="skills-browse-preview"] button')].filter((b) => b.offsetParent !== null)
+    return {
+      back: vis.some((b) => b.textContent.trim() === 'Indietro'),
+      annulla: vis.filter((b) => b.textContent.trim() === 'Annulla').length,
+      aggiungi: vis.filter((b) => b.textContent.trim() === 'Aggiungi').length
+    }
+  `)
+  check('anteprima (T4): in alto «‹ Indietro», UN solo «Annulla» (in basso, con «Aggiungi»)',
+    btnCounts.back && btnCounts.annulla === 1 && btnCounts.aggiungi === 1, JSON.stringify(btnCounts))
+  // T3: il titolo è lo STESSO nome della griglia (displayName), lo slug
+  // scende nella riga piccola accanto a marketplace e sha12
+  const head = await r.pageEval(`
+    const title = document.querySelector('[data-testid="skills-browse-preview-title"]')
+    const sha = document.querySelector('[data-testid="skills-browse-sha"]')
+    return { title: title?.textContent.trim() ?? '', sotto: (title?.nextElementSibling?.textContent ?? '').replace(/\\s+/g, ' ').trim(), sha: sha?.textContent ?? '' }
+  `)
+  check('anteprima (T3): il titolo è il displayName della griglia («Con Comandi»)', head.title === 'Con Comandi', head.title)
+  check('anteprima (T3): lo slug nella riga piccola, con marketplace e sha12',
+    head.sotto === `con-comandi · mp-di-prova · ${head.sha}`, head.sotto)
   // lo staging È VIVO (cartelle sandbot-plugin- NUOVE) e Annulla lo BUTTA
   await sleep(500)
   const stagingConPreview = nuoveStaging(stagingPrimaList)
@@ -461,10 +532,31 @@ try {
   }
   await setDark(r.pageEval, false)
   await r.setWindowWidth(1440)
+  // T4: «‹ Indietro» in alto FA LA STESSA COSA dell'«Annulla»: scarta lo
+  // staging e torna all'elenco (come il «‹ Indietro» del dettaglio)
+  await clickText(r.pageEval, 'Indietro', '[data-testid="skills-browse-preview"] button', true)
+  await sleep(800)
+  const stagingDopoIndietro = nuoveStaging(stagingPrimaList)
+  check('anteprima (T4): «‹ Indietro» SCARTA lo staging e torna all\'elenco',
+    stagingDopoIndietro.length === 0 && await r.waitDom(`!document.querySelector('[data-testid="skills-browse-preview"]') && !!document.querySelector('[data-testid="skills-browse-entry-due-skill"]')`, 5000),
+    `nuove rimaste: ${stagingDopoIndietro.join(', ') || 'nessuna'}`)
+  // ...e l'«Annulla» rimasto in basso butta pure lui lo staging
+  for (let attempt = 0; attempt < 3 && !(await r.waitDom(`!!document.querySelector('[data-testid="skills-browse-preview"]')`, 1500)); attempt++) {
+    await scrollIntoView(r.pageEval, `document.querySelector('[data-testid="skills-browse-entry-con-comandi"]')`)
+    await pointerClick(r.pageEval, `document.querySelector('[data-testid="skills-browse-entry-con-comandi"]')`)
+  }
+  if (!(await r.waitDom(`!!document.querySelector('[data-testid="skills-browse-preview"]')`, 10_000))) {
+    throw new Error('la riapertura dell\'anteprima di con-comandi non riesce (3 tentativi)')
+  }
+  // l'«Annulla» scarta solo se l'anteprima è CARICA (altrimenti chiude e basta)
+  if (!(await r.waitDom(`!!document.querySelector('[data-testid="skills-browse-sha"]')`, 30_000))) {
+    throw new Error('la riapertura dell\'anteprima di con-comandi non carica lo staging')
+  }
+  await sleep(500)
   await clickText(r.pageEval, 'Annulla', '[data-testid="skills-browse-preview"] button', true)
   await sleep(800)
   const stagingDopoAnnulla = nuoveStaging(stagingPrimaList)
-  check('anteprima: «Annulla» BUTTA lo staging (la cartella sparisce)', stagingDopoAnnulla.length === 0, `nuove rimaste: ${stagingDopoAnnulla.join(', ') || 'nessuna'}`)
+  check('anteprima: l\'«Annulla» in basso BUTTA lo staging (la cartella sparisce)', stagingDopoAnnulla.length === 0, `nuove rimaste: ${stagingDopoAnnulla.join(', ') || 'nessuna'}`)
   check('anteprima: chiusa, si torna all\'elenco', await r.waitDom(`!document.querySelector('[data-testid="skills-browse-preview"]') && !!document.querySelector('[data-testid="skills-browse-entry-due-skill"]')`, 5000))
 
   // ============ 5. AGGIUNGI (a) per il SOLO bot Alfa (B3) ============
