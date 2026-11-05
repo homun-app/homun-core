@@ -476,6 +476,11 @@ try {
   if (!(await r.waitDom(`!!document.querySelector('[data-testid="skills-browse-preview"]')`, 10_000))) {
     throw new Error('l\'anteprima di due-skill non si apre (3 tentativi)')
   }
+  // l'anteprima carica in modo asincrono (staging del pacchetto): il contenitore
+  // c'è PRIMA dei toggle — si aspetta «Tutti i bot» + almeno un bot
+  if (!(await r.waitDom(`document.querySelectorAll('[data-testid="skills-browse-preview"] [role="switch"]').length >= 2`, 20_000))) {
+    throw new Error('l\'anteprima di due-skill non mostra i toggle «Bot che la usano»')
+  }
   await sleep(300)
   // «Tutti i bot» OFF, poi ACCENDO solo Alfa (il primo toggle dei bot)
   await r.pageEval(`
