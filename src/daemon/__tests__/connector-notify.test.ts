@@ -2,12 +2,12 @@
 // connettore offerto dal bot, gli agenti con offerte pendenti ricevono un job
 // 'user-message' con meta.initiator 'CONNECTOR_CONNECTED' e le offerte si
 // marcano meta.connected (niente doppie notifiche).
-import { describe, expect, it, beforeAll, afterAll } from 'vitest'
+import { describe, expect, it, beforeAll, afterAll, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-const { setDataDir, dataDir, createAgent, appendEntry, updateEntryMeta, getEntries, db } = await import('../../main/store/db')
+const { setDataDir, dataDir, createAgent, appendEntry, updateEntryMeta, getEntries, setSetting, db } = await import('../../main/store/db')
 const { notifyConnectorConnected, notifyMcpServerConnected, notifyComposioAppConnected } = await import('../api')
 
 let root: string
@@ -106,6 +106,47 @@ describe('fase mcp-setup (M5.2): notifyMcpServerConnected', () => {
     const payload = JSON.parse(rows.at(-1)!.payload_json) as { text: string; extraMeta?: { ui?: { values?: Record<string, string> } } }
     expect(payload.text).toBe('[sistema] The user connected Notion: its mcp__notion-2__* tools are now available.')
     expect(payload.extraMeta?.ui?.values).toEqual({ name: 'Notion', prefix: 'mcp__notion-2' })
+  })
+})
+
+describe('fase prefisso-offerta (P2): il ripiego di notifyConnectorConnected non indovina più l\'id', () => {
+  it('server NON registrato → prefisso dal NOME come farebbe la registrazione (gcalendar «Google Calendar» → mcp__google-calendar__*) e UN warn col solo id', async () => {
+    const a1 = createAgent('Offerta gcalendar senza server')
+    offerEntry(a1.id, 'gcalendar', 'Google Calendar')
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    // le chiamate si catturano PRIMA del mockRestore (il restore le azzera)
+    let lines: string[] = []
+    try {
+      await notifyConnectorConnected('gcalendar', 'Google Calendar', () => undefined, { poke: () => undefined } as never)
+      lines = warn.mock.calls.map((c) => String(c[0]))
+    } finally {
+      warn.mockRestore()
+    }
+    // caso che non dovrebbe succedere: UNA riga di warn, col SOLO id (niente dati dell'utente)
+    const mine = lines.filter((l) => l.includes('gcalendar'))
+    expect(mine).toHaveLength(1)
+    expect(mine[0]).not.toContain('Google Calendar')
+    const rows = db().prepare("SELECT payload_json FROM jobs WHERE kind = 'user-message' AND agent_id = ?").all(a1.id) as Array<{ payload_json: string }>
+    const payload = JSON.parse(rows.at(-1)!.payload_json) as { text: string; extraMeta?: { ui?: { values?: Record<string, string> } } }
+    expect(payload.text).toBe('[sistema] The user connected Google Calendar: its mcp__google-calendar__* tools are now available (find the exact names with your tools or by asking the user).')
+    expect(payload.extraMeta?.ui?.values).toEqual({ name: 'Google Calendar', connectorId: 'google-calendar' })
+  })
+
+  it('server registrato con toolSlug rinumerato → il messaggio dice il prefisso VERO (mcp__google-calendar-2__*)', async () => {
+    const a1 = createAgent('Offerta gcalendar con server -2')
+    offerEntry(a1.id, 'gcalendar', 'Google Calendar')
+    setSetting('mcp.servers', [{
+      id: 'srv-cal', name: 'Google Calendar', transport: 'http' as const, url: 'https://calendarmcp.googleapis.com/mcp/v1',
+      enabled: true, catalogId: 'gcalendar', toolSlug: 'google-calendar-2'
+    }])
+    try {
+      await notifyConnectorConnected('gcalendar', 'Google Calendar', () => undefined, { poke: () => undefined } as never)
+    } finally {
+      setSetting('mcp.servers', [])
+    }
+    const rows = db().prepare("SELECT payload_json FROM jobs WHERE kind = 'user-message' AND agent_id = ?").all(a1.id) as Array<{ payload_json: string }>
+    const payload = JSON.parse(rows.at(-1)!.payload_json) as { text: string }
+    expect(payload.text).toBe('[sistema] The user connected Google Calendar: its mcp__google-calendar-2__* tools are now available (find the exact names with your tools or by asking the user).')
   })
 })
 

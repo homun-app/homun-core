@@ -1,3 +1,57 @@
+# REPORT FASE PREFISSO-OFFERTA — IL BOT NON INDOVINA I NOMI DEGLI STRUMENTI PRIMA DEL COLLEGAMENTO (P1–P2)
+
+**Data:** 2026-11-05 · **Base:** `main` @ 7cbab860 · **Tag:** `fase-prefisso-offerta`. Nessun push, nessun tag `v*`, versione invariata (0.3.1001), nessuna dipendenza nuova, niente rete, niente Docker, niente eval. L'app non è mai stata avviata: fase piccola, due testi e i loro test.
+**Verifica:** `typecheck` pulito · `vitest` **176 file / 2762 test verdi** (**+3** rispetto alla base: la base misurata oggi su 7cbab860 è **2759** — il REPORT precedente dichiarava 2758, il conteggio reale è 2759). I test nuovi sono stati scritti **prima** e visti fallire sul codice di oggi (evidenza sotto), poi la correzione.
+
+## Cosa è cambiato, in una riga
+
+Il result di `offer_connector` per un connettore del catalogo **non nomina più un prefisso `mcp__…` indovinato** (poteva essere sbagliato: lo slug vero è quello del NOME, può prendere `-2` per collisione, o diventare `composio__…` se la card passa per Composio) e il ripiego di `notifyConnectorConnected`, se il server installato non si trova, usa **lo slug del nome** (`toolSlugOf({ name })`, come farebbe la registrazione) invece dell'id, con un warn: **l'unica fonte di verità resta il messaggio di sistema `CONNECTOR_CONNECTED`**.
+
+## P1 — L'offerta del catalogo non nomina un prefisso
+
+**Il testo letto dal modello, PRIMA** (`src/main/agent/loop.ts`, result di `offer_connector` con `catalog:<id>`):
+
+> `offer shown to the user: connecting ${entry2.name} happens ONLY from their click on the Connect button. When the user connects you will receive a system message and will be able to use the mcp__${entry2.id}__* tools.`
+
+Per `gcalendar` diceva `mcp__gcalendar__*`: un prefisso **indovinato e sbagliato** — quello vero è `toolSlugOf(cfg)` (lo slug del nome: `mcp__google-calendar__*`), prende `-2` se lo slug è già usato, e se la card passa per Composio gli strumenti sono `composio__gmail__*`, non `mcp__…`. Il nome giusto arriva comunque col `CONNECTOR_CONNECTED`, ma il bot poteva già aver salvato o provato quello sbagliato.
+
+**DOPO** (`src/main/agent/loop.ts:3145`, testo voluto dalla fase):
+
+> `offer shown to the user: connecting ${entry2.name} happens ONLY from their click on the Connect button. When the user connects you will receive a system message with the exact names of the new tools: use those names, do not guess them.`
+
+Nessun altro testo del loop cambia.
+
+### Il controllo sulle offerte vicine (Composio e registro)
+
+- **Composio** (`src/main/agent/loop.ts:3123`, result di `offer_connector` con `composio:<slug>`): `offer shown to the user: connecting ${app.name} happens ONLY from their click on the Connect button (it goes through Composio, with the user's own Composio key).` — **non nomina prefissi**, nemmeno `composio__…`: già a posto, non toccata.
+- **Registro** (`add_mcp_server`/`install_plugin` → costante `PROPOSAL_RESULT`, `src/main/connectors/install.ts:54`): `proposal shown to the user; when they accept it you receive a system message` — **non nomina prefissi**: già a posto, non toccata.
+
+L'unica delle tre che indovinava un prefisso era quella del catalogo.
+
+**Test nuovo** (`src/main/agent/__tests__/loop.test.ts`, dentro il describe del funnel dei connettori, accanto agli altri test di `offer_connector`): `offer_connector` con `catalog:gcalendar` → il result letto dal modello **non contiene** `mcp__gcalendar__`, **non contiene nessun `mcp__` seguito da un nome** (`/mcp__[a-z0-9]/i`) e **contiene «exact names»**; la card resta quella giusta (`connectorId: 'gcalendar'`, nome «Google Calendar»). **Visto fallire sul codice di oggi** con l'evidenza del vecchio testo: `Received: "…you will receive a system message and will be able to use the mcp__gcalendar__* tools."`
+
+## P2 — Il ripiego della notifica non indovina l'id
+
+In `notifyConnectorConnected` (`src/daemon/api.ts:1871`), se il server del catalogo non si trova (non dovrebbe succedere: la notifica arriva dopo l'installazione):
+
+- **PRIMA** il ripiego era `` `mcp__${connectorId}` ``: per `gcalendar` il messaggio di sistema diceva `its mcp__gcalendar__* tools are now available…` — di nuovo l'id al posto dello slug, e senza accorgersene.
+- **DOPO** il ripiego è `serverToolsPrefix({ name })` = `mcp__${toolSlugOf({ name })}`: lo slug del NOME, esattamente come farebbe la registrazione («Google Calendar» → `mcp__google-calendar__*`). Il messaggio in sé non cambia (il testo con il server registrato era già giusto dalla fase mcp-setup-ritocchi R1); cambia solo il ripiego, e arriva un `console.warn` di una riga col **solo id**, senza dati dell'utente (`src/daemon/api.ts:1870`): `[connector] catalog server not found for "<id>"`.
+- Il valore UI `connectorId` del messaggio resta `prefix.slice('mcp__'.length)` (semantica invariata: con il ripiego vale il nome-sluggato).
+
+**Test nuovi** (`src/daemon/__tests__/connector-notify.test.ts`, describe «fase prefisso-offerta (P2)»):
+1. connettore `gcalendar`, nome «Google Calendar», **nessun server registrato** → il messaggio dice `mcp__google-calendar__*`; **una sola** riga di warn, contenente l'id e **senza** il nome; `extraMeta.ui.values` = `{ name: 'Google Calendar', connectorId: 'google-calendar' }`. **Visto fallire sul codice di oggi** (né il warn né il prefisso dal nome esistevano).
+2. server registrato con `catalogId: 'gcalendar'` e `toolSlug: 'google-calendar-2'` → dice `mcp__google-calendar-2__*`. Questo **passava già** sul codice di oggi (il percorso col server trovato era giusto): è la guardia che il ripiego nuovo non lo rompe, come chiedeva la fase.
+
+## Test esistenti cambiati
+
+**Nessuno.** Verificato con una ricerca su tutto `src/`: nessun test pinnav il vecchio testo dell'offerta (`will be able to use the mcp__…`) né `mcp__gcalendar__` come testo del loop (le occorrenze di `mcp__gcalendar__*` in `src/shared/__tests__/cron-human.test.ts` e `triggers.test.ts` sono dati campione di routine/trigger, scollegati). I due test esistenti di `offer_connector` asseriscono solo il prefisso invariato «offer shown to the user»; il test esistente di `notifyConnectorConnected` con `gmail`/«Gmail» continua a passare com'è perché `slug('Gmail') = 'gmail'` coincide con l'id — ora però quel «gmail» arriva dal **nome** (ripiego nuovo), non più dall'id: coincidenza, non copiatura.
+
+## Dettaglio della verifica
+
+- `npm run typecheck` → pulito.
+- `npm test` → **176 file / 2762 test verdi** (base 7cbab860: 176/2759, +3: `loop.test.ts` +1, `connector-notify.test.ts` +2).
+- Ordine di lavoro rispettato: prima i test nuovi, visti fallire con l'output del vecchio testo (P1 e P2-ripiego), poi le correzioni, poi di nuovo verdi.
+
 # REPORT FASE MCP-SETUP — RITOCCHI DOPO LA VERIFICA (R1–R6)
 
 **Data:** 2026-11-05 · **Base:** `main` @ 01f1df86 (tag `fase-mcp-setup`) · **Tag:** `fase-mcp-setup-ritocchi`. Nessun push, nessun tag `v*`, versione invariata (0.3.1001), **nessuna dipendenza nuova**.

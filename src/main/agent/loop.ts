@@ -3139,7 +3139,10 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           appendSend(agentId, call, message, emit, { status: 'pending' }, opts.taskId)
           messages.push({
             role: 'tool', toolCallId: call.id,
-            content: `offer shown to the user: connecting ${entry2.name} happens ONLY from their click on the Connect button. When the user connects you will receive a system message and will be able to use the mcp__${entry2.id}__* tools.`
+            // fase prefisso-offerta (P1): NESSUN prefisso indovinato — quello
+            // vero (toolSlug, o composio__ se passa per Composio) lo dice SOLO
+            // il messaggio di sistema CONNECTOR_CONNECTED che arriva al click
+            content: `offer shown to the user: connecting ${entry2.name} happens ONLY from their click on the Connect button. When the user connects you will receive a system message with the exact names of the new tools: use those names, do not guess them.`
           })
           continue
         }

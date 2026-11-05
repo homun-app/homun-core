@@ -1851,7 +1851,9 @@ export function buildApiMethods(
  * vengono marcate meta.connected per non ri-notificare.
  * R1: il prefisso degli strumenti è quello VERO del server installato
  * (toolSlug), non l'id del connettore — un toolSlug rinumerato (-2) direbbe
- * il nome sbagliato altrimenti.
+ * il nome sbagliato altrimenti. Fase prefisso-offerta (P2): se il server non
+ * si trova, il ripiego è `toolSlugOf({ name })` (lo slug del NOME come alla
+ * registrazione) con un warn, mai l'id.
  */
 export async function notifyConnectorConnected(
   connectorId: string,
@@ -1861,7 +1863,12 @@ export async function notifyConnectorConnected(
 ): Promise<void> {
   const mcpMod = await import('../main/mcp')
   const server = mcpMod.listServers().find((s) => s.catalogId === connectorId)
-  const prefix = server ? mcpMod.serverToolsPrefix(server) : `mcp__${connectorId}`
+  // fase prefisso-offerta (P2): se il server non si trova (non dovrebbe
+  // succedere: la notifica arriva DOPO l'installazione) il ripiego è lo slug
+  // del NOME come farebbe la registrazione (toolSlugOf), non l'id — per
+  // gcalendar il nome Google Calendar dà mcp__google-calendar__*, quello giusto
+  if (!server) console.warn(`[connector] catalog server not found for "${connectorId}"`)
+  const prefix = mcpMod.serverToolsPrefix(server ?? { name })
   for (const agent of store.listAgents()) {
     const offers = store.getEntries(agent.id).filter(
       (e) =>

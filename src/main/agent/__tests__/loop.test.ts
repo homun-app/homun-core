@@ -1624,6 +1624,27 @@ describe('fase 5: funnel dei connettori (offer_connector) e card Riconnetti', ()
     expect(second.some((m) => m.role === 'tool' && String(m.content).includes('search_connectors'))).toBe(true)
   })
 
+  it('offer_connector del catalogo NON nomina un prefisso indovinato (catalog:gcalendar)', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 'oc3', name: 'offer_connector', arguments: JSON.stringify({ id: 'catalog:gcalendar', reason: 'per gli appuntamenti' }) }] },
+      { text: 'fatto' }
+    ]
+    await runTurn(AGENT, 'collega il calendario', emit)
+
+    // la card resta quella del catalogo (id senza prefisso «catalog:»)
+    const offer = h.db.entries.find((e) => e.kind === 'send-message')!
+    expect(offer.meta?.message).toMatchObject({ type: 'connector', connectorId: 'gcalendar', name: 'Google Calendar' })
+    // il result letto dal modello NON nomina prefissi mcp__*: quelli veri
+    // (toolSlug, o composio__ se passa per Composio) arrivano SOLO col
+    // messaggio di sistema CONNECTOR_CONNECTED
+    const second = h.llm.calls[1]!
+    const result = String(second.find((m) => m.role === 'tool')?.content ?? '')
+    expect(result).toContain('offer shown to the user')
+    expect(result).not.toContain('mcp__gcalendar__')
+    expect(result).not.toMatch(/mcp__[a-z0-9]/i)
+    expect(result).toContain('exact names')
+  })
+
   it('search_connectors è SEMPRE consentito (lettura del catalogo, nessuna approval)', async () => {
     h.llm.queue = [
       { toolCalls: [{ id: 'sc1', name: 'search_connectors', arguments: JSON.stringify({ query: 'gmail' }) }] },
