@@ -34,12 +34,14 @@ import { Toggle } from './Settings'
 
 type Filter = 'all' | 'mine' | 'bot' | 'github' | 'plugin'
 
-/** L'etichetta breve dell'origine. */
-function SourceTag({ source }: { source: SkillLibraryItem['source'] }): React.ReactNode {
+/** L'etichetta breve dell'origine (K4: l'importata MODIFICATA si dichiara). */
+function SourceTag({ item }: { item: SkillLibraryItem }): React.ReactNode {
   const { t } = useLingui()
-  const label = source === 'user' ? t`tua`
-    : source === 'bot' ? t`creata da un bot`
-    : source === 'github' ? t`da GitHub`
+  const label = item.importedModified
+    ? t`importata · modificata`
+    : item.source === 'user' ? t`tua`
+    : item.source === 'bot' ? t`creata da un bot`
+    : item.source === 'github' ? t`da GitHub`
     : t`migrata`
   return <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{label}</span>
 }
@@ -86,7 +88,8 @@ export function SkillsWindow(): React.ReactNode {
       if (q && !s.name.toLowerCase().includes(q) && !s.description.toLowerCase().includes(q)) return false
       if (filter === 'mine') return s.source === 'user' || s.source === 'migrated'
       if (filter === 'bot') return s.source === 'bot'
-      if (filter === 'github') return s.source === 'github'
+      // K4: anche l'importata MODIFICATA resta un'importata (source user + origin)
+      if (filter === 'github') return s.source === 'github' || s.importedModified === true
       if (filter === 'plugin') return false
       return true
     })
@@ -210,7 +213,7 @@ export function SkillsWindow(): React.ReactNode {
                         <span className="min-w-0 flex-1">
                           <span className="flex items-center gap-2">
                             <span className="truncate text-[15px]">{humanizeSkillName(s.name)}</span>
-                            <SourceTag source={s.source} />
+                            <SourceTag item={s} />
                             {!s.valid && <span className="rounded-full bg-destructive/10 px-1.5 py-0.5 text-[10px] text-destructive"><Trans>non valida</Trans></span>}
                           </span>
                           <span className="block truncate text-[13px] text-muted-foreground">{s.description.replace(/\s+/g, ' ')}</span>
@@ -332,6 +335,9 @@ function SkillEditor({ folder, onDone, onCancel, embedded = false }: {
         setMeta(item)
         setEnabledFor(item?.enabledFor ?? ['*'])
         setVersions(vers)
+        // K2: una skill non valida (formato rotto o nome ≠ cartella) resta
+        // visibile nella finestra COL MOTIVO, come le importate non valide
+        setIssues(item && !item.valid ? item.issues : [])
         const parsed = parseSkillMd(text)
         if (parsed.ok) {
           setName(parsed.skill.name)
@@ -720,7 +726,13 @@ function GithubImport({ onDone, onCancel }: { onDone(): void; onCancel(): void }
       .filter((s) => checked[s.path])
       .map((s) => ({ path: s.path, ...(renames[s.path] ? { name: renames[s.path]! } : {}) }))
     void api.skillsGithubAdd(importId, choices, enabledFor)
-      .then(() => { onDone(); onCancel() })
+      .then((rows) => {
+        onDone()
+        // K5: il nome scelto invalido salta quella riga e si mostra qui
+        const bad = rows.filter((r) => r.error)
+        if (bad.length) setError(bad.map((r) => `${r.path}: ${r.error?.english ?? ''}`).join(' · '))
+        else onCancel()
+      })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
   }
 

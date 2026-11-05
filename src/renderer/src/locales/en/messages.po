@@ -2164,6 +2164,11 @@ msgstr "runs a command…"
 msgid "Eseguito senza chiedere (Approvazioni: non chiedere)"
 msgstr "Ran without asking (Approvals: never ask)"
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "skill.err.duplicateName"
+msgstr "A skill with this name already exists."
+
 #: src/renderer/src/components/Chat.tsx
 msgid "Esito"
 msgstr "Result"
@@ -2834,7 +2839,7 @@ msgstr "The main model {model} is not responding ({why}): switching to the fallb
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "skill.nameFolderMismatch"
-msgstr "The name \"{name}\" does not match the folder name \"{folder}\"."
+msgstr "The name in the file ({name}) is different from the folder ({folder})."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -2959,6 +2964,10 @@ msgstr "the turn is not the user’s — creating bots or groups requires their 
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "Il vault è cifrato a riposo (AES-256-GCM, chiave nel Keychain). I valori non si rileggono mai in chiaro: si possono solo sostituire. I bot vedono i nomi con <0>list-credentials</0> e i login si compilano con <1>fill_credential</1>, sempre col tuo consenso."
 msgstr "The vault is encrypted at rest (AES-256-GCM, key in the Keychain). Values are never read back in clear: they can only be replaced. Bots see names with <0>list-credentials</0> and logins are filled with <1>fill_credential</1>, always with your consent."
+
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "importata · modificata"
+msgstr "imported · edited"
 
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "Importate"
@@ -3227,6 +3236,11 @@ msgstr "The screen connection closed."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
+msgid "skill.descriptionNotText"
+msgstr "The description must be text."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
 msgid "skill.descriptionTooLong"
 msgstr "The description must be at most 1024 characters (now {n})."
 
@@ -3250,6 +3264,11 @@ msgstr "The check failed"
 #: src/renderer/src/components/Settings.tsx
 msgid "La routine gira quando torni al computer dopo un'assenza lunga."
 msgstr "The routine runs when you come back to the computer after a long absence."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "skill.err.invalidSkill"
+msgstr "The skill in the repository is not valid: fix it before updating."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts

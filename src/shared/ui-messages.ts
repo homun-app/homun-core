@@ -709,8 +709,9 @@ export const UI = {
   skillYamlInvalid: msg({ id: 'skill.yamlInvalid', message: 'Il frontmatter non è YAML valido: {reason}' }),
   skillNameMissing: msg({ id: 'skill.nameMissing', message: 'Il frontmatter richiede «name».' }),
   skillNameInvalid: msg({ id: 'skill.nameInvalid', message: 'Nome non valido «{name}»: 1–64 caratteri, solo minuscole, cifre e trattini singoli (niente trattino iniziale o finale, niente «--»).' }),
-  skillNameFolderMismatch: msg({ id: 'skill.nameFolderMismatch', message: 'Il nome «{name}» non coincide con la cartella «{folder}».' }),
+  skillNameFolderMismatch: msg({ id: 'skill.nameFolderMismatch', message: 'Il nome nel file ({name}) è diverso dalla cartella ({folder}).' }),
   skillDescriptionMissing: msg({ id: 'skill.descriptionMissing', message: 'Il frontmatter richiede una «description» non vuota.' }),
+  skillDescriptionNotText: msg({ id: 'skill.descriptionNotText', message: 'La descrizione dev\'essere testo.' }),
   skillDescriptionTooLong: msg({ id: 'skill.descriptionTooLong', message: 'La descrizione può essere al massimo 1024 caratteri (ora {n}).' }),
   skillCompatibilityTooLong: msg({ id: 'skill.compatibilityTooLong', message: '«compatibility» può essere al massimo 500 caratteri (ora {n}).' }),
   skillMetadataInvalid: msg({ id: 'skill.metadataInvalid', message: '«metadata» dev\'essere una mappa di stringhe (ogni valore una stringa).' }),
@@ -729,7 +730,9 @@ export const UI = {
   skillErrTooLarge: msg({ id: 'skill.err.tooLarge', message: 'Il repository è troppo grande da importare.' }),
   skillErrSymlink: msg({ id: 'skill.err.symlink', message: 'Il repository contiene link simbolici: non si può importare.' }),
   skillErrNoOrigin: msg({ id: 'skill.err.noOrigin', message: 'Questa skill non ha un\'origine GitHub da cui aggiornarsi.' }),
+  skillErrInvalidSkill: msg({ id: 'skill.err.invalidSkill', message: 'La skill nel repository non è valida: correggila prima di aggiornare.' }),
   skillErrInvalidName: msg({ id: 'skill.err.invalidName', message: 'Nome non valido: 1–64 caratteri, solo minuscole, cifre e trattini singoli.' }),
+  skillErrDuplicateName: msg({ id: 'skill.err.duplicateName', message: 'Esiste già una skill con questo nome.' }),
   skillErrNotFound: msg({ id: 'skill.err.notFound', message: 'Skill non trovata.' })
 } as const
 

@@ -50,8 +50,9 @@ export const DAEMON_RPC_CHANNELS = [
   'groups:create', 'groups:update', 'groups:delete',
   'memory:list', 'memory:update', 'memory:delete',
   // fase skill (S2/S4/S6): la finestra «Skill» — libreria unica, editor,
-  // versioni, abilitazione per bot, import e aggiornamento da GitHub
-  'skills:library', 'skills:get', 'skills:save', 'skills:delete', 'skills:set-enabled-for',
+  // versioni, abilitazione per bot, import e aggiornamento da GitHub;
+  // K2 (ritocchi): skills:invocable per l'elenco `/` del compositore
+  'skills:library', 'skills:invocable', 'skills:get', 'skills:save', 'skills:delete', 'skills:set-enabled-for',
   'skills:read-file', 'skills:versions', 'skills:restore-version', 'skills:export',
   'skills:github-preview', 'skills:github-add',
   'skills:github-update-preview', 'skills:github-update-apply',

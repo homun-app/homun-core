@@ -14,7 +14,8 @@ import { listMemories, updateMemory, deleteMemory } from '../main/agent/memory'
 import {
   libraryItemsForUi, pluginSkillGroups, readSkillMd, deleteLibrarySkill, setSkillEnabledFor,
   readSupportFile, listSkillVersions, restoreSkillVersion, exportSkillFolder,
-  libraryDir, skillsLibrary, writeLibrarySkill, saveSkillVersion
+  libraryDir, skillsLibrary, writeLibrarySkill, saveSkillVersion,
+  assertSkillFolder, invocableSkillList, renameLibraryFolder
 } from '../main/agent/skills'
 import {
   previewSkillsFromGithub, addSkillsFromStaging, previewSkillUpdate, applySkillUpdate
@@ -62,7 +63,7 @@ import { INVALID_TEST_BOX_PREFIX } from '../main/sandbox/docker-argv'
 // R2 (fase app — ritocchi): l'esito degli invii si ripulisce come gli errori Composio
 import { redactComposioSecrets } from '../main/connectors/composio-actions'
 import { existsSync } from 'node:fs'
-import { readFileSync, renameSync, rmSync } from 'node:fs'
+import { readFileSync, rmSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
@@ -971,13 +972,19 @@ export function buildApiMethods(
       library: libraryItemsForUi(),
       plugins: pluginSkillGroups()
     }),
-    // lo SKILL.md intero per l'editor
-    'skills:get': ([name]) => readSkillMd(String(name)),
+    // K2: l'elenco `/` del compositore — la STESSA selezione del loop
+    // (invocableSkillsOf) senza i corpi: un'unica fonte di verità
+    'skills:invocable': ([agentId]) => invocableSkillList(String(agentId)),
+    // lo SKILL.md intero per l'editor (K5: il nome è una cartella valida)
+    'skills:get': ([name]) => readSkillMd(assertSkillFolder(String(name))),
     /**
      * Il salvataggio dalla finestra: validazione S1 (le issue tornano al
      * campo, non come errore generico), versione precedente in .versions/,
      * rename cartella+nome insieme, enabledFor quando arriva. Le importate
      * MODIFICATE diventano source 'user' con origin conservato (S4.2).
+     * K3: la rinomina usa renameLibraryFolder, che sposta ANCHE la voce del
+     * setting — prima la voce nuova nasceva di default (enabledFor ['*']) e
+     * quella vecchia restava orfana: una skill «solo Alfa» diventava di tutti.
      */
     'skills:save': ([rec]) => {
       const r = rec as {
@@ -992,10 +999,10 @@ export function buildApiMethods(
       const entry = skillsLibrary()[folder]
       // nome già usato da UN'ALTRA skill → errore (mai sovrascrittura silenziosa)
       if (name !== folder && existsSync(join(libraryDir(), name))) {
-        throw uiError(UI.skillErrInvalidName)
+        throw uiError(UI.skillErrDuplicateName)
       }
       if (existsSync(skillDir) && existsSync(join(skillDir, 'SKILL.md'))) saveSkillVersion(skillDir, 'user')
-      if (name !== folder && existsSync(skillDir)) renameSync(skillDir, join(libraryDir(), name))
+      if (name !== folder && existsSync(skillDir)) renameLibraryFolder(folder, name)
       const parsedOld = existsSync(join(libraryDir(), name, 'SKILL.md'))
         ? parseSkillMd(readFileSync(join(libraryDir(), name, 'SKILL.md'), 'utf8'))
         : null
@@ -1016,13 +1023,13 @@ export function buildApiMethods(
     'skills:delete': ([name]) => {
       if (!deleteLibrarySkill(String(name))) throw uiError(UI.skillErrNotFound)
     },
-    'skills:set-enabled-for': ([name, ids]) => setSkillEnabledFor(String(name), ids as string[]),
-    'skills:read-file': ([folder, file]) => readSupportFile(String(folder), String(file)),
-    'skills:versions': ([name]) => listSkillVersions(String(name)),
+    'skills:set-enabled-for': ([name, ids]) => setSkillEnabledFor(assertSkillFolder(String(name)), ids as string[]),
+    'skills:read-file': ([folder, file]) => readSupportFile(assertSkillFolder(String(folder)), String(file)),
+    'skills:versions': ([name]) => listSkillVersions(assertSkillFolder(String(name))),
     'skills:restore-version': ([name, file]) => {
-      if (!restoreSkillVersion(String(name), String(file))) throw uiError(UI.skillErrNotFound)
+      if (!restoreSkillVersion(assertSkillFolder(String(name)), String(file))) throw uiError(UI.skillErrNotFound)
     },
-    'skills:export': ([name]) => exportSkillFolder(String(name)),
+    'skills:export': ([name]) => exportSkillFolder(assertSkillFolder(String(name))),
     // ---- l'import da GitHub (S6): l'anteprima NON salva niente; lo staging
     // resta vivo finché l'utente decide (o scade dopo 10 minuti) ----
     'skills:github-preview': async ([url]) => {
@@ -1041,6 +1048,8 @@ export function buildApiMethods(
       return added
     },
     'skills:github-update-preview': async ([name]) => {
+      // K5: il nome arriva dalla UI ma il daemon si difende da solo
+      assertSkillFolder(String(name))
       const out = await previewSkillUpdate(String(name), testSkillCloneDeps())
       if (!out.ok) throw new UiError('skill update failed', out.error)
       const id = `skill-update-${++skillImportSeq}`
@@ -1049,11 +1058,14 @@ export function buildApiMethods(
       return { id, diff: out.diff }
     },
     'skills:github-update-apply': ([id, name]) => {
+      // K5: la guardia PRIMA di guardare lo staging (il nome è della UI)
+      assertSkillFolder(String(name))
       const pending = skillImports.get(String(id))
       if (!pending?.diff) throw uiError(UI.skillErrNoOrigin)
       const r = applySkillUpdate(String(name), pending.staging, pending.diff)
       releaseSkillImport(String(id))
-      if (!r.ok) throw uiError(UI.skillErrRepoNotFound)
+      // K6: l'errore umano del rifiuto (skill non valida, origine persa…)
+      if (!r.ok) throw new UiError('skill update failed', r.error)
       return true
     },
 

@@ -317,7 +317,12 @@ export function Chat() {
   const [text, setText] = useState('')
   const [images, setImages] = useState<string[]>([])
   // fase skill (S7): le skill visibili a QUESTO bot (libreria + plugin) per
-  // l'elenco `/` del compositore; il highlight della selezione
+  // l'elenco `/` del compositore; il highlight della selezione.
+  // K2 (fase skill ritocchi): l'elenco arriva dal RPC skills:invocable — la
+  // STESSA selezione del loop (skill usabili e visibili, plugin col nome
+  // <plugin>--<skill>), senza il filtro duplicato nel renderer. Si ricarica
+  // anche quando la finestra Skill si CHIUDE (può aver salvato, importato o
+  // rimosso: un evento in più non serve, la ricarica basta).
   const [botSkills, setBotSkills] = useState<Array<{ name: string; description: string }>>([])
   const [slashOpen, setSlashOpen] = useState(false)
   const [slashIndex, setSlashIndex] = useState(0)
@@ -325,21 +330,14 @@ export function Chat() {
     setBotSkills([])
     if (!activeId) return
     let alive = true
-    void api.skillsLibrary()
+    void api.skillsInvocable(activeId)
       .then((r) => {
         if (!alive) return
-        setBotSkills([
-          ...r.library
-            .filter((sk) => sk.enabledFor.includes('*') || sk.enabledFor.includes(activeId))
-            .map((sk) => ({ name: sk.name, description: sk.description })),
-          ...r.plugins
-            .filter((g) => g.enabledFor.includes('*') || g.enabledFor.includes(activeId))
-            .flatMap((g) => g.skills)
-        ])
+        setBotSkills(r.map((sk) => ({ name: sk.name, description: sk.description })))
       })
       .catch(() => undefined)
     return () => { alive = false }
-  }, [activeId])
+  }, [activeId, skillsOpen])
   // l'elenco `/` si apre SOLO quando il messaggio comincia con / e resta su
   // una riga (la query è tutto ciò che segue); filtra nome e descrizione
   const slashQuery = /^\/([^\n]*)$/.exec(text)?.[1] ?? null

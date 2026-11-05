@@ -14,6 +14,8 @@ declare module 'js-yaml' {
     indent?: number
     lineWidth?: number
     noRefs?: boolean
+    /** K1 (fase skill ritocchi): false = le chiavi restano nell'ordine dell'oggetto */
+    sortKeys?: boolean
   }
   export function load(text: string, opts?: LoadOptions): unknown
   export function dump(value: unknown, opts?: DumpOptions): string

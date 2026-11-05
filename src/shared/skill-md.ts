@@ -62,6 +62,8 @@ const issue = (m: { english: string; ui: UiText }): SkillMdIssue => ({ english: 
 export function skillMdIssues(input: { name: unknown; description: unknown; frontmatter: Record<string, unknown> }): SkillMdIssue[] {
   const issues: SkillMdIssue[] = []
   const name = typeof input.name === 'string' ? input.name.trim() : ''
+  // K10: una description che NON è testo (per esempio un numero nello YAML)
+  // è un problema DIVERSO da «mancante»: l'editor lo dice all'utente
   const description = typeof input.description === 'string' ? input.description.trim() : ''
   if (!name) {
     issues.push(issue({ english: 'The frontmatter requires "name".', ui: ui(UI.skillNameMissing) }))
@@ -71,7 +73,9 @@ export function skillMdIssues(input: { name: unknown; description: unknown; fron
       ui: ui(UI.skillNameInvalid, { name })
     }))
   }
-  if (!description) {
+  if (input.description !== undefined && input.description !== null && typeof input.description !== 'string') {
+    issues.push(issue({ english: 'The "description" must be text (a string).', ui: ui(UI.skillDescriptionNotText) }))
+  } else if (!description) {
     issues.push(issue({ english: 'The frontmatter requires a non-empty "description".', ui: ui(UI.skillDescriptionMissing) }))
   } else if (description.length > SKILL_DESCRIPTION_MAX) {
     issues.push(issue({
@@ -160,9 +164,13 @@ export function parseSkillMd(text: string): ParseSkillMdResult {
 }
 
 /**
- * Costruisce lo SKILL.md: `name` e `description` per primi, poi le altre
- * chiavi nell'ordine in cui sono arrivate (roundtrip stabile). I valori con
- * a capo diventano block scalar `|`/`|-`/`|+`, gli altri restano su una riga.
+ * Costruisce lo SKILL.md: il frontmatter lo scrive `yaml.dump` di js-yaml
+ * con JSON_SCHEMA (lo stesso schema del parse: ciò che si scrive si rilegge),
+ * `lineWidth: -1` (niente a capo arbitrari), `noRefs` e chiavi NON riordinate.
+ * L'oggetto si costruisce con `name` e `description` per primi e le altre
+ * chiavi del frontmatter di partenza NELL'ORDINE originale; una descrizione
+ * su più righe può tornare come block scalar `|`/`>`: conta il valore, che il
+ * giro parse → build → parse conserva identico.
  */
 export function buildSkillMd(input: {
   name: string
@@ -171,66 +179,22 @@ export function buildSkillMd(input: {
   /** il frontmatter di un parse precedente: le chiavi sconosciute si conservano */
   frontmatter?: Record<string, unknown>
 }): string {
-  const merged: Record<string, unknown> = { ...(input.frontmatter ?? {}) }
-  merged.name = input.name.trim()
-  merged.description = input.description.trim()
-  const rank = (key: string): number => (key === 'name' ? 0 : key === 'description' ? 1 : 2)
-  const keys = Object.keys(merged).sort((a, b) => {
-    const diff = rank(a) - rank(b)
-    return diff !== 0 ? diff : a.localeCompare(b)
+  const rest: Record<string, unknown> = { ...(input.frontmatter ?? {}) }
+  delete rest.name
+  delete rest.description
+  const fm: Record<string, unknown> = {
+    name: input.name.trim(),
+    description: input.description.trim(),
+    ...rest
+  }
+  const frontmatter = yaml.dump(fm, {
+    schema: yaml.JSON_SCHEMA,
+    lineWidth: -1,
+    noRefs: true,
+    sortKeys: false
   })
-  const lines = keys.map((key) => formatYamlLine(key, merged[key]))
   const body = input.body.replace(/^\r?\n/, '')
-  return `---\n${lines.join('\n')}\n---\n${body.startsWith('\n') ? body : `\n${body}`}`
-}
-
-/** True quando il testo è uno scalare YAML che non serve proteggere. */
-function plainScalar(value: string): boolean {
-  if (value === '' || value !== value.trim()) return false
-  if (value.startsWith('"') || value.startsWith("'") || value.startsWith('&') || value.startsWith('*')) return false
-  if (/[:#{}[\],&*?|>!%@`]/.test(value)) return false
-  if (value === 'true' || value === 'false' || value === 'null' || value === '~') return false
-  if (/^-?\d+(\.\d+)?$/.test(value)) return false
-  return true
-}
-
-function formatYamlBlockScalar(key: string, value: string): string {
-  const trailing = /\n*$/.exec(value)?.[0]?.length ?? 0
-  let indicator = '|'
-  let lines: string[]
-  if (trailing === 0) {
-    indicator = '|-'
-    lines = value.split('\n')
-  } else if (trailing === 1) {
-    indicator = '|'
-    lines = value.slice(0, -1).split('\n')
-  } else {
-    indicator = '|+'
-    lines = [...value.slice(0, -trailing).split('\n'), ...Array.from({ length: trailing - 1 }, () => '')]
-  }
-  return `${key}: ${indicator}\n${lines.map((line) => `  ${line}`).join('\n')}`
-}
-
-function formatYamlLine(key: string, value: unknown): string {
-  if (value === null || value === undefined) return `${key}:`
-  if (typeof value === 'string') {
-    if (value.includes('\n')) return formatYamlBlockScalar(key, value)
-    if (plainScalar(value)) return `${key}: ${value}`
-    return `${key}: ${JSON.stringify(value)}`
-  }
-  if (typeof value === 'number' || typeof value === 'boolean') return `${key}: ${value}`
-  if (Array.isArray(value)) {
-    if (value.every((item) => typeof item === 'string' || typeof item === 'number')) {
-      return `${key}: [${value.map((item) => JSON.stringify(String(item))).join(', ')}]`
-    }
-    return `${key}:\n${value.map((item) => `  - ${typeof item === 'string' ? JSON.stringify(item) : JSON.stringify(item)}`).join('\n')}`
-  }
-  if (typeof value === 'object') {
-    const entries = Object.entries(value as Record<string, unknown>)
-    if (entries.length === 0) return `${key}:`
-    return `${key}:\n${entries.map(([k, v]) => `  ${formatYamlLine(k, v)}`).join('\n')}`
-  }
-  return `${key}: ${JSON.stringify(String(value))}`
+  return `---\n${frontmatter}${frontmatter.endsWith('\n') ? '' : '\n'}---\n${body.startsWith('\n') ? body : `\n${body}`}`
 }
 
 /** Il nome umanizzato per l'elenco: `pubblica-articolo` → «Pubblica articolo». */

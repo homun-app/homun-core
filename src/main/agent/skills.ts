@@ -16,10 +16,26 @@ import { boxOwnerOf } from '../sandbox'
 import {
   parseSkillMd, buildSkillMd, isValidSkillName, type ParsedSkillMd, type SkillMdIssue
 } from '../../shared/skill-md'
+import { UI } from '../../shared/ui-messages'
+import { ui } from '../../shared/ui-text'
+import { uiError } from '../ui-language'
 import type { SkillLibraryEntry, SkillLibrarySettings, SkillLibraryItem } from '../../shared/types'
 
 export { isValidSkillName }
 export type { ParsedSkillMd }
+
+/**
+ * K5: la guardia UNICA del nome di cartella di una skill. Ogni RPC e ogni
+ * funzione che costruisce un path con quel nome la chiama per prima: un nome
+ * che non sia dello standard ('..', 'a/b', '', …) è l'errore UMANO di nome
+ * non valido, prima di toccare il filesystem (il daemon si difende da solo,
+ * come deleteLibrarySkill: il renderer è nostro, ma non basta).
+ */
+export function assertSkillFolder(name: string): string {
+  const n = String(name ?? '').trim()
+  if (!isValidSkillName(n)) throw uiError(UI.skillErrInvalidName)
+  return n
+}
 
 // ---- fase 13 (punto 4): le skill dei PLUGIN (sola lettura, mai copiate) ----
 
@@ -102,9 +118,16 @@ export interface InvocableSkill {
   imported: boolean
 }
 
+/** Un segmento di nome di skill: parole singole separate da trattini (niente --). */
+const SKILL_NAME_SEGMENT = '[a-z0-9]+(?:-[a-z0-9]+)*'
+/** Il `/nome`: un segmento, oppure `<plugin>--<skill>` per le skill dei PLUGIN (K2). */
+const SKILL_INVOCATION_RE = new RegExp(`^/(${SKILL_NAME_SEGMENT}(?:--${SKILL_NAME_SEGMENT})?)(?:[ \\t\\n]+([\\s\\S]*))?$`)
+
 /**
  * Il `/nome` all'inizio del messaggio (o del prompt di una routine, dopo
- * l'apertura `[recurring routine: …]`): PURO. Se `<name>` è una skill
+ * l'apertura `[recurring routine: …]`): PURO. Il nome è un segmento dello
+ * standard OPPURE `<plugin>--<skill>` (K2: le skill dei plugin si invocano
+ * così, col corpo letto dalla cartella del plugin). Se `<name>` è una skill
  * visibile al bot, il contenuto per il modello diventa l'invocazione + le
  * istruzioni + --- + il resto («(no further text)» se vuoto). Nome che non
  * esiste o non è abilitato → null (il testo arriva così com'è).
@@ -116,14 +139,16 @@ export function skillInvocationExpansion(
   const raw = text.replace(/^\uFEFF/, '')
   const routine = ROUTINE_OPENING_RE.exec(raw)
   const afterRoutine = routine ? raw.slice(routine[0].length) : raw
-  const m = /^\/([a-z0-9]+(?:-[a-z0-9]+)*)(?:[ \t\n]+([\s\S]*))?$/.exec(afterRoutine)
+  const m = SKILL_INVOCATION_RE.exec(afterRoutine)
   if (!m) return null
   const name = m[1]!
   const rest = (m[2] ?? '').trim()
   const skill = visible.find((s) => s.name === name)
   if (!skill) return null
   const core = [
-    `The user invoked the skill "${name}" for this message: follow its instructions.`,
+    // K9: le istruzioni sono GIÀ qui sotto — il modello non deve spenderci
+    // una chiamata skill() per rileggerle
+    `The user invoked the skill "${name}" for this message. Its full instructions are below — do not load it again with skill(); follow them now.`,
     '',
     skill.body.trim(),
     '---',
@@ -161,7 +186,24 @@ export interface LibrarySkill extends ParsedSkillMd {
   folder: string
   entry: SkillLibraryEntry
   issues: SkillMdIssue[]
+  /**
+   * K2: false quando il FORMATO è rotto (parse fallito) o name ≠ cartella
+   * (spec S1.2) — la finestra la mostra col motivo ma NON arriva al prompt,
+   * al `/`, al tool skill né all'elenco del compositore. I problemi dei soli
+   * file di supporto NON la disabilitano: tolgono solo quel file.
+   */
+  usable: boolean
   files: string[]
+}
+
+/**
+ * K4: una skill è di TERZI quando arriva da GitHub (source 'github') oppure
+ * quando ci ARRIVATA e conserva l'origin — cioè anche dopo che l'utente l'ha
+ * modificata dalla finestra (source torna 'user', S4.2). Il testo è comunque
+ * scritto da altri: tool, `/` ed etichetta la trattano come importata.
+ */
+export function isThirdPartySkill(entry: SkillLibraryEntry): boolean {
+  return entry.source === 'github' || entry.origin !== undefined
 }
 
 /** L'id del bot le cui skill valgono: il padre per un sottoagente (S2.3). */
@@ -194,25 +236,38 @@ export function listLibrarySkills(): LibrarySkill[] {
     } catch {
       out.push({
         folder, name: folder, description: '', body: '', frontmatter: {},
-        entry, issues: [{ english: 'SKILL.md missing.', ui: { id: 'skill.noFrontmatter' } }], files: []
+        entry, usable: false,
+        issues: [{ english: 'SKILL.md missing.', ui: { id: 'skill.noFrontmatter' } }], files: []
       })
       continue
     }
     const parsed = parseSkillMd(text)
     const { files, issues } = scanSkillFolder(join(libraryDir(), folder))
-    if (parsed.ok) {
-      out.push({ folder, ...parsed.skill, entry, issues, files })
+    if (parsed.ok && parsed.skill.name === folder) {
+      out.push({ folder, ...parsed.skill, entry, usable: true, issues, files })
+    } else if (parsed.ok) {
+      // K2: name ≠ cartella (spec S1.2) — resta nella finestra col motivo ma
+      // NON arriva al modello (il nome che il bot vedrebbe sarebbe l'altro)
+      out.push({
+        folder, ...parsed.skill, entry, usable: false,
+        issues: [{
+          english: `The name in the file (${parsed.skill.name}) is different from the folder (${folder}).`,
+          ui: ui(UI.skillNameFolderMismatch, { name: parsed.skill.name, folder })
+        }, ...issues],
+        files
+      })
     } else {
-      out.push({ folder, name: folder, description: '', body: '', frontmatter: {}, entry, issues: [...parsed.issues, ...issues], files })
+      out.push({ folder, name: folder, description: '', body: '', frontmatter: {}, entry, usable: false, issues: [...parsed.issues, ...issues], files })
     }
   }
   return out.sort((a, b) => a.folder.localeCompare(b.folder))
 }
 
-/** Le skill della libreria visibili a un bot: enabledFor '*' o l'id (S2.3). */
+/** Le skill della libreria visibili a un bot: enabledFor '*' o l'id (S2.3).
+ *  K2: SOLO le skill USABILI (formato sano e name = cartella). */
 export function librarySkillsVisibleTo(agentId: string): LibrarySkill[] {
   const owner = skillOwnerOf(agentId)
-  return listLibrarySkills().filter((s) => s.entry.enabledFor.includes('*') || s.entry.enabledFor.includes(owner))
+  return listLibrarySkills().filter((s) => s.usable && (s.entry.enabledFor.includes('*') || s.entry.enabledFor.includes(owner)))
 }
 
 /** Le skill visibili al bot nella forma dell'espansione `/` (libreria + plugin). */
@@ -220,13 +275,31 @@ export function invocableSkillsOf(agentId: string): InvocableSkill[] {
   const own = librarySkillsVisibleTo(agentId).map((s): InvocableSkill => ({
     name: s.name,
     body: s.body,
-    imported: s.entry.source === 'github'
+    imported: isThirdPartySkill(s.entry)
   }))
-  const plugins = pluginSkillsOf(agentId).map((s): InvocableSkill => ({
-    name: s.name,
-    body: '',
-    imported: true
+  // K2: anche le skill dei plugin si invocano col `/` — col CORPO letto dalla
+  // cartella del plugin (prima arrivava al modello un corpo vuoto)
+  const owner = skillOwnerOf(agentId)
+  const plugins = pluginsEnabledFor(owner).flatMap((p) =>
+    p.skills.map((skill): InvocableSkill => {
+      const text = pluginSkillBody(p, dataDir(), skill.name)
+      const parsed = text !== null ? parseSkillMd(text) : null
+      return { name: skill.name, body: parsed?.ok ? parsed.skill.body : (text ?? ''), imported: true }
+    })
+  )
+  return [...own, ...plugins]
+}
+
+/**
+ * K2: l'elenco del compositore `/` (RPC `skills:invocable`) — la STESSA
+ * selezione di invocableSkillsOf (stesso filtro, stesse visibilità) SENZA i
+ * corpi: un'unica fonte di verità, niente filtro duplicato nel renderer.
+ */
+export function invocableSkillList(agentId: string): Array<{ name: string; description: string; imported: boolean }> {
+  const own = librarySkillsVisibleTo(agentId).map((s) => ({
+    name: s.name, description: s.description, imported: isThirdPartySkill(s.entry)
   }))
+  const plugins = pluginSkillsOf(agentId).map((s) => ({ name: s.name, description: s.description, imported: true }))
   return [...own, ...plugins]
 }
 
@@ -379,7 +452,7 @@ export function appendSkillVersion(skillDir: string, content: string, origin: 'u
 
 /** L'elenco delle versioni (più recente prima), con data e origine. */
 export function listSkillVersions(name: string): Array<{ file: string; ts: number; origin: string; by?: string }> {
-  const skillDir = join(libraryDir(), name)
+  const skillDir = join(libraryDir(), assertSkillFolder(name))
   try {
     const index = JSON.parse(readFileSync(join(versionsDir(skillDir), 'index.json'), 'utf8')) as Array<{ file: string; ts: number; origin: string; by?: string }>
     return [...index].sort((a, b) => b.ts - a.ts)
@@ -391,7 +464,7 @@ export function listSkillVersions(name: string): Array<{ file: string; ts: numbe
 /** Ripristina una versione: la versione CORRENTE si conserva prima (S5). */
 export function restoreSkillVersion(name: string, file: string): boolean {
   if (!/^[0-9TZa-z.-]+(?:-\d+)?\.md$/.test(file)) throw new Error('invalid version file name')
-  const skillDir = join(libraryDir(), name)
+  const skillDir = join(libraryDir(), assertSkillFolder(name))
   const source = join(versionsDir(skillDir), file)
   if (!existsSync(source)) return false
   saveSkillVersion(skillDir, 'user')
@@ -473,7 +546,9 @@ export function writeSkillFromBot(
   if (!existingVisible && libraryHasName(name)) {
     return { ok: false, error: `A skill named "${name}" already exists (it is not enabled for this bot): choose a different name.` }
   }
-  if (existingVisible?.entry.source === 'github') {
+  if (existingVisible && isThirdPartySkill(existingVisible.entry)) {
+    // K4: rifiutata anche se l'importata è stata MODIFICATA (source 'user'
+    // con origin): il testo resta scritto da altri
     return { ok: false, error: GITHUB_SKILL_REFUSAL }
   }
   const created = !existingVisible
@@ -495,7 +570,7 @@ export function writeSkillFromBot(
 }
 
 /** Rinomina la cartella di una skill (e la sua voce nel setting). */
-function renameLibraryFolder(from: string, to: string): void {
+export function renameLibraryFolder(from: string, to: string): void {
   const src = join(libraryDir(), from)
   const dest = join(libraryDir(), to)
   if (existsSync(src)) renameSync(src, dest)
@@ -510,8 +585,8 @@ function renameLibraryFolder(from: string, to: string): void {
 
 /** Elimina una skill della libreria (directory inclusa); true se esisteva. */
 export function deleteLibrarySkill(name: string): boolean {
-  if (!isValidSkillName(name)) throw new Error(`Invalid skill name: "${name}"`)
-  const dir = join(libraryDir(), name)
+  const folder = assertSkillFolder(name)
+  const dir = join(libraryDir(), folder)
   try {
     readdirSync(dir)
   } catch {
@@ -519,8 +594,8 @@ export function deleteLibrarySkill(name: string): boolean {
   }
   rmSync(dir, { recursive: true, force: true })
   const lib = skillsLibrary()
-  if (lib[name]) {
-    delete lib[name]
+  if (lib[folder]) {
+    delete lib[folder]
     saveSkillsLibrary(lib)
   }
   return true
@@ -528,7 +603,7 @@ export function deleteLibrarySkill(name: string): boolean {
 
 /** «Bot che la usano» dalla finestra (come i server MCP). */
 export function setSkillEnabledFor(name: string, enabledFor: string[]): void {
-  touchLibraryEntry(name, { enabledFor })
+  touchLibraryEntry(assertSkillFolder(name), { enabledFor })
 }
 
 // ---- lettura per il tool skill (S3.2) ----
@@ -542,7 +617,7 @@ export function readSkillFor(agentId: string, name: string): { output: string; f
     if (mine.files.length) {
       lines.push('', 'Support files (read with skill({name, file})):', ...mine.files.map((f) => `- ${f}`))
     }
-    return { output: lines.join('\n'), files: mine.files, webContent: mine.entry.source === 'github' }
+    return { output: lines.join('\n'), files: mine.files, webContent: isThirdPartySkill(mine.entry) }
   }
   // plugin: si LEGGE dalla cartella del plugin (fase 13)
   const owner = skillOwnerOf(agentId)
@@ -619,14 +694,17 @@ export function libraryItemsForUi(): SkillLibraryItem[] {
     createdAt: s.entry.createdAt,
     updatedAt: s.entry.updatedAt,
     files: s.files,
-    valid: s.issues.length === 0,
+    // K2: valid = formato sano e name = cartella (i problemi dei SOLI file di
+    // supporto non rendono la skill non valida: tolgono solo quel file)
+    valid: s.usable,
+    ...(s.entry.source !== 'github' && s.entry.origin ? { importedModified: true } : {}),
     issues: s.issues.map((i) => ({ english: i.english, uiId: i.ui.id, ...(i.ui.values ? { values: i.ui.values } : {}) }))
   }))
 }
 
 /** Lo SKILL.md intero di una skill (per l'editor della finestra). */
 export function readSkillMd(folder: string): string {
-  return readFileSync(join(libraryDir(), folder, 'SKILL.md'), 'utf8')
+  return readFileSync(join(libraryDir(), assertSkillFolder(folder), 'SKILL.md'), 'utf8')
 }
 
 /** Le skill dei plugin installati per la finestra (sola lettura, per plugin). */
@@ -643,7 +721,7 @@ export function readSupportFile(folder: string, file: string): string | null {
   const skill = listLibrarySkills().find((s) => s.folder === folder)
   if (!skill || !skill.files.includes(file)) return null
   try {
-    return readFileSync(join(libraryDir(), folder, file), 'utf8')
+    return readFileSync(join(libraryDir(), assertSkillFolder(folder), file), 'utf8')
   } catch {
     return null
   }
@@ -651,11 +729,12 @@ export function readSupportFile(folder: string, file: string): string | null {
 
 /** L'esportazione (S4): copia la cartella in ~/Downloads/Homun/skills/<name>/. */
 export function exportSkillFolder(name: string): { ok: boolean; path: string } {
-  const src = join(libraryDir(), name)
+  const folder = assertSkillFolder(name)
+  const src = join(libraryDir(), folder)
   const downloads = join(homedir(), 'Downloads', 'Homun', 'skills')
   mkdirSync(downloads, { recursive: true })
-  let dest = join(downloads, name)
-  for (let i = 2; existsSync(dest); i++) dest = join(downloads, `${name}-${i}`)
+  let dest = join(downloads, folder)
+  for (let i = 2; existsSync(dest); i++) dest = join(downloads, `${folder}-${i}`)
   cpSync(src, dest, {
     recursive: true,
     // .versions/ NON va nell'export (S5)

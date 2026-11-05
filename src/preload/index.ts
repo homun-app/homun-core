@@ -119,6 +119,8 @@ const api: SandbotApi = {
   deleteMemory: (agentId, id) => ipcRenderer.invoke('memory:delete', agentId, id),
   // fase skill: la finestra «Skill» — libreria unica, editor, versioni, GitHub
   skillsLibrary: () => ipcRenderer.invoke('skills:library'),
+  // K2 (fase skill ritocchi): l'elenco `/` del compositore, senza i corpi
+  skillsInvocable: (agentId) => ipcRenderer.invoke('skills:invocable', agentId),
   skillsGet: (name) => ipcRenderer.invoke('skills:get', name),
   skillsSave: (rec) => ipcRenderer.invoke('skills:save', rec),
   skillsDelete: (name) => ipcRenderer.invoke('skills:delete', name),

@@ -17,8 +17,8 @@ import { resolveTool } from '../tool-paths'
 import {
   checkGitUrl, gitCloneArgv, findEscapingSymlink, dirStats, PLUGIN_MAX_BYTES, PLUGIN_MAX_FILES, PLUGIN_TIMEOUT_MS
 } from '../connectors/marketplace'
-import { parseSkillMd, buildSkillMd } from '../../shared/skill-md'
-import { scanSkillFolder, libraryDir, skillsLibrary, saveSkillsLibrary, appendSkillVersion } from './skills'
+import { parseSkillMd, buildSkillMd, isValidSkillName } from '../../shared/skill-md'
+import { scanSkillFolder, libraryDir, skillsLibrary, saveSkillsLibrary, appendSkillVersion, assertSkillFolder } from './skills'
 import { UI } from '../../shared/ui-messages'
 import { ui } from '../../shared/ui-text'
 import type { UiText } from '../../shared/types'
@@ -58,6 +58,13 @@ export function parseGithubSkillUrl(raw: string, opts: { allowFileUrlsForTests?:
   } else if (parts.length > 2) {
     path = parts.slice(2).join('/')
   }
+  // K7: ref e path finiscono come ARGOMENTI di git (fetch … <ref>,
+  // sparse-checkout set <path>): uno che comincia con «-» diventerebbe
+  // un'opzione, uno con «..» uscirebbe dal percorso — «indirizzo non valido»
+  const dangerous = (seg: string): boolean => seg.startsWith('-') || seg.includes('..')
+  if ((ref !== undefined && dangerous(ref)) || path.split('/').some(dangerous)) {
+    return { ok: false, error: ui(UI.skillErrNotGithub) }
+  }
   return { ok: true, repo, ...(ref ? { ref } : {}), path, url: s }
 }
 
@@ -76,6 +83,24 @@ const runGit = (args: string[], opts: { cwd?: string; timeoutMs?: number } = {})
     })
   })
 
+// K7 (difesa in profondità): le capacità del git del sistema si sondano UNA
+// volta per processo. Se --end-of-options non c'è (o il sondo fallisce) si
+// fa a meno del separatore: il parse ha GIÀ rifiutato ref e path pericolosi.
+let eooProbe: Promise<boolean> | null = null
+function gitSupportsEndOfOptions(cwd: string): Promise<boolean> {
+  eooProbe ??= runGit(['fetch', '--end-of-options', 'sandbot-sondo-remoto-inesistente'], { cwd, timeoutMs: 10_000 })
+    .then((r) => !/unknown option/i.test(r.stderr))
+    .catch(() => false)
+  return eooProbe
+}
+let dashDashProbe: Promise<boolean> | null = null
+function gitSparseSupportsDashDash(cwd: string): Promise<boolean> {
+  dashDashProbe ??= runGit(['sparse-checkout', 'set', '--'], { cwd, timeoutMs: 10_000 })
+    .then((r) => r.code === 0)
+    .catch(() => false)
+  return dashDashProbe
+}
+
 /** Il clone in staging: riusa checkGitUrl + gitCloneArgv + i limiti dei plugin. */
 async function stageRepo(url: string, ref: string | undefined, path: string, opts: { allowFileUrlsForTests?: boolean; mkdtemp?: (p: string) => string }): Promise<
   { ok: true; dir: string; sha: string } | { ok: false; error: UiText; kind: 'not-found' | 'too-large' | 'symlink' | 'clone' }
@@ -91,18 +116,25 @@ async function stageRepo(url: string, ref: string | undefined, path: string, opt
       return { ok: false, error: ui(UI.skillErrRepoNotFound), kind: 'not-found' }
     }
     // il ref richiesto (branch/tag), poi lo sparse-checkout DEL PERCORSO (il
-    // clone --sparse arriva con l'albero vuoto); senza percorso, tutto l'albero
+    // clone --sparse arriva con l'albero vuoto); senza percorso, tutto l'albero.
+    // K7: --end-of-options prima del ref e -- prima del path, se il git del
+    // sistema li supporta (mai un ref/path come opzione, anche se già rifiutati)
     if (ref) {
-      const fe = await runGit(['fetch', '--depth', '1', 'origin', ref], { cwd: staging, timeoutMs: PLUGIN_TIMEOUT_MS })
+      const eoo = await gitSupportsEndOfOptions(staging)
+      const fe = await runGit(['fetch', '--depth', '1', ...(eoo ? ['--end-of-options'] : []), 'origin', ref], { cwd: staging, timeoutMs: PLUGIN_TIMEOUT_MS })
       if (fe.code === 0) await runGit(['checkout', 'FETCH_HEAD'], { cwd: staging })
       else {
         console.error(`[skills] ref ${ref} non trovato: ${fe.stderr.trim().slice(0, 160)}`)
         return { ok: false, error: ui(UI.skillErrRepoNotFound), kind: 'not-found' }
       }
     }
-    const sp = path
-      ? await runGit(['sparse-checkout', 'set', path], { cwd: staging })
-      : await runGit(['sparse-checkout', 'disable'], { cwd: staging })
+    let sp: { code: number; stdout: string; stderr: string }
+    if (path) {
+      const dd = await gitSparseSupportsDashDash(staging)
+      sp = await runGit(['sparse-checkout', 'set', ...(dd ? ['--'] : []), path], { cwd: staging })
+    } else {
+      sp = await runGit(['sparse-checkout', 'disable'], { cwd: staging })
+    }
     if (sp.code !== 0) {
       console.error(`[skills] percorso ${path || '(radice)'} mancante nel repository`)
       return { ok: false, error: ui(UI.skillErrNoSkills), kind: 'not-found' }
@@ -219,29 +251,53 @@ export function availableSkillName(name: string, taken: (n: string) => boolean):
   }
 }
 
+/** Il risultato di una scelta in «Aggiungi»: aggiunta, o ERRORE per quella riga (K5). */
+export interface SkillAddResult {
+  name?: string
+  path: string
+  error?: { english: string; uiId: string; values?: Record<string, string | number> }
+}
+
+/** K6: il filtro di copia dal repository — niente .git e niente .versions ALLA RADICE della skill. */
+const repoCopyFilter = (src: string): ((p: string) => boolean) => {
+  const versions = join(src, '.versions')
+  return (p: string): boolean =>
+    !p.endsWith('/.git') && !p.includes('/.git/') && p !== versions && !p.startsWith(versions + '/')
+}
+
 /**
  * «Aggiungi»: copia SOLO le cartelle scelte nella libreria, con source
  * 'github' e origin { repo, commit, path }. `renames` sono i nomi scelti
- * dall'utente per i conflitti (path → nome).
+ * dall'utente per i conflitti (path → nome). K5: un nome SCELTO non valido
+ * salta quella skill e torna nel risultato come errore della riga — niente
+ * eccezione che si porta via il lotto.
  */
 export function addSkillsFromStaging(
   staging: string,
   preview: SkillGithubPreview,
   choices: Array<{ path: string; name?: string }>,
   enabledFor: string[]
-): Array<{ name: string; path: string }> {
-  const added: Array<{ name: string; path: string }> = []
+): SkillAddResult[] {
+  const added: SkillAddResult[] = []
   const lib: SkillLibrarySettings = { ...skillsLibrary() }
   for (const choice of choices) {
     const item = preview.skills.find((s) => s.path === choice.path)
     if (!item || !item.valid) continue
-    let name = (choice.name ?? item.name).trim()
-    name = availableSkillName(name, (n) => existsSync(join(libraryDir(), n)) || Boolean(lib[n]))
+    const chosen = (choice.name ?? item.name).trim()
+    if (!isValidSkillName(chosen)) {
+      added.push({
+        path: choice.path,
+        error: {
+          english: `Invalid skill name "${chosen}" (1-64 chars, only lowercase letters, digits and single hyphens): skipped.`,
+          uiId: 'skill.err.invalidName'
+        }
+      })
+      continue
+    }
+    const name = availableSkillName(chosen, (n) => existsSync(join(libraryDir(), n)) || Boolean(lib[n]))
+    const src = join(staging, ...choice.path.split('/'))
     const dest = join(libraryDir(), name)
-    cpSync(join(staging, ...choice.path.split('/')), dest, {
-      recursive: true,
-      filter: (p) => !p.endsWith('/.git') && !p.includes('/.git/')
-    })
+    cpSync(src, dest, { recursive: true, filter: repoCopyFilter(src) })
     // se il nome è cambiato (conflitto → <name>-2), il nome nel FRONTMATTER
     // segue la cartella: nome e cartella cambiano insieme (come la migrazione)
     if (name !== item.name) {
@@ -270,8 +326,9 @@ export async function previewSkillUpdate(
   name: string,
   opts: { allowFileUrlsForTests?: boolean; mkdtemp?: (p: string) => string } = {}
 ): Promise<{ ok: true; diff: SkillGithubUpdatePreview; staging: string } | { ok: false; error: UiText }> {
+  const folder = assertSkillFolder(name) // K5: mai un nome che costruisce path
   const lib = skillsLibrary()
-  const entry = lib[name]
+  const entry = lib[folder]
   if (!entry?.origin) return { ok: false, error: ui(UI.skillErrNoOrigin) }
   const staged = await stageRepo(entry.origin.repo, undefined, entry.origin.path, opts)
   if (!staged.ok) return { ok: false, error: staged.error }
@@ -289,7 +346,7 @@ export async function previewSkillUpdate(
     return { ok: false, error: ui(UI.skillErrNoSkills) }
   }
   const { files, issues } = scanSkillFolder(abs)
-  const currentDir = join(libraryDir(), name)
+  const currentDir = join(libraryDir(), folder)
   const currentFiles = scanSkillFolder(currentDir).files
   const added = files.filter((f) => !currentFiles.includes(f))
   const removed = currentFiles.filter((f) => !files.includes(f))
@@ -326,16 +383,28 @@ export async function previewSkillUpdate(
   }
 }
 
-/** Applica l'aggiornamento: la versione vecchia va in .versions/, l'origin si aggiorna. */
+/**
+ * Applica l'aggiornamento: la versione vecchia va in .versions/, l'origin si
+ * aggiorna. K5: il nome è una cartella valida (guardia unica). K6: una skill
+ * NON valida nel repository non si aggiorna (errore umano — il diff la
+ * mostra già spenta); la copia esclude .git e .versions alla radice; dopo la
+ * copia il `name` del frontmatter si riscrive uguale alla cartella (come
+ * «Aggiungi»: un'importata stile-readme-2 non torna stile-readme).
+ * K4: l'aggiornamento riporta source 'github' (l'importata MODIFICATA torna
+ * di GitHub: il testo torna quello del repository).
+ */
 export function applySkillUpdate(
   name: string,
   staging: string,
   diff: SkillGithubUpdatePreview
-): { ok: boolean } {
+): { ok: true } | { ok: false; error: UiText } {
+  const folder = assertSkillFolder(name) // K5: mai un nome che costruisce path
   const lib = skillsLibrary()
-  const entry = lib[name]
-  if (!entry?.origin) return { ok: false }
-  const dest = join(libraryDir(), name)
+  const entry = lib[folder]
+  if (!entry?.origin) return { ok: false, error: ui(UI.skillErrNoOrigin) }
+  // K6: il symlink (o troppi file) del repository non entra in libreria
+  if (!diff.skill.valid) return { ok: false, error: ui(UI.skillErrInvalidSkill) }
+  const dest = join(libraryDir(), folder)
   try {
     // la versione VECCHIA si conserva (S5, origine GitHub) e le PRECEDENTI
     // attraversano lo scambio di cartella: si spostano di lato e tornano
@@ -344,16 +413,22 @@ export function applySkillUpdate(
     const versionsStash = dest + '.versions-stash'
     const hadVersions = existsSync(keptVersions)
     if (hadVersions) renameSync(keptVersions, versionsStash)
-    // la cartella si sostituisce (SOLO i file del repository)
+    // la cartella si sostituisce (SOLO i file del repository: niente .git,
+    // niente .versions alla radice — K6: un repository non pianta versioni finte)
     rmSync(dest, { recursive: true, force: true })
-    cpSync(join(staging, ...diff.skill.path.split('/')), dest, {
-      recursive: true,
-      filter: (p) => !p.endsWith('/.git') && !p.includes('/.git/')
-    })
+    const src = join(staging, ...diff.skill.path.split('/'))
+    cpSync(src, dest, { recursive: true, filter: repoCopyFilter(src) })
     if (hadVersions) renameSync(versionsStash, keptVersions)
     if (oldText !== null) appendSkillVersion(dest, oldText, 'github')
-    lib[name] = {
+    // K6: il name del frontmatter segue la cartella, come «Aggiungi»
+    const after = readFileSync(join(dest, 'SKILL.md'), 'utf8')
+    const parsed = parseSkillMd(after)
+    if (parsed.ok && parsed.skill.name !== folder) {
+      writeFileSync(join(dest, 'SKILL.md'), buildSkillMd({ ...parsed.skill, name: folder }))
+    }
+    lib[folder] = {
       ...entry,
+      source: 'github',
       origin: { repo: diff.repo, commit: diff.newCommit, path: diff.skill.path },
       updatedAt: Date.now()
     }
@@ -361,6 +436,6 @@ export function applySkillUpdate(
     return { ok: true }
   } catch (e) {
     console.error('[skills] aggiornamento fallito:', e instanceof Error ? e.message : e)
-    return { ok: false }
+    return { ok: false, error: ui(UI.skillErrRepoNotFound) }
   }
 }

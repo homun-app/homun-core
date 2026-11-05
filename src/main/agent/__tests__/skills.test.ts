@@ -8,12 +8,13 @@ import { mkdtempSync, rmSync, existsSync, mkdirSync, writeFileSync, readdirSync,
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-const { setDataDir, dataDir, createAgent, deleteAgent } = await import('../../store/db')
+const { setDataDir, dataDir, createAgent, deleteAgent, setSetting } = await import('../../store/db')
 const {
   writeLibrarySkill, writeSkillFromBot, deleteLibrarySkill, listLibrarySkills, librarySkillsVisibleTo,
   buildSkillsSection, skillsSectionPrompt, readSkillFor, readSkillFileFor, setSkillEnabledFor,
   libraryDir, skillsLibrary, scanSkillFolder, saveSkillVersion, listSkillVersions, restoreSkillVersion,
-  exportSkillFolder, skillInvocationExpansion, invocableSkillsOf, slugifyBotName, SKILLS_PROMPT_MAX
+  exportSkillFolder, skillInvocationExpansion, invocableSkillsOf, slugifyBotName, SKILLS_PROMPT_MAX,
+  libraryItemsForUi, invocableSkillList, isThirdPartySkill
 } = await import('../skills')
 
 let root: string
@@ -250,7 +251,9 @@ describe('S7: il /nome nel turno (funzione pura)', () => {
   it('il testo comincia con /name visibile → invocazione + istruzioni + --- + resto', () => {
     const r = skillInvocationExpansion('/pubblica-articolo il post di oggi', visible)
     expect(r).not.toBeNull()
-    expect(r!.content).toContain('The user invoked the skill "pubblica-articolo" for this message: follow its instructions.')
+    // K9: la prima riga dice che le istruzioni sono GIÀ nel messaggio e di
+    // NON ricaricarle con skill() (il testo di prima invitava di fatto a rileggerle)
+    expect(r!.content).toContain('The user invoked the skill "pubblica-articolo" for this message. Its full instructions are below — do not load it again with skill(); follow them now.')
     expect(r!.content).toContain('PUBBLICA: passo 1, passo 2')
     expect(r!.content).toContain('---')
     expect(r!.content).toContain('il post di oggi')
@@ -313,5 +316,177 @@ describe('S2: slug dei conflitti', () => {
   it('slugifyBotName: «Il Mio Bot» → il-mio-bot', () => {
     expect(slugifyBotName('Il Mio Bot')).toBe('il-mio-bot')
     expect(slugifyBotName('')).toBe('bot')
+  })
+})
+
+// ---- K2 (fase skill ritocchi): il `/` dei plugin e le skill ROTTE ----
+
+/** Semina un plugin installato con UNA skill (cartella dentro dataDir). */
+function seedPlugin(): void {
+  const pdir = join(root, 'plugins-fixture', 'mio-plugin')
+  mkdirSync(join(pdir, 'skills', 'abc'), { recursive: true })
+  writeFileSync(join(pdir, 'skills', 'abc', 'SKILL.md'),
+    '---\nname: abc\ndescription: la skill del plugin\n---\nISTRUZIONI DEL PLUGIN: passo uno e due.')
+  setSetting('connectors.plugins', [{
+    name: 'mio-plugin', marketplace: 'mp', marketplaceSource: 'file://mp', sha: '0'.repeat(40), sha12: '000000000000',
+    dir: 'plugins-fixture/mio-plugin',
+    skills: [{ name: 'mio-plugin--abc', description: 'la skill del plugin', dir: 'skills/abc' }],
+    servers: [], enabledFor: ['*'], installedAt: 0
+  }])
+}
+
+describe('K2: il `/nome` dei PLUGIN si espande col corpo', () => {
+  it('/mio-plugin--abc espande col corpo del plugin e imported: true', () => {
+    seedPlugin()
+    const bot = createAgent('Bot K2 Plugin')
+    const inv = invocableSkillsOf(bot.id)
+    const pluginSkill = inv.find((s) => s.name === 'mio-plugin--abc')
+    expect(pluginSkill, 'la skill del plugin è invocabile').toBeDefined()
+    expect(pluginSkill!.imported).toBe(true)
+    expect(pluginSkill!.body).toContain('ISTRUZIONI DEL PLUGIN')
+    // il `/` del compositore arriva al modello COL CORPO (K2.1)
+    const r = skillInvocationExpansion('/mio-plugin--abc fai la cosa', inv)
+    expect(r).not.toBeNull()
+    expect(r!.content).toContain('ISTRUZIONI DEL PLUGIN')
+    expect(r!.content).toContain('fai la cosa')
+    expect(r!.imported).toBe(true)
+    expect(r!.name).toBe('mio-plugin--abc')
+    // un nome plugin--skill INESISTENTE resta testo (null)
+    expect(skillInvocationExpansion('/mio-plugin--non-ce testo', inv)).toBeNull()
+    setSetting('connectors.plugins', [])
+    deleteAgent(bot.id)
+  })
+})
+
+describe('K2: le skill ROTTE (parse fallito) o col nome ≠ cartella non arrivano al modello', () => {
+  it('non compaiono in buildSkillsSection né in invocableSkillsOf; readSkillFor → null', () => {
+    const bot = createAgent('Bot K2 Rotte')
+    // rotta: YAML che non si parsifica
+    mkdirSync(join(libraryDir(), 'rotta'), { recursive: true })
+    writeFileSync(join(libraryDir(), 'rotta', 'SKILL.md'), '---\nname: [rotto\ndescription: d\n---\ncorpo')
+    // nome ≠ cartella: cartella «a» con name: b (spec S1.2)
+    mkdirSync(join(libraryDir(), 'a'), { recursive: true })
+    writeFileSync(join(libraryDir(), 'a', 'SKILL.md'), '---\nname: b\ndescription: il nome non coincide\n---\ncorpo')
+    // una sana per contrasto
+    writeLibrarySkill({ name: 'sana-k2', description: 'descrizione della sana', body: 'corpo sano' }, { entry: { enabledFor: ['*'], source: 'user' } })
+
+    const section = buildSkillsSection(bot.id)
+    expect(section).toContain('sana-k2')
+    expect(section).not.toContain('rotta')
+    expect(section).not.toMatch(/(^|\n)- (a|b):/)
+
+    const inv = invocableSkillsOf(bot.id)
+    expect(inv.some((s) => s.name === 'rotta' || s.name === 'a' || s.name === 'b')).toBe(false)
+    expect(invocableSkillList(bot.id).some((s) => s.name === 'rotta' || s.name === 'a' || s.name === 'b')).toBe(false)
+
+    expect(readSkillFor(bot.id, 'rotta')).toBeNull()
+    expect(readSkillFor(bot.id, 'a')).toBeNull()
+    expect(readSkillFor(bot.id, 'b')).toBeNull()
+
+    // nella FINESTRA restano visibili, col motivo (come le importate non valide)
+    const items = libraryItemsForUi()
+    const rottaItem = items.find((s) => s.folder === 'rotta')
+    const aItem = items.find((s) => s.folder === 'a')
+    expect(rottaItem?.valid).toBe(false)
+    expect(aItem?.valid).toBe(false)
+    expect(aItem?.issues.some((i) => i.uiId === 'skill.nameFolderMismatch' && i.values?.name === 'b' && i.values?.folder === 'a')).toBe(true)
+
+    // pulizia
+    rmSync(join(libraryDir(), 'rotta'), { recursive: true, force: true })
+    rmSync(join(libraryDir(), 'a'), { recursive: true, force: true })
+    deleteLibrarySkill('sana-k2')
+    deleteAgent(bot.id)
+  })
+
+  it('i problemi dei SOLI file di supporto (link simbolico) NON tolgono la skill al modello', () => {
+    const bot = createAgent('Bot K2 Symlink')
+    writeLibrarySkill({ name: 'con-symlink-k2', description: 'd', body: 'ISTRUZIONI VALIDE' }, { entry: { enabledFor: ['*'], source: 'user' } })
+    try {
+      symlinkSync('/etc/hosts', join(libraryDir(), 'con-symlink-k2', 'fuga'))
+    } catch {
+      deleteAgent(bot.id)
+      return // piattaforma senza symlink: oltre il limite del test
+    }
+    // resta nel prompt e invocabile: il symlink toglie SOLO il file
+    expect(buildSkillsSection(bot.id)).toContain('con-symlink-k2')
+    const inv = invocableSkillsOf(bot.id)
+    expect(inv.some((s) => s.name === 'con-symlink-k2')).toBe(true)
+    expect(readSkillFor(bot.id, 'con-symlink-k2')?.output).toContain('ISTRUZIONI VALIDE')
+    // ...ma il file segnato non è nell'elenco
+    expect(readSkillFor(bot.id, 'con-symlink-k2')?.files).not.toContain('fuga')
+    deleteAgent(bot.id)
+  })
+
+  it('invocableSkillList: la lista del compositore, senza i corpi, con l\'importata', () => {
+    seedPlugin()
+    const bot = createAgent('Bot K2 Lista')
+    writeLibrarySkill({ name: 'del-bot-k2', description: 'la mia', body: 'corpo segretissimo' }, { entry: { enabledFor: [bot.id], source: 'user' } })
+    writeLibrarySkill({ name: 'arrivata-k2', description: 'la importata', body: 'b' }, { entry: { enabledFor: [bot.id], source: 'github', origin: { repo: 'r', commit: 'c', path: 'p' } } })
+    const list = invocableSkillList(bot.id)
+    const mine = list.find((s) => s.name === 'del-bot-k2')
+    expect(mine).toMatchObject({ name: 'del-bot-k2', description: 'la mia', imported: false })
+    expect(JSON.stringify(list)).not.toContain('corpo segretissimo') // MAI i corpi
+    expect(list.find((s) => s.name === 'arrivata-k2')?.imported).toBe(true)
+    expect(list.find((s) => s.name === 'mio-plugin--abc')?.imported).toBe(true)
+    setSetting('connectors.plugins', [])
+    deleteAgent(bot.id)
+  })
+})
+
+// ---- K4 (fase skill ritocchi): l'importata MODIFICATA resta di terzi ----
+
+describe('K4: una skill importata e poi modificata smette di contaminare? NO: resta di terzi', () => {
+  it('importata → salvata dalla finestra (source user, origin conservato) → webContent TRUE col tool', () => {
+    const bot = createAgent('Bot K4 Tool')
+    // l'importata MODIFICATA: la finestra scrive source 'user' con origin (S4.2)
+    writeLibrarySkill(
+      { name: 'terza-modificata-k4', description: 'd', body: 'testo scritto da altri, virgola cambiata' },
+      { entry: { enabledFor: ['*'], source: 'user', origin: { repo: 'file://r', commit: '0'.repeat(40), path: 'skills/x' } } }
+    )
+    const r = readSkillFor(bot.id, 'terza-modificata-k4')
+    expect(r?.webContent).toBe(true)
+    deleteAgent(bot.id)
+  })
+
+  it('la stessa col `/`: imported TRUE (il turno parte contaminato)', () => {
+    const bot = createAgent('Bot K4 Slash')
+    writeLibrarySkill(
+      { name: 'terza-slash-k4', description: 'd', body: 'b' },
+      { entry: { enabledFor: ['*'], source: 'user', origin: { repo: 'r', commit: 'c', path: 'p' } } }
+    )
+    const inv = invocableSkillsOf(bot.id)
+    expect(inv.find((s) => s.name === 'terza-slash-k4')?.imported).toBe(true)
+    const exp = skillInvocationExpansion('/terza-slash-k4', inv)
+    expect(exp?.imported).toBe(true)
+    deleteAgent(bot.id)
+  })
+
+  it('update_skill sulla stessa skill viene RIFIUTATO (anche se modificata)', () => {
+    const bot = createAgent('Bot K4 Update')
+    writeLibrarySkill(
+      { name: 'terza-update-k4', description: 'd', body: 'b' },
+      { entry: { enabledFor: [bot.id], source: 'user', origin: { repo: 'r', commit: 'c', path: 'p' } } }
+    )
+    const r = writeSkillFromBot(bot.id, { name: 'terza-update-k4', description: 'x', content: 'y' })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toContain('imported skill')
+    deleteAgent(bot.id)
+  })
+
+  it('isThirdPartySkill: github oppure con origin (puro)', () => {
+    expect(isThirdPartySkill({ enabledFor: ['*'], source: 'github', createdAt: 0, updatedAt: 0 })).toBe(true)
+    expect(isThirdPartySkill({ enabledFor: ['*'], source: 'user', createdAt: 0, updatedAt: 0, origin: { repo: 'r', commit: 'c', path: 'p' } })).toBe(true)
+    expect(isThirdPartySkill({ enabledFor: ['*'], source: 'user', createdAt: 0, updatedAt: 0 })).toBe(false)
+    expect(isThirdPartySkill({ enabledFor: ['*'], source: 'bot', createdAt: 0, updatedAt: 0 })).toBe(false)
+  })
+
+  it('l\'elenco della finestra la marca come importata modificata', () => {
+    writeLibrarySkill(
+      { name: 'terza-finestra-k4', description: 'd', body: 'b' },
+      { entry: { enabledFor: ['*'], source: 'user', origin: { repo: 'r', commit: 'c', path: 'p' } } }
+    )
+    const item = libraryItemsForUi().find((s) => s.name === 'terza-finestra-k4')
+    expect(item?.importedModified).toBe(true)
+    deleteLibrarySkill('terza-finestra-k4')
   })
 })

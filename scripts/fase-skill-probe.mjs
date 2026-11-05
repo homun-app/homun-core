@@ -17,16 +17,20 @@
 //   la finestra (elenco, filtri), il dettaglio, la nuova skill, l'import con
 //   anteprima e l'elenco `/` del compositore.
 //
-// A FINE SONDA si chiude OGNI daemon avviato (per ogni cartella usata si
-// legge daemon.lock, si termina il pid, si CONTROLLA che sia sparito) e il
-// pgrep finale non deve trovare nessun sandbot nelle cartelle della sonda
-// (S10.2). Niente Docker, nessun push, mai il Portachiavi vero.
-import { spawn, spawnSync } from 'node:child_process'
+// A FINE SONDA si chiude OGNI daemon avviato: il pid da daemon.lock, poi il
+// controllo K8 dall'AMBIENTE dei processi (ps eww -ax: righe con
+// --homun-daemon E SANDBOT_TEST_USER_DATA=<cartella della sonda>) — il
+// filtro di prima (pgrep -fl, prefisso nella riga di comando) non vedeva
+// mai niente e un daemon restava vivo (S10.2 non risolto). Le cartelle
+// temporanee si cancellano SODO DOPO che i daemon sono spariti.
+// Niente Docker, nessun push, mai il Portachiavi vero.
+import { spawn } from 'node:child_process'
 import { createServer } from 'node:http'
 import { execSync } from 'node:child_process'
 import { mkdtempSync, rmSync, readFileSync, mkdirSync, writeFileSync, readdirSync, existsSync, symlinkSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { homedir } from 'node:os'
+import { findProbeDaemons, stopProbeDaemons } from './lib/probe-daemons.mjs'
 
 const ROOT = resolve(import.meta.dirname, '..')
 // Vincoli della fase: temporanei SOLO con mkdtemp nella cartella indicata
@@ -118,18 +122,25 @@ const launchApp = (userData, debugPort) => {
   return { app, getLog: () => appLog, stop: () => { try { app.kill('SIGTERM') } catch { /* già via */ } } }
 }
 
-/** Il pid del daemon di QUESTA cartella dati (daemon.lock), se già scritto. */
+/**
+ * Il pid del daemon di QUESTA cartella dati (daemon.lock), se già scritto.
+ * K8: il lock sta DIRETTAMENTE nella cartella dati del daemon
+ * (<userData>/data/daemon.lock — qui DATA È quella cartella), non un livello
+ * sotto: il percorso di prima (join(DATA,'data','daemon.lock')) non trovava
+ * mai il pid e stopDaemon lasciava il daemon vivo.
+ */
 const daemonPid = (dataDir) => {
   try {
-    const v = JSON.parse(readFileSync(join(dataDir, 'data', 'daemon.lock'), 'utf8'))
+    const v = JSON.parse(readFileSync(join(dataDir, 'daemon.lock'), 'utf8'))
     return Number.isInteger(v.pid) && v.pid > 1 && v.pid !== process.pid ? v.pid : null
   } catch { return null }
 }
 /**
- * S10.2: la sonda chiude TUTTI i daemon che ha avviato — per ogni cartella
- * usata si legge daemon.lock, si termina il pid, si CONTROLLA che sia sparito
- * (SIGKILL se serve) e il pgrep finale non deve trovare nessun sandbot vivo
- * nelle cartelle della sonda.
+ * S10.2 + K8: la sonda chiude TUTTI i daemon che ha avviato. PRIMA si legge
+ * daemon.lock per cartella (pid noto, chiusura gentile), POI il controllo
+ * condiviso probe-daemons guarda l'AMBIENTE dei processi: qualunque daemon
+ * con SANDBOT_TEST_USER_DATA nelle cartelle della sonda viene terminato
+ * (SIGTERM → SIGKILL) e verificato sparito.
  */
 const stopDaemon = async (dataDir) => {
   const pid = daemonPid(dataDir)
@@ -143,22 +154,6 @@ const stopDaemon = async (dataDir) => {
     try { process.kill(pid, 0); await sleep(200) } catch { return true }
   }
   return false
-}
-/** La verifica finale (S10.2): NESSUN daemon vivo nelle cartelle della sonda.
- *  Si guarda il PROCESSO daemon (--homun-daemon), non gli helper di Electron
- *  (gpu/network) che spariscono poco dopo e non aprono né possiedono dati. */
-const assertNoDaemonLeft = async (prefix) => {
-  const pgrepDaemon = () => {
-    const out = spawnSync('/usr/bin/pgrep', ['-fl', 'sandbot'], { encoding: 'utf8' })
-    return (out.stdout ?? '').split('\n').filter((line) => line.includes(prefix) && line.includes('--homun-daemon'))
-  }
-  // qualche secondo di grazia: il figlio daemon muore poco dopo il SIGTERM
-  let alive = pgrepDaemon()
-  for (let i = 0; i < 15 && alive.length > 0; i++) {
-    await sleep(600)
-    alive = pgrepDaemon()
-  }
-  return alive
 }
 
 // ---- CDP ----
@@ -582,14 +577,82 @@ try {
   for (let i = 0; i < 40 && chatRequests.length <= reqs0; i++) await sleep(500)
   const lastReq = chatRequests.at(-1)
   const lastUser = (lastReq?.messages ?? []).filter((m) => m.role === 'user').at(-1)
-  check('turno: al modello arriva «The user invoked the skill … follow its instructions»',
-    Boolean(lastUser && String(lastUser.content).startsWith('The user invoked the skill "riassunto-riunione" for this message: follow its instructions.')),
+  check('turno: al modello arriva «The user invoked the skill … do not load it again with skill()» (K9)',
+    Boolean(lastUser && String(lastUser.content).startsWith('The user invoked the skill "riassunto-riunione" for this message. Its full instructions are below — do not load it again with skill(); follow them now.')),
     String(lastUser?.content ?? '').slice(0, 80))
   check('turno: le ISTRUZIONI della skill sono dentro il messaggio, poi --- e il resto',
     Boolean(lastUser && String(lastUser.content).includes('Prossimi passi') && String(lastUser.content).includes('---') && String(lastUser.content).includes('sulla riunione di oggi')))
   // la bolla compatta /nome
   check('trascrizione: la bolla mostra l\'etichetta compatta /riassunto-riunione',
     await r.waitDom(`[...document.querySelectorAll('span')].some((x) => x.textContent.trim() === '/riassunto-riunione')`, 8000))
+
+  // ============ 4bis. il `/` delle skill dei PLUGIN (K2): nome <plugin>--<skill> ============
+  // un plugin installato col semino diretto: cartella dentro i dati + voce
+  // nel setting connectors.plugins (come farebbe l'installazione vera)
+  mkdirSync(join(DATA, 'plugins', 'mio-plugin', 'skills', 'abc'), { recursive: true })
+  writeFileSync(join(DATA, 'plugins', 'mio-plugin', 'skills', 'abc', 'SKILL.md'),
+    '---\nname: abc\ndescription: la skill del plugin di prova\n---\nISTRUZIONI DEL PLUGIN: primo passo, secondo passo.')
+  await r.rpc(`settingsSet(${JSON.stringify('connectors.plugins')}, ${JSON.stringify([{
+    name: 'mio-plugin', marketplace: 'mp', marketplaceSource: 'file://mp', sha: '0'.repeat(40), sha12: '000000000000',
+    dir: 'plugins/mio-plugin',
+    skills: [{ name: 'mio-plugin--abc', description: 'la skill del plugin di prova', dir: 'skills/abc' }],
+    servers: [], enabledFor: ['*'], installedAt: 0
+  }])})`)
+  await sleep(300)
+  // l'elenco `/` si ricarica quando la finestra Skill si CHIUDE (K2): la si
+  // apre e chiude, come farebbe l'utente dopo aver cambiato le skill
+  await pointerClick(r.pageEval, `[...document.querySelectorAll('[data-testid="sidebar-skills"]')].find((b) => b.offsetParent !== null)`)
+  await r.waitDom(`!!document.querySelector('[data-testid="skills-window"]')`, 5000)
+  await closeSkillsWindow(r)
+  await r.pageEval(`document.querySelector('form textarea')?.focus(); return 'focus'`)
+  await r.pageEval(`
+    const ta = document.querySelector('form textarea')
+    const set = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set
+    set.call(ta, '/mio-plugin--abc')
+    ta.dispatchEvent(new Event('input', { bubbles: true }))
+    return 'scritto /mio-plugin--abc'
+  `)
+  check('compositore: l\'elenco `/` mostra ANCHE la skill del plugin (<plugin>--<skill>)',
+    await r.waitDom(`!!document.querySelector('[data-testid="slash-picker"]') && document.querySelector('[data-testid="slash-picker"]').textContent.includes('/mio-plugin--abc')`, 5000))
+  pushText('Fatto col plugin.')
+  const reqsP = chatRequests.length
+  await r.pageEval(`
+    const ta = document.querySelector('form textarea')
+    const set = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set
+    set.call(ta, ta.value + ' fai la cosa')
+    ta.dispatchEvent(new Event('input', { bubbles: true }))
+    await new Promise((res) => setTimeout(res, 150))
+    ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+    return 'inviato plugin'
+  `)
+  for (let i = 0; i < 40 && chatRequests.length <= reqsP; i++) await sleep(500)
+  const pluginReq = chatRequests.at(-1)
+  const pluginUser = (pluginReq?.messages ?? []).filter((m) => m.role === 'user').at(-1)
+  check('plugin: /mio-plugin--abc arriva al modello COL CORPO letto dal plugin (K2)',
+    Boolean(pluginUser && String(pluginUser.content).includes('The user invoked the skill "mio-plugin--abc"') && String(pluginUser.content).includes('ISTRUZIONI DEL PLUGIN')),
+    String(pluginUser?.content ?? '').slice(0, 90))
+  // via il plugin: le prove dopo non devono vederlo
+  await r.rpc(`settingsSet(${JSON.stringify('connectors.plugins')}, [])`)
+  await sleep(300)
+
+  // ============ 4ter. la RINOMINA conserva «Bot che la usano» (K3) ============
+  // solo-di-alfa è della migrazione con enabledFor [solo Alfa]: rinominandola
+  // dalla finestra la voce deve RESTARE di Alfa (prima diventava di TUTTI)
+  await r.rpc(`skillsSetEnabledFor(${JSON.stringify('solo-di-alfa')}, ${JSON.stringify([ALFA])})`)
+  const renamed = await r.rpc(`skillsSave(${JSON.stringify({ folder: 'solo-di-alfa', name: 'solo-di-alfa-rinominata', description: 'descrizione di solo-di-alfa', body: 'Solo di Alfa.' })})`)
+  const libRename = await r.rpc('skillsLibrary()')
+  const renamedEntry = libRename.library.find((s) => s.name === 'solo-di-alfa-rinominata')
+  check('rinomina (K3): la voce conserva «Bot che la usano» (enabledFor) e la vecchia sparisce',
+    Boolean(renamed?.ok && renamedEntry && JSON.stringify(renamedEntry.enabledFor) === JSON.stringify([ALFA]) && !libRename.library.some((s) => s.name === 'solo-di-alfa')),
+    JSON.stringify({ ok: renamed?.ok, enabledFor: renamedEntry?.enabledFor }))
+  // e il nome GIÀ USATO è l'errore nuovo, non «nome non valido»
+  let duplicateErr = null
+  try {
+    await r.rpc(`skillsSave(${JSON.stringify({ folder: 'solo-di-alfa-rinominata', name: 'riassunto-riunione', description: 'd', body: 'b' })})`)
+  } catch (e) {
+    duplicateErr = String(e?.message ?? e)
+  }
+  check('rinomina (K3): il nome già usato → «Esiste già una skill con questo nome»', /Esiste già una skill con questo nome/.test(duplicateErr ?? ''), duplicateErr ?? '(nessun errore)')
 
   // ============ 5. la CONTAMINAZIONE alla lettura di una skill importata ============
   pushTool('skill', { name: 'stile-readme-2' })
@@ -609,6 +672,39 @@ try {
   check('contaminazione: il result della skill IMPORTATA è un blocco <dato_esterno fonte="skill:…">',
     Boolean(contaminated && contaminated.meta?.webEvidence === true && /fonte="skill:stile-readme-2"/.test(String(contaminated?.content))),
     String(contaminated?.content ?? '').slice(0, 80))
+
+  // ============ 5bis. l'importata MODIFICATA resta di terzi (K4) ============
+  // la finestra la modifica (source 'user' con origin conservato): il tool
+  // deve dare ANCHE ORA il blocco dato_esterno — basta cambiare una virgola
+  // e il testo scritto da altri non diventa fidato
+  const modSave = await r.rpc(`skillsSave(${JSON.stringify({ folder: 'stile-readme-2', name: 'stile-readme-2', description: 'come sistemare un README del progetto (modificata dalla sonda)', body: 'Regole del README modificate dalla sonda.' })})`)
+  const libMod = await r.rpc('skillsLibrary()')
+  const modItem = libMod.library.find((s) => s.name === 'stile-readme-2')
+  check('K4: l\'importata si può modificare dalla finestra (source user, origin conservato)',
+    Boolean(modSave?.ok && modItem && modItem.source === 'user' && modItem.origin),
+    JSON.stringify({ source: modItem?.source, origin: Boolean(modItem?.origin) }))
+  pushTool('skill', { name: 'stile-readme-2' })
+  pushText('Riletta dopo la modifica.')
+  const reqs2 = chatRequests.length
+  await uiSend(r.pageEval, 'ricarica la skill stile-readme-2')
+  for (let i = 0; i < 40 && chatRequests.length <= reqs2; i++) await sleep(500)
+  const contaminatedAfterEdit = await (async () => {
+    for (let i = 0; i < 30; i++) {
+      const entries = await r.rpc(`getEntries(${JSON.stringify(bot.id)})`)
+      const hit = entries.reverse().find((e) => e.kind === 'tool-result' && String(e.content).includes('dato_esterno') && String(e.content).includes('stile-readme-2'))
+      if (hit) return hit
+      await sleep(500)
+    }
+    return null
+  })()
+  const libAfterEdit = await r.rpc('skillsLibrary()')
+  const edited = libAfterEdit.library.find((s) => s.name === 'stile-readme-2')
+  check('K4: l\'importata MODIFICATA e caricata col tool dà ANCORA <dato_esterno>',
+    Boolean(contaminatedAfterEdit && contaminatedAfterEdit.meta?.webEvidence === true),
+    String(contaminatedAfterEdit?.content ?? '').slice(0, 70))
+  check('K4: la finestra la marca «importata · modificata» (source user + origin)',
+    Boolean(edited && edited.importedModified === true && edited.origin),
+    JSON.stringify({ source: edited?.source, origin: Boolean(edited?.origin) }))
 
   // ============ 6. l'EXPORT (S4) ============
   const saved = await r.rpc(`skillsSave(${JSON.stringify({ name: 'esporta-prova', description: 'skill temporanea per la prova di esportazione', body: 'istruzioni' })})`)
@@ -657,20 +753,23 @@ try {
 } finally {
   main?.stop()
   await sleep(800)
+  // K8: si chiude DALL'AMBIENTE prima di tutto (l'helper condiviso): il pid
+  // può non essere più nel lock (restart) o il lock può mancare — l'env dei
+  // processi è la fonte sicura; il giro del lock resta per pulire
+  await stopProbeDaemons('sandbot-fase-skill')
   for (const dir of usedDirs) await stopDaemon(dir)
 }
 
-// ============================ chiusura (S10.2) ============================
-const left = await assertNoDaemonLeft('sandbot-fase-skill')
-if (left.length) {
+// ============================ chiusura (S10.2 + K8) ============================
+// il controllo viene dall'AMBIENTE dei processi (helper condiviso): righe con
+// --homun-daemon E SANDBOT_TEST_USER_DATA nelle cartelle della sonda. Se ne
+// resta uno, si chiude QUI e la sonda è comunque rossa.
+const { found, closed, left } = await stopProbeDaemons('sandbot-fase-skill')
+if (left > 0) {
   failures++
-  console.error('[sonda] daemon rimasti vivi dopo la chiusura:\n' + left.join('\n'))
-  for (const line of left) {
-    const pid = Number(line.split(' ')[0])
-    if (Number.isInteger(pid)) { try { process.kill(pid, 'SIGKILL') } catch { /* già via */ } }
-  }
+  console.error('[sonda] daemon rimasti vivi dopo la chiusura (dall\'ambiente):\n' + findProbeDaemons('sandbot-fase-skill').map((d) => d.line).join('\n'))
 } else {
-  console.log('[sonda] nessun daemon vivo nelle cartelle della sonda (pgrep)')
+  console.log(`[sonda] nessun daemon vivo nelle cartelle della sonda (ps eww: ${found} trovati, ${closed} chiusi)`)
 }
 try { providerServer.closeAllConnections?.(); providerServer.close() } catch { /* già chiusa */ }
 try { rmSync(REPO, { recursive: true, force: true }) } catch { /* l'app può essere ancora viva */ }

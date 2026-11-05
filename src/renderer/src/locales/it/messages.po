@@ -2164,6 +2164,11 @@ msgstr "esegue un comando…"
 msgid "Eseguito senza chiedere (Approvazioni: non chiedere)"
 msgstr "Eseguito senza chiedere (Approvazioni: non chiedere)"
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "skill.err.duplicateName"
+msgstr "Esiste già una skill con questo nome."
+
 #: src/renderer/src/components/Chat.tsx
 msgid "Esito"
 msgstr "Esito"
@@ -2834,7 +2839,7 @@ msgstr "Il modello principale {model} non risponde ({why}): uso la riserva {fall
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "skill.nameFolderMismatch"
-msgstr "Il nome «{name}» non coincide con la cartella «{folder}»."
+msgstr "Il nome nel file ({name}) è diverso dalla cartella ({folder})."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -2959,6 +2964,10 @@ msgstr "il turno non è dell’utente — creare bot o gruppi richiede la sua ap
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "Il vault è cifrato a riposo (AES-256-GCM, chiave nel Keychain). I valori non si rileggono mai in chiaro: si possono solo sostituire. I bot vedono i nomi con <0>list-credentials</0> e i login si compilano con <1>fill_credential</1>, sempre col tuo consenso."
 msgstr "Il vault è cifrato a riposo (AES-256-GCM, chiave nel Keychain). I valori non si rileggono mai in chiaro: si possono solo sostituire. I bot vedono i nomi con <0>list-credentials</0> e i login si compilano con <1>fill_credential</1>, sempre col tuo consenso."
+
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "importata · modificata"
+msgstr "importata · modificata"
 
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "Importate"
@@ -3227,6 +3236,11 @@ msgstr "La connessione allo schermo si è chiusa."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
+msgid "skill.descriptionNotText"
+msgstr "La descrizione dev'essere testo."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
 msgid "skill.descriptionTooLong"
 msgstr "La descrizione può essere al massimo 1024 caratteri (ora {n})."
 
@@ -3250,6 +3264,11 @@ msgstr "La prova non è riuscita"
 #: src/renderer/src/components/Settings.tsx
 msgid "La routine gira quando torni al computer dopo un'assenza lunga."
 msgstr "La routine gira quando torni al computer dopo un'assenza lunga."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "skill.err.invalidSkill"
+msgstr "La skill nel repository non è valida: correggila prima di aggiornare."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts

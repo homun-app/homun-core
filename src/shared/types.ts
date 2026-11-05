@@ -882,6 +882,8 @@ export interface SandbotApi {
     enabledFor?: string[]
   }): Promise<{ ok: true; name: string } | { ok: false; issues: Array<{ english: string; uiId: string; values?: Record<string, string | number> }> }>
   skillsLibrary(): Promise<{ library: SkillLibraryItem[]; plugins: PluginSkillGroup[] }>
+  /** K2: l'elenco `/` del compositore (come invocableSkillsOf, senza i corpi) */
+  skillsInvocable(agentId: string): Promise<Array<{ name: string; description: string; imported: boolean }>>
   skillsGet(name: string): Promise<string>
   skillsDelete(name: string): Promise<void>
   skillsSetEnabledFor(name: string, agentIds: string[]): Promise<void>
@@ -891,7 +893,7 @@ export interface SandbotApi {
   skillsExport(name: string): Promise<{ ok: boolean; path: string }>
   skillsShowInFinder(name: string): Promise<boolean>
   skillsGithubPreview(url: string): Promise<{ id: string; preview: SkillGithubPreview }>
-  skillsGithubAdd(id: string, choices: Array<{ path: string; name?: string }>, enabledFor: string[]): Promise<Array<{ name: string; path: string }>>
+  skillsGithubAdd(id: string, choices: Array<{ path: string; name?: string }>, enabledFor: string[]): Promise<Array<{ name?: string; path: string; error?: { english: string; uiId: string; values?: Record<string, string | number> } }>>
   skillsGithubUpdatePreview(name: string): Promise<{ id: string; diff: SkillGithubUpdatePreview }>
   skillsGithubUpdateApply(id: string, name: string): Promise<boolean>
   // MCP
@@ -1172,6 +1174,8 @@ export interface SkillLibraryItem {
   updatedAt: number
   files: string[]
   valid: boolean
+  /** K4: importata da GitHub e poi modificata dall'utente — resta di terzi */
+  importedModified?: boolean
   issues: Array<{ english: string; uiId: string; values?: Record<string, string | number> }>
 }
 
