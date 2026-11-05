@@ -115,30 +115,55 @@ export function resolvedUrlOk(url: string, allowHttpForTests = false): boolean {
   }
 }
 
-// ---- le etichette umane del modulo (M3.1, pure) ----
+// ---- il RUOLO di una variabile nell'URL (R6, puro) ----
+
+/** Il ruolo di una variabile del template: host, url intero, o testo. */
+export type VarRole = 'host' | 'url' | 'text'
 
 /**
- * L'etichetta umana di una variabile (puro): «mattermost_host» diventa
- * «Indirizzo del server Mattermost» quando il nome contiene host/url (è
- * l'indirizzo del servizio), altrimenti il nome pulito in maiuscoletto.
- * Torna una STRUTTURA, non testo: il componente la traduce con Lingui
- * («Indirizzo del server X» / il nome pulito così com'è).
+ * R6 (puro): il ruolo di una variabile dipende dalla POSIZIONE nell'URL, non
+ * dal nome — una `{base_url}` usata come URL intero (template `{base_url}/mcp`)
+ * non va spogliata dello schema come un host.
+ * - **host**: la variabile sta subito dopo `://` → pulizia e validazione di
+ *   oggi (cleanHostValue/hostValueError), etichetta «Indirizzo del server X»;
+ * - **url**: il template COMINCIA con `{var}` → il valore è un URL https
+ *   (http solo col flag di test), lo schema NON si toglie, stessa etichetta;
+ * - **text**: tutti gli altri casi → nessuna validazione da host, etichetta
+ *   dal nome pulito.
  */
-export function varLabel(name: string, serverName: string): { addressOf: string } | { plain: string } {
-  if (/host|url/i.test(name)) return { addressOf: serverName }
+export function varRole(name: string, urlTemplate: string): VarRole {
+  const v = `{${name}}`
+  if (urlTemplate.includes(`://${v}`)) return 'host'
+  if (urlTemplate.startsWith(v)) return 'url'
+  return 'text'
+}
+
+// ---- le etichette umane del modulo (M3.1 + R6, pure) ----
+
+/**
+ * L'etichetta umana di una variabile (puro): host e url sono l'INDIRIZZO del
+ * servizio («Indirizzo del server X»); gli altri il nome pulito in
+ * maiuscoletto. R6: lo si capisce dalla POSIZIONE nel template (varRole),
+ * non più dal nome. Torna una STRUTTURA, non testo: il componente la traduce
+ * con Lingui («Indirizzo del server X» / il nome pulito così com'è).
+ */
+export function varLabel(name: string, serverName: string, urlTemplate = ''): { addressOf: string } | { plain: string } {
+  const role = varRole(name, urlTemplate)
+  if (role === 'host' || role === 'url') return { addressOf: serverName }
   const clean = name.replace(/[_-]+/g, ' ').trim()
   return { plain: clean.charAt(0).toUpperCase() + clean.slice(1) }
 }
 
 /**
- * Quando il pulsante del modulo è ATTIVO (puro, M3): tutti i campi
- * OBBLIGATORI non segreti sono pieni e VALIDI, e il token c'è quando è la via
- * obbligatoria (auth 'headers' e non ancora salvato).
+ * Quando il pulsante del modulo è ATTIVO (puro, M3 + R6): tutti i campi
+ * OBBLIGATORI non segreti sono pieni e VALIDI (secondo il RUOLO: host come
+ * oggi, url un URL https — http solo col flag di test), e il token c'è quando
+ * è la via obbligatoria (auth 'headers' e non ancora salvato).
  */
 export function setupCanConnect(
   fields: Array<{ name: string; isRequired: boolean; isSecret: boolean; value?: string; saved?: boolean }>,
   values: Record<string, string>,
-  opts: { tokenRequired: boolean; token: string; tokenSaved: boolean }
+  opts: { tokenRequired: boolean; token: string; tokenSaved: boolean; urlTemplate?: string; allowHttpForTests?: boolean }
 ): boolean {
   for (const f of fields) {
     if (!f.isRequired) continue
@@ -148,8 +173,9 @@ export function setupCanConnect(
     }
     const v = (values[f.name] ?? f.value ?? '').trim()
     if (!v) return false
-    // la validazione da HOST vale per le variabili d'indirizzo (M1.4)
-    if (/host|url/i.test(f.name) && hostValueError(v)) return false
+    const role = varRole(f.name, opts.urlTemplate ?? '')
+    if (role === 'host' && hostValueError(v)) return false
+    if (role === 'url' && !resolvedUrlOk(v, opts.allowHttpForTests ?? false)) return false
   }
   if (opts.tokenRequired && !opts.tokenSaved && !opts.token.trim()) return false
   return true

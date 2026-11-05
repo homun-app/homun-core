@@ -954,7 +954,11 @@ export function AppsView({ embedded = false }: { embedded?: boolean }) {
                 <span className="min-w-0 flex-1">
                   <span className="block text-[15px]">{row.name}</span>
                   <span className="block truncate text-[13px] text-muted-foreground">{botsHalfLine(row.botsLabel)}</span>
-                  <ProvenanceTag via={row.via} />
+                  {/* R4: un server MCP di terzi NON è un connettore diretta —
+                      il badge neutro dice cosa è, come la mezza riga del foglio */}
+                  {row.source === 'server'
+                    ? <span className="inline-block rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground" data-testid="server-row-mcp-tag"><Trans>Server MCP</Trans></span>
+                    : <ProvenanceTag via={row.via} />}
                 </span>
                 {row.status === 'setup' ? (
                   // fase mcp-setup (M6.1): mai partito — la configurazione manca
@@ -1362,7 +1366,10 @@ function ConnectedDetailSheet({ row, installed, onClose, onChanged }: {
   const plugin = row.source === 'plugin' ? installed?.plugins.find((p) => p.name === row.id) : undefined
   return (
     <div className="no-drag fixed inset-0 z-50 grid place-items-center bg-foreground/20 p-4" onClick={onClose}>
-      <div className="max-h-[85vh] w-full max-w-lg overflow-y-auto scroll-thin rounded-3xl bg-card p-5 shadow-soft" onClick={(e) => e.stopPropagation()}>
+      {/* R2: @container — senza, le righe del foglio (SettingsRow) non vedono
+          la larghezza del contenitore e l'interruttore scende SOTTO il nome;
+          il foglio è largo abbastanza per la riga unica, come le Impostazioni */}
+      <div className="@container max-h-[85vh] w-full max-w-lg overflow-y-auto scroll-thin rounded-3xl bg-card p-5 shadow-soft" onClick={(e) => e.stopPropagation()}>
         {server && <ServerDetail sv={server as never} onDone={onChanged} />}
         {plugin && (
           <div className="space-y-3">

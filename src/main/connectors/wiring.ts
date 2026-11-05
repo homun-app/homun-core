@@ -17,6 +17,8 @@ import { listServers, saveServers, setMcpAuthResolver, type McpServerConfig, typ
 import { SECRET_KIND } from '../../shared/types'
 // fase mcp-setup (M1.3): i template `{var}` dei server del registro
 import { fillTemplate, missingTemplateVars } from '../../shared/registry-vars'
+// fase mcp-setup ritocchi (R1): lo slug stabile degli strumenti anche per i server del catalogo
+import { toolSlugKeeping } from '../mcp/slug'
 import { resolvePluginServerPlaceholders, unresolvedUserConfigKeys } from './install'
 // fase 17c correzioni (D2): il rifiuto è un UiError — message inglese per il
 // modello, id del catalogo UI per la UI (confine RPC di ws-server)
@@ -243,10 +245,12 @@ export function wireConnectors(host: ConnectorsHost, onChange: () => void) {
       return mcp.toolsOfServer(id)
     },
     registerServer: (cfg) => {
-      // il connettore del catalogo diventa un server MCP http con auth OAuth
+      // il connettore del catalogo diventa un server MCP http con auth OAuth.
+      // R1: anche lui ha un toolSlug STABILE (una riconnessione non lo cambia)
       const mcpCfg: McpServerConfig = {
         id: cfg.id, name: cfg.name, transport: 'http', url: cfg.url,
-        enabled: true, auth: { kind: 'oauth' }, catalogId: cfg.id
+        enabled: true, auth: { kind: 'oauth' }, catalogId: cfg.id,
+        toolSlug: toolSlugKeeping(listServers(), cfg.id, cfg.name)
       }
       saveServers([...listServers().filter((s) => s.id !== cfg.id), mcpCfg])
     },

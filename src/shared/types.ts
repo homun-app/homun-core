@@ -181,6 +181,8 @@ export type SendMessagePayload =
           default?: string
         }>
         auth: 'oauth' | 'headers'
+        /** fase mcp-setup ritocchi (R6): il template dell'URL — il ruolo di ogni variabile (etichetta e validazione) nasce dalla POSIZIONE, non dal nome */
+        urlTemplate?: string
         /** l'header col token facoltativo/obbligatorio (template + variabile segreta) */
         tokenHeader?: {
           name: string
@@ -1379,6 +1381,12 @@ export interface McpServerInfo {
    * invece di "Riconnetti" (che resta per la sessione scaduta).
    */
   neverAuthorized?: boolean
+  /**
+   * fase mcp-setup ritocchi (R1): il prefisso STABILE degli strumenti
+   * (mcp__&lt;toolSlug&gt;__), deciso all'installazione e mai più cambiato — il
+   * nome mostrato può cambiare (titolo del registro) senza cambiare i tool.
+   */
+  toolSlug?: string
 }
 
 // ---- fase mcp-setup (M3): il modulo di configurazione di un server ----
@@ -1416,6 +1424,8 @@ export interface McpServerSetupSpec {
   variables: McpServerSetupField[]
   auth: 'oauth' | 'headers' | 'env'
   tokenHeader?: McpServerSetupTokenHeader
+  /** fase mcp-setup ritocchi (R6): il template `{var}` dell'URL — il ruolo di ogni variabile nasce dalla POSIZIONE */
+  urlTemplate?: string
   /** true quando manca qualcosa: il modulo si apre, il server non è partito */
   needsSetup: boolean
   /** fase mcp-setup (M6.1): lo stato dell'ultima prova (connectors.state) */

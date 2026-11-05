@@ -1550,6 +1550,10 @@ msgstr "Configure a provider and a model first."
 msgid "notice.configureProviderFirst"
 msgstr "Configure a provider and a model in the agent settings first."
 
+#: src/renderer/src/components/ServerSetup.tsx
+msgid "Configurazione"
+msgstr "Configuration"
+
 #. placeholder {0}: String(entry.meta?.templateName ?? '')
 #: src/renderer/src/components/Chat.tsx
 msgid "Configurazione da template: {0}"
@@ -3531,10 +3535,6 @@ msgstr "No calls in the period."
 msgid "Nessuna concessione: ogni fill chiede la card."
 msgstr "No grants: every fill asks with a card."
 
-#: src/renderer/src/components/ServerSheet.tsx
-msgid "Nessuna configurazione in attesa."
-msgstr "No configuration waiting."
-
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Nessuna descrizione."
 msgstr "No description."
@@ -3946,10 +3946,6 @@ msgstr "What do you want to use me for the most?"
 #: src/renderer/src/components/BotDialogs.tsx
 msgid "Per esempio: segue le ricevute email e prepara il riepilogo della settimana…"
 msgstr "For example: watches email receipts and prepares the weekly summary…"
-
-#: src/renderer/src/components/ServerSetup.tsx
-msgid "Per farlo partire"
-msgstr "To start it"
 
 #: src/renderer/src/components/ComputerPanel.tsx
 msgid "Per il computer dei bot serve Docker Desktop: installalo e aprilo, poi Riprova."
@@ -4885,6 +4881,10 @@ msgstr "The team needs a name."
 msgid "rpc.needsWindow"
 msgstr "the Homun window is needed to authorize"
 
+#: src/renderer/src/components/ServerSetup.tsx
+msgid "Serve un indirizzo completo, che comincia con https://"
+msgstr "Enter a full address, starting with https://"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "rpc.gatewayName"
@@ -4918,6 +4918,7 @@ msgstr "Third-party server: it can read and do whatever its tools allow"
 msgid "Server esterno"
 msgstr "External server"
 
+#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/ServerSheet.tsx
 msgid "Server MCP"
 msgstr "MCP server"

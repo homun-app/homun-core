@@ -938,7 +938,13 @@ export function buildApiMethods(
     'mcp:list': () => mcp().then((x) => x.listServers()),
     'mcp:save': async ([s, secret]) => {
       const x = await mcp()
-      x.saveServers([...x.listServers().filter((y) => y.id !== (s as { id: string }).id), s as Parameters<typeof x.saveServers>[0][number]])
+      // R1: anche il server manuale ha un toolSlug STABILE (se non ce l'ha già)
+      const incoming = s as Parameters<typeof x.saveServers>[0][number]
+      if (!incoming.toolSlug) {
+        const { toolSlugKeeping } = await import('../main/mcp/slug')
+        incoming.toolSlug = toolSlugKeeping(x.listServers(), incoming.id, incoming.name)
+      }
+      x.saveServers([...x.listServers().filter((y) => y.id !== (s as { id: string }).id), incoming])
       // fase 5: bearer/header statici del server manuale → store CIFRATO (mai nei settings)
       const cfg = s as McpServerInfo
       const sec = secret as McpServerSecret | undefined
@@ -1103,7 +1109,7 @@ export function buildApiMethods(
             : parsed.kind === 'registry' ? serverIdFor({ kind: 'registry', name: parsed.name })
               : serverIdFor({ kind: 'url', url: parsed.url }))
         const cfg = sid ? (await mcp()).listServers().find((s) => s.id === sid) : null
-        if (cfg && !cfg.needsAuth) await notifyMcpServerConnected([message.id], cfg.name, emit, worker)
+        if (cfg && !cfg.needsAuth) await notifyMcpServerConnected([message.id], cfg, emit, worker)
       }
       // fase 17c (C2, MU): il testo per il modello resta inglese; meta.ui
       // dice alla UI cosa mostrare nella lingua dell'interfaccia
@@ -1249,7 +1255,7 @@ export function buildApiMethods(
         // M5.2: il bot che ha proposto il server riceve CONNECTOR_CONNECTED
         const cfg = (await mcp()).listServers().find((s) => s.id === id)
         if (cfg?.source?.kind === 'registry') {
-          await notifyMcpServerConnected([`registry:${cfg.source.name}`, `url:${cfg.source.name}`], cfg.name, emit, worker)
+          await notifyMcpServerConnected([`registry:${cfg.source.name}`, `url:${cfg.source.name}`], cfg, emit, worker)
         }
       }
       return r
@@ -1843,6 +1849,9 @@ export function buildApiMethods(
  * 'user-message' con meta.initiator 'CONNECTOR_CONNECTED' (specifica §3ter
  * T2-T3) così può proseguire ("Fatto, ora posso…"). Le offerte soddisfatte
  * vengono marcate meta.connected per non ri-notificare.
+ * R1: il prefisso degli strumenti è quello VERO del server installato
+ * (toolSlug), non l'id del connettore — un toolSlug rinumerato (-2) direbbe
+ * il nome sbagliato altrimenti.
  */
 export async function notifyConnectorConnected(
   connectorId: string,
@@ -1850,6 +1859,9 @@ export async function notifyConnectorConnected(
   emit: Emitter,
   worker: JobWorker
 ): Promise<void> {
+  const mcpMod = await import('../main/mcp')
+  const server = mcpMod.listServers().find((s) => s.catalogId === connectorId)
+  const prefix = server ? mcpMod.serverToolsPrefix(server) : `mcp__${connectorId}`
   for (const agent of store.listAgents()) {
     const offers = store.getEntries(agent.id).filter(
       (e) =>
@@ -1863,13 +1875,13 @@ export async function notifyConnectorConnected(
     enqueueUserMessage(
       db(),
       agent.id,
-      `[sistema] The user connected ${name}: its mcp__${connectorId}__* tools are now available (find the exact names with your tools or by asking the user).`,
+      `[sistema] The user connected ${name}: its ${prefix}__* tools are now available (find the exact names with your tools or by asking the user).`,
       undefined,
       emit,
       undefined,
       'CONNECTOR_CONNECTED',
       // fase 17c (C2, MU): la UI mostra la lingua dell'interfaccia
-      { ui: ui(UI.sistemaConnectorConnected, { name, connectorId }) }
+      { ui: ui(UI.sistemaConnectorConnected, { name, connectorId: prefix.slice('mcp__'.length) }) }
     )
     worker.poke()
   }
@@ -1879,18 +1891,19 @@ export async function notifyConnectorConnected(
  * Fase mcp-setup (M5.2): l'utente ha completato il collegamento di un server
  * MCP proposto dal bot (add_mcp_server). Ogni agente con la card ancora
  * aperta riceve il messaggio initiator CONNECTOR_CONNECTED col prefisso dei
- * suoi strumenti (mcp__&lt;slug&gt;__*) e le card si marcano meta.connected
+ * suoi strumenti (mcp__&lt;toolSlug&gt;__*, R1) e le card si marcano meta.connected
  * (una sola notifica per offerta). `cardIds` sono gli id delle card
  * («registry:&lt;nome&gt;» / «url:&lt;url&gt;»).
  */
 export async function notifyMcpServerConnected(
   cardIds: string[],
-  name: string,
+  cfg: { name: string; toolSlug?: string },
   emit: Emitter,
   worker: JobWorker
 ): Promise<void> {
   const { serverToolsPrefix } = await import('../main/mcp')
-  const prefix = serverToolsPrefix(name)
+  const name = cfg.name
+  const prefix = serverToolsPrefix(cfg)
   for (const agent of store.listAgents()) {
     const offers = store.getEntries(agent.id).filter(
       (e) =>

@@ -213,8 +213,11 @@ export type RegistryRuntime =
   | { kind: 'not-installable'; registryType: string; reason?: string }
 
 /** Hook di test della verifica d'integrazione: remoto http locale (in produzione SOLO https). */
+// R6: un remote col template che COMINCIA con una variabile (`{base_url}/mcp`)
+// è un URL INTERO da compilare — lo schema lo decide il VALORE (il modulo lo
+// valida https), quindi qui è accettabile come un https già scritto
 const remoteUrlOk = (u: string): boolean =>
-  u.startsWith('https://') || (process.env.SANDBOT_TEST_ALLOW_HTTP_REMOTES === '1' && u.startsWith('http://'))
+  u.startsWith('https://') || u.startsWith('{') || (process.env.SANDBOT_TEST_ALLOW_HTTP_REMOTES === '1' && u.startsWith('http://'))
 
 /**
  * La modalità di esecuzione di una voce del registro (pura): i `remotes`

@@ -171,7 +171,8 @@ export function appsViewModel(input: AppsViewInput): AppsViewModel {
       source: 'server',
       id: s.id,
       name: s.name,
-      logo: '✦',
+      // R4: l'icona della riga è QUELLA del foglio (il logo o l'iniziale), non ✦
+      logo: '',
       botsLabel: botsLabelOf(s.enabledFor ?? null, agents),
       status: serverRowStatus(s, s.stateStatus),
       via: 'direct'

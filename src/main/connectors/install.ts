@@ -18,10 +18,13 @@ import { SECRET_KIND } from '../../shared/types'
 import type { McpServerConnectResult, McpServerSetupField, McpServerSetupSpec, McpServerSetupTokenHeader } from '../../shared/types'
 // fase mcp-setup (M1): i template `{var}` dei remoti del registro (puri, condivisi col renderer)
 import {
-  cleanHostValue, cleanSecretValue, fillTemplate, hostValueError, missingTemplateVars, templateVarNames, urlVarIsRequired,
+  cleanHostValue, cleanSecretValue, fillTemplate, hostValueError, missingTemplateVars, resolvedUrlOk, templateVarNames,
+  urlVarIsRequired, varRole,
   type RegistryVarSpec
 } from '../../shared/registry-vars'
 import type { McpServerConfig } from '../mcp'
+// fase mcp-setup ritocchi (R1): il prefisso stabile degli strumenti
+import { toolSlugKeeping } from '../mcp/slug'
 import { boxHomePath, dockerRmDirArgv } from '../sandbox/docker-argv'
 import { createOAuthProvider, authorizeWithLoopback } from './oauth-provider'
 import type { ConnectorsSecretStore } from './sealed-store'
@@ -205,10 +208,11 @@ function hostOfTemplate(url: string): string {
   }
 }
 
-/** Il payload `setup` della card (M1/M3): le variabili dell'URL e l'accesso. */
+/** Il payload `setup` della card (M1/M3 + R6): le variabili dell'URL e l'accesso. */
 function setupPayloadOf(rt: { urlTemplate?: string; urlVariables?: RegistryVarSpec[]; headers?: RemoteHeaderRuntime[]; auth?: 'oauth' | 'headers' }): {
   urlVariables: Array<{ name: string; description?: string; placeholder?: string; isRequired: boolean; isSecret: boolean; default?: string }>
   auth: 'oauth' | 'headers'
+  urlTemplate?: string
   tokenHeader?: { name: string; valueTemplate: string; description?: string; variable: string; variableDescription?: string }
 } | null {
   const urlVars = (rt.urlVariables ?? []).map((v) => ({
@@ -240,6 +244,9 @@ function setupPayloadOf(rt: { urlTemplate?: string; urlVariables?: RegistryVarSp
   return {
     urlVariables: urlVars,
     auth: rt.auth ?? 'oauth',
+    // R6: il renderer calcola il RUOLO di ogni variabile (host/url/testo) dal
+    // template, non dal nome
+    ...(rt.urlTemplate ? { urlTemplate: rt.urlTemplate } : {}),
     ...(tokenHeader ? { tokenHeader } : {})
   }
 }
@@ -305,16 +312,21 @@ function saveServerCfg(cfg: McpServerConfig, deps: InstallDeps): string | null {
 /**
  * Server id e config per una voce del registro. Fase mcp-setup: il NOME è il
  * titolo umano (M2) e il nome tecnico sta in `source.name` (l'id NON cambia:
- * gli strumenti si chiamano mcp__&lt;slug del nome&gt;__… e il serverId è hash
- * del nome tecnico). M1: il remote porta i TEMPLATE (url, header) e i valori
- * non segreti in `vars`; i segreti vanno solo nello store cifrato.
+ * è hash del nome tecnico). R1: `toolSlug` è il prefisso STABILE degli
+ * strumenti, deciso qui (una volta) e mai più cambiato — il titolo può
+ * arrivare dopo (fixTitleFromRegistry) senza toccare i nomi dei tool. M1: il
+ * remote porta i TEMPLATE (url, header) e i valori non segreti in `vars`; i
+ * segreti vanno solo nello store cifrato.
  */
-function registryServerCfg(entry: RegistryEntry, agentId: string): McpServerConfig {
+function registryServerCfg(entry: RegistryEntry, agentId: string, existing: McpServerConfig[] = []): McpServerConfig {
   const rt = registryRuntime(entry)
   if (rt === null || rt.kind === 'not-installable') throw new Error('registry entry not installable')
   const trust = registryTrust(entry.server.name)
   const id = serverIdFor({ kind: 'registry', name: entry.server.name })
   const source = { kind: 'registry' as const, name: entry.server.name, ...(entry.server.version ? { version: entry.server.version } : {}) }
+  // R1: lo slug del titolo (max 24, -2 se preso — contano i server installati);
+  // una reinstallazione mantiene quello che ha già
+  const toolSlug = toolSlugKeeping(existing, id, registryTitle(entry))
   if (rt.kind === 'remote') {
     // i default del registro entrano in vars già ora: una voce dichiarata
     // completa parte senza chiedere niente
@@ -327,6 +339,7 @@ function registryServerCfg(entry: RegistryEntry, agentId: string): McpServerConf
     return {
       id,
       name: registryTitle(entry), transport: 'http', enabled: true,
+      toolSlug,
       // senza buchi l'URL risolto; coi buchi solo il TEMPLATE (mai un URL con
       // le graffe: la connessione parte quando i valori ci sono)
       ...(hasHoles ? {} : { url: resolvedUrl }),
@@ -355,6 +368,7 @@ function registryServerCfg(entry: RegistryEntry, agentId: string): McpServerConf
   return {
     id,
     name: registryTitle(entry), transport: 'stdio', enabled: true,
+    toolSlug,
     box: {
       workdir: boxHomePath(agentId),
       home: boxHomePath(agentId),
@@ -412,9 +426,11 @@ export async function installMcpServer(
   const parsed = parseMcpServerId(card.id)
   if ('error' in parsed) return { ok: false, error: parsed.error }
   if (parsed.kind === 'url') {
+    const id = serverIdFor({ kind: 'url', url: parsed.url })
     const cfg: McpServerConfig = {
-      id: serverIdFor({ kind: 'url', url: parsed.url }),
+      id,
       name: new URL(parsed.url).host, transport: 'http', url: parsed.url, enabled: true,
+      toolSlug: toolSlugKeeping(deps.listServers(), id, new URL(parsed.url).host),
       auth: { kind: 'oauth' }, enabledFor: [agentId],
       source: { kind: 'registry', name: parsed.url },
       trustLabel: 'unverified',
@@ -428,7 +444,7 @@ export async function installMcpServer(
   if (rt === null || rt.kind === 'not-installable') {
     return { ok: false, error: rt?.kind === 'not-installable' ? `not installable here: ${rt.reason ?? `type ${rt.registryType}`}` : 'not installable here' }
   }
-  const cfg = registryServerCfg(entry, agentId)
+  const cfg = registryServerCfg(entry, agentId, deps.listServers())
   const slot = saveServerCfg(cfg, deps)
   if (slot) return { ok: false, error: slot }
   if (rt.kind === 'box-npm') {
@@ -838,6 +854,7 @@ export async function installPlugin(
     if (s.url) {
       const cfg: McpServerConfig = {
         id: serverId, name: s.name, transport: 'http', url: s.url, enabled: true,
+        toolSlug: toolSlugKeeping(deps.listServers(), serverId, s.name),
         auth: { kind: 'oauth' }, enabledFor: [agentId],
         source,
         pluginSpec: {
@@ -859,6 +876,7 @@ export async function installPlugin(
     } else if (s.command) {
       const cfg: McpServerConfig = {
         id: serverId, name: s.name, transport: 'stdio', enabled: true,
+        toolSlug: toolSlugKeeping(deps.listServers(), serverId, s.name),
         box: {
           workdir: boxDir,
           home: boxHomePath(agentId),
@@ -1091,10 +1109,15 @@ export async function serverSetupSpec(id: string, deps: InstallDeps): Promise<Se
       ...(isSecret && (await secretUrlVarSaved(name)) ? { saved: true } : {})
     })
   }
-  // il campo del token: il primo header SEGRETTO col template (M3.2)
+  // il campo del token: il primo header SEGRETTO col template (M3.2). I
+  // server salvati PRIMA di M1 non hanno headerTemplates: l'header si rilegge
+  // dalla voce del REGISTRO (la stessa promessa di M7 per le descrizioni —
+  // senza, il modulo dell'utente di ieri non chiederebbe mai il token)
   const headerVarNames = (h: { valueTemplate: string; variables?: Array<{ name: string }> }): string[] =>
     templateVarNames(h.valueTemplate)
-  const tokenHeaderDecl = (cfg.headerTemplates ?? []).find((h) => headerVarNames(h).length > 0)
+  const headerCandidates: Array<{ name: string; valueTemplate: string; description?: string; variables?: Array<{ name: string; description?: string; isSecret?: boolean }> }> =
+    (cfg.headerTemplates ?? []).length ? cfg.headerTemplates! : (headerDecls ?? [])
+  const tokenHeaderDecl = headerCandidates.find((h) => headerVarNames(h).length > 0)
   const tokenHeaderOf = (h: NonNullable<typeof tokenHeaderDecl>): ServerSetupTokenHeader => {
     const variable = h.variables?.find((v) => v.isSecret === true)?.name ?? headerVarNames(h)[0] ?? h.name
     const declDesc = headerDecls.find((x) => x.name === h.name)
@@ -1116,6 +1139,9 @@ export async function serverSetupSpec(id: string, deps: InstallDeps): Promise<Se
     transport: 'http',
     variables,
     auth: cfg.auth?.kind === 'headers' ? 'headers' : 'oauth',
+    // R6: il ruolo di ogni variabile (etichetta e validazione) nasce dalla
+    // POSIZIONE nel template, non dal nome
+    ...(cfg.urlTemplate ? { urlTemplate: cfg.urlTemplate } : {}),
     ...(tokenHeaderDecl ? { tokenHeader: tokenHeaderOf(tokenHeaderDecl) } : {}),
     needsSetup: cfg.needsAuth !== undefined || missing.urlVars.length > 0 || missing.requiredHeader !== null
   }
@@ -1145,12 +1171,13 @@ export async function connectServerSetup(
   const spec = await serverSetupSpec(id, deps)
   if (!spec) return { ok: false, error: 'server not found' }
 
-  // 1. validazione dei valori (M1.4): gli INDIRIZZI si ripuliscono e si
-  // validano da host (niente / @ o spazi, schema incollato via); le altre
-  // variabili si prendono ripulite degli spazi soltanto
+  // 1. validazione dei valori (M1.4 + R6): il RUOLO della variabile nell'URL
+  // decide — host (subito dopo «://») si ripulisce e si valida da host; url
+  // (il template COMINCIA con {var}) deve essere un URL https (http solo col
+  // flag di test) e lo schema NON si toglie; le altre solo spazi
+  const allowHttp = process.env.SANDBOT_TEST_ALLOW_HTTP_REMOTES === '1'
   const fieldErrors: Record<string, string> = {}
   const vars: Record<string, string> = { ...(cfg.vars ?? {}) }
-  const isHostVar = (name: string): boolean => cfg.transport === 'http' && /host|url/i.test(name)
   for (const f of spec.variables) {
     const raw = (input.vars ?? {})[f.name]
     if (raw === undefined || f.isSecret) continue // i segreti non passano da cfg.vars
@@ -1158,13 +1185,20 @@ export async function connectServerSetup(
       if (f.isRequired) fieldErrors[f.name] = 'empty'
       continue
     }
-    if (isHostVar(f.name)) {
+    const role = cfg.transport === 'http' ? varRole(f.name, cfg.urlTemplate ?? '') : 'text'
+    if (role === 'host') {
       const bad = hostValueError(raw)
       if (bad) {
         fieldErrors[f.name] = bad
         continue
       }
       vars[f.name] = cleanHostValue(raw)
+    } else if (role === 'url') {
+      if (!resolvedUrlOk(raw.trim(), allowHttp)) {
+        fieldErrors[f.name] = 'url'
+        continue
+      }
+      vars[f.name] = raw.trim()
     } else {
       vars[f.name] = raw.trim()
     }
@@ -1172,9 +1206,11 @@ export async function connectServerSetup(
   if (Object.keys(fieldErrors).length) return { ok: false, error: 'invalid values', reason: 'invalid-value', fieldErrors }
 
   // 2. il token: SOLO il valore della variabile — «Bearer » lo mette il
-  // template; un «Bearer » già incollato si toglie (M3.2)
-  const headerTemplates = cfg.headerTemplates ?? []
-  const tokenHeader = headerTemplates.find((h) => (spec.tokenHeader?.name ?? '') === h.name)
+  // template; un «Bearer » già incollato si toglie (M3.2). Il template arriva
+  // dalla config, o dallo spec (la voce del registro, per i server di prima
+  // di M1 che non hanno headerTemplates)
+  const tokenHeader = (cfg.headerTemplates ?? []).find((h) => (spec.tokenHeader?.name ?? '') === h.name)
+    ?? (spec.tokenHeader ? { name: spec.tokenHeader.name, valueTemplate: spec.tokenHeader.valueTemplate } : undefined)
   if (input.token !== undefined && input.token.trim() && tokenHeader && spec.tokenHeader) {
     const value = fillTemplate(tokenHeader.valueTemplate, { [spec.tokenHeader.variable]: cleanSecretValue(input.token) })
     const saved = (await deps.store.read<Record<string, string>>(cfg.id, SECRET_KIND.headers).catch(() => null)) ?? {}
@@ -1266,9 +1302,13 @@ function markServerConnected(setSetting: (key: string, value: unknown) => void, 
 
 /**
  * M7: un cfg.name rimasto al nome TECNICO diventa il titolo del registro alla
- * prima connessione riuscita (il registro lo dà). Gli strumenti cambiano
- * prefisso: la cache del client si chiude, alla prossima connessione i nomi
- * sono quelli nuovi.
+ * prima connessione riuscita (il registro lo dà). R1: cambia SOLO il nome —
+ * i NOMI degli strumenti non dipendono più da cfg.name (toolSlug congelato
+ * all'installazione o dalla migrazione), quindi permessi per strumento,
+ * disabledTools e riferimenti del bot sopravvivono alla rinomina intatti.
+ * La cache del client si chiude lo stesso, ma per UN ALTRO motivo: la
+ * DESCRIZIONE degli strumenti porta `[MCP:<nome>]` — senza chiusura il modello
+ * leggerebbe il nome tecnico vecchio fino allo scadere della TTL (5 minuti).
  */
 async function fixTitleFromRegistry(cfg: McpServerConfig, deps: InstallDeps): Promise<void> {
   if (cfg.source?.kind !== 'registry' || cfg.name !== cfg.source.name) return
@@ -1321,6 +1361,7 @@ export async function addGateway(input: GatewayInput, deps: InstallDeps): Promis
   const id = serverIdFor({ kind: 'gateway', name: input.name.trim(), url: input.url })
   const cfg: McpServerConfig = {
     id, name: input.name.trim(), transport: 'http', url: input.url, enabled: true,
+    toolSlug: toolSlugKeeping(deps.listServers(), id, input.name.trim()),
     ...(input.auth === 'bearer' ? { auth: { kind: 'bearer' as const } } : {}),
     ...(input.auth === 'headers' ? { auth: { kind: 'headers' as const } } : {}),
     ...(input.auth === 'oauth' ? { auth: { kind: 'oauth' as const } } : {}),

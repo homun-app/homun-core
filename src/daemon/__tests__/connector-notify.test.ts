@@ -70,7 +70,7 @@ function mcpCardEntry(agentId: string, cardId: string, name: string): number {
 }
 
 describe('fase mcp-setup (M5.2): notifyMcpServerConnected', () => {
-  it('le card del server collegato si marcano connected e il bot riceve CONNECTOR_CONNECTED col prefisso mcp__', async () => {
+  it('le card del server collegato si marcano connected e il bot riceve CONNECTOR_CONNECTED col prefisso mcp__ (R1: dal toolSlug della config, non dal nome)', async () => {
     const a1 = createAgent('Con card Mattermost')
     const a2 = createAgent('Card già soddisfatta')
     mcpCardEntry(a1.id, 'registry:io.github.mattermost/mattermost-plugin-agents', 'Mattermost')
@@ -81,7 +81,7 @@ describe('fase mcp-setup (M5.2): notifyMcpServerConnected', () => {
     mcpCardEntry(a1.id, 'registry:altro/server', 'Altro')
 
     let pokes = 0
-    await notifyMcpServerConnected(['registry:io.github.mattermost/mattermost-plugin-agents'], 'Mattermost', () => undefined, { poke: () => pokes++ } as never)
+    await notifyMcpServerConnected(['registry:io.github.mattermost/mattermost-plugin-agents'], { name: 'Mattermost', toolSlug: 'mattermost' }, () => undefined, { poke: () => pokes++ } as never)
 
     // il db dei job è condiviso col test di prima: si filtrano per agente
     const rows = db().prepare("SELECT agent_id, payload_json FROM jobs WHERE kind = 'user-message' AND agent_id = ?").all(a1.id) as Array<{ agent_id: string; payload_json: string }>
@@ -96,6 +96,16 @@ describe('fase mcp-setup (M5.2): notifyMcpServerConnected', () => {
     expect(entries.find((x) => (x.meta?.message as { id?: string }).id === 'registry:io.github.mattermost/mattermost-plugin-agents')?.meta?.connected).toBe(true)
     expect(entries.find((x) => (x.meta?.message as { id?: string }).id === 'registry:altro/server')?.meta?.connected).toBeUndefined()
     expect(pokes).toBe(1)
+  })
+
+  it('R1: il prefisso è toolSlugOf(cfg) — un titolo che cambia non lo trascina più (slug congelato anche «-2»)', async () => {
+    const a1 = createAgent('Con card Notion dal registro')
+    mcpCardEntry(a1.id, 'registry:com.notion/mcp', 'Notion')
+    await notifyMcpServerConnected(['registry:com.notion/mcp'], { name: 'Notion', toolSlug: 'notion-2' }, () => undefined, { poke: () => undefined } as never)
+    const rows = db().prepare("SELECT payload_json FROM jobs WHERE kind = 'user-message' AND agent_id = ?").all(a1.id) as Array<{ payload_json: string }>
+    const payload = JSON.parse(rows.at(-1)!.payload_json) as { text: string; extraMeta?: { ui?: { values?: Record<string, string> } } }
+    expect(payload.text).toBe('[sistema] The user connected Notion: its mcp__notion-2__* tools are now available.')
+    expect(payload.extraMeta?.ui?.values).toEqual({ name: 'Notion', prefix: 'mcp__notion-2' })
   })
 })
 

@@ -23,6 +23,9 @@ import {
   type InstallDeps, type InstalledPlugin
 } from '../install'
 import type { McpServerConfig } from '../../mcp'
+import { serverToolsPrefix } from '../../mcp'
+import { serverOfToolName, toolSlugOf, TOOL_SLUG_MAX } from '../../mcp/slug'
+import { migrateToolSlugs } from '../../store/mcp-migrations'
 import type { ConnectorsSecretStore } from '../sealed-store'
 
 // uno store cifrato FINTO in memoria
@@ -450,6 +453,133 @@ describe('mcp-setup: la voce vera di Mattermost', () => {
     // il titolo del registro arriva alla prima connessione RIUSCITA
     expect(deps.listServers()[0]!.name).toBe('Mattermost')
     expect(deps.listServers()[0]!.source).toEqual(expect.objectContaining({ name: MATTERMOST.server.name }))
+  })
+
+  it('R1: il toolSlug nasce qui — slug del titolo, TAGLIATO a 24 (il nome completo deve stare nei 64 dei provider)', async () => {
+    const deps = makeMmDeps()
+    const card = await buildMcpServerCard(`registry:${MATTERMOST.server.name}`, '', deps)
+    if (!card.ok) throw new Error('card')
+    await installMcpServer(card.card, 'a', deps)
+    const cfg = deps.listServers()[0]!
+    expect(cfg.toolSlug).toBe('mattermost')
+    expect(cfg.toolSlug!.length).toBeLessThanOrEqual(TOOL_SLUG_MAX)
+    // un titolo lungo: taglio a 24, il prefisso resta nei limiti
+    const longTitle = { ...MATTERMOST, server: { ...MATTERMOST.server, name: MATTERMOST.server.name, title: 'Un Titolo Di Server Molto Lungo Che Supa I Ventiquattro' } }
+    const deps2 = makeMmDeps({ findRegistryEntry: async () => longTitle })
+    const card2 = await buildMcpServerCard(`registry:${MATTERMOST.server.name}`, '', deps2)
+    if (!card2.ok) throw new Error('card2')
+    await installMcpServer(card2.card, 'a', deps2)
+    const cfg2 = deps2.listServers()[0]!
+    expect(cfg2.toolSlug).toHaveLength(TOOL_SLUG_MAX)
+    expect(`mcp__${cfg2.toolSlug}__`.length).toBe(31) // mcp__ (5) + 24 (slug) + __ (2): restano 33 per il nome dello strumento
+    expect(serverToolsPrefix(cfg2)).toBe(`mcp__${cfg2.toolSlug}`)
+  })
+
+  it('R1: catalogo Notion + registro com.notion/mcp installati INSIEME → prefissi DIVERSI e callTool che instrada ciascuno sul SUO server', async () => {
+    // il server del catalogo (lo registra registerServer di wiring): nome
+    // «Notion», niente toolSlug (il suo nome non cambia mai)
+    const deps = makeDeps()
+    deps.saveServers([{ id: 'notion', name: 'Notion', transport: 'http', url: 'https://api.notion.com/mcp', enabled: true, auth: { kind: 'oauth' }, catalogId: 'notion' }])
+    const card = await buildMcpServerCard('registry:com.notion/mcp', 'per leggere le pagine', deps)
+    if (!card.ok) throw new Error('card')
+    expect(card.card.name).toBe('Notion') // stesso titolo…
+    const r = await installMcpServer(card.card, 'a', deps)
+    expect(r.ok).toBe(true)
+    const registry = deps.listServers().find((x) => x.source?.kind === 'registry')!
+    // …ma prefissi DIVERSI: il registro riceve -2 (il catalogo c'era già)
+    expect(toolSlugOf(deps.listServers().find((x) => x.catalogId === 'notion')!)).toBe('notion')
+    expect(registry.toolSlug).toBe('notion-2')
+    expect(serverToolsPrefix(registry)).toBe('mcp__notion-2')
+    // e il routing manda ciascuno sul SUO server (basta il nome completo)
+    expect(serverOfToolName(deps.listServers(), 'mcp__notion__notion_search')?.id).toBe('notion')
+    expect(serverOfToolName(deps.listServers(), 'mcp__notion-2__notion_search')?.id).toBe(registry.id)
+  })
+
+  it('R1: la rinomina di M7.3 NON cambia i nomi degli strumenti — una regola di permesso e un disabledTools sopravvivono', async () => {
+    const deps = makeMmDeps({ toolsOfServer: async () => [{ name: 'search' }] })
+    const id = serverIdFor({ kind: 'registry', name: MATTERMOST.server.name })
+    // il server di PRIMA: nome tecnico, toolSlug CONGELATO dalla migrazione
+    const frozen = migrateToolSlugs([{
+      id, name: MATTERMOST.server.name, transport: 'http', enabled: true,
+      urlTemplate: 'https://{mattermost_host}/plugins/mattermost-ai/mcp-server/mcp',
+      headerTemplates: [{ name: 'Authorization', valueTemplate: 'Bearer {personal_access_token}', isSecret: true, variables: [{ name: 'personal_access_token', isSecret: true }] }],
+      auth: { kind: 'oauth' }, enabledFor: ['*'],
+      source: { kind: 'registry', name: MATTERMOST.server.name },
+      needsAuth: { kind: 'setup', keys: ['mattermost_host'] }
+    }]).servers[0]!
+    const prefixBefore = serverToolsPrefix(frozen) // mcp__io-github-mattermost-mattermost-plugin-agents
+    expect(prefixBefore).toBe('mcp__io-github-mattermost-mattermost-plugin-agents')
+    // una regola di permesso per strumento e i disabledTools, per nome COMPLETO
+    const [getSetting, setSetting] = mkSettings()
+    const grantTool = `${prefixBefore}__*` // mcpServerReadGrantKey(slug)
+    setSetting('connectors.state', { [id]: { disabledTools: [`${prefixBefore}__search`] } })
+    deps.saveServers([frozen])
+    await connectServerSetup(id, { vars: { mattermost_host: 'chat.example.com' } }, deps, getSetting, setSetting)
+    const after = deps.listServers()[0]!
+    // il nome diventa il titolo…
+    expect(after.name).toBe('Mattermost')
+    // …ma il prefisso e i nomi degli strumenti RESTANO (toolSlug congelato)
+    expect(after.toolSlug).toBe(frozen.toolSlug)
+    expect(serverToolsPrefix(after)).toBe(prefixBefore)
+    // permesso e disabledTools (chiavi per nome completo) MATCHANO ancora
+    const states = getSetting<Record<string, { disabledTools?: string[] }>>('connectors.state', {})
+    expect(states[id]!.disabledTools).toEqual([`${serverToolsPrefix(after)}__search`])
+    expect(grantTool).toBe(`${serverToolsPrefix(after)}__*`)
+  })
+
+  it('R6: una variabile {base_url} usata come URL INTERO ({base_url}/mcp) — schema NON tolto, https richiesto, http solo col flag', async () => {
+    const entry = { server: { name: 'io.github.esempio/mcp', title: 'Esempio', remotes: [{ type: 'streamable-http', url: '{base_url}/mcp' }] } }
+    const deps = makeDeps({ findRegistryEntry: async () => entry as never })
+    const card = await buildMcpServerCard('registry:io.github.esempio/mcp', '', deps)
+    if (!card.ok) throw new Error('card')
+    const r = await installMcpServer(card.card, 'a', deps)
+    expect(r.ok).toBe(true)
+    const cfg = deps.listServers()[0]!
+    expect(cfg.urlTemplate).toBe('{base_url}/mcp')
+    expect(cfg.needsAuth?.kind).toBe('setup')
+    // lo spec porta il template: il modulo valida per POSIZIONE (R6)
+    const spec = await serverSetupSpec(cfg.id, deps)
+    expect(spec?.urlTemplate).toBe('{base_url}/mcp')
+    // un valore SENZA schema non è un URL intero: rifiutato per campo
+    const no = await connectServerSetup(cfg.id, { vars: { base_url: 'mm.example.com' } }, deps, ...mkSettings())
+    expect(no.ok).toBe(false)
+    expect(no.reason).toBe('invalid-value')
+    expect(no.fieldErrors?.base_url).toBe('url')
+    // http:// senza flag di test: rifiutato anche lui
+    const httpNo = await connectServerSetup(cfg.id, { vars: { base_url: 'http://127.0.0.1:9999' } }, deps, ...mkSettings())
+    expect(httpNo.fieldErrors?.base_url).toBe('url')
+    // https://: il valore resta COME È (lo schema non si toglie) e l'URL si risolve
+    const ok = await connectServerSetup(cfg.id, { vars: { base_url: 'https://mm.example.com' } }, deps, ...mkSettings())
+    expect(ok.ok).toBe(true)
+    const done = deps.listServers()[0]!
+    expect(done.vars).toEqual({ base_url: 'https://mm.example.com' })
+    expect(done.url).toBe('https://mm.example.com/mcp')
+  })
+
+  it('M7+R1: il server di PRIMA di M1 (niente headerTemplates) rilegge l\'header del token dal REGISTRO: il campo c\'è e il collegamento scrive «Bearer <valore>»', async () => {
+    const deps = makeMmDeps({
+      toolsOfServer: async (id) => {
+        const h = (await deps.store.read<Record<string, string>>(id, SECRET_KIND.headers)) ?? {}
+        seenHeaders.push(JSON.stringify(h))
+        return [{ name: 'search' }]
+      }
+    })
+    const seenHeaders: string[] = []
+    // com\'era il db dell\'utente di ieri: url col buco, needsAuth key, NESSUN headerTemplates
+    const id = serverIdFor({ kind: 'registry', name: MATTERMOST.server.name })
+    deps.saveServers([{
+      id, name: MATTERMOST.server.name, transport: 'http', enabled: true,
+      url: 'https://{mattermost_host}/plugins/mattermost-ai/mcp-server/mcp',
+      auth: { kind: 'headers' }, enabledFor: ['*'],
+      source: { kind: 'registry', name: MATTERMOST.server.name },
+      needsAuth: { kind: 'key', keys: ['Authorization'] }
+    }])
+    const spec = await serverSetupSpec(id, deps)
+    expect(spec?.tokenHeader).toEqual(expect.objectContaining({ name: 'Authorization', valueTemplate: 'Bearer {personal_access_token}', variable: 'personal_access_token' }))
+    // il collegamento col token scrive l\'header risolto nello store cifrato
+    const r = await connectServerSetup(id, { vars: { mattermost_host: 'chat.example.com' }, token: 'mm_pat_valore' }, deps, ...mkSettings())
+    expect(r.ok).toBe(true)
+    expect(await deps.store.read(id, SECRET_KIND.headers)).toEqual({ Authorization: 'Bearer mm_pat_valore' })
   })
 
   it('missingSetupKeys e classifyConnectError (puri)', () => {

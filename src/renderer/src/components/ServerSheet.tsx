@@ -136,18 +136,14 @@ export function ServerSheet({ sv, onDone }: { sv: ServerSheetInfo; onDone(): voi
         )}
       </div>
 
-      {/* il modulo M3, quando serve */}
+      {/* il modulo M3, quando serve; collegato e senza coda: niente (R5 —
+          lo stato in alto dice già «Connessa») */}
       {setupLoaded && setup && setup.needsSetup && (
         <ServerSetupModule
           spec={setup}
           onConnected={(_r: McpServerConnectResult) => onDone()}
           testid="server-sheet-setup"
         />
-      )}
-      {setupLoaded && setup && !setup.needsSetup && (
-        <p className="text-[13px] text-muted-foreground" data-testid="server-sheet-nothing-to-do">
-          <Trans>Nessuna configurazione in attesa.</Trans>
-        </p>
       )}
       {note && <p className="text-[12px] text-muted-foreground">{note}</p>}
 

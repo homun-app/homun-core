@@ -139,6 +139,18 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
     }
   }
 
+  // fase mcp-setup ritocchi (R1): i toolSlug si congelano col nome di OGGI,
+  // PRIMA di qualsiasi rinomina (la migrazione dei template e il titolo del
+  // registro vengono dopo) — una tantum, flag idempotente
+  {
+    const { migrateToolSlugFreeze } = await import('../main/store/mcp-migrations')
+    try {
+      migrateToolSlugFreeze()
+    } catch (e) {
+      console.error('[sandbotd] congelamento dei toolSlug rimandato al prossimo avvio:', e instanceof Error ? e.message : e)
+    }
+  }
+
   // fase mcp-setup (M7): i server del registro salvati con l'URL coi
   // segnaposto letterali diventano urlTemplate + needsAuth 'setup' (una
   // tantum, flag idempotente)

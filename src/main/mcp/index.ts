@@ -92,6 +92,16 @@ export interface McpServerConfig {
   trustLabel?: string
   /** fase 17c (C5): il kind della fiducia — la UI lo traduce */
   trustKind?: 'verified-domain' | 'github-account' | 'unverified'
+  /**
+   * fase mcp-setup ritocchi (R1): il prefisso STABILE degli strumenti
+   * (mcp__&lt;toolSlug&gt;__…), deciso UNA VOLTA all'installazione e mai più
+   * cambiato — il nome mostrato (cfg.name) può cambiare (titolo del registro)
+   * senza perdere permessi, disabledTools e riferimenti, che stanno per nome
+   * completo. Massimo 24 caratteri: mcp__&lt;slug&gt;__&lt;tool&gt; deve stare nei 64
+   * dei provider. Senza campo (i server di PRIMA della migrazione del
+   * catalogo) vale slug(cfg.name), che per loro non cambia mai.
+   */
+  toolSlug?: string
 }
 
 /**
@@ -152,7 +162,7 @@ export function offeredMcpTools<T extends { name: string }>(tools: T[]): T[] {
  */
 export function composioServerTools(): { manageConnections: string; waitForConnections: string } {
   const cfg = listServers().find((s) => s.catalogId === 'composio')
-  const prefix = `mcp__${cfg ? slug(cfg.name) : 'composio'}`
+  const prefix = `mcp__${cfg ? toolSlugOf(cfg) : 'composio'}`
   return {
     manageConnections: `${prefix}__COMPOSIO_MANAGE_CONNECTIONS`,
     waitForConnections: `${prefix}__COMPOSIO_WAIT_FOR_CONNECTIONS`
@@ -236,17 +246,19 @@ export function saveServers(s: McpServerConfig[]): void {
   setSetting('mcp.servers', s)
 }
 
-function slug(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
-}
+// R1: gli slug degli strumenti vivono nel modulo leggero mcp/slug.ts (serve
+// PURO anche alle migrazioni); qui si riesportano per i consumer di sempre
+import { toolSlugOf, serverOfToolName } from './slug'
+export { toolSlugOf, assignToolSlug, toolSlugKeeping, serverOfToolName, TOOL_SLUG_MAX } from './slug'
 
 /**
  * Fase mcp-setup (M5.2): il prefisso degli strumenti di un server nella
- * pipeline (mcp__&lt;slug del nome&gt;) — per il messaggio di sistema che dice
- * al bot che l'utente ha completato il collegamento.
+ * pipeline (mcp__&lt;toolSlug&gt;) — per il messaggio di sistema che dice al bot
+ * che l'utente ha completato il collegamento. R1: prende la CONFIG (il prefisso
+ * è toolSlugOf, non più lo slug del nome).
  */
-export function serverToolsPrefix(serverName: string): string {
-  return `mcp__${slug(serverName)}`
+export function serverToolsPrefix(cfg: Pick<McpServerConfig, 'toolSlug' | 'name'>): string {
+  return `mcp__${toolSlugOf(cfg)}`
 }
 
 /** Stato del connettore collegato al server (fase 5), se ce n'è uno. */
@@ -338,7 +350,7 @@ async function ensure(cfg: McpServerConfig, force = false): Promise<Cached> {
     serverName: cfg.name,
     originalName: t.name,
     def: {
-      name: `mcp__${slug(cfg.name)}__${t.name}`,
+      name: `mcp__${toolSlugOf(cfg)}__${t.name}`,
       description: `[MCP:${cfg.name}] ${t.description ?? ''}`.slice(0, 400),
       parameters: (t.inputSchema as Record<string, unknown>) ?? { type: 'object', properties: {} }
     },
@@ -494,10 +506,11 @@ export async function callTool(fullName: string, args: Record<string, unknown>, 
   }
   const parts = fullName.split('__')
   if (parts.length < 3) throw new Error(`malformed MCP tool name: ${fullName}`)
-  const serverSlug = parts[1]
   const originalName = parts.slice(2).join('__')
-  for (const cfg of listServers().filter((s) => s.enabled)) {
-    if (slug(cfg.name) !== serverSlug) continue
+  // R1: il routing per toolSlug (mcp__<toolSlug>__…): il primo server
+  // abilitato col prefisso GIUSTO — mai più «il primo che slacca per nome»
+  const cfg = serverOfToolName(listServers(), fullName)
+  if (cfg) {
     // C3 + K6 (ritocchi): uno strumento COMPOSIO_* che non offriamo, chiamato
     // per nome dal modello lo stesso, si rifiuta su OGNI server (per nome,
     // come il gate): mai un'esecuzione nascosta
