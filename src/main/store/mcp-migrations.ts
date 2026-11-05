@@ -87,14 +87,15 @@ export interface SlugDuplicate {
 export function migrateToolSlugs(servers: McpServerConfig[]): { servers: McpServerConfig[]; changed: boolean; duplicates: SlugDuplicate[] } {
   let changed = false
   const duplicates: SlugDuplicate[] = []
-  const taken = new Set<string>()
+  // verifica: gli slug che NON si toccano (catalogo, già congelati) si
+  // prenotano PRIMA del giro — altrimenti un server del registro che nella
+  // lista viene prima del catalogo si prenderebbe lo slug del catalogo
+  const fixed = (s: McpServerConfig): boolean => Boolean(s.catalogId || s.toolSlug)
+  const taken = new Set<string>(servers.filter(fixed).map((s) => toolSlugOf(s)))
   const out = servers.map((s) => {
     const current = toolSlugOf(s)
-    if (s.catalogId || s.toolSlug) {
-      // il server del catalogo non si tocca; chi ha già toolSlug nemmeno
-      taken.add(current)
-      return s
-    }
+    // il server del catalogo non si tocca; chi ha già toolSlug nemmeno
+    if (fixed(s)) return s
     let next = current
     for (let i = 2; taken.has(next); i++) next = `${current}-${i}`
     taken.add(next)

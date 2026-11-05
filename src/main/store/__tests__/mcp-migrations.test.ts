@@ -91,6 +91,14 @@ describe('R1: migrateToolSlugs (core puro)', () => {
     expect(duplicates.map((d) => d.to)).toEqual(['notion-2'])
   })
 
+  it('verifica: il catalogo vince anche quando nella lista viene DOPO il server del registro (l\'ordine non conta)', () => {
+    const registro: McpServerConfig = { id: 'r', name: 'Notion', transport: 'http', url: 'https://r.example/mcp', enabled: true, source: { kind: 'registry', name: 'com.notion/mcp' } }
+    const catalogo: McpServerConfig = { id: 'notion', name: 'Notion', transport: 'http', url: 'https://api.notion.com/mcp', enabled: true, catalogId: 'notion' }
+    const { servers } = migrateToolSlugs([registro, catalogo])
+    expect(servers[0]!.toolSlug).toBe('notion-2')
+    expect(servers[1]).toEqual(catalogo)
+  })
+
   it('un server che HA GIÀ toolSlug non si tocca (installato col codice nuovo)', () => {
     const gia: McpServerConfig = { id: 'x', name: 'Qualunque', transport: 'http', enabled: true, toolSlug: 'congelato' }
     expect(migrateToolSlugs([gia]).servers[0]).toBe(gia)
