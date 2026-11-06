@@ -868,7 +868,14 @@ try {
   await setDark(true)
   await shot('ragiona-900-pannello-scuro.png')
   await setDark(false)
-  await pageEval(`document.body.click()`) // chiude il menu
+  // i menu Radix NON si chiudono con body.click(): Escape sul menu, poi si
+  // aspetta che sparisca (altrimenti P6b misura il menu vecchio che si smonta)
+  await pageEval(`
+    const m = document.querySelector('[role="menu"]')
+    ;(m ?? document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    return 'menu chiuso'
+  `)
+  await waitDom(`!document.querySelector('[role="menu"]')`, 5_000)
   await sleep(400)
   const p6b = await panelMenuCheck(1100)
   check('P6b a 1100 px col pannello aperto il menu «Ragiona» NON interseca il pannello', p6b.ok, p6b.note)
