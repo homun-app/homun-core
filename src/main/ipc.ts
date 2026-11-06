@@ -56,9 +56,9 @@ export const DAEMON_RPC_CHANNELS = [
   'skills:read-file', 'skills:versions', 'skills:restore-version', 'skills:export',
   'skills:github-preview', 'skills:github-add',
   'skills:github-update-preview', 'skills:github-update-apply',
-  // fase skill · Sfoglia (B2/B3): il catalogo dei pacchetti di sole skill e
-  // l'aggiunta dalla finestra (stesso percorso delle card, senza chat)
-  'skills:browse', 'skills:browse-preview', 'skills:browse-install', 'skills:browse-discard',
+  // fase skill · catalogo (K2/K3): il catalogo curato del repo e l'aggiunta
+  // di una voce (staging al commit fissato, senza card in chat)
+  'skills:catalog', 'skills:catalog-preview', 'skills:catalog-install',
   'mcp:list', 'mcp:save', 'mcp:delete', 'mcp:test',
   'connectors:list', 'connectors:connect', 'connectors:disconnect',
   'connectors:set-tools', 'connectors:set-instructions', 'connectors:save-static',

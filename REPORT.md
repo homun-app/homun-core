@@ -1,3 +1,105 @@
+# REPORT FASE SKILL · CATALOGO — SFOGLIA MOSTRA IL CATALOGO CURATO DA NOI (K1–K9)
+
+**Data:** 2026-11-06 · **Base:** `main` @ 3186fc1f, tag **`fase-sfoglia-veloce`** (il tag `fase-pagine` NON esiste nel repo: la fase pagine non è stata fatta, si parte da lì) · **Tag di chiusura:** `fase-skill-catalogo`. Nessun push, nessun tag `v*`, nessuna dipendenza nuova, niente Docker, niente eval, niente `npm run dist`; rete solo su 127.0.0.1 (provider finto della sonda e repository git di prova `file://` con `SANDBOT_TEST_ALLOW_FILE_URLS=1`, **mai github.com**); nessun modello o strumento in rete, nemmeno per le catture; temporanei solo con mkdtemp in `/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/`; app avviata solo con l'ambiente richiesto (`HOME`, `PATH` di sistema, `SANDBOT_TEST_USER_DATA` da mkdtemp, keychain e safestorage finti, più il catalogo finto `SANDBOT_TEST_SKILL_CATALOG`); i menu Radix delle sonde si chiudono con Escape.
+**Verifica finale:** `typecheck` pulito · `vitest` **192 file / 3028 test verdi** · `build` verde · sonda nuova `fase-skill-catalogo-probe.mjs` **48/48** (corse consecutive verdi: 40/40, 40/40, 40/40 e 48/48 con i controlli DOM allargati; **0 daemon dopo ogni corsa**) · `fase-skill-probe.mjs` **49/49** una volta, 0 daemon · catture **controllate sul DOM e coi pixel misurati in locale, e dichiarate così** (il visualizer non restituiva le immagini: verifica DOM di traboccamento nella sonda a 1440 e 900, chiaro e scuro, più controllo pixel locale — 8 catture non vuote, chiaro/scuro nettamente diversi; § Catture).
+
+## Esito per punto
+
+| Punto | Esito | Cosa è cambiato |
+|---|---|---|
+| **K1** catalogo nel repo, validato | **fatto** | `analisi/skill-catalog-bozza.json` copiato **tale e quale** in `src/shared/skill-catalog/skill-catalog.json` (38 voci, 8 repository, commit fissati). Modulo puro `src/shared/skill-catalog/index.ts` sul modello di `app-catalog/`: tipi (`SkillCatalogEntry`), `SKILL_CATEGORIES` (writing, work, thinking, research, career) con etichette it/en, `loadSkillCatalog()` (PURO: renderer, main, daemon e test), `skillCatalogIssues()` (la validazione), `searchSkillCatalog()` (la ricerca condivisa), `skillCatalogInstallState()` (available/installed/update), `catalogFileIncluded()` (il glob delle esclusioni). `THIRD_PARTY_NOTICES.md`: sezione «Skill del catalogo» con repository, voci, licenze e la frase che i file si scaricano dalla fonte al commit indicato e **non sono ridistribuiti nel repo**. |
+| **K2** Sfoglia legge il catalogo | **fatto** | La sezione «Sfoglia» della finestra Skill mostra le voci del catalogo (**nessuna rete**: l'elenco arriva dall'RPC `skills:catalog`, il file è nell'app, appare subito — la sonda misura ~1 ms), **raggruppate per categoria** coi titoletti nell'ordine del catalogo (Scrittura, Lavoro, Pensiero, Ricerca, Carriera), **filtri a pillola** (Tutte + 5 categorie) e la **ricerca in alto** che filtra anche il catalogo con la funzione condivisa `searchSkillCatalog` (nome, descrizione nella lingua attiva, repo, categoria). Ogni riga: nome, descrizione nella lingua, fonte `owner/repo` piccola e grigia, «Aggiunta» e «Aggiornamento disponibile». Tolto tutto lo Sfoglia dei marketplace (elenco sotto). I **plugin** restano installabili da Collega app › Marketplace e visibili come righe plugin. |
+| **K3** installare una voce | **fatto** | Percorso dell'import da GitHub di oggi: `stageRepo` (esportata) con il **commit fissato del catalogo come ref**; lo sha dello staging dev'essere **esattamente** quello della voce o si rifiuta (prove sperimentali su `file://`: fetch di uno sha assente fallisce; uno sha di un **blob** o dell'oggetto di un **tag annotato** lascia lo staging in cima al ramo → il controllo sull'sha li rifiuta). Copia **solo i file ammessi**: glob `files.exclude` (con `**`, anche a segmenti interni; una cartella esclusa porta via l'albero), `SKILL.md` e `LICENSE*` **sempre**. Cartella = `id` (con `-2` ai conflitti), `name` del frontmatter allineato come oggi. Voce di libreria: `source: 'github'`, `origin: { repo, commit, path, catalogId }`, `homunNotes`, `invocation` — **sempre «di terzi»** (contaminazione `<dato_esterno>` col tool skill, `imported` col `/`). Anteprima: nome/descrizione, fonte e commit (12), licenza, elenco dei file che entreranno, «Adattamenti di Homun», «Bot che la usano». «Aggiorna»: catalogo nuovo con commit diverso → riga «Aggiornamento disponibile» e flusso di oggi (diff vecchio→nuovo, versione vecchia in `.versions/`), **note e invocation si aggiornano col catalogo**. `SANDBOT_TEST_SKILL_CATALOG=<file json>` letta **solo** insieme a `SANDBOT_TEST_USER_DATA` sostituisce il catalogo del repo. RPC nuove: `skills:catalog`, `skills:catalog-preview` (staging vivo nel daemon, id opaco), `skills:catalog-install`. |
+| **K4** note per Homun nel corpo per il modello | **fatto** | Una skill della libreria con `homunNotes`, quando arriva al modello (tool `skill` **ed** espansione `/nome`), porta in coda al corpo `## Notes for Homun` + le note (PRIMA dell'elenco dei file di supporto). Il file `SKILL.md` su disco **non cambia**; le note vivono nella voce di libreria. Nella finestra, il dettaglio mostra «Adattamenti di Homun» in sola lettura. Una skill senza note è **identica a oggi** (test di uguaglianza letterale). |
+| **K5** convenzioni di Claude Code, per tutte le skill | **fatto** | 1) `disable-model-invocation: true` nel frontmatter **oppure** `invocation: 'user'` nella voce di libreria (vale per libreria **e plugin**): la skill **non compare** in «# Available skills», il tool `skill` la **rifiuta** con l'errore inglese esatto `This skill runs only when the user invokes it with /name.` (anche `skill({name, file})`), il `/nome` dell'utente funziona come sempre, la finestra la marca **«solo con /»**. 2) Segnaposto nell'espansione `/nome`: `$ARGUMENTS` (e `$TEXT`, `$OBJECTIVE`) → il testo dopo il nome; `$1`, `$2`… → le parole separate da spazio (`$10` non è `$1` seguito da 0; oltre le parole, stringa vuota; i `$` dell'utente restano letterali). Caricata col tool: i segnaposto **restano** e in coda c'è la riga `Placeholders like $ARGUMENTS refer to the user's request.` (solo se la skill ne ha). Le note per Homun **non** vengono toccate dai segnaposto (una nota del catalogo cita `$ARGUMENTS` letteralmente). |
+| **K6** catalogo in «# Available skills» | **fatto** | Le voci installate si comportano come le altre della libreria (nome + descrizione nel prompt), con le due eccezioni K5. Test: intestazione e istruzioni della sezione **identiche a oggi** (prime 5 righe confrontate letteralmente). |
+| **K7** interfaccia e testi | **fatto** | Testi nuovi it/en rigenerati con `npm run i18n:extract` e compilati: titoli delle categorie (Scrittura/Writing, Lavoro/Work, Pensiero/Thinking, Ricerca/Research, Carriera/Career), «Adattamenti di Homun»/«Homun's adaptations», «solo con /»/«only with /», «Aggiornamento disponibile»/«Update available», la licenza, «File che entrano», gli errori `skill.err.catalog*`. En tradotte a mano nel `.po` (il test C1 le esige). Stile come la finestra di oggi: un campo di ricerca, righe affiancate, niente anello di focus all'apertura (T5 resta). |
+| **K8** sonda | **fatta** | `scripts/fase-skill-catalogo-probe.mjs` col catalogo finto `file://` di K3: (1) categorie, filtri, ricerca, elenco subito; (2) anteprima con fonte, licenza, file senza `evals/`, note; (3) Aggiungi per il solo Alfa: libreria, «Aggiunta», `/` di Alfa sì e di Beta no; (4) turno `/voce testo` al provider finto: corpo, note in coda, `$ARGUMENTS` sostituito; (5) `invocation: 'user'`: assente dal system prompt, rifiutata dal tool, funzionante con `/`; (6) «Aggiornamento disponibile» col secondo catalogo e aggiornamento che funziona; (7) 1440 e 900, chiaro e scuro, **niente sporge** (controllo DOM: contenuto e pagina non scrollano in larghezza, dialogo dentro la finestra). **48/48**, tre corse consecutive verdi, **0 daemon dopo ognuna**; più `fase-skill-probe.mjs` **49/49** una volta. |
+| **K9** chiusura | **fatta** | Typecheck, vitest (192 file / 3028), build verdi; sonde come sopra; catture dichiarate sul DOM (+ pixel locali); REPORT; commit e tag `fase-skill-catalogo`. Nessun push. |
+
+## I test visti fallire PRIMA (nome, riga, errore)
+
+Ogni punto: prima il test, poi il codice. Le righe vengono dai file di test finali girati prima dell'implementazione (i moduli non esistevano) o, dove il modulo c'era già, con l'implementazione assente.
+
+| Punto | Test | Riga · errore (rosso) |
+|---|---|---|
+| **K1** | `src/shared/__tests__/skill-catalog.test.ts` — «ci sono voci e NESSUN problema di validazione» | riga 9:111 · `Error: Cannot find module '/src/shared/skill-catalog'` (modulo e JSON mancanti). Dopo la copia del JSON, rosso residuo a riga 21:21 · `AssertionError: expected 0 to be greater than 0` (il caricatore di default non leggeva `skills` del file) → 11/11 verdi. |
+| **K2** | `src/renderer/src/__tests__/skills-catalog-section.test.ts` — «sta DOPO l'elenco delle skill e dei plugin» | riga 28:23 · `AssertionError: expected -1 to be greater than 15577` (nessuna sezione `skills-catalog`); 8 test su 8 rossi (elenco, filtri, titoletti, riga, residui browse) → 8/8 verdi. |
+| **K3** | `src/main/agent/__tests__/skill-catalog-install.test.ts` — tutta la suite | riga 22:5 · `Error: Cannot find module '/src/main/agent/skill-catalog'`. In corsa anche due bug veri visti dai test: il filtro di copia escludeva la radice (`expected false to be true` su `applySkillUpdate`), e `skillCatalogInstallState` aspettava le voci in forma diversa (`expected 'available' to be 'installed'`) → 13/13 verdi. |
+| **K4** | `src/main/agent/__tests__/skill-homun-notes.test.ts` — «il tool skill: il corpo finisce con "## Notes for Homun" e le note» | riga 46:22 · `AssertionError: expected false to be true` (le note non c'erano da nessuna parte: 4 rossi su 6) → 6/6 verdi. |
+| **K5** | `src/main/agent/__tests__/skill-claude-code.test.ts` — riga della tabella «solo-frontmatter: nel prompt NO…» | riga 68:32 · `AssertionError: expected true to be false` (la skill era ancora nel prompt); 11 rossi su 16 (le due regole). Segnaposto: riga 123 · `expected '…' to contain 'Riassumi: riscrivi questo testo\n'` → 16/16 verdi. |
+| **K6** | stesso file, describe «K6» | «quelle "solo con /" restano FUORI» rosso con `solo-voce` nel prompt prima del filtro in `buildSkillsSection`; verde dopo. |
+| **K7** | `src/main/__tests__/ui-text.test.ts` — «OGNI id di UI esiste in entrambi i .po…» | `it mancante: skill.err.catalogPin` (i 5 id nuovi senza estrazione) → verde dopo `i18n:extract` + traduzioni en a mano nel `.po`. |
+| **K8** | sonda `fase-skill-catalogo-probe.mjs` | prima corsa rossa: l'Escape inviato dopo il click chiudeva la finestra Radix appena aperta (`KO 1·finestra: si apre dal menu in fondo`); poi il `previewId` dell'anteprima passato al posto dell'id di staging (`KO 3·in libreria — null`) e le attese mancanti sui caricamenti (`non trovato: Aggiungi`). Verdi 40/40 ×3, 48/48 finale. |
+
+## I testi per il modello, prima e dopo (K4, K5)
+
+Nessun altro testo per il modello cambia: K6 è esclusione dalle righe esistenti, il resto della sezione è letterale (test).
+
+### K4 — le note per Homun (skill con `homunNotes`, voce del catalogo installata)
+
+**Prima** (tool `skill`, come oggi — e resta così per le skill senza note):
+
+```
+# <name>
+
+<description>
+
+<corpo della skill>
+
+Support files (read with skill({name, file})):
+- <file>
+```
+
+**Dopo** (tool `skill` **e** espansione `/nome`; le note stanno DOPO il corpo, PRIMA dell'elenco dei file):
+
+```
+# <name>
+
+<description>
+
+<corpo della skill>
+
+## Notes for Homun
+<homunNotes>
+
+Support files (read with skill({name, file})):
+- <file>
+```
+
+**Espansione `/nome`** — prima: `The user invoked the skill "X" for this message. Its full instructions are below — do not load it again with skill(); follow them now.` + `<corpo>` + `---` + `<resto>`; dopo è lo stesso con `<corpo>` **seguito da** `## Notes for Homun` + `<homunNotes>` prima del `---`. Il file `SKILL.md` su disco non cambia mai; una skill senza note è byte per byte come oggi.
+
+### K5.1 — `disable-model-invocation: true` o `invocation: 'user'`
+
+- **Prima**: la skill compariva fra le righe `- name: description` di «# Available skills» e il tool `skill` la caricava.
+- **Dopo**: **non compare** nella sezione (per libreria e plugin); il tool `skill` risponde **`This skill runs only when the user invokes it with /name.`** (anche con `file`); il `/nome` dell'utente porta il corpo come sempre; la finestra la marca «solo con /».
+
+### K5.2 — i segnaposto di Claude Code
+
+**Prima** (espansione `/nome testo`): il corpo arrivava con `$ARGUMENTS` **letterale**.
+
+**Dopo**:
+
+- `/nome riscrivi questo testo` → nel corpo `$ARGUMENTS`, `$TEXT` e `$OBJECTIVE` diventano `riscrivi questo testo`; `$1`, `$2`, `$3` diventano `riscrivi`, `questo`, `testo`; `$10` (oltre le parole) diventa stringa vuota; un `$` nel testo dell'utente resta letterale (niente doppia sostituzione).
+- Caricata **col tool** (senza `/`): i segnaposto **restano** e in coda all'output si aggiunge **`Placeholders like $ARGUMENTS refer to the user's request.`** (solo se il corpo ne ha).
+- Le note per Homun (K4) non vengono mai toccate dai segnaposto.
+
+## Quello che ho tolto (K2 — Sfoglia sui marketplace)
+
+- **`src/main/agent/skill-browse.ts`** — il browser dei pacchetti dei marketplace (classificazione, clone parziale `-tree`, cache **su disco** `skill-browse.json`, ls-remote/fetch, pool a 8, tetto 60 s);
+- **`src/shared/skill-browse-search.ts`** — la ricerca dei pacchetti (`matchesSkillPackQuery`…), sostituita da `searchSkillCatalog` del catalogo;
+- **RPC** `skills:browse`, `skills:browse-preview`, `skills:browse-install`, `skills:browse-discard` (canale in `ipc.ts`, `preload/index.ts`, handler in `daemon/api.ts` con lo stato `skillBrowses`/`skillBrowserInst` e la potatura);
+- **eventi** `skills:browse-progress` e `skills:browse-updated` (`shared/types.ts`);
+- **finestra**: la griglia dei pacchetti, `BrowsePreview`, il conteggio «N di M plugin letti», «Riprova»/«Alcuni pacchetti non si sono caricati» (SkillsWindow.tsx);
+- **test**: `skill-browse.test.ts`, `skill-browse-veloce.test.ts`, `skill-browse-install.test.ts`, `skills-browse-section.test.ts`, `skills-window-veloce.test.ts`; `skills-window-ritocchi.test.ts` riscritto sulle invarianti che restano (T1 ricerca unica, T2 @container, T3/T4 sull'anteprima del catalogo, T5 focus);
+- **sonda** `scripts/fase-skill-sfoglia-probe.mjs`;
+- **testi UI** `skill.browse.*` da `ui-messages.ts` (sostituiti da `skill.err.catalog*`).
+- **Restato** (condiviso con Collega app › Marketplace): tutta la pipeline dei marketplace e dei plugin (`marketplace.ts`, `marketplace-manager.ts`, `install.ts`), la card del bot, l'installazione dei plugin da Collega app e le righe plugin nella finestra Skill.
+
+## Catture
+
+`docs/catture/skill-catalogo/` (8): `catalogo-{1440,900}-{chiaro,scuro}.png` e `anteprima-{1440,900}-{chiaro,scuro}.png`. Il visualizer non restituiva le immagini a chi scrive, quindi — come la spec permette — sono **controllate sul DOM e dichiarate così**: la sonda verifica a ogni combinazione di larghezza e tema che il contenuto della finestra e la pagina non scrollino in larghezza e che il dialogo stia dentro la finestra («niente sporge», 8 controlli). In più, verifica pixel **in locale** (PIL, niente rete): le 8 catture non sono vuote (varianza 547–5108) e chiaro e scuro differiscono nettamente (luminosità media ~170–204 contro ~20–30).
+
 # REPORT FASE SFOGLIA VELOCE — LA SFOGLIA CHE SI APRE SUBITO E IL COMPOSITORE ALLINEATO (V1–V4)
 
 **Data:** 2026-11-06 · **Base:** `main` @ 621ba936 · **Tag di chiusura:** `fase-sfoglia-veloce`. Nessun push, nessun tag `v*`, nessuna dipendenza nuova, niente Docker, niente eval, niente `npm run dist`; rete solo su 127.0.0.1 (marketplace di test `file://` con `SANDBOT_TEST_ALLOW_FILE_URLS=1`); nessun modello o strumento in rete, nemmeno per le catture; temporanei solo con mkdtemp nella cartella dei vincoli; i menu Radix delle sonde si chiudono con Escape. App avviata con l'ambiente pulito richiesto (`HOME`, `PATH` di sistema, `SANDBOT_TEST_USER_DATA` da mkdtemp, keychain e safestorage finti) **più una variabile sola**: `HOMUN_GIT_PATH`, l'env esplicito che `tool-paths` (A7) già prevede per risolvere git, puntato al git della sonda — un involucro LOCALE di `/usr/bin/git` che registra le chiamate (per contare i `git clone`) e, solo nella parte dei tempi, le rallenta (1 s per `show` e per `clone`, come il clone parziale da GitHub). Nessun testo letto dal modello cambia.

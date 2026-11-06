@@ -9,7 +9,7 @@ import {
   writeMemory, updateMemory, deleteMemory, listMemories, searchMemoriesByQuery,
   type MemoryTier, type MemoryScope
 } from './memory'
-import { readSkillFor, readSkillFileFor, writeSkillFromBot } from './skills'
+import { readSkillFor, readSkillFileFor, writeSkillFromBot, SKILL_USER_ONLY_REFUSAL } from './skills'
 
 /** Fase 10 (punto 1): limiti della creazione di bot da parte di un bot. */
 export const MAX_CREATE_AGENTS_PER_TURN = 6
@@ -1189,17 +1189,19 @@ export async function executeTool(
       // supporto; con file SOLO se il percorso è esattamente uno dell'elenco.
       // fase 12: le skill del figlio sono quelle del PADRE. Una skill
       // importata (GitHub o plugin) è testo NON FIDATO: meta.webContent → il
-      // loop mette il blocco dati esterni e contamina il turno (decisione 3)
+      // loop mette il blocco dati esterni e contamina il turno (decisione 3).
+      // K5 (fase skill · catalogo): una skill «solo con /» NON si carica da
+      // qui — né intera né a pezzi col tool
       const name = String(input.name ?? '')
       const file = input.file === undefined ? undefined : String(input.file)
+      const base = readSkillFor(agentId, name)
+      if (base?.userOnly) return { output: SKILL_USER_ONLY_REFUSAL, meta: {} }
       if (file === undefined) {
-        const r = readSkillFor(agentId, name)
-        if (!r) return { output: `Skill "${name}" not found (or not enabled for this bot).`, meta: {} }
-        return { output: r.output, meta: { skill: name, ...(r.webContent ? { webContent: true } : {}) } }
+        if (!base) return { output: `Skill "${name}" not found (or not enabled for this bot).`, meta: {} }
+        return { output: base.output, meta: { skill: name, ...(base.webContent ? { webContent: true } : {}) } }
       }
       const f = readSkillFileFor(agentId, name, file)
       if (!f) {
-        const base = readSkillFor(agentId, name)
         return {
           output: base
             ? `No file "${file}" in this skill. The files are:\n${base.files.map((x) => `- ${x}`).join('\n')}`

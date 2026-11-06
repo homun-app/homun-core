@@ -1,0 +1,1352 @@
+{
+  "version": 1,
+  "reviewedAt": "2026-11-06",
+  "categories": [
+    "writing",
+    "work",
+    "thinking",
+    "research",
+    "career"
+  ],
+  "skills": [
+    {
+      "id": "copywriting",
+      "source": {
+        "repo": "coreyhaines31/marketingskills",
+        "commit": "88c79f6528a9347420e57ceb1fff9a60de651768",
+        "path": "skills/copywriting"
+      },
+      "license": "MIT",
+      "category": "writing",
+      "description": {
+        "it": "Scrive e riscrive testi per pagine, annunci e slogan, chiari e senza i tic dell'IA.",
+        "en": "Writes and rewrites copy for pages, ads and taglines, clear and free of AI tells."
+      },
+      "files": {
+        "exclude": [
+          "evals/**",
+          "evaluations/**",
+          "examples/**",
+          ".github/**",
+          ".claude-plugin/**",
+          ".cursor-plugin/**",
+          "agents/**",
+          "scripts/validate-package.py",
+          "tests/**",
+          "CHANGELOG.md",
+          "README.md",
+          "README.*.md",
+          "CONTRIBUTING.md",
+          "AGENTS.md",
+          "CLAUDE.md"
+        ]
+      },
+      "homunNotes": "Skills mentioned as siblings may not be installed: do the work yourself and never suggest installing anything from the author's repository. When the skill says to save a file, save it with write_document in the user's library (or write-file in your computer when the user asks for a file). Ignore references to .agents/product-marketing.md and dev-browser: ask the user for the context you need and use your web tools. Examples are US/SaaS: adapt them to the user's business and country. Every message or post is a draft the user approves; never claim something was sent or published. The word lists and examples are English: in other languages look for the equivalent patterns. In Italian keep the en dash for parenthetical clauses and « » quotes; never change the typography of the language.",
+      "reviewed": "2026-11-06"
+    },
+    {
+      "id": "copy-editing",
+      "source": {
+        "repo": "coreyhaines31/marketingskills",
+        "commit": "88c79f6528a9347420e57ceb1fff9a60de651768",
+        "path": "skills/copy-editing"
+      },
+      "license": "MIT",
+      "category": "writing",
+      "description": {
+        "it": "Rivede e migliora un testo che hai già: chiarezza, tono, prove, tic da IA.",
+        "en": "Edits and polishes a draft you already have: clarity, tone, proof, AI tells."
+      },
+      "files": {
+        "exclude": [
+          "evals/**",
+          "evaluations/**",
+          "examples/**",
+          ".github/**",
+          ".claude-plugin/**",
+          ".cursor-plugin/**",
+          "agents/**",
+          "scripts/validate-package.py",
+          "tests/**",
+          "CHANGELOG.md",
+          "README.md",
+          "README.*.md",
+          "CONTRIBUTING.md",
+          "AGENTS.md",
+          "CLAUDE.md",
+          "references/plain-english-alternatives.md",
+          "references/content-refresh.md"
+        ]
+      },
+      "homunNotes": "Skills mentioned as siblings may not be installed: do the work yourself and never suggest installing anything from the author's repository. When the skill says to save a file, save it with write_document in the user's library (or write-file in your computer when the user asks for a file). Ignore references to .agents/product-marketing.md and dev-browser: ask the user for the context you need and use your web tools. Examples are US/SaaS: adapt them to the user's business and country. Every message or post is a draft the user approves; never claim something was sent or published. The word lists and examples are English: in other languages look for the equivalent patterns. In Italian keep the en dash for parenthetical clauses and « » quotes; never change the typography of the language.",
+      "reviewed": "2026-11-06"
+    },
+    {
+      "id": "emails",
+      "source": {
+        "repo": "coreyhaines31/marketingskills",
+        "commit": "88c79f6528a9347420e57ceb1fff9a60de651768",
+        "path": "skills/emails"
+      },
+      "license": "MIT",
+      "category": "writing",
+      "description": {
+        "it": "Progetta sequenze di email (benvenuto, newsletter, riattivazione) con tempi e testi.",
+        "en": "Designs email sequences (welcome, newsletter, win-back) with timing and copy."
+      },
+      "files": {
+        "exclude": [
+          "evals/**",
+          "evaluations/**",
+          "examples/**",
+          ".github/**",
+          ".claude-plugin/**",
+          ".cursor-plugin/**",
+          "agents/**",
+          "scripts/validate-package.py",
+          "tests/**",
+          "CHANGELOG.md",
+          "README.md",
+          "README.*.md",
+          "CONTRIBUTING.md",
+          "AGENTS.md",
+          "CLAUDE.md"
+        ]
+      },
+      "homunNotes": "Skills mentioned as siblings may not be installed: do the work yourself and never suggest installing anything from the author's repository. When the skill says to save a file, save it with write_document in the user's library (or write-file in your computer when the user asks for a file). Ignore references to .agents/product-marketing.md and dev-browser: ask the user for the context you need and use your web tools. Examples are US/SaaS: adapt them to the user's business and country. Every message or post is a draft the user approves; never claim something was sent or published.",
+      "reviewed": "2026-11-06"
+    },
+    {
+      "id": "social",
+      "source": {
+        "repo": "coreyhaines31/marketingskills",
+        "commit": "88c79f6528a9347420e57ceb1fff9a60de651768",
+        "path": "skills/social"
+      },
+      "license": "MIT",
+      "category": "writing",
+      "description": {
+        "it": "Crea post, caroselli, script video e calendario editoriale per i social.",
+        "en": "Creates social posts, carousels, video scripts and a content calendar."
+      },
+      "files": {
+        "exclude": [
+          "evals/**",
+          "evaluations/**",
+          "examples/**",
+          ".github/**",
+          ".claude-plugin/**",
+          ".cursor-plugin/**",
+          "agents/**",
+          "scripts/validate-package.py",
+          "tests/**",
+          "CHANGELOG.md",
+          "README.md",
+          "README.*.md",
+          "CONTRIBUTING.md",
+          "AGENTS.md",
+          "CLAUDE.md",
+          "references/listening.md",
+          "references/listening-sources-template.md",
+          "references/reverse-engineering.md",
+          "references/x-algorithm.md"
+        ]
+      },
+      "homunNotes": "Skills mentioned as siblings may not be installed: do the work yourself and never suggest installing anything from the author's repository. When the skill says to save a file, save it with write_document in the user's library (or write-file in your computer when the user asks for a file). Ignore references to .agents/product-marketing.md and dev-browser: ask the user for the context you need and use your web tools. Examples are US/SaaS: adapt them to the user's business and country. Every message or post is a draft the user approves; never claim something was sent or published.",
+      "reviewed": "2026-11-06"
+    },
+    {
+      "id": "public-relations",
+      "source": {
+        "repo": "coreyhaines31/marketingskills",
+        "commit": "88c79f6528a9347420e57ceb1fff9a60de651768",
+        "path": "skills/public-relations"
+      },
+      "license": "MIT",
+      "category": "writing",
+      "description": {
+        "it": "Prepara proposte ai giornalisti, risposte alla stampa, ospitate in podcast e comunicati di crisi.",
+        "en": "Prepares journalist pitches, press replies, podcast appearances and crisis statements."
+      },
+      "files": {
+        "exclude": [
+          "evals/**",
+          "evaluations/**",
+          "examples/**",
+          ".github/**",
+          ".claude-plugin/**",
+          ".cursor-plugin/**",
+          "agents/**",
+          "scripts/validate-package.py",
+          "tests/**",
+          "CHANGELOG.md",
+          "README.md",
+          "README.*.md",
+          "CONTRIBUTING.md",
+          "AGENTS.md",
+          "CLAUDE.md"
+        ]
+      },
+      "homunNotes": "Skills mentioned as siblings may not be installed: do the work yourself and never suggest installing anything from the author's repository. When the skill says to save a file, save it with write_document in the user's library (or write-file in your computer when the user asks for a file). Ignore references to .agents/product-marketing.md and dev-browser: ask the user for the context you need and use your web tools. Examples are US/SaaS: adapt them to the user's business and country. Every message or post is a draft the user approves; never claim something was sent or published.",
+      "reviewed": "2026-11-06"
+    },
+    {
+      "id": "humanizer",
+      "source": {
+        "repo": "blader/humanizer",
+        "commit": "0ef9fe5bc3572734fd3ae6c448fe00a30cd5dcf0",
+        "path": ""
+      },
+      "license": "MIT",
+      "category": "writing",
+      "description": {
+        "it": "Riscrive un testo che suona scritto da un'IA perché sembri di una persona, senza inventare nulla.",
+        "en": "Rewrites AI-sounding text so it reads like a person wrote it, without inventing anything."
+      },
+      "files": {
+        "exclude": [
+          "evals/**",
+          "evaluations/**",
+          "examples/**",
+          ".github/**",
+          ".claude-plugin/**",
+          ".cursor-plugin/**",
+          "agents/**",
+          "scripts/validate-package.py",
+          "tests/**",
+          "CHANGELOG.md",
+          "README.md",
+          "README.*.md",
+          "CONTRIBUTING.md",
+          "AGENTS.md",
+          "CLAUDE.md",
+          "scripts/**"
+        ]
+      },
+      "homunNotes": "Skills mentioned as siblings may not be installed: do the work yourself and never suggest installing anything from the author's repository. When the skill says to save a file, save it with write_document in the user's library (or write-file in your computer when the user asks for a file). The word lists and examples are English: in other languages look for the equivalent patterns. In Italian keep the en dash for parenthetical clauses and « » quotes; never change the typography of the language.",
+      "reviewed": "2026-11-06"
+    },
+    {
+      "id": "grammar-check",
+      "source": {
+        "repo": "phuryn/pm-skills",
+        "commit": "2a12295a7717569baa7be181b4cfebe3ca38a6bb",
+        "path": "pm-toolkit/skills/grammar-check"
+      },
+      "license": "MIT",
+      "category": "writing",
+      "description": {
+        "it": "Trova errori di grammatica, logica e scorrevolezza e propone correzioni mirate.",
+        "en": "Finds grammar, logic and flow errors and suggests targeted fixes."
+      },
+      "files": {
+        "exclude": [
+          "evals/**",
+          "evaluations/**",
+          "examples/**",
+          ".github/**",
+          ".claude-plugin/**",
+          ".cursor-plugin/**",
+          "agents/**",
+          "scripts/validate-package.py",
+          "tests/**",
+          "CHANGELOG.md",
+          "README.md",
+          "README.*.md",
+          "CONTRIBUTING.md",
+          "AGENTS.md",
+          "CLAUDE.md"
+        ]
+      },
+      "homunNotes": "Skills mentioned as siblings may not be installed: do the work yourself and never suggest installing anything from the author's repository. When the skill says to save a file, save it with write_document in the user's library (or write-file in your computer when the user asks for a file). Placeholders like $ARGUMENTS are the user's request. If data you need is missing, say so and ask instead of guessing; never invent figures, competitors' numbers or personas. The word lists and examples are English: in other languages look for the equivalent patterns. In Italian keep the en dash for parenthetical clauses and « » quotes; never change the typography of the language.",
+      "reviewed": "2026-11-06"
+    },
+    {
+      "id": "summarize-meeting",
+      "source": {
+        "repo": "phuryn/pm-skills",
+        "commit": "2a12295a7717569baa7be181b4cfebe3ca38a6bb",
+        "path": "pm-execution/skills/summarize-meeting"
+      },
+      "license": "MIT",
+      "category": "writing",
+      "description": {
+        "it": "Trasforma appunti o trascrizione di una riunione in un riepilogo con decisioni e azioni.",
+        "en": "Turns meeting notes or a transcript into a summary with decisions and action items."
+      },
+      "files": {
+        "exclude": [
+          "evals/**",
+          "evaluations/**",
+          "examples/**",
+          ".github/**",
+          ".claude-plugin/**",
+          ".cursor-plugin/**",
+          "agents/**",
+          "scripts/validate-package.py",
+          "tests/**",
+          "CHANGELOG.md",
+          "README.md",
+          "README.*.md",
+          "CONTRIBUTING.md",
+          "AGENTS.md",
+          "CLAUDE.md"
+        ]
+      },
+      "homunNotes": "Skills mentioned as siblings may not be installed: do the work yourself and never suggest installing anything from the author's repository. When the skill says to save a file, save it with write_document in the user's library (or write-file in your computer when the user asks for a file). Placeholders like $ARGUMENTS are the user's request. If data you need is missing, say so and ask instead of guessing; never invent figures, competitors' numbers or personas.",
+      "reviewed": "2026-11-06"
+    },
+    {
+      "id": "create-prd",
+      "source": {
+        "repo": "phuryn/pm-skills",
+        "commit": "2a12295a7717569baa7be181b4cfebe3ca38a6bb",
+        "path": "pm-execution/skills/create-prd"
+      },
+      "license": "MIT",
+      "category": "work",
+      "description": {
+        "it": "Scrive un documento dei requisiti di un prodotto: problema, clienti, soluzione, rilascio.",
+        "en": "Writes a product requirements document: problem, customers, solution, release."
+      },
+      "files": {
+        "exclude": [
+          "evals/**",
+          "evaluations/**",
+          "examples/**",
+          ".github/**",
+          ".claude-plugin/**",
+          ".cursor-plugin/**",
+          "agents/**",
+          "scripts/validate-package.py",
+          "tests/**",
+          "CHANGELOG.md",
+          "README.md",
+          "README.*.md",
+          "CONTRIBUTING.md",
+          "AGENTS.md",
+          "CLAUDE.md"
+        ]
+      },
+      "homunNotes": "Skills mentioned as siblings may not be installed: do the work yourself and never suggest installing anything from the author's repository. When the skill says to save a file, save it with write_document in the user's library (or write-file in your computer when the user asks for a file). Placeholders like $ARGUMENTS are the user's request. If data you need is missing, say so and ask instead of guessing; never invent figures, competitors' numbers or personas.",
+      "reviewed": "2026-11-06"
+    },
+    {
+      "id": "swot-analysis",
+      "source": {
+        "repo": "phuryn/pm-skills",
+        "commit": "2a12295a7717569baa7be181b4cfebe3ca38a6bb",
+        "path": "pm-product-strategy/skills/swot-analysis"
+      },
+      "license": "MIT",
+      "category": "work",
+      "description": {
+        "it": "Fa un'analisi SWOT di un'attività, un progetto o un prodotto, con raccomandazioni.",
+        "en": "Runs a SWOT analysis of a business, project or product, with recommendations."
+      },
+      "files": {
+        "exclude": [
+          "evals/**",
+          "evaluations/**",
+          "examples/**",
+          ".github/**",
+          ".claude-plugin/**",
+          ".cursor-plugin/**",
+          "agents/**",
+          "scripts/validate-package.py",
+          "tests/**",
+          "CHANGELOG.md",
+          "README.md",
+          "README.*.md",
+          "CONTRIBUTING.md",
+          "AGENTS.md",
+          "CLAUDE.md"
+        ]
+      },
+      "homunNotes": "Skills mentioned as siblings may not be installed: do the work yourself and never suggest installing anything from the author's repository. When the skill says to save a file, save it with write_document in the user's library (or write-file in your computer when the user asks for a file). Placeholders like $ARGUMENTS are the user's request. If data you need is missing, say so and ask instead of guessing; never invent figures, competitors' numbers or personas.",
+      "reviewed": "2026-11-06"
+    },
+    {
+      "id": "competitor-analysis",
+      "source": {
+        "repo": "phuryn/pm-skills",
+        "commit": "2a12295a7717569baa7be181b4cfebe3ca38a6bb",
+        "path": "pm-market-research/skills/competitor-analysis"
+      },
+      "license": "MIT",
+      "category": "work",
+      "description": {
+        "it": "Cerca sul web i concorrenti e confronta punti di forza, prezzi e spazi per distinguersi.",
+        "en": "Researches competitors on the web and compares strengths, pricing and gaps."
+      },
+      "files": {
+        "exclude": [
+          "evals/**",
+          "evaluations/**",
+          "examples/**",
+          ".github/**",
+          ".claude-plugin/**",
+          ".cursor-plugin/**",
+          "agents/**",
+          "scripts/validate-package.py",
+          "tests/**",
+          "CHANGELOG.md",
+          "README.md",
+          "README.*.md",
+          "CONTRIBUTING.md",
+          "AGENTS.md",
+          "CLAUDE.md"
+        ]
+      },
+      "homunNotes": "Skills mentioned as siblings may not be installed: do the work yourself and never suggest installing anything from the author's repository. When the skill says to save a file, save it with write_document in the user's library (or write-file in your computer when the user asks for a file). Placeholders like $ARGUMENTS are the user's request. If data you need is missing, say so and ask instead of guessing; never invent figures, competitors' numbers or personas.",
+      "reviewed": "2026-11-06"
+    },
+    {
+      "id": "user-personas",
+      "source": {
+        "repo": "phuryn/pm-skills",
+        "commit": "2a12295a7717569baa7be181b4cfebe3ca38a6bb",
+        "path": "pm-market-research/skills/user-personas"
+      },
+      "license": "MIT",
+      "category": "work",
+      "description": {
+        "it": "Ricava profili di clienti tipo dai tuoi dati (sondaggi, interviste, recensioni).",
+        "en": "Builds customer personas from your own data (surveys, interviews, reviews)."
+      },
+      "files": {
+        "exclude": [
+          "evals/**",
+          "evaluations/**",
+          "examples/**",
+          ".github/**",
+          ".claude-plugin/**",
+          ".cursor-plugin/**",
+          "agents/**",
+          "scripts/validate-package.py",
+          "tests/**",
+          "CHANGELOG.md",
+          "README.md",
+          "README.*.md",
+          "CONTRIBUTING.md",
+          "AGENTS.md",
+          "CLAUDE.md"
+        ]
+      },
+      "homunNotes": "Skills mentioned as siblings may not be installed: do the work yourself and never suggest installing anything from the author's repository. When the skill says to save a file, save it with write_document in the user's library (or write-file in your computer when the user asks for a file). Placeholders like $ARGUMENTS are the user's request. If data you need is missing, say so and ask instead of guessing; never invent figures, competitors' numbers or personas.",
+      "reviewed": "2026-11-06"
+    },
+    {
+      "id": "launch",
+      "source": {
+        "repo": "coreyhaines31/marketingskills",
+        "commit": "88c79f6528a9347420e57ceb1fff9a60de651768",
+        "path": "skills/launch"
+      },
+      "license": "MIT",
+      "category": "work",
+      "description": {
+        "it": "Pianifica il lancio di un prodotto o di una novità: canali, annunci, checklist.",
+        "en": "Plans a product or feature launch: channels, announcements, checklist."
+      },
+      "files": {
+        "exclude": [
+          "evals/**",
+          "evaluations/**",
+          "examples/**",
+          ".github/**",
+          ".claude-plugin/**",
+          ".cursor-plugin/**",
+          "agents/**",
+          "scripts/validate-package.py",
+          "tests/**",
+          "CHANGELOG.md",
+          "README.md",
+          "README.*.md",
+          "CONTRIBUTING.md",
+          "AGENTS.md",
+          "CLAUDE.md",
+          "references/shipped-changes.md"
+        ]
+      },
+      "homunNotes": "Skills mentioned as siblings may not be installed: do the work yourself and never suggest installing anything from the author's repository. When the skill says to save a file, save it with write_document in the user's library (or write-file in your computer when the user asks for a file). Ignore references to .agents/product-marketing.md and dev-browser: ask the user for the context you need and use your web tools. Examples are US/SaaS: adapt them to the user's business and country. Every message or post is a draft the user approves; never claim something was sent or published.",
+      "reviewed": "2026-11-06"
+    },
+    {
+      "id": "sales-enablement",
+      "source": {
+        "repo": "coreyhaines31/marketingskills",
+        "commit": "88c79f6528a9347420e57ceb1fff9a60de651768",
+        "path": "skills/sales-enablement"
+      },
+      "license": "MIT",
+      "category": "work",
+      "description": {
+        "it": "Crea materiali per vendere: presentazioni, schede prodotto, risposte alle obiezioni.",
+        "en": "Builds sales material: decks, one-pagers, objection replies."
+      },
+      "files": {
+        "exclude": [
+          "evals/**",
+          "evaluations/**",
+          "examples/**",
+          ".github/**",
+          ".claude-plugin/**",
+          ".cursor-plugin/**",
+          "agents/**",
+          "scripts/validate-package.py",
+          "tests/**",
+          "CHANGELOG.md",
+          "README.md",
+          "README.*.md",
+          "CONTRIBUTING.md",
+          "AGENTS.md",
+          "CLAUDE.md"
+        ]
+      },
+      "homunNotes": "Skills mentioned as siblings may not be installed: do the work yourself and never suggest installing anything from the author's repository. When the skill says to save a file, save it with write_document in the user's library (or write-file in your computer when the user asks for a file). Ignore references to .agents/product-marketing.md and dev-browser: ask the user for the context you need and use your web tools. Examples are US/SaaS: adapt them to the user's business and country. Every message or post is a draft the user approves; never claim something was sent or published.",
+      "reviewed": "2026-11-06"
+    },
+    {
+      "id": "customer-research",
+      "source": {
+        "repo": "coreyhaines31/marketingskills",
+        "commit": "88c79f6528a9347420e57ceb1fff9a60de651768",
+        "path": "skills/customer-research"
+      },
+      "license": "MIT",
+      "category": "work",
+      "description": {
+        "it": "Analizza recensioni, interviste e richieste dei clienti per capire cosa vogliono davvero.",
+        "en": "Analyzes reviews, interviews and customer requests to learn what they really want."
+      },
+      "files": {
+        "exclude": [
+          "evals/**",
+          "evaluations/**",
+          "examples/**",
+          ".github/**",
+          ".claude-plugin/**",
+          ".cursor-plugin/**",
+          "agents/**",
+          "scripts/validate-package.py",
+          "tests/**",
+          "CHANGELOG.md",
+          "README.md",
+          "README.*.md",
+          "CONTRIBUTING.md",
+          "AGENTS.md",
+          "CLAUDE.md"
+        ]
+      },
+      "homunNotes": "Skills mentioned as siblings may not be installed: do the work yourself and never suggest installing anything from the author's repository. When the skill says to save a file, save it with write_document in the user's library (or write-file in your computer when the user asks for a file). Ignore references to .agents/product-marketing.md and dev-browser: ask the user for the context you need and use your web tools. Examples are US/SaaS: adapt them to the user's business and country. Every message or post is a draft the user approves; never claim something was sent or published.",
+      "reviewed": "2026-11-06"
+    },
+    {
+      "id": "pricing-strategy",
+      "source": {
+        "repo": "phuryn/pm-skills",
+        "commit": "2a12295a7717569baa7be181b4cfebe3ca38a6bb",
+        "path": "pm-product-strategy/skills/pricing-strategy"
+      },
+      "license": "MIT",
+      "category": "work",
+      "description": {
+        "it": "Aiuta a scegliere modello e livelli di prezzo di un prodotto o servizio.",
+        "en": "Helps choose a pricing model and tiers for a product or service."
+      },
+      "files": {
+        "exclude": [
+          "evals/**",
+          "evaluations/**",
+          "examples/**",
+          ".github/**",
+          ".claude-plugin/**",
+          ".cursor-plugin/**",
+          "agents/**",
+          "scripts/validate-package.py",
+          "tests/**",
+          "CHANGELOG.md",
+          "README.md",
+          "README.*.md",
+          "CONTRIBUTING.md",
+          "AGENTS.md",
+          "CLAUDE.md"
+        ]
+      },
+      "homunNotes": "Skills mentioned as siblings may not be installed: do the work yourself and never suggest installing anything from the author's repository. When the skill says to save a file, save it with write_document in the user's library (or write-file in your computer when the user asks for a file). Placeholders like $ARGUMENTS are the user's request. If data you need is missing, say so and ask instead of guessing; never invent figures, competitors' numbers or personas.",
+      "reviewed": "2026-11-06"
+    },
+    {
+      "id": "release-notes",
+      "source": {
+        "repo": "phuryn/pm-skills",
+        "commit": "2a12295a7717569baa7be181b4cfebe3ca38a6bb",
+        "path": "pm-execution/skills/release-notes"
+      },
+      "license": "MIT",
+      "category": "work",
+      "description": {
+        "it": "Trasforma un elenco di modifiche in note di rilascio chiare per chi usa il prodotto.",
+        "en": "Turns a list of changes into clear release notes for users."
+      },
+      "files": {
+        "exclude": [
+          "evals/**",
+          "evaluations/**",
+          "examples/**",
+          ".github/**",
+          ".claude-plugin/**",
+          ".cursor-plugin/**",
+          "agents/**",
+          "scripts/validate-package.py",
+          "tests/**",
+          "CHANGELOG.md",
+          "README.md",
+          "README.*.md",
+          "CONTRIBUTING.md",
+          "AGENTS.md",
+          "CLAUDE.md"
+        ]
+      },
+      "homunNotes": "Skills mentioned as siblings may not be installed: do the work yourself and never suggest installing anything from the author's repository. When the skill says to save a file, save it with write_document in the user's library (or write-file in your computer when the user asks for a file). Placeholders like $ARGUMENTS are the user's request. If data you need is missing, say so and ask instead of guessing; never invent figures, competitors' numbers or personas.",
+      "reviewed": "2026-11-06"
+    },
+    {
+      "id": "thinking-first-principles",
+      "source": {
+        "repo": "tjboudreaux/cc-thinking-skills",
+        "commit": "7b8fece345dfaa11773be7152ccd194589cb5437",
+        "path": "skills/thinking-first-principles"
+      },
+      "license": "MIT",
+      "category": "thinking",
+      "description": {
+        "it": "Smonta i vincoli dati per scontati e ricostruisce la soluzione più semplice.",
+        "en": "Breaks down assumed constraints and rebuilds the simplest solution."
+      },
+      "files": {
+        "exclude": [
+          "evals/**",
+          "evaluations/**",
+          "examples/**",
+          ".github/**",
+          ".claude-plugin/**",
+          ".cursor-plugin/**",
+          "agents/**",
+          "scripts/validate-package.py",
+          "tests/**",
+          "CHANGELOG.md",
+          "README.md",
+          "README.*.md",
+          "CONTRIBUTING.md",
+          "AGENTS.md",
+          "CLAUDE.md"
+        ]
+      },
+      "homunNotes": "Skills mentioned as siblings may not be installed: do the work yourself and never suggest installing anything from the author's repository. When the skill says to save a file, save it with write_document in the user's library (or write-file in your computer when the user asks for a file). Present the result in plain language in the user's language, not as the technical block; keep the method.",
+      "reviewed": "2026-11-06"
+    },
+    {
+      "id": "thinking-second-order",
+      "source": {
+        "repo": "tjboudreaux/cc-thinking-skills",
+        "commit": "7b8fece345dfaa11773be7152ccd194589cb5437",
+        "path": "skills/thinking-second-order"
+      },
+      "license": "MIT",
+      "category": "thinking",
+      "description": {
+        "it": "Prima di decidere segue la catena delle conseguenze: «e poi cosa succede?».",
+        "en": "Before deciding, follows the chain of consequences: \"and then what?\"."
+      },
+      "files": {
+        "exclude": [
+          "evals/**",
+          "evaluations/**",
+          "examples/**",
+          ".github/**",
+          ".claude-plugin/**",
+          ".cursor-plugin/**",
+          "agents/**",
+          "scripts/validate-package.py",
+          "tests/**",
+          "CHANGELOG.md",
+          "README.md",
+          "README.*.md",
+          "CONTRIBUTING.md",
+          "AGENTS.md",
+          "CLAUDE.md"
+        ]
+      },
+      "homunNotes": "Skills mentioned as siblings may not be installed: do the work yourself and never suggest installing anything from the author's repository. When the skill says to save a file, save it with write_document in the user's library (or write-file in your computer when the user asks for a file). Present the result in plain language in the user's language, not as the technical block; keep the method.",
+      "reviewed": "2026-11-06"
+    },
+    {
+      "id": "thinking-opportunity-cost",
+      "source": {
+        "repo": "tjboudreaux/cc-thinking-skills",
+        "commit": "7b8fece345dfaa11773be7152ccd194589cb5437",
+        "path": "skills/thinking-opportunity-cost"
+      },
+      "license": "MIT",
+      "category": "thinking",
+      "description": {
+        "it": "Prima di impegnare tempo o soldi, confronta con la migliore alternativa a cui rinunci.",
+        "en": "Before committing time or money, compares with the best alternative you give up."
+      },
+      "files": {
+        "exclude": [
+          "evals/**",
+          "evaluations/**",
+          "examples/**",
+          ".github/**",
+          ".claude-plugin/**",
+          ".cursor-plugin/**",
+          "agents/**",
+          "scripts/validate-package.py",
+          "tests/**",
+          "CHANGELOG.md",
+          "README.md",
+          "README.*.md",
+          "CONTRIBUTING.md",
+          "AGENTS.md",
+          "CLAUDE.md"
+        ]
+      },
+      "homunNotes": "Skills mentioned as siblings may not be installed: do the work yourself and never suggest installing anything from the author's repository. When the skill says to save a file, save it with write_document in the user's library (or write-file in your computer when the user asks for a file). Present the result in plain language in the user's language, not as the technical block; keep the method.",
+      "reviewed": "2026-11-06"
+    },
+    {
+      "id": "thinking-reversibility",
+      "source": {
+        "repo": "tjboudreaux/cc-thinking-skills",
+        "commit": "7b8fece345dfaa11773be7152ccd194589cb5437",
+        "path": "skills/thinking-reversibility"
+      },
+      "license": "MIT",
+      "category": "thinking",
+      "description": {
+        "it": "Valuta se una scelta si può annullare: decidi in fretta se sì, a piccoli passi se no.",
+        "en": "Rates whether a choice can be undone: decide fast if so, in small steps if not."
+      },
+      "files": {
+        "exclude": [
+          "evals/**",
+          "evaluations/**",
+          "examples/**",
+          ".github/**",
+          ".claude-plugin/**",
+          ".cursor-plugin/**",
+          "agents/**",
+          "scripts/validate-package.py",
+          "tests/**",
+          "CHANGELOG.md",
+          "README.md",
+          "README.*.md",
+          "CONTRIBUTING.md",
+          "AGENTS.md",
+          "CLAUDE.md"
+        ]
+      },
+      "homunNotes": "Skills mentioned as siblings may not be installed: do the work yourself and never suggest installing anything from the author's repository. When the skill says to save a file, save it with write_document in the user's library (or write-file in your computer when the user asks for a file). Present the result in plain language in the user's language, not as the technical block; keep the method.",
+      "reviewed": "2026-11-06"
+    },
+    {
+      "id": "thinking-steel-manning",
+      "source": {
+        "repo": "tjboudreaux/cc-thinking-skills",
+        "commit": "7b8fece345dfaa11773be7152ccd194589cb5437",
+        "path": "skills/thinking-steel-manning"
+      },
+      "license": "MIT",
+      "category": "thinking",
+      "description": {
+        "it": "Costruisce la versione più forte della tesi opposta prima di decidere.",
+        "en": "Builds the strongest version of the opposing view before deciding."
+      },
+      "files": {
+        "exclude": [
+          "evals/**",
+          "evaluations/**",
+          "examples/**",
+          ".github/**",
+          ".claude-plugin/**",
+          ".cursor-plugin/**",
+          "agents/**",
+          "scripts/validate-package.py",
+          "tests/**",
+          "CHANGELOG.md",
+          "README.md",
+          "README.*.md",
+          "CONTRIBUTING.md",
+          "AGENTS.md",
+          "CLAUDE.md"
+        ]
+      },
+      "homunNotes": "Skills mentioned as siblings may not be installed: do the work yourself and never suggest installing anything from the author's repository. When the skill says to save a file, save it with write_document in the user's library (or write-file in your computer when the user asks for a file). Present the result in plain language in the user's language, not as the technical block; keep the method.",
+      "reviewed": "2026-11-06"
+    },
+    {
+      "id": "thinking-pre-mortem",
+      "source": {
+        "repo": "tjboudreaux/cc-thinking-skills",
+        "commit": "7b8fece345dfaa11773be7152ccd194589cb5437",
+        "path": "skills/thinking-pre-mortem"
+      },
+      "license": "MIT",
+      "category": "thinking",
+      "description": {
+        "it": "Immagina che il piano sia già fallito, ne trova le cause e prepara le contromisure.",
+        "en": "Imagines the plan already failed, finds the causes and prepares safeguards."
+      },
+      "files": {
+        "exclude": [
+          "evals/**",
+          "evaluations/**",
+          "examples/**",
+          ".github/**",
+          ".claude-plugin/**",
+          ".cursor-plugin/**",
+          "agents/**",
+          "scripts/validate-package.py",
+          "tests/**",
+          "CHANGELOG.md",
+          "README.md",
+          "README.*.md",
+          "CONTRIBUTING.md",
+          "AGENTS.md",
+          "CLAUDE.md"
+        ]
+      },
+      "homunNotes": "Skills mentioned as siblings may not be installed: do the work yourself and never suggest installing anything from the author's repository. When the skill says to save a file, save it with write_document in the user's library (or write-file in your computer when the user asks for a file). Present the result in plain language in the user's language, not as the technical block; keep the method.",
+      "reviewed": "2026-11-06"
+    },
+    {
+      "id": "problem-solver",
+      "source": {
+        "repo": "tronghieu/agent-skills",
+        "commit": "831d1ae5c686a81b10f9c5b9cca04a7b8b97303d",
+        "path": "skills/problem-solver"
+      },
+      "license": "MIT",
+      "category": "thinking",
+      "description": {
+        "it": "Trova la causa vera di un problema prima delle soluzioni, poi aiuta a decidere.",
+        "en": "Finds the real cause of a problem before fixes, then helps you decide."
+      },
+      "files": {
+        "exclude": [
+          "evals/**",
+          "evaluations/**",
+          "examples/**",
+          ".github/**",
+          ".claude-plugin/**",
+          ".cursor-plugin/**",
+          "agents/**",
+          "scripts/validate-package.py",
+          "tests/**",
+          "CHANGELOG.md",
+          "README.md",
+          "README.*.md",
+          "CONTRIBUTING.md",
+          "AGENTS.md",
+          "CLAUDE.md"
+        ]
+      },
+      "homunNotes": "Skills mentioned as siblings may not be installed: do the work yourself and never suggest installing anything from the author's repository. When the skill says to save a file, save it with write_document in the user's library (or write-file in your computer when the user asks for a file). Where the skill says to run a script with a /mnt/skills path, create the folders yourself instead.",
+      "reviewed": "2026-11-06"
+    },
+    {
+      "id": "brainstorm-coach",
+      "source": {
+        "repo": "tronghieu/agent-skills",
+        "commit": "831d1ae5c686a81b10f9c5b9cca04a7b8b97303d",
+        "path": "skills/brainstorm-coach"
+      },
+      "license": "MIT",
+      "category": "thinking",
+      "description": {
+        "it": "Guida una sessione di idee: prima le tue, poi le mie, poi si sceglie.",
+        "en": "Coaches a brainstorm: your ideas first, then mine, then pick next steps."
+      },
+      "files": {
+        "exclude": [
+          "evals/**",
+          "evaluations/**",
+          "examples/**",
+          ".github/**",
+          ".claude-plugin/**",
+          ".cursor-plugin/**",
+          "agents/**",
+          "scripts/validate-package.py",
+          "tests/**",
+          "CHANGELOG.md",
+          "README.md",
+          "README.*.md",
+          "CONTRIBUTING.md",
+          "AGENTS.md",
+          "CLAUDE.md"
+        ]
+      },
+      "homunNotes": "Skills mentioned as siblings may not be installed: do the work yourself and never suggest installing anything from the author's repository. When the skill says to save a file, save it with write_document in the user's library (or write-file in your computer when the user asks for a file). Where the skill says to run a script with a /mnt/skills path, create the folders yourself instead.",
+      "reviewed": "2026-11-06"
+    },
+    {
+      "id": "socratic-questor",
+      "source": {
+        "repo": "tronghieu/agent-skills",
+        "commit": "831d1ae5c686a81b10f9c5b9cca04a7b8b97303d",
+        "path": "skills/socratic-questor"
+      },
+      "license": "MIT",
+      "category": "thinking",
+      "description": {
+        "it": "Ti fa capire un tema facendoti domande invece di spiegare. Se chiedi la risposta, te la dà.",
+        "en": "Teaches through questions instead of explanations. Gives the answer if you ask."
+      },
+      "files": {
+        "exclude": [
+          "evals/**",
+          "evaluations/**",
+          "examples/**",
+          ".github/**",
+          ".claude-plugin/**",
+          ".cursor-plugin/**",
+          "agents/**",
+          "scripts/validate-package.py",
+          "tests/**",
+          "CHANGELOG.md",
+          "README.md",
+          "README.*.md",
+          "CONTRIBUTING.md",
+          "AGENTS.md",
+          "CLAUDE.md"
+        ]
+      },
+      "homunNotes": "Skills mentioned as siblings may not be installed: do the work yourself and never suggest installing anything from the author's repository. When the skill says to save a file, save it with write_document in the user's library (or write-file in your computer when the user asks for a file). If the user explicitly asks for the answer, or is stuck after several tries, give it plainly.",
+      "reviewed": "2026-11-06"
+    },
+    {
+      "id": "critical-thinking",
+      "source": {
+        "repo": "tronghieu/agent-skills",
+        "commit": "831d1ae5c686a81b10f9c5b9cca04a7b8b97303d",
+        "path": "skills/critical-thinking"
+      },
+      "license": "MIT",
+      "category": "thinking",
+      "description": {
+        "it": "Controlla il ragionamento di un testo: prove, ipotesi nascoste, salti logici, citando il testo.",
+        "en": "Audits the reasoning of a text: evidence, hidden assumptions, logic gaps, quoting it."
+      },
+      "files": {
+        "exclude": [
+          "evals/**",
+          "evaluations/**",
+          "examples/**",
+          ".github/**",
+          ".claude-plugin/**",
+          ".cursor-plugin/**",
+          "agents/**",
+          "scripts/validate-package.py",
+          "tests/**",
+          "CHANGELOG.md",
+          "README.md",
+          "README.*.md",
+          "CONTRIBUTING.md",
+          "AGENTS.md",
+          "CLAUDE.md"
+        ]
+      },
+      "homunNotes": "Skills mentioned as siblings may not be installed: do the work yourself and never suggest installing anything from the author's repository. When the skill says to save a file, save it with write_document in the user's library (or write-file in your computer when the user asks for a file). Where the skill says to run a script with a /mnt/skills path, create the folders yourself instead.",
+      "reviewed": "2026-11-06"
+    },
+    {
+      "id": "discernment-nudge",
+      "source": {
+        "repo": "anthropics/skills",
+        "commit": "ca45fc496a3436251f191354091d557da31c15b5",
+        "path": "skills/discernment-nudge"
+      },
+      "license": "Apache-2.0",
+      "category": "thinking",
+      "description": {
+        "it": "Dopo una risposta importante propone 2–3 domande per verificarla. Solo su richiesta.",
+        "en": "After an important answer, suggests 2–3 questions to check it. On request only."
+      },
+      "files": {
+        "exclude": [
+          "evals/**",
+          "evaluations/**",
+          "examples/**",
+          ".github/**",
+          ".claude-plugin/**",
+          ".cursor-plugin/**",
+          "agents/**",
+          "scripts/validate-package.py",
+          "tests/**",
+          "CHANGELOG.md",
+          "README.md",
+          "README.*.md",
+          "CONTRIBUTING.md",
+          "AGENTS.md",
+          "CLAUDE.md"
+        ]
+      },
+      "homunNotes": "Skills mentioned as siblings may not be installed: do the work yourself and never suggest installing anything from the author's repository. When the skill says to save a file, save it with write_document in the user's library (or write-file in your computer when the user asks for a file). Use this only when the user invoked it with /discernment-nudge; the lead-in line may be in the user's language.",
+      "reviewed": "2026-11-06",
+      "invocation": "user"
+    },
+    {
+      "id": "notion-research-documentation",
+      "source": {
+        "repo": "openai/skills",
+        "commit": "49f948faa9258a0c61caceaf225e179651397431",
+        "path": "skills/.curated/notion-research-documentation"
+      },
+      "license": "MIT (Notion Labs) / Apache-2.0",
+      "category": "research",
+      "description": {
+        "it": "Cerca nel tuo Notion e ne fa un report, un confronto o una scheda con le fonti.",
+        "en": "Searches your Notion and turns it into a cited report, comparison or brief."
+      },
+      "files": {
+        "exclude": [
+          "evals/**",
+          "evaluations/**",
+          "examples/**",
+          ".github/**",
+          ".claude-plugin/**",
+          ".cursor-plugin/**",
+          "agents/**",
+          "scripts/validate-package.py",
+          "tests/**",
+          "CHANGELOG.md",
+          "README.md",
+          "README.*.md",
+          "CONTRIBUTING.md",
+          "AGENTS.md",
+          "CLAUDE.md"
+        ]
+      },
+      "homunNotes": "Skills mentioned as siblings may not be installed: do the work yourself and never suggest installing anything from the author's repository. When the skill says to save a file, save it with write_document in the user's library (or write-file in your computer when the user asks for a file). Ignore any Codex setup step. In Homun the Notion tools are named mcp__notion__notion-search, mcp__notion__notion-fetch, mcp__notion__notion-create-pages, mcp__notion__notion-update-page. If Notion is not connected, ask the user to connect it in Connect apps. Always show the user what you will write and ask for confirmation before creating or changing Notion pages; never mention or notify other people.",
+      "reviewed": "2026-11-06"
+    },
+    {
+      "id": "notion-knowledge-capture",
+      "source": {
+        "repo": "openai/skills",
+        "commit": "49f948faa9258a0c61caceaf225e179651397431",
+        "path": "skills/.curated/notion-knowledge-capture"
+      },
+      "license": "MIT (Notion Labs) / Apache-2.0",
+      "category": "research",
+      "description": {
+        "it": "Trasforma una conversazione o degli appunti in pagine Notion ordinate.",
+        "en": "Turns a conversation or notes into organized Notion pages."
+      },
+      "files": {
+        "exclude": [
+          "evals/**",
+          "evaluations/**",
+          "examples/**",
+          ".github/**",
+          ".claude-plugin/**",
+          ".cursor-plugin/**",
+          "agents/**",
+          "scripts/validate-package.py",
+          "tests/**",
+          "CHANGELOG.md",
+          "README.md",
+          "README.*.md",
+          "CONTRIBUTING.md",
+          "AGENTS.md",
+          "CLAUDE.md"
+        ]
+      },
+      "homunNotes": "Skills mentioned as siblings may not be installed: do the work yourself and never suggest installing anything from the author's repository. When the skill says to save a file, save it with write_document in the user's library (or write-file in your computer when the user asks for a file). Ignore any Codex setup step. In Homun the Notion tools are named mcp__notion__notion-search, mcp__notion__notion-fetch, mcp__notion__notion-create-pages, mcp__notion__notion-update-page. If Notion is not connected, ask the user to connect it in Connect apps. Always show the user what you will write and ask for confirmation before creating or changing Notion pages; never mention or notify other people.",
+      "reviewed": "2026-11-06"
+    },
+    {
+      "id": "notion-meeting-intelligence",
+      "source": {
+        "repo": "openai/skills",
+        "commit": "49f948faa9258a0c61caceaf225e179651397431",
+        "path": "skills/.curated/notion-meeting-intelligence"
+      },
+      "license": "MIT (Notion Labs) / Apache-2.0",
+      "category": "research",
+      "description": {
+        "it": "Prepara una riunione col contesto del tuo Notion: scaletta, materiali, decisioni da prendere.",
+        "en": "Prepares a meeting from your Notion context: agenda, pre-read, decisions needed."
+      },
+      "files": {
+        "exclude": [
+          "evals/**",
+          "evaluations/**",
+          "examples/**",
+          ".github/**",
+          ".claude-plugin/**",
+          ".cursor-plugin/**",
+          "agents/**",
+          "scripts/validate-package.py",
+          "tests/**",
+          "CHANGELOG.md",
+          "README.md",
+          "README.*.md",
+          "CONTRIBUTING.md",
+          "AGENTS.md",
+          "CLAUDE.md"
+        ]
+      },
+      "homunNotes": "Skills mentioned as siblings may not be installed: do the work yourself and never suggest installing anything from the author's repository. When the skill says to save a file, save it with write_document in the user's library (or write-file in your computer when the user asks for a file). Ignore any Codex setup step. In Homun the Notion tools are named mcp__notion__notion-search, mcp__notion__notion-fetch, mcp__notion__notion-create-pages, mcp__notion__notion-update-page. If Notion is not connected, ask the user to connect it in Connect apps. Always show the user what you will write and ask for confirmation before creating or changing Notion pages; never mention or notify other people.",
+      "reviewed": "2026-11-06"
+    },
+    {
+      "id": "cover-letter-generator",
+      "source": {
+        "repo": "Paramchoudhary/ResumeSkills",
+        "commit": "74ae19e7c62b0516d1c298328e5544976c12da5d",
+        "path": "skills/cover-letter-generator"
+      },
+      "license": "MIT",
+      "category": "career",
+      "description": {
+        "it": "Scrive una lettera di presentazione su misura da CV e annuncio.",
+        "en": "Writes a tailored cover letter from your resume and the job posting."
+      },
+      "files": {
+        "exclude": [
+          "evals/**",
+          "evaluations/**",
+          "examples/**",
+          ".github/**",
+          ".claude-plugin/**",
+          ".cursor-plugin/**",
+          "agents/**",
+          "scripts/validate-package.py",
+          "tests/**",
+          "CHANGELOG.md",
+          "README.md",
+          "README.*.md",
+          "CONTRIBUTING.md",
+          "AGENTS.md",
+          "CLAUDE.md"
+        ]
+      },
+      "homunNotes": "Skills mentioned as siblings may not be installed: do the work yourself and never suggest installing anything from the author's repository. When the skill says to save a file, save it with write_document in the user's library (or write-file in your computer when the user asks for a file). Adapt to the user's country. For Italy use Italian conventions (RAL and net pay, 13th/14th month, CCNL, TFR, welfare; 'Gentile …' openings; Europass and the GDPR consent line when relevant). Never quote statistics without a source and never advise hiding facts the employer asks about.",
+      "reviewed": "2026-11-06"
+    },
+    {
+      "id": "resume-tailor",
+      "source": {
+        "repo": "Paramchoudhary/ResumeSkills",
+        "commit": "74ae19e7c62b0516d1c298328e5544976c12da5d",
+        "path": "skills/resume-tailor"
+      },
+      "license": "MIT",
+      "category": "career",
+      "description": {
+        "it": "Adatta il CV a un annuncio riordinando e riformulando, senza inventare nulla.",
+        "en": "Tailors your resume to a posting by reordering and rewording, inventing nothing."
+      },
+      "files": {
+        "exclude": [
+          "evals/**",
+          "evaluations/**",
+          "examples/**",
+          ".github/**",
+          ".claude-plugin/**",
+          ".cursor-plugin/**",
+          "agents/**",
+          "scripts/validate-package.py",
+          "tests/**",
+          "CHANGELOG.md",
+          "README.md",
+          "README.*.md",
+          "CONTRIBUTING.md",
+          "AGENTS.md",
+          "CLAUDE.md"
+        ]
+      },
+      "homunNotes": "Skills mentioned as siblings may not be installed: do the work yourself and never suggest installing anything from the author's repository. When the skill says to save a file, save it with write_document in the user's library (or write-file in your computer when the user asks for a file). Adapt to the user's country. For Italy use Italian conventions (RAL and net pay, 13th/14th month, CCNL, TFR, welfare; 'Gentile …' openings; Europass and the GDPR consent line when relevant). Never quote statistics without a source and never advise hiding facts the employer asks about.",
+      "reviewed": "2026-11-06"
+    },
+    {
+      "id": "job-description-analyzer",
+      "source": {
+        "repo": "Paramchoudhary/ResumeSkills",
+        "commit": "74ae19e7c62b0516d1c298328e5544976c12da5d",
+        "path": "skills/job-description-analyzer"
+      },
+      "license": "MIT",
+      "category": "career",
+      "description": {
+        "it": "Legge un annuncio di lavoro: cosa chiedono davvero, quanto corrispondi, campanelli d'allarme.",
+        "en": "Reads a job posting: what they really want, how you match, red flags."
+      },
+      "files": {
+        "exclude": [
+          "evals/**",
+          "evaluations/**",
+          "examples/**",
+          ".github/**",
+          ".claude-plugin/**",
+          ".cursor-plugin/**",
+          "agents/**",
+          "scripts/validate-package.py",
+          "tests/**",
+          "CHANGELOG.md",
+          "README.md",
+          "README.*.md",
+          "CONTRIBUTING.md",
+          "AGENTS.md",
+          "CLAUDE.md"
+        ]
+      },
+      "homunNotes": "Skills mentioned as siblings may not be installed: do the work yourself and never suggest installing anything from the author's repository. When the skill says to save a file, save it with write_document in the user's library (or write-file in your computer when the user asks for a file). Adapt to the user's country. For Italy use Italian conventions (RAL and net pay, 13th/14th month, CCNL, TFR, welfare; 'Gentile …' openings; Europass and the GDPR consent line when relevant). Never quote statistics without a source and never advise hiding facts the employer asks about.",
+      "reviewed": "2026-11-06"
+    },
+    {
+      "id": "interview-prep-generator",
+      "source": {
+        "repo": "Paramchoudhary/ResumeSkills",
+        "commit": "74ae19e7c62b0516d1c298328e5544976c12da5d",
+        "path": "skills/interview-prep-generator"
+      },
+      "license": "MIT",
+      "category": "career",
+      "description": {
+        "it": "Prepara un colloquio: domande probabili, risposte dal tuo CV, domande da fare.",
+        "en": "Prepares an interview: likely questions, answers from your resume, questions to ask."
+      },
+      "files": {
+        "exclude": [
+          "evals/**",
+          "evaluations/**",
+          "examples/**",
+          ".github/**",
+          ".claude-plugin/**",
+          ".cursor-plugin/**",
+          "agents/**",
+          "scripts/validate-package.py",
+          "tests/**",
+          "CHANGELOG.md",
+          "README.md",
+          "README.*.md",
+          "CONTRIBUTING.md",
+          "AGENTS.md",
+          "CLAUDE.md"
+        ]
+      },
+      "homunNotes": "Skills mentioned as siblings may not be installed: do the work yourself and never suggest installing anything from the author's repository. When the skill says to save a file, save it with write_document in the user's library (or write-file in your computer when the user asks for a file). Adapt to the user's country. For Italy use Italian conventions (RAL and net pay, 13th/14th month, CCNL, TFR, welfare; 'Gentile …' openings; Europass and the GDPR consent line when relevant). Never quote statistics without a source and never advise hiding facts the employer asks about.",
+      "reviewed": "2026-11-06"
+    },
+    {
+      "id": "salary-negotiation-prep",
+      "source": {
+        "repo": "Paramchoudhary/ResumeSkills",
+        "commit": "74ae19e7c62b0516d1c298328e5544976c12da5d",
+        "path": "skills/salary-negotiation-prep"
+      },
+      "license": "MIT",
+      "category": "career",
+      "description": {
+        "it": "Prepara la trattativa sullo stipendio: valore di mercato e controproposta.",
+        "en": "Prepares a salary negotiation: market value and counter-offer."
+      },
+      "files": {
+        "exclude": [
+          "evals/**",
+          "evaluations/**",
+          "examples/**",
+          ".github/**",
+          ".claude-plugin/**",
+          ".cursor-plugin/**",
+          "agents/**",
+          "scripts/validate-package.py",
+          "tests/**",
+          "CHANGELOG.md",
+          "README.md",
+          "README.*.md",
+          "CONTRIBUTING.md",
+          "AGENTS.md",
+          "CLAUDE.md"
+        ]
+      },
+      "homunNotes": "Skills mentioned as siblings may not be installed: do the work yourself and never suggest installing anything from the author's repository. When the skill says to save a file, save it with write_document in the user's library (or write-file in your computer when the user asks for a file). Adapt to the user's country. For Italy use Italian conventions (RAL and net pay, 13th/14th month, CCNL, TFR, welfare; 'Gentile …' openings; Europass and the GDPR consent line when relevant). Never quote statistics without a source and never advise hiding facts the employer asks about.",
+      "reviewed": "2026-11-06"
+    },
+    {
+      "id": "offer-comparison-analyzer",
+      "source": {
+        "repo": "Paramchoudhary/ResumeSkills",
+        "commit": "74ae19e7c62b0516d1c298328e5544976c12da5d",
+        "path": "skills/offer-comparison-analyzer"
+      },
+      "license": "MIT",
+      "category": "career",
+      "description": {
+        "it": "Confronta più offerte di lavoro su retribuzione, crescita, equilibrio e rischio.",
+        "en": "Compares job offers on pay, growth, balance and risk."
+      },
+      "files": {
+        "exclude": [
+          "evals/**",
+          "evaluations/**",
+          "examples/**",
+          ".github/**",
+          ".claude-plugin/**",
+          ".cursor-plugin/**",
+          "agents/**",
+          "scripts/validate-package.py",
+          "tests/**",
+          "CHANGELOG.md",
+          "README.md",
+          "README.*.md",
+          "CONTRIBUTING.md",
+          "AGENTS.md",
+          "CLAUDE.md"
+        ]
+      },
+      "homunNotes": "Skills mentioned as siblings may not be installed: do the work yourself and never suggest installing anything from the author's repository. When the skill says to save a file, save it with write_document in the user's library (or write-file in your computer when the user asks for a file). Adapt to the user's country. For Italy use Italian conventions (RAL and net pay, 13th/14th month, CCNL, TFR, welfare; 'Gentile …' openings; Europass and the GDPR consent line when relevant). Never quote statistics without a source and never advise hiding facts the employer asks about.",
+      "reviewed": "2026-11-06"
+    },
+    {
+      "id": "linkedin-profile-optimizer",
+      "source": {
+        "repo": "Paramchoudhary/ResumeSkills",
+        "commit": "74ae19e7c62b0516d1c298328e5544976c12da5d",
+        "path": "skills/linkedin-profile-optimizer"
+      },
+      "license": "MIT",
+      "category": "career",
+      "description": {
+        "it": "Migliora il profilo LinkedIn per farti trovare dai selezionatori.",
+        "en": "Improves your LinkedIn profile so recruiters find you."
+      },
+      "files": {
+        "exclude": [
+          "evals/**",
+          "evaluations/**",
+          "examples/**",
+          ".github/**",
+          ".claude-plugin/**",
+          ".cursor-plugin/**",
+          "agents/**",
+          "scripts/validate-package.py",
+          "tests/**",
+          "CHANGELOG.md",
+          "README.md",
+          "README.*.md",
+          "CONTRIBUTING.md",
+          "AGENTS.md",
+          "CLAUDE.md"
+        ]
+      },
+      "homunNotes": "Skills mentioned as siblings may not be installed: do the work yourself and never suggest installing anything from the author's repository. When the skill says to save a file, save it with write_document in the user's library (or write-file in your computer when the user asks for a file). Adapt to the user's country. For Italy use Italian conventions (RAL and net pay, 13th/14th month, CCNL, TFR, welfare; 'Gentile …' openings; Europass and the GDPR consent line when relevant). Never quote statistics without a source and never advise hiding facts the employer asks about.",
+      "reviewed": "2026-11-06"
+    }
+  ]
+}

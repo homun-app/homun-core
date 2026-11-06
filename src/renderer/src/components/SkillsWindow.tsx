@@ -16,15 +16,19 @@
 //   plugin     in sola lettura («si aggiorna aggiornando il plugin»);
 //   importate  modificabili: diventano source 'user' con origin conservato;
 //              «Aggiorna da GitHub» avvisa che sovrascrive le modifiche.
-//   sfoglia    (fase skill · Sfoglia, B4) la terza sezione: i PACCHETTI DI
-//              SOLE SKILL dei marketplace registrati (niente registro aperto),
-//              griglia a 2 colonne come il Browse di Rakazo; l'anteprima
-//              mostra skill e parti non usate e aggiunge SENZA card in chat.
+//   sfoglia    (fase skill · catalogo, K2) la terza sezione: il CATALOGO
+//              CURATO che vive nel repo (src/shared/skill-catalog) — niente
+//              rete per l'elenco, titoletti per categoria, filtri a pillola e
+//              righe con fonte e «Aggiunta». Prima mostrava i pacchetti dei
+//              marketplace: i plugin restano in Collega app › Marketplace.
+//              L'anteprima (K3) scarica la voce al COMMIT FISSATO e mostra
+//              fonte, licenza, i file che entreranno e gli «Adattamenti di
+//              Homun»; «Aggiornamento disponibile» usa il flusso di oggi.
 //   ritocchi   (fase skill · Sfoglia, T1–T5) un solo campo di ricerca (il
-//              campo in alto filtra ANCHE i pacchetti), il contenuto della
+//              campo in alto filtra ANCHE il catalogo), il contenuto della
 //              finestra è un @container (le righe col controllo a destra),
-//              l'anteprima col displayName della griglia e «‹ Indietro» in
-//              alto (UN solo «Annulla»), focus d'apertura sul campo.
+//              «‹ Indietro» in alto nell'anteprima (UN solo «Annulla»),
+//              focus d'apertura sul campo.
 import { useEffect, useMemo, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
@@ -33,17 +37,32 @@ import { Dialog, DialogContent, DialogTitle } from './ui/dialog'
 import { ChevronLeft, Plus, Upload, Search, Sparkles } from 'lucide-react'
 import { api, useStore } from '../store'
 import type {
-  SkillLibraryItem, SkillGithubPreview, SkillGithubPreviewItem, SkillGithubUpdatePreview, SkillVersion,
-  SkillBrowseResult, SkillBrowsePreview
+  SkillLibraryItem, SkillGithubPreview, SkillGithubUpdatePreview, SkillVersion,
+  SkillCatalogEntry, SkillCatalogPreview
 } from '../../../shared/types'
 import { humanizeSkillName, parseSkillMd } from '../../../shared/skill-md'
-import { matchesSkillPackQuery } from '../../../shared/skill-browse-search'
+import {
+  SKILL_CATEGORIES, searchSkillCatalog, skillCatalogDescription, skillCatalogInstallState,
+  type SkillCategoryId, type SkillCatalogInstallState
+} from '../../../shared/skill-catalog'
 import { SettingsAdvanced } from './settings/SettingsAdvanced'
 import { SettingsGroup } from './settings/SettingsGroup'
 import { SettingsRow } from './settings/SettingsRow'
 import { Toggle } from './Settings'
 
 type Filter = 'all' | 'mine' | 'bot' | 'github' | 'plugin'
+
+/** I titoli delle categorie del catalogo (K7: testi del catalogo lingui). */
+function useCategoryTitles(): Record<SkillCategoryId, string> {
+  const { i18n } = useLingui()
+  return {
+    writing: i18n._(msg`Scrittura`),
+    work: i18n._(msg`Lavoro`),
+    thinking: i18n._(msg`Pensiero`),
+    research: i18n._(msg`Ricerca`),
+    career: i18n._(msg`Carriera`)
+  }
+}
 
 /** L'etichetta breve dell'origine (K4: l'importata MODIFICATA si dichiara). */
 function SourceTag({ item }: { item: SkillLibraryItem }): React.ReactNode {
@@ -78,50 +97,32 @@ export function SkillsWindow(): React.ReactNode {
   const [detail, setDetail] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [importing, setImporting] = useState(false)
-  // fase skill · Sfoglia (B4): il catalogo dei pacchetti di sole skill
-  const [browseId, setBrowseId] = useState<string | null>(null)
-  const [browseData, setBrowseData] = useState<SkillBrowseResult | null>(null)
-  const [browseLoading, setBrowseLoading] = useState(true)
-  const [browseRetryAt, setBrowseRetryAt] = useState(0)
-  // fase sfoglia veloce (V1): il conteggio della PRIMA lettura («12 di 54 plugin letti»)
-  const [browseProgress, setBrowseProgress] = useState<{ done: number; total: number } | null>(null)
+  // fase skill · catalogo (K2): il catalogo CURATO del repo — arriva subito
+  // dall'RPC locale (nessuna rete), la voce aperta nell'anteprima (K3) e il
+  // filtro a pillola della categoria
+  const [catalog, setCatalog] = useState<SkillCatalogEntry[] | null>(null)
+  const [catalogId, setCatalogId] = useState<string | null>(null)
+  const [catalogFilter, setCatalogFilter] = useState<'all' | SkillCategoryId>('all')
+  const categoryTitles = useCategoryTitles()
+  const lang = i18n.locale === 'en' ? 'en' : 'it'
 
   const reload = (): void => {
     void api.skillsLibrary().then(setData).catch(() => setData({ library: [], plugins: [] }))
   }
   useEffect(reload, [])
-  // fase sfoglia veloce (V1): all'apertura NESSUN retry — risponde la cache
-  // del daemon (anche quella su disco) e, se è scaduta, si aggiorna in
-  // sottofondo: il clone non si rifà a ogni finestra. Il retry resta al solo
-  // bottone «Riprova» (browseRetryAt > 0 solo dopo un click). quiet: il
-  // ricaricamento dopo l'aggiornamento in sottofondo, senza spinner sopra la
-  // lista già visibile
-  const loadBrowse = (retry = false, quiet = false): void => {
-    if (!quiet) {
-      setBrowseLoading(true)
-      setBrowseProgress(null)
-    }
-    void api.skillsBrowse('', retry ? { retry: true } : undefined)
-      .then(setBrowseData)
-      // anche un errore mostra la riga «non si sono caricati» con Riprova
-      .catch(() => { if (!quiet) setBrowseData({ entries: [], unavailable: [{ source: '' }], skipped: [] }) })
-      .finally(() => { if (!quiet) setBrowseLoading(false) })
-  }
-  useEffect(() => { loadBrowse(browseRetryAt > 0) }, [browseRetryAt])
-  // V1: gli eventi del daemon — l'avanzamento della lettura e il catalogo
-  // aggiornato in sottofondo (la finestra aperta ricarica la lista)
-  useEffect(() => api.onEvent((e) => {
-    if (e.type === 'skills:browse-progress') setBrowseProgress({ done: e.done, total: e.total })
-    else if (e.type === 'skills:browse-updated') loadBrowse(false, true)
-  }), [])
+  useEffect(() => {
+    void api.skillsCatalog().then(setCatalog).catch(() => setCatalog([]))
+  }, [])
   // T1: UN solo campo di ricerca (quello in alto) — la stessa query filtra
-  // le tue skill, quelle dei plugin e i pacchetti di Sfoglia
-  const browsePacks = useMemo(
-    () => (browseData?.entries ?? []).filter((e) => matchesSkillPackQuery(e, query)),
-    [browseData, query]
-  )
-  // T3: la voce cliccata della griglia — l'anteprima mostra il suo displayName
-  const browseEntry = browseId !== null ? (browseData?.entries ?? []).find((e) => e.id === browseId) : undefined
+  // le tue skill, quelle dei plugin e il catalogo (la ricerca condivisa del
+  // catalogo: nome, descrizione nella lingua dell'interfaccia, repo, categoria)
+  const catalogRows = useMemo(() => {
+    const found = searchSkillCatalog(catalog ?? [], query, lang)
+    return catalogFilter === 'all' ? found : found.filter((e) => e.category === catalogFilter)
+  }, [catalog, query, lang, catalogFilter])
+  // lo stato di ogni voce rispetto alla libreria: «Aggiunta», «Aggiornamento disponibile»
+  const catalogState = (entry: SkillCatalogEntry): SkillCatalogInstallState => skillCatalogInstallState(entry, data?.library ?? [])
+  const catalogEntry = catalogId !== null ? (catalog ?? []).find((e) => e.id === catalogId) : undefined
   // il filtro bot del pannello della chat vale per la PRIMA apertura
   useEffect(() => {
     if (filterAgent && data) {
@@ -224,20 +225,21 @@ export function SkillsWindow(): React.ReactNode {
             <div className="@container min-h-0 flex-1 overflow-y-auto scroll-thin px-6 pb-6 pt-4" data-testid="skills-content">
               {creating && <SkillEditor folder={null} onDone={() => { setCreating(false); reload() }} onCancel={() => setCreating(false)} />}
               {importing && <GithubImport onDone={() => { setImporting(false); reload() }} onCancel={() => setImporting(false)} />}
-              {browseId !== null && !creating && !importing && (
-                <BrowsePreview
-                  id={browseId}
-                  displayName={browseEntry?.displayName ?? browseEntry?.name ?? ''}
-                  onClose={() => setBrowseId(null)}
-                  onAdded={() => { reload(); loadBrowse() }}
+              {catalogEntry && !creating && !importing && (
+                <CatalogPreview
+                  entry={catalogEntry}
+                  state={catalogState(catalogEntry)}
+                  installedFolder={data?.library.find((s) => s.origin?.catalogId === catalogEntry.id)?.folder ?? null}
+                  onClose={() => setCatalogId(null)}
+                  onChanged={reload}
                 />
               )}
-              {detail !== null && !creating && !importing && browseId === null && (
+              {detail !== null && !creating && !importing && !catalogEntry && (
                 data?.library.find((s) => s.folder === detail)
                   ? <SkillDetailSheet folder={detail} onDone={() => { reload() }} onClose={() => setDetail(null)} />
                   : <PluginDetail name={detail} plugins={data?.plugins ?? []} onClose={() => setDetail(null)} />
               )}
-              {detail === null && !creating && !importing && browseId === null && (
+              {detail === null && !creating && !importing && !catalogEntry && (
                 <>
                   <div className="flex items-center gap-2">
                     <div className="flex h-9 flex-1 items-center gap-2 rounded-full bg-muted px-3">
@@ -296,6 +298,7 @@ export function SkillsWindow(): React.ReactNode {
                           <span className="flex items-center gap-2">
                             <span className="truncate text-[15px]">{humanizeSkillName(s.name)}</span>
                             <SourceTag item={s} />
+                            {s.userOnly && <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"><Trans>solo con /</Trans></span>}
                             {!s.valid && <span className="rounded-full bg-destructive/10 px-1.5 py-0.5 text-[10px] text-destructive"><Trans>non valida</Trans></span>}
                           </span>
                           <span className="block truncate text-[13px] text-muted-foreground">{s.description.replace(/\s+/g, ' ')}</span>
@@ -323,66 +326,68 @@ export function SkillsWindow(): React.ReactNode {
                     ))}
                   </div>
 
-                  {/* fase skill · Sfoglia (B4): la terza sezione — i pacchetti
-                      di sole skill dei marketplace, come il Browse di Rakazo.
-                      T1: nessun campo qui — filtra il campo in alto */}
-                  <section className="mt-7 space-y-2" data-testid="skills-browse">
+                  {/* fase skill · catalogo (K2): la terza sezione — il catalogo
+                      CURATO che vive nel repo: nessuna rete, la lista appare
+                      subito. Titoletti per categoria, filtri a pillola e la
+                      ricerca del campo in alto (funzione condivisa) */}
+                  <section className="mt-7 space-y-2" data-testid="skills-catalog">
                     <h3 className="text-[14px] font-medium text-muted-foreground"><Trans>Sfoglia</Trans></h3>
-                    {/* fase sfoglia veloce (V1): niente spinner muto — «Cerco i
-                        pacchetti…» e, appena il daemon lo manda, il conteggio */}
-                    {browseLoading && (
-                      <div role="status" aria-live="polite" className="grid place-items-center gap-2 py-8 text-sm text-muted-foreground" data-testid="skills-browse-loading">
-                        <span className="size-5 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" aria-hidden="true" />
-                        <span><Trans>Cerco i pacchetti…</Trans></span>
-                        {browseProgress && browseProgress.total > 0 && (
-                          <span className="text-[12px] tabular-nums" data-testid="skills-browse-progress">
-                            <Trans>{browseProgress.done} di {browseProgress.total} plugin letti</Trans>
-                          </span>
-                        )}
-                      </div>
-                    )}
-                    {!browseLoading && (browseData?.unavailable.length ?? 0) > 0 && (
-                      <div role="alert" className="flex items-center gap-3 py-1 text-sm text-muted-foreground" data-testid="skills-browse-unavailable">
-                        <Trans>Alcuni pacchetti non si sono caricati.</Trans>
+                    <div className="flex flex-wrap items-center gap-1.5" data-testid="skills-catalog-filters">
+                      <button
+                        type="button"
+                        className={`rounded-full px-3 py-1 text-[12px] transition ${catalogFilter === 'all' ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-muted'}`}
+                        onClick={() => setCatalogFilter('all')}
+                        data-testid="skills-catalog-filter-all"
+                      >
+                        <Trans>Tutte</Trans>
+                      </button>
+                      {SKILL_CATEGORIES.map((c) => (
                         <button
+                          key={c}
                           type="button"
-                          className="rounded-full bg-muted px-3 py-1 text-xs text-foreground transition hover:bg-accent"
-                          data-testid="skills-browse-retry"
-                          onClick={() => setBrowseRetryAt(Date.now())}
+                          className={`rounded-full px-3 py-1 text-[12px] transition ${catalogFilter === c ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-muted'}`}
+                          onClick={() => setCatalogFilter(catalogFilter === c ? 'all' : c)}
+                          data-testid={`skills-catalog-filter-${c}`}
                         >
-                          <Trans>Riprova</Trans>
+                          {categoryTitles[c]}
                         </button>
-                      </div>
-                    )}
-                    {!browseLoading && browsePacks.length === 0 ? (
-                      <p className="py-6 text-center text-sm text-muted-foreground" data-testid="skills-browse-empty">
-                        <Trans>Nessun pacchetto trovato</Trans>
+                      ))}
+                    </div>
+                    {catalog === null ? (
+                      <p className="py-6 text-center text-sm text-muted-foreground" data-testid="skills-catalog-loading"><Trans>caricamento…</Trans></p>
+                    ) : catalogRows.length === 0 ? (
+                      <p className="py-6 text-center text-sm text-muted-foreground" data-testid="skills-catalog-empty">
+                        <Trans>Nessuna skill trovata</Trans>
                       </p>
                     ) : (
-                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2" data-testid="skills-browse-grid">
-                        {browsePacks.map((pack) => (
-                          <button
-                            key={pack.id}
-                            type="button"
-                            className="flex min-w-0 items-start gap-3 rounded-[14px] px-2.5 py-2 text-left transition hover:bg-muted/60"
-                            onClick={() => setBrowseId(pack.id)}
-                            data-testid={`skills-browse-entry-${pack.name}`}
-                          >
-                            <span className="grid size-10 shrink-0 place-items-center rounded-[11px] bg-muted text-base">✦</span>
-                            <span className="min-w-0 flex-1">
-                              <span className="flex items-center gap-1.5">
-                                <span className="truncate text-[15px]">{pack.displayName}</span>
-                                {pack.official && <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"><Trans>ufficiale</Trans></span>}
-                                {pack.installed && <span className="shrink-0 rounded-full bg-foreground px-1.5 py-0.5 text-[10px] text-background"><Trans>Aggiunto</Trans></span>}
-                              </span>
-                              <span className="line-clamp-2 text-[13px] leading-snug text-muted-foreground">{pack.description.replace(/\s+/g, ' ') || '—'}</span>
-                              <span className="mt-0.5 block text-[12px] text-muted-foreground">
-                                <Trans>{pack.skillCount} skill</Trans>
-                              </span>
-                            </span>
-                          </button>
-                        ))}
-                      </div>
+                      SKILL_CATEGORIES.filter((c) => catalogRows.some((e) => e.category === c)).map((c) => (
+                        <div key={c} className="space-y-1.5" data-testid={`skills-catalog-category-${c}`}>
+                          <h4 className="pt-2 text-[12px] font-medium uppercase tracking-wide text-muted-foreground">{categoryTitles[c]}</h4>
+                          {catalogRows.filter((e) => e.category === c).map((entry) => {
+                            const state = catalogState(entry)
+                            return (
+                              <button
+                                key={entry.id}
+                                type="button"
+                                className="flex w-full items-center gap-3 rounded-[14px] px-2 py-2 text-left transition hover:bg-muted/60"
+                                onClick={() => setCatalogId(entry.id)}
+                                data-testid={`skills-catalog-entry-${entry.id}`}
+                              >
+                                <span className="grid size-10 shrink-0 place-items-center rounded-[11px] bg-muted text-base">✦</span>
+                                <span className="min-w-0 flex-1">
+                                  <span className="flex items-center gap-1.5">
+                                    <span className="truncate text-[15px]">{humanizeSkillName(entry.id)}</span>
+                                    {state !== 'available' && <span className="shrink-0 rounded-full bg-foreground px-1.5 py-0.5 text-[10px] text-background"><Trans>Aggiunta</Trans></span>}
+                                    {state === 'update' && <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-amber-600 dark:text-amber-400"><Trans>Aggiornamento disponibile</Trans></span>}
+                                  </span>
+                                  <span className="block truncate text-[13px] text-muted-foreground">{skillCatalogDescription(entry, lang)}</span>
+                                  <span className="mt-0.5 block truncate text-[12px] text-muted-foreground">{entry.source.repo}</span>
+                                </span>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      ))
                     )}
                   </section>
                 </>
@@ -616,6 +621,14 @@ function SkillEditor({ folder, onDone, onCancel, embedded = false }: {
         </div>
       </SettingsGroup>
 
+      {/* K4 (fase skill · catalogo): le note per Homun della voce, in sola lettura */}
+      {folder !== null && meta?.homunNotes && (
+        <div className="space-y-1" data-testid="skill-homun-notes">
+          <p className="text-[13px] text-muted-foreground"><Trans>Adattamenti di Homun</Trans></p>
+          <p className="max-h-40 overflow-y-auto scroll-thin whitespace-pre-wrap rounded-xl bg-muted/40 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">{meta.homunNotes}</p>
+        </div>
+      )}
+
       {folder !== null && meta && (
         <>
           {/* Bot che la usano: Tutti i bot + un interruttore per bot */}
@@ -827,31 +840,44 @@ function SkillEditor({ folder, onDone, onCancel, embedded = false }: {
 }
 
 /**
- * L'anteprima di un pacchetto di Sfoglia (B4): nome, marketplace e sha12,
- * l'elenco delle skill con la descrizione, le parti «non usate», «Bot che la
- * usano» (predefinito «Tutti i bot»). «Aggiungi» installa SENZA card in chat;
- * «Annulla» butta lo staging (browse-discard). Ritocchi: il titolo è il
- * displayName della griglia (T3, lo slug nella riga piccola accanto a
- * marketplace e sha12) e in alto c'è «‹ Indietro» come nel dettaglio (T4,
- * stesso effetto dell'«Annulla»: scarta lo staging). Quando «Tutti i bot» è
- * acceso i toggle dei singoli bot si SPENGONO e si DISATTIVANO (B4: così si
- * corregge anche il difetto dell'anteprima di import).
+ * L'anteprima di una VOCE del catalogo (K3): nome e descrizione, fonte e
+ * licenza, l'elenco dei file che entreranno e le note per Homun nel riquadro
+ * «Adattamenti di Homun»; «Bot che la usano» (predefinito «Tutti i bot», e
+ * quando è acceso i toggle dei singoli si SPENGONO e si DISATTIVANO).
+ * «Aggiungi» scarica la voce al COMMIT FISSATO; «‹ Indietro» chiude (lo
+ * staging scade da solo col TTL). Se la voce installata ha un commit diverso
+ * da quello del catalogo («Aggiornamento disponibile»), l'aggiornamento usa
+ * il flusso di oggi: diff vecchio → nuovo, versione vecchia conservata.
  */
-function BrowsePreview({ id, displayName, onClose, onAdded }: { id: string; displayName: string; onClose(): void; onAdded(): void }): React.ReactNode {
-  const { t } = useLingui()
+function CatalogPreview({ entry, state, installedFolder, onClose, onChanged }: {
+  entry: SkillCatalogEntry
+  state: SkillCatalogInstallState
+  installedFolder: string | null
+  onClose(): void
+  onChanged(): void
+}): React.ReactNode {
+  const { i18n, t } = useLingui()
   const agents = useStore((s) => s.agents)
-  const [preview, setPreview] = useState<SkillBrowsePreview | null>(null)
+  const [preview, setPreview] = useState<SkillCatalogPreview | null>(null)
   const [error, setError] = useState('')
   const [enabledFor, setEnabledFor] = useState<string[]>(['*'])
   const [adding, setAdding] = useState(false)
+  // lo staging vive nel daemon sotto un id OPACO (mai path al renderer)
+  const [previewId, setPreviewId] = useState<string | null>(null)
+  // «Aggiorna» (flusso di oggi): anteprima del diff, poi applica
+  const [updateDiff, setUpdateDiff] = useState<{ id: string; diff: SkillGithubUpdatePreview } | null>(null)
+  const [updateNote, setUpdateNote] = useState('')
 
   useEffect(() => {
     setError('')
     setPreview(null)
-    void api.skillsBrowsePreview(id)
-      .then(setPreview)
+    setPreviewId(null)
+    setUpdateDiff(null)
+    setUpdateNote('')
+    void api.skillsCatalogPreview(entry.id)
+      .then((r) => { setPreviewId(r.previewId); setPreview(r.preview) })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
-  }, [id])
+  }, [entry.id])
 
   const allBots = enabledFor.includes('*')
   const toggleBot = (agentId: string, on: boolean): void => {
@@ -860,60 +886,120 @@ function BrowsePreview({ id, displayName, onClose, onAdded }: { id: string; disp
     setEnabledFor(next.length === agents.length ? ['*'] : next)
   }
 
-  const cancel = (): void => {
-    if (preview) void api.skillsBrowseDiscard(preview.previewId).catch(() => undefined)
-    onClose()
-  }
-
   const add = (): void => {
-    if (!preview) return
+    if (!preview || !previewId) return
     setAdding(true)
-    void api.skillsBrowseInstall(preview.previewId, enabledFor)
-      .then((r) => {
-        if (r.ok) {
-          onAdded()
-          onClose()
-        } else {
-          setError(r.error ?? '')
-        }
+    void api.skillsCatalogInstall(previewId, enabledFor)
+      .then(() => {
+        onChanged()
+        onClose()
       })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setAdding(false))
   }
 
   return (
-    <div className="space-y-4" data-testid="skills-browse-preview">
-      <button type="button" className="flex items-center gap-1 text-[13px] text-muted-foreground transition hover:text-foreground" onClick={cancel} data-testid="skills-browse-back">
+    <div className="space-y-4" data-testid="skills-catalog-preview">
+      <button type="button" className="flex items-center gap-1 text-[13px] text-muted-foreground transition hover:text-foreground" onClick={onClose} data-testid="skills-catalog-back">
         <ChevronLeft className="size-4" /><Trans>Indietro</Trans>
       </button>
-      {error && <p role="alert" className="rounded-lg bg-destructive/10 px-3 py-2 text-[13px] text-destructive" data-testid="skills-browse-preview-error">{error}</p>}
+      {error && <p role="alert" className="rounded-lg bg-destructive/10 px-3 py-2 text-[13px] text-destructive" data-testid="skills-catalog-preview-error">{error}</p>}
       {!preview && !error && <p className="py-6 text-center text-sm text-muted-foreground"><Trans>caricamento…</Trans></p>}
       {preview && (
         <div className="space-y-3">
           <div className="flex items-center gap-3">
             <span className="grid size-12 shrink-0 place-items-center rounded-[12px] bg-muted text-lg">✦</span>
             <span className="min-w-0 flex-1">
-              {/* T3: il titolo è lo STESSO nome della griglia (displayName);
-                  lo slug scende nella riga piccola, con marketplace e sha12 */}
-              <span className="block truncate text-lg font-medium" data-testid="skills-browse-preview-title">{displayName || preview.card.name}</span>
+              <span className="block truncate text-lg font-medium" data-testid="skills-catalog-preview-title">{humanizeSkillName(entry.id)}</span>
               <span className="block truncate text-[13px] text-muted-foreground">
-                <span className="font-mono">{preview.card.name}</span> · <Trans>{preview.card.marketplace}</Trans> · <span className="font-mono" data-testid="skills-browse-sha">{preview.sha12}</span>
+                <span className="font-mono" data-testid="skills-catalog-preview-source">{entry.source.repo}</span> · <span data-testid="skills-catalog-preview-commit" className="font-mono">{preview.commit.slice(0, 12)}</span>
               </span>
             </span>
           </div>
-          <div className="space-y-1.5">
-            {preview.skills.map((s) => (
-              <div key={s.name} className="rounded-[14px] bg-muted/60 px-3 py-2" data-testid={`skills-browse-skill-${s.name}`}>
-                <span className="block truncate text-[14px]">{humanizeSkillName(s.name)}</span>
-                <span className="block truncate text-[12px] text-muted-foreground">{s.description.replace(/\s+/g, ' ')}</span>
-              </div>
-            ))}
-          </div>
-          {preview.ignored.length > 0 && (
-            <p className="rounded-xl bg-muted/60 px-3 py-2 text-[13px] text-muted-foreground" data-testid="skills-browse-ignored">
-              <Trans>non usate:</Trans> {preview.ignored.join(', ')}
-            </p>
+          <p className="text-[13px] text-muted-foreground" data-testid="skills-catalog-preview-description">
+            {skillCatalogDescription(entry, i18n.locale === 'en' ? 'en' : 'it')}
+          </p>
+          <p className="text-[12px] text-muted-foreground" data-testid="skills-catalog-preview-license">
+            <Trans>Licenza</Trans>: <span className="font-mono">{preview.license}</span>
+          </p>
+          {preview.invocation === 'user' && (
+            <p className="rounded-xl bg-muted/60 px-3 py-2 text-[12px] text-muted-foreground"><Trans>solo con /</Trans></p>
           )}
+          {/* i file che entreranno (le esclusioni del catalogo sono già applicate) */}
+          <div className="space-y-1" data-testid="skills-catalog-preview-files">
+            <p className="text-[13px] text-muted-foreground"><Trans>File che entrano</Trans> ({preview.files.length})</p>
+            <ul className="max-h-40 space-y-0.5 overflow-y-auto scroll-thin rounded-xl bg-muted/40 px-3 py-2">
+              {preview.files.map((f) => (
+                <li key={f} className="truncate font-mono text-[11px] text-muted-foreground">{f}</li>
+              ))}
+            </ul>
+          </div>
+          {/* K4: le note per Homun, in un riquadro piccolo, sola lettura */}
+          {preview.homunNotes && (
+            <div className="space-y-1" data-testid="skills-catalog-preview-notes">
+              <p className="text-[13px] text-muted-foreground"><Trans>Adattamenti di Homun</Trans></p>
+              <p className="max-h-40 overflow-y-auto scroll-thin whitespace-pre-wrap rounded-xl bg-muted/40 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">{preview.homunNotes}</p>
+            </div>
+          )}
+          {!preview.valid && preview.issues.length > 0 && (
+            <div className="space-y-1 rounded-lg bg-destructive/10 px-3 py-2" role="alert">
+              {preview.issues.map((i, idx) => <p key={idx} className="text-[12px] text-destructive">{issueText(i, i18n)}</p>)}
+            </div>
+          )}
+
+          {/* «Aggiornamento disponibile»: il flusso di oggi (diff, versione vecchia conservata) */}
+          {state === 'update' && installedFolder && (
+            <SettingsGroup label={<Trans>Aggiornamento disponibile</Trans>}>
+              {updateDiff === null ? (
+                <div className="px-4 py-3">
+                  <button
+                    type="button"
+                    className="rounded-full px-3 py-1 text-xs text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                    data-testid="skills-catalog-update-preview"
+                    onClick={() => {
+                      setUpdateNote('')
+                      void api.skillsGithubUpdatePreview(installedFolder)
+                        .then((r) => setUpdateDiff(r))
+                        .catch((e: unknown) => setUpdateNote(e instanceof Error ? e.message : String(e)))
+                    }}
+                  >
+                    <Trans>Controlla aggiornamenti</Trans>
+                  </button>
+                  {updateNote && <p className="mt-2 text-[12px] text-destructive">{updateNote}</p>}
+                </div>
+              ) : (
+                <div className="space-y-2 px-4 py-3 text-[13px]" data-testid="skills-catalog-update-diff">
+                  <p className="font-mono text-[11px] text-muted-foreground">
+                    {updateDiff.diff.oldCommit.slice(0, 8)} → {updateDiff.diff.newCommit.slice(0, 8)}
+                  </p>
+                  {updateDiff.diff.added.length > 0 && <p><Trans>File aggiunti: {updateDiff.diff.added.join(', ')}</Trans></p>}
+                  {updateDiff.diff.removed.length > 0 && <p><Trans>File tolti: {updateDiff.diff.removed.join(', ')}</Trans></p>}
+                  {updateDiff.diff.changed.length > 0 && <p><Trans>File cambiati: {updateDiff.diff.changed.join(', ')}</Trans></p>}
+                  <div className="flex justify-end gap-2 pt-1">
+                    <button type="button" className="rounded-full px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground" onClick={() => setUpdateDiff(null)}>
+                      <Trans>Annulla</Trans>
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-full bg-foreground px-4 py-1.5 text-xs font-medium text-background hover:opacity-90"
+                      data-testid="skills-catalog-update-apply"
+                      onClick={() => {
+                        void api.skillsGithubUpdateApply(updateDiff.id, installedFolder).then(() => {
+                          setUpdateDiff(null)
+                          setUpdateNote(t`aggiornata`)
+                          onChanged()
+                          void api.skillsCatalogPreview(entry.id).then((r) => setPreview(r.preview)).catch(() => undefined)
+                        }).catch((e: unknown) => setUpdateNote(e instanceof Error ? e.message : String(e)))
+                      }}
+                    >
+                      <Trans>Aggiorna</Trans>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </SettingsGroup>
+          )}
+
           <SettingsGroup label={<Trans>Bot che la usano</Trans>}>
             <SettingsRow
               title={<Trans>Tutti i bot</Trans>}
@@ -931,16 +1017,16 @@ function BrowsePreview({ id, displayName, onClose, onAdded }: { id: string; disp
             <button
               type="button"
               className="rounded-full px-4 py-1.5 text-xs text-muted-foreground transition hover:text-foreground"
-              data-testid="skills-browse-cancel"
-              onClick={cancel}
+              onClick={onClose}
+              data-testid="skills-catalog-cancel"
             >
               <Trans>Annulla</Trans>
             </button>
             <button
               type="button"
               className="rounded-full bg-foreground px-4 py-1.5 text-xs font-medium text-background transition hover:opacity-90 disabled:opacity-40"
-              disabled={adding}
-              data-testid="skills-browse-add"
+              disabled={adding || !preview.valid}
+              data-testid="skills-catalog-add"
               onClick={add}
             >
               <Trans>Aggiungi</Trans>

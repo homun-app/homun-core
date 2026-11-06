@@ -25,21 +25,21 @@ function block(name: string): string {
 /** Il blocco dell'elenco: dalla lista delle skill alla sezione Sfoglia. */
 function listBlock(): string {
   const atList = src.indexOf('data-testid="skills-list"')
-  const atBrowse = src.indexOf('data-testid="skills-browse"')
+  const atBrowse = src.indexOf('data-testid="skills-catalog"')
   if (atList < 0 || atBrowse < 0) throw new Error('elenco o sezione Sfoglia non trovati')
   return src.slice(atList, atBrowse)
 }
 
 describe('T1: un solo campo di ricerca', () => {
   it('il campo dentro Sfoglia non c\'è più (né lo stato dedicato): resta solo quello in alto', () => {
-    expect(src).not.toContain('skills-browse-search')
-    expect(src).not.toContain('browseQuery')
+    expect(src).not.toContain('skills-catalog-search')
+    expect(src).not.toContain('catalogQuery')
     // il campo in alto resta UNO solo (un solo placeholder «Cerca skill»)
     expect((src.match(/placeholder=\{t`Cerca skill`\}/g) ?? []).length).toBe(1)
   })
 
-  it('il campo in alto filtra ANCHE i pacchetti di Sfoglia (la stessa query)', () => {
-    expect(src).toContain('matchesSkillPackQuery(e, query)')
+  it('il campo in alto filtra ANCHE il catalogo di Sfoglia (la ricerca condivisa del catalogo)', () => {
+    expect(src).toContain('searchSkillCatalog(catalog ?? [], query, lang)')
   })
 
   it('ricerca/filtro senza risultati → «Nessuna skill trovata»; l\'invito lungo solo a libreria VUOTA e SENZA ricerca', () => {
@@ -69,34 +69,33 @@ describe('T2: il contenuto della finestra è un @container', () => {
   })
 })
 
-describe('T3: il nome dell\'anteprima è lo stesso della griglia', () => {
-  it('il titolo dell\'anteprima è il displayName (lo slug come ripiego)', () => {
-    const bp = block('BrowsePreview')
-    expect(src).toMatch(/<BrowsePreview[^>]*displayName=/)
-    expect(bp).toMatch(/displayName[^\n]*preview\.card\.name|displayName \?\? preview\.card\.name/)
-    expect(bp).toContain('data-testid="skills-browse-preview-title"')
-  })
-
-  it('lo slug nella riga piccola sotto, ACCANTO a marketplace e sha12 (slug · marketplace · sha12)', () => {
-    const bp = block('BrowsePreview')
-    // l'ordine nella riga: slug (card.name) · marketplace · sha12
-    expect(bp).toMatch(/\{preview\.card\.name\}[\s\S]{0,200}preview\.card\.marketplace[\s\S]{0,200}skills-browse-sha[\s\S]{0,100}preview\.sha12/)
+describe('T3: il nome dell\'anteprima è lo stesso della riga del catalogo', () => {
+  it('il titolo dell\'anteprima è l\'id umanizzato della voce (come la riga), con fonte e commit sotto', () => {
+    const cp = block('CatalogPreview')
+    expect(src).toMatch(/<CatalogPreview[^>]*entry=/)
+    expect(cp).toContain('data-testid="skills-catalog-preview-title"')
+    expect(cp).toMatch(/humanizeSkillName\(entry\.id\)/)
+    // la riga piccola: owner/repo · commit (i primi 12)
+    expect(cp).toMatch(/entry\.source\.repo[\s\S]{0,120}preview\.commit\.slice\(0, 12\)/)
   })
 })
 
-describe('T4: un solo «Annulla» nell\'anteprima di Sfoglia', () => {
-  it('in alto «‹ Indietro» che SCARTA lo staging; «Annulla» e «Aggiungi» restano in basso', () => {
-    const bp = block('BrowsePreview')
-    // il PRIMO bottone del blocco: l'Indietro, con la stessa azione dell'Annulla
-    const atFirst = bp.indexOf('<button')
-    const firstBtn = bp.slice(atFirst, bp.indexOf('</button>', atFirst))
+describe('T4: un solo «Annulla» in basso nell\'anteprima di una voce del catalogo', () => {
+  it('in alto «‹ Indietro» che chiude; «Annulla» e «Aggiungi» restano in basso', () => {
+    const cp = block('CatalogPreview')
+    // il PRIMO bottone del blocco: l'Indietro, che chiude l'anteprima
+    const atFirst = cp.indexOf('<button')
+    const firstBtn = cp.slice(atFirst, cp.indexOf('</button>', atFirst))
     expect(firstBtn).toContain('<Trans>Indietro</Trans>')
-    expect(firstBtn).toContain('data-testid="skills-browse-back"')
-    expect(firstBtn).toMatch(/onClick=\{cancel\}/)
-    // UN solo «Annulla» in tutto il blocco: quello in basso, accanto ad «Aggiungi»
-    expect((bp.match(/<Trans>Annulla<\/Trans>/g) ?? []).length).toBe(1)
-    expect(bp).toContain('data-testid="skills-browse-cancel"')
-    expect(bp).toContain('data-testid="skills-browse-add"')
+    expect(firstBtn).toContain('data-testid="skills-catalog-back"')
+    expect(firstBtn).toMatch(/onClick=\{onClose\}/)
+    // UN solo «Annulla» nella riga delle azioni in basso, accanto ad «Aggiungi»
+    // (nel diff dell'aggiornamento l'«Annulla» è un'altra cosa: chiude il diff)
+    const atAdd = cp.indexOf('data-testid="skills-catalog-add"')
+    expect(atAdd).toBeGreaterThan(0)
+    const actions = cp.slice(cp.lastIndexOf('<div', atAdd), atAdd)
+    expect((actions.match(/<Trans>Annulla<\/Trans>/g) ?? []).length).toBe(1)
+    expect(cp).toContain('data-testid="skills-catalog-cancel"')
   })
 })
 

@@ -1,5 +1,8 @@
 // Tipi condivisi tra main, preload e renderer (rispecchiano il modello del Grok Bot originale)
 
+import type { SkillCatalogEntry } from './skill-catalog'
+export type { SkillCatalogEntry } from './skill-catalog'
+
 export type AgentStatus = 'offline' | 'idle' | 'thinking' | 'running' | 'paused-for-approval'
 
 // ---- fase 16: aspetto della mascotte (le 5 famiglie scelte, 7 colori) ----
@@ -643,12 +646,6 @@ export type SandbotEvent =
   // di shell_jobs — il feed «Attività» e la vista File del PROPRIETARIO
   // ricaricano (niente payload pesante: la UI legge quello che serve)
   | { type: 'computer-activity'; ownerId: string }
-  // fase sfoglia veloce (V1): la PRIMA lettura del catalogo Sfoglia dice
-  // quanti plugin ha letto (la finestra mostra «12 di 54 plugin letti») e,
-  // finito l'aggiornamento in sottofondo della cache scaduta, la finestra
-  // aperta ricarica la lista
-  | { type: 'skills:browse-progress'; done: number; total: number }
-  | { type: 'skills:browse-updated' }
 
 /** Lo stato dello schermo di un bot per la UI (fase 19a, RPC screen:status). */
 export interface ScreenStatus {
@@ -902,12 +899,12 @@ export interface SandbotApi {
   skillsGithubAdd(id: string, choices: Array<{ path: string; name?: string }>, enabledFor: string[]): Promise<Array<{ name?: string; path: string; error?: { english: string; uiId: string; values?: Record<string, string | number> } }>>
   skillsGithubUpdatePreview(name: string): Promise<{ id: string; diff: SkillGithubUpdatePreview }>
   skillsGithubUpdateApply(id: string, name: string): Promise<boolean>
-  // fase skill · Sfoglia (B2/B3): il catalogo dei pacchetti di sole skill dei
-  // marketplace e l'aggiunta dalla finestra (senza card in chat)
-  skillsBrowse(query?: string, opts?: { retry?: boolean }): Promise<SkillBrowseResult>
-  skillsBrowsePreview(id: string): Promise<SkillBrowsePreview>
-  skillsBrowseInstall(previewId: string, enabledFor: string[]): Promise<{ ok: boolean; message?: string; error?: string }>
-  skillsBrowseDiscard(previewId: string): Promise<{ ok: boolean }>
+  // fase skill · catalogo (K2/K3): il catalogo curato che vive NEL REPO
+  // (nessuna rete per l'elenco) e l'aggiunta dalla finestra, col commit
+  // fissato della voce come ref
+  skillsCatalog(): Promise<SkillCatalogEntry[]>
+  skillsCatalogPreview(id: string): Promise<{ previewId: string; preview: SkillCatalogPreview }>
+  skillsCatalogInstall(previewId: string, enabledFor: string[]): Promise<{ ok: true; name: string }>
   // MCP
   mcpList(): Promise<McpServerInfo[]>
   mcpSave(s: McpServerInfo, secret?: McpServerSecret): Promise<McpServerInfo[]>
@@ -1158,6 +1155,8 @@ export interface SkillOrigin {
   repo: string
   commit: string
   path: string
+  /** fase skill · catalogo (K3): l'id della voce del catalogo da cui viene */
+  catalogId?: string
 }
 
 /** I metadati di Homun di una skill (NON stanno in SKILL.md: setting `skills.library`). */
@@ -1167,6 +1166,10 @@ export interface SkillLibraryEntry {
   source: SkillSourceKind
   createdBy?: string
   origin?: SkillOrigin
+  /** K4 (fase skill · catalogo): le note per Homun — il motore le mette in coda alla skill per il modello */
+  homunNotes?: string
+  /** K5: 'user' = solo con /nome (fuori dal prompt, rifiutata dal tool skill) */
+  invocation?: 'user'
   createdAt: number
   updatedAt: number
 }
@@ -1188,6 +1191,12 @@ export interface SkillLibraryItem {
   valid: boolean
   /** K4: importata da GitHub e poi modificata dall'utente — resta di terzi */
   importedModified?: boolean
+  /** K4 (fase skill · catalogo): le note per Homun, in sola lettura nella finestra */
+  homunNotes?: string
+  /** K5: la voce di libreria dice «solo con /» */
+  invocation?: 'user'
+  /** K5: si usa solo con /nome (disable-model-invocation nel frontmatter o invocation 'user') */
+  userOnly?: boolean
   issues: Array<{ english: string; uiId: string; values?: Record<string, string | number> }>
 }
 
@@ -1229,46 +1238,30 @@ export interface SkillVersion {
   by?: string
 }
 
-// ---- fase skill · Sfoglia (B2/B3): i pacchetti di sole skill dei marketplace ----
+// ---- fase skill · catalogo (K3): l'anteprima di una voce del catalogo curato ----
 
-/** Una voce del catalogo «Sfoglia»: un plugin di sole skill di un marketplace. */
-export interface SkillBrowseEntry {
-  /** l'id che usa l'installazione: plugin:<nome>@<marketplace> */
+/**
+ * L'anteprima di una voce del catalogo, scaricata al COMMIT FISSATO: i file
+ * che entreranno (esclusioni applicate), la fonte, la licenza e le note per
+ * Homun. Lo staging resta nel daemon (id opaco), come l'import da GitHub.
+ */
+export interface SkillCatalogPreview {
+  /** l'id della voce (= il nome della cartella) */
   id: string
+  /** il name e la description dello SKILL.md scaricato */
   name: string
-  displayName: string
   description: string
-  category: string
-  keywords: string[]
-  homepage: string
-  marketplace: string
-  official: boolean
-  skillCount: number
-  skillNames: string[]
-  /** «Aggiunto»: il pacchetto è già installato */
-  installed: boolean
-}
-
-/** Il catalogo Sfoglia: le voci e i marketplace che non si sono letti. */
-export interface SkillBrowseResult {
-  entries: SkillBrowseEntry[]
-  unavailable: Array<{ source: string }>
-  /** le voci scartate col motivo (diagnostica) */
-  skipped: Array<{ plugin: string; reason: string }>
-}
-
-/** L'anteprima di un pacchetto dalla finestra (lo stesso percorso della card, senza chat). */
-export interface SkillBrowsePreview {
-  previewId: string
-  /** la card del plugin (senza proposta in chat) */
-  card: Extract<SendMessagePayload, { type: 'plugin' }>
-  /** le skill CON la descrizione (per l'elenco dell'anteprima) */
-  skills: Array<{ name: string; description: string }>
-  /** le parti che Homun non usa (commands, agents…), mostrate come «non usate» */
-  ignored: string[]
-  sha12: string
-  /** byte dello staging */
-  size: number
+  repo: string
+  commit: string
+  path: string
+  license: string
+  /** i file che entreranno, relativi alla cartella della skill (SKILL.md e LICENSE* sempre) */
+  files: string[]
+  homunNotes: string
+  invocation?: 'user'
+  /** la skill scaricata rispetta il formato (altrimenti «Aggiungi» è spento col motivo) */
+  valid: boolean
+  issues: Array<{ english: string; uiId: string; values?: Record<string, string | number> }>
 }
 
 /** Le skill dei plugin per la finestra «Skill» (sola lettura). */

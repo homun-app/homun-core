@@ -734,11 +734,12 @@ export const UI = {
   skillErrInvalidName: msg({ id: 'skill.err.invalidName', message: 'Nome non valido: 1–64 caratteri, solo minuscole, cifre e trattini singoli.' }),
   skillErrDuplicateName: msg({ id: 'skill.err.duplicateName', message: 'Esiste già una skill con questo nome.' }),
   skillErrNotFound: msg({ id: 'skill.err.notFound', message: 'Skill non trovata.' }),
-  // ---- fase skill · Sfoglia (B3): i rifiuti dell'aggiunta dalla finestra ----
-  skillBrowseHasConnectors: msg({ id: 'skill.browse.hasConnectors', message: 'Questo pacchetto contiene anche connettori: aggiungilo da Collega app.' }),
-  skillBrowsePreviewMissing: msg({ id: 'skill.browse.previewMissing', message: 'L\u2019anteprima non è più valida: chiudi e riapri il pacchetto.' }),
-  skillBrowsePreviewFailed: msg({ id: 'skill.browse.previewFailed', message: 'L\u2019anteprima non è riuscita: il pacchetto non si può scaricare o non è valido.' }),
-  skillBrowseBadEnabledFor: msg({ id: 'skill.browse.badEnabledFor', message: 'L\u2019elenco dei bot non è valido.' })
+  // ---- fase skill · catalogo (K3): i rifiuti dell'installazione di una voce ----
+  skillErrCatalogPin: msg({ id: 'skill.err.catalogPin', message: 'La versione fissata dal catalogo non è più reperibile nel repository: non si scarica nient\u2019altro.' }),
+  skillErrCatalogMissing: msg({ id: 'skill.err.catalogMissing', message: 'Questa voce non è più nel catalogo.' }),
+  skillErrCatalogPreviewMissing: msg({ id: 'skill.err.catalogPreviewMissing', message: 'L\u2019anteprima non è più valida: chiudi e riapri la voce.' }),
+  skillErrCatalogInvalidSkill: msg({ id: 'skill.err.catalogInvalidSkill', message: 'La skill nel repository non è valida: non si può aggiungere.' }),
+  skillErrBadEnabledFor: msg({ id: 'skill.err.badEnabledFor', message: 'L\u2019elenco dei bot non è valido.' })
 } as const
 
 export type UiMessage = (typeof UI)[keyof typeof UI]

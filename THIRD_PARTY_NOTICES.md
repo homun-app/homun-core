@@ -190,3 +190,28 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 ```
+
+## Skill del catalogo
+
+La finestra «Skill» › Sfoglia mostra un catalogo di skill di terze parti curato
+da noi (`src/shared/skill-catalog/skill-catalog.json`): 38 voci da questi
+repository GitHub, ciascuna con il commit fissato e la licenza dichiarata
+dalla voce (le licenze indicate sono quelle del repository di origine alla
+data della revisione):
+
+| Repository | Voci | Licenza |
+| --- | --- | --- |
+| `coreyhaines31/marketingskills` | 8 | MIT |
+| `phuryn/pm-skills` | 8 | MIT |
+| `Paramchoudhary/ResumeSkills` | 7 | MIT |
+| `tjboudreaux/cc-thinking-skills` | 6 | MIT |
+| `tronghieu/agent-skills` | 4 | MIT |
+| `openai/skills` | 3 | MIT (Notion Labs) / Apache-2.0 |
+| `blader/humanizer` | 1 | MIT |
+| `anthropics/skills` | 1 | Apache-2.0 |
+
+I file di queste skill **non sono ridistribuiti in questo repository**: vengono
+scaricati dalla fonte al commit indicato nel catalogo solo quando l'utente
+installa una voce, e la copia finisce nella libreria skill dell'utente
+(`LICENSE*` viene copiato insieme alla skill). I marchi e i repository citati
+appartengono ai rispettivi proprietari.

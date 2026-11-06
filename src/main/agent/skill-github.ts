@@ -18,12 +18,14 @@ import {
   checkGitUrl, gitCloneArgv, findEscapingSymlink, dirStats, PLUGIN_MAX_BYTES, PLUGIN_MAX_FILES, PLUGIN_TIMEOUT_MS
 } from '../connectors/marketplace'
 import { parseSkillMd, buildSkillMd, isValidSkillName } from '../../shared/skill-md'
+import { catalogFileIncluded, type SkillCatalogEntry } from '../../shared/skill-catalog'
+import { catalogRepoUrl, catalogCopyFilter } from './skill-catalog'
 import { scanSkillFolder, libraryDir, skillsLibrary, saveSkillsLibrary, appendSkillVersion, assertSkillFolder } from './skills'
 import { UI } from '../../shared/ui-messages'
 import { ui } from '../../shared/ui-text'
 import type { UiText } from '../../shared/types'
 import type {
-  SkillGithubPreview, SkillGithubPreviewItem, SkillGithubUpdatePreview, SkillLibrarySettings
+  SkillGithubPreview, SkillGithubPreviewItem, SkillGithubUpdatePreview, SkillLibraryEntry, SkillLibrarySettings
 } from '../../shared/types'
 
 /** L'URL che l'utente ha incollato, ripulito (puro). */
@@ -101,8 +103,12 @@ function gitSparseSupportsDashDash(cwd: string): Promise<boolean> {
   return dashDashProbe
 }
 
-/** Il clone in staging: riusa checkGitUrl + gitCloneArgv + i limiti dei plugin. */
-async function stageRepo(url: string, ref: string | undefined, path: string, opts: { allowFileUrlsForTests?: boolean; mkdtemp?: (p: string) => string }): Promise<
+/**
+ * Il clone in staging: riusa checkGitUrl + gitCloneArgv + i limiti dei plugin.
+ * Fase skill · catalogo (K3): esportata — l'installazione di una voce del
+ * catalogo passa da QUI, col commit fissato della voce come ref.
+ */
+export async function stageRepo(url: string, ref: string | undefined, path: string, opts: { allowFileUrlsForTests?: boolean; mkdtemp?: (p: string) => string }): Promise<
   { ok: true; dir: string; sha: string } | { ok: false; error: UiText; kind: 'not-found' | 'too-large' | 'symlink' | 'clone' }
 > {
   const staging = (opts.mkdtemp ?? ((p: string) => mkdtempSync(join(tmpdir(), p))))('sandbot-skill-import-')
@@ -320,18 +326,30 @@ export function addSkillsFromStaging(
 
 /**
  * «Aggiorna da GitHub» (S6.5): l'anteprima di cosa cambia sull'origin —
- * commit vecchio → nuovo, file aggiunti, tolti e cambiati.
+ * commit vecchio → nuovo, file aggiunti, tolti e cambiati. Fase skill ·
+ * catalogo (K3): una voce del catalogo installata si aggiorna al COMMIT
+ * FISSATO che il catalogo attivo porta per lei (`catalog`), non alla HEAD —
+ * e lo sha dello staging dev'essere quello, altrimenti rifiuto.
  */
 export async function previewSkillUpdate(
   name: string,
-  opts: { allowFileUrlsForTests?: boolean; mkdtemp?: (p: string) => string } = {}
+  opts: { allowFileUrlsForTests?: boolean; mkdtemp?: (p: string) => string; catalog?: readonly SkillCatalogEntry[] } = {}
 ): Promise<{ ok: true; diff: SkillGithubUpdatePreview; staging: string } | { ok: false; error: UiText }> {
   const folder = assertSkillFolder(name) // K5: mai un nome che costruisce path
   const lib = skillsLibrary()
   const entry = lib[folder]
   if (!entry?.origin) return { ok: false, error: ui(UI.skillErrNoOrigin) }
-  const staged = await stageRepo(entry.origin.repo, undefined, entry.origin.path, opts)
+  // K3: la voce del catalogo per questa skill installata (se c'è)
+  const catEntry = entry.origin.catalogId !== undefined ? opts.catalog?.find((c) => c.id === entry.origin!.catalogId) : undefined
+  const catUrl = catEntry ? catalogRepoUrl(catEntry, opts) : entry.origin.repo
+  const ref = catEntry ? catEntry.source.commit : undefined
+  const staged = await stageRepo(catUrl, ref, entry.origin.path, opts)
   if (!staged.ok) return { ok: false, error: staged.error }
+  // si scarica ESATTAMENTE la versione del catalogo: nessun'altra
+  if (catEntry && staged.sha !== catEntry.source.commit) {
+    rmSync(staged.dir, { recursive: true, force: true })
+    return { ok: false, error: ui(UI.skillErrCatalogPin) }
+  }
   const dirs = findSkillDirs(staged.dir, entry.origin.path)
   const dir = dirs.includes(entry.origin.path) ? entry.origin.path : dirs[0]
   if (!dir) {
@@ -345,7 +363,11 @@ export async function previewSkillUpdate(
     rmSync(staged.dir, { recursive: true, force: true })
     return { ok: false, error: ui(UI.skillErrNoSkills) }
   }
-  const { files, issues } = scanSkillFolder(abs)
+  const exclude = catEntry?.files.exclude ?? []
+  const { files: scanned, issues } = scanSkillFolder(abs)
+  // K3: nel diff contano SOLO i file ammessi (le esclusioni del catalogo):
+  // la skill installata non ha evals/ né examples/, non siano «rimossi»
+  const files = scanned.filter((f) => catalogFileIncluded(f, exclude))
   const currentDir = join(libraryDir(), folder)
   const currentFiles = scanSkillFolder(currentDir).files
   const added = files.filter((f) => !currentFiles.includes(f))
@@ -392,16 +414,22 @@ export async function previewSkillUpdate(
  * «Aggiungi»: un'importata stile-readme-2 non torna stile-readme).
  * K4: l'aggiornamento riporta source 'github' (l'importata MODIFICATA torna
  * di GitHub: il testo torna quello del repository).
+ * Fase skill · catalogo (K3): per una voce del catalogo (`catalog` con la
+ * voce installata) la copia rispetta le esclusioni (SKILL.md e LICENSE*
+ * sempre), l'origin porta il catalogId e le note per Homun e l'eventuale
+ * invocation si aggiornano col catalogo.
  */
 export function applySkillUpdate(
   name: string,
   staging: string,
-  diff: SkillGithubUpdatePreview
+  diff: SkillGithubUpdatePreview,
+  opts: { catalog?: readonly SkillCatalogEntry[] } = {}
 ): { ok: true } | { ok: false; error: UiText } {
   const folder = assertSkillFolder(name) // K5: mai un nome che costruisce path
   const lib = skillsLibrary()
   const entry = lib[folder]
   if (!entry?.origin) return { ok: false, error: ui(UI.skillErrNoOrigin) }
+  const catEntry = entry.origin.catalogId !== undefined ? opts.catalog?.find((c) => c.id === entry.origin!.catalogId) : undefined
   // K6: il symlink (o troppi file) del repository non entra in libreria
   if (!diff.skill.valid) return { ok: false, error: ui(UI.skillErrInvalidSkill) }
   const dest = join(libraryDir(), folder)
@@ -414,10 +442,11 @@ export function applySkillUpdate(
     const hadVersions = existsSync(keptVersions)
     if (hadVersions) renameSync(keptVersions, versionsStash)
     // la cartella si sostituisce (SOLO i file del repository: niente .git,
-    // niente .versions alla radice — K6: un repository non pianta versioni finte)
+    // niente .versions alla radice — K6: un repository non pianta versioni
+    // finte); per una voce del catalogo contano le esclusioni di K3
     rmSync(dest, { recursive: true, force: true })
     const src = join(staging, ...diff.skill.path.split('/'))
-    cpSync(src, dest, { recursive: true, filter: repoCopyFilter(src) })
+    cpSync(src, dest, { recursive: true, filter: catEntry ? catalogCopyFilter(src, catEntry.files.exclude) : repoCopyFilter(src) })
     if (hadVersions) renameSync(versionsStash, keptVersions)
     if (oldText !== null) appendSkillVersion(dest, oldText, 'github')
     // K6: il name del frontmatter segue la cartella, come «Aggiungi»
@@ -426,12 +455,22 @@ export function applySkillUpdate(
     if (parsed.ok && parsed.skill.name !== folder) {
       writeFileSync(join(dest, 'SKILL.md'), buildSkillMd({ ...parsed.skill, name: folder }))
     }
-    lib[folder] = {
+    // K3: l'origin di una voce del catalogo resta della voce (catalogId
+    // compreso), e le note per Homun seguono il catalogo attivo
+    const next: SkillLibraryEntry = {
       ...entry,
       source: 'github',
-      origin: { repo: diff.repo, commit: diff.newCommit, path: diff.skill.path },
+      origin: catEntry
+        ? { repo: catEntry.source.repo, commit: catEntry.source.commit, path: catEntry.source.path, catalogId: catEntry.id }
+        : { repo: diff.repo, commit: diff.newCommit, path: diff.skill.path },
       updatedAt: Date.now()
     }
+    if (catEntry) {
+      next.homunNotes = catEntry.homunNotes
+      if (catEntry.invocation) next.invocation = catEntry.invocation
+      else delete next.invocation
+    }
+    lib[folder] = next
     saveSkillsLibrary(lib)
     return { ok: true }
   } catch (e) {

@@ -150,7 +150,6 @@ msgid "{0, plural, one {# passo} other {# passaggi}}"
 msgstr "{0, plural, one {# step} other {# steps}}"
 
 #. placeholder {0}: agentName(filterAgent)
-#. placeholder {0}: preview.card.marketplace
 #. placeholder {0}: tk.status
 #: src/renderer/src/components/RightPanel.tsx
 #: src/renderer/src/components/SkillsWindow.tsx
@@ -174,12 +173,6 @@ msgstr "{0} @ {1}"
 #: src/renderer/src/components/ui/ModelPicker.tsx
 msgid "{0} / {1} per M"
 msgstr "{0} / {1} per M"
-
-#. placeholder {0}: browseProgress.done
-#. placeholder {1}: browseProgress.total
-#: src/renderer/src/components/SkillsWindow.tsx
-msgid "{0} di {1} plugin letti"
-msgstr "{0} of {1} plugins read"
 
 #. placeholder {0}: s.fileCount
 #: src/renderer/src/components/SkillsWindow.tsx
@@ -215,11 +208,6 @@ msgstr "{0} min ago"
 #: src/renderer/src/components/Sidebar.tsx
 msgid "{0} scrive…"
 msgstr "{0} is writing…"
-
-#. placeholder {0}: pack.skillCount
-#: src/renderer/src/components/SkillsWindow.tsx
-msgid "{0} skill"
-msgstr "{0} skill"
 
 #. placeholder {0}: plugin.skills.length
 #. placeholder {1}: plugin.servers.length
@@ -634,6 +622,10 @@ msgstr "Composio account"
 msgid "Account Composio · connesso"
 msgstr "Composio account · connected"
 
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "Adattamenti di Homun"
+msgstr "Homun’s adaptations"
+
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "agente"
 msgstr "agent"
@@ -661,6 +653,14 @@ msgstr "Refresh"
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "Aggiorna da GitHub"
 msgstr "Update from GitHub"
+
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "Aggiornamento disponibile"
+msgstr "Update available"
+
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "aggiornata"
+msgstr "updated"
 
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "aggiornata da GitHub"
@@ -717,7 +717,7 @@ msgid "Aggiungo…"
 msgstr "Adding…"
 
 #: src/renderer/src/components/SkillsWindow.tsx
-msgid "Aggiunto"
+msgid "Aggiunta"
 msgstr "Added"
 
 #: src/renderer/src/components/ServerSheet.tsx
@@ -739,10 +739,6 @@ msgstr "At work: the child's approval cards appear here."
 #: src/renderer/src/lib/opening-rows.ts
 msgid "Al tuo rientro"
 msgstr "When you came back"
-
-#: src/renderer/src/components/SkillsWindow.tsx
-msgid "Alcuni pacchetti non si sono caricati."
-msgstr "Some packages could not be loaded."
 
 #: src/renderer/src/components/ServerSetup.tsx
 msgid "Alcuni valori non vanno bene: correggili e riprova."
@@ -1239,6 +1235,10 @@ msgstr "Uploaded {ok} files."
 msgid "Caricato: {0}"
 msgstr "Uploaded: {0}"
 
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "Carriera"
+msgstr "Career"
+
 #: src/renderer/src/components/ComputerFiles.tsx
 msgid "Cartella vuota."
 msgstr "Empty folder."
@@ -1298,10 +1298,6 @@ msgstr "Search apps and skills"
 #: src/renderer/src/components/ui/ModelSelect.tsx
 msgid "Cerca un modello o un provider"
 msgstr "Search a model or a provider"
-
-#: src/renderer/src/components/SkillsWindow.tsx
-msgid "Cerco i pacchetti…"
-msgstr "Looking for packages…"
 
 #: src/renderer/src/components/settings/AddProviderSheet.tsx
 msgid "Cerco LM Studio sul tuo Mac (porta 1234)."
@@ -2288,6 +2284,7 @@ msgstr "file"
 msgid "File"
 msgstr "Files"
 
+#. placeholder {0}: updateDiff.diff.added.join(', ')
 #. placeholder {0}: updatePreview.diff.added.join(', ')
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "File aggiunti: {0}"
@@ -2298,16 +2295,22 @@ msgstr "Added files: {0}"
 msgid "File binario ({0})"
 msgstr "Binary file ({0})"
 
+#. placeholder {0}: updateDiff.diff.changed.join(', ')
 #. placeholder {0}: updatePreview.diff.changed.join(', ')
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "File cambiati: {0}"
 msgstr "Changed files: {0}"
+
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "File che entrano"
+msgstr "Files to be added"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "rpc.filesNotFound"
 msgstr "File or folder not found."
 
+#. placeholder {0}: updateDiff.diff.removed.join(', ')
 #. placeholder {0}: updatePreview.diff.removed.join(', ')
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "File tolti: {0}"
@@ -3199,17 +3202,12 @@ msgstr "Keychain unavailable: cannot store the key"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
-msgid "skill.browse.previewMissing"
-msgstr "The preview is no longer valid: close and reopen the package."
+msgid "skill.err.catalogPreviewMissing"
+msgstr "The preview is no longer valid: close and reopen the entry."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
-msgid "skill.browse.previewFailed"
-msgstr "The preview failed: the package cannot be downloaded or is not valid."
-
-#. js-lingui-explicit-id
-#: src/shared/ui-messages.ts
-msgid "skill.browse.badEnabledFor"
+msgid "skill.err.badEnabledFor"
 msgstr "The bot list is not valid."
 
 #: src/renderer/src/components/ServerSetup.tsx
@@ -3316,12 +3314,26 @@ msgstr "The skill in the repository is not valid: fix it before updating."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
+msgid "skill.err.catalogInvalidSkill"
+msgstr "The skill in the repository is not valid: it cannot be added."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "skill.err.catalogPin"
+msgstr "The catalog’s pinned version can no longer be found in the repository: nothing else is downloaded."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
 msgid "presence.keepPaused"
 msgstr "Keep them paused"
 
 #: src/renderer/src/lib/activity.ts
 msgid "lavora…"
 msgstr "working…"
+
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "Lavoro"
+msgstr "Work"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -3781,10 +3793,6 @@ msgstr "no model in the list: type the id and press Enter"
 msgid "Nessun modello trovato."
 msgstr "No model found."
 
-#: src/renderer/src/components/SkillsWindow.tsx
-msgid "Nessun pacchetto trovato"
-msgstr "No packages found"
-
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Nessun server trovato."
 msgstr "No server found."
@@ -4059,10 +4067,6 @@ msgid "non supportato: valore in argv ({0})"
 msgstr "unsupported: value in argv ({0})"
 
 #: src/renderer/src/components/SkillsWindow.tsx
-msgid "non usate:"
-msgstr "not used:"
-
-#: src/renderer/src/components/SkillsWindow.tsx
 msgid "non valida"
 msgstr "invalid"
 
@@ -4257,6 +4261,10 @@ msgstr "thinking…"
 #: src/renderer/src/components/Chat.tsx
 msgid "pensando…"
 msgstr "thinking…"
+
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "Pensiero"
+msgstr "Thinking"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Per attivarlo, macOS chiede il tuo via"
@@ -4639,6 +4647,11 @@ msgstr "This skill has no GitHub origin to update from."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
+msgid "skill.err.catalogMissing"
+msgstr "This entry is no longer in the catalog."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
 msgid "rpc.groupMemberUnknown"
 msgstr "These ids are not bots: {ids}."
 
@@ -4653,11 +4666,6 @@ msgstr "This model cannot see images"
 #: src/renderer/src/components/ServerSetup.tsx
 msgid "Questo non sembra un server MCP: controlla l'indirizzo."
 msgstr "This does not look like an MCP server: check the address."
-
-#. js-lingui-explicit-id
-#: src/shared/ui-messages.ts
-msgid "skill.browse.hasConnectors"
-msgstr "This package also contains connectors: add it from Connect apps."
 
 #: src/renderer/src/components/ServerSetup.tsx
 msgid "Questo server non permette l'accesso dal browser: usa un token di accesso."
@@ -4766,6 +4774,10 @@ msgstr "resume"
 msgid "presence.resumeAll"
 msgstr "Resume all"
 
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "Ricerca"
+msgstr "Research"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "onboarding.roleSearch"
@@ -4857,7 +4869,6 @@ msgstr "Restore"
 #: src/renderer/src/components/ConnectorCard.tsx
 #: src/renderer/src/components/LibraryPanel.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
-#: src/renderer/src/components/SkillsWindow.tsx
 #: src/renderer/src/components/ui/ModelSelect.tsx
 msgid "Riprova"
 msgstr "Retry"
@@ -5134,6 +5145,10 @@ msgstr "Disconnect {0}? Bots using it need to be moved."
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Scollegare NON cancella l'account su Composio: si gestisce da composio.dev."
 msgstr "Disconnecting does NOT delete the account on Composio: manage it at composio.dev."
+
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "Scrittura"
+msgstr "Writing"
 
 #: src/renderer/src/lib/activity.ts
 msgid "scrive {file}…"
@@ -5427,6 +5442,10 @@ msgstr "Read-only — the bot cannot see your cursor"
 #: src/shared/ui-messages.ts
 msgid "notice.wakeNudge"
 msgstr "Delivery reminder to the parent (wake_parent)."
+
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "solo con /"
+msgstr "only with /"
 
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "Solo istruzioni: gli script inclusi non vengono eseguiti."
@@ -5790,10 +5809,6 @@ msgstr "All types"
 #: src/renderer/src/components/ComputerActivity.tsx
 msgid "ucciso"
 msgstr "killed"
-
-#: src/renderer/src/components/SkillsWindow.tsx
-msgid "ufficiale"
-msgstr "official"
 
 #. placeholder {0}: i18n.t(fmtAgo(task.updatedAt, now))
 #. placeholder {1}: status === 'needs_input' ? t` — rispondi dalla vista del task (Apri)` : ''

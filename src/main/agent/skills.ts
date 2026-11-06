@@ -109,6 +109,49 @@ export function skillsSectionPrompt(skills: ReadonlyArray<{ name: string; descri
   ].join('\n')
 }
 
+// ---- fase skill · catalogo (K5): le convenzioni di Claude Code, per TUTTE
+// le skill (non solo per quelle del catalogo) ----
+
+/** K5: il rifiuto del tool `skill` quando il MODELLO prova a caricare da solo una skill «solo con /». */
+export const SKILL_USER_ONLY_REFUSAL = 'This skill runs only when the user invokes it with /name.'
+
+/** K5: la riga in coda quando una skill coi segnaposti arriva col tool (senza `/`). */
+export const SKILL_PLACEHOLDERS_NOTE = 'Placeholders like $ARGUMENTS refer to the user\'s request.'
+
+/** K5: il testo contiene almeno un segnaposto di Claude Code ($ARGUMENTS, $TEXT, $OBJECTIVE, $1…)? */
+export function hasSkillPlaceholders(text: string): boolean {
+  return /\$(?:ARGUMENTS|TEXT|OBJECTIVE|\d+)/.test(text)
+}
+
+/**
+ * K5: i segnaposto di Claude Code nell'espansione `/nome` (PURO):
+ * `$ARGUMENTS` (e `$TEXT`, `$OBJECTIVE`) diventano il testo dopo il nome;
+ * `$1`, `$2`… le parole separate da spazio; `$10` NON è `$1` seguito da 0;
+ * oltre le parole c'è la stringa vuota. Un `$` letterale resta tale (i valori
+ * inseriti non si ri-processano).
+ */
+export function expandSkillPlaceholders(text: string, args: string): string {
+  const words = args.split(/\s+/).filter(Boolean)
+  return text.replace(/\$(ARGUMENTS|TEXT|OBJECTIVE|\d+)/g, (_all, token: string) =>
+    token === 'ARGUMENTS' || token === 'TEXT' || token === 'OBJECTIVE' ? args : (words[Number(token) - 1] ?? ''))
+}
+
+/** K5: una skill della LIBRERIA si usa solo con /nome: il frontmatter di Claude Code o la voce dicono di sì. */
+export function isUserOnlySkill(skill: { frontmatter: Record<string, unknown>; entry: SkillLibraryEntry }): boolean {
+  return skill.entry.invocation === 'user' || skill.frontmatter['disable-model-invocation'] === true
+}
+
+/** K5: una skill di PLUGIN si usa solo con /nome quando il suo frontmatter lo dice. */
+export function pluginSkillUserOnly(agentId: string, name: string): boolean {
+  for (const p of pluginsOfAgent(agentId)) {
+    const text = pluginSkillBody(p, dataDir(), name)
+    if (text === null) continue
+    const parsed = parseSkillMd(text)
+    return parsed.ok && parsed.skill.frontmatter['disable-model-invocation'] === true
+  }
+  return false
+}
+
 // ---- il `/nome` del turno (S7.3, PURO) ----
 
 /** L'apertura delle routine ([recurring routine: …]) davanti al prompt (S7.4). */
@@ -127,6 +170,8 @@ export interface InvocableSkill {
   body: string
   /** github o plugin: testo di terzi — il turno parte contaminato (decisione 3) */
   imported: boolean
+  /** K4: le note per Homun viaggiano a parte (i segnaposto non le toccano) */
+  notes?: string
 }
 
 /** Un segmento di nome di skill: parole singole separate da trattini (niente --). */
@@ -156,12 +201,15 @@ export function skillInvocationExpansion(
   const rest = (m[2] ?? '').trim()
   const skill = visible.find((s) => s.name === name)
   if (!skill) return null
+  // K5: i segnaposto di Claude Code si sostituiscono SOLO sul corpo della
+  // skill — le note per Homun (K4) restano letterali
+  const body = withHomunNotes(expandSkillPlaceholders(skill.body.trim(), rest), skill.notes)
   const core = [
     // K9: le istruzioni sono GIÀ qui sotto — il modello non deve spenderci
     // una chiamata skill() per rileggerle
     `The user invoked the skill "${name}" for this message. Its full instructions are below — do not load it again with skill(); follow them now.`,
     '',
-    skill.body.trim(),
+    body,
     '---',
     rest || '(no further text)'
   ].join('\n')
@@ -285,7 +333,10 @@ export function librarySkillsVisibleTo(agentId: string): LibrarySkill[] {
 export function invocableSkillsOf(agentId: string): InvocableSkill[] {
   const own = librarySkillsVisibleTo(agentId).map((s): InvocableSkill => ({
     name: s.name,
+    // K4: le note per Homun (le voci del catalogo le portano) viaggiano col
+    // corpo quando la skill arriva al modello — mai nel file su disco
     body: s.body,
+    ...(s.entry.homunNotes ? { notes: s.entry.homunNotes } : {}),
     imported: isThirdPartySkill(s.entry)
   }))
   // K2: anche le skill dei plugin si invocano col `/` — col CORPO letto dalla
@@ -320,8 +371,10 @@ export function buildSkillsSection(agentId: string): string {
     let all: Array<{ name: string; description: string }>
     try {
       all = [
-        ...librarySkillsVisibleTo(agentId).map((s) => ({ name: s.name, description: s.description })),
-        ...pluginSkillsOf(agentId)
+        // K5: le skill «solo con /» (disable-model-invocation o invocation
+        // 'user') restano FUORI dalla sezione «# Available skills»
+        ...librarySkillsVisibleTo(agentId).filter((s) => !isUserOnlySkill(s)).map((s) => ({ name: s.name, description: s.description })),
+        ...pluginSkillsOf(agentId).filter((s) => !pluginSkillUserOnly(agentId, s.name))
       ]
     } catch {
       all = [] // i plugin non devono mai rompere il prompt
@@ -330,6 +383,18 @@ export function buildSkillsSection(agentId: string): string {
   } catch {
     return '' // le skill non devono mai rompere il turno
   }
+}
+
+// ---- fase skill · catalogo (K4): le note per Homun nel corpo per il modello ----
+
+/** Il suffisso delle note per Homun, in coda al corpo che arriva al modello (PURO). */
+export function homunNotesSuffix(notes: string): string {
+  return `\n\n## Notes for Homun\n${notes.trim()}`
+}
+
+/** Il corpo di una skill con le sue note per Homun: senza note, com'era (PURO). */
+export function withHomunNotes(body: string, notes: string | undefined): string {
+  return notes ? body + homunNotesSuffix(notes) : body
 }
 
 // ---- i file di supporto (S1.3): limiti, symlink, testo ----
@@ -620,15 +685,25 @@ export function setSkillEnabledFor(name: string, enabledFor: string[]): void {
 // ---- lettura per il tool skill (S3.2) ----
 
 /** Il risultato del tool skill senza `file`: istruzioni ed elenco dei file. */
-export function readSkillFor(agentId: string, name: string): { output: string; files: string[]; webContent: boolean } | null {
+export function readSkillFor(agentId: string, name: string): { output: string; files: string[]; webContent: boolean; userOnly: boolean } | null {
   const visible = librarySkillsVisibleTo(agentId)
   const mine = visible.find((s) => s.name === name)
   if (mine) {
-    const lines = [`# ${mine.name}`, '', mine.description, '', mine.body.trim()]
+    // K4: le note per Homun in coda al corpo (prima dell'elenco dei file);
+    // il file su disco NON cambia — le note vivono nella voce di libreria
+    const lines = [`# ${mine.name}`, '', mine.description, '', withHomunNotes(mine.body.trim(), mine.entry.homunNotes)]
     if (mine.files.length) {
       lines.push('', 'Support files (read with skill({name, file})):', ...mine.files.map((f) => `- ${f}`))
     }
-    return { output: lines.join('\n'), files: mine.files, webContent: isThirdPartySkill(mine.entry) }
+    // K5: caricata col tool (senza `/`) i segnaposti RESTANO; la riga in coda
+    // li spiega (solo quando ce ne sono)
+    if (hasSkillPlaceholders(mine.body)) lines.push('', SKILL_PLACEHOLDERS_NOTE)
+    return {
+      output: lines.join('\n'),
+      files: mine.files,
+      webContent: isThirdPartySkill(mine.entry),
+      userOnly: isUserOnlySkill(mine)
+    }
   }
   // plugin: si LEGGE dalla cartella del plugin (fase 13); P8: stessa
   // selezione dell'elenco e del prompt (pluginsOfAgent)
@@ -643,7 +718,13 @@ export function readSkillFor(agentId: string, name: string): { output: string; f
       if (files.length) {
         lines.push('', 'Support files (read with skill({name, file})):', ...files.map((f) => `- ${f}`))
       }
-      return { output: lines.join('\n'), files, webContent: true }
+      if (hasSkillPlaceholders(content)) lines.push('', SKILL_PLACEHOLDERS_NOTE)
+      return {
+        output: lines.join('\n'),
+        files,
+        webContent: true,
+        userOnly: parsed.ok && parsed.skill.frontmatter['disable-model-invocation'] === true
+      }
     }
   }
   return null
@@ -701,6 +782,10 @@ export function libraryItemsForUi(): SkillLibraryItem[] {
     source: s.entry.source,
     ...(s.entry.createdBy ? { createdBy: s.entry.createdBy } : {}),
     ...(s.entry.origin ? { origin: s.entry.origin } : {}),
+    ...(s.entry.homunNotes ? { homunNotes: s.entry.homunNotes } : {}),
+    // K5: la finestra la marca «solo con /» (e porta l'invocation della voce)
+    ...(s.entry.invocation ? { invocation: s.entry.invocation } : {}),
+    ...(isUserOnlySkill(s) ? { userOnly: true } : {}),
     createdAt: s.entry.createdAt,
     updatedAt: s.entry.updatedAt,
     files: s.files,

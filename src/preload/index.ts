@@ -134,11 +134,10 @@ const api: SandbotApi = {
   skillsGithubAdd: (id, choices, enabledFor) => ipcRenderer.invoke('skills:github-add', id, choices, enabledFor),
   skillsGithubUpdatePreview: (name) => ipcRenderer.invoke('skills:github-update-preview', name),
   skillsGithubUpdateApply: (id, name) => ipcRenderer.invoke('skills:github-update-apply', id, name),
-  // fase skill · Sfoglia (B2/B3): pacchetti di sole skill dei marketplace
-  skillsBrowse: (query, opts) => ipcRenderer.invoke('skills:browse', query, opts),
-  skillsBrowsePreview: (id) => ipcRenderer.invoke('skills:browse-preview', id),
-  skillsBrowseInstall: (previewId, enabledFor) => ipcRenderer.invoke('skills:browse-install', previewId, enabledFor),
-  skillsBrowseDiscard: (previewId) => ipcRenderer.invoke('skills:browse-discard', previewId),
+  // fase skill · catalogo (K2/K3): il catalogo curato del repo e l'aggiunta di una voce
+  skillsCatalog: () => ipcRenderer.invoke('skills:catalog'),
+  skillsCatalogPreview: (id) => ipcRenderer.invoke('skills:catalog-preview', id),
+  skillsCatalogInstall: (previewId, enabledFor) => ipcRenderer.invoke('skills:catalog-install', previewId, enabledFor),
   mcpList: () => ipcRenderer.invoke('mcp:list'),
   mcpSave: (s, secret) => ipcRenderer.invoke('mcp:save', s, secret),
   mcpDelete: (id) => ipcRenderer.invoke('mcp:delete', id),

@@ -20,8 +20,8 @@ import {
 import {
   previewSkillsFromGithub, addSkillsFromStaging, previewSkillUpdate, applySkillUpdate
 } from '../main/agent/skill-github'
-// fase skill · Sfoglia (B2): i plugin installati per l'etichetta «Aggiunto»
-import { installedPlugins } from '../main/connectors/install'
+// fase skill · catalogo (K2/K3): il catalogo attivo (repo, o finto nei test)
+import { activeSkillCatalog } from '../main/agent/skill-catalog'
 import { skillMdIssues, isValidSkillName, parseSkillMd } from '../shared/skill-md'
 import * as providers from '../main/agent/providers'
 import { suggestRoutines } from '../main/routines'
@@ -96,23 +96,28 @@ const pruneSkillImports = (): void => {
 const testSkillCloneDeps = (): { allowFileUrlsForTests?: boolean } =>
   process.env.SANDBOT_TEST_ALLOW_FILE_URLS === '1' ? { allowFileUrlsForTests: true } : {}
 
-// ---- fase skill · Sfoglia (B2/B3): il browser del catalogo (uno per daemon)
-// e le anteprime vive finché l'utente decide (lo staging scade comunque col
-// TTL delle card, sweepPendingPlugins) ----
-interface PendingSkillBrowse {
-  /** la card dell'anteprima (id + sha12 approvati: il controllo L6 resta) */
-  card: import('../shared/types').SendMessagePayload & { type: 'plugin'; id: string; sha12: string }
+// ---- fase skill · catalogo (K3): le anteprime delle voci vivono finché
+// l'utente decide (lo staging scade comunque col TTL, come gli import) ----
+interface PendingSkillCatalog {
+  staging: string
   at: number
+  preview: import('../shared/types').SkillCatalogPreview
 }
-const skillBrowses = new Map<string, PendingSkillBrowse>()
-let skillBrowseSeq = 0
-const pruneSkillBrowses = (): void => {
-  const cutoff = Date.now() - 30 * 60_000 // come PENDING_PLUGIN_TTL_MS
-  for (const [id, pending] of skillBrowses) {
-    if (pending.at < cutoff) skillBrowses.delete(id)
+const skillCatalogPreviews = new Map<string, PendingSkillCatalog>()
+let skillCatalogSeq = 0
+const releaseSkillCatalogPreview = (id: string): void => {
+  const pending = skillCatalogPreviews.get(id)
+  if (pending) {
+    try { rmSync(pending.staging, { recursive: true, force: true }) } catch { /* già via */ }
+    skillCatalogPreviews.delete(id)
   }
 }
-let skillBrowserInst: ReturnType<typeof import('../main/agent/skill-browse').createSkillBrowser> | null = null
+const pruneSkillCatalogPreviews = (): void => {
+  const cutoff = Date.now() - 10 * 60_000
+  for (const [id, pending] of skillCatalogPreviews) {
+    if (pending.at < cutoff) releaseSkillCatalogPreview(id)
+  }
+}
 
 function dockerToolStatus(): { installed: boolean; running: boolean; path: string; testPrefixInvalid: boolean } {
   const installed = isToolResolved('docker')
@@ -1070,7 +1075,7 @@ export function buildApiMethods(
     'skills:github-update-preview': async ([name]) => {
       // K5: il nome arriva dalla UI ma il daemon si difende da solo
       assertSkillFolder(String(name))
-      const out = await previewSkillUpdate(String(name), testSkillCloneDeps())
+      const out = await previewSkillUpdate(String(name), { ...testSkillCloneDeps(), catalog: activeSkillCatalog() })
       if (!out.ok) throw new UiError('skill update failed', out.error)
       const id = `skill-update-${++skillImportSeq}`
       skillImports.set(id, { staging: out.staging, diff: out.diff, at: Date.now() })
@@ -1082,78 +1087,47 @@ export function buildApiMethods(
       assertSkillFolder(String(name))
       const pending = skillImports.get(String(id))
       if (!pending?.diff) throw uiError(UI.skillErrNoOrigin)
-      const r = applySkillUpdate(String(name), pending.staging, pending.diff)
+      // K3 (fase skill · catalogo): una voce del catalogo si aggiorna col
+      // catalogo attivo (le note e l'invocation seguono il catalogo nuovo)
+      const r = applySkillUpdate(String(name), pending.staging, pending.diff, { catalog: activeSkillCatalog() })
       releaseSkillImport(String(id))
       // K6: l'errore umano del rifiuto (skill non valida, origine persa…)
       if (!r.ok) throw new UiError('skill update failed', r.error)
       return true
     },
 
-    // ---- fase skill · Sfoglia (B2): il catalogo dei pacchetti di sole skill
-    // dei marketplace registrati; retry true = la «Riprova» della finestra
-    // (si rilegge davvero: catalogo e HEAD degli alberi). Fase sfoglia veloce
-    // (V1): senza retry risponde la cache (anche quella su disco), scaduta si
-    // aggiorna in sottofondo; gli eventi vanno a tutte le finestre ----
-    'skills:browse': async ([query, browseOpts]) => {
-      if (!opts.marketplaces) throw uiError(UI.rpcMarketplacesUnavailable)
-      skillBrowserInst ??= (await import('../main/agent/skill-browse')).createSkillBrowser({
-        marketplaces: opts.marketplaces,
-        dataDir: store.dataDir,
-        installedPlugins: () => installedPlugins({ getSetting: store.getSetting }),
-        emit: (e) => emit(e),
-        ...testSkillCloneDeps()
-      })
-      return skillBrowserInst.browse(String(query ?? ''), {
-        retry: (browseOpts as { retry?: boolean } | undefined)?.retry === true
-      })
+    // ---- fase skill · catalogo (K2): l'elenco per Sfoglia — il catalogo
+    // CURATO vive nel repo (nessuna rete: la lista arriva subito); nei test e
+    // nella sonda SANDBOT_TEST_SKILL_CATALOG lo sostituisce (solo insieme a
+    // SANDBOT_TEST_USER_DATA) ----
+    'skills:catalog': () => activeSkillCatalog(),
+    // ---- (K3): l'anteprima di una voce — staging al COMMIT FISSATO della
+    // voce (uno sha diverso si rifiuta), i file che entreranno, fonte,
+    // licenza e note per Homun; lo staging resta vivo finché l'utente decide ----
+    'skills:catalog-preview': async ([id]) => {
+      const { previewCatalogSkill } = await import('../main/agent/skill-catalog')
+      const entry = activeSkillCatalog().find((e) => e.id === String(id))
+      if (!entry) throw uiError(UI.skillErrCatalogMissing)
+      const out = await previewCatalogSkill(entry, testSkillCloneDeps())
+      if (!out.ok) throw new UiError('catalog preview failed', out.error)
+      const previewId = `skill-catalog-${++skillCatalogSeq}`
+      skillCatalogPreviews.set(previewId, { staging: out.staging, preview: out.preview, at: Date.now() })
+      pruneSkillCatalogPreviews()
+      return { previewId, preview: out.preview }
     },
-    // ---- (B3): l'anteprima dalla finestra — lo STESSO percorso della card
-    // (staging, sha fissato, tetti, symlink), ma senza proposta in chat ----
-    'skills:browse-preview': async ([id]) => {
-      const { buildPluginCard, pluginProposalDetails } = await import('../main/connectors/install')
-      const built = await buildPluginCard(String(id ?? ''), '', (await installBridge()).getInstallDeps(), testSkillCloneDeps())
-      if (!built.ok) throw new UiError(`browse preview failed: ${built.error}`, ui(UI.skillBrowsePreviewFailed))
-      // il marketplace è CAMBIATO dopo il catalogo: il pacchetto ora porta
-      // connettori → si rifiuta (si aggiunge da Collega app)
-      if (built.card.servers.length) throw uiError(UI.skillBrowseHasConnectors)
-      const details = pluginProposalDetails(built.card.id)
-      if (!details) throw uiError(UI.skillBrowsePreviewMissing)
-      const previewId = `skill-browse-${++skillBrowseSeq}`
-      skillBrowses.set(previewId, { card: built.card, at: Date.now() })
-      pruneSkillBrowses()
-      return {
-        previewId,
-        card: built.card,
-        skills: details.skills,
-        ignored: details.ignored,
-        sha12: details.sha12,
-        size: details.size
-      }
-    },
-    // ---- (B3): l'installazione dalla finestra — enabledFor scelto dall'utente
-    // («Tutti i bot» o un elenco), NESSUNA voce in chat e nessun [sistema] ----
-    'skills:browse-install': async ([previewId, enabledFor]) => {
-      const pending = skillBrowses.get(String(previewId))
-      if (!pending) throw uiError(UI.skillBrowsePreviewMissing)
+    // ---- (K3): l'installazione dalla finestra — enabledFor scelto
+    // dall'utente («Tutti i bot» o un elenco), cartella = id della voce ----
+    'skills:catalog-install': async ([previewId, enabledFor]) => {
+      const pending = skillCatalogPreviews.get(String(previewId))
+      if (!pending) throw uiError(UI.skillErrCatalogPreviewMissing)
       const ids = Array.isArray(enabledFor) ? enabledFor.map(String).filter(Boolean) : []
-      if (!ids.length) throw uiError(UI.skillBrowseBadEnabledFor)
-      const { installPlugin } = await import('../main/connectors/install')
-      const r = await installPlugin(
-        pending.card, '', (await installBridge()).getInstallDeps(), store.setSetting, store.getSetting,
-        testSkillCloneDeps(), { enabledFor: ids.includes('*') ? ['*'] : ids }
-      )
-      if (r.ok) skillBrowses.delete(String(previewId))
-      return r
-    },
-    // ---- (B3): «Annulla» butta lo staging (scade comunque col TTL delle card) ----
-    'skills:browse-discard': async ([previewId]) => {
-      const pending = skillBrowses.get(String(previewId))
-      if (pending) {
-        const { discardPluginProposal } = await import('../main/connectors/install')
-        discardPluginProposal(pending.card.id)
-        skillBrowses.delete(String(previewId))
-      }
-      return { ok: true }
+      if (!ids.length) throw uiError(UI.skillErrBadEnabledFor)
+      if (!pending.preview.valid) throw uiError(UI.skillErrCatalogInvalidSkill)
+      const { addCatalogSkillFromStaging } = await import('../main/agent/skill-catalog')
+      const r = addCatalogSkillFromStaging(pending.staging, pending.preview, ids)
+      if (r.ok) releaseSkillCatalogPreview(String(previewId))
+      else throw new UiError('catalog install failed', r.error)
+      return { ok: true, name: r.name }
     },
 
     // ---- MCP ----
