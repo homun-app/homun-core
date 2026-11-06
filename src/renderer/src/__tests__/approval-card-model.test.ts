@@ -2,9 +2,13 @@
 // strumenti Composio e MCP — come opening-rows, il test lavora sul modello
 // puro che ApprovalCard rende punto per punto. Invariante: FUORI dai
 // «Dettagli tecnici» non compare mai un nome tecnico (composio__…, mcp__…).
+// Fase pulizia (P2): l'invariante si estende agli strumenti DEL BOT — il
+// motivo del meta.ui e il titolo generico portano il nome umano di
+// toolDisplayName, mai «create_agent richiede approvazione».
 import { describe, expect, it } from 'vitest'
 import { i18n } from '@lingui/core'
-import { approvalAppOf, approvalTitleOf, approvalReasonPhrase, approvalTechnicalLine } from '../lib/approval-app'
+import { approvalAppOf, approvalTitleOf, approvalReasonPhrase, approvalTechnicalLine, approvalAskTitle } from '../lib/approval-app'
+import { uiTextOfMetaTools } from '../lib/ui-text'
 import { itCatalogEntries } from './po-helper'
 
 // come la sidebar: le etichette si risolvono dal catalogo it (i msgid nuovi
@@ -16,10 +20,12 @@ i18n.activate('it')
 function rendered(tool: string, meta: Record<string, unknown> | null | undefined, agentName = 'Contabile', lang: 'it' | 'en' = 'it') {
   const info = approvalAppOf(tool, meta)
   const title = approvalTitleOf(info, agentName, lang)
+  const askTitle = approvalAskTitle(tool, meta, agentName, lang)
   return {
     kind: info?.kind ?? null,
-    title: title === null ? null : typeof title === 'string' ? title : i18n.t(title),
+    title: title === null ? (typeof askTitle === 'string' ? askTitle : i18n.t(askTitle)) : typeof title === 'string' ? title : i18n.t(title),
     reason: info ? (approvalReasonPhrase(info) ? i18n.t(approvalReasonPhrase(info)!) : null) : null,
+    reasonUi: uiTextOfMetaTools(meta, lang),
     technical: info ? approvalTechnicalLine(info, tool) : null
   }
 }
@@ -109,5 +115,55 @@ describe('R3 — la card d\'approvazione senza riga tecnica (Composio e MCP)', (
       composioAction: { app: 'Gmail', action: 'Send email' }
     })
     expect(r.title).toBe('Gmail · Invia email')
+  })
+})
+
+describe('P2 — la card degli strumenti DEL BOT senza nome tecnico', () => {
+  it('create_agent: il motivo del meta.ui dice «Creare un bot richiede approvazione»', () => {
+    const r = rendered('create_agent', {
+      tool: 'create_agent',
+      ui: { id: 'approval.toolRequires', values: { tool: 'create_agent' } }
+    })
+    expect(r.reasonUi).toBe('Creare un bot richiede approvazione')
+    // e il titolo generico non dice più «vuole usare create_agent»
+    expect(r.title).toBe('Contabile vuole usare Creare un bot')
+  })
+
+  it('send_to_agent (contaminato): il motivo porta «Inviare a un altro bot»', () => {
+    const r = rendered('send_to_agent', {
+      tool: 'send_to_agent',
+      ui: { id: 'approval.contaminated', values: { tool: 'send_to_agent' } }
+    })
+    expect(r.reasonUi).toContain('Inviare a un altro bot')
+    expect(r.reasonUi).not.toMatch(/send_to_agent/)
+  })
+
+  it('card MCP con motivo del meta.ui: {tool} umano anche lì («Notion · Search pages …»)', () => {
+    const r = rendered('mcp__notion__search_pages', {
+      tool: 'mcp__notion__search_pages',
+      mcpApp: 'Notion',
+      ui: { id: 'approval.mcpOutward', values: { tool: 'mcp__notion__search_pages' } }
+    })
+    expect(r.reasonUi).toBe('Notion · Search pages agisce verso l’esterno (annotazione del server MCP)')
+  })
+
+  it('i testi del meta.ui SENZA valori strumento passano identici', () => {
+    const r = rendered('run-command', { tool: 'run-command', ui: { id: 'approval.rcRequires', values: { key: 'curl' } } })
+    expect(r.reasonUi).toBe('curl richiede approvazione')
+  })
+
+  it('il titolo specifico dei tool noti non cambia (comando, file…)', () => {
+    expect(rendered('run-command', { tool: 'run-command' }).title).toBe('Contabile vuole eseguire un comando')
+    expect(rendered('write-file', { tool: 'write-file' }).title).toBe('Contabile vuole scrivere un file')
+    expect(rendered('update_state', { tool: 'update_state' }).title).toBe('Contabile vuole cambiare un\'automazione')
+  })
+
+  it('tool senza etichetta: il nome tecnico, come oggi', () => {
+    const r = rendered('tool_sconosciuto', {
+      tool: 'tool_sconosciuto',
+      ui: { id: 'approval.toolRequires', values: { tool: 'tool_sconosciuto' } }
+    })
+    expect(r.title).toBe('Contabile vuole usare tool_sconosciuto')
+    expect(r.reasonUi).toBe('tool_sconosciuto richiede approvazione')
   })
 })

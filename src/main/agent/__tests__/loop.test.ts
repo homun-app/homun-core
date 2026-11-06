@@ -1041,7 +1041,7 @@ describe('R1: ripresa del turno dopo crash/retry (payload.entryId)', () => {
     expect(sent.content).toBe('ok')
     expect(sent.meta?.final).toBe(true)
     // il messaggio utente compare UNA volta sola nella storia del modello
-    expect(h.llm.calls[0]!.filter((m) => m.role === 'user' && m.content === 'ciao')).toHaveLength(1)
+    expect(h.llm.calls[0]!.filter((m) => m.role === 'user' && m.content.startsWith('ciao'))).toHaveLength(1) // P10: + riga della data/ora in coda
   })
 
   it('ripresa dopo crash: un solo messaggio utente, tool-result "interrotto da un riavvio", approval expired, tool non rieseguito', async () => {
@@ -1072,7 +1072,7 @@ describe('R1: ripresa del turno dopo crash/retry (payload.entryId)', () => {
     expect(h.sandboxMock.exec.calls).toBe(0)
     // al modello è arrivato il result sintetico e un solo messaggio utente
     const first = h.llm.calls[0]!
-    expect(first.filter((m) => m.role === 'user' && m.content === 'fai il deploy')).toHaveLength(1)
+    expect(first.filter((m) => m.role === 'user' && m.content.startsWith('fai il deploy'))).toHaveLength(1) // P10
     expect(first.find((m) => m.role === 'tool')?.content).toContain('interrupted by a restart')
   })
 
@@ -1193,7 +1193,7 @@ describe('fase 3 → fase risposta: message_user per i progressi, il testo final
     expect(answer.content).toBe('Sì')
     expect(answer.meta?.respondedTo).toBe(widget.id)
     // e la storia del modello contiene la risposta dopo il widget
-    expect(h.llm.calls[1]!.filter((m) => m.role === 'user' && m.content === 'Sì')).toHaveLength(1)
+    expect(h.llm.calls[1]!.filter((m) => m.role === 'user' && m.content.startsWith('Sì'))).toHaveLength(1) // P10
   })
 
   it('SUPERSEDED: nuovo messaggio durante un\'approval pendente → approval superseded, turno SUPERSEDED, il nuovo parte', async () => {
@@ -1979,7 +1979,7 @@ describe('fase 7: send_to_agent', () => {
     ]
     await runTurn(AGENT, 'e adesso?', emit)
     // la prima chiamata del SECONDO turno: quella che contiene il nuovo messaggio utente
-    const second = h.llm.calls.find((c) => c.some((m) => m.role === 'user' && m.content === 'e adesso?'))!
+    const second = h.llm.calls.find((c) => c.some((m) => m.role === 'user' && m.content.startsWith('e adesso?')))! // P10
     const call = second.flatMap((m) => (m.toolCalls as FakeToolCall[] | undefined) ?? []).find((tc) => tc?.name === 'send_to_agent')
     expect(call).toBeTruthy()
     const result = second.find((m) => m.role === 'tool' && m.toolCallId === call!.id)
@@ -2479,7 +2479,7 @@ describe('fase 8 (§3bis L7): ciclo di vita del task', () => {
     const taskEntries = h.db.entries.filter((e) => e.meta?.taskId === 1)
     expect(taskEntries.length).toBeGreaterThan(1) // brief + thinking + widget…
     // il contesto del task conteneva SOLO il brief (nessun messaggio della chat principale)
-    const taskCall = h.llm.calls.find((c) => c.some((m) => m.role === 'user' && m.content === 'Confronta i prezzi di X su 3 siti.'))!
+    const taskCall = h.llm.calls.find((c) => c.some((m) => m.role === 'user' && m.content.startsWith('Confronta i prezzi di X su 3 siti.')))! // P10
     expect(taskCall.some((m) => m.content === 'confronta i prezzi di X')).toBe(false)
 
     // la risposta dell'utente continua il task (come fa enqueueWidgetResponse)
@@ -2499,7 +2499,7 @@ describe('fase 8 (§3bis L7): ciclo di vita del task', () => {
     // né il brief né la domanda del task
     h.llm.queue = [{ text: 'ok' }]
     await runTurn(AGENT, 'e adesso?', emit)
-    const mainCall = h.llm.calls.find((c) => c.some((m) => m.role === 'user' && m.content === 'e adesso?'))!
+    const mainCall = h.llm.calls.find((c) => c.some((m) => m.role === 'user' && m.content.startsWith('e adesso?')))! // P10
     expect(JSON.stringify(mainCall)).not.toContain('Quanti siti')
     expect(JSON.stringify(mainCall)).not.toContain('Confronta i prezzi di X su 3 siti.')
   })
@@ -6535,5 +6535,49 @@ describe('fase risposta: il recupero senza strumenti non esegue chiamate inventa
     expect(h.llm.calls).toHaveLength(3)
     expect(h.sandboxMock.exec.calls).toBe(0)
     expect(h.db.entries.filter((e) => e.kind === 'send-message')).toHaveLength(0)
+  })
+})
+
+// ---- P10 (fase pulizia): la data e l'ora nel turno ----
+describe('P10 — la data e l\'ora sull\'ultimo messaggio utente (mai nel system, mai salvata)', () => {
+  it('turno utente: la riga del presente sta nel contenuto per il modello, NON nel system né nella storia', async () => {
+    h.llm.queue = [{ text: 'ok, sono le ' }]
+    await runTurn(AGENT, 'che ore sono?', emit)
+    expect(h.llm.calls).toHaveLength(1)
+    const msgs = h.llm.calls[0]!
+    const system = msgs.find((m) => m.role === 'system')!
+    expect(system.content).not.toContain('Current date and time')
+    const last = [...msgs].reverse().find((m) => m.role === 'user')!
+    // la riga è AGGIUNTA al contenuto per il modello, DOPO il testo dell'utente
+    expect(last.content.startsWith('che ore sono?')).toBe(true)
+    expect(last.content).toContain('Current date and time for the user:')
+    expect(last.content).toContain('Never infer today\'s date from your training data')
+    // la storia salvata e la chat NON la vedono
+    const saved = h.db.entries.filter((e) => e.kind === 'message' && e.role === 'user')
+    expect(saved).toHaveLength(1)
+    expect(saved[0]!.content).toBe('che ore sono?')
+  })
+
+  it('turno di ROUTINE senza messaggio utente nuovo: la riga va sul messaggio che apre il turno', async () => {
+    h.llm.queue = [{ text: 'fatto' }]
+    await runTurn(AGENT, '[routine ricorrente: Controllo] guarda le scadenze di oggi', emit, undefined, { source: 'routine', title: 'Controllo' })
+    const msgs = h.llm.calls[0]!
+    const users = msgs.filter((m) => m.role === 'user')
+    const last = users[users.length - 1]!
+    expect(last.content).toContain('Current date and time for the user:')
+    // e nemmeno stavolta entra nella storia
+    expect(h.db.entries.filter((e) => e.kind === 'message' && e.role === 'user').every((e) => !e.content.includes('Current date'))).toBe(true)
+  })
+
+  it('la riga sopravvive all\'espansione del /nome di una skill (sta DOPO, sulla stessa apertura)', async () => {
+    const { writeLibrarySkill } = await import('../skills')
+    writeLibrarySkill({ name: 'orario', description: 'dice l orario', body: 'LE ISTRUZIONI DELLA SKILL.' })
+    h.llm.queue = [{ text: 'ecco' }]
+    await runTurn(AGENT, '/orario dimmi', emit)
+    const msgs = h.llm.calls[0]!
+    const last = [...msgs].reverse().find((m) => m.role === 'user')!
+    expect(last.content).toContain('LE ISTRUZIONI DELLA SKILL.')
+    expect(last.content).toContain('Current date and time for the user:')
+    expect(h.db.entries.filter((e) => e.kind === 'message' && e.role === 'user')[0]!.content).toBe('/orario dimmi')
   })
 })

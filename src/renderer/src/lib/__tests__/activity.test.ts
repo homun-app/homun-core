@@ -4,7 +4,7 @@
 // coerenza fra la tabella TOOL_FAMILIES e i nomi dei tool definiti nel daemon.
 import { describe, expect, it } from 'vitest'
 import { i18n } from '@lingui/core'
-import { activityPhrase, stepsOfTurn, targetOfArguments, hostOf, fileNameOf, stepsDurationSeconds, TOOL_FAMILIES } from '../activity'
+import { activityPhrase, stepsOfTurn, targetOfArguments, hostOf, fileNameOf, stepsDurationSeconds, stepsDurationLabel, TOOL_FAMILIES } from '../activity'
 import type { TranscriptEntry } from '../../../../shared/types'
 import { itCatalogEntries, enCatalogEntries } from '../../__tests__/po-helper'
 import { toolDefs, computerToolDefs, wakeParentToolDef } from '../../../../main/agent/tools'
@@ -270,5 +270,35 @@ describe('fase 16b (S3.3): stepsOfTurn — i passaggi del turno', () => {
     const g = stepsOfTurn(entries, 'open')
     expect(g.steps).toHaveLength(1)
     expect(g.steps[0]!.done).toBe(true)
+  })
+})
+
+// ---- P5 (fase pulizia): l'etichetta della durata del riquadro dei passaggi ----
+describe('P5 — stepsDurationLabel: mai «0 s»', () => {
+  const userMsg = (id: number, at = id): TranscriptEntry =>
+    entry({ id, kind: 'message', role: 'user', content: 'domanda', createdAt: at * 1000 })
+  const call = (id: number, tool: string, args: Record<string, unknown> = {}, at = id): TranscriptEntry =>
+    entry({ id, kind: 'tool-call', role: 'assistant', content: tool, createdAt: at * 1000, meta: { id: `c${id}`, arguments: JSON.stringify(args) } })
+  const result = (id: number, callId: string, at = id): TranscriptEntry =>
+    entry({ id, kind: 'tool-result', role: 'system', content: 'ok', createdAt: at * 1000, meta: { callId } })
+
+  it('durata sotto il secondo (misurata): «< 1 s»', () => {
+    // startedAt = il primo passo (2 s), fine 2,4 s: 0 secondi interi
+    const entries = [userMsg(1), call(2, 'web_search', {}, 2), result(3, 'c2', 2.4)]
+    const g = stepsOfTurn(entries, 'open')
+    expect(stepsDurationSeconds(g, 2_400)).toBe(0)
+    expect(stepsDurationLabel(g, 2_400)).toBe('< 1 s')
+  })
+
+  it('senza durata nota (nessun passo, startedAt nullo): NESSUN tempo', () => {
+    const g = stepsOfTurn([userMsg(1)], 'open')
+    expect(g.startedAt).toBeNull()
+    expect(stepsDurationLabel(g, 99_000)).toBeNull()
+  })
+
+  it('un secondo o più: i secondi interi come oggi', () => {
+    const entries = [userMsg(1), call(2, 'web_search', {}, 2), result(3, 'c2', 43)]
+    const g = stepsOfTurn(entries, 'open')
+    expect(stepsDurationLabel(g, 50_000)).toBe('41 s')
   })
 })

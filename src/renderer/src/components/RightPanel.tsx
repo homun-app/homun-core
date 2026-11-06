@@ -393,6 +393,7 @@ function BotPanel({ layout, onClose }: { layout: LayoutResult; onClose(): void }
   return (
     <aside
       ref={asideRef}
+      data-testid="bot-panel"
       className={
         overlay
           ? // Q1: il pannello galleggia sopra la chat — ombra morbida, nessun bordo

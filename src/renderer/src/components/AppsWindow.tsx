@@ -18,7 +18,11 @@ import { api, useStore } from '../store'
 import { i18n } from '../lib/i18n'
 import { loadAppCatalog, appCategoryLabel, appTaglineOf, type AppCatalogRow, type AppCategoryId } from '../../../shared/app-catalog'
 import type { McpServerInfo, McpServerSecret, AppsRegistryResult } from '../../../shared/types'
-import { appsViewModel, appsCatalogModel, type AppsFilter, type InstalledServerLike, type InstalledPluginLike, type ConnectedRow, type CatalogRowView } from '../lib/apps-view'
+import { appsViewModel, appsCatalogModel, botsToggleState, type AppsFilter, type InstalledServerLike, type InstalledPluginLike, type ConnectedRow, type CatalogRowView } from '../lib/apps-view'
+import { mcpToolPresentation } from '../../../shared/tool-names'
+import { SettingsGroup } from './settings/SettingsGroup'
+import { SettingsRow } from './settings/SettingsRow'
+import { Toggle } from './Settings'
 import { catalogLogoUrl } from '../lib/app-logos'
 import { ServerSheet } from './ServerSheet'
 import { Dialog, DialogContent, DialogTitle } from './ui/dialog'
@@ -1084,6 +1088,59 @@ export function AppsView({ embedded = false }: { embedded?: boolean }) {
  * l'account Composio se c'è, Scollega con conferma e quali bot la usano.
  * Niente slug, niente nomi di strumenti.
  */
+/**
+ * P4 (fase pulizia): «per bot» del dettaglio di un'app DIRETTA — «Tutti i
+ * bot» acceso con i bot spenti e disattivati quando la scelta vale per tutti
+ * (stessa resa e stessi componenti dell'anteprima della finestra Skill). Ciò
+ * che si salva NON cambia significato: assente o ['*'] = tutti, gli id scelti
+ * = quei bot, lista vuota = nessuno (serversForAgent).
+ */
+function BotTogglesForApp({ directId, enabledFor, agents, onChanged }: {
+  directId: string
+  enabledFor: string[] | null | undefined
+  agents: Array<{ id: string; name: string }>
+  onChanged(): void
+}): ReactNode {
+  const { t } = useLingui()
+  const st = botsToggleState(enabledFor, agents)
+  const save = (ids: string[]): void => {
+    void api.connectorsSetEnabledFor('server', directId, ids).then(onChanged)
+  }
+  return (
+    <div className="mt-3" data-testid="app-bots-toggles">
+      <SettingsGroup label={<Trans>Bot che lo usano</Trans>}>
+        <SettingsRow
+          title={<Trans>Tutti i bot</Trans>}
+          control={
+            <Toggle
+              label={t`Tutti i bot`}
+              checked={st.all}
+              onChange={(v) => save(v ? ['*'] : [])}
+            />
+          }
+        />
+        {st.bots.map((b) => (
+          <SettingsRow
+            key={b.id}
+            title={b.name}
+            control={
+              <Toggle
+                label={b.name}
+                checked={b.checked}
+                disabled={b.disabled}
+                onChange={(v) => {
+                  const ids = (enabledFor ?? []).filter((id) => id !== '*')
+                  save(v ? [...ids, b.id] : ids.filter((id) => id !== b.id))
+                }}
+              />
+            }
+          />
+        ))}
+      </SettingsGroup>
+    </div>
+  )
+}
+
 function AppDetailSheet({ row, installed, onClose, onChanged, onConnect }: {
   row: CatalogRowView
   installed: { servers: InstalledServerLike[]; plugins: InstalledPluginLike[] } | null
@@ -1153,6 +1210,24 @@ function AppDetailSheet({ row, installed, onClose, onChanged, onConnect }: {
         {gatewayApp?.email && (
           <p className="mt-1 text-[11px] text-muted-foreground">{gatewayApp.email}</p>
         )}
+        {/* P4 (fase pulizia): «per bot» sta SOTTO lo stato e SOPRA i bottoni —
+            per le app Composio la scelta per singola app NON esiste (il server
+            vale per tutti i bot): testo «Tutti i bot», senza casella; la
+            casella resta dove funziona davvero (connettori diretti e server) */}
+        {row.connected && app.via === 'composio' && (
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span className="text-[11px] text-muted-foreground"><Trans>per bot:</Trans></span>
+            <span className="text-[11px] text-muted-foreground"><Trans>Tutti i bot</Trans></span>
+          </div>
+        )}
+        {row.connected && app.via === 'direct' && app.directId && (
+          <BotTogglesForApp
+            directId={app.directId}
+            enabledFor={installed?.servers.find((s) => s.id === app.directId)?.enabledFor}
+            agents={agents}
+            onChanged={onChanged}
+          />
+        )}
         <div className="mt-3 flex items-center gap-2">
           <div className="flex-1" />
           {row.connected ? (
@@ -1185,43 +1260,6 @@ function AppDetailSheet({ row, installed, onClose, onChanged, onConnect }: {
             <Trans>Chiudi</Trans>
           </button>
         </div>
-        {/* quali bot la usano — V11 (prova vera): per le app Composio la
-            scelta per singola app NON esiste (il server vale per tutti i
-            bot): testo «Tutti i bot», senza casella; la casella resta dove
-            funziona davvero (connettori diretti e server) */}
-        {row.connected && app.via === 'composio' && (
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <span className="text-[11px] text-muted-foreground"><Trans>per bot:</Trans></span>
-            <span className="text-[11px] text-muted-foreground"><Trans>Tutti i bot</Trans></span>
-          </div>
-        )}
-        {row.connected && app.via === 'direct' && app.directId && (
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <span className="text-[11px] text-muted-foreground"><Trans>per bot:</Trans></span>
-            {agents.map((a) => {
-              const server = installed?.servers.find((s) => s.id === app.directId)
-              const cur = server?.enabledFor ?? []
-              const on = cur.includes('*') || cur.includes(a.id)
-              return (
-                <label key={a.id} className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                  <input
-                    type="checkbox"
-                    className="h-3 w-3 accent-foreground"
-                    checked={on}
-                    onChange={() => {
-                      const next = cur.includes('*') ? [] : [...cur]
-                      const i = next.indexOf(a.id)
-                      if (i >= 0) next.splice(i, 1)
-                      else next.push(a.id)
-                      void api.connectorsSetEnabledFor('server', app.directId!, next).then(onChanged)
-                    }}
-                  />
-                  {a.name}
-                </label>
-              )
-            })}
-          </div>
-        )}
         {app.via === 'composio' && (
           <p className="mt-3 text-[11px] text-muted-foreground">
             <Trans>Scollegare NON cancella l'account su Composio: si gestisce da composio.dev.</Trans>
@@ -1263,8 +1301,10 @@ function AppDetailSheet({ row, installed, onClose, onChanged, onConnect }: {
                         }}
                       />
                       <span className="min-w-0">
-                        <span className="block truncate font-mono text-[11px]">{t2.name}</span>
-                        <span className="block text-[10px] text-muted-foreground">{t2.description}</span>
+                        {/* P4: il nome senza prefisso mcp__ e la descrizione
+                            senza «[MCP:…]» — il prefisso resta al modello */}
+                        <span className="block truncate font-mono text-[11px]">{mcpToolPresentation(t2.name, t2.description).name}</span>
+                        <span className="block text-[10px] text-muted-foreground">{mcpToolPresentation(t2.name, t2.description).description}</span>
                       </span>
                     </label>
                   )

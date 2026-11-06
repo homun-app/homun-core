@@ -5,7 +5,8 @@ Homun contiene codice adattato da **Rakazo** (https://github.com/elie222/rakazo,
 - `src/shared/network-host.ts` — predicati sugli host (loopback, rete privata, metadata cloud), da `packages/contracts/src/network-host.ts`;
 - `src/shared/agent-model.ts` — la regola di risoluzione del modello di un bot, ispirata a `resolveRunModel`/`selectConfiguredModel`;
 - `src/shared/terminal-frames.ts` — da `src/contracts/terminal.ts`;
-- `src/main/sandbox/docker-argv.ts` — il programma del server del terminale, da `src/terminal/server.ts`.
+- `src/main/sandbox/docker-argv.ts` — il programma del server del terminale, da `src/terminal/server.ts`;
+- `src/main/agent/current-time.ts` — la data e l'ora nel turno (`formatCurrentTimeInstruction`), da `packages/adapters/src/current-time.ts`.
 
 Le modifiche sono di Homun. Testo della licenza:
 

@@ -53,10 +53,21 @@ export function pluginsEnabledFor(agentId: string, parentId?: string): Installed
   return all.filter((p) => p.enabledFor.includes('*') || p.enabledFor.includes(agentId) || (parentId !== undefined && p.enabledFor.includes(parentId)))
 }
 
+/**
+ * P8 (fase pulizia): l'UNICA selezione dei plugin di un bot — il suo id E,
+ * se è un sottoagente, quello del padre (boxOwnerOf). La usano il prompt
+ * (pluginSkillsOf), il `/` del compositore (invocableSkillsOf) e la lettura
+ * del tool skill (readSkillFor/readSkillFileFor): un plugin abilitato solo
+ * per l'id del sottoagente compare nell'elenco E si invoca.
+ */
+export function pluginsOfAgent(agentId: string): InstalledPlugin[] {
+  const owner = boxOwnerOf(agentId)
+  return pluginsEnabledFor(agentId, owner === agentId ? undefined : owner)
+}
+
 /** Le skill dei plugin abilitati per un bot: nome nel prompt <plugin>--<skill> con "(plugin <nome>)". */
 export function pluginSkillsOf(agentId: string): Array<{ name: string; description: string }> {
-  const owner = boxOwnerOf(agentId)
-  return pluginsEnabledFor(agentId, owner === agentId ? undefined : owner).flatMap((p) =>
+  return pluginsOfAgent(agentId).flatMap((p) =>
     p.skills.map((s) => ({ name: s.name, description: `${s.description} (plugin ${p.name})` }))
   )
 }
@@ -278,9 +289,9 @@ export function invocableSkillsOf(agentId: string): InvocableSkill[] {
     imported: isThirdPartySkill(s.entry)
   }))
   // K2: anche le skill dei plugin si invocano col `/` — col CORPO letto dalla
-  // cartella del plugin (prima arrivava al modello un corpo vuoto)
-  const owner = skillOwnerOf(agentId)
-  const plugins = pluginsEnabledFor(owner).flatMap((p) =>
+  // cartella del plugin (prima arrivava al modello un corpo vuoto). P8: la
+  // selezione è UNICA con il prompt (pluginsOfAgent: id del bot + padre)
+  const plugins = pluginsOfAgent(agentId).flatMap((p) =>
     p.skills.map((skill): InvocableSkill => {
       const text = pluginSkillBody(p, dataDir(), skill.name)
       const parsed = text !== null ? parseSkillMd(text) : null
@@ -619,9 +630,9 @@ export function readSkillFor(agentId: string, name: string): { output: string; f
     }
     return { output: lines.join('\n'), files: mine.files, webContent: isThirdPartySkill(mine.entry) }
   }
-  // plugin: si LEGGE dalla cartella del plugin (fase 13)
-  const owner = skillOwnerOf(agentId)
-  for (const p of pluginsEnabledFor(owner)) {
+  // plugin: si LEGGE dalla cartella del plugin (fase 13); P8: stessa
+  // selezione dell'elenco e del prompt (pluginsOfAgent)
+  for (const p of pluginsOfAgent(agentId)) {
     const body = pluginSkillBody(p, dataDir(), name)
     if (body !== null) {
       const parsed = parseSkillMd(body)
@@ -660,9 +671,8 @@ export function readSkillFileFor(agentId: string, name: string, file: string): {
       return null
     }
   }
-  // plugin
-  const owner = skillOwnerOf(agentId)
-  for (const p of pluginsEnabledFor(owner)) {
+  // plugin; P8: stessa selezione dell'elenco e del prompt (pluginsOfAgent)
+  for (const p of pluginsOfAgent(agentId)) {
     const rec = p.skills.find((s) => s.name === name)
     if (!rec) continue
     const dir = join(dataDir(), p.dir, rec.dir)

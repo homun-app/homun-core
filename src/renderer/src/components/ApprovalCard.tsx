@@ -11,11 +11,13 @@ import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import { describeCron } from '../../../shared/cron-human'
 // fase 17c (C2): il motivo della card si ritraduce dal meta.ui
-import { uiTextOfMeta } from '../lib/ui-text'
+// P2 (fase pulizia): col nome dello strumento in parole (toolDisplayName)
+import { uiTextOfMetaTools, toolCtxOfMeta } from '../lib/ui-text'
 import { i18n } from '../lib/i18n'
 // R3 (fase app — ritocchi): il modello puro della card per Composio e MCP
 // fase Composio OAuth (C7): anche il modello del blocco
-import { approvalAppOf, approvalTitleOf, approvalReasonPhrase, approvalTechnicalLine, approvalBatchArgumentLines, type ComposioBatchActionMeta } from '../lib/approval-app'
+import { approvalAppOf, approvalTitleOf, approvalReasonPhrase, approvalTechnicalLine, approvalBatchArgumentLines, approvalAskTitle, type ComposioBatchActionMeta } from '../lib/approval-app'
+import { toolDisplayName } from '../../../shared/tool-names'
 import type { TranscriptEntry } from '../../../shared/types'
 import { DecidedRow, CardShell } from './DecidedRow'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu'
@@ -36,7 +38,7 @@ function suggestedRule(tool: string, input: Record<string, unknown> | undefined)
 }
 
 /** La sintesi breve della riga dopo la decisione («rm -rf …/vecchi-report»). */
-export function approvalSummary(tool: string, input: Record<string, unknown> | undefined): string {
+export function approvalSummary(tool: string, input: Record<string, unknown> | undefined, meta?: Record<string, unknown> | null, lang: 'it' | 'en' = 'it'): string {
   if (typeof input?.command === 'string') {
     const cmd = input.command.trim()
     return cmd.length > 32 ? `${cmd.slice(0, 32)}…` : cmd
@@ -49,32 +51,14 @@ export function approvalSummary(tool: string, input: Record<string, unknown> | u
       return input.url.slice(0, 24)
     }
   }
-  return tool
+  // P2: il ripiego è il nome umano dello strumento, mai il tecnico nudo
+  return toolDisplayName(tool, toolCtxOfMeta(meta, lang))
 }
 
-/** Il titolo in parole: cosa vuole fare il bot con questo tool. */
-function askTitle(tool: string, name: string): string {
-  switch (tool) {
-    case 'run-command':
-    case 'run_command':
-      return i18n.t(msgTitleCommand(name))
-    case 'write-file':
-    case 'write_file':
-    case 'edit-file':
-      return i18n.t(msgTitleWrite(name))
-    case 'read-file':
-      return i18n.t(msgTitleRead(name))
-    case 'update_state':
-      return i18n.t(msgTitleAutomation(name))
-    default:
-      return i18n.t(msgTitleGeneric(name, tool))
-  }
+/** Il titolo in parole: cosa vuole fare il bot con questo tool (P2: modello puro in approval-app). */
+function askTitle(tool: string, meta: Record<string, unknown> | null | undefined, name: string, lang: 'it' | 'en'): string {
+  return i18n.t(approvalAskTitle(tool, meta, name, lang))
 }
-const msgTitleCommand = (name: string) => msg`${name} vuole eseguire un comando`
-const msgTitleWrite = (name: string) => msg`${name} vuole scrivere un file`
-const msgTitleRead = (name: string) => msg`${name} vuole leggere un file`
-const msgTitleAutomation = (name: string) => msg`${name} vuole cambiare un'automazione`
-const msgTitleGeneric = (name: string, tool: string) => msg`${name} vuole usare ${tool}`
 
 export function ApprovalCard({ entry, readOnly = false }: { entry: TranscriptEntry; readOnly?: boolean }) {
   const { t } = useLingui()
@@ -97,8 +81,9 @@ export function ApprovalCard({ entry, readOnly = false }: { entry: TranscriptEnt
   const resolvedTitle = typeof humanTitle === 'string' ? humanTitle : humanTitle ? i18n.t(humanTitle) : null
   const humanReason = appInfo ? approvalReasonPhrase(appInfo) : null
 
-  // fase 17c (C2): il testo del motivo nella lingua attiva (meta.ui)
-  const reasonText = uiTextOfMeta(entry.meta) ?? entry.content
+  // fase 17c (C2): il testo del motivo nella lingua attiva (meta.ui);
+  // P2 (fase pulizia): il valore {tool} in parole, mai il nome tecnico
+  const reasonText = uiTextOfMetaTools(entry.meta, activeLang) ?? entry.content
 
   // M4 (fase 0.3.1001): tool MCP readOnly di un server manuale — la card offre
   // «Consenti sempre le letture di <server>» (grant scope readOnly, controllata
@@ -158,7 +143,7 @@ export function ApprovalCard({ entry, readOnly = false }: { entry: TranscriptEnt
   const body = (
     <>
       <p className="text-[15px] font-semibold">
-        {resolvedTitle ?? askTitle(tool, agentName)}
+        {resolvedTitle ?? askTitle(tool, entry.meta, agentName, activeLang)}
       </p>
       {(composioAction || composioBatch) && (
         <p className="mt-0.5 text-[11px] text-muted-foreground"><Trans>tramite Composio</Trans></p>
@@ -329,7 +314,7 @@ export function ApprovalCard({ entry, readOnly = false }: { entry: TranscriptEnt
         label={rowLabel}
         // R3: anche la riga dopo la decisione è umana per Composio e MCP
         // («Slack · Crea promemoria»), mai il nome tecnico dello strumento
-        summary={appInfo ? (appInfo.kind === 'composio' && resolvedTitle ? resolvedTitle : appInfo.app) : approvalSummary(tool, input)}
+        summary={appInfo ? (appInfo.kind === 'composio' && resolvedTitle ? resolvedTitle : appInfo.app) : approvalSummary(tool, input, entry.meta, activeLang)}
         at={entry.createdAt}
       >
         <CardShell tone="waiting">{body}</CardShell>

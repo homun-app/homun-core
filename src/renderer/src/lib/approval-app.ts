@@ -15,6 +15,8 @@ import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
 import type { UiLanguage } from '../../../shared/ui-language'
 import { localizedActionName } from '../../../shared/composio-names'
+import { toolDisplayName } from '../../../shared/tool-names'
+import { toolCtxOfMeta } from './ui-text'
 
 /** Il meta.composioAction scritto dal loop (R4: con slug, versione e nome originale). */
 export interface ComposioActionMeta {
@@ -158,6 +160,42 @@ export function approvalTechnicalLine(info: ApprovalAppInfo, tool: string): stri
     return `${tool}\n${parts.filter(Boolean).join(' · ')}`
   }
   return `${tool}\nserver ${info.app}`
+}
+
+// ---- fase pulizia (P2): il nome umano anche per gli strumenti DEL BOT ----
+
+const msgTitleCommand = (name: string) => msg`${name} vuole eseguire un comando`
+const msgTitleWrite = (name: string) => msg`${name} vuole scrivere un file`
+const msgTitleRead = (name: string) => msg`${name} vuole leggere un file`
+const msgTitleAutomation = (name: string) => msg`${name} vuole cambiare un'automazione`
+const msgTitleGeneric = (name: string, tool: string) => msg`${name} vuole usare ${tool}`
+
+/**
+ * P2: il titolo della card per gli strumenti che non sono Composio né MCP —
+ * gli stessi casi di sempre (comando, file, automazione) e, nel caso
+ * generico, il nome umano di toolDisplayName: mai «vuole usare create_agent».
+ */
+export function approvalAskTitle(
+  tool: string,
+  meta: Record<string, unknown> | null | undefined,
+  agentName: string,
+  lang: UiLanguage
+): MessageDescriptor {
+  switch (tool) {
+    case 'run-command':
+    case 'run_command':
+      return msgTitleCommand(agentName)
+    case 'write-file':
+    case 'write_file':
+    case 'edit-file':
+      return msgTitleWrite(agentName)
+    case 'read-file':
+      return msgTitleRead(agentName)
+    case 'update_state':
+      return msgTitleAutomation(agentName)
+    default:
+      return msgTitleGeneric(agentName, toolDisplayName(tool, toolCtxOfMeta(meta, lang)))
+  }
 }
 
 // ---- il blocco: le righe degli argomenti per azione (C7 punto 1) ----

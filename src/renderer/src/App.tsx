@@ -169,7 +169,7 @@ export function App() {
       <div className="relative flex min-h-0 flex-1">
       <Sidebar layout={layout} />
       <div className="relative flex min-w-0 flex-1">
-        {openGroupId === null ? <Chat /> : <TeamChat />}
+        {openGroupId === null ? <Chat layout={layout} /> : <TeamChat />}
         <LibraryPanel />
         <ActivityPanel />
       </div>

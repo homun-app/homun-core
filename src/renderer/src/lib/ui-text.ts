@@ -9,6 +9,8 @@
 // componente, così il cambio lingua ri-renderizza e il testo si aggiorna.
 import { i18n } from '@lingui/core'
 import type { TranscriptEntry, UiText } from '../../../shared/types'
+import { toolDisplayName, type ToolDisplayCtx } from '../../../shared/tool-names'
+import type { UiLanguage } from '../../../shared/ui-language'
 
 /** Un UiText (o lista) dal meta di una entry, già normalizzato. */
 export function uiListOf(meta: Record<string, unknown> | null | undefined): UiText[] | null {
@@ -38,4 +40,45 @@ export function uiTextOfMeta(meta: Record<string, unknown> | null | undefined): 
 /** Il testo da mostrare dell'entry: meta.ui se c'è (nella lingua attiva), altrimenti il content. */
 export function uiTextOf(entry: Pick<TranscriptEntry, 'content' | 'meta'>): string {
   return uiTextOfMeta(entry.meta) ?? entry.content
+}
+
+// ---- fase pulizia (P2): il nome dello strumento DENTRO i testi del meta.ui ----
+
+/** Le id il cui valore {tool} è un DATO di configurazione, non un nome da umanizzare. */
+const TOOL_VALUE_DATA_IDS = new Set(['trigger.tool'])
+
+/** Il ctx di toolDisplayName ricavato dal meta dell'entry (mcpApp, composioAction). */
+export function toolCtxOfMeta(meta: Record<string, unknown> | null | undefined, lang: UiLanguage): ToolDisplayCtx {
+  const mcpApp = typeof meta?.mcpApp === 'string' ? meta.mcpApp : undefined
+  const composioAction = meta?.composioAction as { app?: string; action?: string; original?: string } | undefined
+  return {
+    lang,
+    ...(mcpApp ? { mcpServer: mcpApp } : {}),
+    ...(composioAction && typeof composioAction === 'object' ? { composio: composioAction } : {})
+  }
+}
+
+/**
+ * P2: il testo del meta.ui col nome dello strumento IN PAROLE — il valore
+ * {tool} passa da toolDisplayName («Creare un bot», «Slack · Create
+ * reminder», «Notion · <strumento>»), così card e notice non mostrano mai il
+ * nome tecnico. Le id dei dati di configurazione (trigger.tool) non si
+ * toccano. Null se l'entry non ha meta.ui.
+ */
+export function uiTextOfMetaTools(meta: Record<string, unknown> | null | undefined, lang: UiLanguage): string | null {
+  const list = uiListOf(meta)
+  if (!list) return null
+  const ctx = toolCtxOfMeta(meta, lang)
+  return list
+    .map((u) => {
+      const tool = u.values?.tool
+      if (tool === undefined || TOOL_VALUE_DATA_IDS.has(u.id)) return i18n._(u.id, u.values ?? {})
+      return i18n._(u.id, { ...u.values, tool: toolDisplayName(String(tool), ctx) })
+    })
+    .join('; ')
+}
+
+/** Come uiTextOf, ma col nome dello strumento in parole (P2): vale il content senza meta.ui. */
+export function uiTextOfTools(entry: Pick<TranscriptEntry, 'content' | 'meta'>, lang: UiLanguage = i18n.locale === 'en' ? 'en' : 'it'): string {
+  return uiTextOfMetaTools(entry.meta, lang) ?? entry.content
 }

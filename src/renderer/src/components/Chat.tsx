@@ -16,7 +16,7 @@ import remarkGfm from 'remark-gfm'
 import { Paperclip, PanelRight, ArrowUp, Square, Copy, Quote, Info, Brain } from 'lucide-react'
 import { api, useStore, useResolvedModel } from '../store'
 // fase 17c (C2): il testo di notice/eventi/system dal meta.ui (lingua attiva)
-import { uiTextOf } from '../lib/ui-text'
+import { uiTextOf, uiTextOfTools } from '../lib/ui-text'
 // M2 (fase 0.3.1001): l'apertura di un turno con initiator è una riga di sistema
 import { openingRowFor } from '../lib/opening-rows'
 // R1 (fase app — ritocchi): le notice in chat non sono tutte errori
@@ -40,9 +40,11 @@ import { MemoryPanel } from './MemoryPanel'
 import { Bot } from '../bot/Bot'
 import { useBotInfo } from '../bot/use-bot'
 // fase 16b (S3.3): la mezza riga d'attività e i passaggi del turno
-import { activityPhrase, stepsOfTurn, stepsDurationSeconds, type StepGroup } from '../lib/activity'
+import { activityPhrase, stepsOfTurn, stepsDurationLabel, type StepGroup } from '../lib/activity'
 // fase risposta (R3): la riga di lavoro dal testo a metà turno
 import { narrationStatusLine } from '../../../shared/narration'
+// P6 (fase pulizia): il layout (pannello docked/overlay) per il limite dei menu
+import type { LayoutResult } from '../layout'
 import { THINKING_LABELS } from './ui/ModelPicker'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu'
 
@@ -53,11 +55,13 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 export function StepsPopover({ group, live }: { group: StepGroup; live: boolean }) {
   const { i18n } = useLingui()
   const lang = i18n.locale === 'en' ? 'en' : 'it'
-  const secs = stepsDurationSeconds(group, Date.now())
+  const duration = stepsDurationLabel(group, Date.now())
   return (
     <div data-testid="steps-popover" className="w-72 max-w-[calc(100vw-1.5rem)] rounded-[14px] bg-card p-3 text-[13px] shadow-soft">
       <p className="mb-1.5 text-xs text-muted-foreground">
-        <Plural value={group.steps.length} one="# passo" other="# passaggi" /> · {secs ?? 0} s
+        <Plural value={group.steps.length} one="# passo" other="# passaggi" />
+        {/* P5: sotto il secondo «< 1 s», senza durata nota niente tempo (mai «0 s») */}
+        {duration !== null && <> · {duration}</>}
       </p>
       {group.steps.length === 0 && <p className="text-muted-foreground">{i18n.t(msg`ancora nessun passo`)}</p>}
       <div className="space-y-1">
@@ -281,7 +285,7 @@ function StepsPopoverBox({ entry }: { entry: TranscriptEntry }) {
   )
 }
 
-export function Chat() {
+export function Chat({ layout }: { layout?: LayoutResult }) {
   const { t, i18n } = useLingui()
   const agents = useStore((s) => s.agents)
   const activeId = useStore((s) => s.activeId)
@@ -310,6 +314,14 @@ export function Chat() {
     if (panelFocusRestore > 0) panelBtnRef.current?.focus()
   }, [panelFocusRestore])
   const scrollRef = useRef<HTMLDivElement>(null)
+  // P6 (fase pulizia): la colonna della chat è il limite dei menu del
+  // compositore (collisionBoundary) — a finestra stretta col pannello aperto
+  // il menu «Ragiona» non deve coprire il pannello del profilo. Col pannello
+  // in OVERLAY la colonna VISIBILE finisce dove comincia il pannello: la
+  // sentinella qui sotto copre esattamente quell'area
+  const chatColumnRef = useRef<HTMLElement>(null)
+  const chatVisibleRef = useRef<HTMLDivElement>(null)
+  const reasonMenuRef = useRef<HTMLDivElement>(null)
 
   const agent = agents.find((a) => a.id === activeId)
   const info = useBotInfo(activeId)
@@ -360,6 +372,30 @@ export function Chat() {
   // fase 3 (§3bis L2): il ragionamento è nascosto di default; il toggle vive
   // nel menu «Ragiona» del composer (16b, S3.1/S3.4)
   const [showReasoning, setShowReasoning] = useState(false)
+
+  /**
+   * P6 (fase pulizia): il menu «Ragiona» resta DENTRO la colonna visibile
+   * della chat. Il collisionBoundary di Radix ferma l'asse verticale, ma lo
+   * shift orizzontale non lo fa (mainAxis only): appena il menu è posizionato
+   * il contenuto si ritaglia sulla colonna — col pannello in overlay a 900 px
+   * non copre mai il pannello del profilo.
+   */
+  const clampReasonMenu = (): void => {
+    const el = reasonMenuRef.current
+    const col = chatVisibleRef.current ?? chatColumnRef.current
+    if (!el || !col) return
+    const m = el.getBoundingClientRect()
+    const c = col.getBoundingClientRect()
+    const pad = 8
+    let dx = 0
+    if (m.right > c.right - pad) dx = c.right - pad - m.right
+    else if (m.left < c.left + pad) dx = c.left + pad - m.left
+    if (dx !== 0) el.style.transform = `${el.style.transform} translateX(${Math.round(dx)}px)`
+  }
+  const clampReasonMenuSoon = (): void => {
+    requestAnimationFrame(() => requestAnimationFrame(clampReasonMenu))
+    setTimeout(clampReasonMenu, 60)
+  }
   // fase 18b (H4.3 → K3): l'avviso per i modelli senza visione.
   // Fase 16c correzioni (R4): provider e modello del bot passano dal
   // selettore resolvedModelOf — anche un bot «Come gli altri» (null/null)
@@ -445,7 +481,14 @@ export function Chat() {
   const reasonLabel = i18n.t(msg`Ragiona: ${levelLabel ? i18n.t(levelLabel) : (agent.thinking ?? 'default')}`)
 
   return (
-    <main className="relative flex min-w-0 flex-1 flex-col">
+    <main ref={chatColumnRef} className="relative flex min-w-0 flex-1 flex-col">
+      {/* P6: il limite VISIBLE dei menu del compositore (v. chatVisibleRef) */}
+      <div
+        ref={chatVisibleRef}
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-y-0 left-0"
+        style={{ right: layout?.panel === 'overlay' ? layout.panelWidth : 0 }}
+      />
       {/* fase 16b correzioni 2 (Q3): la fascia alta di 60 px — trascina la
           finestra — con UNA riga di controlli (y 12–48, centro 30): pillola
           del bot al centro e bottone del pannello a destra. La pillola tronca
@@ -633,7 +676,7 @@ export function Chat() {
           {/* Ragiona: <livello> ▾ — il selettore che stava nel chip (S3.4).
               Q2: sotto i 560 px di contenitore resta solo l'icona (Brain), il
               testo vive in aria-label e tooltip; il menu è identico */}
-          <DropdownMenu>
+          <DropdownMenu onOpenChange={(open) => { if (open) clampReasonMenuSoon() }}>
             <DropdownMenuTrigger
               className="grid h-9 shrink-0 place-items-center rounded-full px-3 text-[13px] text-muted-foreground transition hover:bg-muted hover:text-foreground"
               aria-label={t`Livello di ragionamento`}
@@ -642,7 +685,14 @@ export function Chat() {
               <span className="@max-pill:hidden">{reasonLabel}</span>
               <Brain className="hidden size-4 @max-pill:block" aria-hidden="true" />
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
+            {/* P6: il menu resta DENTRO la colonna VISIBILE della chat — a
+                900 px col pannello in overlay non lo copre, a 1100 docked resta
+                nella colonna */}
+            <DropdownMenuContent
+              ref={reasonMenuRef}
+              align="end"
+              collisionBoundary={chatVisibleRef.current ?? chatColumnRef.current}
+            >
               {(['default', ...levels] as ThinkingSetting[]).map((l) => (
                 <DropdownMenuItem key={l} onClick={() => { void api.updateAgent(agent.id, { thinking: l }).catch(() => undefined) }}>
                   {i18n.t(THINKING_LABELS[l] ?? msg`${l}`)}
@@ -907,13 +957,16 @@ function NoticeRow({ entry }: { entry: TranscriptEntry }) {
     // come le righe di sistema, warning ambra (token --waiting ≥ 4,5:1), solo
     // gli errori restano rossi
     const severity = noticeSeverity(uiId)
+    // P2 (fase pulizia): il valore {tool} della notice in parole (Bloccato dai
+    // permessi: Creare un bot), mai il nome tecnico
+    const text = uiTextOfTools(entry)
     if (severity === 'error') {
-      return <p className="text-center text-xs text-destructive/90">{uiTextOf(entry)}</p>
+      return <p className="text-center text-xs text-destructive/90">{text}</p>
     }
     if (severity === 'warning') {
-      return <p className="text-center text-xs text-waiting">{uiTextOf(entry)}</p>
+      return <p className="text-center text-xs text-waiting">{text}</p>
     }
-    return <p className="text-center text-xs text-muted-foreground">{uiTextOf(entry)}</p>
+    return <p className="text-center text-xs text-muted-foreground">{text}</p>
   }
   return (
     <div className="flex items-center gap-3 rounded-[14px] bg-destructive/10 px-4 py-2.5 text-sm text-foreground">

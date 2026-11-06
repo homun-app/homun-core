@@ -51,6 +51,8 @@ import { isExternalSend, draftFromExternalCall, draftFromBatchSend, prepareDraft
 import { normalizeOptions, findDismissibleWidgets } from './widgets'
 import { buildMemorySection, estimateTokensOf } from './memory'
 import { buildSkillsSection, skillInvocationExpansion, invocableSkillsOf, mayInvokeSkill } from './skills'
+// P10 (fase pulizia): la data e l'ora del turno (come Rakazo, sul messaggio utente)
+import { formatCurrentTimeInstruction, systemTimeZone } from './current-time'
 import { maybeCompactHistory, summarizeWithLlm } from './compaction'
 import { automationEventText } from './update-state'
 import { formatAgentMessage, agentSendGuard, countPairMessagesLastHour, AGENT_HOP_MAX, formatWebSearchEvidence, formatWebFetchEvidence, formatWebBrowserEvidence, formatExternalDataEvidence } from '../../shared/agent-message'
@@ -1520,6 +1522,23 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           }
         } catch {
           // le skill non devono mai rompere il turno
+        }
+      }
+    }
+
+    // P10 (fase pulizia): la data e l'ora del TURNO. Il modello non ha
+    // orologio: ogni turno dichiara il presente reale sul messaggio utente
+    // che lo apre (le routine e i turni senza messaggio nuovo lo ricevono
+    // lì). AGGIUNTA al solo contenuto per il modello — DOPO l'espansione del
+    // /nome, che altrimenti la coprirebbe — mai nel system prompt (resterebbe
+    // diverso a ogni chiamata, rompendo la cache), mai nella storia salvata
+    // né in chat.
+    {
+      const timeLine = formatCurrentTimeInstruction(new Date(), systemTimeZone())
+      for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i]!.role === 'user') {
+          messages[i] = { ...messages[i]!, content: `${messages[i]!.content}\n\n${timeLine}` }
+          break
         }
       }
     }

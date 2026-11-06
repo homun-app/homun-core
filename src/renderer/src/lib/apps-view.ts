@@ -284,3 +284,27 @@ export function appsCatalogModel(input: AppsCatalogInput): AppsCatalogModel {
     nothingFound
   }
 }
+
+/**
+ * P4 (fase pulizia): lo stato degli interruttori «per bot» del dettaglio di
+ * un'app DIRETTA. «Tutti i bot» acceso (con i bot SPENTI e DISATTIVATI, come
+ * l'anteprima della finestra Skill) quando la scelta vale per tutti —
+ * enabledFor assente (i server di prima della migrazione valgono per tutti,
+ * mcp/index.ts serversForAgent) oppure ['*']. Lista vuota esplicita = nessun
+ * bot: il significato di ciò che è salvato NON cambia.
+ */
+export function botsToggleState(
+  enabledFor: string[] | null | undefined,
+  agents: AgentLike[]
+): { all: boolean; bots: Array<{ id: string; name: string; checked: boolean; disabled: boolean }> } {
+  const all = enabledFor == null || enabledFor.includes('*')
+  return {
+    all,
+    bots: agents.map((a) => ({
+      id: a.id,
+      name: a.name,
+      checked: !all && (enabledFor ?? []).includes(a.id),
+      disabled: all
+    }))
+  }
+}

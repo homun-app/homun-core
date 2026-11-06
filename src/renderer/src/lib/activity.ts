@@ -411,3 +411,14 @@ export function stepsDurationSeconds(group: StepGroup, now: number): number | nu
   const end = group.endedAt ?? now
   return Math.max(0, Math.round((end - group.startedAt) / 1000))
 }
+
+/**
+ * P5 (fase pulizia): l'etichetta della durata del riquadro dei passaggi — un
+ * turno sotto il secondo dice «< 1 s» (mai «0 s»); senza durata nota
+ * (startedAt nullo) NON c'è tempo: null, e chi rende omette il «· X s».
+ */
+export function stepsDurationLabel(group: StepGroup, now: number): string | null {
+  const secs = stepsDurationSeconds(group, now)
+  if (secs === null) return null
+  return secs === 0 ? '< 1 s' : `${secs} s`
+}

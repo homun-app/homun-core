@@ -6,7 +6,7 @@
 import { describe, expect, it, beforeAll } from 'vitest'
 import { i18n } from '@lingui/core'
 import type { Messages } from '@lingui/core'
-import { uiListOf, uiTextOf, uiTextOfMeta } from '../ui-text'
+import { uiListOf, uiTextOf, uiTextOfMeta, uiTextOfTools } from '../ui-text'
 import { messages as itMessages } from '../../../../renderer/src/locales/it/messages.mjs'
 import { messages as enMessages } from '../../../../renderer/src/locales/en/messages.mjs'
 import type { TranscriptEntry } from '../../../../shared/types'
@@ -58,5 +58,41 @@ describe('fase 17c (C9): uiTextOf del renderer', () => {
     expect(uiListOf({ ui: 'garbage' })).toBeNull()
     expect(uiListOf({ ui: [{ nope: 1 }] })).toBeNull()
     expect(uiListOf(null)).toBeNull()
+  })
+})
+
+describe('fase pulizia (P2): uiTextOfTools — il nome dello strumento in parole', () => {
+  beforeAll(() => {
+    i18n.load({ it: itMessages as unknown as Messages, en: enMessages as unknown as Messages })
+  })
+
+  it('notice deniedByPermissions: «Bloccato dai permessi: Creare un bot», mai il nome tecnico', () => {
+    i18n.activate('it')
+    const e = entry({ ui: { id: 'notice.deniedByPermissions', values: { tool: 'create_agent' } }, tool: 'create_agent' })
+    expect(uiTextOfTools(e)).toBe('Bloccato dai permessi: Creare un bot')
+  })
+
+  it('notice denied su uno strumento MCP: «Notion · Search pages»', () => {
+    i18n.activate('it')
+    const e = entry({ ui: { id: 'notice.deniedByPermissions', values: { tool: 'mcp__notion__search_pages' } }, tool: 'mcp__notion__search_pages', mcpApp: 'Notion' })
+    expect(uiTextOfTools(e)).toBe('Bloccato dai permessi: Notion · Search pages')
+  })
+
+  it('testi SENZA valori strumento: identici a uiTextOf', () => {
+    i18n.activate('it')
+    const e = entry({ ui: { id: 'notice.queueFull' } })
+    expect(uiTextOfTools(e)).toBe(uiTextOf(e))
+  })
+
+  it('trigger.tool NON si umanizza: il nome del connettore è un dato della routine', () => {
+    i18n.activate('it')
+    const e = entry({ ui: { id: 'trigger.tool', values: { tool: 'mcp__gmail__list_messages', connector: 'gmail', field: 'messages[].id' } } })
+    expect(uiTextOfTools(e)).toContain('mcp__gmail__list_messages')
+  })
+
+  it('entry senza meta.ui: il content, come uiTextOf', () => {
+    i18n.activate('it')
+    const e = entry(null, 'testo vecchio con run-command dentro')
+    expect(uiTextOfTools(e)).toBe('testo vecchio con run-command dentro')
   })
 })

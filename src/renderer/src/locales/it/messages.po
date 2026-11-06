@@ -363,23 +363,23 @@ msgstr "{name} ora coordina la squadra"
 msgid "composio.disconnected"
 msgstr "{name} scollegata."
 
-#: src/renderer/src/components/ApprovalCard.tsx
+#: src/renderer/src/lib/approval-app.ts
 msgid "{name} vuole cambiare un'automazione"
 msgstr "{name} vuole cambiare un'automazione"
 
-#: src/renderer/src/components/ApprovalCard.tsx
+#: src/renderer/src/lib/approval-app.ts
 msgid "{name} vuole eseguire un comando"
 msgstr "{name} vuole eseguire un comando"
 
-#: src/renderer/src/components/ApprovalCard.tsx
+#: src/renderer/src/lib/approval-app.ts
 msgid "{name} vuole leggere un file"
 msgstr "{name} vuole leggere un file"
 
-#: src/renderer/src/components/ApprovalCard.tsx
+#: src/renderer/src/lib/approval-app.ts
 msgid "{name} vuole scrivere un file"
 msgstr "{name} vuole scrivere un file"
 
-#: src/renderer/src/components/ApprovalCard.tsx
+#: src/renderer/src/lib/approval-app.ts
 msgid "{name} vuole usare {tool}"
 msgstr "{name} vuole usare {tool}"
 
@@ -1113,6 +1113,7 @@ msgstr "Bot"
 msgid "Bot che la usano"
 msgstr "Bot che la usano"
 
+#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/ServerSheet.tsx
 msgid "Bot che lo usano"
 msgstr "Bot che lo usano"

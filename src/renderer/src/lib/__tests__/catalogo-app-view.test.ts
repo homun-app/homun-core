@@ -3,7 +3,7 @@
 // le consigliate (massimo 6, non connesse), le sezioni per categoria (prime 6
 // per rank, connesse escluse) e la griglia di ricerca/filtro senza doppioni.
 import { describe, expect, it } from 'vitest'
-import { appsCatalogModel } from '../apps-view'
+import { appsCatalogModel, botsToggleState } from '../apps-view'
 import { loadAppCatalog, type AppCuration, type ComposioCatalogEntry, type DirectCatalogEntry } from '../../../../shared/app-catalog'
 import type { ConnectorInfo, ComposioStatusInfo, ComposioGatewayStatusInfo } from '../../../../shared/types'
 
@@ -121,5 +121,42 @@ describe('P3 — appsCatalogModel: la griglia di ricerca e filtro', () => {
   it('le categorie presenti seguono l\'ordine fisso (le pillole)', () => {
     const m = model({ composioGateway: gateway('gmail', 'ACTIVE') })
     expect(m.categoriesPresent).toEqual(['communication', 'productivity', 'development'])
+  })
+})
+
+// ---- P4 (fase pulizia): gli interruttori «per bot» del dettaglio app ----
+describe('P4 — botsToggleState: «Tutti i bot» acceso, i bot spenti e disattivati', () => {
+  const bots = [
+    { id: 'agent_a', name: 'Contabile' },
+    { id: 'agent_b', name: 'Postino' }
+  ]
+
+  it('enabledFor ["*"]: Tutti i bot acceso, i bot SPENTI e DISATTIVATI (come la finestra Skill)', () => {
+    const st = botsToggleState(['*'], bots)
+    expect(st.all).toBe(true)
+    expect(st.bots).toEqual([
+      { id: 'agent_a', name: 'Contabile', checked: false, disabled: true },
+      { id: 'agent_b', name: 'Postino', checked: false, disabled: true }
+    ])
+  })
+
+  it('enabledFor ASSENTE (server di prima della migrazione): vale per tutti — Tutti i bot acceso', () => {
+    expect(botsToggleState(undefined, bots).all).toBe(true)
+    expect(botsToggleState(null, bots).all).toBe(true)
+  })
+
+  it('enabledFor con bot scelti: Tutti i bot spento, quei bot accesi e ATTIVI', () => {
+    const st = botsToggleState(['agent_b'], bots)
+    expect(st.all).toBe(false)
+    expect(st.bots).toEqual([
+      { id: 'agent_a', name: 'Contabile', checked: false, disabled: false },
+      { id: 'agent_b', name: 'Postino', checked: true, disabled: false }
+    ])
+  })
+
+  it('lista VUOTA esplicita: nessun bot (non è «tutti») — il significato salvato non cambia', () => {
+    const st = botsToggleState([], bots)
+    expect(st.all).toBe(false)
+    expect(st.bots.every((b) => !b.checked && !b.disabled)).toBe(true)
   })
 })

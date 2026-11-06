@@ -322,7 +322,7 @@ describe('S2: slug dei conflitti', () => {
 // ---- K2 (fase skill ritocchi): il `/` dei plugin e le skill ROTTE ----
 
 /** Semina un plugin installato con UNA skill (cartella dentro dataDir). */
-function seedPlugin(): void {
+function seedPlugin(enabledFor: string[] = ['*']): void {
   const pdir = join(root, 'plugins-fixture', 'mio-plugin')
   mkdirSync(join(pdir, 'skills', 'abc'), { recursive: true })
   writeFileSync(join(pdir, 'skills', 'abc', 'SKILL.md'),
@@ -331,7 +331,7 @@ function seedPlugin(): void {
     name: 'mio-plugin', marketplace: 'mp', marketplaceSource: 'file://mp', sha: '0'.repeat(40), sha12: '000000000000',
     dir: 'plugins-fixture/mio-plugin',
     skills: [{ name: 'mio-plugin--abc', description: 'la skill del plugin', dir: 'skills/abc' }],
-    servers: [], enabledFor: ['*'], installedAt: 0
+    servers: [], enabledFor, installedAt: 0
   }])
 }
 
@@ -488,5 +488,31 @@ describe('K4: una skill importata e poi modificata smette di contaminare? NO: re
     const item = libraryItemsForUi().find((s) => s.name === 'terza-finestra-k4')
     expect(item?.importedModified).toBe(true)
     deleteLibrarySkill('terza-finestra-k4')
+  })
+})
+
+
+// ---- P8 (fase pulizia): il plugin abilitato SOLO per l'id del sottoagente ----
+describe('P8 — il plugin del sottoagente: nel prompt E invocabile col /', () => {
+  it('enabledFor [id del sottoagente]: buildSkillsSection lo elenca e invocableSkillsOf lo invoca', () => {
+    const padre = createAgent('Padre P8')
+    const figlio = createAgent('Figlio P8', '', { parentId: padre.id })
+    seedPlugin([figlio.id])
+    // nel prompt c'è GIÀ (pluginSkillsOf usa pluginsEnabledFor(agentId, owner))
+    const section = buildSkillsSection(figlio.id)
+    expect(section).toContain('mio-plugin--abc')
+    // e la STESSA selezione vale per il `/` del compositore (oggi no: bug P8)
+    const inv = invocableSkillsOf(figlio.id)
+    const pluginSkill = inv.find((s) => s.name === 'mio-plugin--abc')
+    expect(pluginSkill, 'la skill del plugin è invocabile dal sottoagente').toBeDefined()
+    expect(pluginSkill!.body).toContain('ISTRUZIONI DEL PLUGIN')
+    expect(invocableSkillList(figlio.id).some((s) => s.name === 'mio-plugin--abc')).toBe(true)
+    // e il tool skill la LEGGE (il /nome espande davvero il corpo)
+    const read = readSkillFor(figlio.id, 'mio-plugin--abc')
+    expect(read?.output).toContain('ISTRUZIONI DEL PLUGIN')
+    // il padre NON la vede (abilitato solo per il figlio)
+    expect(invocableSkillsOf(padre.id).some((s) => s.name === 'mio-plugin--abc')).toBe(false)
+    deleteAgent(figlio.id)
+    deleteAgent(padre.id)
   })
 })
