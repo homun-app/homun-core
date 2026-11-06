@@ -9,6 +9,8 @@ function mk(kind: TranscriptEntry['kind'], role: TranscriptEntry['role'], conten
 }
 
 const sys = 'SEI IL SISTEMA'
+/** U4: il testo di un messaggio utente senza il timbro [Sent: …] in testa. */
+const unstamped = (content: string): string => content.replace(/^\[Sent: [^\]\n]*\]\n\n/, '')
 
 describe('buildMessages (§5.3)', () => {
   it('ordine cronologico: [system, user, assistant(+toolCalls), tool, user]', () => {
@@ -25,7 +27,7 @@ describe('buildMessages (§5.3)', () => {
     expect(msgs[0]).toEqual({ role: 'system', content: sys })
     expect(msgs[2].toolCalls?.[0]).toMatchObject({ id: 'call1', name: 'run-command' })
     expect(msgs[3]).toMatchObject({ role: 'tool', toolCallId: 'call1' })
-    expect(msgs[5].content).toBe('grazie')
+    expect(unstamped(msgs[5].content)).toBe('grazie')
   })
 
   it('il messaggio corrente (ultimo entry utente) compare una sola volta', () => {
@@ -35,7 +37,7 @@ describe('buildMessages (§5.3)', () => {
       mk('message', 'user', 'seconda domanda')
     ]
     const msgs = buildMessages(sys, entries)
-    const currents = msgs.filter((m) => m.role === 'user' && m.content === 'seconda domanda')
+    const currents = msgs.filter((m) => m.role === 'user' && unstamped(m.content) === 'seconda domanda')
     expect(currents).toHaveLength(1)
     expect(msgs.map((m) => m.role)).toEqual(['system', 'user', 'assistant', 'user'])
   })
@@ -77,8 +79,8 @@ describe('buildMessages (§5.3)', () => {
     const msgs = buildMessages(sys, entries, undefined, { maxMessages: 4 })
     expect(msgs[0].role).toBe('system')
     expect(msgs[1].role).toBe('user') // confine di turno, mai a metà
-    expect(msgs[1].content).toBe('turno 2')
-    expect(msgs.map((m) => m.content)).toEqual([sys, 'turno 2', 'risp 2', 'turno 3', 'risp 3'])
+    expect(unstamped(msgs[1].content)).toBe('turno 2')
+    expect(msgs.map((m) => unstamped(m.content))).toEqual([sys, 'turno 2', 'risp 2', 'turno 3', 'risp 3'])
   })
 
   it('dopo il taglio nessuna coppia tool orfana: result senza call viene scartato', () => {
@@ -94,7 +96,7 @@ describe('buildMessages (§5.3)', () => {
     const msgs = buildMessages(sys, entries, undefined, { maxMessages: 2 })
     expect(msgs.some((m) => m.role === 'tool')).toBe(false)
     expect(msgs.some((m) => m.role === 'assistant' && m.toolCalls?.length)).toBe(false)
-    expect(msgs.map((m) => m.content)).toEqual([sys, 't2', 'nuova risposta'])
+    expect(msgs.map((m) => unstamped(m.content))).toEqual([sys, 't2', 'nuova risposta'])
   })
 
   it('tool-call senza result (turno interrotto) → result sintetico "interrupted"', () => {
@@ -187,7 +189,7 @@ describe('fase 3 (§3bis L2): send-message e thinking nella storia del modello',
     // …e la vecchia send è DIVENTATA testo assistant: il modello non vede mai
     // lo schema vecchio che deve abbandonare (niente coppia chiamata/risultato)
     expect(msgs[3]).toEqual({ role: 'assistant', content: 'Ecco la risposta' })
-    expect(msgs[4]).toEqual({ role: 'user', content: 'grazie' })
+    expect({ ...msgs[4], content: unstamped(msgs[4]!.content) }).toEqual({ role: 'user', content: 'grazie' })
   })
 
   it('widget → call ask_user con esito "in attesa"; respondedValue/dismissed cambiano il result', () => {
@@ -443,5 +445,80 @@ describe('fase risposta (R9): la storia del protocollo nuovo', () => {
       resultText: 'delivered to the user: "testo tagliato…". Do not repeat it. (your message was longer than 500 characters and was cut: never put a report or long content in message_user — the complete answer goes in your final reply text).'
     })
     expect(sendResultText(e)).toContain('longer than 500 characters')
+  })
+})
+
+// ---- U4 (fase pulizia · ritocchi): l'ora di invio su OGNI messaggio utente ----
+// Il timbro nasce in buildMessages dal createdAt GIÀ salvato di ogni entry
+// (nessun dato nuovo nel DB): lo stesso messaggio dà sempre lo stesso testo,
+// quindi il prefisso della conversazione resta identico fra un turno e
+// l'altro e la cache del provider tiene.
+describe('U4 — buildMessages: il timbro [Sent: …] dal createdAt salvato', () => {
+  const TZ = { timeZone: 'Europe/Rome' }
+  const FRI_1430Z = Date.UTC(2026, 10, 6, 14, 30)
+  const sent = (e: TranscriptEntry, ms: number): TranscriptEntry => ({ ...e, createdAt: ms })
+
+  it('il timbro sta all\'INIZIO del contenuto, poi una riga vuota e il testo', () => {
+    const entries = [sent(mk('message', 'user', 'ciao'), FRI_1430Z), mk('message', 'assistant', 'ehi')]
+    const msgs = buildMessages(sys, entries, undefined, TZ)
+    expect(msgs[1]).toEqual({ role: 'user', content: '[Sent: Friday, 2026-11-06 15:30 (Europe/Rome)]\n\nciao' })
+  })
+
+  it('lo ricevono TUTTI i messaggi utente: utente, [sistema], da altri bot, apertura di una routine', () => {
+    const entries = [
+      sent(mk('message', 'user', 'ciao'), FRI_1430Z),
+      sent(mk('message', 'user', '[sistema] The user connected Notion: its mcp__notion__* tools are now available.'), FRI_1430Z + 60_000),
+      sent(mk('message', 'user', '<messaggio_da_agente nome="Contabile">\nfatto\n</messaggio_da_agente>', { fromAgentId: 'b', fromAgentName: 'Contabile' }), FRI_1430Z + 120_000),
+      sent(mk('message', 'user', '[routine ricorrente: Controllo] guarda le scadenze'), FRI_1430Z + 180_000)
+    ]
+    const users = buildMessages(sys, entries, undefined, TZ).filter((m) => m.role === 'user')
+    expect(users.map((m) => m.content.split('\n\n')[0])).toEqual([
+      '[Sent: Friday, 2026-11-06 15:30 (Europe/Rome)]',
+      '[Sent: Friday, 2026-11-06 15:31 (Europe/Rome)]',
+      '[Sent: Friday, 2026-11-06 15:32 (Europe/Rome)]',
+      '[Sent: Friday, 2026-11-06 15:33 (Europe/Rome)]'
+    ])
+    // il testo resta intero dopo la riga vuota
+    expect(users[2]!.content).toBe('[Sent: Friday, 2026-11-06 15:32 (Europe/Rome)]\n\n<messaggio_da_agente nome="Contabile">\nfatto\n</messaggio_da_agente>')
+  })
+
+  it('il riassunto della compattazione NON lo riceve; assistant e tool nemmeno', () => {
+    const summary = mk('summary', 'system', 'fatti e decisioni', { coversUpTo: 0 })
+    const entries = [
+      summary,
+      sent(mk('message', 'user', 'e adesso?'), FRI_1430Z),
+      mk('message', 'assistant', 'guardo'),
+      mk('tool-call', 'assistant', 'run-command', { id: 'c1', name: 'run-command', arguments: '{}' }),
+      mk('tool-result', 'system', 'ok', { callId: 'c1' })
+    ]
+    const msgs = buildMessages(sys, entries, undefined, TZ)
+    expect(msgs[1]).toEqual({ role: 'user', content: '[summary of the previous turns]\nfatti e decisioni' })
+    expect(msgs[2]!.content.startsWith('[Sent: ')).toBe(true)
+    expect(msgs.filter((m) => m.role !== 'user' && m.content.includes('[Sent:'))).toEqual([])
+  })
+
+  it('fuso non valido: UTC', () => {
+    const msgs = buildMessages(sys, [sent(mk('message', 'user', 'ciao'), FRI_1430Z)], undefined, { timeZone: 'Non/Fuso!' })
+    expect(msgs[1]!.content).toBe('[Sent: Friday, 2026-11-06 14:30 (UTC)]\n\nciao')
+  })
+
+  it('stabilità: costruiti prima e dopo un messaggio NUOVO, i messaggi vecchi sono identici byte per byte', () => {
+    const before = [
+      sent(mk('message', 'user', 'prima domanda'), FRI_1430Z),
+      mk('send-message', 'assistant', 'prima risposta', { message: { type: 'text', text: 'prima risposta' }, final: true })
+    ]
+    const after = [...before, sent(mk('message', 'user', 'seconda domanda'), FRI_1430Z + 300_000)]
+    const a = buildMessages(sys, before, undefined, TZ)
+    const b = buildMessages(sys, after, undefined, TZ)
+    expect(b.slice(0, a.length).map((m) => JSON.stringify(m))).toEqual(a.map((m) => JSON.stringify(m)))
+    expect(b[b.length - 1]!.content).toBe('[Sent: Friday, 2026-11-06 15:35 (Europe/Rome)]\n\nseconda domanda')
+  })
+
+  it('le entry NON cambiano: il timbro esiste solo nel contenuto per il modello', () => {
+    const entries = [sent(mk('message', 'user', 'ciao'), FRI_1430Z)]
+    const copy = JSON.stringify(entries)
+    buildMessages(sys, entries, undefined, TZ)
+    expect(JSON.stringify(entries)).toBe(copy)
+    expect(entries[0]!.content).toBe('ciao')
   })
 })

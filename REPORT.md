@@ -1,3 +1,164 @@
+# REPORT FASE PULIZIA · RITOCCHI — TITOLO DELLA CARD, FINESTRA APP, ORA DEL MESSAGGIO STABILE (U1–U5)
+
+**Data:** 2026-11-06 · **Base:** `main` @ 01d1a30c · **Tag di chiusura:** `fase-pulizia-ritocchi`. Nessun push, nessun tag `v*`, nessuna dipendenza nuova, niente Docker, niente eval (la lanci tu: **U4 cambia il testo letto dal modello**), niente `npm run dist`; rete solo su 127.0.0.1; nessun modello o strumento in rete, nemmeno per le catture (§6); temporanei solo con mkdtemp nella cartella dei vincoli. App avviata con ambiente pulito (`HOME`, `PATH` di sistema, `SANDBOT_TEST_USER_DATA`, keychain e safestorage finti) **più** le variabili che le sonde hanno già di loro, tutte verso finti locali (`SANDBOT_TEST_COMPOSIO_MCP_URL`, `SANDBOT_TEST_MCP_URLS`, `SANDBOT_TEST_FAKE_BROWSER`, `SANDBOT_TEST_ALLOW_FILE_URLS`).
+**Verifica finale:** `typecheck` pulito · `vitest` **189 file / 3001 test verdi** (base 188 / 2966, **+35**) · `build` verde · `fase-pulizia-probe.mjs` **53/53 per tre corse finali** sul build finale · `fase-skill-sfoglia-probe.mjs` **40/40** · `fase-skill-probe.mjs` **49/49** · **0 daemon dopo ogni corsa** · catture **controllate sul DOM, non guardate** (§6).
+
+**Da sapere subito** (dettagli in §4 e §7):
+- La corsa 2 della sonda è andata **KO su U3a**. La causa è misurata: `requestAnimationFrame` da solo **non basta**, e serve una modifica **fuori dalla spec** in `Sidebar.tsx`.
+- La spiegazione della gara scritta nel REPORT di T5 **era sbagliata**.
+- Ho **alzato due budget di prompt** (2100 → 2200, figlio 450 → 500).
+- Ho **cambiato un controllo** in ciascuna delle due sonde skill, che al primo giro chiudevano 39/40 e 48/49.
+
+## Esito per punto
+
+| Punto | Esito | Cosa è cambiato |
+|---|---|---|
+| **U1** titolo della card | **corretto** | Campo `action` nella stessa tabella di `toolDisplayName` per ogni strumento del bot (`shared/tool-names.ts`), `toolActionPhrase(tool, lang)` pura, `null` per Composio, MCP, famiglie di prefisso, `*` e nomi sconosciuti. Modello nuovo in `approvalAskTitle`: «Bot vuole creare un bot» / «Bot wants to create a bot» (`{name} vuole {action}`, en tradotto, 0 mancanti). Resta «vuole usare …» dove non c'è frase. Motivo della card invariato. |
+| **U2** righe affiancate | **corretto** | `@container` sul contenuto della finestra (`apps-content`), sul dettaglio app, sull'account Composio e su «Per sviluppatori», in un punto per contenitore. Il foglio del server MCP lo aveva già (R2). `SettingsRow` non toccato. Sonda: da `delta 31 px`, riga alta 79, a `delta 1 px`, riga alta 48. |
+| **U3** niente anello all'apertura | **corretto, con un'aggiunta** | `onOpenAutoFocus` come T5, campo `apps-search`, nel frame dopo. **In più:** il menu dell'account non riprende il focus quando una sua voce apre una finestra (§4). L'anello da tastiera resta: U3e, un Tab vero porta su «Tutte» con `:focus-visible` e outline. I fogli sono `div` semplici: non spostano il focus, e l'unico `autoFocus` è sul campo della chiave Composio. |
+| **U4** ora stabile | **corretto** | Regola fissa nel system prompt, `formatSentStamp` pura, timbro in `buildMessages` dal `createdAt` salvato. Via la riga di P10 e `formatCurrentTimeInstruction`. Attribuzione a Rakazo aggiornata, non tolta: resta la resa data/ora con `formatToParts` e ripiego UTC. |
+| **U5** chiusura | **fatta** | Vedi sopra e §5. |
+
+## 1. I test visti fallire PRIMA
+
+Ogni test è stato scritto e visto fallire prima della correzione. Le righe qui sotto vengono da una seconda corsa di controllo: i file di test **finali** su una copia pulita di 01d1a30c, **46 rossi su 408**. Sono quindi le righe di oggi, non quelle del primo fallimento: lì il test di stabilità stava a `loop.test.ts:6562`, con lo stesso errore.
+
+| Punto | Test | Riga · errore |
+|---|---|---|
+| **U1** | `tool-names.test.ts` — 6 test di `toolActionPhrase` (tabella, copertura, Composio, MCP, sconosciuto, `*`/famiglie) | 147, 164, 170, 175, 180, 185 · `toolActionPhrase is not a function` |
+| **U1** | `approval-card-model.test.ts` — «create_agent: il motivo del meta.ui…» | 131 · `expected 'Contabile vuole usare Creare un bot' to be 'Contabile vuole creare un bot'` |
+| **U1** | stesso file — «U1: in inglese il titolo è…» | 141 · `expected 'Contabile wants to use Create a bot' to be 'Contabile wants to create a bot'` |
+| **U1** | stesso file — «U1: un altro strumento del bot con la sua frase» | 148 · `expected 'Contabile vuole usare Inviare a un al…'` |
+| **U2** | `apps-window-ritocchi.test.ts` — «il contenitore del contenuto della finestra…» | 40 · `expected 'function AppsWindow() {…' to match /className="@container…/` |
+| **U2** | stesso file — `AppDetailSheet`, `ComposioAccountSheet`, `DevelopersSheet` | 48 (tutti e tre) · `expected [ 'max-h-[85vh]', 'w-full', …(7) ] to include '@container'` |
+| **U3** | stesso file — «all'apertura il focus va al campo…» | 66 · `expected -1 to be greater than 0` |
+| **U3** | stesso file — «il campo di ricerca è riconoscibile» | 76 · `expected '<input…' to contain 'data-testid="apps-search"'` |
+| **U3** | stesso file — «i fogli che si aprono sopra…» | 87 · `expected +0 to be 1` |
+| **U3** | stesso file — «il menu dell'account NON riprende il focus…» | 100 · `expected 'function AccountMenu(…' to match /onCloseAutoFocus=…/` |
+| **U4** | `current-time.test.ts` — 7 test di `formatSentStamp` (data e fuso fissi, Auckland, mezzanotte, fuso non valido, ora legale, ora solare, stabile) | 16, 21, 25, 29, 37, 43, 48 · `formatSentStamp is not a function` |
+| **U4** | **`loop.test.ts` — «STABILITÀ del prefisso…»** | **6567** · `messaggio 1 (user) cambiato fra i turni` (§3) |
+| **U4** | `loop.test.ts` — «STABILITÀ anche con gli strumenti…» (scritto dopo la correzione, visto fallire solo in questa corsa sul base) | 6586 · `chiamata 2, messaggio 1 (user) cambiato` |
+| **U4** | `loop.test.ts` — «il system prompt contiene la REGOLA…» | 6597 · `expected '# Who you are…' to contain 'Each user message starts…'` |
+| **U4** | `loop.test.ts` — tutti i messaggi col timbro · createdAt salvato · routine · `/nome` · sollecito · consegna a metà turno | 6608, 6625, 6632, 6642, 6655, 6678 · `to match /^\[Sent: …/` (6625: `formatSentStamp is not a function`) |
+| **U4** | `history.test.ts` — inizio del contenuto · tutti i tipi · riassunto · fuso non valido · stabilità | 464, 475, 496, 502, 514 · contenuto senza timbro |
+| **U4** | `prompts.test.ts` — regola nel prompt principale, nei gruppi, nel figlio | 443, 451, 456 · regola assente |
+
+Gli altri 5 rossi di quella corsa sono asserzioni vecchie di `loop.test.ts` (righe 1046, 1077, 1200, 1987, 2487) che confrontavano il testo utente esatto: le ho riscritte con `unstamped()`, senza cambiarne il senso. Altre 5 asserzioni di `history.test.ts` e 3 sul sollecito di recupero in `loop.test.ts` hanno avuto lo stesso trattamento. Una (`m.content === 'confronta i prezzi di X'`) sarebbe diventata vacua col timbro: ora toglie il timbro prima di confrontare.
+
+**La stessa sonda sul codice base:** ho fatto girare la sonda nuova su 01d1a30c, per vedere i controlli DOM fallire e non solo le guardie sul sorgente. Risultato **40/53**, 13 KO: U1a, U1b, U2a (`delta 31`, riga alta 79), U2b, U2c, U3a, U3b, U3c, U3e, U4a, U4b, U4c, U4d. U3b riproduce il tuo difetto: `"active":"BUTTON[Chiudi]","closeFocusVisible":true,"ringedButtons":["Chiudi"]`. Tre note:
+- **U3b** era verde in una prima corsa sul base, a finestra senza focus di sistema: non distingueva niente. Da lì la sezione U3 gira con `Emulation.setFocusEmulationEnabled`.
+- **U3e** sul base è KO per un altro motivo: da ✕ il Tab va sul campo, non su un bottone. Non significa che l'anello mancasse.
+- **U3d** ha dato KO in quella prima corsa e OK nella seconda, e **U4e** è verde anche sul base perché lì il timbro non esiste: nessuno dei due, da solo, distingue il base dal nuovo.
+
+## 2. I testi del modello, prima e dopo
+
+**Prima (P10):** in coda al solo ultimo messaggio utente, calcolata all'invio, mai salvata (~115 token, rifatti a ogni turno):
+
+```
+Current date and time for the user: Friday, 2026-11-06 15:30 (UTC+01:00) (Europe/Rome). That is 2026-11-06T14:30:00Z (UTC). Treat this as the present moment for everything you say and do. Use the user's time zone for times you mention unless they ask otherwise, judge what is past, upcoming, or overdue from it, and write absolute dates rather than relative ones. Never infer today's date from your training data or from timestamps quoted in the conversation.
+```
+
+**Dopo — la regola**, fissa, in `# How you work` del prompt principale (quindi anche nei turni di gruppo) e del figlio (~84 token, in cache):
+
+```
+- Each user message starts with the time it was sent, in the user's time zone. Treat the time of the latest message as the present moment: judge what is past, upcoming or overdue from it, use the user's time zone for times you mention, and write absolute dates rather than relative ones. Never infer today's date from your training data.
+```
+
+**Dopo — il timbro**, in testa a ogni messaggio utente (~12 token a messaggio; con fuso non valido, `(UTC)`):
+
+```
+[Sent: Friday, 2026-11-06 15:30 (Europe/Rome)]
+
+il testo del messaggio
+```
+
+Lo ricevono utente, `[sistema]`, messaggi da altri bot e aperture delle routine (dal `createdAt` dell'entry), e la consegna a metà turno (dal `createdAt` della SUA entry, così il turno dopo ricostruisce lo stesso testo). I messaggi che il loop costruisce senza entry usano `Date.now()`: i solleciti di recupero (quattro punti del loop) e le due iniezioni `[screenshot]`. Il riassunto della compattazione non lo riceve. Con `/nome` il timbro sta prima dell'espansione. Nessun altro testo per il modello è cambiato.
+
+## 3. Il test di stabilità, prima e dopo
+
+**Prima** (`loop.test.ts`, «STABILITÀ del prefisso…», sul codice base) — **rosso**:
+
+```
+AssertionError: messaggio 1 (user) cambiato fra i turni
+Expected: {"role":"user","content":"prima domanda\n\nCurrent date and time for the user: Friday, 2026-11-06 12:16 (UTC+01:00) (Europe/Rome). That is 2026-11-06T11:16:45Z (UTC). Treat this as…"}
+Received: {"role":"user","content":"prima domanda"}
+```
+
+È esattamente il difetto descritto: al turno dopo il messaggio perde la riga, e il prefisso cambia lì.
+
+**Dopo** — **verde**, anche nella versione che controlla ogni chiamata contro la precedente, fra passi e fra turni, con strumenti di mezzo (`system` + `user` + `assistant` con chiamate + `tool`).
+
+**Sulla richiesta vera al provider finto** (sonda, U4b): sul base `{"primo":"Ciao\n\nCurrent date and time…","secondo":"Ciao"}`; dopo `{"primo":"[Sent: Friday, 2026-11-06 13:10 (Europe/Rome)]\n\nCiao","secondo":"[Sent: Friday, 2026-11-06 13:10 (Europe/Rome)]\n\nCiao"}`. U4c: il primo messaggio resta identico in tutte le 15 richieste della corsa. U4a: 62 messaggi utente su 62 col timbro.
+
+## 4. La gara del focus (U3): cosa è successo davvero
+
+Con il solo `requestAnimationFrame`, come da spec, le prime tre corse hanno dato 50/50, **49/50**, 50/50. Il KO: `U3a … "active":"BUTTON[account-menu-trigger]"`. Tre corse verdi dopo una prima correzione non dimostravano niente (senza correzione ne passavano 2 su 3), quindi ho misurato con un banco temporaneo fuori dal repo: un registro in pagina di `focusin`, chiamate a `focus()` e rAF.
+
+| Build | Aperture dal menu | Focus finito sul trigger | Aperture con `hasFocus()` falso | `focus()` del menu sul trigger |
+|---|---|---|---|---|
+| solo rAF, 7 avvii | 48 | **10** | 10, tutte KO | **48 su 48** |
+| con la correzione, 6 avvii | 18 | **0** | 6, nessun KO | **0 su 18** |
+
+Le sequenze, in ms dal clic sulla voce:
+
+```
+KO: +41 focus() apps-search | +165 focus() account-menu-trigger            (nessun focusin)
+OK: +11 focus() apps-search | +11 focusin apps-search | +164 focus() account-menu-trigger | +164 focus() apps-search
+```
+
+**Cosa dice:**
+- Il menu restituisce il focus a fine animazione (162–204 ms), **sempre dopo** il rAF (7–45 ms): 48 aperture su 48. La spiegazione del REPORT di T5 («il focus arriva dopo la restituzione del menu») è sbagliata: nelle aperture misurate non arriva mai dopo.
+- A rimettere le cose a posto è la **trappola del dialogo Radix**, che però vive di `focusin`. A finestra senza focus di sistema (`document.hasFocus()` falso) Chromium non emette `focusin`, la trappola non scatta e il focus resta sul trigger.
+- Il KO lo vede chi ha la finestra in secondo piano, cioè le sonde. Una persona che clicca nel menu ha la finestra attiva, quindi all'uso normale non dovrebbe capitare: è una deduzione, non l'ho provato a mano.
+- La finestra Skill ha lo stesso codice. Il 39/40 di T5 è probabilmente questo, ma quella riga è andata persa e non posso dimostrarlo.
+
+**Correzione:** in `AccountMenu` le voci che aprono una finestra (App, Skill, Impostazioni) lo segnano in `openedWindow`, e `onCloseAutoFocus` allora non restituisce il focus. Il rAF resta, come chiedeva la spec. La sonda ha ora **U3c**, che non dipende dal focus di sistema: il menu non chiama `focus()` sul trigger. Una guardia esistente (`skills-menu-guard.test.ts`) fissava `onClick={() => setSkillsOpen(true)}` alla lettera: ho allargato lo schema, l'intento è lo stesso.
+
+## 5. Le sonde e i daemon
+
+Dopo **ogni** corsa: **0 daemon rimasti** (`probe-daemons.mjs`).
+
+| Sonda | Corse | Esito | Daemon |
+|---|---|---|---|
+| `fase-pulizia-probe.mjs` (50 controlli), solo rAF | 3 | 50/50 · **49/50** · 50/50 | 1 trovato, 1 chiuso, 0 rimasti |
+| stessa, con la correzione di §4 | 3 | 50/50 · 50/50 · 50/50 | 1, 1, 0 |
+| stessa con U3c/U3d (52 controlli), su 01d1a30c | 1 | 40/52, attesi | 1, 1, 0 |
+| stessa con U3c/U3d (52 controlli), build finale | 3 | 52/52 · 52/52 · 52/52 | 1, 1, 0 |
+| stessa con U3e ed emulazione del focus (53 controlli), su **01d1a30c** | 1 | **40/53**, attesi (§1) | 1, 1, 0 |
+| **stessa, build finale** | **3 finali** | **53/53 · 53/53 · 53/53** | 1, 1, 0 |
+| `fase-skill-sfoglia-probe.mjs` (stesso build finale) | 2 | **39/40** → **40/40** | 0 rimasti |
+| `fase-skill-probe.mjs` (stesso build finale) | 2 | **48/49** → **49/49** | 0 rimasti |
+| banco temporaneo della gara | 13 avvii | §4 | 1, 1, 0 |
+
+**I due KO delle sonde skill:** controllavano `startsWith('The user invoked the skill…')`, ma U4 mette il timbro prima di tutto, come chiede la spec. Ora richiedono il timbro **e** subito dopo l'invocazione. Il controllo è più stretto, non più largo.
+
+**Nella sonda pulizia:** P2b diventa U1a/U1b, P10a/b diventano U4a–U4e. Il menu «Ragiona» dopo P6b ora si chiude con Escape aspettando che sparisca (c'era un `document.body.click()`). La prima apertura della finestra passa dal menu dell'account. U2c controlla che il velo del foglio non segua lo scorrimento del contenuto, che è il rischio di mettere `@container` su un contenitore che contiene dei `fixed`.
+
+## 6. Le catture
+
+Rigenerate dalle corse finali: `docs/catture/pulizia/` (22 PNG, una nuova: `finestra-app-apertura-1440-chiaro.png`) e `docs/catture/skill/`. **Non le ho guardate.** Leggere un'immagine vorrebbe dire mandarla a un modello in rete, che i vincoli vietano. La spec consente il controllo sul DOM, e questo è ciò che è stato fatto: top e altezze delle righe (U2a), `container-type` (U2b, U2c), `activeElement` e `:focus-visible` (U3), testo esatto del titolo (U1a), hash diversi fra le catture (K1), formato PNG 2880×1600 per le tre che ho controllato a campione. **Un'occhiata tua a `dettaglio-notion-perbot-1440-chiaro.png` e `finestra-app-apertura-1440-chiaro.png` resta utile.**
+
+## 7. Fuori dalla spec, e limiti noti
+
+**Decisioni mie da rivedere:**
+- `PROMPT_TOKEN_BUDGET` da 2100 a **2200** (prompt base ora 2180,75) e budget del figlio da 450 a **500** (ora 499,25, cioè al limite). La regola non ci stava: il test dice «non superare», quindi lo dichiaro.
+- La regola sta anche nel prompt del **figlio**, che la spec non nomina: i suoi messaggi portano il timbro.
+- Le due iniezioni `[screenshot]` portano il timbro: sono messaggi `user` senza entry.
+
+**Limiti del prefisso stabile, da lettura del codice e non misurati.** Non dipendono dal timbro e non li ho toccati, perché cambierebbero ciò che il modello legge:
+- Un `/nome` viene espanso solo nel turno che apre: al turno dopo quel messaggio torna nella forma salvata, e il prefisso cambia lì una volta.
+- Lo stesso vale per le immagini, attaccate solo al messaggio del turno corrente.
+- Restano il taglio a 40 messaggi, la compattazione e le sezioni variabili del system (`update_memory`).
+
+**Da tenere d'occhio nell'eval:** con un timbro in testa a ogni messaggio, un modello potrebbe imitarlo nelle risposte. Non c'è nessun filtro.
+
+**Visti e non corretti:**
+- `ApprovalCard.tsx:105` (riga auto-approvata, aperta) mostra ancora il nome tecnico per gli strumenti del bot: `{resolvedTitle ?? tool}`.
+- `fase-velocita-probe.mjs:329` cerca ancora «vuole usare create_agent», già superato da P2. Non l'ho eseguita.
+- Il commento T5 in `SkillsWindow.tsx` porta ancora la spiegazione sbagliata di §4. La finestra Skill è comunque coperta dalla correzione.
+
+---
+
 # REPORT FASE PULIZIA — I RESIDUI DELLE FASI CHIUSE (P1–P13)
 
 **Data:** 2026-11-06 · **Base:** `main` @ c89b2c20 (tag `fase-skill-sfoglia-ritocchi`) · **Tag di chiusura:** `fase-pulizia`. Nessun push, nessun tag `v*`, nessuna dipendenza nuova, niente Docker, niente eval (la lancia l'utente dopo P9/P10), niente `npm run dist`; rete solo su 127.0.0.1 (AS finto, server MCP finti, provider finto); Composio solo col finto (`SANDBOT_TEST_COMPOSIO_MCP_URL` + `SANDBOT_TEST_FAKE_BROWSER=1`); app avviata solo con `env` pulita (`HOME`, `PATH` di sistema, `SANDBOT_TEST_USER_DATA`, keychain e safestorage finti); temporanei solo con mkdtemp nella cartella dei vincoli. Testi letti dal modello cambiati SOLO in P9 e P10.

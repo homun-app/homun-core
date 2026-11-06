@@ -586,9 +586,11 @@ try {
   for (let i = 0; i < 40 && chatRequests.length <= reqs0; i++) await sleep(500)
   const lastReq = chatRequests.at(-1)
   const lastUser = (lastReq?.messages ?? []).filter((m) => m.role === 'user').at(-1)
-  check('turno: al modello arriva «The user invoked the skill … do not load it again with skill()» (K9)',
-    Boolean(lastUser && String(lastUser.content).startsWith('The user invoked the skill "riassunto-riunione" for this message. Its full instructions are below — do not load it again with skill(); follow them now.')),
-    String(lastUser?.content ?? '').slice(0, 80))
+  // U4 (fase pulizia · ritocchi): il timbro [Sent: …] sta PRIMA di tutto, poi l'espansione
+  const sentStamp = /^\[Sent: [^\]\n]*\]\n\n/
+  check('turno: al modello arriva il timbro [Sent: …] e subito «The user invoked the skill … do not load it again with skill()» (K9)',
+    Boolean(lastUser && sentStamp.test(String(lastUser.content)) && String(lastUser.content).replace(sentStamp, '').startsWith('The user invoked the skill "riassunto-riunione" for this message. Its full instructions are below — do not load it again with skill(); follow them now.')),
+    String(lastUser?.content ?? '').slice(0, 110))
   check('turno: le ISTRUZIONI della skill sono dentro il messaggio, poi --- e il resto',
     Boolean(lastUser && String(lastUser.content).includes('Prossimi passi') && String(lastUser.content).includes('---') && String(lastUser.content).includes('sulla riunione di oggi')))
   // la bolla compatta /nome

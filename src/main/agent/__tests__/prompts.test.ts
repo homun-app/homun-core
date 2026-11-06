@@ -246,7 +246,9 @@ describe('fase 12 (punto 6): la sezione "Subagents" nel prompt del padre', () =>
     expect(child).toContain('password')
     expect(child).toContain('Ricerca su Astro')
     expect(child).not.toContain('# Your computer')
-    expect(child.length / 4).toBeLessThanOrEqual(450)
+    // U4 (fase pulizia · ritocchi): +50 per la regola fissa dell'ora di invio
+    // (~84 token stimati): i messaggi utente del figlio portano il timbro
+    expect(child.length / 4).toBeLessThanOrEqual(500)
     // correzione J1: il figlio conosce il PROPRIO id e il path VERO del report
     expect(child).toContain('Your id is sub_ab12cd34')
     expect(child).toContain('subagents/sub_ab12cd34/report.md')
@@ -427,5 +429,30 @@ describe('fase 17b correzioni (B3): create_agent senza lingua nel role', () => {
     expect(def!.description).not.toContain('language')
     const role = (def!.parameters.properties as Record<string, unknown>).role as { description?: string } | undefined
     expect(role?.description ?? '').not.toContain('language')
+  })
+})
+
+// U4 (fase pulizia · ritocchi, sostituisce P10): la REGOLA dell'ora sta FISSA
+// nel system prompt — sempre uguale, quindi in cache; il dato (l'ora di invio)
+// sta sui messaggi utente ([Sent: …], history.ts). Testo esatto della spec.
+describe('U4: la regola dell\'ora di invio, fissa nel system prompt', () => {
+  const RULE = "Each user message starts with the time it was sent, in the user's time zone. Treat the time of the latest message as the present moment: judge what is past, upcoming or overdue from it, use the user's time zone for times you mention, and write absolute dates rather than relative ones. Never infer today's date from your training data."
+
+  it('il prompt principale la contiene UNA volta, ed è identico da una chiamata all\'altra', () => {
+    const p = systemPrompt(agent)
+    expect(p.split(RULE).length - 1).toBe(1)
+    expect(systemPrompt(agent)).toBe(p)
+    // il DATO non sta mai nel system: niente timbro, niente ora corrente
+    expect(p).not.toContain('[Sent:')
+    expect(p).not.toContain('Current date and time')
+  })
+
+  it('anche i turni di gruppo (stesso costruttore, senza sottoagenti/connettori/credenziali)', () => {
+    expect(systemPrompt(agent, { subagents: false, connectors: false, credentials: false })).toContain(RULE)
+  })
+
+  it('anche il FIGLIO: i suoi messaggi utente portano il timbro come quelli del padre', () => {
+    const child = subagentSystemPrompt(agent, { id: 'sub_ab12cd34', title: 't' })
+    expect(child.split(RULE).length - 1).toBe(1)
   })
 })

@@ -13,10 +13,19 @@
 // tornano al modello come tool call + tool result (il modello vede COSA ha
 // detto all'utente, non un testo assistant); le entry 'thinking' (testo libero
 // generato dal modello) tornano come contenuto assistant.
+//
+// U4 (fase pulizia · ritocchi): ogni messaggio utente comincia con la sua
+// ora di invio («[Sent: Friday, 2026-11-06 15:30 (Europe/Rome)]», una riga
+// vuota, poi il testo), dal createdAt GIÀ salvato dell'entry: lo stesso
+// messaggio dà sempre lo stesso testo, il prefisso resta identico fra i turni
+// e la cache del provider tiene. Il riassunto della compattazione non lo
+// riceve; le entry non cambiano (il timbro vive solo nel contenuto per il
+// modello, mai nella storia salvata né in chat).
 import type { ChatMessage } from './llm'
 import type { TranscriptEntry, SendMessageMeta, SendMessagePayload } from '../../shared/types'
 // fase 9 (punto 0b): il result di una send di testo riporta l'inizio del testo
 import { deliveredResultText } from './turn-sends'
+import { systemTimeZone, withSentStamp } from './current-time'
 
 const DEFAULT_MAX_MESSAGES = 40
 
@@ -110,7 +119,7 @@ function summaryEventOf(e: TranscriptEntry): { call: { name: string; arguments: 
 }
 
 /** entries → messaggi: i tool-call si aggregano al messaggio assistant, i result diventano messaggi tool. */
-function toMessages(entries: TranscriptEntry[]): ChatMessage[] {
+function toMessages(entries: TranscriptEntry[], timeZone: string): ChatMessage[] {
   const msgs: ChatMessage[] = []
   for (const e of entries) {
     if (e.kind === 'message') {
@@ -120,7 +129,11 @@ function toMessages(entries: TranscriptEntry[]): ChatMessage[] {
       // conteneva tool call, le entry tool-call seguenti si aggregano da sole
       // in un assistant con sole chiamate (contenuto testo assente).
       if (e.role === 'assistant' && !e.content.trim()) continue
-      msgs.push({ role: e.role === 'user' ? 'user' : 'assistant', content: e.content })
+      // U4: utente, [sistema], messaggi da altri bot e aperture delle routine
+      // portano l'ora di invio della LORO entry, sempre la stessa
+      msgs.push(e.role === 'user'
+        ? { role: 'user', content: withSentStamp(e.content, e.createdAt, timeZone) }
+        : { role: 'assistant', content: e.content })
     } else if (e.kind === 'thinking') {
       // fase 3: il testo libero del modello è ragionamento interno — resta
       // contenuto assistant per il modello, MAI visibile all'utente in chat
@@ -229,6 +242,8 @@ function repairToolPairs(msgs: ChatMessage[]): ChatMessage[] {
 export interface BuildMessagesOptions {
   /** Budget massimo di messaggi di storia (escluso il system). */
   maxMessages?: number
+  /** U4: il fuso dei timbri [Sent: …]; di default quello del sistema (UTC se non valido). */
+  timeZone?: string | null
 }
 
 /**
@@ -243,6 +258,7 @@ export function buildMessages(
   opts: BuildMessagesOptions = {}
 ): ChatMessage[] {
   const max = opts.maxMessages ?? DEFAULT_MAX_MESSAGES
+  const timeZone = opts.timeZone === undefined ? systemTimeZone() : (opts.timeZone ?? 'UTC')
   // fase 4: l'entry summary più recente SOSTITUISCE i turni che copre
   // (meta.coversUpTo) — le entry restano nel DB, ma al modello non arrivano
   let effective = entries
@@ -253,7 +269,7 @@ export function buildMessages(
       break
     }
   }
-  let msgs = toMessages(effective)
+  let msgs = toMessages(effective, timeZone)
   msgs = trimToTurnBoundary(msgs, max)
   msgs = repairToolPairs(msgs)
   // le immagini vanno all'ULTIMO messaggio utente (quello corrente)

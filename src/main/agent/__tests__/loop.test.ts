@@ -712,6 +712,8 @@ const { toolDefs } = await import('../tools')
 
 const emit = () => undefined
 const AGENT = 'agent_t'
+/** U4: il testo di un messaggio utente senza il timbro [Sent: …] in testa (il timbro lo provano i test U4). */
+const unstamped = (content: string): string => content.replace(/^\[Sent: [^\]\n]*\]\n\n/, '')
 
 // fase 4: memoria/skill del loop scrivono su file — directory temporanea
 // (la dataDir del mock db la legge da qui)
@@ -1041,7 +1043,7 @@ describe('R1: ripresa del turno dopo crash/retry (payload.entryId)', () => {
     expect(sent.content).toBe('ok')
     expect(sent.meta?.final).toBe(true)
     // il messaggio utente compare UNA volta sola nella storia del modello
-    expect(h.llm.calls[0]!.filter((m) => m.role === 'user' && m.content.startsWith('ciao'))).toHaveLength(1) // P10: + riga della data/ora in coda
+    expect(h.llm.calls[0]!.filter((m) => m.role === 'user' && unstamped(m.content) === 'ciao')).toHaveLength(1) // U4: il timbro in testa
   })
 
   it('ripresa dopo crash: un solo messaggio utente, tool-result "interrotto da un riavvio", approval expired, tool non rieseguito', async () => {
@@ -1072,7 +1074,7 @@ describe('R1: ripresa del turno dopo crash/retry (payload.entryId)', () => {
     expect(h.sandboxMock.exec.calls).toBe(0)
     // al modello è arrivato il result sintetico e un solo messaggio utente
     const first = h.llm.calls[0]!
-    expect(first.filter((m) => m.role === 'user' && m.content.startsWith('fai il deploy'))).toHaveLength(1) // P10
+    expect(first.filter((m) => m.role === 'user' && unstamped(m.content) === 'fai il deploy')).toHaveLength(1) // U4
     expect(first.find((m) => m.role === 'tool')?.content).toContain('interrupted by a restart')
   })
 
@@ -1134,7 +1136,8 @@ describe('fase 3 → fase risposta: message_user per i progressi, il testo final
     expect(h.llm.calls).toHaveLength(2)
     // la seconda chiamata porta il sollecito di recupero come messaggio utente
     const second = h.llm.calls[1]!
-    expect(second[second.length - 1]).toMatchObject({ role: 'user', content: RECOVERY_NUDGE })
+    expect(second[second.length - 1]).toMatchObject({ role: 'user' })
+    expect(unstamped(second[second.length - 1]!.content)).toBe(RECOVERY_NUDGE)
     // R5: il recupero va al modello SENZA strumenti
     expect(h.llm.toolsList[1]).toEqual([])
     const sent = h.db.entries.find((e) => e.kind === 'send-message')!
@@ -1154,7 +1157,8 @@ describe('fase 3 → fase risposta: message_user per i progressi, il testo final
 
     expect(h.llm.calls).toHaveLength(3)
     // la chiamata di recupero è la TERZA e porta il sollecito in coda, SENZA tool
-    expect(h.llm.calls[2]!.at(-1)).toMatchObject({ role: 'user', content: RECOVERY_NUDGE })
+    expect(h.llm.calls[2]!.at(-1)).toMatchObject({ role: 'user' })
+    expect(unstamped(h.llm.calls[2]!.at(-1)!.content)).toBe(RECOVERY_NUDGE)
     expect(h.llm.toolsList[2]).toEqual([])
     const fallback = h.db.entries.findLast((e) => e.kind === 'send-message')!
     expect(fallback.content).toBe('controllo la memoria')
@@ -1193,7 +1197,7 @@ describe('fase 3 → fase risposta: message_user per i progressi, il testo final
     expect(answer.content).toBe('Sì')
     expect(answer.meta?.respondedTo).toBe(widget.id)
     // e la storia del modello contiene la risposta dopo il widget
-    expect(h.llm.calls[1]!.filter((m) => m.role === 'user' && m.content.startsWith('Sì'))).toHaveLength(1) // P10
+    expect(h.llm.calls[1]!.filter((m) => m.role === 'user' && unstamped(m.content) === 'Sì')).toHaveLength(1) // U4
   })
 
   it('SUPERSEDED: nuovo messaggio durante un\'approval pendente → approval superseded, turno SUPERSEDED, il nuovo parte', async () => {
@@ -1979,7 +1983,7 @@ describe('fase 7: send_to_agent', () => {
     ]
     await runTurn(AGENT, 'e adesso?', emit)
     // la prima chiamata del SECONDO turno: quella che contiene il nuovo messaggio utente
-    const second = h.llm.calls.find((c) => c.some((m) => m.role === 'user' && m.content.startsWith('e adesso?')))! // P10
+    const second = h.llm.calls.find((c) => c.some((m) => m.role === 'user' && unstamped(m.content) === 'e adesso?'))! // U4
     const call = second.flatMap((m) => (m.toolCalls as FakeToolCall[] | undefined) ?? []).find((tc) => tc?.name === 'send_to_agent')
     expect(call).toBeTruthy()
     const result = second.find((m) => m.role === 'tool' && m.toolCallId === call!.id)
@@ -2479,8 +2483,8 @@ describe('fase 8 (§3bis L7): ciclo di vita del task', () => {
     const taskEntries = h.db.entries.filter((e) => e.meta?.taskId === 1)
     expect(taskEntries.length).toBeGreaterThan(1) // brief + thinking + widget…
     // il contesto del task conteneva SOLO il brief (nessun messaggio della chat principale)
-    const taskCall = h.llm.calls.find((c) => c.some((m) => m.role === 'user' && m.content.startsWith('Confronta i prezzi di X su 3 siti.')))! // P10
-    expect(taskCall.some((m) => m.content === 'confronta i prezzi di X')).toBe(false)
+    const taskCall = h.llm.calls.find((c) => c.some((m) => m.role === 'user' && unstamped(m.content) === 'Confronta i prezzi di X su 3 siti.'))! // U4
+    expect(taskCall.some((m) => unstamped(m.content) === 'confronta i prezzi di X')).toBe(false) // U4: senza timbro, o il controllo sarebbe vacuo
 
     // la risposta dell'utente continua il task (come fa enqueueWidgetResponse)
     h.llm.queue = [
@@ -2499,7 +2503,7 @@ describe('fase 8 (§3bis L7): ciclo di vita del task', () => {
     // né il brief né la domanda del task
     h.llm.queue = [{ text: 'ok' }]
     await runTurn(AGENT, 'e adesso?', emit)
-    const mainCall = h.llm.calls.find((c) => c.some((m) => m.role === 'user' && m.content.startsWith('e adesso?')))! // P10
+    const mainCall = h.llm.calls.find((c) => c.some((m) => m.role === 'user' && unstamped(m.content) === 'e adesso?'))! // U4
     expect(JSON.stringify(mainCall)).not.toContain('Quanti siti')
     expect(JSON.stringify(mainCall)).not.toContain('Confronta i prezzi di X su 3 siti.')
   })
@@ -6342,7 +6346,8 @@ describe('fase risposta: il testo finale è la risposta (R1/R4/R5/R6)', () => {
     h.llm.queue = [{ text: '.' }, { text: 'Ecco la risposta vera.' }]
     await runTurn(AGENT, 'dimmi', emit)
     expect(h.llm.calls).toHaveLength(2)
-    expect(h.llm.calls[1]!.at(-1)).toMatchObject({ role: 'user', content: RECOVERY_NUDGE })
+    expect(h.llm.calls[1]!.at(-1)).toMatchObject({ role: 'user' })
+    expect(unstamped(h.llm.calls[1]!.at(-1)!.content)).toBe(RECOVERY_NUDGE)
     expect(h.llm.toolsList[1]).toEqual([])
     const sends = h.db.entries.filter((e) => e.kind === 'send-message')
     expect(sends.map((s) => s.content)).toEqual(['Ecco la risposta vera.'])
@@ -6538,46 +6543,143 @@ describe('fase risposta: il recupero senza strumenti non esegue chiamate inventa
   })
 })
 
-// ---- P10 (fase pulizia): la data e l'ora nel turno ----
-describe('P10 — la data e l\'ora sull\'ultimo messaggio utente (mai nel system, mai salvata)', () => {
-  it('turno utente: la riga del presente sta nel contenuto per il modello, NON nel system né nella storia', async () => {
-    h.llm.queue = [{ text: 'ok, sono le ' }]
-    await runTurn(AGENT, 'che ore sono?', emit)
-    expect(h.llm.calls).toHaveLength(1)
-    const msgs = h.llm.calls[0]!
-    const system = msgs.find((m) => m.role === 'system')!
-    expect(system.content).not.toContain('Current date and time')
-    const last = [...msgs].reverse().find((m) => m.role === 'user')!
-    // la riga è AGGIUNTA al contenuto per il modello, DOPO il testo dell'utente
-    expect(last.content.startsWith('che ore sono?')).toBe(true)
-    expect(last.content).toContain('Current date and time for the user:')
-    expect(last.content).toContain('Never infer today\'s date from your training data')
-    // la storia salvata e la chat NON la vedono
-    const saved = h.db.entries.filter((e) => e.kind === 'message' && e.role === 'user')
-    expect(saved).toHaveLength(1)
-    expect(saved[0]!.content).toBe('che ore sono?')
+// ---- U4 (fase pulizia · ritocchi, sostituisce P10): l'ora del messaggio, stabile per la cache ----
+// La REGOLA sta fissa nel system prompt; il DATO è l'ora di invio di OGNI
+// messaggio utente, dal createdAt salvato. Lo stesso messaggio dà sempre lo
+// stesso testo: il prefisso della conversazione resta identico fra un turno
+// e l'altro e la cache del provider tiene. P10 invece aggiungeva la riga
+// solo all'ULTIMO messaggio al momento dell'invio: al turno dopo quel
+// messaggio tornava senza riga e il prefisso cambiava proprio lì.
+describe('U4 — l\'ora di invio su ogni messaggio utente, stabile fra i turni', () => {
+  const SENT = /^\[Sent: [A-Z][a-z]+day, \d{4}-\d{2}-\d{2} \d{2}:\d{2} \([^)]+\)\]\n\n/
+  const RULE = "Each user message starts with the time it was sent, in the user's time zone. Treat the time of the latest message as the present moment: judge what is past, upcoming or overdue from it, use the user's time zone for times you mention, and write absolute dates rather than relative ones. Never infer today's date from your training data."
+  const bytes = (m: unknown): string => JSON.stringify(m)
+
+  it('STABILITÀ del prefisso: costruiti prima e dopo un messaggio nuovo, i messaggi vecchi sono identici BYTE PER BYTE', async () => {
+    h.llm.queue = [{ text: 'prima risposta' }, { text: 'seconda risposta' }]
+    await runTurn(AGENT, 'prima domanda', emit)
+    await runTurn(AGENT, 'seconda domanda', emit)
+    expect(h.llm.calls).toHaveLength(2)
+    const [t1, t2] = [h.llm.calls[0]!, h.llm.calls[1]!]
+    expect(t2.length).toBeGreaterThan(t1.length)
+    // il prefisso comune: TUTTI i messaggi del primo turno, uguali nel secondo
+    for (let i = 0; i < t1.length; i++) {
+      expect(bytes(t2[i]), `messaggio ${i} (${t1[i]!.role}) cambiato fra i turni`).toBe(bytes(t1[i]))
+    }
   })
 
-  it('turno di ROUTINE senza messaggio utente nuovo: la riga va sul messaggio che apre il turno', async () => {
+  it('STABILITÀ anche con gli strumenti: ogni chiamata ripete la precedente byte per byte, fra i passi e fra i turni', async () => {
+    h.llm.queue = [
+      { text: 'guardo negli appunti', toolCalls: [{ id: 'c1', name: 'recall_memory', arguments: JSON.stringify({ query: 'appunti' }) }] },
+      { text: 'prima risposta' },
+      { text: 'seconda risposta' },
+      { text: 'terza risposta' }
+    ]
+    await runTurn(AGENT, 'prima domanda', emit)
+    await runTurn(AGENT, 'seconda domanda', emit)
+    await runTurn(AGENT, 'terza domanda', emit)
+    expect(h.llm.calls).toHaveLength(4)
+    for (let c = 1; c < h.llm.calls.length; c++) {
+      const [prev, next] = [h.llm.calls[c - 1]!, h.llm.calls[c]!]
+      expect(next.length).toBeGreaterThan(prev.length)
+      for (let i = 0; i < prev.length; i++) {
+        expect(bytes(next[i]), `chiamata ${c}, messaggio ${i} (${prev[i]!.role}) cambiato`).toBe(bytes(prev[i]))
+      }
+    }
+  })
+
+  it('il system prompt contiene la REGOLA ed è identico fra due turni (il dato non ci sta mai)', async () => {
+    h.llm.queue = [{ text: 'a' }, { text: 'b' }]
+    await runTurn(AGENT, 'uno', emit)
+    await runTurn(AGENT, 'due', emit)
+    const s1 = h.llm.calls[0]!.find((m) => m.role === 'system')!.content
+    const s2 = h.llm.calls[1]!.find((m) => m.role === 'system')!.content
+    expect(s1).toContain(RULE)
+    expect(s2).toBe(s1)
+    expect(s1).not.toContain('[Sent:')
+  })
+
+  it('TUTTI i messaggi utente al modello cominciano col timbro; la storia salvata e la chat NO', async () => {
+    h.llm.queue = [{ text: 'a' }, { text: 'b' }]
+    await runTurn(AGENT, 'uno', emit)
+    await runTurn(AGENT, 'due', emit)
+    const users = h.llm.calls[1]!.filter((m) => m.role === 'user')
+    expect(users).toHaveLength(2)
+    for (const u of users) expect(u.content).toMatch(SENT)
+    expect(users.map((u) => u.content.replace(SENT, ''))).toEqual(['uno', 'due'])
+    // mai nella storia salvata (la chat mostra le entry): né nel testo né nel meta
+    expect(h.db.entries.filter((e) => e.content.includes('[Sent:'))).toEqual([])
+    expect(JSON.stringify(h.db.entries.map((e) => e.meta))).not.toContain('[Sent:')
+    expect(h.db.entries.filter((e) => e.kind === 'message' && e.role === 'user').map((e) => e.content)).toEqual(['uno', 'due'])
+  })
+
+  it('il timbro viene dal createdAt SALVATO dell\'entry (il fuso del sistema)', async () => {
+    const { formatSentStamp, systemTimeZone } = await import('../current-time')
+    h.llm.queue = [{ text: 'a' }, { text: 'b' }]
+    await runTurn(AGENT, 'uno', emit)
+    // l'entry di ieri: il turno dopo la ricostruisce con la SUA ora, non con quella di adesso
+    const e1 = h.db.entries.find((e) => e.kind === 'message' && e.role === 'user')!
+    e1.createdAt = Date.UTC(2026, 10, 5, 8, 15)
+    await runTurn(AGENT, 'due', emit)
+    const u1 = h.llm.calls[1]!.filter((m) => m.role === 'user')[0]!
+    expect(u1.content).toBe(`${formatSentStamp(Date.UTC(2026, 10, 5, 8, 15), systemTimeZone())}\n\nuno`)
+  })
+
+  it('turno di ROUTINE: l\'apertura (il prompt) porta il timbro', async () => {
     h.llm.queue = [{ text: 'fatto' }]
     await runTurn(AGENT, '[routine ricorrente: Controllo] guarda le scadenze di oggi', emit, undefined, { source: 'routine', title: 'Controllo' })
-    const msgs = h.llm.calls[0]!
-    const users = msgs.filter((m) => m.role === 'user')
-    const last = users[users.length - 1]!
-    expect(last.content).toContain('Current date and time for the user:')
-    // e nemmeno stavolta entra nella storia
-    expect(h.db.entries.filter((e) => e.kind === 'message' && e.role === 'user').every((e) => !e.content.includes('Current date'))).toBe(true)
+    const last = h.llm.calls[0]!.filter((m) => m.role === 'user').at(-1)!
+    expect(last.content).toMatch(SENT)
+    expect(last.content.replace(SENT, '')).toBe('[routine ricorrente: Controllo] guarda le scadenze di oggi')
   })
 
-  it('la riga sopravvive all\'espansione del /nome di una skill (sta DOPO, sulla stessa apertura)', async () => {
+  it('espansione del /nome: il timbro va PRIMA di tutto, poi le istruzioni della skill', async () => {
     const { writeLibrarySkill } = await import('../skills')
     writeLibrarySkill({ name: 'orario', description: 'dice l orario', body: 'LE ISTRUZIONI DELLA SKILL.' })
     h.llm.queue = [{ text: 'ecco' }]
     await runTurn(AGENT, '/orario dimmi', emit)
-    const msgs = h.llm.calls[0]!
-    const last = [...msgs].reverse().find((m) => m.role === 'user')!
-    expect(last.content).toContain('LE ISTRUZIONI DELLA SKILL.')
-    expect(last.content).toContain('Current date and time for the user:')
+    const last = [...h.llm.calls[0]!].reverse().find((m) => m.role === 'user')!
+    expect(last.content).toMatch(SENT)
+    expect(last.content.replace(SENT, '')).toContain('LE ISTRUZIONI DELLA SKILL.')
     expect(h.db.entries.filter((e) => e.kind === 'message' && e.role === 'user')[0]!.content).toBe('/orario dimmi')
+  })
+
+  it('un messaggio che il loop costruisce SENZA entry (il sollecito di recupero) porta il timbro di Date.now()', async () => {
+    const { formatSentStamp, systemTimeZone } = await import('../current-time')
+    h.llm.queue = [{ text: '' }, { text: 'ecco la risposta' }]
+    const before = Date.now()
+    await runTurn(AGENT, 'domanda', emit)
+    const after = Date.now()
+    const nudge = h.llm.calls[1]!.at(-1)!
+    expect(nudge.role).toBe('user')
+    expect(nudge.content).toMatch(SENT)
+    expect(nudge.content.replace(SENT, '')).toBe(RECOVERY_NUDGE)
+    const stamp = nudge.content.split('\n\n')[0]
+    expect([formatSentStamp(before, systemTimeZone()), formatSentStamp(after, systemTimeZone())]).toContain(stamp)
+  })
+
+  it('consegna a metà turno: il messaggio nuovo porta il timbro della SUA entry, identico al turno dopo', async () => {
+    const gate = deferred()
+    h.llm.queue = [
+      async (): Promise<FakeResp> => {
+        await gate.promise
+        return { toolCalls: [{ id: 't1', name: 'recall_memory', arguments: JSON.stringify({ query: 'appunti' }) }] }
+      },
+      { text: 'fatto, col rosso' },
+      { text: 'ancora qui' }
+    ]
+    const turn = runTurn(AGENT, 'dipingi la stanza', emit)
+    await vi.waitFor(() => expect(h.llm.calls).toHaveLength(1))
+    h.db.jobs.push({ id: 98, agentId: AGENT, kind: 'user-message', payload: { text: 'no, usa il rosso' }, createdAt: Date.now(), status: 'queued' })
+    expect(deliverToRunningTurn(AGENT, { jobId: 98, text: 'no, usa il rosso' })).toBe(true)
+    gate.resolve()
+    await turn
+    const delivered = h.llm.calls[1]!.filter((m) => m.role === 'user').at(-1)!
+    expect(delivered.content).toMatch(SENT)
+    expect(delivered.content.replace(SENT, '')).toBe('no, usa il rosso')
+    // il turno dopo ricostruisce lo STESSO testo dalla storia
+    await runTurn(AGENT, 'e adesso?', emit)
+    const again = h.llm.calls[2]!.filter((m) => m.role === 'user').find((m) => m.content.endsWith('\n\nno, usa il rosso'))!
+    expect(again.content).toBe(delivered.content)
   })
 })

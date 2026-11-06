@@ -493,7 +493,8 @@ function DevelopersSheet({ onClose }: { onClose(): void }) {
 
   return (
     <div className="no-drag fixed inset-0 z-50 grid place-items-center bg-foreground/20 p-4" onClick={onClose}>
-      <div className="max-h-[85vh] w-full max-w-2xl overflow-y-auto scroll-thin rounded-3xl bg-card p-5 shadow-soft" onClick={(e) => e.stopPropagation()} data-testid="developers-sheet">
+      {/* U2: @container, come il dettaglio app */}
+      <div className="@container max-h-[85vh] w-full max-w-2xl overflow-y-auto scroll-thin rounded-3xl bg-card p-5 shadow-soft" onClick={(e) => e.stopPropagation()} data-testid="developers-sheet">
         <strong className="block font-display text-lg"><Trans>Per sviluppatori</Trans></strong>
         <p className="mt-1 text-xs text-muted-foreground"><Trans>Server personalizzati, plugin, gateway e registro: chi sa cos'è un server MCP lo trova qui.</Trans></p>
         <div className="mt-4 space-y-6">
@@ -898,6 +899,7 @@ export function AppsView({ embedded = false }: { embedded?: boolean }) {
         <Search className="size-4 shrink-0" />
         <input
           className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none"
+          data-testid="apps-search"
           placeholder={t`Cerca tra app e skill`}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
@@ -1189,7 +1191,8 @@ function AppDetailSheet({ row, installed, onClose, onChanged, onConnect }: {
 
   return (
     <div className="no-drag fixed inset-0 z-50 grid place-items-center bg-foreground/20 p-4" onClick={onClose}>
-      <div className="max-h-[85vh] w-full max-w-lg overflow-y-auto scroll-thin rounded-3xl bg-card p-5 shadow-soft" onClick={(e) => e.stopPropagation()} data-testid={`app-detail-${app.id}`}>
+      {/* U2: @container — «Bot che lo usano» col toggle sulla riga del nome */}
+      <div className="@container max-h-[85vh] w-full max-w-lg overflow-y-auto scroll-thin rounded-3xl bg-card p-5 shadow-soft" onClick={(e) => e.stopPropagation()} data-testid={`app-detail-${app.id}`}>
         <div className="flex items-center gap-3">
           <AppLogo logo={app.logo} name={app.name} className="size-14 text-xl" />
           <span className="min-w-0 flex-1">
@@ -1340,7 +1343,8 @@ function ComposioAccountSheet({ onClose, onChanged }: { onClose(): void; onChang
   const [confirmOff, setConfirmOff] = useState(false)
   return (
     <div className="no-drag fixed inset-0 z-50 grid place-items-center bg-foreground/20 p-4" onClick={onClose}>
-      <div className="max-h-[85vh] w-full max-w-md overflow-y-auto scroll-thin rounded-3xl bg-card p-5 shadow-soft" onClick={(e) => e.stopPropagation()} data-testid="composio-account-sheet">
+      {/* U2: @container, come il dettaglio app */}
+      <div className="@container max-h-[85vh] w-full max-w-md overflow-y-auto scroll-thin rounded-3xl bg-card p-5 shadow-soft" onClick={(e) => e.stopPropagation()} data-testid="composio-account-sheet">
         <div className="flex items-center gap-3">
           <span className="grid size-10 shrink-0 place-items-center rounded-[11px] bg-muted text-base">🌐</span>
           <span className="min-w-0 flex-1">
@@ -1473,9 +1477,24 @@ export function AppsWindow() {
   const setAppsOpen = useStore((s) => s.setAppsOpen)
   return (
     <Dialog open onOpenChange={(o) => !o && setAppsOpen(false)}>
-      <DialogContent className="flex max-h-[88vh] max-w-[calc(100%-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl" showCloseButton={false}>
+      <DialogContent
+        className="flex max-h-[88vh] max-w-[calc(100%-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl"
+        showCloseButton={false}
+        onOpenAutoFocus={(e) => {
+          // U3 (fase pulizia · ritocchi), come T5 nella finestra Skill: niente
+          // anello all'apertura — Radix focalizzerebbe la ✕ in alto; il focus
+          // va al campo di ricerca, che non ha anello (con Tab resta, è
+          // focus-visible), nel frame dopo. Aperta dal menu dell'account, il
+          // menu NON riprende il focus: lo decide AccountMenu (openedWindow)
+          e.preventDefault()
+          requestAnimationFrame(() => document.querySelector<HTMLInputElement>('[data-testid="apps-search"]')?.focus())
+        }}
+      >
         <DialogTitle className="sr-only">{i18n._(msg`App`)}</DialogTitle>
-        <div className="min-h-0 flex-1 overflow-y-auto scroll-thin p-8">
+        {/* U2 (fase pulizia · ritocchi): @container sul contenitore del
+            contenuto, in UN punto solo come T2 nella finestra Skill — le righe
+            SettingsRow vedono la larghezza e mettono il controllo a destra */}
+        <div className="@container min-h-0 flex-1 overflow-y-auto scroll-thin p-8" data-testid="apps-content">
           <AppsView />
         </div>
       </DialogContent>

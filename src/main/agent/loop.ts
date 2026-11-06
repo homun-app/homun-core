@@ -51,8 +51,10 @@ import { isExternalSend, draftFromExternalCall, draftFromBatchSend, prepareDraft
 import { normalizeOptions, findDismissibleWidgets } from './widgets'
 import { buildMemorySection, estimateTokensOf } from './memory'
 import { buildSkillsSection, skillInvocationExpansion, invocableSkillsOf, mayInvokeSkill } from './skills'
-// P10 (fase pulizia): la data e l'ora del turno (come Rakazo, sul messaggio utente)
-import { formatCurrentTimeInstruction, systemTimeZone } from './current-time'
+// U4 (fase pulizia · ritocchi, sostituisce P10): l'ora di invio sui messaggi
+// utente — buildMessages la mette su quelli delle entry, qui quella dei
+// messaggi che il loop costruisce durante il turno
+import { systemTimeZone, withSentStamp } from './current-time'
 import { maybeCompactHistory, summarizeWithLlm } from './compaction'
 import { automationEventText } from './update-state'
 import { formatAgentMessage, agentSendGuard, countPairMessagesLastHour, AGENT_HOP_MAX, formatWebSearchEvidence, formatWebFetchEvidence, formatWebBrowserEvidence, formatExternalDataEvidence } from '../../shared/agent-message'
@@ -1491,7 +1493,10 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     // tutte e tre le varianti (bot normale, turno di gruppo, figlio) e DOPO
     // memoria, skill, bot principale, connettori e sezione connettori attivi
     systemText = withLanguage(systemText, userLang)
-    const messages: ChatMessage[] = buildMessages(systemText, scopedEntries(), images)
+    // U4: il fuso dei timbri [Sent: …] del turno — lo stesso per i messaggi
+    // ricostruiti dalle entry e per quelli che il loop costruisce
+    const sentZone = systemTimeZone()
+    const messages: ChatMessage[] = buildMessages(systemText, scopedEntries(), images, { timeZone: sentZone })
 
     // fase skill (S7.3): il `/nome` all'inizio del messaggio dell'utente (o
     // del prompt di una routine) porta le istruzioni DENTRO il turno. Il
@@ -1508,9 +1513,12 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         try {
           const inv = skillInvocationExpansion(openingText, invocableSkillsOf(agentId))
           if (inv) {
+            // U4: il timbro dell'entry che apre il turno resta PRIMA di tutto
+            // (lo stesso che buildMessages ha calcolato dal suo createdAt)
+            const openedAt = scopedEntries().find((e) => e.id === turnEntryId)?.createdAt ?? Date.now()
             for (let i = messages.length - 1; i >= 0; i--) {
               if (messages[i]!.role === 'user') {
-                messages[i] = { ...messages[i]!, content: inv.content }
+                messages[i] = { ...messages[i]!, content: withSentStamp(inv.content, openedAt, sentZone) }
                 break
               }
             }
@@ -1522,23 +1530,6 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           }
         } catch {
           // le skill non devono mai rompere il turno
-        }
-      }
-    }
-
-    // P10 (fase pulizia): la data e l'ora del TURNO. Il modello non ha
-    // orologio: ogni turno dichiara il presente reale sul messaggio utente
-    // che lo apre (le routine e i turni senza messaggio nuovo lo ricevono
-    // lì). AGGIUNTA al solo contenuto per il modello — DOPO l'espansione del
-    // /nome, che altrimenti la coprirebbe — mai nel system prompt (resterebbe
-    // diverso a ogni chiamata, rompendo la cache), mai nella storia salvata
-    // né in chat.
-    {
-      const timeLine = formatCurrentTimeInstruction(new Date(), systemTimeZone())
-      for (let i = messages.length - 1; i >= 0; i--) {
-        if (messages[i]!.role === 'user') {
-          messages[i] = { ...messages[i]!, content: `${messages[i]!.content}\n\n${timeLine}` }
-          break
         }
       }
     }
@@ -1726,12 +1717,14 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       if (due?.length) {
         midTurnDeliveries.delete(agentId)
         for (const d of due) {
-          add({
+          const delivered = add({
             agentId, kind: 'message', role: 'user', content: d.text,
             meta: { ...(d.images?.length ? { images: d.images.length } : {}) }
           })
           emitLastEntry(agentId, emit)
-          messages.push({ role: 'user', content: d.text, ...(d.images?.length ? { images: d.images } : {}) })
+          // U4: il timbro della SUA entry — identico a quello che buildMessages
+          // ricostruirà al turno dopo (prefisso stabile)
+          messages.push({ role: 'user', content: withSentStamp(d.text, delivered.createdAt, sentZone), ...(d.images?.length ? { images: d.images } : {}) })
           if (d.jobId !== null) {
             const { completeJob } = await import('../store/jobs')
             completeJob(db(), d.jobId)
@@ -1953,7 +1946,8 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             recoveryDone = true
             turnTools = []
             if (liveReplyTurn) emit({ type: 'live-reply', agentId, entryId: entry.id, text: '' })
-            messages.push({ role: 'user', content: RECOVERY_NUDGE })
+            // U4: un messaggio costruito dal loop senza entry: l'ora di adesso
+            messages.push({ role: 'user', content: withSentStamp(RECOVERY_NUDGE, Date.now(), sentZone) })
             continue
           }
           // il recupero c'è già stato e anche stavolta niente: il ripiego di
@@ -2005,7 +1999,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             turnTools = groupRecoveryTools(allTools, opts.groupTurn.closing === true)
             messages.push({
               role: 'user',
-              content: opts.groupTurn.closing ? GROUP_CALLED_CLOSING_RECOVERY_NUDGE : GROUP_CALLED_RECOVERY_NUDGE
+              content: withSentStamp(opts.groupTurn.closing ? GROUP_CALLED_CLOSING_RECOVERY_NUDGE : GROUP_CALLED_RECOVERY_NUDGE, Date.now(), sentZone)
             })
             continue
           }
@@ -2042,7 +2036,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           ) {
             groupRecoveryDone = true
             turnTools = groupRecoveryTools(allTools, opts.groupTurn.closing === true)
-            messages.push({ role: 'user', content: opts.groupTurn.closing ? GROUP_CLOSING_RECOVERY_NUDGE : GROUP_RECOVERY_NUDGE })
+            messages.push({ role: 'user', content: withSentStamp(opts.groupTurn.closing ? GROUP_CLOSING_RECOVERY_NUDGE : GROUP_RECOVERY_NUDGE, Date.now(), sentZone) })
             continue
           }
         }
@@ -2594,7 +2588,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             pushResult(`${prefix}\nThe screenshot follows (the coordinates you want to click are in pixels of THAT image).`, meta)
             messages.push({
               role: 'user',
-              content: `[screenshot] Here is the current screen of your own computer in the sandbox requested by the ${call.name} tool (the coordinates you want to click are in pixels of THIS image):`,
+              content: withSentStamp(`[screenshot] Here is the current screen of your own computer in the sandbox requested by the ${call.name} tool (the coordinates you want to click are in pixels of THIS image):`, Date.now(), sentZone),
               images: [image]
             })
           }
@@ -4084,7 +4078,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           if (images?.length) {
             messages.push({
               role: 'user',
-              content: '[screenshot] Here is the screenshot requested by the use-app tool (the coordinates you want to click are in pixels of THIS image):',
+              content: withSentStamp('[screenshot] Here is the screenshot requested by the use-app tool (the coordinates you want to click are in pixels of THIS image):', Date.now(), sentZone),
               images
             })
           }
@@ -4114,7 +4108,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         subagentNudged = true
         add({ ...uiSystemEntry(agentId, 'notice', ui(UI.wakeNudge)) })
         emitLastEntry(agentId, emit)
-        messages.push({ role: 'user', content: SUBAGENT_RECOVERY_NUDGE })
+        messages.push({ role: 'user', content: withSentStamp(SUBAGENT_RECOVERY_NUDGE, Date.now(), sentZone) })
         setStatus(agentId, 'thinking', emit)
         try {
           const rstream = llmStream(activeProvider, activeRoute.model, messages, [wakeParentToolDef], controller.signal, {

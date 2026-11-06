@@ -364,6 +364,10 @@ msgid "composio.disconnected"
 msgstr "{name} disconnected."
 
 #: src/renderer/src/lib/approval-app.ts
+msgid "{name} vuole {action}"
+msgstr "{name} wants to {action}"
+
+#: src/renderer/src/lib/approval-app.ts
 msgid "{name} vuole cambiare un'automazione"
 msgstr "{name} wants to change an automation"
 

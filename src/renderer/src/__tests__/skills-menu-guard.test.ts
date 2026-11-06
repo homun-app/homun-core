@@ -31,7 +31,9 @@ describe("B1: «Skill» nel menu in fondo, non più nella barra", () => {
 
   it('la voce del menu apre la finestra Skill (setSkillsOpen) ed è cliccabile dalle sonde', () => {
     const menu = accountMenuContent()
-    const item = /<DropdownMenuItem[^>]*onClick=\{\(\) => setSkillsOpen\(true\)\}[^>]*>/.exec(menu)
+    // U3 (fase pulizia · ritocchi): la voce segna anche che apre una finestra
+    // (openedWindow) prima di aprirla — l'onClick può avere più istruzioni
+    const item = /<DropdownMenuItem[^>]*onClick=\{\(\) => (?:setSkillsOpen\(true\)|\{[^}]*setSkillsOpen\(true\)[^}]*\})\}[^>]*>/.exec(menu)
     expect(item).not.toBeNull()
     expect(item![0]).toContain('data-testid="menu-skills"')
   })

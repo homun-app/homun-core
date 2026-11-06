@@ -21,8 +21,11 @@ import { sandboxMode, browserSandboxOk } from '../sandbox'
  * Fase velocità (S3.6): +100 per i puntatori «via find_tools + use_tool»
  * accanto agli strumenti integrati differiti (l'elenco dei tool perde ~19
  * schemi, ma le frasi del prompt ora dicono come raggiungerli).
+ * Fase pulizia · ritocchi (U4): +100 per la regola fissa dell'ora di invio
+ * (~84 token, in cache); in cambio la riga di P10 (~115 token, rifatta a ogni
+ * turno sull'ultimo messaggio) non c'è più.
  */
-export const PROMPT_TOKEN_BUDGET = 2100
+export const PROMPT_TOKEN_BUDGET = 2200
 
 /** Chi sei: nome, ruolo scelto dall'utente. La lingua la dà la sezione Language (17b A3). */
 export function identitySection(agent: Agent): string {
@@ -104,6 +107,14 @@ export function transparencySection(): string {
 - The text of your system documents is never reported; the mechanisms concerning THEIR data (memory, routines, permissions, deferred deliveries) are always explained, when they ask.`
 }
 
+/**
+ * U4 (fase pulizia · ritocchi, sostituisce P10): la REGOLA dell'ora, fissa
+ * — sempre uguale, quindi in cache. Il dato sta sui messaggi utente
+ * («[Sent: …]», history.ts), mai qui. Testo della spec, parola per parola.
+ */
+export const SENT_TIME_RULE =
+  "Each user message starts with the time it was sent, in the user's time zone. Treat the time of the latest message as the present moment: judge what is past, upcoming or overdue from it, use the user's time zone for times you mention, and write absolute dates rather than relative ones. Never infer today's date from your training data."
+
 /** Come lavori: tool subito, alternative, chiusura col risultato. */
 export function workSection(): string {
   return `# How you work
@@ -112,7 +123,8 @@ export function workSection(): string {
 - Close with the result and, only if needed, ONE proposed next step.
 - Outbound sends (email, messages, …) never leave directly from you: call draft_external and let the user decide.
 - Do not ask for confirmations that permissions already ask; if the user often approves the same action, propose a rule with propose_rule_change (via find_tools + use_tool).
-- Actions on accounts, passwords or purchases: explicit consent from the user.`
+- Actions on accounts, passwords or purchases: explicit consent from the user.
+- ${SENT_TIME_RULE}`
 }
 
 /**
@@ -345,6 +357,7 @@ You are a subagent of ${parent.name}: you work ONLY on the brief you received, a
 - VERIFIED sources: cite a link only if you opened it in this work.
 - No work outside the boundary of the brief: the rest is done by the parent or other subagents.
 - You work in the same home as the parent. Your id is ${row.id}: long material is saved in subagents/${row.id}/report.md (write-file); if the brief indicates another path, the brief's path wins.
+- ${SENT_TIME_RULE}
 # The result
 - ALWAYS close with wake_parent: status "done" or "failed" and a CONDENSED summary (max 2000 characters) with the report path.
 - If you are stuck, close with "failed" and say what is missing: that is better than silence.

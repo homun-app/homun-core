@@ -6,7 +6,7 @@ Homun contiene codice adattato da **Rakazo** (https://github.com/elie222/rakazo,
 - `src/shared/agent-model.ts` — la regola di risoluzione del modello di un bot, ispirata a `resolveRunModel`/`selectConfiguredModel`;
 - `src/shared/terminal-frames.ts` — da `src/contracts/terminal.ts`;
 - `src/main/sandbox/docker-argv.ts` — il programma del server del terminale, da `src/terminal/server.ts`;
-- `src/main/agent/current-time.ts` — la data e l'ora nel turno (`formatCurrentTimeInstruction`), da `packages/adapters/src/current-time.ts`.
+- `src/main/agent/current-time.ts` — l'ora locale nel fuso IANA con ripiego su UTC (`formatSentStamp`, `systemTimeZone`), dalla resa di data e ora di `packages/adapters/src/current-time.ts` (la frase `formatCurrentTimeInstruction` di P10 non c'è più: la sostituisce il timbro di U4).
 
 Le modifiche sono di Homun. Testo della licenza:
 

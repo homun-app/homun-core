@@ -15,7 +15,7 @@ import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
 import type { UiLanguage } from '../../../shared/ui-language'
 import { localizedActionName } from '../../../shared/composio-names'
-import { toolDisplayName } from '../../../shared/tool-names'
+import { toolDisplayName, toolActionPhrase } from '../../../shared/tool-names'
 import { toolCtxOfMeta } from './ui-text'
 
 /** Il meta.composioAction scritto dal loop (R4: con slug, versione e nome originale). */
@@ -169,11 +169,16 @@ const msgTitleWrite = (name: string) => msg`${name} vuole scrivere un file`
 const msgTitleRead = (name: string) => msg`${name} vuole leggere un file`
 const msgTitleAutomation = (name: string) => msg`${name} vuole cambiare un'automazione`
 const msgTitleGeneric = (name: string, tool: string) => msg`${name} vuole usare ${tool}`
+// U1 (fase pulizia · ritocchi): il modello a sé per gli strumenti del bot —
+// «Bot vuole creare un bot» / «Bot wants to create a bot»
+const msgTitleAction = (name: string, action: string) => msg`${name} vuole ${action}`
 
 /**
  * P2: il titolo della card per gli strumenti che non sono Composio né MCP —
  * gli stessi casi di sempre (comando, file, automazione) e, nel caso
  * generico, il nome umano di toolDisplayName: mai «vuole usare create_agent».
+ * U1: uno strumento del bot con la sua frase verbale usa «{name} vuole
+ * {azione}»; Composio, MCP e nomi sconosciuti restano «vuole usare …».
  */
 export function approvalAskTitle(
   tool: string,
@@ -193,8 +198,11 @@ export function approvalAskTitle(
       return msgTitleRead(agentName)
     case 'update_state':
       return msgTitleAutomation(agentName)
-    default:
+    default: {
+      const action = toolActionPhrase(tool, lang)
+      if (action) return msgTitleAction(agentName, action)
       return msgTitleGeneric(agentName, toolDisplayName(tool, toolCtxOfMeta(meta, lang)))
+    }
   }
 }
 

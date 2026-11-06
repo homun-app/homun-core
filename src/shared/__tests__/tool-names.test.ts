@@ -6,7 +6,7 @@
 // («Notion · <nome dello strumento>»). Il nome tecnico resta il ripiego
 // finale (e vive nei «Dettagli tecnici» della card).
 import { describe, expect, it } from 'vitest'
-import { toolDisplayName, readableToolName, mcpToolPresentation } from '../tool-names'
+import { toolDisplayName, toolActionPhrase, readableToolName, mcpToolPresentation } from '../tool-names'
 import { getPermissions } from '../../main/store/db'
 import type { PermissionRule } from '../types'
 
@@ -137,5 +137,53 @@ describe('P4 (fase pulizia) — mcpToolPresentation: lo strumento come lo vede l
 
   it('nome senza prefisso mcp__ ma con __: invariato (non è un nome MCP)', () => {
     expect(mcpToolPresentation('composio__slack__X', 'desc')).toEqual({ name: 'composio__slack__X', description: 'desc' })
+  })
+})
+
+// ---- U1 (fase pulizia · ritocchi): la frase VERBALE del titolo della card ----
+
+describe('U1 — toolActionPhrase: la frase verbale per «{name} vuole {azione}»', () => {
+  it('la frase della STESSA tabella di toolDisplayName, minuscola, it ed en', () => {
+    expect(toolActionPhrase('create_agent', 'it')).toBe('creare un bot')
+    expect(toolActionPhrase('create_agent', 'en')).toBe('create a bot')
+    expect(toolActionPhrase('send_to_agent', 'it')).toBe('inviare un messaggio a un altro bot')
+    expect(toolActionPhrase('send_to_agent', 'en')).toBe('message another bot')
+    expect(toolActionPhrase('update_state', 'it')).toBe('cambiare un’automazione')
+    expect(toolActionPhrase('update_state', 'en')).toBe('change an automation')
+    expect(toolActionPhrase('use_tool', 'en')).toBe('use a tool')
+  })
+
+  it('copre TUTTI gli strumenti del bot che possono chiedere approvazione (come i nomi, P2)', () => {
+    const askers = [
+      'update_state', 'update_memory', 'create_agent', 'update_agent', 'delete_agent',
+      'create_group', 'update_group', 'send_to_agent', 'run-command', 'write-file',
+      'read-file', 'use-app', 'update_skill', 'propose_rule_change', 'export_from_library',
+      'fill_credential', 'save_contact', 'request_secure_input', 'copy_to_box', 'copy_from_box'
+    ]
+    for (const tool of askers) {
+      expect(toolActionPhrase(tool, 'it') === null ? `senza frase verbale: ${tool}` : '').toBe('')
+      expect(toolActionPhrase(tool, 'en') === null ? `senza frase verbale en: ${tool}` : '').toBe('')
+    }
+  })
+
+  it('azione Composio → null: il titolo resta il modello di oggi («vuole usare Slack · …»)', () => {
+    expect(toolActionPhrase('composio__slack__SLACK_CREATE_REMINDER', 'it')).toBeNull()
+    expect(toolActionPhrase('composio__slack__SLACK_CREATE_REMINDER', 'en')).toBeNull()
+  })
+
+  it('strumento di un server MCP → null', () => {
+    expect(toolActionPhrase('mcp__notion__search_pages', 'it')).toBeNull()
+    expect(toolActionPhrase('mcp__notion__search_pages', 'en')).toBeNull()
+  })
+
+  it('nome sconosciuto → null (il ripiego «vuole usare <nome tecnico>» resta)', () => {
+    expect(toolActionPhrase('tool_mai_visto', 'it')).toBeNull()
+    expect(toolActionPhrase('tool_mai_visto', 'en')).toBeNull()
+  })
+
+  it('«*» e le famiglie di prefisso → null (non sono strumenti concreti)', () => {
+    expect(toolActionPhrase('*', 'it')).toBeNull()
+    expect(toolActionPhrase('browser_click', 'it')).toBeNull()
+    expect(toolActionPhrase('computer_click', 'en')).toBeNull()
   })
 })

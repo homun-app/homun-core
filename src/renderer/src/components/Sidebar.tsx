@@ -306,6 +306,14 @@ function AccountMenu(props?: { rail?: { forced: boolean; onExpand(): void }; tri
   // fase 16c correzioni (R4): il modello mostrato è quello RISOLTO, dal
   // selettore UNICO («Come gli altri» compreso)
   const resolved = useResolvedModel(main?.id ?? null)
+  // U3 (fase pulizia · ritocchi): una voce che APRE una finestra (App, Skill,
+  // Impostazioni) lo segna qui, e alla chiusura il menu NON riprende il focus
+  // sul suo trigger: il focus è della finestra (il campo di ricerca). Il menu
+  // Radix lo restituirebbe a fine animazione (~165 ms), sempre DOPO il frame
+  // in cui la finestra lo dà: a riportarlo indietro resta solo la trappola del
+  // dialogo, che vive di focusin — e a finestra senza focus di sistema
+  // (document.hasFocus() falso) focusin non arriva e il focus resta qui.
+  const openedWindow = useRef(false)
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -329,12 +337,17 @@ function AccountMenu(props?: { rail?: { forced: boolean; onExpand(): void }; tri
           </span>
         )}
       </DropdownMenuTrigger>
-      <DropdownMenuContent side="top" align={props?.rail ? 'end' : 'start'} className="w-56">
-        <DropdownMenuItem onClick={() => setAppsOpen(true)}><Trans>Collega app</Trans></DropdownMenuItem>
+      <DropdownMenuContent
+        side="top"
+        align={props?.rail ? 'end' : 'start'}
+        className="w-56"
+        onCloseAutoFocus={(e) => { if (openedWindow.current) { openedWindow.current = false; e.preventDefault() } }}
+      >
+        <DropdownMenuItem onClick={() => { openedWindow.current = true; setAppsOpen(true) }}><Trans>Collega app</Trans></DropdownMenuItem>
         {/* fase skill · sfoglia (B1): «Skill» sta QUI nel menu, sotto Collega
             app — non più come bottone nella barra accanto ad App */}
-        <DropdownMenuItem data-testid="menu-skills" onClick={() => setSkillsOpen(true)}><Trans>Skill</Trans></DropdownMenuItem>
-        <DropdownMenuItem onClick={() => { setSettingsOpen(true) }}><Trans>Impostazioni</Trans></DropdownMenuItem>
+        <DropdownMenuItem data-testid="menu-skills" onClick={() => { openedWindow.current = true; setSkillsOpen(true) }}><Trans>Skill</Trans></DropdownMenuItem>
+        <DropdownMenuItem onClick={() => { openedWindow.current = true; setSettingsOpen(true) }}><Trans>Impostazioni</Trans></DropdownMenuItem>
         {props?.rail && !props.rail.forced && (
           <DropdownMenuItem onClick={props.rail.onExpand}><Trans>Allarga la barra</Trans></DropdownMenuItem>
         )}

@@ -9,11 +9,12 @@ import { describe, expect, it } from 'vitest'
 import { i18n } from '@lingui/core'
 import { approvalAppOf, approvalTitleOf, approvalReasonPhrase, approvalTechnicalLine, approvalAskTitle } from '../lib/approval-app'
 import { uiTextOfMetaTools } from '../lib/ui-text'
-import { itCatalogEntries } from './po-helper'
+import { itCatalogEntries, enCatalogEntries } from './po-helper'
 
 // come la sidebar: le etichette si risolvono dal catalogo it (i msgid nuovi
 // ricadono su se stessi — la lingua sorgente è l'italiano)
 i18n.load('it', itCatalogEntries())
+i18n.load('en', enCatalogEntries())
 i18n.activate('it')
 
 /** Il «come si rende» la card: titolo + motivo nella lingua attiva, e i dettagli tecnici separati. */
@@ -125,8 +126,26 @@ describe('P2 — la card degli strumenti DEL BOT senza nome tecnico', () => {
       ui: { id: 'approval.toolRequires', values: { tool: 'create_agent' } }
     })
     expect(r.reasonUi).toBe('Creare un bot richiede approvazione')
-    // e il titolo generico non dice più «vuole usare create_agent»
-    expect(r.title).toBe('Contabile vuole usare Creare un bot')
+    // U1 (fase pulizia · ritocchi): il titolo usa la FRASE VERBALE — mai
+    // «vuole usare create_agent», e nemmeno «vuole usare Creare un bot»
+    expect(r.title).toBe('Contabile vuole creare un bot')
+  })
+
+  it('U1: in inglese il titolo è «{name} wants to {action}» («Contabile wants to create a bot»)', () => {
+    i18n.activate('en')
+    try {
+      const r = rendered('create_agent', {
+        tool: 'create_agent',
+        ui: { id: 'approval.toolRequires', values: { tool: 'create_agent' } }
+      }, 'Contabile', 'en')
+      expect(r.title).toBe('Contabile wants to create a bot')
+    } finally {
+      i18n.activate('it')
+    }
+  })
+
+  it('U1: un altro strumento del bot con la sua frase («Contabile vuole inviare un messaggio a un altro bot»)', () => {
+    expect(rendered('send_to_agent', { tool: 'send_to_agent' }).title).toBe('Contabile vuole inviare un messaggio a un altro bot')
   })
 
   it('send_to_agent (contaminato): il motivo porta «Inviare a un altro bot»', () => {
@@ -163,7 +182,15 @@ describe('P2 — la card degli strumenti DEL BOT senza nome tecnico', () => {
       tool: 'tool_sconosciuto',
       ui: { id: 'approval.toolRequires', values: { tool: 'tool_sconosciuto' } }
     })
+    // U1: nessuna frase verbale → resta il modello di oggi, «vuole usare …»
     expect(r.title).toBe('Contabile vuole usare tool_sconosciuto')
     expect(r.reasonUi).toBe('tool_sconosciuto richiede approvazione')
+  })
+
+  it('U1: un\'azione Composio senza dati della card passa dal modello «vuole usare Slack · Create reminder»', () => {
+    // il caso del titolo GENERICO per Composio (approvalAskTitle): nessuna
+    // frase verbale, il nome umano dell'azione
+    const title = approvalAskTitle('composio__slack__SLACK_CREATE_REMINDER', null, 'Contabile', 'it')
+    expect(i18n.t(title)).toBe('Contabile vuole usare Slack · Create reminder')
   })
 })

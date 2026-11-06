@@ -674,9 +674,10 @@ try {
   for (let i = 0; i < 60 && chatRequests.length <= reqs0; i++) await sleep(500)
   const lastReq = chatRequests.at(-1)
   const lastUser = (lastReq?.messages ?? []).filter((m) => m.role === 'user').at(-1)
-  check('turno: la riga d\'invocazione arriva al modello (The user invoked the skill)',
-    Boolean(lastUser && String(lastUser.content).startsWith('The user invoked the skill "due-skill--ordina"')),
-    String(lastUser?.content ?? '').slice(0, 80))
+  // U4 (fase pulizia · ritocchi): il timbro [Sent: …] sta PRIMA di tutto, poi l'espansione
+  check('turno: la riga d\'invocazione arriva al modello, subito dopo il timbro [Sent: …]',
+    Boolean(lastUser && /^\[Sent: [^\]\n]*\]\n\nThe user invoked the skill "due-skill--ordina"/.test(String(lastUser.content))),
+    String(lastUser?.content ?? '').slice(0, 110))
   check('turno: il CORPO della skill è nel messaggio, poi il testo dell\'utente',
     Boolean(lastUser && String(lastUser.content).includes('ISTRUZIONI di ordina') && String(lastUser.content).includes('le idee della settimana')))
 

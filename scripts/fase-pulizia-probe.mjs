@@ -22,8 +22,26 @@
 //   P6: a 900 e 1100 px, col pannello del profilo aperto, il menu «Ragiona»
 //       resta DENTRO la colonna della chat (il rettangolo non interseca il
 //       pannello);
-//   P10 (extra): la riga della data/ora entra nel messaggio per il modello
-//       (registrato dal provider finto) e NON nella bolla in chat.
+//   (P10 è sostituito da U4, qui sotto.)
+// Fase pulizia · RITOCCHI (U1–U4), nella stessa corsa:
+//   U1: la card di create_agent dice «<bot> vuole creare un bot» (mai «vuole
+//       usare Creare un bot»);
+//   U2: nel dettaglio di Notion il toggle «Tutti i bot» sta sulla riga del
+//       nome (top entro ±8 px) — il foglio è un @container; e il velo del
+//       foglio resta fermo sulla finestra anche col contenuto scorso;
+//   U3: aperta dal menu dell'account («Collega app»), la finestra App ha il
+//       focus nel campo di ricerca e NESSUN bottone con :focus-visible, il
+//       menu NON chiama focus() sul suo trigger (controllo che non dipende da
+//       document.hasFocus(): a finestra senza focus di sistema la trappola
+//       del dialogo non scatta), un foglio aperto sopra non accende anelli e
+//       con Tab l'anello da tastiera resta. La sezione gira con l'emulazione
+//       del focus: la finestra della sonda può stare in secondo piano e
+//       ':focus-visible' misura qualcosa solo a pagina attiva;
+//   U4: il provider finto riceve «[Sent: …]» su TUTTI i messaggi utente, al
+//       secondo turno il primo messaggio è identico byte per byte a quello
+//       del primo, la regola sta nel system prompt; mai in chat né salvato.
+// I menu Radix si chiudono con Escape e si aspetta che spariscano (mai
+// document.body.click()).
 // K1: le catture sono precedute da visibleOnTop e due PNG con nomi diversi
 // non possono avere lo stesso hash. A FINE SONDA si chiude ANCHE il daemon di
 // sviluppo (probe-daemons), la cartella temporanea viene rimossa, nessun push.
@@ -429,6 +447,39 @@ const clickTestid = (testid) => pageEval(`
   ;(b ?? el).click()
   return 'cliccato'
 `)
+/** Un click «da puntatore» (i trigger dei menu Radix aprono su pointerdown). */
+const pointerClick = (selectorExpr) => pageEval(`
+  const el = ${selectorExpr}
+  if (!el) throw new Error('non trovato (pointerClick)')
+  el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, pointerId: 1 }))
+  el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, pointerId: 1 }))
+  el.click()
+  return 'cliccato'
+`)
+/** Chiude il menu Radix aperto con Escape e ASPETTA che sparisca. */
+const closeRadixMenu = async () => {
+  await pageEval(`
+    const m = document.querySelector('[role="menu"]')
+    ;(m ?? document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    return 'escape'
+  `)
+  const gone = await waitDom(`!document.querySelector('[role="menu"]')`, 5_000)
+  if (!gone) throw new Error('il menu Radix non si è chiuso con Escape')
+  await sleep(300)
+}
+/** U3: apre la finestra App dal menu dell'account («Collega app»). */
+const openAppsFromMenu = async () => {
+  await pointerClick(`[...document.querySelectorAll('[data-testid="account-menu-trigger"]')].find((b) => b.offsetParent !== null)`)
+  if (!(await waitDom(`!!document.querySelector('[role="menu"]')`, 5_000))) throw new Error('menu dell\'account non aperto')
+  await pageEval(`
+    const item = [...document.querySelectorAll('[role="menuitem"]')].find((x) => x.offsetParent !== null && x.textContent.trim() === 'Collega app')
+    if (!item) throw new Error('voce «Collega app» non trovata')
+    item.click()
+    return 'collega app'
+  `)
+  // la voce chiude il menu da sé: si aspetta che sparisca
+  if (!(await waitDom(`!document.querySelector('[role="menu"]')`, 5_000))) throw new Error('il menu dell\'account non si è chiuso')
+}
 /** La finestra App: il dialogo che contiene le pillole dei filtri. */
 const APP_DIALOG = `[...document.querySelectorAll('[role="dialog"]')].find((d) => d.querySelector('[data-testid="app-filters"]'))`
 const closeAppWindow = async () => {
@@ -525,10 +576,63 @@ try {
   check('setup compositore pronto', await waitDom(`!!document.querySelector('form textarea')`, 25_000))
   await setWindowWidth(1440)
 
+  // ============ U3: la finestra App dal MENU, senza anello di focus ============
+  await page.send('Emulation.setFocusEmulationEnabled', { enabled: true })
+  await pageEval(`
+    window.__focusCalls = []
+    const plain = HTMLElement.prototype.focus
+    window.__plainFocus = plain
+    HTMLElement.prototype.focus = function (...a) {
+      window.__focusCalls.push(this.getAttribute('data-testid') ?? this.getAttribute('aria-label') ?? this.tagName)
+      return plain.apply(this, a)
+    }
+    return 'registro del focus attivo'
+  `)
+  await openAppsFromMenu()
+  check('P4a la finestra App si apre (dal menu dell\'account, «Collega app»)', await waitDom(`!!document.querySelector('[data-testid="app-filters"]')`, 10_000))
+  await waitDom(`document.activeElement === document.querySelector('[data-testid="apps-search"]')`, 3_000)
+  // il menu restituirebbe il focus a fine animazione (~165 ms): si aspetta oltre
+  await sleep(500)
+  const focusApertura = await pageEval(`
+    const search = document.querySelector('[data-testid="apps-search"]')
+    const dialog = ${APP_DIALOG}
+    const close = dialog ? [...dialog.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === 'Chiudi') : null
+    const ringed = [...document.querySelectorAll('button')].filter((b) => b.matches(':focus-visible'))
+    return {
+      focusSearch: document.activeElement === search,
+      hasFocus: document.hasFocus(),
+      focusCalls: window.__focusCalls,
+      active: document.activeElement ? document.activeElement.tagName + '[' + (document.activeElement.getAttribute('data-testid') ?? document.activeElement.getAttribute('aria-label') ?? '') + ']' : null,
+      closeFocusVisible: close ? close.matches(':focus-visible') : null,
+      ringedButtons: ringed.map((b) => b.getAttribute('aria-label') ?? b.textContent.trim().slice(0, 30))
+    }
+  `)
+  check('U3a aperta dal menu: document.activeElement è il campo «Cerca tra app e skill»',
+    focusApertura.focusSearch === true, JSON.stringify(focusApertura))
+  check('U3b nessun bottone ha :focus-visible (niente anello sulla ✕)',
+    focusApertura.ringedButtons.length === 0 && focusApertura.closeFocusVisible === false, JSON.stringify(focusApertura))
+  check('U3c il menu NON chiama focus() sul suo trigger: il focus resta alla finestra (vale anche con hasFocus falso)',
+    focusApertura.focusCalls.includes('apps-search') && !focusApertura.focusCalls.includes('account-menu-trigger'), JSON.stringify(focusApertura))
+  await pageEval(`HTMLElement.prototype.focus = window.__plainFocus; return 'registro del focus tolto'`)
+  // l'anello da TASTIERA resta: Tab vero (non da script) dal campo di ricerca
+  await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 })
+  await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 })
+  await sleep(250)
+  const anelloTab = await pageEval(`
+    const a = document.activeElement
+    const style = getComputedStyle(a)
+    return {
+      tag: a.tagName, text: a.textContent.trim().slice(0, 30), focusVisible: a.matches(':focus-visible'),
+      outline: style.outlineStyle + ' ' + style.outlineWidth
+    }
+  `)
+  check('U3e con Tab l\'anello da tastiera resta (:focus-visible su un bottone, con outline)',
+    anelloTab.tag === 'BUTTON' && anelloTab.focusVisible === true && !anelloTab.outline.startsWith('none'), JSON.stringify(anelloTab))
+  await pageEval(`document.querySelector('[data-testid="apps-search"]')?.focus(); return 'focus al campo'`)
+  await page.send('Emulation.setFocusEmulationEnabled', { enabled: false })
+  await shot('finestra-app-apertura-1440-chiaro.png')
+  await sleep(300)
   // ============ P4: Notion DIRETTA collegata, il dettaglio e le Avanzate ============
-  await clickByLabel('App')
-  check('P4a la finestra App si apre', await waitDom(`!!document.querySelector('[data-testid="app-filters"]')`, 10_000))
-  await sleep(600)
   await clickTestid('app-connect-notion')
   const notionTimeline = await timelineOf('app-row-notion', 40_000)
   check('P4b la riga Notion arriva a «Connessa» (diretta, OAuth finto)',
@@ -540,6 +644,16 @@ try {
   await clickTestid('app-row-notion')
   check('P4c il dettaglio di Notion si apre', await waitDom(`!!document.querySelector('[data-testid="app-detail-notion"]')`, 8_000))
   await sleep(500)
+  const focusFoglio = await pageEval(`
+    const a = document.activeElement
+    return {
+      active: a ? a.tagName + '[' + (a.getAttribute('data-testid') ?? a.getAttribute('aria-label') ?? '') + ']' : null,
+      activeIsButton: !!a && a.tagName === 'BUTTON',
+      ringedButtons: [...document.querySelectorAll('button')].filter((b) => b.matches(':focus-visible')).map((b) => b.getAttribute('aria-label') ?? b.textContent.trim().slice(0, 30))
+    }
+  `)
+  check('U3d il foglio aperto sopra non porta il focus su un bottone e non accende anelli',
+    !focusFoglio.activeIsButton && focusFoglio.ringedButtons.length === 0, JSON.stringify(focusFoglio))
   const perBot = await pageEval(`
     const detail = document.querySelector('[data-testid="app-detail-notion"]')
     const toggles = detail.querySelector('[data-testid="app-bots-toggles"]')
@@ -562,6 +676,53 @@ try {
     JSON.stringify(perBot))
   const k1toggles = await visibleOnTop('[data-testid="app-bots-toggles"]')
   check('K1 il blocco «per bot» è scoperto', k1toggles === true, String(k1toggles))
+  // U2: il toggle «Tutti i bot» sulla riga del NOME (top entro ±8 px): il
+  // foglio è un @container e SettingsRow mette il controllo a destra
+  const u2 = await pageEval(`
+    const detail = document.querySelector('[data-testid="app-detail-notion"]')
+    const sw = [...detail.querySelectorAll('[role="switch"]')].find((x) => x.getAttribute('aria-label') === 'Tutti i bot')
+    if (!sw) return { error: 'toggle «Tutti i bot» non trovato' }
+    const row = sw.parentElement.parentElement
+    const name = row.firstElementChild?.firstElementChild ?? row.firstElementChild
+    const n = name.getBoundingClientRect()
+    const t = sw.getBoundingClientRect()
+    return {
+      name: name.textContent.trim(),
+      nameTop: Math.round(n.top), toggleTop: Math.round(t.top), delta: Math.round(Math.abs(n.top - t.top)),
+      rowHeight: Math.round(row.getBoundingClientRect().height),
+      sheetContainer: getComputedStyle(detail).containerType
+    }
+  `)
+  check('U2a nel dettaglio di Notion il toggle «Tutti i bot» sta sulla riga del nome (top entro ±8 px)',
+    !u2.error && u2.name === 'Tutti i bot' && u2.delta <= 8, JSON.stringify(u2))
+  check('U2b il foglio del dettaglio è un @container (container-type: inline-size)',
+    u2.sheetContainer === 'inline-size', JSON.stringify(u2))
+  // U2: il contenuto della finestra è un @container, e il velo del foglio
+  // (fixed inset-0) resta sulla finestra anche col contenuto SCORSO — il
+  // contenitore non diventa il blocco di riferimento dei fixed
+  const u2c = await pageEval(`
+    const content = document.querySelector('[data-testid="apps-content"]')
+    if (!content) return { error: 'contenitore apps-content assente' }
+    const veil = document.querySelector('[data-testid="app-detail-notion"]').parentElement
+    const dialog = content.closest('[role="dialog"]')
+    const before = veil.getBoundingClientRect()
+    content.scrollTop = content.scrollHeight
+    await new Promise((r) => setTimeout(r, 250))
+    const after = veil.getBoundingClientRect()
+    const d = dialog.getBoundingClientRect()
+    const scrolled = content.scrollTop
+    content.scrollTop = 0
+    await new Promise((r) => setTimeout(r, 250))
+    return {
+      contentContainer: getComputedStyle(content).containerType, scrolled,
+      veilTopBefore: Math.round(before.top), veilTopAfter: Math.round(after.top), veilHeight: Math.round(after.height),
+      dialogTop: Math.round(d.top), dialogHeight: Math.round(d.height)
+    }
+  `)
+  check('U2c il contenuto della finestra è un @container e il velo del foglio non segue lo scorrimento',
+    !u2c.error && u2c.contentContainer === 'inline-size' && u2c.scrolled > 0 && u2c.veilTopAfter === u2c.veilTopBefore &&
+      Math.abs(u2c.veilTopAfter - u2c.dialogTop) <= 2 && Math.abs(u2c.veilHeight - u2c.dialogHeight) <= 2,
+    JSON.stringify(u2c))
   await shot('dettaglio-notion-perbot-1440-chiaro.png')
   await setDark(true)
   await shot('dettaglio-notion-perbot-1440-scuro.png')
@@ -700,8 +861,11 @@ try {
   pushTool('use_tool', { name: 'create_agent', arguments: { name: 'Aiutante', role: 'Aiuta con le prove della sonda.' } })
   pushTool('send_to_user', { text: 'Chiedo il consenso.' })
   await uiSend('Creami un aiutante.')
-  check('P2b la card d\'approvazione dice «vuole usare Creare un bot»',
-    await waitDom(`[...document.querySelectorAll('div')].some((d) => d.offsetParent !== null && d.textContent.includes('vuole usare Creare un bot'))`, 30_000))
+  // U1 (ritocchi): il titolo usa la FRASE verbale — «<bot> vuole creare un bot»
+  check('U1a la card d\'approvazione dice «' + bot.name + ' vuole creare un bot»',
+    await waitDom(`[...document.querySelectorAll('p')].some((d) => d.offsetParent !== null && d.textContent.trim() === ${JSON.stringify(`${bot.name} vuole creare un bot`)})`, 30_000))
+  check('U1b mai più «vuole usare Creare un bot» in chat',
+    !(await chatVisibleText()).includes('vuole usare Creare un bot'))
   check('P2c il motivo della card dice «Creare un bot richiede approvazione»',
     await waitDom(`[...document.querySelectorAll('div')].some((d) => d.offsetParent !== null && d.textContent.includes('Creare un bot richiede approvazione'))`, 8_000))
   const visibleChat = await chatVisibleText()
@@ -880,20 +1044,40 @@ try {
   const p6b = await panelMenuCheck(1100)
   check('P6b a 1100 px col pannello aperto il menu «Ragiona» NON interseca il pannello', p6b.ok, p6b.note)
   await shot('ragiona-1100-pannello-chiaro.png')
-  await pageEval(`document.body.click()`)
-  await sleep(400)
+  // il menu resta aperto dopo la misura: Escape e si aspetta che sparisca
+  await closeRadixMenu()
 
-  // ============ P10 (extra): la data/ora al modello, mai in chat ============
-  const lastReq = chatRequests.at(-1)
-  const lastUser = [...(lastReq?.messages ?? [])].reverse().find((m) => m.role === 'user')
+  // ============ U4: l'ora di invio su OGNI messaggio utente, stabile ============
+  const SENT = /^\[Sent: [A-Z][a-z]+day, \d{4}-\d{2}-\d{2} \d{2}:\d{2} \([^)]+\)\]\n\n/
+  const RULE = "Each user message starts with the time it was sent, in the user's time zone. Treat the time of the latest message as the present moment: judge what is past, upcoming or overdue from it, use the user's time zone for times you mention, and write absolute dates rather than relative ones. Never infer today's date from your training data."
+  const textOf = (c) => (typeof c === 'string' ? c : Array.isArray(c) ? c.filter((x) => x?.type === 'text').map((x) => x.text).join('') : '')
+  const isSys = (m) => m.role === 'system' || m.role === 'developer'
+  // le richieste della CONVERSAZIONE hanno il system; quelle di servizio
+  // (revisore delle approvazioni, compattazione) sono un solo messaggio utente
+  const convRequests = chatRequests.filter((r) => (r.messages ?? []).some(isSys))
+  const userMsgs = (req) => (req?.messages ?? []).filter((m) => m.role === 'user')
+  const allUsers = convRequests.flatMap((r) => userMsgs(r))
+  const unstamped = allUsers.filter((m) => !SENT.test(textOf(m.content)))
+  check(`U4a il provider finto riceve «[Sent: …]» su TUTTI i messaggi utente (${allUsers.length} in ${convRequests.length} richieste; ${chatRequests.length - convRequests.length} di servizio)`,
+    allUsers.length > 0 && unstamped.length === 0,
+    unstamped.slice(0, 2).map((m) => JSON.stringify(textOf(m.content).slice(0, 80))).join(' | '))
+  const firstOf = (req) => textOf(userMsgs(req)[0]?.content)
+  const turn2 = convRequests.find((r) => userMsgs(r).some((m) => textOf(m.content).replace(SENT, '') === 'Tutto a posto?'))
+  check('U4b al secondo turno il primo messaggio è identico byte per byte a quello del primo turno',
+    !!turn2 && firstOf(convRequests[0]) !== '' && firstOf(turn2) === firstOf(convRequests[0]) &&
+      firstOf(convRequests[0]).replace(SENT, '') === 'Ciao',
+    JSON.stringify({ primo: firstOf(convRequests[0]).slice(0, 70), secondo: firstOf(turn2).slice(0, 70) }))
+  // e lo resta in OGNI richiesta della corsa (la storia qui non si taglia)
+  const drift = convRequests.findIndex((r) => firstOf(r) !== firstOf(convRequests[0]))
+  check('U4c il primo messaggio resta identico in TUTTE le richieste della conversazione', drift === -1, drift === -1 ? '' : `cambia alla richiesta ${drift}`)
+  const systems = convRequests.map((r) => textOf((r.messages ?? []).find(isSys)?.content))
+  check('U4d la regola sta nel system prompt di ogni richiesta, e il system non porta mai «[Sent:»',
+    systems.length > 0 && systems.every((x) => x.includes(RULE) && !x.includes('[Sent:')))
   const chatText = await pageEval(`return document.body.innerText`)
-  check('P10a l\'ultimo messaggio utente per il modello porta la riga della data/ora',
-    typeof lastUser?.content === 'string' && lastUser.content.includes('Current date and time for the user:') &&
-    lastUser.content.includes('Never infer today\'s date from your training data'),
-    (lastUser?.content ?? '').slice(-160))
-  check('P10b la riga NON compare in chat né nel system prompt',
-    !chatText.includes('Current date and time') &&
-    !(lastReq?.messages ?? []).some((m) => m.role === 'system' && String(m.content).includes('Current date and time')))
+  const savedEntries = await rpc(`getEntries(${JSON.stringify(bot.id)})`)
+  check('U4e il timbro NON compare in chat né nella storia salvata (né la riga di P10)',
+    !chatText.includes('[Sent:') && !chatText.includes('Current date and time') &&
+      !JSON.stringify(savedEntries).includes('[Sent:'))
 
   // ---- K1: due PNG con NOMI diversi non possono avere lo stesso hash ----
   const byHash = new Map()

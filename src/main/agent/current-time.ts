@@ -1,66 +1,53 @@
-// P10 (fase pulizia): la data e l'ora nel turno. Il modello non ha orologio:
-// senza un'ancora esplicita deduce «oggi» dall'addestramento o dai timestamp
-// che capitano nella conversazione, e ragiona su scadenze e routine da una
-// data vecchia. Come Rakazo (packages/adapters/src/current-time.ts, Apache
-// 2.0 — adattamento, vedi THIRD_PARTY_NOTICES.md), ogni turno dichiara il
-// presente REALE sul messaggio utente che lo apre; resta FUORI dal system
-// prompt, che resterebbe diverso a ogni chiamata rompendo la cache.
+// U4 (fase pulizia · ritocchi, sostituisce P10): l'ora di invio di un
+// messaggio utente, per il modello. Il modello non ha orologio: ogni
+// messaggio utente che gli arriva comincia con l'ora in cui è stato mandato,
+// nel fuso dell'utente — calcolata dal createdAt GIÀ salvato dell'entry
+// (history.ts), quindi lo stesso messaggio dà SEMPRE lo stesso testo e il
+// prefisso della conversazione resta identico fra un turno e l'altro: la
+// cache del provider tiene. La regola che spiega il timbro sta FISSA nel
+// system prompt (prompts.ts, SENT_TIME_RULE). Il timbro non entra mai nella
+// storia salvata né in chat: esiste solo nel contenuto per il modello.
 //
-// Col fuso IANA dell'utente guida l'ora locale («domani mattina», «stasera»
-// significano ciò che l'utente intende), con l'istante UTC esatto accanto.
-// Fuso sconosciuto o non valido: si ripiega su UTC, solo UTC.
+// La resa di giorno, data e ora nel fuso IANA (formatToParts, ripiego su
+// UTC) viene dall'adattamento di Rakazo di P10 (packages/adapters/src/
+// current-time.ts, Apache 2.0 — vedi THIRD_PARTY_NOTICES.md).
 //
 // Modulo PURO: nessuna dipendenza, testabile in nodo puro.
 
-/**
- * La riga (unica, senza a capo) con l'ora locale dell'utente nel fuso IANA,
- * il fuso e l'istante UTC, seguita dalle istruzioni di Rakazo: quel momento
- * è il presente, date assolute e non relative, mai dedurre la data
- * dall'addestramento.
- */
-export function formatCurrentTimeInstruction(now: Date, timeZone?: string | null): string {
-  const iso = now.toISOString().replace(/\.\d{3}Z$/, 'Z')
-  const local = timeZone ? localDateTime(now, timeZone) : undefined
-  const anchor = local
-    ? `Current date and time for the user: ${local} (${timeZone}). That is ${iso} (UTC).`
-    : `Current date and time: ${weekdayIn(now, 'UTC')}, ${iso} (UTC).`
-  return [
-    anchor,
-    'Treat this as the present moment for everything you say and do.',
-    local
-      ? "Use the user's time zone for times you mention unless they ask otherwise, judge what is past, upcoming, or overdue from it, and write absolute dates rather than relative ones."
-      : 'Use it to judge what is past, upcoming, or overdue, convert it to the user\'s time zone when one is known, and write absolute dates rather than relative ones.',
-    "Never infer today's date from your training data or from timestamps quoted in the conversation."
-  ].join(' ')
-}
-
-function weekdayIn(now: Date, timeZone: string): string {
-  return new Intl.DateTimeFormat('en-US', { weekday: 'long', timeZone }).format(now)
-}
-
-/** "Saturday, 2026-10-17 22:15 (UTC+13:00)", o undefined per un fuso inutilizzabile. */
-export function localDateTime(now: Date, timeZone: string): string | undefined {
-  let parts: Intl.DateTimeFormatPart[]
+/** Il fuso se Intl lo accetta, altrimenti null. */
+function usableTimeZone(timeZone: string | null | undefined): string | null {
+  if (!timeZone?.trim()) return null
   try {
-    parts = new Intl.DateTimeFormat('en-US', {
-      timeZone,
-      weekday: 'long',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      hourCycle: 'h23',
-      timeZoneName: 'longOffset'
-    }).formatToParts(now)
+    new Intl.DateTimeFormat('en-US', { timeZone })
+    return timeZone
   } catch {
-    return undefined
+    return null
   }
-  const part = (type: Intl.DateTimeFormatPartTypes): string =>
-    parts.find((entry) => entry.type === type)?.value ?? ''
-  // "GMT+13:00" / "GMT" da longOffset, mostrato come UTC per stare accanto all'istante
-  const offset = part('timeZoneName').replace(/^GMT/, 'UTC') || 'UTC'
-  return `${part('weekday')}, ${part('year')}-${part('month')}-${part('day')} ${part('hour')}:${part('minute')} (${offset === 'UTC' ? 'UTC+00:00' : offset})`
+}
+
+/**
+ * «[Sent: Friday, 2026-11-06 15:30 (Europe/Rome)]»: giorno, data e ora
+ * locali nel fuso IANA, col nome del fuso. Fuso non valido o assente: UTC.
+ */
+export function formatSentStamp(ms: number, timeZone?: string | null): string {
+  const zone = usableTimeZone(timeZone) ?? 'UTC'
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: zone,
+    weekday: 'long',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23'
+  }).formatToParts(new Date(ms))
+  const part = (type: Intl.DateTimeFormatPartTypes): string => parts.find((p) => p.type === type)?.value ?? ''
+  return `[Sent: ${part('weekday')}, ${part('year')}-${part('month')}-${part('day')} ${part('hour')}:${part('minute')} (${zone})]`
+}
+
+/** Il contenuto per il modello: il timbro all'inizio, una riga vuota, il testo. */
+export function withSentStamp(text: string, ms: number, timeZone?: string | null): string {
+  return `${formatSentStamp(ms, timeZone)}\n\n${text}`
 }
 
 /**
@@ -74,11 +61,5 @@ export function systemTimeZone(): string {
   } catch {
     tz = ''
   }
-  if (!tz.trim()) return 'UTC'
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: tz })
-    return tz
-  } catch {
-    return 'UTC'
-  }
+  return usableTimeZone(tz) ?? 'UTC'
 }
