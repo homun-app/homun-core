@@ -643,6 +643,12 @@ export type SandbotEvent =
   // di shell_jobs — il feed «Attività» e la vista File del PROPRIETARIO
   // ricaricano (niente payload pesante: la UI legge quello che serve)
   | { type: 'computer-activity'; ownerId: string }
+  // fase sfoglia veloce (V1): la PRIMA lettura del catalogo Sfoglia dice
+  // quanti plugin ha letto (la finestra mostra «12 di 54 plugin letti») e,
+  // finito l'aggiornamento in sottofondo della cache scaduta, la finestra
+  // aperta ricarica la lista
+  | { type: 'skills:browse-progress'; done: number; total: number }
+  | { type: 'skills:browse-updated' }
 
 /** Lo stato dello schermo di un bot per la UI (fase 19a, RPC screen:status). */
 export interface ScreenStatus {

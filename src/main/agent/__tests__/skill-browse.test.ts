@@ -176,17 +176,28 @@ describe('B2: il catalogo Sfoglia dal marketplace git locale', () => {
     expect(readFileSync(join(treeDir, 'sentinella'), 'utf8')).toBe('resta')
   })
 
-  it('cache di 10 minuti: entro il TTL nessuna nuova classificazione; scaduta si riclassifica; l\'albero si ri-clona dopo 1 ora', async () => {
+  // fase sfoglia veloce (V1): la cache scaduta si dà SUBITO e si riclassifica
+  // IN SOTTOFONDO; scaduto anche l'albero (1 h), il clone si rifà SOLTANTO se
+  // la HEAD remota è cambiata (ls-remote) — qui è la stessa: nessun clone.
+  // Il re-clone a HEAD cambiata sta in skill-browse-veloce.test.ts
+  it('cache di 10 minuti: entro il TTL nessun lavoro; scaduta si riclassifica in sottofondo; dopo 1 ora l\'albero NON si ri-clona se la HEAD è la stessa (ls-remote)', async () => {
     let clones = 0
     let lstrees = 0
+    let lsRemotes = 0
     const runGit = (args: string[], opts?: { cwd?: string; timeoutMs?: number }): Promise<{ code: number; stdout: string; stderr: string }> => {
       if (args.includes('clone')) clones++
       if (args.includes('ls-tree')) lstrees++
+      if (args.includes('ls-remote')) lsRemotes++
       return spawnGitRun(args, opts)
     }
+    const until = async (cond: () => boolean): Promise<void> => {
+      for (let i = 0; i < 200 && !cond(); i++) await new Promise((r) => setTimeout(r, 50))
+    }
+    // l'aggiornamento in sottofondo è FINITO quando il browser lo dice alla finestra
+    let updated = 0
     const now = { v: 1_000_000 }
     const dirTtl = freshDataDir()
-    const b = mkBrowser({ runGit, now: () => now.v, dataDir: () => dirTtl })
+    const b = mkBrowser({ runGit, now: () => now.v, dataDir: () => dirTtl, emit: (e: { type: string }) => { if (e.type === 'skills:browse-updated') updated++ } })
     await b.browse('')
     expect(clones).toBe(1)
     expect(lstrees).toBe(1)
@@ -195,16 +206,24 @@ describe('B2: il catalogo Sfoglia dal marketplace git locale', () => {
     await b.browse('')
     expect(lstrees).toBe(1)
     expect(clones).toBe(1)
-    // catalogo scaduto (10 min): si riclassifica, ma l'ALBERO è ancora fresco (1 h)
+    // catalogo scaduto (10 min): risposta subito, riclassificazione in
+    // sottofondo; l'ALBERO è ancora fresco (1 h): nessun ls-remote
     now.v += SKILL_BROWSE_CACHE_MS + 1_000
-    await b.browse('')
+    expect((await b.browse('')).entries).toHaveLength(2)
+    await until(() => updated === 1)
+    expect(updated).toBe(1)
     expect(lstrees).toBe(2)
     expect(clones).toBe(1)
-    // scade anche l'albero (1 h): re-clone in cartella nuova
+    expect(lsRemotes).toBe(0)
+    // scade anche l'albero (1 h): ls-remote — la HEAD è la stessa, il clone resta
     now.v += 60 * 60_000 + 1_000
     await b.browse('')
-    expect(clones).toBe(2)
-  })
+    await until(() => updated === 2)
+    expect(updated).toBe(2)
+    expect(lstrees).toBe(3)
+    expect(lsRemotes).toBe(1)
+    expect(clones).toBe(1)
+  }, 30_000)
 
   it('due richieste CONTEMPORANEE condividono lo stesso lavoro (un solo clone)', async () => {
     let clones = 0

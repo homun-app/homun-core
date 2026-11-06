@@ -633,8 +633,12 @@ export function Chat({ layout }: { layout?: LayoutResult }) {
               <span className="absolute -top-1 -right-1 grid size-4 place-items-center rounded-full bg-foreground text-[10px] text-background">{images.length}</span>
             )}
           </button>
+          {/* fase sfoglia veloce (V3): a UNA riga il campo è alto quanto i
+              bottoni (36 px: py-2 attorno a una riga da 20 px, leading-5),
+              così testo e segnaposto stanno sulla linea centrale di graffetta,
+              Ragiona e Invia; a capo cresce verso l'alto (il form resta items-end) */}
           <textarea
-            className="max-h-40 min-h-11 min-w-[120px] flex-1 resize-none bg-transparent px-3 py-2.5 text-sm outline-none placeholder:text-muted-foreground"
+            className="max-h-40 min-h-9 min-w-[120px] flex-1 resize-none bg-transparent px-3 py-2 text-sm leading-5 outline-none placeholder:text-muted-foreground"
             placeholder={t`Scrivi a ${agent.name}`}
             rows={Math.min(6, text.split('\n').length)}
             value={text}

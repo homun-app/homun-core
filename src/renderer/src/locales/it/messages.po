@@ -175,6 +175,12 @@ msgstr "{0} @ {1}"
 msgid "{0} / {1} per M"
 msgstr "{0} / {1} per M"
 
+#. placeholder {0}: browseProgress.done
+#. placeholder {1}: browseProgress.total
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "{0} di {1} plugin letti"
+msgstr "{0} di {1} plugin letti"
+
 #. placeholder {0}: s.fileCount
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "{0} file"
@@ -1292,6 +1298,10 @@ msgstr "Cerca tra app e skill"
 #: src/renderer/src/components/ui/ModelSelect.tsx
 msgid "Cerca un modello o un provider"
 msgstr "Cerca un modello o un provider"
+
+#: src/renderer/src/components/SkillsWindow.tsx
+msgid "Cerco i pacchetti…"
+msgstr "Cerco i pacchetti…"
 
 #: src/renderer/src/components/settings/AddProviderSheet.tsx
 msgid "Cerco LM Studio sul tuo Mac (porta 1234)."

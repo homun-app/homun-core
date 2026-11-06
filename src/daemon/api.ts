@@ -1091,13 +1091,16 @@ export function buildApiMethods(
 
     // ---- fase skill · Sfoglia (B2): il catalogo dei pacchetti di sole skill
     // dei marketplace registrati; retry true = la «Riprova» della finestra
-    // (niente cache: si rileggono catalogo e alberi) ----
+    // (si rilegge davvero: catalogo e HEAD degli alberi). Fase sfoglia veloce
+    // (V1): senza retry risponde la cache (anche quella su disco), scaduta si
+    // aggiorna in sottofondo; gli eventi vanno a tutte le finestre ----
     'skills:browse': async ([query, browseOpts]) => {
       if (!opts.marketplaces) throw uiError(UI.rpcMarketplacesUnavailable)
       skillBrowserInst ??= (await import('../main/agent/skill-browse')).createSkillBrowser({
         marketplaces: opts.marketplaces,
         dataDir: store.dataDir,
         installedPlugins: () => installedPlugins({ getSetting: store.getSetting }),
+        emit: (e) => emit(e),
         ...testSkillCloneDeps()
       })
       return skillBrowserInst.browse(String(query ?? ''), {

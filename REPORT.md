@@ -1,3 +1,101 @@
+# REPORT FASE SFOGLIA VELOCE — LA SFOGLIA CHE SI APRE SUBITO E IL COMPOSITORE ALLINEATO (V1–V4)
+
+**Data:** 2026-11-06 · **Base:** `main` @ 621ba936 · **Tag di chiusura:** `fase-sfoglia-veloce`. Nessun push, nessun tag `v*`, nessuna dipendenza nuova, niente Docker, niente eval, niente `npm run dist`; rete solo su 127.0.0.1 (marketplace di test `file://` con `SANDBOT_TEST_ALLOW_FILE_URLS=1`); nessun modello o strumento in rete, nemmeno per le catture; temporanei solo con mkdtemp nella cartella dei vincoli; i menu Radix delle sonde si chiudono con Escape. App avviata con l'ambiente pulito richiesto (`HOME`, `PATH` di sistema, `SANDBOT_TEST_USER_DATA` da mkdtemp, keychain e safestorage finti) **più una variabile sola**: `HOMUN_GIT_PATH`, l'env esplicito che `tool-paths` (A7) già prevede per risolvere git, puntato al git della sonda — un involucro LOCALE di `/usr/bin/git` che registra le chiamate (per contare i `git clone`) e, solo nella parte dei tempi, le rallenta (1 s per `show` e per `clone`, come il clone parziale da GitHub). Nessun testo letto dal modello cambia.
+**Verifica finale:** `typecheck` pulito · `vitest` **192 file / 3021 test verdi** (due corse consecutive; +19 nei tre file nuovi) · `build` verde · `fase-skill-sfoglia-probe.mjs` allargata **79/79 per tre corse** sul build finale · **0 daemon dopo ogni corsa** (i due daemon presenti sul Mac prima di cominciare — l'app installata Homun.app e uno `sandbot-demo-verifica` — non sono della sonda e non sono stati toccati) · catture **controllate sul DOM e coi pixel misurati nel renderer, non guardate** (§5).
+
+## I tempi di apertura (V4): prima e dopo
+
+Misurati dalla sonda (punto T): un marketplace finto da **30 plugin** (24 con manifest, 3 senza, 3 connettori) e il `git` rallentato a **1 s per blob** — la condizione del difetto (il clone parziale che scarica un blob da GitHub a ogni lettura). I millisecondi vanno dal click su «Skill» alla lista visibile (orologio dentro la pagina).
+
+| Apertura | Prima (base 621ba936) | Dopo (corsa 1 / 2 / 3) |
+|---|---|---|
+| **Prima apertura** (niente cache) | **34 441 ms** — spinner muto | **6 407 / 6 153 / 6 781 ms** — con «Cerco i pacchetti… N di 30 plugin letti» |
+| **Seconda apertura** (cache) | **32 950 ms** — ri-clona e rilegge tutto | **8 / 10 / 8 ms** |
+| **Dopo un riavvio del daemon** | **32 960 ms** — ricomincia da zero | **16 / 15 / 14 ms** (riavvio del daemon ≈ 810 ms) |
+
+Sulla finestra principale (marketplace dei 5 plugin della sonda, git normale) la seconda apertura era 425 ms sul base, **9–11 ms** dopo. Il base rifà il clone a OGNI apertura (33 s l'una): è il difetto «carica all'infinito». Dopo, la prima volta in assoluto resta l'unica attesa (30 manifest ÷ 8 worker × 1 s + il clone) e mostra il conteggio; tutto il resto è istantaneo, riavvio del daemon compreso.
+
+## Esito per punto
+
+| Punto | Esito | Cosa è cambiato |
+|---|---|---|
+| **V1** aprire non rifà niente | **corretto** | Catalogo classificato anche **su disco** (`<dataDir>/cache/marketplaces/skill-browse.json`: ora, sha della HEAD di ogni marketplace, elenco e nomi dei marketplace, voci), riletto alla creazione del browser (= avvio del daemon). Apertura **senza** `retry` (l'unico `retry: true` resta il bottone «Riprova»). Cache **scaduta** (10 min): si dà subito e si aggiorna **in sottofondo**; finito, il daemon emette `skills:browse-updated` e la finestra aperta ricarica (senza spinner sopra la lista visibile). **Riprova**: `git ls-remote <url> HEAD` (leggera); HEAD invariata → `git fetch --depth 1 --filter=blob:none` **sul clone esistente** (mai buttato); cambiata → solo allora re-clone (cartella nuova che sostituisce). Stessa regola anche allo scadere del TTL di 1 h dell'albero. Prima volta in assoluto: attesa con **conteggio** `skills:browse-progress` («12 di 54 plugin letti», testid `skills-browse-progress`), niente spinner muto. |
+| **V2** letture parallele, poche, limitate | **corretto** | I `git show` dei manifest in **un pool con tetto 8** su tutti i marketplace (`MANIFEST_CONCURRENCY`, come i worker di Rakazo). `.mcp.json` **mai letto**: la presenza nell'albero basta per classificare connettore; il manifest si legge solo se c'è. **Tetto di 60 s** per la classificazione di un marketplace (parte quando comincia, finite le fasi di catalogo e clone): i rimasti vanno in `skipped` col motivo e la lista dà quelli pronti. Le letture vicine allo scadere hanno il timeout accorciato al tempo rimasto. |
+| **V3** compositore allineato | **corretto** | `Chat.tsx`: textarea `min-h-11 py-2.5` → **`min-h-9 py-2 leading-5`** (36 px, riga da 20 px centrata); il form resta `items-end`, i bottoni identici. Misura della spec: centro textarea ↔ Invia **2,00 px** (≤ 2); in più graffetta e Ragiona **0,00 px** (base: 4,00) e l'**inchiostro** — centro dei pixel del testo contro le icone, calcolato nel renderer — da **5,1–5,6 px** del base a **0,4–0,9 px**, a 1440 e 900, chiaro e scuro, con e senza testo. Col testo a capo il campo cresce verso l'alto e i bottoni restano in basso (Δ bordo inferiore 0,0 px). |
+| **V4** chiusura | **fatta** | Typecheck, vitest (192 file / 3021, due corse) e build verdi; sonda allargata **79/79 × 3** con 0 daemon a ogni corsa; catture dichiarate sul DOM (§5); REPORT; commit e tag. |
+
+**Da sapere subito:**
+- **La misura della spec passa anche sul base** (textarea 44 px contro Invia 40, allineati in basso → Δ 2 px; dopo: 36 contro 40 → Δ 2 px). Per questo il punto 8 della sonda misura anche graffetta e Ragiona (≤ 1 px) e l'inchiostro dei pixel: sono loro a distinguere base (Δ 4,00 px; inchiostro 5,1–5,6 px) da dopo (Δ 0,00; 0,4–0,9).
+- **«Tempo scaduto» è in inglese negli scarti** (`time limit reached: not read within 60 s`): la guardia del testo italiano di main/daemon (fase 17c) non ammette letterali italiani nel codice.
+- **Un extra oltre la spec, visto fallire prima:** se l'utente cambia l'elenco dei marketplace (Collega app › Marketplace), la cache **vale come scaduta**: subito la lista dei marketplace di adesso (i pacchetti dei marketplace tolti spariscono), in sottofondo quella nuova. Senza, la finestra sarebbe cieca per 10 minuti dopo ogni aggiunta o rimozione.
+- **Il fetch della riprova usa l'origin del clone** (`git fetch … origin`), non l'URL: il filtro `blob:none` di un clone parziale vale solo per il suo remote; una fetch esplicita dell'URL scaricherebbe TUTTI i blob. Il testo della spec diceva «sull'URL»: ho seguito git, non la lettera.
+- **Una riprova che arriva mentre un aggiornamento normale è in corso** lo aspetta e poi rilegge davvero: un lavoro non-forzato non può accontentare una «Riprova».
+- Il vecchio test B2 «l'albero si ri-clona dopo 1 ora» l'ho **riscritto** per il comportamento nuovo (ls-remote a HEAD invariata; il re-clone a HEAD cambiata sta nel test nuovo).
+
+## 1. I test visti fallire PRIMA
+
+Ogni test è stato scritto e visto fallire sul base. Le righe qui sotto vengono dai file di test **finali** girati su una copia pulita di 621ba936 (worktree in mkdtemp): **14 rossi**. All'origine il test del sottofondo stava su un cancello troppo largo e falliva per timeout; rifatto (il cancello si apre solo DOPO la prima classificazione), sul base dà `expected 'timeout' to be 'data'`.
+
+| Punto | Test (`skill-browse-veloce.test.ts`, se no file indicato) | Riga · errore |
+|---|---|---|
+| V1 | il catalogo si salva su disco… un NUOVO daemon lo rilegge SENZA git | 107 · `TypeError: skillBrowseCacheFile is not a function` |
+| V1 | cache scaduta: SUBITO il vecchio, aggiornamento in sottofondo (`skills:browse-updated`) | 145 · `AssertionError: expected 'timeout' to be 'data'` |
+| V1 | «Riprova» NON rifà il clone a HEAD invariata: ls-remote + fetch | 168 · `expected […] to have a length of 1 but got 2` |
+| V1 | la prima volta in assoluto emette `skills:browse-progress` (0 di N → done = total) | 238 · `expected 0 to be greater than or equal to 2` |
+| V1+ | l'elenco dei marketplace cambia → cache come scaduta (l'extra dichiarato) | 222 · `expected false to be true` |
+| V2 | tetto esportato: `MANIFEST_CONCURRENCY` 8, `SKILL_BROWSE_TIME_CAP_MS` 60 s | 250 · `expected undefined to be 8` |
+| V2 | i `git show` in parallelo (≥ 2 insieme, MAI oltre 8) | 262 · `expected 1 to be greater than or equal to 2` |
+| V2 | `.mcp.json`: la presenza basta, senza leggerlo | 282 · `expected 3 to be 1` |
+| V2 | tetto di 60 s → i rimasti in `skipped` «time limit reached» | 310 · `expected […] to have a length of 8 but got 10` |
+| V1 | finestra (`skills-window-veloce.test.ts`): mount senza `loadBrowse(true)`, retry da `browseRetryAt > 0` | 27 · `not to contain 'loadBrowse(true)'` |
+| V1 | finestra: «Cerco i pacchetti…» col conteggio (`skills-browse-progress`) | 49 · `to contain 'skills-browse-progress'` |
+| V1 | finestra: lo stato `browseProgress` esiste e si azzera | 55 · `to match /browseProgress/` |
+| V1 | finestra: `api.onEvent` ascolta progress e updated | 63 · `to contain 'api.onEvent'` |
+| V3 | compositore (`composer-allineato.test.ts`): `min-h-9 py-2 leading-5`, form `items-end`, bottoni intatti | 32 · `to contain 'min-h-9'` |
+
+Il test «la riprova rifà il clone SOLO a HEAD cambiata» passa anche sul base (il base ri-clona sempre: a distinguerlo è il test di riga 168). I due test di blocco del compositore (form `items-end`, bottoni invariati) passano sul base perché bloccano ciò che non deve cambiare.
+
+**La stessa sonda sul base:** 79 controlli, **53 OK / 26 KO** — tutti e sei i controlli V3 non-spec, il no-clone della seconda apertura (2 → 3 cloni), la sentinella nel clone, la cache su disco, ls-remote+fetch sulla riprova, il conteggio della prima apertura (mai visto), la seconda entro 2 s e il dopo-riavvio (33 s).
+
+## 2. V1 — com'è fatto
+
+- **Su disco**, `skill-browse.json` (scrittura atomica: file temporaneo + rename; le temporanee `.skill-browse-*` si buttano alla creazione come le `.tree-clone-*`). Contiene `version`, `at`, `heads` (sha per sorgente), `sources`/`names` e il catalogo. Alla creazione del browser si rilegge: anche dopo un riavvio del daemon si apre subito.
+- **`browse()` senza retry:** cache fresca → risponde; scaduta → risponde SUBITO e `revalidate()` in sottofondo (uno alla volta; condivide il lavoro con la prima lettura); nessuna cache → si aspetta, col conteggio.
+- **Eventi** (in `SandbotEvent`, `emit` iniettata dal daemon a `createSkillBrowser`): `skills:browse-progress {done, total}` a ogni plugin e `skills:browse-updated` solo quando il sottofondo finisce. La finestra ascolta con `api.onEvent` e ricarica in silenzio.
+- **Il clone:** HEAD locale nel sidecar `<dir>.head` (per i cloni vecchi senza sidecar, un `rev-parse` locale lo scrive). `remoteHead` = ls-remote; uguale → il clone resta (e `.at` si rinnova); diverso o assente → clone nuovo. Fallita la ls-remote → marketplace in `unavailable` come oggi.
+- **Sicurezza invariata:** l'installazione passa sempre da `buildPluginCard` con sha fissato e controllo L6; la cache serve solo a mostrare l'elenco. `ls-remote`/`fetch` con le stesse regole di `treeCloneArgv` (hook disattivati, `protocol.file.allow=never` salvo flag di test, https sola).
+
+## 3. V2 — com'è fatto
+
+- Fase 1 per marketplace (in serie, come prima): catalogo, clone dell'albero, `ls-tree`. Fase 2: **un solo pool da 8** sui plugin di TUTTI i marketplace; `total` noto subito → il conteggio è giusto da subito.
+- `.mcp.json`: `own.includes('.mcp.json')` → scarto connettore, **zero letture**. Il manifest si legge solo se `own` lo contiene.
+- Tetto di 60 s **per marketplace**, calcolato quando la sua classificazione comincia (le fasi di catalogo/clone hanno già i timeout loro, 120 s per git). Letture iniziate oltre il tetto → `skipped`; ogni lettura parte col timeout accorciato al tempo rimasto; una lettura fallita a tetto scaduto conta come scaduta.
+
+## 4. V3 — i numeri
+
+| Misura (sonda, punto 8) | Base | Dopo |
+|---|---|---|
+| altezza del textarea a una riga | 44 px | **36 px** |
+| centro textarea ↔ Invia (misura della spec, ≤ 2 px) | 2,00 px | 2,00 px |
+| centro textarea ↔ graffetta / Ragiona | 4,00 / 4,00 px | **0,00 / 0,00 px** |
+| inchiostro testo ↔ graffetta (pixel, nel renderer) | 5,1–5,6 px | **0,4–0,9 px** |
+| inchiostro testo ↔ Ragiona / Invia (1440) | 5,5–6,0 / 1,8–2,3 px | 0,0–0,5 / 3,7–4,2 px |
+| testo a capo | — | 3 righe, 76 px, cresce in alto; Δ bordo inferiore con Invia 0,0 px |
+
+A 900 px i bottoni a destra stanno sotto il pannello del bot aperto (`bot-panel`, sovrimpressione): la riga di testo non li tocca (la sonda lo verifica con `elementFromPoint`) e il loro inchiostro lì non si misura (n/d). Il vecchio controllo sul DOM del compositore (Δ 2 px col Invia) resta ed è verde.
+
+## 5. Sonda e catture
+
+`scripts/fase-skill-sfoglia-probe.mjs` allargata: **2b** seconda apertura senza clone (conteggio delle `-tree`, `git clone` registrati dal git della sonda, sentinella DENTRO il clone) e lista entro 2 s; **7** ridisegnato (l'illeggibile ora si vede quando un AGGIORNAMENTO fallisce, perché aprire non rilegge più: prima la RPC di riprova col marketplace nascosto, poi la riga col «Riprova» che al ripristino riporta i pacchetti **senza ri-clonare**, ls-remote + fetch); **8** il compositore (V3, numeri in §4); **T** i tempi (§ in testa). I menu Radix si chiudono con Escape (`chiudiMenu`, come sempre); a fine corsa i daemon si chiudono dall'ambiente (`probe-daemons`): **0 rimasti, a ogni corsa**.
+
+**Catture NON guardate, dichiarato:** il controllo è sul DOM e, per l'allineamento, sulla misura dei pixel fatta **nel renderer** (canvas dello screenshot del compositore, centro dei pixel pesato sul contrasto) — la spec consente «controllate sul DOM e dichiarate così». Le catture sono in `docs/catture/skill/`: `compositore-{1440,900}-{chiaro,scuro}-{vuoto,testo}.png` e `compositore-1440-chiaro-a-capo.png` (V3), `sfoglia-avanzamento-{1440}-{chiaro,scuro}.png` (il conteggio della prima lettura), più le `sfoglia-*`, `sfoglia-anteprima-*` e `menu-skill-*` di sempre.
+
+## 6. I vincoli
+
+Rete solo su 127.0.0.1 (provider finto e CDP); marketplace `file://` col flag di test; app avviata solo con l'ambiente pulito richiesto + `HOMUN_GIT_PATH` (§ testo in testa, il posto che `tool-paths` prevede); temporanei solo con mkdtemp nella cartella dei vincoli (worktree del base incluso, rimosso); niente Docker, eval, `npm run dist`, dipendenze nuove, push o tag `v*`; nessun modello o strumento in rete per le catture (misurate nel renderer). `npm run i18n:extract` + `compile` per le due stringhe nuove («Cerco i pacchetti…», «N di M plugin letti»): **en 0 mancanti**.
+
+---
+
 # REPORT FASE PULIZIA · RITOCCHI — TITOLO DELLA CARD, FINESTRA APP, ORA DEL MESSAGGIO STABILE (U1–U5)
 
 **Data:** 2026-11-06 · **Base:** `main` @ 01d1a30c · **Tag di chiusura:** `fase-pulizia-ritocchi`. Nessun push, nessun tag `v*`, nessuna dipendenza nuova, niente Docker, niente eval (la lanci tu: **U4 cambia il testo letto dal modello**), niente `npm run dist`; rete solo su 127.0.0.1; nessun modello o strumento in rete, nemmeno per le catture (§6); temporanei solo con mkdtemp nella cartella dei vincoli. App avviata con ambiente pulito (`HOME`, `PATH` di sistema, `SANDBOT_TEST_USER_DATA`, keychain e safestorage finti) **più** le variabili che le sonde hanno già di loro, tutte verso finti locali (`SANDBOT_TEST_COMPOSIO_MCP_URL`, `SANDBOT_TEST_MCP_URLS`, `SANDBOT_TEST_FAKE_BROWSER`, `SANDBOT_TEST_ALLOW_FILE_URLS`).

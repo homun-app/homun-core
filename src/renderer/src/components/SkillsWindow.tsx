@@ -83,23 +83,37 @@ export function SkillsWindow(): React.ReactNode {
   const [browseData, setBrowseData] = useState<SkillBrowseResult | null>(null)
   const [browseLoading, setBrowseLoading] = useState(true)
   const [browseRetryAt, setBrowseRetryAt] = useState(0)
+  // fase sfoglia veloce (V1): il conteggio della PRIMA lettura («12 di 54 plugin letti»)
+  const [browseProgress, setBrowseProgress] = useState<{ done: number; total: number } | null>(null)
 
   const reload = (): void => {
     void api.skillsLibrary().then(setData).catch(() => setData({ library: [], plugins: [] }))
   }
   useEffect(reload, [])
-  // all'apertura (e sulla «Riprova») si legge FRESCO: un marketplace diventato
-  // illeggibile si vede subito; dopo l'aggiunta basta la cache («Aggiunto» si
-  // calcola a ogni chiamata comunque)
-  const loadBrowse = (retry = false): void => {
-    setBrowseLoading(true)
+  // fase sfoglia veloce (V1): all'apertura NESSUN retry — risponde la cache
+  // del daemon (anche quella su disco) e, se è scaduta, si aggiorna in
+  // sottofondo: il clone non si rifà a ogni finestra. Il retry resta al solo
+  // bottone «Riprova» (browseRetryAt > 0 solo dopo un click). quiet: il
+  // ricaricamento dopo l'aggiornamento in sottofondo, senza spinner sopra la
+  // lista già visibile
+  const loadBrowse = (retry = false, quiet = false): void => {
+    if (!quiet) {
+      setBrowseLoading(true)
+      setBrowseProgress(null)
+    }
     void api.skillsBrowse('', retry ? { retry: true } : undefined)
       .then(setBrowseData)
       // anche un errore mostra la riga «non si sono caricati» con Riprova
-      .catch(() => setBrowseData({ entries: [], unavailable: [{ source: '' }], skipped: [] }))
-      .finally(() => setBrowseLoading(false))
+      .catch(() => { if (!quiet) setBrowseData({ entries: [], unavailable: [{ source: '' }], skipped: [] }) })
+      .finally(() => { if (!quiet) setBrowseLoading(false) })
   }
-  useEffect(() => { loadBrowse(true) }, [browseRetryAt])
+  useEffect(() => { loadBrowse(browseRetryAt > 0) }, [browseRetryAt])
+  // V1: gli eventi del daemon — l'avanzamento della lettura e il catalogo
+  // aggiornato in sottofondo (la finestra aperta ricarica la lista)
+  useEffect(() => api.onEvent((e) => {
+    if (e.type === 'skills:browse-progress') setBrowseProgress({ done: e.done, total: e.total })
+    else if (e.type === 'skills:browse-updated') loadBrowse(false, true)
+  }), [])
   // T1: UN solo campo di ricerca (quello in alto) — la stessa query filtra
   // le tue skill, quelle dei plugin e i pacchetti di Sfoglia
   const browsePacks = useMemo(
@@ -314,10 +328,18 @@ export function SkillsWindow(): React.ReactNode {
                       T1: nessun campo qui — filtra il campo in alto */}
                   <section className="mt-7 space-y-2" data-testid="skills-browse">
                     <h3 className="text-[14px] font-medium text-muted-foreground"><Trans>Sfoglia</Trans></h3>
+                    {/* fase sfoglia veloce (V1): niente spinner muto — «Cerco i
+                        pacchetti…» e, appena il daemon lo manda, il conteggio */}
                     {browseLoading && (
-                      <p className="grid place-items-center py-8" data-testid="skills-browse-loading">
-                        <span className="size-5 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" aria-label={t`caricamento…`} />
-                      </p>
+                      <div role="status" aria-live="polite" className="grid place-items-center gap-2 py-8 text-sm text-muted-foreground" data-testid="skills-browse-loading">
+                        <span className="size-5 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" aria-hidden="true" />
+                        <span><Trans>Cerco i pacchetti…</Trans></span>
+                        {browseProgress && browseProgress.total > 0 && (
+                          <span className="text-[12px] tabular-nums" data-testid="skills-browse-progress">
+                            <Trans>{browseProgress.done} di {browseProgress.total} plugin letti</Trans>
+                          </span>
+                        )}
+                      </div>
                     )}
                     {!browseLoading && (browseData?.unavailable.length ?? 0) > 0 && (
                       <div role="alert" className="flex items-center gap-3 py-1 text-sm text-muted-foreground" data-testid="skills-browse-unavailable">

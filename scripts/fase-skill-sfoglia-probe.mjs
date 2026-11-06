@@ -32,9 +32,30 @@
 // entrambi scartano lo staging) e il focus d'apertura sul campo di ricerca
 // (niente anello su «Nuova skill»).
 //
+// Fase SFOGLIA VELOCE (V1–V4), allargata:
+//   2b. la SECONDA apertura della finestra NON rifà il clone (si contano le
+//       cartelle -tree, le chiamate `git clone` registrate dal git della sonda
+//       e una sentinella DENTRO il clone resta) e la lista appare entro 2 s;
+//   7.  «Riprova» funziona (l'illeggibile ora si vede quando un aggiornamento
+//       fallisce: aprire non rilegge più il marketplace);
+//   8.  V3, il compositore: centro del textarea e del bottone Invia ≤ 2 px (la
+//       misura della spec), più graffetta e Ragiona ≤ 1 px e l'INCHIOSTRO dei
+//       pixel (testo contro icone) misurato IN LOCALE nel renderer, a 1440 e
+//       900, chiaro e scuro, con e senza testo; col testo a capo il campo
+//       cresce verso l'alto e i bottoni restano in basso;
+//   T.  i TEMPI d'apertura su un'ALTRA app (cartella dati sua) con un
+//       marketplace finto da 30 plugin e un `git` RALLENTATO apposta (1 s per
+//       `show` e per `clone`, come il clone parziale da GitHub): prima
+//       apertura (col conteggio «N di 30 plugin letti»), seconda apertura,
+//       dopo un riavvio del daemon.
+// Il `git` della sonda è un involucro LOCALE di /usr/bin/git (registra le
+// chiamate e, nella parte T, le rallenta): arriva al daemon da HOMUN_GIT_PATH,
+// l'unica variabile in più rispetto all'avvio pulito. Nessuna rete.
+//
 // Catture in docs/catture/skill/: sfoglia-* e menu-skill-* (1440 e 900,
-// chiaro e scuro). A FINE SONDA si chiude OGNI daemon avviato (dall'AMBIENTE,
-// helper probe-daemons) e le cartelle temporanee si cancellano SOLO DOPO.
+// chiaro e scuro), compositore-* (V3), sfoglia-avanzamento-* (T). A FINE
+// SONDA si chiude OGNI daemon avviato (dall'AMBIENTE, helper probe-daemons)
+// e le cartelle temporanee si cancellano SOLO DOPO.
 // Niente Docker, nessun push, mai il Portachiavi vero.
 import { spawn } from 'node:child_process'
 import { createServer } from 'node:http'
@@ -58,6 +79,34 @@ const check = (id, ok, note = '') => {
   console.log(`${ok ? 'OK ' : 'KO '} ${id}${note ? ` — ${note}` : ''}`)
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+/**
+ * Fase sfoglia veloce (V4): il `git` della sonda — un involucro di
+ * /usr/bin/git che REGISTRA ogni chiamata (per contare i clone) e, se
+ * chiesto, RALLENTA `show` e `clone` (come il clone parziale da GitHub: circa
+ * 1 s per blob). Arriva al daemon da HOMUN_GIT_PATH (tool-paths). Tutto locale.
+ */
+function makeGitWrapper(prefix, { showDelay = 0, cloneDelay = 0 } = {}) {
+  const dir = mkdtempSync(TMP_BASE + prefix)
+  const logFile = join(dir, 'git.log')
+  const script = join(dir, 'git')
+  writeFileSync(script, [
+    '#!/bin/sh',
+    `printf '%s\\n' "$*" >> '${logFile}'`,
+    'case " $* " in',
+    `  *" show "*) ${showDelay ? `/bin/sleep ${showDelay}` : ':'} ;;`,
+    `  *" clone "*) ${cloneDelay ? `/bin/sleep ${cloneDelay}` : ':'} ;;`,
+    'esac',
+    'exec /usr/bin/git "$@"',
+    ''
+  ].join('\n'), { mode: 0o755 })
+  const lines = () => { try { return readFileSync(logFile, 'utf8').split('\n').filter(Boolean) } catch { return [] } }
+  return { dir, script, lines, clones: () => lines().filter((l) => / clone /.test(` ${l} `)).length }
+}
+/** Le cartelle -tree (i cloni dell'albero di Sfoglia) nella cache dei marketplace. */
+const treeDirs = (dataDir) => {
+  try { return readdirSync(join(dataDir, 'cache', 'marketplaces')).filter((d) => d.endsWith('-tree')) } catch { return [] }
+}
 
 // ---- il marketplace git LOCALE con i cinque plugin della spec (file:// SOLO col flag) ----
 const REPO = mkdtempSync(TMP_BASE + 'sandbot-sfoglia-mp-')
@@ -132,7 +181,7 @@ const providerPort = providerServer.address().port
 // ---- l'app Electron (build di sviluppo) con dati temporanei ----
 // SOLO così: env pulita + cartella dati temporanea + keychain/safestorage FINTI
 const ELECTRON = join(ROOT, 'node_modules', 'electron', 'dist', 'Electron.app', 'Contents', 'MacOS', 'Electron')
-const launchApp = (userData, debugPort) => {
+const launchApp = (userData, debugPort, extraEnv = {}) => {
   const app = spawn(ELECTRON, ['.', `--remote-debugging-port=${debugPort}`], {
     cwd: ROOT,
     env: {
@@ -142,7 +191,9 @@ const launchApp = (userData, debugPort) => {
       SANDBOT_TEST_FAKE_KEYCHAIN: join(userData, 'keychain-finta.json'),
       SANDBOT_TEST_FAKE_SAFESTORAGE: join(userData, 'safestorage-finta.json'),
       // il clone file:// del marketplace di prova (SOLO locale, mai github.com)
-      SANDBOT_TEST_ALLOW_FILE_URLS: '1'
+      SANDBOT_TEST_ALLOW_FILE_URLS: '1',
+      // fase sfoglia veloce: HOMUN_GIT_PATH verso il git della sonda (locale)
+      ...extraEnv
     },
     stdio: ['ignore', 'pipe', 'pipe']
   })
@@ -304,6 +355,88 @@ const menuItems = (pageEval) => pageEval(`
   const items = [...document.querySelectorAll('[role="menuitem"]')].filter((x) => x.offsetParent !== null)
   return items.map((x) => x.textContent.trim())
 `)
+/** La lista di Sfoglia è VISIBILE: almeno una voce e nessun caricamento in corso. */
+const LISTA_PRONTA = `!!document.querySelector('[data-testid^="skills-browse-entry-"]') && !document.querySelector('[data-testid="skills-browse-loading"]')`
+/**
+ * Fase sfoglia veloce: apre la finestra dal menu e misura i ms dal click
+ * sulla voce «Skill» alla lista visibile. L'orologio è NELLA pagina
+ * (performance.now al click, un MutationObserver segna l'istante in cui la
+ * lista appare): il sondaggio CDP e le catture non sporcano la misura.
+ * onPoll gira a ogni giro (per vedere l'avanzamento). null = mai pronta.
+ */
+const openSkillsTimed = async (r, { readyExpr = LISTA_PRONTA, timeoutMs = 120_000, onPoll } = {}) => {
+  await pointerClick(r.pageEval, `[...document.querySelectorAll('[data-testid="account-menu-trigger"]')].find((b) => b.offsetParent !== null)`)
+  await r.waitDom(`[...document.querySelectorAll('[data-testid="menu-skills"]')].some((x) => x.offsetParent !== null)`, 6000, 50)
+  await r.pageEval(`
+    window.__sondaT0 = null
+    window.__sondaPronta = null
+    window.__sondaObs?.disconnect()
+    window.__sondaObs = new MutationObserver(() => {
+      if (window.__sondaT0 !== null && window.__sondaPronta === null && (${readyExpr})) {
+        window.__sondaPronta = performance.now()
+        window.__sondaObs.disconnect()
+      }
+    })
+    window.__sondaObs.observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true })
+    const el = [...document.querySelectorAll('[data-testid="menu-skills"]')].find((x) => x.offsetParent !== null && x.textContent.trim() === 'Skill')
+    if (!el) throw new Error('voce «Skill» non trovata')
+    window.__sondaT0 = performance.now()
+    el.click()
+    return 'cliccato'
+  `)
+  const t0 = Date.now()
+  for (;;) {
+    const ms = await r.pageEval(`
+      if (window.__sondaPronta !== null) return window.__sondaPronta - window.__sondaT0
+      return (${readyExpr}) ? performance.now() - window.__sondaT0 : null
+    `)
+    if (ms !== null) return Math.round(ms)
+    if (onPoll) await onPoll(Date.now() - t0)
+    if (Date.now() - t0 > timeoutMs) return null
+    await sleep(50)
+  }
+}
+const chiudiFinestra = async (r) => {
+  await clickText(r.pageEval, '✕', '[data-testid="skills-window"] button')
+  await r.waitDom(`!document.querySelector('[data-testid="skills-window"]')`, 5000)
+  await sleep(200)
+}
+
+/** Il DB seminato: i bot dati e il marketplace LOCALE al posto di quello ufficiale. */
+async function seedDb(dataDir, marketplaceUrl, marketplaceName, bots) {
+  const { DatabaseSync } = await import('node:sqlite')
+  const db = new DatabaseSync(join(dataDir, 'sandbot.db'))
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS agents (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT DEFAULT '', provider_id TEXT, model TEXT, status TEXT DEFAULT 'offline', unread INTEGER DEFAULT 0, created_at INTEGER, created_by TEXT, section TEXT DEFAULT '', parent_id TEXT);
+    CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+  `)
+  const ins = db.prepare('INSERT INTO agents(id, name, description, status, unread, created_at, created_by, section, parent_id) VALUES (?,?,?,?,?,?,?,?,?)')
+  bots.forEach(([id, name, description], i) => ins.run(id, name, description, 'idle', 0, 1000 + i, null, '', null))
+  const st = db.prepare('INSERT INTO settings(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+  // B5: il marketplace di prova registrato e quello UFFICIALE tolto
+  st.run('connectors.marketplaces', JSON.stringify([{ name: marketplaceName, source: marketplaceUrl, kind: 'git', official: false, addedAt: 1 }]))
+  db.close()
+}
+
+/** Provider finto + modello per i bot dati, poi ricarica (come la prima parte). */
+async function setupProvider(r, botNames) {
+  await r.rpc(`saveProvider(${JSON.stringify({ id: 'finto', name: 'Finto (locale)', kind: 'openai-compatible', baseUrl: `http://127.0.0.1:${providerPort}/v1`, apiKey: 'chiave-finta-di-prova', enabled: true })})`)
+  await r.rpc(`settingsSet(${JSON.stringify('models.main')}, ${JSON.stringify({ providerId: 'finto', model: 'finto', thinking: null })})`)
+  const agents = await r.rpc('listAgents()')
+  const out = {}
+  for (const name of botNames) {
+    const a = agents.find((x) => x.name === name)
+    if (!a) throw new Error(`il bot ${name} non c'è (onboarding?)`)
+    await r.rpc(`updateAgent(${JSON.stringify(a.id)}, ${JSON.stringify({ providerId: 'finto', model: 'finto' })})`)
+    out[name] = a
+  }
+  await r.page.send('Page.reload')
+  await r.waitDom(`typeof window.sandbot !== 'undefined' && !!document.querySelector('form textarea')`, 30_000)
+  return out
+}
+
+/** I tempi misurati (per il REPORT): stampati in fondo come JSON. */
+const tempi = {}
 
 // ============================ la corsa ============================
 const TMP = mkdtempSync(TMP_BASE + 'sandbot-fase-sfoglia-')
@@ -317,23 +450,11 @@ const usedDirs = [DATA]
 // setting: NESSUNA rete verso github.com)
 const ALFA = 'agent_alfa'
 const BETA = 'agent_beta'
-{
-  const { DatabaseSync } = await import('node:sqlite')
-  const db = new DatabaseSync(join(DATA, 'sandbot.db'))
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS agents (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT DEFAULT '', provider_id TEXT, model TEXT, status TEXT DEFAULT 'offline', unread INTEGER DEFAULT 0, created_at INTEGER, created_by TEXT, section TEXT DEFAULT '', parent_id TEXT);
-    CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-  `)
-  const ins = db.prepare('INSERT INTO agents(id, name, description, status, unread, created_at, created_by, section, parent_id) VALUES (?,?,?,?,?,?,?,?,?)')
-  ins.run(ALFA, 'Alfa', 'bot Alfa', 'idle', 0, 1000, null, '', null)
-  ins.run(BETA, 'Beta Bot', 'bot Beta', 'idle', 0, 1001, null, '', null)
-  const st = db.prepare('INSERT INTO settings(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
-  // B5: il marketplace di prova registrato e quello UFFICIALE tolto
-  st.run('connectors.marketplaces', JSON.stringify([{ name: 'mp-di-prova', source: REPO_URL, kind: 'git', official: false, addedAt: 1 }]))
-  db.close()
-}
+await seedDb(DATA, REPO_URL, 'mp-di-prova', [[ALFA, 'Alfa', 'bot Alfa'], [BETA, 'Beta Bot', 'bot Beta']])
 
-const main = launchApp(USER, 9371)
+// il git della sonda (NESSUN rallentamento qui): registra i clone per 2b
+const gitMain = makeGitWrapper('sandbot-sfoglia-git-')
+const main = launchApp(USER, 9371, { HOMUN_GIT_PATH: gitMain.script })
 try {
   let r
   try {
@@ -345,16 +466,8 @@ try {
     throw new Error('window.sandbot non disponibile dopo 40s')
   }
   // provider finto + modello per i due bot
-  await r.rpc(`saveProvider(${JSON.stringify({ id: 'finto', name: 'Finto (locale)', kind: 'openai-compatible', baseUrl: `http://127.0.0.1:${providerPort}/v1`, apiKey: 'chiave-finta-di-prova', enabled: true })})`)
-  await r.rpc(`settingsSet(${JSON.stringify('models.main')}, ${JSON.stringify({ providerId: 'finto', model: 'finto', thinking: null })})`)
-  const agents0 = await r.rpc('listAgents()')
-  const alfa = agents0.find((a) => a.name === 'Alfa')
-  const beta = agents0.find((a) => a.name === 'Beta Bot')
-  if (!alfa || !beta) throw new Error('i due bot non ci sono (onboarding?)')
-  await r.rpc(`updateAgent(${JSON.stringify(alfa.id)}, ${JSON.stringify({ providerId: 'finto', model: 'finto' })})`)
-  await r.rpc(`updateAgent(${JSON.stringify(beta.id)}, ${JSON.stringify({ providerId: 'finto', model: 'finto' })})`)
-  await r.page.send('Page.reload')
-  await r.waitDom(`typeof window.sandbot !== 'undefined' && !!document.querySelector('form textarea')`, 30_000)
+  const bots = await setupProvider(r, ['Alfa', 'Beta Bot'])
+  const alfa = bots['Alfa']
   await r.setWindowWidth(1440)
 
   // ============ 1. «Skill» nel MENU sotto «Collega app» (B1) ============
@@ -437,6 +550,26 @@ try {
     browse0.skipped.some((s) => s.plugin === 'esterno' && /external source/.test(s.reason)) &&
     browse0.skipped.some((s) => s.plugin === 'con-connettore' && /MCP/.test(s.reason)) &&
     browse0.skipped.some((s) => s.plugin === 'fuori' && /leave/i.test(s.reason)))
+
+  // ============ 2b. (V1) la SECONDA apertura NON rifà il clone ============
+  // si contano le cartelle -tree, le chiamate `git clone` registrate dal git
+  // della sonda e una SENTINELLA dentro il clone dell'albero (un re-clone la
+  // cancellerebbe); con la cache la lista appare entro 2 s
+  const treesPrima = treeDirs(DATA)
+  const clonesPrima = gitMain.clones()
+  check('2b: dopo la prima apertura c\'è UNA cartella -tree', treesPrima.length === 1, JSON.stringify(treesPrima))
+  const sentinella = treesPrima[0] ? join(DATA, 'cache', 'marketplaces', treesPrima[0], 'sonda-sentinella') : null
+  if (sentinella) writeFileSync(sentinella, 'resta')
+  await chiudiFinestra(r)
+  const secondaMs = await openSkillsTimed(r, { timeoutMs: 60_000 })
+  tempi.principaleSeconda = secondaMs
+  check('2b: la seconda apertura mostra la lista entro 2 s (cache)', secondaMs !== null && secondaMs <= 2000, `${secondaMs} ms`)
+  await sleep(500) // un eventuale lavoro in sottofondo avrebbe il tempo di partire
+  check('2b: la seconda apertura NON rifà il clone (nessun `git clone` in più)', gitMain.clones() === clonesPrima, `${clonesPrima} → ${gitMain.clones()}`)
+  check('2b: le cartelle -tree restano UNA, la sentinella dentro il clone c\'è ancora',
+    treeDirs(DATA).length === 1 && sentinella !== null && existsSync(sentinella), JSON.stringify(treeDirs(DATA)))
+  check('2b: la cache del catalogo è su disco (cache/marketplaces/skill-browse.json)',
+    existsSync(join(DATA, 'cache', 'marketplaces', 'skill-browse.json')))
 
   // ============ 3. la ricerca filtra (T1: dal campo IN ALTO, insieme ============
   // ============ alle skill dei plugin e ai pacchetti di Sfoglia)    ============
@@ -682,26 +815,166 @@ try {
     Boolean(lastUser && String(lastUser.content).includes('ISTRUZIONI di ordina') && String(lastUser.content).includes('le idee della settimana')))
 
   // ============ 7. marketplace ILLEGGIBILE → riga + «Riprova» (B2/B4) ============
-  // il marketplace diventa illeggibile (cartella rinominata) con la finestra
-  // GIÀ CHIUSA: alla RIAPERTURA il primo caricamento è fresco → la riga
+  // Fase sfoglia veloce (V1): APRIRE non rilegge più il marketplace (la
+  // cache è fresca, nessun retry all'apertura) — l'illeggibile si vede quando
+  // un AGGIORNAMENTO fallisce. Qui una riprova via RPC (la stessa chiamata del
+  // bottone) col marketplace nascosto; poi la finestra mostra la riga col
+  // «Riprova», che dopo il ripristino riporta i pacchetti
   const REPO_NASCOSTO = REPO + '-nascosto'
   renameSync(REPO, REPO_NASCOSTO)
-  await openSkillsFromMenu(r)
-  await r.waitDom(`!!document.querySelector('[data-testid="skills-window"]')`, 8000)
-  check('illeggibile: «Alcuni pacchetti non si sono caricati.» con «Riprova»',
-    await r.waitDom(`!!document.querySelector('[data-testid="skills-browse-unavailable"]') && ${SKILLS_WINDOW}.textContent.includes('Alcuni pacchetti non si sono caricati.') && !!document.querySelector('[data-testid="skills-browse-retry"]')`, 30_000))
   const browseKo = await r.rpc(`skillsBrowse('', ${JSON.stringify({ retry: true })})`)
   check('illeggibile: il catalogo RPC riporta il marketplace in unavailable e l\'elenco vuoto',
     browseKo.entries.length === 0 && browseKo.unavailable.length === 1 && browseKo.unavailable[0].source === REPO_URL,
     JSON.stringify(browseKo.unavailable))
+  await openSkillsFromMenu(r)
+  await r.waitDom(`!!document.querySelector('[data-testid="skills-window"]')`, 8000)
+  check('illeggibile: «Alcuni pacchetti non si sono caricati.» con «Riprova»',
+    await r.waitDom(`!!document.querySelector('[data-testid="skills-browse-unavailable"]') && ${SKILLS_WINDOW}.textContent.includes('Alcuni pacchetti non si sono caricati.') && !!document.querySelector('[data-testid="skills-browse-retry"]')`, 30_000))
   // ripristino → «Riprova» FUNZIONA (gli errori non stanno mai in cache)
   renameSync(REPO_NASCOSTO, REPO)
+  const clonesPrimaRiprova = gitMain.clones()
   await scrollIntoView(r.pageEval, `document.querySelector('[data-testid="skills-browse-retry"]')`)
   await pointerClick(r.pageEval, `document.querySelector('[data-testid="skills-browse-retry"]')`)
   check('ripristino: «Riprova» riporta i pacchetti (errori mai in cache)',
     await r.waitDom(`!!document.querySelector('[data-testid="skills-browse-entry-due-skill"]') && !document.querySelector('[data-testid="skills-browse-unavailable"]')`, 30_000))
+  // V1: la riprova col marketplace INVARIATO non rifà il clone (ls-remote:
+  // stessa HEAD → fetch leggero sul clone esistente)
+  const chiamateRiprova = gitMain.lines().slice(-40).join(' | ')
+  check('ripristino (V1): «Riprova» con la HEAD invariata NON rifà il clone (ls-remote + fetch)',
+    gitMain.clones() === clonesPrimaRiprova && / ls-remote /.test(` ${chiamateRiprova} `) && / fetch /.test(` ${chiamateRiprova} `),
+    `clone ${clonesPrimaRiprova} → ${gitMain.clones()}`)
   await clickText(r.pageEval, '✕', '[data-testid="skills-window"] button')
   await sleep(300)
+
+  // ============ 8. (V3) il COMPOSITORE allineato ============
+  // la misura della spec: il centro del rettangolo del textarea e quello di
+  // Invia ≤ 2 px. DA SOLA non distingue (sul base: textarea 44 px, Invia 40,
+  // allineati in basso → Δ 2 px; dopo: 36 contro 40 → Δ 2 px) — per questo
+  // anche graffetta e Ragiona (≤ 1 px) e l'INCHIOSTRO: il centro verticale dei
+  // pixel del testo contro quello dell'icona della graffetta, calcolato IN
+  // LOCALE nel renderer (canvas sullo scatto del form), ≤ 2 px
+  await r.waitDom(`!!document.querySelector('form button[type="submit"]')`, 30_000)
+  const misuraCompositore = () => r.pageEval(`
+    const ta = document.querySelector('form textarea')
+    const form = ta.closest('form')
+    const rect = (el) => { if (!el) return null; const b = el.getBoundingClientRect(); return { x: b.left, y: b.top, w: b.width, h: b.height, mid: b.top + b.height / 2, bottom: b.bottom } }
+    // chi c'è DAVVERO sopra il centro di un bottone (un pannello in sovrimpressione?)
+    const sopra = (el) => {
+      if (!el) return null
+      const b = el.getBoundingClientRect()
+      const top = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2)
+      return !top ? 'niente' : el.contains(top) ? 'il bottone' : (top.closest('[data-testid]')?.getAttribute('data-testid') ?? top.tagName.toLowerCase())
+    }
+    const send = form.querySelector('button[type="submit"]')
+    const reason = form.querySelector('[aria-label="Livello di ragionamento"]')
+    return {
+      ta: rect(ta),
+      send: rect(send),
+      clip: rect(form.querySelector('button[aria-label^="Allega immagine"]')),
+      reason: rect(reason),
+      form: rect(form),
+      rows: ta.rows,
+      sopraInvia: sopra(send),
+      sopraRagiona: sopra(reason)
+    }
+  `)
+  /** Lo scatto del SOLO form e i centri dell'inchiostro (testo, icone), in locale. */
+  const inchiostro = async (m) => {
+    const clip = { x: m.form.x - 6, y: m.form.y - 6, width: m.form.w + 12, height: m.form.h + 12, scale: 1 }
+    const shotData = (await r.page.send('Page.captureScreenshot', { format: 'png', clip })).data
+    const centri = await r.pageEval(`
+      const img = new Image()
+      img.src = 'data:image/png;base64,${shotData}'
+      await img.decode()
+      const c = document.createElement('canvas')
+      c.width = img.width
+      c.height = img.height
+      const g = c.getContext('2d')
+      g.drawImage(img, 0, 0)
+      const { data, width } = g.getImageData(0, 0, img.width, img.height)
+      const k = img.width / ${clip.width}
+      const ox = ${clip.x}
+      const oy = ${clip.y}
+      const px = (x, y) => { const i = (y * width + x) * 4; return [data[i], data[i + 1], data[i + 2]] }
+      // il centro dei pixel che si staccano dallo sfondo della zona (pesato sul contrasto)
+      const centro = (x0, y0, x1, y1) => {
+        const X0 = Math.round((x0 - ox) * k), Y0 = Math.round((y0 - oy) * k), X1 = Math.round((x1 - ox) * k), Y1 = Math.round((y1 - oy) * k)
+        const bg = px(X0, Y0)
+        let s = 0
+        let w = 0
+        for (let y = Y0; y < Y1; y++) for (let x = X0; x < X1; x++) {
+          const p = px(x, y)
+          const d = Math.abs(p[0] - bg[0]) + Math.abs(p[1] - bg[1]) + Math.abs(p[2] - bg[2])
+          if (d > 60) { s += y * d; w += d }
+        }
+        return w ? oy + s / w / k : null
+      }
+      const m = ${JSON.stringify(m)}
+      const quadro = (b, half) => [b.x + b.w / 2 - half, b.mid - half, b.x + b.w / 2 + half, b.mid + half]
+      return {
+        testo: centro(m.ta.x + 12, m.ta.y, Math.min(m.ta.x + m.ta.w - 12, m.ta.x + 12 + 220), m.ta.y + m.ta.h),
+        graffetta: centro(...quadro(m.clip, 10)),
+        ragiona: centro(m.reason.x + 4, m.reason.y + 4, m.reason.x + m.reason.w - 4, m.reason.y + m.reason.h - 4),
+        invia: centro(...quadro(m.send, 10))
+      }
+    `)
+    return { shotData, centri }
+  }
+  const scriviCompositore = (t) => r.pageEval(`
+    const ta = document.querySelector('form textarea')
+    const set = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set
+    set.call(ta, ${JSON.stringify(t)})
+    ta.dispatchEvent(new Event('input', { bubbles: true }))
+    ta.blur()
+    return 'scritto'
+  `)
+  const v3 = []
+  for (const [w, dark] of [[1440, false], [1440, true], [900, false], [900, true]]) {
+    await r.setWindowWidth(w)
+    await setDark(r.pageEval, dark)
+    for (const testo of ['', 'Ciao Alfa, una riga sola']) {
+      await scriviCompositore(testo)
+      await sleep(300)
+      const m = await misuraCompositore()
+      const { shotData, centri } = await inchiostro(m)
+      const nome = `compositore-${w}-${dark ? 'scuro' : 'chiaro'}-${testo ? 'testo' : 'vuoto'}`
+      writeFileSync(join(SHOTS, `${nome}.png`), Buffer.from(shotData, 'base64'))
+      log('cattura', `${nome}.png`)
+      const delta = (a, b) => (a === null || b === null ? null : Math.abs(a - b))
+      const d = {
+        nome,
+        altezza: m.ta.h,
+        invia: delta(m.ta.mid, m.send.mid),
+        graffetta: delta(m.ta.mid, m.clip.mid),
+        ragiona: delta(m.ta.mid, m.reason.mid),
+        inkGraffetta: delta(centri.testo, centri.graffetta),
+        inkRagiona: delta(centri.testo, centri.ragiona),
+        inkInvia: delta(centri.testo, centri.invia),
+        sopraInvia: m.sopraInvia,
+        sopraRagiona: m.sopraRagiona
+      }
+      v3.push(d)
+      const f = (x) => (x === null ? 'n/d' : x.toFixed(2))
+      check(`V3 ${nome}: centro textarea ↔ Invia ≤ 2 px (la misura della spec)`, d.invia !== null && d.invia <= 2, `Δ ${f(d.invia)} px, textarea alto ${m.ta.h} px`)
+      check(`V3 ${nome}: centro textarea ↔ graffetta e Ragiona ≤ 1 px`, d.graffetta !== null && d.ragiona !== null && d.graffetta <= 1 && d.ragiona <= 1, `Δ ${f(d.graffetta)} / ${f(d.ragiona)} px`)
+      check(`V3 ${nome}: INCHIOSTRO del testo ↔ icona della graffetta ≤ 2 px (pixel, in locale)`, d.inkGraffetta !== null && d.inkGraffetta <= 2,
+        `Δ ${f(d.inkGraffetta)} px (Ragiona ${f(d.inkRagiona)}, Invia ${f(d.inkInvia)}; sopra Invia: ${d.sopraInvia}, sopra Ragiona: ${d.sopraRagiona})`)
+    }
+  }
+  // col testo A CAPO il campo cresce verso l'alto e i bottoni restano in basso
+  await r.setWindowWidth(1440)
+  await setDark(r.pageEval, false)
+  await scriviCompositore('riga uno\nriga due\nriga tre')
+  await sleep(300)
+  const ml = await misuraCompositore()
+  writeFileSync(join(SHOTS, 'compositore-1440-chiaro-a-capo.png'), Buffer.from((await inchiostro(ml)).shotData, 'base64'))
+  log('cattura', 'compositore-1440-chiaro-a-capo.png')
+  check('V3: col testo a capo il campo cresce verso l\'alto e i bottoni restano in basso',
+    ml.rows === 3 && ml.ta.h > 50 && Math.abs(ml.ta.bottom - ml.send.bottom) <= 1 && ml.ta.y < ml.send.y - 10,
+    `righe ${ml.rows}, alto ${ml.ta.h} px, Δ basso ${Math.abs(ml.ta.bottom - ml.send.bottom).toFixed(1)} px`)
+  await scriviCompositore('')
+  log('V3 misure:', JSON.stringify(v3))
+  tempi.v3 = v3
 } catch (e) {
   failures++
   console.error('\n[sonda] ERRORE:', e.message ?? e)
@@ -715,6 +988,138 @@ try {
   for (const dir of usedDirs) await stopDaemon(dir)
 }
 
+// ============================ T. i TEMPI d'apertura ============================
+// un'ALTRA app (cartella dati sua) con un marketplace finto da 30 plugin e il
+// git RALLENTATO apposta (1 s per show e per clone, come il clone parziale da
+// GitHub): la prima apertura (col conteggio dell'avanzamento), la seconda e
+// quella dopo un riavvio del daemon. 30 plugin = 24 di sole skill col
+// manifest, 3 senza manifest (sole skill, nessuna lettura), 3 connettori
+// (.mcp.json): in Sfoglia ne restano 27
+const REPO30 = mkdtempSync(TMP_BASE + 'sandbot-sfoglia-mp-')
+{
+  const defs = Array.from({ length: 30 }, (_, i) => ({
+    name: `pacchetto-${String(i + 1).padStart(2, '0')}`,
+    mcp: i % 10 === 9,
+    manifest: i % 10 !== 4
+  }))
+  mkdirSync(join(REPO30, '.claude-plugin'), { recursive: true })
+  writeFileSync(join(REPO30, '.claude-plugin', 'marketplace.json'), JSON.stringify({
+    name: 'mp-trenta',
+    owner: 'tester',
+    plugins: defs.map((d) => ({ name: d.name, description: `Il ${d.name} di prova`, source: `./plugins/${d.name}` }))
+  }))
+  for (const d of defs) {
+    const base = join(REPO30, 'plugins', d.name)
+    mkdirSync(join(base, 'skills', 'unica'), { recursive: true })
+    writeFileSync(join(base, 'skills', 'unica', 'SKILL.md'), `---\nname: unica\ndescription: la skill di ${d.name}\n---\nIstruzioni di ${d.name}.`)
+    if (d.manifest) {
+      mkdirSync(join(base, '.claude-plugin'), { recursive: true })
+      writeFileSync(join(base, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: d.name }))
+    }
+    if (d.mcp) writeFileSync(join(base, '.mcp.json'), JSON.stringify({ mcpServers: { s: { url: 'https://servizio.example/mcp' } } }))
+  }
+  execSync('git init -q && git config user.email t@t && git config user.name t && git add -A && git commit -qm init', { cwd: REPO30 })
+}
+const ATTESI30 = 27
+const TT = mkdtempSync(TMP_BASE + 'sandbot-fase-sfoglia-tempi-')
+const USER_T = join(TT, 'data')
+const DATA_T = join(USER_T, 'data')
+mkdirSync(DATA_T, { recursive: true })
+await seedDb(DATA_T, `file://${REPO30}`, 'mp-trenta', [['agent_tempo', 'Tempo', 'bot dei tempi']])
+const gitLento = makeGitWrapper('sandbot-sfoglia-git-lento-', { showDelay: 1, cloneDelay: 1 })
+const appT = launchApp(USER_T, 9372, { HOMUN_GIT_PATH: gitLento.script })
+try {
+  let r
+  try {
+    r = await run(9372)
+  } catch (e) {
+    throw new Error('pagina CDP (tempi) non raggiunta: ' + (e?.message ?? e) + '\nlog app:\n' + appT.getLog().slice(-1200))
+  }
+  if (!(await r.waitDom(`typeof window.sandbot !== 'undefined' && !!window.sandbot.saveProvider`, 40_000))) {
+    throw new Error('window.sandbot (tempi) non disponibile dopo 40s')
+  }
+  await setupProvider(r, ['Tempo'])
+  await r.setWindowWidth(1440)
+  const quanteVoci = () => r.pageEval(`return document.querySelectorAll('[data-testid^="skills-browse-entry-"]').length`)
+
+  // ---- T1: la PRIMA apertura in assoluto (niente cache): il conteggio ----
+  const visti = []
+  let scatti = 0
+  const primaMs = await openSkillsTimed(r, {
+    timeoutMs: 150_000,
+    onPoll: async () => {
+      // il blocco del caricamento: «Cerco i pacchetti…» e il conteggio del daemon
+      const t = await r.pageEval(`return document.querySelector('[data-testid="skills-browse-loading"]')?.textContent.replace(/\\s+/g, ' ').trim() ?? ''`)
+      if (!t) return
+      visti.push(t)
+      if (!/plugin letti/.test(t)) return
+      if (scatti === 0) {
+        scatti++
+        await r.shot('sfoglia-avanzamento-1440-chiaro.png')
+      } else if (scatti === 1) {
+        scatti++
+        await setDark(r.pageEval, true)
+        if (await r.pageEval(`return !!document.querySelector('[data-testid="skills-browse-progress"]')`)) await r.shot('sfoglia-avanzamento-1440-scuro.png')
+        await setDark(r.pageEval, false)
+      }
+    }
+  })
+  tempi.primaApertura = primaMs
+  const conteggi = visti.map((t) => /(\d+) di (\d+) plugin letti/.exec(t)).filter(Boolean).map((m) => [Number(m[1]), Number(m[2])])
+  check('T1: la prima apertura mostra «Cerco i pacchetti…» col conteggio «N di 30 plugin letti»',
+    visti.some((t) => t.includes('Cerco i pacchetti')) && conteggi.some(([d, tot]) => tot === 30 && d < 30),
+    `${visti.length} letture, ${scatti} catture: ${[...new Set(visti)].slice(0, 3).join(' / ') || 'nessuna'}`)
+  check('T1: il conteggio cresce e non torna mai indietro',
+    conteggi.length > 0 && conteggi.every((c, i) => i === 0 || c[0] >= conteggi[i - 1][0]),
+    JSON.stringify([...new Set(conteggi.map((c) => c[0]))]))
+  const vociT1 = await quanteVoci()
+  check('T1: alla fine la lista è completa (27 pacchetti di sole skill)', primaMs !== null && vociT1 === ATTESI30, `${primaMs} ms, ${vociT1} voci`)
+
+  // ---- T2: la SECONDA apertura (cache) ----
+  const treesT = treeDirs(DATA_T)
+  const sentT = treesT[0] ? join(DATA_T, 'cache', 'marketplaces', treesT[0], 'sonda-sentinella') : null
+  if (sentT) writeFileSync(sentT, 'resta')
+  await chiudiFinestra(r)
+  const clonesT2 = gitLento.clones()
+  const secondaMs = await openSkillsTimed(r, { timeoutMs: 150_000 })
+  tempi.secondaApertura = secondaMs
+  check('T2: la seconda apertura mostra la lista entro 2 s', secondaMs !== null && secondaMs <= 2000, `${secondaMs} ms`)
+  await sleep(500)
+  check('T2: NESSUN clone in più, una sola -tree, la sentinella dentro il clone resta',
+    gitLento.clones() === clonesT2 && treeDirs(DATA_T).length === 1 && !!sentT && existsSync(sentT),
+    `clone ${clonesT2} → ${gitLento.clones()}, -tree ${treeDirs(DATA_T).length}`)
+  await chiudiFinestra(r)
+
+  // ---- T3: dopo un RIAVVIO del daemon (la cache su disco) ----
+  const pid0 = daemonPid(DATA_T)
+  await stopDaemon(DATA_T)
+  const tRiavvio = Date.now()
+  await r.rpc('listAgents()') // il client si riconnette e il daemon riparte
+  tempi.riavvioDelDaemon = Date.now() - tRiavvio
+  const pid1 = daemonPid(DATA_T)
+  check('T3: il daemon è ripartito (pid nuovo)', !!pid1 && pid1 !== pid0, `${pid0} → ${pid1}`)
+  await sleep(800)
+  const clonesT3 = gitLento.clones()
+  const dopoRiavvioMs = await openSkillsTimed(r, { timeoutMs: 150_000 })
+  tempi.dopoRiavvio = dopoRiavvioMs
+  check('T3: dopo il riavvio del daemon la lista appare entro 2 s (cache su disco)', dopoRiavvioMs !== null && dopoRiavvioMs <= 2000, `${dopoRiavvioMs} ms`)
+  await sleep(500)
+  const vociT3 = await quanteVoci()
+  check('T3: dopo il riavvio NESSUN clone in più e la lista completa',
+    gitLento.clones() === clonesT3 && vociT3 === ATTESI30, `clone ${clonesT3} → ${gitLento.clones()}, ${vociT3} voci`)
+  await chiudiFinestra(r)
+} catch (e) {
+  failures++
+  console.error('\n[sonda] ERRORE (tempi):', e.message ?? e)
+  try { console.error('--- daemon.log (tempi) ---\n' + readFileSync(join(DATA_T, 'daemon.log'), 'utf8').slice(-2500)) } catch { /* niente log */ }
+  try { console.error(appT.getLog().slice(-1200)) } catch { /* niente log */ }
+} finally {
+  appT?.stop()
+  await sleep(800)
+  await stopProbeDaemons('sandbot-fase-sfoglia')
+  await stopDaemon(DATA_T)
+}
+
 // ============================ chiusura ============================
 const { found, closed, left } = await stopProbeDaemons('sandbot-fase-sfoglia')
 if (left > 0) {
@@ -725,9 +1130,16 @@ if (left > 0) {
 }
 try { providerServer.closeAllConnections?.(); providerServer.close() } catch { /* già chiusa */ }
 try { rmSync(REPO, { recursive: true, force: true }) } catch { /* l'app può essere ancora viva */ }
+try { rmSync(REPO30, { recursive: true, force: true }) } catch { /* l'app può essere ancora viva */ }
+// i tempi d'apertura (per il REPORT): ms dal click su «Skill» alla lista visibile
+console.log('[tempi] ' + JSON.stringify({
+  primaApertura: tempi.primaApertura, secondaApertura: tempi.secondaApertura,
+  riavvioDelDaemon: tempi.riavvioDelDaemon, dopoRiavvio: tempi.dopoRiavvio,
+  principaleSeconda: tempi.principaleSeconda
+}))
 // con fallimenti le cartelle RESTANO (diagnostica); verdi si puliscono
 if (failures === 0 && !process.env.PROBE_KEEP) {
-  for (const entry of readdirSync(TMP_BASE).filter((f) => f.startsWith('sandbot-fase-sfoglia-') || f.startsWith('sandbot-sfoglia-mp-'))) {
+  for (const entry of readdirSync(TMP_BASE).filter((f) => f.startsWith('sandbot-fase-sfoglia-') || f.startsWith('sandbot-sfoglia-mp-') || f.startsWith('sandbot-sfoglia-git-'))) {
     try { rmSync(TMP_BASE + entry, { recursive: true, force: true }) } catch { /* l'app può essere ancora viva */ }
   }
 } else {
