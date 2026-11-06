@@ -218,11 +218,18 @@ let createdTeamN = 0
 const createdTeamIds: string[] = []
 // fase 11 (punto 5): il provider web FINTO e deterministico — si misura il
 // comportamento del modello, non internet
+// 2026-11-06: domini dall'aspetto CREDIBILE. Con «ristoranti.example» il
+// modello (giustamente) diffidava dei risultati come fittizi e andava a
+// cercare altrove o non li citava: il caso misurava il dominio finto, non il
+// comportamento «apri un risultato prima di citarlo». Il mondo resta finto
+// (nessuna rete): questi indirizzi esistono solo nel result simulato.
 const WEB_RESULTS = [
-  { title: 'Trattoria Verde — Bologna', url: 'https://ristoranti.example/verde-bologna', snippet: 'Menu interamente vegetariano nel cuore di Bologna, zona Santo Stefano.' },
-  { title: 'Orto e Cucina', url: 'https://ristoranti.example/orto-cucina', snippet: 'Cucina vegetariana stagionale a km 0.' },
-  { title: 'Sfoglia Rinascita', url: 'https://ristoranti.example/sfoglia-rinascita', snippet: 'Pasta fresca con opzioni vegetariane verificate.' }
+  { title: 'Trattoria Verde — Bologna', url: 'https://www.trattoriaverde-bologna.it/', snippet: 'Menu interamente vegetariano nel cuore di Bologna, zona Santo Stefano.' },
+  { title: 'Orto e Cucina — ristorante vegetariano', url: 'https://www.ortoecucina-bo.it/', snippet: 'Cucina vegetariana stagionale a km 0, via del Pratello.' },
+  { title: 'Sfoglia Rinascita', url: 'https://www.sfogliarinascita.com/', snippet: 'Pasta fresca con opzioni vegetariane verificate, via Castiglione.' }
 ]
+/** Stessa pagina a meno della barra finale (il modello a volte la toglie o la aggiunge). */
+const sameUrl = (a: string, b: string): boolean => a.replace(/\/+$/, '') === b.replace(/\/+$/, '')
 /** fase 11b (0a): i comandi "lunghi" (build, test, install) il sistema li promuove in background da solo. */
 const LONG_CMD_RE = /\b(build|test|install|compile|make)\b/i
 /**
@@ -376,11 +383,14 @@ const TOOL_RESULTS: Record<string, (args: Record<string, unknown>) => string> = 
     if (url.includes('spa.example/offerte')) {
       return formatWebFetchEvidence(url, 'Caricamento…') + '\n\n' + JS_PAGE_HINT
     }
-    if (url.includes('verde-bologna')) {
+    if (url.includes('trattoriaverde-bologna')) {
       return formatWebFetchEvidence(url, '# Trattoria Verde\nMenu vegetariano: ravioli di ricotta e spinaci, parmigiana di melanzane, lasagne di verdure. Prenotazioni 051 123456, zona Santo Stefano a Bologna.')
     }
-    if (url.includes('orto-cucina')) {
-      return formatWebFetchEvidence(url, '# Orto e Cucina\nRistorante vegetariano stagionale. Menù del giorno verdurine fritte, zuppa di farro.')
+    if (url.includes('ortoecucina-bo')) {
+      return formatWebFetchEvidence(url, '# Orto e Cucina\nRistorante vegetariano stagionale in via del Pratello. Menù del giorno: verdurine fritte, zuppa di farro.')
+    }
+    if (url.includes('sfogliarinascita')) {
+      return formatWebFetchEvidence(url, '# Sfoglia Rinascita\nPasta fresca fatta a mano, via Castiglione. Tortelloni di ricotta e piatti vegetariani verificati.')
     }
     return formatWebFetchEvidence(url, '# Pagina\nRistorante a Bologna con piatti vegetariani.')
   },
@@ -1447,7 +1457,7 @@ export const CASES: EvalCase[] = [
       const opened = fetches.map((c) => {
         try { return String((JSON.parse(c.arguments || '{}') as { url?: string }).url ?? '') } catch { return '' }
       })
-      const fromResults = opened.filter((u) => WEB_RESULTS.some((r) => r.url === u))
+      const fromResults = opened.filter((u) => WEB_RESULTS.some((r) => sameUrl(r.url, u)))
       if (!fromResults.length) return { pass: false, reason: `web_fetch di url fuori dai risultati (${opened.join(', ')})` }
       if (!t.delivered.length) return { pass: false, reason: 'nessuna consegna all\'utente' }
       const d = t.delivered[t.delivered.length - 1]!
