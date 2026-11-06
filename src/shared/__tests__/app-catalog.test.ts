@@ -203,4 +203,13 @@ describe('P2 — il catalogo di prova del repo (da sostituire col vero)', () => 
     }
     expect(rows.length).toBeGreaterThanOrEqual(40)
   })
+  it('Google Super è nascosta (decisione 2026-11-06): Google si collega app per app', () => {
+    const rows = loadAppCatalog()
+    expect(rows.some((r) => r.composioSlug === 'googlesuper' || r.name === 'Google Super')).toBe(false)
+    expect(searchApps(rows, 'google super', 'it').some((r) => r.composioSlug === 'googlesuper')).toBe(false)
+    // le app Google singole restano
+    for (const id of ['gmail', 'googledrive', 'googlecalendar']) {
+      expect(rows.some((r) => r.id === id || r.composioSlug === id || r.directId === id)).toBe(true)
+    }
+  })
 })

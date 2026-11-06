@@ -11,7 +11,8 @@
     "test_app",
     "composio",
     "composio_search",
-    "browser_tool"
+    "browser_tool",
+    "googlesuper"
   ],
   "categories": {
     "email": "mail-calendar",
