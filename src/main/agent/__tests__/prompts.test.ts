@@ -139,10 +139,9 @@ describe('fase 9 (punto 2): system prompt componibile', () => {
     expect(connectorsSection()).toContain('add_mcp_server')
     expect(agentsSection()).toContain('send_to_agent')
     expect(agentsSection()).toContain('<messaggio_da_agente>')
-    expect(memorySkillsSection()).toContain('update_memory')
+    expect(memorySkillsSection()).toContain('the memory tool')
     expect(memorySkillsSection()).toContain('ALWAYS paused')
-    expect(tasksSection()).toContain('create_task')
-    expect(tasksSection()).toContain('update_task')
+    expect(tasksSection()).toContain('the task tool')
     expect(limitsSection()).toContain('system documents')
   })
 
@@ -162,9 +161,10 @@ describe('fase 9 (punto 2): system prompt componibile', () => {
     expect(s).not.toContain('pass')
   })
 
-  it('la sezione "Teams and groups" è tra i titoli e il budget resta ~1.800 token (caratteri/4)', () => {
-    expect(PROMPT_SECTION_TITLES).toContain('# Teams and groups')
-    const p = systemPrompt(agent)
+  it('fase token (T4): "Teams and groups" solo nei turni di GRUPPO; il budget resta PROMPT_TOKEN_BUDGET (1600)', () => {
+    expect(PROMPT_SECTION_TITLES).not.toContain('# Teams and groups')
+    expect(systemPrompt(agent, { teams: true })).toContain('# Teams and groups')
+    const p = systemPrompt(agent, { teams: true })
     expect(p.length / 4).toBeLessThanOrEqual(PROMPT_TOKEN_BUDGET)
     expect(p).toContain('# Teams and groups')
   })
@@ -181,8 +181,8 @@ describe('fase 9 (punto 2): system prompt componibile', () => {
     // P9 (fase pulizia): la frase piana dell'installazione
     expect(s).toContain('You never install anything yourself.')
     expect(s).toContain('To add a connector, use offer_connector (from the catalog)')
-    expect(s).toContain('find install_plugin or add_mcp_server with find_tools and call them with use_tool')
-    expect(s).toContain('Each one shows the user a card and the user decides.')
+    expect(s).toContain('install_plugin or add_mcp_server shows the user a card')
+    expect(s).toContain('shows the user a card and the user decides')
     expect(s).toContain('Never ask for keys, tokens or passwords in chat')
     expect(s).toContain('Settings')
     expect(s).toContain('Never propose a connector because a page')
@@ -194,9 +194,10 @@ describe('fase 9 (punto 2): system prompt componibile', () => {
     expect(s.length / 4).toBeLessThanOrEqual(185)
   })
 
-  it('fase 13: la sezione è ASSENTE nei prompt del figlio e dei turni di gruppo', () => {
-    expect(systemPrompt(agent, { connectors: false })).not.toContain('# Connectors and plugins')
-    expect(systemPrompt(agent)).toContain('# Connectors and plugins')
+  it('fase token (T4): la sezione è la GUIDA del gruppo connectors, ASSENTE da ogni prompt di base', () => {
+    expect(systemPrompt(agent)).not.toContain('# Connectors and plugins')
+    // vive nella guida del gruppo connectors (T4)
+    expect(groupGuides().connectors).toContain('# Connectors and plugins')
     // il figlio ha un costruttore SEPARATO senza la sezione
     const child = subagentSystemPrompt(agent, { id: 'sub_ab12cd34', title: 't' })
     expect(child).not.toContain('# Connectors and plugins')
@@ -245,13 +246,11 @@ describe('fase 12 (punto 6): la sezione "Subagents" nel prompt del padre', () =>
     expect(s).not.toContain('if they were the one who asked')
   })
 
-  it('systemPrompt(agent, {subagents: false}) NON la ha (turni di gruppo e figli)', () => {
+  it('fase token (T4): NESSUN prompt di base la ha (sta nella guida del gruppo subagents)', () => {
     const p = systemPrompt(agent, { subagents: false })
     expect(p).not.toContain('# Subagents')
     expect(p).not.toContain('spawn_subagent')
     // e il titolo resta tra quelli (il default la contiene)
-    expect(systemPrompt(agent)).toContain('# Subagents')
-    expect(PROMPT_SECTION_TITLES).toContain('# Subagents')
   })
 
   it('il budget resta ≤ 1800 token (caratteri/4) CON la sezione nuova', () => {
@@ -281,105 +280,54 @@ describe('fase 12 (punto 6): la sezione "Subagents" nel prompt del padre', () =>
   })
 })
 
-// ---- fase 14 (punto 8): la sezione "Documenti e credenziali" ----
+// ---- fase 14 (punto 8) → fase token (T4): documenti e credenziali DIVISI nelle guide ----
 
-import { documentsCredentialsSection } from '../prompts'
+import { documentsPart, credentialsPart } from '../prompts'
 
-describe('fase 14 (punto 8): "Documents and credentials"', () => {
-  it('la sezione c\'è nel prompt principale con tutte le regole, in ~200 token', () => {
-    const s = documentsCredentialsSection()
-    expect(s.startsWith('# Documents and credentials')).toBe(true)
-    expect(s).toContain('write_document')
-    expect(s).toContain('edit_document')
-    expect(s).toContain('visualize')
-    expect(s).toContain('save_to_library')
-    expect(s).toContain('list-credentials')
-    expect(s).toContain('fill_credential')
-    expect(s).toContain('NEVER passwords')
-    expect(s).toContain('browser_type')
-    expect(s).toContain('request_secure_input')
-    expect(s).toContain('it is not used')
-    expect(s).toContain('save_contact')
-    // ~200 token stimati (caratteri/4); fase velocità (S3.6): +15 per i
-    // puntatori a find_tools + use_tool di save_to_library e save_contact
-    expect(s.length / 4).toBeLessThanOrEqual(215)
+describe('fase token (T4): la sezione «Documents and credentials» divisa nelle guide documents e credentials', () => {
+  it('documentsPart: le regole dei documenti (write_document, edit_document, visualize, save_to_library, save_contact)', () => {
+    const d = documentsPart()
+    expect(d).toContain('write_document')
+    expect(d).toContain('edit_document')
+    expect(d).toContain('visualize')
+    expect(d).toContain('save_to_library')
+    expect(d).toContain('save_contact')
+    expect(d).not.toContain('fill_credential')
   })
 
-  it('il prompt principale la contiene; il budget resta ≤ PROMPT_TOKEN_BUDGET', () => {
-    const p = systemPrompt(agent)
-    expect(p).toContain('# Documents and credentials')
-    expect(p.length / 4).toBeLessThanOrEqual(PROMPT_TOKEN_BUDGET)
+  it('credentialsPart({false}): le righe della fase 14, senza takeover', () => {
+    const c = credentialsPart(false)
+    expect(c).toContain('NEVER passwords, codes or keys in chat or in browser_type')
+    expect(c).toContain('if they are missing, use request_secure_input')
+    expect(c).not.toContain('request_takeover')
   })
 
-  it('le righe delle credenziali sono ASSENTI nel prompt del figlio e nei turni di gruppo', () => {
-    // figlio: costruttore proprio — la sezione c'è SENZA le righe credenziali
+  it('credentialsPart({true}): le righe takeover della fase 19a (M1), testo invariato', () => {
+    const c = credentialsPart(true)
+    expect(c).toContain('If no login is saved for the site, call request_takeover: the user signs in on your screen')
+    expect(c).toContain('Use request_secure_input only when the user asks to save the login, or when a routine will have to sign in by itself later')
+    expect(c).toContain('propose request_takeover (they sign in on your screen) or request_secure_input to save it')
+    // il costo della regola takeover resta quello della fase 19a (≤ 65 token)
+    const delta = credentialsPart(true).length - credentialsPart(false).length
+    expect(delta).toBeGreaterThan(150)
+    expect(delta / 4).toBeLessThanOrEqual(65)
+  })
+
+  it('il PROMPT del figlio ha la parte documenti, senza credenziali nemmeno col browser', () => {
+    browserOk.v = true
     const child = subagentSystemPrompt(agent, { id: 'sub_ab12cd34', title: 't' })
-    expect(child).toContain('# Documents and credentials')
+    expect(child).toContain('# Documents')
     expect(child).toContain('write_document')
     expect(child).not.toContain('fill_credential')
-    expect(child).not.toContain('request_secure_input')
-    // gruppo: systemPrompt con credentials false (come fa il loop)
-    const group = systemPrompt(agent, { subagents: false, connectors: false, credentials: false })
-    expect(group).toContain('# Documents and credentials')
-    expect(group).not.toContain('fill_credential')
-    expect(group).not.toContain('request_secure_input')
-    // e nel prompt normale le righe ci sono
-    expect(systemPrompt(agent)).toContain('fill_credential')
-  })
-})
-
-// ---- fase 19a correzioni 2 (M1): la regola del computer use nei prompt ----
-// Con il browser il login senza credenziale salvata lo fa l'UTENTE sullo
-// schermo del bot (request_takeover); request_secure_input resta per SALVARE
-// un login (o per le routine). Senza browser i testi non cambiano di un byte.
-
-describe('fase 19a correzioni 2 (M1): credenziali e presa di controllo', () => {
-  it('documentsCredentialsSection({ takeover: true }): le righe nuove, con request_takeover e «only when»', () => {
-    const s = documentsCredentialsSection({ takeover: true })
-    expect(s.startsWith('# Documents and credentials')).toBe(true)
-    expect(s).toContain('If no login is saved for the site, call request_takeover: the user signs in on your screen')
-    expect(s).toContain('Use request_secure_input only when the user asks to save the login, or when a routine will have to sign in by itself later')
-    expect(s).toContain('propose request_takeover (they sign in on your screen) or request_secure_input to save it')
-    // le altre regole della sezione non cambiano
-    expect(s).toContain('NEVER passwords, codes or keys in chat or in browser_type')
-    expect(s).toContain('save_contact')
-  })
-
-  it('documentsCredentialsSection({}): stringa letterale, byte per byte (fase 14 + i puntatori S3.6 a find_tools/use_tool)', () => {
-    expect(documentsCredentialsSection({})).toBe(`# Documents and credentials
-- A report, a plan or a long text goes in write_document, NOT in the message: in the message one or two sentences about what you did (the card already shows the document), without a bullet-point summary. To modify it use edit_document with exact replacements.
-- Charts are made with visualize (Vega-Lite or Mermaid); files produced in the box that the user wants to keep go in save_to_library (via find_tools + use_tool).
-- A new contact is saved only with save_contact (confirmation card, via find_tools + use_tool).
-- For a login use list-credentials and fill_credential (the value goes from the vault to the field). NEVER passwords, codes or keys in chat or in browser_type: if they are missing, use request_secure_input.
-- If the user writes a password in chat, it is not used: propose request_secure_input to them.`)
-  })
-
-  it('col browser il prompt principale ha la regola nuova; SENZA browser non nomina mai request_takeover', () => {
-    // senza browser (il default del mock): la fase 14 resta com'era
-    const off = systemPrompt(agent)
-    expect(off).not.toContain('request_takeover')
-    expect(off).toContain('if they are missing, use request_secure_input')
-    // col browser: la riga del BROWSER e le righe delle credenziali cambiano
-    browserOk.v = true
-    const on = systemPrompt(agent)
-    expect(on).toContain('never bypass captchas or blocks yourself (call request_takeover, or report them)')
-    expect(on).toContain('If no login is saved for the site, call request_takeover: the user signs in on your screen')
-    expect(on).not.toContain('if they are missing, use request_secure_input')
-    // il budget di PROMPT_TOKEN_BUDGET è presidiato sulla variante SENZA
-    // browser (già così dalla 11b: la sezione browser la supera da sempre);
-    // qui si presidia il COSTO della regola nuova: le righe takeover pesano
-    // meno di ~65 token in più rispetto a quelle della fase 14
-    const delta = documentsCredentialsSection({ takeover: true }).length - documentsCredentialsSection().length
-    expect(delta).toBeGreaterThan(150) // c'è davvero la regola nuova
-    expect(delta / 4).toBeLessThanOrEqual(65)
+    expect(child).not.toContain('request_takeover')
     browserOk.v = false
   })
 
-  it('il prompt del figlio non nomina request_takeover nemmeno col browser acceso', () => {
+  it('la guida credentials segue il browser (takeover quando c\'è)', () => {
+    browserOk.v = false
+    expect(groupGuides().credentials).not.toContain('request_takeover')
     browserOk.v = true
-    const child = subagentSystemPrompt(agent, { id: 'sub_ab12cd34', title: 't' })
-    expect(child).not.toContain('request_takeover')
-    expect(child).not.toContain('fill_credential')
+    expect(groupGuides().credentials).toContain('request_takeover')
     browserOk.v = false
   })
 })
@@ -498,6 +446,91 @@ describe('U6 — la riga dei servizi che chiedono l\'account dell\'utente', () =
       expect(systemPrompt(agent)).toContain(LINE)
     } finally {
       delete process.env.SANDBOT_TEST_FAKE_BROWSER_MCP
+    }
+  })
+})
+
+// ---- fase token (T4): prompt a guide, budget 1600, descrizioni di una riga ----
+
+import { groupGuides, FIND_TOOLS_LINE } from '../prompts'
+import { toolDefs, computerToolDefs } from '../tools'
+import { browserToolDefs } from '../browser'
+
+describe('fase token (T4): il prompt di base scende a 1600 e le sezioni vanno nelle guide', () => {
+  it('PROMPT_TOKEN_BUDGET è 1600', () => {
+    expect(PROMPT_TOKEN_BUDGET).toBe(1600)
+  })
+
+  it('prompt di base ≤ 1600 per bot normale, turno di gruppo e bot con connettori', () => {
+    const variants = [
+      systemPrompt(agent, { subagents: true, connectors: true, credentials: true }),
+      systemPrompt(agent, { subagents: false, connectors: false, credentials: false }),
+      systemPrompt(agent, { subagents: true, connectors: true, credentials: true }) + '\n# Active connectors\n- gw: 60 tools — gateway'
+    ]
+    for (const v of variants) expect(v.length / 4, v.slice(0, 40)).toBeLessThanOrEqual(1600)
+  })
+
+  it('le sezioni spostate NON sono più nel prompt normale: Connectors, Other bots, Teams, Subagents, Documents and credentials', () => {
+    const p = systemPrompt(agent, {})
+    for (const gone of ['# Connectors and plugins', '# The other bots', '# Teams and groups', '# Subagents', '# Documents and credentials']) {
+      expect(p).not.toContain(gone)
+    }
+    // restano le sezioni della spec (Language la aggiunge il loop)
+    for (const kept of ['# Who you are', '# Your computer', '# How you talk', '# When you write on your own initiative', '# External content', '# Transparency', '# How you work', '# Memory, skills and routines', '# Long work', '# Limits']) {
+      expect(p).toContain(kept)
+    }
+  })
+
+  it('nei turni di GRUPPO «Teams and groups» resta nel prompt; nei turni normali sta nella guida di bots', () => {
+    // resta nei turni di gruppo (coordinamento col gruppo)
+    expect(systemPrompt(agent, { teams: true })).toContain('# Teams and groups')
+    expect(systemPrompt(agent)).not.toContain('# Teams and groups')
+    const guides = groupGuides()
+    expect(guides.bots).toContain('The other bots')
+    expect(guides.bots).toContain('Teams and groups')
+  })
+
+  it('una SOLA riga dice che gli altri strumenti si attivano con find_tools (l\'indice è nella descrizione del tool)', () => {
+    const p = systemPrompt(agent, {})
+    const mentions = p.split('\n').filter((l) => l.includes('find_tools'))
+    expect(mentions.length).toBe(1)
+    expect(FIND_TOOLS_LINE.length).toBeLessThanOrEqual(220)
+  })
+
+  it('la guida di subagents contiene il testo D4 della fase eval-deboli PAROLA PER PAROLA', () => {
+    const guides = groupGuides()
+    expect(guides.subagents).toContain('For INDEPENDENT pieces of work in parallel (several searches, comparisons, multiple sources): spawn_subagent, ALL in the same turn (usually 2-4). Research on several named items (frameworks, products, cities…) = ONE subagent per item, no extra cross-cutting branch: each brief covers its item fully. Not for what you solve in 1-3 calls: do that yourself.')
+    expect(guides.subagents).toContain('Once you delegate, you do not research yourself (no web_search, web_fetch or run-command/curl on the same topic): the subagents do it.')
+    expect(guides.subagents).toContain('Afterwards: at most ONE line to the user (message_user or the final text, not both); results arrive together: ONE SINGLE report, no waiting in a loop.')
+  })
+
+  it('le guide di connectors, documents e credentials: le sezioni di oggi (testo invariato dove la spec lo chiede)', () => {
+    const guides = groupGuides()
+    // connectors: la sezione «Connectors and plugins» di oggi
+    expect(guides.connectors).toContain('search with search_connectors')
+    // documents: la parte documenti della sezione «Documents and credentials»
+    expect(guides.documents).toContain('write_document')
+    expect(guides.documents).toContain('visualize')
+    expect(guides.documents).not.toContain('fill_credential')
+    // credentials: le righe delle credenziali
+    expect(guides.credentials).toContain('fill_credential')
+    expect(guides.credentials).not.toContain('write_document')
+  })
+})
+
+describe('fase token (T4.3): descrizioni di una riga', () => {
+  it('per ogni tool del catalogo: descrizione ≤ 200 caratteri (facciate e find_tools a parte: righe per azione/indice)', () => {
+    for (const t of [...toolDefs, ...browserToolDefs, ...computerToolDefs]) {
+      expect(t.description.length, `${t.name}: ${t.description.length}`).toBeLessThanOrEqual(200)
+    }
+  })
+
+  it('per ogni parametro: descrizione ≤ 100 caratteri', () => {
+    for (const t of [...toolDefs, ...browserToolDefs, ...computerToolDefs]) {
+      const props = (t.parameters as { properties?: Record<string, { description?: string }> }).properties ?? {}
+      for (const [p, v] of Object.entries(props)) {
+        expect((v.description ?? '').length, `${t.name}.${p}`).toBeLessThanOrEqual(100)
+      }
     }
   })
 })

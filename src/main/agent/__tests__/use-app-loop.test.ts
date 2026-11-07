@@ -88,6 +88,9 @@ const makeAgent = (useAppMode: 'always_allow' | 'needs_approval' = 'always_allow
       { tool: 'use-app', pattern: '*', mode: useAppMode }
     ]
   })
+  // fase token (T2): i test chiamano use-app per nome — il gruppo apps dev'essere
+  // già attivo, come farebbe una find_tools({group}) precedente nella conversazione
+  store.appendEntry({ agentId: agent.id, kind: 'tool-result', role: 'system', content: 'groups active', meta: { callId: 'seed-groups', activatedGroups: ['apps'] } })
   return agent.id
 }
 

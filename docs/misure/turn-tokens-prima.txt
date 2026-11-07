@@ -1,0 +1,188 @@
+# turn-tokens — token stimati (caratteri/4) del turno, per configurazione
+# fonte: assembleTurnTools (src/main/agent/turn-tools.ts) — la stessa del loop e dell'eval
+# prompt: system prompt del turno SENZA le sezioni dinamiche (memoria, skill, bot principale, connettori)
+
+## bot normale senza browser
+prompt: 2473
+tools del turno: 6252 (33 tool)
+totale prompt+tools: 8725
+per tool:
+  message_user: 202
+  ask_user: 319
+  draft_external: 271
+  run-command: 295
+  await_shell: 176
+  read-file: 94
+  write-file: 74
+  list-directory: 59
+  use-app: 389
+  list-credentials: 97
+  find_contacts: 94
+  update_memory: 262
+  recall_memory: 86
+  skill: 157
+  search_connectors: 140
+  offer_connector: 152
+  web_search: 135
+  web_fetch: 175
+  post_to_group: 189
+  pass: 93
+  create_task: 230
+  update_task: 170
+  spawn_subagent: 171
+  check_subagent: 81
+  update_state: 587
+  write_document: 257
+  edit_document: 170
+  read_document: 106
+  visualize: 163
+  fill_credential: 208
+  request_secure_input: 284
+  find_tools: 220
+  use_tool: 146
+gruppi (aree dei differiti di oggi):
+  Other bots and groups: 1183 (7 tool)
+  Subagents: 196 (2 tool)
+  Skills: 203 (1 tool)
+  Connectors and plugins: 332 (2 tool)
+  Permissions: 198 (1 tool)
+  Files with the Mac: 273 (2 tool)
+  Library: 376 (3 tool)
+  Contacts: 152 (1 tool)
+
+## bot normale con browser
+prompt: 2715
+tools del turno: 7763 (47 tool)
+totale prompt+tools: 10478
+per tool:
+  message_user: 202
+  ask_user: 319
+  draft_external: 271
+  run-command: 295
+  await_shell: 176
+  read-file: 94
+  write-file: 74
+  list-directory: 59
+  use-app: 389
+  list-credentials: 97
+  find_contacts: 94
+  update_memory: 262
+  recall_memory: 86
+  skill: 157
+  search_connectors: 140
+  offer_connector: 152
+  web_search: 135
+  web_fetch: 175
+  post_to_group: 189
+  pass: 93
+  create_task: 230
+  update_task: 170
+  spawn_subagent: 171
+  check_subagent: 81
+  update_state: 587
+  write_document: 257
+  edit_document: 170
+  read_document: 106
+  visualize: 163
+  fill_credential: 208
+  request_secure_input: 284
+  find_tools: 220
+  use_tool: 146
+  browser_open: 92
+  browser_snapshot: 112
+  browser_click: 83
+  browser_type: 124
+  browser_select: 81
+  browser_press_key: 63
+  browser_back: 33
+  browser_wait: 86
+  browser_tabs: 105
+  browser_screenshot: 53
+  browser_close: 36
+  request_takeover: 124
+  computer_observe: 84
+  computer_act: 435
+gruppi (aree dei differiti di oggi):
+  Other bots and groups: 1183 (7 tool)
+  Subagents: 196 (2 tool)
+  Skills: 203 (1 tool)
+  Connectors and plugins: 332 (2 tool)
+  Permissions: 198 (1 tool)
+  Files with the Mac: 273 (2 tool)
+  Library: 376 (3 tool)
+  Contacts: 152 (1 tool)
+
+## turno di gruppo
+prompt: 1979
+tools del turno: 5977 (32 tool)
+totale prompt+tools: 7956
+per tool:
+  send_to_user: 149
+  ask_user: 319
+  draft_external: 271
+  run-command: 295
+  await_shell: 176
+  read-file: 94
+  write-file: 74
+  list-directory: 59
+  use-app: 389
+  list-credentials: 97
+  find_contacts: 94
+  update_memory: 262
+  recall_memory: 86
+  skill: 157
+  search_connectors: 140
+  offer_connector: 152
+  web_search: 135
+  web_fetch: 175
+  post_to_group: 189
+  pass: 93
+  create_task: 230
+  update_task: 170
+  spawn_subagent: 171
+  check_subagent: 81
+  update_state: 587
+  write_document: 257
+  edit_document: 170
+  read_document: 106
+  visualize: 163
+  request_secure_input: 284
+  find_tools: 206
+  use_tool: 146
+gruppi (aree dei differiti di oggi):
+  Other bots and groups: 1183 (7 tool)
+  Subagents: 196 (2 tool)
+  Skills: 203 (1 tool)
+  Permissions: 198 (1 tool)
+  Files with the Mac: 273 (2 tool)
+  Library: 376 (3 tool)
+  Contacts: 152 (1 tool)
+
+## figlio (sottoagente)
+prompt: 652
+tools del turno: 2280 (21 tool)
+totale prompt+tools: 2932
+per tool:
+  run-command: 295
+  await_shell: 176
+  read-file: 94
+  write-file: 74
+  list-directory: 59
+  recall_memory: 86
+  skill: 157
+  web_search: 135
+  web_fetch: 175
+  browser_open: 92
+  browser_snapshot: 112
+  browser_click: 83
+  browser_type: 124
+  browser_select: 81
+  browser_press_key: 63
+  browser_back: 33
+  browser_wait: 86
+  browser_tabs: 105
+  browser_screenshot: 53
+  browser_close: 36
+  wake_parent: 161
+gruppi (aree dei differiti di oggi):
+

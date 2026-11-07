@@ -103,6 +103,9 @@ const SUBAGENT_BASE_TOOLS = new Set([
   'read-file', 'write-file', 'list-directory',
   'web_search', 'web_fetch',
   'recall_memory', 'skill',
+  // fase token (T2): la ricerca dei gruppi è del figlio come del padre
+  // (browser e tasks si trovano; i gruppi esclusi dalla whitelist no)
+  'find_tools',
   'wake_parent'
 ])
 

@@ -106,11 +106,19 @@ import { MAX_CREATE_AGENTS_PER_TURN, wakeParentToolDef } from './tools'
 import { toolsForTurnSource, connectorProposalOffered, CONNECTOR_PROPOSAL_DENIED, GROUP_EXCLUDED_TOOLS, isMcpId, offerConnectorMcpGuidance, offerConnectorMissingText } from './connectors-policy'
 import { PROPOSAL_RESULT } from '../connectors/install'
 import {
-  findToolsDef, rankTools, requiredParamsOf, formatFindToolsResult, formatBuiltinToolsResult, toolsDeferred,
-  activeToolsFromTranscript, connectorsActiveSection, DEFAULT_MAX_INLINE_TOOLS
+  requiredParamsOf, toolsDeferred, connectorsActiveSection, DEFAULT_MAX_INLINE_TOOLS
 } from '../mcp/find-tools'
-// fase velocità (S3): elenco core fisso + integrati differiti dietro find_tools/use_tool
-import { partitionTools, useToolDef, formatNameIndexText, DEFERRED_TOOL_NAMES } from './core-tools'
+// fase velocità (S3): elenco core fisso + integrati differiti dietro find_tools/use_tool;
+// fase token (T0/T1/T2): l'elenco lo costruisce l'unica fonte pura assembleTurnTools
+// (nucleo + gruppi attivabili); use_tool resta solo per le storie vecchie
+import { assembleTurnTools, offeredMcpOf, activateGroupsResult, toolDefsOfGroups, groupsNamedInResult, RESULT_ACTIVATES, activeGroupsFromTranscript, groupActivationText, type ToolGroupPresent } from './turn-tools'
+import { useToolDef } from './core-tools'
+import { expandFacadeCall, FACADE_ACTIONS } from './facades'
+// fase token (T8): i controlli fissi di sicurezza (puri): <evento> esterno
+// contamina il turno; gli argomenti verso l'esterno con carta/chiave/segreto
+// di chat vengono rifiutati PRIMA di permessi e card, senza il valore
+import { hasExternalEvento, argGuardVerdict, redactGuardedArgs, userChatTextsOf } from './arg-guard'
+import { builtinGroupOf } from './core-tools'
 import type { Approval, ProviderConfig, SandbotEvent, SendMessagePayload, TurnEnd, ReadingPageMeta } from '../../shared/types'
 // fase 12: sottoagenti — policy pura del figlio, store del registro, formatters
 import {
@@ -1332,6 +1340,15 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       )
     }
 
+    // fase token (T8a): un blocco <evento> esterno nel messaggio che apre il
+    // turno contamina il turno, come una pagina web letta (le regole allow
+    // delle azioni con effetti tornano a chiedere all'utente)
+    if (!contaminated && hasExternalEvento(userText)) {
+      contaminated = true
+      run.turnAllows.clear()
+      run.turnGrantEpoch++
+    }
+
     // §5.3: il messaggio corrente è l'ultimo entry del transcript → compare una volta sola.
     // Fase 4: il system prompt include memoria (§3bis L6) e skill disponibili.
     // Fase 5: include le istruzioni personalizzate dei connettori connessi.
@@ -1389,7 +1406,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       // fase 12 (punto 6): la sezione Sottoagenti solo nei bot NORMALI, mai
       // nei turni di gruppo (lì si coordina col gruppo)
       // fase 14 (punto 8): le righe delle credenziali solo nei turni NON di gruppo
-      systemText = systemPrompt(agent, { subagents: opts.groupTurn === undefined, connectors: opts.groupTurn === undefined, credentials: opts.groupTurn === undefined }) +
+      systemText = systemPrompt(agent, { teams: opts.groupTurn !== undefined }) +
         mainSection + buildSkillsSection(agentId) + connectorsSection + buildMemorySection(agentId)
     }
 
@@ -1409,9 +1426,13 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     // fase 19a (V7): anche i tre dello SCHERMO (request_takeover,
     // computer_observe, computer_act) esistono solo dove esiste il browser
     let browserDefs: import('./llm').ToolDef[] = []
+    let browserOn = false
     try {
       const { browserToolDefs, browserAvailable } = await import('./browser')
-      if (browserAvailable()) browserDefs = [...browserToolDefs, ...computerToolDefs]
+      if (browserAvailable()) {
+        browserDefs = [...browserToolDefs, ...computerToolDefs]
+        browserOn = true
+      }
     } catch {
       // browser non disponibile: prosegue senza
     }
@@ -1445,10 +1466,12 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       agentMessage: opts.agentMessage,
       initiator: opts.initiator
     })
-    // la divisione core/differiti (fase velocità S3): l'elenco differito è
-    // fisso per tutto il turno, l'ordine resta quello di toolDefs
-    const { core: coreDefs, deferred: deferredBuiltinDefs } = partitionTools(builtins)
-    let allTools: import('./llm').ToolDef[] = coreDefs
+    // fase token (T0/T1/T2): i tool MCP del bot e la soglia differita si
+    // calcolano qui (la sezione "Connettori attivi" del prompt li serve);
+    // l'elenco del turno lo costruisce l'UNICA fonte pura assembleTurnTools
+    // (turn-tools.ts) PIÙ AVANTI, dopo la risoluzione della rotta — il
+    // filtro dei tool che restituiscono immagini (H4) agisce sul CATALOGO,
+    // prima dell'assemblaggio, così un gruppo non si attiva senza i suoi tool.
     let mcpToolDefs: import('./llm').ToolDef[] = []
     try {
       const { activeTools } = await import('../mcp')
@@ -1458,49 +1481,6 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     }
     const maxInlineTools = getSetting<number>('connectors.maxInlineTools', DEFAULT_MAX_INLINE_TOOLS)
     const deferredMcp = toolsDeferred(mcpToolDefs.length, maxInlineTools)
-    // find_tools c'è sempre quando esiste almeno un integrato differito nel
-    // turno, o quando i tool MCP sono differiti; use_tool solo per gli
-    // integrati differiti (i tool MCP si chiamano per nome, come sempre)
-    if (deferredBuiltinDefs.length > 0 || deferredMcp) {
-      allTools = [
-        ...allTools,
-        findToolsDef(deferredBuiltinDefs.map((t) => t.name), deferredMcp, formatNameIndexText),
-        ...(deferredBuiltinDefs.length > 0 ? [useToolDef] : [])
-      ]
-    }
-    // poi browser/computer, in fondo all'elenco degli integrati
-    allTools = [...allTools, ...browserDefs]
-    let offeredMcpDefs = mcpToolDefs
-    if (!deferredMcp) {
-      // gli MCP inline chiudono l'elenco (dopo core, ricerca e browser)
-      allTools = [...allTools, ...mcpToolDefs]
-    } else {
-      // nessuno schema MCP nel prompt: restano attivi solo quelli già
-      // attivati con find_tools in QUESTA conversazione (dal transcript,
-      // ultimi 20), aggiunti in FONDO in ordine stabile (cache del prompt)
-      const prevActive = activeToolsFromTranscript(scopedEntries())
-      const prevSet = new Set(prevActive)
-      offeredMcpDefs = mcpToolDefs.filter((t) => prevSet.has(t.name))
-      allTools = [...allTools, ...offeredMcpDefs]
-    }
-    // nel FIGLIO wake_parent esiste e chiude l'elenco
-    if (opts.subagent) allTools = [...allTools, wakeParentToolDef]
-    // M1: i tool MCP offerti in QUESTO turno, con annotazioni e schema —
-    // servono a compilare la via di un draft_external senza via quando per
-    // il canale c'è esattamente un invio esterno
-    const sendCandidates: SendCandidate[] = offeredMcpDefs.map((t) => ({
-      name: t.name,
-      ...(permissions.mcpAnnotationsOf(t.name) ? { annotations: permissions.mcpAnnotationsOf(t.name)! } : {}),
-      parameters: t.parameters
-    }))
-    // i nomi dei tool MCP attivi del turno: in modalità differita un mcp__*
-    // (o composio__*, fase app A5) fuori da questo insieme NON si esegue
-    // ("strumento non attivo")
-    const activeMcpNames = new Set(
-      allTools
-        .filter((t) => t.name.startsWith('mcp__') || t.name.startsWith('composio__'))
-        .map((t) => t.name)
-    )
     // fase 13 (punto 5): in modalità differita il prompt porta la sezione
     // "Connettori attivi" al posto degli schemi MCP (una riga per server)
     if (deferredMcp && !opts.subagent) {
@@ -1682,17 +1662,50 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     // ignorati: la visione resta sconosciuta, come prima
     if (activeProvider.kind === 'ollama') await readOllamaCapabilities(activeProvider, activeRoute.model)
 
-    // fase 18b (H4): visione conosciuta FALSA del modello del turno → use-app
-    // (l'unico tool che restituisce images) non viene offerto. Con vision
-    // sconosciuta (null) tutto resta come prima. Se la riserva cambia modello
-    // a metà turno la lista non si tocca: un'eventuale chiamata riceve
-    // l'errore inglese al momento dell'esecuzione (giù, nel gate dei tool).
+    // fase 18b (H4): visione conosciuta FALSA del modello del turno → i tool
+    // che restituiscono immagini non si OFFRONO. Con vision sconosciuta (null)
+    // tutto resta come prima. fase token (T2): il filtro agisce sul CATALOGO
+    // (prima dell'assemblaggio), così il gruppo apps non esiste affatto e il
+    // gruppo browser perde computer_observe/computer_act — un find_tools non
+    // può attivare schemi che il modello non può usare.
     // fase 19a (V7): computer_observe e computer_act restituiscono IMMAGINI
     // dello schermo del bot → stessa regola di use-app; request_takeover è
     // testuale e resta per TUTTI i modelli
     if (modelCapabilities(activeProvider, activeRoute.model).vision === false) {
-      allTools = allTools.filter((t) => t.name !== 'use-app' && t.name !== 'computer_observe' && t.name !== 'computer_act')
+      builtins = builtins.filter((t) => t.name !== 'use-app')
+      browserDefs = browserDefs.filter((t) => t.name !== 'computer_observe' && t.name !== 'computer_act')
     }
+    // fase token (T0/T1/T2): l'elenco del turno lo costruisce l'UNICA fonte
+    // pura assembleTurnTools (turn-tools.ts) — la stessa che chiama l'eval
+    // (T7) e che misura scripts/turn-tokens.ts: nucleo T1, find_tools con
+    // l'indice dei gruppi, i gruppi attivati in conversazione in coda, MCP
+    // inline o per server, wake_parent nel figlio.
+    const {
+      tools: assembledTools,
+      deferredIndex: turnCatalog,
+      activeGroups: assembledActiveGroups
+    } = assembleTurnTools({
+      builtins,
+      browserAvailable: browserOn,
+      browserDefs,
+      mcpToolDefs,
+      maxInlineTools,
+      activatedGroups: activeGroupsFromTranscript(scopedEntries()),
+      ...(opts.subagent !== undefined ? { subagent: true } : {}),
+      ...(opts.groupTurn !== undefined ? { groupTurn: true } : {})
+    })
+    let allTools: import('./llm').ToolDef[] = assembledTools
+    // gli MCP offerti in QUESTO turno (inline, o attivati in conversazione):
+    // derivati dall'elenco — servono ai sendCandidates qui sotto
+    const offeredMcpDefs = offeredMcpOf(allTools)
+    // M1: i tool MCP offerti in QUESTO turno, con annotazioni e schema —
+    // servono a compilare la via di un draft_external senza via quando per
+    // il canale c'è esattamente un invio esterno
+    const sendCandidates: SendCandidate[] = offeredMcpDefs.map((t) => ({
+      name: t.name,
+      ...(permissions.mcpAnnotationsOf(t.name) ? { annotations: permissions.mcpAnnotationsOf(t.name)! } : {}),
+      parameters: t.parameters
+    }))
     // fase 18b (H4): il turno parte con IMMAGINI e il modello del turno ha
     // visione conosciuta FALSA → notice per l'utente. Il segnaposto di pi-ai
     // al modello resta: non si toglie (con vision sconosciuta, niente notice)
@@ -1705,6 +1718,40 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     // turno di gruppo li restringe a quelli del sollecito (DOPO il filtro
     // use-app della visione, così anche il recupero non lo offre)
     let turnTools = allTools
+    // fase token (T2): il CATALOGO del turno (nomi interni di tutto ciò che
+    // esiste: nucleo, gruppi, MCP) per lo srotolamento delle facciate e
+    // use_tool; e l'attivazione IN CODA di un gruppo (ordine di TOOL_GROUPS).
+    // La persistenza delle attivazioni sta nel transcript: i tool-result che
+    // attivano portano meta.activatedGroups (activeGroupsFromTranscript).
+    const catalogDefs: import('./llm').ToolDef[] = [...builtins, ...browserDefs, ...mcpToolDefs]
+    const catalogSchemaOf = (name: string): import('./llm').ToolDef | null =>
+      catalogDefs.find((t) => t.name === name) ?? null
+    // i gruppi attivi in QUESTO turno (dall'assemblaggio + le attivazioni
+    // di metà turno): un nome INTERNO di gruppo attivo resta eseguibile
+    // anche se verso il modello l'elenco porta la facciata (storie vecchie)
+    const activeGroupIds = new Set<string>(assembledActiveGroups)
+    const activateInTurn = (ids: string[]): void => {
+      for (const id of ids) activeGroupIds.add(id)
+      const defs = toolDefsOfGroups(turnCatalog, ids).filter((d) => !turnTools.some((x) => x.name === d.name))
+      if (defs.length) turnTools = [...turnTools, ...defs]
+    }
+    /** il gruppo (presente nel turno) che contiene un nome interno o una facciata */
+    const groupOfToolName = (name: string): ToolGroupPresent | null => {
+      for (const g of turnCatalog) {
+        if (g.internalNames.includes(name)) return g
+        if (g.tools.some((t) => t.name === name)) return g
+      }
+      return null
+    }
+    /** la firma compatta (T2): nome e parametri richiesti con il loro tipo */
+    const compactSignatureOf = (name: string, def: import('./llm').ToolDef | null): string => {
+      if (!def) return name
+      const schema = def.parameters as { properties?: Record<string, Record<string, unknown>>; required?: unknown } | null
+      const props = schema?.properties ?? {}
+      const required = Array.isArray(schema?.required) ? schema.required.map(String) : []
+      const params = required.map((p) => `${p}: ${String(props[p]?.type ?? 'string')}`)
+      return params.length ? `${name}(${params.join(', ')})` : name
+    }
 
     // fase 18b (K7): la regola pura sugli anelli CANDIDATI (i > chainIdx, li
     // valuta nextRoute quando l'anello attivo fallisce). Il bisogno del turno
@@ -2097,37 +2144,37 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         } catch {
           input = {}
         }
+        // fase token (T3): la facciata della chiamata, se il modello ha
+        // scritto browser/document/task/memory — va nel meta del transcript
+        // (meta.name resta il nome interno, meta.facade la facciata)
+        let facadeOf: string | null = null
 
-        // fase velocità (S3.5): use_tool si SROTOLA prima di ogni controllo:
-        // da qui in poi la chiamata è IDENTICA a una chiamata diretta di
-        // name con arguments — permessi, gate, card d'approvazione, bozze,
-        // regole di toolsForTurnSource, whitelist dei figli, transcript,
-        // attività e Dettagli tecnici vedono il nome VERO, mai use_tool.
-        // Un nome inesistente, non differito o vietato in questo turno
-        // riceve l'errore che darebbe la chiamata diretta (più giù).
+        // fase velocità (S3.5) → fase token (T2): use_tool NON si offre più,
+        // ma le storie vecchie lo chiamano ancora: si SROTOLA come oggi (i
+        // tool dei GRUPPI presenti nel turno, nomi interni) e ATTIVA il
+        // gruppo del tool chiamato. Da qui in poi la chiamata è IDENTICA a
+        // una chiamata diretta: permessi, gate, card, transcript vedono il
+        // nome VERO.
         if (call.name === 'use_tool') {
           const target = typeof input.name === 'string' ? input.name : ''
           const rawArgs = input.arguments
           const args = rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs)
             ? (rawArgs as Record<string, unknown>)
             : {}
-          // use_tool esegue SOLO gli integrati differiti (l'elenco statico):
-          // i core si chiamano per nome, gli MCP pure — così use_tool non
-          // diventa una porta per nomi tolti dall'elenco del turno. Le
-          // regole del turno (figli, gruppi, proposte) restano ai controlli
-          // per chiamata più giù, uguali alla chiamata diretta.
-          if (!target || target === 'use_tool' || target === 'find_tools' || !DEFERRED_TOOL_NAMES.has(target)) {
-            // use_tool non può chiamare sé stesso né find_tools (e senza nome
-            // non c'è niente da srotolare): rifiuto fisso, come farebbe la
-            // chiamata diretta di uno strumento che non si esegue
+          // use_tool esegue SOLO i tool che stanno in un gruppo STATICo di
+          // TOOL_GROUPS (nucleo e MCP si chiamano per nome): le regole del
+          // turno (figli, gruppi, proposte) restano ai controlli per chiamata
+          // più giù, uguali alla chiamata diretta — come oggi con i differiti.
+          const staticGroup = builtinGroupOf(target)
+          if (!target || target === 'use_tool' || target === 'find_tools' || !staticGroup) {
             const refused = !target
               ? 'use_tool requires the name of a built-in tool (find it with find_tools)'
               : target === 'use_tool' || target === 'find_tools'
                 ? `use_tool cannot call ${target}: it runs built-in tools found with find_tools, not itself or find_tools`
-                : `use_tool cannot call ${target}: it runs only the built-in tools listed by find_tools (other tools are called directly by name)`
+                : `use_tool cannot call ${target} in this turn: it runs the built-in tools of the tool groups (other tools are called directly by name)`
             const uEntry = add({
               agentId, kind: 'tool-call', role: 'assistant', content: call.name,
-              meta: { id: call.id, name: call.name, arguments: call.arguments }
+              meta: { id: call.id, name: call.name, arguments: call.arguments, ...(facadeOf ? { facade: facadeOf } : {}) }
             })
             emit({ type: 'entries', agentId, entries: [uEntry] })
             messages.push({ role: 'tool', toolCallId: call.id, content: refused })
@@ -2135,19 +2182,52 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             emit({ type: 'entries', agentId, entries: [res] })
             continue
           }
+          // il gruppo del tool chiamato si attiva (se presente nel turno):
+          // le sue definizioni entrano in coda dal passo dopo
+          if (turnCatalog.some((g) => g.id === staticGroup.id)) activateInTurn([staticGroup.id])
           call = { ...call, name: target, arguments: JSON.stringify(args) }
           input = args
         }
 
+        // fase token (T3): lo srotolamento della facciata — UNA volta, nello
+        // stesso punto di use_tool e PRIMA di coerceToolArgs, permessi, gate e
+        // card: da qui in poi tutto il loop vede il nome INTERNO (browser_type,
+        // write_document…), mentre nei messages la chiamata resta come il
+        // modello l'ha scritta (facciata + action). Azione mancante o
+        // sconosciuta, o parametro richiesto mancante: errore breve, NIENTE
+        // esecuzione.
+        if (FACADE_ACTIONS.has(call.name)) {
+          const expanded = expandFacadeCall({ name: call.name, arguments: call.arguments }, catalogSchemaOf)
+          if (!expanded.ok) {
+            // errore breve (azione o parametro): la entry della chiamata porta
+            // la facciata, il result l'errore — NIENTE esecuzione
+            const fEntry = add({
+              agentId, kind: 'tool-call', role: 'assistant', content: call.name,
+              meta: { id: call.id, name: call.name, arguments: call.arguments, facade: call.name }
+            })
+            emit({ type: 'entries', agentId, entries: [fEntry] })
+            messages.push({ role: 'tool', toolCallId: call.id, content: expanded.error })
+            const res = add({ agentId, kind: 'tool-result', role: 'system', content: expanded.error, meta: { callId: call.id, error: true, facade: call.name } })
+            emit({ type: 'entries', agentId, entries: [res] })
+            continue
+          }
+          facadeOf = call.name
+          call = { ...call, name: expanded.name, arguments: expanded.arguments }
+          try {
+            input = JSON.parse(expanded.arguments || '{}')
+          } catch {
+            input = {}
+          }
+        }
+
         // fase eval-deboli (D1): i primitivi scritti come stringhe dal modello
         // ("true", "60") si convertono al tipo dichiarato nello schema del tool
-        // VERO — core, differiti (appena srotolti da use_tool) e MCP — UNA sola
+        // VERO — nucleo, gruppi (anche appena srotolti) e MCP — UNA sola
         // chiamata, PRIMA di permessi, gate e card: tutti vedono gli stessi
         // valori (anche la entry del transcript, che porta gli argomenti
         // convertiti). Senza schema nessuna conversione.
         const callSchema = allTools.find((t) => t.name === call.name)?.parameters
-          ?? deferredBuiltinDefs.find((t) => t.name === call.name)?.parameters
-          ?? mcpToolDefs.find((t) => t.name === call.name)?.parameters
+          ?? catalogDefs.find((t) => t.name === call.name)?.parameters
         if (callSchema) {
           const coerced = coerceToolArgs(input, callSchema)
           if (coerced !== input) {
@@ -2167,6 +2247,59 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           call = { ...call, name: 'message_user' }
         } else if (call.name === 'message_user' && opts.groupTurn !== undefined) {
           call = { ...call, name: 'send_to_user' }
+        }
+
+        // fase token (T2): chiamata per nome a un tool di un gruppo NON attivo
+        // (verso il modello: facciata compresa, e i mcp__* in modalità
+        // differita) — il loop ATTIVA il gruppo (come find_tools({group})), NON
+        // esegue la chiamata e risponde con la firma compatta per richiamarla
+        // subito. Per un modello piccolo è un passo in meno del chiedergli di
+        // cercare; la chiamata vera, quando arriva, passa da permessi e card
+        // come sempre. Un nome INTERNO di gruppo ATTIVO resta eseguibile anche
+        // se l'elenco verso il modello porta la facciata (storie vecchie); i
+        // nomi esclusi dal turno (whitelist dei figli, regole dei gruppi e
+        // delle proposte) non sono nel catalogo: qui non scatta niente, e i
+        // rifiuti dedicati più giù dicono il perché.
+        if (!turnTools.some((t) => t.name === call.name)) {
+          const inactiveGroup = groupOfToolName(call.name)
+          if (inactiveGroup && !activeGroupIds.has(inactiveGroup.id)) {
+            activateInTurn([inactiveGroup.id])
+            const shown = facadeOf ?? call.name
+            const shownDef = turnTools.find((t) => t.name === shown) ?? null
+            const refused = `${shown} is in group ${inactiveGroup.id}, now active. Call it again with: ${compactSignatureOf(shown, shownDef)}`
+            const gEntry = add({
+              agentId, kind: 'tool-call', role: 'assistant', content: shown,
+              meta: { id: call.id, name: call.name, arguments: call.arguments, ...(facadeOf ? { facade: facadeOf } : {}) }
+            })
+            emit({ type: 'entries', agentId, entries: [gEntry] })
+            messages.push({ role: 'tool', toolCallId: call.id, content: refused })
+            const res = add({
+              agentId, kind: 'tool-result', role: 'system', content: refused,
+              meta: { callId: call.id, activatedGroups: [inactiveGroup.id] }
+            })
+            emit({ type: 'entries', agentId, entries: [res] })
+            continue
+          }
+        }
+
+        // fase token (T8b): la sentinella degli argomenti — un valore che va
+        // verso l'esterno o verso un sito (carta che passa Luhn, chiave col
+        // prefisso noto, segreto scritto in chat) si rifiuta SENZA esecuzione
+        // e PRIMA di permessi e card; il messaggio e la entry del transcript
+        // non contengono MAI il valore (redatto)
+        {
+          const guard = argGuardVerdict(call.name, input, userChatTextsOf(messages))
+          if (!guard.ok) {
+            const rEntry = add({
+              agentId, kind: 'tool-call', role: 'assistant', content: call.name,
+              meta: { id: call.id, name: call.name, arguments: JSON.stringify(redactGuardedArgs(input, userChatTextsOf(messages))), ...(facadeOf ? { facade: facadeOf } : {}) }
+            })
+            emit({ type: 'entries', agentId, entries: [rEntry] })
+            messages.push({ role: 'tool', toolCallId: call.id, content: guard.reason })
+            const res = add({ agentId, kind: 'tool-result', role: 'system', content: guard.reason, meta: { callId: call.id, error: true, argGuard: true } })
+            emit({ type: 'entries', agentId, entries: [res] })
+            continue
+          }
         }
 
         // fase 8 (§3bis L11): loop detection — la stessa identica chiamata
@@ -2368,7 +2501,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           emit({ type: 'activity', agentId, activity: activityOf(call.name, input) })
           const tEntry = add({
             agentId, kind: 'tool-call', role: 'assistant', content: call.name,
-            meta: { id: call.id, name: call.name, arguments: call.arguments }
+            meta: { id: call.id, name: call.name, arguments: call.arguments, ...(facadeOf ? { facade: facadeOf } : {}) }
           })
           emit({ type: 'entries', agentId, entries: [tEntry] })
           const browser = await import('./browser')
@@ -2398,7 +2531,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           emit({ type: 'activity', agentId, activity: activityOf(call.name, input) })
           const webEntry = add({
             agentId, kind: 'tool-call', role: 'assistant', content: call.name,
-            meta: { id: call.id, name: call.name, arguments: call.arguments }
+            meta: { id: call.id, name: call.name, arguments: call.arguments, ...(facadeOf ? { facade: facadeOf } : {}) }
           })
           emit({ type: 'entries', agentId, entries: [webEntry] })
           let output = ''
@@ -2448,7 +2581,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           emit({ type: 'activity', agentId, activity: activityOf(call.name, input) })
           const bEntry = add({
             agentId, kind: 'tool-call', role: 'assistant', content: call.name,
-            meta: { id: call.id, name: call.name, arguments: call.arguments }
+            meta: { id: call.id, name: call.name, arguments: call.arguments, ...(facadeOf ? { facade: facadeOf } : {}) }
           })
           emit({ type: 'entries', agentId, entries: [bEntry] })
           const browser = await import('./browser')
@@ -2605,7 +2738,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           emit({ type: 'activity', agentId, activity: activityOf(call.name, input) })
           const cEntry = add({
             agentId, kind: 'tool-call', role: 'assistant', content: call.name,
-            meta: { id: call.id, name: call.name, arguments: call.arguments }
+            meta: { id: call.id, name: call.name, arguments: call.arguments, ...(facadeOf ? { facade: facadeOf } : {}) }
           })
           emit({ type: 'entries', agentId, entries: [cEntry] })
           const browser = await import('./browser')
@@ -2777,7 +2910,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           emit({ type: 'activity', agentId, activity: activityOf(call.name, input) })
           const copyEntry = add({
             agentId, kind: 'tool-call', role: 'assistant', content: call.name,
-            meta: { id: call.id, name: call.name, arguments: call.arguments }
+            meta: { id: call.id, name: call.name, arguments: call.arguments, ...(facadeOf ? { facade: facadeOf } : {}) }
           })
           emit({ type: 'entries', agentId, entries: [copyEntry] })
           const { getPrepareFileExchange, getRunFileExchange } = await import('./file-exchange')
@@ -2876,7 +3009,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           emit({ type: 'activity', agentId, activity: activityOf(call.name, input) })
           const skEntry = add({
             agentId, kind: 'tool-call', role: 'assistant', content: call.name,
-            meta: { id: call.id, name: call.name, arguments: call.arguments }
+            meta: { id: call.id, name: call.name, arguments: call.arguments, ...(facadeOf ? { facade: facadeOf } : {}) }
           })
           emit({ type: 'entries', agentId, entries: [skEntry] })
           let output = ''
@@ -2914,7 +3047,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           emit({ type: 'activity', agentId, activity: activityOf(call.name, input) })
           const sEntry = add({
             agentId, kind: 'tool-call', role: 'assistant', content: call.name,
-            meta: { id: call.id, name: call.name, arguments: call.arguments }
+            meta: { id: call.id, name: call.name, arguments: call.arguments, ...(facadeOf ? { facade: facadeOf } : {}) }
           })
           emit({ type: 'entries', agentId, entries: [sEntry] })
           let output = ''
@@ -2953,7 +3086,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         if (call.name === 'add_mcp_server' || call.name === 'install_plugin') {
           const propEntry = add({
             agentId, kind: 'tool-call', role: 'assistant', content: call.name,
-            meta: { id: call.id, name: call.name, arguments: call.arguments }
+            meta: { id: call.id, name: call.name, arguments: call.arguments, ...(facadeOf ? { facade: facadeOf } : {}) }
           })
           emit({ type: 'entries', agentId, entries: [propEntry] })
           const offerFacts = {
@@ -2992,43 +3125,33 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         // parametri: si chiamano con use_tool dal passo dopo) e, quando la
         // modalità differita MCP è attiva, anche fra i tool MCP DEFERITI del
         // bot, che ATTIVA dal passo successivo (in fondo, ordine stabile)
+        // fase token (T2): find_tools è la ricerca per GRUPPI — con {group}
+        // attiva il gruppo esatto, con {query} cerca su id, descrizioni dei
+        // gruppi e nomi/descrizioni dei tool (rankTools di oggi) e attiva i
+        // gruppi dei primi risultati (max 2). Il result elenca i tool con una
+        // riga, porta la GUIDA del gruppo (T4) e chiude con l'istruzione di
+        // chiamarli per nome dal passo dopo. La stessa funzione pura la usa
+        // il simulatore dell'eval (T7).
         if (call.name === 'find_tools') {
           const fEntry = add({
             agentId, kind: 'tool-call', role: 'assistant', content: 'find_tools',
-            meta: { id: call.id, name: call.name, arguments: call.arguments }
+            meta: { id: call.id, name: call.name, arguments: call.arguments, ...(facadeOf ? { facade: facadeOf } : {}) }
           })
           emit({ type: 'entries', agentId, entries: [fEntry] })
-          const query = String(input.query ?? '')
-          const foundBuiltins = rankTools(
-            deferredBuiltinDefs.map((t) => ({ name: t.name, description: t.description, requiredParams: requiredParamsOf(t) })),
-            query
-          )
-          const foundMcp = deferredMcp
-            ? rankTools(
-              mcpToolDefs.map((t) => ({ name: t.name, description: t.description, requiredParams: requiredParamsOf(t) })),
-              query
-            )
-            : []
-          const parts = [
-            formatBuiltinToolsResult(foundBuiltins),
-            // la parte MCP solo quando la ricerca MCP è attiva in questo turno
-            ...(deferredMcp ? [formatFindToolsResult(foundMcp)] : [])
-          ].filter(Boolean)
-          const text = parts.length ? parts.join('\n\n') : 'No tools found with this search: try again with other words or tell the user.'
+          const act = activateGroupsResult(turnCatalog, activeGroupsFromTranscript(scopedEntries()), {
+            ...(typeof input.group === 'string' ? { group: input.group } : {}),
+            ...(typeof input.query === 'string' ? { query: input.query } : {})
+          })
           const res = add({
-            agentId, kind: 'tool-result', role: 'system', content: text,
-            // attivati (dal transcript, per i turni futuri): SOLO i tool MCP
-            meta: { callId: call.id, activated: foundMcp.map((t) => t.name) }
+            agentId, kind: 'tool-result', role: 'system', content: act.text,
+            // i gruppi attivati restano per TUTTA la conversazione (transcript)
+            meta: { callId: call.id, activatedGroups: act.activated }
           })
           emit({ type: 'entries', agentId, entries: [res] })
-          messages.push({ role: 'tool', toolCallId: call.id, content: text })
-          // i tool MCP trovati diventano ATTIVI dal passo successivo e restano
-          // nella lista, in FONDO e in ordine stabile (cache del prompt)
-          for (const t of foundMcp) {
-            activeMcpNames.add(t.name)
-            const def = mcpToolDefs.find((x) => x.name === t.name)
-            if (def && !turnTools.some((x) => x.name === t.name)) turnTools = [...turnTools, def]
-          }
+          messages.push({ role: 'tool', toolCallId: call.id, content: act.text })
+          // i tool dei gruppi attivati entrano nell'elenco dal PASSO
+          // SUCCESSIVO, in CODA e in ordine stabile (cache del prompt)
+          activateInTurn(act.activated)
           continue
         }
 
@@ -3041,7 +3164,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           emit({ type: 'activity', agentId, activity: activityOf(call.name, input) })
           const xEntry = add({
             agentId, kind: 'tool-call', role: 'assistant', content: call.name,
-            meta: { id: call.id, name: call.name, arguments: call.arguments }
+            meta: { id: call.id, name: call.name, arguments: call.arguments, ...(facadeOf ? { facade: facadeOf } : {}) }
           })
           emit({ type: 'entries', agentId, entries: [xEntry] })
           const { prepareLibraryExport, runLibraryExport } = await import('./library')
@@ -3087,7 +3210,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           emit({ type: 'activity', agentId, activity: activityOf(call.name, input) })
           const fillEntry = add({
             agentId, kind: 'tool-call', role: 'assistant', content: call.name,
-            meta: { id: call.id, name: call.name, arguments: call.arguments }
+            meta: { id: call.id, name: call.name, arguments: call.arguments, ...(facadeOf ? { facade: facadeOf } : {}) }
           })
           emit({ type: 'entries', agentId, entries: [fillEntry] })
           const pushResult = (content: string, meta: Record<string, unknown> = {}): void => {
@@ -3137,7 +3260,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           const origin = String(input.origin ?? '').trim()
           const sEntry = add({
             agentId, kind: 'tool-call', role: 'assistant', content: call.name,
-            meta: { id: call.id, name: call.name, arguments: call.arguments }
+            meta: { id: call.id, name: call.name, arguments: call.arguments, ...(facadeOf ? { facade: facadeOf } : {}) }
           })
           emit({ type: 'entries', agentId, entries: [sEntry] })
           const pushResult = (content: string): void => {
@@ -3189,7 +3312,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         if (call.name === 'save_contact') {
           const cEntry = add({
             agentId, kind: 'tool-call', role: 'assistant', content: call.name,
-            meta: { id: call.id, name: call.name, arguments: call.arguments }
+            meta: { id: call.id, name: call.name, arguments: call.arguments, ...(facadeOf ? { facade: facadeOf } : {}) }
           })
           emit({ type: 'entries', agentId, entries: [cEntry] })
           const pushResult = (content: string): void => {
@@ -3324,7 +3447,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         if (call.name === 'wake_parent') {
           const wakeEntry = add({
             agentId, kind: 'tool-call', role: 'assistant', content: 'wake_parent',
-            meta: { id: call.id, name: call.name, arguments: call.arguments }
+            meta: { id: call.id, name: call.name, arguments: call.arguments, ...(facadeOf ? { facade: facadeOf } : {}) }
           })
           emit({ type: 'entries', agentId, entries: [wakeEntry] })
           if (!opts.subagent) {
@@ -3367,7 +3490,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         if (call.name === 'spawn_subagent' || call.name === 'check_subagent' || call.name === 'message_subagent' || call.name === 'stop_subagent') {
           const subEntry = add({
             agentId, kind: 'tool-call', role: 'assistant', content: call.name,
-            meta: { id: call.id, name: call.name, arguments: call.arguments }
+            meta: { id: call.id, name: call.name, arguments: call.arguments, ...(facadeOf ? { facade: facadeOf } : {}) }
           })
           emit({ type: 'entries', agentId, entries: [subEntry] })
           const result = await runSubagentTool(agentId, call, input, {
@@ -3618,7 +3741,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           }
           const postEntry = add({
             agentId, kind: 'tool-call', role: 'assistant', content: 'post_to_group',
-            meta: { id: call.id, name: call.name, arguments: call.arguments }
+            meta: { id: call.id, name: call.name, arguments: call.arguments, ...(facadeOf ? { facade: facadeOf } : {}) }
           })
           const postRes = add({ agentId, kind: 'tool-result', role: 'system', content: result, meta: { callId: call.id } })
           emit({ type: 'entries', agentId, entries: [postEntry, postRes] })
@@ -3638,7 +3761,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             : 'pass is only valid inside group turns: outside you can simply write nothing.'
           const passEntry = add({
             agentId, kind: 'tool-call', role: 'assistant', content: 'pass',
-            meta: { id: call.id, name: call.name, arguments: call.arguments }
+            meta: { id: call.id, name: call.name, arguments: call.arguments, ...(facadeOf ? { facade: facadeOf } : {}) }
           })
           const passRes = add({ agentId, kind: 'tool-result', role: 'system', content: result, meta: { callId: call.id } })
           emit({ type: 'entries', agentId, entries: [passEntry, passRes] })
@@ -3675,7 +3798,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
 
         const callEntry = add({
           agentId, kind: 'tool-call', role: 'assistant', content: `${call.name}`,
-          meta: { id: call.id, name: call.name, arguments: call.arguments }
+          meta: { id: call.id, name: call.name, arguments: call.arguments, ...(facadeOf ? { facade: facadeOf } : {}) }
         })
         emit({ type: 'entries', agentId, entries: [callEntry] })
 
@@ -3978,20 +4101,11 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           }
         }
 
-        // fase 13 (punto 5): in modalità differita un tool MCP NON attivo non si
-        // esegue — niente esecuzione cieca di un nome indovinato: il result
-        // dice di cercarlo con find_tools (vale anche per composio__*, fase app)
-        if (
-          deferredMcp &&
-          (call.name.startsWith('mcp__') || call.name.startsWith('composio__')) &&
-          !activeMcpNames.has(call.name)
-        ) {
-          const refused = 'tool not active: find it with find_tools({query}) and call it from the next step'
-          messages.push({ role: 'tool', toolCallId: call.id, content: refused })
-          const res = add({ agentId, kind: 'tool-result', role: 'system', content: refused, meta: { callId: call.id, inactive: true } })
-          emit({ type: 'entries', agentId, entries: [res] })
-          continue
-        }
+        // fase 13 (punto 5) → fase token (T2): in modalità differita un tool
+        // MCP NON attivo non si esegue in modo cieco — la chiamata per nome a
+        // un tool di gruppo non attivo la gestisce l'ATTIVAZIONE AUTOMATICA di
+        // sopra (attiva il gruppo, non esegue, risponde con la firma); per i
+        // mcp__* vale uguale: il gruppo è il loro server.
 
         // fase 18b (H4): la riserva ha portato il turno su un modello con
         // visione conosciuta FALSA a metà turno — use-app è RESTATO nella
@@ -4135,11 +4249,27 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             const browserMod = await import('./browser')
             finalOutput = browserMod.redactBrowserSecrets(agentId, finalOutput)
           }
+          // fase token (T2): quando il risultato di un tool del NUCLEO NOMINA
+          // un tool di un gruppo (run-command in background → await_shell,
+          // web_fetch su pagina JS → browser_open), quel gruppo si attiva:
+          // la tabella RESULT_ACTIVATES dice QUALI gruppi guardare, il nome
+          // del tool nel testo decide. I tool entrano in coda dal passo dopo
+          // e il meta.activatedGroups li persiste per la conversazione.
+          let activatedByResult: string[] = []
+          {
+            const candidates = RESULT_ACTIVATES[call.name]
+            if (candidates) {
+              activatedByResult = groupsNamedInResult(String(finalOutput), turnCatalog)
+                .filter((g) => candidates.includes(g))
+              if (activatedByResult.length) activateInTurn(activatedByResult)
+            }
+          }
           const res = add({
             agentId, kind: 'tool-result', role: 'system',
             content: finalOutput.slice(0, 50_000),
             meta: {
               callId: call.id, ...meta,
+              ...(activatedByResult.length ? { activatedGroups: activatedByResult } : {}),
               ...(call.name.startsWith('mcp__') || call.name.startsWith('composio__')
                 ? { webEvidence: true, mcpEvidence: true }
                 : {})

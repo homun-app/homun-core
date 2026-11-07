@@ -1,147 +1,152 @@
-// Fase velocità (S3): gli strumenti integrati si dividono in un elenco CORE
-// fisso (sempre nel prompt del turno) e un elenco DIFFERITO, che il modello
-// raggiunge con find_tools + use_tool (stessa idea di Rakazo,
-// builtin-tool-bridge.ts: CORE_BUILTIN_TOOL_NAMES e partitionTools). Così
-// ogni chiamata porta molti meno byte di schemi e l'elenco del turno non
-// cambia durante il turno (condizione per la cache del prefisso).
-// Tutto PURO: solo nomi e una partizione stabile.
+// Fase token (T1/T2): il NUCLEO piccolo (sempre nel prompt del turno) e i
+// GRUPPI (come i namespace di OpenAI: il dettaglio arriva quando l'area si
+// attiva, l'indice dei gruppi sta nella descrizione di find_tools). Prima
+// (fase velocità S3) c'erano un elenco CORE di 32 tool e 19 differiti dietro
+// use_tool: ora il nucleo del turno normale sono parlare/pc/web/memory/skill
+// e TUTTO il resto vive in gruppi attivabili con find_tools({group}|{query}).
+// Tutto PURO: nomi, partizioni stabili e testi.
 import type { ToolDef } from './llm'
 
 /**
- * Gli strumenti integrati SEMPRE nel prompt del turno. Alla proposta di
- * partenza della fase si aggiungono i tool di base del computer
- * (run-command, read-file, write-file, list-directory, use-app,
- * list-credentials): servono a QUALSIASI primo passo (i prompt li nominano
- * e la whitelist dei figli è costruita su di loro) — differirli renderebbe
- * il bot meno capace per risparmiare poco.
+ * Fase token (T1): gli strumenti SEMPRE nel prompt del turno normale. Il
+ * computer di base (un QUALSIASI primo passo), il web in lettura, la facciata
+ * memory (update_memory + recall_memory) e la ricerca. Verso il modello la
+ * coppia update_memory/recall_memory appare come la facciata `memory`
+ * (facades.ts): qui restano i nomi INTERNI. `pass` e `post_to_group` esistono
+ * per costruzione nei turni di gruppo; `wake_parent` (figlio) lo aggiunge
+ * l'assemblaggio del turno.
  */
 export const CORE_TOOL_NAMES: ReadonlySet<string> = new Set([
-  // i base del computer (vedi sopra: aggiunti alla proposta della fase)
+  // parlare con l'utente (message_user fuori dai gruppi, send_to_user nei gruppi)
+  'send_to_user',
+  'message_user',
+  'ask_user',
+  // il computer
   'run-command',
   'read-file',
   'write-file',
   'list-directory',
-  'use-app',
-  'list-credentials',
-  // la proposta di partenza della fase
-  'send_to_user',
-  // fase risposta (R2): il progresso dei lavori lunghi nei turni non di
-  // gruppo (nei gruppi si offre solo send_to_user, R7)
-  'message_user',
-  'ask_user',
-  'draft_external',
+  // il web in lettura
   'web_search',
   'web_fetch',
+  // la facciata memory (update_memory + recall_memory)
   'update_memory',
   'recall_memory',
+  // le skill installate
   'skill',
-  'search_connectors',
-  'offer_connector',
-  'spawn_subagent',
-  'check_subagent',
-  'create_task',
-  'update_task',
-  'update_state',
-  'write_document',
-  'read_document',
-  'edit_document',
-  'visualize',
-  'await_shell',
-  'find_contacts',
-  'fill_credential',
-  'request_secure_input',
-  'request_takeover',
-  // quando esistono nel turno (fase): pass e post_to_group vivono in toolDefs
-  // (i turni di gruppo); i tool del browser e dello schermo arrivano da
-  // browser.ts/computerToolDefs coi prefissi browser_/computer_ e restano
-  // core per costruzione (mai nell'elenco differito)
+  // per costruzione nei turni di gruppo
   'pass',
   'post_to_group'
 ])
 
-/**
- * Gli strumenti integrati DIFFERITI: niente schema nel prompt, si trovano
- * con find_tools e si chiamano con use_tool. Sono i tool di amministrazione
- * e di scambio rari (bot, gruppi, skill, connettori, libreria, contatti):
- * nessun flusso li necesita al primo passo.
- */
-export const DEFERRED_TOOL_NAMES: ReadonlySet<string> = new Set([
-  'list_agents',
-  'create_agent',
-  'update_agent',
-  'delete_agent',
-  'create_group',
-  'update_group',
-  'send_to_agent',
-  'message_subagent',
-  'stop_subagent',
-  'update_skill',
-  'add_mcp_server',
-  'install_plugin',
-  'propose_rule_change',
-  'copy_to_box',
-  'copy_from_box',
-  'save_to_library',
-  'list_library',
-  'export_from_library',
-  'save_contact'
-])
+/** Una voce dell'indice/gruppo: id, descrizione (≤ 90 caratteri), tool (nomi INTERNI), guida (T4). */
+export interface ToolGroup {
+  id: string
+  description: string
+  tools: ReadonlyArray<string>
+  /** la guida che entra nel result dell'attivazione (T4: le sezioni spostate dal prompt) */
+  guide: string
+}
 
 /**
- * Le AREE dell'indice dei nomi differiti (come formatNameIndexText di
- * Rakazo): l'indice nella descrizione di find_tools raggruppa i nomi per
- * area, così il modello sa che esistono anche senza cercare.
+ * Fase token (T2): i GRUPPI, in ordine STABILE (l'ordine con cui i gruppi
+ * attivati entrano in coda all'elenco del turno). I nomi sono INTERNI: verso
+ * il modello la famiglia coperta da una facciata appare con il nome della
+ * facciata (browser, document, task, memory) — la sostituzione la fa
+ * l'assemblaggio del turno. `mcp:<server>` non sta qui: si costruisce dai
+ * tool MCP del bot quando sono differiti (come oggi, ma per server).
  */
-export const DEFERRED_TOOL_AREAS: ReadonlyArray<{ area: string; tools: ReadonlyArray<string> }> = [
-  { area: 'Other bots and groups', tools: ['list_agents', 'create_agent', 'update_agent', 'delete_agent', 'create_group', 'update_group', 'send_to_agent'] },
-  { area: 'Subagents', tools: ['message_subagent', 'stop_subagent'] },
-  { area: 'Skills', tools: ['update_skill'] },
-  { area: 'Connectors and plugins', tools: ['add_mcp_server', 'install_plugin'] },
-  { area: 'Permissions', tools: ['propose_rule_change'] },
-  { area: 'Files with the Mac', tools: ['copy_to_box', 'copy_from_box'] },
-  { area: 'Library', tools: ['save_to_library', 'list_library', 'export_from_library'] },
-  { area: 'Contacts', tools: ['save_contact'] }
+export const TOOL_GROUPS: ReadonlyArray<ToolGroup> = [
+  {
+    id: 'browser',
+    description: 'Open and drive web pages: snapshot text with refs, click, type, takeover for logins.',
+    tools: [
+      'browser_open', 'browser_snapshot', 'browser_click', 'browser_type', 'browser_select',
+      'browser_press_key', 'browser_back', 'browser_wait', 'browser_tabs', 'browser_screenshot',
+      'browser_close', 'request_takeover', 'computer_observe', 'computer_act'
+    ],
+    guide: ''
+  },
+  {
+    id: 'documents',
+    description: 'Write and edit documents, charts, and the library of files the user keeps.',
+    tools: ['write_document', 'read_document', 'edit_document', 'visualize', 'save_to_library', 'list_library', 'export_from_library'],
+    guide: ''
+  },
+  {
+    id: 'tasks',
+    description: 'Long work: task threads, routine state, background shells.',
+    tools: ['create_task', 'update_task', 'update_state', 'await_shell'],
+    guide: ''
+  },
+  {
+    id: 'credentials',
+    description: 'The vault: list saved logins, fill them into pages, save new ones securely.',
+    tools: ['list-credentials', 'fill_credential', 'request_secure_input'],
+    guide: ''
+  },
+  {
+    id: 'outside',
+    description: 'Outbound drafts (email, messages), the user contacts, saving new contacts.',
+    tools: ['draft_external', 'find_contacts', 'save_contact'],
+    guide: ''
+  },
+  {
+    id: 'subagents',
+    description: 'Parallel helpers: spawn subagents, check, message, stop them.',
+    tools: ['spawn_subagent', 'check_subagent', 'message_subagent', 'stop_subagent'],
+    guide: ''
+  },
+  {
+    id: 'bots',
+    description: 'The other bots and groups: list, create, update, delete, message them.',
+    tools: ['list_agents', 'create_agent', 'update_agent', 'delete_agent', 'create_group', 'update_group', 'send_to_agent'],
+    guide: ''
+  },
+  {
+    id: 'connectors',
+    description: 'Search apps and services, propose connectors, add MCP servers and plugins.',
+    tools: ['search_connectors', 'offer_connector', 'add_mcp_server', 'install_plugin'],
+    guide: ''
+  },
+  {
+    id: 'apps',
+    description: 'use-app: drive apps on the user own Mac with their account.',
+    tools: ['use-app'],
+    guide: ''
+  },
+  {
+    id: 'admin',
+    description: 'Skills, permission rules, file exchange with the user Mac (the box).',
+    tools: ['update_skill', 'propose_rule_change', 'copy_to_box', 'copy_from_box'],
+    guide: ''
+  }
 ]
 
-/**
- * L'indice dei nomi degli integrati differiti, raggruppati per area (puro):
- * una riga per area presente nel turno, i nomi in ordine alfabetico. È il
- * testo che va nella descrizione di find_tools (il modello lo legge in ogni
- * chiamata: gli dice CHE COSA esiste dietro la ricerca).
- */
-export function formatNameIndexText(deferredNames: string[]): string {
-  const present = new Set(deferredNames)
-  const lines: string[] = []
-  for (const { area, tools } of DEFERRED_TOOL_AREAS) {
-    const names = tools.filter((t) => present.has(t)).sort((a, b) => a.localeCompare(b))
-    if (names.length) lines.push(`${area}: ${names.join(', ')}`)
-  }
-  // nomi differiti fuori da ogni area (non dovrebbe capitare: test di coerenza)
-  const covered = new Set(DEFERRED_TOOL_AREAS.flatMap((a) => [...a.tools]))
-  const extra = [...present].filter((n) => !covered.has(n)).sort((a, b) => a.localeCompare(b))
-  if (extra.length) lines.push(`Other: ${extra.join(', ')}`)
-  return lines.join('\n')
+/** Il gruppo builtin (TOOL_GROUPS) che contiene un nome interno, o null. */
+export function builtinGroupOf(internalName: string): ToolGroup | null {
+  return TOOL_GROUPS.find((g) => g.tools.includes(internalName)) ?? null
 }
 
 /**
- * La divisione core/differiti di un elenco di tool (puro, ordine stabile):
+ * La divisione nucleo/gruppi di un elenco di tool (puro, ordine stabile):
  * l'input sono gli integrati del turno DOPO le regole del turno (whitelist
- * dei figli, toolsForTurnSource: un figlio non trova con find_tools ciò che
- * la sua lista bianca esclude). Core = tutto ciò che non è nell'elenco
- * differito (i tool del browser e dello schermo, pass, post_to_group e
- * wake_parent vivono qui quando esistono nel turno).
+ * dei figli, toolsForTurnSource). Core = i nomi del nucleo (T1); tutto il
+ * resto appartiene a un gruppo di TOOL_GROUPS.
  */
-export function partitionTools(tools: ToolDef[]): { core: ToolDef[]; deferred: ToolDef[] } {
+export function partitionTools(tools: ToolDef[]): { core: ToolDef[]; grouped: ToolDef[] } {
   const core: ToolDef[] = []
-  const deferred: ToolDef[] = []
+  const grouped: ToolDef[] = []
   for (const t of tools) {
-    if (DEFERRED_TOOL_NAMES.has(t.name)) deferred.push(t)
-    else core.push(t)
+    if (CORE_TOOL_NAMES.has(t.name)) core.push(t)
+    else grouped.push(t)
   }
-  return { core, deferred }
+  return { core, grouped }
 }
 
-/** L'esecutore degli integrati differiti: use_tool si «srotola» nel loop. */
+/** L'esecutore degli integrati differiti: use_tool si «srotola» nel loop.
+ *  Fase token (T2): NON si offre più nei turni nuovi; se il modello lo chiama
+ *  ancora (storie vecchie) il loop lo srotola come oggi e attiva il gruppo. */
 export const useToolDef: ToolDef = {
   name: 'use_tool',
   description:

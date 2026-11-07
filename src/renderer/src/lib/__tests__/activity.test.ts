@@ -8,7 +8,7 @@ import { activityPhrase, stepsOfTurn, targetOfArguments, hostOf, fileNameOf, ste
 import type { TranscriptEntry } from '../../../../shared/types'
 import { itCatalogEntries, enCatalogEntries } from '../../__tests__/po-helper'
 import { toolDefs, computerToolDefs, wakeParentToolDef } from '../../../../main/agent/tools'
-import { findToolsDef } from '../../../../main/mcp/find-tools'
+import { findToolsGroupedDef } from '../../../../main/mcp/find-tools'
 import { youKeylessProvider, exaMcpKeylessProvider, tavilyKeylessProvider, EXA_MCP_SEARCH_TOOL } from '../../../../main/agent/web-search-providers'
 
 const entry = (over: Partial<TranscriptEntry> & Pick<TranscriptEntry, 'id' | 'kind' | 'role'>): TranscriptEntry => ({
@@ -191,7 +191,7 @@ describe('fase 16b correzioni (P2): coerenza TOOL_FAMILIES ↔ nomi dei tool del
       ...toolDefs.map((t) => t.name),
       ...computerToolDefs.map((t) => t.name),
       wakeParentToolDef.name,
-      findToolsDef([], true, () => '').name,
+      findToolsGroupedDef([]).name,
       // i nomi della catena di ricerca keyless (provider + tool MCP di Exa)
       youKeylessProvider().name,
       exaMcpKeylessProvider().name,

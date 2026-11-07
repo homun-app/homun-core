@@ -59,6 +59,37 @@ export const coercedArgsOfCall = (c: { name: string; arguments: string }): Recor
   return coerceToolArgs(args, evalSchemaOf(c.name))
 }
 
+/** i browser+schermo dell'eval (il flag del MCP finto li rende disponibili) */
+const EVAL_BROWSER_DEFS: ToolDef[] = [...browserToolDefs, ...computerToolDefs] as ToolDef[]
+/**
+ * Fase token (T7): l'elenco del turno EVAL è quello del PRODOTTO — la stessa
+ * assembleTurnTools del loop (nucleo T1, gruppi T2, find_tools con l'indice),
+ * con le regole del turno (toolsForTurnSource, whitelist del figlio). I tool
+ * MCP del gateway (caso 28) entrano differiti per server, come nel loop.
+ * EVAL_TOOLS resta SOLO come catalogo degli schemi (schemaOf, facciate).
+ */
+export function evalAssemble(source: 'user' | 'routine' | 'group', child: boolean, mcpToolDefs: ToolDef[] = []): { tools: ToolDef[]; catalog: ToolGroupPresent[] } {
+  const facts = {
+    source,
+    ...(source === 'group' ? { groupTurn: {} } : {}),
+    ...(child ? { subagent: {} } : {})
+  }
+  const allow = (t: ToolDef) => !child || subagentToolDenyReason(t.name) === null
+  const builtins = toolsForTurnSource(toolDefs.filter(allow), facts)
+  const browserDefs = toolsForTurnSource(EVAL_BROWSER_DEFS.filter(allow), facts)
+  const r = assembleTurnTools({
+    builtins,
+    browserAvailable: true,
+    browserDefs,
+    mcpToolDefs,
+    maxInlineTools: 30,
+    activatedGroups: [],
+    ...(child ? { subagent: true } : {}),
+    ...(source === 'group' ? { groupTurn: true } : {})
+  })
+  return { tools: r.tools, catalog: r.deferredIndex }
+}
+
 /**
  * Correzione J4 (caso 20): nel sistema vero un browser_click su un elemento
  * con parola di impegno ("Conferma prenotazione") NON viene eseguito — è una
@@ -127,7 +158,7 @@ import { mergeConnectorResults, formatSearchResults } from '../src/main/connecto
 import { parseRegistryResponse } from '../src/main/connectors/registry'
 import { loadCatalog } from '../src/main/connectors'
 import registryNotionFixture from '../src/main/connectors/__tests__/fixtures/registry-notion.json'
-import { findToolsDef, rankTools, requiredParamsOf, formatFindToolsResult } from '../src/main/mcp/find-tools'
+import { rankTools, requiredParamsOf, findToolsGroupedDef } from '../src/main/mcp/find-tools'
 import { subagentToolAllowed, briefTarget, SUBAGENT_RECOVERY_NUDGE } from '../src/main/agent/subagents'
 // fase 14 (punto 9): i result dei tool di documenti/credenziali usano i
 // FORMATTER e i CONTROLLI VERI (checkFillOrigin per il rifiuto d'origine)
@@ -142,6 +173,13 @@ import {
 // schema anche nel simulatore (stessa funzione del loop); (D6.7) i testi di
 // offer_connector per gli id del registro sono quelli VERI, condivisi
 import { coerceToolArgs } from '../src/main/agent/tool-args'
+// fase token (T7): l'elenco del turno dell'eval è quello del PRODOTTO —
+// assembleTurnTools (nucleo + gruppi + find_tools), le facciate srotolate e
+// l'attivazione (automatica e da find_tools) con le STESSE funzioni pure del loop
+import { assembleTurnTools, activateGroupsResult, toolDefsOfGroups, type ToolGroupPresent } from '../src/main/agent/turn-tools'
+import { expandFacadeCall } from '../src/main/agent/facades'
+import { toolsForTurnSource } from '../src/main/agent/connectors-policy'
+import { subagentToolDenyReason } from '../src/main/agent/subagents'
 import { isMcpId, offerConnectorMcpGuidance, offerConnectorMissingText } from '../src/main/agent/connectors-policy'
 import type { ProviderConfig, Agent } from '../src/shared/types'
 // fase 17b (A5): l'eval gira nelle due lingue — il system prompt si costruisce
@@ -884,8 +922,6 @@ export function simulatedResult(name: string, args: Record<string, unknown>, wor
  */
 const SNAPSHOT_LINE_RE = /^- .*\[ref=[A-Za-z0-9]+\]$/gm
 const snapshotLinesOf = (result: string): string => (result.match(SNAPSHOT_LINE_RE) ?? []).join('\n')
-/** i tool del gateway attivati da find_tools NEL turno corrente (caso 28) */
-let activatedGw: ToolDef[] = []
 /**
  * Il deliverer del simulatore (esportato per il test con le trascrizioni
  * finte): le consegne seguono le regole VERE del loop (turn-sends) — dedup,
@@ -946,19 +982,6 @@ export function makeDeliverer(world: WorldResults = {}) {
       // FERMATO dal sistema (card negata dall'utente, testo reale del loop)
       if (name === 'browser_click' && commitClickDenied(lastSnapshot, String(args.ref ?? ''))) {
         return { result: DENIED_ACTION_RESULT, endTurn: false }
-      }
-      // fase 13 (caso 28): find_tools attiva i tool del gateway dal passo dopo
-      // (in fondo, ordine stabile) — come il loop in modalità differita
-      if (name === 'find_tools') {
-        const found = rankTools(
-          GW_TOOLS.map((t) => ({ name: t.name, description: t.description, requiredParams: requiredParamsOf(t) })),
-          String(args.query ?? '')
-        )
-        for (const f of found) {
-          const def = GW_TOOLS.find((t) => t.name === f.name)
-          if (def && !activatedGw.some((t) => t.name === def.name)) activatedGw.push(def)
-        }
-        return { result: formatFindToolsResult(found), endTurn: false }
       }
       const result = simulatedResult(name, args, world)
       if (name === 'browser_open' || name === 'browser_snapshot') {
@@ -1078,7 +1101,9 @@ async function evalTurn(
   /** fase 13 (caso 28): lista di tool DINAMICA — i tool attivati da find_tools entrano dal passo dopo */
   dynamicTools?: { current: ToolDef[] },
   /** fase 14 (residui R1): il mondo simulato del CASO — result che sostituiscono quelli di default solo in questo turno */
-  world?: WorldResults
+  world?: WorldResults,
+  /** fase token (T7): il catalogo dei GRUPPI del turno (assembleTurnTools) per find_tools e l'attivazione automatica */
+  catalog: ToolGroupPresent[] = []
 ): Promise<{
   steps: Array<{ text: string; toolCalls: ToolCall[] }>
   delivered: string[]
@@ -1091,6 +1116,9 @@ async function evalTurn(
 }> {
   const messages: ChatMessage[] = replyTurnHistory([history[0]!, ...history.slice(1)], source, child)
   const deliverer = makeDeliverer(world)
+  // fase token (T7): la lista del turno cresce coi gruppi attivati (sempre,
+  // come turnTools nel loop — dynamicTools era solo del caso 28)
+  const dynState: { current: ToolDef[] } = dynamicTools ?? { current: [...turnToolsAll] }
   const steps: Array<{ text: string; toolCalls: ToolCall[] }> = []
   let lastFreeText = ''
   let endedWithAsk = false
@@ -1101,10 +1129,22 @@ async function evalTurn(
   // fase 10: gli id dei bot creati in QUESTO turno (deterministici per run)
   createdTeamN = 0
   createdTeamIds.length = 0
-  activatedGw = []
+  // fase token (T7): i gruppi attivi e l'attivazione con le funzioni PURA del
+  // loop — find_tools risponde groupActivationText e i tool del gruppo entrano
+  // in CODA dal passo dopo; la chiamata a un tool non attivo attiva il gruppo,
+  // NON esegue e risponde con la firma (come il loop)
+  const activeGroups = new Set<string>()
+  const groupOfTool = (name: string): ToolGroupPresent | null =>
+    catalog.find((g) => g.internalNames.includes(name) || g.tools.some((t) => t.name === name)) ?? null
+  const activateInEval = (ids: string[]): void => {
+    for (const id of ids) activeGroups.add(id)
+    const defs = toolDefsOfGroups(catalog, ids).filter((d) => !dynState.current.some((x) => x.name === d.name))
+    if (defs.length) dynState.current = [...dynState.current, ...defs]
+  }
+  const compactSignature = (name: string): string => name
   const drainOnce = async (tools?: ToolDef[]): Promise<{ text: string; toolCalls: ToolCall[] }> => {
     // con tool dinamici la lista del passo è QUELLA (find_tools può averla allungata)
-    const list = tools ?? replyTurnTools(dynamicTools ? dynamicTools.current : turnToolsAll, source, child)
+    const list = tools ?? replyTurnTools(dynState.current, source, child)
     const ctrl = new AbortController()
     const timer = setTimeout(() => ctrl.abort(), 120_000)
     try {
@@ -1128,24 +1168,51 @@ async function evalTurn(
         break
       }
       messages.push({ role: 'assistant', content: drained.text, toolCalls: drained.toolCalls })
-      // fase 13 (caso 28): i tool attivati dal find_tools di QUESTO passo entrano
-      // in fondo alla lista, in ordine stabile, dal PASSO SUCCESSIVO
-      if (dynamicTools && activatedGw.length) {
-        for (const t of activatedGw) {
-          if (!dynamicTools.current.some((x) => x.name === t.name)) dynamicTools.current = [...dynamicTools.current, t]
-        }
-      }
+      // fase token (T7): le chiamate srotolate (nomi INTERNI) che i giudici
+      // vedono — nei messages resta la chiamata COME l'ha scritta il modello
+      const expandedCalls: ToolCall[] = []
       for (const c of drained.toolCalls) {
+        // T3: la facciata si srotola PRIMA di simulare il risultato e PRIMA
+        // che i giudici vedano le chiamate (i giudici ragionano sui nomi interni)
+        const ex = expandFacadeCall({ name: c.name, arguments: c.arguments }, (n) => EVAL_TOOLS.find((t) => t.name === n) ?? null)
+        if (!ex.ok) {
+          expandedCalls.push(c)
+          messages.push({ role: 'tool', toolCallId: c.id, content: ex.error })
+          continue
+        }
+        const ec: ToolCall = { id: c.id, name: ex.name, arguments: ex.arguments }
+        expandedCalls.push(ec)
+        // T2: find_tools attiva i GRUPPI con la stessa funzione pura del loop
+        if (ec.name === 'find_tools') {
+          let fargs: Record<string, unknown> = {}
+          try { fargs = JSON.parse(ec.arguments || '{}') as Record<string, unknown> } catch { /* vuoto */ }
+          const act = activateGroupsResult(catalog, [...activeGroups], fargs)
+          activateInEval(act.activated)
+          messages.push({ role: 'tool', toolCallId: c.id, content: act.text })
+          continue
+        }
+        // T2: chiamata a un tool di un gruppo NON attivo → attivazione
+        // automatica, nessuna esecuzione, la firma per richiamarla
+        const inList = dynState.current.some((t) => t.name === ec.name)
+        const g = groupOfTool(ec.name)
+        if (!inList && g && !activeGroups.has(g.id)) {
+          activateInEval([g.id])
+          messages.push({ role: 'tool', toolCallId: c.id, content: `${ec.name} is in group ${g.id}, now active. Call it again with: ${compactSignature(ec.name)}` })
+          continue
+        }
         // fase eval-deboli (D1): gli argomenti si convertono al tipo dello
         // schema del tool del turno, come il loop vero prima di eseguire
-        const args = coercedArgsOfCall(c)
-        const r = deliverer.run(c.name, args)
+        const args = coercedArgsOfCall(ec)
+        const r = deliverer.run(ec.name, args)
         messages.push({ role: 'tool', toolCallId: c.id, content: r.result })
         if (r.endTurn) endedWithAsk = true
         // correzione C1: come nel loop reale, pass chiude il turno di gruppo
         // (i tool chiesti dopo nella stessa risposta non vengono eseguiti)
-        if (c.name === 'pass' && source === 'group') { endedWithPass = true; break }
+        if (ec.name === 'pass' && source === 'group') { endedWithPass = true; break }
       }
+      // fase token (T7): il passo registra le chiamate SROTLATE (i giudici
+      // ragionano sui nomi interni: browser_type, write_document…)
+      ;(drained as { toolCalls: ToolCall[] }).toolCalls = expandedCalls
       if (endedWithAsk || endedWithPass) break
     }
     // fase 11b (0b) + fase eval-deboli (D2): il recupero dei turni di gruppo
@@ -1241,7 +1308,7 @@ async function evalTurn(
 const sys = withLanguage(systemPrompt(AGENT), EVAL_LANG)
 // fase 12: il system dei turni di GRUPPO è senza la sezione Sottoagenti (come
 // il loop vero); quello del FIGLIO è il costruttore separato
-const sysGroup = withLanguage(systemPrompt(AGENT, { subagents: false, connectors: false }), EVAL_LANG)
+const sysGroup = withLanguage(systemPrompt(AGENT, { teams: true }), EVAL_LANG)
 const sysChild = subagentSystemPrompt(AGENT, { id: 'sub_e24a', title: L('Ricerca su Astro', 'Astro research') })
 const CHILD_TOOLS: ToolDef[] = [...EVAL_TOOLS.filter((t) => subagentToolAllowed(t.name)), wakeParentToolDef as ToolDef]
 const tc = (id: string, name: string, args: Record<string, unknown>): ToolCall =>
@@ -2915,9 +2982,12 @@ describe(`eval dei comportamenti (fasi 9-11) su modello reale (${MODEL} × ${RUN
         // fase skill (S9): la sezione delle skill del caso, come il loop
         const baseSystem = c.child ? sysChild : c.source === 'group' ? sysGroup : sys
         const caseSystem = c.systemExtra ? baseSystem + '\n' + c.systemExtra : baseSystem
-        // fase 13 (caso 28): col gateway i 60 tool MCP sono DEFERITI — nel turno
-        // c'è find_tools e la lista cresce con gli attivati (come il loop)
-        const dyn = c.dynamic ? { current: [...EVAL_TOOLS, findToolsDef([], true, () => '') as ToolDef] } : undefined
+        // fase token (T7): il turno dell'eval è quello del PRODOTTO —
+        // assembleTurnTools (nucleo T1, gruppi T2, find_tools con l'indice).
+        // Col gateway (caso 28) i tool MCP entrano DIFFERITI PER SERVER: la
+        // lista cresce coi gruppi attivati, come nel loop
+        const assembledEval = evalAssemble(c.source ?? 'user', c.child === true, c.dynamic ? GW_TOOLS : [])
+        const dyn = c.dynamic ? { current: assembledEval.tools } : undefined
         // fase eval-deboli (D6.8): il registro dei tool senza risultato simulato
         // attribuisce il fallback 'ok' al caso che lo ha prodotto
         simulatedResultCase = String(c.id)
@@ -2926,10 +2996,11 @@ describe(`eval dei comportamenti (fasi 9-11) su modello reale (${MODEL} × ${RUN
           c.source ?? 'user',
           c.maxSteps,
           c.group ? { called: c.group.called, closing: c.group.closing === true } : undefined,
-          c.child ? CHILD_TOOLS : EVAL_TOOLS,
+          assembledEval.tools,
           c.child === true,
           dyn,
-          c.world
+          c.world,
+          assembledEval.catalog
         )
         const v = c.judge(t)
         if (v.pass) {

@@ -87,37 +87,17 @@ export function requiredParamsOf(def: ToolDef): string[] {
 }
 
 /** Il result di find_tools: nome completo, descrizione (200 caratteri), parametri obbligatori (puro). */
-export function formatFindToolsResult(found: Array<{ name: string; description?: string; requiredParams?: string[] }>): string {
-  if (!found.length) return 'No MCP tools found with this search: try again with other words or tell the user.'
-  return found
-    .map((t) => {
-      const desc = (t.description ?? '').replace(/\s+/g, ' ').trim().slice(0, 200)
-      const req = t.requiredParams?.length ? ` · required parameters: ${t.requiredParams.join(', ')}` : ''
-      return `- ${t.name}: ${desc}${req}`
-    })
-    .join('\n')
-}
-
-/**
- * Fase velocità (S3): il result di find_tools per gli INTEGRATI differiti —
- * nome, descrizione, parametri obbligatori e l'istruzione di chiamarli con
- * use_tool (puro).
- */
-export function formatBuiltinToolsResult(found: Array<{ name: string; description?: string; requiredParams?: string[] }>): string {
-  if (!found.length) return ''
-  const lines = found.map((t) => {
-    const desc = (t.description ?? '').replace(/\s+/g, ' ').trim().slice(0, 200)
-    const req = t.requiredParams?.length ? ` · required parameters: ${t.requiredParams.join(', ')}` : ''
-    return `- ${t.name}: ${desc}${req}`
-  })
-  return ['Built-in tools (call them with use_tool({name, arguments})):', ...lines].join('\n')
-}
+// (fase token T2: il result dei gruppi attivati lo costruisce turn-tools.ts,
+// groupActivationText; qui restano solo le parti PURE ancora usate)
 
 /**
  * I tool MCP attivati con find_tools nella CONVERSAZIONE (pura sul
  * transcript): le entry tool-result dei find_tools portano meta.activated
  * coi nomi attivati; si tengono gli ULTIMI 20 (ordine di attivazione, senza
  * duplicati). È la persistenza richiesta: niente stato nuovo.
+ * Fase token (T2): i turni nuovi scrivono meta.activatedGroups (id di
+ * gruppo) e li legge activeGroupsFromTranscript (turn-tools.ts); i
+ * meta.activated legacy dei tool MCP si mappano al gruppo del loro server.
  */
 export function activeToolsFromTranscript(entries: Pick<TranscriptEntry, 'kind' | 'meta'>[], limit = ACTIVE_TOOLS_MEMORY): string[] {
   const names: string[] = []
@@ -147,48 +127,27 @@ export function connectorsActiveSection(servers: Array<{ name: string; toolCount
 }
 
 /**
- * Fase velocità (S3): la descrizione del tool find_tools, la RICERCA UNICA —
- * cerca tra gli integrati differiti (il loro indice di nomi per area sta
- * qui, così il modello sa che esistono anche senza cercare: come
- * formatNameIndexText di Rakazo) e, quando la modalità differita MCP è
- * attiva, anche tra i tool MCP dei connettori (che ATTIVA: dal passo dopo
- * si chiamano per nome). Puro.
+ * Fase token (T2): la definizione del tool find_tools del turno — la ricerca
+ * per GRUPPI. La descrizione porta l'INDICE dei gruppi presenti, una riga
+ * per gruppo («id: descrizione»: come Cursor, i nomi delle aree nel contesto
+ * fisso, il dettaglio su richiesta). Parametri {group?|query?}: con group si
+ * attiva il gruppo esatto, con query si cerca e si attivano i gruppi dei
+ * primi risultati. Puro: le righe dell'indice le costruisce il chiamante
+ * (turn-tools.ts) dai gruppi presenti nel turno.
  */
-export function findToolsDescription(deferredBuiltinNames: string[], deferredMcp: boolean, nameIndex: (names: string[]) => string): string {
-  const parts: string[] = []
-  if (deferredBuiltinNames.length) {
-    parts.push(
-      'Searches the built-in tools that are NOT in your tool list and tells you how to call them (name, description, parameters). ' +
-        'More built-in tools exist beyond your list; their names by area:\n' +
-        nameIndex(deferredBuiltinNames) +
-        '.'
-    )
-  }
-  if (deferredMcp) {
-    parts.push(
-      'Searches among the MCP tools of the active connectors (linked servers, plugins, gateways) and ACTIVATES up to 8 of them: from the following step you can call them by name.'
-    )
-  }
-  parts.push('Use it before saying you cannot do something.')
-  return parts.join(' ')
-}
-
-/**
- * La definizione del tool find_tools del turno: la ricerca unica (S3). La
- * descrizione porta l'indice dei nomi degli integrati differiti presenti nel
- * turno; il loop la aggiunge quando c'è almeno un integrato differito o la
- * modalità differita MCP è attiva.
- */
-export function findToolsDef(deferredBuiltinNames: string[], deferredMcp: boolean, nameIndex: (names: string[]) => string): ToolDef {
+export function findToolsGroupedDef(indexLines: string[]): ToolDef {
   return {
     name: 'find_tools',
-    description: findToolsDescription(deferredBuiltinNames, deferredMcp, nameIndex),
+    description:
+      'Finds and ACTIVATES the tool groups that are not in your tool list: their tools become callable by name from the next step. ' +
+      'Groups available in this turn:\n' +
+      indexLines.join('\n'),
     parameters: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: 'Keywords of the tool you are looking for (e.g. "issue linear crea", "crea un bot")' }
-      },
-      required: ['query']
+        query: { type: 'string', description: 'Keywords of what you need: activates the matching groups (max 2)' },
+        group: { type: 'string', description: 'Exact group id from the index above: activates that group' }
+      }
     }
   }
 }

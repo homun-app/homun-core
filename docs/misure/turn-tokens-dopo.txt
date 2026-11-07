@@ -1,0 +1,105 @@
+# turn-tokens — token stimati (caratteri/4) del turno, per configurazione
+# fonte: assembleTurnTools (src/main/agent/turn-tools.ts) — la stessa del loop e dell'eval
+# prompt: system prompt del turno SENZA le sezioni dinamiche (memoria, skill, bot principale, connettori)
+
+## bot normale senza browser
+prompt: 1512
+tools del turno: 1664 (11 tool)
+totale prompt+tools: 3176
+per tool:
+  message_user: 129
+  ask_user: 306
+  run-command: 177
+  read-file: 94
+  write-file: 74
+  list-directory: 59
+  web_search: 100
+  web_fetch: 112
+  memory: 211
+  skill: 112
+  find_tools: 290
+gruppi (TOOL_GROUPS, tool verso il modello):
+  documents: 681 (5 tool)
+  tasks: 699 (3 tool)
+  credentials: 414 (3 tool)
+  outside: 471 (3 tool)
+  subagents: 397 (4 tool)
+  bots: 699 (7 tool)
+  connectors: 477 (4 tool)
+  apps: 228 (1 tool)
+  admin: 489 (4 tool)
+
+## bot normale con browser
+prompt: 1699
+tools del turno: 1688 (11 tool)
+totale prompt+tools: 3387
+per tool:
+  message_user: 129
+  ask_user: 306
+  run-command: 177
+  read-file: 94
+  write-file: 74
+  list-directory: 59
+  web_search: 100
+  web_fetch: 112
+  memory: 211
+  skill: 112
+  find_tools: 314
+gruppi (TOOL_GROUPS, tool verso il modello):
+  browser: 896 (4 tool)
+  documents: 681 (5 tool)
+  tasks: 699 (3 tool)
+  credentials: 414 (3 tool)
+  outside: 471 (3 tool)
+  subagents: 397 (4 tool)
+  bots: 699 (7 tool)
+  connectors: 477 (4 tool)
+  apps: 228 (1 tool)
+  admin: 489 (4 tool)
+
+## turno di gruppo
+prompt: 1512
+tools del turno: 1659 (11 tool)
+totale prompt+tools: 3171
+per tool:
+  send_to_user: 124
+  ask_user: 306
+  run-command: 177
+  read-file: 94
+  write-file: 74
+  list-directory: 59
+  web_search: 100
+  web_fetch: 112
+  memory: 211
+  skill: 112
+  find_tools: 290
+gruppi (TOOL_GROUPS, tool verso il modello):
+  documents: 681 (5 tool)
+  tasks: 699 (3 tool)
+  credentials: 257 (2 tool)
+  outside: 471 (3 tool)
+  subagents: 397 (4 tool)
+  bots: 699 (7 tool)
+  connectors: 225 (2 tool)
+  apps: 228 (1 tool)
+  admin: 489 (4 tool)
+
+## figlio (sottoagente)
+prompt: 643
+tools del turno: 1123 (10 tool)
+totale prompt+tools: 1766
+per tool:
+  run-command: 177
+  read-file: 94
+  write-file: 74
+  list-directory: 59
+  web_search: 100
+  web_fetch: 112
+  memory: 82
+  skill: 112
+  find_tools: 152
+  wake_parent: 161
+gruppi (TOOL_GROUPS, tool verso il modello):
+  browser: 376 (1 tool)
+  tasks: 134 (1 tool)
+

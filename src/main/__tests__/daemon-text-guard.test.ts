@@ -55,8 +55,6 @@ const ALLOWED_LITERALS: ReadonlyArray<{ file: string; text: string }> = [
   // ripresa dopo la presa di controllo (come <messaggio_da_agente>)
   { file: 'src/main/agent/screen.ts', text: '\n\n<nota_utente>' },
   { file: 'src/main/agent/screen.ts', text: '\n</nota_utente>' },
-  // descrizione di send_to_agent: cita il marcatore <messaggio_da_agente> (invariante)
-  { file: 'src/main/agent/tools.ts', text: 'Sends a message to another bot of the user (delegation' },
   // errori di avvio per lo SVILUPPATORE (lanciano al boot, finiscono nel log)
   { file: 'src/main/connectors/index.ts', text: 'il catalogo non è un array' },
   { file: 'src/main/connectors/index.ts', text: ': non è un oggetto' },
