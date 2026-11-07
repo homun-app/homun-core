@@ -187,8 +187,8 @@ interface Store {
   draftSend(entryId: number, body?: string): void
   draftDiscard(entryId: number): void
   draftUpdate(entryId: number, body: string): void
-  /** fase 8: mode 'once' | 'always' | 'turn' (fino a fine turno) */
-  resolveApproval(approvalId: string, decision: 'allow' | 'deny', mode: 'once' | 'always' | 'turn'): void
+  /** fase 8: mode 'once' | 'always' | 'turn' (fino a fine turno); fase use-app: anche 'minutes10' */
+  resolveApproval(approvalId: string, decision: 'allow' | 'deny', mode: 'once' | 'always' | 'turn' | 'minutes10'): void
   /** fase 8: decisione sulla regola di auto-review proposta dal bot */
   autoreviewRuleDecision(entryId: number, action: 'add' | 'dismiss'): void
   /** fase 8: "Crea regola da questa azione" — apre l'editor precompilato */

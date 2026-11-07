@@ -7,7 +7,7 @@ import { getPermissions, listGrants, addGrant, getRoutine } from '../store/db'
 import { sandboxMode, boxRoot, boxDir } from '../sandbox'
 import { resolveBoxPath } from '../sandbox/box-paths'
 import type { PermissionMode } from '../../shared/types'
-import { targetKey, runCommandVerdict, commandKey, isNeverAuto, ruleToolMatches, mcpAnnotationMode, serverReadGrantCovers, type McpAnnotationsLike } from './permission-rules'
+import { targetKey, runCommandVerdict, commandKey, isNeverAuto, ruleToolMatches, mcpAnnotationMode, serverReadGrantCovers, grantActive, useAppAlwaysAsk, type McpAnnotationsLike } from './permission-rules'
 // fase app (A6): la classificazione delle azioni di Composio (pura)
 import { classifyComposioToolName } from '../connectors/composio-actions'
 // fase Composio OAuth (C2/C3/C5/C4): il gate del blocco e degli strumenti
@@ -413,11 +413,35 @@ export async function check(
     return { kind: 'ask', reason: 'reads outside the shared box', ui: ui(UI.approvalReadsOutsideBox) }
   }
 
-  // standing grant: match ESATTO tool+target ("Consenti sempre" su quel target)
-  const grant = listGrants().find((g) => g.tool === tool && g.target === target)
+  // fase use-app (U3): i comandi riconosciuti come tasti di invio (Return, o
+  // un type che finisce con a-capo) in un'app di posta o chat chiedono SEMPRE:
+  // un Invio lì dentro può spedire — grant e regole always_allow non lo coprono
+  if (tool === 'use-app') {
+    const sendKey = useAppAlwaysAsk(input)
+    if (sendKey) {
+      return { kind: 'ask', reason: `use-app (${sendKey}) requires approval`, ui: ui(UI.approvalUseAppSend, { app: String(input.app ?? '') }) }
+    }
+  }
+
+  // standing grant: match ESATTO tool+target ("Consenti sempre" su quel
+  // target); fase use-app (U3): una grant SCADUTA (i 10 minuti) non vale più
+  const grant = listGrants().find((g) => g.tool === tool && g.target === target && grantActive(g))
   if (grant) return { kind: 'allow', via: 'grant' }
 
   if (mode === 'always_allow') return { kind: 'allow', via: 'rule' }
+  // fase use-app (U3): la card dice l'APP o l'HOST, mai la chiave tecnica
+  if (tool === 'use-app') {
+    if (String(input.action ?? '') === 'open_url') {
+      let host = ''
+      try {
+        host = new URL(String(input.url ?? '')).host
+      } catch {
+        host = String(input.url ?? '').slice(0, 60)
+      }
+      return { kind: 'ask', reason: `use-app (${target}) requires approval`, ui: ui(UI.approvalUseAppUrl, { host }) }
+    }
+    return { kind: 'ask', reason: `use-app (${target}) requires approval`, ui: ui(UI.approvalUseApp, { app: String(input.app ?? '').trim() || '?' }) }
+  }
   return {
     kind: 'ask',
     reason: `${tool}${target !== '*' && target ? ` (${target})` : ''} requires approval`,
@@ -436,7 +460,7 @@ export async function check(
  *   futuri del prompt di una routine attiva — le sue card non offrono
  *   "Consenti sempre" e il gate non consulta più le grant già salvate.
  */
-export async function grantStanding(tool: string, input: Record<string, unknown>): Promise<void> {
+export async function grantStanding(tool: string, input: Record<string, unknown>, opts: { expiresAtMs?: number } = {}): Promise<void> {
   if (tool === 'update_state') return
   if (tool === 'run-command') {
     const analysis = await analyzeCommand(String(input.command ?? ''))
@@ -456,5 +480,7 @@ export async function grantStanding(tool: string, input: Record<string, unknown>
       return
     }
   }
-  addGrant(tool, targetKey(tool, input))
+  // fase use-app (U3): «Consenti per 10 minuti a <App>» salva la grant con la
+  // scadenza (expires_at); senza opts resta il «Consenti sempre» di sempre
+  addGrant(tool, targetKey(tool, input), undefined, opts.expiresAtMs)
 }

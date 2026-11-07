@@ -185,16 +185,17 @@ export const toolDefs: ToolDef[] = [
   },
   {
     name: 'use-app',
-    description: "Controls the user's computer (computer use). Actions: screenshot (captures the screen and you see it as an image), click/double_click/right_click {x,y in image pixels}, type {text}, key {key e.g. cmd+c, Return, tab}, open_app {app}. Typical flow: screenshot → look → action → screenshot to verify.",
+    description: "Controls the user's computer (computer use). Actions: screenshot (captures the screen and you see it as an image), open_url {url} — the ONE-step way to open a page in the user's browser: use it instead of typing an address, open_app {app}, type {text}, key {key e.g. cmd+c, Return}, click/double_click/right_click {x,y in image pixels} — each of type/key/click REQUIRES `app` (e.g. Safari): Homun brings that app to the front first and the action runs ONLY there, never anywhere else (Homun's own window is always refused). Typical flow: open_url or screenshot → look → action with `app` → screenshot to verify.",
     parameters: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['screenshot', 'click', 'double_click', 'right_click', 'type', 'key', 'open_app'], description: 'Action to perform' },
+        action: { type: 'string', enum: ['screenshot', 'open_url', 'open_app', 'type', 'key', 'click', 'double_click', 'right_click'], description: 'Action to perform' },
+        url: { type: "string", description: "URL to open in the user's browser (action open_url; only http: and https:)" },
         x: { type: 'number', description: 'X coordinate in screenshot pixels' },
         y: { type: 'number', description: 'Y coordinate in screenshot pixels' },
         text: { type: 'string', description: 'Text to type (action type)' },
         key: { type: 'string', description: 'Key combo (action key)' },
-        app: { type: 'string', description: 'App name, prefer the English name (e.g. Calculator, Notes, Safari)' }
+        app: { type: 'string', description: 'Target app, prefer the English name (e.g. Calculator, Notes, Safari): REQUIRED for type/key/click/double_click/right_click (the app that must receive the action, never Homun itself); the browser to open the url in for open_url; the app to open for open_app' }
       },
       required: ['action']
     }
@@ -1020,7 +1021,9 @@ export async function executeTool(
     case 'use-app': {
       const { executeUseApp } = await import('../computeruse')
       const r = await executeUseApp(input as unknown as Parameters<typeof executeUseApp>[0])
-      return { output: r.output, meta: { computerUse: true, error: r.error ?? false }, images: r.images }
+      // fase use-app (U4): la bandierina dell'Accessibilità mancante arriva al
+      // loop, che conta gli errori del turno e ferma tutto al secondo
+      return { output: r.output, meta: { computerUse: true, error: r.error ?? false, ...(r.accessibilityError ? { accessibilityError: true } : {}) }, images: r.images }
     }
     case 'list-credentials': {
       // fase 14 (punto 7c): i NOMI dei secret (come prima) + i login senza

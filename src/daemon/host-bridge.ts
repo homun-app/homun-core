@@ -4,7 +4,7 @@
 // notifica via osascript, vault bloccato (mai chiavi in chiaro), scale factor
 // retina di default (coerente con gli screenshot nativi 2x).
 import { execFile } from 'node:child_process'
-import { setScaleFactorProvider } from '../main/computeruse'
+import { setScaleFactorProvider, setHomunPidProvider } from '../main/computeruse'
 import { setSafeStorage, type SafeStorageLike } from '../main/vault'
 
 /** notifica macOS senza Electron: display notification di osascript. */
@@ -84,6 +84,23 @@ export function attachHostBridge(deps: HostBridgeDeps): {
   }
   const refreshTimer = setInterval(refreshScale, 60_000)
   refreshTimer.unref()
+
+  // fase use-app (U1): il pid del processo di Homun (l'app Electron), cache
+  // 60s: computer use riconosce Homun in primo piano ANCHE quando il processo
+  // si chiama "Electron" (build di sviluppo)
+  let homunPid: number | null = null
+  setHomunPidProvider(() => homunPid)
+  const refreshHomunPid = (): void => {
+    if (!deps.hasUi()) return
+    deps.callUi('host.app.pid')
+      .then((v) => {
+        homunPid = typeof v === 'number' && v > 1 ? v : null
+      })
+      .catch(() => undefined)
+  }
+  const pidTimer = setInterval(refreshHomunPid, 60_000)
+  pidTimer.unref()
+  refreshHomunPid()
 
   return {
     refreshScale,

@@ -952,9 +952,12 @@ function NoticeRow({ entry }: { entry: TranscriptEntry }) {
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
   const setSettingsTab = useStore((s) => s.setSettingsTab)
   const uiId = (entry.meta?.ui as { id?: string } | undefined)?.id
+  // fase use-app (U4): manca l'Accessibilità → il bottone apre la pagina
+  // giusta delle Impostazioni di sistema
+  const accessibility = uiId === 'notice.computerAccessibility'
   // fase 16b correzioni (P6): anche l'avviso «configura prima un provider e
   // un modello» ha la via d'uscita — stesso bottone «Scegli un modello»
-  const withAction = uiId === 'notice.modelError' || uiId === 'notice.modelNotResponding' || uiId === 'notice.configureProviderFirst'
+  const withAction = accessibility || uiId === 'notice.modelError' || uiId === 'notice.modelNotResponding' || uiId === 'notice.configureProviderFirst'
   const fallback = uiId === 'notice.modelFallback' || uiId === 'notice.modelFallbackRoute' || uiId === 'notice.modelRouteCooled'
   if (!withAction && !fallback) {
     // R1 (fase app — ritocchi): le notice non sono tutte errori — info grigia
@@ -976,12 +979,21 @@ function NoticeRow({ entry }: { entry: TranscriptEntry }) {
     <div className="flex items-center gap-3 rounded-[14px] bg-destructive/10 px-4 py-2.5 text-sm text-foreground">
       <span className="min-w-0 flex-1">{uiTextOf(entry)}</span>
       {withAction && (
-        <button
-          className="shrink-0 rounded-full bg-muted px-3 py-1.5 text-xs text-foreground transition hover:bg-accent"
-          onClick={() => { setSettingsTab('modelli'); setSettingsOpen(true) }}
-        >
-          <Trans>Scegli un modello</Trans>
-        </button>
+        accessibility ? (
+          <button
+            className="shrink-0 rounded-full bg-muted px-3 py-1.5 text-xs text-foreground transition hover:bg-accent"
+            onClick={() => { void api.openAccessibilitySettings().catch(() => undefined) }}
+          >
+            <Trans>Apri Accessibilità</Trans>
+          </button>
+        ) : (
+          <button
+            className="shrink-0 rounded-full bg-muted px-3 py-1.5 text-xs text-foreground transition hover:bg-accent"
+            onClick={() => { setSettingsTab('modelli'); setSettingsOpen(true) }}
+          >
+            <Trans>Scegli un modello</Trans>
+          </button>
+        )
       )}
       <span className="sr-only">{t`errore del modello`}</span>
     </div>

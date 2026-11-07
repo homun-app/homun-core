@@ -16,7 +16,20 @@ export function targetKey(tool: string, input: Record<string, unknown>): string 
     return String(input.path ?? '')
   }
   if (tool === 'use-app') {
-    return String(input.action ?? '') // scope per azione, come l'originale
+    // fase use-app (U3): la chiave è l'APP che riceve l'azione, non più
+    // l'azione — «sempre a Safari» non deve valere per Mail. screenshot
+    // resta 'screenshot' (senza card, come oggi: la regola predefinita
+    // pattern "screenshot" continua a coprirla); open_url è per HOST.
+    const action = String(input.action ?? '')
+    if (action === 'screenshot') return 'screenshot'
+    if (action === 'open_url') {
+      try {
+        return `url:${new URL(String(input.url ?? '')).host}`
+      } catch {
+        return 'url:'
+      }
+    }
+    return `app:${String(input.app ?? '').trim()}`
   }
   // fase 4: grant/regole per skill e routine, non per tool intero
   if (tool === 'update_skill') {
@@ -26,6 +39,52 @@ export function targetKey(tool: string, input: Record<string, unknown>): string 
     return input.target === 'routine' ? `routine ${String(input.id ?? '')}` : 'memory'
   }
   return '*'
+}
+
+// ---- fase use-app (U3): permessi per app, scadenze, Invii che chiedono sempre ----
+
+/** Una grant vale ancora? (expires_at assente = per sempre; passata = scaduta). */
+export function grantActive(g: { expiresAt?: number | null }, now: number = Date.now()): boolean {
+  return g.expiresAt == null || g.expiresAt > now
+}
+
+/**
+ * I target grant di use-app delle versioni di prima (scope per AZIONE): la
+ * migrazione li toglie, perché davano il permesso di digitare in qualunque app.
+ */
+export const LEGACY_USE_APP_GRANT_TARGETS = new Set(['type', 'key', 'click', 'double_click', 'right_click', 'open_app'])
+
+/** Le app di posta e chat: un Invio lì dentro può spedire qualcosa. */
+const SEND_KEY_APPS = new Set([
+  'mail', 'posta', 'mailmate', 'spark', 'airmail', 'thunderbird', 'outlook',
+  'messages', 'messaggi', 'imessage', 'whatsapp', 'telegram', 'signal', 'slack',
+  'discord', 'messenger', 'teams', 'skype', 'zoom', 'line'
+])
+
+/** true se l'app è una di posta/chat in cui un Invio spedirebbe. */
+export function isSendKeyApp(app: string): boolean {
+  const key = app.trim().replace(/\.app$/i, '').toLowerCase()
+  return SEND_KEY_APPS.has(key)
+}
+
+/**
+ * U3: i comandi riconosciuti come tasti di invio (Return/enter, o un type che
+ * finisce con a-capo) in un'app di posta o chat chiedono SEMPRE — grant e
+ * regole always_allow non li coprono. Ritorna il motivo, o null.
+ */
+export function useAppAlwaysAsk(input: Record<string, unknown>): string | null {
+  const action = String(input.action ?? '')
+  const app = String(input.app ?? '').trim()
+  if (!app || !isSendKeyApp(app)) return null
+  if (action === 'key') {
+    const main = String(input.key ?? '').split('+').pop()?.trim().toLowerCase() ?? ''
+    if (main === 'return' || main === 'enter') return `would press Return in ${app}`
+  }
+  if (action === 'type') {
+    const text = String(input.text ?? '')
+    if (text.endsWith('\n') || text.endsWith('\r')) return `would press Return in ${app}`
+  }
+  return null
 }
 
 // ---- gate run-command (§5.1): chiavi esatte "name" o "name sub" ----

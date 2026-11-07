@@ -194,3 +194,33 @@ describe('P2 — la card degli strumenti DEL BOT senza nome tecnico', () => {
     expect(i18n.t(title)).toBe('Contabile vuole usare Slack · Create reminder')
   })
 })
+
+// ---- fase use-app (U3): la card parla di APP o di HOST ----
+
+describe('U3 — la card di use-app: app di destinazione o host in evidenza', () => {
+  it('useAppCardModel: open_url → l\'host; tastiera/mouse → l\'app; screenshot → null', async () => {
+    const { useAppCardModel } = await import('../lib/approval-app')
+    expect(useAppCardModel({ action: 'open_url', url: 'https://sora.chatgpt.com' })).toEqual({ kind: 'url', host: 'sora.chatgpt.com' })
+    expect(useAppCardModel({ action: 'open_url', url: 'https://sora.chatgpt.com', app: 'Safari' })).toEqual({ kind: 'url', host: 'sora.chatgpt.com' })
+    expect(useAppCardModel({ action: 'type', app: 'Safari', text: 'x' })).toEqual({ kind: 'app', app: 'Safari' })
+    expect(useAppCardModel({ action: 'click', x: 1, y: 2, app: 'Mail' })).toEqual({ kind: 'app', app: 'Mail' })
+    expect(useAppCardModel({ action: 'open_app', app: 'Notes' })).toEqual({ kind: 'app', app: 'Notes' })
+    expect(useAppCardModel({ action: 'screenshot' })).toBeNull()
+    // URL malformato: l'host è il testo grezzo (l'azione fallirà comunque)
+    expect(useAppCardModel({ action: 'open_url', url: 'sito' })).toEqual({ kind: 'url', host: 'sito' })
+    // app mancante: l'app resta vuota (l'azione fallirà con «app is required»)
+    expect(useAppCardModel({ action: 'type', text: 'x' })).toEqual({ kind: 'app', app: '' })
+  })
+
+  it('grantDisplayName: i consensi di use-app si chiamano per app o per host, in it e in en', async () => {
+    const { grantDisplayName } = await import('../lib/approval-app')
+    expect(grantDisplayName({ tool: 'use-app', target: 'app:Safari' }, 'it')).toBe('Usare Safari')
+    expect(grantDisplayName({ tool: 'use-app', target: 'app:Safari' }, 'en')).toBe('Use Safari')
+    expect(grantDisplayName({ tool: 'use-app', target: 'url:sora.chatgpt.com' }, 'it')).toBe('Aprire sora.chatgpt.com')
+    expect(grantDisplayName({ tool: 'use-app', target: 'url:sora.chatgpt.com' }, 'en')).toBe('Open sora.chatgpt.com')
+    // le letture di un server MCP restano come oggi
+    expect(grantDisplayName({ tool: 'mcp__notion__*', target: '*', scope: 'readOnly' }, 'it')).toBe('Letture di notion')
+    // gli altri tool restano col nome umano di sempre
+    expect(typeof grantDisplayName({ tool: 'run-command', target: 'git status' }, 'it')).toBe('string')
+  })
+})

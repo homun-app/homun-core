@@ -456,3 +456,24 @@ describe('U4: la regola dell\'ora di invio, fissa nel system prompt', () => {
     expect(child.split(RULE).length - 1).toBe(1)
   })
 })
+
+// ---- fase use-app (U6): l'unica riga del prompt che cambia ----
+
+describe('U6 — la riga dei servizi che chiedono l\'account dell\'utente', () => {
+  const LINE = "For services that need the user's own account (video or image generators, banking, shops), open the page with open_url and hand over to the user to sign in; do not drive the login or the service step by step."
+
+  it('sta nella sezione del computer, una volta sola, parola per parola', () => {
+    const p = computerSection()
+    expect(p.split(LINE).length - 1).toBe(1)
+  })
+
+  it('c\'è in TUTTE le varianti del prompt principale (con e senza browser)', () => {
+    expect(systemPrompt(agent)).toContain(LINE)
+    process.env.SANDBOT_TEST_FAKE_BROWSER_MCP = '1'
+    try {
+      expect(systemPrompt(agent)).toContain(LINE)
+    } finally {
+      delete process.env.SANDBOT_TEST_FAKE_BROWSER_MCP
+    }
+  })
+})

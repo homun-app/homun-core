@@ -38,6 +38,9 @@ import { composioGateway } from '../connectors/composio-gateway'
 import { deniedRepeatRefusal, repeatsDeniedAction } from './composio-trust'
 import { llmStream, type ChatMessage, type ToolCall } from './llm'
 import { systemPrompt, secondaryPrompts, mainAgentSection, withLanguage, ROUTINE_SILENT_REPLY_GUIDANCE } from './prompts'
+// fase use-app (U1/U4): i rifiuti del loop per Homun stesso e per il tetto
+// degli errori di Accessibilità
+import { KEYBOARD_MOUSE_ACTIONS, ACCESSIBILITY_RESULT, HOMUN_SELF_RESULT, isHomunAppName } from '../computeruse'
 import { toolDefs, executeTool } from './tools'
 import * as permissions from './permissions'
 // fase 16c (C1/C3.3): i provider si leggono dal modulo providers (vista del
@@ -273,6 +276,12 @@ interface Running {
   superseded?: boolean
   /** fase 8 (punto 2): chiavi concesse "per questo turno" (in memoria, mai nel DB). */
   turnAllows: Set<string>
+  /**
+   * Fase use-app (U4): errori di Accessibilità già visti in QUESTO turno. A
+   * due, le altre azioni di tastiera e mouse non partono nemmeno: senza il
+   * permesso nessuna funzionerebbe, il modello deve fermarsi e chiedere.
+   */
+  accessibilityFailures: number
   /**
    * F8: epoca dei grant di turno. La lettura web che contamina il turno
    * revoca i grant concessi PRIMA (clear + incremento): anche un grant ancora
@@ -865,7 +874,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
   if (!provider) throw new Error('provider not found')
 
   const controller = new AbortController()
-  const run: Running = { controller, approvals: new Map(), turnAllows: new Set(), turnGrantEpoch: 0, composioTrustedApps: new Set(), composioDenied: [] }
+  const run: Running = { controller, approvals: new Map(), turnAllows: new Set(), turnGrantEpoch: 0, composioTrustedApps: new Set(), composioDenied: [], accessibilityFailures: 0 }
   if (opts.taskId !== undefined) run.taskId = opts.taskId
   running.set(agentId, run)
 
@@ -3656,6 +3665,22 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           }
         }
 
+        // fase use-app (U1): l'azione che ha come destinazione Homun stesso si
+        // rifiuta PRIMA del gate — non ha senso chiedere il permesso di
+        // digitare nella finestra di chi chiede (il difetto del turno Sora:
+        // l'URL finito tre volte nel campo di scrittura di Homun)
+        if (
+          call.name === 'use-app' &&
+          ((KEYBOARD_MOUSE_ACTIONS as readonly string[]).includes(String(input.action ?? '')) || String(input.action ?? '') === 'open_app') &&
+          isHomunAppName(String(input.app ?? ''))
+        ) {
+          const refused = HOMUN_SELF_RESULT
+          messages.push({ role: 'tool', toolCallId: call.id, content: refused })
+          const res = add({ agentId, kind: 'tool-result', role: 'system', content: refused, meta: { callId: call.id, error: true } })
+          emit({ type: 'entries', agentId, entries: [res] })
+          continue
+        }
+
         // §5.1: il gate run-command analizza OGNI comando della riga (tree-sitter);
         // agentId serve al gate C5 (letture dentro/fuori dalla box in host).
         // fase 10 (punti 1-2): permessi PER ORIGINE — creare bot e gruppi parte
@@ -3924,6 +3949,20 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           continue
         }
 
+        // fase use-app (U4): dopo DUE errori di Accessibilità in questo turno
+        // le altre azioni di tastiera e mouse vengono rifiutate senza
+        // eseguire, con lo stesso testo: senza il permesso nessuna funzionerebbe
+        if (
+          call.name === 'use-app' &&
+          (KEYBOARD_MOUSE_ACTIONS as readonly string[]).includes(String(input.action ?? '')) &&
+          run.accessibilityFailures >= 2
+        ) {
+          messages.push({ role: 'tool', toolCallId: call.id, content: ACCESSIBILITY_RESULT })
+          const res = add({ agentId, kind: 'tool-result', role: 'system', content: ACCESSIBILITY_RESULT, meta: { callId: call.id, error: true, accessibilityCap: true } })
+          emit({ type: 'entries', agentId, entries: [res] })
+          continue
+        }
+
         // esecuzione
         try {
           // correzione A5: il contesto del turno (chi lo ha aperto) serve a
@@ -3941,6 +3980,16 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               ? { routineActivateOk: true }
               : {})
           })
+          // fase use-app (U4): l'errore di Accessibilità conta nel turno; al
+          // PRIMO compare in chat la notice con la via d'uscita («Apri
+          // Accessibilità» lo mette la UI dall'id notice.computerAccessibility)
+          if (call.name === 'use-app' && (meta as Record<string, unknown>).accessibilityError === true) {
+            run.accessibilityFailures++
+            if (run.accessibilityFailures === 1) {
+              const accessibilityNotice = add({ ...uiSystemEntry(agentId, 'notice', ui(UI.computerAccessibility)) })
+              emit({ type: 'entries', agentId, entries: [accessibilityNotice] })
+            }
+          }
           // fase 13 (punto 8): OGNI result MCP è un DATO ESTERNO (email, pagine
           // Notion, issue): blocco evidenza con la fonte mcp:<server> e
           // CONTAMINAZIONE del turno, con le stesse conseguenze di web_fetch
@@ -4275,14 +4324,17 @@ export function supersedeIfPaused(agentId: string): boolean {
 /**
  * Fase 8 (punto 2): mode 'once' = consentito una volta; 'always' = standing
  * grant persistente; 'turn' = chiave in memoria fino alla fine del turno
- * (mai nel DB). Per update_state e comandi never-auto 'turn' ricade su
+ * (mai nel DB). Fase use-app (U3): 'minutes10' = standing grant CON SCADENZA
+ * (10 minuti) — «Consenti per 10 minuti a <App>»: una card sola per la
+ * sessione d'uso dell'app, senza permesso per sempre.
+ * Per update_state e comandi never-auto 'turn' ricade su
  * 'once' (turnGrantKey → null): valgono gli stessi divieti di "Consenti sempre".
  */
 export function resolveApproval(
   agentId: string,
   approvalId: string,
   decision: 'allow' | 'deny',
-  mode: 'once' | 'always' | 'turn' = 'once'
+  mode: 'once' | 'always' | 'turn' | 'minutes10' = 'once'
 ): void {
   const run = running.get(agentId)
   const cb = run?.approvals.get(approvalId)
@@ -4296,7 +4348,7 @@ export function resolveApproval(
     (e: import('../../shared/types').TranscriptEntry) =>
       (e.kind === 'approval' || e.kind === 'send-message') && e.meta?.approvalId === approvalId
   )
-  if (decision === 'allow' && mode === 'always') {
+  if (decision === 'allow' && (mode === 'always' || mode === 'minutes10')) {
     // fase 14 (7d-3): "Sempre per questo sito" della card fill crea la
     // concessione (loginId, origin) — MAI una concessione generica del tool
     const fill = entry?.meta?.fill as { loginId: string; origin: string } | undefined
@@ -4304,8 +4356,13 @@ export function resolveApproval(
       // fase 14 (7d-3): concessione (loginId, origin) — mai generica
       addGrant('fill_credential', `${fill.loginId}|${fill.origin}`)
     } else if (entry) {
-      // registra standing grant per il tool+target dell'approval in sospeso
-      void permissions.grantStanding(String(entry.meta?.tool), entry.meta?.input as Record<string, unknown>)
+      // registra standing grant per il tool+target dell'approval in sospeso;
+      // fase use-app (U3): 'minutes10' la salva con la scadenza a 10 minuti
+      void permissions.grantStanding(
+        String(entry.meta?.tool),
+        entry.meta?.input as Record<string, unknown>,
+        mode === 'minutes10' ? { expiresAtMs: Date.now() + 10 * 60_000 } : {}
+      )
     }
   }
   if (decision === 'allow' && mode === 'turn' && entry) {

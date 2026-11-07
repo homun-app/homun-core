@@ -16,7 +16,7 @@ import { uiTextOfMetaTools, toolCtxOfMeta } from '../lib/ui-text'
 import { i18n } from '../lib/i18n'
 // R3 (fase app — ritocchi): il modello puro della card per Composio e MCP
 // fase Composio OAuth (C7): anche il modello del blocco
-import { approvalAppOf, approvalTitleOf, approvalReasonPhrase, approvalTechnicalLine, approvalBatchArgumentLines, approvalAskTitle, type ComposioBatchActionMeta } from '../lib/approval-app'
+import { approvalAppOf, approvalTitleOf, approvalReasonPhrase, approvalTechnicalLine, approvalBatchArgumentLines, approvalAskTitle, useAppCardModel, type ComposioBatchActionMeta } from '../lib/approval-app'
 import { toolDisplayName } from '../../../shared/tool-names'
 import type { TranscriptEntry } from '../../../shared/types'
 import { DecidedRow, CardShell } from './DecidedRow'
@@ -90,6 +90,12 @@ export function ApprovalCard({ entry, readOnly = false }: { entry: TranscriptEnt
   // sulle annotazioni a ogni chiamata); dopo il click QUESTA chiamata passa once
   const mcpServerRead = entry.meta?.mcpServerRead as { slug?: string; name?: string } | undefined
 
+  // fase use-app (U3): la card parla di APP o di HOST — «Vuole aprire
+  // sora.chatgpt.com nel tuo browser», «Consenti per 10 minuti a Safari». I
+  // tasti di invio in posta/chat (approval.useAppSend) chiedono sempre: niente «Sempre»
+  const useApp = tool === 'use-app' ? useAppCardModel(input) : null
+  const useAppSend = (entry.meta?.ui as { id?: string } | undefined)?.id === 'approval.useAppSend'
+
   // fase 8: auto-approvata dall'auto-review — riga compressa, espandibile.
   // fase impostazioni (I4.3): nel modo «Non chiedere» non c'è regola — la
   // riga dice QUALE impostazione ha fatto passare l'azione
@@ -130,7 +136,7 @@ export function ApprovalCard({ entry, readOnly = false }: { entry: TranscriptEnt
   // fase Composio OAuth (C7): le azioni del blocco (o le voci di
   // MANAGE_CONNECTIONS / PROXY_EXECUTE) — il titolo viene da loro
   const composioBatch = entry.meta?.composioBatch as { actions: ComposioBatchActionMeta[]; incomplete: boolean; reason?: 'action' | 'incomplete' | 'trust' | 'rule' } | undefined
-  const noAlways = tool === 'update_state' || entry.meta?.composioDestructive === true || entry.meta?.composioNoAlways === true
+  const noAlways = tool === 'update_state' || entry.meta?.composioDestructive === true || entry.meta?.composioNoAlways === true || useAppSend
   const noTurn = noAlways || entry.meta?.neverAuto === true
   const command = typeof input?.command === 'string' ? input.command : null
   const filePath = typeof input?.path === 'string' ? input.path : null
@@ -142,9 +148,20 @@ export function ApprovalCard({ entry, readOnly = false }: { entry: TranscriptEnt
 
   const body = (
     <>
-      <p className="text-[15px] font-semibold">
-        {resolvedTitle ?? askTitle(tool, entry.meta, agentName, activeLang)}
-      </p>
+      {useApp?.kind === 'url' && useApp.host ? (
+        // U2: l'host in evidenza — «Aprire sora.chatgpt.com nel tuo browser»
+        <p className="text-[15px] font-semibold">
+          <Trans>Aprire <b>{useApp.host}</b> nel tuo browser</Trans>
+        </p>
+      ) : useApp?.kind === 'app' && useApp.app ? (
+        <p className="text-[15px] font-semibold">
+          <Trans>{agentName} vuole usare {useApp.app} sul tuo Mac</Trans>
+        </p>
+      ) : (
+        <p className="text-[15px] font-semibold">
+          {resolvedTitle ?? askTitle(tool, entry.meta, agentName, activeLang)}
+        </p>
+      )}
       {(composioAction || composioBatch) && (
         <p className="mt-0.5 text-[11px] text-muted-foreground"><Trans>tramite Composio</Trans></p>
       )}
@@ -262,12 +279,24 @@ export function ApprovalCard({ entry, readOnly = false }: { entry: TranscriptEnt
               >
                 <Trans>Per questo turno</Trans>
               </DropdownMenuItem>
+              {useApp?.kind === 'app' && useApp.app && !useAppSend && (
+                <DropdownMenuItem
+                  title={t`Le azioni su ${useApp.app} non chiederanno per 10 minuti`}
+                  onClick={() => resolve(approvalId, 'allow', 'minutes10')}
+                >
+                  <Trans>Consenti per 10 minuti a {useApp.app}</Trans>
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem
                 disabled={noAlways}
-                title={noAlways ? (entry.meta?.composioDestructive === true ? t`Questa azione chiede sempre l'approvazione` : t`Le modifiche di automazione chiedono ogni volta`) : undefined}
+                title={noAlways ? (useAppSend ? t`Questa azione chiede sempre l'approvazione` : entry.meta?.composioDestructive === true ? t`Questa azione chiede sempre l'approvazione` : t`Le modifiche di automazione chiedono ogni volta`) : undefined}
                 onClick={() => resolve(approvalId, 'allow', 'always')}
               >
-                <Trans>Sempre</Trans>
+                {useApp?.kind === 'app' && useApp.app && !useAppSend ? (
+                  <Trans>Consenti sempre a {useApp.app}</Trans>
+                ) : (
+                  <Trans>Sempre</Trans>
+                )}
               </DropdownMenuItem>
               {mcpServerRead?.slug && (
                 <DropdownMenuItem
@@ -300,9 +329,11 @@ export function ApprovalCard({ entry, readOnly = false }: { entry: TranscriptEnt
       status === 'allowed'
         ? (mode === 'turn'
             ? i18n.t(msg`Consentito per il turno`)
-            : mode === 'always'
-              ? i18n.t(msg`Consentito sempre`)
-              : i18n.t(msg`Consentito una volta`))
+            : mode === 'minutes10'
+              ? i18n.t(msg`Consentito per 10 minuti`)
+              : mode === 'always'
+                ? i18n.t(msg`Consentito sempre`)
+                : i18n.t(msg`Consentito una volta`))
         : status === 'denied'
           ? i18n.t(msg`Rifiutato`)
           : status === 'cancelled'

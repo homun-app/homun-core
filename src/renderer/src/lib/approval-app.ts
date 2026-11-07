@@ -234,3 +234,56 @@ function batchArgumentText(value: unknown): string {
   }
   return JSON.stringify(value) ?? ''
 }
+
+// ---- fase use-app (U3): la card parla di APP o di HOST, mai di chiavi tecniche ----
+
+/** Il modello della card di use-app: l'app che riceve l'azione, o l'host da aprire. */
+export interface UseAppCardModel {
+  kind: 'url' | 'app'
+  /** kind 'url': l'host in evidenza («Aprire sora.chatgpt.com nel tuo browser») */
+  host?: string
+  /** kind 'app': l'app di destinazione («Consenti per 10 minuti a Safari») */
+  app?: string
+}
+
+/** Che cosa vuole usare use-app in QUESTA chiamata (null = niente da evidenziare, es. screenshot). */
+export function useAppCardModel(input: Record<string, unknown> | undefined | null): UseAppCardModel | null {
+  if (!input) return null
+  const action = String(input.action ?? '')
+  if (action === 'open_url') {
+    const raw = String(input.url ?? '')
+    let host = raw
+    try {
+      host = new URL(raw).host || raw
+    } catch {
+      // URL malformato: si mostra il testo grezzo (l'azione fallirà comunque)
+    }
+    return { kind: 'url', host }
+  }
+  if (action === 'type' || action === 'key' || action === 'click' || action === 'double_click' || action === 'right_click' || action === 'open_app') {
+    return { kind: 'app', app: String(input.app ?? '').trim() }
+  }
+  return null
+}
+
+/** Il nome umano di un consenso salvato (use-app per app/host, letture MCP come oggi). */
+export function grantDisplayName(
+  g: { tool: string; target: string; scope?: 'readOnly' | null },
+  lang: UiLanguage
+): string {
+  if (g.tool === 'use-app') {
+    if (g.target.startsWith('url:')) {
+      const host = g.target.slice(4)
+      return lang === 'en' ? `Open ${host}` : `Aprire ${host}`
+    }
+    if (g.target.startsWith('app:')) {
+      const app = g.target.slice(4)
+      return lang === 'en' ? `Use ${app}` : `Usare ${app}`
+    }
+  }
+  if (g.scope === 'readOnly' && /^mcp__[^_]+__\*$/.test(g.tool)) {
+    const server = g.tool.slice(5, -3)
+    return lang === 'en' ? `Reads of ${server}` : `Letture di ${server}`
+  }
+  return toolDisplayName(g.tool, lang)
+}

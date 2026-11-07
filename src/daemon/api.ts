@@ -1798,9 +1798,10 @@ export function buildApiMethods(
     },
 
     // ---- approvazioni ----
-    // fase 8 (punto 2): mode 'once' | 'always' (standing grant) | 'turn' (fino a fine turno)
+    // fase 8 (punto 2): mode 'once' | 'always' (standing grant) | 'turn' (fino
+    // a fine turno) | 'minutes10' (fase use-app U3: standing grant con scadenza)
     'approvals:resolve': ([agentId, approvalId, decision, mode]) => {
-      const m = mode === 'always' ? 'always' : mode === 'turn' ? 'turn' : 'once'
+      const m = mode === 'always' ? 'always' : mode === 'turn' ? 'turn' : mode === 'minutes10' ? 'minutes10' : 'once'
       // fase 16b (S6): la modalità finisce nel meta dell'entry — la riga dopo
       // la decisione dice «Consentito una volta / per il turno / sempre»
       const aid = String(agentId)

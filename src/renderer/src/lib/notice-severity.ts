@@ -26,6 +26,8 @@ export const NOTICE_SEVERITY: Readonly<Record<string, NoticeSeverity>> = {
   'notice.resume': 'info',
   'notice.wakeNudge': 'info',
   'notice.taskCancelled': 'info',
+  // ---- error: banner con la via d'uscita (fase use-app: Accessibilità) ----
+  'notice.computerAccessibility': 'error',
   // ---- warning: ambra (qualcosa è stato saltato o degradato, ma il bot lavora) ----
   'notice.agentBusyDiscard': 'warning',
   'notice.queueFull': 'warning',

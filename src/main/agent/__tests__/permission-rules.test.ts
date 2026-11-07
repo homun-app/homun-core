@@ -2,7 +2,7 @@ import { describe, expect, it, afterAll } from 'vitest'
 import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync, rmSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { targetKey, commandKey, commandRuleMatches, runCommandVerdict, isNeverAuto, NEVER_AUTO, isInsideBox, serverReadGrantCovers, mcpServerReadGrantKey } from '../permission-rules'
+import { targetKey, commandKey, commandRuleMatches, runCommandVerdict, isNeverAuto, NEVER_AUTO, isInsideBox, serverReadGrantCovers, mcpServerReadGrantKey, grantActive, useAppAlwaysAsk, LEGACY_USE_APP_GRANT_TARGETS } from '../permission-rules'
 import { analyzeCommand } from '../shell-ast'
 import type { PermissionMode, PermissionRule } from '../../../shared/types'
 
@@ -27,13 +27,60 @@ describe('targetKey (tool non shell)', () => {
     expect(targetKey('read-file', {})).toBe('')
   })
 
-  it('use-app: scope per azione', () => {
+  it('use-app: la chiave è l\'APP, non più l\'azione (fase use-app U3)', () => {
+    // screenshot resta senza card come oggi: chiave invariata, la regola
+    // predefinita pattern "screenshot" → always_allow continua a valere
     expect(targetKey('use-app', { action: 'screenshot' })).toBe('screenshot')
-    expect(targetKey('use-app', {})).toBe('')
+    // tastiera e mouse: la chiave è l'app di destinazione
+    expect(targetKey('use-app', { action: 'type', app: 'Safari', text: 'x' })).toBe('app:Safari')
+    expect(targetKey('use-app', { action: 'key', key: 'Return', app: 'Mail' })).toBe('app:Mail')
+    expect(targetKey('use-app', { action: 'click', x: 1, y: 2, app: 'Safari' })).toBe('app:Safari')
+    expect(targetKey('use-app', { action: 'open_app', app: 'Notes' })).toBe('app:Notes')
+    // open_url: la chiave è l'HOST
+    expect(targetKey('use-app', { action: 'open_url', url: 'https://sora.chatgpt.com' })).toBe('url:sora.chatgpt.com')
+    expect(targetKey('use-app', { action: 'open_url', url: 'https://sora.chatgpt.com', app: 'Safari' })).toBe('url:sora.chatgpt.com')
+    // app mancante (l'azione fallirà in esecuzione): chiave senza nome, non *
+    expect(targetKey('use-app', { action: 'type', text: 'x' })).toBe('app:')
+    expect(targetKey('use-app', {})).toBe('app:')
   })
 
   it('tool sconosciuto → *', () => {
     expect(targetKey('qualunque', { x: 1 })).toBe('*')
+  })
+})
+
+describe('fase use-app (U3): grant con scadenza e Invii che chiedono sempre', () => {
+  it('grantActive: senza scadenza sempre attiva; con scadenza futura sì, passata no', () => {
+    const now = 1_000_000
+    expect(grantActive({ expiresAt: null }, now)).toBe(true)
+    expect(grantActive({}, now)).toBe(true)
+    expect(grantActive({ expiresAt: now + 1 }, now)).toBe(true)
+    expect(grantActive({ expiresAt: now }, now)).toBe(false)
+    expect(grantActive({ expiresAt: now - 1 }, now)).toBe(false)
+  })
+
+  it('useAppAlwaysAsk: Return/Invio in posta o chat chiede SEMPRE; altrove no', () => {
+    // key Return/enter in Mail, WhatsApp, Slack → chiede
+    expect(useAppAlwaysAsk({ action: 'key', key: 'Return', app: 'Mail' })).toContain('Mail')
+    expect(useAppAlwaysAsk({ action: 'key', key: 'enter', app: 'WhatsApp' })).toContain('WhatsApp')
+    expect(useAppAlwaysAsk({ action: 'key', key: 'cmd+Return', app: 'Slack' })).toContain('Slack')
+    // type che finisce con a-capo = un Invio digitato
+    expect(useAppAlwaysAsk({ action: 'type', text: 'ciao\n', app: 'Mail' })).toContain('Mail')
+    // in Safari no: Return nella barra degli indirizzi non spedisce
+    expect(useAppAlwaysAsk({ action: 'key', key: 'Return', app: 'Safari' })).toBeNull()
+    expect(useAppAlwaysAsk({ action: 'type', text: 'ciao\n', app: 'Safari' })).toBeNull()
+    // testo senza a-capo in Mail: normale digitazione
+    expect(useAppAlwaysAsk({ action: 'type', text: 'ciao', app: 'Mail' })).toBeNull()
+    // altri tasti in Mail: normale
+    expect(useAppAlwaysAsk({ action: 'key', key: 'cmd+c', app: 'Mail' })).toBeNull()
+    // mouse mai
+    expect(useAppAlwaysAsk({ action: 'click', x: 1, y: 2, app: 'Mail' })).toBeNull()
+  })
+
+  it('i target grant di use-app che la migrazione toglie sono proprio i sei nomi azione', () => {
+    expect([...LEGACY_USE_APP_GRANT_TARGETS].sort()).toEqual(
+      ['click', 'double_click', 'key', 'open_app', 'right_click', 'type']
+    )
   })
 })
 

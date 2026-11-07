@@ -18,7 +18,7 @@ const DEFAULT_RULES: PermissionRule[] = [
 const state = {
   sandboxMode: 'host' as 'host' | 'docker',
   rules: DEFAULT_RULES.map((r) => ({ ...r })),
-  grants: [] as Array<{ tool: string; target: string }>,
+  grants: [] as Array<{ tool: string; target: string; expiresAt?: number | null }>,
   routines: [] as Array<{ id: number; title: string; prompt: string; schedule: string; enabled: number }>
 }
 
@@ -28,8 +28,8 @@ const OUTSIDE = join(TMP, 'outside')
 
 vi.mock('../../store/db', () => ({
   getPermissions: () => ({ default: 'needs_approval' as const, rules: state.rules }),
-  listGrants: () => state.grants.map((g, i) => ({ id: i + 1, tool: g.tool, target: g.target, createdAt: 0 })),
-  addGrant: (tool: string, target: string) => { state.grants.push({ tool, target }) },
+  listGrants: () => state.grants.map((g, i) => ({ id: i + 1, tool: g.tool, target: g.target, createdAt: 0, expiresAt: g.expiresAt ?? null })),
+  addGrant: (tool: string, target: string, scope?: 'readOnly', expiresAt?: number) => { state.grants.push({ tool, target, expiresAt }) },
   getRoutine: (id: number) => state.routines.find((r) => r.id === id) ?? null
 }))
 
@@ -295,5 +295,71 @@ describe('fase 5: permessi dai tool MCP (annotazioni standard)', () => {
 
   afterAll(() => {
     setMcpAnnotationsLookup(() => undefined)
+  })
+})
+
+// ---- fase use-app (U3): permessi per APP, scadenza 10 minuti, Invii sempre ----
+
+describe('fase use-app (U3): la chiave è l\'app, non l\'azione', () => {
+  // le regole predefinite di use-app di oggi (db.ts): screenshot senza card
+  const USE_APP_RULES = [
+    { tool: 'use-app', pattern: 'screenshot', mode: 'always_allow' as const },
+    { tool: 'use-app', pattern: '*', mode: 'needs_approval' as const }
+  ]
+
+  beforeEach(() => {
+    state.rules = [...DEFAULT_RULES, ...USE_APP_RULES]
+  })
+
+  it('«sempre a Safari» NON vale per Mail: stessa azione, altra app → ask', async () => {
+    state.grants = [{ tool: 'use-app', target: 'app:Safari' }]
+    expect(await check('use-app', { action: 'type', app: 'Safari', text: 'x' })).toEqual({ kind: 'allow', via: 'grant' })
+    expect((await check('use-app', { action: 'type', app: 'Mail', text: 'x' })).kind).toBe('ask')
+    // e copre anche le altre azioni su Safari: una sola card per sessione d'uso
+    expect(await check('use-app', { action: 'click', x: 1, y: 2, app: 'Safari' })).toEqual({ kind: 'allow', via: 'grant' })
+    expect(await check('use-app', { action: 'open_app', app: 'Safari' })).toEqual({ kind: 'allow', via: 'grant' })
+  })
+
+  it('il permesso a 10 minuti vale finché non scade, poi chiede di nuovo', async () => {
+    state.grants = [{ tool: 'use-app', target: 'app:Safari', expiresAt: Date.now() + 600_000 }]
+    expect(await check('use-app', { action: 'key', key: 'cmd+l', app: 'Safari' })).toEqual({ kind: 'allow', via: 'grant' })
+    state.grants = [{ tool: 'use-app', target: 'app:Safari', expiresAt: Date.now() - 1 }]
+    expect((await check('use-app', { action: 'key', key: 'cmd+l', app: 'Safari' })).kind).toBe('ask')
+  })
+
+  it('screenshot resta senza card: la regola predefinita di oggi continua a valere', async () => {
+    expect(await check('use-app', { action: 'screenshot' })).toEqual({ kind: 'allow', via: 'rule' })
+  })
+
+  it('open_url: la grant vale per l\'HOST, non per tutto il web', async () => {
+    state.grants = [{ tool: 'use-app', target: 'url:sora.chatgpt.com' }]
+    expect(await check('use-app', { action: 'open_url', url: 'https://sora.chatgpt.com' })).toEqual({ kind: 'allow', via: 'grant' })
+    expect((await check('use-app', { action: 'open_url', url: 'https://altro.example.com' })).kind).toBe('ask')
+  })
+
+  it('Return in un\'app di posta/chat chiede SEMPRE, grant compresa', async () => {
+    state.grants = [{ tool: 'use-app', target: 'app:Mail' }]
+    const v = await check('use-app', { action: 'key', key: 'Return', app: 'Mail' })
+    expect(v.kind).toBe('ask')
+    if (v.kind !== 'ask') return
+    expect(v.reason).toContain('Return in Mail')
+    // una regola always_allow dell'utente non lo copre nemmeno
+    state.rules = [...state.rules, { tool: 'use-app', pattern: 'app:Mail', mode: 'always_allow' }]
+    expect((await check('use-app', { action: 'key', key: 'Return', app: 'Mail' })).kind).toBe('ask')
+    // type che finisce con a-capo in WhatsApp: stesso trattamento
+    expect((await check('use-app', { action: 'type', text: 'ciao\n', app: 'WhatsApp' })).kind).toBe('ask')
+    // la digitazione normale in Mail resta coperta dalla grant
+    expect(await check('use-app', { action: 'type', text: 'ciao', app: 'Mail' })).toEqual({ kind: 'allow', via: 'grant' })
+  })
+
+  it('grantStanding di use-app salva la chiave PER APP (e la scadenza quando c\'è)', async () => {
+    await grantStanding('use-app', { action: 'type', app: 'Safari', text: 'x' })
+    expect(state.grants).toEqual([{ tool: 'use-app', target: 'app:Safari', expiresAt: undefined }])
+    state.grants = []
+    await grantStanding('use-app', { action: 'type', app: 'Safari', text: 'x' }, { expiresAtMs: 1_234 })
+    expect(state.grants).toEqual([{ tool: 'use-app', target: 'app:Safari', expiresAt: 1234 }])
+    state.grants = []
+    await grantStanding('use-app', { action: 'open_url', url: 'https://sora.chatgpt.com' })
+    expect(state.grants).toEqual([{ tool: 'use-app', target: 'url:sora.chatgpt.com', expiresAt: undefined }])
   })
 })

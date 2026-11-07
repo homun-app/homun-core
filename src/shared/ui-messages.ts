@@ -85,6 +85,12 @@ export const UI = {
   stepsLimit: msg({ id: 'notice.stepsLimit', message: 'Turno interrotto: limite di passi raggiunto.' }),
   resume: msg({ id: 'notice.resume', message: 'Turno ripreso dopo un’interruzione.' }),
   deniedByPermissions: msg({ id: 'notice.deniedByPermissions', message: 'Bloccato dai permessi: {tool}' }),
+  // fase use-app (U4): manca l'Accessibilità — banner col bottone che apre
+  // la pagina giusta delle Impostazioni di sistema
+  computerAccessibility: msg({
+    id: 'notice.computerAccessibility',
+    message: 'Homun non ha il permesso di Accessibilità: clic e digitazione sul tuo Mac sono bloccati. Dagli il permesso, poi riprova.'
+  }),
   awayLine: msg({ id: 'notice.awayLine', message: 'Mentre eri via:' }),
   routinesResumed: msg({
     id: 'notice.routinesResumed',
@@ -145,6 +151,10 @@ export const UI = {
   // ---- motivi delle card di approvazione (ui accanto a reason, C2) ----
   approvalToolRequires: msg({ id: 'approval.toolRequires', message: '{tool} richiede approvazione' }),
   approvalToolTargetRequires: msg({ id: 'approval.toolTargetRequires', message: '{tool} ({target}) richiede approvazione' }),
+  // fase use-app (U3): la card dice l'app o l'host, mai la chiave tecnica
+  approvalUseApp: msg({ id: 'approval.useApp', message: 'Vuole usare {app} sul tuo Mac.' }),
+  approvalUseAppUrl: msg({ id: 'approval.useAppUrl', message: 'Vuole aprire {host} nel tuo browser.' }),
+  approvalUseAppSend: msg({ id: 'approval.useAppSend', message: 'Un Invio in {app} può spedire qualcosa: questa azione chiede sempre.' }),
   approvalMcpOutward: msg({ id: 'approval.mcpOutward', message: '{tool} agisce verso l’esterno (annotazione del server MCP)' }),
   // fase app (A6): il motivo della card di un'azione Composio (la card mostra
   // anche «Gmail · Invia email» e la riga piccola «tramite Composio», A7)

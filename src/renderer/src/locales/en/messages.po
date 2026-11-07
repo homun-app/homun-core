@@ -252,6 +252,11 @@ msgstr "{agent} needs you"
 msgid "notify.done"
 msgstr "{agent} replied"
 
+#. placeholder {0}: useApp.app
+#: src/renderer/src/components/ApprovalCard.tsx
+msgid "{agentName} vuole usare {0} sul tuo Mac"
+msgstr "{agentName} wants to use {0} on your Mac"
+
 #. placeholder {0}: info.app
 #: src/renderer/src/lib/approval-app.ts
 msgid "{agentName} vuole usare uno strumento di {0}"
@@ -908,6 +913,10 @@ msgstr "open"
 msgid "Apri"
 msgstr "Open"
 
+#: src/renderer/src/components/Chat.tsx
+msgid "Apri Accessibilità"
+msgstr "Open Accessibility"
+
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Apri Composio"
 msgstr "Open Composio"
@@ -954,6 +963,11 @@ msgstr "Open the screen"
 #: src/renderer/src/components/Settings.tsx
 msgid "Apri nel pannello del bot"
 msgstr "Open in the bot panel"
+
+#. placeholder {0}: useApp.host
+#: src/renderer/src/components/ApprovalCard.tsx
+msgid "Aprire <0>{0}</0> nel tuo browser"
+msgstr "Open <0>{0}</0> in your browser"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Argomenti (args) non sono JSON valido"
@@ -1721,9 +1735,19 @@ msgstr "Saved consents"
 msgid "Consenti"
 msgstr "Allow"
 
+#. placeholder {0}: useApp.app
+#: src/renderer/src/components/ApprovalCard.tsx
+msgid "Consenti per 10 minuti a {0}"
+msgstr "Allow for 10 minutes on {0}"
+
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 msgid "Consenti sempre"
 msgstr "Always allow"
+
+#. placeholder {0}: useApp.app
+#: src/renderer/src/components/ApprovalCard.tsx
+msgid "Consenti sempre a {0}"
+msgstr "Always allow on {0}"
 
 #. placeholder {0}: mcpServerRead.name ?? mcpServerRead.slug
 #: src/renderer/src/components/ApprovalCard.tsx
@@ -1733,6 +1757,10 @@ msgstr "Always allow reads from {0}"
 #: src/renderer/src/components/LibraryCards.tsx
 msgid "Consentito"
 msgstr "Allowed"
+
+#: src/renderer/src/components/ApprovalCard.tsx
+msgid "Consentito per 10 minuti"
+msgstr "Allowed for 10 minutes"
 
 #: src/renderer/src/components/ApprovalCard.tsx
 msgid "Consentito per il turno"
@@ -2624,6 +2652,11 @@ msgstr "Homun has been renewed. Homun 2’s conversations and bots were not impo
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
+msgid "notice.computerAccessibility"
+msgstr "Homun lacks the Accessibility permission: clicks and typing on your Mac are blocked. Grant the permission, then try again."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
 msgid "rpc.masterKeyUnavailable"
 msgstr "Homun can’t read the keys that protect your secrets. If macOS asked for Keychain access, allow it and press Retry."
 
@@ -3347,6 +3380,11 @@ msgstr "Apps connected outside Homun don't show up here: "
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Le app dell'elenco che passano da qui"
 msgstr "The apps in the list that go through here"
+
+#. placeholder {0}: useApp.app
+#: src/renderer/src/components/ApprovalCard.tsx
+msgid "Le azioni su {0} non chiederanno per 10 minuti"
+msgstr "Actions on {0} will not ask again for 10 minutes"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Le chiamate e i risultati dei tool tornano come righe nella conversazione (per il debug)."
@@ -5025,6 +5063,11 @@ msgstr "Save contact “{name}” in the vault?"
 msgid "Sblocca"
 msgstr "Unpin"
 
+#. placeholder {0}: new Date(g.expiresAt).toLocaleTimeString(i18n.locale, { hour: '2-digit', minute: '2-digit' })
+#: src/renderer/src/components/settings/ApprovalsPage.tsx
+msgid "Scade: {0}"
+msgstr "Expires: {0}"
+
 #: src/renderer/src/components/TakeoverCard.tsx
 msgid "Scaduta: il bot non aspetta più"
 msgstr "Expired: the bot is no longer waiting"
@@ -5853,6 +5896,11 @@ msgstr "A gateway holds the keys to all the apps you connect there: it's a third
 msgid "install.gatewayWarning"
 msgstr "A gateway guards access to all the apps you connect there: it is a third-party service"
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "approval.useAppSend"
+msgstr "Pressing Return in {app} can send something: this action always asks."
+
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 msgid "Un modello controlla ogni azione contro le tue regole: quelle semplici passano, per le altre il bot chiede."
 msgstr "A model checks every action against your rules: the simple ones pass, for the others the bot asks."
@@ -6030,6 +6078,11 @@ msgstr "item not found"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
+msgid "approval.useAppUrl"
+msgstr "It wants to open {host} in your browser."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
 msgid "approval.composioProxy"
 msgstr "Wants to call a connected app's API directly (raw HTTP request through Composio)"
 
@@ -6056,6 +6109,11 @@ msgstr "It wants to perform an action that cannot be undone on {0}."
 #: src/shared/ui-messages.ts
 msgid "approval.composioTrust"
 msgstr "Wants to read from a Composio app this turn hasn't used yet, after untrusted content entered it"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "approval.useApp"
+msgstr "It wants to use {app} on your Mac."
 
 #: src/renderer/src/components/Settings.tsx
 msgid "wake"

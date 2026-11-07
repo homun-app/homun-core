@@ -24,8 +24,10 @@ import { sandboxMode, browserSandboxOk } from '../sandbox'
  * Fase pulizia · ritocchi (U4): +100 per la regola fissa dell'ora di invio
  * (~84 token, in cache); in cambio la riga di P10 (~115 token, rifatta a ogni
  * turno sull'ultimo messaggio) non c'è più.
+ * Fase use-app (U6): +100 per la riga dei servizi con l'account dell'utente
+ * (~66 token, fissa in cache).
  */
-export const PROMPT_TOKEN_BUDGET = 2200
+export const PROMPT_TOKEN_BUDGET = 2300
 
 /** Chi sei: nome, ruolo scelto dall'utente. La lingua la dà la sezione Language (17b A3). */
 export function identitySection(agent: Agent): string {
@@ -62,7 +64,8 @@ You have a computer (the box): ${env}
 - \`/workspace\` (the shared box) is the COMMON space of all your bots: deliverables that the others need too go there, in \`/workspace/<project>/…\`, and you cite the path in the group.
 - Your home is yours: relative paths start there.
 - Before redoing work, check whether another bot has already left it in \`/workspace\`.
-Base tools: run-command (background: true for long ones), read-file, write-file, list-directory, web_search / web_fetch (web search and reading), update_memory / recall_memory, skill, update_state (routines), create_task / update_task (long work). More built-in tools exist beyond your list (copy_to_box / copy_from_box, update_skill, …): find them with find_tools, run them with use_tool.${browser}
+Base tools: run-command (background: true for long ones), read-file, write-file, list-directory, web_search / web_fetch (web search and reading), update_memory / recall_memory, skill, update_state (routines), create_task / update_task (long work). More built-in tools exist beyond your list (copy_to_box / copy_from_box, update_skill, …): find them with find_tools, run them with use_tool.
+- On the user's own Mac (use-app): For services that need the user's own account (video or image generators, banking, shops), open the page with open_url and hand over to the user to sign in; do not drive the login or the service step by step.${browser}
 Credentials: names with list-credentials; you NEVER see the values. Write {{secret:NAME}} where needed in the command (e.g. \`curl -H "Authorization: Bearer {{secret:API_KEY}}" ...\`): the value is injected only at execution time and stays hidden in the output.`
 }
 

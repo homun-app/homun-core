@@ -73,7 +73,14 @@ const ALLOWED_LITERALS: ReadonlyArray<{ file: string; text: string }> = [
   { file: 'src/main/computeruse/index.ts', text: 'impostazioni di sistema' },
   // fase 18a (E0): codici del piano box (chiavi del piano sandbox, non testo)
   { file: 'src/main/sandbox/docker-argv.ts', text: 'mount-plugin-mancante' },
-  { file: 'src/main/sandbox/docker-argv.ts', text: 'mount-browser-mancante' }
+  { file: 'src/main/sandbox/docker-argv.ts', text: 'mount-browser-mancante' },
+  // fase use-app (U4): il TESTO VERO con cui macOS in italiano nega
+  // l'Accessibilità — si riconosce per confrontarlo, non è UI
+  { file: 'src/main/computeruse/index.ts', text: "non ammette l’accesso di assistenza" },
+  { file: 'src/main/computeruse/index.ts', text: "non ammette l'accesso di assistenza" },
+  // fase use-app (U4): l'errore del -2521１che il desktop FINTO restituisce
+  // per simulare macOS in italiano (strumento di test, non UI)
+  { file: 'src/main/computeruse/fake.ts', text: 'osascript: non ammette l’accesso di assistenza. (-25211)' }
 ]
 
 // Allowlist per SIMBOLO — SOLO liste o dati per costruzione (D4). Anche queste

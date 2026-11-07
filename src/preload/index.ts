@@ -50,7 +50,7 @@ const api: SandbotApi = {
   draftSend: (agentId, entryId, body) => ipcRenderer.invoke('draft:send', agentId, entryId, body),
   draftDiscard: (agentId, entryId) => ipcRenderer.invoke('draft:discard', agentId, entryId),
   draftUpdate: (agentId, entryId, body) => ipcRenderer.invoke('draft:update', agentId, entryId, body),
-  // fase 8: mode 'once' | 'always' | 'turn' (fino a fine turno)
+  // fase 8: mode 'once' | 'always' | 'turn' (fino a fine turno); fase use-app: anche 'minutes10'
   resolveApproval: (agentId, approvalId, decision, mode) =>
     ipcRenderer.invoke('approvals:resolve', agentId, approvalId, decision, mode),
   // fase 8 (§3bis L5): decisione dell'utente sulla regola proposta dal bot
@@ -214,6 +214,8 @@ const api: SandbotApi = {
   setLaunchAtLogin: (enabled) => ipcRenderer.invoke('launch-at-login:set', enabled),
   // fase rilascio (A3): apre Impostazioni › Elementi login
   openLoginItemsSettings: () => ipcRenderer.invoke('open-login-items-settings'),
+  // fase use-app (U4): apre Privacy → Accessibilità dalle Impostazioni di sistema
+  openAccessibilitySettings: () => ipcRenderer.invoke('open-accessibility-settings'),
   // fase rilascio (A7): stato di docker
   boxDockerStatus: () => ipcRenderer.invoke('box:docker-status'),
   boxDockerRetry: () => ipcRenderer.invoke('box:docker-retry'),

@@ -247,6 +247,12 @@ export function registerIpc(client: DaemonClient, getWindows: () => BrowserWindo
       logPath: join(db.dataDir(), 'daemon.log')
     })
   })
+  // fase use-app (U4): il bottone della notice di Accessibilità mancante apre
+  // la pagina giusta delle Impostazioni di sistema (niente URL arbitrari)
+  ipcMain.handle('open-accessibility-settings', () => {
+    void shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility')
+    return { opened: true }
+  })
   ipcMain.handle('open-login-items-settings', () => {
     // «Apri Elementi login» (A3): apre la pagina giusta delle Impostazioni
     void shell.openExternal('x-apple.systempreferences:com.apple.LoginItems-Settings.extension')

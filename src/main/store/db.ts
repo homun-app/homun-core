@@ -205,6 +205,12 @@ function open(): DatabaseSync {
   // un server MCP, ricontrollate sulle annotazioni a ogni chiamata)
   const grantCols = db.prepare("SELECT name FROM pragma_table_info('grants')").all() as Array<{ name: string }>
   if (!grantCols.some((c) => c.name === 'scope')) db.exec('ALTER TABLE grants ADD COLUMN scope TEXT')
+  // fase use-app (U3): expires_at — la scadenza dei permessi «per 10 minuti»;
+  // e la rimozione dei grants di use-app per AZIONE (le nuove chiavi sono
+  // app:<Nome> e url:<host>: i vecchi target davano il permesso di digitare
+  // in qualunque app, Homun compreso)
+  if (!grantCols.some((c) => c.name === 'expires_at')) db.exec('ALTER TABLE grants ADD COLUMN expires_at INTEGER')
+  migrateUseAppActionGrants()
   // fase 16b (S1.2): il flag del riepilogo di chiusura del coordinatore
   const groupMsgCols = db.prepare("SELECT name FROM pragma_table_info('group_messages')").all() as Array<{ name: string }>
   if (!groupMsgCols.some((c) => c.name === 'summary')) db.exec('ALTER TABLE group_messages ADD COLUMN summary INTEGER DEFAULT 0')
@@ -497,14 +503,35 @@ export function updateEntryKindRole(id: number, kind: TranscriptEntry['kind'], r
  * readOnlyHint true e destructiveHint diverso da true, controllati a OGNI
  * chiamata sulle annotazioni correnti (grant `mcp__<server>__*`).
  */
-export interface Grant { id: number; tool: string; target: string; createdAt: number; scope?: 'readOnly' | null }
-
-export function listGrants(): Grant[] {
-  return db().prepare('SELECT * FROM grants').all() as unknown as Grant[]
+export interface Grant {
+  id: number
+  tool: string
+  target: string
+  createdAt: number
+  scope?: 'readOnly' | null
+  /** fase use-app (U3): scadenza dei permessi a tempo («per 10 minuti»); null = per sempre */
+  expiresAt?: number | null
 }
 
-export function addGrant(tool: string, target: string, scope?: 'readOnly'): void {
-  db().prepare('INSERT INTO grants(tool, target, created_at, scope) VALUES(?,?,?,?)').run(tool, target, Date.now(), scope ?? null)
+/**
+ * Fase use-app (U3): rimuove i grants di use-app salvati col target AZIONE
+ * (type, key, click, double_click, right_click, open_app) dalle versioni di
+ * prima: autorizzavano a digitare in qualunque app. Idempotente — quei target
+ * non possono più esistere nel formato nuovo (app:<Nome>, url:<host>).
+ */
+export function migrateUseAppActionGrants(): { removed: number } {
+  const rows = db().prepare('SELECT id FROM grants WHERE tool = ? AND target IN (?,?,?,?,?,?)')
+    .all('use-app', 'type', 'key', 'click', 'double_click', 'right_click', 'open_app') as Array<{ id: number }>
+  for (const r of rows) db().prepare('DELETE FROM grants WHERE id=?').run(r.id)
+  return { removed: rows.length }
+}
+
+export function listGrants(): Grant[] {
+  return db().prepare('SELECT id, tool, target, created_at AS createdAt, scope, expires_at AS expiresAt FROM grants').all() as unknown as Grant[]
+}
+
+export function addGrant(tool: string, target: string, scope?: 'readOnly', expiresAt?: number): void {
+  db().prepare('INSERT INTO grants(tool, target, created_at, scope, expires_at) VALUES(?,?,?,?,?)').run(tool, target, Date.now(), scope ?? null, expiresAt ?? null)
 }
 
 export function removeGrant(id: number): void {

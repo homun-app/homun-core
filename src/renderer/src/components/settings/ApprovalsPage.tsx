@@ -13,6 +13,8 @@ import { api, useStore } from '../../store'
 import type { ApprovalsMode, AutoReviewSettings, PermissionMode } from '../../../../shared/types'
 import { DEFAULT_AUTO_REVIEW, approvalsModeOf } from '../../../../shared/types'
 import { toolDisplayName } from '../../../../shared/tool-names'
+// fase use-app (U3): i consensi di use-app si chiamano per APP o per HOST
+import { grantDisplayName } from '../../lib/approval-app'
 import { SettingsPage } from './SettingsPage'
 import { SettingsGroup } from './SettingsGroup'
 import { SettingsRow } from './SettingsRow'
@@ -41,7 +43,7 @@ export function ApprovalsPage() {
   const [pendingNever, setPendingNever] = useState(false)
   const [newAllow, setNewAllow] = useState('')
   const [newBlock, setNewBlock] = useState('')
-  const [grants, setGrants] = useState<Array<{ id: number; tool: string; target: string; createdAt: number; scope?: 'readOnly' | null }> | null>(null)
+  const [grants, setGrants] = useState<Array<{ id: number; tool: string; target: string; createdAt: number; scope?: 'readOnly' | null; expiresAt?: number | null }> | null>(null)
 
   const loadGrants = (): void => {
     void api.grantsList().then(setGrants).catch(() => setGrants([]))
@@ -159,8 +161,17 @@ export function ApprovalsPage() {
         {grants?.map((g) => (
           <SettingsRow
             key={g.id}
-            title={grantName(g, i18n.locale === 'en' ? 'en' : 'it')}
-            description={<code className="font-mono text-[11px]">{g.tool}{g.target !== '*' ? ` · ${g.target}` : ''}</code>}
+            title={grantDisplayName(g, i18n.locale === 'en' ? 'en' : 'it')}
+            description={
+              <span>
+                <code className="font-mono text-[11px]">{g.tool}{g.target !== '*' ? ` · ${g.target}` : ''}</code>
+                {g.expiresAt != null && (
+                  <span className="ml-2 text-[11px] text-muted-foreground">
+                    <Trans>Scade: {new Date(g.expiresAt).toLocaleTimeString(i18n.locale, { hour: '2-digit', minute: '2-digit' })}</Trans>
+                  </span>
+                )}
+              </span>
+            }
             control={
               <button
                 className="rounded-full bg-card px-2.5 py-1 text-xs text-muted-foreground transition hover:text-destructive"
@@ -240,15 +251,6 @@ export function ApprovalsPage() {
       )}
     </SettingsPage>
   )
-}
-
-/** Il nome umano di un consenso salvato (le letture di un server MCP come oggi). */
-function grantName(g: { tool: string; target: string; scope?: 'readOnly' | null }, lang: 'it' | 'en'): string {
-  if (g.scope === 'readOnly' && /^mcp__[^_]+__\*$/.test(g.tool)) {
-    const server = g.tool.slice(5, -3)
-    return lang === 'en' ? `Reads of ${server}` : `Letture di ${server}`
-  }
-  return toolDisplayName(g.tool, lang)
 }
 
 /** Il selettore dei tre modi di una regola (Consenti sempre / Chiedi / Blocca). */

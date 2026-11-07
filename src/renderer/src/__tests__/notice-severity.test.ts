@@ -160,6 +160,7 @@ describe('R1 — noticeSeverity: la tabella copre tutti gli id usati come notice
       'notice.boxMigrated',
       'notice.boxMigratedFailed',
       'notice.boxPreparing',
+      'notice.computerAccessibility',
       'notice.configureProviderFirst',
       'notice.deniedByPermissions',
       'notice.imagesNotSeen',
