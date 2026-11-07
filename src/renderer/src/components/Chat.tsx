@@ -34,6 +34,8 @@ import { RuleProposalCard } from './RuleProposalCard'
 import { TaskCard } from './TaskCard'
 import { SubagentCard } from './SubagentCard'
 import { DocumentCard, ChartCard, FillCard, SecureInputCard, ContactCard } from './LibraryCards'
+// fase pagine (G2): la pagina aperta al posto del transcript (il compositore resta sospeso)
+import { PageView } from './PageView'
 // fase 19a (V4/V5): la card della presa di controllo chiesta dal bot
 import { TakeoverCard } from './TakeoverCard'
 import { MemoryPanel } from './MemoryPanel'
@@ -296,6 +298,12 @@ export function Chat({ layout }: { layout?: LayoutResult }) {
   const debugSteps = useStore((s) => s.debugSteps)
   const quote = useStore((s) => s.quote)
   const setQuote = useStore((s) => s.setQuote)
+  // fase pagine (G2): la pagina aperta copre il transcript, non il compositore;
+  // G4: la precompilazione del compositore (suggerimento «Crea una routine»)
+  const openPageInfo = useStore((s) => s.openPageInfo)
+  const composerPrefill = useStore((s) => s.composerPrefill)
+  const setComposerPrefill = useStore((s) => s.setComposerPrefill)
+  const composerRef = useRef<HTMLTextAreaElement>(null)
   const memoryOpen = useStore((s) => s.memoryOpen)
   const skillsOpen = useStore((s) => s.skillsOpen)
   const setMemoryOpen = useStore((s) => s.setMemoryOpen)
@@ -458,13 +466,29 @@ export function Chat({ layout }: { layout?: LayoutResult }) {
     }
   }, [quote, activeId, setQuote, setTyping])
 
+  // fase pagine (G4): la precompilazione del compositore (il suggerimento
+  // «Crea una routine» scrive la richiesta nel campo, pronta da inviare)
+  useEffect(() => {
+    if (composerPrefill === null) return
+    setText(composerPrefill)
+    setComposerPrefill(null)
+    if (activeId) setTyping(activeId)
+    composerRef.current?.focus()
+  }, [composerPrefill, setComposerPrefill, activeId, setTyping])
+
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
   }, [entries])
 
   const sendNow = () => {
     if (!text.trim()) return
-    void send(text, images.length ? images : undefined)
+    // fase pagine (G2/G6): scritto dalla pagina aperta → al modello arriva
+    // la riga di contesto (il testo in chat resta questo)
+    const page = useStore.getState().openPageInfo
+    const readingPage = page && page.title && page.version > 0
+      ? { id: page.id, title: page.title, version: page.version }
+      : undefined
+    void send(text, images.length ? images : undefined, readingPage)
     setText('')
     setImages([])
     setTyping(null)
@@ -564,26 +588,32 @@ export function Chat({ layout }: { layout?: LayoutResult }) {
         </div>
       )}
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto scroll-thin px-6 pb-4 pt-16">
-        {entries.length === 0 && (
-          <p className="mt-16 text-center text-sm text-muted-foreground">
-            <Trans>Manda un messaggio a {agent.name} per iniziare.</Trans>
-          </p>
-        )}
-        <div className="mx-auto max-w-3xl space-y-3">
-          {/*
-            fase 8/10: solo le entry senza meta.taskId e senza meta.groupId.
-            fase 16b (S3.3): le tool-call/tool-result NON compaiono (le racconta
-            la mascotte); la voce di debug le rimette
-          */}
-          {entries.filter((e) => !e.meta?.taskId && !e.meta?.groupId).map((e) => (
-            <EntryRow key={e.id} entry={e} showReasoning={showReasoning} debugSteps={debugSteps} />
-          ))}
-          {/* fase risposta (R6): la risposta in diretta, bolla provvisoria */}
-          <LiveReplyBubble agentId={agent.id} />
-          {/* fase 16b (S3.3): mentre lavora, la mascotte con la mezza riga */}
-          {busy && <ActivityRow agentId={agent.id} />}
+      {/* fase pagine (G2): il transcript resta MONTATO (stessa posizione di
+          scorrimento al ritorno); la pagina aperta gli passa SOPRA, il
+          compositore resta sospeso in basso */}
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        <div ref={scrollRef} className="flex-1 overflow-y-auto scroll-thin px-6 pb-4 pt-16">
+          {entries.length === 0 && (
+            <p className="mt-16 text-center text-sm text-muted-foreground">
+              <Trans>Manda un messaggio a {agent.name} per iniziare.</Trans>
+            </p>
+          )}
+          <div className="mx-auto max-w-3xl space-y-3">
+            {/*
+              fase 8/10: solo le entry senza meta.taskId e senza meta.groupId.
+              fase 16b (S3.3): le tool-call/tool-result NON compaiono (le racconta
+              la mascotte); la voce di debug le rimette
+            */}
+            {entries.filter((e) => !e.meta?.taskId && !e.meta?.groupId).map((e) => (
+              <EntryRow key={e.id} entry={e} showReasoning={showReasoning} debugSteps={debugSteps} />
+            ))}
+            {/* fase risposta (R6): la risposta in diretta, bolla provvisoria */}
+            <LiveReplyBubble agentId={agent.id} />
+            {/* fase 16b (S3.3): mentre lavora, la mascotte con la mezza riga */}
+            {busy && <ActivityRow agentId={agent.id} />}
+          </div>
         </div>
+        <PageView />
       </div>
 
       {/* fase 8 (§3bis L7): vista del sotto-transcript del task aperto */}
@@ -638,6 +668,7 @@ export function Chat({ layout }: { layout?: LayoutResult }) {
               così testo e segnaposto stanno sulla linea centrale di graffetta,
               Ragiona e Invia; a capo cresce verso l'alto (il form resta items-end) */}
           <textarea
+            ref={composerRef}
             className="max-h-40 min-h-9 min-w-[120px] flex-1 resize-none bg-transparent px-3 py-2 text-sm leading-5 outline-none placeholder:text-muted-foreground"
             placeholder={t`Scrivi a ${agent.name}`}
             rows={Math.min(6, text.split('\n').length)}

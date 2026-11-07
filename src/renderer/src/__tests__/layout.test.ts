@@ -21,7 +21,7 @@ const chatOf = (r: LayoutResult, windowWidth: number): number =>
   windowWidth - r.sidebarWidth - (r.panel === 'docked' ? r.panelWidth : 0)
 
 const WIDTHS = [1440, 1280, 1200, 1100, 1000, 960, 915, 900, 820] as const
-const TABS: PanelTabId[] = ['profile', 'computer']
+const TABS: PanelTabId[] = ['activity', 'library', 'computer']
 const PREFS = [256, 420] as const
 
 describe('fase 16b correzioni 2 (Q1): invarianti su tutta la matrice delle misure', () => {
@@ -47,20 +47,20 @@ describe('fase 16b correzioni 2 (Q1): invarianti su tutta la matrice delle misur
 
 describe('M6 (fase 0.3.1001): la tabella della spec — finestra × scheda × barra', () => {
   it('820: sempre rotaia + overlay (non ci sta nemmeno col pannello stretto)', () => {
-    expect(lay(820, 'profile', 420)).toEqual({ sidebar: 'rail', sidebarWidth: RAIL, panel: 'overlay', panelWidth: PANEL })
-    expect(lay(820, 'profile', 256)).toEqual({ sidebar: 'rail', sidebarWidth: RAIL, panel: 'overlay', panelWidth: PANEL })
+    expect(lay(820, 'activity', 420)).toEqual({ sidebar: 'rail', sidebarWidth: RAIL, panel: 'overlay', panelWidth: PANEL })
+    expect(lay(820, 'activity', 256)).toEqual({ sidebar: 'rail', sidebarWidth: RAIL, panel: 'overlay', panelWidth: PANEL })
     expect(lay(820, 'computer', 420)).toEqual({ sidebar: 'rail', sidebarWidth: RAIL, panel: 'overlay', panelWidth: PANEL_WIDE })
     expect(lay(820, 'computer', 256)).toEqual({ sidebar: 'rail', sidebarWidth: RAIL, panel: 'overlay', panelWidth: PANEL_WIDE })
   })
   it('915: rotaia + overlay (il caso del confronto: il velo copre la chat, non la stringe)', () => {
-    expect(lay(915, 'profile', 420)).toEqual({ sidebar: 'rail', sidebarWidth: RAIL, panel: 'overlay', panelWidth: PANEL })
-    expect(lay(915, 'profile', 256)).toEqual({ sidebar: 'rail', sidebarWidth: RAIL, panel: 'overlay', panelWidth: PANEL })
+    expect(lay(915, 'activity', 420)).toEqual({ sidebar: 'rail', sidebarWidth: RAIL, panel: 'overlay', panelWidth: PANEL })
+    expect(lay(915, 'activity', 256)).toEqual({ sidebar: 'rail', sidebarWidth: RAIL, panel: 'overlay', panelWidth: PANEL })
     expect(lay(915, 'computer', 420)).toEqual({ sidebar: 'rail', sidebarWidth: RAIL, panel: 'overlay', panelWidth: PANEL_WIDE })
     expect(lay(915, 'computer', 256)).toEqual({ sidebar: 'rail', sidebarWidth: RAIL, panel: 'overlay', panelWidth: PANEL_WIDE })
   })
   it('1000: Profilo docked sulla rotaia temporanea; Computer ancora overlay (1000−76−420 = 504 < 520)', () => {
-    expect(lay(1000, 'profile', 420)).toEqual({ sidebar: 'rail', sidebarWidth: RAIL, panel: 'docked', panelWidth: PANEL })
-    expect(lay(1000, 'profile', 256)).toEqual({ sidebar: 'rail', sidebarWidth: RAIL, panel: 'docked', panelWidth: PANEL })
+    expect(lay(1000, 'activity', 420)).toEqual({ sidebar: 'rail', sidebarWidth: RAIL, panel: 'docked', panelWidth: PANEL })
+    expect(lay(1000, 'activity', 256)).toEqual({ sidebar: 'rail', sidebarWidth: RAIL, panel: 'docked', panelWidth: PANEL })
     expect(lay(1000, 'computer', 420).panel).toBe('overlay')
     expect(lay(1000, 'computer', 256).panel).toBe('overlay')
   })
@@ -69,18 +69,18 @@ describe('M6 (fase 0.3.1001): la tabella della spec — finestra × scheda × ba
     expect(r).toEqual({ sidebar: 'rail', sidebarWidth: RAIL, panel: 'docked', panelWidth: 504 })
     expect(chatOf(r, 1100)).toBe(CHAT_MIN)
     expect(lay(1100, 'computer', 256)).toEqual({ sidebar: 'rail', sidebarWidth: RAIL, panel: 'docked', panelWidth: 504 })
-    expect(lay(1100, 'profile', 420)).toEqual({ sidebar: 'rail', sidebarWidth: RAIL, panel: 'docked', panelWidth: PANEL })
-    expect(lay(1100, 'profile', 256)).toEqual({ sidebar: 'rail', sidebarWidth: RAIL, panel: 'docked', panelWidth: PANEL })
+    expect(lay(1100, 'activity', 420)).toEqual({ sidebar: 'rail', sidebarWidth: RAIL, panel: 'docked', panelWidth: PANEL })
+    expect(lay(1100, 'activity', 256)).toEqual({ sidebar: 'rail', sidebarWidth: RAIL, panel: 'docked', panelWidth: PANEL })
   })
   it('1200: barra 256 resta PIENA (ci sta); barra 420 → rotaia temporanea + docked', () => {
-    expect(lay(1200, 'profile', 256)).toEqual({ sidebar: 'full', sidebarWidth: 256, panel: 'docked', panelWidth: PANEL })
-    expect(lay(1200, 'profile', 420)).toEqual({ sidebar: 'rail', sidebarWidth: RAIL, panel: 'docked', panelWidth: PANEL })
+    expect(lay(1200, 'activity', 256)).toEqual({ sidebar: 'full', sidebarWidth: 256, panel: 'docked', panelWidth: PANEL })
+    expect(lay(1200, 'activity', 420)).toEqual({ sidebar: 'rail', sidebarWidth: RAIL, panel: 'docked', panelWidth: PANEL })
     expect(lay(1200, 'computer', 256)).toEqual({ sidebar: 'full', sidebarWidth: 256, panel: 'docked', panelWidth: 424 })
     expect(lay(1200, 'computer', 420)).toEqual({ sidebar: 'rail', sidebarWidth: RAIL, panel: 'docked', panelWidth: PANEL_WIDE })
   })
   it('1440: barra piena ovunque, pannello alla sua larghezza o stretto su Computer', () => {
-    expect(lay(1440, 'profile', 420)).toEqual({ sidebar: 'full', sidebarWidth: 420, panel: 'docked', panelWidth: PANEL })
-    expect(lay(1440, 'profile', 256)).toEqual({ sidebar: 'full', sidebarWidth: 256, panel: 'docked', panelWidth: PANEL })
+    expect(lay(1440, 'activity', 420)).toEqual({ sidebar: 'full', sidebarWidth: 420, panel: 'docked', panelWidth: PANEL })
+    expect(lay(1440, 'activity', 256)).toEqual({ sidebar: 'full', sidebarWidth: 256, panel: 'docked', panelWidth: PANEL })
     expect(lay(1440, 'computer', 256)).toEqual({ sidebar: 'full', sidebarWidth: 256, panel: 'docked', panelWidth: PANEL_WIDE })
     expect(lay(1440, 'computer', 420).panelWidth).toBe(500)
   })
@@ -89,7 +89,7 @@ describe('M6 (fase 0.3.1001): la tabella della spec — finestra × scheda × ba
     layoutFor(input)
     expect(input.sidebarWidthPref).toBe(420)
     // a finestra larga la barra torna com'era
-    expect(lay(1440, 'profile', 420).sidebar).toBe('full')
+    expect(lay(1440, 'activity', 420).sidebar).toBe('full')
   })
 })
 
@@ -121,16 +121,16 @@ describe('Q1: la tabella delle misure prese dal vivo', () => {
     expect(chatOf(r, 960)).toBe(960 - RAIL)
   })
   it('900 · Profilo · 256: rotaia + overlay 340 (chat 824)', () => {
-    const r = lay(900, 'profile', 256)
+    const r = lay(900, 'activity', 256)
     expect(r).toEqual({ sidebar: 'rail', sidebarWidth: RAIL, panel: 'overlay', panelWidth: PANEL })
   })
   it('1280 · Profilo · 420: docked 340 per un soffio (chat esattamente 520)', () => {
-    const r = lay(1280, 'profile', 420)
+    const r = lay(1280, 'activity', 420)
     expect(r).toEqual({ sidebar: 'full', sidebarWidth: 420, panel: 'docked', panelWidth: PANEL })
     expect(chatOf(r, 1280)).toBe(CHAT_MIN)
   })
   it('1200 · Profilo · 420 (M6): rotaia temporanea + docked 340 — non più overlay', () => {
-    const r = lay(1200, 'profile', 420)
+    const r = lay(1200, 'activity', 420)
     expect(r).toEqual({ sidebar: 'rail', sidebarWidth: RAIL, panel: 'docked', panelWidth: PANEL })
     expect(chatOf(r, 1200)).toBe(784)
   })
@@ -156,19 +156,19 @@ describe('Q1: la tabella delle misure prese dal vivo', () => {
 
 describe('Q1 regola 1: la rotaia automatica non tocca la preferenza', () => {
   it("sotto 1000 la barra è rotaia anche se l'utente non l'ha chiusa", () => {
-    expect(lay(999, 'profile', 256).sidebar).toBe('rail')
-    expect(lay(999, 'profile', 256).sidebarWidth).toBe(RAIL)
+    expect(lay(999, 'activity', 256).sidebar).toBe('rail')
+    expect(lay(999, 'activity', 256).sidebarWidth).toBe(RAIL)
   })
   it("a 1000 e sopra la barra torna full con la preferenza dell'utente (quando ci sta)", () => {
     // 1200 · Profilo · 256 ci sta larga: full; 1000 non ci sta → rotaia temporanea di M6
-    expect(lay(1200, 'profile', 256).sidebar).toBe('full')
-    expect(lay(1200, 'profile', 256).sidebarWidth).toBe(256)
-    expect(lay(1440, 'profile', 420).sidebarWidth).toBe(420)
+    expect(lay(1200, 'activity', 256).sidebar).toBe('full')
+    expect(lay(1200, 'activity', 256).sidebarWidth).toBe(256)
+    expect(lay(1440, 'activity', 420).sidebarWidth).toBe(420)
     // pannello chiuso: nessuna pressione, barra piena da 1000 in su
-    expect(lay(1000, 'profile', 256, false).sidebar).toBe('full')
+    expect(lay(1000, 'activity', 256, false).sidebar).toBe('full')
   })
   it("la rotaia CHIESTA dall'utente vale anche a finestra larga", () => {
-    const r = layoutFor({ windowWidth: 1440, sidebarCollapsedByUser: true, sidebarWidthPref: 256, panelOpen: true, panelTab: 'profile' })
+    const r = layoutFor({ windowWidth: 1440, sidebarCollapsedByUser: true, sidebarWidthPref: 256, panelOpen: true, panelTab: 'activity' })
     expect(r).toEqual({ sidebar: 'rail', sidebarWidth: RAIL, panel: 'docked', panelWidth: PANEL })
   })
   it("la preferenza passa intatta (funzione pura: l'input non cambia)", () => {
@@ -180,7 +180,7 @@ describe('Q1 regola 1: la rotaia automatica non tocca la preferenza', () => {
 
 describe('Q1 regola 2: pannello chiuso e squadre', () => {
   it('pannello chiuso → hidden, la chat prende tutto lo spazio', () => {
-    const r = lay(1280, 'profile', 256, false)
+    const r = lay(1280, 'activity', 256, false)
     expect(r).toEqual({ sidebar: 'full', sidebarWidth: 256, panel: 'hidden', panelWidth: 0 })
     expect(chatOf(r, 1280)).toBe(1280 - 256)
   })
@@ -198,22 +198,22 @@ describe('Q1 regola 2: pannello chiuso e squadre', () => {
 
 describe('Q1 regola 3: il massimo del trascinamento della barra', () => {
   it('finestra larga: resta 420', () => {
-    expect(sidebarMaxFor(1440, true, 'profile')).toBe(SIDEBAR_MAX)
-    expect(sidebarMaxFor(1440, false, 'profile')).toBe(SIDEBAR_MAX)
+    expect(sidebarMaxFor(1440, true, 'activity')).toBe(SIDEBAR_MAX)
+    expect(sidebarMaxFor(1440, false, 'activity')).toBe(SIDEBAR_MAX)
   })
   it('il pannello Computer docked si prende il suo minimo: 1200 → 260', () => {
     expect(sidebarMaxFor(1200, true, 'computer')).toBe(1200 - CHAT_MIN - PANEL_WIDE_MIN)
   })
   it('pannello normale docked: 1280 → 420 (340 + 520 + 420 = 1280)', () => {
-    expect(sidebarMaxFor(1280, true, 'profile')).toBe(SIDEBAR_MAX)
+    expect(sidebarMaxFor(1280, true, 'activity')).toBe(SIDEBAR_MAX)
   })
   it('se il pannello galleggia comunque, vale solo barra + CHAT_MIN', () => {
     // 1100 · Computer: 1100 − 220 − 420 = 460 < 520 → overlay anche al minimo
     expect(sidebarMaxFor(1100, true, 'computer')).toBe(SIDEBAR_MAX)
   })
   it('al minimo della finestra (900) la barra non può rubare spazio alla chat', () => {
-    expect(sidebarMaxFor(900, true, 'profile')).toBe(900 - CHAT_MIN)
-    expect(sidebarMaxFor(900, false, 'profile')).toBe(900 - CHAT_MIN)
+    expect(sidebarMaxFor(900, true, 'activity')).toBe(900 - CHAT_MIN)
+    expect(sidebarMaxFor(900, false, 'activity')).toBe(900 - CHAT_MIN)
   })
   it('non scende mai sotto SIDEBAR_MIN', () => {
     expect(sidebarMaxFor(1000, true, 'computer')).toBeGreaterThanOrEqual(SIDEBAR_MIN)

@@ -74,7 +74,7 @@ export const DAEMON_RPC_CHANNELS = [
   'vault:items', 'vault:save-login', 'vault:save-contact', 'vault:delete-item', 'vault:get-contact',
   'fills:grants', 'fills:revoke', 'secureinput:submit',
   // fase 14: la libreria (documenti, grafici, file; esportazione anche da UI)
-  'library:list', 'library:get', 'library:delete', 'library:rename', 'library:pin', 'library:export', 'library:stats', 'library:restore-version',
+  'library:list', 'library:get', 'library:delete', 'library:rename', 'library:pin', 'library:export', 'library:stats', 'library:restore-version', 'library:render-chart',
   'approvals:resolve', 'approvals:resolve-latest',
   // fase 8: regole di auto-review proposte dal bot (salvataggio SOLO al click)
   'autoreview:rule-decision',

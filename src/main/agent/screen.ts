@@ -137,7 +137,10 @@ export async function screenStatus(agentId: string): Promise<ScreenStatus> {
   return {
     browser: browser.isBrowserRunning(agentId) ? 'running' : 'stopped',
     control: [...conns].some((c) => c.agentId === agentId && c.mode === 'control'),
-    takeoverPending: pending ? { reason: pending.reason } : null
+    takeoverPending: pending ? { reason: pending.reason } : null,
+    // fase pagine (G3): lo schermo è in uso (vista o controllo aperti o
+    // richiesta in attesa) — il timer di inattività è SOSPESO
+    held: browserHoldMs(agentId, Date.now()) !== null
   }
 }
 

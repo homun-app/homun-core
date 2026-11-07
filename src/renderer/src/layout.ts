@@ -23,8 +23,12 @@ export const SIDEBAR_MAX = 420
  */
 export const TRAFFIC_LIGHT_INSET = 80
 
-/** La scheda del pannello destro: larga solo «computer»; «members» = squadra. */
-export type PanelTabId = 'profile' | 'computer' | 'routines' | 'advanced' | 'members'
+/**
+ * La scheda del pannello destro. Fase pagine (G3): il pannello ha due schede,
+ * Attività e Libreria; Computer si apre dalla card di Attività (e resta larga
+ * 560 px); «members» = squadra.
+ */
+export type PanelTabId = 'activity' | 'library' | 'computer' | 'members'
 
 export interface LayoutInput {
   windowWidth: number

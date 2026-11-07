@@ -22,10 +22,48 @@
 // riceve; le entry non cambiano (il timbro vive solo nel contenuto per il
 // modello, mai nella storia salvata né in chat).
 import type { ChatMessage } from './llm'
-import type { TranscriptEntry, SendMessageMeta, SendMessagePayload } from '../../shared/types'
+import type { TranscriptEntry, SendMessageMeta, SendMessagePayload, ReadingPageMeta } from '../../shared/types'
 // fase 9 (punto 0b): il result di una send di testo riporta l'inizio del testo
 import { deliveredResultText } from './turn-sends'
 import { systemTimeZone, withSentStamp } from './current-time'
+
+/**
+ * Fase pagine (G2/G6): la pagina che l'utente sta leggendo, dal meta del
+ * messaggio (mai nel testo salvato in chat). Un meta malformato è ignorato.
+ */
+export type { ReadingPageMeta }
+
+function readingPageOf(e: TranscriptEntry): ReadingPageMeta | null {
+  const p = (e.meta as { readingPage?: unknown } | null)?.readingPage
+  if (!p || typeof p !== 'object') return null
+  const r = p as { id?: unknown; title?: unknown; version?: unknown }
+  if (typeof r.id !== 'string' || !r.id || typeof r.title !== 'string' || !r.title || typeof r.version !== 'number') return null
+  return { id: r.id, title: r.title, version: r.version }
+}
+
+/**
+ * Fase pagine (G2/G6): la riga UNICA che dice al modello quale pagina sta
+ * leggendo l'utente. Testo per il modello: deterministica dal meta, così la
+ * stessa entry dà sempre lo stesso prefisso (come il timbro [Sent: …]).
+ */
+export function readingPageLine(page: ReadingPageMeta): string {
+  return `[The user is reading the page "${page.title}" (id ${page.id}, version ${page.version}).]`
+}
+
+/**
+ * Fase pagine (G2/G6): il contenuto di un messaggio utente per il modello —
+ * la riga della pagina letta (se c'è), poi il timbro [Sent: …] di U4 e il
+ * testo. Usata da toMessages e dalla consegna a metà turno (M5): i due posti
+ * dove un messaggio utente entra nella storia del modello.
+ */
+export function stampedUserContent(text: string, createdAt: number, timeZone: string, page: ReadingPageMeta | null): string {
+  const stamped = withSentStamp(text, createdAt, timeZone)
+  return page ? `${readingPageLine(page)}\n${stamped}` : stamped
+}
+
+function userContentForModel(e: TranscriptEntry, timeZone: string): string {
+  return stampedUserContent(e.content, e.createdAt, timeZone, readingPageOf(e))
+}
 
 const DEFAULT_MAX_MESSAGES = 40
 
@@ -130,9 +168,10 @@ function toMessages(entries: TranscriptEntry[], timeZone: string): ChatMessage[]
       // in un assistant con sole chiamate (contenuto testo assente).
       if (e.role === 'assistant' && !e.content.trim()) continue
       // U4: utente, [sistema], messaggi da altri bot e aperture delle routine
-      // portano l'ora di invio della LORO entry, sempre la stessa
+      // portano l'ora di invio della LORO entry, sempre la stessa; fase pagine
+      // (G2/G6): chi scrive dalla pagina aperta porta prima la riga di contesto
       msgs.push(e.role === 'user'
-        ? { role: 'user', content: withSentStamp(e.content, e.createdAt, timeZone) }
+        ? { role: 'user', content: userContentForModel(e, timeZone) }
         : { role: 'assistant', content: e.content })
     } else if (e.kind === 'thinking') {
       // fase 3: il testo libero del modello è ragionamento interno — resta

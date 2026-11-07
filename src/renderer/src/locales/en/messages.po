@@ -57,7 +57,7 @@ msgstr "…"
 msgid "…e una voce senza nome: chiede sempre l'approvazione"
 msgstr "…and an unnamed entry: it always asks for approval"
 
-#: src/renderer/src/components/LibraryPanel.tsx
+#: src/renderer/src/components/DocumentMarkdown.tsx
 msgid "…grafico…"
 msgstr "…chart…"
 
@@ -499,6 +499,10 @@ msgstr "⚠ error"
 msgid "⚠ esterno"
 msgstr "⚠ external"
 
+#: src/renderer/src/components/PageView.tsx
+msgid "⚠ proveniente da dati esterni"
+msgstr "⚠ coming from external data"
+
 #: src/renderer/src/components/LibraryCards.tsx
 msgid "⚠ Richiesta nata dopo contenuti letti dal web: controlla che l'origine sia davvero quella del sito."
 msgstr "⚠ Request raised after reading web content: check the origin is really the site's."
@@ -603,6 +607,10 @@ msgstr "Sign in with {0}"
 msgid "Accedi tu sul suo schermo, poi premi «Ho finito». La password non passa dal bot."
 msgstr "Sign in on their screen yourself, then press “I'm done”. The password never goes through the bot."
 
+#: src/renderer/src/components/RightPanel.tsx
+msgid "Acceso"
+msgstr "On"
+
 #: src/renderer/src/components/ServerSetup.tsx
 msgid "Accesso"
 msgstr "Access"
@@ -666,6 +674,11 @@ msgstr "Update available"
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "aggiornata"
 msgstr "updated"
+
+#. placeholder {0}: formatDate(item?.updatedAt ?? 0)
+#: src/renderer/src/components/PageView.tsx
+msgid "aggiornata {0}"
+msgstr "updated {0}"
 
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "aggiornata da GitHub"
@@ -1018,6 +1031,7 @@ msgstr "activate the routine \"{title}\" — prompt: {preview}"
 
 #: src/renderer/src/components/ActivityPanel.tsx
 #: src/renderer/src/components/ComputerPanel.tsx
+#: src/renderer/src/components/RightPanel.tsx
 #: src/renderer/src/components/Sidebar.tsx
 msgid "Attività"
 msgstr "Activity"
@@ -2074,15 +2088,6 @@ msgstr "I take a look around to see if there is anything I can do for you. I’l
 msgid "docker.com"
 msgstr "docker.com"
 
-#: src/renderer/src/components/LibraryPanel.tsx
-msgid "Documento"
-msgstr "Document"
-
-#. placeholder {0}: doc.version
-#: src/renderer/src/components/LibraryCards.tsx
-msgid "Documento · versione {0}"
-msgstr "Document · version {0}"
-
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "rpc.documentNotFound"
@@ -2227,6 +2232,7 @@ msgid "Esito"
 msgstr "Result"
 
 #: src/renderer/src/components/LibraryPanel.tsx
+#: src/renderer/src/components/PageView.tsx
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "Esporta"
 msgstr "Export"
@@ -2308,6 +2314,7 @@ msgstr "file"
 
 #: src/renderer/src/components/ComputerPanel.tsx
 #: src/renderer/src/components/LibraryPanel.tsx
+#: src/renderer/src/components/RightPanel.tsx
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "File"
 msgstr "Files"
@@ -2445,6 +2452,7 @@ msgid "grafico"
 msgstr "chart"
 
 #: src/renderer/src/components/LibraryPanel.tsx
+#: src/renderer/src/components/RightPanel.tsx
 msgid "Grafico"
 msgstr "Chart"
 
@@ -2452,7 +2460,7 @@ msgstr "Chart"
 msgid "Grafico · in Libreria"
 msgstr "Chart · in Library"
 
-#: src/renderer/src/components/LibraryPanel.tsx
+#: src/renderer/src/components/DocumentMarkdown.tsx
 msgid "grafico {lang}"
 msgstr "chart {lang}"
 
@@ -2708,9 +2716,17 @@ msgstr "Tokens are encrypted on your Mac."
 msgid "idField (es. \"messages[].id\")"
 msgstr "idField (e.g. \"messages[].id\")"
 
+#: src/renderer/src/components/RightPanel.tsx
+msgid "Ieri"
+msgstr "Yesterday"
+
 #: src/renderer/src/components/RuleProposalCard.tsx
 msgid "Ignora"
 msgstr "Ignore"
+
+#: src/renderer/src/components/RightPanel.tsx
+msgid "Ignora il suggerimento"
+msgstr "Dismiss the suggestion"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -2721,6 +2737,10 @@ msgstr "on {days}"
 #: src/shared/ui-messages.ts
 msgid "cron.monthsOfYear"
 msgstr "on the {months} of every month"
+
+#: src/renderer/src/components/DocumentMarkdown.tsx
+msgid "Il blocco {lang} non si può rendere: resta il codice."
+msgstr "The {lang} block cannot be rendered: the code stays."
 
 #: src/renderer/src/components/BotDialogs.tsx
 msgid "il bot"
@@ -3063,6 +3083,10 @@ msgstr "cannot verify \"{model}\" on {provider}: {error}"
 msgid "Impostazioni"
 msgstr "Settings"
 
+#: src/renderer/src/components/RightPanel.tsx
+msgid "Impostazioni del bot"
+msgstr "Bot settings"
+
 #: src/renderer/src/components/ConnectorCard.tsx
 msgid "In attesa del login nel browser…"
 msgstr "Waiting for you to log in in the browser…"
@@ -3099,6 +3123,10 @@ msgstr "paused"
 msgid "in pausa per assenza"
 msgstr "paused for absence"
 
+#: src/renderer/src/components/PageView.tsx
+msgid "In questa pagina"
+msgstr "On this page"
+
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "in raffreddamento"
 msgstr "cooling down"
@@ -3107,6 +3135,10 @@ msgstr "cooling down"
 #: src/renderer/src/components/Settings.tsx
 msgid "in raffreddamento fino a {0}"
 msgstr "cooling down until {0}"
+
+#: src/renderer/src/components/RightPanel.tsx
+msgid "In sospensione"
+msgstr "Suspended"
 
 #: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/settings/AddProviderSheet.tsx
@@ -3402,6 +3434,10 @@ msgstr "Reads from this server will not ask again (only tools declared read-only
 msgid "Le modifiche di automazione chiedono ogni volta"
 msgstr "Automation changes ask every time"
 
+#: src/renderer/src/components/RightPanel.tsx
+msgid "Le pagine, i grafici e i file di questo bot finiscono qui."
+msgstr "The pages, charts and files of this bot end up here."
+
 #: src/renderer/src/components/Settings.tsx
 msgid "Le ricerche dei bot vengono inviate a questi servizi, secondo i loro termini d'uso: <0>You.com</0> · <1>Exa</1> · <2>Tavily</2>"
 msgstr "Bot searches are sent to these services under their terms of use: <0>You.com</0> · <1>Exa</1> · <2>Tavily</2>"
@@ -3436,6 +3472,7 @@ msgid "legge una pagina web…"
 msgstr "reads a web page…"
 
 #: src/renderer/src/components/LibraryPanel.tsx
+#: src/renderer/src/components/RightPanel.tsx
 #: src/renderer/src/components/Sidebar.tsx
 msgid "Libreria"
 msgstr "Library"
@@ -3555,6 +3592,10 @@ msgstr "Max"
 #: src/renderer/src/components/Settings.tsx
 msgid "mattina"
 msgstr "morning"
+
+#: src/renderer/src/components/RightPanel.tsx
+msgid "Media"
+msgstr "Media"
 
 #: src/renderer/src/components/ui/ModelPicker.tsx
 msgid "Medio"
@@ -3705,6 +3746,10 @@ msgstr "Secure form: {reason}"
 msgid "Molto alto"
 msgstr "Very high"
 
+#: src/renderer/src/components/RightPanel.tsx
+msgid "Mostra altro"
+msgstr "Show more"
+
 #: src/renderer/src/components/ComputerFiles.tsx
 msgid "Mostra i file nascosti"
 msgstr "Show hidden files"
@@ -3729,6 +3774,11 @@ msgstr "Show reasoning in chat"
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "Mostra nel Finder"
 msgstr "Reveal in Finder"
+
+#. placeholder {0}: headings.length
+#: src/renderer/src/components/PageView.tsx
+msgid "Mostra tutti ({0})"
+msgstr "Show all ({0})"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -3875,6 +3925,10 @@ msgstr "No memories: ask the bot to remember a preference."
 #: src/shared/ui-messages.ts
 msgid "notice.noRoutinesToResume"
 msgstr "No routines to resume."
+
+#: src/renderer/src/components/RightPanel.tsx
+msgid "Nessuna routine in programma."
+msgstr "No routine scheduled."
 
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Nessuna routine."
@@ -4164,9 +4218,14 @@ msgstr "Offline"
 msgid "Oggetto: {0}"
 msgstr "Subject: {0}"
 
+#: src/renderer/src/components/RightPanel.tsx
 #: src/renderer/src/components/Settings.tsx
 msgid "Oggi"
 msgstr "Today"
+
+#: src/renderer/src/components/RightPanel.tsx
+msgid "Oggi ancora niente."
+msgstr "Nothing yet today."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -4260,6 +4319,21 @@ msgstr "Origins https://… (comma separated)"
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "owner/repo di GitHub oppure URL git https"
 msgstr "GitHub owner/repo or https git URL"
+
+#: src/renderer/src/components/LibraryCards.tsx
+#: src/renderer/src/components/LibraryPanel.tsx
+#: src/renderer/src/components/RightPanel.tsx
+msgid "Pagina"
+msgstr "Page"
+
+#. placeholder {0}: doc.version
+#: src/renderer/src/components/LibraryCards.tsx
+msgid "Pagina · versione {0}"
+msgstr "Page · version {0}"
+
+#: src/renderer/src/components/RightPanel.tsx
+msgid "Pagine"
+msgstr "Pages"
 
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Pannello del bot"
@@ -4531,6 +4605,7 @@ msgstr "Proposal already handled"
 msgid "Proposta ignorata"
 msgstr "Proposal ignored"
 
+#. placeholder {0}: formatDate(r.next_run!, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
 #. placeholder {0}: formatDate(r.next_run, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
 #: src/renderer/src/components/RightPanel.tsx
 msgid "prossima {0}"
@@ -5529,6 +5604,7 @@ msgstr "Subagent"
 msgid "rpc.subagentNotFound"
 msgstr "Subagent not found"
 
+#: src/renderer/src/components/RightPanel.tsx
 #: src/renderer/src/components/ui/ModelPicker.tsx
 msgid "Spento"
 msgstr "Off"
@@ -5716,8 +5792,13 @@ msgstr "tool chosen from the connector: {chosen}"
 
 #: src/renderer/src/components/ActivityPanel.tsx
 #: src/renderer/src/components/LibraryPanel.tsx
+#: src/renderer/src/components/PageView.tsx
 msgid "Torna alla chat"
 msgstr "Back to chat"
+
+#: src/renderer/src/components/PageView.tsx
+msgid "Torna alla libreria"
+msgstr "Back to the library"
 
 #: src/renderer/src/components/LibraryPanel.tsx
 msgid "torna alla lista"
@@ -5825,11 +5906,13 @@ msgid "notice.turnEndSuperseded"
 msgstr "Turn superseded by a new message"
 
 #: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/RightPanel.tsx
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "Tutte"
 msgstr "All"
 
 #: src/renderer/src/components/ActivityPanel.tsx
+#: src/renderer/src/components/RightPanel.tsx
 msgid "Tutti"
 msgstr "All"
 
@@ -6015,6 +6098,10 @@ msgstr "sees (images)"
 #: src/renderer/src/components/Settings.tsx
 msgid "venerdì"
 msgstr "Friday"
+
+#: src/renderer/src/components/PageView.tsx
+msgid "versione {version}"
+msgstr "version {version}"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Versione e aggiornamenti"

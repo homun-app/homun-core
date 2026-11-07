@@ -39,6 +39,19 @@ import { avatarValidationError } from '../shared/avatar'
 import { generateWebhookToken } from './webhooks'
 import { enqueueJob } from '../main/store/jobs'
 import { enqueueUserMessage, enqueueWidgetResponse } from './enqueue'
+
+/**
+ * Fase pagine (G2/G6): il readingPage di chat:send, se ben formato
+ * (id/titolo non vuoti, version numero intero ≥ 1) — null altrimenti.
+ */
+function readingPageValid(v: unknown): ReadingPageMeta | undefined {
+  if (!v || typeof v !== 'object') return undefined
+  const r = v as { id?: unknown; title?: unknown; version?: unknown }
+  if (typeof r.id !== 'string' || !r.id.trim()) return undefined
+  if (typeof r.title !== 'string' || !r.title.trim()) return undefined
+  if (!Number.isInteger(r.version) || (r.version as number) < 1) return undefined
+  return { id: r.id, title: r.title, version: r.version as number }
+}
 import { noteHumanText, currentUserLanguage } from '../main/agent/user-language'
 import { loadTemplates, templateById, buildKickstartMessage } from '../main/templates'
 import { deliverHeldForAgent } from './outbox'
@@ -46,7 +59,7 @@ import type { JobWorker } from './worker'
 import type { ConnectorsManager } from '../main/connectors'
 import type { Presence } from './presence'
 import type { Onboarding } from './onboarding'
-import type { SandbotEvent, SendMessagePayload, McpServerInfo, McpServerSecret, RoutineInfo, RoutineTrigger, AutoReviewSettings, ModelInfo, ModelPriceMap, ThinkingSetting, MainModel, ProviderKind } from '../shared/types'
+import type { SandbotEvent, SendMessagePayload, McpServerInfo, McpServerSecret, RoutineInfo, RoutineTrigger, AutoReviewSettings, ModelInfo, ModelPriceMap, ThinkingSetting, MainModel, ProviderKind, ReadingPageMeta } from '../shared/types'
 // fase 18b (K3): la lettura /api/show condivisa col check dei tool e col loop
 import { readOllamaCapabilities } from '../main/agent/live-models'
 import { DEFAULT_AUTO_REVIEW } from '../shared/types'
@@ -426,8 +439,12 @@ export function buildApiMethods(
 
     // ---- transcript ----
     'agents:entries': ([agentId, afterId]) => store.getEntries(agentId as string, (afterId as number) ?? 0),
-    'chat:send': ([agentId, text, images]) => {
-      enqueueUserMessage(db(), agentId as string, text as string, images as string[] | undefined, emit)
+    'chat:send': ([agentId, text, images, readingPage]) => {
+      // fase pagine (G2/G6): la pagina aperta mentre l'utente scrive — si
+      // accetta solo ben formata (id/titolo/versione), come la ricostruisce la
+      // storia del modello
+      const page = readingPageValid(readingPage)
+      enqueueUserMessage(db(), agentId as string, text as string, images as string[] | undefined, emit, undefined, undefined, undefined, page)
       worker.poke()
     },
     'chat:interrupt': ([agentId]) => {
@@ -1790,6 +1807,17 @@ export function buildApiMethods(
       const fn = getPrintToPdf()
       const r = await lib.runLibraryExport(pre.value, fn ? { printToPdf: fn } : {})
       return { ok: true, path: r.finalPath, output: r.output }
+    },
+    // fase pagine (G2): il SVG di un blocco ```vega-lite di un documento — lo
+    // produce il daemon perché la CSP del renderer vieta eval (vega usa new
+    // Function); STESSE difese di sempre (validateVegaLiteSpec: dati solo
+    // inline, niente url/href/loader) e loader che rifiuta ogni richiesta
+    'library:render-chart': async ([specText]) => {
+      const { validateVegaLiteSpec } = await import('../main/agent/charts')
+      const { renderVegaLiteSvg } = await import('../main/agent/library')
+      const check = validateVegaLiteSpec(String(specText ?? ''))
+      if (!check.ok) throw new Error(check.error)
+      return { svg: await renderVegaLiteSvg(check.spec) }
     },
     'library:stats': async () => {
       const lib = await import('../main/agent/library')

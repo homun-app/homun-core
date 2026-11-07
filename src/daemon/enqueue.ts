@@ -17,7 +17,7 @@ import { noteHumanText } from '../main/agent/user-language'
 import { uiLanguage, formatUi, ui } from '../main/ui-language'
 import { UI } from '../shared/ui-messages'
 import { findDismissibleWidgets, widgetPayload, responseDisplayText } from '../main/agent/widgets'
-import type { SandbotEvent } from '../shared/types'
+import type { SandbotEvent, ReadingPageMeta } from '../shared/types'
 
 // fase 7 (correzione A1): il tetto vive nello store jobs, così vale anche per
 // i send_to_agent del loop (prima era una costante locale di questo modulo)
@@ -44,7 +44,10 @@ export function enqueueUserMessage(
   initiator?: string,
   // fase 17c (C2, MU): meta extra del messaggio che apre il turno (es. la
   // ui dei [sistema]: il testo resta inglese per il modello)
-  extraMeta?: Record<string, unknown>
+  extraMeta?: Record<string, unknown>,
+  // fase pagine (G2/G6): la pagina della libreria che l'utente sta leggendo
+  // (va nel meta dell'entry: al modello UNA riga di contesto, in chat mai)
+  readingPage?: ReadingPageMeta
 ): Job | null {
   // fase 17b (A2): il testo di una PERSONA aggiorna la lingua dell'utente —
   // solo i messaggi diretti (senza initiator: i [sistema] non contano) e non
@@ -83,6 +86,7 @@ export function enqueueUserMessage(
   const payload: Record<string, unknown> = images?.length ? { text, images } : { text }
   if (respondedTo !== undefined) payload.respondedTo = respondedTo
   if (extraMeta) payload.extraMeta = extraMeta
+  if (readingPage) payload.readingPage = readingPage
   // fase 5: chi ha avviato il turno (es. CONNECTOR_CONNECTED dopo il click su
   // "Connetti" di una card offerta dal bot) — finisce in meta.initiator
   if (initiator) payload.initiator = initiator
@@ -98,7 +102,7 @@ export function enqueueUserMessage(
     // M5: il job si consuma al confine di passo del turno in corso; se il
     // turno finisse prima, la consegna si butta via e il job parte come
     // turno nuovo (nessun messaggio perso né letto due volte)
-    if (directUserMessage && deliverToRunningTurn(agentId, { jobId: job.id, text, images })) {
+    if (directUserMessage && deliverToRunningTurn(agentId, { jobId: job.id, text, images, ...(readingPage ? { readingPage } : {}) })) {
       return job
     }
     const waiting = pendingUserMessages(db, agentId)

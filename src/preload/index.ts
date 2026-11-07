@@ -11,7 +11,8 @@ const api: SandbotApi = {
   listTemplates: () => ipcRenderer.invoke('templates:list'),
   createAgentFromTemplate: (templateId) => ipcRenderer.invoke('agents:create-from-template', templateId),
   getEntries: (agentId, afterId) => ipcRenderer.invoke('agents:entries', agentId, afterId),
-  sendMessage: (agentId, text, images) => ipcRenderer.invoke('chat:send', agentId, text, images),
+  // fase pagine (G2/G6): readingPage = la pagina aperta mentre l'utente scrive
+  sendMessage: (agentId, text, images, readingPage) => ipcRenderer.invoke('chat:send', agentId, text, images, readingPage),
   interrupt: (agentId) => ipcRenderer.invoke('chat:interrupt', agentId),
   widgetRespond: (agentId, entryId, value) => ipcRenderer.invoke('widget:respond', agentId, entryId, value),
   // fase 19a: lo schermo del bot (vista dal vivo, presa di controllo, stato)
@@ -208,6 +209,8 @@ const api: SandbotApi = {
   libraryRename: (id, title) => ipcRenderer.invoke('library:rename', id, title),
   libraryPin: (id, pinned) => ipcRenderer.invoke('library:pin', id, pinned),
   libraryExport: (id, format) => ipcRenderer.invoke('library:export', id, format),
+  // fase pagine (G2): il SVG di un blocco vega-lite lo produce il daemon (CSP)
+  renderChartSpec: (spec) => ipcRenderer.invoke('library:render-chart', spec),
   libraryStats: () => ipcRenderer.invoke('library:stats'),
   libraryRestoreVersion: (id, version) => ipcRenderer.invoke('library:restore-version', id, version),
   getLaunchAtLogin: () => ipcRenderer.invoke('launch-at-login:get'),

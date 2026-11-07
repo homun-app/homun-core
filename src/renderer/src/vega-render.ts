@@ -34,12 +34,26 @@ export function vegaSpecHasKey(value: unknown, key: string): boolean {
 export const VEGA_FORBIDDEN_KEYS = ['url', 'href', 'loader'] as const
 
 /**
- * Vega-Lite → SVG nel renderer (anteprima): valida la spec (JSON, dati solo
- * inline, niente url/href/loader), compila e rende col loader che rifiuta.
+ * Vega-Lite → SVG per i blocchi incorporati nei documenti. NELL'APP il SVG
+ * lo produce il DAEMON (library:render-chart): la CSP del renderer vieta
+ * eval e vega usa new Function, quindi la resa locale lì non può funzionare
+ * — le difese sono le stesse di sempre (validateVegaLiteSpec: dati solo
+ * inline, niente url/href/loader; loader che rifiuta ogni richiesta). Il
+ * percorso locale resta per dove eval è lecito (i test di nodo).
  * Torna null se la spec non è valida o la resa fallisce (il chiamante mostra
  * il sorgente come codice).
  */
 export async function renderVegaLiteInRenderer(specText: string): Promise<string | null> {
+  const bridge = typeof window !== 'undefined'
+    ? (window as unknown as { sandbot?: { renderChartSpec?: (spec: string) => Promise<{ svg: string }> } }).sandbot?.renderChartSpec
+    : undefined
+  if (bridge) {
+    try {
+      return (await bridge(specText)).svg
+    } catch {
+      return null
+    }
+  }
   try {
     const spec = JSON.parse(specText) as unknown
     if (typeof spec !== 'object' || spec === null || Array.isArray(spec)) return null

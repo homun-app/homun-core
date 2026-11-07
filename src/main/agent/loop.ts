@@ -48,7 +48,7 @@ import * as permissions from './permissions'
 import { getProvider, listProviders } from './providers'
 // fase 16c (C3.3): il modello risolto («Come gli altri»)
 import { resolveAgentModel, type ResolvedAgentModel } from './model-defaults'
-import { buildMessages, visibleReplyEntries } from './history'
+import { buildMessages, visibleReplyEntries, stampedUserContent } from './history'
 import { planResume, INTERRUPTED_TOOL_RESULT } from './resume'
 import { isExternalSend, draftFromExternalCall, draftFromBatchSend, prepareDraft, DEFAULT_EXTERNAL_SEND_TOOLS, type ExternalSendConfig, type SendCandidate } from './external-send'
 import { normalizeOptions, findDismissibleWidgets } from './widgets'
@@ -107,7 +107,7 @@ import {
 } from '../mcp/find-tools'
 // fase velocità (S3): elenco core fisso + integrati differiti dietro find_tools/use_tool
 import { partitionTools, useToolDef, formatNameIndexText, DEFERRED_TOOL_NAMES } from './core-tools'
-import type { Approval, ProviderConfig, SandbotEvent, SendMessagePayload, TurnEnd } from '../../shared/types'
+import type { Approval, ProviderConfig, SandbotEvent, SendMessagePayload, TurnEnd, ReadingPageMeta } from '../../shared/types'
 // fase 12: sottoagenti — policy pura del figlio, store del registro, formatters
 import {
   subagentToolDenyReason, subagentBriefError, subagentClosure, autoCloseSummary,
@@ -320,6 +320,8 @@ interface MidTurnDelivery {
   jobId: number | null
   text: string
   images?: string[]
+  /** fase pagine (G2/G6): la pagina che l'utente sta leggendo (meta dell'entry) */
+  readingPage?: ReadingPageMeta
 }
 const midTurnDeliveries = new Map<string, MidTurnDelivery[]>()
 
@@ -505,6 +507,12 @@ export interface RunTurnOptions {
   automatic?: boolean
   /** Fase 7: meta extra del messaggio che apre il turno (es. templateName per TEMPLATE_IMPORT). */
   extraMeta?: Record<string, unknown>
+  /**
+   * Fase pagine (G2/G6): la pagina della libreria che l'utente sta leggendo
+   * mentre scrive — finisce nel meta dell'entry (la storia del modello la
+   * traduce nella riga di contesto, in chat non si vede).
+   */
+  readingPage?: ReadingPageMeta
   /**
    * Fase 8 (punto 1): il turno di routine è stato aperto da un evento esterno
    * (blocco <evento> di un trigger): il testo che ha generato le azioni non è
@@ -1283,6 +1291,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           // fase 7: provenienza del messaggio di un altro bot (rate per coppia)
           ...(opts.agentMessage ? { fromAgentId: opts.agentMessage.fromAgentId, fromAgentName: opts.agentMessage.fromAgentName, toAgentId: agentId, hop: opts.agentMessage.hop } : {}),
           ...(opts.extraMeta ?? {}),
+          ...(opts.readingPage ? { readingPage: opts.readingPage } : {}),
           ...(images?.length ? { images: images.length } : {})
         }
       })
@@ -1728,12 +1737,13 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         for (const d of due) {
           const delivered = add({
             agentId, kind: 'message', role: 'user', content: d.text,
-            meta: { ...(d.images?.length ? { images: d.images.length } : {}) }
+            meta: { ...(d.images?.length ? { images: d.images.length } : {}), ...(d.readingPage ? { readingPage: d.readingPage } : {}) }
           })
           emitLastEntry(agentId, emit)
           // U4: il timbro della SUA entry — identico a quello che buildMessages
-          // ricostruirà al turno dopo (prefisso stabile)
-          messages.push({ role: 'user', content: withSentStamp(d.text, delivered.createdAt, sentZone), ...(d.images?.length ? { images: d.images } : {}) })
+          // ricostruirà al turno dopo (prefisso stabile); fase pagine (G2/G6):
+          // prima del timbro, la riga della pagina letta
+          messages.push({ role: 'user', content: stampedUserContent(d.text, delivered.createdAt, sentZone, d.readingPage ?? null), ...(d.images?.length ? { images: d.images } : {}) })
           if (d.jobId !== null) {
             const { completeJob } = await import('../store/jobs')
             completeJob(db(), d.jobId)

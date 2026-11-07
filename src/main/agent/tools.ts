@@ -559,7 +559,7 @@ export const toolDefs: ToolDef[] = [
   },
   {
     name: 'write_document',
-    description: "Saves a document in the user's LIBRARY (GFM Markdown, max 200 KB): without an id it creates it (version 1), with an id it writes an entire NEW VERSION (versions are never overwritten). For a report, a plan or a long text use THIS, not a chat message. Charts are embedded with a ```vega-lite block (JSON spec, data only inline in data.values) or ```mermaid: an invalid block fails the call and no version is written. The document must NOT also be pasted in chat: at most one line saying what it contains.",
+    description: "Saves a document in the user's LIBRARY (GFM Markdown, max 200 KB): without an id it creates it (version 1), with an id it writes an entire NEW VERSION (versions are never overwritten). For a report, a plan or a long text use THIS, not a chat message. Charts are embedded with a ```vega-lite block (JSON spec, data only inline in data.values) or ```mermaid: an invalid block fails the call and no version is written. The user reads it as a page with an index built from the ##/### headings: organize long documents with them, and put a chart where it helps as a ```vega-lite block with inline data. The document must NOT also be pasted in chat: at most one line saying what it contains.",
     parameters: {
       type: 'object',
       properties: {

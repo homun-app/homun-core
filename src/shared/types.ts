@@ -655,6 +655,11 @@ export interface ScreenStatus {
   control: boolean
   /** richiesta di presa di controllo in attesa (scade dopo 30 minuti) */
   takeoverPending: { reason: string } | null
+  /**
+   * Fase pagine (G3): lo schermo è in uso (vista/controllo aperti o richiesta
+   * in attesa) — il timer di inattività del browser è sospeso.
+   */
+  held?: boolean
 }
 
 // ---- fase 19b (T3/T4): i file e l'attività del computer del bot ----
@@ -706,6 +711,17 @@ export interface ActivityItem {
   finishedAt: number | null
 }
 
+/**
+ * Fase pagine (G2/G6): la pagina della libreria che l'utente sta leggendo
+ * quando manda un messaggio. Sta nel meta dell'entry utente (mai nel testo):
+ * la storia del modello la traduce nella riga di contesto.
+ */
+export interface ReadingPageMeta {
+  id: string
+  title: string
+  version: number
+}
+
 export interface SandbotApi {
   // agenti e transcript
   listAgents(): Promise<Agent[]>
@@ -719,7 +735,12 @@ export interface SandbotApi {
   /** fase 7: crea un bot da template e avvia il kickstart (job TEMPLATE_IMPORT) */
   createAgentFromTemplate(templateId: string): Promise<Agent>
   getEntries(agentId: string, afterId?: number): Promise<TranscriptEntry[]>
-  sendMessage(agentId: string, text: string, images?: string[]): Promise<void>
+  /**
+   * Fase pagine (G2/G6): readingPage = la pagina che l'utente sta leggendo
+   * mentre scrive (finisce nel meta del messaggio: al modello UNA riga di
+   * contesto, in chat non si vede mai).
+   */
+  sendMessage(agentId: string, text: string, images?: string[], readingPage?: ReadingPageMeta): Promise<void>
   interrupt(agentId: string): Promise<void>
   // risposta a un widget ask_user (click su un'opzione o testo libero se allowCustom)
   widgetRespond(agentId: string, entryId: number, value: string | string[]): Promise<void>
@@ -986,6 +1007,8 @@ export interface SandbotApi {
   libraryRename(id: string, title: string): Promise<{ ok: boolean }>
   libraryPin(id: string, pinned: boolean): Promise<{ ok: boolean }>
   libraryExport(id: string, format: string): Promise<{ ok: boolean; path: string; output: string }>
+  /** fase pagine (G2): il SVG di una spec Vega-Lite (difese di charts.ts, lato daemon) */
+  renderChartSpec(spec: string): Promise<{ svg: string }>
   libraryRestoreVersion(id: string, version: number): Promise<{ ok: boolean; version: number }>
   libraryStats(): Promise<{ bytes: number; warn: boolean; warnBytes: number }>
   // daemon all'accesso — fase rilascio (A3): nell'app impacchettata è

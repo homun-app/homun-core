@@ -1,7 +1,7 @@
 // State renderer: agenti, transcript dell'agente attivo, eventi dal main.
 import { useMemo } from 'react'
 import { create } from 'zustand'
-import type { Agent, TranscriptEntry, SandbotEvent, ProviderConfig, ProviderPublic, PermissionsConfig, ConnectorInfo, TaskInfo, GroupInfo, GroupMessageInfo, SubagentInfo, AgentAvatar, TurnEnd, ScreenStatus, MainModel, ComposioStatusInfo, ComposioGatewayStatusInfo } from '../../shared/types'
+import type { Agent, TranscriptEntry, SandbotEvent, ProviderConfig, ProviderPublic, PermissionsConfig, ConnectorInfo, TaskInfo, GroupInfo, GroupMessageInfo, SubagentInfo, AgentAvatar, TurnEnd, ScreenStatus, MainModel, ComposioStatusInfo, ComposioGatewayStatusInfo, ReadingPageMeta } from '../../shared/types'
 // fase 16c correzioni (R4): la regola del modello risolto, condivisa col daemon
 import { resolveAgentModel, type ResolvedAgentModel } from '../../shared/agent-model'
 
@@ -165,9 +165,33 @@ interface Store {
   debugSteps: boolean
   setDebugSteps(v: boolean): void
   /** fase 16b (S4): il pannello del bot si apre (o cambia) su una scheda data */
-  botPanelTabRequest: 'profile' | 'computer' | 'routines' | 'advanced' | null
-  openBotAdvanced(): void
+  botPanelTabRequest: 'computer' | 'routines' | null
+  openBotTab(tab: 'computer' | 'routines'): void
   clearBotPanelTabRequest(): void
+  /**
+   * Fase pagine (G3): il foglio «Impostazioni del bot» (Profilo · Routine ·
+   * Avanzate) che si apre cliccando il nome o la mascotte; focus = sezione o
+   * campo da mettere a fuoco (description = le Istruzioni di Avanzate, G4).
+   */
+  botSheetOpen: boolean
+  botSheetFocus: 'routines' | 'description' | null
+  openBotSheet(focus?: 'routines' | 'description'): void
+  closeBotSheet(): void
+  /**
+   * Fase pagine (G2): la pagina della libreria aperta al posto della chat —
+   * from dice dove torna la ✕ (alla chat o alla lista della Libreria);
+   * title/version li riempie la vista quando carica (servono al compositore).
+   */
+  openPageInfo: { id: string; from: 'chat' | 'library'; title: string; version: number } | null
+  openPage(id: string, from: 'chat' | 'library'): void
+  closePage(): void
+  setPageMeta(meta: { title: string; version: number }): void
+  /** fase pagine (G4): il testo con cui precompilare il compositore della chat */
+  composerPrefill: string | null
+  setComposerPrefill(text: string | null): void
+  /** fase pagine (G4): la finestra App si apre su questo dettaglio (null = lista) */
+  appsOpenApp: string | null
+  openAppsOn(appId: string | null): void
   /** fase 16b (S1.3): crea/modifica/cancella squadre dalla UI */
   groupCreate(name: string, memberIds: string[], coordinatorId: string, description?: string): Promise<void>
   groupUpdate(groupId: number, patch: {
@@ -180,7 +204,8 @@ interface Store {
   groupDelete(groupId: number): Promise<void>
   init(): Promise<void>
   select(agentId: string): Promise<void>
-  send(text: string, images?: string[]): Promise<void>
+  /** fase pagine (G2/G6): readingPage = la pagina aperta mentre l'utente scrive */
+  send(text: string, images?: string[], readingPage?: ReadingPageMeta): Promise<void>
   interrupt(): void
   // fase 3: risposta a un widget e azioni sulle bozze
   widgetRespond(entryId: number, value: string | string[]): void
@@ -225,8 +250,6 @@ interface Store {
   setActivityOpen(v: boolean): void
   /** fase 16c (C3.2): cambia il modello principale e ricarica i bot che lo seguono */
   setMainModel(m: MainModel | null): Promise<void>
-  /** fase 16c: apre il pannello del bot su una scheda data (Routine dalle Impostazioni) */
-  openBotTab(tab: 'profile' | 'computer' | 'routines' | 'advanced'): void
   /** fase 12: bottone Ferma sulla card del sottoagente */
   stopSubagent(id: string): void
   setSettingsOpen(v: boolean): void
@@ -314,6 +337,14 @@ export const useStore = create<Store>((set, get) => ({
   skillsFilterAgent: null,
   quote: null,
   botPanelTabRequest: null,
+  // fase pagine (G3): il foglio Impostazioni del bot (chiuso, nessun focus)
+  botSheetOpen: false,
+  botSheetFocus: null,
+  // fase pagine (G2/G4): pagina aperta, precompilazione del compositore,
+  // dettaglio dell'app su cui aprire la finestra App
+  openPageInfo: null,
+  composerPrefill: null,
+  appsOpenApp: null,
   debugSteps: false,
   // fase 16b correzioni 2 (Q1): le letture dal localStorage sono le stesse
   // chiavi che usava Sidebar.tsx — la preferenza dell'utente sopravvive
@@ -323,7 +354,7 @@ export const useStore = create<Store>((set, get) => ({
     const v = Number(readLS(SIDEBAR_WIDTH_KEY))
     return Number.isFinite(v) && v >= SIDEBAR_MIN && v <= SIDEBAR_MAX ? v : 264
   })(),
-  panelTab: 'profile',
+  panelTab: 'activity',
 
   // ---- fase 16b correzioni 2 (Q1) ----
   setWindowWidth: (w) => set({ windowWidth: w }),
@@ -550,7 +581,7 @@ export const useStore = create<Store>((set, get) => ({
     // fase 16b (S5): la squadra aperta lascia il posto alla chat del bot
     // verifica impostazioni (navigazione): scegliere un bot riporta alla sua
     // chat — Attività e Libreria si chiudono (prima restavano sopra la chat)
-    set({ activeId: agentId, entries: [], openSubagentId: null, subEntries: [], typingAgentId: null, openGroupId: null, groupMessages: [], activityOpen: false, openLibraryId: null })
+    set({ activeId: agentId, entries: [], openSubagentId: null, subEntries: [], typingAgentId: null, openGroupId: null, groupMessages: [], activityOpen: false, openLibraryId: null, openPageInfo: null })
     set({ entries: await api.getEntries(agentId) })
     // fase 12: i sottoagenti dell'agente scelto
     api.listSubagents(agentId).then((subagents) => set({ subagents })).catch(() => undefined)
@@ -564,10 +595,10 @@ export const useStore = create<Store>((set, get) => ({
       .catch(() => undefined)
   },
 
-  async send(text, images) {
+  async send(text, images, readingPage) {
     const id = get().activeId
     if (!id || !text.trim()) return
-    await api.sendMessage(id, text.trim(), images)
+    await api.sendMessage(id, text.trim(), images, readingPage)
   },
 
   interrupt() {
@@ -755,8 +786,12 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   // fase 16c: il pannello del bot su una scheda data (dalle Impostazioni › Routine)
+  // fase pagine (G3): computer → la scheda di oggi (560 px); routines → il
+  // foglio Impostazioni del bot sulla sezione Routine (dalle Impostazioni)
   openBotTab(tab) {
-    set({ botPanelTabRequest: tab, rightPanel: true })
+    set(tab === 'computer'
+      ? { botPanelTabRequest: 'computer', rightPanel: true }
+      : { botSheetOpen: true, botSheetFocus: 'routines', rightPanel: true })
   },
 
   // fase 12: il bottone Ferma della card (RPC subagents:stop)
@@ -827,13 +862,42 @@ export const useStore = create<Store>((set, get) => ({
     set({ quote: text })
   },
 
-  // fase 16b (S4): le Impostazioni › Bot rimandano qui
-  openBotAdvanced() {
-    set({ botPanelTabRequest: 'advanced', rightPanel: true })
-  },
-
   clearBotPanelTabRequest() {
     set({ botPanelTabRequest: null })
+  },
+
+  // fase pagine (G3): il foglio «Impostazioni del bot»
+  openBotSheet(focus) {
+    set({ botSheetOpen: true, botSheetFocus: focus ?? null, rightPanel: true })
+  },
+
+  closeBotSheet() {
+    set({ botSheetOpen: false, botSheetFocus: null })
+  },
+
+  // fase pagine (G2): la pagina aperta al posto della chat; title/version li
+  // riempie la vista (il compositore li mette nella riga per il modello)
+  openPage(id, from) {
+    set({ openPageInfo: { id, from, title: '', version: 0 } })
+  },
+
+  closePage() {
+    set({ openPageInfo: null })
+  },
+
+  setPageMeta(meta) {
+    const p = get().openPageInfo
+    if (p) set({ openPageInfo: { ...p, ...meta } })
+  },
+
+  // fase pagine (G4): la richiesta della routine finisce nel compositore
+  setComposerPrefill(text) {
+    set({ composerPrefill: text })
+  },
+
+  // fase pagine (G4): la finestra App sul dettaglio di quell'app
+  openAppsOn(appId) {
+    set({ appsOpenApp: appId, appsOpen: appId !== null })
   },
 
   setMemoryOpen(v) {

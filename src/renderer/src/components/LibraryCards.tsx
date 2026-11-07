@@ -1,46 +1,86 @@
-// Le card della fase 14 in chat, rese pulite (fase 16b, S6): documento e
-// grafico salvati in libreria (icona, titolo, sottotitolo, Apri), la card del
-// fill di un login (ambra, con la riga dopo la decisione), il modulo SICURO
-// (i campi sono password e salvano via RPC nel vault: mai in chat) e la card
-// del contatto da salvare. Niente bordi: fondi tenui, angoli 18 px.
-import { useState } from 'react'
+// Le card della fase 14 in chat, rese pulite (fase 16b, S6): la card PAGINA
+// del documento (fase pagine G1: anteprima, indice, «Pagina»; il clic apre la
+// pagina), il grafico salvato in libreria (icona, titolo, sottotitolo, Apri),
+// la card del fill di un login (ambra, con la riga dopo la decisione), il
+// modulo SICURO (i campi sono password e salvano via RPC nel vault: mai in
+// chat) e la card del contatto da salvare. Niente bordi: fondi tenui, angoli
+// 18 px.
+import { useEffect, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import { FileText, BarChart3, KeyRound, UserRound } from 'lucide-react'
 import { api, useStore } from '../store'
 import { fillFieldLabel } from '../lib/fill-fields'
 import { i18n } from '../lib/i18n'
+// fase pagine (G1): l'anteprima della card è la funzione pura della pagina
+import { pagePreview, type PagePreview } from '../lib/page-view'
 import type { TranscriptEntry, SendMessagePayload } from '../../../shared/types'
 import { DecidedRow, CardShell } from './DecidedRow'
 
 const metaOf = (entry: TranscriptEntry) => (entry.meta ?? {}) as { approvalId?: string; status?: string; message?: SendMessagePayload }
 
-/** Card del documento in libreria: icona, titolo, sottotitolo, Apri (S6). */
+/**
+ * Fase pagine (G1): la card del documento diventa la CARD DELLA PAGINA —
+ * sopra l'anteprima (titolo grande, primo paragrafo, i primi 6 titoli come
+ * indice in piccolo, sfumata in fondo), sotto una riga con icona, titolo ed
+ * etichetta «Pagina» («Pagina · versione N» se N > 1). Il clic APRE LA
+ * PAGINA (G2), non più la libreria globale. L'anteprima viene dalla funzione
+ * pura pagePreview sul contenuto della versione corrente.
+ */
 export function DocumentCard({ entry }: { entry: TranscriptEntry }) {
-  const openLibrary = useStore((s) => s.openLibrary)
+  const openPage = useStore((s) => s.openPage)
   const m = metaOf(entry)
   const doc = m.message as Extract<SendMessagePayload, { type: 'document' }> | undefined
+  const [preview, setPreview] = useState<PagePreview | null>(null)
+  useEffect(() => {
+    if (!doc) return
+    let alive = true
+    setPreview(null)
+    void api.libraryGet(doc.id)
+      .then((c) => { if (alive) setPreview(pagePreview(c.content ?? '')) })
+      .catch(() => undefined)
+    return () => { alive = false }
+  }, [doc?.id, doc?.version]) // eslint-disable-line react-hooks/exhaustive-deps
   if (!doc) return null
+  const headings = preview?.headings.slice(0, 6) ?? []
   return (
-    <CardShell>
-      <div className="flex items-center gap-3.5">
-        <span className="grid size-11 shrink-0 place-items-center rounded-[12px] bg-card">
-          <FileText className="size-5 text-muted-foreground" />
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-[15px] font-medium">{doc.title}</span>
-          <span className="block text-[13px] text-muted-foreground">
-            <Trans>Documento · versione {doc.version}</Trans>
+    <div data-testid="page-card" className="w-full max-w-3xl">
+      <button
+        className="w-full rounded-[18px] bg-muted p-4 text-left transition hover:bg-muted/80"
+        onClick={() => openPage(doc.id, 'chat')}
+      >
+        {/* l'anteprima: alta al massimo ~260 px, sfumata in fondo */}
+        <div className="relative max-h-[260px] overflow-hidden rounded-[14px] bg-card/60 px-5 pb-5 pt-4" data-testid="page-card-preview">
+          <p className="font-display text-[22px] leading-snug">{preview?.title ?? doc.title}</p>
+          {preview?.intro && <p className="mt-2 line-clamp-3 text-[13px] leading-relaxed text-muted-foreground">{preview.intro}</p>}
+          {headings.length > 0 && (
+            <ul className="mt-3 space-y-1 text-xs text-muted-foreground">
+              {headings.map((h, i) => (
+                <li key={i} className="flex gap-1.5">
+                  <span aria-hidden="true" className="text-muted-foreground/50">·</span>
+                  <span className="truncate">{h}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <span aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-b from-transparent to-muted" />
+        </div>
+        {/* la riga sotto: icona, titolo, etichetta */}
+        <div className="mt-3 flex items-center gap-3">
+          <span className="grid size-9 shrink-0 place-items-center rounded-[12px] bg-card">
+            <FileText className="size-4.5 text-muted-foreground" />
           </span>
-        </span>
-        <button
-          className="shrink-0 rounded-[10px] bg-card px-3.5 py-1.5 text-sm transition hover:bg-muted"
-          onClick={() => openLibrary(doc.id)}
-        >
-          <Trans>Apri</Trans>
-        </button>
-      </div>
-    </CardShell>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[15px] font-medium">{doc.title}</span>
+            <span className="block text-[13px] text-muted-foreground" data-testid="page-card-label">
+              {doc.version > 1
+                ? <Trans>Pagina · versione {doc.version}</Trans>
+                : <Trans>Pagina</Trans>}
+            </span>
+          </span>
+        </div>
+      </button>
+    </div>
   )
 }
 

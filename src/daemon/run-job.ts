@@ -46,6 +46,8 @@ export function makeJobRunner(db: DatabaseSync, runTurnFn: RunTurnFn = runTurn) 
         contaminated?: boolean
         // fase 7: meta extra del messaggio che apre il turno (es. templateName)
         extraMeta?: Record<string, unknown>
+        // fase pagine (G2/G6): la pagina della libreria che l'utente sta leggendo
+        readingPage?: import('../shared/types').ReadingPageMeta
       }
       // correzione A3: le opzioni derivate dal payload vengono DOPO `opts`, così
       // sopravvivono anche alla ripresa (payload.entryId): una catena automatica
@@ -60,7 +62,8 @@ export function makeJobRunner(db: DatabaseSync, runTurnFn: RunTurnFn = runTurn) 
         ...(p.automatic ? { automatic: true } : {}),
         ...(p.untrusted ? { untrusted: true } : {}),
         ...(p.contaminated ? { contaminated: true } : {}),
-        ...(p.extraMeta ? { extraMeta: p.extraMeta } : {})
+        ...(p.extraMeta ? { extraMeta: p.extraMeta } : {}),
+        ...(p.readingPage ? { readingPage: p.readingPage } : {})
       })
       return
     }

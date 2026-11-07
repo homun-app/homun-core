@@ -722,6 +722,14 @@ export function AppsView({ embedded = false }: { embedded?: boolean }) {
   const [skillsCount, setSkillsCount] = useState(0)
   const [detailId, setDetailId] = useState<string | null>(null)
   const [linkedDetail, setLinkedDetail] = useState<ConnectedRow | null>(null)
+  // fase pagine (G4): il suggerimento «Collega <App>» apre la finestra DIRETTAMENTE
+  // sul dettaglio di quell'app (appsOpenApp si consuma qui)
+  const appsOpenApp = useStore((s) => s.appsOpenApp)
+  useEffect(() => {
+    if (!appsOpenApp) return
+    setDetailId(appsOpenApp)
+    useStore.setState({ appsOpenApp: null })
+  }, [appsOpenApp])
   const [accountOpen, setAccountOpen] = useState(false)
   const [overflowOpen, setOverflowOpen] = useState(false)
   // P4: le righe con un flusso in corso, per id ('login' → 'app' da sole)

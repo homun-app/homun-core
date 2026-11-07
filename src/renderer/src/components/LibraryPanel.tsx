@@ -3,43 +3,23 @@
 // elenco ☰ (ricordata in localStorage con try/catch), card senza bordo su
 // bg-muted con anteprima (mini grafico dai dati salvati, prime righe dei
 // documenti, badge dell'estensione per i file), titolo e «Tipo · Bot ·
-// quando». La vista del documento col Markdown reso (react-markdown) e i
-// blocchi grafico — Vega-Lite come <img> dell'SVG generato dal daemon,
-// Mermaid in modalità strict, SEMPRE come <img> (mai nel DOM) — con versioni,
-// esporta, rinomina e fissa resta quella di oggi.
+// quando». Fase pagine (G5): le righe di DOCUMENTO aprono la PAGINA (G2) con
+// la ✕ che torna qui, e l'etichetta dice «Pagina» (nei filtri pure); lo
+// storico con versioni, esporta, rinomina e «Ripristina» resta la vista di
+// oggi (ci porta la riga della versione della pagina). Il corpo del documento
+// (Markdown + blocchi grafico, Vega-Lite e Mermaid SEMPRE <img>) vive in
+// DocumentMarkdown, condiviso con la pagina aperta.
 import { useEffect, useMemo, useState } from 'react'
 import { useLingui, Trans, Plural } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
 import { formatDate } from '../lib/i18n'
 import { ChevronLeft, LayoutGrid, List } from 'lucide-react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 import { api, useStore } from '../store'
-import { renderVegaLiteInRenderer } from '../vega-render'
+// fase pagine (G2): il corpo del documento, condiviso con la pagina aperta
+import { DocumentBody, InlineChart, svgDataUrl } from './DocumentMarkdown'
 import { libraryRows, type LibraryKindFilter } from '../lib/library-view'
 import type { LibraryItemInfo, LibraryContentInfo } from '../../../shared/types'
-
-/** base64 → data URL per l'<img> (mai SVG nel DOM). */
-const svgDataUrl = (svg: string): string =>
-  'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svg)))
-
-/** Mermaid in modalità STRICT, reso dalla UI e mostrato come <img>. */
-let mermaidReady: Promise<typeof import('mermaid').default> | null = null
-async function renderMermaid(src: string): Promise<string | null> {
-  try {
-    mermaidReady ??= import('mermaid').then((m) => {
-      m.default.initialize({ startOnLoad: false, securityLevel: 'strict', htmlLabels: false })
-      return m.default
-    })
-    const mermaid = await mermaidReady
-    const id = 'sandbot-mmd-' + Math.random().toString(36).slice(2, 10)
-    const { svg } = await mermaid.render(id, src)
-    return svg
-  } catch {
-    return null
-  }
-}
 
 /** La scelta griglia/elenco resta nel localStorage (try/catch: può mancare). */
 const LIBRARY_VIEW_KEY = 'sandbot:library.view'
@@ -61,7 +41,8 @@ function writeLibraryView(v: LibraryView): void {
 
 /** Il tipo di una voce in una riga («Grafico · Contabile · oggi»). */
 const KIND_LABEL: Record<LibraryItemInfo['kind'], MessageDescriptor> = {
-  document: msg`Documento`,
+  // fase pagine (G5): il documento si chiama Pagina, ovunque
+  document: msg`Pagina`,
   chart: msg`Grafico`,
   file: msg`File`
 }
@@ -123,6 +104,8 @@ function LibraryPreview({ item }: { item: LibraryItemInfo }) {
 
 function LibraryList() {
   const { t, i18n } = useLingui()
+  // fase pagine (G5): le righe di documento aprono la PAGINA (che torna qui)
+  const openPage = useStore((s) => s.openPage)
   const [items, setItems] = useState<LibraryItemInfo[]>([])
   const [kind, setKind] = useState<LibraryKindFilter>('')
   const [author, setAuthor] = useState('')
@@ -180,7 +163,7 @@ function LibraryList() {
             onChange={(e) => setKind(e.target.value as LibraryKindFilter)}
           >
             <option value="">{t`Tutti i tipi`}</option>
-            <option value="document">{i18n.t(msg`Documento`)}</option>
+            <option value="document">{i18n.t(msg`Pagina`)}</option>
             <option value="chart">{i18n.t(msg`Grafico`)}</option>
             <option value="file">{i18n.t(msg`File`)}</option>
           </select>
@@ -222,7 +205,7 @@ function LibraryList() {
         {view === 'grid' ? (
           <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(220px,1fr))]">
             {shown.map((i) => (
-              <button key={i.id} className="group overflow-hidden rounded-[18px] text-left transition hover:bg-muted/80" onClick={() => openLibrary(i.id)}>
+              <button key={i.id} className="group overflow-hidden rounded-[18px] text-left transition hover:bg-muted/80" onClick={() => (i.kind === 'document' ? (openLibrary(null), openPage(i.id, 'library')) : openLibrary(i.id))}>
                 <div className="h-32 rounded-[14px] bg-muted">
                   <LibraryPreview item={i} />
                 </div>
@@ -239,7 +222,7 @@ function LibraryList() {
           <div className="space-y-1">
             {shown.map((i) => (
               <div key={i.id} className="flex items-center justify-between gap-3 rounded-[14px] bg-muted/60 px-4 py-3">
-                <button className="min-w-0 flex-1 text-left" onClick={() => openLibrary(i.id)}>
+                <button className="min-w-0 flex-1 text-left" onClick={() => (i.kind === 'document' ? (openLibrary(null), openPage(i.id, 'library')) : openLibrary(i.id))}>
                   <p className="truncate text-sm">
                     {i.pinned && <span className="mr-1 text-destructive">★</span>}
                     {i.title}
@@ -403,64 +386,6 @@ function LibraryItemView({ id }: { id: string }) {
       </div>
     </div>
   )
-}
-
-/** Il corpo di un documento: Markdown reso; i blocchi vega-lite/mermaid diventano <img>. */
-function DocumentBody({ markdown }: { markdown: string }) {
-  const parts = useMemo(() => {
-    const out: Array<{ kind: 'md'; text: string } | { kind: 'vega-lite'; spec: string } | { kind: 'mermaid'; src: string }> = []
-    const re = /```(vega-lite|mermaid)[ \t]*\r?\n([\s\S]*?)```/g
-    let last = 0
-    let m: RegExpExecArray | null
-    while ((m = re.exec(markdown)) !== null) {
-      if (m.index > last) out.push({ kind: 'md', text: markdown.slice(last, m.index) })
-      out.push(m[1] === 'vega-lite' ? { kind: 'vega-lite', spec: m[2] ?? '' } : { kind: 'mermaid', src: m[2] ?? '' })
-      last = m.index + m[0].length
-    }
-    if (last < markdown.length) out.push({ kind: 'md', text: markdown.slice(last) })
-    return out
-  }, [markdown])
-  return (
-    <div className="space-y-3 text-sm leading-relaxed text-foreground">
-      {parts.map((p, i) =>
-        p.kind === 'md' ? (
-          <div key={i} className="max-w-none">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{p.text}</ReactMarkdown>
-          </div>
-        ) : (
-          <InlineChart key={i} lang={p.kind} source={p.kind === 'vega-lite' ? p.spec : p.src} />
-        )
-      )}
-    </div>
-  )
-}
-
-/** Un grafico: Vega-Lite (SVG dal daemon) o Mermaid (strict, reso dalla UI) — sempre <img>. */
-function InlineChart({ lang, source }: { lang: 'vega-lite' | 'mermaid'; source: string }) {
-  // fase 17a: alt tradotti (il contenuto del grafico è dato del bot)
-  const { t } = useLingui()
-  const [url, setUrl] = useState<string | null>(null)
-  const [failed, setFailed] = useState(false)
-  useEffect(() => {
-    let alive = true
-    setFailed(false)
-    setUrl(null)
-    ;(async () => {
-      if (lang === 'vega-lite') {
-        const svg = await renderVegaLiteInRenderer(source)
-        if (alive && svg) setUrl(svgDataUrl(svg))
-        else if (alive) setFailed(true)
-      } else {
-        const svg = await renderMermaid(source)
-        if (alive && svg) setUrl(svgDataUrl(svg))
-        else if (alive) setFailed(true)
-      }
-    })()
-    return () => { alive = false }
-  }, [lang, source])
-  if (failed) return <pre className="overflow-x-auto rounded-lg border border-border bg-muted px-3 py-2 text-xs text-muted-foreground">{source}</pre>
-  if (!url) return <p className="text-xs text-muted-foreground"><Trans>…grafico…</Trans></p>
-  return <img className="max-w-full rounded-xl border border-border bg-white" src={url} alt={t`grafico ${lang}`} />
 }
 
 function ChartBody({ content }: { content: LibraryContentInfo }) {

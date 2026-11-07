@@ -1,25 +1,29 @@
-// Pannello destro (fase 16b, S4): il pannello del BOT a schede —
-// Profilo · Computer · Routine · Avanzate. In cima la mascotte grande SOSPESA
-// (niente riquadro, solo l'ombra ovale sotto) e il nome in font-display; le
-// schede sono testo, la selezionata su pillola bg-muted. Con la scheda
-// Computer il pannello si allarga a 560 px (uno schermo utilizzabile) e torna
-// alla larghezza normale sulle altre. Con una SQUADRA aperta il pannello
-// mostra «Membri»: elenco, coordinatore, aggiungi/togli, descrizione,
-// eliminazione. La Libreria è uscita dal pannello (16c la farà globale).
-// correzioni 2 (Q1): la larghezza la decide layoutFor — quando la chat non
-// può restare ≥ CHAT_MIN il pannello galleggia in OVERLAY sopra di essa
-// (ombra morbida, nessun bordo, si chiude con Esc, con la ✕ o clicando
-// fuori) invece di tagliarsi oltre il bordo della finestra.
-import { useEffect, useRef, useState } from 'react'
+// Pannello destro (fase 16b, S4 → fase pagine G3): il pannello del BOT a Due
+// schede — Attività · Libreria (catture 12 e 13). In cima la mascotte grande
+// SOSPESA e il nome: cliccandoli si apre il foglio «Impostazioni del bot» con
+// le sezioni di oggi (Profilo, Routine come elenco completo, Avanzate) —
+// Profilo e Avanzate non spariscono. Attività, dall'alto: i Suggerimenti
+// proattivi (G4, da regole e mai dal modello), il Computer del bot (card con
+// anteprima e stato, clic = la scheda di oggi a 560 px), le prossime 3
+// routine e gli Ultimi lavori di oggi. Libreria: quello che QUESTO bot (e i
+// suoi sottoagenti) ha prodotto, con le pillole Tutti / Pagine / Media,
+// raggruppato per giorno e «Mostra altro». Le larghezze restano quelle della
+// 16b-correzioni-2 (pannello 340, Computer 560, layoutFor); con una SQUADRA
+// aperta il pannello mostra «Membri» come prima.
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
 import { formatDate } from '../lib/i18n'
-import { X, Plus } from 'lucide-react'
+import { X, Plus, Link2, Repeat, PencilLine, Monitor } from 'lucide-react'
 import { api, useStore, useResolvedModel } from '../store'
 import { Bot } from '../bot/Bot'
 import { useBotInfo } from '../bot/use-bot'
-import type { GroupInfo, LibraryItemInfo, RoutineInfo, ThinkingSetting, Agent } from '../../../shared/types'
+// fase pagine (G4): i suggerimenti, da regole e non dal modello
+import { botSuggestions, type BotSuggestion } from '../lib/bot-suggestions'
+// fase catalogo app: l'elenco unico per la regola «Collega <App>»
+import { loadAppCatalog } from '../../../shared/app-catalog'
+import type { GroupInfo, LibraryItemInfo, RoutineInfo, ThinkingSetting, Agent, AgentAvatar, ScreenStatus } from '../../../shared/types'
 import { ChangeAvatarDialog } from './BotDialogs'
 // fase 16b correzioni 2 (Q1): il risultato di layoutFor
 import type { LayoutResult } from '../layout'
@@ -27,6 +31,7 @@ import type { LayoutResult } from '../layout'
 import { ComputerPanel } from './ComputerPanel'
 import { ModelSelect } from './ui/ModelSelect'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu'
+import { Dialog, DialogContent, DialogTitle } from './ui/dialog'
 
 /** L'etichetta ✕ del pannello, sulla riga comune (fase 16b correzioni 2, Q3). */
 function PanelClose({ onClose }: { onClose(): void }) {
@@ -62,13 +67,12 @@ const TASK_LABEL: Record<string, MessageDescriptor> = {
   cancelled: msg`annullato`
 }
 
-type PanelTab = 'profile' | 'computer' | 'routines' | 'advanced'
+/** Le due schede del pannello (G3); Computer si apre dalla card di Attività. */
+type PanelTab = 'activity' | 'library' | 'computer'
 
-const TAB_LABEL: Record<PanelTab, MessageDescriptor> = {
-  profile: msg`Profilo`,
-  computer: msg`Computer`,
-  routines: msg`Routine`,
-  advanced: msg`Avanzate`
+const TAB_LABEL: Record<'activity' | 'library', MessageDescriptor> = {
+  activity: msg`Attività`,
+  library: msg`Libreria`
 }
 
 /** Riga chiave/valore senza bordi, come il mockup (S4). */
@@ -81,7 +85,7 @@ function KvRow({ label, children }: { label: string; children: React.ReactNode }
   )
 }
 
-/** Titoletto piccolo e grigio delle sezioni di Avanzate (mockup 7). */
+/** Titoletto piccolo e grigio delle sezioni (mockup 7). */
 function SmallTitle({ children }: { children: React.ReactNode }) {
   return <p className="mb-1 mt-4 text-xs font-semibold text-muted-foreground">{children}</p>
 }
@@ -302,6 +306,7 @@ function AdvancedTab() {
 
       <SmallTitle><Trans>Istruzioni</Trans></SmallTitle>
       <textarea
+        data-testid="bot-instructions"
         className="min-h-24 w-full rounded-[12px] bg-muted px-3 py-2 text-sm outline-none"
         placeholder={t`Descrizione / ruolo del bot (va nel system prompt)`}
         defaultValue={agent.description}
@@ -352,7 +357,431 @@ function AdvancedTab() {
   )
 }
 
-/** Il pannello del bot: mascotte sospesa, schede, contenuto. */
+// ---- fase pagine (G4): i suggerimenti ----
+
+/** Il setting dove vivono i suggerimenti ignorati: { [agentId]: [id…] }. */
+const DISMISS_SETTING = 'suggestions.dismissed'
+
+const SUGGESTION_ICON: Record<BotSuggestion['icon'], typeof Link2> = {
+  link: Link2,
+  repeat: Repeat,
+  edit: PencilLine
+}
+
+/**
+ * I suggerimenti proattivi di Attività: le regole di botSuggestions sullo
+ * stato già disponibile (mai il modello, mai testo di terzi). Ogni riga ha la
+ * sua ✕: il suggerimento non torna per quel bot (setting suggestions.dismissed).
+ */
+function SuggestionsBlock({ agentId }: { agentId: string }) {
+  const { i18n } = useLingui()
+  const entries = useStore((s) => s.entries)
+  const agents = useStore((s) => s.agents)
+  const connectors = useStore((s) => s.connectors)
+  const composio = useStore((s) => s.composio)
+  const composioGateway = useStore((s) => s.composioGateway)
+  const openAppsOn = useStore((s) => s.openAppsOn)
+  const setComposerPrefill = useStore((s) => s.setComposerPrefill)
+  const openBotSheet = useStore((s) => s.openBotSheet)
+  const setRightPanel = useStore((s) => s.setRightPanel)
+  const [dismissed, setDismissed] = useState<string[]>([])
+  const [installed, setInstalled] = useState<Array<{ id: string; enabledFor?: string[] | null; needsAuth?: unknown; needsReauth?: boolean }> | null>(null)
+
+  useEffect(() => {
+    let alive = true
+    setDismissed([])
+    setInstalled(null)
+    void api.settingsGet<Record<string, string[]>>(DISMISS_SETTING, {})
+      .then((v) => { if (alive) setDismissed(v[agentId] ?? []) })
+      .catch(() => undefined)
+    void api.connectorsInstalled()
+      .then((r) => { if (alive) setInstalled((r as { servers: Array<{ id: string; enabledFor?: string[] | null; needsAuth?: unknown; needsReauth?: boolean }> }).servers) })
+      .catch(() => { if (alive) setInstalled([]) })
+    return () => { alive = false }
+  }, [agentId])
+
+  // le app del catalogo con il loro stato per QUESTO bot (la stessa regola
+  // della finestra App: collegata diretta o dentro l'account Composio)
+  const apps = useMemo(() => {
+    const staticReady = new Set(connectors.filter((c) => c.clientRegistration === 'static' && c.hasStaticCredentials).map((c) => c.id))
+    const catalog = loadAppCatalog({ staticClientsReady: staticReady })
+    const directState = new Map(connectors.map((c) => [c.id, c.state.status]))
+    const gateway = new Map((composioGateway?.connected ?? []).map((a) => [a.slug, a]))
+    const key = new Map((composio?.connected ?? []).map((a) => [a.slug, a]))
+    const serverById = new Map((installed ?? []).map((s) => [s.id, s]))
+    return catalog.map((app) => {
+      let connectedForBot = false
+      const server = app.directId ? serverById.get(app.directId) : undefined
+      if (server) {
+        const enabled = server.enabledFor == null || server.enabledFor.includes('*') || server.enabledFor.includes(agentId)
+        connectedForBot = enabled && !server.needsAuth && !server.needsReauth
+      } else if (app.directId && directState.get(app.directId) === 'connected') {
+        // collegata senza righe per-bot: vale per tutti i bot
+        connectedForBot = true
+      }
+      const slug = app.composioSlug
+      if (!connectedForBot && slug) {
+        const g = gateway.get(slug)
+        const k = key.get(slug)
+        connectedForBot = g?.status === 'ACTIVE' || k?.status === 'ACTIVE'
+      }
+      return { id: app.id, name: app.name, connectedForBot }
+    })
+  }, [connectors, composio, composioGateway, installed, agentId])
+
+  const suggestions = useMemo(() => botSuggestions({
+    messages: entries
+      .filter((e) => e.kind === 'message' && e.role === 'user')
+      .map((e) => ({
+        text: e.content,
+        at: e.createdAt,
+        initiator: e.meta?.initiator as string | undefined,
+        fromAgentId: e.meta?.fromAgentId as string | undefined
+      })),
+    apps,
+    agentDescription: agents.find((a) => a.id === agentId)?.description ?? '',
+    turns: entries.filter((e) => e.kind === 'message' && e.role === 'user' && !e.meta?.initiator && !e.meta?.fromAgentId).length,
+    dismissed
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [entries, apps, agents, agentId, dismissed])
+
+  const dismiss = (id: string): void => {
+    setDismissed((d) => [...d, id])
+    void api.settingsGet<Record<string, string[]>>(DISMISS_SETTING, {})
+      .then((all) => api.settingsSet(DISMISS_SETTING, { ...all, [agentId]: [...new Set([...(all[agentId] ?? []), id])] }))
+      .catch(() => undefined)
+  }
+  const run = (s: BotSuggestion): void => {
+    if (s.action.kind === 'connect-app') openAppsOn(s.action.appId)
+    else if (s.action.kind === 'create-routine') { setComposerPrefill(s.action.prefill); setRightPanel(false) }
+    else openBotSheet('description')
+  }
+  if (suggestions.length === 0) return null
+  return (
+    <div data-testid="bot-suggestions" className="mb-4 space-y-1.5">
+      {suggestions.map((s) => {
+        const Icon = SUGGESTION_ICON[s.icon] ?? Link2
+        return (
+          <div key={s.id} className="flex items-center gap-2 rounded-[14px] bg-muted/60 py-2 pl-3 pr-1.5" data-testid="bot-suggestion">
+            <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+            <button
+              className="min-w-0 flex-1 truncate text-left text-sm transition hover:text-foreground"
+              onClick={() => run(s)}
+            >
+              {s.label}
+            </button>
+            <button
+              className="grid size-6 shrink-0 place-items-center rounded-full text-muted-foreground/70 transition hover:bg-muted hover:text-foreground"
+              aria-label={i18n.t(msg`Ignora il suggerimento`)}
+              title={i18n.t(msg`Ignora il suggerimento`)}
+              data-testid="bot-suggestion-dismiss"
+              onClick={() => dismiss(s.id)}
+            >
+              <X className="size-3.5" />
+            </button>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ---- fase pagine (G3): la scheda Attività ----
+
+/** Il giorno locale di un timestamp (per i gruppi della Libreria del bot). */
+function dayKeyOf(at: number): number {
+  const d = new Date(at)
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+}
+
+/** La card del Computer: anteprima piccola dello schermo e stato; clic = la scheda di oggi (560 px). */
+function ComputerCard({ agentId }: { agentId: string }) {
+  const { i18n } = useLingui()
+  const openBotTab = useStore((s) => s.openBotTab)
+  const screenStatus = useStore((s) => s.screenStatus[agentId])
+  const [status, setStatus] = useState<ScreenStatus | null>(null)
+  useEffect(() => {
+    let alive = true
+    setStatus(null)
+    void api.screenStatus(agentId).then((s) => { if (alive) setStatus(s) }).catch(() => undefined)
+    return () => { alive = false }
+  }, [agentId, screenStatus])
+  const browser = status?.browser ?? screenStatus?.browser ?? 'stopped'
+  // running e in uso → Acceso; running a riposo → In sospensione; spento → Spento
+  const label = browser === 'running' ? (status?.held ?? screenStatus?.held) ? i18n.t(msg`Acceso`) : i18n.t(msg`In sospensione`) : i18n.t(msg`Spento`)
+  const dot = browser === 'stopped' ? 'bg-muted-foreground/40' : (status?.held ?? screenStatus?.held) ? 'bg-chart-2' : 'bg-waiting'
+  return (
+    <button
+      className="w-full overflow-hidden rounded-[16px] bg-muted/60 text-left transition hover:bg-muted"
+      data-testid="bot-computer-card"
+      onClick={() => openBotTab('computer')}
+    >
+      {/* l'anteprima piccola dello schermo: il riquadro del desktop del bot */}
+      <span className="block h-24 w-full bg-black/85 px-3 pb-3 pt-2" aria-hidden="true">
+        <span className="flex h-full flex-col justify-end gap-1.5 rounded-[8px] bg-white/5 p-2">
+          <span className="h-1.5 w-3/5 rounded-full bg-white/20" />
+          <span className="h-1.5 w-4/5 rounded-full bg-white/10" />
+          <span className="h-1.5 w-2/5 rounded-full bg-white/10" />
+        </span>
+      </span>
+      <span className="flex items-center gap-2 px-3 py-2">
+        <Monitor className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+        <span className="min-w-0 flex-1 truncate text-sm"><Trans>Computer</Trans></span>
+        <span className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground" data-testid="bot-computer-status">
+          <span className={`size-2 rounded-full ${dot}`} aria-hidden="true" />
+          {label}
+        </span>
+      </span>
+    </button>
+  )
+}
+
+/** Attività (G3), dall'alto: Suggerimenti, Computer, le prossime 3 routine, i lavori di oggi. */
+function ActivityTab({ agentId }: { agentId: string }) {
+  const { i18n } = useLingui()
+  const tasks = useStore((s) => s.tasks)
+  const openTask = useStore((s) => s.openTask)
+  const openBotSheet = useStore((s) => s.openBotSheet)
+  const [routines, setRoutines] = useState<RoutineInfo[] | null>(null)
+  useEffect(() => {
+    let alive = true
+    setRoutines(null)
+    void api.listRoutines(agentId)
+      .then((r) => { if (alive) setRoutines(r) })
+      .catch(() => { if (alive) setRoutines([]) })
+    return () => { alive = false }
+  }, [agentId])
+  const next3 = (routines ?? [])
+    .filter((r) => r.enabled && r.next_run)
+    .sort((a, b) => (a.next_run ?? 0) - (b.next_run ?? 0))
+    .slice(0, 3)
+  const today = dayKeyOf(Date.now())
+  const todayTasks = tasks.filter((t) => t.agentId === agentId && dayKeyOf(t.createdAt) === today).slice(-5).reverse()
+  return (
+    <div>
+      <SuggestionsBlock agentId={agentId} />
+      <ComputerCard agentId={agentId} />
+      <div className="mt-4">
+        <div className="flex items-center justify-between">
+          <p className="text-[13px] text-muted-foreground"><Trans>Routine</Trans></p>
+          <button className="text-xs text-muted-foreground transition hover:text-foreground" onClick={() => openBotSheet('routines')}>
+            <Trans>Tutte</Trans> ›
+          </button>
+        </div>
+        {routines === null ? (
+          <p className="mt-1 text-xs text-muted-foreground"><Trans>caricamento…</Trans></p>
+        ) : next3.length === 0 ? (
+          <p className="mt-1 text-sm text-muted-foreground"><Trans>Nessuna routine in programma.</Trans></p>
+        ) : (
+          <div className="mt-1 space-y-1">
+            {next3.map((r) => (
+              <div key={r.id} className="rounded-[12px] px-2.5 py-1.5 text-sm transition hover:bg-muted/60">
+                <p className="truncate">{r.title}</p>
+                <p className="text-xs text-muted-foreground">
+                  <Trans>prossima {formatDate(r.next_run!, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</Trans>
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="mt-4">
+        <p className="text-[13px] text-muted-foreground"><Trans>Ultimi lavori</Trans></p>
+        {todayTasks.length === 0 ? (
+          <p className="mt-1 text-sm text-muted-foreground"><Trans>Oggi ancora niente.</Trans></p>
+        ) : (
+          <div className="mt-1 space-y-1">
+            {todayTasks.map((tk) => (
+              <button
+                key={tk.id}
+                className="flex w-full items-center gap-2 rounded-[12px] px-2.5 py-1.5 text-left text-sm transition hover:bg-muted/60"
+                onClick={() => openTask(tk.id)}
+              >
+                <span className="min-w-0 flex-1 truncate">{tk.title}</span>
+                <span className="shrink-0 text-xs text-muted-foreground">{i18n.t(TASK_LABEL[tk.status] ?? msg`${tk.status}`)}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ---- fase pagine (G3): la scheda Libreria del bot ----
+
+/** Il filtro a pillola della Libreria del bot. */
+type BotLibraryFilter = 'all' | 'pages' | 'media'
+
+const FILTER_LABEL: Record<BotLibraryFilter, MessageDescriptor> = {
+  all: msg`Tutti`,
+  pages: msg`Pagine`,
+  media: msg`Media`
+}
+
+/** Le due etichette fisse dei gruppi per giorno (poi la data formattata). */
+const DAY_TODAY = msg`Oggi`
+const DAY_YESTERDAY = msg`Ieri`
+
+/** Le voci per giorno: «Oggi», «Ieri», poi la data. */
+function dayGroups(items: LibraryItemInfo[]): Array<{ key: string; label: MessageDescriptor | string; items: LibraryItemInfo[] }> {
+  const byDay = new Map<number, LibraryItemInfo[]>()
+  for (const i of items) {
+    const k = dayKeyOf(i.updatedAt)
+    byDay.set(k, [...(byDay.get(k) ?? []), i])
+  }
+  const today = dayKeyOf(Date.now())
+  const yesterday = dayKeyOf(Date.now() - 86_400_000)
+  return [...byDay.entries()]
+    .sort((a, b) => b[0] - a[0])
+    .map(([k, its]) => ({
+      key: String(k),
+      label: k === today ? DAY_TODAY : k === yesterday ? DAY_YESTERDAY : formatDate(k),
+      items: its.sort((a, b) => b.updatedAt - a.updatedAt)
+    }))
+}
+
+/** La Libreria del bot: i suoi elementi (e dei suoi sottoagenti), per giorno. */
+function BotLibraryTab({ agentId }: { agentId: string }) {
+  const { i18n } = useLingui()
+  const agents = useStore((s) => s.agents)
+  const openPage = useStore((s) => s.openPage)
+  const openLibrary = useStore((s) => s.openLibrary)
+  const [items, setItems] = useState<LibraryItemInfo[] | null>(null)
+  const [filter, setFilter] = useState<BotLibraryFilter>('all')
+  const [more, setMore] = useState<Record<string, number>>({})
+  useEffect(() => {
+    let alive = true
+    setItems(null)
+    setMore({})
+    void api.libraryList(undefined, undefined)
+      .then((all) => { if (alive) setItems(all) })
+      .catch(() => { if (alive) setItems([]) })
+    return () => { alive = false }
+  }, [agentId])
+  // i sottoagenti di questo bot firmano con il loro id: le loro voci stanno qui
+  const authors = useMemo(() => new Set([agentId, ...agents.filter((a) => a.parentId === agentId).map((a) => a.id)]), [agents, agentId])
+  const shown = useMemo(() => {
+    const mine = (items ?? []).filter((i) => authors.has(i.authorAgentId))
+    // Grafici dentro Tutti; Pagine = documenti; Media = file (immagini comprese)
+    if (filter === 'pages') return mine.filter((i) => i.kind === 'document')
+    if (filter === 'media') return mine.filter((i) => i.kind === 'file')
+    return mine
+  }, [items, authors, filter])
+  const groups = useMemo(() => dayGroups(shown), [shown])
+  const kindOf = (i: LibraryItemInfo): string =>
+    i.kind === 'document' ? i18n.t(msg`Pagina`) : i.kind === 'chart' ? i18n.t(msg`Grafico`) : i18n.t(msg`File`)
+  return (
+    <div data-testid="bot-library">
+      <div className="flex gap-1" data-testid="bot-library-filters">
+        {(Object.keys(FILTER_LABEL) as BotLibraryFilter[]).map((f) => (
+          <button
+            key={f}
+            className={`h-8 rounded-full px-3 text-sm transition ${filter === f ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+            onClick={() => { setFilter(f); setMore({}) }}
+          >
+            {i18n.t(FILTER_LABEL[f])}
+          </button>
+        ))}
+      </div>
+      {items === null ? (
+        <p className="mt-3 text-xs text-muted-foreground"><Trans>caricamento…</Trans></p>
+      ) : shown.length === 0 ? (
+        <p className="mt-3 text-sm text-muted-foreground">
+          <Trans>Le pagine, i grafici e i file di questo bot finiscono qui.</Trans>
+        </p>
+      ) : (
+        <div className="mt-3 space-y-4">
+          {groups.map((g) => {
+            const limit = 5 + (more[g.key] ?? 0)
+            const rows = g.items.slice(0, limit)
+            return (
+              <div key={g.key}>
+                <p className="mb-1 text-[13px] text-muted-foreground">{typeof g.label === 'string' ? g.label : i18n.t(g.label)}</p>
+                <div className="space-y-1">
+                  {rows.map((i) => (
+                    <button
+                      key={i.id}
+                      className="flex w-full items-center gap-2 rounded-[12px] px-2.5 py-1.5 text-left text-sm transition hover:bg-muted/60"
+                      onClick={() => (i.kind === 'document' ? openPage(i.id, 'chat') : openLibrary(i.id))}
+                    >
+                      <span className="min-w-0 flex-1 truncate">
+                        {i.title}
+                        {i.kind === 'document' && <span className="ml-1.5 text-xs text-muted-foreground">v{i.currentVersion}</span>}
+                      </span>
+                      <span className="shrink-0 text-xs text-muted-foreground">{kindOf(i)}</span>
+                    </button>
+                  ))}
+                  {g.items.length > limit && (
+                    <button
+                      className="w-full rounded-[12px] px-2.5 py-1 text-left text-xs text-muted-foreground transition hover:text-foreground"
+                      onClick={() => setMore((m) => ({ ...m, [g.key]: (m[g.key] ?? 0) + 5 }))}
+                    >
+                      <Trans>Mostra altro</Trans>
+                    </button>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---- fase pagine (G3): il foglio «Impostazioni del bot» ----
+
+/**
+ * Il foglio con le sezioni di oggi — Profilo, Routine (elenco completo) e
+ * Avanzate — che si apre cliccando il nome o la mascotte. focus: 'routines'
+ * scorre alla sezione, 'description' mette a fuoco le Istruzioni (G4).
+ */
+function BotSettingsSheet({ agentId, avatar, onClose }: { agentId: string; avatar: AgentAvatar; onClose(): void }) {
+  const { i18n } = useLingui()
+  const agents = useStore((s) => s.agents)
+  const focus = useStore((s) => s.botSheetFocus)
+  const [avatarOpen, setAvatarOpen] = useState(false)
+  const contentRef = useRef<HTMLDivElement>(null)
+  const name = agents.find((a) => a.id === agentId)?.name ?? ''
+  useEffect(() => {
+    if (!focus) return
+    const t = setTimeout(() => {
+      if (focus === 'routines') contentRef.current?.querySelector('[data-testid="bot-sheet-routines"]')?.scrollIntoView({ block: 'start' })
+      else if (focus === 'description') {
+        const el = contentRef.current?.querySelector<HTMLTextAreaElement>('[data-testid="bot-instructions"]')
+        el?.focus()
+        el?.scrollIntoView({ block: 'center' })
+      }
+    }, 150)
+    return () => clearTimeout(t)
+  }, [focus])
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
+      <DialogContent className="max-w-xl">
+        <DialogTitle>{i18n.t(msg`Impostazioni del bot`)}</DialogTitle>
+        <div ref={contentRef} className="max-h-[70vh] overflow-y-auto scroll-thin pr-1">
+          <p className="mb-2 font-display text-lg">{name}</p>
+          <section>
+            <p className="mb-1 text-xs font-semibold text-muted-foreground"><Trans>Profilo</Trans></p>
+            <ProfileTab onAvatar={() => setAvatarOpen(true)} />
+          </section>
+          <section data-testid="bot-sheet-routines" className="mt-4 scroll-mt-4">
+            <p className="mb-1 text-xs font-semibold text-muted-foreground"><Trans>Routine</Trans></p>
+            <RoutinesTab />
+          </section>
+          <section className="mt-4">
+            <p className="mb-1 text-xs font-semibold text-muted-foreground"><Trans>Avanzate</Trans></p>
+            <AdvancedTab />
+          </section>
+        </div>
+        {avatarOpen && <ChangeAvatarDialog agentId={agentId} current={avatar} onClose={() => setAvatarOpen(false)} />}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/** Il pannello del bot: mascotte sospesa (clic = Impostazioni), schede, contenuto. */
 function BotPanel({ layout, onClose }: { layout: LayoutResult; onClose(): void }) {
   const { i18n } = useLingui()
   const activeId = useStore((s) => s.activeId)
@@ -363,11 +792,13 @@ function BotPanel({ layout, onClose }: { layout: LayoutResult; onClose(): void }
   const setPanelTab = useStore((s) => s.setPanelTab)
   const [tab, setTab] = useState<PanelTab>(() => {
     const t = useStore.getState().panelTab
-    return t === 'members' ? 'profile' : t
+    return t === 'members' ? 'activity' : t
   })
-  const [avatarOpen, setAvatarOpen] = useState(false)
   const tabRequest = useStore((s) => s.botPanelTabRequest)
   const clearTabRequest = useStore((s) => s.clearBotPanelTabRequest)
+  const botSheetOpen = useStore((s) => s.botSheetOpen)
+  const openBotSheet = useStore((s) => s.openBotSheet)
+  const closeBotSheet = useStore((s) => s.closeBotSheet)
   const asideRef = useRef<HTMLElement>(null)
   // G2 (fase 0.3.1001 grafica): aprendo, il focus va al primo controllo del
   // pannello (la ✕) — come già faceva l'overlay, anche quando è docked
@@ -375,13 +806,13 @@ function BotPanel({ layout, onClose }: { layout: LayoutResult; onClose(): void }
     asideRef.current?.querySelector<HTMLElement>('button')?.focus()
   }, [])
   // «Guarda lo schermo» delle card e la TakeoverCard aprono il pannello sulla
-  // scheda Computer (S4); le Impostazioni › Bot rimandano ad Avanzate
+  // scheda Computer (S4); le Impostazioni › Bot aprono il foglio (Routine)
   useEffect(() => {
     if (computerPanel.open) setTab('computer')
   }, [computerPanel.open])
   useEffect(() => {
     if (tabRequest) {
-      setTab(tabRequest)
+      setTab(tabRequest === 'computer' ? 'computer' : 'activity')
       clearTabRequest()
     }
   }, [tabRequest, clearTabRequest])
@@ -403,23 +834,31 @@ function BotPanel({ layout, onClose }: { layout: LayoutResult; onClose(): void }
       style={{ width: layout.panelWidth }}
     >
       <PanelTopBand onClose={onClose} />
-      {/* la mascotte grande sospesa: niente riquadro, solo l'ombra ovale */}
+      {/* la mascotte grande sospesa e il nome: UN bottone, apre le
+          Impostazioni del bot (G3) */}
       <div className="flex flex-col items-center px-6 pt-14">
         <div className="flex flex-col items-center">
-          <Bot family={info.avatar.family} color={info.avatar.color} state={info.state} size={110} dimmed={info.dimmed} label={info.agent.name} />
-          <span aria-hidden="true" className="mt-1 h-2 w-16 rounded-full bg-foreground/10" />
+          <button
+            className="flex flex-col items-center"
+            data-testid="bot-settings-trigger"
+            aria-label={i18n.t(msg`Impostazioni del bot`)}
+            title={i18n.t(msg`Impostazioni del bot`)}
+            onClick={() => openBotSheet()}
+          >
+            <Bot family={info.avatar.family} color={info.avatar.color} state={info.state} size={110} dimmed={info.dimmed} label={info.agent.name} />
+            <span aria-hidden="true" className="mt-1 h-2 w-16 rounded-full bg-foreground/10" />
+            <h2 className="mt-3 font-display text-[26px] leading-tight">{info.agent.name}</h2>
+          </button>
         </div>
-        <h2 className="mt-3 font-display text-[26px] leading-tight">{info.agent.name}</h2>
-        {/* fase 16b correzioni (P5): le quattro pillole stanno dentro i 340 px
-            del pannello (292 utilizzabili col padding interno) — testo 14 px e
-            padding 8 px: misurate 288 px sul font Figtree, senza scorrimento */}
+        {/* fase pagine (G3): le due schede — Attività · Libreria */}
         <div role="tablist" className="mt-3 flex gap-1">
-          {(Object.keys(TAB_LABEL) as PanelTab[]).map((id) => (
+          {(Object.keys(TAB_LABEL) as Array<'activity' | 'library'>).map((id) => (
             <button
               key={id}
               role="tab"
               aria-selected={tab === id}
-              className={`h-8 rounded-full px-2 text-sm transition ${tab === id ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+              data-testid={`bot-tab-${id}`}
+              className={`h-8 rounded-full px-3 text-sm transition ${tab === id ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
               onClick={() => setTab(id)}
             >
               {i18n.t(TAB_LABEL[id])}
@@ -428,16 +867,13 @@ function BotPanel({ layout, onClose }: { layout: LayoutResult; onClose(): void }
         </div>
       </div>
       <div className="flex-1 overflow-y-auto scroll-thin px-5 pb-5 pt-4">
-        {tab === 'profile' && <ProfileTab onAvatar={() => setAvatarOpen(true)} />}
+        {tab === 'activity' && activeId && <ActivityTab agentId={activeId} />}
+        {tab === 'library' && activeId && <BotLibraryTab agentId={activeId} />}
         {tab === 'computer' && activeId && (
-          <ComputerPanel agentId={activeId} onClose={() => setTab('profile')} embedded />
+          <ComputerPanel agentId={activeId} onClose={() => setTab('activity')} embedded />
         )}
-        {tab === 'routines' && <RoutinesTab />}
-        {tab === 'advanced' && <AdvancedTab />}
       </div>
-      {avatarOpen && activeId && (
-        <ChangeAvatarDialog agentId={activeId} current={info.avatar} onClose={() => setAvatarOpen(false)} />
-      )}
+      {botSheetOpen && activeId && <BotSettingsSheet agentId={activeId} avatar={info.avatar} onClose={closeBotSheet} />}
     </aside>
   )
 }
@@ -559,20 +995,22 @@ export function RightPanel({ layout }: { layout: LayoutResult }) {
   const rightPanel = useStore((s) => s.rightPanel)
   const setRightPanel = useStore((s) => s.setRightPanel)
   const setPanelTab = useStore((s) => s.setPanelTab)
+  const closeBotSheet = useStore((s) => s.closeBotSheet)
   const openGroupId = useStore((s) => s.openGroupId)
   const groups = useStore((s) => s.groups)
-  // fase 16b correzioni 2 (Q1): chiudere torna alla scheda Profilo, come
-  // quando il pannello si riapre — così layoutFor non resta sul wide
+  // fase 16b correzioni 2 (Q1): chiudere torna alla prima scheda, così
+  // layoutFor non resta sul wide del Computer
   // G2 (fase 0.3.1001 grafica): il focus torna al bottone PanelRight della
   // fascia alta, che con la chiusura ricompare (✕, Esc e velo passano qui)
   const close = (): void => {
-    setPanelTab('profile')
+    setPanelTab('activity')
+    closeBotSheet()
     setRightPanel(false)
     useStore.getState().requestPanelFocusRestore()
   }
   // il pannello in overlay si chiude anche con Esc (con la ✕ e col clic fuori
   // ci sono già); se un altro gestore ha già consumato l'Esc (menu,
-  // autocompletamento @) qui non si fa niente
+  // autocompletamento @, pagina aperta) qui non si fa niente
   useEffect(() => {
     if (layout.panel !== 'overlay') return
     const onKey = (e: KeyboardEvent): void => {
