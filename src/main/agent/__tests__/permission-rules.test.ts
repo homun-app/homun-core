@@ -82,6 +82,21 @@ describe('fase use-app (U3): grant con scadenza e Invii che chiedono sempre', ()
       ['click', 'double_click', 'key', 'open_app', 'right_click', 'type']
     )
   })
+
+  it('R1: un a-capo DENTRO il testo è un invio — in coda, in mezzo e \\r\\n → chiede; senza a-capo no', () => {
+    // in Slack «ciao\nmondo» spedirebbe «ciao» al PRIMO a-capo: qualunque
+    // \n o \r, in qualunque posizione, conta come invio nelle app di posta/chat
+    expect(useAppAlwaysAsk({ action: 'type', text: 'ciao\n', app: 'Slack' })).toContain('Slack')
+    expect(useAppAlwaysAsk({ action: 'type', text: 'ciao\nmondo', app: 'Slack' })).toContain('Slack')
+    expect(useAppAlwaysAsk({ action: 'type', text: 'prima\r\nseconda', app: 'WhatsApp' })).toContain('WhatsApp')
+    expect(useAppAlwaysAsk({ action: 'type', text: '\nciao', app: 'Mail' })).toContain('Mail')
+    expect(useAppAlwaysAsk({ action: 'type', text: 'ciao\rmondo', app: 'Telegram' })).toContain('Telegram')
+    // senza a-capo, in qualunque app di posta/chat: nessuna eccezione
+    expect(useAppAlwaysAsk({ action: 'type', text: 'ciao mondo', app: 'Slack' })).toBeNull()
+    expect(useAppAlwaysAsk({ action: 'type', text: 'ciao mondo', app: 'Mail' })).toBeNull()
+    // e in Safari anche con l'a-capo in mezzo non è un invio che spedirebbe
+    expect(useAppAlwaysAsk({ action: 'type', text: 'ciao\nmondo', app: 'Safari' })).toBeNull()
+  })
 })
 
 describe('commandKey', () => {

@@ -125,7 +125,7 @@ function toScreenPoints(x?: number, y?: number): { x: number; y: number } | null
   return { x: Math.round(x / scale), y: Math.round(y / scale) }
 }
 
-/** Combo tasti → keystroke AppleScript. es. "cmd+c" → key "c" using command down */
+/** Combo tasti → espressione AppleScript. es. "cmd+c" → keystroke "c" using command down */
 function keyCombo(key: string): { script: string; error?: string } {
   const parts = key.split('+').map((p) => p.trim().toLowerCase())
   const main = parts.pop() as string
@@ -147,7 +147,33 @@ function keyCombo(key: string): { script: string; error?: string } {
     return { script: '', error: `invalid modifier in "${key}" (use cmd/ctrl/alt/shift)` }
   }
   const using = modList.length ? ` using {${modList.join(', ')}}` : ''
-  return { script: `tell application "System Events" to ${isCode ? `key ${keyExpr}` : `keystroke ${keyExpr}`}${using}` }
+  return { script: `${isCode ? `key ${keyExpr}` : `keystroke ${keyExpr}`}${using}` }
+}
+
+/**
+ * R2 (ritocchi): lo script che VERIFICA il primo piano e AGISCE in un'unica
+ * operazione — fra il controllo di lsappinfo e il tasto l'utente può cliccare
+ * un'altra finestra. `pid` è quello che lsappinfo ha appena visto davanti
+ * per l'app giusta: se davanti c'è un altro processo lo script esce con
+ * HOMUN_FRONT_MISMATCH e NON è stato digitato né cliccato niente.
+ * `keystroke` e i click richiedono già Accessibilità: lo script può
+ * controllare da sé (unix id del processo davanti), senza un secondo giro.
+ */
+function guardedSystemEvents(actionExpr: string, pid: number | null): string {
+  if (pid === null) return `tell application "System Events" to ${actionExpr}`
+  return [
+    'tell application "System Events"',
+    '  set p to first application process whose frontmost is true',
+    `  if (unix id of p) is not ${pid} then error "HOMUN_FRONT_MISMATCH:" & (name of p)`,
+    `  ${actionExpr}`,
+    'end tell'
+  ].join('\n')
+}
+
+/** R2: il nome dell'app che ha preso il primo piano, dall'errore della guardia. */
+function frontMismatchName(stderr: string): string | null {
+  const m = /HOMUN_FRONT_MISMATCH:(.*)/.exec(stderr)
+  return m ? m[1]!.trim() : null
 }
 
 async function screenshot(): Promise<{ output: string; images: string[] }> {
@@ -190,6 +216,19 @@ export const ACCESSIBILITY_RESULT =
   'Homun needs the macOS Accessibility permission for clicks and typing. Tell the user to enable Homun in System Settings → Privacy & Security → Accessibility, then try again. Do not retry before the user confirms.'
 export const HOMUN_SELF_RESULT = 'Homun never types or clicks into its own window.'
 export const APP_REQUIRED_RESULT = '`app` is required: name the app that must receive this action (e.g. Safari).'
+/** R3 (ritocchi): `app` in open_url dev'essere un browser — il permesso è per HOST. */
+export const OPEN_URL_BROWSER_ONLY_RESULT =
+  '`app` for open_url must be a web browser (e.g. Safari, Google Chrome). Omit it to use the default browser.'
+
+/**
+ * R3 (ritocchi): gli unici `app` ammessi da open_url. Oggi qualunque app
+ * riceve l'URL (`open -a "Script Editor" https://…/x.scpt` esegue lo script)
+ * e il permesso è per host, non per app. Confronto senza maiuscole e `.app`.
+ */
+const OPEN_URL_BROWSERS = new Set([
+  'safari', 'safari technology preview', 'google chrome', 'chromium', 'firefox', 'arc',
+  'microsoft edge', 'brave browser', 'opera', 'vivaldi', 'orion', 'zen'
+])
 
 /** L'esito di errore di un'azione di tastiera/mouse quando manca l'Accessibilità. */
 function accessibilityFailure(): ComputerUseResult {
@@ -274,8 +313,10 @@ async function activateApp(input: string): Promise<boolean> {
  * U1: attiva l'app e aspetta (max 2 s) che sia DAVVERO in primo piano.
  * La verifica è DOPO l'approvazione: è il momento in cui Homun torna davanti
  * perché l'utente ha cliccato la card. Rifiuta se davanti c'è Homun.
+ * R2 (ritocchi): ok porta anche il PID che lsappinfo ha appena visto davanti
+ * per l'app giusta — la guardia dello script di tastiera/mouse lo ricontrolla.
  */
-async function ensureAppInFront(appName: string): Promise<{ ok: true; name: string } | { ok: false; result: ComputerUseResult }> {
+async function ensureAppInFront(appName: string): Promise<{ ok: true; name: string; pid: number | null } | { ok: false; result: ComputerUseResult }> {
   if (isHomunName(appName)) return { ok: false, result: { output: HOMUN_SELF_RESULT, images: [], error: true } }
   if (!(await activateApp(appName))) {
     return { ok: false, result: { output: `App "${appName}" not found (try the English name, e.g. Calculator, Notes). Nothing was executed.`, images: [], error: true } }
@@ -286,7 +327,7 @@ async function ensureAppInFront(appName: string): Promise<{ ok: true; name: stri
     front = await frontmostApp()
     if (front) {
       if (isHomunFront(front)) return { ok: false, result: { output: HOMUN_SELF_RESULT, images: [], error: true } }
-      if (front.name && sameApp(front.name, appName)) return { ok: true, name: front.name }
+      if (front.name && sameApp(front.name, appName)) return { ok: true, name: front.name, pid: front.pid }
     }
     if (Date.now() >= deadline) break
     await new Promise((r) => setTimeout(r, 200))
@@ -323,13 +364,21 @@ export async function executeUseApp(input: UseAppInput): Promise<ComputerUseResu
       if (u.protocol !== 'https:' && u.protocol !== 'http:') {
         return { output: `Scheme "${u.protocol}" is not allowed: open_url accepts only http: and https: addresses.`, images: [], error: true }
       }
-      // l'URL passa COME È: execFile usa un array di argomenti, nessuna shell
-      const args = input.app ? ['-a', input.app.replace(/"/g, '').trim(), raw] : [raw]
+      // R3: a `open` passa l'URL NORMALIZZATO (u.href), non la stringa grezza
+      // — niente spazi iniziali né forme ambigue; execFile usa un array di
+      // argomenti, nessuna shell
+      const href = u.href
+      const app = input.app !== undefined ? String(input.app).replace(/"/g, '').trim() : ''
+      // R3: `app` dev'essere un browser — qualunque altra app non riceve l'URL
+      if (app && !OPEN_URL_BROWSERS.has(normalizedAppNameKey(app))) {
+        return { output: OPEN_URL_BROWSER_ONLY_RESULT, images: [], error: true }
+      }
+      const args = app ? ['-a', app, href] : [href]
       const r = await io().execFile('open', args, 10_000)
       if (r.code !== 0) {
         return { output: `open_url failed: ${errTail(r)}`, images: [], error: true }
       }
-      return { output: `Opened ${raw} in ${input.app ? normalizedName(input.app) : 'the default browser'}`, images: [] }
+      return { output: `Opened ${href} in ${app ? normalizedName(app) : 'the default browser'}`, images: [] }
     }
     case 'click':
     case 'double_click':
@@ -349,14 +398,17 @@ export async function executeUseApp(input: UseAppInput): Promise<ComputerUseResu
         if (input.action === 'key' && !input.key) return { output: 'Missing key', images: [], error: true }
         let script: string
         if (input.action === 'type') {
-          script = `tell application "System Events" to keystroke "${input.text!.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
+          script = `keystroke "${input.text!.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
         } else {
           const combo = keyCombo(input.key!)
           if (combo.error) return { output: combo.error, images: [], error: true }
           script = combo.script
         }
-        const r = await sh(script)
+        // R2: controllo del primo piano e tasto nello STESSO script
+        const r = await sh(guardedSystemEvents(script, front.pid))
         if (r.code !== 0) {
+          const changed = frontMismatchName(r.stderr)
+          if (changed) return { output: `Not executed: the app in front changed to ${changed} just before the action. Nothing was typed.`, images: [], error: true }
           if (isAccessibilityError(r.stderr)) return accessibilityFailure()
           return { output: `${input.action === 'type' ? 'Type' : 'Key'} failed: ${errTail(r)}`, images: [], error: true }
         }
@@ -368,8 +420,11 @@ export async function executeUseApp(input: UseAppInput): Promise<ComputerUseResu
       const p = toScreenPoints(input.x, input.y)
       if (!p) return { output: 'x and y are required (image pixel coordinates)', images: [], error: true }
       const btn = input.action === 'right_click' ? 'right click' : input.action === 'double_click' ? 'double click' : 'click'
-      const r = await sh(`tell application "System Events" to ${btn} at {${p.x}, ${p.y}}`)
+      // R2: la stessa guardia del primo piano, con «Nothing was clicked.»
+      const r = await sh(guardedSystemEvents(`${btn} at {${p.x}, ${p.y}}`, front.pid))
       if (r.code !== 0) {
+        const changed = frontMismatchName(r.stderr)
+        if (changed) return { output: `Not executed: the app in front changed to ${changed} just before the action. Nothing was clicked.`, images: [], error: true }
         if (isAccessibilityError(r.stderr)) return accessibilityFailure()
         return { output: `Action failed (${errTail(r)}). If the permission is missing: System Settings → Privacy → Accessibility → add this app.`, images: [], error: true }
       }

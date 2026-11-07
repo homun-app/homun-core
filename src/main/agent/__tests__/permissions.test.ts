@@ -320,6 +320,21 @@ describe('fase use-app (U3): la chiave è l\'app, non l\'azione', () => {
     expect(await check('use-app', { action: 'open_app', app: 'Safari' })).toEqual({ kind: 'allow', via: 'grant' })
   })
 
+  it('R4: «sempre a Safari» vale anche scritto «safari» o «Safari.app» (il confronto ignora maiuscole e .app); Mail mai', async () => {
+    state.grants = [{ tool: 'use-app', target: 'app:Safari' }]
+    expect(await check('use-app', { action: 'type', app: 'safari', text: 'x' })).toEqual({ kind: 'allow', via: 'grant' })
+    expect(await check('use-app', { action: 'type', app: 'Safari.app', text: 'x' })).toEqual({ kind: 'allow', via: 'grant' })
+    expect(await check('use-app', { action: 'click', x: 1, y: 2, app: 'SAFARI' })).toEqual({ kind: 'allow', via: 'grant' })
+    // per Mail continua a chiedere: il permesso è di QUELLA app
+    expect((await check('use-app', { action: 'type', app: 'Mail', text: 'x' })).kind).toBe('ask')
+    // anche per url: il confronto dell'host ignora le maiuscole
+    state.grants = [{ tool: 'use-app', target: 'url:sora.chatgpt.com' }]
+    expect(await check('use-app', { action: 'open_url', url: 'https://sora.chatgpt.com', app: 'safari' })).toEqual({ kind: 'allow', via: 'grant' })
+    // la CHIAVE SALVATA resta come l'ha scritta il modello (serve per mostrarla)
+    await grantStanding('use-app', { action: 'type', app: 'safari', text: 'x' })
+    expect(state.grants.at(-1)).toEqual({ tool: 'use-app', target: 'app:safari', expiresAt: undefined })
+  })
+
   it('il permesso a 10 minuti vale finché non scade, poi chiede di nuovo', async () => {
     state.grants = [{ tool: 'use-app', target: 'app:Safari', expiresAt: Date.now() + 600_000 }]
     expect(await check('use-app', { action: 'key', key: 'cmd+l', app: 'Safari' })).toEqual({ kind: 'allow', via: 'grant' })

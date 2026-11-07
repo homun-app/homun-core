@@ -7,7 +7,7 @@ import { getPermissions, listGrants, addGrant, getRoutine } from '../store/db'
 import { sandboxMode, boxRoot, boxDir } from '../sandbox'
 import { resolveBoxPath } from '../sandbox/box-paths'
 import type { PermissionMode } from '../../shared/types'
-import { targetKey, runCommandVerdict, commandKey, isNeverAuto, ruleToolMatches, mcpAnnotationMode, serverReadGrantCovers, grantActive, useAppAlwaysAsk, type McpAnnotationsLike } from './permission-rules'
+import { targetKey, runCommandVerdict, commandKey, isNeverAuto, ruleToolMatches, mcpAnnotationMode, serverReadGrantCovers, grantActive, useAppAlwaysAsk, useAppTargetsMatch, type McpAnnotationsLike } from './permission-rules'
 // fase app (A6): la classificazione delle azioni di Composio (pura)
 import { classifyComposioToolName } from '../connectors/composio-actions'
 // fase Composio OAuth (C2/C3/C5/C4): il gate del blocco e degli strumenti
@@ -424,8 +424,13 @@ export async function check(
   }
 
   // standing grant: match ESATTO tool+target ("Consenti sempre" su quel
-  // target); fase use-app (U3): una grant SCADUTA (i 10 minuti) non vale più
-  const grant = listGrants().find((g) => g.tool === tool && g.target === target && grantActive(g))
+  // target); fase use-app (U3): una grant SCADUTA (i 10 minuti) non vale più;
+  // R4 (ritocchi): per use-app il confronto ignora maiuscole e .app (app: e url:)
+  const grant = listGrants().find((g) =>
+    g.tool === tool &&
+    (tool === 'use-app' ? useAppTargetsMatch(g.target, target) : g.target === target) &&
+    grantActive(g)
+  )
   if (grant) return { kind: 'allow', via: 'grant' }
 
   if (mode === 'always_allow') return { kind: 'allow', via: 'rule' }

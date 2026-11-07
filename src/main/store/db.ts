@@ -211,6 +211,8 @@ function open(): DatabaseSync {
   // in qualunque app, Homun compreso)
   if (!grantCols.some((c) => c.name === 'expires_at')) db.exec('ALTER TABLE grants ADD COLUMN expires_at INTEGER')
   migrateUseAppActionGrants()
+  // fase use-app · ritocchi (R5): all'apertura i grant già scaduti si cancellano
+  purgeExpiredGrants()
   // fase 16b (S1.2): il flag del riepilogo di chiusura del coordinatore
   const groupMsgCols = db.prepare("SELECT name FROM pragma_table_info('group_messages')").all() as Array<{ name: string }>
   if (!groupMsgCols.some((c) => c.name === 'summary')) db.exec('ALTER TABLE group_messages ADD COLUMN summary INTEGER DEFAULT 0')
@@ -526,7 +528,17 @@ export function migrateUseAppActionGrants(): { removed: number } {
   return { removed: rows.length }
 }
 
+/**
+ * Fase use-app · ritocchi (R5): i grant con scadenza PASSATA si CANCELLANO
+ * (non solo si saltano): la pagina Approvazioni non mostra più permessi
+ * «Scade: 02:11» già passati. Si chiude all'apertura del DB e a ogni lettura.
+ */
+export function purgeExpiredGrants(): void {
+  db().prepare('DELETE FROM grants WHERE expires_at IS NOT NULL AND expires_at <= ?').run(Date.now())
+}
+
 export function listGrants(): Grant[] {
+  purgeExpiredGrants()
   return db().prepare('SELECT id, tool, target, created_at AS createdAt, scope, expires_at AS expiresAt FROM grants').all() as unknown as Grant[]
 }
 

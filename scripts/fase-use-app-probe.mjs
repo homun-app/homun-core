@@ -10,16 +10,24 @@
 //
 // Ripete il turno del 6/11 (analisi/turno-sora-2026-11-06.md):
 //   1. open_url → card «Aprire sora.chatgpt.com nel tuo browser» → il
-//      desktop finto registra l'apertura di https://sora.chatgpt.com;
+//      desktop finto registra l'apertura di https://sora.chatgpt.com/
+//      (R3: l'URL arriva a `open` NORMALIZZATO, u.href);
 //   2. type {app: Safari} dopo un «Consenti», col desktop che ha HOMUN
-//      davanti → Homun riattiva Safari e il testo va a Safari;
+//      davanti → Homun riattiva Safari e il testo va a Safari; la riga
+//      decisa dice «Consentito una volta · Safari» (R6, controllo DOM);
 //   3. type SENZA app → errore e niente digitato;
 //   4. type {app: Homun} → rifiutato prima ancora della card;
 //   5. Accessibilità negata dal finto → risultato unico, notice col bottone
 //      «Apri Accessibilità», terzo tentativo rifiutato senza eseguire;
 //   6. «Consenti per 10 minuti a Safari» → le azioni su Safari passano
-//      senza card, quelle su Mail chiedono la card;
-//   7. la pagina Approvazioni mostra il permesso per app con la scadenza.
+//      senza card, quelle su Mail chiedono la card; riga decisa
+//      «Consentito per 10 minuti · Safari» (R6);
+//   7. R1: Slack con a-capo IN MEZZO nel testo → card SEMPRE, anche col
+//      permesso a 10 minuti per Slack appena concesso;
+//   8. R2: il desktop finto cambia l'app davanti fra il controllo e il tasto
+//      → non eseguita («the app in front changed to Mail…»), niente digitato;
+//   9. R3: open_url con app "Terminal" → rifiutata (solo browser), niente aperto;
+//  10. la pagina Approvazioni mostra il permesso per app con la scadenza.
 //
 // TRE corse; a fine corsa si chiude OGNI daemon (pid da daemon.lock, poi il
 // controllo dall'AMBIENTE dei processi) PRIMA di cancellare le cartelle
@@ -298,23 +306,24 @@ async function oneRun(runNo) {
      *  risolve (scompare il bottone) e il turno finisce. */
     const clickApprovalAndEndTurn = async (buttonText = 'Consenti', timeoutMs = 45_000) => {
       const deadline = Date.now() + timeoutMs
-      let seen = []
+      const all = []
       while (Date.now() < deadline) {
         // match ESATTO: «✓Consentito una volta…» della riga decisa contiene
         // «Consenti» e ruberebbe il clic
         try { await clickText(pageEval, buttonText, 'button', true) } catch { /* nessun bottone: già risolta o non montata */ }
         await sleep(800)
-        seen = await newEntries(bot.id)
+        const seen = await newEntries(bot.id)
+        all.push(...seen)
         const stillPending = await pageEval(`return [...document.querySelectorAll('button')].some((b) => b.textContent.trim() === ${JSON.stringify(buttonText)})`)
-        if (!stillPending && seen.some((e) => e.kind === 'event' && e.meta?.turnEnd)) return seen
+        if (!stillPending && seen.some((e) => e.kind === 'event' && e.meta?.turnEnd)) return all
         if (!stillPending) {
           // la card è risolta: aspetta solo la fine del turno
           const rest = await awaitTurnEnd(Math.max(3000, deadline - Date.now()))
-          return [...seen, ...rest]
+          return [...all, ...rest]
         }
       }
-      dumpTurn(seen, `click ${buttonText} (TIMEOUT, card ancora pendente)`)
-      return seen
+      dumpTurn(all, `click ${buttonText} (TIMEOUT, card ancora pendente)`)
+      return all
     }
 
     /** Il raccordo di debug: le entry del turno in forma breve. */
@@ -330,31 +339,36 @@ async function oneRun(runNo) {
     }
 
     /** Manda il messaggio e aspetta che il turno si assesti: o una CARD in
-     *  attesa (da cliccare) o la FINE del turno (event con meta.turnEnd). */
+     *  attesa (da cliccare) o la FINE del turno (event con meta.turnEnd).
+     *  Le entry si ACCUMULANO fra le letture: newEntries torna solo le nuove
+     *  dall'ultima chiamata e l'ultima lettura può contenere sola la coda del
+     *  turno (il result di un tool restava nel batch precedente). */
     const sendAndAwaitSettled = async (label, { timeoutMs = 40_000 } = {}) => {
       await uiSend(pageEval, label)
       const deadline = Date.now() + timeoutMs
-      let seen = []
+      const all = []
       while (Date.now() < deadline) {
-        seen = await newEntries(bot.id)
-        if (seen.some((e) => e.kind === 'event' && e.meta?.turnEnd)) { dumpTurn(seen, label); return { entries: seen, ended: true } }
-        if (seen.some((e) => e.kind === 'approval' && e.meta?.status === 'pending')) { dumpTurn(seen, label); return { entries: seen, ended: false } }
+        const seen = await newEntries(bot.id)
+        all.push(...seen)
+        if (seen.some((e) => e.kind === 'event' && e.meta?.turnEnd)) { dumpTurn(all, label); return { entries: all, ended: true } }
+        if (seen.some((e) => e.kind === 'approval' && e.meta?.status === 'pending')) { dumpTurn(all, label); return { entries: all, ended: false } }
         await sleep(300)
       }
-      dumpTurn(seen, label + ' (TIMEOUT)')
-      return { entries: seen, ended: false }
+      dumpTurn(all, label + ' (TIMEOUT)')
+      return { entries: all, ended: false }
     }
     /** Dopo il click sulla card: aspetta la FINE del turno. */
     const awaitTurnEnd = async (timeoutMs = 40_000) => {
       const deadline = Date.now() + timeoutMs
-      let seen = []
+      const all = []
       while (Date.now() < deadline) {
-        seen = await newEntries(bot.id)
-        if (seen.some((e) => e.kind === 'event' && e.meta?.turnEnd)) return seen
+        const seen = await newEntries(bot.id)
+        all.push(...seen)
+        if (seen.some((e) => e.kind === 'event' && e.meta?.turnEnd)) return all
         await sleep(300)
       }
-      dumpTurn(seen, 'attesa fine (TIMEOUT)')
-      return seen
+      dumpTurn(all, 'attesa fine (TIMEOUT)')
+      return all
     }
 
     // ============ 1. open_url: la card con l'host, il desktop registra ============
@@ -377,12 +391,12 @@ async function oneRun(runNo) {
     let openedOk = false
     for (let i = 0; i < 40 && !openedOk; i++) {
       const ops = desktopLog(userData).slice(before1)
-      openedOk = ops.some((o) => o.op === 'open_url' && o.url === 'https://sora.chatgpt.com' && !o.app)
+      openedOk = ops.some((o) => o.op === 'open_url' && o.url === 'https://sora.chatgpt.com/' && !o.app)
       if (!openedOk) await sleep(250)
     }
-    check(`1c corsa${runNo}: il desktop finto registra l'apertura di https://sora.chatgpt.com`, openedOk)
-    check(`1d corsa${runNo}: il result dice «Opened https://sora.chatgpt.com in the default browser»`,
-      !!res1 && res1.content === 'Opened https://sora.chatgpt.com in the default browser',
+    check(`1c corsa${runNo}: il desktop finto registra l'apertura di https://sora.chatgpt.com/ (R3: href normalizzato)`, openedOk)
+    check(`1d corsa${runNo}: il result dice «Opened https://sora.chatgpt.com/ in the default browser»`,
+      !!res1 && res1.content === 'Opened https://sora.chatgpt.com/ in the default browser',
       res1?.content)
 
     // ============ 2. type {app: Safari} con HOMUN davanti dopo il Consenti ============
@@ -406,6 +420,11 @@ async function oneRun(runNo) {
     }
     check(`2b corsa${runNo}: Homun riattiva Safari (open -a Safari) e POI il testo va a Safari`, safariTyped,
       JSON.stringify(safariOps.slice(0, 4)))
+    // R6: la riga decisa dice l'APP, non «Computer e schermo» (controllo DOM)
+    const rowOnce = await waitDom(pageEval,
+      `[...document.querySelectorAll('span')].some((s) => s.offsetParent !== null && s.textContent.trim() === 'Consentito una volta · Safari')`,
+      8000)
+    check(`2c corsa${runNo}: la riga decisa dice «Consentito una volta · Safari»`, rowOnce)
 
     // ============ 3. type senza app: errore, niente digitato ============
     // permessi: use-app sempre consentito, così si vede l'ERRORE del tool (non una card)
@@ -474,8 +493,21 @@ async function oneRun(runNo) {
     for (let i = 0; i < 5 && !menuClicked; i++) {
       try { await clickText(pageEval, 'Consenti per 10 minuti a Safari', '[role="menuitem"]', true); menuClicked = true } catch { await sleep(500) }
     }
+    // la voce di menu HA GIÀ risolto la card (minutes10): si aspetta che il
+    // bottone sparisca PRIMA di chiamare l'helper, altrimenti il suo click su
+    // «Consenti» risolve di nuovo e sovrascrive la modalità («una volta»)
+    await waitDom(pageEval, `![...document.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Consenti')`, 8000)
     await clickApprovalAndEndTurn('Consenti')
     await closeRadixMenus(pageEval)
+    // R6: la riga decisa dei 10 minuti dice «· Safari»
+    const row10 = await waitDom(pageEval,
+      `[...document.querySelectorAll('span')].some((s) => s.offsetParent !== null && s.textContent.trim() === 'Consentito per 10 minuti · Safari')`,
+      8000)
+    let row10note = ''
+    if (!row10) {
+      row10note = String(await pageEval(`return [...document.querySelectorAll('span')].filter((s) => s.offsetParent !== null && /Consentito|Rifiutato/.test(s.textContent)).map((s) => s.textContent.trim()).slice(0, 8).join(' | ')`) ?? '')
+    }
+    check(`6b2 corsa${runNo}: la riga decisa dice «Consentito per 10 minuti · Safari»`, row10, row10note.slice(0, 200))
     // la seconda azione su Safari NON chiede la card
     pushTool('use-app', { action: 'type', app: 'Safari', text: 'seconda digitazione' })
     pushText('Ok di nuovo.')
@@ -494,22 +526,88 @@ async function oneRun(runNo) {
       await clickApprovalAndEndTurn('Rifiuta')
     }
 
-    // ============ 7. la pagina Approvazioni mostra il permesso per app con la scadenza ============
+    // ============ 7. R1: Slack con a-capo IN MEZZO chiede SEMPRE, permesso 10 minuti compreso ============
+    setDesktop(userData, { frontmost: 'Slack', activates: true, denyAccessibility: false })
+    // prima il permesso a 10 minuti per Slack, come per Safari al punto 6
+    pushTool('use-app', { action: 'type', app: 'Slack', text: 'salve' })
+    pushText('Ok slack.')
+    const t7 = await sendAndAwaitSettled(`slack permesso ${runNo}`)
+    const card7 = t7.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending')
+    check(`7a corsa${runNo}: la card di Slack compare`, !!card7)
+    await waitDom(pageEval, `[...document.querySelectorAll('button')].some((b) => b.textContent.includes('Altre opzioni'))`, 10_000)
+    await pointerClick(pageEval, `[...document.querySelectorAll('button')].filter((b) => b.textContent.includes('Altre opzioni')).pop()`)
+    const menuItem7 = await waitDom(pageEval, `[...document.querySelectorAll('[role="menuitem"]')].some((m) => m.offsetParent !== null && m.textContent.trim() === 'Consenti per 10 minuti a Slack')`, 8000)
+    check(`7b corsa${runNo}: il menu offre «Consenti per 10 minuti a Slack»`, menuItem7)
+    for (let i = 0; i < 5; i++) {
+      try { await clickText(pageEval, 'Consenti per 10 minuti a Slack', '[role="menuitem"]', true); break } catch { await sleep(500) }
+    }
+    // come al punto 6: la voce di menu ha già risolto la card
+    await waitDom(pageEval, `![...document.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Consenti')`, 8000)
+    await clickApprovalAndEndTurn('Consenti')
+    await closeRadixMenus(pageEval)
+    // ORA il testo con l'a-capo IN MEZZO: un invio che spedirebbe «prima riga»
+    pushTool('use-app', { action: 'type', app: 'Slack', text: 'prima riga\nseconda riga' })
+    pushText('Chiedo.')
+    const before7 = desktopLog(userData).length
+    const t7b = await sendAndAwaitSettled(`slack a-capo ${runNo}`)
+    const card7b = t7b.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending')
+    check(`7c corsa${runNo}: l'a-capo IN MEZZO chiede la card NONOSTANTE il permesso a 10 minuti`, !!card7b)
+    check(`7d corsa${runNo}: la card è quella dell'invio in chat (approval.useAppSend)`, card7b?.meta?.ui?.id === 'approval.useAppSend', card7b?.meta?.ui?.id)
+    await shot(`corsa${runNo}-7-card-slack-acapo.png`)
+    if (card7b) await clickApprovalAndEndTurn('Rifiuta')
+    await sleep(800)
+    const typed7 = desktopLog(userData).slice(before7).some((o) => o.op === 'type')
+    check(`7e corsa${runNo}: rifiutata → niente digitato nel desktop finto`, !typed7)
+
+    // ============ 8. R2: l'app davanti cambia fra il controllo e il tasto → NON eseguita ============
+    // il permesso a 10 minuti di Safari (punto 6) è ancora attivo: l'azione
+    // parte senza card, e la guardia nello script la ferma sul nascere
+    setDesktop(userData, { frontmost: 'Safari', activates: true, denyAccessibility: false, frontChangesTo: 'Mail' })
+    pushTool('use-app', { action: 'type', app: 'Safari', text: 'questo non deve essere digitato' })
+    pushText('Fermato.')
+    const before8 = desktopLog(userData).length
+    const t8 = await sendAndAwaitSettled(`cambio fronte ${runNo}`)
+    const res8 = t8.entries.find((e) => e.kind === 'tool-result' && e.content?.includes('the app in front changed to Mail'))
+    check(`8a corsa${runNo}: il risultato è «Not executed: the app in front changed to Mail just before the action. Nothing was typed.»`,
+      !!res8 && res8.content === 'Not executed: the app in front changed to Mail just before the action. Nothing was typed.',
+      res8?.content)
+    await sleep(800)
+    const typed8 = desktopLog(userData).slice(before8).some((o) => o.op === 'type')
+    check(`8b corsa${runNo}: niente è stato digitato (la guardia ha fermato il tasto)`, !typed8)
+
+    // ============ 9. R3: open_url con app "Terminal" → rifiutata, solo browser ============
+    setDesktop(userData, { frontmost: 'Safari', activates: true, denyAccessibility: false })
+    pushTool('use-app', { action: 'open_url', url: 'https://sora.chatgpt.com', app: 'Terminal' })
+    pushText('Rifiutato.')
+    const before9 = desktopLog(userData).length
+    const t9 = await sendAndAwaitSettled(`terminal url ${runNo}`)
+    // la card dell'host c'è (il permesso è per host), l'AZIONE invece è rifiutata
+    const card9 = t9.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending')
+    let es9 = t9.entries
+    if (card9) es9 = [...es9, ...(await clickApprovalAndEndTurn('Consenti'))]
+    const res9 = es9.filter((e) => e.kind === 'tool-result' && e.meta?.callId).at(-1)
+    check(`9a corsa${runNo}: open_url con app "Terminal" → «must be a web browser»`,
+      !!res9 && res9.content === '`app` for open_url must be a web browser (e.g. Safari, Google Chrome). Omit it to use the default browser.',
+      res9?.content)
+    const opened9 = desktopLog(userData).slice(before9).filter((o) => o.op === 'open_url' || o.op === 'open')
+    check(`9b corsa${runNo}: nessun open con Terminal è partito`, opened9.length === 0, JSON.stringify(opened9.slice(0, 2)))
+
+    // ============ 10. la pagina Approvazioni mostra il permesso per app con la scadenza ============
     await pointerClick(pageEval, `[...document.querySelectorAll('aside button[aria-haspopup="menu"]')].pop()`)
     const menuOk = await waitDom(pageEval, `[...document.querySelectorAll('[role="menuitem"]')].some((m) => m.textContent.trim() === 'Impostazioni')`, 6000)
     if (menuOk) await clickText(pageEval, 'Impostazioni', '[role="menuitem"]', true)
     const navOk = await waitDom(pageEval, `!!document.querySelector('[role="dialog"] nav button')`, 8000)
-    check(`7a corsa${runNo}: le Impostazioni si aprono`, navOk)
+    check(`10a corsa${runNo}: le Impostazioni si aprono`, navOk)
     await clickText(pageEval, 'Approvazioni', '[role="dialog"] nav button', false)
     const grantShown = await waitDom(pageEval,
       `[...document.querySelectorAll('[role="dialog"] div, [role="dialog"] span')].some((d) => d.offsetParent !== null && d.textContent.includes('Usare Safari'))`,
       10_000)
-    check(`7b corsa${runNo}: «Consensi salvati» mostra «Usare Safari»`, grantShown)
+    check(`10b corsa${runNo}: «Consensi salvati» mostra «Usare Safari»`, grantShown)
     const expiryShown = await waitDom(pageEval,
       `[...document.querySelectorAll('[role="dialog"] span')].some((d) => d.offsetParent !== null && /Scade:/.test(d.textContent))`,
       6000)
-    check(`7c corsa${runNo}: il consenso mostra la SCADENZA («Scade: …»)`, expiryShown)
-    await shot(`corsa${runNo}-7-approvazioni.png`)
+    check(`10c corsa${runNo}: il consenso mostra la SCADENZA («Scade: …»)`, expiryShown)
+    await shot(`corsa${runNo}-10-approvazioni.png`)
     // chiusura dialog e menu con Escape (regola della fase)
     await pageEval(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); return 'chiuso'`)
     await sleep(500)

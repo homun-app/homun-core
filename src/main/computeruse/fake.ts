@@ -33,6 +33,13 @@ export interface FakeDesktopState {
   homunPid?: number
   /** false = `open -a X` non sposta il primo piano (riattivazione impossibile) */
   activates?: boolean
+  /**
+   * (R2, modo sonda/unit test) l'app davanti CAMBIA in quest'altra fra il
+   * controllo di lsappinfo e lo script con la guardia: l'azione non viene
+   * eseguita né registrata (l'utente ha cliccato un'altra finestra nel
+   * momento fra i due comandi — la corsa che R2 deve rendere innocua)
+   */
+  frontChangesTo?: string
   /** true = ogni osascript di input torna l'errore di Accessibilità */
   denyAccessibility?: boolean
   /** se impostato, osascript torna quest'errore (codice 1) invece della lista */
@@ -58,12 +65,14 @@ export interface FakeDesktop {
   records: FakeRecord[]
 }
 
-/** Le app presenti nel desktop finto (i nomi inglesi, come li usa `open -a`). */
+/** Le app presenti nel desktop finto (i nomi inglesi, come li usa `open -a`).
+ *  R3: anche i browser ammessi da open_url, così il finto può aprirli. */
 export const FAKE_DEFAULT_APPS = [
   'Finder', 'Safari', 'Mail', 'Notes', 'Calendar', 'Terminal', 'TextEdit',
   'Reminders', 'Preview', 'Calculator', 'System Settings', 'Homun', 'Electron',
   'Google Chrome', 'Firefox', 'Microsoft Edge', 'Messages', 'Telegram',
-  'WhatsApp', 'Slack', 'Discord', 'Spark', 'Airmail', 'MailMate', 'Thunderbird', 'Outlook'
+  'WhatsApp', 'Slack', 'Discord', 'Spark', 'Airmail', 'MailMate', 'Thunderbird', 'Outlook',
+  'Safari Technology Preview', 'Chromium', 'Arc', 'Brave Browser', 'Opera', 'Vivaldi', 'Orion', 'Zen'
 ]
 
 /** Il testo dell'errore di Accessibilità che il finto restituisce (quello vero del -25211, in italiano). */
@@ -78,17 +87,19 @@ function pidOf(name: string, state: FakeDesktopState): number {
   return 1000 + h
 }
 
-/** Il decoder dello script AppleScript che index.ts costruisce: keystroke/key code/click. */
+/** Il decoder dello script AppleScript che index.ts costruisce: keystroke/key
+ *  code/click. R2: gli script con la guardia sono blocchi `tell … end tell`
+ *  multilinea — le espressioni si riconoscono ovunque nello script. */
 function decodeAppleScript(script: string, frontmost: string): FakeRecord {
   const into = frontmost
-  let m = /to (click|double click|right click) at \{(-?\d+), (-?\d+)\}/.exec(script)
+  let m = /(click|double click|right click) at \{(-?\d+), (-?\d+)\}/.exec(script)
   if (m) return { op: 'click', key: m[1] === 'click' ? undefined : m[1]!.replace(' ', '_'), at: [Number(m[2]), Number(m[3])], into }
-  m = /to keystroke "((?:[^"\\]|\\.)*)"( using \{.*\})?$/.exec(script)
+  m = /keystroke "((?:[^"\\]|\\.)*)"( using \{[^\n]*\})?/.exec(script)
   if (m) {
     const text = m[1]!.replace(/\\(.)/g, '$1')
     return m[2] ? { op: 'key', key: text, into } : { op: 'type', text, into }
   }
-  m = /to key code (\d+)( using \{.*\})?$/.exec(script)
+  m = /key code (\d+)( using \{[^\n]*\})?/.exec(script)
   if (m) return { op: 'key', key: `code ${m[1]}`, into }
   return { op: 'osascript', into }
 }
@@ -111,7 +122,10 @@ export function createFakeComputerUseIO(init: Partial<FakeDesktopState> & { dir?
   const controlFile = dir ? join(dir, 'fake-computeruse.json') : null
   const logFile = dir ? join(dir, 'fake-computeruse-log.jsonl') : null
   /** modo sonda: il file di controllo vince su tutto ciò che dice; ma
-   *  `frontmost` si applica solo a SCENARIO NUOVO (vedi FakeDesktopState) */
+   *  `frontmost` si applica solo a SCENARIO NUOVO (vedi FakeDesktopState).
+   *  Uno scenario NUOVO è un desktop NUOVO: si riparte dai valori di
+   *  costruzione, così le chiavi che il nuovo scenario non ripete (per
+   *  esempio frontChangesTo) tornano ai default. */
   let lastScenario: number | string | undefined
   const syncIn = (): void => {
     if (!controlFile || !existsSync(controlFile)) return
@@ -119,6 +133,16 @@ export function createFakeComputerUseIO(init: Partial<FakeDesktopState> & { dir?
       const v = JSON.parse(readFileSync(controlFile, 'utf8')) as Partial<FakeDesktopState>
       const scenarioChanged = v.scenario !== undefined && v.scenario !== lastScenario
       lastScenario = v.scenario
+      if (scenarioChanged) {
+        state.frontmost = init.frontmost ?? 'Finder'
+        state.pids = init.pids
+        state.homunPid = init.homunPid
+        state.activates = init.activates ?? true
+        state.frontChangesTo = undefined
+        state.denyAccessibility = init.denyAccessibility ?? false
+        state.osascriptError = undefined
+        state.installedApps = init.installedApps ?? FAKE_DEFAULT_APPS
+      }
       for (const [k, val] of Object.entries(v)) {
         if (k === 'frontmost' && !scenarioChanged) continue
         ;(state as unknown as Record<string, unknown>)[k] = val
@@ -196,6 +220,16 @@ export function createFakeComputerUseIO(init: Partial<FakeDesktopState> & { dir?
       if (state.osascriptError) {
         record({ op: 'osascript' })
         return fail(state.osascriptError)
+      }
+      // R2: il finto interpreta la guardia del primo piano nello script — se
+      // il pid davanti non è quello atteso risponde con l'errore e NON
+      // registra l'azione (niente è stato digitato né cliccato)
+      const guard = /if \(unix id of p\) is not (\d+) then error "HOMUN_FRONT_MISMATCH:"/.exec(script)
+      if (guard) {
+        const frontNow = state.frontChangesTo ?? state.frontmost
+        if (Number(guard[1]) !== pidOf(frontNow, state)) {
+          return fail(`HOMUN_FRONT_MISMATCH:${frontNow}`)
+        }
       }
       record(decodeAppleScript(script, state.frontmost))
       return ok('')

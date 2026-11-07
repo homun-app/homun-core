@@ -71,6 +71,9 @@ export function isSendKeyApp(app: string): boolean {
  * U3: i comandi riconosciuti come tasti di invio (Return/enter, o un type che
  * finisce con a-capo) in un'app di posta o chat chiedono SEMPRE — grant e
  * regole always_allow non li coprono. Ritorna il motivo, o null.
+ * R1 (ritocchi): un a-capo DENTRO il testo è un invio — in Slack, WhatsApp o
+ * Telegram «ciao\nmondo» spedirebbe «ciao» al PRIMO a-capo: qualunque \n o
+ * \r, in qualunque posizione, conta come invio nelle app di posta e chat.
  */
 export function useAppAlwaysAsk(input: Record<string, unknown>): string | null {
   const action = String(input.action ?? '')
@@ -82,9 +85,25 @@ export function useAppAlwaysAsk(input: Record<string, unknown>): string | null {
   }
   if (action === 'type') {
     const text = String(input.text ?? '')
-    if (text.endsWith('\n') || text.endsWith('\r')) return `would press Return in ${app}`
+    if (/[\n\r]/.test(text)) return `would press Return in ${app}`
   }
   return null
+}
+
+/**
+ * R4 (ritocchi): il confronto fra grant e target di use-app ignora maiuscole
+ * e `.app` — `app:Safari` deve valere per `app:safari` e per `app:Safari.app`
+ * (due chiavi diverse erano due permessi distinti, e due card). Vale per
+ * `app:` e per `url:` (l'host); la chiave SALVATA resta come l'ha scritta il
+ * modello, perché serve per mostrarla.
+ */
+export function useAppTargetsMatch(grantTarget: string, target: string): boolean {
+  const norm = (t: string): string => {
+    if (t.startsWith('app:')) return 'app:' + t.slice(4).trim().replace(/\.app$/i, '').toLowerCase()
+    if (t.startsWith('url:')) return 'url:' + t.slice(4).trim().toLowerCase()
+    return t
+  }
+  return norm(grantTarget) === norm(target)
 }
 
 // ---- gate run-command (§5.1): chiavi esatte "name" o "name sub" ----

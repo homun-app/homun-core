@@ -223,4 +223,15 @@ describe('U3 — la card di use-app: app di destinazione o host in evidenza', ()
     // gli altri tool restano col nome umano di sempre
     expect(typeof grantDisplayName({ tool: 'run-command', target: 'git status' }, 'it')).toBe('string')
   })
+
+  it('R6: la sintesi della riga DECISA dice l\'app o l\'host, come la card — i tre casi', async () => {
+    const { useAppDecidedSummary } = await import('../lib/approval-app')
+    // la riga così come DecidedRow la compone: «<esito> · <sintesi>»
+    const row = (label: string, input: Record<string, unknown>): string => `${label} · ${useAppDecidedSummary(input)}`
+    expect(row('Consentito una volta', { action: 'type', app: 'Safari', text: 'x' })).toBe('Consentito una volta · Safari')
+    expect(row('Consentito per 10 minuti', { action: 'type', app: 'Safari', text: 'x' })).toBe('Consentito per 10 minuti · Safari')
+    expect(row('Consentito una volta', { action: 'open_url', url: 'https://sora.chatgpt.com/create' })).toBe('Consentito una volta · sora.chatgpt.com')
+    // mai più «Computer e schermo» quando c'è un'app; senza app (screenshot) niente sintesi dedicata
+    expect(useAppDecidedSummary({ action: 'screenshot' })).toBeNull()
+  })
 })

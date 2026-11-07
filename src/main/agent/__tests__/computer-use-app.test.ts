@@ -124,8 +124,9 @@ describe('U2 — open_url', () => {
   it('apre http/https nel browser predefinito con `open <url>` (array di argomenti, nessuna shell)', async () => {
     const r = await executeUseApp({ action: 'open_url', url: 'https://sora.chatgpt.com' })
     expect(r.error).toBeFalsy()
-    expect(r.output).toBe('Opened https://sora.chatgpt.com in the default browser')
-    expect(desk.records).toEqual([{ op: 'open_url', url: 'https://sora.chatgpt.com', args: ['https://sora.chatgpt.com'] }])
+    // R3: l'URL arriva a `open` NORMALIZZATO (u.href): l'host nudo porta la barra
+    expect(r.output).toBe('Opened https://sora.chatgpt.com/ in the default browser')
+    expect(desk.records).toEqual([{ op: 'open_url', url: 'https://sora.chatgpt.com/', args: ['https://sora.chatgpt.com/'] }])
   })
 
   it('con app sceglie il browser: `open -a Safari <url>`', async () => {
@@ -147,7 +148,8 @@ describe('U2 — open_url', () => {
   it('un argomento con spazi o caratteri di shell resta UN argomento (nessuna interpolazione)', async () => {
     const url = 'https://x.example/a b?q=$(id)&r=`id`'
     await executeUseApp({ action: 'open_url', url })
-    expect(desk.records).toEqual([{ op: 'open_url', url, args: [url] }])
+    // R3: normalizzato (gli spazi diventano %20) ma SEMPRE un solo argomento
+    expect(desk.records).toEqual([{ op: 'open_url', url: 'https://x.example/a%20b?q=$(id)&r=`id`', args: ['https://x.example/a%20b?q=$(id)&r=`id`'] }])
   })
 })
 
@@ -227,5 +229,101 @@ describe('U2/U3 — lo schema e la descrizione di use-app', () => {
     // …e l'app di destinazione obbligatoria per tastiera e mouse
     expect(def.description).toContain('REQUIRES `app`')
     expect(params.properties.app!.description).toContain('REQUIRED for type/key/click')
+  })
+})
+
+// ---- R1–R6 (fase use-app · ritocchi) ----
+
+describe('R2 — il controllo del primo piano e il tasto nello STESSO script', () => {
+  it('caso normale: eseguita UNA volta sola, col pid di lsappinfo nello script', async () => {
+    desk.state.frontmost = 'Safari'
+    const scripts: string[] = []
+    setComputerUseIO({
+      ...desk.io,
+      osascript: (s, t) => { scripts.push(s); return desk.io.osascript(s, t) }
+    })
+    const r = await executeUseApp({ action: 'type', text: 'ciao', app: 'Safari' })
+    expect(r.error).toBeFalsy()
+    expect(r.output).toBe('Typed 4 characters into Safari')
+    expect(desk.records.filter((x) => x.op === 'type')).toEqual([{ op: 'type', text: 'ciao', into: 'Safari' }])
+    // lo script porta la guardia: unix id del processo davanti + HOMUN_FRONT_MISMATCH
+    expect(scripts[0]).toContain('tell application "System Events"')
+    expect(scripts[0]).toMatch(/frontmost is true/)
+    expect(scripts[0]).toMatch(/if \(unix id of p\) is not \d+ then error "HOMUN_FRONT_MISMATCH:"/)
+    expect(scripts[0]).toContain('keystroke "ciao"')
+  })
+
+  it('il finto cambia l\'app davanti fra il controllo e l\'esecuzione → NON eseguita, col messaggio nuovo', async () => {
+    desk.state.frontmost = 'Safari'
+    desk.state.frontChangesTo = 'Mail'
+    const r = await executeUseApp({ action: 'type', text: 'ciao', app: 'Safari' })
+    expect(r.error).toBe(true)
+    expect(r.output).toBe('Not executed: the app in front changed to Mail just before the action. Nothing was typed.')
+    expect(desk.records.some((x) => x.op === 'type')).toBe(false)
+  })
+
+  it('i CLICK usano la stessa guardia: «Nothing was clicked.» e niente registrato', async () => {
+    desk.state.frontmost = 'Safari'
+    desk.state.frontChangesTo = 'Notes'
+    const r = await executeUseApp({ action: 'click', x: 100, y: 100, app: 'Safari' })
+    expect(r.error).toBe(true)
+    expect(r.output).toBe('Not executed: the app in front changed to Notes just before the action. Nothing was clicked.')
+    expect(desk.records.some((x) => x.op === 'click')).toBe(false)
+    // e il messaggio cambia col verbo: per key è comunque «Nothing was typed.»
+    const k = await executeUseApp({ action: 'key', key: 'cmd+a', app: 'Safari' })
+    expect(k.output).toBe('Not executed: the app in front changed to Notes just before the action. Nothing was typed.')
+  })
+
+  it('il FINTO interpreta la guardia: pid davanti ≠ pid atteso → errore HOMUN_FRONT_MISMATCH e niente registrato', async () => {
+    desk.state.frontmost = 'Safari'
+    // il pid vero di Safari secondo il finto: da lsappinfo, come fa index.ts
+    const front = await desk.io.execFile('lsappinfo', ['front'], 5_000)
+    const asn = front.stdout.trim()
+    const info = await desk.io.execFile('lsappinfo', ['info', '-only', 'name', '-only', 'pid', asn], 5_000)
+    const pid = Number(/pid\s*=\s*(\d+)/.exec(info.stdout)?.[1])
+    expect(Number.isFinite(pid)).toBe(true)
+    const guard = (p: number) =>
+      `tell application "System Events"\nset p to first application process whose frontmost is true\nif (unix id of p) is not ${p} then error "HOMUN_FRONT_MISMATCH:" & (name of p)\nkeystroke "x"\nend tell`
+    // pid SBAGLIATO → l'errore della guardia, e l'azione NON si registra
+    const r = await desk.io.osascript(guard(pid + 1), 5_000)
+    expect(r.code).toBe(1)
+    expect(r.stderr).toContain('HOMUN_FRONT_MISMATCH:Safari')
+    expect(desk.records.some((x) => x.op === 'type')).toBe(false)
+    // col pid GIUSTO l'azione passa e si registra
+    const ok = await desk.io.osascript(guard(pid), 5_000)
+    expect(ok.code).toBe(0)
+    expect(desk.records.some((x) => x.op === 'type')).toBe(true)
+  })
+})
+
+describe('R3 — open_url più stretto', () => {
+  it('passa a `open` l\'URL NORMALIZZATO (u.href), non la stringa grezza', async () => {
+    const r = await executeUseApp({ action: 'open_url', url: '  https://x.example/a b?q=1  ' })
+    expect(r.error).toBeFalsy()
+    expect(r.output).toBe('Opened https://x.example/a%20b?q=1 in the default browser')
+    const opened = desk.records.filter((x) => x.op === 'open_url').at(-1)!
+    expect(opened.args).toEqual(['https://x.example/a%20b?q=1'])
+    // niente slash ambigui: l'href canonico di un host nudo porta la barra
+    await executeUseApp({ action: 'open_url', url: 'https://sora.chatgpt.com' })
+    expect(desk.records.filter((x) => x.op === 'open_url').at(-1)!.args).toEqual(['https://sora.chatgpt.com/'])
+  })
+
+  it('`app` in open_url dev\'essere un browser: i nomi ammessi passano (anche minuscoli e con .app)', async () => {
+    for (const app of ['Safari', 'Safari Technology Preview', 'Google Chrome', 'Chromium', 'Firefox', 'Arc', 'Microsoft Edge', 'Brave Browser', 'Opera', 'Vivaldi', 'Orion', 'Zen', 'safari.app', 'google chrome']) {
+      desk.records.length = 0
+      const r = await executeUseApp({ action: 'open_url', url: 'http://127.0.0.1:8080/x', app })
+      expect(r.error, app).toBeFalsy()
+      expect(desk.records.some((x) => x.op === 'open_url'), app).toBe(true)
+    }
+  })
+
+  it('«Script Editor», «Terminal» e «Homun» sono RIFIUTATI: l\'URL non passa a un\'app qualunque', async () => {
+    for (const app of ['Script Editor', 'Terminal', 'Homun', 'TextEdit', 'Finder']) {
+      desk.records.length = 0
+      const r = await executeUseApp({ action: 'open_url', url: 'http://127.0.0.1:8080/x', app })
+      expect(r.error, app).toBe(true)
+      expect(r.output, app).toBe('`app` for open_url must be a web browser (e.g. Safari, Google Chrome). Omit it to use the default browser.')
+      expect(desk.records.some((x) => x.op === 'open_url' || x.op === 'open'), app).toBe(false)
+    }
   })
 })

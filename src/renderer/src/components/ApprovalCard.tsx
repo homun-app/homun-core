@@ -16,7 +16,7 @@ import { uiTextOfMetaTools, toolCtxOfMeta } from '../lib/ui-text'
 import { i18n } from '../lib/i18n'
 // R3 (fase app — ritocchi): il modello puro della card per Composio e MCP
 // fase Composio OAuth (C7): anche il modello del blocco
-import { approvalAppOf, approvalTitleOf, approvalReasonPhrase, approvalTechnicalLine, approvalBatchArgumentLines, approvalAskTitle, useAppCardModel, type ComposioBatchActionMeta } from '../lib/approval-app'
+import { approvalAppOf, approvalTitleOf, approvalReasonPhrase, approvalTechnicalLine, approvalBatchArgumentLines, approvalAskTitle, useAppCardModel, useAppDecidedSummary, type ComposioBatchActionMeta } from '../lib/approval-app'
 import { toolDisplayName } from '../../../shared/tool-names'
 import type { TranscriptEntry } from '../../../shared/types'
 import { DecidedRow, CardShell } from './DecidedRow'
@@ -339,13 +339,16 @@ export function ApprovalCard({ entry, readOnly = false }: { entry: TranscriptEnt
           : status === 'cancelled'
             ? i18n.t(msg`Annullato (interrupt)`)
             : status
+    // R6 (use-app · ritocchi): la riga decisa dice l'APP o l'HOST, col modello
+    // puro della card — «Consentito una volta · Safari», non «· Computer e schermo»
+    const useAppSummary = tool === 'use-app' ? useAppDecidedSummary(input) : null
     return (
       <DecidedRow
         ok={status === 'allowed'}
         label={rowLabel}
         // R3: anche la riga dopo la decisione è umana per Composio e MCP
         // («Slack · Crea promemoria»), mai il nome tecnico dello strumento
-        summary={appInfo ? (appInfo.kind === 'composio' && resolvedTitle ? resolvedTitle : appInfo.app) : approvalSummary(tool, input, entry.meta, activeLang)}
+        summary={appInfo ? (appInfo.kind === 'composio' && resolvedTitle ? resolvedTitle : appInfo.app) : useAppSummary ?? approvalSummary(tool, input, entry.meta, activeLang)}
         at={entry.createdAt}
       >
         <CardShell tone="waiting">{body}</CardShell>

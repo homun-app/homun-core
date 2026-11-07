@@ -266,6 +266,18 @@ export function useAppCardModel(input: Record<string, unknown> | undefined | nul
   return null
 }
 
+/**
+ * Fase use-app · ritocchi (R6): la sintesi della riga DECISA di use-app —
+ * l'app o l'host, lo STESSO modello puro della card («Consentito una volta ·
+ * Safari», «Consentito per 10 minuti · Safari», «… · sora.chatgpt.com»),
+ * mai più «Computer e schermo». null = niente di dedicato (es. screenshot).
+ */
+export function useAppDecidedSummary(input: Record<string, unknown> | undefined | null): string | null {
+  const m = useAppCardModel(input)
+  if (!m) return null
+  return m.kind === 'url' ? (m.host || null) : (m.app || null)
+}
+
 /** Il nome umano di un consenso salvato (use-app per app/host, letture MCP come oggi). */
 export function grantDisplayName(
   g: { tool: string; target: string; scope?: 'readOnly' | null },

@@ -48,4 +48,20 @@ describe('U3: migrazione dei grants di use-app per azione', () => {
     addGrant('use-app', 'app:Notes')
     expect(listGrants().find((x) => x.target === 'app:Notes')?.expiresAt).toBeNull()
   })
+
+  it('R5: i grant SCADUTI si cancellano (non solo si saltano); i validi restano', () => {
+    addGrant('use-app', 'app:Scaduto', undefined, Date.now() - 1_000)
+    addGrant('use-app', 'app:Valido', undefined, Date.now() + 600_000)
+    addGrant('run-command', 'git status') // senza scadenza: intoccabile
+    const after = listGrants()
+    expect(after.some((x) => x.target === 'app:Scaduto')).toBe(false)
+    expect(after.some((x) => x.target === 'app:Valido')).toBe(true)
+    expect(after.some((x) => x.tool === 'run-command' && x.target === 'git status')).toBe(true)
+    // CANCELLATI davvero dalla tabella, non solo filtrati in lettura
+    const rows = db().prepare('SELECT target FROM grants').all() as Array<{ target: string }>
+    expect(rows.some((x) => x.target === 'app:Scaduto')).toBe(false)
+    expect(rows.some((x) => x.target === 'app:Valido')).toBe(true)
+    // e la lettura successiva resta pulita
+    expect(listGrants().some((x) => x.target === 'app:Scaduto')).toBe(false)
+  })
 })
