@@ -483,10 +483,11 @@ export function Chat({ layout }: { layout?: LayoutResult }) {
   const sendNow = () => {
     if (!text.trim()) return
     // fase pagine (G2/G6): scritto dalla pagina aperta → al modello arriva
-    // la riga di contesto (il testo in chat resta questo)
+    // la riga di contesto (il testo in chat resta questo). Ritocchi (P1): si
+    // manda SOLO l'identità — il titolo lo risolve il daemon sulla libreria
     const page = useStore.getState().openPageInfo
-    const readingPage = page && page.title && page.version > 0
-      ? { id: page.id, title: page.title, version: page.version }
+    const readingPage = page && page.version > 0
+      ? { id: page.id, version: page.version }
       : undefined
     void send(text, images.length ? images : undefined, readingPage)
     setText('')

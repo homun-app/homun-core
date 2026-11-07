@@ -45,9 +45,12 @@ function readingPageOf(e: TranscriptEntry): ReadingPageMeta | null {
  * Fase pagine (G2/G6): la riga UNICA che dice al modello quale pagina sta
  * leggendo l'utente. Testo per il modello: deterministica dal meta, così la
  * stessa entry dà sempre lo stesso prefisso (come il timbro [Sent: …]).
+ * Ritocchi (P1): il titolo entra escapato con JSON.stringify — virgolette,
+ * barre e a-capo non possono chiudere le virgolette né spezzare la riga; per
+ * i titoli normali l'output è identico a prima.
  */
 export function readingPageLine(page: ReadingPageMeta): string {
-  return `[The user is reading the page "${page.title}" (id ${page.id}, version ${page.version}).]`
+  return `[The user is reading the page ${JSON.stringify(page.title)} (id ${page.id}, version ${page.version}).]`
 }
 
 /**

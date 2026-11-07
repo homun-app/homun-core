@@ -1481,7 +1481,9 @@ msgid "Collega"
 msgstr "Collega"
 
 #. placeholder {0}: KIND_LABELS[kind] ?? ''
+#. placeholder {0}: apps.find((a) => a.id === appId)?.name ?? ''
 #. placeholder {0}: group === 'server' ? (serverName.trim() || t`il server`) : (KIND_LABELS[kind] ?? '')
+#: src/renderer/src/components/RightPanel.tsx
 #: src/renderer/src/components/settings/AddProviderSheet.tsx
 msgid "Collega {0}"
 msgstr "Collega {0}"
@@ -1899,6 +1901,10 @@ msgstr "Crea squadra"
 msgid "Crea una regola"
 msgstr "Crea una regola"
 
+#: src/renderer/src/components/RightPanel.tsx
+msgid "Crea una routine"
+msgstr "Crea una routine"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "approval.usCreateActive"
@@ -2004,6 +2010,10 @@ msgstr "Decide da solo le richieste semplici quando le Approvazioni sono su Auto
 #: src/renderer/src/components/Settings.tsx
 msgid "Del bot principale"
 msgstr "Del bot principale"
+
+#: src/renderer/src/components/RightPanel.tsx
+msgid "Descrivi cosa fa questo bot"
+msgstr "Descrivi cosa fa questo bot"
 
 #: src/renderer/src/components/BotDialogs.tsx
 msgid "Descrivilo tu"
@@ -2263,6 +2273,10 @@ msgstr "export_from_library: «{name}» ({format}) → {destination}"
 #: src/renderer/src/lib/activity.ts
 msgid "fa un grafico…"
 msgstr "fa un grafico…"
+
+#: src/renderer/src/components/RightPanel.tsx
+msgid "Fai di questo una routine: {request}"
+msgstr "Fai di questo una routine: {request}"
 
 #: src/renderer/src/components/SubagentCard.tsx
 msgid "fallito"

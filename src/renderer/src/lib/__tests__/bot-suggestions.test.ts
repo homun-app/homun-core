@@ -4,6 +4,10 @@
 // 3 o più messaggi molto simili in giorni diversi negli ultimi 14 giorni.
 // Regola 3: bot senza descrizione con più di 5 turni. Tetto 3, ignorati via
 // ids, mai da messaggi [sistema] o di altri bot.
+// Fase pagine · ritocchi (P3): il modello puro NON restituisce più `label`
+// (le etichette fisse restavano in italiano con l'interfaccia in inglese):
+// la UI costruisce il testo da action.kind; la regola 2 porta la richiesta
+// (`request`) e il testo precompilato lo scrive la UI nella lingua dell'utente.
 import { describe, expect, it } from 'vitest'
 import { botSuggestions, normalizeRequest, similarity } from '../bot-suggestions'
 
@@ -26,11 +30,11 @@ const APPS = [
 const BASE = { apps: APPS, agentDescription: 'Il contabile', turns: 9, dismissed: [] as string[] }
 
 describe('fase pagine (G4): botSuggestions — regola 1, collega un\'app', () => {
-  it('app nominata e non collegata → «Collega Slack» con l\'azione che apre l\'app', () => {
+  it('app nominata e non collegata → l\'azione che apre l\'app (il testo lo scrive la UI)', () => {
     const s = botSuggestions({ ...BASE, messages: [u('cerca nel canale Slack le cose su X')] })
     expect(s).toHaveLength(1)
-    expect(s[0]!.label).toBe('Collega Slack')
     expect(s[0]!.action).toEqual({ kind: 'connect-app', appId: 'slack' })
+    expect(s[0]!.id).toBe('connect-app:slack')
   })
 
   it('app collegata per questo bot → NESSUN suggerimento', () => {
@@ -38,7 +42,8 @@ describe('fase pagine (G4): botSuggestions — regola 1, collega un\'app', () =>
   })
 
   it('il nome conta anche in mezzo ad altro testo, mai e maiuscole', () => {
-    expect(botSuggestions({ ...BASE, messages: [u('guarda nella mia GMAIL la mail di ieri')] })[0]!.label).toBe('Collega Gmail')
+    expect(botSuggestions({ ...BASE, messages: [u('guarda nella mia GMAIL la mail di ieri')] })[0]!.action)
+      .toEqual({ kind: 'connect-app', appId: 'gmail' })
   })
 
   it('solo gli ULTIMI 20 messaggi: un nome più vecchio non conta', () => {
@@ -56,19 +61,18 @@ describe('fase pagine (G4): botSuggestions — regola 1, collega un\'app', () =>
   it('una sola app per volta: vince la più recente menzione', () => {
     const s = botSuggestions({ ...BASE, messages: [u('apri Slack'), u('poi guarda Gmail')] })
     expect(s.filter((x) => x.action.kind === 'connect-app')).toHaveLength(1)
-    expect(s[0]!.label).toBe('Collega Gmail')
+    expect(s[0]!.action).toEqual({ kind: 'connect-app', appId: 'gmail' })
   })
 })
 
 describe('fase pagine (G4): botSuggestions — regola 2, crea una routine', () => {
-  it('3 messaggi uguali in 3 giorni diversi → «Crea una routine» con la precompilazione', () => {
+  it('3 messaggi uguali in 3 giorni diversi → l\'azione con la richiesta da precompilare (il testo lo scrive la UI)', () => {
     const s = botSuggestions({
       ...BASE,
       messages: [u('riassumi le email di oggi', 5), u('riassumi le email di oggi', 3), u('riassumi le email di oggi', 1)]
     })
     expect(s).toHaveLength(1)
-    expect(s[0]!.label).toBe('Crea una routine')
-    expect(s[0]!.action).toEqual({ kind: 'create-routine', prefill: 'Fai di questo una routine: riassumi le email di oggi' })
+    expect(s[0]!.action).toEqual({ kind: 'create-routine', request: 'riassumi le email di oggi' })
   })
 
   it('3 messaggi SIMILI (≥ 0,8) bastano, anche non identici', () => {
@@ -76,7 +80,7 @@ describe('fase pagine (G4): botSuggestions — regola 2, crea una routine', () =
       ...BASE,
       messages: [u('riassumi le email di oggi', 4), u('riassumi le email di stamattina', 2), u('riassumi le email', 0)]
     })
-    expect(s[0]!.label).toBe('Crea una routine')
+    expect(s[0]!.action.kind).toBe('create-routine')
   })
 
   it('2 giorni soltanto non bastano, e fuori dai 14 giorni non conta', () => {
@@ -102,10 +106,9 @@ describe('fase pagine (G4): botSuggestions — regola 2, crea una routine', () =
 })
 
 describe('fase pagine (G4): botSuggestions — regola 3, bot senza istruzioni', () => {
-  it('descrizione vuota e più di 5 turni → «Descrivi cosa fa questo bot»', () => {
+  it('descrizione vuota e più di 5 turni → l\'azione describe-bot (il testo lo scrive la UI)', () => {
     const s = botSuggestions({ ...BASE, agentDescription: '', messages: [u('ciao')] })
     expect(s).toHaveLength(1)
-    expect(s[0]!.label).toBe('Descrivi cosa fa questo bot')
     expect(s[0]!.action).toEqual({ kind: 'describe-bot' })
   })
 
@@ -142,8 +145,8 @@ describe('fase pagine (G4): tetto, ignorati, fonti dei messaggi', () => {
     // l'altro suggerimento resta
     const both = botSuggestions({ ...BASE, agentDescription: '', messages })
     const dismissedOne = [both.find((x) => x.action.kind === 'connect-app')!.id]
-    expect(botSuggestions({ ...BASE, agentDescription: '', messages, dismissed: dismissedOne }).map((x) => x.label))
-      .toEqual(['Descrivi cosa fa questo bot'])
+    expect(botSuggestions({ ...BASE, agentDescription: '', messages, dismissed: dismissedOne }).map((x) => x.action.kind))
+      .toEqual(['describe-bot'])
   })
 
   it('MAI suggerimenti da messaggi [sistema] o di altri bot', () => {
@@ -161,12 +164,12 @@ describe('fase pagine (G4): tetto, ignorati, fonti dei messaggi', () => {
     expect(botSuggestions({ ...BASE, messages: [] })).toHaveLength(0)
   })
 
-  it('ogni suggerimento ha id, icona, label e azione', () => {
+  it('P3: ogni suggerimento ha id, icona e azione — NESSUNA label (il testo lo costruisce la UI con Lingui)', () => {
     for (const s of botSuggestions({ ...BASE, agentDescription: '', messages: [u('apri Slack')] })) {
       expect(typeof s.id).toBe('string')
       expect(typeof s.icon).toBe('string')
-      expect(typeof s.label).toBe('string')
       expect(typeof s.action).toBe('object')
+      expect(Object.hasOwn(s, 'label')).toBe(false)
     }
   })
 })

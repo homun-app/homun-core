@@ -14,7 +14,7 @@ import { useLingui, Trans } from '@lingui/react/macro'
 import { X, FileDown } from 'lucide-react'
 import { api, useStore } from '../store'
 import { formatDate } from '../lib/i18n'
-import { pageHeadings } from '../lib/page-view'
+import { pageHeadings, pageBody } from '../lib/page-view'
 import { DocumentBody } from './DocumentMarkdown'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu'
 import type { LibraryItemInfo, LibraryContentInfo } from '../../../shared/types'
@@ -152,8 +152,10 @@ export function PageView() {
                 <ul className="mt-1.5 space-y-0.5">
                   {(allHeadings ? headings : headings.slice(0, TOC_PREVIEW)).map((h) => (
                     <li key={h.id} className={h.level === 3 ? 'pl-4' : ''}>
+                      {/* P5: righe più fitte (py-0, leading-6) — con 10 voci
+                          l'indice non mangia mezza schermata prima del testo */}
                       <button
-                        className="block w-full truncate rounded px-1.5 py-0.5 text-left text-[13px] text-foreground/80 transition hover:bg-muted hover:text-foreground"
+                        className="block w-full truncate rounded px-1.5 py-0 text-left text-[13px] leading-6 text-foreground/80 transition hover:bg-muted hover:text-foreground"
                         data-testid="page-toc-item"
                         onClick={() => goTo(h.id)}
                       >
@@ -174,7 +176,10 @@ export function PageView() {
               </nav>
             )}
             <div className="mt-6">
-              <DocumentBody markdown={markdown} headingIds={headings.map((h) => h.id)} typography="page" />
+              {/* P2: il primo `# ` uguale al titolo non si riduplica nel corpo —
+                  il titolo lo mostra già la pagina; l'indice resta sul Markdown
+                  intero (un `# ` non c'è mai, gli id non cambiano) */}
+              <DocumentBody markdown={pageBody(markdown, title)} headingIds={headings.map((h) => h.id)} typography="page" />
             </div>
           </div>
         )}

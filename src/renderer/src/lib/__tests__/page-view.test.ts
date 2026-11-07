@@ -2,8 +2,11 @@
 // pagePreview (titolo da #, intro saltando righe vuote e immagini, SOLO i
 // titoli ##/###) e pageHeadings (id stabili dai titoli, suffisso sui doppi,
 // niente titoli dentro i blocchi di codice).
+// Fase pagine · ritocchi (P2): pageBody — il corpo da rendere nella pagina
+// aperta, dove il primo `# ` uguale al titolo NON si riduplica (il titolo lo
+// mostra già la pagina); l'indice e gli id dei titoli non cambiano.
 import { describe, expect, it } from 'vitest'
-import { pagePreview, pageHeadings } from '../page-view'
+import { pagePreview, pageHeadings, pageBody } from '../page-view'
 
 describe('fase pagine (G1): pagePreview', () => {
   it('titolo dal primo #, intro = primo paragrafo, titoli ## e ### in ordine', () => {
@@ -76,5 +79,49 @@ describe('fase pagine (G2): pageHeadings', () => {
 
   it('documento senza titoli: array vuoto', () => {
     expect(pageHeadings('testo e basta')).toEqual([])
+  })
+})
+
+describe('fase pagine · ritocchi (P2): pageBody — il titolo non compare due volte', () => {
+  it('il primo `# ` uguale al titolo NON si rende nel corpo (il titolo è già nella pagina)', () => {
+    const md = ['# Brief della settimana', '', 'Intro del documento.', '', '## Sezione 1', '', 'testo'].join('\n')
+    expect(pageBody(md, 'Brief della settimana')).toBe(['', 'Intro del documento.', '', '## Sezione 1', '', 'testo'].join('\n'))
+  })
+
+  it('maiuscole, spazi e punteggiatura in coda NON contano nel confronto', () => {
+    const md = ['# brief della settimana :', '', 'testo'].join('\n')
+    expect(pageBody(md, 'Brief della settimana')).toBe(['', 'testo'].join('\n'))
+  })
+
+  it('un `# ` DIVERSO dal titolo resta nel corpo', () => {
+    const md = ['# Un altro titolo', '', 'testo'].join('\n')
+    expect(pageBody(md, 'Brief della settimana')).toBe(md)
+  })
+
+  it('documento senza `# `: invariato', () => {
+    const md = 'Solo un paragrafo.\n\n## Sezione\n\ntesto'
+    expect(pageBody(md, 'Brief della settimana')).toBe(md)
+  })
+
+  it('un `# ` più in basso, dopo del testo, RESTA (si guarda solo la prima riga non vuota)', () => {
+    const md = ['Prima il testo.', '', '# Titolo nel mezzo', '', 'altro testo'].join('\n')
+    expect(pageBody(md, 'Titolo nel mezzo')).toBe(md)
+  })
+
+  it('le righe vuote in testa si saltano: il `# ` dopo resta il primo non vuoto', () => {
+    const md = ['', '', '# Brief della settimana', '', 'testo'].join('\n')
+    expect(pageBody(md, 'Brief della settimana')).toBe(['', '', '', 'testo'].join('\n'))
+  })
+
+  it('un `# ` DENTRO un blocco di codice non è un titolo: resta', () => {
+    const md = ['```md', '# Brief della settimana', '```', '', 'testo'].join('\n')
+    expect(pageBody(md, 'Brief della settimana')).toBe(md)
+  })
+
+  it('l\'indice e gli id dei titoli NON cambiano (il corpo è solo del rendering)', () => {
+    const md = ['# Brief della settimana', '', '## Contesto', 'testo', '### Numeri', 'testo'].join('\n')
+    const body = pageBody(md, 'Brief della settimana')
+    expect(pageHeadings(body)).toEqual(pageHeadings(md))
+    expect(pageHeadings(body).map((h) => h.id)).toEqual(pageHeadings(md).map((h) => h.id))
   })
 })

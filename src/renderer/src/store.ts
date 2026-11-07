@@ -1,7 +1,7 @@
 // State renderer: agenti, transcript dell'agente attivo, eventi dal main.
 import { useMemo } from 'react'
 import { create } from 'zustand'
-import type { Agent, TranscriptEntry, SandbotEvent, ProviderConfig, ProviderPublic, PermissionsConfig, ConnectorInfo, TaskInfo, GroupInfo, GroupMessageInfo, SubagentInfo, AgentAvatar, TurnEnd, ScreenStatus, MainModel, ComposioStatusInfo, ComposioGatewayStatusInfo, ReadingPageMeta } from '../../shared/types'
+import type { Agent, TranscriptEntry, SandbotEvent, ProviderConfig, ProviderPublic, PermissionsConfig, ConnectorInfo, TaskInfo, GroupInfo, GroupMessageInfo, SubagentInfo, AgentAvatar, TurnEnd, ScreenStatus, MainModel, ComposioStatusInfo, ComposioGatewayStatusInfo, ReadingPageRef } from '../../shared/types'
 // fase 16c correzioni (R4): la regola del modello risolto, condivisa col daemon
 import { resolveAgentModel, type ResolvedAgentModel } from '../../shared/agent-model'
 
@@ -204,8 +204,12 @@ interface Store {
   groupDelete(groupId: number): Promise<void>
   init(): Promise<void>
   select(agentId: string): Promise<void>
-  /** fase pagine (G2/G6): readingPage = la pagina aperta mentre l'utente scrive */
-  send(text: string, images?: string[], readingPage?: ReadingPageMeta): Promise<void>
+  /**
+   * fase pagine (G2/G6): readingPage = la pagina aperta mentre l'utente
+   * scrive. Ritocchi (P1): solo l'identità (id, version) — il titolo lo
+   * risolve il daemon dalla libreria
+   */
+  send(text: string, images?: string[], readingPage?: ReadingPageRef): Promise<void>
   interrupt(): void
   // fase 3: risposta a un widget e azioni sulle bozze
   widgetRespond(entryId: number, value: string | string[]): void

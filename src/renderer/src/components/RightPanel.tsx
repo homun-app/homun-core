@@ -14,7 +14,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
-import { formatDate } from '../lib/i18n'
+import { formatDate, phraseIn } from '../lib/i18n'
 import { X, Plus, Link2, Repeat, PencilLine, Monitor } from 'lucide-react'
 import { api, useStore, useResolvedModel } from '../store'
 import { Bot } from '../bot/Bot'
@@ -384,6 +384,10 @@ function SuggestionsBlock({ agentId }: { agentId: string }) {
   const setComposerPrefill = useStore((s) => s.setComposerPrefill)
   const openBotSheet = useStore((s) => s.openBotSheet)
   const setRightPanel = useStore((s) => s.setRightPanel)
+  // P3 (fase pagine · ritocchi): la lingua dell'UTENTE per il testo
+  // precompilato della routine (può differire da quella dell'interfaccia)
+  const activeLanguage = useStore((s) => s.activeLanguage)
+  const [userLang, setUserLang] = useState<'it' | 'en' | null>(null)
   const [dismissed, setDismissed] = useState<string[]>([])
   const [installed, setInstalled] = useState<Array<{ id: string; enabledFor?: string[] | null; needsAuth?: unknown; needsReauth?: boolean }> | null>(null)
 
@@ -391,12 +395,18 @@ function SuggestionsBlock({ agentId }: { agentId: string }) {
     let alive = true
     setDismissed([])
     setInstalled(null)
+    setUserLang(null)
     void api.settingsGet<Record<string, string[]>>(DISMISS_SETTING, {})
       .then((v) => { if (alive) setDismissed(v[agentId] ?? []) })
       .catch(() => undefined)
+    // P3: l'ultima lingua rilevata da un messaggio umano (currentUserLanguage
+    // del daemon); null → vale la lingua dell'interfaccia
+    void api.settingsGet<string | null>('agent.userLanguage', null)
+      .then((v) => { if (alive) setUserLang(v === 'it' || v === 'en' ? v : null) })
+      .catch(() => undefined)
     void api.connectorsInstalled()
       .then((r) => { if (alive) setInstalled((r as { servers: Array<{ id: string; enabledFor?: string[] | null; needsAuth?: unknown; needsReauth?: boolean }> }).servers) })
-      .catch(() => { if (alive) setInstalled([]) })
+      .catch(() => undefined)
     return () => { alive = false }
   }, [agentId])
 
@@ -451,12 +461,44 @@ function SuggestionsBlock({ agentId }: { agentId: string }) {
       .then((all) => api.settingsSet(DISMISS_SETTING, { ...all, [agentId]: [...new Set([...(all[agentId] ?? []), id])] }))
       .catch(() => undefined)
   }
+  /**
+   * P3: il testo precompilato della routine segue la lingua dell'UTENTE (o,
+   * in mancanza, quella dell'interfaccia): «Fai di questo una routine: …» /
+   * «Make this a routine: …». Quando la lingua coincide con quella attiva
+   * basta il msg macro; quando DIFFERISCE si legge la frase dal catalogo di
+   * quella lingua (i18n.t traduce sempre nella lingua attiva) — il msgid è
+   * quello del macro, così i due testi non possono divergere.
+   */
+  const makeRoutinePrefill = async (request: string): Promise<void> => {
+    const lang = userLang ?? activeLanguage
+    const phrase = msg`Fai di questo una routine: ${request}`
+    const text = lang === activeLanguage
+      ? i18n.t(phrase)
+      : await phraseIn(lang, phrase.id!, { request })
+    setComposerPrefill(text)
+    setRightPanel(false)
+  }
   const run = (s: BotSuggestion): void => {
     if (s.action.kind === 'connect-app') openAppsOn(s.action.appId)
-    else if (s.action.kind === 'create-routine') { setComposerPrefill(s.action.prefill); setRightPanel(false) }
+    else if (s.action.kind === 'create-routine') void makeRoutinePrefill(s.action.request)
     else openBotSheet('description')
   }
   if (suggestions.length === 0) return null
+  /** P3: il testo della riga lo costruisce la UI da action.kind (+ il nome
+   * dell'app del catalogo), nella lingua dell'interfaccia — il modello puro
+   * non porta più etichette fisse. */
+  const labelOf = (s: BotSuggestion): string => {
+    if (s.action.kind === 'connect-app') {
+      // il nome come ESPRESSIONE del template: il segnaposto resta {0} (il
+      // msgid condiviso con la UI di oggi) invece di uno nominato che il
+      // catalogo non ha
+      const { appId } = s.action
+      return i18n.t(msg`Collega ${apps.find((a) => a.id === appId)?.name ?? ''}`)
+    }
+    return s.action.kind === 'create-routine'
+      ? i18n.t(msg`Crea una routine`)
+      : i18n.t(msg`Descrivi cosa fa questo bot`)
+  }
   return (
     <div data-testid="bot-suggestions" className="mb-4 space-y-1.5">
       {suggestions.map((s) => {
@@ -468,7 +510,7 @@ function SuggestionsBlock({ agentId }: { agentId: string }) {
               className="min-w-0 flex-1 truncate text-left text-sm transition hover:text-foreground"
               onClick={() => run(s)}
             >
-              {s.label}
+              {labelOf(s)}
             </button>
             <button
               className="grid size-6 shrink-0 place-items-center rounded-full text-muted-foreground/70 transition hover:bg-muted hover:text-foreground"

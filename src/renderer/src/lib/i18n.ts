@@ -45,6 +45,25 @@ export function activeLocale(): string {
 }
 
 /**
+ * Fase pagine · ritocchi (P3): una frase in una lingua SPECIFICA, anche
+ * diversa da quella attiva — il testo precompilato del suggerimento routine
+ * segue la lingua dell'utente, che può differire da quella dell'interfaccia
+ * (i18n.t traduce sempre nella lingua attiva). Il catalogo sta nel bundle
+ * (import dinamico come loadCatalog, nessuna rete); i segnaposto {nome} si
+ * sostituiscono dagli args. Frase assente dal catalogo → il msgid stesso.
+ */
+export async function phraseIn(lang: UiLanguage, msgid: string, args: Record<string, string | number> = {}): Promise<string> {
+  try {
+    const messages = await loadCatalog(lang)
+    const template = (messages as Record<string, string>)[msgid]
+    if (typeof template !== 'string') return msgid
+    return Object.entries(args).reduce((t, [k, v]) => t.split(`{${k}}`).join(String(v)), template)
+  } catch {
+    return msgid
+  }
+}
+
+/**
  * Data/ora nel formato della lingua attiva. Senza opzioni è equivalente a
  * toLocaleString('it-IT') di prima (identico in italiano).
  */

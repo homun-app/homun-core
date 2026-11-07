@@ -715,10 +715,22 @@ export interface ActivityItem {
  * Fase pagine (G2/G6): la pagina della libreria che l'utente sta leggendo
  * quando manda un messaggio. Sta nel meta dell'entry utente (mai nel testo):
  * la storia del modello la traduce nella riga di contesto.
+ * Ritocchi (P1): questo è il meta RISOLTO DAL DAEMON (titolo di libreria
+ * ripulito); il renderer non lo costruisce più — manda solo ReadingPageRef.
  */
 export interface ReadingPageMeta {
   id: string
   title: string
+  version: number
+}
+
+/**
+ * Fase pagine · ritocchi (P1): quello che manda il renderer per la pagina
+ * aperta — SOLO l'identità. Il titolo non è testo fidato (lo scrive il bot):
+ * lo risolve il daemon dalla voce della libreria, insieme alla versione.
+ */
+export interface ReadingPageRef {
+  id: string
   version: number
 }
 
@@ -738,9 +750,10 @@ export interface SandbotApi {
   /**
    * Fase pagine (G2/G6): readingPage = la pagina che l'utente sta leggendo
    * mentre scrive (finisce nel meta del messaggio: al modello UNA riga di
-   * contesto, in chat non si vede mai).
+   * contesto, in chat non si vede mai). Ritocchi (P1): solo l'identità —
+   * titolo e versione li risolve il daemon sulla libreria.
    */
-  sendMessage(agentId: string, text: string, images?: string[], readingPage?: ReadingPageMeta): Promise<void>
+  sendMessage(agentId: string, text: string, images?: string[], readingPage?: ReadingPageRef): Promise<void>
   interrupt(agentId: string): Promise<void>
   // risposta a un widget ask_user (click su un'opzione o testo libero se allowCustom)
   widgetRespond(agentId: string, entryId: number, value: string | string[]): Promise<void>

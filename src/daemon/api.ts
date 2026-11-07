@@ -39,18 +39,20 @@ import { avatarValidationError } from '../shared/avatar'
 import { generateWebhookToken } from './webhooks'
 import { enqueueJob } from '../main/store/jobs'
 import { enqueueUserMessage, enqueueWidgetResponse } from './enqueue'
+// fase pagine · ritocchi (P1): la pagina letta si risolve sul daemon, sulla
+// voce della libreria (il renderer manda solo l'identità)
+import { resolveReadingPage } from '../main/agent/reading-page'
+import { getLibraryItem } from '../main/store/library'
 
 /**
- * Fase pagine (G2/G6): il readingPage di chat:send, se ben formato
- * (id/titolo non vuoti, version numero intero ≥ 1) — null altrimenti.
+ * Fase pagine · ritocchi (P1): la riga «stai leggendo la pagina» la costruisce
+ * il DAEMON — il renderer manda solo l'identità (id, version) e comunque il
+ * titolo del renderer NON conta: si risolve tutto sulla voce della libreria
+ * (titolo ripulito: una riga sola, tetto 120; versione valida o la corrente).
+ * L'id che non è un documento della libreria non produce NESSUNA riga.
  */
-function readingPageValid(v: unknown): ReadingPageMeta | undefined {
-  if (!v || typeof v !== 'object') return undefined
-  const r = v as { id?: unknown; title?: unknown; version?: unknown }
-  if (typeof r.id !== 'string' || !r.id.trim()) return undefined
-  if (typeof r.title !== 'string' || !r.title.trim()) return undefined
-  if (!Number.isInteger(r.version) || (r.version as number) < 1) return undefined
-  return { id: r.id, title: r.title, version: r.version as number }
+function resolveReadingPageForChat(raw: unknown): ReadingPageMeta | undefined {
+  return resolveReadingPage(raw, (id) => getLibraryItem(id))
 }
 import { noteHumanText, currentUserLanguage } from '../main/agent/user-language'
 import { loadTemplates, templateById, buildKickstartMessage } from '../main/templates'
@@ -440,10 +442,11 @@ export function buildApiMethods(
     // ---- transcript ----
     'agents:entries': ([agentId, afterId]) => store.getEntries(agentId as string, (afterId as number) ?? 0),
     'chat:send': ([agentId, text, images, readingPage]) => {
-      // fase pagine (G2/G6): la pagina aperta mentre l'utente scrive — si
-      // accetta solo ben formata (id/titolo/versione), come la ricostruisce la
-      // storia del modello
-      const page = readingPageValid(readingPage)
+      // fase pagine (G2/G6): la pagina aperta mentre l'utente scrive.
+      // Ritocchi (P1): il meta lo risolve il daemon sulla libreria (fonte di
+      // verità) — quello risolto è il meta salvato nell'entry, così la storia
+      // ricostruisce sempre la stessa riga
+      const page = resolveReadingPageForChat(readingPage)
       enqueueUserMessage(db(), agentId as string, text as string, images as string[] | undefined, emit, undefined, undefined, undefined, page)
       worker.poke()
     },

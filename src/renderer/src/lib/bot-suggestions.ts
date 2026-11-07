@@ -6,6 +6,10 @@
 // con più di 5 turni. Al massimo 3 suggerimenti, ognuno ignorabile per id.
 // Le icone sono CHIAVI ('link' | 'repeat' | 'edit'): i componenti lucide
 // stanno alla UI, qui niente React.
+// Fase pagine · ritocchi (P3): NESSUNA label qui dentro — le etichette fisse
+// restavano in italiano con l'interfaccia in inglese. Il testo lo costruisce
+// la UI da action.kind con Lingui; la regola 2 porta la richiesta (`request`)
+// e il testo precompilato lo scrive la UI nella lingua dell'utente.
 
 /** Un messaggio della chat come serve alle regole (i non-utenti si riconoscono dai campi extra). */
 export interface SuggestionMessage {
@@ -28,7 +32,8 @@ export interface SuggestionApp {
 
 export type SuggestionAction =
   | { kind: 'connect-app'; appId: string }
-  | { kind: 'create-routine'; prefill: string }
+  /** P3: la richiesta da precompilare (il testo attorno lo scrive la UI) */
+  | { kind: 'create-routine'; request: string }
   | { kind: 'describe-bot' }
 
 export interface BotSuggestion {
@@ -36,7 +41,6 @@ export interface BotSuggestion {
   id: string
   /** chiave dell'icona (la UI la mappa su lucide) */
   icon: 'link' | 'repeat' | 'edit'
-  label: string
   action: SuggestionAction
 }
 
@@ -145,7 +149,7 @@ function appSuggestion(input: BotSuggestionsInput): BotSuggestion | null {
     const text = direct[i]!.text
     for (const c of candidates) {
       if (c.re.test(text)) {
-        return { id: `connect-app:${c.app.id}`, icon: 'link', label: `Collega ${c.app.name}`, action: { kind: 'connect-app', appId: c.app.id } }
+        return { id: `connect-app:${c.app.id}`, icon: 'link', action: { kind: 'connect-app', appId: c.app.id } }
       }
     }
   }
@@ -190,8 +194,7 @@ function routineSuggestion(input: BotSuggestionsInput, now: number): BotSuggesti
       return {
         id: 'create-routine',
         icon: 'repeat',
-        label: 'Crea una routine',
-        action: { kind: 'create-routine', prefill: `Fai di questo una routine: ${request}` }
+        action: { kind: 'create-routine', request }
       }
     }
   }
@@ -208,7 +211,7 @@ export function botSuggestions(input: BotSuggestionsInput, now: number = Date.no
     appSuggestion(input),
     routineSuggestion(input, now),
     !input.agentDescription.trim() && input.turns > DESCRIBE_MIN_TURNS
-      ? ({ id: 'describe-bot', icon: 'edit', label: 'Descrivi cosa fa questo bot', action: { kind: 'describe-bot' } } as BotSuggestion)
+      ? ({ id: 'describe-bot', icon: 'edit', action: { kind: 'describe-bot' } } as BotSuggestion)
       : null
   ].filter((s): s is BotSuggestion => s !== null)
   return all.filter((s) => !dismissed.has(s.id)).slice(0, 3)
