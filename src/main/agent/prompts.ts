@@ -26,8 +26,10 @@ import { sandboxMode, browserSandboxOk } from '../sandbox'
  * turno sull'ultimo messaggio) non c'è più.
  * Fase use-app (U6): +100 per la riga dei servizi con l'account dell'utente
  * (~66 token, fissa in cache).
+ * Fase eval-deboli (D4): +100 per la sezione Subagents rifatta (un ramo per
+ * elemento, il padre non cerca, una riga all'utente: ~78 token in più).
  */
-export const PROMPT_TOKEN_BUDGET = 2300
+export const PROMPT_TOKEN_BUDGET = 2400
 
 /** Chi sei: nome, ruolo scelto dall'utente. La lingua la dà la sezione Language (17b A3). */
 export function identitySection(agent: Agent): string {
@@ -191,12 +193,16 @@ export function limitsSection(): string {
  * Fase 12 (punto 6): quando lanciare i sottoagenti. Solo nei bot NORMALI:
  * mai nei turni di gruppo (lì si coordina col gruppo) e mai nei figli (niente
  * annidamento) — il loop passa subagents: false in quei turni.
+ * Fase eval-deboli (D4): un ramo per elemento nominato (niente rami
+ * trasversali), il padre NON cerca per conto dei figli e all'utente arriva al
+ * massimo UNA riga (message_user o il finale, non entrambi).
  */
 export function subagentsSection(): string {
   return `# Subagents
-- For INDEPENDENT pieces of work in parallel (several searches, comparisons, multiple sources): spawn_subagent, ALL in the same turn (usually 2-4). Not for what you solve in 1-3 calls: do that yourself.
+- For INDEPENDENT pieces of work in parallel (several searches, comparisons, multiple sources): spawn_subagent, ALL in the same turn (usually 2-4). Research on several named items (frameworks, products, cities…) = ONE subagent per item, no extra cross-cutting branch: each brief covers its item fully. Not for what you solve in 1-3 calls: do that yourself.
 - Each brief is self-contained: goal, boundaries ("do not search for X: another subagent does that"), result format, where to save; the subagent does not see this conversation.
-- Afterwards: one line to the user if they were the one who asked; results arrive together: ONE SINGLE report, no waiting in a loop.
+- Once you delegate, you do not research yourself (no web_search, web_fetch or run-command/curl on the same topic): the subagents do it.
+- Afterwards: at most ONE line to the user (message_user or the final text, not both); results arrive together: ONE SINGLE report, no waiting in a loop.
 - A task is LONG serial work outside the chat; subagents are PARALLEL pieces (and a task can spawn them).`
 }
 

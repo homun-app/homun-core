@@ -79,3 +79,27 @@ export function toolsForTurnSource(tools: ToolDef[], f: TurnSourceFacts): ToolDe
   if (connectorProposalOffered(f)) return base
   return base.filter((t) => !CONNECTOR_PROPOSAL_TOOLS.has(t.name))
 }
+
+// ---- fase eval-deboli (D5): i testi di offer_connector per gli id del registro ----
+
+/** D5: gli id che NON sono app del catalogo ma server MCP (registro pubblico o URL diretto). */
+export const MCP_ID_PREFIXES = ['registry:', 'url:']
+
+/** D5: true se l'id è un server MCP del registro pubblico (o un URL diretto), non un'app del catalogo. */
+export function isMcpId(id: string): boolean {
+  return MCP_ID_PREFIXES.some((p) => id.startsWith(p))
+}
+
+/**
+ * D5: la risposta di offer_connector per un id del registro — guida verso
+ * add_mcp_server (che mostra la card), senza mostrare nulla e senza aggiungere
+ * niente. La usa il loop VERO e il finto dell'eval (D6.7): stessi testi.
+ */
+export function offerConnectorMcpGuidance(id: string): string {
+  return `"${id}" is an MCP server from the public registry, not a catalog app: propose it with add_mcp_server({id: "${id}", reason}) — that shows the card.`
+}
+
+/** D5: il testo di offer_connector per un id che non esiste da nessuna parte (quello di oggi). */
+export function offerConnectorMissingText(id: string): string {
+  return `Connector "${id}" does not exist: find the right one with search_connectors.`
+}

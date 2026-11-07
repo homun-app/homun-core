@@ -60,7 +60,9 @@ const h = vi.hoisted(() => {
     result: { stdout: '', stderr: '', exitCode: 0, signal: null as string | null, trimmed: false }
   }
   const mcp = { calls: 0 }
-  return { db, llm, sandboxMock, mcp }
+  // fase eval-deboli (D1): i comandi partiti in background (startBackgroundShell)
+  const bg = { commands: [] as string[] }
+  return { db, llm, sandboxMock, mcp, bg }
 })
 
 interface FakeToolCall { id: string; name: string; arguments: string }
@@ -657,6 +659,12 @@ vi.mock('../shells', async (importOriginal) => {
   const real = await importOriginal<typeof import('../shells')>()
   return {
     ...real,
+    // fase eval-deboli (D1): il test del loop prova che background:"true"
+    // convertito in booleano passa DI QUI — qui si registra, senza processi
+    startBackgroundShell: async (_agentId: string, rawCommand: string) => {
+      h.bg.commands.push(rawCommand)
+      return { ok: true as const, shellId: 'sh-testbg1' }
+    },
     runForegroundShell: async (
       agentId: string,
       command: string,
@@ -788,6 +796,7 @@ beforeEach(() => {
   h.llm.reviewer = { text: 'no' }
   h.sandboxMock.exec = { command: '', env: {}, calls: 0 }
   h.sandboxMock.result = { stdout: '', stderr: '', exitCode: 0, signal: null, trimmed: false }
+  h.bg.commands.length = 0
   h.mcp.calls = 0
   h.db.agents.set(AGENT, {
     id: AGENT, name: 'TestBot', description: '', providerId: 'prov', model: 'm1',
@@ -1626,6 +1635,37 @@ describe('fase 5: funnel dei connettori (offer_connector) e card Riconnetti', ()
     expect(h.db.entries.some((e) => (e.meta?.message as { type?: string } | undefined)?.type === 'connector')).toBe(false)
     const second = h.llm.calls[1]!
     expect(second.some((m) => m.role === 'tool' && String(m.content).includes('search_connectors'))).toBe(true)
+  })
+
+  // ---- fase eval-deboli (D5): id del registro → guida verso add_mcp_server ----
+
+  it('D5: offer_connector con id registry: → il testo che porta ad add_mcp_server, NESSUNA card', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 'oc5', name: 'offer_connector', arguments: JSON.stringify({ id: 'registry:com.microsoft/microsoft-learn-mcp', reason: 'documentazione Microsoft' }) }] },
+      { text: 'ok' }
+    ]
+    await runTurn(AGENT, 'collega la documentazione', emit)
+    // NESSUNA card connector (il finale «ok» consegnato come testo non è un'offerta)
+    expect(h.db.entries.some((e) => (e.meta?.message as { type?: string } | undefined)?.type === 'connector')).toBe(false)
+    // al modello il testo di D5, con l'id per intero
+    const second = h.llm.calls[1]!
+    const result = String(second.find((m) => m.role === 'tool')?.content ?? '')
+    expect(result).toBe('"registry:com.microsoft/microsoft-learn-mcp" is an MCP server from the public registry, not a catalog app: propose it with add_mcp_server({id: "registry:com.microsoft/microsoft-learn-mcp", reason}) — that shows the card.')
+  })
+
+  it('D5: offer_connector con id url: → stesso testo di guida (nemmeno quello è del catalogo)', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 'oc6', name: 'offer_connector', arguments: JSON.stringify({ id: 'url:https://mcp.miosito.example/api' }) }] },
+      { text: 'ok' }
+    ]
+    await runTurn(AGENT, 'collega', emit)
+    expect(h.db.entries.some((e) => (e.meta?.message as { type?: string } | undefined)?.type === 'connector')).toBe(false)
+    const second = h.llm.calls[1]!
+    const result = String(second.find((m) => m.role === 'tool')?.content ?? '')
+    expect(result).toContain('is an MCP server from the public registry, not a catalog app')
+    expect(result).toContain('add_mcp_server({id: "url:https://mcp.miosito.example/api", reason})')
+    // il testo di ERRORE di oggi non c'è più per questi id
+    expect(result).not.toContain('does not exist')
   })
 
   it('offer_connector del catalogo NON nomina un prefisso indovinato (catalog:gcalendar)', async () => {
@@ -3845,15 +3885,16 @@ describe('fase 10 (§3): post_to_group, pass e turni di gruppo nel loop', () => 
     expect(h.db.entries.some((e) => e.kind === 'send-message')).toBe(false)
   })
 
-  it('0b: il recupero del chiamato è UNO — seconda risposta vuota chiude STOPPED senza altri solleciti', async () => {
+  it('0b/D2: il recupero del chiamato è al massimo DUE — dopo la seconda risposta vuota chiude STOPPED senza altri solleciti', async () => {
     setupGroup()
-    h.llm.queue = [{}, {}]
+    h.llm.queue = [{}, {}, {}]
     await runTurn(AGENT, '<turno_di_gruppo gruppo="Cena compleanno">…</turno_di_gruppo>', emit, undefined, {
       groupTurn: { groupId: 1, readMaxDepth: 1, rootId: 50, called: true }, untrusted: true
     })
-    expect(h.llm.calls).toHaveLength(2)
+    // risposta vuota + primo recupero vuoto + secondo recupero vuoto: 3 chiamate
+    expect(h.llm.calls).toHaveLength(3)
     const solleciti = h.llm.calls.filter((c) => c.some((m) => m.role === 'user' && String(m.content).includes('You were called')))
-    expect(solleciti).toHaveLength(1)
+    expect(solleciti).toHaveLength(2)
     expect(h.db.entries.some((e) => e.kind === 'event' && e.meta?.turnEnd === 'STOPPED' && e.meta?.stopReason === 'model-error')).toBe(true)
   })
 
@@ -6681,5 +6722,153 @@ describe('U4 — l\'ora di invio su ogni messaggio utente, stabile fra i turni',
     await runTurn(AGENT, 'e adesso?', emit)
     const again = h.llm.calls[2]!.filter((m) => m.role === 'user').find((m) => m.content.endsWith('\n\nno, usa il rosso'))!
     expect(again.content).toBe(delivered.content)
+  })
+})
+
+// ---- fase eval-deboli: D1 (tipi degli argomenti), D2 (secondo recupero), D3 (un messaggio con i subagenti) ----
+
+describe('fase eval-deboli (D1): gli argomenti dei tool si convertono al tipo dello schema', () => {
+  it('D1: run-command con background:"true" (stringa) parte da startBackgroundShell, mai in foreground', async () => {
+    h.db.settings.set('permissions', {
+      default: 'needs_approval',
+      rules: [{ tool: 'run-command', pattern: 'npm', mode: 'always_allow' }]
+    })
+    h.llm.queue = [
+      { toolCalls: [{ id: 'bg1', name: 'run-command', arguments: JSON.stringify({ command: 'npm run build', background: 'true' }) }] },
+      { text: 'build avviata in background, ti farò sapere' }
+    ]
+    await runTurn(AGENT, 'lancia la build', emit)
+    // il comando è partito da startBackgroundShell con background convertito
+    expect(h.bg.commands).toEqual(['npm run build'])
+    expect(h.sandboxMock.exec.calls).toBe(0) // mai in foreground
+    // al modello il result dell'avvio in background (con lo shellId del mock)
+    const res = h.llm.calls[1]!.find((m) => m.role === 'tool')!
+    expect(String(res.content)).toContain('Command started in background (shellId sh-testbg1)')
+    // permessi, gate e transcript vedono gli STESSI valori: la entry porta
+    // il background convertito, non la stringa del modello
+    const callEntry = h.db.entries.find((e) => e.kind === 'tool-call')!
+    expect(String(callEntry.meta?.arguments)).toContain('"background":true')
+  })
+})
+
+describe('fase eval-deboli (D2): il secondo recupero di gruppo quando il primo torna vuoto', () => {
+  function setupGroupEvalDeboli(): void {
+    h.db.groupsState.groups.push({ id: 1, name: 'Cena compleanno', description: 'menu per 8', created_by: AGENT, coordinator_id: 'agent_coord', created_at: 1 })
+    h.db.groupsState.members.set(1, [AGENT, 'agent_coord'])
+    h.db.agents.set('agent_coord', { id: 'agent_coord', name: 'Coordinatore', description: 'coordina', providerId: 'prov', model: 'm1', status: 'idle', unread: 0, createdAt: 2 })
+  }
+
+  it('D2: prima chiamata vuota → la SECONDA parte (con lo stesso sollecito); se consegna, il turno finisce bene', async () => {
+    setupGroupEvalDeboli()
+    h.llm.queue = [
+      {}, // risposta vuota del chiamato
+      {}, // anche il primo recupero torna vuoto (il caso 9/14 dell'eval)
+      { toolCalls: [{ id: 'd2a', name: 'post_to_group', arguments: JSON.stringify({ text: 'eccomi: la lista è pronta' }) }] },
+      { text: 'fatto' } // la chiusura del turno dopo la consegna
+    ]
+    await runTurn(AGENT, '<turno_di_gruppo gruppo="Cena compleanno">…</turno_di_gruppo>', emit, undefined, {
+      groupTurn: { groupId: 1, readMaxDepth: 1, rootId: 50, called: true }, untrusted: true
+    })
+    // vuota + recupero 1 + recupero 2 (che consegna) + chiusura: 4 chiamate
+    expect(h.llm.calls).toHaveLength(4)
+    // i solleciti del turno sono quelli accumulati nella storia dell'ULTIMA
+    // chiamata: DUE, e della seconda è lo stesso testo della prima
+    const solleciti = h.llm.calls[3]!.filter((m) => m.role === 'user' && String(m.content).includes('You were called'))
+    expect(solleciti).toHaveLength(2)
+    expect(solleciti[0]!.content).toBe(solleciti[1]!.content)
+    const post = h.db.groupsState.messages.find((m) => m.author_kind === 'agent')!
+    expect(post.text).toContain('eccomi')
+    expect(h.db.entries.some((e) => e.kind === 'event' && e.meta?.turnEnd === 'FINISHED')).toBe(true)
+  })
+
+  it('D2: la seconda chiamata di recupero ha SOLO i tool ristretti (post_to_group e pass), come la prima', async () => {
+    setupGroupEvalDeboli()
+    h.llm.queue = [
+      {},
+      (_msgs: Array<{ role: string; content: string }>, tools: unknown[]) => {
+        expect((tools as Array<{ name: string }>).map((t) => t.name).sort()).toEqual(['pass', 'post_to_group'])
+        return {} // vuota anche stavolta: la seconda parte
+      },
+      (_msgs: Array<{ role: string; content: string }>, tools: unknown[]) => {
+        expect((tools as Array<{ name: string }>).map((t) => t.name).sort()).toEqual(['pass', 'post_to_group'])
+        return { toolCalls: [{ id: 'd2b', name: 'pass', arguments: '{}' }] }
+      }
+    ]
+    await runTurn(AGENT, '<turno_di_gruppo gruppo="Cena compleanno">…</turno_di_gruppo>', emit, undefined, {
+      groupTurn: { groupId: 1, readMaxDepth: 1, rootId: 50, called: true }, untrusted: true
+    })
+    expect(h.llm.calls).toHaveLength(3)
+    expect(h.db.groupsState.messages.filter((m) => m.author_kind === 'agent')).toHaveLength(0)
+  })
+})
+
+describe('fase eval-deboli (D3): un turno che lancia subagenti consegna al massimo UN messaggio', () => {
+  const spawnCall = (id: string, title: string, brief: string) => ({
+    id, name: 'spawn_subagent', arguments: JSON.stringify({ title, brief })
+  })
+  const LONG_BRIEF = 'Ricerca approfondita su X: punti di forza, limiti, quando sceglierlo. Confini: non cercare Y. Formato: summary di 10 righe e report in subagents/report.md. Fonti: aprire i link citati. Contesto: lavoro per il confronto dell\'utente.' + 'x'.repeat(120)
+  const textSends = () => h.db.entries.filter((e) => e.kind === 'send-message' && (e.meta?.message as { type?: string } | undefined)?.type === 'text')
+
+  it('D3: spawn + message_user + testo finale → UN solo messaggio consegnato, il finale resta ragionamento (thinking)', async () => {
+    h.llm.queue = [
+      {
+        toolCalls: [
+          { id: 'd3m', name: 'message_user', arguments: JSON.stringify({ text: 'Avvio la ricerca in parallelo sui tre framework.' }) },
+          spawnCall('d3s1', 'Ricerca su Astro', LONG_BRIEF),
+          spawnCall('d3s2', 'Ricerca su SvelteKit', LONG_BRIEF),
+          spawnCall('d3s3', 'Ricerca su Remix', LONG_BRIEF)
+        ]
+      },
+      { text: 'I tre subagent stanno lavorando in parallelo; come completano la raccolta, compongo il report unico.' }
+    ]
+    await runTurn(AGENT, 'ricerca approfondita', emit)
+    // solo il message_user: il finale NON è consegna (stessa strada del duplicato)
+    expect(textSends()).toHaveLength(1)
+    expect(textSends()[0]!.content).toContain('Avvio la ricerca in parallelo')
+    // il testo finale resta visibile nei Dettagli tecnici come thinking
+    const thinking = h.db.entries.find((e) => e.kind === 'thinking' && (e.content as string).includes('compongo il report unico'))
+    expect(thinking).toBeTruthy()
+    expect(thinking!.meta?.final).toBeUndefined()
+  })
+
+  it('D3: spawn SENZA message_user → il testo finale si consegna (il turno non resta muto)', async () => {
+    h.llm.queue = [
+      { toolCalls: [spawnCall('d3t1', 'Ricerca su Astro', LONG_BRIEF)] },
+      { text: 'Ricerca su Astro avviata: il resoconto arriva appena finisce.' }
+    ]
+    await runTurn(AGENT, 'cerca', emit)
+    const sends = textSends()
+    expect(sends).toHaveLength(1)
+    expect(sends[0]!.meta?.final).toBe(true)
+    expect(sends[0]!.content).toContain('resoconto arriva')
+  })
+
+  it('D3: NESSUNA spawn → il finale si consegna come sempre (regola spenta)', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 'd3u1', name: 'message_user', arguments: JSON.stringify({ text: 'avanzamento: primo passo fatto' }) }] },
+      { text: 'Ecco la risposta completa.' }
+    ]
+    await runTurn(AGENT, 'lavoro', emit)
+    const sends = textSends()
+    expect(sends).toHaveLength(2) // il progresso e la risposta finale, come oggi
+    expect(sends[1]!.meta?.final).toBe(true)
+  })
+
+  it('D3: una spawn FALLITA (brief mancante) non conta: il finale si consegna lo stesso', async () => {
+    h.llm.queue = [
+      {
+        toolCalls: [
+          { id: 'd3f1', name: 'spawn_subagent', arguments: JSON.stringify({ title: 'Ricerca su Astro' }) }, // brief vuoto → rifiutata
+          { id: 'd3f2', name: 'message_user', arguments: JSON.stringify({ text: 'avvio la ricerca' }) }
+        ]
+      },
+      { text: 'La ricerca è partita ora.' }
+    ]
+    await runTurn(AGENT, 'cerca', emit)
+    // la spawn è stata rifiutata (nessun figlio): il finale NON si trattiene
+    expect(subagentsState.rows).toHaveLength(0)
+    const sends = textSends()
+    expect(sends).toHaveLength(2)
+    expect(sends[1]!.content).toContain('La ricerca è partita ora.')
   })
 })

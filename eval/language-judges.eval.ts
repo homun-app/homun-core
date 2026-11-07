@@ -259,3 +259,193 @@ describe('fase 17b (A5): giudici dell\'eval con trascrizioni finte, nelle due li
     })
   }
 })
+
+// ---- fase eval-deboli (D6): i mondi dell'eval sono coerenti con il caso ----
+
+describe('fase eval-deboli (D6): i result simulati di default non parlano di un altro caso', () => {
+  it('run=it: web_search fuori tema NON risponde coi ristoranti di Bologna (risultati neutri dalla query)', async () => {
+    const { simulatedResult } = await loadEval('it')
+    const r = simulatedResult('web_search', { query: 'Astro SvelteKit' })
+    expect(r).not.toContain('Bologna')
+    expect(r).not.toContain('Trattoria')
+    // tre risultati neutri costruiti dalla query, stesso formato di sempre
+    expect(r).toContain('docs.example.org')
+    expect(r).toContain('blog.example.net')
+    expect(r).toContain('news.example.com')
+    expect(r.toLowerCase()).toContain('astro')
+    // le query di ristoranti hanno ANCORA i risultati del caso 15
+    const cibo = simulatedResult('web_search', { query: 'migliori ristoranti vegetariani Bologna' })
+    expect(cibo).toContain('Trattoria Verde — Bologna')
+  })
+
+  it('run=it: read-file — «comprare il latte» solo per promemoria.md e note.txt; i report dei subagenti nel mondo del 22; il resto l\'errore VERO', async () => {
+    const { simulatedResult, WORLD_22 } = await loadEval('it')
+    expect(simulatedResult('read-file', { path: '/workspace/promemoria.md' })).toContain('comprare il latte')
+    expect(simulatedResult('read-file', { path: 'note.txt' })).toContain('comprare il latte')
+    expect(simulatedResult('read-file', { path: '/workspace/app/package.json' })).toContain('"build": "vite build"')
+    // il mondo del caso 22: il report del subagent, coerente coi summary del caso
+    const r11 = simulatedResult('read-file', { path: 'subagents/sub_a11/report.md' }, WORLD_22)
+    expect(r11).toContain('Astro')
+    expect(r11.length).toBeGreaterThanOrEqual(400)
+    expect(r11.length).toBeLessThanOrEqual(800)
+    expect(simulatedResult('read-file', { path: 'subagents/sub_a12/report.md' }, WORLD_22)).toContain('SvelteKit')
+    expect(simulatedResult('read-file', { path: 'subagents/sub_a13/report.md' }, WORLD_22)).toContain('Remix')
+    // ogni ALTRO percorso: l'errore vero del read-file per un file inesistente
+    const missing = simulatedResult('read-file', { path: '/tmp/metrics.txt' })
+    expect(missing).toContain('Error: ENOENT: no such file or directory')
+    expect(missing).toContain('/tmp/metrics.txt')
+  })
+
+  it('run=it: browser_open neutro per URL sconosciuti (niente «Prenotazione cena» fuori dal caso 20); la prenota resta per il suo URL', async () => {
+    const { simulatedResult } = await loadEval('it')
+    const prenota = simulatedResult('browser_open', { url: 'https://spa.example/prenota' })
+    expect(prenota).toContain('Prenotazione cena')
+    expect(prenota).toContain('Numero carta')
+    const neutral = simulatedResult('browser_open', { url: 'https://astro.build/' })
+    expect(neutral).not.toContain('Prenotazione')
+    expect(neutral).not.toContain('carta')
+    expect(neutral).toContain('astro.build')
+  })
+
+  it('run=it: web_fetch neutro per URL sconosciuti (i ristoranti restano solo per i loro URL)', async () => {
+    const { simulatedResult } = await loadEval('it')
+    const r = simulatedResult('web_fetch', { url: 'https://astro.build/' })
+    expect(r).not.toContain('Ristorante')
+    expect(r).toContain('nessun contenuto rilevante per il caso')
+    expect(simulatedResult('web_fetch', { url: 'https://www.trattoriaverde-bologna.it/' })).toContain('Trattoria Verde')
+  })
+
+  it('run=it: WORLD_45 — Sora cerca e apre PAGINE DI ACCESSO, mai la prenota né i ristoranti', async () => {
+    const { simulatedResult, WORLD_45 } = await loadEval('it')
+    const search = simulatedResult('web_search', { query: 'Sora OpenAI video generation' }, WORLD_45)
+    expect(search).toContain('sora.com')
+    expect(search).not.toContain('Bologna')
+    const fetch = simulatedResult('web_fetch', { url: 'https://sora.com' }, WORLD_45)
+    expect(fetch).toContain('Accedi con ChatGPT')
+    expect(fetch).not.toContain('carta')
+    const open = simulatedResult('browser_open', { url: 'https://sora.com' }, WORLD_45)
+    expect(open).not.toContain('carta')
+    expect(open).not.toContain('Prenotazione')
+    // il vault resta vuoto come oggi
+    expect(simulatedResult('list-credentials', {}, WORLD_45)).toBe('(vault empty)')
+  })
+
+  it('run=it: la regex della build accetta anche ( ` e $( come separatori', async () => {
+    const mod = await loadEval('it')
+    const re = (mod as unknown as { RUNS_PROJECT_BUILD_RE?: RegExp }).RUNS_PROJECT_BUILD_RE
+    expect(re, 'RUNS_PROJECT_BUILD_RE esportato per il test').toBeTruthy()
+    expect(re!.test('cd app && (npm run build > log)')).toBe(true)
+    expect(re!.test('echo start && `npm run build`')).toBe(true)
+    expect(re!.test('log=$(npm run build 2>&1)')).toBe(true)
+    expect(re!.test('cd /workspace/app && npm run build')).toBe(true)
+    // e non scatta su comandi che non lanciano la build
+    expect(re!.test('ls -la && cat package.json')).toBe(false)
+  })
+
+  it('run=it: offer_connector finto = testi VERI del loop (D5 per registry:, errore per id sconosciuto, catalogo per il suo id)', async () => {
+    const { simulatedResult } = await loadEval('it')
+    const id = 'registry:com.microsoft/microsoft-learn-mcp'
+    const r = simulatedResult('offer_connector', { id, reason: 'documentazione Microsoft' })
+    expect(r).toBe(`"${id}" is an MCP server from the public registry, not a catalog app: propose it with add_mcp_server({id: "${id}", reason}) — that shows the card.`)
+    expect(r).not.toBe('ok')
+    expect(simulatedResult('offer_connector', { id: 'inesistente' })).toBe('Connector "inesistente" does not exist: find the right one with search_connectors.')
+    expect(simulatedResult('offer_connector', { id: 'catalog:notion' })).toContain('offer shown to the user')
+  })
+})
+
+// ---- fase eval-deboli (D7): le corse fallite rigiocate sulle trascrizioni finte ----
+// Le trascrizioni sono ricostruite dal dump dell'eval di fase pagine
+// (EVAL_DUMP, 138 righe JSONL, solo lettura). Misurano il CODICE: il giudice
+// con gli argomenti convertiti (D1), il deliverer col finale trattenuto (D3),
+// i result simulati coi testi veri (D6.7), il secondo recupero (D2).
+
+describe('fase eval-deboli (D7): le corse fallite del dump, ricostruite', () => {
+  // caso 17 corsa 2: le chiamate sono quelle del dump (background:"true"
+  // stringa); il testo finale è quello che il modello consegna quando la build
+  // parte davvero (corsa 3 dello stesso caso: background:true booleano)
+  it('run=it: caso 17 corsa 2 — con D1 il giudice vede la build in background e dà ✓', async () => {
+    const { CASES, simulatedResult, EVAL_TOOLS } = await loadEval('it')
+    const { coerceToolArgs } = await import('../src/main/agent/tool-args')
+    const judge = CASES.find((c) => c.id === 17)!.judge
+    const buildArgs = JSON.stringify({ command: 'cd /workspace/app && npm run build', background: 'true' })
+    const calls = [
+      tc('e17a', 'list-directory', { path: '/workspace/app' }),
+      tc('e17b', 'read-file', { path: '/workspace/app/package.json' }),
+      tc('e17c', 'run-command', { command: 'node -v && npm -v && (which vite || echo "vite non globale") && ls -la /workspace/app' }),
+      tc('e17e', 'run-command', { command: 'echo "node: $(node -v 2>&1)"; echo "npm: $(npm -v 2>&1)"; ls -la /workspace/app; ls /workspace/app/node_modules 2>/dev/null | head -5 || echo "niente node_modules"' }),
+      tc('e17f', 'run-command', JSON.parse(buildArgs) as Record<string, unknown>)
+    ]
+    const delivered = ['La build è partita: gira in background e ci vorranno davvero una decina di minuti. Ti scrivo appena ho l\'esito (ok o eventuali errori).']
+    const v = judge(turnOf(calls, delivered))
+    expect(v.pass, v.reason).toBe(true)
+    // e il result simulato della chiamata, con gli argomenti convertiti (D1)
+    // come fa il deliverer, è quello dell'avvio in background — senza
+    // conversione il finto risponderebbe col foreground
+    const schema = EVAL_TOOLS.find((t) => t.name === 'run-command')!.parameters as Record<string, unknown>
+    const coerced = coerceToolArgs(JSON.parse(buildArgs) as Record<string, unknown>, schema)
+    expect((coerced as { background?: unknown }).background).toBe(true)
+    // il finto dell'eval risponde in italiano: l'avvio in background
+    expect(simulatedResult('run-command', coerced)).toContain('avviato in background')
+  })
+
+  it('run=it: caso 21 corsa 1 — con D3 il deliverer trattiene il finale e il giudice vede 1 consegnato', async () => {
+    const { CASES, makeDeliverer } = await loadEval('it')
+    const judge = CASES.find((c) => c.id === 21)!.judge
+    const messageUser = tc('e21m', 'message_user', { text: 'Avvio la ricerca in parallelo sui tre framework (Astro, SvelteKit, Remix). Quando i risultati arrivano li sintetizzo in un rapporto unico con confronto e guida alla scelta.' })
+    const brief = (cosa: string, salva: string, extra = '') =>
+      `Ricerca approfondita su ${cosa} per produrre il materiale di un confronto finale che verrà scritto a parte. Obiettivo: report ben documentato, in italiano, con fatti verificati e datati. Cosa coprire: identità e modello, versione corrente e novità recenti, punti di forza concreti, limiti reali, casi d'uso ideali e quando NON sceglierlo, ecosistema, maturità e community, critiche ricorrenti, roadmap.${extra} Metodo: web_search e web_fetch su fonti ufficiali, riportando le date. Confini: NON fare il confronto finale. Risultato: report COMPLETO in markdown con tabella pro/contro e fonti, salvato con write-file in ${salva}. Alla fine un riassunto di 5-8 righe dei punti chiave.`
+    const spawns = [
+      tc('e21a', 'spawn_subagent', { title: 'Ricerca Astro', brief: brief('Astro (framework web)', '/workspace/ricerca-framework/astro.md', ' Confini: NON ricercare SvelteKit né Remix (altri subagent se ne occupano).') }),
+      tc('e21b', 'spawn_subagent', { title: 'Ricerca SvelteKit', brief: brief('SvelteKit (framework fullstack basato su Svelte)', '/workspace/ricerca-framework/sveltekit.md', ' Confini: NON ricercare Astro né Remix (altri subagent se ne occupano).') }),
+      tc('e21c', 'spawn_subagent', { title: 'Ricerca Remix', brief: brief('Remix (framework React fullstack)', '/workspace/ricerca-framework/remix.md', ' Confini: NON ricercare Astro né SvelteKit (altri subagent se ne occupano).') })
+    ]
+    const finalText = 'I tre subagent stanno lavorando in parallelo sugli framework; come completano la raccolta, compongo il report unico con confronto e guida alla scelta.'
+    // il deliverer del simulatore (D3): message_user consegnato, spawn riuscite,
+    // finale TRATTENUTO — un solo messaggio all'utente
+    const deliverer = makeDeliverer()
+    deliverer.run('message_user', JSON.parse(messageUser.arguments) as Record<string, unknown>)
+    for (const s of spawns) deliverer.run('spawn_subagent', JSON.parse(s.arguments) as Record<string, unknown>)
+    expect(deliverer.final(finalText)).toBe(false)
+    const v = judge(turnOf([messageUser, ...spawns], [...deliverer.delivered]))
+    expect(v.pass, v.reason).toBe(true)
+  })
+
+  it('run=it: caso 26 corsa 2 — il finto di offer_connector risponde col testo di D5 (non ok)', async () => {
+    const { simulatedResult } = await loadEval('it')
+    const id = 'registry:com.microsoft/microsoft-learn-mcp'
+    const r = simulatedResult('offer_connector', { id, reason: 'Ti permette di cercare nella documentazione Microsoft Learn ufficiale al momento.' })
+    expect(r).toBe(`"${id}" is an MCP server from the public registry, not a catalog app: propose it with add_mcp_server({id: "${id}", reason}) — that shows the card.`)
+  })
+
+  it('run=it: casi 9 e 14 corsa 1 — il simulatore chiede il SECONDO recupero (2 chiamate, tool ristretti, stesso sollecito)', async () => {
+    const { evalGroupRecovery, EVAL_TOOLS } = await loadEval('it')
+    // il dump: risposta vuota, primo recupero già fatto e VUOTO anche lui
+    // (recoveryUsed: true, tutti i testi vuoti, nessun post) — D2 fa partire
+    // la seconda chiamata con gli stessi tool ristretti
+    const drainCalls: Array<Array<{ name: string }>> = []
+    const responses: Array<{ text: string; toolCalls: ToolCall[] }> = [
+      { text: '', toolCalls: [] }, { text: '', toolCalls: [] }, { text: '', toolCalls: [] }
+    ]
+    const attempts = await evalGroupRecovery(
+      { called: true, closing: false },
+      () => ({
+        posted: false,
+        userContact: false,
+        lastFreeText: '',
+        // l'ultima risposta (del recupero precedente) è vuota e senza tool
+        lastEmpty: drainCalls.length === 0 || (responses[drainCalls.length - 1]!.text.trim() === '' && responses[drainCalls.length - 1]!.toolCalls.length === 0)
+      }),
+      async (tools) => {
+        drainCalls.push((tools as Array<{ name: string }>).map((t) => ({ name: t.name })))
+        return responses[Math.min(drainCalls.length - 1, responses.length - 1)]!
+      },
+      () => ({ endedWithPass: false })
+    )
+    expect(attempts).toBe(2) // la chiamata in più del secondo recupero, mai una terza
+    expect(drainCalls).toHaveLength(2)
+    for (const tools of drainCalls) {
+      expect(tools.map((t) => t.name).sort()).toEqual(['pass', 'post_to_group'])
+    }
+    expect(EVAL_TOOLS.length).toBeGreaterThan(0) // la lista dei tool del turno è quella vera
+  })
+})

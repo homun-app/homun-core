@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 import {
   deliveredResultText, alreadyDeliveredResult, isDuplicateSend,
   isWorkTool, messageCapResult, previewOf, DELIVERED_PREVIEW_CHARS,
-  turnCapResult, MAX_DELIVERED_PER_TURN
+  turnCapResult, MAX_DELIVERED_PER_TURN, finalHeldAfterSpawn
 } from '../turn-sends'
 
 describe('previewOf / deliveredResultText (punto 0b)', () => {
@@ -107,5 +107,22 @@ describe('turnCapResult / MAX_DELIVERED_PER_TURN (fase 10, residuo 0c)', () => {
     expect(r).toContain('reasoning')
     expect(r).toContain('3 messages')
     expect(r).not.toContain('Do not repeat the same content')
+  })
+})
+
+// ---- fase eval-deboli (D3): un turno che lancia subagenti consegna al massimo UN messaggio ----
+
+describe('fase eval-deboli (D3): finalHeldAfterSpawn — il finale dopo una spawn e una consegna si trattiene', () => {
+  it('spawn RIUSCITA + un messaggio già consegnato → il finale si trattiene', () => {
+    expect(finalHeldAfterSpawn({ spawnedThisTurn: true, deliveredThisTurn: true })).toBe(true)
+  })
+
+  it('spawn senza messaggi consegnati → il finale si consegna (il turno non sarebbe muto)', () => {
+    expect(finalHeldAfterSpawn({ spawnedThisTurn: true, deliveredThisTurn: false })).toBe(false)
+  })
+
+  it('nessuna spawn → invariato: il testo finale si consegna come sempre', () => {
+    expect(finalHeldAfterSpawn({ spawnedThisTurn: false, deliveredThisTurn: true })).toBe(false)
+    expect(finalHeldAfterSpawn({ spawnedThisTurn: false, deliveredThisTurn: false })).toBe(false)
   })
 })

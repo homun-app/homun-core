@@ -221,6 +221,30 @@ describe('fase 12 (punto 6): la sezione "Subagents" nel prompt del padre', () =>
     expect(s).toContain('PARALLEL')
   })
 
+  // fase eval-deboli (D4): un ramo per elemento, il padre non cerca, al massimo UNA riga
+  it('D4: un subagent per elemento Nominato, niente ramo trasversale', () => {
+    const s = subagentsSection()
+    expect(s).toContain('Research on several named items (frameworks, products, cities…) = ONE subagent per item, no extra cross-cutting branch: each brief covers its item fully')
+  })
+
+  it('D4: delegato il lavoro, il padre NON cerca per conto suo (riga dopo i brief)', () => {
+    const s = subagentsSection()
+    const delegate = s.indexOf('Once you delegate, you do not research yourself (no web_search, web_fetch or run-command/curl on the same topic): the subagents do it.')
+    expect(delegate).toBeGreaterThan(0)
+    // sta DOPO la riga dei brief e PRIMA della riga «Afterwards»
+    const briefs = s.indexOf('Each brief is self-contained')
+    const afterwards = s.indexOf('Afterwards:')
+    expect(delegate).toBeGreaterThan(briefs)
+    expect(delegate).toBeLessThan(afterwards)
+  })
+
+  it('D4: «Afterwards» dice al massimo UNA riga (message_user o il finale, non entrambi)', () => {
+    const s = subagentsSection()
+    expect(s).toContain('Afterwards: at most ONE line to the user (message_user or the final text, not both); results arrive together: ONE SINGLE report, no waiting in a loop.')
+    // la riga vecchia («if they were the one who asked») non c'è più
+    expect(s).not.toContain('if they were the one who asked')
+  })
+
   it('systemPrompt(agent, {subagents: false}) NON la ha (turni di gruppo e figli)', () => {
     const p = systemPrompt(agent, { subagents: false })
     expect(p).not.toContain('# Subagents')
@@ -233,8 +257,8 @@ describe('fase 12 (punto 6): la sezione "Subagents" nel prompt del padre', () =>
   it('il budget resta ≤ 1800 token (caratteri/4) CON la sezione nuova', () => {
     const p = systemPrompt(agent)
     expect(p.length / 4).toBeLessThanOrEqual(PROMPT_TOKEN_BUDGET)
-    // e la sezione è compatta: ~220 token stimati
-    expect(subagentsSection().length / 4).toBeLessThanOrEqual(220)
+    // e la sezione è compatta: ~235 token stimati (D4: +311 caratteri)
+    expect(subagentsSection().length / 4).toBeLessThanOrEqual(240)
   })
 
   it('il prompt del FIGLIO: costruttore separato, ~450 token, chiude SEMPRE con wake_parent', () => {

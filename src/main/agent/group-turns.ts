@@ -651,3 +651,31 @@ export function groupRecoveryTools<T extends { name: string }>(tools: ReadonlyAr
   const allowed = closing ? ['send_to_user', 'pass'] : ['post_to_group', 'pass']
   return tools.filter((t) => allowed.includes(t.name))
 }
+
+// ---- fase eval-deboli (D2): il secondo tentativo del recupero ----
+
+/** Al massimo 2 chiamate di recupero per turno di gruppo (D2). */
+export const GROUP_RECOVERY_MAX_ATTEMPTS = 2
+
+export interface GroupRecoveryAttemptsInput {
+  /** quante chiamate di recupero sono già partite in questo turno */
+  attempts: number
+  /**
+   * l'ultima risposta (del recupero precedente) è stata testo VUOTO e SENZA
+   * chiamate a tool: solo così la successiva parte (con testo o con tool il
+   * turno ha già avuto la sua occasione)
+   */
+  lastEmpty: boolean
+}
+
+/**
+ * groupRecoveryAttemptsLeft (pura, D2): quante chiamate di recupero possono
+ * ancora partire. La PRIMA resta decisa da needsGroupRecovery (come oggi); la
+ * SECONDA parte solo se la prima ha risposto vuota e senza tool, e comunque
+ * mai oltre GROUP_RECOVERY_MAX_ATTEMPTS. La usano sia il loop sia il
+ * simulatore dell'eval, così il secondo tentativo vale uguale nei due posti.
+ */
+export function groupRecoveryAttemptsLeft(input: GroupRecoveryAttemptsInput): number {
+  if (input.attempts <= 0) return GROUP_RECOVERY_MAX_ATTEMPTS
+  return input.lastEmpty ? Math.max(0, GROUP_RECOVERY_MAX_ATTEMPTS - input.attempts) : 0
+}

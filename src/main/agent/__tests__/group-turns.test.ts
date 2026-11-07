@@ -17,7 +17,7 @@ import {
   GROUP_CHAIN_CLOSED_TEXT, GROUP_HOURLY_CAP_TEXT, GROUP_TURN_RULE,
   GROUP_MEMBER_CHAIN_POSTS_MAX, GROUP_CLOSING_LINE,
   shouldScheduleClosingTurn, closingTurnNonce, isClosingNonce, memberWaitingForUser,
-  hasSentToUserInChain, alreadySentToUserResult, readChainDepth,
+  hasSentToUserInChain, alreadySentToUserResult, readChainDepth, groupRecoveryAttemptsLeft,
   needsGroupRecovery, groupRecoveryTools, GROUP_RECOVERY_NUDGE, GROUP_CLOSING_RECOVERY_NUDGE,
   GROUP_CALLED_RECOVERY_NUDGE, GROUP_CALLED_CLOSING_RECOVERY_NUDGE
 } from '../group-turns'
@@ -611,6 +611,28 @@ describe('correzione E2: needsGroupRecovery e i tool del recupero (puri)', () =>
     expect(GROUP_CALLED_RECOVERY_NUDGE).toContain('post_to_group')
     expect(GROUP_CALLED_CLOSING_RECOVERY_NUDGE).toContain('You were called and did not answer')
     expect(GROUP_CALLED_CLOSING_RECOVERY_NUDGE).toContain('send_to_user')
+  })
+})
+
+// ---- fase eval-deboli (D2): il secondo tentativo del recupero ----
+
+describe('fase eval-deboli (D2): groupRecoveryAttemptsLeft — al massimo 2 chiamate, la seconda solo a vuoto', () => {
+  it('nessuna chiamata ancora: la prima è possibile (la decide needsGroupRecovery, come oggi)', () => {
+    expect(groupRecoveryAttemptsLeft({ attempts: 0, lastEmpty: true })).toBe(2)
+    expect(groupRecoveryAttemptsLeft({ attempts: 0, lastEmpty: false })).toBe(2)
+  })
+
+  it('prima chiamata a vuoto (testo vuoto, nessun tool) → la seconda parte', () => {
+    expect(groupRecoveryAttemptsLeft({ attempts: 1, lastEmpty: true })).toBe(1)
+  })
+
+  it('prima chiamata con TESTO o con tool → nessuna seconda', () => {
+    expect(groupRecoveryAttemptsLeft({ attempts: 1, lastEmpty: false })).toBe(0)
+  })
+
+  it('due chiamate già partite → zero: mai più di 2 (dopo la seconda vuota resta il comportamento di oggi)', () => {
+    expect(groupRecoveryAttemptsLeft({ attempts: 2, lastEmpty: true })).toBe(0)
+    expect(groupRecoveryAttemptsLeft({ attempts: 3, lastEmpty: true })).toBe(0)
   })
 })
 // ---- fase app (A8): la riga dei pari porta le APP del bot ----

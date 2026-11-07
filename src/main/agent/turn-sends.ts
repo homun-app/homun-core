@@ -117,3 +117,26 @@ export function progressResultText(text: string, opts: { held?: boolean; truncat
     ? `${base} (your message was longer than ${MESSAGE_USER_MAX_CHARS} characters and was cut: never put a report or long content in message_user — the complete answer goes in your final reply text).`
     : base
 }
+
+// ---- fase eval-deboli (D3): un turno che lancia subagenti, un messaggio ----
+
+export interface FinalAfterSpawnInput {
+  /** in questo turno almeno UNA spawn_subagent è RIUSCITA (una card, un figlio vero) */
+  spawnedThisTurn: boolean
+  /** all'utente è già stato consegnato almeno un messaggio in questo turno */
+  deliveredThisTurn: boolean
+}
+
+/**
+ * finalHeldAfterSpawn (pura, D3): il prompt promette «Afterwards: at most ONE
+ * line to the user», ma il modello scrive message_user E un testo finale che
+ * dice la stessa cosa — e il dedup (testi non identici) non lo ferma. La
+ * regola deterministica: se nel turno è riuscita almeno una spawn e l'utente
+ * ha già ricevuto un messaggio, il testo FINALE non si consegna (prende la
+ * stessa strada del finale duplicato: resta ragionamento, visibile nei
+ * Dettagli tecnici). I risultati dei subagenti arrivano in un turno
+ * SUCCESSIVO (SUBAGENTS_DONE), dove questa regola non vale.
+ */
+export function finalHeldAfterSpawn(input: FinalAfterSpawnInput): boolean {
+  return input.spawnedThisTurn && input.deliveredThisTurn
+}

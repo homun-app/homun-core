@@ -72,8 +72,11 @@ import { nextWithDeadline, DEFAULT_STREAM_DEADLINES, StreamDeadlineError } from 
 // fase risposta (R2): clamp e result dei progressi message_user
 import {
   deliveredResultText, alreadyDeliveredResult, isDuplicateSend, isWorkTool, messageCapResult, emptySendResult, turnCapResult,
-  MAX_DELIVERED_PER_TURN, clampProgressMessage, progressResultText, MESSAGE_USER_MAX_CHARS
+  MAX_DELIVERED_PER_TURN, clampProgressMessage, progressResultText, MESSAGE_USER_MAX_CHARS, finalHeldAfterSpawn
 } from './turn-sends'
+// fase eval-deboli (D1): i primitivi scritti come stringhe si convertono al
+// tipo dello schema del tool, prima di permessi, gate e card
+import { coerceToolArgs } from './tool-args'
 // fase risposta (R4): il silenzio esplicito dei turni automatici (da Rakazo)
 import { NO_RESPONSE, isExactNoResponse, isPlaceholderText, couldBecomeNoResponse, stripStrayNoResponse } from './silent-reply'
 // fase 9 (punto 1) → fase 18b (H2): la riserva è una CATENA di anelli
@@ -93,13 +96,14 @@ import type { ThinkingSetting } from '../../shared/types'
 import { getGroup, getGroupMessage, isGroupMember, addGroupMessage, scheduleTurnsForMessage } from '../store/groups'
 import {
   nextPostDepth, hasSentToUserInChain, alreadySentToUserResult,
-  needsGroupRecovery, groupRecoveryTools, GROUP_RECOVERY_NUDGE, GROUP_CLOSING_RECOVERY_NUDGE,
+  needsGroupRecovery, groupRecoveryTools, groupRecoveryAttemptsLeft,
+  GROUP_RECOVERY_NUDGE, GROUP_CLOSING_RECOVERY_NUDGE,
   GROUP_CALLED_RECOVERY_NUDGE, GROUP_CALLED_CLOSING_RECOVERY_NUDGE
 } from './group-turns'
 import { MAX_CREATE_AGENTS_PER_TURN, wakeParentToolDef } from './tools'
 // fase 13 (punto 3): add_mcp_server/install_plugin SOLO nei turni dell'utente;
 // (punto 5): tool MCP deferiti oltre connectors.maxInlineTools
-import { toolsForTurnSource, connectorProposalOffered, CONNECTOR_PROPOSAL_DENIED, GROUP_EXCLUDED_TOOLS } from './connectors-policy'
+import { toolsForTurnSource, connectorProposalOffered, CONNECTOR_PROPOSAL_DENIED, GROUP_EXCLUDED_TOOLS, isMcpId, offerConnectorMcpGuidance, offerConnectorMissingText } from './connectors-policy'
 import { PROPOSAL_RESULT } from '../connectors/install'
 import {
   findToolsDef, rankTools, requiredParamsOf, formatFindToolsResult, formatBuiltinToolsResult, toolsDeferred,
@@ -940,11 +944,13 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
   let sendsSinceWork = 0
   // fase 10 (§3): un solo post_to_group per membro per turno (il secondo ha un
   // result esplicito che lo spiega); correzione C1: il silenzio esplicito
-  // (pass) CHIUDE il turno di gruppo; correzione E2 (terzo giro): al massimo
-  // UNA chiamata di recupero per turno quando la consegna è finita nel testo
+  // (pass) CHIUDE il turno di gruppo; correzione E2 (terzo giro): la chiamata
+  // di recupero quando la consegna è finita nel testo libero; fase eval-deboli
+  // (D2): le chiamate di recupero sono al massimo 2 (groupRecoveryAttemptsLeft)
+  // e la seconda parte solo se la prima ha risposto vuota e senza tool
   let groupPosted = false
   let passedSilence = false
-  let groupRecoveryDone = false
+  let groupRecoveryAttempts = 0
   // fase risposta (R5): l'UNICA chiamata di recupero di un turno privato con
   // risposta vuota è già partita (la seconda volta vale il ripiego)
   let recoveryDone = false
@@ -955,6 +961,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
   let turnBatchId: string | null = null
   let wakeDone = false
   let subagentNudged = false
+  // fase eval-deboli (D3): in questo turno è riuscita almeno una spawn_subagent
+  // (il finale dopo una consegna all'utente si trattiene, finalHeldAfterSpawn)
+  let spawnSucceededThisTurn = false
 
   // fase 8 (§3bis L7): ogni entry scritta da un turno di TASK porta meta.taskId —
   // vive nel sotto-transcript del task, esclusa dalla chat principale.
@@ -1198,6 +1207,13 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     streamEntry: import('../../shared/types').TranscriptEntry
   ): boolean => {
     if (!text.trim()) return false
+    // fase eval-deboli (D3): un turno che ha già lanciato subagenti e ha già
+    // consegnato un messaggio all'utente NON ne consegna un secondo col testo
+    // finale (il prompt dice «at most ONE line»): stessa strada del finale
+    // duplicato — resta ragionamento, visibile nei Dettagli tecnici. Il
+    // resoconto dei figli arriva in un turno SUCCESSIVO (SUBAGENTS_DONE),
+    // dove questa regola non vale.
+    if (finalHeldAfterSpawn({ spawnedThisTurn: spawnSucceededThisTurn, deliveredThisTurn: deliveredTexts.length > 0 })) return false
     if (isDuplicateSend(deliveredTexts, text)) return false
     // verifica: il tetto dei 3 consegnati NON vale per la risposta finale —
     // frena i progressi, ma dopo tre message_user la risposta (ciò che
@@ -1999,12 +2015,14 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         // ---- gruppi e figli: invariati in questa fase (R7/R8) ----
         if (!text) {
           // fase 11 (residuo 0b): risposta VUOTA in un turno di gruppo del membro
-          // CHIAMATO (menzionato nella finestra o turno di chiusura) → UNA chiamata
-          // di recupero col sollecito dedicato, lo stesso passo in più di E2 per il
+          // CHIAMATO (menzionato nella finestra o turno di chiusura) → chiamate di
+          // recupero col sollecito dedicato, lo stesso passo in più di E2 per il
           // testo libero non pubblicato; il chiamato che non risponde non lascia la
-          // richiesta senza risposta
+          // richiesta senza risposta. D2: fino a 2 (la risposta qui è vuota e
+          // senza tool per costruzione, quindi ogni tentativo successivo parte)
           if (
-            opts.groupTurn !== undefined && !groupRecoveryDone &&
+            opts.groupTurn !== undefined &&
+            groupRecoveryAttemptsLeft({ attempts: groupRecoveryAttempts, lastEmpty: true }) > 0 &&
             needsGroupRecovery({
               finished: true,
               passed: passedSilence,
@@ -2014,7 +2032,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               called: opts.groupTurn.called
             })
           ) {
-            groupRecoveryDone = true
+            groupRecoveryAttempts++
             turnTools = groupRecoveryTools(allTools, opts.groupTurn.closing === true)
             messages.push({
               role: 'user',
@@ -2035,15 +2053,16 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         if (opts.groupTurn !== undefined) {
           // correzione E2 (terzo giro): un turno di gruppo FINISHED senza post,
           // senza pass e senza contatto con l'utente, ma CON testo libero, è una
-          // consegna scritta come ragionamento che nessuno ha letto — UNA
-          // chiamata di recupero col sollecito, SOLO coi tool del sollecito
+          // consegna scritta come ragionamento che nessuno ha letto — chiamata
+          // di recupero col sollecito, SOLO coi tool del sollecito
           // (post_to_group e pass; nella chiusura send_to_user e pass). Le
           // chiamate che produce passano dallo STESSO percorso del turno (depth,
           // rootId, tetti, rifiuto del post nella chiusura); se anche il recupero
           // risponde solo testo il turno resta PASS: il testo NON diventa mai un
-          // post (il registro segna il motivo).
+          // post (il registro segna il motivo). D2: fino a 2 chiamate, ma qui la
+          // risposta ha TESTO (lastEmpty false) — la prima parte, la seconda no
           if (
-            !groupRecoveryDone &&
+            groupRecoveryAttemptsLeft({ attempts: groupRecoveryAttempts, lastEmpty: false }) > 0 &&
             needsGroupRecovery({
               finished: true,
               passed: passedSilence,
@@ -2053,7 +2072,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               called: opts.groupTurn.called
             })
           ) {
-            groupRecoveryDone = true
+            groupRecoveryAttempts++
             turnTools = groupRecoveryTools(allTools, opts.groupTurn.closing === true)
             messages.push({ role: 'user', content: withSentStamp(opts.groupTurn.closing ? GROUP_CLOSING_RECOVERY_NUDGE : GROUP_RECOVERY_NUDGE, Date.now(), sentZone) })
             continue
@@ -2118,6 +2137,23 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           }
           call = { ...call, name: target, arguments: JSON.stringify(args) }
           input = args
+        }
+
+        // fase eval-deboli (D1): i primitivi scritti come stringhe dal modello
+        // ("true", "60") si convertono al tipo dichiarato nello schema del tool
+        // VERO — core, differiti (appena srotolti da use_tool) e MCP — UNA sola
+        // chiamata, PRIMA di permessi, gate e card: tutti vedono gli stessi
+        // valori (anche la entry del transcript, che porta gli argomenti
+        // convertiti). Senza schema nessuna conversione.
+        const callSchema = allTools.find((t) => t.name === call.name)?.parameters
+          ?? deferredBuiltinDefs.find((t) => t.name === call.name)?.parameters
+          ?? mcpToolDefs.find((t) => t.name === call.name)?.parameters
+        if (callSchema) {
+          const coerced = coerceToolArgs(input, callSchema)
+          if (coerced !== input) {
+            input = coerced
+            call = { ...call, arguments: JSON.stringify(coerced) }
+          }
         }
 
         // fase risposta (R2.4): send_to_user chiamato fuori da un gruppo
@@ -3228,10 +3264,20 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             continue
           }
           const entry2 = (await import('../connectors')).loadCatalog().find((c) => c.id === wanted)
+          // fase eval-deboli (D5): un id registry:/url: NON è un'app del
+          // catalogo (e non è sbagliato: l'ha appena trovato search_connectors)
+          // — la risposta guida verso add_mcp_server, senza card né aggiunte
+          if (!entry2 && isMcpId(String(input.id ?? ''))) {
+            messages.push({
+              role: 'tool', toolCallId: call.id,
+              content: offerConnectorMcpGuidance(String(input.id ?? ''))
+            })
+            continue
+          }
           if (!entry2) {
             messages.push({
               role: 'tool', toolCallId: call.id,
-              content: `Connector "${String(input.id ?? '')}" does not exist: find the right one with search_connectors.`
+              content: offerConnectorMissingText(String(input.id ?? ''))
             })
             continue
           }
@@ -3339,8 +3385,13 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             }
           })
           // card nella chat del padre (entry send-message type subagent) quando
-          // la spawn riesce; nel turno di un task va nel sotto-transcript
-          if (result.card) appendSend(agentId, call, result.card, emit, {}, opts.taskId)
+          // la spawn riesce; nel turno di un task va nel sotto-transcript.
+          // D3: la spawn RIUSCITA (c'è la card) accende la regola del finale
+          // trattenuto — una spawn rifiutata dal tool non conta
+          if (result.card) {
+            appendSend(agentId, call, result.card, emit, {}, opts.taskId)
+            spawnSucceededThisTurn = true
+          }
           if (result.changed) subagentsChanged(agentId, emit)
           const res = add({ agentId, kind: 'tool-result', role: 'system', content: result.output, meta: { callId: call.id } })
           emit({ type: 'entries', agentId, entries: [res] })
