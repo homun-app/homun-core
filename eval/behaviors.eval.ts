@@ -1046,7 +1046,8 @@ const MAX_STEPS = 4
 export async function evalGroupRecovery(
   group: { called: boolean; closing: boolean },
   facts: () => { posted: boolean; userContact: boolean; lastFreeText: string; lastEmpty: boolean },
-  drain: (tools: ToolDef[]) => Promise<{ text: string; toolCalls: ToolCall[] }>,
+  /** il sollecito va nei messaggi PRIMA della chiamata (come nel loop vero): drain lo riceve */
+  drain: (tools: ToolDef[], nudge: string) => Promise<{ text: string; toolCalls: ToolCall[] }>,
   onResponse: (r: { text: string; toolCalls: ToolCall[] }, nudge: string, tools: ToolDef[]) => { endedWithPass: boolean }
 ): Promise<number> {
   let attempts = 0
@@ -1058,7 +1059,7 @@ export async function evalGroupRecovery(
       ? (group.closing ? GROUP_CALLED_CLOSING_RECOVERY_NUDGE : GROUP_CALLED_RECOVERY_NUDGE)
       : (group.closing ? GROUP_CLOSING_RECOVERY_NUDGE : GROUP_RECOVERY_NUDGE)
     const tools = groupRecoveryTools(EVAL_TOOLS, group.closing)
-    const recovery = await drain(tools)
+    const recovery = await drain(tools, nudge)
     attempts++
     if (onResponse(recovery, nudge, tools).endedWithPass) break
   }
@@ -1164,7 +1165,11 @@ async function evalTurn(
             lastEmpty: !!last && !last.text.trim() && !last.toolCalls.length
           }
         },
-        (tools) => drainOnce(tools),
+        (tools, nudge) => {
+          // verifica: il sollecito entra nei messaggi come nel loop vero
+          messages.push({ role: 'user', content: nudge })
+          return drainOnce(tools)
+        },
         (r) => {
           recoveryUsed = true
           if (r.text.trim()) lastFreeText = r.text

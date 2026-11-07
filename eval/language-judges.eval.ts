@@ -423,6 +423,7 @@ describe('fase eval-deboli (D7): le corse fallite del dump, ricostruite', () => 
     // (recoveryUsed: true, tutti i testi vuoti, nessun post) — D2 fa partire
     // la seconda chiamata con gli stessi tool ristretti
     const drainCalls: Array<Array<{ name: string }>> = []
+    const nudges: string[] = []
     const responses: Array<{ text: string; toolCalls: ToolCall[] }> = [
       { text: '', toolCalls: [] }, { text: '', toolCalls: [] }, { text: '', toolCalls: [] }
     ]
@@ -435,7 +436,9 @@ describe('fase eval-deboli (D7): le corse fallite del dump, ricostruite', () => 
         // l'ultima risposta (del recupero precedente) è vuota e senza tool
         lastEmpty: drainCalls.length === 0 || (responses[drainCalls.length - 1]!.text.trim() === '' && responses[drainCalls.length - 1]!.toolCalls.length === 0)
       }),
-      async (tools) => {
+      async (tools, nudge) => {
+        // verifica: OGNI chiamata di recupero riceve il sollecito (prima non arrivava mai al modello)
+        nudges.push(nudge)
         drainCalls.push((tools as Array<{ name: string }>).map((t) => ({ name: t.name })))
         return responses[Math.min(drainCalls.length - 1, responses.length - 1)]!
       },
@@ -443,6 +446,8 @@ describe('fase eval-deboli (D7): le corse fallite del dump, ricostruite', () => 
     )
     expect(attempts).toBe(2) // la chiamata in più del secondo recupero, mai una terza
     expect(drainCalls).toHaveLength(2)
+    expect(nudges).toHaveLength(2)
+    for (const n of nudges) expect(n.trim().length).toBeGreaterThan(20)
     for (const tools of drainCalls) {
       expect(tools.map((t) => t.name).sort()).toEqual(['pass', 'post_to_group'])
     }
