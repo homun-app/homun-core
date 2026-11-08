@@ -7285,3 +7285,87 @@ describe('fase token (T8): i quattro casi, prima sul loop vero', () => {
     expect(String(res2.content)).not.toContain('request_secure_input')
   })
 })
+
+// ---- fase token ritocchi (R4): la sentinella PRIMA di ogni registrazione ----
+
+describe('fase token ritocchi (R4): la sentinella prima dell\'attivazione, le entry dei rifiuti sempre redatte', () => {
+  it('R4-a: browser {action:type, carta} col gruppo NON attivo → il rifiuto della SENTINELLA, non l\'attivazione; nessuna entry con la carta', async () => {
+    h.virtualGroupsOff.off = true
+    browserState.available = true
+    browserState.calls.length = 0
+    h.llm.queue = [
+      { toolCalls: [{ id: 'r1', name: 'browser', arguments: JSON.stringify({ action: 'type', ref: 'e6', text: '4242 4242 4242 4242' }) }] },
+      { text: 'ok' }
+    ]
+    await runTurn(AGENT, 'compila il pagamento', emit)
+    expect(browserState.calls).toHaveLength(0)
+    const res = h.db.entries.find((e) => e.kind === 'tool-result' && e.meta?.callId === 'r1')!
+    // il rifiuto è quello della sentinella, NON il messaggio di attivazione
+    expect(String(res.content)).toContain('request_secure_input')
+    expect(String(res.content)).not.toContain('now active')
+    expect(res.meta?.activatedGroups).toBeUndefined()
+    // e NESSUNA entry contiene il numero, né spaziato né compatto
+    for (const e of h.db.entries) {
+      expect(String(e.content), `entry ${e.id} (${e.kind})`).not.toContain('4242 4242')
+      expect(String(e.content), `entry ${e.id} (${e.kind})`).not.toContain('4242424242424242')
+      expect(JSON.stringify(e.meta), `meta della entry ${e.id}`).not.toContain('4242 4242')
+      expect(JSON.stringify(e.meta), `meta della entry ${e.id}`).not.toContain('4242424242424242')
+    }
+    const call = h.db.entries.find((e) => e.kind === 'tool-call' && e.meta?.id === 'r1')!
+    expect(String(call.meta?.arguments)).toContain('[redacted]')
+  })
+
+  it('R4-b: facciata con action sbagliata e carta negli argomenti → l\'errore della facciata resta, ma la entry è redatta', async () => {
+    h.virtualGroupsOff.off = true
+    browserState.available = true
+    browserState.calls.length = 0
+    h.llm.queue = [
+      { toolCalls: [{ id: 'r2', name: 'browser', arguments: JSON.stringify({ action: 'compila', ref: 'e6', text: '4242 4242 4242 4242' }) }] },
+      { text: 'ok' }
+    ]
+    await runTurn(AGENT, 'compila il pagamento', emit)
+    expect(browserState.calls).toHaveLength(0)
+    // l'errore della facciata va bene (azione sconosciuta): è il suo lavoro
+    const res = h.db.entries.find((e) => e.kind === 'tool-result' && e.meta?.callId === 'r2')!
+    expect(String(res.content)).toContain('Unknown action')
+    // ma la entry della chiamata porta gli argomenti REDATTI
+    const call = h.db.entries.find((e) => e.kind === 'tool-call' && e.meta?.id === 'r2')!
+    expect(String(call.meta?.arguments)).not.toContain('4242 4242')
+    expect(String(call.meta?.arguments)).not.toContain('4242424242424242')
+    expect(String(call.meta?.arguments)).toContain('[redacted]')
+  })
+
+  it('R4-c: il rifiuto di use_tool redige gli argomenti (la carta nel messaggio non finisce nel transcript)', async () => {
+    h.virtualGroupsOff.off = true
+    h.llm.queue = [
+      { toolCalls: [{ id: 'r3', name: 'use_tool', arguments: JSON.stringify({ name: 'message_user', arguments: { text: 'paga con 4242 4242 4242 4242' } }) }] },
+      { text: 'ok' }
+    ]
+    await runTurn(AGENT, 'un comando che non va', emit)
+    const res = h.db.entries.find((e) => e.kind === 'tool-result' && e.meta?.callId === 'r3')!
+    expect(String(res.content)).toContain('use_tool cannot call')
+    const call = h.db.entries.find((e) => e.kind === 'tool-call' && e.meta?.id === 'r3')!
+    expect(String(call.meta?.arguments)).not.toContain('4242 4242')
+    expect(String(call.meta?.arguments)).not.toContain('4242424242424242')
+    expect(String(call.meta?.arguments)).toContain('[redacted]')
+  })
+
+  it('R4-d: anche l\'attivazione automatica del gruppo scrive gli argomenti redatti (difesa in profondità)', async () => {
+    h.virtualGroupsOff.off = true
+    browserState.available = true
+    browserState.calls.length = 0
+    // una carta che la sentinella NON rifiuta (nell'id del campo, non nel testo
+    // digitato): l'attivazione parte — ma la entry non porta il numero in chiaro
+    h.llm.queue = [
+      { toolCalls: [{ id: 'r4', name: 'browser_type', arguments: JSON.stringify({ ref: '4242424242424242', text: 'ciao' }) }] },
+      { text: 'ok' }
+    ]
+    await runTurn(AGENT, 'compila il campo', emit)
+    expect(browserState.calls).toHaveLength(0)
+    const res = h.db.entries.find((e) => e.kind === 'tool-result' && e.meta?.callId === 'r4')!
+    expect(String(res.content)).toContain('now active') // l'attivazione è il suo lavoro
+    const call = h.db.entries.find((e) => e.kind === 'tool-call' && e.meta?.id === 'r4')!
+    expect(String(call.meta?.arguments)).not.toContain('4242424242424242')
+    expect(String(call.meta?.arguments)).toContain('[redacted]')
+  })
+})

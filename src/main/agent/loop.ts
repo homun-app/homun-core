@@ -2174,7 +2174,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
                 : `use_tool cannot call ${target} in this turn: it runs the built-in tools of the tool groups (other tools are called directly by name)`
             const uEntry = add({
               agentId, kind: 'tool-call', role: 'assistant', content: call.name,
-              meta: { id: call.id, name: call.name, arguments: call.arguments, ...(facadeOf ? { facade: facadeOf } : {}) }
+              // fase token ritocchi (R4): anche i percorsi di rifiuto/errore
+              // scrivono gli argomenti REDATTI (difesa in profondità)
+              meta: { id: call.id, name: call.name, arguments: JSON.stringify(redactGuardedArgs(input, userChatTextsOf(messages))), ...(facadeOf ? { facade: facadeOf } : {}) }
             })
             emit({ type: 'entries', agentId, entries: [uEntry] })
             messages.push({ role: 'tool', toolCallId: call.id, content: refused })
@@ -2200,10 +2202,12 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           const expanded = expandFacadeCall({ name: call.name, arguments: call.arguments }, catalogSchemaOf)
           if (!expanded.ok) {
             // errore breve (azione o parametro): la entry della chiamata porta
-            // la facciata, il result l'errore — NIENTE esecuzione
+            // la facciata, il result l'errore — NIENTE esecuzione; fase token
+            // ritocchi (R4): gli argomenti della entry sono REDATTI (difesa in
+            // profondità: una carta negli argomenti non finisce nel transcript)
             const fEntry = add({
               agentId, kind: 'tool-call', role: 'assistant', content: call.name,
-              meta: { id: call.id, name: call.name, arguments: call.arguments, facade: call.name }
+              meta: { id: call.id, name: call.name, arguments: JSON.stringify(redactGuardedArgs(input, userChatTextsOf(messages))), facade: call.name }
             })
             emit({ type: 'entries', agentId, entries: [fEntry] })
             messages.push({ role: 'tool', toolCallId: call.id, content: expanded.error })
@@ -2233,6 +2237,28 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           if (coerced !== input) {
             input = coerced
             call = { ...call, arguments: JSON.stringify(coerced) }
+          }
+        }
+
+        // fase token ritocchi (R4): la sentinella degli argomenti — SUBITO
+        // dopo lo srotolamento (use_tool e facciata) e coerceToolArgs, quindi
+        // PRIMA dell'attivazione automatica del gruppo e di OGNI entry
+        // tool-call: un valore che va verso l'esterno o verso un sito (carta
+        // dove si digita con IIN+Luhn, chiave col prefisso noto, segreto
+        // assegnato in chat) si rifiuta SENZA esecuzione; il messaggio e la
+        // entry del transcript non contengono MAI il valore (redatto)
+        {
+          const guard = argGuardVerdict(call.name, input, userChatTextsOf(messages))
+          if (!guard.ok) {
+            const rEntry = add({
+              agentId, kind: 'tool-call', role: 'assistant', content: call.name,
+              meta: { id: call.id, name: call.name, arguments: JSON.stringify(redactGuardedArgs(input, userChatTextsOf(messages))), ...(facadeOf ? { facade: facadeOf } : {}) }
+            })
+            emit({ type: 'entries', agentId, entries: [rEntry] })
+            messages.push({ role: 'tool', toolCallId: call.id, content: guard.reason })
+            const res = add({ agentId, kind: 'tool-result', role: 'system', content: guard.reason, meta: { callId: call.id, error: true, argGuard: true } })
+            emit({ type: 'entries', agentId, entries: [res] })
+            continue
           }
         }
 
@@ -2267,9 +2293,11 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             const shown = facadeOf ?? call.name
             const shownDef = turnTools.find((t) => t.name === shown) ?? null
             const refused = `${shown} is in group ${inactiveGroup.id}, now active. Call it again with: ${compactSignatureOf(shown, shownDef)}`
+            // fase token ritocchi (R4): anche l'attivazione scrive gli
+            // argomenti REDATTI (difesa in profondità)
             const gEntry = add({
               agentId, kind: 'tool-call', role: 'assistant', content: shown,
-              meta: { id: call.id, name: call.name, arguments: call.arguments, ...(facadeOf ? { facade: facadeOf } : {}) }
+              meta: { id: call.id, name: call.name, arguments: JSON.stringify(redactGuardedArgs(input, userChatTextsOf(messages))), ...(facadeOf ? { facade: facadeOf } : {}) }
             })
             emit({ type: 'entries', agentId, entries: [gEntry] })
             messages.push({ role: 'tool', toolCallId: call.id, content: refused })
@@ -2277,26 +2305,6 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               agentId, kind: 'tool-result', role: 'system', content: refused,
               meta: { callId: call.id, activatedGroups: [inactiveGroup.id] }
             })
-            emit({ type: 'entries', agentId, entries: [res] })
-            continue
-          }
-        }
-
-        // fase token (T8b): la sentinella degli argomenti — un valore che va
-        // verso l'esterno o verso un sito (carta che passa Luhn, chiave col
-        // prefisso noto, segreto scritto in chat) si rifiuta SENZA esecuzione
-        // e PRIMA di permessi e card; il messaggio e la entry del transcript
-        // non contengono MAI il valore (redatto)
-        {
-          const guard = argGuardVerdict(call.name, input, userChatTextsOf(messages))
-          if (!guard.ok) {
-            const rEntry = add({
-              agentId, kind: 'tool-call', role: 'assistant', content: call.name,
-              meta: { id: call.id, name: call.name, arguments: JSON.stringify(redactGuardedArgs(input, userChatTextsOf(messages))), ...(facadeOf ? { facade: facadeOf } : {}) }
-            })
-            emit({ type: 'entries', agentId, entries: [rEntry] })
-            messages.push({ role: 'tool', toolCallId: call.id, content: guard.reason })
-            const res = add({ agentId, kind: 'tool-result', role: 'system', content: guard.reason, meta: { callId: call.id, error: true, argGuard: true } })
             emit({ type: 'entries', agentId, entries: [res] })
             continue
           }

@@ -1,3 +1,76 @@
+# REPORT FASE TOKEN · RITOCCI — SENTINELLA SENZA FALSI POSITIVI, CONTROLLO PRIMA DI OGNI REGISTRAZIONE (R1–R6)
+
+**Data:** 2026-11-08 · **Base:** `main` @ `6a3869d4` (tag `fase-token`) · **Tag di chiusura:** `fase-token-ritocchi`. Nessun push, nessun tag `v*`, nessuna dipendenza nuova, niente Docker, niente eval col modello (`npm run eval` mai lanciato; solo il permesso `npx vitest run --config vitest.eval.config.ts eval/language-judges.eval.ts`), niente `npm run dist` (`npm run build` sì), **nessuna rete** (nessuna sonda, nessun avvio dell'app: solo vitest/typecheck/build offline), temporanei solo con mkdtemp in `/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/` (la misura del «prima» del paragrafo sotto), `docs/catture` intatte (niente da ripristinare: nessuna sonda), `out-review/` non toccato, **0 daemon dopo ogni corsa** (verificato con pgrep: i processi Electron rimasti sono di 1Password/Claude/Cursor, altre app).
+
+**Verifica finale:** `typecheck` pulito · `vitest` **207 file / 3267 test verdi** (base 206/3255; +1 file `arg-guard-corpus` con 3 test, +4 test R4 in `loop.test.ts`, `arg-guard.test.ts` riscritto sui rilevatori: 15→19) · `npm run build` verde · `npx vitest run --config vitest.eval.config.ts eval/language-judges.eval.ts` **36/36 verdi** · i test T8 di `fase-token` (**2b, 20, 35, 29** + «nessun falso positivo») ancora verdi: il blocco vero non si è indebolito. Commit e tag `fase-token-ritocchi`, nessun push.
+
+## I test visti fallire PRIMA (test, riga, errore)
+
+I test nuovi sono stati scritti PRIMA dell'implementazione e visti fallire sulla base `fase-token` (i test T8 vecchi che codificavano il comportamento vecchio — `sk-abc123DEF`, `xoxT-`, «chiave api sk-xyz999» senza separatore — sono stati aggiornati alla spec nella stessa riscrittura di `arg-guard.test.ts`):
+
+| Req | Test (file) | Riga | Errore visto |
+|---|---|---|---|
+| **R1** | `KEY_SHAPES è la tabella esportata delle soglie` (`arg-guard.test.ts`) | 29 | `TypeError: Cannot read properties of undefined (reading 'map')` — la tabella non esisteva |
+| **R1** | `NESSUN falso positivo: le parole comuni…` (stesso file) | 39 | `AssertionError: npm install task-runner: expected [ 'sk-runner' ] to deeply equal []` |
+| **R1** | `sotto la soglia, o senza cifre, non è una chiave` | 55 | `AssertionError: expected [ 'sk-abc123DEF' ] to deeply equal []` |
+| **R2** | `i numeri che sembrano carte: 13–19 cifre, IIN plausibile E Luhn` | 78 | `AssertionError: expected [] to deeply equal [ '4242424242424242' ]` — la forma a trattini non era riconosciuta |
+| **R2** | `NESSUN falso positivo: id, timestamp… anche quando Luhn passa` | 85 | `AssertionError: expected [ '1926010112345678904' ] to deeply equal []` — 19 cifre, Luhn valido, IIN ignorato |
+| **R2** | `argGuardVerdict cerca la carta SOLO nei campi dove si digita > i tool che scrivono…` | 104 | `AssertionError: expected true to be false` — `computer_act` non era tra i tool guardati |
+| **R2** | `…MAI su URL, comandi o id` | 107 | `AssertionError: expected false to be true` — la carta nell'url di web_fetch veniva rifiutata |
+| **R3** | `presi: parola di segreto + separatore esplicito…` | 138 | `AssertionError: la chiave segreta: Topolino1: expected [ 'segreta' ] to include 'Topolino1'` |
+| **R3** | `NON presi: niente assegnazione esplicita…` | 148 | `AssertionError: la password di Netflix non funziona più: expected [ 'Netflix' ] to deeply equal []` |
+| **R4** | `R4-a: browser {action:type, carta} col gruppo NON attivo…` (`loop.test.ts`) | 7304 | `AssertionError: expected 'browser is in group browser, now acti…' to contain 'request_secure_input'` — la sentinella stava DOPO l'attivazione |
+| **R4** | `R4-b: facciata con action sbagliata e carta…la entry è redatta` | 7333 | `AssertionError: expected '{"action":"compila","ref":"e6","text"…' not to contain '4242 4242'` |
+| **R4** | `R4-c: il rifiuto di use_tool redige gli argomenti` | 7348 | `AssertionError: expected '{"name":"message_user","arguments":{"…' not to contain '4242 4242'` |
+| **R4** | `R4-d: anche l'attivazione automatica del gruppo scrive gli argomenti redatti` | 7368 | `AssertionError: expected '{"ref":"4242424242424242","text":"cia…' not to contain '4242424242424242'` |
+| **R5** | `MUST_PASS: 34 righe…` (`arg-guard-corpus.test.ts`) | 111 | `AssertionError: run-command {"command":"npm install task-runner"} «sk-» dentro task-runner: expected false to be true` |
+| **R5** | `MUST_BLOCK: 20 righe…` | 118 | `AssertionError: browser_type {"ref":"e6","text":"4242-4242-4242-4242"} Visa a trattini: expected true to be false` |
+| **R5** | `quota: 2000 URL di tweet…` | 149 | `AssertionError: https://x.com/u/status/1615500772456818734: expected [ '1615500772456818734' ] to deeply equal []` |
+
+## La tabella dei casi della spec, prima e dopo
+
+«Prima» misurato sui rilevatori della base `fase-token` (copia verbatim in un mkdtemp, righe 23–129 di `arg-guard.ts`), « Dopo» = i test verdi di oggi (le prime 6 righe stanno anche nel corpus R5):
+
+| Tool | Argomento | Testo dell'utente in chat | PRIMA (misurato) | DOPO |
+|---|---|---|---|---|
+| run-command | `npm install task-runner` | — | BLOCCATO («sk-» dentro «task-runner») | **passa** |
+| run-command | `brew install disk-utility` | — | BLOCCATO | **passa** |
+| run-command | `python peak_hours.py` | — | BLOCCATO («ak_» dentro «peak_hours») | **passa** |
+| web_fetch | `https://x.com/u/status/<19 cifre>` | — | BLOCCATO (Luhn da solo: **187/2000** = 9,4% degli id a scala; l'11,6% della spec era su id qualunque) | **passa** (quota R5: 0/2000) |
+| draft_external | «Ciao, il nostro account Netflix non va» | «la password di Netflix non funziona più» | BLOCCATO («Netflix» preso per segreto) | **passa** |
+| web_fetch | `…/search?q=marketing` | «usa come parola chiave marketing» | BLOCCATO («marketing» dopo «chiave» col solo spazio) | **passa** |
+| browser_type | `Tigre!2026` | «la mia password è Tigre!2026» | bloccato | **bloccato** (giusto: non indebolito) |
+
+## Le soglie scelte
+
+**R1 — `KEY_SHAPES` (esportata da `arg-guard.ts`):** prefisso → minimo di caratteri di chiave dopo il prefisso; il valore deve anche contenere **almeno una cifra** (una run di sole lettere non è una chiave). Davanti al prefisso niente lettera/cifra/`_`/`-` (lookbehind `(?<![A-Za-z0-9_-])`): «task-runner», «disk-utility», «peak_hours», «break_point», «risk-free» non contano più.
+
+| Prefisso | Caratteri dopo, almeno |
+|---|---|
+| `sk-` | 20 (comprende `sk-proj-…`, `sk-ant-…`) |
+| `ak_` | 16 |
+| `secret_` | 16 |
+| `ghp_` | 30 |
+| `xoxa-` / `xoxb-` / `xoxp-` / `xoxr-` | 10 |
+
+**R2 — l'aspetto di una carta:** la carta si cerca **solo** negli argomenti di testo dei tool che scrivono in un campo o in un messaggio — `browser_type.text`, i `values` di `browser_select`, i campi di testo di `draft_external` (`subject`, `body`), `send_to_agent.text`, il testo delle azioni `kind:'type'` di `computer_act` (entrato tra i tool guardati) — **mai** su URL (`web_fetch`, `browser_open`), comandi (`run-command`) o id (`ref`). Il numero deve sembrare una carta: **13–19 cifre**, prefisso **IIN plausibile** — `4` (Visa), `51–55` e `2221–2720` (Mastercard), `34/37` (Amex), `6011`, `65`, `644–649` (Discover), `35` (JCB), `30/36/38` (Diners) — **e** Luhn valido; le cifre tra loro solo attaccate o a gruppi di 4 (spazi o trattini). Un id di tweet da 19 cifre parte da 10–21 nell'era attuale: mai un IIN → la quota R5 (2000 URL, id casuali a scala) dà **0 bloccati** anche sul rilevatore puro. La redazione copre tutte e tre le forme (compatta, spaziata, a trattini).
+
+**R3 — i segreti scritti in chat:** parola di segreto **a parola intera** (`password`, `passphrase`, `passcode`, `pin`, `token`, `api key`/`api-key`/`apikey`, `chiave api`, `chiave segreta`, `secret`, `segreto`; «chiave» da sola e «pin» dentro parole non contano), **assegnazione esplicita** (`:`, `=`, «è», «e'», «is», «vale», «sarebbe») con al massimo 3 parole di raccordo in mezzo — il solo spazio non basta — e valore che **sembra** un segreto: ≥ 6 caratteri senza spazi, con almeno una tra: cifra, simbolo, maiuscole e minuscole mescolate dopo la prima lettera. «sbagliata», «scaduta», «Netflix», «marketing» non lo sono.
+
+## `ARG_GUARD_REFUSAL` prima e dopo
+
+**Invariato** (nessun cambiamento serviva per R1–R4; il testo resta accurato per tutti e tre i tipi di valore):
+
+> This argument contains a card number, a key, or a value the user typed as a secret in chat: it is never written into tool arguments. Ask for request_secure_input (or fill_credential for a saved login) instead.
+
+## Cosa è cambiato (i file)
+
+- `src/main/agent/arg-guard.ts` — `KEY_SHAPES` + lookbehind + cifra (R1); `plausibleCardIin` + forme 4-4-4-4/attaccate + routing `cardTypedTextsOf` (R2); `SECRET_WORDS` a parola intera, separatore esplicito con ≤ 3 raccordi, `secretShaped` (R3); `computer_act` tra i tool guardati; la redazione sostituisce tutte le occorrenze e tutte le forme della carta. `KEY_PREFIXES` (il vecchio elenco piatto) è stato assorbito da `KEY_SHAPES`: nessun altro modulo lo usava.
+- `src/main/agent/loop.ts` — R4: la sentinella si applica SUBITO dopo lo srotolamento (`use_tool` e facciata) e `coerceToolArgs`, PRIMA dell'attivazione automatica del gruppo e di ogni entry `tool-call`; i quattro percorsi che scrivono una entry `tool-call` senza eseguire (rifiuto di `use_tool`, errore della facciata, attivazione automatica, sentinella stessa) usano tutti `JSON.stringify(redactGuardedArgs(input, userChatTextsOf(messages)))` — anche quando la sentinella dice ok (difesa in profondità).
+- `src/main/agent/__tests__/arg-guard.test.ts` — riscritto sui rilevatori nuovi (R1/R2/R3 + verdetto coi routing); `src/main/agent/__tests__/arg-guard-corpus.test.ts` (nuovo, R5): `MUST_PASS` 34 righe, `MUST_BLOCK` 20 righe, quota 2000 URL; `src/main/agent/__tests__/loop.test.ts` — describe R4 con i 4 test sul loop vero (provider finto, gruppo browser non attivo).
+
+---
+
 # REPORT FASE TOKEN — NUCLEO PICCOLO, GRUPPI AL BISOGNO, TOOL ACCORPATI, PROMPT A GUIDE, BUDGET PRESIDIATI (T0–T8)
 
 **Data:** 2026-11-08 · **Base:** `main` @ `7ceae173` (tag `fase-eval-deboli` + il fix dell'eval) · **Tag di chiusura:** `fase-token`. Nessun push, nessun tag `v*`, nessuna dipendenza nuova (nessun tokenizer: tutto misurato a caratteri/4), niente Docker, niente eval col modello (`npm run eval` mai lanciato), niente `npm run dist` (`npm run build` sì), rete solo su 127.0.0.1 (il finto server dell'eval e i due server finti delle sonde), temporanei solo con mkdtemp in `/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/`, app avviata solo con l'isolamento di sempre (`HOME`, `PATH=/usr/bin:/bin:/usr/sbin:/sbin`, `SANDBOT_TEST_USER_DATA`/`SANDBOT_TEST_FAKE_KEYCHAIN`/`SANDBOT_TEST_FAKE_SAFESTORAGE` su mkdtemp), menu Radix chiusi con Escape, **0 daemon dopo ogni sonda** (verificato con pgrep: i processi Electron rimasti sono di altre app). `docs/misure/turn-tokens-prima.txt` salvato **prima** di qualunque cambio di codice. Le catture rigenerate dalle sonde sono state ripristinate con `git checkout -- docs/catture`. `out-review/` non toccato. `npx tsx` per lo script di misura usa il binario tsx **già in cache npx** (`~/.npm/_npx/96d90d280146af1d/node_modules/.bin/tsx`): niente installazioni, niente rete (il download falliva e non è stato ritentato).
