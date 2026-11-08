@@ -22,12 +22,12 @@ const childBuiltin = toolsForTurnSource(
 )
 const childBrowser = allBrowser.filter((t) => subagentToolDenyReason(t.name) === null)
 
-/** il nucleo del turno normale (T1): parlare, pc, web, memory (facciata), document (facciata, R7.2), skill, find_tools */
+/** il nucleo del turno normale (T1): parlare, pc, web, memory (facciata), document (facciata, R7.2), skill, spawn_subagent (R8.2), find_tools */
 const CORE_NORMAL = [
   'message_user', 'ask_user',
   'run-command', 'read-file', 'write-file', 'list-directory',
   'web_search', 'web_fetch',
-  'memory', 'document', 'skill', 'find_tools'
+  'memory', 'document', 'skill', 'spawn_subagent', 'find_tools'
 ]
 
 const assembleUser = (over: Partial<Parameters<typeof assembleTurnTools>[0]> = {}) =>
@@ -124,14 +124,16 @@ describe('fase token (T2): i gruppi, l\'indice e l\'attivazione', () => {
       'list_agents', 'create_agent', 'update_agent', 'delete_agent', 'create_group', 'update_group', 'send_to_agent'])
   })
 
-  it('activateGroupsResult({group}): attiva il gruppo esatto e il result elenca i tool, la guida e la riga finale', () => {
+  it('activateGroupsResult({group}): attiva il gruppo esatto e il result elenca i tool, la guida e le righe finali', () => {
     const r = assembleUser({ browserAvailable: true, browserDefs: allBrowser })
     const act = activateGroupsResult(r.deferredIndex, [], { group: 'browser' })
     expect(act.activated).toEqual(['browser'])
     for (const line of ['Group browser is now active: browser', 'request_takeover', 'computer_observe', 'computer_act']) {
       expect(act.text).toContain(line)
     }
-    expect(act.text.trimEnd().endsWith('Call these tools directly by name from the next step.')).toBe(true)
+    expect(act.text).toContain('Call these tools directly by name from the next step.')
+    // fase token · nucleo (R8.3): la riga che chiude è «chiama ora, non annunciare»
+    expect(act.text.trimEnd().endsWith('Now call the tool you need; do not announce it.')).toBe(true)
   })
 
   it('activateGroupsResult({query}): cerca su id, descrizione dei gruppi, nomi e descrizioni dei tool — max 2 gruppi', () => {

@@ -65,14 +65,21 @@ export interface AssembleTurnToolsResult {
 /** T5: i budget presidiati (token stimati caratteri/4). MAI alzarli per far passare un test. */
 /** Il turno base (prompt + nucleo + find_tools) del bot normale, con o senza browser.
  *  Fase token · scoperta (R7.5): 4300 — decisione dell'utente dopo l'eval (righe
- *  «quando» dei gruppi nel prompt, document nel nucleo). */
-export const TURN_TOKEN_BUDGET = 4300
-/** Un gruppo attivato: browser (più grande), i tre gruppi ricchi, tutti gli altri. */
+ *  «quando» dei gruppi nel prompt, document nel nucleo).
+ *  Fase token · nucleo (R8.4): 4601 = 4541 misurati (la prima richiesta del
+ *  caso 3 dell'eval, T7: system col browser + history + nucleo con
+ *  spawn_subagent) + 60 di margine. */
+export const TURN_TOKEN_BUDGET = 4601
+/** Un gruppo attivato: browser (più grande), i tre gruppi ricchi, tutti gli altri.
+ *  Fase token · nucleo (R8.4): subagents ha un budget DEDICATO che SCENDE —
+ *  spawn_subagent è nel nucleo e il gruppo restano check/message/stop:
+ *  277 misurati + margine (prima valeva il default 500). */
 export const GROUP_TOKEN_BUDGET: Record<string, number> = {
   browser: 900,
   documents: 700,
   tasks: 700,
-  bots: 700
+  bots: 700,
+  subagents: 340
 }
 export const GROUP_TOKEN_BUDGET_DEFAULT = 500
 
@@ -152,14 +159,16 @@ function presentMcpGroups(mcpToolDefs: ToolDef[]): ToolGroupPresent[] {
   }))
 }
 
-/** L'ordine FISSO del nucleo (T1): parlare, computer, web, memory (facciata), document (facciata, R7.2), skill. */
+/** L'ordine FISSO del nucleo (T1): parlare, computer, web, memory (facciata), document (facciata, R7.2), skill, spawn (R8.2). */
 const CORE_ORDER: ReadonlyArray<string> = [
   'send_to_user', 'message_user', 'ask_user',
   'run-command', 'read-file', 'write-file', 'list-directory',
   'web_search', 'web_fetch',
   'update_memory', 'recall_memory',
   'write_document', 'read_document', 'edit_document',
-  'skill'
+  'skill',
+  // fase token · nucleo (R8.2): la delega sta nel nucleo del bot normale
+  'spawn_subagent'
 ]
 
 /** Le facciate del nucleo: i nomi interni che, presenti, diventano UN tool (in ordine di CORE_ORDER). */
@@ -266,6 +275,14 @@ function toolLine(g: ToolGroupPresent, t: ToolDef): string {
   return `Group ${g.id} is now active: ${t.name} — ${oneLine.slice(0, 120)}`
 }
 
+/**
+ * Fase token · nucleo (R8.3): la riga che CHIUDE il result dell'attivazione di
+ * un gruppo, con find_tools o con la chiamata per nome — il modello piccolo
+ * annuncia lo strumento invece di chiamarlo (caso 10: find_tools e poi
+ * l'annuncio). L'istruzione più recente vince: sta in CODA al result.
+ */
+export const GROUP_ACTIVATION_ACT_NOW = 'Now call the tool you need; do not announce it.'
+
 /** Il result di find_tools per i gruppi attivati: righe per tool, guida, riga finale. */
 export function groupActivationText(groups: ToolGroupPresent[]): string {
   const parts: string[] = []
@@ -274,6 +291,7 @@ export function groupActivationText(groups: ToolGroupPresent[]): string {
     if (g.guide.trim()) parts.push(g.guide.trim())
   }
   parts.push('Call these tools directly by name from the next step.')
+  parts.push(GROUP_ACTIVATION_ACT_NOW)
   return parts.join('\n')
 }
 

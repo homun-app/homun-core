@@ -351,6 +351,63 @@ describe('fase eval-deboli (D6): i result simulati di default non parlano di un 
     expect(simulatedResult('offer_connector', { id: 'inesistente' })).toBe('Connector "inesistente" does not exist: find the right one with search_connectors.')
     expect(simulatedResult('offer_connector', { id: 'catalog:notion' })).toContain('offer shown to the user')
   })
+
+  it('run=it: recall_memory di default risponde col testo VERO del prodotto, non «ok» (R8.3)', async () => {
+    const { simulatedResult } = await loadEval('it')
+    const { NO_MEMORY_FOUND } = await import('../src/main/agent/tools')
+    // il testo è QUELLO del codice vero di recall_memory (tools.ts), non inventato
+    expect(NO_MEMORY_FOUND).toBe('No memory found for this search.')
+    expect(simulatedResult('recall_memory', { query: 'preferenze dell\'utente' })).toBe(NO_MEMORY_FOUND)
+    expect(simulatedResult('recall_memory', { query: 'preferenze dell\'utente' })).not.toBe('ok')
+  })
+
+  it('run=it: il mondo del CASO vince — le memorie del mondo, non il default (R8.3)', async () => {
+    const { simulatedResult } = await loadEval('it')
+    const world = {
+      'recall_memory': () => '- [mem_eval9] (core/agent, aggiornata 2026-11-08) L\'utente preferisce i ristoranti vegetariani'
+    }
+    expect(simulatedResult('recall_memory', { query: 'ristoranti' }, world)).toContain('vegetariani')
+  })
+
+  it('run=it: la facciata memory è srotolata anche nel turno di gruppo — il RECUPERO non manda chiamate grezze (R8.3, caso 14)', async () => {
+    const { recoveryCallOf, simulatedResult, EVAL_TOOLS } = await loadEval('it')
+    const rc = recoveryCallOf(
+      { id: 'm1', name: 'memory', arguments: JSON.stringify({ action: 'recall', query: 'scaletta della cena' }) },
+      {
+        schemaOf: (n) => EVAL_TOOLS.find((t) => t.name === n) ?? null,
+        run: (name, args) => simulatedResult(name, args)
+      }
+    )
+    // la chiamata che i giudici vedono è QUELLA SROTLATA (nome interno)
+    expect(rc.expanded.name).toBe('recall_memory')
+    expect(rc.expanded.arguments).toBe(JSON.stringify({ query: 'scaletta della cena' }))
+    // e il result è quello di recall_memory (il default vero), non il fallback 'ok'
+    expect(rc.result).toBe('No memory found for this search.')
+    expect(rc.result).not.toBe('ok')
+  })
+
+  it('run=it: il recupero srotola ANCHE l\'attivazione per nome di un gruppo non attivo, con la riga R8.3.3', async () => {
+    const { recoveryCallOf, EVAL_TOOLS } = await loadEval('it')
+    const rc = recoveryCallOf(
+      { id: 'v1', name: 'visualize', arguments: JSON.stringify({ title: 'G', kind: 'mermaid', content: 'graph TD; A-->B' }) },
+      {
+        schemaOf: (n) => EVAL_TOOLS.find((t) => t.name === n) ?? null,
+        run: () => 'non deve arrivare qui',
+        inactiveGroupOf: () => ({ id: 'documents', signature: 'visualize(title, kind, content)' })
+      }
+    )
+    expect(rc.result).toContain('visualize is in group documents, now active. Call it again with: visualize(title, kind, content)')
+    expect(rc.result.trimEnd().endsWith('Now call the tool you need; do not announce it.')).toBe(true)
+  })
+
+  it('run=it: write_document/edit_document simulati terminano con le righe R8.1 del loop vero', async () => {
+    const { simulatedResult } = await loadEval('it')
+    const w = simulatedResult('write_document', { title: 'Report X', content: 'il testo' })
+    expect(w).toContain('saved to the library')
+    expect(w.trimEnd().endsWith('Saved: the user sees the document card. Reply with one or two sentences; do not repeat or summarize the content.')).toBe(true)
+    const e = simulatedResult('edit_document', { id: 'lib_eval01', edits: [{ old: 'a', new: 'b' }] })
+    expect(e.trimEnd().endsWith('Saved: the user sees the document card. Reply with one or two sentences; do not repeat or summarize what you changed.')).toBe(true)
+  })
 })
 
 // ---- fase eval-deboli (D7): le corse fallite rigiocate sulle trascrizioni finte ----
@@ -472,16 +529,20 @@ describe('fase token (T7): il turno dell\'eval è quello del prodotto e sta nel 
     const toolsTokens = tools.reduce((n, t) => n + tok(JSON.stringify(t)), 0)
     // il system prompt del runner: sys (normale) — si ricostruisce dal modulo,
     // con le righe «quando» dei gruppi presenti (fase token · scoperta, R7.1)
+    // e i punti 1-3 dei subagent (fase token · nucleo, R8.2: spawn_subagent
+    // sta nel nucleo del bot normale)
     const { systemPrompt, withLanguage } = await import('../src/main/agent/prompts')
-    const sys = withLanguage(systemPrompt({ id: 'a', name: 'SandBot', description: 'd', providerId: 'p', model: 'm', status: 'idle', unread: 0, createdAt: 1 }, { groups: catalog.map((g) => g.id) }), 'it')
+    const sys = withLanguage(systemPrompt({ id: 'a', name: 'SandBot', description: 'd', providerId: 'p', model: 'm', status: 'idle', unread: 0, createdAt: 1 }, { subagents: true, groups: catalog.map((g) => g.id) }), 'it')
     expect(sys).toContain('- subagents: ')
     expect(tok(sys) + systemAndHistory + toolsTokens).toBeLessThanOrEqual(TURN_TOKEN_BUDGET)
     // e l'elenco del turno eval è il NUCLEO del prodotto: niente schemi dei
-    // gruppi; la facciata document sì (R7.2: è nel nucleo)
+    // gruppi; la facciata document sì (R7.2: è nel nucleo) e spawn_subagent
+    // sì (R8.2: la delega è nel nucleo del bot normale)
     const names = tools.map((t) => t.name)
     expect(names).toContain('find_tools')
     expect(names).toContain('document')
-    for (const absent of ['create_agent', 'write_document', 'fill_credential', 'browser_open', 'spawn_subagent']) {
+    expect(names).toContain('spawn_subagent')
+    for (const absent of ['create_agent', 'write_document', 'fill_credential', 'browser_open', 'check_subagent']) {
       expect(names).not.toContain(absent)
     }
   })

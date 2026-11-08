@@ -563,6 +563,33 @@ const subagentsState = vi.hoisted(() => ({
   /** correzione J2: i lotti sigillati alla fine dei turni del padre */
   sealedBatches: [] as string[]
 }))
+// fase token · nucleo (R8.1): il result di write/edit_document nel loop — la
+// LIBRERIA dello store è in memoria (le righe); i file delle versioni restano
+// VERI, nella mkdtemp di dataDir, come le memorie e le skill
+vi.mock('../../store/library', () => {
+  const items: Array<Record<string, unknown>> = []
+  ;(h as unknown as { libraryItems: Array<Record<string, unknown>> }).libraryItems = items
+  return {
+    newLibraryId: () => `lib_${items.length + 1}`,
+    libraryRoot: () => `${h.db.dataDir}/library`,
+    libraryItemDir: (id: string) => `${h.db.dataDir}/library/${id}`,
+    insertLibraryItem: (row: Record<string, unknown>) => { items.push(row); return row },
+    getLibraryItem: (id: string) => (items.find((x) => x.id === id) ?? null) as never,
+    updateLibraryItem: (id: string, patch: Record<string, unknown>) => {
+      const row = items.find((x) => x.id === id)
+      if (row) Object.assign(row, patch)
+    },
+    listLibraryItems: () => [...items] as never,
+    allLibraryItems: () => [...items] as never,
+    deleteLibraryItem: (id: string) => {
+      const i = items.findIndex((x) => x.id === id)
+      if (i < 0) return false
+      items.splice(i, 1)
+      return true
+    }
+  }
+})
+
 vi.mock('../../store/subagents', () => {
   const TERMINAL = ['done', 'failed', 'stopped', 'expired']
   const find = (id: string) => subagentsState.rows.find((r) => r.id === id) ?? null
@@ -801,6 +828,8 @@ beforeEach(() => {
   subagentsState.terminal.length = 0
   subagentsState.changed.length = 0
   subagentsState.sealedBatches.length = 0
+  // fase token · nucleo (R8.1): la libreria in memoria si azzera tra i test
+  ;((h as unknown as { libraryItems?: Array<Record<string, unknown>> }).libraryItems ??= []).length = 0
   // fase 4: memoria e skill scritte dai test non devono inquinare il dopo
   rmSync(join(TMP, 'agents'), { recursive: true, force: true })
   h.virtualGroupsOff.off = false
@@ -5339,7 +5368,9 @@ describe('fase 13: add_mcp_server / install_plugin / find_tools / result MCP', (
     const fRes = h.db.entries.find((e) => e.kind === 'tool-result' && e.meta?.callId === 'f1')!
     expect(fRes.content).toContain('Group mcp:gw is now active: mcp__gw__linear_create_issue')
     expect(fRes.content).toContain('mcp__gw__linear_list_issues')
-    expect(fRes.content.trimEnd().endsWith('Call these tools directly by name from the next step.')).toBe(true)
+    expect(fRes.content).toContain('Call these tools directly by name from the next step.')
+    // fase token · nucleo (R8.3): il result di attivazione chiude con la riga nuova
+    expect(fRes.content.trimEnd().endsWith('Now call the tool you need; do not announce it.')).toBe(true)
     expect((fRes.meta?.activatedGroups as string[])[0]).toBe('mcp:gw')
     // il tool del gruppo attivato è stato ESEGUITO (dal passo successivo),
     // e alla fine del turno le chiamate MCP sono DUE: linear_create_issue e
@@ -6186,10 +6217,11 @@ describe('fase velocità (S3): elenco core fisso, differiti dietro find_tools/us
     await runTurn(AGENT, 'ciao', emit)
     const offered = namesOf(0)
     // fase token (T1): il nucleo esatto — niente charts/libreria, task, credenziali, bot…
-    // (fase token · scoperta R7.2: la facciata document È nel nucleo)
+    // (fase token · scoperta R7.2: la facciata document É nel nucleo;
+    //  fase token · nucleo R8.2: anche spawn_subagent)
     expect(offered).toEqual([
       'message_user', 'ask_user', 'run-command', 'read-file', 'write-file', 'list-directory',
-      'web_search', 'web_fetch', 'memory', 'document', 'skill', 'find_tools',
+      'web_search', 'web_fetch', 'memory', 'document', 'skill', 'spawn_subagent', 'find_tools',
       'mcp__gmail__send_message'
     ])
     // use_tool NON si offre più (storie vecchie a parte)
@@ -6345,9 +6377,10 @@ describe('fase velocità (S3): elenco core fisso, differiti dietro find_tools/us
     const activatedGroups = (res?.meta as { activatedGroups?: string[] } | null)?.activatedGroups ?? []
     expect(activatedGroups[0]).toBe('bots')
     expect(activatedGroups.length).toBeLessThanOrEqual(2)
-    // dal passo dopo gli schemi del gruppo sono nella lista, in CODA (R7.2: document nel nucleo)
-    expect(afterTools.slice(0, 12)).toEqual(['message_user', 'ask_user', 'run-command', 'read-file', 'write-file', 'list-directory', 'web_search', 'web_fetch', 'memory', 'document', 'skill', 'find_tools'])
-    expect(afterTools.slice(12)).toContain('create_agent')
+    // dal passo dopo gli schemi del gruppo sono nella lista, in CODA (R7.2:
+    // document nel nucleo; R8.2: anche spawn_subagent, prima di find_tools)
+    expect(afterTools.slice(0, 13)).toEqual(['message_user', 'ask_user', 'run-command', 'read-file', 'write-file', 'list-directory', 'web_search', 'web_fetch', 'memory', 'document', 'skill', 'spawn_subagent', 'find_tools'])
+    expect(afterTools.slice(13)).toContain('create_agent')
   })
 })
 
@@ -7381,7 +7414,8 @@ describe('fase token·scoperta (R7): il prompt del turno porta le righe «quando
       async (msgs: Array<{ role: string; content: string }>) => { system = msgs[0]!.content; return { text: 'ok' } }
     ]
     await runTurn(AGENT, 'ciao', emit)
-    expect(system).toContain('- subagents: research or work on 2+ independent topics')
+    // fase token · nucleo (R8.2.3): la riga nuova di subagents (check/message/stop)
+    expect(system).toContain('- subagents: check, message or stop the subagents you started')
     expect(system).toContain('- tasks: routines, reminders, long background work')
     expect(system).toContain('- admin: save a procedure as a skill')
     expect(system).not.toContain('- browser:')
@@ -7421,5 +7455,119 @@ describe('fase token·scoperta (R7): il prompt del turno porta le righe «quando
     for (const absent of ['- browser:', '- subagents:', '- connectors:', '- bots:']) {
       expect(system).not.toContain(absent)
     }
+  })
+})
+
+// ---- fase token · nucleo (R8): i comportamenti del nucleo, sul loop VERO ----
+
+describe('fase token·nucleo (R8): le righe fisse nei result e il gruppo subagents che si attiva da solo', () => {
+  const namesOf = (i: number): string[] =>
+    (((h.llm as { toolsList?: unknown[][] }).toolsList ?? [])[i] as Array<{ name: string }> ?? []).map((t) => t.name)
+  const LONG_BRIEF = 'Ricerca approfondita su X: punti di forza, limiti, quando sceglierlo. Confini: non cercare Y. Formato: summary di 10 righe e report in subagents/report.md. Fonti: aprire i link citati. Contesto: lavoro per il confronto dell\'utente.' + 'x'.repeat(120)
+
+  beforeEach(() => {
+    browserState.available = false
+    browserState.calls.length = 0
+    // come i test T6/T8: il nucleo SPOLIO, senza gruppi pre-attivati (il seed
+    // virtuale vale per i test vecchi, qui servono le regole del nucleo R8)
+    h.virtualGroupsOff.off = true
+  })
+
+  it('R8.1: write_document riuscito termina con la riga del messaggio breve; quello fallito no', async () => {
+    h.db.settings.set('permissions', {
+      default: 'needs_approval',
+      rules: [{ tool: 'write_document', pattern: '*', mode: 'always_allow' }, { tool: 'edit_document', pattern: '*', mode: 'always_allow' }]
+    } as const)
+    h.llm.queue = [
+      { toolCalls: [{ id: 'w1', name: 'write_document', arguments: JSON.stringify({ title: 'Report X', content: '# Report X\n\nIl testo del report, lungo abbastanza.' }) }] },
+      { toolCalls: [{ id: 'w2', name: 'write_document', arguments: JSON.stringify({ title: '', content: 'senza titolo' }) }] },
+      { text: 'fatto' }
+    ]
+    await runTurn(AGENT, 'scrivi il report', emit)
+    const ok = h.db.entries.find((e) => e.kind === 'tool-result' && e.meta?.callId === 'w1')!
+    expect(String(ok.content)).toContain('saved to the library')
+    expect(String(ok.content).trimEnd().endsWith('Saved: the user sees the document card. Reply with one or two sentences; do not repeat or summarize the content.')).toBe(true)
+    const ko = h.db.entries.find((e) => e.kind === 'tool-result' && e.meta?.callId === 'w2')!
+    expect(String(ko.content)).toContain('Document not saved')
+    expect(String(ko.content)).not.toContain('Saved: the user sees the document card')
+  })
+
+  it('R8.1: edit_document riuscito termina con la riga (con «what you changed»); quello fallito no', async () => {
+    h.db.settings.set('permissions', {
+      default: 'needs_approval',
+      rules: [{ tool: 'write_document', pattern: '*', mode: 'always_allow' }, { tool: 'edit_document', pattern: '*', mode: 'always_allow' }]
+    } as const)
+    h.llm.queue = [
+      { toolCalls: [{ id: 'e0', name: 'write_document', arguments: JSON.stringify({ title: 'Nota X', content: 'testo originale della nota' }) }] },
+      async (msgs: Array<{ role: string; content: string }>) => {
+        const last = [...msgs].reverse().find((m) => m.role === 'tool')!
+        const id = /Document "[^"]+" \((lib_[a-z0-9]+)\)/.exec(String(last.content))![1]
+        return { toolCalls: [{ id: 'e1', name: 'edit_document', arguments: JSON.stringify({ id, edits: [{ old: 'originale', new: 'modificato' }] }) }] }
+      },
+      { toolCalls: [{ id: 'e2', name: 'edit_document', arguments: JSON.stringify({ id: 'lib_inesistente', edits: [{ old: 'a', new: 'b' }] }) }] },
+      { text: 'ok' }
+    ]
+    await runTurn(AGENT, 'sistema la nota', emit)
+    const ok = h.db.entries.find((e) => e.kind === 'tool-result' && e.meta?.callId === 'e1')!
+    expect(String(ok.content)).toContain('v2 saved to the library')
+    expect(String(ok.content).trimEnd().endsWith('Saved: the user sees the document card. Reply with one or two sentences; do not repeat or summarize what you changed.')).toBe(true)
+    const ko = h.db.entries.find((e) => e.kind === 'tool-result' && e.meta?.callId === 'e2')!
+    expect(String(ko.content)).toContain('Document not modified')
+    expect(String(ko.content)).not.toContain('Saved: the user sees the document card')
+  })
+
+  it('R8.2: il result della spawn RIUSCITA termina con la riga degli altri pezzi indipendenti', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 'sx1', name: 'spawn_subagent', arguments: JSON.stringify({ title: 'Ricerca su X', brief: LONG_BRIEF }) }] },
+      { toolCalls: [{ id: 'sx2', name: 'send_to_user', arguments: JSON.stringify({ text: 'al lavoro' }) }] }
+    ]
+    await runTurn(AGENT, 'cerca su X', emit)
+    const res = h.db.entries.find((e) => e.kind === 'tool-result' && e.meta?.callId === 'sx1')!
+    expect(String(res.content)).toContain('launched')
+    expect(String(res.content).trimEnd().endsWith('Spawn the other independent pieces now, in this same turn; do not research them yourself.')).toBe(true)
+  })
+
+  it('R8.2: il gruppo subagents si attiva DA SOLO quando il bot ha un figlio APERTO', async () => {
+    subagentsState.rows.push({
+      id: 'sub_r8open', parent_id: AGENT, parent_task_id: null, batch_id: 'b-r8', title: 'Ricerca', brief: 'il brief',
+      status: 'queued', summary: null, report_path: null,
+      contaminated: 0, untrusted: 0, automatic: 0, woken: 0, sealed: 0,
+      created_at: 1000, started_at: null, finished_at: null, deadline_at: 9e15
+    })
+    h.llm.queue = [{ text: 'ok' }]
+    await runTurn(AGENT, 'a che punto è la ricerca?', emit)
+    const names = namesOf(0)
+    expect(names).toContain('spawn_subagent')
+    expect(names).toContain('check_subagent')
+    expect(names).toContain('message_subagent')
+    expect(names).toContain('stop_subagent')
+  })
+
+  it('R8.2: con SUBAGENTS_DONE il gruppo si attiva anche senza figli aperti', async () => {
+    h.llm.queue = [{ text: 'resoconto unico' }]
+    await runTurn(AGENT, 'risultati dei sottoagenti', emit, undefined, { source: 'user', initiator: 'SUBAGENTS_DONE' })
+    const names = namesOf(0)
+    for (const t of ['check_subagent', 'message_subagent', 'stop_subagent']) expect(names).toContain(t)
+  })
+
+  it('R8.2: SENZA figli aperti e senza SUBAGENTS_DONE il gruppo NON si attiva da solo', async () => {
+    h.llm.queue = [{ text: 'ok' }]
+    await runTurn(AGENT, 'ciao', emit)
+    const names = namesOf(0)
+    expect(names).toContain('spawn_subagent')
+    expect(names).not.toContain('check_subagent')
+    expect(names).not.toContain('stop_subagent')
+  })
+
+  it('R8.3: la chiamata per nome di un tool di gruppo NON attivo risponde con l\'attivazione, che termina con la riga nuova', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 'a1', name: 'visualize', arguments: JSON.stringify({ title: 'Grafico X', kind: 'mermaid', content: 'graph TD; A-->B' }) }] },
+      { text: 'ok' }
+    ]
+    await runTurn(AGENT, 'un grafico', emit)
+    const res = h.db.entries.find((e) => e.kind === 'tool-result' && e.meta?.callId === 'a1')!
+    expect(String(res.content)).toContain('visualize is in group documents, now active. Call it again with:')
+    expect(String(res.content).trimEnd().endsWith('Now call the tool you need; do not announce it.')).toBe(true)
+    expect(res.meta?.activatedGroups).toEqual(['documents'])
   })
 })

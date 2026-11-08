@@ -207,36 +207,39 @@ describe('fase 9 (punto 2): system prompt componibile', () => {
 
 // ---- fase 12 (punto 6): la sezione Sottoagenti e il prompt del FIGLIO ----
 
-import { subagentsSection, subagentSystemPrompt } from '../prompts'
+import { subagentsSection, subagentsCoreSection, subagentSystemPrompt } from '../prompts'
 
 describe('fase 12 (punto 6): la sezione "Subagents" nel prompt del padre', () => {
   it('c\'è nei bot NORMALI, con quando/how/dopo e la distinzione task/sottoagenti', () => {
-    const s = subagentsSection()
-    expect(s).toContain('# Subagents')
-    expect(s).toContain('INDEPENDENT')
-    expect(s).toContain('ALL in the same turn')
-    expect(s).toContain('self-contained')
-    expect(s).toContain('does not see this conversation')
-    expect(s).toContain('ONE SINGLE report')
-    expect(s).toContain('LONG serial work')
-    expect(s).toContain('PARALLEL')
+    // fase token · nucleo (R8.2): i punti 1-3 (quando/how/non cercare da sé)
+    // stanno nel prompt di base del bot NORMALE (subagentsCoreSection); i
+    // punti 4-5 (dopo/task contro subagent) restano nella guida
+    const core = subagentsCoreSection()
+    expect(core).toContain('# Subagents')
+    expect(core).toContain('INDEPENDENT')
+    expect(core).toContain('ALL in the same turn')
+    expect(core).toContain('self-contained')
+    expect(core).toContain('does not see this conversation')
+    const guide = subagentsSection()
+    expect(guide).toContain('ONE SINGLE report')
+    expect(guide).toContain('LONG serial work')
+    expect(guide).toContain('PARALLEL')
   })
 
   // fase eval-deboli (D4): un ramo per elemento, il padre non cerca, al massimo UNA riga
   it('D4: un subagent per elemento Nominato, niente ramo trasversale', () => {
-    const s = subagentsSection()
+    const s = subagentsCoreSection()
     expect(s).toContain('Research on several named items (frameworks, products, cities…) = ONE subagent per item, no extra cross-cutting branch: each brief covers its item fully')
   })
 
   it('D4: delegato il lavoro, il padre NON cerca per conto suo (riga dopo i brief)', () => {
-    const s = subagentsSection()
+    const s = subagentsCoreSection()
     const delegate = s.indexOf('Once you delegate, you do not research yourself (no web_search, web_fetch or run-command/curl on the same topic): the subagents do it.')
     expect(delegate).toBeGreaterThan(0)
-    // sta DOPO la riga dei brief e PRIMA della riga «Afterwards»
+    // sta DOPO la riga dei brief (la riga «Afterwards» sta nella guida, R8.2)
     const briefs = s.indexOf('Each brief is self-contained')
-    const afterwards = s.indexOf('Afterwards:')
     expect(delegate).toBeGreaterThan(briefs)
-    expect(delegate).toBeLessThan(afterwards)
+    expect(delegate).toBe(s.trimEnd().length - 'Once you delegate, you do not research yourself (no web_search, web_fetch or run-command/curl on the same topic): the subagents do it.'.length)
   })
 
   it('D4: «Afterwards» dice al massimo UNA riga (message_user o il finale, non entrambi)', () => {
@@ -271,7 +274,9 @@ describe('fase 12 (punto 6): la sezione "Subagents" nel prompt del padre', () =>
     expect(child).not.toContain('# Your computer')
     // U4 (fase pulizia · ritocchi): +50 per la regola fissa dell'ora di invio
     // (~84 token stimati): i messaggi utente del figlio portano il timbro
-    expect(child.length / 4).toBeLessThanOrEqual(500)
+    // fase token · nucleo (R8.1): +30 per la riga degli indici ##/### della
+    // regola dei documenti (documentRule): il tetto sale a 530
+    expect(child.length / 4).toBeLessThanOrEqual(530)
     // correzione J1: il figlio conosce il PROPRIO id e il path VERO del report
     expect(child).toContain('Your id is sub_ab12cd34')
     expect(child).toContain('subagents/sub_ab12cd34/report.md')
@@ -282,17 +287,22 @@ describe('fase 12 (punto 6): la sezione "Subagents" nel prompt del padre', () =>
 
 // ---- fase 14 (punto 8) → fase token (T4): documenti e credenziali DIVISI nelle guide ----
 
-import { documentsPart, credentialsPart } from '../prompts'
+import { documentsPart, credentialsPart, documentRule } from '../prompts'
 
 describe('fase token (T4): la sezione «Documents and credentials» divisa nelle guide documents e credentials', () => {
-  it('documentsPart: le regole dei documenti (write_document, edit_document, visualize, save_to_library, save_contact)', () => {
+  it('documentsPart: charts, libreria e contatti (R8.1: la regola di consegna sta nel prompt di base)', () => {
     const d = documentsPart()
-    expect(d).toContain('write_document')
-    expect(d).toContain('edit_document')
     expect(d).toContain('visualize')
     expect(d).toContain('save_to_library')
     expect(d).toContain('save_contact')
+    expect(d).not.toContain('write_document')
+    expect(d).not.toContain('edit_document')
     expect(d).not.toContain('fill_credential')
+    // la regola di consegna (primo punto + riga degli indici) è documentRule
+    const rule = documentRule()
+    expect(rule).toContain('A report, a plan or a long text goes in write_document')
+    expect(rule).toContain('edit_document with exact replacements')
+    expect(rule).toContain('##/### headings')
   })
 
   it('credentialsPart({false}): le righe della fase 14, senza takeover', () => {
@@ -460,8 +470,8 @@ import { browserToolDefs } from '../browser'
 const NO_BROWSER_GROUPS = ['documents', 'tasks', 'credentials', 'outside', 'subagents', 'bots', 'connectors', 'apps', 'admin']
 
 describe('fase token (T4): il prompt di base scende e le sezioni vanno nelle guide', () => {
-  it('PROMPT_TOKEN_BUDGET è 1900 (fase token: 1600; R7.5: 1900, decisione dopo l\'eval)', () => {
-    expect(PROMPT_TOKEN_BUDGET).toBe(1900)
+  it('PROMPT_TOKEN_BUDGET è 2046 (fase token: 1600; R7.5: 1900; R8.4: 2046 = 1986 misurati + 60, tetto 2100)', () => {
+    expect(PROMPT_TOKEN_BUDGET).toBe(2046)
   })
 
   it('prompt di base ≤ PROMPT_TOKEN_BUDGET per bot normale, turno di gruppo e bot con connettori (con le righe dei gruppi)', () => {
@@ -500,19 +510,23 @@ describe('fase token (T4): il prompt di base scende e le sezioni vanno nelle gui
     expect(groupWhenBlock(NO_BROWSER_GROUPS).split('\n')[0]!.length).toBeLessThanOrEqual(220)
   })
 
-  it('la guida di subagents contiene il testo D4 della fase eval-deboli PAROLA PER PAROLA', () => {
+  it('la guida di subagents contiene il testo D4 della fase eval-deboli PAROLA PER PAROLA (punti 4-5; i punti 1-3 sono nel prompt di base, R8.2)', () => {
     const guides = groupGuides()
-    expect(guides.subagents).toContain('For INDEPENDENT pieces of work in parallel (several searches, comparisons, multiple sources): spawn_subagent, ALL in the same turn (usually 2-4). Research on several named items (frameworks, products, cities…) = ONE subagent per item, no extra cross-cutting branch: each brief covers its item fully. Not for what you solve in 1-3 calls: do that yourself.')
-    expect(guides.subagents).toContain('Once you delegate, you do not research yourself (no web_search, web_fetch or run-command/curl on the same topic): the subagents do it.')
     expect(guides.subagents).toContain('Afterwards: at most ONE line to the user (message_user or the final text, not both); results arrive together: ONE SINGLE report, no waiting in a loop.')
+    expect(guides.subagents).toContain('A task is LONG serial work outside the chat; subagents are PARALLEL pieces (and a task can spawn them).')
+    // R8.2: i punti 1-3 non si duplicano — stanno in subagentsCoreSection
+    expect(guides.subagents).not.toContain('For INDEPENDENT pieces of work')
+    expect(guides.subagents).not.toContain('Once you delegate')
   })
 
   it('le guide di connectors, documents e credentials: le sezioni di oggi (testo invariato dove la spec lo chiede)', () => {
     const guides = groupGuides()
     // connectors: la sezione «Connectors and plugins» di oggi
     expect(guides.connectors).toContain('search with search_connectors')
-    // documents: la parte documenti della sezione «Documents and credentials»
-    expect(guides.documents).toContain('write_document')
+    // documents: charts, libreria e contatti (R8.1: la regola di consegna è
+    // nel prompt di base, la guida non la ripete)
+    expect(guides.documents).not.toContain('write_document')
+    expect(guides.documents).not.toContain('##/###')
     expect(guides.documents).toContain('visualize')
     expect(guides.documents).not.toContain('fill_credential')
     // credentials: le righe delle credenziali

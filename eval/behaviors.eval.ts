@@ -21,7 +21,7 @@ setDataDir(EVAL_DIR)
 
 import { llmStream, type ChatMessage, type ToolCall, type ToolDef } from '../src/main/agent/llm'
 import { systemPrompt, withLanguage, ROUTINE_SILENT_REPLY_GUIDANCE } from '../src/main/agent/prompts'
-import { toolDefs } from '../src/main/agent/tools'
+import { toolDefs, WRITE_DOCUMENT_REPLY_RULE, EDIT_DOCUMENT_REPLY_RULE, NO_MEMORY_FOUND } from '../src/main/agent/tools'
 // fase 11: i result web simulati usano gli stessi FORMATTER REALI del loop
 // (blocchi evidenza con regola del dato), così i casi 15-16 misurano il
 // comportamento sul testo che il modello riceve davvero
@@ -130,7 +130,7 @@ const commitClickDenied = (snapshot: string, ref: string): boolean => {
 // Correzione J4 (caso 24): anche il budget di passi del FIGLIO è quello VERO
 // (MAX_STEPS importato, non un numero a parte) e la chiusura robusta col
 // sollecito del figlio è quella del loop
-import { RECOVERY_NUDGE, RECOVERY_NO_TOOLS_RESULT, MAX_STEPS as LOOP_MAX_STEPS, ASK_USER_RESULT, WAKE_PARENT_RESULT, REQUEST_TAKEOVER_RESULT } from '../src/main/agent/loop'
+import { RECOVERY_NUDGE, RECOVERY_NO_TOOLS_RESULT, MAX_STEPS as LOOP_MAX_STEPS, ASK_USER_RESULT, WAKE_PARENT_RESULT, REQUEST_TAKEOVER_RESULT, SPAWN_SIBLINGS_RULE } from '../src/main/agent/loop'
 // fase risposta (R4): il silenzio esplicito e i segnali spaiati, come il loop
 import { isExactNoResponse, isPlaceholderText, stripStrayNoResponse } from '../src/main/agent/silent-reply'
 // fase 10: l'apertura dei turni di gruppo è quella VERA del runner (blocco
@@ -176,7 +176,7 @@ import { coerceToolArgs } from '../src/main/agent/tool-args'
 // fase token (T7): l'elenco del turno dell'eval è quello del PRODOTTO —
 // assembleTurnTools (nucleo + gruppi + find_tools), le facciate srotolate e
 // l'attivazione (automatica e da find_tools) con le STESSE funzioni pure del loop
-import { assembleTurnTools, activateGroupsResult, toolDefsOfGroups, type ToolGroupPresent } from '../src/main/agent/turn-tools'
+import { assembleTurnTools, activateGroupsResult, toolDefsOfGroups, GROUP_ACTIVATION_ACT_NOW, type ToolGroupPresent } from '../src/main/agent/turn-tools'
 import { expandFacadeCall } from '../src/main/agent/facades'
 import { toolsForTurnSource } from '../src/main/agent/connectors-policy'
 import { subagentToolDenyReason } from '../src/main/agent/subagents'
@@ -563,6 +563,11 @@ const TOOL_RESULTS: Record<string, (args: Record<string, unknown>) => string> = 
   'browser_screenshot': () => 'Screenshot salvato nel box: /box/home/agent_eval/.browser/screens/eval0001.png',
   'await_shell': () => 'Command sh-eval0001 `npm run build`: still RUNNING (wait timeout expired).\nLast lines of the log:\nbuilding…',
   'update_memory': () => 'Memory created (id mem_eval1, tier log, scope agent).',
+  // fase token · nucleo (R8.3): il default è il testo VERO del prodotto
+  // (NO_MEMORY_FOUND, tools.ts) — con «ok» il modello non sapeva niente e
+  // girava a vuoto (casi 9, 11 e 14 della corsa 2). Se il caso ha memorie
+  // nel suo mondo, il mondo vince come sempre (simulatedResult).
+  'recall_memory': () => NO_MEMORY_FOUND,
   'update_state': (a) => String(a.action) === 'resume'
     ? `Routine "${L('Riepilogo mattina', 'Morning summary')}" activated (schedule "0 9 * * 1-5").`
     : `Routine "${L('Riepilogo mattina', 'Morning summary')}" created PAUSED (id 7, provenance agent, schedule "0 9 * * 1-5"): it will not run until the user activates it with resume.`,
@@ -596,17 +601,21 @@ const TOOL_RESULTS: Record<string, (args: Record<string, unknown>) => string> = 
   'post_to_group': (a) => `Published in the group "Team cena": "${String(a.text ?? '').slice(0, 80)}…". The other members will receive it in their turn (those not called may stay silent).`,
   'pass': () => 'Silence registered: your turn in the group ends here.',
   // fase 12 (punto 8): i result dei tool del padre sui figli (deterministici)
+  // fase token · nucleo (R8.2): come il loop, il result della spawn riuscita
+  // chiude col richiamo a spawnare subito gli altri pezzi indipendenti
   'spawn_subagent': (a) => {
     const t = String(a.title ?? '')
-    return `Subagent "${t}" launched (id sub_${String(a.title ?? '').slice(0, 3).toLowerCase()}${(spawnedN++ + 10)}): it works in parallel; the batch results all arrive together when the last one finishes. Do not wait for it in a loop.`
+    return `Subagent "${t}" launched (id sub_${String(a.title ?? '').slice(0, 3).toLowerCase()}${(spawnedN++ + 10)}): it works in parallel; the batch results all arrive together when the last one finishes. Do not wait for it in a loop.\n${SPAWN_SIBLINGS_RULE}`
   },
   'check_subagent': (a) => `Subagent (id ${String(a.id ?? '')}): status running.\nTime: 1 min elapsed, deadline in 19 min. Steps: 3. Last activity: web_fetch https://docs.example.`,
   'message_subagent': (a) => `Subagent (id ${String(a.id ?? '')}) reopened on this message: it works and the result arrives on its own when it closes.`,
   'stop_subagent': (a) => `Subagent (id ${String(a.id ?? '')}) stopped: turn interrupted and queued jobs cancelled.`,
   'wake_parent': () => WAKE_PARENT_RESULT,
   // ---- fase 14 (punto 9): documenti, libreria e credenziali ----
-  'write_document': (a) => `Document "${String(a.title ?? '')}" (lib_eval01) v1 saved to the library.`,
-  'edit_document': (a) => `Document "${String(a.id ?? '')}" (lib_eval01) v2 saved to the library.`,
+  // fase token · nucleo (R8.1): come il loop vero, il result riuscito chiude
+  // con la riga del messaggio breve (quello fallito no)
+  'write_document': (a) => `Document "${String(a.title ?? '')}" (lib_eval01) v1 saved to the library.\n${WRITE_DOCUMENT_REPLY_RULE}`,
+  'edit_document': (a) => `Document "${String(a.id ?? '')}" (lib_eval01) v2 saved to the library.\n${EDIT_DOCUMENT_REPLY_RULE}`,
   'read_document': () => '# Report sui vantaggi del box condiviso\n\nIl box condiviso permette a tutti i bot…',
   'visualize': (a) => `Chart "${String(a.title ?? '')}" (lib_eval02, ${String(a.kind ?? '')}) saved in the library.`,
   'save_to_library': (a) => `File "${String(a.path ?? '')}" (lib_eval03, esportato.png, 1234 bytes) saved in the library.`,
@@ -1019,6 +1028,38 @@ function replyTurnTools(list: ToolDef[], source: 'user' | 'routine' | 'group', c
   if (child) return list
   return source === 'group' ? list.filter((t) => t.name !== 'message_user') : list.filter((t) => t.name !== 'send_to_user')
 }
+
+/**
+ * fase token · nucleo (R8.3): il result di UNA chiamata del RECUPERO (turno
+ * di gruppo o figlio) — la facciata si srotola COME nel percorso principale e
+ * come nel loop VERO (lì il sollecito entra nel flusso normale delle chiamate
+ * e lo srotolamento sta a monte dell'esecuzione). Prima la chiamata
+ * memory {action:"recall"} del caso 14 arrivava GREZZA al simulatore e cadeva
+ * nel fallback 'ok'. Esportata per il test con le trascrizioni finte.
+ */
+export function recoveryCallOf(
+  call: ToolCall,
+  deps: {
+    /** lo schema dei tool interni del turno, come lo vuole expandFacadeCall */
+    schemaOf: (n: string) => Pick<ToolDef, 'name' | 'parameters'> | null
+    /** l'esecuzione (il deliverer): nome interno + argomenti convertiti */
+    run: (name: string, args: Record<string, unknown>) => string
+    /** il gruppo (id + firma) di un tool NON attivo, per l'attivazione per nome; null se attivo o senza gruppo */
+    inactiveGroupOf?: (name: string) => { id: string; signature: string } | null
+  }
+): { result: string; expanded: ToolCall } {
+  const ex = expandFacadeCall({ name: call.name, arguments: call.arguments }, deps.schemaOf)
+  if (!ex.ok) return { result: ex.error, expanded: call }
+  const ec: ToolCall = { id: call.id, name: ex.name, arguments: ex.arguments }
+  const inactive = deps.inactiveGroupOf?.(ec.name) ?? null
+  if (inactive) {
+    return {
+      result: `${ec.name} is in group ${inactive.id}, now active. Call it again with: ${inactive.signature}\n${GROUP_ACTIVATION_ACT_NOW}`,
+      expanded: ec
+    }
+  }
+  return { result: deps.run(ec.name, coercedArgsOfCall(ec)), expanded: ec }
+}
 function replyTurnHistory(history: ChatMessage[], source: 'user' | 'routine' | 'group', child: boolean): ChatMessage[] {
   if (child || source === 'group') return history
   const out: ChatMessage[] = []
@@ -1193,11 +1234,12 @@ async function evalTurn(
         }
         // T2: chiamata a un tool di un gruppo NON attivo → attivazione
         // automatica, nessuna esecuzione, la firma per richiamarla
+        // R8.3: come il loop, il result chiude con la riga «chiama ora»
         const inList = dynState.current.some((t) => t.name === ec.name)
         const g = groupOfTool(ec.name)
         if (!inList && g && !activeGroups.has(g.id)) {
           activateInEval([g.id])
-          messages.push({ role: 'tool', toolCallId: c.id, content: `${ec.name} is in group ${g.id}, now active. Call it again with: ${compactSignature(ec.name)}` })
+          messages.push({ role: 'tool', toolCallId: c.id, content: `${ec.name} is in group ${g.id}, now active. Call it again with: ${compactSignature(ec.name)}\n${GROUP_ACTIVATION_ACT_NOW}` })
           continue
         }
         // fase eval-deboli (D1): gli argomenti si convertono al tipo dello
@@ -1242,12 +1284,29 @@ async function evalTurn(
           if (r.text.trim()) lastFreeText = r.text
           steps.push(r)
           messages.push({ role: 'assistant', content: r.text, toolCalls: r.toolCalls })
+          // fase token · nucleo (R8.3): anche le chiamate del RECUPERO
+          // srotolano la facciata e attivano il gruppo per nome, come il
+          // percorso principale (e come il loop vero, dove il sollecito entra
+          // nel flusso normale): prima la memory {action:"recall"} del caso 14
+          // arrivava GREZZA al simulatore ('ok')
+          const expandedCalls: ToolCall[] = []
           for (const c of r.toolCalls) {
-            const args = coercedArgsOfCall(c)
-            const res = deliverer.run(c.name, args)
-            messages.push({ role: 'tool', toolCallId: c.id, content: res.result })
-            if (c.name === 'pass') { endedWithPass = true; break }
+            const rc = recoveryCallOf(c, {
+              schemaOf: (n) => EVAL_TOOLS.find((t) => t.name === n) ?? null,
+              run: (name, args) => deliverer.run(name, args).result,
+              inactiveGroupOf: (name) => {
+                const inList = dynState.current.some((t) => t.name === name)
+                const g = inList ? null : groupOfTool(name)
+                if (!g || activeGroups.has(g.id)) return null
+                activateInEval([g.id])
+                return { id: g.id, signature: compactSignature(name) }
+              }
+            })
+            expandedCalls.push(rc.expanded)
+            messages.push({ role: 'tool', toolCallId: c.id, content: rc.result })
+            if (rc.expanded.name === 'pass') { endedWithPass = true; break }
           }
+          ;(r as { toolCalls: ToolCall[] }).toolCalls = expandedCalls
           return { endedWithPass }
         }
       )
@@ -1264,11 +1323,18 @@ async function evalTurn(
       if (recovery.text.trim()) lastFreeText = recovery.text
       steps.push(recovery)
       messages.push({ role: 'assistant', content: recovery.text, toolCalls: recovery.toolCalls })
+      // fase token · nucleo (R8.3): la facciata si srotola anche qui (il
+      // percorso principale lo fa per ogni chiamata del turno)
+      const expandedCalls: ToolCall[] = []
       for (const c of recovery.toolCalls) {
-        const args = coercedArgsOfCall(c)
-        const r = deliverer.run(c.name, args)
-        messages.push({ role: 'tool', toolCallId: c.id, content: r.result })
+        const rc = recoveryCallOf(c, {
+          schemaOf: (n) => EVAL_TOOLS.find((t) => t.name === n) ?? null,
+          run: (name, args) => deliverer.run(name, args).result
+        })
+        expandedCalls.push(rc.expanded)
+        messages.push({ role: 'tool', toolCallId: c.id, content: rc.result })
       }
+      ;(recovery as { toolCalls: ToolCall[] }).toolCalls = expandedCalls
     }
     // fase 3 del loop reale: turno UTENTE senza nessuna send visibile → UNA
     // chiamata di recupero col sollecito; se non basta, il testo libero
@@ -1309,10 +1375,11 @@ async function evalTurn(
 // «quando» dei gruppi PRESENTI nel turno (gli id del catalogo di evalAssemble)
 const groupIdsOf = (source: 'user' | 'routine' | 'group', child: boolean): string[] =>
   evalAssemble(source, child).catalog.map((g) => g.id)
-const sys = withLanguage(systemPrompt(AGENT, { groups: groupIdsOf('user', false) }), EVAL_LANG)
+const sys = withLanguage(systemPrompt(AGENT, { subagents: true, groups: groupIdsOf('user', false) }), EVAL_LANG)
 // fase 12: il system dei turni di GRUPPO è senza la sezione Sottoagenti (come
-// il loop vero); quello del FIGLIO è il costruttore separato
-const sysGroup = withLanguage(systemPrompt(AGENT, { teams: true, groups: groupIdsOf('group', false) }), EVAL_LANG)
+// il loop vero; fase token · nucleo R8.2: i punti 1-3 sono solo del bot
+// NORMALE); quello del FIGLIO è il costruttore separato
+const sysGroup = withLanguage(systemPrompt(AGENT, { subagents: false, teams: true, groups: groupIdsOf('group', false) }), EVAL_LANG)
 const sysChild = subagentSystemPrompt(AGENT, { id: 'sub_e24a', title: L('Ricerca su Astro', 'Astro research') }, groupIdsOf('user', true))
 const CHILD_TOOLS: ToolDef[] = [...EVAL_TOOLS.filter((t) => subagentToolAllowed(t.name)), wakeParentToolDef as ToolDef]
 const tc = (id: string, name: string, args: Record<string, unknown>): ToolCall =>

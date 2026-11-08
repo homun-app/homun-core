@@ -50,8 +50,10 @@ describe('fase token·scoperta (R7.1): una riga «quando» per gruppo nel prompt
     }
   })
 
-  it('i testi della spec per i nove gruppi indicati (parola per parola; connectors senza il «the» iniziale)', () => {
-    expect(GROUP_WHEN.subagents).toBe('research or work on 2+ independent topics → one subagent per topic, in the same turn')
+  it('i testi della spec per i nove gruppi indicati (parola per parola; connectors senza il «the» iniziale; subagents cambia in R8.2)', () => {
+    // fase token · nucleo (R8.2.3): spawn_subagent è nel nucleo, il gruppo
+    // restano check/message/stop — la riga dice quelli
+    expect(GROUP_WHEN.subagents).toBe('check, message or stop the subagents you started')
     // la riga della spec con «the» misura 114 caratteri, oltre il tetto di 110
     // della spec stessa (visto da questo file): tolto SOLO l'articolo
     expect(GROUP_WHEN.connectors).toBe('user wants a service, app or documentation "inside" you → search connectors, never a key in chat')
@@ -66,7 +68,8 @@ describe('fase token·scoperta (R7.1): una riga «quando» per gruppo nel prompt
 
   it('systemPrompt mette le righe dei gruppi PRESENTI nel turno, non quelle degli assenti', () => {
     const p = systemPrompt(agent, { groups: ['subagents', 'tasks', 'bots'] })
-    expect(p).toContain('- subagents: research or work on 2+ independent topics')
+    // fase token · nucleo (R8.2.3): la riga nuova di subagents
+    expect(p).toContain('- subagents: check, message or stop the subagents you started')
     expect(p).toContain('- tasks: routines, reminders, long background work')
     expect(p).toContain('- bots: other bots, teams and groups')
     expect(p).not.toContain('- browser:')
@@ -154,22 +157,25 @@ describe('fase token·scoperta (R7.3): le regole che solo la descrizione può da
   })
 })
 
-describe('fase token·scoperta (R7.5): i budget nuovi', () => {
-  it('TURN_TOKEN_BUDGET sale a 4300 e PROMPT_TOKEN_BUDGET a 1900 (decisione dopo l\'eval)', () => {
-    expect(TURN_TOKEN_BUDGET).toBe(4300)
-    expect(PROMPT_TOKEN_BUDGET).toBe(1900)
+describe('fase token·scoperta (R7.5): i budget nuovi (valori aggiornati da R8.4)', () => {
+  it('TURN_TOKEN_BUDGET e PROMPT_TOKEN_BUDGET (R8.4: misurato + 60, dentro i tetti 4700/2100)', () => {
+    expect(TURN_TOKEN_BUDGET).toBe(4601)
+    expect(PROMPT_TOKEN_BUDGET).toBe(2046)
+    expect(TURN_TOKEN_BUDGET).toBeLessThanOrEqual(4700)
+    expect(PROMPT_TOKEN_BUDGET).toBeLessThanOrEqual(2100)
   })
 
-  it('il turno base (prompt con le righe dei gruppi + nucleo con document + find_tools) ≤ 4300', () => {
+  it('il turno base (prompt con le righe dei gruppi + nucleo con document e spawn_subagent + find_tools) ≤ TURN_TOKEN_BUDGET', () => {
     const r = assembleUser()
-    const prompt = withLanguage(systemPrompt(agent, { groups: r.deferredIndex.map((g) => g.id) }), 'it')
+    // R8.2: il prompt del bot NORMALE porta i punti 1-3 (subagents: true)
+    const prompt = withLanguage(systemPrompt(agent, { subagents: true, groups: r.deferredIndex.map((g) => g.id) }), 'it')
     const total = tok(prompt) + r.tools.reduce((n, t) => n + toolTok(t), 0)
-    expect(total, `totale ${total}`).toBeLessThanOrEqual(4300)
+    expect(total, `totale ${total}`).toBeLessThanOrEqual(TURN_TOKEN_BUDGET)
   })
 
-  it('il prompt di base con TUTTI i gruppi (senza browser) ≤ 1900', () => {
+  it('il prompt di base con TUTTI i gruppi (senza browser) ≤ PROMPT_TOKEN_BUDGET', () => {
     const ids = TOOL_GROUPS.map((g) => g.id).filter((id) => id !== 'browser')
-    const p = systemPrompt(agent, { groups: ids })
-    expect(p.length / 4, `${p.length / 4} token`).toBeLessThanOrEqual(1900)
+    const p = systemPrompt(agent, { subagents: true, groups: ids })
+    expect(p.length / 4, `${p.length / 4} token`).toBeLessThanOrEqual(PROMPT_TOKEN_BUDGET)
   })
 })

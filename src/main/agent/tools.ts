@@ -15,6 +15,25 @@ import { readSkillFor, readSkillFileFor, writeSkillFromBot, SKILL_USER_ONLY_REFU
 export const MAX_CREATE_AGENTS_PER_TURN = 6
 export const MAX_AGENTS_TOTAL = 20
 
+/**
+ * Fase token · nucleo (R8.1): l'istruzione al momento giusto — il result
+ * RIUSCITO di write_document/edit_document chiude con questa riga (quello
+ * fallito no): per i modelli piccoli l'istruzione più recente vince, e la
+ * regola del messaggio breve arriva DOPO il salvataggio, quando serve. Il
+ * simulatore dell'eval usa le stesse righe.
+ */
+export const WRITE_DOCUMENT_REPLY_RULE =
+  'Saved: the user sees the document card. Reply with one or two sentences; do not repeat or summarize the content.'
+export const EDIT_DOCUMENT_REPLY_RULE =
+  'Saved: the user sees the document card. Reply with one or two sentences; do not repeat or summarize what you changed.'
+
+/**
+ * Fase token · nucleo (R8.3): il testo VERO del result di recall_memory
+ * quando la ricerca non trova nulla — l'eval lo usa come result simulato di
+ * default (niente più «ok» che non dice niente).
+ */
+export const NO_MEMORY_FOUND = 'No memory found for this search.'
+
 export const toolDefs: ToolDef[] = [
   {
     name: 'send_to_user',
@@ -1070,7 +1089,8 @@ export async function executeTool(
       const r = writeDocument(agentId, input, { contaminated: ctx.contaminated, userTurn: ctx.userTurn })
       if (!r.ok) return { output: `Document not saved: ${r.error}`, meta: { error: true } }
       return {
-        output: documentResultText(r.value),
+        // R8.1: il result riuscito chiude con la regola del messaggio breve
+        output: `${documentResultText(r.value)}\n${WRITE_DOCUMENT_REPLY_RULE}`,
         meta: { libraryCard: { type: 'document', id: r.value.id, title: r.value.title, version: r.value.version } }
       }
     }
@@ -1079,7 +1099,8 @@ export async function executeTool(
       const r = editDocument(agentId, input, { contaminated: ctx.contaminated, userTurn: ctx.userTurn })
       if (!r.ok) return { output: `Document not modified: ${r.error}`, meta: { error: true } }
       return {
-        output: documentResultText(r.value),
+        // R8.1: come write, con «what you changed» al posto di «the content»
+        output: `${documentResultText(r.value)}\n${EDIT_DOCUMENT_REPLY_RULE}`,
         meta: { libraryCard: { type: 'document', id: r.value.id, title: r.value.title, version: r.value.version } }
       }
     }
@@ -1183,7 +1204,7 @@ export async function executeTool(
       // update_memory non è nella whitelist del figlio)
       const owner = sandbox.boxOwnerOf(agentId)
       const found = searchMemoriesByQuery(listMemories(owner), String(input.query ?? ''))
-      if (!found.length) return { output: 'No memory found for this search.', meta: {} }
+      if (!found.length) return { output: NO_MEMORY_FOUND, meta: {} }
       const lines = found.map((r) => `- [${r.id}] (${r.tier}/${r.scope}, aggiornata ${new Date(r.updatedAt).toISOString().slice(0, 10)}) ${r.content.replace(/\n+/g, ' ')}`)
       return { output: lines.join('\n'), meta: { memoryIds: found.map((r) => r.id) } }
     }

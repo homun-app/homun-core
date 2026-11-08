@@ -111,7 +111,7 @@ import {
 // fase velocità (S3): elenco core fisso + integrati differiti dietro find_tools/use_tool;
 // fase token (T0/T1/T2): l'elenco lo costruisce l'unica fonte pura assembleTurnTools
 // (nucleo + gruppi attivabili); use_tool resta solo per le storie vecchie
-import { assembleTurnTools, offeredMcpOf, activateGroupsResult, toolDefsOfGroups, groupsNamedInResult, RESULT_ACTIVATES, activeGroupsFromTranscript, groupActivationText, type ToolGroupPresent } from './turn-tools'
+import { assembleTurnTools, offeredMcpOf, activateGroupsResult, toolDefsOfGroups, groupsNamedInResult, RESULT_ACTIVATES, activeGroupsFromTranscript, groupActivationText, GROUP_ACTIVATION_ACT_NOW, type ToolGroupPresent } from './turn-tools'
 import { useToolDef } from './core-tools'
 import { expandFacadeCall, FACADE_ACTIONS } from './facades'
 // fase token (T8): i controlli fissi di sicurezza (puri): <evento> esterno
@@ -647,6 +647,14 @@ interface SubagentToolResult {
 }
 
 /**
+ * Fase token · nucleo (R8.2): la riga che CHIUDE il result della spawn
+ * riuscita — il modello piccolo lancia un figlio e poi cerca da sé gli altri
+ * pezzi (eval: caso 21). L'istruzione più recente vince: sta in CODA.
+ * Il simulatore dell'eval la usa per lo stesso result.
+ */
+export const SPAWN_SIBLINGS_RULE = 'Spawn the other independent pieces now, in this same turn; do not research them yourself.'
+
+/**
  * Fase 12 (punto 2): i tool del PADRE — spawn_subagent, check_subagent,
  * message_subagent, stop_subagent. Il figlio è una riga agents nascosta con
  * parent_id + una riga subagents; il job subagent-run è sulla SUA corsia (il
@@ -704,7 +712,9 @@ async function runSubagentTool(
       runAt: now, now
     })
     return {
-      output: `Subagent "${title}" launched (id ${childId}): it works in parallel; the batch results all arrive together when the last one finishes. Do not wait for it in a loop.`,
+      // R8.2: il result riuscito chiude col richiamo a spawnare SUBITO gli
+      // altri pezzi indipendenti, nello stesso turno
+      output: `Subagent "${title}" launched (id ${childId}): it works in parallel; the batch results all arrive together when the last one finishes. Do not wait for it in a loop.\n${SPAWN_SIBLINGS_RULE}`,
       card: { type: 'subagent', subagentId: childId, title },
       changed: true
     }
@@ -1567,7 +1577,18 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       browserDefs,
       mcpToolDefs,
       maxInlineTools,
-      activatedGroups: activeGroupsFromTranscript(scopedEntries()),
+      // fase token · nucleo (R8.2): il gruppo subagents (check/message/stop)
+      // si attiva DA SOLO nei turni in cui il bot ha almeno un figlio APERTO o
+      // il turno è il risveglio SUBAGENTS_DONE: quei tool servono subito,
+      // senza find_tools. Mai nel figlio (lì il gruppo non è nemmeno presente)
+      activatedGroups: (() => {
+        const groups = activeGroupsFromTranscript(scopedEntries())
+        if (opts.subagent === undefined && !groups.includes('subagents') &&
+            (opts.initiator === 'SUBAGENTS_DONE' || openSubagentsOf(db(), agentId) > 0)) {
+          groups.push('subagents')
+        }
+        return groups
+      })(),
       ...(opts.subagent !== undefined ? { subagent: true } : {}),
       ...(opts.groupTurn !== undefined ? { groupTurn: true } : {})
     })
@@ -1632,7 +1653,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       // fase 14 (punto 8): le righe delle credenziali solo nei turni NON di gruppo
       // fase token · scoperta (R7.1): una riga «quando» per ogni gruppo
       // PRESENTE nel turno (stesso ordine dell'indice di find_tools)
-      systemText = systemPrompt(agent, { teams: opts.groupTurn !== undefined, groups: turnCatalog.map((g) => g.id) }) +
+      // fase token · nucleo (R8.2): i punti 1-3 della guida sono nel prompt
+      // del bot NORMALE (spawn_subagent sta nel suo nucleo)
+      systemText = systemPrompt(agent, { teams: opts.groupTurn !== undefined, subagents: opts.groupTurn === undefined, groups: turnCatalog.map((g) => g.id) }) +
         mainSection + buildSkillsSection(agentId) + connectorsSection + buildMemorySection(agentId)
     }
 
@@ -2301,7 +2324,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             activateInTurn([inactiveGroup.id])
             const shown = facadeOf ?? call.name
             const shownDef = turnTools.find((t) => t.name === shown) ?? null
-            const refused = `${shown} is in group ${inactiveGroup.id}, now active. Call it again with: ${compactSignatureOf(shown, shownDef)}`
+            // R8.3: anche l'attivazione per nome chiude con la riga «chiama
+            // ora, non annunciare» (come il result di find_tools)
+            const refused = `${shown} is in group ${inactiveGroup.id}, now active. Call it again with: ${compactSignatureOf(shown, shownDef)}\n${GROUP_ACTIVATION_ACT_NOW}`
             // fase token ritocchi (R4): anche l'attivazione scrive gli
             // argomenti REDATTI (difesa in profondità)
             const gEntry = add({
@@ -2354,8 +2379,13 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         // (fill_credential) non compaiono nella lista; se il modello li chiama
         // lo stesso — direttamente o con use_tool — il rifiuto è qui, per
         // chiamata, come per i figli
+        // fase token · nucleo (R8.2): spawn_subagent è escluso dai gruppi per
+        // COORDINAZIONE (lì si posta nel gruppo), non per dati sensibili: il
+        // suo rifiuto è quello dedicato di sempre
         if (opts.groupTurn !== undefined && GROUP_EXCLUDED_TOOLS.has(call.name)) {
-          const refused = `not available in group turns: ${call.name} (credentials and sensitive data stay out of groups)`
+          const refused = call.name === 'spawn_subagent'
+            ? 'In group turns subagents are not launched: there you coordinate with the group (post_to_group).'
+            : `not available in group turns: ${call.name} (credentials and sensitive data stay out of groups)`
           const res = add({ agentId, kind: 'tool-result', role: 'system', content: refused, meta: { callId: call.id, error: true } })
           emit({ type: 'entries', agentId, entries: [res] })
           messages.push({ role: 'tool', toolCallId: call.id, content: refused })

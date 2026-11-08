@@ -40,6 +40,11 @@ export const CORE_TOOL_NAMES: ReadonlySet<string> = new Set([
   'edit_document',
   // le skill installate
   'skill',
+  // fase token · nucleo (R8.2): la delega è comportamento di base del bot
+  // NORMALE (come Task/Agent in Claude Code, sempre caricato); nei turni di
+  // gruppo la regola del turno lo esclude (GROUP_EXCLUDED_TOOLS) e nel figlio
+  // la whitelist lo nega da sempre
+  'spawn_subagent',
   // per costruzione nei turni di gruppo
   'pass',
   'post_to_group'
@@ -100,9 +105,12 @@ export const TOOL_GROUPS: ReadonlyArray<ToolGroup> = [
     guide: ''
   },
   {
+    // fase token · nucleo (R8.2): spawn_subagent sta nel NUCLEO del bot
+    // normale; il gruppo resta per seguire i figli già lanciati (e si attiva
+    // da solo quando ce n'è almeno uno aperto o arriva SUBAGENTS_DONE)
     id: 'subagents',
-    description: 'Parallel helpers: spawn subagents, check, message, stop them.',
-    tools: ['spawn_subagent', 'check_subagent', 'message_subagent', 'stop_subagent'],
+    description: 'Check, message or stop the subagents you started (spawn is a base tool).',
+    tools: ['check_subagent', 'message_subagent', 'stop_subagent'],
     guide: ''
   },
   {

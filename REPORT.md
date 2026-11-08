@@ -1,3 +1,98 @@
+# REPORT FASE TOKEN · NUCLEO — LE REGOLE CHE NON POSSONO STARE DIETRO UNA SCOPERTA (R8)
+
+**Data:** 2026-11-08 · **Base:** `main` @ `90d39173` (tag `fase-token-scoperta`) · **Tag di chiusura:** `fase-token-nucleo`. Eseguito **solo R8** (punti 1–6). Nessun push, nessuna dipendenza nuova, niente Docker, niente eval col modello (solo `npx vitest run --config vitest.eval.config.ts eval/language-judges.eval.ts`), niente `npm run dist` (`npm run build` sì), **rete solo su 127.0.0.1** (nessuna sonda, nessun avvio dell'app), temporanei solo con mkdtemp in `/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/` (misura del «prima» e del «dopo», script di misura dei budget), `docs/catture` intatte, `out-review/` non toccato, **0 daemon** dopo ogni corsa (pgrep: nessun processo SandBot/Homun).
+
+**Verifica finale:** `typecheck` pulito · `vitest` **209 file / 3309 test verdi** (base 208/3287: +1 file `token-nucleo.test.ts` con 14 test, +7 test R8 sul loop vero in `loop.test.ts`, +1 test del gruppo subagents in `turn-budget.test.ts`) · `npm run build` verde · `language-judges.eval.ts` **41/41** (base 36: +5 test R8.3) · i test T6 del prefisso stabile, T8, R4 di `fase-token-ritocchi` e R7 di `fase-token-scoperta` ancora verdi. Commit e tag `fase-token-nucleo`, nessun push.
+
+## I test visti fallire PRIMA (test, riga, errore)
+
+Scritti prima di toccare il codice e lanciati sulla base `90d39173`. Le righe sono quelle del file dopo l'eventuale aggiunta di commenti: nessuna riga di questi test è cambiata dopo la corsa «prima».
+
+| Req | Test (file) | Riga | Errore visto |
+|---|---|---|---|
+| **R8.1** | `il prompt del bot normale contiene la regola del documento (primo punto + riga degli indici)` (`token-nucleo.test.ts`) | 58 | `AssertionError: … to contain 'A report, a plan or a long text goes …'` |
+| **R8.1** | `il prompt del turno di GRUPPO contiene la regola` | 68 | `AssertionError: … to contain 'A report, a plan or a long text …'` |
+| **R8.1** | `la guida del gruppo documents NON la ripete` | 74 | `AssertionError: expected '# Documents\n- A report, a pla…' not to contain 'A report, a plan or a long text'` |
+| **R8.1** | `la regola esce una volta sola: documentRule la incarna` | 84 | `TypeError: documentRule is not a function` |
+| **R8.2** | `il nucleo del bot normale contiene spawn_subagent, dopo skill e prima di find_tools` | 96 | `AssertionError: expected [ 'message_user', 'ask_user', … ] to include 'spawn_subagent'` |
+| **R8.2** | `il gruppo subagents contiene ormai solo check, message e stop` | 114 | `AssertionError: expected [ 'spawn_subagent', …(3) ] to deeply equal [ 'check_subagent', …(2) ]` |
+| **R8.2** | `i punti 1-3 dei subagent sono nel prompt del bot normale, PAROLA PER PAROLA` | 122 | `AssertionError: … to contain '- For INDEPENDENT pieces of work in p…'` |
+| **R8.2** | `i punti 4-5 restano nella guida, senza duplicare i punti 1-3` | 138 | `AssertionError: expected '# Subagents\n- For INDEPENDENT pieces…' not to contain 'For INDEPENDENT pieces of work'` |
+| **R8.2** | `la riga «quando» di subagents diventa quella dei tre tool rimasti` | 150 | `AssertionError: expected 'research or work on 2+ independent to…' to be 'check, message or stop the subagents …'` |
+| **R8.3.3** | `find_tools({group}) termina con «Now call the tool you need; do not announce it.»` | 156 | `AssertionError: expected false to be true` |
+| **R8.3.3** | `la riga è quella della spec, parola per parola` | 164 | `AssertionError: expected undefined to be 'Now call the tool you need; …'` (la costante non esisteva) |
+| **R8.1.2** | `R8.1: write_document riuscito termina con la riga…` (`loop.test.ts`) | 7476 | `AssertionError: expected false to be true` (il result finiva a «saved to the library.») |
+| **R8.1.2** | `R8.1: edit_document riuscito termina con la riga…` | 7495 | come sopra |
+| **R8.2.4** | `R8.2: il result della spawn RIUSCITA termina con la riga degli altri pezzi` | 7519 | `AssertionError: expected false to be true` |
+| **R8.2.1** | `R8.2: il gruppo subagents si attiva DA SOLO quando il bot ha un figlio APERTO` | 7530 | `AssertionError: … to include 'spawn_subagent'` (e `check_subagent`) |
+| **R8.2.1** | `R8.2: con SUBAGENTS_DONE il gruppo si attiva anche senza figli aperti` | 7546 | come sopra |
+| **R8.2.1** | `R8.2: SENZA figli aperti e senza SUBAGENTS_DONE il gruppo NON si attiva` | 7553 | `AssertionError: … to include 'spawn_subagent'` (oggi la spawn non sta nel nucleo) |
+| **R8.3.3** | `R8.3: la chiamata per nome di un tool di gruppo NON attivo… termina con la riga nuova` | 7562 | `AssertionError: expected false to be true` |
+| **R8.3.1** | `recall_memory di default risponde col testo VERO del prodotto, non «ok»` (`language-judges.eval.ts`) | 355 | `AssertionError: expected 'ok' to be 'No memory found for this search.'` |
+| **R8.3.2** | `la facciata memory è srotolata anche nel turno di gruppo — il RECUPERO non manda chiamate grezze` | 372 | `TypeError: recoveryCallOf is not a function` |
+| **R8.3.3** | `il recupero srotola ANCHE l'attivazione per nome di un gruppo non attivo` | 389 | come sopra |
+| **R8.1.2** | `write_document/edit_document simulati terminano con le righe R8.1 del loop vero` | 403 | `AssertionError: expected false to be true` |
+
+Quattro test erano già verdi prima, come previsto (le guardie): il nucleo di gruppo e del figlio NON contiene spawn_subagent; i punti 1-3 non sono nel prompt di gruppo né del figlio; il mondo del caso vince sul default di `recall_memory` (il meccanismo di `simulatedResult` era già world-first).
+
+## R8.1 — La regola dei documenti va dove sta il tool
+
+- **La regola nel prompt di base.** Il primo punto di `documentsPart()` e la riga degli indici `##/###` (che stava solo nella guida del gruppo) sono ora `documentRule()` (`prompts.ts:102`), inclusa da `computerSection` subito dopo la riga `Base tools:` che elenca `document`. Bot normale e turni di gruppo la ricevono via `systemPrompt`; **il figlio** la riceve nel suo costruttore (`# Documents` = `documentRule()` + `documentsPart()`), che ora porta anche la riga degli indici (prima non l'aveva): un'unica fonte per tutti.
+- **La guida del gruppo `documents`** resta con soli charts, `save_to_library` e `save_contact` (`documentsPart()`): nessun testo duplicato.
+- **L'istruzione al momento giusto.** Il result riuscito di `write_document` termina con `Saved: the user sees the document card. Reply with one or two sentences; do not repeat or summarize the content.`; quello di `edit_document` con la stessa riga dove «the content» diventa «what you changed» (`WRITE_DOCUMENT_REPLY_RULE`/`EDIT_DOCUMENT_REPLY_RULE`, `tools.ts:25-28`, appese ai due case riusciti). I result falliti (`Document not saved: …` / `Document not modified: …`) non la portano. Il simulatore dell'eval usa le STESSE costanti.
+- **Nessun troncamento automatico** del messaggio: la regola resta al modello.
+
+## R8.2 — `spawn_subagent` nel nucleo del bot normale
+
+- `spawn_subagent` entra in `CORE_TOOL_NAMES` (`core-tools.ts:47`) e in `CORE_ORDER` dopo `skill`, prima di `find_tools`. **Non nei turni di gruppo**: `GROUP_EXCLUDED_TOOLS` (`connectors-policy.ts:24`) ora lo esclude — una spawn chiamata lo stesso in un gruppo riceve il rifiuto dedicato `In group turns subagents are not launched…` (specializzato in `loop.ts:2386`, perché il rifiuto generico «credentials and sensitive data» sarebbe il motivo sbagliato). **Non nel figlio**: la whitelist (`subagents.ts`) è intatta.
+- Il gruppo `subagents` contiene ormai solo `check_subagent`, `message_subagent`, `stop_subagent`; la descrizione dice `Check, message or stop the subagents you started (spawn is a base tool).`
+- **I punti 1–3** (quando, brief autosufficiente, «once you delegate you do not research yourself») sono nel prompt di base del bot normale **parola per parola**: `subagentsCoreSection()` (`prompts.ts:271`), inclusa da `systemPrompt` solo con `subagents: true` — che il loop passa esattamente quando `groupTurn === undefined` (`loop.ts:1658`). I punti 4–5 (resoconto, task contro subagent) restano in `subagentsSection()`, la guida del gruppo. Nessuna duplicazione.
+- **L'auto-attivazione: oggi NON c'era.** Le vie di attivazione erano solo quattro: `find_tools`, la chiamata per nome, `RESULT_ACTIVATES` (run-command→tasks, web_fetch→browser) e la persistenza nel transcript (`activeGroupsFromTranscript`). Niente era legato ai figli aperti o a `SUBAGENTS_DONE`. L'ho aggiunta nell'input di `assembleTurnTools` (`loop.ts:1584`): se il bot ha almeno un figlio `queued`/`running` (`openSubagentsOf`) o il turno è il risveglio `SUBAGENTS_DONE`, `subagents` entra nei gruppi attivi (mai nel figlio, dove il gruppo non è nemmeno presente nel catalogo). Con l'attivazione a inizio turno, il prefisso resta stabile (T6 verde).
+- La riga «quando» di `subagents` in `GROUP_WHEN` diventa `check, message or stop the subagents you started` (62 caratteri).
+- Il result della spawn riuscita termina con `Spawn the other independent pieces now, in this same turn; do not research them yourself.` (`SPAWN_SIBLINGS_RULE`, `loop.ts:655`, in coda al testo di sempre; il simulatore dell'eval la replica).
+
+## R8.3 — Il mondo dell'eval
+
+### R8.3.1 — `recall_memory` realistico
+
+Il default simulato è il testo **vero** del prodotto: `No memory found for this search.` — preso dal codice (`tools.ts:1207`, ora costante esportata `NO_MEMORY_FOUND`, `tools.ts:35`, usata sia dal tool vero sia da `'recall_memory': () => NO_MEMORY_FOUND` nel `TOOL_RESULTS` dell'eval). Se un caso ha memorie nel suo mondo, vince il mondo come sempre (`simulatedResult` legge prima `world[name]`); il test in `language-judges.eval.ts:364` lo documenta con un mondo che restituisce le sue righe `- [id] (tier/scope, aggiornata …)`. Così il modello che ricorda a inizio turno non riceve più un `ok` muto (i casi 9, 11 e 14 della corsa 2 giravano a vuoto), ma la stessa risposta che dà il prodotto.
+
+### R8.3.2 — La `memory` grezza del caso 14: cosa ho trovato
+
+**Succedeva solo nel runner dell'eval, non nel loop vero.**
+
+- **Nel loop vero** il recupero dei turni di gruppo è DENTRO il ciclo dei passi (`loop.ts:2115` e `2155`): cambia `turnTools` con `groupRecoveryTools`, accoda il sollecito ai messaggi e prosegue — la risposta successiva passa dal percorso normale di OGNI chiamata, dove lo srotolamento della facciata (`loop.ts:2233`, `FACADE_ACTIONS.has` → `expandFacadeCall`) sta a monte di coercizione, attivazione ed esecuzione. Una `memory {action:"recall"}` del recupero diventa `recall_memory` sempre. Il recupero del figlio, poi, esegue solo `wake_parent` (`loop.ts:4437`) e ignora le altre chiamate.
+- **Nel runner dell'eval** il percorso principale srotolava le facciate (T3), ma i due percorsi di recupero no: il callback di `evalGroupRecovery` e il recupero del figlio eseguivano `deliverer.run(c.name, args)` sulla chiamata **grezza**. `memory` non è nella mappa dei result → fallback `'ok'` + registrazione in `unsimulatedTools`: la riga «senza risultato simulato» del caso 14, corsa 2.
+- **La correzione:** `recoveryCallOf` (`behaviors.eval.ts:1040`) — srotola la facciata, gestisce anche l'attivazione per nome di un gruppo non attivo (con la riga R8.3.3), converte gli argomenti e consegna al deliverer; i giudici vedono la chiamata srotolata (le `toolCalls` del passo vengono riscritte col nome interno, come nel percorso principale). Cablata in entrambi i recuperi (gruppo e figlio). Per il figlio è la stessa cura: nel loop vero il sollecito del figlio non esegue niente all'infuori di `wake_parent`, ma dove l'eval eseguiva, ora srotola.
+
+### R8.3.3 — La riga dell'attivazione
+
+Ogni result di attivazione di un gruppo termina con `Now call the tool you need; do not announce it.` (`GROUP_ACTIVATION_ACT_NOW`, `turn-tools.ts:284`): con `find_tools` (in coda a `groupActivationText`, dopo la riga di meccanica «Call these tools directly by name…» che resta), con la chiamata per nome nel loop (`loop.ts` e nel runner eval: `… Call it again with: <firma>` + riga nuova) e ora anche nel recupero dell'eval. Il caso 10 della corsa 2 (find_tools e poi l'annuncio) trova l'istruzione nell'ultimo punto che legge.
+
+## R8.4 — I budget e la misura
+
+Misura completa (prima/dopo) in `docs/misure/turn-tokens-nucleo.txt`:
+
+| Configurazione | Prima (`90d39173`) | Dopo R8 | Δ |
+|---|---|---|---|
+| bot normale senza browser | 1690 + 1938 (12 tool) = **3628** | 1952 + 2061 (13) = **4013** | +385 |
+| bot normale con browser | 1896 + 1962 (12) = **3858** | 2158 + 2085 (13) = **4243** | +385 |
+| turno di gruppo | 1895 + 2131 (14) = **4026** | 1986 + 2134 (14) = **4120** | +94 |
+| figlio (sottoagente) | 721 + 1123 (10) = **1844** | 751 + 1123 (10) = **1874** | +30 |
+
+- **Da dove viene il +385 del bot normale:** prompt +262 (documentRule +100, punti 1–3 `subagentsCoreSection` +171, riga «quando» di subagents −9) e tool +123 (lo schema di `spawn_subagent` nel nucleo; il gruppo perde il suo schema, ma il gruppo non sta nel turno base). Il turno di gruppo prende solo la regola dei documenti (+100−9 del prompt, +3 nell'indice di find_tools); il figlio solo la riga degli indici (+30).
+- **PROMPT_TOKEN_BUDGET = 2046** = 1986 misurati + 60 di margine: il prompt più grande fra quelli che il budget presidia (il turno di gruppo, senza browser). **Nota dichiarata:** il prompt del bot normale **con browser** misura 2158 e resta fuori dal tetto di 2100 — il blocco del browser (~172 token, `computerSection`) esiste solo nell'ambiente docker ed è conteggiato nel bilancio del TURNO, che lo copre per intero; i test che presidiano il prompt misurano le varianti senza browser (massima: 1827 senza sezione Language, 1986 con). I margini di prima (4 token) non esistono più.
+- **TURN_TOKEN_BUDGET = 4601** = 4541 misurati + 60: la prima richiesta del caso 3 dell'eval (T7: system col browser + history + nucleo con spawn), la configurazione più grande che i test misurano. Sotto il tetto di 4700.
+- **Il budget del gruppo `subagents` scende:** prima valeva il default 500 (gruppo di 4 tool, 397 misurati); ora il gruppo sono check/message/stop (277 misurati) e ha una voce dedicata: **340** (277 + margine). Nessun altro budget cambia.
+
+## R8.5/R8.6 — Test e chiusura
+
+- Tutti i test nuovi scritti prima e visti fallire (tabella sopra); poi verdi. Aggiornati i test che R8 cambia per contratto: `CORE_NORMAL` e il gruppo di 3 tool in `turn-tools.test.ts`, la riga «quando» in `token-scoperta.test.ts` (R7.1, testo nuovo di R8.2.3) e nei test R7 sul loop vero, i finali dei result di attivazione (T2, loop e turn-tools), i valori dei budget (R7.5 → R8.4) e le misure che ora passano `subagents: true` (il prompt vero del bot normale), il tetto del figlio 500 → 530 (la riga degli indici, +30). In `prompts.test.ts` i test D4 puntano i punti 1–3 su `subagentsCoreSection` e i 4–5 sulla guida; `documentsPart` perde le attese su write/edit_document. Il test T7 dell'eval misura ora il prompt con `subagents: true` e si aspetta `spawn_subagent` nel nucleo.
+- Per i test R8.1 sul loop vero, l'harness ha un mock in-memory di `store/library` (le righe; i file delle versioni restano veri nella mkdtemp) e i test R8 girano col nucleo spoglio (`virtualGroupsOff`), come T6/T8.
+- `typecheck` pulito, `vitest` 209 file / 3309 verdi, `npm run build` verde, `language-judges.eval.ts` 41/41, 0 daemon (pgrep). Commit e tag `fase-token-nucleo`, nessun push.
+
+---
+
 # REPORT FASE TOKEN · SCOPERTA — LE RIGHE «QUANDO» DEI GRUPPI, DOCUMENT NEL NUCLEO, LE REGOLE CHE SOLO LA DESCRIZIONE DÀ (R7)
 
 **Data:** 2026-11-08 · **Base:** `main` @ `5bd0f66b` (tag `fase-token-ritocchi`) · **Tag di chiusura:** `fase-token-scoperta`. Eseguito **solo R7** (punti 1–6). Nessun push, nessun tag `v*`, nessuna dipendenza nuova, niente Docker, niente eval col modello (solo il permesso `npx vitest run --config vitest.eval.config.ts eval/language-judges.eval.ts`), niente `npm run dist` (`npm run build` sì), **nessuna rete** (nessuna sonda, nessun avvio dell'app), temporanei solo con mkdtemp in `/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/` (la misura del «prima», lo script che ha spostato i blocchi del loop, le stampe di controllo), `docs/catture` intatte (nessuna sonda: niente da ripristinare), `out-review/` non toccato, **0 daemon** dopo ogni corsa (pgrep: nessun processo SandBot/Homun; gli Electron presenti sono di ZCode).

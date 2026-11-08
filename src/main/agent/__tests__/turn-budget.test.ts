@@ -38,10 +38,12 @@ const assemble = (over: Partial<Parameters<typeof assembleTurnTools>[0]> = {}) =
 
 describe('fase token (T5): i budget presidiati', () => {
   // fase token · scoperta (R7): il prompt porta le righe «quando» dei gruppi
-  // PRESENTI nel turno (gli id di deferredIndex), come nel loop
+  // PRESENTI nel turno (gli id di deferredIndex), come nel loop.
+  // fase token · nucleo (R8.2): il bot NORMALE porta anche i punti 1-3 dei
+  // subagent (subagents: true, come il loop)
   it('turno base, bot normale senza connettori (prompt con le righe dei gruppi + nucleo + find_tools) ≤ TURN_TOKEN_BUDGET', () => {
     const r = assemble()
-    const prompt = withLanguage(systemPrompt(agent, { groups: r.deferredIndex.map((g) => g.id) }), 'it')
+    const prompt = withLanguage(systemPrompt(agent, { subagents: true, groups: r.deferredIndex.map((g) => g.id) }), 'it')
     const total = tok(prompt) + r.tools.reduce((n, t) => n + toolTok(t), 0)
     expect(total).toBeLessThanOrEqual(TURN_TOKEN_BUDGET)
   })
@@ -52,7 +54,7 @@ describe('fase token (T5): i budget presidiati', () => {
     const noBrowser = assemble()
     expect(r.tools).toHaveLength(noBrowser.tools.length)
     // le righe browser del prompt e la riga «quando» del gruppo browser contano
-    const prompt = withLanguage(systemPrompt(agent, { groups: r.deferredIndex.map((g) => g.id) }), 'it')
+    const prompt = withLanguage(systemPrompt(agent, { subagents: true, groups: r.deferredIndex.map((g) => g.id) }), 'it')
     const total = tok(prompt) + r.tools.reduce((n, t) => n + toolTok(t), 0)
     expect(total).toBeLessThanOrEqual(TURN_TOKEN_BUDGET)
   })
@@ -69,6 +71,13 @@ describe('fase token (T5): i budget presidiati', () => {
       const r = assemble({ activatedGroups: [id] })
       expect(groupTokensOf(r, id)).toBeLessThanOrEqual(GROUP_TOKEN_BUDGET[id]!)
     }
+  })
+
+  it('fase token·nucleo (R8.4): il gruppo subagents (check/message/stop, spawn è nel nucleo) ≤ 340', () => {
+    const r = assemble({ activatedGroups: ['subagents'] })
+    const g = r.deferredIndex.find((x) => x.id === 'subagents')!
+    expect(g.tools.map((t) => t.name)).toEqual(['check_subagent', 'message_subagent', 'stop_subagent'])
+    expect(groupTokensOf(r, 'subagents')).toBeLessThanOrEqual(GROUP_TOKEN_BUDGET.subagents!)
   })
 
   it('ogni ALTRO gruppo ≤ 500', () => {

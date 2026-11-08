@@ -16,8 +16,12 @@ export const CONNECTOR_PROPOSAL_TOOLS = new Set(['add_mcp_server', 'install_plug
  * Fase 14 (punto 7d): fill_credential NON esiste nei turni di GRUPPO (Grok:
  * niente accessi né dati sensibili nei gruppi). Nei figli non c'è già: la
  * whitelist del sottoagente non lo contiene.
+ * Fase token · nucleo (R8.2): anche spawn_subagent non esiste nei turni di
+ * gruppo (lì si coordina col gruppo: post_to_group) — è nel nucleo SOLO del
+ * bot normale; una spawn chiamata lo stesso in un gruppo riceve il rifiuto
+ * dedicato del loop.
  */
-export const GROUP_EXCLUDED_TOOLS = new Set(['fill_credential'])
+export const GROUP_EXCLUDED_TOOLS = new Set(['fill_credential', 'spawn_subagent'])
 
 // fase risposta (R2): fuori dai gruppi si offre message_user (i progressi dei
 // lavori lunghi) e NON send_to_user — la risposta all'utente è il testo

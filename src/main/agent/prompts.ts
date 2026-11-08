@@ -23,8 +23,13 @@ import { sandboxMode, browserSandboxOk } from '../sandbox'
  * (groupGuides): il testo arriva quando l'area si attiva, non a ogni turno.
  * Fase token · scoperta (R7.5): 1900 — decisione dell'utente dopo l'eval,
  * per le righe «quando» dei gruppi (GROUP_WHEN) e document nel nucleo.
+ * Fase token · nucleo (R8.4): 2046 = 1986 misurati (scripts/turn-tokens.ts,
+ * il prompt più grande fra quelli che il budget presidia: il turno di gruppo,
+ * senza browser) + 60 di margine. Il prompt del bot normale CON browser
+ * misura 2158: il blocco del browser (~172 token) esiste solo in docker ed
+ * è conteggiato nel bilancio del TURNO (TURN_TOKEN_BUDGET), non qui.
  */
-export const PROMPT_TOKEN_BUDGET = 1900
+export const PROMPT_TOKEN_BUDGET = 2046
 
 /** Chi sei: nome, ruolo scelto dall'utente. La lingua la dà la sezione Language (17b A3). */
 export function identitySection(agent: Agent): string {
@@ -51,6 +56,8 @@ function browserOn(): boolean {
  * spec — tolto l'articolo, il resto (e «documentation», il caso 26) invariato.
  * documents (che resta per charts e libreria: document è nel nucleo) ha un
  * testo nostro.
+ * Fase token · nucleo (R8.2): subagents ora contiene solo check/message/stop
+ * (spawn_subagent è nel nucleo del bot normale): la riga dice quelli.
  */
 export const GROUP_WHEN: Readonly<Record<string, string>> = {
   browser: 'act on a web page (click, fill, log in); reading only → web_fetch',
@@ -58,7 +65,7 @@ export const GROUP_WHEN: Readonly<Record<string, string>> = {
   tasks: 'routines, reminders, long background work',
   credentials: 'a login is needed → saved logins, secure input, or hand over to the user',
   outside: 'send email or messages to other people (always as a draft)',
-  subagents: 'research or work on 2+ independent topics → one subagent per topic, in the same turn',
+  subagents: 'check, message or stop the subagents you started',
   bots: 'other bots, teams and groups',
   connectors: 'user wants a service, app or documentation "inside" you → search connectors, never a key in chat',
   apps: 'guide the user on a website or app they use with an account → open it with use-app',
@@ -85,6 +92,19 @@ export function groupWhenBlock(ids: ReadonlyArray<string>): string {
 }
 
 /**
+ * Fase token · nucleo (R8.1): la regola di consegna dei documenti — il primo
+ * punto di documentsPart() e la riga degli indici ##/###, che stavano nella
+ * guida del gruppo documents. Ora che document è un tool del NUCLEO la regola
+ * sta nel prompt di base, accanto ai Base tools (bot normale e turni di
+ * gruppo); il figlio la riceve nel suo costruttore. La guida del gruppo non
+ * la ripete.
+ */
+export function documentRule(): string {
+  return `- A report, a plan or a long text goes in write_document (the document tool), NOT in the message: in the message one or two sentences about what you did (the card already shows the document), without a bullet-point summary. To modify it use edit_document with exact replacements.
+- The user reads the document as a page with an index built from the ##/### headings: organize long documents with them.`
+}
+
+/**
  * Il computer dell'agente (condiviso tra i bot, fase 11): ambiente, tool di
  * base, credenziali opache. Fase 11b (punto 4): poche righe sul BROWSER, SOLO
  * quando è disponibile (in host il browser non esiste e il prompt non lo cita).
@@ -92,6 +112,8 @@ export function groupWhenBlock(ids: ReadonlyArray<string>): string {
  * il resto si raggiunge con find_tools. Fase token · scoperta (R7.1/R7.2):
  * document entra nel nucleo e la riga di find_tools diventa il blocco
  * «quando» dei gruppi presenti nel turno (groupWhenBlock).
+ * Fase token · nucleo (R8.1): la regola di consegna dei documenti sta qui,
+ * accanto ai Base tools che lo elencano.
  */
 export function computerSection(groups: ReadonlyArray<string> = []): string {
   const docker = sandboxMode() === 'docker'
@@ -110,6 +132,7 @@ You have a computer (the box): ${env}
 - Your home is yours: relative paths start there.
 - Before redoing work, check whether another bot has already left it in \`/workspace\`.
 Base tools: run-command (background: true for long ones), read-file, write-file, list-directory, web_search / web_fetch (web search and reading), memory (save / recall), document (write / read / edit), skill.${groupBlock ? `\n${groupBlock}` : ''}
+${documentRule()}
 - On the user's own Mac (use-app): For services that need the user's own account (video or image generators, banking, shops), open the page with open_url and hand over to the user to sign in; do not drive the login or the service step by step.${browser}
 Credentials: names with list-credentials; you NEVER see the values. Write {{secret:NAME}} where needed in the command (e.g. \`curl -H "Authorization: Bearer {{secret:API_KEY}}" ...\`): the value is injected only at execution time and stays hidden in the output.`
 }
@@ -239,12 +262,22 @@ export function limitsSection(): string {
  * Fase eval-deboli (D4): un ramo per elemento nominato (niente rami
  * trasversali), il padre NON cerca per conto dei figli e all'utente arriva al
  * massimo UNA riga (message_user o il finale, non entrambi).
+ * Fase token · nucleo (R8.2): la sezione si DIVIDE — i punti 1-3 (quando, il
+ * brief autosufficiente, «delegato il padre non cerca») vanno nel prompt di
+ * base del bot normale, PAROLA PER PAROLA (subagentsCoreSection), perché
+ * spawn_subagent è nel nucleo: l'orchestrazione è comportamento di base, non
+ * un'area da scoprire. I punti 4-5 restano qui, nella guida del gruppo.
  */
-export function subagentsSection(): string {
+export function subagentsCoreSection(): string {
   return `# Subagents
 - For INDEPENDENT pieces of work in parallel (several searches, comparisons, multiple sources): spawn_subagent, ALL in the same turn (usually 2-4). Research on several named items (frameworks, products, cities…) = ONE subagent per item, no extra cross-cutting branch: each brief covers its item fully. Not for what you solve in 1-3 calls: do that yourself.
 - Each brief is self-contained: goal, boundaries ("do not search for X: another subagent does that"), result format, where to save; the subagent does not see this conversation.
-- Once you delegate, you do not research yourself (no web_search, web_fetch or run-command/curl on the same topic): the subagents do it.
+- Once you delegate, you do not research yourself (no web_search, web_fetch or run-command/curl on the same topic): the subagents do it.`
+}
+
+/** La guida del gruppo subagents (T4): i punti 4-5 — il resoconto e task vs subagent. */
+export function subagentsSection(): string {
+  return `# Subagents
 - Afterwards: at most ONE line to the user (message_user or the final text, not both); results arrive together: ONE SINGLE report, no waiting in a loop.
 - A task is LONG serial work outside the chat; subagents are PARALLEL pieces (and a task can spawn them).`
 }
@@ -254,10 +287,12 @@ export function subagentsSection(): string {
  * documenti va nella guida del gruppo documents, le righe delle credenziali
  * nella guida del gruppo credentials. Il PROMPT DEL FIGLIO continua a
  * ricevere la parte documenti (senza credenziali, che lì non esistono).
+ * Fase token · nucleo (R8.1): la regola di consegna (primo punto + indici
+ * ##/###) sta nel prompt di base (documentRule): qui restano solo charts,
+ * save_to_library e save_contact.
  */
 export function documentsPart(): string {
-  return `- A report, a plan or a long text goes in write_document (the document tool), NOT in the message: in the message one or two sentences about what you did (the card already shows the document), without a bullet-point summary. To modify it use edit_document with exact replacements.
-- Charts are made with visualize (Vega-Lite or Mermaid); files produced in the box that the user wants to keep go in save_to_library.
+  return `- Charts are made with visualize (Vega-Lite or Mermaid); files produced in the box that the user wants to keep go in save_to_library.
 - A new contact is saved only with save_contact (confirmation card, group outside).`
 }
 
@@ -279,7 +314,9 @@ export function credentialsPart(takeover: boolean): string {
 export function groupGuides(): Record<string, string> {
   return {
     browser: '',
-    documents: `# Documents\n${documentsPart()}\n- The user reads the document as a page with an index built from the ##/### headings: organize long documents with them.`,
+    // R8.1: la regola di consegna sta nel prompt di base (documentRule);
+    // qui restano solo charts, libreria e contatti
+    documents: `# Documents\n${documentsPart()}`,
     tasks: '',
     credentials: `# Credentials\n${credentialsPart(browserOn())}`,
     outside: '',
@@ -340,6 +377,9 @@ export const PROMPT_SECTION_TITLES = [
  * proprio (subagentSystemPrompt). Fase token · scoperta (R7.1): `groups` sono
  * gli id dei gruppi PRESENTI nel turno (deferredIndex di assembleTurnTools,
  * nello stesso ordine): una riga «quando» per ciascuno, nessuna per gli assenti.
+ * Fase token · nucleo (R8.2): con `subagents: true` (solo bot NORMALE) i
+ * punti 1-3 della guida tornano nel prompt di base — spawn_subagent è nel
+ * nucleo e la sua regola non può stare dietro una scoperta.
  */
 export function systemPrompt(agent: Agent, opts: { subagents?: boolean; connectors?: boolean; credentials?: boolean; teams?: boolean; groups?: ReadonlyArray<string> } = {}): string {
   const sections = [
@@ -355,6 +395,9 @@ export function systemPrompt(agent: Agent, opts: { subagents?: boolean; connecto
     // fase token (T4): «Teams and groups» resta nei turni di GRUPPO (il loop
     // passa teams: true lì); nei turni normali sta nella guida di bots
     ...(opts.teams ? [teamGroupsSection()] : []),
+    // fase token · nucleo (R8.2): i punti 1-3 solo nei bot NORMALI (mai
+    // gruppi, mai figli)
+    ...(opts.subagents ? [subagentsCoreSection()] : []),
     limitsSection()
   ]
   return sections.join('\n')
@@ -433,5 +476,6 @@ You are a subagent of ${parent.name}: you work ONLY on the brief you received, a
 - Never passwords, card data or credentials: those steps belong to the user.
 - Ongoing activity: "${row.title}".
 # Documents
+${documentRule()}
 ${documentsPart()}`
 }
