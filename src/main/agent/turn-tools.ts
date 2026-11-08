@@ -4,7 +4,8 @@
 //
 // T1: nel turno normale restano sempre caricati solo parlare/pc/web/memory
 // (facciata)/skill/find_tools; pass e post_to_group nei turni di gruppo,
-// wake_parent nel figlio. Tutto il resto è nei GRUPPI.
+// wake_parent nel figlio. Tutto il resto è nei GRUPPI. Fase token · scoperta
+// (R7.2): anche la facciata document sta nel nucleo.
 // T2: i gruppi sono i namespace — l'indice (id: descrizione) sta nella
 // descrizione di find_tools; con {group} si attiva il gruppo esatto, con
 // {query} si cercano id, descrizioni dei gruppi e nomi/descrizioni dei tool
@@ -62,8 +63,10 @@ export interface AssembleTurnToolsResult {
 }
 
 /** T5: i budget presidiati (token stimati caratteri/4). MAI alzarli per far passare un test. */
-/** Il turno base (prompt + nucleo + find_tools) del bot normale, con o senza browser. */
-export const TURN_TOKEN_BUDGET = 4000
+/** Il turno base (prompt + nucleo + find_tools) del bot normale, con o senza browser.
+ *  Fase token · scoperta (R7.5): 4300 — decisione dell'utente dopo l'eval (righe
+ *  «quando» dei gruppi nel prompt, document nel nucleo). */
+export const TURN_TOKEN_BUDGET = 4300
 /** Un gruppo attivato: browser (più grande), i tre gruppi ricchi, tutti gli altri. */
 export const GROUP_TOKEN_BUDGET: Record<string, number> = {
   browser: 900,
@@ -149,13 +152,20 @@ function presentMcpGroups(mcpToolDefs: ToolDef[]): ToolGroupPresent[] {
   }))
 }
 
-/** L'ordine FISSO del nucleo (T1): parlare, computer, web, memory (facciata), skill. */
+/** L'ordine FISSO del nucleo (T1): parlare, computer, web, memory (facciata), document (facciata, R7.2), skill. */
 const CORE_ORDER: ReadonlyArray<string> = [
   'send_to_user', 'message_user', 'ask_user',
   'run-command', 'read-file', 'write-file', 'list-directory',
   'web_search', 'web_fetch',
   'update_memory', 'recall_memory',
+  'write_document', 'read_document', 'edit_document',
   'skill'
+]
+
+/** Le facciate del nucleo: i nomi interni che, presenti, diventano UN tool (in ordine di CORE_ORDER). */
+const CORE_FACADES: ReadonlyArray<{ facade: string; internals: ReadonlyArray<string> }> = [
+  { facade: 'memory', internals: ['update_memory', 'recall_memory'] },
+  { facade: 'document', internals: ['write_document', 'read_document', 'edit_document'] }
 ]
 
 /**
@@ -177,14 +187,17 @@ export function assembleTurnTools(input: AssembleTurnToolsInput): AssembleTurnTo
   const deferredIndex: ToolGroupPresent[] = [...builtinPresent.map((b) => b.present), ...mcpPresent]
   const presentById = new Map(deferredIndex.map((g) => [g.id, g]))
 
-  // il NUCLEO, in ordine fisso: la coppia update_memory/recall_memory diventa
-  // la facciata memory (costruita solo coi tool presenti: nel figlio solo recall)
+  // il NUCLEO, in ordine fisso: le famiglie update_memory/recall_memory e
+  // write/read/edit_document diventano le facciate memory e document
+  // (costruite solo coi tool presenti: nel figlio memory ha solo recall e
+  // document non c'è, la whitelist non lo ammette)
   const coreDefs: ToolDef[] = []
   for (const name of CORE_ORDER) {
-    if (name === 'update_memory' || name === 'recall_memory') {
-      if (coreDefs.some((x) => x.name === 'memory')) continue
-      const internals = ['update_memory', 'recall_memory'].filter((n) => byInternal.has(n)).map((n) => byInternal.get(n)!)
-      const facade = buildFacadeDef('memory', internals)
+    const family = CORE_FACADES.find((f) => f.internals.includes(name))
+    if (family) {
+      if (coreDefs.some((x) => x.name === family.facade)) continue
+      const internals = family.internals.filter((n) => byInternal.has(n)).map((n) => byInternal.get(n)!)
+      const facade = buildFacadeDef(family.facade, internals)
       if (facade) coreDefs.push(facade)
       continue
     }

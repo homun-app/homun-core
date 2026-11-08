@@ -6185,10 +6185,11 @@ describe('fase velocità (S3): elenco core fisso, differiti dietro find_tools/us
     ]
     await runTurn(AGENT, 'ciao', emit)
     const offered = namesOf(0)
-    // fase token (T1): il nucleo esatto — niente documenti, task, credenziali, bot…
+    // fase token (T1): il nucleo esatto — niente charts/libreria, task, credenziali, bot…
+    // (fase token · scoperta R7.2: la facciata document È nel nucleo)
     expect(offered).toEqual([
       'message_user', 'ask_user', 'run-command', 'read-file', 'write-file', 'list-directory',
-      'web_search', 'web_fetch', 'memory', 'skill', 'find_tools',
+      'web_search', 'web_fetch', 'memory', 'document', 'skill', 'find_tools',
       'mcp__gmail__send_message'
     ])
     // use_tool NON si offre più (storie vecchie a parte)
@@ -6344,9 +6345,9 @@ describe('fase velocità (S3): elenco core fisso, differiti dietro find_tools/us
     const activatedGroups = (res?.meta as { activatedGroups?: string[] } | null)?.activatedGroups ?? []
     expect(activatedGroups[0]).toBe('bots')
     expect(activatedGroups.length).toBeLessThanOrEqual(2)
-    // dal passo dopo gli schemi del gruppo sono nella lista, in CODA
-    expect(afterTools.slice(0, 11)).toEqual(['message_user', 'ask_user', 'run-command', 'read-file', 'write-file', 'list-directory', 'web_search', 'web_fetch', 'memory', 'skill', 'find_tools'])
-    expect(afterTools.slice(11)).toContain('create_agent')
+    // dal passo dopo gli schemi del gruppo sono nella lista, in CODA (R7.2: document nel nucleo)
+    expect(afterTools.slice(0, 12)).toEqual(['message_user', 'ask_user', 'run-command', 'read-file', 'write-file', 'list-directory', 'web_search', 'web_fetch', 'memory', 'document', 'skill', 'find_tools'])
+    expect(afterTools.slice(12)).toContain('create_agent')
   })
 })
 
@@ -7367,5 +7368,58 @@ describe('fase token ritocchi (R4): la sentinella prima dell\'attivazione, le en
     const call = h.db.entries.find((e) => e.kind === 'tool-call' && e.meta?.id === 'r4')!
     expect(String(call.meta?.arguments)).not.toContain('4242424242424242')
     expect(String(call.meta?.arguments)).toContain('[redacted]')
+  })
+})
+
+// ---- fase token · scoperta (R7): le righe «quando» dei gruppi nel prompt del turno ----
+
+describe('fase token·scoperta (R7): il prompt del turno porta le righe «quando» dei gruppi PRESENTI', () => {
+  it('bot normale senza browser: le righe dei gruppi presenti ci sono, quella del browser no', async () => {
+    browserState.available = false
+    let system = ''
+    h.llm.queue = [
+      async (msgs: Array<{ role: string; content: string }>) => { system = msgs[0]!.content; return { text: 'ok' } }
+    ]
+    await runTurn(AGENT, 'ciao', emit)
+    expect(system).toContain('- subagents: research or work on 2+ independent topics')
+    expect(system).toContain('- tasks: routines, reminders, long background work')
+    expect(system).toContain('- admin: save a procedure as a skill')
+    expect(system).not.toContain('- browser:')
+  })
+
+  it('bot normale CON browser: compare anche la riga del browser', async () => {
+    browserState.available = true
+    let system = ''
+    h.llm.queue = [
+      async (msgs: Array<{ role: string; content: string }>) => { system = msgs[0]!.content; return { text: 'ok' } }
+    ]
+    await runTurn(AGENT, 'ciao', emit)
+    expect(system).toContain('- browser: act on a web page (click, fill, log in); reading only → web_fetch')
+    browserState.available = false
+  })
+
+  it('figlio senza browser: la riga di tasks sì; browser, subagents e connectors no', async () => {
+    browserState.available = false
+    const CHILD = 'sub_r7child'
+    h.db.agents.set(CHILD, {
+      id: CHILD, name: 'TestBot · Ricerca', description: 'Ricerca', providerId: 'prov', model: 'm1',
+      status: 'idle', unread: 0, createdAt: 1, createdBy: null, section: '', parentId: AGENT
+    })
+    subagentsState.rows.push({
+      id: CHILD, parent_id: AGENT, parent_task_id: null, batch_id: 'b-r7', title: 'Ricerca', brief: 'il brief del padre',
+      status: 'running', summary: null, report_path: null,
+      contaminated: 0, untrusted: 0, automatic: 0, woken: 0, sealed: 0,
+      created_at: 1000, started_at: 1000, finished_at: null, deadline_at: 9e15
+    })
+    let system = ''
+    h.llm.queue = [
+      async (msgs: Array<{ role: string; content: string }>) => { system = msgs[0]!.content; return { text: 'ok' } }
+    ]
+    await runTurn(CHILD, 'brief', emit, undefined, { source: 'user', subagent: { id: CHILD, parentId: AGENT } })
+    expect(system).toContain('subagent of')
+    expect(system).toContain('- tasks: routines, reminders, long background work')
+    for (const absent of ['- browser:', '- subagents:', '- connectors:', '- bots:']) {
+      expect(system).not.toContain(absent)
+    }
   })
 })

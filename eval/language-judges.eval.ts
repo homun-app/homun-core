@@ -461,22 +461,26 @@ describe('fase eval-deboli (D7): le corse fallite del dump, ricostruite', () => 
 describe('fase token (T7): il turno dell\'eval è quello del prodotto e sta nel budget', () => {
   it('la prima richiesta del caso 3 (system + nucleo + find_tools) ≤ TURN_TOKEN_BUDGET', async () => {
     const m = await loadEval('it')
-    const { evalAssemble } = m as unknown as { evalAssemble: (s: 'user' | 'routine' | 'group', c: boolean, mcp?: unknown[]) => { tools: Array<{ name: string }> } }
+    const { evalAssemble } = m as unknown as { evalAssemble: (s: 'user' | 'routine' | 'group', c: boolean, mcp?: unknown[]) => { tools: Array<{ name: string }>; catalog: Array<{ id: string }> } }
     const { TURN_TOKEN_BUDGET } = await import('../src/main/agent/turn-tools')
     const tok = (s: string): number => Math.ceil(s.length / 4)
     // il caso 3: system del runner + la SUA history + l'elenco assemblato
     const { CASES } = m
     const c3 = (CASES as Array<{ id: number | string; history: Array<{ role: string; content: string }> }>).find((c) => String(c.id) === '3')!
-    const { tools } = evalAssemble('user', false)
+    const { tools, catalog } = evalAssemble('user', false)
     const systemAndHistory = c3.history.reduce((n, h) => n + tok(JSON.stringify(h)), 0)
     const toolsTokens = tools.reduce((n, t) => n + tok(JSON.stringify(t)), 0)
-    // il system prompt del runner: sys (normale) — si ricostruisce dal modulo
+    // il system prompt del runner: sys (normale) — si ricostruisce dal modulo,
+    // con le righe «quando» dei gruppi presenti (fase token · scoperta, R7.1)
     const { systemPrompt, withLanguage } = await import('../src/main/agent/prompts')
-    const sys = withLanguage(systemPrompt({ id: 'a', name: 'SandBot', description: 'd', providerId: 'p', model: 'm', status: 'idle', unread: 0, createdAt: 1 }, {}), 'it')
+    const sys = withLanguage(systemPrompt({ id: 'a', name: 'SandBot', description: 'd', providerId: 'p', model: 'm', status: 'idle', unread: 0, createdAt: 1 }, { groups: catalog.map((g) => g.id) }), 'it')
+    expect(sys).toContain('- subagents: ')
     expect(tok(sys) + systemAndHistory + toolsTokens).toBeLessThanOrEqual(TURN_TOKEN_BUDGET)
-    // e l'elenco del turno eval è il NUCLEO del prodotto: niente schemi dei gruppi
+    // e l'elenco del turno eval è il NUCLEO del prodotto: niente schemi dei
+    // gruppi; la facciata document sì (R7.2: è nel nucleo)
     const names = tools.map((t) => t.name)
     expect(names).toContain('find_tools')
+    expect(names).toContain('document')
     for (const absent of ['create_agent', 'write_document', 'fill_credential', 'browser_open', 'spawn_subagent']) {
       expect(names).not.toContain(absent)
     }

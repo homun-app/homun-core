@@ -1,3 +1,181 @@
+# REPORT FASE TOKEN · SCOPERTA — LE RIGHE «QUANDO» DEI GRUPPI, DOCUMENT NEL NUCLEO, LE REGOLE CHE SOLO LA DESCRIZIONE DÀ (R7)
+
+**Data:** 2026-11-08 · **Base:** `main` @ `5bd0f66b` (tag `fase-token-ritocchi`) · **Tag di chiusura:** `fase-token-scoperta`. Eseguito **solo R7** (punti 1–6). Nessun push, nessun tag `v*`, nessuna dipendenza nuova, niente Docker, niente eval col modello (solo il permesso `npx vitest run --config vitest.eval.config.ts eval/language-judges.eval.ts`), niente `npm run dist` (`npm run build` sì), **nessuna rete** (nessuna sonda, nessun avvio dell'app), temporanei solo con mkdtemp in `/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/` (la misura del «prima», lo script che ha spostato i blocchi del loop, le stampe di controllo), `docs/catture` intatte (nessuna sonda: niente da ripristinare), `out-review/` non toccato, **0 daemon** dopo ogni corsa (pgrep: nessun processo SandBot/Homun; gli Electron presenti sono di ZCode).
+
+**Verifica finale:** `typecheck` pulito · `vitest` **208 file / 3287 test verdi** (base 207/3267: +1 file `token-scoperta.test.ts` con 17 test, +3 test R7 sul loop vero in `loop.test.ts`) · `npm run build` verde · `language-judges.eval.ts` **36/36** · i test T8 di `fase-token` (2b, 20, 35, 29) e i test R4 di `fase-token-ritocchi` ancora verdi. Commit e tag `fase-token-scoperta`, nessun push.
+
+## I test visti fallire PRIMA (test, riga, errore)
+
+Scritti prima di toccare il codice e lanciati sulla base `5bd0f66b`. Le righe sono quelle di oggi: dopo la corsa «prima» ho aggiunto due righe di commento in `token-scoperta.test.ts` e una in `loop.test.ts`, quindi alcuni numeri sono slittati di 1 o 2. Su 17 test puri ne falliscono 13, e falliscono tutti e 3 i test sul loop:
+
+| Req | Test (file) | Riga | Errore visto |
+|---|---|---|---|
+| **R7.1** | `GROUP_WHEN ha un testo per OGNI gruppo builtin e ogni riga… ≤ 110 caratteri` (`token-scoperta.test.ts`) | 44 | `TypeError: Cannot read properties of undefined (reading 'browser')`: la tabella non esisteva |
+| **R7.1** | `i testi della spec per i nove gruppi indicati` | 53 | `TypeError: Cannot read properties of undefined (reading 'subagents')` |
+| **R7.1** | `systemPrompt mette le righe dei gruppi PRESENTI nel turno, non quelle degli assenti` | 67 | `AssertionError: expected '# Who you are\nYou are SandBot, the u…' to contain '- subagents: research or work on 2+ i…'` |
+| **R7.1** | `la riga dice anche che chiamare per nome un tool di un gruppo lo attiva` | 77 | `AssertionError: expected '# Who you are…' to match /by name[^.]*activat/` |
+| **R7.1** | `senza gruppi non c'è nessuna riga` | 82 | `AssertionError: expected '# Who you are…' not to contain 'find_tools({group:'`: la riga fissa c'era sempre |
+| **R7.1** | `il figlio riceve le righe dei SUOI gruppi` | 87 | `AssertionError: expected '# Who you are\nYou are a subagent of …' to contain '- tasks: routines, reminders, long ba…'` |
+| **R7.1** | `i gruppi mcp:<server> hanno una riga generica` | 94 | `TypeError: groupWhenLine is not a function` |
+| **R7.2** | `il nucleo del bot normale contiene la facciata document, tra memory e skill` | 103 | `AssertionError: expected [ 'message_user', 'ask_user', …(9) ] to include 'document'` |
+| **R7.2** | `il gruppo documents resta per charts e libreria, SENZA la facciata document` | 120 | `AssertionError: expected [ 'document', …(4) ] to deeply equal [ 'export_from_library', …(3) ]` |
+| **R7.2** | `la descrizione della facciata document porta la regola della spec` | 126 | `AssertionError: expected 'write: write a new document (markdown…' to contain 'not in chat'` |
+| **R7.3** | `write_document (interno) dice che il testo non va in chat` | 138 | `AssertionError: expected 'Saves a document in the user library …' to contain 'NOT in chat'` |
+| **R7.3** | `update_skill: la DESCRIZIONE contiene la regola del «QUANDO usarla» (caso 44)` | 144 | `AssertionError: expected 'Creates or updates a skill (reusable …' to match /WHEN to use/i` |
+| **R7.5** | `TURN_TOKEN_BUDGET sale a 4300 e PROMPT_TOKEN_BUDGET a 1900` | 158 | `AssertionError: expected 4000 to be 4300 // Object.is equality` |
+| **R7.6** | `bot normale senza browser: le righe dei gruppi presenti ci sono, quella del browser no` (`loop.test.ts`) | 7377 | `AssertionError: expected '# Who you are\nYou are TestBot, the u…' to contain '- subagents: research or work on 2+ i…'` |
+| **R7.6** | `bot normale CON browser: compare anche la riga del browser` | 7390 | `AssertionError: … to contain '- browser: act on a web page (click, …'` |
+| **R7.6** | `figlio senza browser: la riga di tasks sì; browser, subagents e connectors no` | 7401 | `AssertionError: expected '# Who you are\nYou are a subagent of …' to contain '- tasks: routines, reminders, long ba…'` |
+
+Quattro test erano già verdi prima, come previsto: fanno da guardia per dopo.
+- Riga 110, `document srotola in write_document`: la facciata esisteva già; il passo nuovo è che sta nel nucleo, e lo verifica la riga 103.
+- Riga 149, il parametro `description` di `update_skill` dice «what it does AND when»: la regola storica non era mai stata tolta (vedi R7.3).
+- Righe 163 e 170, le misure dei budget: prima passavano perché le righe dei gruppi non c'erano.
+
+## R7.1 — Una riga «quando» per gruppo nel prompt di base
+
+`FIND_TOOLS_LINE` non c'è più. Al suo posto, in `computerSection`, c'è il blocco `groupWhenBlock(ids)` costruito sugli id dei gruppi **presenti nel turno** (stesso ordine dell'indice di `find_tools`): una riga d'apertura e poi `- <id>: <quando serve>` per ogni gruppo. Senza gruppi il blocco è vuoto. Le funzioni nuove in `prompts.ts` sono `GROUP_WHEN`, `groupWhenLine` e `groupWhenBlock`. Come esce il prompt del bot normale senza browser:
+
+```
+Base tools: run-command (background: true for long ones), read-file, write-file, list-directory, web_search / web_fetch (web search and reading), memory (save / recall), document (write / read / edit), skill.
+More tools exist in groups; each line says WHEN a group serves you. Activate one with find_tools({group: "<id>"} or a {query}), or call one of its tools by name: that activates it too.
+- documents: charts, and the files the user keeps in the library
+- tasks: routines, reminders, long background work
+- credentials: a login is needed → saved logins, secure input, or hand over to the user
+- outside: send email or messages to other people (always as a draft)
+- subagents: research or work on 2+ independent topics → one subagent per topic, in the same turn
+- bots: other bots, teams and groups
+- connectors: user wants a service, app or documentation "inside" you → search connectors, never a key in chat
+- apps: guide the user on a website or app they use with an account → open it with use-app
+- admin: save a procedure as a skill, permission rules, files with the Mac
+```
+
+- **I testi sono quelli della spec, parola per parola, con una sola eccezione.** La riga data per `connectors` misura **114 caratteri**, oltre il tetto di 110 della spec stessa: l'ha trovato il test della riga 44. Ho tolto solo l'articolo iniziale «the» e la riga misura ora 110 esatti. Il resto è invariato, compreso «documentation», la parola del caso 26. Le altre righe misurano da 36 a 97 caratteri.
+- **Due righe nostre, che la spec non dava:**
+  - `documents`: il gruppo resta, con charts e libreria, perché `document` è passato nel nucleo;
+  - i gruppi `mcp:<server>` hanno una riga generica, `tools of the "<server>" connector, when its service is needed`.
+- **«Chiamare per nome attiva»** è vero nel loop: la chiamata di un tool di un gruppo non attivo riceve `<tool> is in group <id>, now active. Call it again with: …` (`loop.ts:2304`). `find_tools` e il suo indice sono invariati.
+- **Il figlio** riceve le righe dei **suoi** gruppi, cioè quelli che la whitelist lascia presenti: `tasks` (`await_shell`) e, col browser, `browser`. Il blocco sta in coda a «# How you work».
+- **Il cablaggio nel loop.** Il prompt veniva composto *prima* dell'assemblaggio dei tool, quindi non poteva conoscere i gruppi del turno. Ho spostato prima del system prompt, **senza cambiarli**, due blocchi:
+  - tool del turno, filtri del turno e tool MCP;
+  - rotta, catena delle riserve, filtro H4 della visione e `assembleTurnTools`.
+
+  Poi `systemPrompt(…, { groups })` e `subagentSystemPrompt(…, groups)` ricevono `turnCatalog.map((g) => g.id)`. Lo spostamento è sicuro perché nessuna entry cambia ordine: fra la vecchia e la nuova posizione non c'è nessun `add()`. Le uniche entry di quei blocchi sono le notice di rotta (H7, H2.3), e le notice non entrano nei messaggi del modello (`history.ts`). Il filtro H4 agisce prima dell'assemblaggio come prima, quindi un modello senza visione non vede la riga `apps`. Il prefisso resta stabile: i test T6 su system e tool, identici byte per byte fra passi e fra turni, sono verdi.
+- **L'eval è coerente col prodotto.** Il runner (`behaviors.eval.ts`) costruisce `sys`, `sysGroup` e `sysChild` con gli id del catalogo di `evalAssemble`, come fa il loop.
+
+## R7.2 — `document` passa nel nucleo
+
+- In `CORE_TOOL_NAMES` entrano `write_document`, `read_document` ed `edit_document`. L'assemblaggio del nucleo (`CORE_FACADES` in `turn-tools.ts`) costruisce la facciata `document` come `memory`, fra `memory` e `skill`.
+- Il gruppo `documents` resta per charts e libreria (`visualize`, `save_to_library`, `list_library`, `export_from_library`). La sua descrizione è ora «Charts and the library of files the user keeps (document itself is a base tool).». La guida del gruppo è invariata.
+- La descrizione della facciata comincia con la regola della spec (campo `rule` nuovo di `FacadeSpec`):
+
+  > Reports, notes, plans and anything longer than a short reply go here, not in chat; then send a short message.
+  > write: write a new document (markdown) / read: read a saved document / edit: replace exact text in a document
+
+- **Il figlio non cambia.** La sua whitelist non comprende i tool dei documenti, né prima né ora, quindi nel nucleo del figlio `document` non c'è. Lo verifica il test esistente sull'elenco del figlio.
+
+## R7.3 — Le regole che solo la descrizione può dare
+
+**`update_skill`.** Ho cercato la regola nella versione al tag `fase-eval-deboli` e nella fase skill (`fase-skill-ritocchi`). La frase sul QUANDO sta nel **parametro** `description`: «When to use the skill — what it does AND when (one line, shown in the system prompt)». È **identica** a `fase-skill-ritocchi`, `fase-eval-deboli`, `fase-token` e oggi: non è mai stata tolta (`git log -S` la trova solo nel commit della fase skill, `cad6c7d9`). In `fase-token` è stata accorciata la descrizione del **tool**, e il tool è finito nascosto nel gruppo `admin`. Ora la regola sta anche nella prima frase della descrizione del tool. È la frase che compare pure nella riga dell'attivazione del gruppo, che ne mostra solo la prima:
+
+| | Testo |
+|---|---|
+| prima | `Creates or updates a skill (reusable procedure): needs the user's approval (it changes future behavior). Your skills only; imported ones cannot change.` |
+| dopo | `Creates or updates a skill (reusable procedure) whose description says WHEN to use it, not only what it does. Needs the user's approval; your skills only, imported ones cannot change.` |
+
+**`write_document`** (descrizione interna, ≤ 200 caratteri come chiede il test T4.3):
+
+| | Testo |
+|---|---|
+| prima | `Saves a document in the user library (Markdown, max 200 KB): without id it creates it; with id a NEW version is written (versions never overwritten). Charts go as ```vega-lite or ```mermaid blocks.` |
+| dopo | `Saves a library document (Markdown, max 200 KB): no id creates it, with id a NEW version. Charts as ```vega-lite or ```mermaid blocks. The text goes here, NOT in chat: one or two sentences there.` |
+
+**La tabella delle frasi tolte di `fase-token`, righe (a), ricontrollate.** Per ogni riga ho verificato che il rifiuto o l'errore esista e scatti nel caso giusto. **Esistono tutti, quindi nessuna frase torna nella descrizione:**
+
+| Tool | Frase tolta | Errore/rifiuto che la fa rispettare | Scatta? |
+|---|---|---|---|
+| await_shell | «Do not wait in a loop…» | result `still RUNNING (wait timeout expired)` (`shells.ts:549`); la regola resta in breve nella descrizione («if still running, report and move on») | sì |
+| copy_to_box / copy_from_box | cartelle sensibili escluse / mai sovrascrive | `Mac path not allowed … (no sensitive folders nor Homun's data)` (`file-exchange.ts:151,199`); nome alternativo `nonConflictingName` (`file-exchange.ts:92`, usato nel ramo from_box) | sì |
+| update_skill | regole del nome 1-64 | `Invalid skill name: … (1-64 chars, only lowercase letters, digits and single hyphens)` (`skills.ts:613`) | sì |
+| send_to_agent | i limiti anti-loop | `agentSendGuard` su hop e coppia per ora (`loop.ts:3629`), più il tetto di coda | sì |
+| create_agent | conferma nei turni non dell'utente | la card d'origine e il lift nel gate: la verifica il test T8-2b (`loop.test.ts:7184`) | sì |
+| create_group / update_group | tetto dei 6 bot, creatore non rimosso | `Too many members…` (`tools.ts:1429`), `A group needs between 1 and 6 bots…` (`tools.ts:1461`), `The group creator cannot be removed with tools…` (`tools.ts:1483`) | sì |
+| web_fetch | «do NOT bypass it: report it» | `DO NOT bypass the block, tell the user that the page cannot be read` (`web-tools.ts:776,793`) | sì |
+| create_task | solo dalla chat principale, meno di 5 aperti | `You cannot open a task from inside another task…` (`loop.ts:3560`), `You cannot open more tasks…` (`loop.ts:3568`) | sì |
+| spawn_subagent | «Max 4 per turn, 6 open» | `Turn limit reached: at most 4 spawn_subagent per turn.` (`loop.ts:677`), `There are already 6 open subagents…` (`loop.ts:680`) | sì |
+| update_state | activate/provenance | resume → card di approvazione (`update-state.ts:74`) | sì |
+| computer_observe / computer_act | acquisti con conferma; password e carte rifiutate | parole d'impegno → card (`browser-guard.ts:22`); `I NEVER type passwords, card data…` (`browser-guard.ts:118`) | sì |
+
+## R7.4 — Caso 1 (routine senza novità): cosa ho trovato
+
+**Non c'è nessuna frase sul silenzio tolta o spostata.**
+- **I testi:** `ROUTINE_SILENT_REPLY_GUIDANCE` e la sezione «When you write on your own initiative» sono **identiche byte per byte** fra `fase-eval-deboli` e `fase-token`, e lo sono anche oggi: nel `git diff fase-eval-deboli HEAD -- src/main/agent/prompts.ts` non compaiono.
+- **Il cablaggio nel loop:** è invariato. La guidance va in coda al sistema nei turni con `sentinelAllowed`, fuori da gruppi e figli. Nel diff di `loop.ts` nessuna riga tocca `ROUTINE_SILENT`, `sentinelAllowed` o `NO_RESPONSE`.
+- **Il simulatore dell'eval:** è invariato. Inserisce la guidance prima di `# Language` per `source: 'routine'`.
+- **Gli altri file del silenzio:** `silent-reply.ts` e `turn-sends.ts` non sono cambiati.
+
+Quindi il calo da 3/3 a 1/3 non si spiega con i testi del silenzio, e non c'era niente da rimettere. Su 3 corse la differenza può essere anche varianza. Per misurarla serve l'eval col modello, che qui non si può lanciare.
+
+## R7.5 — I budget e la misura di `scripts/turn-tokens.ts` dopo R7
+
+`TURN_TOKEN_BUDGET` passa da 4000 a **4300** e `PROMPT_TOKEN_BUDGET` da 1600 a **1900**. Gli altri budget sono invariati.
+
+Ho corretto due imprecisioni dello script, che deve misurare ciò che manda il loop:
+- prima del prompt assembla i tool e passa al prompt gli id dei gruppi presenti;
+- nel **turno di gruppo** passa `teams: true` e `groupTurn: true`, come il loop. Lo script di `fase-token` misurava il turno di gruppo senza la sezione «Teams and groups» e senza `post_to_group`/`pass`.
+
+Il «prima» corretto del turno di gruppo l'ho misurato sulla base con lo stesso costruttore (prompt 1717, in un mkdtemp) e coi due tool, che non sono cambiati (138 + 60).
+
+Misura completa in `docs/misure/turn-tokens-scoperta.txt` (caratteri/4; il «prima» è uguale a `docs/misure/turn-tokens-dopo.txt` di `fase-token`):
+
+| Configurazione | Prima (`5bd0f66b`) | Dopo R7 | Δ |
+|---|---|---|---|
+| bot normale senza browser | 1512 + 1664 (11 tool) = **3176** | 1690 + 1938 (12 tool) = **3628** | +452 |
+| bot normale con browser | 1699 + 1688 (11 tool) = **3387** | 1896 + 1962 (12 tool) = **3858** | +471 |
+| turno di gruppo | 3171 misurati dal vecchio script (senza Teams né post_to_group/pass); corretto: 1717 + 1857 (13 tool) = **3574** | 1895 + 2131 (14 tool) = **4026** | +452 |
+| figlio (sottoagente) | 643 + 1123 (10 tool) = **1766** | 721 + 1123 (10 tool) = **1844** | +78 |
+
+- **Da dove viene il +452 del bot normale:**
+  - prompt +178: le righe «quando» e `document` fra i tool di base;
+  - tool +274: la facciata `document` vale 273, e `find_tools` +1 per la descrizione nuova del gruppo documents.
+- **Budget del turno base:** 3628 e 3858, entrambi ≤ 4300.
+- **Budget del prompt (sezione Language compresa):** 1690 senza browser, 1896 col browser, 1895 nel turno di gruppo, tutti ≤ 1900. **I margini col browser e nel turno di gruppo sono sottili: 4 e 5 token.**
+- **Budget dei gruppi:**
+  - documents scende da 681 a **436**, sotto il tetto di 700;
+  - admin sale da 489 a **497**, sotto il tetto di 500: l'aumento viene dalla descrizione di `update_skill` e lascia solo 3 token di margine;
+  - tutti gli altri sono invariati.
+- **Nessun budget è stato superato**, e nessuno è stato alzato oltre i due della spec.
+
+## R7.6 — I test
+
+`src/main/agent/__tests__/token-scoperta.test.ts` (nuovo, 17 test) e tre test in `loop.test.ts`, coi punti della spec:
+- **Righe dei gruppi presenti nel prompt, assenti no:** loop vero col bot normale con e senza browser, e col figlio senza browser; più i test puri su `systemPrompt` e `subagentSystemPrompt`.
+- **`document` nel nucleo e lo srotolamento in `write_document`:** righe 103, 110 e 120.
+- **Descrizione di `update_skill` con la regola del «quando»:** riga 144.
+- **Budget nuovi:** righe 158, 163 e 170.
+
+Ho aggiornato test esistenti dove la spec cambia il comportamento atteso:
+- `prompts.test.ts`, describe T4: `FIND_TOOLS_LINE` diventa `groupWhenBlock`, il budget passa da 1600 a 1900, e le varianti si misurano con le righe dei gruppi (il turno di gruppo con `teams: true`);
+- `turn-tools.test.ts` e i due test S3 di `loop.test.ts`: il nucleo del bot normale e quello del turno di gruppo contengono `document`;
+- `turn-budget.test.ts`: il turno base si misura col prompt che porta le righe dei gruppi presenti;
+- `language-judges.eval.ts`, test T7 del budget del caso 3: il `sys` porta i gruppi e il nucleo contiene `document`.
+
+## Cosa è cambiato (i file)
+
+- `src/main/agent/prompts.ts`: `GROUP_WHEN`, `groupWhenLine` e `groupWhenBlock` al posto di `FIND_TOOLS_LINE`; `computerSection(groups)` con `document` fra i tool di base; `systemPrompt` accetta `opts.groups`; `subagentSystemPrompt(…, groups)`; `PROMPT_TOKEN_BUDGET` a 1900.
+- `src/main/agent/loop.ts`: tool, rotta e assemblaggio spostati prima del system prompt, invariati; i due costruttori del prompt ricevono gli id di `turnCatalog`.
+- `src/main/agent/core-tools.ts`: `document` nel nucleo; il gruppo `documents` tiene charts e libreria, con la descrizione nuova.
+- `src/main/agent/turn-tools.ts`: `CORE_FACADES` (memory e document) nel nucleo; `TURN_TOKEN_BUDGET` a 4300.
+- `src/main/agent/facades.ts`: campo `rule` di `FacadeSpec`; la regola di `document` in testa alla descrizione.
+- `src/main/agent/tools.ts`: le descrizioni di `update_skill` (il QUANDO) e di `write_document` (il testo non in chat).
+- `eval/behaviors.eval.ts`: il runner costruisce i prompt coi gruppi del turno.
+- `eval/language-judges.eval.ts`: il test T7 come sopra.
+- `scripts/turn-tokens.ts`: il prompt dipende dai gruppi; il turno di gruppo con `teams`/`groupTurn`.
+- `docs/misure/turn-tokens-scoperta.txt` (nuovo): la misura dopo R7.
+- Test: `token-scoperta.test.ts` (nuovo), più `loop.test.ts`, `prompts.test.ts`, `turn-tools.test.ts` e `turn-budget.test.ts`.
+
+---
+
 # REPORT FASE TOKEN · RITOCCI — SENTINELLA SENZA FALSI POSITIVI, CONTROLLO PRIMA DI OGNI REGISTRAZIONE (R1–R6)
 
 **Data:** 2026-11-08 · **Base:** `main` @ `6a3869d4` (tag `fase-token`) · **Tag di chiusura:** `fase-token-ritocchi`. Nessun push, nessun tag `v*`, nessuna dipendenza nuova, niente Docker, niente eval col modello (`npm run eval` mai lanciato; solo il permesso `npx vitest run --config vitest.eval.config.ts eval/language-judges.eval.ts`), niente `npm run dist` (`npm run build` sì), **nessuna rete** (nessuna sonda, nessun avvio dell'app: solo vitest/typecheck/build offline), temporanei solo con mkdtemp in `/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/` (la misura del «prima» del paragrafo sotto), `docs/catture` intatte (niente da ripristinare: nessuna sonda), `out-review/` non toccato, **0 daemon dopo ogni corsa** (verificato con pgrep: i processi Electron rimasti sono di 1Password/Claude/Cursor, altre app).

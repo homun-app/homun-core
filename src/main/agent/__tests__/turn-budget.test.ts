@@ -37,19 +37,22 @@ const assemble = (over: Partial<Parameters<typeof assembleTurnTools>[0]> = {}) =
   })
 
 describe('fase token (T5): i budget presidiati', () => {
-  it('turno base, bot normale senza connettori (prompt + nucleo + find_tools) ≤ 4000', () => {
+  // fase token · scoperta (R7): il prompt porta le righe «quando» dei gruppi
+  // PRESENTI nel turno (gli id di deferredIndex), come nel loop
+  it('turno base, bot normale senza connettori (prompt con le righe dei gruppi + nucleo + find_tools) ≤ TURN_TOKEN_BUDGET', () => {
     const r = assemble()
-    const prompt = withLanguage(systemPrompt(agent, {}), 'it')
+    const prompt = withLanguage(systemPrompt(agent, { groups: r.deferredIndex.map((g) => g.id) }), 'it')
     const total = tok(prompt) + r.tools.reduce((n, t) => n + toolTok(t), 0)
     expect(total).toBeLessThanOrEqual(TURN_TOKEN_BUDGET)
   })
 
-  it('turno base con browser disponibile: STESSO numero di tool (il browser è un gruppo) ≤ 4000', () => {
+  it('turno base con browser disponibile: STESSO numero di tool (il browser è un gruppo) ≤ TURN_TOKEN_BUDGET', () => {
     browserOk.v = true
     const r = assemble({ browserAvailable: true, browserDefs: [...browserToolDefs, ...computerToolDefs] })
     const noBrowser = assemble()
     expect(r.tools).toHaveLength(noBrowser.tools.length)
-    const prompt = withLanguage(systemPrompt(agent, {}), 'it') // le righe browser del prompt contano
+    // le righe browser del prompt e la riga «quando» del gruppo browser contano
+    const prompt = withLanguage(systemPrompt(agent, { groups: r.deferredIndex.map((g) => g.id) }), 'it')
     const total = tok(prompt) + r.tools.reduce((n, t) => n + toolTok(t), 0)
     expect(total).toBeLessThanOrEqual(TURN_TOKEN_BUDGET)
   })

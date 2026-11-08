@@ -452,22 +452,25 @@ describe('U6 — la riga dei servizi che chiedono l\'account dell\'utente', () =
 
 // ---- fase token (T4): prompt a guide, budget 1600, descrizioni di una riga ----
 
-import { groupGuides, FIND_TOOLS_LINE } from '../prompts'
+import { groupGuides, groupWhenBlock } from '../prompts'
 import { toolDefs, computerToolDefs } from '../tools'
 import { browserToolDefs } from '../browser'
 
-describe('fase token (T4): il prompt di base scende a 1600 e le sezioni vanno nelle guide', () => {
-  it('PROMPT_TOKEN_BUDGET è 1600', () => {
-    expect(PROMPT_TOKEN_BUDGET).toBe(1600)
+/** fase token · scoperta (R7.1): i gruppi di un bot normale senza browser */
+const NO_BROWSER_GROUPS = ['documents', 'tasks', 'credentials', 'outside', 'subagents', 'bots', 'connectors', 'apps', 'admin']
+
+describe('fase token (T4): il prompt di base scende e le sezioni vanno nelle guide', () => {
+  it('PROMPT_TOKEN_BUDGET è 1900 (fase token: 1600; R7.5: 1900, decisione dopo l\'eval)', () => {
+    expect(PROMPT_TOKEN_BUDGET).toBe(1900)
   })
 
-  it('prompt di base ≤ 1600 per bot normale, turno di gruppo e bot con connettori', () => {
+  it('prompt di base ≤ PROMPT_TOKEN_BUDGET per bot normale, turno di gruppo e bot con connettori (con le righe dei gruppi)', () => {
     const variants = [
-      systemPrompt(agent, { subagents: true, connectors: true, credentials: true }),
-      systemPrompt(agent, { subagents: false, connectors: false, credentials: false }),
-      systemPrompt(agent, { subagents: true, connectors: true, credentials: true }) + '\n# Active connectors\n- gw: 60 tools — gateway'
+      systemPrompt(agent, { subagents: true, connectors: true, credentials: true, groups: NO_BROWSER_GROUPS }),
+      systemPrompt(agent, { subagents: false, connectors: false, credentials: false, teams: true, groups: NO_BROWSER_GROUPS }),
+      systemPrompt(agent, { subagents: true, connectors: true, credentials: true, groups: [...NO_BROWSER_GROUPS, 'mcp:gw'] }) + '\n# Active connectors\n- gw: 60 tools — gateway'
     ]
-    for (const v of variants) expect(v.length / 4, v.slice(0, 40)).toBeLessThanOrEqual(1600)
+    for (const v of variants) expect(v.length / 4, v.slice(0, 40)).toBeLessThanOrEqual(PROMPT_TOKEN_BUDGET)
   })
 
   it('le sezioni spostate NON sono più nel prompt normale: Connectors, Other bots, Teams, Subagents, Documents and credentials', () => {
@@ -490,11 +493,11 @@ describe('fase token (T4): il prompt di base scende a 1600 e le sezioni vanno ne
     expect(guides.bots).toContain('Teams and groups')
   })
 
-  it('una SOLA riga dice che gli altri strumenti si attivano con find_tools (l\'indice è nella descrizione del tool)', () => {
-    const p = systemPrompt(agent, {})
+  it('una SOLA riga dice che gli altri strumenti si attivano con find_tools (l\'indice è nella descrizione del tool; R7.1: seguono le righe «quando»)', () => {
+    const p = systemPrompt(agent, { groups: NO_BROWSER_GROUPS })
     const mentions = p.split('\n').filter((l) => l.includes('find_tools'))
     expect(mentions.length).toBe(1)
-    expect(FIND_TOOLS_LINE.length).toBeLessThanOrEqual(220)
+    expect(groupWhenBlock(NO_BROWSER_GROUPS).split('\n')[0]!.length).toBeLessThanOrEqual(220)
   })
 
   it('la guida di subagents contiene il testo D4 della fase eval-deboli PAROLA PER PAROLA', () => {

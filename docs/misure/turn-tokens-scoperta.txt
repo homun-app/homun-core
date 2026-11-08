@@ -1,0 +1,111 @@
+# turn-tokens — token stimati (caratteri/4) del turno, per configurazione
+# fonte: assembleTurnTools (src/main/agent/turn-tools.ts) — la stessa del loop e dell'eval
+# prompt: system prompt del turno SENZA le sezioni dinamiche (memoria, skill, bot principale, connettori),
+#         con le righe «quando» dei gruppi PRESENTI nel turno (fase token · scoperta, R7.1)
+
+## bot normale senza browser
+prompt: 1690
+tools del turno: 1938 (12 tool)
+totale prompt+tools: 3628
+per tool:
+  message_user: 129
+  ask_user: 306
+  run-command: 177
+  read-file: 94
+  write-file: 74
+  list-directory: 59
+  web_search: 100
+  web_fetch: 112
+  memory: 211
+  document: 273
+  skill: 112
+  find_tools: 291
+gruppi (TOOL_GROUPS, tool verso il modello):
+  documents: 436 (4 tool)
+  tasks: 699 (3 tool)
+  credentials: 414 (3 tool)
+  outside: 471 (3 tool)
+  subagents: 397 (4 tool)
+  bots: 699 (7 tool)
+  connectors: 477 (4 tool)
+  apps: 228 (1 tool)
+  admin: 497 (4 tool)
+
+## bot normale con browser
+prompt: 1896
+tools del turno: 1962 (12 tool)
+totale prompt+tools: 3858
+per tool:
+  message_user: 129
+  ask_user: 306
+  run-command: 177
+  read-file: 94
+  write-file: 74
+  list-directory: 59
+  web_search: 100
+  web_fetch: 112
+  memory: 211
+  document: 273
+  skill: 112
+  find_tools: 315
+gruppi (TOOL_GROUPS, tool verso il modello):
+  browser: 896 (4 tool)
+  documents: 436 (4 tool)
+  tasks: 699 (3 tool)
+  credentials: 414 (3 tool)
+  outside: 471 (3 tool)
+  subagents: 397 (4 tool)
+  bots: 699 (7 tool)
+  connectors: 477 (4 tool)
+  apps: 228 (1 tool)
+  admin: 497 (4 tool)
+
+## turno di gruppo
+prompt: 1895
+tools del turno: 2131 (14 tool)
+totale prompt+tools: 4026
+per tool:
+  send_to_user: 124
+  ask_user: 306
+  run-command: 177
+  read-file: 94
+  write-file: 74
+  list-directory: 59
+  web_search: 100
+  web_fetch: 112
+  memory: 211
+  document: 273
+  skill: 112
+  find_tools: 291
+  post_to_group: 138
+  pass: 60
+gruppi (TOOL_GROUPS, tool verso il modello):
+  documents: 436 (4 tool)
+  tasks: 699 (3 tool)
+  credentials: 257 (2 tool)
+  outside: 471 (3 tool)
+  subagents: 397 (4 tool)
+  bots: 699 (7 tool)
+  connectors: 225 (2 tool)
+  apps: 228 (1 tool)
+  admin: 497 (4 tool)
+
+## figlio (sottoagente)
+prompt: 721
+tools del turno: 1123 (10 tool)
+totale prompt+tools: 1844
+per tool:
+  run-command: 177
+  read-file: 94
+  write-file: 74
+  list-directory: 59
+  web_search: 100
+  web_fetch: 112
+  memory: 82
+  skill: 112
+  find_tools: 152
+  wake_parent: 161
+gruppi (TOOL_GROUPS, tool verso il modello):
+  browser: 376 (1 tool)
+  tasks: 134 (1 tool)
+

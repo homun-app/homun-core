@@ -14,7 +14,8 @@ import type { ToolDef } from './llm'
  * coppia update_memory/recall_memory appare come la facciata `memory`
  * (facades.ts): qui restano i nomi INTERNI. `pass` e `post_to_group` esistono
  * per costruzione nei turni di gruppo; `wake_parent` (figlio) lo aggiunge
- * l'assemblaggio del turno.
+ * l'assemblaggio del turno. Fase token · scoperta (R7.2): anche la facciata
+ * `document` (write/read/edit_document) sta nel nucleo.
  */
 export const CORE_TOOL_NAMES: ReadonlySet<string> = new Set([
   // parlare con l'utente (message_user fuori dai gruppi, send_to_user nei gruppi)
@@ -32,6 +33,11 @@ export const CORE_TOOL_NAMES: ReadonlySet<string> = new Set([
   // la facciata memory (update_memory + recall_memory)
   'update_memory',
   'recall_memory',
+  // fase token · scoperta (R7.2): la facciata document (write/read/edit) —
+  // i documenti sono un'uscita frequente quanto un messaggio
+  'write_document',
+  'read_document',
+  'edit_document',
   // le skill installate
   'skill',
   // per costruzione nei turni di gruppo
@@ -68,9 +74,11 @@ export const TOOL_GROUPS: ReadonlyArray<ToolGroup> = [
     guide: ''
   },
   {
+    // R7.2: write/read/edit_document (la facciata document) sono nel NUCLEO;
+    // qui restano charts e libreria
     id: 'documents',
-    description: 'Write and edit documents, charts, and the library of files the user keeps.',
-    tools: ['write_document', 'read_document', 'edit_document', 'visualize', 'save_to_library', 'list_library', 'export_from_library'],
+    description: 'Charts and the library of files the user keeps (document itself is a base tool).',
+    tools: ['visualize', 'save_to_library', 'list_library', 'export_from_library'],
     guide: ''
   },
   {

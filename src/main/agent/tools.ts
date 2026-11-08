@@ -260,7 +260,7 @@ export const toolDefs: ToolDef[] = [
   },
   {
     name: 'update_skill',
-    description: 'Creates or updates a skill (reusable procedure): needs the user\'s approval (it changes future behavior). Your skills only; imported ones cannot change.',
+    description: 'Creates or updates a skill (reusable procedure) whose description says WHEN to use it, not only what it does. Needs the user\'s approval; your skills only, imported ones cannot change.',
     parameters: {
       type: 'object',
       properties: {
@@ -559,7 +559,7 @@ export const toolDefs: ToolDef[] = [
   },
   {
     name: 'write_document',
-    description: 'Saves a document in the user library (Markdown, max 200 KB): without id it creates it; with id a NEW version is written (versions never overwritten). Charts go as ```vega-lite or ```mermaid blocks.',
+    description: 'Saves a library document (Markdown, max 200 KB): no id creates it, with id a NEW version. Charts as ```vega-lite or ```mermaid blocks. The text goes here, NOT in chat: one or two sentences there.',
     parameters: {
       type: 'object',
       properties: {

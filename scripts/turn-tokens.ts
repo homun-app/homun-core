@@ -40,7 +40,8 @@ const parent = { ...agent, id: 'agent_parent', name: 'Papa' }
 
 interface Config {
   title: string
-  prompt: string
+  /** fase token · scoperta (R7.1): il prompt dipende dai gruppi PRESENTI nel turno, come nel loop */
+  prompt: (groups: string[]) => string
   builtins: ToolDef[]
   browserAvailable: boolean
   browserDefs: ToolDef[]
@@ -61,11 +62,11 @@ function configs(): Config[] {
   const it = 'it' as const
   // il prompt «con browser» porta le righe del browser in computerSection:
   // il flag di test del MCP finto lo accende, come nell'eval
-  const withBrowserPrompt = (): string => {
+  const withBrowserPrompt = (groups: string[]): string => {
     const had = process.env.SANDBOT_TEST_FAKE_BROWSER_MCP
     process.env.SANDBOT_TEST_FAKE_BROWSER_MCP ??= 'scripts/fake-browser-mcp.mjs'
     try {
-      return withLanguage(systemPrompt(agent, { subagents: true, connectors: true, credentials: true }), it)
+      return withLanguage(systemPrompt(agent, { subagents: true, connectors: true, credentials: true, groups }), it)
     } finally {
       if (had === undefined) delete process.env.SANDBOT_TEST_FAKE_BROWSER_MCP
       else process.env.SANDBOT_TEST_FAKE_BROWSER_MCP = had
@@ -74,23 +75,25 @@ function configs(): Config[] {
   return [
     {
       title: 'bot normale senza browser',
-      prompt: withLanguage(systemPrompt(agent, { subagents: true, connectors: true, credentials: true }), it),
+      prompt: (groups) => withLanguage(systemPrompt(agent, { subagents: true, connectors: true, credentials: true, groups }), it),
       builtins: userBuiltin, browserAvailable: false, browserDefs: []
     },
     {
       title: 'bot normale con browser',
-      prompt: withBrowserPrompt(),
+      prompt: withBrowserPrompt,
       builtins: userBuiltin, browserAvailable: true,
       browserDefs: [...browserToolDefs, ...computerToolDefs]
     },
     {
+      // fase token · scoperta: teams: true come nel loop (prima lo script
+      // misurava il turno di gruppo SENZA la sezione «Teams and groups»)
       title: 'turno di gruppo',
-      prompt: withLanguage(systemPrompt(agent, { subagents: false, connectors: false, credentials: false }), it),
+      prompt: (groups) => withLanguage(systemPrompt(agent, { subagents: false, connectors: false, credentials: false, teams: true, groups }), it),
       builtins: groupBuiltin, browserAvailable: false, browserDefs: []
     },
     {
       title: 'figlio (sottoagente)',
-      prompt: withLanguage(subagentSystemPrompt(parent, { id: 'sub_x', title: 'prova' }), it),
+      prompt: (groups) => withLanguage(subagentSystemPrompt(parent, { id: 'sub_x', title: 'prova' }, groups), it),
       builtins: childBuiltin, browserAvailable: true, browserDefs: childBrowser
     }
   ]
@@ -100,15 +103,17 @@ function main(): void {
   const out: string[] = []
   out.push('# turn-tokens — token stimati (caratteri/4) del turno, per configurazione')
   out.push('# fonte: assembleTurnTools (src/main/agent/turn-tools.ts) — la stessa del loop e dell\'eval')
-  out.push('# prompt: system prompt del turno SENZA le sezioni dinamiche (memoria, skill, bot principale, connettori)')
+  out.push('# prompt: system prompt del turno SENZA le sezioni dinamiche (memoria, skill, bot principale, connettori),')
+  out.push('#         con le righe «quando» dei gruppi PRESENTI nel turno (fase token · scoperta, R7.1)')
   out.push('')
   for (const c of configs()) {
     const r = assembleTurnTools({
       builtins: c.builtins, browserAvailable: c.browserAvailable, browserDefs: c.browserDefs,
       mcpToolDefs: [], maxInlineTools: 30, activatedGroups: [],
-      ...(c.title.startsWith('figlio') ? { subagent: true } : {})
+      ...(c.title.startsWith('figlio') ? { subagent: true } : {}),
+      ...(c.title.startsWith('turno di gruppo') ? { groupTurn: true } : {})
     })
-    const promptT = tok(c.prompt)
+    const promptT = tok(c.prompt(r.deferredIndex.map((g) => g.id)))
     const toolT = r.tools.reduce((n, t) => n + toolTok(t), 0)
     out.push(`## ${c.title}`)
     out.push(`prompt: ${promptT}`)

@@ -22,12 +22,12 @@ const childBuiltin = toolsForTurnSource(
 )
 const childBrowser = allBrowser.filter((t) => subagentToolDenyReason(t.name) === null)
 
-/** il nucleo del turno normale (T1): parlare, pc, web, memory (facciata), skill, find_tools */
+/** il nucleo del turno normale (T1): parlare, pc, web, memory (facciata), document (facciata, R7.2), skill, find_tools */
 const CORE_NORMAL = [
   'message_user', 'ask_user',
   'run-command', 'read-file', 'write-file', 'list-directory',
   'web_search', 'web_fetch',
-  'memory', 'skill', 'find_tools'
+  'memory', 'document', 'skill', 'find_tools'
 ]
 
 const assembleUser = (over: Partial<Parameters<typeof assembleTurnTools>[0]> = {}) =>
@@ -37,7 +37,7 @@ const assembleUser = (over: Partial<Parameters<typeof assembleTurnTools>[0]> = {
   })
 
 describe('fase token (T1): il nucleo sempre caricato', () => {
-  it('bot normale senza browser: SOLO il nucleo — niente browser, documenti, task, credenziali, bot…', () => {
+  it('bot normale senza browser: SOLO il nucleo — niente browser, charts/libreria, task, credenziali, bot…', () => {
     const r = assembleUser()
     expect(r.tools.map((t) => t.name)).toEqual(CORE_NORMAL)
   })
@@ -56,7 +56,7 @@ describe('fase token (T1): il nucleo sempre caricato', () => {
       'send_to_user', 'ask_user',
       'run-command', 'read-file', 'write-file', 'list-directory',
       'web_search', 'web_fetch',
-      'memory', 'skill', 'find_tools', 'post_to_group', 'pass'
+      'memory', 'document', 'skill', 'find_tools', 'post_to_group', 'pass'
     ])
   })
 

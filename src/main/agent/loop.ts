@@ -1349,67 +1349,10 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       run.turnGrantEpoch++
     }
 
-    // §5.3: il messaggio corrente è l'ultimo entry del transcript → compare una volta sola.
-    // Fase 4: il system prompt include memoria (§3bis L6) e skill disponibili.
-    // Fase 5: include le istruzioni personalizzate dei connettori connessi.
-    // Fase 7: se questo è il bot principale, la sezione di coordinamento con
-    // l'elenco degli altri bot (nome, descrizione, routine attive)
-    let mainSection = ''
-    let connectorsSection = ''
-    // fase velocità (S5): le sezioni VARIABILI vanno in FONDO al sistema,
-    // dopo la parte fissa e in ordine di frequenza (memoria per ultima: è
-    // quella che cambia più spesso, a ogni update_memory); la sezione
-    // Language resta l'ULTIMA (fase 17b A3)
-    let systemText: string
-    // fase 17b (A3): la lingua del turno si legge QUI, all'inizio della
-    // composizione: se il turno nasce da un messaggio umano, noteHumanText è
-    // già stato chiamato all'ingresso (enqueue), quindi vale la lingua nuova
-    const userLang = currentUserLanguage()
-    if (opts.subagent) {
-      // fase 12 (punto 3): il FIGLIO ha un prompt SEPARATO (costruttore proprio,
-      // ~450 token): identità da sottoagente, come lavorare, chiusura col
-      // wake_parent. Memoria e skill sono quelle del PADRE (sola lettura:
-      // update_memory/update_skill non sono nella whitelist del figlio)
-      const subRow = getSubagent(db(), opts.subagent.id)
-      const parent = getAgent(opts.subagent.parentId)
-      // correzione J1: anche il ripiego porta l'id — il path del report nel
-      // prompt è sempre quello VERO del figlio
-      systemText = subagentSystemPrompt(parent ?? agent, subRow ?? { id: opts.subagent.id, title: '' }) +
-        buildSkillsSection(opts.subagent.parentId) + buildMemorySection(opts.subagent.parentId)
-    } else {
-      try {
-        const agents = listAgents()
-        if (mainAgentOf(agents, getSetting<string | null>('mainAgentId', null))?.id === agentId) {
-          mainSection = mainAgentSection(
-            agents
-              .filter((a) => a.id !== agentId)
-              .map((a) => ({
-                name: a.name,
-                description: a.description,
-                routines: listRoutines(a.id).filter((r) => r.enabled).map((r) => r.title)
-              }))
-          )
-        }
-      } catch {
-        // elenco non disponibile: il prompt resta quello di base
-      }
-      try {
-        const { connectorInstructionsFromSettings } = await import('../connectors')
-        const { listServers } = await import('../mcp')
-        connectorsSection = connectorInstructionsFromSettings(
-          listServers(),
-          getSetting<Record<string, import('../connectors').ConnectorState>>('connectors.state', {})
-        )
-      } catch {
-        // connettori non disponibili: il system prompt resta quello di base
-      }
-      // fase 12 (punto 6): la sezione Sottoagenti solo nei bot NORMALI, mai
-      // nei turni di gruppo (lì si coordina col gruppo)
-      // fase 14 (punto 8): le righe delle credenziali solo nei turni NON di gruppo
-      systemText = systemPrompt(agent, { teams: opts.groupTurn !== undefined }) +
-        mainSection + buildSkillsSection(agentId) + connectorsSection + buildMemorySection(agentId)
-    }
-
+    // fase token · scoperta (R7.1): i tool del turno, la rotta e l'assemblaggio
+    // vengono PRIMA del system prompt — il prompt porta le righe «quando» dei
+    // gruppi PRESENTI nel turno (turnCatalog). Blocchi spostati invariati:
+    // nessuna entry cambia ordine (le notice di rotta non entrano nei messaggi).
     // tool statici + tool MCP attivi (server esterni → mcp__<server>__<tool>)
     // fase 13 (punto 5): i tool MCP sono PER BOT (enabledFor via
     // serversForAgent; un figlio eredita dal padre); sopra
@@ -1481,72 +1424,6 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     }
     const maxInlineTools = getSetting<number>('connectors.maxInlineTools', DEFAULT_MAX_INLINE_TOOLS)
     const deferredMcp = toolsDeferred(mcpToolDefs.length, maxInlineTools)
-    // fase 13 (punto 5): in modalità differita il prompt porta la sezione
-    // "Connettori attivi" al posto degli schemi MCP (una riga per server)
-    if (deferredMcp && !opts.subagent) {
-      try {
-        const { activeServersForAgent } = await import('../mcp')
-        const servers = await activeServersForAgent(agentId)
-        systemText +=
-          '\n' + connectorsActiveSection(servers.map((x) => ({
-            name: x.name,
-            toolCount: x.tools.length,
-            description: (x.tools[0]?.description ?? '').replace(/^\[MCP:[^\]]*\]\s*/, '')
-          })))
-      } catch {
-        // MCP non disponibile: nessuna sezione
-      }
-    }
-    // fase risposta (R4.1): nei turni dove il silenzio esplicito è ammesso
-    // (automatici e risvegli di sistema, mai gruppi e figli) la frase del
-    // NO_RESPONSE va in coda al sistema, prima della sezione Language
-    if (sentinelAllowed && opts.groupTurn === undefined && opts.subagent === undefined) {
-      systemText += '\n\n' + ROUTINE_SILENT_REPLY_GUIDANCE
-    }
-    // fase 17b (A3): la sezione Language è l'ULTIMA cosa del systemText, in
-    // tutte e tre le varianti (bot normale, turno di gruppo, figlio) e DOPO
-    // memoria, skill, bot principale, connettori e sezione connettori attivi
-    systemText = withLanguage(systemText, userLang)
-    // U4: il fuso dei timbri [Sent: …] del turno — lo stesso per i messaggi
-    // ricostruiti dalle entry e per quelli che il loop costruisce
-    const sentZone = systemTimeZone()
-    const messages: ChatMessage[] = buildMessages(systemText, scopedEntries(), images, { timeZone: sentZone })
-
-    // fase skill (S7.3): il `/nome` all'inizio del messaggio dell'utente (o
-    // del prompt di una routine) porta le istruzioni DENTRO il turno. Il
-    // testo nel transcript resta quello dell'utente; qui si trasforma SOLO
-    // il contenuto per il modello (l'ultimo messaggio utente è quello che
-    // apre il turno). Una skill importata contamina il turno (decisione 3).
-    // Nei gruppi niente `/` per ora (fuori da questa fase). Su ripresa dopo
-    // un crash vale il testo dell'entry che ha aperto il turno.
-    if (opts.groupTurn === undefined && opts.subagent === undefined) {
-      const openingText = opts.resume
-        ? String(scopedEntries().find((e) => e.id === opts.resume!.entryId)?.content ?? '')
-        : userText
-      if (mayInvokeSkill(openingText)) {
-        try {
-          const inv = skillInvocationExpansion(openingText, invocableSkillsOf(agentId))
-          if (inv) {
-            // U4: il timbro dell'entry che apre il turno resta PRIMA di tutto
-            // (lo stesso che buildMessages ha calcolato dal suo createdAt)
-            const openedAt = scopedEntries().find((e) => e.id === turnEntryId)?.createdAt ?? Date.now()
-            for (let i = messages.length - 1; i >= 0; i--) {
-              if (messages[i]!.role === 'user') {
-                messages[i] = { ...messages[i]!, content: withSentStamp(inv.content, openedAt, sentZone) }
-                break
-              }
-            }
-            if (inv.imported && !contaminated) {
-              run.turnAllows.clear()
-              run.turnGrantEpoch++
-              contaminated = true
-            }
-          }
-        } catch {
-          // le skill non devono mai rompere il turno
-        }
-      }
-    }
 
     // fase 3 (§3bis L5): quali tool MCP sono invii verso l'esterno.
     // Fase 0.3.1001 (M1): classificazione per annotazioni e NOME (funzione
@@ -1694,6 +1571,138 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       ...(opts.subagent !== undefined ? { subagent: true } : {}),
       ...(opts.groupTurn !== undefined ? { groupTurn: true } : {})
     })
+
+    // §5.3: il messaggio corrente è l'ultimo entry del transcript → compare una volta sola.
+    // Fase 4: il system prompt include memoria (§3bis L6) e skill disponibili.
+    // Fase 5: include le istruzioni personalizzate dei connettori connessi.
+    // Fase 7: se questo è il bot principale, la sezione di coordinamento con
+    // l'elenco degli altri bot (nome, descrizione, routine attive)
+    let mainSection = ''
+    let connectorsSection = ''
+    // fase velocità (S5): le sezioni VARIABILI vanno in FONDO al sistema,
+    // dopo la parte fissa e in ordine di frequenza (memoria per ultima: è
+    // quella che cambia più spesso, a ogni update_memory); la sezione
+    // Language resta l'ULTIMA (fase 17b A3)
+    let systemText: string
+    // fase 17b (A3): la lingua del turno si legge QUI, all'inizio della
+    // composizione: se il turno nasce da un messaggio umano, noteHumanText è
+    // già stato chiamato all'ingresso (enqueue), quindi vale la lingua nuova
+    const userLang = currentUserLanguage()
+    if (opts.subagent) {
+      // fase 12 (punto 3): il FIGLIO ha un prompt SEPARATO (costruttore proprio,
+      // ~450 token): identità da sottoagente, come lavorare, chiusura col
+      // wake_parent. Memoria e skill sono quelle del PADRE (sola lettura:
+      // update_memory/update_skill non sono nella whitelist del figlio)
+      const subRow = getSubagent(db(), opts.subagent.id)
+      const parent = getAgent(opts.subagent.parentId)
+      // correzione J1: anche il ripiego porta l'id — il path del report nel
+      // prompt è sempre quello VERO del figlio; R7.1: le righe «quando» dei
+      // gruppi che la whitelist lascia presenti nel turno del figlio
+      systemText = subagentSystemPrompt(parent ?? agent, subRow ?? { id: opts.subagent.id, title: '' }, turnCatalog.map((g) => g.id)) +
+        buildSkillsSection(opts.subagent.parentId) + buildMemorySection(opts.subagent.parentId)
+    } else {
+      try {
+        const agents = listAgents()
+        if (mainAgentOf(agents, getSetting<string | null>('mainAgentId', null))?.id === agentId) {
+          mainSection = mainAgentSection(
+            agents
+              .filter((a) => a.id !== agentId)
+              .map((a) => ({
+                name: a.name,
+                description: a.description,
+                routines: listRoutines(a.id).filter((r) => r.enabled).map((r) => r.title)
+              }))
+          )
+        }
+      } catch {
+        // elenco non disponibile: il prompt resta quello di base
+      }
+      try {
+        const { connectorInstructionsFromSettings } = await import('../connectors')
+        const { listServers } = await import('../mcp')
+        connectorsSection = connectorInstructionsFromSettings(
+          listServers(),
+          getSetting<Record<string, import('../connectors').ConnectorState>>('connectors.state', {})
+        )
+      } catch {
+        // connettori non disponibili: il system prompt resta quello di base
+      }
+      // fase 12 (punto 6): la sezione Sottoagenti solo nei bot NORMALI, mai
+      // nei turni di gruppo (lì si coordina col gruppo)
+      // fase 14 (punto 8): le righe delle credenziali solo nei turni NON di gruppo
+      // fase token · scoperta (R7.1): una riga «quando» per ogni gruppo
+      // PRESENTE nel turno (stesso ordine dell'indice di find_tools)
+      systemText = systemPrompt(agent, { teams: opts.groupTurn !== undefined, groups: turnCatalog.map((g) => g.id) }) +
+        mainSection + buildSkillsSection(agentId) + connectorsSection + buildMemorySection(agentId)
+    }
+
+    // fase 13 (punto 5): in modalità differita il prompt porta la sezione
+    // "Connettori attivi" al posto degli schemi MCP (una riga per server)
+    if (deferredMcp && !opts.subagent) {
+      try {
+        const { activeServersForAgent } = await import('../mcp')
+        const servers = await activeServersForAgent(agentId)
+        systemText +=
+          '\n' + connectorsActiveSection(servers.map((x) => ({
+            name: x.name,
+            toolCount: x.tools.length,
+            description: (x.tools[0]?.description ?? '').replace(/^\[MCP:[^\]]*\]\s*/, '')
+          })))
+      } catch {
+        // MCP non disponibile: nessuna sezione
+      }
+    }
+    // fase risposta (R4.1): nei turni dove il silenzio esplicito è ammesso
+    // (automatici e risvegli di sistema, mai gruppi e figli) la frase del
+    // NO_RESPONSE va in coda al sistema, prima della sezione Language
+    if (sentinelAllowed && opts.groupTurn === undefined && opts.subagent === undefined) {
+      systemText += '\n\n' + ROUTINE_SILENT_REPLY_GUIDANCE
+    }
+    // fase 17b (A3): la sezione Language è l'ULTIMA cosa del systemText, in
+    // tutte e tre le varianti (bot normale, turno di gruppo, figlio) e DOPO
+    // memoria, skill, bot principale, connettori e sezione connettori attivi
+    systemText = withLanguage(systemText, userLang)
+    // U4: il fuso dei timbri [Sent: …] del turno — lo stesso per i messaggi
+    // ricostruiti dalle entry e per quelli che il loop costruisce
+    const sentZone = systemTimeZone()
+    const messages: ChatMessage[] = buildMessages(systemText, scopedEntries(), images, { timeZone: sentZone })
+
+    // fase skill (S7.3): il `/nome` all'inizio del messaggio dell'utente (o
+    // del prompt di una routine) porta le istruzioni DENTRO il turno. Il
+    // testo nel transcript resta quello dell'utente; qui si trasforma SOLO
+    // il contenuto per il modello (l'ultimo messaggio utente è quello che
+    // apre il turno). Una skill importata contamina il turno (decisione 3).
+    // Nei gruppi niente `/` per ora (fuori da questa fase). Su ripresa dopo
+    // un crash vale il testo dell'entry che ha aperto il turno.
+    if (opts.groupTurn === undefined && opts.subagent === undefined) {
+      const openingText = opts.resume
+        ? String(scopedEntries().find((e) => e.id === opts.resume!.entryId)?.content ?? '')
+        : userText
+      if (mayInvokeSkill(openingText)) {
+        try {
+          const inv = skillInvocationExpansion(openingText, invocableSkillsOf(agentId))
+          if (inv) {
+            // U4: il timbro dell'entry che apre il turno resta PRIMA di tutto
+            // (lo stesso che buildMessages ha calcolato dal suo createdAt)
+            const openedAt = scopedEntries().find((e) => e.id === turnEntryId)?.createdAt ?? Date.now()
+            for (let i = messages.length - 1; i >= 0; i--) {
+              if (messages[i]!.role === 'user') {
+                messages[i] = { ...messages[i]!, content: withSentStamp(inv.content, openedAt, sentZone) }
+                break
+              }
+            }
+            if (inv.imported && !contaminated) {
+              run.turnAllows.clear()
+              run.turnGrantEpoch++
+              contaminated = true
+            }
+          }
+        } catch {
+          // le skill non devono mai rompere il turno
+        }
+      }
+    }
+
     let allTools: import('./llm').ToolDef[] = assembledTools
     // gli MCP offerti in QUESTO turno (inline, o attivati in conversazione):
     // derivati dall'elenco — servono ai sendCandidates qui sotto

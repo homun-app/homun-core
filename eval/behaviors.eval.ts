@@ -1305,11 +1305,15 @@ async function evalTurn(
 // ---- i casi (system REALE + history costruita a mano) ----
 // fase 17b (A5): come fa il loop — withLanguage per ULTIMA, così l'eval misura
 // il prompt vero con la sezione Language vera nella lingua del run
-const sys = withLanguage(systemPrompt(AGENT), EVAL_LANG)
+// fase token · scoperta (R7.1): come il loop, il prompt porta le righe
+// «quando» dei gruppi PRESENTI nel turno (gli id del catalogo di evalAssemble)
+const groupIdsOf = (source: 'user' | 'routine' | 'group', child: boolean): string[] =>
+  evalAssemble(source, child).catalog.map((g) => g.id)
+const sys = withLanguage(systemPrompt(AGENT, { groups: groupIdsOf('user', false) }), EVAL_LANG)
 // fase 12: il system dei turni di GRUPPO è senza la sezione Sottoagenti (come
 // il loop vero); quello del FIGLIO è il costruttore separato
-const sysGroup = withLanguage(systemPrompt(AGENT, { teams: true }), EVAL_LANG)
-const sysChild = subagentSystemPrompt(AGENT, { id: 'sub_e24a', title: L('Ricerca su Astro', 'Astro research') })
+const sysGroup = withLanguage(systemPrompt(AGENT, { teams: true, groups: groupIdsOf('group', false) }), EVAL_LANG)
+const sysChild = subagentSystemPrompt(AGENT, { id: 'sub_e24a', title: L('Ricerca su Astro', 'Astro research') }, groupIdsOf('user', true))
 const CHILD_TOOLS: ToolDef[] = [...EVAL_TOOLS.filter((t) => subagentToolAllowed(t.name)), wakeParentToolDef as ToolDef]
 const tc = (id: string, name: string, args: Record<string, unknown>): ToolCall =>
   ({ id, name, arguments: JSON.stringify(args) })

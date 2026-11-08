@@ -35,6 +35,11 @@ export interface FacadeSpec {
   name: string
   /** azione → tool interno */
   actions: Record<string, FacadeAction>
+  /**
+   * Fase token · scoperta (R7.2/R7.3): la regola che SOLO la descrizione può
+   * dare (nessun errore la fa rispettare), in testa alle righe delle azioni.
+   */
+  rule?: string
 }
 
 export const FACADES: Record<string, FacadeSpec> = {
@@ -56,6 +61,8 @@ export const FACADES: Record<string, FacadeSpec> = {
   },
   document: {
     name: 'document',
+    // R7.2: document è nel NUCLEO; il testo lungo va qui, in chat un messaggio breve
+    rule: 'Reports, notes, plans and anything longer than a short reply go here, not in chat; then send a short message.',
     actions: {
       write: { internal: 'write_document', line: 'write a new document (markdown)' },
       read: { internal: 'read_document', line: 'read a saved document' },
@@ -111,7 +118,8 @@ function paramsOf(def: Pick<ToolDef, 'parameters'>): { properties: Record<string
  * (pura): unione dei parametri — meno l'`action` interna del tool, che la
  * facciata ricava — tutti facoltativi tranne action (enum delle azioni i cui
  * tool ci sono). Nella descrizione di ogni parametro, tra parentesi, le
- * azioni che lo usano; la descrizione della facciata è una riga per azione.
+ * azioni che lo usano; la descrizione della facciata è una riga per azione
+ * (R7.2: preceduta dalla regola della facciata, quando c'è — document).
  */
 export function buildFacadeDef(facadeName: string, internalDefs: ReadonlyArray<ToolDef>): ToolDef | null {
   const spec = FACADE_ACTIONS.get(facadeName)
@@ -144,7 +152,7 @@ export function buildFacadeDef(facadeName: string, internalDefs: ReadonlyArray<T
   }
   return {
     name: spec.name,
-    description: actions.map(([a, x]) => `${a}: ${x.line}`).join('\n'),
+    description: [...(spec.rule ? [spec.rule] : []), ...actions.map(([a, x]) => `${a}: ${x.line}`)].join('\n'),
     parameters: { type: 'object', properties, required: ['action'] }
   }
 }
