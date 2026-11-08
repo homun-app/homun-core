@@ -1,0 +1,251 @@
+# fase token · pari (R9) — PRIMA: base fase-token-nucleo (78797220), misurata prima di ogni modifica
+# turn-tokens — token stimati (caratteri/4) del turno, per configurazione
+# fonte: assembleTurnTools (src/main/agent/turn-tools.ts) — la stessa del loop e dell'eval
+# prompt: system prompt del turno SENZA le sezioni dinamiche (memoria, skill, bot principale, connettori),
+#         con le righe «quando» dei gruppi PRESENTI nel turno (fase token · scoperta, R7.1)
+
+## bot normale senza browser
+prompt: 1952
+tools del turno: 2061 (13 tool)
+totale prompt+tools: 4013
+per tool:
+  message_user: 129
+  ask_user: 306
+  run-command: 177
+  read-file: 94
+  write-file: 74
+  list-directory: 59
+  web_search: 100
+  web_fetch: 112
+  memory: 211
+  document: 273
+  skill: 112
+  spawn_subagent: 120
+  find_tools: 294
+gruppi (TOOL_GROUPS, tool verso il modello):
+  documents: 436 (4 tool)
+  tasks: 699 (3 tool)
+  credentials: 414 (3 tool)
+  outside: 471 (3 tool)
+  subagents: 277 (3 tool)
+  bots: 699 (7 tool)
+  connectors: 477 (4 tool)
+  apps: 228 (1 tool)
+  admin: 497 (4 tool)
+
+## bot normale con browser
+prompt: 2158
+tools del turno: 2085 (13 tool)
+totale prompt+tools: 4243
+per tool:
+  message_user: 129
+  ask_user: 306
+  run-command: 177
+  read-file: 94
+  write-file: 74
+  list-directory: 59
+  web_search: 100
+  web_fetch: 112
+  memory: 211
+  document: 273
+  skill: 112
+  spawn_subagent: 120
+  find_tools: 318
+gruppi (TOOL_GROUPS, tool verso il modello):
+  browser: 896 (4 tool)
+  documents: 436 (4 tool)
+  tasks: 699 (3 tool)
+  credentials: 414 (3 tool)
+  outside: 471 (3 tool)
+  subagents: 277 (3 tool)
+  bots: 699 (7 tool)
+  connectors: 477 (4 tool)
+  apps: 228 (1 tool)
+  admin: 497 (4 tool)
+
+## turno di gruppo
+prompt: 1986
+tools del turno: 2134 (14 tool)
+totale prompt+tools: 4120
+per tool:
+  send_to_user: 124
+  ask_user: 306
+  run-command: 177
+  read-file: 94
+  write-file: 74
+  list-directory: 59
+  web_search: 100
+  web_fetch: 112
+  memory: 211
+  document: 273
+  skill: 112
+  find_tools: 294
+  post_to_group: 138
+  pass: 60
+gruppi (TOOL_GROUPS, tool verso il modello):
+  documents: 436 (4 tool)
+  tasks: 699 (3 tool)
+  credentials: 257 (2 tool)
+  outside: 471 (3 tool)
+  subagents: 277 (3 tool)
+  bots: 699 (7 tool)
+  connectors: 225 (2 tool)
+  apps: 228 (1 tool)
+  admin: 497 (4 tool)
+
+## figlio (sottoagente)
+prompt: 751
+tools del turno: 1123 (10 tool)
+totale prompt+tools: 1874
+per tool:
+  run-command: 177
+  read-file: 94
+  write-file: 74
+  list-directory: 59
+  web_search: 100
+  web_fetch: 112
+  memory: 82
+  skill: 112
+  find_tools: 152
+  wake_parent: 161
+gruppi (TOOL_GROUPS, tool verso il modello):
+  browser: 376 (1 tool)
+  tasks: 134 (1 tool)
+
+
+# fase token · pari (R9) — DOPO: regola del background nel prompt dei turni privati (", then tell the user you will report the outcome when it finishes"); guide dei gruppi collegate (solo nel result dell'attivazione, fuori dal turno base)
+# turn-tokens — token stimati (caratteri/4) del turno, per configurazione
+# fonte: assembleTurnTools (src/main/agent/turn-tools.ts) — la stessa del loop e dell'eval
+# prompt: system prompt del turno SENZA le sezioni dinamiche (memoria, skill, bot principale, connettori),
+#         con le righe «quando» dei gruppi PRESENTI nel turno (fase token · scoperta, R7.1)
+
+## bot normale senza browser
+prompt: 1968
+tools del turno: 2061 (13 tool)
+totale prompt+tools: 4029
+per tool:
+  message_user: 129
+  ask_user: 306
+  run-command: 177
+  read-file: 94
+  write-file: 74
+  list-directory: 59
+  web_search: 100
+  web_fetch: 112
+  memory: 211
+  document: 273
+  skill: 112
+  spawn_subagent: 120
+  find_tools: 294
+gruppi (TOOL_GROUPS, tool verso il modello):
+  documents: 436 (4 tool)
+  tasks: 699 (3 tool)
+  credentials: 414 (3 tool)
+  outside: 471 (3 tool)
+  subagents: 277 (3 tool)
+  bots: 699 (7 tool)
+  connectors: 477 (4 tool)
+  apps: 228 (1 tool)
+  admin: 497 (4 tool)
+
+## bot normale con browser
+prompt: 2174
+tools del turno: 2085 (13 tool)
+totale prompt+tools: 4259
+per tool:
+  message_user: 129
+  ask_user: 306
+  run-command: 177
+  read-file: 94
+  write-file: 74
+  list-directory: 59
+  web_search: 100
+  web_fetch: 112
+  memory: 211
+  document: 273
+  skill: 112
+  spawn_subagent: 120
+  find_tools: 318
+gruppi (TOOL_GROUPS, tool verso il modello):
+  browser: 896 (4 tool)
+  documents: 436 (4 tool)
+  tasks: 699 (3 tool)
+  credentials: 414 (3 tool)
+  outside: 471 (3 tool)
+  subagents: 277 (3 tool)
+  bots: 699 (7 tool)
+  connectors: 477 (4 tool)
+  apps: 228 (1 tool)
+  admin: 497 (4 tool)
+
+## turno di gruppo
+prompt: 1986
+tools del turno: 2134 (14 tool)
+totale prompt+tools: 4120
+per tool:
+  send_to_user: 124
+  ask_user: 306
+  run-command: 177
+  read-file: 94
+  write-file: 74
+  list-directory: 59
+  web_search: 100
+  web_fetch: 112
+  memory: 211
+  document: 273
+  skill: 112
+  find_tools: 294
+  post_to_group: 138
+  pass: 60
+gruppi (TOOL_GROUPS, tool verso il modello):
+  documents: 436 (4 tool)
+  tasks: 699 (3 tool)
+  credentials: 257 (2 tool)
+  outside: 471 (3 tool)
+  subagents: 277 (3 tool)
+  bots: 699 (7 tool)
+  connectors: 225 (2 tool)
+  apps: 228 (1 tool)
+  admin: 497 (4 tool)
+
+## figlio (sottoagente)
+prompt: 751
+tools del turno: 1123 (10 tool)
+totale prompt+tools: 1874
+per tool:
+  run-command: 177
+  read-file: 94
+  write-file: 74
+  list-directory: 59
+  web_search: 100
+  web_fetch: 112
+  memory: 82
+  skill: 112
+  find_tools: 152
+  wake_parent: 161
+gruppi (TOOL_GROUPS, tool verso il modello):
+  browser: 376 (1 tool)
+  tasks: 134 (1 tool)
+
+
+# fase token · pari (R9) — misura T7 (prima richiesta del caso 3 dell'eval: system col browser + history + nucleo) e result dell'attivazione dei gruppi (find_tools({group}), turno utente col browser)
+## PRIMA (78797220)
+T7 caso 3: system 2151 + history 305 + tools 2085 (13) = 4541
+  attivazione bots: 231 token
+  attivazione connectors: 189 token
+  attivazione credentials: 152 token
+  attivazione documents: 160 token
+  attivazione subagents: 145 token
+  attivazione apps: 65 token
+  attivazione tasks: 126 token
+  attivazione browser: 180 token
+## DOPO R9
+T7 caso 3: system 2168 + history 305 + tools 2085 (13) = 4558
+  attivazione bots: 545 token
+  attivazione connectors: 358 token
+  attivazione credentials: 286 token
+  attivazione documents: 218 token
+  attivazione subagents: 213 token
+  attivazione apps: 113 token
+  attivazione tasks: 126 token
+  attivazione browser: 180 token

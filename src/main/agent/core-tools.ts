@@ -50,13 +50,16 @@ export const CORE_TOOL_NAMES: ReadonlySet<string> = new Set([
   'post_to_group'
 ])
 
-/** Una voce dell'indice/gruppo: id, descrizione (≤ 90 caratteri), tool (nomi INTERNI), guida (T4). */
+/**
+ * Una voce dell'indice/gruppo: id, descrizione (≤ 90 caratteri), tool (nomi
+ * INTERNI). Fase token · pari (R9.2): la guida (T4) non sta più qui — era
+ * vuota per tutti i gruppi e nessuna guida arrivava al modello; la fonte è
+ * groupGuides (prompts.ts), letta da assembleTurnTools.
+ */
 export interface ToolGroup {
   id: string
   description: string
   tools: ReadonlyArray<string>
-  /** la guida che entra nel result dell'attivazione (T4: le sezioni spostate dal prompt) */
-  guide: string
 }
 
 /**
@@ -75,34 +78,29 @@ export const TOOL_GROUPS: ReadonlyArray<ToolGroup> = [
       'browser_open', 'browser_snapshot', 'browser_click', 'browser_type', 'browser_select',
       'browser_press_key', 'browser_back', 'browser_wait', 'browser_tabs', 'browser_screenshot',
       'browser_close', 'request_takeover', 'computer_observe', 'computer_act'
-    ],
-    guide: ''
+    ]
   },
   {
     // R7.2: write/read/edit_document (la facciata document) sono nel NUCLEO;
     // qui restano charts e libreria
     id: 'documents',
     description: 'Charts and the library of files the user keeps (document itself is a base tool).',
-    tools: ['visualize', 'save_to_library', 'list_library', 'export_from_library'],
-    guide: ''
+    tools: ['visualize', 'save_to_library', 'list_library', 'export_from_library']
   },
   {
     id: 'tasks',
     description: 'Long work: task threads, routine state, background shells.',
-    tools: ['create_task', 'update_task', 'update_state', 'await_shell'],
-    guide: ''
+    tools: ['create_task', 'update_task', 'update_state', 'await_shell']
   },
   {
     id: 'credentials',
     description: 'The vault: list saved logins, fill them into pages, save new ones securely.',
-    tools: ['list-credentials', 'fill_credential', 'request_secure_input'],
-    guide: ''
+    tools: ['list-credentials', 'fill_credential', 'request_secure_input']
   },
   {
     id: 'outside',
     description: 'Outbound drafts (email, messages), the user contacts, saving new contacts.',
-    tools: ['draft_external', 'find_contacts', 'save_contact'],
-    guide: ''
+    tools: ['draft_external', 'find_contacts', 'save_contact']
   },
   {
     // fase token · nucleo (R8.2): spawn_subagent sta nel NUCLEO del bot
@@ -110,32 +108,27 @@ export const TOOL_GROUPS: ReadonlyArray<ToolGroup> = [
     // da solo quando ce n'è almeno uno aperto o arriva SUBAGENTS_DONE)
     id: 'subagents',
     description: 'Check, message or stop the subagents you started (spawn is a base tool).',
-    tools: ['check_subagent', 'message_subagent', 'stop_subagent'],
-    guide: ''
+    tools: ['check_subagent', 'message_subagent', 'stop_subagent']
   },
   {
     id: 'bots',
     description: 'The other bots and groups: list, create, update, delete, message them.',
-    tools: ['list_agents', 'create_agent', 'update_agent', 'delete_agent', 'create_group', 'update_group', 'send_to_agent'],
-    guide: ''
+    tools: ['list_agents', 'create_agent', 'update_agent', 'delete_agent', 'create_group', 'update_group', 'send_to_agent']
   },
   {
     id: 'connectors',
     description: 'Search apps and services, propose connectors, add MCP servers and plugins.',
-    tools: ['search_connectors', 'offer_connector', 'add_mcp_server', 'install_plugin'],
-    guide: ''
+    tools: ['search_connectors', 'offer_connector', 'add_mcp_server', 'install_plugin']
   },
   {
     id: 'apps',
     description: 'use-app: drive apps on the user own Mac with their account.',
-    tools: ['use-app'],
-    guide: ''
+    tools: ['use-app']
   },
   {
     id: 'admin',
     description: 'Skills, permission rules, file exchange with the user Mac (the box).',
-    tools: ['update_skill', 'propose_rule_change', 'copy_to_box', 'copy_from_box'],
-    guide: ''
+    tools: ['update_skill', 'propose_rule_change', 'copy_to_box', 'copy_from_box']
   }
 ]
 

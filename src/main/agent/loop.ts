@@ -2608,10 +2608,21 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             // G3: url= è l'URL FINALE della lettura (meta.finalUrl, redirect
             // compresi); l'URL di partenza, se diverso, va in richiesto=
             : formatWebFetchEvidence(String(meta.finalUrl ?? input.url ?? ''), output, String(input.url ?? ''))
+          // fase token · pari (R9.2, caso 19): RESULT_ACTIVATES vale ANCHE qui —
+          // questo ramo chiude il giro prima del blocco generico, e la voce
+          // web_fetch → browser (il suggerimento della pagina JS nomina
+          // browser_open) non scattava mai: i tool del browser entrano in coda
+          // dal passo dopo, come per run-command → tasks
+          let webActivated: string[] = []
+          const webCandidates = RESULT_ACTIVATES[call.name]
+          if (webCandidates) {
+            webActivated = groupsNamedInResult(output, turnCatalog).filter((g) => webCandidates.includes(g))
+            if (webActivated.length) activateInTurn(webActivated)
+          }
           const res = add({
             agentId, kind: 'tool-result', role: 'system',
             content: evidence.slice(0, 50_000),
-            meta: { callId: call.id, ...meta, webEvidence: true }
+            meta: { callId: call.id, ...meta, webEvidence: true, ...(webActivated.length ? { activatedGroups: webActivated } : {}) }
           })
           emit({ type: 'entries', agentId, entries: [res] })
           messages.push({ role: 'tool', toolCallId: call.id, content: evidence.slice(0, 50_000) })

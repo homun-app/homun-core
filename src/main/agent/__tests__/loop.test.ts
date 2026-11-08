@@ -7080,6 +7080,56 @@ describe('fase token (T2): i gruppi si attivano e restano', () => {
     const res = h.db.entries.findLast((e) => e.kind === 'tool-result')
     expect((res?.meta as { activatedGroups?: string[] } | null)?.activatedGroups).toContain('tasks')
   })
+
+  // fase token · pari (R9.2, caso 19): il ramo di web_search/web_fetch chiude
+  // il giro PRIMA del blocco generico di RESULT_ACTIVATES — la voce
+  // web_fetch → browser della tabella non scattava mai nel loop vero
+  it('RESULT_ACTIVATES: web_fetch su una pagina JS nomina browser_open → il gruppo browser si attiva', async () => {
+    h.virtualGroupsOff.off = true
+    browserState.available = true
+    const { setWebFetchForTests: setFetch } = await import('../web-tools')
+    const { JS_PAGE_HINT } = await import('../web-guard')
+    setFetch(async () => ({ ok: true, text: 'Caricamento…', contentType: 'text/html', finalUrl: 'https://spa.example/account', downloadedBytes: 900, jsBuilt: true }))
+    let after: string[] = []
+    h.llm.queue = [
+      { toolCalls: [{ id: 'j1', name: 'web_fetch', arguments: JSON.stringify({ url: 'https://spa.example/account' }) }] },
+      async (_m: unknown[], tools: Array<{ name: string }>) => { after = tools.map((t) => t.name); return { text: 'ok' } }
+    ]
+    try {
+      await runTurn(AGENT, 'apri https://spa.example/account', emit)
+    } finally {
+      setFetch(null)
+      browserState.available = false
+    }
+    // il result porta il suggerimento VERO del prodotto…
+    const toolMsg = h.llm.calls[1]!.find((m) => m.role === 'tool')!
+    expect(String(toolMsg.content)).toContain(JS_PAGE_HINT)
+    // …e i tool del browser entrano in coda dal passo dopo, persistiti nel meta
+    expect(after).toContain('browser')
+    const res = h.db.entries.find((e) => e.kind === 'tool-result' && e.meta?.webEvidence)!
+    expect((res.meta as { activatedGroups?: string[] }).activatedGroups).toEqual(['browser'])
+  })
+
+  it('RESULT_ACTIVATES: una pagina normale letta con web_fetch NON attiva il browser', async () => {
+    h.virtualGroupsOff.off = true
+    browserState.available = true
+    const { setWebFetchForTests: setFetch } = await import('../web-tools')
+    setFetch(async () => ({ ok: true, text: '# Menu\nRavioli vegetali', contentType: 'text/html', finalUrl: 'https://da-leo.example/menu', downloadedBytes: 100 }))
+    let after: string[] = []
+    h.llm.queue = [
+      { toolCalls: [{ id: 'j2', name: 'web_fetch', arguments: JSON.stringify({ url: 'https://da-leo.example/menu' }) }] },
+      async (_m: unknown[], tools: Array<{ name: string }>) => { after = tools.map((t) => t.name); return { text: 'ok' } }
+    ]
+    try {
+      await runTurn(AGENT, 'apri il menu', emit)
+    } finally {
+      setFetch(null)
+      browserState.available = false
+    }
+    expect(after).not.toContain('browser')
+    const res = h.db.entries.find((e) => e.kind === 'tool-result' && e.meta?.webEvidence)!
+    expect((res.meta as { activatedGroups?: string[] }).activatedGroups).toBeUndefined()
+  })
 })
 
 describe('fase token (T3): le facciate nel loop vero', () => {

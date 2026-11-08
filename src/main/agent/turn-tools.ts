@@ -18,6 +18,7 @@ import { partitionTools, useToolDef, TOOL_GROUPS, type ToolGroup } from './core-
 import { toolsDeferred, rankTools, findToolsGroupedDef } from '../mcp/find-tools'
 import { wakeParentToolDef } from './tools'
 import { buildFacadeDef, facadeCovering, FACADES } from './facades'
+import { groupGuideOf } from './prompts'
 import type { TranscriptEntry } from '../../shared/types'
 
 /** L'input di assembleTurnTools: i builtin del turno GIÀ filtrati (whitelist del figlio, toolsForTurnSource). */
@@ -68,8 +69,10 @@ export interface AssembleTurnToolsResult {
  *  «quando» dei gruppi nel prompt, document nel nucleo).
  *  Fase token · nucleo (R8.4): 4601 = 4541 misurati (la prima richiesta del
  *  caso 3 dell'eval, T7: system col browser + history + nucleo con
- *  spawn_subagent) + 60 di margine. */
-export const TURN_TOKEN_BUDGET = 4601
+ *  spawn_subagent) + 60 di margine.
+ *  Fase token · pari (R9.4): 4618 = 4558 misurati (stessa richiesta: +17 per
+ *  la regola del background nel prompt dei turni privati) + 60. Tetto 5000. */
+export const TURN_TOKEN_BUDGET = 4618
 /** Un gruppo attivato: browser (più grande), i tre gruppi ricchi, tutti gli altri.
  *  Fase token · nucleo (R8.4): subagents ha un budget DEDICATO che SCENDE —
  *  spawn_subagent è nel nucleo e il gruppo restano check/message/stop:
@@ -121,8 +124,12 @@ function modelFacingToolsOf(group: ToolGroup, byInternal: Map<string, ToolDef>):
   return out
 }
 
-/** i gruppi builtin presenti nel turno (con almeno un tool nel catalogo) */
-function presentBuiltinGroups(catalog: ToolDef[]): Array<{ group: ToolGroup; present: ToolGroupPresent }> {
+/**
+ * i gruppi builtin presenti nel turno (con almeno un tool nel catalogo).
+ * Fase token · pari (R9.2): la guida è quella di groupGuideOf (prompts.ts),
+ * col browser del TURNO per la variante takeover delle credenziali.
+ */
+function presentBuiltinGroups(catalog: ToolDef[], browserAvailable: boolean): Array<{ group: ToolGroup; present: ToolGroupPresent }> {
   const byInternal = new Map(catalog.map((t) => [t.name, t]))
   const out: Array<{ group: ToolGroup; present: ToolGroupPresent }> = []
   for (const g of TOOL_GROUPS) {
@@ -135,7 +142,7 @@ function presentBuiltinGroups(catalog: ToolDef[]): Array<{ group: ToolGroup; pre
         description: g.description,
         tools: modelFacingToolsOf(g, byInternal),
         internalNames,
-        guide: g.guide
+        guide: groupGuideOf(g.id, { takeover: browserAvailable })
       }
     })
   }
@@ -191,7 +198,7 @@ export function assembleTurnTools(input: AssembleTurnToolsInput): AssembleTurnTo
   const deferredMcp = toolsDeferred(input.mcpToolDefs.length, input.maxInlineTools)
 
   // i gruppi presenti: builtin + (se MCP differiti) i mcp:<server>
-  const builtinPresent = presentBuiltinGroups(catalog)
+  const builtinPresent = presentBuiltinGroups(catalog, input.browserAvailable)
   const mcpPresent = deferredMcp ? presentMcpGroups(input.mcpToolDefs) : []
   const deferredIndex: ToolGroupPresent[] = [...builtinPresent.map((b) => b.present), ...mcpPresent]
   const presentById = new Map(deferredIndex.map((g) => [g.id, g]))
