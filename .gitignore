@@ -7,3 +7,8 @@ dist
 
 # fase rilascio: gli artifact di electron-builder non si committano
 dist-installers
+
+# fase memoria-engramma (M0): il modulo del motore si copia dal crate
+# (scripts/prepare-engramma.mjs); nel repo resta SOLO il lock con gli hash
+vendor/engramma/*
+!vendor/engramma/engramma.lock.json

@@ -109,6 +109,35 @@ if (unexpectedUsage.length > 0) {
   die(`NS*UsageDescription in Info.plist fuori dall'elenco consentito: ${unexpectedUsage.join(', ')} (M7 — nessuna funzione di Homun le usa; se una serve, aggiungerla ad ALLOWED_USAGE_KEYS e motivarla nel REPORT)`)
 }
 
+// ---- 1bis. il modulo nativo di Engramma (fase memoria-engramma M0) ----
+// Il .node sta FUORI dall'asar (Resources/vendor/engramma, via extraResources:
+// un modulo nativo va mappato dal file system), deve essere l'esatto binario
+// agganciato da vendor/engramma/engramma.lock.json e portare una firma valida
+// anche da solo (hardened runtime: ogni libreria nativa è firmata). Nella
+// build firmata electron-builder lo rifirma con l'identità dell'app: l'hash
+// del lock vale per la build locale (--signed controlla autorità e runtime).
+const engrammaNode = path.join(resources, 'vendor', 'engramma', 'engramma.darwin-arm64.node')
+if (!(await stat(engrammaNode).catch(() => null))) die(`manca il modulo nativo di Engramma: ${engrammaNode}`)
+const engrammaLockPath = path.join(scriptDir, '..', 'vendor', 'engramma', 'engramma.lock.json')
+const engrammaLock = JSON.parse(await readFile(engrammaLockPath, 'utf8'))
+if (!signed) {
+  const { createHash } = await import('node:crypto')
+  const hash = createHash('sha256').update(await readFile(engrammaNode)).digest('hex')
+  if (hash !== engrammaLock.files?.['engramma.darwin-arm64.node']) {
+    die(`engramma.darwin-arm64.node nel bundle non è la versione agganciata da ${engrammaLockPath} (tag ${engrammaLock.tag})`)
+  }
+}
+const engrammaSign = run('codesign', ['--verify', '--strict', '--verbose=2', engrammaNode], 'Firma del .node di Engramma (codesign --verify --strict)')
+if (signed) {
+  // firmato davvero: stessa squadra dell'app e hardened runtime
+  const appInfo = run('codesign', ['-dv', '--verbose=2', appPath], 'Lettura della firma dell\'app')
+  const nodeInfo = run('codesign', ['-dv', '--verbose=2', engrammaNode], 'Lettura della firma del .node')
+  const team = (s) => (/TeamIdentifier=(\S+)/.exec(s) ?? [])[1]
+  if (!team(nodeInfo) || team(nodeInfo) !== team(appInfo)) die(`il .node di Engramma non è firmato dalla squadra dell'app (${team(nodeInfo)} ≠ ${team(appInfo)})`)
+  if (!/flags=0x[0-9a-f]*\(.*runtime/.test(nodeInfo)) die('il .node di Engramma non ha l\'hardened runtime')
+}
+void engrammaSign
+
 // ---- 2. il plist del LaunchAgent (A3) ----
 const agentPlist = path.join(contents, 'Library', 'LaunchAgents', 'app.homun.desktop.daemon.plist')
 const agentRaw = await readFile(agentPlist, 'utf8').catch(() => null)
@@ -178,6 +207,7 @@ console.log(
       icon: iconFile,
       asarIntegrityInInfoPlist: asarIntegrity,
       launchAgentPlist: true,
+      engramma: { tag: engrammaLock.tag, node: path.relative(contents, engrammaNode), codesign: 'ok' },
       fuses: fuseReport,
       notarized
     },
