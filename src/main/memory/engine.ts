@@ -269,9 +269,14 @@ export function resetEngrammaModuleCacheForTests(): void {
 // ---- celle ----
 
 /**
- * Un nome di cella non può contenere MAI «-snap-»: nella v0.4.2
- * dropCell('x') cancella anche le celle x-snap-… (difetto aperto, corretto
- * in v0.4.3) — un nome che le somigli si RIFIUTA, non si costruisce.
+ * Un nome di cella non può contenere MAI «-snap-». La v0.4.3 ha chiuso il
+ * difetto: dropCell('x') non cancella più le celle vicine x-snap-…, i nomi
+ * nella forma <cella>-snap-<cifre> sono riservati (il motore li rifiuta da
+ * solo, INVALID_ARGUMENT) e cells() non elenca le istantanee. L'asserzione
+ * di Homun RESTA: è più severa (vieta QUALSIASI «-snap-», non solo
+ * <cella>-snap-<cifre> — l'id di un bot arriva da fuori e non si vuole
+ * dipendere dal predicato esatto del motore) e costa nulla: un nome che
+ * somigli a un'istantanea si RIFIUTA qui, non si costruisce.
  */
 function assertNoSnap(name: string): void {
   if (name.includes('-snap-')) throw new Error(`invalid cell name "${name}": must not contain '-snap-' (dropCell would take snapshot cells with it)`)
@@ -482,9 +487,12 @@ export interface DroppedCellView {
  * Correzioni C2: l'oblio di una cella intera — Engine.dropCell più lo
  * sgombero della cache. NOT_FOUND vale «già dimenticata» (mai un'eccezione:
  * il job finisce bene); la cella si toglie da state.cells SEMPRE, anche a
- * drop già fatto: una Cell in cache risponde NOT_FOUND per sempre e finché
- * resta viva tiene aperta la connessione SQLite sui file già cancellati — i
- * byte restano sul disco finché il GC non la rilascia.
+ * drop già fatto: una Cell in cache risponde NOT_FOUND per sempre, quindi lo
+ * sgombero serve a non riusare un handle sigillato. Dalla v0.4.3 non serve
+ * più a liberare il disco: dropCell chiude subito la connessione condivisa
+ * della cella (Cell::retire), la Cell in cache non tiene aperti i .sqlite /
+ * -wal / -shm già cancellati e l'oblio finisce quando dropCell risponde,
+ * non ore dopo al GC.
  */
 export async function dropCellAndEvict(name: string, reason: string): Promise<DroppedCellView> {
   const engine = await memoryEngine()
@@ -597,7 +605,9 @@ export function enqueueStoryIndex(
 /**
  * La coda dell'oblio di un bot ELIMINATO (M5, correzioni C2): DUE dropCell —
  * bot-<id> e storia-<id>, lapidi comprese. L'oblio della cella è veloce ma
- * sta in coda, mai nella RPC che elimina il bot.
+ * sta in coda, mai nella RPC che elimina il bot. Dalla v0.4.3, quando il job
+ * risponde l'oblio è finito DAVVERO: dropCell chiude subito la connessione
+ * della cella e nessun file cancellato resta aperto fino al GC.
  */
 export function enqueueForgetAgent(db: DatabaseSync, agentId: string, now = Date.now()) {
   return enqueueJob(db, { agentId, kind: 'memory-forget-agent', payload: {}, runAt: now, now })
