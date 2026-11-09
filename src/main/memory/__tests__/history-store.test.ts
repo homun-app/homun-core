@@ -161,3 +161,55 @@ describe('fase memoria-engramma · correzioni C2: riferimenti e indicizzazione i
     await e.closeMemoryEngine()
   })
 })
+
+describe('fase memoria-engramma · correzioni C3: la provenienza dei messaggi indicizzati a ritroso', () => {
+  it('le risposte vecchie (senza meta.contaminated, prima di provenanceSince) nascono tainted; i messaggi utente no; le nuove pulite restano pulite', async () => {
+    const { setDataDir, appendEntry, setSetting, db } = await import('../../store/db')
+    const dir = join(DATA, 'c3' + Math.random().toString(36).slice(2, 6))
+    setDataDir(dir)
+    const e = await import('../engine')
+    await e.closeMemoryEngine()
+    expect((await e.openMemoryEngine({ dataDir: dir })).available).toBe(true)
+    // il primo avvio della correzione salva la data: prima di lì, la
+    // provenienza delle risposte è IGNOTA
+    const since = 1_736_000_000_000
+    setSetting('memory.provenanceSince', since)
+    // appendEntry non accetta createdAt: le righe vecchie si datano a mano
+    appendEntry({ agentId: 'agent_c3', kind: 'message', role: 'user', content: 'domanda vecchia sul treno oscillante' })
+    appendEntry({ agentId: 'agent_c3', kind: 'send-message', role: 'assistant', content: 'risposta vecchia: il treno oscillante parte alle 7', meta: { final: true } })
+    db().prepare('UPDATE entries SET created_at = ? WHERE agent_id = ?').run(since - 86_400_000, 'agent_c3')
+    appendEntry({ agentId: 'agent_c3', kind: 'send-message', role: 'assistant', content: 'risposta nuova pulita: il traghetto luminoso salpa alle 9', meta: { final: true } })
+    appendEntry({ agentId: 'agent_c3', kind: 'send-message', role: 'assistant', content: 'risposta nuova contaminata: il divertimento pendolare costa 5', meta: { final: true, contaminated: true } })
+
+    const { backfillStory, searchHistory, storyRefOf, runStoryIndexJob } = await import('../history-store')
+    const r = await backfillStory(['agent_c3'])
+    expect(r.indexed).toBe(4)
+
+    const oldHit = (await searchHistory('parte alle 7', 'agent_c3'))[0]!
+    expect(storyRefOf(oldHit).tainted).toBe(true) // PRIMA: false — ignoto = pulito
+    // e cercata dal tool contamina il turno (dato esterno)
+    const { executeTool } = await import('../../agent/tools')
+    const res = await executeTool('agent_c3', 'search_history', { query: 'parte alle 7' }, {})
+    expect(res.meta.libraryTainted).toBe('history')
+
+    // il messaggio utente VECCHIO resta pulito
+    const oldUser = (await searchHistory('domanda vecchia', 'agent_c3'))[0]!
+    expect(storyRefOf(oldUser).tainted).toBe(false)
+    // la risposta NUOVA senza meta.contaminated resta pulita
+    const newClean = (await searchHistory('traghetto luminoso', 'agent_c3'))[0]!
+    expect(storyRefOf(newClean).tainted).toBe(false)
+    const resClean = await executeTool('agent_c3', 'search_history', { query: 'traghetto luminoso' }, {})
+    expect(resClean.meta.libraryTainted).toBeUndefined()
+    // la risposta nuova con meta.contaminated è tainted (regola C1)
+    const newTainted = (await searchHistory('divertimento pendolare', 'agent_c3'))[0]!
+    expect(storyRefOf(newTainted).tainted).toBe(true)
+    // la stessa regola vale per il job della coda (un entry VECCHIO che
+    // arriva dal job non si lava)
+    const queuedOld = appendEntry({ agentId: 'agent_c3', kind: 'send-message', role: 'assistant', content: 'dal job: la funicolare nascosta parte a mezzanotte', meta: { final: true } })
+    db().prepare('UPDATE entries SET created_at = ? WHERE id = ?').run(since - 1000, queuedOld.id)
+    expect(await runStoryIndexJob('agent_c3', queuedOld.id)).toBe('indexed')
+    const jobHit = (await searchHistory('funicolare nascosta', 'agent_c3'))[0]!
+    expect(storyRefOf(jobHit).tainted).toBe(true)
+    await e.closeMemoryEngine()
+  })
+})

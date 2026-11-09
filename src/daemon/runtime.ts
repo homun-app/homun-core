@@ -188,6 +188,16 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
     const st = await openMemoryEngine({ dataDir: dataDir() })
     if (st.available) {
       console.log(`[sandbotd] memoria Engramma attiva (motore ${st.version}, ${st.model.present ? 'modello presente' : 'senza modello: ricerca testo+grafo'})`)
+      // fase memoria-engramma · correzioni (C3): la data del primo avvio della
+      // correzione — le risposte finali scritte PRIMA non hanno
+      // meta.contaminated (nessuno lo registrava): il backfill le indicizza
+      // col segno tainted. Si salva QUI, prima di ogni turno e del backfill.
+      try {
+        const { ensureProvenanceSince } = await import('../main/memory/history-store')
+        ensureProvenanceSince()
+      } catch {
+        // niente store a questo punto: lo rifà il prossimo avvio
+      }
       // M2: alla prima apertura i vecchi file markdown della memoria diventano
       // note (idempotente: un'id già migrata non si riscrive; una migrazione
       // interrotta riprende). I file NON si cancellano: copia di sicurezza in

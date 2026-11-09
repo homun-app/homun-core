@@ -12,7 +12,7 @@
 import { createHash } from 'node:crypto'
 import type { EngrammaSearchHit } from './engine'
 import { memoryCell, memoryEngine, storyCellName, dropCellAndEvict } from './engine'
-import { getEntries, deleteSetting } from '../store/db'
+import { getEntries, deleteSetting, getSetting, setSetting } from '../store/db'
 
 /** L'actor delle scritture della storia: il demone, per conto della chat. */
 const STORY_ACTOR = 'homun:story'
@@ -104,17 +104,20 @@ export async function backfillStory(
   progress: (done: number, total: number) => void = () => undefined
 ): Promise<{ indexed: number; durationMs: number }> {
   const t0 = Date.now()
-  const todo: Array<{ agentId: string; id: number; kind: 'user' | 'assistant'; text: string; createdAt: number }> = []
+  const todo: Array<{ agentId: string; id: number; kind: 'user' | 'assistant'; text: string; createdAt: number; tainted: boolean }> = []
   for (const agentId of agentIds) {
     for (const e of getEntries(agentId)) {
       const kind = isConversationEntry(e)
-      if (kind) todo.push({ agentId, id: e.id, kind, text: e.content, createdAt: e.createdAt })
+      // correzioni C3: le risposte finali nate prima di questa correzione non
+      // hanno meta.contaminated — si indicizzano col segno tainted (provenienza
+      // ignota = non fidata); i messaggi dell'utente restano puliti
+      if (kind) todo.push({ agentId, id: e.id, kind, text: e.content, createdAt: e.createdAt, tainted: storyTaintedOf(e, e.createdAt) })
     }
   }
   let done = 0
   progress(0, todo.length)
   for (const t of todo) {
-    await indexStoryNote(t.agentId, t.id, t.kind, t.text, t.createdAt)
+    await indexStoryNote(t.agentId, t.id, t.kind, t.text, t.createdAt, { tainted: t.tainted })
     done++
     if (done % 100 === 0 || done === todo.length) progress(done, todo.length)
   }
@@ -155,9 +158,42 @@ export function queueStoryIndex(agentId: string, entry: StoryEntry): void {
 }
 
 /**
+ * Correzioni C3: il primo avvio della correzione salva la data — le risposte
+ * finali scritte PRIMA non hanno meta.contaminated (nessuno lo registrava):
+ * provenienza ignota. Si chiama UNA volta al boot del demone, prima di ogni
+ * turno e del backfill: le entry create dopo sono nel mondo della C1.
+ */
+export function ensureProvenanceSince(now: () => number = Date.now): number {
+  const existing = getSetting<number | null>('memory.provenanceSince', null)
+  if (typeof existing === 'number' && existing > 0) return existing
+  const value = now()
+  setSetting('memory.provenanceSince', value)
+  return value
+}
+
+/**
+ * La provenienza di un messaggio della conversazione (correzioni C3):
+ *   - il messaggio dell'utente è sempre pulito;
+ *   - meta.contaminated (C1) decide per le risposte di QUESTA fase;
+ *   - una risposta finale senza meta.contaminated scritta prima di
+ *     provenanceSince nasce TAINTED: ignoto vuol dire non fidato.
+ */
+export function storyTaintedOf(
+  entry: { kind: string; role: string; meta?: Record<string, unknown> | null },
+  createdAtMs: number
+): boolean {
+  if (isConversationEntry(entry) !== 'assistant') return false
+  if (entry.meta?.contaminated === true) return true
+  if (entry.meta?.contaminated === false) return false
+  const since = getSetting<number | null>('memory.provenanceSince', null)
+  return typeof since === 'number' && since > 0 && createdAtMs < since
+}
+
+/**
  * Ciò che gira nel job memory-index-story (correzioni C1): rilegge l'entry
  * dal DB — il riferimento, non i dati — e indicizza testo e kind con
- * isConversationEntry; tainted arriva da meta.contaminated. L'entry sparito
+ * isConversationEntry; tainted arriva da meta.contaminated (C1) e, per le
+ * risposte più vecchie della correzione, dalla regola C3. L'entry sparito
  * (conversazione o bot eliminati nel frattempo) non indicizza nulla: non è
  * un errore, il job finisce bene.
  */
@@ -167,7 +203,7 @@ export async function runStoryIndexJob(agentId: string, entryId: number): Promis
   const kind = isConversationEntry(entry)
   if (!kind) return 'gone'
   await indexStoryNote(agentId, entryId, kind, entry.content, entry.createdAt, {
-    tainted: entry.meta?.contaminated === true
+    tainted: storyTaintedOf(entry, entry.createdAt)
   })
   return 'indexed'
 }
