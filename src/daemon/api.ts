@@ -1959,6 +1959,57 @@ export function buildApiMethods(
       emit({ type: 'agents' })
     },
     'providers:discover': () => providers.discoverProviders(),
+    // ---- fase locale (L3): il modello integrato (download, stato, rimozione) ----
+    // Lo stato si POLLa dalla scheda Integrato (nessun evento push nuovo); il
+    // download parte SOLO qui, dal consenso esplicito mostrato dalla UI.
+    'local-model:status': async () => {
+      const lm = await import('./local-model')
+      const { LOCAL_MODEL_CATALOG } = await import('../main/agent/local-catalog')
+      const { localModelStatus } = await import('../main/agent/local-model')
+      const entry = LOCAL_MODEL_CATALOG[0]!
+      const st = localModelStatus({ modelsDir: lm.localModelsDir(), entry })
+      const srv = lm.getLocalModelServer().status()
+      const gb = (n: number): number => Math.round((n / 1024 ** 3) * 10) / 10
+      return {
+        state: st.state === 'ready' ? (srv.running ? 'running' : 'ready') : st.state,
+        ...(st.state === 'downloading' ? { progress: { bytes: st.bytes, total: st.total } } : {}),
+        model: {
+          id: entry.id, label: entry.label, sizeGb: gb(entry.sizeBytes),
+          license: entry.license, source: `Hugging Face · ${entry.repo}`,
+          ramUseGb: entry.ramUseGb, minRamGb: entry.minRamGb
+        },
+        eligibility: lm.localEligibilityOfMachine(entry),
+        server: srv
+      }
+    },
+    'local-model:install': async () => {
+      const lm = await import('./local-model')
+      // il consenso lo ha dato l'utente nella UI: qui parte (o riprende) il
+      // download; la fine si vede da local-model:status (poll)
+      const done = lm.startLocalModelDownload()
+      done.then(async () => {
+        // a fine download il provider «Integrato» esiste (senza chiave)
+        await providers.saveProvider({
+          id: 'homun-local', name: 'Integrato (sul tuo Mac)', kind: 'homun-local',
+          baseUrl: '', enabled: true
+        })
+        emit({ type: 'agents' })
+        // L4: l'onboarding fermo sul provider riprende anche da qui
+        if (opts.onboarding) void opts.onboarding.resume().catch(() => undefined)
+      }).catch(() => undefined)
+      return { started: true }
+    },
+    'local-model:cancel': async () => {
+      const lm = await import('./local-model')
+      return { cancelled: lm.cancelLocalModelDownload() }
+    },
+    'local-model:remove': async () => {
+      const lm = await import('./local-model')
+      const r = await lm.removeLocalModelFromDisk()
+      providers.deleteProvider('homun-local')
+      emit({ type: 'agents' })
+      return { freedGb: r.freedGb }
+    },
     'providers:test': ([id]) => {
       const p = providers.getProvider(id as string)
       return p ? providers.testProvider(p) : { ok: false, error: uiText(UI.rpcProviderNotFoundLower) }

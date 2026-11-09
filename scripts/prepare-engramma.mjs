@@ -49,7 +49,12 @@ const defaultRun = (cmd, args, opts) => {
 
 /**
  * Il cuore (iniettabile nei test): copia e verifica.
+ * - fase locale (L0) FAST PATH: se i tre file in vendor/engramma/ hanno GIÀ
+ *   gli hash del lock, esce subito SENZA leggere la sorgente — la build di
+ *   Homun non dipende dallo stato del repo di Engramma (mentre GLM lavora a
+ *   una versione nuova lì, qui si continua a costruire col vendor giusto);
  * - sorgente con hash ≠ lock → errore NOMINANDO il file (versione non agganciata);
+ *   la sorgente si consulta SOLO se vendor manca o è sbagliato;
  * - destinazione già giusta → nessuna riscrittura (idempotente);
  * - .node assente nella sorgente → UNA `npm run build` nel crate, poi tutto
  *   come sopra.
@@ -60,6 +65,30 @@ export async function prepareEngramma({ srcDir, vendorDir, run = defaultRun }) {
     throw new Error(`manca ${lockPath}: il lock è nel repo (vendor/engramma/${LOCK_FILE})`)
   }
   const lock = JSON.parse(readFileSync(lockPath, 'utf8'))
+  const lockHashOf = (f) => {
+    const expected = lock.files?.[f]
+    if (typeof expected !== 'string' || !/^[0-9a-f]{64}$/.test(expected)) {
+      throw new Error(`il lock non ha l'hash di ${f}: rigenera con --update-lock`)
+    }
+    return expected
+  }
+
+  // fase locale (L0): vendor già giusto → via, senza toccare la sorgente
+  // (il package.json comune lo si assicura lo stesso: costa un existsSync)
+  let vendorReady = true
+  for (const f of ENGRAMMA_FILES) {
+    const dst = join(vendorDir, f)
+    if (!existsSync(dst) || (await sha256File(dst)) !== lockHashOf(f)) {
+      vendorReady = false
+      break
+    }
+  }
+  if (vendorReady) {
+    const pkgPath = join(vendorDir, 'package.json')
+    const pkg = JSON.stringify({ type: 'commonjs' }) + '\n'
+    if (!existsSync(pkgPath) || readFileSync(pkgPath, 'utf8') !== pkg) writeFileSync(pkgPath, pkg)
+    return { copied: [], skipped: [...ENGRAMMA_FILES], tag: lock.tag }
+  }
 
   // il .node manca ancora nella sorgente → lo si costruisce una volta
   if (!existsSync(join(srcDir, 'engramma.darwin-arm64.node'))) {
@@ -74,10 +103,7 @@ export async function prepareEngramma({ srcDir, vendorDir, run = defaultRun }) {
   for (const f of ENGRAMMA_FILES) {
     const src = join(srcDir, f)
     if (!existsSync(src)) throw new Error(`manca ${src} (ENGRAMMA_NODE_DIR punta al crate giusto?)`)
-    const expected = lock.files?.[f]
-    if (typeof expected !== 'string' || !/^[0-9a-f]{64}$/.test(expected)) {
-      throw new Error(`il lock non ha l'hash di ${f}: rigenera con --update-lock`)
-    }
+    const expected = lockHashOf(f)
     const hash = await sha256File(src)
     if (hash !== expected) {
       throw new Error(

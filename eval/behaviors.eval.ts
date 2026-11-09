@@ -180,7 +180,12 @@ import { assembleTurnTools, activateGroupsResult, toolDefsOfGroups, GROUP_ACTIVA
 // fase token · pari (R9.3): la sentinella degli argomenti è quella VERA del
 // loop, nella stessa posizione (evalCallStep)
 import { argGuardVerdict, userChatTextsOf } from '../src/main/agent/arg-guard'
-import { expandFacadeCall } from '../src/main/agent/facades'
+import { expandFacadeCall, FACADE_ACTIONS } from '../src/main/agent/facades'
+// fase locale (L1): il recupero delle chiamate scritte come TESTO (i blocchi
+// <tool_call> che i server locali a volte non riconoscono) — lo stesso
+// aggancio del loop, per un runner che imita il prodotto
+import { parseTextToolCalls, stripTextToolCallBlocks, hasRawToolCallBlocks } from '../src/main/agent/text-tool-calls'
+import { isLocalKind } from '../src/main/agent/live-models'
 import { toolsForTurnSource } from '../src/main/agent/connectors-policy'
 import { subagentToolDenyReason } from '../src/main/agent/subagents'
 import { isMcpId, offerConnectorMcpGuidance, offerConnectorMissingText } from '../src/main/agent/connectors-policy'
@@ -1044,11 +1049,39 @@ export function makeDeliverer(world: WorldResults = {}) {
  * spaiati ai bordi tolti, i segnaposto e il segnale dove non è ammesso
  * valgono vuoto (nei turni utente il vuoto vale il recupero di R5).
  */
-function finalReplyOfEval(text: string, source: 'user' | 'routine' | 'group'): string {
+export function finalReplyOfEval(text: string, source: 'user' | 'routine' | 'group'): string {
   if (source === 'routine' && isExactNoResponse(text)) return ''
-  const reply = stripStrayNoResponse(text)
+  // fase locale (L1.3): il testo consegnato non contiene MAI blocchi grezzi
+  // di chiamata, per OGNI provider — come nel loop, prima di ogni uso
+  const reply = stripStrayNoResponse(hasRawToolCallBlocks(text) ? stripTextToolCallBlocks(text) : text)
   if (!reply.trim() || isPlaceholderText(reply) || isExactNoResponse(reply)) return ''
   return reply
+}
+
+/**
+ * Fase locale (L1.4): il recupero delle chiamate scritte come testo nel
+ * runner dell'eval — lo stesso aggancio del loop (provider locale, risposta
+ * senza chiamate native): i blocchi riconosciuti col nome nel catalogo del
+ * turno (nucleo, gruppi compresi quelli non attivi, facciate) diventano
+ * chiamate con id eval; il testo esce pulito dai blocchi. Null se non c'è
+ * niente da recuperare. Il caso conta ✓r quando passa grazie al recupero.
+ */
+export function evalTextRecovery(text: string, catalog: ToolGroupPresent[]): { text: string; toolCalls: ToolCall[] } | null {
+  if (!hasRawToolCallBlocks(text)) return null
+  const known = new Set<string>([
+    ...EVAL_TOOLS.map((t) => t.name),
+    // find_tools/use_tool nascono nell'ASSEMBLAGGIO (come nel loop, dove il
+    // catalogo noto è allTools): lo si ricostruisce dal catalogo dei gruppi
+    ...(catalog.length ? [findToolsGroupedDef(catalog.map((g) => `${g.id}: ${g.description}`)).name] : []),
+    ...catalog.flatMap((g) => [...g.internalNames, ...g.tools.map((t) => t.name)]),
+    ...FACADE_ACTIONS.keys()
+  ])
+  const rec = parseTextToolCalls(text, known)
+  if (!rec.calls.length) return null
+  return {
+    text: rec.text,
+    toolCalls: rec.calls.map((c, i) => ({ id: `textcall_eval_${i}`, name: c.name, arguments: c.arguments }))
+  }
 }
 
 /**
@@ -1301,8 +1334,22 @@ async function evalTurn(
     }
   }
   try {
+    let textCallN = 0
     for (let step = 0; step < maxSteps; step++) {
       const drained = await drainOnce()
+      // fase locale (L1.4): lo stesso aggancio del loop — provider LOCALE senza
+      // chiamate native: i blocchi <tool_call> riconosciuti nel testo diventano
+      // chiamate e passano da evalCallStep come le native (facciata,
+      // coercizione, sentinella, attivazione); il blocco non si consegna MAI.
+      // Il caso conta ✓r quando passa grazie al recupero dal testo.
+      if (!drained.toolCalls.length && isLocalKind(PROVIDER.kind)) {
+        const rec = evalTextRecovery(drained.text, catalog)
+        if (rec) {
+          recoveryUsed = true
+          drained.text = rec.text
+          drained.toolCalls = rec.toolCalls.map((c) => ({ ...c, id: `textcall_eval_${++textCallN}` }))
+        }
+      }
       if (drained.text.trim()) lastFreeText = drained.text
       steps.push(drained)
       if (!drained.toolCalls.length) {

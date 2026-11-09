@@ -732,3 +732,62 @@ describe('fase memoria-engramma (M8): il mondo effettivo dei casi come il prodot
     expect(simulatedResult('recall_memory', {}, caseWorld({ source: 'user', world: own }))).toBe('memoria del mondo')
   })
 })
+
+// ---- fase locale (L1.4): il recupero dal testo anche nel runner dell'eval ----
+// Lo stesso aggancio del loop: provider locale senza chiamate native → i blocchi
+// <tool_call> riconosciuti diventano chiamate e passano da evalCallStep (il
+// caso conta ✓r quando passa grazie al recupero dal testo); il testo consegnato
+// non contiene MAI blocchi grezzi, per ogni provider.
+describe('fase locale (L1.4): il recupero dal testo nel runner dell\'eval', () => {
+  const BLOCK = '<tool_call>\n<function=find_tools>\n<parameter=group>\nbrowser\n</parameter>\n</function>\n</tool_call>'
+
+  it('evalTextRecovery: il blocco diventa una chiamata col nome vero, il testo esce pulito', async () => {
+    const { evalTextRecovery, evalAssemble } = await loadEval('it')
+    const { catalog } = evalAssemble('user', false)
+    const r = evalTextRecovery('Cerco gli strumenti.\n' + BLOCK, catalog)
+    expect(r).not.toBeNull()
+    expect(r!.toolCalls.map((c) => c.name)).toEqual(['find_tools'])
+    expect(JSON.parse(r!.toolCalls[0]!.arguments)).toEqual({ group: 'browser' })
+    expect(r!.text).not.toContain('<tool_call>')
+    expect(r!.text).toContain('Cerco gli strumenti.')
+  })
+
+  it('evalTextRecovery: nome NON nel catalogo → null (il blocco resta al loop della consegna)', async () => {
+    const { evalTextRecovery, evalAssemble } = await loadEval('it')
+    const { catalog } = evalAssemble('user', false)
+    expect(evalTextRecovery('<tool_call>\n<function=strumento_che_non_esiste>\n<parameter=q>\nz\n</parameter>\n</function>\n</tool_call>', catalog)).toBeNull()
+    expect(evalTextRecovery('risposta normale senza blocchi', catalog)).toBeNull()
+  })
+
+  it('la chiamata recuperata passa da evalCallStep: attiva il gruppo come una nativa', async () => {
+    const m = await loadEval('it')
+    const { evalTextRecovery, evalAssemble } = m
+    const { tools, catalog } = evalAssemble('user', false)
+    const r = evalTextRecovery(BLOCK, catalog)!
+    expect(r.toolCalls).toHaveLength(1)
+    const activated: string[][] = []
+    const active = new Set<string>()
+    const o = m.evalCallStep(r.toolCalls[0]!, {
+      messages: [{ role: 'user', content: 'apri il sito' }],
+      catalog,
+      activeGroups: active,
+      currentTools: () => tools,
+      activate: (ids) => { activated.push(ids); for (const id of ids) active.add(id) },
+      run: () => ({ result: 'non deve eseguire', endTurn: false })
+    })
+    expect(activated.flat()).toEqual(['browser'])
+    expect(o.result).toContain('now active')
+    expect(o.result).not.toContain('non deve eseguire')
+  })
+
+  it('finalReplyOfEval: il blocco grezzo non si consegna MAI, il testo attorno resta', async () => {
+    const { finalReplyOfEval } = await loadEval('it') as unknown as { finalReplyOfEval: (t: string, s: 'user' | 'routine' | 'group') => string }
+    const out = finalReplyOfEval('Ti servono gli strumenti:\n' + BLOCK + '\nDimmi tu.', 'user')
+    expect(out).not.toContain('<tool_call>')
+    expect(out).not.toContain('<function=')
+    expect(out).toContain('Ti servono gli strumenti:')
+    expect(out).toContain('Dimmi tu.')
+    // solo il blocco → vuoto: il runner usa il recupero normale di R5
+    expect(finalReplyOfEval(BLOCK, 'user').trim()).toBe('')
+  })
+})

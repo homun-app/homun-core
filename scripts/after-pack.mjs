@@ -53,6 +53,20 @@ export default async function afterPack(context) {
   if (!(await stat(plist).catch(() => null))) {
     throw new Error(`after-pack: manca il plist del LaunchAgent nel bundle: ${plist}`)
   }
+  // fase locale (L2): il server del modello integrato deve stare nel bundle
+  // (extraResources vendor → Resources/vendor) ed essere ESEGUIBILE. La firma
+  // col runtime rinforzato la fa electron-builder sui binari dell'app: per
+  // llama-server NON servono entitlement in più (Metal non usa JIT) e non
+  // servono voci mac.binaries — il binario sta in Resources/, fuori dall'asar,
+  // e viene firmato come gli altri file del bundle.
+  const llamaServer = path.join(resources, 'vendor', 'llama', 'llama-server')
+  const llamaStat = await stat(llamaServer).catch(() => null)
+  if (!llamaStat) {
+    throw new Error(`after-pack: manca il bundle del modello integrato: ${llamaServer} (scaricalo con: node scripts/fetch-llama.mjs)`)
+  }
+  if (!(llamaStat.mode & 0o111)) {
+    throw new Error(`after-pack: ${llamaServer} non è eseguibile`)
+  }
   const integrity = await asarIntegrityPresent(context)
   if (!integrity) {
     // lo si dice a schermo: verify-release approfondisce (A4.3)

@@ -608,6 +608,14 @@ export const UI = {
     message: 'Apre le impostazioni: scegli o attiva un provider e torno a completare da solo.'
   }),
   onboardingProviderButton: msg({ id: 'onboarding.providerButton', message: 'Apri le impostazioni del provider' }),
+  // fase locale (L4): le tre strade del widget «nessun provider»
+  onboardingProviderCloud: msg({ id: 'onboarding.providerCloud', message: 'Modello cloud con chiave (consigliato)' }),
+  onboardingProviderOllama: msg({ id: 'onboarding.providerOllama', message: 'Usa Ollama che è già sul tuo Mac' }),
+  onboardingProviderLocal: msg({ id: 'onboarding.providerLocal', message: 'Modello integrato sul Mac (2,7 GB)' }),
+  onboardingLocalModelHonest: msg({
+    id: 'onboarding.localModelHonest',
+    message: 'Il modello integrato gira sul tuo Mac: niente costi e i dati restano qui. È più lento e sbaglia più spesso dei modelli cloud. Va bene per prove e cose semplici; per lavori affidabili ti consiglio un modello cloud.'
+  }),
   onboardingWelcomeHead: msg({
     id: 'onboarding.welcomeHead',
     message: 'Benvenuto! Ho preparato due bot su misura per te, li trovi nella barra a sinistra:'

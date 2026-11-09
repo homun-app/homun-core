@@ -78,6 +78,39 @@ describe('fase memoria-engramma M0: prepare-engramma', () => {
     expect(Math.abs(statSync(node).mtimeMs - past.getTime())).toBeLessThan(1000)
   })
 
+  // fase locale (L0): la build di Homun NON dipende dallo stato del repo di
+  // Engramma — mentre GLM lavora a v0.4.3 nell'altro repo il .node sorgente
+  // cambia, ma se vendor/ ha già gli hash del lock lo script esce SUBITO
+  it('L0: vendor coi tre hash del lock → ok senza LEGGERE la sorgente (nemmeno se manca)', async () => {
+    const vendor = await makeVendor()
+    // prima la popola (la prima copia vera)…
+    const seed = makeDir('seed', BASE)
+    await prepareEngramma({ srcDir: seed, vendorDir: vendor })
+    // …poi la sorgente sparisce (l'altro repo che cambia non conta più)
+    const missing = join(ROOT, 'src-inesistente-L0')
+    const r = await prepareEngramma({ srcDir: missing, vendorDir: vendor })
+    expect(r.copied).toEqual([])
+    expect([...r.skipped].sort()).toEqual([...ENGRAMMA_FILES].sort())
+    // e i file non sono stati riscritti (mtime intatto)
+    const node = join(vendor, 'engramma.darwin-arm64.node')
+    const past = new Date(Date.now() - 60_000)
+    utimesSync(node, past, past)
+    await prepareEngramma({ srcDir: missing, vendorDir: vendor })
+    expect(Math.abs(statSync(node).mtimeMs - past.getTime())).toBeLessThan(1000)
+  })
+
+  it('L0: vendor SBAGLIATO e sorgente con hash diverso dal lock → errore che NOMINA il file', async () => {
+    // vendor con un file rotto, sorgente che non è la versione agganciata
+    const vendor = await makeVendor()
+    const seed = makeDir('seed-l0b', BASE)
+    await prepareEngramma({ srcDir: seed, vendorDir: vendor })
+    writeFileSync(join(vendor, 'index.js'), 'module.exports = { rotto: true }')
+    const src = makeDir('src-l0b', { ...BASE, 'index.js': 'module.exports = { altro: true }' })
+    await expect(prepareEngramma({ srcDir: src, vendorDir: vendor })).rejects.toThrow(/index\.js/)
+    // il vendor rotto non è stato sovrascritto con la sorgente NON agganciata
+    expect(readFileSync(join(vendor, 'index.js'), 'utf8')).toBe('module.exports = { rotto: true }')
+  })
+
   it('rifiuta una sorgente il cui hash non è nel lock (versione non agganciata)', async () => {
     const src = makeDir('src', { ...BASE, 'index.js': 'module.exports = { altro: true }' })
     const vendor = await makeVendor()

@@ -43,6 +43,8 @@ import { getConnectorsKey } from './keychain'
 import { sandboxMode } from '../main/sandbox'
 import { spawn } from 'node:child_process'
 import { createPresence, mainAgentOf } from './presence'
+// fase locale (L2/L3): il modello integrato — fatti macchina e ciclo di vita
+import { localModelFacts } from './local-model'
 import { handleWebhook } from './webhooks'
 import { deliverDueHeld } from './outbox'
 import { decideNotification, notifyTexts } from './notifications'
@@ -99,6 +101,15 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
   }
 
   const database = db()
+
+  // fase locale (L2.3): l'eventuale orfano di llama-server nel pidfile si
+  // spegne SOLO se quel pid è davvero un nostro binario (mai l'Homebrew);
+  // un problema qui non ferma il daemon
+  {
+    const { localModelBootCleanup, localModelFacts } = await import('./local-model')
+    localModelFacts() // precarica i fatti macchina (il disco arriva async)
+    void localModelBootCleanup()
+  }
 
   // fase skill (S2.4): migrazione una tantum delle skill PER BOT nella
   // LIBRERIA UNICA — PRIMA di tutto ciò che legge le skill (prompt, tool,
@@ -656,6 +667,16 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
     createAgent: (name, description) => createAgent(name, description),
     updateAgent,
     listProviders,
+    // fase locale (L4): le strade Ollama e Integrato del widget del provider
+    discoverLocalProviders: async () => {
+      try {
+        const providersMod = await import('../main/agent/providers')
+        return await providersMod.discoverProviders()
+      } catch {
+        return []
+      }
+    },
+    localEligibilityFacts: () => localModelFacts(),
     // fase 9 (punto 1): provider attivo + modello predefinito (capability "tools"
     // verificata via /api/show), non più il primo modello dell'elenco
     assignDefaultModel: async () => {
@@ -716,6 +737,8 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
     console.log('[sandbotd] arresto')
     worker.stop()
     clearInterval(schedulerTimer)
+    // fase locale (L2.3): il modello integrato si spegne SEMPRE col daemon
+    void import('./local-model').then((m) => m.localModelShutdown()).catch(() => undefined)
     removeDaemonInfo(dataDir())
     releaseDaemonLock(dataDir())
     // fase memoria-engramma (M1): close aspetta le operazioni in volo; dopo,
@@ -795,6 +818,16 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
         ops.tickSubagentDeadlines(database, { interrupt: loop.interrupt, now: () => Date.now() }, emit)
       } catch (e) {
         console.error('[sandbotd] scadenze sottoagenti:', e)
+      }
+      // fase locale (L2.3): lo spegnimento del modello integrato dopo 10
+      // minuti senza richieste (come il keep_alive di Ollama) e il refresh
+      // dei fatti macchina (il disco libero arriva async al primo tick)
+      try {
+        const { localModelIdleTick, localModelFacts } = await import('./local-model')
+        localModelFacts()
+        localModelIdleTick()
+      } catch {
+        // il modello integrato non deve mai fermare il tick
       }
       worker.poke()
     } catch (e) {

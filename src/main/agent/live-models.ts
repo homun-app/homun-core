@@ -34,10 +34,11 @@ export const KNOWN_BASE_URLS: Partial<Record<ProviderKind, string>> = {
   groq: 'https://api.groq.com/openai'
 }
 
-/** I kind che parlano solo in locale (nessuna chiave, costo nullo). */
-export const LOCAL_KINDS: ReadonlySet<ProviderKind> = new Set(['ollama', 'lmstudio', 'openai-compatible', 'custom'])
+/** I kind che parlano solo in locale (nessuna chiave, costo nullo). Fase
+ * locale (L3): anche homun-local, il modello integrato gestito dal daemon. */
+export const LOCAL_KINDS: ReadonlySet<ProviderKind> = new Set(['ollama', 'lmstudio', 'homun-local', 'openai-compatible', 'custom'])
 
-/** Il provider è tutto locale (ollama, lmstudio, openai-compatible, custom)? */
+/** Il provider è tutto locale (ollama, lmstudio, homun-local, openai-compatible, custom)? */
 export function isLocalKind(kind: string): boolean {
   return LOCAL_KINDS.has(kind as ProviderKind)
 }

@@ -993,10 +993,6 @@ msgstr "Open the Homun window to authorize"
 msgid "onboarding.providerButton"
 msgstr "Open the provider settings"
 
-#: src/renderer/src/components/Chat.tsx
-msgid "Apri le impostazioni del provider"
-msgstr "Open provider settings"
-
 #: src/renderer/src/components/TakeoverCard.tsx
 msgid "Apri lo schermo"
 msgstr "Open the screen"
@@ -1037,6 +1033,11 @@ msgstr "Appearance"
 #: src/renderer/src/components/RightPanel.tsx
 msgid "attende te"
 msgstr "waiting for you"
+
+#. placeholder {0}: m.minRamGb
+#: src/renderer/src/components/settings/ModelsPage.tsx
+msgid "Attenzione: con meno di {0} GB di RAM sarà lento e potrebbe bloccare il Mac."
+msgstr "Warning: with less than {0} GB of RAM it will be slow and may freeze your Mac."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -2216,6 +2217,11 @@ msgstr "Where it runs: on the {0} server you choose"
 msgid "Dove la trovo? Copia la chiave API dalle impostazioni del tuo progetto su Composio (composio.dev → Settings → API Keys)."
 msgstr "Where do I find it? Copy the API key from your Composio project settings (composio.dev → Settings → API Keys)."
 
+#. placeholder {0}: pct ?? 0
+#: src/renderer/src/components/settings/ModelsPage.tsx
+msgid "Download {0}%"
+msgstr "Download {0}%"
+
 #. placeholder {0}: Math.round((memoryProgress.done / Math.max(1, memoryProgress.total)) * 100)
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "download del modello… {0}%"
@@ -3016,6 +3022,19 @@ msgstr "Model {model} on provider {provider} is not responding ({why}): switchin
 msgid "notice.imagesNotSeen"
 msgstr "The model {model} cannot see images: the attachments of this message will not be looked at."
 
+#: src/renderer/src/components/settings/ModelsPage.tsx
+msgid "Il modello integrato gira sul tuo Mac: niente costi e i dati restano qui. È più lento e sbaglia più spesso dei modelli cloud; per lavori affidabili ti consiglio un modello cloud."
+msgstr "The built-in model runs on your Mac: no costs and your data stays here. It is slower and makes more mistakes than cloud models; for reliable work I recommend a cloud model."
+
+#: src/renderer/src/components/settings/ModelsPage.tsx
+msgid "Il modello integrato gira sul tuo Mac: niente costi e i dati restano qui. È più lento e sbaglia più spesso dei modelli cloud. Va bene per prove e cose semplici; per lavori affidabili ti consiglio un modello cloud."
+msgstr "The built-in model runs on your Mac: no costs and your data stays here. It is slower and makes more mistakes than cloud models. Fine for trying things and simple tasks; for reliable work I recommend a cloud model."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "onboarding.localModelHonest"
+msgstr "The built-in model runs on your Mac: no costs and your data stays here. It is slower and makes more mistakes than cloud models. Fine for trying things and simple tasks; for reliable work I recommend a cloud model."
+
 #. js-lingui-explicit-id
 #: src/renderer/src/components/Chat.tsx
 #: src/shared/ui-messages.ts
@@ -3235,6 +3254,10 @@ msgstr "queued"
 msgid "in corso"
 msgstr "in progress"
 
+#: src/renderer/src/components/settings/ModelsPage.tsx
+msgid "In esecuzione"
+msgstr "Running"
+
 #: src/renderer/src/components/RightPanel.tsx
 #: src/renderer/src/components/Settings.tsx
 msgid "in pausa"
@@ -3301,8 +3324,13 @@ msgid "Inserisci un valore"
 msgstr "Enter a value"
 
 #: src/renderer/src/components/ConnectorCards13.tsx
+#: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Installa"
 msgstr "Install"
+
+#: src/renderer/src/components/settings/ModelsPage.tsx
+msgid "Installa il modello integrato"
+msgstr "Install the built-in model"
 
 #. placeholder {0}: message.name
 #: src/renderer/src/components/ConnectorCards13.tsx
@@ -3313,6 +3341,14 @@ msgstr "Install plugin: {0}"
 #: src/shared/ui-messages.ts
 msgid "card.plugin"
 msgstr "Install plugin: {name}"
+
+#. placeholder {0}: m.label
+#. placeholder {1}: m.sizeGb
+#. placeholder {2}: m.source
+#. placeholder {3}: m.license
+#: src/renderer/src/components/settings/ModelsPage.tsx
+msgid "Installare {0} ({1} GB) da {2}, licenza {3}?"
+msgstr "Install {0} ({1} GB) from {2}, license {3}?"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -3327,6 +3363,10 @@ msgstr "installation in progress"
 #: src/renderer/src/components/ConnectorCards13.tsx
 msgid "Installo…"
 msgstr "Installing…"
+
+#: src/renderer/src/components/settings/ModelsPage.tsx
+msgid "Integrato"
+msgstr "Built-in"
 
 #: src/renderer/src/components/BotScreen.tsx
 msgid "Interrompe il turno del bot e apre il controllo"
@@ -3598,6 +3638,10 @@ msgstr "reads a file…"
 msgid "legge una pagina web…"
 msgstr "reads a web page…"
 
+#: src/renderer/src/components/settings/ModelsPage.tsx
+msgid "Liberati {freed} GB."
+msgstr "Freed {freed} GB."
+
 #: src/renderer/src/components/LibraryPanel.tsx
 #: src/renderer/src/components/RightPanel.tsx
 #: src/renderer/src/components/Sidebar.tsx
@@ -3809,6 +3853,11 @@ msgstr "Model"
 msgid "modello che non risponde"
 msgstr "model not responding"
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "onboarding.providerCloud"
+msgstr "Cloud model with a key (recommended)"
+
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Modello dei bot"
 msgstr "Bot model"
@@ -3825,6 +3874,15 @@ msgstr "Approvals model"
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Modello e ragionamento"
 msgstr "Model and reasoning"
+
+#: src/renderer/src/components/Chat.tsx
+msgid "modello integrato · più lento"
+msgstr "built-in model · slower"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "onboarding.providerLocal"
+msgstr "Built-in model on your Mac (2.7 GB)"
 
 #: src/renderer/src/components/ActivityPanel.tsx
 msgid "modello senza credito"
@@ -4225,6 +4283,10 @@ msgstr "not connected"
 #: src/shared/ui-messages.ts
 msgid "notice.boxMigratedFailed"
 msgstr "Not copied (will retry at next launch): {list}."
+
+#: src/renderer/src/components/settings/ModelsPage.tsx
+msgid "Non disponibile su questa macchina."
+msgstr "Not available on this machine."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -4741,6 +4803,10 @@ msgstr "Project (title in the sidebar)"
 msgid "Prompt:"
 msgstr "Prompt:"
 
+#: src/renderer/src/components/settings/ModelsPage.tsx
+msgid "Pronto"
+msgstr "Ready"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "rpc.pluginProposalNotFound"
@@ -4983,6 +5049,11 @@ msgstr "Reasoning"
 msgid "Ragionamento: Predefinito"
 msgstr "Reasoning: Default"
 
+#. placeholder {0}: m.ramUseGb
+#: src/renderer/src/components/settings/ModelsPage.tsx
+msgid "RAM ~{0} GB"
+msgstr "RAM ~{0} GB"
+
 #: src/renderer/src/components/ServerSheet.tsx
 msgid "registro MCP"
 msgstr "MCP registry"
@@ -5125,6 +5196,11 @@ msgstr "Deny"
 #: src/renderer/src/components/LibraryCards.tsx
 msgid "Rifiutato"
 msgstr "Denied"
+
+#. placeholder {0}: m.sizeGb
+#: src/renderer/src/components/settings/ModelsPage.tsx
+msgid "Rimuovere il modello e liberare {0} GB?"
+msgstr "Remove the model and free {0} GB?"
 
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "rimuovi"
@@ -5635,6 +5711,12 @@ msgstr "servers: {serversList}"
 msgid "Servizi di ricerca gratuiti"
 msgstr "Free search services"
 
+#. placeholder {0}: st.eligibility.neededGb
+#. placeholder {1}: st.eligibility.freeGb ?? '—'
+#: src/renderer/src/components/settings/ModelsPage.tsx
+msgid "Servono {0} GB di spazio libero (liberi: {1})."
+msgstr "{0} GB of free space needed (free: {1})."
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "rpc.secretValuesMissing"
@@ -5786,6 +5868,10 @@ msgstr "Subagent"
 #: src/shared/ui-messages.ts
 msgid "rpc.subagentNotFound"
 msgstr "Subagent not found"
+
+#: src/renderer/src/components/settings/ModelsPage.tsx
+msgid "Spazio su disco insufficiente."
+msgstr "Not enough disk space."
 
 #: src/renderer/src/components/RightPanel.tsx
 #: src/renderer/src/components/ui/ModelPicker.tsx
@@ -6240,6 +6326,11 @@ msgstr "Use the project key"
 #: src/shared/ui-messages.ts
 msgid "rpc.useConnectApps"
 msgstr "use the \"Connect apps\" view for catalog connectors"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "onboarding.providerOllama"
+msgstr "Use the Ollama already on your Mac"
 
 #: src/renderer/src/lib/activity.ts
 msgid "usa un’app…"

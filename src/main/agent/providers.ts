@@ -11,6 +11,7 @@
 // memoria nel daemon (`plainKeys`), da dove lo legge getProvider() per llm,
 // test e catalogo. Verso il renderer si usa publicProviders(): mai la chiave.
 import { getSetting, setSetting } from '../store/db'
+import { join as joinPath } from 'node:path'
 // fase 17c (C3): gli errori del check dei tool si mostrano in impostazioni e
 // onboarding — testo del catalogo UI
 import { uiText, uiError } from '../ui-language'
@@ -279,6 +280,28 @@ async function eachWithConcurrency<T>(items: T[], limit: number, fn: (item: T) =
  * L'unione col catalogo pi-ai vive nell'RPC models:list (H5.1).
  */
 export async function listProviderModels(p: ProviderConfig): Promise<ModelInfo[]> {
+  // fase locale (L3): il provider «Integrato» ha UN solo modello, quello del
+  // catalogo installato, restituito come supporta-tool (llama-server con
+  // --jinja li serve). Nessuna rete: si guarda il file nel data dir.
+  if (p.kind === 'homun-local') {
+    const { dataDir } = await import('../store/db')
+    const { LOCAL_MODEL_CATALOG } = await import('./local-catalog')
+    const { localModelStatus } = await import('./local-model')
+    const entry = LOCAL_MODEL_CATALOG[0]!
+    const st = localModelStatus({ modelsDir: joinPath(dataDir(), 'models'), entry })
+    if (st.state !== 'ready') return []
+    return [{
+      id: entry.id,
+      label: entry.label,
+      source: 'live',
+      vision: null,
+      tools: true,
+      thinkingLevels: [],
+      cost: null,
+      costSource: null,
+      local: true
+    }]
+  }
   if (p.kind === 'ollama') {
     const base = p.baseUrl.replace(/\/+$/, '')
     const r = await fetch(liveModelsUrl(p), { signal: AbortSignal.timeout(5000) })

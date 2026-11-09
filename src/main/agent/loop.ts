@@ -92,7 +92,7 @@ import { coolDown, isCooled, cooledUntil, markHealthy } from './route-health'
 // fase 18b (K3): la lettura delle capability Ollama prima di calcolare la visione
 // fase 18b (K7): i dati noti di un anello per la regola pura routeIncompatibility
 import { modelCapabilities, routeModelCaps } from './llm-pi'
-import { readOllamaCapabilities } from './live-models'
+import { readOllamaCapabilities, isLocalKind } from './live-models'
 import type { ThinkingSetting } from '../../shared/types'
 // fase 10: gruppi (store) e regole del turno di gruppo (puro); correzioni C1-C3;
 // correzione E2 (terzo giro): il recupero dei turni di gruppo finiti con la
@@ -118,6 +118,13 @@ import {
 import { assembleTurnTools, offeredMcpOf, activateGroupsResult, toolDefsOfGroups, groupsNamedInResult, RESULT_ACTIVATES, activeGroupsFromTranscript, groupActivationText, GROUP_ACTIVATION_ACT_NOW, type ToolGroupPresent } from './turn-tools'
 import { useToolDef } from './core-tools'
 import { expandFacadeCall, FACADE_ACTIONS } from './facades'
+// fase locale (L1): il recupero delle chiamate scritte come TESTO grezzo (i
+// blocchi <tool_call> che llama-server non riconosce) e la pulizia dei blocchi
+// dal testo consegnato, per OGNI provider
+import { parseTextToolCalls, stripTextToolCallBlocks, hasRawToolCallBlocks } from './text-tool-calls'
+// fase locale (L3.1): il provider di turno del modello integrato (baseUrl e
+// chiave da ensureRunning, mai salvati) — torno com'è per gli altri kind
+import { ensureLocalTurnProvider } from '../../daemon/local-model'
 // fase token (T8): i controlli fissi di sicurezza (puri): <evento> esterno
 // contamina il turno; gli argomenti verso l'esterno con carta/chiave/segreto
 // di chat vengono rifiutati PRIMA di permessi e card, senza il valore
@@ -1108,7 +1115,8 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
    * La usa anche la chiamata di recupero: stesse regole a fine turno.
    */
   const deliverSend = (call: { id: string; name: string; arguments: string }, input: Record<string, unknown>): string => {
-    const text = String(input.text ?? '')
+    // L1.3: difesa in profondità — anche il testo di una send non porta blocchi
+    const text = hasRawToolCallBlocks(String(input.text ?? '')) ? stripTextToolCallBlocks(String(input.text ?? '')) : String(input.text ?? '')
     // testo vuoto: niente messaggio vuoto in chat (visto nell'eval: un modello
     // a volte chiama send_to_user senza text)
     if (!text.trim()) return emptySendResult()
@@ -1188,7 +1196,8 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
    * la storia lo ricostruisce identico a come il modello l'ha visto).
    */
   const deliverMessageUser = (call: { id: string; name: string; arguments: string }, input: Record<string, unknown>): string => {
-    const raw = String(input.text ?? '')
+    // L1.3: come deliverSend, il testo consegnato non contiene mai blocchi
+    const raw = hasRawToolCallBlocks(String(input.text ?? '')) ? stripTextToolCallBlocks(String(input.text ?? '')) : String(input.text ?? '')
     // testo vuoto: come oggi per send_to_user, niente messaggio vuoto in chat
     if (!raw.trim()) return emptySendResult()
     const text = clampProgressMessage(raw)
@@ -1225,9 +1234,12 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
    * l'utente aspetta (R5 non la sostituisce con niente).
    */
   const deliverFinalText = (
-    text: string,
+    rawText: string,
     streamEntry: import('../../shared/types').TranscriptEntry
   ): boolean => {
+    // L1.3: la risposta finale non contiene MAI blocchi grezzi (difesa in
+    // profondità: il passo li ha già tolti dal testo del modello)
+    const text = hasRawToolCallBlocks(rawText) ? stripTextToolCallBlocks(rawText) : rawText
     if (!text.trim()) return false
     // fase eval-deboli (D3): un turno che ha già lanciato subagenti e ha già
     // consegnato un messaggio all'utente NON ne consegna un secondo col testo
@@ -1807,6 +1819,18 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     const catalogDefs: import('./llm').ToolDef[] = [...builtins, ...browserDefs, ...mcpToolDefs]
     const catalogSchemaOf = (name: string): import('./llm').ToolDef | null =>
       catalogDefs.find((t) => t.name === name) ?? null
+    // fase locale (L1.1): il catalogo intero del turno per il recupero dal
+    // testo — nomi interni di nucleo (find_tools/use_tool compresi: li
+    // costruisce l'assemblaggio), gruppi (anche NON ancora attivi: la
+    // chiamata passa dall'attivazione per nome come oggi) e MCP, più le
+    // FACCIATE (browser/document/task/memory), che il percorso di sempre
+    // srotola come le chiamate native
+    const knownCatalogNames: Set<string> = new Set([
+      ...catalogDefs.map((t) => t.name),
+      ...allTools.map((t) => t.name),
+      ...turnCatalog.flatMap((g) => [...g.internalNames, ...g.tools.map((t) => t.name)]),
+      ...FACADE_ACTIONS.keys()
+    ])
     // i gruppi attivi in QUESTO turno (dall'assemblaggio + le attivazioni
     // di metà turno): un nome INTERNO di gruppo attivo resta eseguibile
     // anche se verso il modello l'elenco porta la facciata (storie vecchie)
@@ -1906,7 +1930,14 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       // default (2): senza riserve un blip di rete merita il retry. maxRetries
       // NON va sul filo: è un'opzione dell'SDK, il body non cambia.
       const usableAhead = chain.some((r, i) => i > chainIdx && !isCooled(r, Date.now()))
-      const stream = llmStream(activeProvider, activeRoute.model, messages, turnTools, AbortSignal.any([controller.signal, streamAbort.signal]), {
+      // fase locale (L3.1): per il provider «Integrato» (homun-local) il
+      // baseUrl e la chiave arrivano da ensureRunning() a OGNI chiamata e non
+      // si salvano mai (porta e api-key nuove a ogni avvio del processo);
+      // registra anche la richiesta, che posticipa lo spegnimento per inattività
+      const callProvider = activeProvider.kind === 'homun-local'
+        ? await ensureLocalTurnProvider(activeProvider)
+        : activeProvider
+      const stream = llmStream(callProvider, activeRoute.model, messages, turnTools, AbortSignal.any([controller.signal, streamAbort.signal]), {
         thinking: turnThinking,
         modelPrices,
         ...(usableAhead ? { maxRetries: 0 } : {}),
@@ -2048,6 +2079,31 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       } finally {
         controller.signal.removeEventListener('abort', onTurnAbort)
       }
+      // fase locale (L1.2): RECUPERO DELLE CHIAMATE SCRITTE COME TESTO —
+      // quando il provider è locale (isLocalKind) e la risposta non ha
+      // chiamate native, i blocchi <tool_call> riconosciuti nel testo
+      // diventano chiamate, AGGANCATE QUI, prima del recupero senza
+      // strumenti di R5 (loop.ts:263 RECOVERY_NO_TOOLS_RESULT): così le
+      // chiamate recuperate seguono in TUTTO la strada delle native — anche
+      // nel passo di recupero senza tool, dove valgono il result «non
+      // eseguito» o vengono lasciate cadere come le inventate dal modello.
+      // Da qui in poi srotolamento facciate, coercizione, argGuard,
+      // attivazione per nome e permessi sono quelli di sempre: nessuna
+      // scorciatoia. Il blocco NON finisce mai nel testo consegnato.
+      if (!final.toolCalls?.length && isLocalKind(activeProvider.kind)) {
+        const rec = parseTextToolCalls(final.text, knownCatalogNames)
+        if (rec.calls.length) {
+          final = {
+            text: rec.text,
+            toolCalls: rec.calls.map((c, i) => ({
+              id: `textcall_${traceTurnId}_${i}_${randomUUID().slice(0, 8)}`,
+              name: c.name,
+              arguments: c.arguments
+            })),
+            finishReason: 'tool_calls'
+          }
+        }
+      }
       // fase risposta (R5): la chiamata di recupero è SENZA strumenti — le
       // eventuali chiamate che il modello inventa lo stesso non si eseguono:
       // valgono un result che lo dice. Verifica (eval glm-5.3): con la storia
@@ -2065,7 +2121,13 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         }
         final = { text: final.text, toolCalls: [], finishReason: 'stop' }
       }
-      const text = final.text
+      // fase locale (L1.3): per OGNI provider (anche cloud) il testo del
+      // passo non contiene MAI blocchi grezzi di chiamata: si puliscono
+      // PRIMA di ogni uso — risposta finale, ragionamento, storia per il
+      // modello, recupero dei gruppi. Se dopo la pulizia resta vuoto, il
+      // flusso di sempre lo tratta come risposta vuota (recupero R5 o del
+      // gruppo, come oggi).
+      const text = hasRawToolCallBlocks(final.text) ? stripTextToolCallBlocks(final.text) : final.text
       updateEntryContent(entry.id, text)
       if (text.trim()) lastFreeText = text
       // fase risposta (R6): con strumenti la diretta finisce qui — la bolla

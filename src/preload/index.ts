@@ -67,6 +67,11 @@ const api: SandbotApi = {
   // solo in questa direzione e non torna mai indietro)
   probeProvider: (config) => ipcRenderer.invoke('providers:probe', config),
   listModels: (providerId) => ipcRenderer.invoke('models:list', providerId),
+  // fase locale (L3/L4): il modello integrato (stato, download, annullamento, rimozione)
+  localModelStatus: () => ipcRenderer.invoke('local-model:status'),
+  localModelInstall: () => ipcRenderer.invoke('local-model:install'),
+  localModelCancel: () => ipcRenderer.invoke('local-model:cancel'),
+  localModelRemove: () => ipcRenderer.invoke('local-model:remove'),
   // fase 18b (K3): le capacità di UN modello (nessun elenco completo in chat)
   modelCapabilities: (providerId, model) => ipcRenderer.invoke('models:capabilities', providerId, model),
   // fase 18b (H6): uso e costi aggregati (per modello/bot/origine)

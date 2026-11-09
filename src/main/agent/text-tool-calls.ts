@@ -1,0 +1,147 @@
+// Fase locale (L1): il recupero delle chiamate ai tool scritte come TESTO
+// grezzo. Con llama-server (e qualunque server OpenAI-compatible con --jinja)
+// a volte una chiamata GIUSTA non viene riconosciuta dal parser del template
+// e arriva nel testo della risposta; nei dump L1 (Qwen 2 casi, LFM3 6: i
+// casi 17, 21, 23, 29, 32, 33, 34 e 45) il formato è sempre lo stesso:
+//
+//   <tool_call>
+//   <function=find_tools>
+//   <parameter=group>
+//   browser
+//   </parameter>
+//   </function>
+//   </tool_call>
+//
+// Motivo probabile del mancato parse in llama-server (L1.5): il template
+// chat template cerca i tool call nei CONTENT STOPreason='tool_calls' del
+// generatore; quando il modello emette ANCHE una riga di testo prima del
+// blocco (o due blocchi di fila) la grammatica/regex del template di
+// llama-server non riconosce la sequenza come tool call e i token restano
+// testo. Il recupero qui sotto copre OGNI versione del server perché lavora
+// sulla risposta FINITA, non sullo streaming del template.
+//
+// Tutto PURO: nessuno store, nessuna rete. Le chiamate recuperate seguono la
+// STESSA strada delle native (srotolamento facciate, coercizione, argGuard,
+// attivazione per nome, permessi): qui si producono solo {name, arguments}.
+export interface ParsedTextToolCall {
+  name: string
+  /** argomenti serializzati in JSON, come le chiamate native */
+  arguments: string
+}
+
+export interface TextToolCallParse {
+  calls: ParsedTextToolCall[]
+  /** il testo rimasto fuori dai blocchi RICONOSCIUTI (i blocchi con nome
+   *  sconosciuto o malformati restano al loro posto) */
+  text: string
+}
+
+/** Un blocco <tool_call>…</tool_call> intero (non-greedy), con eventuali a-capo ai bordi. */
+const TOOL_CALL_BLOCK_RE = /[ \t]*<tool_call>\s*([\s\S]*?)<\/tool_call>[ \t]*\n?/g
+
+/** La testa XML del formato: <function=nome>. */
+const XML_FUNCTION_HEAD_RE = /^<function=([A-Za-z0-9_.\-]+)>/
+
+/** Un parametro del formato XML: <parameter=nome>…</parameter> (multilinea). */
+const XML_PARAMETER_RE = /<parameter=([A-Za-z0-9_.\-]+)>\s*([\s\S]*?)\s*<\/parameter>/g
+
+/**
+ * Il valore di un parametro: i numeri, i booleani e gli oggetti si leggono
+ * come JSON (il caso 21 scrive max_results su una riga sola, «10»); tutto il
+ * resto è la stringa grezza, a capo compresi (rimossi solo gli a-capo
+ * strutturali ai bordi del blocco parameter).
+ */
+function paramValueOf(raw: string): unknown {
+  const v = raw.trim()
+  if (!v) return ''
+  if (/^(?:-?\d+(?:\.\d+)?|true|false|null)$/.test(v)) {
+    try { return JSON.parse(v) } catch { return v }
+  }
+  if (v.startsWith('{') || v.startsWith('[') || (v.startsWith('"') && v.endsWith('"'))) {
+    try {
+      const parsed = JSON.parse(v) as unknown
+      return parsed
+    } catch { /* JSON rotto: resta la stringa grezza */ }
+  }
+  return raw.replace(/^\n+/, '').replace(/\n+$/, '')
+}
+
+/** Il parse del corpo XML <function=…>…</function>: nome + argomenti, o null se malformato. */
+function parseXmlFunctionBlock(body: string): { name: string; args: Record<string, unknown> } | null {
+  const m = body.match(XML_FUNCTION_HEAD_RE)
+  if (!m) return null
+  const rest = body.slice(m[0].length)
+  if (!rest.includes('</function>')) return null
+  const inner = rest.slice(0, rest.indexOf('</function>'))
+  const args: Record<string, unknown> = {}
+  for (const p of inner.matchAll(XML_PARAMETER_RE)) {
+    args[p[1]!] = paramValueOf(p[2] ?? '')
+  }
+  return { name: m[1]!, args }
+}
+
+/** Il parse del corpo Hermes: JSON {"name":…,"arguments"|"parameters":{…}}. */
+function parseHermesBlock(body: string): { name: string; args: Record<string, unknown> } | null {
+  const v = body.trim()
+  if (!v.startsWith('{')) return null
+  let j: { name?: unknown; arguments?: unknown; parameters?: unknown }
+  try {
+    j = JSON.parse(v) as typeof j
+  } catch {
+    return null
+  }
+  if (typeof j.name !== 'string' || !j.name) return null
+  const args = j.arguments ?? j.parameters
+  const clean = args && typeof args === 'object' && !Array.isArray(args)
+    ? (args as Record<string, unknown>)
+    : {}
+  return { name: j.name, args: clean }
+}
+
+/**
+ * L1.1: le chiamate scritte come testo, nel formato XML dei dump e in quello
+ * Hermes. Accetta SOLO nomi presenti in `knownToolNames` (il catalogo intero
+ * del turno, compresi i tool dei gruppi non ancora attivi: le chiamate
+ * passano dall'attivazione per nome come oggi); un blocco con nome
+ * sconosciuto resta nel testo COM'È. Torna le chiamate e il testo fuori dai
+ * blocchi riconosciuti.
+ */
+export function parseTextToolCalls(text: string, knownToolNames: Iterable<string>): TextToolCallParse {
+  const known = knownToolNames instanceof Set ? knownToolNames : new Set(knownToolNames)
+  const calls: ParsedTextToolCall[] = []
+  let out = ''
+  let last = 0
+  for (const m of text.matchAll(TOOL_CALL_BLOCK_RE)) {
+    const body = m[1] ?? ''
+    const parsed = parseXmlFunctionBlock(body) ?? parseHermesBlock(body)
+    if (!parsed || !known.has(parsed.name)) continue // sconosciuto o malformato: il blocco resta
+    calls.push({ name: parsed.name, arguments: JSON.stringify(parsed.args) })
+    out += text.slice(last, m.index)
+    last = (m.index ?? 0) + m[0].length
+  }
+  out += text.slice(last)
+  return { calls, text: out }
+}
+
+/**
+ * L1.3: la pulizia per la CONSEGNA — un testo consegnato all'utente non
+ * contiene MAI blocchi grezzi, per ogni provider (anche cloud): si tolgono
+ * TUTTI i blocchi <tool_call>…</tool_call> (nome sconosciuto compreso), i
+ * frammenti <function=…>…</function> orfani e i tag spaiati residui. Se dopo
+ * la pulizia resta vuoto, il chiamante usa il recupero normale del loop.
+ */
+export function stripTextToolCallBlocks(text: string): string {
+  let out = text.replace(TOOL_CALL_BLOCK_RE, '')
+  // frammenti orfani: function…/function in coppia, poi i tag spaiati
+  out = out.replace(/[ \t]*<function=[A-Za-z0-9_.\-]*>[\s\S]*?<\/function>[ \t]*\n?/g, '')
+  out = out.replace(/[ \t]*<\/?tool_call>[ \t]*\n?/g, '')
+  out = out.replace(/[ \t]*<function=[A-Za-z0-9_.\-]*>[ \t]*\n?/g, '')
+  out = out.replace(/[ \t]*<\/?function>[ \t]*\n?/g, '')
+  out = out.replace(/[ \t]*<\/?(?:parameter(?:=[A-Za-z0-9_.\-]*)?)>[ \t]*\n?/g, '')
+  return out.trim()
+}
+
+/** L1.3: il testo contiene blocchi (o frammenti) grezzi di chiamata? */
+export function hasRawToolCallBlocks(text: string): boolean {
+  return /<tool_call>|<function=/.test(text)
+}

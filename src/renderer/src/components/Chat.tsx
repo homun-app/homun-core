@@ -332,6 +332,12 @@ export function Chat({ layout }: { layout?: LayoutResult }) {
   const reasonMenuRef = useRef<HTMLDivElement>(null)
 
   const agent = agents.find((a) => a.id === activeId)
+  // fase locale (L4.3): la riga discreta serve quando il bot GIra sull'Integrato
+  // (modello proprio, o «come gli altri» col principale Integrato)
+  const mainModel = useStore((s) => s.mainModel)
+  const onLocalModel =
+    agent?.providerId === 'homun-local' ||
+    (!agent?.providerId && mainModel?.providerId === 'homun-local')
   const info = useBotInfo(activeId)
   const busy = agent?.status === 'thinking' || agent?.status === 'running' || agent?.status === 'paused-for-approval'
   const [text, setText] = useState('')
@@ -644,6 +650,13 @@ export function Chat({ layout }: { layout?: LayoutResult }) {
               </button>
             ))}
           </div>
+        )}
+        {/* fase locale (L4.3): stato dell'INTERFACCIA, mai del prompt — una
+            riga fissa e discreta quando questo bot gira sul modello integrato */}
+        {onLocalModel && (
+          <p className="mx-auto mb-1.5 max-w-3xl text-center text-[11px] text-muted-foreground/80">
+            <Trans>modello integrato · più lento</Trans>
+          </p>
         )}
         <form
           className="mx-auto flex max-w-3xl items-end gap-2 rounded-full bg-card py-2 pl-2 pr-2 shadow-soft"
@@ -1051,6 +1064,9 @@ function SummaryPostedRow({ entry }: { entry: TranscriptEntry }) {
 /**
  * Fase 7 (onboarding): widget di sistema che porta alle impostazioni del
  * provider — il bottone apre le Impostazioni, niente turno del modello.
+ * Fase locale (L4): TRE strade (cloud consigliato, Ollama se trovato,
+ * Integrato se la macchina è idonea): i bottoni arrivano dal widget, ognuno
+ * apre le Impostazioni → modelli (l'Integrato sulla sua scheda).
  */
 function ProviderWidgetCard({ entry }: { entry: TranscriptEntry }) {
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
@@ -1061,6 +1077,7 @@ function ProviderWidgetCard({ entry }: { entry: TranscriptEntry }) {
   const activeId = useStore((s) => s.activeId)
   if (!widget) return null
   const responded = meta.respondedValue !== undefined
+  const options = widget.options ?? [{ label: '', value: 'open-provider-settings', style: 'primary' }]
 
   return (
     <div className="max-w-[75%] rounded-[18px] bg-muted p-4">
@@ -1069,16 +1086,25 @@ function ProviderWidgetCard({ entry }: { entry: TranscriptEntry }) {
       {responded ? (
         <p className="mt-3 text-xs text-muted-foreground"><Trans>✓ Appena il provider è a posto preparo i tuoi bot.</Trans></p>
       ) : (
-        <button
-          className="mt-3 rounded-full bg-foreground px-3 py-1.5 text-xs font-medium text-background transition hover:opacity-90"
-          onClick={() => {
-            setTab('modelli')
-            setSettingsOpen(true)
-            if (activeId) widgetRespond(entry.id, 'open-provider-settings')
-          }}
-        >
-          <Trans>Apri le impostazioni del provider</Trans>
-        </button>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {options.map((o) => (
+            <button
+              key={o.value}
+              className={
+                o.style === 'primary'
+                  ? 'rounded-full bg-foreground px-3 py-1.5 text-xs font-medium text-background transition hover:opacity-90'
+                  : 'rounded-full bg-card px-3 py-1.5 text-xs transition hover:bg-accent'
+              }
+              onClick={() => {
+                setTab('modelli')
+                setSettingsOpen(true)
+                if (activeId) widgetRespond(entry.id, o.value)
+              }}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
       )}
     </div>
   )

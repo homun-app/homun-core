@@ -148,6 +148,18 @@ function secretShaped(v: string): boolean {
 }
 
 /**
+ * Fase locale (L5): le parole che diventan segreto quando il VALORE ha la
+ * forma di un token — «chiave / key / api key / token» seguita (con la
+ * stessa assegnazione esplicita di R3) da un valore secretShaped di ALMENO 8
+ * caratteri CON almeno una cifra. È il caso 29 di L1: «la mia chiave è
+ * secret_abc123» passava perché il prefisso secret_ vuole ≥ 16 caratteri
+ * dopo e «chiave» da sola non contava fra le parole del segreto. «la chiave
+ * del problema è il tempo» e «la chiave inglese 12» restano fuori: il valore
+ * non ha la forma di un token.
+ */
+const KEY_WITH_TOKEN_WORDS = ['chiave', 'key', 'api key', 'api-key', 'token']
+
+/**
  * R3: i valori che l'utente ha scritto in chat dopo una parola di segreto
  * («la mia password è X», «token: Y», «my password is Z») — SOLO con
  * assegnazione esplicita (`:` `=`, «è», «e'», «is», «vale», «sarebbe», con al
@@ -156,6 +168,8 @@ function secretShaped(v: string): boolean {
  * valore sembra un segreto (secretShaped: «sbagliata», «Netflix»,
  * «marketing» non lo sono). Un PIN di 4 cifre resta fuori: troppo corto per
  * essere utile da solo (lo coprono le regole della carta e delle chiavi).
+ * Fase locale (L5): in più «chiave / key / api key / token» + valore a forma
+ * di token (secretShaped, ≥ 8 caratteri, con cifre).
  */
 export function chatSecretValues(userTexts: readonly string[]): string[] {
   const out: string[] = []
@@ -167,11 +181,25 @@ export function chatSecretValues(userTexts: readonly string[]): string[] {
     `\\s*["']?([!-~]{6,64})["']?`,                                     // il valore
     'gi'
   )
+  const kwL5 = KEY_WITH_TOKEN_WORDS.map(escapeRe).join('|')
+  const reL5 = new RegExp(
+    `\\b(?:${kwL5})\\b` +                                              // chiave / key / api key / token
+    `(?:\\s+[^\\s:=\\u00e8]{1,24}){0,3}?` +                            // fino a 3 parole di raccordo
+    `\\s*(?::|=|\\u00e8|\\be'|\\bis\\b|\\bvale\\b|\\bsarebbe\\b)` +    // l'assegnazione esplicita
+    `\\s*["']?([!-~]{8,64})["']?`,                                     // il valore a forma di token
+    'gi'
+  )
+  const allKw = [...SECRET_WORDS, ...KEY_WITH_TOKEN_WORDS].map(escapeRe).join('|')
   for (const text of userTexts) {
     for (const m of text.matchAll(re)) {
       const v = m[1]!.trim().replace(/[,.:;)>]+$/, '')
       // la parola catturata non può essere la parola di segreto stessa
-      if (v.length >= 6 && !new RegExp(`^(?:${kw})$`, 'i').test(v) && secretShaped(v) && !out.includes(v)) out.push(v)
+      if (v.length >= 6 && !new RegExp(`^(?:${allKw})$`, 'i').test(v) && secretShaped(v) && !out.includes(v)) out.push(v)
+    }
+    for (const m of text.matchAll(reL5)) {
+      const v = m[1]!.trim().replace(/[,.:;)>]+$/, '')
+      // L5: il valore decide — token vero (≥ 8, con cifre), non una parola
+      if (v.length >= 8 && /[0-9]/.test(v) && secretShaped(v) && !new RegExp(`^(?:${allKw})$`, 'i').test(v) && !out.includes(v)) out.push(v)
     }
   }
   return out

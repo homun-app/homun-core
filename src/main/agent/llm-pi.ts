@@ -86,6 +86,8 @@ const KIND_APIS: Record<ProviderKind, string> = {
   zai: 'openai-completions',
   ollama: 'openai-completions',
   lmstudio: 'openai-completions',
+  // fase locale (L3): llama-server parla OpenAI-compatible (/v1/…)
+  'homun-local': 'openai-completions',
   'openai-compatible': 'openai-completions',
   custom: 'openai-completions'
 }
@@ -97,7 +99,8 @@ function normalizedBaseUrl(p: ProviderConfig): string {
   // (https://api.z.ai o https://api.z.ai/v1): il dato nel database non si migra
   if (p.kind === 'zai') return ZAI_CONSUMPTION_BASE_URL
   // i server OpenAI-compatible locali prendono la regola /v1 di openAiCompatBase
-  if (p.kind === 'ollama' || p.kind === 'lmstudio' || p.kind === 'openai-compatible' || p.kind === 'custom') {
+  // (fase locale L3: anche homun-local — llama-server serve /v1/chat/completions)
+  if (p.kind === 'ollama' || p.kind === 'lmstudio' || p.kind === 'homun-local' || p.kind === 'openai-compatible' || p.kind === 'custom') {
     return openAiCompatBase({ baseUrl: base })
   }
   return base
@@ -348,7 +351,7 @@ export function piModelFor(p: ProviderConfig, modelId: string): Model<Api> {
  * parte col valore del livello e «spento» si dice con "none".
  */
 function localCompatOf(p: ProviderConfig, ollamaThinking: boolean): Record<string, unknown> | undefined {
-  if (p.kind !== 'ollama' && p.kind !== 'lmstudio' && p.kind !== 'openai-compatible' && p.kind !== 'custom') return undefined
+  if (p.kind !== 'ollama' && p.kind !== 'lmstudio' && p.kind !== 'homun-local' && p.kind !== 'openai-compatible' && p.kind !== 'custom') return undefined
   if (p.kind === 'ollama' && ollamaThinking) {
     return { supportsDeveloperRole: false, supportsReasoningEffort: true, thinkingFormat: 'openai', supportsStore: false }
   }

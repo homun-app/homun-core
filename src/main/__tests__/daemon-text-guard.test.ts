@@ -57,6 +57,10 @@ const ALLOWED_LITERALS: ReadonlyArray<{ file: string; text: string }> = [
   { file: 'src/main/agent/screen.ts', text: '\n</nota_utente>' },
   // errori di avvio per lo SVILUPPATORE (lanciano al boot, finiscono nel log)
   { file: 'src/main/connectors/index.ts', text: 'il catalogo non è un array' },
+  // fase locale (L2.4): l'errore CHIARO dell'utente al secondo crash del
+  // modello integrato — la frase è CITATA dalla spec di fase, arriva nella
+  // notice di errore del modello
+  { file: 'src/daemon/local-model-server.ts', text: 'il modello locale si è fermato (memoria?): riapri il modello integrato dalle Impostazioni ' },
   { file: 'src/main/connectors/index.ts', text: ': non è un oggetto' },
   { file: 'src/main/templates/index.ts', text: 'il template non è un oggetto' },
   { file: 'src/main/templates/index.ts', text: 'roles deve essere un array di stringhe non vuote' },

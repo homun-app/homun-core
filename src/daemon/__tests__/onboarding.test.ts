@@ -8,6 +8,7 @@ import { describe, expect, it, beforeEach } from 'vitest'
 import {
   createOnboarding, maybeStartOnboarding, answerOnboardingRole, resumeOnboarding,
   roleTemplates, welcomeMessage, onboardingPrompt, onboardingRoleOptions,
+  providerPathsOf,
   MAIN_BOT_NAME, ROLE_SETTING, PENDING_PROVIDER_SETTING, DONE_SETTING,
   type OnboardingDeps
 } from '../onboarding'
@@ -213,8 +214,8 @@ describe('answerOnboardingRole SENZA provider', () => {
     maybeStartOnboarding(deps)
   })
 
-  it('la risposta parcheggia il ruolo e mostra il widget che porta alle impostazioni del provider', () => {
-    answerOnboardingRole(deps, roleWidgetEntryId, 'lavoro e codice (custom)')
+  it('la risposta parcheggia il ruolo e mostra il widget che porta alle impostazioni del provider', async () => {
+    await answerOnboardingRole(deps, roleWidgetEntryId, 'lavoro e codice (custom)')
     expect(log.settings[ROLE_SETTING]).toBe('lavoro e codice (custom)')
     expect(log.settings[PENDING_PROVIDER_SETTING]).toBe(true)
     expect(log.settings[DONE_SETTING]).toBeUndefined()
@@ -228,7 +229,7 @@ describe('answerOnboardingRole SENZA provider', () => {
   })
 
   it('resumeOnboarding: senza provider non fa nulla; col provider completa e consuma il pending', async () => {
-    answerOnboardingRole(deps, roleWidgetEntryId, 'email')
+    await answerOnboardingRole(deps, roleWidgetEntryId, 'email')
     expect(await resumeOnboarding(deps)).toBe(false) // ancora nessun provider
     expect(log.agents).toHaveLength(1)
     // arriva il provider (salvataggio dalle impostazioni)
@@ -260,5 +261,64 @@ describe('createOnboarding (facciata cablata nel daemon)', () => {
     log.providers.push({ id: 'p', name: 'P', kind: 'custom', baseUrl: 'http://x', apiKey: '', enabled: true })
     onboarding.answerRole(1, 'email')
     expect(log.settings[ROLE_SETTING]).toBe('email')
+  })
+})
+
+
+// ---- fase locale (L4): il widget «nessun provider» con TRE strade ----
+describe('L4: providerPathsOf — la visibilità delle tre strade (pura)', () => {
+  it('ordine fisso: cloud, Ollama SOLO se trovato, Integrato SOLO se non unsupported', () => {
+    expect(providerPathsOf({ ollamaFound: false, eligibility: { status: 'ok' } })).toEqual(['cloud', 'local'])
+    expect(providerPathsOf({ ollamaFound: true, eligibility: { status: 'ok' } })).toEqual(['cloud', 'ollama', 'local'])
+    // discouraged (RAM < 16) resta visibile: si può, con l'avviso forte
+    expect(providerPathsOf({ ollamaFound: false, eligibility: { status: 'discouraged' } })).toEqual(['cloud', 'local'])
+    // Intel: la strada Integrato NON si offre
+    expect(providerPathsOf({ ollamaFound: true, eligibility: { status: 'unsupported' } })).toEqual(['cloud', 'ollama'])
+    // no-space: la strada resta (il cloud è consigliato), la scheda dirà i GB
+    expect(providerPathsOf({ ollamaFound: false, eligibility: { status: 'no-space' } })).toEqual(['cloud', 'local'])
+  })
+})
+
+describe('L4: il widget del provider senza configurazione offre le tre strade', () => {
+  const withLocalDeps = (
+    ollamaFound: boolean,
+    arch = 'arm64'
+  ): OnboardingDeps => ({
+    ...deps,
+    discoverLocalProviders: async () => (ollamaFound ? [{ kind: 'ollama' }] : []),
+    localEligibilityFacts: () => ({ arch, ramGb: arch === 'arm64' ? 36 : 16, freeDiskBytes: null })
+  })
+
+  const widgetOf = (send: { message: SendMessagePayload; meta?: Record<string, unknown> }) =>
+    send.message as { prompt: string; helpText?: string; options: Array<{ label: string; value: string; style?: string }> }
+
+  it('cloud PRIMO (consigliato), poi Ollama trovato, poi Integrato — e l’avviso onesto', async () => {
+    const d = withLocalDeps(true)
+    await answerOnboardingRole(d, roleWidgetEntryId, 'email')
+    const w = log.sends.find((s) => (s.message as { type?: string }).type === 'widget' && s.meta?.onboardingProvider)
+    expect(w).toBeTruthy()
+    const opts = widgetOf(w!).options
+    expect(opts.map((o) => o.value)).toEqual(['open-provider-settings', 'open-ollama', 'open-local-model'])
+    expect(opts[0]!.style).toBe('primary')
+    // l'avviso onesto dell'Integrato (idea esatta della spec, IT)
+    expect(widgetOf(w!).helpText).toContain('i dati restano qui')
+    expect(widgetOf(w!).helpText).toContain('più lento')
+    expect(widgetOf(w!).helpText).toContain('modello cloud')
+    // resta parcheggiato: pendingProvider acceso, ripresa come oggi
+    expect(log.settings[PENDING_PROVIDER_SETTING]).toBe(true)
+  })
+
+  it('Ollama NON trovato → la strada NON si offre; Intel → niente Integrato', async () => {
+    await answerOnboardingRole(withLocalDeps(false), roleWidgetEntryId, 'email')
+    let w = log.sends.find((s) => (s.message as { type?: string }).type === 'widget' && s.meta?.onboardingProvider)
+    expect(widgetOf(w!).options.map((o) => o.value)).toEqual(['open-provider-settings', 'open-local-model'])
+
+    log.sends.length = 0
+    log.marked.length = 0
+    await answerOnboardingRole(withLocalDeps(true, 'x64'), roleWidgetEntryId, 'email')
+    w = log.sends.find((s) => (s.message as { type?: string }).type === 'widget' && s.meta?.onboardingProvider)
+    expect(widgetOf(w!).options.map((o) => o.value)).toEqual(['open-provider-settings', 'open-ollama'])
+    // e senza l'Integrato l'avviso onesto non serve
+    expect(widgetOf(w!).helpText).not.toContain('i dati restano qui')
   })
 })

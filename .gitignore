@@ -12,3 +12,7 @@ dist-installers
 # (scripts/prepare-engramma.mjs); nel repo resta SOLO il lock con gli hash
 vendor/engramma/*
 !vendor/engramma/engramma.lock.json
+
+# fase locale (L2): il bundle llama.cpp si scarica con scripts/fetch-llama.mjs
+# (pin in scripts/llama-pin.json); nel repo restano SOLO il pin e lo script
+vendor/llama/

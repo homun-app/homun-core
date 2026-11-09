@@ -473,6 +473,9 @@ vi.mock('../llm', () => ({
     // fase 18b (K6): anche maxRetries (0 = il passaggio d'anello sostituisce il retry)
     h.llm.models.push(String(_model))
     h.llm.provIds.push(String((_p as { id?: string })?.id ?? ''))
+    // fase locale (L3): il baseUrl del provider di OGNI chiamata (homun-local)
+    ;(h.llm as { baseUrls?: string[] }).baseUrls ??= []
+    ;(h.llm as { baseUrls?: string[] }).baseUrls!.push(String((_p as { baseUrl?: string })?.baseUrl ?? ''))
     h.llm.opts.push({ thinking: _opts?.thinking, modelPrices: _opts?.modelPrices, maxRetries: _opts?.maxRetries, sessionId: _opts?.sessionId })
     // fase 8: la chiamata del REVISORE (solo tool report_decision) risponde da
     // h.llm.reviewer senza toccare la coda del turno
@@ -654,6 +657,20 @@ vi.mock('../../../daemon/subagent-ops', () => ({
   sealTurnBatch: (_db: unknown, batchId: string) => { subagentsState.sealedBatches.push(batchId) },
   subagentsChanged: (parentId: string) => { subagentsState.changed.push(parentId) }
 }))
+
+// fase locale (L3): il provider di turno del modello integrato — mock con lo
+// stato che il test decide (il server vero non parte nei test del loop)
+const localModelState = vi.hoisted(() => ({
+  turns: [] as Array<{ baseUrl: string; apiKey: string }>,
+  notes: 0
+}))
+vi.mock('../../../daemon/local-model', () => ({
+  ensureLocalTurnProvider: async (p: { id: string; kind: string; baseUrl: string; apiKey: string }) => {
+    localModelState.turns.push({ baseUrl: 'http://127.0.0.1:8431', apiKey: 'k-di-quel-turno' })
+    return { ...p, baseUrl: 'http://127.0.0.1:8431', apiKey: 'k-di-quel-turno' }
+  }
+}))
+
 
 // fase 11b (punto 2): il browser del bot — mock parziale (i tool defs sono
 // veri); disponibilità, refInfo ed esecuzione sono guidate dai test
@@ -858,6 +875,8 @@ beforeEach(() => {
   h.llm.queue.length = 0
   h.llm.calls.length = 0
   h.llm.models.length = 0
+  // fase locale (L3): il baseUrl del provider di ogni chiamata
+  ;((h.llm as { baseUrls?: string[] }).baseUrls ??= []).length = 0
   // fase 18b: il raffreddamento delle rotte è in memoria nel modulo — si
   // azzera tra i test, come il resto dello stato
   h.llm.provIds.length = 0
@@ -7754,5 +7773,102 @@ describe('fase memoria-engramma · correzioni C1: la contaminazione attraversa l
     } finally {
       setStoryIndexer(null)
     }
+  })
+})
+
+// ---- fase locale (L1): recupero delle chiamate scritte come TESTO ----
+// I blocchi veri dei dump L1 (llama-server non li ha riconosciuti): il
+// provider locale li esegue come chiamate native, il testo consegnato non li
+// contiene MAI (anche cloud), e argGuard vale anche per le chiamate dal testo.
+describe('fase locale (L1): recupero delle chiamate scritte come testo', () => {
+  const BLOCK_FIND_TOOLS = '<tool_call>\n<function=find_tools>\n<parameter=group>\nbrowser\n</parameter>\n</function>\n</tool_call>'
+
+  it('provider LOCALE: risposta senza chiamate native ma col blocco → la chiamata viene eseguita, il blocco non è consegnato', async () => {
+    h.db.providers = [{ id: 'prov', enabled: true, kind: 'openai-compatible' }]
+    h.llm.queue = [
+      { text: 'Cerco gli strumenti del browser.\n' + BLOCK_FIND_TOOLS },
+      { text: 'Ho attivato il gruppo browser: dimmi quale sito aprire.' }
+    ]
+    await runTurn(AGENT, 'apri un sito', emit)
+    // la chiamata è stata ESEGUITA come se fosse nativa: entry tool-call col
+    // nome e gli argomenti recuperati dal testo…
+    const call = h.db.entries.find((e) => e.kind === 'tool-call' && e.meta?.name === 'find_tools')
+    expect(call, 'entry tool-call della chiamata recuperata').toBeTruthy()
+    expect(call!.meta!.arguments).toBe(JSON.stringify({ group: 'browser' }))
+    // …e un result per quella chiamata (attivazione del gruppo)
+    const res = h.db.entries.find((e) => e.kind === 'tool-result' && e.meta?.callId === call!.meta!.id)
+    expect(res).toBeTruthy()
+    // e il modello ha visto il result (coppia chiamata/risposta nei messaggi)
+    const toolMsg = h.llm.calls[1]?.find((m) => m.role === 'tool')
+    expect(toolMsg).toBeTruthy()
+    // il blocco NON è mai consegnato: né nella risposta finale né altrove
+    for (const e of h.db.entries.filter((x) => x.kind === 'send-message')) {
+      expect(e.content).not.toContain('<tool_call>')
+      expect(e.content).not.toContain('<function=')
+    }
+    const finals = h.db.entries.filter((e) => e.kind === 'send-message' && e.meta?.final === true)
+    expect(finals.map((e) => e.content).join('\n')).toContain('Ho attivato il gruppo browser')
+  })
+
+  it('provider CLOUD col blocco: NIENTE recupero di chiamate, ma il testo consegnato è RIPULITO', async () => {
+    h.db.providers = [{ id: 'prov', enabled: true, kind: 'openai' }]
+    h.llm.queue = [{ text: 'Ti servono gli strumenti:\n' + BLOCK_FIND_TOOLS + '\nDimmi tu.' }]
+    await runTurn(AGENT, 'apri un sito', emit)
+    // cloud: il blocco NON diventa una chiamata (nessuna entry tool-call)
+    expect(h.db.entries.find((e) => e.kind === 'tool-call' && e.meta?.name === 'find_tools')).toBeFalsy()
+    // ma la consegna è pulita, col testo attorno conservato
+    const final = h.db.entries.find((e) => e.kind === 'send-message' && e.meta?.final === true)
+    expect(final).toBeTruthy()
+    expect(final!.content).not.toContain('<tool_call>')
+    expect(final!.content).not.toContain('<function=')
+    expect(final!.content).toContain('Ti servono gli strumenti:')
+    expect(final!.content).toContain('Dimmi tu.')
+  })
+
+  it('provider CLOUD: testo che è SOLO il blocco → consegnato vuoto → il recupero normale del loop (R5)', async () => {
+    h.db.providers = [{ id: 'prov', enabled: true, kind: 'openai' }]
+    h.llm.queue = [
+      { text: BLOCK_FIND_TOOLS },          // la risposta è solo il blocco grezzo
+      { text: 'Ecco: ti servo io, quale sito?' } // la risposta del recupero R5
+    ]
+    await runTurn(AGENT, 'apri un sito', emit)
+    expect(h.db.entries.find((e) => e.kind === 'tool-call')).toBeFalsy()
+    const final = h.db.entries.find((e) => e.kind === 'send-message' && e.meta?.final === true)
+    expect(final!.content).toContain('Ecco: ti servo io')
+    // il blocco grezzo non è MAI nel transcript consegnato
+    for (const e of h.db.entries.filter((x) => x.kind === 'send-message' || x.kind === 'message')) {
+      expect(e.content).not.toContain('<tool_call>')
+    }
+  })
+
+  it('provider «Integrato» (homun-local): baseUrl e chiave di ensureRunning a OGNI chiamata, mai il salvato', async () => {
+    h.db.providers = [{ id: 'prov', enabled: true, kind: 'homun-local' }]
+    h.llm.queue = [{ text: 'Risposta del modello integrato.' }]
+    await runTurn(AGENT, 'ciao', emit)
+    // la chiamata è partita col baseUrl e la chiave del turno (mock sopra)…
+    expect(localModelState.turns.length).toBe(1)
+    expect((h.llm as { baseUrls?: string[] }).baseUrls?.[0]).toBe('http://127.0.0.1:8431')
+    // …e il turno ha risposto normally
+    const final = h.db.entries.find((e) => e.kind === 'send-message' && e.meta?.final === true)
+    expect(final!.content).toContain('Risposta del modello integrato')
+  })
+
+  it('provider LOCALE: argGuard vale anche per le chiamate dal testo (il caso 29: la chiave nel reason)', async () => {
+    h.db.providers = [{ id: 'prov', enabled: true, kind: 'openai-compatible' }]
+    // l'utente scrive la chiave in chat; il modello la rimette nel reason di
+    // offer_connector SCRITTO COME TESTO — la sentinella la ferma come le native
+    h.llm.queue = [
+      { text: '<tool_call>\n<function=offer_connector>\n<parameter=id>\ngcal\n</parameter>\n<parameter=reason>\ncollego con la chiave secret_abc123\n</parameter>\n</function>\n</tool_call>' },
+      { text: 'Non posso usare la chiave: salviamola nel modulo sicuro.' }
+    ]
+    await runTurn(AGENT, 'la mia chiave è secret_abc123, collega il calendario', emit)
+    const call = h.db.entries.find((e) => e.kind === 'tool-call' && e.meta?.name === 'offer_connector')
+    expect(call, 'entry tool-call della chiamata recuperata dal testo').toBeTruthy()
+    const res = h.db.entries.find((e) => e.kind === 'tool-result' && e.meta?.callId === call!.meta!.id)
+    expect(res!.meta!.argGuard).toBe(true)
+    // il valore non è MAI nelle chiamate né nei result (argomenti redatti);
+    // resta solo nel messaggio dell'utente, che è suo
+    expect(res!.content).not.toContain('secret_abc123')
+    expect(JSON.stringify(h.db.entries.filter((e) => e.kind !== 'message'))).not.toContain('secret_abc123')
   })
 })

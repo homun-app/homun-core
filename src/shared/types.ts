@@ -406,6 +406,7 @@ export type Localized = string | { it: string; en: string }
 export type ProviderKind =
   | 'ollama'
   | 'lmstudio'
+  | 'homun-local'
   | 'openai-compatible'
   | 'openai'
   | 'anthropic'
@@ -467,6 +468,28 @@ export interface ProviderProbeResult {
 }
 
 /** Fase 16c (C3.3): il modello principale («il cervello dei bot»). Setting models.main. */
+/**
+ * Fase locale (L4): lo stato del modello integrato che la scheda Impostazioni
+ * polla (niente eventi push): non-installato / download (byte) / pronto /
+ * in esecuzione, con i dati del modello, l'idoneità della macchina e lo
+ * stato del processo affiancato.
+ */
+export interface LocalModelStatusRpc {
+  state: 'not-installed' | 'downloading' | 'ready' | 'running'
+  progress?: { bytes: number; total: number }
+  model: {
+    id: string
+    label: string
+    sizeGb: number
+    license: string
+    source: string
+    ramUseGb: number
+    minRamGb: number
+  }
+  eligibility: { status: 'ok' | 'discouraged' | 'unsupported' | 'no-space'; neededGb?: number; freeGb?: number }
+  server: { running: boolean; port: number | null; startedAt: number | null; lastError: string | null }
+}
+
 export interface MainModel {
   providerId: string
   model: string
@@ -785,6 +808,14 @@ export interface SandbotApi {
    */
   probeProvider(config: { kind: ProviderKind; baseUrl: string; apiKey?: string; providerId?: string }): Promise<ProviderProbeResult>
   listModels(providerId: string): Promise<ModelInfo[]>
+  /**
+   * Fase locale (L3/L4): il modello integrato — stato della scheda, download
+   * (dopo il consenso esplicito della UI), annullamento e rimozione.
+   */
+  localModelStatus(): Promise<LocalModelStatusRpc>
+  localModelInstall(): Promise<{ started: boolean }>
+  localModelCancel(): Promise<{ cancelled: boolean }>
+  localModelRemove(): Promise<{ freedGb: number }>
   /**
    * Fase 18b (K3): le capacità di UN modello, SENZA l'elenco completo e senza
    * prezzo personalizzato. Nessuna rete per i provider di catalogo; per

@@ -215,3 +215,25 @@ scaricati dalla fonte al commit indicato nel catalogo solo quando l'utente
 installa una voce, e la copia finisce nella libreria skill dell'utente
 (`LICENSE*` viene copiato insieme alla skill). I marchi e i repository citati
 appartengono ai rispettivi proprietari.
+
+## llama.cpp (b12061)
+
+Il server del modello integrato è ``llama-server`` della release b12061 di
+<https://github.com/ggml-org/llama.cpp>, licenza MIT:
+
+> Permission is hereby granted, free of charge, to any person obtaining a copy
+> of this software and associated documentation files (the "Software"), to deal
+> in the Software without restriction, including without limitation the rights
+> to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+> copies of the Software, and to permit persons to whom the Software is
+> furnished to do so, subject to the following conditions: the above copyright
+> notice and this permission notice shall be included in all copies or
+> substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

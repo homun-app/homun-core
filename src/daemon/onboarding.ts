@@ -18,6 +18,8 @@ import { currentUserLanguage } from '../main/agent/user-language'
 import { formatUi, ui } from '../shared/ui-text'
 import { UI } from '../shared/ui-messages'
 import { pickLang } from '../shared/localized'
+// fase locale (L4): l'idoneità della macchina per la strada «Integrato»
+import { localEligibility } from '../main/agent/local-catalog'
 import type { Lang } from '../shared/language'
 
 /** Il nome del bot principale creato dall'onboarding. */
@@ -86,6 +88,14 @@ export interface OnboardingDeps {
   /** Accoda il job del kickstart di un bot da template (initiator TEMPLATE_IMPORT). */
   enqueueKickstart(agentId: string, template: BotTemplate): void
   emit(e: SandbotEvent): void
+  /**
+   * Fase locale (L4): la scoperta dei servizi locali, per la strada Ollama del
+   * widget del provider (solo se lo trova). Facoltativa: senza, la strada non
+   * si offre.
+   */
+  discoverLocalProviders?: () => Promise<Array<{ kind: string }>>
+  /** Fase locale (L4): i fatti della macchina per la strada Integrato (default: Mac idoneo). */
+  localEligibilityFacts?: () => { arch: string; ramGb: number; freeDiskBytes: number | null }
 }
 
 /** C'è almeno un provider attivo? (senza provider i bot non possono pensare) */
@@ -116,25 +126,63 @@ export function maybeStartOnboarding(deps: OnboardingDeps): void {
 }
 
 /**
- * La risposta al widget del ruolo: salva il ruolo e completa subito, oppure —
- * senza provider — si ferma col widget che porta alle impostazioni del
- * provider (la ripresa avviene a providers:save o al prossimo avvio).
+ * Fase locale (L4), pura: le strade del widget «nessun provider», in ordine —
+ * cloud con chiave (consigliato), Ollama SOLO se la scoperta lo trova,
+ * Integrato sul Mac SOLO se l'idoneità non è unsupported (con RAM < 16 si può
+ * installare: la scheda mostra l'avviso forte).
  */
-export function answerOnboardingRole(deps: OnboardingDeps, entryId: number, value: string | string[]): void {
+export function providerPathsOf(f: {
+  ollamaFound: boolean
+  eligibility: { status: 'ok' | 'discouraged' | 'unsupported' | 'no-space' }
+}): Array<'cloud' | 'ollama' | 'local'> {
+  const out: Array<'cloud' | 'ollama' | 'local'> = ['cloud']
+  if (f.ollamaFound) out.push('ollama')
+  if (f.eligibility.status !== 'unsupported') out.push('local')
+  return out
+}
+
+/**
+ * La risposta al widget del ruolo: salva il ruolo e completa subito, oppure —
+ * senza provider — si ferma col widget delle TRE strade (L4): cloud con chiave
+ * (consigliato), Ollama se trovato, Integrato se la macchina è idonea. La
+ * ripresa avviene a providers:save, all'installazione dell'Integrato o al
+ * prossimo avvio.
+ */
+export async function answerOnboardingRole(deps: OnboardingDeps, entryId: number, value: string | string[]): Promise<void> {
   const role = (Array.isArray(value) ? value[0] : value) ?? ''
   deps.setSetting(ROLE_SETTING, role)
   deps.markWidgetResponded(deps.getSetting<string | null>('mainAgentId', null) ?? '', entryId, value)
   if (providerConfigured(deps)) {
-    void completeOnboarding(deps, role)
+    await completeOnboarding(deps, role)
   } else {
     deps.setSetting(PENDING_PROVIDER_SETTING, true)
     const main = deps.getSetting<string | null>('mainAgentId', null) ?? ''
     const lang = currentUserLanguage()
+    let ollamaFound = false
+    try {
+      ollamaFound = (await deps.discoverLocalProviders?.() ?? []).some((p) => p.kind === 'ollama')
+    } catch {
+      ollamaFound = false
+    }
+    const facts = deps.localEligibilityFacts?.() ?? { arch: 'arm64', ramGb: 16, freeDiskBytes: null }
+    const paths = providerPathsOf({ ollamaFound, eligibility: localEligibility(facts) })
+    const optionOf = (v: 'open-provider-settings' | 'open-ollama' | 'open-local-model', labelId: typeof UI.onboardingProviderButton, primary = false) => ({
+      label: formatUi(ui(labelId), lang),
+      value: v,
+      ...(primary ? { style: 'primary' as const } : {})
+    })
     deps.appendSystemSend(main, {
       type: 'widget',
       prompt: formatUi(ui(UI.onboardingProviderPrompt), lang),
-      helpText: formatUi(ui(UI.onboardingProviderHelp), lang),
-      options: [{ label: formatUi(ui(UI.onboardingProviderButton), lang), value: 'open-provider-settings', style: 'primary' }]
+      // l'avviso onesto serve solo quando c'è la strada Integrato
+      ...(paths.includes('local')
+        ? { helpText: formatUi(ui(UI.onboardingLocalModelHonest), lang) }
+        : { helpText: formatUi(ui(UI.onboardingProviderHelp), lang) }),
+      options: [
+        optionOf('open-provider-settings', UI.onboardingProviderButton, true),
+        ...(paths.includes('ollama') ? [optionOf('open-ollama', UI.onboardingProviderOllama)] : []),
+        ...(paths.includes('local') ? [optionOf('open-local-model', UI.onboardingProviderLocal)] : [])
+      ]
     }, { onboardingProvider: true })
   }
 }

@@ -1,0 +1,8 @@
+{
+  "tag": "b12061",
+  "asset": "llama-b12061-bin-macos-arm64.tar.gz",
+  "url": "https://github.com/ggml-org/llama.cpp/releases/download/b12061/llama-b12061-bin-macos-arm64.tar.gz",
+  "size": 16542711,
+  "sha256": "b107a8373f7af640ff2744521792d3bc4742b9a86e73f52aa8636b30e3e7c554",
+  "license": "MIT"
+}

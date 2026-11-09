@@ -12,7 +12,7 @@ import { ChevronDown, ChevronRight, Plus } from 'lucide-react'
 import { api, useStore } from '../../store'
 import type {
   ApprovalsMode, AutoReviewSettings, FallbackRoute,
-  ModelInfo, ProviderPublic, WebSearchStatusRpc, WebSearchProviderStatusRpc
+  LocalModelStatusRpc, ModelInfo, ProviderPublic, WebSearchStatusRpc, WebSearchProviderStatusRpc
 } from '../../../../shared/types'
 import { DEFAULT_AUTO_REVIEW, approvalsModeOf } from '../../../../shared/types'
 import { providerPlace } from '../../../../shared/network-host'
@@ -272,6 +272,9 @@ export function ModelsPage() {
         </button>
       </SettingsGroup>
 
+      {/* ---- fase locale (L4): il modello Integrato ---- */}
+      <LocalModelCard />
+
       {addOpen && (
         <AddProviderSheet
           onClose={() => setAddOpen(false)}
@@ -279,6 +282,169 @@ export function ModelsPage() {
         />
       )}
     </SettingsPage>
+  )
+}
+
+/**
+ * Fase locale (L4.2): la scheda «Integrato» — stato (non installato /
+ * download x% / pronto / in esecuzione), RAM usata, i pulsanti Installa,
+ * Annulla e Rimuovi, e l'avviso onesto. Il download parte SOLO dal consenso
+ * esplicito (modello, dimensione, sorgente e licenza mostrati prima del click).
+ */
+function LocalModelCard() {
+  const [st, setSt] = useState<LocalModelStatusRpc | null>(null)
+  const [confirm, setConfirm] = useState(false)
+  const [removing, setRemoving] = useState(false)
+  const [freed, setFreed] = useState<number | null>(null)
+
+  const refresh = (): void => {
+    void api.localModelStatus().then(setSt).catch(() => setSt(null))
+  }
+  useEffect(refresh, [])
+  // durante il download si polla più stretto (il progresso è il .part su disco)
+  useEffect(() => {
+    const ms = st?.state === 'downloading' ? 1000 : 8000
+    const t = setInterval(refresh, ms)
+    return () => clearInterval(t)
+  }, [st?.state])
+
+  if (st === null) {
+    return (
+      <SettingsGroup label={<Trans>Integrato</Trans>}>
+        <div className={`px-4 py-3 text-sm text-muted-foreground ${ROW}`}>…</div>
+      </SettingsGroup>
+    )
+  }
+  const m = st.model
+  const pct = st.state === 'downloading' && st.progress && st.progress.total > 0
+    ? Math.floor((st.progress.bytes / st.progress.total) * 100)
+    : null
+  const notEligible = st.eligibility.status === 'unsupported'
+  const strong = st.eligibility.status === 'discouraged'
+  const noSpace = st.eligibility.status === 'no-space'
+
+  return (
+    <SettingsGroup label={<Trans>Integrato</Trans>}>
+      <div className={`px-4 py-3 ${ROW}`}>
+        <div className="flex items-center gap-2">
+          <span className="text-[15px]">{m.label}</span>
+          {st.state === 'running' && <span className="rounded-full bg-chart-2/15 px-2 py-0.5 text-[11px] text-chart-2"><Trans>In esecuzione</Trans></span>}
+          {st.state === 'ready' && <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground"><Trans>Pronto</Trans></span>}
+        </div>
+        <p className="mt-1 text-[13px] text-muted-foreground">
+          <Trans>{m.sizeGb} GB · {m.source} · {m.license} · RAM ~{m.ramUseGb} GB</Trans>
+        </p>
+
+        {/* l'avviso onesto (L4: la stessa idea dell'onboarding) */}
+        {st.state !== 'not-installed' && (
+          <p className="mt-2 text-[13px] text-muted-foreground">
+            <Trans>Il modello integrato gira sul tuo Mac: niente costi e i dati restano qui. È più lento e sbaglia più spesso dei modelli cloud; per lavori affidabili ti consiglio un modello cloud.</Trans>
+          </p>
+        )}
+
+        {notEligible && (
+          <p className="mt-2 text-[13px] text-destructive"><Trans>Non disponibile su questa macchina.</Trans></p>
+        )}
+        {strong && (
+          <p className="mt-2 text-[13px] text-amber-600 dark:text-amber-400">
+            <Trans>Attenzione: con meno di {m.minRamGb} GB di RAM sarà lento e potrebbe bloccare il Mac.</Trans>
+          </p>
+        )}
+        {noSpace && (
+          <p className="mt-2 text-[13px] text-amber-600 dark:text-amber-400">
+            {st.eligibility.neededGb !== undefined
+              ? <Trans>Servono {st.eligibility.neededGb} GB di spazio libero (liberi: {st.eligibility.freeGb ?? '—'}).</Trans>
+              : <Trans>Spazio su disco insufficiente.</Trans>}
+          </p>
+        )}
+
+        {st.state === 'downloading' && (
+          <div className="mt-3">
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+              <div className="h-full rounded-full bg-foreground transition-all" style={{ width: `${pct ?? 0}%` }} />
+            </div>
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <p className="text-[13px] text-muted-foreground"><Trans>Download {pct ?? 0}%</Trans></p>
+              <button
+                className="rounded-full bg-muted px-3 py-1.5 text-xs transition hover:bg-accent"
+                onClick={() => { void api.localModelCancel().then(refresh) }}
+              >
+                <Trans>Annulla</Trans>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {st.state === 'not-installed' && !notEligible && (
+          <div className="mt-3">
+            {confirm ? (
+              <div className="flex flex-wrap items-center gap-2 text-[13px]">
+                <span>
+                  <Trans>Installare {m.label} ({m.sizeGb} GB) da {m.source}, licenza {m.license}?</Trans>
+                </span>
+                <button
+                  className="rounded-full bg-foreground px-3 py-1.5 text-xs font-medium text-background transition hover:opacity-90"
+                  onClick={() => { setConfirm(false); void api.localModelInstall().then(refresh) }}
+                >
+                  <Trans>Installa</Trans>
+                </button>
+                <button className="text-xs text-muted-foreground transition hover:text-foreground" onClick={() => setConfirm(false)}>
+                  <Trans>Annulla</Trans>
+                </button>
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  className="rounded-full bg-muted px-3 py-1.5 text-xs font-medium transition hover:bg-accent"
+                  onClick={() => setConfirm(true)}
+                >
+                  <Trans>Installa il modello integrato</Trans>
+                </button>
+                <span className="text-[13px] text-muted-foreground">
+                  <Trans>Il modello integrato gira sul tuo Mac: niente costi e i dati restano qui. È più lento e sbaglia più spesso dei modelli cloud. Va bene per prove e cose semplici; per lavori affidabili ti consiglio un modello cloud.</Trans>
+                </span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {(st.state === 'ready' || st.state === 'running') && (
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            {removing ? (
+              <>
+                <span className="text-[13px] text-destructive"><Trans>Rimuovere il modello e liberare {m.sizeGb} GB?</Trans></span>
+                <button
+                  className="rounded-full bg-destructive/10 px-3 py-1.5 text-xs font-medium text-destructive transition hover:bg-destructive/20"
+                  onClick={() => {
+                    void api.localModelRemove()
+                      .then((r) => { setFreed(r.freedGb); setRemoving(false); refresh() })
+                      .catch(() => setRemoving(false))
+                  }}
+                >
+                  <Trans>Rimuovi</Trans>
+                </button>
+                <button className="text-xs text-muted-foreground transition hover:text-foreground" onClick={() => setRemoving(false)}>
+                  <Trans>Annulla</Trans>
+                </button>
+              </>
+            ) : freed !== null ? (
+              <span className="text-[13px] text-chart-2"><Trans>Liberati {freed} GB.</Trans></span>
+            ) : (
+              <button
+                className="rounded-full px-3 py-1.5 text-xs text-destructive/90 transition hover:text-destructive"
+                onClick={() => setRemoving(true)}
+              >
+                <Trans>Rimuovi</Trans>
+              </button>
+            )}
+          </div>
+        )}
+
+        {st.server.lastError && (
+          <p className="mt-2 text-[13px] text-destructive">{st.server.lastError}</p>
+        )}
+      </div>
+    </SettingsGroup>
   )
 }
 

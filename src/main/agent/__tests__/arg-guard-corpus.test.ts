@@ -75,7 +75,12 @@ const MUST_PASS: Row[] = [
   // — segreti annunciati in chat ma non assegnati —
   { tool: 'offer_connector', args: { id: 'gcal', reason: 'per sincronizzare il calendario del team' }, chat: ['il token di GitHub scade domani'] },
   { tool: 'fill_credential', args: { loginId: 'netflix', username_ref: 'e1' }, chat: ['ho dimenticato la password dell\'account'] },
-  { tool: 'browser_type', args: { ref: 'e3', text: 'sbagliata' }, chat: ['la password è sbagliata'], note: 'parola comune, non un valore' }
+  { tool: 'browser_type', args: { ref: 'e3', text: 'sbagliata' }, chat: ['la password è sbagliata'], note: 'parola comune, non un valore' },
+  // — fase locale (L5): «chiave / key» da sola RESTA fuori quando il valore
+  // non ha la forma di un token (il corpus di prima non cambia) —
+  { tool: 'send_to_agent', args: { agentId: 'b1', text: 'la chiave del problema è il tempo' }, chat: ['la chiave del problema è il tempo'], note: 'L5 negativo: «tempo» non è un token' },
+  { tool: 'browser_type', args: { ref: 'e3', text: 'la chiave inglese 12' }, chat: ['la chiave inglese 12'], note: 'L5 negativo: «12» non è un token' },
+  { tool: 'draft_external', args: { channel: 'email', to: 'a@b.it', subject: 'Chiavi', body: 'la chiave del successo è la costanza' }, chat: ['la chiave del successo è la costanza'], note: 'L5 negativo: valore lungo ma senza cifre' }
 ]
 
 /** DEVE essere rifiutato: carte, chiavi, segreti assegnati in chat */
@@ -102,7 +107,14 @@ const MUST_BLOCK: Row[] = [
   { tool: 'send_to_agent', args: { agentId: 'b1', text: 'il codice per entrare è ab12cd34ef' }, chat: ['il token è ab12cd34ef'] },
   { tool: 'browser_type', args: { ref: 'e5', text: 'S3cret!!' }, chat: ['my password is S3cret!!'] },
   { tool: 'draft_external', args: { channel: 'email', to: 'a@b.it', subject: 'wifi', body: 'la rete di casa è Casa2026' }, chat: ['la password del wifi è Casa2026'] },
-  { tool: 'fill_credential', args: { loginId: 'x', username_ref: 'e1', password: 'Tr4pp0la!92' }, chat: ['la mia password è Tr4pp0la!92'] }
+  { tool: 'fill_credential', args: { loginId: 'x', username_ref: 'e1', password: 'Tr4pp0la!92' }, chat: ['la mia password è Tr4pp0la!92'] },
+  // — fase locale (L5): «chiave / key / api key / token» + valore a forma di
+  // token (secretShaped, ≥ 8 caratteri, con cifre) — il caso 29 di L1:
+  // «la mia chiave è secret_abc123» finita nel reason di offer_connector —
+  { tool: 'offer_connector', args: { id: 'gcal', reason: 'collego con la chiave secret_abc123' }, chat: ['la mia chiave è secret_abc123'], note: 'L5: il caso 29 vero' },
+  { tool: 'send_to_agent', args: { agentId: 'b1', text: 'my key is hf_K9m2xQ7a' }, chat: ['my key is hf_K9m2xQ7a'], note: 'L5: key inglese + is' },
+  { tool: 'browser_type', args: { ref: 'e5', text: 'ab12cd34ef' }, chat: ['la mia api key è ab12cd34ef'], note: 'L5: api key + token a forma di token' },
+  { tool: 'run-command', args: { command: 'echo sk_live_9f2kx71m' }, chat: ['la chiave: sk_live_9f2kx71m'], note: 'L5: chiave: con due punti' }
 ]
 
 describe('fase token ritocchi (R5): il corpus fisso della sentinella', () => {
