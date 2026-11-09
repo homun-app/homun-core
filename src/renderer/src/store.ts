@@ -151,6 +151,8 @@ interface Store {
   previews: Record<string, SidebarPreview>
   /** fase 16 (U5): pannelli Memoria e Skill della vista dell'agente (anche dal pannello destro) */
   memoryOpen: boolean
+  /** fase memoria-engramma (M6): l'avanzamento dei lavori della memoria */
+  memoryProgress: { phase: 'story-backfill' | 'model-pull'; done: number; total: number; finished?: boolean; error?: string } | null
   skillsOpen: boolean
   /** fase skill: il filtro bot della finestra «Skill» (null = tutti i bot) */
   skillsFilterAgent: string | null
@@ -337,6 +339,7 @@ export const useStore = create<Store>((set, get) => ({
   nowTick: 0,
   previews: {},
   memoryOpen: false,
+  memoryProgress: null,
   skillsOpen: false,
   skillsFilterAgent: null,
   quote: null,
@@ -552,6 +555,12 @@ export const useStore = create<Store>((set, get) => ({
         // fase 19a (V3.4): lo stato dello schermo di un bot è cambiato
         case 'screen': {
           set({ screenStatus: { ...s.screenStatus, [e.agentId]: e.status } })
+          break
+        }
+        // fase memoria-engramma (M6): download del modello e indicizzazione
+        // della storia — la sezione Memoria mostra l'avanzamento
+        case 'memory': {
+          set({ memoryProgress: { phase: e.phase, done: e.done, total: e.total, ...(e.finished !== undefined ? { finished: e.finished } : {}), ...(e.error !== undefined ? { error: e.error } : {}) } })
           break
         }
         // fase 10: un gruppo o i suoi messaggi sono cambiati (sidebar + vista)

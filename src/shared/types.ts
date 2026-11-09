@@ -909,9 +909,18 @@ export interface SandbotApi {
   /** fase 16c (C4): ricerca di sola lettura nel registro MCP (finestra Collega app) */
   connectorsSearchRegistry(query: string): Promise<AppsRegistryResult[]>
   // memoria (fase 4): sezione nella vista dell'agente, modifica ed eliminazione
-  listMemories(agentId: string): Promise<MemoryInfo[]>
-  updateMemory(agentId: string, id: string, content: string): Promise<void>
-  deleteMemory(agentId: string, id: string): Promise<void>
+  // fase memoria-engramma (M6): la sezione Memoria sul motore Engramma
+  memoryOverview(agentId: string): Promise<MemoryOverview>
+  memoryList(agentId: string, opts: { owner: 'bot' | 'user'; tier?: 'core' | 'log'; status?: 'active' | 'quarantined'; limit?: number; offset?: number }): Promise<{ notes: MemoryNoteInfo[]; total: number }>
+  memorySearch(agentId: string, query: string, opts?: { explain?: boolean }): Promise<MemorySearchHitInfo[]>
+  memoryNote(agentId: string, id: string): Promise<MemoryNoteDetail>
+  memorySave(agentId: string, input: { id?: string; body: string; tier: 'core' | 'log'; scope?: 'agent' | 'user' }): Promise<MemoryNoteInfo>
+  memoryConfirm(agentId: string, id: string): Promise<void>
+  memoryDiscard(agentId: string, id: string): Promise<void>
+  memoryDelete(agentId: string, id: string): Promise<void>
+  memoryRestore(agentId: string, id: string): Promise<void>
+  memoryPurge(agentId: string, id: string): Promise<MemoryPurgeResult>
+  memoryModelPull(): Promise<{ started: boolean }>
   // skill (fase 4): elenco con visualizzazione ed eliminazione
   /** fase skill: il SALVATAGGIO dalla finestra — validazione S1, versioni, rename */
   skillsSave(rec: {
@@ -1169,15 +1178,90 @@ export interface TriggerEventPayload {
 
 // ---- memoria e skill (fase 4) ----
 
-/** Una memoria dell'agente (o condivisa, scope 'user') così come la vede la UI. */
-export interface MemoryInfo {
+/**
+ * Fase memoria-engramma (M6): una nota della memoria come la vede la sezione
+ * Memoria — dal motore Engramma (cella bot-<id> = owner 'bot', cella
+ * utente = owner 'user'). Le date sono RFC 3339 come le dà il motore.
+ */
+export interface MemoryNoteInfo {
+  /** ULID completo */
   id: string
-  content: string
+  /** le ultime 8 cifre: l'id che il bot vede in recall_memory */
+  shortId: string
+  owner: 'bot' | 'user'
+  /** il bot e l'entry della conversazione da cui viene (source homun:chat/<bot>/<entry>) */
+  agentId: string | null
+  entryId: number | null
+  body: string
   tier: 'core' | 'log'
-  scope: 'agent' | 'user'
+  /** stated | inferred | external */
+  confidence: string
+  /** active | quarantined (in attesa di conferma) */
+  status: string
   source: string
-  createdAt: number
-  updatedAt: number
+  validFrom: string | null
+  validTo: string | null
+  createdAt: string
+  updatedAt: string
+  version: number
+}
+
+/** Una versione dello storico di una nota (lo stato PRIMA dell'operazione registrata). */
+export interface MemoryVersionInfo {
+  version: number
+  note: MemoryNoteInfo
+}
+
+/** Il dettaglio di una nota: la nota (assente per una lapide) e lo storico. */
+export interface MemoryNoteDetail {
+  state: 'active' | 'quarantined' | 'deleted'
+  note: MemoryNoteInfo | null
+  history: MemoryVersionInfo[]
+}
+
+/** La spiegazione di un richiamo (explain del motore, senza contenuti nuovi). */
+export interface MemoryHitExplain {
+  lists?: string[]
+  matchedTerms?: string[]
+  bm25Rank?: number
+  semanticRank?: number
+  graphRank?: number
+  cosine?: number
+  support?: string
+  via?: string
+  graph?: { weight: number; off?: string; gap?: number; agreement?: boolean }
+  fusedScore?: number
+}
+
+/** Un risultato della ricerca della sezione Memoria (stesso motore del bot). */
+export interface MemorySearchHitInfo {
+  id: string
+  shortId: string
+  owner: 'bot' | 'user'
+  body: string
+  tier: 'core' | 'log'
+  score: number
+  support: string | null
+  updatedAt: string
+  explain?: MemoryHitExplain
+}
+
+/** Lo stato della memoria per l'interfaccia: motore, modello, conteggi. */
+export interface MemoryOverview {
+  engine: { available: boolean; reason?: 'module' | 'open' | 'closed'; error?: string; version?: string }
+  model: { present: boolean; id?: string; bytes?: number; pulling: boolean }
+  counts: { own: number; shared: number; pending: number }
+  /** l'indicizzazione iniziale delle conversazioni è fatta? */
+  storyIndexed: boolean
+}
+
+/** L'esito di «Dimentica per sempre» (purge): scrubbed false = qualcosa trattiene ancora byte. */
+export interface MemoryPurgeResult {
+  forgotten: number
+  scrubbed: boolean
+  pending: string[]
+  /** le viste non raggiunte (nessun contenuto di note) */
+  views: Array<{ viewId: string | null; root: string; reason: string }>
 }
 
 /** Una skill dell'agente (SKILL.md), con le istruzioni complete. */

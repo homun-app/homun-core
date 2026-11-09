@@ -79,9 +79,9 @@ export interface WriterOpts {
 }
 
 /** Scrive una memoria. Ritorna la nota creata (id ULID completo). */
-export async function writeMemoryNote(agentId: string, input: WriteMemoryNoteInput): Promise<EngrammaNoteView> {
+export async function writeMemoryNote(agentId: string, input: WriteMemoryNoteInput, opts: WriterOpts = {}): Promise<EngrammaNoteView> {
   const scope = input.scope === 'user' ? 'user' : 'agent'
-  const cell = await cellFor(agentId, scope)
+  const cell = await cellFor(agentId, scope, opts.byUser)
   const confidence = input.contaminated ? 'external' : input.userTurn ? 'stated' : 'inferred'
   const note = await cell.put({
     body: input.content,

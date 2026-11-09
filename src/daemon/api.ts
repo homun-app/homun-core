@@ -9,8 +9,8 @@ import * as loop from '../main/agent/loop'
 import * as permissions from '../main/agent/permissions'
 import { executeTool } from '../main/agent/tools'
 import { isExternalSend, applyDraftBody, DEFAULT_EXTERNAL_SEND_TOOLS, type ExternalSendConfig } from '../main/agent/external-send'
-// fase memoria-engramma (M3): la sezione Memoria legge e scrive sul motore
-import { listActiveMemoryRecords, updateMemoryNote, deleteMemoryNote } from '../main/memory/memory-store'
+// fase memoria-engramma (M6): la sezione Memoria legge e scrive sul motore
+import * as memoryRpc from '../main/memory/memory-rpc'
 // fase skill: la libreria unica (finestra «Skill»), le versioni e l'import
 import {
   libraryItemsForUi, pluginSkillGroups, readSkillMd, deleteLibrarySkill, setSkillEnabledFor,
@@ -1009,14 +1009,41 @@ export function buildApiMethods(
     },
 
     // ---- memoria (fase 4): sezione nella vista dell'agente ----
-    // fase memoria-engramma (M3): sul motore; le modifiche dall'interfaccia
-    // scrivono con l'actor homun:user (il registro dice chi)
-    'memory:list': ([agentId]) => listActiveMemoryRecords(agentId as string),
-    'memory:update': async ([agentId, id, content]) => {
-      await updateMemoryNote(agentId as string, { id: id as string, content: content as string }, { byUser: true })
+    // fase memoria-engramma (M6): un'interfaccia sul motore Engramma — le
+    // scritture dall'interfaccia portano l'actor homun:user (il registro dice
+    // chi); gli errori portano codici e id, mai contenuti di note
+    'memory:overview': ([agentId]) => memoryRpc.memoryOverview(agentId as string, store.getSetting),
+    'memory:list': ([agentId, opts]) => memoryRpc.memoryList(agentId as string, (opts ?? {}) as Parameters<typeof memoryRpc.memoryList>[1]),
+    'memory:search': ([agentId, query, opts]) => memoryRpc.memorySearch(agentId as string, String(query ?? ''), (opts ?? {}) as { explain?: boolean }),
+    'memory:note': ([agentId, id]) => memoryRpc.memoryNote(agentId as string, String(id ?? '')),
+    'memory:save': async ([agentId, input]) => {
+      const note = await memoryRpc.memorySave(agentId as string, input as Parameters<typeof memoryRpc.memorySave>[1])
+      const { enqueueEmbedPending } = await import('../main/memory/engine')
+      enqueueEmbedPending(db(), agentId as string)
+      return note
     },
-    'memory:delete': async ([agentId, id]) => {
-      await deleteMemoryNote(agentId as string, id as string, { byUser: true })
+    'memory:confirm': ([agentId, id]) => memoryRpc.memoryConfirm(agentId as string, String(id ?? '')),
+    'memory:discard': ([agentId, id]) => memoryRpc.memoryDiscard(agentId as string, String(id ?? '')),
+    'memory:delete': ([agentId, id]) => memoryRpc.memoryDelete(agentId as string, String(id ?? '')),
+    'memory:restore': ([agentId, id]) => memoryRpc.memoryRestore(agentId as string, String(id ?? '')),
+    'memory:purge': ([agentId, id]) => memoryRpc.memoryPurge(agentId as string, String(id ?? '')),
+    // il modello NON si scarica mai da solo: solo da questo click. Dopo il
+    // download, embedPending in fondo alla coda (job memory-embed)
+    'memory:model-pull': () => {
+      const started = memoryRpc.startModelPull(
+        (done, total) => emit({ type: 'memory', phase: 'model-pull', done, total }),
+        (outcome) => {
+          emit({ type: 'memory', phase: 'model-pull', done: outcome.ok ? 1 : 0, total: 1, finished: true, ...(outcome.ok ? {} : { error: outcome.error ?? 'error' }) })
+          if (outcome.ok) {
+            void import('../main/memory/engine').then((m) => {
+              const lane = store.listAgents()[0]?.id
+              if (lane) m.enqueueEmbedPending(db(), lane, Date.now() - m.EMBED_JOB_DELAY_MS)
+              worker.poke()
+            }).catch(() => undefined)
+          }
+        }
+      )
+      return { started }
     },
 
     // ---- fase skill (S2/S4/S5/S6): la finestra «Skill» ----

@@ -115,9 +115,18 @@ const api: SandbotApi = {
   listSubagents: (parentId) => ipcRenderer.invoke('subagents:list', parentId),
   stopSubagent: (id) => ipcRenderer.invoke('subagents:stop', id),
   // fase 4: memoria e skill dell'agente
-  listMemories: (agentId) => ipcRenderer.invoke('memory:list', agentId),
-  updateMemory: (agentId, id, content) => ipcRenderer.invoke('memory:update', agentId, id, content),
-  deleteMemory: (agentId, id) => ipcRenderer.invoke('memory:delete', agentId, id),
+  // fase memoria-engramma (M6): la sezione Memoria sul motore Engramma
+  memoryOverview: (agentId) => ipcRenderer.invoke('memory:overview', agentId),
+  memoryList: (agentId, opts) => ipcRenderer.invoke('memory:list', agentId, opts),
+  memorySearch: (agentId, query, opts) => ipcRenderer.invoke('memory:search', agentId, query, opts),
+  memoryNote: (agentId, id) => ipcRenderer.invoke('memory:note', agentId, id),
+  memorySave: (agentId, input) => ipcRenderer.invoke('memory:save', agentId, input),
+  memoryConfirm: (agentId, id) => ipcRenderer.invoke('memory:confirm', agentId, id),
+  memoryDiscard: (agentId, id) => ipcRenderer.invoke('memory:discard', agentId, id),
+  memoryDelete: (agentId, id) => ipcRenderer.invoke('memory:delete', agentId, id),
+  memoryRestore: (agentId, id) => ipcRenderer.invoke('memory:restore', agentId, id),
+  memoryPurge: (agentId, id) => ipcRenderer.invoke('memory:purge', agentId, id),
+  memoryModelPull: () => ipcRenderer.invoke('memory:model-pull'),
   // fase skill: la finestra «Skill» — libreria unica, editor, versioni, GitHub
   skillsLibrary: () => ipcRenderer.invoke('skills:library'),
   // K2 (fase skill ritocchi): l'elenco `/` del compositore, senza i corpi

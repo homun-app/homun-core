@@ -48,7 +48,10 @@ export const DAEMON_RPC_CHANNELS = [
   'groups:list', 'groups:messages', 'groups:send-user',
   // fase 16b (S1.3): squadre create e modificate dalla UI
   'groups:create', 'groups:update', 'groups:delete',
-  'memory:list', 'memory:update', 'memory:delete',
+  'memory:list', 'memory:delete',
+  // fase memoria-engramma (M6): la sezione Memoria sul motore
+  'memory:overview', 'memory:search', 'memory:note', 'memory:save', 'memory:confirm', 'memory:discard',
+  'memory:restore', 'memory:purge', 'memory:model-pull',
   // fase skill (S2/S4/S6): la finestra «Skill» — libreria unica, editor,
   // versioni, abilitazione per bot, import e aggiornamento da GitHub;
   // K2 (ritocchi): skills:invocable per l'elenco `/` del compositore

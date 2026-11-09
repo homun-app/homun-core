@@ -111,7 +111,8 @@ function ProfileTab({ onAvatar }: { onAvatar(): void }) {
     setMemories(null)
     setSkills(null)
     if (!activeId) return
-    void api.listMemories(activeId).then((m) => setMemories(m.length)).catch(() => setMemories(0))
+    // fase memoria-engramma (M6): il conteggio dal motore (bot + condivise)
+    void api.memoryOverview(activeId).then((o) => setMemories(o.counts.own + o.counts.shared)).catch(() => setMemories(0))
     // fase skill (S2): il conteggio viene dalla libreria unica (una chiamata)
     void api.skillsLibrary()
       .then((r) => setSkills(r.library.filter((sk) => sk.enabledFor.includes('*') || sk.enabledFor.includes(activeId)).length))

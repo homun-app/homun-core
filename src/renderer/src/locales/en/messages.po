@@ -13,6 +13,16 @@ msgstr ""
 "Language-Team: \n"
 "Plural-Forms: \n"
 
+#. js-lingui-explicit-id
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "Cerca nella memoria…"
+msgstr "Search memory…"
+
+#. js-lingui-explicit-id
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "grafo"
+msgstr "graph"
+
 #: src/renderer/src/components/TaskCard.tsx
 msgid " — rispondi dalla vista del task (Apri)"
 msgstr " — answer from the task view (Open)"
@@ -193,6 +203,11 @@ msgstr "{0} h ago"
 #: src/renderer/src/components/TakeoverCard.tsx
 msgid "{0} ha bisogno di te sullo schermo"
 msgstr "{0} needs you on their screen"
+
+#. placeholder {0}: overview.counts.pending
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "{0} in attesa di conferma"
+msgstr "{0} pending confirmation"
 
 #. placeholder {0}: Math.round(s / 60)
 #: src/renderer/src/components/SubagentCard.tsx
@@ -640,6 +655,10 @@ msgid "Adattamenti di Homun"
 msgstr "Homun’s adaptations"
 
 #: src/renderer/src/components/MemoryPanel.tsx
+msgid "affidabilità:"
+msgstr "reliability:"
+
+#: src/renderer/src/components/MemoryPanel.tsx
 msgid "agente"
 msgstr "agent"
 
@@ -951,6 +970,10 @@ msgstr "Open the members of {0}"
 msgid "Apri Impostazioni → Approvazione automatica con una regola precompilata"
 msgstr "Open Settings → Auto-review with a prefilled rule"
 
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "apri la conversazione"
+msgstr "open the conversation"
+
 #: src/renderer/src/components/ServerSetup.tsx
 msgid "Apri la finestra dell'app per autorizzare."
 msgstr "Open the app window to authorize."
@@ -1015,6 +1038,7 @@ msgstr "waiting for you"
 msgid "onboarding.modelWarning"
 msgstr "Warning: I could not assign the model to the bots ({warning}). Pick a valid one from the agent settings."
 
+#: src/renderer/src/components/MemoryPanel.tsx
 #: src/renderer/src/components/RightPanel.tsx
 #: src/renderer/src/components/Settings.tsx
 msgid "attiva"
@@ -1028,6 +1052,10 @@ msgstr "Activate with your project's ak_ key."
 #: src/shared/ui-messages.ts
 msgid "approval.usResume"
 msgstr "activate the routine \"{title}\" — prompt: {preview}"
+
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "attive"
+msgstr "active"
 
 #: src/renderer/src/components/ActivityPanel.tsx
 #: src/renderer/src/components/ComputerPanel.tsx
@@ -1107,6 +1135,10 @@ msgstr "Automatic start"
 #: src/renderer/src/components/Settings.tsx
 msgid "avvisa"
 msgstr "notify"
+
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "Azzera"
+msgstr "Clear"
 
 #: src/renderer/src/components/settings/AddProviderSheet.tsx
 msgid "Base URL"
@@ -1275,6 +1307,7 @@ msgstr "Empty folder."
 msgid "Cassaforte"
 msgstr "Vault"
 
+#: src/renderer/src/components/MemoryPanel.tsx
 #: src/renderer/src/components/Sidebar.tsx
 msgid "Cerca"
 msgstr "Search"
@@ -1635,6 +1668,18 @@ msgstr "With an API key"
 msgid "Concessioni"
 msgstr "Grants"
 
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "condivisa"
+msgstr "shared"
+
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "condivise"
+msgstr "shared"
+
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "Conferma"
+msgstr "Confirm"
+
 #. placeholder {0}: selected.length
 #: src/renderer/src/components/WidgetCard.tsx
 msgid "Conferma ({0})"
@@ -1859,6 +1904,10 @@ msgstr "Copied from the Mac"
 msgid "Copiato sul Mac"
 msgstr "Copied to the Mac"
 
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "core"
+msgstr "core"
+
 #: src/renderer/src/components/Settings.tsx
 msgid "Cosa deve fare il Bot a ogni esecuzione"
 msgstr "What the Bot should do on each run"
@@ -1910,6 +1959,12 @@ msgstr "Create a routine"
 msgid "approval.usCreateActive"
 msgstr "create the routine \"{title}\" ACTIVE: it will run by itself on its schedule — prompt: {preview}"
 
+#. placeholder {0}: fmt(detail.note.createdAt)
+#. placeholder {1}: fmt(detail.note.updatedAt)
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "creata {0} · aggiornata {1}"
+msgstr "created {0} · updated {1}"
+
 #. placeholder {0}: agentName(meta.createdBy)
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "creata da {0}"
@@ -1946,11 +2001,6 @@ msgstr "cron \"{expr}\""
 msgid "rpc.cronInvalid"
 msgstr "invalid cron: \"{cron}\" (5 fields, e.g. \"0 9 * * *\")"
 
-#. placeholder {0}: m.source
-#: src/renderer/src/components/MemoryPanel.tsx
-msgid "da {0}"
-msgstr "from {0}"
-
 #. placeholder {0}: String(entry.meta?.fromAgentName ?? 'altro bot')
 #: src/renderer/src/components/Chat.tsx
 msgid "Da {0}"
@@ -1974,6 +2024,10 @@ msgstr "To complete"
 #: src/renderer/src/components/ConnectorCards13.tsx
 msgid "da configurare: {0} (Impostazioni)"
 msgstr "to configure: {0} (Settings)"
+
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "da contenuti esterni"
+msgstr "from external content"
 
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "da GitHub"
@@ -2007,6 +2061,14 @@ msgstr "dashboard.composio.dev"
 msgid "Decide da solo le richieste semplici quando le Approvazioni sono su Automatico."
 msgstr "It handles the simple requests on its own when Approvals is set to Automatic."
 
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "dedotto dal bot"
+msgstr "inferred by the bot"
+
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "del bot"
+msgstr "this bot"
+
 #: src/renderer/src/components/Settings.tsx
 msgid "Del bot principale"
 msgstr "Of the main bot"
@@ -2039,10 +2101,22 @@ msgstr "Details"
 msgid "Dettagli tecnici"
 msgstr "Technical details"
 
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "detto dall'utente"
+msgstr "said by the user"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "chart.metaLine"
 msgstr "by {author} · version {version} · exported by Homun"
+
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "Dimentica per sempre"
+msgstr "Forget forever"
+
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "Dimenticare per sempre questa memoria? Il testo sparisce del tutto e non si torna indietro (l'eliminazione normale, invece, si può annullare)."
+msgstr "Forget this memory forever? The text is completely erased and there is no way back (a normal delete can still be undone)."
 
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Diretta: il permesso resta sul tuo Mac"
@@ -2136,6 +2210,16 @@ msgstr "Where it runs: on the {0} server you choose"
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Dove la trovo? Copia la chiave API dalle impostazioni del tuo progetto su Composio (composio.dev → Settings → API Keys)."
 msgstr "Where do I find it? Copy the API key from your Composio project settings (composio.dev → Settings → API Keys)."
+
+#. placeholder {0}: Math.round((memoryProgress.done / Math.max(1, memoryProgress.total)) * 100)
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "download del modello… {0}%"
+msgstr "downloading the model… {0}%"
+
+#. placeholder {0}: memoryProgress.error
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "Download non riuscito: {0}"
+msgstr "Download failed: {0}"
 
 #. placeholder {0}: entries.length
 #: src/renderer/src/components/ComputerFiles.tsx
@@ -2287,8 +2371,8 @@ msgid "Fallito"
 msgstr "Failed"
 
 #: src/renderer/src/components/MemoryPanel.tsx
-msgid "Fatti e regole che il bot ricorda tra i turni. Scope \"utente\" = condivisi da tutti i bot."
-msgstr "Facts and rules the bot remembers across turns. \"User\" scope = shared by all bots."
+msgid "Fatti e regole che il bot ricorda tra i turni, sul motore Engramma. «Condivise» valgono per tutti i bot."
+msgstr "Facts and rules the bot remembers across turns, on the Engramma engine. “Shared” ones apply to every bot."
 
 #: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/settings/AddProviderSheet.tsx
@@ -2396,6 +2480,11 @@ msgstr "Pin"
 #: src/renderer/src/components/ServerSheet.tsx
 msgid "Fonte"
 msgstr "Source"
+
+#. placeholder {0}: detail.note.source
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "fonte: {0}"
+msgstr "source: {0}"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Fuso orario"
@@ -3050,6 +3139,10 @@ msgstr "The terminal is not responding."
 msgid "rpc.terminalUnavailable"
 msgstr "The terminal requires docker mode (Settings → Sandbox): it is not available here."
 
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "Il testo sparisce del tutto e non si torna indietro. Continuare?"
+msgstr "The text is completely erased and there is no way back. Continue?"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "rpc.toolNotReadOnly"
@@ -3110,6 +3203,7 @@ msgstr "Waiting for you to log in in the browser…"
 msgid "notice.turnEndAwaitingUser"
 msgstr "Waiting for the user’s reply"
 
+#: src/renderer/src/components/MemoryPanel.tsx
 #: src/renderer/src/components/SubagentCard.tsx
 msgid "in attesa di conferma"
 msgstr "waiting for confirmation"
@@ -3158,6 +3252,12 @@ msgstr "Suspended"
 #: src/renderer/src/components/settings/AddProviderSheet.tsx
 msgid "Incolla la chiave"
 msgstr "Paste the key"
+
+#. placeholder {0}: memoryProgress.done
+#. placeholder {1}: memoryProgress.total
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "indicizzazione delle conversazioni: {0}/{1}"
+msgstr "indexing conversations: {0}/{1}"
 
 #: src/renderer/src/components/settings/AddProviderSheet.tsx
 #: src/renderer/src/components/SkillsWindow.tsx
@@ -3536,6 +3636,10 @@ msgstr "The screen requires docker mode (Settings → Sandbox): it is not availa
 msgid "locale"
 msgstr "local"
 
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "log"
+msgstr "log"
+
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "Login"
 msgstr "Logins"
@@ -3649,6 +3753,10 @@ msgstr "pause"
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "Mie"
 msgstr "Mine"
+
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "Migliora la ricerca: scarica il modello (circa 400 MB)"
+msgstr "Improve search: download the model (about 400 MB)"
 
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "migrata"
@@ -3794,6 +3902,15 @@ msgstr "Reveal in Finder"
 msgid "Mostra tutti ({0})"
 msgstr "Show all ({0})"
 
+#. placeholder {0}: overview.engine.version
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "motore {0}"
+msgstr "engine {0}"
+
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "Motore della memoria non disponibile: le memorie non si leggono né si scrivono finché non torna."
+msgstr "The memory engine is unavailable: memories cannot be read or written until it comes back."
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "mp.badPluginName"
@@ -3895,6 +4012,10 @@ msgstr "no model in the list: type the id and press Enter"
 msgid "Nessun modello trovato."
 msgstr "No model found."
 
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "Nessun risultato."
+msgstr "No results."
+
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Nessun server trovato."
 msgstr "No server found."
@@ -3985,6 +4106,10 @@ msgstr "No “@”: it wants the server address, not an account"
 #: src/renderer/src/components/ServerSetup.tsx
 msgid "Niente «/»: serve il solo indirizzo, non un percorso"
 msgstr "No “/”: just the address, not a path"
+
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "Niente in attesa di conferma: ciò che il bot scrive leggendo il web arriva qui, finché non lo confermi."
+msgstr "Nothing pending confirmation: what the bot writes from web content lands here until you confirm it."
 
 #: src/renderer/src/components/ServerSetup.tsx
 msgid "Niente spazi nell'indirizzo"
@@ -4293,6 +4418,10 @@ msgstr "every…"
 msgid "Online"
 msgstr "Online"
 
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "Operazione non riuscita."
+msgstr "The operation failed."
+
 #: src/renderer/src/components/Settings.tsx
 msgid "ora"
 msgstr "hour"
@@ -4445,6 +4574,10 @@ msgstr "For developers"
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Per sviluppatori: server personalizzati, plugin, registro"
 msgstr "For developers: custom servers, plugins, registry"
+
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "Perché lo so?"
+msgstr "Why do I know this?"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -4747,6 +4880,10 @@ msgstr "when you return to the computer"
 msgid "trigger.presence"
 msgstr "when you come back to the computer after an absence"
 
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "Quasi dimenticato: alcuni byte restano nel registro delle scritture e vengono rimossi alla prossima scrittura del motore."
+msgstr "Almost forgotten: a few bytes remain in the write log and are removed at the engine's next write."
+
 #: src/renderer/src/components/Settings.tsx
 msgid "Quello del bot"
 msgstr "The bot’s one"
@@ -4762,6 +4899,10 @@ msgstr "This build does not receive updates"
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Questa è una chiave di Composio «For You» (inizia con ck_). Homun usa la chiave di un progetto Composio: su composio.dev apri il pannello per sviluppatori, crea un progetto e copia la sua chiave API da Settings → API Keys (inizia con ak_)."
 msgstr "This is a Composio “For You” key (it starts with ck_). Homun uses a Composio project key: on composio.dev open the developer dashboard, create a project and copy its API key from Settings → API Keys (it starts with ak_)."
+
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "Questa memoria è eliminata: puoi ripristinarla dall'ultima versione qui sotto."
+msgstr "This memory is deleted: you can restore it from the latest version below."
 
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "Questa skill è stata modificata: l'aggiornamento sovrascrive le modifiche (la versione attuale va nelle precedenti)."
@@ -4910,6 +5051,15 @@ msgstr "Research"
 msgid "onboarding.roleSearch"
 msgstr "Research and updates"
 
+#. placeholder {0}: fmtBytes(overview.model.bytes ?? 0)
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "ricerca ibrida · modello {0}"
+msgstr "hybrid search · model {0}"
+
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "ricerca testo+grafo"
+msgstr "text+graph search"
+
 #: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Ricerca web"
@@ -4982,6 +5132,7 @@ msgstr "Rename"
 msgid "riprendi"
 msgstr "resume"
 
+#: src/renderer/src/components/MemoryPanel.tsx
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "Ripristina"
 msgstr "Restore"
@@ -5180,6 +5331,7 @@ msgid "Scaricato: {0}"
 msgstr "Downloaded: {0}"
 
 #: src/renderer/src/components/DraftCard.tsx
+#: src/renderer/src/components/MemoryPanel.tsx
 msgid "Scarta"
 msgstr "Discard"
 
@@ -5665,6 +5817,10 @@ msgstr "You are controlling the screen of {0}"
 msgid "stdio (comando locale)"
 msgstr "stdio (local command)"
 
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "Storico delle versioni"
+msgstr "Version history"
+
 #: src/renderer/src/components/Settings.tsx
 msgid "suggerimento routine"
 msgstr "routine suggestion"
@@ -5690,6 +5846,11 @@ msgstr "On your network · {0} models"
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Sulla tua rete · 1 modello"
 msgstr "On your network · 1 model"
+
+#. placeholder {0}: h.support ?? '—'
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "support {0}"
+msgstr "support {0}"
 
 #: src/renderer/src/components/Chat.tsx
 #: src/renderer/src/components/TaskCard.tsx
@@ -5919,6 +6080,10 @@ msgstr "Turn resumed after an interruption."
 msgid "notice.turnEndSuperseded"
 msgstr "Turn superseded by a new message"
 
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "tutte"
+msgstr "all"
+
 #: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/RightPanel.tsx
 #: src/renderer/src/components/SkillsWindow.tsx
@@ -6077,10 +6242,6 @@ msgstr "Usage & costs"
 msgid "Uso e costi: {0} questo mese"
 msgstr "Usage and costs: {0} this month"
 
-#: src/renderer/src/components/MemoryPanel.tsx
-msgid "utente (condivisa)"
-msgstr "user (shared)"
-
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 msgid "Vale per gli strumenti senza una regola loro."
 msgstr "Applies to tools without a rule of their own."
@@ -6092,6 +6253,12 @@ msgstr "Applies to the same tool until the end of this turn"
 #: src/renderer/src/components/Settings.tsx
 msgid "Vale solo per i turni di questa routine; il resto del bot non cambia."
 msgstr "It only applies to this routine’s turns; the rest of the bot stays the same."
+
+#. placeholder {0}: detail.note.validFrom ?? '…'
+#. placeholder {1}: detail.note.validTo ?? '…'
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "validità: {0} → {1}"
+msgstr "validity: {0} → {1}"
 
 #: src/renderer/src/components/LibraryCards.tsx
 msgid "Valore"
@@ -6112,6 +6279,11 @@ msgstr "sees (images)"
 #: src/renderer/src/components/Settings.tsx
 msgid "venerdì"
 msgstr "Friday"
+
+#. placeholder {0}: detail.note.version
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "versione {0}"
+msgstr "version {0}"
 
 #: src/renderer/src/components/PageView.tsx
 msgid "versione {version}"
