@@ -1,16 +1,12 @@
-// Memoria a file (fase 4, §3bis L6): un file markdown per memoria, con
-// frontmatter (id, created_at, updated_at, tier, scope, source). Le memorie
-// di scope 'agent' stanno in <dataDir>/agents/<agentId>/memory/, quelle di
-// scope 'user' (condivise da tutti gli agenti) in <dataDir>/user/memory/.
-//
-// I path si costruiscono SOLO dall'id generato dal runtime: gli id che
-// arrivano dal modello (update/delete) passano da isSafeMemoryId, che
-// rifiuta punti e separatori — nessun traversal possibile.
-// Parsing, selezione del budget e ricerca sono funzioni pure (testabili);
-// l'I/O file è nelle funzioni in fondo, con dataDir dallo store.
-import { readFileSync, writeFileSync, readdirSync, mkdirSync, rmSync } from 'node:fs'
+// Memoria (fase 4, §3bis L6) — dalla fase memoria-engramma le memorie
+// vivono nel motore Engramma (src/main/memory/: engine, memory-store,
+// migrate). Qui restano le funzioni PURE della memoria di Homun:
+//   - il formato dei vecchi file markdown (frontmatter id, created_at,
+//     updated_at, tier, scope, source), che la migrazione M2 legge da
+//     <dataDir>/agents/<agentId>/memory/ e <dataDir>/user/memory/;
+//   - isSafeMemoryId, la difesa sugli id che arrivano dal modello;
+//   - la selezione per il prompt e la sezione «# Memory».
 import { join } from 'node:path'
-import { randomBytes } from 'node:crypto'
 import { dataDir } from '../store/db'
 
 export type MemoryTier = 'core' | 'log'
@@ -108,27 +104,6 @@ export function selectMemoriesForPrompt(records: MemoryRecord[], logBudgetTokens
   return [...core.sort((a, b) => a.createdAt - b.createdAt), ...kept]
 }
 
-/**
- * Ricerca testuale semplice (recall_memory): ogni parola chiave della query
- * (split su spazi, case-insensitive) cerca nel contenuto; punteggio = parole
- * distinte trovate, ordine per punteggio e poi per recenza. Top 10.
- */
-export function searchMemoriesByQuery(records: MemoryRecord[], query: string): MemoryRecord[] {
-  const words = query.toLowerCase().split(/\s+/).filter((w) => w.length > 1)
-  if (!words.length) {
-    return [...records].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 10)
-  }
-  const scored = records
-    .map((r) => {
-      const hay = r.content.toLowerCase()
-      const score = words.filter((w) => hay.includes(w)).length
-      return { r, score }
-    })
-    .filter((x) => x.score > 0)
-    .sort((a, b) => b.score - a.score || b.r.updatedAt - a.r.updatedAt)
-  return scored.slice(0, 10).map((x) => x.r)
-}
-
 /** Etichetta dello scope per il prompt. */
 const SCOPE_LABEL: Record<MemoryScope, string> = { agent: 'agent', user: 'user (shared)' }
 
@@ -152,106 +127,11 @@ export function memorySectionPrompt(records: MemoryRecord[], logBudgetTokens = 2
   return parts.join('\n\n')
 }
 
-// ---- I/O file ----
+// ---- i vecchi file (letti solo dalla migrazione M2) ----
 
-/** Directory delle memorie per scope (user = condivisa tra agenti). */
+/** Directory delle memorie a file per scope (user = condivisa tra agenti). */
 export function memoryDir(agentId: string, scope: MemoryScope): string {
   return scope === 'user'
     ? join(dataDir(), 'user', 'memory')
     : join(dataDir(), 'agents', agentId, 'memory')
-}
-
-function readDir(dir: string): MemoryRecord[] {
-  try {
-    return readdirSync(dir)
-      .filter((f) => f.endsWith('.md'))
-      .map((f) => parseMemoryFile(readFileSync(join(dir, f), 'utf8')))
-      .filter((r): r is MemoryRecord => r !== null)
-  } catch {
-    return [] // directory assente: nessuna memoria
-  }
-}
-
-/** Tutte le memorie visibili a un agente: le sue (scope agent) + le condivise (scope user). */
-export function listMemories(agentId: string): MemoryRecord[] {
-  return [...readDir(memoryDir(agentId, 'agent')), ...readDir(memoryDir(agentId, 'user'))]
-}
-
-export interface WriteMemoryInput {
-  content: string
-  tier: MemoryTier
-  scope?: MemoryScope
-  source?: MemorySource
-}
-
-/** Crea una nuova memoria con id generato dal runtime; ritorna il record. */
-export function writeMemory(agentId: string, input: WriteMemoryInput): MemoryRecord {
-  const scope = input.scope === 'user' ? 'user' : 'agent'
-  const record: MemoryRecord = {
-    id: 'mem_' + randomBytes(6).toString('hex'),
-    content: String(input.content ?? ''),
-    tier: input.tier === 'core' ? 'core' : 'log',
-    scope,
-    source: input.source ?? 'agent',
-    createdAt: Date.now(),
-    updatedAt: Date.now()
-  }
-  const dir = memoryDir(agentId, scope)
-  mkdirSync(dir, { recursive: true })
-  writeFileSync(join(dir, `${record.id}.md`), serializeMemory(record))
-  return record
-}
-
-export interface UpdateMemoryInput {
-  id: string
-  content?: string
-  tier?: MemoryTier
-  scope?: MemoryScope
-}
-
-/** Aggiorna una memoria esistente (contenuto/tier/scope); lo scope la sposta nella directory dell'altro scope. */
-export function updateMemory(agentId: string, input: UpdateMemoryInput): MemoryRecord {
-  const id = String(input.id ?? '')
-  if (!isSafeMemoryId(id)) throw new Error(`Invalid memory id: "${id}"`)
-  const cur = listMemories(agentId).find((r) => r.id === id)
-  if (!cur) throw new Error(`Memory "${id}" not found`)
-  const next: MemoryRecord = {
-    ...cur,
-    ...(input.content !== undefined ? { content: String(input.content) } : {}),
-    ...(input.tier === 'core' || input.tier === 'log' ? { tier: input.tier } : {}),
-    ...(input.scope === 'agent' || input.scope === 'user' ? { scope: input.scope } : {}),
-    updatedAt: Date.now()
-  }
-  const dir = memoryDir(agentId, next.scope)
-  mkdirSync(dir, { recursive: true })
-  writeFileSync(join(dir, `${id}.md`), serializeMemory(next))
-  if (next.scope !== cur.scope) rmSync(join(memoryDir(agentId, cur.scope), `${id}.md`), { force: true })
-  return next
-}
-
-/** Elimina una memoria; true se esisteva. */
-export function deleteMemory(agentId: string, id: string): boolean {
-  if (!isSafeMemoryId(String(id ?? ''))) throw new Error(`Invalid memory id: "${id}"`)
-  for (const scope of ['agent', 'user'] as const) {
-    const file = join(memoryDir(agentId, scope), `${id}.md`)
-    let existed = false
-    try {
-      readFileSync(file)
-      existed = true
-    } catch {
-      continue
-    }
-    rmSync(file, { force: true })
-    return existed
-  }
-  return false
-}
-
-/** Sezione memoria del system prompt per un agente ('' se non ci sono memorie). */
-export function buildMemorySection(agentId: string, logBudgetTokens = 2000): string {
-  try {
-    return memorySectionPrompt(listMemories(agentId), logBudgetTokens)
-  } catch {
-    return '' // la memoria non deve mai rompere il turno
-  }
 }

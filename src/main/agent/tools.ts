@@ -5,10 +5,13 @@ import { resolveSecretRefs } from './secrets'
 import { formatTaskDone } from '../../shared/agent-message'
 import { MAX_GROUP_MEMBERS, coordinatorNowText } from './group-turns'
 import { WAKE_SUMMARY_MAX_CHARS } from './subagents'
+// fase memoria-engramma (M3): gli strumenti di memoria girano sul motore
+// Engramma tramite il memory-store (stessa interfaccia verso il modello)
 import {
-  writeMemory, updateMemory, deleteMemory, listMemories, searchMemoriesByQuery,
+  writeMemoryNote, updateMemoryNote, deleteMemoryNote, recallMemories, formatRecallLines,
+  MemoryNoteError,
   type MemoryTier, type MemoryScope
-} from './memory'
+} from '../memory/memory-store'
 import { readSkillFor, readSkillFileFor, writeSkillFromBot, SKILL_USER_ONLY_REFUSAL } from './skills'
 
 /** Fase 10 (punto 1): limiti della creazione di bot da parte di un bot. */
@@ -807,38 +810,86 @@ export interface ToolExecResult {
 }
 
 /** Azione su una memoria (update_memory e update_state target 'memory'). */
-function runMemoryAction(agentId: string, input: Record<string, unknown>): ToolExecResult {
+async function runMemoryAction(agentId: string, input: Record<string, unknown>, ctx: ToolTurnContext = {}): Promise<ToolExecResult> {
   const action = String(input.action ?? 'write')
-  if (action === 'write') {
-    const content = String(input.content ?? '')
-    if (!content.trim()) return { output: 'Empty memory content: nothing written.', meta: {} }
-    const r = writeMemory(agentId, {
-      content,
-      tier: input.tier === 'core' ? 'core' : 'log',
-      ...(input.scope === 'user' ? { scope: 'user' as MemoryScope } : {}),
-      source: 'agent'
-    })
-    return { output: `Memory created (id ${r.id}, tier ${r.tier}, scope ${r.scope}).`, meta: { memoryId: r.id } }
+  const tier: MemoryTier = input.tier === 'core' ? 'core' : 'log'
+  const scope: MemoryScope | undefined = input.scope === 'user' ? 'user' : input.scope === 'agent' ? 'agent' : undefined
+  try {
+    if (action === 'write') {
+      const content = String(input.content ?? '')
+      if (!content.trim()) return { output: 'Empty memory content: nothing written.', meta: {} }
+      // la fonte dice QUALE turno ha scritto: homun:chat/<bot>/<entry>
+      const source = `homun:chat/${agentId}/${ctx.turnEntryId ?? 'turn'}`
+      const note = await writeMemoryNote(agentId, {
+        content, tier,
+        ...(scope ? { scope } : {}),
+        source,
+        contaminated: ctx.contaminated === true,
+        userTurn: ctx.userTurn === true
+      })
+      // fase memoria-engramma: ciò che il bot scrive in un turno contaminato
+      // nasce in quarantena e NON esce nei richiami finché l'utente non
+      // conferma — il result lo dice al modello
+      if (note.status === 'quarantined') {
+        return {
+          output: `Memory saved pending the user's confirmation (id ${note.id.slice(-8)}, tier ${tier}, scope ${scope ?? 'agent'}): it came from untrusted content and will not be recalled until the user confirms it.`,
+          meta: { memoryId: note.id, quarantined: true }
+        }
+      }
+      return { output: `Memory created (id ${note.id.slice(-8)}, tier ${tier}, scope ${scope ?? 'agent'}).`, meta: { memoryId: note.id } }
+    }
+    if (action === 'update') {
+      const note = await updateMemoryNote(agentId, {
+        id: String(input.id ?? ''),
+        ...(input.content !== undefined ? { content: String(input.content) } : {}),
+        ...(input.tier === 'core' || input.tier === 'log' ? { tier: input.tier as MemoryTier } : {}),
+        ...(scope ? { scope } : {}),
+        ...(ctx.contaminated ? { contaminated: true } : {})
+      })
+      // regola del motore: la riscrittura CONSERVA lo stato — una nota in
+      // quarantena resta in attesa dell'utente, e il result lo dice
+      if (note.status === 'quarantined') {
+        return { output: `Memory ${note.id.slice(-8)} updated, still pending the user's confirmation: it will not be recalled until the user confirms it.`, meta: { memoryId: note.id, quarantined: true } }
+      }
+      return { output: `Memory ${note.id.slice(-8)} updated (tier ${note.tags.includes('core') ? 'core' : 'log'}, scope ${scopeLabel(note)}).`, meta: { memoryId: note.id } }
+    }
+    if (action === 'delete') {
+      const existed = await deleteMemoryNote(agentId, String(input.id ?? ''))
+      return { output: existed ? `Memory ${input.id} deleted.` : `Memory ${input.id} not found (already deleted?).`, meta: {} }
+    }
+    // fase memoria-engramma: l'oblio definitivo NON è del bot (purge è solo
+    // dell'utente, dalla sezione Memoria)
+    return { output: `Invalid memory action: "${action}" (write | update | delete).`, meta: {} }
+  } catch (e) {
+    // gli errori del motore e dello store diventano TESTO CHIARO per il
+    // modello (mai contenuti di note); il motore che manca è un errore chiaro,
+    // non un fallimento muto
+    if (e instanceof MemoryNoteError) return { output: e.message, meta: { error: true } }
+    return { output: memoryErrorText(e), meta: { error: true } }
   }
-  if (action === 'update') {
-    const r = updateMemory(agentId, {
-      id: String(input.id ?? ''),
-      ...(input.content !== undefined ? { content: String(input.content) } : {}),
-      ...(input.tier === 'core' || input.tier === 'log' ? { tier: input.tier as MemoryTier } : {}),
-      ...(input.scope === 'agent' || input.scope === 'user' ? { scope: input.scope as MemoryScope } : {})
-    })
-    return { output: `Memory ${r.id} updated (tier ${r.tier}, scope ${r.scope}).`, meta: { memoryId: r.id } }
-  }
-  if (action === 'delete') {
-    const existed = deleteMemory(agentId, String(input.id ?? ''))
-    return { output: existed ? `Memory ${input.id} deleted.` : `Memory ${input.id} not found (already deleted?).`, meta: {} }
-  }
-  return { output: `Invalid memory action: "${action}" (write | update | delete).`, meta: {} }
 }
 
+/**
+ * L'errore del motore per il modello: il motore che non c'è («Memory
+ * unavailable: …») passa com'è; un errore del motore porta il SUO codice
+ * stabile (CLOSED, IO, …) — i messaggi del motore non rivelano contenuti.
+ */
+function memoryErrorText(e: unknown): string {
+  const msg = e instanceof Error ? e.message : String(e)
+  if (msg.startsWith('Memory unavailable')) return msg
+  const code = (e as { code?: string })?.code
+  return `Memory unavailable: the memory engine answered ${code ?? 'an error'}${code === 'CLOSED' ? ' (Homun is shutting down)' : ''}.`
+}
+
+/** Lo scope di una nota per il result del tool (x-homun.scope: agent | user). */
+function scopeLabel(note: { extensions: Record<string, unknown> }): 'agent' | 'user' {
+  return (note.extensions['x-homun'] as { scope?: string } | undefined)?.scope === 'user' ? 'user' : 'agent'
+}
 /** Contesto del turno in cui gira il tool (correzione A5): chi ha aperto il turno. */
 export interface ToolTurnContext {
   turnInitiator?: string
+  /** fase memoria-engramma (M3): l'id dell'entry che apre il turno (source homun:chat/<bot>/<entry>) */
+  turnEntryId?: number
   /** fase 8 (correzione B3): il turno gira nel sotto-transcript di questo task (dentro un task si chiude SOLO quello). */
   taskId?: number
   /** fase 14 (punto 6): il turno è contaminato (web/email/MCP letti) — le scritture in libreria diventano tainted. */
@@ -1146,7 +1197,7 @@ export async function executeTool(
       return { output: formatLibraryRows(rows), meta: { ...(anyTainted ? { libraryTainted: 'list' } : {}) } }
     }
     case 'update_memory':
-      return runMemoryAction(agentId, input)
+      return runMemoryAction(agentId, input, ctx)
     case 'web_search': {
       // fase 15 (S2/S6): la CATENA dei provider (chiave Ollama se c'è, poi i
       // keyless You.com → Exa → Tavily) con passaggio automatico al successivo;
@@ -1201,12 +1252,19 @@ export async function executeTool(
     }
     case 'recall_memory': {
       // fase 12 (punto 1): il figlio legge la memoria del PADRE (sola lettura:
-      // update_memory non è nella whitelist del figlio)
+      // update_memory non è nella whitelist del figlio).
+      // Fase memoria-engramma (M3): Engine.search su bot-<id> e utente — ibrida
+      // col modello, testo+grafo senza; k 10, graphHops 2. Ogni riga dal
+      // SearchHit (id corto, tier/cella, data, support, frase): nessun get per
+      // riga. Le note in quarantena non escono (il motore le esclude)
       const owner = sandbox.boxOwnerOf(agentId)
-      const found = searchMemoriesByQuery(listMemories(owner), String(input.query ?? ''))
-      if (!found.length) return { output: NO_MEMORY_FOUND, meta: {} }
-      const lines = found.map((r) => `- [${r.id}] (${r.tier}/${r.scope}, aggiornata ${new Date(r.updatedAt).toISOString().slice(0, 10)}) ${r.content.replace(/\n+/g, ' ')}`)
-      return { output: lines.join('\n'), meta: { memoryIds: found.map((r) => r.id) } }
+      try {
+        const hits = await recallMemories(owner, String(input.query ?? ''))
+        if (!hits.length) return { output: NO_MEMORY_FOUND, meta: {} }
+        return { output: formatRecallLines(hits).join('\n'), meta: { memoryIds: hits.map((h) => h.id) } }
+      } catch (e) {
+        return { output: memoryErrorText(e), meta: { error: true } }
+      }
     }
     case 'skill': {
       // fase skill (S3.2): senza file le istruzioni + l'elenco dei file di
@@ -1260,7 +1318,7 @@ export async function executeTool(
       return { output: out.text, meta: out.thirdParty ? { thirdParty: true } : {} }
     }
     case 'update_state': {
-      if (input.target === 'memory') return runMemoryAction(agentId, input)
+      if (input.target === 'memory') return runMemoryAction(agentId, input, ctx)
       if (input.target === 'routine') return runRoutineAction(agentId, input, ctx)
       return { output: `Invalid update_state target: ${JSON.stringify(input.target)} (routine | memory).`, meta: {} }
     }
@@ -1404,6 +1462,9 @@ export async function executeTool(
       loopMod.interrupt(target.id)
       cancelAgentJobs(dbMod.db(), target.id)
       const elections = dbMod.deleteAgent(target.id)
+      // fase memoria-engramma (M3): le memorie del bot muoiono con lui (oblio
+      // vero della sua cella, in coda)
+      void import('../memory/memory-store').then((m) => m.purgeBotCell(target.id)).catch(() => undefined)
       // fase 16b (S1.1): i gruppi che hanno eletto un nuovo coordinatore
       // ricevono la riga di sistema nel gruppo
       if (elections.length) {

@@ -9,7 +9,8 @@ import * as loop from '../main/agent/loop'
 import * as permissions from '../main/agent/permissions'
 import { executeTool } from '../main/agent/tools'
 import { isExternalSend, applyDraftBody, DEFAULT_EXTERNAL_SEND_TOOLS, type ExternalSendConfig } from '../main/agent/external-send'
-import { listMemories, updateMemory, deleteMemory } from '../main/agent/memory'
+// fase memoria-engramma (M3): la sezione Memoria legge e scrive sul motore
+import { listActiveMemoryRecords, updateMemoryNote, deleteMemoryNote } from '../main/memory/memory-store'
 // fase skill: la libreria unica (finestra «Skill»), le versioni e l'import
 import {
   libraryItemsForUi, pluginSkillGroups, readSkillMd, deleteLibrarySkill, setSkillEnabledFor,
@@ -369,6 +370,9 @@ export function buildApiMethods(
       loop.interrupt(id as string)
       cancelAgentJobs(db(), id as string)
       const elections = store.deleteAgent(id as string)
+      // fase memoria-engramma (M3): le memorie del bot eliminato si purgano
+      // (oblio vero della sua cella, in coda)
+      void import('../main/memory/memory-store').then((m) => m.purgeBotCell(id as string)).catch(() => undefined)
       // fase 16b (S1.1): i gruppi che hanno eletto un nuovo coordinatore
       // ricevono la riga di sistema nel gruppo
       if (elections.length) {
@@ -1003,12 +1007,14 @@ export function buildApiMethods(
     },
 
     // ---- memoria (fase 4): sezione nella vista dell'agente ----
-    'memory:list': ([agentId]) => listMemories(agentId as string),
-    'memory:update': ([agentId, id, content]) => {
-      updateMemory(agentId as string, { id: id as string, content: content as string })
+    // fase memoria-engramma (M3): sul motore; le modifiche dall'interfaccia
+    // scrivono con l'actor homun:user (il registro dice chi)
+    'memory:list': ([agentId]) => listActiveMemoryRecords(agentId as string),
+    'memory:update': async ([agentId, id, content]) => {
+      await updateMemoryNote(agentId as string, { id: id as string, content: content as string }, { byUser: true })
     },
-    'memory:delete': ([agentId, id]) => {
-      deleteMemory(agentId as string, id as string)
+    'memory:delete': async ([agentId, id]) => {
+      await deleteMemoryNote(agentId as string, id as string, { byUser: true })
     },
 
     // ---- fase skill (S2/S4/S5/S6): la finestra «Skill» ----

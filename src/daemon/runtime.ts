@@ -188,6 +188,20 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
     const st = await openMemoryEngine({ dataDir: dataDir() })
     if (st.available) {
       console.log(`[sandbotd] memoria Engramma attiva (motore ${st.version}, ${st.model.present ? 'modello presente' : 'senza modello: ricerca testo+grafo'})`)
+      // M2: alla prima apertura i vecchi file markdown della memoria diventano
+      // note (idempotente: un'id già migrata non si riscrive; una migrazione
+      // interrotta riprende). I file NON si cancellano: copia di sicurezza in
+      // <dataDir>/memory-legacy-<data>/. Il log conta, non mostra contenuti.
+      const { migrateLegacyMemories } = await import('../main/memory/migrate')
+      try {
+        const s = await migrateLegacyMemories(listAgents().map((a) => a.id))
+        if (s.migrated > 0 || s.warnings.length > 0) {
+          console.log(`[sandbotd] memoria a file migrata al motore: ${s.migrated} note in ${s.durationMs} ms${s.warnings.length ? `, ${s.warnings.length} avvisi` : ''}${s.backupDir ? ` — file originali in ${s.backupDir}` : ''}`)
+          for (const w of s.warnings) console.warn(`[sandbotd] migrazione memoria: ${w}`)
+        }
+      } catch (e) {
+        console.error('[sandbotd] migrazione memoria rimandata al prossimo avvio:', e instanceof Error ? e.message : e)
+      }
     } else {
       console.error(`[sandbotd] memoria Engramma NON disponibile: ${st.error}`)
     }

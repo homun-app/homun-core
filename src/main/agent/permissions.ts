@@ -135,8 +135,10 @@ function matchRule(tool: string, target: string, rules: ReturnType<typeof getPer
 async function currentMemoryScope(agentId: string | undefined, id: unknown): Promise<'agent' | 'user' | null> {
   if (typeof id !== 'string' || !id) return null
   try {
-    const { listMemories } = await import('./memory')
-    return listMemories(agentId ?? '').find((m) => m.id === id)?.scope ?? null
+    // fase memoria-engramma (M3): lo scope è la CELLA dove vive la nota
+    // (bot-<id> → agent, utente → user), letta dal motore
+    const { memoryScopeOf } = await import('../memory/memory-store')
+    return await memoryScopeOf(agentId ?? '', id)
   } catch {
     return null
   }

@@ -778,9 +778,31 @@ const TMP = mkdtempSync(join(tmpdir(), 'sandbot-loop-test-'))
 h.db.dataDir = TMP
 // M6: la cartella si cancella a FINE corsa — prima restava in $TMPDIR per
 // ogni `vitest run` (il revisore ne contava ~50 a volta)
-afterAll(() => {
+afterAll(async () => {
   rmSync(TMP, { recursive: true, force: true })
+  // fase memoria-engramma (M3): il motore della memoria si chiude a fine
+  // corsa (i turni lo aprono sulla temporanea qui sopra)
+  const { closeMemoryEngine } = await import('../../memory/engine')
+  await closeMemoryEngine()
 })
+
+/** fase memoria-engramma (M3): apre il motore sulla temporanea di questo file. */
+async function openMemoryEngineForTests(): Promise<void> {
+  const { openMemoryEngine } = await import('../../memory/engine')
+  const st = await openMemoryEngine({ dataDir: TMP })
+  if (!st.available) throw new Error('motore Engramma non disponibile nei test: ' + st.error)
+}
+
+/** fase memoria-engramma (M3): una memoria del bot, scritta nel motore. */
+async function seedMemory(agentId: string, content: string, tier: 'core' | 'log' = 'core', scope: 'agent' | 'user' = 'agent'): Promise<void> {
+  await openMemoryEngineForTests()
+  const { writeMemoryNote } = await import('../../memory/memory-store')
+  await writeMemoryNote(agentId, { content, tier, scope, source: 'test', userTurn: true })
+}
+
+// fase memoria-engramma (M3): come nel demone, il motore è aperto per tutti i
+// turni del file (celle vuote finché un test non semina una memoria)
+beforeAll(openMemoryEngineForTests)
 
 function deferred<T = void>() {
   let resolve!: (v: T) => void
@@ -1506,8 +1528,7 @@ describe('residuo fase 4 (0c): interrupt durante un’approval', () => {
 
 describe('fase 4: memoria e skill nel system prompt', () => {
   it('una memoria core finisce nella sezione # Memoria del system del turno', async () => {
-    const { writeMemory } = await import('../memory')
-    writeMemory(AGENT, { content: "l'utente vuole puntualità", tier: 'core' })
+    await seedMemory(AGENT, "l'utente vuole puntualità", 'core')
     h.llm.queue = [
       { toolCalls: [{ id: 's1', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] },
       { text: 'fine' }
@@ -4899,8 +4920,7 @@ describe('fase 12: il FIGLIO — tool, prompt, whitelist e consegna', () => {
 
   it('il PROMPT del figlio è subagentSystemPrompt (niente "# Chi sei" del padre, con "sottoagente di") e memoria/skill del PADRE', async () => {
     childAgent()
-    const { writeMemory } = await import('../memory')
-    writeMemory(AGENT, { content: "l'utente vuole puntualità", tier: 'core' })
+    await seedMemory(AGENT, "l'utente vuole puntualità", 'core')
     let system = ''
     h.llm.queue = [
       async (msgs: Array<{ role: string; content: string }>) => { system = msgs[0]!.content; return { text: 'ok' } }
@@ -6427,8 +6447,7 @@ describe('fase velocità (S5): il prompt di sistema non cambia tra le chiamate d
     const before = h.llm.calls[0]!.find((m) => m.role === 'system')!.content
 
     // una memoria NUOVA tra i turni: la sezione variabile più frequente
-    const { writeMemory } = await import('../memory')
-    writeMemory(AGENT, { content: 'l\'utente preferisce le risposte brevi', tier: 'core', scope: 'agent', source: 'agent' })
+    await seedMemory(AGENT, 'l\'utente preferisce le risposte brevi', 'core', 'agent')
 
     h.llm.queue = [{ text: 'ok' }]
     await runTurn(AGENT, 'secondo', emit)

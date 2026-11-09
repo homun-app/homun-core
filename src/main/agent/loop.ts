@@ -52,7 +52,9 @@ import { buildMessages, visibleReplyEntries, stampedUserContent } from './histor
 import { planResume, INTERRUPTED_TOOL_RESULT } from './resume'
 import { isExternalSend, draftFromExternalCall, draftFromBatchSend, prepareDraft, DEFAULT_EXTERNAL_SEND_TOOLS, type ExternalSendConfig, type SendCandidate } from './external-send'
 import { normalizeOptions, findDismissibleWidgets } from './widgets'
-import { buildMemorySection, estimateTokensOf } from './memory'
+import { estimateTokensOf } from './memory'
+// fase memoria-engramma (M3): la sezione Memoria del prompt dal motore Engramma
+import { buildMemorySection } from '../memory/memory-store'
 import { buildSkillsSection, skillInvocationExpansion, invocableSkillsOf, mayInvokeSkill } from './skills'
 // U4 (fase pulizia · ritocchi, sostituisce P10): l'ora di invio sui messaggi
 // utente — buildMessages la mette su quelli delle entry, qui quella dei
@@ -1620,7 +1622,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       // prompt è sempre quello VERO del figlio; R7.1: le righe «quando» dei
       // gruppi che la whitelist lascia presenti nel turno del figlio
       systemText = subagentSystemPrompt(parent ?? agent, subRow ?? { id: opts.subagent.id, title: '' }, turnCatalog.map((g) => g.id)) +
-        buildSkillsSection(opts.subagent.parentId) + buildMemorySection(opts.subagent.parentId)
+        buildSkillsSection(opts.subagent.parentId) + await buildMemorySection(opts.subagent.parentId)
     } else {
       try {
         const agents = listAgents()
@@ -1656,7 +1658,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       // fase token · nucleo (R8.2): i punti 1-3 della guida sono nel prompt
       // del bot NORMALE (spawn_subagent sta nel suo nucleo)
       systemText = systemPrompt(agent, { teams: opts.groupTurn !== undefined, subagents: opts.groupTurn === undefined, groups: turnCatalog.map((g) => g.id) }) +
-        mainSection + buildSkillsSection(agentId) + connectorsSection + buildMemorySection(agentId)
+        mainSection + buildSkillsSection(agentId) + connectorsSection + await buildMemorySection(agentId)
     }
 
     // fase 13 (punto 5): in modalità differita il prompt porta la sezione
@@ -4205,6 +4207,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           // turno utente servono alle scritture in libreria (tainted)
           const { output, meta, images } = await executeTool(agentId, call.name, input, {
             turnInitiator: opts.initiator,
+            // fase memoria-engramma (M3): la fonte delle memorie scritte nel
+            // turno (homun:chat/<bot>/<entry che apre il turno>)
+            ...(turnEntryId ? { turnEntryId } : {}),
             ...(opts.taskId !== undefined ? { taskId: opts.taskId } : {}),
             ...(contaminated ? { contaminated: true } : {}),
             ...(source === 'user' && !automatic && !untrustedTurn ? { userTurn: true } : {}),

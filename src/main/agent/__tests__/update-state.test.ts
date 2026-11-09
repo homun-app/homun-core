@@ -3,7 +3,7 @@
 // esecuzione con store reale (routine che nasce in pausa con provenance
 // 'agent', cron non valido → errore leggibile, evento automation).
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
-import { mkdtempSync, rmSync, existsSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { formatUi } from '../../../shared/ui-text'
@@ -14,12 +14,20 @@ const { executeTool } = await import('../tools')
 
 let root: string
 const AGENT = 'agent_us'
-beforeAll(() => {
+beforeAll(async () => {
   root = mkdtempSync(join(tmpdir(), 'sandbot-upstate-test-'))
   setDataDir(root)
   dataDir()
+  // fase memoria-engramma (M3): le memorie vivono nel motore Engramma
+  const { openMemoryEngine } = await import('../../memory/engine')
+  const st = await openMemoryEngine({ dataDir: root })
+  if (!st.available) throw new Error('motore Engramma non disponibile nei test: ' + st.error)
 })
-afterAll(() => rmSync(root, { recursive: true, force: true }))
+afterAll(async () => {
+  const { closeMemoryEngine } = await import('../../memory/engine')
+  await closeMemoryEngine()
+  rmSync(root, { recursive: true, force: true })
+})
 
 const routine = (over: Partial<Parameters<typeof createRoutine>[4]> = {}) =>
   createRoutine(AGENT, 'Riepilogo mattina', 'riassumi le email', '30 8 * * 1-5', over)
@@ -274,15 +282,17 @@ describe('esecuzione (store reale)', () => {
       target: 'memory', action: 'write', content: 'preferenza ricordata', tier: 'core'
     })
     expect(output).toContain('Memory created')
-    const { listMemories } = await import('../memory')
-    expect(listMemories(AGENT).some((m) => m.id === meta.memoryId && m.content === 'preferenza ricordata')).toBe(true)
+    // fase memoria-engramma: la nota sta nella cella del bot
+    const { botCell } = await import('../../memory/engine')
+    const note = await (await botCell(AGENT)).get(String(meta.memoryId))
+    expect(note!.body).toBe('preferenza ricordata')
   })
 })
 
 // import a livello modulo (dentro describe non è consentito await); updateRoutine
 // e createRoutine sono già importati in testa al file
 const { addGrant, createAgent, deleteAgent, getAgent } = await import('../../store/db')
-const { writeMemory, listMemories } = await import('../memory')
+const { writeMemoryNote } = await import('../../memory/memory-store')
 const { writeSkillFromBot, listLibrarySkills } = await import('../skills')
 const { check } = await import('../permissions')
 
@@ -301,8 +311,8 @@ describe('fase 5 — residui (M1, M3, 0d) con store reale', () => {
   })
 
   it('M3: update/delete di una memoria ESISTENTE di scope user chiede anche senza scope nell\'argomento', async () => {
-    const shared = writeMemory(AGENT, { content: 'regola condivisa', tier: 'core', scope: 'user' })
-    const own = writeMemory(AGENT, { content: 'fatto privato', tier: 'core', scope: 'agent' })
+    const shared = await writeMemoryNote(AGENT, { content: 'regola condivisa', tier: 'core', scope: 'user', source: 'test', userTurn: true })
+    const own = await writeMemoryNote(AGENT, { content: 'fatto privato', tier: 'core', scope: 'agent', source: 'test', userTurn: true })
     // update senza scope nell'argomento: lo scope reale della memoria decide
     const v = await check('update_memory', { action: 'update', id: shared.id, content: 'regola manipolata' }, AGENT)
     expect(v.kind).toBe('ask')
@@ -312,19 +322,29 @@ describe('fase 5 — residui (M1, M3, 0d) con store reale', () => {
     // delete di una condivisa chiede; delete di una privata no
     expect((await check('update_memory', { action: 'delete', id: shared.id }, AGENT)).kind).toBe('ask')
     expect(await check('update_memory', { action: 'delete', id: own.id }, AGENT)).toEqual({ kind: 'allow', via: 'rule' })
-    expect(listMemories(AGENT).some((m) => m.id === shared.id)).toBe(true) // ask ≠ eseguito
+    // ask ≠ eseguito: la nota condivisa è ancora lì
+    const { userCell } = await import('../../memory/engine')
+    expect(await (await userCell(AGENT)).get(shared.id)).not.toBeNull()
   })
 
-  it('0d: agents:delete rimuove anche la directory agents/<id>/ (memoria e skill)', async () => {
+  it('0d: agents:delete rimuove la directory agents/<id>/ e PURGA la cella del motore', async () => {
     const a = createAgent('Eliminami')
-    writeMemory(a.id, { content: 'ricordo', tier: 'core' })
+    await writeMemoryNote(a.id, { content: 'ricordo', tier: 'core', source: 'test', userTurn: true })
     writeSkillFromBot(a.id, { name: 'prova', description: 'd', content: 'istruzioni' })
     // fase skill (S2): la skill del bot nasce nella LIBRERIA unica, abilitata
     // solo per lui
     expect(listLibrarySkills().some((sk) => sk.name === 'prova' && sk.entry.enabledFor.includes(a.id))).toBe(true)
+    // fase memoria-engramma: la memoria non vive più in agents/<id>/memory —
+    // la cartella resta per i vecchi dati (es. la memory/ svuotata dalla
+    // migrazione) e deleteAgent la rimuove comunque
     const dir = join(root, 'agents', a.id)
+    mkdirSync(join(dir, 'memory'), { recursive: true })
     expect(existsSync(dir)).toBe(true)
     deleteAgent(a.id)
+    // fase memoria-engramma: la cella del bot si PURGA (oblio vero)
+    const { purgeBotCell, listActiveMemoryRecords } = await import('../../memory/memory-store')
+    expect(await purgeBotCell(a.id)).toBe(1)
+    expect((await listActiveMemoryRecords(a.id)).filter((m) => m.scope === 'agent')).toEqual([])
     expect(getAgent(a.id)).toBeNull()
     expect(existsSync(dir)).toBe(false)
     // id inesistente: no-op senza errori
