@@ -1,0 +1,128 @@
+# fase memoria-engramma · correzioni (C2) — turno base DOPO la nuova search_history
+# fonte: scripts/turn-tokens.ts (stessa procedura della fase token e della fase
+# memoria-engramma). Il default di search_history diventa «il bot che parla»:
+# descrizione e parametro `bot` riscritti. La definizione dello strumento sta
+# nel GRUPPO history (dietro find_tools), NON nel turno base.
+#
+#   turno base (bot normale senza browser), prompt+tools:
+#     base della fase memoria-engramma (prima di M5)   4029
+#     dopo M5 (fase memoria-engramma)                  4074  (+45)
+#     dopo C2 (questa correzione)                      4074  (+45: invariato, limite +60 rispettato)
+#   definizione di search_history (solo quando il gruppo history si attiva):
+#     106 → 119 token (+13); gruppo history 222 → 235
+#
+# turn-tokens — token stimati (caratteri/4) del turno, per configurazione
+# fonte: assembleTurnTools (src/main/agent/turn-tools.ts) — la stessa del loop e dell'eval
+# prompt: system prompt del turno SENZA le sezioni dinamiche (memoria, skill, bot principale, connettori),
+#         con le righe «quando» dei gruppi PRESENTI nel turno (fase token · scoperta, R7.1)
+
+## bot normale senza browser
+prompt: 1992
+tools del turno: 2082 (13 tool)
+totale prompt+tools: 4074
+per tool:
+  message_user: 129
+  ask_user: 306
+  run-command: 177
+  read-file: 94
+  write-file: 74
+  list-directory: 59
+  web_search: 100
+  web_fetch: 112
+  memory: 211
+  document: 273
+  skill: 112
+  spawn_subagent: 120
+  find_tools: 315
+gruppi (TOOL_GROUPS, tool verso il modello):
+  documents: 436 (4 tool)
+  tasks: 699 (3 tool)
+  credentials: 414 (3 tool)
+  outside: 471 (3 tool)
+  subagents: 277 (3 tool)
+  bots: 699 (7 tool)
+  connectors: 477 (4 tool)
+  apps: 228 (1 tool)
+  admin: 497 (4 tool)
+  history: 235 (2 tool)
+
+## bot normale con browser
+prompt: 2198
+tools del turno: 2105 (13 tool)
+totale prompt+tools: 4303
+per tool:
+  message_user: 129
+  ask_user: 306
+  run-command: 177
+  read-file: 94
+  write-file: 74
+  list-directory: 59
+  web_search: 100
+  web_fetch: 112
+  memory: 211
+  document: 273
+  skill: 112
+  spawn_subagent: 120
+  find_tools: 338
+gruppi (TOOL_GROUPS, tool verso il modello):
+  browser: 896 (4 tool)
+  documents: 436 (4 tool)
+  tasks: 699 (3 tool)
+  credentials: 414 (3 tool)
+  outside: 471 (3 tool)
+  subagents: 277 (3 tool)
+  bots: 699 (7 tool)
+  connectors: 477 (4 tool)
+  apps: 228 (1 tool)
+  admin: 497 (4 tool)
+  history: 235 (2 tool)
+
+## turno di gruppo
+prompt: 1986
+tools del turno: 2134 (14 tool)
+totale prompt+tools: 4120
+per tool:
+  send_to_user: 124
+  ask_user: 306
+  run-command: 177
+  read-file: 94
+  write-file: 74
+  list-directory: 59
+  web_search: 100
+  web_fetch: 112
+  memory: 211
+  document: 273
+  skill: 112
+  find_tools: 294
+  post_to_group: 138
+  pass: 60
+gruppi (TOOL_GROUPS, tool verso il modello):
+  documents: 436 (4 tool)
+  tasks: 699 (3 tool)
+  credentials: 257 (2 tool)
+  outside: 471 (3 tool)
+  subagents: 277 (3 tool)
+  bots: 699 (7 tool)
+  connectors: 225 (2 tool)
+  apps: 228 (1 tool)
+  admin: 497 (4 tool)
+
+## figlio (sottoagente)
+prompt: 751
+tools del turno: 1123 (10 tool)
+totale prompt+tools: 1874
+per tool:
+  run-command: 177
+  read-file: 94
+  write-file: 74
+  list-directory: 59
+  web_search: 100
+  web_fetch: 112
+  memory: 82
+  skill: 112
+  find_tools: 152
+  wake_parent: 161
+gruppi (TOOL_GROUPS, tool verso il modello):
+  browser: 376 (1 tool)
+  tasks: 134 (1 tool)
+
