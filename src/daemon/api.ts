@@ -1027,29 +1027,27 @@ export function buildApiMethods(
     'memory:delete': ([agentId, id]) => memoryRpc.memoryDelete(agentId as string, String(id ?? '')),
     'memory:restore': ([agentId, id]) => memoryRpc.memoryRestore(agentId as string, String(id ?? '')),
     'memory:purge': ([agentId, id]) => memoryRpc.memoryPurge(agentId as string, String(id ?? '')),
-    // il modello NON si scarica mai da solo: solo da questo click. Dopo il
-    // download, embedPending in fondo alla coda (job memory-embed)
+    // il modello NON si scarica mai da solo: solo da questo click. Correzioni
+    // C8: la v0.4.2 collega l'embedder al motore APERTO (pullModel a caldo) —
+    // niente più close/open dopo il download: si accoda l'incorporazione per
+    // ogni agente (job memory-embed, nella corsia di ciascuno)
     'memory:model-pull': () => {
       const started = memoryRpc.startModelPull(
         (done, total) => emit({ type: 'memory', phase: 'model-pull', done, total }),
         (outcome) => {
           emit({ type: 'memory', phase: 'model-pull', done: outcome.ok ? 1 : 0, total: 1, finished: true, ...(outcome.ok ? {} : { error: outcome.error ?? 'error' }) })
           if (outcome.ok) {
-            // il motore lega l'embedder ALL'APERTURA (fase-v0.4.1): dopo il
-            // download si RIAPRE (le operazioni in volo finiscono, le nuove
-            // aspettano la riapertura) e solo allora embedPending, in coda
             void (async () => {
               try {
                 const m = await import('../main/memory/engine')
-                await m.closeMemoryEngine()
-                const st = await m.openMemoryEngine({ dataDir: store.dataDir() })
-                if (st.available) {
-                  console.log(`[sandbotd] memoria Engramma: modello caricato (${st.model.present ? 'ibrida' : 'testo+grafo'})`)
-                  for (const a of store.listAgents()) m.enqueueEmbedPending(db(), a.id)
+                const st = await m.memoryEngineStatus()
+                if (st.available && st.model.present) {
+                  console.log('[sandbotd] memoria Engramma: modello collegato (ricerca ibrida), incorporazione in coda')
+                  m.enqueueEmbedPendingAll(db(), store.listAgents().map((a) => a.id))
                   worker.poke()
                 }
               } catch {
-                // la riapertura non è andata: alla prossima, senza errori nei log
+                // il collegamento non è andato: alla prossima, senza errori nei log
               }
             })()
           }
