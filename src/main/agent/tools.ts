@@ -37,6 +37,24 @@ export const EDIT_DOCUMENT_REPLY_RULE =
  */
 export const NO_MEMORY_FOUND = 'No memory found for this search.'
 
+/**
+ * Fase memoria-engramma (M8): lo stesso result nei turni PRIVATI, dove gli
+ * strumenti della storia esistono — nomina search_history, e RESULT_ACTIVATES
+ * fa arrivare il gruppo history (i modelli piccoli non aprono find_tools da
+ * soli). Nei turni di gruppo e nei figli resta NO_MEMORY_FOUND.
+ */
+export const NO_MEMORY_FOUND_PRIVATE = 'No memory found for this search. Past conversations are not memories: search_history finds them.'
+
+/**
+ * Fase memoria-engramma (M3/M8): il result VERO di una memoria scritta in un
+ * turno contaminato — nasce in quarantena. Come R8.1 (WRITE_DOCUMENT_REPLY_RULE)
+ * chiude con la regola della risposta: per i modelli piccoli vince
+ * l'istruzione più recente, e l'utente deve sapere che decide lui.
+ */
+export function quarantinedMemoryResult(shortId: string, tier: string, scope: string): string {
+  return `Memory saved pending the user's confirmation (id ${shortId}, tier ${tier}, scope ${scope}): it came from untrusted content and will not be recalled until the user confirms it.\nTell the user it awaits their confirmation in the Memory section: do not say it is remembered.`
+}
+
 /** Fase memoria-engramma (M5): il testo VERO del result di search_history a vuoto. */
 export const NO_HISTORY_FOUND = 'No past conversation found for this search.'
 
@@ -863,7 +881,7 @@ async function runMemoryAction(agentId: string, input: Record<string, unknown>, 
       // conferma — il result lo dice al modello
       if (note.status === 'quarantined') {
         return {
-          output: `Memory saved pending the user's confirmation (id ${note.id.slice(-8)}, tier ${tier}, scope ${scope ?? 'agent'}): it came from untrusted content and will not be recalled until the user confirms it.`,
+          output: quarantinedMemoryResult(note.id.slice(-8), tier, scope ?? 'agent'),
           meta: { memoryId: note.id, quarantined: true }
         }
       }
@@ -921,6 +939,8 @@ export interface ToolTurnContext {
   turnInitiator?: string
   /** fase memoria-engramma (M3): l'id dell'entry che apre il turno (source homun:chat/<bot>/<entry>) */
   turnEntryId?: number
+  /** fase memoria-engramma (M8): il turno ha gli strumenti della storia (turni privati, mai gruppi e figli) */
+  historyTools?: boolean
   /** fase 8 (correzione B3): il turno gira nel sotto-transcript di questo task (dentro un task si chiude SOLO quello). */
   taskId?: number
   /** fase 14 (punto 6): il turno è contaminato (web/email/MCP letti) — le scritture in libreria diventano tainted. */
@@ -1291,7 +1311,7 @@ export async function executeTool(
       const owner = sandbox.boxOwnerOf(agentId)
       try {
         const hits = await recallMemories(owner, String(input.query ?? ''))
-        if (!hits.length) return { output: NO_MEMORY_FOUND, meta: {} }
+        if (!hits.length) return { output: ctx.historyTools ? NO_MEMORY_FOUND_PRIVATE : NO_MEMORY_FOUND, meta: {} }
         return { output: formatRecallLines(hits).join('\n'), meta: { memoryIds: hits.map((h) => h.id) } }
       } catch (e) {
         return { output: memoryErrorText(e), meta: { error: true } }

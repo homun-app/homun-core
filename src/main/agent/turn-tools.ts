@@ -355,7 +355,10 @@ export const RESULT_ACTIVATES: Readonly<Record<string, ReadonlyArray<string>>> =
   // il background di run-command nomina await_shell
   'run-command': ['tasks'],
   // il hint JS di web_fetch nomina browser_open
-  web_fetch: ['browser']
+  web_fetch: ['browser'],
+  // fase memoria-engramma (M5): un recall_memory a vuoto nomina
+  // search_history (le conversazioni passate): il gruppo arriva da solo
+  recall_memory: ['history']
 }
 
 /** I gruppi il cui NOME DI TOOL compare nel testo di un risultato (parola intera). */

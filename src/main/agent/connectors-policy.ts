@@ -21,7 +21,9 @@ export const CONNECTOR_PROPOSAL_TOOLS = new Set(['add_mcp_server', 'install_plug
  * bot normale; una spawn chiamata lo stesso in un gruppo riceve il rifiuto
  * dedicato del loop.
  */
-export const GROUP_EXCLUDED_TOOLS = new Set(['fill_credential', 'spawn_subagent'])
+// fase memoria-engramma (M8): la storia delle chat PRIVATE non entra nei
+// turni di gruppo (ciò che il bot riporta lì lo leggono gli altri bot)
+export const GROUP_EXCLUDED_TOOLS = new Set(['fill_credential', 'spawn_subagent', 'search_history', 'read_history'])
 
 // fase risposta (R2): fuori dai gruppi si offre message_user (i progressi dei
 // lavori lunghi) e NON send_to_user — la risposta all'utente è il testo

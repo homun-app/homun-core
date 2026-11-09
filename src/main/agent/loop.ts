@@ -4252,6 +4252,8 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             // fase memoria-engramma (M3): la fonte delle memorie scritte nel
             // turno (homun:chat/<bot>/<entry che apre il turno>)
             ...(turnEntryId ? { turnEntryId } : {}),
+            // M8: gli strumenti della storia ci sono solo nei turni privati
+            ...(opts.groupTurn === undefined && opts.subagent === undefined ? { historyTools: true } : {}),
             ...(opts.taskId !== undefined ? { taskId: opts.taskId } : {}),
             ...(contaminated ? { contaminated: true } : {}),
             ...(source === 'user' && !automatic && !untrustedTurn ? { userTurn: true } : {}),

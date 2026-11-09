@@ -152,3 +152,24 @@ describe('fase memoria-engramma M5: search_history e read_history', () => {
     expect(await check('read_history', { entryId: 1 }, AGENT)).toEqual({ kind: 'allow', via: 'rule' })
   })
 })
+
+describe('fase memoria-engramma M8: la storia solo dove serve', () => {
+  it('recall_memory a vuoto: nei turni privati indica search_history, altrove il testo di sempre', async () => {
+    const { NO_MEMORY_FOUND, NO_MEMORY_FOUND_PRIVATE } = await import('../../agent/tools')
+    const priv = await exec('recall_memory', { query: 'zzkkqq inesistente' }, { historyTools: true })
+    expect(priv.output).toBe(NO_MEMORY_FOUND_PRIVATE)
+    expect(priv.output).toContain('search_history')
+    const group = await exec('recall_memory', { query: 'zzkkqq inesistente' })
+    expect(group.output).toBe(NO_MEMORY_FOUND)
+    expect(group.output).not.toContain('search_history')
+  })
+
+  it('i turni di GRUPPO non hanno gli strumenti della storia privata (privacy della chat)', async () => {
+    const { toolsForTurnSource } = await import('../../agent/connectors-policy')
+    const { toolDefs } = await import('../../agent/tools')
+    const names = (f: Parameters<typeof toolsForTurnSource>[1]) => toolsForTurnSource(toolDefs, f).map((t) => t.name)
+    expect(names({ source: 'user', groupTurn: 1 } as never)).not.toContain('search_history')
+    expect(names({ source: 'user', groupTurn: 1 } as never)).not.toContain('read_history')
+    expect(names({ source: 'user' } as never)).toContain('search_history')
+  })
+})

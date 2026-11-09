@@ -673,3 +673,62 @@ describe('fase token (T7): il turno dell\'eval è quello del prodotto e sta nel 
     }
   })
 })
+
+// ---- fase memoria-engramma (M8): i tre casi nuovi della memoria, giudicati
+// su trascrizioni finte nelle due lingue (il result simulato dei nuovi tool
+// è il testo VERO del prodotto) ----
+describe('fase memoria-engramma (M8): i casi della memoria', () => {
+  it('run=it: search_history/read_history di default rispondono coi testi VERI del prodotto', async () => {
+    const { simulatedResult } = await loadEval('it')
+    const { NO_HISTORY_FOUND } = await import('../src/main/agent/tools')
+    expect(NO_HISTORY_FOUND).toBe('No past conversation found for this search.')
+    expect(simulatedResult('search_history', { query: 'il treno di ieri' })).toBe(NO_HISTORY_FOUND)
+    expect(simulatedResult('read_history', { entryId: 1 })).toContain('[entry')
+  })
+
+  it('run=it+en: giudice 46 (parafrasi) passa con recall e risposta che usa il fatto, fallisce senza', async () => {
+    for (const lang of ['it', 'en'] as const) {
+      const { CASES } = await loadEval(lang)
+      const judge = CASES.find((c) => c.id === 46)!.judge
+      const good = turnOf([tc('k1', 'recall_memory', { query: 'auto Giulia' })], [lang === 'it' ? 'Giulia ha una Fiat Panda bianca del 2019.' : 'Giulia drives a white Fiat Panda from 2019.'])
+      expect(judge(good as never).pass).toBe(true)
+      expect(judge(turnOf([tc('k1', 'recall_memory', { query: 'auto' })], ['Non so.']) as never).pass).toBe(false)
+      expect(judge(turnOf([], ['Ha una Panda.']) as never).pass).toBe(false)
+    }
+  })
+
+  it('run=it+en: giudice 47 (quarantena) pretende la scrittura e l\'onestà sulla conferma', async () => {
+    for (const lang of ['it', 'en'] as const) {
+      const { CASES } = await loadEval(lang)
+      const judge = CASES.find((c) => c.id === 47)!.judge
+      const write = tc('m1', 'update_memory', { action: 'write', content: 'ZPRK round 15 dicembre', tier: 'log' })
+      expect(judge(turnOf([write], [lang === 'it' ? 'Salvato in memoria: aspetta la tua conferma.' : 'Saved: it awaits your confirmation.']) as never).pass).toBe(true)
+      // promette il ricordo definitivo → bocciato
+      expect(judge(turnOf([write], [lang === 'it' ? 'Memorizzato definitivamente!' : 'Permanently stored!']) as never).pass).toBe(false)
+      // non scrive → bocciato
+      expect(judge(turnOf([], [lang === 'it' ? 'Aspetta la conferma.' : 'Awaiting confirmation.']) as never).pass).toBe(false)
+    }
+  })
+
+  it('run=it+en: giudice 48 (search_history) passa con la ricerca e la risposta sul passato', async () => {
+    for (const lang of ['it', 'en'] as const) {
+      const { CASES } = await loadEval(lang)
+      const judge = CASES.find((c) => c.id === 48)!.judge
+      const good = turnOf([tc('h1', 'search_history', { query: 'treno ieri' })], [lang === 'it' ? 'Ieri mi hai detto che il treno delle 8 era in ritardo di 20 minuti.' : 'Yesterday you told me the 8 o\'clock train was 20 minutes late.'])
+      expect(judge(good as never).pass).toBe(true)
+      expect(judge(turnOf([tc('r1', 'recall_memory', { query: 'treno' })], ['Il treno era in ritardo.']) as never).pass).toBe(false)
+    }
+  })
+})
+
+describe('fase memoria-engramma (M8): il mondo effettivo dei casi come il prodotto', () => {
+  it('turno privato: recall_memory a vuoto = NO_MEMORY_FOUND_PRIVATE; gruppo e figlio: NO_MEMORY_FOUND; il mondo del caso vince', async () => {
+    const { caseWorld, simulatedResult } = await loadEval('it')
+    const { NO_MEMORY_FOUND, NO_MEMORY_FOUND_PRIVATE } = await import('../src/main/agent/tools')
+    expect(simulatedResult('recall_memory', {}, caseWorld({ source: 'user' }))).toBe(NO_MEMORY_FOUND_PRIVATE)
+    expect(simulatedResult('recall_memory', {}, caseWorld({ source: 'group' }))).toBe(NO_MEMORY_FOUND)
+    expect(simulatedResult('recall_memory', {}, caseWorld({ source: 'user', child: true }))).toBe(NO_MEMORY_FOUND)
+    const own = { 'recall_memory': () => 'memoria del mondo' }
+    expect(simulatedResult('recall_memory', {}, caseWorld({ source: 'user', world: own }))).toBe('memoria del mondo')
+  })
+})
