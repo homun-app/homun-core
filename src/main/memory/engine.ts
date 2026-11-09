@@ -15,7 +15,7 @@
 // produrre errori nei log).
 //
 // I tipi qui sotto rispecchiano il contratto di crates/engramma-node
-// (index.d.ts, fase-v0.4.1): il .d.ts del crate non entra nel tsconfig di
+// (index.d.ts, fase-v0.4.2): il .d.ts del crate non entra nel tsconfig di
 // Homun, quindi il contratto vive in questi nominali minimi.
 import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -152,6 +152,16 @@ export interface EngrammaModelStatus {
   bytes?: number
 }
 
+/** v0.4.2: l'esito dell'oblio di una cella intera (come la PurgeView). */
+export interface EngrammaDropView {
+  /** le note dimenticate, lapidi comprese */
+  notes: number
+  scrubbed: boolean
+  /** cosa trattiene ancora byte (viste vault) */
+  pending: string[]
+  views: Array<{ viewId?: string | null; root: string; reason: string }>
+}
+
 export interface EngrammaCell {
   readonly name: string
   put(note: EngrammaNoteInput): Promise<EngrammaNoteView>
@@ -171,6 +181,8 @@ export interface EngrammaCell {
 export interface EngrammaEngine {
   cell(name: string, opts?: { create?: boolean; actor?: string }): Promise<EngrammaCell>
   cells(): Promise<string[]>
+  /** v0.4.2: oblio di una cella intera (NOT_FOUND su una cella assente) */
+  dropCell(name: string, reason: string): Promise<EngrammaDropView>
   modelStatus(): Promise<EngrammaModelStatus>
   pullModel(onProgress?: (done: number, total: number) => void): Promise<void>
   search(cells: string[], q: EngrammaSearchInput): Promise<EngrammaSearchHit[]>
@@ -256,10 +268,29 @@ export function resetEngrammaModuleCacheForTests(): void {
 
 // ---- celle ----
 
+/**
+ * Un nome di cella non può contenere MAI «-snap-»: nella v0.4.2
+ * dropCell('x') cancella anche le celle x-snap-… (difetto aperto, corretto
+ * in v0.4.3) — un nome che le somigli si RIFIUTA, non si costruisce.
+ */
+function assertNoSnap(name: string): void {
+  if (name.includes('-snap-')) throw new Error(`invalid cell name "${name}": must not contain '-snap-' (dropCell would take snapshot cells with it)`)
+}
+
 /** La cella delle memorie di un bot: bot-<id sanificato> (DESIGN §8.4). */
 export function botCellName(agentId: string): string {
   const clean = agentId.toLowerCase().replace(/[^a-z0-9_-]/g, '-').slice(0, 64)
-  return 'bot-' + clean
+  const name = 'bot-' + clean
+  assertNoSnap(name)
+  return name
+}
+
+/** La cella della STORIA di un bot: storia-<id sanificato> (correzioni C2). */
+export function storyCellName(agentId: string): string {
+  const clean = agentId.toLowerCase().replace(/[^a-z0-9_-]/g, '-').slice(0, 64)
+  const name = 'storia-' + clean
+  assertNoSnap(name)
+  return name
 }
 
 /** La cella delle memorie condivise da tutti i bot. */
@@ -419,6 +450,45 @@ export function userCell(writerAgentId: string | null): Promise<EngrammaCell> {
   return memoryCell(USER_CELL, writerAgentId ? botActor(writerAgentId) : 'homun:user')
 }
 
+/** L'esito di dropCellAndEvict (i numeri del DropView, senza contenuti). */
+export interface DroppedCellView {
+  /** NOT_FOUND: la cella non c'è (o non c'è più) — vale «già dimenticata» */
+  alreadyGone: boolean
+  notes: number
+  scrubbed: boolean
+  pending: string[]
+  views: EngrammaDropView['views']
+}
+
+/**
+ * Correzioni C2: l'oblio di una cella intera — Engine.dropCell più lo
+ * sgombero della cache. NOT_FOUND vale «già dimenticata» (mai un'eccezione:
+ * il job finisce bene); la cella si toglie da state.cells SEMPRE, anche a
+ * drop già fatto: una Cell in cache risponde NOT_FOUND per sempre e finché
+ * resta viva tiene aperta la connessione SQLite sui file già cancellati — i
+ * byte restano sul disco finché il GC non la rilascia.
+ */
+export async function dropCellAndEvict(name: string, reason: string): Promise<DroppedCellView> {
+  const engine = await memoryEngine()
+  let out: DroppedCellView
+  try {
+    const v = await engine.dropCell(name, reason)
+    out = { alreadyGone: false, notes: v.notes, scrubbed: v.scrubbed, pending: v.pending, views: v.views }
+  } catch (e) {
+    if ((e as { code?: string })?.code === 'NOT_FOUND') {
+      out = { alreadyGone: true, notes: 0, scrubbed: true, pending: [], views: [] }
+    } else {
+      throw e
+    }
+  }
+  if (state.kind === 'open') {
+    for (const key of [...state.cells.keys()]) {
+      if (key.startsWith(name + '::')) state.cells.delete(key)
+    }
+  }
+  return out
+}
+
 /**
  * Le celle che la ricerca di un bot attraversa: bot-<id> e utente. Il motore
  * risponde NOT_FOUND su una cella inesistente, quindi le si GARANTISCE qui
@@ -493,12 +563,12 @@ export function enqueueStoryIndex(
 }
 
 /**
- * La coda dell'oblio di un bot ELIMINATO (M5): purga la sua cella di memorie
- * e le sue note nella storia (l'eliminazione della conversazione). La purga
- * è lenta (riscrive la cella): sta in coda, mai nella RPC.
+ * La coda dell'oblio di un bot ELIMINATO (M5, correzioni C2): DUE dropCell —
+ * bot-<id> e storia-<id>, lapidi comprese. L'oblio della cella è veloce ma
+ * sta in coda, mai nella RPC che elimina il bot.
  */
-export function enqueueForgetAgent(db: DatabaseSync, agentId: string, now = Date.now()): void {
-  enqueueJob(db, { agentId, kind: 'memory-forget-agent', payload: {}, runAt: now, now })
+export function enqueueForgetAgent(db: DatabaseSync, agentId: string, now = Date.now()) {
+  return enqueueJob(db, { agentId, kind: 'memory-forget-agent', payload: {}, runAt: now, now })
 }
 
 /** La coda dell'indicizzazione iniziale delle conversazioni esistenti (M5). */

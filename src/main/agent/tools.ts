@@ -291,15 +291,16 @@ export const toolDefs: ToolDef[] = [
   },
   // fase memoria-engramma (M5): il richiamo delle conversazioni (gruppo
   // history, dietro find_tools): i messaggi dell'utente e le risposte finali
-  // dei bot, mai i risultati dei tool
+  // dei bot, mai i risultati dei tool. Correzioni C2: il DEFAULT è la
+  // conversazione del bot che parla; bot 'all' o un id per allargare.
   {
     name: 'search_history',
-    description: 'Searches past conversations: what the user wrote and the final replies of the bots (no tool results). Returns entry ids for read_history.',
+    description: "Searches past conversations: what the user wrote and the final replies (no tool results). Yours by default; bot 'all' or a bot id to widen. Returns entry ids for read_history.",
     parameters: {
       type: 'object',
       properties: {
         query: { type: 'string', description: 'What to look for, in plain words' },
-        bot: { type: 'string', description: 'Bot id to search only its conversation (optional: all bots)' }
+        bot: { type: 'string', description: "'all' for every bot, or another bot's id (default: this bot's conversation)" }
       },
       required: ['query']
     }
@@ -1318,15 +1319,20 @@ export async function executeTool(
       }
     }
     case 'search_history': {
-      // fase memoria-engramma (M5): la cella storia — una risposta nata in un
-      // turno contaminato è DATO ESTERNO: il meta lo dice e il loop incarta il
-      // result e contamina il turno (come la libreria tainted, fase 14)
+      // fase memoria-engramma (M5): le celle storia-<id>. Correzioni C2:
+      // senza bot si cerca la storia del bot che PARLA (boxOwnerOf per i
+      // figli) — un bot esposto al web non legge di default le chat degli
+      // altri; bot 'all' o un id per allargare. Una risposta nata in un
+      // turno contaminato è DATO ESTERNO: il meta lo dice e il loop incarta
+      // il result e contamina il turno (come la libreria tainted, fase 14)
       const query = String(input.query ?? '').trim()
       if (!query) return { output: 'Missing query: write the search in the query field.', meta: {} }
-      const bot = typeof input.bot === 'string' && input.bot.trim() ? input.bot.trim() : undefined
+      const rawBot = typeof input.bot === 'string' ? input.bot.trim() : ''
+      const bot: string | 'all' | undefined = rawBot === 'all' ? 'all' : rawBot || undefined
+      const speaking = sandbox.boxOwnerOf(agentId)
       try {
         const { searchHistory, storyRefOf } = await import('../memory/history-store')
-        const hits = await searchHistory(query, bot)
+        const hits = await searchHistory(query, speaking, bot)
         if (!hits.length) return { output: NO_HISTORY_FOUND, meta: {} }
         const refs = hits.map((h) => ({ h, ref: storyRefOf(h) }))
         const lines = refs.map(({ h, ref }) =>

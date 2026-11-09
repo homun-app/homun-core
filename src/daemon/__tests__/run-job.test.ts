@@ -429,11 +429,11 @@ describe('makeJobRunner: memory-index-story e memory-story-backfill', () => {
       await makeJobRunner(db, fakeTurn(log))(job, emit)
       expect(log).toEqual([])
       const { searchHistory } = await import('../../main/memory/history-store')
-      expect((await searchHistory('cena otto')).length).toBe(1)
+      expect((await searchHistory('cena otto', 'a1')).length).toBe(1)
       // un entry SPARITO non indicizza nulla, e il job non è un errore
       const gone = enqueueJob(db, { agentId: 'a1', kind: 'memory-index-story', payload: { entryId: 999_999 }, runAt: 0, now: 0 })
       await makeJobRunner(db, fakeTurn(log))(gone, emit)
-      expect((await searchHistory('cena otto')).length).toBe(1)
+      expect((await searchHistory('cena otto', 'a1')).length).toBe(1)
     } finally {
       await e.closeMemoryEngine()
       rmSync(dir, { recursive: true, force: true })
@@ -480,8 +480,13 @@ describe('makeJobRunner: memory-forget-agent', () => {
       await indexStoryNote('agent_g1', 5, 'user', 'conversazione da dimenticare', 1730000000000)
       const job = enqueueJob(db, { agentId: 'agent_g1', kind: 'memory-forget-agent', payload: {}, runAt: 0, now: 0 })
       await makeJobRunner(db, fakeTurn([]))(job, emit)
-      expect((await searchHistory('dimenticare'))).toEqual([])
-      expect(await (await e.botCell('agent_g1')).list({ limit: 100 })).toEqual([])
+      // correzioni C2: l'oblio è PER CELLA — le due celle non ci sono più
+      // (e la ricerca, col nuovo default, non le vede)
+      expect((await searchHistory('dimenticare', 'agent_g1'))).toEqual([])
+      const engine = await e.memoryEngine()
+      expect(await engine.cells()).toEqual(expect.not.arrayContaining(['bot-agent_g1', 'storia-agent_g1']))
+      // una SECONDA esecuzione finisce bene: NOT_FOUND = già dimenticata
+      await makeJobRunner(db, fakeTurn([]))(job, emit)
     } finally {
       await e.closeMemoryEngine()
       rmSync(dir, { recursive: true, force: true })

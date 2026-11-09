@@ -1,7 +1,8 @@
-// Fase memoria-engramma (M5): il richiamo delle conversazioni — la cella
-// «storia». Ogni messaggio dell'utente e ogni risposta finale del bot
-// diventano una nota `type: event`:
-//   source: homun:chat/<agentId>/<entryId>, tag bot/<agentId>;
+// Fase memoria-engramma (M5) · correzioni (C2): il richiamo delle
+// conversazioni — la storia di un bot vive nella CELLA storia-<id>, la stessa
+// separazione delle memorie (bot-<id>). Ogni messaggio dell'utente e ogni
+// risposta finale del bot diventano una nota `type: event`:
+//   source: homun:chat/<agentId>/<entryId>, tag entry/<entryId>;
 //   i risultati dei tool e i contenuti esterni NON entrano (indicizza solo
 //   il testo dell'utente e la risposta finale).
 // L'indicizzazione è ASINCRONA, in coda nel demone (job memory-index-story):
@@ -10,11 +11,8 @@
 // non un duplicato (idempotenza anche dopo un crash a metà coda).
 import { createHash } from 'node:crypto'
 import type { EngrammaSearchHit } from './engine'
-import { memoryCell, memoryEngine } from './engine'
-import { getEntries } from '../store/db'
-
-/** La cella delle conversazioni (una per Homun, i tag separano i bot). */
-export const STORY_CELL = 'storia'
+import { memoryCell, memoryEngine, storyCellName, dropCellAndEvict } from './engine'
+import { getEntries, deleteSetting } from '../store/db'
 
 /** L'actor delle scritture della storia: il demone, per conto della chat. */
 const STORY_ACTOR = 'homun:story'
@@ -65,14 +63,14 @@ export async function indexStoryNote(
 ): Promise<void> {
   const body = text.length > STORY_MAX_CHARS ? text.slice(0, STORY_MAX_CHARS) : text
   if (!body.trim()) return
-  const cell = await memoryCell(STORY_CELL, STORY_ACTOR)
+  const cell = await memoryCell(storyCellName(agentId), STORY_ACTOR)
   await cell.put({
     id: storyNoteId(agentId, entryId, createdAtMs),
     noteType: 'event',
     body,
-    // entry/<id> fa arrivare l'entry col SearchHit (che porta i tag, non la
-    // source): niente get per riga in search_history
-    tags: [`bot/${agentId}`, `entry/${entryId}`, ...(opts.tainted ? [STORY_TAINTED_TAG] : [])],
+    // entry/<id> fa arrivare l'entry col SearchHit (che porta i tag); il BOT
+    // è la cella stessa (storia-<id>): niente get per riga in search_history
+    tags: [`entry/${entryId}`, ...(opts.tainted ? [STORY_TAINTED_TAG] : [])],
     source: `homun:chat/${agentId}/${entryId}`,
     // l'utente lo ha detto; la risposta del bot l'ha dedotta il bot
     confidence: kind === 'user' ? 'stated' : 'inferred',
@@ -80,12 +78,12 @@ export async function indexStoryNote(
   })
 }
 
-/** L'entry e il bot di un hit della storia (dai tag entry/<id> e bot/<id>). */
-export function storyRefOf(hit: { tags: string[] }): { entryId: number | null; agentId: string | null; tainted: boolean } {
+/** L'entry e il bot di un hit della storia (dal tag entry/<id> e dalla CELLA). */
+export function storyRefOf(hit: { cell: string; tags: string[] }): { entryId: number | null; agentId: string | null; tainted: boolean } {
   const entry = hit.tags.find((t) => t.startsWith('entry/'))
-  const bot = hit.tags.find((t) => t.startsWith('bot/'))
   const n = entry ? Number(entry.slice('entry/'.length)) : NaN
-  return { entryId: Number.isFinite(n) ? n : null, agentId: bot ? bot.slice('bot/'.length) : null, tainted: hit.tags.includes(STORY_TAINTED_TAG) }
+  const agentId = hit.cell.startsWith('storia-') ? hit.cell.slice('storia-'.length) : null
+  return { entryId: Number.isFinite(n) ? n : null, agentId, tainted: hit.tags.includes(STORY_TAINTED_TAG) }
 }
 
 /** È un messaggio della conversazione da indicizzare? (utente o finale) */
@@ -174,16 +172,33 @@ export async function runStoryIndexJob(agentId: string, entryId: number): Promis
   return 'indexed'
 }
 
-/** Cerca nelle conversazioni indicizzate (tutti i bot, o solo uno). */
-export async function searchHistory(query: string, agentId?: string, k = 10): Promise<EngrammaSearchHit[]> {
+/**
+ * Cerca nelle conversazioni indicizzate (correzioni C2):
+ *   - senza `bot`: la storia del bot che STA PARLANDO (`speaking`, già
+ *     risolto col boxOwnerOf per i figli) — un bot esposto al web non legge
+ *     di default le chat degli altri;
+ *   - `bot: 'all'`: tutte le celle storia-*, con UN solo Engine.search
+ *     (fusione RRF del motore, non filtri JS dopo i primi k di tutti);
+ *   - un id: la storia di quel bot.
+ */
+export async function searchHistory(
+  query: string,
+  speaking: string,
+  bot?: string | 'all',
+  k = 10
+): Promise<EngrammaSearchHit[]> {
   const engine = await memoryEngine()
-  // la cella si garantisce (il motore risponde NOT_FOUND su una cella assente)
-  await engine.cell(STORY_CELL)
   const model = await engine.modelStatus()
-  const hits = await engine.search([STORY_CELL], {
-    text: query, k: Math.max(k, 50), mode: model.present ? 'hybrid' : 'text', graphHops: 1
-  })
-  return agentId ? hits.filter((h) => h.tags.includes(`bot/${agentId}`)).slice(0, k) : hits.slice(0, k)
+  const mode = model.present ? 'hybrid' : 'text'
+  const existing = await engine.cells()
+  if (bot === 'all') {
+    const cells = existing.filter((n) => n.startsWith('storia-'))
+    if (!cells.length) return []
+    return engine.search(cells, { text: query, k, mode, graphHops: 1 })
+  }
+  const name = storyCellName(bot ?? speaking)
+  if (!existing.includes(name)) return [] // nessuna storia: nessun risultato, non un errore
+  return engine.search([name], { text: query, k, mode, graphHops: 1 })
 }
 
 /**
@@ -209,17 +224,19 @@ export async function readHistoryWindow(agentId: string, entryId: number, window
     .join('\n')
 }
 
-/** Purga le note di storia di un bot (la sua conversazione si cancella). */
-export async function purgeStoryOf(agentId: string): Promise<{ forgotten: number }> {
+
+/**
+ * Correzioni C2: la cella «storia» UNICA della fase precedente (dati di
+ * sviluppo) si dimentica all'avvio e l'indicizzazione iniziale riparte, così
+ * ogni bot ritrova la sua storia nella propria cella. Ritorna true se la
+ * vecchia cella c'era (ed è stata dimenticata).
+ */
+export async function dropLegacyStoryCell(): Promise<boolean> {
   const engine = await memoryEngine()
-  await engine.cell(STORY_CELL)
-  const cell = await memoryCell(STORY_CELL, STORY_ACTOR)
-  const notes = (await cell.list({ tags: [`bot/${agentId}`], limit: 100_000 }))
-    .filter((n) => n.tags.includes(`bot/${agentId}`))
-  let forgotten = 0
-  for (const n of notes) {
-    const view = await cell.purge(n.id, 'conversation deleted')
-    forgotten += view.forgottenPayloads
-  }
-  return { forgotten }
+  if (!(await engine.cells()).includes('storia')) return false
+  await dropCellAndEvict('storia', 'legacy shared story cell of the previous phase: reindexing per bot')
+  // il marcatore si azzera: il job di backfill riparte e ridistribuisce le
+  // conversazioni nelle celle storia-<id>
+  deleteSetting('memory.storyBackfilledAt')
+  return true
 }

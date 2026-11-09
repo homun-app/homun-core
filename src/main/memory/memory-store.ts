@@ -243,25 +243,6 @@ export function formatRecallLines(hits: EngrammaSearchHit[]): string[] {
 }
 
 /**
- * Purga la cella di un bot ELIMINATO (agents:delete e delete_agent): le sue
- * memorie muoiono con lui, oblio VERO (non lapidi). Best-effort, in coda:
- * i byte ancora trattenuti (WAL) li finisce il giro successivo del demone.
- */
-export async function purgeBotCell(agentId: string, reason = 'bot deleted'): Promise<number> {
-  try {
-    const cell = await botCell(agentId)
-    const notes = [
-      ...await cell.list({ status: ['active'], limit: 100_000 }),
-      ...await cell.list({ status: ['quarantined'], limit: 100_000 })
-    ]
-    for (const n of notes) await cell.purge(n.id, reason)
-    return notes.length
-  } catch {
-    return 0 // motore chiuso o assente: niente da purgare ora
-  }
-}
-
-/**
  * Lo scope di una memoria esistente (permessi dello scope user: modificarla
  * chiede anche quando l'argomento non lo dice); null se assente o se il
  * motore non c'è (vale lo scope dell'argomento).

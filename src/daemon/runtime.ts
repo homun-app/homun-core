@@ -207,6 +207,21 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
     }
   }
 
+  // fase memoria-engramma · correzioni (C2): la cella «storia» UNICA della
+  // fase precedente (dati di sviluppo) si dimentica e l'indicizzazione
+  // iniziale riparte, così ogni bot ritrova la sua storia nella propria
+  // cella storia-<id>
+  {
+    try {
+      const { dropLegacyStoryCell } = await import('../main/memory/history-store')
+      if (await dropLegacyStoryCell()) {
+        console.log('[sandbotd] cella storia unica della fase precedente dimenticata: le conversazioni si reindicizzano per bot')
+      }
+    } catch (e) {
+      console.error('[sandbotd] oblio della vecchia cella storia rimandato al prossimo avvio:', e instanceof Error ? e.message : e)
+    }
+  }
+
   // fase 12: il broadcast si riempie quando il server ws esiste; il boot lo
   // usa per il risveglio dei lotti (gli eventi persi prima della connessione
   // della UI si ricaricano comunque al primo 'agents'/'subagents')

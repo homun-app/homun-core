@@ -1,9 +1,11 @@
-// Fase memoria-engramma (M5): il richiamo delle conversazioni — la cella
-// «storia»: ogni messaggio dell'utente e ogni risposta finale del bot
-// diventano una nota type event (source homun:chat/<bot>/<entry>, tag
-// bot/<id>); i risultati dei tool e i contenuti esterni NON entrano. Poi i
-// due strumenti dietro find_tools (search_history, read_history) e la purga
-// delle note di un bot quando la sua conversazione si cancella.
+// Fase memoria-engramma (M5) · correzioni (C2): il richiamo delle
+// conversazioni — la storia di un bot vive nella CELLA storia-<id> (come le
+// memorie in bot-<id>). Ogni messaggio dell'utente e ogni risposta finale del
+// bot diventano una nota type event (source homun:chat/<bot>/<entry>, tag
+// entry/<id>); i risultati dei tool e i contenuti esterni NON entrano. Poi i
+// due strumenti dietro find_tools (search_history, read_history): senza bot si
+// cerca la storia del bot che parla, bot: 'all' cerca in tutte le celle
+// storia-* con un solo Engine.search, un id la storia di quel bot.
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -26,16 +28,17 @@ async function fresh() {
   return e
 }
 
-describe('fase memoria-engramma M5: la cella storia', () => {
-  it('indexStoryNote: nota event con tag bot/<id>, source homun:chat/<bot>/<entry>, idempotente', async () => {
+describe('fase memoria-engramma · correzioni C2: la storia per bot', () => {
+  it('indexStoryNote: nota event nella cella storia-<id>, tag entry/<id> (niente bot/<id>), idempotente', async () => {
     const e = await fresh()
     const { indexStoryNote } = await import('../history-store')
     await indexStoryNote('agent_s1', 101, 'user', 'Ieri ti ho detto che il treno delle 8 era in ritardo', 1730000000000)
     await indexStoryNote('agent_s1', 102, 'assistant', 'Ho controllato: ritardo di 20 minuti, arrivo alle 8:20', 1730000100000)
-    const cell = await e.memoryCell('storia', 'homun:story')
+    const cell = await e.memoryCell('storia-agent_s1', 'homun:story')
     const notes = await cell.list({ noteType: 'event', limit: 1000 })
     expect(notes).toHaveLength(2)
-    expect(notes.every((n) => n.tags.includes('bot/agent_s1'))).toBe(true)
+    expect(notes.every((n) => n.tags.includes('entry/101') || n.tags.includes('entry/102'))).toBe(true)
+    expect(notes.every((n) => n.tags.every((t) => !t.startsWith('bot/')))).toBe(true)
     expect(notes.every((n) => n.source.startsWith('homun:chat/agent_s1/'))).toBe(true)
     expect(notes[0]!.noteType).toBe('event')
     // IDEMPOTENTE: lo stesso entry non si indicizza due volte
@@ -44,36 +47,28 @@ describe('fase memoria-engramma M5: la cella storia', () => {
     await e.closeMemoryEngine()
   })
 
-  it('searchHistory: trova per parafrasi tra i messaggi, filtra per bot quando chiesto', async () => {
+  it('searchHistory: il DEFAULT è la storia del bot che parla; un altro bot SOLO con bot; all trova in due bot', async () => {
     const e = await fresh()
-    const { indexStoryNote, searchHistory } = await import('../history-store')
+    const { indexStoryNote, searchHistory, storyRefOf } = await import('../history-store')
     await indexStoryNote('agent_s1', 201, 'user', 'mi sono iscritto in palestra, il martedì e il venerdì', 1730000000000)
     await indexStoryNote('agent_s1', 202, 'assistant', 'perfetto, segno gli allenamenti sul calendario', 1730000100000)
-    await indexStoryNote('agent_s9', 203, 'user', 'argomento completamente diverso di un altro bot', 1730000200000)
-    // senza modello la ricerca è testo+grafo: le parole chiave bastano (la
-    // PARAFRASI la aggiunge il modello ibrido, provata dal vivo in M8)
-    const hits = await searchHistory('palestra iscritto')
-    expect(hits.length).toBeGreaterThanOrEqual(1)
-    expect(hits.some((h) => h.snippet.includes('palestra'))).toBe(true)
-    expect(hits.every((h) => h.tags.includes('bot/agent_s1') || h.tags.includes('bot/agent_s9'))).toBe(true)
-    // con bot: SOLO quel bot
-    const only = await searchHistory('palestra', 'agent_s1')
-    expect(only.length).toBeGreaterThanOrEqual(1)
-    expect(only.every((h) => h.tags.includes('bot/agent_s1'))).toBe(true)
-    const none = await searchHistory('palestra', 'agent_zz')
-    expect(none).toEqual([])
-    await e.closeMemoryEngine()
-  })
-
-  it('purgeStoryOf: le note di un bot spariscono (oblio vero), le altre restano', async () => {
-    const e = await fresh()
-    const { indexStoryNote, searchHistory, purgeStoryOf } = await import('../history-store')
-    await indexStoryNote('agent_s1', 301, 'user', 'il codice del citofono è 4512', 1730000000000)
-    await indexStoryNote('agent_s2', 302, 'user', 'una nota che deve restare', 1730000100000)
-    expect((await purgeStoryOf('agent_s1')).forgotten).toBe(1)
-    const hits = await searchHistory('citofono')
-    expect(hits).toEqual([])
-    expect((await searchHistory('nota che deve restare')).length).toBeGreaterThanOrEqual(1)
+    await indexStoryNote('agent_s9', 203, 'user', 'la mia palestra preferita è quella di via Roma', 1730000200000)
+    // agent_s9 cerca senza bot: vede SOLO la propria storia (il default è il
+    // bot che parla — un bot esposto al web non legge le chat degli altri)
+    const own = await searchHistory('palestra', 'agent_s9')
+    expect(own.length).toBeGreaterThanOrEqual(1)
+    expect(own.every((h) => h.cell === 'storia-agent_s9')).toBe(true)
+    // la storia di un ALTRO bot solo con l'id
+    const other = await searchHistory('palestra', 'agent_s9', 'agent_s1')
+    expect(other.length).toBeGreaterThanOrEqual(1)
+    expect(other.every((h) => h.cell === 'storia-agent_s1')).toBe(true)
+    // un id senza storia: nessun risultato, nessun errore
+    expect(await searchHistory('palestra', 'agent_s9', 'agent_zz')).toEqual([])
+    // 'all': un solo Engine.search su più celle, trova in ENTRAMBI i bot
+    const all = await searchHistory('palestra', 'agent_s9', 'all')
+    expect(new Set(all.map((h) => h.cell))).toEqual(new Set(['storia-agent_s1', 'storia-agent_s9']))
+    // il ref viene dalla CELLA (il tag bot/<id> non esiste più)
+    for (const h of all) expect(storyRefOf(h)).toEqual({ entryId: expect.any(Number), agentId: h.cell.slice('storia-'.length), tainted: false })
     await e.closeMemoryEngine()
   })
 
@@ -106,17 +101,17 @@ describe('fase memoria-engramma M5: la cella storia', () => {
   })
 })
 
-describe('fase memoria-engramma M5: riferimenti e indicizzazione iniziale', () => {
-  it('il SearchHit porta entry e bot nei tag (niente get per riga); le risposte contaminate sono tainted', async () => {
+describe('fase memoria-engramma · correzioni C2: riferimenti e indicizzazione iniziale', () => {
+  it('le risposte contaminate sono tainted (il ref viene dalla cella, non dal tag)', async () => {
     const e = await fresh()
     const { indexStoryNote, searchHistory, storyRefOf } = await import('../history-store')
     await indexStoryNote('agent_r1', 555, 'assistant', 'secondo il sito, il museo apre alle 9', 1730000000000, { tainted: true })
-    const [hit] = await searchHistory('museo apre')
+    const [hit] = await searchHistory('museo apre', 'agent_r1')
     expect(storyRefOf(hit!)).toEqual({ entryId: 555, agentId: 'agent_r1', tainted: true })
     await e.closeMemoryEngine()
   })
 
-  it('backfillStory indicizza i messaggi utente e le risposte finali di ogni bot, con avanzamento', async () => {
+  it('backfillStory indicizza i messaggi utente e le risposte finali di ogni bot, OGNIUNO nella sua cella', async () => {
     const { setDataDir, appendEntry } = await import('../../store/db')
     const dir = join(DATA, 'b' + Math.random().toString(36).slice(2, 6))
     setDataDir(dir)
@@ -134,13 +129,35 @@ describe('fase memoria-engramma M5: riferimenti e indicizzazione iniziale', () =
     expect(r.indexed).toBe(3)
     expect(seen[0]).toEqual([0, 3])
     expect(seen.at(-1)).toEqual([3, 3])
-    expect((await searchHistory('ferie agosto')).length).toBeGreaterThanOrEqual(1)
-    expect(await searchHistory('risultato web')).toEqual([])
-    expect(await searchHistory('apertura di sistema')).toEqual([])
+    const engine = await e.memoryEngine()
+    expect(await engine.cells()).toEqual(expect.arrayContaining(['storia-agent_b1', 'storia-agent_b2']))
+    expect((await searchHistory('ferie agosto', 'agent_b1')).length).toBeGreaterThanOrEqual(1)
+    expect(await searchHistory('risultato web', 'agent_b1')).toEqual([])
+    expect(await searchHistory('apertura di sistema', 'agent_b1')).toEqual([])
+    // il secondo bot NON vede la storia del primo senza bot: 'agent_b2'
+    expect((await searchHistory('ferie agosto', 'agent_b2'))).toEqual([])
     // una seconda passata non duplica (id deterministico)
     await backfillStory(['agent_b1', 'agent_b2'])
-    const cell = await e.memoryCell('storia', 'homun:story')
-    expect(await cell.list({ noteType: 'event', limit: 1000 })).toHaveLength(3)
+    const cell = await e.memoryCell('storia-agent_b1', 'homun:story')
+    expect(await cell.list({ noteType: 'event', limit: 1000 })).toHaveLength(2)
+    await e.closeMemoryEngine()
+  })
+
+  it('la cella «storia» UNICA della fase precedente si dimentica e il backfill riparte', async () => {
+    const e = await fresh()
+    const { setSetting, getSetting } = await import('../../store/db')
+    // la vecchia cella con dentro una nota, e il marcatore che dice «già fatto»
+    await (await e.memoryCell('storia', 'homun:story')).put({ body: 'nota della vecchia cella unica', source: 'homun:chat/agent_x/1', confidence: 'stated', tags: ['entry/1'] })
+    setSetting('memory.storyBackfilledAt', 123)
+    const { dropLegacyStoryCell } = await import('../history-store')
+    expect(await dropLegacyStoryCell()).toBe(true)
+    const engine = await e.memoryEngine()
+    expect(await engine.cells()).not.toContain('storia')
+    expect(getSetting<number | null>('memory.storyBackfilledAt', null)).toBeNull()
+    // senza la vecchia cella: no-op (false), il marcatore non si tocca
+    setSetting('memory.storyBackfilledAt', 456)
+    expect(await dropLegacyStoryCell()).toBe(false)
+    expect(getSetting<number | null>('memory.storyBackfilledAt', null)).toBe(456)
     await e.closeMemoryEngine()
   })
 })

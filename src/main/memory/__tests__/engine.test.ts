@@ -173,3 +173,54 @@ describe('fase memoria-engramma M8: dove si cerca il modulo nell\'app impacchett
     }
   })
 })
+
+describe('fase memoria-engramma · correzioni C2: oblio per cella e nomi sicuri', () => {
+  it('dropCellAndEvict: dopo il drop un cell(name) nuovo è una CELLA NUOVA scrivibile, non quella in cache', async () => {
+    const e = await eng()
+    await e.openMemoryEngine({ dataDir: join(ROOT, 'c2a') })
+    const engine = await e.memoryEngine()
+    const c1 = await e.botCell('agent_drop')
+    await c1.put({ body: 'nota del bot eliminato', source: 's', confidence: 'stated' })
+    const r = await e.dropCellAndEvict('bot-agent_drop', 'bot deleted')
+    expect(r.alreadyGone).toBe(false)
+    expect(r.notes).toBe(1)
+    expect(r.scrubbed).toBe(true)
+    expect(await engine.cells()).not.toContain('bot-agent_drop')
+    // la cache è sgomberata: la STESSA chiamata torna una cella nuova (quella
+    // in cache risponderebbe NOT_FOUND per sempre, coi file già cancellati)
+    const c2 = await e.botCell('agent_drop')
+    expect(c2).not.toBe(c1)
+    await c2.put({ body: 'nuova vita della cella', source: 's', confidence: 'stated' })
+    expect(await c2.list({ limit: 10 })).toHaveLength(1)
+    await e.closeMemoryEngine()
+  })
+
+  it('NOT_FOUND vale «già dimenticata»: nessuna eccezione, e la cache si sgombra uguale', async () => {
+    const e = await eng()
+    await e.openMemoryEngine({ dataDir: join(ROOT, 'c2b') })
+    // una cella che non esiste: il drop risponde NOT_FOUND → già dimenticata
+    const r = await e.dropCellAndEvict('mai-esistita', 'test')
+    expect(r.alreadyGone).toBe(true)
+    // anche quando in cache c\'è una Cell su quel nome (droppata prima):
+    // la si toglie comunque, altrimenti resta viva su file cancellati
+    const c1 = await e.memoryCell('droppata-due-volte', 'homun:x')
+    await c1.put({ body: 'x', source: 's', confidence: 'stated' })
+    expect((await e.dropCellAndEvict('droppata-due-volte', 'test')).alreadyGone).toBe(false)
+    expect((await e.dropCellAndEvict('droppata-due-volte', 'test')).alreadyGone).toBe(true)
+    const c2 = await e.memoryCell('droppata-due-volte', 'homun:x')
+    expect(c2).not.toBe(c1)
+    await e.closeMemoryEngine()
+  })
+
+  it('storyCellName: stessa sanificazione di botCellName; MAI «-snap-» nel nome', async () => {
+    const { botCellName, storyCellName } = await eng()
+    expect(storyCellName('agent_s1')).toBe('storia-agent_s1')
+    expect(storyCellName('agent_AB.CD')).toBe('storia-agent_ab-cd')
+    expect(storyCellName('a'.repeat(100))).toHaveLength(7 + 64)
+    // dropCell('x') nella v0.4.2 cancella anche le x-snap-… (difetto aperto):
+    // un nome che le contenga si RIFIUTA, non si costruisce
+    expect(() => botCellName('x-snap-y')).toThrow(/-snap-/)
+    expect(() => storyCellName('x-snap-y')).toThrow(/-snap-/)
+    expect(() => storyCellName('agent_snap')).not.toThrow() // «-snap-» col trattino, non «snap»
+  })
+})

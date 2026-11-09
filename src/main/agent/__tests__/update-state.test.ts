@@ -327,7 +327,7 @@ describe('fase 5 — residui (M1, M3, 0d) con store reale', () => {
     expect(await (await userCell(AGENT)).get(shared.id)).not.toBeNull()
   })
 
-  it('0d: agents:delete rimuove la directory agents/<id>/ e PURGA la cella del motore', async () => {
+  it('0d: agents:delete rimuove la directory agents/<id>/ e DROPPA la cella del motore', async () => {
     const a = createAgent('Eliminami')
     await writeMemoryNote(a.id, { content: 'ricordo', tier: 'core', source: 'test', userTurn: true })
     writeSkillFromBot(a.id, { name: 'prova', description: 'd', content: 'istruzioni' })
@@ -341,10 +341,14 @@ describe('fase 5 — residui (M1, M3, 0d) con store reale', () => {
     mkdirSync(join(dir, 'memory'), { recursive: true })
     expect(existsSync(dir)).toBe(true)
     deleteAgent(a.id)
-    // fase memoria-engramma: la cella del bot si PURGA (oblio vero)
-    const { purgeBotCell, listActiveMemoryRecords } = await import('../../memory/memory-store')
-    expect(await purgeBotCell(a.id)).toBe(1)
-    expect((await listActiveMemoryRecords(a.id)).filter((m) => m.scope === 'agent')).toEqual([])
+    // fase memoria-engramma · correzioni C2: l'oblio è PER CELLA —
+    // dropCellAndEvict su bot-<id> (e storia-<id>): la cella SPARISCE
+    const { dropCellAndEvict, botCellName, storyCellName, memoryEngine } = await import('../../memory/engine')
+    const r = await dropCellAndEvict(botCellName(a.id), 'bot deleted')
+    expect(r.notes).toBe(1)
+    await dropCellAndEvict(storyCellName(a.id), 'bot deleted')
+    const engine = await memoryEngine()
+    expect(await engine.cells()).toEqual(expect.not.arrayContaining([botCellName(a.id), storyCellName(a.id)]))
     expect(getAgent(a.id)).toBeNull()
     expect(existsSync(dir)).toBe(false)
     // id inesistente: no-op senza errori

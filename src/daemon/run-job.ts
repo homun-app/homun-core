@@ -167,15 +167,28 @@ export function makeJobRunner(db: DatabaseSync, runTurnFn: RunTurnFn = runTurn) 
       }
       return
     }
-    // fase memoria-engramma (M5): il bot eliminato si dimentica DAVVERO —
-    // la sua cella di memorie e le sue note nella storia si purgano (la purga
-    // è lenta: sta in coda, mai nella RPC che elimina il bot)
+    // fase memoria-engramma (M5) · correzioni (C2): il bot eliminato si
+    // dimentica DAVVERO — DUE dropCell (bot-<id> e storia-<id>, lapidi
+    // comprese), non una purga per nota che si fermava a 1000 e lasciava le
+    // lapidi. NOT_FOUND vale «già dimenticata»: il job finisce bene. Nel log
+    // solo i NUMERI del DropView, mai contenuti.
     if (job.kind === 'memory-forget-agent') {
-      const { purgeBotCell } = await import('../main/memory/memory-store')
-      const { purgeStoryOf } = await import('../main/memory/history-store')
-      const notes = await purgeBotCell(job.agent_id, 'bot deleted')
-      const story = await purgeStoryOf(job.agent_id)
-      console.log(`[sandbotd] bot ${job.agent_id} dimenticato: ${notes} memorie e ${story.forgotten} note di storia purgate`)
+      const { dropCellAndEvict, botCellName, storyCellName } = await import('../main/memory/engine')
+      const reason = `bot ${job.agent_id} deleted`
+      let notes = 0
+      let forgotten = 0
+      for (const name of [botCellName(job.agent_id), storyCellName(job.agent_id)]) {
+        const r = await dropCellAndEvict(name, reason)
+        if (r.alreadyGone) {
+          forgotten++
+          continue
+        }
+        notes += r.notes
+        // scrubbed false può venire solo dalle viste vault (Homun non le
+        // usa): avviso col pending, il job NON si ripete
+        if (!r.scrubbed) console.warn(`[sandbotd] oblio della cella ${name}: byte ancora pendenti (${r.pending.join(', ') || 'unknown'})`)
+      }
+      console.log(`[sandbotd] bot ${job.agent_id} dimenticato: ${notes} note, ${forgotten}/2 celle già dimenticate`)
       return
     }
     // fase memoria-engramma (M5): le conversazioni esistenti si indicizzano

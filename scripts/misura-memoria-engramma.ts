@@ -62,10 +62,11 @@ const migMs = Date.now() - t0
 const t1 = Date.now()
 const story = await backfillStory(agents.map((a) => a.id))
 const storyMs = Date.now() - t1
-// una ricerca come quella del bot, su una cella grande
+// una ricerca come quella del bot (correzioni C2: la storia per bot, il
+// default è il bot che parla)
 const engine = await memoryEngine()
 const tq = Date.now()
-const hits = await engine.search(['storia'], { text: 'treno per Milano martedì', k: 10, mode: 'text', graphHops: 1 })
+const hits = await engine.search([`storia-${agents[0]!.id}`], { text: 'treno per Milano martedì', k: 10, mode: 'text', graphHops: 1 })
 const searchMs = Date.now() - tq
 await closeMemoryEngine()
 console.log(JSON.stringify({
