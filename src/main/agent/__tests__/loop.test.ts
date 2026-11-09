@@ -1539,6 +1539,37 @@ describe('fase 4: memoria e skill nel system prompt', () => {
     expect(system).toContain("l'utente vuole puntualità")
   })
 
+  it('M4: le memorie LOG pertinenti stanno NEL TURNO ([Relevant memories]), il system resta senza e non cambia', async () => {
+    await seedMemory(AGENT, 'per il colazione del sabato comprare i cornetti dal fornaio di via Roma', 'log')
+    h.llm.queue = [
+      { toolCalls: [{ id: 's1', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] },
+      { text: 'fine' }
+    ]
+    await runTurn(AGENT, 'che facciamo per la colazione di sabato?', emit)
+    const firstCall = h.llm.calls[0]!
+    const system = firstCall[0]!.content
+    // il system NON porta le log (solo core): la sua cache non si rompe.
+    // (il system NOMINA il blocco nell'istruzione della sezione Memory: il
+    // blocco VERO sta nel turno)
+    expect(system).not.toContain('cornetti')
+    expect(system).not.toContain('Facts and rules learned')
+    // il blocco sta in CODA all'ultimo messaggio utente, nel turno
+    const lastUser = [...firstCall].reverse().find((m) => m!.role === 'user')!
+    expect(lastUser!.content).toContain('[Relevant memories]')
+    expect(lastUser!.content).toContain('cornetti')
+    expect(lastUser!.content).toMatch(/colazione di sabato\?[\s\S]*\[Relevant memories\]/)
+    // una log NUOVA non cambia il system del turno dopo
+    await seedMemory(AGENT, 'altra regola: il latte senza lattosio', 'log')
+    h.llm.queue = [{ text: 'ok' }]
+    await runTurn(AGENT, 'altro argomento', emit)
+    expect(h.llm.calls.at(-1)![0]!.content).toBe(system)
+    // un messaggio non pertinente non porta nessun blocco
+    h.llm.queue = [{ text: 'ok' }]
+    await runTurn(AGENT, 'Dammi il titolo di un film giallo', emit)
+    const plain = [...h.llm.calls.at(-1)!].reverse().find((m) => m!.role === 'user')!
+    expect(plain!.content).not.toContain('[Relevant memories]')
+  })
+
   it('nel system solo nome e descrizione delle skill; il corpo arriva col tool skill()', async () => {
     const { writeSkillFromBot } = await import('../skills')
     writeSkillFromBot(AGENT, { name: 'triage', description: 'smista la posta', content: 'CORPO SEGRETO della skill' })

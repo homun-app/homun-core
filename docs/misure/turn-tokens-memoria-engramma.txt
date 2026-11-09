@@ -1,0 +1,44 @@
+# fase memoria-engramma (M4) — turno base PRIMA e DOPO
+# fonte: scripts/turn-tokens.ts (stessa procedura della fase token); la sezione
+# Memory NON entra in questa misura (sezione dinamica) ma il system con le memorie
+# DIVENTA più piccolo: le log (fino a 2000 token) non ci stanno più, arrivano nel
+# turno solo se pertinenti (≤600 token, k 5). Il blocco [Relevant memories] sta
+# NEL TURNO: il turno base non cambia.
+
+## PRIMA (base fase-memoria-engramma @ 30e6af06 + M0-M3, prima del blocco)
+
+## bot normale senza browser
+prompt: 1968
+tools del turno: 2061 (13 tool)
+totale prompt+tools: 4029
+per tool:
+  message_user: 129
+  ask_user: 306
+  run-command: 177
+  read-file: 94
+  write-file: 74
+  list-directory: 59
+  web_search: 100
+  web_fetch: 112
+  memory: 211
+  document: 273
+
+## DOPO (M4 applicato)
+
+## bot normale senza browser
+prompt: 1968
+tools del turno: 2061 (13 tool)
+totale prompt+tools: 4029
+per tool:
+  message_user: 129
+  ask_user: 306
+  run-command: 177
+  read-file: 94
+  write-file: 74
+  list-directory: 59
+  web_search: 100
+  web_fetch: 112
+  memory: 211
+  document: 273
+
+diff: NESSUNO (byte identici) — prompt 1968, tools 2061, totale 4029 ≤ 4618

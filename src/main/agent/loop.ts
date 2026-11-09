@@ -1728,6 +1728,34 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       }
     }
 
+    // fase memoria-engramma (M4): le memorie PERTINENTI al messaggio stanno
+    // NEL TURNO, accodate all'ultimo messaggio utente (dopo l'eventuale
+    // espansione della skill) — il system prompt resta uguale e la sua cache
+    // non si rompe. Le core sono già nel system: qui arrivono le log attinent
+    // (k 5, ≤600 token, sopra la soglia di support); la quarantena non esce.
+    // Nel transcript non cambia nulla: il testo resta quello dell'utente.
+    {
+      const openingForSearch = opts.resume
+        ? String(scopedEntries().find((e) => e.id === opts.resume!.entryId)?.content ?? '')
+        : userText
+      if (openingForSearch.trim() && opts.groupTurn === undefined && opts.subagent === undefined) {
+        try {
+          const { relevantMemoriesBlock } = await import('../memory/memory-store')
+          const block = await relevantMemoriesBlock(agentId, openingForSearch)
+          if (block) {
+            for (let i = messages.length - 1; i >= 0; i--) {
+              if (messages[i]!.role === 'user') {
+                messages[i] = { ...messages[i]!, content: messages[i]!.content + '\n\n' + block }
+                break
+              }
+            }
+          }
+        } catch {
+          // la memoria non deve mai rompere il turno
+        }
+      }
+    }
+
     let allTools: import('./llm').ToolDef[] = assembledTools
     // gli MCP offerti in QUESTO turno (inline, o attivati in conversazione):
     // derivati dall'elenco — servono ai sendCandidates qui sotto

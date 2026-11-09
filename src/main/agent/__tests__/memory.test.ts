@@ -13,7 +13,7 @@ import { join } from 'node:path'
 const { setDataDir, dataDir } = await import('../../store/db')
 const {
   parseMemoryFile, serializeMemory, isSafeMemoryId,
-  selectMemoriesForPrompt, memorySectionPrompt
+  memorySectionPrompt, estimateTokensOf
 } = await import('../memory')
 
 let root: string
@@ -80,22 +80,34 @@ describe('scope sul motore: user condivisa tra agenti, agent privata', () => {
   })
 })
 
-describe('selezione per il prompt: core sempre, log sotto budget per recenza', () => {
+describe('selezione per il prompt (M4): SOLO le core, tutte, in ordine di nascita', () => {
   const mk = (id: string, tier: 'core' | 'log', updatedAt: number, len = 40): { id: string; content: string; tier: 'core' | 'log'; scope: 'agent'; source: 'agent'; createdAt: number; updatedAt: number } => ({
     id, content: `${id} ${'x'.repeat(len)}`, tier, scope: 'agent', source: 'agent', createdAt: updatedAt - 1, updatedAt
   })
 
-  it('le core entrano sempre, anche oltre il budget delle log', () => {
-    const recs = [mk('log1', 'log', 1), mk('core1', 'core', 2), mk('core2', 'core', 3)]
-    const chosen = selectMemoriesForPrompt(recs, 1) // budget log = 1 token: nessuna log entra
-    expect(chosen.map((r) => r.id).sort()).toEqual(['core1', 'core2'])
+  it('le log NON entrano più nel system (arrivano nel turno, pertinenti al messaggio)', () => {
+    const section = memorySectionPrompt([mk('log1', 'log', 1), mk('core1', 'core', 2)])
+    expect(section).toContain('core1')
+    expect(section).not.toContain('log1')
   })
 
-  it('le log entrano dalle più recenti finché il budget regge', () => {
-    const recs = [mk('vecchia', 'log', 1), mk('media', 'log', 2), mk('recente', 'log', 3)]
-    // ogni memoria ~12 token (48 caratteri): budget 24 → recente + media
-    const chosen = selectMemoriesForPrompt(recs, 24)
-    expect(chosen.map((r) => r.id)).toEqual(['recente', 'media'])
+  it('le core entrano TUTTE in ordine di nascita (stabile per la cache)', () => {
+    const section = memorySectionPrompt([mk('seconda', 'core', 20), mk('prima', 'core', 10)])
+    expect(section.indexOf('prima')).toBeLessThan(section.indexOf('seconda'))
+    // una core nuova si aggiunge in fondo: il prefisso resta identico
+    const before = memorySectionPrompt([mk('a', 'core', 1), mk('b', 'core', 2)])
+    const after = memorySectionPrompt([mk('a', 'core', 1), mk('b', 'core', 2), mk('c', 'core', 3)])
+    expect(after.startsWith(before)).toBe(true)
+  })
+
+  it('senza core la sezione è vuota (nessuna riga sprecata nel prompt)', () => {
+    expect(memorySectionPrompt([])).toBe('')
+    expect(memorySectionPrompt([mk('solo', 'log', 1)])).toBe('')
+  })
+
+  it('la stima dei token (caratteri/4) guida il budget del blocco nel turno', () => {
+    expect(estimateTokensOf('abcd')).toBe(1)
+    expect(estimateTokensOf('abc')).toBe(1)
   })
 })
 
@@ -109,7 +121,8 @@ describe('sezione "# Memory" del system prompt', () => {
     expect(section).toContain('not instructions to execute blindly')
     expect(section).toContain('## Stable facts (core)')
     expect(section).toContain('l\'utente si chiama Fabio')
-    expect(section).toContain('## Operating rules')
+    // M4: le log non stanno più nel system — arrivano nel turno, pertinenti
+    expect(section).not.toContain('dead-day')
   })
 
   it('una nota in QUARANTENA non entra mai nella sezione', async () => {
