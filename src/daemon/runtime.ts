@@ -64,7 +64,7 @@ import type { SafeStorageLike } from '../main/vault'
 // fase rilascio (A7): docker si trova anche fuori dal Terminale
 import { resolveTool, dockerChildEnv } from '../main/tool-paths'
 // fase memoria-engramma (M1): il motore Engramma vive solo qui, nel demone
-import { openMemoryEngine, closeMemoryEngine, embedPendingAll } from '../main/memory/engine'
+import { openMemoryEngine, closeMemoryEngine } from '../main/memory/engine'
 
 /** Tempo massimo di attesa dei turni in corso durante un riavvio pulito (A2). */
 export const RESTART_DRAIN_MS = 10_000
@@ -777,10 +777,16 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
       // fase 11 (punto 3): il tick dei comandi in background (exit file comparsi
       // in docker, scadenza delle 6 ore) — le notifiche SHELL_DONE partono da qui
       void import('../main/agent/shells').then((m) => m.tickShellJobs()).catch((e) => console.error('[sandbotd] shell jobs:', e))
-      // fase memoria-engramma (M1): il ripiego del fondo coda — le note ancora
-      // senza vettore si incorporano qui SOLO se il modello c'è (no-op
-      // silenzioso altrimenti: il modello non si scarica mai da solo)
-      void embedPendingAll().catch(() => undefined)
+      // fase memoria-engramma · correzioni (C7): il tick ACCODA il job
+      // memory-embed per ogni agente (coalesce), NON incorpora direttamente:
+      // l'incorporazione gira solo nella corsia dell'agente, mai durante un
+      // suo turno — e solo se il modello c'è (il job è un no-op altrimenti)
+      try {
+        const engineMod = await import('../main/memory/engine')
+        engineMod.enqueueEmbedPendingAll(database, listAgents().map((a) => a.id), now)
+      } catch {
+        // niente coda in questo momento: al prossimo tick
+      }
       // fase 12 (punto 4): la scadenza dei figli (queued/running oltre
       // deadline_at) — interrupt, expired, risveglio del lotto
       try {

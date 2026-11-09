@@ -520,12 +520,14 @@ export async function ensureSearchCells(agentId: string): Promise<void> {
 }
 
 /**
- * embedPending su tutte le celle, SOLO se il modello c'è (altrimenti è un
- * no-op silenzioso: il modello non si scarica mai da solo). Gira in fondo
- * alla coda del demone, mai dentro un turno. Ritorna quante note ha
- * incorporato; gli errori CLOSED/MODEL_MISSING diventano silenzio.
+ * Correzioni C7: l'incorporazione gira SOLO nella corsia dell'agente (job
+ * memory-embed), mai nel tick. Questo è ciò che il job fa: le celle DI
+ * QUELL'AGENTE — bot-<id>, storia-<id> e utente — non tutte le celle a ogni
+ * giro. Senza modello è un no-op silenzioso (il modello non si scarica mai
+ * da solo); gli errori CLOSED/MODEL_MISSING diventano silenzio. Ritorna
+ * quante note ha incorporato.
  */
-export async function embedPendingAll(limit = 64): Promise<number> {
+export async function embedCellsOfAgent(agentId: string, limit = 512): Promise<number> {
   let engine: EngrammaEngine
   try {
     engine = await memoryEngine()
@@ -534,9 +536,11 @@ export async function embedPendingAll(limit = 64): Promise<number> {
   }
   try {
     if (!(await engine.modelStatus()).present) return 0
+    const existing = new Set(await engine.cells())
     let done = 0
-    for (const name of await engine.cells()) {
-      const cell = await engine.cell(name)
+    for (const name of [botCellName(agentId), storyCellName(agentId), USER_CELL]) {
+      if (!existing.has(name)) continue
+      const cell = await memoryCell(name, 'homun')
       done += await cell.embedPending(limit)
     }
     return done
@@ -544,6 +548,16 @@ export async function embedPendingAll(limit = 64): Promise<number> {
     // CLOSED a metà, o il modello sparito: si riprova al prossimo giro
     return 0
   }
+}
+
+/**
+ * Il tick dei 30 s (correzioni C7): ACCODA il job memory-embed per ogni
+ * agente — col coalesce di enqueueEmbedPending, un solo job per agente — e
+ * NON incorpora direttamente (il tick gira fuori dalle corsie: anche DURANTE
+ * i turni, contro il «mai durante un turno» del REPORT).
+ */
+export function enqueueEmbedPendingAll(db: DatabaseSync, agentIds: string[], now = Date.now()): void {
+  for (const id of agentIds) enqueueEmbedPending(db, id, now)
 }
 
 // ---- embedPending in fondo alla coda del demone ----

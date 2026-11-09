@@ -146,12 +146,13 @@ export function makeJobRunner(db: DatabaseSync, runTurnFn: RunTurnFn = runTurn) 
       )
       return
     }
-    // fase memoria-engramma (M1): embedPending in fondo alla coda — il job
-    // gira nella corsia dell'agente che ha scritto (mai durante un suo turno)
-    // e incorpora le note ancora senza vettore SOLO se il modello c'è
+    // fase memoria-engramma (M1) · correzioni (C7): embedPending in fondo
+    // alla coda — il job gira nella corsia dell'agente che ha scritto (mai
+    // durante un suo turno) e incorpora le celle DI QUELL'AGENTE
+    // (bot-<id>, storia-<id> e utente), non tutte a ogni giro
     if (job.kind === 'memory-embed') {
-      const { embedPendingAll } = await import('../main/memory/engine')
-      await embedPendingAll()
+      const { embedCellsOfAgent } = await import('../main/memory/engine')
+      await embedCellsOfAgent(job.agent_id)
       return
     }
     // fase memoria-engramma (M5): un messaggio della conversazione entra

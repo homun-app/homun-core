@@ -150,10 +150,10 @@ describe('fase memoria-engramma M1: embedPending in fondo alla coda', () => {
     const e = await eng()
     await e.openMemoryEngine({ dataDir: join(ROOT, 'd6') })
     await (await e.botCell('agent_e')).put({ body: 'da incorporare', source: 's', confidence: 'stated' })
-    expect(await e.embedPendingAll()).toBe(0)
+    expect(await e.embedCellsOfAgent('agent_e')).toBe(0)
     await e.closeMemoryEngine()
     // anche a motore chiuso: silenzio, nessun errore
-    expect(await e.embedPendingAll()).toBe(0)
+    expect(await e.embedCellsOfAgent('agent_e')).toBe(0)
   })
 })
 
