@@ -580,6 +580,16 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
   )
   pokeWorker = () => worker.poke()
 
+  // fase memoria-engramma · correzioni (C1): i job della storia fatti o
+  // falliti dalle versioni precedenti portano il testo del messaggio nel
+  // payload — si svuota UNA volta (i job nuovi portano solo l'id dell'entry)
+  if (!getSetting<boolean>('memory.storyJobsCleared', false)) {
+    const { clearStoryJobPayloads } = await import('../main/store/jobs')
+    const cleared = clearStoryJobPayloads(database)
+    setSetting('memory.storyJobsCleared', true)
+    if (cleared > 0) console.log(`[sandbotd] ${cleared} job della storia ripuliti del testo nel payload`)
+  }
+
   // fase memoria-engramma (M5): il loop consegna i messaggi della
   // conversazione alla coda della storia (job memory-index-story, nella
   // corsia dell'agente: partono DOPO il turno, mai dentro)

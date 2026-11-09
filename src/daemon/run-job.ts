@@ -155,11 +155,16 @@ export function makeJobRunner(db: DatabaseSync, runTurnFn: RunTurnFn = runTurn) 
       return
     }
     // fase memoria-engramma (M5): un messaggio della conversazione entra
-    // nella cella storia — in coda, nella corsia dell'agente (dopo il turno)
+    // nella cella storia — in coda, nella corsia dell'agente (dopo il turno).
+    // Correzioni C1: il payload è SOLO { entryId }; testo, kind e tainted
+    // (meta.contaminated) li legge il job dal DB. Un entry sparito non
+    // indicizza nulla e il job finisce bene.
     if (job.kind === 'memory-index-story') {
-      const p = job.payload as { entryId: number; kind: 'user' | 'assistant'; text: string; createdAt: number; tainted?: boolean }
-      const { indexStoryNote } = await import('../main/memory/history-store')
-      await indexStoryNote(job.agent_id, p.entryId, p.kind, p.text, p.createdAt, p.tainted ? { tainted: true } : {})
+      const p = job.payload as { entryId?: number }
+      if (typeof p.entryId === 'number') {
+        const { runStoryIndexJob } = await import('../main/memory/history-store')
+        await runStoryIndexJob(job.agent_id, p.entryId)
+      }
       return
     }
     // fase memoria-engramma (M5): il bot eliminato si dimentica DAVVERO —

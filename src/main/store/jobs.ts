@@ -222,6 +222,19 @@ export function cancelAgentJobs(db: DatabaseSync, agentId: string): void {
 }
 
 /**
+ * Correzioni C1: i job memory-index-story GIÀ fatti o falliti dalle versioni
+ * precedenti portano il testo del messaggio nel payload — l'utente non lo
+ * vede e non può cancellarlo. La migrazione lo svuota (una volta: i job nuovi
+ * portano solo l'id dell'entry). Ritorna quante righe ha ripulito.
+ */
+export function clearStoryJobPayloads(db: DatabaseSync): number {
+  const r = db.prepare(
+    "UPDATE jobs SET payload_json = '{}' WHERE kind = 'memory-index-story' AND status IN ('done','failed') AND payload_json != '{}'"
+  ).run()
+  return Number(r.changes)
+}
+
+/**
  * Fase 8 (§3bis L7): annulla i job di un task interrotto dall'utente (il
  * task-run in coda non deve partire; quello in volo lo ferma interruptTask).
  */

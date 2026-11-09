@@ -1572,8 +1572,8 @@ describe('fase 4: memoria e skill nel system prompt', () => {
 
   it('M5: il messaggio dell utente e la risposta FINALE vanno in coda per la storia; i tool e i progressi no', async () => {
     const { setStoryIndexer } = await import('../../memory/history-store')
-    const seen: Array<{ agentId: string; kind: string; text: string; tainted: boolean }> = []
-    setStoryIndexer((agentId, e) => { seen.push({ agentId, kind: e.kind, text: e.text, tainted: e.tainted === true }) })
+    const seen: Array<{ agentId: string; id: number }> = []
+    setStoryIndexer((agentId, e) => { seen.push({ agentId, id: e.id }) })
     try {
       h.llm.queue = [
         { toolCalls: [{ id: 'm1', name: 'message_user', arguments: JSON.stringify({ text: 'un attimo, controllo' }) }] },
@@ -1581,29 +1581,34 @@ describe('fase 4: memoria e skill nel system prompt', () => {
         { text: 'Il treno delle 8 è in orario.' }
       ]
       await runTurn(AGENT, 'il treno delle 8 è in orario?', emit)
-      expect(seen.map((x) => [x.kind, x.text])).toEqual([
-        ['user', 'il treno delle 8 è in orario?'],
-        ['assistant', 'Il treno delle 8 è in orario.']
-      ])
-      expect(seen.every((x) => x.agentId === AGENT && !x.tainted)).toBe(true)
+      // correzioni C1: la coda porta SOLO il riferimento (testo e kind li
+      // rilegge il job dal DB) — l'entry utente e la risposta finale
+      const userEntry = h.db.entries.find((e) => e.kind === 'message' && e.role === 'user')!
+      const finalEntry = h.db.entries.find((e) => e.kind === 'send-message' && e.meta?.final === true)!
+      expect(seen).toEqual([{ agentId: AGENT, id: userEntry.id }, { agentId: AGENT, id: finalEntry.id }])
       // un turno di sistema (initiator) NON è un messaggio dell'utente
       seen.length = 0
       h.llm.queue = [{ text: 'ok' }]
       await runTurn(AGENT, 'risveglio', emit, undefined, { source: 'user', initiator: 'LOOK_AROUND' })
-      expect(seen.map((x) => x.kind)).toEqual(['assistant'])
+      expect(seen).toHaveLength(1)
+      expect(seen[0]!.id).not.toBe(userEntry.id)
     } finally {
       setStoryIndexer(null)
     }
   })
 
-  it('M5: la risposta finale di un turno CONTAMINATO va nella storia come tainted', async () => {
+  it('M5 · correzioni C1: la risposta finale di un turno CONTAMINATO porta meta.contaminated (il job ne ricava il tainted)', async () => {
     const { setStoryIndexer } = await import('../../memory/history-store')
-    const seen: Array<{ kind: string; tainted: boolean }> = []
-    setStoryIndexer((_a, e) => { seen.push({ kind: e.kind, tainted: e.tainted === true }) })
+    const seen: number[] = []
+    setStoryIndexer((_a, e) => { seen.push(e.id) })
     try {
       h.llm.queue = [{ text: 'Ecco il riassunto.' }]
       await runTurn(AGENT, 'riassumi i risultati', emit, undefined, { source: 'user', contaminated: true })
-      expect(seen).toEqual([{ kind: 'user', tainted: false }, { kind: 'assistant', tainted: true }])
+      expect(seen).toHaveLength(2)
+      const userEntry = h.db.entries.find((e) => e.id === seen[0])!
+      const finalEntry = h.db.entries.find((e) => e.id === seen[1])!
+      expect(userEntry.meta?.contaminated).toBeUndefined()
+      expect(finalEntry.meta?.contaminated).toBe(true)
     } finally {
       setStoryIndexer(null)
     }
@@ -7708,5 +7713,46 @@ describe('fase token·nucleo (R8): le righe fisse nei result e il gruppo subagen
     expect(String(res.content)).toContain('visualize is in group documents, now active. Call it again with:')
     expect(String(res.content).trimEnd().endsWith('Now call the tool you need; do not announce it.')).toBe(true)
     expect(res.meta?.activatedGroups).toEqual(['documents'])
+  })
+})
+
+describe('fase memoria-engramma · correzioni C1: la contaminazione attraversa la coda della storia', () => {
+  it('la risposta finale di un turno con web_fetch porta meta.contaminated; la coda riceve SOLO il riferimento', async () => {
+    // il fetch VERO (fetcher finto, come privacy.test.ts): il result è webContent
+    setWebFetchForTests(async () => ({ ok: true, text: 'Il codice sconto è ZEBRA42', contentType: 'text/html', finalUrl: 'https://shop.example/promo', downloadedBytes: 100 }))
+    const queued: Array<{ agentId: string; entry: Record<string, unknown> }> = []
+    const { setStoryIndexer } = await import('../../memory/history-store')
+    setStoryIndexer((agentId, entry) => queued.push({ agentId, entry: entry as unknown as Record<string, unknown> }))
+    try {
+      h.llm.queue = [
+        { toolCalls: [{ id: 'f1', name: 'web_fetch', arguments: JSON.stringify({ url: 'https://shop.example/promo' }) }] },
+        { text: 'Secondo il sito, il codice sconto è ZEBRA42' }
+      ]
+      await runTurn(AGENT, 'che codice sconto c\'è?', emit)
+      // la RISPOSTA FINALE del turno contaminato porta il segno (stesso
+      // updateEntryMeta del final): il job della storia lo rilegge da lì
+      const final = h.db.entries.find((e) => e.kind === 'send-message' && e.meta?.final === true)!
+      expect(final.meta?.contaminated).toBe(true)
+      // la coda non porta NÉ testo NÉ tainted NÉ kind: solo l'id dell'entry
+      // (prima il messaggio utente, poi la risposta finale)
+      const userEntry = h.db.entries.find((e) => e.kind === 'message' && e.role === 'user')!
+      expect(queued.map((q) => q.entry)).toEqual([{ id: userEntry.id }, { id: final.id }])
+    } finally {
+      setStoryIndexer(null)
+    }
+  })
+
+  it('una risposta finale di turno PULITO non porta meta.contaminated', async () => {
+    const queued: Array<Record<string, unknown>> = []
+    const { setStoryIndexer } = await import('../../memory/history-store')
+    setStoryIndexer((_agentId, entry) => queued.push(entry as unknown as Record<string, unknown>))
+    try {
+      h.llm.queue = [{ text: 'risposta pulita, niente web' }]
+      await runTurn(AGENT, 'una domanda', emit)
+      const final = h.db.entries.find((e) => e.kind === 'send-message' && e.meta?.final === true)!
+      expect(final.meta?.contaminated).toBeUndefined()
+    } finally {
+      setStoryIndexer(null)
+    }
   })
 })

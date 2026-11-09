@@ -125,14 +125,14 @@ export async function backfillStory(
 
 // ---- la coda: il demone inietta chi accoda (job memory-index-story) ----
 
-/** Un messaggio della conversazione da indicizzare. */
+/**
+ * Un messaggio della conversazione da indicizzare: SOLO il riferimento
+ * (correzioni C1). Testo e kind li rilegge il job dall'entry del DB, la
+ * provenienza (tainted) da meta.contaminated che il loop scrive sulla
+ * risposta finale di un turno contaminato.
+ */
 export interface StoryEntry {
   id: number
-  kind: 'user' | 'assistant'
-  text: string
-  createdAt: number
-  /** risposta nata in un turno contaminato: dato esterno quando torna */
-  tainted?: boolean
 }
 
 type StoryIndexer = (agentId: string, entry: StoryEntry) => void
@@ -154,6 +154,24 @@ export function queueStoryIndex(agentId: string, entry: StoryEntry): void {
   } catch {
     // la storia non deve mai rompere il turno
   }
+}
+
+/**
+ * Ciò che gira nel job memory-index-story (correzioni C1): rilegge l'entry
+ * dal DB — il riferimento, non i dati — e indicizza testo e kind con
+ * isConversationEntry; tainted arriva da meta.contaminated. L'entry sparito
+ * (conversazione o bot eliminati nel frattempo) non indicizza nulla: non è
+ * un errore, il job finisce bene.
+ */
+export async function runStoryIndexJob(agentId: string, entryId: number): Promise<'indexed' | 'gone'> {
+  const entry = getEntries(agentId).find((e) => e.id === entryId)
+  if (!entry) return 'gone'
+  const kind = isConversationEntry(entry)
+  if (!kind) return 'gone'
+  await indexStoryNote(agentId, entryId, kind, entry.content, entry.createdAt, {
+    tainted: entry.meta?.contaminated === true
+  })
+  return 'indexed'
 }
 
 /** Cerca nelle conversazioni indicizzate (tutti i bot, o solo uno). */

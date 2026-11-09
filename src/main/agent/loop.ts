@@ -1251,6 +1251,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       ...(streamEntry.meta ?? {}),
       message: { type: 'text', text },
       final: true,
+      // correzioni C1: la provenienza sta sull'entry — la risposta finale di
+      // un turno contaminato porta il segno, e il job della storia lo rilegge
+      ...(contaminated ? { contaminated: true } : {}),
       ...(hold ? { held: true } : {})
     })
     const promoted = getEntries(agentId).find((e) => e.id === streamEntry.id)
@@ -1258,10 +1261,11 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     if (hold) holdOutboxEntry(streamEntry.id, agentId, streamEntry.createdAt)
     deliveredTexts.push(text)
     // fase memoria-engramma (M5): la RISPOSTA FINALE va nella storia (in coda
-    // nel demone); nata in un turno contaminato porta il segno tainted e
-    // tornerà come dato esterno. I progressi e i risultati dei tool no
+    // nel demone). Correzioni C1: la coda porta solo il riferimento — il
+    // tainted arriva dal meta.contaminated qui sopra, il testo dal DB. I
+    // progressi e i risultati dei tool non entrano mai
     if (replyTurn) {
-      queueStoryIndex(agentId, { id: streamEntry.id, kind: 'assistant', text, createdAt: streamEntry.createdAt, ...(contaminated ? { tainted: true } : {}) })
+      queueStoryIndex(agentId, { id: streamEntry.id })
     }
     return true
   }
@@ -1346,9 +1350,10 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       opts.onTurnEntry?.(entry.id)
       // fase memoria-engramma (M5): il messaggio DELL'UTENTE va nella storia
       // (in coda nel demone, dopo il turno) — non i risvegli di sistema, non
-      // i messaggi di altri bot, non i task, i gruppi o i figli
+      // i messaggi di altri bot, non i task, i gruppi o i figli. Correzioni
+      // C1: solo il riferimento; il testo lo rilegge il job dal DB
       if (privateHumanTurn && opts.taskId === undefined && opts.groupTurn === undefined && opts.subagent === undefined) {
-        queueStoryIndex(agentId, { id: entry.id, kind: 'user', text: userText, createdAt: entry.createdAt })
+        queueStoryIndex(agentId, { id: entry.id })
       }
     }
 

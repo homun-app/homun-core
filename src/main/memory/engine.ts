@@ -476,18 +476,19 @@ export const EMBED_JOB_DELAY_MS = 20_000
 /**
  * Accoda l'indicizzazione di un messaggio nella cella «storia» (M5): ogni
  * messaggio dell'utente e ogni risposta finale del bot, mai dentro il turno.
- * Il payload porta il testo del messaggio: sta nella coda del demone (il DB
- * locale), non nei log.
+ * Correzioni C1: il payload porta SOLO l'id dell'entry — testo, kind e
+ * provenienza (tainted) li legge il job dal DB quando gira, così nessun testo
+ * di conversazione resta in jobs.payload_json.
  */
 export function enqueueStoryIndex(
   db: DatabaseSync,
   agentId: string,
-  entry: { id: number; kind: 'user' | 'assistant'; text: string; createdAt: number },
+  entry: { id: number },
   now = Date.now()
 ): void {
   enqueueJob(db, {
     agentId, kind: 'memory-index-story', now, runAt: now,
-    payload: { entryId: entry.id, kind: entry.kind, text: entry.text, createdAt: entry.createdAt }
+    payload: { entryId: entry.id }
   })
 }
 

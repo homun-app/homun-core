@@ -419,11 +419,20 @@ describe('makeJobRunner: memory-index-story e memory-story-backfill', () => {
     const e = await import('../../main/memory/engine')
     await e.openMemoryEngine({ dataDir: dir })
     try {
-      const job = enqueueJob(db, { agentId: 'a1', kind: 'memory-index-story', payload: { entryId: 9, kind: 'user', text: 'la cena è alle otto', createdAt: 1730000000000 }, runAt: 0, now: 0 })
+      // correzioni C1: il payload è SOLO { entryId }; testo e kind li legge
+      // il job dall'entry del DB (isConversationEntry)
+      const { setDataDir, appendEntry } = await import('../../main/store/db')
+      setDataDir(dir)
+      const entry = appendEntry({ agentId: 'a1', kind: 'message', role: 'user', content: 'la cena è alle otto' })
+      const job = enqueueJob(db, { agentId: 'a1', kind: 'memory-index-story', payload: { entryId: entry.id }, runAt: 0, now: 0 })
       const log: Seen[] = []
       await makeJobRunner(db, fakeTurn(log))(job, emit)
       expect(log).toEqual([])
       const { searchHistory } = await import('../../main/memory/history-store')
+      expect((await searchHistory('cena otto')).length).toBe(1)
+      // un entry SPARITO non indicizza nulla, e il job non è un errore
+      const gone = enqueueJob(db, { agentId: 'a1', kind: 'memory-index-story', payload: { entryId: 999_999 }, runAt: 0, now: 0 })
+      await makeJobRunner(db, fakeTurn(log))(gone, emit)
       expect((await searchHistory('cena otto')).length).toBe(1)
     } finally {
       await e.closeMemoryEngine()
