@@ -127,3 +127,93 @@ describe('fase memoria-engramma M2: la migrazione', () => {
     await closeMemoryEngine()
   })
 })
+
+describe('fase memoria-engramma · correzioni C6: la migrazione non si blocca su un file', () => {
+  it('una cartella con un SOLO file malformato: avviso, copia di sicurezza, nessuna eccezione (prima: ENOENT)', async () => {
+    const { setDataDir } = await import('../../store/db')
+    const dir = join(ROOT, 'solo-rotto')
+    setDataDir(dir)
+    const { openMemoryEngine, closeMemoryEngine } = await import('../engine')
+    await closeMemoryEngine()
+    await openMemoryEngine({ dataDir: dir })
+    const memDir = join(dir, 'agents', 'agent_solo', 'memory')
+    mkdirSync(memDir, { recursive: true })
+    writeFileSync(join(memDir, 'rotto.md'), 'frontmatter assente del tutto')
+    const { migrateLegacyMemories } = await import('../migrate')
+    // PRIMA della correzione: renameSync verso una cartella di backup mai
+    // creata → ENOENT, l'eccezione saliva e la migrazione si ripeteva uguale
+    // a ogni avvio, bloccando anche gli agenti dopo nel ciclo
+    const s = await migrateLegacyMemories(['agent_solo'])
+    expect(s.migrated).toBe(0)
+    expect(s.warnings.some((w) => w.includes('rotto.md'))).toBe(true)
+    expect(existsSync(join(memDir, 'rotto.md'))).toBe(false)
+    expect(existsSync(join(s.backupDir!, 'agents', 'agent_solo', 'memory', 'rotto.md'))).toBe(true)
+    await closeMemoryEngine()
+  })
+
+  it('un put che FALLISCE diventa un avviso col nome del file e il codice (mai il contenuto); gli altri file e il secondo agente migrano', async () => {
+    const { setDataDir } = await import('../../store/db')
+    const dir = join(ROOT, 'put-fallito')
+    setDataDir(dir)
+    const { openMemoryEngine, closeMemoryEngine } = await import('../engine')
+    await closeMemoryEngine()
+    await openMemoryEngine({ dataDir: dir })
+    const x = join(dir, 'agents', 'agent_x', 'memory')
+    const y = join(dir, 'agents', 'agent_y', 'memory')
+    mkdirSync(x, { recursive: true })
+    mkdirSync(y, { recursive: true })
+    // il file che NON passa: primo nell'ordine alfabetico
+    writeFileSync(join(x, 'a-che-spegne.md'), mem('a_fail', 'contenuto segreto che non entra nei log'))
+    writeFileSync(join(x, 'b-buona.md'), mem('b_ok', 'prima nota buona'))
+    writeFileSync(join(x, 'c-buona.md'), mem('c_ok', 'seconda nota buona'))
+    writeFileSync(join(y, 'd-buona.md'), mem('d_ok', 'nota del secondo agente'))
+    // il finto motore: put rifiuta SOLO per a_fail (code IO), il resto passa
+    const { migrateLegacyMemories } = await import('../migrate')
+    const fakeCell = () => ({
+      list: async () => [],
+      put: async (note: { extensions?: Record<string, unknown> }) => {
+        const id = ((note.extensions?.['x-homun'] as { id?: string } | undefined)?.id) ?? ''
+        if (id === 'a_fail') {
+          const err = new Error('simulated engine failure')
+          ;(err as Error & { code: string }).code = 'IO'
+          throw err
+        }
+        return { id: 'fake_' + id } as never
+      }
+    })
+    const s = await migrateLegacyMemories(['agent_x', 'agent_y'], { openCell: () => Promise.resolve(fakeCell() as never) })
+    expect(s.migrated).toBe(3) // b, c e il secondo agente: TUTTI gli altri
+    expect(s.warnings.some((w) => w.includes('a-che-spegne.md') && w.includes('IO'))).toBe(true)
+    expect(s.warnings.every((w) => !w.includes('contenuto segreto'))).toBe(true) // mai il contenuto
+    // il file che non si è potuto migrare RESTA al suo posto: si riprova al prossimo avvio
+    expect(existsSync(join(x, 'a-che-spegne.md'))).toBe(true)
+    expect(existsSync(join(x, 'b-buona.md'))).toBe(false)
+    await closeMemoryEngine()
+  })
+
+  it('l\'id doppio finisce anche lui nella copia di sicurezza: niente avviso a ogni avvio', async () => {
+    const { setDataDir } = await import('../../store/db')
+    const dir = join(ROOT, 'doppio')
+    setDataDir(dir)
+    const { openMemoryEngine, closeMemoryEngine } = await import('../engine')
+    await closeMemoryEngine()
+    await openMemoryEngine({ dataDir: dir })
+    const memDir = join(dir, 'agents', 'agent_dup', 'memory')
+    mkdirSync(memDir, { recursive: true })
+    // ordine alfabetico: due.md migra, uno.md è il DOPPIO che si scarta
+    writeFileSync(join(memDir, 'uno.md'), mem('stesso_id', 'la copia che si scarta'))
+    writeFileSync(join(memDir, 'due.md'), mem('stesso_id', 'la prima che vale'))
+    const { migrateLegacyMemories } = await import('../migrate')
+    const s = await migrateLegacyMemories(['agent_dup'])
+    expect(s.migrated).toBe(1)
+    expect(s.warnings.some((w) => w.includes('uno.md') && w.includes('stesso_id'))).toBe(true)
+    // ENTRAMBI fuori dalla cartella di origine (il doppio in copia di sicurezza)
+    expect(readdirSync(memDir)).toEqual([])
+    expect(existsSync(join(s.backupDir!, 'agents', 'agent_dup', 'memory', 'uno.md'))).toBe(true)
+    // la seconda corsa: nessun avviso (niente più file con l'id doppio)
+    const s2 = await migrateLegacyMemories(['agent_dup'])
+    expect(s2.warnings).toEqual([])
+    expect(s2.migrated).toBe(0)
+    await closeMemoryEngine()
+  })
+})
