@@ -63,6 +63,8 @@ import { daemonHasSealedData } from './sealed-data'
 import type { SafeStorageLike } from '../main/vault'
 // fase rilascio (A7): docker si trova anche fuori dal Terminale
 import { resolveTool, dockerChildEnv } from '../main/tool-paths'
+// fase memoria-engramma (M1): il motore Engramma vive solo qui, nel demone
+import { openMemoryEngine, closeMemoryEngine, embedPendingAll } from '../main/memory/engine'
 
 /** Tempo massimo di attesa dei turni in corso durante un riavvio pulito (A2). */
 export const RESTART_DRAIN_MS = 10_000
@@ -173,6 +175,21 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
       migrateMcpServers()
     } catch (e) {
       console.error('[sandbotd] migrazione server del registro rimandata al prossimo avvio:', e instanceof Error ? e.message : e)
+    }
+  }
+
+  // fase memoria-engramma (M1): il motore della memoria — UNA volta per
+  // processo (il modello occupa ~400 MB), su <dataDir>/memory, con il modello
+  // in <dataDir>/models (mai scaricato da solo). Se il modulo non si carica
+  // il resto di Homun va avanti: gli strumenti di memoria e l'interfaccia
+  // dicono il problema (nessun ripiego silenzioso). Il log porta solo lo
+  // stato, mai contenuti di note.
+  {
+    const st = await openMemoryEngine({ dataDir: dataDir() })
+    if (st.available) {
+      console.log(`[sandbotd] memoria Engramma attiva (motore ${st.version}, ${st.model.present ? 'modello presente' : 'senza modello: ricerca testo+grafo'})`)
+    } else {
+      console.error(`[sandbotd] memoria Engramma NON disponibile: ${st.error}`)
     }
   }
 
@@ -626,7 +643,12 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
     clearInterval(schedulerTimer)
     removeDaemonInfo(dataDir())
     releaseDaemonLock(dataDir())
-    void server.close().finally(() => process.exit(0))
+    // fase memoria-engramma (M1): close aspetta le operazioni in volo; dopo,
+    // ogni chiamata risponde CLOSED e closeMemoryEngine lo rende silenzio
+    // (niente errori nei log allo spegnimento)
+    void closeMemoryEngine()
+      .catch(() => undefined)
+      .finally(() => { void server.close().finally(() => process.exit(0)) })
     // se il close si blocca (socket appesi), si esce comunque
     setTimeout(() => process.exit(0), 3000).unref()
   }
@@ -680,6 +702,10 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
       // fase 11 (punto 3): il tick dei comandi in background (exit file comparsi
       // in docker, scadenza delle 6 ore) — le notifiche SHELL_DONE partono da qui
       void import('../main/agent/shells').then((m) => m.tickShellJobs()).catch((e) => console.error('[sandbotd] shell jobs:', e))
+      // fase memoria-engramma (M1): il ripiego del fondo coda — le note ancora
+      // senza vettore si incorporano qui SOLO se il modello c'è (no-op
+      // silenzioso altrimenti: il modello non si scarica mai da solo)
+      void embedPendingAll().catch(() => undefined)
       // fase 12 (punto 4): la scadenza dei figli (queued/running oltre
       // deadline_at) — interrupt, expired, risveglio del lotto
       try {

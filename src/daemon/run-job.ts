@@ -146,6 +146,14 @@ export function makeJobRunner(db: DatabaseSync, runTurnFn: RunTurnFn = runTurn) 
       )
       return
     }
+    // fase memoria-engramma (M1): embedPending in fondo alla coda — il job
+    // gira nella corsia dell'agente che ha scritto (mai durante un suo turno)
+    // e incorpora le note ancora senza vettore SOLO se il modello c'è
+    if (job.kind === 'memory-embed') {
+      const { embedPendingAll } = await import('../main/memory/engine')
+      await embedPendingAll()
+      return
+    }
     const p = job.payload as { routineId: number; title: string; prompt: string; event?: TriggerEventPayload }
     // fase 16c (C5): la riga di routine_runs si apre quando il job parte e si
     // chiude con l'esito — il feed Attività legge da lì, non dai job

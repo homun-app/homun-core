@@ -4,7 +4,7 @@
 // test girano su un :memory: senza Electron.
 import type { DatabaseSync } from 'node:sqlite'
 
-export type JobKind = 'user-message' | 'routine-run' | 'task-run' | 'group-turn' | 'subagent-run'
+export type JobKind = 'user-message' | 'routine-run' | 'task-run' | 'group-turn' | 'subagent-run' | 'memory-embed'
 export type JobStatus = 'queued' | 'leased' | 'done' | 'failed'
 
 export interface Job {

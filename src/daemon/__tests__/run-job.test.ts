@@ -392,3 +392,17 @@ describe('makeJobRunner: routine-run con modello proprio (fase 18b, H7)', () => 
     expect(log[0]!.opts.route).toEqual({ providerId: 'prov9', model: 'm-tardi' })
   })
 })
+
+// fase memoria-engramma (M1): embedPending in fondo alla coda — il job
+// memory-embed NON apre un turno (niente runTurn) e non cade nel ramo delle
+// routine: incorpora le note pendenti, solo se il modello c'è
+describe('makeJobRunner: memory-embed', () => {
+  it('non chiama runTurn e non apre una riga di routine', async () => {
+    const job = enqueueJob(db, { agentId: 'a1', kind: 'memory-embed', payload: {}, runAt: 0, now: 0 })
+    const log: Seen[] = []
+    await makeJobRunner(db, fakeTurn(log))(job, emit)
+    expect(log).toEqual([])
+    const runs = db.prepare('SELECT COUNT(*) AS n FROM routine_runs').get() as { n: number }
+    expect(runs.n).toBe(0)
+  })
+})

@@ -56,6 +56,15 @@ describe('fase memoria-engramma M0: prepare-engramma', () => {
     for (const f of ENGRAMMA_FILES) expect(readFileSync(join(vendor, f), 'utf8')).toBe(BASE[f])
   })
 
+  it('scrive vendor/engramma/package.json con type commonjs (index.js è CJS sotto un repo "type": "module")', async () => {
+    // senza, Node tratta index.js come ESM e il require('./engramma.darwin-arm64.node')
+    // del caricatore napi-rs si risolve dal chiamante: «Cannot find native binding»
+    const src = makeDir('src', BASE)
+    const vendor = await makeVendor()
+    await prepareEngramma({ srcDir: src, vendorDir: vendor })
+    expect(JSON.parse(readFileSync(join(vendor, 'package.json'), 'utf8'))).toEqual({ type: 'commonjs' })
+  })
+
   it('è idempotente: la seconda volta non riscrive nulla (mtime intatto)', async () => {
     const src = makeDir('src', BASE)
     const vendor = await makeVendor()

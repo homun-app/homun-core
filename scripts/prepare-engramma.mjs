@@ -96,6 +96,14 @@ export async function prepareEngramma({ srcDir, vendorDir, run = defaultRun }) {
     copyFileSync(src, dst)
     copied.push(f)
   }
+  // index.js è CommonJS (caricatore napi-rs) ma il repo di Homun è
+  // "type": "module": senza questo package.json Node lo tratterebbe come ESM
+  // e il suo require('./engramma.darwin-arm64.node') non troverebbe il .node
+  // («Cannot find native binding»). Nell'app impacchettata non serve (sopra
+  // Resources/vendor non c'è un package.json), ma viaggia uguale: innocuo.
+  const pkgPath = join(vendorDir, 'package.json')
+  const pkg = JSON.stringify({ type: 'commonjs' }) + '\n'
+  if (!existsSync(pkgPath) || readFileSync(pkgPath, 'utf8') !== pkg) writeFileSync(pkgPath, pkg)
   return { copied, skipped, tag: lock.tag }
 }
 

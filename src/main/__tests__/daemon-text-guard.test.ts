@@ -86,6 +86,10 @@ const ALLOWED_LITERALS: ReadonlyArray<{ file: string; text: string }> = [
 const ALLOWED_SYMBOLS: Record<string, string[]> = {
   // il rilevatore stesso contiene le parole italiane (lista per costruzione)
   'src/shared/language.ts': ['IT_WORDS'],
+  // fase memoria-engramma (M1): il nome della cella condivisa è 'utente',
+  // parola italiana PER COSTRUZIONE del DESIGN di Engramma (§8.4), non un
+  // testo della UI
+  'src/main/memory/engine.ts': ['USER_CELL'],
   // R4 (fase app — ritocchi): il glossario degli oggetti delle azioni Composio
   // in italiano (lista per costruzione, come IT_WORDS del rilevatore)
   'src/shared/composio-names.ts': ['ACTION_OBJECTS'],
