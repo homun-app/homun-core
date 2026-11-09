@@ -1,0 +1,44 @@
+[sonda] CDP collegato al renderer (app impacchettata)
+[sonda] configuro provider finto e il bot…
+[sonda] M8.1 migrazione: scrivo i file della memoria a file (fase 4) e riavvio il demone
+[sonda] demone fermato: la UI lo rilancia, e al boot la migrazione parte
+[sonda] riga del log: memoria a file migrata al motore: 4 note in 25 ms, 2 avvisi — file originali in /var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/sandbot-fase-memoria-engramma-sMN3ub/data/data/memory-legacy-2026-11-09
+OK  migrazione: 4 note migrate (1 file malformato saltato) — memoria a file migrata al motore: 4 note in 25 ms, 2 avvisi — file originali in /var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/sandbot-fase-memoria-engramma-sMN3ub/data/data/memory-legacy-2026-11-09
+OK  migrazione: avvisi nel log (data futura e file rotto)
+OK  migrazione: copia di sicurezza memory-legacy-<data> — memory-legacy-2026-11-09
+OK  migrazione: i file originali non ci sono più
+OK  migrazione: conteggi dal motore (own 3, shared 1) — {"own":3,"shared":1,"pending":0}
+OK  migrazione: motore attivo e senza modello — versione 0.1.0-dev
+[sonda] M8.2 conversazione: update_memory, poi recall_memory, poi search_history
+OK  turno 1 chiuso con la risposta
+OK  conversazione: la memoria del gatto è nel motore — 2 core
+OK  conversazione: la source punta al turno (homun:chat/<bot>/<entry>)
+OK  turno 2 chiuso con la risposta
+[sonda] tool-result del turno recall (ultimi 3): ["Memory created (id T8VR7ZQV, tier core, scope agent).","- [T8VR7ZQV] (core/agent, aggiornata 2026-11-09, support strong) Il gatto dell'utente si chiama Piso"]
+OK  conversazione: recall_memory trova la memoria — - [T8VR7ZQV] (core/agent, aggiornata 2026-11-09, support strong) Il gatto dell'utente si chiama Pisolo
+OK  turno 3 chiuso con la risposta
+[sonda] tool-result del turno storia (ultimi 3): ["- [T8VR7ZQV] (core/agent, aggiornata 2026-11-09, support strong) Il gatto dell'utente si chiama Piso","search_history is in group history, now active. Call it again with: search_history(query: string)\nNo","- [entry 1] (bot agent_23cad2ed, 2026-11-09) Ricorda una cosa: il mio gatto si chiama Pisolo.\n- [ent"]
+OK  storia: search_history trova la conversazione — - [entry 1] (bot agent_23cad2ed, 2026-11-09) Ricorda una cosa: il mio gatto si chiama Pisolo.
+- [entry 11] (bot agent_23cad2ed, 2026-11-09) 
+OK  storia: indicizzazione iniziale completata
+[sonda] catturo la sezione Memoria (Impostazioni del bot → Memoria «N note ›»)
+[sonda] cattura memoria-elenco.png
+[sonda] cattura memoria-perche.png
+[sonda] M8.3 download del modello: RAM del demone prima
+[sonda] demone pid 70361: RSS 256816 kB (251 MB) prima del modello
+OK  modello: il bottone «Migliora la ricerca» è nella sezione — cliccato
+[sonda] cattura memoria-modello-download.png
+OK  modello: download completato e presente — 19 s
+OK  modello: motore riaperto con l'embedder — [sandbotd] memoria Engramma: modello caricato (ibrida)
+[sonda] demone pid 70361: RSS 917616 kB (896 MB) dopo il modello (e la ricerca ibrida)
+OK  modello: la ricerca ibrida trova ancora la memoria — 1 hit
+OK  modello: RAM del demone cresce (il modello sta in RAM) — prima 251 MB, dopo 896 MB
+[sonda] cattura memoria-modello-presente.png
+[sonda] M8.4 Dimentica per sempre (purge)
+OK  purge: forgotten ≥ 1 — {"forgotten":1,"scrubbed":true,"pending":[]}
+OK  purge: oblio completo (scrubbed) — pending: —
+OK  purge: NESSUN file sotto <dataDir>/memory contiene il testo
+OK  purge: la nota non è più nell'elenco
+[sonda] RIEPILOGO {"checks":23,"failures":0,"ramBeforeKb":256816,"ramAfterKb":917616,"downloadSec":25}
+[sonda] app e demone fermati, cartella temporanea rimossa: /var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/sandbot-fase-memoria-engramma-sMN3ub
+exit 0
