@@ -7,6 +7,7 @@ import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import { mkdtempSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { spawnSync } from 'node:child_process'
 import {
   setDataDir, db, createAgent, deleteAgent, listAgents, listRoutines,
   createRoutine, getSetting, setSetting, holdOutboxEntry, heldOutboxForAgent,
@@ -152,6 +153,74 @@ describe('correzioni 2 R2: deleteAgent cancella TUTTI i job del bot; l\'oblio gi
     await makeJobRunner(db())(forget, () => undefined)
     const engine = await e.memoryEngine()
     expect(await engine.cells()).toEqual(expect.not.arrayContaining([`bot-${bot.id}`, `storia-${bot.id}`]))
+    await e.closeMemoryEngine()
+  })
+})
+
+// ---- fase memoria-engramma v0.4.3: l'oblio di un bot non lascia file aperti ----
+// Con il .node della v0.4.2 una Cell in cache (quella del MOTORE: Homun la
+// sgombera già da dropCellAndEvict) tiene aperta la connessione SQLite sui
+// file cancellati fino al GC: lsof continua a mostrare bot-<id>.sqlite* e
+// storia-<id>.sqlite* ben DOPO il job memory-forget-agent. La v0.4.3 chiude
+// la connessione condivisa DENTRO dropCell (Cell::retire): quando il job
+// risponde, l'oblio è finito. Il test guarda i file aperti del processo di
+// test SENZA gc(): rosso sulla v0.4.2 (si carica con SANDBOT_ENGRAMMA_DIR
+// puntato alla copia messa da parte), verde sulla v0.4.3.
+
+// lsof c'è? Se manca, il test si SALTA in modo esplicito (it.skipIf), mai
+// in silenzio: un oblio verificato solo a metà non è una prova
+const lsofAvailable = (() => {
+  try {
+    return spawnSync('lsof', ['-v'], { stdio: 'ignore' }).status === 0
+  } catch {
+    return false
+  }
+})()
+
+/** Le righe di lsof -p <pid del processo di test> che citano i file dati delle celle. */
+function openCellFileLines(files: string[]): string[] {
+  const r = spawnSync('lsof', ['-p', String(process.pid)], { encoding: 'utf8' })
+  if (r.error) throw r.error
+  if (r.status !== 0) throw new Error(`lsof -p ${process.pid} è uscito con ${r.status}`)
+  return r.stdout.split('\n').filter((l) => files.some((f) => l.includes(f)))
+}
+
+describe('v0.4.3: dopo memory-forget-agent nessun file delle celle resta aperto', () => {
+  it.skipIf(!lsofAvailable)('lsof non mostra bot-<id>.sqlite* né storia-<id>.sqlite*, senza gc()', async () => {
+    const e = await import('../../memory/engine')
+    await e.closeMemoryEngine()
+    expect((await e.openMemoryEngine({ dataDir: join(dir, 'mem-v043') })).available).toBe(true)
+    const { writeMemoryNote, recallMemories } = await import('../../memory/memory-store')
+    const { indexStoryNote, searchHistory } = await import('../../memory/history-store')
+
+    const bot = createAgent('Oblio senza file aperti', '')
+    const botName = e.botCellName(bot.id)
+    const storyName = e.storyCellName(bot.id)
+    const files = [botName + '.sqlite', storyName + '.sqlite'] // copre anche -wal e -shm
+    // le due celle piene: memorie in bot-<id>, conversazione indicizzata in storia-<id>
+    await writeMemoryNote(bot.id, { content: 'memoria da dimenticare v043', tier: 'core', source: 'test', userTurn: true })
+    await indexStoryNote(bot.id, 11, 'user', 'conversazione da dimenticare v043', 1_730_000_000_000)
+
+    // PRIMA dell'oblio una ricerca su ENTRAMBE le celle (recallMemories cerca
+    // bot-<id>, searchHistory cerca storia-<id>): le Cell sono nella cache del
+    // motore (Engine.search) e in quella di Homun (le scritture, per cella+actor)
+    expect((await recallMemories(bot.id, 'dimenticare')).length).toBeGreaterThan(0)
+    expect((await searchHistory('dimenticare', bot.id)).length).toBeGreaterThan(0)
+    // e i file sono APERTI: la prova che lsof li vede, e il controllo non è vacuo
+    expect(openCellFileLines(files)).not.toEqual([])
+
+    // il percorso vero del demone: eliminazione del bot, poi il job col runner VERO
+    deleteAgent(bot.id)
+    const forget = e.enqueueForgetAgent(db(), bot.id)
+    const { makeJobRunner } = await import('../../../daemon/run-job')
+    await makeJobRunner(db())(forget, () => undefined)
+
+    const engine = await e.memoryEngine()
+    expect(await engine.cells()).toEqual(expect.not.arrayContaining([botName, storyName]))
+    // NESSUNA riga sui file delle celle, senza gc(): la v0.4.3 chiude la
+    // connessione in dropCell, la Cell in cache non trattiene i file cancellati
+    const lines = openCellFileLines(files)
+    expect(lines).toEqual([])
     await e.closeMemoryEngine()
   })
 })
