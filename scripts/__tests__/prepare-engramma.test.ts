@@ -109,10 +109,10 @@ describe('fase memoria-engramma M0: prepare-engramma', () => {
     expect(r.copied).toContain('engramma.darwin-arm64.node')
   })
 
-  it('il lock nel repo ha modulo, versione, tag fase-v0.4.1 e i tre hash', () => {
+  it('il lock nel repo ha modulo, versione, tag fase-v0.4.2 e i tre hash', () => {
     const lock = JSON.parse(readFileSync(join(REPO, 'vendor', 'engramma', 'engramma.lock.json'), 'utf8'))
     expect(lock.module).toBe('engramma-node')
-    expect(lock.tag).toBe('fase-v0.4.1')
+    expect(lock.tag).toBe('fase-v0.4.2')
     expect(typeof lock.version).toBe('string')
     expect(Object.keys(lock.files).sort()).toEqual([...ENGRAMMA_FILES].sort())
     for (const h of Object.values(lock.files) as string[]) expect(h).toMatch(/^[0-9a-f]{64}$/)

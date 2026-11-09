@@ -1,11 +1,11 @@
 {
   "module": "engramma-node",
   "version": "0.1.0-dev",
-  "tag": "fase-v0.4.1",
-  "commit": "513dc5934a8c7ba7f020cce1d59986cdc2eb5e47",
+  "tag": "fase-v0.4.2",
+  "commit": "1afc00765c8573cc9a8c494a8c249894457475a5",
   "files": {
-    "engramma.darwin-arm64.node": "1cd4d75a86e11ace7fd5d0a65a11a7d612580bf718fa59daae2264f65f0b9cc8",
+    "engramma.darwin-arm64.node": "14cd10d5cdf5c1091e6f5650b5b122d7d058fdeca570b1d541918b9f53d07c4a",
     "index.js": "25fd9cc1d50a1ec3f2d74bc004d904663ff07360102d27b938870329d9c832d4",
-    "index.d.ts": "25549514bb02f7367fc82b1d55c52f96f7a8b6171a2f5927cf226c51f5bca4e4"
+    "index.d.ts": "bf9381f18911d1fba6269eb745c2825c57f5ed643461d4c2a6488005bf69d9f8"
   }
 }
