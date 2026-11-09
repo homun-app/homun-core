@@ -184,6 +184,11 @@ msgstr "{0} @ {1}"
 msgid "{0} / {1} per M"
 msgstr "{0} / {1} per M"
 
+#. placeholder {0}: overview.counts.deleted
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "{0} eliminate"
+msgstr "{0} deleted"
+
 #. placeholder {0}: s.fileCount
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "{0} file"
@@ -2258,6 +2263,14 @@ msgstr "Delete team"
 msgid "Eliminare la squadra «{0}» e i suoi messaggi? I bot restano."
 msgstr "Delete the team “{0}” and its messages? The bots stay."
 
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "eliminata"
+msgstr "deleted"
+
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "eliminate"
+msgstr "deleted"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "onboarding.roleEmail"
@@ -4051,6 +4064,10 @@ msgstr "No grants: every fill asks with a card."
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Nessuna descrizione."
 msgstr "No description."
+
+#: src/renderer/src/components/MemoryPanel.tsx
+msgid "Nessuna memoria eliminata: quelle che elimini restano qui finché non le dimentichi per sempre."
+msgstr "No deleted memories: the ones you delete stay here until you forget them for good."
 
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "Nessuna memoria: chiedi al bot di ricordare una preferenza."

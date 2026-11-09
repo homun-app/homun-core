@@ -56,8 +56,13 @@ async function ownerCell(agentId: string, owner: 'bot' | 'user'): Promise<Engram
   return owner === 'user' ? userCell(null) : botCell(agentId)
 }
 
-/** L'elenco con i filtri (le lapidi non ci sono mai: il motore le esclude). */
-export async function memoryList(agentId: string, opts: { owner?: 'bot' | 'user'; tier?: 'core' | 'log'; status?: 'active' | 'quarantined'; limit?: number; offset?: number } = {}): Promise<{ notes: MemoryNoteInfo[]; total: number }> {
+/**
+ * L'elenco con i filtri. Correzioni C4: anche «eliminate» — le lapidi si
+ * elencano (v0.4.2, col corpo) così l'utente le ripristina o le dimentica
+ * per sempre; senza filtro di stato restano le note VIVE (attive e in attesa
+ * di conferma).
+ */
+export async function memoryList(agentId: string, opts: { owner?: 'bot' | 'user'; tier?: 'core' | 'log'; status?: 'active' | 'quarantined' | 'deleted'; limit?: number; offset?: number } = {}): Promise<{ notes: MemoryNoteInfo[]; total: number }> {
   const owner = opts.owner === 'user' ? 'user' : 'bot'
   const cell = await ownerCell(agentId, owner)
   const limit = Math.min(Math.max(opts.limit ?? 100, 1), 1000)
@@ -112,19 +117,22 @@ export async function memorySearch(agentId: string, query: string, opts: { expla
 /** Lo stato per l'interfaccia: motore, modello, conteggi, indicizzazione. */
 export async function memoryOverview(agentId: string, getSetting: <T>(key: string, dflt: T) => T): Promise<MemoryOverview> {
   const status = await memoryEngineStatus()
-  let counts = { own: 0, shared: 0, pending: 0 }
+  let counts = { own: 0, shared: 0, pending: 0, deleted: 0 }
   if (status.available) {
     try {
       // own/shared = le note vive (attive e in attesa); pending = quelle in
-      // attesa di conferma nelle due celle (la sezione le mette in evidenza)
+      // attesa di conferma nelle due celle (la sezione le mette in evidenza);
+      // deleted = le lapidi (correzioni C4: si vedono e si dimenticano)
       const bot = await botCell(agentId)
       const user = await userCell(null)
-      const [own, shared] = await Promise.all([
+      const [own, shared, botDead, userDead] = await Promise.all([
         bot.list({ status: ['active', 'quarantined'], limit: 100_000 }),
-        user.list({ status: ['active', 'quarantined'], limit: 100_000 })
+        user.list({ status: ['active', 'quarantined'], limit: 100_000 }),
+        bot.list({ status: ['deleted'], limit: 100_000 }),
+        user.list({ status: ['deleted'], limit: 100_000 })
       ])
       const pending = [...own, ...shared].filter((n) => n.status === 'quarantined').length
-      counts = { own: own.length, shared: shared.length, pending }
+      counts = { own: own.length, shared: shared.length, pending, deleted: botDead.length + userDead.length }
     } catch {
       // motore chiuso durante il conteggio: zeri
     }

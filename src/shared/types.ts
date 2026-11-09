@@ -911,7 +911,7 @@ export interface SandbotApi {
   // memoria (fase 4): sezione nella vista dell'agente, modifica ed eliminazione
   // fase memoria-engramma (M6): la sezione Memoria sul motore Engramma
   memoryOverview(agentId: string): Promise<MemoryOverview>
-  memoryList(agentId: string, opts: { owner: 'bot' | 'user'; tier?: 'core' | 'log'; status?: 'active' | 'quarantined'; limit?: number; offset?: number }): Promise<{ notes: MemoryNoteInfo[]; total: number }>
+  memoryList(agentId: string, opts: { owner: 'bot' | 'user'; tier?: 'core' | 'log'; status?: 'active' | 'quarantined' | 'deleted'; limit?: number; offset?: number }): Promise<{ notes: MemoryNoteInfo[]; total: number }>
   memorySearch(agentId: string, query: string, opts?: { explain?: boolean }): Promise<MemorySearchHitInfo[]>
   memoryNote(agentId: string, id: string): Promise<MemoryNoteDetail>
   memorySave(agentId: string, input: { id?: string; body: string; tier: 'core' | 'log'; scope?: 'agent' | 'user' }): Promise<MemoryNoteInfo>
@@ -1250,7 +1250,7 @@ export interface MemorySearchHitInfo {
 export interface MemoryOverview {
   engine: { available: boolean; reason?: 'module' | 'open' | 'closed'; error?: string; version?: string }
   model: { present: boolean; id?: string; bytes?: number; pulling: boolean }
-  counts: { own: number; shared: number; pending: number }
+  counts: { own: number; shared: number; pending: number; deleted: number }
   /** l'indicizzazione iniziale delle conversazioni è fatta? */
   storyIndexed: boolean
 }

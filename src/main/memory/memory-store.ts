@@ -105,7 +105,7 @@ export interface LocatedNote {
   state: 'active' | 'quarantined' | 'deleted'
   /** l'id ULID completo */
   id: string
-  /** la nota (assente per la lapide: il motore non la restituisce più) */
+  /** la nota — dalla v0.4.2 anche la lapide, col corpo (l'utente la vede) */
   note?: EngrammaNoteView
 }
 
@@ -113,7 +113,9 @@ export interface LocatedNote {
  * Trova una memoria per id (completo o corto di 8) nelle celle del bot e
  * condivisa. `get` è un oracolo chiuso (null per quarantena e lapide), quindi
  * la quarantena si cerca con list(status quarantined) e la lapide con
- * history — mai per scavalcare lo stato: solo per rispondere col testo giusto.
+ * list(status deleted) (v0.4.2 la elenca, col corpo: l'utente decide se
+ * ripristinarla o dimenticarla per sempre) — mai per scavalcare lo stato:
+ * solo per rispondere col testo giusto.
  */
 export async function locateMemoryNote(agentId: string, id: string, opts: WriterOpts = {}): Promise<LocatedNote | null> {
   if (!isSafeMemoryId(String(id ?? ''))) throw new MemoryNoteError(`Invalid memory id: "${id}"`, 'INVALID')
@@ -124,13 +126,8 @@ export async function locateMemoryNote(agentId: string, id: string, opts: Writer
     if (active) return { scope, state: 'active', id: active.id, note: active }
     const quarantined = (await cell.list({ status: ['quarantined'], limit: 100_000 })).find((n) => matches(n.id))
     if (quarantined) return { scope, state: 'quarantined', id: quarantined.id, note: quarantined }
-    try {
-      const versions = await cell.history(id)
-      const last = versions[versions.length - 1]
-      if (last) return { scope, state: 'deleted', id: last.note.id }
-    } catch {
-      // NOT_FOUND in questa cella: si prova la prossima
-    }
+    const deleted = (await cell.list({ status: ['deleted'], limit: 100_000 })).find((n) => matches(n.id))
+    if (deleted) return { scope, state: 'deleted', id: deleted.id, note: deleted }
   }
   return null
 }

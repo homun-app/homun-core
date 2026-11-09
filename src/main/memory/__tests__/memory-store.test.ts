@@ -253,3 +253,75 @@ describe('fase memoria-engramma M4: il prompt', () => {
     await e.closeMemoryEngine()
   })
 })
+
+describe('fase memoria-engramma · correzioni C4: le lapidi si vedono e si dimenticano', () => {
+  it('RPC: elimina → elenca le eliminate → dimentica per sempre: su disco non resta NESSUNA radice del testo', async () => {
+    const dir = join(DATA, 'c4' + Math.random().toString(36).slice(2, 6))
+    const e = await import('../engine')
+    await e.closeMemoryEngine()
+    expect((await e.openMemoryEngine({ dataDir: dir })).available).toBe(true)
+    const SECRET = 'ciclaminoombroso di roccia'
+    const { memoryDelete, memoryList, memoryPurge, memoryOverview } = await import('../memory-rpc')
+    const { writeMemoryNote } = await import('../memory-store')
+    const { getSetting } = await import('../../store/db')
+    const n = await writeMemoryNote('agent_c4', { content: SECRET, tier: 'log', source: 's', userTurn: true })
+    await writeMemoryNote('agent_c4', { content: 'una memoria che RESTA: passeggiata lungo il fiume', tier: 'log', source: 's', userTurn: true })
+
+    // elimina: lapide
+    await memoryDelete('agent_c4', n.id)
+    // la sezione le elenca: status deleted, col corpo (l'utente decide)
+    const deleted = await memoryList('agent_c4', { status: 'deleted' })
+    expect(deleted.notes).toHaveLength(1)
+    expect(deleted.notes[0]!.status).toBe('deleted')
+    expect(deleted.notes[0]!.body).toBe(SECRET)
+    expect(deleted.total).toBe(1)
+    // e le attive non la vedono
+    expect((await memoryList('agent_c4', { status: 'active' })).total).toBe(1)
+    // il conteggio della sezione porta le eliminate
+    const ov = await memoryOverview('agent_c4', getSetting)
+    expect(ov.counts.deleted).toBe(1)
+    expect(ov.counts.own).toBe(1)
+
+    // dimentica per sempre DALLA LAPIDE
+    const view = await memoryPurge('agent_c4', n.id)
+    expect(view.forgotten).toBeGreaterThanOrEqual(1)
+    await e.closeMemoryEngine()
+
+    // NESSUNA radice del testo in nessun file sotto la cartella del motore
+    const { readdirSync, readFileSync } = await import('node:fs')
+    const { basename } = await import('node:path')
+    const roots = SECRET.split(/\s+/).flatMap((w) => {
+      const base = w.toLowerCase().replace(/[aeio]$/, '')
+      return [w.toLowerCase(), base]
+    }).filter((x) => x.length >= 5)
+    const walk = (d: string): string[] =>
+      readdirSync(d, { withFileTypes: true }).flatMap((x) => x.isDirectory() ? walk(join(d, x.name)) : [join(d, x.name)])
+    for (const f of walk(join(dir, 'memory'))) {
+      const raw = readFileSync(f)
+      for (const needle of roots) {
+        expect(raw.includes(Buffer.from(needle)), `${basename(f)} contiene «${needle}»`).toBe(false)
+      }
+    }
+    // dopo la purga la lista delle eliminate è vuota
+    await e.openMemoryEngine({ dataDir: dir })
+    expect((await memoryList('agent_c4', { status: 'deleted' })).total).toBe(0)
+    await e.closeMemoryEngine()
+  })
+
+  it('locateMemoryNote trova la lapide con list(status deleted); verso il modello non cambia: non si riscrive', async () => {
+    const e = await fresh()
+    const { writeMemoryNote, deleteMemoryNote, locateMemoryNote, updateMemoryNote } = await import('../memory-store')
+    const w = await writeMemoryNote('agent_c4b', { content: 'nota che diventa lapide', tier: 'log', source: 's', userTurn: true })
+    await deleteMemoryNote('agent_c4b', w.id)
+    // la lapide si TROVA (stato deleted, col corpo): «Dimentica per sempre»
+    // e «Ripristina» hanno l'id giusto
+    const found = await locateMemoryNote('agent_c4b', w.id)
+    expect(found?.state).toBe('deleted')
+    expect(found?.note?.body).toBe('nota che diventa lapide')
+    // anche con l'id CORTO
+    expect((await locateMemoryNote('agent_c4b', w.id.slice(-8)))?.state).toBe('deleted')
+    // ma verso il MODELLO non cambia: la lapide non si riscrive (testo chiaro)
+    await expect(updateMemoryNote('agent_c4b', { id: w.id, content: 'x' })).rejects.toThrow(/deleted|cannot be rewritten/i)
+    await e.closeMemoryEngine()
+  })
+})

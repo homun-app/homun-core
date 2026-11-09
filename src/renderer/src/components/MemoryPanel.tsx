@@ -7,8 +7,9 @@
 //             date di validità, storico delle versioni e, per un richiamo,
 //             la spiegazione (explain);
 //   in attesa di conferma: Conferma o Scarta;
-//   Elimina  lapide, si ripristina dallo storico; Dimentica per sempre: purge
-//             (conferma che spiega che non si torna indietro);
+//   Elimina  lapide, si ripristina dallo storico; il filtro «eliminate» le
+//             mostra (correzioni C4) e Dimentica per sempre: purge (conferma
+//             che spiega che non si torna indietro), anche dalla lapide;
 //   modello  stato e download SOLO dal click (circa 400 MB), con avanzamento.
 import { useEffect, useState } from 'react'
 import { Trans, useLingui } from '@lingui/react/macro'
@@ -21,7 +22,7 @@ import type { MemoryNoteInfo, MemoryNoteDetail, MemorySearchHitInfo, MemoryOverv
 
 type Owner = 'bot' | 'user'
 type TierFilter = 'all' | 'core' | 'log'
-type StatusFilter = 'active' | 'quarantined'
+type StatusFilter = 'active' | 'quarantined' | 'deleted'
 
 function fmtBytes(n: number): string {
   if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)} GB`
@@ -164,6 +165,11 @@ export function MemoryPanel({ agentId, onClose }: { agentId: string; onClose: ()
               <Trans>{overview.counts.pending} in attesa di conferma</Trans>
             </button>
           )}
+          {overview.counts.deleted > 0 && (
+            <button className="rounded bg-muted px-1.5 py-0.5 hover:text-foreground" onClick={() => setStatus('deleted')}>
+              <Trans>{overview.counts.deleted} eliminate</Trans>
+            </button>
+          )}
         </div>
       )}
       {memoryProgress?.phase === 'model-pull' && memoryProgress.finished && memoryProgress.error && (
@@ -228,6 +234,8 @@ export function MemoryPanel({ agentId, onClose }: { agentId: string; onClose: ()
             <span className="mx-1 text-border">|</span>
             <button className={pill(status === 'active')} onClick={() => setStatus('active')}><Trans>attive</Trans></button>
             <button className={pill(status === 'quarantined')} onClick={() => setStatus('quarantined')}><Trans>in attesa di conferma</Trans></button>
+            {/* correzioni C4: le lapidi si vedono (e si dimenticano per davvero) */}
+            <button className={pill(status === 'deleted')} onClick={() => setStatus('deleted')}><Trans>eliminate</Trans></button>
           </div>
 
           {notice === 'pending' && (
@@ -244,7 +252,9 @@ export function MemoryPanel({ agentId, onClose }: { agentId: string; onClose: ()
             <p className="mt-2 text-xs text-muted-foreground">
               {status === 'quarantined'
                 ? <Trans>Niente in attesa di conferma: ciò che il bot scrive leggendo il web arriva qui, finché non lo confermi.</Trans>
-                : <Trans>Nessuna memoria: chiedi al bot di ricordare una preferenza.</Trans>}
+                : status === 'deleted'
+                  ? <Trans>Nessuna memoria eliminata: quelle che elimini restano qui finché non le dimentichi per sempre.</Trans>
+                  : <Trans>Nessuna memoria: chiedi al bot di ricordare una preferenza.</Trans>}
             </p>
           )}
           <div className="mt-2 space-y-2">
@@ -256,6 +266,7 @@ export function MemoryPanel({ agentId, onClose }: { agentId: string; onClose: ()
                   </span>
                   <span className={`rounded px-1.5 py-0.5 ${m.tier === 'core' ? 'bg-destructive/15 text-destructive' : 'bg-muted text-muted-foreground'}`}>{m.tier}</span>
                   {m.status === 'quarantined' && <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-amber-600"><Trans>in attesa di conferma</Trans></span>}
+                  {m.status === 'deleted' && <span className="rounded bg-destructive/15 px-1.5 py-0.5 text-destructive"><Trans>eliminata</Trans></span>}
                   <span className="flex-1" />
                   <span title={fmt(m.createdAt)}>{fmt(m.updatedAt)}</span>
                 </div>
@@ -280,6 +291,12 @@ export function MemoryPanel({ agentId, onClose }: { agentId: string; onClose: ()
                         <>
                           <button className="text-primary underline-offset-2 hover:underline" onClick={() => { void api.memoryConfirm(agentId, m.id).then(after) }}><Trans>Conferma</Trans></button>
                           <button className="text-destructive/80 underline-offset-2 hover:text-red-300 hover:underline" onClick={() => { void api.memoryDiscard(agentId, m.id).then(after) }}><Trans>Scarta</Trans></button>
+                        </>
+                      ) : m.status === 'deleted' ? (
+                        /* correzioni C4: la lapide si ripristina o si dimentica per davvero */
+                        <>
+                          <button className="text-primary underline-offset-2 hover:underline" onClick={() => { void api.memoryRestore(agentId, m.id).then(after) }}><Trans>Ripristina</Trans></button>
+                          <button className="text-destructive/80 underline-offset-2 hover:text-red-300 hover:underline" onClick={() => setConfirmPurge(m.id)}><Trans>Dimentica per sempre</Trans></button>
                         </>
                       ) : (
                         <>
@@ -348,7 +365,7 @@ export function MemoryPanel({ agentId, onClose }: { agentId: string; onClose: ()
                     {' '}({detail.note.confidence})
                   </p>
                   <p>
-                    {detail.state === 'active' ? <Trans>attiva</Trans> : <Trans>in attesa di conferma</Trans>}
+                    {detail.state === 'active' ? <Trans>attiva</Trans> : detail.state === 'deleted' ? <Trans>eliminata</Trans> : <Trans>in attesa di conferma</Trans>}
                     {' · '}<Trans>versione {detail.note.version}</Trans>
                   </p>
                   <p><Trans>creata {fmt(detail.note.createdAt)} · aggiornata {fmt(detail.note.updatedAt)}</Trans></p>
@@ -377,11 +394,10 @@ export function MemoryPanel({ agentId, onClose }: { agentId: string; onClose: ()
                   </ul>
                 </div>
               )}
-              {detail.state !== 'deleted' && (
-                <button className="text-destructive/80 underline-offset-2 hover:text-red-300 hover:underline" onClick={() => setConfirmPurge(detailId)}>
-                  <Trans>Dimentica per sempre</Trans>
-                </button>
-              )}
+              {/* correzioni C4: anche dalla lapide — un memoria eliminata si può dimenticare per davvero */}
+              <button className="text-destructive/80 underline-offset-2 hover:text-red-300 hover:underline" onClick={() => setConfirmPurge(detailId)}>
+                <Trans>Dimentica per sempre</Trans>
+              </button>
               {confirmPurge === detailId && (
                 <div className="mt-2 rounded-lg bg-destructive/10 px-3 py-2">
                   <p className="text-xs text-destructive"><Trans>Il testo sparisce del tutto e non si torna indietro. Continuare?</Trans></p>

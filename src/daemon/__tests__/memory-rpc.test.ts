@@ -74,7 +74,7 @@ describe('fase memoria-engramma M6: elenco, filtri e dettaglio', () => {
     const o = (await api['memory:overview']([AGENT])) as { engine: { available: boolean; version: string }; model: { present: boolean }; counts: { own: number; shared: number; pending: number } }
     expect(o.engine.available).toBe(true)
     expect(o.model.present).toBe(false)
-    expect(o.counts).toEqual({ own: 3, shared: 1, pending: 1 })
+    expect(o.counts).toEqual({ own: 3, shared: 1, pending: 1, deleted: 0 })
   })
 })
 
