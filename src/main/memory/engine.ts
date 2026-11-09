@@ -199,7 +199,11 @@ function findProjectRoot(start: string): string | null {
  * Le cartelle dove cercare il modulo (come i wasm di tree-sitter, shell-ast.ts).
  * SANDBOT_ENGRAMMA_DIR, quando c'è, è l'unica cartella considerata.
  */
-export function engrammaDirCandidates(env: NodeJS.ProcessEnv = process.env, resourcesPath?: string): string[] {
+export function engrammaDirCandidates(
+  env: NodeJS.ProcessEnv = process.env,
+  // l'app impacchettata (Electron): process.resourcesPath esiste solo lì
+  resourcesPath: string | undefined = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath
+): string[] {
   const out: string[] = []
   // override ESPLICITO: vince da solo (test/CI), niente cadute sotto mano
   if (env.SANDBOT_ENGRAMMA_DIR) return [env.SANDBOT_ENGRAMMA_DIR]
@@ -213,20 +217,30 @@ export function engrammaDirCandidates(env: NodeJS.ProcessEnv = process.env, reso
 }
 
 let moduleCache: Promise<EngrammaModule | null> | null = null
+/** l'ultimo errore di caricamento (tecnico: mai contenuti di note) */
+export let lastModuleLoadError: string | null = null
 
 /** Il modulo nativo, o null se non si carica (il chiamante lo dice chiaramente). */
 export function engrammaModule(): Promise<EngrammaModule | null> {
   if (!moduleCache) {
     moduleCache = (async () => {
       const dir = engrammaDirCandidates().find((d) => existsSync(join(d, 'index.js')))
-      if (!dir) return null
+      if (!dir) {
+        lastModuleLoadError = `index.js not found in: ${engrammaDirCandidates().join(', ')}`
+        return null
+      }
       try {
         // il caricatore napi-rs cerca il .node ACCANTO a sé: require assoluto
         // di index.js e la risoluzione relativa fa il resto
         const req = createRequire(import.meta.url)
         const m = req(join(dir, 'index.js')) as EngrammaModule
-        return typeof m?.Engine?.open === 'function' ? m : null
-      } catch {
+        if (typeof m?.Engine?.open !== 'function') {
+          lastModuleLoadError = `index.js in ${dir} does not export Engine`
+          return null
+        }
+        return m
+      } catch (e) {
+        lastModuleLoadError = `${dir}: ${e instanceof Error ? e.message : String(e)}`
         return null
       }
     })()
@@ -310,8 +324,8 @@ export function openMemoryEngine(opts: { dataDir: string }): Promise<MemoryEngin
   opening = (async (): Promise<MemoryEngineStatus> => {
     const mod = await engrammaModule()
     if (!mod) {
-      state = { kind: 'failed', reason: 'module' }
-      return unavailable('module')
+      state = { kind: 'failed', reason: 'module', detail: lastModuleLoadError ?? undefined }
+      return unavailable('module', lastModuleLoadError ?? undefined)
     }
     try {
       const engine = await mod.Engine.open({

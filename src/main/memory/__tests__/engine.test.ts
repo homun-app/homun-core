@@ -156,3 +156,20 @@ describe('fase memoria-engramma M1: embedPending in fondo alla coda', () => {
     expect(await e.embedPendingAll()).toBe(0)
   })
 })
+
+describe('fase memoria-engramma M8: dove si cerca il modulo nell\'app impacchettata', () => {
+  it('per DEFAULT si guarda in process.resourcesPath/vendor/engramma (extraResources), prima del repo', async () => {
+    const { engrammaDirCandidates } = await import('../engine')
+    const proc = process as NodeJS.Process & { resourcesPath?: string }
+    const prev = proc.resourcesPath
+    proc.resourcesPath = '/Applications/Homun.app/Contents/Resources'
+    try {
+      const env = { ...process.env }
+      delete env.SANDBOT_ENGRAMMA_DIR
+      const c = engrammaDirCandidates(env)
+      expect(c[0]).toBe('/Applications/Homun.app/Contents/Resources/vendor/engramma')
+    } finally {
+      proc.resourcesPath = prev
+    }
+  })
+})
