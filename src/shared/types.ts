@@ -646,6 +646,10 @@ export type SandbotEvent =
   // di shell_jobs — il feed «Attività» e la vista File del PROPRIETARIO
   // ricaricano (niente payload pesante: la UI legge quello che serve)
   | { type: 'computer-activity'; ownerId: string }
+  // fase memoria-engramma (M5/M6): l'avanzamento dei lavori lunghi della
+  // memoria — l'indicizzazione iniziale delle conversazioni (story-backfill)
+  // e il download del modello (model-pull, in byte). Niente contenuti.
+  | { type: 'memory'; phase: 'story-backfill' | 'model-pull'; done: number; total: number; finished?: boolean; error?: string }
 
 /** Lo stato dello schermo di un bot per la UI (fase 19a, RPC screen:status). */
 export interface ScreenStatus {

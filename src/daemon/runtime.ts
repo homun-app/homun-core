@@ -579,6 +579,32 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
     emit
   )
   pokeWorker = () => worker.poke()
+
+  // fase memoria-engramma (M5): il loop consegna i messaggi della
+  // conversazione alla coda della storia (job memory-index-story, nella
+  // corsia dell'agente: partono DOPO il turno, mai dentro)
+  {
+    const { setStoryIndexer } = await import('../main/memory/history-store')
+    const engineMod = await import('../main/memory/engine')
+    setStoryIndexer((agentId, entry) => {
+      try {
+        engineMod.enqueueStoryIndex(database, agentId, entry)
+        worker.poke()
+      } catch {
+        // coda non disponibile: si riparte dal prossimo messaggio
+      }
+    })
+    // le conversazioni esistenti si indicizzano UNA volta, in coda
+    if (!getSetting<number | null>('memory.storyBackfilledAt', null)) {
+      const main = mainAgentOf(listAgents(), getSetting<string | null>('mainAgentId', null)) ?? listAgents()[0]
+      if (main) {
+        engineMod.enqueueStoryBackfill(database, main.id)
+        worker.poke()
+      } else {
+        setSetting('memory.storyBackfilledAt', Date.now())
+      }
+    }
+  }
   // fase mcp-setup (M5.3): il gateway può finalmente svegliare il worker
   gatewayWorker = worker
 

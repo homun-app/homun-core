@@ -1570,6 +1570,45 @@ describe('fase 4: memoria e skill nel system prompt', () => {
     expect(plain!.content).not.toContain('[Relevant memories]')
   })
 
+  it('M5: il messaggio dell utente e la risposta FINALE vanno in coda per la storia; i tool e i progressi no', async () => {
+    const { setStoryIndexer } = await import('../../memory/history-store')
+    const seen: Array<{ agentId: string; kind: string; text: string; tainted: boolean }> = []
+    setStoryIndexer((agentId, e) => { seen.push({ agentId, kind: e.kind, text: e.text, tainted: e.tainted === true }) })
+    try {
+      h.llm.queue = [
+        { toolCalls: [{ id: 'm1', name: 'message_user', arguments: JSON.stringify({ text: 'un attimo, controllo' }) }] },
+        { toolCalls: [{ id: 'r1', name: 'recall_memory', arguments: JSON.stringify({ query: 'treno' }) }] },
+        { text: 'Il treno delle 8 è in orario.' }
+      ]
+      await runTurn(AGENT, 'il treno delle 8 è in orario?', emit)
+      expect(seen.map((x) => [x.kind, x.text])).toEqual([
+        ['user', 'il treno delle 8 è in orario?'],
+        ['assistant', 'Il treno delle 8 è in orario.']
+      ])
+      expect(seen.every((x) => x.agentId === AGENT && !x.tainted)).toBe(true)
+      // un turno di sistema (initiator) NON è un messaggio dell'utente
+      seen.length = 0
+      h.llm.queue = [{ text: 'ok' }]
+      await runTurn(AGENT, 'risveglio', emit, undefined, { source: 'user', initiator: 'LOOK_AROUND' })
+      expect(seen.map((x) => x.kind)).toEqual(['assistant'])
+    } finally {
+      setStoryIndexer(null)
+    }
+  })
+
+  it('M5: la risposta finale di un turno CONTAMINATO va nella storia come tainted', async () => {
+    const { setStoryIndexer } = await import('../../memory/history-store')
+    const seen: Array<{ kind: string; tainted: boolean }> = []
+    setStoryIndexer((_a, e) => { seen.push({ kind: e.kind, tainted: e.tainted === true }) })
+    try {
+      h.llm.queue = [{ text: 'Ecco il riassunto.' }]
+      await runTurn(AGENT, 'riassumi i risultati', emit, undefined, { source: 'user', contaminated: true })
+      expect(seen).toEqual([{ kind: 'user', tainted: false }, { kind: 'assistant', tainted: true }])
+    } finally {
+      setStoryIndexer(null)
+    }
+  })
+
   it('nel system solo nome e descrizione delle skill; il corpo arriva col tool skill()', async () => {
     const { writeSkillFromBot } = await import('../skills')
     writeSkillFromBot(AGENT, { name: 'triage', description: 'smista la posta', content: 'CORPO SEGRETO della skill' })

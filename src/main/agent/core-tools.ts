@@ -129,6 +129,13 @@ export const TOOL_GROUPS: ReadonlyArray<ToolGroup> = [
     id: 'admin',
     description: 'Skills, permission rules, file exchange with the user Mac (the box).',
     tools: ['update_skill', 'propose_rule_change', 'copy_to_box', 'copy_from_box']
+  },
+  {
+    // fase memoria-engramma (M5): il richiamo delle conversazioni — dietro
+    // find_tools, mai nel nucleo (budget della fase token)
+    id: 'history',
+    description: 'Search and re-read past conversations: what the user and the bots said.',
+    tools: ['search_history', 'read_history']
   }
 ]
 

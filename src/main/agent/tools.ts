@@ -37,6 +37,9 @@ export const EDIT_DOCUMENT_REPLY_RULE =
  */
 export const NO_MEMORY_FOUND = 'No memory found for this search.'
 
+/** Fase memoria-engramma (M5): il testo VERO del result di search_history a vuoto. */
+export const NO_HISTORY_FOUND = 'No past conversation found for this search.'
+
 export const toolDefs: ToolDef[] = [
   {
     name: 'send_to_user',
@@ -266,6 +269,34 @@ export const toolDefs: ToolDef[] = [
         query: { type: 'string', description: 'Keywords to search' }
       },
       required: ['query']
+    }
+  },
+  // fase memoria-engramma (M5): il richiamo delle conversazioni (gruppo
+  // history, dietro find_tools): i messaggi dell'utente e le risposte finali
+  // dei bot, mai i risultati dei tool
+  {
+    name: 'search_history',
+    description: 'Searches past conversations: what the user wrote and the final replies of the bots (no tool results). Returns entry ids for read_history.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'What to look for, in plain words' },
+        bot: { type: 'string', description: 'Bot id to search only its conversation (optional: all bots)' }
+      },
+      required: ['query']
+    }
+  },
+  {
+    name: 'read_history',
+    description: 'Reads the conversation around an entry id from search_history: the user messages and the final bot replies.',
+    parameters: {
+      type: 'object',
+      properties: {
+        entryId: { type: 'number', description: 'The entry id from search_history' },
+        window: { type: 'number', description: 'How many messages around it (default 6)' },
+        bot: { type: 'string', description: 'Bot id of that conversation (default: yours)' }
+      },
+      required: ['entryId']
     }
   },
   {
@@ -1266,6 +1297,43 @@ export async function executeTool(
         return { output: memoryErrorText(e), meta: { error: true } }
       }
     }
+    case 'search_history': {
+      // fase memoria-engramma (M5): la cella storia — una risposta nata in un
+      // turno contaminato è DATO ESTERNO: il meta lo dice e il loop incarta il
+      // result e contamina il turno (come la libreria tainted, fase 14)
+      const query = String(input.query ?? '').trim()
+      if (!query) return { output: 'Missing query: write the search in the query field.', meta: {} }
+      const bot = typeof input.bot === 'string' && input.bot.trim() ? input.bot.trim() : undefined
+      try {
+        const { searchHistory, storyRefOf } = await import('../memory/history-store')
+        const hits = await searchHistory(query, bot)
+        if (!hits.length) return { output: NO_HISTORY_FOUND, meta: {} }
+        const refs = hits.map((h) => ({ h, ref: storyRefOf(h) }))
+        const lines = refs.map(({ h, ref }) =>
+          `- [entry ${ref.entryId ?? '?'}] (bot ${ref.agentId ?? '?'}, ${h.updatedAt.slice(0, 10)}) ${h.snippet.replace(/\n+/g, ' ').slice(0, 240)}`
+        )
+        const tainted = refs.some(({ ref }) => ref.tainted)
+        return { output: lines.join('\n'), meta: { historyEntries: refs.map(({ ref }) => ref.entryId), ...(tainted ? { libraryTainted: 'history' } : {}) } }
+      } catch (e) {
+        return { output: memoryErrorText(e), meta: { error: true } }
+      }
+    }
+    case 'read_history': {
+      const entryId = Number(input.entryId)
+      if (!Number.isInteger(entryId) || entryId <= 0) return { output: 'Missing or invalid entryId: use an entry id from search_history.', meta: {} }
+      const raw = Number(input.window)
+      const windowSize = Number.isFinite(raw) && raw > 0 ? Math.min(Math.floor(raw), 40) : 6
+      // fase 12: il figlio legge le conversazioni del PADRE (sola lettura)
+      const bot = typeof input.bot === 'string' && input.bot.trim() ? input.bot.trim() : sandbox.boxOwnerOf(agentId)
+      try {
+        const { readHistoryWindow } = await import('../memory/history-store')
+        const out = await readHistoryWindow(bot, entryId, windowSize)
+        if (out === null) return { output: `Entry ${entryId} not found in the conversation of bot ${bot} (pass bot with the id from search_history).`, meta: {} }
+        return { output: out, meta: {} }
+      } catch (e) {
+        return { output: memoryErrorText(e), meta: { error: true } }
+      }
+    }
     case 'skill': {
       // fase skill (S3.2): senza file le istruzioni + l'elenco dei file di
       // supporto; con file SOLO se il percorso è esattamente uno dell'elenco.
@@ -1462,9 +1530,14 @@ export async function executeTool(
       loopMod.interrupt(target.id)
       cancelAgentJobs(dbMod.db(), target.id)
       const elections = dbMod.deleteAgent(target.id)
-      // fase memoria-engramma (M3): le memorie del bot muoiono con lui (oblio
-      // vero della sua cella, in coda)
-      void import('../memory/memory-store').then((m) => m.purgeBotCell(target.id)).catch(() => undefined)
+      // fase memoria-engramma (M5): memorie e storia del bot eliminato si
+      // purgano in coda (job memory-forget-agent nel demone)
+      try {
+        const { enqueueForgetAgent } = await import('../memory/engine')
+        enqueueForgetAgent(dbMod.db(), target.id)
+      } catch {
+        // niente coda (es. test del solo tool): la purga la farà il demone
+      }
       // fase 16b (S1.1): i gruppi che hanno eletto un nuovo coordinatore
       // ricevono la riga di sistema nel gruppo
       if (elections.length) {

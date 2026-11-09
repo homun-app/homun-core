@@ -55,6 +55,8 @@ import { normalizeOptions, findDismissibleWidgets } from './widgets'
 import { estimateTokensOf } from './memory'
 // fase memoria-engramma (M3): la sezione Memoria del prompt dal motore Engramma
 import { buildMemorySection } from '../memory/memory-store'
+// fase memoria-engramma (M5): la storia delle conversazioni (coda del demone)
+import { queueStoryIndex } from '../memory/history-store'
 import { buildSkillsSection, skillInvocationExpansion, invocableSkillsOf, mayInvokeSkill } from './skills'
 // U4 (fase pulizia · ritocchi, sostituisce P10): l'ora di invio sui messaggi
 // utente — buildMessages la mette su quelli delle entry, qui quella dei
@@ -1255,6 +1257,12 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     if (promoted) emit({ type: 'entries', agentId, entries: [promoted] })
     if (hold) holdOutboxEntry(streamEntry.id, agentId, streamEntry.createdAt)
     deliveredTexts.push(text)
+    // fase memoria-engramma (M5): la RISPOSTA FINALE va nella storia (in coda
+    // nel demone); nata in un turno contaminato porta il segno tainted e
+    // tornerà come dato esterno. I progressi e i risultati dei tool no
+    if (replyTurn) {
+      queueStoryIndex(agentId, { id: streamEntry.id, kind: 'assistant', text, createdAt: streamEntry.createdAt, ...(contaminated ? { tainted: true } : {}) })
+    }
     return true
   }
 
@@ -1336,6 +1344,12 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       // R1: l'id dell'entry che apre il turno finisce nel payload del job,
       // PRIMA di chiamare il modello, per poter riprendere dopo un crash
       opts.onTurnEntry?.(entry.id)
+      // fase memoria-engramma (M5): il messaggio DELL'UTENTE va nella storia
+      // (in coda nel demone, dopo il turno) — non i risvegli di sistema, non
+      // i messaggi di altri bot, non i task, i gruppi o i figli
+      if (privateHumanTurn && opts.taskId === undefined && opts.groupTurn === undefined && opts.subagent === undefined) {
+        queueStoryIndex(agentId, { id: entry.id, kind: 'user', text: userText, createdAt: entry.createdAt })
+      }
     }
 
     // fase 4: compaction della history PRIMA di costruire i messaggi — se la
@@ -4325,7 +4339,10 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           // legge — un'istruzione iniettata in una pagina, copiata in un
           // report, non diventa "fidata" quando un altro bot legge il report
           if (meta.libraryTainted) {
-            const source14 = meta.libraryTainted === 'list' ? 'search_connectors' : `libreria:${meta.libraryTainted}`
+            const source14 = meta.libraryTainted === 'list'
+              ? 'search_connectors'
+              // fase memoria-engramma (M5): una risposta passata nata da dati esterni
+              : meta.libraryTainted === 'history' ? 'search_history' : `libreria:${meta.libraryTainted}`
             finalOutput = formatExternalDataEvidence(String(source14), finalOutput)
             if (!contaminated) {
               run.turnAllows.clear()

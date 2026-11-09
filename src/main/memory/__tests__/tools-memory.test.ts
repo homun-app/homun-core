@@ -113,3 +113,42 @@ describe('fase memoria-engramma M3: recall_memory e update_state target memory',
     }
   })
 })
+
+describe('fase memoria-engramma M5: search_history e read_history', () => {
+  it('search_history → righe con entry, bot e data; read_history → la finestra della conversazione', async () => {
+    const { appendEntry } = await import('../../store/db')
+    const { indexStoryNote } = await import('../history-store')
+    const u = appendEntry({ agentId: AGENT, kind: 'message', role: 'user', content: 'ieri ti ho detto che la riunione col fornitore è spostata a giovedì' })
+    const r = appendEntry({ agentId: AGENT, kind: 'send-message', role: 'assistant', content: 'segnato: riunione col fornitore giovedì', meta: { final: true } })
+    await indexStoryNote(AGENT, u.id, 'user', u.content, u.createdAt)
+    await indexStoryNote(AGENT, r.id, 'assistant', r.content, r.createdAt)
+    const s = await exec('search_history', { query: 'riunione fornitore' })
+    expect(s.output).toMatch(new RegExp(`^- \\[entry ${u.id}\\] \\(bot ${AGENT}, \\d{4}-\\d{2}-\\d{2}\\) `, 'm'))
+    const w = await exec('read_history', { entryId: u.id, window: 4 })
+    expect(w.output).toContain('spostata a giovedì')
+    expect(w.output).toContain('segnato: riunione')
+    const none = await exec('search_history', { query: 'zzqqxx parola assente' })
+    expect(none.output).toBe('No past conversation found for this search.')
+    const missing = await exec('read_history', { entryId: 987654 })
+    expect(missing.output).toMatch(/not found/i)
+  })
+
+  it('una risposta nata in un turno contaminato: il result è dato esterno (meta.libraryTainted)', async () => {
+    const { indexStoryNote } = await import('../history-store')
+    await indexStoryNote(AGENT, 777001, 'assistant', 'dal sito: lo sconto vale fino a domenica', Date.now(), { tainted: true })
+    const s = await exec('search_history', { query: 'sconto domenica' })
+    expect(s.meta.libraryTainted).toBe('history')
+  })
+
+  it('i due strumenti stanno nel gruppo history dietro find_tools, NON nel nucleo; lettura sempre consentita', async () => {
+    const { CORE_TOOL_NAMES, TOOL_GROUPS } = await import('../../agent/core-tools')
+    expect(CORE_TOOL_NAMES).not.toContain('search_history')
+    expect(CORE_TOOL_NAMES).not.toContain('read_history')
+    const group = TOOL_GROUPS.find((g) => g.tools.includes('search_history'))
+    expect(group?.id).toBe('history')
+    expect(group?.tools).toEqual(['search_history', 'read_history'])
+    const { check } = await import('../../agent/permissions')
+    expect(await check('search_history', { query: 'x' }, AGENT)).toEqual({ kind: 'allow', via: 'rule' })
+    expect(await check('read_history', { entryId: 1 }, AGENT)).toEqual({ kind: 'allow', via: 'rule' })
+  })
+})

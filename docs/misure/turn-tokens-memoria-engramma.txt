@@ -42,3 +42,45 @@ per tool:
   document: 273
 
 diff: NESSUNO (byte identici) — prompt 1968, tools 2061, totale 4029 ≤ 4618
+
+## DOPO M5 (gruppo history dietro find_tools: search_history, read_history)
+
+## bot normale senza browser
+prompt: 1992
+tools del turno: 2082 (13 tool)
+totale prompt+tools: 4074
+per tool:
+  message_user: 129
+  ask_user: 306
+  run-command: 177
+  read-file: 94
+  write-file: 74
+  list-directory: 59
+  web_search: 100
+  web_fetch: 112
+  memory: 211
+  document: 273
+  skill: 112
+  spawn_subagent: 120
+  find_tools: 315
+gruppi (TOOL_GROUPS, tool verso il modello):
+  documents: 436 (4 tool)
+  tasks: 699 (3 tool)
+  credentials: 414 (3 tool)
+  outside: 471 (3 tool)
+  subagents: 277 (3 tool)
+  bots: 699 (7 tool)
+  connectors: 477 (4 tool)
+  apps: 228 (1 tool)
+  admin: 497 (4 tool)
+  history: 222 (2 tool)
+
+## bot normale con browser
+prompt: 2198
+tools del turno: 2105 (13 tool)
+totale prompt+tools: 4303
+per tool:
+
+diff rispetto a PRIMA: bot normale 4029→4074 (+45: riga «quando» history +24 nel prompt, indice di find_tools +21),
+con browser 4259→4303 (+44), turno di gruppo 4120→4165 (+45), figlio invariato (la whitelist esclude il gruppo).
+Gruppo history: 222 token (budget di default dei gruppi 500). Limite della fase: +150.

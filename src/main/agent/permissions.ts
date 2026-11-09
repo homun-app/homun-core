@@ -164,7 +164,9 @@ export async function check(
   // fase 4: la LETTURA di memoria e skill tocca solo i file dell'agente →
   // sempre consentita, anche con config utente personalizzata (viene prima
   // delle regole perché non ha effetti fuori dai file del bot)
-  if (tool === 'recall_memory' || tool === 'skill') {
+  // fase memoria-engramma (M5): anche la storia delle conversazioni è una
+  // lettura (search_history/read_history)
+  if (tool === 'recall_memory' || tool === 'search_history' || tool === 'read_history' || tool === 'skill') {
     return { kind: 'allow', via: 'rule' }
   }
 

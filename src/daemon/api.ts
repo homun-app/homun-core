@@ -370,9 +370,11 @@ export function buildApiMethods(
       loop.interrupt(id as string)
       cancelAgentJobs(db(), id as string)
       const elections = store.deleteAgent(id as string)
-      // fase memoria-engramma (M3): le memorie del bot eliminato si purgano
-      // (oblio vero della sua cella, in coda)
-      void import('../main/memory/memory-store').then((m) => m.purgeBotCell(id as string)).catch(() => undefined)
+      // fase memoria-engramma (M5): memorie e storia del bot eliminato si
+      // purgano IN CODA (job memory-forget-agent: la purga è lenta)
+      const { enqueueForgetAgent } = await import('../main/memory/engine')
+      enqueueForgetAgent(db(), id as string)
+      worker.poke()
       // fase 16b (S1.1): i gruppi che hanno eletto un nuovo coordinatore
       // ricevono la riga di sistema nel gruppo
       if (elections.length) {

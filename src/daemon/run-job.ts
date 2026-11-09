@@ -154,6 +154,37 @@ export function makeJobRunner(db: DatabaseSync, runTurnFn: RunTurnFn = runTurn) 
       await embedPendingAll()
       return
     }
+    // fase memoria-engramma (M5): un messaggio della conversazione entra
+    // nella cella storia — in coda, nella corsia dell'agente (dopo il turno)
+    if (job.kind === 'memory-index-story') {
+      const p = job.payload as { entryId: number; kind: 'user' | 'assistant'; text: string; createdAt: number; tainted?: boolean }
+      const { indexStoryNote } = await import('../main/memory/history-store')
+      await indexStoryNote(job.agent_id, p.entryId, p.kind, p.text, p.createdAt, p.tainted ? { tainted: true } : {})
+      return
+    }
+    // fase memoria-engramma (M5): il bot eliminato si dimentica DAVVERO —
+    // la sua cella di memorie e le sue note nella storia si purgano (la purga
+    // è lenta: sta in coda, mai nella RPC che elimina il bot)
+    if (job.kind === 'memory-forget-agent') {
+      const { purgeBotCell } = await import('../main/memory/memory-store')
+      const { purgeStoryOf } = await import('../main/memory/history-store')
+      const notes = await purgeBotCell(job.agent_id, 'bot deleted')
+      const story = await purgeStoryOf(job.agent_id)
+      console.log(`[sandbotd] bot ${job.agent_id} dimenticato: ${notes} memorie e ${story.forgotten} note di storia purgate`)
+      return
+    }
+    // fase memoria-engramma (M5): le conversazioni esistenti si indicizzano
+    // UNA volta, con l'avanzamento visibile nella sezione Memoria
+    if (job.kind === 'memory-story-backfill') {
+      const { backfillStory } = await import('../main/memory/history-store')
+      const store = await import('../main/store/db')
+      const ids = store.listAgents().map((a) => a.id)
+      const r = await backfillStory(ids, (done, total) => emit({ type: 'memory', phase: 'story-backfill', done, total }))
+      store.setSetting('memory.storyBackfilledAt', Date.now())
+      emit({ type: 'memory', phase: 'story-backfill', done: r.indexed, total: r.indexed, finished: true })
+      console.log(`[sandbotd] storia delle conversazioni indicizzata: ${r.indexed} messaggi in ${r.durationMs} ms`)
+      return
+    }
     const p = job.payload as { routineId: number; title: string; prompt: string; event?: TriggerEventPayload }
     // fase 16c (C5): la riga di routine_runs si apre quando il job parte e si
     // chiude con l'esito — il feed Attività legge da lì, non dai job

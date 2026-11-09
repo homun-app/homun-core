@@ -406,3 +406,76 @@ describe('makeJobRunner: memory-embed', () => {
     expect(runs.n).toBe(0)
   })
 })
+
+// fase memoria-engramma (M5): l'indicizzazione della storia è un job della
+// coda (asincrona, dopo il turno) e l'indicizzazione iniziale delle
+// conversazioni esistenti dice il suo avanzamento all'interfaccia
+describe('makeJobRunner: memory-index-story e memory-story-backfill', () => {
+  it('memory-index-story indicizza il messaggio nella cella storia, senza aprire turni', async () => {
+    const { mkdtempSync, rmSync } = await import('node:fs')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const dir = mkdtempSync(join(tmpdir(), 'sandbot-runjob-story-'))
+    const e = await import('../../main/memory/engine')
+    await e.openMemoryEngine({ dataDir: dir })
+    try {
+      const job = enqueueJob(db, { agentId: 'a1', kind: 'memory-index-story', payload: { entryId: 9, kind: 'user', text: 'la cena è alle otto', createdAt: 1730000000000 }, runAt: 0, now: 0 })
+      const log: Seen[] = []
+      await makeJobRunner(db, fakeTurn(log))(job, emit)
+      expect(log).toEqual([])
+      const { searchHistory } = await import('../../main/memory/history-store')
+      expect((await searchHistory('cena otto')).length).toBe(1)
+    } finally {
+      await e.closeMemoryEngine()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('memory-story-backfill emette l\'avanzamento (evento memory, fase story-backfill)', async () => {
+    const { mkdtempSync, rmSync } = await import('node:fs')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const dir = mkdtempSync(join(tmpdir(), 'sandbot-runjob-backfill-'))
+    const store = await import('../../main/store/db')
+    store.setDataDir(dir)
+    const e = await import('../../main/memory/engine')
+    await e.openMemoryEngine({ dataDir: dir })
+    try {
+      const a = store.createAgent('Storico')
+      store.appendEntry({ agentId: a.id, kind: 'message', role: 'user', content: 'messaggio vecchio da indicizzare' })
+      const events: Array<{ type: string; phase?: string; done?: number; total?: number }> = []
+      const job = enqueueJob(db, { agentId: a.id, kind: 'memory-story-backfill', payload: {}, runAt: 0, now: 0 })
+      await makeJobRunner(db, fakeTurn([]))(job, (ev) => { events.push(ev as never) })
+      const progress = events.filter((ev) => ev.type === 'memory' && ev.phase === 'story-backfill')
+      expect(progress.at(-1)).toMatchObject({ done: 1, total: 1 })
+      expect(store.getSetting<number | null>('memory.storyBackfilledAt', null)).not.toBeNull()
+    } finally {
+      await e.closeMemoryEngine()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('makeJobRunner: memory-forget-agent', () => {
+  it('purga cella memorie e note di storia del bot eliminato', async () => {
+    const { mkdtempSync, rmSync } = await import('node:fs')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const dir = mkdtempSync(join(tmpdir(), 'sandbot-runjob-forget-'))
+    const e = await import('../../main/memory/engine')
+    await e.openMemoryEngine({ dataDir: dir })
+    try {
+      const { writeMemoryNote } = await import('../../main/memory/memory-store')
+      const { indexStoryNote, searchHistory } = await import('../../main/memory/history-store')
+      await writeMemoryNote('agent_g1', { content: 'privata del bot eliminato', tier: 'core', source: 's', userTurn: true })
+      await indexStoryNote('agent_g1', 5, 'user', 'conversazione da dimenticare', 1730000000000)
+      const job = enqueueJob(db, { agentId: 'agent_g1', kind: 'memory-forget-agent', payload: {}, runAt: 0, now: 0 })
+      await makeJobRunner(db, fakeTurn([]))(job, emit)
+      expect((await searchHistory('dimenticare'))).toEqual([])
+      expect(await (await e.botCell('agent_g1')).list({ limit: 100 })).toEqual([])
+    } finally {
+      await e.closeMemoryEngine()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})

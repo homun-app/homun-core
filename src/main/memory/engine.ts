@@ -459,6 +459,38 @@ export const EMBED_JOB_DELAY_MS = 20_000
  * incorpora le note ancora senza vettore, SOLO se il modello c'è; se non c'è
  * non fa nulla — il modello non si scarica mai da solo.
  */
+/**
+ * Accoda l'indicizzazione di un messaggio nella cella «storia» (M5): ogni
+ * messaggio dell'utente e ogni risposta finale del bot, mai dentro il turno.
+ * Il payload porta il testo del messaggio: sta nella coda del demone (il DB
+ * locale), non nei log.
+ */
+export function enqueueStoryIndex(
+  db: DatabaseSync,
+  agentId: string,
+  entry: { id: number; kind: 'user' | 'assistant'; text: string; createdAt: number },
+  now = Date.now()
+): void {
+  enqueueJob(db, {
+    agentId, kind: 'memory-index-story', now, runAt: now,
+    payload: { entryId: entry.id, kind: entry.kind, text: entry.text, createdAt: entry.createdAt }
+  })
+}
+
+/**
+ * La coda dell'oblio di un bot ELIMINATO (M5): purga la sua cella di memorie
+ * e le sue note nella storia (l'eliminazione della conversazione). La purga
+ * è lenta (riscrive la cella): sta in coda, mai nella RPC.
+ */
+export function enqueueForgetAgent(db: DatabaseSync, agentId: string, now = Date.now()): void {
+  enqueueJob(db, { agentId, kind: 'memory-forget-agent', payload: {}, runAt: now, now })
+}
+
+/** La coda dell'indicizzazione iniziale delle conversazioni esistenti (M5). */
+export function enqueueStoryBackfill(db: DatabaseSync, agentId: string, now = Date.now()): void {
+  enqueueJob(db, { agentId, kind: 'memory-story-backfill', payload: {}, runAt: now, now })
+}
+
 export function enqueueEmbedPending(db: DatabaseSync, agentId: string, now = Date.now()): void {
   const queued = db
     .prepare("SELECT COUNT(*) AS n FROM jobs WHERE kind = 'memory-embed' AND status IN ('queued','leased') AND agent_id = ?")

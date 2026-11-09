@@ -69,7 +69,8 @@ export const GROUP_WHEN: Readonly<Record<string, string>> = {
   bots: 'other bots, teams and groups',
   connectors: 'user wants a service, app or documentation "inside" you → search connectors, never a key in chat',
   apps: 'guide the user on a website or app they use with an account → open it with use-app',
-  admin: 'save a procedure as a skill, permission rules, files with the Mac'
+  admin: 'save a procedure as a skill, permission rules, files with the Mac',
+  history: 'the user refers to an earlier conversation ("do you remember", yesterday, last week)'
 }
 
 /** La riga di un gruppo: `- <id>: <quando serve>` (≤ 110 caratteri; i mcp:<server> hanno una riga generica). */
