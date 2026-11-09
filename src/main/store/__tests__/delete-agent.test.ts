@@ -106,3 +106,52 @@ describe('deleteAgent(padre): ferma ed elimina i sottoagenti', () => {
     expect(jobsLeft).toEqual([otherJob.id])
   })
 })
+
+// ---- fase memoria-engramma · correzioni 2 (R2): un bot eliminato non
+// lascia il testo dei messaggi nella tabella jobs ----
+
+describe('correzioni 2 R2: deleteAgent cancella TUTTI i job del bot; l\'oblio gira lo stesso', () => {
+  it('nessuna riga in jobs col testo; il job memory-forget-agent (accodato DOPO, come la RPC) fa sparire le celle', async () => {
+    const e = await import('../../memory/engine')
+    await e.closeMemoryEngine()
+    expect((await e.openMemoryEngine({ dataDir: join(dir, 'mem-r2') })).available).toBe(true)
+    const { writeMemoryNote } = await import('../../memory/memory-store')
+    const { indexStoryNote } = await import('../../memory/history-store')
+    const { enqueueJob } = await import('../jobs')
+
+    const bot = createAgent('Sporco di job', '')
+    const other = createAgent('Altro R2', '')
+    // job FATTI e FALLITI col testo del messaggio (come le versioni prima
+    // della R3), più uno in coda: cancelAgentJobs porta via solo i queued
+    const done = enqueueJob(db(), { agentId: bot.id, kind: 'user-message', payload: { text: 'TESTO-SEGRETO-R2 done' }, runAt: 1, now: 1 })
+    db().prepare("UPDATE jobs SET status = 'done' WHERE id = ?").run(done.id)
+    const failed = enqueueJob(db(), { agentId: bot.id, kind: 'user-message', payload: { text: 'TESTO-SEGRETO-R2 failed' }, runAt: 1, now: 1 })
+    db().prepare("UPDATE jobs SET status = 'failed' WHERE id = ?").run(failed.id)
+    enqueueJob(db(), { agentId: bot.id, kind: 'user-message', payload: { text: 'TESTO-SEGRETO-R2 queued' }, runAt: 1, now: 1 })
+    const otherJob = enqueueJob(db(), { agentId: other.id, kind: 'user-message', payload: { text: 'messaggio dell altro bot' }, runAt: 1, now: 1 })
+
+    // memorie e storia del bot: le celle che l'oblio deve far sparire
+    await writeMemoryNote(bot.id, { content: 'memoria privata del bot R2', tier: 'core', source: 'test', userTurn: true })
+    await indexStoryNote(bot.id, 7, 'user', 'conversazione da dimenticare R2', 1_730_000_000_000)
+
+    deleteAgent(bot.id)
+
+    // in jobs NON resta NESSUNA riga del bot — né col testo, né senza
+    expect((db().prepare('SELECT payload_json FROM jobs WHERE agent_id = ?').all(bot.id))).toEqual([])
+    const rawAll = JSON.stringify(db().prepare('SELECT payload_json FROM jobs').all())
+    expect(rawAll).not.toContain('TESTO-SEGRETO-R2')
+    // i job dell'ALTRO bot restano
+    expect((db().prepare('SELECT COUNT(*) AS n FROM jobs WHERE id = ?').get(otherJob.id) as { n: number }).n).toBe(1)
+
+    // l'oblio: come agents:delete della RPC — enqueueForgetAgent DOPO la
+    // cancellazione (l'ordine che fa sopravvivere il job al DELETE)
+    const { enqueueForgetAgent } = e
+    const forget = enqueueForgetAgent(db(), bot.id)
+    expect(forget.kind).toBe('memory-forget-agent')
+    const { makeJobRunner } = await import('../../../daemon/run-job')
+    await makeJobRunner(db())(forget, () => undefined)
+    const engine = await e.memoryEngine()
+    expect(await engine.cells()).toEqual(expect.not.arrayContaining([`bot-${bot.id}`, `storia-${bot.id}`]))
+    await e.closeMemoryEngine()
+  })
+})

@@ -402,6 +402,14 @@ export function deleteAgent(id: string): Array<{ groupId: number; coordinatorId:
   for (const r of db().prepare('SELECT id FROM routines WHERE agent_id = ?').all(id) as Array<{ id: number }>) {
     db().prepare('DELETE FROM settings WHERE key = ?').run(`trigger.seen.${r.id}`)
   }
+  // fase memoria-engramma · correzioni 2 (R2): anche TUTTI i job del bot, in
+  // OGNI stato — cancelAgentJobs (chiamata prima, da agents:delete e dal tool
+  // delete_agent) porta via solo i queued/leased: i done/failed restavano per
+  // sempre, e i user-message portano il TESTO del messaggio nel payload.
+  // Il job memory-forget-agent non esiste ancora: i due chiamanti lo accodano
+  // DOPO deleteAgent (api.ts agents:delete e tools.ts delete_agent), e così
+  // sopravvive a questo DELETE
+  db().prepare('DELETE FROM jobs WHERE agent_id = ?').run(id)
   db().prepare('DELETE FROM routines WHERE agent_id = ?').run(id)
   db().prepare('DELETE FROM outbox WHERE agent_id = ?').run(id)
   // fase 10: l'agente esce dai gruppi (i gruppi restano, senza di lui).
