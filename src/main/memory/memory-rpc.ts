@@ -17,7 +17,7 @@
 import type {
   EngrammaNoteView, EngrammaSearchHit, EngrammaCell, EngrammaListFilter
 } from './engine'
-import { botCell, userCell, memoryEngineStatus, botCellName, USER_CELL } from './engine'
+import { botCell, userCell, memoryEngineStatus, botCellName, USER_CELL, listAll } from './engine'
 import { locateMemoryNote, writeMemoryNote, updateMemoryNote, MemoryNoteError } from './memory-store'
 import type {
   MemoryNoteInfo, MemoryNoteDetail, MemorySearchHitInfo, MemoryOverview, MemoryPurgeResult
@@ -62,7 +62,7 @@ async function ownerCell(agentId: string, owner: 'bot' | 'user'): Promise<Engram
  * per sempre; senza filtro di stato restano le note VIVE (attive e in attesa
  * di conferma).
  */
-export async function memoryList(agentId: string, opts: { owner?: 'bot' | 'user'; tier?: 'core' | 'log'; status?: 'active' | 'quarantined' | 'deleted'; limit?: number; offset?: number } = {}): Promise<{ notes: MemoryNoteInfo[]; total: number }> {
+export async function memoryList(agentId: string, opts: { owner?: 'bot' | 'user'; tier?: 'core' | 'log'; status?: 'active' | 'quarantined' | 'deleted'; limit?: number; offset?: number } = {}): Promise<{ notes: MemoryNoteInfo[]; more: boolean }> {
   const owner = opts.owner === 'user' ? 'user' : 'bot'
   const cell = await ownerCell(agentId, owner)
   const limit = Math.min(Math.max(opts.limit ?? 100, 1), 1000)
@@ -70,12 +70,15 @@ export async function memoryList(agentId: string, opts: { owner?: 'bot' | 'user'
   // senza filtro di stato: tutte le note vive (attive e in attesa di conferma)
   const filter: EngrammaListFilter = {
     status: opts.status ? [opts.status] : ['active', 'quarantined'],
-    limit: 100_000
+    // correzioni C5: la pagina la fa il MOTORE (limit+offset), non slice in
+    // JS; una riga in più dice se c'è dell'altro
+    limit: limit + 1,
+    offset
   }
   if (opts.tier) filter.tags = [opts.tier]
-  const all = await cell.list(filter)
-  const page = all.slice(offset, offset + limit)
-  return { notes: page.map((n) => toNoteInfo(n, owner)), total: all.length }
+  const page = await cell.list(filter)
+  const more = page.length > limit
+  return { notes: page.slice(0, limit).map((n) => toNoteInfo(n, owner)), more }
 }
 
 /** Il dettaglio: la nota (o la lapide) e lo storico delle versioni. */
@@ -125,11 +128,12 @@ export async function memoryOverview(agentId: string, getSetting: <T>(key: strin
       // deleted = le lapidi (correzioni C4: si vedono e si dimenticano)
       const bot = await botCell(agentId)
       const user = await userCell(null)
+      // correzioni C5: i conteggi a pagine (listAll) — contano TUTTE le note
       const [own, shared, botDead, userDead] = await Promise.all([
-        bot.list({ status: ['active', 'quarantined'], limit: 100_000 }),
-        user.list({ status: ['active', 'quarantined'], limit: 100_000 }),
-        bot.list({ status: ['deleted'], limit: 100_000 }),
-        user.list({ status: ['deleted'], limit: 100_000 })
+        listAll(bot, { status: ['active', 'quarantined'] }),
+        listAll(user, { status: ['active', 'quarantined'] }),
+        listAll(bot, { status: ['deleted'] }),
+        listAll(user, { status: ['deleted'] })
       ])
       const pending = [...own, ...shared].filter((n) => n.status === 'quarantined').length
       counts = { own: own.length, shared: shared.length, pending, deleted: botDead.length + userDead.length }

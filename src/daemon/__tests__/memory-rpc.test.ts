@@ -38,16 +38,17 @@ afterAll(async () => {
 
 describe('fase memoria-engramma M6: elenco, filtri e dettaglio', () => {
   it('memory:list per bot e condiviso, con filtri tier e stato', async () => {
-    const r = (await api['memory:list']([AGENT, { owner: 'bot' }])) as { notes: Array<{ body: string; tier: string; status: string; shortId: string }>; total: number }
-    expect(r.total).toBe(3) // core, log e la quarantena del bot
+    const r = (await api['memory:list']([AGENT, { owner: 'bot', limit: 100 }])) as { notes: Array<{ body: string; tier: string; status: string; shortId: string }>; more: boolean }
+    expect(r.notes).toHaveLength(3) // core, log e la quarantena del bot
+    expect(r.more).toBe(false)
     expect(r.notes.filter((n) => n.status === 'quarantined')).toHaveLength(1)
-    const shared = (await api['memory:list']([AGENT, { owner: 'user' }])) as { notes: Array<{ body: string }>; total: number }
-    expect(shared.total).toBe(1)
+    const shared = (await api['memory:list']([AGENT, { owner: 'user' }])) as { notes: Array<{ body: string }>; more: boolean }
+    expect(shared.notes).toHaveLength(1)
     expect(shared.notes[0]!.body).toContain('lingua italiana')
-    const core = (await api['memory:list']([AGENT, { owner: 'bot', tier: 'core' }])) as { total: number }
-    expect(core.total).toBe(1)
-    const pending = (await api['memory:list']([AGENT, { owner: 'bot', status: 'quarantined' }])) as { total: number }
-    expect(pending.total).toBe(1)
+    const core = (await api['memory:list']([AGENT, { owner: 'bot', tier: 'core' }])) as { notes: unknown[]; more: boolean }
+    expect(core.notes).toHaveLength(1)
+    const pending = (await api['memory:list']([AGENT, { owner: 'bot', status: 'quarantined' }])) as { notes: unknown[]; more: boolean }
+    expect(pending.notes).toHaveLength(1)
   })
 
   it('la nota porta la fonte della conversazione (bot, entry) quando c\'è', async () => {
@@ -83,14 +84,14 @@ describe('fase memoria-engramma M6: conferma, scarta, lapide, ripristino', () =>
     const listed = (await api['memory:list']([AGENT, { owner: 'bot', status: 'quarantined' }])) as { notes: Array<{ shortId: string; body: string }> }
     const id = listed.notes[0]!.shortId
     await api['memory:confirm']([AGENT, id])
-    const after = (await api['memory:list']([AGENT, { owner: 'bot', status: 'quarantined' }])) as { total: number }
-    expect(after.total).toBe(0)
+    const after = (await api['memory:list']([AGENT, { owner: 'bot', status: 'quarantined' }])) as { notes: unknown[]; more: boolean }
+    expect(after.notes).toHaveLength(0)
     // una seconda quarantena si scarta
     const { writeMemoryNote } = await import('../../main/memory/memory-store')
     await writeMemoryNote(AGENT, { content: 'altra voce non confermata dal web', tier: 'log', source: 's', contaminated: true })
     const q = (await api['memory:list']([AGENT, { owner: 'bot', status: 'quarantined' }])) as { notes: Array<{ shortId: string }> }
     await api['memory:discard']([AGENT, q.notes[0]!.shortId])
-    expect(((await api['memory:list']([AGENT, { owner: 'bot', status: 'quarantined' }])) as { total: number }).total).toBe(0)
+    expect(((await api['memory:list']([AGENT, { owner: 'bot', status: 'quarantined' }])) as { notes: unknown[] }).notes).toHaveLength(0)
   })
 
   it('Elimina: lapide; il RIPRISTINO dallo storico la riporta attiva', async () => {

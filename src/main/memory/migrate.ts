@@ -21,7 +21,7 @@ import { mkdirSync, readdirSync, renameSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { dataDir } from '../store/db'
 import { parseMemoryFile, memoryDir, type MemoryRecord } from '../agent/memory'
-import { botCell, userCell } from './engine'
+import { botCell, userCell, listAll } from './engine'
 
 export interface MigrationSummary {
   migrated: number
@@ -89,9 +89,10 @@ export async function migrateLegacyMemories(agentIds: string[], opts: { now?: ()
       // la cella giusta: bot-<id> per lo scope agent, utente per lo user
       // (la migrazione della cella utente scrive con l'actor dell'interfaccia)
       const cell = scope === 'user' ? await userCell(null) : await botCell(agentId)
-      // marcatore: gli x-homun.id GIÀ nella cella non si riscrivono
+      // marcatore: gli x-homun.id GIÀ nella cella non si riscrivono (correzioni
+      // C5: a pagine — il vecchio limit enorme si fermava al tetto del motore)
       const existing = new Set(
-        (await cell.list({ limit: 1_000_000 }))
+        (await listAll(cell))
           .map((n) => (n.extensions['x-homun'] as { id?: string } | undefined)?.id)
           .filter((id): id is string => typeof id === 'string')
       )

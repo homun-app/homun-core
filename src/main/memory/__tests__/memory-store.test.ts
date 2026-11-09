@@ -274,9 +274,9 @@ describe('fase memoria-engramma · correzioni C4: le lapidi si vedono e si dimen
     expect(deleted.notes).toHaveLength(1)
     expect(deleted.notes[0]!.status).toBe('deleted')
     expect(deleted.notes[0]!.body).toBe(SECRET)
-    expect(deleted.total).toBe(1)
+    expect(deleted.more).toBe(false)
     // e le attive non la vedono
-    expect((await memoryList('agent_c4', { status: 'active' })).total).toBe(1)
+    expect((await memoryList('agent_c4', { status: 'active' })).notes).toHaveLength(1)
     // il conteggio della sezione porta le eliminate
     const ov = await memoryOverview('agent_c4', getSetting)
     expect(ov.counts.deleted).toBe(1)
@@ -304,7 +304,7 @@ describe('fase memoria-engramma · correzioni C4: le lapidi si vedono e si dimen
     }
     // dopo la purga la lista delle eliminate è vuota
     await e.openMemoryEngine({ dataDir: dir })
-    expect((await memoryList('agent_c4', { status: 'deleted' })).total).toBe(0)
+    expect((await memoryList('agent_c4', { status: 'deleted' })).notes).toEqual([])
     await e.closeMemoryEngine()
   })
 

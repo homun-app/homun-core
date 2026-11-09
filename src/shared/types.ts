@@ -911,7 +911,7 @@ export interface SandbotApi {
   // memoria (fase 4): sezione nella vista dell'agente, modifica ed eliminazione
   // fase memoria-engramma (M6): la sezione Memoria sul motore Engramma
   memoryOverview(agentId: string): Promise<MemoryOverview>
-  memoryList(agentId: string, opts: { owner: 'bot' | 'user'; tier?: 'core' | 'log'; status?: 'active' | 'quarantined' | 'deleted'; limit?: number; offset?: number }): Promise<{ notes: MemoryNoteInfo[]; total: number }>
+  memoryList(agentId: string, opts: { owner: 'bot' | 'user'; tier?: 'core' | 'log'; status?: 'active' | 'quarantined' | 'deleted'; limit?: number; offset?: number }): Promise<{ notes: MemoryNoteInfo[]; more: boolean }>
   memorySearch(agentId: string, query: string, opts?: { explain?: boolean }): Promise<MemorySearchHitInfo[]>
   memoryNote(agentId: string, id: string): Promise<MemoryNoteDetail>
   memorySave(agentId: string, input: { id?: string; body: string; tier: 'core' | 'log'; scope?: 'agent' | 'user' }): Promise<MemoryNoteInfo>

@@ -26,7 +26,7 @@
 import type { EngrammaNoteView, EngrammaSearchHit } from './engine'
 import {
   botCell, userCell, memoryCell, memoryEngine, ensureSearchCells, USER_CELL, botCellName,
-  enqueueEmbedPending, MemoryUnavailableError, type EngrammaCell
+  enqueueEmbedPending, listAll, MemoryUnavailableError, type EngrammaCell
 } from './engine'
 import { isSafeMemoryId, memorySectionPrompt, estimateTokensOf, type MemoryRecord, type MemoryTier, type MemoryScope } from '../agent/memory'
 
@@ -124,9 +124,10 @@ export async function locateMemoryNote(agentId: string, id: string, opts: Writer
     const cell = await cellFor(agentId, scope, opts.byUser)
     const active = await cell.get(id)
     if (active) return { scope, state: 'active', id: active.id, note: active }
-    const quarantined = (await cell.list({ status: ['quarantined'], limit: 100_000 })).find((n) => matches(n.id))
+    // correzioni C5: a pagine (listAll) — una nota oltre la millesima si trova uguale
+    const quarantined = (await listAll(cell, { status: ['quarantined'] })).find((n) => matches(n.id))
     if (quarantined) return { scope, state: 'quarantined', id: quarantined.id, note: quarantined }
-    const deleted = (await cell.list({ status: ['deleted'], limit: 100_000 })).find((n) => matches(n.id))
+    const deleted = (await listAll(cell, { status: ['deleted'] })).find((n) => matches(n.id))
     if (deleted) return { scope, state: 'deleted', id: deleted.id, note: deleted }
   }
   return null
@@ -276,9 +277,10 @@ function toRecord(n: EngrammaNoteView, scope: MemoryScope): MemoryRecord {
  */
 export async function listActiveMemoryRecords(agentId: string): Promise<MemoryRecord[]> {
   const [bot, user] = [await botCell(agentId), await userCell(agentId)]
+  // correzioni C5: a pagine (listAll) — tutte le attive, oltre ogni tetto
   const [own, shared] = await Promise.all([
-    bot.list({ status: ['active'], limit: 100_000 }),
-    user.list({ status: ['active'], limit: 100_000 })
+    listAll(bot, { status: ['active'] }),
+    listAll(user, { status: ['active'] })
   ])
   return [...own.map((n) => toRecord(n, 'agent')), ...shared.map((n) => toRecord(n, 'user'))]
 }

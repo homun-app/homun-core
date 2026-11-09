@@ -450,6 +450,24 @@ export function userCell(writerAgentId: string | null): Promise<EngrammaCell> {
   return memoryCell(USER_CELL, writerAgentId ? botActor(writerAgentId) : 'homun:user')
 }
 
+/**
+ * Correzioni C5: TUTTE le note di un filtro, a pagine di 1000 fino a una
+ * pagina corta — dove serve davvero tutto (il marcatore della migrazione, i
+ * conteggi, cercare per id), senza tetto e senza fidarsi di un limite enorme
+ * consegnato al motore.
+ */
+export async function listAll(cell: EngrammaCell, filter: EngrammaListFilter = {}): Promise<EngrammaNoteView[]> {
+  const PAGE = 1000
+  const out: EngrammaNoteView[] = []
+  let offset = 0
+  for (;;) {
+    const page = await cell.list({ ...filter, limit: PAGE, offset })
+    out.push(...page)
+    if (page.length < PAGE) return out
+    offset += PAGE
+  }
+}
+
 /** L'esito di dropCellAndEvict (i numeri del DropView, senza contenuti). */
 export interface DroppedCellView {
   /** NOT_FOUND: la cella non c'è (o non c'è più) — vale «già dimenticata» */
