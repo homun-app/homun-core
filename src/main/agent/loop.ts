@@ -4411,7 +4411,11 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             const source14 = meta.libraryTainted === 'list'
               ? 'search_connectors'
               // fase memoria-engramma (M5): una risposta passata nata da dati esterni
-              : meta.libraryTainted === 'history' ? 'search_history' : `libreria:${meta.libraryTainted}`
+              // (correzioni 2, R1: read_history usa lo stesso meta 'history' — la
+              // fonte vera dice QUALE dei due tool l'ha portata)
+              : meta.libraryTainted === 'history'
+                ? (call.name === 'read_history' ? 'read_history' : 'search_history')
+                : `libreria:${meta.libraryTainted}`
             finalOutput = formatExternalDataEvidence(String(source14), finalOutput)
             if (!contaminated) {
               run.turnAllows.clear()

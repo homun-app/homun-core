@@ -1633,6 +1633,37 @@ describe('fase 4: memoria e skill nel system prompt', () => {
     }
   })
 
+  it('correzioni 2 · R1: read_history di una finestra contaminata è DATO ESTERNO e contamina il turno', async () => {
+    // la conversazione di UNA RISPOSTA FA: una risposta finale nata in un
+    // turno contaminato (meta.contaminated, come la scrive il loop alla C1)
+    h.db.entries.push(
+      { id: h.db.nextId++, agentId: AGENT, kind: 'message', role: 'user', content: 'che codice sconto c\'è sul sito?', meta: null, createdAt: Date.now() },
+      { id: h.db.nextId++, agentId: AGENT, kind: 'send-message', role: 'assistant', content: 'secondo il sito il codice sconto è ZEBRA42', meta: { final: true, contaminated: true }, createdAt: Date.now() }
+    )
+    const taintedId = h.db.entries[1]!.id
+    // il gruppo history NON è attivo: la prima chiamata per nome LO ATTIVA
+    // (firma compatta), la seconda esegue DAVVERO — poi il turno chiude
+    h.llm.queue = [
+      { toolCalls: [{ id: 'rh1', name: 'read_history', arguments: JSON.stringify({ entryId: taintedId }) }] },
+      { toolCalls: [{ id: 'rh2', name: 'read_history', arguments: JSON.stringify({ entryId: taintedId }) }] },
+      { text: 'Ecco la finestra dello sconto.' }
+    ]
+    await runTurn(AGENT, 'rileggi la chat dello sconto', emit)
+    // il result della chiamata VERA è incartato come dato esterno, con la
+    // fonte CHE LO PORTA (read_history, non search_history)
+    const wrapped = h.db.entries.find((e) => e.kind === 'tool-result' && e.content.includes('ZEBRA42'))
+    expect(wrapped).toBeDefined()
+    expect(wrapped!.content).toContain('<dato_esterno fonte="read_history">')
+    expect(wrapped!.meta?.libraryTainted).toBe('history')
+    // e il turno PULITO che ha letto risulta contaminato: la risposta finale
+    // porta meta.contaminated (vale per la storia, C1)
+    const finalEntry = h.db.entries.find((e) => e.kind === 'send-message' && e.meta?.final === true)
+    expect(finalEntry?.meta?.contaminated).toBe(true)
+    // e il modello ha VISTO il blocco dato esterno, non il testo fidato
+    const saw = h.llm.calls.flat().some((m) => String(m?.content ?? '').includes('<dato_esterno fonte="read_history">'))
+    expect(saw).toBe(true)
+  })
+
   it('nel system solo nome e descrizione delle skill; il corpo arriva col tool skill()', async () => {
     const { writeSkillFromBot } = await import('../skills')
     writeSkillFromBot(AGENT, { name: 'triage', description: 'smista la posta', content: 'CORPO SEGRETO della skill' })

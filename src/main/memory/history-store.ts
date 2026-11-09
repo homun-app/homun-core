@@ -237,12 +237,26 @@ export async function searchHistory(
   return engine.search([name], { text: query, k, mode, graphHops: 1 })
 }
 
+/** La finestra del transcript attorno a un entry id (correzioni 2, R1). */
+export interface HistoryWindow {
+  /** Le righe per il modello: `- [entry <id>] user|bot: testo`. */
+  text: string
+  /**
+   * True se nella finestra c'è una risposta nata da dati esterni
+   * (storyTaintedOf: meta.contaminated o la regola C3): TUTTO il result
+   * del tool è allora un dato esterno (meta.libraryTainted = 'history').
+   */
+  tainted: boolean
+}
+
 /**
  * La finestra del transcript attorno a un entry id: i messaggi dell'utente e
  * le risposte FINALI del bot (i tool e i messaggi intermedi non sono
  * conversazione). Testo per il modello, null se l'entry non esiste.
+ * Correzioni 2 (R1): porta anche la provenienza — basta UNA risposta
+ * contaminata nella finestra per rendere tainted tutto ciò che si legge.
  */
-export async function readHistoryWindow(agentId: string, entryId: number, windowSize = 6): Promise<string | null> {
+export async function readHistoryWindow(agentId: string, entryId: number, windowSize = 6): Promise<HistoryWindow | null> {
   const all = getEntries(agentId)
   const conversation = all.filter((e) => isConversationEntry(e) !== null)
   const at = conversation.findIndex((e) => e.id === entryId)
@@ -251,13 +265,17 @@ export async function readHistoryWindow(agentId: string, entryId: number, window
   const half = Math.max(0, Math.floor((windowSize - 1) / 2))
   const from = Math.max(0, at - half)
   const to = Math.min(conversation.length, from + Math.max(1, windowSize))
-  return conversation.slice(from, to)
-    .map((e) => {
-      const who = e.kind === 'message' ? 'user' : 'bot'
-      const text = e.content.replace(/\n+/g, ' ').slice(0, 2000)
-      return `- [entry ${e.id}] ${who}: ${text}`
-    })
-    .join('\n')
+  const rows = conversation.slice(from, to)
+  return {
+    text: rows
+      .map((e) => {
+        const who = e.kind === 'message' ? 'user' : 'bot'
+        const text = e.content.replace(/\n+/g, ' ').slice(0, 2000)
+        return `- [entry ${e.id}] ${who}: ${text}`
+      })
+      .join('\n'),
+    tainted: rows.some((e) => storyTaintedOf(e, e.createdAt))
+  }
 }
 
 

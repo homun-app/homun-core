@@ -1355,7 +1355,10 @@ export async function executeTool(
         const { readHistoryWindow } = await import('../memory/history-store')
         const out = await readHistoryWindow(bot, entryId, windowSize)
         if (out === null) return { output: `Entry ${entryId} not found in the conversation of bot ${bot} (pass bot with the id from search_history).`, meta: {} }
-        return { output: out, meta: {} }
+        // correzioni 2 (R1): una finestra che contiene una risposta nata da
+        // dati esterni è essa stessa un DATO ESTERNO — il meta lo dice e il
+        // loop la incarta e contamina il turno (come search_history)
+        return { output: out.text, meta: out.tainted ? { libraryTainted: 'history' } : {} }
       } catch (e) {
         return { output: memoryErrorText(e), meta: { error: true } }
       }

@@ -86,17 +86,25 @@ describe('fase memoria-engramma · correzioni C2: la storia per bot', () => {
     appendEntry({ agentId: 'agent_w', kind: 'send-message', role: 'assistant', content: 'risposta finale', meta: { final: true } })
     appendEntry({ agentId: 'agent_w', kind: 'send-message', role: 'assistant', content: 'messaggio intermedio' })
     const out = await readHistoryWindow('agent_w', a3.id, 6)
-    expect(out).toMatch(/primo messaggio/)
-    expect(out).toMatch(/secondo messaggio/)
-    expect(out).toMatch(/risposta finale/)
-    expect(out).not.toMatch(/messaggio intermedio/) // i tool e i non-finali NON sono conversazione
-    expect(out).not.toMatch(/web_search/)
+    expect(out!.text).toMatch(/primo messaggio/)
+    expect(out!.text).toMatch(/secondo messaggio/)
+    expect(out!.text).toMatch(/risposta finale/)
+    expect(out!.text).not.toMatch(/messaggio intermedio/) // i tool e i non-finali NON sono conversazione
+    expect(out!.text).not.toMatch(/web_search/)
+    // correzioni 2 (R1): risposte pulite e messaggi utente → finestra pulita
+    expect(out!.tainted).toBe(false)
     // la finestra: con window 2 si vede solo il messaggio chiesto
     const small = await readHistoryWindow('agent_w', a3.id, 2)
-    expect(small).toMatch(/secondo messaggio/)
-    expect(small).not.toMatch(/primo messaggio/)
+    expect(small!.text).toMatch(/secondo messaggio/)
+    expect(small!.text).not.toMatch(/primo messaggio/)
+    expect(small!.tainted).toBe(false)
     // entry che non esiste: null (il tool lo dice al modello)
     expect(await readHistoryWindow('agent_w', 999999, 6)).toBeNull()
+    // e una finestra con una risposta CONTAMINATA porta tainted (R1)
+    const bad = appendEntry({ agentId: 'agent_w', kind: 'send-message', role: 'assistant', content: 'secondo il sito: ZEBRA99', meta: { final: true, contaminated: true } })
+    const tainted = await readHistoryWindow('agent_w', bad.id, 6)
+    expect(tainted!.tainted).toBe(true)
+    void a1
     await e.closeMemoryEngine()
   })
 })
