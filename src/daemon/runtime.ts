@@ -626,6 +626,17 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
     if (cleared > 0) console.log(`[sandbotd] ${cleared} job della storia ripuliti del testo nel payload`)
   }
 
+  // fase memoria-engramma · correzioni 2 (R3): i job user-message fatti o
+  // falliti dalle versioni precedenti portano il testo del messaggio nel
+  // payload — si svuota UNA volta; da adesso li svuota il passaggio a
+  // done/failed (il testo vive già nelle entry, dove l'utente lo vede)
+  if (!getSetting<boolean>('jobs.userMessagesCleared', false)) {
+    const { clearUserMessageJobPayloads } = await import('../main/store/jobs')
+    const cleared = clearUserMessageJobPayloads(database)
+    setSetting('jobs.userMessagesCleared', true)
+    if (cleared > 0) console.log(`[sandbotd] ${cleared} job user-message ripuliti del testo nel payload`)
+  }
+
   // fase memoria-engramma (M5): il loop consegna i messaggi della
   // conversazione alla coda della storia (job memory-index-story, nella
   // corsia dell'agente: partono DOPO il turno, mai dentro)

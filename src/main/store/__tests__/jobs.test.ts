@@ -209,3 +209,57 @@ describe('claimDueJobs col tetto maxSubagentLeases', () => {
     expect(claimDueJobs(db, NOW, LEASE, 5)).toHaveLength(4)
   })
 })
+
+// ---- fase memoria-engramma · correzioni 2 (R3): il job user-message
+// finito non tiene il TESTO del messaggio per sempre — chi legge il payload
+// di un job done/failed? Nessuno (il runner legge i job che esegue, la
+// ripresa usa payload.entryId finché il job può ancora girare, la UI non
+// guarda la tabella jobs): il testo vive già nelle entry ----
+
+describe('correzioni 2 R3: il payload del user-message si svuota a fine corsa', () => {
+  it('completeJob svuota il payload dei user-message; gli altri kind lo tengono', () => {
+    const um = userMsg('a1')
+    const rr = enqueueJob(db, { agentId: 'a2', kind: 'routine-run', payload: { routineId: 7, title: 'Backup', prompt: 'fai il backup' }, runAt: NOW, now: NOW })
+    completeJob(db, um.id)
+    expect(getJobById(db, um.id)!.status).toBe('done')
+    expect(getJobById(db, um.id)!.payload).toEqual({})
+    completeJob(db, rr.id)
+    expect(getJobById(db, rr.id)!.status).toBe('done')
+    expect(getJobById(db, rr.id)!.payload).toEqual({ routineId: 7, title: 'Backup', prompt: 'fai il backup' })
+  })
+
+  it('failJob TERMINALE svuota; il retry NON tocca il payload (la ripresa usa entryId)', () => {
+    userMsg('a1')
+    let job = claimDueJobs(db, NOW, LEASE)[0]! // attempts 1
+    for (let n = 1; n < MAX_ATTEMPTS; n++) {
+      expect(failJob(db, job, NOW + n * 60_000, `err${n}`)).toBe('retry')
+      // il retry torna queued col payload INTATTO: payload.entryId serve alla ripresa
+      const again = getJobById(db, job.id)!
+      expect(again.payload.text).toBe('ciao')
+      job = claimDueJobs(db, NOW + n * 60_000 + 300_000, LEASE)[0]!
+    }
+    expect(failJob(db, job, NOW + 9_999_999, 'ultimo')).toBe('failed')
+    const fin = getJobById(db, job.id)!
+    expect(fin.status).toBe('failed')
+    expect(fin.payload).toEqual({})
+    expect(fin.last_error).toBe('ultimo')
+  })
+
+  it('clearUserMessageJobPayloads: la migrazione svuota i VECCHI done/failed (una volta), non i queued', async () => {
+    const { clearUserMessageJobPayloads } = await import('../jobs') as typeof import('../jobs')
+    const oldDone = userMsg('a1', NOW, 'vecchio done')
+    db.prepare("UPDATE jobs SET status = 'done' WHERE id = ?").run(oldDone.id)
+    const oldFailed = userMsg('a1', NOW + 1, 'vecchio failed')
+    db.prepare("UPDATE jobs SET status = 'failed' WHERE id = ?").run(oldFailed.id)
+    const queued = userMsg('a1', NOW + 2, 'ancora in coda')
+    const oldRoutine = enqueueJob(db, { agentId: 'a1', kind: 'routine-run', payload: { routineId: 1, title: 't', prompt: 'p' }, runAt: NOW, now: NOW })
+    db.prepare("UPDATE jobs SET status = 'done' WHERE id = ?").run(oldRoutine.id)
+    expect(clearUserMessageJobPayloads(db)).toBe(2)
+    expect(getJobById(db, oldDone.id)!.payload).toEqual({})
+    expect(getJobById(db, oldFailed.id)!.payload).toEqual({})
+    expect(getJobById(db, queued.id)!.payload).toEqual({ text: 'ancora in coda' })
+    expect(getJobById(db, oldRoutine.id)!.payload).toEqual({ routineId: 1, title: 't', prompt: 'p' })
+    // idempotente: la seconda corsa non trova niente
+    expect(clearUserMessageJobPayloads(db)).toBe(0)
+  })
+})

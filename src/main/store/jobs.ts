@@ -189,8 +189,22 @@ export function renewLease(db: DatabaseSync, jobId: number, now: number, leaseMs
   return Number(r.changes) > 0
 }
 
+/**
+ * Correzioni 2 (R3): quando un job `user-message` finisce (done o failed
+ * definitivo) il payload si SVUOTA — il testo del messaggio non resta per
+ * sempre nella tabella: vive già nelle entry, dove l'utente lo vede e lo può
+ * cancellare. Nessuno legge il payload di un job finito (il runner legge i
+ * job che esegue, la ripresa dopo crash usa payload.entryId finché il job
+ * può ancora girare, la UI non guarda la tabella jobs). Gli altri kind
+ * (routine-run, task-run, …) tengono il payload com'è.
+ */
 export function completeJob(db: DatabaseSync, jobId: number): void {
-  db.prepare("UPDATE jobs SET status = 'done', lease_until = NULL WHERE id = ?").run(jobId)
+  db.prepare(`
+    UPDATE jobs
+    SET status = 'done', lease_until = NULL,
+        payload_json = CASE WHEN kind = 'user-message' THEN '{}' ELSE payload_json END
+    WHERE id = ?
+  `).run(jobId)
 }
 
 /** Backoff esponenziale tra i tentativi: 30s · 60s · 120s · 240s dopo i primi 4 fallimenti. */
@@ -208,7 +222,15 @@ export type FailOutcome = 'retry' | 'failed'
  */
 export function failJob(db: DatabaseSync, job: Job, now: number, error: string): FailOutcome {
   if (job.attempts >= MAX_ATTEMPTS) {
-    db.prepare("UPDATE jobs SET status = 'failed', lease_until = NULL, last_error = ? WHERE id = ?").run(error, job.id)
+    // correzioni 2 (R3): il fallimento DEFINITIVO svuota il payload dei
+    // user-message (il retry qui sotto NON li tocca: payload.entryId serve
+    // alla ripresa del turno)
+    db.prepare(`
+      UPDATE jobs
+      SET status = 'failed', lease_until = NULL, last_error = ?,
+          payload_json = CASE WHEN kind = 'user-message' THEN '{}' ELSE payload_json END
+      WHERE id = ?
+    `).run(error, job.id)
     return 'failed'
   }
   db.prepare("UPDATE jobs SET status = 'queued', lease_until = NULL, run_at = ?, last_error = ? WHERE id = ?")
@@ -230,6 +252,19 @@ export function cancelAgentJobs(db: DatabaseSync, agentId: string): void {
 export function clearStoryJobPayloads(db: DatabaseSync): number {
   const r = db.prepare(
     "UPDATE jobs SET payload_json = '{}' WHERE kind = 'memory-index-story' AND status IN ('done','failed') AND payload_json != '{}'"
+  ).run()
+  return Number(r.changes)
+}
+
+/**
+ * Correzioni 2 (R3): come clearStoryJobPayloads, ma per i job user-message
+ * fatti o falliti dalle versioni precedenti il passaggio a done/failed che
+ * svuota il payload: il testo del messaggio dell'utente esce dalla tabella
+ * UNA volta al boot (ritorna quante righe ha ripulito).
+ */
+export function clearUserMessageJobPayloads(db: DatabaseSync): number {
+  const r = db.prepare(
+    "UPDATE jobs SET payload_json = '{}' WHERE kind = 'user-message' AND status IN ('done','failed') AND payload_json != '{}'"
   ).run()
   return Number(r.changes)
 }
