@@ -222,6 +222,10 @@ describe('K5: addSkillsFromStaging con nomi scelti invalidi', () => {
 })
 
 describe('K6: «Aggiungi» e «Aggiorna» copiano il giusto', () => {
+  // LE2: ogni test fa cloni git locali + copie di file (da soli stanno
+  // intorno al secondo), ma A SUITE PIENA con la macchina carica (load
+  // 29-54) superano i 5 s predefiniti di vitest. Nessuna attesa su tempi
+  // fissi; i tetti espliciti sono solo limiti di sicurezza, ampi e dichiarati
   it('il .versions/ del repository NON entra in libreria (né con Aggiungi né con Aggiorna)', async () => {
     const repo = makeRepo(true)
     try {
@@ -253,7 +257,7 @@ describe('K6: «Aggiungi» e «Aggiorna» copiano il giusto', () => {
     } finally {
       rmSync(repo, { recursive: true, force: true })
     }
-  })
+  }, 60_000)
 
   it('dopo l\'aggiornamento il name del frontmatter segue la CARTELLA (stile-readme-2 non torna stile-readme)', async () => {
     const repo = makeRepo()
@@ -292,7 +296,7 @@ describe('K6: «Aggiungi» e «Aggiorna» copiano il giusto', () => {
     } finally {
       rmSync(repo, { recursive: true, force: true })
     }
-  })
+  }, 60_000)
 
   it('una skill NON valida nel repository non si aggiorna: errore umano, la libreria resta com\'era', async () => {
     const repo = makeRepo()
@@ -329,5 +333,5 @@ describe('K6: «Aggiungi» e «Aggiorna» copiano il giusto', () => {
     } finally {
       rmSync(repo, { recursive: true, force: true })
     }
-  })
+  }, 60_000)
 })

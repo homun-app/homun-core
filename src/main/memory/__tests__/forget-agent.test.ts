@@ -24,6 +24,11 @@ beforeAll(async () => {
 })
 
 describe('fase memoria-engramma · correzioni C2: il bot eliminato si dimentica per cella', () => {
+  // LE2: 1500 messaggi + 20 memorie scritti uno a uno e poi la scansione di
+  // TUTTI i file della cella: da solo sta sotto il secondo, ma con la
+  // macchina carica (load 29-54) supera i 5 s predefiniti di vitest. Le
+  // attese dentro sono sull'ESITO, mai su tempi fissi; il tetto esplicito è
+  // solo un limite di sicurezza, ampio e dichiarato
   it('1500 messaggi indicizzati e 20 memorie (5 a lapide): il job dell\'oblio droppa le due celle e non resta traccia nei file', async () => {
     const e = await import('../engine')
     await e.closeMemoryEngine()
@@ -76,7 +81,7 @@ describe('fase memoria-engramma · correzioni C2: il bot eliminato si dimentica 
       }
     }
     await e.closeMemoryEngine()
-  })
+  }, 60_000)
 
   it('il job dell\'oblio di un bot SENZA storia e già dimenticato finisce bene (NOT_FOUND = già dimenticata)', async () => {
     const e = await import('../engine')

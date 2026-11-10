@@ -485,6 +485,10 @@ describe('stagePlugin con git locale (allowFileUrlsForTests)', () => {
     expect(existsSync(stagingPath)).toBe(false)
   })
 
+  // LE2: il test scrive PLUGIN_MAX_FILES+1 file uno a uno e li scandisce:
+  // da solo sta sul secondo, ma A SUITE PIENA con la macchina carica (load
+  // 29-54) supera i 5 s predefiniti di vitest. Nessuna attesa su tempi
+  // fissi; il tetto esplicito è solo un limite di sicurezza, ampio e dichiarato
   it('tetto dei file: oltre PLUGIN_MAX_FILES si rifiuta', async () => {
     const r = await stagePlugin({ kind: 'url', url: `file://${REPO}` }, null, {
       allowFileUrlsForTests: true,
@@ -504,7 +508,7 @@ describe('stagePlugin con git locale (allowFileUrlsForTests)', () => {
     })
     expect(r.ok).toBe(false)
     expect(r.ok === false && r.error).toContain('too many files')
-  })
+  }, 60_000)
 
   it('sorgente relativa: copia dalla cartella del marketplace e registra lo sha del marketplace', async () => {
     const mpClone = mkdtempSync(join(tmpdir(), 'sandbot-mp-clone-'))

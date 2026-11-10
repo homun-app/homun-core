@@ -23,6 +23,11 @@ beforeAll(async () => {
 })
 
 describe('fase memoria-engramma · correzioni C5: con 1500 note in una cella', () => {
+  // LE2: 1500 note scritte una a una (e il secondo test pure: 1100 file
+  // migrati + l'elenco di 2600): da soli stanno sui 2-3 s, ma con la
+  // macchina carica (load 29-54) superano i 5 s predefiniti di vitest. Le
+  // attese dentro sono sull'ESITO, mai su tempi fissi; i tetti espliciti
+  // sono solo limiti di sicurezza, ampi e dichiarati
   it('i conteggi della sezione dicono 1500 e una nota in quarantena oltre la millesima si trova per id corto', async () => {
     const e = await import('../engine')
     await e.closeMemoryEngine()
@@ -57,7 +62,7 @@ describe('fase memoria-engramma · correzioni C5: con 1500 note in una cella', (
     const last = await memoryList(AGENT, { owner: 'bot', status: 'active', limit: 100, offset: 1494 })
     expect(last.notes.every((n) => n.status === 'active')).toBe(true)
     await e.closeMemoryEngine()
-  })
+  }, 60_000)
 
   it('la seconda migrazione non duplica nulla: il marcatore vede OLTRE la millesima', async () => {
     const e = await import('../engine')
@@ -98,5 +103,5 @@ describe('fase memoria-engramma · correzioni C5: con 1500 note in una cella', (
     const total = (await cell.list({ limit: 100_000 })).length
     expect(total).toBe(N + M)
     await e.closeMemoryEngine()
-  })
+  }, 60_000)
 })
