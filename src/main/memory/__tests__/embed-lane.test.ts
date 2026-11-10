@@ -30,6 +30,10 @@ beforeAll(async () => {
 })
 
 describe.skipIf(!existsSync(MODEL_SRC))('fase memoria-engramma · correzioni C7: il job incorpora le celle di quell agente', () => {
+  // LD5: il test apre il motore e incorpora col modello vero (secondi, non
+  // millisecondi) — il tetto predefinito di 5 s di vitest lo uccideva a caso
+  // sotto carico: le attese dentro sono già sull'ESITO, il tetto è solo un
+  // limite di sicurezza, ampio e dichiarato
   it('memory-embed per l agente A incorpora bot-A, storia-A e utente — NON le celle di B', async () => {
     const e = await import('../engine')
     await e.closeMemoryEngine()
@@ -70,7 +74,7 @@ describe.skipIf(!existsSync(MODEL_SRC))('fase memoria-engramma · correzioni C7:
     await makeJobRunner(db())(jobB, () => undefined)
     expect(await (await e.botCell(B)).embedPending()).toBe(0)
     await e.closeMemoryEngine()
-  })
+  }, 120_000)
 
   it('il tick non incorpora direttamente: enqueueEmbedPendingAll accoda UN job per agente (coalesce)', async () => {
     const { enqueueEmbedPendingAll } = await import('../engine')

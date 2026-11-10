@@ -50,8 +50,22 @@ beforeAll(async () => {
     res.setHeader('content-range', `bytes ${from}-${GGUF.length - 1}/${GGUF.length}`)
     res.setHeader('content-length', String(slice.length))
     if (mode === 'cut') {
-      // la connessione si CHIUDE a metà: al client resta la risposta troncata
-      res.write(slice.slice(0, 20_000), () => { setTimeout(() => res.destroy(), 10) })
+      // la connessione si CHIUDE a metà: al client resta la risposta troncata.
+      // LD5: la chiusura aspetta che i byte scritti SIANO ARRIVATI sul .part
+      // (poll sul file) — prima distruggeva 10 ms dopo il write e sotto carico
+      // il client non aveva ancora scritto niente (.part a 0 byte)
+      const target = from + Math.min(slice.length, 20_000)
+      res.write(slice.slice(0, 20_000), () => {
+        void (async () => {
+          for (let i = 0; i < 500; i++) {
+            try {
+              if (existsSync(partPath()) && statSync(partPath()).size >= target) break
+            } catch { /* il .part compare e cresce: si riprova */ }
+            await new Promise((r) => setTimeout(r, 10))
+          }
+          res.destroy()
+        })()
+      })
       return
     }
     if (mode === 'stall') {
@@ -212,10 +226,8 @@ describe('fase locale correzioni (LC2): Annulla → paused (NON error), Riprendi
   it('l\'annullamento lascia paused col .part: nessun messaggio d\'errore', async () => {
     mode = 'stall'
     const p = lm.startLocalModelDownload({ fetch: fakeFetch as unknown as typeof fetch, url: `${base}/${ENTRY.file}`, entry: ENTRY })
-    // il download è partito (attivo): stato downloading
-    await new Promise((r) => setTimeout(r, 150))
-    const attivo = await statusOf()
-    expect(attivo.state).toBe('downloading')
+    // il download è partito (attivo): si aspetta lo STATO, non un tempo fisso
+    await waitFor(async () => (await statusOf()).state === 'downloading', 'il download non è mai diventato attivo')
     expect(lm.cancelLocalModelDownload()).toBe(true)
     await expect(p).rejects.toThrow(/annull|cancel|abort/i)
     const st = await statusOf()
@@ -227,7 +239,7 @@ describe('fase locale correzioni (LC2): Annulla → paused (NON error), Riprendi
   it('Ricomincia: il .part si cancella e il download riparte DA ZERO (nessun Range)', async () => {
     mode = 'stall'
     const p = lm.startLocalModelDownload({ fetch: fakeFetch as unknown as typeof fetch, url: `${base}/${ENTRY.file}`, entry: ENTRY })
-    await new Promise((r) => setTimeout(r, 150))
+    await waitFor(async () => (await statusOf()).state === 'downloading', 'il download non è mai diventato attivo')
     lm.cancelLocalModelDownload()
     await expect(p).rejects.toThrow(/annull|cancel|abort/i)
     expect(existsSync(partPath())).toBe(true)
@@ -299,15 +311,38 @@ describe('fase locale correzioni (LC2): local-model:install ricontrolla l\'idone
     // il catalogo REALE punta a huggingface: il fetch globale è stubbato e
     // RIFIUTA qualsiasi URL fuori da 127.0.0.1 (nessuna rete vera) — così il
     // download parte davvero e fallisce subito, e l'errore deve FINIRE nello
-    // stato (prima: .catch(() => undefined), spariva tutto)
+    // stato (prima: .catch(() => undefined), spariva tutto). LD5: si aspetta
+    // lo STATO error, non 200 ms fisse
     vi.stubGlobal('fetch', fakeFetch)
     lm.setLocalModelEligibilityFactsForTest({ arch: 'arm64', ramGb: 24, freeDiskBytes: 500 * 1024 ** 3 })
     const r = (await api['local-model:install']!([])) as { started: boolean; error?: string }
     expect(r.started).toBe(true)
     expect(r.error).toBeUndefined()
-    await new Promise((res) => setTimeout(res, 200))
+    await waitFor(async () => (await statusOf()).state === 'error', 'l\'errore del download non è finito nello stato')
     const st = await statusOf()
     expect(st.state).toBe('error')
     expect(st.error ?? '').toMatch(/non è riuscito/i)
+  })
+})
+
+describe('fase locale correzioni 2 (LD5): il «cut» del server aspetta il .part, mai un tempo fisso', () => {
+  it('client LENTO (risposta ritirata tardi, come sotto carico): la chiusura arriva solo DOPO che i 20_000 byte sono sul .part', async () => {
+    // il fetch ritarda la CONSEGNA della risposta al download (100 ms): il
+    // server ha già scritto e chiuso, il client non ha ancora letto niente —
+    // così la corsa «il server distrugge il socket prima che il client abbia
+    // scritto il .part» si vede DETERMINISTICA, senza il carico della suite
+    const slowFetch = async (u: string | URL, init?: RequestInit): Promise<Response> => {
+      const res = await (fakeFetch as unknown as typeof fetch)(u, init)
+      await new Promise((r) => setTimeout(r, 100))
+      return res
+    }
+    mode = 'cut'
+    await expect(lm.startLocalModelDownload({ fetch: slowFetch as unknown as typeof fetch, url: `${base}/${ENTRY.file}`, entry: ENTRY })).rejects.toThrow()
+    // il .part ha TUTTI i byte scritti dal server prima della chiusura
+    // (prima della correzione: destroy 10 ms dopo il write → .part a 0 byte)
+    expect(statSync(partPath()).size).toBe(20_000)
+    const st = await statusOf()
+    expect(st.state).toBe('error')
+    expect(st.progress).toEqual({ bytes: 20_000, total: ENTRY.sizeBytes })
   })
 })

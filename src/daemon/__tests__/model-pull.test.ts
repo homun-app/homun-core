@@ -45,6 +45,10 @@ function startModelServer(): Promise<number> {
 }
 
 describe.skipIf(!existsSync(MODEL_CACHE))('fase memoria-engramma · correzioni C8: model-pull collega il modello a caldo', () => {
+  // LD5: il test scarica ~400 MB dal server locale (su 127.0.0.1) e collega
+  // l'embedder: supera i 5 s predefiniti di vitest pure da solo. Le attese
+  // dentro sono su EVENTI (finished) e STATO (present), mai su tempi fissi;
+  // il tetto esplicito è solo un limite di sicurezza
   it('present passa a true e la ricerca diventa ibrida SENZA riapertura (la cella di prima continua a vivere)', async () => {
     const ROOT = mkdtempSync(join(tmpdir(), 'sandbot-mem-pull-'))
     ROOTS.push(ROOT)
@@ -105,5 +109,5 @@ describe.skipIf(!existsSync(MODEL_CACHE))('fase memoria-engramma · correzioni C
       if (prevBase === undefined) delete process.env.ENGRAMMA_PULL_BASE
       else process.env.ENGRAMMA_PULL_BASE = prevBase
     }
-  })
+  }, 180_000)
 })
