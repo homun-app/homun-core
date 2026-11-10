@@ -5,8 +5,12 @@ name: Build installers
 # Linux/Windows).
 # - Push di un tag v* → macOS arm64 FIRMATO + NOTARIZZATO e pubblicato come
 #   DRAFT su homun-app/homun-releases (il feed di aggiornamento di
-#   electron-updater), con note dal CHANGELOG e SHA256SUMS-mac.txt. Rivedi la
-#   draft e pubblicala.
+#   electron-updater), con note dal CHANGELOG e SHA256SUMS-mac.txt.
+#   RQ1 (fase rilascio di prova — correzioni): la release nasce BOZZA e
+#   diventa prerelease pubblica SOLO all'ULTIMO step, dopo notarizzazione,
+#   verify-release, note e checksum — solo per i v*-beta.* (il canale di
+#   prova), che poi la vede nel feed. I tag senza -beta. restano BOZZA, da
+#   rivedere e pubblicare a mano.
 # - PR su main / esecuzione manuale → build NON firmata, solo artifact: prova
 #   la pipeline senza taggare.
 #
@@ -102,13 +106,14 @@ jobs:
         if: steps.signing.outputs.has_cert == 'true' && startsWith(github.ref, 'refs/tags/v')
         run: npx electron-builder --mac --publish always -c.mac.notarize=true
         env:
-          # RP3 (canale di prova): i tag v*-beta.* escono come PRERELEASE NON
-          # BOZZA, così il canale di prova (allowPrerelease) li vede subito —
-          # una bozza non sta nel feed. Verificato sul sorgente di
-          # electron-publish 26: EP_PRE_RELEASE (isEnvTrue) vince su ogni
-          # releaseType di configurazione; un tag senza -beta. rende 'false'
-          # e resta BOZZA come oggi, da rivedere e pubblicare a mano.
-          EP_PRE_RELEASE: ${{ contains(github.ref_name, '-beta.') }}
+          # RQ1 (fase rilascio di prova — correzioni): la release nasce SEMPRE
+          # BOZZA (EP_DRAFT, già il default — detto a parole). Mai più
+          # EP_PRE_RELEASE qui: pubblicava la prova DENTRO electron-builder e
+          # un fallimento dopo (notarizzazione, verify-release, note,
+          # checksum) lasciava nel feed una prova non verificata, e per un
+          # tratto un beta-mac.yml caricato senza lo zip (l'updater: 404).
+          # La prova diventa prerelease pubblica SOLO nell'ultimo step.
+          EP_DRAFT: 'true'
           # il token di pubblicazione vive SOLO su questo step e SOLO sui tag
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
           CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
@@ -203,3 +208,30 @@ jobs:
             dist-installers/*.yml
             dist-installers/SHA256SUMS-*.txt
           if-no-files-found: error
+
+      # RQ1 (fase rilascio di prova — correzioni): lo schema «bozza, controlli,
+      # poi pubblicazione». Questo è l'ULTIMO step: la prova nasce BOZZA sopra
+      # e diventa prerelease pubblica SOLO ORA — dopo notarizzazione e
+      # graffaggio del dmg, verify-release (firma, Team ID, runtime dei
+      # Mach-O di vendor), note dal CHANGELOG e SHA256SUMS-mac.txt. Tutti i
+      # file sono già caricati sulla bozza: pubblicando alla fine non c'è mai
+      # una finestra con il file canale sì e lo zip no. Solo i tag v*-beta.*
+      # (il canale di prova) e solo col certificato; i tag senza -beta. restano
+      # BOZZA come sempre, da rivedere e pubblicare a mano.
+      - name: Publish prerelease (v*-beta.* only)
+        if: startsWith(github.ref, 'refs/tags/v') && contains(github.ref_name, '-beta.') && steps.signing.outputs.has_cert == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: |
+          gh release edit "$GITHUB_REF_NAME" --repo homun-app/homun-releases --draft=false --prerelease
+          # la pubblicazione si VERIFICA: se non risulta prerelease pubblica,
+          # lo step fallisce (la CI è rossa, non silenziosa)
+          STATE="$(gh release view "$GITHUB_REF_NAME" --repo homun-app/homun-releases --json isDraft,isPrerelease)"
+          echo "release dopo la pubblicazione: $STATE"
+          IS_DRAFT="$(node -p 'JSON.parse(process.argv[1]).isDraft' "$STATE")"
+          IS_PRE="$(node -p 'JSON.parse(process.argv[1]).isPrerelease' "$STATE")"
+          if [ "$IS_DRAFT" != "false" ] || [ "$IS_PRE" != "true" ]; then
+            echo "::error::la prova non risulta prerelease pubblica (isDraft=$IS_DRAFT, isPrerelease=$IS_PRE)"
+            exit 1
+          fi

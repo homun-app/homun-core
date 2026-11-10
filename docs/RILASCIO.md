@@ -12,9 +12,14 @@ git push origin v0.3.1001-beta.1
 ```
 
 - La CI stampa la versione DAL TAG (`npm version` sul tag), costruisce, firma
-  e notarizza, e pubblica su `homun-app/homun-releases` come **prerelease NON
-  bozza** (`EP_PRE_RELEASE` per i `v*-beta.*`): una bozza non starebbe nel
-  feed e il canale di prova non la vedrebbe.
+  e notarizza, e pubblica su `homun-app/homun-releases` come **bozza**
+  (`EP_DRAFT`). **La prova nasce bozza e diventa prerelease pubblica solo
+  quando tutti i controlli sono verdi**: l'ULTIMO step della CI — dopo
+  notarizzazione e graffaggio del dmg, `verify-release`, note dal CHANGELOG e
+  `SHA256SUMS-mac.txt` — esegue `gh release edit … --draft=false --prerelease`
+  e VERIFICA che la release risulti `isDraft=false` e `isPrerelease=true`
+  (altrimenti la CI è rossa). Così una prova non verificata non sta mai nel
+  feed, e non c'è mai una finestra con il file canale caricato ma lo zip no.
 - Con `0.3.1001-beta.N` electron-builder pubblica il file canale
   `beta-mac.yml`: è quello che legge chi ha `allowPrerelease` acceso
   (l'interruttore «Ricevi le versioni di prova»).
@@ -79,8 +84,9 @@ versione decisa.
   ricaricato quello buono sulla release (`--clobber`).
 - Nella release ci sono: il dmg, lo zip, `SHA256SUMS-mac.txt` e il file canale
   giusto — `beta-mac.yml` per le prove, `latest-mac.yml` per le stabili.
-- La release: **prerelease** (non bozza) per i `v*-beta.*`, **bozza** per le
-  stabili; le note vengono dal CHANGELOG.
+- La release: **prerelease pubblica** per i `v*-beta.*` (la pubblica l'ultimo
+  step *Publish prerelease*, col suo controllo `isDraft`/`isPrerelease`
+  verde), **bozza** per le stabili; le note vengono dal CHANGELOG.
 - Fuori da CI, sul Mac: `spctl -a -t open --context context:primary-signature -v <Homun.app>`.
 
 ## La prova a mano
