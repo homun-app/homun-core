@@ -44,16 +44,21 @@ export interface ModelSelectProps {
   placeholder?: string
   ariaLabel?: string
   className?: string
+  /**
+   * RV4 (fase beta.2): apre subito l'elenco al primo render (il foglio del
+   * modello del bot ci arriva già col cerca-modello in vista, un clic in meno)
+   */
+  defaultOpen?: boolean
 }
 
 export function ModelSelect({
   value, onChange, allowNone, allowFollowMain, thinking, onThinking, followModel,
-  placeholder, ariaLabel, className
+  placeholder, ariaLabel, className, defaultOpen
 }: ModelSelectProps) {
   const { t, i18n } = useLingui()
   const providers = useStore((s) => s.providers)
   const mainModel = useStore((s) => s.mainModel)
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(defaultOpen ?? false)
   const [query, setQuery] = useState('')
   const [hi, setHi] = useState(0)
   const [modelsBy, setModelsBy] = useState<Record<string, ProviderModels>>({})

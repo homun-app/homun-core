@@ -21,6 +21,10 @@ import { uiTextOf, uiTextOfTools } from '../lib/ui-text'
 import { openingRowFor } from '../lib/opening-rows'
 // R1 (fase app — ritocchi): le notice in chat non sono tutte errori
 import { noticeSeverity } from '../lib/notice-severity'
+// RV4 (fase beta.2): la stessa notice consecutiva si mostra una volta; il
+// bottone della notice apre il selettore del bot quando c'è un provider
+import { groupRepeatedNotices } from '../lib/notice-rows'
+import { modelNoticeTarget } from '../lib/model-notice'
 import { i18n, formatTime } from '../lib/i18n'
 import { GROUP_CHAIN_CLOSED_TEXT, GROUP_RATE_LIMIT_TEXT, GROUP_HOURLY_CAP_TEXT, parseCoordinatorNowText, parseMemberNoModelText } from '../../../main/agent/group-turns'
 import { agentMessageDisplay } from '../../../shared/agent-message'
@@ -611,8 +615,10 @@ export function Chat({ layout }: { layout?: LayoutResult }) {
               fase 16b (S3.3): le tool-call/tool-result NON compaiono (le racconta
               la mascotte); la voce di debug le rimette
             */}
-            {entries.filter((e) => !e.meta?.taskId && !e.meta?.groupId).map((e) => (
-              <EntryRow key={e.id} entry={e} showReasoning={showReasoning} debugSteps={debugSteps} />
+            {/* RV4: la stessa notice consecutiva senza altro in mezzo si mostra
+                UNA volta, col contatore discreto — le altre entry passano tali */}
+            {groupRepeatedNotices(entries.filter((e) => !e.meta?.taskId && !e.meta?.groupId)).map((g) => (
+              <EntryRow key={g.entry.id} entry={g.entry} repeat={g.repeat} showReasoning={showReasoning} debugSteps={debugSteps} />
             ))}
             {/* fase risposta (R6): la risposta in diretta, bolla provvisoria */}
             <LiveReplyBubble agentId={agent.id} />
@@ -797,7 +803,7 @@ function UserBubbleBody({ entry }: { entry: TranscriptEntry }): React.ReactNode 
   )
 }
 
-function EntryRow({ entry, showReasoning, debugSteps }: { entry: TranscriptEntry; showReasoning: boolean; debugSteps: boolean }) {
+function EntryRow({ entry, repeat = 1, showReasoning, debugSteps }: { entry: TranscriptEntry; repeat?: number; showReasoning: boolean; debugSteps: boolean }) {
   const { t } = useLingui()
   const reasoning = useStore((s) => s.reasoning[entry.id])
   switch (entry.kind) {
@@ -976,7 +982,7 @@ function EntryRow({ entry, showReasoning, debugSteps }: { entry: TranscriptEntry
     case 'notice':
       // fase 16b (S6): gli errori del modello con una via d'uscita sono un
       // banner col bottone che li risolve; le notice informative restano righe
-      return <NoticeRow entry={entry} />
+      return <NoticeRow entry={entry} repeat={repeat} />
     case 'event': {
       // la riga discreta del riepilogo pubblicato nella squadra (S1.2)
       if (entry.meta?.summaryMessageId !== undefined && typeof entry.meta?.groupId === 'number') {
@@ -991,11 +997,19 @@ function EntryRow({ entry, showReasoning, debugSteps }: { entry: TranscriptEntry
   }
 }
 
-/** Il banner degli errori del modello, con l'azione che li risolve (S6). */
-function NoticeRow({ entry }: { entry: TranscriptEntry }) {
+/**
+ * Il banner degli errori del modello, con l'azione che li risolve (S6).
+ * RV4 (fase beta.2): «Scegli un modello» apre il selettore del BOT della
+ * chat (lo stesso del foglio «Impostazioni del bot») quando c'è almeno un
+ * provider attivo; senza provider resta Impostazioni › Modelli, dove prima
+ * va aggiunto un provider. La notice ripetuta porta un contatore discreto.
+ */
+function NoticeRow({ entry, repeat = 1 }: { entry: TranscriptEntry; repeat?: number }) {
   const { t } = useLingui()
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
   const setSettingsTab = useStore((s) => s.setSettingsTab)
+  const providers = useStore((s) => s.providers)
+  const openBotModel = useStore((s) => s.openBotModel)
   const uiId = (entry.meta?.ui as { id?: string } | undefined)?.id
   // fase use-app (U4): manca l'Accessibilità → il bottone apre la pagina
   // giusta delle Impostazioni di sistema
@@ -1013,16 +1027,19 @@ function NoticeRow({ entry }: { entry: TranscriptEntry }) {
     // permessi: Creare un bot), mai il nome tecnico
     const text = uiTextOfTools(entry)
     if (severity === 'error') {
-      return <p className="text-center text-xs text-destructive/90">{text}</p>
+      return <p className="text-center text-xs text-destructive/90">{text}{repeat > 1 && <RepeatMark repeat={repeat} />}</p>
     }
     if (severity === 'warning') {
-      return <p className="text-center text-xs text-waiting">{text}</p>
+      return <p className="text-center text-xs text-waiting">{text}{repeat > 1 && <RepeatMark repeat={repeat} />}</p>
     }
-    return <p className="text-center text-xs text-muted-foreground">{text}</p>
+    return <p className="text-center text-xs text-muted-foreground">{text}{repeat > 1 && <RepeatMark repeat={repeat} />}</p>
   }
   return (
     <div className="flex items-center gap-3 rounded-[14px] bg-destructive/10 px-4 py-2.5 text-sm text-foreground">
-      <span className="min-w-0 flex-1">{uiTextOf(entry)}</span>
+      <span className="min-w-0 flex-1">
+        {uiTextOf(entry)}
+        {repeat > 1 && <RepeatMark repeat={repeat} />}
+      </span>
       {withAction && (
         accessibility ? (
           <button
@@ -1034,7 +1051,13 @@ function NoticeRow({ entry }: { entry: TranscriptEntry }) {
         ) : (
           <button
             className="shrink-0 rounded-full bg-muted px-3 py-1.5 text-xs text-foreground transition hover:bg-accent"
-            onClick={() => { setSettingsTab('modelli'); setSettingsOpen(true) }}
+            data-testid="notice-choose-model"
+            onClick={() => {
+              // RV4: col provider che c'è, si sceglie il modello del BOT qui in
+              // chat; senza provider, prima va aggiunto uno (Impostazioni › Modelli)
+              if (modelNoticeTarget(providers) === 'bot') openBotModel()
+              else { setSettingsTab('modelli'); setSettingsOpen(true) }
+            }}
           >
             <Trans>Scegli un modello</Trans>
           </button>
@@ -1043,6 +1066,11 @@ function NoticeRow({ entry }: { entry: TranscriptEntry }) {
       <span className="sr-only">{t`errore del modello`}</span>
     </div>
   )
+}
+
+/** Il contatore discreto delle notice ripetute: «×N» (RV4). */
+function RepeatMark({ repeat }: { repeat: number }) {
+  return <span className="ml-1 text-muted-foreground/80">×{repeat}</span>
 }
 
 /** «Ho pubblicato il riepilogo nella squadra «X»» — cliccabile verso la squadra. */

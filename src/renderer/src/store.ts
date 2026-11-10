@@ -187,6 +187,15 @@ interface Store {
   openBotSheet(focus?: 'routines' | 'description'): void
   closeBotSheet(): void
   /**
+   * RV4 (fase beta.2): il foglio piccolo del modello del bot (lo STESSO
+   * ModelSelect del foglio «Impostazioni del bot»), aperto dalla riga del
+   * modello nel pannello destro e dal bottone «Scegli un modello» delle
+   * notice in chat. rightPanel si accende: la riga vive lì.
+   */
+  botModelOpen: boolean
+  openBotModel(): void
+  closeBotModel(): void
+  /**
    * Fase pagine (G2): la pagina della libreria aperta al posto della chat —
    * from dice dove torna la ✕ (alla chat o alla lista della Libreria);
    * title/version li riempie la vista quando carica (servono al compositore).
@@ -356,6 +365,8 @@ export const useStore = create<Store>((set, get) => ({
   // fase pagine (G3): il foglio Impostazioni del bot (chiuso, nessun focus)
   botSheetOpen: false,
   botSheetFocus: null,
+  // RV4 (fase beta.2): il foglio del modello del bot
+  botModelOpen: false,
   // fase pagine (G2/G4): pagina aperta, precompilazione del compositore,
   // dettaglio dell'app su cui aprire la finestra App
   openPageInfo: null,
@@ -898,6 +909,16 @@ export const useStore = create<Store>((set, get) => ({
 
   closeBotSheet() {
     set({ botSheetOpen: false, botSheetFocus: null })
+  },
+
+  // RV4 (fase beta.2): il foglio del modello del bot (il pannello serve: la
+  // riga del modello vive lì, e chi arriva dalla notice la trova aperta)
+  openBotModel() {
+    set({ botModelOpen: true, rightPanel: true })
+  },
+
+  closeBotModel() {
+    set({ botModelOpen: false })
   },
 
   // fase pagine (G2): la pagina aperta al posto della chat; title/version li

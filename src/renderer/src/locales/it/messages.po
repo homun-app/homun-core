@@ -1261,6 +1261,10 @@ msgstr "cambia"
 msgid "Cambia aspetto"
 msgstr "Cambia aspetto"
 
+#: src/renderer/src/components/RightPanel.tsx
+msgid "Cambia il modello di questo bot"
+msgstr "Cambia il modello di questo bot"
+
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 msgid "Cambia in Modelli ›"
 msgstr "Cambia in Modelli ›"
@@ -1580,9 +1584,15 @@ msgstr "comando che esegue altri comandi (never-auto)"
 msgid "approval.rcUnparsable"
 msgstr "comando non analizzabile con affidabilità"
 
+#: src/renderer/src/components/RightPanel.tsx
 #: src/renderer/src/components/ui/ModelSelect.tsx
 msgid "Come gli altri"
 msgstr "Come gli altri"
+
+#. placeholder {0}: mainModel.model
+#: src/renderer/src/components/RightPanel.tsx
+msgid "Come gli altri · {0}"
+msgstr "Come gli altri · {0}"
 
 #. placeholder {0}: mainModel.model
 #: src/renderer/src/components/ui/ModelSelect.tsx
@@ -3928,6 +3938,10 @@ msgstr "Modello integrato sul Mac (2,7 GB)"
 msgid "modello senza credito"
 msgstr "modello senza credito"
 
+#: src/renderer/src/components/RightPanel.tsx
+msgid "Modello:"
+msgstr "Modello:"
+
 #: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/SkillsWindow.tsx
@@ -4114,6 +4128,10 @@ msgstr "Nessun messaggio nella squadra."
 #: src/renderer/src/components/Sidebar.tsx
 msgid "nessun modello"
 msgstr "nessun modello"
+
+#: src/renderer/src/components/RightPanel.tsx
+msgid "Nessun modello"
+msgstr "Nessun modello"
 
 #: src/renderer/src/components/ui/ModelPicker.tsx
 msgid "nessun modello in elenco: scrivi l'id e premi Invio"

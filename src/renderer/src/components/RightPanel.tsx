@@ -235,6 +235,80 @@ function RoutinesTab() {
   )
 }
 
+/**
+ * RV4 (fase beta.2): il selettore del modello del bot — UN solo posto (il
+ * ModelSelect di fase impostazioni I6, con la patch di providerId/model e
+ * thinking): lo usa «Avanzate» del foglio «Impostazioni del bot» e il foglio
+ * piccolo del pannello destro. Nessun secondo selettore, nessuna logica di
+ * patch duplicata.
+ */
+function BotModelSelect({ agentId, defaultOpen }: { agentId: string; defaultOpen?: boolean }) {
+  const { t } = useLingui()
+  const agents = useStore((s) => s.agents)
+  const agent = agents.find((a) => a.id === agentId)
+  // fase 16c correzioni (R4): il modello risolto dal selettore UNICO;
+  // followsMain vale anche per il provider proprio sparito (R3.6)
+  const resolved = useResolvedModel(agentId)
+  if (!agent) return null
+  const followsMain = resolved?.followsMain === true
+  const patch = (p: Partial<Agent>): void => {
+    void api.updateAgent(agent.id, p).catch((e) => console.error('updateAgent:', e instanceof Error ? e.message : e))
+  }
+  return (
+    <ModelSelect
+      value={followsMain || !agent.providerId || !agent.model
+        ? null
+        : { providerId: agent.providerId, model: agent.model }}
+      onChange={(r) => patch(r ? { providerId: r.providerId, model: r.model } : { providerId: null, model: null })}
+      allowFollowMain
+      thinking={agent.thinking ?? 'default'}
+      onThinking={(level) => patch({ thinking: level })}
+      // «Come gli altri»: i livelli del ragionamento vengono dal modello
+      // principale risolto (il ⋯ resta offerto anche seguendo)
+      followModel={followsMain && resolved ? { providerId: resolved.providerId, model: resolved.model } : null}
+      aria-label={t`Modello del bot`}
+      defaultOpen={defaultOpen}
+    />
+  )
+}
+
+/**
+ * RV4 (fase beta.2): la riga compatta del modello nel pannello destro, sotto
+ * il nome e sopra le schede — il modello è una proprietà del bot e il
+ * pannello è il suo profilo. Usa il modello RISOLTO (useResolvedModel):
+ * «Modello: <provider> · <modello> ›», «Come gli altri · <principale> ›» o
+ * «Nessun modello» in colore d'avviso.
+ */
+function BotModelRow({ agentId }: { agentId: string }) {
+  const { t } = useLingui()
+  const agents = useStore((s) => s.agents)
+  const providers = useStore((s) => s.providers)
+  const mainModel = useStore((s) => s.mainModel)
+  const openBotModel = useStore((s) => s.openBotModel)
+  const agent = agents.find((a) => a.id === agentId)
+  const resolved = useResolvedModel(agentId)
+  if (!agent) return null
+  const providerName = resolved ? (providers.find((p) => p.id === resolved.providerId)?.name ?? resolved.providerId) : null
+  const label = resolved
+    ? resolved.followsMain
+      ? (mainModel?.model ? t`Come gli altri · ${mainModel.model}` : t`Come gli altri`)
+      : `${providerName} · ${resolved.model}`
+    : t`Nessun modello`
+  return (
+    <button
+      className={`mt-2 flex max-w-full items-center gap-1.5 rounded-full px-3 py-1 text-xs transition hover:bg-muted/60 focus-visible:ring-[3px] focus-visible:ring-ring/50 ${
+        resolved ? 'text-muted-foreground hover:text-foreground' : 'text-waiting'
+      }`}
+      data-testid="bot-model-row"
+      title={t`Cambia il modello di questo bot`}
+      onClick={() => openBotModel()}
+    >
+      <span className="shrink-0">{t`Modello:`}</span>
+      <span className="truncate font-medium">{label} ›</span>
+    </button>
+  )
+}
+
 /** Avanzate: ciò che oggi sta nelle Impostazioni › Bot, niente di inventato. */
 function AdvancedTab() {
   const { t, i18n } = useLingui()
@@ -254,13 +328,10 @@ function AdvancedTab() {
     setNotifOff(null)
     void api.settingsGet<string[]>('notifications.disabledAgents', []).then((v) => setNotifOff(v.includes(activeId ?? ''))).catch(() => setNotifOff(false))
   }, [activeId, agent?.section])
-  // fase 16c correzioni (R4): il modello risolto passa dal selettore UNICO;
-  // followsMain viene da lì (vale anche per il provider proprio sparito, R3.6:
-  // finché l'utente non sceglie, il pannello mostra «Come gli altri»)
-  const resolved = useResolvedModel(agent?.id ?? null)
+  // fase 16c correzioni (R4): il modello risolto passa dal selettore UNICO
+  // (RV4: BotModelSelect, condiviso col foglio piccolo del pannello destro)
   if (!agent) return null
   const effectiveMain = mainAgentId ?? agents[0]?.id ?? null
-  const followsMain = resolved?.followsMain === true
   const patch = (p: Partial<Agent>): void => {
     void api.updateAgent(agent.id, p).catch((e) => console.error('updateAgent:', e instanceof Error ? e.message : e))
   }
@@ -290,20 +361,9 @@ function AdvancedTab() {
       {/* fase impostazioni (I6): UN solo ModelSelect al posto di select dei
           provider + ModelPicker; «Come gli altri · <modello principale>» è la
           prima voce (salva null/null, come sempre) e il ragionamento sta nel
-          «⋯» della riga (I1.4) */}
-      <ModelSelect
-        value={followsMain || !agent.providerId || !agent.model
-          ? null
-          : { providerId: agent.providerId, model: agent.model }}
-        onChange={(r) => patch(r ? { providerId: r.providerId, model: r.model } : { providerId: null, model: null })}
-        allowFollowMain
-        thinking={agent.thinking ?? 'default'}
-        onThinking={(level) => patch({ thinking: level })}
-        // «Come gli altri»: i livelli del ragionamento vengono dal modello
-        // principale risolto (il ⋯ resta offerto anche seguendo)
-        followModel={followsMain && resolved ? { providerId: resolved.providerId, model: resolved.model } : null}
-        aria-label={t`Modello del bot`}
-      />
+          «⋯» della riga (I1.4). RV4: il selettore vive in BotModelSelect,
+          condiviso col foglio piccolo del pannello destro */}
+      <BotModelSelect agentId={agent.id} />
 
       <SmallTitle><Trans>Istruzioni</Trans></SmallTitle>
       <textarea
@@ -824,6 +884,27 @@ function BotSettingsSheet({ agentId, avatar, onClose }: { agentId: string; avata
   )
 }
 
+/**
+ * RV4 (fase beta.2): il foglio piccolo del modello del bot — lo STESSO
+ * selettore del foglio «Impostazioni del bot» (BotModelSelect), aperto
+ * dall'area destra (la riga sotto il nome) e dal bottone «Scegli un
+ * modello» delle notice in chat. L'altezza minima lascia spazio all'elenco
+ * (il popover del ModelSelect, max-h-80 su top-11, sta nel foglio).
+ */
+function BotModelSheet({ agentId, onClose }: { agentId: string; onClose(): void }) {
+  const { i18n } = useLingui()
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
+      <DialogContent className="max-w-md">
+        <DialogTitle>{i18n.t(msg`Modello del bot`)}</DialogTitle>
+        <div className="min-h-[24rem]">
+          <BotModelSelect agentId={agentId} defaultOpen />
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 /** Il pannello del bot: mascotte sospesa (clic = Impostazioni), schede, contenuto. */
 function BotPanel({ layout, onClose }: { layout: LayoutResult; onClose(): void }) {
   const { i18n } = useLingui()
@@ -842,6 +923,9 @@ function BotPanel({ layout, onClose }: { layout: LayoutResult; onClose(): void }
   const botSheetOpen = useStore((s) => s.botSheetOpen)
   const openBotSheet = useStore((s) => s.openBotSheet)
   const closeBotSheet = useStore((s) => s.closeBotSheet)
+  // RV4 (fase beta.2): il foglio piccolo del modello (riga qui sotto + notice in chat)
+  const botModelOpen = useStore((s) => s.botModelOpen)
+  const closeBotModel = useStore((s) => s.closeBotModel)
   const asideRef = useRef<HTMLElement>(null)
   // G2 (fase 0.3.1001 grafica): aprendo, il focus va al primo controllo del
   // pannello (la ✕) — come già faceva l'overlay, anche quando è docked
@@ -893,6 +977,9 @@ function BotPanel({ layout, onClose }: { layout: LayoutResult; onClose(): void }
             <h2 className="mt-3 font-display text-[26px] leading-tight">{info.agent.name}</h2>
           </button>
         </div>
+        {/* RV4 (fase beta.2): la riga del modello — sotto il nome, sopra le
+            schede: il modello è una proprietà del bot e questo è il suo profilo */}
+        <BotModelRow agentId={info.agent.id} />
         {/* fase pagine (G3): le due schede — Attività · Libreria */}
         <div role="tablist" className="mt-3 flex gap-1">
           {(Object.keys(TAB_LABEL) as Array<'activity' | 'library'>).map((id) => (
@@ -917,6 +1004,7 @@ function BotPanel({ layout, onClose }: { layout: LayoutResult; onClose(): void }
         )}
       </div>
       {botSheetOpen && activeId && <BotSettingsSheet agentId={activeId} avatar={info.avatar} onClose={closeBotSheet} />}
+      {botModelOpen && activeId && <BotModelSheet agentId={activeId} onClose={closeBotModel} />}
     </aside>
   )
 }
