@@ -1,3 +1,54 @@
+# REPORT FASE LOCALE · CORREZIONI 2 (LD1–LD6) — il Ricomincia che crea il provider, l'annullamento dal segnale, il parser che non si fa ingoiare dalle menzioni, l'env del figlio in lista ammessa, i test deterministici
+
+**Data:** 2026-11-10 · **Base:** `main` @ `417c47b8` (tag `fase-locale-correzioni`) · **Tag di chiusura:** `fase-locale-correzioni-2`. Nessun push. Lavoro offline: nessun download vero (il GGUF arriva da server finti su 127.0.0.1; il fetch dei test rifiuta ogni URL fuori), rete solo su 127.0.0.1, il repo di Engramma e l'Homebrew `llama-server` non toccati, `out-review/` e `docs/catture` intatti, temporanei solo `mkdtemp` in `/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/`, 0 daemon e 0 `llama-server` dopo OGNI corsa (verificato con `pgrep` dopo ogni comando).
+
+**Verifica finale:** `typecheck` pulito · `vitest` **3 corse consecutive della suite intera tutte verdi: 231 file / 3532 test** (29,11 s · 37,90 s · 26,92 s; base 3521 → +11 test: 2 LD1, 2 LD2, 4 LD3, 2 LD4, 1 LD5, stessi 231 file) · `npm run build` verde · `language-judges.eval.ts` **56/56** · T6, T8, R4 (resolved-model + silent-reply + ws-server), R7, R8 (turn-tools + turn-budget), R9 (history + token-pari) e i budget dei token verdi (**9 file / 417 test**), **nessuna riga nuova nel prompt** (il diff `417c47b8..HEAD` su `src/main/agent/prompts.ts` è vuoto, 0 righe) · cataloghi Lingui completi: **it 1448/1448, en 1448/1448, 0 msgstr vuote** (prima 1447: +`localModel.providerName`).
+
+## LD1 — Il download completato con «Ricomincia» non creava il provider
+
+`local-model:install` agganciava alla fine del download `saveProvider('homun-local')` + `emit agents` + `onboarding.resume()` SOLO a sé; `local-model:restart` chiamava `startLocalModelDownload` senza quell'aggancio: il modello risultava `ready` ma il provider «Integrato» non esisteva e l'onboarding restava fermo, per sempre.
+
+- Il lavoro di fine download sta in **un solo posto**: lo notifica `startLocalModelDownload` (l'unico punto di partenza di OGNI download — Riprendi, Ricomincia e ogni strada futura) ai listener di **`onLocalModelReady`**, che il demone registra **una volta** in `buildApiMethods` (crea il provider se manca, emette `agents`, riprende l'onboarding). `local-model:install` non aggancia più niente: il fuoco-e-dimentica del demone è sparito.
+- **Riparazione idempotente**: `local-model:status` che vede `ready` su disco e il provider `homun-local` mancante lo crea ed emette `agents` — sistema anche gli stati già rotti; la seconda lettura NON ricrea (nessun secondo evento `agents`, lo inchioda il test).
+- Il nome del provider passa dal catalogo UI: **`localModel.providerName`**, it «Integrato (sul tuo Mac)» / en «Built-in (on your Mac)», via lo `'Integrato (sul tuo Mac)'` scritto a mano nel demone.
+- Test **visti FALLIRE prima** e verdi dopo (10/10 del file): *Ricomincia fino a ready* → il provider esiste col nome del catalogo, `agents` emesso, onboarding ripreso (l'attesa è sull'EVENTO `agents` e sul DISCO, non sullo status: la riparazione lo maschererebbe); *ready su disco senza provider* → status lo crea **una volta sola**. Nota dei test: il fetch globale è rimappato sul server finto (il dominio huggingface del catalogo è solo un nome, la rete resta 127.0.0.1).
+
+## LD2 — L'annullamento si riconosce dal segnale, non dal testo
+
+Il demone decideva «annullato o errore» con `/annull|cancel|abort/i` sul messaggio: un errore di rete col testo «aborted» (undici, timeout) veniva preso per un Annulla → `paused` SENZA messaggio. Ora decide **`controller.signal.aborted`**, l'unica fonte di verità. Stessa cura nel download puro: la conversione in «download cancelled» dentro `downloadLocalModel` seguiva `/abort/i` sul messaggio, ora segue `opts.signal.aborted`, così il testo di rete arriva intatto nello stato.
+
+- Test **visti FALLIRE prima**: «network request aborted by the remote peer» senza Annulla → `expected 'not-installed' to be 'error'` (l'errore spariva del tutto); l'Annulla VERO con un messaggio qualunque («socket hang up») → `expected 'error' to be 'paused'`. Verdi dopo: 12/12 del file (24/24 coi test del download puro).
+
+## LD3 — Il parser: una menzione di `<tool_call>` non ingoia più il blocco vero
+
+Il recupero girava sul testo INTERO: la regex partiva dentro il recinto e arrivava alla `</tool_call>` fuori, poi il filtro la scartava e il blocco VERO restava senza chiamata. I 4 casi della tabella della spec, tutti `expected [] to deeply equal ['find_tools']` prima e verdi dopo (35/35 del file):
+
+1. **menzione in un recinto** ``` ```\n<tool_call> ecco\n``` ``` **+ blocco vero** → `find_tools` recuperato, la menzione resta testo;
+2. **menzione nel codice inline** `` usa `<tool_call>` così `` **+ blocco vero** → `find_tools`; il testo pulito CONSERVA `` usa `<tool_call>` così `` (prima diventava `` usa ` ``);
+3. **blocco chiuso con nome sconosciuto + blocco APERTO vero in coda** → `find_tools` (lo sconosciuto resta nel testo);
+4. ** ``` ```\n<tool_call>\n``` ``` + blocco APERTO vero** → `find_tools`.
+
+Come: (1) il recupero gira **per tratti fuori dalle zone protette**, come già faceva la pulizia — mai sul testo intero per poi filtrare; (2) il corpo di un blocco non può contenere un altro `<tool_call>` (**tempered token** `(?:(?!<tool_call>)[\s\S])*?`): una menzione spaiata non si aggancia alla chiusura del blocco dopo; (3) il blocco aperto in coda è **l'ultimo `<tool_call>` dopo l'ultima `</tool_call>`** fuori dalle protette (prima il controllo guardava il PRIMO e un blocco chiuso sconosciuto nascondeva quello vero); (4) gli **span di codice inline** (backtick su una riga, chiusura col run della stessa lunghezza) sono protetti come i recinti, nel recupero E nella pulizia (`protectedRanges` = `codeFenceRanges` + `inlineCodeSpans`). **I 31 test di prima e gli 8 blocchi VERI dei dump (casi 17, 21, 23, 29, 32, 33, 34, 45) restano verdi**, loop 331/331.
+
+## LD4 — L'env del figlio: solo quello che serve
+
+`env: { ...process.env, LLAMA_API_KEY: key }` passava a llama-server **tutto** l'ambiente del demone (chiavi e segreti di servizio compresi). Ora `childEnvFor` costruisce la **lista ammessa**: `PATH`, `HOME`, `TMPDIR`, `LANG` e le `LC_*` presenti, più `LLAMA_API_KEY` (la chiave di turno, fuori da argv come in LC4). Funzione pura, iniettabile sull'env di partenza. Test **visti FALLIRE prima**: `SANDBOT_FAKE_SECRET` del demone arrivava al figlio (`expected 'segreto-che-non-passa' to be undefined`); `childEnvFor` non esisteva. Verdi dopo: 17/17 del file (LC4 compreso).
+
+## LD5 — Test instabili sotto carico: deterministici
+
+- **«rete rotta a metà → error»** (`local-model-download.test.ts`): il server finto in modalità cut distruggeva il socket **10 ms dopo il write** e sotto carico il client non aveva ancora scritto il `.part` (`expected +0 to be 20000`, l'errore documentato dalla spec). Ora il server chiude **solo dopo che il `.part` è arrivato ai byte scritti** (poll sul file). La corsa è diventata riproducibile DETERMINISTICAMENTE con un fetch che ritarda la consegna della risposta di 100 ms: col vecchio handler il test nuovo fallisce con **lo stesso `expected +0 to be 20000` della spec**, col fix passa. Via anche gli altri tempi fissi: le attese del file ora sono sullo STATO (`downloading`/`error` via `waitFor`), **nessun `setTimeout` fisso nelle asserzioni**.
+- **model-pull C8** («present passa a true…»): scarica ~400 MB dal server locale e collega l'embedder — supera i 5 s predefiniti di vitest PURE DA SOLO su questa macchina (**visto ROSSO**: `Test timed out in 5000ms`, 5018 ms; verde con `--testTimeout=180000` in 7965 ms). Le attese dentro sono già su EVENTI (`finished`) e STATO (`present`); il tetto ora è esplicito e ampio (**180 s**): un limite di sicurezza, non un'asserzione sul tempo.
+- **embed-lane C7** («memory-embed per l'agente A…»): motore aperto + incorporazione col modello vero, stessa radice (**visto ROSSO**: `Test timed out in 5000ms`, 5140 ms). Tetto esplicito **120 s**.
+- Prova richiesta dalla spec: **3 corse consecutive della suite intera tutte verdi** (231 file / 3532 test, numeri sopra), 0 daemon e 0 `llama-server` dopo ognuna.
+
+## LD6 — Chiusura
+
+- Ogni punto ha un test visto fallire prima (le evidenze con i messaggi d'errore veri sono nelle sezioni).
+- Restano verdi T6, T8, R4, R7, R8, R9 e i budget dei token: **9 file / 417 test** (loop.test.ts con T6+T8; resolved-model + silent-reply + ws-server per R4; rail-functions R7; turn-tools + turn-budget R8; history + token-pari R9 e i budget); **nessuna riga nuova nel prompt** (`git diff 417c47b8..HEAD -- src/main/agent/prompts.ts` = 0 righe).
+- Typecheck, vitest (3 corse, sopra), build e `language-judges.eval.ts` 56/56; cataloghi Lingui completi (it/en 1448/1448; seconda estrazione verificata IDENTICA: 0 righe di diff, la traduzione en sopravvive a --clean).
+- REPORT **aggiunto in cima** a REPORT.md (questa sezione); il test `report-history` resta verde: la coda è byte-identica a `a6aa41ee:REPORT.md`, ora 56 intestazioni «# REPORT» (1 + 55).
+- Commit: uno per punto (LD1 `86adba42`, LD2 `538063fd`, LD3 `9d8b8274`, LD4 `60d5e6d5`, LD5 `7b2d7624`) + questo REPORT, tag annotato `fase-locale-correzioni-2`, **nessun push**.
+
 # REPORT FASE LOCALE · CORREZIONI (LC1–LC5) — il REPORT recuperato, il download interrotto che si riprende, il parser che non esegue il codice, la chiave fuori da ps
 
 **Data:** 2026-11-10 · **Base:** `main` @ `09737d7b` (tag `fase-memoria-engramma-v043`) · **Tag di chiusura:** `fase-locale-correzioni`. Nessun push. Lavoro offline: nessun download vero, rete solo su 127.0.0.1 (i server finti dei test), il repo di Engramma e l’Homebrew `llama-server` non toccati (il secondo solo LETTO, `--help`), `out-review/` e `docs/catture` intatti, temporanei solo `mkdtemp` in `/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/`, 0 daemon e 0 `llama-server` dopo ogni corsa (verificato con `pgrep`).
