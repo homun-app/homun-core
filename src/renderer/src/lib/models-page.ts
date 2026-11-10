@@ -26,3 +26,17 @@ export function removeFallback(chain: FallbackRoute[], index: number): FallbackR
 export function reviewerMissing(mode: ApprovalsMode, reviewer: { providerId: string | null; model: string | null }): boolean {
   return mode === 'auto' && !(!!reviewer.providerId && !!reviewer.model)
 }
+
+/**
+ * Fase locale correzioni (LC2): i pulsanti della scheda Integrato per ogni
+ * stato — Annulla SOLO col download attivo (con paused/error non c'è niente
+ * da annullare e il bottone today non fa nulla); Riprendi (riparte col
+ * Range) e Ricomincia (cancella il .part) con paused e con error.
+ */
+export function localModelCardActions(
+  state: 'not-installed' | 'downloading' | 'paused' | 'error' | 'ready' | 'running'
+): { cancel: boolean; resume: boolean; restart: boolean } {
+  if (state === 'downloading') return { cancel: true, resume: false, restart: false }
+  if (state === 'paused' || state === 'error') return { cancel: false, resume: true, restart: true }
+  return { cancel: false, resume: false, restart: false }
+}

@@ -194,6 +194,14 @@ msgstr "{0} eliminate"
 msgid "{0} file"
 msgstr "{0} file"
 
+#. placeholder {0}: m.sizeGb
+#. placeholder {1}: m.source
+#. placeholder {2}: m.license
+#. placeholder {3}: m.ramUseGb
+#: src/renderer/src/components/settings/ModelsPage.tsx
+msgid "{0} GB · {1} · {2} · RAM ~{3} GB"
+msgstr "{0} GB · {1} · {2} · RAM ~{3} GB"
+
 #. placeholder {0}: Math.round(s / 3600)
 #: src/renderer/src/components/SubagentCard.tsx
 msgid "{0} h"
@@ -2227,6 +2235,11 @@ msgstr "Download {0}%"
 msgid "download del modello… {0}%"
 msgstr "download del modello… {0}%"
 
+#. placeholder {0}: pct ?? 0
+#: src/renderer/src/components/settings/ModelsPage.tsx
+msgid "Download in pausa · {0}%"
+msgstr "Download in pausa · {0}%"
+
 #. placeholder {0}: memoryProgress.error
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "Download non riuscito: {0}"
@@ -2953,6 +2966,11 @@ msgstr "Il costo è un minimo: alcuni modelli non hanno un prezzo."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
+msgid "localModel.downloadFailed"
+msgstr "Il download del modello integrato non è riuscito: {message}"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
 msgid "skill.fileTooLarge"
 msgstr "Il file «{file}» è troppo grande: {n} KB (massimo 256 KB)."
 
@@ -3026,14 +3044,19 @@ msgstr "Il modello {model} non vede le immagini: gli allegati di questo messaggi
 msgid "Il modello integrato gira sul tuo Mac: niente costi e i dati restano qui. È più lento e sbaglia più spesso dei modelli cloud; per lavori affidabili ti consiglio un modello cloud."
 msgstr "Il modello integrato gira sul tuo Mac: niente costi e i dati restano qui. È più lento e sbaglia più spesso dei modelli cloud; per lavori affidabili ti consiglio un modello cloud."
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "onboarding.localModelHonest"
+msgstr "Il modello integrato gira sul tuo Mac: niente costi e i dati restano qui. È più lento e sbaglia più spesso dei modelli cloud. Va bene per prove e cose semplici; per lavori affidabili ti consiglio un modello cloud."
+
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Il modello integrato gira sul tuo Mac: niente costi e i dati restano qui. È più lento e sbaglia più spesso dei modelli cloud. Va bene per prove e cose semplici; per lavori affidabili ti consiglio un modello cloud."
 msgstr "Il modello integrato gira sul tuo Mac: niente costi e i dati restano qui. È più lento e sbaglia più spesso dei modelli cloud. Va bene per prove e cose semplici; per lavori affidabili ti consiglio un modello cloud."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
-msgid "onboarding.localModelHonest"
-msgstr "Il modello integrato gira sul tuo Mac: niente costi e i dati restano qui. È più lento e sbaglia più spesso dei modelli cloud. Va bene per prove e cose semplici; per lavori affidabili ti consiglio un modello cloud."
+msgid "localModel.unsupported"
+msgstr "Il modello integrato non è disponibile su questa macchina: serve un Mac con Apple Silicon."
 
 #. js-lingui-explicit-id
 #: src/renderer/src/components/Chat.tsx
@@ -4263,6 +4286,11 @@ msgstr "nome utente"
 msgid "Nome utente"
 msgstr "Nome utente"
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "localModel.noSpace"
+msgstr "Non c’è abbastanza spazio su disco per il modello integrato: servono {needed} GB liberi (liberi ora: {free} GB)."
+
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 msgid "Non chiedere"
 msgstr "Non chiedere"
@@ -5049,11 +5077,6 @@ msgstr "Ragionamento"
 msgid "Ragionamento: Predefinito"
 msgstr "Ragionamento: Predefinito"
 
-#. placeholder {0}: m.ramUseGb
-#: src/renderer/src/components/settings/ModelsPage.tsx
-msgid "RAM ~{0} GB"
-msgstr "RAM ~{0} GB"
-
 #: src/renderer/src/components/ServerSheet.tsx
 msgid "registro MCP"
 msgstr "registro MCP"
@@ -5163,6 +5186,10 @@ msgstr "Richiesta non valida (state errato): riprova la connessione da Homun."
 msgid "Ricollega"
 msgstr "Ricollega"
 
+#: src/renderer/src/components/settings/ModelsPage.tsx
+msgid "Ricomincia"
+msgstr "Ricomincia"
+
 #: src/renderer/src/components/ServerSheet.tsx
 msgid "riconnessione non riuscita"
 msgstr "riconnessione non riuscita"
@@ -5224,6 +5251,10 @@ msgstr "Rinomina"
 #: src/renderer/src/components/RightPanel.tsx
 msgid "riprendi"
 msgstr "riprendi"
+
+#: src/renderer/src/components/settings/ModelsPage.tsx
+msgid "Riprendi"
+msgstr "Riprendi"
 
 #: src/renderer/src/components/MemoryPanel.tsx
 #: src/renderer/src/components/SkillsWindow.tsx

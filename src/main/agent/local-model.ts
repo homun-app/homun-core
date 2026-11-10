@@ -16,12 +16,21 @@ import { Readable } from 'node:stream'
 import type { LocalCatalogEntry } from './local-catalog'
 import { downloadUrlOf, localModelInstalledPath } from './local-catalog'
 
-/** Lo stato del modello integrato per la scheda delle Impostazioni. */
+/**
+ * Lo stato del modello integrato per la scheda delle Impostazioni.
+ * Fase locale correzioni (LC2): il .part da solo NON basta a dire
+ * «downloading» — downloading è solo un download ATTIVO nel processo; il
+ * .part senza download attivo è paused (Annulla, errore di rete o riavvio
+ * del demone a metà: si riprende col Range o si ricomincia); error è
+ * l'ultimo tentativo fallito, col messaggio (in memoria nel demone: dopo un
+ * riavvio resta solo paused, che va bene).
+ */
 export type LocalModelState =
   | { state: 'not-installed' }
   | { state: 'downloading'; bytes: number; total: number }
+  | { state: 'paused'; bytes: number; total: number }
+  | { state: 'error'; error: string; bytes: number; total: number }
   | { state: 'ready'; entry: LocalCatalogEntry; sizeBytes: number }
-  | { state: 'error'; error: string }
 
 /**
  * Il download con ripresa: se il .part esiste riparte col Range dal byte che
@@ -92,16 +101,34 @@ async function sha256OfFile(file: string): Promise<string> {
   return hash.digest('hex')
 }
 
-/** Lo stato del modello integrato (file installato / .part / niente). */
-export function localModelStatus(opts: { modelsDir: string; entry: LocalCatalogEntry }): LocalModelState {
+/**
+ * Lo stato del modello integrato (file installato / .part / niente + i fatti
+ * del processo): `downloading` solo se c'è un download ATTIVO (lo dice il
+ * demone), `error` se l'ultimo tentativo è fallito (l'errore sta in memoria
+ * nel demone), il .part da solo è `paused`.
+ */
+export function localModelStatus(opts: {
+  modelsDir: string
+  entry: LocalCatalogEntry
+  /** c'è un download attivo in questo processo? (lo sa il demone) */
+  downloading?: boolean
+  /** l'errore dell'ultimo tentativo, in memoria nel demone (null se nessuno) */
+  lastError?: string | null
+}): LocalModelState {
   const finalPath = localModelInstalledPath(opts.entry, opts.modelsDir)
   const partPath = finalPath + '.part'
   if (existsSync(finalPath)) {
     return { state: 'ready', entry: opts.entry, sizeBytes: statSync(finalPath).size }
   }
-  if (existsSync(partPath)) {
-    return { state: 'downloading', bytes: statSync(partPath).size, total: opts.entry.sizeBytes }
-  }
+  const hasPart = existsSync(partPath)
+  const bytes = hasPart ? statSync(partPath).size : 0
+  const total = opts.entry.sizeBytes
+  if (hasPart && opts.downloading) return { state: 'downloading', bytes, total }
+  // l'ultimo tentativo è fallito: vince error (il messaggio è l'informazione
+  // utile; i pulsanti sono gli stessi di paused). Senza .part — dimensione o
+  // hash sbagliati, il .part si cancella — l'errore resta, bytes 0
+  if (opts.lastError) return { state: 'error', error: opts.lastError, bytes, total }
+  if (hasPart) return { state: 'paused', bytes, total }
   return { state: 'not-installed' }
 }
 

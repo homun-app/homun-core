@@ -1964,15 +1964,23 @@ export function buildApiMethods(
     // download parte SOLO qui, dal consenso esplicito mostrato dalla UI.
     'local-model:status': async () => {
       const lm = await import('./local-model')
-      const { LOCAL_MODEL_CATALOG } = await import('../main/agent/local-catalog')
       const { localModelStatus } = await import('../main/agent/local-model')
-      const entry = LOCAL_MODEL_CATALOG[0]!
-      const st = localModelStatus({ modelsDir: lm.localModelsDir(), entry })
+      const entry = lm.localModelCatalogEntry()
+      // LC2: il .part da solo non basta — lo stato fonde disco (pure) e
+      // processo (download attivo? ultimo errore in memoria nel demone)
+      const st = localModelStatus({
+        modelsDir: lm.localModelsDir(), entry,
+        downloading: lm.localModelDownloading(),
+        lastError: lm.localModelDownloadError()
+      })
       const srv = lm.getLocalModelServer().status()
       const gb = (n: number): number => Math.round((n / 1024 ** 3) * 10) / 10
       return {
         state: st.state === 'ready' ? (srv.running ? 'running' : 'ready') : st.state,
-        ...(st.state === 'downloading' ? { progress: { bytes: st.bytes, total: st.total } } : {}),
+        ...(st.state !== 'not-installed' && st.state !== 'ready'
+          ? { progress: { bytes: st.bytes, total: st.total } }
+          : {}),
+        ...(st.state === 'error' ? { error: st.error } : {}),
         model: {
           id: entry.id, label: entry.label, sizeGb: gb(entry.sizeBytes),
           license: entry.license, source: `Hugging Face · ${entry.repo}`,
@@ -1984,6 +1992,10 @@ export function buildApiMethods(
     },
     'local-model:install': async () => {
       const lm = await import('./local-model')
+      // LC2: l'idoneità si ricontrolla LATO DEMONE prima di partire — la UI
+      // può essere vecchia, manipolata o semplicemente non aggiornata
+      const refusal = lm.localModelInstallRefusal()
+      if (refusal !== null) return { started: false, error: refusal }
       // il consenso lo ha dato l'utente nella UI: qui parte (o riprende) il
       // download; la fine si vede da local-model:status (poll)
       const done = lm.startLocalModelDownload()
@@ -1996,12 +2008,24 @@ export function buildApiMethods(
         emit({ type: 'agents' })
         // L4: l'onboarding fermo sul provider riprende anche da qui
         if (opts.onboarding) void opts.onboarding.resume().catch(() => undefined)
-      }).catch(() => undefined)
+      }, (e: unknown) => {
+        // LC2: l'errore NON si inghiotte — è già nello stato (error) e nel log
+        // (startLocalModelDownload); qui si evita solo l'unhandled rejection
+        console.error('[local-model] install:', e instanceof Error ? e.message : String(e))
+      })
       return { started: true }
     },
     'local-model:cancel': async () => {
       const lm = await import('./local-model')
       return { cancelled: lm.cancelLocalModelDownload() }
+    },
+    // LC2: «Ricomincia» — cancella il .part e riparte da zero (con paused o
+    // error: un .part che non si sa se è buono non si riprende, si ricomincia)
+    'local-model:restart': async () => {
+      const lm = await import('./local-model')
+      const refusal = lm.localModelInstallRefusal()
+      if (refusal !== null) return { started: false, error: refusal }
+      return await lm.restartLocalModelDownload()
     },
     'local-model:remove': async () => {
       const lm = await import('./local-model')

@@ -142,6 +142,48 @@ describe('fase locale (L3.4): download con server finto su 127.0.0.1', () => {
   })
 })
 
+// fase locale correzioni (LC2): il .part da solo NON basta più a dire
+// «downloading» — dopo un Annulla, un errore di rete o un riavvio del demone
+// la scheda deve distinguere downloading (attivo) / paused (.part fermo) /
+// error (ultimo tentativo fallito). Il tipo produce anche error, prima mai.
+describe('fase locale correzioni (LC2): downloading/paused/error dal .part', () => {
+  const PART = join(MODELS_DIR, ENTRY.file + '.part')
+
+  it('il .part SENZA download attivo e SENZA errore → paused con byte e totale', () => {
+    rmSync(join(MODELS_DIR, ENTRY.file), { force: true })
+    writeFileSync(PART, GGUF.slice(0, 12_345))
+    const st = localModelStatus({ modelsDir: MODELS_DIR, entry: ENTRY })
+    expect(st).toEqual({ state: 'paused', bytes: 12_345, total: ENTRY.sizeBytes })
+  })
+
+  it('il .part CON download attivo → downloading (come oggi il progresso)', () => {
+    const st = localModelStatus({ modelsDir: MODELS_DIR, entry: ENTRY, downloading: true })
+    expect(st).toEqual({ state: 'downloading', bytes: 12_345, total: ENTRY.sizeBytes })
+  })
+
+  it('il .part con l\'errore dell\'ultimo tentativo → error col messaggio E i byte', () => {
+    const st = localModelStatus({
+      modelsDir: MODELS_DIR, entry: ENTRY,
+      lastError: 'Il download del modello integrato non è riuscito: fetch failed'
+    })
+    expect(st).toEqual({
+      state: 'error', error: 'Il download del modello integrato non è riuscito: fetch failed',
+      bytes: 12_345, total: ENTRY.sizeBytes
+    })
+  })
+
+  it('errore SENZA .part (per esempio dimensione sbagliata, .part cancellato) → error con bytes 0', () => {
+    rmSync(PART, { force: true })
+    const st = localModelStatus({ modelsDir: MODELS_DIR, entry: ENTRY, lastError: 'wrong size' })
+    expect(st).toEqual({ state: 'error', error: 'wrong size', bytes: 0, total: ENTRY.sizeBytes })
+  })
+
+  it('niente .part e nessun errore → not-installed (dopo un riavvio del demone resta solo il disco)', () => {
+    const st = localModelStatus({ modelsDir: MODELS_DIR, entry: ENTRY })
+    expect(st.state).toBe('not-installed')
+  })
+})
+
 describe('fase locale (L3.4/L3.5): stato e rimozione', () => {
   it('localModelStatus: not-installed → ready col file installato', async () => {
     rmSync(join(MODELS_DIR, ENTRY.file), { force: true })

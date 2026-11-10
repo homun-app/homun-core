@@ -18,7 +18,7 @@ import { DEFAULT_AUTO_REVIEW, approvalsModeOf } from '../../../../shared/types'
 import { providerPlace } from '../../../../shared/network-host'
 import { fmtUsd as fmtUsdIn } from '../../lib/fmt'
 import { nextModelProbe, EMPTY_MODEL_PROBE, type ModelProbeState } from '../../lib/model-probe'
-import { moveFallback, removeFallback, reviewerMissing } from '../../lib/models-page'
+import { moveFallback, removeFallback, reviewerMissing, localModelCardActions } from '../../lib/models-page'
 import { ModelSelect } from '../ui/ModelSelect'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '../ui/dropdown-menu'
 import { SettingsPage } from './SettingsPage'
@@ -287,15 +287,18 @@ export function ModelsPage() {
 
 /**
  * Fase locale (L4.2): la scheda «Integrato» — stato (non installato /
- * download x% / pronto / in esecuzione), RAM usata, i pulsanti Installa,
- * Annulla e Rimuovi, e l'avviso onesto. Il download parte SOLO dal consenso
- * esplicito (modello, dimensione, sorgente e licenza mostrati prima del click).
+ * download x% / pronto / in esecuzione; LC2: anche in pausa ed errore, con
+ * Riprendi e Ricomincia), RAM usata, i pulsanti Installa, Annulla e Rimuovi,
+ * e l'avviso onesto. Il download parte SOLO dal consenso esplicito (modello,
+ * dimensione, sorgente e licenza mostrati prima del click).
  */
 function LocalModelCard() {
   const [st, setSt] = useState<LocalModelStatusRpc | null>(null)
   const [confirm, setConfirm] = useState(false)
   const [removing, setRemoving] = useState(false)
   const [freed, setFreed] = useState<number | null>(null)
+  // LC2: il rifiuto lato demone (idoneità ricontrollata a install/restart)
+  const [installError, setInstallError] = useState<string | null>(null)
 
   const refresh = (): void => {
     void api.localModelStatus().then(setSt).catch(() => setSt(null))
@@ -316,9 +319,13 @@ function LocalModelCard() {
     )
   }
   const m = st.model
-  const pct = st.state === 'downloading' && st.progress && st.progress.total > 0
+  const inProgress = st.state === 'downloading' || st.state === 'paused' || st.state === 'error'
+  const pct = inProgress && st.progress && st.progress.total > 0
     ? Math.floor((st.progress.bytes / st.progress.total) * 100)
     : null
+  // LC2: Annulla SOLO col download attivo; Riprendi (Range) e Ricomincia
+  // (cancella il .part) con paused e con error
+  const actions = localModelCardActions(st.state)
   const notEligible = st.eligibility.status === 'unsupported'
   const strong = st.eligibility.status === 'discouraged'
   const noSpace = st.eligibility.status === 'no-space'
@@ -358,19 +365,49 @@ function LocalModelCard() {
           </p>
         )}
 
-        {st.state === 'downloading' && (
+        {inProgress && (
           <div className="mt-3">
             <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
               <div className="h-full rounded-full bg-foreground transition-all" style={{ width: `${pct ?? 0}%` }} />
             </div>
-            <div className="mt-2 flex items-center justify-between gap-2">
-              <p className="text-[13px] text-muted-foreground"><Trans>Download {pct ?? 0}%</Trans></p>
-              <button
-                className="rounded-full bg-muted px-3 py-1.5 text-xs transition hover:bg-accent"
-                onClick={() => { void api.localModelCancel().then(refresh) }}
-              >
-                <Trans>Annulla</Trans>
-              </button>
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+              <p className={`text-[13px] ${st.state === 'error' ? 'text-destructive' : 'text-muted-foreground'}`}>
+                {st.state === 'downloading' && <Trans>Download {pct ?? 0}%</Trans>}
+                {st.state === 'paused' && <Trans>Download in pausa · {pct ?? 0}%</Trans>}
+                {st.state === 'error' && (st.error ?? '')}
+              </p>
+              <div className="flex items-center gap-2">
+                {actions.cancel && (
+                  <button
+                    className="rounded-full bg-muted px-3 py-1.5 text-xs transition hover:bg-accent"
+                    onClick={() => { void api.localModelCancel().then(refresh) }}
+                  >
+                    <Trans>Annulla</Trans>
+                  </button>
+                )}
+                {actions.resume && (
+                  <button
+                    className="rounded-full bg-muted px-3 py-1.5 text-xs transition hover:bg-accent"
+                    onClick={() => {
+                      setInstallError(null)
+                      void api.localModelInstall().then((r) => { if (r.error) setInstallError(r.error); refresh() })
+                    }}
+                  >
+                    <Trans>Riprendi</Trans>
+                  </button>
+                )}
+                {actions.restart && (
+                  <button
+                    className="rounded-full bg-muted px-3 py-1.5 text-xs transition hover:bg-accent"
+                    onClick={() => {
+                      setInstallError(null)
+                      void api.localModelRestart().then((r) => { if (r.error) setInstallError(r.error); refresh() })
+                    }}
+                  >
+                    <Trans>Ricomincia</Trans>
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -384,7 +421,11 @@ function LocalModelCard() {
                 </span>
                 <button
                   className="rounded-full bg-foreground px-3 py-1.5 text-xs font-medium text-background transition hover:opacity-90"
-                  onClick={() => { setConfirm(false); void api.localModelInstall().then(refresh) }}
+                  onClick={() => {
+                    setConfirm(false)
+                    setInstallError(null)
+                    void api.localModelInstall().then((r) => { if (r.error) setInstallError(r.error); refresh() })
+                  }}
                 >
                   <Trans>Installa</Trans>
                 </button>
@@ -440,6 +481,9 @@ function LocalModelCard() {
           </div>
         )}
 
+        {installError && (
+          <p className="mt-2 text-[13px] text-destructive">{installError}</p>
+        )}
         {st.server.lastError && (
           <p className="mt-2 text-[13px] text-destructive">{st.server.lastError}</p>
         )}

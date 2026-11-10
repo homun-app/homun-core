@@ -8,12 +8,14 @@
 // Il server del bundle ufficiale si cerca dove l'app lo mette
 // (Resources/vendor/llama, extraResources) e in dev nella vendor/ del repo
 // (scripts/fetch-llama.mjs), come fa il motore Engramma col suo .node.
-import { existsSync, statfs } from 'node:fs'
+import { existsSync, rmSync, statfs } from 'node:fs'
 import { homedir, totalmem } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { ProviderConfig } from '../shared/types'
 import { dataDir } from '../main/store/db'
+import { uiText } from '../main/ui-language'
+import { UI } from '../shared/ui-messages'
 import {
   createLocalModelServer, prodDeps, type LocalModelServer
 } from './local-model-server'
@@ -67,12 +69,28 @@ export function llamaServerBin(): string | null {
   return null
 }
 
+/**
+ * La voce del catalogo del modello integrato (override solo per i test, che
+ * servono un GGUF finto da un server su 127.0.0.1 invece del catalogo vero).
+ */
+let catalogEntryOverride: LocalCatalogEntry | null = null
+
+/** Solo per i test: la voce del catalogo usata da demone e RPC (null = quella vera). */
+export function setLocalModelCatalogForTest(e: LocalCatalogEntry | null): void {
+  catalogEntryOverride = e
+}
+
+/** La voce del catalogo di turno: l'override dei test o l'unica vera. */
+export function localModelCatalogEntry(): LocalCatalogEntry {
+  return catalogEntryOverride ?? LOCAL_MODEL_CATALOG[0]!
+}
+
 let serverSingleton: LocalModelServer | null = null
 
 /** Il server del modello integrato (un solo processo per daemon). */
 export function getLocalModelServer(): LocalModelServer {
   if (serverSingleton) return serverSingleton
-  const entry = LOCAL_MODEL_CATALOG[0]!
+  const entry = localModelCatalogEntry()
   const bin = llamaServerBin() ?? '(bundle assente: node scripts/fetch-llama.mjs)'
   const data = dataDir()
   serverSingleton = createLocalModelServer({
@@ -129,8 +147,34 @@ export function localModelFacts(): { arch: string; ramGb: number; freeDiskBytes:
 }
 
 /** L'idoneità della macchina al modello integrato (per onboarding e scheda). */
-export function localEligibilityOfMachine(entry: LocalCatalogEntry = LOCAL_MODEL_CATALOG[0]!): LocalEligibility {
-  return localEligibility(localModelFacts(), entry)
+export function localEligibilityOfMachine(entry: LocalCatalogEntry = localModelCatalogEntry()): LocalEligibility {
+  return localEligibility(eligibilityFactsOverride ?? localModelFacts(), entry)
+}
+
+/** I fatti dell'idoneità (override solo per i test). */
+let eligibilityFactsOverride: { arch: string; ramGb: number; freeDiskBytes: number | null } | null = null
+
+/** Solo per i test: fissa i fatti dell'idoneità (null = la macchina vera). */
+export function setLocalModelEligibilityFactsForTest(
+  f: { arch: string; ramGb: number; freeDiskBytes: number | null } | null
+): void {
+  eligibilityFactsOverride = f
+}
+
+/**
+ * Fase locale correzioni (LC2): l'idoneità si ricontrolla LATO DEMONE prima
+ * di partire — `unsupported` e `no-space` negano la partenza con un errore
+ * chiaro nella lingua dell'utente, senza dipendere dalla UI. Torna il
+ * messaggio dell'errore, o null se la macchina è idonea (discouraged non
+ * nega: l'avviso onesto lo mostra già la scheda).
+ */
+export function localModelInstallRefusal(entry: LocalCatalogEntry = localModelCatalogEntry()): string | null {
+  const elig = localEligibilityOfMachine(entry)
+  if (elig.status === 'unsupported') return uiText(UI.localModelUnsupported)
+  if (elig.status === 'no-space') {
+    return uiText(UI.localModelNoSpace, { needed: elig.neededGb, free: elig.freeGb })
+  }
+  return null
 }
 
 // ---- il download attivo (una sola volta: niente download paralleli) ----
@@ -140,17 +184,39 @@ let activeDownload: {
 } | null = null
 
 /**
- * L3.4: avvia (o riprende) il download del modello. Ritorna la promise della
- * fine; il progresso si legge da localModelProgress() (il .part su disco).
+ * L'errore dell'ULTIMO tentativo fallito, in memoria nel demone (LC2): dopo
+ * un riavvio sparisce e resta solo paused — va bene così. L'annullamento
+ * NON è un errore: lo stato che lascia è paused.
  */
-export function startLocalModelDownload(): Promise<{ path: string }> {
+let lastDownloadError: string | null = null
+
+/** L'errore dell'ultimo tentativo (per local-model:status), null se nessuno. */
+export function localModelDownloadError(): string | null {
+  return lastDownloadError
+}
+
+/** Le dipendenze iniettabili del download (i test servono un server finto). */
+export interface LocalModelDownloadDeps {
+  fetch?: typeof fetch
+  url?: string
+  entry?: LocalCatalogEntry
+}
+
+/**
+ * L3.4: avvia (o riprende) il download del modello. Ritorna la promise della
+ * fine; il progresso si legge dal .part su disco (poll della UI). LC2: il
+ * fallimento finisce NELLO STATO (lastDownloadError) e nel log, non inghiottito.
+ */
+export function startLocalModelDownload(deps: LocalModelDownloadDeps = {}): Promise<{ path: string }> {
   if (activeDownload) return activeDownload.promise
-  const entry = LOCAL_MODEL_CATALOG[0]!
+  const entry = deps.entry ?? localModelCatalogEntry()
   const controller = new AbortController()
+  lastDownloadError = null
   const promise = (async () => {
     const { downloadLocalModel } = await import('../main/agent/local-model')
     return await downloadLocalModel({
-      fetch,
+      fetch: deps.fetch ?? fetch,
+      url: deps.url,
       modelsDir: localModelsDir,
       entry,
       signal: controller.signal,
@@ -160,8 +226,38 @@ export function startLocalModelDownload(): Promise<{ path: string }> {
     })
   })()
   activeDownload = { controller, promise }
-  promise.finally(() => { activeDownload = null }).catch(() => undefined)
+  promise.finally(() => { activeDownload = null }).catch((e: unknown) => {
+    const raw = e instanceof Error ? e.message : String(e)
+    // l'annullamento NON è un errore: lo stato che lascia è paused (il .part resta)
+    if (!/annull|cancel|abort/i.test(raw)) {
+      lastDownloadError = uiText(UI.localModelDownloadFailed, { message: raw })
+      console.error(`[local-model] download failed: ${raw}`)
+    } else {
+      console.error('[local-model] download cancelled (paused, il .part resta)')
+    }
+  })
   return promise
+}
+
+/**
+ * LC2: Ricomincia — cancella il .part e riparte da zero. Ha senso con paused
+ * e con error (un .part corrotto, per esempio); con un download attivo non
+ * fa niente (la UI non lo mostra, e partono comunque download doppi mai).
+ */
+export async function restartLocalModelDownload(deps: LocalModelDownloadDeps = {}): Promise<{ started: boolean }> {
+  if (activeDownload) return { started: false }
+  const entry = deps.entry ?? localModelCatalogEntry()
+  try { rmSync(localModelInstalledPath(entry, localModelsDir()) + '.part', { force: true }) } catch { /* già via */ }
+  lastDownloadError = null
+  startLocalModelDownload(deps)
+  return { started: true }
+}
+
+/** Solo per i test: azzera lo stato del download (annulla e dimentica l'errore). */
+export function resetLocalModelDownloadForTest(): void {
+  if (activeDownload) activeDownload.controller.abort()
+  activeDownload = null
+  lastDownloadError = null
 }
 
 /** L3.4: annulla il download attivo (il .part resta, si può riprendere). */
@@ -182,10 +278,11 @@ export function localModelDownloading(): boolean {
  */
 export async function removeLocalModelFromDisk(): Promise<{ freedBytes: number; freedGb: number }> {
   cancelLocalModelDownload()
+  lastDownloadError = null // LC2: rimosso il modello, anche l'errore del tentativo sparisce
   const { removeLocalModel } = await import('../main/agent/local-model')
   return await removeLocalModel({
     modelsDir: localModelsDir(),
-    entry: LOCAL_MODEL_CATALOG[0]!,
+    entry: localModelCatalogEntry(),
     stopServer: () => getLocalModelServer().stop()
   })
 }

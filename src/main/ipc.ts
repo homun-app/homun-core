@@ -91,7 +91,8 @@ export const DAEMON_RPC_CHANNELS = [
   'providers:probe', 'activity:global', 'connectors:search-registry',
   // fase locale (L3/L4): il modello integrato — stato, download, annullamento,
   // rimozione (tutto nel daemon)
-  'local-model:status', 'local-model:install', 'local-model:cancel', 'local-model:remove',
+  'local-model:status', 'local-model:install', 'local-model:cancel', 'local-model:restart',
+  'local-model:remove',
   // fase app (A2–A4): Composio con la chiave dell'utente — stato, chiave,
   // prova, disattivazione, collega e scollega (tutto nel daemon; il catalogo
   // per la UI è ora il file curato nel repo, fase catalogo app P7)

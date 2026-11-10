@@ -71,6 +71,7 @@ const api: SandbotApi = {
   localModelStatus: () => ipcRenderer.invoke('local-model:status'),
   localModelInstall: () => ipcRenderer.invoke('local-model:install'),
   localModelCancel: () => ipcRenderer.invoke('local-model:cancel'),
+  localModelRestart: () => ipcRenderer.invoke('local-model:restart'),
   localModelRemove: () => ipcRenderer.invoke('local-model:remove'),
   // fase 18b (K3): le capacità di UN modello (nessun elenco completo in chat)
   modelCapabilities: (providerId, model) => ipcRenderer.invoke('models:capabilities', providerId, model),

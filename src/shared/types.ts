@@ -473,10 +473,15 @@ export interface ProviderProbeResult {
  * polla (niente eventi push): non-installato / download (byte) / pronto /
  * in esecuzione, con i dati del modello, l'idoneità della macchina e lo
  * stato del processo affiancato.
+ * Fase locale correzioni (LC2): il .part senza download attivo è paused
+ * (Riprendi col Range / Ricomincia cancellando il .part); error è l'ultimo
+ * tentativo fallito, col messaggio nella lingua dell'utente.
  */
 export interface LocalModelStatusRpc {
-  state: 'not-installed' | 'downloading' | 'ready' | 'running'
+  state: 'not-installed' | 'downloading' | 'paused' | 'error' | 'ready' | 'running'
   progress?: { bytes: number; total: number }
+  /** solo con state 'error': il messaggio dell'ultimo tentativo fallito */
+  error?: string
   model: {
     id: string
     label: string
@@ -811,10 +816,13 @@ export interface SandbotApi {
   /**
    * Fase locale (L3/L4): il modello integrato — stato della scheda, download
    * (dopo il consenso esplicito della UI), annullamento e rimozione.
+   * LC2: install può rifiutare (idoneità ricontrollata LATO DEMONE) e c'è
+   * «Ricomincia»: cancella il .part e riparte da zero.
    */
   localModelStatus(): Promise<LocalModelStatusRpc>
-  localModelInstall(): Promise<{ started: boolean }>
+  localModelInstall(): Promise<{ started: boolean; error?: string }>
   localModelCancel(): Promise<{ cancelled: boolean }>
+  localModelRestart(): Promise<{ started: boolean; error?: string }>
   localModelRemove(): Promise<{ freedGb: number }>
   /**
    * Fase 18b (K3): le capacità di UN modello, SENZA l'elenco completo e senza

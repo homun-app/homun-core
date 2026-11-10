@@ -616,6 +616,19 @@ export const UI = {
     id: 'onboarding.localModelHonest',
     message: 'Il modello integrato gira sul tuo Mac: niente costi e i dati restano qui. È più lento e sbaglia più spesso dei modelli cloud. Va bene per prove e cose semplici; per lavori affidabili ti consiglio un modello cloud.'
   }),
+  // fase locale correzioni (LC2): i testi del demone per il download interrotto
+  localModelDownloadFailed: msg({
+    id: 'localModel.downloadFailed',
+    message: 'Il download del modello integrato non è riuscito: {message}'
+  }),
+  localModelUnsupported: msg({
+    id: 'localModel.unsupported',
+    message: 'Il modello integrato non è disponibile su questa macchina: serve un Mac con Apple Silicon.'
+  }),
+  localModelNoSpace: msg({
+    id: 'localModel.noSpace',
+    message: 'Non c\u2019è abbastanza spazio su disco per il modello integrato: servono {needed} GB liberi (liberi ora: {free} GB).'
+  }),
   onboardingWelcomeHead: msg({
     id: 'onboarding.welcomeHead',
     message: 'Benvenuto! Ho preparato due bot su misura per te, li trovi nella barra a sinistra:'
