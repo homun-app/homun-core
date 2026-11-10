@@ -5,6 +5,43 @@ pubblicata finisce nel corpo della GitHub Release (da cui l'app mostra il
 «cosa cambia» quando propone un aggiornamento). Formato: `## [x.y.z] — data`,
 sezioni H2 e un punto per riga.
 
+## [0.3.1001-beta.3] — 2026-11-10
+
+Il turno di Trello con 11 card di approvazione e nessuna risposta: chi legge
+per rispondere a ciò che hai chiesto non chiede più a ogni passo.
+
+### Approvazioni
+
+- **In Automatico il bot non chiede più per ogni lettura che serve a ciò che
+  hai chiesto.** Un modello controlla ogni azione sulla tua richiesta: fa
+  passare quello che serve (anche i passi che non hai detto) e ti chiede
+  solo quando va chiaramente oltre e non si annulla facilmente: scrivere a
+  qualcuno che non hai nominato, pagare, cancellare, pubblicare. Le tue
+  regole continuano a venire prima — e ora servono per allargare, non per
+  far funzionare l'Automatico.
+- **Per le letture direlle c'è «Per questo turno».** Se consenti una
+  richiesta diretta di lettura a un'app (per esempio le tue board di
+  Trello), le altre letture della stessa app fino a fine turno passano
+  senza chiedere di nuovo. Le scritture continuano a chiedere ogni volta.
+- **Un nome scritto male non apre più una card.** Se il bot chiama uno
+  strumento che non esiste, riceve subito l'errore con i nomi giusti più
+  vicini: niente consensi salvati per cose mai esistite.
+- **Le card si leggono.** Il titolo delle richieste dirette non contiene
+  più l'indirizzo intero (che restava su una riga sola e allargava la
+  chat): l'indirizzo completo si vede una volta sola, negli argomenti, e va
+  a capo.
+
+### Connessioni e aggiornamenti
+
+- **Meno interruzioni quando la connessione con un'app cade.** Se una
+  lettura già approvata muore per una connessione chiusa, il bot si
+  riconnette e la ripete una volta da solo, senza una card nuova per ogni
+  tentativo; le scritture non si ripetono mai da sole.
+- **Le note dell'aggiornamento si leggono.** Nel dialogo «È disponibile
+  Homun…» non si vedono più i tag dell'HTML: elenchi puntati, righe e
+  accenti come devono essere, e le note lunghe si tagliano pulite con un
+  invito ad aprirle tutte.
+
 ## [0.3.1001-beta.2] — 2026-11-10
 
 Correzioni e ritocchi dalla prova della beta.1 sul Mac: l'aggiornamento che

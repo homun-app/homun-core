@@ -94,6 +94,26 @@ describe('fase rilascio di prova (RP5): versione e CHANGELOG', () => {
     // e sta SOPRA la beta.1 (chi legge il changelog vede prima la più nuova)
     expect(changelog.indexOf('## [0.3.1001-beta.2]')).toBeLessThan(changelog.indexOf('## [0.3.1001-beta.1]'))
   })
+
+  it('RW6 (fase revisore sulla richiesta): la voce 0.3.1001-beta.3 c’è, SOPRA la beta.2, in parole per l’utente', async () => {
+    const { extractReleaseNotes } = (await import('../extract-release-notes.mjs')) as {
+      extractReleaseNotes: (changelog: string, version: string) => string | null
+    }
+    const changelog = read('CHANGELOG.md')
+    const body = extractReleaseNotes(changelog, '0.3.1001-beta.3')
+    expect(body, 'manca la sezione ## [0.3.1001-beta.3] nel CHANGELOG').not.toBeNull()
+    expect(body!.length).toBeGreaterThan(80) // in parole per l'utente, non una riga
+    // le cinque cose della fase, dette come le vede chi usa l'app
+    const flat = body!.replace(/\s+/g, ' ')
+    expect(flat).toMatch(/[Aa]utomatico/)
+    expect(flat).toMatch(/chiede meno|non chiede più|senza chiedere/)
+    expect(flat).toContain('Per questo turno')
+    expect(flat).toMatch(/card/)
+    expect(flat).toMatch(/note dell'aggiornamento|note del.*aggiornamento/)
+    expect(flat).toMatch(/connessione/)
+    // e sta SOPRA la beta.2
+    expect(changelog.indexOf('## [0.3.1001-beta.3]')).toBeLessThan(changelog.indexOf('## [0.3.1001-beta.2]'))
+  })
 })
 
 void existsSync
