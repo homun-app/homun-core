@@ -3391,6 +3391,11 @@ msgstr "Installing…"
 msgid "Integrato"
 msgstr "Built-in"
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "localModel.providerName"
+msgstr "Built-in (on your Mac)"
+
 #: src/renderer/src/components/BotScreen.tsx
 msgid "Interrompe il turno del bot e apre il controllo"
 msgstr "Interrupts the bot’s turn and opens control"

@@ -96,9 +96,12 @@ beforeEach(async () => {
   mkdirSync(modelsDir(), { recursive: true })
   mode = 'full'
   seenRanges.length = 0
+  events.length = 0
   lm.setLocalModelCatalogForTest(ENTRY)
   lm.setLocalModelEligibilityFactsForTest(null)
   lm.resetLocalModelDownloadForTest()
+  // LD1: niente listener residui dai test precedenti (ogni test registra il suo)
+  lm.resetLocalModelReadyForTest()
 })
 afterEach(async () => {
   lm.resetLocalModelDownloadForTest()
@@ -111,6 +114,71 @@ afterEach(async () => {
 /** lo stato della RPC, con i deps del test (fetch finto, entry finta) */
 const statusOf = async (): Promise<LocalModelStatusRpc> =>
   (await api['local-model:status']!([])) as LocalModelStatusRpc
+
+/** attende che una condizione diventi vera (attesa sullo STATO, mai su un tempo fisso) */
+const waitFor = async (cond: () => boolean | Promise<boolean>, what: string, attempts = 500): Promise<void> => {
+  for (let i = 0; i < attempts; i++) {
+    if (await cond()) return
+    await new Promise((r) => setTimeout(r, 20))
+  }
+  throw new Error(`attesa fallita: ${what}`)
+}
+
+describe('fase locale correzioni 2 (LD1): la fine del download aggancia il provider UNA volta per tutte', () => {
+  it('Ricomincia fino a ready: il provider esiste, agents emesso, onboarding ripreso', async () => {
+    // l'onboarding finto della RPC (conta le riprese)
+    let resumed = 0
+    const apiLd = buildApiMethods(emit, { poke: () => undefined } as unknown as JobWorker, undefined, undefined, {
+      onboarding: {
+        maybeStart: () => undefined,
+        answerRole: async () => undefined,
+        resume: async () => { resumed++; return true }
+      }
+    })
+    // il catalogo REALE punta a huggingface: il fetch globale è rimappato sul
+    // server finto (il dominio è solo un nome, la rete è sempre 127.0.0.1).
+    // Il fetch VERO si cattura PRIMA dello stub, sennò lo stub richiama se stesso
+    const realFetch = fetch
+    vi.stubGlobal('fetch', ((u: string | URL, init?: RequestInit): Promise<Response> => {
+      const url = String(u).replace('https://huggingface.co', base)
+      if (!url.startsWith('http://127.0.0.1:')) throw new Error(`RETE VIETATA nel test: ${url}`)
+      return realFetch(url, init) as unknown as Promise<Response>
+    }) as unknown as typeof fetch)
+    // il primo tentativo si interrompe a metà (rete rotta) → error
+    mode = 'cut'
+    expect(await apiLd['local-model:install']!([])).toEqual({ started: true })
+    await waitFor(async () => (await statusOf()).state === 'error', 'il download interrotto non è arrivato a error')
+    expect(existsSync(partPath())).toBe(true)
+    // «Ricomincia» (RPC): cancella il .part, riparte da zero e ARRIVA in fondo
+    mode = 'full'
+    expect(await apiLd['local-model:restart']!([])).toEqual({ started: true })
+    // si aspetta la fine SUL DISCO (non con lo status: la riparazione di LD1
+    // su status creerebbe il provider e maschererebbe l'aggancio che si prova)
+    await waitFor(() => existsSync(finalPath()), 'il download ricominciato non è arrivato in fondo', 200)
+    // e l'aggancio della fine download ha fatto IL LAVORO (attesa sull'evento)
+    await waitFor(() => events.some((e) => e.type === 'agents'), 'nessun evento agents dalla fine del download', 150)
+    const { publicProviders } = await import('../../main/agent/providers')
+    const prov = publicProviders().find((p) => p.id === 'homun-local')
+    expect(prov?.name).toBe('Integrato (sul tuo Mac)') // il nome dal catalogo it
+    expect(resumed).toBeGreaterThan(0) // l'onboarding è ripreso
+  })
+
+  it('modello ready su disco SENZA provider: status lo crea e lo emette UNA volta sola', async () => {
+    // si parte DAVVERO senza provider (la connessione settings può essere
+    // quella del test precedente: il provider lì si toglie a mano)
+    const { deleteProvider, publicProviders } = await import('../../main/agent/providers')
+    deleteProvider('homun-local')
+    writeFileSync(finalPath(), GGUF) // il GGUF già arrivato in fondo
+    const before = events.filter((e) => e.type === 'agents').length
+    const st1 = await statusOf()
+    expect(st1.state === 'ready' || st1.state === 'running').toBe(true)
+    expect(publicProviders().some((p) => p.id === 'homun-local')).toBe(true)
+    expect(events.filter((e) => e.type === 'agents').length).toBe(before + 1)
+    // la seconda lettura NON ricrea (nessun secondo evento agents)
+    await statusOf()
+    expect(events.filter((e) => e.type === 'agents').length).toBe(before + 1)
+  })
+})
 
 describe('fase locale correzioni (LC2): rete rotta a metà → error, poi Riprendi fino a ready', () => {
   it('il download parte downloading, la connessione si chiude a metà → error col messaggio e col .part', async () => {

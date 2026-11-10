@@ -629,6 +629,12 @@ export const UI = {
     id: 'localModel.noSpace',
     message: 'Non c\u2019è abbastanza spazio su disco per il modello integrato: servono {needed} GB liberi (liberi ora: {free} GB).'
   }),
+  // fase locale correzioni 2 (LD1): il nome del provider «Integrato» passa per
+  // il catalogo (it verità / en traduzione), non più scritto a mano nel daemon
+  localModelProviderName: msg({
+    id: 'localModel.providerName',
+    message: 'Integrato (sul tuo Mac)'
+  }),
   onboardingWelcomeHead: msg({
     id: 'onboarding.welcomeHead',
     message: 'Benvenuto! Ho preparato due bot su misura per te, li trovi nella barra a sinistra:'

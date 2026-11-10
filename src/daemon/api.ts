@@ -215,6 +215,34 @@ export function buildApiMethods(
     t?.type === 'schedule' && t.kind === 'cron' ? t.cron : ''
 
   /**
+   * Fase locale correzioni 2 (LD1): il provider «Integrato» esiste — crea è
+   * IDEMPOTENTE (lo chiama la fine del download E la riparazione di
+   * local-model:status). Il nome passa dal catalogo UI (it/en), non più
+   * scritto a mano. Torna true se lo ha CREATO (con l'evento agents).
+   */
+  const ensureLocalModelProvider = async (): Promise<boolean> => {
+    if (providers.getProvider('homun-local')) return false
+    await providers.saveProvider({
+      id: 'homun-local', name: uiText(UI.localModelProviderName), kind: 'homun-local',
+      baseUrl: '', enabled: true
+    })
+    emit({ type: 'agents' })
+    return true
+  }
+
+  // LD1: il lavoro di fine download (provider + agents + onboarding) sta in
+  // UN SOLO posto — lo registra qui il demone, una volta; a notificare è
+  // startLocalModelDownload (l'unico punto di partenza di OGNI download:
+  // Riprendi, Ricomincia e le strade future)
+  void import('./local-model').then((lm) => {
+    lm.onLocalModelReady(() => {
+      void ensureLocalModelProvider()
+      // L4: l'onboarding fermo sul provider riprende anche da qui
+      if (opts.onboarding) void opts.onboarding.resume().catch(() => undefined)
+    })
+  }).catch(() => undefined) // senza il modulo locale il demone parte lo stesso
+
+  /**
    * Validazione completa di un trigger: forma (triggerShapeErrors), cron,
    * orari HH:MM e — per i connector_poll — il tool deve esistere sul server
    * del connettore ed essere in SOLA LETTURA (readOnlyHint), altrimenti il
@@ -1973,6 +2001,10 @@ export function buildApiMethods(
         downloading: lm.localModelDownloading(),
         lastError: lm.localModelDownloadError()
       })
+      // LD1: riparazione idempotente — modello ready su disco e provider
+      // mancante (per esempio un download finito PRIMA di questa correzione):
+      // lo status lo crea, così anche gli stati già rotti si sistemano
+      if (st.state === 'ready') await ensureLocalModelProvider()
       const srv = lm.getLocalModelServer().status()
       const gb = (n: number): number => Math.round((n / 1024 ** 3) * 10) / 10
       return {
@@ -1997,22 +2029,10 @@ export function buildApiMethods(
       const refusal = lm.localModelInstallRefusal()
       if (refusal !== null) return { started: false, error: refusal }
       // il consenso lo ha dato l'utente nella UI: qui parte (o riprende) il
-      // download; la fine si vede da local-model:status (poll)
-      const done = lm.startLocalModelDownload()
-      done.then(async () => {
-        // a fine download il provider «Integrato» esiste (senza chiave)
-        await providers.saveProvider({
-          id: 'homun-local', name: 'Integrato (sul tuo Mac)', kind: 'homun-local',
-          baseUrl: '', enabled: true
-        })
-        emit({ type: 'agents' })
-        // L4: l'onboarding fermo sul provider riprende anche da qui
-        if (opts.onboarding) void opts.onboarding.resume().catch(() => undefined)
-      }, (e: unknown) => {
-        // LC2: l'errore NON si inghiotte — è già nello stato (error) e nel log
-        // (startLocalModelDownload); qui si evita solo l'unhandled rejection
-        console.error('[local-model] install:', e instanceof Error ? e.message : String(e))
-      })
+      // download; la fine si vede da local-model:status (poll). LD1: il lavoro
+      // di fine download (provider, agents, onboarding) NON sta più qui — lo
+      // notifica startLocalModelDownload ai listener registrati dal demone
+      void lm.startLocalModelDownload()
       return { started: true }
     },
     'local-model:cancel': async () => {

@@ -183,6 +183,41 @@ let activeDownload: {
   promise: Promise<{ path: string }>
 } | null = null
 
+// ---- fase locale correzioni 2 (LD1): la fine del download, UN SOLO posto ----
+
+/** Chi ascolta la fine RIUSCITA del download (il demone registra il proprio aggancio una volta). */
+export type LocalModelReadyListener = (ready: { path: string }) => void | Promise<void>
+
+const localModelReadyListeners = new Set<LocalModelReadyListener>()
+
+/**
+ * LD1: l'aggancio alla fine del download (provider «Integrato», evento
+ * agents, ripresa dell'onboarding) NON sta più nelle singole RPC che sanno
+ * avviare un download — sta qui, notificato da startLocalModelDownload, che
+ * è l'UNICO punto di partenza (Riprendi, Ricomincia e ogni strada futura).
+ * Il demone registra il listener una volta; torna la deregistrazione.
+ */
+export function onLocalModelReady(listener: LocalModelReadyListener): () => void {
+  localModelReadyListeners.add(listener)
+  return () => { localModelReadyListeners.delete(listener) }
+}
+
+/** Le notifiche ai listener: un listener che lancia non ferma gli altri. */
+async function notifyLocalModelReady(ready: { path: string }): Promise<void> {
+  for (const l of [...localModelReadyListeners]) {
+    try {
+      await l(ready)
+    } catch (e) {
+      console.error('[local-model] onLocalModelReady:', e instanceof Error ? e.message : String(e))
+    }
+  }
+}
+
+/** Solo per i test: azzera i listener registrati. */
+export function resetLocalModelReadyForTest(): void {
+  localModelReadyListeners.clear()
+}
+
 /**
  * L'errore dell'ULTIMO tentativo fallito, in memoria nel demone (LC2): dopo
  * un riavvio sparisce e resta solo paused — va bene così. L'annullamento
@@ -226,6 +261,12 @@ export function startLocalModelDownload(deps: LocalModelDownloadDeps = {}): Prom
     })
   })()
   activeDownload = { controller, promise }
+  // LD1: la fine RIUSCITA notifica i listener registrati dal demone (provider,
+  // evento agents, onboarding) — qui, non nelle RPC che avviano il download
+  promise.then(
+    (ready) => { void notifyLocalModelReady(ready) },
+    () => undefined // il rifiuto lo registra la catena sotto (stato + log)
+  )
   promise.finally(() => { activeDownload = null }).catch((e: unknown) => {
     const raw = e instanceof Error ? e.message : String(e)
     // l'annullamento NON è un errore: lo stato che lascia è paused (il .part resta)
