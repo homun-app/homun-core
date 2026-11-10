@@ -9,8 +9,9 @@
 // Tutto a dipendenze iniettabili: i test servono il GGUF da un server FINTO
 // su 127.0.0.1, senza rete vera.
 import { createHash } from 'node:crypto'
-import { createReadStream, createWriteStream } from 'node:fs'
+import { createReadStream } from 'node:fs'
 import { existsSync, mkdirSync, renameSync, rmSync, statSync, unlinkSync } from 'node:fs'
+import { open } from 'node:fs/promises'
 import { pipeline } from 'node:stream/promises'
 import { Readable } from 'node:stream'
 import type { LocalCatalogEntry } from './local-catalog'
@@ -34,9 +35,14 @@ export type LocalModelState =
 
 /**
  * Il download con ripresa: se il .part esiste riparte col Range dal byte che
- * c'è già; 206 → si appende, 200 → si ricomincia da zero. Alla fine verifica
- * dimensione e sha256: se non tornano, il .part si CANCELLA e l'errore lo
- * dice. Annullato (signal) il .part RESTA: si riprende al tentativo dopo.
+ * c'è già; 206 → si appende, 200 → si ricomincia da zero. Il progresso conta
+ * i byte SUL DISCO (fase CI test ermetici, RU2): ogni pezzo si scrive TUTTO
+ * e solo dopo arriva la chiamata di onProgress — così un annullamento arrivato
+ * dopo il primo pezzo lascia un .part con ESATTAMENTE i byte annunciati (con
+ * la pipeline di stream il primo pezzo poteva restare nel buffer e il .part
+ * nascere a 0 byte). Alla fine verifica dimensione e sha256: se non tornano,
+ * il .part si CANCELLA e l'errore lo dice. Annullato (signal) il .part RESTA:
+ * si riprende al tentativo dopo.
  */
 export async function downloadLocalModel(opts: {
   fetch: typeof fetch
@@ -66,21 +72,30 @@ export async function downloadLocalModel(opts: {
   const totalHeader = Number(res.headers.get('content-length') ?? 0)
   const total = resume ? have + totalHeader : totalHeader
   let bytes = resume ? have : 0
-  const out = createWriteStream(partPath, { flags: resume ? 'a' : 'w' })
   const body = res.body ? Readable.fromWeb(res.body as never) : Readable.from([])
+  const out = await open(partPath, resume ? 'a' : 'w')
   try {
-    body.on('data', (chunk: Buffer) => {
-      bytes += chunk.length
+    for await (const chunk of body) {
+      // il pezzo si scrive TUTTO (i write parziali si ripetono sul byte che
+      // manca): il progresso si annuncia SOLO dopo, coi byte davvero sul .part
+      const piece = chunk as Buffer
+      let written = 0
+      while (written < piece.length) {
+        const r = await out.write(piece, written, piece.length - written)
+        written += r.bytesWritten
+      }
+      bytes += piece.length
       opts.onProgress?.({ bytes, total })
-    })
-    await pipeline(body, out)
+    }
   } catch (e) {
     // annullato o rete rotta: il .part RESTA per la ripresa. LD2: l'annullamento
     // lo dice il SEGNALE, non il testo dell'errore — «aborted» nel messaggio può
     // essere un errore di rete (undici, timeout), che va consegnato com'è
+    await out.close().catch(() => undefined)
     if (opts.signal?.aborted) throw new Error('download cancelled')
     throw e
   }
+  await out.close()
   if (opts.signal?.aborted) throw new Error('download cancelled')
   // verifica finale: dimensione e sha256
   if (statSync(partPath).size !== entry.sizeBytes) {

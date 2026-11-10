@@ -2,6 +2,10 @@
 // su 127.0.0.1 (nessuna rete vera): ripresa con Range, sha256 sbagliato →
 // .part cancellato, annullamento che lascia il .part riprendibile. E la
 // rimozione (L3.5). Il catalogo del test è un GGUF FINTO di poche decine di KB.
+// Fase CI test ermetici (RU2): l'annullamento si prova in modo DETERMINISTICO
+// — dentro onProgress alla prima chiamata con byte > 0, MAI con un timer che
+// gareggia contro l'I/O; e il «cut» del server chiude solo dopo che i byte
+// sono arrivati sul .part (poll sul file).
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, statSync, createReadStream, readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
@@ -28,6 +32,12 @@ const ENTRY: LocalCatalogEntry = {
 const seenRanges: string[] = []
 let abortAfterBytes = -1 // il server chiude la connessione dopo N byte (download interrotto)
 let serveWrongBytes = false
+// RU2: la modalità «firstPiece» serve SOLO il primo pezzo e poi mai la fine:
+// il download può solo annullarsi. firstPieceDelayMs ritarda la SCRITTURA del
+// primo pezzo (e con lui le intestazioni, che partono insieme): serve per
+// provare l'annullamento quando il primo pezzo arriva in RITARDO.
+let firstPiece = -1
+let firstPieceDelayMs = 0
 let server: Server | null = null
 let base = ''
 
@@ -48,10 +58,34 @@ beforeAll(async () => {
     res.setHeader('content-range', `bytes ${from}-${body.length - 1}/${body.length}`)
     res.setHeader('content-length', String(slice.length))
     if (abortAfterBytes > 0 && slice.length > abortAfterBytes) {
-      // interruzione a metà: i primi byte vengono consegnati (callback di
-      // write), POI il socket si distrugge — al client resta la risposta
-      // troncata e il .part con i byte ricevuti
-      res.write(slice.slice(0, abortAfterBytes), () => { setTimeout(() => res.destroy(), 10) })
+      // interruzione a metà: i primi byte vengono consegnati, POI il socket si
+      // distrugge — al client resta la risposta troncata e il .part con i byte
+      // ricevuti. RU2: la chiusura aspetta che i byte siano ARRIVATI sul .part
+      // (poll sul file, come LD5 nel test del demone) — il destroy a orologio
+      // (10 ms) sotto carico vinceva la lettura del client e il .part nasceva
+      // a 0 byte: corsa contro I/O vero, non un difetto del download
+      const target = from + Math.min(slice.length, abortAfterBytes)
+      res.write(slice.slice(0, abortAfterBytes), () => {
+        void (async () => {
+          for (let i = 0; i < 500; i++) {
+            try {
+              if (existsSync(join(MODELS_DIR, ENTRY.file + '.part')) &&
+                  statSync(join(MODELS_DIR, ENTRY.file + '.part')).size >= target) break
+            } catch { /* il .part compare e cresce: si riprova */ }
+            await new Promise((r) => setTimeout(r, 10))
+          }
+          res.destroy()
+        })()
+      })
+      return
+    }
+    if (firstPiece > 0) {
+      // RU2: il primo pezzo (e poi MAI la fine). Dopo il primo pezzo non si
+      // scrive più niente: il client che annulla chiude la connessione senza
+      // che il server scriva su un socket morto.
+      const send = (): void => { if (!res.destroyed && res.writable) res.write(slice.slice(0, firstPiece)) }
+      if (firstPieceDelayMs > 0) setTimeout(send, firstPieceDelayMs)
+      else send()
       return
     }
     res.end(slice)
@@ -61,6 +95,9 @@ beforeAll(async () => {
 })
 
 afterAll(async () => {
+  // le risposte «firstPiece» non finiscono mai: si chiudono i socket a forza,
+  // altrimenti server.close() resta appeso per l'hook timeout
+  server?.closeAllConnections?.()
   await new Promise<void>((resolve) => server?.close(() => resolve()))
   rmSync(ROOT, { recursive: true, force: true })
 })
@@ -114,15 +151,57 @@ describe('fase locale (L3.4): download con server finto su 127.0.0.1', () => {
     expect(existsSync(join(MODELS_DIR, ENTRY.file))).toBe(false)
   })
 
-  it('annullamento: il .part resta (si può riprendere), nessun file finale', async () => {
+  /** il download annullato DENTRO onProgress, alla prima chiamata con byte > 0 */
+  const abortAtFirstPiece = async (): Promise<{ partSize: number; bytesWhenAborted: number }> => {
     rmSync(join(MODELS_DIR, ENTRY.file), { force: true })
-    abortAfterBytes = 10_000
+    rmSync(join(MODELS_DIR, ENTRY.file + '.part'), { force: true })
+    firstPiece = 10_000
     const ac = new AbortController()
-    const p = downloadLocalModel({ ...depsOf(), entry: ENTRY, signal: ac.signal })
-    setTimeout(() => ac.abort(), 5)
+    let bytesWhenAborted = -1
+    const p = downloadLocalModel({
+      ...depsOf((pr) => {
+        // RU2: NIENTE orologio. Si annulla DOPO il primo pezzo, alla prima
+        // chiamata di progresso con byte > 0: quando arriva il pezzo, arriva
+        // l'annullamento — prima della fine, perché il pezzo non è tutto il file
+        if (pr.bytes > 0 && bytesWhenAborted < 0) {
+          bytesWhenAborted = pr.bytes
+          ac.abort()
+        }
+      }),
+      entry: ENTRY, signal: ac.signal
+    })
     await expect(p).rejects.toThrow(/abort|annull|cancel/i)
-    abortAfterBytes = -1
-    expect(existsSync(join(MODELS_DIR, ENTRY.file + '.part'))).toBe(true)
+    firstPiece = -1
+    firstPieceDelayMs = 0
+    const partSize = statSync(join(MODELS_DIR, ENTRY.file + '.part')).size
+    return { partSize, bytesWhenAborted }
+  }
+
+  it('annullamento: il .part resta (si può riprendere), nessun file finale', async () => {
+    const { partSize, bytesWhenAborted } = await abortAtFirstPiece()
+    expect(bytesWhenAborted).toBeGreaterThan(0)
+    // il download si è FERMATO a metà: il .part c'è, con più di 0 byte e
+    // MENO del file intero, e i byte annunciati dal progresso sono SUL DISCO
+    expect(partSize).toBe(bytesWhenAborted)
+    expect(partSize).toBeGreaterThan(0)
+    expect(partSize).toBeLessThan(GGUF.length)
+    expect(existsSync(join(MODELS_DIR, ENTRY.file))).toBe(false)
+    // e si riprende fino in fondo
+    await downloadLocalModel({ ...depsOf(), entry: ENTRY })
+    expect(existsSync(join(MODELS_DIR, ENTRY.file))).toBe(true)
+  })
+
+  it('annullamento col primo pezzo in RITARDO (5 ms): si aspetta il pezzo, non l\'orologio', async () => {
+    // la corsa vista in CI: l'annullamento a orologio (5 ms) arrivava prima
+    // del primo pezzo e il .part non nasceva. Qui il primo pezzo è in RITARDO
+    // FORZATO di 5 ms e l'annullamento avviene comunque DENTRO onProgress al
+    // primo pezzo: qualunque sia il ritardo, il .part resta riprendibile.
+    firstPieceDelayMs = 5
+    const { partSize, bytesWhenAborted } = await abortAtFirstPiece()
+    expect(bytesWhenAborted).toBeGreaterThan(0)
+    expect(partSize).toBe(bytesWhenAborted)
+    expect(partSize).toBeGreaterThan(0)
+    expect(partSize).toBeLessThan(GGUF.length)
     expect(existsSync(join(MODELS_DIR, ENTRY.file))).toBe(false)
     // e si riprende fino in fondo
     await downloadLocalModel({ ...depsOf(), entry: ENTRY })
