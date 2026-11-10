@@ -2313,10 +2313,6 @@ msgstr "Email (separate da virgola)"
 msgid "email in arrivo"
 msgstr "email in arrivo"
 
-#: src/renderer/src/components/Settings.tsx
-msgid "English"
-msgstr "English"
-
 #: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/ConnectorCards13.tsx
 #: src/renderer/src/components/DraftCard.tsx
@@ -3465,10 +3461,6 @@ msgstr "Istruzioni (markdown)"
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Istruzioni personalizzate (vanno nel prompt del bot quando il connettore è attivo)"
 msgstr "Istruzioni personalizzate (vanno nel prompt del bot quando il connettore è attivo)"
-
-#: src/renderer/src/components/Settings.tsx
-msgid "Italiano"
-msgstr "Italiano"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -5980,13 +5972,13 @@ msgstr "Sposta giù"
 msgid "dialog.moveToApplications.title"
 msgstr "Sposta Homun in Applicazioni"
 
-#: src/renderer/src/components/Settings.tsx
-msgid "Sposta in Applicazioni"
-msgstr "Sposta in Applicazioni"
-
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "dialog.moveToApplications.now"
+msgstr "Sposta in Applicazioni"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Sposta in Applicazioni"
 msgstr "Sposta in Applicazioni"
 
 #: src/renderer/src/components/settings/ModelsPage.tsx

@@ -3,7 +3,30 @@
 // Fase 17a correzioni (K1): startupMainLanguage — la scelta all'avvio del
 // main, col setting letto dal daemon più le lingue di sistema.
 import { describe, expect, it } from 'vitest'
-import { resolveUiLanguage, startupMainLanguage } from '../ui-language'
+import { resolveUiLanguage, startupMainLanguage, SUPPORTED_UI_LANGUAGES, isUiLanguageSetting } from '../ui-language'
+
+describe('RV3 (fase beta.2): l’elenco delle lingue è UN solo posto', () => {
+  it('SUPPORTED_UI_LANGUAGES: it + en, ciascuna col suo endonimo (che NON si traduce)', () => {
+    expect(SUPPORTED_UI_LANGUAGES).toEqual([
+      { code: 'it', endonym: 'Italiano' },
+      { code: 'en', endonym: 'English' }
+    ])
+  })
+
+  it('il setting valido è system o un codice dell’elenco — niente altro', () => {
+    expect(isUiLanguageSetting('system')).toBe(true)
+    for (const l of SUPPORTED_UI_LANGUAGES) expect(isUiLanguageSetting(l.code)).toBe(true)
+    expect(isUiLanguageSetting('fr')).toBe(false)
+    expect(isUiLanguageSetting('it ')).toBe(false)
+    expect(isUiLanguageSetting(42)).toBe(false)
+  })
+
+  it('la risoluzione segue l’elenco: un codice dell’elenco si riconosce, gli altri no', () => {
+    // il setting esplicito di OGNI lingua dell’elenco vince sul sistema
+    for (const l of SUPPORTED_UI_LANGUAGES) expect(resolveUiLanguage(l.code, ['xx-XX'])).toBe(l.code)
+    expect(resolveUiLanguage('xx', ['it-IT'])).toBe('it')
+  })
+})
 
 describe('fase 17a (L2): resolveUiLanguage', () => {
   it('un setting esplicito vince sulle lingue di sistema', () => {

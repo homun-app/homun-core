@@ -15,7 +15,7 @@ import { Blocks, Cpu, Gauge, KeyRound, Repeat, Settings as SettingsIcon, ShieldC
 import type { LucideIcon } from 'lucide-react'
 import { api, useStore } from '../store'
 import { formatDate, formatTime } from '../lib/i18n'
-import type { UiLanguageSetting } from '../../../shared/ui-language'
+import { SUPPORTED_UI_LANGUAGES, type UiLanguageSetting } from '../../../shared/ui-language'
 import { describeTrigger } from '../../../shared/cron-human'
 // fase 17c (C5/C6): lingua attiva per le descrizioni; fiducia e template dai codici
 import { i18n } from '../lib/i18n'
@@ -53,6 +53,9 @@ const SECTIONS: Record<string, { label: MessageDescriptor; icon: LucideIcon }> =
   routine: { label: msg`Routine`, icon: Repeat },
   uso: { label: msg`Uso e costi`, icon: Gauge }
 }
+
+/** RV3 (fase beta.2): le select gemelle di Generali (Finestra di consegna, Lingua). */
+const SETTINGS_SELECT_CLS = 'h-9 rounded-[10px] bg-card px-2 text-sm outline-none'
 
 /** La lingua attiva come UiLanguage (fase 17c, C6). */
 function uiLang(): 'it' | 'en' {
@@ -304,20 +307,25 @@ function GeneralTab() {
             </span>
           }
         />
+        {/* RV3 (fase beta.2): una select (le pillole vanno bene per 2–3 voci,
+            le lingue cresceranno) — la STESSA della «Finestra di consegna».
+            Le voci dall'elenco unico SUPPORTED_UI_LANGUAGES, scritte col
+            ENDONIMO: gli endonimi non si traducono */}
         <SettingsRow
           title={<Trans>Lingua</Trans>}
           control={
-            <span className="flex gap-1 rounded-full bg-card p-1">
-              {([['system', msg`Sistema`], ['it', msg`Italiano`], ['en', msg`English`]] as const).map(([value, label]) => (
-                <button
-                  key={value}
-                  className={`rounded-full px-3 py-1 text-xs outline-none transition focus-visible:ring-[3px] focus-visible:ring-ring/50 ${uiLanguage === value ? 'bg-foreground text-background' : 'text-muted-foreground'}`}
-                  onClick={() => setUiLanguage(value as UiLanguageSetting)}
-                >
-                  {i18n.t(label)}
-                </button>
+            <select
+              className={SETTINGS_SELECT_CLS}
+              aria-label={t`Lingua`}
+              data-testid="ui-language-select"
+              value={uiLanguage}
+              onChange={(e) => setUiLanguage(e.target.value as UiLanguageSetting)}
+            >
+              <option value="system">{t`Sistema`}</option>
+              {SUPPORTED_UI_LANGUAGES.map((l) => (
+                <option key={l.code} value={l.code}>{l.endonym}</option>
               ))}
-            </span>
+            </select>
           }
         />
       </SettingsGroup>
@@ -414,7 +422,7 @@ function GeneralTab() {
           control={
             <span className="flex shrink-0 items-center gap-2">
               <select
-                className="h-9 rounded-[10px] bg-card px-2 text-sm outline-none"
+                className={SETTINGS_SELECT_CLS}
                 value={winMode}
                 onChange={(e) => { setWinMode(e.target.value as 'morning' | 'working'); void saveWindow() }}
               >
