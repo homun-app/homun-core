@@ -69,6 +69,19 @@ function resolveLoaderToken(token, binaryDir) {
 }
 
 /**
+ * Un LC_RPATH spogliato del token @loader_path/@executable_path (nudo o con
+ * slash — il binario vero di llama.cpp ha LC_RPATH = @loader_path SENZA
+ * slash): '' → la cartella del binario, null → non è un token (rpath assoluto).
+ */
+function stripRpathToken(rp) {
+  if (rp === '@loader_path') return ''
+  if (rp.startsWith('@loader_path/')) return rp.slice('@loader_path/'.length)
+  if (rp === '@executable_path') return ''
+  if (rp.startsWith('@executable_path/')) return rp.slice('@executable_path/'.length)
+  return null
+}
+
+/**
  * RP2: ogni dipendenza @… di llama-server deve risolversi DENTRO il bundle.
  * - /opt/homebrew o /usr/local: rifiutati subito (dipendenze Homebrew);
  * - @loader_path/@executable_path: risolti rispetto a binaryDir;
@@ -91,11 +104,8 @@ export function checkVendorDeps({ loads, rpaths = [], binaryDir, contentsPath, e
     } else if (load.startsWith('@rpath/')) {
       const rest = load.slice('@rpath/'.length)
       for (const rp of rpaths) {
-        const base = rp.startsWith('@loader_path/')
-          ? resolveLoaderToken(rp.replace(/^@loader_path\//, ''), binaryDir)
-          : rp.startsWith('@executable_path/')
-            ? resolveLoaderToken(rp.replace(/^@executable_path\//, ''), binaryDir)
-            : rp
+        const stripped = stripRpathToken(rp)
+        const base = stripped === null ? rp : stripped === '' ? binaryDir : resolveLoaderToken(stripped, binaryDir)
         const candidate = path.resolve(base, rest)
         if (exists(candidate)) {
           resolved = candidate

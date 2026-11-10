@@ -149,6 +149,17 @@ describe('fase rilascio di prova (RP2): le dipendenze di llama-server dentro il 
     expect(problems).toEqual([])
   })
 
+  it('@rpath con LC_RPATH @loader_path SENZA slash (com\'è nel binario vero di llama.cpp) → si risolve nella cartella del binario', () => {
+    const problems = checkVendorDeps({
+      loads: ['@rpath/libllama.0.dylib', '@rpath/libggml.0.dylib'],
+      rpaths: ['@loader_path'],
+      binaryDir: llamaDir,
+      contentsPath: contents,
+      exists: (p) => p === join(llamaDir, 'libllama.0.dylib') || p === join(llamaDir, 'libggml.0.dylib')
+    })
+    expect(problems).toEqual([])
+  })
+
   it('@rpath che si risolve FUORI dal bundle (via rpath Homebrew) → problema', () => {
     const problems = checkVendorDeps({
       loads: ['@rpath/libllama.dylib'],
