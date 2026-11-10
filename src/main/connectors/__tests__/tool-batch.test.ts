@@ -15,7 +15,8 @@ import {
   batchResultData, redactBatchLeaves, extractBatchSends, batchSendViaArgs,
   composioBatchGate, manageConnectionsGate, proxyExecuteGate,
   manageConnectionsEntries, parseConnectionsResult, manageConnectionsAgentResult,
-  workbenchSpillOf, WORKBENCH_SPILL_NOTE, connectionsAccountsOf
+  workbenchSpillOf, WORKBENCH_SPILL_NOTE, connectionsAccountsOf,
+  appendSearchToolsNote, proxyReadTurnKey, isProxyReadToolCall
 } from '../tool-batch'
 import { composioToolPolicy, COMPOSIO_TOOL_POLICIES, COMPOSIO_CODE_TOOLS, COMMON_COMPOSIO_TOOLKITS } from '../composio-meta'
 import { toPiContext } from '../../agent/llm-pi'
@@ -518,5 +519,70 @@ describe('C7 punto 5 — lo schema del blocco arriva al provider APERTO', () => 
       properties: { tools: { items: { properties: { arguments: { additionalProperties: unknown } } } } }
     }
     expect(sent.properties.tools.items.properties.arguments.additionalProperties).toBe(true)
+  })
+})
+
+// ---- RW (fase revisore sulla richiesta): Composio, azioni con nome prima ----
+
+describe('RW2.1 — la nota fissa arriva solo al risultato di SEARCH_TOOLS', () => {
+  const DATA = '<dato_esterno fonte="composio:composio">\n{"tools":["TRELLO_GET_BOARDS_CARDS_BY_ID_BOARD"]}\n</dato_esterno>\n(rule of the data)'
+
+  it('SEARCH_TOOLS: la nota in CODA, DOPO i dati e fuori dal blocco dato_esterno', () => {
+    const out = appendSearchToolsNote('COMPOSIO_SEARCH_TOOLS', DATA)
+    expect(out).toContain('Run the recommended actions with COMPOSIO_MULTI_EXECUTE_TOOL')
+    expect(out).toContain('Use COMPOSIO_PROXY_EXECUTE only when no listed action covers what you need')
+    // dopo la chiusura del blocco, non dentro
+    expect(out.indexOf('</dato_esterno>')).toBeLessThan(out.indexOf('Run the recommended actions'))
+    expect(out.startsWith(DATA)).toBe(true)
+  })
+
+  it('gli ALTRI strumenti del server non prendono la nota', () => {
+    for (const name of ['COMPOSIO_PROXY_EXECUTE', 'COMPOSIO_GET_TOOL_SCHEMAS', 'COMPOSIO_MANAGE_CONNECTIONS', 'COMPOSIO_WAIT_FOR_CONNECTIONS']) {
+      expect(appendSearchToolsNote(name, DATA), name).toBe(DATA)
+    }
+  })
+})
+
+describe('RW2.2 — la chiave di turno delle letture grezze PROXY', () => {
+  it('GET/HEAD su un toolkit → composio-proxy:<toolkit>:read (minuscolo)', () => {
+    expect(proxyReadTurnKey(PROXY_TOOL, { toolkit_slug: 'trello', method: 'GET', endpoint: '/members/me/boards' })).toBe('composio-proxy:trello:read')
+    expect(proxyReadTurnKey(PROXY_TOOL, { toolkit_slug: 'Trello', method: 'head', endpoint: '/lists/x/cards' })).toBe('composio-proxy:trello:read')
+  })
+
+  it('un ALTRO toolkit ha un\'altra chiave; un metodo di scrittura non ha chiave', () => {
+    expect(proxyReadTurnKey(PROXY_TOOL, { toolkit_slug: 'gmail', method: 'GET', endpoint: '/messages' })).toBe('composio-proxy:gmail:read')
+    expect(proxyReadTurnKey(PROXY_TOOL, { toolkit_slug: 'trello', method: 'POST', endpoint: '/cards' })).toBeNull()
+    expect(proxyReadTurnKey(PROXY_TOOL, { toolkit_slug: 'trello', method: 'DELETE', endpoint: '/cards/x' })).toBeNull()
+    // senza method si legge GET (come il gate): chiave di lettura
+    expect(proxyReadTurnKey(PROXY_TOOL, { toolkit_slug: 'trello', endpoint: '/boards' })).toBe('composio-proxy:trello:read')
+  })
+
+  it('isProxyReadToolCall: solo il PROXY di lettura (per la meta della card)', () => {
+    expect(isProxyReadToolCall(PROXY_TOOL, { toolkit_slug: 'trello', method: 'GET' })).toBe(true)
+    expect(isProxyReadToolCall(PROXY_TOOL, { toolkit_slug: 'trello', method: 'POST' })).toBe(false)
+    expect(isProxyReadToolCall(BATCH_TOOL, { tools: [{ tool_slug: 'TRELLO_GET_CARDS' }] })).toBe(false)
+  })
+})
+
+describe('RW2.3 — lo spill del risultato grande anche per PROXY (entry 286 ridotta)', () => {
+  // la forma VERA del risultato PROXY della prova (board da 714 schede):
+  // data_preview, il file remoto /mnt/files… e il next_steps che dice di
+  // scrivere codice per leggerlo — qui ridotta ai campi che contano
+  const entry286 = JSON.stringify({
+    successful: true,
+    data_preview: '[714 schede della board "Competitoor" — id, nome, ultima attività…]',
+    response_file_path: '/mnt/files/execute/long.json',
+    next_steps: 'The full response was saved to a file. Read the saved response file with code, then parse it to continue.'
+  })
+
+  it('riconosciuta e ripulita: niente next_steps né /mnt/files, sì anteprima e nota fissa', () => {
+    const cleaned = workbenchSpillOf(entry286)
+    expect(cleaned).not.toBeNull()
+    expect(cleaned).not.toContain('next_steps')
+    expect(cleaned).not.toContain('/mnt/files/execute/long.json')
+    expect(cleaned).not.toContain('write code')
+    expect(cleaned).toContain('data_preview')
+    expect(cleaned).toContain('[714 schede')
+    expect(cleaned).toContain(WORKBENCH_SPILL_NOTE)
   })
 })

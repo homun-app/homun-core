@@ -7959,3 +7959,114 @@ describe('fase locale (L1): recupero delle chiamate scritte come testo', () => {
     expect(JSON.stringify(h.db.entries.filter((e) => e.kind !== 'message'))).not.toContain('secret_abc123')
   })
 })
+
+// ---- RW (fase revisore sulla richiesta): Composio, letture grezze e risposte grandi ----
+
+describe('RW2 — Composio: letture grezze per turno, nota SEARCH_TOOLS, risposte grandi', () => {
+  const PROXY = 'mcp__composio__COMPOSIO_PROXY_EXECUTE'
+  const proxy = (id: string, toolkit: string, method: string, endpoint: string): FakeToolCall =>
+    ({ id, name: PROXY, arguments: JSON.stringify({ toolkit_slug: toolkit, method, endpoint }) })
+  /** patcha il client MCP finto: conta le chiamate e risponde il testo dato */
+  const withMcpOutput = <T,>(output: string, fn: () => Promise<T>): Promise<T> => {
+    const prev = (mcpMock as unknown as { callTool: unknown }).callTool
+    ;(mcpMock as unknown as { callTool: unknown }).callTool = async () => {
+      h.mcp.calls++
+      return output
+    }
+    return fn().finally(() => { (mcpMock as unknown as { callTool: unknown }).callTool = prev })
+  }
+
+  it('PROXY GET: card con «Per questo turno» (composioProxyRead) e «Sempre» disattivo; il grant copre l\'altro GET dello stesso toolkit, MAI un POST', async () => {
+    await withMcpOutput('{"ok":true,"cards":[]}', async () => {
+      h.llm.queue = [
+        { toolCalls: [proxy('p1', 'trello', 'GET', '/members/me/boards')] },
+        { toolCalls: [proxy('p2', 'trello', 'GET', '/lists/abc/cards')] },
+        { toolCalls: [proxy('p3', 'trello', 'POST', '/cards')] },
+        { text: 'ok' }
+      ]
+      const turn = runTurn(AGENT, 'le mie board', emit)
+      await vi.waitFor(() => { expect(h.db.entries.some((e) => e.kind === 'approval' && e.meta?.status === 'pending')).toBe(true) })
+      const first = h.db.entries.findLast((e) => e.kind === 'approval')!
+      // la card della LETTURA grezza: «Per questo turno» sì, «Sempre» no
+      expect(first.meta?.composioProxyRead).toBe(true)
+      expect(first.meta?.composioNoAlways).toBe(true)
+      resolveApproval(AGENT, String(first.meta?.approvalId), 'allow', 'turn')
+      // il POST chiede di nuovo: la SUA card pending (input.method POST)
+      await vi.waitFor(() => {
+        expect(h.db.entries.some((e) => e.kind === 'approval' && e.meta?.status === 'pending' && (e.meta?.input as { method?: string } | undefined)?.method === 'POST')).toBe(true)
+      })
+      const second = h.db.entries.findLast((e) => e.kind === 'approval' && e.meta?.status === 'pending')!
+      expect(second.meta?.composioProxyRead).toBeUndefined()
+      resolveApproval(AGENT, String(second.meta?.approvalId), 'deny', 'once')
+      await turn
+      // il GET dello stesso toolkit è passato SENZA card sua (2 card in tutto:
+      // la prima letta, quella del POST negata) ed è STATO eseguito (2 chiamate)
+      expect(h.db.entries.filter((e) => e.kind === 'approval')).toHaveLength(2)
+      expect(h.mcp.calls).toBe(2)
+    })
+  })
+
+  it('il grant di turno di una lettura grezza NON copre un GET di un ALTRO toolkit', async () => {
+    await withMcpOutput('{"ok":true}', async () => {
+      h.llm.queue = [
+        { toolCalls: [proxy('g1', 'trello', 'GET', '/members/me/boards')] },
+        { toolCalls: [proxy('g2', 'gmail', 'GET', '/messages')] },
+        { text: 'ok' }
+      ]
+      const turn = runTurn(AGENT, 'trello e gmail', emit)
+      await vi.waitFor(() => { expect(h.db.entries.some((e) => e.kind === 'approval' && e.meta?.status === 'pending')).toBe(true) })
+      const first = h.db.entries.findLast((e) => e.kind === 'approval')!
+      resolveApproval(AGENT, String(first.meta?.approvalId), 'allow', 'turn')
+      // il GET di gmail è un ALTRO toolkit: la SUA card pending
+      await vi.waitFor(() => {
+        expect(h.db.entries.some((e) => e.kind === 'approval' && e.meta?.status === 'pending' && (e.meta?.input as { toolkit_slug?: string } | undefined)?.toolkit_slug === 'gmail')).toBe(true)
+      })
+      const second = h.db.entries.findLast((e) => e.kind === 'approval' && e.meta?.status === 'pending')!
+      resolveApproval(AGENT, String(second.meta?.approvalId), 'deny', 'once')
+      await turn
+      // solo la prima lettura è partita: quella di gmail era ferma sulla card
+      expect(h.mcp.calls).toBe(1)
+    })
+  })
+
+  it('la risposta grande del PROXY (entry 286 ridotta) arriva RIPULITA al modello', async () => {
+    const entry286 = JSON.stringify({
+      successful: true,
+      data_preview: '[714 schede della board "Competitoor"]',
+      response_file_path: '/mnt/files/execute/long.json',
+      next_steps: 'The full response was saved to a file. Read the saved response file with code, then parse it.'
+    })
+    await withMcpOutput(entry286, async () => {
+      h.llm.queue = [
+        { toolCalls: [proxy('s1', 'trello', 'GET', '/boards/competitoor/lists')] },
+        { text: 'ok' }
+      ]
+      const turn = runTurn(AGENT, 'le schede della board', emit)
+      await vi.waitFor(() => { expect(h.db.entries.some((e) => e.kind === 'approval' && e.meta?.status === 'pending')).toBe(true) })
+      const appr = h.db.entries.findLast((e) => e.kind === 'approval')!
+      resolveApproval(AGENT, String(appr.meta?.approvalId), 'allow', 'once')
+      await turn
+      const res = h.db.entries.find((e) => e.kind === 'tool-result' && e.meta?.callId === 's1')!
+      expect(res.content).toContain('data_preview')
+      expect(res.content).toContain('[714 schede')
+      expect(res.content).not.toContain('next_steps')
+      expect(res.content).not.toContain('/mnt/files/execute/long.json')
+      expect(res.content).toContain('never search for it locally')
+    })
+  })
+
+  it('SEARCH_TOOLS: la nota sulle azioni con nome in CODA al risultato, fuori dal blocco dato_esterno', async () => {
+    h.db.settings.set('permissions', { default: 'needs_approval', rules: [{ tool: 'mcp__*', pattern: '*', mode: 'always_allow' }] })
+    await withMcpOutput('{"tools":["TRELLO_GET_MEMBERS_BOARDS_BY_ID_MEMBER"]}', async () => {
+      h.llm.queue = [
+        { toolCalls: [{ id: 'st1', name: 'mcp__composio__COMPOSIO_SEARCH_TOOLS', arguments: JSON.stringify({ query: 'trello boards' }) }] },
+        { text: 'ok' }
+      ]
+      await runTurn(AGENT, 'cerca gli strumenti di trello', emit)
+      const res = h.db.entries.find((e) => e.kind === 'tool-result' && e.meta?.callId === 'st1')!
+      expect(res.content).toContain('</dato_esterno>')
+      expect(res.content.indexOf('</dato_esterno>')).toBeLessThan(res.content.indexOf('Run the recommended actions with COMPOSIO_MULTI_EXECUTE_TOOL'))
+      expect(res.content).toContain('Use COMPOSIO_PROXY_EXECUTE only when no listed action covers what you need')
+    })
+  })
+})

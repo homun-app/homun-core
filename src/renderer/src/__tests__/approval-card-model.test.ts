@@ -7,7 +7,7 @@
 // toolDisplayName, mai «create_agent richiede approvazione».
 import { describe, expect, it } from 'vitest'
 import { i18n } from '@lingui/core'
-import { approvalAppOf, approvalTitleOf, approvalReasonPhrase, approvalTechnicalLine, approvalAskTitle } from '../lib/approval-app'
+import { approvalAppOf, approvalTitleOf, approvalReasonPhrase, approvalTechnicalLine, approvalAskTitle, approvalOptionFlags } from '../lib/approval-app'
 import { uiTextOfMetaTools } from '../lib/ui-text'
 import { itCatalogEntries, enCatalogEntries } from './po-helper'
 
@@ -233,5 +233,25 @@ describe('U3 — la card di use-app: app di destinazione o host in evidenza', ()
     expect(row('Consentito una volta', { action: 'open_url', url: 'https://sora.chatgpt.com/create' })).toBe('Consentito una volta · sora.chatgpt.com')
     // mai più «Computer e schermo» quando c'è un'app; senza app (screenshot) niente sintesi dedicata
     expect(useAppDecidedSummary({ action: 'screenshot' })).toBeNull()
+  })
+})
+
+// ---- RW2: le opzioni della card per le letture grezze PROXY ----
+
+describe('RW2 — «Per questo turno» per le letture grezze COMPOSIO_PROXY_EXECUTE', () => {
+  const PROXY = 'mcp__composio__COMPOSIO_PROXY_EXECUTE'
+
+  it('GET/HEAD (composioProxyRead): «Per questo turno» ATTIVO, «Sempre» DISATTIVO', () => {
+    expect(approvalOptionFlags(PROXY, { composioNoAlways: true, composioProxyRead: true })).toEqual({ noAlways: true, noTurn: false })
+  })
+
+  it('POST (nessun composioProxyRead): entrambi DISATTIVI', () => {
+    expect(approvalOptionFlags(PROXY, { composioNoAlways: true })).toEqual({ noAlways: true, noTurn: true })
+  })
+
+  it('mai «Per questo turno» per never-auto, distruttive e update_state (come oggi)', () => {
+    expect(approvalOptionFlags('run-command', { neverAuto: true })).toEqual({ noAlways: false, noTurn: true })
+    expect(approvalOptionFlags(PROXY, { composioNoAlways: true, composioDestructive: true })).toEqual({ noAlways: true, noTurn: true })
+    expect(approvalOptionFlags('update_state', {})).toEqual({ noAlways: true, noTurn: true })
   })
 })

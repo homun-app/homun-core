@@ -25,6 +25,48 @@ import { composioToolkitOfSlug, localizedActionName, localizedConnectionsAction,
 /** Lo strumento del blocco di Composio (nome originale, su qualunque server MCP). */
 export const COMPOSIO_MULTI_EXECUTE_TOOL = 'COMPOSIO_MULTI_EXECUTE_TOOL'
 
+/** Lo strumento di ricerca del server «For You» (nome originale). */
+export const COMPOSIO_SEARCH_TOOLS_TOOL = 'COMPOSIO_SEARCH_TOOLS'
+
+/** Lo strumento delle richieste HTTP grezze (nome originale). */
+export const COMPOSIO_PROXY_EXECUTE_TOOL = 'COMPOSIO_PROXY_EXECUTE'
+
+/**
+ * RW (fase revisore sulla richiesta, punto 2): la nota fissa in coda al
+ * risultato di SEARCH_TOOLS — le azioni CON NOME passano da
+ * MULTI_EXECUTE (e per le letture non chiedono), il PROXY grezzo è l'ultima
+ * spiaggia. Va DOPO i dati, FUORI dal blocco <dato_esterno>.
+ */
+export const SEARCH_TOOLS_ACTIONS_NOTE =
+  'Run the recommended actions with COMPOSIO_MULTI_EXECUTE_TOOL. Use COMPOSIO_PROXY_EXECUTE only when no listed action covers what you need.'
+
+/** RW: la nota arriva SOLO al risultato di SEARCH_TOOLS (testo identico altrimenti). */
+export function appendSearchToolsNote(originalName: string, text: string): string {
+  return originalName === COMPOSIO_SEARCH_TOOLS_TOOL ? `${text}\n${SEARCH_TOOLS_ACTIONS_NOTE}` : text
+}
+
+/**
+ * RW: la chiave del grant «Per questo turno» di una LETTURA grezza del
+ * PROXY (GET/HEAD): copre le altre letture grezze dello STESSO toolkit fino
+ * a fine turno — mai un metodo di scrittura, mai un altro toolkit. Null per
+ * tutto ciò che non è il PROXY in lettura.
+ */
+export function proxyReadTurnKey(toolName: string, args: Record<string, unknown>): string | null {
+  if (!toolName.startsWith('mcp__')) return null
+  if (toolName.split('__').slice(2).join('__') !== COMPOSIO_PROXY_EXECUTE_TOOL) return null
+  if (!isProxyReadToolCall(toolName, args)) return null
+  const toolkit = typeof args.toolkit_slug === 'string' ? args.toolkit_slug.trim().toLowerCase() : ''
+  return toolkit ? `composio-proxy:${toolkit}:read` : null
+}
+
+/** RW: la chiamata è una lettura grezza del PROXY (GET/HEAD)? (per la meta della card) */
+export function isProxyReadToolCall(toolName: string, args: Record<string, unknown>): boolean {
+  if (!toolName.startsWith('mcp__')) return false
+  if (toolName.split('__').slice(2).join('__') !== COMPOSIO_PROXY_EXECUTE_TOOL) return false
+  const method = typeof args.method === 'string' ? args.method.toUpperCase() : 'GET'
+  return method === 'GET' || method === 'HEAD'
+}
+
 /** La forma del blocco (come ToolBatch di Rakazo, più il campo account). */
 export interface ComposioBatchShape {
   items: 'tools'

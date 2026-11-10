@@ -32,7 +32,8 @@ import { redactComposioSecrets, composioActionOfToolName } from '../connectors/c
 import {
   batchActions, batchResultData, composioResultError, forceSyncResponseToWorkbenchOff,
   extractBatchSends, toolBatchOf, composioActionKey, composioToolkitOfSlug,
-  manageConnectionsEntries, workbenchSpillOf
+  manageConnectionsEntries, workbenchSpillOf, appendSearchToolsNote, proxyReadTurnKey,
+  isProxyReadToolCall, COMPOSIO_PROXY_EXECUTE_TOOL
 } from '../connectors/tool-batch'
 import { composioGateway } from '../connectors/composio-gateway'
 import { deniedRepeatRefusal, repeatsDeniedAction } from './composio-trust'
@@ -622,6 +623,13 @@ async function turnGrantKey(tool: string, input: Record<string, unknown>): Promi
   // azioni (chiavi composio-action:…), come «Consenti sempre»; un blocco
   // incompleto non è turn-grantabile (non si vede cosa concederebbe)
   if (tool.startsWith('mcp__')) {
+    // RW (fase revisore sulla richiesta): le LETTURE grezze del PROXY
+    // (GET/HEAD) hanno la chiave loro, composio-proxy:<toolkit>:read — copre
+    // le altre letture grezze dello stesso toolkit fino a fine turno; le
+    // scritture grezze non sono turn-grantabili (chiedono ogni volta)
+    const proxyRead = proxyReadTurnKey(tool, input)
+    if (proxyRead) return proxyRead
+    if (tool.split('__').slice(2).join('__') === COMPOSIO_PROXY_EXECUTE_TOOL) return null
     const shape = toolBatchOf(tool.split('__').slice(2).join('__'))
     if (shape) {
       const actions = batchActions(shape, input).actions
@@ -1404,7 +1412,11 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     // delle azioni con effetti tornano a chiedere all'utente)
     if (!contaminated && hasExternalEvento(userText)) {
       contaminated = true
-      run.turnAllows.clear()
+      // RW: il grant «Per questo turno» delle letture grezze PROXY
+      // sopravvive: copre solo GET/HEAD dello stesso toolkit fino a fine turno
+      for (const tk of [...run.turnAllows]) {
+        if (!tk.startsWith('composio-proxy:')) run.turnAllows.delete(tk)
+      }
       run.turnGrantEpoch++
     }
 
@@ -1764,7 +1776,11 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               }
             }
             if (inv.imported && !contaminated) {
-              run.turnAllows.clear()
+              // RW: il grant «Per questo turno» delle letture grezze PROXY
+              // sopravvive: copre solo GET/HEAD dello stesso toolkit fino a fine turno
+              for (const tk of [...run.turnAllows]) {
+                if (!tk.startsWith('composio-proxy:')) run.turnAllows.delete(tk)
+              }
               run.turnGrantEpoch++
               contaminated = true
             }
@@ -2728,7 +2744,11 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             // resto del turno, come oggi. L'epoca revoca anche i grant ancora
             // in fase di registrazione (l'analisi shell è async).
             if (!contaminated) {
-              run.turnAllows.clear()
+              // RW: il grant «Per questo turno» delle letture grezze PROXY
+              // sopravvive: copre solo GET/HEAD dello stesso toolkit fino a fine turno
+              for (const tk of [...run.turnAllows]) {
+                if (!tk.startsWith('composio-proxy:')) run.turnAllows.delete(tk)
+              }
               run.turnGrantEpoch++
             }
             contaminated = true
@@ -2907,7 +2927,11 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             // CONTAMINAZIONE del turno (come web_fetch): il dato non fidato
             // non sblocca da solo le azioni con effetti
             if (!contaminated) {
-              run.turnAllows.clear()
+              // RW: il grant «Per questo turno» delle letture grezze PROXY
+              // sopravvive: copre solo GET/HEAD dello stesso toolkit fino a fine turno
+              for (const tk of [...run.turnAllows]) {
+                if (!tk.startsWith('composio-proxy:')) run.turnAllows.delete(tk)
+              }
               run.turnGrantEpoch++
             }
             contaminated = true
@@ -3217,7 +3241,11 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           let content = output
           if (imported) {
             if (!contaminated) {
-              run.turnAllows.clear()
+              // RW: il grant «Per questo turno» delle letture grezze PROXY
+              // sopravvive: copre solo GET/HEAD dello stesso toolkit fino a fine turno
+              for (const tk of [...run.turnAllows]) {
+                if (!tk.startsWith('composio-proxy:')) run.turnAllows.delete(tk)
+              }
               run.turnGrantEpoch++
             }
             contaminated = true
@@ -3255,7 +3283,11 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           let content = output
           if (thirdParty) {
             if (!contaminated) {
-              run.turnAllows.clear()
+              // RW: il grant «Per questo turno» delle letture grezze PROXY
+              // sopravvive: copre solo GET/HEAD dello stesso toolkit fino a fine turno
+              for (const tk of [...run.turnAllows]) {
+                if (!tk.startsWith('composio-proxy:')) run.turnAllows.delete(tk)
+              }
               run.turnGrantEpoch++
             }
             contaminated = true
@@ -4223,7 +4255,10 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
                   ? {
                       composioBatch: verdict.composioBatch,
                       ...(verdict.composioBatch.destructive ? { composioDestructive: true } : {}),
-                      ...(verdict.composioBatch.noAlways ? { composioNoAlways: true } : {})
+                      ...(verdict.composioBatch.noAlways ? { composioNoAlways: true } : {}),
+                      // RW: la LETTURA grezza del PROXY (GET/HEAD) offre
+                      // «Per questo turno» pur restando senza «Sempre»
+                      ...(isProxyReadToolCall(call.name, input) ? { composioProxyRead: true } : {})
                     }
                   : {})
               }
@@ -4405,10 +4440,23 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               if (composioDraftsNote) batchOutput = `${batchOutput}\n${composioDraftsNote}`
               finalOutput = formatExternalDataEvidence(`composio:${toolkits.join('+') || 'app'}`, batchOutput)
             } else {
+              // RW (fase revisore sulla richiesta): la risposta grande
+              // «salvata nella workbench» remota si ripulisce anche qui — il
+              // PROXY (entry 286 della prova vera: board da 714 schede) e
+              // ogni risultato del server Composio che ne abbia la forma
+              let plainOutput = output
+              if (prefix === 'composio' || originalName.startsWith('COMPOSIO_')) {
+                const spill = workbenchSpillOf(plainOutput)
+                if (spill) plainOutput = spill
+              }
+              if (composioDraftsNote) plainOutput = `${plainOutput}\n${composioDraftsNote}`
               finalOutput = formatExternalDataEvidence(
                 prefix === 'composio' ? `composio:${slugPart ?? 'app'}` : `mcp:${slugPart ?? 'server'}`,
-                composioDraftsNote ? `${output}\n${composioDraftsNote}` : output
+                plainOutput
               )
+              // RW: al risultato di SEARCH_TOOLS la nota fissa — le azioni CON
+              // NOME prima delle richieste grezze, dopo i dati e fuori dal blocco
+              finalOutput = appendSearchToolsNote(originalName, finalOutput)
             }
             // fase Composio OAuth (C5 punto 1): il risultato `add` di
             // MANAGE_CONNECTIONS NON passa il link nel testo libero — sta
@@ -4431,7 +4479,11 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               }
             }
             if (!contaminated) {
-              run.turnAllows.clear()
+              // RW: il grant «Per questo turno» delle letture grezze PROXY
+              // sopravvive: copre solo GET/HEAD dello stesso toolkit fino a fine turno
+              for (const tk of [...run.turnAllows]) {
+                if (!tk.startsWith('composio-proxy:')) run.turnAllows.delete(tk)
+              }
               run.turnGrantEpoch++
             }
             contaminated = true
@@ -4451,7 +4503,11 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
                 : `libreria:${meta.libraryTainted}`
             finalOutput = formatExternalDataEvidence(String(source14), finalOutput)
             if (!contaminated) {
-              run.turnAllows.clear()
+              // RW: il grant «Per questo turno» delle letture grezze PROXY
+              // sopravvive: copre solo GET/HEAD dello stesso toolkit fino a fine turno
+              for (const tk of [...run.turnAllows]) {
+                if (!tk.startsWith('composio-proxy:')) run.turnAllows.delete(tk)
+              }
               run.turnGrantEpoch++
             }
             contaminated = true

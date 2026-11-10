@@ -16,7 +16,7 @@ import { uiTextOfMetaTools, toolCtxOfMeta } from '../lib/ui-text'
 import { i18n } from '../lib/i18n'
 // R3 (fase app — ritocchi): il modello puro della card per Composio e MCP
 // fase Composio OAuth (C7): anche il modello del blocco
-import { approvalAppOf, approvalTitleOf, approvalReasonPhrase, approvalTechnicalLine, approvalBatchArgumentLines, approvalAskTitle, useAppCardModel, useAppDecidedSummary, type ComposioBatchActionMeta } from '../lib/approval-app'
+import { approvalAppOf, approvalTitleOf, approvalReasonPhrase, approvalTechnicalLine, approvalBatchArgumentLines, approvalAskTitle, approvalOptionFlags, useAppCardModel, useAppDecidedSummary, type ComposioBatchActionMeta } from '../lib/approval-app'
 import { toolDisplayName } from '../../../shared/tool-names'
 import type { TranscriptEntry } from '../../../shared/types'
 import { DecidedRow, CardShell } from './DecidedRow'
@@ -140,8 +140,9 @@ export function ApprovalCard({ entry, readOnly = false }: { entry: TranscriptEnt
   // fase Composio OAuth (C7): le azioni del blocco (o le voci di
   // MANAGE_CONNECTIONS / PROXY_EXECUTE) — il titolo viene da loro
   const composioBatch = entry.meta?.composioBatch as { actions: ComposioBatchActionMeta[]; incomplete: boolean; reason?: 'action' | 'incomplete' | 'trust' | 'rule' } | undefined
-  const noAlways = tool === 'update_state' || entry.meta?.composioDestructive === true || entry.meta?.composioNoAlways === true || useAppSend
-  const noTurn = noAlways || entry.meta?.neverAuto === true
+  // RW: le opzioni in un modello puro — per la LETTURA grezza del PROXY
+  // «Per questo turno» è attivo anche se «Sempre» resta disattivato
+  const { noAlways, noTurn } = approvalOptionFlags(tool, entry.meta)
   const command = typeof input?.command === 'string' ? input.command : null
   const filePath = typeof input?.path === 'string' ? input.path : null
   // fase app (A6/A7): gli argomenti dell'azione, TUTTI visibili (come D1:

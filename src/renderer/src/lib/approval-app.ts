@@ -235,6 +235,31 @@ function batchArgumentText(value: unknown): string {
   return JSON.stringify(value) ?? ''
 }
 
+// ---- RW (fase revisore sulla richiesta): le opzioni della card ----
+
+/**
+ * RW: le opzioni del menu «Altre opzioni» della card, PURO — «Sempre» e
+ * «Per questo turno» disattivati secondo i flag del meta. Per la LETTURA
+ * grezza del PROXY (GET/HEAD, meta.composioProxyRead) «Sempre» resta OFF ma
+ * «Per questo turno» è ATTIVO: il grant copre le letture grezze dello stesso
+ * toolkit fino a fine turno. Le scritture grezze (nessun flag) e gli altri
+ * casi di sempre (never-auto, distruttive, update_state) non offrono il turno.
+ */
+export function approvalOptionFlags(
+  tool: string,
+  meta: Record<string, unknown> | null | undefined
+): { noAlways: boolean; noTurn: boolean } {
+  const noAlways =
+    tool === 'update_state' ||
+    meta?.composioDestructive === true ||
+    meta?.composioNoAlways === true ||
+    (meta?.ui as { id?: string } | undefined)?.id === 'approval.useAppSend'
+  const noTurn = meta?.composioProxyRead === true
+    ? false
+    : noAlways || meta?.neverAuto === true
+  return { noAlways, noTurn }
+}
+
 // ---- fase use-app (U3): la card parla di APP o di HOST, mai di chiavi tecniche ----
 
 /** Il modello della card di use-app: l'app che riceve l'azione, o l'host da aprire. */
