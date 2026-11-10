@@ -1,3 +1,47 @@
+# REPORT FASE LOCALE · CORREZIONI (LC1–LC5) — il REPORT recuperato, il download interrotto che si riprende, il parser che non esegue il codice, la chiave fuori da ps
+
+**Data:** 2026-11-10 · **Base:** `main` @ `09737d7b` (tag `fase-memoria-engramma-v043`) · **Tag di chiusura:** `fase-locale-correzioni`. Nessun push. Lavoro offline: nessun download vero, rete solo su 127.0.0.1 (i server finti dei test), il repo di Engramma e l’Homebrew `llama-server` non toccati (il secondo solo LETTO, `--help`), `out-review/` e `docs/catture` intatti, temporanei solo `mkdtemp` in `/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/`, 0 daemon e 0 `llama-server` dopo ogni corsa (verificato con `pgrep`).
+
+**Verifica finale:** `typecheck` pulito · `vitest` **231 file / 3521 test verdi** (base 3493 in 229 file → +2 file, +28 test: 2 di LC1, 17 di LC2, 7 di LC3, 2 di LC4) · `npm run build` verde · `language-judges.eval.ts` **56/56** · T6, T8, R4, R7, R8, R9 e i budget dei token verdi (133/133 nei file citati; T8 sta nel `loop.test.ts` verde), **nessuna riga nuova nel prompt** (il diff `09737d7b..HEAD` sui file del prompt è vuoto).
+
+## LC1 — REPORT.md ripristinato (il commit v043 lo aveva SOSTITUITO)
+
+`09737d7b` aveva riscritto il file: **prima** di LC1 il REPORT era 88 righe e 1 report (a `a6aa41ee` erano 6649 righe e 53 report). Ripristinato così: la sezione v043 di oggi in cima e TUTTO il REPORT.md di `a6aa41ee` come coda, **byte per byte** (`git show a6aa41ee:REPORT.md` è la coda esatta: verificato con confronto di buffer nel test e a mano). **Dopo LC1: 6737 righe e 54 report.**
+
+Test nuovo `scripts/__tests__/report-history.test.ts`, visto FALLIRE prima (`expected 1 to be greater than or equal to 54`; coda diversa) e VERDE dopo: inchioda l’invariante PER IL FUTURO — la coda deve restare byte-identica a `a6aa41ee:REPORT.md`, quindi ogni REPORT nuovo si può solo PREPENDERE.
+
+## LC2 — Il download interrotto non resta «in corso» per sempre
+
+- `localModelStatus` ora fonde DISCO e PROCESSO: `downloading` SOLO se c’è un download attivo nel demone; il `.part` senza download attivo è `paused` (byte e totale); `error` è l’ultimo tentativo fallito col messaggio — stato che il tipo definiva da sempre ma che non veniva MAI prodotto. L’errore sta in memoria nel demone (`lastDownloadError`): dopo un riavvio resta solo `paused`, che va bene.
+- L’ANNULLAMENTO non è un errore: lascia `paused` col `.part` (il riconoscimento passa per il messaggio `download cancelled`). Gli errori NON si inghiottono più: via il `.catch(() => undefined)` da `local-model:install`, finiscono nello stato e nel log (`[local-model] download failed: …`).
+- UI (`LocalModelCard`): con `paused` e con `error` compaiono **Riprendi** (la solita `local-model:install`, che riparte col Range) e **Ricomincia** (RPC NUOVA `local-model:restart`: cancella il `.part` e riparte da zero); **Annulla** solo con `downloading`. La scelta dei pulsanti è una funzione pura (`localModelCardActions` in `lib/models-page.ts`) con i suoi test. Lingua: messaggi nuovi it/en nel catalogo (`localModel.downloadFailed/.unsupported/.noSpace`), en ora **1447/1447** (prima mancava anche una stringa preesistente della scheda).
+- `local-model:install` ricontrolla l’idoneità **LATO DEMONE** prima di partire: `unsupported` e `no-space` negano con un errore chiaro (`{ started: false, error }`), senza dipendere dalla UI; lo stesso rifiuto vale per `restart`.
+- Test (visti fallire prima): il percorso del demone con un **server finto su 127.0.0.1 che chiude la connessione a metà** (`src/daemon/__tests__/local-model-download.test.ts`, 8 verdi): rete rotta a metà → `error` col messaggio e col `.part`; **Riprendi** col Range (`bytes=20000-`) fino a `ready` (sha256 verificato); Annulla → `paused` SENZA messaggio d’errore; Ricomincia → nessun Range, da zero; dopo un «riavvio del demone» (stato dimenticato) il `.part` resta → `paused`; `unsupported`/`no-space` negati; il download fallito FINISCE nello stato (prima spariva). Più 5 test del puro e 4 dei pulsanti. Nessuna rete vera: il fetch dei test rifiuta qualsiasi URL fuori da 127.0.0.1.
+
+## LC3 — Il parser: blocco senza chiusura e blocchi dentro il codice
+
+- Un blocco **aperto in fondo al testo** (nessuna `</tool_call>` dopo: il modello si è fermato all’EOS) con un `<function=…>…</function>` completo si riconosce come gli altri; senza `</function>` resta testo e la consegna lo ripulisce come oggi.
+- Né il recupero né la pulizia toccano i blocchi **dentro un recinto di codice** (``` o `~~~`, fino alla chiusura dello stesso carattere o alla fine del testo se mai chiuso): sono contenuto voluto, quindi anche la pulizia per i provider cloud li lascia (`codeFenceRanges`, pulizia a segmenti, `hasRawToolCallBlocks` conta solo fuori dai recinti).
+- Test: i due casi della tabella della spec (il blocco aperto recuperato; il blocco nel codice NON eseguito), un blocco nel codice e uno fuori nello stesso testo (si recupera solo quello fuori), tilde, recinto mai chiuso, `hasRawToolCallBlocks`. **6 visti fallire prima** (il blocco nel recinto veniva ESEGUITO come chiamata), 31/31 verdi dopo. **Gli 8 blocchi veri dei dump (casi 17, 21, 23, 29, 32, 33, 34, 45) restano verdi**, loop 390/390.
+
+## LC4 — La chiave di llama-server non sta nella riga di comando
+
+Via `--api-key K` dagli argv (visibile con `ps` a ogni processo dell’utente): la chiave passa **SOLO nell’env del figlio** come `LLAMA_API_KEY` (chiave nuova a ogni avvio, come prima; il `.node`/binario non cambia).
+
+**Scelta (come chiede la spec):** `--api-key-file` NON si può verificare contro il pin b12061 perché il tar del pin non è mai stato scaricato (`vendor/llama` vuota, anche stavolta nessun download) e i sorgenti del pin non ci sono in locale → **variabile d’ambiente `LLAMA_API_KEY`**. Come riscontro (solo letto, mai toccato): l’`--help` di un `llama-server` Homebrew build **12110 > 12061**, stessa codebase, documenta «--api-key KEY (env: LLAMA_API_KEY)».
+
+Test (visti fallire prima: argv conteneva `--api-key key-1` e l’env del figlio era `undefined`): gli argomenti di spawn NON contengono la chiave; `LLAMA_API_KEY=key-N` solo nell’env del figlio (una diversa per avvio); `process.env` del demone senza. 15/15 del file.
+
+## Chiusura
+
+- Commit: `69d2dd20` (LC1) · `1aca1aa0` (LC2) · `9830883c` (LC3) · `e160ff5b` (LC4) · REPORT. Tag `fase-locale-correzioni` sul commit del REPORT. Nessun push.
+- Doppia `i18n:extract` identica byte-byte; en 0 missing.
+- `release:local`/`release:verify` NON eseguiti (offline, `fetch-llama` vuole la rete), come già dalle fasi L e v0.4.3.
+
+## Vincoli rispettati
+
+Niente Docker né `npm run dist`; nessuna eval col modello (`language-judges.eval.ts` gira offline su trascrizioni finte); nessun download vero (il fetch dei test rifiuta URL fuori 127.0.0.1 e l’unico tentativo verso huggingface — dal test dell’idoneità, catalogo override — è stato rifiutato dallo stub: nessun socket aperto); rete solo su 127.0.0.1; temporanei solo `mkdtemp` in `/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/` e cancellati; **0 daemon e 0 llama-server** dopo ogni corsa (pgrep vuoto); repo `~/Projects/Bot/engramma` non toccato; Homebrew `llama-server` solo letto; `out-review/` intatta (non tracciata) e `docs/catture` intatti.
+
 # REPORT FASE MEMORIA-ENGRAMMA v0.4.3 — Homun passa a Engramma `fase-v0.4.3`
 
 **Data:** 2026-11-09 · **Base:** `main` @ `a6aa41ee` (tag `fase-memoria-engramma-correzioni-2`) · **Tag di chiusura:** `fase-memoria-engramma-v043`. Nessun push. Lavoro offline; il repo di Engramma non toccato (né build del `.node`), `out-review/` intatta, nessuna cartella dati vera usata; temporanei solo in `/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/` e cancellati a fine fase.
