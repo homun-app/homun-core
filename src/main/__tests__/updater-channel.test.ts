@@ -2,6 +2,8 @@
 // GitHub VERO — non un modello suo. Il GitHubProvider di electron-updater
 // 6.8.9 gira com'è, con un executor finto che serve un feed GitHub finto
 // (atom + releases/latest + i .yml del canale): niente rete, niente Electron.
+// CORREZIONI (RQ2): l'interruttore set-channel non costruisce l'istanza di
+// electron-updater dove l'updater è spento (build --dir, SANDBOT_TEST_*).
 // I 4 casi della spec:
 //   stabile su 0.3.1001 → una prerelease 0.3.1002-beta.1 NON viene offerta;
 //   canale beta → viene offerta;
@@ -12,7 +14,7 @@ import { HttpError } from 'builder-util-runtime'
 import { GitHubProvider } from 'electron-updater/out/providers/GitHubProvider'
 import type { AppUpdater } from 'electron-updater'
 import { allowPrereleaseFor, parseUpdateChannel, type UpdateChannel } from '../../shared/update-channel'
-import { applyUpdateChannel, isNewerVersion } from '../updater'
+import { applyUpdateChannel, injectUpdaterForTests, initUpdater, isNewerVersion, setUpdateChannel } from '../updater'
 
 interface FeedRelease {
   tag: string
@@ -150,5 +152,70 @@ describe('fase rilascio di prova (RP3): il valore del canale resta quello del te
   it('parseUpdateChannel qui sotto è lo stesso del modulo condiviso (coerenza)', () => {
     expect(parseUpdateChannel('beta')).toBe('beta')
     expect(parseUpdateChannel('nope')).toBe('stable')
+  })
+})
+
+// RQ2 (correzioni): updater:set-channel chiamava applyUpdateChannel SEMPRE, e
+// il parametro di default au() COSTRUIVA l'istanza di electron-updater anche
+// nelle build --dir e con le SANDBOT_TEST_*, dove l'updater non deve esistere
+// (A8, K6) — provato sul codice di prima: la costruzione entra nell'AppUpdater
+// vero (che all'init chiama app.getVersion()) e fuori da Electron esplode.
+// Ora il setting si salva SEMPRE e l'istanza nasce SOLO se initUpdater è
+// stato chiamato (flag in updater.ts, condizioni mai ricalcolate qui).
+describe('fase rilascio di prova · correzioni (RQ2): l\'interruttore non sveglia l\'updater spento', () => {
+  /** L'istanza minima che initUpdater/setUpdateChannel toccano (niente Electron). */
+  function fakeUpdater(): AppUpdater {
+    return {
+      allowPrerelease: false,
+      autoDownload: true,
+      autoInstallOnAppQuit: true,
+      on: () => undefined,
+      checkForUpdates: async () => ({ updateInfo: null }),
+      currentVersion: { version: '0.3.1001' }
+    } as unknown as AppUpdater
+  }
+
+  it('updater NON inizializzato: set-channel salva il setting e NON costruisce l\'istanza', () => {
+    let constructed = 0
+    // ogni prova parte dall'updater SPENTO (flag a false), come una build
+    // --dir o con SANDBOT_TEST_*: la costruzione conta quante volte nasce
+    injectUpdaterForTests(() => {
+      constructed += 1
+      return fakeUpdater()
+    })
+    const saved: UpdateChannel[] = []
+    const returned = setUpdateChannel('beta', (c) => {
+      saved.push(c)
+      return 'salvato'
+    }, () => '0.3.1001')
+    expect(constructed, 'l\'istanza di electron-updater non deve nascere qui').toBe(0)
+    expect(saved, 'il setting si salva SEMPRE').toEqual(['beta'])
+    expect(returned, 'il risultato del salvataggio torna al chiamante').toBe('salvato')
+  })
+
+  it('updater NON inizializzato: nemmeno applyUpdateChannel senza updater iniettato la costruisce (ieri esplodeva)', () => {
+    let constructed = 0
+    injectUpdaterForTests(() => {
+      constructed += 1
+      return fakeUpdater()
+    })
+    // quello che l'handler IPC faceva sempre: oggi non costruisce più niente
+    expect(() => applyUpdateChannel('beta', () => '0.3.1001')).not.toThrow()
+    expect(constructed).toBe(0)
+  })
+
+  it('updater inizializzato: set-channel applica il canale SUBITO, senza riavvio', () => {
+    const u = fakeUpdater()
+    injectUpdaterForTests(() => u)
+    // initUpdater accende il flag: l'updater ESISTE, l'effetto è immediato
+    initUpdater(async () => 'stable')
+    const saved: UpdateChannel[] = []
+    setUpdateChannel('beta', (c) => saved.push(c), () => '0.3.1001')
+    expect(u.allowPrerelease, 'il canale di prova accende allowPrerelease SUBITO').toBe(true)
+    expect(saved).toEqual(['beta'])
+    // e spegnere l'interruttore riportando il canale stabile funziona uguale
+    setUpdateChannel('stable', (c) => saved.push(c), () => '0.3.1001')
+    expect(u.allowPrerelease).toBe(false)
+    expect(saved).toEqual(['beta', 'stable'])
   })
 })

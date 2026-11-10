@@ -30,12 +30,23 @@ import { allowPrereleaseFor, type UpdateChannel } from '../shared/update-channel
 import { mainStrings } from './i18n'
 
 // l'istanza si COSTRUISCE al primo accesso (getter del pacchetto) e serve
-// l'app Electron: mai toccarla a import time, o vitest/node puro esplode
+// l'app Electron: mai toccarla a import time, o vitest/node puro esplode.
+// RQ2: la costruzione è iniettabile nei test — una spia che conta quante
+// volte l'istanza NASCE è la prova che l'interruttore non la costruisce.
 let auInstance: AppUpdater | null = null
+let makeAu: () => AppUpdater = () => electronUpdater.autoUpdater
 function au(): AppUpdater {
-  auInstance ??= electronUpdater.autoUpdater
+  auInstance ??= makeAu()
   return auInstance
 }
+
+/**
+ * RQ2 (fase rilascio di prova — correzioni): l'updater è ATTIVO solo se
+ * initUpdater è stato chiamato (app impacchettata col feed, fuori dalle
+ * prove). Le condizioni NON si ricalcolano qui (A8/K6 le ha già decise in
+ * index.ts): chi accende l'updater è initUpdater, e solo lui.
+ */
+let updaterActive = false
 
 const RELEASES_URL = 'https://github.com/homun-app/homun-releases/releases'
 /** Ogni quanto ricontrollare il feed dopo il controllo d'avvio. */
@@ -119,13 +130,45 @@ class semverLike {
  * RP3: applica il canale al updater (iniettabile per i test). Il canale di
  * prova accende allowPrerelease; una beta in esecuzione lo tiene acceso
  * anche a canale stabile. Immediata: niente riavvio.
+ * RQ2: senza updater iniettato, l'istanza nasce SOLO se l'updater è attivo
+ * (initUpdater chiamato): nelle build --dir e con le SANDBOT_TEST_* qui non
+ * si costruisce NIENTE (A8, K6).
  */
 export function applyUpdateChannel(
   channel: UpdateChannel,
   getVersion: () => string = () => app.getVersion(),
-  updater: { allowPrerelease: boolean } = au()
+  updater: { allowPrerelease: boolean } | null = updaterActive ? au() : null
 ): void {
+  if (!updater) return
   updater.allowPrerelease = allowPrereleaseFor(channel, getVersion())
+}
+
+/**
+ * RQ2 (fase rilascio di prova — correzioni): l'interruttore delle
+ * Impostazioni («Ricevi le versioni di prova», IPC updater:set-channel).
+ * Il setting si salva SEMPRE; l'effetto immediato sul updater SOLO se
+ * esiste — initUpdater chiamato. Nelle build --dir e con le SANDBOT_TEST_*
+ * l'istanza di electron-updater non deve NASCERE qui: si salva il canale e
+ * varrà dal primo controllo della prossima build col feed.
+ */
+export function setUpdateChannel(
+  channel: UpdateChannel,
+  save: (channel: UpdateChannel) => unknown,
+  getVersion: () => string = () => app.getVersion()
+): unknown {
+  if (updaterActive) applyUpdateChannel(channel, getVersion)
+  return save(channel)
+}
+
+/**
+ * Solo per i test (RQ2): inietta la costruzione dell'istanza di
+ * electron-updater e azzera istanza e flag — ogni prova parte dall'updater
+ * SPENTO, come una build --dir o con le variabili SANDBOT_TEST_*.
+ */
+export function injectUpdaterForTests(make?: () => AppUpdater): void {
+  makeAu = make ?? (() => electronUpdater.autoUpdater)
+  auInstance = null
+  updaterActive = false
 }
 
 /** Prima di installare: ferma bene il daemon (A2) e aspetta che esca. */
@@ -257,6 +300,9 @@ async function installAfterDaemonStopped(): Promise<void> {
 }
 
 export function initUpdater(getChannel: () => Promise<UpdateChannel> = async () => 'stable'): void {
+  // RQ2: da qui l'updater ESISTE — l'unico punto che accende il flag (le
+  // condizioni per arrivarci le ha decise index.ts con A8/K6, mai ricalcolate)
+  updaterActive = true
   au().autoDownload = false
   au().autoInstallOnAppQuit = true
   au().on('error', (error) => {

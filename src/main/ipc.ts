@@ -19,7 +19,7 @@ import { findLegacyHomun2Dir, legacyNoticeMarkerPath } from './legacy-homun2'
 import { daemonSpawnContext } from './daemon-context'
 import { DAEMON_FLAG } from './mode'
 import type { DaemonClient } from './daemon-client'
-import { applyUpdateChannel, checkNow, hasUpdateConfig } from './updater'
+import { setUpdateChannel, checkNow, hasUpdateConfig } from './updater'
 import { UPDATE_CHANNEL_SETTING, parseUpdateChannel } from '../shared/update-channel'
 import { assertDroppedMacPath } from './dropped-file'
 import type { SandbotEvent } from '../shared/types'
@@ -283,11 +283,13 @@ export function registerIpc(client: DaemonClient, getWindows: () => BrowserWindo
     channel: await readUpdateChannel()
   }))
   ipcMain.handle('updater:check', () => checkNow(readUpdateChannel))
-  ipcMain.handle('updater:set-channel', (_e, value: unknown) => {
-    const channel = parseUpdateChannel(value)
-    applyUpdateChannel(channel) // effetto immediato sul updater
-    return client.call('settings:set', [UPDATE_CHANNEL_SETTING, channel])
-  })
+  ipcMain.handle('updater:set-channel', (_e, value: unknown) =>
+    // RQ2: il setting si salva SEMPRE; l'istanza di electron-updater non
+    // nasce dove l'updater non esiste (build --dir, SANDBOT_TEST_*: A8, K6)
+    setUpdateChannel(parseUpdateChannel(value), (channel) =>
+      client.call('settings:set', [UPDATE_CHANNEL_SETTING, channel])
+    )
+  )
 
   // ---- fase rilascio (A8): il passaggio da Homun 2 e il Finder ----
   ipcMain.handle('app:legacy-homun2', () => {
