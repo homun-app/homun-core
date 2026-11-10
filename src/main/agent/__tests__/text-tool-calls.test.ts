@@ -11,8 +11,22 @@ import { parseTextToolCalls, stripTextToolCallBlocks, hasRawToolCallBlocks } fro
 /** il catalogo del turno: nucleo + gruppi non ancora attivi (nomi interni) */
 const KNOWN = new Set([
   'read-file', 'web_search', 'web_fetch', 'search_connectors', 'find_tools',
-  'run-command', 'browser_open', 'browser_type', 'fill_credential', 'send_to_user'
+  'run-command', 'browser_open', 'browser_type', 'fill_credential', 'send_to_user',
+  // LE1: i nomi underscore delle fixture con backtick negli argomenti
+  'run_command', 'write_file'
 ])
+
+// ---- LE1: i blocchi con backtick/recinti NEGLI ARGOMENTI (le fixture dei
+// dump qui sotto e la tabella del lexer li usano) ----
+const BACKTICK_SHELL =
+  '<tool_call>\n<function=run_command>\n<parameter=command>\necho `date`\n</parameter>\n</function>\n</tool_call>'
+const BACKTICK_WRITE_FILE =
+  '<tool_call>\n<function=write_file>\n<parameter=path>\n/workspace/app/README.md\n</parameter>\n<parameter=content>\n# Titolo\n\nAvvia con `npm i` poi:\n\n```bash\nnpm run dev\n```\n</parameter>\n</function>\n</tool_call>'
+const BACKTICK_HERMES =
+  '<tool_call>\n{"name":"run_command","arguments":{"command":"echo `x`"}}\n</tool_call>'
+/** il blocco APERTO in coda con un backtick nell'argomento (il 4° caso LE1) */
+const BACKTICK_APERTO =
+  '<tool_call>\n<function=run_command>\n<parameter=command>\nls `pwd`\n</parameter>\n</function>'
 
 // ---- le 8 fixture VERI dei dump (casi 17, 21, 23, 29, 32, 33, 34, 45) ----
 const FIXTURES: Array<{ caseId: string; text: string; calls: Array<{ name: string; args: Record<string, unknown> }> }> = [
@@ -59,6 +73,30 @@ const FIXTURES: Array<{ caseId: string; text: string; calls: Array<{ name: strin
     caseId: '45 (LFM3)',
     text: '<tool_call>\n<function=browser_open>\n<parameter=url>\nhttps://sora.com/\n</parameter>\n</function>\n</tool_call>',
     calls: [{ name: 'browser_open', args: { url: 'https://sora.com/' } }]
+  },
+  // ---- LE1: le fixture con BACKTICK o RECINTI NEGLI ARGOMENTI — i casi più
+  // comuni in assoluto (comandi di shell e file markdown) e proprio quelli
+  // senza copertura: è per questo che la regressione LD3 è passata ----
+  {
+    // un comando di shell con sostituzione `…`
+    caseId: 'LE1 (shell)',
+    text: BACKTICK_SHELL,
+    calls: [{ name: 'run_command', args: { command: 'echo `date`' } }]
+  },
+  {
+    // un write_file il cui content È markdown: span inline (`npm i`) e recinto
+    caseId: 'LE1 (write_file markdown)',
+    text: BACKTICK_WRITE_FILE,
+    calls: [{
+      name: 'write_file',
+      args: { path: '/workspace/app/README.md', content: '# Titolo\n\nAvvia con `npm i` poi:\n\n```bash\nnpm run dev\n```' }
+    }]
+  },
+  {
+    // il formato Hermes con un backtick dentro il JSON
+    caseId: 'LE1 (Hermes)',
+    text: BACKTICK_HERMES,
+    calls: [{ name: 'run_command', args: { command: 'echo `x`' } }]
   }
 ]
 
@@ -284,4 +322,140 @@ describe('fase locale correzioni 2 (LD3): una menzione di <tool_call> non ingoia
     expect(r.calls.map((c) => c.name)).toEqual(['find_tools'])
     expect(r.text).toContain('<tool_call>') // la menzione nel recinto resta testo
   })
+})
+
+// ---- fase locale correzioni 3 (LE1): il LESSORE — un solo passaggio da
+// sinistra a destra. Le zone protette si calcolavano anche DENTRO i blocchi
+// veri: un backtick o un recinto dentro un <parameter> spezzava il blocco e
+// la chiamata si perdeva (la pulizia consegnava l'argomento all'utente).
+// Ora fuori da un blocco vince il costrutto che COMINCIA PRIMA, e un
+// <tool_call> consuma il blocco intero QUALUNQUE cosa contenga. La tabella
+// unified: i 4 casi LE1, i 4 di LD3, i 3 di LC3 e gli 8 blocchi veri dei
+// dump (più le fixture LE1 con backtick negli argomenti) ----
+
+describe('fase locale correzioni 3 (LE1): il lexer — i backtick DENTRO un blocco sono argomenti', () => {
+  // il blocco VERO di tutti i casi LD3/LC3 (find_tools, come i dump)
+  const VERO = '<tool_call>\n<function=find_tools>\n<parameter=group>\nbrowser\n</parameter>\n</function>\n</tool_call>'
+  // il blocco APERTO in coda (il modello si è fermato prima della chiusura)
+  const APERTO = '<tool_call>\n<function=find_tools>\n<parameter=group>\nbrowser\n</parameter>\n</function>'
+  // un blocco chiuso con nome SCONOSCIUTO (deve restare nel testo)
+  const SCONOSCIUTO = '<tool_call>\n<function=strumento_inventato>\n<parameter=x>\n1\n</parameter>\n</function>\n</tool_call>'
+
+  type Row = {
+    id: string
+    text: string
+    calls: Array<{ name: string; args: Record<string, unknown> }>
+    /** frasi che DEVONO restare nel testo fuori dai blocchi */
+    textHas?: string[]
+    /** frammenti che NON devono restare nel testo fuori dai blocchi */
+    textHasNot?: string[]
+    /** frasi che NON devono arrivare ALL'UTENTE dalla pulizia della consegna */
+    cleanHas?: string[]
+    cleanHasNot?: string[]
+  }
+
+  const TABLE: Row[] = [
+    // — i 4 casi della tabella LE1 (su a83facd7 erano PERSI: la pulizia
+    //   consegnava il contenuto dell'argomento all'utente) —
+    {
+      id: 'LE1 · run_command con backtick nell’argomento (echo `date`)',
+      text: BACKTICK_SHELL,
+      calls: [{ name: 'run_command', args: { command: 'echo `date`' } }],
+      textHasNot: ['<tool_call>', '<function='],
+      cleanHasNot: ['echo `date`', '<tool_call>']
+    },
+    {
+      id: 'LE1 · write_file con content markdown (span `npm i` e recento ```bash)',
+      text: BACKTICK_WRITE_FILE,
+      calls: [{ name: 'write_file', args: { path: '/workspace/app/README.md', content: '# Titolo\n\nAvvia con `npm i` poi:\n\n```bash\nnpm run dev\n```' } }],
+      textHasNot: ['<tool_call>', '<function=', 'Titolo'],
+      cleanHasNot: ['npm i', 'npm run dev', '<tool_call>']
+    },
+    {
+      id: 'LE1 · Hermes con backtick dentro il JSON (echo `x`)',
+      text: BACKTICK_HERMES,
+      calls: [{ name: 'run_command', args: { command: 'echo `x`' } }],
+      textHasNot: ['<tool_call>', '"name"'],
+      cleanHasNot: ['echo `x`', '<tool_call>']
+    },
+    {
+      id: 'LE1 · blocco APERTO in coda con ls `pwd`',
+      text: BACKTICK_APERTO,
+      calls: [{ name: 'run_command', args: { command: 'ls `pwd`' } }],
+      textHasNot: ['<tool_call>', '<function='],
+      cleanHasNot: ['`pwd`', '<tool_call>']
+    },
+    // — i 4 casi di LD3: una menzione di <tool_call> non ingoia il blocco vero —
+    {
+      id: 'LD3 · menzione DENTRO un recinto + blocco vero fuori',
+      text: '```\n<tool_call> ecco\n```\n' + VERO,
+      calls: [{ name: 'find_tools', args: { group: 'browser' } }],
+      textHas: ['<tool_call> ecco'],
+      textHasNot: ['<function=find_tools>']
+    },
+    {
+      id: 'LD3 · menzione nel codice INLINE + blocco vero',
+      text: 'usa `<tool_call>` così\n' + VERO,
+      calls: [{ name: 'find_tools', args: { group: 'browser' } }],
+      textHas: ['usa `<tool_call>` così'],
+      textHasNot: ['<function=find_tools>'],
+      cleanHas: ['usa `<tool_call>` così']
+    },
+    {
+      id: 'LD3 · blocco chiuso SCONOSCIUTO + blocco APERTO in coda',
+      text: SCONOSCIUTO + '\n' + APERTO,
+      calls: [{ name: 'find_tools', args: { group: 'browser' } }],
+      textHas: ['<function=strumento_inventato>']
+    },
+    {
+      id: 'LD3 · menzione nel recinto NON chiusa + blocco APERTO in coda',
+      text: '```\n<tool_call>\n```\n' + APERTO,
+      calls: [{ name: 'find_tools', args: { group: 'browser' } }],
+      textHas: ['<tool_call>']
+    },
+    // — i casi LC3: il blocco aperto in coda, il codice è testo —
+    {
+      id: 'LC3 · blocco APERTO in coda con function completa',
+      text: 'Apro il browser.\n' + APERTO,
+      calls: [{ name: 'find_tools', args: { group: 'browser' } }],
+      textHas: ['Apro il browser.'],
+      textHasNot: ['<tool_call>', '<function=']
+    },
+    {
+      id: 'LC3 · blocco DENTRO un recinto NON eseguito (è testo voluto)',
+      text: 'Il formato è questo:\n```\n<tool_call>\n<function=run-command>\n<parameter=command>\nls -la\n</parameter>\n</function>\n</tool_call>\n```\nChiaro?',
+      calls: [],
+      textHas: ['<function=run-command>', 'Il formato è questo:', 'Chiaro?'],
+      cleanHas: ['<function=run-command>']
+    },
+    {
+      id: 'LC3 · recinto con blocco + blocco VERO fuori: si recupera solo quello fuori',
+      text: 'Ecco due cose.\n```\n<tool_call>\n<function=run-command>\n<parameter=command>\nls\n</parameter>\n</function>\n</tool_call>\n```\nMa questa la faccio davvero:\n' + VERO,
+      calls: [{ name: 'find_tools', args: { group: 'browser' } }],
+      textHas: ['<function=run-command>', 'Ma questa la faccio davvero:'],
+      textHasNot: ['<function=find_tools>']
+    },
+    // — gli 8 blocchi VERI dei dump + le 3 fixture LE1 (backtick negli
+    //   argomenti): erano proprio i casi senza copertura —
+    ...FIXTURES.map((f): Row => ({
+      id: `dump/LE1 · caso ${f.caseId}: ${f.calls.map((c) => c.name).join(' + ')}`,
+      text: f.text,
+      calls: f.calls,
+      textHasNot: ['<tool_call>', '<function=']
+    }))
+  ]
+
+  for (const row of TABLE) {
+    it(row.id, () => {
+      const r = parseTextToolCalls(row.text, KNOWN)
+      expect(r.calls).toEqual(row.calls.map((c) => ({ name: c.name, arguments: JSON.stringify(c.args) })))
+      for (const s of row.textHas ?? []) expect(r.text).toContain(s)
+      for (const s of row.textHasNot ?? []) expect(r.text).not.toContain(s)
+      const clean = stripTextToolCallBlocks(row.text)
+      for (const s of row.cleanHas ?? []) expect(clean).toContain(s)
+      for (const s of row.cleanHasNot ?? []) expect(clean).not.toContain(s)
+      // dove il testo recuperato non contiene più tag, non c'è nulla di grezzo
+      if (row.textHasNot?.includes('<tool_call>')) expect(hasRawToolCallBlocks(r.text)).toBe(false)
+    })
+  }
 })

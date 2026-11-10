@@ -20,6 +20,13 @@
 // testo. Il recupero qui sotto copre OGNI versione del server perché lavora
 // sulla risposta FINITA, non sullo streaming del template.
 //
+// Fase locale correzioni 3 (LE1): tutto gira su UN SOLO lexer da sinistra a
+// destra (lexToolCallText). Le zone protette di LC3/LD3 si calcolavano su
+// tutto il testo, ANCHE dentro i blocchi veri: un backtick o un recinto in
+// un <parameter> spezzava il blocco e la chiamata si perdeva (comandi di
+// shell e file markdown: i casi più comuni in assoluto). Ora un <tool_call>
+// consuma il blocco INTERO qualunque cosa contenga.
+//
 // Tutto PURO: nessuno store, nessuna rete. Le chiamate recuperate seguono la
 // STESSA strada delle native (srotolamento facciate, coercizione, argGuard,
 // attivazione per nome, permessi): qui si producono solo {name, arguments}.
@@ -37,115 +44,158 @@ export interface TextToolCallParse {
 }
 
 /**
- * Un blocco <tool_call>…</tool_call> intero, con eventuali a-capo ai bordi.
- * LD3: il corpo non può contenere un altro `<tool_call>` (tempered token
- * `(?:(?!<tool_call>)[\s\S])*?`) — così una menzione spaiata non si aggancia
- * alla chiusura del blocco VERO che viene dopo.
+ * LD3 (ora nel lexer lexToolCallText): il corpo di un blocco non può
+ * contenere un altro `<tool_call>` — il tempered token della vecchia regex
+ * `[ \t]*<tool_call>\s*((?:(?!<tool_call>)[\s\S])*?)<\/tool_call>[ \t]*\n?`
+ * — così una menzione spaiata non si aggancia alla chiusura del blocco VERO
+ * che viene dopo. Nel lexer è la condizione `close < nextOpen`.
  */
-const TOOL_CALL_BLOCK_RE = /[ \t]*<tool_call>\s*((?:(?!<tool_call>)[\s\S])*?)<\/tool_call>[ \t]*\n?/g
+
+const OPEN_TAG = '<tool_call>'
+const CLOSE_TAG = '</tool_call>'
+
+/** Un segmento di testo PROTETTO: un recinto di codice o uno span inline. */
+export interface ToolCallProtectedSegment {
+  kind: 'protected'
+  start: number
+  end: number
+}
 
 /**
- * Fase locale correzioni (LC3): le porzioni di testo DENTRO un recinto di
- * codice (``` o ~~~, fino alla chiusura dello stesso carattere o alla fine
- * del testo se mai chiuso). Sono contenuto VOLUTO («ecco il formato»): il
- * recupero non le esegue e la pulizia non le tocca.
+ * Un segmento BLOCCO: un `<tool_call>` consumato per intero. `closed` dice
+ * se ha la sua `</tool_call>` (col corpo senza altre `<tool_call>`, il
+ * tempered token di LD3) o è APERTO in coda al testo.
  */
-export function codeFenceRanges(text: string): Array<[number, number]> {
-  const ranges: Array<[number, number]> = []
-  let i = 0
+export interface ToolCallBlockSegment {
+  kind: 'block'
+  start: number
+  end: number
+  closed: boolean
+}
+
+export type ToolCallTextSegment = ToolCallProtectedSegment | ToolCallBlockSegment
+
+/**
+ * La fine di un recinto aperto in `open` (run contato fino a `runEnd`): la
+ * fine della riga di CHIUSURA (una riga che è SOLO il recinto dello stesso
+ * carattere), o la fine del testo se mai chiuso. La riga d'apertura può
+ * portare una info string (```bash).
+ */
+function fenceEndAt(text: string, ch: string, runEnd: number): number {
+  const closeRe = new RegExp(`^ {0,3}${ch === '`' ? '`' : '~'}{3,}[ \\t]*$`)
   const n = text.length
-  while (i < n) {
-    const nl = text.indexOf('\n', i)
-    const lineEnd = nl === -1 ? n : nl
-    const m = /^ {0,3}(`{3,}|~{3,})/.exec(text.slice(i, lineEnd))
-    if (m) {
-      const ch = m[1]![0]! // ` o ~
-      const closeRe = new RegExp(`^ {0,3}${ch === '`' ? '`' : '~'}{3,}[ \\t]*$`)
-      // la chiusura: una riga che è SOLO il recinto dello stesso carattere
-      let j = nl === -1 ? n : nl + 1
-      let rangeEnd = n // mai chiuso → fino alla fine del testo
-      while (j <= n) {
-        const nl2 = text.indexOf('\n', j)
-        const end2 = nl2 === -1 ? n : nl2
-        if (closeRe.test(text.slice(j, end2))) { rangeEnd = end2; break }
-        if (nl2 === -1) break
-        j = nl2 + 1
-      }
-      ranges.push([i, rangeEnd])
-      i = rangeEnd >= n ? n : rangeEnd + 1
-    } else {
-      i = lineEnd + 1
-    }
+  const nl = text.indexOf('\n', runEnd) // fine della riga d'apertura
+  if (nl === -1) return n
+  let j = nl + 1
+  while (j <= n) {
+    const nl2 = text.indexOf('\n', j)
+    const end2 = nl2 === -1 ? n : nl2
+    if (closeRe.test(text.slice(j, end2))) return end2
+    if (nl2 === -1) return n
+    j = nl2 + 1
   }
-  return ranges
-}
-
-/** L'indice cade dentro un recinto di codice? (per match già calcolati) */
-function inAnyRange(ranges: Array<[number, number]>, idx: number): boolean {
-  for (const [a, b] of ranges) if (idx >= a && idx < b) return true
-  return false
+  return n
 }
 
 /**
- * LD3: gli span di codice INLINE di un tratto — `` `…` `` (o `` ``…`` ``) su
- * UNA riga: un run di N backtick si chiude col PROSSIMO run di ESATTAMENTE N
- * backtick sulla stessa riga (i run più corti in mezzo sono contenuto); senza
- * chiusura sulla riga il run è testo e non fa span. Citare il formato
- * («usa `<tool_call>` così») è contenuto voluto come i recinti.
+ * LE1: il LESSORE — UN SOLO passaggio da sinistra a destra. In ogni punto
+ * FUORI da un blocco si guarda quale costrutto COMINCIA PER PRIMO:
+ *  - un recinto (``` / ~~~ a inizio riga, fino a 3 spazi) o uno span di
+ *    codice inline (run di N backtick chiuso dal prossimo run di ESATTAMENTE
+ *    N backtick sulla stessa riga): si salta fino alla chiusura → segmento
+ *    PROTETTO («ecco il formato»);
+ *  - un `<tool_call>`: si consuma il blocco INTERO — chiuso col tempered
+ *    token di LD3 oppure APERTO in coda (l'ULTIMO `<tool_call>` del testo) —
+ *    QUALUNQUE cosa contenga: backtick e recinti DENTRO un blocco sono
+ *    ARGOMENTI, non zone protette (la regressione LD3 nasceva dalle zone
+ *    protette calcolate anche dentro i blocchi veri).
+ * Recupero, pulizia e hasRawToolCallBlocks usano TUTTI questo lexer: non
+ * possono divergere.
  */
-function inlineCodeSpans(text: string, from: number, to: number): Array<[number, number]> {
-  const out: Array<[number, number]> = []
-  let li = from
-  while (li < to) {
-    const nl = text.indexOf('\n', li)
-    const lineEnd = nl === -1 || nl >= to ? to : nl
-    let j = li
-    while (j < lineEnd) {
-      if (text[j] !== '`') { j++; continue }
-      let openEnd = j
-      while (openEnd < lineEnd && text[openEnd] === '`') openEnd++
-      const len = openEnd - j
-      // la chiusura: il prossimo run della STESSA lunghezza, sulla stessa riga
-      let k = openEnd
+export function lexToolCallText(text: string): ToolCallTextSegment[] {
+  const segs: ToolCallTextSegment[] = []
+  const n = text.length
+  let i = 0
+  let lineStart = 0
+  while (i < n) {
+    const ch = text[i]!
+    // il recinto: run di 3+ ` o ~ a inizio riga (fino a 3 spazi soli)
+    const sinceLineStart = i - lineStart
+    if ((ch === '`' || ch === '~') && sinceLineStart <= 3 && text.slice(lineStart, i) === ' '.repeat(sinceLineStart)) {
+      let runEnd = i
+      while (runEnd < n && text[runEnd] === ch) runEnd++
+      if (runEnd - i >= 3) {
+        const end = fenceEndAt(text, ch, runEnd)
+        segs.push({ kind: 'protected', start: i, end })
+        i = lineStart = end < n ? end + 1 : n // salta anche il \n della chiusura
+        continue
+      }
+      // run < 3 all'inizio riga: può essere uno SPAN inline, si prosegue sotto
+    }
+    if (ch === '`') {
+      // lo span inline: run di N backtick, chiusura col prossimo run di
+      // ESATTAMENTE N backtick sulla STESSA riga (i run più corti in mezzo
+      // sono contenuto); senza chiusura il run è testo
+      let runEnd = i
+      while (runEnd < n && text[runEnd] === '`') runEnd++
+      const len = runEnd - i
+      const nl = text.indexOf('\n', i)
+      const stop = nl === -1 ? n : nl
+      let k = runEnd
       let close = -1
-      while (k < lineEnd) {
+      while (k < stop) {
         if (text[k] === '`') {
           let e = k
-          while (e < lineEnd && text[e] === '`') e++
+          while (e < stop && text[e] === '`') e++
           if (e - k === len) { close = k; break }
           k = e
         } else k++
       }
       if (close >= 0) {
-        out.push([j, close + len])
-        j = close + len
+        segs.push({ kind: 'protected', start: i, end: close + len })
+        i = close + len
       } else {
-        j = openEnd // run non chiuso: testo, si continua a scansionare dopo
+        i = runEnd // run non chiuso: testo, si continua a scansionare dopo
       }
+      continue
     }
-    li = nl === -1 || nl >= to ? to : nl + 1
+    if (ch === '<' && text.startsWith(OPEN_TAG, i)) {
+      const close = text.indexOf(CLOSE_TAG, i + OPEN_TAG.length)
+      const nextOpen = text.indexOf(OPEN_TAG, i + OPEN_TAG.length)
+      if (close !== -1 && (nextOpen === -1 || close < nextOpen)) {
+        // blocco CHIUSO (tempered): il corpo non contiene un altro <tool_call>
+        let start = i
+        while (start > 0 && (text[start - 1] === ' ' || text[start - 1] === '\t')) start--
+        let end = close + CLOSE_TAG.length
+        while (end < n && (text[end] === ' ' || text[end] === '\t')) end++
+        if (text[end] === '\n') end++
+        segs.push({ kind: 'block', start, end, closed: true })
+        i = end
+      } else if (close === -1 && nextOpen === -1) {
+        // blocco APERTO in coda: l'ULTIMO <tool_call>, dopo l'ultima chiusura
+        segs.push({ kind: 'block', start: i, end: n, closed: false })
+        i = n
+      } else {
+        // il corpo conterrebbe un altro <tool_call> (tempered) o l'apertura
+        // non è l'ultima senza chiusura: questa tag è TESTO, si riparte da dopo
+        i += OPEN_TAG.length
+        continue
+      }
+      lineStart = text.lastIndexOf('\n', i - 1) + 1
+      continue
+    }
+    if (ch === '\n') lineStart = i + 1
+    i++
   }
-  return out
+  return segs
 }
 
-/**
- * LC3 + LD3: le zone PROTETTE di un testo, in ordine — i recinti di codice
- * (``` o ~~~, fino alla chiusura dello stesso carattere o alla fine se mai
- * chiusi) E gli span di codice inline sui tratti liberi. Sono contenuto
- * VOLUTO: il recupero non li esegue e la pulizia non li tocca.
- */
-export function protectedRanges(text: string): Array<[number, number]> {
-  const fences = codeFenceRanges(text)
-  const out: Array<[number, number]> = []
-  let pos = 0
-  const n = text.length
-  for (const [a, b] of fences) {
-    if (a > pos) out.push(...inlineCodeSpans(text, pos, a))
-    out.push([a, b])
-    pos = b
-  }
-  if (pos < n) out.push(...inlineCodeSpans(text, pos, n))
-  return out
+/** Il corpo di un segmento blocco: fra `<tool_call>` e la chiusura (o la fine). */
+function blockBody(text: string, seg: ToolCallBlockSegment): string {
+  const tagAt = text.indexOf(OPEN_TAG, seg.start)
+  const bodyStart = tagAt + OPEN_TAG.length
+  const bodyEnd = seg.closed ? text.indexOf(CLOSE_TAG, bodyStart) : seg.end
+  return text.slice(bodyStart, bodyEnd).replace(/^\s+/, '')
 }
 
 /** La testa XML del formato: <function=nome>. */
@@ -217,56 +267,32 @@ function parseHermesBlock(body: string): { name: string; args: Record<string, un
  * LC3: un blocco APERTO in fondo al testo (nessuna </tool_call> dopo, il
  * modello si è fermato all'EOS) con un <function=…>…</function> completo si
  * riconosce come gli altri; senza </function> resta testo.
- * LD3: il recupero gira PER TRATTI fuori dalle zone protette (recinti E span
- * inline), come la pulizia — non sul testo intero per poi filtrare: una
- * menzione nel recinto non ingoia più il blocco vero che viene dopo. Il
- * blocco aperto in coda è l'ULTIMO <tool_call> dopo l'ULTIMA </tool_call>:
- * un blocco chiuso con nome sconosciuto davanti non lo nasconde più.
+ * LD3: il corpo di un blocco non può contenere un altro <tool_call> (tempered
+ * token): una menzione spaiata non si aggancia alla chiusura del blocco dopo;
+ * il blocco aperto in coda è l'ULTIMO <tool_call> dopo l'ULTIMA chiusura.
+ * LE1: gira sul LESSORE — un solo passaggio: le zone protette non si
+ * calcolano più dentro i blocchi veri, quindi backtick e recinti negli
+ * ARGOMENTI non spezzano più il recupero.
  */
 export function parseTextToolCalls(text: string, knownToolNames: Iterable<string>): TextToolCallParse {
   const known = knownToolNames instanceof Set ? knownToolNames : new Set(knownToolNames)
-  const guarded = protectedRanges(text)
   const calls: ParsedTextToolCall[] = []
   let out = ''
   let cursor = 0
-
-  // i blocchi CHIUSI dei tratti liberi, uno per tratto (tra le zone protette)
-  const consumeClosed = (from: number, to: number): void => {
-    const seg = text.slice(from, to)
-    for (const m of seg.matchAll(TOOL_CALL_BLOCK_RE)) {
-      const idx = from + (m.index ?? 0)
-      const body = m[1] ?? ''
-      const parsed = parseXmlFunctionBlock(body) ?? parseHermesBlock(body)
-      if (!parsed || !known.has(parsed.name)) continue // sconosciuto o malformato: il blocco resta
-      calls.push({ name: parsed.name, arguments: JSON.stringify(parsed.args) })
-      out += text.slice(cursor, idx)
-      cursor = idx + m[0].length
+  for (const seg of lexToolCallText(text)) {
+    if (seg.kind === 'protected') {
+      // zona protetta (recinto o span inline): testo voluto, com'è — col
+      // tratto libero che la precede (blocchi rimasti compresi)
+      out += text.slice(cursor, seg.end)
+      cursor = seg.end
+      continue
     }
-  }
-
-  for (const [a, b] of guarded) {
-    if (a > cursor) {
-      consumeClosed(cursor, a)
-      out += text.slice(cursor, a) // il resto del tratto libero, blocchi rimasti compresi
-      cursor = a
-    }
-    out += text.slice(a, b) // zona protetta (recinto o span inline): com'è
-    cursor = b
-  }
-  consumeClosed(cursor, text.length)
-
-  // il blocco APERTO in coda: l'ULTIMO <tool_call> dopo l'ULTIMA
-  // </tool_call>, fuori dalle zone protette (il corpo arriva in fondo al testo)
-  const lastClose = text.lastIndexOf('</tool_call>')
-  const openAt = text.lastIndexOf('<tool_call>')
-  if (openAt > lastClose && openAt >= cursor && !inAnyRange(guarded, openAt)) {
-    const body = text.slice(openAt).replace(/^[ \t]*<tool_call>\s*/, '')
+    const body = blockBody(text, seg)
     const parsed = parseXmlFunctionBlock(body) ?? parseHermesBlock(body)
-    if (parsed && known.has(parsed.name)) {
-      calls.push({ name: parsed.name, arguments: JSON.stringify(parsed.args) })
-      out += text.slice(cursor, openAt)
-      cursor = text.length
-    }
+    if (!parsed || !known.has(parsed.name)) continue // sconosciuto o malformato: il blocco resta, lo raccoglie la fetta del segmento dopo
+    calls.push({ name: parsed.name, arguments: JSON.stringify(parsed.args) })
+    out += text.slice(cursor, seg.start) // il testo prima del blocco (blocchi rimasti compresi)
+    cursor = seg.end // il blocco intero esce dal testo, bordi compresi
   }
   out += text.slice(cursor)
   return { calls, text: out }
@@ -282,23 +308,29 @@ export function parseTextToolCalls(text: string, knownToolNames: Iterable<string
  * contenuto voluto («ecco il formato»), anche per i provider cloud.
  * LD3: come i recinti sono protetti anche gli span di codice INLINE
  * (`…` su una riga): una menzione citata NON si toglie dal testo consegnato.
+ * LE1: gira sul LESSORE — un blocco esce INTERO anche se i suoi argomenti
+ * contengono backtick o recinti (prima la pulizia consegnava il contenuto
+ * dell'argomento all'utente).
  */
 export function stripTextToolCallBlocks(text: string): string {
-  const guarded = protectedRanges(text)
   let out = ''
   let pos = 0
-  for (const [a, b] of guarded) {
-    if (a > pos) out += stripUnfenced(text.slice(pos, a))
-    out += text.slice(a, b) // zona protetta (recinto o span inline): resta com'è
-    pos = b
+  for (const seg of lexToolCallText(text)) {
+    if (seg.start > pos) out += stripOrphanFragments(text.slice(pos, seg.start))
+    if (seg.kind === 'protected') out += text.slice(seg.start, seg.end) // recinto o span inline: resta com'è
+    pos = seg.end // il blocco (chiuso o aperto, nome qualsiasi) ESCE intero
   }
-  out += stripUnfenced(text.slice(pos))
+  out += stripOrphanFragments(text.slice(pos))
   return out.trim()
 }
 
-/** La pulizia di un tratto FUORI dai recinti (le regex di L1.3, identiche). */
-function stripUnfenced(seg: string): string {
-  let out = seg.replace(TOOL_CALL_BLOCK_RE, '')
+/**
+ * La pulizia di un tratto LIBERO del lexer: lì i blocchi non ci sono già più
+ * (il lexer li ha consumati tutti), restano i frammenti orfani — function…/
+ * function in coppia e i tag spaiati (le regex di L1.3, identiche).
+ */
+function stripOrphanFragments(seg: string): string {
+  let out = seg
   // frammenti orfani: function…/function in coppia, poi i tag spaiati
   out = out.replace(/[ \t]*<function=[A-Za-z0-9_.\-]*>[\s\S]*?<\/function>[ \t]*\n?/g, '')
   out = out.replace(/[ \t]*<\/?tool_call>[ \t]*\n?/g, '')
@@ -312,14 +344,15 @@ function stripUnfenced(seg: string): string {
  * L1.3: il testo contiene blocchi (o frammenti) grezzi di chiamata?
  * LC3: quelli DENTRO un recinto di codice non contano — sono contenuto voluto.
  * LD3: non contano nemmeno quelli negli span inline (`…` su una riga).
+ * LE1: gira sul LESSORE, come il recupero e la pulizia: non possono divergere.
  */
 export function hasRawToolCallBlocks(text: string): boolean {
-  const guarded = protectedRanges(text)
   let outside = ''
   let pos = 0
-  for (const [a, b] of guarded) {
-    if (a > pos) outside += text.slice(pos, a)
-    pos = b
+  for (const seg of lexToolCallText(text)) {
+    if (seg.kind === 'block') return true // un blocco (anche aperto in coda) è grezzo
+    if (seg.start > pos) outside += text.slice(pos, seg.start)
+    pos = seg.end
   }
   outside += text.slice(pos)
   return /<tool_call>|<function=/.test(outside)
