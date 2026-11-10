@@ -5,7 +5,21 @@ pubblicata finisce nel corpo della GitHub Release (da cui l'app mostra il
 «cosa cambia» quando propone un aggiornamento). Formato: `## [x.y.z] — data`,
 sezioni H2 e un punto per riga.
 
-## [Prossima]
+## [0.3.1001-beta.1] — 2026-11-10
+
+La prima versione del canale di prova: chi vuole vedere Homun 0.3 prima
+degli altri può farlo in sicurezza, senza che niente cambi per chi aspetta
+la stabile (e senza toccare Homun 2).
+
+### Aggiornamenti
+
+- **«Ricevi le versioni di prova»**: in Impostazioni › Generali, sotto
+  «Controlla aggiornamenti». Acceso, le versioni di prova arrivano subito,
+  senza riavvio; spento, non compaiono mai. Chi ne installa una continua a
+  riceverle finché non esce la versione stabile.
+- Le versioni di prova possono avere difetti: per questo le scegli tu, una
+  volta sola, e le puoi spegnere quando vuoi. Chi non le chiede (incluso
+  Homun 2) continua a vedere solo le stabili.
 
 ### App
 

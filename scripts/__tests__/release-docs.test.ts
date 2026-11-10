@@ -63,6 +63,17 @@ describe('fase rilascio di prova (RP5): versione e CHANGELOG', () => {
     const pkg = JSON.parse(read('package.json'))
     expect(pkg.version).toBe('0.3.1001')
   })
+
+  it('il CHANGELOG ha la voce 0.3.1001-beta.1 con corpo per l\'utente (extract-release-notes la trova)', async () => {
+    const { extractReleaseNotes } = (await import('../extract-release-notes.mjs')) as {
+      extractReleaseNotes: (changelog: string, version: string) => string | null
+    }
+    const body = extractReleaseNotes(read('CHANGELOG.md'), '0.3.1001-beta.1')
+    expect(body, 'manca la sezione ## [0.3.1001-beta.1] nel CHANGELOG').not.toBeNull()
+    expect(body!.length).toBeGreaterThan(80) // in parole per l'utente, non una riga
+    // dice la novità del canale di prova, che è il punto della beta
+    expect(body).toContain('versioni di prova')
+  })
 })
 
 void existsSync
