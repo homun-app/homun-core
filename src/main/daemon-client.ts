@@ -16,7 +16,7 @@ import { join } from 'node:path'
 import { WsClient } from './ws-client'
 import { readDaemonInfo, removeDaemonInfo, pidAlive, releaseDaemonLock, daemonMatchesBuild, type DaemonInfo, type DaemonBuild } from '../daemon/daemon-files'
 import { parseMessage, serializeRpcRequest, serializeRpcOk, serializeRpcError, serializeHello } from '../daemon/rpc'
-import { daemonSpawnSpec, isDaemonCommandLine, isLegacyDaemonCommandLine, DAEMON_FLAG } from './mode'
+import { daemonSpawnSpec, isDaemonCommandLine, isLegacyDaemonCommandLine, daemonRunsFromExecutable, DAEMON_FLAG } from './mode'
 import { daemonSpawnContext } from './daemon-context'
 import { dataDir } from './store/db'
 import type { SandbotEvent } from '../shared/types'
@@ -93,26 +93,72 @@ export async function askDaemonToRestart(dir: string, info: DaemonInfo, timeoutM
 }
 
 /**
+ * RV1 (fase beta.2): ferma BENE il daemon VIVO, se c'è — la stessa RPC
+ * daemon:restart dell'updater (A2: smette di prendere job, dà ai turni in
+ * corso il tempo di chiudere — la coda è durevole — ed esce con 0) — ma
+ * SENZA passare dal client: client.call assicura la connessione e quindi
+ * SPAWNerebbe un daemon se non c'è. Qui si chiede a chi c'è, e basta.
+ * true quando alla fine non gira nessun daemon: è il «posso sostituire
+ * l'app» del conflitto existsAndRunning dello spostamento in Applicazioni.
+ */
+export async function stopRunningDaemon(dir: string = dataDir()): Promise<boolean> {
+  const info = readDaemonInfo(dir)
+  if (!info || !pidAlive(info.pid)) return true
+  await askDaemonToRestart(dir, info)
+  return !pidAlive(info.pid)
+}
+
+/**
+ * Le dipendenze di ensureDaemonRunning, iniettabili nei test (RV1, fase
+ * beta.2): il daemon «da un percorso diverso dal proprio bundle» si prova
+ * con spawn finto e riga di comando dichiarata, senza processi veri.
+ */
+export interface EnsureDaemonDeps {
+  /** l'eseguibile della UI corrente (default: process.execPath) */
+  execPath?: string
+  /** lo spawn del daemon (default: child_process.spawn) */
+  spawnFn?: typeof spawn
+  /** la riga di comando di un pid (default: ps -p <pid> -o command=) */
+  commandOf?: (pid: number) => Promise<string | null>
+  /** «esci bene» verso il daemon vivo (default: askDaemonToRestart) */
+  askRestart?: (dir: string, info: DaemonInfo) => Promise<void>
+  /** l'attesa del polling di daemon.json (default: setTimeout) */
+  sleep?: (ms: number) => Promise<void>
+}
+
+/**
  * Avvia il daemon se non è già attivo e ne aspetta il daemon.json fresco.
  * Un daemon.json con pid morto o con pid appartenente ad altro processo è
  * stantio: viene rimosso (col lock) e il daemon riparte. Un daemon VIVO ma
  * di versione/build diversa (A2) — o VECCHIO stile (fase ≤16c) — esce bene
  * e viene rilanciato.
  */
-export async function ensureDaemonRunning(expected?: DaemonBuild): Promise<DaemonInfo> {
+export async function ensureDaemonRunning(expected?: DaemonBuild, deps: EnsureDaemonDeps = {}): Promise<DaemonInfo> {
+  const execPath = deps.execPath ?? process.execPath
+  const spawnIt = deps.spawnFn ?? spawn
+  const commandOf = deps.commandOf ?? processCommand
+  const askRestart = deps.askRestart ?? askDaemonToRestart
+  const doSleep = deps.sleep ?? sleep
   const dir = dataDir()
   const logPath = join(dir, 'daemon.log')
   const existing = readDaemonInfo(dir)
   if (existing && pidAlive(existing.pid)) {
-    const cmd = existing.pid === process.pid ? '' : await processCommand(existing.pid)
+    const cmd = existing.pid === process.pid ? '' : await commandOf(existing.pid)
     if (existing.pid === process.pid) return existing
     if (cmd && isLegacyDaemonCommandLine(cmd)) {
       // daemon della ≤16c (ELECTRON_RUN_AS_NODE): fermalo, entra quello nuovo
-      await askDaemonToRestart(dir, existing)
+      await askRestart(dir, existing)
     } else if (cmd && isDaemonCommandLine(cmd)) {
-      if (!expected || daemonMatchesBuild(existing, expected)) return existing
-      // versione/build diversi: il daemon esce BENE (A2) e si rilancia
-      await askDaemonToRestart(dir, existing)
+      // RV1 (fase beta.2): si riusa SOLO se è della build giusta E parte dal
+      // bundle CORRENTE — un daemon vivo da un altro eseguibile (per esempio
+      // quello rimasto acceso dal percorso di App Translocation di una copia
+      // con la quarantena) viene sostituito, come già i daemon di build diversa
+      if ((!expected || daemonMatchesBuild(existing, expected)) && daemonRunsFromExecutable(cmd, execPath)) {
+        return existing
+      }
+      // versione/build diversi, o eseguibile di un'altra copia: il daemon esce
+      // BENE (A2) e si rilancia da qui
+      await askRestart(dir, existing)
     } else {
       // pid riusato dal SO per un altro processo: info stantia
       removeDaemonInfo(dir)
@@ -127,8 +173,8 @@ export async function ensureDaemonRunning(expected?: DaemonBuild): Promise<Daemo
   const out = openSync(logPath, 'a')
   try {
     const ctx = daemonSpawnContext()
-    const spec = daemonSpawnSpec({ execPath: process.execPath, isPackaged: ctx.isPackaged, appPath: ctx.appPath, env: process.env })
-    const child: ChildProcess = spawn(spec.command, spec.args, {
+    const spec = daemonSpawnSpec({ execPath, isPackaged: ctx.isPackaged, appPath: ctx.appPath, env: process.env })
+    const child: ChildProcess = spawnIt(spec.command, spec.args, {
       env: spec.env,
       detached: true,
       stdio: ['ignore', out, out]
@@ -140,13 +186,13 @@ export async function ensureDaemonRunning(expected?: DaemonBuild): Promise<Daemo
 
   const deadline = Date.now() + SPAWN_TIMEOUT_MS
   for (;;) {
-    await sleep(200)
+    await doSleep(200)
     const info = readDaemonInfo(dir)
     if (info && info.startedAt >= startedAt) {
       if (expected && !daemonMatchesBuild(info, expected)) {
         // è partito ma non è della build attesa (es. spawn che ha riusato un
         // vecchio bundle): si riparte dal principio una volta
-        if (pidAlive(info.pid)) await askDaemonToRestart(dir, info)
+        if (pidAlive(info.pid)) await askRestart(dir, info)
         continue
       }
       return info

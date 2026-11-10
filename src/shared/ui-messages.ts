@@ -776,7 +776,30 @@ export const UI = {
   skillErrCatalogMissing: msg({ id: 'skill.err.catalogMissing', message: 'Questa voce non è più nel catalogo.' }),
   skillErrCatalogPreviewMissing: msg({ id: 'skill.err.catalogPreviewMissing', message: 'L\u2019anteprima non è più valida: chiudi e riapri la voce.' }),
   skillErrCatalogInvalidSkill: msg({ id: 'skill.err.catalogInvalidSkill', message: 'La skill nel repository non è valida: non si può aggiungere.' }),
-  skillErrBadEnabledFor: msg({ id: 'skill.err.badEnabledFor', message: 'L\u2019elenco dei bot non è valido.' })
+  skillErrBadEnabledFor: msg({ id: 'skill.err.badEnabledFor', message: 'L\u2019elenco dei bot non è valido.' }),
+
+  // ---- RV1 (fase beta.2): i dialoghi nativi dello spostamento in Applicazioni ----
+  moveToApplicationsTitle: msg({ id: 'dialog.moveToApplications.title', message: 'Sposta Homun in Applicazioni' }),
+  moveToApplicationsBody: msg({ id: 'dialog.moveToApplications.body', message: 'Da qui gli aggiornamenti automatici non funzionano.' }),
+  moveToApplicationsNow: msg({ id: 'dialog.moveToApplications.now', message: 'Sposta in Applicazioni' }),
+  moveToApplicationsLater: msg({ id: 'dialog.moveToApplications.later', message: 'Non ora' }),
+  moveToApplicationsReplaceTitle: msg({ id: 'dialog.moveToApplications.replaceTitle', message: 'Sostituisci la versione in Applicazioni?' }),
+  moveToApplicationsReplaceBody: msg({
+    id: 'dialog.moveToApplications.replaceBody',
+    message: 'In Applicazioni c\u2019è già Homun: lo sostituisco con questa copia? Le tue impostazioni e le chat non cambiano.'
+  }),
+  moveToApplicationsReplaceYes: msg({ id: 'dialog.moveToApplications.replaceYes', message: 'Sostituisci' }),
+  moveToApplicationsReplaceNo: msg({ id: 'dialog.moveToApplications.replaceNo', message: 'Non ora' }),
+  moveToApplicationsFailedTitle: msg({ id: 'dialog.moveToApplications.failedTitle', message: 'Spostamento non riuscito' }),
+  moveToApplicationsStillRunning: msg({
+    id: 'dialog.moveToApplications.stillRunning',
+    message: 'Da Applicazioni sta girando ancora un Homun: un\u2019app in esecuzione non si sostituisce mai. Chiudila e riprova.'
+  }),
+  moveToApplicationsDaemonNotStopped: msg({
+    id: 'dialog.moveToApplications.daemonNotStopped',
+    message: 'Non sono riuscito a fermare il bot in background: un\u2019app in esecuzione non si sostituisce mai. Chiudi Homun e riprova.'
+  }),
+  moveToApplicationsCopyFailed: msg({ id: 'dialog.moveToApplications.copyFailed', message: 'La copia in Applicazioni non è riuscita.' })
 } as const
 
 export type UiMessage = (typeof UI)[keyof typeof UI]

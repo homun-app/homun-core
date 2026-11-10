@@ -36,6 +36,9 @@ import { permissionAllowed } from './permissions'
 import { cleanupLegacyLaunchAgent } from './launchagent'
 import { findLegacyHomun2Dir, legacyNoticeMarkerPath } from './legacy-homun2'
 import { initUpdater, setUpdaterDaemonStopper, shouldAutoCheckUpdates, hasUpdateConfig } from './updater'
+// RV1 (fase beta.2): l'app fuori da Applicazioni o translocata (sola lettura)
+import { appLocationAction, proposeMoveToApplications, setAppNeedsMove, appNeedsMove } from './app-location'
+import { stopRunningDaemon } from './daemon-client'
 import { UPDATE_CHANNEL_SETTING, parseUpdateChannel } from '../shared/update-channel'
 import { safeStorageBackendForEnv } from '../daemon/master-keys'
 
@@ -171,7 +174,7 @@ if (isDaemonMode(process.argv)) {
       }
     }
 
-    app.whenReady().then(() => {
+    app.whenReady().then(async () => {
       // fase 17a (L5): la lingua del main (tray, notifiche native) dalle
       // lingue preferite di sistema; cambierà col setting via IPC
       initMainLanguage()
@@ -223,10 +226,14 @@ if (isDaemonMode(process.argv)) {
         return shell.openExternal(current)
       })
       registerIpc(client, () => BrowserWindow.getAllWindows())
-      // A8: prima di installare un aggiornamento il daemon si ferma BENE
+      // A8: prima di installare un aggiornamento il daemon si ferma BENE.
+      // RV1 (fase beta.2): lo STESSO meccanismo dello spostamento in
+      // Applicazioni (stopRunningDaemon: la RPC daemon:restart di A2 senza
+      // passare dal client, che assicura la connessione e spawnerebbe) e poi
+      // l'attesa dell'uscita come sempre
       setUpdaterDaemonStopper(async () => {
         try {
-          await client.call('daemon:restart')
+          await stopRunningDaemon()
         } finally {
           await client.waitDaemonExit(15_000).catch(() => undefined)
         }
@@ -267,12 +274,38 @@ if (isDaemonMode(process.argv)) {
         if (BrowserWindow.getAllWindows().length === 0) createWindow()
       })
 
+      // RV1 (fase beta.2): l'app va in Applicazioni PRIMA di avviare il daemon
+      // — da fuori (o dalla copia translocata in sola lettura) Squirrel.Mac
+      // non può sostituirla e il daemon staccherebbe da quel percorso. Le
+      // condizioni dell'updater si decidono UNA volta (A8/K6) e si riusano
+      // sotto, mai ricalcolate: test env, --dir e dev restano fuori da qui.
+      const updaterEnabled = shouldAutoCheckUpdates(app.isPackaged, process.env, hasUpdateConfig())
+      if (appLocationAction({
+        isPackaged: app.isPackaged,
+        platform: process.platform,
+        inAppsFolder: app.isInApplicationsFolder(),
+        updaterEnabled,
+        execPath: process.execPath
+      }) === 'ask-move') {
+        const outcome = await proposeMoveToApplications()
+        if (outcome === 'moved') {
+          // Electron ha già riavviato dalla nuova posizione: questa istanza
+          // sta uscendo, l'avvio non prosegue (niente daemon da qui)
+          return
+        }
+        // «Non ora» (o spostamento non riuscito): si parte normalmente, ma
+        // gli aggiornamenti restano spenti per QUESTA sessione e le
+        // Impostazioni mostrano il motivo col bottone che ripropone
+        setAppNeedsMove(true)
+      }
+
       // A8: l'aggiornamento si controlla solo nell'app impacchettata e mai
       // quando ci sono variabili SANDBOT_TEST_* (le prove non toccano la rete).
       // K6: e mai quando manca app-update.yml (build --dir): niente ENOENT nel log.
       // RP3 (fase rilascio di prova): il canale (updates.channel) decide
-      // allowPrerelease PRIMA del primo controllo del feed
-      if (shouldAutoCheckUpdates(app.isPackaged, process.env, hasUpdateConfig())) {
+      // allowPrerelease PRIMA del primo controllo del feed.
+      // RV1: e mai finché l'app resta fuori da Applicazioni («Non ora»)
+      if (updaterEnabled && !appNeedsMove()) {
         initUpdater(() =>
           client
             .call('settings:get', [UPDATE_CHANNEL_SETTING, 'stable'])

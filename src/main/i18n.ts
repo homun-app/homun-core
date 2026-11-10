@@ -197,6 +197,11 @@ export function setMainLanguage(lang: UiLanguage): void {
   language = lang
 }
 
+/** RV1 (fase beta.2): la lingua attiva del main (per i dialoghi fuori dal renderer). */
+export function mainLanguage(): UiLanguage {
+  return language
+}
+
 /** I testi del main nella lingua attiva. */
 export function mainStrings(): MainStrings {
   return STRINGS[language]

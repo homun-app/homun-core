@@ -1091,9 +1091,15 @@ export interface SandbotApi {
   // fase rilascio (A8): l'aggiornamento (main process).
   // RP3 (fase rilascio di prova): lo stato porta il canale ('stable'|'beta')
   // e l'interruttore delle Impostazioni lo cambia (effetto immediato)
-  updaterStatus(): Promise<{ current: string; canUpdate: boolean; channel: UpdateChannel }>
-  updaterCheck(): Promise<{ current: string; available: boolean; version: string | null; error?: string }>
+  updaterStatus(): Promise<{ current: string; canUpdate: boolean; channel: UpdateChannel; needsMove: boolean }>
+  updaterCheck(): Promise<{ current: string; available: boolean; version: string | null; error?: string; needsMove?: boolean }>
   setUpdaterChannel(channel: UpdateChannel): Promise<unknown>
+  /**
+   * RV1 (fase beta.2): ripropone lo spostamento in Applicazioni (lo stesso
+   * flusso dell'avvio: dialoghi nativi, daemon fermato prima di sostituire).
+   * 'moved' = Electron ha già riavviato l'app dalla nuova posizione.
+   */
+  moveToApplications(): Promise<{ outcome: 'moved' | 'declined' | 'not-moved' | 'daemon-not-stopped' | 'still-running' }>
   // fase rilascio (A8): la riga del rinnovo da Homun 2 (una volta)
   legacyHomun2(): Promise<{ dir: string } | null>
   legacyHomun2Dismiss(): Promise<{ ok: boolean }>

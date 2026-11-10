@@ -2,6 +2,7 @@
 import { useMemo } from 'react'
 import { create } from 'zustand'
 import type { Agent, TranscriptEntry, SandbotEvent, ProviderConfig, ProviderPublic, PermissionsConfig, ConnectorInfo, TaskInfo, GroupInfo, GroupMessageInfo, SubagentInfo, AgentAvatar, TurnEnd, ScreenStatus, MainModel, ComposioStatusInfo, ComposioGatewayStatusInfo, ReadingPageRef } from '../../shared/types'
+import type { UpdateChannel } from '../../shared/update-channel'
 // fase 16c correzioni (R4): la regola del modello risolto, condivisa col daemon
 import { resolveAgentModel, type ResolvedAgentModel } from '../../shared/agent-model'
 
@@ -90,6 +91,12 @@ interface Store {
   /** fase 7: setting mainAgentId (null → il primo agente è quello principale) */
   mainAgentId: string | null
   settingsOpen: boolean
+  /**
+   * RV1 (fase beta.2): lo stato dell'aggiornamento (riga «Versione e
+   * aggiornamenti») — needsMove dice che l'app va spostata in Applicazioni e
+   * gli aggiornamenti sono spenti per la sessione.
+   */
+  updaterStatus: { current: string; canUpdate: boolean; needsMove: boolean; channel: UpdateChannel }
   /** fase 7: tab da aprire alla prossima apertura delle Impostazioni (onboarding provider) */
   settingsTab: string | null
   /** fase 8: testo con cui precompilare l'editor delle regole di auto-review */
@@ -307,6 +314,8 @@ export const useStore = create<Store>((set, get) => ({
   composioGateway: null,
   mainAgentId: null,
   settingsOpen: false,
+  // RV1 (fase beta.2): finché App non legge lo stato reale, i valori neutri
+  updaterStatus: { current: '', canUpdate: true, needsMove: false, channel: 'stable' },
   settingsTab: null,
   autoreviewPrefill: null,
   tasks: [],
@@ -417,6 +426,9 @@ export const useStore = create<Store>((set, get) => ({
         })
         .catch(() => undefined)
     }
+    // RV1 (fase beta.2): lo stato dell'aggiornamento per la riga «Versione e
+    // aggiornamenti» (GeneralTab lo legge da qui, niente doppia lettura)
+    api.updaterStatus().then((updaterStatus) => set({ updaterStatus })).catch(() => undefined)
     // fase 5: catalogo connettori (per la vista Impostazioni e le card in chat)
     api.connectorsList().then((connectors) => set({ connectors })).catch(() => undefined)
     // fase 8: i task (card in chat + stato live nella sidebar)

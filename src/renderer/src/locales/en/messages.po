@@ -2020,6 +2020,11 @@ msgstr "invalid cron: \"{cron}\" (5 fields, e.g. \"0 9 * * *\")"
 msgid "Da {0}"
 msgstr "From {0}"
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "dialog.moveToApplications.stillRunning"
+msgstr "A Homun is still running from Applications: an app that is running is never replaced. Quit it and try again."
+
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "da autorizzare"
 msgstr "needs authorization"
@@ -2054,6 +2059,11 @@ msgstr "From GitHub"
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "Da plugin"
 msgstr "From plugins"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "dialog.moveToApplications.body"
+msgstr "From here, automatic updates don\\u2019t work."
 
 #: src/renderer/src/components/RightPanel.tsx
 msgid "da scegliere"
@@ -3249,6 +3259,11 @@ msgstr "Settings"
 msgid "Impostazioni del bot"
 msgstr "Bot settings"
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "dialog.moveToApplications.replaceBody"
+msgstr "Homun is already in Applications: replace it with this copy? Your settings and chats don\\u2019t change."
+
 #: src/renderer/src/components/ConnectorCard.tsx
 msgid "In attesa del login nel browser…"
 msgstr "Waiting for you to log in in the browser…"
@@ -3535,6 +3550,11 @@ msgstr "The key stays in the Mac’s Keychain."
 #: src/renderer/src/components/BotScreen.tsx
 msgid "La connessione allo schermo si è chiusa."
 msgstr "The screen connection closed."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "dialog.moveToApplications.copyFailed"
+msgstr "Copying to Applications failed."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -4348,6 +4368,16 @@ msgstr "unread"
 msgid "Non mostrare più"
 msgstr "Don't show again"
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "dialog.moveToApplications.later"
+msgstr "Not now"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "dialog.moveToApplications.replaceNo"
+msgstr "Not now"
+
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Non più attiva: ricollega per riavere le sue azioni."
 msgstr "No longer active: reconnect to get its actions back."
@@ -4403,6 +4433,11 @@ msgstr "Don't save"
 #: src/renderer/src/components/LibraryCards.tsx
 msgid "Non salvato"
 msgstr "Not saved"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "dialog.moveToApplications.daemonNotStopped"
+msgstr "I could not stop the background bot: an app that is running is never replaced. Quit Homun and try again."
 
 #. placeholder {0}: sv.runtimeDetail ?? ''
 #: src/renderer/src/components/ConnectorCards13.tsx
@@ -4653,6 +4688,10 @@ msgstr "What do you want to use me for the most?"
 #: src/renderer/src/components/BotDialogs.tsx
 msgid "Per esempio: segue le ricevute email e prepara il riepilogo della settimana…"
 msgstr "For example: watches email receipts and prepares the weekly summary…"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Per gli aggiornamenti sposta Homun in Applicazioni"
+msgstr "To get updates, move Homun to Applications"
 
 #: src/renderer/src/components/ComputerPanel.tsx
 msgid "Per il computer dei bot serve Docker Desktop: installalo e aprilo, poi Riprova."
@@ -5900,6 +5939,16 @@ msgstr "Replace \"{name}\"?"
 msgid "sostituisci"
 msgstr "replace"
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "dialog.moveToApplications.replaceYes"
+msgstr "Replace"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "dialog.moveToApplications.replaceTitle"
+msgstr "Replace the version in Applications?"
+
 #: src/renderer/src/components/Settings.tsx
 msgid "sottoagente"
 msgstr "subagent"
@@ -5926,9 +5975,28 @@ msgstr "Off"
 msgid "Sposta giù"
 msgstr "Move down"
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "dialog.moveToApplications.title"
+msgstr "Move Homun to Applications"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Sposta in Applicazioni"
+msgstr "Move to Applications"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "dialog.moveToApplications.now"
+msgstr "Move to Applications"
+
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Sposta su"
 msgstr "Move up"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "dialog.moveToApplications.failedTitle"
+msgstr "Move not completed"
 
 #: src/renderer/src/components/TeamChat.tsx
 msgid "Squadra non più disponibile — chiudi"

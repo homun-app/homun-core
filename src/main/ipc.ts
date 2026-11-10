@@ -20,6 +20,8 @@ import { daemonSpawnContext } from './daemon-context'
 import { DAEMON_FLAG } from './mode'
 import type { DaemonClient } from './daemon-client'
 import { setUpdateChannel, checkNow, hasUpdateConfig } from './updater'
+// RV1 (fase beta.2): lo spostamento in Applicazioni (stato, controllo, riproposta)
+import { appNeedsMove, proposeMoveToApplications, updateCheckResultWhenMoveNeeded } from './app-location'
 import { UPDATE_CHANNEL_SETTING, parseUpdateChannel } from '../shared/update-channel'
 import { assertDroppedMacPath } from './dropped-file'
 import type { SandbotEvent } from '../shared/types'
@@ -280,9 +282,19 @@ export function registerIpc(client: DaemonClient, getWindows: () => BrowserWindo
   ipcMain.handle('updater:status', async () => ({
     current: app.getVersion(),
     canUpdate: app.isPackaged && hasUpdateConfig(),
-    channel: await readUpdateChannel()
+    channel: await readUpdateChannel(),
+    // RV1: se l'app andava spostata e l'utente ha detto «Non ora», la UI lo
+    // dice nella riga «Versione e aggiornamenti» col bottone che ripropone
+    needsMove: appNeedsMove()
   }))
-  ipcMain.handle('updater:check', () => checkNow(readUpdateChannel))
+  ipcMain.handle('updater:check', () =>
+    // RV1: con lo spostamento pendente il controllo non tocca il feed e non
+    // fallisce in silenzio: risponde esplicitamente needsMove
+    appNeedsMove()
+      ? Promise.resolve(updateCheckResultWhenMoveNeeded(app.getVersion()))
+      : checkNow(readUpdateChannel)
+  )
+  ipcMain.handle('app:move-to-applications', () => proposeMoveToApplications())
   ipcMain.handle('updater:set-channel', (_e, value: unknown) =>
     // RQ2: il setting si salva SEMPRE; l'istanza di electron-updater non
     // nasce dove l'updater non esiste (build --dir, SANDBOT_TEST_*: A8, K6)

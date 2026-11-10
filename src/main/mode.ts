@@ -36,6 +36,17 @@ export function isLegacyDaemonCommandLine(cmd: string): boolean {
   return !isDaemonCommandLine(cmd) && /\bdaemon\.js\b/.test(cmd)
 }
 
+/**
+ * RV1 (fase beta.2), PURA: la riga di comando di un processo parte
+ * dall'eseguibile dato? `ps` stampa argv unito da spazi SENZA quoting, quindi
+ * il confronto è per PREFISSO ESATTO sull'eseguibile (regge anche i percorsi
+ * con spazi): `<exec> --homun-daemon` nell'app impacchettata,
+ * `<exec> <repo> --homun-daemon` in sviluppo.
+ */
+export function daemonRunsFromExecutable(cmd: string, execPath: string): boolean {
+  return cmd === execPath || cmd.startsWith(`${execPath} `)
+}
+
 export interface DaemonSpawnInput {
   execPath: string
   /** app impacchettata? (in dev serve il percorso dell'app come primo argomento) */

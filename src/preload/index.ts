@@ -243,6 +243,8 @@ const api: SandbotApi = {
   updaterStatus: () => ipcRenderer.invoke('updater:status'),
   updaterCheck: () => ipcRenderer.invoke('updater:check'),
   setUpdaterChannel: (channel) => ipcRenderer.invoke('updater:set-channel', channel),
+  // RV1 (fase beta.2): ripropone lo spostamento in Applicazioni
+  moveToApplications: () => ipcRenderer.invoke('app:move-to-applications'),
   legacyHomun2: () => ipcRenderer.invoke('app:legacy-homun2'),
   legacyHomun2Dismiss: () => ipcRenderer.invoke('app:legacy-homun2-dismiss'),
   revealInFinder: (dir) => ipcRenderer.invoke('app:reveal-in-finder', dir),

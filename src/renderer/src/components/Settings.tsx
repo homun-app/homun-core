@@ -191,10 +191,15 @@ function GeneralTab() {
   const setUiLanguage = useStore((s) => s.setUiLanguage)
   const [atLogin, setAtLogin] = useState<{ enabled: boolean; requiresApproval: boolean; mechanism: 'agentService' | 'plist' }>({ enabled: false, requiresApproval: false, mechanism: 'plist' })
   const [busy, setBusy] = useState(false)
-  const [appVersion, setAppVersion] = useState('')
-  const [canUpdate, setCanUpdate] = useState(true)
-  // RP3 (fase rilascio di prova): il canale degli aggiornamenti
+  // RV1 (fase beta.2): lo stato dell'aggiornamento arriva dallo store (lo
+  // riempie App all'avvio); versione, canUpdate e canale vivono lì
+  const updater = useStore((s) => s.updaterStatus)
+  const appVersion = updater.current
+  const canUpdate = updater.canUpdate
+  // RP3 (fase rilascio di prova): il canale degli aggiornamenti (locale per
+  // l'interruttore ottimistico, si sincronizza quando arriva lo stato)
   const [betaChannel, setBetaChannel] = useState(false)
+  useEffect(() => { setBetaChannel(updater.channel === 'beta') }, [updater.channel])
   const [updateBusy, setUpdateBusy] = useState(false)
   const [updateResult, setUpdateResult] = useState<'none' | 'available' | 'current' | 'error'>('none')
   const [tz, setTz] = useState('')
@@ -209,7 +214,6 @@ function GeneralTab() {
   useEffect(() => { void api.libraryStats().then(setLibStats).catch(() => undefined) }, [])
   useEffect(() => {
     void api.getLaunchAtLogin().then(setAtLogin)
-    void api.updaterStatus().then((s) => { setAppVersion(s.current); setCanUpdate(s.canUpdate); setBetaChannel(s.channel === 'beta') }).catch(() => undefined)
     void api.settingsGet('userTimeZone', '').then(setTz)
     void api.settingsGet('deliveryWindow', { mode: 'morning', morning: { start: '08:30', end: '09:30' }, working: { start: '09:00', end: '19:00' } })
       .then((w) => {
@@ -325,30 +329,48 @@ function GeneralTab() {
             }
           />
         )}
-        <SettingsRow
-          title={<Trans>Versione e aggiornamenti</Trans>}
-          description={<span className="font-mono text-xs">{appVersion || '—'}</span>}
-          control={
-            <span className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
-              {!canUpdate ? (
-                <Trans>Questa build non riceve aggiornamenti</Trans>
-              ) : (
-                <>
-                  {updateResult === 'current' && <span className="text-chart-2"><Trans>Aggiornato</Trans></span>}
-                  {updateResult === 'available' && <span><Trans>Versione nuova disponibile</Trans></span>}
-                  {updateResult === 'error' && <span><Trans>Controllo non riuscito</Trans></span>}
-                  <button
-                    className="rounded-full bg-foreground px-3 py-1.5 text-xs text-background outline-none transition focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-40"
-                    disabled={updateBusy}
-                    onClick={() => void checkUpdates()}
-                  >
-                    <Trans>Controlla aggiornamenti</Trans>
-                  </button>
-                </>
-              )}
-            </span>
-          }
-        />
+        {/* RV1 (fase beta.2): data-testid per i test del render (niente DOM nel repo) */}
+        <div data-testid="settings-update-row">
+          <SettingsRow
+            title={<Trans>Versione e aggiornamenti</Trans>}
+            description={<span className="font-mono text-xs">{appVersion || '—'}</span>}
+            control={
+              <span className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
+                {!canUpdate ? (
+                  <Trans>Questa build non riceve aggiornamenti</Trans>
+                ) : updater.needsMove ? (
+                  // l'app va spostata in Applicazioni: il motivo e il bottone
+                  // che RIPROPONE lo spostamento (gli aggiornamenti sono spenti
+                  // per questa sessione, e «Controlla aggiornamenti» non può
+                  // funzionare: il main risponde comunque needsMove, mai silenzio)
+                  <>
+                    <span className="text-waiting"><Trans>Per gli aggiornamenti sposta Homun in Applicazioni</Trans></span>
+                    <button
+                      className="rounded-full bg-foreground px-3 py-1.5 text-xs text-background outline-none transition focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                      data-testid="move-to-applications"
+                      onClick={() => { void api.moveToApplications() }}
+                    >
+                      <Trans>Sposta in Applicazioni</Trans>
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    {updateResult === 'current' && <span className="text-chart-2"><Trans>Aggiornato</Trans></span>}
+                    {updateResult === 'available' && <span><Trans>Versione nuova disponibile</Trans></span>}
+                    {updateResult === 'error' && <span><Trans>Controllo non riuscito</Trans></span>}
+                    <button
+                      className="rounded-full bg-foreground px-3 py-1.5 text-xs text-background outline-none transition focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-40"
+                      disabled={updateBusy}
+                      onClick={() => void checkUpdates()}
+                    >
+                      <Trans>Controlla aggiornamenti</Trans>
+                    </button>
+                  </>
+                )}
+              </span>
+            }
+          />
+        </div>
         {/* RP3 (fase rilascio di prova): il canale degli aggiornamenti, sotto
             «Controlla aggiornamenti» — le prerelease le vede solo chi le chiede */}
         <SettingsRow
