@@ -700,8 +700,8 @@ function AppRow({ row, flow, onConnect, onCancel, onConflictResolve, onOpen }: {
 
 /**
  * AppsView: la vista condivisa dalla finestra «App» e da Impostazioni › App e
- * skill. `embedded` toglie la testata (nelle Impostazioni c'è già il titolo
- * della sezione).
+ * skill. La testata (titolo, riepilogo «N connesse ›») c'è sempre; con
+ * `embedded` (Impostazioni) la ✕ NO — lì chiude quella del dialogo (RV2).
  */
 export function AppsView({ embedded = false }: { embedded?: boolean }) {
   const { t, i18n } = useLingui()
@@ -873,25 +873,27 @@ export function AppsView({ embedded = false }: { embedded?: boolean }) {
 
   return (
     <div className={embedded ? 'space-y-5 pr-12' : 'space-y-5'}>
-      {/* testata (solo finestra): pila dei loghi + N connesse + ✕ */}
-      {!embedded && (
-        <div className="flex items-center gap-3">
-          <h2 className="flex-1 font-display text-2xl">{i18n._(msg`App`)}</h2>
-          {/* V11 (prova vera): «0 connesse ›» non si mostra; «1 connessa ›» / «N connesse ›» col plurale */}
-          {model.connectedCount > 0 && (
-            <button
-              className="flex items-center gap-2 text-sm text-muted-foreground transition hover:text-foreground"
-              data-testid="connected-summary"
-              onClick={() => setFilter('connected')}
-            >
-              <span className="flex">
-                {model.connectedRows.slice(0, 4).map((r, i) => (
-                  <AppLogo key={r.app.id} logo={r.app.logo} name={r.app.name} className={`size-6 text-[11px] ${i > 0 ? '-ml-1.5' : ''}`} />
-                ))}
-              </span>
-              <Plural value={model.connectedCount} one="# connessa ›" other="# connesse ›" />
-            </button>
-          )}
+      {/* testata: pila dei loghi + N connesse (nelle Impostazioni c'è già la
+          ✕ del dialogo: embedded NON ne disegna una seconda — RV2) */}
+      <div className="flex items-center gap-3">
+        <h2 className="flex-1 font-display text-2xl">{i18n._(msg`App`)}</h2>
+        {/* V11 (prova vera): «0 connesse ›» non si mostra; «1 connessa ›» / «N connesse ›» col plurale */}
+        {model.connectedCount > 0 && (
+          <button
+            className="flex items-center gap-2 text-sm text-muted-foreground transition hover:text-foreground"
+            data-testid="connected-summary"
+            onClick={() => setFilter('connected')}
+          >
+            <span className="flex">
+              {model.connectedRows.slice(0, 4).map((r, i) => (
+                <AppLogo key={r.app.id} logo={r.app.logo} name={r.app.name} className={`size-6 text-[11px] ${i > 0 ? '-ml-1.5' : ''}`} />
+              ))}
+            </span>
+            <Plural value={model.connectedCount} one="# connessa ›" other="# connesse ›" />
+          </button>
+        )}
+        {/* la ✕ chiude la FINESTRA «App»; nelle Impostazioni (embedded) non esiste */}
+        {!embedded && (
           <button
             className="grid size-9 place-items-center rounded-full bg-muted text-muted-foreground transition hover:text-foreground"
             aria-label={t`Chiudi`}
@@ -899,8 +901,8 @@ export function AppsView({ embedded = false }: { embedded?: boolean }) {
           >
             <X className="size-4" />
           </button>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* 1. la ricerca */}
       <label className="flex h-11 items-center gap-2.5 rounded-full bg-muted px-4 text-sm text-muted-foreground">

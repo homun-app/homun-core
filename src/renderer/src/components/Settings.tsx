@@ -64,10 +64,18 @@ export function Settings() {
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
   const setSettingsTab = useStore((s) => s.setSettingsTab)
   const pendingTab = useStore((s) => s.settingsTab)
-  const [tab, setTab] = useState<string>('generale')
+  // RV2 (fase beta.2): la scheda richiesta è già il valore INIZIALE (niente
+  // primo fotogramma su «Generali» che poi salta); l'effetto sotto resta per
+  // i cambi a finestra aperta e consuma il setting
+  const initialTab = pendingTab ? (pendingTab in SECTIONS ? pendingTab : 'modelli') : 'generale'
+  const [tab, setTab] = useState<string>(initialTab)
+
 
   // fase 7: un widget può chiedere di aprire una sezione precisa (es. il
-  // provider durante l'onboarding): lo si applica una volta e si consuma
+  // provider durante l'onboarding): lo si applica UNA volta e si consuma.
+  // RV2 (fase beta.2): la scheda richiesta è già il valore INIZIALE (niente
+  // primo fotogramma su «Generali» che poi salta); l'effetto resta per i
+  // cambi a finestra aperta e consuma il setting
   useEffect(() => {
     if (pendingTab) {
       setTab(pendingTab in SECTIONS ? pendingTab : 'modelli')
@@ -107,7 +115,10 @@ export function Settings() {
             )
           })}
         </nav>
-        <div className="@container relative min-w-0 flex-1 overflow-y-auto scroll-thin">
+        {/* RV2 (fase beta.2): la ✕ sta FUORI dal contenitore che scorre — resta
+            visibile a qualunque scorrimento, in OGNI scheda (prima era absolute
+            DENTRO lo scroller e se ne andava col contenuto) */}
+        <div className="relative flex min-w-0 flex-1 flex-col">
           {/* la ✕ tonda in alto a destra (Esc chiude, come sempre nel Dialog) */}
           <button
             className="absolute right-5 top-4 z-10 grid size-9 place-items-center rounded-full bg-muted text-muted-foreground outline-none transition hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
@@ -116,18 +127,21 @@ export function Settings() {
           >
             <X className="size-4" />
           </button>
-          <div className="px-6 py-6">
-            {tab === 'generale' && <GeneralTab />}
-            {tab === 'modelli' && <ModelsPage />}
-            {tab === 'app' && <AppsView />}
-            {tab === 'approvazioni' && <ApprovalsPage />}
-            {tab === 'vault' && (
-              <SettingsPage title={<Trans>Cassaforte</Trans>}>
-                <VaultTab />
-              </SettingsPage>
-            )}
-            {tab === 'routine' && <RoutinesTab />}
-            {tab === 'uso' && <UsageTab />}
+          <div className="@container min-h-0 flex-1 overflow-y-auto scroll-thin">
+            <div className="px-6 py-6">
+              {tab === 'generale' && <GeneralTab />}
+              {tab === 'modelli' && <ModelsPage />}
+              {/* RV2: embedded — una sola ✕, quella delle Impostazioni */}
+              {tab === 'app' && <AppsView embedded />}
+              {tab === 'approvazioni' && <ApprovalsPage />}
+              {tab === 'vault' && (
+                <SettingsPage title={<Trans>Cassaforte</Trans>}>
+                  <VaultTab />
+                </SettingsPage>
+              )}
+              {tab === 'routine' && <RoutinesTab />}
+              {tab === 'uso' && <UsageTab />}
+            </div>
           </div>
         </div>
       </DialogContent>
