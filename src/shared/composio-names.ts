@@ -334,9 +334,24 @@ export function localizedConnectionsAction(action: ComposioConnectionsAction, ui
 }
 
 /** L'azione di COMPOSIO_PROXY_EXECUTE nella lingua della UI: mai «PROXY» (K3). */
+/** RW4: il percorso per il TITOLO — senza query string, tagliato con «…» oltre ~60 caratteri. */
+export const PROXY_TITLE_PATH_CHARS = 60
+
+/** RW4: il percorso di un endpoint senza query string, tagliato per il titolo. */
+export function proxyPathForTitle(endpoint: string): string {
+  const noQuery = endpoint.split('?')[0] ?? endpoint
+  return noQuery.length > PROXY_TITLE_PATH_CHARS ? `${noQuery.slice(0, PROXY_TITLE_PATH_CHARS - 1)}…` : noQuery
+}
+
+/**
+ * L'azione della richiesta diretta per la card: «Richiesta diretta GET
+ * /members/me/boards». RW4: il titolo NON contiene mai l'endpoint intero —
+ * niente query string, taglio con «…» oltre ~60 caratteri (l'endpoint
+ * completo sta UNA volta, nel riquadro degli argomenti).
+ */
 export function localizedProxyRequestAction(method: string, endpoint: string, uiLang: UiLanguage): string {
   const label = uiLang === 'en' ? 'Direct request' : 'Richiesta diretta'
-  return `${label} ${method} ${endpoint}`.trim()
+  return `${label} ${method} ${proxyPathForTitle(endpoint)}`.trim()
 }
 
 // ---- V9 (prova vera): le app della card del blocco ----

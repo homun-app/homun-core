@@ -163,7 +163,7 @@ export function ApprovalCard({ entry, readOnly = false }: { entry: TranscriptEnt
           <Trans>{agentName} vuole usare {useApp.app} sul tuo Mac</Trans>
         </p>
       ) : (
-        <p className="text-[15px] font-semibold">
+        <p className="break-all text-[15px] font-semibold">
           {resolvedTitle ?? askTitle(tool, entry.meta, agentName, activeLang)}
         </p>
       )}

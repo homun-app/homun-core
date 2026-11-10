@@ -235,3 +235,16 @@ describe('fase 17a (K3): niente stringhe italiane come rami dentro <Trans>', () 
     expect(checkSource(src)).toEqual([])
   })
 })
+
+// ---- RW4: la colonna della chat non scorre in ORIZZONTALE per una card ----
+
+describe('RW4 — la colonna della chat mai con scroll orizzontale', () => {
+  it('lo scroller dei messaggi ha overflow-x-hidden (una card lunga non allarga la chat)', () => {
+    const chat = readFileSync(join(ROOT, 'components', 'Chat.tsx'), 'utf8')
+    const scrollers = [...chat.matchAll(/className="([^"]*overflow-y-auto[^"]*)"/g)].map((m) => m[1]!)
+    expect(scrollers.length).toBeGreaterThan(0)
+    for (const cls of scrollers) {
+      expect(cls, cls).toMatch(/overflow-x-hidden/)
+    }
+  })
+})

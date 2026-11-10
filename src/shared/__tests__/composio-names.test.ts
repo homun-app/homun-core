@@ -181,3 +181,22 @@ describe('K7 — composioViaInfo: da dove parte una bozza', () => {
     expect(composioViaInfo(undefined)).toBeNull()
   })
 })
+
+// ---- RW4: il titolo della richiesta diretta senza l'endpoint intero ----
+
+describe('RW4 — localizedProxyRequestAction: percorso senza query, tagliato', () => {
+  it('il titolo NON contiene mai la query string', () => {
+    const t = localizedProxyRequestAction('GET', '/members/me/boards?filter=starred&fields=id,name,url', 'it')
+    expect(t).toBe('Richiesta diretta GET /members/me/boards')
+    expect(t).not.toContain('?')
+    expect(localizedProxyRequestAction('GET', '/1/boards/abc/cards?fields=all', 'en')).toBe('Direct request GET /1/boards/abc/cards')
+  })
+
+  it('oltre ~60 caratteri il percorso si taglia con «…»', () => {
+    const long = `/1/lists/${'65a1c9f2e8b3d4a5b6c7d8e9f0'.repeat(3)}/cards`
+    expect(long.length).toBeGreaterThan(60)
+    const t = localizedProxyRequestAction('GET', long + '?x=1', 'it')
+    expect(t).toContain('…')
+    expect(t.length).toBeLessThanOrEqual('Richiesta diretta GET '.length + 60)
+  })
+})

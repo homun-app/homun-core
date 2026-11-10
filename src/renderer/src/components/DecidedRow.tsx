@@ -66,7 +66,9 @@ export function CardShell({
         ? 'bg-destructive/10'
         : 'bg-muted'
   return (
-    <div className={`max-w-[85%] rounded-[18px] p-4 ${toneCls} ${className}`} {...(testid ? { 'data-testid': testid } : {})}>
+    // RW4: min-w-0 + overflow-wrap — il contenuto lungo (endpoint, comandi)
+    // va a capo DENTRO la card, mai una card che allarga la chat
+    <div className={`max-w-[85%] min-w-0 rounded-[18px] p-4 [overflow-wrap:anywhere] ${toneCls} ${className}`} {...(testid ? { 'data-testid': testid } : {})}>
       {children}
     </div>
   )

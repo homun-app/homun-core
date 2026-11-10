@@ -603,7 +603,7 @@ export function Chat({ layout }: { layout?: LayoutResult }) {
           scorrimento al ritorno); la pagina aperta gli passa SOPRA, il
           compositore resta sospeso in basso */}
       <div className="relative flex min-h-0 flex-1 flex-col">
-        <div ref={scrollRef} className="flex-1 overflow-y-auto scroll-thin px-6 pb-4 pt-16">
+        <div ref={scrollRef} className="flex-1 overflow-y-auto overflow-x-hidden scroll-thin px-6 pb-4 pt-16">
           {entries.length === 0 && (
             <p className="mt-16 text-center text-sm text-muted-foreground">
               <Trans>Manda un messaggio a {agent.name} per iniziare.</Trans>
@@ -1186,7 +1186,7 @@ function TaskPanel({ onClose }: { onClose: () => void }) {
           </button>
         </div>
       </header>
-      <div ref={scrollRef} className="flex-1 overflow-y-auto scroll-thin px-5 py-4">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto overflow-x-hidden scroll-thin px-5 py-4">
         <div className="mx-auto max-w-3xl space-y-3">
           {taskEntries.length === 0 && (
             <p className="mt-16 text-center text-sm text-muted-foreground"><Trans>Il task non ha ancora attività.</Trans></p>
@@ -1242,7 +1242,7 @@ function SubagentPanel() {
           </button>
         </div>
       </header>
-      <div ref={scrollRef} className="flex-1 overflow-y-auto scroll-thin px-5 py-4">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto overflow-x-hidden scroll-thin px-5 py-4">
         <div className="mx-auto max-w-3xl space-y-3">
           {subEntries.length === 0 && (
             <p className="mt-16 text-center text-sm text-muted-foreground"><Trans>Il sottoagente non ha ancora attività.</Trans></p>
