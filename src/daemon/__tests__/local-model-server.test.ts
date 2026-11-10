@@ -21,6 +21,7 @@ interface FakeChild {
   pid: number
   cmd: string
   args: string[]
+  env?: NodeJS.ProcessEnv
   killed: string[]
   exitListeners: Array<(code: number | null) => void>
   stdout: { on: (ev: string, cb: (d: Buffer) => void) => void }
@@ -45,9 +46,9 @@ function makeDeps(over: Partial<LocalModelServerDeps> = {}) {
   const deps: LocalModelServerDeps = {
     now: () => clock,
     async sleep(ms: number) { clock += ms },
-    spawn: ((cmd: string, args: string[]) => {
+    spawn: ((cmd: string, args: string[], opts?: { cwd?: string; env?: NodeJS.ProcessEnv }) => {
       const c: FakeChild = {
-        pid: ++pidSeq, cmd, args, killed: [], exitListeners: [],
+        pid: ++pidSeq, cmd, args, env: opts?.env, killed: [], exitListeners: [],
         stdout: { on: () => undefined }, stderr: { on: () => undefined },
         on(ev, cb) { if (ev === 'exit') this.exitListeners.push(cb as (code: number | null) => void) },
         exit(code) { for (const l of this.exitListeners.splice(0)) l(code) },
@@ -100,11 +101,12 @@ describe('fase locale (L2.2): avvio su richiesta', () => {
     const s = makeServer(d)
     const r = await s.ensureRunning()
     expect(r).toEqual({ baseUrl: 'http://127.0.0.1:8431', apiKey: 'key-1' })
-    // gli argomenti della spec, esatti
+    // gli argomenti della spec, esatti — LC4: la chiave NON sta tra gli
+    // argomenti (visibile con ps a ogni processo dell'utente)
     expect(d.spawned[0]!.cmd).toBe(SERVER_BIN)
     expect(d.spawned[0]!.args).toEqual([
       '--host', '127.0.0.1', '--port', '8431', '--jinja', '-c', '32768',
-      '-ngl', '99', '--parallel', '1', '-m', MODEL_FILE, '--api-key', 'key-1'
+      '-ngl', '99', '--parallel', '1', '-m', MODEL_FILE
     ])
     // ha aspettato /health su 127.0.0.1
     expect(d.healthCalls.every((u) => u.startsWith('http://127.0.0.1:'))).toBe(true)
@@ -297,3 +299,34 @@ describe('fase locale (L2): stop del daemon spegne SEMPRE', () => {
 // il temporaneo di questo file si cancella a fine corsa (vincolo: 0 processi,
 // 0 file lasciati); i fake spawn non aprono nulla di vero
 afterAll(() => rmSync(ROOT, { recursive: true, force: true }))
+
+// ---- fase locale correzioni (LC4): la chiave non sta nella riga di comando ----
+
+describe('fase locale correzioni (LC4): la chiave di llama-server non si vede con ps', () => {
+  it('nessun --api-key negli argomenti: LLAMA_API_KEY passa SOLO nell\'env del figlio', async () => {
+    const d = makeDeps()
+    d.setHealthyAfter(1)
+    const s = makeServer(d)
+    const r = await s.ensureRunning()
+    expect(r.apiKey).toBe('key-1') // la chiave esiste ancora, per il turno
+    const argv = d.spawned[0]!.args.join(' ')
+    expect(argv).not.toContain('--api-key')
+    expect(argv).not.toContain('key-1') // da ps non si legge NIENTE della chiave
+    expect(d.spawned[0]!.cmd).not.toContain('key-1')
+    // l'env del figlio ha la chiave; il processo del daemon NO
+    expect(d.spawned[0]!.env?.LLAMA_API_KEY).toBe('key-1')
+    expect(process.env.LLAMA_API_KEY).toBeUndefined()
+  })
+
+  it('ogni avvio ha la SUA chiave nell\'env del figlio (porta e chiave nuove a ogni start)', async () => {
+    const d = makeDeps()
+    d.setHealthyAfter(1)
+    const s = makeServer(d)
+    await s.ensureRunning()
+    await s.stop()
+    await s.ensureRunning()
+    expect(d.spawned).toHaveLength(2)
+    expect(d.spawned[0]!.env?.LLAMA_API_KEY).toBe('key-1')
+    expect(d.spawned[1]!.env?.LLAMA_API_KEY).toBe('key-2')
+  })
+})

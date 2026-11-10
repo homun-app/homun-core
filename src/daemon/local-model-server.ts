@@ -4,8 +4,9 @@
 // (spawn, fetch, orologio, porta, file, log): nei test niente processi veri,
 // niente porte, niente rete.
 //
-// - avvio su richiesta (ensureRunning): porta libera su 127.0.0.1 e
-//   --api-key casuale OGNI avvio (nessun altro processo locale lo usa),
+// - avvio su richiesta (ensureRunning): porta libera su 127.0.0.1 e chiave
+//   casuale OGNI avvio, nell'env del figlio come LLAMA_API_KEY (LC4: mai in
+//   argv, dove ps la mostrerebbe; nessun altro processo locale lo usa),
 //   argomenti fissati dalla misura L1: --jinja -c 32768 -ngl 99 --parallel 1;
 //   più chiamate concorrenti condividono lo stesso avvio;
 // - spegnimento per inattività dopo 10 minuti senza richieste (come il
@@ -167,10 +168,19 @@ export function createLocalModelServer(opts: {
       const key = deps.newApiKey()
       const args = [
         '--host', '127.0.0.1', '--port', String(p), '--jinja', '-c', '32768',
-        '-ngl', '99', '--parallel', '1', '-m', modelFile, '--api-key', key
+        '-ngl', '99', '--parallel', '1', '-m', modelFile
       ]
       writeLog(`[local-model] starting ${serverBin} on port ${p}`)
-      const c = deps.spawn(serverBin, args, {})
+      // LC4: la chiave NON sta nella riga di comando (ps la mostrerebbe a
+      // ogni processo dell'utente) — passa SOLO nell'env del figlio come
+      // LLAMA_API_KEY. Il tar del pin b12061 non è mai stato scaricato
+      // (vendor/llama vuota), quindi l'opzione --api-key-file non si può
+      // verificare contro il pin: si usa la variabile d'ambiente, che
+      // llama-server legge per --api-key (confermata nell'help di un build
+      // 12110 > 12061: «--api-key KEY (env: LLAMA_API_KEY)»).
+      const c = deps.spawn(serverBin, args, {
+        env: { ...process.env, LLAMA_API_KEY: key }
+      })
       child = c
       deliberateKill = false
       c.on('exit', (code) => {
