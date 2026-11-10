@@ -113,6 +113,27 @@
       (le chiavi migravano in keys.json, non resta Portachiavi).
 - [ ] Homun 2 non è mai stato toccato: `…/Homun2` c'è ancora, intatto.
 
+## 9. Canale di prova (0.3.1001-beta.1 → 0.3.1001-beta.2)
+
+> Le prerelease le riceve SOLO chi accende l'interruttore: con il canale
+> stabile (e in Homun 2) non compaiono mai. Da seguire a mano, come il resto.
+
+- [ ] Installa `0.3.1001-beta.1` dal dmg (è una prerelease pubblicata su
+      `homun-app/homun-releases`) nell'utente di prova del Mac. Apri
+      Impostazioni › Generali: sotto «Controlla aggiornamenti» accendi
+      «Ricevi le versioni di prova», poi chiudi l'app.
+- [ ] Dopo il tag di `0.3.1001-beta.2` (rilasciata come prerelease),
+      riapri l'app e usa «Controlla aggiornamenti»: la 0.3.1001-beta.2 è
+      OFFERTA con le note → «Scarica» → avanzamento → «Riavria ora».
+      Riaperta l'app, in Impostazioni › Generali si legge `0.3.1001-beta.2`.
+- [ ] Dopo l'aggiornamento i dati sono a posto: bot, chat, routine e chiavi
+      come prima; `ps aux | grep -i homun` mostra UN solo daemon, quello
+      della versione nuova (nessun processo della beta.1 resta in giro).
+- [ ] Il modello integrato (se installato) risponde ancora e la memoria
+      Engramma funziona (il bot ricorda ciò che ricordava prima).
+- [ ] Il passaggio da Homun 2 alla 0.3 NON si può provare qui: Homun 2 non
+      vede le prerelease — resta per la stabile (sezione 6).
+
 ## Esiti
 
 | Sezione | Esito | Note |
@@ -125,5 +146,6 @@
 | 6 0.2.1004 → 0.3.1000 | ⏸ | |
 | 7 0.3.1000 → 0.3.1001 | ⏸ | |
 | 8 Disinstallazione | ⏸ | |
+| 9 Canale di prova | ⏸ | |
 
 Ogni ❌ blocca la pubblicazione della draft: niente «poi si sistema».
