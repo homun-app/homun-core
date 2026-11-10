@@ -5181,6 +5181,10 @@ msgstr "text+graph search"
 msgid "Ricerca web"
 msgstr "Web search"
 
+#: src/renderer/src/components/Settings.tsx
+msgid "Ricevi le versioni di prova"
+msgstr "Get pre-release versions"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "oauth.errPage"
@@ -5873,6 +5877,10 @@ msgstr "Instructions only: any included scripts are never run."
 #: src/renderer/src/components/Sidebar.tsx
 msgid "solo tu"
 msgstr "just you"
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Sono versioni da far provare prima del rilascio: possono avere difetti."
+msgstr "These are early versions to try before the release: they may have flaws."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts

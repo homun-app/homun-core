@@ -1,6 +1,7 @@
 // Tipi condivisi tra main, preload e renderer (rispecchiano il modello del Grok Bot originale)
 
 import type { SkillCatalogEntry } from './skill-catalog'
+import type { UpdateChannel } from './update-channel'
 export type { SkillCatalogEntry } from './skill-catalog'
 
 export type AgentStatus = 'offline' | 'idle' | 'thinking' | 'running' | 'paused-for-approval'
@@ -1087,9 +1088,12 @@ export interface SandbotApi {
   // fase rilascio (A7): stato di docker per la UI (installato? avviato?)
   boxDockerStatus(): Promise<{ installed: boolean; running: boolean; path: string; testPrefixInvalid: boolean }>
   boxDockerRetry(): Promise<{ installed: boolean; running: boolean; path: string; testPrefixInvalid: boolean }>
-  // fase rilascio (A8): l'aggiornamento (main process)
-  updaterStatus(): Promise<{ current: string; canUpdate: boolean }>
+  // fase rilascio (A8): l'aggiornamento (main process).
+  // RP3 (fase rilascio di prova): lo stato porta il canale ('stable'|'beta')
+  // e l'interruttore delle Impostazioni lo cambia (effetto immediato)
+  updaterStatus(): Promise<{ current: string; canUpdate: boolean; channel: UpdateChannel }>
   updaterCheck(): Promise<{ current: string; available: boolean; version: string | null; error?: string }>
+  setUpdaterChannel(channel: UpdateChannel): Promise<unknown>
   // fase rilascio (A8): la riga del rinnovo da Homun 2 (una volta)
   legacyHomun2(): Promise<{ dir: string } | null>
   legacyHomun2Dismiss(): Promise<{ ok: boolean }>

@@ -19,7 +19,8 @@ import { findLegacyHomun2Dir, legacyNoticeMarkerPath } from './legacy-homun2'
 import { daemonSpawnContext } from './daemon-context'
 import { DAEMON_FLAG } from './mode'
 import type { DaemonClient } from './daemon-client'
-import { checkNow, hasUpdateConfig } from './updater'
+import { applyUpdateChannel, checkNow, hasUpdateConfig } from './updater'
+import { UPDATE_CHANNEL_SETTING, parseUpdateChannel } from '../shared/update-channel'
 import { assertDroppedMacPath } from './dropped-file'
 import type { SandbotEvent } from '../shared/types'
 
@@ -268,9 +269,25 @@ export function registerIpc(client: DaemonClient, getWindows: () => BrowserWindo
 
   // ---- fase rilascio (A8): l'aggiornamento (le RPC stanno in updater.ts) ----
   // K6 (fase rilascio — correzioni): canUpdate dice alla UI se QUESTA build
-  // riceve aggiornamenti (le --dir non hanno app-update.yml)
-  ipcMain.handle('updater:status', () => ({ current: app.getVersion(), canUpdate: app.isPackaged && hasUpdateConfig() }))
-  ipcMain.handle('updater:check', () => checkNow())
+  // riceve aggiornamenti (le --dir non hanno app-update.yml).
+  // RP3 (fase rilascio di prova): il canale (setting updates.channel) viaggia
+  // con lo stato, si applica a ogni controllo e cambia SUBITO dall'interruttore
+  // delle Impostazioni — nessun riavvio richiesto
+  const readUpdateChannel = () =>
+    client
+      .call('settings:get', [UPDATE_CHANNEL_SETTING, 'stable'])
+      .then((v) => parseUpdateChannel(v), () => 'stable' as const)
+  ipcMain.handle('updater:status', async () => ({
+    current: app.getVersion(),
+    canUpdate: app.isPackaged && hasUpdateConfig(),
+    channel: await readUpdateChannel()
+  }))
+  ipcMain.handle('updater:check', () => checkNow(readUpdateChannel))
+  ipcMain.handle('updater:set-channel', (_e, value: unknown) => {
+    const channel = parseUpdateChannel(value)
+    applyUpdateChannel(channel) // effetto immediato sul updater
+    return client.call('settings:set', [UPDATE_CHANNEL_SETTING, channel])
+  })
 
   // ---- fase rilascio (A8): il passaggio da Homun 2 e il Finder ----
   ipcMain.handle('app:legacy-homun2', () => {

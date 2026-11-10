@@ -10,6 +10,14 @@
 // visibile (finestra + Dock) → «Riavvia ora» o «Alla chiusura». Prima di
 // installare, il daemon si ferma BENE (RPC daemon:restart di A2: la coda è
 // durevole, un turno interrotto riprende come dopo un crash).
+//
+// FASE RILASCIO DI PROVA (RP3): il canale degli aggiornamenti (setting
+// updates.channel, «Ricevi le versioni di prova» in Impostazioni › Generali)
+// decide allowPrerelease: il canale stabile non vede MAI le prerelease (come
+// Homun 2), quello di prova sì — e una beta in esecuzione le vede comunque,
+// finché non arriva la stabile (più nuova per semver). Si applica al primo
+// controllo, a ogni «Controlla aggiornamenti» e quando l'interruttore cambia:
+// nessun riavvio richiesto.
 import { app, BrowserWindow, dialog, shell } from 'electron'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
@@ -18,6 +26,7 @@ import { join } from 'node:path'
 // dal default export
 import electronUpdater from 'electron-updater'
 import type { AppUpdater, UpdateInfo } from 'electron-updater'
+import { allowPrereleaseFor, type UpdateChannel } from '../shared/update-channel'
 import { mainStrings } from './i18n'
 
 // l'istanza si COSTRUISCE al primo accesso (getter del pacchetto) e serve
@@ -67,13 +76,20 @@ export function isNewerVersion(current: string, candidate: string): boolean {
   }
 }
 
-/** Confronto semplificato x.y.z(…) senza dipendere da semver: x.y.z a pezzi. */
+/**
+ * Confronto x.y.z(−pre) senza dipendere da semver, COERENTE con quello che fa
+ * electron-updater (semver.gt): RP3 conta il pre-release — 0.3.1001-beta.1
+ * < 0.3.1001-beta.2 < 0.3.1001 — così chi prova una beta riceve la beta
+ * dopo e poi la stabile.
+ */
 class semverLike {
   private readonly parts: number[]
+  private readonly pre: Array<number | string> | null
   constructor(v: string) {
-    const m = /^(\d+)\.(\d+)\.(\d+)/.exec(v.trim())
+    const m = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/.exec(v.trim())
     if (!m) throw new Error(`invalid version: ${v}`)
     this.parts = [Number(m[1]), Number(m[2]), Number(m[3])]
+    this.pre = m[4] ? m[4].split('.').map((id) => (/^\d+$/.test(id) ? Number(id) : id)) : null
   }
   compare(other: string): number {
     const o = new semverLike(other)
@@ -81,8 +97,35 @@ class semverLike {
       if (this.parts[i]! < o.parts[i]!) return -1
       if (this.parts[i]! > o.parts[i]!) return 1
     }
+    // stesso x.y.z: senza pre-release è PIÙ grande (1.0.0 > 1.0.0-beta.9)
+    if (this.pre === null) return o.pre === null ? 0 : 1
+    if (o.pre === null) return -1
+    for (let i = 0; i < Math.max(this.pre.length, o.pre.length); i++) {
+      const a = this.pre[i]
+      const b = o.pre[i]
+      if (a === undefined) return -1 // identificatori in meno = più piccolo
+      if (b === undefined) return 1
+      if (a === b) continue
+      if (typeof a === 'number' && typeof b === 'number') return a < b ? -1 : 1
+      if (typeof a === 'number') return -1 // numerico < alfanumerico
+      if (typeof b === 'number') return 1
+      return a < b ? -1 : 1 // ASCII
+    }
     return 0
   }
+}
+
+/**
+ * RP3: applica il canale al updater (iniettabile per i test). Il canale di
+ * prova accende allowPrerelease; una beta in esecuzione lo tiene acceso
+ * anche a canale stabile. Immediata: niente riavvio.
+ */
+export function applyUpdateChannel(
+  channel: UpdateChannel,
+  getVersion: () => string = () => app.getVersion(),
+  updater: { allowPrerelease: boolean } = au()
+): void {
+  updater.allowPrerelease = allowPrereleaseFor(channel, getVersion())
 }
 
 /** Prima di installare: ferma bene il daemon (A2) e aspetta che esca. */
@@ -213,7 +256,7 @@ async function installAfterDaemonStopped(): Promise<void> {
   au().quitAndInstall(false, true)
 }
 
-export function initUpdater(): void {
+export function initUpdater(getChannel: () => Promise<UpdateChannel> = async () => 'stable'): void {
   au().autoDownload = false
   au().autoInstallOnAppQuit = true
   au().on('error', (error) => {
@@ -243,10 +286,15 @@ export function initUpdater(): void {
     })
     if (choice === 0) void installAfterDaemonStopped()
   })
-  // un controllo fallito (offline, feed irraggiungibile) non disturba mai
-  void au().checkForUpdates().catch((error: unknown) => {
-    console.error('[updater] controllo fallito:', error instanceof Error ? error.message : error)
-  })
+  // RP3: il canale (updates.channel) decide allowPrerelease PRIMA del primo
+  // controllo; la lettura non blocca mai l'avvio (daemon giù → canale stabile)
+  void getChannel()
+    .then((channel) => applyUpdateChannel(channel))
+    .catch(() => undefined)
+    .then(() => au().checkForUpdates())
+    .catch((error: unknown) => {
+      console.error('[updater] controllo fallito:', error instanceof Error ? error.message : error)
+    })
   if (checkTimer) clearInterval(checkTimer)
   checkTimer = setInterval(() => {
     void au().checkForUpdates().catch(() => undefined)
@@ -255,8 +303,11 @@ export function initUpdater(): void {
 }
 
 /** Controllo manuale dalle Impostazioni: stesso dialogo se c'è, stato se no. */
-export async function checkNow(): Promise<{ current: string; available: boolean; version: string | null; error?: string }> {
+export async function checkNow(getChannel?: () => Promise<UpdateChannel>): Promise<{ current: string; available: boolean; version: string | null; error?: string }> {
   const current = app.getVersion()
+  // RP3: anche qui il canale si applica PRIMA del controllo (l'interruttore
+  // delle Impostazioni ha effetto immediato, senza riavvio)
+  if (getChannel) await getChannel().then((channel) => applyUpdateChannel(channel)).catch(() => undefined)
   try {
     const result = await au().checkForUpdates()
     const version = result?.updateInfo?.version ?? null

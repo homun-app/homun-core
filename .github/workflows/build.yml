@@ -102,6 +102,13 @@ jobs:
         if: steps.signing.outputs.has_cert == 'true' && startsWith(github.ref, 'refs/tags/v')
         run: npx electron-builder --mac --publish always -c.mac.notarize=true
         env:
+          # RP3 (canale di prova): i tag v*-beta.* escono come PRERELEASE NON
+          # BOZZA, così il canale di prova (allowPrerelease) li vede subito —
+          # una bozza non sta nel feed. Verificato sul sorgente di
+          # electron-publish 26: EP_PRE_RELEASE (isEnvTrue) vince su ogni
+          # releaseType di configurazione; un tag senza -beta. rende 'false'
+          # e resta BOZZA come oggi, da rivedere e pubblicare a mano.
+          EP_PRE_RELEASE: ${{ contains(github.ref_name, '-beta.') }}
           # il token di pubblicazione vive SOLO su questo step e SOLO sui tag
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
           CSC_LINK: ${{ secrets.MAC_CSC_LINK }}

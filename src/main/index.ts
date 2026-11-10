@@ -36,6 +36,7 @@ import { permissionAllowed } from './permissions'
 import { cleanupLegacyLaunchAgent } from './launchagent'
 import { findLegacyHomun2Dir, legacyNoticeMarkerPath } from './legacy-homun2'
 import { initUpdater, setUpdaterDaemonStopper, shouldAutoCheckUpdates, hasUpdateConfig } from './updater'
+import { UPDATE_CHANNEL_SETTING, parseUpdateChannel } from '../shared/update-channel'
 import { safeStorageBackendForEnv } from '../daemon/master-keys'
 
 // fase 16 (U0b): la cartella dati reale dell'utente è …/Application
@@ -268,8 +269,16 @@ if (isDaemonMode(process.argv)) {
 
       // A8: l'aggiornamento si controlla solo nell'app impacchettata e mai
       // quando ci sono variabili SANDBOT_TEST_* (le prove non toccano la rete).
-      // K6: e mai quando manca app-update.yml (build --dir): niente ENOENT nel log
-      if (shouldAutoCheckUpdates(app.isPackaged, process.env, hasUpdateConfig())) initUpdater()
+      // K6: e mai quando manca app-update.yml (build --dir): niente ENOENT nel log.
+      // RP3 (fase rilascio di prova): il canale (updates.channel) decide
+      // allowPrerelease PRIMA del primo controllo del feed
+      if (shouldAutoCheckUpdates(app.isPackaged, process.env, hasUpdateConfig())) {
+        initUpdater(() =>
+          client
+            .call('settings:get', [UPDATE_CHANNEL_SETTING, 'stable'])
+            .then((v) => parseUpdateChannel(v), () => 'stable')
+        )
+      }
     })
 
     app.on('window-all-closed', () => {

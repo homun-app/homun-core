@@ -193,6 +193,8 @@ function GeneralTab() {
   const [busy, setBusy] = useState(false)
   const [appVersion, setAppVersion] = useState('')
   const [canUpdate, setCanUpdate] = useState(true)
+  // RP3 (fase rilascio di prova): il canale degli aggiornamenti
+  const [betaChannel, setBetaChannel] = useState(false)
   const [updateBusy, setUpdateBusy] = useState(false)
   const [updateResult, setUpdateResult] = useState<'none' | 'available' | 'current' | 'error'>('none')
   const [tz, setTz] = useState('')
@@ -207,7 +209,7 @@ function GeneralTab() {
   useEffect(() => { void api.libraryStats().then(setLibStats).catch(() => undefined) }, [])
   useEffect(() => {
     void api.getLaunchAtLogin().then(setAtLogin)
-    void api.updaterStatus().then((s) => { setAppVersion(s.current); setCanUpdate(s.canUpdate) }).catch(() => undefined)
+    void api.updaterStatus().then((s) => { setAppVersion(s.current); setCanUpdate(s.canUpdate); setBetaChannel(s.channel === 'beta') }).catch(() => undefined)
     void api.settingsGet('userTimeZone', '').then(setTz)
     void api.settingsGet('deliveryWindow', { mode: 'morning', morning: { start: '08:30', end: '09:30' }, working: { start: '09:00', end: '19:00' } })
       .then((w) => {
@@ -241,6 +243,17 @@ function GeneralTab() {
       setUpdateResult('error')
     } finally {
       setUpdateBusy(false)
+    }
+  }
+
+  // RP3 (fase rilascio di prova): l'interruttore cambia il canale ORA, senza
+  // riavvio — il main lo applica al updater e lo salva nel setting
+  async function toggleBetaChannel(enabled: boolean): Promise<void> {
+    setBetaChannel(enabled)
+    try {
+      await api.setUpdaterChannel(enabled ? 'beta' : 'stable')
+    } catch {
+      setBetaChannel(!enabled)
     }
   }
 
@@ -335,6 +348,13 @@ function GeneralTab() {
               )}
             </span>
           }
+        />
+        {/* RP3 (fase rilascio di prova): il canale degli aggiornamenti, sotto
+            «Controlla aggiornamenti» — le prerelease le vede solo chi le chiede */}
+        <SettingsRow
+          title={<Trans>Ricevi le versioni di prova</Trans>}
+          description={<Trans>Sono versioni da far provare prima del rilascio: possono avere difetti.</Trans>}
+          control={<Toggle label={t`Ricevi le versioni di prova`} checked={betaChannel} onChange={(v) => void toggleBetaChannel(v)} />}
         />
       </SettingsGroup>
 
