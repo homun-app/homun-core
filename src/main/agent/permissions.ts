@@ -481,6 +481,11 @@ export async function grantStanding(tool: string, input: Record<string, unknown>
   // consenso PER AZIONE (composio-action:<SLUG>), mai per lo strumento del
   // blocco (Rakazo packages/db/src/events.ts:1033–1049)
   if (tool.startsWith('mcp__')) {
+    // RW (fase revisore sulla richiesta, punto 3): rete di sicurezza — mai
+    // un consenso per uno strumento che non corrisponde a nulla di noto
+    // (il nome inventato del caso vero: «COMPROSIO_PROXY_EXECUTE»). Il
+    // guard già rifiuta la chiamata; qui non si salva il grant
+    if (!mcpAnnotationsLookup(tool)) return
     const shape = toolBatchOf(tool.split('__').slice(2).join('__'))
     if (shape) {
       const { batchActions, composioActionKey } = await import('../connectors/tool-batch')

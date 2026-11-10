@@ -25,6 +25,8 @@ import { getSetting, setSetting } from '../store/db'
 import { setMcpAnnotationsLookup } from '../agent/permissions'
 // fase Composio OAuth (C3): l'elenco CHIUSO degli strumenti del server Composio
 import { composioToolPolicy } from '../connectors/composio-meta'
+import { mcpCallIsRead } from '../connectors/tool-batch'
+import { callMcpWithRetry } from './retry'
 import { COMPOSIO_MULTI_EXECUTE_TOOL, forceSyncResponseToWorkbenchOff } from '../connectors/tool-batch'
 import { dockerStdioMcpArgv } from '../sandbox/docker-argv'
 import { boxOwnerOf, ensureBoxContainer, ensureBotHome } from '../sandbox'
@@ -524,15 +526,36 @@ export async function callTool(fullName: string, args: Record<string, unknown>, 
       throw new Error(`tool ${fullName} disabled by the user for this connector`)
     }
     // C3: il blocco non salva la risposta nella workbench del cloud Composio
-    const callArgs = tool.originalName === COMPOSIO_MULTI_EXECUTE_TOOL
-      ? forceSyncResponseToWorkbenchOff(args)
-      : args
-    try {
-      const res = await c.client.callTool(
-        { name: tool.originalName, arguments: callArgs },
+    // RW (fase revisore sulla richiesta, punto 3): la chiamata passa dal
+    // wrapper col log e la ripetizione — ogni errore di trasporto finisce in
+    // daemon.log (server, strumento, millisecondi, messaggio: MAI gli
+    // argomenti); se era una LETTURA si riconnette e si ripete una volta da
+    // sole, coperta dall'approvazione già data per QUESTA chiamata
+    const attempt = async (reconnect: boolean): Promise<unknown> => {
+      const cc = reconnect ? await ensure(cfg, true) : c
+      const t = cc.tools.find((x) => x.def.name === fullName)
+      if (!t) throw new Error(`tool ${fullName} no longer available (reconnect)`)
+      if ((connectorStateOf(cfg).disabledTools ?? []).includes(fullName)) {
+        throw new Error(`tool ${fullName} disabled by the user for this connector`)
+      }
+      const callArgs = t.originalName === COMPOSIO_MULTI_EXECUTE_TOOL
+        ? forceSyncResponseToWorkbenchOff(args)
+        : args
+      return cc.client.callTool(
+        { name: t.originalName, arguments: callArgs },
         undefined,
         opts?.timeoutMs ? { timeout: opts.timeoutMs } : undefined
       )
+    }
+    try {
+      const res = (await callMcpWithRetry({
+        server: toolSlugOf(cfg),
+        tool: tool.originalName,
+        isRead: mcpCallIsRead(originalName, args),
+        attempt,
+        // il token scaduto non si ripete: ha la sua card di riconnessione
+        retryWhen: (e) => !(e instanceof UnauthorizedError)
+      })) as { content?: Array<{ type: string; text?: string }> }
       const content = res.content as Array<{ type: string; text?: string }> | undefined
       const text = (content ?? []).filter((p) => p.type === 'text').map((p) => p.text ?? '').join('\n')
       return text || JSON.stringify(res).slice(0, 4000)

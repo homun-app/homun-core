@@ -18,7 +18,7 @@
 //
 // Modulo PURO: nessuna dipendenza dal daemon, testabile in nodo puro.
 import { classifyComposioToolName, composioActionOfToolName, composioSendLikeName, redactComposioSecrets, stripToolkitPrefix } from './composio-actions'
-import { composioToolkitName } from './composio-meta'
+import { composioToolkitName, composioToolPolicy } from './composio-meta'
 // K6 (ritocchi): composioToolkitOfSlug vive in shared (lo usa anche il renderer)
 import { composioToolkitOfSlug, localizedActionName, localizedConnectionsAction, localizedProxyRequestAction } from '../../shared/composio-names'
 
@@ -65,6 +65,28 @@ export function isProxyReadToolCall(toolName: string, args: Record<string, unkno
   if (toolName.split('__').slice(2).join('__') !== COMPOSIO_PROXY_EXECUTE_TOOL) return false
   const method = typeof args.method === 'string' ? args.method.toUpperCase() : 'GET'
   return method === 'GET' || method === 'HEAD'
+}
+
+/**
+ * RW (fase revisore sulla richiesta, punto 3): una chiamata MCP è una
+ * LETTURA quando cade la connessione e si può ripetere da soli una volta —
+ * i meta-tool read della tabella C3, il PROXY in GET/HEAD e un blocco
+ * MULTI_EXECUTE di SOLA letture. Tutto il resto (scritture, invii, gestioni
+ * delle connessioni, tool di altri server) non si ripete mai.
+ */
+export function mcpCallIsRead(originalName: string, args: Record<string, unknown>): boolean {
+  const policy = composioToolPolicy(originalName)
+  if (policy?.gate === 'read') return true
+  if (originalName === COMPOSIO_PROXY_EXECUTE_TOOL) {
+    return isProxyReadToolCall(`mcp__x__${originalName}`, args)
+  }
+  if (originalName === COMPOSIO_MULTI_EXECUTE_TOOL) {
+    const shape = toolBatchOf(originalName)
+    if (!shape) return false
+    const actions = batchActions(shape, args).actions
+    return actions.length > 0 && actions.every((slug) => classifyBatchAction(slug) === 'read')
+  }
+  return false
 }
 
 /** La forma del blocco (come ToolBatch di Rakazo, più il campo account). */

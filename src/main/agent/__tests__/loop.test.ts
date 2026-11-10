@@ -1965,7 +1965,12 @@ describe('fase 5: funnel dei connettori (offer_connector) e card Riconnetti', ()
     ;(mcpMock as unknown as { callTool: unknown }).callTool = async () => {
       throw new FakeReconnectError('FakeApp', 'fake')
     }
-    // i tool mcp__ passano il gate senza approval (regola del mock db)
+    // i tool mcp__ passano il gate senza approval (regola del mock db);
+    // RW3: il tool chiamato deve essere tra quelli OFFERTI (come nel daemon
+    // collegato), altrimenti il loop lo rifiuta come nome inesistente
+    ;(mcpMock as { activeTools: () => Promise<unknown[]> }).activeTools = async () => [
+      { name: 'mcp__fake__search', description: 'cerca', parameters: { type: 'object', properties: {} } }
+    ]
     h.db.settings.set('permissions', { default: 'needs_approval', rules: [{ tool: 'mcp__*', pattern: '*', mode: 'always_allow' }] })
     h.llm.queue = [
       { toolCalls: [{ id: 'mc1', name: 'mcp__fake__search', arguments: '{}' }] },
@@ -7962,7 +7967,21 @@ describe('fase locale (L1): recupero delle chiamate scritte come testo', () => {
 
 // ---- RW (fase revisore sulla richiesta): Composio, letture grezze e risposte grandi ----
 
+/** i tool del server Composio «For You» offerti al modello (come nel daemon collegato) */
+const COMPOSIO_MCP_TOOLS = [
+  'mcp__composio__COMPOSIO_PROXY_EXECUTE',
+  'mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL',
+  'mcp__composio__COMPOSIO_SEARCH_TOOLS'
+]
+const offerComposioTools = (): void => {
+  ;(mcpMock as { activeTools: () => Promise<unknown[]> }).activeTools = async () => [
+    { name: 'mcp__gmail__send_message', description: 'invia email', parameters: { type: 'object', properties: {} } },
+    ...COMPOSIO_MCP_TOOLS.map((name) => ({ name, description: name, parameters: { type: 'object', properties: {} } }))
+  ]
+}
+
 describe('RW2 — Composio: letture grezze per turno, nota SEARCH_TOOLS, risposte grandi', () => {
+  beforeEach(offerComposioTools)
   const PROXY = 'mcp__composio__COMPOSIO_PROXY_EXECUTE'
   const proxy = (id: string, toolkit: string, method: string, endpoint: string): FakeToolCall =>
     ({ id, name: PROXY, arguments: JSON.stringify({ toolkit_slug: toolkit, method, endpoint }) })
@@ -8068,5 +8087,35 @@ describe('RW2 — Composio: letture grezze per turno, nota SEARCH_TOOLS, rispost
       expect(res.content.indexOf('</dato_esterno>')).toBeLessThan(res.content.indexOf('Run the recommended actions with COMPOSIO_MULTI_EXECUTE_TOOL'))
       expect(res.content).toContain('Use COMPOSIO_PROXY_EXECUTE only when no listed action covers what you need')
     })
+  })
+})
+
+describe('RW3 — il nome che non esiste: errore subito, senza card né grant', () => {
+  beforeEach(offerComposioTools)
+  it('mcp__composio-2__COMPROSIO_PROXY_EXECUTE → tool-result di errore con i vicini, NESSUNA entry approval', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 'x1', name: 'mcp__composio-2__COMPROSIO_PROXY_EXECUTE', arguments: JSON.stringify({ toolkit_slug: 'trello', method: 'GET', endpoint: '/boards' }) }] },
+      { text: 'ok' }
+    ]
+    await runTurn(AGENT, 'le mie board', emit)
+    // niente approval, niente grant
+    expect(h.db.entries.some((e) => e.kind === 'approval')).toBe(false)
+    expect(h.db.grants).toEqual([])
+    const res = h.db.entries.find((e) => e.kind === 'tool-result' && e.meta?.callId === 'x1')!
+    expect(res.meta?.error).toBe(true)
+    expect(res.meta?.unknownTool).toBe(true)
+    expect(res.content).toContain('does not exist')
+    // il tool non è mai partito
+    expect(h.mcp.calls).toBe(0)
+  })
+
+  it('un errore di battitura propone il nome giusto (send_messag → send_message)', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 'x2', name: 'mcp__gmail__send_messag', arguments: '{}' }] },
+      { text: 'ok' }
+    ]
+    await runTurn(AGENT, 'vai', emit)
+    const res = h.db.entries.find((e) => e.kind === 'tool-result' && e.meta?.callId === 'x2')!
+    expect(res.content).toContain('mcp__gmail__send_message')
   })
 })

@@ -378,3 +378,28 @@ describe('fase use-app (U3): la chiave è l\'app, non l\'azione', () => {
     expect(state.grants).toEqual([{ tool: 'use-app', target: 'url:sora.chatgpt.com', expiresAt: undefined }])
   })
 })
+
+// ---- RW (fase revisore sulla richiesta): rete di sicurezza sui consensi ----
+
+describe('RW3: grantStanding rifiuta un mcp__ che non corrisponde a uno strumento noto', () => {
+  beforeAll(() => {
+    setMcpAnnotationsLookup((tool) =>
+      tool === 'mcp__ufficio__send_email'
+        ? { annotations: { readOnlyHint: false }, catalogServer: false, serverName: 'Ufficio' }
+        : undefined
+    )
+  })
+
+  it('uno strumento NOTO si salva come oggi', async () => {
+    const before = state.grants.length
+    await grantStanding('mcp__ufficio__send_email', {})
+    expect(state.grants.length).toBe(before + 1)
+  })
+
+  it('un nome INVENTATO (o di un server caduto) NON diventa un consenso', async () => {
+    const before = state.grants.length
+    await grantStanding('mcp__composio-2__COMPROSIO_PROXY_EXECUTE', { toolkit_slug: 'trello' })
+    await grantStanding('mcp__fantasioso__qualsiasi', {})
+    expect(state.grants.length).toBe(before)
+  })
+})

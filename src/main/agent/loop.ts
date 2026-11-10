@@ -117,6 +117,8 @@ import {
 // fase token (T0/T1/T2): l'elenco lo costruisce l'unica fonte pura assembleTurnTools
 // (nucleo + gruppi attivabili); use_tool resta solo per le storie vecchie
 import { assembleTurnTools, offeredMcpOf, activateGroupsResult, toolDefsOfGroups, groupsNamedInResult, RESULT_ACTIVATES, activeGroupsFromTranscript, groupActivationText, GROUP_ACTIVATION_ACT_NOW, type ToolGroupPresent } from './turn-tools'
+// RW (fase revisore sulla richiesta): il nome che non esiste, con i vicini
+import { unknownToolMessage, offeredToolNames } from '../mcp/unknown-tool'
 import { useToolDef } from './core-tools'
 import { expandFacadeCall, FACADE_ACTIONS } from './facades'
 // fase locale (L1): il recupero delle chiamate scritte come TESTO grezzo (i
@@ -2485,6 +2487,27 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             emit({ type: 'entries', agentId, entries: [res] })
             continue
           }
+        }
+
+        // RW (fase revisore sulla richiesta, punto 3): un nome MCP/Composio
+        // che NON è tra gli strumenti offerti né in catalogo → errore SUBITO,
+        // prima del gate dei permessi: niente card, niente entry approval,
+        // niente grant (il caso vero: «COMPROSIO_PROXY_EXECUTE» su un server
+        // sbagliato era diventato un consenso per uno strumento mai esistito).
+        // I tool DEL BOT differiti o esclusi dalla whitelist hanno i loro
+        // rifiuti dedicati: restano dove sono
+        if (
+          (call.name.startsWith('mcp__') || call.name.startsWith('composio__')) &&
+          !turnTools.some((t) => t.name === call.name) && !knownCatalogNames.has(call.name)
+        ) {
+          const refused = unknownToolMessage(call.name, offeredToolNames(turnTools, catalogDefs))
+          messages.push({ role: 'tool', toolCallId: call.id, content: refused })
+          const res = add({
+            agentId, kind: 'tool-result', role: 'system', content: refused,
+            meta: { callId: call.id, error: true, unknownTool: true }
+          })
+          emit({ type: 'entries', agentId, entries: [res] })
+          continue
         }
 
         // fase 8 (§3bis L11): loop detection — la stessa identica chiamata

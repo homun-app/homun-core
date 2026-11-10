@@ -16,7 +16,7 @@ import {
   composioBatchGate, manageConnectionsGate, proxyExecuteGate,
   manageConnectionsEntries, parseConnectionsResult, manageConnectionsAgentResult,
   workbenchSpillOf, WORKBENCH_SPILL_NOTE, connectionsAccountsOf,
-  appendSearchToolsNote, proxyReadTurnKey, isProxyReadToolCall
+  appendSearchToolsNote, proxyReadTurnKey, isProxyReadToolCall, mcpCallIsRead
 } from '../tool-batch'
 import { composioToolPolicy, COMPOSIO_TOOL_POLICIES, COMPOSIO_CODE_TOOLS, COMMON_COMPOSIO_TOOLKITS } from '../composio-meta'
 import { toPiContext } from '../../agent/llm-pi'
@@ -584,5 +584,28 @@ describe('RW2.3 — lo spill del risultato grande anche per PROXY (entry 286 rid
     expect(cleaned).toContain('data_preview')
     expect(cleaned).toContain('[714 schede')
     expect(cleaned).toContain(WORKBENCH_SPILL_NOTE)
+  })
+})
+
+describe('RW3 — quando una chiamata MCP è una LETTURA (per la ripetizione da sola)', () => {
+  it('i meta-tool read della tabella C3 sono letture', () => {
+    expect(mcpCallIsRead('COMPOSIO_SEARCH_TOOLS', { query: 'trello' })).toBe(true)
+    expect(mcpCallIsRead('COMPOSIO_GET_TOOL_SCHEMAS', {})).toBe(true)
+    expect(mcpCallIsRead('COMPOSIO_WAIT_FOR_CONNECTIONS', {})).toBe(true)
+  })
+
+  it('PROXY: GET/HEAD sì, POST no; MULTI_EXECUTE: solo se TUTTE le azioni sono letture', () => {
+    expect(mcpCallIsRead('COMPOSIO_PROXY_EXECUTE', { method: 'GET', endpoint: '/boards' })).toBe(true)
+    expect(mcpCallIsRead('COMPOSIO_PROXY_EXECUTE', { method: 'HEAD', endpoint: '/boards' })).toBe(true)
+    expect(mcpCallIsRead('COMPOSIO_PROXY_EXECUTE', { method: 'POST', endpoint: '/cards' })).toBe(false)
+    expect(mcpCallIsRead('COMPOSIO_MULTI_EXECUTE_TOOL', { tools: [{ tool_slug: 'TRELLO_GET_BOARDS' }] })).toBe(true)
+    expect(mcpCallIsRead('COMPOSIO_MULTI_EXECUTE_TOOL', {
+      tools: [{ tool_slug: 'TRELLO_GET_BOARDS' }, { tool_slug: 'TRELLO_CREATE_CARD' }]
+    })).toBe(false)
+  })
+
+  it('un tool qualunque non Composio non è una lettura (non si ripete da solo)', () => {
+    expect(mcpCallIsRead('send_email', {})).toBe(false)
+    expect(mcpCallIsRead('COMPOSIO_MANAGE_CONNECTIONS', { toolkits: [{ name: 'trello', action: 'list' }] })).toBe(false)
   })
 })
