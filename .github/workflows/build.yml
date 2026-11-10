@@ -42,6 +42,18 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # RP1 (fase rilascio di prova): in CI non c'è il crate di Engramma (il
+      # repo non ha remote) né il bundle llama-server — si prendono dagli
+      # ASSET PUBBLICI fissati (vendor/engramma/engramma.lock.json con
+      # release { repo, tag }, scripts/llama-pin.json), verificati sha256 e
+      # dimensione. Senza segreti. Serve PRIMA di electron-builder (il bundle
+      # viaggia in Resources/vendor) e prima dei test (pretest lo rifà, ma a
+      # quel punto il fast path ha già tutto).
+      - name: Prepare native vendor assets (Engramma + llama-server)
+        run: |
+          node scripts/prepare-engramma.mjs
+          node scripts/fetch-llama.mjs
+
       # Mai una release da codice rosso: typecheck e test prima di tutto
       # (pretest prepara i .wasm di tree-sitter).
       - name: Typecheck and tests

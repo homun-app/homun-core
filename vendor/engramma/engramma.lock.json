@@ -7,5 +7,14 @@
     "engramma.darwin-arm64.node": "b27b0b0726829c2f32f3934622e99e0d76d3a3e91bad657c3b05fd97038d771d",
     "index.js": "25fd9cc1d50a1ec3f2d74bc004d904663ff07360102d27b938870329d9c832d4",
     "index.d.ts": "bf9381f18911d1fba6269eb745c2825c57f5ed643461d4c2a6488005bf69d9f8"
+  },
+  "sizes": {
+    "engramma.darwin-arm64.node": 33414064,
+    "index.js": 36100,
+    "index.d.ts": 12593
+  },
+  "release": {
+    "repo": "homun-app/homun-core",
+    "tag": "engramma-fase-v0.4.3"
   }
 }
