@@ -182,3 +182,64 @@ describe('fase locale (L1.3): stripTextToolCallBlocks — la consegna non contie
     expect(stripTextToolCallBlocks('Ciao, ecco la risposta.')).toBe('Ciao, ecco la risposta.')
   })
 })
+
+// ---- fase locale correzioni (LC3): blocco senza chiusura e blocchi nel codice ----
+
+describe('fase locale correzioni (LC3): il blocco aperto in fondo si recupera, il codice è testo', () => {
+  // la prova della spec: il modello si ferma all'EOS prima della </tool_call>
+  const APERTO = 'Apro il browser.\n<tool_call>\n<function=find_tools>\n<parameter=group>\nbrowser\n</parameter>\n</function>'
+
+  it('blocco APERTO in fondo (nessuna </tool_call>) con function completa: la chiamata si recupera', () => {
+    const r = parseTextToolCalls(APERTO, KNOWN)
+    expect(r.calls).toEqual([{ name: 'find_tools', arguments: JSON.stringify({ group: 'browser' }) }])
+    expect(r.text).toContain('Apro il browser.')
+    expect(r.text).not.toContain('<tool_call>')
+    expect(r.text).not.toContain('<function=')
+  })
+
+  it('blocco aperto SENZA </function>: resta testo (niente chiamata), la consegna lo ripulisce come oggi', () => {
+    const text = 'Ora cerco.\n<tool_call>\n<function=web_search>\n<parameter=query>\ngatto'
+    const r = parseTextToolCalls(text, KNOWN)
+    expect(r.calls).toEqual([])
+    expect(r.text).toContain('<tool_call>')
+    expect(stripTextToolCallBlocks(text)).not.toContain('<tool_call>')
+    expect(stripTextToolCallBlocks(text)).toContain('Ora cerco.')
+  })
+
+  it('il blocco DENTRO un recinto di codice NON si esegue: è testo («ecco il formato»)', () => {
+    const text = 'Il formato è questo:\n```\n<tool_call>\n<function=run-command>\n<parameter=command>\nls -la\n</parameter>\n</function>\n</tool_call>\n```\nChiaro?'
+    const r = parseTextToolCalls(text, KNOWN)
+    expect(r.calls).toEqual([]) // NON eseguito
+    expect(r.text).toContain('<function=run-command>') // resta testo, tutto
+    expect(r.text).toContain('Il formato è questo:')
+    // e la PULIZIA della consegna non lo tocca: è contenuto voluto
+    expect(stripTextToolCallBlocks(text)).toContain('<function=run-command>')
+    // la consegna pulisce SOLO fuori dal recinto (qui fuori non c'è niente da togliere)
+    expect(stripTextToolCallBlocks(text)).toContain('Chiaro?')
+  })
+
+  it('un blocco nel codice e uno FUORI nello stesso testo: si recupera solo quello fuori', () => {
+    const text = 'Ecco due cose.\n```\n<tool_call>\n<function=run-command>\n<parameter=command>\nls\n</parameter>\n</function>\n</tool_call>\n```\nMa questa la faccio davvero:\n<tool_call>\n<function=find_tools>\n<parameter=group>\nbrowser\n</parameter>\n</function>\n</tool_call>'
+    const r = parseTextToolCalls(text, KNOWN)
+    expect(r.calls).toEqual([{ name: 'find_tools', arguments: JSON.stringify({ group: 'browser' }) }])
+    expect(r.text).toContain('<function=run-command>') // quello nel recinto resta
+    expect(r.text).not.toMatch(/<function=find_tools>/)
+  })
+
+  it('i recinti di TILDE (~~~) fanno recinto come i backtick', () => {
+    const text = '~~~\n<tool_call>\n<function=run-command>\n<parameter=command>\nls\n</parameter>\n</function>\n</tool_call>\n~~~'
+    expect(parseTextToolCalls(text, KNOWN).calls).toEqual([])
+    expect(stripTextToolCallBlocks(text)).toContain('<tool_call>')
+  })
+
+  it('recinto MAI chiuso: fa recinto fino alla fine del testo', () => {
+    const text = 'Esempio:\n```\n<tool_call>\n<function=run-command>\n<parameter=command>\nls\n</parameter>\n</function>\n</tool_call>\n(e il testo finisce qui, senza chiusura'
+    expect(parseTextToolCalls(text, KNOWN).calls).toEqual([])
+    expect(stripTextToolCallBlocks(text)).toContain('<function=run-command>')
+  })
+
+  it('hasRawToolCallBlocks: il blocco SOLO nel recinto non è «grezzo» da pulire', () => {
+    expect(hasRawToolCallBlocks('```\n<tool_call>\nx\n</tool_call>\n```')).toBe(false)
+    expect(hasRawToolCallBlocks('prima un recinto:\n```\n<function=x>\n```\ne POI un blocco vero <tool_call>')).toBe(true)
+  })
+})

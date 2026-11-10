@@ -39,6 +39,48 @@ export interface TextToolCallParse {
 /** Un blocco <tool_call>…</tool_call> intero (non-greedy), con eventuali a-capo ai bordi. */
 const TOOL_CALL_BLOCK_RE = /[ \t]*<tool_call>\s*([\s\S]*?)<\/tool_call>[ \t]*\n?/g
 
+/**
+ * Fase locale correzioni (LC3): le porzioni di testo DENTRO un recinto di
+ * codice (``` o ~~~, fino alla chiusura dello stesso carattere o alla fine
+ * del testo se mai chiuso). Sono contenuto VOLUTO («ecco il formato»): il
+ * recupero non le esegue e la pulizia non le tocca.
+ */
+export function codeFenceRanges(text: string): Array<[number, number]> {
+  const ranges: Array<[number, number]> = []
+  let i = 0
+  const n = text.length
+  while (i < n) {
+    const nl = text.indexOf('\n', i)
+    const lineEnd = nl === -1 ? n : nl
+    const m = /^ {0,3}(`{3,}|~{3,})/.exec(text.slice(i, lineEnd))
+    if (m) {
+      const ch = m[1]![0]! // ` o ~
+      const closeRe = new RegExp(`^ {0,3}${ch === '`' ? '`' : '~'}{3,}[ \\t]*$`)
+      // la chiusura: una riga che è SOLO il recinto dello stesso carattere
+      let j = nl === -1 ? n : nl + 1
+      let rangeEnd = n // mai chiuso → fino alla fine del testo
+      while (j <= n) {
+        const nl2 = text.indexOf('\n', j)
+        const end2 = nl2 === -1 ? n : nl2
+        if (closeRe.test(text.slice(j, end2))) { rangeEnd = end2; break }
+        if (nl2 === -1) break
+        j = nl2 + 1
+      }
+      ranges.push([i, rangeEnd])
+      i = rangeEnd >= n ? n : rangeEnd + 1
+    } else {
+      i = lineEnd + 1
+    }
+  }
+  return ranges
+}
+
+/** L'indice cade dentro un recinto di codice? (per match già calcolati) */
+function inAnyRange(ranges: Array<[number, number]>, idx: number): boolean {
+  for (const [a, b] of ranges) if (idx >= a && idx < b) return true
+  return false
+}
+
 /** La testa XML del formato: <function=nome>. */
 const XML_FUNCTION_HEAD_RE = /^<function=([A-Za-z0-9_.\-]+)>/
 
@@ -105,19 +147,41 @@ function parseHermesBlock(body: string): { name: string; args: Record<string, un
  * passano dall'attivazione per nome come oggi); un blocco con nome
  * sconosciuto resta nel testo COM'È. Torna le chiamate e il testo fuori dai
  * blocchi riconosciuti.
+ * LC3: un blocco APERTO in fondo al testo (nessuna </tool_call> dopo, il
+ * modello si è fermato all'EOS) con un <function=…>…</function> completo si
+ * riconosce come gli altri; senza </function> resta testo. I blocchi dentro
+ * un recinto di codice non si toccano MAI: sono contenuto voluto.
  */
 export function parseTextToolCalls(text: string, knownToolNames: Iterable<string>): TextToolCallParse {
   const known = knownToolNames instanceof Set ? knownToolNames : new Set(knownToolNames)
+  const fences = codeFenceRanges(text)
   const calls: ParsedTextToolCall[] = []
   let out = ''
   let last = 0
   for (const m of text.matchAll(TOOL_CALL_BLOCK_RE)) {
+    if (inAnyRange(fences, m.index ?? 0)) continue // nel recinto: è testo voluto
     const body = m[1] ?? ''
     const parsed = parseXmlFunctionBlock(body) ?? parseHermesBlock(body)
     if (!parsed || !known.has(parsed.name)) continue // sconosciuto o malformato: il blocco resta
     calls.push({ name: parsed.name, arguments: JSON.stringify(parsed.args) })
     out += text.slice(last, m.index)
     last = (m.index ?? 0) + m[0].length
+  }
+  // LC3: il blocco APERTO in coda — un <tool_call> rimasto senza chiusura
+  const tail = text.slice(last)
+  const openIdx = tail.indexOf('<tool_call>')
+  if (openIdx !== -1) {
+    const openAt = last + openIdx
+    const after = tail.slice(openIdx)
+    if (!after.includes('</tool_call>') && !inAnyRange(fences, openAt)) {
+      const body = after.replace(/^[ \t]*<tool_call>\s*/, '')
+      const parsed = parseXmlFunctionBlock(body) ?? parseHermesBlock(body)
+      if (parsed && known.has(parsed.name)) {
+        calls.push({ name: parsed.name, arguments: JSON.stringify(parsed.args) })
+        out += tail.slice(0, openIdx)
+        last = text.length // il blocco aperto arriva in fondo al testo
+      }
+    }
   }
   out += text.slice(last)
   return { calls, text: out }
@@ -129,19 +193,46 @@ export function parseTextToolCalls(text: string, knownToolNames: Iterable<string
  * TUTTI i blocchi <tool_call>…</tool_call> (nome sconosciuto compreso), i
  * frammenti <function=…>…</function> orfani e i tag spaiati residui. Se dopo
  * la pulizia resta vuoto, il chiamante usa il recupero normale del loop.
+ * LC3: i blocchi dentro un recinto di codice restano COME SONO — sono
+ * contenuto voluto («ecco il formato»), anche per i provider cloud.
  */
 export function stripTextToolCallBlocks(text: string): string {
-  let out = text.replace(TOOL_CALL_BLOCK_RE, '')
+  const fences = codeFenceRanges(text)
+  let out = ''
+  let pos = 0
+  for (const [a, b] of fences) {
+    if (a > pos) out += stripUnfenced(text.slice(pos, a))
+    out += text.slice(a, b) // il recinto resta com'è
+    pos = b
+  }
+  out += stripUnfenced(text.slice(pos))
+  return out.trim()
+}
+
+/** La pulizia di un tratto FUORI dai recinti (le regex di L1.3, identiche). */
+function stripUnfenced(seg: string): string {
+  let out = seg.replace(TOOL_CALL_BLOCK_RE, '')
   // frammenti orfani: function…/function in coppia, poi i tag spaiati
   out = out.replace(/[ \t]*<function=[A-Za-z0-9_.\-]*>[\s\S]*?<\/function>[ \t]*\n?/g, '')
   out = out.replace(/[ \t]*<\/?tool_call>[ \t]*\n?/g, '')
   out = out.replace(/[ \t]*<function=[A-Za-z0-9_.\-]*>[ \t]*\n?/g, '')
   out = out.replace(/[ \t]*<\/?function>[ \t]*\n?/g, '')
   out = out.replace(/[ \t]*<\/?(?:parameter(?:=[A-Za-z0-9_.\-]*)?)>[ \t]*\n?/g, '')
-  return out.trim()
+  return out
 }
 
-/** L1.3: il testo contiene blocchi (o frammenti) grezzi di chiamata? */
+/**
+ * L1.3: il testo contiene blocchi (o frammenti) grezzi di chiamata?
+ * LC3: quelli DENTRO un recinto di codice non contano — sono contenuto voluto.
+ */
 export function hasRawToolCallBlocks(text: string): boolean {
-  return /<tool_call>|<function=/.test(text)
+  const fences = codeFenceRanges(text)
+  let outside = ''
+  let pos = 0
+  for (const [a, b] of fences) {
+    if (a > pos) outside += text.slice(pos, a)
+    pos = b
+  }
+  outside += text.slice(pos)
+  return /<tool_call>|<function=/.test(outside)
 }
