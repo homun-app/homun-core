@@ -30,6 +30,11 @@
 // (i test le provano su un bundle finto senza firmare nulla); il corpo CLI
 // gira solo quando lo script è invocato davvero (isCli), così l'import nei
 // test non esce con process.exit.
+//
+// FASE VERIFY-RELEASE CLI (RT1): il percorso del bundle si normalizza UNA
+// VOLTA all'ingresso (in CI APP_PATH esce da `find dist-installers …` ed è
+// RELATIVO) e anche le funzioni esportate risolvono i propri percorsi da
+// sole: nessun confronto dipende da come il chiamante scrive il percorso.
 import { readFile, stat, readdir } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
@@ -90,6 +95,10 @@ function stripRpathToken(rp) {
  * Torna l'elenco dei problemi (vuoto = tutto dentro il bundle).
  */
 export function checkVendorDeps({ loads, rpaths = [], binaryDir, contentsPath, exists = existsSync }) {
+  // RT1: i candidati nascono assoluti (path.resolve), quindi i percorsi si
+  // normalizzano ALL'INGRESSO — chi chiama può passare anche relativi
+  binaryDir = path.resolve(binaryDir)
+  contentsPath = path.resolve(contentsPath)
   const problems = []
   const inside = (p) => p === contentsPath || p.startsWith(contentsPath + path.sep)
   for (const load of loads) {
@@ -156,6 +165,8 @@ export async function collectVendorMachOs(vendorDir, fileOf) {
  * elenca TUTTI i problemi; torna il report per il JSON finale.
  */
 export async function verifyVendorBinaries({ appPath, contentsPath, signed, exec = defaultExec }) {
+  // RT1: come in checkVendorDeps, la normalizzazione sta all'ingresso
+  contentsPath = path.resolve(contentsPath)
   const vendorDir = path.join(contentsPath, 'Resources', 'vendor')
   const machos = await collectVendorMachOs(vendorDir, (f) => exec('file', ['-b', f]).out)
   if (machos.length === 0) throw new Error(`nessun binario Mach-O sotto ${vendorDir}: il bundle vendor manca`)
@@ -196,17 +207,20 @@ export async function verifyVendorBinaries({ appPath, contentsPath, signed, exec
 const isCli = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]
 
 async function main() {
-  const appPath = process.argv[2]
+  const givenPath = process.argv[2]
   function option(name) {
     const index = process.argv.indexOf(name)
     return index >= 0 ? process.argv[index + 1] : undefined
   }
   const expectedArch = option('--expected-arch') ?? 'arm64'
   const signed = process.argv.includes('--signed')
-  if (!appPath) {
+  if (!givenPath) {
     console.error('Usage: verify-release.mjs <Homun.app> [--expected-arch arm64] [--expected-version 0.3.1000] [--signed]')
     process.exit(2)
   }
+  // RT1: il percorso si risolve UNA volta sola, qui: da qui in avanti tutto
+  // usa l'assoluto (in CI APP_PATH arriva relativo da `find dist-installers …`)
+  const appPath = path.resolve(givenPath)
 
   // versione attesa: flag esplicito, altrimenti quella del package.json del repo
   // (lo script npm release:verify la passa con $npm_package_version)
@@ -300,7 +314,7 @@ async function main() {
   }
   let vendorReport
   try {
-    vendorReport = await verifyVendorBinaries({ appPath, contentsPath, signed })
+    vendorReport = await verifyVendorBinaries({ appPath, contentsPath: contents, signed })
   } catch (e) {
     die(e instanceof Error ? e.message : String(e))
   }

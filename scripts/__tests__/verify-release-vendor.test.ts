@@ -7,7 +7,7 @@
 import { afterAll, describe, expect, it } from 'vitest'
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
 
 const REPO = join(import.meta.dirname, '..', '..')
 const {
@@ -175,6 +175,31 @@ describe('fase rilascio di prova (RP2): le dipendenze di llama-server dentro il 
     expect(checkVendorDeps({ loads: ['@rpath/libx.dylib'], binaryDir: llamaDir, contentsPath: contents, exists: () => false }).join('\n'))
       .toMatch(/non si risolve/)
   })
+
+  // RT1 (fase verify-release CLI): in CI APP_PATH esce da `find
+  // dist-installers …` ed è RELATIVO — i candidati di checkVendorDeps nascono
+  // assoluti (path.resolve), quindi la normalizzazione sta ALL'INGRESSO
+  // della funzione, non a carico di chi la chiama.
+  it('contentsPath e binaryDir RELATIVI, dipendenze dentro il bundle → nessun problema', () => {
+    const problems = checkVendorDeps({
+      loads: ['@loader_path/libllama.dylib'],
+      binaryDir: relative(process.cwd(), llamaDir),
+      contentsPath: relative(process.cwd(), contents),
+      exists: (p) => p === join(llamaDir, 'libllama.dylib')
+    })
+    expect(problems).toEqual([])
+  })
+
+  it('con percorsi relativi, un @rpath che esce dal bundle viene ancora rifiutato', () => {
+    const problems = checkVendorDeps({
+      loads: ['@rpath/libllama.dylib'],
+      rpaths: ['/opt/homebrew/lib'],
+      binaryDir: relative(process.cwd(), llamaDir),
+      contentsPath: relative(process.cwd(), contents),
+      exists: (p) => p === '/opt/homebrew/lib/libllama.dylib'
+    })
+    expect(problems.join('\n')).toMatch(/FUORI dal bundle.*\/opt\/homebrew/)
+  })
 })
 
 describe('fase rilascio di prova (RP2): ogni Mach-O sotto Resources/vendor', () => {
@@ -250,6 +275,18 @@ describe('fase rilascio di prova (RP2): ogni Mach-O sotto Resources/vendor', () 
     const bad = fakeExec(b2, { file: (rel) => (rel === 'llama/llama-server' ? 'Mach-O 64-bit executable x86_64' : 'Mach-O 64-bit executable arm64') })
     await expect(verifyVendorBinaries({ appPath: b2.appPath, contentsPath: b2.contentsPath, signed: false, exec: bad.exec }))
       .rejects.toThrow(/x86_64/)
+  })
+
+  it('RT1: contentsPath RELATIVO in verifyVendorBinaries → stesso esito dell\'assoluto (normalizzazione all\'ingresso)', async () => {
+    const b = makeFakeApp()
+    const { exec } = fakeExec(b)
+    const r = await verifyVendorBinaries({
+      appPath: relative(process.cwd(), b.appPath),
+      contentsPath: relative(process.cwd(), b.contentsPath),
+      signed: false,
+      exec
+    })
+    expect(r.binaries.map((x) => x.arch)).toEqual(['arm64', 'arm64', 'arm64'])
   })
 })
 
