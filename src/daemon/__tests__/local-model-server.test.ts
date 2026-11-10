@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, existsSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  createLocalModelServer, LOCAL_MODEL_CRASHED_ERROR, IDLE_SHUTDOWN_MS, HEALTH_TIMEOUT_MS,
+  createLocalModelServer, childEnvFor, LOCAL_MODEL_CRASHED_ERROR, IDLE_SHUTDOWN_MS, HEALTH_TIMEOUT_MS,
   type LocalModelServerDeps, type LocalModelServer
 } from '../local-model-server'
 
@@ -328,5 +328,40 @@ describe('fase locale correzioni (LC4): la chiave di llama-server non si vede co
     expect(d.spawned).toHaveLength(2)
     expect(d.spawned[0]!.env?.LLAMA_API_KEY).toBe('key-1')
     expect(d.spawned[1]!.env?.LLAMA_API_KEY).toBe('key-2')
+  })
+})
+
+describe('fase locale correzioni 2 (LD4): l\'env del figlio è SOLO quello che serve', () => {
+  it('una variabile finta del demone NON arriva al figlio: PATH/HOME/TMPDIR, LANG/LC_* presenti e LLAMA_API_KEY, nient\'altro', async () => {
+    // due variabili del demone che al figlio NON devono arrivare
+    process.env.SANDBOT_FAKE_SECRET = 'segreto-che-non-passa'
+    const prevLc = process.env.LC_CTEST
+    process.env.LC_CTEST = 'it_IT.UTF-8'
+    try {
+      const d = makeDeps()
+      d.setHealthyAfter(1)
+      const s = makeServer(d)
+      await s.ensureRunning()
+      const env = d.spawned[0]!.env!
+      expect(env.SANDBOT_FAKE_SECRET).toBeUndefined() // il segreto resta dal demone
+      expect(env.LLAMA_API_KEY).toBe('key-1')
+      expect(env.PATH).toBe(process.env.PATH)
+      expect(env.HOME).toBe(process.env.HOME)
+      if (process.env.TMPDIR !== undefined) expect(env.TMPDIR).toBe(process.env.TMPDIR)
+      if (process.env.LANG !== undefined) expect(env.LANG).toBe(process.env.LANG)
+      expect(env.LC_CTEST).toBe('it_IT.UTF-8') // le LC_* presenti passano
+      // la lista ammessa è molto più corta dell'ambiente del demone
+      expect(Object.keys(env).length).toBeLessThan(Object.keys(process.env).length)
+    } finally {
+      delete process.env.SANDBOT_FAKE_SECRET
+      if (prevLc === undefined) delete process.env.LC_CTEST
+      else process.env.LC_CTEST = prevLc
+    }
+  })
+
+  it('childEnvFor è una funzione pura sulla lista ammessa (LANG assente non compare)', () => {
+    const env = childEnvFor('k', { PATH: '/bin', HOME: '/Users/x', SANDBOT_FAKE_SECRET: 'no', LC_ALL: 'C' } as NodeJS.ProcessEnv)
+    expect(env).toEqual({ LLAMA_API_KEY: 'k', PATH: '/bin', HOME: '/Users/x', LC_ALL: 'C' })
+    expect('TMPDIR' in env).toBe(false) // assente nell'env di partenza → non compare
   })
 })

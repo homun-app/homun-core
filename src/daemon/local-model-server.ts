@@ -101,6 +101,27 @@ async function defaultFindFreePort(): Promise<number> {
   })
 }
 
+/**
+ * LD4: l'env del figlio llama-server — SOLO quello che serve, mai tutto
+ * l'ambiente del demone (chiavi e segreti di servizio non passano al
+ * processo figlio): PATH, HOME, TMPDIR, LANG e le LC_* presenti, più
+ * LLAMA_API_KEY (la chiave di turno, che vive solo qui).
+ */
+export function childEnvFor(
+  apiKey: string,
+  env: NodeJS.ProcessEnv = process.env
+): NodeJS.ProcessEnv {
+  const out: NodeJS.ProcessEnv = { LLAMA_API_KEY: apiKey }
+  for (const name of ['PATH', 'HOME', 'TMPDIR', 'LANG']) {
+    const v = env[name]
+    if (v !== undefined) out[name] = v
+  }
+  for (const name of Object.keys(env)) {
+    if (/^LC_/.test(name) && env[name] !== undefined) out[name] = env[name]
+  }
+  return out
+}
+
 /** Il log in <data>/logs/llama-server.log, a rotazione come gli altri log. */
 function rotatingLog(logPath: string): (line: string) => void {
   return (line) => {
@@ -178,8 +199,9 @@ export function createLocalModelServer(opts: {
       // verificare contro il pin: si usa la variabile d'ambiente, che
       // llama-server legge per --api-key (confermata nell'help di un build
       // 12110 > 12061: «--api-key KEY (env: LLAMA_API_KEY)»).
+      // LD4: l'env è la LISTA AMMESSA di childEnvFor, non process.env intero
       const c = deps.spawn(serverBin, args, {
-        env: { ...process.env, LLAMA_API_KEY: key }
+        env: childEnvFor(key)
       })
       child = c
       deliberateKill = false
