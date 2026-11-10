@@ -243,3 +243,45 @@ describe('fase locale correzioni (LC3): il blocco aperto in fondo si recupera, i
     expect(hasRawToolCallBlocks('prima un recinto:\n```\n<function=x>\n```\ne POI un blocco vero <tool_call>')).toBe(true)
   })
 })
+
+// ---- fase locale correzioni 2 (LD3): una menzione di <tool_call> non ingoia il blocco vero ----
+
+describe('fase locale correzioni 2 (LD3): una menzione di <tool_call> non ingoia il blocco vero', () => {
+  // il blocco VERO di tutti i casi della tabella (find_tools, come i dump)
+  const VERO = '<tool_call>\n<function=find_tools>\n<parameter=group>\nbrowser\n</parameter>\n</function>\n</tool_call>'
+  // il blocco APERTO in coda (il modello si è fermato prima della chiusura)
+  const APERTO = '<tool_call>\n<function=find_tools>\n<parameter=group>\nbrowser\n</parameter>\n</function>'
+
+  it('menzione DENTRO un recinto + blocco vero fuori: il blocco si recupera (prima la regex partiva nel recinto e moriva sulla </tool_call> fuori)', () => {
+    const text = '```\n<tool_call> ecco\n```\n' + VERO
+    const r = parseTextToolCalls(text, KNOWN)
+    expect(r.calls.map((c) => c.name)).toEqual(['find_tools'])
+    expect(r.text).toContain('<tool_call> ecco') // la menzione nel recinto resta
+  })
+
+  it('menzione nel codice INLINE + blocco vero: la chiamata si recupera e il testo citato NON si tocca', () => {
+    const text = 'usa `<tool_call>` così\n' + VERO
+    const r = parseTextToolCalls(text, KNOWN)
+    expect(r.calls.map((c) => c.name)).toEqual(['find_tools'])
+    expect(r.text).toContain('usa `<tool_call>` così')
+    // e la PULIZIA protegge lo span inline come il recinto (prima diventava «usa `»)
+    const clean = stripTextToolCallBlocks(text)
+    expect(clean).toContain('usa `<tool_call>` così')
+    expect(clean).not.toContain('<function=find_tools>')
+    expect(hasRawToolCallBlocks('usa `<tool_call>` così, ecco il formato')).toBe(false)
+  })
+
+  it('blocco chiuso con nome SCONOSCIUTO + blocco APERTO vero in coda: si recupera l\'aperto (prima il controllo guardava il PRIMO <tool_call>)', () => {
+    const text = '<tool_call>\n<function=strumento_inventato>\n<parameter=x>\n1\n</parameter>\n</function>\n</tool_call>\n' + APERTO
+    const r = parseTextToolCalls(text, KNOWN)
+    expect(r.calls.map((c) => c.name)).toEqual(['find_tools']) // solo l'aperto vero
+    expect(r.text).toContain('<function=strumento_inventato>') // lo sconosciuto resta
+  })
+
+  it('menzione nel recinto NON chiusa + blocco APERTO vero: l\'aperto si recupera lo stesso', () => {
+    const text = '```\n<tool_call>\n```\n' + APERTO
+    const r = parseTextToolCalls(text, KNOWN)
+    expect(r.calls.map((c) => c.name)).toEqual(['find_tools'])
+    expect(r.text).toContain('<tool_call>') // la menzione nel recinto resta testo
+  })
+})
