@@ -1,3 +1,49 @@
+# REPORT FASE LOCALE · CORREZIONI 3 (LE1–LE3) — il lexer che non perde più le chiamate col codice negli argomenti, i tetti espliciti per i test pesanti
+
+**Data:** 2026-11-10 · **Base:** `main` @ `a83facd7` (tag `fase-locale-correzioni-2`) · **Tag di chiusura:** `fase-locale-correzioni-3`. Nessun push. Lavoro offline: nessun download vero, rete solo su 127.0.0.1 (i server finti dei test), il repo di Engramma e l'Homebrew `llama-server` non toccati, `out-review/` e `docs/catture` intatti, temporanei solo con `mkdtemp` in `/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/`, 0 daemon e 0 `llama-server` dopo OGNI corsa (verificato con `pgrep` dopo ogni comando), mai avviata l'app né il demone su `~/Library/Application Support/sandbot`.
+
+**Verifica finale:** `typecheck` pulito · `vitest` **3 corse consecutive della suite intera tutte verdi: 231 file / 3557 test** (24,58 · 23,91 · 25,09 s; base 3532 → +25, tutti nel file del parser: 3 fixture + 22 righe della tabella del lexer) · **più una corsa col carico finto acceso** (8 × `yes > /dev/null`, load 33 durante la corsa): **verde in 44,52 s**, gli 8 processi **spenti tutti alla fine** (0 rimasti) · `npm run build` verde (3,39 s) · `language-judges.eval.ts` **56/56** (2,03 s) · T6, T8, R4, R7, R8, R9 e i budget dei token verdi (**9 file / 417 test**: loop con T6+T8; resolved-model + silent-reply + ws-server per R4; rail-functions R7; turn-tools + turn-budget R8; history + token-pari R9 e i budget) · **nessuna riga nuova nel prompt** (il diff `a83facd7..HEAD` su `src/main/agent/prompts.ts` è vuoto, 0 righe).
+
+## LE1 — Una chiamata vera con backtick o codice negli argomenti non veniva più recuperata
+
+La regressione nasceva da un punto della spec di LD3, che qui si corregge: `protectedRanges` calcolava recinti e span inline su TUTTO il testo, anche DENTRO i blocchi veri. Un backtick in un `<parameter>` (o un recinto nel content, o il blocco aperto oltre lo span) spezzava il blocco nei tratti liberi: la regex non vedeva più la coppia `<tool_call>…</tool_call>`, la chiamata si perdeva e la pulizia consegnava all'utente il CONTENUTO dell'argomento. Sono i casi più comuni in assoluto: comandi di shell e file markdown. I 4 casi della tabella della spec, tutti **visti ROSSI su `a83facd7`** (`expected [] to deeply equal [{name:'run_command',…}]`, la chiamata persa):
+
+1. **`run_command` con `` echo `date` `` nell'argomento** → persa; all'utente arrivava `` echo `date` ``;
+2. **`write_file` con content markdown** (`` `npm i` `` e un recinto ```` ```bash ````) → persa; arrivava il file;
+3. **Hermes** `{"name":"run_command","arguments":{"command":"echo `x`"}}` → perso; arrivava il JSON;
+4. **blocco APERTO in coda con `` ls `pwd` ``** → perso (il cursore dei tratti era già oltre la `<tool_call>`: `openAt >= cursor` falso).
+
+Correzione, come da spec: **un solo passaggio da sinistra a destra, come un lexer** (`lexToolCallText`). In ogni punto FUORI da un blocco si guarda quale costrutto comincia per primo: un recinto (```` ``` ````/`~~~` a inizio riga, fino a 3 spazi) o uno span inline (run di N backtick chiuso dal prossimo run di ESATTAMENTE N backtick sulla stessa riga) → segmento PROTETTO; un `<tool_call>` → si consuma il blocco INTERO, chiuso col tempered token di LD3 (`close < nextOpen`: il corpo non contiene un'altra `<tool_call>`) oppure APERTO in coda (l'ULTIMA apertura, dopo l'ultima chiusura), **qualunque cosa contenga**: backtick e recinti dentro un blocco sono ARGOMENTI, non zone protette. **Recupero, pulizia e `hasRawToolCallBlocks` usano lo stesso lexer**, così non possono divergere: spariscono `protectedRanges`/`codeFenceRanges`/`inlineCodeSpans`/`inAnyRange` e la vecchia `TOOL_CALL_BLOCK_RE` dalle consumatrici (resta la pulizia dei soli frammenti ORFANI sui tratti liberi, dove il lexer ha già consumato ogni blocco); nella pulizia il blocco esce INTERO, anche aperto in coda, anche col nome sconosciuto.
+
+- **Tabella UNICA** nel test del parser (come chiede la spec): i 4 casi LE1 + i 4 di LD3 (menzione nel recinto, menzione inline, chiuso sconosciuto + aperto, recinto non chiuso + aperto) + i 3 di LC3 (aperto in coda, blocco nel recinto non eseguito, recinto + blocco vero) + gli 8 blocchi veri dei dump + le 3 fixture nuove = **22 righe**, ognuna con chiamate attese, ciò che resta/sparisce nel testo e ciò che la pulizia consegna.
+- **Almeno 3 fixture con backtick/recinti negli argomenti aggiunte agli 8 blocchi dei dump**: un comando shell, un `write_file` markdown, un Hermes. Erano proprio i casi senza copertura, ed è per questo che la regressione è passata.
+- Verdi dopo: **60/60** il file del parser (i 35 di prima + 25 nuovi, i 10 nuovi dei backtick visti prima ROSSI), **loop 331/331**, typecheck pulito.
+
+## LE2 — Test lenti: tetto esplicito dove il tetto predefinito era la sola causa
+
+**Le durate richieste** (macchina ferma / dentro la suite intera, corsa col reporter verboso / sotto il carico finto della spec, 8 `yes`, load 33):
+
+| Test | da solo | nella suite intera | sotto carico |
+|---|---|---|---|
+| `model-pull` C8 (tetto LD5 180 s) | 2,08 s | 4,50 s | 7,95 s |
+| `embed-lane` C7 (tetto LD5 120 s) | 1,34 s | 3,15 s | 4,39 s (file) |
+| `forget-agent` C2 1500 messaggi | 0,86 s | 2,74 s | 4,79 s (file) |
+| `list-all` C5, i due test | 2,01 + 2,94 s | 1,63 + 2,96 s | 6,86 s (file) |
+| `skill-github` K6, i tre test | 1,25 / 1,16 / 0,63 s | 1,58 / 1,88 / 2,49 s | 20,33 s (file) |
+| `marketplace` «tetto dei file» | 1,05 s | 2,96 s | 15,22 s (file) |
+
+**Nessuno dei due test LD5 dura più di 30 s sotto carico** (max C8: 7,95 s): niente da segnalare. Per i sette test pesanti che andavano in rosso col tetto predefinito (`forget-agent` C2, i due di `list-all` C5, i tre K6 di `skill-github`, «tetto dei file» di `marketplace`) ora c'è un **tetto esplicito di 60 s** come in LD5: dichiarato nel codice, limite di sicurezza ampio e NON asserzione; le attese dentro restano sull'ESITO e **nessun `setTimeout` fisso nelle asserzioni** (i quattro file non ne hanno, verificato). Il rosso del tetto predefinito è stato **visto con i miei occhi**: file di test pre-LE2 (tetto da 5 s) + 24 `yes` per un minuto (load 43,6 → 63, nell'intervallo 29-54 della spec e oltre) → suite intera **1 failed / 3556 passati** con `Error: Test timed out in 5000ms` proprio su «tetto dei file» di `marketplace`; gli stessi file col tetto LE2 sotto il carico finto della spec: verdi. I file di test sono poi stati ripristinati al commit LE2 (albero pulito, verificato con `git status`).
+
+- **Prova richiesta:** 3 corse consecutive della suite intera **tutte verdi** (231 file / 3557 test: 24,58 · 23,91 · 25,09 s) **più una corsa col carico finto acceso** (`yes > /dev/null` su 8 processi): **verde in 44,52 s** con load 33 durante la corsa, gli 8 processi **spenti tutti alla fine** (0 rimasti), 0 daemon e 0 `llama-server` dopo ogni corsa.
+
+## LE3 — Chiusura
+
+- Ogni punto ha un test visto fallire prima: LE1 i 4 casi della tabella (`expected [] to deeply equal […]` su `a83facd7`, sezione LE1); LE2 il `Test timed out in 5000ms` sotto carico sui file pre-LE2 (sezione LE2).
+- Restano verdi T6, T8, R4, R7, R8, R9 e i budget dei token: **9 file / 417 test**; **nessuna riga nuova nel prompt** (diff `a83facd7..HEAD` su `src/main/agent/prompts.ts` = 0 righe).
+- Typecheck pulito; vitest 3 corse + la corsa col carico (numeri in testa); `npm run build` verde (3,39 s); `language-judges.eval.ts` **56/56** (2,03 s).
+- REPORT **aggiunto in cima** a REPORT.md (questa sezione); il test `report-history` resta verde: la coda è byte-identica ad `a6aa41ee:REPORT.md`, ora **57 intestazioni «# REPORT»** (56 + 1).
+- Commit: uno per punto (LE1 `31fffddf`, LE2 `4f185ff0`) + questo REPORT, tag annotato `fase-locale-correzioni-3`, **nessun push**.
+
 # REPORT FASE LOCALE · CORREZIONI 2 (LD1–LD6) — il Ricomincia che crea il provider, l'annullamento dal segnale, il parser che non si fa ingoiare dalle menzioni, l'env del figlio in lista ammessa, i test deterministici
 
 **Data:** 2026-11-10 · **Base:** `main` @ `417c47b8` (tag `fase-locale-correzioni`) · **Tag di chiusura:** `fase-locale-correzioni-2`. Nessun push. Lavoro offline: nessun download vero (il GGUF arriva da server finti su 127.0.0.1; il fetch dei test rifiuta ogni URL fuori), rete solo su 127.0.0.1, il repo di Engramma e l'Homebrew `llama-server` non toccati, `out-review/` e `docs/catture` intatti, temporanei solo `mkdtemp` in `/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/`, 0 daemon e 0 `llama-server` dopo OGNI corsa (verificato con `pgrep` dopo ogni comando).
