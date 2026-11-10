@@ -338,6 +338,13 @@ export interface SendMessageMeta {
   autoApproved?: boolean
   ruleMatched?: string
   /**
+   * RW (fase revisore sulla richiesta): SECONDO COSA l'auto-review ha
+   * approvato — 'request' (giudizio sulla richiesta del proprietario: in
+   * chat si vede il reason del revisore) o 'rule' (regola citata, in
+   * ruleMatched). Le entry vecchie senza il campo sono a regola.
+   */
+  autoBasis?: 'rule' | 'request'
+  /**
    * R2 (fase app — ritocchi): l'esito dell'invio di una bozza (output dello
    * strumento, troncato a 2 KB e ripulito) — si vede nei «Dettagli» della
    * card, mai come notice né JSON grezzo in chat.

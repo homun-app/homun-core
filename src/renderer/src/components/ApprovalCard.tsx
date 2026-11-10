@@ -98,11 +98,15 @@ export function ApprovalCard({ entry, readOnly = false }: { entry: TranscriptEnt
 
   // fase 8: auto-approvata dall'auto-review — riga compressa, espandibile.
   // fase impostazioni (I4.3): nel modo «Non chiedere» non c'è regola — la
-  // riga dice QUALE impostazione ha fatto passare l'azione
+  // riga dice QUALE impostazione ha fatto passare l'azione.
+  // RW (fase revisore sulla richiesta): autoBasis 'request' → il reason del
+  // revisore; 'rule' (e le entry vecchie senza campo) → la regola citata
   if (entry.meta?.autoApproved) {
     const autoLabel = entry.meta?.autoNever
       ? i18n.t(msg`Eseguito senza chiedere (Approvazioni: non chiedere)`)
-      : i18n.t(msg`Approvato automaticamente: ${String(entry.meta?.ruleMatched ?? '')}`)
+      : entry.meta?.autoBasis === 'request'
+        ? i18n.t(msg`Approvato automaticamente: ${String(entry.meta?.reason ?? '')}`)
+        : i18n.t(msg`Approvato automaticamente dalla regola: ${String(entry.meta?.ruleMatched ?? '')}`)
     return (
       <DecidedRow ok label={autoLabel} at={entry.createdAt}>
         <CardShell>

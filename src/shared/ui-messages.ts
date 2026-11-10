@@ -228,6 +228,9 @@ export const UI = {
   autoReviewUnavailable: msg({ id: 'autoreview.unavailable', message: 'revisore non disponibile: {error}' }),
   autoReviewReviewerAsk: msg({ id: 'autoreview.reviewerAsk', message: 'il revisore ha chiesto la conferma dell’utente' }),
   autoReviewNoRule: msg({ id: 'autoreview.noRule', message: 'il revisore non ha citato una regola allow valida' }),
+  // RW (fase revisore sulla richiesta): una regola di fermo citata dal
+  // revisore nega, qualunque siano la decisione e la basis dichiarate
+  autoReviewBlockRule: msg({ id: 'autoreview.blockRule', message: 'il revisore ha citato una regola di fermo' }),
 
   // ---- eventi meta.automation (update-state, C2) ----
   eventRoutineCreate: msg({ id: 'event.routineCreate', message: 'Routine creata (in pausa): {name}' }),

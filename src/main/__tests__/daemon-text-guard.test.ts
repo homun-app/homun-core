@@ -47,6 +47,11 @@ const ALLOWED_LITERALS: ReadonlyArray<{ file: string; text: string }> = [
   { file: 'src/shared/triggers.ts', text: 'evento' },
   { file: 'src/shared/triggers.ts', text: '<evento>' },
   { file: 'src/shared/triggers.ts', text: '</evento>' },
+  // RW (fase revisore sulla richiesta): il marcatore invariante del prompt
+  // del revisore, come <evento> — il blocco dati della richiesta del
+  // proprietario non si traduce
+  { file: 'src/main/agent/auto-review.ts', text: "\n\nThe owner's rules come FIRST" },
+  { file: 'src/main/agent/auto-review.ts', text: '\n</richiesta_del_proprietario>' },
   // marcatori invarianti <messaggio_da_agente>/<messaggio_dal_padre> (fase 7/12)
   { file: 'src/shared/agent-message.ts', text: '<messaggio_da' },
   { file: 'src/shared/agent-message.ts', text: 'messaggio_da' },

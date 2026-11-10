@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   autoReviewDecision, neverAskDecision, approvalsMode, runReviewer, reviewerPrompt, describeActionForReviewer,
-  liftContaminatedAllow, CONTAMINATED_ASK_TOOLS,
+  liftContaminatedAllow, CONTAMINATED_ASK_TOOLS, ownerWordsOf, botBriefOf,
   AUTO_REVIEW_MAX_PER_TURN, type AutoReviewAction, type ReviewerModel
 } from '../auto-review'
 import { DEFAULT_AUTO_REVIEW, type AutoReviewSettings } from '../../../shared/types'
@@ -18,7 +18,7 @@ const cfg: AutoReviewSettings = {
 }
 
 const cmd: AutoReviewAction = { tool: 'run-command', args: { command: 'ls' }, neverAuto: false, untrustedTurn: false }
-const allowOutcome = { ok: true as const, decision: 'allow' as const, ruleMatched: RULE }
+const allowOutcome = { ok: true as const, decision: 'allow' as const, basis: 'rule' as const, ruleMatched: RULE }
 
 describe('liftContaminatedAllow (F8, pura): allow → ask nel turno contaminato', () => {
   it('un verdetto allow dei tool con effetti torna a chiedere, col motivo del turno contaminato', () => {
@@ -71,15 +71,15 @@ describe('autoReviewDecision: la decisione finale (pura)', () => {
   it('fallback ad ask: JSON non valido, errore, timeout, decisione ask del revisore', () => {
     expect(autoReviewDecision(cfg, cmd, { ok: false, error: 'JSON non valido' }, 0).autoAllow).toBe(false)
     expect(autoReviewDecision(cfg, cmd, { ok: false, error: 'timeout (5000 ms)' }, 0).autoAllow).toBe(false)
-    expect(autoReviewDecision(cfg, cmd, { ok: true, decision: 'ask', reason: 'regola fermati' }, 0).autoAllow).toBe(false)
+    expect(autoReviewDecision(cfg, cmd, { ok: true, decision: 'ask', basis: 'request', reason: 'regola fermati' }, 0).autoAllow).toBe(false)
   })
 
   it('una regola block che corrisponde vince: allow che cita la blockRule (o nessuna regola) non passa', () => {
     // il revisore che citasse la regola di fermatela come "matched" non passa:
     // ruleMatched deve essere una delle allowRules, alla lettera
-    expect(autoReviewDecision(cfg, cmd, { ok: true, decision: 'allow', ruleMatched: BLOCK }, 0).autoAllow).toBe(false)
-    expect(autoReviewDecision(cfg, cmd, { ok: true, decision: 'allow' }, 0).autoAllow).toBe(false)
-    expect(autoReviewDecision(cfg, cmd, { ok: true, decision: 'allow', ruleMatched: 'regola inventata' }, 0).autoAllow).toBe(false)
+    expect(autoReviewDecision(cfg, cmd, { ok: true, decision: 'allow', basis: 'rule', ruleMatched: BLOCK }, 0).autoAllow).toBe(false)
+    expect(autoReviewDecision(cfg, cmd, { ok: true, decision: 'allow', basis: 'rule' }, 0).autoAllow).toBe(false)
+    expect(autoReviewDecision(cfg, cmd, { ok: true, decision: 'allow', basis: 'rule', ruleMatched: 'regola inventata' }, 0).autoAllow).toBe(false)
   })
 
   it('tetto di 20 approvazioni automatiche per turno, poi si torna a chiedere', () => {
@@ -133,9 +133,9 @@ describe('runReviewer: normalizzazione e fallback (modello finto)', () => {
 
   it('tool call valida → esito ok', async () => {
     const out = await runReviewer(cfg, cmd, model({
-      toolCalls: [{ arguments: JSON.stringify({ decision: 'allow', ruleMatched: RULE, reason: 'regola rispettata' }) }]
+      toolCalls: [{ arguments: JSON.stringify({ decision: 'allow', basis: 'rule', ruleMatched: RULE, reason: 'regola rispettata' }) }]
     }))
-    expect(out).toEqual({ ok: true, decision: 'allow', ruleMatched: RULE, reason: 'regola rispettata' })
+    expect(out).toEqual({ ok: true, decision: 'allow', basis: 'rule', ruleMatched: RULE, reason: 'regola rispettata' })
   })
 
   it('JSON non valido → ok:false', async () => {
@@ -167,6 +167,176 @@ describe('runReviewer: normalizzazione e fallback (modello finto)', () => {
     expect(out.ok).toBe(false)
     expect((out as { error: string }).error).toContain('timeout')
   }, 5_000)
+})
+
+// ---- RW (fase revisore sulla richiesta): il giudice di Rakazo ----
+
+const RULE_WORDS = 'mi dici cosa ho su trello'
+const BOT_BRIEF = 'Trello — tiene d\'occhio le mie board'
+
+describe('RW1: ownerWordsOf — SOLO le parole del proprietario, per tipo di turno', () => {
+  // la conversazione del test: un messaggio utente, poi una card di un ALTRO
+  // bot, poi il risultato di uno strumento (che NON è parole del proprietario)
+  const entries = [
+    { role: 'assistant', kind: 'message', content: 'premessaggio del bot' },
+    { role: 'user', kind: 'message', content: RULE_WORDS },
+    { role: 'assistant', kind: 'message', content: 'messaggio di un altro bot' },
+    { role: 'system', kind: 'tool-result', content: 'RISULTATO-ESTERNO-da-non-mai-vedere' }
+  ]
+
+  it('turno privato aperto da un suo messaggio → quel messaggio (userText)', () => {
+    expect(ownerWordsOf({ source: 'user', userText: RULE_WORDS, entries })).toBe(RULE_WORDS)
+  })
+
+  it('routine a orario senza evento esterno → le istruzioni della routine (userText)', () => {
+    expect(ownerWordsOf({ source: 'routine', userText: '[recurring routine: Trello] controlla le board', entries }))
+      .toBe('[recurring routine: Trello] controlla le board')
+  })
+
+  it('routine con evento esterno → vuoto (il testo non è del proprietario)', () => {
+    expect(ownerWordsOf({ source: 'routine', externalEvent: true, userText: '<evento>…</evento>', entries })).toBe('')
+  })
+
+  it('risvegli di sistema → l\'ultimo messaggio utente della conversazione, anche con un bot dopo', () => {
+    for (const initiator of ['SHELL_DONE', 'SUBAGENTS_DONE', 'CONNECTOR_CONNECTED', 'LOOK_AROUND', 'ROUTINE']) {
+      expect(ownerWordsOf({ source: 'user', initiator, userText: 'testo del risveglio, non suo', entries }), initiator).toBe(RULE_WORDS)
+    }
+  })
+
+  it('mai risultati di strumenti, mai testo di altri bot: il revisore non li vede', () => {
+    const w = ownerWordsOf({ source: 'user', initiator: 'SHELL_DONE', userText: 'x', entries })
+    expect(w).not.toContain('RISULTATO-ESTERNO')
+    expect(w).not.toContain('altro bot')
+  })
+
+  it('turni di gruppo, figli e task → vuoto; niente messaggi utente → vuoto', () => {
+    expect(ownerWordsOf({ source: 'group', userText: 'apertura del gruppo', entries })).toBe('')
+    expect(ownerWordsOf({ source: 'user', userText: 'brief', entries, subagent: { id: 's', parentId: 'p' } })).toBe('')
+    expect(ownerWordsOf({ source: 'user', userText: 'brief', entries, taskId: 7 })).toBe('')
+    expect(ownerWordsOf({ source: 'user', initiator: 'SHELL_DONE', userText: 'x', entries: [{ role: 'system', kind: 'tool-result', content: 'solo tool' }] })).toBe('')
+  })
+
+  it('taglio a 1000 caratteri; botBrief (nome+descrizione) a 240', () => {
+    const long = ownerWordsOf({ source: 'user', userText: 'a'.repeat(2_000), entries })
+    expect(long.length).toBe(1_000)
+    expect(long.endsWith('…')).toBe(true)
+    expect(botBriefOf('Trello', 'd'.repeat(500)).length).toBe(240)
+    expect(botBriefOf('Trello', 'tiene d\'occhio le mie board')).toBe(BOT_BRIEF)
+  })
+})
+
+describe('RW1: reviewerPrompt — la richiesta del proprietario e il bot come DATI', () => {
+  const act: AutoReviewAction = { tool: 'run-command', args: { command: 'ls' }, neverAuto: false, untrustedTurn: false, ownerWords: RULE_WORDS, botBrief: BOT_BRIEF }
+
+  it('le parole del proprietario stanno in <richiesta_del_proprietario>, il bot in <bot>, l\'azione in <azione>', () => {
+    const p = reviewerPrompt(cfg, act, 'it')
+    expect(p).toContain('<richiesta_del_proprietario>')
+    expect(p).toContain(RULE_WORDS)
+    expect(p).toContain('<bot>')
+    expect(p).toContain(BOT_BRIEF)
+    expect(p).toContain('<azione>')
+    expect(p).toContain('tool: run-command')
+  })
+
+  it('i tre blocchi sono DATI, non istruzioni; la riga di lingua e il contesto del box restano', () => {
+    const p = reviewerPrompt(cfg, act, 'it')
+    expect(p).toContain('DATA')
+    expect(p).toContain('Write the reason in Italian')
+    expect(p).toContain("the working directory is the bot's HOME")
+    // la tool call forzata resta
+    expect(p).toContain('report_decision')
+  })
+
+  it('«When in doubt, ask» NON c\'è più: il dubbio vero è già «va oltre?»', () => {
+    expect(reviewerPrompt(cfg, act, 'it')).not.toContain('When in doubt, ask')
+  })
+
+  it('i criteri in ordine: regola di fermo → ask; regola continua → allow citata; altrimenti si giudica sulla richiesta', () => {
+    const p = reviewerPrompt(cfg, act, 'it')
+    expect(p.indexOf('ALWAYS ask')).toBeLessThan(p.indexOf('plausibly serves'))
+    expect(p).toContain('plausibly serves what the owner asked for or the bot\'s job')
+    expect(p).toContain('hard to undo')
+  })
+
+  it('senza testo del proprietario il blocco c\'è comunque (vuoto marcato), il revisore giudica sul lavoro del bot', () => {
+    const p = reviewerPrompt(cfg, { ...act, ownerWords: '' }, 'it')
+    expect(p).toContain('<richiesta_del_proprietario>')
+    expect(p.toLowerCase()).toContain('none')
+  })
+
+  it('il testo di un risultato di strumento nella conversazione NON entra nel prompt', () => {
+    const words = ownerWordsOf({ source: 'user', initiator: 'SHELL_DONE', userText: 'x', entries: [
+      { role: 'user', kind: 'message', content: RULE_WORDS },
+      { role: 'system', kind: 'tool-result', content: 'RISULTATO-ESTERNO-da-non-mai-vedere' }
+    ] })
+    const p = reviewerPrompt(cfg, { ...act, ownerWords: words }, 'it')
+    expect(p).not.toContain('RISULTATO-ESTERNO')
+  })
+})
+
+describe('RW1: autoReviewDecision con basis — la richiesta può far passare da sola', () => {
+  const requestAllow = { ok: true as const, decision: 'allow' as const, basis: 'request' as const, reason: 'lettura delle board richiesta dall\'utente' }
+
+  it('allowRules VUOTE e revisore allow basis request → autoAllow true (oggi false)', () => {
+    const empty: AutoReviewSettings = { enabled: true, allowRules: [], blockRules: [], providerId: 'p', model: 'm' }
+    const d = autoReviewDecision(empty, cmd, requestAllow, 0)
+    expect(d).toMatchObject({ autoAllow: true, basis: 'request' })
+  })
+
+  it('basis rule con una regola inventata → ask', () => {
+    expect(autoReviewDecision(cfg, cmd, { ok: true, decision: 'allow', basis: 'rule', ruleMatched: 'regola inventata' }, 0).autoAllow).toBe(false)
+  })
+
+  it('una blockRule citata → ask QUALUNQUE sia la decisione e la basis', () => {
+    expect(autoReviewDecision(cfg, cmd, { ok: true, decision: 'allow', basis: 'rule', ruleMatched: BLOCK }, 0).autoAllow).toBe(false)
+    expect(autoReviewDecision(cfg, cmd, { ok: true, decision: 'allow', basis: 'request', ruleMatched: BLOCK }, 0).autoAllow).toBe(false)
+  })
+
+  it('basis rule con la regola citata parola per parola → autoAllow con basis rule e ruleMatched', () => {
+    const d = autoReviewDecision(cfg, cmd, { ok: true, decision: 'allow', basis: 'rule', ruleMatched: RULE }, 0)
+    expect(d).toMatchObject({ autoAllow: true, basis: 'rule', ruleMatched: RULE })
+  })
+
+  it('OGNI esclusione hard resta ask anche con basis request', () => {
+    // turno non fidato, never-auto, comportamento futuro, scambio file, tetto 20
+    expect(autoReviewDecision(cfg, { ...cmd, untrustedTurn: true }, requestAllow, 0).autoAllow).toBe(false)
+    expect(autoReviewDecision(cfg, { ...cmd, neverAuto: true }, requestAllow, 0).autoAllow).toBe(false)
+    for (const tool of ['update_skill', 'update_memory', 'update_state']) {
+      expect(autoReviewDecision(cfg, { ...cmd, tool }, requestAllow, 0).autoAllow, tool).toBe(false)
+    }
+    expect(autoReviewDecision(cfg, { ...cmd, tool: 'copy_to_box' }, requestAllow, 0).autoAllow).toBe(false)
+    expect(autoReviewDecision(cfg, cmd, requestAllow, AUTO_REVIEW_MAX_PER_TURN).autoAllow).toBe(false)
+    // revisore indisponibile o che chiede → ask come oggi
+    expect(autoReviewDecision(cfg, cmd, { ok: false, error: 'timeout' }, 0).autoAllow).toBe(false)
+    expect(autoReviewDecision(cfg, cmd, { ok: true, decision: 'ask', basis: 'request' }, 0).autoAllow).toBe(false)
+  })
+})
+
+describe('RW1: runReviewer — basis nell\'esito strutturato', () => {
+  const model = (resp: unknown): ReviewerModel => ({
+    call: async () => resp as { toolCalls: Array<{ arguments: string }> | undefined }
+  })
+
+  it('basis request valida → ok con basis', async () => {
+    const out = await runReviewer(cfg, cmd, model({
+      toolCalls: [{ arguments: JSON.stringify({ decision: 'allow', basis: 'request', reason: 'serve alla richiesta' }) }]
+    }))
+    expect(out).toEqual({ ok: true, decision: 'allow', basis: 'request', reason: 'serve alla richiesta' })
+  })
+
+  it('basis rule con ruleMatched → ok con basis e regola', async () => {
+    const out = await runReviewer(cfg, cmd, model({
+      toolCalls: [{ arguments: JSON.stringify({ decision: 'allow', basis: 'rule', ruleMatched: RULE }) }]
+    }))
+    expect(out).toEqual({ ok: true, decision: 'allow', basis: 'rule', ruleMatched: RULE })
+  })
+
+  it('basis fuori dai valori → ok:false (fail closed)', async () => {
+    const out = await runReviewer(cfg, cmd, model({
+      toolCalls: [{ arguments: JSON.stringify({ decision: 'allow', basis: 'vibes' }) }]
+    }))
+    expect(out).toEqual({ ok: false, error: 'invalid basis' })
+  })
 })
 
 // ---- fase impostazioni (I4.3): il modo «Non chiedere» — la sorella pura ----

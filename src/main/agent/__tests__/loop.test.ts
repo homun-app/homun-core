@@ -2525,7 +2525,7 @@ function enableAutoReview(over: Partial<{ enabled: boolean; allowRules: string[]
 /** Risposta del revisore che approva citando la regola. */
 function reviewerAllow(rule: string): void {
   h.llm.reviewer = {
-    toolCalls: [{ id: 'rd1', name: 'report_decision', arguments: JSON.stringify({ decision: 'allow', ruleMatched: rule, reason: 'regola rispettata' }) }]
+    toolCalls: [{ id: 'rd1', name: 'report_decision', arguments: JSON.stringify({ decision: 'allow', basis: 'rule', ruleMatched: rule, reason: 'regola rispettata' }) }]
   }
 }
 
@@ -2545,16 +2545,19 @@ describe('fase 8 (punto 1): auto-review delle approvazioni', () => {
     expect(approvals[0]!.meta).toMatchObject({ autoApproved: true, ruleMatched: AR_RULE, status: 'allowed' })
     // entry chiusa: niente approvalId da cliccare
     expect(approvals[0]!.meta?.approvalId).toBeUndefined()
-    // il revisore ha visto SOLO regole e azione (nessun messaggio del transcript)
+    // RW (fase revisore sulla richiesta): il revisore vede le parole del
+    // PROPRIETARIO (il messaggio che ha aperto il turno, nel blocco dati) e
+    // l'azione — mai il resto del transcript
     const reviewerCall = h.llm.calls.find((c) => c.length === 1 && c[0]!.role === 'user' && c[0]!.content.includes('<azione>'))!
     expect(reviewerCall[0]!.content).toContain(AR_RULE)
-    expect(reviewerCall[0]!.content).toContain('elenca i file'.length > 0 ? 'tool: run-command' : '')
-    expect(reviewerCall[0]!.content).not.toContain('elenca i file')
+    expect(reviewerCall[0]!.content).toContain('tool: run-command')
+    expect(reviewerCall[0]!.content).toContain('elenca i file')
+    expect(reviewerCall[0]!.content).toContain('<richiesta_del_proprietario>')
   })
 
   it('revisore che chiede conferma (ask) → la card resta come senza auto-review', async () => {
     enableAutoReview()
-    h.llm.reviewer = { toolCalls: [{ id: 'rd1', name: 'report_decision', arguments: JSON.stringify({ decision: 'ask', reason: 'nessuna regola corrisponde' }) }] }
+    h.llm.reviewer = { toolCalls: [{ id: 'rd1', name: 'report_decision', arguments: JSON.stringify({ decision: 'ask', basis: 'request', reason: 'nessuna regola corrisponde' }) }] }
     h.llm.queue = [{ toolCalls: [{ id: 'c1', name: 'run-command', arguments: JSON.stringify({ command: 'ls' }) }] }]
     const turn = runTurn(AGENT, 'vai', emit)
     await vi.waitFor(() => {
@@ -2642,7 +2645,7 @@ describe('fase 8 (punto 1): auto-review delle approvazioni', () => {
 
   it('bozza che non rispetta le regole → resta card (nessun invio)', async () => {
     enableAutoReview({ allowRules: [AR_DRAFT_RULE] })
-    h.llm.reviewer = { toolCalls: [{ id: 'rd1', name: 'report_decision', arguments: JSON.stringify({ decision: 'ask' }) }] }
+    h.llm.reviewer = { toolCalls: [{ id: 'rd1', name: 'report_decision', arguments: JSON.stringify({ decision: 'ask', basis: 'request' }) }] }
     h.llm.queue = [
       {
         toolCalls: [{
@@ -4498,7 +4501,7 @@ describe('fase 11 (punto 2): web_search e web_fetch nel loop', () => {
   it('la auto-review pura esclude le azioni contaminate anche col revisore favorevole', async () => {
     const { autoReviewDecision, CONTAMINATED_ASK_TOOLS } = await import('../auto-review')
     const cfg = { enabled: true, allowRules: ['qualsiasi cosa'], blockRules: [], providerId: 'prov', model: 'm1' }
-    const reviewer = { ok: true as const, decision: 'allow' as const, ruleMatched: 'qualsiasi cosa' }
+    const reviewer = { ok: true as const, decision: 'allow' as const, basis: 'rule' as const, ruleMatched: 'qualsiasi cosa' }
     for (const tool of ['run-command', 'draft_external', 'send_to_agent', 'create_agent', 'create_group']) {
       const d = autoReviewDecision(cfg, { tool, neverAuto: false, untrustedTurn: false, contaminated: true }, reviewer, 0)
       expect(d.autoAllow, tool).toBe(false)
@@ -4611,7 +4614,7 @@ describe('fase 11 (punto 4): copy_to_box / copy_from_box nel loop', () => {
   it('l\'auto-review PURA non approva MAI i tool di copia (nemmeno col revisore favorevole)', async () => {
     const { autoReviewDecision } = await import('../auto-review')
     const cfg = { enabled: true, allowRules: ['tutto'], blockRules: [], providerId: 'prov', model: 'm1' }
-    const reviewer = { ok: true as const, decision: 'allow' as const, ruleMatched: 'tutto' }
+    const reviewer = { ok: true as const, decision: 'allow' as const, basis: 'rule' as const, ruleMatched: 'tutto' }
     for (const tool of ['copy_to_box', 'copy_from_box']) {
       const d = autoReviewDecision(cfg, { tool, neverAuto: false, untrustedTurn: false }, reviewer, 0)
       expect(d.autoAllow, tool).toBe(false)
@@ -4782,7 +4785,7 @@ describe('fase 11b: il browser del bot nel loop', () => {
       expect(CONTAMINATED_ASK_TOOLS.has(tool), tool).toBe(true)
     }
     const cfg = { enabled: true, allowRules: ['tutto'], blockRules: [], providerId: 'prov', model: 'm1' }
-    const reviewer = { ok: true as const, decision: 'allow' as const, ruleMatched: 'tutto' }
+    const reviewer = { ok: true as const, decision: 'allow' as const, basis: 'rule' as const, ruleMatched: 'tutto' }
     for (const tool of ['browser_click', 'browser_type']) {
       const d = autoReviewDecision(cfg, { tool, neverAuto: false, untrustedTurn: false, contaminated: true }, reviewer, 0)
       expect(d.autoAllow, tool).toBe(false)

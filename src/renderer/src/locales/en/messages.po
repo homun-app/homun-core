@@ -916,6 +916,11 @@ msgstr "Approved, the routine is born active and will run by itself."
 
 #. placeholder {0}: String(entry.meta?.ruleMatched ?? '')
 #: src/renderer/src/components/ApprovalCard.tsx
+msgid "Approvato automaticamente dalla regola: {0}"
+msgstr "Approved automatically by rule: {0}"
+
+#. placeholder {0}: String(entry.meta?.reason ?? '')
+#: src/renderer/src/components/ApprovalCard.tsx
 msgid "Approvato automaticamente: {0}"
 msgstr "Approved automatically: {0}"
 
@@ -3146,6 +3151,11 @@ msgstr "the reviewer asked for the user’s confirmation"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
+msgid "autoreview.blockRule"
+msgstr "the reviewer quoted a stop rule"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
 msgid "autoreview.noRule"
 msgstr "the reviewer did not quote a valid allow rule"
 
@@ -3450,6 +3460,11 @@ msgstr "Sent to {0}"
 msgid "Inviata automaticamente dalla regola: {0}"
 msgstr "Sent automatically by the rule: {0}"
 
+#. placeholder {0}: String(meta.reason ?? '')
+#: src/renderer/src/components/DraftCard.tsx
+msgid "Inviata automaticamente: {0}"
+msgstr "Sent automatically: {0}"
+
 #: src/renderer/src/components/DraftCard.tsx
 msgid "invio esterno"
 msgstr "external send"
@@ -3654,6 +3669,10 @@ msgstr "Automation changes ask every time"
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Le pagine, i grafici e i file di questo bot finiscono qui."
 msgstr "The pages, charts and files of this bot end up here."
+
+#: src/renderer/src/components/settings/ApprovalsPage.tsx
+msgid "Le regole servono per allargare ciò che passa da solo, non sono necessarie: anche senza, il revisore fa passare quello che serve a ciò che hai chiesto."
+msgstr "Rules widen what passes on its own; they are not required: even without them, the reviewer passes what your request needs."
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Le ricerche dei bot vengono inviate a questi servizi, secondo i loro termini d'uso: <0>You.com</0> · <1>Exa</1> · <2>Tavily</2>"
@@ -5673,10 +5692,6 @@ msgstr "If the template has skills, create them with update_skill (name, descrip
 msgid "Se ospiti un documento dei metadati del client (CIMD, es. su GitHub Pages, https e con percorso), incollalo qui; vuoto = registrazione dinamica (DCR)."
 msgstr "If you host a client metadata document (CIMD, e.g. on GitHub Pages, https with a path), paste it here; empty = dynamic registration (DCR)."
 
-#: src/renderer/src/components/settings/ApprovalsPage.tsx
-msgid "Se una regola corrisponde (e nessuna regola di fermata), il revisore può approvare l’azione o l’invio della bozza."
-msgstr "If a rule matches (and no stop rule does), the reviewer can approve the action or the draft send."
-
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "Segreti"
 msgstr "Secrets"
@@ -6389,8 +6404,8 @@ msgid "approval.useAppSend"
 msgstr "Pressing Return in {app} can send something: this action always asks."
 
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
-msgid "Un modello controlla ogni azione contro le tue regole: quelle semplici passano, per le altre il bot chiede."
-msgstr "A model checks every action against your rules: the simple ones pass, for the others the bot asks."
+msgid "Un modello controlla ogni azione: fa passare quello che serve a ciò che hai chiesto e ti chiede quando va oltre e non si annulla facilmente (scrivere a qualcuno, pagare, cancellare, pubblicare). Le tue regole vengono prima."
+msgstr "A model checks every action: it passes what your request needs and asks when it clearly goes beyond and is hard to undo (writing to someone, paying, deleting, publishing). Your rules come first."
 
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 msgid "Una di queste regole vince sempre sulle altre: l’azione diventa una card."

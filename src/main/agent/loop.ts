@@ -68,7 +68,7 @@ import { formatAgentMessage, agentSendGuard, countPairMessagesLastHour, AGENT_HO
 import { mainAgentOf } from '../../daemon/presence'
 import { analyzeCommand } from './shell-ast'
 import { commandKey, isNeverAuto } from './permission-rules'
-import { autoReviewDecision, neverAskDecision, approvalsMode, reviewWithConfiguredModel, liftContaminatedAllow, AUTO_REVIEW_MAX_PER_TURN, type AutoReviewAction } from './auto-review'
+import { autoReviewDecision, neverAskDecision, approvalsMode, reviewWithConfiguredModel, liftContaminatedAllow, ownerWordsOf, botBriefOf, AUTO_REVIEW_MAX_PER_TURN, type AutoReviewAction } from './auto-review'
 import { activityOf, isToolLoop, stopReasonOfError } from './loop-guard'
 import { nextWithDeadline, DEFAULT_STREAM_DEADLINES, StreamDeadlineError } from './stream-deadline'
 // fase 9 (punto 0): regole dei send_to_user dentro il turno (dedup, tetto
@@ -950,6 +950,22 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
   // anche per l'origine propagata dai turni di task e dal TASK_DONE
   const untrustedTurn =
     opts.agentMessage !== undefined || opts.initiator === 'AGENT' || opts.externalEvent === true || opts.untrusted === true
+  // RW (fase revisore sulla richiesta): le parole del PROPRIETARIO e il breve
+  // del bot per il revisore — solo ciò che ha scritto lui (ownerWordsOf),
+  // mai risultati di strumenti né testo di altri bot; nei turni senza suo
+  // testo il revisore giudica solo sul lavoro del bot
+  const ownerWords = ownerWordsOf({
+    source,
+    initiator: opts.initiator,
+    agentMessage: opts.agentMessage,
+    externalEvent: opts.externalEvent,
+    groupTurn: opts.groupTurn,
+    subagent: opts.subagent,
+    taskId: opts.taskId,
+    userText,
+    entries: getEntries(agentId)
+  })
+  const botBrief = botBriefOf(agent.name, agent.description)
   // fase 8 (punto 1): approvazioni automatiche concesse in questo turno (tetto 20)
   let autoApprovals = 0
   // fase 11 (punto 2): dal PRIMO web_search o web_fetch con contenuto il turno
@@ -2559,7 +2575,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           // con le regole dell'utente ("Continua da solo quando…"); tutto ciò
           // che non convince il revisore resta card come prima
           const via = prepared.message.via
-          let autoSend: { ok: true; ruleMatched: string } | { ok: false; error: string } | null = null
+          let autoSend: { ok: true; basis: 'rule' | 'request'; ruleMatched?: string; reason?: string } | { ok: false; error: string } | null = null
           if (via && !prepared.viaRejected && autoApprovals < AUTO_REVIEW_MAX_PER_TURN) {
             const action: AutoReviewAction = {
               tool: 'draft_external',
@@ -2569,7 +2585,8 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
                 body: prepared.message.body
               },
               neverAuto: false, untrustedTurn,
-              ...(contaminated ? { contaminated: true } : {})
+              ...(contaminated ? { contaminated: true } : {}),
+              ownerWords, botBrief
             }
             const review = await reviewWithConfiguredModel(action, userLang)
             if (review) {
@@ -2589,12 +2606,14 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
                     // regola»): l'esito, ripulito e troncato, vive nel meta
                     updateEntryMeta(draft.id, {
                       ...draft.meta, status: 'sent',
-                      autoApproved: true, ruleMatched: decision.ruleMatched,
+                      autoApproved: true, autoBasis: decision.basis,
+                      ...(decision.basis === 'rule' && decision.ruleMatched ? { ruleMatched: decision.ruleMatched } : {}),
+                      ...(decision.reason ? { reason: decision.reason } : {}),
                       sendResult: redactComposioSecrets(output.slice(0, 2048))
                     })
                     const updated = getEntries(agentId).find((e) => e.id === draft.id)
                     if (updated) emit({ type: 'entries', agentId, entries: [updated] })
-                    autoSend = { ok: true, ruleMatched: decision.ruleMatched }
+                    autoSend = { ok: true, basis: decision.basis, ...(decision.basis === 'rule' && decision.ruleMatched ? { ruleMatched: decision.ruleMatched } : {}), ...(decision.reason ? { reason: decision.reason } : {}) }
                   } catch (e) {
                     const msg = e instanceof Error ? e.message : String(e)
                     updateEntryMeta(draft.id, { ...draft.meta, status: 'error' })
@@ -2616,7 +2635,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             content: prepared.viaRejected
               ? `text-only draft created: "via" discarded because ${prepared.viaRejected} is not an external-send tool (no send channel connected).`
               : autoSend?.ok
-                ? `draft SENT automatically under the user's auto-review rule "${autoSend.ruleMatched}": outcome reported in chat.`
+                ? `draft SENT automatically under the user's auto-review ${autoSend.basis === 'rule' ? `rule "${autoSend.ruleMatched}"` : 'judgment on the request'}: outcome reported in chat.`
                 : autoSend && !autoSend.ok
                   ? `automatic send of the draft failed (${autoSend.error}): the draft waits for the user's click.`
                   : prepared.viaAuto && prepared.message.via
@@ -2789,20 +2808,25 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             // approvare da sola: la card va all'utente.
             // Fase impostazioni (I4.3): nel modo «Non chiedere» le esclusioni
             // fisse valgono uguale — neverAllow le rispetta
-            let autoAllowed: { ruleMatched: string; reason?: string } | null = null
+            let autoAllowed: { basis: 'rule' | 'request'; ruleMatched?: string; reason?: string } | null = null
             const action: AutoReviewAction = {
               tool: call.name, args: input, neverAuto: false, untrustedTurn,
-              ...(contaminated ? { contaminated: true } : {})
+              ...(contaminated ? { contaminated: true } : {}),
+              ownerWords, botBrief
             }
             const neverReason = neverAllow(action)
             if (neverReason !== null) {
-              autoAllowed = { ruleMatched: '', reason: neverReason }
+              autoAllowed = { basis: 'rule', ruleMatched: '', reason: neverReason }
             } else {
               const review = await reviewWithConfiguredModel(action, userLang)
               if (review) {
                 const decision = autoReviewDecision(review.cfg, action, review.outcome, autoApprovals)
                 if (decision.autoAllow) {
-                  autoAllowed = { ruleMatched: decision.ruleMatched, ...(decision.reason ? { reason: decision.reason } : {}) }
+                  autoAllowed = {
+                    basis: decision.basis,
+                    ...(decision.basis === 'rule' && decision.ruleMatched ? { ruleMatched: decision.ruleMatched } : {}),
+                    ...(decision.reason ? { reason: decision.reason } : {})
+                  }
                   autoApprovals++
                 }
               }
@@ -2993,17 +3017,17 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               // auto-review come per le altre ask, poi la card all'utente.
               // Fase impostazioni (I4.3): il modo «Non chiedere» rispetta le
               // stesse esclusioni fisse (neverAllow)
-              let autoAllowed: { ruleMatched: string } | null = null
-              const arAction: AutoReviewAction = { tool: call.name, args: input, neverAuto: false, untrustedTurn, ...(contaminated ? { contaminated: true } : {}) }
+              let autoAllowed: { basis: 'rule' | 'request'; ruleMatched?: string } | null = null
+              const arAction: AutoReviewAction = { tool: call.name, args: input, neverAuto: false, untrustedTurn, ...(contaminated ? { contaminated: true } : {}), ownerWords, botBrief }
               const neverReason = neverAllow(arAction)
               if (neverReason !== null) {
-                autoAllowed = { ruleMatched: '' }
+                autoAllowed = { basis: 'rule', ruleMatched: '' }
               } else {
                 const review = await reviewWithConfiguredModel(arAction, userLang)
                 if (review) {
                   const decision = autoReviewDecision(review.cfg, arAction, review.outcome, autoApprovals)
                   if (decision.autoAllow) {
-                    autoAllowed = { ruleMatched: decision.ruleMatched }
+                    autoAllowed = { basis: decision.basis, ...(decision.basis === 'rule' && decision.ruleMatched ? { ruleMatched: decision.ruleMatched } : {}) }
                     autoApprovals++
                   }
                 }
@@ -4102,7 +4126,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           const turnGranted = tKey !== null && run.turnAllows.has(tKey)
           // fase 8 (punto 1): l'auto-review sta DOPO il gate e può SOLO
           // trasformare ask in allow, secondo le regole dell'utente
-          let autoAllowed: { ruleMatched: string; reason?: string; never?: boolean } | null = null
+          let autoAllowed: { basis: 'rule' | 'request'; ruleMatched?: string; reason?: string; never?: boolean } | null = null
           // per la UI: i comandi never-auto non offrono "per questo turno"
           const neverAutoCmd = call.name === 'run-command'
             ? (await analyzeCommand(String(input.command ?? ''))).commands.some((c) => isNeverAuto(c))
@@ -4113,19 +4137,24 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             // le azioni con effetti di un turno CONTAMINATO da contenuti web
             const action: AutoReviewAction = {
               tool: call.name, args: input, neverAuto: neverAutoCmd || forcedOriginAsk, untrustedTurn,
-              ...(contaminated ? { contaminated: true } : {})
+              ...(contaminated ? { contaminated: true } : {}),
+              ownerWords, botBrief
             }
             // fase impostazioni (I4.3): modo «Non chiedere» — allow sintetico,
             // senza tetto per turno, tranne le esclusioni fisse di sempre
             const neverReason = neverAllow(action)
             if (neverReason !== null) {
-              autoAllowed = { ruleMatched: '', reason: neverReason, never: true }
+              autoAllowed = { basis: 'rule', ruleMatched: '', reason: neverReason, never: true }
             } else {
               const review = await reviewWithConfiguredModel(action, userLang)
               if (review) {
                 const decision = autoReviewDecision(review.cfg, action, review.outcome, autoApprovals)
                 if (decision.autoAllow) {
-                  autoAllowed = { ruleMatched: decision.ruleMatched, ...(decision.reason ? { reason: decision.reason } : {}) }
+                  autoAllowed = {
+                    basis: decision.basis,
+                    ...(decision.basis === 'rule' && decision.ruleMatched ? { ruleMatched: decision.ruleMatched } : {}),
+                    ...(decision.reason ? { reason: decision.reason } : {})
+                  }
                   autoApprovals++
                 }
               }
@@ -4143,8 +4172,12 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
                 ...(verdictUiOf(verdict) ? { ui: verdictUiOf(verdict)! } : {}),
                 autoApproved: true,
                 // I4.3: nel modo «Non chiedere» non c'è regola — il marker dice
-                // QUALE impostazione ha fatto passare l'azione
-                ...(autoAllowed.never ? { autoNever: true } : { ruleMatched: autoAllowed.ruleMatched }),
+                // QUALE impostazione ha fatto passare l'azione.
+                // RW: autoBasis dice SECONDO COSA il revisore ha approvato —
+                // 'request' (in chat il reason del revisore) o 'rule' (la regola)
+                ...(autoAllowed.never
+                  ? { autoNever: true }
+                  : { autoBasis: autoAllowed.basis, ...(autoAllowed.basis === 'rule' && autoAllowed.ruleMatched ? { ruleMatched: autoAllowed.ruleMatched } : {}) }),
                 ...(autoAllowed.reason ? { reason: autoAllowed.reason } : {}),
                 ...(verdict.secretRefs?.length ? { secretRefs: verdict.secretRefs } : {}),
                 // R3 (ritocchi): anche le auto-approvate MCP portano il nome

@@ -28,7 +28,9 @@ const MODES: ReadonlyArray<{ id: ApprovalsMode; label: MessageDescriptor }> = [
 
 const MODE_SENTENCES: Record<ApprovalsMode, MessageDescriptor> = {
   ask: msg`Il bot chiede prima di ogni azione che cambia qualcosa: inviare, scrivere, eseguire comandi. Leggere non chiede.`,
-  auto: msg`Un modello controlla ogni azione contro le tue regole: quelle semplici passano, per le altre il bot chiede.`,
+  // RW (fase revisore sulla richiesta): il giudice di Rakazo — passa ciò che
+  // serve a ciò che hai chiesto, chiede ciò che va oltre e non si annulla
+  auto: msg`Un modello controlla ogni azione: fa passare quello che serve a ciò che hai chiesto e ti chiede quando va oltre e non si annulla facilmente (scrivere a qualcuno, pagare, cancellare, pubblicare). Le tue regole vengono prima.`,
   never: msg`Ogni azione parte senza aspettare.`
 }
 
@@ -131,7 +133,7 @@ export function ApprovalsPage() {
             />
             <RuleList
               title={msg`Continua da solo quando…`}
-              hint={msg`Se una regola corrisponde (e nessuna regola di fermata), il revisore può approvare l’azione o l’invio della bozza.`}
+              hint={msg`Le regole servono per allargare ciò che passa da solo, non sono necessarie: anche senza, il revisore fa passare quello che serve a ciò che hai chiesto.`}
               rules={cfg.allowRules}
               value={newAllow}
               setValue={setNewAllow}

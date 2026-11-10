@@ -173,7 +173,11 @@ export function DraftCard({ entry }: { entry: TranscriptEntry }) {
         ok={status === 'sent'}
         label={
           autoSent
-            ? i18n.t(msg`Inviata automaticamente dalla regola: ${String(meta.ruleMatched ?? '')}`)
+            // RW: con autoBasis 'request' il motivo è il reason del revisore;
+            // 'rule' (e le entry vecchie senza campo) la regola citata
+            ? meta.autoBasis === 'request'
+              ? i18n.t(msg`Inviata automaticamente: ${String(meta.reason ?? '')}`)
+              : i18n.t(msg`Inviata automaticamente dalla regola: ${String(meta.ruleMatched ?? '')}`)
             : status === 'sent'
               ? i18n.t(msg`Inviata a ${draft.to || '?'}`)
               : i18n.t(msg`Scartata`)
