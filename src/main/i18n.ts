@@ -31,6 +31,7 @@ export interface MainStrings {
     availableBody: string
     download: string
     openNotes: string
+    notesMore: string
     later: string
     downloadingTitle: string
     downloadFailed: string
@@ -73,6 +74,7 @@ const STRINGS: Record<UiLanguage, MainStrings> = {
       availableBody: 'Puoi scaricarla adesso: vedrai l\'avanzamento e al termine decidi se riavviare subito. Le note complete sono nella pagina delle release.',
       download: 'Scarica',
       openNotes: 'Apri le note',
+      notesMore: 'Apri le note per il resto.',
       later: 'Più tardi',
       downloadingTitle: 'Download della versione {version}',
       downloadFailed: 'Download non riuscito',
@@ -112,6 +114,7 @@ const STRINGS: Record<UiLanguage, MainStrings> = {
       availableBody: 'You can download it now: you will see the progress and then choose whether to restart right away. The full notes are on the releases page.',
       download: 'Download',
       openNotes: 'Open the notes',
+      notesMore: 'Open the notes for the rest.',
       later: 'Later',
       downloadingTitle: 'Downloading version {version}',
       downloadFailed: 'Download failed',

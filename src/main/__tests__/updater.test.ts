@@ -5,7 +5,7 @@
 // FASE RILASCIO — CORREZIONI (K6): mai nemmeno quando manca app-update.yml
 // (le build --dir): niente controllo, niente ENOENT nel log.
 import { describe, expect, it } from 'vitest'
-import { shouldAutoCheckUpdates, isNewerVersion, hasUpdateConfig } from '../updater'
+import { shouldAutoCheckUpdates, isNewerVersion, hasUpdateConfig, notesOf } from '../updater'
 import { findLegacyHomun2Dir, isLegacyHomun2DataDir, legacyNoticeMarkerPath } from '../legacy-homun2'
 
 const APP_DATA = '/Users/fabio/Library/Application Support'
@@ -81,5 +81,23 @@ describe('fase rilascio (A8): la cartella di Homun 2 (solo existsSync)', () => {
     expect(legacyNoticeMarkerPath('/Users/fabio/Library/Application Support/sandbot')).toBe(
       '/Users/fabio/Library/Application Support/sandbot/legacy-homun2-noticed'
     )
+  })
+})
+
+// ---- RW5: le note dell'aggiornamento come testo semplice ----
+
+describe('RW5: notesOf converte l\'HTML delle release in testo leggibile', () => {
+  it('releaseNotes stringa HTML → testo piano (niente <p>, <br>, <li>)', () => {
+    const info = { version: '0.3.1001-beta.2', releaseNotes: '<p>Aggiornamenti</p><ul><li>una cosa</li><li>un\'altra &amp; compagnia</li></ul>' } as Parameters<typeof notesOf>[0]
+    const t = notesOf(info)
+    expect(t).toContain('Aggiornamenti')
+    expect(t).toContain('• una cosa')
+    expect(t).toContain('un\'altra & compagnia')
+    expect(t).not.toMatch(/<\/?(p|ul|li)\b/i)
+  })
+
+  it('la forma ReleaseNoteInfo (note) passa dallo stesso convertitore', () => {
+    const t = notesOf({ version: '1.0.0', releaseNotes: { note: '<p>prima riga<br>seconda riga</p>' } as never } as unknown as Parameters<typeof notesOf>[0])
+    expect(t).toBe('prima riga\nseconda riga')
   })
 })

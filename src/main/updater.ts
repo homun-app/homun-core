@@ -28,6 +28,8 @@ import electronUpdater from 'electron-updater'
 import type { AppUpdater, UpdateInfo } from 'electron-updater'
 import { allowPrereleaseFor, type UpdateChannel } from '../shared/update-channel'
 import { mainStrings } from './i18n'
+// RW (fase revisore sulla richiesta): le note delle release come testo semplice
+import { releaseNotesText } from './release-notes-text'
 
 // l'istanza si COSTRUISCE al primo accesso (getter del pacchetto) e serve
 // l'app Electron: mai toccarla a import time, o vitest/node puro esplode.
@@ -248,13 +250,19 @@ function createUpdateProgressWindow(version: string) {
   }
 }
 
-function notesOf(info: UpdateInfo | undefined): string {
+/**
+ * Le note del dialogo in TESTO SEMPLICE (RW): con il provider GitHub arrivano
+ * come HTML e si vedevano i tag grezzi. La stringa vuota resta il ripiego.
+ * Esportata per i test (pura rispetto a info).
+ */
+export function notesOf(info: UpdateInfo | undefined): string {
   const raw = info?.releaseNotes
   if (!raw) return mainStrings().updater.availableBody
-  if (typeof raw === 'string') return raw
+  const more = mainStrings().updater.notesMore
+  if (typeof raw === 'string') return releaseNotesText(raw, more)
   // ReleaseNoteInfo: solo il testo, niente HTML grezzo
   const note = raw as { note?: string }
-  return note.note ?? mainStrings().updater.availableBody
+  return note.note ? releaseNotesText(note.note, more) : mainStrings().updater.availableBody
 }
 
 function offerUpdate(info: UpdateInfo | undefined): void {
