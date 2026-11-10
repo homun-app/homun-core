@@ -5,6 +5,43 @@ pubblicata finisce nel corpo della GitHub Release (da cui l'app mostra il
 «cosa cambia» quando propone un aggiornamento). Formato: `## [x.y.z] — data`,
 sezioni H2 e un punto per riga.
 
+## [0.3.1001-beta.2] — 2026-11-10
+
+Correzioni e ritocchi dalla prova della beta.1 sul Mac: l'aggiornamento che
+non partiva dall'app copiata a mano, e le cose che chiedevi dopo averla usata.
+
+### Aggiornamenti
+
+- **Se apri Homun fuori da Applicazioni (dal dmg o dai Download), adesso te
+  lo dice.** Da lì l'aggiornamento automatico non può sostituire l'app: Homun
+  chiede di spostarsi in Applicazioni e lo fa da solo, chiedendoti conferma
+  se ci trovi già una tua copia (chat e impostazioni non cambiano). Se
+  rispondi «Non ora», l'app funziona lo stesso ma gli aggiornamenti restano
+  spenti: in Impostazioni › Generali trovi il motivo e il bottone per
+  riprovarci quando vuoi.
+- Chi aveva copiato l'app a mano si era ritrovato un Homun di troppo acceso
+  in background anche dopo aver chiuso tutto: quello sbagliato ora viene
+  fermato e riparte quello giusto.
+
+### Impostazioni
+
+- **Una sola ✕, che non scappa.** Nelle Impostazioni la ✕ scorreva via col
+  contenuto e in «App e skill» ce n'erano due sovrapposte: adesso ce n'è
+  una, sempre visibile, in ogni scheda.
+- **La lingua si sceglie da un elenco.** Al posto dei pulsantini, il menu
+  che usi già per la finestra di consegna: «Sistema», «Italiano»,
+  «English». Le prossime lingue entreranno lì, senza bottoni in più.
+
+### Il tuo bot
+
+- **Il modello sta nel profilo del bot.** Sotto il nome, nel pannello a
+  destra: vedi quale modello usa (o «Come gli altri») e cliccando lo cambi
+  lì, senza aprire il foglio delle impostazioni. Anche l'avviso «Configura
+  prima un provider e un modello…» in chat porta direttamente alla scelta
+  del modello di quel bot.
+- **Gli avvisi ripetuti si raggruppano.** Se lo stesso avviso arriva due
+  volte di fila lo vedi una volta sola, con un piccolo «×2» accanto.
+
 ## [0.3.1001-beta.1] — 2026-11-10
 
 La prima versione del canale di prova: chi vuole vedere Homun 0.3 prima

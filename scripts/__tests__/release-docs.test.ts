@@ -74,6 +74,26 @@ describe('fase rilascio di prova (RP5): versione e CHANGELOG', () => {
     // dice la novità del canale di prova, che è il punto della beta
     expect(body).toContain('versioni di prova')
   })
+
+  it('RV5 (fase beta.2): la voce 0.3.1001-beta.2 c’è, SOPRA la beta.1, in parole per l’utente', async () => {
+    const { extractReleaseNotes } = (await import('../extract-release-notes.mjs')) as {
+      extractReleaseNotes: (changelog: string, version: string) => string | null
+    }
+    const changelog = read('CHANGELOG.md')
+    const body = extractReleaseNotes(changelog, '0.3.1001-beta.2')
+    expect(body, 'manca la sezione ## [0.3.1001-beta.2] nel CHANGELOG').not.toBeNull()
+    expect(body!.length).toBeGreaterThan(80) // in parole per l'utente, non una riga
+    // le cinque cose della beta.2, dette come le vede chi usa l'app (i corpi
+    // del changelog vanno a capo: le frasi si cercano a spazi normalizzati)
+    const flat = body!.replace(/\s+/g, ' ')
+    expect(flat).toContain('Applicazioni')
+    expect(flat).toMatch(/✕/)
+    expect(flat).toMatch(/[Ll]a lingua/)
+    expect(flat).toMatch(/modello/)
+    expect(flat).toContain('Configura prima un provider')
+    // e sta SOPRA la beta.1 (chi legge il changelog vede prima la più nuova)
+    expect(changelog.indexOf('## [0.3.1001-beta.2]')).toBeLessThan(changelog.indexOf('## [0.3.1001-beta.1]'))
+  })
 })
 
 void existsSync
