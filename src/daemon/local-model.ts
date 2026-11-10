@@ -269,12 +269,14 @@ export function startLocalModelDownload(deps: LocalModelDownloadDeps = {}): Prom
   )
   promise.finally(() => { activeDownload = null }).catch((e: unknown) => {
     const raw = e instanceof Error ? e.message : String(e)
-    // l'annullamento NON è un errore: lo stato che lascia è paused (il .part resta)
-    if (!/annull|cancel|abort/i.test(raw)) {
+    // LD2: l'annullamento lo dice il SEGNALE, l'unica fonte di verità: un errore
+    // di rete col testo «aborted» (undici, timeout) NON è un Annulla e finisce
+    // nello stato; l'annullamento NON è un errore: lascia paused (il .part resta)
+    if (controller.signal.aborted) {
+      console.error('[local-model] download cancelled (paused, il .part resta)')
+    } else {
       lastDownloadError = uiText(UI.localModelDownloadFailed, { message: raw })
       console.error(`[local-model] download failed: ${raw}`)
-    } else {
-      console.error('[local-model] download cancelled (paused, il .part resta)')
     }
   })
   return promise

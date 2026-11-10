@@ -75,8 +75,10 @@ export async function downloadLocalModel(opts: {
     })
     await pipeline(body, out)
   } catch (e) {
-    // annullato o rete rotta: il .part RESTA per la ripresa
-    if (e instanceof Error && /abort/i.test(e.message)) throw new Error('download cancelled')
+    // annullato o rete rotta: il .part RESTA per la ripresa. LD2: l'annullamento
+    // lo dice il SEGNALE, non il testo dell'errore — «aborted» nel messaggio può
+    // essere un errore di rete (undici, timeout), che va consegnato com'è
+    if (opts.signal?.aborted) throw new Error('download cancelled')
     throw e
   }
   if (opts.signal?.aborted) throw new Error('download cancelled')

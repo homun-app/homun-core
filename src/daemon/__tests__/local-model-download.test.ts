@@ -248,6 +248,37 @@ describe('fase locale correzioni (LC2): Annulla → paused (NON error), Riprendi
   })
 })
 
+describe('fase locale correzioni 2 (LD2): l\'annullamento si riconosce dal SEGNALE, non dal testo', () => {
+  it('un errore di rete con «aborted» nel testo e NESSUN Annulla → error col messaggio (non paused)', async () => {
+    // undici, timeout: testi di rete che contengono «aborted» senza che
+    // l'utente abbia annullato — l'unica fonte di verità è il segnale
+    const badFetch = vi.fn(async () => {
+      throw new Error('network request aborted by the remote peer')
+    })
+    await expect(lm.startLocalModelDownload({ fetch: badFetch as unknown as typeof fetch, url: `${base}/${ENTRY.file}`, entry: ENTRY }))
+      .rejects.toThrow(/aborted/)
+    const st = await statusOf()
+    expect(st.state).toBe('error')
+    expect(st.error ?? '').toMatch(/non è riuscito: network request aborted by the remote peer/i)
+  })
+
+  it('l\'Annulla VERO (segnale) resta paused senza messaggio, anche se il testo non dice niente', async () => {
+    // un fetch che rifiuta con un testo qualunque DOPO l'annullamento: conta
+    // il segnale, non la parola nel messaggio
+    const pending: { reject?: (e: Error) => void } = {}
+    const slowFetch = vi.fn(() => new Promise<Response>((_, rej) => { pending.reject = rej }))
+    const p = lm.startLocalModelDownload({ fetch: slowFetch as unknown as typeof fetch, url: `${base}/${ENTRY.file}`, entry: ENTRY })
+    await waitFor(() => pending.reject !== undefined, 'il fetch non è partito')
+    writeFileSync(partPath(), GGUF.slice(0, 4_000)) // c'è un .part dal turno prima
+    lm.cancelLocalModelDownload()
+    pending.reject?.(new Error('socket hang up'))
+    await expect(p).rejects.toThrow(/socket hang up/)
+    const st = await statusOf()
+    expect(st.state).toBe('paused') // annullato, NON error
+    expect(st.error).toBeUndefined()
+  })
+})
+
 describe('fase locale correzioni (LC2): local-model:install ricontrolla l\'idoneità LATO DEMONE', () => {
   it('architettura non arm64 → NEGA la partenza con errore chiaro, started:false', async () => {
     lm.setLocalModelEligibilityFactsForTest({ arch: 'x64', ramGb: 64, freeDiskBytes: 500 * 1024 ** 3 })
