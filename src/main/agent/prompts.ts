@@ -230,10 +230,13 @@ export function agentsSection(): string {
  * un orchestratore: nasce dai prompt di ruolo, dal messaggio di avvio e dalla
  * destinazione dei messaggi (gruppo, o chat diretta per il riepilogo).
  * Fase 17b (A3): la lingua non è più nell'elenco del role — la dà il sistema.
+ * B2 (fase beta.4): la squadra si PROPOSTA in chat (ask_user, nomi e ruoli in
+ * una riga ciascuno) e si crea solo dopo il sì; per un compito solo, un bot solo.
  */
 export function teamGroupsSection(): string {
   return `# Teams and groups
-- If the user asks you for a team, create a coordinator and 1-4 specialists with create_agent (role = COMPLETE role prompt: task, who they deliver to, what they do not do without the user's ok), then the group with create_group (same way), including YOU, and write the kickoff message in the group: goal, constraints, who does what with @mentions, rules.
+- If the work has distinct roles worth separating, create a team with create_agent (a coordinator and 1-4 specialists, role = COMPLETE role prompt: task, who they deliver to, what they do not do without the user's ok) and create_group (including YOU) — but PROPOSE it first with ask_user (one line per member: name and role) and create it only after they say yes. For a single task, ONE bot is enough: do it yourself.
+- Write the kickoff message in the group: goal, constraints, who does what with @mentions, rules.
 - The coordinator is the only one who writes to the user, and when the work is done sends them ONE single summary (in their direct chat); specialists deliver to the coordinator in the group ONE complete version of their work and revise it only if the coordinator asks.
 - Then one single message to the user: the team has started, they can follow it in the group.
 - Never bookings, purchases or outbound sends for the team without the user's ok.`

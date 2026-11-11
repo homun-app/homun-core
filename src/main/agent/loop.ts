@@ -64,7 +64,7 @@ import { buildSkillsSection, skillInvocationExpansion, invocableSkillsOf, mayInv
 // messaggi che il loop costruisce durante il turno
 import { systemTimeZone, withSentStamp } from './current-time'
 import { maybeCompactHistory, summarizeWithLlm } from './compaction'
-import { automationEventText } from './update-state'
+import { automationEventText, selfProfileFieldsText } from './update-state'
 import { formatAgentMessage, agentSendGuard, countPairMessagesLastHour, AGENT_HOP_MAX, formatWebSearchEvidence, formatWebFetchEvidence, formatWebBrowserEvidence, formatExternalDataEvidence } from '../../shared/agent-message'
 import { mainAgentOf } from '../../daemon/presence'
 import { analyzeCommand } from './shell-ast'
@@ -108,7 +108,7 @@ import {
 import { MAX_CREATE_AGENTS_PER_TURN, wakeParentToolDef } from './tools'
 // fase 13 (punto 3): add_mcp_server/install_plugin SOLO nei turni dell'utente;
 // (punto 5): tool MCP deferiti oltre connectors.maxInlineTools
-import { toolsForTurnSource, connectorProposalOffered, CONNECTOR_PROPOSAL_DENIED, GROUP_EXCLUDED_TOOLS, isMcpId, offerConnectorMcpGuidance, offerConnectorMissingText } from './connectors-policy'
+import { toolsForTurnSource, connectorProposalOffered, CONNECTOR_PROPOSAL_DENIED, GROUP_EXCLUDED_TOOLS, isMcpId, offerConnectorMcpGuidance, offerConnectorMissingText, isBotIntroTurn } from './connectors-policy'
 import { PROPOSAL_RESULT } from '../connectors/install'
 import {
   requiredParamsOf, toolsDeferred, connectorsActiveSection, DEFAULT_MAX_INLINE_TOOLS
@@ -1495,6 +1495,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     } catch {
       // MCP non disponibile: prosegue coi tool base
     }
+    // B2 (fase beta.4): il turno di presentazione usa SOLO la domanda e il
+    // proprio profilo (come il trigger «created» di Rakazo): niente MCP
+    if (isBotIntroTurn(opts.initiator)) mcpToolDefs = []
     const maxInlineTools = getSetting<number>('connectors.maxInlineTools', DEFAULT_MAX_INLINE_TOOLS)
     const deferredMcp = toolsDeferred(mcpToolDefs.length, maxInlineTools)
 
@@ -1634,27 +1637,35 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       tools: assembledTools,
       deferredIndex: turnCatalog,
       activeGroups: assembledActiveGroups
-    } = assembleTurnTools({
-      builtins,
-      browserAvailable: browserOn,
-      browserDefs,
-      mcpToolDefs,
-      maxInlineTools,
-      // fase token · nucleo (R8.2): il gruppo subagents (check/message/stop)
-      // si attiva DA SOLO nei turni in cui il bot ha almeno un figlio APERTO o
-      // il turno è il risveglio SUBAGENTS_DONE: quei tool servono subito,
-      // senza find_tools. Mai nel figlio (lì il gruppo non è nemmeno presente)
-      activatedGroups: (() => {
-        const groups = activeGroupsFromTranscript(scopedEntries())
-        if (opts.subagent === undefined && !groups.includes('subagents') &&
-            (opts.initiator === 'SUBAGENTS_DONE' || openSubagentsOf(db(), agentId) > 0)) {
-          groups.push('subagents')
-        }
-        return groups
-      })(),
-      ...(opts.subagent !== undefined ? { subagent: true } : {}),
-      ...(opts.groupTurn !== undefined ? { groupTurn: true } : {})
-    })
+    } = (
+      // B2 (fase beta.4): nel turno di presentazione l'elenco è GIUSTO i due
+      // tool che toolsForTurnSource ha lasciato (ask_user e update_self):
+      // niente nucleo, niente find_tools, niente gruppi — la domanda e il
+      // proprio profilo, come il trigger «created» di Rakazo
+      isBotIntroTurn(opts.initiator)
+        ? { tools: builtins, deferredIndex: [], activeGroups: [] }
+        : assembleTurnTools({
+            builtins,
+            browserAvailable: browserOn,
+            browserDefs,
+            mcpToolDefs,
+            maxInlineTools,
+            // fase token · nucleo (R8.2): il gruppo subagents (check/message/stop)
+            // si attiva DA SOLO nei turni in cui il bot ha almeno un figlio APERTO o
+            // il turno è il risveglio SUBAGENTS_DONE: quei tool servono subito,
+            // senza find_tools. Mai nel figlio (lì il gruppo non è nemmeno presente)
+            activatedGroups: (() => {
+              const groups = activeGroupsFromTranscript(scopedEntries())
+              if (opts.subagent === undefined && !groups.includes('subagents') &&
+                  (opts.initiator === 'SUBAGENTS_DONE' || openSubagentsOf(db(), agentId) > 0)) {
+                groups.push('subagents')
+              }
+              return groups
+            })(),
+            ...(opts.subagent !== undefined ? { subagent: true } : {}),
+            ...(opts.groupTurn !== undefined ? { groupTurn: true } : {})
+          })
+    )
 
     // §5.3: il messaggio corrente è l'ultimo entry del transcript → compare una volta sola.
     // Fase 4: il system prompt include memoria (§3bis L6) e skill disponibili.
@@ -4598,6 +4609,20 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               agentId, kind: 'event', role: 'system',
               content: formatUi(autoUi, loopUiLanguage()),
               meta: { automation: a, ui: autoUi }
+            })
+            emitLastEntry(agentId, emit)
+          }
+          // B2 (fase beta.4): il bot ha aggiornato il PROPRIO profilo con
+          // update_self — una riga di sistema dice COSA è cambiato
+          if (meta.selfUpdate && typeof meta.selfUpdate === 'object') {
+            const fields = (meta.selfUpdate as { fields?: unknown }).fields
+            const uiText = ui(UI.eventSelfProfileUpdated, {
+              fields: selfProfileFieldsText(Array.isArray(fields) ? fields.map(String) : [], loopUiLanguage())
+            })
+            add({
+              agentId, kind: 'event', role: 'system',
+              content: formatUi(uiText, loopUiLanguage()),
+              meta: { selfUpdate: meta.selfUpdate, ui: uiText }
             })
             emitLastEntry(agentId, emit)
           }

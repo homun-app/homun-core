@@ -38,6 +38,12 @@ export interface Agent {
   /** fase 16: aspetto scelto dall'utente (NULL = predefinito da hash dell'id) */
   avatar?: AgentAvatar | null
   /**
+   * B2 (fase beta.4): il nome scritto nel dialogo «Nuovo» alla creazione —
+   * update_self può cambiare il nome solo finché è ancora questo
+   * (NULL = il bot non nasce dal dialogo).
+   */
+  birthName?: string | null
+  /**
    * Fase 18b (H3): livello di ragionamento del bot. 'default' (o assente) =
    * il comportamento della 18a ESATTO; l'adattatore clampa sul modello vero.
    */

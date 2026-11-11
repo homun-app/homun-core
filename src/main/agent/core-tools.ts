@@ -40,6 +40,9 @@ export const CORE_TOOL_NAMES: ReadonlySet<string> = new Set([
   'edit_document',
   // le skill installate
   'skill',
+  // B2 (fase beta.4): il proprio profilo (update_self) — disponibile a ogni
+  // bot in ogni turno, come parlare e ricordare
+  'update_self',
   // fase token · nucleo (R8.2): la delega è comportamento di base del bot
   // NORMALE (come Task/Agent in Claude Code, sempre caricato); nei turni di
   // gruppo la regola del turno lo esclude (GROUP_EXCLUDED_TOOLS) e nel figlio

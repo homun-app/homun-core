@@ -852,6 +852,9 @@ function EntryRow({ entry, repeat = 1, showReasoning, debugSteps }: { entry: Tra
           </details>
         )
       }
+      // B2 (fase beta.4): il prompt NASCOSTO della presentazione del bot nuovo
+      // non compare in chat: la domanda arriva come card ask_user
+      if (opening.kind === 'hidden') return null
       return entry.role === 'user' ? (
         // bolla utente a destra — NEUTRA (G1, fase 0.3.1001 grafica): colore
         // fisso della chat, mai il colore del bot (che resta a mascotte,

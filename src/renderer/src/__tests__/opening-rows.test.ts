@@ -150,3 +150,9 @@ describe('M2: openingRowFor — tabella per initiator', () => {
     `)
   })
 })
+
+describe('B2 (fase beta.4): il prompt della presentazione è NASCOSTO', () => {
+  it('BOT_INTRO → nessuna riga in chat (né bolla, né dettagli: non compare)', () => {
+    expect(openingRowFor(entry({ initiator: 'BOT_INTRO' })).kind).toBe('hidden')
+  })
+})

@@ -180,6 +180,14 @@ export async function check(
     return { kind: 'allow', via: 'rule' }
   }
 
+  // B2 (fase beta.4): update_self tocca SOLO il profilo del bot che parla
+  // (descrizione, istruzioni, nome nei limiti del tool) — come una memorie
+  // sua: sempre consentito, mai card. L'esecuzione ricontrolla comunque che
+  // l'agentId sia il proprio.
+  if (tool === 'update_self') {
+    return { kind: 'allow', via: 'rule' }
+  }
+
   // fase 5 (residuo M3): scrivere memorie — lo scope del bot resta sempre
   // consentito; lo scope CONDIVISO 'user' (prompt di tutti i bot) chiede
   // all'utente con il contenuto in card

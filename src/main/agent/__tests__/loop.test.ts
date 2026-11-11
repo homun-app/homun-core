@@ -3327,6 +3327,8 @@ describe('fase 10 (punto 1): create_agent', () => {
     expect(created!.model).toBe('kimi-k3:cloud')
     // NESSUN kickstart: nessun job per il bot nuovo (non saluta, non parte)
     expect(h.db.jobs.filter((j) => j.agentId === created!.id)).toHaveLength(0)
+    // B2 (fase beta.4): NESSUN turno di presentazione — lo accoda SOLO il dialogo
+    expect(h.db.jobs.filter((j) => (j.payload as { initiator?: string } | undefined)?.initiator === 'BOT_INTRO')).toHaveLength(0)
     // il result lo dice al modello
     const res = h.db.entries.find((e) => e.kind === 'tool-result')
     expect(res?.content).toContain('does NOT start on its own')
@@ -8117,5 +8119,29 @@ describe('RW3 — il nome che non esiste: errore subito, senza card né grant', 
     await runTurn(AGENT, 'vai', emit)
     const res = h.db.entries.find((e) => e.kind === 'tool-result' && e.meta?.callId === 'x2')!
     expect(res.content).toContain('mcp__gmail__send_message')
+  })
+})
+
+// ---- B2 (fase beta.4): il turno di presentazione ----
+
+describe('B2 (fase beta.4): presentazione del bot nuovo', () => {
+  it('nel turno BOT_INTRO al modello arrivano SOLO ask_user e update_self', async () => {
+    h.llm.queue = [{ text: 'ok' }]
+    await runTurn(AGENT, 'You were just created.', emit, undefined, { initiator: 'BOT_INTRO' })
+    const names = (h.llm.toolsList[0] ?? []).map((t) => (t as { name: string }).name)
+    expect(names.sort()).toEqual(['ask_user', 'update_self'])
+  })
+
+  it('update_self lascia in chat la riga di sistema «Ha aggiornato il suo profilo»', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 'us1', name: 'update_self', arguments: JSON.stringify({ description: 'una riga', role: 'le istruzioni' }) }] },
+      { text: 'pronto' }
+    ]
+    await runTurn(AGENT, 'a cosa servo?', emit)
+    const row = h.db.entries.find((e) => e.kind === 'event' && e.meta?.selfUpdate !== undefined)
+    expect(row).toBeTruthy()
+    expect(row!.content).toContain('Ha aggiornato il suo profilo')
+    const fields = (row!.meta!.selfUpdate as { fields: string[] }).fields
+    expect([...fields].sort()).toEqual(['description', 'role'])
   })
 })

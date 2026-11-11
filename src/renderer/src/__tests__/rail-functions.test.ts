@@ -21,15 +21,16 @@ describe('R7 — sotto AUTO_RAIL_BELOW la rotaia è forzata (parte pura)', () =>
 })
 
 describe('R7 — la rotaia ha Crea, Cerca e menu account (guarda sul codice)', () => {
-  it('il bottone «+» della rotaia apre lo STESSO menu Crea (Nuovo bot, Nuova squadra)', () => {
-    // dentro CollapsedColumn: il menu Crea con le due voci identiche
+  it('B2 (fase beta.4): il bottone «+» della rotaia apre SUBITO il dialogo «Nuovo» (niente menu bot/squadra)', () => {
+    // dentro CollapsedColumn: il + apre il dialogo direttamente, come la barra larga
     const collapsed = SIDEBAR.slice(
       SIDEBAR.indexOf('function CollapsedColumn'),
       SIDEBAR.indexOf('export function Sidebar')
     )
     expect(collapsed).toContain('aria-label={i18n.t(msg`Crea`)}')
-    expect(collapsed).toContain('<DropdownMenuItem onClick={onNewBot}><Trans>Nuovo bot</Trans></DropdownMenuItem>')
-    expect(collapsed).toContain('<DropdownMenuItem onClick={onNewTeam}><Trans>Nuova squadra</Trans></DropdownMenuItem>')
+    expect(collapsed).toContain('onClick={onNewBot}')
+    expect(collapsed).not.toContain('DropdownMenuItem')
+    expect(collapsed).not.toContain('Nuova squadra')
   })
 
   it('la lente di Cerca c\'è, e la ricerca sospesa vive nella Sidebar (fuori dalla rotaia)', () => {
@@ -51,11 +52,11 @@ describe('R7 — la rotaia ha Crea, Cerca e menu account (guarda sul codice)', (
     expect(SIDEBAR).toContain('<Trans>Allarga la barra</Trans>')
   })
 
-  it('le finestre Nuovo bot / Nuova squadra si aprono ANCHE in rotaia (render fuori dal ramo)', () => {
-    // i dialoghi sono nel render della Sidebar, dopo il ternary collapsed
+  it('la finestra «Nuovo» si apre ANCHE in rotaia (render fuori dal ramo); la squadra non nasce più da un dialogo', () => {
+    // il dialogo è nel render della Sidebar, dopo il ternary collapsed
     const tail = SIDEBAR.slice(SIDEBAR.indexOf('export function Sidebar'))
     expect(tail).toContain('{newBotOpen && <NewBotDialog')
-    expect(tail).toContain('{newTeamOpen && <NewTeamDialog')
+    expect(tail).not.toContain('NewTeamDialog')
   })
 
   it('⌘, apre le Impostazioni (standard macOS; nessun menu Electron: scorciatoia nel renderer)', () => {

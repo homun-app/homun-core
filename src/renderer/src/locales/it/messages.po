@@ -910,6 +910,10 @@ msgstr "App"
 msgid "App e skill"
 msgstr "App e skill"
 
+#: src/renderer/src/components/BotDialogs.tsx
+msgid "Appena creato si presenta lui: ti chiede a cosa serve e impara dal tuo lavoro."
+msgstr "Appena creato si presenta lui: ti chiede a cosa serve e impara dal tuo lavoro."
+
 #: src/renderer/src/components/ApprovalCard.tsx
 msgid "Approvata, la routine nasce attiva e partirà da sola."
 msgstr "Approvata, la routine nasce attiva e partirà da sola."
@@ -1908,7 +1912,6 @@ msgstr "Coordina «{0}»"
 msgid "coordinatore"
 msgstr "coordinatore"
 
-#: src/renderer/src/components/BotDialogs.tsx
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Coordinatore"
 msgstr "Coordinatore"
@@ -1941,10 +1944,6 @@ msgstr "core"
 msgid "Cosa deve fare il Bot a ogni esecuzione"
 msgstr "Cosa deve fare il Bot a ogni esecuzione"
 
-#: src/renderer/src/components/BotDialogs.tsx
-msgid "Cosa farà?"
-msgstr "Cosa farà?"
-
 #. placeholder {0}: info.agent.name
 #: src/renderer/src/components/Chat.tsx
 msgid "Cosa sta facendo {0}"
@@ -1970,10 +1969,6 @@ msgstr "Crea {0}"
 #: src/renderer/src/components/Settings.tsx
 msgid "Crea routine"
 msgstr "Crea routine"
-
-#: src/renderer/src/components/BotDialogs.tsx
-msgid "Crea squadra"
-msgstr "Crea squadra"
 
 #: src/renderer/src/components/ApprovalCard.tsx
 msgid "Crea una regola"
@@ -2116,9 +2111,10 @@ msgstr "Del bot principale"
 msgid "Descrivi cosa fa questo bot"
 msgstr "Descrivi cosa fa questo bot"
 
-#: src/renderer/src/components/BotDialogs.tsx
-msgid "Descrivilo tu"
-msgstr "Descrivilo tu"
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "event.selfProfileField.description"
+msgstr "descrizione"
 
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Descrizione"
@@ -2646,6 +2642,11 @@ msgstr "Gruppo non trovato"
 msgid "guarda i file…"
 msgstr "guarda i file…"
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "event.selfProfileUpdated"
+msgstr "Ha aggiornato il suo profilo: {fields}"
+
 #: src/renderer/src/lib/activity.ts
 msgid "Ha aperto {host}"
 msgstr "Ha aperto {host}"
@@ -2940,10 +2941,6 @@ msgstr "Il bot non ha uno schermo aperto."
 #: src/shared/ui-messages.ts
 msgid "rpc.screenBotBusy"
 msgstr "Il bot sta lavorando: fermalo prima di prendere il controllo."
-
-#: src/renderer/src/components/BotDialogs.tsx
-msgid "Il bot ti propone le sue istruzioni"
-msgstr "Il bot ti propone le sue istruzioni"
 
 #: src/renderer/src/components/BotScreen.tsx
 msgid "Il bot ti sta chiedendo di intervenire sul suo schermo."
@@ -3473,6 +3470,11 @@ msgstr "invio esterno"
 #: src/shared/ui-messages.ts
 msgid "rpc.draftSendError"
 msgstr "Invio non riuscito: {error}"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "event.selfProfileField.role"
+msgstr "istruzioni"
 
 #: src/renderer/src/components/RightPanel.tsx
 #: src/renderer/src/components/SkillsWindow.tsx
@@ -4275,6 +4277,11 @@ msgstr "niente tool"
 msgid "No"
 msgstr "No"
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "event.selfProfileField.name"
+msgstr "nome"
+
 #: src/renderer/src/components/BotDialogs.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
 #: src/renderer/src/components/SkillsWindow.tsx
@@ -4307,10 +4314,6 @@ msgstr "Nome cartella"
 #: src/shared/ui-messages.ts
 msgid "rpc.invalidServerSlug"
 msgstr "Nome del server non valido"
-
-#: src/renderer/src/components/BotDialogs.tsx
-msgid "Nome della squadra"
-msgstr "Nome della squadra"
 
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "Nome già presente: salva come"
@@ -4511,14 +4514,8 @@ msgid "Nuova skill"
 msgstr "Nuova skill"
 
 #: src/renderer/src/components/BotDialogs.tsx
-#: src/renderer/src/components/Sidebar.tsx
-msgid "Nuova squadra"
-msgstr "Nuova squadra"
-
-#: src/renderer/src/components/BotDialogs.tsx
-#: src/renderer/src/components/Sidebar.tsx
-msgid "Nuovo bot"
-msgstr "Nuovo bot"
+msgid "Nuovo"
+msgstr "Nuovo"
 
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "OAuth"
@@ -4658,6 +4655,10 @@ msgstr "Pagine"
 msgid "Pannello del bot"
 msgstr "Pannello del bot"
 
+#: src/renderer/src/components/BotDialogs.tsx
+msgid "Parti da un modello"
+msgstr "Parti da un modello"
+
 #: src/renderer/src/components/Settings.tsx
 msgid "parziale"
 msgstr "parziale"
@@ -4713,10 +4714,6 @@ msgstr "per bot:"
 #: src/shared/ui-messages.ts
 msgid "onboarding.prompt"
 msgstr "Per cosa vuoi usarmi di più?"
-
-#: src/renderer/src/components/BotDialogs.tsx
-msgid "Per esempio: segue le ricevute email e prepara il riepilogo della settimana…"
-msgstr "Per esempio: segue le ricevute email e prepara il riepilogo della settimana…"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Per gli aggiornamenti sposta Homun in Applicazioni"
@@ -5543,10 +5540,6 @@ msgstr "scartata"
 #: src/renderer/src/components/DraftCard.tsx
 msgid "Scartata"
 msgstr "Scartata"
-
-#: src/renderer/src/components/BotDialogs.tsx
-msgid "Scegli da 1 a 6 bot: il coordinatore risponde quando scrivi senza @."
-msgstr "Scegli da 1 a 6 bot: il coordinatore risponde quando scrivi senza @."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts

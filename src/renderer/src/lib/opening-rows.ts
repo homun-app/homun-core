@@ -18,6 +18,11 @@ export type OpeningRow =
   | { kind: 'details'; template: boolean }
   /** riga di sistema breve: ROUTINE, LOOK_AROUND, tutto il resto */
   | { kind: 'system'; label: MessageDescriptor; icon: string }
+  /**
+   * B2 (fase beta.4): il prompt NASCOSTO della presentazione del bot nuovo
+   * (initiator BOT_INTRO) — non compare in chat affatto
+   */
+  | { kind: 'hidden' }
 
 /** Il titolo della routine, se l'apertura lo porta (M2: meta.routineTitle). */
 export function routineTitleOf(meta: Record<string, unknown> | null | undefined): string | undefined {
@@ -47,6 +52,10 @@ export function openingRowFor(entry: Pick<TranscriptEntry, 'role' | 'meta'>): Op
     }
     case 'LOOK_AROUND':
       return { kind: 'system', icon: '👋', label: msg`Al tuo rientro` }
+    // B2 (fase beta.4): il prompt della presentazione NON compare in chat
+    // (né bolla, né riga, né dettagli): la domanda che segue è la card ask_user
+    case 'BOT_INTRO':
+      return { kind: 'hidden' }
     default:
       return { kind: 'system', icon: '⚙', label: msg`Avvio automatico` }
   }

@@ -66,3 +66,22 @@ describe('toolsForTurnSource (pura): la lista dei tool per sorgente di turno', (
     expect(CONNECTOR_PROPOSAL_DENIED).toBe('you may propose connectors only when the user asks you in chat')
   })
 })
+
+// ---- B2 (fase beta.4): il turno di presentazione ----
+
+describe('B2: nel turno di presentazione (initiator BOT_INTRO) SOLO ask_user e update_self', () => {
+  it('la lista si riduce ai DUE tool della presentazione', () => {
+    const intro = toolsForTurnSource(toolDefs, { source: 'user', initiator: 'BOT_INTRO' })
+    expect(intro.map((t) => t.name).sort()).toEqual(['ask_user', 'update_self'])
+  })
+
+  it('create_agent, i connettori e il resto NON ci sono; gli altri initiator restano normali', () => {
+    const intro = toolsForTurnSource(toolDefs, { source: 'user', initiator: 'BOT_INTRO' })
+    expect(intro.some((t) => t.name === 'create_agent')).toBe(false)
+    expect(intro.some((t) => t.name === 'search_connectors')).toBe(false)
+    expect(intro.some((t) => t.name === 'send_to_agent')).toBe(false)
+    const normal = toolsForTurnSource(toolDefs, { source: 'user' })
+    expect(normal.some((t) => t.name === 'create_agent')).toBe(true)
+    expect(normal.some((t) => t.name === 'ask_user')).toBe(true)
+  })
+})

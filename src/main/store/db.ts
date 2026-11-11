@@ -176,8 +176,11 @@ function open(): DatabaseSync {
   for (const [col, ddl] of [
     ['created_by', "ALTER TABLE agents ADD COLUMN created_by TEXT"],
     ['section', "ALTER TABLE agents ADD COLUMN section TEXT DEFAULT ''"],
-    ['parent_id', 'ALTER TABLE agents ADD COLUMN parent_id TEXT'],
-    ['avatar', 'ALTER TABLE agents ADD COLUMN avatar TEXT']
+    ['parent_id', "ALTER TABLE agents ADD COLUMN parent_id TEXT"],
+    ['avatar', "ALTER TABLE agents ADD COLUMN avatar TEXT"],
+    // B2 (fase beta.4): il nome scritto nel dialogo «Nuovo» — update_self può
+    // cambiare il nome solo finché è ancora questo
+    ['birth_name', "ALTER TABLE agents ADD COLUMN birth_name TEXT"]
   ] as const) {
     if (!agentPresent.has(col)) db.exec(ddl)
   }
@@ -258,6 +261,8 @@ interface AgentRow {
   avatar?: string | null
   /** fase 18b (H3): livello di ragionamento ('default' = la 18a) */
   thinking?: string | null
+  /** B2 (fase beta.4): il nome scritto nel dialogo «Nuovo» (il bot può cambiarselo solo finché resta questo) */
+  birth_name?: string | null
 }
 
 /** fase 16: parse dell'avatar salvato — un JSON ROTTO diventa null (predefinito), mai un crash. */
@@ -280,7 +285,8 @@ function rowToAgent(r: AgentRow): Agent {
     model: r.model, status: r.status as Agent['status'], unread: r.unread, createdAt: r.created_at,
     createdBy: r.created_by ?? null, section: r.section ?? null,
     parentId: r.parent_id ?? null, avatar: parseAvatar(r.avatar),
-    thinking: (r.thinking as Agent['thinking']) ?? 'default'
+    thinking: (r.thinking as Agent['thinking']) ?? 'default',
+    birthName: r.birth_name ?? null
   }
 }
 
@@ -323,17 +329,20 @@ export interface CreateAgentOpts {
   parentId?: string
   /** solo per i figli: l'id `sub_…` generato dal chiamante */
   id?: string
+  /** B2 (fase beta.4): il nome scritto nel dialogo «Nuovo» (update_self lo cambia solo finché è ancora questo) */
+  birthName?: string
 }
 
 export function createAgent(name: string, description = '', opts: CreateAgentOpts = {}): Agent {
   const id = opts.id ?? 'agent_' + crypto.randomUUID().slice(0, 8)
   const now = Date.now()
   db()
-    .prepare('INSERT INTO agents(id, name, description, status, created_at, created_by, section, parent_id) VALUES(?,?,?,?,?,?,?,?)')
-    .run(id, name, description, 'idle', now, opts.createdBy ?? null, opts.section ?? '', opts.parentId ?? null)
+    .prepare('INSERT INTO agents(id, name, description, status, created_at, created_by, section, parent_id, birth_name) VALUES(?,?,?,?,?,?,?,?,?)')
+    .run(id, name, description, 'idle', now, opts.createdBy ?? null, opts.section ?? '', opts.parentId ?? null, opts.birthName ?? null)
   return {
     id, name, description, providerId: null, model: null, status: 'idle', unread: 0, createdAt: now,
-    createdBy: opts.createdBy ?? null, section: opts.section ?? '', parentId: opts.parentId ?? null
+    createdBy: opts.createdBy ?? null, section: opts.section ?? '', parentId: opts.parentId ?? null,
+    birthName: opts.birthName ?? null
   }
 }
 

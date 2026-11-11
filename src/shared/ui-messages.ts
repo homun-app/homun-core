@@ -240,6 +240,11 @@ export const UI = {
   eventRoutineResume: msg({ id: 'event.routineResume', message: 'Routine attivata: {name}' }),
   eventRoutineDelete: msg({ id: 'event.routineDelete', message: 'Routine eliminata: {name}' }),
   eventRoutineOther: msg({ id: 'event.routineOther', message: 'Routine: {action}: {name}' }),
+  // B2 (fase beta.4): la riga di sistema dopo update_self (campi nella lingua dell'interfaccia)
+  eventSelfProfileUpdated: msg({ id: 'event.selfProfileUpdated', message: 'Ha aggiornato il suo profilo: {fields}' }),
+  selfProfileFieldDescription: msg({ id: 'event.selfProfileField.description', message: 'descrizione' }),
+  selfProfileFieldRole: msg({ id: 'event.selfProfileField.role', message: 'istruzioni' }),
+  selfProfileFieldName: msg({ id: 'event.selfProfileField.name', message: 'nome' }),
 
   // ---- messaggi [sistema] (MU: il testo per il modello resta inglese, C2) ----
   sistemaServerAdded: msg({ id: 'sistema.serverAdded', message: 'Server "{name}" aggiunto: il bot ha ricevuto l’esito.' }),

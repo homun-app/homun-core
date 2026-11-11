@@ -13,6 +13,8 @@ import type { Routine } from '../store/db'
 import type { UiText } from '../../shared/types'
 import { ui } from '../ui-language'
 import { UI } from '../../shared/ui-messages'
+import { formatUi } from '../../shared/ui-text'
+import type { UiLanguage } from '../../shared/ui-language'
 
 /** Argomenti possibili di update_state (i campi arrivano dal modello, tutti opzionali). */
 export interface UpdateStateArgs {
@@ -136,4 +138,20 @@ export function automationEventText(action: string, name: string, opts: { active
     case 'delete': return ui(UI.eventRoutineDelete, { name })
     default: return ui(UI.eventRoutineOther, { action, name })
   }
+}
+
+/**
+ * B2 (fase beta.4): i NOMI dei campi di update_self nella lingua
+ * dell'interfaccia, per la riga «Ha aggiornato il suo profilo: …». PURO.
+ */
+export function selfProfileFieldsText(fields: string[], lang: UiLanguage): string {
+  const nameOf = (f: string): string => {
+    switch (f) {
+      case 'description': return formatUi(ui(UI.selfProfileFieldDescription), lang)
+      case 'role': return formatUi(ui(UI.selfProfileFieldRole), lang)
+      case 'name': return formatUi(ui(UI.selfProfileFieldName), lang)
+      default: return f
+    }
+  }
+  return [...new Set(fields)].map(nameOf).join(', ')
 }

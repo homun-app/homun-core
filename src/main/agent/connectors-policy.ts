@@ -74,6 +74,9 @@ export function connectorProposalOffered(f: TurnSourceFacts): boolean {
  * dell'utente (pura): i tool NON compaiono proprio nella lista.
  */
 export function toolsForTurnSource(tools: ToolDef[], f: TurnSourceFacts): ToolDef[] {
+  // B2 (fase beta.4): il turno di presentazione (trigger «created» di Rakazo)
+  // vede SOLO la domanda e il proprio profilo: nient'altro esiste
+  if (isBotIntroTurn(f.initiator)) return tools.filter((t) => BOT_INTRO_TOOLS.has(t.name))
   // fase 14 (7d): nei turni di gruppo niente fill_credential (accessi e dati
   // sensibili restano fuori dai gruppi)
   // fase risposta (R2): la coppia send_to_user / message_user si divide sul
@@ -84,6 +87,16 @@ export function toolsForTurnSource(tools: ToolDef[], f: TurnSourceFacts): ToolDe
     : tools.filter((t) => !GROUP_ONLY_TOOLS.has(t.name))
   if (connectorProposalOffered(f)) return base
   return base.filter((t) => !CONNECTOR_PROPOSAL_TOOLS.has(t.name))
+}
+
+// ---- B2 (fase beta.4): il turno di presentazione ----
+
+/** I SOLI tool del turno BOT_INTRO: la domanda e il proprio profilo. */
+export const BOT_INTRO_TOOLS = new Set(['ask_user', 'update_self'])
+
+/** True se il turno è la presentazione del bot appena creato (initiator BOT_INTRO). */
+export function isBotIntroTurn(initiator?: string): boolean {
+  return initiator === 'BOT_INTRO'
 }
 
 // ---- fase eval-deboli (D5): i testi di offer_connector per gli id del registro ----

@@ -58,6 +58,8 @@ function resolveReadingPageForChat(raw: unknown): ReadingPageMeta | undefined {
 import { noteHumanText, currentUserLanguage } from '../main/agent/user-language'
 import { loadTemplates, templateById, buildKickstartMessage } from '../main/templates'
 import { deliverHeldForAgent } from './outbox'
+// B2 (fase beta.4): il turno di presentazione del bot creato dal dialogo
+import { maybeEnqueueBotIntro } from '../main/agent/bot-intro'
 import type { JobWorker } from './worker'
 import type { ConnectorsManager } from '../main/connectors'
 import type { Presence } from './presence'
@@ -365,7 +367,20 @@ export function buildApiMethods(
     // ---- agenti ----
     'agents:list': () => store.listAgents(),
     'agents:create': ([name, description]) => {
-      const a = store.createAgent(name as string, (description as string) ?? '')
+      // B2 (fase beta.4): il dialogo «Nuovo» passa di qui — il nome scritto
+      // resta (birthName: update_self potrà cambiarlo solo finché è ancora
+      // questo) e il bot SI PRESENTA da solo (un turno BOT_INTRO, solo se c'è
+      // un modello utilizzabile). create_agent e i modelli NON passano di qui.
+      const a = store.createAgent(name as string, (description as string) ?? '', { birthName: String(name ?? '') })
+      const intro = maybeEnqueueBotIntro(a.id, {
+        getAgent: (id) => store.getAgent(id) ?? undefined,
+        getEntries: store.getEntries,
+        listProviders: store.listProviders,
+        getSetting: store.getSetting,
+        enqueue: (job) => enqueueJob(db(), job),
+        now: () => Date.now()
+      })
+      if (intro) worker.poke()
       emit({ type: 'agents' })
       return a
     },

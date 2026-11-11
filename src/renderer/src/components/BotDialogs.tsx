@@ -2,16 +2,23 @@
 // di Lovable (anteprima happy 130 px, nome, 5 famiglie, 7 colori), collegato
 // a createAgent + updateAgent(avatar), e "Cambia aspetto" del pannello destro
 // (le stesse famiglie e colori, salva con updateAgent(id, { avatar })).
+// B2 (fase beta.4): il dialogo chiede SOLO nome e aspetto — come Rakazo
+// (create-bot-dialog.tsx). Niente menu «Nuovo bot / Nuova squadra», niente
+// «Cosa farà?» né «Descrivilo tu»: appena creato, il bot SI PRESENTA con un
+// turno suo (chiede a cosa serve e si scrive il profilo con update_self). In
+// fondo il link «Parti da un modello» apre l'elenco di oggi: lo stesso flusso
+// col kickstart, niente si perde. La squadra nasce in chat (create_agent +
+// create_group), non da un dialogo.
 import { useEffect, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog'
-// fase 16c correzioni (R8.2): la spunta della riga scelta e l'idea di «Descrivilo tu»
-import { Check, PenLine } from 'lucide-react'
+// fase 16c correzioni (R8.2): la spunta della riga scelta
+import { Check } from 'lucide-react'
 import { api, useStore } from '../store'
 import { Bot } from '../bot/Bot'
-import { BOT_FAMILIES, BOT_COLORS, avatarOf } from '../../../shared/avatar'
+import { BOT_FAMILIES, BOT_COLORS } from '../../../shared/avatar'
 import type { BotColor, BotFamily, TemplateInfo } from '../../../shared/types'
 // fase 17c (C5): galleria dei template nella lingua dell'interfaccia
 import { pickLang } from '../../../shared/localized'
@@ -82,13 +89,12 @@ function uiLang(): 'it' | 'en' {
 }
 
 /**
- * Fase 16c (C7, tavola 7): «Nuovo bot» — la mascotte grande SOSPESA (nessun
- * riquadro, solo l'ombra ovale), le cinque famiglie a pillola, i colori, il
- * campo Nome e «Cosa farà?»: i template che esistono (al massimo 4 visibili
- * più «Altri ▾») più «Descrivilo tu», con il campo che diventa la descrizione
- * del bot (agents:create — NESSUN messaggio automatico: il kickstart esiste
- * solo per i template). Il bottone «Crea <Nome>» è attivo con un nome. Il
- * modello: il bot nasce «Come gli altri» se models.main c'è (C3.3).
+ * B2 (fase beta.4): «Nuovo» — la mascotte grande SOSPESA (nessun riquadro,
+ * solo l'ombra ovale), le cinque famiglie a pillola, i colori e il campo
+ * Nome: SOLO questo (come il create-bot-dialog di Rakazo). Il bottone «Crea»
+ * è attivo solo con un nome; il bot nasce «Come gli altri» e SI PRESENTA da
+ * solo (turno BOT_INTRO). In fondo il link piccolo «Parti da un modello» apre
+ * l'elenco dei template di oggi: stesso flusso col kickstart, niente si perde.
  */
 export function NewBotDialog({ onClose }: { onClose: () => void }) {
   const { t, i18n } = useLingui()
@@ -98,13 +104,12 @@ export function NewBotDialog({ onClose }: { onClose: () => void }) {
   const [color, setColor] = useState<BotColor>('c1')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
-  // i template che esistono (nessuno nuovo in questa fase)
+  // «Parti da un modello» (fase 16c, tavola 7): l'elenco di oggi, RIGHE senza
+  // bordo su bg-muted/60, emoji e titolo a 8 px, descrizione su UNA riga
+  // troncata (l'intera nel title), massimo 4 visibili più «Altri N ▾»
+  const [showTemplates, setShowTemplates] = useState(false)
   const [templates, setTemplates] = useState<TemplateInfo[]>([])
   const [showAllTemplates, setShowAllTemplates] = useState(false)
-  // «Cosa farà?» — un template scelto, oppure «Descrivilo tu»
-  const [chosenTemplate, setChosenTemplate] = useState<TemplateInfo | null>(null)
-  const [describe, setDescribe] = useState(false)
-  const [description, setDescription] = useState('')
   useEffect(() => {
     api.listTemplates().then(setTemplates).catch(() => setTemplates([]))
   }, [])
@@ -114,35 +119,43 @@ export function NewBotDialog({ onClose }: { onClose: () => void }) {
     setBusy(true)
     setErr('')
     try {
-      if (chosenTemplate) {
-        // il template crea nome/descrizione/kickstart; nome e aspetto scelti
-        // qui si applicano DOPO (updateAgent)
-        const a = await api.createAgentFromTemplate(chosenTemplate.id)
-        await api.updateAgent(a.id, { ...(name.trim() ? { name: name.trim() } : {}), avatar: { family, color } })
-        await select(a.id)
-      } else {
-        // «Descrivilo tu»: la descrizione è il testo del campo; NESSUN
-        // messaggio automatico (il kickstart è solo dei template)
-        const a = await api.createAgent(name.trim(), describe ? description.trim() : '')
-        await api.updateAgent(a.id, { avatar: { family, color } })
-        await select(a.id)
-      }
+      // il bot nasce col SOLO nome: a cosa serve lo chiederà LUI (turno di
+      // presentazione), con l'aspetto scelto qui
+      const a = await api.createAgent(name.trim())
+      await api.updateAgent(a.id, { avatar: { family, color } })
+      await select(a.id)
       onClose()
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e))
-    } finally {
+      setBusy(false)
+    }
+  }
+
+  const createFromTemplate = async (tpl: TemplateInfo): Promise<void> => {
+    setBusy(true)
+    setErr('')
+    try {
+      // il template crea nome/descrizione/kickstart; nome e aspetto scelti
+      // qui si applicano DOPO (updateAgent). Nessuna presentazione: c'è il
+      // kickstart del template
+      const a = await api.createAgentFromTemplate(tpl.id)
+      await api.updateAgent(a.id, { ...(name.trim() ? { name: name.trim() } : {}), avatar: { family, color } })
+      await select(a.id)
+      onClose()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
       setBusy(false)
     }
   }
 
   const visibleTemplates = showAllTemplates ? templates : templates.slice(0, 4)
-  const canCreate = !busy && name.trim().length > 0 && (!describe || !chosenTemplate)
+  const canCreate = !busy && name.trim().length > 0
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-h-[92vh] max-w-xl overflow-y-auto scroll-thin">
         <DialogHeader>
-          <DialogTitle className="font-display text-2xl"><Trans>Nuovo bot</Trans></DialogTitle>
+          <DialogTitle className="font-display text-2xl"><Trans>Nuovo</Trans></DialogTitle>
         </DialogHeader>
 
         {/* la mascotte grande sospesa: niente riquadro, solo l'ombra ovale */}
@@ -183,76 +196,66 @@ export function NewBotDialog({ onClose }: { onClose: () => void }) {
             placeholder={t`Dai un nome al tuo bot`}
             className="w-full rounded-xl border border-border bg-background px-3 py-2 text-base outline-none placeholder:text-muted-foreground"
           />
-        </div>
-
-        {/* «Cosa farà?» — i template che esistono + «Descrivilo tu».
-            Fase 16c correzioni (R8.2, tavola 7): RIGHE senza bordo su
-            bg-muted/60, emoji e titolo a 8 px, descrizione su UNA riga
-            troncata (l'intera nel title), selezione = fondo più scuro +
-            spunta; massimo 4 visibili più «Altri N ▾» */}
-        <div className="space-y-2">
-          <strong className="block text-base"><Trans>Cosa farà?</Trans></strong>
-          <div className="flex flex-col gap-1.5">
-            {visibleTemplates.map((tpl) => (
-              <button
-                key={tpl.id}
-                title={`${pickLang(tpl.name, uiLang())} — ${pickLang(tpl.description, uiLang())}`}
-                className={`flex w-full items-center gap-2 rounded-[14px] px-3 py-2 text-left transition outline-none focus-visible:ring-2 focus-visible:ring-foreground ${chosenTemplate?.id === tpl.id ? 'bg-accent' : 'bg-muted/60 hover:bg-muted'}`}
-                onClick={() => { setChosenTemplate(tpl); setDescribe(false) }}
-              >
-                <span className="shrink-0 text-base">{tpl.avatar}</span>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-semibold">{pickLang(tpl.name, uiLang())}</span>
-                  <span className="block truncate text-[13px] text-muted-foreground">{pickLang(tpl.description, uiLang())}</span>
-                </span>
-                {chosenTemplate?.id === tpl.id && <Check className="size-4 shrink-0 text-foreground" aria-hidden="true" />}
-              </button>
-            ))}
-            {/* «Descrivilo tu» — il bot ti propone le sue istruzioni */}
-            <button
-              className={`flex w-full items-center gap-2 rounded-[14px] px-3 py-2 text-left transition outline-none focus-visible:ring-2 focus-visible:ring-foreground ${describe ? 'bg-accent' : 'bg-muted/60 hover:bg-muted'}`}
-              onClick={() => { setDescribe(true); setChosenTemplate(null) }}
-            >
-              <PenLine className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-semibold"><Trans>Descrivilo tu</Trans></span>
-                <span className="block truncate text-[13px] text-muted-foreground"><Trans>Il bot ti propone le sue istruzioni</Trans></span>
-              </span>
-              {describe && <Check className="size-4 shrink-0 text-foreground" aria-hidden="true" />}
-            </button>
-          </div>
-          {templates.length > 4 && !showAllTemplates && (
-            <button
-              className="mx-auto block rounded-full bg-muted px-3 py-1 text-xs transition hover:bg-accent"
-              onClick={() => setShowAllTemplates(true)}
-            >
-              <Trans>Altri {templates.length - 4} ▾</Trans>
-            </button>
-          )}
-          {describe && (
-            <textarea
-              className="min-h-20 w-full rounded-2xl bg-muted px-3 py-2 text-sm outline-none"
-              placeholder={t`Per esempio: segue le ricevute email e prepara il riepilogo della settimana…`}
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-            />
-          )}
+          <p className="pt-0.5 text-xs text-muted-foreground">
+            <Trans>Appena creato si presenta lui: ti chiede a cosa serve e impara dal tuo lavoro.</Trans>
+          </p>
         </div>
 
         {err && <p className="text-xs text-destructive">{err}</p>}
-        <DialogFooter>
-          <button className={`${btn} bg-muted`} onClick={onClose}>
-            <Trans>Annulla</Trans>
-          </button>
+        <DialogFooter className="items-center sm:justify-between">
           <button
-            disabled={!canCreate}
-            className={`${btn} text-background disabled:opacity-40`}
-            style={{ background: c }}
-            onClick={() => void create()}
+            type="button"
+            className="text-xs text-muted-foreground underline-offset-2 transition hover:underline"
+            onClick={() => setShowTemplates((v) => !v)}
           >
-            <Trans>Crea {name.trim() || i18n._(msg`il bot`)}</Trans>
+            <Trans>Parti da un modello</Trans>
           </button>
+          <div className="flex gap-2">
+            <button className={`${btn} bg-muted`} onClick={onClose}>
+              <Trans>Annulla</Trans>
+            </button>
+            <button
+              disabled={!canCreate}
+              className={`${btn} text-background disabled:opacity-40`}
+              style={{ background: c }}
+              onClick={() => void create()}
+            >
+              <Trans>Crea {name.trim() || i18n._(msg`il bot`)}</Trans>
+            </button>
+          </div>
         </DialogFooter>
+
+        {/* «Parti da un modello»: l'elenco di OGGI, con il suo kickstart */}
+        {showTemplates && (
+          <div className="space-y-2">
+            <div className="flex flex-col gap-1.5">
+              {visibleTemplates.map((tpl) => (
+                <button
+                  key={tpl.id}
+                  disabled={busy}
+                  title={`${pickLang(tpl.name, uiLang())} — ${pickLang(tpl.description, uiLang())}`}
+                  className={`flex w-full items-center gap-2 rounded-[14px] px-3 py-2 text-left transition outline-none focus-visible:ring-2 focus-visible:ring-foreground ${busy ? 'opacity-40' : 'bg-muted/60 hover:bg-muted'}`}
+                  onClick={() => void createFromTemplate(tpl)}
+                >
+                  <span className="shrink-0 text-base">{tpl.avatar}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-semibold">{pickLang(tpl.name, uiLang())}</span>
+                    <span className="block truncate text-[13px] text-muted-foreground">{pickLang(tpl.description, uiLang())}</span>
+                  </span>
+                  <Check className="size-4 shrink-0 text-foreground opacity-0" aria-hidden="true" />
+                </button>
+              ))}
+            </div>
+            {templates.length > 4 && !showAllTemplates && (
+              <button
+                className="mx-auto block rounded-full bg-muted px-3 py-1 text-xs transition hover:bg-accent"
+                onClick={() => setShowAllTemplates(true)}
+              >
+                <Trans>Altri {templates.length - 4} ▾</Trans>
+              </button>
+            )}
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   )
@@ -293,134 +296,6 @@ export function ChangeAvatarDialog({ agentId, current, onClose }: { agentId: str
             }}
           >
             <Trans>Salva</Trans>
-          </button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-/**
- * Fase 16b (S5): «Nuova squadra» dal menu Crea — nome, scelta di 1–6 bot
- * (mascotte cliccabili) e coordinatore obbligatorio (di default il primo
- * scelto). Chiama groups:create (S1.3): la crea l'UTENTE, niente card.
- */
-export function NewTeamDialog({ onClose }: { onClose: () => void }) {
-  const { t } = useLingui()
-  const agents = useStore((s) => s.agents)
-  const mainAgentId = useStore((s) => s.mainAgentId)
-  const groupCreate = useStore((s) => s.groupCreate)
-  const openGroup = useStore((s) => s.openGroup)
-  const [name, setName] = useState('')
-  const [picked, setPicked] = useState<string[]>([])
-  const [coordinatorId, setCoordinatorId] = useState<string | null>(null)
-  const [error, setError] = useState('')
-  const [busy, setBusy] = useState(false)
-  const effectiveMain = mainAgentId ?? agents[0]?.id ?? null
-  // i FIGLI non si scelgono (non sono bot) e nemmeno il bot già in squadra?
-  // no: un bot può stare in più squadre — solo i figli restano fuori
-  const candidates = agents.filter((a) => !a.parentId)
-
-  const toggle = (id: string): void => {
-    setPicked((cur) => {
-      if (cur.includes(id)) {
-        const next = cur.filter((x) => x !== id)
-        if (coordinatorId === id) setCoordinatorId(next[0] ?? null)
-        return next
-      }
-      if (cur.length >= 6) return cur
-      const next = [...cur, id]
-      if (coordinatorId === null) setCoordinatorId(id)
-      return next
-    })
-  }
-
-  const create = async (): Promise<void> => {
-    setBusy(true)
-    setError('')
-    try {
-      await groupCreate(name.trim(), picked, coordinatorId ?? picked[0] ?? '')
-      onClose()
-      // la squadra nuova è l'ultima della lista: si apre
-      const groups = await api.listGroups()
-      const last = groups[groups.length - 1]
-      if (last) openGroup(last.id)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle className="font-display text-2xl"><Trans>Nuova squadra</Trans></DialogTitle>
-        </DialogHeader>
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder={t`Nome della squadra`}
-          aria-label={t`Nome della squadra`}
-          className="rounded-xl bg-muted px-3 py-2 text-sm outline-none placeholder:text-muted-foreground"
-        />
-        <div>
-          <p className="mb-2 text-xs text-muted-foreground">
-            <Trans>Scegli da 1 a 6 bot: il coordinatore risponde quando scrivi senza @.</Trans>
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {candidates.map((a) => {
-              const av = avatarOf(a, agents, effectiveMain)
-              const on = picked.includes(a.id)
-              const coord = coordinatorId === a.id
-              return (
-                <button
-                  key={a.id}
-                  onClick={() => toggle(a.id)}
-                  title={a.name}
-                  aria-pressed={on}
-                  className={`flex flex-col items-center gap-1 rounded-[14px] px-2 py-2 transition ${on ? 'bg-muted' : 'hover:bg-muted/60'}`}
-                >
-                  <span className="relative">
-                    <Bot family={av.family} color={av.color} state={on ? 'happy' : 'idle'} size={44} track={false} />
-                    {coord && (
-                      <span className="absolute -right-1 -top-1 grid size-4 place-items-center rounded-full bg-foreground text-[9px] font-bold text-background">★</span>
-                    )}
-                  </span>
-                  <span className="max-w-16 truncate text-[11px]">{a.name}</span>
-                </button>
-              )
-            })}
-          </div>
-          {picked.length > 0 && (
-            <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
-              <span><Trans>Coordinatore</Trans></span>
-              <select
-                className="rounded-lg bg-muted px-2 py-1 text-xs text-foreground outline-none"
-                value={coordinatorId ?? ''}
-                onChange={(e) => setCoordinatorId(e.target.value || null)}
-                aria-label={t`Coordinatore`}
-              >
-                {picked.map((id) => {
-                  const a = agents.find((x) => x.id === id)
-                  return <option key={id} value={id}>{a?.name ?? id}</option>
-                })}
-              </select>
-            </div>
-          )}
-        </div>
-        {error && <p className="text-xs text-destructive">{error}</p>}
-        <DialogFooter>
-          <button className={`${btn} bg-muted`} onClick={onClose}>
-            <Trans>Annulla</Trans>
-          </button>
-          <button
-            disabled={!name.trim() || picked.length < 1 || picked.length > 6 || busy}
-            className={`${btn} bg-foreground text-background disabled:opacity-40`}
-            onClick={() => void create()}
-          >
-            <Trans>Crea squadra</Trans>
           </button>
         </DialogFooter>
       </DialogContent>

@@ -438,6 +438,21 @@ export const toolDefs: ToolDef[] = [
       required: ['agentId']
     }
   },
+  // B2 (fase beta.4): il bot aggiorna il PROPRIO profilo — come update_bot di
+  // Rakazo, disponibile a ogni bot anche fuori dalla presentazione
+  {
+    name: 'update_self',
+    description: 'Updates YOUR OWN profile: one-line description, instructions (role), and name only if the user asked. Never look, model or permissions.',
+    parameters: {
+      type: 'object',
+      properties: {
+        description: { type: 'string', description: 'One line: what you do' },
+        role: { type: 'string', description: 'Your instructions: how you do it' },
+        name: { type: 'string', description: 'Only if the user asked for a different name and yours is still the one they typed at creation' },
+        agentId: { type: 'string', description: 'Optional check: must be your own id (you can only update yourself)' }
+      }
+    }
+  },
   {
     name: 'delete_agent',
     description: 'Deletes a bot you created, with chats and memories: ALWAYS asks the user (card). The main bot stays.',
@@ -1536,6 +1551,51 @@ export async function executeTool(
       }
       dbMod.updateAgent(target.id, patch)
       return { output: `Bot "${target.name}" updated (${Object.keys(patch).join(', ')}).`, meta: { updatedAgentId: target.id } }
+    }
+    case 'update_self': {
+      // B2 (fase beta.4): il bot aggiorna il PROPRIO profilo (come update_bot
+      // di Rakazo) — mai l'aspetto, il modello o i permessi; un agentId altrui
+      // si rifiuta; il nome cambia solo se è ancora quello scritto nel
+      // dialogo (birthName) e l'utente ne ha chiesto un altro. La riga di
+      // sistema la scrive il LOOP dal meta.selfUpdate, come le automation.
+      const dbMod = await import('../store/db')
+      if (input.agentId !== undefined && String(input.agentId) !== agentId) {
+        return { output: 'update_self only updates YOUR OWN profile: you cannot touch another bot.', meta: {} }
+      }
+      const self = dbMod.getAgent(agentId)
+      if (!self) return { output: `Bot not found ("${agentId}").`, meta: {} }
+      const description = typeof input.description === 'string' ? input.description.trim() : ''
+      const role = typeof input.role === 'string' ? input.role.trim() : ''
+      const wantsName = typeof input.name === 'string' && !!input.name.trim()
+      const patch: { name?: string; description?: string } = {}
+      const fields: string[] = []
+      // description = UNA riga (cosa fa), role = le istruzioni (come): nel
+      // profilo la riga viene prima, le istruzioni dopo
+      if (description || role) {
+        patch.description = [description, role].filter(Boolean).join('\n\n')
+        if (description) fields.push('description')
+        if (role) fields.push('role')
+      }
+      let nameNote = ''
+      if (wantsName) {
+        // solo se è ancora il nome scritto nel dialogo (birthName) e non è
+        // mai cambiato: il resto lo decide l'utente dalle Impostazioni
+        if (self.birthName && self.name === self.birthName) {
+          patch.name = String(input.name).trim()
+          fields.push('name')
+        } else {
+          nameNote = ' Your name stays: with update_self it can change only while it is still the one the user typed when creating you, and only if they asked for a different one.'
+          if (!Object.keys(patch).length) return { output: `Nothing updated.${nameNote}`, meta: {} }
+        }
+      }
+      if (!Object.keys(patch).length) {
+        return { output: 'Nothing to update: description, role or name is required.', meta: {} }
+      }
+      dbMod.updateAgent(self.id, patch)
+      return {
+        output: `Your profile is updated (${fields.join(', ')}).${nameNote}`,
+        meta: { selfUpdate: { fields } }
+      }
     }
     case 'delete_agent': {
       // fase 10 (punto 1): SEMPRE con card (il gate chiede) e SOLO bot creati

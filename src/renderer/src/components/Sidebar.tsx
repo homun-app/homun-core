@@ -29,7 +29,7 @@ import { useBotInfo } from '../bot/use-bot'
 import { activityPhrase } from '../lib/activity'
 import { i18n } from '../lib/i18n'
 import type { UiTheme } from '../theme'
-import { NewBotDialog, NewTeamDialog } from './BotDialogs'
+import { NewBotDialog } from './BotDialogs'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
   DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger,
@@ -370,7 +370,7 @@ function AccountMenu(props?: { rail?: { forced: boolean; onExpand(): void }; tri
 /**
  * La barra STRETTA: solo mascotte nello stesso ordine, contatore e tooltip.
  * Fase 16c correzioni (R7): sotto i bot CI SONO ANCHE il bottone «+» col
- * menu Crea (Nuovo bot, Nuova squadra) e la lente di Cerca; il bottone in
+ * bottone «+» del dialogo «Nuovo» e la lente di Cerca; il bottone in
  * fondo apre il menu ACCOUNT (non più «Allarga la barra»: sotto AUTO_RAIL_BELOW
  * non può funzionare — la voce vive nel menu, solo quando non è forzata).
  */
@@ -380,8 +380,7 @@ function CollapsedColumn({
   forced,
   onSearch,
   searchOpen,
-  onNewBot,
-  onNewTeam
+  onNewBot
 }: {
   model: SidebarModel
   onExpand(): void
@@ -390,7 +389,6 @@ function CollapsedColumn({
   onSearch(): void
   searchOpen: boolean
   onNewBot(): void
-  onNewTeam(): void
 }) {
   const { i18n } = useLingui()
   const select = useStore((s) => s.select)
@@ -473,21 +471,16 @@ function CollapsedColumn({
         >
           <Search className="size-4" />
         </button>
-        {/* R7: «+» col MEDESIMO menu Crea della barra larga (nessuna funzione
-            sparisce sotto i 1000 px) */}
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            className="grid size-9 shrink-0 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
-            aria-label={i18n.t(msg`Crea`)}
-            title={i18n.t(msg`Crea`)}
-          >
-            <Plus className="size-4" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" side="right">
-            <DropdownMenuItem onClick={onNewBot}><Trans>Nuovo bot</Trans></DropdownMenuItem>
-            <DropdownMenuItem onClick={onNewTeam}><Trans>Nuova squadra</Trans></DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {/* B2 (fase beta.4): «+» che apre SUBITO il dialogo «Nuovo», come la
+            barra larga (nessuna funzione sparisce sotto i 1000 px) */}
+        <button
+          className="grid size-9 shrink-0 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
+          aria-label={i18n.t(msg`Crea`)}
+          title={i18n.t(msg`Crea`)}
+          onClick={onNewBot}
+        >
+          <Plus className="size-4" />
+        </button>
         <div className="flex-1" />
         <button
           className="grid size-9 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground transition hover:text-foreground"
@@ -528,7 +521,6 @@ export function Sidebar({ layout }: { layout: LayoutResult }) {
   const [query, setQuery] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
   const [newBotOpen, setNewBotOpen] = useState(false)
-  const [newTeamOpen, setNewTeamOpen] = useState(false)
   const collapsed = layout.sidebar === 'rail'
   // fase 16c correzioni (R7): la rotaia è FORZATA quando la finestra scende
   // sotto AUTO_RAIL_BELOW — «Allarga la barra» può comparire solo se non lo è
@@ -601,7 +593,6 @@ export function Sidebar({ layout }: { layout: LayoutResult }) {
             if (searchOpen) setQuery('')
           }}
           onNewBot={() => setNewBotOpen(true)}
-          onNewTeam={() => setNewTeamOpen(true)}
         />
       ) : (
         <>
@@ -624,19 +615,16 @@ export function Sidebar({ layout }: { layout: LayoutResult }) {
               >
                 <Search className="size-4" />
               </button>
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  className="no-drag grid size-9 place-items-center rounded-full bg-muted/60 text-muted-foreground transition hover:text-foreground"
-                  aria-label={t`Crea`}
-                  title={t`Crea`}
-                >
-                  <Plus className="size-4" />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={() => setNewBotOpen(true)}><Trans>Nuovo bot</Trans></DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setNewTeamOpen(true)}><Trans>Nuova squadra</Trans></DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              {/* B2 (fase beta.4): il «+» apre SUBITO il dialogo «Nuovo» (solo
+                  nome e aspetto; la squadra nasce in chat, non da un menu) */}
+              <button
+                className="no-drag grid size-9 place-items-center rounded-full bg-muted/60 text-muted-foreground transition hover:text-foreground"
+                aria-label={t`Crea`}
+                title={t`Crea`}
+                onClick={() => setNewBotOpen(true)}
+              >
+                <Plus className="size-4" />
+              </button>
             </div>
           </div>
           {searchOpen && (
@@ -738,7 +726,6 @@ export function Sidebar({ layout }: { layout: LayoutResult }) {
       )}
 
       {newBotOpen && <NewBotDialog onClose={() => setNewBotOpen(false)} />}
-      {newTeamOpen && <NewTeamDialog onClose={() => setNewTeamOpen(false)} />}
     </aside>
   )
 }
