@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest'
 import {
   autoReviewDecision, neverAskDecision, approvalsMode, runReviewer, reviewerPrompt, describeActionForReviewer,
   liftContaminatedAllow, CONTAMINATED_ASK_TOOLS, ownerWordsOf, botBriefOf,
-  AUTO_REVIEW_MAX_PER_TURN, type AutoReviewAction, type ReviewerModel
+  AUTO_REVIEW_MAX_PER_TURN, REVIEWER_TOOL, type AutoReviewAction, type ReviewerModel
 } from '../auto-review'
 import { DEFAULT_AUTO_REVIEW, type AutoReviewSettings } from '../../../shared/types'
 
@@ -337,6 +337,111 @@ describe('RW1: runReviewer — basis nell\'esito strutturato', () => {
     }))
     expect(out).toEqual({ ok: false, error: 'invalid basis' })
   })
+})
+
+// ---- RX (fase revisore: correzioni dalla misura) ----
+
+describe('RX1: il revisore risponde sempre in forma valida', () => {
+  // modello finto che risponde in SEQUENZA e registra ogni chiamata (prompt e tool)
+  const seqModel = (responses: Array<unknown>, delayFirstMs = 0) => {
+    const calls: Array<{ content: string; tools: unknown[] }> = []
+    let i = 0
+    const model: ReviewerModel = {
+      call: async (messages, tools) => {
+        calls.push({ content: messages[0]!.content, tools: [...tools] })
+        if (calls.length === 1 && delayFirstMs) await new Promise((r) => setTimeout(r, delayFirstMs))
+        const resp = responses[Math.min(i++, responses.length - 1)]
+        if (resp instanceof Promise) return resp as never
+        return resp as { toolCalls: Array<{ arguments: string }> | undefined }
+      }
+    }
+    return { model, calls }
+  }
+  const noDecision = { toolCalls: [{ arguments: JSON.stringify({ basis: 'request', reason: 'Il proprietario ha chiesto esplicitamente di rispondere a Marco con la mail pronta' }) }] }
+  const valid = { toolCalls: [{ arguments: JSON.stringify({ decision: 'allow', basis: 'request', reason: 'lettura chiesta dal proprietario' }) }] }
+
+  it('REVIEWER_TOOL: proprietà in ordine decision, basis, ruleMatched, reason; reason «one short sentence, at most 25 words»', () => {
+    expect(Object.keys(REVIEWER_TOOL.parameters.properties)).toEqual(['decision', 'basis', 'ruleMatched', 'reason'])
+    expect(REVIEWER_TOOL.parameters.required).toEqual(['decision', 'basis'])
+    expect(REVIEWER_TOOL.parameters.properties.reason.description).toContain('One short sentence, at most 25 words')
+  })
+
+  it('il prompt lo dice in una riga: The reason is one short sentence.', () => {
+    expect(reviewerPrompt(cfg, cmd, 'it')).toContain('The reason is one short sentence.')
+  })
+
+  it('risposta senza decision → UNA seconda chiamata → esito valido', async () => {
+    const { model, calls } = seqModel([noDecision, valid])
+    const out = await runReviewer(cfg, cmd, model)
+    expect(out).toEqual({ ok: true, decision: 'allow', basis: 'request', reason: 'lettura chiesta dal proprietario' })
+    expect(calls.length).toBe(2)
+    // la seconda chiamata è lo STESSO prompt con la riga di richiamo in coda, stessa tool
+    expect(calls[1]!.content.startsWith(calls[0]!.content)).toBe(true)
+    expect(calls[1]!.content).toContain('Your previous answer was missing the required fields: answer again with report_decision including decision and basis.')
+    expect(calls[1]!.tools).toEqual(calls[0]!.tools)
+  })
+
+  it('nessuna tool call alla prima → seconda chiamata → esito valido', async () => {
+    const { model, calls } = seqModel([{ toolCalls: [] }, valid])
+    expect(await runReviewer(cfg, cmd, model)).toEqual({ ok: true, decision: 'allow', basis: 'request', reason: 'lettura chiesta dal proprietario' })
+    expect(calls.length).toBe(2)
+  })
+
+  it('due risposte invalide → ok:false (e si torna a chiedere)', async () => {
+    const { model, calls } = seqModel([noDecision])
+    expect(await runReviewer(cfg, cmd, model)).toEqual({ ok: false, error: 'invalid decision' })
+    expect(calls.length).toBe(2)
+  })
+
+  it('"Allow" / " request " si normalizzano; "pass" resta invalido', async () => {
+    const out = await runReviewer(cfg, cmd, seqModel([{
+      toolCalls: [{ arguments: JSON.stringify({ decision: 'Allow', basis: ' request ', reason: 'richiesta chiara' }) }]
+    }]).model)
+    expect(out).toEqual({ ok: true, decision: 'allow', basis: 'request', reason: 'richiesta chiara' })
+    const { model, calls } = seqModel([{
+      toolCalls: [{ arguments: JSON.stringify({ decision: 'pass', basis: 'request' }) }]
+    }])
+    expect(await runReviewer(cfg, cmd, model)).toEqual({ ok: false, error: 'invalid decision' })
+    expect(calls.length).toBe(2)
+  })
+
+  it('reason di 400 caratteri tagliato a 160 con «…» (come truncateReviewText di Rakazo)', async () => {
+    const out = await runReviewer(cfg, cmd, seqModel([{
+      toolCalls: [{ arguments: JSON.stringify({ decision: 'ask', basis: 'request', reason: 'r'.repeat(400) }) }]
+    }]).model)
+    expect(out.ok).toBe(true)
+    if (out.ok) {
+      expect(out.reason?.length).toBe(160)
+      expect(out.reason?.endsWith('…')).toBe(true)
+    }
+  })
+
+  it('timeout alla PRIMA chiamata → nessuna riprova', async () => {
+    const calls: unknown[] = []
+    const model: ReviewerModel = {
+      call: () => { calls.push(1); return new Promise(() => undefined) }
+    }
+    const out = await runReviewer(cfg, cmd, model, 20)
+    expect(out.ok).toBe(false)
+    expect((out as { error: string }).error).toContain('timeout')
+    expect(calls.length).toBe(1)
+  }, 5_000)
+
+  it('errore di rete alla PRIMA chiamata → nessuna riprova', async () => {
+    const calls: unknown[] = []
+    const model: ReviewerModel = {
+      call: async () => { calls.push(1); throw new Error('connessione persa') }
+    }
+    expect(await runReviewer(cfg, cmd, model)).toEqual({ ok: false, error: 'connessione persa' })
+    expect(calls.length).toBe(1)
+  })
+
+  it('prima risposta invalida ma tempo rimasto SOTTO 1/3 → nessuna riprova', async () => {
+    const { model, calls } = seqModel([noDecision], 80) // consuma l'80% di 100 ms
+    const out = await runReviewer(cfg, cmd, model, 100)
+    expect(out).toEqual({ ok: false, error: 'invalid decision' })
+    expect(calls.length).toBe(1)
+  }, 5_000)
 })
 
 // ---- fase impostazioni (I4.3): il modo «Non chiedere» — la sorella pura ----
