@@ -5,7 +5,7 @@ pubblicata finisce nel corpo della GitHub Release (da cui l'app mostra il
 «cosa cambia» quando propone un aggiornamento). Formato: `## [x.y.z] — data`,
 sezioni H2 e un punto per riga.
 
-## [0.3.1001-beta.3] — 2026-11-10
+## [0.3.1001-beta.3] — 2026-11-11
 
 Il turno di Trello con 11 card di approvazione e nessuna risposta: chi legge
 per rispondere a ciò che hai chiesto non chiede più a ogni passo.
@@ -19,7 +19,7 @@ per rispondere a ciò che hai chiesto non chiede più a ogni passo.
   qualcuno che non hai nominato, pagare, cancellare, pubblicare. Le tue
   regole continuano a venire prima — e ora servono per allargare, non per
   far funzionare l'Automatico.
-- **Per le letture direlle c'è «Per questo turno».** Se consenti una
+- **Per le letture dirette c'è «Per questo turno».** Se consenti una
   richiesta diretta di lettura a un'app (per esempio le tue board di
   Trello), le altre letture della stessa app fino a fine turno passano
   senza chiedere di nuovo. Le scritture continuano a chiedere ogni volta.
