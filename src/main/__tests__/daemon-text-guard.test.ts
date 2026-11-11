@@ -117,7 +117,13 @@ const ALLOWED_SYMBOLS: Record<string, string[]> = {
   // errori per lo sviluppatore che finiscono nel log, come le voci per letterale
   // qui sopra (con IT_STRONG allargato scattano i singoli «mancante», «deve»…)
   'src/main/connectors/index.ts': ['validateCatalog', 'loadCatalog'],
-  'src/main/templates/index.ts': ['validateTemplate', 'loadTemplates']
+  'src/main/templates/index.ts': ['validateTemplate', 'loadTemplates'],
+  // RX (fase revisore: correzioni dalla misura): i DATI dell'eval del revisore
+  // — le parole del proprietario e i titoli dei 13 casi sono italiani per
+  // costruzione (simulano i messaggi dell'utente), come ACTION_OBJECTS — e i
+  // suoi messaggi diagnostici (tabella e soglie): il core vive in src/ solo
+  // per essere provato dalla suite senza rete, l'output resta dell'eval
+  'src/main/agent/review-eval.ts': ['TRELLO', 'REVIEW_EVAL_CASES', 'formatReviewEvalTable', 'reviewEvalProblems']
 }
 
 interface Node {
