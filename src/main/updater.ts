@@ -18,8 +18,8 @@
 // finché non arriva la stabile (più nuova per semver). Si applica al primo
 // controllo, a ogni «Controlla aggiornamenti» e quando l'interruttore cambia:
 // nessun riavvio richiesto.
-import { app, BrowserWindow, dialog, shell } from 'electron'
-import { existsSync } from 'node:fs'
+import { app, BrowserWindow, dialog, nativeTheme, shell } from 'electron'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 // electron-updater è CommonJS: l'import CON NOME non è rilevabile dal lexer
 // CJS nel bundle (errori a runtime nell'app impacchettata) — si destruttura
@@ -265,20 +265,192 @@ export function notesOf(info: UpdateInfo | undefined): string {
   return note.note ? releaseNotesText(note.note, more) : mainStrings().updater.availableBody
 }
 
+// ---- B1 (fase beta.4): il dialogo diventa una finestra di Homun ----
+// L'NSAlert nativo era stretto (~260 pt), senza scorrimento: con le note
+// lunghe cresceva oltre lo schermo e i bottoni finivano fuori. La finestra
+// dell'offerta è della stessa famiglia della finestra d'avanzamento
+// (createUpdateProgressWindow): HTML autonomo, niente Node nel renderer,
+// lingua dell'interfaccia. Le note sono TESTO SEMPLICE (textContent, mai
+// HTML), l'area scorre e i TRE bottoni restano FISSI in fondo.
+
+/** Le misure massime della finestra dell'offerta (pt). */
+export const UPDATE_OFFER_WINDOW_SIZE = { width: 460, height: 520 } as const
+
+/**
+ * Le opzioni della finestra dell'offerta (PURO, per i test): piccola, NON
+ * ridimensionabile, centrata, senza Node nel renderer.
+ */
+export function updateOfferWindowOptions(): {
+  width: number
+  height: number
+  resizable: boolean
+  minimizable: boolean
+  maximizable: boolean
+  fullscreenable: boolean
+  center: boolean
+  show: boolean
+  autoHideMenuBar: boolean
+  webPreferences: { sandbox: boolean; contextIsolation: boolean; nodeIntegration: boolean }
+} {
+  return {
+    width: UPDATE_OFFER_WINDOW_SIZE.width,
+    height: UPDATE_OFFER_WINDOW_SIZE.height,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    center: true,
+    show: false,
+    autoHideMenuBar: true,
+    webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false }
+  }
+}
+
+/**
+ * La pagina dell'offerta (PURO, per i test): titolo, note che scorrono, TRE
+ * bottoni fissi in fondo. Le NOTE non stanno nella pagina: arrivano dopo con
+ * textContent (updateOfferNotesScript). Nessuno script, nessuna risorsa
+ * esterna: CSP default-src 'none'.
+ */
+export function buildUpdateOfferPage(
+  s: { availableTitle: string; download: string; openNotes: string; later: string },
+  version: string,
+  dark: boolean
+): string {
+  const bg = dark ? '#1e1e20' : '#ffffff'
+  const fg = dark ? '#f2f2f2' : '#1d1d1f'
+  const muted = dark ? 'rgba(235,235,245,.6)' : 'rgba(60,60,67,.6)'
+  const border = dark ? 'rgba(255,255,255,.14)' : 'rgba(0,0,0,.12)'
+  const btnBg = dark ? 'rgba(255,255,255,.12)' : 'rgba(0,0,0,.06)'
+  return `<!doctype html>
+<html lang="it"><head><meta charset="utf-8"><title>${s.availableTitle.replace('{version}', version)}</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
+<style>
+  html, body { height: 100%; box-sizing: border-box; }
+  body { font: 13px -apple-system, system-ui, sans-serif; margin: 0; padding: 18px 20px 16px;
+         display: flex; flex-direction: column; cursor: default;
+         background: ${bg}; color: ${fg}; }
+  h1 { font-size: 15px; font-weight: 600; margin: 0 0 12px; }
+  #upd-notes { flex: 1; min-height: 0; overflow-y: auto; white-space: pre-wrap;
+               font-size: 12px; line-height: 1.55; color: ${muted};
+               border-top: 1px solid ${border}; border-bottom: 1px solid ${border};
+               padding: 10px 2px; }
+  footer { display: flex; gap: 8px; justify-content: flex-end; padding-top: 14px; }
+  footer button { font: inherit; font-size: 13px; padding: 7px 14px; border: 0;
+                  border-radius: 8px; background: ${btnBg}; color: ${fg}; cursor: pointer; }
+  footer button#upd-download { background: #4f7942; color: #fff; font-weight: 600; }
+</style></head>
+<body>
+  <h1>${s.availableTitle.replace('{version}', version)}</h1>
+  <div id="upd-notes"></div>
+  <footer>
+    <button type="button" id="upd-download">${s.download}</button>
+    <button type="button" id="upd-open-notes">${s.openNotes}</button>
+    <button type="button" id="upd-later">${s.later}</button>
+  </footer>
+</body></html>`
+}
+
+/**
+ * Lo script che mette le NOTE nella pagina (PURO, per i test): textContent,
+ * MAI innerHTML — il testo può contenere quello che vuole, resta testo.
+ */
+export function updateOfferNotesScript(notes: string): string {
+  return `document.getElementById('upd-notes').textContent = ${JSON.stringify(notes)}`
+}
+
+/**
+ * La finestra dell'offerta: modale sulla finestra principale (se c'è), nota e
+ * bottoni come buildUpdateOfferPage. I bottoni non navigano davvero: fanno un
+ * assign su uno schema privato che il main intercetta (will-navigate) — così
+ * la pagina resta senza script, senza Node e senza rete. Chiudere la finestra
+ * equivale a «Più tardi».
+ */
+function createUpdateOfferWindow(
+  version: string,
+  notes: string,
+  actions: { onDownload(): void; onOpenNotes(): void }
+): void {
+  const s = mainStrings().updater
+  const parent = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed())
+  const win = new BrowserWindow({
+    ...updateOfferWindowOptions(),
+    title: s.availableTitle.replace('{version}', version),
+    ...(parent ? { parent, modal: true } : {})
+  })
+  const dark = nativeTheme.shouldUseDarkColors
+  void win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(buildUpdateOfferPage(s, version, dark)))
+  const ACTION_SCHEME = 'sandbot-update-action:'
+  win.webContents.on('will-navigate', (event, url) => {
+    if (!url.startsWith(ACTION_SCHEME)) return
+    event.preventDefault()
+    const action = url.slice(ACTION_SCHEME.length)
+    if (action === 'download') actions.onDownload()
+    if (action === 'notes') actions.onOpenNotes()
+  })
+  win.once('ready-to-show', () => win.show())
+  win.webContents.once('did-finish-load', () => {
+    const bind = `(() => {
+      ${updateOfferNotesScript(notes)}
+      const go = (a) => { location.assign('${ACTION_SCHEME}' + a) }
+      document.getElementById('upd-download').addEventListener('click', () => go('download'))
+      document.getElementById('upd-open-notes').addEventListener('click', () => go('notes'))
+      document.getElementById('upd-later').addEventListener('click', () => window.close())
+      return true
+    })()`
+    void win.webContents.executeJavaScript(bind).catch(() => undefined)
+  })
+}
+
 function offerUpdate(info: UpdateInfo | undefined): void {
   if (!info?.version) return
-  const s = mainStrings().updater
   if (downloading) return
-  const choice = dialog.showMessageBoxSync({
-    type: 'info',
-    message: s.availableTitle.replace('{version}', info.version),
-    detail: notesOf(info),
-    buttons: [s.download, s.openNotes, s.later],
-    defaultId: 0,
-    cancelId: 2
+  createUpdateOfferWindow(info.version, notesOf(info), {
+    onDownload: () => startDownload(info.version!),
+    onOpenNotes: () => { void shell.openExternal(`${RELEASES_URL}/tag/v${info.version}`) }
   })
-  if (choice === 0) startDownload(info.version)
-  if (choice === 1) void shell.openExternal(`${RELEASES_URL}/tag/v${info.version}`)
+}
+
+// ---- B1.4: il gancio di prova delle sonde (solo con SANDBOT_TEST_USER_DATA) ----
+
+/** La versione FINTA della finestra di prova (mai controllata su GitHub). */
+export const TEST_UPDATE_VERSION = '0.3.1001-beta.4'
+
+/**
+ * Il gancio (PURO, per i test): con SANDBOT_TEST_USER_DATA e
+ * SANDBOT_TEST_UPDATE_NOTES=<file> la finestra dell'offerta si apre con la
+ * versione finta e le note di quel file. Senza SANDBOT_TEST_USER_DATA la
+ * variabile è IGNORATA: fuori dalle prove non esiste.
+ */
+export function testUpdateOfferFromEnv(env: NodeJS.ProcessEnv): { version: string; notesFile: string } | null {
+  if (!env.SANDBOT_TEST_USER_DATA) return null
+  const notesFile = env.SANDBOT_TEST_UPDATE_NOTES
+  if (!notesFile) return null
+  return { version: TEST_UPDATE_VERSION, notesFile }
+}
+
+/**
+ * All'avvio (chiamato da index.ts): apre la finestra dell'offerta col gancio
+ * di prova, SENZA controllare GitHub. I bottoni non fanno nulla qui: nelle
+ * prove niente download e niente browser. True se la finestra è partita.
+ */
+export function openTestUpdateWindowIfRequested(): boolean {
+  const t = testUpdateOfferFromEnv(process.env)
+  if (!t) return false
+  let raw = ''
+  try {
+    raw = readFileSync(t.notesFile, 'utf8')
+  } catch (error) {
+    console.error('[updater] SANDBOT_TEST_UPDATE_NOTES non leggibile:', error instanceof Error ? error.message : error)
+    return false
+  }
+  const s = mainStrings().updater
+  createUpdateOfferWindow(t.version, releaseNotesText(raw, s.notesMore), {
+    // prove: nessuna azione vera (niente download, niente browser)
+    onDownload: () => undefined,
+    onOpenNotes: () => undefined
+  })
+  return true
 }
 
 function startDownload(version: string): void {

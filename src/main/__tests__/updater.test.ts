@@ -5,7 +5,11 @@
 // FASE RILASCIO — CORREZIONI (K6): mai nemmeno quando manca app-update.yml
 // (le build --dir): niente controllo, niente ENOENT nel log.
 import { describe, expect, it } from 'vitest'
-import { shouldAutoCheckUpdates, isNewerVersion, hasUpdateConfig, notesOf } from '../updater'
+import {
+  shouldAutoCheckUpdates, isNewerVersion, hasUpdateConfig, notesOf,
+  UPDATE_OFFER_WINDOW_SIZE, updateOfferWindowOptions, buildUpdateOfferPage,
+  updateOfferNotesScript, testUpdateOfferFromEnv, TEST_UPDATE_VERSION
+} from '../updater'
 import { findLegacyHomun2Dir, isLegacyHomun2DataDir, legacyNoticeMarkerPath } from '../legacy-homun2'
 
 const APP_DATA = '/Users/fabio/Library/Application Support'
@@ -99,5 +103,66 @@ describe('RW5: notesOf converte l\'HTML delle release in testo leggibile', () =>
   it('la forma ReleaseNoteInfo (note) passa dallo stesso convertitore', () => {
     const t = notesOf({ version: '1.0.0', releaseNotes: { note: '<p>prima riga<br>seconda riga</p>' } as never } as unknown as Parameters<typeof notesOf>[0])
     expect(t).toBe('prima riga\nseconda riga')
+  })
+})
+
+// ---- B1 (fase beta.4): il dialogo diventa una finestra di Homun ----
+
+describe('B1: la finestra dell\'offerta — opzioni e pagina (puro)', () => {
+  it('piccola, NON ridimensionabile, centrata: al massimo 460×520 pt', () => {
+    const o = updateOfferWindowOptions()
+    expect(o.width).toBeLessThanOrEqual(460)
+    expect(o.height).toBeLessThanOrEqual(520)
+    expect(o.resizable).toBe(false)
+    expect(o.center).toBe(true)
+    // mai Node nel renderer: sandbox, isolation, niente nodeIntegration
+    expect(o.webPreferences.nodeIntegration).toBe(false)
+    expect(o.webPreferences.contextIsolation).toBe(true)
+    expect(o.webPreferences.sandbox).toBe(true)
+    expect(UPDATE_OFFER_WINDOW_SIZE).toEqual({ width: 460, height: 520 })
+  })
+
+  it('la pagina: titolo con la versione, TRE bottoni, area note che SCORRE, CSP stretta', () => {
+    const s = {
+      availableTitle: 'È disponibile Homun {version}',
+      download: 'Scarica e installa', openNotes: 'Apri le note', later: 'Più tardi'
+    } as never as Parameters<typeof buildUpdateOfferPage>[0]
+    const page = buildUpdateOfferPage(s, '0.3.1001-beta.4', false)
+    expect(page).toContain('È disponibile Homun 0.3.1001-beta.4')
+    // i tre bottoni FISSI IN FONDO, ciascico col suo id
+    expect(page).toMatch(/id="upd-download"[^>]*>Scarica e installa</)
+    expect(page).toMatch(/id="upd-open-notes"[^>]*>Apri le note</)
+    expect(page).toMatch(/id="upd-later"[^>]*>Più tardi</)
+    // l'area delle note SCORRE (flex + overflow), i bottoni stanno in un
+    // footer FUORI dall'area che scorre
+    expect(page).toMatch(/#upd-notes\s*\{[^}]*overflow-y:\s*auto/)
+    expect(page).toMatch(/<footer/)
+    // CSP stretta e NESSUNA rete: la pagina non carica niente da fuori
+    expect(page).toMatch(/http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"/)
+    expect(page).not.toMatch(/(src|href)="(https?:|\/\/)/)
+    // le NOTE non sono nella pagina: arrivano dopo, con textContent (mai HTML)
+    expect(page).not.toContain('upd-notes-text')
+  })
+
+  it('le note arrivano con textContent (mai HTML), anche se contengono tag', () => {
+    const js = updateOfferNotesScript('<p>una <strong>voce</strong></p>\n<script>male()</script>')
+    expect(js).toContain('textContent')
+    expect(js).not.toContain('innerHTML')
+    // il testo viaggia come STRINGA JSON: nessun markup interpretato
+    expect(js).toContain(JSON.stringify('<p>una <strong>voce</strong></p>\n<script>male()</script>'))
+  })
+})
+
+describe('B1: il gancio di prova SANDBOT_TEST_UPDATE_NOTES (puro)', () => {
+  it('con SANDBOT_TEST_USER_DATA e SANDBOT_TEST_UPDATE_NOTES: la finestra si apre con la versione finta', () => {
+    expect(testUpdateOfferFromEnv({ SANDBOT_TEST_USER_DATA: '/x', SANDBOT_TEST_UPDATE_NOTES: '/x/note.html' }))
+      .toEqual({ version: TEST_UPDATE_VERSION, notesFile: '/x/note.html' })
+  })
+
+  it('SENZA SANDBOT_TEST_USER_DATA la variabile è IGNORATA (mai fuori dalle prove)', () => {
+    expect(testUpdateOfferFromEnv({ SANDBOT_TEST_UPDATE_NOTES: '/x/note.html' })).toBeNull()
+    // e senza la variabile delle note non c'è niente da aprire
+    expect(testUpdateOfferFromEnv({ SANDBOT_TEST_USER_DATA: '/x' })).toBeNull()
+    expect(testUpdateOfferFromEnv({})).toBeNull()
   })
 })

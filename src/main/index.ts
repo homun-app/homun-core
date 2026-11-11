@@ -35,7 +35,7 @@ import { canOpenExternally } from './external-url'
 import { permissionAllowed } from './permissions'
 import { cleanupLegacyLaunchAgent } from './launchagent'
 import { findLegacyHomun2Dir, legacyNoticeMarkerPath } from './legacy-homun2'
-import { initUpdater, setUpdaterDaemonStopper, shouldAutoCheckUpdates, hasUpdateConfig } from './updater'
+import { initUpdater, setUpdaterDaemonStopper, shouldAutoCheckUpdates, hasUpdateConfig, openTestUpdateWindowIfRequested } from './updater'
 // RV1 (fase beta.2): l'app fuori da Applicazioni o translocata (sola lettura)
 import { appLocationAction, proposeMoveToApplications, setAppNeedsMove, appNeedsMove } from './app-location'
 import { stopRunningDaemon } from './daemon-client'
@@ -261,6 +261,12 @@ if (isDaemonMode(process.argv)) {
       createTray(getMainWindow)
       refreshTray()
       emitLocal({ type: 'agents' }, () => BrowserWindow.getAllWindows())
+
+      // B1 (fase beta.4): il gancio di prova delle sonde — con
+      // SANDBOT_TEST_USER_DATA + SANDBOT_TEST_UPDATE_NOTES la finestra
+      // dell'offerta si apre con la versione finta e quelle note, SENZA
+      // controllare GitHub (fuori dalle prove la variabile è ignorata)
+      openTestUpdateWindowIfRequested()
 
       // deep link sandbot://agent/<id>
       app.setAsDefaultProtocolClient('sandbot')

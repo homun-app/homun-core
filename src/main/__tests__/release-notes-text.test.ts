@@ -115,12 +115,42 @@ describe('RW5: releaseNotesText — il taglio oltre ~1500 caratteri', () => {
     expect(t).toContain('Apri le note')
     // il taglio finisce a fine VOCE: l'ultima riga prima dei puntini è una
     // riga INTERA del changelog (continuazioni comprese), non una frase mozzata
-    const beforeDots = t.slice(0, t.indexOf('…')).trimEnd().split('\n').pop() ?? ''
+    const cutLine = t.split('\n').lastIndexOf('…')
+    const beforeDots = t.split('\n').slice(0, cutLine).pop() ?? ''
     const mdLines = BETA2_MD.split('\n').map((l: string) => l.replace(/^[-*]\s*/, '').replace(/^###\s*/, ''))
-    expect(beforeDots.length).toBeGreaterThan(10)
+    expect(beforeDots.length, `riga sospetta: «${beforeDots}»`).toBeGreaterThan(3)
     expect(
       mdLines.some((l: string) => l === beforeDots || l.endsWith(beforeDots)),
       `riga mozzata: ${beforeDots.slice(-60)}`
     ).toBe(true)
+  })
+
+  it('B1: l\'HTML VERO della beta.3 (fixture dal feed atom) — voci intere, ≤ 12 righe prima del taglio', () => {
+    const BETA3_HTML = readFileSync(join(import.meta.dirname, 'fixtures', 'release-notes-beta3.html'), 'utf8')
+    const t = releaseNotesText(BETA3_HTML, NOTES_MORE)
+    // il testo della beta.3 resta lungo: si taglia, con l'invito
+    expect(t).toContain('…')
+    expect(t).toContain(NOTES_MORE)
+    const plain = htmlToPlainText(BETA3_HTML)
+    expect(plain).not.toMatch(/</)
+    // NESSUNA riga vuota tra i pezzi di una stessa voce: ogni <li> è UNA riga,
+    // e dopo una voce viene o vuoto, o un titolo, o un'altra voce — mai il
+    // resto della frase
+    const lines = plain.split('\n')
+    for (let i = 1; i < lines.length; i++) {
+      if (!lines[i - 1]!.startsWith('• ')) continue
+      expect(lines[i], `frase mozzata dopo «…${lines[i - 1]!.slice(-40)}»`).toMatch(/^• |^$|^#/)
+    }
+    // il taglio lascia al massimo 12 righe (i bottoni del dialogo vecchio
+    // devono stare in finestra; ora l'area scorre, ma il testo resta compatto).
+    // Il taglio è la riga «…» DA SOLA: il testo contiene già ellissi letterali
+    // («È disponibile Homun…»), non valgono
+    const cutLine = t.split('\n').indexOf('…')
+    expect(cutLine, 'manca la riga del taglio «…»').toBeGreaterThan(0)
+    expect(t.split('\n').slice(0, cutLine).length).toBeLessThanOrEqual(12)
+    // e nessun pezzo di voce spezzato: le righe piene prima del taglio finiscono col punto
+    for (const l of t.split('\n').slice(0, cutLine)) {
+      if (l.startsWith('• ')) expect(l, `voce mozzata: «${l.slice(-50)}»`).toMatch(/[.!»)]$/)
+    }
   })
 })

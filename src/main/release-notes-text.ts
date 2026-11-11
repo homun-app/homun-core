@@ -14,6 +14,15 @@ export const RELEASE_NOTES_MAX_CHARS = 1_500
 /** L'HTML delle note in testo semplice (niente taglio). */
 export function htmlToPlainText(html: string): string {
   const text = html
+    // B1 (fase beta.4): GitHub spezza le righe del CHANGELOG a ~75 colonne e
+    // nel corpo della release ogni a capo diventa `<br>` SEGUIto da `\n`.
+    // Quello è un ACAPO MORBIDO: si UNISCE con uno spazio, non si va a capo
+    // (il risultato era ogni frase mozzata con una riga vuota in mezzo)
+    .replace(/<br\s*\/?>(?:[ \t]*\n)+/gi, ' ')
+    // B1: anche un `\n` rimasto dentro <p> o <li> è un a capo morbido dello
+    // sorgente HTML: uno spazio. Si va a capo SOLO sui marcatori di blocco
+    // (sotto): chiusura di paragrafo/voce, i titoli e un <br> non seguito da \n
+    .replace(/\n/g, ' ')
     // i marcatori che diventano RIGHE: <li> apre una voce col puntino,
     // </p>/</li>/<br> e i titoli vanno a capo
     .replace(/<li[^>]*>/gi, '• ')

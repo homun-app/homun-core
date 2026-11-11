@@ -72,7 +72,7 @@ const STRINGS: Record<UiLanguage, MainStrings> = {
     updater: {
       availableTitle: 'È disponibile Homun {version}',
       availableBody: 'Puoi scaricarla adesso: vedrai l\'avanzamento e al termine decidi se riavviare subito. Le note complete sono nella pagina delle release.',
-      download: 'Scarica',
+      download: 'Scarica e installa',
       openNotes: 'Apri le note',
       notesMore: 'Apri le note per il resto.',
       later: 'Più tardi',
@@ -112,7 +112,7 @@ const STRINGS: Record<UiLanguage, MainStrings> = {
     updater: {
       availableTitle: 'Homun {version} is available',
       availableBody: 'You can download it now: you will see the progress and then choose whether to restart right away. The full notes are on the releases page.',
-      download: 'Download',
+      download: 'Download and install',
       openNotes: 'Open the notes',
       notesMore: 'Open the notes for the rest.',
       later: 'Later',

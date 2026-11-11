@@ -16,9 +16,52 @@ function escapeRegExp(s) {
 }
 
 /**
+ * B1 (fase beta.4): le righe di continuazione si UNISCONO con uno spazio.
+ * Il CHANGELOG spezza le righe a ~75 colonne e GitHub trasforma OGNI a capo
+ * del corpo in `<br>` + `\n`: le note che i clienti beta.3 mostrano nell'NSAlert
+ * uscivano con ogni frase mozzata e una riga vuota in mezzo. Una riga non
+ * vuota che NON inizia con `-`, `*`, `#`, `>`, un numero seguito da `.` o un
+ * recinto di codice continua la precedente; le righe vuote, i titoli, gli
+ * elenchi e i blocchi di codice restano come sono. PURO.
+ */
+export function joinWrappedLines(lines) {
+  const out = []
+  let inFence = false
+  let lastWasFence = false
+  const isFence = (l) => /^\s*(```|~~~)/.test(l)
+  for (const line of lines) {
+    if (isFence(line)) {
+      inFence = !inFence
+      out.push(line)
+      lastWasFence = true
+      continue
+    }
+    if (inFence) {
+      out.push(line) // dentro il blocco di codice: INTATTO
+      continue
+    }
+    const continues =
+      line !== '' &&
+      out.length > 0 &&
+      !lastWasFence &&
+      out[out.length - 1] !== '' &&
+      !/^([-*#>]|\d+\.)/.test(line)
+    if (continues) {
+      // trim: le continuazioni nel CHANGELOG sono indentate sotto la voce
+      out[out.length - 1] += ` ${line.trim()}`
+    } else {
+      out.push(line)
+    }
+    lastWasFence = false
+  }
+  return out
+}
+
+/**
  * Il corpo delle note di `version`: tutto fra l'intestazione `## [version]` e
- * la successiva `## [` (o EOF), ripulito delle definizioni di link in coda.
- * `null` se la versione non ha sezione — il chiamante lo tratta come ERRORE.
+ * la successiva `## [` (o EOF), ripulito delle definizioni di link in coda e
+ * colle le righe di continuazione (B1). `null` se la versione non ha sezione —
+ * il chiamante lo tratta come ERRORE.
  */
 export function extractReleaseNotes(changelog, version) {
   const lines = changelog.split(/\r?\n/)
@@ -32,9 +75,11 @@ export function extractReleaseNotes(changelog, version) {
       break
     }
   }
-  const body = lines
-    .slice(start + 1, end)
-    .filter((l) => !/^\[[^\]]+\]:\s*\S+/.test(l))
+  const body = joinWrappedLines(
+    lines
+      .slice(start + 1, end)
+      .filter((l) => !/^\[[^\]]+\]:\s*\S+/.test(l))
+  )
     .join('\n')
     .trim()
   return body || null
