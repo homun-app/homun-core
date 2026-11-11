@@ -73,7 +73,8 @@ describe('RX3: il runner dell\'eval con ReviewerModel finto — tabella e soglie
     expect(r.table).toContain('2/2')
     expect(r.table).toContain('TOTALE')
     expect(r.table).toContain('6/6')
-    expect(r.table).toContain('invalide dopo la riprova 0')
+    expect(r.table).toContain('malformate dopo la riprova 0')
+    expect(r.table).toContain('timeout 0')
     expect(r.table).toContain('p50')
     expect(r.table).toContain('p95')
   })
@@ -156,5 +157,69 @@ describe('RX3: i 13 casi della spec — il 10 riscritto e il 13 nuovo', () => {
         expect(c.expected, `caso ${c.id}`).toBe('allow')
       }
     }
+  })
+})
+
+// ---- B5 (fase beta.4): i timeout separati dalle risposte malformate ----
+
+/** Il modello che va in TIMEOUT sui casi dati (l'errore comincia per «timeout»). */
+const timeoutModel = (ids: number[]): ReviewerModel => ({
+  call: async (messages) => {
+    const c = synthCases.find((x) => messages[0]!.content.includes(x.ownerWords))!
+    if (ids.includes(c.id)) throw new Error('timeout (10003 ms)')
+    return { toolCalls: [{ arguments: JSON.stringify({ decision: c.expected, basis: 'request', reason: 'motivo del test' }) }] }
+  }
+})
+
+describe('B5: i timeout contano come produzioni, non come malformate', () => {
+  it('un timeout su un caso ASK è CORRETTO (in produzione un timeout chiede comunque)', async () => {
+    // il caso 102 (invio non chiesto) è ask: il timeout vale ask → corretto
+    const r = await runReviewEval(synthCases, timeoutModel([102]), { runs: 1, timeoutMs: 2_000, providerId: 'p', model: 'm' })
+    const rec = r.records.find((x) => x.caseId === 102)!
+    expect(rec.timedOut).toBe(true)
+    expect(rec.valid).toBe(false)
+    expect(rec.correct).toBe(true)
+  })
+
+  it('un timeout su un caso ALLOW è SBAGLIATO (una lettura chiesta diventa una card)', async () => {
+    const r = await runReviewEval(synthCases, timeoutModel([101]), { runs: 1, timeoutMs: 2_000, providerId: 'p', model: 'm' })
+    const rec = r.records.find((x) => x.caseId === 101)!
+    expect(rec.timedOut).toBe(true)
+    expect(rec.correct).toBe(false)
+  })
+
+  it('i timeout stanno nella colonna «timeout» e NON tra le malformate; la quota nel totale', async () => {
+    // runs 4 → 12 giri; UN solo timeout (≈8%) resta sotto la soglia del 10%
+    let left = 1
+    const once: ReviewerModel = {
+      call: async (messages) => {
+        const c = synthCases.find((x) => messages[0]!.content.includes(x.ownerWords))!
+        if (c.id === 102 && left > 0) {
+          left--
+          throw new Error('timeout (10003 ms)')
+        }
+        return { toolCalls: [{ arguments: JSON.stringify({ decision: c.expected, basis: 'request', reason: 'motivo del test' }) }] }
+      }
+    }
+    const r = await runReviewEval(synthCases, once, { runs: 4, timeoutMs: 2_000, providerId: 'p', model: 'm' })
+    expect(r.totals.timeouts).toBe(1)
+    expect(r.totals.runs).toBe(12)
+    expect(r.totals.timeoutShare).toBeCloseTo(1 / 12, 5)
+    // le MALFORMATE dopo la riprova restano 0: i timeout non contano
+    expect(r.totals.invalidAfterRetry).toBe(0)
+    expect(r.problems).toEqual([])
+    // la tabella ha la colonna e il numero nel totale
+    expect(r.table).toContain('timeout')
+    expect(r.table).toMatch(/timeout 1 /)
+    const s = r.caseStats.find((x) => x.id === 102)!
+    expect(s.timeouts).toBe(1)
+    expect(s.invalidAfterRetry).toBe(0)
+  })
+
+  it('timeout oltre il 10% del totale → problema dedicato (≤ 10% è ammesso)', async () => {
+    // un terzo dei giri in timeout (1/3): oltre il 10%
+    const r = await runReviewEval(synthCases, timeoutModel([102]), { runs: 1, timeoutMs: 2_000, providerId: 'p', model: 'm' })
+    expect(r.totals.timeoutShare).toBeGreaterThan(0.1)
+    expect(r.problems.join('\n')).toMatch(/timeout/)
   })
 })
