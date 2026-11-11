@@ -117,3 +117,23 @@ describe('fase rilascio di prova (RP5): versione e CHANGELOG', () => {
 })
 
 void existsSync
+
+describe('B6 (fase beta.4): la voce 0.3.1001-beta.4 — BREVE (la leggono anche i client beta.3 con l\'NSAlert)', () => {
+  it('c\'è, sta SOPRA la beta.3, e resta sotto i 900 caratteri', async () => {
+    const { extractReleaseNotes } = (await import('../extract-release-notes.mjs')) as {
+      extractReleaseNotes: (changelog: string, version: string) => string | null
+    }
+    const changelog = read('CHANGELOG.md')
+    const body = extractReleaseNotes(changelog, '0.3.1001-beta.4')
+    expect(body, 'manca la sezione ## [0.3.1001-beta.4] nel CHANGELOG').not.toBeNull()
+    // BREVE: massimo 900 caratteri in tutto (le righe si uniscono da sole, B1)
+    expect(body!.length).toBeLessThanOrEqual(900)
+    expect(changelog.indexOf('## [0.3.1001-beta.4]')).toBeLessThan(changelog.indexOf('## [0.3.1001-beta.3]'))
+    // le quattro cose della fase, in parole per l'utente
+    const flat = body!.replace(/\s+/g, ' ')
+    expect(flat).toMatch(/[Nn]uovo.*si presenta|si presenta.*[Nn]uovo/)
+    expect(flat).toMatch(/note dell'aggiornamento/)
+    expect(flat).toMatch(/app hai collegato|app collegate/)
+    expect(flat).toMatch(/chat/)
+  })
+})

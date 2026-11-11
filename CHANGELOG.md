@@ -5,6 +5,24 @@ pubblicata finisce nel corpo della GitHub Release (da cui l'app mostra il
 «cosa cambia» quando propone un aggiornamento). Formato: `## [x.y.z] — data`,
 sezioni H2 e un punto per riga.
 
+## [0.3.1001-beta.4] — 2026-11-11
+
+Quattro cose che hai chiesto dopo la beta.3.
+
+### Novità
+
+- **Un solo «Nuovo», e il bot si presenta.** Dal «+» crei il bot con nome e
+  aspetto: è lui a chiederti a cosa serve, a scriversi la descrizione e a
+  partire. Le squadre nascono in chat, e puoi ancora partire da un modello.
+- **Il bot sa quali app hai collegato.** Trello, Gmail, i server che hai
+  aggiunto: li usa subito, senza cercare un connettore nuovo ogni volta.
+
+### Correzioni
+
+- **Le note dell'aggiornamento si leggono e i bottoni restano visibili.**
+- **La creazione dalla chat è più pulita:** le risposte, le anteprime, le
+  richieste ai bot e le routine col bottone «Attiva» a portata di clic.
+
 ## [0.3.1001-beta.3] — 2026-11-11
 
 Il turno di Trello con 11 card di approvazione e nessuna risposta: chi legge
