@@ -1421,6 +1421,22 @@ export async function executeTool(
       }
     }
     case 'search_connectors': {
+      // B4 (fase beta.4): un'app GIÀ collegata tramite Composio si dice
+      // subito, senza cercarne (e proporne) un'altra: usa i tool Composio
+      const { connectedAppMatch } = await import('./connected-apps')
+      try {
+        const { composioGateway } = await import('../connectors/composio-gateway')
+        const connected = (composioGateway()?.status().connected ?? []).filter((a) => a.status === 'ACTIVE')
+        const hit = connectedAppMatch(String(input.query ?? ''), connected)
+        if (hit) {
+          return {
+            output: `"${hit.name}" is already connected via Composio: use COMPOSIO_SEARCH_TOOLS to find the action, then COMPOSIO_MULTI_EXECUTE_TOOL.`,
+            meta: { connectedApp: hit.slug }
+          }
+        }
+      } catch {
+        // gateway non disponibile: la ricerca procede come oggi
+      }
       // fase 13 (punto 1): la porta unica su tre fonti — il runner del daemon
       // porta catalogo + marketplace + registro; il meta dice se ci sono righe
       // DI TERZI (registro/marketplace): il loop le mette nel blocco dati

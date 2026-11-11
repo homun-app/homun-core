@@ -8145,3 +8145,42 @@ describe('B2 (fase beta.4): presentazione del bot nuovo', () => {
     expect([...fields].sort()).toEqual(['description', 'role'])
   })
 })
+
+// ---- B4 (fase beta.4): il bot sa quali app ha collegate ----
+
+describe('B4 (fase beta.4): la riga delle app collegate nel prompt del turno', () => {
+  it("con le app collegate la riga c'è, DOPO il prompt base (parte che cambia)", async () => {
+    const { setActiveComposioGateway } = await import('../../connectors/composio-gateway')
+    const fake = {
+      status: () => ({
+        active: true,
+        connected: [
+          { slug: 'trello', name: 'Trello', status: 'ACTIVE', accountId: 'a' },
+          { slug: 'gmail', name: 'Gmail', status: 'ACTIVE', accountId: 'b' }
+        ],
+        pending: null
+      })
+    } as unknown as import('../../connectors/composio-gateway').ComposioGatewayManager
+    setActiveComposioGateway(fake)
+    try {
+      h.llm.queue = [{ text: 'ok' }]
+      await runTurn(AGENT, 'quali sono le board di trello?', emit)
+      const system = String(h.llm.calls[0]![0]!.content)
+      expect(system).toContain('Connected apps: Trello, Gmail (via Composio: COMPOSIO_SEARCH_TOOLS')
+      expect(system).toMatch(/not history, memory, the browser or a new connector/)
+      // sta DOPO il prompt base (mai nel prefisso in cache): # Limits la precede
+      expect(system.indexOf('# Limits')).toBeLessThan(system.indexOf('Connected apps:'))
+    } finally {
+      setActiveComposioGateway(null)
+    }
+  })
+
+  it("senza app collegate la riga non c'è", async () => {
+    const { setActiveComposioGateway } = await import('../../connectors/composio-gateway')
+    setActiveComposioGateway(null)
+    h.llm.queue = [{ text: 'ok' }]
+    await runTurn(AGENT, 'ciao', emit)
+    const system = String(h.llm.calls[0]![0]!.content)
+    expect(system).not.toContain('Connected apps:')
+  })
+})

@@ -109,6 +109,7 @@ import { MAX_CREATE_AGENTS_PER_TURN, wakeParentToolDef } from './tools'
 // fase 13 (punto 3): add_mcp_server/install_plugin SOLO nei turni dell'utente;
 // (punto 5): tool MCP deferiti oltre connectors.maxInlineTools
 import { toolsForTurnSource, connectorProposalOffered, CONNECTOR_PROPOSAL_DENIED, GROUP_EXCLUDED_TOOLS, isMcpId, offerConnectorMcpGuidance, offerConnectorMissingText, isBotIntroTurn } from './connectors-policy'
+import { connectedAppsLine, mcpServerNames } from './connected-apps'
 import { PROPOSAL_RESULT } from '../connectors/install'
 import {
   requiredParamsOf, toolsDeferred, connectorsActiveSection, DEFAULT_MAX_INLINE_TOOLS
@@ -1674,6 +1675,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     // l'elenco degli altri bot (nome, descrizione, routine attive)
     let mainSection = ''
     let connectorsSection = ''
+    let connectedAppsSection = ''
     // fase velocità (S5): le sezioni VARIABILI vanno in FONDO al sistema,
     // dopo la parte fissa e in ordine di frequenza (memoria per ultima: è
     // quella che cambia più spesso, a ogni update_memory); la sezione
@@ -1722,6 +1724,25 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       } catch {
         // connettori non disponibili: il system prompt resta quello di base
       }
+      // B4 (fase beta.4): il bot sa quali app ha collegate — la riga sta
+      // nella parte VARIABILE del prompt (mai nel prefisso in cache), dalle
+      // app del gateway Composio (C5) e dai server MCP attivi del bot
+      try {
+        const { composioGateway } = await import('../connectors/composio-gateway')
+        const apps = (composioGateway()?.status().connected ?? [])
+          .filter((a) => a.status === 'ACTIVE')
+          .map((a) => a.name)
+        let servers: Array<{ name: string; tools: Array<{ name: string }> }> = []
+        try {
+          const { activeServersForAgent } = await import('../mcp')
+          servers = (await activeServersForAgent(agentId)) as Array<{ name: string; tools: Array<{ name: string }> }>
+        } catch {
+          // MCP non disponibile: bastano le app collegate
+        }
+        connectedAppsSection = connectedAppsLine({ composioApps: apps, mcpServers: mcpServerNames(servers, apps) })
+      } catch {
+        // niente riga: il prompt resta quello di base
+      }
       // fase 12 (punto 6): la sezione Sottoagenti solo nei bot NORMALI, mai
       // nei turni di gruppo (lì si coordina col gruppo)
       // fase 14 (punto 8): le righe delle credenziali solo nei turni NON di gruppo
@@ -1730,7 +1751,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       // fase token · nucleo (R8.2): i punti 1-3 della guida sono nel prompt
       // del bot NORMALE (spawn_subagent sta nel suo nucleo)
       systemText = systemPrompt(agent, { teams: opts.groupTurn !== undefined, subagents: opts.groupTurn === undefined, groups: turnCatalog.map((g) => g.id) }) +
-        mainSection + buildSkillsSection(agentId) + connectorsSection + await buildMemorySection(agentId)
+        mainSection + buildSkillsSection(agentId) + connectorsSection +
+        (connectedAppsSection ? `\n${connectedAppsSection}` : '') +
+        await buildMemorySection(agentId)
     }
 
     // fase 13 (punto 5): in modalità differita il prompt porta la sezione
