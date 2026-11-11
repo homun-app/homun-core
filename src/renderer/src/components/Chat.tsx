@@ -18,7 +18,7 @@ import { api, useStore, useResolvedModel } from '../store'
 // fase 17c (C2): il testo di notice/eventi/system dal meta.ui (lingua attiva)
 import { uiTextOf, uiTextOfTools } from '../lib/ui-text'
 // M2 (fase 0.3.1001): l'apertura di un turno con initiator è una riga di sistema
-import { openingRowFor } from '../lib/opening-rows'
+import { openingRowFor, hidesUserBubble } from '../lib/opening-rows'
 // R1 (fase app — ritocchi): le notice in chat non sono tutte errori
 import { noticeSeverity } from '../lib/notice-severity'
 // RV4 (fase beta.2): la stessa notice consecutiva si mostra una volta; il
@@ -31,6 +31,8 @@ import { agentMessageDisplay } from '../../../shared/agent-message'
 import type { TranscriptEntry, SendMessageMeta, SendMessagePayload, ThinkingSetting } from '../../../shared/types'
 import { ApprovalCard } from './ApprovalCard'
 import { WidgetCard } from './WidgetCard'
+import { AgentSendRow } from './AgentSendRow'
+import { RoutineCreatedRow } from './RoutineCreatedRow'
 import { DraftCard } from './DraftCard'
 import { ConnectorCard } from './ConnectorCard'
 import { McpServerCard, PluginCard } from './ConnectorCards13'
@@ -855,6 +857,9 @@ function EntryRow({ entry, repeat = 1, showReasoning, debugSteps }: { entry: Tra
       // B2 (fase beta.4): il prompt NASCOSTO della presentazione del bot nuovo
       // non compare in chat: la domanda arriva come card ask_user
       if (opening.kind === 'hidden') return null
+      // B3 (fase beta.4): la risposta a una domanda NON si ripete come bolla
+      // utente separata — resta la riga della card, riapribile
+      if (entry.role === 'user' && hidesUserBubble(entry)) return null
       return entry.role === 'user' ? (
         // bolla utente a destra — NEUTRA (G1, fase 0.3.1001 grafica): colore
         // fisso della chat, mai il colore del bot (che resta a mascotte,
@@ -905,16 +910,10 @@ function EntryRow({ entry, repeat = 1, showReasoning, debugSteps }: { entry: Tra
       const message = meta.message as SendMessagePayload | undefined
       // fase 6: trattenuto nell'outbox — invisibile finché non consegnato
       if (meta.held) return null
-      // fase 7 (correzione A2): delega a un altro bot — riga «A <nome>»
+      // B3 (fase beta.4): delega a un altro bot — UNA riga sola, apribile
+      // (prima era una bolla piena, refusi del modello compresi)
       if (meta.agentSend && meta.toAgentName) {
-        return (
-          <div className="max-w-[75%] rounded-[22px] bg-muted px-4 py-2.5 text-sm">
-            <p className="mb-1 text-xs text-muted-foreground">
-              <Trans>A {meta.toAgentName}</Trans>
-            </p>
-            <p className="whitespace-pre-wrap">{entry.content}</p>
-          </div>
-        )
+        return <AgentSendRow name={String(meta.toAgentName)} content={entry.content} />
       }
       // fase 7: widget di sistema che porta alle impostazioni del provider
       if (message?.type === 'widget' && (entry.meta as Record<string, unknown>)?.onboardingProvider) {
@@ -993,6 +992,10 @@ function EntryRow({ entry, repeat = 1, showReasoning, debugSteps }: { entry: Tra
       }
       // gli esiti di turno (meta.turnEnd) sono dettaglio interno
       if (entry.meta?.turnEnd && !showReasoning) return null
+      // B3 (fase beta.4): «Routine creata (in pausa)» col bottone «Attiva»
+      if (entry.meta?.automation && (entry.meta.automation as { action?: unknown }).action === 'create') {
+        return <RoutineCreatedRow entry={entry} />
+      }
       return <p className="text-center text-xs text-muted-foreground">{uiTextOf(entry)}</p>
     }
     default:

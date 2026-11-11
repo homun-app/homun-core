@@ -612,11 +612,6 @@ msgstr "30 days"
 msgid "7 giorni"
 msgstr "7 days"
 
-#. placeholder {0}: meta.toAgentName
-#: src/renderer/src/components/Chat.tsx
-msgid "A {0}"
-msgstr "To {0}"
-
 #. placeholder {0}: draft.to || t`(nessun destinatario)`
 #: src/renderer/src/components/DraftCard.tsx
 msgid "A: {0}"
@@ -1067,6 +1062,10 @@ msgstr "Warning: I could not assign the model to the bots ({warning}). Pick a va
 msgid "attiva"
 msgstr "active"
 
+#: src/renderer/src/components/RoutineCreatedRow.tsx
+msgid "Attiva"
+msgstr "Activate"
+
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Attiva con la chiave ak_ del tuo progetto."
 msgstr "Activate with your project's ak_ key."
@@ -1075,6 +1074,10 @@ msgstr "Activate with your project's ak_ key."
 #: src/shared/ui-messages.ts
 msgid "approval.usResume"
 msgstr "activate the routine \"{title}\" — prompt: {preview}"
+
+#: src/renderer/src/components/RoutineCreatedRow.tsx
+msgid "attivata"
+msgstr "activated"
 
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "attive"
@@ -1710,6 +1713,7 @@ msgid "condivise"
 msgstr "shared"
 
 #: src/renderer/src/components/MemoryPanel.tsx
+#: src/renderer/src/components/RoutineCreatedRow.tsx
 msgid "Conferma"
 msgstr "Confirm"
 
@@ -2216,10 +2220,6 @@ msgstr "document not found"
 msgid "Dollari per milione di token. Vale per le chiamate da qui in avanti, lo storico non cambia; svuota entrambi i campi per togliere un prezzo."
 msgstr "Dollars per million tokens. Applies to calls from now on; history does not change. Empty both fields to remove a price."
 
-#: src/renderer/src/components/WidgetCard.tsx
-msgid "domanda scavalcata, hai proseguito senza rispondere"
-msgstr "question skipped, you moved on without answering"
-
 #: src/renderer/src/components/Settings.tsx
 msgid "domenica"
 msgstr "Sunday"
@@ -2539,6 +2539,7 @@ msgstr "source: {0}"
 msgid "Fuso orario"
 msgstr "Time zone"
 
+#: src/renderer/src/components/RoutineCreatedRow.tsx
 #: src/renderer/src/components/Settings.tsx
 msgid "Fuso orario (es. Europe/Rome)"
 msgstr "Time zone (e.g. Europe/Rome)"
@@ -2667,6 +2668,11 @@ msgstr "Searched for the right tool"
 msgid "Ha cercato sul web"
 msgstr "Searched the web"
 
+#. placeholder {0}: askedRowSummary(content)
+#: src/renderer/src/components/AgentSendRow.tsx
+msgid "Ha chiesto a {name}: {0}"
+msgstr "Asked {name}: {0}"
+
 #: src/renderer/src/lib/activity.ts
 msgid "Ha chiesto a un aiutante"
 msgstr "Asked a helper"
@@ -2787,11 +2793,15 @@ msgstr "You're done · the bot resumes"
 msgid "Hai scaricato"
 msgstr "You downloaded"
 
-#. placeholder {0}: letterOf(String(first))
-#. placeholder {1}: labels(values)
-#: src/renderer/src/components/WidgetCard.tsx
-msgid "Hai scelto: {0} · {1}"
-msgstr "You chose: {0} · {1}"
+#. placeholder {0}: parts.join(' · ')
+#: src/renderer/src/lib/widget-decision.ts
+msgid "Hai scelto: {0}"
+msgstr "You chose: {0}"
+
+#. placeholder {0}: list.join(', ')
+#: src/renderer/src/lib/widget-decision.ts
+msgid "Hai scritto: {0}"
+msgstr "You wrote: {0}"
 
 #: src/renderer/src/components/BotScreen.tsx
 msgid "Ho finito"
@@ -6260,7 +6270,7 @@ msgstr "Too large to preview ({0})"
 msgid "tu"
 msgstr "you"
 
-#. placeholder {0}: e.content
+#. placeholder {0}: plainPreview(e.content)
 #: src/renderer/src/sidebar-utils.ts
 msgid "Tu: {0}"
 msgstr "You: {0}"

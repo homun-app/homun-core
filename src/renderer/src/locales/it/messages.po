@@ -612,11 +612,6 @@ msgstr "30 giorni"
 msgid "7 giorni"
 msgstr "7 giorni"
 
-#. placeholder {0}: meta.toAgentName
-#: src/renderer/src/components/Chat.tsx
-msgid "A {0}"
-msgstr "A {0}"
-
 #. placeholder {0}: draft.to || t`(nessun destinatario)`
 #: src/renderer/src/components/DraftCard.tsx
 msgid "A: {0}"
@@ -1067,6 +1062,10 @@ msgstr "Attenzione: non ho potuto assegnare il modello ai bot ({warning}). Scegl
 msgid "attiva"
 msgstr "attiva"
 
+#: src/renderer/src/components/RoutineCreatedRow.tsx
+msgid "Attiva"
+msgstr "Attiva"
+
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Attiva con la chiave ak_ del tuo progetto."
 msgstr "Attiva con la chiave ak_ del tuo progetto."
@@ -1075,6 +1074,10 @@ msgstr "Attiva con la chiave ak_ del tuo progetto."
 #: src/shared/ui-messages.ts
 msgid "approval.usResume"
 msgstr "attivare la routine \"{title}\" — prompt: {preview}"
+
+#: src/renderer/src/components/RoutineCreatedRow.tsx
+msgid "attivata"
+msgstr "attivata"
 
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "attive"
@@ -1710,6 +1713,7 @@ msgid "condivise"
 msgstr "condivise"
 
 #: src/renderer/src/components/MemoryPanel.tsx
+#: src/renderer/src/components/RoutineCreatedRow.tsx
 msgid "Conferma"
 msgstr "Conferma"
 
@@ -2216,10 +2220,6 @@ msgstr "documento non trovato"
 msgid "Dollari per milione di token. Vale per le chiamate da qui in avanti, lo storico non cambia; svuota entrambi i campi per togliere un prezzo."
 msgstr "Dollari per milione di token. Vale per le chiamate da qui in avanti, lo storico non cambia; svuota entrambi i campi per togliere un prezzo."
 
-#: src/renderer/src/components/WidgetCard.tsx
-msgid "domanda scavalcata, hai proseguito senza rispondere"
-msgstr "domanda scavalcata, hai proseguito senza rispondere"
-
 #: src/renderer/src/components/Settings.tsx
 msgid "domenica"
 msgstr "domenica"
@@ -2539,6 +2539,7 @@ msgstr "fonte: {0}"
 msgid "Fuso orario"
 msgstr "Fuso orario"
 
+#: src/renderer/src/components/RoutineCreatedRow.tsx
 #: src/renderer/src/components/Settings.tsx
 msgid "Fuso orario (es. Europe/Rome)"
 msgstr "Fuso orario (es. Europe/Rome)"
@@ -2667,6 +2668,11 @@ msgstr "Ha cercato lo strumento giusto"
 msgid "Ha cercato sul web"
 msgstr "Ha cercato sul web"
 
+#. placeholder {0}: askedRowSummary(content)
+#: src/renderer/src/components/AgentSendRow.tsx
+msgid "Ha chiesto a {name}: {0}"
+msgstr "Ha chiesto a {name}: {0}"
+
 #: src/renderer/src/lib/activity.ts
 msgid "Ha chiesto a un aiutante"
 msgstr "Ha chiesto a un aiutante"
@@ -2787,11 +2793,15 @@ msgstr "Hai finito · il bot riprende"
 msgid "Hai scaricato"
 msgstr "Hai scaricato"
 
-#. placeholder {0}: letterOf(String(first))
-#. placeholder {1}: labels(values)
-#: src/renderer/src/components/WidgetCard.tsx
-msgid "Hai scelto: {0} · {1}"
-msgstr "Hai scelto: {0} · {1}"
+#. placeholder {0}: parts.join(' · ')
+#: src/renderer/src/lib/widget-decision.ts
+msgid "Hai scelto: {0}"
+msgstr "Hai scelto: {0}"
+
+#. placeholder {0}: list.join(', ')
+#: src/renderer/src/lib/widget-decision.ts
+msgid "Hai scritto: {0}"
+msgstr "Hai scritto: {0}"
 
 #: src/renderer/src/components/BotScreen.tsx
 msgid "Ho finito"
@@ -6260,7 +6270,7 @@ msgstr "Troppo grande per l'anteprima ({0})"
 msgid "tu"
 msgstr "tu"
 
-#. placeholder {0}: e.content
+#. placeholder {0}: plainPreview(e.content)
 #: src/renderer/src/sidebar-utils.ts
 msgid "Tu: {0}"
 msgstr "Tu: {0}"

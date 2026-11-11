@@ -31,6 +31,16 @@ export function routineTitleOf(meta: Record<string, unknown> | null | undefined)
 }
 
 /**
+ * B3 (fase beta.4): True se il messaggio utente è la risposta a una domanda
+ * (meta.respondedTo): NON si rende come bolla — il testo vive già nella riga
+ * della card, che si può riaprire. PURO.
+ */
+export function hidesUserBubble(entry: Pick<TranscriptEntry, 'role' | 'meta'>): boolean {
+  if (entry.role !== 'user') return false
+  return (entry.meta as { respondedTo?: unknown } | null)?.respondedTo !== undefined
+}
+
+/**
  * La riga di un'apertura di turno (entry message role 'user'): fumetto
  * dell'utente SOLO senza initiator. Con initiator qualsiasi → riga di
  * sistema; il testo per il modello NON si mostra (al massimo nei dettagli).

@@ -7,6 +7,7 @@ import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import { useStore } from '../store'
 import { i18n } from '../lib/i18n'
+import { widgetDecidedLabel } from '../lib/widget-decision'
 import type { TranscriptEntry, SendMessageMeta, SendMessagePayload } from '../../../shared/types'
 import { DecidedRow, CardShell } from './DecidedRow'
 
@@ -31,9 +32,6 @@ export function WidgetCard({ entry }: { entry: TranscriptEntry }) {
     setConfirming(true)
     respond(entry.id, value)
   }
-
-  const labels = (v: string | string[]): string =>
-    (Array.isArray(v) ? v : [v]).map((x) => widget.options.find((o) => o.value === x)?.label ?? x).join(', ')
 
   const toggle = (value: string): void => {
     setSelected((sel) => (sel.includes(value) ? sel.filter((v) => v !== value) : [...sel, value]))
@@ -105,11 +103,12 @@ export function WidgetCard({ entry }: { entry: TranscriptEntry }) {
   )
 
   // dopo: UNA riga («Hai scelto: B · Preparare le fatture»), riapribile (S6)
+  // B3 (fase beta.4): la risposta LIBERA dice «Hai scritto: Alle 8» — niente
+  // lettera né «·» vuoti; con un'opzione resta «Hai scelto: B · …»
   if (responded) {
     const values = meta.respondedValue as string | string[]
-    const first = Array.isArray(values) ? values[0] : values
     return (
-      <DecidedRow ok label={i18n.t(msg`Hai scelto: ${letterOf(String(first))} · ${labels(values)}`)} at={entry.createdAt}>
+      <DecidedRow ok label={i18n.t(widgetDecidedLabel(values, widget.options))} at={entry.createdAt}>
         <CardShell>{body}</CardShell>
       </DecidedRow>
     )

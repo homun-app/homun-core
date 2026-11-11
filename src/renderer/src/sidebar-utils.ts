@@ -176,11 +176,33 @@ export function teamOpenState(saved: string | null): boolean {
 }
 
 /**
+ * B3 (fase beta.4): l'anteprima della barra è TESTO SEMPLICE — niente **, _,
+ * #, backtick o link markdown (l'anteprima mostrava «Fatto! Ho creato il bot
+ * **"No…»). I link diventano il loro testo. PURO.
+ */
+export function plainPreview(text: string): string {
+  return text
+    // [testo](url) → testo
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    // **grassetto** e __grassetto__
+    .replace(/(\*\*|__)(?=\S)([\s\S]+?)(?<=\S)\1/g, '$2')
+    // *corsivo* e _corsivo_ (non dentro le parole: snake_case resta suo)
+    .replace(/(^|[^\w*_])[*_](?=\S)([^*_\n]+?)(?<=\S)[*_](?!\w)/g, '$1$2')
+    // `codice` e ```codice```
+    .replace(/`{1,3}([^`\n]*)`{1,3}/g, '$1')
+    // i titoli #
+    .replace(/^#{1,6}[ \t]+/gm, '')
+    .trim()
+}
+
+/**
  * L'anteprima dell'ultimo messaggio visibile di un transcript: i send-message
  * (non trattenuti), i widget con la loro domanda, le bozze col destinatario e
  * i messaggi dell'utente (con "Tu:"). '' se non c'è niente di visibile.
  * M2 (fase 0.3.1001): una entry utente CON un qualsiasi initiator è un avvio
  * automatico (routine, rientro, risvegli) — non è "Tu:" e non si anteprime.
+ * B3 (fase beta.4): nemmeno la risposta a una domanda (respondedTo) si
+ * anteprime — vive nella riga della card; e i testi sono SEMPLICI.
  */
 export function previewOf(entries: TranscriptEntry[]): SidebarPreview {
   for (let i = entries.length - 1; i >= 0; i--) {
@@ -188,15 +210,17 @@ export function previewOf(entries: TranscriptEntry[]): SidebarPreview {
     if (e.kind === 'send-message') {
       const meta = (e.meta ?? {}) as { held?: boolean; message?: { type?: string; prompt?: string; to?: string } }
       if (meta.held) continue
-      if (meta.message?.type === 'widget') return meta.message.prompt ?? ''
+      if (meta.message?.type === 'widget') return plainPreview(meta.message.prompt ?? '')
       if (meta.message?.type === 'draft') return msg`Bozza per ${meta.message.to ?? '?'}`
-      if (meta.message?.type === 'text') return e.content
+      if (meta.message?.type === 'text') return plainPreview(e.content)
       continue
     }
     if (e.kind === 'message' && e.role === 'user') {
-      const initiator = (e.meta as { initiator?: string } | null)?.initiator
-      if (initiator !== undefined && initiator !== '') continue
-      return msg`Tu: ${e.content}`
+      const meta = (e.meta ?? {}) as { initiator?: string; respondedTo?: number }
+      if (meta.initiator !== undefined && meta.initiator !== '') continue
+      // B3: la risposta a una domanda sta già nella riga della card
+      if (meta.respondedTo !== undefined) continue
+      return msg`Tu: ${plainPreview(e.content)}`
     }
   }
   return ''

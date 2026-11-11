@@ -3,7 +3,7 @@
 // E dell'anteprima dell'ultimo messaggio visibile.
 import { describe, expect, it } from 'vitest'
 import { i18n } from '@lingui/core'
-import { matchesQuery, filterSidebar, previewOf, buildSidebarModel, collapsedVoices, teamOpenState, type SidebarPreview } from '../sidebar-utils'
+import { matchesQuery, filterSidebar, previewOf, plainPreview, buildSidebarModel, collapsedVoices, teamOpenState, type SidebarPreview } from '../sidebar-utils'
 import type { Agent, GroupInfo, TranscriptEntry } from '../../../shared/types'
 import { itCatalogEntries } from './po-helper'
 
@@ -235,5 +235,27 @@ describe('fase 16b correzioni (P3): teamOpenState — una squadra senza stato sa
   it('si ricorda solo la chiusura: \'0\' è chiusa, ogni altro valore è aperta', () => {
     expect(teamOpenState('0')).toBe(false)
     expect(teamOpenState('1')).toBe(true)
+  })
+})
+
+// ---- B3 (fase beta.4): l'anteprima è TESTO SEMPLICE ----
+
+describe('B3: plainPreview — via il markdown dall\'anteprima della barra', () => {
+  it('niente **, _, #, backtick: «Fatto! Ho creato il bot **"No…» diventa testo pulito', () => {
+    expect(plainPreview('Fatto! Ho creato il bot **"Notizie Tech"** per te.')).toBe('Fatto! Ho creato il bot "Notizie Tech" per te.')
+    expect(plainPreview('**grassetto** e _corsivo_ e *stellina*')).toBe('grassetto e corsivo e stellina')
+    expect(plainPreview('## Titolo\nriga')).toBe('Titolo\nriga')
+    expect(plainPreview('comando `npm test` fatto')).toBe('comando npm test fatto')
+  })
+
+  it('i link markdown diventano il loro testo', () => {
+    expect(plainPreview('vedi [le note](https://esempio.it) qui')).toBe('vedi le note qui')
+  })
+
+  it('previewOf manda in barra SOLO testo semplice (bot e «Tu:»)', () => {
+    const bot = previewOf([entry({ id: 1, kind: 'send-message', role: 'assistant', content: 'Fatto! Ho creato il bot **"Notizie Tech"**.', meta: { message: { type: 'text' } } })])
+    expect(resolve(bot)).not.toContain('**')
+    const tu = previewOf([entry({ id: 2, kind: 'message', role: 'user', content: 'bravo, _proprio_ bravo' })])
+    expect(resolve(tu)).toBe('Tu: bravo, proprio bravo')
   })
 })
