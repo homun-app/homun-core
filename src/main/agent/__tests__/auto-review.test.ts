@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest'
 import {
   autoReviewDecision, neverAskDecision, approvalsMode, runReviewer, reviewerPrompt, describeActionForReviewer,
   liftContaminatedAllow, CONTAMINATED_ASK_TOOLS, ownerWordsOf, botBriefOf,
-  AUTO_REVIEW_MAX_PER_TURN, REVIEWER_TOOL, type AutoReviewAction, type ReviewerModel
+  AUTO_REVIEW_MAX_PER_TURN, REVIEWER_TIMEOUT_MS, REVIEWER_TOOL, type AutoReviewAction, type ReviewerModel
 } from '../auto-review'
 import { DEFAULT_AUTO_REVIEW, type AutoReviewSettings } from '../../../shared/types'
 
@@ -70,7 +70,7 @@ describe('autoReviewDecision: la decisione finale (pura)', () => {
 
   it('fallback ad ask: JSON non valido, errore, timeout, decisione ask del revisore', () => {
     expect(autoReviewDecision(cfg, cmd, { ok: false, error: 'JSON non valido' }, 0).autoAllow).toBe(false)
-    expect(autoReviewDecision(cfg, cmd, { ok: false, error: 'timeout (5000 ms)' }, 0).autoAllow).toBe(false)
+    expect(autoReviewDecision(cfg, cmd, { ok: false, error: 'timeout (10000 ms)' }, 0).autoAllow).toBe(false)
     expect(autoReviewDecision(cfg, cmd, { ok: true, decision: 'ask', basis: 'request', reason: 'regola fermati' }, 0).autoAllow).toBe(false)
   })
 
@@ -160,7 +160,7 @@ describe('runReviewer: normalizzazione e fallback (modello finto)', () => {
     expect(out).toEqual({ ok: false, error: 'connessione persa' })
   })
 
-  it('timeout di 5 s (qui 10 ms con modello appeso) → ok:false', async () => {
+  it('timeout di 10 s (qui 10 ms con modello appeso) → ok:false', async () => {
     const out = await runReviewer(cfg, cmd, {
       call: () => new Promise(() => undefined) // non risponde mai
     }, 10)
@@ -442,6 +442,14 @@ describe('RX1: il revisore risponde sempre in forma valida', () => {
     expect(out).toEqual({ ok: false, error: 'invalid decision' })
     expect(calls.length).toBe(1)
   }, 5_000)
+})
+
+// ---- RX (fase revisore: correzioni dalla misura) ----
+
+describe('RX2: il timeout del revisore a 10 s', () => {
+  it('REVIEWER_TIMEOUT_MS = 10_000 — il default di Rakazo (tempi misurati per chiamata: 1,1–7,7 s, molti tra 3 e 4,6 s con glm-5.3-flash:cloud)', () => {
+    expect(REVIEWER_TIMEOUT_MS).toBe(10_000)
+  })
 })
 
 // ---- fase impostazioni (I4.3): il modo «Non chiedere» — la sorella pura ----

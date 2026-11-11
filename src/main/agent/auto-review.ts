@@ -38,8 +38,14 @@ import { UI } from '../../shared/ui-messages'
 /** Tetto di approvazioni automatiche per turno: poi si torna a chiedere. */
 export const AUTO_REVIEW_MAX_PER_TURN = 20
 
-/** Timeout della chiamata al revisore: scaduto si torna a chiedere (ask). */
-export const REVIEWER_TIMEOUT_MS = 5_000
+/**
+ * Timeout della chiamata al revisore: scaduto si torna a chiedere (ask).
+ * RX (fase revisore: correzioni dalla misura): 10 s, il default di Rakazo
+ * (DEFAULT_TIMEOUT_MS) — con 5 s una parte delle letture finiva in timeout
+ * (tempi misurati per chiamata: 1,1–7,7 s, molti tra 3 e 4,6 s con
+ * glm-5.3-flash:cloud).
+ */
+export const REVIEWER_TIMEOUT_MS = 10_000
 
 /**
  * RX (fase revisore: correzioni dalla misura): tetto del reason del revisore,

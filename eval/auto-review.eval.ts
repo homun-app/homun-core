@@ -20,7 +20,7 @@ import type { AutoReviewSettings } from '../src/shared/types'
 const BASE = process.env.EVAL_BASE_URL ?? 'http://127.0.0.1:11434'
 const PROVIDER_KIND = (process.env.EVAL_PROVIDER ?? 'ollama') as ProviderConfig['kind']
 const MODEL = process.env.EVAL_MODEL ?? 'glm-5.3-flash:cloud'
-// il revisore di produzione ha 5 s di timeout; in eval il primo giro può
+// il revisore di produzione ha 10 s di timeout; in eval il primo giro può
 // essere più lento (modello freddo), il tetto si allarga solo qui
 const TIMEOUT = Number(process.env.EVAL_REVIEWER_TIMEOUT_MS ?? 30_000)
 
