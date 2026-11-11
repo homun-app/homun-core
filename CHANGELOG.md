@@ -30,6 +30,10 @@ per rispondere a ciò che hai chiesto non chiede più a ogni passo.
   più l'indirizzo intero (che restava su una riga sola e allargava la
   chat): l'indirizzo completo si vede una volta sola, negli argomenti, e va
   a capo.
+- **Il controllo automatico risponde più spesso al primo colpo e aspetta
+  abbastanza il modello.** Se la risposta del controllo arriva incompleta,
+  il bot riprova una volta da solo invece di aprirti una card; e il
+  controllo ha dieci secondi di tempo, non più cinque.
 
 ### Connessioni e aggiornamenti
 
