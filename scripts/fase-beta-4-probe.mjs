@@ -14,9 +14,12 @@
 //       sparisce dall'elenco delle pagine;
 //   B2: «+» → dialogo «Nuovo» (solo nome e aspetto) → Crea → il bot si
 //       presenta: col provider finto che risponde con una tool call ask_user,
-//       la card della domanda compare nella chat del bot nuovo; alla risposta,
-//       il bot (sempre finto) si aggiorna con update_self e la DESCRIZIONE
-//       del profilo cambia.
+//       la card della domanda compare nella chat del bot nuovo.
+//   BU2: alla presentazione si risponde dalla CASELLA IN BASSO (non dalla
+//       card): il messaggio diventa la risposta alla card (respondedTo) e nel
+//       turno DOPO la presentazione il provider finto chiama update_self SOLO
+//       se il tool è nella lista ricevuta — la descrizione cambia e compare
+//       la riga «Ha aggiornato il suo profilo».
 // A FINE SONDA si chiude ANCHE il daemon di sviluppo (il controllo condiviso
 // probe-daemons, dall'ambiente), la cartella viene rimossa. Mai il Portachiavi
 // vero, mai la cartella dati vera (env SANDBOT_TEST_*), niente Docker, rete
@@ -52,10 +55,14 @@ const check = (id, ok, note = '') => {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 // ---- il provider FINTO (openai-compatible, SSE su 127.0.0.1) ----
-// Le risposte sono uno script in coda: { text } | { toolCalls: [{name, arguments}] }
+// Le risposte sono uno script in coda: { text } | { toolCalls: [{name,
+// arguments}] } | una FUNZIONE (req) → risposta, che vede la richiesta VERA
+// (BU2: il turno dopo la presentazione chiama update_self SOLO se il tool è
+// nella lista ricevuta, come un modello vero)
 const script = []
 const pushText = (text) => script.push({ text })
 const pushTool = (name, arguments_) => script.push({ toolCalls: [{ name, arguments: arguments_ }] })
+const pushDynamic = (fn) => script.push(fn)
 let providerPort = 0
 const chatRequests = []
 const chunkOf = (delta, finish = null) =>
@@ -66,15 +73,17 @@ const providerServer = createServer((req, res) => {
     let body = ''
     req.on('data', (c) => { body += c })
     req.on('end', () => {
-      chatRequests.push(JSON.parse(body))
+      const parsed = JSON.parse(body)
+      chatRequests.push(parsed)
       const next = script.shift() ?? { text: 'ok' }
+      const resp = typeof next === 'function' ? next(parsed) : next
       res.writeHead(200, { 'content-type': 'text/event-stream' })
       res.write(chunkOf({ role: 'assistant', content: '' }))
-      if (next.text) res.write(chunkOf({ content: next.text }))
-      for (const [i, tc] of (next.toolCalls ?? []).entries()) {
+      if (resp.text) res.write(chunkOf({ content: resp.text }))
+      for (const [i, tc] of (resp.toolCalls ?? []).entries()) {
         res.write(chunkOf({ tool_calls: [{ index: i, id: `call_${randomUUID().slice(0, 8)}`, type: 'function', function: { name: tc.name, arguments: JSON.stringify(tc.arguments) } }] }))
       }
-      res.write(chunkOf({}, next.toolCalls ? 'tool_calls' : 'stop'))
+      res.write(chunkOf({}, resp.toolCalls ? 'tool_calls' : 'stop'))
       res.write('data: [DONE]\n\n')
       res.end()
     })
@@ -347,30 +356,61 @@ try {
   check('B2b il prompt nascosto c\'è per il MODELLO (nel turno partito)', introTexts.includes('You were just created'))
   await shot(appPage, 'b2-presentazione.png')
 
-  // B2c: si risponde (opzione «Le notizie del mattino»); il provider finto
-  // risponde con update_self che cambia la descrizione del profilo
-  pushTool('update_self', { description: 'Mi sveglio alle 8 con le notizie di tecnologia.' })
+  // BU2: si risponde dalla CASELLA IN BASSO, non dalla card — il percorso che
+  // l'utente vive davvero. Il provider finto, nel turno DOPO la presentazione
+  // (non BOT_INTRO), chiama update_self SOLO se il tool è nella lista che
+  // riceve; altrimenti risponde testo (come un modello vero, che non può
+  // chiamare un tool che non ha)
+  const TURN2_DESC = 'Mi sveglio alle 8 con le notizie di tecnologia.'
+  pushDynamic((req) => {
+    const names = (req.tools ?? []).map((t) => t?.function?.name ?? t?.name)
+    return names.includes('update_self')
+      ? { toolCalls: [{ name: 'update_self', arguments: { description: TURN2_DESC } }] }
+      : { text: 'ok, ma non ho update_self in questo turno' }
+  })
   pushText('Perfetto, comincio domattina.')
-  const answered = await pageEval(appPage, `
-    // il bottone porta anche il quadratino della lettera: A + etichetta
-    const btn = [...document.querySelectorAll('button')].find((b) => b.textContent.includes('Le notizie del mattino'))
-    if (!btn) return false
-    btn.click()
-    return true
+  const TYPED = 'Le notizie del mattino, per favore'
+  const typed = await pageEval(appPage, `
+    const ta = document.querySelector('form textarea')
+    if (!ta) return { ok: false, why: 'casella in basso non trovata' }
+    const set = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set
+    set.call(ta, ${JSON.stringify(TYPED)})
+    ta.dispatchEvent(new Event('input', { bubbles: true }))
+    await new Promise((r) => setTimeout(r, 150))
+    ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+    return { ok: true }
   `)
-  check('B2c risposta data alla card (clic sull\'opzione)', answered === true)
+  check('BU2 la risposta arriva dalla CASELLA IN BASSO (non dalla card)', typed?.ok === true, String(typed?.why ?? ''))
+
+  // il turno DOPO la presentazione riceve update_self nell'elenco
+  for (let i = 0; i < 40 && !chatRequests[1]; i++) await sleep(500)
+  const turn2Names = (chatRequests[1]?.tools ?? []).map((t) => t?.function?.name ?? t?.name)
+  check('BU2 il turno DOPO la presentazione riceve update_self nell\'elenco',
+    turn2Names.includes('update_self'), `${turn2Names.length} tool${turn2Names.length ? `: ${turn2Names.slice(0, 5).join(', ')}…` : ' (nessuna seconda richiesta)'}`)
+
+  // il messaggio scritto nella casella è la RISPOSTA alla card (respondedTo)
+  let provaRow = null
+  for (let i = 0; i < 40 && !provaRow; i++) {
+    const agents = await rpc(appPage, 'listAgents()')
+    const prova = agents.find((a) => a.name === 'Prova')
+    const entries = prova ? await rpc(appPage, `getEntries(${JSON.stringify(prova.id)})`) : []
+    provaRow = (entries ?? []).find((e) => e.kind === 'message' && e.role === 'user' && String(e.content ?? '').includes(TYPED))
+    if (!provaRow) await sleep(500)
+  }
+  check('BU2 il messaggio scritto porta respondedTo (è la risposta alla card)',
+    provaRow?.meta?.respondedTo !== undefined, `meta=${JSON.stringify(provaRow?.meta ?? null).slice(0, 80)}`)
 
   // la riga di sistema dopo update_self + la descrizione cambiata
   const rowSeen = await waitDom(appPage,
-    `[...document.querySelectorAll('p, summary, div')].some((x) => x.textContent.trim().startsWith('Ha aggiornato il suo profilo'))`, 60_000)
-  check('B2c la riga di sistema «Ha aggiornato il suo profilo» compare in chat', rowSeen === true)
+    `[...document.querySelectorAll('p, summary, div')].some((x) => x.textContent.trim().startsWith('Ha aggiornato il suo profilo'))`, 45_000)
+  check('BU2 la riga di sistema «Ha aggiornato il suo profilo» compare in chat', rowSeen === true)
   let prova = null
   for (let i = 0; i < 40 && !prova; i++) {
     const agents = await rpc(appPage, 'listAgents()')
     prova = agents.find((a) => a.name === 'Prova' && a.description && a.description.includes('notizie'))
     if (!prova) await sleep(500)
   }
-  check('B2c update_self ha CAMBIATO la descrizione del profilo', !!prova, prova?.description?.slice(0, 60) ?? 'descrizione invariata')
+  check('BU2 update_self ha CAMBIATO la descrizione del profilo', !!prova, prova?.description?.slice(0, 60) ?? 'descrizione invariata')
   await shot(appPage, 'b2-profilo-aggiornato.png')
   await shot(appPage, 'b2-chat-completa.png')
   appPage.close()
