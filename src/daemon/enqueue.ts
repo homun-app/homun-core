@@ -16,7 +16,7 @@ import { noteHumanText } from '../main/agent/user-language'
 // fase 17c (C2): le notice portano meta.ui e il content nella lingua dell'interfaccia
 import { uiLanguage, formatUi, ui } from '../main/ui-language'
 import { UI } from '../shared/ui-messages'
-import { findDismissibleWidgets, widgetPayload, responseDisplayText } from '../main/agent/widgets'
+import { findDismissibleWidgets, widgetPayload, responseDisplayText, answerableAskUser } from '../main/agent/widgets'
 import type { SandbotEvent, ReadingPageMeta } from '../shared/types'
 
 // fase 7 (correzione A1): il tetto vive nello store jobs, così vale anche per
@@ -49,6 +49,17 @@ export function enqueueUserMessage(
   // (va nel meta dell'entry: al modello UNA riga di contesto, in chat mai)
   readingPage?: ReadingPageMeta
 ): Job | null {
+  // BC3 (fase beta.4 — correzioni): un messaggio scritto nella casella mentre
+  // il turno è fermo su AWAITING_USER e l'ultima entry del bot è una card
+  // ask_user ancora senza risposta DIVENTA la risposta a quella card, come il
+  // campo «Scrivi tu…» (respondedTo = id della card: la riga «Hai scritto: …»,
+  // nessuna bola doppia, il modello la riceve come risposta). Un punto solo,
+  // qui dove chat:send accoda — vale anche per i messaggi da altri canali.
+  // Le card dei task non si collegano (si rispondono nella vista del task).
+  if (respondedTo === undefined && initiator === undefined && !images?.length) {
+    const card = answerableAskUser(getEntries(agentId))
+    if (card) return enqueueWidgetResponse(db, agentId, card.id, text, emit)
+  }
   // fase 17b (A2): il testo di una PERSONA aggiorna la lingua dell'utente —
   // solo i messaggi diretti (senza initiator: i [sistema] non contano) e non
   // le risposte ai widget (le etichette delle opzioni sono nella lingua del

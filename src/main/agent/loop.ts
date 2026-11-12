@@ -2733,7 +2733,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             type: 'widget', prompt: String(input.prompt ?? ''), options,
             ...(input.helpText !== undefined ? { helpText: String(input.helpText) } : {}),
             ...(input.multiSelect ? { multiSelect: true } : {}),
-            ...(input.allowCustom ? { allowCustom: true } : {}),
+            // BC3 (fase beta.4 — correzioni): nel turno BOT_INTRO la risposta
+            // libera c'è SEMPRE — il prompt della presentazione la promette
+            ...(input.allowCustom || isBotIntroTurn(opts.initiator) ? { allowCustom: true } : {}),
             ...(input.dismissOnMoveOn ? { dismissOnMoveOn: true } : {})
           }
           const widget = appendSend(agentId, call, message, emit, {}, opts.taskId)

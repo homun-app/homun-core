@@ -30,6 +30,40 @@ export function findDismissibleWidgets(entries: TranscriptEntry[]): TranscriptEn
 }
 
 /**
+ * BC3 (fase beta.4 — correzioni): la card ask_user a cui un messaggio scritto
+ * nella casella si collega (PURA). Vale solo se il turno è fermo su
+ * AWAITING_USER e l'ULTIMA entry del bot è una domanda ancora senza risposta:
+ * una card più vecchia di un'altra entry del bot (testo, altra card) NON si
+ * collega — conta solo l'ultima. Le card dei TASK restano fuori (si risponde
+ * nella vista del task, non dalla casella della chat). Null negli altri casi.
+ */
+export function answerableAskUser(entries: TranscriptEntry[]): TranscriptEntry | null {
+  // l'ultimo esito di turno dev'essere AWAITING_USER (il turno è fermo lì)
+  let awaiting = false
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const turnEnd = (entries[i]!.meta as { turnEnd?: string } | null)?.turnEnd
+    if (turnEnd !== undefined) {
+      if (turnEnd !== 'AWAITING_USER') return null
+      awaiting = true
+      break
+    }
+  }
+  if (!awaiting) return null
+  // l'ultima entry del bot: deve essere PROPRIO la card, ancora aperta
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const e = entries[i]!
+    if (e.kind !== 'send-message' || e.role !== 'assistant') continue
+    const w = widgetPayload(e)
+    if (!w) return null
+    const m = e.meta as Partial<SendMessageMeta>
+    if (m.respondedValue !== undefined || m.widgetDismissed) return null
+    if (m.taskId !== undefined) return null
+    return e
+  }
+  return null
+}
+
+/**
  * Testo del messaggio utente che porta la risposta del widget: le etichette
  * delle opzioni scelte (valore → label), o il testo libero se allowCustom.
  */

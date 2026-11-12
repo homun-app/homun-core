@@ -8171,6 +8171,26 @@ describe('B2 (fase beta.4): presentazione del bot nuovo', () => {
     await runTurn(AGENT, 'ciao ancora', emit)
     expect(String(h.llm.calls[0]![0]!.content)).not.toContain('set it yourself with update_self')
   })
+
+  // BC3 (fase beta.4 — correzioni): nel turno di presentazione la risposta
+  // libera c'è SEMPRE (il prompt la promette): allowCustom forzato
+  it('BC3: nel turno BOT_INTRO la card ask_user ha SEMPRE allowCustom, anche se il modello non lo chiede', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 'q1', name: 'ask_user', arguments: JSON.stringify({ prompt: 'Per cosa mi vuoi?', options: [{ label: 'A' }, { label: 'B' }] }) }] }
+    ]
+    await runTurn(AGENT, 'You were just created.', emit, undefined, { initiator: 'BOT_INTRO' })
+    const widget = h.db.entries.find((e) => e.kind === 'send-message')!
+    expect(widget.meta?.message).toMatchObject({ type: 'widget' })
+    expect((widget.meta?.message as { allowCustom?: boolean }).allowCustom).toBe(true)
+    // in un turno NORMALE allowCustom resta quello che chiede il modello
+    h.llm.calls.length = 0
+    h.llm.queue = [
+      { toolCalls: [{ id: 'q2', name: 'ask_user', arguments: JSON.stringify({ prompt: 'Sì o no?', options: [{ label: 'Sì' }] }) }] }
+    ]
+    await runTurn(AGENT, 'procedi', emit)
+    const widget2 = h.db.entries.findLast((e) => e.kind === 'send-message')!
+    expect((widget2.meta?.message as { allowCustom?: boolean }).allowCustom).toBeUndefined()
+  })
 })
 
 // ---- B4 (fase beta.4): il bot sa quali app ha collegate ----
