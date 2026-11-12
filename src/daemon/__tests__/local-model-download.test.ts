@@ -146,7 +146,9 @@ describe('fase locale correzioni 2 (LD1): la fine del download aggancia il provi
       onboarding: {
         // OA1 (fase onboarding-a): la facciata ha start/status al posto di maybeStart
         start: async () => undefined,
-        status: () => ({ needed: false }),
+        status: () => ({ needed: false, state: null, sequence: ['welcome', 'model', 'approvals', 'chat'] }),
+        advance: () => false,
+        reopen: () => false,
         answerRole: async () => undefined,
         resume: async () => { resumed++; return true }
       }

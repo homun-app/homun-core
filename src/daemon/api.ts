@@ -64,6 +64,7 @@ import type { JobWorker } from './worker'
 import type { ConnectorsManager } from '../main/connectors'
 import type { Presence } from './presence'
 import type { Onboarding } from './onboarding'
+import type { OnboardingStepId } from '../shared/types'
 import type { SandbotEvent, SendMessagePayload, McpServerInfo, McpServerSecret, RoutineInfo, RoutineTrigger, AutoReviewSettings, ModelInfo, ModelPriceMap, ThinkingSetting, MainModel, ProviderKind, ReadingPageMeta } from '../shared/types'
 // fase 18b (K3): la lettura /api/show condivisa col check dei tool e col loop
 import { readOllamaCapabilities } from '../main/agent/live-models'
@@ -493,8 +494,19 @@ export function buildApiMethods(
     'agents:entries': ([agentId, afterId]) => store.getEntries(agentId as string, (afterId as number) ?? 0),
     // OA1 (fase onboarding-a): lo stato del primo avvio — la finestra resta in
     // caricamento finché il daemon non risponde (niente chat vuota, niente
-    // «Bot» che compare da sola prima del tempo)
-    'onboarding:state': () => opts.onboarding?.status() ?? { needed: false },
+    // «Bot» che compare da sola prima del tempo).
+    // OA2: lo stato della GUIDA (onboarding.state) con la sequenza dei passi,
+    // e le mosse che la fanno avanzare o riaprire
+    'onboarding:state': () =>
+      opts.onboarding?.status() ?? { needed: false, state: null, sequence: ['welcome', 'model', 'approvals', 'chat'] },
+    'onboarding:advance': ([step, outcome]) => {
+      if (!opts.onboarding) return false
+      return opts.onboarding.advance(step as OnboardingStepId, outcome === 'skipped' ? 'skipped' : 'done')
+    },
+    'onboarding:reopen': ([target]) => {
+      if (!opts.onboarding) return false
+      return opts.onboarding.reopen(target as OnboardingStepId | 'restart')
+    },
     'chat:send': ([agentId, text, images, readingPage]) => {
       // fase pagine (G2/G6): la pagina aperta mentre l'utente scrive.
       // Ritocchi (P1): il meta lo risolve il daemon sulla libreria (fonte di

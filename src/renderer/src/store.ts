@@ -1,7 +1,7 @@
 // State renderer: agenti, transcript dell'agente attivo, eventi dal main.
 import { useMemo } from 'react'
 import { create } from 'zustand'
-import type { Agent, TranscriptEntry, SandbotEvent, ProviderConfig, ProviderPublic, PermissionsConfig, ConnectorInfo, TaskInfo, GroupInfo, GroupMessageInfo, SubagentInfo, AgentAvatar, TurnEnd, ScreenStatus, MainModel, ComposioStatusInfo, ComposioGatewayStatusInfo, ReadingPageRef } from '../../shared/types'
+import type { Agent, TranscriptEntry, SandbotEvent, OnboardingStatus, OnboardingStepId, ProviderConfig, ProviderPublic, PermissionsConfig, ConnectorInfo, TaskInfo, GroupInfo, GroupMessageInfo, SubagentInfo, AgentAvatar, TurnEnd, ScreenStatus, MainModel, ComposioStatusInfo, ComposioGatewayStatusInfo, ReadingPageRef } from '../../shared/types'
 import type { UpdateChannel } from '../../shared/update-channel'
 // fase 16c correzioni (R4): la regola del modello risolto, condivisa col daemon
 import { resolveAgentModel, type ResolvedAgentModel } from '../../shared/agent-model'
@@ -72,8 +72,9 @@ interface Store {
    * OA1 (fase onboarding-a): lo stato del primo avvio. null = il daemon non
    * ha ancora risposto → la finestra mostra il caricamento (niente chat vuota
    * e niente «Bot» che compare da sola prima della decisione del daemon).
+   * OA2: porta anche lo stato della GUIDA (onboarding.state) e la sequenza.
    */
-  onboarding: { needed: boolean } | null
+  onboarding: OnboardingStatus | null
   activeId: string | null
   entries: TranscriptEntry[]
   reasoning: Record<number, string>
@@ -282,6 +283,10 @@ interface Store {
   stopSubagent(id: string): void
   setSettingsOpen(v: boolean): void
   setSettingsTab(v: string | null): void
+  /** OA2 (fase onboarding-a): chiude il passo corrente della guida (done|skipped) */
+  onboardingAdvance(step: OnboardingStepId, outcome: 'done' | 'skipped'): Promise<void>
+  /** OA2: riapre la guida su un passo saltato, o la rifà da capo ('restart') */
+  onboardingReopen(target: OnboardingStepId | 'restart'): Promise<void>
   /** fase 16: tema (classe dark su <html>) e pannello destro */
   setTheme(t: UiTheme): void
   /** fase 17a: lingua dell'interfaccia — si applica subito e resta nel setting */
@@ -406,7 +411,9 @@ export const useStore = create<Store>((set, get) => ({
   async init() {
     // OA1 (fase onboarding-a): lo stato del primo avvio PRIMA di tutto — finché
     // non arriva, la finestra resta in caricamento (niente chat vuota)
-    void api.onboardingState().then((onboarding) => set({ onboarding })).catch(() => set({ onboarding: { needed: false } }))
+    void api.onboardingState()
+      .then((onboarding) => set({ onboarding }))
+      .catch(() => set({ onboarding: { needed: false, state: null, sequence: ['welcome', 'model', 'approvals', 'chat'] } }))
     const agents = await api.listAgents()
     const providers = await api.listProviders()
     const permissions = await api.getPermissions()
@@ -484,8 +491,15 @@ export const useStore = create<Store>((set, get) => ({
           void api.listAgents().then((agents2) => set({ agents: agents2 }))
           break
         case 'onboarding': {
-          // OA1: il daemon ha detto lo stato del primo avvio
-          set({ onboarding: { needed: e.needed } })
+          // OA1: il daemon ha detto lo stato del primo avvio. OA2: con lo
+          // stato della guida (il passo corrente) e la sequenza
+          set({
+            onboarding: {
+              needed: e.needed,
+              state: e.state ?? null,
+              sequence: e.sequence ?? ['welcome', 'model', 'approvals', 'chat']
+            }
+          })
           break
         }
         case 'status': {
@@ -852,6 +866,14 @@ export const useStore = create<Store>((set, get) => ({
     )
   },
 
+  async onboardingAdvance(step, outcome) {
+    const r = await api.onboardingAdvance(step, outcome)
+    if (r) set({ onboarding: r })
+  },
+  async onboardingReopen(target) {
+    const r = await api.onboardingReopen(target)
+    if (r) set({ onboarding: r })
+  },
   setSettingsOpen(v) {
     set({ settingsOpen: v })
   },

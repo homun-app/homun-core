@@ -7,6 +7,8 @@ import { Chat } from './components/Chat'
 import { TeamChat } from './components/TeamChat'
 import { RightPanel } from './components/RightPanel'
 import { Settings } from './components/Settings'
+// OA2 (fase onboarding-a): la guida a passi del primo avvio, a tutta finestra
+import { GuideView } from './components/GuideView'
 import { LibraryPanel } from './components/LibraryPanel'
 // fase 16c (C5/C4): la vista Attività e la finestra «Collega app»
 import { ActivityPanel } from './components/ActivityPanel'
@@ -79,8 +81,10 @@ export function App() {
   // fase skill (S4): la finestra «Skill» (libreria unica)
   const skillsOpen = useStore((s) => s.skillsOpen)
   // OA1 (fase onboarding-a): finché il daemon non dice lo stato del primo
-  // avvio, la finestra CARICA — niente chat vuota, niente «Bot» da sola
+  // avvio, la finestra CARICA — niente chat vuota, niente «Bot» da sola.
+  // OA2: se la guida è aperta (needed e passo ≠ chat) la finestra è la GUIDA
   const onboardingKnown = useStore((s) => s.onboarding !== null)
+  const guideOpen = useStore((s) => s.onboarding?.needed === true && s.onboarding.state !== null && s.onboarding.state.step !== 'chat')
 
   useEffect(() => {
     void init()
@@ -167,6 +171,7 @@ export function App() {
   const panelTab = useStore((s) => (s.openGroupId !== null ? ('members' as const) : s.panelTab))
   const layout = layoutFor({ windowWidth, sidebarCollapsedByUser: sidebarCollapsed, sidebarWidthPref: sidebarWidth, panelOpen: rightPanel, panelTab })
   if (!onboardingKnown) return <BootSplash />
+  if (guideOpen) return <GuideView />
   return (
     <div className="relative flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
       <LegacyHomun2Notice />

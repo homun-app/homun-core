@@ -623,6 +623,32 @@ export interface PermissionsConfig {
   rules: PermissionRule[]
 }
 
+// ---- Onboarding (fase onboarding-a) ----
+
+/**
+ * OA2: i passi della guida «Prepariamo Homun». «chat» è la coda: la guida è
+ * chiusa e si entra nella chat del bot principale. computer e memory
+ * arrivano con le fasi B e C: quando non disponibili, la sequenza li salta.
+ */
+export type OnboardingStepId = 'welcome' | 'model' | 'approvals' | 'computer' | 'memory' | 'chat'
+
+/** OA2: lo stato persistito della guida (setting onboarding.state). */
+export interface OnboardingState {
+  step: OnboardingStepId
+  done: OnboardingStepId[]
+  skipped: OnboardingStepId[]
+  startedAt: number
+}
+
+/** OA2: lo stato della guida per la finestra (RPC onboarding:state ed evento). */
+export interface OnboardingStatus {
+  needed: boolean
+  /** null se la guida non è mai partita (per esempio chi usa già Homun) */
+  state: OnboardingState | null
+  /** i passi disponibili su questa macchina, in ordine (l'ultimo è «chat») */
+  sequence: OnboardingStepId[]
+}
+
 // ---- Approvazioni ----
 
 /**
@@ -654,8 +680,9 @@ export type SandbotEvent =
   | { type: 'status'; agentId: string; status: AgentStatus }
   | { type: 'agents' }
   // OA1 (fase onboarding-a): il daemon ha deciso lo stato dell'onboarding —
-  // needed false significa «niente guida» (finestra normale), true «guida»
-  | { type: 'onboarding'; needed: boolean }
+  // needed false significa «niente guida» (finestra normale), true «guida».
+  // OA2: l'evento porta anche lo stato della guida e la sequenza dei passi
+  | { type: 'onboarding' } & OnboardingStatus
   | { type: 'approval'; agentId: string; approval: Approval }
   | { type: 'open-agent'; agentId: string }
   // residuo fase 4 (0b): il client del daemon si è RICONNESSO dopo una
@@ -895,7 +922,11 @@ export interface SandbotApi {
   // OA1 (fase onboarding-a): lo stato del primo avvio — la finestra resta in
   // caricamento finché il daemon non ha risposto (niente chat vuota, niente
   // «Bot» che compare da sola prima che l'onboarding l'abbia deciso)
-  onboardingState(): Promise<{ needed: boolean }>
+  onboardingState(): Promise<OnboardingStatus>
+  /** OA2: chiude il passo CORRENTE della guida (esito done o skipped) */
+  onboardingAdvance(step: OnboardingStepId, outcome: 'done' | 'skipped'): Promise<OnboardingStatus | false>
+  /** OA2: riapre la guida su un passo saltato, o la rifà da capo ('restart') */
+  onboardingReopen(target: OnboardingStepId | 'restart'): Promise<OnboardingStatus | false>
   // quick-ask (domanda effimera)
   quickAsk(agentId: string, question: string): Promise<string>
   // allegati

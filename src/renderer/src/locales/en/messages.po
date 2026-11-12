@@ -1136,6 +1136,10 @@ msgstr "authorization failed ({error})"
 msgid "rpc.authOkServerDown"
 msgstr "authorization succeeded but the server does not respond: {error}"
 
+#: src/renderer/src/components/GuideView.tsx
+msgid "Autorizzazioni"
+msgstr "Permissions"
+
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Avanti"
 msgstr "Next"
@@ -1190,6 +1194,10 @@ msgstr "Low"
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Bearer token (opzionale — salvato cifrato)"
 msgstr "Bearer token (optional — stored encrypted)"
+
+#: src/renderer/src/components/GuideView.tsx
+msgid "Benvenuto"
+msgstr "Welcome"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -1693,6 +1701,7 @@ msgstr "Composio unreachable: check your connection and try again."
 msgid "Composio non raggiungibile: controlla la connessione e riprova."
 msgstr "Composio unreachable: check your connection and try again."
 
+#: src/renderer/src/components/GuideView.tsx
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Computer"
 msgstr "Computer"
@@ -1914,6 +1923,10 @@ msgstr "Contact to save in the vault"
 #: src/shared/ui-messages.ts
 msgid "approval.rcSubstitution"
 msgstr "contains a command substitution ($(...) or backtick)"
+
+#: src/renderer/src/components/GuideView.tsx
+msgid "Continua"
+msgstr "Continue"
 
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 msgid "Continua da solo quando…"
@@ -2705,6 +2718,10 @@ msgstr "Group not found"
 msgid "guarda i file…"
 msgstr "looks through the files…"
 
+#: src/renderer/src/components/Settings.tsx
+msgid "Guida iniziale"
+msgstr "Initial guide"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "event.selfProfileUpdated"
@@ -3119,6 +3136,10 @@ msgstr "the marketplace is not an object"
 msgid "main.botDescription"
 msgstr "My personal assistant, always on."
 
+#: src/renderer/src/components/GuideView.tsx
+msgid "Il modello"
+msgstr "The model"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "providers.noTools"
@@ -3133,6 +3154,10 @@ msgstr "Model {model} on provider {provider} is not responding ({why}): switchin
 #: src/shared/ui-messages.ts
 msgid "notice.imagesNotSeen"
 msgstr "The model {model} cannot see images: the attachments of this message will not be looked at."
+
+#: src/renderer/src/components/GuideView.tsx
+msgid "Il modello è ciò che fa pensare il tuo Homun. Si può scegliere ora, oppure più avanti dalla chat."
+msgstr "The model is what makes your Homun think. You can pick one now, or later from the chat."
 
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Il modello integrato gira sul tuo Mac: niente costi e i dati restano qui. È più lento e sbaglia più spesso dei modelli cloud; per lavori affidabili ti consiglio un modello cloud."
@@ -3445,6 +3470,10 @@ msgstr "{0} server address"
 #: src/renderer/src/components/Settings.tsx
 msgid "ingresso $/M"
 msgstr "input $/M"
+
+#: src/renderer/src/components/GuideView.tsx
+msgid "Iniziamo"
+msgstr "Let's start"
 
 #: src/renderer/src/components/ServerSetup.tsx
 msgid "Inserisci un valore"
@@ -3951,6 +3980,7 @@ msgstr "Medium"
 msgid "Membri"
 msgstr "Members"
 
+#: src/renderer/src/components/GuideView.tsx
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Memoria"
 msgstr "Memory"
@@ -4016,6 +4046,7 @@ msgstr "Models"
 msgid "modello"
 msgstr "model"
 
+#: src/renderer/src/components/GuideView.tsx
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Modello"
 msgstr "Model"
@@ -4277,6 +4308,10 @@ msgstr "no model in the list: type the id and press Enter"
 #: src/renderer/src/components/ui/ModelSelect.tsx
 msgid "Nessun modello trovato."
 msgstr "No model found."
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Nessun passo saltato da riprendere"
+msgstr "No skipped step to resume"
 
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "Nessun risultato."
@@ -4927,6 +4962,10 @@ msgstr "Plugins in the Claude Code format. Default: <0>anthropics/claude-plugins
 msgid "rpc.pluginNotFoundPlain"
 msgstr "plugin not found"
 
+#: src/renderer/src/components/GuideView.tsx
+msgid "Pochi passi e il tuo Homun è pronto: il modello che lo fa pensare, che cosa può fare da solo."
+msgstr "A few steps and your Homun is ready: the model that makes it think, and what it may do on its own."
+
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 msgid "Politica predefinita"
 msgstr "Default policy"
@@ -4954,6 +4993,10 @@ msgstr "takes note…"
 #: src/renderer/src/components/BotScreen.tsx
 msgid "Prendi il controllo"
 msgstr "Take control"
+
+#: src/renderer/src/components/GuideView.tsx
+msgid "Prepariamo Homun"
+msgstr "Let's set up Homun"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -5021,6 +5064,7 @@ msgstr "Project (title in the sidebar)"
 msgid "Prompt:"
 msgstr "Prompt:"
 
+#: src/renderer/src/components/GuideView.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Pronto"
 msgstr "Ready"
@@ -5244,6 +5288,10 @@ msgstr "This model cannot see images"
 msgid "Questo non sembra un server MCP: controlla l'indirizzo."
 msgstr "This does not look like an MCP server: check the address."
 
+#: src/renderer/src/components/GuideView.tsx
+msgid "Questo passo arriva con un aggiornamento prossimo: per ora puoi proseguire."
+msgstr "This step arrives with an upcoming update: you can go on for now."
+
 #: src/renderer/src/components/ServerSetup.tsx
 msgid "Questo server non permette l'accesso dal browser: usa un token di accesso."
 msgstr "This server does not allow browser sign-in: use an access token."
@@ -5416,6 +5464,10 @@ msgstr "summary for you"
 msgid "Riepilogo turni precedenti"
 msgstr "Summary of earlier turns"
 
+#: src/renderer/src/components/Settings.tsx
+msgid "Rifai da capo"
+msgstr "Start over"
+
 #: src/renderer/src/components/ApprovalCard.tsx
 #: src/renderer/src/components/LibraryCards.tsx
 msgid "Rifiuta"
@@ -5464,6 +5516,7 @@ msgstr "Rename"
 msgid "riprendi"
 msgstr "resume"
 
+#: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Riprendi"
 msgstr "Resume"
@@ -5591,6 +5644,14 @@ msgstr "Role"
 #: src/renderer/src/components/Settings.tsx
 msgid "sabato"
 msgstr "Saturday"
+
+#: src/renderer/src/components/GuideView.tsx
+msgid "Salta per ora"
+msgstr "Skip for now"
+
+#: src/renderer/src/components/GuideView.tsx
+msgid "saltato"
+msgstr "skipped"
 
 #: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/BotDialogs.tsx
@@ -6012,6 +6073,10 @@ msgstr "it installs only in the bots’ computer (docker mode)"
 #: src/shared/ui-messages.ts
 msgid "rpc.filesNotAFile"
 msgstr "Only a file can be downloaded, not a folder."
+
+#: src/renderer/src/components/Settings.tsx
+msgid "Si riprendono solo i passi saltati. Rifarla da capo non tocca bot né dati."
+msgstr "Only skipped steps can be resumed. Starting over touches neither bots nor data."
 
 #: src/renderer/src/components/ServerSetup.tsx
 msgid "Si salvano cifrate sul tuo Mac quando premi Collega."

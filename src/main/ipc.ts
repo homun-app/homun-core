@@ -128,8 +128,9 @@ export const DAEMON_RPC_CHANNELS = [
   'box:engine-status', 'box:engine-set', 'box:engine-start', 'box:engine-kernel-install',
   // fase 7: template dei bot (catalogo + creazione col kickstart)
   'templates:list', 'agents:create-from-template',
-  // OA1 (fase onboarding-a): lo stato del primo avvio (la finestra carica finché non risponde)
-  'onboarding:state'
+  // OA1 (fase onboarding-a): lo stato del primo avvio (la finestra carica finché non risponde);
+  // OA2: la guida avanza e si riapre da qui
+  'onboarding:state', 'onboarding:advance', 'onboarding:reopen'
 ] as const
 
 export function registerIpc(client: DaemonClient, getWindows: () => BrowserWindow[]): void {

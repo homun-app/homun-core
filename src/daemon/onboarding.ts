@@ -6,7 +6,7 @@
 // due bot da template col kickstart, benvenuto fisso, widget del provider e
 // ripresa) resta finché la guida a passi di OA2+ non lo sostituisce.
 // Tutto a dipendenze iniettabili: nei test niente LLM, niente rete.
-import type { Agent, ProviderConfig, SendMessagePayload, SandbotEvent, TranscriptEntry, WidgetOption } from '../shared/types'
+import type { Agent, OnboardingState, OnboardingStatus, OnboardingStepId, ProviderConfig, SendMessagePayload, SandbotEvent, TranscriptEntry, WidgetOption } from '../shared/types'
 import type { BotTemplate } from '../shared/types'
 import { templateById } from '../main/templates'
 // fase 17c (C4): i testi dell'onboarding sono messaggi del BOT all'utente —
@@ -30,6 +30,78 @@ export function mainBotDescription(lang: Lang): string {
 export const ROLE_SETTING = 'onboarding.role'
 export const PENDING_PROVIDER_SETTING = 'onboarding.pendingProvider'
 export const DONE_SETTING = 'onboarding.done'
+
+// ---- OA2 (fase onboarding-a): la guida a passi che si riprende ----
+
+/** Il setting dove vive lo stato della guida (persistito, come i fatti). */
+export const ONBOARDING_STATE_SETTING = 'onboarding.state'
+
+/**
+ * La sequenza dei passi della guida (PURA): i passi non disponibili su
+ * questa macchina non ci sono — in fase A computer e memory non esistono
+ * ancora (arrivano con le fasi B e C), e la guida li salta senza segnarli
+ * né fatti né saltati. «chat» è la coda: la guida è chiusa e si entra nella
+ * chat del bot principale.
+ */
+export function onboardingStepSequence(available: { computer: boolean; memory: boolean }): OnboardingStepId[] {
+  return [
+    'welcome',
+    'model',
+    ...(available.computer ? (['computer'] as OnboardingStepId[]) : []),
+    ...(available.memory ? (['memory'] as OnboardingStepId[]) : []),
+    'approvals',
+    'chat'
+  ]
+}
+
+/** Lo stato iniziale della guida: dal primo passo della sequenza. */
+export function initialOnboardingState(now: number, available: { computer: boolean; memory: boolean }): OnboardingState {
+  return { step: onboardingStepSequence(available)[0]!, done: [], skipped: [], startedAt: now }
+}
+
+/**
+ * L'esito di un passo (PURA): SOLO il passo corrente avanza; l'esito finisce
+ * in done o skipped (e esce dall'altro elenco), il passo diventa il prossimo
+ * della sequenza. Un passo che non è il corrente, o che non è in sequenza,
+ * non cambia nulla: la guida non si salta da sola.
+ */
+export function advanceOnboardingStep(
+  state: OnboardingState,
+  step: OnboardingStepId,
+  outcome: 'done' | 'skipped',
+  sequence: readonly OnboardingStepId[]
+): OnboardingState {
+  if (state.step !== step) return state
+  const idx = sequence.indexOf(step)
+  if (idx === -1) return state
+  const done = state.done.filter((s) => s !== step)
+  const skipped = state.skipped.filter((s) => s !== step)
+  return {
+    step: sequence[idx + 1] ?? 'chat',
+    done: outcome === 'done' ? [...done, step] : done,
+    skipped: outcome === 'skipped' ? [...skipped, step] : skipped,
+    startedAt: state.startedAt
+  }
+}
+
+/**
+ * Riaprire la guida (PURA): «Riprendi» solo su un passo SALTATO (diventa il
+ * corrente ed esce dai saltati; i fatti restano fatti); «Rifai da capo»
+ * (target 'restart') rimette SOLO lo stato — niente bot né dati toccati —
+ * con startedAt nuovo.
+ */
+export function reopenOnboarding(
+  state: OnboardingState,
+  target: OnboardingStepId | 'restart',
+  sequence: readonly OnboardingStepId[],
+  now: number
+): OnboardingState | null {
+  if (target === 'restart') {
+    return { step: sequence[0]!, done: [], skipped: [], startedAt: now }
+  }
+  if (!state.skipped.includes(target) || !sequence.includes(target)) return null
+  return { ...state, step: target, skipped: state.skipped.filter((s) => s !== target) }
+}
 
 // ---- OA1 (fase onboarding-a): chi fa l'onboarding, e UN solo bot ----
 
@@ -178,6 +250,11 @@ export interface OnboardingDeps {
   tx<T>(fn: () => T): T
   /** OA1: l'ensure single-flight del bot principale (se il wiring ne ha già uno). */
   ensureMainBot?: (adopt: string | null) => Promise<Agent>
+  /**
+   * OA2: quali passi extra esistono su questa macchina. In fase A computer e
+   * memory non ci sono ancora: default { computer: false, memory: false }.
+   */
+  stepAvailability?: () => { computer: boolean; memory: boolean }
   updateAgent(id: string, patch: { providerId?: string | null; model?: string | null }): void
   listProviders(): ProviderConfig[]
   /** Fase 9 (punto 1): provider attivo + defaultModel (con capability "tools"). */
@@ -204,6 +281,28 @@ function providerConfigured(deps: OnboardingDeps): boolean {
   return deps.listProviders().some((p) => p.enabled)
 }
 
+/** I passi disponibili su questa macchina (fase A: computer e memory mai). */
+function availabilityOf(deps: OnboardingDeps): { computer: boolean; memory: boolean } {
+  return deps.stepAvailability?.() ?? { computer: false, memory: false }
+}
+
+/** Lo stato persistito della guida, se è mai partita. */
+function stateOf(deps: OnboardingDeps): OnboardingState | null {
+  const raw = deps.getSetting<OnboardingState | null>(ONBOARDING_STATE_SETTING, null)
+  if (!raw || typeof raw !== 'object' || typeof raw.step !== 'string') return null
+  return raw
+}
+
+/** Lo status completo per RPC ed eventi (nessun effetto). */
+function statusOf(deps: OnboardingDeps): OnboardingStatus {
+  const decision = onboardingNeeded(onboardingFactsOf(deps))
+  return {
+    needed: decision.needed,
+    state: stateOf(deps),
+    sequence: onboardingStepSequence(availabilityOf(deps))
+  }
+}
+
 /** I fatti del primo avvio, dai deps (nessun effetto: si può chiamare per uno status). */
 export function onboardingFactsOf(deps: OnboardingDeps): OnboardingFacts {
   return {
@@ -226,15 +325,20 @@ export async function startOnboarding(deps: OnboardingDeps): Promise<void> {
   const decision = onboardingNeeded(onboardingFactsOf(deps))
   if (!decision.needed) {
     if (decision.markDone) deps.setSetting(DONE_SETTING, true)
-    deps.emit({ type: 'onboarding', needed: false })
+    deps.emit({ type: 'onboarding', ...statusOf(deps) })
     return
   }
   const ensurer = deps.ensureMainBot
     ? { ensureMainBot: (adopt: string | null) => deps.ensureMainBot!(adopt) }
     : createMainBotEnsurer(deps)
   const main = await ensurer.ensureMainBot(decision.adoptAgentId)
+  // OA2: lo stato della guida nasce qui e NON si tocca più — chiudere l'app
+  // a metà e riaprirla riporta allo stesso passo
+  if (stateOf(deps) === null) {
+    deps.setSetting(ONBOARDING_STATE_SETTING, initialOnboardingState(deps.now(), availabilityOf(deps)))
+  }
   deps.emit({ type: 'agents' })
-  deps.emit({ type: 'onboarding', needed: true })
+  deps.emit({ type: 'onboarding', ...statusOf(deps) })
   // il widget del ruolo del vecchio flusso: solo se la chat è ancora vuota
   // (nessuna send di sistema: niente widget doppio ai riavvii)
   if (!deps.getEntries(main.id).some((e) => e.kind === 'send-message')) {
@@ -366,10 +470,41 @@ export async function completeOnboarding(deps: OnboardingDeps, role: string): Pr
 export function createOnboarding(deps: OnboardingDeps) {
   return {
     start: () => startOnboarding(deps),
-    /** OA1: lo stato per la finestra — finché non lo dice il daemon, la UI carica. */
-    status: (): { needed: boolean } => {
-      const decision = onboardingNeeded(onboardingFactsOf(deps))
-      return { needed: decision.needed }
+    /** OA1/OA2: lo stato per la finestra — finché non lo dice il daemon, la UI carica. */
+    status: (): OnboardingStatus => statusOf(deps),
+    /**
+     * OA2: chiude il passo CORRENTE con l'esito dato e passa al prossimo
+     * disponibile. Quando la guida arriva a «chat» scrive onboarding.done.
+     * False se il passo non è il corrente (niente cambiato).
+     */
+    advance: (step: OnboardingStepId, outcome: 'done' | 'skipped'): OnboardingStatus | false => {
+      const state = stateOf(deps)
+      if (!state) return false
+      const sequence = onboardingStepSequence(availabilityOf(deps))
+      const next = advanceOnboardingStep(state, step, outcome, sequence)
+      if (next === state) return false
+      deps.setSetting(ONBOARDING_STATE_SETTING, next)
+      if (next.step === 'chat') deps.setSetting(DONE_SETTING, true)
+      const status = statusOf(deps)
+      deps.emit({ type: 'onboarding', ...status })
+      return status
+    },
+    /**
+     * OA2: riapre la guida su un passo SALTATO, o la rifà da capo (target
+     * 'restart': rimette SOLO onboarding.state, nessun bot né dato toccato —
+     * e onboarding.done si spegne, se era acceso). False se non si può.
+     */
+    reopen: (target: OnboardingStepId | 'restart'): OnboardingStatus | false => {
+      const state = stateOf(deps)
+      if (!state) return false
+      const sequence = onboardingStepSequence(availabilityOf(deps))
+      const next = reopenOnboarding(state, target, sequence, deps.now())
+      if (!next) return false
+      deps.setSetting(ONBOARDING_STATE_SETTING, next)
+      deps.setSetting(DONE_SETTING, false)
+      const status = statusOf(deps)
+      deps.emit({ type: 'onboarding', ...status })
+      return status
     },
     answerRole: (entryId: number, value: string | string[]) => answerOnboardingRole(deps, entryId, value),
     resume: () => resumeOnboarding(deps)

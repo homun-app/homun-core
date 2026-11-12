@@ -209,6 +209,12 @@ function GeneralTab() {
   const setDebugSteps = useStore((s) => s.setDebugSteps)
   const uiLanguage = useStore((s) => s.uiLanguage)
   const setUiLanguage = useStore((s) => s.setUiLanguage)
+  // OA2 (fase onboarding-a): la riga «Guida iniziale» — c'è solo se la guida
+  // è mai partita (chi usa già Homun da sempre non la vede)
+  const onboarding = useStore((s) => s.onboarding)
+  const onboardingReopen = useStore((s) => s.onboardingReopen)
+  const guideState = onboarding?.state ?? null
+  const skippedSteps = guideState?.skipped ?? []
   const [atLogin, setAtLogin] = useState<{ enabled: boolean; requiresApproval: boolean; mechanism: 'agentService' | 'plist' }>({ enabled: false, requiresApproval: false, mechanism: 'plist' })
   const [busy, setBusy] = useState(false)
   // RV1 (fase beta.2): lo stato dell'aggiornamento arriva dallo store (lo
@@ -404,6 +410,34 @@ function GeneralTab() {
           control={<Toggle label={t`Ricevi le versioni di prova`} checked={betaChannel} onChange={(v) => void toggleBetaChannel(v)} />}
         />
       </SettingsGroup>
+
+      {/* ---- OA2 (fase onboarding-a): la guida iniziale ---- */}
+      {guideState && (
+        <SettingsGroup label={<Trans>Guida iniziale</Trans>}>
+          <SettingsRow
+            title={<Trans>Guida iniziale</Trans>}
+            description={<Trans>Si riprendono solo i passi saltati. Rifarla da capo non tocca bot né dati.</Trans>}
+            control={
+              <span className="flex shrink-0 items-center gap-2 text-xs" data-testid="settings-guide-row">
+                <button
+                  className="rounded-full bg-foreground px-3 py-1.5 text-xs text-background outline-none transition focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-40"
+                  disabled={skippedSteps.length === 0}
+                  title={skippedSteps.length === 0 ? t`Nessun passo saltato da riprendere` : undefined}
+                  onClick={() => { void onboardingReopen(skippedSteps[0]!) }}
+                >
+                  <Trans>Riprendi</Trans>
+                </button>
+                <button
+                  className="rounded-full bg-muted px-3 py-1.5 text-xs text-foreground outline-none transition hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                  onClick={() => { void onboardingReopen('restart') }}
+                >
+                  <Trans>Rifai da capo</Trans>
+                </button>
+              </span>
+            }
+          />
+        </SettingsGroup>
+      )}
 
       {/* ---- Consegna ---- */}
       <SettingsGroup label={<Trans>Consegna</Trans>}>

@@ -89,8 +89,11 @@ const api: SandbotApi = {
   grantRevoke: (id) => ipcRenderer.invoke('grants:revoke', id),
   grantServerReads: (slug) => ipcRenderer.invoke('permissions:grant-server-reads', slug),
   settingsGet: <T,>(key: string, fallback: T) => ipcRenderer.invoke('settings:get', key, fallback) as Promise<T>,
-  // OA1 (fase onboarding-a): lo stato del primo avvio (caricamento finché non risponde)
-  onboardingState: () => ipcRenderer.invoke('onboarding:state') as Promise<{ needed: boolean }>,
+  // OA1 (fase onboarding-a): lo stato del primo avvio (caricamento finché non risponde).
+  // OA2: advance chiude il passo corrente (done|skipped), reopen riapre un passo saltato o rifà da capo
+  onboardingState: () => ipcRenderer.invoke('onboarding:state') as Promise<import('../shared/types').OnboardingStatus>,
+  onboardingAdvance: (step, outcome) => ipcRenderer.invoke('onboarding:advance', step, outcome) as Promise<import('../shared/types').OnboardingStatus | false>,
+  onboardingReopen: (target) => ipcRenderer.invoke('onboarding:reopen', target) as Promise<import('../shared/types').OnboardingStatus | false>,
   settingsSet: (key, value) => ipcRenderer.invoke('settings:set', key, value),
   quickAsk: (agentId, question) => ipcRenderer.invoke('quickask', agentId, question),
   pickImage: () => ipcRenderer.invoke('dialog:pick-image'),

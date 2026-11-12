@@ -11,12 +11,14 @@ import { describe, expect, it, beforeEach } from 'vitest'
 import {
   createOnboarding, startOnboarding, answerOnboardingRole, resumeOnboarding,
   onboardingNeeded, createMainBotEnsurer,
+  onboardingStepSequence, initialOnboardingState, advanceOnboardingStep, reopenOnboarding,
+  ONBOARDING_STATE_SETTING,
   roleTemplates, welcomeMessage, onboardingPrompt, onboardingRoleOptions,
   providerPathsOf,
   MAIN_BOT_NAME, ROLE_SETTING, PENDING_PROVIDER_SETTING, DONE_SETTING,
   type OnboardingDeps
 } from '../onboarding'
-import type { Agent, ProviderConfig, SendMessagePayload, SandbotEvent, TranscriptEntry } from '../../shared/types'
+import type { Agent, OnboardingState, ProviderConfig, SendMessagePayload, SandbotEvent, TranscriptEntry } from '../../shared/types'
 import type { BotTemplate } from '../../shared/types'
 // fase 17c: i test della lingua scrivono i setting dello store reale (test-setup).
 // La lingua di default qui è l'italiano (i testi fissi erano italiani prima);
@@ -173,13 +175,97 @@ describe('OA1 ensureMainBot: single-flight, un solo bot anche con la race', () =
     expect(log.settings['mainAgentId']).toBe(bot.id)
   })
 
-  it('l\'adozione: il «Bot» vuoto della beta diventa principale SENZA crearne un altro', async () => {
+  it("l\\'adozione: il «Bot» vuoto della beta diventa principale SENZA crearne un altro", async () => {
     const beta: Agent = { id: 'agent_beta', name: 'Bot', description: 'della beta', providerId: null, model: null, status: 'idle', unread: 0, createdAt: 1 }
     log.agents.push(beta)
     const bot = await createMainBotEnsurer(mkEnsurerDeps(log), 'agent_beta').ensureMainBot()
     expect(log.agents).toHaveLength(1)
     expect(bot.id).toBe('agent_beta')
     expect(log.settings['mainAgentId']).toBe('agent_beta')
+  })
+})
+
+// ---- OA2: la guida a passi che si riprende (tutto PURO) ----
+describe('OA2 onboardingStepSequence: la sequenza dei passi disponibili', () => {
+  it('fase A: computer e memory NON ci sono ancora — la sequenza li salta (passi non disponibili su questa macchina)', () => {
+    expect(onboardingStepSequence({ computer: false, memory: false }))
+      .toEqual(['welcome', 'model', 'approvals', 'chat'])
+  })
+
+  it("con i passi disponibili (fasi B e C) l\\'ordine è welcome, model, computer, memory, approvals, chat", () => {
+    expect(onboardingStepSequence({ computer: true, memory: true }))
+      .toEqual(['welcome', 'model', 'computer', 'memory', 'approvals', 'chat'])
+    expect(onboardingStepSequence({ computer: true, memory: false }))
+      .toEqual(['welcome', 'model', 'computer', 'approvals', 'chat'])
+    expect(onboardingStepSequence({ computer: false, memory: true }))
+      .toEqual(['welcome', 'model', 'memory', 'approvals', 'chat'])
+  })
+})
+
+describe('OA2 advanceOnboardingStep (pura): esito del passo e passo successivo', () => {
+  const SEQ = onboardingStepSequence({ computer: false, memory: false })
+
+  it('stato iniziale: welcome, niente fatto né saltato', () => {
+    const st = initialOnboardingState(1_000, { computer: false, memory: false })
+    expect(st).toEqual({ step: 'welcome', done: [], skipped: [], startedAt: 1_000 })
+  })
+
+  it('done: il passo finisce in done e si passa al successivo', () => {
+    const st = advanceOnboardingStep(initialOnboardingState(1_000, { computer: false, memory: false }), 'welcome', 'done', SEQ)
+    expect(st.step).toBe('model')
+    expect(st.done).toEqual(['welcome'])
+    expect(st.skipped).toEqual([])
+    expect(st.startedAt).toBe(1_000)
+  })
+
+  it('skipped: la guida avanza lo stesso, il passo resta segnato saltato', () => {
+    const st = advanceOnboardingStep(initialOnboardingState(1_000, { computer: false, memory: false }), 'welcome', 'done', SEQ)
+    const st2 = advanceOnboardingStep(st, 'model', 'skipped', SEQ)
+    expect(st2.step).toBe('approvals')
+    expect(st2.done).toEqual(['welcome'])
+    expect(st2.skipped).toEqual(['model'])
+  })
+
+  it('SOLO il passo corrente avanza: un passo diverso non cambia nulla', () => {
+    const st = initialOnboardingState(1_000, { computer: false, memory: false })
+    expect(advanceOnboardingStep(st, 'model', 'done', SEQ)).toEqual(st)
+    // e un passo fuori sequenza nemmeno
+    expect(advanceOnboardingStep(st, 'memory', 'done', SEQ)).toEqual(st)
+  })
+
+  it("l\\'ultimo passo utile porta a chat: la guida è chiusa", () => {
+    let st = initialOnboardingState(1_000, { computer: false, memory: false })
+    st = advanceOnboardingStep(st, 'welcome', 'done', SEQ)
+    st = advanceOnboardingStep(st, 'model', 'skipped', SEQ)
+    st = advanceOnboardingStep(st, 'approvals', 'done', SEQ)
+    expect(st.step).toBe('chat')
+  })
+})
+
+describe('OA2 reopenOnboarding (pura): riprendere i saltati, rifare da capo', () => {
+  const SEQ = onboardingStepSequence({ computer: false, memory: false })
+  const skippedModel = advanceOnboardingStep(
+    advanceOnboardingStep(initialOnboardingState(1_000, { computer: false, memory: false }), 'welcome', 'done', SEQ),
+    'model', 'skipped', SEQ
+  )
+
+  it('Riprendi: UN passo saltato diventa il corrente ed esce dai saltati', () => {
+    const st = reopenOnboarding(skippedModel, 'model', SEQ, 2_000)!
+    expect(st.step).toBe('model')
+    expect(st.skipped).toEqual([])
+    // i passi FATTI restano fatti: da lì in poi si rifà solo model
+    expect(st.done).toEqual(['welcome'])
+    expect(st.startedAt).toBe(1_000) // la guida NON ricomincia nel tempo
+  })
+
+  it('Riprendi su un passo NON saltato non si può (null: solo i saltati si riprendono)', () => {
+    expect(reopenOnboarding(skippedModel, 'welcome', SEQ, 2_000)).toBeNull()
+    expect(reopenOnboarding(skippedModel, 'approvals', SEQ, 2_000)).toBeNull()
+  })
+
+  it('Rifai da capo: stato fresco (si riparte da welcome), startedAt nuovo', () => {
+    const st = reopenOnboarding(skippedModel, 'restart', SEQ, 2_000)
+    expect(st).toEqual({ step: 'welcome', done: [], skipped: [], startedAt: 2_000 })
   })
 })
 
@@ -191,7 +277,7 @@ describe('OA1 startOnboarding: il bot principale lo crea solo il daemon', () => 
     expect(log.agents[0]!.name).toBe(MAIN_BOT_NAME)
     expect(log.settings['mainAgentId']).toBe(log.agents[0]!.id)
     expect(log.events.filter((e) => e.type === 'agents')).toHaveLength(1)
-    expect(log.events).toContainEqual({ type: 'onboarding', needed: true })
+    expect(log.events.some((e) => e.type === 'onboarding' && e.needed === true)).toBe(true)
   })
 
   it('c\'è già un messaggio dell\'utente → NESSUN bot nuovo, onboarding.done scritto, evento not-needed', async () => {
@@ -201,7 +287,7 @@ describe('OA1 startOnboarding: il bot principale lo crea solo il daemon', () => 
     expect(log.agents).toHaveLength(1)
     expect(log.sends).toHaveLength(0)
     expect(log.settings[DONE_SETTING]).toBe(true)
-    expect(log.events).toContainEqual({ type: 'onboarding', needed: false })
+    expect(log.events.some((e) => e.type === 'onboarding' && e.needed === false)).toBe(true)
   })
 
   it('onboarding.done → non fa nulla (nemmeno il widget)', async () => {
@@ -209,7 +295,7 @@ describe('OA1 startOnboarding: il bot principale lo crea solo il daemon', () => 
     await startOnboarding(deps)
     expect(log.agents).toHaveLength(0)
     expect(log.sends).toHaveLength(0)
-    expect(log.events).toContainEqual({ type: 'onboarding', needed: false })
+    expect(log.events.some((e) => e.type === 'onboarding' && e.needed === false)).toBe(true)
   })
 
   it('il «Bot» vuoto della beta 4 viene ADOZZATO: mainAgentId = suo id, un solo agente in tutto', async () => {
@@ -217,12 +303,85 @@ describe('OA1 startOnboarding: il bot principale lo crea solo il daemon', () => 
     await startOnboarding(deps)
     expect(log.agents).toHaveLength(1)
     expect(log.settings['mainAgentId']).toBe('agent_beta')
-    expect(log.events).toContainEqual({ type: 'onboarding', needed: true })
+    expect(log.events.some((e) => e.type === 'onboarding' && e.needed === true)).toBe(true)
+  })
+})
+
+// ---- OA2: lo stato persistito della guida (startOnboarding + facciata) ----
+describe('OA2 startOnboarding: onboarding.state nasce qui e NON si tocca più', () => {
+  it("primo avvio → onboarding.state iniziale (welcome) e l\'evento porta stato e sequenza", async () => {
+    await startOnboarding(deps)
+    const st = log.settings[ONBOARDING_STATE_SETTING] as OnboardingState | undefined
+    expect(st).toEqual({ step: 'welcome', done: [], skipped: [], startedAt: 1_000_000_000_000 })
+    expect(log.events).toContainEqual({
+      type: 'onboarding', needed: true,
+      state: { step: 'welcome', done: [], skipped: [], startedAt: 1_000_000_000_000 },
+      sequence: ['welcome', 'model', 'approvals', 'chat']
+    })
+  })
+
+  it("il riavvio a metà guida RIporta allo STESSO passo (lo stato resta byte per byte)", async () => {
+    await startOnboarding(deps)
+    const guiata = { step: 'model', done: ['welcome'], skipped: [], startedAt: 42 } as OnboardingState
+    log.settings[ONBOARDING_STATE_SETTING] = guiata
+    log.agentEntries = {}
+    log.sends.length = 0
+    await startOnboarding(deps)
+    expect(log.settings[ONBOARDING_STATE_SETTING]).toEqual(guiata)
+  })
+})
+
+describe('OA2 facciata: advance e reopen persistono e dicono alla UI', () => {
+  it("advance(welcome, done) → stato persistito, passo model, evento con il nuovo stato", async () => {
+    const onboarding = createOnboarding(deps)
+    await onboarding.start()
+    const r = await onboarding.advance('welcome', 'done')
+    expect(r !== false && r.state?.step).toBe('model')
+    expect(log.events.at(-1)).toMatchObject({ type: 'onboarding', needed: true, state: { step: 'model' } })
+  })
+
+  it("advance su un passo che NON è il corrente → rifiutato (false), stato immutato", async () => {
+    const onboarding = createOnboarding(deps)
+    await onboarding.start()
+    expect(await onboarding.advance('approvals', 'done')).toBe(false)
+    expect((log.settings[ONBOARDING_STATE_SETTING] as OnboardingState | undefined)?.step).toBe('welcome')
+  })
+
+  it("l\'ultimo passo chiude la guida: onboarding.done scritto e evento needed resta true con step chat", async () => {
+    const onboarding = createOnboarding(deps)
+    await onboarding.start()
+    await onboarding.advance('welcome', 'done')
+    await onboarding.advance('model', 'skipped')
+    const r = await onboarding.advance('approvals', 'done')
+    expect(r !== false && r.state?.step).toBe('chat')
+    expect(log.settings[DONE_SETTING]).toBe(true)
+  })
+
+  it("reopen(model) su un passo saltato → la guida riapre LÌ; reopen restart → da capo senza toccare bot né dati", async () => {
+    const onboarding = createOnboarding(deps)
+    await onboarding.start()
+    await onboarding.advance('welcome', 'done')
+    await onboarding.advance('model', 'skipped')
+    log.settings[DONE_SETTING] = true
+    const agentsBefore = log.agents.length
+    const r = await onboarding.reopen('model')
+    expect(r !== false && r.state?.step).toBe('model')
+    expect(r !== false && r.state?.skipped).toEqual([])
+    expect(log.settings[DONE_SETTING]).toBe(false)
+    expect(log.agents).toHaveLength(agentsBefore) // nessun bot toccato
+    const r2 = await onboarding.reopen('restart')
+    expect(r2 !== false && r2.state).toMatchObject({ step: 'welcome', done: [], skipped: [], startedAt: 1_000_000_000_000 })
+  })
+
+  it("reopen su un passo non saltato → false, niente cambia", async () => {
+    const onboarding = createOnboarding(deps)
+    await onboarding.start()
+    expect(await onboarding.reopen('model')).toBe(false)
   })
 })
 
 describe('roleTemplates: mappa ruolo → 2 template (pura)', () => {
-  it('ogni ruolo dell\'onboarding mappa su due template del catalogo, distinti per coppia', () => {
+  it("ogni ruolo dell\\'onboarding mappa su due template del catalogo, distinti per coppia", () => {
     expect(roleTemplates('lavoro-codice')).toEqual(['mention-monitor', 'daily-briefing'])
     expect(roleTemplates('organizzazione-calendario')).toEqual(['meeting-prep', 'executive-assistant'])
     expect(roleTemplates('email')).toEqual(['inbox-manager', 'chief-of-staff'])
@@ -339,7 +498,7 @@ describe('answerOnboardingRole CON provider configurato', () => {
     expect(warn?.agentId).toBe(log.settings['mainAgentId'])
   })
 
-  it('fase 9 (punto 1): provider senza defaultModel → provider sì, modello null (niente primo dell\'elenco)', async () => {
+  it("fase 9 (punto 1): provider senza defaultModel → provider sì, modello null (niente primo dell\\'elenco)", async () => {
     deps = mkDeps(log, { providerId: 'ollama', model: null })
     await new Promise<void>((r) => {
       answerOnboardingRole(deps, roleWidgetEntryId, 'email')
