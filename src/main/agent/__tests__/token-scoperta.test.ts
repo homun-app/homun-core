@@ -158,9 +158,10 @@ describe('fase token·scoperta (R7.3): le regole che solo la descrizione può da
 })
 
 describe('fase token·scoperta (R7.5): i budget nuovi (valori aggiornati da R8.4 e da R9.4)', () => {
-  it('TURN_TOKEN_BUDGET e PROMPT_TOKEN_BUDGET (R9.4: misurato + 60, dentro i tetti 5000/2400)', () => {
-    // R9.4: 4558 misurati (la prima richiesta del caso 3 dell'eval, T7) + 60
-    expect(TURN_TOKEN_BUDGET).toBe(4618)
+  it('TURN_TOKEN_BUDGET e PROMPT_TOKEN_BUDGET (BU1: misurato + 60, dentro i tetti 5000/2400)', () => {
+    // BU1 (fase beta.4): 4763 misurati (il test T7 dell'eval,
+    // language-judges.eval.ts: la prima richiesta del caso 3) + 60
+    expect(TURN_TOKEN_BUDGET).toBe(4823)
     expect(PROMPT_TOKEN_BUDGET).toBe(2046)
     expect(TURN_TOKEN_BUDGET).toBeLessThanOrEqual(5000)
     expect(PROMPT_TOKEN_BUDGET).toBeLessThanOrEqual(2400)

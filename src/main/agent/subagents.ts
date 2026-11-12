@@ -130,6 +130,12 @@ const SUBAGENT_DENY_REASONS: ReadonlyArray<{ test: (tool: string) => boolean; re
     reason: 'memory, skills and routines belong to the parent and stay read-only'
   },
   {
+    // BU1 (fase beta.4): il profilo è del PADRE — il figlio lavora sul brief
+    // e consegna, non si scrive la descrizione del padre
+    test: (t) => t === 'update_self',
+    reason: 'the profile belongs to the parent and stays as it is: deliver with wake_parent'
+  },
+  {
     test: (t) => ['copy_to_box', 'copy_from_box'].includes(t),
     reason: 'file exchange with the Mac is handled by the parent'
   },

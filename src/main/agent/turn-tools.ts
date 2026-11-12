@@ -71,8 +71,12 @@ export interface AssembleTurnToolsResult {
  *  caso 3 dell'eval, T7: system col browser + history + nucleo con
  *  spawn_subagent) + 60 di margine.
  *  Fase token · pari (R9.4): 4618 = 4558 misurati (stessa richiesta: +17 per
- *  la regola del background nel prompt dei turni privati) + 60. Tetto 5000. */
-export const TURN_TOKEN_BUDGET = 4618
+ *  la regola del background nel prompt dei turni privati) + 60. Tetto 5000.
+ *  BU1 (fase beta.4): 4823 = 4763 misurati (il test T7 dell'eval,
+ *  language-judges.eval.ts: la prima richiesta del caso 3 — system del
+ *  runner + history del caso + nucleo con update_self, che pesa 161) + 60.
+ *  Tetto 5000. */
+export const TURN_TOKEN_BUDGET = 4823
 /** Un gruppo attivato: browser (più grande), i tre gruppi ricchi, tutti gli altri.
  *  Fase token · nucleo (R8.4): subagents ha un budget DEDICATO che SCENDE —
  *  spawn_subagent è nel nucleo e il gruppo restano check/message/stop:
@@ -166,9 +170,12 @@ function presentMcpGroups(mcpToolDefs: ToolDef[]): ToolGroupPresent[] {
   }))
 }
 
-/** L'ordine FISSO del nucleo (T1): parlare, computer, web, memory (facciata), document (facciata, R7.2), skill, spawn (R8.2). */
-const CORE_ORDER: ReadonlyArray<string> = [
-  'send_to_user', 'message_user', 'ask_user',
+/** L'ordine FISSO del nucleo (T1): parlare, computer, web, memory (facciata), document (facciata, R7.2), skill, spawn (R8.2).
+ *  BU1 (fase beta.4): update_self subito dopo ask_user — profilo e domanda
+ *  vanno insieme. Il legame con CORE_TOOL_NAMES lo presidia il test
+ *  update-self-core.test.ts: un nome del nucleo NON ordinato è un errore. */
+export const CORE_ORDER: ReadonlyArray<string> = [
+  'send_to_user', 'message_user', 'ask_user', 'update_self',
   'run-command', 'read-file', 'write-file', 'list-directory',
   'web_search', 'web_fetch',
   'update_memory', 'recall_memory',

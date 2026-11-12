@@ -22,9 +22,9 @@ const childBuiltin = toolsForTurnSource(
 )
 const childBrowser = allBrowser.filter((t) => subagentToolDenyReason(t.name) === null)
 
-/** il nucleo del turno normale (T1): parlare, pc, web, memory (facciata), document (facciata, R7.2), skill, spawn_subagent (R8.2), find_tools */
+/** il nucleo del turno normale (T1): parlare, pc, web, memory (facciata), document (facciata, R7.2), skill, spawn_subagent (R8.2), find_tools. BU1 (fase beta.4): update_self dopo ask_user */
 const CORE_NORMAL = [
-  'message_user', 'ask_user',
+  'message_user', 'ask_user', 'update_self',
   'run-command', 'read-file', 'write-file', 'list-directory',
   'web_search', 'web_fetch',
   'memory', 'document', 'skill', 'spawn_subagent', 'find_tools'
@@ -53,7 +53,7 @@ describe('fase token (T1): il nucleo sempre caricato', () => {
       mcpToolDefs: [], maxInlineTools: 30, activatedGroups: [], groupTurn: {}
     })
     expect(r.tools.map((t) => t.name)).toEqual([
-      'send_to_user', 'ask_user',
+      'send_to_user', 'ask_user', 'update_self',
       'run-command', 'read-file', 'write-file', 'list-directory',
       'web_search', 'web_fetch',
       'memory', 'document', 'skill', 'find_tools', 'post_to_group', 'pass'

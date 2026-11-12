@@ -6426,9 +6426,10 @@ describe('fase velocità (S3): elenco core fisso, differiti dietro find_tools/us
     const offered = namesOf(0)
     // fase token (T1): il nucleo esatto — niente charts/libreria, task, credenziali, bot…
     // (fase token · scoperta R7.2: la facciata document É nel nucleo;
-    //  fase token · nucleo R8.2: anche spawn_subagent)
+    //  fase token · nucleo R8.2: anche spawn_subagent; BU1 fase beta.4:
+    //  update_self dopo ask_user)
     expect(offered).toEqual([
-      'message_user', 'ask_user', 'run-command', 'read-file', 'write-file', 'list-directory',
+      'message_user', 'ask_user', 'update_self', 'run-command', 'read-file', 'write-file', 'list-directory',
       'web_search', 'web_fetch', 'memory', 'document', 'skill', 'spawn_subagent', 'find_tools',
       'mcp__gmail__send_message'
     ])
@@ -6586,9 +6587,10 @@ describe('fase velocità (S3): elenco core fisso, differiti dietro find_tools/us
     expect(activatedGroups[0]).toBe('bots')
     expect(activatedGroups.length).toBeLessThanOrEqual(2)
     // dal passo dopo gli schemi del gruppo sono nella lista, in CODA (R7.2:
-    // document nel nucleo; R8.2: anche spawn_subagent, prima di find_tools)
-    expect(afterTools.slice(0, 13)).toEqual(['message_user', 'ask_user', 'run-command', 'read-file', 'write-file', 'list-directory', 'web_search', 'web_fetch', 'memory', 'document', 'skill', 'spawn_subagent', 'find_tools'])
-    expect(afterTools.slice(13)).toContain('create_agent')
+    // document nel nucleo; R8.2: anche spawn_subagent, prima di find_tools;
+    // BU1 fase beta.4: update_self dopo ask_user)
+    expect(afterTools.slice(0, 14)).toEqual(['message_user', 'ask_user', 'update_self', 'run-command', 'read-file', 'write-file', 'list-directory', 'web_search', 'web_fetch', 'memory', 'document', 'skill', 'spawn_subagent', 'find_tools'])
+    expect(afterTools.slice(14)).toContain('create_agent')
   })
 })
 
@@ -8229,5 +8231,23 @@ describe('B4 (fase beta.4): la riga delle app collegate nel prompt del turno', (
     await runTurn(AGENT, 'ciao', emit)
     const system = String(h.llm.calls[0]![0]!.content)
     expect(system).not.toContain('Connected apps:')
+  })
+})
+
+// ---- BU1 (fase beta.4 — update_self): il tool del nucleo VERO, non solo il
+// prompt — la prova dal vivo di fase-beta-4-correzioni mostrava un prompt che
+// spingeva verso update_self in un turno la cui lista NON lo aveva
+
+describe('BU1 (fase beta.4): update_self arriva al modello in OGNI turno', () => {
+  it('turno NORMALE del bot non principale senza descrizione: update_self nell\'elenco E la riga nel system prompt', async () => {
+    // un ALTRO bot è il principale → AGENT (descrizione vuota) non lo è
+    dbm.createAgent('Principale', 'il punto di contatto', { id: 'agent_main' })
+    dbm.setSetting('mainAgentId', 'agent_main')
+    h.llm.queue = [{ text: 'ok' }]
+    await runTurn(AGENT, 'ciao', emit)
+    const names = (h.llm.toolsList[0] ?? []).map((t) => (t as { name: string }).name)
+    expect(names).toContain('update_self')
+    const system = String(h.llm.calls[0]![0]!.content)
+    expect(system).toContain('update_self')
   })
 })

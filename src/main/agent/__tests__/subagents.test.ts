@@ -35,6 +35,8 @@ describe('fase 12 (punto 3): la whitelist dei tool del figlio', () => {
       ['update_memory', 'read-only'],
       ['update_skill', 'read-only'],
       ['update_state', 'read-only'],
+      // BU1 (fase beta.4): il figlio non cambia il profilo del padre
+      ['update_self', 'profile belongs to the parent'],
       ['copy_to_box', 'parent'],
       ['copy_from_box', 'parent'],
       ['use-app', 'computer'],

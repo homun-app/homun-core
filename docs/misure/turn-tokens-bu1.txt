@@ -1,0 +1,9 @@
+# turn-tokens — BU1 (fase beta.4): la misura del turno base con update_self nel nucleo
+# Il numero che GOVERNA il budget è il test T7 dell'eval (eval/language-judges.eval.ts,
+# «la prima richiesta del caso 3»): system del runner + history del caso 3 (JSON)
+# + elenco assemblato (evalAssemble 'user'), caratteri/4:
+#   base fase-beta-4-correzioni (62788658): 4602 (13 tool) — dentro 4618 per 16 token
+#   con update_self nel nucleo:               4763 (14 tool) → TURN_TOKEN_BUDGET 4823 = 4763 + 60 (tetto 5000)
+# Per confronto, la composizione del VECCHIO riferimento R9 (system col browser +
+# gruppo history attivato, scripts/turn-tokens.ts): base 4538 → 4699;
+# update_self pesa 161 token (tool JSON caratteri/4).
