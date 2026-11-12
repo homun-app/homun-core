@@ -119,6 +119,9 @@ export const DAEMON_RPC_CHANNELS = [
   'grants:list', 'grants:revoke', 'permissions:grant-server-reads',
   // fase rilascio (A7): lo stato di docker per la UI (installato? avviato?)
   'box:docker-status', 'box:docker-retry',
+  // fase box-container (BX3): lo spazio su disco del computer dei bot
+  'box:disk-space', 'box:image-remove', 'box:box-files-remove', 'box:space-prune',
+  'memory:model-remove',
   // fase 7: template dei bot (catalogo + creazione col kickstart)
   'templates:list', 'agents:create-from-template'
 ] as const

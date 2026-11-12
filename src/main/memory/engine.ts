@@ -352,7 +352,7 @@ function unavailable(reason: MemoryUnavailableReason, detail?: string): MemoryEn
 }
 
 /** Apre (o riapre) il motore su <dataDir>/memory. Idempotente; non lancia mai. */
-export function openMemoryEngine(opts: { dataDir: string }): Promise<MemoryEngineStatus> {
+export function openMemoryEngine(opts: { dataDir: string; embedder?: 'builtin' | 'none' }): Promise<MemoryEngineStatus> {
   if (opening) return opening
   if (state.kind === 'open') {
     return Promise.resolve({ available: true, version: state.version, model: { present: false } })
@@ -367,6 +367,7 @@ export function openMemoryEngine(opts: { dataDir: string }): Promise<MemoryEngin
       const engine = await mod.Engine.open({
         root: join(opts.dataDir, 'memory'),
         modelDir: join(opts.dataDir, 'models'),
+        ...(opts.embedder ? { embedder: opts.embedder } : {}),
         actor: 'homun'
       })
       state = { kind: 'open', engine, root: join(opts.dataDir, 'memory'), version: mod.version(), cells: new Map() }
@@ -428,6 +429,43 @@ export async function closeMemoryEngine(): Promise<void> {
       // il contratto: chiudere due volte o a motore già chiuso non è un errore
     }
   }
+}
+
+/**
+ * Fase box-container (BX3): la rimozione del modello della MEMORIA. Chiude il
+ * motore, toglie i file del modello da <dataDir>/models (il nome è quello che
+ * dice modelStatus, e il path deve restare DENTRO la cartella dei modelli)
+ * e riapre con embedder 'none': la memoria continua a rispondere, con la
+ * ricerca per testo. Torna i byte liberati.
+ */
+export async function removeMemoryModel(dataDir: string): Promise<{ freedBytes: number }> {
+  const st = await memoryEngineStatus()
+  const id = st.model.id
+  const freed = st.model.bytes ?? 0
+  await closeMemoryEngine()
+  if (id) {
+    const { rmSync } = await import('node:fs')
+    const modelsDir = join(dataDir, 'models')
+    const target = resolveJoin(modelsDir, id)
+    if (target.startsWith(modelsDir + '/') && !target.includes('/../')) {
+      try { rmSync(target, { recursive: true, force: true }) } catch { /* già via */ }
+    }
+  }
+  // riapertura SENZA embedder: la memoria torna alla ricerca per testo
+  state = { kind: 'closed' }
+  await openMemoryEngine({ dataDir, embedder: 'none' })
+  return { freedBytes: freed }
+}
+
+/** join con guardia: il percorso risolve DENTRO base (nessun traversal). */
+function resolveJoin(base: string, name: string): string {
+  const out = []
+  for (const part of name.split('/')) {
+    if (!part || part === '.') continue
+    if (part === '..') { out.pop(); continue }
+    out.push(part)
+  }
+  return join(base, ...out)
 }
 
 /**

@@ -24,9 +24,13 @@ import { homedir } from 'node:os'
 import { join, resolve, dirname, basename } from 'node:path'
 import { getSetting, dataDir, getAgent } from '../store/db'
 import { resolveBoxPath } from './box-paths'
+// fase box-container (BX3): lo spazio su disco — margine prima della build,
+// pulizia della cache dopo, immagine vecchia eliminata dopo l'aggiornamento
+import { enoughDiskSpace, freeDiskBytesOf, BOX_BUILD_ESTIMATED_BYTES } from './disk-space'
 // fase box-container (BX1): il MOTORE del box (docker o apple-container)
 import { activeBoxEngine } from './engine'
 import {
+  BOX_IMAGE_REPO,
   boxNeedsRecreateForInit,
   boxEnsurePlan,
   boxCreateCheck,
@@ -381,18 +385,39 @@ function notifyBoxImageBuild(): void {
  * single-flight, notice al bot principale). false = build fallita (l'errore
  * lo dice il chiamante, che sa se il container vecchio esiste ancora).
  */
+/** L'ultimo motivo (chiaro) per cui la build del box non è partita o finita. */
+let lastBoxImageBuildError: string | null = null
+
 function ensureBoxImage(): Promise<boolean> {
   if (!boxImageBuild) {
     boxImageBuild = (async () => {
       const tag = boxImage()
       const has = await dockerRunner(activeBoxEngine().argv.imageInspect(tag), { timeoutMs: 15_000 })
       if (has.exitCode === 0) return true
+      // BX3: prima della build si guarda lo spazio libero — servono la stima
+      // PIÙ 5 GB di margine; senza, errore chiaro (quanto manca) e NESSUNA
+      // build: «Spazio su disco» nelle Impostazioni dice cosa liberare
+      const space = enoughDiskSpace(freeDiskBytesOf(dataDir()), BOX_BUILD_ESTIMATED_BYTES)
+      if (!space.ok) {
+        lastBoxImageBuildError = `not enough free disk space for the box image: ${(space.missingBytes / 1e9).toFixed(1)} GB missing (the build needs ~${(BOX_BUILD_ESTIMATED_BYTES / 1e9).toFixed(1)} GB plus 5 GB of margin) — free some space in Settings › Disk space`
+        console.error(`[sandbox] spazio insufficiente per la build del box: mancano ${(space.missingBytes / 1e9).toFixed(1)} GB (stima ${(BOX_BUILD_ESTIMATED_BYTES / 1e9).toFixed(1)} GB + 5 GB di margine) — Impostazioni › Spazio su disco`)
+        return false
+      }
       notifyBoxImageBuild()
       const dockerfile = boxDockerfilePath()
       const build = await dockerRunner(activeBoxEngine().argv.build(tag, dockerfile, dirname(dockerfile)), { timeoutMs: BOX_IMAGE_BUILD_TIMEOUT_MS })
       if (build.exitCode !== 0) {
         console.error(`[sandbox] build dell'immagine del box (${tag}) fallita: ${(build.stderr || `exit ${build.exitCode}`).slice(0, 500)}`)
         return false
+      }
+      // BX3: build RIUSCITA → la pulizia SICURA toglie la cache di build del
+      // nostro box (con Docker cresceva senza limiti: 1,15 GB sul Mac
+      // dell'utente); pruneSafe non tocca MAI l'immagine in uso né i volumi
+      for (const argv of activeBoxEngine().argv.pruneSafe()) {
+        const prune = await dockerRunner(argv, { timeoutMs: 60_000 }).catch(() => null)
+        if (prune && prune.exitCode !== 0) {
+          console.warn(`[sandbox] pulizia post-build (${argv.join(' ')}) non riuscita: ${(prune.stderr || '').slice(0, 200)}`)
+        }
       }
       return true
     })().finally(() => {
@@ -429,9 +454,15 @@ export async function ensureBoxContainer(): Promise<void> {
   const ps = await dockerRunner(activeBoxEngine().argv.ps(BOX_CONTAINER), { timeoutMs: 15_000 })
   const exists = ps.exitCode === 0 && ps.stdout.trim().split('\n').includes(BOX_CONTAINER)
   if (!imageOk && !exists) {
-    throw new Error(`box image build (${image}) failed: check the daemon logs (docker build); the Dockerfile is ${boxDockerfilePath()}`)
+    throw new Error(
+      lastBoxImageBuildError ??
+        `box image build (${image}) failed: check the daemon logs (docker build); the Dockerfile is ${boxDockerfilePath()}`
+    )
   }
   const facts: BoxEnsureFacts = { exists, initOk: true }
+  // BX3: l'immagine VECCHIA del container (Dockerfile cambiato) si toglie
+  // SOLO a box ripartito con la nuova — mai due versioni dell'immagine
+  let staleImage: string | null = null
   if (exists) {
     // G2: un container nato PRIMA di --init non raccoglie gli zombie (PID 1 è
     // `sleep infinity`) e con --pids-limit condiviso li accumula a ogni comando
@@ -448,6 +479,7 @@ export async function ensureBoxContainer(): Promise<void> {
       if (imageOk) {
         const img = await dockerRunner(activeBoxEngine().argv.containerImage(BOX_CONTAINER), { timeoutMs: 15_000 })
         facts.imageOk = img.exitCode === 0 ? img.stdout.trim() === image : undefined
+        if (facts.imageOk === false && img.stdout.trim().startsWith(`${BOX_IMAGE_REPO}:`)) staleImage = img.stdout.trim()
       }
       // M4 + P2: container nato PRIMA del volume dei plugin / del volume del
       // browser → manca il mount corrispondente → si ricrea (solo il
@@ -507,6 +539,16 @@ export async function ensureBoxContainer(): Promise<void> {
   if (!check.ok) {
     boxNotWritableError = check.error
     throw new Error(check.error)
+  }
+  // BX3: il box è ripartito con l'immagine NUOVA — la vecchia si elimina
+  // (fire-and-forget: se fallisce resta un'immagine in più, si ritenta al
+  // prossimo aggiornamento; MAI la nuova, MAI i volumi)
+  if (staleImage) {
+    void dockerRunner(activeBoxEngine().argv.removeImage(staleImage), { timeoutMs: 60_000 })
+      .then((r) => {
+        if (r.exitCode !== 0) console.warn(`[sandbox] la vecchia immagine ${staleImage} non si è tolta: ${(r.stderr || '').slice(0, 200)}`)
+      })
+      .catch(() => undefined)
   }
 }
 

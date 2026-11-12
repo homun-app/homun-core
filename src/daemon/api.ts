@@ -4,7 +4,7 @@
 // non cambiano. chat:send accoda un job invece di girare il turno in linea.
 import { cancelAgentJobs, cancelTaskJobs } from '../main/store/jobs'
 import * as store from '../main/store/db'
-import { db } from '../main/store/db'
+import { db, dataDir } from '../main/store/db'
 import * as loop from '../main/agent/loop'
 import * as permissions from '../main/agent/permissions'
 import { executeTool } from '../main/agent/tools'
@@ -2220,6 +2220,89 @@ export function buildApiMethods(
     'box:docker-retry': () => {
       invalidateToolCache()
       return dockerToolStatus()
+    },
+
+    // ---- fase box-container (BX3): lo spazio su disco ----
+    'box:disk-space': async () => {
+      const { runDockerRaw, boxImage } = await import('../main/sandbox')
+      const { activeBoxEngine } = await import('../main/sandbox/engine')
+      const { parseDfJson, diskSpaceRows, freeDiskBytesOf, DISK_MARGIN_BYTES } = await import('../main/sandbox/disk-space')
+      const engine = activeBoxEngine()
+      // il df del motore è best-effort: senza motore le righe restano senza
+      // dimensione, MAI numeri inventati
+      const dfRaw = await runDockerRaw(engine.argv.df(), { timeoutMs: 15_000 }).catch(() => null)
+      const df = dfRaw && dfRaw.exitCode === 0 ? parseDfJson(dfRaw.stdout) : null
+      let boxImageBytes: number | null = null
+      if (df) {
+        const sz = await runDockerRaw(engine.argv.imageSize(boxImage()), { timeoutMs: 15_000 }).catch(() => null)
+        if (sz && sz.exitCode === 0) {
+          const n = Number(sz.stdout.trim())
+          boxImageBytes = Number.isFinite(n) ? n : null
+        }
+      }
+      // il modello locale: la dimensione del file installato, se c'è
+      let modelBytes: number | null = null
+      try {
+        const { stat } = await import('node:fs/promises')
+        const lm = await import('./local-model')
+        const path = lm.localModelInstalledPathOf()
+        modelBytes = path ? await stat(path).then((s) => s.size).catch(() => null) : null
+      } catch { /* nessun modello: la riga resta senza dimensione */ }
+      // il modello della memoria: lo dice il motore
+      let memoryModelBytes: number | null = null
+      try {
+        const m = await import('../main/memory/engine')
+        const st = await m.memoryEngineStatus()
+        memoryModelBytes = st.model.present ? st.model.bytes ?? null : null
+      } catch { /* memoria non disponibile */ }
+      return {
+        engine: engine.id,
+        rows: diskSpaceRows({ df, boxImageBytes, modelBytes, memoryModelBytes }),
+        freeBytes: freeDiskBytesOf(dataDir()),
+        marginBytes: DISK_MARGIN_BYTES
+      }
+    },
+    /** «Rimuovi» l'immagine del box: il box si FERMA, l'immagine si elimina. */
+    'box:image-remove': async () => {
+      const { runDockerRaw, boxImage } = await import('../main/sandbox')
+      const { activeBoxEngine } = await import('../main/sandbox/engine')
+      const { BOX_CONTAINER } = await import('../main/sandbox/docker-argv')
+      const engine = activeBoxEngine()
+      const stop = await runDockerRaw(engine.argv.stop(BOX_CONTAINER), { timeoutMs: 30_000 }).catch(() => null)
+      void stop
+      const rm = await runDockerRaw(engine.argv.removeImage(boxImage()), { timeoutMs: 60_000 })
+      if (rm.exitCode !== 0) return { ok: false, error: rm.stderr || `exit ${rm.exitCode}` }
+      return { ok: true }
+    },
+    /** «Elimina i file dei bot»: IRREVERSIBILE (la UI chiede la conferma). */
+    'box:box-files-remove': async () => {
+      const { runDockerRaw } = await import('../main/sandbox')
+      const { activeBoxEngine } = await import('../main/sandbox/engine')
+      const { BOX_CONTAINER, BOX_VOLUME } = await import('../main/sandbox/docker-argv')
+      const engine = activeBoxEngine()
+      // il container va via prima: il volume è in suo uso finché esiste
+      await runDockerRaw(engine.argv.stop(BOX_CONTAINER), { timeoutMs: 30_000 }).catch(() => null)
+      await runDockerRaw(engine.argv.boxRm(BOX_CONTAINER), { timeoutMs: 30_000 }).catch(() => null)
+      const rm = await runDockerRaw(engine.argv.removeVolumes([BOX_VOLUME]), { timeoutMs: 60_000 })
+      if (rm.exitCode !== 0) return { ok: false, error: rm.stderr || `exit ${rm.exitCode}` }
+      return { ok: true }
+    },
+    /** «Libera spazio»: pruneSafe — mai l'immagine in uso, mai i file dei bot. */
+    'box:space-prune': async () => {
+      const { runDockerRaw } = await import('../main/sandbox')
+      const { activeBoxEngine } = await import('../main/sandbox/engine')
+      const engine = activeBoxEngine()
+      for (const argv of engine.argv.pruneSafe()) {
+        const r = await runDockerRaw(argv, { timeoutMs: 120_000 }).catch(() => null)
+        if (r && r.exitCode !== 0) return { ok: false, error: r.stderr || `exit ${r.exitCode}` }
+      }
+      return { ok: true }
+    },
+    /** «Rimuovi» il modello della memoria: la memoria torna alla ricerca per testo. */
+    'memory:model-remove': async () => {
+      const m = await import('../main/memory/engine')
+      const r = await m.removeMemoryModel(dataDir())
+      return r
     },
 
     // diagnostica

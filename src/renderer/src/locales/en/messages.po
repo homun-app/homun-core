@@ -1683,6 +1683,14 @@ msgstr "Composio unreachable: check your connection and try again."
 msgid "Computer"
 msgstr "Computer"
 
+#: src/renderer/src/components/settings/DiskSpaceSection.tsx
+msgid "Computer dei bot: file dei bot"
+msgstr "Bot computer: bot files"
+
+#: src/renderer/src/components/settings/DiskSpaceSection.tsx
+msgid "Computer dei bot: immagine"
+msgstr "Bot computer: image"
+
 #: src/renderer/src/components/ComputerPanel.tsx
 msgid "Computer del bot"
 msgstr "Bot's computer"
@@ -2220,6 +2228,10 @@ msgstr "document not found"
 msgid "Dollari per milione di token. Vale per le chiamate da qui in avanti, lo storico non cambia; svuota entrambi i campi per togliere un prezzo."
 msgstr "Dollars per million tokens. Applies to calls from now on; history does not change. Empty both fields to remove a price."
 
+#: src/renderer/src/components/WidgetCard.tsx
+msgid "domanda scavalcata, hai proseguito senza rispondere"
+msgstr "question overridden, you moved on without answering"
+
 #: src/renderer/src/components/Settings.tsx
 msgid "domenica"
 msgstr "Sunday"
@@ -2294,9 +2306,17 @@ msgstr "Delete {0} with their chats, memories and routines?"
 msgid "Elimina bot"
 msgstr "Delete bot"
 
+#: src/renderer/src/components/settings/DiskSpaceSection.tsx
+msgid "Elimina i file dei bot"
+msgstr "Delete the bot files"
+
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Elimina squadra"
 msgstr "Delete team"
+
+#: src/renderer/src/components/settings/DiskSpaceSection.tsx
+msgid "Eliminare {size}? Verranno cancellati per sempre i file che i bot hanno creato nel loro computer. Questa azione non si può annullare."
+msgstr "Delete {size}? The files the bots created in their computer will be gone forever. This cannot be undone."
 
 #. placeholder {0}: group.name
 #: src/renderer/src/components/RightPanel.tsx
@@ -2436,6 +2456,10 @@ msgstr "Stop"
 #: src/renderer/src/components/BotScreen.tsx
 msgid "Ferma e prendi il controllo"
 msgstr "Stop and take control"
+
+#: src/renderer/src/components/settings/DiskSpaceSection.tsx
+msgid "Ferma il computer dei bot ed elimina la sua immagine ({size}). L'immagine si ricostruisce quando serve."
+msgstr "Stops the bot computer and deletes its image ({size}). The image is rebuilt when needed."
 
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 msgid "Fermati e chiedimi sempre quando…"
@@ -3719,6 +3743,10 @@ msgstr "reads a file…"
 msgid "legge una pagina web…"
 msgstr "reads a web page…"
 
+#: src/renderer/src/components/settings/DiskSpaceSection.tsx
+msgid "Libera spazio"
+msgstr "Free up space"
+
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Liberati {freed} GB."
 msgstr "Freed {freed} GB."
@@ -3947,6 +3975,10 @@ msgstr "Bot model"
 msgid "Modello del bot"
 msgstr "The bot’s model"
 
+#: src/renderer/src/components/settings/DiskSpaceSection.tsx
+msgid "Modello della memoria"
+msgstr "Memory model"
+
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Modello delle approvazioni"
@@ -3964,6 +3996,10 @@ msgstr "built-in model · slower"
 #: src/shared/ui-messages.ts
 msgid "onboarding.providerLocal"
 msgstr "Built-in model on your Mac (2.7 GB)"
+
+#: src/renderer/src/components/settings/DiskSpaceSection.tsx
+msgid "Modello locale"
+msgstr "Local model"
 
 #: src/renderer/src/components/ActivityPanel.tsx
 msgid "modello senza credito"
@@ -5308,16 +5344,25 @@ msgstr "Deny"
 msgid "Rifiutato"
 msgstr "Denied"
 
+#: src/renderer/src/components/settings/DiskSpaceSection.tsx
+msgid "Rimuovere il modello della memoria ({size})? La memoria torna alla ricerca per testo."
+msgstr "Remove the memory model ({size})? Memory goes back to text-only search."
+
 #. placeholder {0}: m.sizeGb
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Rimuovere il modello e liberare {0} GB?"
 msgstr "Remove the model and free {0} GB?"
+
+#: src/renderer/src/components/settings/DiskSpaceSection.tsx
+msgid "Rimuovere il modello locale ({size})? Potrai riscaricarlo quando vuoi."
+msgstr "Remove the local model ({size})? You can download it again whenever you want."
 
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "rimuovi"
 msgstr "remove"
 
 #: src/renderer/src/components/ServerSheet.tsx
+#: src/renderer/src/components/settings/DiskSpaceSection.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "Rimuovi"
@@ -5989,6 +6034,19 @@ msgstr "Subagent"
 #: src/shared/ui-messages.ts
 msgid "rpc.subagentNotFound"
 msgstr "Subagent not found"
+
+#. placeholder {0}: fmtBytes(free)
+#: src/renderer/src/components/settings/DiskSpaceSection.tsx
+msgid "Spazio libero sul Mac: {0} — prima di costruire o scaricare ne restano sempre 5 GB."
+msgstr "Free space on your Mac: {0} — at least 5 GB always stay free before building or downloading."
+
+#: src/renderer/src/components/settings/DiskSpaceSection.tsx
+msgid "Spazio recuperabile"
+msgstr "Reclaimable space"
+
+#: src/renderer/src/components/settings/DiskSpaceSection.tsx
+msgid "Spazio su disco"
+msgstr "Disk space"
 
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Spazio su disco insufficiente."

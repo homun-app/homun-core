@@ -315,6 +315,12 @@ export function localModelDownloading(): boolean {
   return activeDownload !== null
 }
 
+/** BX3: il percorso del modello locale INSTALLATO, o null se non c'è. */
+export function localModelInstalledPathOf(): string | null {
+  const p = localModelInstalledPath(localModelCatalogEntry(), localModelsDir())
+  return existsSync(p) ? p : null
+}
+
 /**
  * L3.5: la rimozione — ferma il processo, cancella i file, torna i byte
  * liberati (la UI dice i GB).

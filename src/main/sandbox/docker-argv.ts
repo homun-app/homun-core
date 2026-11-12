@@ -539,6 +539,11 @@ export function dockerImageInspectArgv(tag: string): string[] {
   return ['image', 'inspect', tag]
 }
 
+/** La dimensione in byte della NOSTRA immagine (BX3: la riga di «Spazio su disco»). */
+export function dockerImageSizeArgv(tag: string): string[] {
+  return ['image', 'inspect', '--format', '{{.Size}}', tag]
+}
+
 /** Con quale immagine è nato il container esistente (inspect -f, argv puro). */
 export function dockerContainerImageArgv(container: string): string[] {
   return ['inspect', '-f', '{{.Config.Image}}', container]

@@ -237,6 +237,12 @@ const api: SandbotApi = {
   // fase rilascio (A7): stato di docker
   boxDockerStatus: () => ipcRenderer.invoke('box:docker-status'),
   boxDockerRetry: () => ipcRenderer.invoke('box:docker-retry'),
+  // fase box-container (BX3): «Spazio su disco» nelle Impostazioni
+  boxDiskSpace: () => ipcRenderer.invoke('box:disk-space'),
+  boxImageRemove: () => ipcRenderer.invoke('box:image-remove'),
+  boxBoxFilesRemove: () => ipcRenderer.invoke('box:box-files-remove'),
+  boxSpacePrune: () => ipcRenderer.invoke('box:space-prune'),
+  memoryModelRemove: () => ipcRenderer.invoke('memory:model-remove'),
   // fase rilascio (A8): aggiornamento e rinnovo da Homun 2.
   // RP3 (fase rilascio di prova): il canale si cambia dall'interruttore delle
   // Impostazioni e ha effetto immediato (nessun riavvio)

@@ -183,6 +183,11 @@ export function appleImageInspectArgv(tag: string): string[] {
   return ['image', 'inspect', tag]
 }
 
+/** La dimensione in byte della NOSTRA immagine (BX3; formato da verificare dal vivo). */
+export function appleImageSizeArgv(tag: string): string[] {
+  return ['image', 'inspect', '--format', '{{.size}}', tag]
+}
+
 export function appleBuildArgv(tag: string, dockerfilePath: string, contextDir: string): string[] {
   return ['build', '-t', tag, '-f', dockerfilePath, contextDir]
 }

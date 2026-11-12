@@ -780,6 +780,21 @@ export interface ReadingPageRef {
   version: number
 }
 
+/** Una riga di «Spazio su disco» (BX3): la dimensione e se l'azione è distruttiva. */
+export interface DiskSpaceRow {
+  id: 'box-image' | 'box-files' | 'reclaimable' | 'model' | 'memory-model'
+  bytes: number | null
+  destructive: boolean
+}
+
+/** La risposta di box:disk-space (BX3): righe, byte liberi e margine. */
+export interface DiskSpaceInfo {
+  engine: string
+  rows: DiskSpaceRow[]
+  freeBytes: number | null
+  marginBytes: number
+}
+
 export interface SandbotApi {
   // agenti e transcript
   listAgents(): Promise<Agent[]>
@@ -1101,6 +1116,12 @@ export interface SandbotApi {
   // fase rilascio (A7): stato di docker per la UI (installato? avviato?)
   boxDockerStatus(): Promise<{ installed: boolean; running: boolean; path: string; testPrefixInvalid: boolean }>
   boxDockerRetry(): Promise<{ installed: boolean; running: boolean; path: string; testPrefixInvalid: boolean }>
+  // fase box-container (BX3): «Spazio su disco» nelle Impostazioni
+  boxDiskSpace(): Promise<DiskSpaceInfo>
+  boxImageRemove(): Promise<{ ok: boolean; error?: string }>
+  boxBoxFilesRemove(): Promise<{ ok: boolean; error?: string }>
+  boxSpacePrune(): Promise<{ ok: boolean; error?: string }>
+  memoryModelRemove(): Promise<{ freedBytes: number }>
   // fase rilascio (A8): l'aggiornamento (main process).
   // RP3 (fase rilascio di prova): lo stato porta il canale ('stable'|'beta')
   // e l'interruttore delle Impostazioni lo cambia (effetto immediato)

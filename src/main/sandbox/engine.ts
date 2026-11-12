@@ -44,6 +44,8 @@ export interface BoxEngineArgv {
   containerImage(container: string): string[]
   ensureHome(container: string, agentId: string): string[]
   imageInspect(tag: string): string[]
+  /** BX3: la dimensione in byte della NOSTRA immagine. */
+  imageSize(tag: string): string[]
   build(tag: string, dockerfilePath: string, contextDir: string): string[]
   volumeLs(volume: string): string[]
 
