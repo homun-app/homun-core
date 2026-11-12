@@ -101,6 +101,7 @@ const launchApp = (mode, giro) => {
   // autodiscovery non parli con Ollama/LM Studio VERI del Mac (se ci sono)
   const db = new DatabaseSync(join(dataDir, 'data', 'sandbot.db'))
   db.exec('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
+  db.exec('CREATE TABLE IF NOT EXISTS agents (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT DEFAULT \'\', provider_id TEXT, model TEXT, status TEXT DEFAULT \'offline\', unread INTEGER DEFAULT 0, created_at INTEGER)')
   db.prepare('INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)').run(
     'providers',
     JSON.stringify([{ id: 'finto', name: 'Finto (locale)', kind: 'openai-compatible', baseUrl: 'http://127.0.0.1:1/v1', apiKey: 'k', enabled: true }])
@@ -112,6 +113,12 @@ const launchApp = (mode, giro) => {
   if (mode !== 'ready') {
     db.prepare('INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)').run('sandbox.engine', '"apple-container"')
   }
+  // fase guida: la guida ora CHIEDE i permessi e la scelta scriverebbe
+  // approvals.mode — questa sonda non prova la guida (c'è la sua, apposta):
+  // si semina un principale GIÀ fatto e la guida non parte
+  db.prepare('INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)').run('onboarding.done', 'true')
+  db.prepare('INSERT OR REPLACE INTO agents(id, name, description, status, unread, created_at) VALUES (?, ?, ?, ?, 0, ?)').run('agent_main', 'Bot', '', 'idle', Date.now())
+  db.prepare('INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)').run('mainAgentId', '"agent_main"')
   db.close()
   const cliLogFile = join(TMP, `cli-${mode}-${giro}.jsonl`)
   try { rmSync(cliLogFile) } catch { /* nuovo giro */ }
@@ -455,6 +462,7 @@ try {
     mkdirSync(join(dataDir, 'data'), { recursive: true })
     const db = new DatabaseSync(join(dataDir, 'data', 'sandbot.db'))
     db.exec('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
+    db.exec('CREATE TABLE IF NOT EXISTS agents (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT DEFAULT \'\', provider_id TEXT, model TEXT, status TEXT DEFAULT \'offline\', unread INTEGER DEFAULT 0, created_at INTEGER)')
     db.prepare('INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)').run(
       'providers',
       JSON.stringify([{ id: 'finto', name: 'Finto (locale)', kind: 'openai-compatible', baseUrl: `http://127.0.0.1:${providerPort}/v1`, apiKey: 'k', enabled: true }])
@@ -465,6 +473,14 @@ try {
     // i turni della sonda non chiedono approvazioni: si scrive un FILE del
     // bot (nessun comando da approvare, nessun output da aspettare)
     db.prepare('INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)').run('approvals.mode', '"never"')
+    // fase guida: la guida ora CHIEDE i permessi (niente più Salta), e la
+    // scelta scriverebbe approvals.mode sopra il «never» seminato. Questa
+    // sonda non prova la guida (c'è la sua, fase-onboarding-a-probe): si
+    // semina un principal GIÀ fatto con modello pronto, e la guida non parte
+    db.prepare('INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)').run('models.main', JSON.stringify({ providerId: 'finto', model: 'finto', thinking: null }))
+    db.prepare('INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)').run('onboarding.done', 'true')
+    db.prepare('INSERT OR REPLACE INTO agents(id, name, description, status, unread, created_at) VALUES (?, ?, ?, ?, 0, ?)').run('agent_main', 'Bot', '', 'idle', Date.now())
+    db.prepare('INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)').run('mainAgentId', '"agent_main"')
     db.close()
     const cliLogFile = opts.cliLogFile
     let appLog = ''

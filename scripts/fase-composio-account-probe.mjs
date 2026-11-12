@@ -495,17 +495,20 @@ try {
     throw new Error('window.sandbot non disponibile dopo 30s')
   }
 
-  // fase onboarding-a: al primo avvio c'è la GUIDA a tutta finestra — la si
-  // attraversa (benvenuto → modello saltato → autorizzazioni SALTATE: i flussi
-  // di questa sonda sono sugli ACCOUNT, non sull'onboarding, e nessun setting
-  // della guida deve cambiare i dati seminati) e la card del focus si chiude
-  // senza scegliere
+  // fase guida: al primo avvio c'è la GUIDA — la si attraversa coi clic
+  // (benvenuto → modello saltato → permessi «Chiedimi prima», che qui scrive
+  // i default → Pronto → «Apri la chat») e la card del focus si chiude senza
+  // scegliere. I flussi di questa sonda sono sugli ACCOUNT, non sulla guida
   if (await waitDom(`!!document.querySelector('[data-testid="guide-step-welcome"]')`, 20_000)) {
     await clickTestid('guide-continue')
     await waitDom(`!!document.querySelector('[data-testid="guide-step-model"]')`, 10_000)
     await clickTestid('guide-skip')
     await waitDom(`!!document.querySelector('[data-testid="guide-step-approvals"]')`, 10_000)
-    await clickTestid('guide-skip')
+    await clickTestid('guide-approvals-ask')
+    await waitDom(`!document.querySelector('[data-testid="guide-continue"]')?.disabled`, 10_000)
+    await clickTestid('guide-continue')
+    await waitDom(`!!document.querySelector('[data-testid="guide-step-ready"]')`, 10_000)
+    await clickTestid('guide-continue')
   }
   await waitDom(`!!document.querySelector('form textarea')`, 25_000)
   if (await waitDom(`!!document.querySelector('[data-testid="focus-dismiss"]')`, 8_000)) {
