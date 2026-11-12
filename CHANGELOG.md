@@ -5,7 +5,7 @@ pubblicata finisce nel corpo della GitHub Release (da cui l'app mostra il
 «cosa cambia» quando propone un aggiornamento). Formato: `## [x.y.z] — data`,
 sezioni H2 e un punto per riga.
 
-## [0.3.1001-beta.4] — 2026-11-11
+## [0.3.1001-beta.4] — 2026-11-12
 
 Quattro cose che hai chiesto dopo la beta.3.
 
