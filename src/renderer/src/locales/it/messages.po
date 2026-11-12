@@ -757,6 +757,10 @@ msgstr "Aggiungi server MCP: {0}"
 msgid "card.mcpServer"
 msgstr "Aggiungi server MCP: {name}"
 
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Aggiungi un altro account"
+msgstr "Aggiungi un altro account"
+
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Aggiungi un bot"
 msgstr "Aggiungi un bot"
@@ -1545,6 +1549,7 @@ msgstr "Coda piena: messaggio scartato."
 msgid "codice TOTP"
 msgstr "codice TOTP"
 
+#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/ConnectorCard.tsx
 #: src/renderer/src/components/ServerSetup.tsx
 #: src/renderer/src/components/settings/AddProviderSheet.tsx
@@ -2103,6 +2108,10 @@ msgstr "Da plugin"
 #: src/shared/ui-messages.ts
 msgid "dialog.moveToApplications.body"
 msgstr "Da qui gli aggiornamenti automatici non funzionano."
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Da ricollegare"
+msgstr "Da ricollegare"
 
 #: src/renderer/src/components/RightPanel.tsx
 msgid "da scegliere"
@@ -3709,6 +3718,10 @@ msgstr "Lavoro"
 #: src/shared/ui-messages.ts
 msgid "onboarding.roleWork"
 msgstr "Lavoro e codice"
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "lavoro, personale…"
+msgstr "lavoro, personale…"
 
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Le app collegate fuori da Homun non si vedono qui: "
@@ -5434,6 +5447,7 @@ msgstr "Rimuovi"
 msgid "Rimuovi davvero"
 msgstr "Rimuovi davvero"
 
+#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/LibraryPanel.tsx
 msgid "Rinomina"
 msgstr "Rinomina"
@@ -6294,9 +6308,14 @@ msgstr "tipo non valido: {kind}"
 msgid "Titolo (es. Riepilogo email del mattino)"
 msgstr "Titolo (es. Riepilogo email del mattino)"
 
+#: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Togli"
 msgstr "Togli"
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Togli davvero"
+msgstr "Togli davvero"
 
 #: src/renderer/src/components/ServerSetup.tsx
 msgid "Token di accesso"

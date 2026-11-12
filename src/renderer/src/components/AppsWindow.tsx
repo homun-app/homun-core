@@ -17,8 +17,8 @@ import { Search, X } from 'lucide-react'
 import { api, useStore } from '../store'
 import { i18n } from '../lib/i18n'
 import { loadAppCatalog, appCategoryLabel, appTaglineOf, type AppCatalogRow, type AppCategoryId } from '../../../shared/app-catalog'
-import type { McpServerInfo, McpServerSecret, AppsRegistryResult } from '../../../shared/types'
-import { appsViewModel, appsCatalogModel, botsToggleState, type AppsFilter, type InstalledServerLike, type InstalledPluginLike, type ConnectedRow, type CatalogRowView } from '../lib/apps-view'
+import type { McpServerInfo, McpServerSecret, AppsRegistryResult, ComposioGatewayAppInfo } from '../../../shared/types'
+import { appsViewModel, appsCatalogModel, botsToggleState, gatewayAccountRows, accountLimitMessage, type AppsFilter, type InstalledServerLike, type InstalledPluginLike, type ConnectedRow, type CatalogRowView } from '../lib/apps-view'
 import { mcpToolPresentation } from '../../../shared/tool-names'
 import { SettingsGroup } from './settings/SettingsGroup'
 import { SettingsRow } from './settings/SettingsRow'
@@ -1153,6 +1153,166 @@ function BotTogglesForApp({ directId, enabledFor, agents, onChanged }: {
   )
 }
 
+/**
+ * CA2 (fase composio-account): gli account di un'app Composio collegata nel
+ * dettaglio della finestra App — una riga per account (alias in grassetto,
+ * email in grigio, «Da ricollegare» per i non attivi) con «Rinomina» e
+ * «Togli» (con conferma), e sotto «Aggiungi un altro account»: chiede un
+ * nome facoltativo («lavoro, personale…») e apre il login come oggi. Il
+ * limite di account del server si dice in parole semplici, mai l'errore
+ * grezzo. Stile della finestra di oggi: niente bordi, fondi tenui.
+ */
+function GatewayAccountsSection({ app, appName, onChanged }: {
+  app: ComposioGatewayAppInfo
+  appName: string
+  onChanged(): void
+}) {
+  const { t } = useLingui()
+  const rows = gatewayAccountRows(app)
+  const [renaming, setRenaming] = useState<{ key: string; value: string } | null>(null)
+  const [removing, setRemoving] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [limitCount, setLimitCount] = useState<number | null>(null)
+  const [adding, setAdding] = useState(false)
+  const [addAlias, setAddAlias] = useState('')
+
+  if (rows.length === 0) return null
+
+  const run = async (fn: () => Promise<{ ok: boolean; error?: string; accountCount?: number }>): Promise<void> => {
+    setBusy(true)
+    setError('')
+    setLimitCount(null)
+    try {
+      const r = await fn()
+      if (!r.ok) {
+        if (r.error === 'account-limit') setLimitCount(r.accountCount ?? 5)
+        else setError(r.error ?? 'error')
+      } else {
+        onChanged()
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="mt-3 space-y-1.5" data-testid="app-accounts">
+      {rows.map((row) => (
+        <div key={row.key} className="rounded-xl bg-muted/60 px-3 py-2" data-testid={`app-account-${row.key}`}>
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
+            <span className="text-[13px] font-semibold">{row.alias}</span>
+            {row.email && <span className="truncate text-[12px] text-muted-foreground">{row.email}</span>}
+            {row.reconnect && <span className="text-[11px] text-muted-foreground"><Trans>Da ricollegare</Trans></span>}
+            <span className="flex-1" />
+            {renaming?.key === row.key ? (
+              <span className="flex items-center gap-1.5">
+                <input
+                  autoFocus
+                  className="w-32 rounded-lg bg-card px-2 py-1 text-xs outline-none"
+                  value={renaming.value}
+                  onChange={(e) => setRenaming({ key: row.key, value: e.target.value })}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && renaming.value.trim() && !busy) {
+                      void run(() => api.composioGatewayRenameAccount(app.slug, row.key, renaming.value))
+                      setRenaming(null)
+                    }
+                    if (e.key === 'Escape') setRenaming(null)
+                  }}
+                />
+                <button
+                  className="rounded-full bg-foreground px-2.5 py-1 text-[11px] font-medium text-background transition hover:opacity-90 disabled:opacity-50"
+                  disabled={busy || !renaming.value.trim()}
+                  onClick={() => {
+                    void run(() => api.composioGatewayRenameAccount(app.slug, row.key, renaming.value))
+                    setRenaming(null)
+                  }}
+                >
+                  <Trans>Salva</Trans>
+                </button>
+                <button className="rounded-full px-2 py-1 text-[11px] text-muted-foreground transition hover:text-foreground" onClick={() => setRenaming(null)}>
+                  <Trans>Annulla</Trans>
+                </button>
+              </span>
+            ) : removing === row.key ? (
+              <span className="flex items-center gap-1.5">
+                <button
+                  className="rounded-full px-2.5 py-1 text-[11px] text-destructive transition hover:bg-destructive/10 disabled:opacity-50"
+                  disabled={busy}
+                  onClick={() => {
+                    void run(() => api.composioGatewayRemoveAccount(app.slug, row.key))
+                    setRemoving(null)
+                  }}
+                >
+                  <Trans>Togli davvero</Trans>
+                </button>
+                <button className="rounded-full px-2 py-1 text-[11px] text-muted-foreground transition hover:text-foreground" onClick={() => setRemoving(null)}>
+                  <Trans>Annulla</Trans>
+                </button>
+              </span>
+            ) : (
+              <span className="flex items-center gap-2 text-[11px]">
+                <button className="text-muted-foreground transition hover:text-foreground" disabled={busy} onClick={() => setRenaming({ key: row.key, value: row.alias })}>
+                  <Trans>Rinomina</Trans>
+                </button>
+                <button className="text-destructive transition hover:opacity-70" disabled={busy} onClick={() => setRemoving(row.key)}>
+                  <Trans>Togli</Trans>
+                </button>
+              </span>
+            )}
+          </div>
+        </div>
+      ))}
+      {/* CA2: «Aggiungi un altro account» — nome facoltativo, login come oggi */}
+      <div className="rounded-xl bg-muted/40 px-3 py-2">
+        {adding ? (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <input
+              autoFocus
+              className="w-40 rounded-lg bg-card px-2 py-1 text-xs outline-none"
+              placeholder={t`lavoro, personale…`}
+              value={addAlias}
+              onChange={(e) => setAddAlias(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') { setAdding(false); setAddAlias('') }
+              }}
+            />
+            <button
+              className="rounded-full bg-foreground px-2.5 py-1 text-[11px] font-medium text-background transition hover:opacity-90 disabled:opacity-50"
+              disabled={busy}
+              onClick={() => {
+                void run(() => api.composioGatewayConnect(app.slug, appName, { another: true, alias: addAlias }))
+                setAdding(false)
+                setAddAlias('')
+              }}
+            >
+              <Trans>Collega</Trans>
+            </button>
+            <button className="rounded-full px-2 py-1 text-[11px] text-muted-foreground transition hover:text-foreground" onClick={() => { setAdding(false); setAddAlias('') }}>
+              <Trans>Annulla</Trans>
+            </button>
+          </div>
+        ) : (
+          <button
+            className="text-[12px] text-muted-foreground transition hover:text-foreground disabled:opacity-50"
+            disabled={busy}
+            onClick={() => setAdding(true)}
+            data-testid="app-add-account"
+          >
+            + <Trans>Aggiungi un altro account</Trans>
+          </button>
+        )}
+      </div>
+      {limitCount !== null && (
+        <p className="text-[12px] text-muted-foreground" data-testid="app-account-limit">{accountLimitMessage(limitCount, appName, uiLang())}</p>
+      )}
+      {error && <p className="text-[12px] text-destructive">{error}</p>}
+    </div>
+  )
+}
+
 function AppDetailSheet({ row, installed, onClose, onChanged, onConnect }: {
   row: CatalogRowView
   installed: { servers: InstalledServerLike[]; plugins: InstalledPluginLike[] } | null
@@ -1218,11 +1378,11 @@ function AppDetailSheet({ row, installed, onClose, onChanged, onConnect }: {
         {error && <p className="mt-2 text-[13px] text-destructive">{error}</p>}
         {row.connected === 'connected' && <p className="mt-3 text-sm text-chart-2"><Trans>Connessa</Trans></p>}
         {row.connected === 'reconnect' && <p className="mt-3 text-sm text-muted-foreground"><Trans>Non più attiva: ricollega per riavere le sue azioni.</Trans></p>}
-        {/* V11 (prova vera): MAI l'id tecnico dell'account — l'email quando
-            `list` la dà (user_info.email), altrimenti nulla */}
-        {gatewayApp?.email && (
-          <p className="mt-1 text-[11px] text-muted-foreground">{gatewayApp.email}</p>
-        )}
+        {/* V11 (prova vera) + CA2 (fase composio-account): MAI l'id tecnico —
+            l'ELENCO degli account (alias in grassetto, email in grigio, stato
+            «Da ricollegare»), «Rinomina» e «Togli» per ognuno e sotto
+            «Aggiungi un altro account» */}
+        {gatewayApp && <GatewayAccountsSection app={gatewayApp} appName={app.name} onChanged={onChanged} />}
         {/* P4 (fase pulizia): «per bot» sta SOTTO lo stato e SOPRA i bottoni —
             per le app Composio la scelta per singola app NON esiste (il server
             vale per tutti i bot): testo «Tutti i bot», senza casella; la

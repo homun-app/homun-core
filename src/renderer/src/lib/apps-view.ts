@@ -5,7 +5,7 @@
 // Consigliate per te, una per categoria) e la griglia di ricerca/filtro.
 // La sezione «Collegate» dei server e dei plugin resta quella di fase 16c:
 // righe con stato, nomi dei bot e «+N».
-import type { ConnectorInfo, ComposioStatusInfo, ComposioGatewayStatusInfo } from '../../../shared/types'
+import type { ConnectorInfo, ComposioStatusInfo, ComposioGatewayStatusInfo, ComposioGatewayAppInfo, ComposioGatewayAccountInfo } from '../../../shared/types'
 import type { AppCatalogRow, AppCategoryId } from '../../../shared/app-catalog'
 import { APP_CATEGORIES, appTaglineOf, searchApps } from '../../../shared/app-catalog'
 
@@ -307,4 +307,60 @@ export function botsToggleState(
       disabled: all
     }))
   }
+}
+
+// ---- CA2 (fase composio-account): gli account di un'app Composio collegata ----
+
+/** Una riga di account della finestra App (alias in evidenza, email accanto). */
+export interface GatewayAccountRow {
+  key: string
+  alias: string
+  email?: string
+  /** l'account non è attivo: la riga dice «Da ricollegare» */
+  reconnect: boolean
+}
+
+/**
+ * PURA (CA2): le righe degli account di un'app collegata tramite il gateway
+ * Composio. L'etichetta in evidenza è l'ALIAS; senza alias vale l'email
+ * (o la parte locale), senza email «account N» — MAI l'id tecnico
+ * (coup_hurricane_dal_analytical). L'email sta accanto in grigio quando
+ * c'è un alias; lo stato non attivo diventa «Da ricollegare» (la traduzione
+ * vive nei cataloghi Lingui del componente, qui il fatto).
+ */
+export function gatewayAccountRows(app: ComposioGatewayAppInfo | null | undefined): GatewayAccountRow[] {
+  return (app?.accounts ?? []).map((acc, i) => ({
+    key: acc.accountId ?? `acc-${i}`,
+    alias: acc.alias ?? acc.email ?? `account ${i + 1}`,
+    ...(acc.email && acc.alias ? { email: acc.email } : {}),
+    reconnect: acc.status !== 'ACTIVE'
+  }))
+}
+
+/**
+ * PURA (CA2): il messaggio del LIMITE di account in parole semplici —
+ * «Hai già 5 account Gmail: togline uno per aggiungerne un altro», mai
+ * l'errore grezzo del server.
+ */
+export function accountLimitMessage(count: number, appName: string, lang: 'it' | 'en'): string {
+  return lang === 'en'
+    ? `You already have ${count} ${appName} accounts: remove one to add another.`
+    : `Hai già ${count} account ${appName}: togline uno per aggiungerne un altro.`
+}
+
+/**
+ * PURA (CA2/CA3): l'etichetta dell'account usato da una card («lavoro
+ * (fabio@azienda.test)») — l'account può arrivare per ALIAS o per ID dal
+ * modello; se non si risolve, si mostra com'è (mai un'etichetta inventata).
+ */
+export function accountLabelOf(
+  accounts: ReadonlyArray<Pick<ComposioGatewayAccountInfo, 'accountId' | 'alias' | 'email'>>,
+  account: string
+): string {
+  const ref = account.trim()
+  if (!ref) return ''
+  const hit = accounts.find((a) => (a.alias && a.alias === ref) || (a.accountId && a.accountId === ref))
+  if (!hit) return ref
+  if (hit.alias && hit.email) return `${hit.alias} (${hit.email})`
+  return hit.alias ?? hit.email ?? hit.accountId ?? ref
 }
