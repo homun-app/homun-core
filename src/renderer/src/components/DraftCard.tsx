@@ -12,6 +12,8 @@ import { i18n } from '../lib/i18n'
 import type { TranscriptEntry, SendMessageMeta, SendMessagePayload } from '../../../shared/types'
 // K7 (ritocchi): la riga «<app> tramite Composio» quando la via è il blocco
 import { composioViaInfo } from '../../../shared/composio-names'
+// CA3: l'account della card si risolve negli account del gateway (alias + email)
+import { accountLabelOf } from '../lib/apps-view'
 import { DecidedRow, CardShell } from './DecidedRow'
 
 type Draft = Extract<SendMessagePayload, { type: 'draft' }>
@@ -22,6 +24,7 @@ const CHANNEL_LABEL = { email: 'Email', slack: 'Slack', other: '' } as const
 export function DraftCard({ entry }: { entry: TranscriptEntry }) {
   const { t } = useLingui()
   const send = useStore((s) => s.draftSend)
+  const gateway = useStore((s) => s.composioGateway)
   const discard = useStore((s) => s.draftDiscard)
   const update = useStore((s) => s.draftUpdate)
   const meta = (entry.meta ?? {}) as Partial<SendMessageMeta>
@@ -40,6 +43,10 @@ export function DraftCard({ entry }: { entry: TranscriptEntry }) {
   // K7 (ritocchi): se l'invio passa da Composio (il blocco o un composio__),
   // la regola A7 vuole l'etichetta su OGNI superficie — anche sulla bozza
   const composioVia = composioViaInfo(draft.via)
+  // CA3 (fase composio-account): il titolo della card dice QUALE account —
+  // l'alias e l'email del gateway quando l'account (alias o id) si risolve
+  const viaAccounts = composioVia?.slug ? (gateway?.connected.find((a) => a.slug === composioVia.slug)?.accounts ?? []) : []
+  const accountLabel = composioVia?.account ? accountLabelOf(viaAccounts, composioVia.account) : ''
 
   const startEdit = (): void => {
     setBody(draft.body)
@@ -51,6 +58,8 @@ export function DraftCard({ entry }: { entry: TranscriptEntry }) {
       <div className="flex items-center gap-2 text-sm">
         <Icon className="size-4 text-muted-foreground" />
         <span className="font-medium">{CHANNEL_LABEL[draft.channel] || t`invio esterno`}</span>
+        {/* CA3: «Email · da lavoro (fabio@azienda.it)» — l'account in titolo */}
+        {accountLabel && <span className="text-xs text-muted-foreground">{t`da ${accountLabel}`}</span>}
         <span className="text-xs text-muted-foreground">
           {status === 'pending' ? t`bozza — si invia solo se confermi` : status === 'sent' ? t`inviata` : status === 'error' ? t`errore` : t`scartata`}
         </span>

@@ -2060,6 +2060,10 @@ msgstr "cron non valido: \"{cron}\" (5 campi, es. \"0 9 * * *\")"
 msgid "Da {0}"
 msgstr "Da {0}"
 
+#: src/renderer/src/components/DraftCard.tsx
+msgid "da {accountLabel}"
+msgstr "da {accountLabel}"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "dialog.moveToApplications.stillRunning"

@@ -33,7 +33,7 @@ import {
   batchActions, batchResultData, composioResultError, forceSyncResponseToWorkbenchOff,
   extractBatchSends, toolBatchOf, composioActionKey, composioToolkitOfSlug,
   manageConnectionsEntries, workbenchSpillOf, appendSearchToolsNote, proxyReadTurnKey,
-  isProxyReadToolCall, COMPOSIO_PROXY_EXECUTE_TOOL
+  isProxyReadToolCall, COMPOSIO_PROXY_EXECUTE_TOOL, missingAccountOfItems
 } from '../connectors/tool-batch'
 import { composioGateway } from '../connectors/composio-gateway'
 import { deniedRepeatRefusal, repeatsDeniedAction } from './composio-trust'
@@ -1731,12 +1731,20 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       }
       // B4 (fase beta.4): il bot sa quali app ha collegate — la riga sta
       // nella parte VARIABILE del prompt (mai nel prefisso in cache), dalle
-      // app del gateway Composio (C5) e dai server MCP attivi del bot
+      // app del gateway Composio (C5) e dai server MCP attivi del bot.
+      // CA3 (fase composio-account): ogni app porta i SUOI account attivi —
+      // l'email con un account solo, l'elenco «alias (email)» e la regola
+      // `account` con più di uno
       try {
         const { composioGateway } = await import('../connectors/composio-gateway')
         const apps = (composioGateway()?.status().connected ?? [])
           .filter((a) => a.status === 'ACTIVE')
-          .map((a) => a.name)
+          .map((a) => ({
+            name: a.name,
+            accounts: (a.accounts ?? [])
+              .filter((acc) => acc.status === 'ACTIVE')
+              .map((acc) => ({ ...(acc.alias ? { alias: acc.alias } : {}), ...(acc.email ? { email: acc.email } : {}) }))
+          }))
         let servers: Array<{ name: string; tools: Array<{ name: string }> }> = []
         try {
           const { activeServersForAgent } = await import('../mcp')
@@ -1744,7 +1752,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         } catch {
           // MCP non disponibile: bastano le app collegate
         }
-        connectedAppsSection = connectedAppsLine({ composioApps: apps, mcpServers: mcpServerNames(servers, apps) })
+        connectedAppsSection = connectedAppsLine({ composioApps: apps, mcpServers: mcpServerNames(servers, apps.map((a) => a.name)) })
       } catch {
         // niente riga: il prompt resta quello di base
       }
@@ -4109,6 +4117,28 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             const res = add({ agentId, kind: 'tool-result', role: 'system', content: refused, meta: { callId: call.id, denied: true } })
             emit({ type: 'entries', agentId, entries: [res] })
             continue
+          }
+        }
+
+        // CA3 (fase composio-account): la scelta dell'account. Se il toolkit
+        // di una voce del blocco ha PIÙ account attivi e la voce non ha
+        // `account`, Composio NON si chiama: il risultato dice al modello
+        // quali sono e di passare `account` con quello che intende l'utente
+        // (o chiederglielo con ask_user). Con un solo account non si tocca nulla
+        if (call.name.startsWith('mcp__') && gateway) {
+          const shapeCA = toolBatchOf(call.name.split('__').slice(2).join('__'))
+          if (shapeCA) {
+            const refusalCA = missingAccountOfItems(
+              batchActions(shapeCA, input).items,
+              gatewaySlugs,
+              (tk) => gateway.activeAccountsOf(tk)
+            )
+            if (refusalCA) {
+              messages.push({ role: 'tool', toolCallId: call.id, content: refusalCA })
+              const res = add({ agentId, kind: 'tool-result', role: 'system', content: refusalCA, meta: { callId: call.id, error: true, accountChoice: true } })
+              emit({ type: 'entries', agentId, entries: [res] })
+              continue
+            }
           }
         }
 

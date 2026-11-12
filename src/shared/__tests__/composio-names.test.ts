@@ -161,18 +161,19 @@ describe('K7 — composioViaInfo: da dove parte una bozza', () => {
   }
 
   it('via = il blocco di Composio → l\'app umana e l\'account della voce', () => {
-    expect(composioViaInfo(batchVia)).toEqual({ app: 'Gmail', account: 'lavoro' })
+    // CA3: porta anche lo slug del toolkit (per cercare gli account nel gateway)
+    expect(composioViaInfo(batchVia)).toEqual({ app: 'Gmail', slug: 'gmail', account: 'lavoro' })
   })
 
   it('blocco su QUALUNQUE server (nome originale COMPOSIO_MULTI_EXECUTE_TOOL) e senza account', () => {
     expect(composioViaInfo({
       tool: 'mcp__il-mio-composio__COMPOSIO_MULTI_EXECUTE_TOOL',
       args: { tools: [{ tool_slug: 'SLACK_POST_MESSAGE', arguments: {} }] }
-    })).toEqual({ app: 'Slack' })
+    })).toEqual({ app: 'Slack', slug: 'slack' })
   })
 
   it('via = strumento composio__ del vecchio flusso SDK → il toolkit dal nome', () => {
-    expect(composioViaInfo({ tool: 'composio__gmail__GMAIL_SEND_EMAIL', args: {} })).toEqual({ app: 'Gmail' })
+    expect(composioViaInfo({ tool: 'composio__gmail__GMAIL_SEND_EMAIL', args: {} })).toEqual({ app: 'Gmail', slug: 'gmail' })
   })
 
   it('ogni altra via (o nessuna) → null: la riga riguarda solo le superfici Composio', () => {

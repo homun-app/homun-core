@@ -1425,15 +1425,29 @@ export async function executeTool(
     }
     case 'search_connectors': {
       // B4 (fase beta.4): un'app GIÀ collegata tramite Composio si dice
-      // subito, senza cercarne (e proporne) un'altra: usa i tool Composio
-      const { connectedAppMatch } = await import('./connected-apps')
+      // subito, senza cercarne (e proporne) un'altra: usa i tool Composio.
+      // CA3 (fase composio-account): il messaggio porta gli ACCOUNT, e se
+      // c'è almeno un'app collegata il risultato COMINCIA con l'elenco di
+      // ciò che è già lì — anche se la query è generica («email», «posta»):
+      // un risultato che dice «nessun Gmail» pesa più della riga nel prompt
+      const { connectedAppMatch, alreadyConnectedPrefix, connectedAppHitMessage } = await import('./connected-apps')
+      let alreadyConnectedPrefixText: string | null = null
       try {
         const { composioGateway } = await import('../connectors/composio-gateway')
-        const connected = (composioGateway()?.status().connected ?? []).filter((a) => a.status === 'ACTIVE')
+        const connected = (composioGateway()?.status().connected ?? [])
+          .filter((a) => a.status === 'ACTIVE')
+          .map((a) => ({
+            slug: a.slug,
+            name: a.name,
+            accounts: (a.accounts ?? [])
+              .filter((acc) => acc.status === 'ACTIVE')
+              .map((acc) => ({ ...(acc.alias ? { alias: acc.alias } : {}), ...(acc.email ? { email: acc.email } : {}) }))
+          }))
+        if (connected.length > 0) alreadyConnectedPrefixText = alreadyConnectedPrefix(connected)
         const hit = connectedAppMatch(String(input.query ?? ''), connected)
         if (hit) {
           return {
-            output: `"${hit.name}" is already connected via Composio: use COMPOSIO_SEARCH_TOOLS to find the action, then COMPOSIO_MULTI_EXECUTE_TOOL.`,
+            output: connectedAppHitMessage(hit),
             meta: { connectedApp: hit.slug }
           }
         }
@@ -1446,7 +1460,8 @@ export async function executeTool(
       // esterni e contamina il turno
       const { runConnectorsSearch } = await import('../connectors/search-runtime')
       const out = await runConnectorsSearch(String(input.query ?? ''))
-      return { output: out.text, meta: out.thirdParty ? { thirdParty: true } : {} }
+      const text = alreadyConnectedPrefixText ? `${alreadyConnectedPrefixText}\n\n${out.text}` : out.text
+      return { output: text, meta: out.thirdParty ? { thirdParty: true } : {} }
     }
     case 'update_state': {
       if (input.target === 'memory') return runMemoryAction(agentId, input, ctx)

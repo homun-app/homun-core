@@ -467,6 +467,44 @@ export function batchSendViaArgs(item: ComposioBatchItem): Record<string, unknow
   }
 }
 
+// ---- CA3 (fase composio-account): la scelta dell'account nel blocco ----
+
+/** Gli account di un toolkit come servono al blocco (alias o id). */
+export interface BatchAccountRef {
+  accountId: string | null
+  alias?: string
+}
+
+/**
+ * CA3 punto 3 (PURa): il toolkit di un'azione del blocco ha PIÙ account
+ * attivi e la voce non ha `account`? Composio NON si chiama: il risultato
+ * per il modello dice quali sono e di passare `account` (o chiedere
+ * all'utente con ask_user). Null se ogni voce è a posto. Una frase per ogni
+ * toolkit carente.
+ */
+export function missingAccountOfItems(
+  items: readonly ComposioBatchItem[],
+  connectedSlugs: readonly string[],
+  accountsOf: (toolkit: string) => ReadonlyArray<BatchAccountRef>
+): string | null {
+  const missing = new Map<string, ReadonlyArray<BatchAccountRef>>()
+  for (const item of items) {
+    if (!item.slug || item.account) continue
+    const toolkit = composioToolkitOfSlug(item.slug, connectedSlugs)
+    if (missing.has(toolkit)) continue
+    const accounts = accountsOf(toolkit)
+    if (accounts.length >= 2) missing.set(toolkit, accounts)
+  }
+  if (missing.size === 0) return null
+  return [...missing.entries()]
+    .map(([toolkit, accounts]) => {
+      const name = composioToolkitName(toolkit)
+      const names = accounts.map((a, i) => a.alias ?? `account ${i + 1}`).join(', ')
+      return `${name} has ${accounts.length} accounts: ${names}. Pass \`account\` with the one the user means; if unclear, ask them with ask_user.`
+    })
+    .join(' ')
+}
+
 // ---- COMPOSIO_MANAGE_CONNECTIONS (C5) ----
 
 /** Il modo di una voce di toolkits[] di COMPOSIO_MANAGE_CONNECTIONS. */

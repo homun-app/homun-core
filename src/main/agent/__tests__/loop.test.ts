@@ -8215,10 +8215,42 @@ describe('B4 (fase beta.4): la riga delle app collegate nel prompt del turno', (
       h.llm.queue = [{ text: 'ok' }]
       await runTurn(AGENT, 'quali sono le board di trello?', emit)
       const system = String(h.llm.calls[0]![0]!.content)
-      expect(system).toContain('Connected apps: Trello, Gmail (via Composio: COMPOSIO_SEARCH_TOOLS')
+      // CA3: il formato nuovo — la guida Composio in testa e i nomi con ';'
+      expect(system).toContain('Connected apps (via Composio: COMPOSIO_SEARCH_TOOLS to find the action, then COMPOSIO_MULTI_EXECUTE_TOOL): Trello; Gmail')
       expect(system).toMatch(/not history, memory, the browser or a new connector/)
       // sta DOPO il prompt base (mai nel prefisso in cache): # Limits la precede
-      expect(system.indexOf('# Limits')).toBeLessThan(system.indexOf('Connected apps:'))
+      expect(system.indexOf('# Limits')).toBeLessThan(system.indexOf('Connected apps'))
+    } finally {
+      setActiveComposioGateway(null)
+    }
+  })
+
+  it("CA3: con più account la riga porta l'elenco e la regola `account` (parte che cambia)", async () => {
+    const { setActiveComposioGateway } = await import('../../connectors/composio-gateway')
+    const fake = {
+      status: () => ({
+        active: true,
+        connected: [
+          {
+            slug: 'gmail', name: 'Gmail', status: 'ACTIVE', accountId: 'a1',
+            accounts: [
+              { accountId: 'a1', alias: 'lavoro', email: 'fabio@azienda.test', status: 'ACTIVE', isDefault: true },
+              { accountId: 'a2', alias: 'personale', email: 'fabio@gmail.test', status: 'ACTIVE' }
+            ]
+          }
+        ],
+        pending: null
+      })
+    } as unknown as import('../../connectors/composio-gateway').ComposioGatewayManager
+    setActiveComposioGateway(fake)
+    try {
+      h.llm.queue = [{ text: 'ok' }]
+      await runTurn(AGENT, 'quale casella email ho collegato?', emit)
+      const system = String(h.llm.calls[0]![0]!.content)
+      expect(system).toContain('Gmail — accounts: lavoro (fabio@azienda.test), personale (fabio@gmail.test)')
+      expect(system).toContain('pass `account` in every MULTI_EXECUTE item for Gmail')
+      // mai nel prefisso in cache
+      expect(system.indexOf('# Limits')).toBeLessThan(system.indexOf('Connected apps'))
     } finally {
       setActiveComposioGateway(null)
     }

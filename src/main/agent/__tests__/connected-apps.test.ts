@@ -30,8 +30,8 @@ afterAll(async () => {
 
 describe('B4: connectedAppsLine — la riga del prompt (pura)', () => {
   it('con le app collegate c\'è, con la guida Composio e i server MCP', () => {
-    const line = connectedAppsLine({ composioApps: ['Trello', 'Gmail'], mcpServers: ['Notion'] })
-    expect(line).toContain('Connected apps: Trello, Gmail (via Composio: COMPOSIO_SEARCH_TOOLS to find the action, then COMPOSIO_MULTI_EXECUTE_TOOL)')
+    const line = connectedAppsLine({ composioApps: [{ name: 'Trello', accounts: [] }, { name: 'Gmail', accounts: [] }], mcpServers: ['Notion'] })
+    expect(line).toContain('Connected apps (via Composio: COMPOSIO_SEARCH_TOOLS to find the action, then COMPOSIO_MULTI_EXECUTE_TOOL): Trello; Gmail')
     expect(line).toContain('MCP servers: Notion')
     expect(line).toMatch(/use these tools|use THESE tools/i)
     expect(line).toMatch(/not history, memory, the browser or a new connector/)
@@ -43,13 +43,13 @@ describe('B4: connectedAppsLine — la riga del prompt (pura)', () => {
 
   it('l\'ordine dei nomi resta quello dato; massimo 20, poi «and N more»', () => {
     expect(CONNECTED_APPS_MAX_NAMES).toBe(20)
-    const many = Array.from({ length: 25 }, (_, i) => `App${i}`)
+    const many = Array.from({ length: 25 }, (_, i) => ({ name: `App${i}`, accounts: [] as Array<{ alias?: string; email?: string }> }))
     const line = connectedAppsLine({ composioApps: many, mcpServers: [] })
-    expect(line).toContain('App0, App1')
+    expect(line).toContain('App0; App1')
     expect(line).toMatch(/App19, and 5 more/)
     expect(line).not.toContain('App20')
     // i server MCP contano nello stesso tetto
-    const line2 = connectedAppsLine({ composioApps: many.slice(0, 10), mcpServers: many.slice(10) })
+    const line2 = connectedAppsLine({ composioApps: many.slice(0, 10), mcpServers: many.slice(10).map((a) => a.name) })
     expect(line2).toMatch(/and 5 more/)
   })
 
@@ -120,11 +120,16 @@ describe('BC4: connectedAppMatch confronta su PAROLE INTERE (confine Unicode, ma
 const { setActiveComposioGateway } = await import('../../connectors/composio-gateway')
 const { executeTool } = await import('../tools')
 
-const fakeGateway = (apps: Array<{ slug: string; name: string }>) =>
+const fakeGateway = (apps: Array<{ slug: string; name: string; accounts?: Array<{ accountId: string; alias?: string; email?: string; status: string }> }>) =>
   ({
     status: () => ({
       active: true,
-      connected: apps.map((a) => ({ ...a, status: 'ACTIVE', accountId: 'acct' })),
+      connected: apps.map((a) => ({
+        ...a,
+        status: 'ACTIVE',
+        accountId: a.accounts?.[0]?.accountId ?? 'acct',
+        ...(a.accounts ? { accounts: a.accounts } : {})
+      })),
       pending: null
     })
   }) as unknown as import('../../connectors/composio-gateway').ComposioGatewayManager
@@ -142,11 +147,149 @@ describe('B4: search_connectors su un\'app già collegata', () => {
     }
   })
 
+  it('CA3: la query GENERICA («email») comincia con l\'elenco di ciò che è già collegato', async () => {
+    setActiveComposioGateway(fakeGateway([
+      { slug: 'gmail', name: 'Gmail', accounts: [{ accountId: 'a1', alias: 'lavoro', email: 'fabio@azienda.test', status: 'ACTIVE' }, { accountId: 'a2', alias: 'personale', email: 'fabio@gmail.test', status: 'ACTIVE' }] },
+      { slug: 'trello', name: 'Trello', accounts: [{ accountId: 't1', status: 'ACTIVE' }] }
+    ]))
+    try {
+      const { output } = await executeTool('agent_x', 'search_connectors', { query: 'email' })
+      // il risultato COMINCIA con l'elenco di ciò che c'è già (prima delle
+      // righe dei connettori da installare)
+      expect(output.startsWith('Already connected via Composio: Gmail (lavoro: fabio@azienda.test, personale: fabio@gmail.test), Trello.')).toBe(true)
+      expect(output).toContain('the results below are apps NOT connected yet')
+    } finally {
+      setActiveComposioGateway(null)
+    }
+  })
+
+  it('CA3: la query che NOMINA l\'app collegata dice anche QUALI account', async () => {
+    setActiveComposioGateway(fakeGateway([
+      { slug: 'gmail', name: 'Gmail', accounts: [{ accountId: 'a1', alias: 'lavoro', email: 'fabio@azienda.test', status: 'ACTIVE' }, { accountId: 'a2', alias: 'personale', email: 'fabio@gmail.test', status: 'ACTIVE' }] }
+    ]))
+    try {
+      const { output, meta } = await executeTool('agent_x', 'search_connectors', { query: 'gmail' })
+      expect(output).toContain('"Gmail" is already connected via Composio (accounts: lavoro (fabio@azienda.test), personale (fabio@gmail.test)):')
+      expect(meta).toEqual({ connectedApp: 'gmail' })
+    } finally {
+      setActiveComposioGateway(null)
+    }
+  })
+
   it('senza il gateway collegato la ricerca procede come oggi (nessun esito finto)', async () => {
     setActiveComposioGateway(null)
     // nessun gateway → nessuna risposta «già collegata»: il result è quello
     // del runner vero (qui: la query corta si rifiuta, come sempre)
     const { output } = await executeTool('agent_x', 'search_connectors', { query: 'x' })
     expect(output).not.toContain('already connected')
+  })
+})
+
+// ---- CA3 (fase composio-account): il bot sa quali account ha, e quale usare ----
+
+const { alreadyConnectedPrefix } = await import('../connected-apps')
+const { missingAccountOfItems } = await import('../../connectors/tool-batch')
+
+const ACC = (alias?: string, email?: string) => ({ ...(alias ? { alias } : {}), ...(email ? { email } : {}) })
+
+describe('CA3: connectedAppsLine — la riga porta gli ACCOUNT', () => {
+  it('un SOLO account: l\'email accanto al nome («quale casella ho collegato?» ha risposta)', () => {
+    const line = connectedAppsLine({ composioApps: [{ name: 'Gmail', accounts: [ACC(undefined, 'fabio@gmail.test')] }], mcpServers: [] })
+    expect(line).toContain('Gmail — fabio@gmail.test')
+    expect(line).not.toContain('accounts:')
+  })
+
+  it('PIÙ account: l\'elenco alias (email) e la regola `account` esplicita', () => {
+    const line = connectedAppsLine({
+      composioApps: [{ name: 'Gmail', accounts: [ACC('lavoro', 'fabio@azienda.test'), ACC('personale', 'fabio@gmail.test')] }],
+      mcpServers: []
+    })
+    expect(line).toContain('Gmail — accounts: lavoro (fabio@azienda.test), personale (fabio@gmail.test)')
+    expect(line).toContain('pass `account` in every MULTI_EXECUTE item for Gmail')
+  })
+
+  it('la guida Composio e i server MCP restano; 0 account → solo il nome', () => {
+    const line = connectedAppsLine({
+      composioApps: [{ name: 'Trello', accounts: [] }, { name: 'Gmail', accounts: [ACC('lavoro', 'f@azienda.test')] }],
+      mcpServers: ['Notion']
+    })
+    expect(line).toContain('Connected apps (via Composio: COMPOSIO_SEARCH_TOOLS to find the action, then COMPOSIO_MULTI_EXECUTE_TOOL):')
+    expect(line).toContain('Trello; Gmail — lavoro (f@azienda.test)')
+    expect(line).toContain('MCP servers: Notion')
+    expect(line).toMatch(/not history, memory, the browser or a new connector/)
+  })
+
+  it('più di 3 account per app: i primi 3 più «and N more»', () => {
+    const line = connectedAppsLine({
+      composioApps: [{ name: 'Gmail', accounts: [ACC('a'), ACC('b'), ACC('c'), ACC('d')] }],
+      mcpServers: []
+    })
+    expect(line).toContain('accounts: a, b, c, and 1 more')
+    expect(line).not.toContain('(d)')
+  })
+
+  it('il tetto di 20 nomi resta: conta le APP', () => {
+    const many = Array.from({ length: 25 }, (_, i) => ({ name: `App${i}`, accounts: [] }))
+    const line = connectedAppsLine({ composioApps: many, mcpServers: [] })
+    expect(line).toContain('App0')
+    expect(line).toMatch(/App19, and 5 more/)
+    expect(line).not.toContain('App20')
+  })
+})
+
+describe('CA3: alreadyConnectedPrefix — search_connectors dice prima cosa c\'è GIÀ', () => {
+  it('comincia con «Already connected via Composio: …» con gli account per app', () => {
+    const prefix = alreadyConnectedPrefix([
+      { slug: 'gmail', name: 'Gmail', accounts: [ACC('lavoro', 'fabio@azienda.test'), ACC('personale', 'fabio@gmail.test')] },
+      { slug: 'trello', name: 'Trello', accounts: [ACC(undefined, 'fabio@trello.test')] }
+    ])
+    expect(prefix).toMatch(/^Already connected via Composio: /)
+    expect(prefix).toContain('Gmail (lavoro: fabio@azienda.test, personale: fabio@gmail.test)')
+    expect(prefix).toContain('Trello (fabio@trello.test)')
+    expect(prefix).toContain('Use those for their data; the results below are apps NOT connected yet.')
+  })
+
+  it('senza email vale l\'alias; senza né alias né email resta il solo nome', () => {
+    const prefix = alreadyConnectedPrefix([
+      { slug: 'slack', name: 'Slack', accounts: [ACC('lavoro')] },
+      { slug: 'box', name: 'Box', accounts: [{}] }
+    ])
+    expect(prefix).toContain('Slack (lavoro)')
+    // senza né alias né email resta il SOLO nome (niente parentesi vuote)
+    expect(prefix).toContain('Box')
+    expect(prefix).not.toContain('Box (')
+  })
+})
+
+describe('CA3: missingAccountOfItems — il blocco MULTI_EXECUTE senza `account`', () => {
+  const accountsOf = (toolkit: string) =>
+    toolkit === 'gmail'
+      ? [{ accountId: 'a1', alias: 'lavoro' }, { accountId: 'a2', alias: 'personale' }]
+      : toolkit === 'trello'
+        ? [{ accountId: 't1' }]
+        : []
+
+  it('toolkit con PIÙ account attivi e voce senza `account`: il testo per il modello', () => {
+    const refusal = missingAccountOfItems(
+      [{ slug: 'GMAIL_SEND_EMAIL', arguments: {} }],
+      ['gmail'],
+      accountsOf
+    )
+    expect(refusal).toBe('Gmail has 2 accounts: lavoro, personale. Pass `account` with the one the user means; if unclear, ask them with ask_user.')
+  })
+
+  it('la voce CON `account` passa; un solo account non chiede nulla', () => {
+    expect(missingAccountOfItems([{ slug: 'GMAIL_SEND_EMAIL', arguments: {}, account: 'lavoro' }], ['gmail'], accountsOf)).toBeNull()
+    expect(missingAccountOfItems([{ slug: 'TRELLO_GET_BOARDS', arguments: {} }], ['gmail', 'trello'], accountsOf)).toBeNull()
+  })
+
+  it('più toolkit carenti: una frase per ciascuno', () => {
+    const refusal = missingAccountOfItems(
+      [{ slug: 'GMAIL_SEND_EMAIL', arguments: {} }, { slug: 'SLACK_POST_MESSAGE', arguments: {} }],
+      ['gmail', 'slack'],
+      (tk) => (tk === 'gmail' ? [{ accountId: 'a1', alias: 'lavoro' }, { accountId: 'a2', alias: 'personale' }] : tk === 'slack' ? [{ accountId: 's1', alias: 'ufficio' }, { accountId: 's2' }] : [])
+    )
+    expect(refusal).toContain('Gmail has 2 accounts: lavoro, personale.')
+    expect(refusal).toContain('Slack has 2 accounts: ufficio, account 2.')
   })
 })

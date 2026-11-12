@@ -17,6 +17,7 @@ import { i18n } from '../lib/i18n'
 // R3 (fase app — ritocchi): il modello puro della card per Composio e MCP
 // fase Composio OAuth (C7): anche il modello del blocco
 import { approvalAppOf, approvalTitleOf, approvalReasonPhrase, approvalTechnicalLine, approvalBatchArgumentLines, approvalAskTitle, approvalOptionFlags, useAppCardModel, useAppDecidedSummary, type ComposioBatchActionMeta } from '../lib/approval-app'
+import { accountLabelOf } from '../lib/apps-view'
 import { toolDisplayName } from '../../../shared/tool-names'
 import type { TranscriptEntry } from '../../../shared/types'
 import { DecidedRow, CardShell } from './DecidedRow'
@@ -140,6 +141,13 @@ export function ApprovalCard({ entry, readOnly = false }: { entry: TranscriptEnt
   // fase Composio OAuth (C7): le azioni del blocco (o le voci di
   // MANAGE_CONNECTIONS / PROXY_EXECUTE) — il titolo viene da loro
   const composioBatch = entry.meta?.composioBatch as { actions: ComposioBatchActionMeta[]; incomplete: boolean; reason?: 'action' | 'incomplete' | 'trust' | 'rule' } | undefined
+  // CA3 (fase composio-account): l'account di un'azione si risolve negli
+  // account del gateway — «lavoro (fabio@azienda.it)» invece del solo ref
+  const gatewayCA = useStore((st) => st.composioGateway)
+  const accountsOfApp = (appName: string): ReadonlyArray<{ accountId: string | null; alias?: string; email?: string }> => {
+    const hit = gatewayCA?.connected.find((a) => a.name === appName)
+    return hit?.accounts ?? []
+  }
   // RW: le opzioni in un modello puro — per la LETTURA grezza del PROXY
   // «Per questo turno» è attivo anche se «Sempre» resta disattivato
   const { noAlways, noTurn } = approvalOptionFlags(tool, entry.meta)
@@ -180,7 +188,7 @@ export function ApprovalCard({ entry, readOnly = false }: { entry: TranscriptEnt
               <div key={`${a.slug}-${a.app}`}>
                 <div className="font-medium">
                   {a.app} · {a.action}
-                  {a.account ? <span className="ml-1 text-muted-foreground">({a.account})</span> : null}
+                  {a.account ? <span className="ml-1 text-muted-foreground">({accountLabelOf(accountsOfApp(a.app), a.account)})</span> : null}
                 </div>
                 {lines.first.map(([k, v]) => (
                   <div key={k} className="flex gap-2">

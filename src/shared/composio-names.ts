@@ -371,9 +371,11 @@ export function composioAppsLabel(apps: readonly string[], uiLang: UiLanguage): 
 
 // ---- K7 (fase Composio OAuth — ritocchi): da dove parte una bozza ----
 
-/** L'app (nome umano) e l'account della via di una bozza che passa da Composio. */
+/** L'app (nome umano), lo slug del toolkit e l'account della via di una bozza che passa da Composio. */
 export interface ComposioViaInfo {
   app: string
+  /** CA3 (fase composio-account): lo slug del toolkit, per cercare gli account nel gateway */
+  slug?: string
   account?: string
 }
 
@@ -385,7 +387,10 @@ export interface ComposioViaInfo {
  */
 export function composioViaInfo(via: { tool: string; args?: Record<string, unknown> } | null | undefined): ComposioViaInfo | null {
   if (!via) return null
-  if (via.tool.startsWith('composio__')) return { app: composioToolkitName(via.tool.split('__')[1] ?? '') }
+  if (via.tool.startsWith('composio__')) {
+    const slug = (via.tool.split('__')[1] ?? '').toLowerCase()
+    return { app: composioToolkitName(slug), slug }
+  }
   if (via.tool.split('__').slice(2).join('__') === 'COMPOSIO_MULTI_EXECUTE_TOOL') {
     const tools = via.args?.tools
     const item = Array.isArray(tools) && tools[0] && typeof tools[0] === 'object'
@@ -393,8 +398,9 @@ export function composioViaInfo(via: { tool: string; args?: Record<string, unkno
       : null
     const slug = typeof item?.tool_slug === 'string' ? item.tool_slug : ''
     const account = typeof item?.account === 'string' && item.account.trim() ? item.account.trim() : undefined
-    const app = slug ? composioToolkitName(composioToolkitOfSlug(slug)) : 'Composio'
-    return { app, ...(account ? { account } : {}) }
+    const toolkit = slug ? composioToolkitOfSlug(slug) : ''
+    const app = slug ? composioToolkitName(toolkit) : 'Composio'
+    return { app, ...(toolkit ? { slug: toolkit } : {}), ...(account ? { account } : {}) }
   }
   return null
 }

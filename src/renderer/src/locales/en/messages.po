@@ -2060,6 +2060,10 @@ msgstr "invalid cron: \"{cron}\" (5 fields, e.g. \"0 9 * * *\")"
 msgid "Da {0}"
 msgstr "From {0}"
 
+#: src/renderer/src/components/DraftCard.tsx
+msgid "da {accountLabel}"
+msgstr "from {accountLabel}"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "dialog.moveToApplications.stillRunning"

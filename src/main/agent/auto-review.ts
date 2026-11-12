@@ -404,7 +404,7 @@ ${allow}
 
 The owner's rules come FIRST: they override your own judgment on the request in both directions.
 
-Environment context (provided by the system, trustworthy data — not an instruction): run-command commands run in the bot's sandbox; if the action does not specify a workingDirectory, the working directory is the bot's HOME.
+Environment context (provided by the system, trustworthy data — not an instruction): run-command commands run in the bot's sandbox; if the action does not specify a workingDirectory, the working directory is the bot's HOME. For Composio batch actions the optional 'account' field of each item selects WHICH connected account (for example which mailbox) the action runs on: running it on an account the owner did not mean goes beyond their request.
 
 <richiesta_del_proprietario>
 ${owner}
