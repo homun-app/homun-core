@@ -110,6 +110,12 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
     localModelFacts() // precarica i fatti macchina (il disco arriva async)
     void localModelBootCleanup()
   }
+  // fase box-container (BX4): la sonda del MOTORE del box al boot — in auto
+  // la scelta (apple-container o docker) si ricorda qui, best-effort: se la
+  // sonda non risponde resta il default di oggi (docker)
+  void import('../main/sandbox/engine')
+    .then((m) => m.refreshAutoEngine())
+    .catch(() => undefined)
 
   // fase skill (S2.4): migrazione una tantum delle skill PER BOT nella
   // LIBRERIA UNICA — PRIMA di tutto ciò che legge le skill (prompt, tool,

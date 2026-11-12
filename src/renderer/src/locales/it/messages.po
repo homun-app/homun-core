@@ -630,6 +630,10 @@ msgstr "Accedi con {0}"
 msgid "Accedi tu sul suo schermo, poi premi «Ho finito». La password non passa dal bot."
 msgstr "Accedi tu sul suo schermo, poi premi «Ho finito». La password non passa dal bot."
 
+#: src/renderer/src/components/settings/EngineSection.tsx
+msgid "Accendi"
+msgstr "Accendi"
+
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Acceso"
 msgstr "Acceso"
@@ -909,6 +913,10 @@ msgstr "App e skill"
 msgid "Appena creato si presenta lui: ti chiede a cosa serve e impara dal tuo lavoro."
 msgstr "Appena creato si presenta lui: ti chiede a cosa serve e impara dal tuo lavoro."
 
+#: src/renderer/src/components/settings/EngineSection.tsx
+msgid "Apple container"
+msgstr "Apple container"
+
 #: src/renderer/src/components/ApprovalCard.tsx
 msgid "Approvata, la routine nasce attiva e partirà da sola."
 msgstr "Approvata, la routine nasce attiva e partirà da sola."
@@ -1096,6 +1104,7 @@ msgid "autoreview.disabled"
 msgstr "auto-review disattivata"
 
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
+#: src/renderer/src/components/settings/EngineSection.tsx
 msgid "Automatico"
 msgstr "Automatico"
 
@@ -1683,6 +1692,10 @@ msgstr "Composio non raggiungibile: controlla la connessione e riprova."
 msgid "Computer"
 msgstr "Computer"
 
+#: src/renderer/src/components/settings/EngineSection.tsx
+msgid "Computer dei bot"
+msgstr "Computer dei bot"
+
 #: src/renderer/src/components/settings/DiskSpaceSection.tsx
 msgid "Computer dei bot: file dei bot"
 msgstr "Computer dei bot: file dei bot"
@@ -2078,6 +2091,10 @@ msgstr "da GitHub"
 msgid "Da GitHub"
 msgstr "Da GitHub"
 
+#: src/renderer/src/components/settings/EngineSection.tsx
+msgid "Da installare: serve macOS 26 o successivo"
+msgstr "Da installare: serve macOS 26 o successivo"
+
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "Da plugin"
 msgstr "Da plugin"
@@ -2214,6 +2231,14 @@ msgstr "disponibile"
 #: src/shared/ui-messages.ts
 msgid "presence.lookaround"
 msgstr "Do un’occhiata in giro per vedere se c’è qualcosa che posso fare per te. Ti aggiorno tra poco."
+
+#: src/renderer/src/components/settings/EngineSection.tsx
+msgid "Docker"
+msgstr "Docker"
+
+#: src/renderer/src/components/settings/EngineSection.tsx
+msgid "Docker non risponde: aprilo e riprova"
+msgstr "Docker non risponde: aprilo e riprova"
 
 #: src/renderer/src/components/ComputerPanel.tsx
 msgid "docker.com"
@@ -3007,6 +3032,10 @@ msgstr "Il computer dei bot ora è UNO solo, condiviso (radice: {root}).\n"
 "{failed}\n"
 "I dati originali restano dove sono: puoi cancellarli tu quando vuoi."
 
+#: src/renderer/src/components/settings/EngineSection.tsx
+msgid "Il computer dei bot senza Docker usa Apple container: lo installa Apple col suo pacchetto firmato (chiede la password del Mac)."
+msgstr "Il computer dei bot senza Docker usa Apple container: lo installa Apple col suo pacchetto firmato (chiede la password del Mac)."
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "rpc.groupCoordinatorNotMember"
@@ -3413,6 +3442,10 @@ msgstr "Inserisci un valore"
 msgid "Installa"
 msgstr "Installa"
 
+#: src/renderer/src/components/settings/EngineSection.tsx
+msgid "Installa il kernel"
+msgstr "Installa il kernel"
+
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Installa il modello integrato"
 msgstr "Installa il modello integrato"
@@ -3434,6 +3467,10 @@ msgstr "Installa plugin: {name}"
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Installare {0} ({1} GB) da {2}, licenza {3}?"
 msgstr "Installare {0} ({1} GB) da {2}, licenza {3}?"
+
+#: src/renderer/src/components/settings/EngineSection.tsx
+msgid "Installare il kernel di Linux raccomandato? Verrà scaricato da Apple (circa 1 GB)."
+msgstr "Installare il kernel di Linux raccomandato? Verrà scaricato da Apple (circa 1 GB)."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -3710,6 +3747,10 @@ msgstr "Le pagine, i grafici e i file di questo bot finiscono qui."
 msgid "Le regole servono per allargare ciò che passa da solo, non sono necessarie: anche senza, il revisore fa passare quello che serve a ciò che hai chiesto."
 msgstr "Le regole servono per allargare ciò che passa da solo, non sono necessarie: anche senza, il revisore fa passare quello che serve a ciò che hai chiesto."
 
+#: src/renderer/src/components/settings/EngineSection.tsx
+msgid "Le release su GitHub"
+msgstr "Le release su GitHub"
+
 #: src/renderer/src/components/Settings.tsx
 msgid "Le ricerche dei bot vengono inviate a questi servizi, secondo i loro termini d'uso: <0>You.com</0> · <1>Exa</1> · <2>Tavily</2>"
 msgstr "Le ricerche dei bot vengono inviate a questi servizi, secondo i loro termini d'uso: <0>You.com</0> · <1>Exa</1> · <2>Tavily</2>"
@@ -3830,6 +3871,10 @@ msgstr "lun–ven"
 #: src/renderer/src/components/Settings.tsx
 msgid "lunedì"
 msgstr "lunedì"
+
+#: src/renderer/src/components/settings/EngineSection.tsx
+msgid "Manca il kernel di Linux"
+msgstr "Manca il kernel di Linux"
 
 #. placeholder {0}: agent.name
 #: src/renderer/src/components/Chat.tsx
@@ -4094,6 +4139,10 @@ msgstr "Mostra nel Finder"
 msgid "Mostra tutti ({0})"
 msgstr "Mostra tutti ({0})"
 
+#: src/renderer/src/components/settings/EngineSection.tsx
+msgid "Motore"
+msgstr "Motore"
+
 #. placeholder {0}: overview.engine.version
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "motore {0}"
@@ -4102,6 +4151,10 @@ msgstr "motore {0}"
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "Motore della memoria non disponibile: le memorie non si leggono né si scrivono finché non torna."
 msgstr "Motore della memoria non disponibile: le memorie non si leggono né si scrivono finché non torna."
+
+#: src/renderer/src/components/settings/EngineSection.tsx
+msgid "Motore scelto in automatico"
+msgstr "Motore scelto in automatico"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -4951,6 +5004,14 @@ msgstr "Prompt:"
 msgid "Pronto"
 msgstr "Pronto"
 
+#: src/renderer/src/components/settings/EngineSection.tsx
+msgid "Pronto (Apple container)"
+msgstr "Pronto (Apple container)"
+
+#: src/renderer/src/components/settings/EngineSection.tsx
+msgid "Pronto (Docker)"
+msgstr "Pronto (Docker)"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "rpc.pluginProposalNotFound"
@@ -5786,6 +5847,10 @@ msgstr "Serve il nome della squadra."
 msgid "rpc.needsWindow"
 msgstr "serve la finestra di Homun per autorizzare"
 
+#: src/renderer/src/components/settings/EngineSection.tsx
+msgid "Serve macOS 26 o successivo, con chip Apple"
+msgstr "Serve macOS 26 o successivo, con chip Apple"
+
 #: src/renderer/src/components/ServerSetup.tsx
 msgid "Serve un indirizzo completo, che comincia con https://"
 msgstr "Serve un indirizzo completo, che comincia con https://"
@@ -6053,6 +6118,7 @@ msgid "Spazio su disco insufficiente."
 msgstr "Spazio su disco insufficiente."
 
 #: src/renderer/src/components/RightPanel.tsx
+#: src/renderer/src/components/settings/EngineSection.tsx
 #: src/renderer/src/components/ui/ModelPicker.tsx
 msgid "Spento"
 msgstr "Spento"
@@ -6117,6 +6183,10 @@ msgstr "Stai controllando lo schermo di {0}"
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "stdio (comando locale)"
 msgstr "stdio (comando locale)"
+
+#: src/renderer/src/components/settings/EngineSection.tsx
+msgid "Sto guardando…"
+msgstr "Sto guardando…"
 
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "Storico delle versioni"

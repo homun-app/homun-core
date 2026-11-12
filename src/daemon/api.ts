@@ -2298,6 +2298,66 @@ export function buildApiMethods(
       }
       return { ok: true }
     },
+    // ---- fase box-container (BX4): il motore nelle Impostazioni ----
+    /**
+     * Lo stato del MOTORE: quale è in uso, come sta il motore Apple in parole
+     * (BX1.4) e cosa risponde Docker. La sonda aggiorna la memoria dell'auto.
+     */
+    'box:engine-status': async () => {
+      const e = await import('../main/sandbox/engine')
+      const { facts, chosen } = await e.refreshAutoEngine()
+      return {
+        setting: e.sandboxEngineSetting(),
+        chosen,
+        appleState: e.appleContainerState(facts),
+        dockerRunning: dockerToolStatusInfo().running,
+        facts
+      }
+    },
+    /** Il selettore Automatico / Apple container / Docker. */
+    'box:engine-set': async ([v]) => {
+      const e = await import('../main/sandbox/engine')
+      const value = String(v ?? '')
+      if (value !== 'auto' && value !== 'apple-container' && value !== 'docker') {
+        throw new Error(`invalid sandbox.engine "${value}": auto | apple-container | docker`)
+      }
+      store.setSetting('sandbox.engine', value)
+      const { facts, chosen } = await e.refreshAutoEngine()
+      return {
+        setting: e.sandboxEngineSetting(),
+        chosen,
+        appleState: e.appleContainerState(facts),
+        dockerRunning: dockerToolStatusInfo().running,
+        facts
+      }
+    },
+    /**
+     * «Accendi» il servizio del motore Apple: `container system start
+     * --disable-kernel-install` — il kernel NON si scarica mai di nascosto.
+     */
+    'box:engine-start': async () => {
+      const { appleContainerEngine, engineProbeDeps } = await import('../main/sandbox/engine')
+      const { appleSystemStartArgv } = await import('../main/sandbox/apple-container-argv')
+      const r = await engineProbeDeps
+        .runCli(appleContainerEngine.command(), appleSystemStartArgv(), 120_000)
+        .catch(() => ({ stdout: '', stderr: 'spawn failed', exitCode: null }))
+      if (r.exitCode !== 0) return { ok: false, error: r.stderr || `exit ${r.exitCode}` }
+      return { ok: true }
+    },
+    /**
+     * Il consenso ESPPLICITO all'installazione del kernel raccomandato (la UI
+     * lo chiede solo quando lo stato è kernel-missing): `container system
+     * kernel set --recommended`.
+     */
+    'box:engine-kernel-install': async () => {
+      const { appleContainerEngine, engineProbeDeps } = await import('../main/sandbox/engine')
+      const { appleKernelSetRecommendedArgv } = await import('../main/sandbox/apple-container-argv')
+      const r = await engineProbeDeps
+        .runCli(appleContainerEngine.command(), appleKernelSetRecommendedArgv(), 300_000)
+        .catch(() => ({ stdout: '', stderr: 'spawn failed', exitCode: null }))
+      if (r.exitCode !== 0) return { ok: false, error: r.stderr || `exit ${r.exitCode}` }
+      return { ok: true }
+    },
     /** «Rimuovi» il modello della memoria: la memoria torna alla ricerca per testo. */
     'memory:model-remove': async () => {
       const m = await import('../main/memory/engine')

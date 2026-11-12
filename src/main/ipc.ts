@@ -122,6 +122,8 @@ export const DAEMON_RPC_CHANNELS = [
   // fase box-container (BX3): lo spazio su disco del computer dei bot
   'box:disk-space', 'box:image-remove', 'box:box-files-remove', 'box:space-prune',
   'memory:model-remove',
+  // fase box-container (BX4): il motore nelle Impostazioni
+  'box:engine-status', 'box:engine-set', 'box:engine-start', 'box:engine-kernel-install',
   // fase 7: template dei bot (catalogo + creazione col kickstart)
   'templates:list', 'agents:create-from-template'
 ] as const

@@ -787,6 +787,14 @@ export interface DiskSpaceRow {
   destructive: boolean
 }
 
+/** Lo stato del motore del box (BX4), per la riga «Computer dei bot». */
+export interface EngineStatusInfo {
+  setting: 'auto' | 'apple-container' | 'docker'
+  chosen: string | null
+  appleState: 'unsupported' | 'not-installed' | 'stopped' | 'kernel-missing' | 'ready'
+  dockerRunning: boolean
+}
+
 /** La risposta di box:disk-space (BX3): righe, byte liberi e margine. */
 export interface DiskSpaceInfo {
   engine: string
@@ -1122,6 +1130,11 @@ export interface SandbotApi {
   boxBoxFilesRemove(): Promise<{ ok: boolean; error?: string }>
   boxSpacePrune(): Promise<{ ok: boolean; error?: string }>
   memoryModelRemove(): Promise<{ freedBytes: number }>
+  // fase box-container (BX4): il motore del computer dei bot
+  boxEngineStatus(): Promise<EngineStatusInfo>
+  boxEngineSet(engine: string): Promise<EngineStatusInfo>
+  boxEngineStart(): Promise<{ ok: boolean; error?: string }>
+  boxEngineKernelInstall(): Promise<{ ok: boolean; error?: string }>
   // fase rilascio (A8): l'aggiornamento (main process).
   // RP3 (fase rilascio di prova): lo stato porta il canale ('stable'|'beta')
   // e l'interruttore delle Impostazioni lo cambia (effetto immediato)

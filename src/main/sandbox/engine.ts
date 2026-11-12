@@ -228,8 +228,11 @@ export function sandboxEngineSetting(): SandboxEngineSetting {
 // MEMORIZZA (refreshActiveBoxEngine, chiamato dal boot del daemon e dalle RPC
 // del motore). Mai sondato → docker, il comportamento di oggi.
 
-import { dockerEngine as dockerEngineImpl } from './docker-engine'
+import { execFile } from 'node:child_process'
+import { release } from 'node:os'
+import { dockerEngine as dockerEngineImpl, dockerToolStatusInfo } from './docker-engine'
 import { appleContainerEngine as appleContainerEngineImpl } from './apple-container-engine'
+import { parseSystemStatus } from './apple-container-argv'
 
 /** I due motori (ri-esportati: i punti d'uso li prendono da qui). */
 export const dockerEngine = dockerEngineImpl
@@ -267,3 +270,71 @@ export function setCachedAutoEngine(id: BoxEngineId | null): void {
 
 /** La pagina ufficiale delle release di Apple container (BX1.4: la mostra la UI). */
 export const APPLE_CONTAINER_RELEASES_URL = 'https://github.com/apple/container/releases'
+
+// ---- la SONDA dei fatti del motore (BX4: la RPC box:engine-status) ----
+
+export interface CliRunResult {
+  stdout: string
+  stderr: string
+  exitCode: number | null
+}
+
+/** L'esecutore di produzione: execFile SENZA shell, con timeout. */
+export function defaultCliRunner(file: string, argv: string[], timeoutMs: number): Promise<CliRunResult> {
+  return new Promise((resolve) => {
+    execFile(file, argv, { timeout: timeoutMs, maxBuffer: 4_000_000 }, (err, stdout, stderr) => {
+      const e = err as (NodeJS.ErrnoException & { code?: number | string }) | null
+      const exit = typeof e?.code === 'number' ? e.code : err ? null : 0
+      resolve({ stdout: String(stdout ?? ''), stderr: String(stderr ?? ''), exitCode: exit })
+    })
+  })
+}
+
+/** Le dipendenze della sonda, sostituibili nei test (nessuno spawn). */
+export const engineProbeDeps: { runCli: typeof defaultCliRunner } = { runCli: defaultCliRunner }
+
+/**
+ * I FATTI della macchina per la scelta del motore (BX4): versione di macOS,
+ * CLI di Apple (installata? servizio attivo? kernel?) e Docker (risponde?).
+ * La CLI di Apple è quella del MOTORE (con SANDBOT_TEST_USER_DATA +
+ * SANDBOT_TEST_CONTAINER_CLI è la CLI finta dei test, BX5); Docker si guarda
+ * senza spawn (socket, come sempre).
+ */
+export async function probeBoxEngineFacts(): Promise<BoxEngineFacts> {
+  const cmd = appleContainerEngineImpl.command()
+  let containerInstalled = false
+  let containerServiceRunning = false
+  let containerKernelOk = false
+  const ver = await engineProbeDeps.runCli(cmd, ['--version'], 5_000).catch(() => null)
+  if (ver && ver.exitCode === 0) {
+    containerInstalled = true
+    const st = await engineProbeDeps.runCli(cmd, ['system', 'status'], 5_000).catch(() => null)
+    if (st && st.exitCode === 0) {
+      const parsed = parseSystemStatus(st.stdout)
+      containerServiceRunning = parsed.running
+      containerKernelOk = parsed.kernelOk
+    }
+  }
+  const docker = dockerToolStatusInfo()
+  return {
+    platform: process.platform,
+    arch: process.arch,
+    macOsMajor: process.platform === 'darwin' ? macOsMajorFromDarwin(release()) : 0,
+    containerInstalled,
+    containerServiceRunning,
+    containerKernelOk,
+    dockerInstalled: docker.installed,
+    dockerResponds: docker.running
+  }
+}
+
+/**
+ * La sonda completa e la MEMORIA del risultato per l'auto (BX1: i punti
+ * d'uso sono sincroni; qui si aggiorna la cache dopo il sondaggio).
+ */
+export async function refreshAutoEngine(): Promise<{ facts: BoxEngineFacts; chosen: BoxEngineId | null }> {
+  const facts = await probeBoxEngineFacts()
+  const chosen = selectBoxEngine(sandboxEngineSetting(), facts)
+  if (sandboxEngineSetting() === 'auto') setCachedAutoEngine(chosen)
+  return { facts, chosen }
+}

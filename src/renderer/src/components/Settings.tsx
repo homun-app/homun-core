@@ -42,8 +42,9 @@ import { SettingsPage } from './settings/SettingsPage'
 import { SettingsGroup } from './settings/SettingsGroup'
 import { SettingsRow } from './settings/SettingsRow'
 import { SettingsAdvanced } from './settings/SettingsAdvanced'
-// fase box-container (BX3): «Spazio su disco» in Generali
+// fase box-container (BX3/BX4): «Spazio su disco» e il motore in Generali
 import { DiskSpaceSection } from './settings/DiskSpaceSection'
+import { EngineSection } from './settings/EngineSection'
 
 /** Le sezioni con i nomi e le icone per la UI (I5.4). */
 const SECTIONS: Record<string, { label: MessageDescriptor; icon: LucideIcon }> = {
@@ -514,6 +515,9 @@ function GeneralTab() {
         </SettingsGroup>
         <WebSearchSection />
       </SettingsAdvanced>
+      {/* fase box-container (BX4): il motore del computer dei bot (Apple
+          container o Docker, o l'Automatico che sceglie) */}
+      <EngineSection />
       {/* fase box-container (BX3): quanto occupa ogni cosa, e l'azione per
           toglierla — l'ultima sezione di Generali, fuori da «Avanzate»
           perché lo spazio è una cosa di tutti i giorni */}

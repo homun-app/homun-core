@@ -243,6 +243,11 @@ const api: SandbotApi = {
   boxBoxFilesRemove: () => ipcRenderer.invoke('box:box-files-remove'),
   boxSpacePrune: () => ipcRenderer.invoke('box:space-prune'),
   memoryModelRemove: () => ipcRenderer.invoke('memory:model-remove'),
+  // fase box-container (BX4): il motore nelle Impostazioni
+  boxEngineStatus: () => ipcRenderer.invoke('box:engine-status'),
+  boxEngineSet: (engine) => ipcRenderer.invoke('box:engine-set', engine),
+  boxEngineStart: () => ipcRenderer.invoke('box:engine-start'),
+  boxEngineKernelInstall: () => ipcRenderer.invoke('box:engine-kernel-install'),
   // fase rilascio (A8): aggiornamento e rinnovo da Homun 2.
   // RP3 (fase rilascio di prova): il canale si cambia dall'interruttore delle
   // Impostazioni e ha effetto immediato (nessun riavvio)
