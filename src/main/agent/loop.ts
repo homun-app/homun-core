@@ -25,6 +25,7 @@
 // Ogni turno si chiude con un evento meta.turnEnd ∈
 // FINISHED | STOPPED | SUPERSEDED | AWAITING_USER.
 import { randomUUID, createHash } from 'node:crypto'
+import { TurnHeldForModel } from './turn-held'
 import { getAgent, listAgents, listRoutines, getEntries, updateAgent, appendEntry, updateEntryContent, updateEntryMeta, updateEntryKindRole, getSetting, holdOutboxEntry, db, getTask, createTask, updateTask, openTasksOf, MAX_OPEN_TASKS, createAgent, subagentRefusal, addGrant, listGrants, recordModelUsage, type Grant, type AppendEntry } from '../store/db'
 // R2 (fase app — ritocchi): l'esito degli invii automatici si ripulisce come gli errori Composio
 import { redactComposioSecrets, composioActionOfToolName } from '../connectors/composio-actions'
@@ -512,7 +513,11 @@ export interface RunTurnOptions {
    * il turno (payload.entryId del job). Il messaggio NON viene riscritto e il
    * turno interrotto viene riparato dal transcript prima di chiamare il modello.
    */
-  resume?: { entryId: number }
+  resume?: {
+    entryId: number
+    /** OA5 (fase onboarding-a): ripresa di un job trattenuto per il modello — niente notice di ripresa */
+    quiet?: boolean
+  }
   /** Primo tentativo: chiamato con l'id dell'entry utente appena aggiunta, PRIMA del modello. */
   onTurnEntry?: (entryId: number) => void
   /** Fase 3: la risposta a un widget ask_user (meta.respondedTo sul messaggio utente). */
@@ -890,6 +895,42 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     listProviders().map((p) => ({ id: p.id, enabled: p.enabled }))
   )
   if (!resolved) {
+    // OA5 (fase onboarding-a): il messaggio di CHAT senza modello NON si
+    // perde — resta nel transcript come messaggio dell'utente, sotto c'è la
+    // riga di sistema «Per risponderti mi serve un modello» col bottone che
+    // apre il passo model della guida, e il turno si TRATTIENE: il job torna
+    // in coda e parte da solo una volta sola appena un modello valido è
+    // salvato (TurnHeldForModel → worker → holdJobForModel).
+    // I turni NON di chat (routine, task, gruppi, figli, kickstart…) restano
+    // come prima: notice di configurazione e via.
+    const heldChatTurn =
+      source === 'user' &&
+      opts.initiator === undefined &&
+      opts.taskId === undefined &&
+      opts.groupTurn === undefined &&
+      opts.subagent === undefined &&
+      opts.agentMessage === undefined
+    if (heldChatTurn) {
+      if (!opts.resume) {
+        // il messaggio utente entra ADESSO (prima volta): come un turno vero
+        // (niente taskId/groupId: qui il turno è di chat privata per costruzione)
+        const entry = appendEntry({
+          agentId, kind: 'message', role: 'user', content: userText,
+          meta: { ...(opts.extraMeta ?? {}), ...(images?.length ? { images: images.length } : {}) }
+        })
+        emitLastEntry(agentId, emit)
+        opts.onTurnEntry?.(entry.id)
+      }
+      // la riga «serve un modello» compare UNA volta: mai due sulla stessa attesa
+      const hasWaitingRow = getEntries(agentId).some(
+        (e) => e.kind === 'notice' && (e.meta as { ui?: { id?: string } } | null)?.ui?.id === 'notice.needModel'
+      )
+      if (!hasWaitingRow) {
+        appendEntry(uiSystemEntry(agentId, 'notice', ui(UI.onboardingNeedModel)))
+        emitLastEntry(agentId, emit)
+      }
+      throw new TurnHeldForModel()
+    }
     appendEntry(uiSystemEntry(agentId, 'notice', ui(UI.configureProviderFirst)))
     emitLastEntry(agentId, emit)
     return
@@ -1358,8 +1399,11 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         })
         emit({ type: 'entries', agentId, entries: [res] })
       }
-      add({ ...uiSystemEntry(agentId, 'notice', ui(UI.resume)) })
-      emitLastEntry(agentId, emit)
+      // OA5: la ripresa di un messaggio trattenuto per il modello è QUIET
+      if (!opts.resume.quiet) {
+        add({ ...uiSystemEntry(agentId, 'notice', ui(UI.resume)) })
+        emitLastEntry(agentId, emit)
+      }
     } else {
       const entry = add({
         agentId, kind: 'message', role: 'user', content: userText,

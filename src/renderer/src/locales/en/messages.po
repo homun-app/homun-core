@@ -4887,6 +4887,11 @@ msgstr "by source"
 msgid "Per questo turno"
 msgstr "For this turn"
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "notice.needModel"
+msgstr "I need a model to answer you."
+
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Per sviluppatori"
 msgstr "For developers"

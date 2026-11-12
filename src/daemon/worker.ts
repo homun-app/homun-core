@@ -8,6 +8,8 @@ import {
   recoverExpiredLeases, claimDueJobs, renewLease, completeJob, failJob, type Job
 } from '../main/store/jobs'
 import { getSetting } from '../main/store/db'
+import { holdJobForModel } from '../main/store/jobs'
+import { TurnHeldForModel } from '../main/agent/turn-held'
 import { DEFAULT_SUBAGENT_CONCURRENCY } from '../main/store/subagents'
 import type { SandbotEvent } from '../shared/types'
 
@@ -110,6 +112,13 @@ export class JobWorker {
       await this.deps.runJob(job, emitWithBeat)
       completeJob(this.db, job.id)
     } catch (e) {
+      if (e instanceof TurnHeldForModel) {
+        // OA5 (fase onboarding-a): il turno di chat aspetta un modello — il
+        // messaggio è già nel transcript; il job si TRATTIENE e riparte da
+        // solo quando il modello arriva (releaseJobsHeldForModel)
+        holdJobForModel(this.db, job.id, this.deps.now())
+        return
+      }
       const error = e instanceof Error ? e.message : String(e)
       const outcome = failJob(this.db, job, this.deps.now(), error)
       this.deps.onError?.(job, e, outcome)

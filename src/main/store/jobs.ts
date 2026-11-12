@@ -239,6 +239,43 @@ export function failJob(db: DatabaseSync, job: Job, now: number, error: string):
 }
 
 /** Azzera i job di un agente eliminato (né eseguibili né recuperabili). */
+/**
+ * OA5 (fase onboarding-a): quanto a lungo il job che aspetta un modello sta
+ * in coda senza che nessun worker lo prenda (un anno: si sveglia SOLO con
+ * releaseJobsHeldForModel, mai per scadenza).
+ */
+export const HELD_FOR_MODEL_MS = 365 * 24 * 3600 * 1000
+
+/**
+ * OA5: il job torna in coda TRATTENUTO (run_at lontanissimo, lease via,
+ * payload.waitingModel): il messaggio utente è già nel transcript, il turno
+ * riprenderà da lì (payload.entryId, resume quiet) appena il modello c'è.
+ */
+export function holdJobForModel(db: DatabaseSync, jobId: number, now: number): void {
+  const job = getJobById(db, jobId)
+  if (!job) return
+  db.prepare('UPDATE jobs SET status = ?, lease_until = NULL, run_at = ? WHERE id = ?')
+    .run('queued', now + HELD_FOR_MODEL_MS, jobId)
+  db.prepare('UPDATE jobs SET payload_json = ? WHERE id = ?')
+    .run(JSON.stringify({ ...job.payload, waitingModel: true, heldForModel: true }), jobId)
+}
+
+/**
+ * OA5: un modello valido è stato salvato — i job trattenuti tornano dovuti
+ * ADESSO (il worker li prende al prossimo tick). heldForModel resta nel
+ * payload: la ripresa del turno è QUIET. Torna quanti ne ha rilanciati:
+ * gli altri job in coda non si toccano.
+ */
+export function releaseJobsHeldForModel(db: DatabaseSync, now: number): number {
+  const held = listJobs(db).filter((j) => j.status === 'queued' && j.kind === 'user-message' && j.payload.waitingModel === true)
+  for (const j of held) {
+    const payload = { ...j.payload }
+    delete payload.waitingModel
+    db.prepare('UPDATE jobs SET run_at = ?, payload_json = ? WHERE id = ?').run(now, JSON.stringify(payload), j.id)
+  }
+  return held.length
+}
+
 export function cancelAgentJobs(db: DatabaseSync, agentId: string): void {
   db.prepare("DELETE FROM jobs WHERE agent_id = ? AND status IN ('queued','leased')").run(agentId)
 }

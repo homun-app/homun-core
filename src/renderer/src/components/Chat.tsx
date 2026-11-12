@@ -1009,6 +1009,9 @@ function EntryRow({ entry, repeat = 1, showReasoning, debugSteps }: { entry: Tra
  */
 function NoticeRow({ entry, repeat = 1 }: { entry: TranscriptEntry; repeat?: number }) {
   const { t } = useLingui()
+  // OA5 (fase onboarding-a): la riga sotto un messaggio rimasto in attesa —
+  // neutra, col bottone che apre il passo model della guida
+  const needModel = (entry.meta?.ui as { id?: string } | undefined)?.id === 'notice.needModel'
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
   const setSettingsTab = useStore((s) => s.setSettingsTab)
   const providers = useStore((s) => s.providers)
@@ -1021,6 +1024,29 @@ function NoticeRow({ entry, repeat = 1 }: { entry: TranscriptEntry; repeat?: num
   // un modello» ha la via d'uscita — stesso bottone «Scegli un modello»
   const withAction = accessibility || uiId === 'notice.modelError' || uiId === 'notice.modelNotResponding' || uiId === 'notice.configureProviderFirst'
   const fallback = uiId === 'notice.modelFallback' || uiId === 'notice.modelFallbackRoute' || uiId === 'notice.modelRouteCooled'
+  if (needModel) {
+    return (
+      <div className="flex items-center gap-3 rounded-[14px] bg-muted/70 px-4 py-2.5 text-sm text-foreground">
+        <span className="min-w-0 flex-1">
+          {uiTextOf(entry)}
+          {repeat > 1 && <RepeatMark repeat={repeat} />}
+        </span>
+        <button
+          className="shrink-0 rounded-full bg-card px-3 py-1.5 text-xs text-foreground transition hover:ring-1 hover:ring-foreground/20"
+          data-testid="need-model-choose"
+          onClick={() => {
+            // riapre la guida al passo model (se era saltato); se non si può
+            // (guida finita e modello perso dopo), le Impostazioni dei modelli
+            void api.onboardingReopen('model').then((r) => {
+              if (!r) { setSettingsTab('modelli'); setSettingsOpen(true) }
+            }).catch(() => { setSettingsTab('modelli'); setSettingsOpen(true) })
+          }}
+        >
+          <Trans>Scegli un modello</Trans>
+        </button>
+      </div>
+    )
+  }
   if (!withAction && !fallback) {
     // R1 (fase app — ritocchi): le notice non sono tutte errori — info grigia
     // come le righe di sistema, warning ambra (token --waiting ≥ 4,5:1), solo

@@ -24,7 +24,7 @@ import {
   listAgents, listRoutines, updateRoutine, appendEntry, updateEntryMeta, updateAgent, listProviders, createAgent,
   setAgentStopperForDaemon as store_setAgentStopper
 } from '../main/store/db'
-import { requeueAllLeased } from '../main/store/jobs'
+import { requeueAllLeased, releaseJobsHeldForModel } from '../main/store/jobs'
 import { acquireDaemonLock, releaseDaemonLock, writeDaemonInfo, removeDaemonInfo } from './daemon-files'
 import { startWsServer, generateToken } from './ws-server'
 import { buildApiMethods, notifyComposioAppConnected } from './api'
@@ -912,6 +912,13 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
   // fuori dalla corsa); OA2/OA3: la guida riprende dallo stesso passo e il
   // passo model si chiude da solo se il modello c'è già
   void onboarding.start().catch((e) => console.error('[sandbotd] avvio onboarding:', e))
+  // OA5 (fase onboarding-a): messaggi rimasti in attesa di un modello che nel
+  // frattempo c'è già (per esempio salvato mentre l'app era chiusa): ripartono
+  const bootMain = getSetting<import('../shared/types').MainModel | null>('models.main', null)
+  if (bootMain && listProviders().some((p) => p.id === bootMain.providerId && p.enabled)) {
+    const released = releaseJobsHeldForModel(database, Date.now())
+    if (released > 0) console.log(`[sandbotd] ${released} messaggi in attesa ripartono: il modello c'è`)
+  }
 
   // autodiscovery dei provider locali silenziosa al boot (come faceva l'app)
   void import('../main/agent/providers').then((p) => p.discoverProviders().catch(() => undefined))

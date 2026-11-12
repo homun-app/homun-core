@@ -65,6 +65,7 @@ import type { ConnectorsManager } from '../main/connectors'
 import type { Presence } from './presence'
 import type { Onboarding } from './onboarding'
 import { answerableOnboardingFocus } from './onboarding-focus'
+import { releaseJobsHeldForModel } from '../main/store/jobs'
 import type { OnboardingStepId } from '../shared/types'
 import type { SandbotEvent, SendMessagePayload, McpServerInfo, McpServerSecret, RoutineInfo, RoutineTrigger, AutoReviewSettings, ModelInfo, ModelPriceMap, ThinkingSetting, MainModel, ProviderKind, ReadingPageMeta } from '../shared/types'
 // fase 18b (K3): la lettura /api/show condivisa col check dei tool e col loop
@@ -243,8 +244,10 @@ export function buildApiMethods(
     lm.onLocalModelReady(() => {
       void ensureLocalModelProvider()
       // OA3 (fase onboarding-a): il modello integrato pronto chiude il passo
-      // model della guida da solo
+      // model della guida da solo. OA5: e i messaggi in attesa ripartono
       opts.onboarding?.modelBecameReady()
+      const releasedLm = releaseJobsHeldForModel(db(), Date.now())
+      if (releasedLm > 0) console.log(`[sandbotd] ${releasedLm} messaggi in attesa ripartono col modello integrato`)
     })
   }).catch(() => undefined) // senza il modulo locale il demone parte lo stesso
 
@@ -2048,8 +2051,15 @@ export function buildApiMethods(
         setReviewer: (cfg) => store.setSetting('autoReview', cfg)
       })
       // OA3 (fase onboarding-a): se la guida è al passo model, il passo si
-      // chiude da solo — il provider col modello valido è appena arrivato
-      opts.onboarding?.modelBecameReady()
+      // chiude da solo — il provider col modello valido è appena arrivato.
+      // OA5: e i messaggi rimasti in attesa partono, una volta sola
+      if (opts.onboarding?.modelBecameReady() || store.getSetting<import('../shared/types').MainModel | null>('models.main', null)) {
+        const released = releaseJobsHeldForModel(db(), Date.now())
+        if (released > 0) {
+          console.log(`[sandbotd] ${released} messaggi in attesa ripartono col nuovo modello`)
+          worker.poke()
+        }
+      }
     },
     'providers:delete': ([id]) => {
       // fase 16c (C3.3): se era il provider del modello principale, models.main si azzera
@@ -2263,7 +2273,20 @@ export function buildApiMethods(
       return { ok: true }
     },
     'settings:get': ([key, fallback]) => store.getSetting(key as string, fallback),
-    'settings:set': ([key, value]) => store.setSetting(key as string, value),
+    'settings:set': ([key, value]) => {
+      store.setSetting(key as string, value)
+      // OA3/OA5 (fase onboarding-a): il modello principale scelto (la UI lo
+      // scrive da qui) chiude il passo model della guida e fa ripartire, una
+      // volta sola, i messaggi rimasti in attesa
+      if (key === 'models.main' && value) {
+        opts.onboarding?.modelBecameReady()
+        const released = releaseJobsHeldForModel(db(), Date.now())
+        if (released > 0) {
+          console.log(`[sandbotd] ${released} messaggi in attesa ripartono col modello scelto`)
+          worker.poke()
+        }
+      }
+    },
 
     // ---- fase rilascio (A7): docker c'è? si è avviato? ----
     // Lo stato del tool per la UI: installed = trovato su disco (PATH o i

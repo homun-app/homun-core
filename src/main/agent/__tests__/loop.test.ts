@@ -3,6 +3,7 @@
 // sandbox e il vault sono stub: nessun Electron, nessun processo reale.
 import { describe, expect, it, beforeAll, beforeEach, afterEach, afterAll, vi } from 'vitest'
 import type { TranscriptEntry, Agent, PermissionsConfig } from '../../../shared/types'
+import { TurnHeldForModel } from '../turn-held'
 
 // ---- stato condiviso coi mock (hoisted: disponibile dentro le factory) ----
 const h = vi.hoisted(() => {
@@ -3255,16 +3256,28 @@ describe('fase 10 (residuo 0c): al massimo 3 send consegnati per turno', () => {
   })
 })
 
-describe('fase 10 (residuo 0e): la notice quando manca il modello', () => {
-  it('senza provider resta la vecchia notice di configurazione', async () => {
+describe('OA5 (fase onboarding-a): il primo messaggio senza modello non si perde', () => {
+  it('messaggio di chat senza modello: RESTA nel transcript, la riga «Per risponderti mi serve un modello» e il turno si trattiene', async () => {
     h.db.agents.set(AGENT, { ...h.db.agents.get(AGENT)!, providerId: null, model: null })
     h.db.providers = []
-    await runTurn(AGENT, 'ciao', emit)
+    await expect(runTurn(AGENT, 'ciao, ci sei?', emit)).rejects.toBeInstanceOf(TurnHeldForModel)
+    const user = h.db.entries.find((e) => e.kind === 'message' && e.role === 'user')
+    expect(user?.content).toContain('ciao, ci sei?')
+    const notice = h.db.entries.find((e) => e.kind === 'notice')
+    expect(notice?.content).toContain('Per risponderti mi serve un modello')
+    expect(notice?.content).not.toContain('Configura prima un provider')
+  })
+
+  it('un turno NON di chat (routine) senza modello: resta la notice di configurazione, NON si trattiene', async () => {
+    h.db.agents.set(AGENT, { ...h.db.agents.get(AGENT)!, providerId: null, model: null })
+    h.db.providers = []
+    await runTurn(AGENT, 'routine', emit, undefined, { source: 'routine', initiator: 'ROUTINE' })
+    expect(h.db.entries.some((e) => e.kind === 'message' && e.role === 'user')).toBe(false)
     const notice = h.db.entries.find((e) => e.kind === 'notice')
     expect(notice?.content).toContain('Configura prima un provider')
   })
-
 })
+
 
 // ---- fase 10: team e gruppi ----
 
@@ -6219,14 +6232,14 @@ describe('R3.6 — il modello proprio su un provider rimosso segue il principale
     expect(h.db.entries.filter((e) => e.kind === 'notice' && e.content.includes('non è più collegato'))).toHaveLength(2)
   })
 
-  it('senza models.main il modello su provider rimosso dà la notice di configurazione (come prima)', async () => {
+  it('senza models.main il modello su provider rimosso: il messaggio di chat resta e il turno si trattiene (OA5)', async () => {
     h.db.providers = []
     h.db.agents.get(AGENT)!.providerId = 'andato'
-    await runTurn(AGENT, 'ciao', emit)
-    const notice = h.db.entries.find((e) => e.kind === 'notice')
-    expect(notice?.content).toContain('Configura prima un provider')
+    await expect(runTurn(AGENT, 'ciao', emit)).rejects.toBeInstanceOf(TurnHeldForModel)
+    expect(h.db.entries.some((e) => e.kind === 'message' && e.role === 'user')).toBe(true)
     expect(h.llm.calls).toHaveLength(0)
   })
+
 })
 
 // ---- M3 (fase 0.3.1001): una routine chiesta dall'utente nasce con UN solo consenso ----

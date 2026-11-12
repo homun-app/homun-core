@@ -45,6 +45,8 @@ export const NOTICE_SEVERITY: Readonly<Record<string, NoticeSeverity>> = {
   'notice.modelError': 'error',
   'notice.modelNotResponding': 'error',
   'notice.configureProviderFirst': 'error',
+  // OA5 (fase onboarding-a): la riga dell'attesa del modello — informazione, non errore
+  'notice.needModel': 'info',
   'notice.modelEmpty': 'error',
   'notice.toolLoop': 'error',
   'rpc.draftSendError': 'error',

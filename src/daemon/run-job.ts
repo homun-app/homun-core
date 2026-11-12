@@ -28,8 +28,13 @@ export function routineOpening(title: string, prompt: string): string {
 /** Runner dei job per il worker (runTurn iniettabile nei test). */
 export function makeJobRunner(db: DatabaseSync, runTurnFn: RunTurnFn = runTurn) {
   return async (job: Job, emit: Emitter): Promise<void> => {
-    // entryId presente → tentativo successivo: ripresa dal transcript
-    const opts: RunTurnOptions = typeof job.payload.entryId === 'number' ? { resume: { entryId: job.payload.entryId } } : {}
+    // entryId presente → tentativo successivo: ripresa dal transcript.
+    // OA5 (fase onboarding-a): il messaggio di un job trattenuto per il
+    // modello è già nel transcript e la riga «serve un modello» pure: la
+    // ripresa è QUIET (niente notice di ripresa)
+    const opts: RunTurnOptions = typeof job.payload.entryId === 'number'
+      ? { resume: { entryId: job.payload.entryId, ...(job.payload.heldForModel ? { quiet: true } : {}) } }
+      : {}
     // al primo tentativo l'id dell'entry utente finisce nel payload del job
     const onTurnEntry = (entryId: number): void => setJobEntryId(db, job.id, entryId)
     if (job.kind === 'user-message') {

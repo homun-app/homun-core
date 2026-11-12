@@ -588,6 +588,12 @@ export const UI = {
   chartNotAvailable: msg({ id: 'chart.notAvailable', message: 'grafico non disponibile' }),
   chartMetaLine: msg({ id: 'chart.metaLine', message: 'di {author} · versione {version} · esportato da Homun' }),
 
+  // ---- OA5 (fase onboarding-a): la riga sotto un messaggio senza modello ----
+  onboardingNeedModel: msg({
+    id: 'notice.needModel',
+    message: 'Per risponderti mi serve un modello.'
+  }),
+
   // ---- OA4 (fase onboarding-a): il focus in chat, deterministico e zero token ----
   onboardingFocusGreeting: msg({
     id: 'onboarding.focusGreeting',
