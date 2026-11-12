@@ -64,7 +64,7 @@ import { setMasterKeyStorage, setMasterKeySealedDataProbe, safeStorageBackendFor
 import { daemonHasSealedData } from './sealed-data'
 import type { SafeStorageLike } from '../main/vault'
 // fase rilascio (A7): docker si trova anche fuori dal Terminale
-import { resolveTool, dockerChildEnv } from '../main/tool-paths'
+import { activeBoxEngine } from '../main/sandbox/engine'
 // fase memoria-engramma (M1): il motore Engramma vive solo qui, nel demone
 import { openMemoryEngine, closeMemoryEngine } from '../main/memory/engine'
 
@@ -553,14 +553,16 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
     toolsOfServer: async (id) => mcpServers.toolsOfServer(id),
     openExternal: (url) => server.callUi('host.openExternal', [url]).then(() => undefined),
     hasUi: () => server.hasUi(),
-    dockerMode: () => sandboxMode() === 'docker',
+    // fase box-container (BX1): boxMode — il computer dei bot, qualunque motore
+    dockerMode: () => sandboxMode() === 'box',
     dataDir,
     // fase rilascio (A7): il percorso di docker risolto (PATH minimo di launchd)
     runDocker: (argv) =>
       new Promise((res, rej) => {
-        const child = spawn(resolveTool('docker'), argv, {
+        const engine = activeBoxEngine()
+        const child = spawn(engine.command(), argv, {
           stdio: ['ignore', 'pipe', 'pipe'],
-          env: dockerChildEnv(process.env)
+          env: engine.childEnv(process.env)
         })
         let stdout = ''
         let stderr = ''

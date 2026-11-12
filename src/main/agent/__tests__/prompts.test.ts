@@ -6,7 +6,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
 // il prompt base dipende dalla modalità sandbox solo per la sezione computer
-const mode = vi.hoisted(() => ({ v: 'host' as 'host' | 'docker' }))
+const mode = vi.hoisted(() => ({ v: 'host' as 'host' | 'box' }))
 // fase 11b: la sezione browser dipende dalla disponibilità del browser
 const browserOk = vi.hoisted(() => ({ v: false }))
 vi.mock('../../sandbox', () => ({ sandboxMode: () => mode.v, browserSandboxOk: () => browserOk.v }))
@@ -61,9 +61,9 @@ describe('fase 9 (punto 2): system prompt componibile', () => {
     expect(identitySection(senza, { main: true })).not.toContain('posta in ordine')
   })
 
-  it('computer: host vs docker, CONDIVISO tra i bot, /workspace comune, credenziali opache', () => {
+  it('computer: host vs box, CONDIVISO tra i bot, /workspace comune, credenziali opache', () => {
     expect(computerSection()).toContain('persistent working folder')
-    mode.v = 'docker'
+    mode.v = 'box'
     expect(computerSection()).toContain('persistent Linux container')
     mode.v = 'host'
     // fase 11 (punto 1): il computer è condiviso, /workspace è lo spazio comune

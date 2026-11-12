@@ -20,7 +20,7 @@
 // con `node <path>` (verifica d'integrazione, non esiste in produzione).
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 // fase rilascio (A7): docker fuori dal PATH del Terminale
-import { resolveTool } from '../tool-paths'
+import { activeBoxEngine } from '../sandbox/engine'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import type { ToolDef } from './llm'
 import { checkUrl } from './web-guard'
@@ -32,11 +32,8 @@ import {
 // fase 19a (correzioni 3, M5): la nota sul form di login nel result del browser
 import { findLoginForOrigin, loginFormNote } from './credentials'
 import {
-  dockerBrowserMcpArgv, BOX_CONTAINER, BROWSER_MOUNT, BROWSER_USER,
-  BROWSER_IDLE_MS, BROWSERS_PER_BOX_MAX, boxHomePath, browserPidFile, browserStateDir,
-  dockerBrowserReadFileArgv, dockerBrowserWritableArgv, dockerBrowserOldProfileRmArgv,
-  dockerBrowserReadB64Argv, dockerBrowserWriteB64Argv, dockerBrowserRmFileArgv,
-  dockerKillGroupArgv
+  BOX_CONTAINER, BROWSER_MOUNT, BROWSER_USER,
+  BROWSER_IDLE_MS, BROWSERS_PER_BOX_MAX, boxHomePath, browserPidFile, browserStateDir
 } from '../sandbox/docker-argv'
 import {
   sandboxMode, browserSandboxOk, ensureBoxContainer, ensureBotHome, runDockerRaw, runDockerArgv,
@@ -297,25 +294,25 @@ function armCloseTimer(agentId: string, s: BrowserSession): void {
 async function killOrphanByPidFile(pidFileContent: string | null): Promise<void> {
   const parsed = parseShellPgid(pidFileContent)
   if (!parsed.ok) return
-  await runDockerRaw(dockerKillGroupArgv(BOX_CONTAINER, parsed.pgid, 'TERM', BROWSER_USER), { timeoutMs: 15_000 }).catch(() => undefined)
+  await runDockerRaw(activeBoxEngine().argv.killGroup(BOX_CONTAINER, parsed.pgid, 'TERM', BROWSER_USER), { timeoutMs: 15_000 }).catch(() => undefined)
 }
 
 export async function killBrowserOrphan(agentId: string): Promise<void> {
-  if (sandboxMode() !== 'docker') return
+  if (sandboxMode() !== 'box') return
   // fase 12 (punto 1): il pid file di un FIGLIO sta nella cartella del padre
   // e porta il suo id nel nome
   const owner = boxOwnerOf(agentId)
   const child = isSubagent(agentId)
   const pidFile = browserPidFile(owner, child ? agentId : undefined)
   // best effort: senza container o senza pid file non c'è nessun orfano
-  const r = await runDockerRaw(dockerBrowserReadFileArgv(BOX_CONTAINER, pidFile), { timeoutMs: 15_000 }).catch(() => null)
+  const r = await runDockerRaw(activeBoxEngine().argv.browserReadFile(BOX_CONTAINER, pidFile), { timeoutMs: 15_000 }).catch(() => null)
   if (!r || r.exitCode !== 0) return
   await killOrphanByPidFile(r.stdout)
 }
 
 /** Al boot del daemon: kill degli orfani di TUTTI i bot (solo docker). */
 export async function killBrowserOrphans(agentIds: ReadonlyArray<string>): Promise<void> {
-  if (sandboxMode() !== 'docker') return
+  if (sandboxMode() !== 'box') return
   for (const id of agentIds) await killBrowserOrphan(id).catch(() => undefined)
 }
 
@@ -334,7 +331,7 @@ async function startBrowserSession(agentId: string): Promise<BrowserSession> {
   }
   const proxyPort = await ensureBrowserProxy()
   // fase rilascio (A7): il PERCORSO risolto, non il nome semplice
-  let command = resolveTool('docker')
+  let command = activeBoxEngine().command()
   let args: string[]
   let env: Record<string, string> | undefined
   const fakeMcp = fakeBrowserMcpPath()
@@ -363,12 +360,12 @@ async function startBrowserSession(agentId: string): Promise<BrowserSession> {
     // un rm di una cartella assente non costa nulla
     const child = isSubagent(agentId)
     const owner = boxOwnerOf(agentId)
-    const w = await runDockerRaw(dockerBrowserWritableArgv(BOX_CONTAINER), { timeoutMs: 15_000 })
+    const w = await runDockerRaw(activeBoxEngine().argv.browserWritable(BOX_CONTAINER), { timeoutMs: 15_000 })
     if (w.exitCode !== 0) {
       throw new Error(`the browser volume is not owned by ${BROWSER_USER} and 0700 (test -O/-w /browser failed as 1001): the browser state is not secure, the browser does not start. The volumes were not touched.`)
     }
     if (!child) {
-      const rm = await runDockerRaw(dockerBrowserOldProfileRmArgv(BOX_CONTAINER, owner), { timeoutMs: 30_000 })
+      const rm = await runDockerRaw(activeBoxEngine().argv.browserOldProfileRm(BOX_CONTAINER, owner), { timeoutMs: 30_000 })
       if (rm.exitCode !== 0) {
         throw new Error(`removal of the old browser profile failed: ${rm.stderr || `exit ${rm.exitCode}`}`)
       }
@@ -376,7 +373,7 @@ async function startBrowserSession(agentId: string): Promise<BrowserSession> {
     // fase 12 (punto 1) + P2: il browser di un FIGLIO ha istanza e pid file
     // SUOI (--isolated, output- e pid col suo id) ma gira ANCH'ESSO come 1001
     // nello stato del PADRE (/browser/<owner>)
-    args = dockerBrowserMcpArgv(agentId, proxyPort, { child, owner })
+    args = activeBoxEngine().argv.browserMcp(agentId, proxyPort, { child, owner })
   }
   const client = new Client({ name: 'sandbot', version: '0.1.0' })
   await client.connect(new StdioClientTransport(env ? { command, args, env } : { command, args }))
@@ -803,13 +800,13 @@ export async function callBrowserTool(agentId: string, tool: string, input: Reco
  */
 export async function copyBrowserScreenshot(owner: string, name: string, dest: string): Promise<string | null> {
   const src = `${browserStateDir(owner)}/${name}`
-  const read = await runDockerArgv(dockerBrowserReadB64Argv(BOX_CONTAINER, src), { timeoutMs: 30_000 })
+  const read = await runDockerArgv(activeBoxEngine().argv.browserReadB64(BOX_CONTAINER, src), { timeoutMs: 30_000 })
   if (read.exitCode !== 0) return `failed to read the screenshot in the browser volume: ${read.stderr || `exit ${read.exitCode}`}`
   // base64 troncato dal tetto dell'output = PNG corrotto: meglio fermarsi
   if (read.trimmed) return 'screenshot too large to copy (read truncated): try again with a simpler page'
-  const write = await runDockerArgv(dockerBrowserWriteB64Argv(BOX_CONTAINER, dest), { timeoutMs: 30_000, input: read.stdout })
+  const write = await runDockerArgv(activeBoxEngine().argv.browserWriteB64(BOX_CONTAINER, dest), { timeoutMs: 30_000, input: read.stdout })
   if (write.exitCode !== 0) return `failed to write the screenshot in the bot's home: ${write.stderr || `exit ${write.exitCode}`}`
-  const rm = await runDockerArgv(dockerBrowserRmFileArgv(BOX_CONTAINER, src), { timeoutMs: 30_000 })
+  const rm = await runDockerArgv(activeBoxEngine().argv.browserRmFile(BOX_CONTAINER, src), { timeoutMs: 30_000 })
   if (rm.exitCode !== 0) return `failed to delete the original in the browser state: ${rm.stderr || `exit ${rm.exitCode}`}`
   return null
 }

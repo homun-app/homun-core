@@ -21,7 +21,7 @@ process.env.SANDBOT_TEST_FAKE_TERMINAL = '1'
 const dockerCalls = vi.hoisted(() => ({ argvs: [] as string[][] }))
 vi.mock('../../main/sandbox', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  sandboxMode: () => 'docker',
+  sandboxMode: () => 'box',
   boxOwnerOf: (id: string) => id,
   ensureBoxContainer: async () => undefined,
   ensureBotHome: async () => undefined,

@@ -17,14 +17,14 @@
 // test non dipendono da Docker; i processi figlio in host sono veri ma
 // innocui (echo/sleep su directory temporanea).
 import { spawn } from 'node:child_process'
-// fase rilascio (A7): docker fuori dal PATH del Terminale
-import { resolveTool, dockerChildEnv } from '../tool-paths'
+// fase box-container (BX1): il MOTORE del box dà comando e env dei figli
+import { activeBoxEngine } from '../sandbox/engine'
 import { randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
 import { db as dbFn } from '../store/db'
 import { createShellJob, getShellJob, updateShellJob, runningShellJobsOf, runningShellJobsAll, SHELLS_PER_AGENT_MAX, SHELLS_PER_BOX_MAX, SHELL_MAX_DURATION_MS, type ShellJob } from '../store/shell-jobs'
 import { sandboxMode, boxDir, boxOwnerOf, readFileInBox, ensureBoxContainer, ensureBotHome, execCommand, capOutput } from '../sandbox'
-import { dockerExecBackgroundArgv, dockerKillGroupArgv, dockerClientEnv, DOCKER_BG_WRAPPER_SH, BOX_CONTAINER, boxHomePath } from '../sandbox/docker-argv'
+import { dockerClientEnv, DOCKER_BG_WRAPPER_SH, BOX_CONTAINER, boxHomePath } from '../sandbox/docker-argv'
 import { formatShellDone } from '../../shared/agent-message'
 import { redactSecrets } from './secrets'
 // fase 19b (T4): ogni cambio di stato di shell_jobs spinge l'evento
@@ -176,7 +176,8 @@ async function dockerArgvExit(argv: string[]): Promise<number | null> {
 async function dockerArgvRun(argv: string[], env?: Record<string, string>): Promise<{ exitCode: number | null; stderr: string }> {
   const { spawn: sp } = await import('node:child_process')
   return new Promise((resolve) => {
-    const p = sp(resolveTool('docker'), argv, { env: dockerChildEnv(env ? { ...process.env, ...env } : process.env), stdio: ['ignore', 'ignore', 'pipe'] })
+    const engine = activeBoxEngine()
+    const p = sp(engine.command(), argv, { env: engine.childEnv(env ? { ...process.env, ...env } : process.env), stdio: ['ignore', 'ignore', 'pipe'] })
     let err = ''
     p.stderr?.on('data', (d: Buffer) => {
       if (err.length < 100_000) err += d.toString()
@@ -198,19 +199,19 @@ function defaultTerminate(deps: ShellHostDeps): (agentId: string, job: ShellJob)
   const sleep = deps.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)))
   return async (agentId, job) => {
     const parsed = parseShellPgid(await deps.readBoxFile?.(agentId, backgroundShellPaths(job.id).pid) ?? null)
-    if (job.mode === 'docker') {
+    if (job.mode === 'box') {
       if (!parsed.ok) {
         // nessun kill con un pgid a caso: il motivo resta nel log del daemon
         console.warn(`[shells] ${job.id}: ${parsed.reason}`)
         return
       }
-      await dockerArgvExit(dockerKillGroupArgv(BOX_CONTAINER, parsed.pgid, 'TERM'))
+      await dockerArgvExit(activeBoxEngine().argv.killGroup(BOX_CONTAINER, parsed.pgid, 'TERM'))
       for (let i = 0; i < 10; i++) {
         await sleep(500)
         // segnale 0 = sola esistenza del gruppo (rc != 0, docker incluso, = morto)
-        if (await dockerArgvExit(dockerKillGroupArgv(BOX_CONTAINER, parsed.pgid, '0')) !== 0) return
+        if (await dockerArgvExit(activeBoxEngine().argv.killGroup(BOX_CONTAINER, parsed.pgid, '0')) !== 0) return
       }
-      await dockerArgvExit(dockerKillGroupArgv(BOX_CONTAINER, parsed.pgid, 'KILL'))
+      await dockerArgvExit(activeBoxEngine().argv.killGroup(BOX_CONTAINER, parsed.pgid, 'KILL'))
       return
     }
     const pgid = parsed.ok ? parsed.pgid : job.pid
@@ -239,7 +240,7 @@ export async function startBackgroundShell(
   }
   const id = `sh-${randomUUID().slice(0, 12)}`
   const paths = backgroundShellPaths(id)
-  const mode = sandboxMode() === 'docker' ? 'docker' : 'host'
+  const mode = sandboxMode() === 'box' ? 'box' : 'host'
   const launch = deps.launch ?? defaultShellLaunch(mode)
   const started = await launch(agentId, rawCommand, env, paths)
   if (!started.ok) {
@@ -261,9 +262,9 @@ export async function startBackgroundShell(
  * figlio detached con /bin/sh, docker è `exec -d` di cui si attende l'exit
  * code (H2: gli errori di avvio, es. il chdir di una home assente, arrivano lì).
  */
-function defaultShellLaunch(mode: 'host' | 'docker'): NonNullable<ShellHostDeps['launch']> {
+function defaultShellLaunch(mode: 'host' | 'box'): NonNullable<ShellHostDeps['launch']> {
   return async (agentId, command, env, p): Promise<ShellLaunch> => {
-    if (mode === 'docker') {
+    if (mode === 'box') {
       await ensureBoxContainer()
       try {
         await ensureBotHome(agentId) // H2: -w punta alla home del bot
@@ -280,7 +281,7 @@ function defaultShellLaunch(mode: 'host' | 'docker'): NonNullable<ShellHostDeps[
       // pid/log/exit nel box. F2: nel client docker sull'HOST restano il
       // daemon + i SOLI segreti; HOME del bot viaggia col valore nell'argv
       // (-e HOME=/box/home/<id>)
-      const r = await dockerArgvRun(dockerExecBackgroundArgv(BOX_CONTAINER, command, { workdir: home, env: env2 }, p), dockerClientEnv(env2))
+      const r = await dockerArgvRun(activeBoxEngine().argv.execBackground(BOX_CONTAINER, command, { workdir: home, env: env2 }, p), dockerClientEnv(env2))
       if (r.exitCode !== 0) return { ok: false, exitCode: r.exitCode, stderr: r.stderr }
       return { ok: true, pid: null }
     }
@@ -401,7 +402,7 @@ export async function runForegroundShell(
   }
   const id = `sh-${randomUUID().slice(0, 12)}`
   const paths = backgroundShellPaths(id)
-  const mode = sandboxMode() === 'docker' ? 'docker' : 'host'
+  const mode = sandboxMode() === 'box' ? 'box' : 'host'
   const launch = deps.launch ?? defaultShellLaunch(mode)
   const started = await launch(agentId, rawCommand, env, paths)
   if (!started.ok) {

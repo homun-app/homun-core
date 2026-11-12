@@ -26,7 +26,7 @@
 // browser e delle shell).
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 // fase rilascio (A7): docker fuori dal PATH del Terminale
-import { resolveTool, dockerChildEnv } from '../tool-paths'
+import { activeBoxEngine } from '../sandbox/engine'
 import { randomBytes } from 'node:crypto'
 import type { Duplex } from 'node:stream'
 import type { IncomingMessage } from 'node:http'
@@ -138,7 +138,7 @@ export function resetTerminalForTests(): void {
  * scade in 30 s e NON viene mai loggata.
  */
 export async function terminalOpen(agentId: string): Promise<{ url: string }> {
-  if (sandboxMode() !== 'docker') {
+  if (sandboxMode() !== 'box') {
     throw new UiError(
       'The terminal requires docker mode (Settings → Sandbox): it is not available here.',
       ui(UI.rpcTerminalUnavailable)
@@ -339,7 +339,7 @@ function closeIdle(conn: TermConn): void {
 function spawnTerminalBridge(owner: string): ChildProcessWithoutNullStreams {
   const child = fakeTerminalEnabled()
     ? spawn('node', ['-e', FAKE_TERMINAL_BRIDGE_JS], { stdio: ['pipe', 'pipe', 'pipe'] })
-    : spawn(resolveTool('docker'), dockerTerminalArgv(owner), { env: dockerChildEnv(process.env), stdio: ['pipe', 'pipe', 'pipe'] })
+    : (() => { const engine = activeBoxEngine(); return spawn(engine.command(), engine.argv.terminal(owner), { env: engine.childEnv(process.env), stdio: ['pipe', 'pipe', 'pipe'] }) })()
   return child as ChildProcessWithoutNullStreams
 }
 
@@ -368,10 +368,10 @@ export function tickTerminal(at: number): void {
  * senza docker o senza container non c'è nessun orfano.
  */
 export async function killTerminalOrphans(agentIds: ReadonlyArray<string>): Promise<void> {
-  if (sandboxMode() !== 'docker') return
+  if (sandboxMode() !== 'box') return
   const owners = new Set(agentIds.map((id) => boxOwnerOf(id)))
   for (const owner of owners) {
-    const list = await runDockerRaw(dockerTermPidListArgv(BOX_CONTAINER, owner), { timeoutMs: 15_000 }).catch(() => null)
+    const list = await runDockerRaw(activeBoxEngine().argv.termPidList(BOX_CONTAINER, owner), { timeoutMs: 15_000 }).catch(() => null)
     if (!list || list.exitCode !== 0) continue
     const pids = list.stdout
       .split('\n')
@@ -384,7 +384,7 @@ export async function killTerminalOrphans(agentIds: ReadonlyArray<string>): Prom
     for (const pgid of pids) {
       await runDockerRaw(dockerKillGroupArgv(BOX_CONTAINER, pgid, 'HUP', CONTAINER_USER), { timeoutMs: 15_000 }).catch(() => undefined)
     }
-    await runDockerRaw(dockerTermPidCleanArgv(BOX_CONTAINER, owner), { timeoutMs: 15_000 }).catch(() => undefined)
+    await runDockerRaw(activeBoxEngine().argv.termPidClean(BOX_CONTAINER, owner), { timeoutMs: 15_000 }).catch(() => undefined)
   }
 }
 

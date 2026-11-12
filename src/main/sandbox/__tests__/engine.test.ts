@@ -1,0 +1,212 @@
+// Fase box-container (BX1): UN motore del box, DUE implementazioni.
+// Le parti PURE della scelta del motore e degli stati del motore Apple, la
+// migrazione di sandbox.mode ('docker' storico letto come 'box') e la regola
+// del modulo: NESSUN resolveTool('docker') fuori dal modulo del motore Docker
+// (ricerca nel sorgente, come le guardie N1/D4).
+import { describe, expect, it, vi } from 'vitest'
+import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const SRC = join(import.meta.dirname, '..', '..', '..')
+
+/** I fatti della macchina per la scelta del motore (tutti iniettabili). */
+const facts = (over: Partial<import('../engine').BoxEngineFacts> = {}): import('../engine').BoxEngineFacts => ({
+  platform: 'darwin',
+  arch: 'arm64',
+  macOsMajor: 26,
+  containerInstalled: true,
+  containerServiceRunning: true,
+  containerKernelOk: true,
+  dockerInstalled: true,
+  dockerResponds: true,
+  ...over
+})
+
+// sandbox.mode pilotabile (la migrazione 'docker' → 'box' si prova SENZA store)
+const mode = vi.hoisted(() => ({ value: 'host' as string }))
+vi.mock('../../store/db', () => ({
+  getSetting: (key: string, fallback: unknown) => (key === 'sandbox.mode' ? mode.value : fallback),
+  dataDir: () => '/tmp/sandbot-engine-test'
+}))
+
+const { selectBoxEngine, appleContainerState, macOsMajorFromDarwin, activeBoxEngine, setActiveEngineForTests, dockerEngine, appleContainerEngine } = await import('../engine')
+import type { BoxEngineArgv } from '../engine'
+const { sandboxMode } = await import('../index')
+
+describe('BX1: la scelta del motore (selectBoxEngine, pura)', () => {
+  it('auto: macOS 26 arm64 con container pronto → apple-container', () => {
+    expect(selectBoxEngine('auto', facts())).toBe('apple-container')
+  })
+
+  it('auto: macOS 15 (darwin 24) → docker se risponde, MAI apple', () => {
+    expect(selectBoxEngine('auto', facts({ macOsMajor: 15 }))).toBe('docker')
+  })
+
+  it('auto: Mac Intel (x64) → docker: container vuole il chip Apple', () => {
+    expect(selectBoxEngine('auto', facts({ arch: 'x64' }))).toBe('docker')
+  })
+
+  it('auto: container non installato → docker se risponde', () => {
+    expect(selectBoxEngine('auto', facts({ containerInstalled: false }))).toBe('docker')
+  })
+
+  it('auto: container installato ma servizio spento → docker se risponde', () => {
+    expect(selectBoxEngine('auto', facts({ containerServiceRunning: false }))).toBe('docker')
+  })
+
+  it('auto: kernel mancante → NON pronto: docker se risponde (il kernel si installa solo col consenso)', () => {
+    expect(selectBoxEngine('auto', facts({ containerKernelOk: false }))).toBe('docker')
+  })
+
+  it('auto: niente container e Docker non risponde → NESSUN motore (si resta in host)', () => {
+    expect(selectBoxEngine('auto', facts({ containerInstalled: false, dockerResponds: false, dockerInstalled: false }))).toBeNull()
+  })
+
+  it('auto: docker installato ma SPENTO (non risponde) → nessun motore', () => {
+    expect(selectBoxEngine('auto', facts({ containerInstalled: false, dockerResponds: false }))).toBeNull()
+  })
+
+  it('docker esplicito → docker SEMPRE (è il motore di riserva scelto dall\'utente)', () => {
+    expect(selectBoxEngine('docker', facts())).toBe('docker')
+    expect(selectBoxEngine('docker', facts({ dockerInstalled: false, dockerResponds: false }))).toBe('docker')
+  })
+
+  it('apple-container esplicito e USABILE → apple-container', () => {
+    expect(selectBoxEngine('apple-container', facts())).toBe('apple-container')
+  })
+
+  it('apple-container esplicito ma NON installato → null (l\'utente lo vede dallo stato, si resta in host)', () => {
+    expect(selectBoxEngine('apple-container', facts({ containerInstalled: false }))).toBeNull()
+  })
+
+  it('apple-container esplicito ma macOS < 26 → null (unsupported)', () => {
+    expect(selectBoxEngine('apple-container', facts({ macOsMajor: 15 }))).toBeNull()
+  })
+})
+
+describe('BX1: gli stati del motore Apple (appleContainerState, pura)', () => {
+  it('macOS 15 o Intel → unsupported', () => {
+    expect(appleContainerState(facts({ macOsMajor: 15 }))).toBe('unsupported')
+    expect(appleContainerState(facts({ arch: 'x64' }))).toBe('unsupported')
+    expect(appleContainerState(facts({ platform: 'linux' }))).toBe('unsupported')
+  })
+
+  it('CLI assente → not-installed', () => {
+    expect(appleContainerState(facts({ containerInstalled: false }))).toBe('not-installed')
+  })
+
+  it('servizio spento → stopped', () => {
+    expect(appleContainerState(facts({ containerServiceRunning: false }))).toBe('stopped')
+  })
+
+  it('kernel mancante → kernel-missing (chiede il consenso, MAI download nascosto)', () => {
+    expect(appleContainerState(facts({ containerKernelOk: false }))).toBe('kernel-missing')
+  })
+
+  it('tutto a posto → ready', () => {
+    expect(appleContainerState(facts())).toBe('ready')
+  })
+
+  it('l\'ordine dei controlli: unsupported prima di not-installed (un Intel senza CLI resta unsupported)', () => {
+    expect(appleContainerState(facts({ arch: 'x64', containerInstalled: false }))).toBe('unsupported')
+  })
+})
+
+describe('BX1: la versione di macOS da os.release() (macOsMajorFromDarwin, pura)', () => {
+  it('darwin 24 → macOS 15 (numerazione vecchia: major − 9)', () => {
+    expect(macOsMajorFromDarwin('24.5.0')).toBe(15)
+    expect(macOsMajorFromDarwin('23.0.0')).toBe(14)
+  })
+
+  it('darwin 25 → macOS 26 (la numerazione a anno: Tahoe); darwin 27 → 28', () => {
+    expect(macOsMajorFromDarwin('25.0.0')).toBe(26)
+    expect(macOsMajorFromDarwin('27.0.0')).toBe(28)
+  })
+
+  it('output assurdo → 0 (mai NaN: il confronto ≥ 26 resta falso)', () => {
+    expect(macOsMajorFromDarwin('')).toBe(0)
+    expect(macOsMajorFromDarwin('pippo')).toBe(0)
+    // la numerazione a anno è una regola (darwin N → macOS N+1), non una
+    // tabella: un darwin futuro prosegue la serie
+    expect(macOsMajorFromDarwin('99')).toBe(100)
+  })
+})
+
+describe('BX1: sandbox.mode — il valore storico \'docker\' si legge come \'box\'', () => {
+  it('\'docker\' salvato dalle versioni precedenti → \'box\' (migrazione in lettura)', () => {
+    mode.value = 'docker'
+    expect(sandboxMode()).toBe('box')
+  })
+
+  it('\'box\' → \'box\', qualunque altro valore → \'host\'', () => {
+    mode.value = 'box'
+    expect(sandboxMode()).toBe('box')
+    mode.value = 'host'
+    expect(sandboxMode()).toBe('host')
+  })
+})
+
+describe('BX1: il motore attivo (activeBoxEngine) e i due moduli motore', () => {
+  it('il motore Docker delega OGNI argv alle funzioni di oggi: stesso contenuto byte per byte', async () => {
+    const a = dockerEngine.argv
+    const d = await import('../docker-argv')
+    expect(a.exec('c', 'echo', { workdir: '/w' })).toEqual(d.dockerExecArgv('c', 'echo', { workdir: '/w' }))
+    expect(a.boxCreate('c', 'v', 'bridge', d.DEFAULT_BOX_LIMITS, 'img')).toEqual(d.dockerBoxCreateArgv('c', 'v', 'bridge', d.DEFAULT_BOX_LIMITS, 'img'))
+    expect(a.terminal('own')).toEqual(d.dockerTerminalArgv('own'))
+    expect(a.browserMcp('ag', 8085)).toEqual(d.dockerBrowserMcpArgv('ag', 8085))
+    expect(a.build('t', '/df', '/ctx')).toEqual(d.dockerBuildArgv('t', '/df', '/ctx'))
+  })
+
+  it('i due motori hanno id diversi e argv per TUTTE le operazioni dell\'interfaccia', () => {
+    expect(dockerEngine.id).toBe('docker')
+    expect(appleContainerEngine.id).toBe('apple-container')
+    for (const e of [dockerEngine, appleContainerEngine]) {
+      expect(typeof e.command()).toBe('string')
+      expect(typeof e.childEnv({ PATH: '/x' })).toBe('object')
+      const missing = ['exec', 'boxCreate', 'cpFromBox', 'df', 'pruneSafe', 'removeImage', 'removeVolumes', 'terminal', 'browserMcp', 'screenBridge', 'build', 'volumeLs'].filter(
+        (op) => typeof e.argv[op as keyof BoxEngineArgv] !== 'function'
+      )
+      expect(missing).toEqual([])
+    }
+  })
+
+  it('auto non ancora sondato → il motore di DEFAULT è docker (comportamento di oggi)', () => {
+    setActiveEngineForTests(null)
+    expect(activeBoxEngine().id).toBe('docker')
+  })
+
+  it('la sonda dell\'auto può fissare apple-container e poi tornare', () => {
+    setActiveEngineForTests('apple-container')
+    expect(activeBoxEngine().id).toBe('apple-container')
+    setActiveEngineForTests(null)
+    expect(activeBoxEngine().id).toBe('docker')
+  })
+})
+
+describe('BX1: la regola del modulo — resolveTool(\'docker\') SOLO nel motore Docker', () => {
+  /** Tutti i file .ts/.tsx del src (senza test), ricorsivo. */
+  function sourceFiles(dir: string, out: string[] = []): string[] {
+    for (const name of readdirSync(dir)) {
+      const p = join(dir, name)
+      const st = statSync(p)
+      if (st.isDirectory()) {
+        if (name === '__tests__' || name === 'node_modules') continue
+        sourceFiles(p, out)
+      } else if (/\.(ts|tsx|mts|mjs)$/.test(name)) {
+        out.push(p)
+      }
+    }
+    return out
+  }
+
+  it('nessuna chiamata resolveTool(\'docker\') fuori da src/main/sandbox/docker-engine.ts', () => {
+    const offenders: string[] = []
+    for (const f of sourceFiles(SRC)) {
+      const rel = f.slice(SRC.length + 1)
+      if (rel === join('main', 'sandbox', 'docker-engine.ts')) continue
+      if (readFileSync(f, 'utf8').includes("resolveTool('docker')")) offenders.push(rel)
+    }
+    expect(offenders).toEqual([])
+  })
+})

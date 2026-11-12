@@ -63,7 +63,7 @@ describe('fase 19b (T4.1): la tabella computer_actions', () => {
 describe('fase 19b (T7, puro): l\'unione e l\'ordinamento delle due fonti', () => {
   it('shellItem e actionItem mappano le righe (status, exitCode, bytes, testo troncato a 500)', () => {
     const sh = shellItem(
-      { id: 'sh-1', agent_id: 'papà', command: 'x'.repeat(600), secret_names: [], mode: 'docker', pid: null, log_path: '.sandbot/shells/sh-1.log', started_at: 1, status: 'done', exit_code: 3, finished_at: 2, awaited: true, notified: true },
+      { id: 'sh-1', agent_id: 'papà', command: 'x'.repeat(600), secret_names: [], mode: 'box', pid: null, log_path: '.sandbot/shells/sh-1.log', started_at: 1, status: 'done', exit_code: 3, finished_at: 2, awaited: true, notified: true },
       'Papà'
     )
     expect(sh).toMatchObject({ source: 'shell', kind: 'shell', status: 'done', exitCode: 3, bytes: null, text: 'x'.repeat(500) })
@@ -76,7 +76,7 @@ describe('fase 19b (T7, puro): l\'unione e l\'ordinamento delle due fonti', () =
   })
 
   it('mergeActivity ordina dalla più recente e ferma al limite', () => {
-    const shell = (id: string, at: number): ShellJob => ({ id, agent_id: 'papà', command: `cmd ${id}`, secret_names: [], mode: 'docker', pid: null, log_path: 'l', started_at: at, status: 'running', exit_code: null, finished_at: null, awaited: false, notified: false })
+    const shell = (id: string, at: number): ShellJob => ({ id, agent_id: 'papà', command: `cmd ${id}`, secret_names: [], mode: 'box', pid: null, log_path: 'l', started_at: at, status: 'running', exit_code: null, finished_at: null, awaited: false, notified: false })
     const action = (id: string, at: number): ComputerAction => ({ id, agent_id: 'papà', owner_id: 'papà', actor: 'bot', kind: 'write_file', target: 't', bytes: 1, error: null, created_at: at })
     const merged = mergeActivity(
       [shell('sh-a', 100), shell('sh-b', 300)],
@@ -89,10 +89,10 @@ describe('fase 19b (T7, puro): l\'unione e l\'ordinamento delle due fonti', () =
   })
 
   it('listComputerActivity: la famiglia del pannello (i comandi dei FIGLI col nome), ordine e limite', () => {
-    createShellJob(mem, { id: 'sh-padre', agent_id: 'papà', command: 'echo padre', secret_names: [], mode: 'docker', pid: null, log_path: '.sandbot/shells/sh-padre.log', started_at: 100 })
-    createShellJob(mem, { id: 'sh-figlio', agent_id: 'figlio', command: 'echo figlio', secret_names: [], mode: 'docker', pid: null, log_path: '.sandbot/shells/sh-figlio.log', started_at: 200 })
+    createShellJob(mem, { id: 'sh-padre', agent_id: 'papà', command: 'echo padre', secret_names: [], mode: 'box', pid: null, log_path: '.sandbot/shells/sh-padre.log', started_at: 100 })
+    createShellJob(mem, { id: 'sh-figlio', agent_id: 'figlio', command: 'echo figlio', secret_names: [], mode: 'box', pid: null, log_path: '.sandbot/shells/sh-figlio.log', started_at: 200 })
     // un comando dell'ALTRO proprietario NON compare
-    createShellJob(mem, { id: 'sh-altro', agent_id: 'altro', command: 'echo altro', secret_names: [], mode: 'docker', pid: null, log_path: '.sandbot/shells/sh-altro.log', started_at: 300 })
+    createShellJob(mem, { id: 'sh-altro', agent_id: 'altro', command: 'echo altro', secret_names: [], mode: 'box', pid: null, log_path: '.sandbot/shells/sh-altro.log', started_at: 300 })
     const { owner, items } = listComputerActivity('papà', 100, { db: mem })
     expect(owner).toBe('papà')
     const ids = items.map((i) => i.id)
@@ -126,7 +126,7 @@ describe('fase 19b (T4.1): il comando in shell_jobs NON porta MAI i valori dei s
     // come run-command oggi: il comando salvato è quello REDATTO (i valori
     // sostituiti da {{secret:NOME}} dal gate dei segreti PRIMA della riga)
     const command = 'curl -H "Authorization: Bearer {{secret:API_TOKEN}}" https://api.example.com'
-    createShellJob(mem, { id: 'sh-secret', agent_id: 'papà', command, secret_names: ['API_TOKEN'], mode: 'docker', pid: null, log_path: '.sandbot/shells/sh-secret.log', started_at: 400 })
+    createShellJob(mem, { id: 'sh-secret', agent_id: 'papà', command, secret_names: ['API_TOKEN'], mode: 'box', pid: null, log_path: '.sandbot/shells/sh-secret.log', started_at: 400 })
     const row = mem.prepare('SELECT command, secret_names FROM shell_jobs WHERE id = ?').get('sh-secret') as { command: string; secret_names: string }
     expect(row.command).toBe(command)
     expect(row.command).toContain('{{secret:API_TOKEN}}')

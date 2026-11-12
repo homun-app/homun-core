@@ -21,7 +21,7 @@
 // SANDBOT_TEST_FAKE_BROWSER_MCP, non esiste in produzione).
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 // fase rilascio (A7): docker fuori dal PATH del Terminale
-import { resolveTool, dockerChildEnv } from '../tool-paths'
+import { activeBoxEngine } from '../sandbox/engine'
 import { randomBytes } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { basename, join } from 'node:path'
@@ -213,7 +213,7 @@ async function waitForSocket(socketPath: string): Promise<void> {
   for (;;) {
     const ok = fake
       ? existsSync(join(fake, basename(socketPath)))
-      : (await runDockerRaw(dockerScreenSocketReadyArgv(BOX_CONTAINER, socketPath), { timeoutMs: 10_000 })).exitCode === 0
+      : (await runDockerRaw(activeBoxEngine().argv.screenSocketReady(BOX_CONTAINER, socketPath), { timeoutMs: 10_000 })).exitCode === 0
     if (ok) return
     if (deps.now() >= deadline) {
       throw new UiError(
@@ -227,7 +227,7 @@ async function waitForSocket(socketPath: string): Promise<void> {
 
 /** Il numero di display scelto da -displayfd (file display del wrapper), senza due punti. */
 async function readDisplay(owner: string): Promise<string> {
-  const r = await runDockerRaw(dockerScreenDisplayReadArgv(BOX_CONTAINER, owner), { timeoutMs: 10_000 })
+  const r = await runDockerRaw(activeBoxEngine().argv.screenDisplayRead(BOX_CONTAINER, owner), { timeoutMs: 10_000 })
   const n = r.exitCode === 0 ? r.stdout.trim() : ''
   if (!/^\d+$/.test(n)) {
     throw new UiError('the bot has no screen open', ui(UI.rpcScreenNotOpen))
@@ -249,7 +249,7 @@ async function ensureControlVnc(agentId: string): Promise<void> {
   }
   if (!fakeScreenSocketDir()) {
     const display = await readDisplay(owner)
-    const start = await runDockerRaw(dockerScreenControlVncArgv(owner, display), { timeoutMs: 15_000 })
+    const start = await runDockerRaw(activeBoxEngine().argv.screenControlVnc(owner, display), { timeoutMs: 15_000 })
     if (start.exitCode !== 0) {
       throw new UiError(`the control screen failed to start: ${start.stderr || `exit ${start.exitCode}`}`, ui(UI.rpcScreenControlFailed))
     }
@@ -263,7 +263,7 @@ async function stopControlVnc(agentId: string): Promise<void> {
   const owner = boxOwnerOf(agentId)
   controlVncOwners.delete(owner)
   if (fakeScreenSocketDir()) return
-  const pid = await runDockerRaw(dockerScreenControlPidReadArgv(BOX_CONTAINER, owner), { timeoutMs: 10_000 }).catch(() => null)
+  const pid = await runDockerRaw(activeBoxEngine().argv.screenControlPidRead(BOX_CONTAINER, owner), { timeoutMs: 10_000 }).catch(() => null)
   const pgid = pid && pid.exitCode === 0 ? Number(pid.stdout.trim()) : NaN
   if (Number.isInteger(pgid) && pgid > 0) {
     await runDockerRaw(dockerKillGroupArgv(BOX_CONTAINER, pgid, 'TERM', BROWSER_USER), { timeoutMs: 15_000 }).catch(() => undefined)
@@ -390,7 +390,7 @@ function spawnBridge(socketPath: string): ChildProcessWithoutNullStreams {
   const fake = fakeScreenSocketDir()
   const child = fake
     ? spawn('node', ['-e', SCREEN_BRIDGE_NODE_JS, join(fake, basename(socketPath))], { stdio: ['pipe', 'pipe', 'pipe'] })
-    : spawn(resolveTool('docker'), dockerScreenBridgeArgv(socketPath), { env: dockerChildEnv(process.env), stdio: ['pipe', 'pipe', 'pipe'] })
+    : (() => { const engine = activeBoxEngine(); return spawn(engine.command(), engine.argv.screenBridge(socketPath), { env: engine.childEnv(process.env), stdio: ['pipe', 'pipe', 'pipe'] }) })()
   return child as ChildProcessWithoutNullStreams
 }
 

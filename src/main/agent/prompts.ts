@@ -133,7 +133,7 @@ export function documentRule(): string {
  * await_shell, sempre caricata: avvisare l'utente che l'esito arriverà.
  */
 export function computerSection(groups: ReadonlyArray<string> = [], opts: { groupTurn?: boolean } = {}): string {
-  const docker = sandboxMode() === 'docker'
+  const docker = sandboxMode() === 'box'
   const env = docker
     ? 'a persistent Linux container shared with your OTHER bots (files survive across sessions).'
     : 'a persistent working folder shared with your OTHER bots. Commands run in a shell.'

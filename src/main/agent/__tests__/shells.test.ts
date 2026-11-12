@@ -213,7 +213,7 @@ describe('notifica SHELL_DONE e riconciliazione al riavvio', () => {
     alive.unref()
     try {
       // 1) exit file già scritto (docker-like): la riga si chiude col codice letto
-      createShellJob(db(), { id: 'sh-rec1', agent_id: AGENT, command: 'build', secret_names: [], mode: 'docker', pid: null, log_path: '.sandbot/shells/sh-rec1.log', started_at: Date.now() - 1000 })
+      createShellJob(db(), { id: 'sh-rec1', agent_id: AGENT, command: 'build', secret_names: [], mode: 'box', pid: null, log_path: '.sandbot/shells/sh-rec1.log', started_at: Date.now() - 1000 })
       writeFileSync(join(TMP, 'box', 'home', AGENT, '.sandbot/shells/sh-rec1.exit'), '5')
       // 2) processo morto senza exit code (host)
       createShellJob(db(), { id: 'sh-rec2', agent_id: AGENT, command: 'test', secret_names: [], mode: 'host', pid: 999999, log_path: '.sandbot/shells/sh-rec2.log', started_at: Date.now() - 1000 })
@@ -259,7 +259,7 @@ describe('notifica SHELL_DONE e riconciliazione al riavvio', () => {
     const t = testDeps()
     // riga già letta (awaited) e exit file comparso dopo: il tick chiude la
     // riga ma NON accoda la notifica
-    createShellJob(db(), { id: 'sh-read', agent_id: AGENT, command: 'letto', secret_names: [], mode: 'docker', pid: null, log_path: '.sandbot/shells/sh-read.log', started_at: Date.now() - 1000 })
+    createShellJob(db(), { id: 'sh-read', agent_id: AGENT, command: 'letto', secret_names: [], mode: 'box', pid: null, log_path: '.sandbot/shells/sh-read.log', started_at: Date.now() - 1000 })
     updateShellJob(db(), 'sh-read', { awaited: true })
     writeFileSync(join(TMP, 'box', 'home', AGENT, '.sandbot/shells/sh-read.exit'), '0')
     await tickShellJobs(t.deps)

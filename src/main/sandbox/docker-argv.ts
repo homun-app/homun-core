@@ -1261,3 +1261,47 @@ export function dockerTestPathArgv(container: string, flag: '-f' | '-e' | '-d', 
   return ['exec', '-u', CONTAINER_USER, container, 'test', flag, path]
 }
 
+// ---- fase box-container (BX1/BX3): le operazioni del motore che mancavano —
+// cp box→Mac FORMALIZZATA (prima assemblata inline in due punti), lo STOP del
+// box e lo spazio su disco (df, prune sicura, rimozione immagine/volumi). Le
+// funzioni di PRIMA non cambiano di un byte: il test di BX5 confronta.
+
+/** La copia box → Mac (BX1): l'argv che sandbox e library assemblavano inline. */
+export function dockerCpFromBoxArgv(container: string, boxPath: string, macPath: string): string[] {
+  return ['cp', `${container}:${boxPath}`, macPath]
+}
+
+/** Lo STOP del box (BX3: «Rimuovi» l'immagine ferma prima il box). */
+export function dockerStopArgv(container: string): string[] {
+  return ['stop', container]
+}
+
+/** Lo spazio su disco del motore (BX3): `system df` in JSON. */
+export function dockerDfArgv(): string[] {
+  return ['system', 'df', '--format', 'json']
+}
+
+/**
+ * La PULIZIA SICURA (BX3): una SEQUENZA di argv. `image prune` SENZA -a tocca
+ * SOLO le immagini dangling (la nostra porta il TAG: mai nominata) e
+ * `builder prune -f` toglie la cache di build (1,15 GB sul Mac dell'utente a
+ * fine 2026). MAI container prune: fermerebbe anche il box.
+ */
+export function dockerPruneSafeArgv(): string[][] {
+  return [
+    ['image', 'prune', '-f'],
+    ['builder', 'prune', '-f']
+  ]
+}
+
+/** La rimozione dell'immagine del box (BX3): il tag È nostro, mai -a. */
+export function dockerRemoveImageArgv(tag: string): string[] {
+  return ['image', 'rm', tag]
+}
+
+/** La rimozione dei volumi (BX3 «Elimina i file dei bot»): SOLO i nomi dati. */
+export function dockerRemoveVolumesArgv(names: string[]): string[] {
+  return ['volume', 'rm', ...names]
+}
+
+

@@ -80,6 +80,8 @@ import { UiError } from '../shared/ui-text'
 import { isToolResolved, resolveTool, invalidateToolCache } from '../main/tool-paths'
 // M10 (fase 0.3.1001): prefisso dei nomi del box di prova non valido → riga nella UI
 import { INVALID_TEST_BOX_PREFIX } from '../main/sandbox/docker-argv'
+// BX1: la risoluzione del percorso di docker vive nel modulo del motore
+import { dockerToolStatusInfo } from '../main/sandbox/docker-engine'
 // R2 (fase app — ritocchi): l'esito degli invii si ripulisce come gli errori Composio
 import { redactComposioSecrets } from '../main/connectors/composio-actions'
 import { existsSync } from 'node:fs'
@@ -137,15 +139,14 @@ const pruneSkillCatalogPreviews = (): void => {
   }
 }
 
+/**
+ * Fase box-container (BX1): lo stato del motore DOCKER per la RPC storica
+ * box:docker-status — la risoluzione del percorso vive nel modulo del motore
+ * (dockerToolStatusInfo); M10: il prefisso dei nomi del box di prova, se
+ * PRESENTE e non valido, compare come riga nella UI (la sandbox non parte).
+ */
 function dockerToolStatus(): { installed: boolean; running: boolean; path: string; testPrefixInvalid: boolean } {
-  const installed = isToolResolved('docker')
-  const home = homedir()
-  const socket = Boolean(process.env.DOCKER_HOST) ||
-    existsSync('/var/run/docker.sock') ||
-    existsSync(join(home, '.docker', 'run', 'docker.sock'))
-  // M10: il prefisso dei nomi del box di prova, se PRESENTE e non valido,
-  // compare come riga nella UI (la sandbox non parte)
-  return { installed, running: installed && socket, path: resolveTool('docker'), testPrefixInvalid: INVALID_TEST_BOX_PREFIX !== null }
+  return { ...dockerToolStatusInfo(), testPrefixInvalid: INVALID_TEST_BOX_PREFIX !== null }
 }
 import type { UiText } from '../shared/types'
 

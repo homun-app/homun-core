@@ -16,7 +16,7 @@
 // un server in attesa di chiavi/variabili (needsAuth) non è offerto al modello.
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 // fase rilascio (A7): docker fuori dal PATH del Terminale
-import { resolveTool, dockerChildEnv } from '../tool-paths'
+import { activeBoxEngine } from '../sandbox/engine'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js'
@@ -28,7 +28,6 @@ import { composioToolPolicy } from '../connectors/composio-meta'
 import { mcpCallIsRead } from '../connectors/tool-batch'
 import { callMcpWithRetry } from './retry'
 import { COMPOSIO_MULTI_EXECUTE_TOOL, forceSyncResponseToWorkbenchOff } from '../connectors/tool-batch'
-import { dockerStdioMcpArgv } from '../sandbox/docker-argv'
 import { boxOwnerOf, ensureBoxContainer, ensureBotHome } from '../sandbox'
 import type { ToolDef } from '../agent/llm'
 // fase 17c (C3/C5): lo stato needs_auth che la UI mostra è nel catalogo UI; trustKind per la vista Installati
@@ -237,7 +236,7 @@ export function boxOwnerOfWorkdir(box: { workdir: string; home?: string }): stri
 export function boxStdioArgv(cfg: McpServerConfig, stdioEnv?: Record<string, string>): string[] {
   const box = cfg.box!
   const envKeys = stdioEnv && Object.keys(stdioEnv).length ? Object.keys(stdioEnv) : box.envKeys
-  return dockerStdioMcpArgv({ ...box, envKeys })
+  return activeBoxEngine().argv.stdioMcp({ ...box, envKeys })
 }
 
 export function listServers(): McpServerConfig[] {
@@ -301,8 +300,8 @@ async function connect(cfg: McpServerConfig): Promise<Client> {
       const argv = boxStdioArgv(cfg, a.stdioEnv)
       await client.connect(
         a.stdioEnv && Object.keys(a.stdioEnv).length
-          ? new StdioClientTransport({ command: resolveTool('docker'), args: argv, env: { ...dockerChildEnv(process.env), ...a.stdioEnv } as Record<string, string> })
-          : new StdioClientTransport({ command: resolveTool('docker'), args: argv })
+          ? new StdioClientTransport({ command: activeBoxEngine().command(), args: argv, env: { ...activeBoxEngine().childEnv(process.env), ...a.stdioEnv } as Record<string, string> })
+          : new StdioClientTransport({ command: activeBoxEngine().command(), args: argv })
       )
       return client
     }

@@ -21,7 +21,8 @@ export interface ShellJob {
   command: string
   /** nomi dei segreti usati (per redarre l'output alla lettura; mai i valori) */
   secret_names: string[]
-  mode: 'host' | 'docker'
+  /** 'box' da fase box-container (BX1): le righe vecchie con 'docker' si leggono 'box'. */
+  mode: 'host' | 'box'
   /** pid del processo (host) o del wrapper nel container (docker) */
   pid: number | null
   /** path del log RELATIVO alla home del bot nel box */
@@ -65,7 +66,7 @@ function rowToJob(r: ShellJobRow): ShellJob {
   return {
     id: r.id, agent_id: r.agent_id, command: r.command,
     secret_names: JSON.parse(r.secret_names) as string[],
-    mode: r.mode as 'host' | 'docker', pid: r.pid, log_path: r.log_path,
+    mode: r.mode === 'host' ? 'host' : 'box', pid: r.pid, log_path: r.log_path,
     started_at: r.started_at, status: r.status as ShellJobStatus,
     exit_code: r.exit_code, finished_at: r.finished_at,
     awaited: r.awaited === 1, notified: r.notified === 1

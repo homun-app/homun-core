@@ -1,0 +1,183 @@
+// Fase box-container (BX1): il motore APPLE CONTAINER (macOS ≥ 26, chip
+// Apple). Gli argv sono le funzioni pure di apple-container-argv; l'env dei
+// figli è quello del daemon tale e quale (la CLI di Apple non ha socket da
+// cercare: niente DOCKER_HOST). Il percorso della CLI: l'override di test
+// (SANDBOT_TEST_USER_DATA + SANDBOT_TEST_CONTAINER_CLI, la CLI finta di BX5)
+// vince su tutto; poi HOMUN_CONTAINER_PATH, il PATH e /usr/local/bin/container
+// (dove lo mette il pacchetto firmato di Apple).
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
+import type { BoxEngine, BoxEngineArgv } from './engine'
+import { BOX_CONTAINER, BOX_VOLUME } from './docker-argv'
+import {
+  appleSystemStartArgv,
+  appleKernelSetRecommendedArgv,
+  appleNetworkCreateArgv,
+  applePsArgv,
+  appleStartArgv,
+  appleStopArgv,
+  appleBoxRunArgv,
+  appleBoxRmArgv,
+  appleBoxInitCheckArgv,
+  appleBoxMountsArgv,
+  appleBoxWritableArgv,
+  appleContainerImageArgv,
+  appleEnsureHomeArgv,
+  appleImageInspectArgv,
+  appleBuildArgv,
+  appleVolumeLsArgv,
+  appleExecArgv,
+  appleExecBackgroundArgv,
+  appleKillGroupArgv,
+  appleStatSizeArgv,
+  appleStdioMcpArgv,
+  appleReadFileArgv,
+  appleWriteFileArgv,
+  appleListDirArgv,
+  appleRealpathArgv,
+  appleFindListArgv,
+  appleReadB64Argv,
+  appleWriteB64Argv,
+  appleTestPathArgv,
+  appleRmDirArgv,
+  appleCpFromBoxArgv,
+  applePluginsVolumeCreateArgv,
+  applePluginCopyCreateArgv,
+  applePluginsMkdirArgv,
+  applePluginCpArgv,
+  applePluginsChownArgv,
+  applePluginsChmodArgv,
+  applePluginsRmHelperArgv,
+  appleBrowserVolumeCreateArgv,
+  appleBrowserRootArgv,
+  appleBrowserWritableArgv,
+  appleBrowserOldProfileRmArgv,
+  appleBrowserMcpArgv,
+  appleBrowserReadFileArgv,
+  appleBrowserReadB64Argv,
+  appleBrowserRmFileArgv,
+  appleScreenControlVncArgv,
+  appleScreenControlPidReadArgv,
+  appleScreenSocketReadyArgv,
+  appleScreenDisplayReadArgv,
+  appleScreenBridgeArgv,
+  appleXdotoolArgv,
+  appleScreenCaptureArgv,
+  appleScreenGeometryArgv,
+  appleTerminalArgv,
+  appleTermPidListArgv,
+  appleTermPidCleanArgv,
+  appleBoxChownArgv,
+  appleBoxMigrateArgv,
+  appleBoxMarkerCheckArgv,
+  appleBoxMarkerWriteArgv,
+  appleDfArgv,
+  applePruneSafeArgv,
+  appleRemoveImageArgv,
+  appleRemoveVolumesArgv
+} from './apple-container-argv'
+import { DOCKER_BROWSER_ROOT_SH } from './docker-argv'
+
+/** Il gateway della rete interna, ricordato dopo l'inspect (BX2). */
+let cachedGateway: string | null = null
+
+/** Solo per i test (e l'ensure del box): il gateway della rete del box. */
+export function setBoxNetworkGateway(ip: string | null): void {
+  cachedGateway = ip
+}
+
+/** Il gateway della rete del box (null = non ancora letto). */
+export function boxNetworkGateway(): string | null {
+  return cachedGateway
+}
+
+/**
+ * Il percorso della CLI container (PURa sull'env): la CLI finta dei test SOLO
+ * con SANDBOT_TEST_USER_DATA (mai nella corsa vera), poi l'override esplicito,
+ * il PATH e /usr/local/bin/container. Non trovata → il nome semplice: lo
+ * spawn risponde ENOENT e l'interfaccia lo dice in parole (come docker oggi).
+ */
+export function containerCliPath(env: NodeJS.ProcessEnv = process.env, pathEnv = env.PATH ?? ''): string {
+  if (env.SANDBOT_TEST_USER_DATA && env.SANDBOT_TEST_CONTAINER_CLI) return env.SANDBOT_TEST_CONTAINER_CLI
+  if (env.HOMUN_CONTAINER_PATH) return env.HOMUN_CONTAINER_PATH
+  for (const dir of pathEnv.split(':').filter(Boolean)) {
+    const p = join(dir, 'container')
+    if (existsSync(p)) return p
+  }
+  const local = '/usr/local/bin/container'
+  return existsSync(local) ? local : 'container'
+}
+
+/** Gli argv del motore Apple: il container del box è il BOX_CONTAINER di oggi. */
+const argv: BoxEngineArgv = {
+  ps: applePsArgv,
+  start: appleStartArgv,
+  stop: appleStopArgv,
+  boxCreate: appleBoxRunArgv,
+  boxRm: appleBoxRmArgv,
+  boxInitCheck: appleBoxInitCheckArgv,
+  boxMounts: appleBoxMountsArgv,
+  boxWritable: appleBoxWritableArgv,
+  containerImage: appleContainerImageArgv,
+  ensureHome: appleEnsureHomeArgv,
+  imageInspect: appleImageInspectArgv,
+  build: appleBuildArgv,
+  volumeLs: appleVolumeLsArgv,
+  exec: appleExecArgv,
+  execBackground: appleExecBackgroundArgv,
+  killGroup: appleKillGroupArgv,
+  statSize: appleStatSizeArgv,
+  stdioMcp: (opts) => appleStdioMcpArgv(opts, BOX_CONTAINER),
+  readFile: appleReadFileArgv,
+  writeFile: appleWriteFileArgv,
+  listDir: appleListDirArgv,
+  realpath: appleRealpathArgv,
+  findList: appleFindListArgv,
+  readB64: appleReadB64Argv,
+  browserWriteB64: appleWriteB64Argv,
+  testPath: appleTestPathArgv,
+  rmDir: (boxPath, image) => appleRmDirArgv(boxPath, image, BOX_CONTAINER),
+  cpFromBox: appleCpFromBoxArgv,
+  pluginsVolumeCreate: applePluginsVolumeCreateArgv,
+  pluginCopyCreate: applePluginCopyCreateArgv,
+  pluginsMkdir: applePluginsMkdirArgv,
+  pluginCp: applePluginCpArgv,
+  pluginsChown: applePluginsChownArgv,
+  pluginsChmod: applePluginsChmodArgv,
+  pluginsRmHelper: applePluginsRmHelperArgv,
+  browserVolumeCreate: appleBrowserVolumeCreateArgv,
+  browserRoot: (image) => appleBrowserRootArgv(image, DOCKER_BROWSER_ROOT_SH),
+  browserWritable: appleBrowserWritableArgv,
+  browserOldProfileRm: appleBrowserOldProfileRmArgv,
+  browserMcp: (agentId, proxyPort, opts) => appleBrowserMcpArgv(agentId, proxyPort, { ...opts, gateway: cachedGateway ?? undefined }, BOX_CONTAINER),
+  browserReadFile: appleBrowserReadFileArgv,
+  browserReadB64: appleBrowserReadB64Argv,
+  browserRmFile: appleBrowserRmFileArgv,
+  screenControlVnc: (owner, display) => appleScreenControlVncArgv(BOX_CONTAINER, owner, display),
+  screenControlPidRead: appleScreenControlPidReadArgv,
+  screenSocketReady: appleScreenSocketReadyArgv,
+  screenDisplayRead: appleScreenDisplayReadArgv,
+  screenBridge: (socketPath) => appleScreenBridgeArgv(socketPath, BOX_CONTAINER),
+  xdotool: (display, xauthority, args) => appleXdotoolArgv(BOX_CONTAINER, display, xauthority, args),
+  screenCapture: (display, xauthority, owner, name) => appleScreenCaptureArgv(BOX_CONTAINER, display, xauthority, owner, name),
+  screenGeometry: (display, xauthority) => appleScreenGeometryArgv(BOX_CONTAINER, display, xauthority),
+  terminal: (owner) => appleTerminalArgv(BOX_CONTAINER, owner),
+  termPidList: appleTermPidListArgv,
+  termPidClean: appleTermPidCleanArgv,
+  boxChown: appleBoxChownArgv,
+  boxMigrate: (oldVolume, agentId, image) => appleBoxMigrateArgv(oldVolume, agentId, image, BOX_VOLUME),
+  boxMarkerCheck: (image) => appleBoxMarkerCheckArgv(image, BOX_VOLUME),
+  boxMarkerWrite: (image) => appleBoxMarkerWriteArgv(image, BOX_VOLUME),
+  df: appleDfArgv,
+  pruneSafe: applePruneSafeArgv,
+  removeImage: appleRemoveImageArgv,
+  removeVolumes: appleRemoveVolumesArgv
+}
+
+/** Il motore Apple container. */
+export const appleContainerEngine: BoxEngine = {
+  id: 'apple-container',
+  command: () => containerCliPath(),
+  childEnv: (env) => Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined)),
+  argv
+}

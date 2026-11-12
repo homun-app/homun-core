@@ -14,7 +14,7 @@
 // Il bot NON cancella: delete/rename/pin sono della UI (store/library).
 import { createHash } from 'node:crypto'
 // fase rilascio (A7): docker fuori dal PATH del Terminale
-import { resolveTool, dockerChildEnv } from '../tool-paths'
+import { activeBoxEngine } from '../sandbox/engine'
 import { join, extname, basename } from 'node:path'
 import { mkdirSync, readFileSync, writeFileSync, statSync, readdirSync, createReadStream, existsSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
@@ -382,18 +382,18 @@ export async function saveFileFromBox(
   const path = String(input.path ?? '').trim()
   if (!path) return { ok: false, error: 'the file path in the computer is required (relative to your home or /workspace/…)' }
   const owner = (await import('../sandbox')).boxOwnerOf(agentId)
-  const root = sandboxMode() === 'docker' ? '/box' : boxRoot()
-  const home1 = sandboxMode() === 'docker' ? `/box/home/${owner}` : boxDir(agentId)
-  const resolved = resolveBoxPath(path, root, home1, sandboxMode() === 'docker' ? (p: string) => p : (await import('node:fs')).realpathSync)
+  const root = sandboxMode() === 'box' ? '/box' : boxRoot()
+  const home1 = sandboxMode() === 'box' ? `/box/home/${owner}` : boxDir(agentId)
+  const resolved = resolveBoxPath(path, root, home1, sandboxMode() === 'box' ? (p: string) => p : (await import('node:fs')).realpathSync)
   if (!resolved.ok) return { ok: false, error: resolved.reason! }
   const boxAbs = resolved.abs!
 
   let size: number
-  if (sandboxMode() === 'docker') {
+  if (sandboxMode() === 'box') {
     const stat = deps.dockerStatSize ?? (async (agent, p) => {
       const { runDockerArgv } = await import('../sandbox')
-      const { dockerStatSizeArgv, BOX_CONTAINER } = await import('../sandbox/docker-argv')
-      const r = await runDockerArgv(dockerStatSizeArgv(BOX_CONTAINER, p), { timeoutMs: 15_000 })
+      const { BOX_CONTAINER } = await import('../sandbox/docker-argv')
+      const r = await runDockerArgv(activeBoxEngine().argv.statSize(BOX_CONTAINER, p), { timeoutMs: 15_000 })
       const n = Number(r.stdout.trim())
       return r.exitCode === 0 && Number.isFinite(n) ? n : null
     })
@@ -417,12 +417,13 @@ export async function saveFileFromBox(
   const dir = libraryItemDir(id)
   mkdirSync(dir, { recursive: true })
   const localPath = join(dir, name)
-  if (sandboxMode() === 'docker') {
+  if (sandboxMode() === 'box') {
     const cp = deps.dockerCp ?? (async (boxPath, dest) => {
       const { BOX_CONTAINER } = await import('../sandbox/docker-argv')
       const { execFile } = await import('node:child_process')
+      const engine = activeBoxEngine()
       await new Promise<void>((resolveP, rejectP) => {
-        execFile(resolveTool('docker'), ['cp', `${BOX_CONTAINER}:${boxPath}`, dest], { env: dockerChildEnv(process.env) }, (err) => (err ? rejectP(err) : resolveP()))
+        execFile(engine.command(), engine.argv.cpFromBox(BOX_CONTAINER, boxPath, dest), { env: engine.childEnv(process.env) }, (err) => (err ? rejectP(err) : resolveP()))
       })
     })
     try {

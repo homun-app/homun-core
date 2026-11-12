@@ -26,9 +26,10 @@ export function ComputerPanel({ agentId, onClose, embedded = false }: { agentId:
   useEffect(() => {
     void api.settingsGet<string>('sandbox.mode', 'host')
       .then(async (mode) => {
-        const docker = mode === 'docker'
-        setHasTerminal(docker)
-        if (!docker) {
+        // BX1: 'box' è il valore nuovo; 'docker' il valore storico (letto uguale)
+        const box = mode === 'box' || mode === 'docker'
+        setHasTerminal(box)
+        if (!box) {
           setHasScreen(false)
           return
         }
@@ -61,7 +62,7 @@ export function ComputerPanel({ agentId, onClose, embedded = false }: { agentId:
   }
   useEffect(() => {
     void api.settingsGet<string>('sandbox.mode', 'host').then((mode) => {
-      if (mode === 'docker') readDockerStatus(false)
+      if (mode === 'box' || mode === 'docker') readDockerStatus(false)
       else setDockerMode(false)
     }).catch(() => setDockerMode(false))
   }, [])

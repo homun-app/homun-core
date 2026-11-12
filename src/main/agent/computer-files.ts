@@ -77,7 +77,7 @@ function absOf(rel: string): string {
 }
 
 function boxAbsRoot(): string {
-  return sandboxMode() === 'docker' ? BOX_MOUNT : boxRoot()
+  return sandboxMode() === 'box' ? BOX_MOUNT : boxRoot()
 }
 
 // ---- il PERCORSO REALE: il confine sui symlink (T6) ----
@@ -94,7 +94,7 @@ function insideRoot(real: string, rootReal: string): boolean {
  */
 async function realPathInside(rel: string): Promise<string> {
   const abs = absOf(rel)
-  if (sandboxMode() === 'docker') {
+  if (sandboxMode() === 'box') {
     const r = await runDockerArgv(dockerRealpathArgv(BOX_CONTAINER, abs), { timeoutMs: 15_000 })
     if (r.exitCode !== 0) throw uiError(UI.rpcFilesNotFound)
     const real = r.stdout.trim()
@@ -172,7 +172,7 @@ export async function listBotFiles(agentId: string, path: unknown): Promise<File
   const rel = parsed.rel
   const real = await realPathInside(rel)
   let listing: { entries: FileEntry[]; truncated: boolean }
-  if (sandboxMode() === 'docker') {
+  if (sandboxMode() === 'box') {
     const r = await runDockerArgv(dockerFindListArgv(BOX_CONTAINER, real), { timeoutMs: 30_000 })
     if (r.exitCode !== 0) throw uiError(UI.rpcFilesNotFound)
     // l'output capped (cartelle enormi) si segnala: l'elenco è monco
@@ -203,7 +203,7 @@ export async function listBotFiles(agentId: string, path: unknown): Promise<File
 
 /** La dimensione di un file del box (docker: stat -c %s argv puro; host: stat). */
 async function fileSize(abs: string): Promise<number | null> {
-  if (sandboxMode() === 'docker') {
+  if (sandboxMode() === 'box') {
     const r = await runDockerArgv(dockerStatSizeArgv(BOX_CONTAINER, abs), { timeoutMs: 15_000 })
     const n = Number(r.stdout.trim())
     return r.exitCode === 0 && Number.isFinite(n) ? n : null
@@ -213,7 +213,7 @@ async function fileSize(abs: string): Promise<number | null> {
 
 /** I byte di un file del box (docker: base64 nel canale testuale, poi Buffer). */
 async function readBytes(abs: string): Promise<Buffer | null> {
-  if (sandboxMode() === 'docker') {
+  if (sandboxMode() === 'box') {
     const r = await runDockerArgv(dockerBoxReadB64Argv(BOX_CONTAINER, abs), { timeoutMs: 60_000 })
     if (r.exitCode !== 0) return null
     return Buffer.from(r.stdout.replace(/\s+/g, ''), 'base64')
@@ -257,7 +257,7 @@ export async function readBotFile(agentId: string, path: unknown): Promise<Files
 
 /** Un path è un FILE (non una cartella): i download prendono solo file. */
 async function isFile(real: string): Promise<boolean> {
-  if (sandboxMode() === 'docker') {
+  if (sandboxMode() === 'box') {
     const r = await runDockerArgv(dockerTestPathArgv(BOX_CONTAINER, '-f', real), { timeoutMs: 15_000 })
     return r.exitCode === 0
   }
@@ -266,7 +266,7 @@ async function isFile(real: string): Promise<boolean> {
 
 /** Un path esiste già (upload: senza overwrite si chiede «Sostituire?»). */
 async function pathExists(abs: string): Promise<boolean> {
-  if (sandboxMode() === 'docker') {
+  if (sandboxMode() === 'box') {
     const r = await runDockerArgv(dockerTestPathArgv(BOX_CONTAINER, '-e', abs), { timeoutMs: 15_000 })
     return r.exitCode === 0
   }
@@ -326,7 +326,7 @@ export async function importMacFile(agentId: string, dirPath: unknown, macPath: 
   }
   const bytes = await readFile(macPath) // i byte veri (T0): mai una stringa
   try {
-    if (sandboxMode() === 'docker') {
+    if (sandboxMode() === 'box') {
       // T0: il file arriva come 1000 con lo script COSTANTE (temporaneo + rename)
       const r = await runDockerArgv(dockerWriteFileArgv(BOX_CONTAINER, destAbs), { timeoutMs: 120_000, input: bytes })
       if (r.exitCode !== 0) throw new Error(r.stderr || `exit ${r.exitCode}`)

@@ -155,18 +155,18 @@ export async function prepareFileExchange(
     if (s > FILE_EXCHANGE_MAX_BYTES) {
       return { ok: false, error: `File too large (${s} bytes, limit ${FILE_EXCHANGE_MAX_BYTES}): refused.` }
     }
-    const root = sandboxMode() === 'docker' ? '/box' : boxRoot()
-    const home1 = sandboxMode() === 'docker' ? `/box/home/${agentId}` : boxDir(agentId)
-    const resolved = resolveBoxPath(boxRaw, root, home1, sandboxMode() === 'docker' ? (p) => p : realpathSync)
+    const root = sandboxMode() === 'box' ? '/box' : boxRoot()
+    const home1 = sandboxMode() === 'box' ? `/box/home/${agentId}` : boxDir(agentId)
+    const resolved = resolveBoxPath(boxRaw, root, home1, sandboxMode() === 'box' ? (p) => p : realpathSync)
     if (!resolved.ok) return { ok: false, error: resolved.reason! }
     return { ok: true, plan: { direction: 'to_box', macPath, boxPath: resolved.abs!, size: s } }
   }
   // copy_from_box
   const boxRaw = String(input.box_path ?? '')
   if (!boxRaw.trim()) return { ok: false, error: 'box_path is required (the file in the box to bring to the Mac).' }
-  const root = sandboxMode() === 'docker' ? '/box' : boxRoot()
-  const home1 = sandboxMode() === 'docker' ? `/box/home/${agentId}` : boxDir(agentId)
-  const resolved = resolveBoxPath(boxRaw, root, home1, sandboxMode() === 'docker' ? (p) => p : realpathSync)
+  const root = sandboxMode() === 'box' ? '/box' : boxRoot()
+  const home1 = sandboxMode() === 'box' ? `/box/home/${agentId}` : boxDir(agentId)
+  const resolved = resolveBoxPath(boxRaw, root, home1, sandboxMode() === 'box' ? (p) => p : realpathSync)
   if (!resolved.ok) return { ok: false, error: resolved.reason! }
   let boxSize = 0
   try {
