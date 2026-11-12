@@ -1,26 +1,19 @@
 #!/usr/bin/env node
-// Sonda Electron della fase «onboarding-a» (OA): la guida «Prepariamo Homun»
-// e tutto ciò che le gira intorno, DALLA FINESTRA con clic veri via CDP.
+// Sonda Electron della fase «guida» (G8): la guida del primo avvio DALLA
+// FINESTRA, con CLIC VERI via CDP. REGOLA NUOVA: la guida si attraversa SOLO
+// con clic veri — MAI saveProvider/advance via RPC per i passi della guida
+// (fu proprio quello a nascondere il difetto del clic che non faceva nulla).
 // L'app VERA (build di sviluppo in out/) su cartelle dati TEMPORANEE vuote,
-// Portachiavi finto, provider FINTO openai-compatible su 127.0.0.1. NESSUNA
-// RETE VERA, niente Composio, nessuna app collegata davvero. Copre:
-//   OA1: nessun «Bot» prima del daemon (la finestra CARICA), un solo bot
-//        principale con mainAgentId;
-//   OA2/OA3: welcome → cambio lingua (testi in inglese e ritorno in
-//        italiano) → model (il salvataggio del provider col modello chiude
-//        il passo DA SOLO) → approvals («Chiedi prima») → chat; il riavvio
-//        dell'app A METÀ GUIDA riporta allo STESSO passo;
-//   OA4: la card del focus → la scelta → le card app delle app NON collegate
-//        (zero chiamate al modello: zero token), la chiusura senza scelta;
-//   OA5: «Salta per ora» sul modello → messaggio scritto che RESTA con la
-//        riga «Per risponderti mi serve un modello» → salvataggio del
-//        provider → il messaggio parte UNA volta sola;
-//   l'adozione: dati di una «beta 4» simulata (un «Bot» vuoto senza
-//        mainAgentId) → la guida parte col bot ADOTTATO; dati con messaggi
-//        → NESSUNA guida.
-// Catture in docs/catture/onboarding-a/. A FINE SONDA si chiude ANCHE il
-// daemon di sviluppo (pid in daemon.lock dentro la cartella dati), la
-// cartella viene rimossa, nessun push.
+// Portachiavi finto, provider FINTO openai-compatible su 127.0.0.1 (con
+// l'elenco /v1/models per la prova della chiave). NESSUNA RETE VERA.
+// Copre: il percorso intero Tu → Modello (prova chiave sbagliata/giusta,
+// modello consigliato) → Permessi → Pronto → «Apri la chat»; il riavvio a
+// metà guida; «Salta per ora» + «Riprendi» e «Rifai da capo» da Impostazioni
+// per chi ha già scritto (OAC4); il compositore con la card del focus
+// aperta; la SECONDA attesa del modello (OAC2); il doppio clic sul focus
+// (OAC3); le larghezze 1440/1000/820 senza scorrimento orizzontale.
+// Catture guida-v2-* e oac-* in docs/catture/onboarding-a/. A FINE SONDA si
+// chiude ANCHE il daemon di sviluppo, la cartella viene rimossa, nessun push.
 import { spawn } from 'node:child_process'
 import { createServer } from 'node:http'
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
@@ -44,10 +37,22 @@ const check = (id, ok, note = '') => {
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
-// ---- il provider FINTO (openai-compatible, SSE su 127.0.0.1) ----
+// ---- il provider FINTO (openai-compatible su 127.0.0.1) ----
+const GOOD_KEY = 'chiave-finta-di-prova'
 const chatRequests = []
 const providerServer = createServer((req, res) => {
   const url = new URL(req.url ?? '/', 'http://127.0.0.1')
+  const auth = req.headers.authorization ?? ''
+  if (req.method === 'GET' && url.pathname.endsWith('/models')) {
+    if (auth !== `Bearer ${GOOD_KEY}`) {
+      res.writeHead(401, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ error: { message: 'Invalid API key' } }))
+      return
+    }
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ data: [{ id: 'finto' }, { id: 'finto-sciocco' }] }))
+    return
+  }
   if (req.method === 'POST' && url.pathname.endsWith('/chat/completions')) {
     let body = ''
     req.on('data', (c) => (body += c))
@@ -68,6 +73,7 @@ const providerServer = createServer((req, res) => {
 })
 await new Promise((r) => providerServer.listen(0, '127.0.0.1', r))
 const providerPort = providerServer.address().port
+const PROVIDER_BASE = `http://127.0.0.1:${providerPort}/v1`
 const callsWith = (text) => chatRequests.filter((c) => JSON.stringify(c).includes(text)).length
 
 // ---- l'app Electron (build di sviluppo) ----
@@ -115,6 +121,13 @@ const stopEverything = async (dataDir) => {
   // rete di sicurezza: l'helper condiviso cerca dall'AMBIENTE i daemon di questa sonda
   const r = await stopProbeDaemons('sandbot-fase-onboarding-a')
   if (r.left > 0) throw new Error(`daemon rimasti vivi: ${r.left}`)
+  // la porta del debugger dev'essere LIBERA prima di riavviare (il nuovo
+  // processo altrimenti non fa il bind e la pagina CDP non c'è mai)
+  for (let i = 0; i < 50; i++) {
+    try { await fetch(`http://127.0.0.1:${DEBUG_PORT}/json/list`) } catch { return }
+    await sleep(200)
+  }
+  throw new Error('la porta CDP non si libera')
 }
 
 // ---- CDP: pagina del renderer ----
@@ -185,12 +198,14 @@ const clickTestid = (testid) => pageEval(`
   ;(b ?? el).click()
   return 'cliccato'
 `)
-const setSelectValue = (testid, value) => pageEval(`
-  const sel = document.querySelector('[data-testid=${JSON.stringify(testid)}]')
-  if (!sel) throw new Error('select non trovata: ' + ${JSON.stringify(testid)})
-  const set = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value').set
-  set.call(sel, ${JSON.stringify(value)})
-  sel.dispatchEvent(new Event('change', { bubbles: true }))
+/** scrive in un input della guida col setter nativo (il valore VERO, l'evento VERO) */
+const setInputValue = (testid, value) => pageEval(`
+  const el = document.querySelector('[data-testid=${JSON.stringify(testid)}]')
+  if (!el) throw new Error('input non trovato: ' + ${JSON.stringify(testid)})
+  const proto = el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype
+  const set = Object.getOwnPropertyDescriptor(proto, 'value').set
+  set.call(el, ${JSON.stringify(value)})
+  el.dispatchEvent(new Event('input', { bubbles: true }))
   return 'scritto'
 `)
 const uiSend = (text) => pageEval(`
@@ -212,9 +227,6 @@ const startApp = async (dataDir) => {
   mkdirSync(dataDir, { recursive: true })
   app = launchApp(dataDir)
   page = await waitForPage()
-  // OA1: il caricamento del primo avvio dura dal mount di React alla risposta
-  // del daemon — si polla FITTO (60 ms) da SUBITO, prima ancora che window.sandbot
-  // esista, perché la finestra può essere brevissima su una macchina veloce
   const splashSeenHere = await waitDom(`!!document.querySelector('[data-testid="boot-splash"]')`, 8_000, 60)
   if (!(await waitDom(`typeof window.sandbot !== 'undefined' && !!window.sandbot.saveProvider`, 30_000))) {
     throw new Error('window.sandbot non disponibile dopo 30s')
@@ -223,195 +235,339 @@ const startApp = async (dataDir) => {
   return splashSeenHere
 }
 
-/** salva il provider FINTO e sceglie il modello principale (come fa la UI) */
-const saveFintoProvider = async () => {
-  await rpc(`saveProvider(${JSON.stringify({ id: 'finto', name: 'Finto (locale)', kind: 'openai-compatible', baseUrl: `http://127.0.0.1:${providerPort}/v1`, apiKey: 'chiave-finta-di-prova', enabled: true })})`)
-  await rpc(`settingsSet('models.main', ${JSON.stringify({ providerId: 'finto', model: 'finto', thinking: null })})`)
-}
-
-// ---- il percorso della guida fino alla chat (usato da più fasi) ----
-const runGuideToChat = async ({ modelAction, approvals = 'ask' }) => {
-  if (!(await waitDom(`!!document.querySelector('[data-testid="guide-step-welcome"]')`, 30_000))) throw new Error('la guida non è al benvenuto')
-  await clickTestid('guide-continue') // Iniziamo
-  if (!(await waitDom(`!!document.querySelector('[data-testid="guide-step-model"]')`, 10_000))) throw new Error('la guida non è al passo model')
-  if (modelAction === 'skip') {
-    await clickTestid('guide-skip')
-  } else if (modelAction === 'save') {
-    await saveFintoProvider()
-    await rpc(`settingsSet('models.main', ${JSON.stringify({ providerId: 'finto', model: 'finto', thinking: null })})`)
-  }
-  if (!(await waitDom(`!!document.querySelector('[data-testid="guide-step-approvals"]')`, 20_000))) throw new Error('la guida non è arrivata alle autorizzazioni')
-  await clickTestid(`guide-approvals-${approvals}`)
-  return waitDom(`!!document.querySelector('form textarea')`, 20_000) // la chat
+/** dai Permessi alla chat, clic per clic (con le attese tra un clic e l'altro) */
+const approvalsToChat = async () => {
+  await clickTestid('guide-approvals-ask')
+  if (!(await waitDom(`!document.querySelector('[data-testid="guide-continue"]')?.disabled`, 10_000))) throw new Error('Continua non attivo dopo la scelta dei permessi')
+  await clickTestid('guide-continue') // → Pronto
+  if (!(await waitDom(`!!document.querySelector('[data-testid="guide-step-ready"]')`, 10_000))) throw new Error('il passo Pronto non arriva')
+  await clickTestid('guide-continue') // «Apri la chat»
+  if (!(await waitDom(`!!document.querySelector('form textarea')`, 20_000))) throw new Error('la chat non arriva')
 }
 
 const guideStep = () => pageEval(`return document.querySelector('[data-testid^="guide-step-"]')?.getAttribute('data-testid') ?? null`)
-
-// il testo visibile della vista corrente (guida o chat)
 const visibleText = () => pageEval(`return document.body.innerText`)
+const countText = async (needle) => ((await visibleText()).split(needle).length - 1)
+
+// ---- il percorso della guida con CLIC VERI (il cuore della sonda) ----
+
+/** il passo Tu: nome, faccia, colore (tutti clic veri) */
+const tuStep = async ({ name = 'Nanna', family = 'jelly', color = 'c3' } = {}) => {
+  if (!(await waitDom(`!!document.querySelector('[data-testid="guide-step-welcome"]')`, 30_000))) throw new Error('la guida non è al passo Tu')
+  await setInputValue('guide-name-input', name)
+  await clickTestid(`guide-family-${family}`)
+  await clickTestid(`guide-color-${color}`)
+  // l'anteprima è immediata: la mascotte grande ha già la faccia scelta
+  const preview = await pageEval(`return !!document.querySelector('[data-testid="guide-scene"] .bot--${family}')`)
+  await clickTestid('guide-continue')
+  return preview
+}
+
+/** il passo Modello dal pannello «Compatibile OpenAI» col provider finto */
+const modelStepViaCompatibile = async ({ key = GOOD_KEY } = {}) => {
+  if (!(await waitDom(`!!document.querySelector('[data-testid="guide-provider-others"]')`, 20_000))) throw new Error('la griglia dei provider non si vede')
+  await clickTestid('guide-provider-others')
+  if (!(await waitDom(`!!document.querySelector('[data-testid="guide-other-openai-compatible"]')`, 10_000))) throw new Error('l\'elenco Altri… non si apre')
+  await clickTestid('guide-other-openai-compatible')
+  await setInputValue('guide-baseurl-input', PROVIDER_BASE)
+  await setInputValue('guide-key-input', key)
+  await clickTestid('guide-key-probe')
+}
 
 try {
-  // ================= FASE 1: dati vuoti — la guida vera e propria =================
-  const DATA1 = join(TMP, 'uno')
-  log('FASE 1: primo avvio su dati vuoti…')
-  const splashSeen = await startApp(DATA1)
-  check('OA1a la finestra carica finché il daemon non dice lo stato (boot splash)', splashSeen, splashSeen ? '' : 'lo splash non è stato visto (daemon già pronto?)')
-  if (splashSeen) {
-    // durante il caricamento il main NON ha creato nessun «Bot» per conto suo:
-    // nella corsa di una volta il bot compariva SENZA mainAgentId (creato dal
-    // main prima che il daemon decidesse) — ora o non c'è ancora, o c'è GIÀ
-    // col mainAgentId scritto (lo crea solo il daemon, nella transazione)
-    const early = await rpc('listAgents()').catch(() => [])
-    const earlyMain = await rpc(`settingsGet('mainAgentId', null)`).catch(() => null)
-    check("OA1b nessun «Bot» orfano: durante il caricamento o non c'è bot, o c'è già col mainAgentId",
-      Array.isArray(early) && (early.length === 0 || earlyMain === early[0].id),
-      `agenti: ${early?.length}, mainAgentId: ${earlyMain}`)
-  }
-  // OA1: la guida appare e c'è UN solo bot principale
-  check('OA1c la guida «Prepariamo Homun» appare al primo avvio', await waitDom(`!!document.querySelector('[data-testid="guide-step-welcome"]')`, 25_000))
-  const agents1 = await rpc('listAgents()')
-  const main1 = await rpc(`settingsGet('mainAgentId', null)`)
-  check('OA1d UN solo bot, ed è il principale (mainAgentId)', agents1.length === 1 && main1 === agents1[0].id, `${agents1.length} agenti, main=${main1}`)
+/** ---------------- FASE 1: il percorso intero, con clic veri ---------------- */
+log('FASE 1: il percorso della guida, tutto con clic veri…')
+const DATA1 = join(TMP, 'uno')
+const splashSeen = await startApp(DATA1)
+check('G8-1a la finestra carica finché il daemon non dice lo stato (boot splash)', splashSeen, splashSeen ? '' : 'splash non visto')
+check('G8-1b la guida appare al primo avvio (passo Tu, non più «Prepariamo Homun»)',
+  await waitDom(`!!document.querySelector('[data-testid="guide-step-welcome"]') && document.body.innerText.includes('Diamo una faccia al tuo bot')`, 25_000))
+check('G8-1c la scena: la mascotte Bot VERA (svg) e la nuvoletta col saluto del mockup',
+  await waitDom(`!!document.querySelector('[data-testid="guide-scene"] svg') && document.body.innerText.includes('Ciao! Sono il tuo nuovo bot. Come mi chiami?')`, 10_000))
+check('G8-1d niente emoji nella guida (il 🧚 è stato via)', !((await visibleText()).includes('🧚')))
+await shot('guida-v2-tu-1440-chiaro.png')
+await dark(true)
+await shot('guida-v2-tu-1440-scuro.png')
+await dark(false)
 
-  // OA2: la guida si vede; OA3 welcome
-  await shot('guida-benvenuto-1440-chiaro.png')
+const previewOk = await tuStep()
+check('G8-1e l\'anteprima della faccia è immediata sulla mascotte grande', previewOk === true)
+check('G8-1f «Continua» del passo Tu salva nome e avatar (agents:update, clic vero)',
+  await waitDom(`!!document.querySelector('[data-testid="guide-step-model"]')`, 15_000))
+const agents1 = await rpc('listAgents()')
+check('G8-1g il bot principale ha il nome e l\'avatar scelti', agents1[0]?.name === 'Nanna' && agents1[0]?.avatar?.family === 'jelly' && agents1[0]?.avatar?.color === 'c3',
+  `${agents1[0]?.name} ${JSON.stringify(agents1[0]?.avatar)}`)
 
-  // OA3: la lingua cambia SUBITO i testi (en, poi di nuovo it)
-  await setSelectValue('guide-language-select', 'en')
-  check('OA3a la lingua inglese cambia subito i testi della guida',
-    await waitDom(`document.querySelector('[data-testid="guide-step-welcome"]')?.innerText.includes("Let's set up Homun")`, 8_000),
-    await pageEval(`return document.querySelector('[data-testid="guide-step-welcome"]')?.innerText.split('\\n')[0] ?? ''`))
-  await setSelectValue('guide-language-select', 'it')
-  check('OA3b e tornare all\'italiano ririscrive i testi',
-    await waitDom(`document.querySelector('[data-testid="guide-step-welcome"]')?.innerText.includes('Prepariamo Homun')`, 8_000))
+// la griglia del passo Modello
+check('G8-1h la griglia: Anthropic (consigliato), OpenAI, OpenRouter, Altri…, Integrato — niente Google',
+  await waitDom(`!!document.querySelector('[data-testid="guide-provider-anthropic"]') && !!document.querySelector('[data-testid="guide-provider-others"]') && !!document.querySelector('[data-testid="guide-provider-local"]') && !document.body.innerText.includes('Google')`, 10_000)
+  && (await visibleText()).includes('consigliato'))
+await shot('guida-v2-modello-1440-chiaro.png')
+await dark(true)
+await shot('guida-v2-modello-1440-scuro.png')
+await dark(false)
 
-  // OA3: il passo model con le strade di oggi
-  await clickTestid('guide-continue')
-  check('OA3c il passo modello mostra le strade (cloud consigliato, Integrato sul Mac idoneo)',
-    await waitDom(`!!document.querySelector('[data-testid="guide-step-model"]') && !!document.querySelector('[data-testid="guide-road-cloud"]') && !!document.querySelector('[data-testid="guide-road-local"]')`, 10_000))
-  await shot('guida-modello-1440-chiaro.png')
-  await dark(true)
-  await shot('guida-modello-1440-scuro.png')
-  await dark(false)
+// le larghezze: mai scorrimento orizzontale, mascotte sempre visibile
+for (const w of [1000, 820]) {
+  await setWindowWidth(w)
+  const noHScroll = await pageEval('return document.documentElement.scrollWidth <= window.innerWidth')
+  const mascotVisible = await pageEval(`return !!(document.querySelector('[data-testid="guide-scene"] .bot') && document.querySelector('[data-testid="guide-scene"] .bot').getBoundingClientRect().width > 0)`)
+  check(`G8-1i a ${w}px niente scorrimento orizzontale e mascotte visibile`, noHScroll === true && mascotVisible === true,
+    `scrollWidth ${await pageEval('return document.documentElement.scrollWidth')} vs ${w}`)
+  if (w === 1000) await shot('guida-v2-modello-1000-chiaro.png')
+  if (w === 820) await shot('guida-v2-modello-820-chiaro.png')
+}
+await setWindowWidth(1440)
 
-  // OA3: il salvataggio del provider col modello chiude il passo DA SOLO
-  const llmBefore = chatRequests.length
-  await saveFintoProvider()
-  check('OA3d il passo modello si chiude DA SOLO al salvataggio del provider col modello',
-    await waitDom(`!!document.querySelector('[data-testid="guide-step-approvals"]')`, 15_000))
+// «Altri…» → «Compatibile OpenAI»: chiave SBAGLIATA (il finto risponde 401)
+await modelStepViaCompatibile({ key: 'chiave-sbagliata' })
+check('G8-1l chiave sbagliata: la frase dell\'errore in parole (invalid-key)',
+  await waitDom(`!!document.querySelector('[data-testid="guide-probe-error"]') && document.body.innerText.includes('Questa chiave non funziona') && document.body.innerText.includes('non autorizzata')`, 15_000),
+  await pageEval(`return document.querySelector('[data-testid="guide-probe-error"]')?.innerText ?? ''`))
+await shot('oac-chiave-sbagliata-1440-chiaro.png')
 
-  // OA3: autorizzazioni — «Automatico» acceso col modello, si sceglie «Chiedi prima»
-  const autoEnabled = await pageEval(`return !document.querySelector('[data-testid="guide-approvals-auto"]')?.disabled`)
-  check('OA3e «Automatico» è disponibile col modello', autoEnabled === true)
-  await shot('guida-autorizzazioni-1440-chiaro.png')
-  await clickTestid('guide-approvals-ask')
-  check('OA3f la scelta «Chiedi prima» chiude la guida ed entra in chat', await waitDom(`!!document.querySelector('form textarea')`, 15_000))
-  const mode = await rpc(`settingsGet('approvals.mode', null)`)
-  const modeSet = await rpc(`settingsGet('approvals.modeSet', false)`)
-  check('OA3g approvals.mode=ask e modeSet scritti', mode === 'ask' && modeSet === true, `mode=${mode} modeSet=${modeSet}`)
+// «← Altri provider»: dal pannello all'elenco Altri…, e di lì alla griglia
+await clickTestid('guide-back-providers')
+check("G8-1m «← Altri provider» torna all'elenco Altri… e poi alla griglia",
+  await waitDom(`!!document.querySelector('[data-testid="guide-other-openai-compatible"]')`, 10_000)
+  && (await clickTestid('guide-back-providers'), true)
+  && await waitDom(`!!document.querySelector('[data-testid="guide-provider-others"]')`, 10_000))
 
-  // OA4: la card del focus, deterministica e senza token
-  check('OA4a il bot principale apre col saluto e la card «Su cosa vuoi che ti aiuti per primo?»',
-    await waitDom(`!!document.querySelector('[data-testid="widget-option-posta"]')`, 15_000) &&
-    (await visibleText()).includes('Su cosa vuoi che ti aiuti per primo?'))
-  await shot('chat-card-focus-1440-chiaro.png')
-  await dark(true)
-  await shot('chat-card-focus-1440-scuro.png')
-  await dark(false)
-  check('OA4b la guida NON ha speso token: nessuna chiamata al modello', chatRequests.length === llmBefore, `chiamate: ${chatRequests.length - llmBefore}`)
-  // la scelta: le card app delle app NON collegate (gmail e gcalendar, non collegate qui)
-  await clickTestid('widget-option-posta')
-  check('OA4c la scelta deterministica: la frase fissa «Va bene: Posta e calendario»',
-    await waitDom(`document.body.innerText.includes('Va bene: Posta e calendario')`, 15_000))
-  const textAfterChoice = await visibleText()
-  check('OA4d le card app del focus (Gmail e Google Calendar) sono offerte da COLLEGARE',
-    textAfterChoice.includes('Gmail') && textAfterChoice.includes('Google Calendar') && !textAfterChoice.includes('Connessa') && textAfterChoice.includes('Connetti'),
-    'card app presenti col bottone Connetti, mai «Connessa»')
-  await shot('chat-card-app-1440-chiaro.png')
-  const botAfter = (await rpc('listAgents()'))[0]
-  check('OA4e il bot NON è stato rinominato e la descrizione ha la riga del focus',
-    botAfter.name === 'Bot' && (botAfter.description ?? '').includes('Focus iniziale:'), `${botAfter.name}: ${botAfter.description?.slice(0, 60)}`)
-  check('OA4f la scelta del focus NON ha speso token', chatRequests.length === llmBefore)
-  await stopEverything(DATA1)
+// chiave GIUSTA: «Funziona», il consigliato già scelto, Continua
+await modelStepViaCompatibile()
+check('G8-1n chiave giusta: la riga verde «Funziona. La chiave resta nel Portachiavi del Mac.»',
+  await waitDom(`!!document.querySelector('[data-testid="guide-probe-ok"]')`, 15_000))
+const recommendedPressed = await pageEval(`return document.querySelector('[data-testid="guide-model-finto"]')?.getAttribute('aria-pressed')`)
+check('G8-1o il modello consigliato è GIÀ scelto (il primo dell\'elenco: finto)', recommendedPressed === 'true', `aria-pressed=${recommendedPressed}`)
+await shot('guida-v2-modello-pannello-1440-chiaro.png')
+await clickTestid('guide-continue')
+check('G8-1p «Continua» del passo Modello porta ai Permessi (salvataggio col clic, mai RPC)',
+  await waitDom(`!!document.querySelector('[data-testid="guide-step-approvals"]')`, 20_000))
+const main1 = await rpc(`settingsGet('models.main', null)`)
+const providers1 = await rpc('listProviders()')
+const saved1 = providers1.find((p) => p.kind === 'openai-compatible')
+check('G8-1q models.main scritto col modello scelto e il provider salvato con la chiave nel Portachiavi',
+  main1?.model === 'finto' && !!saved1 && saved1.id === main1.providerId && saved1.hasKey === true,
+  `main=${JSON.stringify(main1)}`)
 
-  // ================= FASE 2: salta il modello, il messaggio resta in attesa =================
-  const DATA2 = join(TMP, 'due')
-  log('FASE 2: modello saltato, messaggio in attesa…')
-  await startApp(DATA2)
-  check('OA5a la guida riparte su dati nuovi', await runGuideToChat({ modelAction: 'skip' }) === true)
-  // la card del focus si può CHIUDERE senza scegliere
-  check('OA5b la card del focus si chiude senza scegliere («Chiudi»)',
-    await waitDom(`!!document.querySelector('[data-testid="focus-dismiss"]')`, 10_000) && (await clickTestid('focus-dismiss'), true) &&
-      await waitDom(`!document.querySelector('[data-testid="focus-dismiss"]')`, 10_000))
-  // il messaggio senza modello resta, con la riga e il bottone
-  const held = 'senza modello, mi senti?'
-  await uiSend(held)
-  check('OA5c il messaggio RESTA in chat come messaggio dell\'utente',
-    await waitDom(`document.body.innerText.includes(${JSON.stringify(held)})`, 15_000))
-  check('OA5d sotto compare la riga «Per risponderti mi serve un modello» col bottone',
-    await waitDom(`!!document.querySelector('[data-testid="need-model-choose"]') && document.body.innerText.includes('Per risponderti mi serve un modello')`, 15_000))
-  await shot('chat-messaggio-in-attesa-1440-chiaro.png')
-  check('OA5e il messaggio in attesa NON ha chiamato il modello', callsWith(held) === 0)
-  // il modello arriva: il messaggio parte UNA volta
-  await saveFintoProvider()
-  check('OA5f col modello salvato il messaggio parte e arriva la risposta',
-    await waitDom(`document.body.innerText.includes('Ecco fatto: sono qui.')`, 40_000))
-  await sleep(2_500) // eventuale seconda corsa (che NON deve esserci)
-  check('OA5g il messaggio è partito UNA volta sola', callsWith(held) === 1, `chiamate col messaggio: ${callsWith(held)}`)
-  await stopEverything(DATA2)
+// Permessi → Pronto → «Apri la chat»
+check('G8-1r passo Permessi: titolo del mockup e «Fai quello che ti chiedo» ATTIVO col modello',
+  await waitDom(`document.body.innerText.includes('Quanto posso fare da solo?')`, 10_000)
+  && (await pageEval(`return !document.querySelector('[data-testid="guide-approvals-auto"]')?.disabled`)) === true)
+await shot('guida-v2-permessi-1440-chiaro.png')
+await dark(true)
+await shot('guida-v2-permessi-1440-scuro.png')
+await dark(false)
+const contDisabledBefore = await pageEval(`return document.querySelector('[data-testid="guide-continue"]')?.disabled`)
+check('G8-1s «Continua» spento finché non si sceglie', contDisabledBefore === true)
+await clickTestid('guide-approvals-ask')
+await shot('oac-permessi-scelto-1440-chiaro.png')
+await clickTestid('guide-continue')
+check('G8-1t il passo Pronto (solo UI): «Tutto pronto.» col riepilogo',
+  await waitDom(`!!document.querySelector('[data-testid="guide-step-ready"]') && document.body.innerText.includes('Tutto pronto.')`, 10_000))
+await shot('guida-v2-pronto-1440-chiaro.png')
+await dark(true)
+await shot('guida-v2-pronto-1440-scuro.png')
+await dark(false)
+await clickTestid('guide-continue') // «Apri la chat»
+check('G8-1u «Apri la chat» porta in chat, con la card del focus (OA4) e lo STESSO bot',
+  await waitDom(`!!document.querySelector('[data-testid="widget-option-posta"]')`, 20_000)
+  && (await rpc('listAgents()'))[0]?.name === 'Nanna')
 
-  // ================= FASE 3: riavvio a metà guida → stesso passo =================
-  const DATA3 = join(TMP, 'tre')
-  log('FASE 3: riavvio a metà guida…')
-  await startApp(DATA3)
-  check('OA2a la guida riparte (dati tre)', await waitDom(`!!document.querySelector('[data-testid="guide-step-welcome"]')`, 25_000))
-  await clickTestid('guide-continue')
-  check('OA2b la guida è al passo model', await waitDom(`!!document.querySelector('[data-testid="guide-step-model"]')`, 10_000))
-  await stopEverything(DATA3)
-  // riavvio COMPLETO (app E daemon) sulla stessa cartella: stesso passo
-  await startApp(DATA3)
-  check('OA2c riavvio a metà guida: la finestra riporta allo STESSO passo (model)',
-    await waitDom(`!!document.querySelector('[data-testid="guide-step-model"]')`, 30_000), `step: ${await guideStep()}`)
-  await stopEverything(DATA3)
+// OAC4.1: il compositore con la card del focus APERTA diventa la risposta libera
+const llmBefore = chatRequests.length
+const freeText = 'vorrei partire dalla posta per favore'
+await uiSend(freeText)
+check('OAC4.1 il messaggio nella casella con la card APERTA è UNA chiamata col testo (risposta libera)',
+  await waitDom(`document.body.innerText.includes('Ecco fatto: sono qui.')`, 40_000) && callsWith(freeText) === 1,
+  `chiamate col testo: ${callsWith(freeText)}`)
+await shot('oac-composer-card-aperta-1440-chiaro.png')
 
-  // ================= FASE 4: l'adozione della beta 4, e chi ha già scritto =================
-  log('FASE 4: adozione del «Bot» della beta 4…')
-  // simula la beta 4: un «Bot» VUOTO, niente mainAgentId, niente onboarding
-  const db3 = new DatabaseSync(join(DATA3, 'data', 'sandbot.db'))
-  db3.prepare("DELETE FROM settings WHERE key IN ('mainAgentId', 'onboarding.state', 'onboarding.done')").run()
-  db3.prepare('DELETE FROM entries').run()
-  const betaRow = db3.prepare("SELECT id FROM agents WHERE name = 'Bot'").get()
-  db3.close()
-  await startApp(DATA3)
-  check('OA1e il «Bot» vuoto della beta viene ADOZZATO: la guida parte con LUI',
-    await waitDom(`!!document.querySelector('[data-testid="guide-step-welcome"]')`, 30_000))
-  const agentsAdopt = await rpc('listAgents()')
-  const mainAdopt = await rpc(`settingsGet('mainAgentId', null)`)
-  check('OA1f adottato: UN solo bot, STESSO id, mainAgentId suo',
-    agentsAdopt.length === 1 && betaRow && agentsAdopt[0].id === betaRow.id && mainAdopt === betaRow.id,
-    `${agentsAdopt.length} agenti, id=${agentsAdopt[0]?.id}, atteso=${betaRow?.id}`)
-  await stopEverything(DATA3)
+// OAC2/OAC4.4: la VERA doppia attesa — modello tolto → attesa (riga 1) →
+// il modello torna (il messaggio riparte da solo e il bot risponde) → tolto
+// di nuovo → la SECONDA attesa ha la SUA riga col bottone
+const firstWait = 'prima attesa del modello'
+await rpc(`settingsSet('models.main', null)`)
+await uiSend(firstWait)
+check('OAC4.4a tolto il modello: la PRIMA attesa ha la riga «mi serve un modello» col bottone',
+  await waitDom(`!!document.querySelector('[data-testid="need-model-choose"]')`, 20_000)
+  && (await countText('Per risponderti mi serve un modello')) === 1,
+  `righe: ${await countText('Per risponderti mi serve un modello')}`)
+await shot('oac-prima-attesa-1440-chiaro.png')
+// il modello torna: il messaggio trattenuto riparte DA SOLO e il bot risponde
+await rpc(`settingsSet('models.main', ${JSON.stringify(main1)})`)
+check('OAC4.4b il modello torna: il messaggio della prima attesa riparte da solo (una chiamata sola)',
+  await waitDom(`(document.body.innerText.match(/Ecco fatto: sono qui\./g) ?? []).length >= 2`, 40_000)
+  && callsWith(firstWait) === 1,
+  `chiamate: ${callsWith(firstWait)}`)
+const secondWait = 'seconda attesa del modello'
+await rpc(`settingsSet('models.main', null)`)
+await uiSend(secondWait)
+check('OAC4.4c la SECONDA attesa ha la SUA riga (due in tutto) col bottone',
+  await waitDom(`(document.body.innerText.match(/Per risponderti mi serve un modello/g) ?? []).length >= 2`, 20_000)
+  && await waitDom(`!!document.querySelector('[data-testid="need-model-choose"]')`, 5_000),
+  `righe: ${await countText('Per risponderti mi serve un modello')}`)
+await shot('oac-seconda-attesa-1440-chiaro.png')
+check('OAC4.4d il messaggio della seconda attesa NON ha chiamato il modello', callsWith(secondWait) === 0)
+await stopEverything(DATA1)
 
-  // ...e chi ha GIA' scritto in chat non vede nessuna guida
-  const db4 = new DatabaseSync(join(DATA3, 'data', 'sandbot.db'))
-  db4.prepare("INSERT INTO entries(agent_id, kind, role, content, meta, created_at) VALUES(?, 'message', 'user', 'ciao dalla beta', NULL, ?)")
-    .run(betaRow.id, Date.now())
-  db4.close()
-  await startApp(DATA3)
-  await sleep(2_500) // il tempo di dire onboarding:state
-  const guideAfterMessages = await pageEval(`return !!document.querySelector('[data-testid^="guide-step-"]')`)
-  const doneAfterMessages = await rpc(`settingsGet('onboarding.done', false)`)
-  check('OA1g chi ha già messaggi NON rifa la guida (e onboarding.done si scrive da solo)',
-    guideAfterMessages === false && doneAfterMessages === true, `guida=${guideAfterMessages} done=${doneAfterMessages}`)
-  await shot('chat-chi-ha-gia-scritto-1440-chiaro.png')
-  await stopEverything(DATA3)
+/** ---------------- FASE 2: riavvio a metà guida → stesso passo ---------------- */
+const DATA2 = join(TMP, 'due')
+log('FASE 2: riavvio a metà guida…')
+await startApp(DATA2)
+check('G8-2a la guida riparte (dati due)', await waitDom(`!!document.querySelector('[data-testid="guide-step-welcome"]')`, 25_000))
+await tuStep({ name: 'Bot' })
+await waitDom(`!!document.querySelector('[data-testid="guide-step-model"]')`, 10_000)
+await stopEverything(DATA2)
+await startApp(DATA2)
+check('G8-2b riavvio a metà guida: la finestra riporta allo STESSO passo (model)',
+  await waitDom(`!!document.querySelector('[data-testid="guide-step-model"]')`, 30_000), `step: ${await guideStep()}`)
+await stopEverything(DATA2)
 
-  // ---- pulizia finale: 0 daemon e 0 llama-server ----
-  const leftDaemons = findProbeDaemons('sandbot-fase-onboarding-a')
-  check('PULIZIA nessun daemon della sonda vivo', leftDaemons.length === 0, leftDaemons.map((d) => d.pid).join(','))
-  const llama = await import('node:child_process').then((c) => c.spawnSync('/usr/bin/pgrep', ['-fl', 'llama-server'], { encoding: 'utf8' }))
-  const llamaMine = (llama.stdout ?? '').split('\n').filter((l) => l.includes(TMP))
-  check('PULIZIA nessun llama-server della sonda vivo', llamaMine.length === 0, llamaMine.join(' | ') || 'nessuno')
+/** ---------- FASE 3: salta il modello, «Riprendi» e «Rifai da capo» (OAC4) ---------- */
+const DATA3 = join(TMP, 'tre')
+log('FASE 3: salta il modello, Riprendi e Rifai da capo…')
+await startApp(DATA3)
+await tuStep({ name: 'Bot' })
+await waitDom(`!!document.querySelector('[data-testid="guide-step-model"]')`, 10_000)
+await clickTestid('guide-skip')
+check('G8-3a «Salta per ora» porta ai Permessi', await waitDom(`!!document.querySelector('[data-testid="guide-step-approvals"]')`, 15_000))
+await approvalsToChat()
+
+// OAC4.2: «Rifai da capo» per chi ha GIÀ scritto
+await uiSend('ciao, ricominciamo')
+await waitDom(`document.body.innerText.includes('Ecco fatto: sono qui.')`, 40_000)
+// ⌘, apre le Impostazioni (input TRUSTED del CDP)
+await page.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: ',', code: 'Comma', windowsVirtualKeyCode: 188, nativeVirtualKeyCode: 188, modifiers: 4 })
+await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: ',', code: 'Comma', windowsVirtualKeyCode: 188, nativeVirtualKeyCode: 188, modifiers: 4 })
+check('G8-3b le Impostazioni si aprono con ⌘,', await waitDom(`!!document.querySelector('[data-testid="settings-guide-row"]')`, 10_000))
+await shot('oac-impostazioni-guida-1440-chiaro.png')
+await pageEval(`
+  const row = document.querySelector('[data-testid="settings-guide-row"]')
+  const btn = [...row.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Rifai da capo')
+  if (!btn) throw new Error('bottone Rifai da capo non trovato')
+  btn.click()
+  return 'cliccato'
+`)
+check('OAC4.2 «Rifai da capo» apre la guida ANCHE per chi ha già scritto (passo Tu)',
+  await waitDom(`!!document.querySelector('[data-testid="guide-step-welcome"]')`, 15_000))
+// si attraversa di nuovo: qui il modello era stato SALTATO, così la guida
+// riaperta rifà anche il passo Modello (si salta di nuovo, clic vero)
+await clickTestid('guide-continue')
+check('OAC4.2b la guida riaperta rifà il passo Modello (saltato: si rivede la griglia)',
+  await waitDom(`!!document.querySelector('[data-testid="guide-step-model"]')`, 15_000))
+await clickTestid('guide-skip')
+check('OAC4.2c saltato di nuovo, si torna ai Permessi',
+  await waitDom(`!!document.querySelector('[data-testid="guide-step-approvals"]')`, 15_000))
+await approvalsToChat()
+check('OAC4.2d di nuovo in chat: lo STESSO bot e la card del focus NON doppia',
+  await waitDom(`!!document.querySelector('form textarea')`, 20_000)
+  && (await countText('Su cosa vuoi che ti aiuti per primo?')) <= 1
+  && ((await rpc('listAgents()'))[0]?.name === 'Bot'))
+await shot('oac-rifai-da-capo-1440-chiaro.png')
+
+// OAC4.3: «Riprendi» su un passo SALTATO (il model di FASE 3 è saltato)
+await page.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: ',', code: 'Comma', windowsVirtualKeyCode: 188, nativeVirtualKeyCode: 188, modifiers: 4 })
+await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: ',', code: 'Comma', windowsVirtualKeyCode: 188, nativeVirtualKeyCode: 188, modifiers: 4 })
+await waitDom(`!!document.querySelector('[data-testid="settings-guide-row"]')`, 10_000)
+await pageEval(`
+  const row = document.querySelector('[data-testid="settings-guide-row"]')
+  const btn = [...row.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Riprendi')
+  if (!btn) throw new Error('bottone Riprendi non trovato')
+  btn.click()
+  return 'cliccato'
+`)
+check('OAC4.3 «Riprendi» riapre la guida SUL passo model saltato',
+  await waitDom(`!!document.querySelector('[data-testid="guide-step-model"]')`, 15_000), `step: ${await guideStep()}`)
+await shot('oac-riprendi-model-1440-chiaro.png')
+await stopEverything(DATA3)
+
+/** ---------- FASE 4: il doppio clic sul focus (OAC3/OAC4.5) ---------- */
+const DATA4 = join(TMP, 'quattro')
+log('FASE 4: doppio clic sul focus…')
+await startApp(DATA4)
+await tuStep({ name: 'Bot' })
+await modelStepViaCompatibile()
+await waitDom(`!!document.querySelector('[data-testid="guide-probe-ok"]')`, 15_000)
+await clickTestid('guide-continue')
+await waitDom(`!!document.querySelector('[data-testid="guide-step-approvals"]')`, 20_000)
+await approvalsToChat()
+await waitDom(`!!document.querySelector('[data-testid="widget-option-posta"]')`, 20_000)
+// un clic VERO sulla prima opzione, poi la SECONDA chiamata (in ritardo) via
+// RPC sulla STESSA opzione: le opzioni scomparse non si possono più cliccare,
+// ma una chiamata duplicata (due finestre, un clic arrivato tardi) non deve
+// rifare frasi né card
+await clickTestid('widget-option-posta')
+await sleep(800)
+const agent4 = (await rpc('listAgents()'))[0]
+const entries4 = await rpc(`getEntries(${JSON.stringify(agent4.id)}, 0)`)
+const focusEntry4 = entries4.find((e) => e.meta?.onboardingFocus === true)
+if (!focusEntry4) throw new Error('entry del focus non trovata')
+const dup = await rpc(`widgetRespond(${JSON.stringify(agent4.id)}, ${focusEntry4.id}, 'posta')`)
+check('OAC4.5-pre la chiamata duplicata è rifiutata dal daemon ({ ok: false })', JSON.stringify(dup) === JSON.stringify({ ok: false }), JSON.stringify(dup))
+await sleep(1_200)
+check('OAC4.5 doppio clic sul focus: la frase fissa UNA volta sola',
+  (await countText('Va bene: Posta e calendario')) === 1, `frasi: ${await countText('Va bene: Posta e calendario')}`)
+const botAfter = (await rpc('listAgents()'))[0]
+check('OAC4.5b la riga «Focus iniziale» nella descrizione UNA volta sola',
+  ((botAfter.description ?? '').match(/Focus iniziale:/g) ?? []).length === 1, botAfter.description?.slice(0, 80))
+await shot('oac-doppio-focus-1440-chiaro.png')
+await stopEverything(DATA4)
+
+/** ---------- FASE 5: l'adozione della beta 4, e chi ha già scritto ---------- */
+log('FASE 5: adozione del «Bot» della beta 4…')
+const DATA5 = join(TMP, 'cinque')
+await startApp(DATA5)
+await waitDom(`!!document.querySelector('[data-testid="guide-step-welcome"]')`, 25_000)
+await stopEverything(DATA5)
+const db5 = new DatabaseSync(join(DATA5, 'data', 'sandbot.db'))
+db5.prepare("DELETE FROM settings WHERE key IN ('mainAgentId', 'onboarding.state', 'onboarding.done')").run()
+db5.prepare('DELETE FROM entries').run()
+const betaRow = db5.prepare("SELECT id FROM agents WHERE name = 'Bot'").get()
+db5.close()
+await startApp(DATA5)
+check('G8-5a il «Bot» vuoto della beta viene ADOZZATO: la guida parte con LUI',
+  await waitDom(`!!document.querySelector('[data-testid="guide-step-welcome"]')`, 30_000))
+const agentsAdopt = await rpc('listAgents()')
+check('G8-5b adottato: UN solo bot, STESSO id, mainAgentId suo',
+  agentsAdopt.length === 1 && betaRow && agentsAdopt[0].id === betaRow.id && (await rpc(`settingsGet('mainAgentId', null)`)) === betaRow.id)
+await stopEverything(DATA5)
+
+const db5b = new DatabaseSync(join(DATA5, 'data', 'sandbot.db'))
+db5b.prepare("INSERT INTO entries(agent_id, kind, role, content, meta, created_at) VALUES(?, 'message', 'user', 'ciao dalla beta', NULL, ?)")
+  .run(betaRow.id, Date.now())
+db5b.close()
+await startApp(DATA5)
+await sleep(2_500)
+// OAC1 (G1): lo stato a metà si RIPREnde al boot, ANCHE per chi ha messaggi
+const stepAfterMessages = await guideStep()
+check('G8-5c OAC1: lo stato a metà si riapre allo stesso passo anche con messaggi',
+  stepAfterMessages === 'guide-step-welcome', `step: ${stepAfterMessages}`)
+await stopEverything(DATA5)
+
+// e chi ha messaggi SENZA stato di guida (la beta vera): NESSUNA guida,
+// onboarding.done si scrive da solo
+const db5c = new DatabaseSync(join(DATA5, 'data', 'sandbot.db'))
+db5c.prepare("DELETE FROM settings WHERE key = 'onboarding.state'").run()
+db5c.close()
+await startApp(DATA5)
+await sleep(2_500)
+const guideNoState = await pageEval(`return !!document.querySelector('[data-testid^="guide-step-"]')`)
+const doneNoState = await rpc(`settingsGet('onboarding.done', false)`)
+check('G8-5d chi ha già messaggi e MAI guida: NESSUNA guida (e onboarding.done si scrive)',
+  guideNoState === false && doneNoState === true, `guida=${guideNoState} done=${doneNoState}`)
+await stopEverything(DATA5)
+
+// ---- pulizia finale: 0 daemon e 0 llama-server ----
+const leftDaemons = findProbeDaemons('sandbot-fase-onboarding-a')
+check('PULIZIA nessun daemon della sonda vivo', leftDaemons.length === 0, leftDaemons.map((d) => d.pid).join(','))
+const llama = await import('node:child_process').then((c) => c.spawnSync('/usr/bin/pgrep', ['-fl', 'llama-server'], { encoding: 'utf8' }))
+const llamaMine = (llama.stdout ?? '').split('\n').filter((l) => l.includes(TMP))
+check('PULIZIA nessun llama-server della sonda vivo', llamaMine.length === 0, llamaMine.join(' | ') || 'nessuno')
+providerServer.close()
+} catch (err) {
+  console.error('[sonda] ERRORE:', err)
+  failures++
 } finally {
   try { app?.kill('SIGKILL') } catch { /* già via */ }
   await stopProbeDaemons('sandbot-fase-onboarding-a').catch(() => undefined)
