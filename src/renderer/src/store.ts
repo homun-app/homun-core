@@ -413,7 +413,7 @@ export const useStore = create<Store>((set, get) => ({
     // non arriva, la finestra resta in caricamento (niente chat vuota)
     void api.onboardingState()
       .then((onboarding) => set({ onboarding }))
-      .catch(() => set({ onboarding: { needed: false, state: null, sequence: ['welcome', 'model', 'approvals', 'chat'] } }))
+      .catch(() => set({ onboarding: { needed: false, state: null, sequence: ['welcome', 'model', 'approvals', 'chat'], modelReady: false } }))
     const agents = await api.listAgents()
     const providers = await api.listProviders()
     const permissions = await api.getPermissions()
@@ -497,9 +497,19 @@ export const useStore = create<Store>((set, get) => ({
             onboarding: {
               needed: e.needed,
               state: e.state ?? null,
-              sequence: e.sequence ?? ['welcome', 'model', 'approvals', 'chat']
+              sequence: e.sequence ?? ['welcome', 'model', 'approvals', 'chat'],
+              modelReady: e.modelReady ?? false,
+              // le strade del passo model solo la RPC le porta: l'evento non
+              // le butta via se c'erano già
+              providerPaths: s.onboarding?.providerPaths
             }
           })
+          // OA3: la guida è arrivata a «chat» → si entra nella chat del bot
+          // principale (la finestra torna la shell normale)
+          if (e.state?.step === 'chat') {
+            const mainId = s.mainAgentId ?? s.agents[0]?.id ?? null
+            if (mainId && s.activeId !== mainId) void s.select(mainId)
+          }
           break
         }
         case 'status': {

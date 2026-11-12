@@ -1107,6 +1107,7 @@ msgstr "Attività"
 msgid "autoreview.disabled"
 msgstr "auto-review disattivata"
 
+#: src/renderer/src/components/GuideView.tsx
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 #: src/renderer/src/components/settings/EngineSection.tsx
 msgid "Automatico"
@@ -1427,6 +1428,10 @@ msgstr "Cerco Ollama sul tuo Mac (porta 11434)."
 msgid "Cerco…"
 msgstr "Cerco…"
 
+#: src/renderer/src/components/GuideView.tsx
+msgid "Che cosa può fare il tuo Homun da solo, e dove si ferma a chiederti il via?"
+msgstr "Che cosa può fare il tuo Homun da solo, e dove si ferma a chiederti il via?"
+
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Chi risponde"
 msgstr "Chi risponde"
@@ -1504,6 +1509,10 @@ msgstr "Chiedi"
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 msgid "Chiedi approvazione"
 msgstr "Chiedi approvazione"
+
+#: src/renderer/src/components/GuideView.tsx
+msgid "Chiedi prima"
+msgstr "Chiedi prima"
 
 #. placeholder {0}: agent.name
 #: src/renderer/src/components/Chat.tsx
@@ -1911,6 +1920,10 @@ msgstr "Consentito una volta"
 msgid "Consigliate per te"
 msgstr "Consigliate per te"
 
+#: src/renderer/src/components/GuideView.tsx
+msgid "consigliato"
+msgstr "consigliato"
+
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "Contatti"
 msgstr "Contatti"
@@ -2133,6 +2146,10 @@ msgstr "Da ricollegare"
 #: src/renderer/src/components/RightPanel.tsx
 msgid "da scegliere"
 msgstr "da scegliere"
+
+#: src/renderer/src/components/GuideView.tsx
+msgid "Da solo: leggere la tua posta per riassumerla. Con la tua conferma: mandare un'email a qualcuno, cancellare file. Mai senza di te: le cose irreversibili."
+msgstr "Da solo: leggere la tua posta per riassumerla. Con la tua conferma: mandare un'email a qualcuno, cancellare file. Mai senza di te: le cose irreversibili."
 
 #: src/renderer/src/components/ActivityPanel.tsx
 msgid "Da te"
@@ -2868,6 +2885,10 @@ msgstr "Hai caricato"
 msgid "Hai finito · il bot riprende"
 msgstr "Hai finito · il bot riprende"
 
+#: src/renderer/src/components/GuideView.tsx
+msgid "Hai Ollama in casa: si aggiunge come provider e si sceglie un modello che supporti i tool."
+msgstr "Hai Ollama in casa: si aggiunge come provider e si sceglie un modello che supporti i tool."
+
 #: src/renderer/src/components/ComputerActivity.tsx
 msgid "Hai scaricato"
 msgstr "Hai scaricato"
@@ -2899,6 +2920,10 @@ msgstr "Ho pubblicato il riepilogo nella squadra «{name}»"
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Homun crea il client e chiede a Composio l'elenco delle app: se riesce, la chiave viene salvata cifrata sul tuo Mac."
 msgstr "Homun crea il client e chiede a Composio l'elenco delle app: se riesce, la chiave viene salvata cifrata sul tuo Mac."
+
+#: src/renderer/src/components/GuideView.tsx
+msgid "Homun è il tuo spazio di lavoro con la squadra AI: un bot principale che ti aiuta ogni giorno, e altri bot per le cose che ripeti."
+msgstr "Homun è il tuo spazio di lavoro con la squadra AI: un bot principale che ti aiuta ogni giorno, e altri bot per le cose che ripeti."
 
 #: src/renderer/src/App.tsx
 msgid "Homun è stato rinnovato. Le conversazioni e i bot di Homun 2 non sono stati importati: restano sul tuo Mac nella cartella di Homun 2."
@@ -3156,8 +3181,8 @@ msgid "notice.imagesNotSeen"
 msgstr "Il modello {model} non vede le immagini: gli allegati di questo messaggio non saranno guardati."
 
 #: src/renderer/src/components/GuideView.tsx
-msgid "Il modello è ciò che fa pensare il tuo Homun. Si può scegliere ora, oppure più avanti dalla chat."
-msgstr "Il modello è ciò che fa pensare il tuo Homun. Si può scegliere ora, oppure più avanti dalla chat."
+msgid "Il modello è ciò che fa pensare il tuo Homun: senza, i tuoi messaggi restano in attesa e ripartono da soli appena ne scegli uno. Puoi farlo ora, oppure più avanti dalla chat."
+msgstr "Il modello è ciò che fa pensare il tuo Homun: senza, i tuoi messaggi restano in attesa e ripartono da soli appena ne scegli uno. Puoi farlo ora, oppure più avanti dalla chat."
 
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Il modello integrato gira sul tuo Mac: niente costi e i dati restano qui. È più lento e sbaglia più spesso dei modelli cloud; per lavori affidabili ti consiglio un modello cloud."
@@ -3212,6 +3237,10 @@ msgstr "il PDF lo genera la finestra di Homun: aprila e riprova, oppure esporta 
 #: src/shared/ui-messages.ts
 msgid "skill.escapingPath"
 msgstr "Il percorso «{file}» esce dalla cartella della skill."
+
+#: src/renderer/src/components/GuideView.tsx
+msgid "Il più capace, consigliato per partire. Serve una chiave (Anthropic, OpenAI, Google…)."
+msgstr "Il più capace, consigliato per partire. Serve una chiave (Anthropic, OpenAI, Google…)."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -3777,6 +3806,10 @@ msgstr "Le chiamate e i risultati dei tool tornano come righe nella conversazion
 msgid "Le concessioni \"Sempre per questo sito\" del fill dei login: il bot compila QUEL login su QUELL'origine senza chiedere ogni volta. Revocabili una a una; non esistono concessioni generiche."
 msgstr "Le concessioni \"Sempre per questo sito\" del fill dei login: il bot compila QUEL login su QUELL'origine senza chiedere ogni volta. Revocabili una a una; non esistono concessioni generiche."
 
+#: src/renderer/src/components/GuideView.tsx
+msgid "Le cose che cambiano qualcosa passano da una tua conferma."
+msgstr "Le cose che cambiano qualcosa passano da una tua conferma."
+
 #: src/renderer/src/components/ApprovalCard.tsx
 msgid "Le letture di questo server non chiederanno più (solo i tool dichiarati in sola lettura)"
 msgstr "Le letture di questo server non chiederanno più (solo i tool dichiarati in sola lettura)"
@@ -3857,6 +3890,7 @@ msgstr "Licenza"
 msgid "limite d'uso"
 msgstr "limite d'uso"
 
+#: src/renderer/src/components/GuideView.tsx
 #: src/renderer/src/components/Settings.tsx
 msgid "Lingua"
 msgstr "Lingua"
@@ -4060,6 +4094,10 @@ msgstr "modello che non risponde"
 msgid "onboarding.providerCloud"
 msgstr "Modello cloud con chiave (consigliato)"
 
+#: src/renderer/src/components/GuideView.tsx
+msgid "Modello cloud con una chiave"
+msgstr "Modello cloud con una chiave"
+
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Modello dei bot"
 msgstr "Modello dei bot"
@@ -4089,6 +4127,10 @@ msgstr "modello integrato · più lento"
 #: src/shared/ui-messages.ts
 msgid "onboarding.providerLocal"
 msgstr "Modello integrato sul Mac (2,7 GB)"
+
+#: src/renderer/src/components/GuideView.tsx
+msgid "Modello integrato sul tuo Mac"
+msgstr "Modello integrato sul tuo Mac"
 
 #: src/renderer/src/components/settings/DiskSpaceSection.tsx
 msgid "Modello locale"
@@ -4411,6 +4453,10 @@ msgstr "Niente «@»: serve l'indirizzo del server, non un account"
 #: src/renderer/src/components/ServerSetup.tsx
 msgid "Niente «/»: serve il solo indirizzo, non un percorso"
 msgstr "Niente «/»: serve il solo indirizzo, non un percorso"
+
+#: src/renderer/src/components/GuideView.tsx
+msgid "Niente costi e i dati restano qui. È più lento e sbaglia più spesso dei modelli cloud."
+msgstr "Niente costi e i dati restano qui. È più lento e sbaglia più spesso dei modelli cloud."
 
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "Niente in attesa di conferma: ciò che il bot scrive leggendo il web arriva qui, finché non lo confermi."
@@ -4738,6 +4784,10 @@ msgstr "ogni settimana il {day} {at}"
 msgid "ogni…"
 msgstr "ogni…"
 
+#: src/renderer/src/components/GuideView.tsx
+msgid "Ollama che è già sul tuo Mac"
+msgstr "Ollama che è già sul tuo Mac"
+
 #: src/renderer/src/bot/bot-state.ts
 msgid "Online"
 msgstr "Online"
@@ -4961,10 +5011,6 @@ msgstr "Plugin nel formato di Claude Code. Predefinito: <0>anthropics/claude-plu
 #: src/shared/ui-messages.ts
 msgid "rpc.pluginNotFoundPlain"
 msgstr "plugin non trovato"
-
-#: src/renderer/src/components/GuideView.tsx
-msgid "Pochi passi e il tuo Homun è pronto: il modello che lo fa pensare, che cosa può fare da solo."
-msgstr "Pochi passi e il tuo Homun è pronto: il modello che lo fa pensare, che cosa può fare da solo."
 
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 msgid "Politica predefinita"
@@ -6082,6 +6128,7 @@ msgstr "Si riprendono solo i passi saltati. Rifarla da capo non tocca bot né da
 msgid "Si salvano cifrate sul tuo Mac quando premi Collega."
 msgstr "Si salvano cifrate sul tuo Mac quando premi Collega."
 
+#: src/renderer/src/components/GuideView.tsx
 #: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/Sidebar.tsx
 msgid "Sistema"
@@ -6434,6 +6481,10 @@ msgstr "tool scelto dal connettore: {chosen}"
 msgid "Torna alla chat"
 msgstr "Torna alla chat"
 
+#: src/renderer/src/components/Settings.tsx
+msgid "Torna alla guida"
+msgstr "Torna alla guida"
+
 #: src/renderer/src/components/PageView.tsx
 msgid "Torna alla libreria"
 msgstr "Torna alla libreria"
@@ -6629,6 +6680,10 @@ msgstr "Un Invio in {app} può spedire qualcosa: questa azione chiede sempre."
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 msgid "Un modello controlla ogni azione: fa passare quello che serve a ciò che hai chiesto e ti chiede quando va oltre e non si annulla facilmente (scrivere a qualcuno, pagare, cancellare, pubblicare). Le tue regole vengono prima."
 msgstr "Un modello controlla ogni azione: fa passare quello che serve a ciò che hai chiesto e ti chiede quando va oltre e non si annulla facilmente (scrivere a qualcuno, pagare, cancellare, pubblicare). Le tue regole vengono prima."
+
+#: src/renderer/src/components/GuideView.tsx
+msgid "Un revisore controlla le azioni e le lascia passare quando sono sicure."
+msgstr "Un revisore controlla le azioni e le lascia passare quando sono sicure."
 
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 msgid "Una di queste regole vince sempre sulle altre: l’azione diventa una card."

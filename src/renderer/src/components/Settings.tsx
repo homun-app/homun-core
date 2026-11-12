@@ -68,6 +68,9 @@ function uiLang(): 'it' | 'en' {
 export function Settings() {
   const { i18n } = useLingui()
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
+  // OA3 (fase onboarding-a): la guida aspetta il modello — chi arriva qui dal
+  // suo passo model torna alla guida chiudendo le Impostazioni
+  const guideWaitingModel = useStore((s) => s.onboarding?.needed === true && s.onboarding.state?.step === 'model')
   const setSettingsTab = useStore((s) => s.setSettingsTab)
   const pendingTab = useStore((s) => s.settingsTab)
   // RV2 (fase beta.2): la scheda richiesta è già il valore INIZIALE (niente
@@ -125,6 +128,16 @@ export function Settings() {
             visibile a qualunque scorrimento, in OGNI scheda (prima era absolute
             DENTRO lo scroller e se ne andava col contenuto) */}
         <div className="relative flex min-w-0 flex-1 flex-col">
+          {/* OA3: «Torna alla guida» quando il passo model l'ha aperta */}
+          {guideWaitingModel && (
+            <button
+              className="absolute left-5 top-4 z-10 rounded-full bg-foreground px-3.5 py-2 text-xs text-background outline-none transition hover:opacity-90 focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              data-testid="settings-back-to-guide"
+              onClick={() => setSettingsOpen(false)}
+            >
+              <Trans>Torna alla guida</Trans>
+            </button>
+          )}
           {/* la ✕ tonda in alto a destra (Esc chiude, come sempre nel Dialog) */}
           <button
             className="absolute right-5 top-4 z-10 grid size-9 place-items-center rounded-full bg-muted text-muted-foreground outline-none transition hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"

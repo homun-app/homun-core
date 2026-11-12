@@ -640,6 +640,9 @@ export interface OnboardingState {
   startedAt: number
 }
 
+/** Le strade del passo modello (le stesse providerPathsOf del daemon). */
+export type OnboardingProviderPath = 'cloud' | 'ollama' | 'local'
+
 /** OA2: lo stato della guida per la finestra (RPC onboarding:state ed evento). */
 export interface OnboardingStatus {
   needed: boolean
@@ -647,6 +650,13 @@ export interface OnboardingStatus {
   state: OnboardingState | null
   /** i passi disponibili su questa macchina, in ordine (l'ultimo è «chat») */
   sequence: OnboardingStepId[]
+  /** OA3: c'è già un provider attivo col modello principale? */
+  modelReady: boolean
+  /**
+   * OA3: le strade del passo modello per questa macchina (solo nella RPC
+   * onboarding:state, che può attendere la scoperta dei servizi locali).
+   */
+  providerPaths?: OnboardingProviderPath[]
 }
 
 // ---- Approvazioni ----

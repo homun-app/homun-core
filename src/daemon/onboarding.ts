@@ -103,6 +103,36 @@ export function reopenOnboarding(
   return { ...state, step: target, skipped: state.skipped.filter((s) => s !== target) }
 }
 
+/**
+ * OA3: le strade del passo modello per QUESTA macchina (cloud consigliato,
+ * Ollama solo se la scoperta lo trova, Integrato solo se la macchina è
+ * idonea). Asincrona per la scoperta: la chiama la RPC onboarding:state.
+ */
+export async function guideProviderPaths(deps: OnboardingDeps): Promise<Array<'cloud' | 'ollama' | 'local'>> {
+  let ollamaFound = false
+  try {
+    ollamaFound = (await deps.discoverLocalProviders?.() ?? []).some((p) => p.kind === 'ollama')
+  } catch {
+    ollamaFound = false
+  }
+  const facts = deps.localEligibilityFacts?.() ?? { arch: 'arm64', ramGb: 16, freeDiskBytes: null }
+  return providerPathsOf({ ollamaFound, eligibility: localEligibility(facts) })
+}
+
+/**
+ * OA3 (PURA): il passo del modello si chiude DA SOLO quando il modello c'è
+ * già (un provider attivo col modello principale): il passo è FATTO, non
+ * saltato. Vale SOLO per il passo corrente: gli altri passi non si toccano.
+ */
+export function autoAdvanceOnboarding(
+  state: OnboardingState,
+  facts: { modelReady: boolean },
+  sequence: readonly OnboardingStepId[]
+): OnboardingState {
+  if (state.step !== 'model' || !facts.modelReady) return state
+  return advanceOnboardingStep(state, 'model', 'done', sequence)
+}
+
 // ---- OA1 (fase onboarding-a): chi fa l'onboarding, e UN solo bot ----
 
 /** I fatti che decidono se l'onboarding serve (tutti leggibili, nessun effetto). */
@@ -293,13 +323,21 @@ function stateOf(deps: OnboardingDeps): OnboardingState | null {
   return raw
 }
 
+/** OA3: c'è già un modello utilizzabile? (provider ATTIVO + models.main) */
+function modelReadyOf(deps: OnboardingDeps): boolean {
+  const main = deps.getSetting<import('../shared/types').MainModel | null>('models.main', null)
+  if (!main) return false
+  return deps.listProviders().some((p) => p.id === main.providerId && p.enabled)
+}
+
 /** Lo status completo per RPC ed eventi (nessun effetto). */
 function statusOf(deps: OnboardingDeps): OnboardingStatus {
   const decision = onboardingNeeded(onboardingFactsOf(deps))
   return {
     needed: decision.needed,
     state: stateOf(deps),
-    sequence: onboardingStepSequence(availabilityOf(deps))
+    sequence: onboardingStepSequence(availabilityOf(deps)),
+    modelReady: modelReadyOf(deps)
   }
 }
 
@@ -333,10 +371,13 @@ export async function startOnboarding(deps: OnboardingDeps): Promise<void> {
     : createMainBotEnsurer(deps)
   const main = await ensurer.ensureMainBot(decision.adoptAgentId)
   // OA2: lo stato della guida nasce qui e NON si tocca più — chiudere l'app
-  // a metà e riaprirla riporta allo stesso passo
-  if (stateOf(deps) === null) {
-    deps.setSetting(ONBOARDING_STATE_SETTING, initialOnboardingState(deps.now(), availabilityOf(deps)))
-  }
+  // a metà e riaprirla riporta allo stesso passo.
+  // OA3: se il modello c'è GIÀ (per esempio una beta col provider), il passo
+  // model si chiude da solo prima di mostrarsi
+  const sequence = onboardingStepSequence(availabilityOf(deps))
+  const state = stateOf(deps) ?? initialOnboardingState(deps.now(), availabilityOf(deps))
+  const auto = autoAdvanceOnboarding(state, { modelReady: modelReadyOf(deps) }, sequence)
+  deps.setSetting(ONBOARDING_STATE_SETTING, auto)
   deps.emit({ type: 'agents' })
   deps.emit({ type: 'onboarding', ...statusOf(deps) })
   // il widget del ruolo del vecchio flusso: solo se la chat è ancora vuota
@@ -470,6 +511,8 @@ export async function completeOnboarding(deps: OnboardingDeps, role: string): Pr
 export function createOnboarding(deps: OnboardingDeps) {
   return {
     start: () => startOnboarding(deps),
+    /** OA3: le strade del passo modello per questa macchina (RPC onboarding:state). */
+    providerPaths: () => guideProviderPaths(deps),
     /** OA1/OA2: lo stato per la finestra — finché non lo dice il daemon, la UI carica. */
     status: (): OnboardingStatus => statusOf(deps),
     /**
@@ -481,7 +524,13 @@ export function createOnboarding(deps: OnboardingDeps) {
       const state = stateOf(deps)
       if (!state) return false
       const sequence = onboardingStepSequence(availabilityOf(deps))
-      const next = advanceOnboardingStep(state, step, outcome, sequence)
+      // OA3: dopo la mossa dell'utente, il passo model si chiude da solo se
+      // il modello è arrivato mentre la guida era ferma prima
+      const next = autoAdvanceOnboarding(
+        advanceOnboardingStep(state, step, outcome, sequence),
+        { modelReady: modelReadyOf(deps) },
+        sequence
+      )
       if (next === state) return false
       deps.setSetting(ONBOARDING_STATE_SETTING, next)
       if (next.step === 'chat') deps.setSetting(DONE_SETTING, true)
@@ -505,6 +554,22 @@ export function createOnboarding(deps: OnboardingDeps) {
       const status = statusOf(deps)
       deps.emit({ type: 'onboarding', ...status })
       return status
+    },
+    /**
+     * OA3: un provider col modello valido è appena stato salvato — se la
+     * guida è ferma sul passo model, si chiude da solo (è «fatto», non
+     * saltato). True se ha chiuso il passo ora.
+     */
+    modelBecameReady(): boolean {
+      const state = stateOf(deps)
+      if (!state) return false
+      const sequence = onboardingStepSequence(availabilityOf(deps))
+      const next = autoAdvanceOnboarding(state, { modelReady: modelReadyOf(deps) }, sequence)
+      if (next === state) return false
+      deps.setSetting(ONBOARDING_STATE_SETTING, next)
+      if (next.step === 'chat') deps.setSetting(DONE_SETTING, true)
+      deps.emit({ type: 'onboarding', ...statusOf(deps) })
+      return true
     },
     answerRole: (entryId: number, value: string | string[]) => answerOnboardingRole(deps, entryId, value),
     resume: () => resumeOnboarding(deps)

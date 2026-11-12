@@ -241,8 +241,12 @@ export function buildApiMethods(
   void import('./local-model').then((lm) => {
     lm.onLocalModelReady(() => {
       void ensureLocalModelProvider()
-      // L4: l'onboarding fermo sul provider riprende anche da qui
-      if (opts.onboarding) void opts.onboarding.resume().catch(() => undefined)
+      // L4: l'onboarding fermo sul provider riprende anche da qui.
+      // OA3: il modello integrato pronto chiude il passo model da solo
+      if (opts.onboarding) {
+        void opts.onboarding.resume().catch(() => undefined)
+        opts.onboarding.modelBecameReady()
+      }
     })
   }).catch(() => undefined) // senza il modulo locale il demone parte lo stesso
 
@@ -497,8 +501,13 @@ export function buildApiMethods(
     // «Bot» che compare da sola prima del tempo).
     // OA2: lo stato della GUIDA (onboarding.state) con la sequenza dei passi,
     // e le mosse che la fanno avanzare o riaprire
-    'onboarding:state': () =>
-      opts.onboarding?.status() ?? { needed: false, state: null, sequence: ['welcome', 'model', 'approvals', 'chat'] },
+    'onboarding:state': async () => {
+      const base = opts.onboarding?.status() ?? { needed: false, state: null, sequence: ['welcome', 'model', 'approvals', 'chat'] as import('../shared/types').OnboardingStepId[], modelReady: false }
+      // OA3: le strade del passo modello richiedono la scoperta dei servizi
+      // locali — solo qui, che è async
+      if (!opts.onboarding) return base
+      return { ...base, providerPaths: await opts.onboarding.providerPaths() }
+    },
     'onboarding:advance': ([step, outcome]) => {
       if (!opts.onboarding) return false
       return opts.onboarding.advance(step as OnboardingStepId, outcome === 'skipped' ? 'skipped' : 'done')
@@ -2026,8 +2035,12 @@ export function buildApiMethods(
         getReviewer: () => ({ ...DEFAULT_AUTO_REVIEW, ...store.getSetting<AutoReviewSettings>('autoReview', DEFAULT_AUTO_REVIEW) }),
         setReviewer: (cfg) => store.setSetting('autoReview', cfg)
       })
-      // fase 7: l'onboarding fermo sul provider riprende appena ce n'è uno
-      if (opts.onboarding) void opts.onboarding.resume().catch(() => undefined)
+      // fase 7: l'onboarding fermo sul provider riprende appena ce n'è uno.
+      // OA3: e se la guida è al passo model, il passo si chiude da solo
+      if (opts.onboarding) {
+        void opts.onboarding.resume().catch(() => undefined)
+        opts.onboarding.modelBecameReady()
+      }
     },
     'providers:delete': ([id]) => {
       // fase 16c (C3.3): se era il provider del modello principale, models.main si azzera

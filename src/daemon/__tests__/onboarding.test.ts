@@ -11,7 +11,7 @@ import { describe, expect, it, beforeEach } from 'vitest'
 import {
   createOnboarding, startOnboarding, answerOnboardingRole, resumeOnboarding,
   onboardingNeeded, createMainBotEnsurer,
-  onboardingStepSequence, initialOnboardingState, advanceOnboardingStep, reopenOnboarding,
+  onboardingStepSequence, initialOnboardingState, advanceOnboardingStep, reopenOnboarding, autoAdvanceOnboarding,
   ONBOARDING_STATE_SETTING,
   roleTemplates, welcomeMessage, onboardingPrompt, onboardingRoleOptions,
   providerPathsOf,
@@ -269,6 +269,77 @@ describe('OA2 reopenOnboarding (pura): riprendere i saltati, rifare da capo', ()
   })
 })
 
+// ---- OA3: il passo del modello si chiude da solo quando il modello c'è ----
+describe('OA3 autoAdvanceOnboarding (pura): il passo model si salta da solo se il modello c\'è già', () => {
+  const SEQ = onboardingStepSequence({ computer: false, memory: false })
+  const atModel = advanceOnboardingStep(initialOnboardingState(1_000, { computer: false, memory: false }), 'welcome', 'done', SEQ)
+
+  it('a model CON modello pronto → il passo è FATTO e si passa oltre (da solo)', () => {
+    const st = autoAdvanceOnboarding(atModel, { modelReady: true }, SEQ)
+    expect(st.step).toBe('approvals')
+    expect(st.done).toEqual(['welcome', 'model'])
+    expect(st.skipped).toEqual([])
+  })
+
+  it('a model SENZA modello → non si tocca: la scelta resta all\'utente', () => {
+    expect(autoAdvanceOnboarding(atModel, { modelReady: false }, SEQ)).toEqual(atModel)
+  })
+
+  it('solo il passo CORRENTE si auto-avanza: a welcome non succede nulla anche col modello pronto', () => {
+    const st = initialOnboardingState(1_000, { computer: false, memory: false })
+    expect(autoAdvanceOnboarding(st, { modelReady: true }, SEQ)).toEqual(st)
+  })
+
+  it('i passi dopo model non si toccano mai da soli', () => {
+    const st = advanceOnboardingStep(atModel, 'model', 'skipped', SEQ)
+    expect(autoAdvanceOnboarding(st, { modelReady: true }, SEQ)).toEqual(st)
+  })
+})
+
+describe('OA3 facciata: modelBecameReady e status con modelReady', () => {
+  it('status dice modelReady quando c\'è un provider ATTIVO col modello principale', async () => {
+    const onboarding = createOnboarding(deps)
+    expect(onboarding.status().modelReady).toBe(false)
+    log.providers.push({ id: 'ollama', name: 'Ollama', kind: 'ollama', baseUrl: 'http://x', apiKey: '', enabled: true })
+    log.settings['models.main'] = { providerId: 'ollama', model: 'kimi' }
+    expect(onboarding.status().modelReady).toBe(true)
+    // un provider SPENTO non basta
+    log.providers[0]!.enabled = false
+    expect(onboarding.status().modelReady).toBe(false)
+  })
+
+  it('modelBecameReady col modello che arriva chiude il passo DA SOLO (stato persistito, evento)', async () => {
+    const onboarding = createOnboarding(deps)
+    await onboarding.start()
+    await onboarding.advance('welcome', 'done')
+    expect((log.settings[ONBOARDING_STATE_SETTING] as OnboardingState).step).toBe('model')
+    log.providers.push({ id: 'ollama', name: 'Ollama', kind: 'ollama', baseUrl: 'http://x', apiKey: '', enabled: true })
+    log.settings['models.main'] = { providerId: 'ollama', model: 'kimi' }
+    const closed = onboarding.modelBecameReady()
+    expect(closed).toBe(true)
+    expect((log.settings[ONBOARDING_STATE_SETTING] as OnboardingState).step).toBe('approvals')
+    expect((log.settings[ONBOARDING_STATE_SETTING] as OnboardingState).done).toContain('model')
+  })
+
+  it('modelBecameReady lontano dal passo model (o senza modello) non fa nulla', async () => {
+    const onboarding = createOnboarding(deps)
+    await onboarding.start()
+    expect(onboarding.modelBecameReady()).toBe(false) // ancora a welcome
+    await onboarding.advance('welcome', 'done')
+    expect(onboarding.modelBecameReady()).toBe(false) // a model ma senza modello
+  })
+
+  it('startOnboarding con il modello GIÀ configurato salta model da solo (beta che aveva già il provider)', async () => {
+    log.providers.push({ id: 'ollama', name: 'Ollama', kind: 'ollama', baseUrl: 'http://x', apiKey: '', enabled: true })
+    log.settings['models.main'] = { providerId: 'ollama', model: 'kimi' }
+    const onboarding = createOnboarding(deps)
+    await onboarding.start()
+    await onboarding.advance('welcome', 'done')
+    // il passo model si è chiuso da solo: si è già oltre
+    expect((log.settings[ONBOARDING_STATE_SETTING] as OnboardingState).step).toBe('approvals')
+  })
+})
+
 // ---- OA1: il bot lo crea SOLO il daemon (startOnboarding) ----
 describe('OA1 startOnboarding: il bot principale lo crea solo il daemon', () => {
   it('dati vuoti → un solo bot principale con mainAgentId, evento agents e onboarding needed', async () => {
@@ -314,7 +385,7 @@ describe('OA2 startOnboarding: onboarding.state nasce qui e NON si tocca più', 
     const st = log.settings[ONBOARDING_STATE_SETTING] as OnboardingState | undefined
     expect(st).toEqual({ step: 'welcome', done: [], skipped: [], startedAt: 1_000_000_000_000 })
     expect(log.events).toContainEqual({
-      type: 'onboarding', needed: true,
+      type: 'onboarding', needed: true, modelReady: false,
       state: { step: 'welcome', done: [], skipped: [], startedAt: 1_000_000_000_000 },
       sequence: ['welcome', 'model', 'approvals', 'chat']
     })
