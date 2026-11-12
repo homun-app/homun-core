@@ -8144,6 +8144,33 @@ describe('B2 (fase beta.4): presentazione del bot nuovo', () => {
     const fields = (row!.meta!.selfUpdate as { fields: string[] }).fields
     expect([...fields].sort()).toEqual(['description', 'role'])
   })
+
+  // BC2 (fase beta.4 — correzioni): la regola «scriviti il profilo» è nel
+  // prompt di OGNI turno del bot non principale senza descrizione
+  it('BC2: il bot NON principale senza descrizione ha la riga update_self nel prompt; il principale no', async () => {
+    // un ALTRO bot è il principale → AGENT non lo è
+    dbm.createAgent('Principale', 'il punto di contatto', { id: 'agent_main' })
+    dbm.setSetting('mainAgentId', 'agent_main')
+    h.llm.queue = [{ text: 'ok' }]
+    await runTurn(AGENT, 'ciao', emit)
+    const system = String(h.llm.calls[0]![0]!.content)
+    expect(system).toContain('You have no role yet')
+    expect(system).toContain('set it yourself with update_self')
+    // AGENT È il principale → la riga di oggi
+    dbm.setSetting('mainAgentId', AGENT)
+    h.llm.calls.length = 0
+    h.llm.queue = [{ text: 'ok' }]
+    await runTurn(AGENT, 'ciao di nuovo', emit)
+    const systemMain = String(h.llm.calls[0]![0]!.content)
+    expect(systemMain).toContain('general assistant')
+    expect(systemMain).not.toContain('set it yourself with update_self')
+    // e un bot CON descrizione non ha la riga in nessun caso
+    h.db.agents.get(AGENT)!.description = 'il mio ruolo'
+    h.llm.calls.length = 0
+    h.llm.queue = [{ text: 'ok' }]
+    await runTurn(AGENT, 'ciao ancora', emit)
+    expect(String(h.llm.calls[0]![0]!.content)).not.toContain('set it yourself with update_self')
+  })
 })
 
 // ---- B4 (fase beta.4): il bot sa quali app ha collegate ----

@@ -1698,9 +1698,14 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       systemText = subagentSystemPrompt(parent ?? agent, subRow ?? { id: opts.subagent.id, title: '' }, turnCatalog.map((g) => g.id)) +
         buildSkillsSection(opts.subagent.parentId) + await buildMemorySection(opts.subagent.parentId)
     } else {
+      // BC2 (fase beta.4 — correzioni): il bot PRINCIPALE tiene la riga di
+      // identità di oggi; gli altri, senza descrizione, portano la regola
+      // update_self in OGNI turno (identitySection)
+      let isMain = false
       try {
         const agents = listAgents()
         if (mainAgentOf(agents, getSetting<string | null>('mainAgentId', null))?.id === agentId) {
+          isMain = true
           mainSection = mainAgentSection(
             agents
               .filter((a) => a.id !== agentId)
@@ -1750,7 +1755,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       // PRESENTE nel turno (stesso ordine dell'indice di find_tools)
       // fase token · nucleo (R8.2): i punti 1-3 della guida sono nel prompt
       // del bot NORMALE (spawn_subagent sta nel suo nucleo)
-      systemText = systemPrompt(agent, { teams: opts.groupTurn !== undefined, subagents: opts.groupTurn === undefined, groups: turnCatalog.map((g) => g.id) }) +
+      systemText = systemPrompt(agent, { main: isMain, teams: opts.groupTurn !== undefined, subagents: opts.groupTurn === undefined, groups: turnCatalog.map((g) => g.id) }) +
         mainSection + buildSkillsSection(agentId) + connectorsSection +
         (connectedAppsSection ? `\n${connectedAppsSection}` : '') +
         await buildMemorySection(agentId)

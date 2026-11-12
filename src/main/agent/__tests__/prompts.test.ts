@@ -56,8 +56,9 @@ describe('fase 9 (punto 2): system prompt componibile', () => {
     expect(identitySection(agent)).toContain('You are SandBot')
     expect(identitySection(agent)).toContain('Ti tieni la posta in ordine')
     const senza: Agent = { ...agent, description: '' }
-    expect(identitySection(senza)).toContain('general assistant')
-    expect(identitySection(senza)).not.toContain('posta in ordine')
+    // BC2: la riga «general assistant» resta al bot PRINCIPALE (opts.main)
+    expect(identitySection(senza, { main: true })).toContain('general assistant')
+    expect(identitySection(senza, { main: true })).not.toContain('posta in ordine')
   })
 
   it('computer: host vs docker, CONDIVISO tra i bot, /workspace comune, credenziali opache', () => {
@@ -549,5 +550,40 @@ describe('fase token (T4.3): descrizioni di una riga', () => {
         expect((v.description ?? '').length, `${t.name}.${p}`).toBeLessThanOrEqual(100)
       }
     }
+  })
+})
+
+// ---- BC2 (fase beta.4 — correzioni): la regola del profilo in OGNI turno ----
+
+describe('BC2: il bot senza ruolo si scrive il profilo (identitySection)', () => {
+  const vuoto: Agent = { ...agent, description: '' }
+
+  it('un bot NON principale senza ruolo porta la riga update_self (come update_bot di Rakazo, in ogni turno)', () => {
+    const s = identitySection(vuoto)
+    expect(s).toContain('update_self')
+    expect(s).toContain('You have no role yet')
+    expect(s).toContain('do not use update_memory for it')
+  })
+
+  it('il bot PRINCIPALE senza ruolo tiene la riga di oggi (general assistant)', () => {
+    const s = identitySection(vuoto, { main: true })
+    expect(s).toContain('general assistant')
+    expect(s).not.toContain('update_self')
+    // default (senza opts): come oggi, il principale — la riga nuova va chiesta esplicitamente
+    expect(identitySection(vuoto)).toContain('update_self')
+  })
+
+  it('un bot CON descrizione non ha la riga: il profilo è già scritto (cache del prefisso intatta)', () => {
+    expect(identitySection(agent)).not.toContain('update_self')
+    expect(identitySection(agent, { main: true })).not.toContain('update_self')
+  })
+
+  it('il prompt di base del bot vuoto NON principale resta sotto PROMPT_TOKEN_BUDGET (normale, gruppo, connettori)', () => {
+    const variants = [
+      systemPrompt(vuoto, { subagents: true, groups: NO_BROWSER_GROUPS }),
+      systemPrompt(vuoto, { subagents: false, teams: true, groups: NO_BROWSER_GROUPS }),
+      systemPrompt(vuoto, { subagents: true, groups: [...NO_BROWSER_GROUPS, 'mcp:gw'] }) + '\n# Active connectors\n- gw: 60 tools — gateway'
+    ]
+    for (const v of variants) expect(v.length / 4, v.slice(0, 40)).toBeLessThanOrEqual(PROMPT_TOKEN_BUDGET)
   })
 })

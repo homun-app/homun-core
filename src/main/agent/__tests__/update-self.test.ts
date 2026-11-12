@@ -10,7 +10,7 @@ import { mkdtempSync, mkdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-const { setDataDir, dataDir, createAgent, getAgent, getEntries } = await import('../../store/db')
+const { setDataDir, dataDir, createAgent, getAgent, getEntries, updateAgent } = await import('../../store/db')
 const { executeTool } = await import('../tools')
 
 let root: string
@@ -81,5 +81,50 @@ describe('B2: update_self — il tool del proprio profilo', () => {
     // la riga di sistema la scrive il LOOP (come le automation): qui il tool
     // deve solo riportarla nel meta — e non aggiunge entry da solo
     expect(eventsOf(SELF)).toHaveLength(0)
+  })
+})
+
+// ---- BC2 (fase beta.4 — correzioni): MERGE invece di sovrascrivere ----
+
+describe('BC2: update_self fa il MERGE delle due parti del profilo', () => {
+  it('con la SOLA description sostituisce la riga e tiene le istruzioni', async () => {
+    updateAgent(SELF, { description: 'riga vecchia\n\nistruzioni vecchie' })
+    await executeTool(SELF, 'update_self', { description: 'riga nuova' })
+    expect(getAgent(SELF)!.description).toBe('riga nuova\n\nistruzioni vecchie')
+  })
+
+  it('con il SOLO role sostituisce le istruzioni e tiene la riga', async () => {
+    updateAgent(SELF, { description: 'riga vecchia\n\nistruzioni vecchie' })
+    await executeTool(SELF, 'update_self', { role: 'istruzioni nuove' })
+    expect(getAgent(SELF)!.description).toBe('riga vecchia\n\nistruzioni nuove')
+  })
+
+  it('con ENTRAMBI il profilo si riscrive intero (come prima)', async () => {
+    updateAgent(SELF, { description: 'riga vecchia\n\nistruzioni vecchie' })
+    await executeTool(SELF, 'update_self', { description: 'riga nuova', role: 'istruzioni nuove' })
+    expect(getAgent(SELF)!.description).toBe('riga nuova\n\nistruzioni nuove')
+  })
+
+  it('un profilo senza \\n\\n è tutto «riga»: il role si AGGIUNGE, non cancella', async () => {
+    updateAgent(SELF, { description: 'solo riga' })
+    await executeTool(SELF, 'update_self', { role: 'le istruzioni arrivano adesso' })
+    expect(getAgent(SELF)!.description).toBe('solo riga\n\nle istruzioni arrivano adesso')
+  })
+
+  it('le istruzioni con a-capo interni restano intere: le parti si separano al PRIMO \\n\\n', async () => {
+    updateAgent(SELF, { description: 'riga\n\nprima parte\n\nseconda parte' })
+    // solo description: le «istruzioni» sono TUTTO dopo il primo \n\n
+    await executeTool(SELF, 'update_self', { description: 'nuova riga' })
+    expect(getAgent(SELF)!.description).toBe('nuova riga\n\nprima parte\n\nseconda parte')
+  })
+})
+
+describe('BC2: la descrizione di update_self dice di scriversi il profilo (come update_bot di Rakazo)', () => {
+  it('il tool porta la clausola «quando il lavoro è chiaro, te lo scrivi»', async () => {
+    const { toolDefs } = await import('../tools')
+    const def = toolDefs.find((t) => t.name === 'update_self')
+    expect(def).toBeTruthy()
+    expect(def!.description).toContain('When you have no role yet and your job becomes clear, set your description and instructions yourself')
+    expect(def!.description).toContain('Change your name only if the user asks')
   })
 })

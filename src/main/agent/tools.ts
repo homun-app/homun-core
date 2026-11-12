@@ -439,10 +439,13 @@ export const toolDefs: ToolDef[] = [
     }
   },
   // B2 (fase beta.4): il bot aggiorna il PROPRIO profilo — come update_bot di
-  // Rakazo, disponibile a ogni bot anche fuori dalla presentazione
+  // Rakazo, disponibile a ogni bot anche fuori dalla presentazione.
+  // BC2 (fase beta.4 — correzioni): la descrizione riprende la clausola di
+  // update_bot di Rakazo (run-instructions.ts:363): quando non ha ancora un
+  // ruolo e il lavoro diventa chiaro, SE LO SCRIVE DA SOLO
   {
     name: 'update_self',
-    description: 'Updates YOUR OWN profile: one-line description, instructions (role), and name only if the user asked. Never look, model or permissions.',
+    description: 'Updates your own profile. When you have no role yet and your job becomes clear, set your description and instructions yourself. Change your name only if the user asks.',
     parameters: {
       type: 'object',
       properties: {
@@ -1586,9 +1589,16 @@ export async function executeTool(
       const patch: { name?: string; description?: string } = {}
       const fields: string[] = []
       // description = UNA riga (cosa fa), role = le istruzioni (come): nel
-      // profilo la riga viene prima, le istruzioni dopo
+      // profilo la riga viene prima, le istruzioni dopo.
+      // BC2 (fase beta.4 — correzioni): MERGE invece di sovrascrivere — le due
+      // parti del profilo corrente si separano al PRIMO \n\n (senza: tutto
+      // «riga»); la sola description sostituisce la riga e tiene le
+      // istruzioni, il solo role fa il contrario
       if (description || role) {
-        patch.description = [description, role].filter(Boolean).join('\n\n')
+        const splitAt = self.description.indexOf('\n\n')
+        const curLine = splitAt < 0 ? self.description : self.description.slice(0, splitAt)
+        const curRole = splitAt < 0 ? '' : self.description.slice(splitAt + 2)
+        patch.description = [description || curLine, role || curRole].filter(Boolean).join('\n\n')
         if (description) fields.push('description')
         if (role) fields.push('role')
       }

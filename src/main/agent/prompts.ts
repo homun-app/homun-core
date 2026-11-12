@@ -31,11 +31,23 @@ import { sandboxMode, browserSandboxOk } from '../sandbox'
  */
 export const PROMPT_TOKEN_BUDGET = 2046
 
-/** Chi sei: nome, ruolo scelto dall'utente. La lingua la dà la sezione Language (17b A3). */
-export function identitySection(agent: Agent): string {
+/**
+ * Chi sei: nome, ruolo scelto dall'utente. La lingua la dà la sezione Language
+ * (17b A3). BC2 (fase beta.4 — correzioni): la regola «scriviti il profilo»
+ * sta in OGNI turno, non solo nel prompt nascosto della presentazione — come
+ * la clausola di update_bot di Rakazo (run-instructions.ts:363): «when you
+ * have no instructions yet and your job becomes clear, set your name,
+ * description and instructions yourself». Vale per i bot NON principali con
+ * descrizione vuota (il loop passa main: true al principale, che tiene la
+ * riga di oggi). Il testo è FISSO per bot e cambia solo quando il profilo si
+ * riempie: la cache del prefisso regge.
+ */
+export function identitySection(agent: Agent, opts: { main?: boolean } = {}): string {
   const role = agent.description.trim()
     ? `The user has given you this role: ${agent.description.trim()}`
-    : 'The user has not given you a specific role yet: you are their general assistant.'
+    : opts.main
+      ? 'The user has not given you a specific role yet: you are their general assistant.'
+      : 'You have no role yet. As soon as the user makes your job clear, set it yourself with update_self (a one-line description and your instructions): your profile is not a memory, so do not use update_memory for it.'
   return `# Who you are
 You are ${agent.name}, the user's personal agent: you work for them even when they are not watching.
 ${role}`
@@ -394,10 +406,13 @@ export const PROMPT_SECTION_TITLES = [
  * Fase token · nucleo (R8.2): con `subagents: true` (solo bot NORMALE) i
  * punti 1-3 della guida tornano nel prompt di base — spawn_subagent è nel
  * nucleo e la sua regola non può stare dietro una scoperta.
+ * BC2 (fase beta.4 — correzioni): `main: true` è il bot PRINCIPALE (riga di
+ * identità di oggi); senza, un bot senza descrizione porta la regola
+ * update_self (identitySection).
  */
-export function systemPrompt(agent: Agent, opts: { subagents?: boolean; connectors?: boolean; credentials?: boolean; teams?: boolean; groups?: ReadonlyArray<string> } = {}): string {
+export function systemPrompt(agent: Agent, opts: { main?: boolean; subagents?: boolean; connectors?: boolean; credentials?: boolean; teams?: boolean; groups?: ReadonlyArray<string> } = {}): string {
   const sections = [
-    identitySection(agent),
+    identitySection(agent, { main: opts.main === true }),
     // R9.2: teams: true è il turno di GRUPPO (lo passa il loop): lì la riga
     // del background non dice di avvisare l'utente
     computerSection(opts.groups ?? [], { groupTurn: opts.teams === true }),
