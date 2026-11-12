@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { useStore } from './store'
 import { Sidebar } from './components/Sidebar'
@@ -20,6 +20,9 @@ import { layoutFor, TRAFFIC_LIGHT_INSET } from './layout'
 // OAC1 (fase guida): la finestra mostra la guida quando è APERTA (guideOpen),
 // non quando «serve» — e col needed senza stato resta in caricamento
 import { guideWindowState } from './lib/guide-window'
+// G6 (fase guida): all'arrivo in chat la mascotte VOLA dalla scena al
+// pannello del bot (FLIP via Web Animations); se non si può, semplice dissolvenza
+import { flyStashedMascotTo } from './lib/guide-arrival'
 
 /** Minimo intervallo tra due segnali 'active' (il daemon ne scarta uno ogni 30 s). */
 const ACTIVE_EVERY_MS = 30_000
@@ -92,6 +95,16 @@ export function App() {
   const onboardingStatus = useStore((s) => s.onboarding)
   const onboardingKnown = onboardingStatus !== null
   const guideView = guideWindowState(onboardingStatus)
+  // G6: il passaggio guida → shell è l'ARRIVO: la mascotte parcheggiata dalla
+  // guida vola al suo posto (due frame: il tempo della shell in campo)
+  const prevGuideView = useRef(guideView)
+  useEffect(() => {
+    const was = prevGuideView.current
+    prevGuideView.current = guideView
+    if (was !== 'guide' || guideView !== 'shell') return
+    const raf = requestAnimationFrame(() => requestAnimationFrame(() => flyStashedMascotTo()))
+    return () => cancelAnimationFrame(raf)
+  }, [guideView])
 
   useEffect(() => {
     void init()

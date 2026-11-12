@@ -2165,6 +2165,7 @@ msgstr "Da qui gli aggiornamenti automatici non funzionano."
 msgid "Da ricollegare"
 msgstr "Da ricollegare"
 
+#: src/renderer/src/components/GuideView.tsx
 #: src/renderer/src/components/RightPanel.tsx
 msgid "da scegliere"
 msgstr "da scegliere"
@@ -3408,6 +3409,10 @@ msgstr "Il testo sparisce del tutto e non si torna indietro. Continuare?"
 #: src/shared/ui-messages.ts
 msgid "rpc.toolNotReadOnly"
 msgstr "il tool \"{tool}\" non è in sola lettura (readOnlyHint): il trigger viene rifiutato"
+
+#: src/renderer/src/components/GuideView.tsx
+msgid "Il tuo bot"
+msgstr "Il tuo bot"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -6796,6 +6801,10 @@ msgstr "tutti i giorni"
 #: src/renderer/src/components/LibraryPanel.tsx
 msgid "Tutti i tipi"
 msgstr "Tutti i tipi"
+
+#: src/renderer/src/components/GuideView.tsx
+msgid "Tutto pronto."
+msgstr "Tutto pronto."
 
 #: src/renderer/src/components/GuideView.tsx
 msgid "tutto quello che serve a ciò che mi hai chiesto"

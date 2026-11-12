@@ -13,7 +13,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { useStore, api } from '../store'
-import type { AutoReviewSettings } from '../../../shared/types'
+import type { AutoReviewSettings, MainModel } from '../../../shared/types'
 import { DEFAULT_AUTO_REVIEW } from '../../../shared/types'
 import { avatarOf, BOT_FAMILIES, BOT_COLORS } from '../../../shared/avatar'
 import type { BotFamily, BotColor } from '../../../shared/types'
@@ -26,6 +26,8 @@ import { guideMood, guideBubble, guideBubbleKey, EMPTY_GUIDE_FACTS, type GuideFa
 import { Bot } from '../bot/Bot'
 // G4: il passo Modello vive in un componente suo (griglia, prova, Ollama, Integrato)
 import { GuideModelStep, type ModelStepFacts } from './GuideModelStep'
+// G6: l'arrivo in chat — la mascotte vola dalla scena al pannello del bot
+import { stashMascotFlight } from '../lib/guide-arrival'
 
 /** L'ordine dei passi della guida nella UI («Pronto» è solo UI, G6). */
 const UI_STEPS: readonly GuideUiStep[] = ['welcome', 'model', 'approvals', 'ready']
@@ -301,6 +303,71 @@ function ApprovalsStep({ modelReady, chosen, onChoose }: {
 }
 
 /**
+ * G6: il passo «Pronto» (SOLO della UI: la sequenza del daemon non cambia) —
+ * «Tutto pronto.», tre righe di riepilogo (il tuo bot, il modello o «da
+ * scegliere», i permessi) e il bottone «Apri la chat», che fa l'avanzare di
+ * approvals e porta in chat (la mascotte ci vola, FLIP in lib/guide-arrival).
+ */
+function ReadyStep({ modelReady, chosen }: { modelReady: boolean; chosen: 'ask' | 'auto' | null }) {
+  const { t } = useLingui()
+  const [summary, setSummary] = useState<{ model: string; approvals: 'ask' | 'auto' } | null>(null)
+  const agents = useStore((st) => st.agents)
+  const mainAgentId = useStore((st) => st.mainAgentId)
+  const providers = useStore((st) => st.providers)
+  const main = agents.find((a) => a.id === mainAgentId) ?? null
+  const avatar = main ? avatarOf(main, agents, mainAgentId) : { family: 'h-creature' as const, color: 'c1' as const }
+  useEffect(() => {
+    let alive = true
+    void (async () => {
+      const mm = await api.settingsGet<MainModel | null>('models.main', null).catch(() => null)
+      const mode = chosen ?? await api.settingsGet<'ask' | 'auto' | null>('approvals.mode', null).catch(() => null)
+      if (!alive) return
+      const modelName = mm && modelReady
+        ? `${providers.find((p) => p.id === mm.providerId)?.name ?? mm.providerId} · ${mm.model}`
+        : null
+      setSummary({ model: modelName ?? t`da scegliere`, approvals: mode === 'auto' ? 'auto' : 'ask' })
+    })()
+    return () => { alive = false }
+  }, [chosen, modelReady, providers, t])
+  const familyLabel = avatar.family === 'h-creature' ? t`Creatura`
+    : avatar.family === 'h-robo' ? t`Robottino`
+      : avatar.family === 'h-device' ? t`Tech`
+        : avatar.family === 'jelly' ? t`Gelatina` : t`Pixel`
+  const colorLabel = avatar.color === 'c1' ? t`Arancio`
+    : avatar.color === 'c2' ? t`Rosa`
+      : avatar.color === 'c3' ? t`Verde`
+        : avatar.color === 'c4' ? t`Blu`
+          : avatar.color === 'c5' ? t`Giallo`
+            : avatar.color === 'c6' ? t`Turchese` : t`Grafite`
+  const rows: Array<{ test: string; k: string; v: string; ok: boolean }> = [
+    { test: 'guide-summary-bot', k: t`Il tuo bot`, v: `${main?.name ?? 'Bot'} · ${familyLabel}, ${colorLabel.toLowerCase()}`, ok: true },
+    { test: 'guide-summary-model', k: t`Modello`, v: summary?.model ?? t`da scegliere`, ok: modelReady },
+    { test: 'guide-summary-permissions', k: t`Permessi`, v: (summary?.approvals ?? 'ask') === 'auto' ? t`Fai quello che ti chiedo` : t`Chiedimi prima`, ok: true }
+  ]
+  return (
+    <StepPanel stepKey="ready" testId="guide-step-ready">
+      <h1 className="m-0 font-display text-[44px] font-semibold leading-[1.1] tracking-[-0.01em]">{t`Tutto pronto.`}</h1>
+      <div className="flex flex-col gap-2.5">
+        {rows.map((r) => (
+          <div key={r.test} data-testid={r.test} className="flex items-center gap-3 rounded-[14px] bg-card px-4 py-3.5">
+            <span
+              aria-hidden
+              className={`grid size-[30px] place-items-center rounded-full text-sm font-bold ${r.ok ? 'bg-chart-2/15 text-chart-2' : 'bg-muted text-muted-foreground'}`}
+            >
+              {r.ok ? '✓' : '–'}
+            </span>
+            <span className="flex flex-col">
+              <span className="text-[13px] text-muted-foreground">{r.k}</span>
+              <span className="max-w-full truncate text-[15.5px] font-semibold">{r.v}</span>
+            </span>
+          </div>
+        ))}
+      </div>
+    </StepPanel>
+  )
+}
+
+/**
  * La guida: sostituisce la finestra finché lo stato non arriva a «chat».
  */
 export function GuideView() {
@@ -320,6 +387,10 @@ export function GuideView() {
   // torna mai indietro (si avanfa soltanto); Continua riporta al passo vero
   const [backTo, setBackTo] = useState<GuideUiStep | null>(null)
   const [chosenApprovals, setChosenApprovals] = useState<'ask' | 'auto' | null>(null)
+  // G6: il passo Pronto (solo UI) — raggiunto dopo la scelta dei permessi;
+  // la chiave è startedAt, così un «Rifai da capo» lo azzera da solo
+  const guideReadyAt = useStore((st) => st.guideReadyAt)
+  const setGuideReadyAt = useStore((st) => st.setGuideReadyAt)
 
   // G3: la bozza del passo «Tu» — nome e aspetto si provano SUBITO sulla
   // mascotte grande; si salvano solo a «Continua» (agents:update). Il campo
@@ -364,8 +435,9 @@ export function GuideView() {
   const displayName = typedName || 'Bot'
 
   // il passo della UI: i passi computer/memory non ci sono in fase A; il
-  // passo Pronto (solo UI) apre G6 dopo la scelta dei permessi
-  const uiStep: GuideUiStep = backTo ?? (daemonStep as GuideUiStep)
+  // passo Pronto (solo UI, G6) sta fra i permessi scelti e la chat
+  const reachedReady = daemonStep === 'approvals' && guideReadyAt === state.startedAt
+  const uiStep: GuideUiStep = backTo ?? (daemonStep === 'approvals' && reachedReady ? 'ready' : daemonStep as GuideUiStep)
   const stepIdx = UI_STEPS.indexOf(uiStep)
 
   // il nome per le frasi: sul passo Tu quello digitato finora (vuoto =
@@ -432,12 +504,18 @@ export function GuideView() {
     }
     if (uiStep === 'approvals') {
       if (backTo) { setBackTo(null); return }
-      // la scelta ha GIÀ scritto i setting (OA3): Continua chiude il passo
-      if (chosenApprovals) void advance('approvals', 'done')
+      // la scelta ha GIÀ scritto i setting (OA3): Continua porta al passo
+      // Pronto (solo UI), la sequenza del daemon non cambia
+      if (chosenApprovals) setGuideReadyAt(state.startedAt)
       return
     }
     if (backTo) { setBackTo(null); return }
-    if (uiStep === 'ready') { void advance('approvals', 'done'); return }
+    if (uiStep === 'ready') {
+      // G6: la mascotte si misura PRIMA che la guida chiuda, poi l'avanzare
+      // dei permessi porta in chat (l'arrivo vola con un FLIP in App)
+      stashMascotFlight()
+      void advance('approvals', 'done')
+    }
   }
   const onSkip = (): void => {
     if (uiStep === 'model') void advance('model', 'skipped')
@@ -552,6 +630,7 @@ export function GuideView() {
           {uiStep === 'approvals' && (
             <ApprovalsStep modelReady={modelReady} chosen={chosenApprovals} onChoose={(mode) => { void chooseApprovals(mode) }} />
           )}
+          {uiStep === 'ready' && <ReadyStep modelReady={modelReady} chosen={chosenApprovals} />}
           {(daemonStep === 'computer' || daemonStep === 'memory') && (
             <StepPanel stepKey={daemonStep} testId={`guide-step-${daemonStep}`}>
               <h1 className="m-0 font-display text-[40px] font-semibold leading-[1.1] tracking-[-0.01em]">{t`Prossimamente`}</h1>

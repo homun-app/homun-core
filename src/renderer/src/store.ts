@@ -310,6 +310,10 @@ interface Store {
    * La rotaia AUTOMATICA sotto AUTO_RAIL_BELOW non tocca sidebarCollapsed.
    */
   windowWidth: number
+  /** G6 (fase guida): startedAt della guida quando ha raggiunto il passo Pronto (solo UI) */
+  guideReadyAt: number | null
+  /** G6: segna il passo Pronto raggiunto per la guida corrente (startedAt) */
+  setGuideReadyAt: (startedAt: number | null) => void
   sidebarCollapsed: boolean
   sidebarWidth: number
   /** la scheda aperta nel pannello del bot (decide la larghezza wide di Computer) */
@@ -388,6 +392,7 @@ export const useStore = create<Store>((set, get) => ({
   // fase 16b correzioni 2 (Q1): le letture dal localStorage sono le stesse
   // chiavi che usava Sidebar.tsx — la preferenza dell'utente sopravvive
   windowWidth: typeof window !== 'undefined' ? window.innerWidth : 1280,
+  guideReadyAt: null,
   sidebarCollapsed: readLS(SIDEBAR_COLLAPSED_KEY) === '1',
   sidebarWidth: (() => {
     const v = Number(readLS(SIDEBAR_WIDTH_KEY))
@@ -397,6 +402,7 @@ export const useStore = create<Store>((set, get) => ({
 
   // ---- fase 16b correzioni 2 (Q1) ----
   setWindowWidth: (w) => set({ windowWidth: w }),
+  setGuideReadyAt: (startedAt) => set({ guideReadyAt: startedAt }),
   setSidebarWidth: (w) => {
     const clamped = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, w))
     writeLS(SIDEBAR_WIDTH_KEY, String(clamped))

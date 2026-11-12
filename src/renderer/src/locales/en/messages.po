@@ -2165,6 +2165,7 @@ msgstr "From here, automatic updates don\\u2019t work."
 msgid "Da ricollegare"
 msgstr "Needs reconnecting"
 
+#: src/renderer/src/components/GuideView.tsx
 #: src/renderer/src/components/RightPanel.tsx
 msgid "da scegliere"
 msgstr "to be chosen"
@@ -3408,6 +3409,10 @@ msgstr "The text is completely erased and there is no way back. Continue?"
 #: src/shared/ui-messages.ts
 msgid "rpc.toolNotReadOnly"
 msgstr "tool \"{tool}\" is not read-only (readOnlyHint): the trigger is refused"
+
+#: src/renderer/src/components/GuideView.tsx
+msgid "Il tuo bot"
+msgstr "Your bot"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -6796,6 +6801,10 @@ msgstr "every day"
 #: src/renderer/src/components/LibraryPanel.tsx
 msgid "Tutti i tipi"
 msgstr "All types"
+
+#: src/renderer/src/components/GuideView.tsx
+msgid "Tutto pronto."
+msgstr "All set."
 
 #: src/renderer/src/components/GuideView.tsx
 msgid "tutto quello che serve a ciò che mi hai chiesto"
