@@ -324,6 +324,10 @@ await modelStepViaCompatibile({ key: 'chiave-sbagliata' })
 check('G8-1l chiave sbagliata: la frase dell\'errore in parole (invalid-key)',
   await waitDom(`!!document.querySelector('[data-testid="guide-probe-error"]') && document.body.innerText.includes('Questa chiave non funziona') && document.body.innerText.includes('non autorizzata')`, 15_000),
   await pageEval(`return document.querySelector('[data-testid="guide-probe-error"]')?.innerText ?? ''`))
+// GC1.4: dopo la chiave sbagliata la mascotte è in ATTESA (data-mood)
+check('GC1-b chiave sbagliata: la mascotte è in attesa (data-mood="waiting")',
+  await waitDom(`document.querySelector('[data-testid="guide-scene"] [data-mood]')?.getAttribute('data-mood') === 'waiting'`, 10_000),
+  `mood=${await pageEval(`return document.querySelector('[data-testid="guide-scene"] [data-mood]')?.getAttribute('data-mood') ?? null`)}`)
 await shot('oac-chiave-sbagliata-1440-chiaro.png')
 
 // «← Altri provider»: dal pannello all'elenco Altri…, e di lì alla griglia
@@ -339,6 +343,11 @@ check('G8-1n chiave giusta: la riga verde «Funziona. La chiave resta nel Portac
   await waitDom(`!!document.querySelector('[data-testid="guide-probe-ok"]')`, 15_000))
 const recommendedPressed = await pageEval(`return document.querySelector('[data-testid="guide-model-finto"]')?.getAttribute('aria-pressed')`)
 check('G8-1o il modello consigliato è GIÀ scelto (il primo dell\'elenco: finto)', recommendedPressed === 'true', `aria-pressed=${recommendedPressed}`)
+// GC1.4: dopo «Funziona» la mascotte è FELICE e la nuvoletta cambia frase
+// SUBITO, senza aspettare il «Continua» (il modelReady del daemon arriva dopo)
+check('GC1-a dopo «Funziona» la mascotte è felice (data-mood="happy") e la nuvoletta dice la frase della prova riuscita',
+  await waitDom(`document.querySelector('[data-testid="guide-scene"] [data-mood]')?.getAttribute('data-mood') === 'happy' && document.body.innerText.includes('Funziona! Sento già i pensieri.')`, 10_000),
+  `mood=${await pageEval(`return document.querySelector('[data-testid="guide-scene"] [data-mood]')?.getAttribute('data-mood') ?? null`)}`)
 await shot('guida-v2-modello-pannello-1440-chiaro.png')
 await clickTestid('guide-continue')
 check('G8-1p «Continua» del passo Modello porta ai Permessi (salvataggio col clic, mai RPC)',

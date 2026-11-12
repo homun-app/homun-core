@@ -48,8 +48,9 @@ function SceneColumn({ phrase, bubbleKey, mood, avatar, displayName, width, masc
   stacked: boolean
 }) {
   const shadowWidth = Math.round((mascotSize / 460) * 260)
+  // GC1: l'umore è leggibile anche da fuori (data-mood), per la sonda
   const mascot = (
-    <div className="guide-float">
+    <div className="guide-float" data-mood={mood}>
       <Bot family={avatar.family} color={avatar.color} state={mood} size={mascotSize} label={displayName} />
     </div>
   )

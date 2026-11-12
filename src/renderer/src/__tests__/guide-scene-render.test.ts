@@ -88,6 +88,17 @@ describe('G2: la scena della guida — mascotte Bot, nuvoletta, niente emoji', (
     expect(byTestId(tree, 'guide-skip').length).toBe(0)
   })
 
+  it('GC1: la scena espone l\'umore come data-mood sul contenitore della mascotte', () => {
+    const html = renderGuide(status({ step: 'welcome', done: [], skipped: [], startedAt: 1 }))
+    const tree = parseHtml(html)
+    const scene = byTestId(tree, 'guide-scene')[0]!
+    // il contenitore della mascotte (guide-float) porta l'umore corrente:
+    // al passo Tu idle (o happy col lampo), la sonda lo legge da fuori
+    const mascotBox = findAll(scene, (n) => n.attrs['data-mood'] !== undefined)
+    expect(mascotBox.length).toBe(1)
+    expect(mascotBox[0]!.attrs['data-mood']).toBe('idle')
+  })
+
   it('finestra stretta (820): la scena impilata resta senza scorrimenti nascosti', () => {
     const html = renderGuide(status({ step: 'welcome', done: [], skipped: [], startedAt: 1 }), 820)
     const tree = parseHtml(html)

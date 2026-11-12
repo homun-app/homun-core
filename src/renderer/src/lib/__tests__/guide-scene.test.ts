@@ -43,6 +43,21 @@ describe('G2 guideMood (pura): l\'umore della mascotte per passo e fatti', () =>
     expect(guideMood('model', facts({ modelReady: true, probe: 'testing' }))).toBe('listening')
   })
 
+  it('GC1: il bot se ne accorge SUBITO — prova riuscita, Ollama scelto o download finito → happy', () => {
+    // la prova della chiave riuscita (senza aspettare il «Continua»): happy
+    expect(guideMood('model', facts({ providerPath: 'cloud', probe: 'ok' }))).toBe('happy')
+    // Ollama col modello scelto: happy (prima restava thinking)
+    expect(guideMood('model', facts({ providerPath: 'ollama', ollamaChosen: true }))).toBe('happy')
+    // il download del modello integrato è finito: happy
+    expect(guideMood('model', facts({ providerPath: 'local', download: 'done' }))).toBe('happy')
+    // la prova in corso vince anche sulla prova riuscita di prima (si riascolta)
+    expect(guideMood('model', facts({ providerPath: 'cloud', probe: 'testing' }))).toBe('listening')
+    // le altre combinazioni restano come oggi
+    expect(guideMood('model', facts({ providerPath: 'cloud', probe: 'idle' }))).toBe('thinking')
+    expect(guideMood('model', facts({ providerPath: 'ollama', ollamaChosen: false }))).toBe('thinking')
+    expect(guideMood('model', facts({ providerPath: 'local', download: 'idle' }))).toBe('thinking')
+  })
+
   it('passo Permessi: speaking. Passo Pronto: happy', () => {
     expect(guideMood('approvals', facts({}))).toBe('speaking')
     expect(guideMood('ready', facts({}))).toBe('happy')
@@ -68,6 +83,14 @@ describe('G2 guideBubble (pura): le frasi della nuvoletta, in it e en', () => {
     expect(phrase('it', 'model', facts({ providerPath: 'cloud', probe: 'ok', modelReady: true }))).toBe('Funziona! Sento già i pensieri.')
     expect(phrase('it', 'model', facts({ providerPath: 'cloud', probe: 'bad' }))).toBe('Mmh, questa chiave non entra.')
     expect(phrase('en', 'model', facts({ providerPath: 'cloud', probe: 'testing' }))).toBe('Testing the key…')
+  })
+
+  it('GC1: prova riuscita SENZA modelReady → la frase della prova riuscita, subito', () => {
+    expect(phrase('it', 'model', facts({ providerPath: 'cloud', probe: 'ok' }))).toBe('Funziona! Sento già i pensieri.')
+    expect(phrase('en', 'model', facts({ providerPath: 'cloud', probe: 'ok' }))).toBe('It works! I can feel the thoughts already.')
+    // il rifiuto e l'invito non cambiano
+    expect(phrase('it', 'model', facts({ providerPath: 'cloud', probe: 'bad' }))).toBe('Mmh, questa chiave non entra.')
+    expect(phrase('it', 'model', facts({ providerPath: 'cloud' }))).toBe('Incolla la chiave: la provo subito.')
   })
 
   it('passo Modello Ollama: l\'invito a scegliere, e il modello scelto', () => {
