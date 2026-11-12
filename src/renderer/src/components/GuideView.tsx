@@ -282,13 +282,13 @@ function ApprovalsStep({ modelReady, chosen, onChoose }: {
               data-testid={`guide-approvals-${c.id}`}
               aria-pressed={chosen === c.id}
               disabled={!enabled}
-              className={`flex min-h-[44px] flex-col gap-1.5 rounded-[20px] px-6 py-[22px] text-left transition ${chosen === c.id ? 'bg-card shadow-[0_0_0_2px_var(--foreground)]' : 'bg-card/55 hover:bg-card'} ${enabled ? '' : 'cursor-not-allowed opacity-55'}`}
+              className={`flex min-h-[44px] flex-col gap-1.5 rounded-[20px] px-6 py-[22px] text-left transition ${chosen === c.id ? 'bg-card shadow-[0_0_0_2px_var(--foreground)]' : 'bg-card/55 hover:bg-card dark:bg-card'} ${enabled ? '' : 'cursor-not-allowed opacity-55'}`}
               onClick={() => { if (enabled) onChoose(c.id) }}
             >
               <span className="font-display text-xl font-semibold">{c.title}</span>
               <span className="text-sm leading-[1.45] text-muted-foreground">{c.desc}</span>
               <span className="mt-1.5 flex flex-col gap-1 text-[13.5px] leading-[1.4]">
-                <span><b className="text-chart-2">{t`Da solo`}</b> · {c.alone}</span>
+                <span><b className="text-guide-good">{t`Da solo`}</b> · {c.alone}</span>
                 <span><b>{t`Ti chiedo`}</b> · {c.ask}</span>
               </span>
               {!enabled && (
@@ -592,7 +592,7 @@ export function GuideView() {
           <label className="flex shrink-0 items-center gap-2 text-[13px] text-muted-foreground">
             <Trans>Lingua</Trans>
             <select
-              className="rounded-full bg-card px-3 py-1.5 text-[13px] text-foreground outline-none"
+              className="min-h-[44px] rounded-full bg-card px-3 py-1.5 text-[13px] text-foreground outline-none"
               aria-label={t`Lingua`}
               data-testid="guide-language-select"
               value={uiLanguage}

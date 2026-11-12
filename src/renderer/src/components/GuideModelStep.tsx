@@ -52,12 +52,12 @@ function ProviderCard({ id, label, desc, badge, logoKind, onPick }: {
       type="button"
       data-testid={`guide-provider-${id}`}
       onClick={onPick}
-      className="flex min-h-[124px] flex-col items-start gap-2.5 rounded-[18px] bg-card/55 p-4 text-left transition hover:-translate-y-px hover:bg-card"
+      className="flex min-h-[124px] flex-col items-start gap-2.5 rounded-[18px] bg-card/55 p-4 text-left transition hover:-translate-y-px hover:bg-card dark:bg-card/80"
     >
       <span className="flex w-full items-center justify-between gap-2">
         <ProviderMark kind={logoKind as ProviderKind} name={label} />
         {badge && (
-          <span className="rounded-full bg-chart-2/15 px-2 py-0.5 text-[11px] font-semibold text-chart-2">{badge}</span>
+          <span className="rounded-full bg-guide-good/15 px-2 py-0.5 text-[11px] font-semibold text-guide-good">{badge}</span>
         )}
       </span>
       <span className="text-[15px] font-semibold leading-tight">{label}</span>
@@ -238,7 +238,7 @@ export function GuideModelStep({ paths, onFactsChange, onReadyChange, registerCo
         <button
           type="button"
           data-testid="guide-back-providers"
-          className="self-start rounded-lg px-1.5 py-2 text-sm font-semibold text-muted-foreground transition hover:text-foreground"
+          className="min-h-[44px] self-start rounded-lg px-1.5 py-2 text-sm font-semibold text-muted-foreground transition hover:text-foreground"
           onClick={() => { setPanel(kind === 'xai' || kind === 'mistral' || kind === 'deepseek' || kind === 'groq' || kind === 'zai' || kind === 'openai-compatible' ? 'others' : 'grid'); setup.reset(); setSelectedModel(null) }}
         >
           ← <Trans>Altri provider</Trans>
@@ -289,7 +289,7 @@ export function GuideModelStep({ paths, onFactsChange, onReadyChange, registerCo
           </label>
           {setup.probe.ok === true && (
             <div className="guide-stepin flex flex-col gap-2.5">
-              <p className="m-0 rounded-[10px] bg-chart-2/15 px-3 py-2.5 text-sm text-chart-2" data-testid="guide-probe-ok">
+              <p className="m-0 rounded-[10px] bg-guide-good/15 px-3 py-2.5 text-sm text-guide-good" data-testid="guide-probe-ok">
                 <Trans>Funziona. La chiave resta nel Portachiavi del Mac.</Trans>
               </p>
               <div className="flex flex-wrap gap-2" data-testid="guide-model-pills">
@@ -299,7 +299,7 @@ export function GuideModelStep({ paths, onFactsChange, onReadyChange, registerCo
                     type="button"
                     data-testid={`guide-model-${m}`}
                     aria-pressed={selectedModel === m}
-                    className={`max-w-full truncate rounded-full px-3.5 py-2 text-[13.5px] font-semibold transition ${selectedModel === m ? 'bg-foreground text-background' : 'bg-background text-foreground hover:bg-accent'}`}
+                    className={`max-w-full min-h-[44px] truncate rounded-full px-3.5 py-2 text-[13.5px] font-semibold transition ${selectedModel === m ? 'bg-foreground text-background' : 'bg-background text-foreground hover:bg-accent'}`}
                     onClick={() => setSelectedModel(m)}
                   >
                     {m}
@@ -337,7 +337,7 @@ export function GuideModelStep({ paths, onFactsChange, onReadyChange, registerCo
         <button
           type="button"
           data-testid="guide-back-providers"
-          className="self-start rounded-lg px-1.5 py-2 text-sm font-semibold text-muted-foreground transition hover:text-foreground"
+          className="min-h-[44px] self-start rounded-lg px-1.5 py-2 text-sm font-semibold text-muted-foreground transition hover:text-foreground"
           onClick={() => { setPanel('grid'); setOllamaModels(null); setOllamaModel(null) }}
         >
           ← <Trans>Altri provider</Trans>
@@ -385,7 +385,7 @@ export function GuideModelStep({ paths, onFactsChange, onReadyChange, registerCo
         <button
           type="button"
           data-testid="guide-back-providers"
-          className="self-start rounded-lg px-1.5 py-2 text-sm font-semibold text-muted-foreground transition hover:text-foreground"
+          className="min-h-[44px] self-start rounded-lg px-1.5 py-2 text-sm font-semibold text-muted-foreground transition hover:text-foreground"
           onClick={() => setPanel('grid')}
         >
           ← <Trans>Altri provider</Trans>
@@ -405,7 +405,7 @@ export function GuideModelStep({ paths, onFactsChange, onReadyChange, registerCo
               <button
                 type="button"
                 data-testid="guide-local-cancel"
-                className="rounded-[12px] bg-foreground px-4 py-2 text-sm font-semibold text-background transition hover:opacity-90"
+                className="min-h-[44px] rounded-[12px] bg-foreground px-4 py-2 text-sm font-semibold text-background transition hover:opacity-90"
                 onClick={() => { void api.localModelCancel().catch(() => undefined) }}
               >
                 <Trans>Annulla</Trans>
@@ -440,7 +440,7 @@ export function GuideModelStep({ paths, onFactsChange, onReadyChange, registerCo
         <button
           type="button"
           data-testid="guide-back-providers"
-          className="self-start rounded-lg px-1.5 py-2 text-sm font-semibold text-muted-foreground transition hover:text-foreground"
+          className="min-h-[44px] self-start rounded-lg px-1.5 py-2 text-sm font-semibold text-muted-foreground transition hover:text-foreground"
           onClick={() => setPanel('grid')}
         >
           ← <Trans>Altri provider</Trans>
