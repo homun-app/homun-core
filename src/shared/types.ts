@@ -937,6 +937,8 @@ export interface SandbotApi {
   onboardingAdvance(step: OnboardingStepId, outcome: 'done' | 'skipped'): Promise<OnboardingStatus | false>
   /** OA2: riapre la guida su un passo saltato, o la rifà da capo ('restart') */
   onboardingReopen(target: OnboardingStepId | 'restart'): Promise<OnboardingStatus | false>
+  /** OA4: chiude la card del focus senza scegliere */
+  onboardingFocusDismiss(entryId: number): Promise<{ ok: boolean }>
   // quick-ask (domanda effimera)
   quickAsk(agentId: string, question: string): Promise<string>
   // allegati

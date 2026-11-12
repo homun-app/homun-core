@@ -3255,7 +3255,7 @@ describe('fase 10 (residuo 0c): al massimo 3 send consegnati per turno', () => {
   })
 })
 
-describe('fase 10 (residuo 0e): notice di onboarding quando il provider esiste', () => {
+describe('fase 10 (residuo 0e): la notice quando manca il modello', () => {
   it('senza provider resta la vecchia notice di configurazione', async () => {
     h.db.agents.set(AGENT, { ...h.db.agents.get(AGENT)!, providerId: null, model: null })
     h.db.providers = []
@@ -3264,33 +3264,6 @@ describe('fase 10 (residuo 0e): notice di onboarding quando il provider esiste',
     expect(notice?.content).toContain('Configura prima un provider')
   })
 
-  it('provider attivo + widget del ruolo in attesa → chiede di scegliere il ruolo, non di configurare', async () => {
-    h.db.agents.set(AGENT, { ...h.db.agents.get(AGENT)!, providerId: null, model: null })
-    h.db.providers = [{ id: 'prov', enabled: true }]
-    h.db.entries.push({
-      id: h.db.nextId++, agentId: AGENT, kind: 'send-message', role: 'assistant',
-      content: 'Per cosa vuoi usarmi di più?', meta: { onboardingRole: true, message: { type: 'widget', prompt: '', options: [] } },
-      createdAt: 1
-    })
-    await runTurn(AGENT, 'ciao', emit)
-    const notice = h.db.entries.find((e) => e.kind === 'notice')
-    expect(notice?.content).toContain('scegli il ruolo nel messaggio')
-    expect(notice?.content).not.toContain('Configura prima un provider')
-  })
-
-  it('widget del ruolo GIÀ risposto: anche col provider attivo la notice resta quella di configurazione', async () => {
-    h.db.agents.set(AGENT, { ...h.db.agents.get(AGENT)!, providerId: null, model: null })
-    h.db.providers = [{ id: 'prov', enabled: true }]
-    h.db.entries.push({
-      id: h.db.nextId++, agentId: AGENT, kind: 'send-message', role: 'assistant',
-      content: 'Per cosa vuoi usarmi di più?',
-      meta: { onboardingRole: true, respondedValue: 'email', message: { type: 'widget', prompt: '', options: [] } },
-      createdAt: 1
-    })
-    await runTurn(AGENT, 'ciao', emit)
-    const notice = h.db.entries.find((e) => e.kind === 'notice')
-    expect(notice?.content).toContain('Configura prima un provider')
-  })
 })
 
 // ---- fase 10: team e gruppi ----

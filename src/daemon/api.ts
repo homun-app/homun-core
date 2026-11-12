@@ -64,6 +64,7 @@ import type { JobWorker } from './worker'
 import type { ConnectorsManager } from '../main/connectors'
 import type { Presence } from './presence'
 import type { Onboarding } from './onboarding'
+import { answerableOnboardingFocus } from './onboarding-focus'
 import type { OnboardingStepId } from '../shared/types'
 import type { SandbotEvent, SendMessagePayload, McpServerInfo, McpServerSecret, RoutineInfo, RoutineTrigger, AutoReviewSettings, ModelInfo, ModelPriceMap, ThinkingSetting, MainModel, ProviderKind, ReadingPageMeta } from '../shared/types'
 // fase 18b (K3): la lettura /api/show condivisa col check dei tool e col loop
@@ -241,12 +242,9 @@ export function buildApiMethods(
   void import('./local-model').then((lm) => {
     lm.onLocalModelReady(() => {
       void ensureLocalModelProvider()
-      // L4: l'onboarding fermo sul provider riprende anche da qui.
-      // OA3: il modello integrato pronto chiude il passo model da solo
-      if (opts.onboarding) {
-        void opts.onboarding.resume().catch(() => undefined)
-        opts.onboarding.modelBecameReady()
-      }
+      // OA3 (fase onboarding-a): il modello integrato pronto chiude il passo
+      // model della guida da solo
+      opts.onboarding?.modelBecameReady()
     })
   }).catch(() => undefined) // senza il modulo locale il demone parte lo stesso
 
@@ -516,12 +514,29 @@ export function buildApiMethods(
       if (!opts.onboarding) return false
       return opts.onboarding.reopen(target as OnboardingStepId | 'restart')
     },
+    // OA4: chiudere la card del focus senza scegliere (dismissFocus di Rakazo)
+    'onboarding:focus-dismiss': ([entryId]) => {
+      if (!opts.onboarding) return { ok: false }
+      opts.onboarding.dismissFocus(entryId as number)
+      return { ok: true }
+    },
     'chat:send': ([agentId, text, images, readingPage]) => {
       // fase pagine (G2/G6): la pagina aperta mentre l'utente scrive.
       // Ritocchi (P1): il meta lo risolve il daemon sulla libreria (fonte di
       // verità) — quello risolto è il meta salvato nell'entry, così la storia
       // ricostruisce sempre la stessa riga
       const page = resolveReadingPageForChat(readingPage)
+      // OA4 (fase onboarding-a): un messaggio scritto mentre la card del focus
+      // è APERTA diventa la sua RISPOSTA LIBERA (come BC3 per le ask_user):
+      // la card si chiude e il messaggio è il primo turno vero del bot
+      if (!(images as string[] | undefined)?.length) {
+        const focusCard = answerableOnboardingFocus(store.getEntries(agentId as string))
+        if (focusCard) {
+          const job = enqueueWidgetResponse(db(), agentId as string, focusCard.id, text as string, emit)
+          if (job) worker.poke()
+          return
+        }
+      }
       enqueueUserMessage(db(), agentId as string, text as string, images as string[] | undefined, emit, undefined, undefined, undefined, page)
       worker.poke()
     },
@@ -632,18 +647,15 @@ export function buildApiMethods(
           appendLocalNotice(agentId as string, resumed > 0 ? ui(UI.routinesResumed, { count: resumed }) : ui(UI.noRoutinesToResume))
         }
       }
-      // fase 7: i widget di sistema dell'onboarding sono deterministici —
-      // niente turno del modello: il ruolo prepara i bot (o parcheggia sul
-      // provider), il bottone del provider apre le impostazioni (UI)
-      if (widget?.meta?.onboardingRole && opts.onboarding) {
-        opts.onboarding.answerRole(entryId as number, value as string | string[])
-        return { ok: true }
-      }
-      if (widget?.meta?.onboardingProvider) {
-        const meta = widget.meta ?? {}
-        store.updateEntryMeta(widget.id, { ...meta, respondedValue: value as string | string[] })
-        emitUpdatedEntry(agentId as string, widget.id)
-        return { ok: true }
+      // OA4 (fase onboarding-a): la card del focus è DETERMINISTICA — il clic
+      // su una delle 4 opzioni non apre alcun turno del modello (zero token);
+      // il testo libero (da «Scrivi tu…») passa dalla strada delle risposte ai
+      // widget: la card si chiude come risposta libera e il messaggio diventa
+      // il primo turno vero del bot
+      if (widget?.meta?.onboardingFocus && opts.onboarding) {
+        const v = Array.isArray(value) ? String(value[0] ?? '') : String(value ?? '')
+        if (opts.onboarding.answerFocus(entryId as number, v)) return { ok: true }
+        return { ok: enqueueWidgetResponse(db(), agentId as string, entryId as number, value as string | string[], emit) !== null }
       }
       const job = enqueueWidgetResponse(db(), agentId as string, entryId as number, value as string | string[], emit)
       if (job) worker.poke()
@@ -2035,12 +2047,9 @@ export function buildApiMethods(
         getReviewer: () => ({ ...DEFAULT_AUTO_REVIEW, ...store.getSetting<AutoReviewSettings>('autoReview', DEFAULT_AUTO_REVIEW) }),
         setReviewer: (cfg) => store.setSetting('autoReview', cfg)
       })
-      // fase 7: l'onboarding fermo sul provider riprende appena ce n'è uno.
-      // OA3: e se la guida è al passo model, il passo si chiude da solo
-      if (opts.onboarding) {
-        void opts.onboarding.resume().catch(() => undefined)
-        opts.onboarding.modelBecameReady()
-      }
+      // OA3 (fase onboarding-a): se la guida è al passo model, il passo si
+      // chiude da solo — il provider col modello valido è appena arrivato
+      opts.onboarding?.modelBecameReady()
     },
     'providers:delete': ([id]) => {
       // fase 16c (C3.3): se era il provider del modello principale, models.main si azzera
@@ -2427,12 +2436,38 @@ export function buildApiMethods(
  * si trova, il ripiego è `toolSlugOf({ name })` (lo slug del NOME come alla
  * registrazione) con un warn, mai l'id.
  */
+/**
+ * OA4 (fase onboarding-a): le card app dell'onboarding (quelle nate dalla
+ * scelta del focus) passano a «Collegata» quando l'app si collega, su
+ * QUALSIASI strada (diretta, chiave Composio, login Composio): si marca
+ * meta.connected e l'entry torna alla UI, come le offerte del bot.
+ */
+export function markOnboardingAppCards(appIds: ReadonlySet<string>, emit: Emitter): void {
+  for (const agent of store.listAgents()) {
+    const cards = store.getEntries(agent.id).filter(
+      (e) =>
+        e.kind === 'send-message' &&
+        (e.meta?.message as SendMessagePayload | undefined)?.type === 'connector' &&
+        e.meta?.onboardingApp === true &&
+        appIds.has(String((e.meta.message as { connectorId?: string }).connectorId ?? '')) &&
+        !e.meta?.connected
+    )
+    for (const c of cards) {
+      store.updateEntryMeta(c.id, { ...c.meta, connected: true })
+      const updated = store.getEntries(agent.id).find((e) => e.id === c.id)
+      if (updated) emit({ type: 'entries', agentId: agent.id, entries: [updated] })
+    }
+  }
+}
+
 export async function notifyConnectorConnected(
   connectorId: string,
   name: string,
   emit: Emitter,
   worker: JobWorker
 ): Promise<void> {
+  // OA4: le card app dell'onboarding passano a «Collegata» (via diretta)
+  markOnboardingAppCards(new Set([connectorId]), emit)
   const mcpMod = await import('../main/mcp')
   const server = mcpMod.listServers().find((s) => s.catalogId === connectorId)
   // fase prefisso-offerta (P2): se il server non si trova (non dovrebbe
@@ -2522,6 +2557,10 @@ export async function notifyComposioAppConnected(
   worker: JobWorker
 ): Promise<void> {
   const { loadAppCatalog } = await import('../shared/app-catalog')
+  // OA4: le card app dell'onboarding passano a «Collegata» (via Composio):
+  // l'id della RIGA, o lo slug quando l'app è solo di Composio
+  const anyRow = loadAppCatalog({ staticClientsReady: [] }).find((r) => r.composioSlug === slug)
+  markOnboardingAppCards(new Set([anyRow?.id ?? slug]), emit)
   // la curata DIRETTA dello stesso marchio (la riga a doppia strada)
   const row = loadAppCatalog({ staticClientsReady: [] }).find((r) => r.composioSlug === slug && r.directId)
   if (!row?.directId) return

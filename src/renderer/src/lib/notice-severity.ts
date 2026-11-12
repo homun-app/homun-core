@@ -16,7 +16,6 @@ export type NoticeSeverity = 'info' | 'warning' | 'error'
 export const NOTICE_SEVERITY: Readonly<Record<string, NoticeSeverity>> = {
   // ---- info: righe grigie, centrate (come gli eventi) ----
   'notice.agentBusyQueued': 'info',
-  'notice.onboardingWaitingProvider': 'info',
   'notice.routinesResumed': 'info',
   'notice.noRoutinesToResume': 'info',
   'notice.boxPreparing': 'info',

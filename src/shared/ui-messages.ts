@@ -27,11 +27,6 @@ export const UI = {
   turnEndStopped: msg({ id: 'notice.turnEndStopped', message: 'Turno interrotto' }),
   turnEndSuperseded: msg({ id: 'notice.turnEndSuperseded', message: 'Turno sostituito da un nuovo messaggio' }),
   turnEndAwaitingUser: msg({ id: 'notice.turnEndAwaitingUser', message: 'In attesa della risposta dell’utente' }),
-  onboardingWaitingProvider: msg({
-    id: 'notice.onboardingWaitingProvider',
-    message:
-      'C’è già un provider attivo: per farmi partire scegli il ruolo nel messaggio qui sopra (con la risposta preparo i tuoi bot).'
-  }),
   configureProviderFirst: msg({
     id: 'notice.configureProviderFirst',
     message: 'Configura prima un provider e un modello nelle impostazioni dell’agente.'
@@ -593,37 +588,40 @@ export const UI = {
   chartNotAvailable: msg({ id: 'chart.notAvailable', message: 'grafico non disponibile' }),
   chartMetaLine: msg({ id: 'chart.metaLine', message: 'di {author} · versione {version} · esportato da Homun' }),
 
-  // ---- onboarding, benvenuto, kickstart (lingua dell'UTENTE, C4) ----
+  // ---- OA4 (fase onboarding-a): il focus in chat, deterministico e zero token ----
+  onboardingFocusGreeting: msg({
+    id: 'onboarding.focusGreeting',
+    message: 'Ciao! Sono Homun. Dimmi da dove partiamo.'
+  }),
+  onboardingFocusPrompt: msg({
+    id: 'onboarding.focusPrompt',
+    message: 'Su cosa vuoi che ti aiuti per primo?'
+  }),
+  onboardingFocusWork: msg({ id: 'onboarding.focusWork', message: 'Lavoro di tutti i giorni' }),
+  onboardingFocusMail: msg({ id: 'onboarding.focusMail', message: 'Posta e calendario' }),
+  onboardingFocusResearch: msg({ id: 'onboarding.focusResearch', message: 'Ricerca e scrittura' }),
+  onboardingFocusEverything: msg({ id: 'onboarding.focusEverything', message: 'Un po’ di tutto' }),
+  onboardingFocusChosen: msg({
+    id: 'onboarding.focusChosen',
+    message: 'Va bene: {focus}. Vediamo cosa è già collegato.'
+  }),
+  onboardingFocusAskAny: msg({ id: 'onboarding.focusAskAny', message: 'Da cosa vuoi partire?' }),
+  onboardingFocusClosing: msg({
+    id: 'onboarding.focusClosing',
+    message: 'Quando colleghi un’app, la sua card qui sopra diventa «Collegata».'
+  }),
+  onboardingFocusDescription: msg({
+    id: 'onboarding.focusDescription',
+    message: 'Focus iniziale: {focus}'
+  }),
+
   onboardingMainBotDescription: msg({
     id: 'onboarding.mainBotDescription',
     message: 'Punto di contatto principale: coordina gli altri bot.'
   }),
-  onboardingPrompt: msg({ id: 'onboarding.prompt', message: 'Per cosa vuoi usarmi di più?' }),
-  onboardingRoleWork: msg({ id: 'onboarding.roleWork', message: 'Lavoro e codice' }),
-  onboardingRoleOrg: msg({ id: 'onboarding.roleOrg', message: 'Organizzazione e calendario' }),
-  onboardingRoleEmail: msg({ id: 'onboarding.roleEmail', message: 'Email' }),
-  onboardingRoleSearch: msg({ id: 'onboarding.roleSearch', message: 'Ricerca e aggiornamenti' }),
-  onboardingHelp: msg({
-    id: 'onboarding.help',
-    message: 'Con la risposta preparo due bot dedicati (li potrai cambiare quando vuoi).'
-  }),
-  onboardingProviderPrompt: msg({
-    id: 'onboarding.providerPrompt',
-    message: 'Prima di preparare i tuoi bot mi serve un provider (il modello che li fa pensare).'
-  }),
-  onboardingProviderHelp: msg({
-    id: 'onboarding.providerHelp',
-    message: 'Apre le impostazioni: scegli o attiva un provider e torno a completare da solo.'
-  }),
-  onboardingProviderButton: msg({ id: 'onboarding.providerButton', message: 'Apri le impostazioni del provider' }),
-  // fase locale (L4): le tre strade del widget «nessun provider»
-  onboardingProviderCloud: msg({ id: 'onboarding.providerCloud', message: 'Modello cloud con chiave (consigliato)' }),
-  onboardingProviderOllama: msg({ id: 'onboarding.providerOllama', message: 'Usa Ollama che è già sul tuo Mac' }),
-  onboardingProviderLocal: msg({ id: 'onboarding.providerLocal', message: 'Modello integrato sul Mac (2,7 GB)' }),
-  onboardingLocalModelHonest: msg({
-    id: 'onboarding.localModelHonest',
-    message: 'Il modello integrato gira sul tuo Mac: niente costi e i dati restano qui. È più lento e sbaglia più spesso dei modelli cloud. Va bene per prove e cose semplici; per lavori affidabili ti consiglio un modello cloud.'
-  }),
+  // ---- onboarding: la descrizione del bot principale (lingua dell'UTENTE, C4);
+  // OA4 (fase onboarding-a): le chiavi del vecchio flusso (widget del ruolo,
+  // provider, benvenuto dei template) sono STATE RIMOSSE col codice che le usava ----  // fase locale (L4): le tre strade del widget «nessun provider»
   // fase locale correzioni (LC2): i testi del demone per il download interrotto
   localModelDownloadFailed: msg({
     id: 'localModel.downloadFailed',
@@ -643,17 +641,6 @@ export const UI = {
     id: 'localModel.providerName',
     message: 'Integrato (sul tuo Mac)'
   }),
-  onboardingWelcomeHead: msg({
-    id: 'onboarding.welcomeHead',
-    message: 'Benvenuto! Ho preparato due bot su misura per te, li trovi nella barra a sinistra:'
-  }),
-  onboardingWelcomeLine: msg({ id: 'onboarding.welcomeLine', message: '- {name}: {description}' }),
-  onboardingModelWarning: msg({
-    id: 'onboarding.modelWarning',
-    message:
-      'Attenzione: non ho potuto assegnare il modello ai bot ({warning}). Scegline uno valido dalle impostazioni dell’agente.'
-  }),
-  mainBotDescription: msg({ id: 'main.botDescription', message: 'Il mio assistente personale sempre attivo.' }),
   lookaroundOpening: msg({
     id: 'presence.lookaround',
     message: 'Do un’occhiata in giro per vedere se c’è qualcosa che posso fare per te. Ti aggiorno tra poco.'

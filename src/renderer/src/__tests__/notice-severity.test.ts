@@ -171,7 +171,6 @@ describe('R1 — noticeSeverity: la tabella copre tutti gli id usati come notice
       'notice.modelNotResponding',
       'notice.modelRouteCooled',
       'notice.noRoutinesToResume',
-      'notice.onboardingWaitingProvider',
       'notice.ownModelUnavailable',
       'notice.queueFull',
       'notice.resume',

@@ -94,6 +94,7 @@ const api: SandbotApi = {
   onboardingState: () => ipcRenderer.invoke('onboarding:state') as Promise<import('../shared/types').OnboardingStatus>,
   onboardingAdvance: (step, outcome) => ipcRenderer.invoke('onboarding:advance', step, outcome) as Promise<import('../shared/types').OnboardingStatus | false>,
   onboardingReopen: (target) => ipcRenderer.invoke('onboarding:reopen', target) as Promise<import('../shared/types').OnboardingStatus | false>,
+  onboardingFocusDismiss: (entryId) => ipcRenderer.invoke('onboarding:focus-dismiss', entryId) as Promise<{ ok: boolean }>,
   settingsSet: (key, value) => ipcRenderer.invoke('settings:set', key, value),
   quickAsk: (agentId, question) => ipcRenderer.invoke('quickask', agentId, question),
   pickImage: () => ipcRenderer.invoke('dialog:pick-image'),

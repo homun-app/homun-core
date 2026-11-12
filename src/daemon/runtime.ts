@@ -24,7 +24,7 @@ import {
   listAgents, listRoutines, updateRoutine, appendEntry, updateEntryMeta, updateAgent, listProviders, createAgent,
   setAgentStopperForDaemon as store_setAgentStopper
 } from '../main/store/db'
-import { requeueAllLeased, enqueueJob } from '../main/store/jobs'
+import { requeueAllLeased } from '../main/store/jobs'
 import { acquireDaemonLock, releaseDaemonLock, writeDaemonInfo, removeDaemonInfo } from './daemon-files'
 import { startWsServer, generateToken } from './ws-server'
 import { buildApiMethods, notifyComposioAppConnected } from './api'
@@ -53,7 +53,7 @@ import { enqueueUserMessage } from './enqueue'
 import { uiLanguage, formatUi, ui } from '../main/ui-language'
 import { UI } from '../shared/ui-messages'
 import { secondaryPrompts } from '../main/agent/prompts'
-import { loadTemplates, buildKickstartMessage } from '../main/templates'
+import { loadTemplates } from '../main/templates'
 import { createOnboarding, createMainBotEnsurer } from './onboarding'
 import { join } from 'node:path'
 import type { SandbotEvent } from '../shared/types'
@@ -680,12 +680,12 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
   // fase mcp-setup (M5.3): il gateway può finalmente svegliare il worker
   gatewayWorker = worker
 
-  // fase 7: onboarding al primo avvio — bot principale "Bot" + widget di
-  // sistema sul ruolo; i due bot da template partono col kickstart in coda.
-  // OA1 (fase onboarding-a): il bot lo crea SOLO il daemon, qui — single-flight
-  // e transazione di mainAgentId (il main non crea più «Bot» per conto suo).
-  // Il catalogo dei template si valida QUI all'avvio: un JSON rotto ferma il
-  // daemon con l'errore chiaro invece di sorprendere a runtime.
+  // fase 7 (template): il catalogo dei template si valida QUI all'avvio: un
+  // JSON rotto ferma il daemon con l'errore chiaro. (I template RESTANO per il
+  // «Nuovo» di oggi; l'onboarding non li usa più.)
+  // OA1–OA4 (fase onboarding-a): il bot lo crea SOLO il daemon, qui —
+  // single-flight e transazione di mainAgentId — e la GUIDA a passi con, in
+  // coda, la card del focus in chat (deterministica, zero token)
   loadTemplates()
   // OA1: la transazione SQLite attorno a creazione + mainAgentId
   const onboardingTx = <T,>(fn: () => T): T => {
@@ -730,23 +730,6 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
       }
     },
     localEligibilityFacts: () => localModelFacts(),
-    // fase 9 (punto 1): provider attivo + modello predefinito (capability "tools"
-    // verificata via /api/show), non più il primo modello dell'elenco
-    assignDefaultModel: async () => {
-      const { assignDefaultModel } = await import('../main/agent/model-defaults')
-      type ModelDefaultsMap = import('../main/agent/model-defaults').ModelDefaultsMap
-      const providersMod = await import('../main/agent/providers')
-      return assignDefaultModel({
-        listProviders,
-        getOverrides: () => getSetting<ModelDefaultsMap>('providers.modelDefaults', {}),
-        supportsTools: (p, model) => {
-          const full = providersMod.getProvider(p.id)
-          // fase 18a (E0): l'errore finisce nell'avviso dell'onboarding —
-          // testo del catalogo UI
-          return full ? providersMod.modelSupportsTools(full, model) : Promise.resolve({ ok: false, checked: false, error: formatUi(ui(UI.rpcProviderNotFoundLower), uiLanguage()) })
-        }
-      })
-    },
     appendSystemSend: (agentId, message, meta) => {
       const content = message.type === 'text' ? message.text : message.type === 'widget' ? message.prompt : ''
       const entry = appendEntry({
@@ -764,21 +747,39 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
         if (updated) broadcast({ type: 'entries', agentId, entries: [updated] })
       }
     },
-    enqueueKickstart: (agentId, template) => {
-      const now = Date.now()
-      enqueueJob(database, {
-        agentId,
-        kind: 'user-message',
-        payload: {
-          // fase 17c (C4): il kickstart parte nella lingua dell'utente
-          text: buildKickstartMessage(template, currentUserLanguage()),
-          initiator: 'TEMPLATE_IMPORT',
-          extraMeta: { templateName: template.name }
-        },
-        runAt: now,
-        now
-      })
-      pokeWorker()
+    // OA4: la card del focus chiusa senza scelta (widgetDismissed)
+    markWidgetDismissed: (agentId, entryId) => {
+      const entry = getEntries(agentId).find((e) => e.id === entryId)
+      if (entry) {
+        updateEntryMeta(entryId, { ...(entry.meta ?? {}), widgetDismissed: true })
+        const updated = getEntries(agentId).find((e) => e.id === entryId)
+        if (updated) broadcast({ type: 'entries', agentId, entries: [updated] })
+      }
+    },
+    // OA4: le app GIÀ collegate (le tre strade: diretta, chiave Composio,
+    // login Composio) per offrire solo quelle nuove — la stessa regola
+    // dell'elenco unico della finestra App
+    connectedAppIds: async () => {
+      const out = new Set<string>()
+      try {
+        const { loadAppCatalog } = await import('../shared/app-catalog')
+        const rows = loadAppCatalog({ staticClientsReady: [] })
+        const direct = new Map((connectors ? await connectors.list() : []).map((c) => [c.id, c.state.status]))
+        const gateway = new Map((composioGatewayManager.status().connected ?? []).map((a) => [a.slug, a.status]))
+        const key = new Map(((composio ? await composio.status() : { connected: [] }).connected ?? []).map((a) => [a.slug, a.status]))
+        for (const row of rows) {
+          const s = row.directId ? direct.get(row.directId) : undefined
+          if (s === 'connected') { out.add(row.id); continue }
+          if (row.composioSlug) {
+            const g = gateway.get(row.composioSlug)
+            const k = key.get(row.composioSlug)
+            if (g === 'ACTIVE' || k === 'ACTIVE') out.add(row.id)
+          }
+        }
+      } catch {
+        // niente catalogo in questo momento: nessuna app considerata collegata
+      }
+      return out
     },
     emit: (e) => broadcast(e)
   })
@@ -907,11 +908,10 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
   if (requeued > 0) console.log(`[sandbotd] ${requeued} job con lease orfano rimessi in coda all'avvio`)
   worker.start()
 
-  // fase 7: primo avvio su dati vuoti → bot principale + widget del ruolo;
-  // se l'onboarding era fermo sul provider e ora c'è, riprende da qui.
-  // OA1: il bot lo crea SOLO questa chiamata (main escluso dalla corsa)
+  // OA1 (fase onboarding-a): il bot lo crea SOLO questa chiamata (il main è
+  // fuori dalla corsa); OA2/OA3: la guida riprende dallo stesso passo e il
+  // passo model si chiude da solo se il modello c'è già
   void onboarding.start().catch((e) => console.error('[sandbotd] avvio onboarding:', e))
-  void onboarding.resume().catch((e) => console.error('[sandbotd] ripresa onboarding:', e))
 
   // autodiscovery dei provider locali silenziosa al boot (come faceva l'app)
   void import('../main/agent/providers').then((p) => p.discoverProviders().catch(() => undefined))

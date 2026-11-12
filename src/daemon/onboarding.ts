@@ -1,34 +1,40 @@
-// Onboarding al primo avvio. OA1 (fase onboarding-a): UNA sola strada per il
-// primo avvio — il main NON crea più «Bot» (index.ts), lo crea SOLO il daemon
-// qui dentro, con ensureMainBot single-flight e la transazione di
-// mainAgentId; onboardingNeeded (pura) decide chi lo fa, ADOZIONE del «Bot»
-// vuoto delle beta 1–4 compresa. Il flusso vecchio (fase 7: widget del ruolo,
-// due bot da template col kickstart, benvenuto fisso, widget del provider e
-// ripresa) resta finché la guida a passi di OA2+ non lo sostituisce.
+// Onboarding del primo avvio (fase onboarding-a).
+//
+// OA1: UNA sola strada per il primo avvio — il main NON crea più «Bot»: lo
+// crea (o adotta quello vuoto delle beta 1–4) SOLO il daemon, qui, con
+// ensureMainBot single-flight e mainAgentId in transazione. onboardingNeeded
+// (pura) decide chi lo fa: chi ha già scritto in un bot NON la rifà.
+// OA2: la guida a passi «Prepariamo Homun», persistita nel setting
+// onboarding.state — chiudere l'app a metà e riaprirla riporta allo stesso
+// passo; la sequenza e il passo successivo sono puri, i passi non
+// disponibili su questa macchina non ci sono (in fase A computer e memory
+// arrivano con le fasi B e C).
+// OA3: i passi — benvenuto (lingua), modello (si chiude da solo quando il
+// modello arriva), autorizzazioni; «chat» chiude e si entra nella chat del
+// bot principale.
+// OA4: all'ingresso in chat la card del FOCUS (deterministica, zero token)
+// — vedi onboarding-focus.ts. Il vecchio onboarding (widget del ruolo, i due
+// bot da template col kickstart, il benvenuto fisso, il widget del provider
+// e la sua ripresa) è STATO RIMOSSO con i suoi test.
 // Tutto a dipendenze iniettabili: nei test niente LLM, niente rete.
-import type { Agent, OnboardingState, OnboardingStatus, OnboardingStepId, ProviderConfig, SendMessagePayload, SandbotEvent, TranscriptEntry, WidgetOption } from '../shared/types'
-import type { BotTemplate } from '../shared/types'
-import { templateById } from '../main/templates'
-// fase 17c (C4): i testi dell'onboarding sono messaggi del BOT all'utente —
-// si scrivono con formatUi(…, currentUserLanguage()) e si salvano come testo
-// (contenuto dell'utente, niente meta.ui)
+import type { Agent, OnboardingState, OnboardingStatus, OnboardingStepId, ProviderConfig, SendMessagePayload, SandbotEvent, TranscriptEntry } from '../shared/types'
+// fase locale (L4): l'idoneità della macchina per la strada «Integrato»
+import { localEligibility } from '../main/agent/local-catalog'
 import { currentUserLanguage } from '../main/agent/user-language'
 import { formatUi, ui } from '../shared/ui-text'
 import { UI } from '../shared/ui-messages'
-import { pickLang } from '../shared/localized'
-// fase locale (L4): l'idoneità della macchina per la strada «Integrato»
-import { localEligibility } from '../main/agent/local-catalog'
-import type { Lang } from '../shared/language'
+import {
+  insertFocusCardIfDue, answerOnboardingFocus, dismissOnboardingFocus,
+  isFocusCode, type FocusFlowDeps
+} from './onboarding-focus'
 
 /** Il nome del bot principale creato dall'onboarding. */
 export const MAIN_BOT_NAME = 'Bot'
 /** La descrizione del bot principale nella lingua dell'utente (C4). */
-export function mainBotDescription(lang: Lang): string {
+export function mainBotDescription(lang: import('../shared/language').Lang): string {
   return formatUi(ui(UI.onboardingMainBotDescription), lang)
 }
 
-export const ROLE_SETTING = 'onboarding.role'
-export const PENDING_PROVIDER_SETTING = 'onboarding.pendingProvider'
 export const DONE_SETTING = 'onboarding.done'
 
 // ---- OA2 (fase onboarding-a): la guida a passi che si riprende ----
@@ -104,22 +110,6 @@ export function reopenOnboarding(
 }
 
 /**
- * OA3: le strade del passo modello per QUESTA macchina (cloud consigliato,
- * Ollama solo se la scoperta lo trova, Integrato solo se la macchina è
- * idonea). Asincrona per la scoperta: la chiama la RPC onboarding:state.
- */
-export async function guideProviderPaths(deps: OnboardingDeps): Promise<Array<'cloud' | 'ollama' | 'local'>> {
-  let ollamaFound = false
-  try {
-    ollamaFound = (await deps.discoverLocalProviders?.() ?? []).some((p) => p.kind === 'ollama')
-  } catch {
-    ollamaFound = false
-  }
-  const facts = deps.localEligibilityFacts?.() ?? { arch: 'arm64', ramGb: 16, freeDiskBytes: null }
-  return providerPathsOf({ ollamaFound, eligibility: localEligibility(facts) })
-}
-
-/**
  * OA3 (PURA): il passo del modello si chiude DA SOLO quando il modello c'è
  * già (un provider attivo col modello principale): il passo è FATTO, non
  * saltato. Vale SOLO per il passo corrente: gli altri passi non si toccano.
@@ -147,7 +137,7 @@ export interface OnboardingFacts {
 /** La decisione di onboardingNeeded (pura). */
 export interface OnboardingDecision {
   needed: boolean
-  /** il bot da ADOZZARE come principale (il «Bot» vuoto delle beta 1–4), se c'è */
+  /** il bot da ADOTTARE come principale (il «Bot» vuoto delle beta 1–4), se c'è */
   adoptAgentId: string | null
   /** scrivere onboarding.done: chi usa già Homun non deve rifare l'onboarding */
   markDone: boolean
@@ -228,44 +218,6 @@ export function createMainBotEnsurer(deps: EnsureMainBotDeps, adopt: string | nu
   }
 }
 
-/** La domanda del widget di sistema (§3ter T3): 4 opzioni + testo libero (nella lingua dell'utente). */
-export function onboardingPrompt(lang: Lang): string {
-  return formatUi(ui(UI.onboardingPrompt), lang)
-}
-export function onboardingRoleOptions(lang: Lang): WidgetOption[] {
-  // i value restano CODICI (li legge roleTemplates), le label si traducono
-  return [
-    { label: formatUi(ui(UI.onboardingRoleWork), lang), value: 'lavoro-codice' },
-    { label: formatUi(ui(UI.onboardingRoleOrg), lang), value: 'organizzazione-calendario' },
-    { label: formatUi(ui(UI.onboardingRoleEmail), lang), value: 'email' },
-    { label: formatUi(ui(UI.onboardingRoleSearch), lang), value: 'ricerca-aggiornamenti' }
-  ]
-}
-
-/**
- * La mappa ruolo → 2 template (pura): decide quali bot nascono dall'onboarding.
- * Risposte libere o non riconosciute cadono sulla coppia predefinita.
- */
-export function roleTemplates(role: string): [string, string] {
-  switch (role) {
-    case 'lavoro-codice':
-    case 'ricerca-aggiornamenti':
-      return ['mention-monitor', 'daily-briefing']
-    case 'organizzazione-calendario':
-      return ['meeting-prep', 'executive-assistant']
-    case 'email':
-      return ['inbox-manager', 'chief-of-staff']
-    default: // "altro" o testo libero
-      return ['inbox-manager', 'daily-briefing']
-  }
-}
-
-/** Il messaggio FISSO di benvenuto: presenta i nuovi bot in una riga ciascuno (nella lingua dell'utente, nomi/descrizioni dei template compresi). */
-export function welcomeMessage(templates: BotTemplate[], lang: Lang): string {
-  const lines = templates.map((t) => formatUi(ui(UI.onboardingWelcomeLine, { name: pickLang(t.name, lang), description: pickLang(t.description, lang) }), lang))
-  return [formatUi(ui(UI.onboardingWelcomeHead), lang), ...lines].join('\n')
-}
-
 export interface OnboardingDeps {
   now(): number
   getSetting<T>(key: string, fallback: T): T
@@ -285,30 +237,26 @@ export interface OnboardingDeps {
    * memory non ci sono ancora: default { computer: false, memory: false }.
    */
   stepAvailability?: () => { computer: boolean; memory: boolean }
-  updateAgent(id: string, patch: { providerId?: string | null; model?: string | null }): void
+  /** OA4: la riga del focus va in descrizione del bot (il nome non si tocca) */
+  updateAgent(id: string, patch: { providerId?: string | null; model?: string | null; description?: string }): void
   listProviders(): ProviderConfig[]
-  /** Fase 9 (punto 1): provider attivo + defaultModel (con capability "tools"). */
-  assignDefaultModel(): Promise<{ providerId: string; model: string | null; warning?: string } | null>
   /** Entry visibile creata dal sistema (non dal modello), come il look-around. */
   appendSystemSend(agentId: string, message: SendMessagePayload, meta?: Record<string, unknown>): void
   /** Segna il widget risposto (respondedValue) e lo rimanda alla UI. */
   markWidgetResponded(agentId: string, entryId: number, value: string | string[]): void
-  /** Accoda il job del kickstart di un bot da template (initiator TEMPLATE_IMPORT). */
-  enqueueKickstart(agentId: string, template: BotTemplate): void
+  /** OA4: segna la card del focus CHIUSA senza scelta (widgetDismissed). */
+  markWidgetDismissed(agentId: string, entryId: number): void
+  /** OA4: le app già collegate, per offrire solo quelle nuove */
+  connectedAppIds(): Promise<ReadonlySet<string>>
   emit(e: SandbotEvent): void
   /**
-   * Fase locale (L4): la scoperta dei servizi locali, per la strada Ollama del
-   * widget del provider (solo se lo trova). Facoltativa: senza, la strada non
+   * Fase locale (L4): la scoperta dei servizi locali, per la strada Ollama
+   * del passo modello (solo se lo trova). Facoltativa: senza, la strada non
    * si offre.
    */
   discoverLocalProviders?: () => Promise<Array<{ kind: string }>>
   /** Fase locale (L4): i fatti della macchina per la strada Integrato (default: Mac idoneo). */
   localEligibilityFacts?: () => { arch: string; ramGb: number; freeDiskBytes: number | null }
-}
-
-/** C'è almeno un provider attivo? (senza provider i bot non possono pensare) */
-function providerConfigured(deps: OnboardingDeps): boolean {
-  return deps.listProviders().some((p) => p.enabled)
 }
 
 /** I passi disponibili su questa macchina (fase A: computer e memory mai). */
@@ -352,12 +300,44 @@ export function onboardingFactsOf(deps: OnboardingDeps): OnboardingFacts {
 }
 
 /**
+ * Fase locale (L4), pura: le strade del passo «nessun provider», in ordine —
+ * cloud con chiave (consigliato), Ollama SOLO se la scoperta lo trova,
+ * Integrato sul Mac SOLO se l'idoneità non è unsupported (con RAM < 16 si può
+ * installare: la scheda mostra l'avviso forte).
+ */
+export function providerPathsOf(f: {
+  ollamaFound: boolean
+  eligibility: { status: 'ok' | 'discouraged' | 'unsupported' | 'no-space' }
+}): Array<'cloud' | 'ollama' | 'local'> {
+  const out: Array<'cloud' | 'ollama' | 'local'> = ['cloud']
+  if (f.ollamaFound) out.push('ollama')
+  if (f.eligibility.status !== 'unsupported') out.push('local')
+  return out
+}
+
+/**
+ * OA3: le strade del passo modello per QUESTA macchina (cloud consigliato,
+ * Ollama solo se la scoperta lo trova, Integrato solo se la macchina è
+ * idonea). Asincrona per la scoperta: la chiama la RPC onboarding:state.
+ */
+export async function guideProviderPaths(deps: OnboardingDeps): Promise<Array<'cloud' | 'ollama' | 'local'>> {
+  let ollamaFound = false
+  try {
+    ollamaFound = (await deps.discoverLocalProviders?.() ?? []).some((p) => p.kind === 'ollama')
+  } catch {
+    ollamaFound = false
+  }
+  const facts = deps.localEligibilityFacts?.() ?? { arch: 'arm64', ramGb: 16, freeDiskBytes: null }
+  return providerPathsOf({ ollamaFound, eligibility: localEligibility(facts) })
+}
+
+/**
  * OA1: il primo avvio ha UNA sola strada. Il main NON crea più «Bot»: lo crea
  * (o adotta) SOLO il daemon, qui — con l'ensure single-flight, così la race
  * col main e i doppi start non fanno nascere due bot. Chi ha già scritto in
  * chat non rifà l'onboarding (e onboarding.done si scrive qui, una volta per
- * tutte). Il widget del ruolo del vecchio flusso resta finché la guida a
- * passi non lo sostituisce: solo se la chat del bot è ancora vuota.
+ * tutte). OA2: lo stato della guida nasce qui e non si tocca più. Se la
+ * guida è GIÀ chiusa (chat), l'ingresso in chat riceve la card del focus.
  */
 export async function startOnboarding(deps: OnboardingDeps): Promise<void> {
   const decision = onboardingNeeded(onboardingFactsOf(deps))
@@ -380,144 +360,50 @@ export async function startOnboarding(deps: OnboardingDeps): Promise<void> {
   deps.setSetting(ONBOARDING_STATE_SETTING, auto)
   deps.emit({ type: 'agents' })
   deps.emit({ type: 'onboarding', ...statusOf(deps) })
-  // il widget del ruolo del vecchio flusso: solo se la chat è ancora vuota
-  // (nessuna send di sistema: niente widget doppio ai riavvii)
-  if (!deps.getEntries(main.id).some((e) => e.kind === 'send-message')) {
-    const lang = currentUserLanguage()
-    deps.appendSystemSend(main.id, {
-      type: 'widget',
-      prompt: onboardingPrompt(lang),
-      options: onboardingRoleOptions(lang),
-      allowCustom: true,
-      helpText: formatUi(ui(UI.onboardingHelp), lang)
-    }, { onboardingRole: true })
+  // OA4: la guida era già chiusa (riavvio dopo la fine, senza messaggi in
+  // chat): la card del focus entra se è dovuta (idempotente)
+  if (auto.step === 'chat' && !decision.markDone) {
+    insertFocusCardIfDue(focusDepsOf(deps))
   }
+  void main
 }
 
-/**
- * Fase locale (L4), pura: le strade del widget «nessun provider», in ordine —
- * cloud con chiave (consigliato), Ollama SOLO se la scoperta lo trova,
- * Integrato sul Mac SOLO se l'idoneità non è unsupported (con RAM < 16 si può
- * installare: la scheda mostra l'avviso forte).
- */
-export function providerPathsOf(f: {
-  ollamaFound: boolean
-  eligibility: { status: 'ok' | 'discouraged' | 'unsupported' | 'no-space' }
-}): Array<'cloud' | 'ollama' | 'local'> {
-  const out: Array<'cloud' | 'ollama' | 'local'> = ['cloud']
-  if (f.ollamaFound) out.push('ollama')
-  if (f.eligibility.status !== 'unsupported') out.push('local')
-  return out
-}
-
-/**
- * La risposta al widget del ruolo: salva il ruolo e completa subito, oppure —
- * senza provider — si ferma col widget delle TRE strade (L4): cloud con chiave
- * (consigliato), Ollama se trovato, Integrato se la macchina è idonea. La
- * ripresa avviene a providers:save, all'installazione dell'Integrato o al
- * prossimo avvio.
- */
-export async function answerOnboardingRole(deps: OnboardingDeps, entryId: number, value: string | string[]): Promise<void> {
-  const role = (Array.isArray(value) ? value[0] : value) ?? ''
-  deps.setSetting(ROLE_SETTING, role)
-  deps.markWidgetResponded(deps.getSetting<string | null>('mainAgentId', null) ?? '', entryId, value)
-  if (providerConfigured(deps)) {
-    await completeOnboarding(deps, role)
-  } else {
-    deps.setSetting(PENDING_PROVIDER_SETTING, true)
-    const main = deps.getSetting<string | null>('mainAgentId', null) ?? ''
-    const lang = currentUserLanguage()
-    let ollamaFound = false
-    try {
-      ollamaFound = (await deps.discoverLocalProviders?.() ?? []).some((p) => p.kind === 'ollama')
-    } catch {
-      ollamaFound = false
-    }
-    const facts = deps.localEligibilityFacts?.() ?? { arch: 'arm64', ramGb: 16, freeDiskBytes: null }
-    const paths = providerPathsOf({ ollamaFound, eligibility: localEligibility(facts) })
-    const optionOf = (v: 'open-provider-settings' | 'open-ollama' | 'open-local-model', labelId: typeof UI.onboardingProviderButton, primary = false) => ({
-      label: formatUi(ui(labelId), lang),
-      value: v,
-      ...(primary ? { style: 'primary' as const } : {})
-    })
-    deps.appendSystemSend(main, {
-      type: 'widget',
-      prompt: formatUi(ui(UI.onboardingProviderPrompt), lang),
-      // l'avviso onesto serve solo quando c'è la strada Integrato
-      ...(paths.includes('local')
-        ? { helpText: formatUi(ui(UI.onboardingLocalModelHonest), lang) }
-        : { helpText: formatUi(ui(UI.onboardingProviderHelp), lang) }),
-      options: [
-        optionOf('open-provider-settings', UI.onboardingProviderButton, true),
-        ...(paths.includes('ollama') ? [optionOf('open-ollama', UI.onboardingProviderOllama)] : []),
-        ...(paths.includes('local') ? [optionOf('open-local-model', UI.onboardingProviderLocal)] : [])
-      ]
-    }, { onboardingProvider: true })
+/** I deps del flusso del focus ricavati dagli stessi deps dell'onboarding. */
+function focusDepsOf(deps: OnboardingDeps): FocusFlowDeps {
+  return {
+    now: deps.now,
+    getSetting: deps.getSetting,
+    setSetting: deps.setSetting,
+    getAgent: deps.getAgent,
+    updateAgent: deps.updateAgent,
+    getEntries: deps.getEntries,
+    appendSystemSend: deps.appendSystemSend,
+    markWidgetResponded: deps.markWidgetResponded,
+    markWidgetDismissed: deps.markWidgetDismissed,
+    tx: deps.tx,
+    connectedAppIds: deps.connectedAppIds
   }
-}
-
-/**
- * Riprende l'onboarding parcheggiato sul provider: chiamata a providers:save e
- * all'avvio del daemon. True se ha completato ora.
- */
-export async function resumeOnboarding(deps: OnboardingDeps): Promise<boolean> {
-  if (!deps.getSetting<boolean>(PENDING_PROVIDER_SETTING, false)) return false
-  if (deps.getSetting<boolean>(DONE_SETTING, false)) return false
-  if (!providerConfigured(deps)) return false
-  const role = deps.getSetting<string>(ROLE_SETTING, '')
-  await completeOnboarding(deps, role)
-  return true
-}
-
-/**
- * Completa l'onboarding: i due bot da template (col kickstart in coda) e il
- * benvenuto FISSO del bot principale. Fase 9 (punto 1): ai bot va il
- * MODELLO PREDEFINITO del provider (capability "tools" verificata), non più
- * il primo modello dell'elenco; senza default configurato il bot resta senza
- * modello e la prima chat dirà di configurarlo.
- */
-export async function completeOnboarding(deps: OnboardingDeps, role: string): Promise<void> {
-  const assignment = await deps.assignDefaultModel()
-  const mainId = deps.getSetting<string | null>('mainAgentId', null)
-  if (mainId && assignment) deps.updateAgent(mainId, { providerId: assignment.providerId, model: assignment.model })
-
-  const lang = currentUserLanguage()
-  const templates = roleTemplates(role)
-    .map((id) => templateById(id))
-    .filter((t): t is BotTemplate => !!t)
-  for (const t of templates) {
-    // fase 17c (C5): il bot nasce col nome/descrizione nella lingua
-    // dell'utente (contenuto dell'utente, modificabile)
-    const a = deps.createAgent(pickLang(t.name, lang), pickLang(t.description, lang))
-    if (assignment) deps.updateAgent(a.id, { providerId: assignment.providerId, model: assignment.model })
-    deps.enqueueKickstart(a.id, t)
-  }
-  if (mainId) {
-    deps.appendSystemSend(mainId, { type: 'text', text: welcomeMessage(templates, lang) })
-    // il default non è assegnabile (niente capability "tools"): lo dice qui,
-    // così l'utente sa perché i bot non rispondono finché non sistema il modello
-    if (assignment?.warning) {
-      deps.appendSystemSend(mainId, {
-        type: 'text',
-        text: formatUi(ui(UI.onboardingModelWarning, { warning: assignment.warning }), lang)
-      })
-    }
-  }
-  deps.setSetting(PENDING_PROVIDER_SETTING, false)
-  deps.setSetting(DONE_SETTING, true)
-  deps.emit({ type: 'agents' })
 }
 
 export function createOnboarding(deps: OnboardingDeps) {
+  const focus = focusDepsOf(deps)
+  /** La guida arriva a «chat»: done scritto e la card del focus entra (idempotente). */
+  const reachChatIfChat = (next: OnboardingState): void => {
+    if (next.step === 'chat') {
+      deps.setSetting(DONE_SETTING, true)
+      insertFocusCardIfDue(focus)
+    }
+  }
   return {
     start: () => startOnboarding(deps),
-    /** OA3: le strade del passo modello per questa macchina (RPC onboarding:state). */
-    providerPaths: () => guideProviderPaths(deps),
     /** OA1/OA2: lo stato per la finestra — finché non lo dice il daemon, la UI carica. */
     status: (): OnboardingStatus => statusOf(deps),
+    /** OA3: le strade del passo modello per questa macchina (RPC onboarding:state). */
+    providerPaths: () => guideProviderPaths(deps),
     /**
      * OA2: chiude il passo CORRENTE con l'esito dato e passa al prossimo
-     * disponibile. Quando la guida arriva a «chat» scrive onboarding.done.
+     * disponibile. Quando la guida arriva a «chat» si scrive onboarding.done
+     * e la chat del bot principale riceve la card del focus.
      * False se il passo non è il corrente (niente cambiato).
      */
     advance: (step: OnboardingStepId, outcome: 'done' | 'skipped'): OnboardingStatus | false => {
@@ -533,7 +419,7 @@ export function createOnboarding(deps: OnboardingDeps) {
       )
       if (next === state) return false
       deps.setSetting(ONBOARDING_STATE_SETTING, next)
-      if (next.step === 'chat') deps.setSetting(DONE_SETTING, true)
+      reachChatIfChat(next)
       const status = statusOf(deps)
       deps.emit({ type: 'onboarding', ...status })
       return status
@@ -567,12 +453,20 @@ export function createOnboarding(deps: OnboardingDeps) {
       const next = autoAdvanceOnboarding(state, { modelReady: modelReadyOf(deps) }, sequence)
       if (next === state) return false
       deps.setSetting(ONBOARDING_STATE_SETTING, next)
-      if (next.step === 'chat') deps.setSetting(DONE_SETTING, true)
+      reachChatIfChat(next)
       deps.emit({ type: 'onboarding', ...statusOf(deps) })
       return true
     },
-    answerRole: (entryId: number, value: string | string[]) => answerOnboardingRole(deps, entryId, value),
-    resume: () => resumeOnboarding(deps)
+    /** OA4: la risposta alla card del focus (deterministica, zero token). */
+    answerFocus: (entryId: number, value: string) => {
+      if (!isFocusCode(value)) return false
+      void answerOnboardingFocus(focus, entryId, value)
+      return true
+    },
+    /** OA4: chiudere la card del focus senza scegliere. */
+    dismissFocus: (entryId: number) => {
+      dismissOnboardingFocus(focus, entryId)
+    }
   }
 }
 

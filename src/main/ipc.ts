@@ -130,7 +130,7 @@ export const DAEMON_RPC_CHANNELS = [
   'templates:list', 'agents:create-from-template',
   // OA1 (fase onboarding-a): lo stato del primo avvio (la finestra carica finché non risponde);
   // OA2: la guida avanza e si riapre da qui
-  'onboarding:state', 'onboarding:advance', 'onboarding:reopen'
+  'onboarding:state', 'onboarding:advance', 'onboarding:reopen', 'onboarding:focus-dismiss'
 ] as const
 
 export function registerIpc(client: DaemonClient, getWindows: () => BrowserWindow[]): void {

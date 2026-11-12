@@ -40,11 +40,6 @@ msgstr " (HTTP {0})"
 msgid " attende la tua risposta"
 msgstr " waiting for your answer"
 
-#. js-lingui-explicit-id
-#: src/shared/ui-messages.ts
-msgid "onboarding.welcomeLine"
-msgstr "- {name}: {description}"
-
 #: src/renderer/src/components/Settings.tsx
 msgid "— connettore —"
 msgstr "— connector —"
@@ -563,10 +558,6 @@ msgstr "✓ {0} tool: {1}"
 msgid "✓ Aggiunto — il bot ha ricevuto l'esito"
 msgstr "✓ Added — the bot received the result"
 
-#: src/renderer/src/components/Chat.tsx
-msgid "✓ Appena il provider è a posto preparo i tuoi bot."
-msgstr "✓ As soon as the provider is ready I'll set up your bots."
-
 #: src/renderer/src/components/ConnectorCard.tsx
 msgid "✓ Collegata — il bot può usarla"
 msgstr "✓ Connected — the bot can use it"
@@ -953,11 +944,6 @@ msgstr "Approvals ›"
 msgid "apre {host}…"
 msgstr "opens {host}…"
 
-#. js-lingui-explicit-id
-#: src/shared/ui-messages.ts
-msgid "onboarding.providerHelp"
-msgstr "It opens the settings: choose or activate a provider and I finish on my own."
-
 #: src/renderer/src/lib/activity.ts
 msgid "apre una pagina…"
 msgstr "opens a page…"
@@ -1012,11 +998,6 @@ msgstr "Open the app window to authorize."
 msgid "conn.needsAuthOpenWindow"
 msgstr "Open the Homun window to authorize"
 
-#. js-lingui-explicit-id
-#: src/shared/ui-messages.ts
-msgid "onboarding.providerButton"
-msgstr "Open the provider settings"
-
 #: src/renderer/src/components/TakeoverCard.tsx
 msgid "Apri lo schermo"
 msgstr "Open the screen"
@@ -1062,11 +1043,6 @@ msgstr "waiting for you"
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Attenzione: con meno di {0} GB di RAM sarà lento e potrebbe bloccare il Mac."
 msgstr "Warning: with less than {0} GB of RAM it will be slow and may freeze your Mac."
-
-#. js-lingui-explicit-id
-#: src/shared/ui-messages.ts
-msgid "onboarding.modelWarning"
-msgstr "Warning: I could not assign the model to the bots ({warning}). Pick a valid one from the agent settings."
 
 #: src/renderer/src/components/MemoryPanel.tsx
 #: src/renderer/src/components/RightPanel.tsx
@@ -1200,11 +1176,6 @@ msgstr "Bearer token (optional — stored encrypted)"
 msgid "Benvenuto"
 msgstr "Welcome"
 
-#. js-lingui-explicit-id
-#: src/shared/ui-messages.ts
-msgid "onboarding.welcomeHead"
-msgstr "Welcome! I have prepared two bots tailored to you, you find them in the bar on the left:"
-
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 msgid "Blocca"
 msgstr "Block"
@@ -1270,11 +1241,6 @@ msgstr "Draft for {0}"
 #: src/shared/ui-messages.ts
 msgid "conn.noBrowserNoWindow"
 msgstr "browser not available without the Homun window"
-
-#. js-lingui-explicit-id
-#: src/shared/ui-messages.ts
-msgid "notice.onboardingWaitingProvider"
-msgstr "A provider is already active: to get me started choose the role in the message above (with your answer I prepare your bots)."
 
 #: src/renderer/src/components/Settings.tsx
 msgid "cache"
@@ -1532,6 +1498,7 @@ msgstr "close"
 #: src/renderer/src/components/settings/ModelsPage.tsx
 #: src/renderer/src/components/SkillsWindow.tsx
 #: src/renderer/src/components/ui/dialog.tsx
+#: src/renderer/src/components/WidgetCard.tsx
 msgid "Chiudi"
 msgstr "Close"
 
@@ -1548,6 +1515,11 @@ msgstr "Close the panel"
 #: src/shared/ui-messages.ts
 msgid "kick.greeting"
 msgstr "Hi {name}. Create your routines, connect the template apps and write your memories, following the instructions below."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "onboarding.focusGreeting"
+msgstr "Hi! I'm Homun. Tell me where we start."
 
 #: src/renderer/src/components/LibraryCards.tsx
 msgid "Cifrato sul Mac. Il bot non vedrà mai la password."
@@ -1734,11 +1706,6 @@ msgstr "Bot's computer"
 #: src/renderer/src/components/ServerSetup.tsx
 msgid "Con il tuo account"
 msgstr "With your account"
-
-#. js-lingui-explicit-id
-#: src/shared/ui-messages.ts
-msgid "onboarding.help"
-msgstr "With your answer I prepare two dedicated bots (you can change them whenever you want)."
 
 #: src/renderer/src/components/settings/AddProviderSheet.tsx
 msgid "Con una chiave"
@@ -2118,6 +2085,11 @@ msgstr "to configure: {0} (Settings)"
 msgid "da contenuti esterni"
 msgstr "from external content"
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "onboarding.focusAskAny"
+msgstr "Where do you want to start?"
+
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "da GitHub"
 msgstr "from GitHub"
@@ -2399,11 +2371,6 @@ msgstr "deleted"
 msgid "eliminate"
 msgstr "deleted"
 
-#. js-lingui-explicit-id
-#: src/shared/ui-messages.ts
-msgid "onboarding.roleEmail"
-msgstr "Email"
-
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "Email (separate da virgola)"
 msgstr "Email (comma separated)"
@@ -2617,6 +2584,11 @@ msgstr "done"
 #: src/renderer/src/components/LibraryPanel.tsx
 msgid "Fissa"
 msgstr "Pin"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "onboarding.focusDescription"
+msgstr "Initial focus: {focus}"
 
 #: src/renderer/src/components/ServerSheet.tsx
 msgid "Fonte"
@@ -3156,11 +3128,6 @@ msgstr "The round has closed: the coordinator reports to the user."
 msgid "mp.notObject"
 msgstr "the marketplace is not an object"
 
-#. js-lingui-explicit-id
-#: src/shared/ui-messages.ts
-msgid "main.botDescription"
-msgstr "My personal assistant, always on."
-
 #: src/renderer/src/components/GuideView.tsx
 msgid "Il modello"
 msgstr "The model"
@@ -3187,11 +3154,6 @@ msgstr "The model is what makes your Homun think: without one, your messages wai
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Il modello integrato gira sul tuo Mac: niente costi e i dati restano qui. È più lento e sbaglia più spesso dei modelli cloud; per lavori affidabili ti consiglio un modello cloud."
 msgstr "The built-in model runs on your Mac: no costs and your data stays here. It is slower and makes more mistakes than cloud models; for reliable work I recommend a cloud model."
-
-#. js-lingui-explicit-id
-#: src/shared/ui-messages.ts
-msgid "onboarding.localModelHonest"
-msgstr "The built-in model runs on your Mac: no costs and your data stays here. It is slower and makes more mistakes than cloud models. Fine for trying things and simple tasks; for reliable work I recommend a cloud model."
 
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Il modello integrato gira sul tuo Mac: niente costi e i dati restano qui. È più lento e sbaglia più spesso dei modelli cloud. Va bene per prove e cose semplici; per lavori affidabili ti consiglio un modello cloud."
@@ -3778,8 +3740,8 @@ msgstr "Work"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
-msgid "onboarding.roleWork"
-msgstr "Work and code"
+msgid "onboarding.focusWork"
+msgstr "Everyday work"
 
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "lavoro, personale…"
@@ -4089,11 +4051,6 @@ msgstr "Model"
 msgid "modello che non risponde"
 msgstr "model not responding"
 
-#. js-lingui-explicit-id
-#: src/shared/ui-messages.ts
-msgid "onboarding.providerCloud"
-msgstr "Cloud model with a key (recommended)"
-
 #: src/renderer/src/components/GuideView.tsx
 msgid "Modello cloud con una chiave"
 msgstr "Cloud model with a key"
@@ -4122,11 +4079,6 @@ msgstr "Model and reasoning"
 #: src/renderer/src/components/Chat.tsx
 msgid "modello integrato · più lento"
 msgstr "built-in model · slower"
-
-#. js-lingui-explicit-id
-#: src/shared/ui-messages.ts
-msgid "onboarding.providerLocal"
-msgstr "Built-in model on your Mac (2.7 GB)"
 
 #: src/renderer/src/components/GuideView.tsx
 msgid "Modello integrato sul tuo Mac"
@@ -4812,11 +4764,6 @@ msgstr "working hours"
 msgid "ore"
 msgstr "hours"
 
-#. js-lingui-explicit-id
-#: src/shared/ui-messages.ts
-msgid "onboarding.roleOrg"
-msgstr "Organization and calendar"
-
 #: src/renderer/src/components/Settings.tsx
 msgid "origine"
 msgstr "source"
@@ -4910,11 +4857,6 @@ msgstr "by bot"
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "per bot:"
 msgstr "per bot:"
-
-#. js-lingui-explicit-id
-#: src/shared/ui-messages.ts
-msgid "onboarding.prompt"
-msgstr "What do you want to use me for the most?"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Per gli aggiornamenti sposta Homun in Applicazioni"
@@ -5020,6 +4962,11 @@ msgstr "Default policy"
 msgid "poll di un connettore"
 msgstr "connector poll"
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "onboarding.focusMail"
+msgstr "Mail and calendar"
+
 #: src/renderer/src/components/Settings.tsx
 msgid "preciso"
 msgstr "exact"
@@ -5088,11 +5035,6 @@ msgstr "output price $/M"
 #: src/shared/ui-messages.ts
 msgid "kick.5"
 msgstr "Before offering connectors, check with search_connectors which ones are already connected."
-
-#. js-lingui-explicit-id
-#: src/shared/ui-messages.ts
-msgid "onboarding.providerPrompt"
-msgstr "Before preparing your bots I need a provider (the model that makes them think)."
 
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Principale"
@@ -5251,6 +5193,11 @@ msgstr "when an email arrives{withQuery, select, yes { matching \"{query}\"} oth
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 msgid "Quando chiedere"
 msgstr "When to ask"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "onboarding.focusClosing"
+msgstr "When you connect an app, its card above becomes “Connected”."
 
 #: src/renderer/src/components/Settings.tsx
 msgid "quando finisce o mi aspetta"
@@ -5451,8 +5398,8 @@ msgstr "Research"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
-msgid "onboarding.roleSearch"
-msgstr "Research and updates"
+msgid "onboarding.focusResearch"
+msgstr "Research and writing"
 
 #. placeholder {0}: fmtBytes(overview.model.bytes ?? 0)
 #: src/renderer/src/components/MemoryPanel.tsx
@@ -6326,6 +6273,11 @@ msgstr "Checking…"
 msgid "Storico delle versioni"
 msgstr "Version history"
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "onboarding.focusPrompt"
+msgstr "What do you want me to help you with first?"
+
 #: src/renderer/src/components/Settings.tsx
 msgid "suggerimento routine"
 msgstr "routine suggestion"
@@ -6681,6 +6633,11 @@ msgstr "Pressing Return in {app} can send something: this action always asks."
 msgid "Un modello controlla ogni azione: fa passare quello che serve a ciò che hai chiesto e ti chiede quando va oltre e non si annulla facilmente (scrivere a qualcuno, pagare, cancellare, pubblicare). Le tue regole vengono prima."
 msgstr "A model checks every action: it passes what your request needs and asks when it clearly goes beyond and is hard to undo (writing to someone, paying, deleting, publishing). Your rules come first."
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "onboarding.focusEverything"
+msgstr "A bit of everything"
+
 #: src/renderer/src/components/GuideView.tsx
 msgid "Un revisore controlla le azioni e le lascia passare quando sono sicure."
 msgstr "A reviewer checks actions and lets them through when they are safe."
@@ -6742,11 +6699,6 @@ msgstr "Use the project key"
 msgid "rpc.useConnectApps"
 msgstr "use the \"Connect apps\" view for catalog connectors"
 
-#. js-lingui-explicit-id
-#: src/shared/ui-messages.ts
-msgid "onboarding.providerOllama"
-msgstr "Use the Ollama already on your Mac"
-
 #: src/renderer/src/lib/activity.ts
 msgid "usa un’app…"
 msgstr "uses an app…"
@@ -6764,6 +6716,11 @@ msgstr "Usage & costs"
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Uso e costi: {0} questo mese"
 msgstr "Usage and costs: {0} this month"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "onboarding.focusChosen"
+msgstr "Alright: {focus}. Let's see what's already connected."
 
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 msgid "Vale per gli strumenti senza una regola loro."

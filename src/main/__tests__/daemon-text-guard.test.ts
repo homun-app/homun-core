@@ -74,8 +74,6 @@ const ALLOWED_LITERALS: ReadonlyArray<{ file: string; text: string }> = [
   { file: 'src/main/daemon-client.ts', text: 'il daemon non ha scritto daemon.json entro il timeout' },
   // messaggio del keychain FINTO dei test (strumento di test, non UI)
   { file: 'src/daemon/keychain.ts', text: 'operazione non supportata dal keychain finto' },
-  // value del widget dell'onboarding: CODICE del ruolo (lo legge roleTemplates), non testo
-  { file: 'src/daemon/onboarding.ts', text: 'lavoro-codice' },
   // nome app localizzato → bundle (parser di open_app, C7)
   { file: 'src/main/computeruse/index.ts', text: 'impostazioni di sistema' },
   // fase 18a (E0): codici del piano box (chiavi del piano sandbox, non testo)

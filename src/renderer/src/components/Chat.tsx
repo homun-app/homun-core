@@ -915,10 +915,7 @@ function EntryRow({ entry, repeat = 1, showReasoning, debugSteps }: { entry: Tra
       if (meta.agentSend && meta.toAgentName) {
         return <AgentSendRow name={String(meta.toAgentName)} content={entry.content} />
       }
-      // fase 7: widget di sistema che porta alle impostazioni del provider
-      if (message?.type === 'widget' && (entry.meta as Record<string, unknown>)?.onboardingProvider) {
-        return <ProviderWidgetCard entry={entry} />
-      }
+      // fase 3: la card delle domande (anche quella del focus dell'onboarding, OA4)
       if (message?.type === 'widget') return <WidgetCard entry={entry} />
       if (message?.type === 'draft') return <DraftCard entry={entry} />
       if (message?.type === 'connector') return <ConnectorCard entry={entry} />
@@ -1101,52 +1098,6 @@ function SummaryPostedRow({ entry }: { entry: TranscriptEntry }) {
  * Fase locale (L4): TRE strade (cloud consigliato, Ollama se trovato,
  * Integrato se la macchina è idonea): i bottoni arrivano dal widget, ognuno
  * apre le Impostazioni → modelli (l'Integrato sulla sua scheda).
- */
-function ProviderWidgetCard({ entry }: { entry: TranscriptEntry }) {
-  const setSettingsOpen = useStore((s) => s.setSettingsOpen)
-  const setTab = useStore((s) => s.setSettingsTab)
-  const widgetRespond = useStore((s) => s.widgetRespond)
-  const meta = (entry.meta ?? {}) as Partial<SendMessageMeta> & { respondedValue?: string | string[] }
-  const widget = meta.message as Extract<SendMessagePayload, { type: 'widget' }> | undefined
-  const activeId = useStore((s) => s.activeId)
-  if (!widget) return null
-  const responded = meta.respondedValue !== undefined
-  const options = widget.options ?? [{ label: '', value: 'open-provider-settings', style: 'primary' }]
-
-  return (
-    <div className="max-w-[75%] rounded-[18px] bg-muted p-4">
-      <p className="text-sm font-medium">{widget.prompt}</p>
-      {widget.helpText && <p className="mt-1 text-xs text-muted-foreground">{widget.helpText}</p>}
-      {responded ? (
-        <p className="mt-3 text-xs text-muted-foreground"><Trans>✓ Appena il provider è a posto preparo i tuoi bot.</Trans></p>
-      ) : (
-        <div className="mt-3 flex flex-wrap gap-2">
-          {options.map((o) => (
-            <button
-              key={o.value}
-              className={
-                o.style === 'primary'
-                  ? 'rounded-full bg-foreground px-3 py-1.5 text-xs font-medium text-background transition hover:opacity-90'
-                  : 'rounded-full bg-card px-3 py-1.5 text-xs transition hover:bg-accent'
-              }
-              onClick={() => {
-                setTab('modelli')
-                setSettingsOpen(true)
-                if (activeId) widgetRespond(entry.id, o.value)
-              }}
-            >
-              {o.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-/**
- * Fase 8 (§3bis L7): vista del sotto-transcript di un task — le entry con
- * meta.taskId, con le stesse card della chat principale.
  */
 function TaskPanel({ onClose }: { onClose: () => void }) {
   const entries = useStore((s) => s.entries)

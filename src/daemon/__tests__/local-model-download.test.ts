@@ -141,18 +141,18 @@ const waitFor = async (cond: () => boolean | Promise<boolean>, what: string, att
 describe('fase locale correzioni 2 (LD1): la fine del download aggancia il provider UNA volta per tutte', () => {
   it('Ricomincia fino a ready: il provider esiste, agents emesso, onboarding ripreso', async () => {
     // l'onboarding finto della RPC (conta le riprese)
-    let resumed = 0
+    let closed = 0
     const apiLd = buildApiMethods(emit, { poke: () => undefined } as unknown as JobWorker, undefined, undefined, {
       onboarding: {
-        // OA1 (fase onboarding-a): la facciata ha start/status al posto di maybeStart
+        // OA1–OA4 (fase onboarding-a): la facciata nuova della guida
         start: async () => undefined,
         status: () => ({ needed: false, state: null, sequence: ['welcome', 'model', 'approvals', 'chat'], modelReady: false }),
         advance: () => false,
         reopen: () => false,
         providerPaths: async () => [],
-        modelBecameReady: () => false,
-        answerRole: async () => undefined,
-        resume: async () => { resumed++; return true }
+        modelBecameReady: () => { closed++; return false },
+        answerFocus: () => false,
+        dismissFocus: () => undefined
       }
     })
     // il catalogo REALE punta a huggingface: il fetch globale è rimappato sul
@@ -180,7 +180,7 @@ describe('fase locale correzioni 2 (LD1): la fine del download aggancia il provi
     const { publicProviders } = await import('../../main/agent/providers')
     const prov = publicProviders().find((p) => p.id === 'homun-local')
     expect(prov?.name).toBe('Integrato (sul tuo Mac)') // il nome dal catalogo it
-    expect(resumed).toBeGreaterThan(0) // l'onboarding è ripreso
+    expect(closed).toBeGreaterThan(0) // il passo model della guida ha sentito il modello pronto
   })
 
   it('modello ready su disco SENZA provider: status lo crea e lo emette UNA volta sola', async () => {

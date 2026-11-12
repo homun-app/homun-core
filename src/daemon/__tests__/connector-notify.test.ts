@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const { setDataDir, dataDir, createAgent, appendEntry, updateEntryMeta, getEntries, setSetting, db } = await import('../../main/store/db')
-const { notifyConnectorConnected, notifyMcpServerConnected, notifyComposioAppConnected } = await import('../api')
+const { notifyConnectorConnected, notifyMcpServerConnected, notifyComposioAppConnected, markOnboardingAppCards } = await import('../api')
 
 let root: string
 beforeAll(() => {
@@ -170,5 +170,44 @@ describe('fase mcp-setup (M5.3): notifyComposioAppConnected (via Composio dalla 
     await notifyComposioAppConnected('slug-senza-diretta', 'X', () => undefined, worker)
     rows = db().prepare("SELECT payload_json FROM jobs WHERE kind = 'user-message'").all() as Array<{ payload_json: string }>
     expect(rows.map((r) => JSON.parse(r.payload_json) as { text: string }).filter((p) => p.text.includes('via Composio'))).toHaveLength(1)
+  })
+})
+
+
+// ---- OA4 (fase onboarding-a): le card app dell'onboarding passano a «Collegata» ----
+describe('OA4 markOnboardingAppCards: la card del focus si marca Collegata', () => {
+  /** Una card app dell'onboarding (come quelle nate dalla scelta del focus). */
+  function onboardingAppCard(agentId: string, connectorId: string, name: string): number {
+    return appendEntry({
+      agentId, kind: 'send-message', role: 'assistant', content: name,
+      meta: { message: { type: 'connector', connectorId, name }, onboardingApp: true }
+    }).id
+  }
+
+  it("la card dell'app collegata si marca connected e torna alla UI; le altre app no", () => {
+    const a = createAgent('Con card onboarding')
+    const gmail = onboardingAppCard(a.id, 'gmail', 'Gmail')
+    onboardingAppCard(a.id, 'slack', 'Slack')
+    const events: Array<{ type: string }> = []
+    markOnboardingAppCards(new Set(['gmail']), (e) => events.push(e as { type: string }))
+    const entries = getEntries(a.id)
+    const byConnector = (id: string) => entries.find((e) => (e.meta?.message as { connectorId?: string })?.connectorId === id)
+    expect(byConnector('gmail')?.meta?.connected).toBe(true)
+    expect(byConnector('slack')?.meta?.connected).toBeUndefined()
+    // l'entry marcata torna alla UI
+    expect(events.filter((e) => e.type === 'entries')).toHaveLength(1)
+    expect(gmail).toBeGreaterThan(0)
+  })
+
+  it('una card GIÀ collegata non si ritocca (niente doppio evento)', () => {
+    const a = createAgent('Card già collegata')
+    const e0 = getEntries(a.id)
+    void e0
+    const id = onboardingAppCard(a.id, 'gmail', 'Gmail')
+    const e = getEntries(a.id).find((x) => x.id === id)!
+    updateEntryMeta(id, { ...e.meta, connected: true })
+    const events: Array<{ type: string }> = []
+    markOnboardingAppCards(new Set(['gmail']), (ev) => events.push(ev as { type: string }))
+    expect(events).toHaveLength(0)
   })
 })

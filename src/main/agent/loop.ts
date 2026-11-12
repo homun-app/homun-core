@@ -890,16 +890,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     listProviders().map((p) => ({ id: p.id, enabled: p.enabled }))
   )
   if (!resolved) {
-    // fase 10 (residuo 0e): durante l'onboarding, se il provider ESISTE ma il
-    // widget del ruolo è ancora in attesa, il problema non è la configurazione:
-    // chiedere di configurare porta fuori strada
-    const onboardingWaiting =
-      listProviders().some((p) => p.enabled) &&
-      getEntries(agentId).some((e) => e.kind === 'send-message' && e.meta?.onboardingRole && e.meta?.respondedValue === undefined)
-    appendEntry(uiSystemEntry(
-      agentId, 'notice',
-      onboardingWaiting ? ui(UI.onboardingWaitingProvider) : ui(UI.configureProviderFirst)
-    ))
+    appendEntry(uiSystemEntry(agentId, 'notice', ui(UI.configureProviderFirst)))
     emitLastEntry(agentId, emit)
     return
   }
