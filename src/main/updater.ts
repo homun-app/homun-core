@@ -307,10 +307,24 @@ export function updateOfferWindowOptions(): {
 }
 
 /**
+ * BC1 (fase beta.4 — correzioni): l'escape HTML di versioni e testi che
+ * finiscono nella pagina (la VERSIONE arriva dal feed: non è fidata). PURO.
+ */
+export function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+/**
  * La pagina dell'offerta (PURO, per i test): titolo, note che scorrono, TRE
  * bottoni fissi in fondo. Le NOTE non stanno nella pagina: arrivano dopo con
  * textContent (updateOfferNotesScript). Nessuno script, nessuna risorsa
- * esterna: CSP default-src 'none'.
+ * esterna: CSP default-src 'none'. BC1: versione ed etichette passano
+ * dall'escape HTML (escapeHtml) — la versione arriva dal feed.
  */
 export function buildUpdateOfferPage(
   s: { availableTitle: string; download: string; openNotes: string; later: string },
@@ -322,8 +336,11 @@ export function buildUpdateOfferPage(
   const muted = dark ? 'rgba(235,235,245,.6)' : 'rgba(60,60,67,.6)'
   const border = dark ? 'rgba(255,255,255,.14)' : 'rgba(0,0,0,.12)'
   const btnBg = dark ? 'rgba(255,255,255,.12)' : 'rgba(0,0,0,.06)'
+  // la sostituzione usa una FUNZIONE: un «$&» nella versione non si
+  // interpreterebbe come pattern di replace
+  const title = escapeHtml(s.availableTitle.replace('{version}', () => version))
   return `<!doctype html>
-<html lang="it"><head><meta charset="utf-8"><title>${s.availableTitle.replace('{version}', version)}</title>
+<html lang="it"><head><meta charset="utf-8"><title>${title}</title>
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
 <style>
   html, body { height: 100%; box-sizing: border-box; }
@@ -341,12 +358,12 @@ export function buildUpdateOfferPage(
   footer button#upd-download { background: #4f7942; color: #fff; font-weight: 600; }
 </style></head>
 <body>
-  <h1>${s.availableTitle.replace('{version}', version)}</h1>
+  <h1>${title}</h1>
   <div id="upd-notes"></div>
   <footer>
-    <button type="button" id="upd-download">${s.download}</button>
-    <button type="button" id="upd-open-notes">${s.openNotes}</button>
-    <button type="button" id="upd-later">${s.later}</button>
+    <button type="button" id="upd-download">${escapeHtml(s.download)}</button>
+    <button type="button" id="upd-open-notes">${escapeHtml(s.openNotes)}</button>
+    <button type="button" id="upd-later">${escapeHtml(s.later)}</button>
   </footer>
 </body></html>`
 }
@@ -360,11 +377,41 @@ export function updateOfferNotesScript(notes: string): string {
 }
 
 /**
+ * BC1 (fase beta.4 — correzioni): il piano di ogni azione della finestra
+ * dell'offerta (PURO, per i test). «Scarica e installa» chiude la finestra
+ * DOPO aver chiamato l'azione (parte la finestra d'avanzamento di sempre: la
+ * modale non ha più motivo di esistere); «Apri le note» la lascia aperta;
+ * «Più tardi» e i valori sconosciuti chiudono senza azioni.
+ */
+export function offerWindowAction(action: string): { run: boolean; close: boolean } {
+  if (action === 'download') return { run: true, close: true }
+  if (action === 'notes') return { run: true, close: false }
+  return { run: false, close: true }
+}
+
+/**
+ * BC1 (fase beta.4 — correzioni): una SOLA finestra dell'offerta alla volta
+ * (PURO, per i test). Con un download in corso non si offre niente (come
+ * oggi); se la finestra è già aperta la si PORTA IN PRIMO PIANO invece di
+ * crearne un'altra — il secondo «Controlla aggiornamenti» non apre più due
+ * finestre (l'NSAlert sincrono di prima lo impediva da solo).
+ */
+export function offerWindowPlan(state: { downloading: boolean; offerOpen: boolean }): 'skip' | 'focus' | 'create' {
+  if (state.downloading) return 'skip'
+  return state.offerOpen ? 'focus' : 'create'
+}
+
+/** BC1: la finestra dell'offerta APERTA (il registro: una sola alla volta). */
+let offerWin: BrowserWindow | null = null
+
+/**
  * La finestra dell'offerta: modale sulla finestra principale (se c'è), nota e
  * bottoni come buildUpdateOfferPage. I bottoni non navigano davvero: fanno un
  * assign su uno schema privato che il main intercetta (will-navigate) — così
  * la pagina resta senza script, senza Node e senza rete. Chiudere la finestra
- * equivale a «Più tardi».
+ * equivale a «Più tardi». BC1: l'azione passa da offerWindowAction («Scarica
+ * e installa» chiude DOPO onDownload) e la finestra si registra nel registro
+ * delle offerte aperte.
  */
 function createUpdateOfferWindow(
   version: string,
@@ -372,12 +419,14 @@ function createUpdateOfferWindow(
   actions: { onDownload(): void; onOpenNotes(): void }
 ): void {
   const s = mainStrings().updater
-  const parent = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed())
+  const parent = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed() && w !== offerWin)
   const win = new BrowserWindow({
     ...updateOfferWindowOptions(),
     title: s.availableTitle.replace('{version}', version),
     ...(parent ? { parent, modal: true } : {})
   })
+  offerWin = win
+  win.once('closed', () => { if (offerWin === win) offerWin = null })
   const dark = nativeTheme.shouldUseDarkColors
   void win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(buildUpdateOfferPage(s, version, dark)))
   const ACTION_SCHEME = 'sandbot-update-action:'
@@ -385,8 +434,12 @@ function createUpdateOfferWindow(
     if (!url.startsWith(ACTION_SCHEME)) return
     event.preventDefault()
     const action = url.slice(ACTION_SCHEME.length)
-    if (action === 'download') actions.onDownload()
-    if (action === 'notes') actions.onOpenNotes()
+    const plan = offerWindowAction(action)
+    if (plan.run) {
+      if (action === 'download') actions.onDownload()
+      if (action === 'notes') actions.onOpenNotes()
+    }
+    if (plan.close && !win.isDestroyed()) win.close()
   })
   win.once('ready-to-show', () => win.show())
   win.webContents.once('did-finish-load', () => {
@@ -404,7 +457,14 @@ function createUpdateOfferWindow(
 
 function offerUpdate(info: UpdateInfo | undefined): void {
   if (!info?.version) return
-  if (downloading) return
+  // BC1: una sola finestra alla volta — aperta → in primo piano, download in
+  // corso → niente (come oggi)
+  const plan = offerWindowPlan({ downloading, offerOpen: !!offerWin && !offerWin.isDestroyed() })
+  if (plan === 'skip') return
+  if (plan === 'focus') {
+    offerWin?.focus()
+    return
+  }
   createUpdateOfferWindow(info.version, notesOf(info), {
     onDownload: () => startDownload(info.version!),
     onOpenNotes: () => { void shell.openExternal(`${RELEASES_URL}/tag/v${info.version}`) }

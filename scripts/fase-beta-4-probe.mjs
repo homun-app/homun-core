@@ -9,6 +9,9 @@
 //         DENTRO la finestra visibile (getBoundingClientRect dentro innerHeight);
 //       — l'area delle note SCORRE;
 //       — nelle note mostrate non c'è NESSUN «<» (testo semplice, mai HTML);
+//   BC1: al giro 1280×720 il clic VERO su «Scarica e installa» (gancio di
+//       prova, azioni FINTE): la finestra si CHIUDE e il suo target CDP
+//       sparisce dall'elenco delle pagine;
 //   B2: «+» → dialogo «Nuovo» (solo nome e aspetto) → Crea → il bot si
 //       presenta: col provider finto che risponde con una tool call ask_user,
 //       la card della domanda compare nella chat del bot nuovo; alla risposta,
@@ -174,7 +177,7 @@ const waitDom = async (page, exprTrue, timeoutMs = 30_000, step = 300) => {
 }
 
 /** B1: i controlli sulla finestra dell'offerta, a una data dimensione APP. */
-async function probeUpdateWindow(appPage, width, height, tag) {
+async function probeUpdateWindow(appPage, width, height, tag, clickDownload = false) {
   await setAppViewport(appPage, width, height)
   // la finestra dell'offerta: la pagina data: del gancio di prova
   const offer = await waitForPage((t) => (t.url ?? '').startsWith('data:text/html'))
@@ -215,7 +218,23 @@ async function probeUpdateWindow(appPage, width, height, tag) {
   check(`B1 ${tag}: la finestra resta AL MASSIMO 460×520 pt`,
     (facts?.innerW ?? 9999) <= 460 && (facts?.innerH ?? 9999) <= 520, `${facts?.innerW}×${facts?.innerH}`)
   await shot(offer, `b1-finestra-aggiornamento-${tag}.png`)
-  offer.close()
+  if (!clickDownload) {
+    offer.close()
+    return
+  }
+  // BC1: il clic VERO su «Scarica e installa» col gancio di prova (azioni
+  // FINTE: niente download, niente browser) — la finestra si CHIUDE e il suo
+  // target CDP sparisce dall'elenco delle pagine
+  await pageEval(offer, `document.getElementById('upd-download').click(); return true`)
+  check('BC1 clic VERO su «Scarica e installa» (gancio di prova, azioni finte)', true)
+  let gone = false
+  for (let i = 0; i < 40 && !gone; i++) {
+    const list = await httpJson('/json/list').catch(() => [])
+    gone = !list.some((t) => t.type === 'page' && (t.url ?? '').startsWith('data:text/html'))
+    if (!gone) await sleep(250)
+  }
+  check('BC1 dopo il clic la finestra dell\'offerta SPARISCE dai target CDP', gone === true)
+  try { offer.close() } catch { /* già chiusa col suo target */ }
 }
 
 try {
@@ -242,7 +261,8 @@ try {
   if (!(await waitDom(appPage, `typeof window.sandbot !== 'undefined'`, 30_000))) {
     throw new Error('window.sandbot non disponibile dopo 30s (giro 2)')
   }
-  await probeUpdateWindow(appPage, 1280, 720, '1280x720')
+  // BC1: al giro basso il clic VERO su «Scarica e installa» (azioni finte)
+  await probeUpdateWindow(appPage, 1280, 720, '1280x720', true)
 
   // ---- B2: un solo «Nuovo», e il bot si presenta (provider finto) ----
   // configurazione: provider finto + models.main (il bot nuovo nasce «Come

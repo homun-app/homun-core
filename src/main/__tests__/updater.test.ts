@@ -8,7 +8,8 @@ import { describe, expect, it } from 'vitest'
 import {
   shouldAutoCheckUpdates, isNewerVersion, hasUpdateConfig, notesOf,
   UPDATE_OFFER_WINDOW_SIZE, updateOfferWindowOptions, buildUpdateOfferPage,
-  updateOfferNotesScript, testUpdateOfferFromEnv, TEST_UPDATE_VERSION
+  updateOfferNotesScript, testUpdateOfferFromEnv, TEST_UPDATE_VERSION,
+  offerWindowAction, offerWindowPlan, escapeHtml
 } from '../updater'
 import { findLegacyHomun2Dir, isLegacyHomun2DataDir, legacyNoticeMarkerPath } from '../legacy-homun2'
 
@@ -150,6 +151,57 @@ describe('B1: la finestra dell\'offerta — opzioni e pagina (puro)', () => {
     expect(js).not.toContain('innerHTML')
     // il testo viaggia come STRINGA JSON: nessun markup interpretato
     expect(js).toContain(JSON.stringify('<p>una <strong>voce</strong></p>\n<script>male()</script>'))
+  })
+})
+
+// ---- BC1 (fase beta.4 — correzioni): la finestra dell'offerta si comporta ----
+
+describe('BC1: le azioni della finestra dell\'offerta (puro)', () => {
+  it('«Scarica e installa» chiude la finestra DOPO l\'azione; «Apri le note» NON chiude', () => {
+    expect(offerWindowAction('download')).toEqual({ run: true, close: true })
+    expect(offerWindowAction('notes')).toEqual({ run: true, close: false })
+    // «Più tardi» (e qualunque valore sconosciuto) chiude senza azioni
+    expect(offerWindowAction('later')).toEqual({ run: false, close: true })
+    expect(offerWindowAction('qualunque')).toEqual({ run: false, close: true })
+  })
+})
+
+describe('BC1: una SOLA finestra dell\'offerta alla volta (puro)', () => {
+  it('la finestra già aperta si porta in primo piano, non se ne crea un\'altra', () => {
+    expect(offerWindowPlan({ downloading: false, offerOpen: true })).toBe('focus')
+    expect(offerWindowPlan({ downloading: false, offerOpen: false })).toBe('create')
+    // come oggi: con un download in corso non si offre niente
+    expect(offerWindowPlan({ downloading: true, offerOpen: true })).toBe('skip')
+    expect(offerWindowPlan({ downloading: true, offerOpen: false })).toBe('skip')
+  })
+})
+
+describe('BC1: la versione arriva dal feed e passa dall\'escape HTML', () => {
+  it('un «<» nella versione esce come escape, sia nel titolo sia nell\'h1', () => {
+    const s = {
+      availableTitle: 'È disponibile Homun {version}',
+      download: 'Scarica e installa', openNotes: 'Apri le note', later: 'Più tardi'
+    } as never as Parameters<typeof buildUpdateOfferPage>[0]
+    const evil = '0.9.9<script>&"\''
+    const page = buildUpdateOfferPage(s, evil, false)
+    // il markup NON contiene la versione GREZZA: niente tag, niente attributi
+    expect(page).not.toContain(evil)
+    expect(page).not.toContain('<script>')
+    expect(page).not.toContain('0.9.9<')
+    // l'escape c'è, nel titolo E nell'h1
+    const esc = escapeHtml(evil)
+    expect(page.match(new RegExp(esc, 'g'))?.length).toBeGreaterThanOrEqual(2)
+    // anche le ETICHETTE dei bottoni passano dall'escape (testi interpolati)
+    expect(page).toContain(`>${escapeHtml('Scarica e installa')}<`)
+  })
+
+  it('una versione pulita resta leggibile come prima', () => {
+    const s = {
+      availableTitle: 'È disponibile Homun {version}',
+      download: 'Scarica e installa', openNotes: 'Apri le note', later: 'Più tardi'
+    } as never as Parameters<typeof buildUpdateOfferPage>[0]
+    const page = buildUpdateOfferPage(s, '0.3.1001-beta.4', false)
+    expect(page).toContain('È disponibile Homun 0.3.1001-beta.4')
   })
 })
 
