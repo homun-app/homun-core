@@ -16,6 +16,7 @@ import { KIND_LABELS, useProviderSetup } from '../lib/use-provider-setup'
 import { guideProviderCards, GUIDE_OTHER_KINDS, type GuideProviderCardId } from '../lib/guide-provider-cards'
 import { providerKeyUrl } from '../lib/provider-key-urls'
 import { recommendedModel } from '../lib/recommended-model'
+import { guideModelPills } from '../lib/guide-model-pills'
 import { ModelPicker } from './ui/ModelPicker'
 import { ProviderMark } from './settings/AddProviderSheet'
 
@@ -63,6 +64,49 @@ function ProviderCard({ id, label, desc, badge, logoKind, onPick }: {
       <span className="text-[15px] font-semibold leading-tight">{label}</span>
       <span className="text-[12.5px] leading-[1.35] text-muted-foreground">{desc}</span>
     </button>
+  )
+}
+
+/**
+ * GC2: le pillole dei modelli del pannello con chiave — al massimo 4 (il
+ * consigliato per primo, poi gli altri nell'ordine dell'elenco: funzione
+ * pura guideModelPills) più una pillola «Altri modelli…» con lo STESSO
+ * stile, che apre il ModelPicker. Il trigger non mostra MAI il valore
+ * scelto: era quello il «quarto controllo» che sembrava una pillola rotta.
+ * Un modello scelto dal picker che non è fra le pillole diventa una pillola,
+ * selezionata, al posto dell'ultima.
+ */
+export function GuideModelPills({ kind, models, selected, onSelect, pickerLabel }: {
+  kind: string
+  models: readonly string[]
+  selected: string | null
+  onSelect(id: string): void
+  pickerLabel: string
+}) {
+  const pills = guideModelPills(kind, models, selected)
+  const pillCls = 'max-w-full min-h-[44px] truncate rounded-full px-3.5 py-2 text-[13.5px] font-semibold transition'
+  return (
+    <>
+      {pills.map((m) => (
+        <button
+          key={m}
+          type="button"
+          data-testid={`guide-model-${m}`}
+          aria-pressed={selected === m}
+          className={`${pillCls} ${selected === m ? 'bg-foreground text-background' : 'bg-background text-foreground hover:bg-accent'}`}
+          onClick={() => onSelect(m)}
+        >
+          {m}
+        </button>
+      ))}
+      <ModelPicker
+        pillTrigger={{ label: pickerLabel }}
+        className={`${pillCls} bg-background text-foreground hover:bg-accent`}
+        models={models.map((id): ModelInfo => ({ id, source: 'live', vision: false, tools: true, thinkingLevels: [], cost: null, costSource: null, local: false }))}
+        value={selected}
+        onChange={(id) => { if (id) onSelect(id) }}
+      />
+    </>
   )
 }
 
@@ -292,24 +336,14 @@ export function GuideModelStep({ paths, onFactsChange, onReadyChange, registerCo
               <p className="m-0 rounded-[10px] bg-guide-good/15 px-3 py-2.5 text-sm text-guide-good" data-testid="guide-probe-ok">
                 <Trans>Funziona. La chiave resta nel Portachiavi del Mac.</Trans>
               </p>
+              {/* GC2: le pillole (max 4, consigliato per primo) + «Altri modelli…» */}
               <div className="flex flex-wrap gap-2" data-testid="guide-model-pills">
-                {setup.probe.models.map((m) => (
-                  <button
-                    key={m}
-                    type="button"
-                    data-testid={`guide-model-${m}`}
-                    aria-pressed={selectedModel === m}
-                    className={`max-w-full min-h-[44px] truncate rounded-full px-3.5 py-2 text-[13.5px] font-semibold transition ${selectedModel === m ? 'bg-foreground text-background' : 'bg-background text-foreground hover:bg-accent'}`}
-                    onClick={() => setSelectedModel(m)}
-                  >
-                    {m}
-                  </button>
-                ))}
-                <ModelPicker
-                  models={setup.probe.models.map((id): ModelInfo => ({ id, source: 'live', vision: false, tools: true, thinkingLevels: [], cost: null, costSource: null, local: false }))}
-                  value={selectedModel}
-                  onChange={(id) => { if (id) setSelectedModel(id) }}
-                  placeholder={t`Altri modelli…`}
+                <GuideModelPills
+                  kind={kind!}
+                  models={setup.probe.models}
+                  selected={selectedModel}
+                  onSelect={setSelectedModel}
+                  pickerLabel={t`Altri modelli…`}
                 />
               </div>
             </div>

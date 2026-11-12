@@ -49,9 +49,16 @@ export interface ModelPickerProps {
    * Default 'sm': l'aspetto compatto di sempre.
    */
   size?: 'sm' | 'md'
+  /**
+   * GC2 (fase guida-correzioni): invece del campo di testo, il trigger è una
+   * PILLOLA (il testo la passa il chiamante, per esempio «Altri modelli…»)
+   * che apre l'elenco — il VALORE SCELTO non si mostra mai nel trigger: lo
+   * stato scelto vive nelle pillole attorno, come nella guida.
+   */
+  pillTrigger?: { label: string }
 }
 
-export function ModelPicker({ models, value, onChange, placeholder, disabled, className, size = 'sm' }: ModelPickerProps) {
+export function ModelPicker({ models, value, onChange, placeholder, disabled, className, size = 'sm', pillTrigger }: ModelPickerProps) {
   const { t } = useLingui()
   const [open, setOpen] = useState(false)
   // null = il campo mostra il valore scelto; stringa = l'utente sta cercando
@@ -89,6 +96,33 @@ export function ModelPicker({ models, value, onChange, placeholder, disabled, cl
 
   return (
     <div ref={rootRef} className={`relative ${className ?? ''}`}>
+      {pillTrigger ? (
+        // GC2: pillola che apre l'elenco — mai il valore scelto nel trigger
+        <button
+          type="button"
+          data-testid="model-picker-pill"
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          aria-controls={listId}
+          disabled={disabled}
+          onClick={() => { setOpen(!open); setHi(0) }}
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowDown') {
+              e.preventDefault()
+              setOpen(true)
+              setHi((i) => Math.min(i + 1, filtered.length - 1))
+            } else if (e.key === 'ArrowUp') {
+              e.preventDefault()
+              setHi((i) => Math.max(i - 1, 0))
+            } else if (e.key === 'Escape') {
+              setOpen(false)
+              setQuery(null)
+            }
+          }}
+        >
+          {pillTrigger.label}
+        </button>
+      ) : (
       <input
         type="text"
         role="combobox"
@@ -126,6 +160,7 @@ export function ModelPicker({ models, value, onChange, placeholder, disabled, cl
           }
         }}
       />
+      )}
       {open && (
         <ul
           id={listId}

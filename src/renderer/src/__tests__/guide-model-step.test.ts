@@ -113,6 +113,64 @@ describe('G4: la griglia del passo Modello', () => {
   })
 })
 
+describe('GC2: le pillole dei modelli del pannello con chiave', () => {
+  it('un SOLO controllo «Altri modelli…» e nessun testo di modello ripetuto', async () => {
+    const { GuideModelPills } = await import('../components/GuideModelStep')
+    const { createElement: ce } = await import('react')
+    const html = renderHtml(ce(GuideModelPills, {
+      kind: 'anthropic',
+      models: ['claude-sonnet-4-5', 'bravo', 'sciocco'],
+      selected: 'bravo',
+      onSelect: () => undefined,
+      pickerLabel: 'Altri modelli…'
+    }))
+    const tree = parseHtml(html)
+    const texts = findAll(tree, (n) => !!n.text).map((n) => n.text ?? '')
+    // UNA sola «Altri modelli…»: il trigger del picker non mostra il valore
+    expect(texts.filter((t) => t === 'Altri modelli…')).toHaveLength(1)
+    // il modello scelto compare UNA volta sola (nella sua pillola), mai anche nel trigger
+    expect(texts.filter((t) => t === 'bravo')).toHaveLength(1)
+    expect(texts.filter((t) => t.includes('bravo'))).toHaveLength(1)
+    // niente campo di testo: il trigger è una pillola come le altre
+    expect(findAll(tree, (n) => n.tag === 'input')).toHaveLength(0)
+  })
+
+  it('la scelta evidenzia la pillola giusta; dal picker una pillola NUOVA, selezionata, al posto dell\'ultima', async () => {
+    const { GuideModelPills } = await import('../components/GuideModelStep')
+    const { createElement: ce } = await import('react')
+    const render = (selected: string | null) => {
+      // come nel pannello: le pillole stanno nel contenitore guide-model-pills
+      const html = renderHtml(ce('div', { 'data-testid': 'guide-model-pills', className: 'contents' }, ce(GuideModelPills, {
+        kind: 'anthropic',
+        models: ['claude-sonnet-4-5', 'bravo', 'sciocco', 'lungo', 'vecchio'],
+        selected,
+        onSelect: () => undefined,
+        pickerLabel: 'Altri modelli…'
+      })))
+      return parseHtml(html)
+    }
+    // la pillola scelta è premuta, le altre no
+    let tree = render('bravo')
+    expect(byTestId(tree, 'guide-model-bravo')[0]!.attrs['aria-pressed']).toBe('true')
+    expect(byTestId(tree, 'guide-model-claude-sonnet-4-5')[0]!.attrs['aria-pressed']).toBe('false')
+    // un modello del picker che non è fra le pillole: ultima pillola, selezionata
+    tree = render('estratto-dal-picker')
+    const last = byTestId(tree, 'guide-model-estratto-dal-picker')
+    expect(last).toHaveLength(1)
+    expect(last[0]!.attrs['aria-pressed']).toBe('true')
+    // al massimo 4 pillole + il trigger «Altri modelli…»
+    const pills = byTestId(tree, 'guide-model-pills')[0]!
+    expect(findAll(pills, (n) => n.tag === 'button')).toHaveLength(5)
+  })
+
+  it('il pannello usa le pillole e il trigger NON mostra mai il valore scelto', () => {
+    // il pannello col chiave renderizza GuideModelPills (che porta il trigger
+    // pill del ModelPicker), non più il campo-elicottero col valore dentro
+    expect(MODEL_SRC).toContain('GuideModelPills')
+    expect(MODEL_SRC).not.toContain('placeholder={t`Altri modelli…`}')
+  })
+})
+
 describe('G4: il foglio «Aggiungi provider» resta com\'era (hook condiviso)', () => {
   it('l\'elenco dei tipi coi tre gruppi, il campo chiave e la nota del Portachiavi', () => {
     capture.els.length = 0
