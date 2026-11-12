@@ -101,7 +101,10 @@ function Mouth({ state, x, y, ink = 'var(--bot-ink)' }: { state: BotState; x: nu
 function Extras({ state }: { state: BotState }) {
   if (state === 'thinking')
     return (
-      <g fill="var(--bot-ink)" opacity={0.7}>
+      // GC4 (fase guida-correzioni): --muted-foreground, non --bot-ink: nel
+      // tema scuro l'inchiostro quasi nero sparisce sul fondo scuro; questo
+      // token si vede sui DUE temi (vale ovunque, barra e pannello compresi)
+      <g fill="var(--muted-foreground)" opacity={0.7}>
         {[0, 1, 2].map((i) => (
           <circle key={i} cx={78 + i * 6} cy={14} r={2} className="bot-dot" style={{ animationDelay: `${i * 0.15}s` }} />
         ))}

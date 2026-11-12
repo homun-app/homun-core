@@ -113,6 +113,20 @@ describe('G4: la griglia del passo Modello', () => {
   })
 })
 
+describe('GC4.2: icone VERE per «Altri…» e «Integrato» (niente lettere)', () => {
+  it('le schede Altri… e Integrato hanno un\'icona (svg lucide), mai una lettera sola', () => {
+    const { tree } = renderModel(['cloud', 'local'])
+    for (const id of ['guide-provider-others', 'guide-provider-local']) {
+      const card = byTestId(tree, id)[0]!
+      // l'icona è un svg (MoreHorizontal / Cpu di lucide), non la lettera A / I
+      expect(findAll(card, (n) => n.tag === 'svg').length, `${id} senza icona`).toBeGreaterThan(0)
+      const texts = findAll(card, (n) => !!n.text).map((n) => n.text)
+      expect(texts, `${id} mostra l'iniziale`).not.toContain('A')
+      expect(texts).not.toContain('I')
+    }
+  })
+})
+
 describe('GC2: le pillole dei modelli del pannello con chiave', () => {
   it('un SOLO controllo «Altri modelli…» e nessun testo di modello ripetuto', async () => {
     const { GuideModelPills } = await import('../components/GuideModelStep')

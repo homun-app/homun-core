@@ -88,6 +88,18 @@ describe('G2: la scena della guida — mascotte Bot, nuvoletta, niente emoji', (
     expect(byTestId(tree, 'guide-skip').length).toBe(0)
   })
 
+  it('GC4.4 la punta della nuvoletta indica la mascotte: in BASSO affiancata, a SINISTRA impilata', () => {
+    // affiancata (≥ 900): la nuvoletta sta SOPRA la mascotte, punta in giù
+    const wide = parseHtml(renderGuide(status({ step: 'welcome', done: [], skipped: [], startedAt: 1 })))
+    const wideTail = findAll(wide, (n) => (n.attrs['class'] ?? '').includes('rotate-45'))[0]!
+    expect(wideTail.attrs['class']).toContain('bottom-[-9px]')
+    // impilata (< 900): la nuvoletta sta a DESTRA della mascotte, punta a sinistra
+    const stacked = parseHtml(renderGuide(status({ step: 'welcome', done: [], skipped: [], startedAt: 1 }), 820))
+    const stackedTail = findAll(stacked, (n) => (n.attrs['class'] ?? '').includes('rotate-45'))[0]!
+    expect(stackedTail.attrs['class']).toContain('left-[-9px]')
+    expect(stackedTail.attrs['class']).toContain('top-1/2')
+  })
+
   it('GC1: la scena espone l\'umore come data-mood sul contenitore della mascotte', () => {
     const html = renderGuide(status({ step: 'welcome', done: [], skipped: [], startedAt: 1 }))
     const tree = parseHtml(html)

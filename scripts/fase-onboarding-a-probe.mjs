@@ -178,6 +178,16 @@ const setWindowWidth = async (width, height = 900) => {
   if (w !== width) throw new Error(`viewport emulato non applicato: ${w} ≠ ${width}`)
 }
 const shot = async (name) => {
+  // GC4.5: la cattura aspetta la fine delle animazioni FINITE (le catture
+  // pronto-* erano prese a metà entrata: titolo e righe sbiaditi e il
+  // puntino «Permessi» ancora largo in transizione) — più un'attesa ≥ 500 ms
+  // dall'ultimo cambio di passo; le animazioni infinite (galleggio, respiro)
+  // non si aspettano
+  await sleep(500)
+  await waitDom(
+    `document.getAnimations({ subtree: true }).filter((a) => { const t = a.effect?.getTiming?.(); return t && t.iterations !== Infinity && a.playState !== 'finished' }).length === 0`,
+    8_000, 200
+  )
   const r = await page.send('Page.captureScreenshot', { format: 'png' })
   writeFileSync(join(SHOTS, name), Buffer.from(r.data, 'base64'))
   log('cattura', name)
@@ -374,6 +384,11 @@ await shot('oac-permessi-scelto-1440-chiaro.png')
 await clickTestid('guide-continue')
 check('G8-1t il passo Pronto (solo UI): «Tutto pronto.» col riepilogo',
   await waitDom(`!!document.querySelector('[data-testid="guide-step-ready"]') && document.body.innerText.includes('Tutto pronto.')`, 10_000))
+// GC4.3: a «Pronto» i TRE puntini sono fatti e NESSUNO è il corrente (la
+// cattura vecchia li prendeva a metà transizione, col «Permessi» ancora largo)
+check('GC4.3 a «Pronto» l\'avanzamento: tre puntini fatti, NESSUN corrente',
+  await waitDom(`(() => { const rail = document.querySelector('[data-testid="guide-rail"]'); if (!rail) return false; const dots = [...rail.querySelectorAll('span[aria-hidden]')]; return dots.length === 3 && dots.every((d) => d.classList.contains('bg-foreground') && !d.classList.contains('w-[22px]')) })()`, 10_000),
+  `rail=${await pageEval(`return document.querySelector('[data-testid="guide-rail"]')?.innerText ?? null`)}`)
 await shot('guida-v2-pronto-1440-chiaro.png')
 await dark(true)
 await shot('guida-v2-pronto-1440-scuro.png')

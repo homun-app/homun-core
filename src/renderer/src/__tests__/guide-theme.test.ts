@@ -115,7 +115,9 @@ describe('G7: bersagli ≥ 44 px e mai informazione solo dal colore', () => {
     // la select della lingua, i bottoni di ritorno, le pillole dei modelli
     expect(guideSrc).toMatch(/guide-language-select[\s\S]{0,300}min-h-\[44px\]|h-11/)
     expect(modelSrc).toContain('min-h-[44px]')
-    expect(modelSrc).toMatch(/guide-model-\$\{m\}[\s\S]{0,500}min-h-\[44px\]/)
+    // GC2: le pillole dei modelli condividono pillCls (min-h-[44px] dentro)
+    expect(modelSrc).toMatch(/const pillCls = 'max-w-full min-h-\[44px\]/)
+    expect(modelSrc).toMatch(/guide-model-\$\{m\}[\s\S]{0,300}\$\{pillCls\}/)
   })
 
   it('gli stati scelti si vedono anche senza colore: aria-pressed su facce, colori, permessi, modelli e Ollama', () => {
@@ -125,5 +127,28 @@ describe('G7: bersagli ≥ 44 px e mai informazione solo dal colore', () => {
 
   it('il movimento ridotto spegne anche la scena della guida (ombra compresa)', () => {
     expect(css).toMatch(/prefers-reduced-motion[\s\S]{0,400}\.guide-float, \.guide-shadow, \.guide-stepin, \.guide-bubble-pop \{ animation: none \}/)
+  })
+})
+
+describe('GC4: le sbavature viste nelle catture', () => {
+  const BOT = fileURLToPath(new URL('../bot/Bot.tsx', import.meta.url))
+  const botSrc = readFileSync(BOT, 'utf8')
+
+  it('GC4.1 i puntini di thinking si vedono su ENTRAMBI i temi (muted-foreground, non bot-ink)', () => {
+    // nel tema scuro --bot-ink è quasi nero su fondo scuro: i puntini spariscono.
+    // --muted-foreground si vede sui due temi (chiaro 0.5 / scuro 0.7)
+    const extras = botSrc.slice(botSrc.indexOf('function Extras'), botSrc.indexOf('const JELLY'))
+    expect(extras).toContain('var(--muted-foreground)')
+    expect(extras).not.toContain('var(--bot-ink)')
+  })
+
+  it('GC4.1 l\'ombra sotto la mascotte: nel tema scuro un alone chiaro molto tenue', () => {
+    // il colore dell\'ombra sta nel CSS (non più inline): la variante .dark
+    // la rende un alone chiaro, perché quella scura sparisce sul fondo scuro
+    expect(guideSrc).not.toContain('rgba(40,30,10')
+    const darkShadow = css.indexOf('.dark .guide-shadow')
+    expect(darkShadow).toBeGreaterThanOrEqual(0)
+    const block = css.slice(darkShadow, css.indexOf('\n}', darkShadow))
+    expect(block).toMatch(/rgba\(2\d\d,/)
   })
 })

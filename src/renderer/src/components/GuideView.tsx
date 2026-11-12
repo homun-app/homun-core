@@ -55,6 +55,9 @@ function SceneColumn({ phrase, bubbleKey, mood, avatar, displayName, width, masc
     </div>
   )
   const shadow = (
+    // GC4: il colore dell'ombra sta nel CSS (qui solo le misure): nel tema
+    // scuro la variante .dark la rende un alone chiaro molto tenue, quella
+    // scura sparisce sul fondo scuro
     <div
       className="guide-shadow"
       aria-hidden
@@ -62,7 +65,6 @@ function SceneColumn({ phrase, bubbleKey, mood, avatar, displayName, width, masc
         width: shadowWidth,
         height: Math.max(12, Math.round((mascotSize / 460) * 24)),
         borderRadius: '50%',
-        background: 'radial-gradient(closest-side, rgba(40,30,10,.28), transparent)',
         marginTop: stacked ? 4 : 6
       }}
     />
@@ -70,8 +72,13 @@ function SceneColumn({ phrase, bubbleKey, mood, avatar, displayName, width, masc
   const bubble = (
     <div key={bubbleKey} className="guide-bubble-pop relative max-w-[420px] rounded-[22px] bg-card px-[22px] py-[18px] text-[19px] leading-[1.4] shadow-soft">
       <span className="font-display font-medium">{phrase}</span>
-      {/* la punta della nuvoletta, verso la mascotte */}
-      <span aria-hidden className="absolute bottom-[-9px] left-1/2 h-[18px] w-[18px] -translate-x-1/2 rotate-45 rounded-[3px] bg-card" />
+      {/* la punta della nuvoletta, verso la mascotte: in basso quando la
+          nuvoletta sta SOPRA (affiancata), a sinistra quando sta a DESTRA
+          della mascotte (layout impilato, GC4) */}
+      <span
+        aria-hidden
+        className={`absolute h-[18px] w-[18px] rotate-45 rounded-[3px] bg-card ${stacked ? 'left-[-9px] top-1/2 -translate-y-1/2' : 'bottom-[-9px] left-1/2 -translate-x-1/2'}`}
+      />
     </div>
   )
   if (stacked) {

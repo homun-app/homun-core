@@ -10,6 +10,8 @@
 // La chiave non si logga mai e non torna alla UI.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
+// GC4: icone vere per «Altri…» e «Integrato» (lucide, già nel progetto)
+import { MoreHorizontal, Cpu } from 'lucide-react'
 import { api, useStore } from '../store'
 import type { ModelInfo, OnboardingProviderPath, ProviderKind, ProviderPublic } from '../../../shared/types'
 import { KIND_LABELS, useProviderSetup } from '../lib/use-provider-setup'
@@ -40,12 +42,14 @@ export interface GuideModelStepProps {
 }
 
 /** La scheda di un provider della griglia (mockup: min 124 px, logo o iniziale). */
-function ProviderCard({ id, label, desc, badge, logoKind, onPick }: {
+function ProviderCard({ id, label, desc, badge, logoKind, icon, onPick }: {
   id: GuideProviderCardId | ProviderKind
   label: string
   desc: string
   badge?: string
   logoKind: string
+  /** GC4: icona vera per le schede senza logo (Altri…, Integrato) */
+  icon?: React.ReactNode
   onPick(): void
 }) {
   return (
@@ -56,7 +60,14 @@ function ProviderCard({ id, label, desc, badge, logoKind, onPick }: {
       className="flex min-h-[124px] flex-col items-start gap-2.5 rounded-[18px] bg-card/55 p-4 text-left transition hover:-translate-y-px hover:bg-card dark:bg-card/80"
     >
       <span className="flex w-full items-center justify-between gap-2">
-        <ProviderMark kind={logoKind as ProviderKind} name={label} />
+        {icon ? (
+          // la stessa piastrella dei loghi, con l'icona lucide (mai una lettera)
+          <span className="grid size-11 shrink-0 place-items-center rounded-[12px] bg-card text-foreground" aria-hidden>
+            {icon}
+          </span>
+        ) : (
+          <ProviderMark kind={logoKind as ProviderKind} name={label} />
+        )}
         {badge && (
           <span className="rounded-full bg-guide-good/15 px-2 py-0.5 text-[11px] font-semibold text-guide-good">{badge}</span>
         )}
@@ -499,13 +510,13 @@ export function GuideModelStep({ paths, onFactsChange, onReadyChange, registerCo
   }
 
   // ---- la griglia ----
-  const cardDefs: Record<GuideProviderCardId, { label: string; desc: string; badge?: string }> = {
+  const cardDefs: Record<GuideProviderCardId, { label: string; desc: string; badge?: string; icon?: React.ReactNode }> = {
     anthropic: { label: 'Anthropic', desc: t`Claude. Il più affidabile coi tool.`, badge: t`consigliato` },
     openai: { label: 'OpenAI', desc: t`Con una chiave API.` },
     openrouter: { label: 'OpenRouter', desc: t`Molti modelli, una chiave.` },
-    others: { label: t`Altri…`, desc: t`xAI, Mistral, DeepSeek, Groq, Z.ai e i compatibili OpenAI.` },
+    others: { label: t`Altri…`, desc: t`xAI, Mistral, DeepSeek, Groq, Z.ai e i compatibili OpenAI.`, icon: <MoreHorizontal className="size-5" /> },
     ollama: { label: 'Ollama', desc: t`Già sul tuo Mac.`, badge: t`trovato` },
-    local: { label: t`Integrato`, desc: t`Gira tutto qui, senza costi.` }
+    local: { label: t`Integrato`, desc: t`Gira tutto qui, senza costi.`, icon: <Cpu className="size-5" /> }
   }
   return (
     <div key="grid" className="guide-stepin flex w-full max-w-xl flex-col gap-7 text-left" data-testid="guide-step-model">
@@ -524,6 +535,7 @@ export function GuideModelStep({ paths, onFactsChange, onReadyChange, registerCo
             desc={cardDefs[c].desc}
             badge={cardDefs[c].badge}
             logoKind={c}
+            icon={cardDefs[c].icon}
             onPick={() => setPanel(c === 'others' ? 'others' : c as ProviderKind)}
           />
         ))}

@@ -343,7 +343,10 @@
 @keyframes guide-step-in { from { opacity: 0; transform: translateY(12px) } to { opacity: 1; transform: none } }
 @keyframes guide-pop { 0% { opacity: 0; transform: translateY(6px) scale(.96) } 100% { opacity: 1; transform: none } }
 .guide-float { animation: guide-float 4.2s ease-in-out infinite }
-.guide-shadow { animation: guide-shadow 4.2s ease-in-out infinite }
+/* GC4 (fase guida-correzioni): il colore dell'ombra nel CSS — la variante
+   scura è un alone CHIARO molto tenue, l'ombra scura sparisce sul fondo scuro */
+.guide-shadow { animation: guide-shadow 4.2s ease-in-out infinite; background: radial-gradient(closest-side, rgba(40,30,10,.28), transparent) }
+.dark .guide-shadow { background: radial-gradient(closest-side, rgba(255,246,235,.13), transparent) }
 .guide-stepin { animation: guide-step-in .38s cubic-bezier(.2,.7,.2,1) both }
 .guide-bubble-pop { animation: guide-pop .32s cubic-bezier(.2,.7,.2,1) both }
 
