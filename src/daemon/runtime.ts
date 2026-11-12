@@ -535,6 +535,13 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
     // K6 (ritocchi): i nomi degli strumenti dal nome VERO del server Composio
     // del catalogo (mcp__<slug>__…), non più lo slug scritto a mano
     serverTools: () => mcpServers.composioServerTools(),
+    // CA4 (fase composio-account): su «Connection closed» il client MCP del
+    // server Composio si chiude e si RIAPRE (la stessa riconnessione che RW3
+    // usa per le letture del bot) — mai la stessa connessione chiusa
+    reopenMcp: () => {
+      const cfg = mcpServers.listServers().find((sv) => sv.catalogId === 'composio')
+      if (cfg) mcpServers.disconnectServer(cfg.id)
+    },
     // fase mcp-setup (M5.3): un'app diventata ACTIVE che chiude l'offerta
     // pendente di una curata DIRETTA dello stesso marchio avvisa il bot
     // (CONNECTOR_CONNECTED, coi nomi degli strumenti di Composio)

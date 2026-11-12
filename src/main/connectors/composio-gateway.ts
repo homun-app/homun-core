@@ -121,6 +121,17 @@ export interface ComposioGatewayDeps {
    */
   serverTools?(): { manageConnections: string; waitForConnections: string }
   /**
+   * CA4 (fase composio-account): chiude e RIAPRE il client MCP del server
+   * Composio (la stessa riconnessione che RW3 usa per le letture del bot) —
+   * su «Connection closed» la connessione chiusa non si riusa.
+   */
+  reopenMcp?(): void | Promise<void>
+  /**
+   * CA4: la riga di log di ogni riconnessione (default console.error: nel
+   * daemon finisce in daemon.log) — MAI token né link negli argomenti.
+   */
+  logLine?(line: string): void
+  /**
    * Fase mcp-setup (M5.3): un'app è appena diventata ACTIVE (transizione, non
    * il refresh di una già attiva) — il daemon può avvisare i bot con
    * un'offerta pendente per la curata DIRETTA dello stesso marchio.
@@ -206,13 +217,57 @@ export function createComposioGatewayManager(deps: ComposioGatewayDeps) {
   const withSession = (args: Record<string, unknown>): Record<string, unknown> =>
     sessionId ? { ...args, session_id: sessionId } : args
 
+  /** CA4: l'errore di trasporto che si cura RIAPRENDO il client MCP. */
+  const isConnectionClosed = (e: unknown): boolean =>
+    /connection closed/i.test(e instanceof Error ? e.message : String(e))
+
+  /** CA4: l'add/remove partito quando la connessione è caduta (NON si ripete). */
+  class ConnectionDroppedError extends Error {
+    constructor() {
+      super('MCP connection closed while the request may have already been sent')
+    }
+  }
+
+  /** CA4: la riga di log di una riapertura (server/strumento, MAI token né link). */
+  const logReopen = (tool: string): void => {
+    ;(deps.logLine ?? console.error)(`[sandbotd] composio gateway: mcp connection closed on ${tool}; client reopened`)
+  }
+
+  /**
+   * CA4: la chiamata con la RIAPERTURA del client MCP — su «Connection
+   * closed» il client si chiude, si riapre una volta e la chiamata si
+   * ripete. Per le chiamate con EFFETTI che non si ripetono (add e remove:
+   * la richiesta può essere già avvenuta) la ripetizione NON c'è: si
+   * riapre, si segna la caduta e il chiamante decide rileggendo `list`.
+   */
+  async function callMcpReopen(
+    tool: string,
+    args: Record<string, unknown>,
+    opts?: { timeoutMs?: number },
+    effects = false
+  ): Promise<string> {
+    try {
+      return await deps.callMcp(tool, args, opts)
+    } catch (e) {
+      if (!isConnectionClosed(e)) throw e
+      logReopen(tool.split('__').slice(2).join('__') || tool)
+      await deps.reopenMcp?.()
+      if (effects) throw new ConnectionDroppedError()
+      return await deps.callMcp(tool, args, opts)
+    }
+  }
+
   /**
    * Chiama COMPOSIO_MANAGE_CONNECTIONS e torna il risultato con i link
    * trovati (parseConnectionsResult: la forma VERA di V8 per prima, poi il
    * walk tollerante; il session_id si tiene per le chiamate successive).
+   * CA4: add/remove non si ripetono dopo che la richiesta è partita — la
+   * caduta di connessione si segnala al chiamante (che rilegge `list`).
    */
   async function runManageConnections(args: Record<string, unknown>): Promise<{ output: string; links: Array<{ url: string; toolkit?: string }> }> {
-    const output = await deps.callMcp(serverTools().manageConnections, withSession(args))
+    const entries = manageConnectionsEntries(args)
+    const effects = entries.some((e) => e.action === 'add' || e.action === 'remove')
+    const output = await callMcpReopen(serverTools().manageConnections, withSession(args), undefined, effects)
     const parsed = parseConnectionsResult(output)
     if (parsed.sessionId) sessionId = parsed.sessionId
     return { output, links: parsed.redirectUrls }
@@ -362,10 +417,12 @@ export function createComposioGatewayManager(deps: ComposioGatewayDeps) {
       try {
         // P4 (catalogo app): la PRIMA chiamata dopo il login di Composio può
         // trovare la connessione MCP ancora aperta male («Connection closed»)
-        // — si ritenta un paio di volte prima di arrendersi
+        // — si ritenta un paio di volte prima di arrendersi.
+        // CA4: ogni tentativo passa dalla RIAPERTURA del client (la stessa
+        // riconnessione delle letture del bot), non dalla stessa connessione chiusa
         for (let attempt = 0; ; attempt++) {
           try {
-            await deps.callMcp(
+            await callMcpReopen(
               serverTools().waitForConnections,
               withSession({ toolkits: [slug], mode: 'any' }),
               { timeoutMs: COMPOSIO_GATEWAY_WAIT_MS }
@@ -527,6 +584,18 @@ export function createComposioGatewayManager(deps: ComposioGatewayDeps) {
             return { ok: false, error: 'no authorization link in the response' }
           }
         } catch (e) {
+          if (e instanceof ConnectionDroppedError) {
+            // CA4: l'add NON si ripete (la richiesta può essere già partita):
+            // si rilegge `list` e si decide da lì
+            try {
+              const after = await readAccounts(slug, () => false)
+              if (after.some((a) => a.status === 'ACTIVE')) {
+                setApp(slug, { name, accounts: after })
+                return { ok: true, already: true }
+              }
+            } catch { /* il list non risponde: l'esito resta incerto */ }
+            return { ok: false, error: 'connection closed while adding the account; open the app again to see its accounts' }
+          }
           lastError = e instanceof Error ? e.message : String(e)
           if (attempt < 2) await new Promise((r) => setTimeout(r, deps.retryDelayMs?.() ?? 600))
         }
@@ -579,7 +648,11 @@ export function createComposioGatewayManager(deps: ComposioGatewayDeps) {
       try {
         await runManageConnections({ toolkits: [{ name: slug, action: 'remove', account_id: accountId }] })
       } catch (e) {
-        return { ok: false, error: e instanceof Error ? e.message : String(e) }
+        // CA4: il remove NON si ripete dopo che la richiesta è partita —
+        // decide il `list` di sotto (l'account può essere già tolto)
+        if (!(e instanceof ConnectionDroppedError)) {
+          return { ok: false, error: e instanceof Error ? e.message : String(e) }
+        }
       }
       try {
         const accounts = await readAccounts(slug, () => false)
@@ -619,7 +692,11 @@ export function createComposioGatewayManager(deps: ComposioGatewayDeps) {
           }
         }
       } catch (e) {
-        return { ok: false, error: e instanceof Error ? e.message : String(e) }
+        // CA4: un remove caduto non si ripete — la riga locale va via comunque
+        // e il `list` al prossimo refresh dice la verità del server
+        if (!(e instanceof ConnectionDroppedError)) {
+          return { ok: false, error: e instanceof Error ? e.message : String(e) }
+        }
       } finally {
         const next = { ...apps() }
         delete next[slug]

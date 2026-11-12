@@ -18,6 +18,9 @@ const makeManager = (respond: FakeMcp['respond']) => {
   const opened: string[] = []
   const settings = new Map<string, unknown>()
   const emitted: unknown[] = []
+  // CA4: la riconnessione del client MCP e la riga di log del daemon
+  const reopens: number[] = []
+  const logLines: string[] = []
   const manager = createComposioGatewayManager({
     callMcp: async (tool, args, opts) => {
       fake.calls.push({ tool, args, opts })
@@ -33,9 +36,14 @@ const makeManager = (respond: FakeMcp['respond']) => {
     emit: (e) => emitted.push(e),
     // fase catalogo app (P4): i tentativi di una chiamata MCP rotta partono
     // subito nei test (nel daemon vero aspettano 600 ms)
-    retryDelayMs: () => 0
+    retryDelayMs: () => 0,
+    // CA4 (fase composio-account): il client MCP si RIAPRE su Connection closed
+    reopenMcp: () => {
+      reopens.push(Date.now())
+    },
+    logLine: (line) => logLines.push(line)
   })
-  return { manager, fake, opened, settings }
+  return { manager, fake, opened, settings, reopens, logLines }
 }
 
 const addResult = (slug: string) => JSON.stringify({
@@ -172,8 +180,9 @@ describe('C5 punto 1 — il flusso DAL BOT (add → card → clic → attesa)', 
       expect(manager.status().pending).toBeNull()
     })
     expect(manager.status().connected[0]?.status).not.toBe('FAILED')
-    // la WAIT è stata ritentata (3 tentativi) prima di fidarsi del list
-    expect(fake.calls.filter((c) => original(c.tool) === 'COMPOSIO_WAIT_FOR_CONNECTIONS')).toHaveLength(3)
+    // la WAIT è stata ritentata prima di fidarsi del list — CA4: 3 tentativi
+    // e OGNI tentativo riapre il client e ripete (3 × 2 = 6 chiamate)
+    expect(fake.calls.filter((c) => original(c.tool) === 'COMPOSIO_WAIT_FOR_CONNECTIONS')).toHaveLength(6)
   })
 
   it('il link di una card scade dopo l’uso (un secondo clic non apre nulla)', async () => {
@@ -562,5 +571,124 @@ describe('CA1 — più account per app', () => {
       { accountId: 'a1', alias: 'lavoro', email: 'fabio@azienda.test', status: 'ACTIVE', isDefault: true },
       { accountId: 'a2', alias: 'personale', email: 'fabio@gmail.test', status: 'ACTIVE' }
     ])
+  })
+})
+
+
+// ---- CA4 (fase composio-account): la connessione chiusa si riapre ----
+
+describe('CA4 — «Connection closed»: il client MCP si riapre, add/remove non si ripetono', () => {
+  const CLOSED = 'MCP error -32000: Connection closed'
+
+  it('il list cade una volta → riconnessione e RIPETIZIONE: gli account arrivano, con la riga di log SENZA link né token', async () => {
+    let listCalls = 0
+    const { manager, reopens, logLines } = makeManager((tool, args) => {
+      const entry = (args.toolkits as Array<{ action?: string }> | undefined)?.[0]
+      if (entry?.action === 'list') {
+        listCalls++
+        if (listCalls === 1) throw new Error(CLOSED)
+        return realListMany('gmail', [{ id: 'a1', alias: 'lavoro', email: 'fabio@azienda.test', is_default: true }])
+      }
+      return addResult('gmail')
+    })
+    const r = await manager.connectApp('gmail', { name: 'Gmail' })
+    // il pre-controllo è passato dalla riconnessione: l'account c'è già → already
+    expect(r).toEqual({ ok: true, already: true })
+    expect(listCalls).toBe(2)
+    expect(reopens).toHaveLength(1)
+    expect(logLines.join('\n')).toContain('reopened')
+    // la riga di log non porta MAI il link né gli argomenti
+    expect(logLines.join('\n')).not.toContain('mcp.example')
+    expect(logLines.join('\n')).not.toContain('toolkits')
+  })
+
+  it('l\'add NON si ripete dopo che la richiesta è partita: cade → si rilegge list e si decide (già collegata)', async () => {
+    let addCalls = 0
+    const state = { active: false }
+    const { manager, fake, reopens, opened } = makeManager((tool, args) => {
+      const entry = (args.toolkits as Array<{ action?: string }> | undefined)?.[0]
+      if (entry?.action === 'add') {
+        addCalls++
+        // la richiesta ERA partita: il collegamento riesce sul server
+        state.active = true
+        throw new Error(CLOSED)
+      }
+      if (entry?.action === 'list') {
+        if (!state.active) return JSON.stringify({ data: { results: { gmail: { toolkit: 'gmail', status: 'initiated', accounts: [] } } } })
+        return realListMany('gmail', [{ id: 'a1', alias: 'lavoro', email: 'fabio@azienda.test', is_default: true }])
+      }
+      return JSON.stringify({ toolkits: [{ toolkit: 'gmail', accounts: [{ id: 'a1', status: 'ACTIVE' }] }] })
+    })
+    const r = await manager.connectApp('gmail', { name: 'Gmail' })
+    expect(r).toEqual({ ok: true, already: true })
+    // l\'add è partito UNA sola volta: la richiesta può essere già avvenuta
+    expect(addCalls).toBe(1)
+    expect(fake.calls.filter((c) => (c.args.toolkits as Array<{ action?: string }>)?.[0]?.action === 'add')).toHaveLength(1)
+    expect(reopens).toHaveLength(1)
+    expect(opened).toHaveLength(0)
+  })
+
+  it('il remove NON si ripete: cade → list decide (l\'account non c\'è più → ok)', async () => {
+    let removeCalls = 0
+    const state = { ids: ['a1', 'a2'] }
+    const { manager, settings } = makeManager((tool, args) => {
+      const entry = (args.toolkits as Array<{ action?: string; account_id?: string }> | undefined)?.[0]
+      if (entry?.action === 'remove') {
+        removeCalls++
+        // la richiesta ERA partita: l'account non c'è più anche se la risposta è caduta
+        state.ids = state.ids.filter((x) => x !== entry.account_id)
+        if (removeCalls === 1) throw new Error(CLOSED)
+        return JSON.stringify({ toolkits: [{ toolkit: 'gmail', status: 'removed' }] })
+      }
+      if (entry?.action === 'list') {
+        return realListMany('gmail', state.ids.map((id, i) => ({ id, alias: i === 0 ? 'lavoro' : 'personale' })))
+      }
+      return addResult('gmail')
+    })
+    settings.set('composioGateway.apps', structuredClone(twoAccountGmail))
+    const r = await manager.removeAccount('gmail', 'a2')
+    expect(r.ok).toBe(true)
+    // il remove è partito UNA volta sola; il list dice che a2 non c\'è più
+    expect(removeCalls).toBe(1)
+    expect(manager.status().connected.find((a) => a.slug === 'gmail')?.accounts).toHaveLength(1)
+  })
+
+  it('la WAIT cade una volta → riconnessione e ripetizione: il collegamento finisce comunque attivo', async () => {
+    let waitCalls = 0
+    const state = { active: false }
+    const { manager, reopens } = makeManager((tool, args) => {
+      const entry = (args.toolkits as Array<{ action?: string }> | undefined)?.[0]
+      if (tool.includes('WAIT_FOR_CONNECTIONS')) {
+        waitCalls++
+        if (waitCalls === 1) throw new Error(CLOSED)
+        state.active = true
+        return JSON.stringify({ toolkits: [{ toolkit: 'gmail', accounts: [{ id: 'a1', status: 'ACTIVE' }] }] })
+      }
+      if (entry?.action === 'list') {
+        if (!state.active) return JSON.stringify({ data: { results: { gmail: { toolkit: 'gmail', status: 'initiated', accounts: [] } } } })
+        return realListMany('gmail', [{ id: 'a1', email: 'fabio@azienda.test', is_default: true }])
+      }
+      return addResult('gmail')
+    })
+    await manager.connectApp('gmail', { name: 'Gmail' })
+    await vi.waitFor(() => {
+      expect(manager.status().connected.find((a) => a.slug === 'gmail')?.status).toBe('ACTIVE')
+    })
+    expect(waitCalls).toBeGreaterThanOrEqual(2)
+    expect(reopens.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('V12 aggiornata: la WAIT che cade SEMPRE non è un fallimento definitivo — decide il list', async () => {
+    const { manager } = makeManager((tool, args) => {
+      const entry = (args.toolkits as Array<{ action?: string }> | undefined)?.[0]
+      if (tool.includes('WAIT_FOR_CONNECTIONS')) throw new Error(CLOSED)
+      if (entry?.action === 'list') return realListMany('gmail', [{ id: 'a1', email: 'fabio@azienda.test', is_default: true }])
+      return addResult('gmail')
+    })
+    await manager.connectApp('gmail', { name: 'Gmail' })
+    await vi.waitFor(() => {
+      expect(manager.status().connected.find((a) => a.slug === 'gmail')?.status).toBe('ACTIVE')
+      expect(manager.status().pending).toBeNull()
+    })
   })
 })
