@@ -1108,7 +1108,6 @@ msgstr "Attività"
 msgid "autoreview.disabled"
 msgstr "auto-review disattivata"
 
-#: src/renderer/src/components/GuideView.tsx
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 #: src/renderer/src/components/settings/EngineSection.tsx
 msgid "Automatico"
@@ -1137,10 +1136,6 @@ msgstr "autorizzazione non riuscita ({error})"
 #: src/shared/ui-messages.ts
 msgid "rpc.authOkServerDown"
 msgstr "autorizzazione riuscita ma il server non risponde: {error}"
-
-#: src/renderer/src/components/GuideView.tsx
-msgid "Autorizzazioni"
-msgstr "Autorizzazioni"
 
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Avanti"
@@ -1429,10 +1424,6 @@ msgstr "Cerco…"
 msgid "Che aspetto ha?"
 msgstr "Che aspetto ha?"
 
-#: src/renderer/src/components/GuideView.tsx
-msgid "Che cosa può fare il tuo Homun da solo, e dove si ferma a chiederti il via?"
-msgstr "Che cosa può fare il tuo Homun da solo, e dove si ferma a chiederti il via?"
-
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Chi risponde"
 msgstr "Chi risponde"
@@ -1515,14 +1506,14 @@ msgstr "Chiedi"
 msgid "Chiedi approvazione"
 msgstr "Chiedi approvazione"
 
-#: src/renderer/src/components/GuideView.tsx
-msgid "Chiedi prima"
-msgstr "Chiedi prima"
-
 #. placeholder {0}: agent.name
 #: src/renderer/src/components/Chat.tsx
 msgid "Chiedi qualcosa a {0} senza inquinare la conversazione…"
 msgstr "Chiedi qualcosa a {0} senza inquinare la conversazione…"
+
+#: src/renderer/src/components/GuideView.tsx
+msgid "Chiedimi prima"
+msgstr "Chiedimi prima"
 
 #: src/renderer/src/components/ConnectorCards13.tsx
 #: src/renderer/src/components/SkillsWindow.tsx
@@ -2178,6 +2169,10 @@ msgstr "Da ricollegare"
 msgid "da scegliere"
 msgstr "da scegliere"
 
+#: src/renderer/src/components/GuideView.tsx
+msgid "Da solo"
+msgstr "Da solo"
+
 #: src/renderer/src/components/ActivityPanel.tsx
 msgid "Da te"
 msgstr "Da te"
@@ -2537,9 +2532,17 @@ msgstr "export_from_library: «{name}» ({format}) → {destination}"
 msgid "fa un grafico…"
 msgstr "fa un grafico…"
 
+#: src/renderer/src/components/GuideView.tsx
+msgid "Faccio da solo ciò che serve alla tua richiesta."
+msgstr "Faccio da solo ciò che serve alla tua richiesta."
+
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Fai di questo una routine: {request}"
 msgstr "Fai di questo una routine: {request}"
+
+#: src/renderer/src/components/GuideView.tsx
+msgid "Fai quello che ti chiedo"
+msgstr "Fai quello che ti chiedo"
 
 #: src/renderer/src/components/SubagentCard.tsx
 msgid "fallito"
@@ -3642,6 +3645,10 @@ msgstr "Interrompi task"
 msgid "Invia"
 msgstr "Invia"
 
+#: src/renderer/src/components/GuideView.tsx
+msgid "inviare, scrivere, cancellare, pagare"
+msgstr "inviare, scrivere, cancellare, pagare"
+
 #: src/renderer/src/components/DraftCard.tsx
 msgid "inviata"
 msgstr "inviata"
@@ -3875,10 +3882,6 @@ msgstr "Le chiamate e i risultati dei tool tornano come righe nella conversazion
 msgid "Le concessioni \"Sempre per questo sito\" del fill dei login: il bot compila QUEL login su QUELL'origine senza chiedere ogni volta. Revocabili una a una; non esistono concessioni generiche."
 msgstr "Le concessioni \"Sempre per questo sito\" del fill dei login: il bot compila QUEL login su QUELL'origine senza chiedere ogni volta. Revocabili una a una; non esistono concessioni generiche."
 
-#: src/renderer/src/components/GuideView.tsx
-msgid "Le cose che cambiano qualcosa passano da una tua conferma."
-msgstr "Le cose che cambiano qualcosa passano da una tua conferma."
-
 #: src/renderer/src/components/ApprovalCard.tsx
 msgid "Le letture di questo server non chiederanno più (solo i tool dichiarati in sola lettura)"
 msgstr "Le letture di questo server non chiederanno più (solo i tool dichiarati in sola lettura)"
@@ -3932,6 +3935,14 @@ msgstr "legge un file…"
 msgid "legge una pagina web…"
 msgstr "legge una pagina web…"
 
+#: src/renderer/src/components/GuideView.tsx
+msgid "leggere la posta, cercare sul web, preparare bozze"
+msgstr "leggere la posta, cercare sul web, preparare bozze"
+
+#: src/renderer/src/components/GuideView.tsx
+msgid "Leggo e cerco da solo. Prima di cambiare qualcosa, ti chiedo."
+msgstr "Leggo e cerco da solo. Prima di cambiare qualcosa, ti chiedo."
+
 #: src/renderer/src/components/settings/DiskSpaceSection.tsx
 msgid "Libera spazio"
 msgstr "Libera spazio"
@@ -3967,6 +3978,10 @@ msgstr "Lingua"
 #: src/renderer/src/components/Chat.tsx
 msgid "Livello di ragionamento"
 msgstr "Livello di ragionamento"
+
+#: src/renderer/src/components/GuideView.tsx
+msgid "Lo cambi quando vuoi da Impostazioni › Approvazioni."
+msgstr "Lo cambi quando vuoi da Impostazioni › Approvazioni."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -5368,6 +5383,10 @@ msgstr "quando torni al computer"
 msgid "trigger.presence"
 msgstr "quando torni al computer dopo un’assenza"
 
+#: src/renderer/src/components/GuideView.tsx
+msgid "Quanto posso fare da solo?"
+msgstr "Quanto posso fare da solo?"
+
 #: src/renderer/src/lib/guide-scene.ts
 msgid "Quanto posso fare senza chiederti?"
 msgstr "Quanto posso fare senza chiederti?"
@@ -6107,6 +6126,10 @@ msgstr "Serve macOS 26 o successivo, con chip Apple"
 msgid "Serve un indirizzo completo, che comincia con https://"
 msgstr "Serve un indirizzo completo, che comincia con https://"
 
+#: src/renderer/src/components/GuideView.tsx
+msgid "Serve un modello: torna indietro e collegane uno"
+msgstr "Serve un modello: torna indietro e collegane uno"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "rpc.gatewayName"
@@ -6294,6 +6317,10 @@ msgstr "SKILL.md è troppo grande: al massimo 100000 caratteri (ora {n})."
 #: src/renderer/src/components/BotScreen.tsx
 msgid "Sola lettura — il bot non vede il tuo cursore"
 msgstr "Sola lettura — il bot non vede il tuo cursore"
+
+#: src/renderer/src/components/GuideView.tsx
+msgid "soldi, messaggi a persone nuove, cancellazioni, cose fuori richiesta"
+msgstr "soldi, messaggi a persone nuove, cancellazioni, cose fuori richiesta"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -6543,6 +6570,10 @@ msgstr "Tetto orario raggiunto (40 messaggi di bot in un’ora): i turni del gru
 msgid "ti aspetta"
 msgstr "ti aspetta"
 
+#: src/renderer/src/components/GuideView.tsx
+msgid "Ti chiedo"
+msgstr "Ti chiedo"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "rpc.invalidValueType"
@@ -6766,6 +6797,10 @@ msgstr "tutti i giorni"
 msgid "Tutti i tipi"
 msgstr "Tutti i tipi"
 
+#: src/renderer/src/components/GuideView.tsx
+msgid "tutto quello che serve a ciò che mi hai chiesto"
+msgstr "tutto quello che serve a ciò che mi hai chiesto"
+
 #: src/renderer/src/components/ComputerActivity.tsx
 msgid "ucciso"
 msgstr "ucciso"
@@ -6826,10 +6861,6 @@ msgstr "Un modello controlla ogni azione: fa passare quello che serve a ciò che
 #: src/shared/ui-messages.ts
 msgid "onboarding.focusEverything"
 msgstr "Un po’ di tutto"
-
-#: src/renderer/src/components/GuideView.tsx
-msgid "Un revisore controlla le azioni e le lascia passare quando sono sicure."
-msgstr "Un revisore controlla le azioni e le lascia passare quando sono sicure."
 
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 msgid "Una di queste regole vince sempre sulle altre: l’azione diventa una card."

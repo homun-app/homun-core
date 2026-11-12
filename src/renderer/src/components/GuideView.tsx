@@ -227,6 +227,80 @@ function WelcomeStep({ name, onName, family, color, onPickFamily, onPickColor, o
 }
 
 /**
+ * G5: il passo «Permessi» — le due schede grandi del mockup. La scrittura
+ * dei setting resta quella di OA3 (approvalsChoices, approvals.mode,
+ * approvals.modeSet, autoReview derivato): cambia solo come si presenta.
+ * «Fai quello che ti chiedo» senza modello resta spenta, con la riga che
+ * dice perché.
+ */
+function ApprovalsStep({ modelReady, chosen, onChoose }: {
+  modelReady: boolean
+  chosen: 'ask' | 'auto' | null
+  onChoose(mode: 'ask' | 'auto'): void
+}) {
+  const { t } = useLingui()
+  const cards: Array<{
+    id: 'ask' | 'auto'
+    title: string
+    desc: string
+    alone: string
+    ask: string
+  }> = [
+    {
+      id: 'ask',
+      title: t`Chiedimi prima`,
+      desc: t`Leggo e cerco da solo. Prima di cambiare qualcosa, ti chiedo.`,
+      alone: t`leggere la posta, cercare sul web, preparare bozze`,
+      ask: t`inviare, scrivere, cancellare, pagare`
+    },
+    {
+      id: 'auto',
+      title: t`Fai quello che ti chiedo`,
+      desc: t`Faccio da solo ciò che serve alla tua richiesta.`,
+      alone: t`tutto quello che serve a ciò che mi hai chiesto`,
+      ask: t`soldi, messaggi a persone nuove, cancellazioni, cose fuori richiesta`
+    }
+  ]
+  const choices = approvalsChoices(modelReady)
+  return (
+    <StepPanel stepKey="approvals" testId="guide-step-approvals">
+      <div className="flex flex-col gap-3.5">
+        <h1 className="m-0 font-display text-[40px] font-semibold leading-[1.1] tracking-[-0.01em]">{t`Quanto posso fare da solo?`}</h1>
+        <p className="m-0 text-base leading-[1.6] text-muted-foreground">
+          {t`Lo cambi quando vuoi da Impostazioni › Approvazioni.`}
+        </p>
+      </div>
+      <div className="flex w-full flex-col gap-3">
+        {cards.map((c) => {
+          const enabled = c.id === 'ask' || modelReady
+          return (
+            <button
+              key={c.id}
+              type="button"
+              data-testid={`guide-approvals-${c.id}`}
+              aria-pressed={chosen === c.id}
+              disabled={!enabled}
+              className={`flex min-h-[44px] flex-col gap-1.5 rounded-[20px] px-6 py-[22px] text-left transition ${chosen === c.id ? 'bg-card shadow-[0_0_0_2px_var(--foreground)]' : 'bg-card/55 hover:bg-card'} ${enabled ? '' : 'cursor-not-allowed opacity-55'}`}
+              onClick={() => { if (enabled) onChoose(c.id) }}
+            >
+              <span className="font-display text-xl font-semibold">{c.title}</span>
+              <span className="text-sm leading-[1.45] text-muted-foreground">{c.desc}</span>
+              <span className="mt-1.5 flex flex-col gap-1 text-[13.5px] leading-[1.4]">
+                <span><b className="text-chart-2">{t`Da solo`}</b> · {c.alone}</span>
+                <span><b>{t`Ti chiedo`}</b> · {c.ask}</span>
+              </span>
+              {!enabled && (
+                <span className="text-[12.5px] text-destructive">{t`Serve un modello: torna indietro e collegane uno`}</span>
+              )}
+            </button>
+          )
+        })}
+      </div>
+    </StepPanel>
+  )
+}
+
+/**
  * La guida: sostituisce la finestra finché lo stato non arriva a «chat».
  */
 export function GuideView() {
@@ -289,11 +363,9 @@ export function GuideView() {
   const typedName = (onTuStep ? draftName : (mainAgent?.name ?? '')).trim()
   const displayName = typedName || 'Bot'
 
-  // il passo della UI: i passi computer/memory non ci sono in fase A; la
-  // scelta fatta dei permessi porta al passo Pronto (solo UI, G6)
-  const uiStep: GuideUiStep = backTo ?? (
-    daemonStep === 'approvals' && chosenApprovals !== null ? 'ready' : (daemonStep as GuideUiStep)
-  )
+  // il passo della UI: i passi computer/memory non ci sono in fase A; il
+  // passo Pronto (solo UI) apre G6 dopo la scelta dei permessi
+  const uiStep: GuideUiStep = backTo ?? (daemonStep as GuideUiStep)
   const stepIdx = UI_STEPS.indexOf(uiStep)
 
   // il nome per le frasi: sul passo Tu quello digitato finora (vuoto =
@@ -323,7 +395,9 @@ export function GuideView() {
   // prova riuscita col modello scelto, Ollama scelto, o l'integrato pronto);
   // il modelReady del daemon copre il caso limite di un salvataggio esterno
   const modelReadyHere = modelLocalReady || modelReady
-  const nextDisabled = uiStep === 'model' && !modelReadyHere
+  // G5: anche il passo Permessi aspetta la scelta (mockup: Continua spento
+  // finché non si sceglie una delle due schede)
+  const nextDisabled = (uiStep === 'model' && !modelReadyHere) || (uiStep === 'approvals' && chosenApprovals === null)
   const nextLabel = uiStep === 'ready' ? t`Apri la chat` : t`Continua`
   const canBack = stepIdx > 0 && daemonStep !== 'welcome'
   const canSkip = uiStep === 'model' && !modelReadyHere
@@ -354,6 +428,12 @@ export function GuideView() {
       const fn = modelContinueRef.current
       if (fn) void fn().then((done) => { if (!done && modelReady) void advance('model', 'done') })
       else if (modelReady) void advance('model', 'done')
+      return
+    }
+    if (uiStep === 'approvals') {
+      if (backTo) { setBackTo(null); return }
+      // la scelta ha GIÀ scritto i setting (OA3): Continua chiude il passo
+      if (chosenApprovals) void advance('approvals', 'done')
       return
     }
     if (backTo) { setBackTo(null); return }
@@ -470,35 +550,7 @@ export function GuideView() {
             />
           )}
           {uiStep === 'approvals' && (
-            <StepPanel stepKey="approvals" testId="guide-step-approvals">
-              <h1 className="m-0 font-display text-[40px] font-semibold leading-[1.1] tracking-[-0.01em]">{t`Autorizzazioni`}</h1>
-              <p className="m-0 text-base leading-[1.6] text-muted-foreground">
-                {t`Che cosa può fare il tuo Homun da solo, e dove si ferma a chiederti il via?`}
-              </p>
-              <div className="flex w-full flex-col gap-2">
-                {approvalsChoices(modelReady).map((c) => (
-                  <button
-                    key={c.id}
-                    type="button"
-                    data-testid={`guide-approvals-${c.id}`}
-                    disabled={!c.enabled}
-                    aria-pressed={chosenApprovals === c.id}
-                    className={`flex flex-col items-start gap-1 rounded-2xl px-5 py-4 text-left transition ${c.enabled ? 'bg-muted/60 hover:bg-accent' : 'cursor-not-allowed bg-muted/30 opacity-60'}`}
-                    onClick={() => { void chooseApprovals(c.id) }}
-                  >
-                    <span className="flex w-full items-center justify-between gap-3">
-                      <span className="text-sm font-medium">{c.id === 'ask' ? t`Chiedi prima` : t`Automatico`}</span>
-                      {!c.enabled && <span className="text-[10px] text-muted-foreground">{c.hint}</span>}
-                    </span>
-                    <span className="text-xs text-muted-foreground">
-                      {c.id === 'ask'
-                        ? t`Le cose che cambiano qualcosa passano da una tua conferma.`
-                        : t`Un revisore controlla le azioni e le lascia passare quando sono sicure.`}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </StepPanel>
+            <ApprovalsStep modelReady={modelReady} chosen={chosenApprovals} onChoose={(mode) => { void chooseApprovals(mode) }} />
           )}
           {(daemonStep === 'computer' || daemonStep === 'memory') && (
             <StepPanel stepKey={daemonStep} testId={`guide-step-${daemonStep}`}>
