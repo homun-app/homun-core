@@ -22,14 +22,15 @@ export const APPLE_CONTAINER_RELEASES_URL = 'https://github.com/apple/container/
  * motore Apple con la loro azione.
  */
 export function engineStatusText(st: EngineStatusInfo): { text: MessageDescriptor; action: 'start' | 'kernel' | 'install-link' | null } {
+  // il motore DI DUTY è docker: le sue parole, e non si tocca apple
   if (st.chosen === 'docker') {
     return st.dockerRunning
       ? { text: msg`Pronto (Docker)`, action: null }
       : { text: msg`Docker non risponde: aprilo e riprova`, action: null }
   }
-  if (st.chosen === 'apple-container') {
-    return { text: msg`Pronto (Apple container)`, action: null }
-  }
+  // apple-container (scelto dall'auto PRONTO, o scelto esplicito), o NESSUN
+  // motore (auto senza docker): le parole le dice lo STATO del motore Apple,
+  // mai «pronto» se il servizio è spento o il kernel manca
   switch (st.appleState) {
     case 'ready':
       return { text: msg`Pronto (Apple container)`, action: null }
