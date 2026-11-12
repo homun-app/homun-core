@@ -576,6 +576,41 @@ try {
     await shot(page, 'br-chat-errore-isolamento.png')
     page.close()
   }
+
+  // ---- BRR (fase box-rete-riavvio): il box none FERMATO E RIPARTITO si
+  // VERIFICA di nuovo ----
+  // Il box none del giro BR-B è nel log della CLI finta, con le interfacce
+  // GIÙ. Lo si FERMA (stop): il suo start sarà un BOOT NUOVO e le interfacce
+  // tornano SU. Il comando del bot dopo: l'ensure del riuso VERIFICA, poi
+  // link down e verifica di nuovo, e il comando GIRA.
+  {
+    log('--- BRR: il riavvio del box none (stop → comando del bot) ---')
+    const stop = spawnSync(process.execPath, [FAKE_SRC, 'stop', 'sandbot-box'], {
+      encoding: 'utf8',
+      env: { ...process.env, SANDBOT_TEST_CONTAINER_MODE: 'ready', SANDBOT_TEST_CONTAINER_LOG: brLog }
+    })
+    if (stop.status !== 0) throw new Error(`lo stop del box non è riuscito: ${stop.stderr}`)
+    const afterStop = readCliLog(brLog).length
+    pushTool('write-file', { path: 'rete-prova-riavvio.txt', content: 'riavviato' })
+    pushText('Fatto dopo il riavvio.')
+    const page = await boxTurn(13, { network: 'none', cliLogFile: brLog }, 'Scrivi il file rete-prova-riavvio.txt', 'Fatto dopo il riavvio.')
+    const after = readCliLog(brLog).slice(afterStop)
+    const isRootExec = (a) => a[0] === 'exec' && a[1] === '-u' && a[2] === '0'
+    const sh = (a) => (a[a.indexOf('-c') + 1] ?? '')
+    const checkAt = after.map((a, i) => (isRootExec(a) && sh(a).includes('operstate') ? i : -1)).filter((i) => i >= 0)
+    const downAt = after.findIndex((a) => isRootExec(a) && sh(a).includes('ip link set'))
+    check('BRR il box FERMATO si RIUSA (nessun run -d nuovo, nessun rm) e il suo start è un BOOT NUOVO',
+      after.some((a) => a[0] === 'start' && a.includes('sandbot-box')) && !after.some((a) => a[0] === 'run' && a.includes('-d')) && !after.some((a) => a[0] === 'rm'),
+      JSON.stringify(after.filter((a) => ['start', 'run', 'rm'].includes(a[0])).map((a) => a.slice(0, 3))))
+    check('BRR la verifica CADE sul boot, poi LINK DOWN e la verifica PASSA',
+      downAt >= 0 && checkAt.length === 2 && checkAt[0] < downAt && checkAt[1] > downAt,
+      `verifiche=${JSON.stringify(checkAt)} linkDown=${downAt}`)
+    check('BRR e il comando del bot GIRA nel box riusato e ri-verificato',
+      after.some((a) => a[0] === 'exec' && a.some((x) => typeof x === 'string' && x.includes('rete-prova-riavvio.txt'))),
+      'nessun exec di scrittura')
+    await shot(page, 'brr-riavvio-riuso-verificato.png')
+    page.close()
+  }
   try { providerServer.closeAllConnections?.(); providerServer.close() } catch { /* già chiusa */ }
 } catch (e) {
   failures++
