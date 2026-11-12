@@ -19,19 +19,38 @@
 import * as http from 'node:http'
 import * as net from 'node:net'
 import { lookup } from 'node:dns/promises'
+import ipaddr from 'ipaddr.js'
 import { isForbiddenIp, literalHostIp, loopbackAllowedForTests } from './web-guard'
 
 export type ProxyDecision =
   | { allow: true }
   | { allow: false; reason: string }
 
+/** BR2 (fase box-rete): l'IP sta in una delle sottoreti vietate? CIDR rotto → SÌ (fail closed). */
+function ipInAnySubnet(ip: string, cidrs: readonly string[]): boolean {
+  for (const cidr of cidrs) {
+    try {
+      const parsed = ipaddr.process(ip)
+      const range = ipaddr.parseCIDR(cidr)
+      if (parsed.kind() === range[0].kind() && parsed.match(range)) return true
+    } catch {
+      return true // cidr non valido: si NEGA, mai un buco
+    }
+  }
+  return false
+}
+
 /**
  * La decisione del proxy (PURO): porte ammesse 80 e 443; host risolti SOLO
  * pubblici (privati, loopback, link-local, host.docker.internal → privato —
  * tutto ciò che isForbiddenIp rifiuta). Col flag di test i soli target LOCALI
  * passano su qualunque porta (per il server http del test).
+ * BR2: `boxSubnets` sono le sottoreti del box (CIDR) — le loro destinazioni
+ * sono VIETATE qualunque siano gli intervalli (192.0.x.y non è un privato
+ * classico: la lista dei privati non basta; il box non usa il proxy per
+ * raggiungere servizi del Mac su quell'interfaccia).
  */
-export function proxyDecision(host: string, port: number, ips: string[]): ProxyDecision {
+export function proxyDecision(host: string, port: number, ips: string[], boxSubnets: readonly string[] = []): ProxyDecision {
   const local = loopbackAllowedForTests()
   // col flag di test i target loopback/privati passano (server locale del test)
   if (local && ips.length > 0 && ips.every((ip) => isForbiddenIp(ip))) return { allow: true }
@@ -39,7 +58,7 @@ export function proxyDecision(host: string, port: number, ips: string[]): ProxyD
     return { allow: false, reason: `port not allowed (${port}): the bot's browser goes out only on 80 and 443` }
   }
   if (!ips.length) return { allow: false, reason: `host not resolved: ${host}` }
-  if (ips.some((ip) => isForbiddenIp(ip))) {
+  if (ips.some((ip) => isForbiddenIp(ip) || ipInAnySubnet(ip, boxSubnets))) {
     return { allow: false, reason: 'internal address: the bot\'s browser does not access the local network' }
   }
   return { allow: true }
@@ -108,7 +127,7 @@ export function createBrowserProxy(): http.Server {
       } catch {
         ips = []
       }
-      const decision = proxyDecision(target.host, target.port, ips)
+      const decision = proxyDecision(target.host, target.port, ips, boxEgressSubnets())
       if (!decision.allow) {
         console.log(`[browser-proxy] rifiutato ${target.host}:${target.port}: ${decision.reason}`)
         res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' })
@@ -151,7 +170,7 @@ export function createBrowserProxy(): http.Server {
       } catch {
         ips = []
       }
-      const decision = proxyDecision(target.host, target.port, ips)
+      const decision = proxyDecision(target.host, target.port, ips, boxEgressSubnets())
       if (!decision.allow) {
         console.log(`[browser-proxy] rifiutato ${target.host}:${target.port}: ${decision.reason}`)
         denyConnect(clientSocket, decision.reason)
@@ -187,6 +206,8 @@ export async function resetBrowserProxyForTests(): Promise<void> {
   proxyServer = null
   proxyPort = 0
   if (s) await new Promise<void>((resolve) => s.close(() => resolve()))
+  await closeGatewayListen()
+  boxSubnet = null
 }
 
 /**
@@ -202,4 +223,139 @@ export async function ensureBrowserProxy(): Promise<number> {
   })
   proxyServer = server
   return proxyPort
+}
+
+// ---- BR2 (fase box-rete): il SECONDO ascolto, sul gateway di homun-box ----
+//
+// Col motore Apple il browser del box raggiunge il Mac all'IP del GATEWAY
+// della rete vmnet homun-box, non al loopback (host.docker.internal non
+// esiste): senza un secondo ascolto lì, il browser del bot resterebbe senza
+// rete anche in bridge. Regole: MAI su 0.0.0.0 (sarebbe la LAN), MAI sul
+// gateway della rete isolata homun-box-isolated, e sul secondo ascolto
+// passano SOLO i client della sottorete di homun-box.
+
+/** La sottorete del box: le destinazioni VIETATE in uscita da ENTRAMBI gli ascolti. */
+let boxSubnet: string | null = null
+
+/** Le sottoreti d'uscita correnti (il proxy decide a OGNI richiesta). */
+function boxEgressSubnets(): string[] {
+  return boxSubnet ? [boxSubnet] : []
+}
+
+let gatewayServer: http.Server | null = null
+let gatewayListen: { host: string; port: number; subnet: string } | null = null
+
+/** BR2: il secondo ascolto del proxy, com'è (host, porta, sottorete del filtro). */
+export interface GatewayProxyListen {
+  host: string
+  port: number
+  subnet: string
+}
+
+/**
+ * BR2 (PURO): `remoteAddress` può parlare col secondo ascolto? Sì SOLO se
+ * sta nella sottorete di homun-box (CIDR, letta dall'inspect come il
+ * gateway). Gli indirizzi mappati (::ffff:a.b.c.d) contano come IPv4; IP o
+ * subnet non validi, o senza indirizzo, NON passano mai (fail closed).
+ */
+export function gatewayClientAllowed(remoteAddress: string | undefined, subnetCidr: string): boolean {
+  if (!remoteAddress) return false
+  let subnet: [ipaddr.IPv4 | ipaddr.IPv6, number]
+  let addr: ipaddr.IPv4 | ipaddr.IPv6
+  try {
+    subnet = ipaddr.parseCIDR(subnetCidr)
+    addr = ipaddr.process(remoteAddress.trim())
+  } catch {
+    return false
+  }
+  if (addr.kind() !== subnet[0].kind()) return false // IPv6 contro una subnet IPv4: fuori
+  return addr.match(subnet)
+}
+
+/** BR2: le parole del secondo ascolto che non riesce ad aprirsi. */
+export const BROWSER_PROXY_GATEWAY_FAILED_MESSAGE = 'Non riesco ad aprire il proxy del browser sull\'indirizzo della rete del box: per sicurezza il browser del bot non parte'
+
+/** Un tentativo d'ascolto: ok con la porta, o il codice d'errore. */
+function tryListen(server: http.Server, host: string, port: number): Promise<{ ok: true; port: number } | { ok: false; code: string }> {
+  return new Promise((resolve) => {
+    const onError = (e: NodeJS.ErrnoException): void => resolve({ ok: false, code: e.code ?? 'UNKNOWN' })
+    server.once('error', onError)
+    server.listen(port, host, () => {
+      server.off('error', onError)
+      const a = server.address()
+      resolve({ ok: true, port: typeof a === 'object' && a ? a.port : 0 })
+    })
+  })
+}
+
+/** BR2: chiude il secondo ascolto (cambio gateway o reset dei test). */
+async function closeGatewayListen(): Promise<void> {
+  const s = gatewayServer
+  gatewayServer = null
+  gatewayListen = null
+  if (s) await new Promise<void>((resolve) => s.close(() => resolve()))
+}
+
+/**
+ * BR2: apre (o aggiorna) il SECONDO ascolto del proxy sul gateway di
+ * homun-box. L'host è INIETTABILE (nei test 127.0.0.1: la logica è quale
+ * indirizzo, quale porta e il filtro). Regole:
+ * - stessa porta del primo ascolto SE POSSIBILE, altrimenti un'ALTRA porta
+ *   (è quella che i flag del browser useranno);
+ * - MAI 0.0.0.0: si ascolta PROPRIO l'IP del gateway;
+ * - il gateway esiste solo a rete vmnet attiva: su EADDRNOTAVAIL poche prove
+ *   con pausa crescente, poi una riga nel log e il browser del bot fallisce
+ *   in parole;
+ * - il gateway (o la sottorete) CAMBIA — rete ricreata —: il vecchio ascolto
+ *   si chiude e se ne apre uno nuovo;
+ * - i client fuori dalla sottorete si chiudono subito, senza dati della
+ *   richiesta nel log; la sottorete diventa anche la regola d'uscita di
+ *   ENTRAMBI gli ascolti (destinazioni del box vietate).
+ */
+export async function ensureBrowserProxyGateway(
+  host: string,
+  subnet: string,
+  opts: { attempts?: number; baseDelayMs?: number } = {}
+): Promise<GatewayProxyListen> {
+  const attempts = opts.attempts ?? 4
+  const baseDelayMs = opts.baseDelayMs ?? 250
+  // già aperto su questo gateway con questa sottorete: tutto a posto
+  if (gatewayServer && gatewayListen && gatewayListen.host === host && gatewayListen.subnet === subnet) {
+    return gatewayListen
+  }
+  // gateway o sottorete cambiate (rete ricreata): il vecchio ascolto si chiude
+  await closeGatewayListen()
+  boxSubnet = subnet
+  const server = createBrowserProxy()
+  // il filtro d'ingresso: SOLO la sottorete del box, chiusura subito (il log
+  // non porta dati della richiesta: solo l'esito)
+  server.on('connection', (socket: net.Socket) => {
+    if (!gatewayClientAllowed(socket.remoteAddress, subnet)) {
+      console.log('[browser-proxy] connessione al secondo ascolto chiusa: indirizzo fuori dalla rete del box')
+      socket.destroy()
+    }
+  })
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, baseDelayMs * 2 ** (attempt - 1)))
+    // alla PRIMA prova si chiede la PORTA del primo ascolto (se è libera su
+    // questo indirizzo è la stessa per il browser); altrimenti una a caso
+    for (const want of attempt === 0 && proxyPort > 0 ? [proxyPort, 0] : [0]) {
+      const r = await tryListen(server, host, want)
+      if (r.ok) {
+        gatewayServer = server
+        gatewayListen = { host, port: r.port, subnet }
+        return gatewayListen
+      }
+      if (r.code === 'EADDRNOTAVAIL') break // il gateway non c'è: pausa crescente e si riprova
+      if (r.code === 'EADDRINUSE' && want !== 0) continue // porta del primo ascolto già presa qui: un'altra
+      await closeGatewayListen()
+      boxSubnet = null
+      throw new Error(`cannot listen on ${host} for the box proxy: ${r.code}`)
+    }
+    console.warn(`[browser-proxy] il gateway ${host} non c'è ancora (EADDRNOTAVAIL), riprovo (${attempt + 1}/${attempts})`)
+  }
+  await closeGatewayListen()
+  boxSubnet = null
+  console.error(`[browser-proxy] il gateway ${host} non è mai comparso: il browser del box non ha proxy (secondo ascolto non aperto)`)
+  throw new Error(BROWSER_PROXY_GATEWAY_FAILED_MESSAGE)
 }

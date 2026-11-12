@@ -36,10 +36,11 @@ import {
   BROWSER_IDLE_MS, BROWSERS_PER_BOX_MAX, boxHomePath, browserPidFile, browserStateDir
 } from '../sandbox/docker-argv'
 import {
-  sandboxMode, browserSandboxOk, ensureBoxContainer, ensureBotHome, runDockerRaw, runDockerArgv,
+  sandboxMode, sandboxNetwork, browserSandboxOk, ensureBoxContainer, ensureBotHome, runDockerRaw, runDockerArgv,
   boxOwnerOf, isSubagent
 } from '../sandbox'
-import { ensureBrowserProxy } from './browser-proxy'
+import { boxNetworkGateway, boxNetworkSubnet } from '../sandbox/apple-container-engine'
+import { ensureBrowserProxy, ensureBrowserProxyGateway } from './browser-proxy'
 import { parseShellPgid } from './shells'
 // fase 19a (V2): il timer di inattività si SOSPENDE mentre lo schermo del bot
 // è in uso (vista, controllo o richiesta di presa di controllo), e la chiusura
@@ -329,7 +330,7 @@ async function startBrowserSession(agentId: string): Promise<BrowserSession> {
   if (sessions.size >= BROWSERS_PER_BOX_MAX) {
     throw new Error(`Limit reached: at most ${BROWSERS_PER_BOX_MAX} browsers at the same time per computer (Chromium is heavy and the computer has shared memory). Close one with browser_close or try again later.`)
   }
-  const proxyPort = await ensureBrowserProxy()
+  let proxyPort = await ensureBrowserProxy()
   // fase rilascio (A7): il PERCORSO risolto, non il nome semplice
   let command = activeBoxEngine().command()
   let args: string[]
@@ -360,6 +361,22 @@ async function startBrowserSession(agentId: string): Promise<BrowserSession> {
     // un rm di una cartella assente non costa nulla
     const child = isSubagent(agentId)
     const owner = boxOwnerOf(agentId)
+    // BR2 (fase box-rete): col motore Apple in bridge il browser del box
+    // raggiunge il Mac al GATEWAY di homun-box (host.docker.internal non
+    // esiste): il proxy apre un SECONDO ascolto lì — MAI su 0.0.0.0, MAI sul
+    // gateway della isolata — e i flag del browser usano la SUA porta. Il
+    // gateway esiste solo a rete vmnet attiva: se non compare, il browser
+    // del bot fallisce in parole (lo dice ensureBrowserProxyGateway)
+    if (activeBoxEngine().id === 'apple-container' && sandboxNetwork() === 'bridge') {
+      const gw = boxNetworkGateway()
+      const subnet = boxNetworkSubnet()
+      if (gw && subnet) {
+        const listen = await ensureBrowserProxyGateway(gw, subnet)
+        proxyPort = listen.port
+      } else {
+        console.warn('[browser] gateway o sottorete di homun-box non ancora noti: il browser del box potrebbe non raggiungere il proxy')
+      }
+    }
     const w = await runDockerRaw(activeBoxEngine().argv.browserWritable(BOX_CONTAINER), { timeoutMs: 15_000 })
     if (w.exitCode !== 0) {
       throw new Error(`the browser volume is not owned by ${BROWSER_USER} and 0700 (test -O/-w /browser failed as 1001): the browser state is not secure, the browser does not start. The volumes were not touched.`)

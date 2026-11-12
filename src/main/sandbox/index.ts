@@ -82,7 +82,8 @@ export function sandboxMode(): SandboxMode {
   return v === 'docker' || v === 'box' ? 'box' : 'host'
 }
 
-function sandboxNetwork(): SandboxNetwork {
+/** La rete della sandbox (BR2/BR3: chi la conosce decide ascolti e ricreazioni). */
+export function sandboxNetwork(): SandboxNetwork {
   return getSetting<SandboxNetwork>('sandbox.network', 'bridge')
 }
 

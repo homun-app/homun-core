@@ -118,6 +118,18 @@ export function parseNetworkGateway(stdout: string): string | null {
 }
 
 /**
+ * BR2 (fase box-rete): la SOTTORETE della rete (CIDR) dal suo inspect (PURO):
+ * come il gateway, dal campo subnet della stessa risposta. È il confine del
+ * secondo ascolto del proxy (chi ci può parlare) e della regola d'uscita
+ * (quali destinazioni sono vietate): 192.0.x.y NON è un intervallo privato
+ * classico, la lista dei privati non lo conosce.
+ */
+export function parseNetworkSubnet(stdout: string): string | null {
+  const m = /"subnet"\s*:\s*"([0-9.]+\/\d+)"/.exec(stdout) ?? /subnet[=:]\s*([0-9.]+\/\d+)/i.exec(stdout)
+  return m && /^\d+\.\d+\.\d+\.\d+\/\d{1,2}$/.test(m[1]!) ? m[1]! : null
+}
+
+/**
  * BX2: i flag del browser del bot col proxy al GATEWAY della rete interna
  * invece di host.docker.internal (PURO: la sostituzione tocca SOLO il valore
  * di --proxy-server, gli altri flag restano identici e nello stesso ordine).

@@ -14,6 +14,7 @@ import {
   appleNetworkOf,
   appleNetworkInspectArgv,
   parseNetworkGateway,
+  parseNetworkSubnet,
   appleSystemStartArgv,
   appleKernelSetRecommendedArgv,
   appleNetworkCreateArgv,
@@ -91,6 +92,9 @@ export type BoxArgvRunner = (argv: string[], opts?: { timeoutMs?: number }) => P
 /** Il gateway della rete interna, ricordato dopo l'inspect (BX2). */
 let cachedGateway: string | null = null
 
+/** BR2: la SOTTORETE di homun-box (CIDR), ricordata col gateway. */
+let cachedSubnet: string | null = null
+
 /** Solo per i test (e l'ensure del box): il gateway della rete del box. */
 export function setBoxNetworkGateway(ip: string | null): void {
   cachedGateway = ip
@@ -99,6 +103,16 @@ export function setBoxNetworkGateway(ip: string | null): void {
 /** Il gateway della rete del box (null = non ancora letto). */
 export function boxNetworkGateway(): string | null {
   return cachedGateway
+}
+
+/** Solo per i test: la sottorete della rete del box (BR2). */
+export function setBoxNetworkSubnet(cidr: string | null): void {
+  cachedSubnet = cidr
+}
+
+/** BR2: la sottorete di homun-box in forma CIDR (null = non ancora letta). */
+export function boxNetworkSubnet(): string | null {
+  return cachedSubnet
 }
 
 /**
@@ -124,7 +138,12 @@ export async function ensureAppleBoxNetwork(run: BoxArgvRunner, network: 'bridge
     ins = await run(appleNetworkInspectArgv(name), { timeoutMs: 15_000 })
   }
   const gw = parseNetworkGateway(ins.stdout)
-  if (network === 'bridge') setBoxNetworkGateway(gw)
+  if (network === 'bridge') {
+    // BR2: la sottorete di homun-box si ricorda COL gateway — è il confine
+    // del secondo ascolto del proxy e della regola d'uscita
+    setBoxNetworkGateway(gw)
+    setBoxNetworkSubnet(parseNetworkSubnet(ins.stdout))
+  }
   return gw
 }
 

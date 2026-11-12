@@ -23,11 +23,12 @@ import {
   appleBrowserMcpArgv,
   browserMcpFlagsWithGateway,
   parseNetworkGateway,
+  parseNetworkSubnet,
   appleSystemStartArgv,
   appleKernelSetRecommendedArgv
 } from '../apple-container-argv'
 import { DEFAULT_BOX_LIMITS, browserMcpFlags, CONTAINER_USER, BOX_MOUNT, PLUGINS_MOUNT, BROWSER_MOUNT } from '../docker-argv'
-const { ensureAppleBoxNetwork, boxNetworkGateway, setBoxNetworkGateway, appleContainerEngine } = await import('../apple-container-engine')
+const { ensureAppleBoxNetwork, boxNetworkGateway, setBoxNetworkGateway, boxNetworkSubnet, setBoxNetworkSubnet, appleContainerEngine } = await import('../apple-container-engine')
 
 const runArgv = (network: 'bridge' | 'none') =>
   appleBoxRunArgv('sandbot-box', 'sandbot-box', network, DEFAULT_BOX_LIMITS, 'sandbot-box:abc')
@@ -133,6 +134,13 @@ describe('BX2: il proxy del browser al GATEWAY della rete interna', () => {
     expect(parseNetworkGateway('gateway:.non.un.ip')).toBeNull()
   })
 
+  it('BR2 parseNetworkSubnet: la sottorete (CIDR) dello stesso inspect, per il filtro del proxy', () => {
+    expect(parseNetworkSubnet('{"name":"homun-box","subnets":[{"subnet":"192.0.15.0/24","gateway":"192.0.15.1"}]}')).toBe('192.0.15.0/24')
+    expect(parseNetworkSubnet('subnet: 192.0.9.0/24')).toBe('192.0.9.0/24')
+    expect(parseNetworkSubnet('{"subnets":[{"gateway":"192.0.15.1"}]}')).toBeNull()
+    expect(parseNetworkSubnet('subnet: non.un.cifr')).toBeNull()
+  })
+
   it('browserMcpFlagsWithGateway: --proxy-server cambia indirizzo, il RESTO dei flag resta identico e in ordine', () => {
     const base = browserMcpFlags('agent_x', 8085)
     const withGw = browserMcpFlagsWithGateway('agent_x', 8085, '192.0.15.1')
@@ -194,6 +202,48 @@ describe('BX2: l\'ensure della rete del box (ensureAppleBoxNetwork)', () => {
     expect(calls.map((c) => c.slice(0, 2).join(' '))).toEqual(['network inspect'])
     expect(gw).toBe('192.0.2.1')
     setBoxNetworkGateway(null)
+  })
+
+  it('BR2: in bridge il gateway E la SOTTORETE si ricordano (il filtro del secondo ascolto)', async () => {
+    setBoxNetworkGateway(null)
+    setBoxNetworkSubnet(null)
+    const run = async (argv: string[]) =>
+      argv[0] === 'network' && argv[1] === 'inspect'
+        ? { stdout: '{"subnets":[{"subnet":"192.0.15.0/24","gateway":"192.0.15.1"}]}', stderr: '', exitCode: 0 }
+        : { stdout: '', stderr: '', exitCode: 0 }
+    await ensureAppleBoxNetwork(run)
+    expect(boxNetworkGateway()).toBe('192.0.15.1')
+    expect(boxNetworkSubnet()).toBe('192.0.15.0/24')
+    setBoxNetworkGateway(null)
+    setBoxNetworkSubnet(null)
+  })
+
+  it('BR1/BR2: in NONE la rete isolata si crea e ispeziona, MA il gateway della isolata NON diventa quello del proxy', async () => {
+    setBoxNetworkGateway('192.0.15.1') // il gateway di homun-box, già noto
+    setBoxNetworkSubnet(null)
+    const calls: string[][] = []
+    let created = false
+    const run = async (argv: string[]) => {
+      calls.push(argv)
+      if (argv[0] === 'network' && argv[1] === 'inspect') {
+        if (argv.includes('homun-box-isolated')) {
+          return created
+            ? { stdout: '{"subnets":[{"subnet":"192.0.16.0/24","gateway":"192.0.16.1"}]}', stderr: '', exitCode: 0 }
+            : { stdout: '', stderr: 'network not found', exitCode: 1 }
+        }
+        return { stdout: '{"subnets":[{"subnet":"192.0.15.0/24","gateway":"192.0.15.1"}]}', stderr: '', exitCode: 0 }
+      }
+      if (argv[0] === 'network' && argv[1] === 'create') { created = true; return { stdout: '', stderr: '', exitCode: 0 } }
+      return { stdout: '', stderr: '', exitCode: 0 }
+    }
+    const gw = await ensureAppleBoxNetwork(run, 'none')
+    expect(calls.some((c) => c[0] === 'network' && c[1] === 'create' && c.includes('homun-box-isolated'))).toBe(true)
+    expect(gw).toBe('192.0.16.1') // quello della isolata, risposto dall'inspect di DOPO
+    // ma la cache del proxy resta quella di homun-box: il proxy non ascolta MAI sulla isolata
+    expect(boxNetworkGateway()).toBe('192.0.15.1')
+    expect(boxNetworkSubnet()).toBeNull()
+    setBoxNetworkGateway(null)
+    setBoxNetworkSubnet(null)
   })
 })
 
