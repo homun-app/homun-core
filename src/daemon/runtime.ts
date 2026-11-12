@@ -54,7 +54,7 @@ import { uiLanguage, formatUi, ui } from '../main/ui-language'
 import { UI } from '../shared/ui-messages'
 import { secondaryPrompts } from '../main/agent/prompts'
 import { loadTemplates, buildKickstartMessage } from '../main/templates'
-import { createOnboarding } from './onboarding'
+import { createOnboarding, createMainBotEnsurer } from './onboarding'
 import { join } from 'node:path'
 import type { SandbotEvent } from '../shared/types'
 import { currentUserLanguage } from '../main/agent/user-language'
@@ -682,15 +682,42 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
 
   // fase 7: onboarding al primo avvio — bot principale "Bot" + widget di
   // sistema sul ruolo; i due bot da template partono col kickstart in coda.
+  // OA1 (fase onboarding-a): il bot lo crea SOLO il daemon, qui — single-flight
+  // e transazione di mainAgentId (il main non crea più «Bot» per conto suo).
   // Il catalogo dei template si valida QUI all'avvio: un JSON rotto ferma il
   // daemon con l'errore chiaro invece di sorprendere a runtime.
   loadTemplates()
+  // OA1: la transazione SQLite attorno a creazione + mainAgentId
+  const onboardingTx = <T,>(fn: () => T): T => {
+    database.exec('BEGIN IMMEDIATE')
+    try {
+      const out = fn()
+      database.exec('COMMIT')
+      return out
+    } catch (e) {
+      database.exec('ROLLBACK')
+      throw e
+    }
+  }
+  // OA1: l'ensure single-flight vive quanto il daemon (i doppi start condividono
+  // la stessa promessa); il riavvio recupera da mainAgentId persistito
+  const mainBotEnsurer = createMainBotEnsurer({
+    getSetting,
+    setSetting,
+    getAgent,
+    createAgent: (name, description) => createAgent(name, description),
+    tx: onboardingTx
+  })
   const onboarding = createOnboarding({
     now: () => Date.now(),
     getSetting,
     setSetting,
     listAgents,
     createAgent: (name, description) => createAgent(name, description),
+    getAgent,
+    getEntries,
+    tx: onboardingTx,
+    ensureMainBot: (adopt) => mainBotEnsurer.ensureMainBot(adopt),
     updateAgent,
     listProviders,
     // fase locale (L4): le strade Ollama e Integrato del widget del provider
@@ -881,8 +908,9 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
   worker.start()
 
   // fase 7: primo avvio su dati vuoti → bot principale + widget del ruolo;
-  // se l'onboarding era fermo sul provider e ora c'è, riprende da qui
-  onboarding.maybeStart()
+  // se l'onboarding era fermo sul provider e ora c'è, riprende da qui.
+  // OA1: il bot lo crea SOLO questa chiamata (main escluso dalla corsa)
+  void onboarding.start().catch((e) => console.error('[sandbotd] avvio onboarding:', e))
   void onboarding.resume().catch((e) => console.error('[sandbotd] ripresa onboarding:', e))
 
   // autodiscovery dei provider locali silenziosa al boot (come faceva l'app)

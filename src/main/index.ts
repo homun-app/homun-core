@@ -14,16 +14,10 @@
 import { app, BrowserWindow, protocol, safeStorage, screen, session, shell } from 'electron'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { registerIpc, emitLocal } from './ipc'
-import { setDataDir, listAgents, createAgent } from './store/db'
+import { registerIpc } from './ipc'
+import { setDataDir } from './store/db'
 import { createTray, refreshTray } from './tray'
 import { initMainLanguage, applyStartupLanguage } from './i18n'
-// fase 17c (C4): la descrizione del Bot principale è un messaggio del bot
-// all'utente — lingua dell'utente (al primo avvio: lingue di sistema, il
-// setting ui.activeLanguage non è ancora stato pubblicato)
-import { formatUi, ui } from '../shared/ui-text'
-import { UI } from '../shared/ui-messages'
-import { resolveUiLanguage } from '../shared/ui-language'
 import { DaemonClient } from './daemon-client'
 import { setDaemonSpawnContext } from './daemon-context'
 import { userDataDir } from './paths'
@@ -253,14 +247,14 @@ if (isDaemonMode(process.argv)) {
         .then(() => refreshTray())
         .catch((e) => console.error('[sandbot] daemon non avviabile:', e))
 
-      if (listAgents().length === 0) {
-        // primo avvio: agente principale, come il "Bot principale" dell'originale
-        createAgent('Bot', formatUi(ui(UI.mainBotDescription), resolveUiLanguage(null, app.getPreferredSystemLanguages())))
-      }
+      // OA1 (fase onboarding-a): il main NON crea più «Bot» al primo avvio —
+      // il bot principale lo crea SOLO il daemon, dentro l'onboarding
+      // (single-flight + adozione del «Bot» vuoto delle beta). Qui si crea la
+      // finestra e basta: la UI resta in caricamento finché il daemon non
+      // dice lo stato dell'onboarding.
       createWindow()
       createTray(getMainWindow)
       refreshTray()
-      emitLocal({ type: 'agents' }, () => BrowserWindow.getAllWindows())
 
       // B1 (fase beta.4): il gancio di prova delle sonde — con
       // SANDBOT_TEST_USER_DATA + SANDBOT_TEST_UPDATE_NOTES la finestra

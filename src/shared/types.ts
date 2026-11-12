@@ -653,6 +653,9 @@ export type SandbotEvent =
   | { type: 'live-reply'; agentId: string; entryId: number; text: string }
   | { type: 'status'; agentId: string; status: AgentStatus }
   | { type: 'agents' }
+  // OA1 (fase onboarding-a): il daemon ha deciso lo stato dell'onboarding —
+  // needed false significa «niente guida» (finestra normale), true «guida»
+  | { type: 'onboarding'; needed: boolean }
   | { type: 'approval'; agentId: string; approval: Approval }
   | { type: 'open-agent'; agentId: string }
   // residuo fase 4 (0b): il client del daemon si è RICONNESSO dopo una
@@ -889,6 +892,10 @@ export interface SandbotApi {
   // impostazioni generiche (fase 6: fuso orario, finestre di consegna, assenza, notifiche)
   settingsGet<T>(key: string, fallback: T): Promise<T>
   settingsSet(key: string, value: unknown): Promise<void>
+  // OA1 (fase onboarding-a): lo stato del primo avvio — la finestra resta in
+  // caricamento finché il daemon non ha risposto (niente chat vuota, niente
+  // «Bot» che compare da sola prima che l'onboarding l'abbia deciso)
+  onboardingState(): Promise<{ needed: boolean }>
   // quick-ask (domanda effimera)
   quickAsk(agentId: string, question: string): Promise<string>
   // allegati

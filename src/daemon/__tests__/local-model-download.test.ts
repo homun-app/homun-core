@@ -144,7 +144,9 @@ describe('fase locale correzioni 2 (LD1): la fine del download aggancia il provi
     let resumed = 0
     const apiLd = buildApiMethods(emit, { poke: () => undefined } as unknown as JobWorker, undefined, undefined, {
       onboarding: {
-        maybeStart: () => undefined,
+        // OA1 (fase onboarding-a): la facciata ha start/status al posto di maybeStart
+        start: async () => undefined,
+        status: () => ({ needed: false }),
         answerRole: async () => undefined,
         resume: async () => { resumed++; return true }
       }

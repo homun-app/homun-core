@@ -89,6 +89,8 @@ const api: SandbotApi = {
   grantRevoke: (id) => ipcRenderer.invoke('grants:revoke', id),
   grantServerReads: (slug) => ipcRenderer.invoke('permissions:grant-server-reads', slug),
   settingsGet: <T,>(key: string, fallback: T) => ipcRenderer.invoke('settings:get', key, fallback) as Promise<T>,
+  // OA1 (fase onboarding-a): lo stato del primo avvio (caricamento finché non risponde)
+  onboardingState: () => ipcRenderer.invoke('onboarding:state') as Promise<{ needed: boolean }>,
   settingsSet: (key, value) => ipcRenderer.invoke('settings:set', key, value),
   quickAsk: (agentId, question) => ipcRenderer.invoke('quickask', agentId, question),
   pickImage: () => ipcRenderer.invoke('dialog:pick-image'),

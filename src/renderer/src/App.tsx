@@ -78,6 +78,9 @@ export function App() {
   const appsOpen = useStore((s) => s.appsOpen)
   // fase skill (S4): la finestra «Skill» (libreria unica)
   const skillsOpen = useStore((s) => s.skillsOpen)
+  // OA1 (fase onboarding-a): finché il daemon non dice lo stato del primo
+  // avvio, la finestra CARICA — niente chat vuota, niente «Bot» da sola
+  const onboardingKnown = useStore((s) => s.onboarding !== null)
 
   useEffect(() => {
     void init()
@@ -163,6 +166,7 @@ export function App() {
   // «members» quando la squadra è aperta: il pannello non è mai wide
   const panelTab = useStore((s) => (s.openGroupId !== null ? ('members' as const) : s.panelTab))
   const layout = layoutFor({ windowWidth, sidebarCollapsedByUser: sidebarCollapsed, sidebarWidthPref: sidebarWidth, panelOpen: rightPanel, panelTab })
+  if (!onboardingKnown) return <BootSplash />
   return (
     <div className="relative flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
       <LegacyHomun2Notice />
@@ -177,6 +181,26 @@ export function App() {
       {settingsOpen && <Settings />}
       {appsOpen && <AppsWindow />}
       {skillsOpen && <SkillsWindow />}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * OA1 (fase onboarding-a): il caricamento del primo avvio. Il daemon sta
+ * decidendo se serve la guida (e, se è il caso, creando il bot principale):
+ * la finestra non mostra né la chat vuota né un «Bot» prematuro. Stile della
+ * finestra App di oggi: fondo tenue, niente bordi.
+ */
+function BootSplash() {
+  return (
+    <div className="flex h-screen w-screen flex-col items-center justify-center gap-5 bg-muted/40 text-foreground" data-testid="boot-splash">
+      <div className="flex h-16 w-16 animate-pulse items-center justify-center rounded-[18px] bg-muted text-2xl font-display" aria-hidden>🧚</div>
+      <div className="flex flex-col items-center gap-2">
+        <p className="font-display text-xl">Homun</p>
+        <p className="text-xs text-muted-foreground">
+          <Trans>Preparo tutto…</Trans>
+        </p>
       </div>
     </div>
   )

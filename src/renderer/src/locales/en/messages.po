@@ -4960,6 +4960,10 @@ msgstr "Take control"
 msgid "notice.boxPreparing"
 msgstr "Preparing the bots’ computer (box image with the browser): once only, a few minutes. The bots resume as soon as it is ready."
 
+#: src/renderer/src/App.tsx
+msgid "Preparo tutto…"
+msgstr "Getting everything ready…"
+
 #: src/renderer/src/components/TakeoverCard.tsx
 msgid "Presa di controllo dello schermo"
 msgstr "Screen takeover"

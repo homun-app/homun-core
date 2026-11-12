@@ -1,18 +1,22 @@
-// Test dell'onboarding al primo avvio (fase 7): nessun agente → bot principale
-// "Bot" + widget DI SISTEMA sul ruolo; la risposta crea i due bot da template
-// (kickstart in coda) col benvenuto FISSO; senza provider l'onboarding si
-// ferma sul widget delle impostazioni e riprende quando un provider è attivo.
+// Test dell'onboarding al primo avvio. OA1 (fase onboarding-a): UNA sola
+// strada per il primo avvio — il main NON crea più «Bot» (lo crea solo il
+// daemon, dentro l'onboarding, con ensureMainBot single-flight e transazione);
+// onboardingNeeded (pura) decide chi fa l'onboarding, ADOZIONE del «Bot» vuoto
+// delle beta compresa. Il resto del flusso vecchio (widget del ruolo, due bot
+// da template, benvenuto, widget del provider) resta testato qui finché la
+// guida a passi non lo sostituisce.
 // Dipendenze registrate (niente LLM, niente rete): l'"LLM finto" non serve,
 // il kickstart vero partirà come job della coda sui bot creati.
 import { describe, expect, it, beforeEach } from 'vitest'
 import {
-  createOnboarding, maybeStartOnboarding, answerOnboardingRole, resumeOnboarding,
+  createOnboarding, startOnboarding, answerOnboardingRole, resumeOnboarding,
+  onboardingNeeded, createMainBotEnsurer,
   roleTemplates, welcomeMessage, onboardingPrompt, onboardingRoleOptions,
   providerPathsOf,
   MAIN_BOT_NAME, ROLE_SETTING, PENDING_PROVIDER_SETTING, DONE_SETTING,
   type OnboardingDeps
 } from '../onboarding'
-import type { Agent, ProviderConfig, SendMessagePayload, SandbotEvent } from '../../shared/types'
+import type { Agent, ProviderConfig, SendMessagePayload, SandbotEvent, TranscriptEntry } from '../../shared/types'
 import type { BotTemplate } from '../../shared/types'
 // fase 17c: i test della lingua scrivono i setting dello store reale (test-setup).
 // La lingua di default qui è l'italiano (i testi fissi erano italiani prima);
@@ -28,8 +32,9 @@ interface Log {
   marked: Array<{ agentId: string; entryId: number; value: string | string[] }>
   kickstarts: Array<{ agentId: string; template: BotTemplate }>
   updates: Array<{ id: string; patch: Record<string, unknown> }>
-  events: string[]
-  entries: Array<{ id: number; agentId: string; meta: Record<string, unknown> | null }>
+  events: SandbotEvent[]
+  /** le entry per agente, come getEntries del daemon (vuote = chat vuota) */
+  agentEntries: Record<string, TranscriptEntry[]>
   nextEntryId: number
 }
 
@@ -43,6 +48,9 @@ function mkDeps(
     getSetting: <T,>(key: string, fallback: T) => (key in log.settings ? (log.settings[key] as T) : fallback),
     setSetting: (key, value) => { log.settings[key] = value },
     listAgents: () => log.agents,
+    getAgent: (id) => log.agents.find((a) => a.id === id) ?? null,
+    getEntries: (agentId) => log.agentEntries[agentId] ?? [],
+    tx: <T,>(fn: () => T): T => fn(),
     createAgent: (name, description) => {
       const a: Agent = {
         id: `agent_${log.agents.length + 1}`, name, description,
@@ -54,10 +62,18 @@ function mkDeps(
     updateAgent: (id, patch) => { log.updates.push({ id, patch: patch as Record<string, unknown> }) },
     listProviders: () => log.providers,
     assignDefaultModel: async () => assignment,
-    appendSystemSend: (agentId, message, meta) => { log.sends.push({ agentId, message, meta }) },
+    appendSystemSend: (agentId, message, meta) => {
+      log.sends.push({ agentId, message, meta })
+      // come il daemon vero: la send di sistema è anche una ENTRY (il controllo
+      // anti-widget-doppio del riavvio la rilegge dalla chat)
+      log.agentEntries[agentId] = [...(log.agentEntries[agentId] ?? []), {
+        id: log.nextEntryId++, agentId, kind: 'send-message', role: 'assistant',
+        content: '', meta: { message, ...(meta ?? {}) }, createdAt: log.nextEntryId
+      }]
+    },
     markWidgetResponded: (agentId, entryId, value) => { log.marked.push({ agentId, entryId, value }) },
     enqueueKickstart: (agentId, template) => { log.kickstarts.push({ agentId, template }) },
-    emit: (e: SandbotEvent) => { log.events.push(e.type) }
+    emit: (e: SandbotEvent) => { log.events.push(e) }
   }
 }
 
@@ -67,13 +83,143 @@ let deps: OnboardingDeps
 beforeEach(() => {
   log = {
     settings: {}, agents: [], providers: [], sends: [], marked: [], kickstarts: [],
-    updates: [], events: [], entries: [], nextEntryId: 1
+    updates: [], events: [], agentEntries: {}, nextEntryId: 1
   }
   deps = mkDeps(log)
 })
 
 // il widget del ruolo viene da una entry send-message di sistema: id noto per i test
 const roleWidgetEntryId = 7
+
+// ---- OA1: chi fa l'onboarding (onboardingNeeded, PURA) ----
+describe('OA1 onboardingNeeded (pura): chi fa l\'onboarding', () => {
+  it('onboarding.done vero → no, e non chiede di scriverlo', () => {
+    expect(onboardingNeeded({ done: true, hasUserMessages: false, agents: [], mainAgentId: null }))
+      .toEqual({ needed: false, adoptAgentId: null, markDone: false })
+  })
+
+  it('c\'è almeno un messaggio dell\'utente in un qualunque bot → no, e onboarding.done si scrive (chi usa già Homun non la rifà)', () => {
+    expect(onboardingNeeded({ done: false, hasUserMessages: true, agents: [{ id: 'a_1', name: 'Bot' }], mainAgentId: 'a_1' }))
+      .toEqual({ needed: false, adoptAgentId: null, markDone: true })
+  })
+
+  it('dati vuoti → sì, nessuna adozione', () => {
+    expect(onboardingNeeded({ done: false, hasUserMessages: false, agents: [], mainAgentId: null }))
+      .toEqual({ needed: true, adoptAgentId: null, markDone: false })
+  })
+
+  it('un «Bot» vuoto delle beta 1–4 → sì, e quel bot si ADOZZA (mai un secondo Bot)', () => {
+    expect(onboardingNeeded({ done: false, hasUserMessages: false, agents: [{ id: 'a_1', name: 'Bot' }], mainAgentId: null }))
+      .toEqual({ needed: true, adoptAgentId: 'a_1', markDone: false })
+  })
+
+  it('mainAgentId che punta ancora a un bot esistente → nessuna adozione (è già il principale)', () => {
+    expect(onboardingNeeded({ done: false, hasUserMessages: false, agents: [{ id: 'a_1', name: 'Bot' }], mainAgentId: 'a_1' }))
+      .toEqual({ needed: true, adoptAgentId: null, markDone: false })
+  })
+
+  it('un bot con ALTRO nome (senza «Bot») non si adotta: la chat nuova parte da zero', () => {
+    expect(onboardingNeeded({ done: false, hasUserMessages: false, agents: [{ id: 'a_1', name: 'Mio bot' }], mainAgentId: null }))
+      .toEqual({ needed: true, adoptAgentId: null, markDone: false })
+  })
+})
+
+// ---- OA1: ensureMainBot single-flight, UN solo bot ----
+describe('OA1 ensureMainBot: single-flight, un solo bot anche con la race', () => {
+  const mkEnsurerDeps = (log: Log) => ({
+    now: () => 1_000_000_000_000,
+    getSetting: <T,>(key: string, fallback: T) => (key in log.settings ? (log.settings[key] as T) : fallback),
+    setSetting: (key: string, value: unknown) => { log.settings[key] = value },
+    getAgent: (id: string) => log.agents.find((a) => a.id === id) ?? null,
+    createAgent: (name: string, description: string) => {
+      const a: Agent = {
+        id: `agent_${log.agents.length + 1}`, name, description,
+        providerId: null, model: null, status: 'idle', unread: 0, createdAt: log.agents.length + 1
+      }
+      log.agents.push(a)
+      return a
+    },
+    tx: <T,>(fn: () => T): T => fn()
+  })
+
+  it('due chiamate concorrenti → UN solo bot, mainAgentId scritto una volta', async () => {
+    const ensurer = createMainBotEnsurer(mkEnsurerDeps(log))
+    const [a, b] = await Promise.all([ensurer.ensureMainBot(), ensurer.ensureMainBot()])
+    expect(log.agents).toHaveLength(1)
+    expect(a.id).toBe(b.id)
+    expect(log.settings['mainAgentId']).toBe(log.agents[0]!.id)
+  })
+
+  it('la chiamata DOPO la prima riusa il bot di mainAgentId (niente secondo bot)', async () => {
+    const ensurer = createMainBotEnsurer(mkEnsurerDeps(log))
+    const first = await ensurer.ensureMainBot()
+    const second = await ensurer.ensureMainBot()
+    expect(log.agents).toHaveLength(1)
+    expect(second.id).toBe(first.id)
+  })
+
+  it('un riavvio a metà (ensurer NUOVO, stesso store) → riusa il bot, non ne crea un secondo', async () => {
+    const first = await createMainBotEnsurer(mkEnsurerDeps(log)).ensureMainBot()
+    // il daemon riparte: nuovo ensurer, mainAgentId persistito
+    const second = await createMainBotEnsurer(mkEnsurerDeps(log)).ensureMainBot()
+    expect(log.agents).toHaveLength(1)
+    expect(second.id).toBe(first.id)
+  })
+
+  it('mainAgentId stantio (bot eliminato) → ne crea UNO nuovo e se lo segna', async () => {
+    log.settings['mainAgentId'] = 'agent_sparito'
+    const bot = await createMainBotEnsurer(mkEnsurerDeps(log)).ensureMainBot()
+    expect(log.agents).toHaveLength(1)
+    expect(log.settings['mainAgentId']).toBe(bot.id)
+  })
+
+  it('l\'adozione: il «Bot» vuoto della beta diventa principale SENZA crearne un altro', async () => {
+    const beta: Agent = { id: 'agent_beta', name: 'Bot', description: 'della beta', providerId: null, model: null, status: 'idle', unread: 0, createdAt: 1 }
+    log.agents.push(beta)
+    const bot = await createMainBotEnsurer(mkEnsurerDeps(log), 'agent_beta').ensureMainBot()
+    expect(log.agents).toHaveLength(1)
+    expect(bot.id).toBe('agent_beta')
+    expect(log.settings['mainAgentId']).toBe('agent_beta')
+  })
+})
+
+// ---- OA1: il bot lo crea SOLO il daemon (startOnboarding) ----
+describe('OA1 startOnboarding: il bot principale lo crea solo il daemon', () => {
+  it('dati vuoti → un solo bot principale con mainAgentId, evento agents e onboarding needed', async () => {
+    await startOnboarding(deps)
+    expect(log.agents).toHaveLength(1)
+    expect(log.agents[0]!.name).toBe(MAIN_BOT_NAME)
+    expect(log.settings['mainAgentId']).toBe(log.agents[0]!.id)
+    expect(log.events.filter((e) => e.type === 'agents')).toHaveLength(1)
+    expect(log.events).toContainEqual({ type: 'onboarding', needed: true })
+  })
+
+  it('c\'è già un messaggio dell\'utente → NESSUN bot nuovo, onboarding.done scritto, evento not-needed', async () => {
+    log.agentEntries['a_1'] = [{ id: 1, agentId: 'a_1', kind: 'message', role: 'user', content: 'ciao', meta: null, createdAt: 1 }]
+    log.agents.push({ id: 'a_1', name: 'Bot', description: '', providerId: null, model: null, status: 'idle', unread: 0, createdAt: 1 })
+    await startOnboarding(deps)
+    expect(log.agents).toHaveLength(1)
+    expect(log.sends).toHaveLength(0)
+    expect(log.settings[DONE_SETTING]).toBe(true)
+    expect(log.events).toContainEqual({ type: 'onboarding', needed: false })
+  })
+
+  it('onboarding.done → non fa nulla (nemmeno il widget)', async () => {
+    log.settings[DONE_SETTING] = true
+    await startOnboarding(deps)
+    expect(log.agents).toHaveLength(0)
+    expect(log.sends).toHaveLength(0)
+    expect(log.events).toContainEqual({ type: 'onboarding', needed: false })
+  })
+
+  it('il «Bot» vuoto della beta 4 viene ADOZZATO: mainAgentId = suo id, un solo agente in tutto', async () => {
+    log.agents.push({ id: 'agent_beta', name: 'Bot', description: 'della beta', providerId: null, model: null, status: 'idle', unread: 0, createdAt: 1 })
+    await startOnboarding(deps)
+    expect(log.agents).toHaveLength(1)
+    expect(log.settings['mainAgentId']).toBe('agent_beta')
+    expect(log.events).toContainEqual({ type: 'onboarding', needed: true })
+  })
+})
 
 describe('roleTemplates: mappa ruolo → 2 template (pura)', () => {
   it('ogni ruolo dell\'onboarding mappa su due template del catalogo, distinti per coppia', () => {
@@ -93,9 +239,9 @@ describe('roleTemplates: mappa ruolo → 2 template (pura)', () => {
   })
 })
 
-describe('maybeStartOnboarding: primo avvio', () => {
-  it('nessun agente → crea il bot principale "Bot" con mainAgentId e il widget di sistema sul ruolo', () => {
-    maybeStartOnboarding(deps)
+describe('startOnboarding: il widget del ruolo del vecchio flusso (finché la guida non lo sostituisce)', () => {
+  it('nessun agente → crea il bot principale "Bot" con mainAgentId e il widget di sistema sul ruolo', async () => {
+    await startOnboarding(deps)
     expect(log.agents).toHaveLength(1)
     expect(log.agents[0]).toMatchObject({ name: MAIN_BOT_NAME })
     expect(log.settings['mainAgentId']).toBe(log.agents[0]!.id)
@@ -105,51 +251,47 @@ describe('maybeStartOnboarding: primo avvio', () => {
     expect(w.message).toMatchObject({ type: 'widget', prompt: onboardingPrompt('it'), allowCustom: true })
     expect((w.message as { options: ReturnType<typeof onboardingRoleOptions> }).options).toEqual(onboardingRoleOptions('it'))
     expect(w.meta).toMatchObject({ onboardingRole: true })
-    expect(log.events).toContain('agents')
+    expect(log.events.filter((e) => e.type === 'agents')).toHaveLength(1)
   })
 
-  it('con agenti esistenti o onboarding già fatto non fa nulla (idempotente)', () => {
-    log.agents.push({ id: 'a_x', name: 'Esistente', description: '', providerId: null, model: null, status: 'idle', unread: 0, createdAt: 1 })
-    maybeStartOnboarding(deps)
+  it('il riavvio del daemon NON raddoppia né bot né widget (mainAgentId persistito)', async () => {
+    await startOnboarding(deps)
+    await startOnboarding(deps)
     expect(log.agents).toHaveLength(1)
-    expect(log.sends).toHaveLength(0)
-    // done → mai più, nemmeno a dati vuoti di nuovo
-    log.agents.length = 0
-    log.settings[DONE_SETTING] = true
-    maybeStartOnboarding(deps)
-    expect(log.agents).toHaveLength(0)
+    expect(log.sends).toHaveLength(1)
   })
 })
 
 describe('answerOnboardingRole CON provider configurato', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     log.providers.push({ id: 'ollama', name: 'Ollama', kind: 'ollama', baseUrl: 'http://x', apiKey: '', enabled: true })
-    maybeStartOnboarding(deps)
+    await startOnboarding(deps)
   })
 
-  it('fase 17c (C4): la lingua dell’onboarding segue l’utente (userLanguage, ripiego su ui.activeLanguage)', () => {
-    const restart = (): void => {
+  it('fase 17c (C4): la lingua dell’onboarding segue l’utente (userLanguage, ripiego su ui.activeLanguage)', async () => {
+    const restart = async (): Promise<void> => {
       log.agents.length = 0
       log.sends.length = 0
+      log.agentEntries = {}
       log.settings['onboarding.done'] = false
-      maybeStartOnboarding(deps)
+      await startOnboarding(deps)
     }
     // senza userLanguage e con ui.activeLanguage=en → onboarding inglese
     deleteSetting('agent.userLanguage')
     setSetting('ui.activeLanguage', 'en')
-    restart()
+    await restart()
     let w = log.sends.find((s) => (s.message as { type?: string }).type === 'widget')
     expect((w!.message as { prompt: string }).prompt).toBe('What do you want to use me for the most?')
     // con userLanguage=en vince la lingua dell'utente anche se l'app è italiana
     setSetting('ui.activeLanguage', 'it')
     setSetting('agent.userLanguage', 'en')
-    restart()
+    await restart()
     w = log.sends.find((s) => (s.message as { type?: string }).type === 'widget')
     expect((w!.message as { prompt: string }).prompt).toBe('What do you want to use me for the most?')
     deleteSetting('agent.userLanguage')
     setSetting('ui.activeLanguage', 'it')
     // e l'italiano resta per i test successivi (comportamento pre-17c)
-    restart()
+    await restart()
     const wIt = log.sends.find((s) => (s.message as { type?: string }).type === 'widget')
     expect((wIt!.message as { prompt: string }).prompt).toBe('Per cosa vuoi usarmi di più?')
     // il done resta spento per la describe SENZA provider
@@ -210,8 +352,8 @@ describe('answerOnboardingRole CON provider configurato', () => {
 })
 
 describe('answerOnboardingRole SENZA provider', () => {
-  beforeEach(() => {
-    maybeStartOnboarding(deps)
+  beforeEach(async () => {
+    await startOnboarding(deps)
   })
 
   it('la risposta parcheggia il ruolo e mostra il widget che porta alle impostazioni del provider', async () => {
@@ -254,9 +396,9 @@ describe('answerOnboardingRole SENZA provider', () => {
 })
 
 describe('createOnboarding (facciata cablata nel daemon)', () => {
-  it('espone maybeStart/answerRole/resume sugli stessi deps', () => {
+  it('espone start/answerRole/resume/status sugli stessi deps', async () => {
     const onboarding = createOnboarding(deps)
-    onboarding.maybeStart()
+    await onboarding.start()
     expect(log.agents).toHaveLength(1)
     log.providers.push({ id: 'p', name: 'P', kind: 'custom', baseUrl: 'http://x', apiKey: '', enabled: true })
     onboarding.answerRole(1, 'email')

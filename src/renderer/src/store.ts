@@ -68,6 +68,12 @@ function lastTurnEndOf(entries: TranscriptEntry[]): { value: TurnEnd; sendAt: nu
 
 interface Store {
   agents: Agent[]
+  /**
+   * OA1 (fase onboarding-a): lo stato del primo avvio. null = il daemon non
+   * ha ancora risposto → la finestra mostra il caricamento (niente chat vuota
+   * e niente «Bot» che compare da sola prima della decisione del daemon).
+   */
+  onboarding: { needed: boolean } | null
   activeId: string | null
   entries: TranscriptEntry[]
   reasoning: Record<number, string>
@@ -311,6 +317,7 @@ interface Store {
 
 export const useStore = create<Store>((set, get) => ({
   agents: [],
+  onboarding: null,
   activeId: null,
   entries: [],
   reasoning: {},
@@ -397,6 +404,9 @@ export const useStore = create<Store>((set, get) => ({
   setPanelTab: (t) => set({ panelTab: t }),
 
   async init() {
+    // OA1 (fase onboarding-a): lo stato del primo avvio PRIMA di tutto — finché
+    // non arriva, la finestra resta in caricamento (niente chat vuota)
+    void api.onboardingState().then((onboarding) => set({ onboarding })).catch(() => set({ onboarding: { needed: false } }))
     const agents = await api.listAgents()
     const providers = await api.listProviders()
     const permissions = await api.getPermissions()
@@ -473,6 +483,11 @@ export const useStore = create<Store>((set, get) => ({
         case 'agents':
           void api.listAgents().then((agents2) => set({ agents: agents2 }))
           break
+        case 'onboarding': {
+          // OA1: il daemon ha detto lo stato del primo avvio
+          set({ onboarding: { needed: e.needed } })
+          break
+        }
         case 'status': {
           set({ agents: s.agents.map((a) => (a.id === e.agentId ? { ...a, status: e.status } : a)) })
           break

@@ -1,14 +1,12 @@
-// Onboarding al primo avvio (fase 7, §3bis L4 + §3ter T3): se non esiste
-// nessun agente, il daemon crea il bot principale "Bot" (mainAgentId) e mostra
-// nella sua chat un widget DI SISTEMA (non generato dal modello) "Per cosa vuoi
-// usarmi di più?". Alla risposta, la mappa ruolo → 2 template (pura, testata)
-// crea i due bot da template, che partono col kickstart; il bot principale
-// manda un messaggio FISSO di benvenuto che li presenta in una riga ciascuno.
-// Se non c'è ancora nessun provider configurato l'onboarding si ferma con un
-// widget che porta alle impostazioni del provider e riprende (dopo il salvataggio
-// di un provider o al prossimo avvio) da lì. Tutto a dipendenze iniettabili:
-// nei test niente LLM, niente rete.
-import type { Agent, ProviderConfig, SendMessagePayload, SandbotEvent, WidgetOption } from '../shared/types'
+// Onboarding al primo avvio. OA1 (fase onboarding-a): UNA sola strada per il
+// primo avvio — il main NON crea più «Bot» (index.ts), lo crea SOLO il daemon
+// qui dentro, con ensureMainBot single-flight e la transazione di
+// mainAgentId; onboardingNeeded (pura) decide chi lo fa, ADOZIONE del «Bot»
+// vuoto delle beta 1–4 compresa. Il flusso vecchio (fase 7: widget del ruolo,
+// due bot da template col kickstart, benvenuto fisso, widget del provider e
+// ripresa) resta finché la guida a passi di OA2+ non lo sostituisce.
+// Tutto a dipendenze iniettabili: nei test niente LLM, niente rete.
+import type { Agent, ProviderConfig, SendMessagePayload, SandbotEvent, TranscriptEntry, WidgetOption } from '../shared/types'
 import type { BotTemplate } from '../shared/types'
 import { templateById } from '../main/templates'
 // fase 17c (C4): i testi dell'onboarding sono messaggi del BOT all'utente —
@@ -32,6 +30,101 @@ export function mainBotDescription(lang: Lang): string {
 export const ROLE_SETTING = 'onboarding.role'
 export const PENDING_PROVIDER_SETTING = 'onboarding.pendingProvider'
 export const DONE_SETTING = 'onboarding.done'
+
+// ---- OA1 (fase onboarding-a): chi fa l'onboarding, e UN solo bot ----
+
+/** I fatti che decidono se l'onboarding serve (tutti leggibili, nessun effetto). */
+export interface OnboardingFacts {
+  done: boolean
+  /** true se esiste almeno un messaggio dell'utente in un qualunque bot */
+  hasUserMessages: boolean
+  agents: Array<{ id: string; name: string }>
+  mainAgentId: string | null
+}
+
+/** La decisione di onboardingNeeded (pura). */
+export interface OnboardingDecision {
+  needed: boolean
+  /** il bot da ADOZZARE come principale (il «Bot» vuoto delle beta 1–4), se c'è */
+  adoptAgentId: string | null
+  /** scrivere onboarding.done: chi usa già Homun non deve rifare l'onboarding */
+  markDone: boolean
+}
+
+/**
+ * OA1 (pura): decide se questo primo avvio fa l'onboarding. La risposta è
+ * «sì» solo se l'utente non ha MAI usato Homun (nessun suo messaggio in
+ * nessun bot) e l'onboarding non è già fatto — anche se esiste già un «Bot»
+ * vuoto creato dal main nelle beta 1–4: quel bot si ADOTTA come principale
+ * invece di crearne un secondo. mainAgentId che punta ancora a un bot
+ * esistente non ha bisogno di adozione (è già il principale).
+ */
+export function onboardingNeeded(facts: OnboardingFacts): OnboardingDecision {
+  if (facts.done) return { needed: false, adoptAgentId: null, markDone: false }
+  if (facts.hasUserMessages) return { needed: false, adoptAgentId: null, markDone: true }
+  const mainOk = facts.mainAgentId !== null && facts.agents.some((a) => a.id === facts.mainAgentId)
+  if (mainOk) return { needed: true, adoptAgentId: null, markDone: false }
+  const betaBot = facts.agents.find((a) => a.name === MAIN_BOT_NAME) ?? null
+  return { needed: true, adoptAgentId: betaBot?.id ?? null, markDone: false }
+}
+
+/** Il messaggio è dell'utente (la stessa chiave della storia: kind message, role user). */
+function isUserEntry(e: { kind: string; role: string }): boolean {
+  return e.kind === 'message' && e.role === 'user'
+}
+
+/** Le dipendenze di ensureMainBot (iniettabili, niente DB diretto). */
+export interface EnsureMainBotDeps {
+  getSetting<T>(key: string, fallback: T): T
+  setSetting(key: string, value: unknown): void
+  getAgent(id: string): Agent | null
+  createAgent(name: string, description: string): Agent
+  /**
+   * Transazione attorno a creazione + mainAgentId: un riavvio a metà non
+   * lascia mai un bot senza mainAgentId (che ne farebbe nascere un secondo).
+   */
+  tx<T>(fn: () => T): T
+}
+
+export interface MainBotEnsurer {
+  /** Il bot principale, creato UNA volta sola anche con chiamate concorrenti. */
+  ensureMainBot(adopt?: string | null): Promise<Agent>
+}
+
+/**
+ * OA1 (come first-bot.tsx di Rakazo): il primo bot è IDEMPOTENTE —
+ * single-flight (una promessa condivisa: i doppi mount non creano doppioni),
+ * riusa il bot in mainAgentId se esiste ancora, adotta quello indicato se il
+ * main l'aveva già creato (beta 1–4), altrimenti lo crea e salva mainAgentId
+ * nella STESSA transazione. Due chiamate concorrenti, o un riavvio a metà,
+ * producono un solo bot.
+ */
+export function createMainBotEnsurer(deps: EnsureMainBotDeps, adopt: string | null = null): MainBotEnsurer {
+  let inflight: Promise<Agent> | null = null
+  return {
+    ensureMainBot(overrideAdopt?: string | null): Promise<Agent> {
+      if (inflight) return inflight
+      const adoptId = overrideAdopt !== undefined ? overrideAdopt : adopt
+      inflight = (async () => {
+        const saved = deps.getSetting<string | null>('mainAgentId', null)
+        const existing = saved ? deps.getAgent(saved) : null
+        if (existing) return existing
+        const toAdopt = adoptId ? deps.getAgent(adoptId) : null
+        if (toAdopt) {
+          deps.setSetting('mainAgentId', toAdopt.id)
+          return toAdopt
+        }
+        const lang = currentUserLanguage()
+        return deps.tx(() => {
+          const a = deps.createAgent(MAIN_BOT_NAME, mainBotDescription(lang))
+          deps.setSetting('mainAgentId', a.id)
+          return a
+        })
+      })().finally(() => { inflight = null })
+      return inflight
+    }
+  }
+}
 
 /** La domanda del widget di sistema (§3ter T3): 4 opzioni + testo libero (nella lingua dell'utente). */
 export function onboardingPrompt(lang: Lang): string {
@@ -77,6 +170,14 @@ export interface OnboardingDeps {
   setSetting(key: string, value: unknown): void
   listAgents(): Agent[]
   createAgent(name: string, description: string): Agent
+  /** OA1: il singolo agente, per riusare/adottare il bot principale. */
+  getAgent(id: string): Agent | null
+  /** OA1: le entry di un agente, per vedere se l'utente ha già scritto. */
+  getEntries(agentId: string): TranscriptEntry[]
+  /** OA1: la transazione di ensureMainBot (creazione + mainAgentId). */
+  tx<T>(fn: () => T): T
+  /** OA1: l'ensure single-flight del bot principale (se il wiring ne ha già uno). */
+  ensureMainBot?: (adopt: string | null) => Promise<Agent>
   updateAgent(id: string, patch: { providerId?: string | null; model?: string | null }): void
   listProviders(): ProviderConfig[]
   /** Fase 9 (punto 1): provider attivo + defaultModel (con capability "tools"). */
@@ -103,26 +204,49 @@ function providerConfigured(deps: OnboardingDeps): boolean {
   return deps.listProviders().some((p) => p.enabled)
 }
 
+/** I fatti del primo avvio, dai deps (nessun effetto: si può chiamare per uno status). */
+export function onboardingFactsOf(deps: OnboardingDeps): OnboardingFacts {
+  return {
+    done: deps.getSetting<boolean>(DONE_SETTING, false),
+    hasUserMessages: deps.listAgents().some((a) => deps.getEntries(a.id).some(isUserEntry)),
+    agents: deps.listAgents().map((a) => ({ id: a.id, name: a.name })),
+    mainAgentId: deps.getSetting<string | null>('mainAgentId', null)
+  }
+}
+
 /**
- * Primo avvio: se non c'è nessun agente crea il bot principale e mostra il
- * widget di sistema col ruolo. Idempotente (onboarding.done, agenti esistenti).
+ * OA1: il primo avvio ha UNA sola strada. Il main NON crea più «Bot»: lo crea
+ * (o adotta) SOLO il daemon, qui — con l'ensure single-flight, così la race
+ * col main e i doppi start non fanno nascere due bot. Chi ha già scritto in
+ * chat non rifà l'onboarding (e onboarding.done si scrive qui, una volta per
+ * tutte). Il widget del ruolo del vecchio flusso resta finché la guida a
+ * passi non lo sostituisce: solo se la chat del bot è ancora vuota.
  */
-export function maybeStartOnboarding(deps: OnboardingDeps): void {
-  if (deps.listAgents().length > 0) return
-  if (deps.getSetting<boolean>(DONE_SETTING, false)) return
-  // fase 17c (C4): la lingua dell'utente (prima del primo messaggio umano
-  // ricade su ui.activeLanguage, cioè quella dell'app)
-  const lang = currentUserLanguage()
-  const main = deps.createAgent(MAIN_BOT_NAME, mainBotDescription(lang))
-  deps.setSetting('mainAgentId', main.id)
+export async function startOnboarding(deps: OnboardingDeps): Promise<void> {
+  const decision = onboardingNeeded(onboardingFactsOf(deps))
+  if (!decision.needed) {
+    if (decision.markDone) deps.setSetting(DONE_SETTING, true)
+    deps.emit({ type: 'onboarding', needed: false })
+    return
+  }
+  const ensurer = deps.ensureMainBot
+    ? { ensureMainBot: (adopt: string | null) => deps.ensureMainBot!(adopt) }
+    : createMainBotEnsurer(deps)
+  const main = await ensurer.ensureMainBot(decision.adoptAgentId)
   deps.emit({ type: 'agents' })
-  deps.appendSystemSend(main.id, {
-    type: 'widget',
-    prompt: onboardingPrompt(lang),
-    options: onboardingRoleOptions(lang),
-    allowCustom: true,
-    helpText: formatUi(ui(UI.onboardingHelp), lang)
-  }, { onboardingRole: true })
+  deps.emit({ type: 'onboarding', needed: true })
+  // il widget del ruolo del vecchio flusso: solo se la chat è ancora vuota
+  // (nessuna send di sistema: niente widget doppio ai riavvii)
+  if (!deps.getEntries(main.id).some((e) => e.kind === 'send-message')) {
+    const lang = currentUserLanguage()
+    deps.appendSystemSend(main.id, {
+      type: 'widget',
+      prompt: onboardingPrompt(lang),
+      options: onboardingRoleOptions(lang),
+      allowCustom: true,
+      helpText: formatUi(ui(UI.onboardingHelp), lang)
+    }, { onboardingRole: true })
+  }
 }
 
 /**
@@ -241,7 +365,12 @@ export async function completeOnboarding(deps: OnboardingDeps, role: string): Pr
 
 export function createOnboarding(deps: OnboardingDeps) {
   return {
-    maybeStart: () => maybeStartOnboarding(deps),
+    start: () => startOnboarding(deps),
+    /** OA1: lo stato per la finestra — finché non lo dice il daemon, la UI carica. */
+    status: (): { needed: boolean } => {
+      const decision = onboardingNeeded(onboardingFactsOf(deps))
+      return { needed: decision.needed }
+    },
     answerRole: (entryId: number, value: string | string[]) => answerOnboardingRole(deps, entryId, value),
     resume: () => resumeOnboarding(deps)
   }

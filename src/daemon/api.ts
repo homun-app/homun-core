@@ -491,6 +491,10 @@ export function buildApiMethods(
 
     // ---- transcript ----
     'agents:entries': ([agentId, afterId]) => store.getEntries(agentId as string, (afterId as number) ?? 0),
+    // OA1 (fase onboarding-a): lo stato del primo avvio — la finestra resta in
+    // caricamento finché il daemon non risponde (niente chat vuota, niente
+    // «Bot» che compare da sola prima del tempo)
+    'onboarding:state': () => opts.onboarding?.status() ?? { needed: false },
     'chat:send': ([agentId, text, images, readingPage]) => {
       // fase pagine (G2/G6): la pagina aperta mentre l'utente scrive.
       // Ritocchi (P1): il meta lo risolve il daemon sulla libreria (fonte di
