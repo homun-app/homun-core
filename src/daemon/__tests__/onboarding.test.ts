@@ -381,7 +381,7 @@ describe('OA2 startOnboarding: onboarding.state nasce qui e NON si tocca più', 
     const st = log.settings[ONBOARDING_STATE_SETTING] as OnboardingState | undefined
     expect(st).toEqual({ step: 'welcome', done: [], skipped: [], startedAt: 1_000_000_000_000 })
     expect(log.events).toContainEqual({
-      type: 'onboarding', needed: true, modelReady: false,
+      type: 'onboarding', needed: true, modelReady: false, guideOpen: true,
       state: { step: 'welcome', done: [], skipped: [], startedAt: 1_000_000_000_000 },
       sequence: ['welcome', 'model', 'approvals', 'chat']
     })
@@ -458,5 +458,73 @@ describe('L4: providerPathsOf — la visibilità delle tre strade (pura)', () =>
     expect(providerPathsOf({ ollamaFound: true, eligibility: { status: 'unsupported' } })).toEqual(['cloud', 'ollama'])
     // no-space: la strada resta (il cloud è consigliato), la scheda dirà i GB
     expect(providerPathsOf({ ollamaFound: false, eligibility: { status: 'no-space' } })).toEqual(['cloud', 'local'])
+  })
+})
+
+// ---- OAC1 (fase guida, G1): la guida si vede quando è APERTA, non quando «serve» ----
+// guideOpen è un campo ESPLICITO dello status, calcolato dallo stato: la
+// finestra non lo ricava più da needed (che con un messaggio dell'utente è
+// false anche se la guida è aperta a metà o riaperta da Impostazioni).
+describe('OAC1 guideOpen: lo stato dice se la guida è aperta, qualunque sia la storia', () => {
+  /** semi: stato a metà + un messaggio dell'utente nel bot principale */
+  const seedMidGuideWithMessages = (): void => {
+    log.settings[ONBOARDING_STATE_SETTING] = { step: 'model', done: ['welcome'], skipped: [], startedAt: 1_000_000_000_000 }
+    log.settings.mainAgentId = 'a_1'
+    log.agents = [{ id: 'a_1', name: 'Bot', description: '', providerId: null, model: null, status: 'idle', unread: 0, createdAt: 1 }]
+    log.agentEntries['a_1'] = [{ id: 1, agentId: 'a_1', kind: 'message', role: 'user', content: 'ciao', meta: null, createdAt: 1 }]
+  }
+
+  it('status con guida a metà dice guideOpen: true, ANCHE con messaggi dell\'utente (needed resta false)', async () => {
+    seedMidGuideWithMessages()
+    const onboarding = createOnboarding(deps)
+    const status = onboarding.status()
+    expect(status.guideOpen).toBe(true)
+    expect(status.needed).toBe(false) // needed non c'entra più con il MOSTRARE la guida
+  })
+
+  it('status senza stato (mai partita) o a chat: guideOpen false', async () => {
+    const onboarding = createOnboarding(deps)
+    expect(onboarding.status().guideOpen).toBe(false) // stato mai nato
+    log.settings[ONBOARDING_STATE_SETTING] = { step: 'chat', done: ['welcome', 'model', 'approvals'], skipped: [], startedAt: 1 }
+    expect(onboarding.status().guideOpen).toBe(false) // chiusa
+  })
+
+  it('reopen(\'restart\') con un messaggio dell\'utente → guideOpen: true, passo welcome', async () => {
+    seedMidGuideWithMessages()
+    log.settings[DONE_SETTING] = true // aveva finito
+    const onboarding = createOnboarding(deps)
+    const r = await onboarding.reopen('restart')
+    expect(r !== false && r.guideOpen).toBe(true)
+    expect(r !== false && r.state?.step).toBe('welcome')
+  })
+
+  it('reopen(\'model\') su un passo SALTATO con messaggi → guideOpen: true sul passo model', async () => {
+    seedMidGuideWithMessages()
+    log.settings[ONBOARDING_STATE_SETTING] = { step: 'approvals', done: ['welcome'], skipped: ['model'], startedAt: 1_000_000_000_000 }
+    const onboarding = createOnboarding(deps)
+    const r = await onboarding.reopen('model')
+    expect(r !== false && r.guideOpen).toBe(true)
+    expect(r !== false && r.state?.step).toBe('model')
+  })
+
+  it('boot con stato a metà e messaggi: la guida resta aperta allo STESSO passo (markDone non tocca lo stato)', async () => {
+    seedMidGuideWithMessages()
+    const onboarding = createOnboarding(deps)
+    await onboarding.start()
+    const status = onboarding.status()
+    expect(status.guideOpen).toBe(true)
+    expect(status.state).toEqual({ step: 'model', done: ['welcome'], skipped: [], startedAt: 1_000_000_000_000 })
+    // onboarding.done si scrive (chi usa già non deve rifarla), ma lo stato NO
+    expect(log.settings[DONE_SETTING]).toBe(true)
+  })
+
+  it('needed: true con stato NULL: guideOpen false (la finestra resta in caricamento, non shell vuota)', async () => {
+    // dati vuoti ma stato non ancora scritto: il campo dice «non aperta», la
+    // finestra capisce dal needed+state null di attendere lo splash
+    const onboarding = createOnboarding(deps)
+    const status = onboarding.status()
+    expect(status.needed).toBe(true)
+    expect(status.state).toBeNull()
+    expect(status.guideOpen).toBe(false)
   })
 })

@@ -653,6 +653,13 @@ export interface OnboardingStatus {
   /** OA3: c'è già un provider attivo col modello principale? */
   modelReady: boolean
   /**
+   * OAC1 (fase guida): la guida è APERTA adesso? Lo dice lo STATO (esiste e
+   * passo ≠ chat), non «needed»: chi ha già scritto può riaprire la guida da
+   * Impostazioni e lo stato a metà si riprende al boot. La finestra la
+   * mostra in base a questo campo, calcolato dal daemon (funzione pura).
+   */
+  guideOpen: boolean
+  /**
    * OA3: le strade del passo modello per questa macchina (solo nella RPC
    * onboarding:state, che può attendere la scoperta dei servizi locali).
    */

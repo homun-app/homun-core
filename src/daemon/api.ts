@@ -503,7 +503,7 @@ export function buildApiMethods(
     // OA2: lo stato della GUIDA (onboarding.state) con la sequenza dei passi,
     // e le mosse che la fanno avanzare o riaprire
     'onboarding:state': async () => {
-      const base = opts.onboarding?.status() ?? { needed: false, state: null, sequence: ['welcome', 'model', 'approvals', 'chat'] as import('../shared/types').OnboardingStepId[], modelReady: false }
+      const base = opts.onboarding?.status() ?? { needed: false, state: null, sequence: ['welcome', 'model', 'approvals', 'chat'] as import('../shared/types').OnboardingStepId[], modelReady: false, guideOpen: false }
       // OA3: le strade del passo modello richiedono la scoperta dei servizi
       // locali — solo qui, che è async
       if (!opts.onboarding) return base
@@ -638,7 +638,7 @@ export function buildApiMethods(
     },
 
     // ---- fase 3: risposta ai widget ask_user ----
-    'widget:respond': ([agentId, entryId, value]) => {
+    'widget:respond': async ([agentId, entryId, value]) => {
       const widget = store.getEntries(agentId as string).find((e) => e.id === (entryId as number))
       // fase 6: risposta alla domanda sulle routine in pausa per assenza —
       // "Riattiva tutte" riprende SOLO quelle con pausedForAway, in modo
@@ -655,10 +655,18 @@ export function buildApiMethods(
       // il testo libero (da «Scrivi tu…») passa dalla strada delle risposte ai
       // widget: la card si chiude come risposta libera e il messaggio diventa
       // il primo turno vero del bot
+      // OAC3 (fase guida): IDEMPOTENTE nel daemon — una card già risolta o
+      // chiusa risponde { ok: false }, nessun effetto e nessun job (il
+      // controllo e la marcatura stanno in transazione in answerOnboardingFocus);
+      // il testo libero sulla card APERTA sveglia il worker come gli altri widget
       if (widget?.meta?.onboardingFocus && opts.onboarding) {
+        const meta = widget.meta as { respondedValue?: unknown; widgetDismissed?: boolean }
+        if (meta.respondedValue !== undefined || meta.widgetDismissed) return { ok: false }
         const v = Array.isArray(value) ? String(value[0] ?? '') : String(value ?? '')
-        if (opts.onboarding.answerFocus(entryId as number, v)) return { ok: true }
-        return { ok: enqueueWidgetResponse(db(), agentId as string, entryId as number, value as string | string[], emit) !== null }
+        if (await opts.onboarding.answerFocus(entryId as number, v)) return { ok: true }
+        const freeJob = enqueueWidgetResponse(db(), agentId as string, entryId as number, value as string | string[], emit)
+        if (freeJob) worker.poke()
+        return { ok: freeJob !== null }
       }
       const job = enqueueWidgetResponse(db(), agentId as string, entryId as number, value as string | string[], emit)
       if (job) worker.poke()

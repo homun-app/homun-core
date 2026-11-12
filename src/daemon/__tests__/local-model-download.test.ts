@@ -146,12 +146,12 @@ describe('fase locale correzioni 2 (LD1): la fine del download aggancia il provi
       onboarding: {
         // OA1–OA4 (fase onboarding-a): la facciata nuova della guida
         start: async () => undefined,
-        status: () => ({ needed: false, state: null, sequence: ['welcome', 'model', 'approvals', 'chat'], modelReady: false }),
+        status: () => ({ needed: false, state: null, sequence: ['welcome', 'model', 'approvals', 'chat'], modelReady: false, guideOpen: false }),
         advance: () => false,
         reopen: () => false,
         providerPaths: async () => [],
         modelBecameReady: () => { closed++; return false },
-        answerFocus: () => false,
+        answerFocus: async () => false,
         dismissFocus: () => undefined
       }
     })

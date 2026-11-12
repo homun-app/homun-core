@@ -135,7 +135,7 @@ import { ensureLocalTurnProvider } from '../../daemon/local-model'
 // di chat vengono rifiutati PRIMA di permessi e card, senza il valore
 import { hasExternalEvento, argGuardVerdict, redactGuardedArgs, userChatTextsOf } from './arg-guard'
 import { builtinGroupOf } from './core-tools'
-import type { Approval, ProviderConfig, SandbotEvent, SendMessagePayload, TurnEnd, ReadingPageMeta } from '../../shared/types'
+import type { Approval, ProviderConfig, SandbotEvent, SendMessagePayload, TurnEnd, ReadingPageMeta, TranscriptEntry } from '../../shared/types'
 // fase 12: sottoagenti — policy pura del figlio, store del registro, formatters
 import {
   subagentToolDenyReason, subagentBriefError, subagentClosure, autoCloseSummary,
@@ -174,6 +174,29 @@ function loopUiLanguage(): UiLanguage {
  */
 function uiSystemEntry(agentId: string, kind: 'notice' | 'event', text: UiText, extra: Record<string, unknown> = {}): AppendEntry {
   return { agentId, kind, role: 'system', content: formatUi(text, loopUiLanguage()), meta: { ui: text, ...extra } }
+}
+
+/**
+ * OAC2 (fase guida, PURA): serve la riga «Per risponderti mi serve un
+ * modello» per QUESTA attesa? La si cerca solo DOPO l'ultima risposta del
+ * bot del transcript — l'ultima entry send-message/message con role
+ * 'assistant', oppure l'ultimo evento di fine turno (meta.turnEnd), che è
+ * ciò che chiude un'attesa anche senza testo (per esempio un turno
+ * interrotto). Così: più messaggi nella STESSA attesa → una riga sola; una
+ * NUOVA attesa dopo una risposta → una riga nuova col suo bottone.
+ */
+export function needModelNoticeDue(entries: readonly TranscriptEntry[]): boolean {
+  let lastAnswer = -1
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const e = entries[i]!
+    const isAnswer =
+      ((e.kind === 'send-message' || e.kind === 'message') && e.role === 'assistant') ||
+      e.meta?.turnEnd !== undefined
+    if (isAnswer) { lastAnswer = i; break }
+  }
+  return !entries
+    .slice(lastAnswer + 1)
+    .some((e) => e.kind === 'notice' && (e.meta as { ui?: { id?: string } } | null)?.ui?.id === 'notice.needModel')
 }
 
 /**
@@ -921,11 +944,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         emitLastEntry(agentId, emit)
         opts.onTurnEntry?.(entry.id)
       }
-      // la riga «serve un modello» compare UNA volta: mai due sulla stessa attesa
-      const hasWaitingRow = getEntries(agentId).some(
-        (e) => e.kind === 'notice' && (e.meta as { ui?: { id?: string } } | null)?.ui?.id === 'notice.needModel'
-      )
-      if (!hasWaitingRow) {
+      // OAC2: la riga «serve un modello» compare UNA volta per OGNI attesa —
+      // la si cerca solo nell'attesa corrente (dopo l'ultima risposta del bot)
+      if (needModelNoticeDue(getEntries(agentId))) {
         appendEntry(uiSystemEntry(agentId, 'notice', ui(UI.onboardingNeedModel)))
         emitLastEntry(agentId, emit)
       }

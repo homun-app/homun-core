@@ -49,3 +49,67 @@ describe('RV4+OA5: senza modello, il messaggio RESTA e la riga dell\'attesa è U
     expect(entries.filter((en) => en.kind === 'notice')).toHaveLength(1)
   })
 })
+
+// ---- OAC2 (fase guida, G1): la riga dell'attesa vale per OGNI attesa ----
+// needModelNoticeDue (pura) cerca un notice.needModel solo DOPO l'ultima
+// risposta del bot: così una NUOVA attesa (dopo una risposta) ha la sua
+// riga col suo bottone, mentre più messaggi nella stessa attesa non duplicano.
+import { needModelNoticeDue } from '../loop'
+import { appendEntry } from '../../store/db'
+import type { TranscriptEntry } from '../../../shared/types'
+
+describe('OAC2 needModelNoticeDue (pura): la riga si cerca solo nell\'attesa CORRENTE', () => {
+  const notice = (id: number): TranscriptEntry => ({
+    id, agentId: 'x', kind: 'notice', role: 'system', content: 'serve un modello',
+    meta: { ui: { id: 'notice.needModel' } }, createdAt: id
+  })
+  const userMsg = (id: number): TranscriptEntry => ({
+    id, agentId: 'x', kind: 'message', role: 'user', content: 'ciao', meta: null, createdAt: id
+  })
+  const botAnswer = (id: number): TranscriptEntry => ({
+    id, agentId: 'x', kind: 'message', role: 'assistant', content: 'ecco', meta: null, createdAt: id
+  })
+  const turnEnd = (id: number): TranscriptEntry => ({
+    id, agentId: 'x', kind: 'event', role: 'system', content: '[FINISHED]', meta: { turnEnd: 'FINISHED' }, createdAt: id
+  })
+
+  it('nessuna notice nell\'attesa corrente → serve (due messaggi, niente riga)', () => {
+    expect(needModelNoticeDue([userMsg(1), userMsg(2)])).toBe(true)
+  })
+
+  it('c\'è già una notice.needModel nell\'attesa corrente → NON serve (stessa attesa, una riga)', () => {
+    expect(needModelNoticeDue([userMsg(1), notice(2), userMsg(3)])).toBe(false)
+  })
+
+  it('la notice di un\'attesa PRECEDENTE non conta: dopo la risposta del bot serve di nuovo', () => {
+    expect(needModelNoticeDue([userMsg(1), notice(2), botAnswer(3), userMsg(4)])).toBe(true)
+  })
+
+  it('anche il solo turnEnd chiude l\'attesa precedente (nessun testo dopo il bottone)', () => {
+    expect(needModelNoticeDue([userMsg(1), notice(2), turnEnd(3), userMsg(4)])).toBe(true)
+  })
+
+  it('una notice SENZA risposta del bot dopo è ancora dell\'attesa corrente (niente seconda riga)', () => {
+    expect(needModelNoticeDue([notice(1), userMsg(2)])).toBe(false)
+  })
+})
+
+describe('OAC2 runTurn: la seconda attesa ha la SUA riga (modello → risposta → modello tolto)', () => {
+  it('dopo una risposta del bot, un nuovo messaggio senza modello ha una SECONDA riga needModel', async () => {
+    // la risposta del bot di un turno col modello (qui simulata dalle entry,
+    // come la scrive il loop): messaggio assistant + fine turno
+    appendEntry({ agentId, kind: 'message', role: 'assistant', content: 'Ecco fatto.' })
+    appendEntry({ agentId, kind: 'event', role: 'system', content: '[FINISHED]', meta: { turnEnd: 'FINISHED' } })
+    await expect(runTurn(agentId, 'ci sei ancora?', () => undefined)).rejects.toBeInstanceOf(TurnHeldForModel)
+    const entries = getEntries(agentId)
+    const notices = entries.filter((en) => en.kind === 'notice' && (en.meta as { ui?: { id?: string } })?.ui?.id === 'notice.needModel')
+    expect(notices, 'la seconda attesa ha la SUA riga col suo bottone').toHaveLength(2)
+  })
+
+  it('un TERZO messaggio nella stessa seconda attesa: la riga resta una (per attesa)', async () => {
+    await expect(runTurn(agentId, 'e adesso?', () => undefined)).rejects.toBeInstanceOf(TurnHeldForModel)
+    const entries = getEntries(agentId)
+    const notices = entries.filter((en) => en.kind === 'notice' && (en.meta as { ui?: { id?: string } })?.ui?.id === 'notice.needModel')
+    expect(notices).toHaveLength(2)
+  })
+})

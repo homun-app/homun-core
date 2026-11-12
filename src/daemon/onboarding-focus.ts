@@ -147,16 +147,36 @@ export function insertFocusCardIfDue(deps: FocusFlowDeps): boolean {
 }
 
 /**
+ * OAC3 (fase guida): pretende la risposta al focus — controllo E marcatura
+ * nella STESSA transazione (come l'inserimento della card). True se la
+ * chiamata è QUELLA CHE VALE: la card esiste, è il focus ed è ancora aperta
+ * (senza respondedValue né widgetDismissed). Un secondo clic, una seconda
+ * finestra o un clic arrivato tardi trovano la card già presa → false, e la
+ * risposta deterministica non si esegue due volte.
+ */
+export function claimFocusAnswer(deps: FocusFlowDeps, entryId: number, code: FocusCode): boolean {
+  const mainId = deps.getSetting<string | null>('mainAgentId', null) ?? ''
+  return deps.tx(() => {
+    const card = deps.getEntries(mainId).find((e) => e.id === entryId)
+    const meta = (card?.meta ?? {}) as { onboardingFocus?: boolean; respondedValue?: unknown; widgetDismissed?: boolean }
+    if (!card || meta.onboardingFocus !== true || meta.respondedValue !== undefined || meta.widgetDismissed) return false
+    deps.markWidgetResponded(mainId, entryId, code)
+    return true
+  })
+}
+
+/**
  * La scelta del focus (deterministica, ZERO token): la card si segna
  * risposta, una frase fissa, le card connector delle app del focus ancora
  * non collegate (ognuna con la strada che ConnectorCard già sa scegliere),
  * una frase di chiusura. Se sono tutte collegate, o nessuna è disponibile:
  * «Da cosa vuoi partire?». La descrizione del bot riceve la riga fissa
  * «Focus iniziale: …»; il nome NON cambia (il focus non rinomina il bot).
+ * OAC3: idempotente — se la card è già risolta o chiusa non fa nulla (false).
  */
-export async function answerOnboardingFocus(deps: FocusFlowDeps, entryId: number, code: FocusCode): Promise<void> {
+export async function answerOnboardingFocus(deps: FocusFlowDeps, entryId: number, code: FocusCode): Promise<boolean> {
   const mainId = deps.getSetting<string | null>('mainAgentId', null) ?? ''
-  deps.markWidgetResponded(mainId, entryId, code)
+  if (!claimFocusAnswer(deps, entryId, code)) return false
   const l = currentUserLanguage()
   const label = focusLabelOf(code, l)
   const bot = deps.getAgent(mainId)
@@ -178,13 +198,21 @@ export async function answerOnboardingFocus(deps: FocusFlowDeps, entryId: number
   } else {
     deps.appendSystemSend(mainId, { type: 'text', text: formatUi(ui(UI.onboardingFocusAskAny), l) })
   }
+  return true
 }
 
 /**
  * Chiudere senza scegliere (come dismissFocus di Rakazo): la card si segna
  * «chiusa» e la chat resta normale — niente card app, niente frasi.
+ * OAC3: una card già RISOLTA non si marca chiusa (stato invariato), e il
+ * doppio dismiss non fa nulla — controllo e marcatura nella stessa tx.
  */
 export function dismissOnboardingFocus(deps: FocusFlowDeps, entryId: number): void {
   const mainId = deps.getSetting<string | null>('mainAgentId', null) ?? ''
-  deps.markWidgetDismissed(mainId, entryId)
+  deps.tx(() => {
+    const card = deps.getEntries(mainId).find((e) => e.id === entryId)
+    const meta = (card?.meta ?? {}) as { onboardingFocus?: boolean; respondedValue?: unknown; widgetDismissed?: boolean }
+    if (!card || meta.onboardingFocus !== true || meta.respondedValue !== undefined || meta.widgetDismissed) return
+    deps.markWidgetDismissed(mainId, entryId)
+  })
 }

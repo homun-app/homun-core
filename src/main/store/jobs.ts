@@ -238,7 +238,6 @@ export function failJob(db: DatabaseSync, job: Job, now: number, error: string):
   return 'retry'
 }
 
-/** Azzera i job di un agente eliminato (né eseguibili né recuperabili). */
 /**
  * OA5 (fase onboarding-a): quanto a lungo il job che aspetta un modello sta
  * in coda senza che nessun worker lo prenda (un anno: si sveglia SOLO con
@@ -276,6 +275,7 @@ export function releaseJobsHeldForModel(db: DatabaseSync, now: number): number {
   return held.length
 }
 
+/** Azzera i job di un agente eliminato (né eseguibili né recuperabili). */
 export function cancelAgentJobs(db: DatabaseSync, agentId: string): void {
   db.prepare("DELETE FROM jobs WHERE agent_id = ? AND status IN ('queued','leased')").run(agentId)
 }

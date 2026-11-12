@@ -17,6 +17,9 @@ import { SkillsWindow } from './components/SkillsWindow'
 import { api } from './store'
 // fase 16b correzioni 2 (Q1): il layout a tre colonne è UNA funzione pura
 import { layoutFor, TRAFFIC_LIGHT_INSET } from './layout'
+// OAC1 (fase guida): la finestra mostra la guida quando è APERTA (guideOpen),
+// non quando «serve» — e col needed senza stato resta in caricamento
+import { guideWindowState } from './lib/guide-window'
 
 /** Minimo intervallo tra due segnali 'active' (il daemon ne scarta uno ogni 30 s). */
 const ACTIVE_EVERY_MS = 30_000
@@ -82,9 +85,13 @@ export function App() {
   const skillsOpen = useStore((s) => s.skillsOpen)
   // OA1 (fase onboarding-a): finché il daemon non dice lo stato del primo
   // avvio, la finestra CARICA — niente chat vuota, niente «Bot» da sola.
-  // OA2: se la guida è aperta (needed e passo ≠ chat) la finestra è la GUIDA
-  const onboardingKnown = useStore((s) => s.onboarding !== null)
-  const guideOpen = useStore((s) => s.onboarding?.needed === true && s.onboarding.state !== null && s.onboarding.state.step !== 'chat')
+  // OAC1 (fase guida): la GUIDA si vede quando è APERTA (guideOpen: lo dice
+  // lo stato, anche per chi ha già scritto e l'ha riaperta da Impostazioni);
+  // col needed ma stato non ancora nato si resta sullo splash (niente lampo
+  // della shell vuota)
+  const onboardingStatus = useStore((s) => s.onboarding)
+  const onboardingKnown = onboardingStatus !== null
+  const guideView = guideWindowState(onboardingStatus)
 
   useEffect(() => {
     void init()
@@ -170,8 +177,8 @@ export function App() {
   // «members» quando la squadra è aperta: il pannello non è mai wide
   const panelTab = useStore((s) => (s.openGroupId !== null ? ('members' as const) : s.panelTab))
   const layout = layoutFor({ windowWidth, sidebarCollapsedByUser: sidebarCollapsed, sidebarWidthPref: sidebarWidth, panelOpen: rightPanel, panelTab })
-  if (!onboardingKnown) return <BootSplash />
-  if (guideOpen) return <GuideView />
+  if (!onboardingKnown || guideView === 'loading') return <BootSplash />
+  if (guideView === 'guide') return <GuideView />
   return (
     <div className="relative flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
       <LegacyHomun2Notice />

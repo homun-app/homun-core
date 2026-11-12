@@ -271,6 +271,17 @@ function stateOf(deps: OnboardingDeps): OnboardingState | null {
   return raw
 }
 
+/**
+ * OAC1 (fase guida, PURA): la guida è APERTA adesso? Lo dice lo stato —
+ * esiste e il passo non è «chat» — NON la storia della chat: chi ha già
+ * scritto può aver riaperto la guida da Impostazioni (reopen), e uno stato
+ * rimasto a metà si riprende al boot. «needed» resta la domanda del PRIMO
+ * avvio (chi fa partire la guida e adotta il «Bot»), non del mostrarla.
+ */
+export function guideOpenOf(state: OnboardingState | null): boolean {
+  return state !== null && state.step !== 'chat'
+}
+
 /** OA3: c'è già un modello utilizzabile? (provider ATTIVO + models.main) */
 function modelReadyOf(deps: OnboardingDeps): boolean {
   const main = deps.getSetting<import('../shared/types').MainModel | null>('models.main', null)
@@ -285,7 +296,9 @@ function statusOf(deps: OnboardingDeps): OnboardingStatus {
     needed: decision.needed,
     state: stateOf(deps),
     sequence: onboardingStepSequence(availabilityOf(deps)),
-    modelReady: modelReadyOf(deps)
+    modelReady: modelReadyOf(deps),
+    // OAC1: la finestra la mostra da QUI, non da needed
+    guideOpen: guideOpenOf(stateOf(deps))
   }
 }
 
@@ -457,11 +470,14 @@ export function createOnboarding(deps: OnboardingDeps) {
       deps.emit({ type: 'onboarding', ...statusOf(deps) })
       return true
     },
-    /** OA4: la risposta alla card del focus (deterministica, zero token). */
-    answerFocus: (entryId: number, value: string) => {
+    /**
+     * OA4: la risposta alla card del focus (deterministica, zero token).
+     * OAC3: idempotente nel daemon — la card già risolta o chiusa risponde
+     * false (controllo e marcatura in transazione in answerOnboardingFocus).
+     */
+    answerFocus: async (entryId: number, value: string): Promise<boolean> => {
       if (!isFocusCode(value)) return false
-      void answerOnboardingFocus(focus, entryId, value)
-      return true
+      return answerOnboardingFocus(focus, entryId, value)
     },
     /** OA4: chiudere la card del focus senza scegliere. */
     dismissFocus: (entryId: number) => {

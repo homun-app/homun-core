@@ -86,3 +86,45 @@ describe('OA5 worker+runner: il messaggio trattenuto parte una volta sola quando
     expect(calls).toHaveLength(2)
   })
 })
+
+// ---- OAC2 (fase guida, G1): il job della SECONDA attesa riparte una volta sola ----
+describe('OAC2 worker: due attese trattenute, entrambe ripartono UNA volta quando il modello torna', () => {
+  it('due messaggi in due attese diverse: due job trattenuti; al rilascio due resume, e poi mai più', async () => {
+    const calls: string[] = []
+    let nextEntryId = 41
+    const runTurnFake = async (_agentId: string, text: string, _emit: unknown, _images: unknown, opts: RunTurnOptions): Promise<void> => {
+      calls.push(`${opts.resume ? 'resume' : 'nuovo'}:${text}`)
+      if (!opts.resume) {
+        // come runTurn vero senza modello: il messaggio entra nel transcript
+        // (entry con id SUO) e il turno si trattiene
+        opts.onTurnEntry?.(nextEntryId++)
+        throw new TurnHeldForModel()
+      }
+    }
+    let t = 1_000
+    const worker = new JobWorker(db, { now: () => t, runJob: makeJobRunner(db, runTurnFake as never) }, () => undefined)
+    // prima attesa: si trattiene (il messaggio resta, la riga needModel esce)
+    enqueueJob(db, { agentId: 'a_1', kind: 'user-message', payload: { text: 'prima attesa' }, runAt: 1_000, now: 1_000 })
+    worker.poke(); await worker.drain()
+    // il bot HA risposto ( modello arrivato e poi tolto): una seconda attesa
+    // nasce un nuovo job, che si trattiene a sua volta
+    enqueueJob(db, { agentId: 'a_1', kind: 'user-message', payload: { text: 'seconda attesa' }, runAt: 2_000, now: 2_000 })
+    t = 2_000
+    worker.poke(); await worker.drain()
+    expect(calls).toEqual(['nuovo:prima attesa', 'nuovo:seconda attesa'])
+    const held = listJobs(db).filter((j) => j.status === 'queued')
+    expect(held).toHaveLength(2)
+    expect(held.every((j) => j.payload.waitingModel === true)).toBe(true)
+    // il modello torna: ENTRAMBE ripartono, una volta sola ciascuna (il
+    // worker prende un job per agente per tick: servono due poke)
+    t = 3_000
+    expect(releaseJobsHeldForModel(db, 3_000)).toBe(2)
+    worker.poke(); await worker.drain()
+    expect(calls).toEqual(['nuovo:prima attesa', 'nuovo:seconda attesa', 'resume:prima attesa'])
+    worker.poke(); await worker.drain()
+    expect(calls).toEqual(['nuovo:prima attesa', 'nuovo:seconda attesa', 'resume:prima attesa', 'resume:seconda attesa'])
+    worker.poke(); await worker.drain()
+    expect(calls).toHaveLength(4)
+    expect(listJobs(db).every((j) => j.status === 'done')).toBe(true)
+  })
+})

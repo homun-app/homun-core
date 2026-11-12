@@ -42,8 +42,22 @@ function mkDeps(log: Log): FocusFlowDeps {
         content: '', meta: { message, ...(meta ?? {}) }, createdAt: log.nextEntryId
       }]
     },
-    markWidgetResponded: (agentId, entryId, value) => { log.marked.push({ agentId, entryId, value }) },
-    markWidgetDismissed: (agentId, entryId) => { log.dismissed.push(entryId) },
+    markWidgetResponded: (agentId, entryId, value) => {
+      log.marked.push({ agentId, entryId, value })
+      // come il daemon vero: respondedValue finisce nel META della entry (il
+      // controllo idempotente di OAC3 la rilegge da lì)
+      const list = log.entries[agentId] ?? []
+      if (list.some((e) => e.id === entryId)) {
+        log.entries[agentId] = list.map((e) => e.id === entryId ? { ...e, meta: { ...(e.meta ?? {}), respondedValue: value } } : e)
+      }
+    },
+    markWidgetDismissed: (agentId, entryId) => {
+      log.dismissed.push(entryId)
+      const list = log.entries[agentId] ?? []
+      if (list.some((e) => e.id === entryId)) {
+        log.entries[agentId] = list.map((e) => e.id === entryId ? { ...e, meta: { ...(e.meta ?? {}), widgetDismissed: true } } : e)
+      }
+    },
     tx: <T,>(fn: () => T): T => fn(),
     connectedAppIds: async () => log.connected
   }
@@ -215,5 +229,51 @@ describe('OA4 answerOnboardingFocus: la scelta è DETERMINISTICA, zero token', (
     expect(log.dismissed).toEqual([id])
     expect(log.sends.filter((s) => s.message.type === 'connector')).toHaveLength(0)
     expect(log.sends.filter((s) => s.message.type === 'text')).toHaveLength(1) // solo il saluto
+  })
+})
+
+// ---- OAC3 (fase guida, G1): la risposta al focus è IDEMPOTENTE nel daemon ----
+// Il controllo (card non già risolta/chiusa) e la marcatura stanno nella STESSA
+// transazione: un doppio clic, due finestre o un clic arrivato tardi producono
+// UN solo esito — una frase, le card app una volta, la riga descrizione una volta.
+describe('OAC3 answerOnboardingFocus: doppia scelta → un solo esito', () => {
+  const seedOpenCard = (): number => {
+    insertFocusCardIfDue(deps)
+    const card = focusCardIn(log.entries['agent_1'] ?? [])
+    if (!card) throw new Error('card non inserita')
+    return card.id
+  }
+
+  it('doppia scelta sulla stessa card: la SECONDA non fa nulla (false), frasi e card app UNA volta sola', async () => {
+    const entryId = seedOpenCard()
+    const first = await answerOnboardingFocus(deps, entryId, 'posta')
+    expect(first).toBe(true)
+    const sendsAfterFirst = log.sends.length
+    const updatesAfterFirst = log.updates.length
+    const second = await answerOnboardingFocus(deps, entryId, 'posta')
+    expect(second).toBe(false)
+    expect(log.sends).toHaveLength(sendsAfterFirst) // niente frasi doppie
+    expect(log.updates).toHaveLength(updatesAfterFirst) // «Focus iniziale» UNA volta
+    const chosen = log.sends.filter((s) => s.message.type === 'text' && s.message.text.includes('Va bene'))
+    expect(chosen).toHaveLength(1)
+    const appCards = log.sends.filter((s) => s.meta?.onboardingApp === true)
+    expect(appCards.length).toBeGreaterThan(0)
+  })
+
+  it('scelta dopo «Chiudi» (dismiss) → niente: la card chiusa non si risponde più', async () => {
+    const entryId = seedOpenCard()
+    dismissOnboardingFocus(deps, entryId)
+    const sendsAfterDismiss = log.sends.length
+    const r = await answerOnboardingFocus(deps, entryId, 'posta')
+    expect(r).toBe(false)
+    expect(log.sends).toHaveLength(sendsAfterDismiss)
+    expect(log.marked).toHaveLength(0) // mai segnata risposta
+  })
+
+  it('«Chiudi» dopo una scelta → la card RISPOSTA non si marca chiusa (stato invariato)', async () => {
+    const entryId = seedOpenCard()
+    await answerOnboardingFocus(deps, entryId, 'lavoro')
+    dismissOnboardingFocus(deps, entryId)
+    expect(log.dismissed).toHaveLength(0) // non ha marcato il dismissal
   })
 })

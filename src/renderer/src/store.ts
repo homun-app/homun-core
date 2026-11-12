@@ -413,7 +413,7 @@ export const useStore = create<Store>((set, get) => ({
     // non arriva, la finestra resta in caricamento (niente chat vuota)
     void api.onboardingState()
       .then((onboarding) => set({ onboarding }))
-      .catch(() => set({ onboarding: { needed: false, state: null, sequence: ['welcome', 'model', 'approvals', 'chat'], modelReady: false } }))
+      .catch(() => set({ onboarding: { needed: false, state: null, sequence: ['welcome', 'model', 'approvals', 'chat'], modelReady: false, guideOpen: false } }))
     const agents = await api.listAgents()
     const providers = await api.listProviders()
     const permissions = await api.getPermissions()
@@ -492,13 +492,16 @@ export const useStore = create<Store>((set, get) => ({
           break
         case 'onboarding': {
           // OA1: il daemon ha detto lo stato del primo avvio. OA2: con lo
-          // stato della guida (il passo corrente) e la sequenza
+          // stato della guida (il passo corrente) e la sequenza.
+          // OAC1 (fase guida): guideOpen è esplicito (lo stato dice se la
+          // guida è aperta, non la storia della chat)
           set({
             onboarding: {
               needed: e.needed,
               state: e.state ?? null,
               sequence: e.sequence ?? ['welcome', 'model', 'approvals', 'chat'],
               modelReady: e.modelReady ?? false,
+              guideOpen: e.guideOpen ?? (e.state !== null && e.state.step !== 'chat'),
               // le strade del passo model solo la RPC le porta: l'evento non
               // le butta via se c'erano già
               providerPaths: s.onboarding?.providerPaths
