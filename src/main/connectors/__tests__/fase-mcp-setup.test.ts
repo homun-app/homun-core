@@ -37,7 +37,7 @@ describe('gateway: onAppActive (M5.3)', () => {
 
   it('un collegamento riuscito chiama onAppActive UNA volta (non al refresh di una già attiva)', async () => {
     const { manager, active } = makeGateway()
-    await manager.connectApp('gmail', 'Gmail')
+    await manager.connectApp('gmail', { name: 'Gmail' })
     // il collegamento gira: il link si apre, WAIT finisce, `list` dice ACTIVE
     await new Promise((r) => setTimeout(r, 30))
     expect(active).toEqual([{ slug: 'gmail', name: 'Gmail' }])

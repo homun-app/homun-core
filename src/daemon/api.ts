@@ -352,7 +352,7 @@ export function buildApiMethods(
       const intent = appConnectIntent
       if (r.status === 'connected' && intent && Date.now() - intent.at <= APP_INTENT_TTL_MS && opts.composioGateway) {
         appConnectIntent = null
-        await opts.composioGateway.connectApp(intent.slug, intent.name)
+        await opts.composioGateway.connectApp(intent.slug, { name: intent.name })
         return
       }
       appConnectIntent = null
@@ -1668,13 +1668,29 @@ export function buildApiMethods(
       if (!opts.composioGateway) throw uiError(UI.composioNotActive)
       return opts.composioGateway.refreshAccounts().then(() => opts.composioGateway!.status())
     },
-    'composio-gateway:connect': ([slug, name]) => {
+    'composio-gateway:connect': ([slug, name, connectOpts]) => {
       if (!opts.composioGateway) throw uiError(UI.composioNotActive)
-      return opts.composioGateway.connectApp(String(slug ?? ''), typeof name === 'string' ? name : undefined)
+      // CA1: `another` salta il controllo «già attivo» e porta l'alias del
+      // secondo account; `name` resta l'hint umano della finestra App
+      const o = connectOpts && typeof connectOpts === 'object' ? connectOpts as { another?: unknown; alias?: unknown } : {}
+      return opts.composioGateway.connectApp(String(slug ?? ''), {
+        ...(typeof name === 'string' && name ? { name } : {}),
+        ...(o.another === true ? { another: true } : {}),
+        ...(typeof o.alias === 'string' && o.alias.trim() ? { alias: o.alias } : {})
+      })
     },
     'composio-gateway:remove': ([slug]) => {
       if (!opts.composioGateway) throw uiError(UI.composioNotActive)
       return opts.composioGateway.removeApp(String(slug ?? ''))
+    },
+    // CA1 punto 3: rinominare e togliere un SINGOLO account
+    'composio-gateway:rename-account': ([slug, accountId, alias]) => {
+      if (!opts.composioGateway) throw uiError(UI.composioNotActive)
+      return opts.composioGateway.renameAccount(String(slug ?? ''), String(accountId ?? ''), typeof alias === 'string' ? alias : undefined)
+    },
+    'composio-gateway:remove-account': ([slug, accountId]) => {
+      if (!opts.composioGateway) throw uiError(UI.composioNotActive)
+      return opts.composioGateway.removeAccount(String(slug ?? ''), String(accountId ?? ''))
     },
     'composio-gateway:cancel': () => {
       if (!opts.composioGateway) throw uiError(UI.composioNotActive)
@@ -1713,7 +1729,7 @@ export function buildApiMethods(
         return { started: false as const, conflict: 'composio-key' as const }
       }
       if (opts.composioGateway?.status().active) {
-        void opts.composioGateway.connectApp(slug, row.name)
+        void opts.composioGateway.connectApp(slug, { name: row.name })
         return { started: true as const, phase: 'app' as const }
       }
       // non ancora entrato: login di Composio ora, l'app appena il login riesce

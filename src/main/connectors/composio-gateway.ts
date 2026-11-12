@@ -22,6 +22,17 @@
 // redirect_url, id e stati nei campi del JSON, vedi parseConnectionsResult)
 // e quando lo stato non si deduce la riga dice «Gestisci su Composio».
 //
+// CA1 (fase composio-account): PIÙ ACCOUNT PER APP. Composio supporta più
+// account per toolkit (add sempre con link nuovo e limite di account, rename
+// e remove per account_id, il campo `account` di ogni voce del blocco): lo
+// stato locale passa da «un account per app, sempre l'ultimo» a un ELENCO —
+// `{ [slug]: { name, accounts: […] } }` con migrazione pura del formato
+// vecchio (composio-accounts.ts) — e la verità resta `list`, che rilegge
+// TUTTI gli account (id, alias, email, stato, is_default) e sostituisce
+// l'elenco. L'alias predefinito è la parte locale dell'email, appena nota;
+// altrimenti «account 2», «account 3»; normalizzati minuscoli, senza spazi
+// e unici nel toolkit.
+//
 // Le dipendenze sono INIETTABILI (callMcp, openExternal, settings): i test
 // girano senza daemon. Nessuna chiamata a Composio fuori dai flussi di qui.
 import { randomUUID } from 'node:crypto'
@@ -29,8 +40,13 @@ import type { SandbotEvent } from '../../shared/types'
 // K3 (ritocchi): il nome umano del toolkit, mai lo slug grezzo nella UI
 import { composioToolkitName } from '../../shared/composio-names'
 import {
-  manageConnectionsAgentResult, manageConnectionsEntries, parseConnectionsResult, connectionsAccountsOf
+  manageConnectionsAgentResult, manageConnectionsEntries, parseConnectionsResult, connectionsAccountsOf, accountLimitReachedIn
 } from './tool-batch'
+// CA1: lo stato multi-account e le sue funzioni pure (migrazione, alias)
+import {
+  assignDefaultAliases, gatewayAppStatusOf, normalizeAlias, normalizeGatewayApps, uniqueAlias,
+  type GatewayAccount, type GatewayAppStored, type GatewayAppsStored, type GatewayAccountStatus
+} from './composio-accounts'
 
 /**
  * Il nome completo degli strumenti del server Composio nella pipeline. È il
@@ -49,27 +65,27 @@ export const COMPOSIO_GATEWAY_WAIT_MS = 5 * 60_000
 /** Ogni quanti secondi la UI rilegge lo stato mentre aspetta (il suo timer). */
 const S_SETTING_APPS = 'composioGateway.apps'
 
-export type ComposioGatewayAppStatus = 'ACTIVE' | 'RECONNECT' | 'FAILED'
+export type ComposioGatewayAppStatus = GatewayAccountStatus
 
-interface StoredGatewayApp {
-  name: string
+export interface ComposioGatewayAccountRpc {
   accountId: string | null
-  status: ComposioGatewayAppStatus
-  connectedAt: number
-  /** V8: l'email dell'account quando `list` la dà (user_info.email) */
+  alias?: string
   email?: string
+  status: ComposioGatewayAppStatus
+  isDefault?: boolean
 }
-
-/** Lo stato locale delle app collegate tramite il server Composio. */
-type GatewayAppsSetting = Record<string, StoredGatewayApp>
 
 export interface ComposioGatewayAppRpc {
   slug: string
   name: string
   status: ComposioGatewayAppStatus
+  /** CA1: il primo degli account (is_default, altrimenti il primo attivo) —
+   *  per compatibilità con chi leggeva la riga a un account solo */
   accountId: string | null
   /** V8: l'email dell'account da mostrare nel dettaglio (mai l'id tecnico) */
   email?: string
+  /** CA1: TUTTI gli account dell'app, l'elenco che la finestra App mostra */
+  accounts: ComposioGatewayAccountRpc[]
 }
 
 export interface ComposioGatewayStatusRpc {
@@ -112,6 +128,16 @@ export interface ComposioGatewayDeps {
   onAppActive?(slug: string, name: string): void
 }
 
+/** Le opzioni di connectApp: il nome umano e, da CA1, il SECONDO account. */
+export interface ConnectAppOptions {
+  /** il nome umano del toolkit (hint della finestra App) */
+  name?: string
+  /** CA1: aggiunge un ALTRO account anche se ce n'è già uno attivo */
+  another?: boolean
+  /** CA1: l'alias dell'account nuovo (normalizzato: minuscolo, senza spazi) */
+  alias?: string
+}
+
 export type ComposioGatewayManager = ReturnType<typeof createComposioGatewayManager>
 
 /** Un link di autorizzazione in attesa del clic dell'utente (la card lo chiama per chiave). */
@@ -145,24 +171,28 @@ export function createComposioGatewayManager(deps: ComposioGatewayDeps) {
    */
   let sessionId: string | null = null
 
-  const apps = (): GatewayAppsSetting => deps.getSetting<GatewayAppsSetting>(S_SETTING_APPS, {})
-  const setApps = (next: GatewayAppsSetting): void => {
+  // CA1: lo stato è NORMALIZZATO in lettura (migrazione pura e idempotente
+  // del formato vecchio a un account) e si riscrive già normalizzato
+  const apps = (): GatewayAppsStored => normalizeGatewayApps(deps.getSetting<unknown>(S_SETTING_APPS, {}))
+  const setApps = (next: GatewayAppsStored): void => {
     deps.setSetting(S_SETTING_APPS, next)
     deps.emit({ type: 'connectors' })
   }
-  const setApp = (slug: string, patch: StoredGatewayApp): void => {
+  const setApp = (slug: string, patch: GatewayAppStored): void => {
     const key = slug.toLowerCase()
-    const wasActive = apps()[key]?.status === 'ACTIVE'
-    setApps({ ...apps(), [key]: patch })
+    const wasActive = apps()[key]?.accounts.some((a) => a.status === 'ACTIVE') ?? false
+    const next = { ...apps(), [key]: patch }
+    setApps(next)
+    const isActive = patch.accounts.some((a) => a.status === 'ACTIVE')
     // K2 (ritocchi): un toolkit diventato ACTIVE azzera la SUA attesa — il
     // riquadro «Non riuscito» non può restare accanto alla riga «Collegata»
     // anche se l'ACTIVE l'ha portato un'altra via (refreshAccounts, la card)
-    if (patch.status === 'ACTIVE' && waiting?.slug === key) waiting = null
+    if (isActive && waiting?.slug === key) waiting = null
     // fase mcp-setup (M5.3): SOLO la transizione a ACTIVE (il refresh di una
     // già attiva non ri-notifica — e le offerte soddisfatte non si ripetono)
-    if (patch.status === 'ACTIVE' && !wasActive) deps.onAppActive?.(key, patch.name)
+    if (isActive && !wasActive) deps.onAppActive?.(key, patch.name)
   }
-  const appOf = (slug: string): StoredGatewayApp | undefined => apps()[slug.toLowerCase()]
+  const appOf = (slug: string): GatewayAppStored | undefined => apps()[slug.toLowerCase()]
   /** K6 (ritocchi): i nomi degli strumenti del server Composio (di default lo slug storico). */
   const serverTools = (): { manageConnections: string; waitForConnections: string } =>
     deps.serverTools?.() ?? COMPOSIO_SERVER_TOOLS
@@ -188,27 +218,66 @@ export function createComposioGatewayManager(deps: ComposioGatewayDeps) {
     return { output, links: parsed.redirectUrls }
   }
 
+  /** Lo stato di un account di `list` → lo stato locale (V8 + CA1). */
+  const accountStatusOf = (listStatus: string | undefined): GatewayAccountStatus => {
+    const s = String(listStatus ?? '').toLowerCase()
+    if (s === 'active') return 'ACTIVE'
+    if (s === 'failed') return 'FAILED'
+    return 'RECONNECT'
+  }
+
   /**
-   * V8: lo stato VERITÀ di un toolkit lo dice `list` — l'account da tenere è
-   * l'is_default, altrimenti il primo attivo. Ritenta un paio di volte: la
-   * connessione MCP appena aperta può rispondere «Connection closed» (P4).
+   * CA1: TUTTI gli account di un toolkit dal `list` (id, alias, email,
+   * stato, is_default), con gli alias predefiniti assegnati a chi non li ha
+   * (la parte locale dell'email, altrimenti «account N», unici nel toolkit).
+   * Il parsing tollerante può trovare lo STESSO account due volte (la forma
+   * vera per prima, poi il walk): si deduplica per id, e i resti senza id
+   * contano solo quando non c'è nessun account con id.
+   * Ritenta un paio di volte: la connessione MCP appena aperta può rispondere
+   * «Connection closed» (P4).
    */
-  async function listToolkit(slug: string, cancelled: () => boolean): Promise<{ active: boolean; accountId: string | null; email?: string }> {
+  async function readAccounts(slug: string, cancelled: () => boolean): Promise<GatewayAccount[]> {
     for (let attempt = 0; ; attempt++) {
       try {
         const { output } = await runManageConnections({ toolkits: [{ name: slug, action: 'list' }] })
         const parsed = parseConnectionsResult(output)
-        const accounts = connectionsAccountsOf(parsed, slug)
-        const chosen = accounts[0]
-        return {
-          active: accounts.some((a) => String(a.status ?? '').toLowerCase() === 'active'),
-          accountId: chosen?.id ?? null,
-          ...(chosen?.email ? { email: chosen.email } : {})
+        const seen = new Set<string>()
+        const accounts: GatewayAccount[] = []
+        for (const a of connectionsAccountsOf(parsed, slug)) {
+          // contano solo gli account con ID: il walk tollerante produce anche
+          // «account» dal solo record del toolkit (status senza id) — rumore
+          if (!a.id) continue
+          if (seen.has(a.id)) continue
+          seen.add(a.id)
+          accounts.push({
+            accountId: a.id,
+            status: accountStatusOf(a.status),
+            connectedAt: now(),
+            ...(a.alias ? { alias: a.alias } : {}),
+            ...(a.email ? { email: a.email } : {}),
+            ...(a.isDefault ? { isDefault: true } : {})
+          })
         }
+        return assignDefaultAliases(accounts)
       } catch (e) {
         if (cancelled() || attempt >= 2) throw e
         await new Promise((r) => setTimeout(r, deps.retryDelayMs?.() ?? 600))
       }
+    }
+  }
+
+  /**
+   * V8 (compatibilità): lo stato VERITÀ di un toolkit lo dice `list` — la
+   * forma a un account di prima, ricavata dagli account completi (per chi
+   * chiede «è attivo? qual è l'account?»).
+   */
+  async function listToolkit(slug: string, cancelled: () => boolean): Promise<{ active: boolean; accountId: string | null; email?: string }> {
+    const accounts = await readAccounts(slug, cancelled)
+    const chosen = accounts.find((a) => a.status === 'ACTIVE') ?? accounts[0]
+    return {
+      active: accounts.some((a) => a.status === 'ACTIVE'),
+      accountId: chosen?.accountId ?? null,
+      ...(chosen?.email ? { email: chosen.email } : {})
     }
   }
 
@@ -247,9 +316,10 @@ export function createComposioGatewayManager(deps: ComposioGatewayDeps) {
    *
    * V8 (prova vera): il formato vero di WAIT non lo conosciamo ancora, quindi
    * l'esito NON si deduce dalla sua risposta — dopo l'attesa il gateway chiama
-   * SEMPRE `list` per quel toolkit e prende stato e account da lì (l'account
-   * is_default, altrimenti il primo attivo). Se `list` non dice active, il
-   * collegamento NON è riuscito.
+   * SEMPRE `list` per quel toolkit e prende stato e account da lì. Se `list`
+   * non dice active, il collegamento NON è riuscito.
+   * CA1: il `list` rilegge TUTTI gli account; l'esito negativo segna i non
+   * attivi come FAILED (l'esito definitivo di sempre, non «da ricollegare»).
    * V12: nemmeno un errore di WAIT basta per «Non riuscito» — prima si
    * verifica con `list`: finché ci sono tentativi o verifica in corso la riga
    * resta «Completa il login…», l'esito definitivo conta soltanto.
@@ -272,14 +342,21 @@ export function createComposioGatewayManager(deps: ComposioGatewayDeps) {
       let outcome: 'connected' | 'failed' | 'cancelled'
       waiting = state
       deps.emit({ type: 'connectors' })
-      /** V8: chiude il collegamento con l'esito della verifica `list`. */
+      /** CA1: chiude il collegamento con l'esito della verifica `list` (TUTTI gli account). */
       const finishByList = async (): Promise<'connected' | 'failed'> => {
-        const v = await listToolkit(slug, () => state.cancelled)
-        if (v.active) {
-          setApp(slug, { name, accountId: v.accountId, status: 'ACTIVE', connectedAt: now(), ...(v.email ? { email: v.email } : {}) })
+        const accounts = await readAccounts(slug, () => state.cancelled)
+        if (accounts.some((a) => a.status === 'ACTIVE')) {
+          setApp(slug, { name, accounts })
           return 'connected'
         }
-        setApp(slug, { name, accountId: null, status: 'FAILED', connectedAt: now() })
+        // l'esito definitivo negativo: i non attivi sono FAILED (V8), non «da
+        // ricollegare»; senza account resta la riga FALLITA di sempre
+        setApp(slug, {
+          name,
+          accounts: accounts.length
+            ? accounts.map((a) => (a.status === 'ACTIVE' ? a : { ...a, status: 'FAILED' as const }))
+            : [{ accountId: null, status: 'FAILED', connectedAt: now() }]
+        })
         return 'failed'
       }
       try {
@@ -311,7 +388,7 @@ export function createComposioGatewayManager(deps: ComposioGatewayDeps) {
           try {
             outcome = await finishByList()
           } catch {
-            setApp(slug, { name, accountId: null, status: 'FAILED', connectedAt: now() })
+            setApp(slug, { name, accounts: [{ accountId: null, status: 'FAILED', connectedAt: now() }] })
             outcome = 'failed'
           }
         }
@@ -331,21 +408,49 @@ export function createComposioGatewayManager(deps: ComposioGatewayDeps) {
     }
   }
 
+  /** L'account «principale» di un'app: l'is_default, altrimenti il primo attivo. */
+  const mainAccountOf = (app: GatewayAppStored): GatewayAccount | undefined =>
+    app.accounts.find((a) => a.isDefault) ?? app.accounts.find((a) => a.status === 'ACTIVE') ?? app.accounts[0]
+
   return {
     /** Gli slug collegati (per il classificatore del blocco, C2). */
     connectedSlugs,
 
+    /**
+     * CA3: gli account ATTIVI di un toolkit, per la riga del prompt e per la
+     * scelta dell'account nel loop (vuoto se l'app non è del gateway).
+     */
+    activeAccountsOf(slugRaw: string): Array<{ accountId: string | null; alias?: string; email?: string }> {
+      return assignDefaultAliases(appOf(slugRaw)?.accounts ?? [])
+        .filter((a) => a.status === 'ACTIVE')
+        .map((a) => ({ accountId: a.accountId, ...(a.alias ? { alias: a.alias } : {}), ...(a.email ? { email: a.email } : {}) }))
+    },
+
     /** Lo stato per la UI (C5 punto 3) — mai i link, mai i token. */
     status(): ComposioGatewayStatusRpc {
-      const rows: ComposioGatewayAppRpc[] = Object.entries(apps()).map(([slug, a]) => ({
-        slug,
-        // K3 (ritocchi): un nome salvato UGUALE allo slug (dati delle sonde
-        // vecchie) si sostituisce col nome umano alla lettura
-        name: a.name === slug ? composioToolkitName(slug) : a.name,
-        status: a.status,
-        accountId: a.accountId,
-        ...(a.email ? { email: a.email } : {})
-      }))
+      const rows: ComposioGatewayAppRpc[] = Object.entries(apps()).map(([slug, a]) => {
+        // CA1: gli alias predefiniti valgono anche per i dati appena migrati
+        // (il formato vecchio non aveva alias ma poteva avere l'email)
+        const withAliases = assignDefaultAliases(a.accounts)
+        const main = mainAccountOf({ ...a, accounts: withAliases })
+        return {
+          slug,
+          // K3 (ritocchi): un nome salvato UGUALE allo slug (dati delle sonde
+          // vecchie) si sostituisce col nome umano alla lettura
+          name: a.name === slug ? composioToolkitName(slug) : a.name,
+          status: gatewayAppStatusOf(a),
+          accountId: main?.accountId ?? null,
+          ...(main?.email ? { email: main.email } : {}),
+          // CA1: l'elenco di TUTTI gli account per la finestra App
+          accounts: withAliases.map((acc) => ({
+            accountId: acc.accountId,
+            ...(acc.alias ? { alias: acc.alias } : {}),
+            ...(acc.email ? { email: acc.email } : {}),
+            status: acc.status,
+            ...(acc.isDefault ? { isDefault: true } : {})
+          }))
+        }
+      })
       rows.sort((a, b) => a.name.localeCompare(b.name))
       return {
         active: deps.gatewayActive(),
@@ -382,35 +487,45 @@ export function createComposioGatewayManager(deps: ComposioGatewayDeps) {
      * closed»): l'add si ritenta un paio di volte prima di arrendersi.
      * V8 (prova vera): PRIMA dell'add si chiama `list` per quel toolkit — se
      * c'è GIÀ un account attivo, niente add (mai account doppi sullo stesso
-     * utente): la riga diventa «Collegata» e la risposta lo dice. Il modello
-     * resta libero di chiedere un SECONDO account (la sua chiamata add passa
-     * dalla card, come oggi).
+     * utente): la riga diventa «Collegata» e la risposta lo dice.
+     * CA1: con `another: true` il controllo si SALTA (il secondo account si
+     * vuole davvero) e l'add porta l'ALIAS normalizzato e univoco; se il
+     * server dice che si è al massimo di account, la risposta lo dice in
+     * parole povere (`error: 'account-limit'` + quanti se ne hanno).
      */
-    async connectApp(slugRaw: string, nameHint?: string): Promise<{ ok: boolean; already?: boolean; error?: string }> {
+    async connectApp(slugRaw: string, opts: ConnectAppOptions = {}): Promise<{ ok: boolean; already?: boolean; error?: string; accountCount?: number }> {
       const slug = slugRaw.toLowerCase()
       if (!deps.gatewayActive()) return { ok: false, error: 'not-active' }
+      const name = composioToolkitName(opts.name ?? slug)
+      let existing: GatewayAccount[] = []
       try {
-        const v = await listToolkit(slug, () => false)
-        if (v.active) {
-          setApp(slug, {
-            name: composioToolkitName(nameHint ?? slug),
-            accountId: v.accountId,
-            status: 'ACTIVE',
-            connectedAt: now(),
-            ...(v.email ? { email: v.email } : {})
-          })
+        existing = await readAccounts(slug, () => false)
+        if (!opts.another && existing.some((a) => a.status === 'ACTIVE')) {
+          setApp(slug, { name, accounts: existing })
           return { ok: true, already: true }
         }
       } catch { /* list non risponde: si prova l'add come oggi */ }
+      // CA1: l'alias richiesto, normalizzato e univoco fra gli account che ci
+      // sono già (il suffisso -2, -3… se serve)
+      const alias = typeof opts.alias === 'string' && normalizeAlias(opts.alias)
+        ? uniqueAlias(normalizeAlias(opts.alias), new Set(existing.flatMap((a) => (a.alias ? [a.alias] : []))))
+        : undefined
       let link: string | undefined
       let lastError = ''
       for (let attempt = 0; attempt < 3 && !link; attempt++) {
         try {
-          const { links } = await runManageConnections({
-            toolkits: [{ name: slug, action: 'add' }]
+          const { output, links } = await runManageConnections({
+            toolkits: [{ name: slug, action: 'add', ...(alias ? { alias } : {}) }]
           })
           link = links[0]?.url
-          if (!link) return { ok: false, error: 'no authorization link in the response' }
+          if (!link) {
+            // CA1: il server può rispondere che si è al MASSIMO di account —
+            // la UI lo dice in parole semplici, niente errore grezzo
+            if (accountLimitReachedIn(output)) {
+              return { ok: false, error: 'account-limit', accountCount: existing.length || 5 }
+            }
+            return { ok: false, error: 'no authorization link in the response' }
+          }
         } catch (e) {
           lastError = e instanceof Error ? e.message : String(e)
           if (attempt < 2) await new Promise((r) => setTimeout(r, deps.retryDelayMs?.() ?? 600))
@@ -423,20 +538,85 @@ export function createComposioGatewayManager(deps: ComposioGatewayDeps) {
         return { ok: false, error: e instanceof Error ? e.message : String(e) }
       }
       // K3 (ritocchi): il nome dell'attesa è umano anche senza hint
-      void waitForApp(slug, composioToolkitName(nameHint ?? slug))
+      void waitForApp(slug, name)
       return { ok: true }
     },
 
-    /** Rimuovi (C5 punto 2): remove con account_id, conferma chiesta dalla UI. */
+    /**
+     * CA1 punto 3: rinomina un ACCOUNT (rename con account_id + alias
+     * normalizzato e univoco), poi `list` rilegge l'elenco.
+     */
+    async renameAccount(slugRaw: string, accountId: string, aliasInput?: string): Promise<{ ok: boolean; error?: string }> {
+      const slug = slugRaw.toLowerCase()
+      const app = appOf(slug)
+      if (!app) return { ok: false, error: 'app not connected from Homun' }
+      const base = normalizeAlias(String(aliasInput ?? ''))
+      if (!base) return { ok: false, error: 'alias required' }
+      const taken = new Set(app.accounts.filter((a) => a.accountId !== accountId).flatMap((a) => (a.alias ? [a.alias] : [])))
+      const alias = uniqueAlias(base, taken)
+      try {
+        await runManageConnections({ toolkits: [{ name: slug, action: 'rename', account_id: accountId, alias }] })
+      } catch (e) {
+        return { ok: false, error: e instanceof Error ? e.message : String(e) }
+      }
+      try {
+        const accounts = await readAccounts(slug, () => false)
+        setApp(slug, { ...app, accounts })
+      } catch {
+        // il rename è partito: l'elenco si rileggerà al prossimo refresh
+      }
+      return { ok: true }
+    },
+
+    /**
+     * CA1 punto 3: toglie un ACCOUNT (remove con account_id); togliere
+     * l'ultimo toglie l'app. L'esito lo decide il `list` di dopo.
+     */
+    async removeAccount(slugRaw: string, accountId: string): Promise<{ ok: boolean; error?: string }> {
+      const slug = slugRaw.toLowerCase()
+      const app = appOf(slug)
+      if (!app) return { ok: false, error: 'app not connected from Homun' }
+      try {
+        await runManageConnections({ toolkits: [{ name: slug, action: 'remove', account_id: accountId }] })
+      } catch (e) {
+        return { ok: false, error: e instanceof Error ? e.message : String(e) }
+      }
+      try {
+        const accounts = await readAccounts(slug, () => false)
+        if (accounts.length === 0) {
+          const next = { ...apps() }
+          delete next[slug]
+          setApps(next)
+        } else {
+          setApp(slug, { ...app, accounts })
+        }
+      } catch {
+        // il remove è partito ma il list non risponde: si toglie l'account
+        // anche in locale (era la richiesta dell'utente), l'elenco tornerà
+        const rest = app.accounts.filter((a) => a.accountId !== accountId)
+        if (rest.length === 0) {
+          const next = { ...apps() }
+          delete next[slug]
+          setApps(next)
+        } else {
+          setApp(slug, { ...app, accounts: rest })
+        }
+      }
+      return { ok: true }
+    },
+
+    /** Rimuovi (C5 punto 2): remove con account_id per OGNI account, conferma chiesta dalla UI. */
     async removeApp(slugRaw: string): Promise<{ ok: boolean; error?: string }> {
       const slug = slugRaw.toLowerCase()
       const app = appOf(slug)
       if (!app) return { ok: false, error: 'app not connected from Homun' }
       try {
-        if (app.accountId) {
-          await runManageConnections({
-            toolkits: [{ name: slug, action: 'remove', account_id: app.accountId }]
-          })
+        for (const account of app.accounts) {
+          if (account.accountId) {
+            await runManageConnections({
+              toolkits: [{ name: slug, action: 'remove', account_id: account.accountId }]
+            })
+          }
         }
       } catch (e) {
         return { ok: false, error: e instanceof Error ? e.message : String(e) }
@@ -461,11 +641,11 @@ export function createComposioGatewayManager(deps: ComposioGatewayDeps) {
     },
 
     /**
-     * C5 punto 3: `list` sui toolkit collegati da Homun — V8: si legge la
-     * forma VERA (data.results.<toolkit>, l'account is_default con l'email);
-     * lo stato non deducibile lascia la riga com'è (la UI mostra «Gestisci su
-     * Composio» quando serve). K2 (ritocchi): passa da setApp, così un ACTIVE
-     * del toolkit azzera la sua attesa «Non riuscito».
+     * C5 punto 3 + CA1: `list` sui toolkit collegati da Homun — rilegge TUTTI
+     * gli account di ogni toolkit (id, alias, email, stato, is_default) e
+     * SOSTITUISCE l'elenco; lo stato non deducibile lascia la riga com'è (la
+     * UI mostra «Gestisci su Composio» quando serve). K2 (ritocchi): passa da
+     * setApp, così un ACTIVE del toolkit azzera la sua attesa «Non riuscito».
      */
     async refreshAccounts(): Promise<void> {
       if (!deps.gatewayActive()) return
@@ -473,13 +653,19 @@ export function createComposioGatewayManager(deps: ComposioGatewayDeps) {
         const stored = appOf(slug)
         if (!stored) continue
         try {
-          const v = await listToolkit(slug, () => false)
-          if (v.active) {
-            setApp(slug, { ...stored, status: 'ACTIVE', accountId: v.accountId ?? stored.accountId, ...(v.email ? { email: v.email } : {}) })
+          const accounts = await readAccounts(slug, () => false)
+          if (accounts.length === 0) continue
+          // il connectedAt degli account che si conoscono già non si azzera
+          const merged = accounts.map((a) => ({
+            ...a,
+            connectedAt: stored.accounts.find((old) => old.accountId !== null && old.accountId === a.accountId)?.connectedAt ?? a.connectedAt
+          }))
+          if (merged.some((a) => a.status === 'ACTIVE')) {
+            setApp(slug, { ...stored, accounts: merged })
           } else {
             // V8: stati che non sono active → da ricollegare (o FALLITA del
             // server: la riga dice «Ricollega», non resta «Collegata» fissa)
-            setApp(slug, { ...stored, status: 'RECONNECT' })
+            setApp(slug, { ...stored, accounts: merged })
           }
         } catch {
           // senza rete o server giù: la riga resta com'è, mai un'eccezione alla UI

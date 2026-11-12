@@ -1071,8 +1071,10 @@ export interface SandbotApi {
   composioGatewayStatus(): Promise<ComposioGatewayStatusInfo>
   composioGatewayRefresh(): Promise<ComposioGatewayStatusInfo>
   // V8 (prova vera): already = c'era GIÀ un account attivo, nessun add
-  composioGatewayConnect(slug: string, name?: string): Promise<{ ok: boolean; already?: boolean; error?: string }>
+  composioGatewayConnect(slug: string, name?: string, opts?: { another?: boolean; alias?: string }): Promise<{ ok: boolean; already?: boolean; error?: string; accountCount?: number }>
   composioGatewayRemove(slug: string): Promise<{ ok: boolean; error?: string }>
+  composioGatewayRenameAccount(slug: string, accountId: string, alias?: string): Promise<{ ok: boolean; error?: string }>
+  composioGatewayRemoveAccount(slug: string, accountId: string): Promise<{ ok: boolean; error?: string }>
   composioGatewayCancel(): Promise<{ ok: boolean }>
   /** il clic su «Collega» della card in chat: apre il link e aspetta il login */
   composioGatewayCardConnect(key: string): Promise<{ ok: boolean; error?: string }>
@@ -1921,6 +1923,15 @@ export interface ComposioStatusInfo {
 
 // ---- fase Composio OAuth (C5): le app collegate DENTRO il server Composio ----
 
+/** Un account collegato di un'app del gateway (CA1). */
+export interface ComposioGatewayAccountInfo {
+  accountId: string | null
+  alias?: string
+  email?: string
+  status: 'ACTIVE' | 'RECONNECT' | 'FAILED'
+  isDefault?: boolean
+}
+
 /** Un'app collegata tramite il server Composio (login C1, non la chiave di progetto). */
 export interface ComposioGatewayAppInfo {
   slug: string
@@ -1929,6 +1940,8 @@ export interface ComposioGatewayAppInfo {
   accountId: string | null
   /** V8 (prova vera): l'email dell'account quando `list` la dà (user_info.email) */
   email?: string
+  /** CA1 (fase composio-account): TUTTI gli account dell'app, per la finestra App */
+  accounts?: ComposioGatewayAccountInfo[]
 }
 
 /** Lo stato del gateway Composio per la UI (mai link, mai token). */

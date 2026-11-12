@@ -555,6 +555,8 @@ function parseRealConnectionsShape(root: unknown, out: ParsedConnectionsResult):
           ...(typeof acc.id === 'string' && acc.id ? { id: acc.id } : {}),
           ...(typeof acc.status === 'string' && acc.status ? { status: acc.status.toLowerCase() } : {}),
           ...(acc.is_default === true ? { isDefault: true } : {}),
+          // CA1 (fase composio-account): l'alias dell'account, quando `list` lo dà
+          ...(typeof acc.alias === 'string' && acc.alias.trim() ? { alias: acc.alias.trim() } : {}),
           ...(typeof (acc.user_info as { email?: unknown } | null | undefined)?.email === 'string'
             ? { email: (acc.user_info as { email: string }).email }
             : {})
@@ -633,6 +635,16 @@ export function connectionsAccountsOf(parsed: ParsedConnectionsResult, toolkit: 
     return 2
   }
   return ofToolkit.sort((a, b) => rank(a) - rank(b))
+}
+
+/**
+ * CA1 (fase composio-account): la risposta di `add` dice che si è al MASSIMO
+ * di account per il toolkit? («Always creates a new auth link. Enforces max
+ * account limit» dello schema.) Tollerante sul testo: la forma dell'errore
+ * del server non è documentata, si cercano le parole del limite.
+ */
+export function accountLimitReachedIn(output: string): boolean {
+  return /max(?:imum)?\s+(?:number\s+of\s+)?(?:accounts?|connections?)\s*(?:\([^)]*\))?\s*(?:limit|reached|allowed)|too many accounts?|account\s*limit/i.test(output)
 }
 
 /**

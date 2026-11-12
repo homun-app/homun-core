@@ -104,6 +104,8 @@ export const DAEMON_RPC_CHANNELS = [
   // fase Composio OAuth (C5): le app dentro il server Composio collegato col login
   'composio-gateway:status', 'composio-gateway:refresh', 'composio-gateway:connect',
   'composio-gateway:remove', 'composio-gateway:cancel', 'composio-gateway:card-connect',
+  // CA1 (fase composio-account): rinominare e togliere un SINGOLO account
+  'composio-gateway:rename-account', 'composio-gateway:remove-account',
   // fase catalogo app (P4): «Connetti» in un passo (la riga sceglie la strada)
   'apps:connect', 'apps:cancel-connect',
   // fase 18b (K3): le capacità di UN modello, senza l'elenco completo

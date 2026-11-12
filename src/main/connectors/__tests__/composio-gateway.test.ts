@@ -44,19 +44,31 @@ const addResult = (slug: string) => JSON.stringify({
 
 /** La risposta `list` nel FORMATO VERO della prova (V8, dati sostituiti). */
 const realListResult = (slug: string, opts: { id?: string; email?: string; status?: string } = {}) =>
+  realListMany(slug, [{ id: opts.id ?? `acc_${slug}`, status: opts.status ?? 'active', is_default: true, ...(opts.email ? { email: opts.email } : {}) }], opts.status ?? 'active')
+
+/** CA1: la risposta `list` con PIÙ account (alias, email, is_default). */
+const realListMany = (
+  slug: string,
+  accounts: Array<{ id: string; alias?: string; email?: string; status?: string; is_default?: boolean }>,
+  toolkitStatus = 'active'
+) =>
   JSON.stringify({
     successful: true,
     data: {
       results: {
         [slug]: {
           toolkit: slug,
-          status: opts.status ?? 'active',
-          accounts: [
-            { id: opts.id ?? `acc_${slug}`, status: opts.status ?? 'active', is_default: true, ...(opts.email ? { user_info: { email: opts.email } } : {}) }
-          ]
+          status: accounts.some((a) => (a.status ?? 'active') === 'active') ? toolkitStatus : 'initiated',
+          accounts: accounts.map((a) => ({
+            id: a.id,
+            status: a.status ?? 'active',
+            is_default: a.is_default ?? false,
+            ...(a.alias ? { alias: a.alias } : {}),
+            ...(a.email ? { user_info: { email: a.email } } : {})
+          }))
         }
       },
-      summary: { total_toolkits: 1, active_connections: 1, initiated_connections: 0, failed_connections: 0 },
+      summary: { total_toolkits: 1, active_connections: accounts.filter((a) => (a.status ?? 'active') === 'active').length, initiated_connections: 0, failed_connections: 0 },
       session: { id: 'zulu', instructions: 'REQUIRED: Pass session_id "zulu" in ALL subsequent meta tool calls for this workflow.' }
     },
     error: null
@@ -64,12 +76,13 @@ const realListResult = (slug: string, opts: { id?: string; email?: string; statu
 
 /** Il fake che risponde per strumento e azione di toolkits[0]. */
 const byAction = (
-  answers: { wait?: () => string; list?: () => string; add?: () => string; remove?: () => string }
+  answers: { wait?: () => string; list?: () => string; add?: () => string; remove?: () => string; rename?: () => string }
 ): FakeMcp['respond'] => (tool, args) => {
   const action = (args.toolkits as Array<{ action?: string }> | undefined)?.[0]?.action ?? (Array.isArray(args.toolkits) && typeof args.toolkits[0] === 'string' ? 'wait' : 'add')
   if (original(tool) === 'COMPOSIO_WAIT_FOR_CONNECTIONS') return answers.wait?.() ?? realListResult('x')
   if (action === 'list') return answers.list?.() ?? realListResult('x')
   if (action === 'remove') return answers.remove?.() ?? JSON.stringify({ toolkits: [{ toolkit: 'x', status: 'removed' }] })
+  if (action === 'rename') return answers.rename?.() ?? JSON.stringify({ toolkits: [{ toolkit: 'x', status: 'renamed' }] })
   return answers.add?.() ?? addResult('x')
 }
 
@@ -115,9 +128,10 @@ describe('C5 punto 1 — il flusso DAL BOT (add → card → clic → attesa)', 
     expect(wait?.args.toolkits).toEqual(['gmail'])
     expect(wait?.opts?.timeoutMs).toBe(5 * 60_000)
     // V8: lo stato lo dice `list` (account is_default, email), non la WAIT
+    // CA1: la riga porta TUTTI gli account (qui uno, senza email → senza alias)
     await vi.waitFor(() => {
       expect(manager.status().connected).toEqual([
-        { slug: 'gmail', name: 'Gmail', status: 'ACTIVE', accountId: 'acc_9' }
+        { slug: 'gmail', name: 'Gmail', status: 'ACTIVE', accountId: 'acc_9', accounts: [{ accountId: 'acc_9', status: 'ACTIVE', isDefault: true }] }
       ])
     })
   })
@@ -126,7 +140,7 @@ describe('C5 punto 1 — il flusso DAL BOT (add → card → clic → attesa)', 
     const { manager } = makeManager(gradualConnect('gmail', 'gmail_aaa-bbb', () =>
       JSON.stringify({ qualunque: { cosa: 'il formato di WAIT non lo conosciamo' } })
     , 'utente@example.com'))
-    await manager.connectApp('gmail', 'Gmail')
+    await manager.connectApp('gmail', { name: 'Gmail' })
     await vi.waitFor(() => {
       expect(manager.status().connected[0]).toMatchObject({
         slug: 'gmail', status: 'ACTIVE', accountId: 'gmail_aaa-bbb', email: 'utente@example.com'
@@ -140,7 +154,7 @@ describe('C5 punto 1 — il flusso DAL BOT (add → card → clic → attesa)', 
       list: () => realListResult('gmail', { status: 'initiated' }),
       add: () => addResult('gmail')
     }))
-    await manager.connectApp('gmail', 'Gmail')
+    await manager.connectApp('gmail', { name: 'Gmail' })
     await vi.waitFor(() => {
       expect(manager.status().connected[0]?.status).toBe('FAILED')
       expect(manager.status().pending?.failed).toBe(true)
@@ -151,7 +165,7 @@ describe('C5 punto 1 — il flusso DAL BOT (add → card → clic → attesa)', 
     const { manager, fake } = makeManager(gradualConnect('slack', 'a1', () => {
       throw new Error('Connection closed')
     }))
-    await manager.connectApp('slack', 'Slack')
+    await manager.connectApp('slack', { name: 'Slack' })
     // la riga diventa ACTIVE senza mai passare per FAILED
     await vi.waitFor(() => {
       expect(manager.status().connected[0]?.status).toBe('ACTIVE')
@@ -175,7 +189,7 @@ describe('C5 punto 1 — il flusso DAL BOT (add → card → clic → attesa)', 
 describe('C5 punto 2 — il flusso DALLA FINESTRA APP', () => {
   it('connectApp: add → il link si apre SUBITO (il clic nella finestra è dell\'utente) → attesa → collegata', async () => {
     const { manager, opened } = makeManager(gradualConnect('slack', 'acc_1'))
-    const r = await manager.connectApp('slack', 'Slack')
+    const r = await manager.connectApp('slack', { name: 'Slack' })
     expect(r.ok).toBe(true)
     expect(r.already).toBeUndefined()
     expect(opened).toEqual(['https://mcp.example/authorize?tk=slack'])
@@ -192,7 +206,7 @@ describe('C5 punto 2 — il flusso DALLA FINESTRA APP', () => {
       if (action === 'add') throw new Error('V8: add non doveva essere chiamato')
       return realListResult('gmail', { id: 'gmail_gia', email: 'utente@example.com' })
     })
-    const r = await manager.connectApp('gmail', 'Gmail')
+    const r = await manager.connectApp('gmail', { name: 'Gmail' })
     expect(r).toEqual({ ok: true, already: true })
     expect(fake.calls.some((c) => JSON.stringify(c.args).includes('"add"'))).toBe(false)
     expect(opened).toHaveLength(0)
@@ -215,7 +229,7 @@ describe('C5 punto 2 — il flusso DALLA FINESTRA APP', () => {
       list: () => realListResult('notion', { id: 'acc_7' }),
       add: () => addResult('notion')
     }))
-    await manager.connectApp('notion', 'Notion')
+    await manager.connectApp('notion', { name: 'Notion' })
     await vi.waitFor(() => {
       expect(manager.status().connected.some((a) => a.slug === 'notion')).toBe(true)
     })
@@ -236,7 +250,7 @@ describe('C5 punto 2 — il flusso DALLA FINESTRA APP', () => {
       }
       return addResult('x')
     })
-    const started = manager.connectApp('x', 'X')
+    const started = manager.connectApp('x', { name: 'X' })
     await vi.waitFor(() => {
       expect(manager.status().pending?.slug).toBe('x')
     })
@@ -254,7 +268,7 @@ describe('C5 punto 2 — il flusso DALLA FINESTRA APP', () => {
       list: () => JSON.stringify({ toolkits: [{ toolkit: 'slack', accounts: [{ status: 'INITIATED' }] }] }),
       add: () => addResult('slack')
     }))
-    const first = await manager.connectApp('slack', 'Slack')
+    const first = await manager.connectApp('slack', { name: 'Slack' })
     expect(first.ok).toBe(true)
     await vi.waitFor(() => {
       // l'attesa è finita male: «Non riuscito · Riprova»
@@ -263,7 +277,7 @@ describe('C5 punto 2 — il flusso DALLA FINESTRA APP', () => {
     })
     // Riprova (come fa la card): una NUOVA chiamata add (link nuovo, monouso il
     // vecchio) e una nuova attesa
-    const second = await manager.connectApp('slack', 'Slack')
+    const second = await manager.connectApp('slack', { name: 'Slack' })
     expect(second.ok).toBe(true)
     const adds = fake.calls.filter((c) => (c.args.toolkits as Array<{ action?: string }>)?.[0]?.action === 'add')
     expect(adds.length).toBe(2)
@@ -275,7 +289,7 @@ describe('C5 punto 2 — il flusso DALLA FINESTRA APP', () => {
 
   it('V8: il session_id del server si ripassa nelle chiamate successive del gateway', async () => {
     const { manager, fake } = makeManager(gradualConnect('slack', 's1'))
-    await manager.connectApp('slack', 'Slack')
+    await manager.connectApp('slack', { name: 'Slack' })
     await vi.waitFor(() => {
       expect(manager.status().connected[0]?.status).toBe('ACTIVE')
     })
@@ -302,7 +316,7 @@ describe('C5 punto 3 — il list (V8: la forma vera letta per prima)', () => {
       },
       add: () => addResult('gmail')
     }))
-    await manager.connectApp('gmail', 'Gmail')
+    await manager.connectApp('gmail', { name: 'Gmail' })
     await vi.waitFor(() => {
       expect(manager.status().connected[0]?.status).toBe('ACTIVE')
     })
@@ -321,8 +335,8 @@ describe('C5 — lo stato che vede la UI', () => {
       list: () => JSON.stringify({ toolkits: [] }), // list senza account: non attivo
       add: () => addResult('a')
     }))
-    await manager.connectApp('a', 'Beta')
-    await manager.connectApp('b', 'Alpha')
+    await manager.connectApp('a', { name: 'Beta' })
+    await manager.connectApp('b', { name: 'Alpha' })
     await vi.waitFor(() => {
       const st = manager.status()
       expect(st.active).toBe(true)
@@ -336,7 +350,7 @@ describe('C5 — lo stato che vede la UI', () => {
   it('K2: due attese sullo stesso toolkit → UNA sola chiamata WAIT_FOR_CONNECTIONS', async () => {
     const { manager, fake } = makeManager(gradualConnect('slack', 'a1'))
     // la card in chat e la finestra App partono INSIEME per lo stesso toolkit
-    await Promise.all([manager.connectApp('slack', 'Slack'), manager.connectApp('slack', 'Slack')])
+    await Promise.all([manager.connectApp('slack', { name: 'Slack' }), manager.connectApp('slack', { name: 'Slack' })])
     await vi.waitFor(() => {
       expect(manager.status().connected.find((a) => a.slug === 'slack')?.status).toBe('ACTIVE')
     })
@@ -350,7 +364,7 @@ describe('C5 — lo stato che vede la UI', () => {
       list: () => realListResult('slack', { id: 'a1' }),
       add: () => addResult('slack')
     }))
-    await manager.connectApp('slack', 'Slack')
+    await manager.connectApp('slack', { name: 'Slack' })
     // V8+V12: il FALLIMENTO della WAIT non basta — list dice ACTIVE, quindi la
     // riga è «Collegata» e NON è mai comparsa come «Non riuscito»
     await vi.waitFor(() => {
@@ -364,5 +378,189 @@ describe('C5 — lo stato che vede la UI', () => {
     // lo stato su disco di una sonda vecchia: name = slug
     settings.set('composioGateway.apps', { slack: { name: 'slack', accountId: null, status: 'ACTIVE', connectedAt: 1 } })
     expect(manager.status().connected[0]?.name).toBe('Slack')
+  })
+})
+
+// ---- CA1 (fase composio-account): più account per la stessa app ----
+
+/** Lo stato locale già in formato nuovo (due account Gmail attivi). */
+const twoAccountGmail = {
+  gmail: {
+    name: 'Gmail',
+    accounts: [
+      { accountId: 'a1', alias: 'lavoro', email: 'fabio@azienda.test', status: 'ACTIVE', connectedAt: 1, isDefault: true },
+      { accountId: 'a2', alias: 'personale', email: 'fabio@gmail.test', status: 'ACTIVE', connectedAt: 2 }
+    ]
+  }
+}
+
+describe('CA1 — più account per app', () => {
+  it('connectApp another: SALTA il controllo «già attivo», chiama add CON l\'alias normalizzato, e dopo il login il list rilegge TUTTI gli account', async () => {
+    const state = { second: false }
+    const { manager, fake, opened } = makeManager(byAction({
+      wait: () => { state.second = true; return realListMany('gmail', []) },
+      list: () => state.second
+        ? realListMany('gmail', [
+            { id: 'a1', alias: 'fabio', email: 'fabio@azienda.test', is_default: true },
+            { id: 'a2', alias: 'casapersonale', email: 'fabio@gmail.test' }
+          ])
+        : realListMany('gmail', [{ id: 'a1', alias: 'fabio', email: 'fabio@azienda.test', is_default: true }]),
+      add: () => addResult('gmail')
+    }))
+    await manager.connectApp('gmail', { name: 'Gmail', another: true, alias: ' Casa Personale ' })
+    // l'add è partito NONOSTANTE l'account attivo, con l'alias normalizzato
+    const add = fake.calls.find((c) => (c.args.toolkits as Array<{ action?: string; alias?: string }>)?.[0]?.action === 'add')
+    expect(add?.args.toolkits).toEqual([{ name: 'gmail', action: 'add', alias: 'casapersonale' }])
+    expect(opened).toHaveLength(1)
+    await vi.waitFor(() => {
+      const row = manager.status().connected.find((a) => a.slug === 'gmail')
+      expect(row?.accounts).toHaveLength(2)
+      expect(row?.accounts?.map((a) => a.alias)).toEqual(['fabio', 'casapersonale'])
+    })
+  })
+
+  it('connectApp SENZA another e un account attivo resta «already» (nessun add)', async () => {
+    const { manager, fake, opened } = makeManager(byAction({
+      list: () => realListMany('gmail', [{ id: 'a1', alias: 'lavoro', email: 'fabio@azienda.test' }])
+    }))
+    const r = await manager.connectApp('gmail', { name: 'Gmail' })
+    expect(r).toEqual({ ok: true, already: true })
+    expect(fake.calls.some((c) => JSON.stringify(c.args).includes('"add"'))).toBe(false)
+    expect(opened).toHaveLength(0)
+  })
+
+  it('l\'alias predefinito è la parte locale dell\'email, univoca nel toolkit', async () => {
+    const state = { second: false }
+    const { manager } = makeManager(byAction({
+      wait: () => { state.second = true; return realListMany('gmail', []) },
+      list: () => state.second
+        ? realListMany('gmail', [
+            { id: 'a1', email: 'fabio@azienda.test', is_default: true },
+            { id: 'a2', email: 'fabio@gmail.test' }
+          ])
+        : realListMany('gmail', [{ id: 'a1', email: 'fabio@azienda.test', is_default: true }]),
+      add: () => addResult('gmail')
+    }))
+    await manager.connectApp('gmail', { name: 'Gmail', another: true })
+    await vi.waitFor(() => {
+      const row = manager.status().connected.find((a) => a.slug === 'gmail')
+      expect(row?.accounts?.map((a) => a.alias)).toEqual(['fabio', 'fabio-2'])
+    })
+  })
+
+  it('renameAccount: rename con account_id e alias normalizzato/univoco, poi il list rilegge', async () => {
+    // lo stato locale: a1 «lavoro», a2 «personale» (twoAccountGmail)
+    const state = { aliases: new Map([['a1', 'lavoro'], ['a2', 'personale']]) }
+    const { manager, fake, settings } = makeManager((tool, args) => {
+      const entry = (args.toolkits as Array<{ action?: string; account_id?: string; alias?: string }> | undefined)?.[0]
+      if (entry?.action === 'rename') {
+        state.aliases.set(entry.account_id ?? '', entry.alias ?? '')
+        return JSON.stringify({ toolkits: [{ toolkit: 'gmail', status: 'renamed' }] })
+      }
+      if (entry?.action === 'list') {
+        return realListMany('gmail', [...state.aliases.entries()].map(([id, alias]) => ({
+          id, alias, email: id === 'a1' ? 'fabio@azienda.test' : 'fabio@gmail.test', is_default: id === 'a1'
+        })))
+      }
+      return addResult('gmail')
+    })
+    settings.set('composioGateway.apps', structuredClone(twoAccountGmail))
+    // «Lavoro» normalizzato è «lavoro», già preso da a1 → a2 diventa «lavoro-2»
+    const renamesOf = () => fake.calls.filter((c) => (c.args.toolkits as Array<{ action?: string }>)?.[0]?.action === 'rename')
+    const r = await manager.renameAccount('gmail', 'a2', 'Lavoro')
+    expect(r.ok).toBe(true)
+    expect(renamesOf()[0]?.args.toolkits).toEqual([{ name: 'gmail', action: 'rename', account_id: 'a2', alias: 'lavoro-2' }])
+    // dopo il rename il list rilegge e la riga mostra l'alias nuovo
+    expect(manager.status().connected.find((a) => a.slug === 'gmail')?.accounts?.find((a) => a.accountId === 'a2')?.alias).toBe('lavoro-2')
+    // un alias libero passa normalizzato, senza suffissi
+    const r2 = await manager.renameAccount('gmail', 'a1', ' Casa ')
+    expect(r2.ok).toBe(true)
+    expect(renamesOf()[1]?.args.toolkits).toEqual([{ name: 'gmail', action: 'rename', account_id: 'a1', alias: 'casa' }])
+  })
+
+  it('removeAccount: remove per account; togliere l\'ULTIMO account toglie l\'app', async () => {
+    const state = { ids: ['a1', 'a2'] }
+    const { manager, fake, settings } = makeManager((tool, args) => {
+      const entry = (args.toolkits as Array<{ action?: string; account_id?: string }> | undefined)?.[0]
+      if (entry?.action === 'remove') {
+        state.ids = state.ids.filter((x) => x !== entry.account_id)
+        return JSON.stringify({ toolkits: [{ toolkit: 'gmail', status: 'removed' }] })
+      }
+      if (entry?.action === 'list') {
+        return realListMany('gmail', state.ids.map((id, i) => ({ id, alias: i === 0 ? 'lavoro' : 'personale', email: `fabio${i}@azienda.test` })))
+      }
+      return addResult('gmail')
+    })
+    settings.set('composioGateway.apps', structuredClone(twoAccountGmail))
+    // rimuove il SECONDO account: la riga resta con uno
+    const r = await manager.removeAccount('gmail', 'a2')
+    expect(r.ok).toBe(true)
+    const remove = fake.calls.find((c) => (c.args.toolkits as Array<{ action?: string }>)?.[0]?.action === 'remove')
+    expect(remove?.args.toolkits).toEqual([{ name: 'gmail', action: 'remove', account_id: 'a2' }])
+    expect(manager.status().connected.find((a) => a.slug === 'gmail')?.accounts).toHaveLength(1)
+  })
+
+  it('removeAccount dell\'ultimo account: la riga dell\'app SPARISCE', async () => {
+    const state = { ids: ['a1', 'a2'] }
+    const { manager, settings } = makeManager((tool, args) => {
+      const action = (args.toolkits as Array<{ action?: string; account_id?: string }> | undefined)?.[0]?.action
+      if (action === 'remove') {
+        const id = (args.toolkits as Array<{ account_id?: string }>)[0]!.account_id
+        state.ids = state.ids.filter((x) => x !== id)
+        return JSON.stringify({ toolkits: [{ toolkit: 'gmail', status: 'removed' }] })
+      }
+      if (action === 'list') {
+        return realListMany('gmail', state.ids.map((id) => ({ id, alias: 'lavoro', email: 'fabio@azienda.test' })))
+      }
+      return addResult('gmail')
+    })
+    settings.set('composioGateway.apps', structuredClone(twoAccountGmail))
+    // il primo remove lascia un account; il SECONDO toglie l'ultimo e la
+    // riga dell'app sparisce (CA1 punto 3)
+    await manager.removeAccount('gmail', 'a1')
+    expect(manager.status().connected.find((a) => a.slug === 'gmail')?.accounts).toHaveLength(1)
+    const r2 = await manager.removeAccount('gmail', 'a2')
+    expect(r2.ok).toBe(true)
+    expect(manager.status().connected.find((a) => a.slug === 'gmail')).toBeUndefined()
+  })
+
+  it('il limite di account: la UI lo sa in parole semplici (error account-limit, nessun browser)', async () => {
+    const { manager, fake, opened } = makeManager(byAction({
+      list: () => realListMany('gmail', [
+        { id: 'a1' }, { id: 'a2' }, { id: 'a3' }, { id: 'a4' }, { id: 'a5' }
+      ]),
+      add: () => JSON.stringify({
+        toolkits: [{ toolkit: 'gmail', status: 'error', error: 'Max account limit reached: 5 accounts per toolkit. Remove one to add another.' }]
+      })
+    }))
+    const r = await manager.connectApp('gmail', { name: 'Gmail', another: true, alias: 'extra' })
+    expect(r.ok).toBe(false)
+    expect(r).toMatchObject({ error: 'account-limit', accountCount: 5 })
+    expect(opened).toHaveLength(0)
+    expect(fake.calls.some((c) => c.tool.includes('WAIT_FOR_CONNECTIONS'))).toBe(false)
+  })
+
+  it('la migrazione del formato vecchio si vede dallo status (un account piatto → accounts[0])', async () => {
+    const { manager, settings } = makeManager(byAction({ add: () => addResult('x') }))
+    settings.set('composioGateway.apps', { gmail: { name: 'Gmail', accountId: 'vecchio', status: 'ACTIVE', connectedAt: 9, email: 'utente@example.com' } })
+    const row = manager.status().connected[0]
+    expect(row).toMatchObject({ slug: 'gmail', status: 'ACTIVE', accountId: 'vecchio', email: 'utente@example.com' })
+    expect(row?.accounts).toEqual([{ accountId: 'vecchio', alias: 'utente', email: 'utente@example.com', status: 'ACTIVE' }])
+  })
+
+  it('refreshAccounts sostituisce l\'elenco con TUTTI gli account del toolkit', async () => {
+    const { manager, settings } = makeManager(byAction({
+      list: () => realListMany('gmail', [
+        { id: 'a1', alias: 'lavoro', email: 'fabio@azienda.test', is_default: true },
+        { id: 'a2', alias: 'personale', email: 'fabio@gmail.test' }
+      ])
+    }))
+    settings.set('composioGateway.apps', structuredClone(twoAccountGmail))
+    await manager.refreshAccounts()
+    const row = manager.status().connected.find((a) => a.slug === 'gmail')
+    expect(row?.accounts).toEqual([
+      { accountId: 'a1', alias: 'lavoro', email: 'fabio@azienda.test', status: 'ACTIVE', isDefault: true },
+      { accountId: 'a2', alias: 'personale', email: 'fabio@gmail.test', status: 'ACTIVE' }
+    ])
   })
 })

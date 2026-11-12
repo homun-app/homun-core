@@ -73,8 +73,8 @@ const fakeManagers = (state: FakeState) => {
   const composio = { status: async () => state.composioStatus } as unknown as ComposioManager
   const gateway = {
     status: () => ({ active: state.gateway.active, connected: [], pending: state.gateway.pending }),
-    connectApp: async (slug: string, name?: string) => {
-      state.gateway.connectAppCalls.push({ slug, name })
+    connectApp: async (slug: string, opts?: { name?: string }) => {
+      state.gateway.connectAppCalls.push({ slug, name: opts?.name })
       return { ok: true }
     },
     cancelWait: () => { state.gateway.cancelWaitCalls++ }

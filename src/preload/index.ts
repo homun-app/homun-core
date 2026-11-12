@@ -195,8 +195,10 @@ const api: SandbotApi = {
   // fase Composio OAuth (C5): le app dentro il server Composio collegato col login
   composioGatewayStatus: () => ipcRenderer.invoke('composio-gateway:status'),
   composioGatewayRefresh: () => ipcRenderer.invoke('composio-gateway:refresh'),
-  composioGatewayConnect: (slug, name) => ipcRenderer.invoke('composio-gateway:connect', slug, name),
+  composioGatewayConnect: (slug, name, opts) => ipcRenderer.invoke('composio-gateway:connect', slug, name, opts),
   composioGatewayRemove: (slug) => ipcRenderer.invoke('composio-gateway:remove', slug),
+  composioGatewayRenameAccount: (slug, accountId, alias) => ipcRenderer.invoke('composio-gateway:rename-account', slug, accountId, alias),
+  composioGatewayRemoveAccount: (slug, accountId) => ipcRenderer.invoke('composio-gateway:remove-account', slug, accountId),
   composioGatewayCancel: () => ipcRenderer.invoke('composio-gateway:cancel'),
   composioGatewayCardConnect: (key) => ipcRenderer.invoke('composio-gateway:card-connect', key),
   // fase catalogo app (P4): «Connetti» in un passo dalla riga dell'elenco
