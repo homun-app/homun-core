@@ -22,6 +22,8 @@ dalla beta.
 - **Più account per la stessa app (per esempio due caselle Gmail), e il bot
   sa subito quale hai collegato.** Ogni account col suo nome, dalla
   finestra App: aggiungi, rinomini, togli.
+- **Una guida al primo avvio che porta da zero a un bot pronto** — e i
+  messaggi scritti senza modello ripartono da soli.
 
 ## [0.3.1001-beta.4] — 2026-11-12
 

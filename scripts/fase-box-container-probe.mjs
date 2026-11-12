@@ -191,6 +191,27 @@ const waitDom = async (page, exprTrue, timeoutMs = 30_000, step = 300) => {
     await sleep(step)
   }
 }
+/** fase onboarding-a: al primo avvio c'è la GUIDA a tutta finestra — la si
+ *  attraversa (benvenuto → modello saltato → autorizzazioni «Chiedi prima»)
+ *  per avere la shell vera con le Impostazioni; se la guida non c'è, no-op. */
+const crossOnboardingGuide = async (page) => {
+  if (!(await waitDom(page, `!!document.querySelector('[data-testid="guide-step-welcome"]')`, 20_000))) return true
+  const click = (testid) => pageEval(page, `
+    const el = document.querySelector('[data-testid=${JSON.stringify(testid)}]')
+    if (!el) throw new Error('elemento non trovato: ' + ${JSON.stringify(testid)})
+    el.click()
+    return 'cliccato'
+  `)
+  await click('guide-continue')
+  if (!(await waitDom(page, `!!document.querySelector('[data-testid="guide-step-model"]')`, 10_000))) return false
+  await click('guide-skip')
+  if (!(await waitDom(page, `!!document.querySelector('[data-testid="guide-step-approvals"]')`, 10_000))) return false
+  // le autorizzazioni si SALTANO: questa sonda semina il suo approvals.mode
+  // nei dati (per esempio «never») e la guida non deve sovrascriverlo
+  await click('guide-skip')
+  return waitDom(page, `!!document.querySelector('form textarea')`, 20_000)
+}
+
 /** Apre le Impostazioni con ⌘, (input TRUSTED) e aspetta la colonna delle sezioni. */
 const openSettings = async (page) => {
   const NAV = `!!document.querySelector('[role="dialog"] nav button')`
@@ -292,6 +313,7 @@ try {
     let page = await waitForPage(port, (t) => (t.url ?? '').startsWith('http') || (t.url ?? '').startsWith('homun://'))
     if (!page) throw new Error(`nessuna pagina app (${mode}): log:\n${app.getAppLog().slice(-1500)}`)
     if (!(await waitDom(page, `typeof window.sandbot !== 'undefined'`, 40_000))) throw new Error('window.sandbot non disponibile')
+    if (!(await crossOnboardingGuide(page))) throw new Error(`la guida del primo avvio non si attraversa (${mode})`)
     if (!(await openSettings(page))) throw new Error(`le Impostazioni non si aprono (${mode})`)
 
     // la riga «Computer dei bot»: testo e azioni dello stato
@@ -325,6 +347,7 @@ try {
   let page = await waitForPage(port, (t) => (t.url ?? '').startsWith('http') || (t.url ?? '').startsWith('homun://'))
   if (!page) throw new Error('nessuna pagina app (ready-azioni): log:\n' + app.getAppLog().slice(-1500))
   if (!(await waitDom(page, `typeof window.sandbot !== 'undefined'`, 40_000))) throw new Error('window.sandbot non disponibile')
+  if (!(await crossOnboardingGuide(page))) throw new Error('la guida del primo avvio non si attraversa (ready-azioni)')
   if (!(await openSettings(page))) throw new Error('le Impostazioni non si aprono (ready-azioni)')
   if (!(await waitDom(page, `!!document.querySelector('[data-testid="disk-space-section"]')`, 25_000))) {
     throw new Error('la sezione «Spazio su disco» non compare')
@@ -473,6 +496,11 @@ try {
     if (!page) throw new Error(`nessuna pagina app (BR giro ${giro}): log:\n${app.getAppLog().slice(-1500)}`)
     if (!(await waitDom(page, `typeof window.sandbot !== 'undefined'`, 40_000))) throw new Error('window.sandbot non disponibile (BR)')
     const rpc = (callExpr) => pageEval(page, `return await window.sandbot.${callExpr}`)
+    // fase onboarding-a: la guida del primo avvio va attraversata anche qui
+    if (!(await crossOnboardingGuide(page))) throw new Error('la guida del primo avvio non si attraversa (BR)')
+    if (await waitDom(page, `!!document.querySelector('[data-testid="focus-dismiss"]')`, 8_000)) {
+      await pageEval(page, `document.querySelector('[data-testid="focus-dismiss"]').click(); return 'chiusa'`)
+    }
     const agents = await rpc('listAgents()')
     if (!agents?.[0]) throw new Error('nessun bot (BR)')
     await rpc(`updateAgent(${JSON.stringify(agents[0].id)}, ${JSON.stringify({ providerId: 'finto', model: 'finto' })})`)

@@ -495,6 +495,23 @@ try {
     throw new Error('window.sandbot non disponibile dopo 30s')
   }
 
+  // fase onboarding-a: al primo avvio c'è la GUIDA a tutta finestra — la si
+  // attraversa (benvenuto → modello saltato → autorizzazioni SALTATE: i flussi
+  // di questa sonda sono sugli ACCOUNT, non sull'onboarding, e nessun setting
+  // della guida deve cambiare i dati seminati) e la card del focus si chiude
+  // senza scegliere
+  if (await waitDom(`!!document.querySelector('[data-testid="guide-step-welcome"]')`, 20_000)) {
+    await clickTestid('guide-continue')
+    await waitDom(`!!document.querySelector('[data-testid="guide-step-model"]')`, 10_000)
+    await clickTestid('guide-skip')
+    await waitDom(`!!document.querySelector('[data-testid="guide-step-approvals"]')`, 10_000)
+    await clickTestid('guide-skip')
+  }
+  await waitDom(`!!document.querySelector('form textarea')`, 25_000)
+  if (await waitDom(`!!document.querySelector('[data-testid="focus-dismiss"]')`, 8_000)) {
+    await clickTestid('focus-dismiss')
+  }
+
   // ---- setup: provider finto + il bot principale ----
   log('configuro provider finto e il bot…')
   await rpc(`saveProvider(${JSON.stringify({ id: 'finto', name: 'Finto (locale)', kind: 'openai-compatible', baseUrl: `http://127.0.0.1:${providerPort}/v1`, apiKey: 'chiave-finta-di-prova', enabled: true })})`)
