@@ -194,6 +194,16 @@ export function dockerBoxInitCheckArgv(container: string): string[] {
   return ['inspect', '-f', '{{.HostConfig.Init}}', container]
 }
 
+/**
+ * BR3 (fase box-rete): la RETE del container esistente — `inspect -f` stampa
+ * il NetworkMode col quale è nato ('bridge', 'none', …). La rete si legge
+ * solo alla creazione: se non è più quella della modalità corrente, il box
+ * si RICREA (solo il container, i volumi mai).
+ */
+export function dockerContainerNetworkArgv(container: string): string[] {
+  return ['inspect', '-f', '{{.HostConfig.NetworkMode}}', container]
+}
+
 /** G2: rimozione del SOLO container da ricreare (il volume non si tocca MAI). */
 export function dockerBoxRmArgv(container: string): string[] {
   return ['rm', '-f', container]
@@ -244,11 +254,19 @@ export interface BoxEnsureFacts {
    * → si tiene.
    */
   browserMountOk?: boolean
+  /**
+   * BR3 (fase box-rete): la rete del box esistente è quella che la modalità
+   * corrente richiede. false = nato con l'altra → ricreazione 'rete-cambiata'
+   * (la rete si legge solo alla creazione); undefined = inspect non riuscito
+   * → in `none` si ricrea lo stesso (fail closed), in `bridge` si tiene il
+   * box che funziona (regola di oggi).
+   */
+  networkOk?: boolean
 }
 
 export type BoxEnsurePlan =
   | { kind: 'use' }
-  | { kind: 'recreate'; reason: 'senza-init' | 'volume-di-root' | 'immagine-vecchia' | 'mount-plugin-mancante' | 'mount-browser-mancante' }
+  | { kind: 'recreate'; reason: 'senza-init' | 'volume-di-root' | 'immagine-vecchia' | 'mount-plugin-mancante' | 'mount-browser-mancante' | 'rete-cambiata' }
   | { kind: 'create' }
 
 /**
@@ -272,6 +290,10 @@ export function boxEnsurePlan(facts: BoxEnsureFacts): BoxEnsurePlan {
   if (facts.imageOk === false) return { kind: 'recreate', reason: 'immagine-vecchia' }
   if (facts.pluginsMountOk === false) return { kind: 'recreate', reason: 'mount-plugin-mancante' }
   if (facts.browserMountOk === false) return { kind: 'recreate', reason: 'mount-browser-mancante' }
+  // BR3: la rete si legge solo alla creazione — nata con l'ALTRA rete, il box
+  // si ricrea (solo il container, i volumi mai). networkOk undefined (inspect
+  // caduto) qui NON basta: il chiamante lo sa e in `none` passa false
+  if (facts.networkOk === false) return { kind: 'recreate', reason: 'rete-cambiata' }
   return facts.writable ? { kind: 'use' } : { kind: 'recreate', reason: 'volume-di-root' }
 }
 

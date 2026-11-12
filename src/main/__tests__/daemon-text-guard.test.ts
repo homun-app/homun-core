@@ -81,6 +81,11 @@ const ALLOWED_LITERALS: ReadonlyArray<{ file: string; text: string }> = [
   // fase 18a (E0): codici del piano box (chiavi del piano sandbox, non testo)
   { file: 'src/main/sandbox/docker-argv.ts', text: 'mount-plugin-mancante' },
   { file: 'src/main/sandbox/docker-argv.ts', text: 'mount-browser-mancante' },
+  // fase box-rete (BR1/BR2): i due messaggi IN PAROLE della spec — l'errore
+  // che il bot vede quando l'isolamento della modalità none non riesce e
+  // quando il secondo ascolto del proxy non si apre sul gateway
+  { file: 'src/main/sandbox/index.ts', text: 'Non riesco a isolare il computer del bot dalla rete: per sicurezza non l\'ho avviato' },
+  { file: 'src/main/agent/browser-proxy.ts', text: 'Non riesco ad aprire il proxy del browser sull\'indirizzo della rete del box: per sicurezza il browser del bot non parte' },
   // fase use-app (U4): il TESTO VERO con cui macOS in italiano nega
   // l'Accessibilità — si riconosce per confrontarlo, non è UI
   { file: 'src/main/computeruse/index.ts', text: "non ammette l’accesso di assistenza" },

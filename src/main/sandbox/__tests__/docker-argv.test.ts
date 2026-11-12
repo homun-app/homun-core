@@ -38,6 +38,7 @@ import {
     dockerEnsureHomeArgv,
     boxNeedsRecreateForInit,
     boxEnsurePlan,
+    dockerContainerNetworkArgv,
     boxCreateCheck,
     boxImageTag,
     dockerImageInspectArgv,
@@ -714,6 +715,26 @@ describe('H1: controllo test -w e decisione use/una ricreazione/errore chiaro', 
     expect(boxEnsurePlan({ exists: true, initOk: true, writable: false })).toEqual({ kind: 'recreate', reason: 'volume-di-root' })
     // scrivibilità ignota (difensivo): si ricrea, il lato sicuro
     expect(boxEnsurePlan({ exists: true, initOk: true })).toEqual({ kind: 'recreate', reason: 'volume-di-root' })
+  })
+
+  // BR3 (fase box-rete): la rete del box esistente contro quella che la
+  // modalità corrente richiede — cambiare sandbox.network RICREA il box (la
+  // rete si legge solo alla creazione). Fail closed: inspect fallito in none
+  // → si ricrea; in bridge la regola di oggi (inspect fallito non ricrea).
+  it('BR3: dockerContainerNetworkArgv è un inspect puro; la decisione usa networkOk', () => {
+    expect(dockerContainerNetworkArgv(BOX_CONTAINER)).toEqual(['inspect', '-f', '{{.HostConfig.NetworkMode}}', 'sandbot-box'])
+  })
+
+  it('BR3: rete UGUALE a quella richiesta → use; DIVERSA → recreate rete-cambiata', () => {
+    expect(boxEnsurePlan({ exists: true, initOk: true, writable: true, networkOk: true })).toEqual({ kind: 'use' })
+    expect(boxEnsurePlan({ exists: true, initOk: true, writable: true, networkOk: false })).toEqual({ kind: 'recreate', reason: 'rete-cambiata' })
+    // la rete vince sulla scrivibilità ignota: il motivo è la RETE
+    expect(boxEnsurePlan({ exists: true, initOk: true, networkOk: false })).toEqual({ kind: 'recreate', reason: 'rete-cambiata' })
+  })
+
+  it('BR3 fail closed: inspect della rete FALLITO — in none si ricrea, in bridge non si tocca (regola di oggi)', () => {
+    // networkOk undefined = inspect non riuscito
+    expect(boxEnsurePlan({ exists: true, initOk: true, writable: true, networkOk: undefined })).toEqual({ kind: 'use' })
   })
 
   it('punto 1: decisione pura con imageOk — immagine DIVERSA ricrea, inspect fallito NON ricrea', () => {

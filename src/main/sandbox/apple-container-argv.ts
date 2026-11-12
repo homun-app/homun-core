@@ -234,6 +234,11 @@ export function appleContainerImageArgv(container: string): string[] {
   return ['inspect', '--format', '{{.image}}', container]
 }
 
+/** BR3: la RETE del box esistente (l'inspect da confrontare con appleNetworkOf). */
+export function appleContainerNetworkArgv(container: string): string[] {
+  return ['inspect', '--format', '{{.network}}', container]
+}
+
 export function appleEnsureHomeArgv(container: string, agentId: string): string[] {
   return ['exec', container, 'mkdir', '-p', boxHomePath(agentId)]
 }

@@ -37,6 +37,8 @@ function fakeDocker(state: { inspect: string; image?: string; mounts?: string; m
     if (argv[0] === 'ps') return ok('sandbot-box') // il container esiste
     // punto 1: init e immagine del container si leggono con inspect -f diversi
     if (argv[0] === 'inspect' && argv[2] === '{{.Config.Image}}') return ok(state.image ?? boxImage())
+    // BR3 (fase box-rete): la RETE del box esistente (qui i test girano in bridge)
+    if (argv[0] === 'inspect' && argv[2] === '{{.HostConfig.NetworkMode}}') return ok('bridge')
     // M4/N1: i mount EFFETTIVI del container (inspect -f {{range .Mounts}}…) —
     // il matcher segue il template VERO: un ritorno a .HostConfig.Mounts non
     // viene riconosciuto, cade nell'inspect generico e la guardia N1 fallisce
@@ -165,10 +167,10 @@ describe('N1: il box già a posto NON si ricrea a ogni comando', () => {
     expect(f.calls.some((a) => a[0] === 'create')).toBe(false)
     expect(f.calls.some((a) => a[0] === 'run')).toBe(false)
     expect(f.calls.some((a) => a[0] === 'volume')).toBe(false)
-    // SOLO controlli: image inspect, ps, inspect (init/immagine/mount), start
-    // e il test -w — una corsa completa per chiamata
+    // SOLO controlli: image inspect, ps, inspect (init/immagine/mount/rete),
+    // start e il test -w — una corsa completa per chiamata
     expect(new Set(f.calls.map((a) => a[0]))).toEqual(new Set(['image', 'ps', 'inspect', 'start', 'exec']))
-    expect(f.calls.filter((a) => a[0] === 'inspect')).toHaveLength(6) // init, immagine e mount × 2
+    expect(f.calls.filter((a) => a[0] === 'inspect')).toHaveLength(8) // init, immagine, mount e RETE (BR3) × 2
     expect(f.calls.filter((a) => a[0] === 'start')).toHaveLength(2)
     expect(f.calls.filter((a) => a[0] === 'exec' && a[2] === 'test')).toHaveLength(2) // test -w /box/workspace
   })

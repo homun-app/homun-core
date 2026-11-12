@@ -170,6 +170,9 @@ if (argv[0] === 'run') {
   }
   out('run (fake): container started'); process.exit(0)
 }
+// il create DI DOCKER (lo usa il motore docker nei test dell'ensure BR3): lo
+// stato lo registra scanState dal --name/--network/immagine dell'argv
+if (argv[0] === 'create') { out('create (fake): container created'); process.exit(0) }
 if (argv[0] === 'exec') {
   // BR1: l'exec della VERIFICA (lo script che legge operstate) può fallire
   // su richiesta del test: le interfacce NON sono giù, l'isolamento è rotto
@@ -181,7 +184,9 @@ if (argv[0] === 'exec') {
 if (argv[0] === 'cp') { process.exit(0) }
 if (argv[0] === 'inspect') {
   const { box } = scanState()
-  const i = argv.indexOf('--format')
+  // il formato è --format (CLI di Apple) o -f (docker): stesso posto
+  const fi = argv.indexOf('--format')
+  const i = fi >= 0 ? fi : argv.indexOf('-f')
   const f = i >= 0 ? String(argv[i + 1] ?? '') : ''
   if (i >= 0 && /running/i.test(f)) { out('true'); process.exit(0) }
   if (i >= 0 && /image/i.test(f)) { out(box?.image ?? 'sandbot-box:fake'); process.exit(0) }

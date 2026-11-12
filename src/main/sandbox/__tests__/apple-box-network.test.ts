@@ -130,3 +130,105 @@ describe('BR1: l\'ensure in none con la CLI finta — isolata e verificata, o no
     }
   })
 })
+
+// ---- BR3 (fase box-rete): cambiare sandbox.network RICREA il box ----
+//
+// La rete si legge solo alla creazione: un box nato bridge resta bridge anche
+// dopo il passaggio a none. L'ensure confronta la rete DEL box esistente con
+// quella della modalità corrente (Docker: none/bridge; Apple: la rete di
+// Homun) e ricrea col motivo 'rete-cambiata'. Fail closed: inspect della
+// rete fallito in none → si ricrea; in bridge non si tocca (regola di oggi).
+
+describe('BR3: il passaggio bridge → none ricrea il box (CLI finta, stato nel log)', () => {
+  it('APPLE: box nato su homun-box, modalità none → RICREATO su homun-box-isolated col motivo nel log', async () => {
+    const logFile = newLog()
+    setDockerRunnerForTests(fakeCliRunner(logFile))
+    const err = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    try {
+      settings.value['sandbox.network'] = 'bridge'
+      await execCommand('agent_x', 'true')
+      const nato = boxRun(readCliLog(logFile))!
+      expect(nato[nato.indexOf('--network') + 1]).toBe('homun-box')
+      // cambia la modalità: la rete del box non è più quella richiesta
+      settings.value['sandbox.network'] = 'none'
+      const before = readCliLog(logFile).length
+      await execCommand('agent_x', 'echo di-nuovo')
+      const log = readCliLog(logFile)
+      // RICREATO: rm del SOLO container (mai volumi), nuovo run -d sulla rete
+      // isolata, e di nuovo link down + verifica (un box none è VERIFICATO)
+      const rm = log.slice(before).find((a) => a[0] === 'rm' && a.includes('sandbot-box'))
+      expect(rm, 'il box bridge viene rimosso').toBeDefined()
+      expect(log.slice(before).some((a) => a[0] === 'volume' && (a[1] === 'rm' || a[1] === 'delete'))).toBe(false)
+      const ricreato = log.slice(before).find((a) => a[0] === 'run' && a.includes('-d'))!
+      expect(ricreato[ricreato.indexOf('--network') + 1]).toBe('homun-box-isolated')
+      expect(ricreato).toContain('--no-dns')
+      expect(rootExecs(log.slice(before)).some((a) => (a[a.indexOf('-c') + 1] ?? '').includes('ip link set'))).toBe(true)
+      expect(log.some((a) => a[0] === 'exec' && a.includes('echo di-nuovo'))).toBe(true)
+      expect(err).toHaveBeenCalledWith(expect.stringContaining('ricreazione del container sandbot-box: rete-cambiata'))
+    } finally {
+      err.mockRestore()
+    }
+  })
+
+  it('DOCKER: box nato su bridge, modalità none → RICREATO con --network none (niente rm di volumi)', async () => {
+    const logFile = newLog()
+    setDockerRunnerForTests(fakeCliRunner(logFile))
+    const err = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    try {
+      settings.value['sandbox.engine'] = 'docker'
+      settings.value['sandbox.network'] = 'bridge'
+      await execCommand('agent_x', 'true')
+      const nato = readCliLog(logFile).find((a) => a[0] === 'create')!
+      expect(nato[nato.indexOf('--network') + 1]).toBe('bridge')
+      settings.value['sandbox.network'] = 'none'
+      const before = readCliLog(logFile).length
+      await execCommand('agent_x', 'echo di-nuovo')
+      const log = readCliLog(logFile)
+      expect(log.slice(before).some((a) => a[0] === 'rm' && a.includes('sandbot-box'))).toBe(true)
+      expect(log.slice(before).some((a) => a[0] === 'volume' && (a[1] === 'rm' || a[1] === 'delete'))).toBe(false)
+      const ricreato = log.slice(before).find((a) => a[0] === 'create')!
+      expect(ricreato[ricreato.indexOf('--network') + 1]).toBe('none')
+      expect(log.some((a) => a[0] === 'exec' && a.includes('echo di-nuovo'))).toBe(true)
+      expect(err).toHaveBeenCalledWith(expect.stringContaining('ricreazione del container sandbot-box: rete-cambiata'))
+    } finally {
+      settings.value['sandbox.engine'] = 'apple-container'
+      err.mockRestore()
+    }
+  })
+
+  it('DOCKER fail closed: inspect della rete CADUTO in none → si ricrea lo stesso; in bridge NON si tocca', async () => {
+    const logFile = newLog()
+    // la CLI finta risponde a TUTTO tranne che all'inspect della rete del box
+    const base = fakeCliRunner(logFile)
+    const runner = async (argv: string[]): Promise<{ stdout: string; stderr: string; exitCode: number | null; signal: null }> => {
+      if (argv[0] === 'inspect' && argv.some((a) => typeof a === 'string' && /network/i.test(a))) {
+        return { stdout: '', stderr: 'Error: No such object', exitCode: 1, signal: null }
+      }
+      return base(argv)
+    }
+    setDockerRunnerForTests(runner)
+    const err = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    try {
+      settings.value['sandbox.engine'] = 'docker'
+      settings.value['sandbox.network'] = 'none'
+      // il box NASCE (il percorso di creazione non ispeziona la rete del box)
+      await execCommand('agent_x', 'true')
+      const dopoLaNascita = readCliLog(logFile).length
+      expect(readCliLog(logFile).some((a) => a[0] === 'create' && a[a.indexOf('--network') + 1] === 'none')).toBe(true)
+      // secondo giro col box che ESISTE e l'inspect della rete che CADE: in
+      // none si ricrea (fail closed), col motivo nel log
+      await execCommand('agent_x', 'echo due')
+      const log2 = readCliLog(logFile)
+      expect(log2.slice(dopoLaNascita).some((a) => a[0] === 'rm' && a.includes('sandbot-box'))).toBe(true)
+      expect(err).toHaveBeenCalledWith(expect.stringContaining('ricreazione del container sandbot-box: rete-cambiata'))
+      // e la regola di oggi in bridge: inspect fallito NON ricrea (networkOk ignoto)
+      settings.value['sandbox.network'] = 'bridge'
+      const before = log2.length
+      await execCommand('agent_x', 'true')
+      expect(readCliLog(logFile).slice(before).some((a) => a[0] === 'rm')).toBe(false)
+    } finally {
+      settings.value['sandbox.engine'] = 'apple-container'
+      err.mockRestore()
+    }
+  })
+})

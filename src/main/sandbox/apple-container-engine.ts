@@ -29,6 +29,7 @@ import {
   appleBoxMountsArgv,
   appleBoxWritableArgv,
   appleContainerImageArgv,
+  appleContainerNetworkArgv,
   appleEnsureHomeArgv,
   appleImageInspectArgv,
   appleImageSizeArgv,
@@ -175,6 +176,7 @@ const argv: BoxEngineArgv = {
   boxMounts: appleBoxMountsArgv,
   boxWritable: appleBoxWritableArgv,
   containerImage: appleContainerImageArgv,
+  containerNetwork: appleContainerNetworkArgv,
   ensureHome: appleEnsureHomeArgv,
   imageInspect: appleImageInspectArgv,
   imageSize: appleImageSizeArgv,
@@ -237,6 +239,8 @@ export const appleContainerEngine: BoxEngine = {
   command: () => containerCliPath(),
   childEnv: (env) => Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined)),
   argv,
+  /** BR3: le reti di Homun, non i nomi di Docker. */
+  networkNameOf: appleNetworkOf,
   prepareNetwork: async (run, network) => {
     await ensureAppleBoxNetwork(run, network)
   },

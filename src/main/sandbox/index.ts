@@ -518,6 +518,15 @@ export async function ensureBoxContainer(): Promise<void> {
       const mounts = await dockerRunner(activeBoxEngine().argv.boxMounts(BOX_CONTAINER), { timeoutMs: 15_000 })
       facts.pluginsMountOk = mounts.exitCode === 0 ? boxHasPluginsMountRo(mounts.stdout) : undefined
       facts.browserMountOk = mounts.exitCode === 0 ? boxHasBrowserMountRw(mounts.stdout) : undefined
+      // BR3 (fase box-rete): la RETE del box esistente contro quella che la
+      // modalità corrente richiede — la rete si legge solo alla creazione, un
+      // box nato bridge resta bridge dopo il passaggio a none. Inspect caduto:
+      // in `none` si ricrea (fail closed: mai un box none non verificato), in
+      // `bridge` la regola di oggi (si tiene il box che funziona)
+      const netInsp = await dockerRunner(engine.argv.containerNetwork(BOX_CONTAINER), { timeoutMs: 15_000 })
+      facts.networkOk = netInsp.exitCode === 0
+        ? netInsp.stdout.trim() === engine.networkNameOf(network)
+        : network === 'none' ? false : undefined
       const start = await dockerRunner(activeBoxEngine().argv.start(BOX_CONTAINER), { timeoutMs: 30_000 })
       if (start.exitCode !== 0) throw new Error(`docker start fallito: ${start.stderr}`)
       const w = await dockerRunner(activeBoxEngine().argv.boxWritable(BOX_CONTAINER), { timeoutMs: 15_000 })

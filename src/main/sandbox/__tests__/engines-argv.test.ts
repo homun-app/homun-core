@@ -4,6 +4,7 @@
 // (BX1.3). Test di guardia: nasce verde e impedisce qualunque deriva.
 import { describe, expect, it } from 'vitest'
 import { dockerEngine } from '../docker-engine'
+import { appleContainerEngine } from '../apple-container-engine'
 import * as d from '../docker-argv'
 
 const a = dockerEngine.argv
@@ -22,11 +23,20 @@ describe('BX5: gli argv del motore Docker sono byte-identici a oggi', () => {
     expect(a.boxMounts('c')).toEqual(d.dockerBoxMountsArgv('c'))
     expect(a.boxWritable('c')).toEqual(d.dockerBoxWritableArgv('c'))
     expect(a.containerImage('c')).toEqual(d.dockerContainerImageArgv('c'))
+    // BR3 (fase box-rete): la rete DEL box esistente, per decidere se ricreare
+    expect(a.containerNetwork('c')).toEqual(d.dockerContainerNetworkArgv('c'))
     expect(a.ensureHome('c', 'agent_x')).toEqual(d.dockerEnsureHomeArgv('c', 'agent_x'))
     expect(a.imageInspect('t')).toEqual(d.dockerImageInspectArgv('t'))
     expect(a.imageSize('t')).toEqual(d.dockerImageSizeArgv('t'))
     expect(a.build('t', '/df', '/ctx')).toEqual(d.dockerBuildArgv('t', '/df', '/ctx'))
     expect(a.volumeLs('v')).toEqual(d.dockerVolumeLsArgv('v'))
+  })
+
+  it('BR3: networkNameOf — la rete che ogni motore richiede per modalità (Docker i nomi di Docker, Apple le reti di Homun)', () => {
+    expect(dockerEngine.networkNameOf('bridge')).toBe('bridge')
+    expect(dockerEngine.networkNameOf('none')).toBe('none')
+    expect(appleContainerEngine.networkNameOf('bridge')).toBe('homun-box')
+    expect(appleContainerEngine.networkNameOf('none')).toBe('homun-box-isolated')
   })
 
   it('exec: comandi, background, kill di gruppo, stat, MCP stdio', () => {
@@ -107,6 +117,7 @@ describe('BX5: gli argv del motore Docker sono byte-identici a oggi', () => {
     // operazione si aggiunge, questo elenco la pretende sul motore
     const OPS = [
       'ps', 'start', 'stop', 'boxCreate', 'boxRm', 'boxInitCheck', 'boxMounts', 'boxWritable', 'containerImage',
+      'containerNetwork',
       'ensureHome', 'imageInspect', 'imageSize', 'build', 'volumeLs',
       'exec', 'execBackground', 'killGroup', 'statSize', 'stdioMcp',
       'readFile', 'writeFile', 'listDir', 'realpath', 'findList', 'readB64', 'testPath', 'rmDir', 'cpFromBox',

@@ -9,6 +9,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { BoxEngine, BoxEngineArgv } from './engine'
 import {
+  dockerContainerNetworkArgv,
   dockerExecArgv,
   dockerExecBackgroundArgv,
   dockerKillGroupArgv,
@@ -85,6 +86,7 @@ const argv: BoxEngineArgv = {
   boxMounts: dockerBoxMountsArgv,
   boxWritable: dockerBoxWritableArgv,
   containerImage: dockerContainerImageArgv,
+  containerNetwork: dockerContainerNetworkArgv,
   ensureHome: dockerEnsureHomeArgv,
   imageInspect: dockerImageInspectArgv,
   imageSize: dockerImageSizeArgv,
@@ -146,7 +148,9 @@ export const dockerEngine: BoxEngine = {
   id: 'docker',
   command: () => resolveTool('docker'),
   childEnv: (env) => dockerChildEnv(env),
-  argv
+  argv,
+  /** BR3: Docker usa i SUOI nomi di rete, nessuna rete di Homun. */
+  networkNameOf: (network) => network
 }
 
 /**

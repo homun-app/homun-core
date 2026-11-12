@@ -42,6 +42,8 @@ export interface BoxEngineArgv {
   boxMounts(container: string): string[]
   boxWritable(container: string): string[]
   containerImage(container: string): string[]
+  /** BR3: la RETE del box esistente (l'inspect da confrontare con networkNameOf). */
+  containerNetwork(container: string): string[]
   ensureHome(container: string, agentId: string): string[]
   imageInspect(tag: string): string[]
   /** BX3: la dimensione in byte della NOSTRA immagine. */
@@ -125,6 +127,12 @@ export interface BoxEngine {
   /** L'env dei processi figli (docker: + DOCKER_HOST quando serve). */
   childEnv(env: NodeJS.ProcessEnv): Record<string, string>
   readonly argv: BoxEngineArgv
+  /**
+   * BR3 (fase box-rete): la rete che questo motore usa per la modalità —
+   * Docker i nomi di Docker ('bridge' | 'none'), Apple le reti di Homun
+   * ('homun-box' | 'homun-box-isolated'). PURA.
+   */
+  networkNameOf(network: 'bridge' | 'none'): string
   /**
    * BX2: il terreno del motore PRIMA del (ri)avvio del box, se il motore ne
    * ha uno (apple-container: la rete interna e il suo gateway). Il runner è

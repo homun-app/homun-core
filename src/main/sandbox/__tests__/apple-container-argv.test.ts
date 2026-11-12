@@ -20,6 +20,7 @@ import {
   appleNetworkInspectArgv,
   appleIsolateLinkDownArgv,
   appleIsolationCheckArgv,
+  appleContainerNetworkArgv,
   appleBrowserMcpArgv,
   browserMcpFlagsWithGateway,
   parseNetworkGateway,
@@ -123,6 +124,10 @@ describe('BR1: none → la rete isolata e le interfacce GIÙ (difesa in profondi
     expect(script).toContain('/sys/class/net/')
     expect(script).toContain('operstate')
     expect(script).toContain('lo')
+  })
+
+  it('BR3: la rete DEL box esistente si ispeziona (inspect --format {{.network}})', () => {
+    expect(appleContainerNetworkArgv('sandbot-box')).toEqual(['inspect', '--format', '{{.network}}', 'sandbot-box'])
   })
 })
 
