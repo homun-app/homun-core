@@ -203,6 +203,49 @@ export async function verifyVendorBinaries({ appPath, contentsPath, signed, exec
   return { binaries }
 }
 
+// ---- fase box-container (BX6): la verifica del ticket di notarizzazione riprova ----
+
+/** L'exec del validate: (cmd, args) => { status, out } (come defaultExec). */
+
+/**
+ * BX6 (PURa): l'errore di `stapler validate` è di RETE di CloudKit? La CI
+ * della beta.4 è caduta solo per quello (errore 68, NSURLErrorDomain -1005
+ * «network connection was lost») e il rilancio è passato. Solo i guasti di
+ * rete si riprovano: -1005 e -1001 NUMERI INTERI (non -10050), la frase di
+ * rete persa, i timeout. Tutto il resto (ticket mancante, firme, JSON)
+ * fallisce subito come oggi.
+ */
+export function isNotarizationNetworkError(output) {
+  return /(?<![0-9])-100[15](?![0-9])/.test(output) || /network connection was lost/i.test(output) || /timed?\s?out|timeout/i.test(output)
+}
+
+/** Le attese crescenti tra le corse del validate: 10 s, 30 s (3 corse in tutto). */
+export const STAPLER_RETRY_DELAYS_MS = [10_000, 30_000]
+
+const defaultSleep = async (ms) => new Promise((r) => setTimeout(r, ms))
+
+/**
+ * BX6: `xcrun stapler validate <app>` con RIPRESA dai guasti di rete — fino
+ * a 3 corse (1 + i 2 retry) con attese crescenti. Gli altri errori escono
+ * alla prima corsa, come oggi. Torna {ok:true} o {ok:false, error} col testo
+ * dell'ULTIMO fallimento: il chiamante decide come mostrarlo.
+ */
+export async function runStaplerValidate(opts) {
+  const sleep = opts.sleep ?? defaultSleep
+  let last = ''
+  for (let attempt = 0; attempt <= STAPLER_RETRY_DELAYS_MS.length; attempt++) {
+    const r = opts.exec('xcrun', ['stapler', 'validate', opts.appPath])
+    if (r.status === 0) return { ok: true }
+    last = r.out.trim() || `exit ${r.status}`
+    if (attempt < STAPLER_RETRY_DELAYS_MS.length && isNotarizationNetworkError(last)) {
+      await sleep(STAPLER_RETRY_DELAYS_MS[attempt])
+      continue
+    }
+    return { ok: false, error: last }
+  }
+  return { ok: false, error: last }
+}
+
 // ---- CLI (solo da riga di comando: importato dai test non esce) ----
 const isCli = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]
 
@@ -372,7 +415,12 @@ async function main() {
   let notarized = false
   if (signed) {
     run('codesign', ['--verify', '--deep', '--strict', appPath], 'Deep code-signature verification')
-    run('xcrun', ['stapler', 'validate', appPath], 'Notarization ticket validation')
+    // BX6: il ticket si valida con RIPRESA dai guasti di rete di CloudKit
+    // (max 3 corse, 10 s e 30 s di attesa): gli altri errori escono subito
+    const stapler = await runStaplerValidate({ exec: defaultExec, appPath: appPath })
+    if (!stapler.ok) {
+      die(`Notarization ticket validation failed\n${stapler.error}`)
+    }
     notarized = true
   }
 
