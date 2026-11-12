@@ -13,7 +13,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { useStore, api } from '../store'
-import type { OnboardingProviderPath, AutoReviewSettings } from '../../../shared/types'
+import type { AutoReviewSettings } from '../../../shared/types'
 import { DEFAULT_AUTO_REVIEW } from '../../../shared/types'
 import { avatarOf, BOT_FAMILIES, BOT_COLORS } from '../../../shared/avatar'
 import type { BotFamily, BotColor } from '../../../shared/types'
@@ -24,6 +24,8 @@ import { TRAFFIC_LIGHT_INSET } from '../layout'
 import { approvalsChoices } from '../lib/guide-steps'
 import { guideMood, guideBubble, guideBubbleKey, EMPTY_GUIDE_FACTS, type GuideFacts, type GuideUiStep } from '../lib/guide-scene'
 import { Bot } from '../bot/Bot'
+// G4: il passo Modello vive in un componente suo (griglia, prova, Ollama, Integrato)
+import { GuideModelStep, type ModelStepFacts } from './GuideModelStep'
 
 /** L'ordine dei passi della guida nella UI («Pronto» è solo UI, G6). */
 const UI_STEPS: readonly GuideUiStep[] = ['welcome', 'model', 'approvals', 'ready']
@@ -135,44 +137,6 @@ function StepPanel({ stepKey, children, testId }: { stepKey: string; children: R
   )
 }
 
-/** La carta di una strada del passo modello (finché G4 non la sostituisce). */
-function RoadCard({ path, onOpen }: { path: OnboardingProviderPath; onOpen: () => void }) {
-  const { t } = useLingui()
-  const roads: Record<OnboardingProviderPath, { title: string; note: string; primary?: boolean; test: string }> = {
-    cloud: {
-      title: t`Modello cloud con una chiave`,
-      note: t`Il più capace, consigliato per partire. Serve una chiave (Anthropic, OpenAI, Google…).`,
-      primary: true,
-      test: 'guide-road-cloud'
-    },
-    ollama: {
-      title: t`Ollama che è già sul tuo Mac`,
-      note: t`Hai Ollama in casa: si aggiunge come provider e si sceglie un modello che supporti i tool.`,
-      test: 'guide-road-ollama'
-    },
-    local: {
-      title: t`Modello integrato sul tuo Mac`,
-      note: t`Niente costi e i dati restano qui. È più lento e sbaglia più spesso dei modelli cloud.`,
-      test: 'guide-road-local'
-    }
-  }
-  const r = roads[path]
-  return (
-    <button
-      type="button"
-      data-testid={r.test}
-      className={`flex w-full flex-col items-start gap-1 rounded-2xl px-5 py-4 text-left transition hover:bg-accent ${r.primary ? 'bg-muted' : 'bg-muted/60'}`}
-      onClick={onOpen}
-    >
-      <span className="flex w-full items-center justify-between gap-3">
-        <span className="text-sm font-medium">{r.title}</span>
-        {r.primary && <span className="rounded-full bg-foreground px-2.5 py-0.5 text-[10px] text-background">{t`consigliato`}</span>}
-      </span>
-      <span className="text-xs text-muted-foreground">{r.note}</span>
-    </button>
-  )
-}
-
 /**
  * G3: il passo «Tu» — il nome e la faccia del bot principale, secondo il
  * mockup: campo nome (max 40, vuoto = «Bot»), le 5 famiglie come piastrelle
@@ -269,8 +233,6 @@ export function GuideView() {
   const { t, i18n } = useLingui()
   const onboarding = useStore((s) => s.onboarding)
   const advance = useStore((s) => s.onboardingAdvance)
-  const setSettingsOpen = useStore((s) => s.setSettingsOpen)
-  const setSettingsTab = useStore((s) => s.setSettingsTab)
   const uiLanguage = useStore((s) => s.uiLanguage)
   const setUiLanguage = useStore((s) => s.setUiLanguage)
   const windowWidth = useStore((s) => s.windowWidth)
@@ -294,6 +256,10 @@ export function GuideView() {
   const [draftAvatar, setDraftAvatar] = useState<{ family: BotFamily; color: BotColor } | null>(null)
   // il lampo felice (~1 s) dopo la scelta di una faccia o un colore
   const [flashHappy, setFlashHappy] = useState(false)
+  // G4: i fatti del passo Modello per la scena, la sua Continua e il pronto
+  const [modelFacts, setModelFacts] = useState<ModelStepFacts>({ providerPath: null, probe: 'idle', ollamaChosen: false, download: 'idle' })
+  const [modelLocalReady, setModelLocalReady] = useState(false)
+  const modelContinueRef = useRef<(() => Promise<boolean>) | null>(null)
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const happyFlash = (): void => {
     setFlashHappy(true)
@@ -336,7 +302,12 @@ export function GuideView() {
     ...EMPTY_GUIDE_FACTS,
     name: typedName,
     modelReady,
-    flashHappy
+    flashHappy,
+    // G4: lo stato del pannello del passo Modello (strada, prova, download)
+    providerPath: modelFacts.providerPath,
+    probe: modelFacts.probe,
+    ollamaChosen: modelFacts.ollamaChosen,
+    download: modelFacts.download
   }
   const mood = guideMood(uiStep, facts)
   const bubble = i18n.t(guideBubble(uiStep, facts))
@@ -348,10 +319,14 @@ export function GuideView() {
   const sceneWidth = windowWidth >= 1100 ? 580 : 420
 
   // ---- la navigazione ----
-  const nextDisabled = uiStep === 'model' && !modelReady
+  // G4: «Continua» del passo Modello è attivo solo col modello pronto (la
+  // prova riuscita col modello scelto, Ollama scelto, o l'integrato pronto);
+  // il modelReady del daemon copre il caso limite di un salvataggio esterno
+  const modelReadyHere = modelLocalReady || modelReady
+  const nextDisabled = uiStep === 'model' && !modelReadyHere
   const nextLabel = uiStep === 'ready' ? t`Apri la chat` : t`Continua`
   const canBack = stepIdx > 0 && daemonStep !== 'welcome'
-  const canSkip = uiStep === 'model' && !modelReady
+  const canSkip = uiStep === 'model' && !modelReadyHere
   // G3: «Continua» del passo Tu salva nome e aspetto del bot principale
   // (agents:update, con la validazione dell'avatar che il daemon già fa)
   const saveTuStep = async (): Promise<void> => {
@@ -371,8 +346,17 @@ export function GuideView() {
       })
       return
     }
+    if (uiStep === 'model') {
+      if (backTo) { setBackTo(null); return }
+      // la Continua del pannello aperto (salva il provider e models.main: il
+      // passo si chiude da solo, modelBecameReady); senza pannello con
+      // Continua, il modelReady del daemon avanza direttamente
+      const fn = modelContinueRef.current
+      if (fn) void fn().then((done) => { if (!done && modelReady) void advance('model', 'done') })
+      else if (modelReady) void advance('model', 'done')
+      return
+    }
     if (backTo) { setBackTo(null); return }
-    if (uiStep === 'model') { if (modelReady) void advance('model', 'done'); return }
     if (uiStep === 'ready') { void advance('approvals', 'done'); return }
   }
   const onSkip = (): void => {
@@ -424,11 +408,6 @@ export function GuideView() {
     await api.settingsSet('autoReview', { ...cfg, enabled: mode === 'auto' })
     setChosenApprovals(mode)
   }
-  const openModelsSettings = (): void => {
-    setSettingsTab('modelli')
-    setSettingsOpen(true)
-  }
-
   return (
     <div
       className={`${stacked ? 'flex flex-col' : 'flex'} h-screen w-screen overflow-hidden bg-background text-foreground`}
@@ -483,17 +462,12 @@ export function GuideView() {
             />
           )}
           {uiStep === 'model' && (
-            <StepPanel stepKey="model" testId="guide-step-model">
-              <h1 className="m-0 font-display text-[40px] font-semibold leading-[1.1] tracking-[-0.01em]">{t`Il modello`}</h1>
-              <p className="m-0 text-base leading-[1.6] text-muted-foreground">
-                {t`Il modello è ciò che fa pensare il tuo Homun: senza, i tuoi messaggi restano in attesa e ripartono da soli appena ne scegli uno. Puoi farlo ora, oppure più avanti dalla chat.`}
-              </p>
-              <div className="flex w-full flex-col gap-2">
-                {(paths ?? (['cloud'] as OnboardingProviderPath[])).map((p) => (
-                  <RoadCard key={p} path={p} onOpen={openModelsSettings} />
-                ))}
-              </div>
-            </StepPanel>
+            <GuideModelStep
+              paths={paths}
+              onFactsChange={setModelFacts}
+              onReadyChange={setModelLocalReady}
+              registerContinue={(fn) => { modelContinueRef.current = fn }}
+            />
           )}
           {uiStep === 'approvals' && (
             <StepPanel stepKey="approvals" testId="guide-step-approvals">

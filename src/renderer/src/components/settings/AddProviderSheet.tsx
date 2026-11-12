@@ -3,32 +3,23 @@
 // campi di sempre di AddModelRail per il tipo scelto (prova automatica della
 // chiave, «Collega <tipo>»). È lo stesso foglio che «Collega» apre dentro
 // ModelSelect (I1.2), già sul tipo giusto: per questo vive qui, condiviso.
-import { useEffect, useRef, useState } from 'react'
+// G4 (fase guida): la prova della chiave e il salvataggio stanno nell'hook
+// condiviso useProviderSetup (lib/use-provider-setup.ts) — lo usa anche la
+// guida del primo avvio; per l'utente questo foglio non cambia.
+import { useEffect, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
 import { ChevronLeft, Search } from 'lucide-react'
-import { api, useStore } from '../../store'
+import { api } from '../../store'
 import type { ProviderKind, ProviderPublic } from '../../../../shared/types'
-import { KNOWN_BASE_URLS } from '../../../../main/agent/live-models'
-import { nextModelProbe, EMPTY_MODEL_PROBE, type ModelProbeState } from '../../lib/model-probe'
 import { providerLogoUrl } from '../../lib/provider-logos'
 import { CONNECTABLE_KINDS } from '../../lib/model-select'
+// i nomi dei tipi e la logica di prova/salvataggio: hook condiviso (G4), usato
+// anche dalla guida del primo avvio
+import { KIND_LABELS, useProviderSetup } from '../../lib/use-provider-setup'
 
-/** I nomi dei tipi (i marchi non si traducono). */
-export const KIND_LABELS: Record<string, string> = {
-  ollama: 'Ollama',
-  lmstudio: 'LM Studio',
-  anthropic: 'Anthropic',
-  openai: 'OpenAI',
-  mistral: 'Mistral',
-  zai: 'Z.ai',
-  openrouter: 'OpenRouter',
-  xai: 'xAI',
-  deepseek: 'DeepSeek',
-  groq: 'Groq',
-  'openai-compatible': 'OpenAI-compatible'
-}
+export { KIND_LABELS }
 
 const GROUP_LABELS: Record<'mac' | 'key' | 'server', MessageDescriptor> = {
   mac: msg`Sul tuo Mac`,
@@ -64,26 +55,17 @@ export interface AddProviderSheetProps {
 
 export function AddProviderSheet({ initialKind, onClose, onSaved }: AddProviderSheetProps) {
   const { t, i18n } = useLingui()
-  const providers = useStore((s) => s.providers)
-  const refreshProviders = useStore((s) => s.refreshProviders)
   const [kind, setKind] = useState<ProviderKind | null>(initialKind ?? null)
   const [query, setQuery] = useState('')
   // — sul Mac —
   const [scanning, setScanning] = useState(false)
   const [found, setFound] = useState<ProviderPublic[] | null>(null)
   const [scanError, setScanError] = useState(false)
-  // — chiave / altro server —
+  // — chiave / altro server: la prova e il salvataggio stanno nell'hook condiviso —
+  const setup = useProviderSetup(kind, { autoProbe: true })
   const [showAdvanced, setShowAdvanced] = useState(false)
-  const [baseUrl, setBaseUrl] = useState('')
   const [serverName, setServerName] = useState('')
-  const [apiKey, setApiKey] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [probe, setProbe] = useState<ModelProbeState>(EMPTY_MODEL_PROBE)
-  const probeRevision = useRef(0)
-  const probeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  const group = kind ? CONNECTABLE_KINDS.find((c) => c.kind === kind)?.group ?? 'key' : null
-  const effectiveBaseUrl = group === 'key' ? (baseUrl || (kind ? KNOWN_BASE_URLS[kind] : '') || '') : baseUrl
+  const { apiKey, baseUrl, probe, busy, group, effectiveBaseUrl, setApiKey, setBaseUrl, reset } = setup
 
   // il tipo già scelto da «Collega»: la scansione del Mac parte DA SOLA
   const scan = (): void => {
@@ -105,48 +87,10 @@ export function AddProviderSheet({ initialKind, onClose, onSaved }: AddProviderS
       : code === 'unreachable' ? t`Il servizio non risponde`
         : t`La prova non è riuscita`
 
-  /** La prova parte DA SOLA appena la chiave cambia (debounce 400 ms); vale solo l'ultima. */
-  const scheduleProbe = (nextKey: string, url: string): void => {
-    if (probeTimer.current) clearTimeout(probeTimer.current)
-    setProbe(EMPTY_MODEL_PROBE)
-    if (!url.trim()) return
-    probeTimer.current = setTimeout(() => {
-      const revision = ++probeRevision.current
-      setProbe((s) => nextModelProbe(s, { type: 'start', revision }, probeRevision.current))
-      void api.probeProvider({ kind: kind ?? 'openai-compatible', baseUrl: url.trim(), ...(nextKey.trim() ? { apiKey: nextKey.trim() } : {}) })
-        .then((r) => setProbe((s) => nextModelProbe(
-          s,
-          r.ok
-            ? { type: 'result', revision, ok: true, models: r.models ?? [] }
-            : { type: 'result', revision, ok: false, error: r.error ?? 'error' },
-          probeRevision.current
-        )))
-        .catch(() => setProbe((s) => nextModelProbe(s, { type: 'result', revision, ok: false, error: 'unreachable' }, probeRevision.current)))
-    }, 400)
-  }
-
   const connect = async (): Promise<void> => {
     if (!kind) return
-    setBusy(true)
-    try {
-      const isServer = group === 'server'
-      const name = isServer ? (serverName.trim() || 'Server') : KIND_LABELS[kind] ?? String(kind)
-      const id = `${isServer ? 'custom' : kind}_${Date.now()}`
-      await api.saveProvider({
-        id,
-        name,
-        kind: isServer ? 'openai-compatible' : kind,
-        baseUrl: effectiveBaseUrl.trim(),
-        enabled: true,
-        ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {})
-      })
-      setApiKey('')
-      setProbe(EMPTY_MODEL_PROBE)
-      await refreshProviders()
-      onSaved(id)
-    } finally {
-      setBusy(false)
-    }
+    const id = await setup.save({ name: group === 'server' ? (serverName.trim() || 'Server') : undefined })
+    if (id) onSaved(id)
   }
 
   const q = query.trim().toLowerCase()
@@ -165,7 +109,7 @@ export function AddProviderSheet({ initialKind, onClose, onSaved }: AddProviderS
             <button
               className="grid size-8 place-items-center rounded-full bg-muted text-muted-foreground transition hover:text-foreground"
               aria-label={t`Indietro`}
-              onClick={() => { setKind(null); setFound(null); setApiKey(''); setBaseUrl(''); setProbe(EMPTY_MODEL_PROBE) }}
+              onClick={() => { setKind(null); setFound(null); reset() }}
             >
               <ChevronLeft className="size-4" />
             </button>
@@ -200,7 +144,7 @@ export function AddProviderSheet({ initialKind, onClose, onSaved }: AddProviderS
                         <button
                           key={k}
                           className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition hover:bg-muted [&:not(:first-child)]:border-t [&:not(:first-child)]:border-border/40"
-                          onClick={() => { setKind(k); setBaseUrl(''); setApiKey(''); setProbe(EMPTY_MODEL_PROBE) }}
+                          onClick={() => { setKind(k); reset() }}
                         >
                           <ProviderMark kind={k} name={KIND_LABELS[k]!} size="sm" />
                           <span className="min-w-0 flex-1">
@@ -281,13 +225,8 @@ export function AddProviderSheet({ initialKind, onClose, onSaved }: AddProviderS
                   disabled={busy || !baseUrl.trim()}
                   onClick={() => {
                     void (async () => {
-                      setBusy(true)
-                      try {
-                        const id = `${kind}_${Date.now()}`
-                        await api.saveProvider({ id, name: KIND_LABELS[kind]!, kind, baseUrl: baseUrl.trim(), enabled: true })
-                        await refreshProviders()
-                        onSaved(id)
-                      } finally { setBusy(false) }
+                      const id = await setup.save()
+                      if (id) onSaved(id)
                     })()
                   }}
                 >
@@ -317,7 +256,7 @@ export function AddProviderSheet({ initialKind, onClose, onSaved }: AddProviderS
                   className="mt-1.5 w-full rounded-[12px] bg-muted px-3 py-2 text-sm outline-none"
                   placeholder={group === 'server' ? t`Indirizzo (es. http://127.0.0.1:8000/v1)` : t`Base URL`}
                   value={baseUrl}
-                  onChange={(e) => { setBaseUrl(e.target.value); scheduleProbe(apiKey, e.target.value || (kind ? KNOWN_BASE_URLS[kind] : '') || '') }}
+                  onChange={(e) => setBaseUrl(e.target.value)}
                 />
               )}
             </div>
@@ -328,7 +267,7 @@ export function AddProviderSheet({ initialKind, onClose, onSaved }: AddProviderS
               type="password"
               placeholder={group === 'server' ? t`Chiave (facoltativa)` : t`sk-…`}
               value={apiKey}
-              onChange={(e) => { setApiKey(e.target.value); scheduleProbe(e.target.value, effectiveBaseUrl) }}
+              onChange={(e) => setApiKey(e.target.value)}
             />
             {probe.probing && <p className="text-[13px] text-muted-foreground"><Trans>Provo la chiave…</Trans></p>}
             {probe.ok === true && (

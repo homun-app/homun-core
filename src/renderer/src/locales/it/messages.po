@@ -844,9 +844,21 @@ msgstr "Altre opzioni ▾"
 msgid "Altri {0} ▾"
 msgstr "Altri {0} ▾"
 
+#: src/renderer/src/components/GuideModelStep.tsx
+msgid "Altri modelli…"
+msgstr "Altri modelli…"
+
 #: src/renderer/src/components/DraftCard.tsx
 msgid "Altri parametri (verranno inviati così):"
 msgstr "Altri parametri (verranno inviati così):"
+
+#: src/renderer/src/components/GuideModelStep.tsx
+msgid "Altri provider"
+msgstr "Altri provider"
+
+#: src/renderer/src/components/GuideModelStep.tsx
+msgid "Altri…"
+msgstr "Altri…"
 
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Altro ▾"
@@ -864,6 +876,7 @@ msgstr "ancora nessun passo"
 #: src/renderer/src/components/BotDialogs.tsx
 #: src/renderer/src/components/ConnectorCard.tsx
 #: src/renderer/src/components/DraftCard.tsx
+#: src/renderer/src/components/GuideModelStep.tsx
 #: src/renderer/src/components/LibraryCards.tsx
 #: src/renderer/src/components/LibraryPanel.tsx
 #: src/renderer/src/components/MemoryPanel.tsx
@@ -1407,6 +1420,7 @@ msgstr "Cerco nel registro…"
 msgid "Cerco Ollama sul tuo Mac (porta 11434)."
 msgstr "Cerco Ollama sul tuo Mac (porta 11434)."
 
+#: src/renderer/src/components/GuideModelStep.tsx
 #: src/renderer/src/components/settings/AddProviderSheet.tsx
 msgid "Cerco…"
 msgstr "Cerco…"
@@ -1489,6 +1503,10 @@ msgstr "chiave salvata (nel vault)"
 msgid "chiede a un aiutante…"
 msgstr "chiede a un aiutante…"
 
+#: src/renderer/src/components/GuideModelStep.tsx
+msgid "chiede anche l'indirizzo"
+msgstr "chiede anche l'indirizzo"
+
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 msgid "Chiedi"
 msgstr "Chiedi"
@@ -1554,6 +1572,10 @@ msgstr "Cifrato sul Mac. Il bot non vedrà mai la password."
 msgid "circa (±15 min)"
 msgstr "circa (±15 min)"
 
+#: src/renderer/src/components/GuideModelStep.tsx
+msgid "Claude. Il più affidabile coi tool."
+msgstr "Claude. Il più affidabile coi tool."
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "notice.queueFull"
@@ -1591,6 +1613,10 @@ msgstr "collega {app}…"
 #: src/renderer/src/components/Sidebar.tsx
 msgid "Collega app"
 msgstr "Collega app"
+
+#: src/renderer/src/components/GuideModelStep.tsx
+msgid "Collega un modello"
+msgstr "Collega un modello"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -1738,6 +1764,10 @@ msgstr "Con il tuo account"
 #: src/renderer/src/components/settings/AddProviderSheet.tsx
 msgid "Con una chiave"
 msgstr "Con una chiave"
+
+#: src/renderer/src/components/GuideModelStep.tsx
+msgid "Con una chiave API."
+msgstr "Con una chiave API."
 
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "Concessioni"
@@ -1915,7 +1945,7 @@ msgstr "Consentito una volta"
 msgid "Consigliate per te"
 msgstr "Consigliate per te"
 
-#: src/renderer/src/components/GuideView.tsx
+#: src/renderer/src/components/GuideModelStep.tsx
 msgid "consigliato"
 msgstr "consigliato"
 
@@ -2323,6 +2353,10 @@ msgstr "Dopo questi giorni di assenza, le routine si fermano."
 msgid "Dove gira: sul server {0} che indichi tu"
 msgstr "Dove gira: sul server {0} che indichi tu"
 
+#: src/renderer/src/components/GuideModelStep.tsx
+msgid "Dove la trovo?"
+msgstr "Dove la trovo?"
+
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Dove la trovo? Copia la chiave API dalle impostazioni del tuo progetto su Composio (composio.dev → Settings → API Keys)."
 msgstr "Dove la trovo? Copia la chiave API dalle impostazioni del tuo progetto su Composio (composio.dev → Settings → API Keys)."
@@ -2350,6 +2384,10 @@ msgstr "Download non riuscito: {0}"
 #: src/renderer/src/components/GuideView.tsx
 msgid "È il tuo punto di contatto in Homun: ti risponde, lavora per te e coordina gli altri bot. Puoi cambiarlo quando vuoi."
 msgstr "È il tuo punto di contatto in Homun: ti risponde, lavora per te e coordina gli altri bot. Puoi cambiarlo quando vuoi."
+
+#: src/renderer/src/components/GuideModelStep.tsx
+msgid "È quello che fa pensare il tuo bot. Si prova subito, prima di salvare."
+msgstr "È quello che fa pensare il tuo bot. Si prova subito, prima di salvare."
 
 #: src/renderer/src/lib/guide-scene.ts
 msgid "Eccomi! Andiamo?"
@@ -2640,6 +2678,10 @@ msgstr "fonte: {0}"
 msgid "Funziona! Sento già i pensieri."
 msgstr "Funziona! Sento già i pensieri."
 
+#: src/renderer/src/components/GuideModelStep.tsx
+msgid "Funziona. La chiave resta nel Portachiavi del Mac."
+msgstr "Funziona. La chiave resta nel Portachiavi del Mac."
+
 #: src/renderer/src/components/Settings.tsx
 msgid "Fuso orario"
 msgstr "Fuso orario"
@@ -2679,6 +2721,10 @@ msgstr "Gestisci su Composio"
 msgid "gestiscile su Composio"
 msgstr "gestiscile su Composio"
 
+#: src/renderer/src/components/GuideModelStep.tsx
+msgid "Già sul tuo Mac."
+msgstr "Già sul tuo Mac."
+
 #: src/renderer/src/components/GuideView.tsx
 msgid "Giallo"
 msgstr "Giallo"
@@ -2698,6 +2744,10 @@ msgstr "giorno"
 #: src/renderer/src/components/Settings.tsx
 msgid "giovedì"
 msgstr "giovedì"
+
+#: src/renderer/src/components/GuideModelStep.tsx
+msgid "Gira tutto qui, senza costi."
+msgstr "Gira tutto qui, senza costi."
 
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "GitHub"
@@ -2911,10 +2961,6 @@ msgstr "Hai finito · il bot riprende"
 msgid "Hai già Ollama: scegli un modello."
 msgstr "Hai già Ollama: scegli un modello."
 
-#: src/renderer/src/components/GuideView.tsx
-msgid "Hai Ollama in casa: si aggiunge come provider e si sceglie un modello che supporti i tool."
-msgstr "Hai Ollama in casa: si aggiunge come provider e si sceglie un modello che supporti i tool."
-
 #: src/renderer/src/components/ComputerActivity.tsx
 msgid "Hai scaricato"
 msgstr "Hai scaricato"
@@ -2942,6 +2988,10 @@ msgstr "Ho messo in pausa le tue routine mentre eri via per evitare consumi inut
 #: src/shared/ui-messages.ts
 msgid "group.summaryPosted"
 msgstr "Ho pubblicato il riepilogo nella squadra «{name}»"
+
+#: src/renderer/src/components/GuideModelStep.tsx
+msgid "Ho trovato questi modelli sul tuo Mac"
+msgstr "Ho trovato questi modelli sul tuo Mac"
 
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Homun crea il client e chiede a Composio l'elenco delle app: se riesce, la chiave viene salvata cifrata sul tuo Mac."
@@ -3178,10 +3228,6 @@ msgstr "Il giro si è chiuso: il coordinatore riferisce all’utente."
 msgid "mp.notObject"
 msgstr "il marketplace non è un oggetto"
 
-#: src/renderer/src/components/GuideView.tsx
-msgid "Il modello"
-msgstr "Il modello"
-
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "providers.noTools"
@@ -3196,10 +3242,6 @@ msgstr "Il modello {model} del provider {provider} non risponde ({why}): passo a
 #: src/shared/ui-messages.ts
 msgid "notice.imagesNotSeen"
 msgstr "Il modello {model} non vede le immagini: gli allegati di questo messaggio non saranno guardati."
-
-#: src/renderer/src/components/GuideView.tsx
-msgid "Il modello è ciò che fa pensare il tuo Homun: senza, i tuoi messaggi restano in attesa e ripartono da soli appena ne scegli uno. Puoi farlo ora, oppure più avanti dalla chat."
-msgstr "Il modello è ciò che fa pensare il tuo Homun: senza, i tuoi messaggi restano in attesa e ripartono da soli appena ne scegli uno. Puoi farlo ora, oppure più avanti dalla chat."
 
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Il modello integrato gira sul tuo Mac: niente costi e i dati restano qui. È più lento e sbaglia più spesso dei modelli cloud; per lavori affidabili ti consiglio un modello cloud."
@@ -3249,10 +3291,6 @@ msgstr "il PDF lo genera la finestra di Homun: aprila e riprova, oppure esporta 
 #: src/shared/ui-messages.ts
 msgid "skill.escapingPath"
 msgstr "Il percorso «{file}» esce dalla cartella della skill."
-
-#: src/renderer/src/components/GuideView.tsx
-msgid "Il più capace, consigliato per partire. Serve una chiave (Anthropic, OpenAI, Google…)."
-msgstr "Il più capace, consigliato per partire. Serve una chiave (Anthropic, OpenAI, Google…)."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -3486,6 +3524,10 @@ msgstr "Incolla la chiave"
 msgid "Incolla la chiave: la provo subito."
 msgstr "Incolla la chiave: la provo subito."
 
+#: src/renderer/src/components/GuideModelStep.tsx
+msgid "Incolla qui la chiave"
+msgstr "Incolla qui la chiave"
+
 #. placeholder {0}: memoryProgress.done
 #. placeholder {1}: memoryProgress.total
 #: src/renderer/src/components/MemoryPanel.tsx
@@ -3504,6 +3546,7 @@ msgstr "Indietro"
 msgid "Indirizzo"
 msgstr "Indirizzo"
 
+#: src/renderer/src/components/GuideModelStep.tsx
 #: src/renderer/src/components/settings/AddProviderSheet.tsx
 msgid "Indirizzo (es. http://127.0.0.1:8000/v1)"
 msgstr "Indirizzo (es. http://127.0.0.1:8000/v1)"
@@ -3570,6 +3613,7 @@ msgstr "installazione in corso"
 msgid "Installo…"
 msgstr "Installo…"
 
+#: src/renderer/src/components/GuideModelStep.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Integrato"
 msgstr "Integrato"
@@ -3659,6 +3703,10 @@ msgstr "L’anteprima non è più valida: chiudi e riapri la voce."
 msgid "skill.err.badEnabledFor"
 msgstr "L’elenco dei bot non è valido."
 
+#: src/renderer/src/components/GuideModelStep.tsx
+msgid "L'indirizzo del servizio"
+msgstr "L'indirizzo del servizio"
+
 #: src/renderer/src/components/ServerSetup.tsx
 msgid "L'indirizzo non risponde: controllalo e riprova."
 msgstr "L'indirizzo non risponde: controllalo e riprova."
@@ -3702,6 +3750,10 @@ msgstr "La cartella della skill contiene un link simbolico: «{file}»."
 #: src/shared/ui-messages.ts
 msgid "skill.libraryTooLarge"
 msgstr "La cartella della skill è troppo grande: {n} KB (massimo 2 MB in tutto)."
+
+#: src/renderer/src/components/GuideModelStep.tsx
+msgid "La chiave di {providerLabel}"
+msgstr "La chiave di {providerLabel}"
 
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "La chiave non è stata salvata."
@@ -3756,6 +3808,10 @@ msgstr "La libreria supera 2 GB: valuta cosa cancellare (nessun blocco automatic
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "La prova non è riuscita"
 msgstr "La prova non è riuscita"
+
+#: src/renderer/src/components/GuideModelStep.tsx
+msgid "La prova non è riuscita. Controlla la chiave e riprova."
+msgstr "La prova non è riuscita. Controlla la chiave e riprova."
 
 #: src/renderer/src/components/Settings.tsx
 msgid "La routine gira quando torni al computer dopo un'assenza lunga."
@@ -4109,10 +4165,6 @@ msgstr "Modello"
 msgid "modello che non risponde"
 msgstr "modello che non risponde"
 
-#: src/renderer/src/components/GuideView.tsx
-msgid "Modello cloud con una chiave"
-msgstr "Modello cloud con una chiave"
-
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Modello dei bot"
 msgstr "Modello dei bot"
@@ -4137,10 +4189,6 @@ msgstr "Modello e ragionamento"
 #: src/renderer/src/components/Chat.tsx
 msgid "modello integrato · più lento"
 msgstr "modello integrato · più lento"
-
-#: src/renderer/src/components/GuideView.tsx
-msgid "Modello integrato sul tuo Mac"
-msgstr "Modello integrato sul tuo Mac"
 
 #: src/renderer/src/components/settings/DiskSpaceSection.tsx
 msgid "Modello locale"
@@ -4200,6 +4248,10 @@ msgstr "Modulo sicuro (secret {name}): {reason}"
 #: src/shared/ui-messages.ts
 msgid "card.secureInput"
 msgstr "Modulo sicuro: {reason}"
+
+#: src/renderer/src/components/GuideModelStep.tsx
+msgid "Molti modelli, una chiave."
+msgstr "Molti modelli, una chiave."
 
 #: src/renderer/src/components/ui/ModelPicker.tsx
 msgid "Molto alto"
@@ -4361,6 +4413,10 @@ msgstr "nessun modello in elenco: scrivi l'id e premi Invio"
 msgid "Nessun modello trovato."
 msgstr "Nessun modello trovato."
 
+#: src/renderer/src/components/GuideModelStep.tsx
+msgid "Nessun modello: aprilo e ricrea uno di questi modelli, poi riprova."
+msgstr "Nessun modello: aprilo e ricrea uno di questi modelli, poi riprova."
+
 #: src/renderer/src/components/Settings.tsx
 msgid "Nessun passo saltato da riprendere"
 msgstr "Nessun passo saltato da riprendere"
@@ -4463,10 +4519,6 @@ msgstr "Niente «@»: serve l'indirizzo del server, non un account"
 #: src/renderer/src/components/ServerSetup.tsx
 msgid "Niente «/»: serve il solo indirizzo, non un percorso"
 msgstr "Niente «/»: serve il solo indirizzo, non un percorso"
-
-#: src/renderer/src/components/GuideView.tsx
-msgid "Niente costi e i dati restano qui. È più lento e sbaglia più spesso dei modelli cloud."
-msgstr "Niente costi e i dati restano qui. È più lento e sbaglia più spesso dei modelli cloud."
 
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "Niente in attesa di conferma: ciò che il bot scrive leggendo il web arriva qui, finché non lo confermi."
@@ -4621,6 +4673,10 @@ msgstr "Non ora"
 msgid "Non più attiva: ricollega per riavere le sue azioni."
 msgstr "Non più attiva: ricollega per riavere le sue azioni."
 
+#: src/renderer/src/components/GuideModelStep.tsx
+msgid "Non posso ora: controlla lo spazio e riprova."
+msgstr "Non posso ora: controlla lo spazio e riprova."
+
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Non riesco a cercare nel registro"
 msgstr "Non riesco a cercare nel registro"
@@ -4640,6 +4696,10 @@ msgstr "Non riesco a leggere la libreria"
 #: src/renderer/src/components/ActivityPanel.tsx
 msgid "Non riesco a leggere le attività"
 msgstr "Non riesco a leggere le attività"
+
+#: src/renderer/src/components/GuideModelStep.tsx
+msgid "Non riesco a raggiungere {providerLabel}. Controlla la connessione e riprova."
+msgstr "Non riesco a raggiungere {providerLabel}. Controlla la connessione e riprova."
 
 #: src/renderer/src/components/settings/ModelsPage.tsx
 #: src/renderer/src/components/ui/ModelSelect.tsx
@@ -4682,6 +4742,10 @@ msgstr "Non sono riuscito a fermare il bot in background: un’app in esecuzione
 #: src/renderer/src/components/ConnectorCards13.tsx
 msgid "non supportato: valore in argv ({0})"
 msgstr "non supportato: valore in argv ({0})"
+
+#: src/renderer/src/components/GuideModelStep.tsx
+msgid "non usa i tool: non adatto"
+msgstr "non usa i tool: non adatto"
 
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "non valida"
@@ -4793,10 +4857,6 @@ msgstr "ogni settimana il {day} {at}"
 #: src/renderer/src/components/Settings.tsx
 msgid "ogni…"
 msgstr "ogni…"
-
-#: src/renderer/src/components/GuideView.tsx
-msgid "Ollama che è già sul tuo Mac"
-msgstr "Ollama che è già sul tuo Mac"
 
 #: src/renderer/src/bot/bot-state.ts
 msgid "Online"
@@ -5136,6 +5196,10 @@ msgstr "Pronto (Apple container)"
 msgid "Pronto (Docker)"
 msgstr "Pronto (Docker)"
 
+#: src/renderer/src/components/GuideModelStep.tsx
+msgid "Pronto a scaricare."
+msgstr "Pronto a scaricare."
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "rpc.pluginProposalNotFound"
@@ -5180,6 +5244,7 @@ msgid "Prossimamente"
 msgstr "Prossimamente"
 
 #: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/GuideModelStep.tsx
 msgid "Prova"
 msgstr "Prova"
 
@@ -5230,6 +5295,7 @@ msgstr "Provo la chiave…"
 msgid "provo…"
 msgstr "provo…"
 
+#: src/renderer/src/components/GuideModelStep.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Provo…"
 msgstr "Provo…"
@@ -5321,6 +5387,10 @@ msgstr "Questa azione chiede sempre l'approvazione"
 #: src/renderer/src/components/Settings.tsx
 msgid "Questa build non riceve aggiornamenti"
 msgstr "Questa build non riceve aggiornamenti"
+
+#: src/renderer/src/components/GuideModelStep.tsx
+msgid "Questa chiave non funziona: {providerLabel} risponde “non autorizzata”. Controlla di averla copiata intera."
+msgstr "Questa chiave non funziona: {providerLabel} risponde “non autorizzata”. Controlla di averla copiata intera."
 
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Questa è una chiave di Composio «For You» (inizia con ck_). Homun usa la chiave di un progetto Composio: su composio.dev apri il pannello per sviluppatori, crea un progetto e copia la sua chiave API da Settings → API Keys (inizia con ak_)."
@@ -5792,9 +5862,17 @@ msgstr "scaduto"
 msgid "Scaduto"
 msgstr "Scaduto"
 
+#: src/renderer/src/components/GuideModelStep.tsx
+msgid "Scarica"
+msgstr "Scarica"
+
 #: src/renderer/src/components/ComputerFiles.tsx
 msgid "Scarica sul Mac"
 msgstr "Scarica sul Mac"
+
+#: src/renderer/src/components/GuideModelStep.tsx
+msgid "Scaricato e provato."
+msgstr "Scaricato e provato."
 
 #. placeholder {0}: r.name ?? selected
 #: src/renderer/src/components/ComputerFiles.tsx
@@ -5804,6 +5882,15 @@ msgstr "Scaricato: {0}"
 #: src/renderer/src/lib/guide-scene.ts
 msgid "Scaricato: penso da qui."
 msgstr "Scaricato: penso da qui."
+
+#. placeholder {0}: localSizeGb ?? '—'
+#: src/renderer/src/components/GuideModelStep.tsx
+msgid "Scarico un modello adatto a questo Mac ({0} GB). Gira tutto qui: niente costi, ma è più lento dei modelli cloud."
+msgstr "Scarico un modello adatto a questo Mac ({0} GB). Gira tutto qui: niente costi, ma è più lento dei modelli cloud."
+
+#: src/renderer/src/components/GuideModelStep.tsx
+msgid "Scarico…"
+msgstr "Scarico…"
 
 #: src/renderer/src/lib/guide-scene.ts
 msgid "Scarico… ci vuole qualche minuto."
@@ -6579,6 +6666,10 @@ msgstr "Troppi terminali aperti: al massimo 3 per bot e 8 in tutto."
 msgid "Troppo grande per l'anteprima ({0})"
 msgstr "Troppo grande per l'anteprima ({0})"
 
+#: src/renderer/src/components/GuideModelStep.tsx
+msgid "trovato"
+msgstr "trovato"
+
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "tu"
 msgstr "tu"
@@ -6784,6 +6875,14 @@ msgstr "usa {label}…"
 msgid "approval.rcCredentials"
 msgstr "usa credenziali: {names}"
 
+#: src/renderer/src/components/GuideModelStep.tsx
+msgid "usa i tool"
+msgstr "usa i tool"
+
+#: src/renderer/src/components/GuideModelStep.tsx
+msgid "usa i tool · consigliato"
+msgstr "usa i tool · consigliato"
+
 #: src/renderer/src/lib/activity.ts
 msgid "usa il computer…"
 msgstr "usa il computer…"
@@ -6982,3 +7081,7 @@ msgstr "webhook"
 #: src/shared/ui-messages.ts
 msgid "trigger.tokenMissing"
 msgstr "webhook: token mancante"
+
+#: src/renderer/src/components/GuideModelStep.tsx
+msgid "xAI, Mistral, DeepSeek, Groq, Z.ai e i compatibili OpenAI."
+msgstr "xAI, Mistral, DeepSeek, Groq, Z.ai e i compatibili OpenAI."
