@@ -167,7 +167,11 @@ describe("OA7 (fase onboarding-a): la riga della guida nella voce 0.3.1001-beta.
     expect(body, 'manca la sezione ## [0.3.1001-beta.5] nel CHANGELOG').not.toBeNull()
     expect(body!.length).toBeLessThanOrEqual(900)
     const flat = body!.replace(/\s+/g, ' ')
-    expect(flat).toMatch(/una guida al primo avvio che porta da zero a un bot pronto/i)
+    // GC3 (fase guida-correzioni): la riga è quella RIFORMULATA in G9 («Una
+    // guida che porta da zero a un bot pronto, col modello collegato e
+    // provato lì…»): il test cerca la guida che porta a un bot pronto e
+    // sopravvive a una riformulazione minima, MA non all'assenza della riga
+    expect(flat).toMatch(/guida .{0,80}porta da zero a un bot pronto/i)
     expect(flat).toMatch(/ripartono da soli/)
   })
 })
