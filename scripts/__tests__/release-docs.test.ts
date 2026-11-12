@@ -137,3 +137,21 @@ describe('B6 (fase beta.4): la voce 0.3.1001-beta.4 — BREVE (la leggono anche 
     expect(flat).toMatch(/chat/)
   })
 })
+
+describe("BX7 (fase box-container): la voce 0.3.1001-beta.5 — BREVE, in parole per l'utente", () => {
+  it("c'è, sta SOPRA la beta.4, e resta sotto i 900 caratteri", async () => {
+    const { extractReleaseNotes } = (await import('../extract-release-notes.mjs')) as {
+      extractReleaseNotes: (changelog: string, version: string) => string | null
+    }
+    const changelog = read('CHANGELOG.md')
+    const body = extractReleaseNotes(changelog, '0.3.1001-beta.5')
+    expect(body, 'manca la sezione ## [0.3.1001-beta.5] nel CHANGELOG').not.toBeNull()
+    expect(body!.length).toBeLessThanOrEqual(900)
+    expect(changelog.indexOf('## [0.3.1001-beta.5]')).toBeLessThan(changelog.indexOf('## [0.3.1001-beta.4]'))
+    const flat = body!.replace(/\s+/g, ' ')
+    // le due cose della fase: il computer dei bot senza Docker (macOS 26+) e lo spazio su disco
+    expect(flat).toMatch(/senza Docker/)
+    expect(flat).toMatch(/macOS 26|macOS\s*26/)
+    expect(flat).toMatch(/[Ss]pazio su disco/)
+  })
+})

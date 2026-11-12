@@ -5,6 +5,20 @@ pubblicata finisce nel corpo della GitHub Release (da cui l'app mostra il
 «cosa cambia» quando propone un aggiornamento). Formato: `## [x.y.z] — data`,
 sezioni H2 e un punto per riga.
 
+## [0.3.1001-beta.5] — 2026-11-12
+
+Due cose grosse, una è un po' rivoluzionaria.
+
+### Novità
+
+- **Il computer dei bot funziona anche senza Docker.** Su macOS 26 o
+  successivo il box dei bot gira con Apple container: niente Docker Desktop
+  da installare. L'Automatico sceglie il motore; Docker resta per chi lo
+  preferisce (Impostazioni › Generali › Computer dei bot).
+- **«Spazio su disco» nelle Impostazioni.** Quanto occupano il computer dei
+  bot, i modelli e lo spazio recuperabile — e come toglierli, con le
+  conferme che servono sulle cose irreversibili.
+
 ## [0.3.1001-beta.4] — 2026-11-12
 
 Quattro cose che hai chiesto dopo la beta.3.
