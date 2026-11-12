@@ -16,7 +16,8 @@
 // provider non serve: nessun turno di modello). A fine OGNI giro l'app si
 // chiude E il daemon di sviluppo pure (stopProbeDaemons); la cartella dati
 // si rimuove. Mai il Portachiavi vero, mai i dati veri dell'utente.
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
+import { createServer } from 'node:http'
 import { DatabaseSync } from 'node:sqlite'
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, chmodSync, mkdirSync, existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -38,6 +39,38 @@ writeFileSync(FAKE_CLI, `#!/bin/sh\nexec "${process.execPath}" "${FAKE_SRC}" "$@
 chmodSync(FAKE_CLI, 0o755)
 
 const log = (...a) => console.log('[sonda]', ...a)
+
+/**
+ * Chiude l'app E l'aspetta davvero: SIGTERM, 3 s, poi SIGKILL. Un'app viva
+ * RISPAWNA il suo daemon (ensureConnected) anche dopo che stopProbeDaemons
+ * l'ha chiuso — la fuga si chiude solo chiudendo l'app per davvero.
+ */
+const stopAppHard = async (proc) => {
+  if (!proc || proc.exitCode !== null || proc.signalCode !== null) return
+  const gone = new Promise((r) => proc.once('exit', r))
+  try { proc.kill('SIGTERM') } catch { return }
+  const killer = setTimeout(() => { try { proc.kill('SIGKILL') } catch { /* già via */ } }, 3_000)
+  await Promise.race([gone, sleep(5_000)])
+  clearTimeout(killer)
+}
+
+/** Le app residue delle corse precedenti (env della sonda + porta di debug): si chiudono PRIMA di partire. */
+const stopProbeApps = async () => {
+  const out = spawnSync('/bin/ps', ['eww', '-ax', '-o', 'pid=,command='], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 })
+  const pids = (out.stdout ?? '')
+    .split('\n')
+    .filter((line) => line.includes('--remote-debugging-port=93') && line.includes(PREFIX) && !line.includes('--homun-daemon'))
+    .map((line) => Number(line.trim().split(/\s+/, 1)[0]))
+    .filter((pid) => Number.isInteger(pid) && pid > 1 && pid !== process.pid)
+  if (!pids.length) return 0
+  for (const pid of pids) { try { process.kill(pid, 'SIGTERM') } catch { /* già via */ } }
+  await sleep(2500)
+  for (const pid of pids) {
+    try { process.kill(pid, 0); process.kill(pid, 'SIGKILL') } catch { /* già via */ }
+  }
+  return pids.length
+}
+
 let failures = 0
 const checks = []
 const check = (id, ok, note = '') => {
@@ -105,7 +138,7 @@ const launchApp = (mode, giro) => {
     dataDir,
     cliLogFile,
     getAppLog: () => appLog,
-    stop: () => { try { proc.kill('SIGTERM') } catch { /* già via */ } }
+    stop: () => stopAppHard(proc)
   }
 }
 
@@ -208,7 +241,11 @@ const clickRowAction = (page, rowId) => pageEval(page, `
   if (!row) return { ok: false, why: 'riga non trovata' }
   const btn = row.querySelector('button')
   if (!btn) return { ok: false, why: 'bottone non trovato' }
-  if (btn.disabled) return { ok: false, why: 'bottone DISABILITATO' }
+  if (btn.disabled) {
+    const rows = [...document.querySelectorAll('[data-testid^="disk-space-"]')].map((el) => ({ id: el.dataset.testid, size: el.querySelectorAll('p')[1]?.textContent.trim() ?? '' }))
+    const err = document.querySelector('[data-testid="disk-space-error"]')?.textContent?.trim() ?? ''
+    return { ok: false, why: 'bottone DISABILITATO', rows, err }
+  }
   btn.click()
   return { ok: true }
 `)
@@ -240,6 +277,13 @@ const GIRI = [
 
 let app = null
 try {
+  // nessuna app né daemon di prove precedenti in giro (porte e carico): si
+  // parte puliti — PRIMA le app, che altrimenti RISPAWNANO i loro daemon
+  {
+    const apps = await stopProbeApps()
+    const pre = await stopProbeDaemons(PREFIX)
+    if (apps > 0 || pre.found > 0) log(`pulizia iniziale: ${apps} app e ${pre.found} daemon lasciati da corse precedenti, chiusi`)
+  }
   for (let giro = 0; giro < GIRI.length; giro++) {
     const { mode, expect } = GIRI[giro]
     log(`--- giro ${giro + 1}/4: CLI finta «${mode}» ---`)
@@ -267,7 +311,7 @@ try {
     }
     await shot(page, `engine-${mode}.png`)
     page.close()
-    app.stop()
+    await app.stop()
     await sleep(1200)
     const d = await stopProbeDaemons(PREFIX)
     log(`daemon dopo ${mode}: ${d.found} trovati, ${d.closed} chiusi, ${d.left} rimasti`)
@@ -293,7 +337,8 @@ try {
     else await sleep(500)
   }
   const by = Object.fromEntries((rows ?? []).map((r) => [r.id, r]))
-  check('BX5 Spazio su disco: le CINQUE righe ci sono', (rows ?? []).length === 5, JSON.stringify((rows ?? []).map((r) => r.id)))
+  const daemonTail = () => { try { return readFileSync(join(app.dataDir, 'data', 'daemon.log'), 'utf8').slice(-1500) } catch { return '(niente daemon.log)' } }
+  check('BX5 Spazio su disco: le CINQUE righe ci sono', (rows ?? []).length === 5, JSON.stringify((rows ?? []).map((r) => r.id)) + '\ndaemon.log:\n' + daemonTail())
   check('BX5 le dimensioni finte del df: immagine 1.2 GB, file dei bot 315 MB, recuperabile 1.2 GB',
     by['box-image']?.size === '1.2 GB' && by['box-files']?.size === '315 MB' && by.reclaimable?.size === '1.2 GB',
     `immagine=${by['box-image']?.size} file=${by['box-files']?.size} recuperabile=${by.reclaimable?.size}`)
@@ -343,6 +388,195 @@ try {
 
   await shot(page, 'spazio-dopo-azioni.png')
   page.close()
+
+  // ---- BR (fase box-rete): la rete del box — none ISOLATA e VERIFICATA, e il cambio che RICREA ----
+  // Tre giri con la sandbox PILOTA (sandbox.mode=box, motore apple-container,
+  // rete scelta nel DB) e un TURNO VERO del bot (provider finto su 127.0.0.1):
+  // la CLI finta ricorda container e reti NEL SUO LOG, quindi il giro 2 vede
+  // il box nato bridge del giro 1 e lo RICREA su homun-box-isolated.
+  log('--- BR: la rete del box (none isolata, cambio che ricrea) ---')
+  const chatRequests = []
+  const replies = []
+  const providerServer = createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://127.0.0.1')
+    if (req.method === 'POST' && url.pathname.endsWith('/chat/completions')) {
+      let body = ''
+      req.on('data', (c) => (body += c))
+      req.on('end', () => {
+        chatRequests.push(JSON.parse(body))
+        const next = replies.shift() ?? { text: 'ok' }
+        res.writeHead(200, { 'content-type': 'text/event-stream' })
+        const chunk = (delta, finish = null) =>
+          res.write(`data: ${JSON.stringify({ id: 'chatcmpl-finto', object: 'chat.completion.chunk', created: 1, model: 'finto', choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`)
+        chunk({ role: 'assistant', content: '' })
+        if (next.text) chunk({ content: next.text })
+        for (const [i, tc] of (next.toolCalls ?? []).entries()) {
+          chunk({ tool_calls: [{ index: i, id: `call_${i}`, type: 'function', function: { name: tc.name, arguments: JSON.stringify(tc.arguments) } }] })
+        }
+        chunk({}, next.toolCalls ? 'tool_calls' : 'stop')
+        res.write('data: [DONE]\n\n')
+        res.end()
+      })
+      return
+    }
+    res.writeHead(404).end()
+  })
+  await new Promise((r) => providerServer.listen(0, '127.0.0.1', r))
+  const providerPort = providerServer.address().port
+  const pushTool = (name, args) => replies.push({ toolCalls: [{ name, arguments: args }] })
+  const pushText = (text) => replies.push({ text })
+
+  /** L'app col box PILOTATO: settings seminati nel DB, log della CLI finta scelto, env extra a piacere. */
+  const launchBoxApp = (giro, opts) => {
+    const dataDir = join(TMP, `data-br-${giro}`)
+    mkdirSync(join(dataDir, 'data'), { recursive: true })
+    const db = new DatabaseSync(join(dataDir, 'data', 'sandbot.db'))
+    db.exec('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
+    db.prepare('INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)').run(
+      'providers',
+      JSON.stringify([{ id: 'finto', name: 'Finto (locale)', kind: 'openai-compatible', baseUrl: `http://127.0.0.1:${providerPort}/v1`, apiKey: 'k', enabled: true }])
+    )
+    db.prepare('INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)').run('sandbox.engine', '"apple-container"')
+    db.prepare('INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)').run('sandbox.mode', '"box"')
+    db.prepare('INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)').run('sandbox.network', JSON.stringify(opts.network))
+    // i turni della sonda non chiedono approvazioni: si scrive un FILE del
+    // bot (nessun comando da approvare, nessun output da aspettare)
+    db.prepare('INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)').run('approvals.mode', '"never"')
+    db.close()
+    const cliLogFile = opts.cliLogFile
+    let appLog = ''
+    const proc = spawn(ELECTRON, ['.', `--remote-debugging-port=${DEBUG_PORT_BASE + giro}`], {
+      cwd: ROOT,
+      env: {
+        HOME: process.env.HOME,
+        PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
+        SANDBOT_TEST_USER_DATA: dataDir,
+        SANDBOT_TEST_FAKE_KEYCHAIN: join(dataDir, 'keychain-finta.json'),
+        SANDBOT_TEST_FAKE_SAFESTORAGE: join(dataDir, 'safestorage-finta.json'),
+        SANDBOT_TEST_CONTAINER_CLI: FAKE_CLI,
+        SANDBOT_TEST_CONTAINER_MODE: 'ready',
+        SANDBOT_TEST_CONTAINER_LOG: cliLogFile,
+        ...(opts.extraEnv ?? {})
+      },
+      stdio: ['ignore', 'pipe', 'pipe']
+    })
+    proc.stdout.on('data', (d) => { appLog += d.toString() })
+    proc.stderr.on('data', (d) => { appLog += d.toString() })
+    return { proc, dataDir, cliLogFile, getAppLog: () => appLog, stop: () => { try { proc.kill('SIGTERM') } catch { /* già via */ } } }
+  }
+
+  /** Apre l'app, collega il bot al provider finto e MANDA un messaggio in chat. */
+  const boxTurn = async (giro, opts, userText, replyWhen) => {
+    app = launchBoxApp(giro, opts)
+    const port = DEBUG_PORT_BASE + giro
+    const page = await waitForPage(port, (t) => (t.url ?? '').startsWith('http') || (t.url ?? '').startsWith('homun://'))
+    if (!page) throw new Error(`nessuna pagina app (BR giro ${giro}): log:\n${app.getAppLog().slice(-1500)}`)
+    if (!(await waitDom(page, `typeof window.sandbot !== 'undefined'`, 40_000))) throw new Error('window.sandbot non disponibile (BR)')
+    const rpc = (callExpr) => pageEval(page, `return await window.sandbot.${callExpr}`)
+    const agents = await rpc('listAgents()')
+    if (!agents?.[0]) throw new Error('nessun bot (BR)')
+    await rpc(`updateAgent(${JSON.stringify(agents[0].id)}, ${JSON.stringify({ providerId: 'finto', model: 'finto' })})`)
+    await page.send('Page.reload')
+    if (!(await waitDom(page, `!!document.querySelector('form textarea')`, 25_000))) throw new Error('compositore non pronto (BR)')
+    await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, mobile: false, deviceScaleFactor: 2 })
+    await sleep(700)
+    await pageEval(page, `
+      const ta = document.querySelector('form textarea')
+      if (!ta) throw new Error('compositore non trovato')
+      const set = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set
+      set.call(ta, ${JSON.stringify(userText)})
+      ta.dispatchEvent(new Event('input', { bubbles: true }))
+      await new Promise((r) => setTimeout(r, 120))
+      ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+      return 'inviato'
+    `)
+    // la risposta del bot chiude il turno (il testo atteso arriva col reply scriptato)
+    const seen = await waitDom(page, `[...document.querySelectorAll('div')].some((d) => d.textContent.trim() === ${JSON.stringify(replyWhen)})`, 60_000)
+    if (!seen) {
+      const chatText = await pageEval(page, `return document.body.innerText.slice(0, 1200)`).catch(() => '(chat illeggibile)')
+      throw new Error(`la risposta del bot non è arrivata (BR giro ${giro}) — richieste al provider: ${chatRequests.length}; chat:\n${chatText}\n--- log app:\n${app.getAppLog().slice(-1200)}`)
+    }
+    await sleep(600)
+    return page
+  }
+
+  // BR-A: il box nasce in BRIDGE (stato nel log della CLI finta)
+  const brLog = join(TMP, 'cli-br.jsonl')
+  try { rmSync(brLog) } catch { /* nuovo giro */ }
+  {
+    pushTool('write-file', { path: 'rete-prova-bridge.txt', content: 'bridge' })
+    pushText('Fatto in bridge.')
+    const page = await boxTurn(10, { network: 'bridge', cliLogFile: brLog }, 'Scrivi il file rete-prova-bridge.txt', 'Fatto in bridge.')
+    const log = readCliLog(brLog)
+    const run = log.find((a) => a[0] === 'run' && a.includes('-d'))
+    check('BR il box nasce in bridge sulla rete homun-box', !!run && run[run.indexOf('--network') + 1] === 'homun-box', JSON.stringify(run?.slice(0, 10)))
+    check('BR in bridge NESSUN --no-dns e nessun isolamento', !run.includes('--no-dns') && !log.some((a) => a[0] === 'exec' && a[1] === '-u' && a[2] === '0'), 'bridge non isola')
+    const hasPath = (argv, name) => argv.some((x) => typeof x === 'string' && x.includes(name))
+    check('BR la scrittura del bot è girata nel box', log.some((a) => a[0] === 'exec' && hasPath(a, 'rete-prova-bridge.txt')), 'nessun exec di scrittura')
+    await shot(page, 'br-box-bridge-turno.png')
+    page.close()
+  }
+  await app.stop()
+  await sleep(1200)
+  await stopProbeDaemons(PREFIX)
+
+  // BR-B: si passa a NONE a app RIAPERTA (stesso log): il box bridge si RICREA
+  // su homun-box-isolated, con link down e VERIFICA
+  {
+    const beforeBridge = readCliLog(brLog).length
+    pushTool('write-file', { path: 'rete-prova-none.txt', content: 'none' })
+    pushText('Fatto in none.')
+    const page = await boxTurn(11, { network: 'none', cliLogFile: brLog }, 'Scrivi il file rete-prova-none.txt', 'Fatto in none.')
+    const log = readCliLog(brLog)
+    const after = log.slice(beforeBridge)
+    const ricreato = after.find((a) => a[0] === 'run' && a.includes('-d'))
+    check('BR5a none: il run -d porta --network homun-box-isolated --no-dns',
+      !!ricreato && ricreato[ricreato.indexOf('--network') + 1] === 'homun-box-isolated' && ricreato.includes('--no-dns'),
+      JSON.stringify(ricreato?.slice(0, 12)))
+    check('BR5b la CLI finta registra il link down COME ROOT e la verifica operstate',
+      after.some((a) => a[0] === 'exec' && a[1] === '-u' && a[2] === '0' && (a[a.indexOf('-c') + 1] ?? '').includes('ip link set')) &&
+      after.some((a) => a[0] === 'exec' && a[1] === '-u' && a[2] === '0' && (a[a.indexOf('-c') + 1] ?? '').includes('operstate')),
+      'manca il link down o la verifica')
+    check('BR5c il passaggio bridge → none RICREA il box (rm del container, MAI dei volumi)',
+      after.some((a) => a[0] === 'rm' && a.includes('sandbot-box')) && !after.some((a) => a[0] === 'volume' && (a[1] === 'rm' || a[1] === 'delete')),
+      'rm del container atteso')
+    check('BR5 la scrittura del bot gira anche nel box ISOLATO', after.some((a) => a[0] === 'exec' && a.some((x) => typeof x === 'string' && x.includes('rete-prova-none.txt'))), 'nessun exec di scrittura')
+    await shot(page, 'br-bridge-none-ricreato.png')
+    page.close()
+  }
+  await app.stop()
+  await sleep(1200)
+  await stopProbeDaemons(PREFIX)
+
+  // BR-C: la VERIFICA FALLISCE (operstate = up): NESSUN box, l'errore in parole
+  // nella chat del bot
+  {
+    const chatFrom = chatRequests.length
+    const failLog = join(TMP, 'cli-br-fail.jsonl')
+    try { rmSync(failLog) } catch { /* nuovo giro */ }
+    pushTool('run-command', { command: 'echo non-partira' })
+    pushText('Non riesco a isolare il computer del bot dalla rete: per sicurezza non l\'ho avviato.')
+    const page = await boxTurn(12, { network: 'none', cliLogFile: failLog, extraEnv: { SANDBOT_TEST_CONTAINER_OPERSTATE: 'up' } }, 'Esegui echo non-partira', "Non riesco a isolare il computer del bot dalla rete: per sicurezza non l'ho avviato.")
+    const log = readCliLog(failLog)
+    const runAt = log.findIndex((a) => a[0] === 'run' && a.includes('-d'))
+    const rmAt = log.findIndex((a) => a[0] === 'rm' && a.includes('sandbot-box'))
+    // il giro usa un COMANDO vero: l'isolamento cade PRIMA di ogni exec del
+    // bot, quindi il comando non deve MAI arrivare alla CLI
+    check('BR5d verifica fallita: il box si è RIMOSSO (rm -f DOPO il run) e il comando NON è mai girato',
+      runAt >= 0 && rmAt > runAt && !log.some((a) => a[0] === 'exec' && a.some((x) => typeof x === 'string' && x.includes('echo non-partira'))),
+      `run=${runAt} rm=${rmAt}`)
+    // l'errore IN PAROLE arriva al modello come risultato del tool: è la chat del bot
+    const toolTexts = chatRequests
+      .slice(chatFrom)
+      .flatMap((r) => (r.messages ?? []).filter((m) => m.role === 'tool').map((m) => String(m.content)))
+      .join('\n---\n')
+    check('BR5e l\'errore in parole nella chat del bot («Non riesco a isolare…»)',
+      toolTexts.includes('Non riesco a isolare il computer del bot dalla rete: per sicurezza non l\'ho avviato'),
+      toolTexts.slice(0, 160))
+    await shot(page, 'br-chat-errore-isolamento.png')
+    page.close()
+  }
+  try { providerServer.closeAllConnections?.(); providerServer.close() } catch { /* già chiusa */ }
 } catch (e) {
   failures++
   console.error('\n[sonda] ERRORE:', e.message ?? e)
@@ -350,9 +584,10 @@ try {
 } finally {
   console.log(`\n${failures === 0 ? 'TUTTI I CONTROLLI OK' : 'CONTROLLI FALLITI'}: ${checks.filter((c) => c.ok).length}/${checks.length}`)
   console.log(`catture in ${SHOTS}`)
-  try { app?.stop() } catch { /* già via */ }
+  try { await app?.stop() } catch { /* già via */ }
   await sleep(1000)
-  // 0 daemon a fine sonda (il controllo condiviso, dall'ambiente)
+  // 0 app e 0 daemon a fine sonda (le app vive RESPAWNANO i daemon: prima loro)
+  await stopProbeApps()
   const { found, closed, left } = await stopProbeDaemons(PREFIX)
   console.log(`daemon di sviluppo: ${found} trovati, ${closed} chiusi, ${left} rimasti`)
   if (left > 0) {
