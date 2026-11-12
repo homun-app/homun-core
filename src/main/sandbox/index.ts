@@ -464,6 +464,9 @@ export async function ensureBoxContainer(): Promise<void> {
   }
   const plan = boxEnsurePlan(facts)
   if (plan.kind === 'use') return
+  // BX2: il terreno del MOTORE, se ne ha uno (apple-container: la rete interna
+  // --internal e il suo GATEWAY, prima del run; docker non prepara nulla)
+  await activeBoxEngine().prepareNetwork?.(dockerRunner)
   // N1 (fase 13 correzioni 3): il MOTIVO di ogni ricreazione una riga nel log
   // del daemon (stdout/stderr finiscono in data/daemon.log) — un ciclo di
   // ricreazioni a ogni comando si vede nei log invece di passare inosservato

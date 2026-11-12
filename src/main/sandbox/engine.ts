@@ -123,6 +123,12 @@ export interface BoxEngine {
   /** L'env dei processi figli (docker: + DOCKER_HOST quando serve). */
   childEnv(env: NodeJS.ProcessEnv): Record<string, string>
   readonly argv: BoxEngineArgv
+  /**
+   * BX2: il terreno del motore PRIMA del (ri)avvio del box, se il motore ne
+   * ha uno (apple-container: la rete interna e il suo gateway). Il runner è
+   * quello del box. Docker non lo implementa: nulla da preparare.
+   */
+  prepareNetwork?(run: (argv: string[], opts?: { timeoutMs?: number }) => Promise<{ stdout: string; stderr: string; exitCode: number | null }>): Promise<void>
 }
 
 // ---- la scelta del motore (PURa) ----

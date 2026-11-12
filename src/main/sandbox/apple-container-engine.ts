@@ -10,6 +10,9 @@ import { join } from 'node:path'
 import type { BoxEngine, BoxEngineArgv } from './engine'
 import { BOX_CONTAINER, BOX_VOLUME } from './docker-argv'
 import {
+  APPLE_BOX_NETWORK,
+  appleNetworkInspectArgv,
+  parseNetworkGateway,
   appleSystemStartArgv,
   appleKernelSetRecommendedArgv,
   appleNetworkCreateArgv,
@@ -78,6 +81,9 @@ import {
 } from './apple-container-argv'
 import { DOCKER_BROWSER_ROOT_SH } from './docker-argv'
 
+/** Il runner degli argv del box (la firma del DockerRunner di sandbox/index). */
+export type BoxArgvRunner = (argv: string[], opts?: { timeoutMs?: number }) => Promise<{ stdout: string; stderr: string; exitCode: number | null }>
+
 /** Il gateway della rete interna, ricordato dopo l'inspect (BX2). */
 let cachedGateway: string | null = null
 
@@ -89,6 +95,28 @@ export function setBoxNetworkGateway(ip: string | null): void {
 /** Il gateway della rete del box (null = non ancora letto). */
 export function boxNetworkGateway(): string | null {
   return cachedGateway
+}
+
+/**
+ * BX2: il terreno della RETE del box, prima del run. La rete DEDICATA
+ * --internal homun-box si crea se manca (inspect → create → inspect) e il
+ * suo GATEWAY si ricorda: è l'indirizzo del Mac con cui il browser del bot
+ * raggiunge il proxy d'uscita, al posto di host.docker.internal. Esito:
+ * il gateway, o null se l'inspect non lo dice (l'avvio prosegue col
+ * fallback e il log lo ricorda — la rete interna resta il confine).
+ */
+export async function ensureAppleBoxNetwork(run: BoxArgvRunner): Promise<string | null> {
+  let ins = await run(appleNetworkInspectArgv(), { timeoutMs: 15_000 })
+  if (ins.exitCode !== 0) {
+    const create = await run(appleNetworkCreateArgv(), { timeoutMs: 30_000 })
+    if (create.exitCode !== 0) {
+      throw new Error(`creation of the internal network ${APPLE_BOX_NETWORK} failed: ${create.stderr || `exit ${create.exitCode}`}`)
+    }
+    ins = await run(appleNetworkInspectArgv(), { timeoutMs: 15_000 })
+  }
+  const gw = parseNetworkGateway(ins.stdout)
+  setBoxNetworkGateway(gw)
+  return gw
 }
 
 /**
@@ -179,5 +207,8 @@ export const appleContainerEngine: BoxEngine = {
   id: 'apple-container',
   command: () => containerCliPath(),
   childEnv: (env) => Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined)),
-  argv
+  argv,
+  prepareNetwork: async (run) => {
+    await ensureAppleBoxNetwork(run)
+  }
 }

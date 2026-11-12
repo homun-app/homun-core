@@ -74,6 +74,14 @@ RUN npm install -g @playwright/mcp@0.0.83 \
  && playwright-mcp --help >/dev/null \
  && chmod -R a+rX,go-w "${PLAYWRIGHT_BROWSERS_PATH:-/ms-playwright}"
 
+# fase box-container (BX2): NESSUN bit setuid/setgid nell'immagine. Con Docker
+# il box girava --cap-drop ALL + no-new-privileges; con Apple container quei
+# flag non esistono (il confine è la VM del container) e un setuid in più
+# nell'immagine peserebbe due volte. La pulizia toglie il bit a TUTTI i file
+# dell'immagine (chmod a-s, idempotente): dentro il box il bot resta uid 1000
+# SENZA sudo, e nessun binario può fargli da trampolino.
+RUN find / -xdev -perm -4000 -o -xdev -perm -2000 | xargs -r chmod a-s
+
 # fase 14 correzioni (P1): NESSUN useradd — l'immagine base Playwright porta
 # GIÀ l'utente non-root pwuser (uid/gid 1001:1001, membro di 100/users) previsto
 # apposta per far girare il browser: è lui l'utente del processo Playwright MCP
