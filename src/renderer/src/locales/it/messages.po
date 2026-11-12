@@ -425,6 +425,10 @@ msgstr "{name}, sta pensando"
 msgid "{name}, sta scrivendo"
 msgstr "{name}, sta scrivendo"
 
+#: src/renderer/src/lib/guide-scene.ts
+msgid "{name}? Mi piace. E che faccia ho?"
+msgstr "{name}? Mi piace. E che faccia ho?"
+
 #: src/renderer/src/components/SubagentCard.tsx
 msgid "{s} s"
 msgstr "{s} s"
@@ -985,6 +989,10 @@ msgstr "Apri i membri di {0}"
 msgid "Apri Impostazioni → Approvazione automatica con una regola precompilata"
 msgstr "Apri Impostazioni → Approvazione automatica con una regola precompilata"
 
+#: src/renderer/src/components/GuideView.tsx
+msgid "Apri la chat"
+msgstr "Apri la chat"
+
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "apri la conversazione"
 msgstr "apri la conversazione"
@@ -1121,6 +1129,10 @@ msgstr "Autorizzazioni"
 msgid "Avanti"
 msgstr "Avanti"
 
+#: src/renderer/src/components/GuideView.tsx
+msgid "Avanzamento"
+msgstr "Avanzamento"
+
 #: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/RightPanel.tsx
 #: src/renderer/src/components/settings/AddProviderSheet.tsx
@@ -1171,10 +1183,6 @@ msgstr "Basso"
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Bearer token (opzionale — salvato cifrato)"
 msgstr "Bearer token (opzionale — salvato cifrato)"
-
-#: src/renderer/src/components/GuideView.tsx
-msgid "Benvenuto"
-msgstr "Benvenuto"
 
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 msgid "Blocca"
@@ -1521,6 +1529,10 @@ msgstr "Ciao {name}. Crea le tue routine, collega le app del template e scrivi l
 msgid "onboarding.focusGreeting"
 msgstr "Ciao! Sono Homun. Dimmi da dove partiamo."
 
+#: src/renderer/src/lib/guide-scene.ts
+msgid "Ciao! Sono il tuo nuovo bot. Come mi chiami?"
+msgstr "Ciao! Sono il tuo nuovo bot. Come mi chiami?"
+
 #: src/renderer/src/components/LibraryCards.tsx
 msgid "Cifrato sul Mac. Il bot non vedrà mai la password."
 msgstr "Cifrato sul Mac. Il bot non vedrà mai la password."
@@ -1682,7 +1694,6 @@ msgstr "Composio non raggiungibile: controlla la connessione e riprova."
 msgid "Composio non raggiungibile: controlla la connessione e riprova."
 msgstr "Composio non raggiungibile: controlla la connessione e riprova."
 
-#: src/renderer/src/components/GuideView.tsx
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Computer"
 msgstr "Computer"
@@ -2119,10 +2130,6 @@ msgstr "Da ricollegare"
 msgid "da scegliere"
 msgstr "da scegliere"
 
-#: src/renderer/src/components/GuideView.tsx
-msgid "Da solo: leggere la tua posta per riassumerla. Con la tua conferma: mandare un'email a qualcuno, cancellare file. Mai senza di te: le cose irreversibili."
-msgstr "Da solo: leggere la tua posta per riassumerla. Con la tua conferma: mandare un'email a qualcuno, cancellare file. Mai senza di te: le cose irreversibili."
-
 #: src/renderer/src/components/ActivityPanel.tsx
 msgid "Da te"
 msgstr "Da te"
@@ -2317,6 +2324,10 @@ msgstr "Download in pausa · {0}%"
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "Download non riuscito: {0}"
 msgstr "Download non riuscito: {0}"
+
+#: src/renderer/src/lib/guide-scene.ts
+msgid "Eccomi! Andiamo?"
+msgstr "Eccomi! Andiamo?"
 
 #. placeholder {0}: entries.length
 #: src/renderer/src/components/ComputerFiles.tsx
@@ -2599,6 +2610,10 @@ msgstr "Fonte"
 msgid "fonte: {0}"
 msgstr "fonte: {0}"
 
+#: src/renderer/src/lib/guide-scene.ts
+msgid "Funziona! Sento già i pensieri."
+msgstr "Funziona! Sento già i pensieri."
+
 #: src/renderer/src/components/Settings.tsx
 msgid "Fuso orario"
 msgstr "Fuso orario"
@@ -2856,6 +2871,10 @@ msgstr "Hai caricato"
 #: src/renderer/src/components/TakeoverCard.tsx
 msgid "Hai finito · il bot riprende"
 msgstr "Hai finito · il bot riprende"
+
+#: src/renderer/src/lib/guide-scene.ts
+msgid "Hai già Ollama: scegli un modello."
+msgstr "Hai già Ollama: scegli un modello."
 
 #: src/renderer/src/components/GuideView.tsx
 msgid "Hai Ollama in casa: si aggiunge come provider e si sceglie un modello che supporti i tool."
@@ -3432,12 +3451,17 @@ msgstr "In sospensione"
 msgid "Incolla la chiave"
 msgstr "Incolla la chiave"
 
+#: src/renderer/src/lib/guide-scene.ts
+msgid "Incolla la chiave: la provo subito."
+msgstr "Incolla la chiave: la provo subito."
+
 #. placeholder {0}: memoryProgress.done
 #. placeholder {1}: memoryProgress.total
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "indicizzazione delle conversazioni: {0}/{1}"
 msgstr "indicizzazione delle conversazioni: {0}/{1}"
 
+#: src/renderer/src/components/GuideView.tsx
 #: src/renderer/src/components/settings/AddProviderSheet.tsx
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "Indietro"
@@ -3461,10 +3485,6 @@ msgstr "Indirizzo del server {0}"
 #: src/renderer/src/components/Settings.tsx
 msgid "ingresso $/M"
 msgstr "ingresso $/M"
-
-#: src/renderer/src/components/GuideView.tsx
-msgid "Iniziamo"
-msgstr "Iniziamo"
 
 #: src/renderer/src/components/ServerSetup.tsx
 msgid "Inserisci un valore"
@@ -3976,7 +3996,6 @@ msgstr "Medio"
 msgid "Membri"
 msgstr "Membri"
 
-#: src/renderer/src/components/GuideView.tsx
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Memoria"
 msgstr "Memoria"
@@ -4003,6 +4022,10 @@ msgstr "metodo sconosciuto: {method}"
 #: src/renderer/src/components/Settings.tsx
 msgid "metti in pausa"
 msgstr "metti in pausa"
+
+#: src/renderer/src/lib/guide-scene.ts
+msgid "Mi serve un cervello. Con cosa penso?"
+msgstr "Mi serve un cervello. Con cosa penso?"
 
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "Mie"
@@ -4031,6 +4054,10 @@ msgstr "minuti prima dell'evento"
 #: src/renderer/src/components/Settings.tsx
 msgid "minuti tra i poll (minimo 2)"
 msgstr "minuti tra i poll (minimo 2)"
+
+#: src/renderer/src/lib/guide-scene.ts
+msgid "Mmh, questa chiave non entra."
+msgstr "Mmh, questa chiave non entra."
 
 #: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
@@ -4909,6 +4936,14 @@ msgstr "Perché lo so?"
 msgid "rpc.filesOutside"
 msgstr "Percorso fuori dal computer del bot."
 
+#: src/renderer/src/lib/guide-scene.ts
+msgid "Perfetto, uso quello sul Mac."
+msgstr "Perfetto, uso quello sul Mac."
+
+#: src/renderer/src/components/GuideView.tsx
+msgid "Permessi"
+msgstr "Permessi"
+
 #: src/renderer/src/components/ComputerActivity.tsx
 msgid "perso"
 msgstr "perso"
@@ -4966,6 +5001,10 @@ msgstr "Politica predefinita"
 #: src/renderer/src/components/Settings.tsx
 msgid "poll di un connettore"
 msgstr "poll di un connettore"
+
+#: src/renderer/src/lib/guide-scene.ts
+msgid "Posso pensare tutto qui sul Mac."
+msgstr "Posso pensare tutto qui sul Mac."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -5057,7 +5096,6 @@ msgstr "Progetto (titolo nella barra)"
 msgid "Prompt:"
 msgstr "Prompt:"
 
-#: src/renderer/src/components/GuideView.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Pronto"
 msgstr "Pronto"
@@ -5109,6 +5147,10 @@ msgstr "prossima {0}"
 msgid "prossima: {0}"
 msgstr "prossima: {0}"
 
+#: src/renderer/src/components/GuideView.tsx
+msgid "Prossimamente"
+msgstr "Prossimamente"
+
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Prova"
 msgstr "Prova"
@@ -5152,6 +5194,7 @@ msgid "Provo l’indirizzo…"
 msgstr "Provo l’indirizzo…"
 
 #: src/renderer/src/components/settings/AddProviderSheet.tsx
+#: src/renderer/src/lib/guide-scene.ts
 msgid "Provo la chiave…"
 msgstr "Provo la chiave…"
 
@@ -5230,6 +5273,10 @@ msgstr "quando torni al computer"
 #: src/shared/ui-messages.ts
 msgid "trigger.presence"
 msgstr "quando torni al computer dopo un’assenza"
+
+#: src/renderer/src/lib/guide-scene.ts
+msgid "Quanto posso fare senza chiederti?"
+msgstr "Quanto posso fare senza chiederti?"
 
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "Quasi dimenticato: alcuni byte restano nel registro delle scritture e vengono rimossi alla prossima scrittura del motore."
@@ -5647,10 +5694,6 @@ msgstr "sabato"
 msgid "Salta per ora"
 msgstr "Salta per ora"
 
-#: src/renderer/src/components/GuideView.tsx
-msgid "saltato"
-msgstr "saltato"
-
 #: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/BotDialogs.tsx
 #: src/renderer/src/components/DraftCard.tsx
@@ -5724,6 +5767,14 @@ msgstr "Scarica sul Mac"
 #: src/renderer/src/components/ComputerFiles.tsx
 msgid "Scaricato: {0}"
 msgstr "Scaricato: {0}"
+
+#: src/renderer/src/lib/guide-scene.ts
+msgid "Scaricato: penso da qui."
+msgstr "Scaricato: penso da qui."
+
+#: src/renderer/src/lib/guide-scene.ts
+msgid "Scarico… ci vuole qualche minuto."
+msgstr "Scarico… ci vuole qualche minuto."
 
 #: src/renderer/src/components/DraftCard.tsx
 #: src/renderer/src/components/MemoryPanel.tsx
@@ -6497,6 +6548,10 @@ msgstr "Troppo grande per l'anteprima ({0})"
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "tu"
 msgstr "tu"
+
+#: src/renderer/src/components/GuideView.tsx
+msgid "Tu"
+msgstr "Tu"
 
 #. placeholder {0}: plainPreview(e.content)
 #: src/renderer/src/sidebar-utils.ts
