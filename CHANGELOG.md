@@ -7,7 +7,8 @@ sezioni H2 e un punto per riga.
 
 ## [0.3.1001-beta.5] — 2026-11-12
 
-Due cose grosse, una è un po' rivoluzionaria.
+Tre cose: due grosse (una è un po' rivoluzionaria) e una che hai chiesto
+dalla beta.
 
 ### Novità
 
@@ -18,6 +19,9 @@ Due cose grosse, una è un po' rivoluzionaria.
 - **«Spazio su disco» nelle Impostazioni.** Quanto occupano il computer dei
   bot, i modelli e lo spazio recuperabile — e come toglierli, con le
   conferme che servono sulle cose irreversibili.
+- **Più account per la stessa app (per esempio due caselle Gmail), e il bot
+  sa subito quale hai collegato.** Ogni account col suo nome, dalla
+  finestra App: aggiungi, rinomini, togli.
 
 ## [0.3.1001-beta.4] — 2026-11-12
 

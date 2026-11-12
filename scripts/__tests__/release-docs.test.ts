@@ -155,3 +155,20 @@ describe("BX7 (fase box-container): la voce 0.3.1001-beta.5 — BREVE, in parole
     expect(flat).toMatch(/[Ss]pazio su disco/)
   })
 })
+
+
+describe("CA6 (fase composio-account): la riga della voce 0.3.1001-beta.5", () => {
+  it("c'è la riga dei più account per app, e la voce resta sotto i 900 caratteri", async () => {
+    const { extractReleaseNotes } = (await import('../extract-release-notes.mjs')) as {
+      extractReleaseNotes: (changelog: string, version: string) => string | null
+    }
+    const changelog = read('CHANGELOG.md')
+    const body = extractReleaseNotes(changelog, '0.3.1001-beta.5')
+    expect(body, 'manca la sezione ## [0.3.1001-beta.5] nel CHANGELOG').not.toBeNull()
+    expect(body!.length).toBeLessThanOrEqual(900)
+    const flat = body!.replace(/\s+/g, ' ')
+    expect(flat).toMatch(/più account per la stessa app/i)
+    expect(flat).toMatch(/due caselle Gmail/)
+    expect(flat).toMatch(/il bot sa subito quale hai collegato|bot sa subito quale/)
+  })
+})
