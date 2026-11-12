@@ -496,6 +496,17 @@ export const useStore = create<Store>((set, get) => ({
         case 'agents':
           void api.listAgents().then((agents2) => set({ agents: agents2 }))
           break
+        case 'models': {
+          // GC6.1 (fase guida-correzioni): il daemon dice che models.main o i
+          // provider sono cambiati (guida, Impostazioni, modello integrato
+          // pronto) — lo store si ricarica SUBITO: prima li leggeva solo
+          // all'avvio e la finestra restava su «Nessun modello»
+          api.listProviders().then((providers) => set({ providers })).catch(() => undefined)
+          api.settingsGet<MainModel | null>('models.main', null)
+            .then((mainModel) => set({ mainModel }))
+            .catch(() => undefined)
+          break
+        }
         case 'onboarding': {
           // OA1: il daemon ha detto lo stato del primo avvio. OA2: con lo
           // stato della guida (il passo corrente) e la sequenza.

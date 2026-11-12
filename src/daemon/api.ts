@@ -233,6 +233,9 @@ export function buildApiMethods(
       baseUrl: '', enabled: true
     })
     emit({ type: 'agents' })
+    // GC6.1 (fase guida-correzioni): i provider sono cambiati → la finestra
+    // si ricarica l'elenco (e il modello principale se è questo il caso)
+    emit({ type: 'models' })
     return true
   }
 
@@ -2068,11 +2071,16 @@ export function buildApiMethods(
           worker.poke()
         }
       }
+      // GC6.1 (fase guida-correzioni): provider nuovo (e forse principale
+      // assegnato) → la finestra si ricarica elenco e modello
+      emit({ type: 'models' })
     },
     'providers:delete': ([id]) => {
       // fase 16c (C3.3): se era il provider del modello principale, models.main si azzera
       providers.deleteProvider(id as string)
       emit({ type: 'agents' })
+      // GC6.1: come sopra — anche TOGLIERE un provider cambia elenco e modello
+      emit({ type: 'models' })
     },
     'providers:discover': () => providers.discoverProviders(),
     // ---- fase locale (L3): il modello integrato (download, stato, rimozione) ----
@@ -2294,6 +2302,10 @@ export function buildApiMethods(
           worker.poke()
         }
       }
+      // GC6.1 (fase guida-correzioni): il modello principale è cambiato (la
+      // guida, le Impostazioni, o tolto del tutto) → lo store del renderer
+      // si ricarica, la finestra non resta su «Nessun modello»
+      if (key === 'models.main') emit({ type: 'models' })
     },
 
     // ---- fase rilascio (A7): docker c'è? si è avviato? ----

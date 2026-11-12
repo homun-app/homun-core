@@ -1549,7 +1549,7 @@ msgstr "Ciao {name}. Crea le tue routine, collega le app del template e scrivi l
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "onboarding.focusGreeting"
-msgstr "Ciao! Sono Homun. Dimmi da dove partiamo."
+msgstr "Ciao! Sono {name}. Dimmi da dove partiamo."
 
 #: src/renderer/src/lib/guide-scene.ts
 msgid "Ciao! Sono il tuo nuovo bot. Come mi chiami?"
@@ -3180,6 +3180,10 @@ msgstr "Il costo è un minimo: alcuni modelli non hanno un prezzo."
 #: src/shared/ui-messages.ts
 msgid "localModel.downloadFailed"
 msgstr "Il download del modello integrato non è riuscito: {message}"
+
+#: src/renderer/src/components/GuideModelStep.tsx
+msgid "Il download del modello non è riuscito."
+msgstr "Il download del modello non è riuscito."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts

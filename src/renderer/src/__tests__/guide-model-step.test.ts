@@ -127,6 +127,21 @@ describe('GC4.2: icone VERE per «Altri…» e «Integrato» (niente lettere)', 
   })
 })
 
+describe('GC6.2: «Scarica» mostra il download SUBITO e riprende il polling', () => {
+  it('dopo localModelInstall started il pannello va a «Scarico…» e RIAVVIA il driver', () => {
+    // il pannello usa il driver condiviso (lib/guide-local-model), e il
+    // bottone Scarica: stato downloading SUBITO + restart del polling
+    // (pollEpoch) + expecting, così le letture non ancora downloading non
+    // fermano il loop né riportano indietro la barra
+    expect(MODEL_SRC).toContain('runLocalModelPolling')
+    expect(MODEL_SRC).toMatch(/setLocalState\('downloading'\)/)
+    expect(MODEL_SRC).toMatch(/setPollEpoch\(\(e\) => e \+ 1\)/)
+    expect(MODEL_SRC).toContain('expecting: () =>')
+    // l'errore del download arriva in PAROLE (il messaggio del daemon)
+    expect(MODEL_SRC).toMatch(/localDownloadError/)
+  })
+})
+
 describe('GC2: le pillole dei modelli del pannello con chiave', () => {
   it('un SOLO controllo «Altri modelli…» e nessun testo di modello ripetuto', async () => {
     const { GuideModelPills } = await import('../components/GuideModelStep')

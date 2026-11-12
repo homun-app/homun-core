@@ -277,3 +277,37 @@ describe('OAC3 answerOnboardingFocus: doppia scelta → un solo esito', () => {
     expect(log.dismissed).toHaveLength(0) // non ha marcato il dismissal
   })
 })
+
+describe('GC6.4: il saluto usa il NOME del bot principale, non «Homun»', () => {
+  const agentNamed = (name: string): Agent => ({
+    id: 'agent_1', name, description: 'desc', providerId: null, model: null, status: 'idle', unread: 0, createdAt: 1
+  })
+  const greetingText = (): string => {
+    const first = log.sends[0]!
+    expect(first.message.type).toBe('text')
+    return (first.message as { type: 'text'; text: string }).text
+  }
+
+  it('il bot si chiama «Bottolo» → «Ciao! Sono Bottolo. Dimmi da dove partiamo.»', () => {
+    log.agents = [agentNamed('Bottolo')]
+    expect(insertFocusCardIfDue(deps)).toBe(true)
+    expect(greetingText()).toBe('Ciao! Sono Bottolo. Dimmi da dove partiamo.')
+  })
+
+  it('nome vuoto o di soli spazi → ripiego su «Bot»', () => {
+    log.agents = [agentNamed('   ')]
+    expect(insertFocusCardIfDue(deps)).toBe(true)
+    expect(greetingText()).toBe('Ciao! Sono Bot. Dimmi da dove partiamo.')
+  })
+
+  it('in inglese il saluto col nome, uguale per la card (lingua dell\'utente)', () => {
+    setSetting('ui.activeLanguage', 'en')
+    try {
+      log.agents = [agentNamed('Bottolo')]
+      expect(insertFocusCardIfDue(deps)).toBe(true)
+      expect(greetingText()).toBe("Hi! I'm Bottolo. Tell me where we start.")
+    } finally {
+      setSetting('ui.activeLanguage', 'it')
+    }
+  })
+})

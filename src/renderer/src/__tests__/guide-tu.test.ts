@@ -126,3 +126,13 @@ describe('G3: il pannello del passo «Tu»', () => {
     expect(GUIDE_SRC).toContain("if (e.key === 'Enter') { e.preventDefault(); onConfirm() }")
   })
 })
+
+describe('GC6.3: gli anelli di selezione non si tagliano MAI', () => {
+  it('la colonna dei passi ha il margine interno orizzontale per l\'anello (px, non solo py)', () => {
+    // il contenitore che scorre (overflow-y-auto) taglia anche in orizzontale
+    // (visible → auto per CSS): il suo padding orizzontale deve coprire
+    // l'anello di selezione (2px) e quello di focus (3px) delle schede della
+    // PRIMA colonna — altrimenti la faccia scelta resta mozzata a sinistra
+    expect(GUIDE_SRC).toMatch(/overflow-y-auto scroll-thin py-4 px-1/)
+  })
+})

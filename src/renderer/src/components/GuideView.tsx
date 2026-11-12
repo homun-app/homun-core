@@ -615,7 +615,7 @@ export function GuideView() {
         </div>
 
         {/* al centro: il contenuto del passo */}
-        <div className="flex min-h-0 flex-1 flex-col justify-center overflow-y-auto scroll-thin py-4">
+        <div className="flex min-h-0 flex-1 flex-col justify-center overflow-y-auto scroll-thin py-4 px-1">
           {uiStep === 'welcome' && (
             <WelcomeStep
               name={draftName}

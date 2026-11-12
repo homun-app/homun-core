@@ -19,6 +19,7 @@ import { guideProviderCards, GUIDE_OTHER_KINDS, type GuideProviderCardId } from 
 import { providerKeyUrl } from '../lib/provider-key-urls'
 import { recommendedModel } from '../lib/recommended-model'
 import { guideModelPills } from '../lib/guide-model-pills'
+import { runLocalModelPolling } from '../lib/guide-local-model'
 import { ModelPicker } from './ui/ModelPicker'
 import { ProviderMark } from './settings/AddProviderSheet'
 
@@ -140,6 +141,11 @@ export function GuideModelStep({ paths, onFactsChange, onReadyChange, registerCo
   const [localPct, setLocalPct] = useState(0)
   const [localSizeGb, setLocalSizeGb] = useState<number | null>(null)
   const [localInstallError, setLocalInstallError] = useState<string | null>(null)
+  // GC6.2: l'errore del download in PAROLE (il messaggio del daemon), la
+  // ripartenza del polling (pollEpoch) e l'attesa del download appena avviato
+  const [localDownloadError, setLocalDownloadError] = useState<string | null>(null)
+  const [pollEpoch, setPollEpoch] = useState(0)
+  const expectingDownload = useRef(false)
   const continueBusy = useRef(false)
 
   // il tipo con chiave del pannello aperto (Ollama e Integrato sono a parte)
@@ -229,35 +235,56 @@ export function GuideModelStep({ paths, onFactsChange, onReadyChange, registerCo
     }
   }, [ollamaModel, providers])
 
-  // Integrato: lo stato si polla (1 s durante il download, come la scheda
-  // Impostazioni); al modello pronto il passo si chiude da solo (daemon)
+  // Integrato: lo stato si polla col driver condiviso (lib/guide-local-model,
+  // 1 s durante il download come la scheda Impostazioni); al modello pronto
+  // il passo si chiude da solo (daemon). GC6.2: il loop riparte anche DOPO
+  // «Scarica» (pollEpoch) — prima partiva solo all'apertura del pannello e
+  // continuava solo se lo stato era già downloading: dopo localModelInstall()
+  // nessuno lo riavviava e la finestra restava ferma su «Pronto a scaricare.»
   useEffect(() => {
     if (panel !== 'local') return
     let alive = true
-    let timer: ReturnType<typeof setTimeout> | null = null
-    const poll = async (): Promise<void> => {
-      try {
-        const st = await api.localModelStatus()
+    void runLocalModelPolling({
+      status: () => api.localModelStatus(),
+      onUi: (u) => {
         if (!alive) return
-        setLocalSizeGb(st.model.sizeGb)
-        setLocalState(st.state === 'downloading' ? 'downloading' : st.state === 'ready' || st.state === 'running' ? 'ready' : 'other')
-        if (st.progress && st.progress.total > 0) {
-          setLocalPct(Math.min(100, Math.round((st.progress.bytes / st.progress.total) * 100)))
+        // finché il download è ATTESO, le letture ancora precedenti allo
+        // stato downloading del daemon non riportano il pannello indietro
+        if (u.state === 'idle' && expectingDownload.current) return
+        if (u.sizeGb !== null) setLocalSizeGb(u.sizeGb)
+        if (u.state === 'error') {
+          // l'errore in PAROLE (il messaggio del daemon), pannello pronto a riprovare
+          setLocalState('other')
+          setLocalPct(0)
+          setLocalDownloadError(u.error ?? '')
+          return
         }
-        if (st.state === 'downloading') timer = setTimeout(() => { void poll() }, 1_000)
-      } catch { /* status non disponibile: resta com'è */ }
-    }
-    void poll()
-    return () => { alive = false; if (timer) clearTimeout(timer) }
-  }, [panel])
+        setLocalState(u.state)
+        setLocalPct(u.pct)
+      },
+      delay: (ms) => new Promise<void>((r) => setTimeout(r, ms)),
+      isAlive: () => alive,
+      expecting: () => expectingDownload.current
+    })
+    return () => { alive = false }
+  }, [panel, pollEpoch])
 
   const localInstall = async (): Promise<void> => {
     setLocalInstallError(null)
+    setLocalDownloadError(null)
     const r = await api.localModelInstall().catch(() => null)
-    if (r && !r.started) {
+    if (!r) return
+    if (!r.started) {
       // l'idoneità ricontrollata dal daemon ha rifiutato (per esempio spazio)
       setLocalInstallError(r.error ?? 'no')
+      return
     }
+    // GC6.2: «Scarico…» SUBITO, con la barra e «Annulla», e il polling
+    // riparte: le prime letture possono non essere ancora downloading
+    expectingDownload.current = true
+    setLocalPct((p) => Math.max(p, 1))
+    setLocalState('downloading')
+    setPollEpoch((e) => e + 1)
   }
 
   // la Continua attiva e la sua funzione, secondo il pannello
@@ -467,6 +494,11 @@ export function GuideModelStep({ paths, onFactsChange, onReadyChange, registerCo
             ) : null}
           </span>
           {localInstallError && <p className="m-0 text-sm text-destructive">{t`Non posso ora: controlla lo spazio e riprova.`}</p>}
+          {localDownloadError !== null && (
+            <p className="m-0 text-sm text-destructive" data-testid="guide-local-download-error">
+              {t`Il download del modello non è riuscito.`} {localDownloadError}
+            </p>
+          )}
         </div>
       </div>
     )

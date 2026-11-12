@@ -595,9 +595,11 @@ export const UI = {
   }),
 
   // ---- OA4 (fase onboarding-a): il focus in chat, deterministico e zero token ----
+  // GC6.4 (fase guida-correzioni): il saluto col NOME del bot principale al
+  // momento dell'inserimento (dopo il passo Tu può già non chiamarsi Homun)
   onboardingFocusGreeting: msg({
     id: 'onboarding.focusGreeting',
-    message: 'Ciao! Sono Homun. Dimmi da dove partiamo.'
+    message: 'Ciao! Sono {name}. Dimmi da dove partiamo.'
   }),
   onboardingFocusPrompt: msg({
     id: 'onboarding.focusPrompt',

@@ -135,7 +135,11 @@ export function insertFocusCardIfDue(deps: FocusFlowDeps): boolean {
     if (entries.some(isUserEntry)) return false
     if (focusCardIn(entries)) return false
     const l = currentUserLanguage()
-    deps.appendSystemSend(mainId, { type: 'text', text: formatUi(ui(UI.onboardingFocusGreeting), l) })
+    // GC6.4: il saluto col NOME del bot principale al momento dell'inserimento
+    // (il passo Tu l'ha appena scelto): ripiego su «Bot» se vuoto
+    const bot = deps.getAgent(mainId)
+    const name = (bot?.name ?? '').trim() || 'Bot'
+    deps.appendSystemSend(mainId, { type: 'text', text: formatUi(ui(UI.onboardingFocusGreeting, { name }), l) })
     deps.appendSystemSend(mainId, {
       type: 'widget',
       prompt: focusPrompt(l),

@@ -724,6 +724,10 @@ export type SandbotEvent =
   // V5 (prova vera): app = nome umano del server MCP, args = i SOLI NOMI
   // delle azioni degli strumenti meta di Composio (mai i valori)
   | { type: 'activity'; agentId: string; activity: { tool: string; target: string; app?: string; args?: string } | null }
+  // GC6.1 (fase guida-correzioni): il modello principale o i provider sono
+  // cambiati (guida, Impostazioni, modello integrato pronto) — lo store del
+  // renderer ricarica provider e models.main senza ricaricare la finestra
+  | { type: 'models' }
   // fase 10: i messaggi o i membri di un gruppo sono cambiati (sidebar + vista gruppo)
   | { type: 'groups' }
   // fase 12: lo stato di un sottoagente di questo padre è cambiato (card + pannello)

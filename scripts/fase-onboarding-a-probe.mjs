@@ -300,6 +300,48 @@ await dark(true)
 await shot('guida-v2-tu-1440-scuro.png')
 await dark(false)
 
+// GC6.3: l'anello della faccia scelta nella prima colonna NON è mai tagliato:
+// nessun antenato con overflow non visible taglia il rettangolo della scheda
+// allargato dello spessore dell'anello (a 1000 la colonna dei passi riempie
+// tutta la larghezza: è lì che l'anello sbordava dal contenitore che scorre)
+const anelloAt = async (w) => {
+  await setWindowWidth(w)
+  const v = await pageEval(`return (() => {
+    const el = document.querySelector('[data-testid="guide-family-h-creature"][aria-pressed="true"]')
+    if (!el) return 'tile non trovata'
+    const ring = 2
+    const r = el.getBoundingClientRect()
+    const box = { left: r.left - ring, top: r.top - ring, right: r.right + ring, bottom: r.bottom + ring }
+    let n = el.parentElement
+    while (n && n !== document.documentElement) {
+      const cs = getComputedStyle(n)
+      if (cs.overflowX !== 'visible' || cs.overflowY !== 'visible') {
+        const b = n.getBoundingClientRect()
+        const clip = {
+          left: b.left + (parseFloat(cs.borderLeftWidth) || 0),
+          right: b.right - (parseFloat(cs.borderRightWidth) || 0),
+          top: b.top + (parseFloat(cs.borderTopWidth) || 0),
+          bottom: b.bottom - (parseFloat(cs.borderBottomWidth) || 0)
+        }
+        const side = box.left < clip.left - 0.5 ? 'left' : box.right > clip.right + 0.5 ? 'right' : box.top < clip.top - 0.5 ? 'top' : box.bottom > clip.bottom + 0.5 ? 'bottom' : null
+        if (side) {
+          return JSON.stringify({ side, tag: n.tagName, cls: String(n.className).slice(0, 80), box, clip: { left: clip.left, right: clip.right, top: clip.top, bottom: clip.bottom } })
+        }
+      }
+      n = n.parentElement
+    }
+    return 'ok'
+  })()`)
+  return v
+}
+await setInputValue('guide-name-input', 'Nanna')
+// la faccia della PRIMA colonna («Creatura»): è lì che l'anello si tagliava
+await clickTestid('guide-family-h-creature')
+check('GC6.3a a 1440 l\'anello della faccia scelta non è tagliato da nessun antenato', (await anelloAt(1440)) === 'ok', await anelloAt(1440))
+check('GC6.3b a 1000 (colonna piena) l\'anello non è tagliato', (await anelloAt(1000)) === 'ok', await anelloAt(1000))
+await setWindowWidth(1440)
+await shot('gc-anello-tu-1440-chiaro.png')
+
 const previewOk = await tuStep()
 check('G8-1e l\'anteprima della faccia è immediata sulla mascotte grande', previewOk === true)
 check('G8-1f «Continua» del passo Tu salva nome e avatar (agents:update, clic vero)',
@@ -397,6 +439,20 @@ await clickTestid('guide-continue') // «Apri la chat»
 check('G8-1u «Apri la chat» porta in chat, con la card del focus (OA4) e lo STESSO bot',
   await waitDom(`!!document.querySelector('[data-testid="widget-option-posta"]')`, 20_000)
   && (await rpc('listAgents()'))[0]?.name === 'Nanna')
+
+// GC6.1: il modello scelto nella guida ARRIVA alla finestra SENZA ricaricare:
+// il pannello del bot dice «Modello: …finto», mai «Nessun modello» (lo store
+// ora ascolta l'evento models del daemon)
+check('GC6.1a in chat senza ricaricare: il pannello del bot mostra il modello scelto (finto), mai «Nessun modello»',
+  await waitDom(`(() => { const row = document.querySelector('[data-testid="bot-model-row"]'); return !!row && row.innerText.includes('finto') && !row.innerText.includes('Nessun modello') })()`, 10_000),
+  `row=${await pageEval(`return document.querySelector('[data-testid="bot-model-row"]')?.innerText ?? null`)}`)
+check('GC6.1b nemmeno la barra in basso dice «nessun modello»',
+  !((await visibleText()).toLowerCase().includes('nessun modello')),
+  (await visibleText()).toLowerCase().includes('nessun modello') ? 'qualcosa dice ancora «nessun modello»' : '')
+
+// GC6.4: il saluto della card del focus usa il NOME del bot scelto nel passo Tu
+check('GC6.4 il saluto dice «Ciao! Sono Nanna.», non «Sono Homun»',
+  await waitDom(`document.body.innerText.includes('Ciao! Sono Nanna. Dimmi da dove partiamo.')`, 10_000))
 
 // OAC4.1: il compositore con la card del focus APERTA diventa la risposta libera
 const llmBefore = chatRequests.length
