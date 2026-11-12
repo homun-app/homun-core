@@ -80,6 +80,41 @@ describe('B4: connectedAppMatch — query che nomina un\'app già collegata (pur
   })
 })
 
+describe('BC4: connectedAppMatch confronta su PAROLE INTERE (confine Unicode, maiuscole irrilevanti)', () => {
+  it('«dropbox» con «Box» collegata → null: box è DENTRO la parola, non una parola a sé', () => {
+    const box = [{ slug: 'box', name: 'Box' }]
+    expect(connectedAppMatch('dropbox', box)).toBeNull()
+    expect(connectedAppMatch('mandalo su dropbox per favore', box)).toBeNull()
+    expect(connectedAppMatch('inbox', box)).toBeNull()
+    // «Box» come parola intera resta trovato
+    expect(connectedAppMatch('mettilo su Box', box)?.slug).toBe('box')
+    expect(connectedAppMatch('BOX', box)?.slug).toBe('box')
+  })
+
+  it('«le board di trello» → Trello (il nome è una parola della query)', () => {
+    const trello = [{ slug: 'trello', name: 'Trello' }]
+    expect(connectedAppMatch('le board di trello', trello)?.slug).toBe('trello')
+    expect(connectedAppMatch('trello!', trello)?.slug).toBe('trello')
+    expect(connectedAppMatch('TRELLO?', trello)?.slug).toBe('trello')
+  })
+
+  it('«google calendar» con «Google Calendar» collegata → sì (nome multi-parola intero)', () => {
+    const gcal = [{ slug: 'google-calendar', name: 'Google Calendar' }]
+    expect(connectedAppMatch('google calendar', gcal)?.slug).toBe('google-calendar')
+    expect(connectedAppMatch('sincronizza Google Calendar domani', gcal)?.slug).toBe('google-calendar')
+    // una PARTE del nome non basta: «calendar» da solo non nomina «Google Calendar»
+    expect(connectedAppMatch('calendar', gcal)).toBeNull()
+    expect(connectedAppMatch('il mio calendar appuntamento', gcal)).toBeNull()
+  })
+
+  it('i confini sono UNICODE: le lettere accentate contano come parte della parola', () => {
+    const apps = [{ slug: 'cafe', name: 'Café' }]
+    // «café» dentro «récafé»: la é accentata è una lettera → NON è una parola a sé
+    expect(connectedAppMatch('récafé', apps)).toBeNull()
+    expect(connectedAppMatch('voglio Café', apps)?.slug).toBe('cafe')
+  })
+})
+
 // ---- B4: l'integrazione (gateway FINTO, niente rete) ----
 
 const { setActiveComposioGateway } = await import('../../connectors/composio-gateway')

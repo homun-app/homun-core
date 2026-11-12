@@ -61,9 +61,25 @@ export interface ConnectedAppRef {
 }
 
 /**
+ * BC4 (fase beta.4 — correzioni): il confronto su PAROLE INTERE (PURA). Il
+ * nome o lo slug deve apparire nella query come PAROLA a sé: i confini sono
+ * Unicode (qualsiasi cosa non sia lettera o numero), maiuscole irrilevanti.
+ * Così «le board di trello» nomina Trello, ma «dropbox» NON nomina «Box»
+ * (box sta DENTRO la parola dropbox) e «calendar» da solo non nomina
+ * «Google Calendar».
+ */
+function wholeWordIn(query: string, needle: string): boolean {
+  if (!needle) return false
+  // il needle si escapa: i nomi possono portare punti, trattini, ecc.
+  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'u').test(query)
+}
+
+/**
  * L'app già collegata che la query di search_connectors nomina (PURA):
- * nome o slug, maiuscole irrilevanti, anche DENTRO la query («le board di
- * trello»). Null se la query non nomina nessuna app collegata.
+ * nome o slug, su PAROLE INTERE (confine Unicode, maiuscole irrilevanti),
+ * anche DENTRO la query («le board di trello»). Null se la query non nomina
+ * nessuna app collegata.
  */
 export function connectedAppMatch(query: string, connected: readonly ConnectedAppRef[]): ConnectedAppRef | null {
   const q = query.trim().toLowerCase()
@@ -72,7 +88,7 @@ export function connectedAppMatch(query: string, connected: readonly ConnectedAp
     const slug = app.slug.toLowerCase()
     const name = app.name.trim().toLowerCase()
     if (!name) continue
-    if (q === slug || q === name || q.includes(slug) || q.includes(name)) return app
+    if (wholeWordIn(q, slug) || wholeWordIn(q, name)) return app
   }
   return null
 }
