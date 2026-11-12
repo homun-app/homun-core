@@ -155,8 +155,9 @@ describe('B4: search_connectors su un\'app già collegata', () => {
     try {
       const { output } = await executeTool('agent_x', 'search_connectors', { query: 'email' })
       // il risultato COMINCIA con l'elenco di ciò che c'è già (prima delle
-      // righe dei connettori da installare)
-      expect(output.startsWith('Already connected via Composio: Gmail (lavoro: fabio@azienda.test, personale: fabio@gmail.test), Trello.')).toBe(true)
+      // righe dei connettori da installare). BR4: l'account di Trello è senza
+      // alias → si mostra col suo ID (che Composio accetta in `account`)
+      expect(output.startsWith('Already connected via Composio: Gmail (lavoro: fabio@azienda.test, personale: fabio@gmail.test), Trello (t1).')).toBe(true)
       expect(output).toContain('the results below are apps NOT connected yet')
     } finally {
       setActiveComposioGateway(null)
@@ -190,7 +191,7 @@ describe('B4: search_connectors su un\'app già collegata', () => {
 const { alreadyConnectedPrefix } = await import('../connected-apps')
 const { missingAccountOfItems } = await import('../../connectors/tool-batch')
 
-const ACC = (alias?: string, email?: string) => ({ ...(alias ? { alias } : {}), ...(email ? { email } : {}) })
+const ACC = (alias?: string, email?: string, accountId?: string) => ({ ...(accountId ? { accountId } : {}), ...(alias ? { alias } : {}), ...(email ? { email } : {}) })
 
 describe('CA3: connectedAppsLine — la riga porta gli ACCOUNT', () => {
   it('un SOLO account: l\'email accanto al nome («quale casella ho collegato?» ha risposta)', () => {
@@ -228,6 +229,26 @@ describe('CA3: connectedAppsLine — la riga porta gli ACCOUNT', () => {
     expect(line).not.toContain('(d)')
   })
 
+  // BR4 (fase box-rete, difetto CA3): un account SENZA alias si mostra col
+  // suo accountId, che Composio accetta in `account` — non con «account N»,
+  // che il modello ripasserebbe e Composio non conosce (succede con gli
+  // account collegati fuori da Homun, dalla dashboard di Composio)
+  it('BR4: l\'account SENZA alias dell\'elenco multiplo si mostra col suo accountId', () => {
+    const line = connectedAppsLine({
+      composioApps: [{ name: 'Gmail', accounts: [ACC('lavoro', 'fabio@azienda.test', 'a1'), ACC(undefined, undefined, 's2-dashboard')] }],
+      mcpServers: []
+    })
+    expect(line).toContain('Gmail — accounts: lavoro (fabio@azienda.test), s2-dashboard')
+  })
+
+  it('BR4: un SOLO account senza alias e senza email → il suo accountId accanto al nome', () => {
+    const line = connectedAppsLine({
+      composioApps: [{ name: 'Trello', accounts: [ACC(undefined, undefined, 't9')] }],
+      mcpServers: []
+    })
+    expect(line).toContain('Trello — t9')
+  })
+
   it('il tetto di 20 nomi resta: conta le APP', () => {
     const many = Array.from({ length: 25 }, (_, i) => ({ name: `App${i}`, accounts: [] }))
     const line = connectedAppsLine({ composioApps: many, mcpServers: [] })
@@ -258,6 +279,17 @@ describe('CA3: alreadyConnectedPrefix — search_connectors dice prima cosa c\'�
     // senza né alias né email resta il SOLO nome (niente parentesi vuote)
     expect(prefix).toContain('Box')
     expect(prefix).not.toContain('Box (')
+  })
+
+  it('BR4: l\'account senza alias del prefisso si mostra col suo accountId', () => {
+    const prefix = alreadyConnectedPrefix([
+      { slug: 'trello', name: 'Trello', accounts: [ACC(undefined, undefined, 't1')] },
+      { slug: 'gmail', name: 'Gmail', accounts: [ACC('lavoro', 'fabio@azienda.test', 'a1'), ACC(undefined, 'fabio@gmail.test', 'a2')] }
+    ])
+    expect(prefix).toContain('Trello (t1)')
+    // senza alias ma con email: l'ID PRIMA (è quello che \`account\` accetta),
+    // l'email come annotazione
+    expect(prefix).toContain('Gmail (lavoro: fabio@azienda.test, a2: fabio@gmail.test)')
   })
 })
 
@@ -290,6 +322,17 @@ describe('CA3: missingAccountOfItems — il blocco MULTI_EXECUTE senza `account`
       (tk) => (tk === 'gmail' ? [{ accountId: 'a1', alias: 'lavoro' }, { accountId: 'a2', alias: 'personale' }] : tk === 'slack' ? [{ accountId: 's1', alias: 'ufficio' }, { accountId: 's2' }] : [])
     )
     expect(refusal).toContain('Gmail has 2 accounts: lavoro, personale.')
-    expect(refusal).toContain('Slack has 2 accounts: ufficio, account 2.')
+    // BR4: l'account senza alias si mostra col suo accountId — «account 2»
+    // il modello lo ripasserebbe a Composio, che non lo conosce
+    expect(refusal).toContain('Slack has 2 accounts: ufficio, s2.')
+  })
+
+  it('BR4: senza alias E senza accountId l\'etichetta di ripiego resta (nulla di meglio da mostrare)', () => {
+    const refusal = missingAccountOfItems(
+      [{ slug: 'SLACK_POST_MESSAGE', arguments: {} }],
+      ['slack'],
+      () => [{ accountId: null }, { accountId: null, alias: 'ufficio' }]
+    )
+    expect(refusal).toContain('Slack has 2 accounts: account 1, ufficio.')
   })
 })

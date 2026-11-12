@@ -17,6 +17,8 @@ export const CONNECTED_APPS_MAX_NAMES = 20
 export interface ConnectedAppAccountFacts {
   alias?: string
   email?: string
+  /** BR4 (fase box-rete): l'id dell'account — l'unico nome che Composio ACCETTA in `account` quando l'alias non c'è. */
+  accountId?: string
 }
 
 /** Un'app Composio collegata: nome umano e account ATTIVI (CA3). */
@@ -33,10 +35,24 @@ export interface ConnectedAppsFacts {
   mcpServers: readonly string[]
 }
 
-/** L'account in breve: «lavoro (fabio@…)» o l'alias o l'email da sola. */
+/**
+ * L'account in breve: «lavoro (fabio@…)» o l'alias o l'email da sola; BR4:
+ * senza alias E senza email, il suo accountId (l'ultimo ripiego buono).
+ */
 function accountBrief(a: ConnectedAppAccountFacts): string {
   if (a.alias && a.email) return `${a.alias} (${a.email})`
-  return a.alias ?? a.email ?? ''
+  return a.alias ?? a.email ?? a.accountId ?? ''
+}
+
+/**
+ * L'account come lo deve NOMINARE il modello quando serve `account` (BR4):
+ * alias se c'è, ALTRIMENTI l'accountId — che Composio accetta — e solo per
+ * ultimo l'email (informazione per l'utente, non un nome che Composio
+ * conosce). Mai «account N»: è un nome nostro, Composio non lo sa.
+ */
+function accountRefBrief(a: ConnectedAppAccountFacts): string {
+  if (a.alias) return a.email ? `${a.alias} (${a.email})` : a.alias
+  return a.accountId ?? a.email ?? ''
 }
 
 /**
@@ -52,7 +68,9 @@ export function connectedAppPhrase(app: ConnectedAppFacts): string {
     return brief ? `${app.name} — ${brief}` : app.name
   }
   const MAX_SHOWN = 3
-  const shown = app.accounts.slice(0, MAX_SHOWN).map(accountBrief).filter(Boolean)
+  // BR4: nell'elenco multiplo conta il nome che \`account\` ACCETTA — per un
+  // account senza alias è il suo accountId
+  const shown = app.accounts.slice(0, MAX_SHOWN).map(accountRefBrief).filter(Boolean)
   const over = app.accounts.length - MAX_SHOWN
   const list = shown.join(', ') + (over > 0 ? `, and ${over} more` : '')
   return `${app.name} — accounts: ${list}; pass \`account\` in every MULTI_EXECUTE item for ${app.name}`
@@ -104,12 +122,18 @@ export interface ConnectedAppWithAccounts extends ConnectedAppRef {
 export function alreadyConnectedPrefix(apps: readonly ConnectedAppWithAccounts[]): string {
   const names = apps.map((app) => {
     if (app.accounts.length === 0) return app.name
+    // BR4: senza alias il nome è l'accountId (l'email resta annotata dopo «:»)
+    const item = (a: ConnectedAppAccountFacts): string => {
+      if (a.alias && a.email) return `${a.alias}: ${a.email}`
+      if (a.alias) return a.alias
+      if (a.accountId) return a.email ? `${a.accountId}: ${a.email}` : a.accountId
+      return a.email ?? ''
+    }
     if (app.accounts.length === 1) {
-      const a = app.accounts[0]!
-      const brief = a.alias && a.email ? `${a.alias}: ${a.email}` : (a.alias ?? a.email ?? '')
+      const brief = item(app.accounts[0]!)
       return brief ? `${app.name} (${brief})` : app.name
     }
-    const list = app.accounts.map((a) => (a.alias && a.email ? `${a.alias}: ${a.email}` : (a.alias ?? a.email ?? ''))).filter(Boolean).join(', ')
+    const list = app.accounts.map(item).filter(Boolean).join(', ')
     return list ? `${app.name} (${list})` : app.name
   })
   return `Already connected via Composio: ${names.join(', ')}. Use those for their data; the results below are apps NOT connected yet.`
@@ -124,10 +148,10 @@ export function alreadyConnectedPrefix(apps: readonly ConnectedAppWithAccounts[]
 export function connectedAppHitMessage(app: ConnectedAppWithAccounts): string {
   let brief = ''
   if (app.accounts.length === 1) {
-    const a = app.accounts[0]!
-    brief = a.alias && a.email ? `${a.alias} (${a.email})` : (a.alias ?? a.email ?? '')
+    brief = accountBrief(app.accounts[0]!)
   } else if (app.accounts.length > 1) {
-    brief = `accounts: ${app.accounts.map(accountBrief).filter(Boolean).join(', ')}`
+    // BR4: i nomi dell'elenco sono quelli che \`account\` accetta
+    brief = `accounts: ${app.accounts.map(accountRefBrief).filter(Boolean).join(', ')}`
   }
   const inParens = brief ? ` (${brief})` : ''
   return `"${app.name}" is already connected via Composio${inParens}: use COMPOSIO_SEARCH_TOOLS to find the action, then COMPOSIO_MULTI_EXECUTE_TOOL.`

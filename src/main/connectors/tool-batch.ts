@@ -499,7 +499,11 @@ export function missingAccountOfItems(
   return [...missing.entries()]
     .map(([toolkit, accounts]) => {
       const name = composioToolkitName(toolkit)
-      const names = accounts.map((a, i) => a.alias ?? `account ${i + 1}`).join(', ')
+      // BR4 (fase box-rete): l'account senza alias si mostra col suo
+      // accountId, che Composio ACCETTA in `account` — «account N» è un nome
+      // nostro, il modello lo ripasserebbe e Composio non lo conosce
+      // (succede con gli account collegati fuori da Homun)
+      const names = accounts.map((a, i) => a.alias ?? a.accountId ?? `account ${i + 1}`).join(', ')
       return `${name} has ${accounts.length} accounts: ${names}. Pass \`account\` with the one the user means; if unclear, ask them with ask_user.`
     })
     .join(' ')

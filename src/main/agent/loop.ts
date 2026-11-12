@@ -1743,7 +1743,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             name: a.name,
             accounts: (a.accounts ?? [])
               .filter((acc) => acc.status === 'ACTIVE')
-              .map((acc) => ({ ...(acc.alias ? { alias: acc.alias } : {}), ...(acc.email ? { email: acc.email } : {}) }))
+              // BR4 (fase box-rete): l'accountId VIAGGIA — un account senza
+              // alias si mostra col suo id, che Composio accetta in `account`
+              .map((acc) => ({ ...(acc.accountId ? { accountId: acc.accountId } : {}), ...(acc.alias ? { alias: acc.alias } : {}), ...(acc.email ? { email: acc.email } : {}) }))
           }))
         let servers: Array<{ name: string; tools: Array<{ name: string }> }> = []
         try {
