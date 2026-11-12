@@ -115,4 +115,51 @@ describe('BX5: la CLI finta di container — i comportamenti per variabile d\'am
     const r = spawnSync(wrapper, ['--version'], { encoding: 'utf8', env: { PATH: process.env.PATH, SANDBOT_TEST_CONTAINER_MODE: 'ready' } })
     expect(r.status).toBe(0)
   })
+
+  // BRR (fase box-rete-riavvio): ogni container Apple è una VM — un `start`
+  // di un box FERMATO è un boot NUOVO e le interfacce tornano SU. La CLI
+  // finta lo simula tenendo lo STATO (running, interfacce) NEL LOG: qui le
+  // chiamate CONDIVIDONO il log, così la sequenza si vede.
+  it('BRR: il riavvio — run -d → verifica FALLISCE (boot), link down → passa, stop → start → verifica FALLISCE di nuovo', () => {
+    const logFile = join(TMP, 'log-brr-riavvio.jsonl')
+    const run = (argv: string[], extra: Record<string, string> = {}) =>
+      spawnSync(process.execPath, [FAKE, ...argv], {
+        encoding: 'utf8',
+        env: { PATH: process.env.PATH, SANDBOT_TEST_CONTAINER_MODE: 'ready', SANDBOT_TEST_CONTAINER_LOG: logFile, ...extra }
+      })
+    const check = () => run(['exec', '-u', '0', 'sandbot-box', 'sh', '-c', 'for i in /sys/class/net/*; do echo "$i/operstate"; done'])
+    const linkDown = () => run(['exec', '-u', '0', 'sandbot-box', 'sh', '-c', 'for i in /sys/class/net/*; do ip link set dev "$i" down; done'])
+    // il box NASCE: boot nuovo, le interfacce sono SU → la verifica cade
+    expect(run(['run', '-d', '--name', 'sandbot-box', '--network', 'homun-box-isolated', 'sandbot-box:fake', 'sleep', 'infinity']).status).toBe(0)
+    expect(check().status).toBe(1)
+    // il link down le mette GIÙ → la verifica passa
+    expect(linkDown().status).toBe(0)
+    expect(check().status).toBe(0)
+    // il box si FERMA e RIPARTE: il boot nuovo riporta le interfacce SU
+    expect(run(['stop', 'sandbot-box']).status).toBe(0)
+    expect(run(['start', 'sandbot-box']).status).toBe(0)
+    expect(check().status).toBe(1)
+    expect(linkDown().status).toBe(0)
+    expect(check().status).toBe(0)
+    // lo start di un box che GIÀ CORRE non è un boot: le interfacce restano giù
+    expect(run(['start', 'sandbot-box']).status).toBe(0)
+    expect(check().status).toBe(0)
+  })
+
+  // BRR: il difetto dei test — le interfacce che RESTANO su anche dopo il
+  // link down (SANDBOT_TEST_CONTAINER_OPERSTATE=up le tiene su per sempre)
+  it('BRR: con OPERSTATE=up la verifica cade SEMPRE, anche dopo il link down', () => {
+    const logFile = join(TMP, 'log-brr-resta-up.jsonl')
+    const run = (argv: string[]) =>
+      spawnSync(process.execPath, [FAKE, ...argv], {
+        encoding: 'utf8',
+        env: { PATH: process.env.PATH, SANDBOT_TEST_CONTAINER_MODE: 'ready', SANDBOT_TEST_CONTAINER_LOG: logFile, SANDBOT_TEST_CONTAINER_OPERSTATE: 'up' }
+      })
+    expect(run(['run', '-d', '--name', 'sandbot-box', '--network', 'homun-box-isolated', 'sandbot-box:fake', 'sleep', 'infinity']).status).toBe(0)
+    const check = ['exec', '-u', '0', 'sandbot-box', 'sh', '-c', 'for i in /sys/class/net/*; do echo "$i/operstate"; done']
+    const linkDown = ['exec', '-u', '0', 'sandbot-box', 'sh', '-c', 'for i in /sys/class/net/*; do ip link set dev "$i" down; done']
+    expect(run(check).status).toBe(1)
+    expect(run(linkDown).status).toBe(0)
+    expect(run(check).status).toBe(1)
+  })
 })

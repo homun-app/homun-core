@@ -24,6 +24,13 @@
 // SANDBOT_TEST_CONTAINER_ISOLATED_FAIL=1 la create di homun-box-isolated
 // cade: la rete isolata non si può creare.
 //
+// BRR (fase box-rete-riavvio): il RIAVVIO — ogni container Apple è una VM:
+// il `run -d` è un boot nuovo e le interfacce sono SU; un `start` di un box
+// FERMATO (uno `stop` nel log) è un boot nuovo pure lui e le interfacce
+// tornano SU; su un box già avanti lo start non fa nulla. Il link down come
+// root le mette GIÙ. L'exec della VERIFICA legge questo stato: boot senza
+// link down → «eth0 is up» (esce 1), dopo il link down → passa.
+//
 // Nessuna rete, nessuna scrittura fuori dal file di log. La usa il motore al
 // posto della CLI vera SOLO con SANDBOT_TEST_USER_DATA impostata E
 // SANDBOT_TEST_CONTAINER_CLI=<percorso di questo file> (sandbox/engine).
@@ -57,6 +64,9 @@ const logArgvs = () => {
  * BR1: lo stato dal log — l'ULTIMO container creato da run -d/create (nome,
  * rete, immagine) finché un rm/delete col suo nome non lo toglie; le reti
  * create (homun-box esiste GIÀ, come la prima della sonda di box-container).
+ * BRR: il box sa anche se CORRE e se le interfacce sono SU — il run -d è un
+ * boot (interfacce su), lo start di un box FERMATO pure, il link down come
+ * root le mette giù.
  */
 function scanState() {
   let box = null
@@ -68,8 +78,21 @@ function scanState() {
       if (nameI >= 0) {
         const netI = a.indexOf('--network')
         const sleepI = a.lastIndexOf('sleep')
-        box = { name: a[nameI + 1], network: netI >= 0 ? a[netI + 1] : null, image: sleepI > 0 ? a[sleepI - 1] : 'sandbot-box:fake' }
+        // run -d: il box CORRE e il boot ha messo le interfacce SU; create
+        // (il run di Docker) parte FERMO: le decide lo start
+        box = { name: a[nameI + 1], network: netI >= 0 ? a[netI + 1] : null, image: sleepI > 0 ? a[sleepI - 1] : 'sandbot-box:fake', running: a[0] === 'run', linksUp: a[0] === 'run' }
       }
+    }
+    // BRR: il «riavvio» — start di un box FERMATO = boot nuovo, interfacce
+    // SU; su un box che già corre lo start non tocca nulla
+    if (a[0] === 'start' && box && a.slice(1).includes(box.name) && !box.running) {
+      box.running = true
+      box.linksUp = true
+    }
+    if (a[0] === 'stop' && box && a.slice(1).includes(box.name)) box.running = false
+    // il link down COME ROOT: le interfacce vanno GIÙ (il boot le aveva messe su)
+    if (a[0] === 'exec' && a[1] === '-u' && a[2] === '0' && a.some((x) => typeof x === 'string' && x.includes('ip link set')) && box) {
+      box.linksUp = false
     }
     if ((a[0] === 'rm' || a[0] === 'delete') && box && a.slice(1).includes(box.name)) box = null
     if (a[0] === 'network' && a[1] === 'create') networks.add(a[a.length - 1])
@@ -174,10 +197,14 @@ if (argv[0] === 'run') {
 // stato lo registra scanState dal --name/--network/immagine dell'argv
 if (argv[0] === 'create') { out('create (fake): container created'); process.exit(0) }
 if (argv[0] === 'exec') {
-  // BR1: l'exec della VERIFICA (lo script che legge operstate) può fallire
-  // su richiesta del test: le interfacce NON sono giù, l'isolamento è rotto
-  if (argv.some((a) => typeof a === 'string' && a.includes('operstate')) && process.env.SANDBOT_TEST_CONTAINER_OPERSTATE === 'up') {
-    die(1, 'eth0 is up')
+  // BR1 + BRR: la VERIFICA (lo script che legge operstate) risponde con lo
+  // STATO del box dal log — boot (run -d, o start di un box fermato) senza
+  // link down → le interfacce sono SU e fallisce; dopo il link down passa.
+  // SANDBOT_TEST_CONTAINER_OPERSTATE=up le tiene SU per sempre: nemmeno il
+  // link down le abbassa (il difetto «resta up dopo il link down» dei test)
+  if (argv.some((a) => typeof a === 'string' && a.includes('operstate'))) {
+    const suPerSempre = process.env.SANDBOT_TEST_CONTAINER_OPERSTATE === 'up'
+    if (suPerSempre || scanState().box?.linksUp) die(1, 'eth0 is up')
   }
   process.exit(0)
 }

@@ -149,6 +149,15 @@ export interface BoxEngine {
    * non lo implementa: la rete none di Docker è del runtime, già chiusa.
    */
   isolateBoxNetwork?(run: (argv: string[], opts?: { timeoutMs?: number }) => Promise<{ stdout: string; stderr: string; exitCode: number | null }>): Promise<void>
+  /**
+   * BRR1 (fase box-rete-riavvio): la SOLA verifica operstate come root,
+   * senza link down — l'ensure la chiama ANCHE quando il container si riusa:
+   * un riavvio della VM (Mac riavviato, `container system stop/start`) è un
+   * boot nuovo che riporta le interfacce SU, e la difesa deve tornare a
+   * valere PRIMA di ogni exec del bot. Lancia se la verifica non passa (il
+   * chiamante riprova con isolateBoxNetwork, poi fallisce chiuso).
+   */
+  isolationCheck?(run: (argv: string[], opts?: { timeoutMs?: number }) => Promise<{ stdout: string; stderr: string; exitCode: number | null }>): Promise<void>
 }
 
 // ---- la scelta del motore (PURa) ----

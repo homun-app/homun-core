@@ -551,7 +551,29 @@ export async function ensureBoxContainer(): Promise<void> {
       await engine.prepareNetwork(dockerRunner, network)
     }
   }
-  if (plan.kind === 'use') return
+  // BRR1 (fase box-rete-riavvio): col box che si RIUSA l'isolamento si
+  // VERIFICA, non si ricorda — con Apple ogni container è una VM: un box
+  // fermato e ripartito (riavvio del Mac, `container system stop/start`)
+  // fa un boot NUOVO e le interfacce tornano SU, anche se il box resta sulla
+  // rete host-only isolata. PRIMA di ogni exec del bot: la SOLA verifica
+  // (un exec come root); se non passa, link down e verifica di nuovo
+  // (isolateBoxNetwork); se non passa ancora → come alla creazione: il box
+  // si rimuove e l'azione del bot fallisce in parole. Nessuna cache «già
+  // verificato»: un riavvio della VM tra due comandi non si vede da qui.
+  if (plan.kind === 'use') {
+    if (isolated && engine.isolationCheck && engine.isolateBoxNetwork) {
+      try {
+        await engine.isolationCheck(dockerRunner)
+      } catch {
+        try {
+          await engine.isolateBoxNetwork(dockerRunner)
+        } catch (e) {
+          await isolationFailClosed(e)
+        }
+      }
+    }
+    return
+  }
   // N1 (fase 13 correzioni 3): il MOTIVO di ogni ricreazione una riga nel log
   // del daemon (stdout/stderr finiscono in data/daemon.log) — un ciclo di
   // ricreazioni a ogni comando si vede nei log invece di passare inosservato

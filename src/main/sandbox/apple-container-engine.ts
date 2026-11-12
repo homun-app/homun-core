@@ -233,6 +233,18 @@ const argv: BoxEngineArgv = {
   removeVolumes: appleRemoveVolumesArgv
 }
 
+/**
+ * BR1 + BRR1: la VERIFICA operstate come ROOT, un solo exec — ogni
+ * interfaccia diversa da lo deve essere down. Lancia se non passa (il
+ * chiamante riprova col link down, o fallisce chiuso).
+ */
+async function verifyBoxInterfaces(run: BoxArgvRunner): Promise<void> {
+  const check = await run(appleIsolationCheckArgv(BOX_CONTAINER), { timeoutMs: 30_000 })
+  if (check.exitCode !== 0) {
+    throw new Error(`verification of the box interfaces failed (not all down): ${(check.stdout || check.stderr || `exit ${check.exitCode}`).slice(0, 200)}`)
+  }
+}
+
 /** Il motore Apple container. */
 export const appleContainerEngine: BoxEngine = {
   id: 'apple-container',
@@ -254,9 +266,13 @@ export const appleContainerEngine: BoxEngine = {
     if (down.exitCode !== 0) {
       throw new Error(`link down of the box interfaces failed: ${down.stderr || `exit ${down.exitCode}`}`)
     }
-    const check = await run(appleIsolationCheckArgv(BOX_CONTAINER), { timeoutMs: 30_000 })
-    if (check.exitCode !== 0) {
-      throw new Error(`verification of the box interfaces failed (not all down): ${(check.stdout || check.stderr || `exit ${check.exitCode}`).slice(0, 200)}`)
-    }
-  }
+    await verifyBoxInterfaces(run)
+  },
+  /**
+   * BRR1 (fase box-rete-riavvio): la SOLA verifica, senza link down — la
+   * chiama l'ensure ANCHE col box che si riusa: un riavvio della VM è un
+   * boot nuovo che riporta le interfacce SU, e la seconda difesa deve
+   * tornare a valere PRIMA di ogni exec del bot.
+   */
+  isolationCheck: verifyBoxInterfaces
 }
