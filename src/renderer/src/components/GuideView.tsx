@@ -15,7 +15,9 @@ import { useLingui, Trans } from '@lingui/react/macro'
 import { useStore, api } from '../store'
 import type { OnboardingProviderPath, AutoReviewSettings } from '../../../shared/types'
 import { DEFAULT_AUTO_REVIEW } from '../../../shared/types'
-import { avatarOf } from '../../../shared/avatar'
+import { avatarOf, BOT_FAMILIES, BOT_COLORS } from '../../../shared/avatar'
+import type { BotFamily, BotColor } from '../../../shared/types'
+import { guideNameOf, GUIDE_NAME_MAX } from '../lib/guide-identity'
 import type { UiLanguageSetting } from '../../../shared/ui-language'
 import { SUPPORTED_UI_LANGUAGES } from '../../../shared/ui-language'
 import { TRAFFIC_LIGHT_INSET } from '../layout'
@@ -172,6 +174,95 @@ function RoadCard({ path, onOpen }: { path: OnboardingProviderPath; onOpen: () =
 }
 
 /**
+ * G3: il passo «Tu» — il nome e la faccia del bot principale, secondo il
+ * mockup: campo nome (max 40, vuoto = «Bot»), le 5 famiglie come piastrelle
+ * col Bot piccolo da 62 px nel colore scelto, i 7 colori come tondi da 34 px
+ * col doppio anello sul selezionato. Ogni scelta è IMMEDIATA sulla mascotte
+ * grande (la bozza vive in GuideView) e fa il lampo felice (~1 s).
+ */
+function WelcomeStep({ name, onName, family, color, onPickFamily, onPickColor, onConfirm }: {
+  name: string
+  onName(v: string): void
+  family: BotFamily
+  color: BotColor
+  onPickFamily(f: BotFamily): void
+  onPickColor(c: BotColor): void
+  onConfirm(): void
+}) {
+  const { t } = useLingui()
+  const familyLabels: Record<BotFamily, string> = {
+    'h-creature': t`Creatura`,
+    'h-robo': t`Robottino`,
+    'h-device': t`Tech`,
+    jelly: t`Gelatina`,
+    pixel: t`Pixel`
+  }
+  const colorLabels: Record<BotColor, string> = {
+    c1: t`Arancio`, c2: t`Rosa`, c3: t`Verde`, c4: t`Blu`, c5: t`Giallo`, c6: t`Turchese`, c7: t`Grafite`
+  }
+  return (
+    <StepPanel stepKey="welcome" testId="guide-step-welcome">
+      <div className="flex flex-col gap-3.5">
+        <h1 className="m-0 font-display text-[40px] font-semibold leading-[1.1] tracking-[-0.01em]">{t`Diamo una faccia al tuo bot`}</h1>
+        <p className="m-0 text-base leading-[1.6] text-muted-foreground">
+          {t`È il tuo punto di contatto in Homun: ti risponde, lavora per te e coordina gli altri bot. Puoi cambiarlo quando vuoi.`}
+        </p>
+      </div>
+      <label className="flex flex-col gap-2 text-sm font-semibold">
+        {t`Come si chiama?`}
+        <input
+          data-testid="guide-name-input"
+          className="rounded-[14px] bg-card px-4 py-3.5 text-lg font-medium text-foreground outline-none"
+          placeholder={t`Bot`}
+          maxLength={GUIDE_NAME_MAX}
+          value={name}
+          onChange={(e) => onName(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); onConfirm() } }}
+        />
+      </label>
+      <div className="flex flex-col gap-3.5">
+        <span className="text-sm font-semibold">{t`Che aspetto ha?`}</span>
+        <div className="grid grid-cols-5 gap-3.5">
+          {BOT_FAMILIES.map((f) => (
+            <button
+              key={f}
+              type="button"
+              data-testid={`guide-family-${f}`}
+              aria-pressed={family === f}
+              aria-label={familyLabels[f]}
+              className={`flex min-h-[44px] flex-col items-center gap-1.5 rounded-2xl px-1.5 pb-2.5 pt-3 transition ${family === f ? 'bg-card shadow-[0_0_0_2px_var(--foreground)]' : 'hover:bg-accent/60'}`}
+              onClick={() => onPickFamily(f)}
+            >
+              <Bot family={f} color={color} state="idle" size={62} track={false} />
+              <span className="text-xs">{familyLabels[f]}</span>
+            </button>
+          ))}
+        </div>
+        <div className="mt-2.5 flex gap-1.5">
+          {BOT_COLORS.map((c) => (
+            <button
+              key={c}
+              type="button"
+              data-testid={`guide-color-${c}`}
+              aria-pressed={color === c}
+              aria-label={colorLabels[c]}
+              className="grid size-11 shrink-0 place-items-center rounded-full transition hover:scale-105"
+              onClick={() => onPickColor(c)}
+            >
+              {/* il tondo visibile è da 34 px (mockup), il bersaglio del clic 44 */}
+              <span
+                className={`size-[34px] rounded-full ${color === c ? 'shadow-[0_0_0_3px_var(--background),0_0_0_5px_var(--foreground)]' : ''}`}
+                style={{ background: `var(--bot-${c})` }}
+              />
+            </button>
+          ))}
+        </div>
+      </div>
+    </StepPanel>
+  )
+}
+
+/**
  * La guida: sostituisce la finestra finché lo stato non arriva a «chat».
  */
 export function GuideView() {
@@ -194,6 +285,23 @@ export function GuideView() {
   const [backTo, setBackTo] = useState<GuideUiStep | null>(null)
   const [chosenApprovals, setChosenApprovals] = useState<'ask' | 'auto' | null>(null)
 
+  // G3: la bozza del passo «Tu» — nome e aspetto si provano SUBITO sulla
+  // mascotte grande; si salvano solo a «Continua» (agents:update). Il campo
+  // nome parte dal nome attuale: col default «Bot» resta vuoto col segnaposto
+  // (il saluto della nuvoletta chiede «come mi chiami?»)
+  const agentForDraft = useStore((st) => st.agents.find((a) => a.id === st.mainAgentId) ?? null)
+  const [draftName, setDraftName] = useState<string>(() => (agentForDraft && agentForDraft.name !== 'Bot' ? agentForDraft.name : ''))
+  const [draftAvatar, setDraftAvatar] = useState<{ family: BotFamily; color: BotColor } | null>(null)
+  // il lampo felice (~1 s) dopo la scelta di una faccia o un colore
+  const [flashHappy, setFlashHappy] = useState(false)
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const happyFlash = (): void => {
+    setFlashHappy(true)
+    if (flashTimer.current) clearTimeout(flashTimer.current)
+    flashTimer.current = setTimeout(() => setFlashHappy(false), 1_100)
+  }
+  useEffect(() => () => { if (flashTimer.current) clearTimeout(flashTimer.current) }, [])
+
   // le strade del passo modello le porta la RPC (scoperta asincrona)
   useEffect(() => {
     if (state?.step === 'model' && !paths) {
@@ -204,11 +312,16 @@ export function GuideView() {
   }, [state?.step, paths])
 
   const mainAgent = agents.find((a) => a.id === mainAgentId) ?? null
-  const avatar = mainAgent ? avatarOf(mainAgent, agents, mainAgentId) : { family: 'h-creature' as const, color: 'c1' as const }
-  const displayName = mainAgent?.name || 'Bot'
-
+  const savedAvatar = mainAgent ? avatarOf(mainAgent, agents, mainAgentId) : { family: 'h-creature' as const, color: 'c1' as const }
   if (!state || state.step === 'chat') return null
   const daemonStep = state.step
+
+  // G3: sul passo Tu la scena mostra la BOZZA (anteprima immediata del nome,
+  // della faccia e del colore), altrove l'aspetto salvato del bot
+  const onTuStep = daemonStep === 'welcome' || backTo === 'welcome'
+  const avatar = onTuStep ? (draftAvatar ?? savedAvatar) : savedAvatar
+  const typedName = (onTuStep ? draftName : (mainAgent?.name ?? '')).trim()
+  const displayName = typedName || 'Bot'
 
   // il passo della UI: i passi computer/memory non ci sono in fase A; la
   // scelta fatta dei permessi porta al passo Pronto (solo UI, G6)
@@ -217,13 +330,13 @@ export function GuideView() {
   )
   const stepIdx = UI_STEPS.indexOf(uiStep)
 
-  // il nome per le frasi: col default «Bot» si lascia il saluto iniziale
-  // («Come mi chiami?»); un nome VERO (adozione, ripresa) va nella frase
-  const guideName = displayName === 'Bot' ? '' : displayName
+  // il nome per le frasi: sul passo Tu quello digitato finora (vuoto =
+  // saluto iniziale), altrove il nome vero del bot
   const facts: GuideFacts = {
     ...EMPTY_GUIDE_FACTS,
-    name: guideName,
-    modelReady
+    name: typedName,
+    modelReady,
+    flashHappy
   }
   const mood = guideMood(uiStep, facts)
   const bubble = i18n.t(guideBubble(uiStep, facts))
@@ -239,9 +352,26 @@ export function GuideView() {
   const nextLabel = uiStep === 'ready' ? t`Apri la chat` : t`Continua`
   const canBack = stepIdx > 0 && daemonStep !== 'welcome'
   const canSkip = uiStep === 'model' && !modelReady
+  // G3: «Continua» del passo Tu salva nome e aspetto del bot principale
+  // (agents:update, con la validazione dell'avatar che il daemon già fa)
+  const saveTuStep = async (): Promise<void> => {
+    if (!mainAgentId) return
+    try {
+      await api.updateAgent(mainAgentId, { name: guideNameOf(draftName), avatar: { family: avatar.family, color: avatar.color } })
+    } catch {
+      // i valori sono quelli validi del selettore: la validazione del daemon
+      // non può rifiutarli; se la RPC cade, la guida prosegue lo stesso
+    }
+  }
   const onContinue = (): void => {
+    if (uiStep === 'welcome') {
+      void saveTuStep().then(() => {
+        if (backTo) setBackTo(null)
+        else void advance('welcome', 'done')
+      })
+      return
+    }
     if (backTo) { setBackTo(null); return }
-    if (uiStep === 'welcome') { void advance('welcome', 'done'); return }
     if (uiStep === 'model') { if (modelReady) void advance('model', 'done'); return }
     if (uiStep === 'ready') { void advance('approvals', 'done'); return }
   }
@@ -342,12 +472,15 @@ export function GuideView() {
         {/* al centro: il contenuto del passo */}
         <div className="flex min-h-0 flex-1 flex-col justify-center overflow-y-auto scroll-thin py-4">
           {uiStep === 'welcome' && (
-            <StepPanel stepKey="welcome" testId="guide-step-welcome">
-              <h1 className="m-0 font-display text-[40px] font-semibold leading-[1.1] tracking-[-0.01em]">{t`Prepariamo Homun`}</h1>
-              <p className="m-0 text-base leading-[1.6] text-muted-foreground">
-                {t`Homun è il tuo spazio di lavoro con la squadra AI: un bot principale che ti aiuta ogni giorno, e altri bot per le cose che ripeti.`}
-              </p>
-            </StepPanel>
+            <WelcomeStep
+              name={draftName}
+              onName={setDraftName}
+              family={avatar.family}
+              color={avatar.color}
+              onPickFamily={(family) => { setDraftAvatar({ family, color: avatar.color }); happyFlash() }}
+              onPickColor={(color) => { setDraftAvatar({ family: avatar.family, color }); happyFlash() }}
+              onConfirm={onContinue}
+            />
           )}
           {uiStep === 'model' && (
             <StepPanel stepKey="model" testId="guide-step-model">

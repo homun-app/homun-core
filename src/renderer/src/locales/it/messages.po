@@ -1019,6 +1019,10 @@ msgstr "Apri nel pannello del bot"
 msgid "Aprire <0>{0}</0> nel tuo browser"
 msgstr "Aprire <0>{0}</0> nel tuo browser"
 
+#: src/renderer/src/components/GuideView.tsx
+msgid "Arancio"
+msgstr "Arancio"
+
 #: src/renderer/src/components/Settings.tsx
 msgid "Argomenti (args) non sono JSON valido"
 msgstr "Argomenti (args) non sono JSON valido"
@@ -1193,11 +1197,16 @@ msgstr "Blocca"
 msgid "notice.deniedByPermissions"
 msgstr "Bloccato dai permessi: {tool}"
 
+#: src/renderer/src/components/GuideView.tsx
+msgid "Blu"
+msgstr "Blu"
+
 #: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "bot"
 msgstr "bot"
 
+#: src/renderer/src/components/GuideView.tsx
 #: src/renderer/src/components/Sidebar.tsx
 msgid "Bot"
 msgstr "Bot"
@@ -1401,6 +1410,10 @@ msgstr "Cerco Ollama sul tuo Mac (porta 11434)."
 #: src/renderer/src/components/settings/AddProviderSheet.tsx
 msgid "Cerco…"
 msgstr "Cerco…"
+
+#: src/renderer/src/components/GuideView.tsx
+msgid "Che aspetto ha?"
+msgstr "Che aspetto ha?"
 
 #: src/renderer/src/components/GuideView.tsx
 msgid "Che cosa può fare il tuo Homun da solo, e dove si ferma a chiederti il via?"
@@ -1625,6 +1638,10 @@ msgstr "Come gli altri · {0}"
 #: src/renderer/src/components/ui/ModelSelect.tsx
 msgid "Come gli altri ({0})"
 msgstr "Come gli altri ({0})"
+
+#: src/renderer/src/components/GuideView.tsx
+msgid "Come si chiama?"
+msgstr "Come si chiama?"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "compaction"
@@ -2037,6 +2054,7 @@ msgid "Create dai bot"
 msgstr "Create dai bot"
 
 #: src/renderer/src/components/BotDialogs.tsx
+#: src/renderer/src/components/GuideView.tsx
 msgid "Creatura"
 msgstr "Creatura"
 
@@ -2196,6 +2214,10 @@ msgstr "detto dall'utente"
 msgid "chart.metaLine"
 msgstr "di {author} · versione {version} · esportato da Homun"
 
+#: src/renderer/src/components/GuideView.tsx
+msgid "Diamo una faccia al tuo bot"
+msgstr "Diamo una faccia al tuo bot"
+
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "Dimentica per sempre"
 msgstr "Dimentica per sempre"
@@ -2324,6 +2346,10 @@ msgstr "Download in pausa · {0}%"
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "Download non riuscito: {0}"
 msgstr "Download non riuscito: {0}"
+
+#: src/renderer/src/components/GuideView.tsx
+msgid "È il tuo punto di contatto in Homun: ti risponde, lavora per te e coordina gli altri bot. Puoi cambiarlo quando vuoi."
+msgstr "È il tuo punto di contatto in Homun: ti risponde, lavora per te e coordina gli altri bot. Puoi cambiarlo quando vuoi."
 
 #: src/renderer/src/lib/guide-scene.ts
 msgid "Eccomi! Andiamo?"
@@ -2633,6 +2659,7 @@ msgid "gateway"
 msgstr "gateway"
 
 #: src/renderer/src/components/BotDialogs.tsx
+#: src/renderer/src/components/GuideView.tsx
 msgid "Gelatina"
 msgstr "Gelatina"
 
@@ -2651,6 +2678,10 @@ msgstr "Gestisci su Composio"
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "gestiscile su Composio"
 msgstr "gestiscile su Composio"
+
+#: src/renderer/src/components/GuideView.tsx
+msgid "Giallo"
+msgstr "Giallo"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "giorni"
@@ -2700,6 +2731,10 @@ msgstr "grafico {lang}"
 #: src/shared/ui-messages.ts
 msgid "chart.notAvailable"
 msgstr "grafico non disponibile"
+
+#: src/renderer/src/components/GuideView.tsx
+msgid "Grafite"
+msgstr "Grafite"
 
 #: src/renderer/src/components/settings/AddProviderSheet.tsx
 msgid "gratis, nessun dato esce"
@@ -2911,10 +2946,6 @@ msgstr "Ho pubblicato il riepilogo nella squadra «{name}»"
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Homun crea il client e chiede a Composio l'elenco delle app: se riesce, la chiave viene salvata cifrata sul tuo Mac."
 msgstr "Homun crea il client e chiede a Composio l'elenco delle app: se riesce, la chiave viene salvata cifrata sul tuo Mac."
-
-#: src/renderer/src/components/GuideView.tsx
-msgid "Homun è il tuo spazio di lavoro con la squadra AI: un bot principale che ti aiuta ogni giorno, e altri bot per le cose che ripeti."
-msgstr "Homun è il tuo spazio di lavoro con la squadra AI: un bot principale che ti aiuta ogni giorno, e altri bot per le cose che ripeti."
 
 #: src/renderer/src/App.tsx
 msgid "Homun è stato rinnovato. Le conversazioni e i bot di Homun 2 non sono stati importati: restano sul tuo Mac nella cartella di Homun 2."
@@ -4957,6 +4988,7 @@ msgid "Più strumenti d'invio per questo canale: chiedi al bot di sceglierne uno
 msgstr "Più strumenti d'invio per questo canale: chiedi al bot di sceglierne uno"
 
 #: src/renderer/src/components/BotDialogs.tsx
+#: src/renderer/src/components/GuideView.tsx
 msgid "Pixel"
 msgstr "Pixel"
 
@@ -5030,10 +5062,6 @@ msgstr "prende nota…"
 #: src/renderer/src/components/BotScreen.tsx
 msgid "Prendi il controllo"
 msgstr "Prendi il controllo"
-
-#: src/renderer/src/components/GuideView.tsx
-msgid "Prepariamo Homun"
-msgstr "Prepariamo Homun"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -5610,8 +5638,13 @@ msgid "risultato"
 msgstr "risultato"
 
 #: src/renderer/src/components/BotDialogs.tsx
+#: src/renderer/src/components/GuideView.tsx
 msgid "Robottino"
 msgstr "Robottino"
+
+#: src/renderer/src/components/GuideView.tsx
+msgid "Rosa"
+msgstr "Rosa"
 
 #: src/renderer/src/components/ActivityPanel.tsx
 msgid "routine"
@@ -6381,6 +6414,7 @@ msgid "rpc.taskNotFound"
 msgstr "Task non trovato"
 
 #: src/renderer/src/components/BotDialogs.tsx
+#: src/renderer/src/components/GuideView.tsx
 msgid "Tech"
 msgstr "Tech"
 
@@ -6561,6 +6595,10 @@ msgstr "Tu: {0}"
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "tua"
 msgstr "tua"
+
+#: src/renderer/src/components/GuideView.tsx
+msgid "Turchese"
+msgstr "Turchese"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "turno"
@@ -6819,6 +6857,10 @@ msgstr "vede (immagini)"
 #: src/renderer/src/components/Settings.tsx
 msgid "venerdì"
 msgstr "venerdì"
+
+#: src/renderer/src/components/GuideView.tsx
+msgid "Verde"
+msgstr "Verde"
 
 #. placeholder {0}: detail.note.version
 #: src/renderer/src/components/MemoryPanel.tsx
