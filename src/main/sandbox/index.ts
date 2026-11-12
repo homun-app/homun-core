@@ -429,6 +429,29 @@ function ensureBoxImage(): Promise<boolean> {
 }
 
 /**
+ * BR1 (fase box-rete): le parole dell'isolamento non riuscito. La modalità
+ * none fallisce CHIUSA: il bot non parte se la rete del suo computer non si
+ * può chiudere e VERIFICARE.
+ */
+export const BOX_ISOLATION_FAILED_MESSAGE = 'Non riesco a isolare il computer del bot dalla rete: per sicurezza non l\'ho avviato'
+
+/**
+ * BR1: l'isolamento della modalità none non è riuscito → si fallisce CHIUSO.
+ * Il box si RIMUOVE (rm -f, best-effort: se non ci si riesce si ritenta al
+ * prossimo comando), UNA riga nel log del daemon (console.error →
+ * daemon.log), e l'azione del bot fallisce col messaggio in parole. Mai un
+ * box none che gira senza la verifica passata.
+ */
+async function isolationFailClosed(cause: unknown): Promise<never> {
+  console.error(`[sandbox] isolamento della rete del box (none) non riuscito: ${cause instanceof Error ? cause.message : String(cause)} — il box viene rimosso per sicurezza`)
+  const rm = await dockerRunner(activeBoxEngine().argv.boxRm(BOX_CONTAINER), { timeoutMs: 30_000 }).catch(() => null)
+  if (!rm || rm.exitCode !== 0) {
+    console.warn('[sandbox] rimozione del box non riuscita: si ritenta al prossimo comando del bot')
+  }
+  throw new Error(BOX_ISOLATION_FAILED_MESSAGE)
+}
+
+/**
  * Il container UNICO del box condiviso (punto 1): come il vecchio
  * ensureContainer per agente, ma con volume `sandbot-box` montato su /box e
  * limiti condivisi configurabili. H1: dopo ogni start un controllo argv puro
@@ -448,6 +471,12 @@ export async function ensureBoxContainer(): Promise<void> {
   // silenzio e il box girava come sandbot-box)
   if (INVALID_TEST_BOX_PREFIX) throw new Error(invalidTestBoxPrefixError(INVALID_TEST_BOX_PREFIX))
   if (boxNotWritableError) throw new Error(boxNotWritableError)
+  // BR1 (fase box-rete): la RETE è quella della modalità corrente, e col
+  // motore Apple la modalità none fallisce CHIUSA — mai un box none che
+  // gira senza la sua rete isolata e la verifica passata
+  const network = sandboxNetwork()
+  const engine = activeBoxEngine()
+  const isolated = network === 'none' && engine.isolateBoxNetwork !== undefined
   // punto 1: l'immagine del box esiste (o viene costruita) PRIMA di tutto
   const image = boxImage()
   const imageOk = await ensureBoxImage()
@@ -495,10 +524,24 @@ export async function ensureBoxContainer(): Promise<void> {
     }
   }
   const plan = boxEnsurePlan(facts)
-  if (plan.kind === 'use') return
   // BX2: il terreno del MOTORE, se ne ha uno (apple-container: la rete interna
-  // --internal e il suo GATEWAY, prima del run; docker non prepara nulla)
-  await activeBoxEngine().prepareNetwork?.(dockerRunner)
+  // --internal e il suo GATEWAY, prima del run; docker non prepara nulla).
+  // BR1: la rete preparata è quella della MODALITÀ corrente (homun-box o
+  // homun-box-isolated) e gira SEMPRE, anche quando il container si riusa:
+  // la rete isolata di none dev'esserci anche col box già avanti, e in none
+  // la sua creazione fallisce CHIUSA
+  if (engine.prepareNetwork) {
+    if (isolated) {
+      try {
+        await engine.prepareNetwork(dockerRunner, network)
+      } catch (e) {
+        await isolationFailClosed(e)
+      }
+    } else {
+      await engine.prepareNetwork(dockerRunner, network)
+    }
+  }
+  if (plan.kind === 'use') return
   // N1 (fase 13 correzioni 3): il MOTIVO di ogni ricreazione una riga nel log
   // del daemon (stdout/stderr finiscono in data/daemon.log) — un ciclo di
   // ricreazioni a ogni comando si vede nei log invece di passare inosservato
@@ -530,11 +573,22 @@ export async function ensureBoxContainer(): Promise<void> {
   // 0c: creazione e one-shot con l'immagine NOSTRA del box (tag dal Dockerfile)
   const chown = await dockerRunner(activeBoxEngine().argv.boxChown(BOX_VOLUME, image), { timeoutMs: 60_000 })
   if (chown.exitCode !== 0) throw new Error(`init volume fallito: ${chown.stderr}`)
-  const create = await dockerRunner(activeBoxEngine().argv.boxCreate(BOX_CONTAINER, BOX_VOLUME, sandboxNetwork(), boxLimits(), image), { timeoutMs: 60_000 })
+  const create = await dockerRunner(engine.argv.boxCreate(BOX_CONTAINER, BOX_VOLUME, network, boxLimits(), image), { timeoutMs: 60_000 })
   if (create.exitCode !== 0) throw new Error(`docker create fallito: ${create.stderr}`)
-  const start = await dockerRunner(activeBoxEngine().argv.start(BOX_CONTAINER), { timeoutMs: 30_000 })
+  const start = await dockerRunner(engine.argv.start(BOX_CONTAINER), { timeoutMs: 30_000 })
   if (start.exitCode !== 0) throw new Error(`docker start fallito: ${start.stderr}`)
-  const w = await dockerRunner(activeBoxEngine().argv.boxWritable(BOX_CONTAINER), { timeoutMs: 15_000 })
+  // BR1: col motore Apple in none, SUBITO dopo il run -d e prima di OGNI
+  // exec del bot — interfacce GIÙ come root e VERIFICA operstate. Ogni
+  // fallimento è CHIUSO: il box si rimuove, l'azione del bot lo dice in
+  // parole. L'utente del bot (1000:1000, senza setuid) non può rialzarle.
+  if (isolated && engine.isolateBoxNetwork) {
+    try {
+      await engine.isolateBoxNetwork(dockerRunner)
+    } catch (e) {
+      await isolationFailClosed(e)
+    }
+  }
+  const w = await dockerRunner(engine.argv.boxWritable(BOX_CONTAINER), { timeoutMs: 15_000 })
   const check = boxCreateCheck(w.exitCode === 0)
   if (!check.ok) {
     boxNotWritableError = check.error

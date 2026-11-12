@@ -11,11 +11,14 @@ import type { BoxEngine, BoxEngineArgv } from './engine'
 import { BOX_CONTAINER, BOX_VOLUME } from './docker-argv'
 import {
   APPLE_BOX_NETWORK,
+  appleNetworkOf,
   appleNetworkInspectArgv,
   parseNetworkGateway,
   appleSystemStartArgv,
   appleKernelSetRecommendedArgv,
   appleNetworkCreateArgv,
+  appleIsolateLinkDownArgv,
+  appleIsolationCheckArgv,
   applePsArgv,
   appleStartArgv,
   appleStopArgv,
@@ -105,18 +108,23 @@ export function boxNetworkGateway(): string | null {
  * raggiunge il proxy d'uscita, al posto di host.docker.internal. Esito:
  * il gateway, o null se l'inspect non lo dice (l'avvio prosegue col
  * fallback e il log lo ricorda — la rete interna resta il confine).
+ * BR1 (fase box-rete): con `none` la rete è l'altra dedicata di Homun,
+ * homun-box-isolated (host-only pure lei): si crea e si ispeziona uguale,
+ * MA il suo gateway NON si ricorda — il proxy non ascolta MAI lì (BR2) e il
+ * gateway del browser resta quello di homun-box, letto in bridge.
  */
-export async function ensureAppleBoxNetwork(run: BoxArgvRunner): Promise<string | null> {
-  let ins = await run(appleNetworkInspectArgv(), { timeoutMs: 15_000 })
+export async function ensureAppleBoxNetwork(run: BoxArgvRunner, network: 'bridge' | 'none' = 'bridge'): Promise<string | null> {
+  const name = appleNetworkOf(network)
+  let ins = await run(appleNetworkInspectArgv(name), { timeoutMs: 15_000 })
   if (ins.exitCode !== 0) {
-    const create = await run(appleNetworkCreateArgv(), { timeoutMs: 30_000 })
+    const create = await run(appleNetworkCreateArgv(name), { timeoutMs: 30_000 })
     if (create.exitCode !== 0) {
-      throw new Error(`creation of the internal network ${APPLE_BOX_NETWORK} failed: ${create.stderr || `exit ${create.exitCode}`}`)
+      throw new Error(`creation of the internal network ${name} failed: ${create.stderr || `exit ${create.exitCode}`}`)
     }
-    ins = await run(appleNetworkInspectArgv(), { timeoutMs: 15_000 })
+    ins = await run(appleNetworkInspectArgv(name), { timeoutMs: 15_000 })
   }
   const gw = parseNetworkGateway(ins.stdout)
-  setBoxNetworkGateway(gw)
+  if (network === 'bridge') setBoxNetworkGateway(gw)
   return gw
 }
 
@@ -210,7 +218,22 @@ export const appleContainerEngine: BoxEngine = {
   command: () => containerCliPath(),
   childEnv: (env) => Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined)),
   argv,
-  prepareNetwork: async (run) => {
-    await ensureAppleBoxNetwork(run)
+  prepareNetwork: async (run, network) => {
+    await ensureAppleBoxNetwork(run, network)
+  },
+  /**
+   * BR1: le interfacce del box GIÙ come root e la VERIFICA operstate. Ogni
+   * fallimento lancia: il chiamante (l'ensure del box) fallisce CHIUSO — il
+   * box si rimuove, mai un box none che gira senza verifica passata.
+   */
+  isolateBoxNetwork: async (run) => {
+    const down = await run(appleIsolateLinkDownArgv(BOX_CONTAINER), { timeoutMs: 30_000 })
+    if (down.exitCode !== 0) {
+      throw new Error(`link down of the box interfaces failed: ${down.stderr || `exit ${down.exitCode}`}`)
+    }
+    const check = await run(appleIsolationCheckArgv(BOX_CONTAINER), { timeoutMs: 30_000 })
+    if (check.exitCode !== 0) {
+      throw new Error(`verification of the box interfaces failed (not all down): ${(check.stdout || check.stderr || `exit ${check.exitCode}`).slice(0, 200)}`)
+    }
   }
 }

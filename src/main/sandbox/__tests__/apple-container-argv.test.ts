@@ -13,9 +13,13 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import {
   APPLE_BOX_NETWORK,
+  APPLE_BOX_ISOLATED_NETWORK,
+  appleNetworkOf,
   appleBoxRunArgv,
   appleNetworkCreateArgv,
   appleNetworkInspectArgv,
+  appleIsolateLinkDownArgv,
+  appleIsolationCheckArgv,
   appleBrowserMcpArgv,
   browserMcpFlagsWithGateway,
   parseNetworkGateway,
@@ -67,9 +71,57 @@ describe('BX2: le protezioni del box con container', () => {
     expect(appleNetworkInspectArgv()).toEqual(['network', 'inspect', APPLE_BOX_NETWORK])
   })
 
-  it('rete none: NESSUN --network (un container senza rete)', () => {
+  // BR1: il test di guardia SI ROVESCIA. Con la CLI di Apple non esiste una
+  // rete «none»: un run SENZA --network va sulla rete PREDEFINITA di Apple,
+  // in NAT verso Internet — l'esatto opposto di «senza rete». Ora il run
+  // porta SEMPRE esattamente un --network col nome di una rete di Homun.
+  it('BR1 rete none: --network homun-box-isolated E --no-dns (mai la rete predefinita)', () => {
     const argv = runArgv('none')
-    expect(argv).not.toContain('--network')
+    expect(argv[argv.indexOf('--network') + 1]).toBe('homun-box-isolated')
+    expect(argv).toContain('--no-dns')
+  })
+
+  it('BR1 SEMPRE esattamente UN --network, col nome di una rete di Homun; bridge senza --no-dns', () => {
+    const HOMUN_NETWORKS = ['homun-box', 'homun-box-isolated']
+    for (const network of ['bridge', 'none'] as const) {
+      const argv = runArgv(network)
+      expect(argv.filter((f) => f === '--network'), network).toHaveLength(1)
+      expect(HOMUN_NETWORKS, network).toContain(argv[argv.indexOf('--network') + 1])
+    }
+    expect(runArgv('bridge')).not.toContain('--no-dns')
+  })
+})
+
+// ---- BR1: la modalità none col motore Apple — isolata e VERIFICATA ----
+
+describe('BR1: none → la rete isolata e le interfacce GIÙ (difesa in profondità)', () => {
+  it('appleNetworkOf: la rete di Homun per modalità (bridge → homun-box, none → homun-box-isolated)', () => {
+    expect(appleNetworkOf('bridge')).toBe('homun-box')
+    expect(appleNetworkOf('none')).toBe('homun-box-isolated')
+    expect(APPLE_BOX_ISOLATED_NETWORK).toBe('homun-box-isolated')
+  })
+
+  it('la rete isolata si crea --internal come homun-box, e si ispeziona per nome', () => {
+    expect(appleNetworkCreateArgv('homun-box-isolated')).toEqual(['network', 'create', '--internal', 'homun-box-isolated'])
+    expect(appleNetworkInspectArgv('homun-box-isolated')).toEqual(['network', 'inspect', 'homun-box-isolated'])
+  })
+
+  it('il link down: un exec COME ROOT (−u 0) che porta giù ogni interfaccia tranne lo', () => {
+    const argv = appleIsolateLinkDownArgv('sandbot-box')
+    expect(argv.slice(0, 4)).toEqual(['exec', '-u', '0', 'sandbot-box'])
+    expect(argv).toContain('sh')
+    const script = argv[argv.indexOf('-c') + 1]
+    expect(script).toContain('ip link set')
+    expect(script).toContain('lo')
+  })
+
+  it('la verifica: COME ROOT, ogni interfaccia diversa da lo deve essere operstate down', () => {
+    const argv = appleIsolationCheckArgv('sandbot-box')
+    expect(argv.slice(0, 4)).toEqual(['exec', '-u', '0', 'sandbot-box'])
+    const script = argv[argv.indexOf('-c') + 1]
+    expect(script).toContain('/sys/class/net/')
+    expect(script).toContain('operstate')
+    expect(script).toContain('lo')
   })
 })
 

@@ -54,6 +54,11 @@ RUN mkdir -p /etc/sandbot \
 # fase 19b (T2): python3 — il programma del TERMINALE del bot (PTY con shell
 # di login, `python3 -c <programma costante>`): l'immagine base non lo
 # garantisce, lo si installa esplicitamente e command -v lo verifica.
+# fase box-rete (BR1): iproute2 — `ip link set <if> down` porta giù le
+# interfacce del box isolato (none) come root, e la verifica le rilegge da
+# /sys/class/net/<if>/operstate: senza `ip` la modalità none non può chiudere
+# la rete e il box non parte. Il tag dell'immagine cambia (deriva dal
+# Dockerfile): previsto.
 # Le liste di apt si puliscono nello STESSO layer; command -v fa FALLIRE la
 # build in modo chiaro se un binario manca.
 RUN apt-get update \
@@ -65,8 +70,9 @@ RUN apt-get update \
       imagemagick \
       x11-utils \
       python3 \
+      iproute2 \
  && rm -rf /var/lib/apt/lists/* \
- && command -v Xvfb x11vnc xauth xdotool import xdpyinfo python3
+ && command -v Xvfb x11vnc xauth xdotool import xdpyinfo python3 ip
 
 RUN npm install -g @playwright/mcp@0.0.83 \
  && PWCLI="$(npm root -g)/@playwright/mcp/node_modules/playwright/cli.js" \

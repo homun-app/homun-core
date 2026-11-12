@@ -4,7 +4,7 @@
 // che riceve (una riga JSON per chiamata, in append su $SANDBOT_TEST_CONTAINER_LOG)
 // e risponde ai comandi che il motore usa: --version, system status/start/
 // kernel set, system df --format json, image inspect/prune/delete, volume
-// create/delete, network create/inspect, ls, stop/rm, exec.
+// create/delete, network create/inspect, ls, stop/rm, exec, cp, run.
 //
 // Il comportamento si sceglie con SANDBOT_TEST_CONTAINER_MODE:
 //   not-installed  tutto esce 127 (la CLI «non c'è»)
@@ -12,10 +12,22 @@
 //   kernel-missing status: running: true MA kernel: missing
 //   ready          (default) tutto a posto
 //
+// BR1 (fase box-rete): il STATO si ricorda rileggendo il proprio log — i
+// container creati da `run -d`/`create` (nome, rete, immagine) esistono per
+// `ls` e gli inspect finché un `rm` non li toglie; le RETI esistono dopo
+// `network create` (homun-box c'è già, homun-box-isolated no). E un `run -d`
+// SENZA --network viene RIFIUTATO con errore: con la CLI di Apple «nessuna
+// rete» non esiste, un run senza flag va sulla rete PREDEFINITA in NAT verso
+// Internet — nessuna sonda futura può passare col difetto. Con
+// SANDBOT_TEST_CONTAINER_OPERSTATE=up l'exec della VERIFICA (lo script che
+// legge operstate) fallisce: le interfacce non sono giù. Con
+// SANDBOT_TEST_CONTAINER_ISOLATED_FAIL=1 la create di homun-box-isolated
+// cade: la rete isolata non si può creare.
+//
 // Nessuna rete, nessuna scrittura fuori dal file di log. La usa il motore al
 // posto della CLI vera SOLO con SANDBOT_TEST_USER_DATA impostata E
 // SANDBOT_TEST_CONTAINER_CLI=<percorso di questo file> (sandbox/engine).
-import { appendFileSync } from 'node:fs'
+import { appendFileSync, readFileSync } from 'node:fs'
 
 const MODE = process.env.SANDBOT_TEST_CONTAINER_MODE ?? 'ready'
 const argv = process.argv.slice(2)
@@ -31,6 +43,43 @@ const out = (s) => { process.stdout.write(`${s}\n`) }
 const die = (code, msg) => { process.stderr.write(`${msg}\n`); process.exit(code) }
 
 if (MODE === 'not-installed') die(127, 'container: command not found')
+
+/** Le righe del log (gli argv già ricevuti): lo STATO della CLI finta. */
+const logArgvs = () => {
+  try {
+    return readFileSync(process.env.SANDBOT_TEST_CONTAINER_LOG ?? '', 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l).argv)
+  } catch {
+    return []
+  }
+}
+
+/**
+ * BR1: lo stato dal log — l'ULTIMO container creato da run -d/create (nome,
+ * rete, immagine) finché un rm/delete col suo nome non lo toglie; le reti
+ * create (homun-box esiste GIÀ, come la prima della sonda di box-container).
+ */
+function scanState() {
+  let box = null
+  const networks = new Set(['homun-box'])
+  for (const a of logArgvs()) {
+    if (!Array.isArray(a)) continue
+    if ((a[0] === 'run' && a.includes('-d')) || a[0] === 'create') {
+      const nameI = a.indexOf('--name')
+      if (nameI >= 0) {
+        const netI = a.indexOf('--network')
+        const sleepI = a.lastIndexOf('sleep')
+        box = { name: a[nameI + 1], network: netI >= 0 ? a[netI + 1] : null, image: sleepI > 0 ? a[sleepI - 1] : 'sandbot-box:fake' }
+      }
+    }
+    if ((a[0] === 'rm' || a[0] === 'delete') && box && a.slice(1).includes(box.name)) box = null
+    if (a[0] === 'network' && a[1] === 'create') networks.add(a[a.length - 1])
+  }
+  return { box, networks }
+}
+
+/** Il JSON dell'inspect di una rete: subnet e gateway della rete richiesta. */
+const networkJson = (name) =>
+  JSON.stringify({ name, internal: true, subnets: [{ subnet: name === 'homun-box-isolated' ? '192.0.16.0/24' : '192.0.15.0/24', gateway: name === 'homun-box-isolated' ? '192.0.16.1' : '192.0.15.1' }] })
 
 // ---- --version ----
 if (argv[0] === '--version' || argv[0] === 'version') {
@@ -84,10 +133,17 @@ if (argv[0] === 'volume') {
 
 // ---- network ----
 if (argv[0] === 'network') {
-  if (argv[1] === 'create') { out(argv[argv.length - 1] ?? 'network'); process.exit(0) }
+  if (argv[1] === 'create') {
+    const name = argv[argv.length - 1]
+    if (name === 'homun-box-isolated' && process.env.SANDBOT_TEST_CONTAINER_ISOLATED_FAIL === '1') {
+      die(1, `container (fake): creation of the internal network ${name} failed`)
+    }
+    out(name ?? 'network'); process.exit(0)
+  }
   if (argv[1] === 'inspect') {
-    out(JSON.stringify({ name: argv[2] ?? 'homun-box', internal: true, subnets: [{ subnet: '192.0.15.0/24', gateway: '192.0.15.1' }] }))
-    process.exit(0)
+    const name = argv[2] ?? 'homun-box'
+    if (!scanState().networks.has(name)) die(1, `container (fake): network ${name} not found`)
+    out(networkJson(name)); process.exit(0)
   }
   die(1, `container: unknown network subcommand: ${argv[1] ?? ''}`)
 }
@@ -100,18 +156,37 @@ if (argv[0] === 'builder') { out('build cache pruned (fake)'); process.exit(0) }
 
 // ---- i container: ls/stop/start/rm/exec/cp/run ----
 if (argv[0] === 'ls' || argv[0] === 'list' || argv[0] === 'ps') {
-  out('sandbot-box')
+  const { box } = scanState()
+  if (box) out(box.name)
   process.exit(0)
 }
 if (argv[0] === 'stop' || argv[0] === 'start') { process.exit(0) }
 if (argv[0] === 'rm' || argv[0] === 'delete') { process.exit(0) }
-if (argv[0] === 'run') { out('run (fake): container started'); process.exit(0) }
-if (argv[0] === 'exec') { process.exit(0) }
+if (argv[0] === 'run') {
+  // BR1: un run -d SENZA --network non esiste — rifiutato, mai la rete di
+  // default in NAT. I one-shot di servizio (--rm) non sono il box: passano.
+  if (argv.includes('-d') && !argv.includes('--network')) {
+    die(64, 'container (fake): run -d requires --network with a Homun network (homun-box | homun-box-isolated) — senza flag il container andrebbe sulla rete predefinita, in NAT verso Internet')
+  }
+  out('run (fake): container started'); process.exit(0)
+}
+if (argv[0] === 'exec') {
+  // BR1: l'exec della VERIFICA (lo script che legge operstate) può fallire
+  // su richiesta del test: le interfacce NON sono giù, l'isolamento è rotto
+  if (argv.some((a) => typeof a === 'string' && a.includes('operstate')) && process.env.SANDBOT_TEST_CONTAINER_OPERSTATE === 'up') {
+    die(1, 'eth0 is up')
+  }
+  process.exit(0)
+}
 if (argv[0] === 'cp') { process.exit(0) }
 if (argv[0] === 'inspect') {
+  const { box } = scanState()
   const i = argv.indexOf('--format')
-  if (i >= 0 && /running/i.test(argv[i + 1] ?? '')) { out('true'); process.exit(0) }
-  if (i >= 0 && /image/i.test(argv[i + 1] ?? '')) { out('sandbot-box:fake'); process.exit(0) }
+  const f = i >= 0 ? String(argv[i + 1] ?? '') : ''
+  if (i >= 0 && /running/i.test(f)) { out('true'); process.exit(0) }
+  if (i >= 0 && /image/i.test(f)) { out(box?.image ?? 'sandbot-box:fake'); process.exit(0) }
+  if (i >= 0 && /network/i.test(f)) { out(box?.network ?? ''); process.exit(0) }
+  if (i >= 0 && /mounts/i.test(f)) { out('/box:rw /browser:rw /plugins:ro '); process.exit(0) }
   out('{}')
   process.exit(0)
 }

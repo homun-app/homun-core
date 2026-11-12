@@ -49,6 +49,20 @@ import {
 /** BX2: la rete DEDICATA del box, --internal (host-only: solo il Mac). */
 export const APPLE_BOX_NETWORK = 'homun-box'
 
+/**
+ * BR1 (fase box-rete): la rete DEDICATA della modalità none, --internal come
+ * homun-box. La CLI di Apple NON ha una rete «none»: un run senza --network
+ * va sulla rete PREDEFINITA, in NAT verso Internet — l'esatto opposto di
+ * «senza rete». Con none il box gira su QUESTA rete isolata (e col proxy che
+ * NON ascolta mai sul suo gateway: BR2).
+ */
+export const APPLE_BOX_ISOLATED_NETWORK = 'homun-box-isolated'
+
+/** BR1: la rete di Homun che la modalità richiede (PURO). */
+export function appleNetworkOf(network: 'bridge' | 'none'): string {
+  return network === 'bridge' ? APPLE_BOX_NETWORK : APPLE_BOX_ISOLATED_NETWORK
+}
+
 /** BX1.4: l'accensione del servizio MAI scarica il kernel di nascosto. */
 export function appleSystemStartArgv(): string[] {
   return ['system', 'start', '--disable-kernel-install']
@@ -84,13 +98,13 @@ export function parseSystemStatus(stdout: string): { running: boolean; kernelOk:
 }
 
 /** BX2: la rete interna del box si crea se manca (l'inspect lo dice). */
-export function appleNetworkCreateArgv(): string[] {
-  return ['network', 'create', '--internal', APPLE_BOX_NETWORK]
+export function appleNetworkCreateArgv(network: string = APPLE_BOX_NETWORK): string[] {
+  return ['network', 'create', '--internal', network]
 }
 
 /** BX2: l'inspect della rete, da cui si legge il GATEWAY (il Mac per il box). */
-export function appleNetworkInspectArgv(): string[] {
-  return ['network', 'inspect', APPLE_BOX_NETWORK]
+export function appleNetworkInspectArgv(network: string = APPLE_BOX_NETWORK): string[] {
+  return ['network', 'inspect', network]
 }
 
 /**
@@ -136,6 +150,10 @@ export function appleStopArgv(container: string): string[] {
  * processi è la VM del container — annotato nel REPORT), i TRE volumi di
  * oggi (box rw, plugin RO dal kernel, browser rw), la RETE dedicata interna.
  * Niente --cap-drop/--security-opt: non esistono; il confine è la VM.
+ * BR1 (fase box-rete): SEMPRE esattamente un --network, con una rete di
+ * Homun — `bridge` → homun-box, `none` → homun-box-isolated + --no-dns. Mai
+ * la rete predefinita di Apple (NAT verso Internet): «senza rete» non si fa
+ * omettendo il flag.
  */
 export function appleBoxRunArgv(container: string, volume: string, network: 'bridge' | 'none', limits: BoxLimits, image: string): string[] {
   return [
@@ -144,7 +162,8 @@ export function appleBoxRunArgv(container: string, volume: string, network: 'bri
     '-u', CONTAINER_USER,
     '-m', limits.memory,
     '-c', String(limits.cpus),
-    ...(network === 'bridge' ? ['--network', APPLE_BOX_NETWORK] : []),
+    '--network', appleNetworkOf(network),
+    ...(network === 'none' ? ['--no-dns'] : []),
     '-v', `${volume}:${BOX_MOUNT}`,
     '-v', `${PLUGINS_VOLUME}:${PLUGINS_MOUNT}:ro`,
     '-v', `${BROWSER_VOLUME}:${BROWSER_MOUNT}`,
@@ -156,6 +175,34 @@ export function appleBoxRunArgv(container: string, volume: string, network: 'bri
 
 export function appleBoxRmArgv(container: string): string[] {
   return ['rm', '-f', container]
+}
+
+// ---- BR1 (fase box-rete): la modalità none isolata e VERIFICATA ----
+
+/**
+ * BR1, difesa in profondità: porta GIÙ ogni interfaccia del box tranne lo.
+ * Stringa COSTANTE (nessuna interpolazione), gira COME ROOT (exec -u 0):
+ * l'utente del bot (1000:1000, senza setuid dopo BX2) non può rialzarla.
+ * Serve `ip` (iproute2) nell'immagine: c'è nel Dockerfile del box.
+ */
+export const APPLE_ISOLATE_LINK_DOWN_SH = 'for i in /sys/class/net/*; do n=${i##*/}; [ "$n" = lo ] || ip link set dev "$n" down; done'
+
+/** BR1: il link down come ROOT, subito dopo il run -d e prima di ogni exec del bot. */
+export function appleIsolateLinkDownArgv(container: string): string[] {
+  return ['exec', '-u', '0', container, 'sh', '-c', APPLE_ISOLATE_LINK_DOWN_SH]
+}
+
+/**
+ * BR1: la VERIFICA (sempre come ROOT): per ogni interfaccia diversa da lo,
+ * /sys/class/net/<if>/operstate deve essere down. Stampa l'interfaccia che
+ * non lo è ed esce diverso da zero: il chiamante fallisce CHIUSO (box
+ * rimosso, azione del bot in parole) — mai un box none senza verifica.
+ */
+export const APPLE_ISOLATION_CHECK_SH = 'for i in /sys/class/net/*; do n=${i##*/}; [ "$n" = lo ] && continue; s=$(cat "$i/operstate" 2>/dev/null); [ "$s" = down ] || { echo "$n is $s"; exit 1; }; done'
+
+/** BR1: la verifica operstate come ROOT, dopo il link down. */
+export function appleIsolationCheckArgv(container: string): string[] {
+  return ['exec', '-u', '0', container, 'sh', '-c', APPLE_ISOLATION_CHECK_SH]
 }
 
 /** La creazione di ALWAYS: ogni container Apple ha l'init suo nella VM. */

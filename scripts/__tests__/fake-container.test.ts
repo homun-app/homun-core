@@ -80,6 +80,23 @@ describe('BX5: la CLI finta di container — i comportamenti per variabile d\'am
     expect(r.stdout).toMatch(/192\.0\.\d+\.1/)
   })
 
+  // BR1 (fase box-rete): la CLI finta RIFIUTA un run -d senza --network —
+  // con la CLI di Apple «nessuna rete» non esiste: un run senza --network
+  // va sulla rete PREDEFINITA in NAT verso Internet. Così nessuna sonda
+  // futura può passare col difetto. I one-shot (--rm) non hanno rete per
+  // progetto: non sono il box.
+  it('BR1: un run -d SENZA --network viene RIFIUTATO con errore; con --network passa', () => {
+    const bad = run('ready', ['run', '-d', '--name', 'sandbot-box', 'img', 'sleep', 'infinity'])
+    expect(bad.status).not.toBe(0)
+    expect(bad.stderr).toMatch(/--network/)
+    const badNoD = run('ready', ['run', '-d', '--name', 'sandbot-box', 'sleep', 'infinity'])
+    expect(badNoD.status).not.toBe(0)
+    const ok = run('ready', ['run', '-d', '--name', 'sandbot-box', '--network', 'homun-box', 'img', 'sleep', 'infinity'])
+    expect(ok.status).toBe(0)
+    // i one-shot di servizio (--rm) restano legitimi anche senza rete
+    expect(run('ready', ['run', '--rm', '-u', '0', 'img', 'mkdir', '-p', '/p/x']).status).toBe(0)
+  })
+
   it('OGNI argv viene REGISTRATO nel log (JSON per riga)', () => {
     const r = run('ready', ['image', 'prune', '-f'])
     expect(r.log).toEqual([['image', 'prune', '-f']])

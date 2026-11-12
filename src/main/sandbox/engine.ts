@@ -129,8 +129,18 @@ export interface BoxEngine {
    * BX2: il terreno del motore PRIMA del (ri)avvio del box, se il motore ne
    * ha uno (apple-container: la rete interna e il suo gateway). Il runner è
    * quello del box. Docker non lo implementa: nulla da preparare.
+   * BR1 (fase box-rete): riceve la rete che la modalità corrente richiede —
+   * apple-container prepara homun-box (bridge) o homun-box-isolated (none).
    */
-  prepareNetwork?(run: (argv: string[], opts?: { timeoutMs?: number }) => Promise<{ stdout: string; stderr: string; exitCode: number | null }>): Promise<void>
+  prepareNetwork?(run: (argv: string[], opts?: { timeoutMs?: number }) => Promise<{ stdout: string; stderr: string; exitCode: number | null }>, network: 'bridge' | 'none'): Promise<void>
+  /**
+   * BR1 (fase box-rete): la difesa in profondità della modalità none, se il
+   * motore ce l'ha (apple-container): le interfacce del box GIÙ come root e
+   * la VERIFICA operstate. Lancia errore se non ci si riesce: il chiamante
+   * fallisce CHIUSO (box rimosso, mai un box none senza verifica). Docker
+   * non lo implementa: la rete none di Docker è del runtime, già chiusa.
+   */
+  isolateBoxNetwork?(run: (argv: string[], opts?: { timeoutMs?: number }) => Promise<{ stdout: string; stderr: string; exitCode: number | null }>): Promise<void>
 }
 
 // ---- la scelta del motore (PURa) ----
