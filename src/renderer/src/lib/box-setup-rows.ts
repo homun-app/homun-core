@@ -69,16 +69,6 @@ export function boxSetupRows(s: BoxSetupState): BoxSetupRow[] {
   })
 }
 
-/**
- * «Continua» può portare oltre mentre la preparazione corre SOLO nelle fasi
- * in background (download e immagine: l'utente non serve): negli altri
- * passi serve l'utente o la fine (PURa — la usano la guida e il riepilogo
- * di «Pronto»).
- */
-export function boxSetupInBackground(phase: BoxSetupPhase): boolean {
-  return phase === 'downloading' || phase === 'building-image'
-}
-
 /** «Annulla» c'è finché il download o l'immagine corrono (PURa). */
 export function boxSetupCancellable(phase: BoxSetupPhase): boolean {
   return phase === 'downloading' || phase === 'building-image'

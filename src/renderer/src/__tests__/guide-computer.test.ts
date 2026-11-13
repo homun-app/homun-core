@@ -2,9 +2,9 @@
 // (titolo, la riga del mockup, il bottone del consenso con le quattro cose
 // IN PAROLE e i GB calcolati), la lista d'avanzamento condivisa (righe col
 // loro stato, il bottone «Apri l'installazione» sull'attesa), la
-// navigazione (Continua spento sull'attesa dell'Installer, attivo a ready
-// o mentre download/immagine corrono in background; «Salta per ora»
-// sempre) e il riepilogo di Pronto con la riga Computer. Render statico
+// navigazione (OBD1: Continua attivo SOLO a ready — durante download e
+// immagine è disabilitato; «Salta per ora» sempre, finché non è ready) e
+// il riepilogo di Pronto con la riga Computer. Render statico
 // del componente VERO (render-helper) + guardie sul sorgente per i clic.
 import './render-helper-install'
 import { describe, expect, it } from 'vitest'
@@ -169,11 +169,28 @@ describe('OB2: la navigazione del passo Computer', () => {
     expect(byTestId(tree, 'guide-skip').length).toBe(0)
   })
 
-  it('«Continua» ATTIVO mentre il download o l\'immagine corrono in background', () => {
-    for (const patch of [{ phase: 'downloading' as const, bytes: 1, total: 2 }, { phase: 'building-image' as const }]) {
-      const { tree } = renderComputer(setupState(patch))
-      expect(byTestId(tree, 'guide-continue')[0]!.attrs.disabled, patch.phase).toBeUndefined()
-    }
+  // OBD1 (fase onboarding-b-dettagli): «Continua» è attivo SOLO a ready —
+  // durante download e immagine il passo NON è finito, e un bottone attivo
+  // diceva il contrario. La sola via per andare avanti prima della fine è
+  // «Salta per ora» (e la preparazione continua in background).
+  it('OBD1: durante il download «Continua» è DISABILITATO (oggi era attivo)', () => {
+    const { tree } = renderComputer(setupState({ phase: 'downloading', bytes: 1, total: 2 }))
+    expect(byTestId(tree, 'guide-continue')[0]!.attrs.disabled).toBe('')
+  })
+
+  it('OBD1: durante la build dell\'immagine «Continua» è DISABILITATO (oggi era attivo)', () => {
+    const { tree } = renderComputer(setupState({ phase: 'building-image' }))
+    expect(byTestId(tree, 'guide-continue')[0]!.attrs.disabled).toBe('')
+  })
+
+  it('OBD1: a fase ready «Continua» è ATTIVO', () => {
+    const { tree } = renderComputer(setupState({ phase: 'ready' }))
+    expect(byTestId(tree, 'guide-continue')[0]!.attrs.disabled).toBeUndefined()
+  })
+
+  it('OBD1: «Salta per ora» c\'è durante la build dell\'immagine (la sola via prima della fine)', () => {
+    const { tree } = renderComputer(setupState({ phase: 'building-image' }))
+    expect(byTestId(tree, 'guide-skip').length).toBe(1)
   })
 
   it('«Continua» SPENTO durante la verifica (non è background: l\'utente aspetta)', () => {

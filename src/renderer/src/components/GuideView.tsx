@@ -23,7 +23,7 @@ import { SUPPORTED_UI_LANGUAGES } from '../../../shared/ui-language'
 import { TRAFFIC_LIGHT_INSET } from '../layout'
 import { approvalsChoices } from '../lib/guide-steps'
 import { guideMood, guideBubble, guideBubbleKey, EMPTY_GUIDE_FACTS, type GuideFacts, type GuideUiStep } from '../lib/guide-scene'
-import { boxSetupInBackground, boxSetupActive } from '../lib/box-setup-rows'
+import { boxSetupActive } from '../lib/box-setup-rows'
 import { Bot } from '../bot/Bot'
 // G4: il passo Modello vive in un componente suo (griglia, prova, Ollama, Integrato)
 import { GuideModelStep, type ModelStepFacts } from './GuideModelStep'
@@ -496,13 +496,16 @@ export function GuideView() {
   // prova riuscita col modello scelto, Ollama scelto, o l'integrato pronto);
   // il modelReady del daemon copre il caso limite di un salvataggio esterno
   const modelReadyHere = modelLocalReady || modelReady
-  // OB2: «Continua» del passo Computer è attivo a ready, oppure quando la
-  // preparazione corre SOLO in background (download o immagine: l'utente non
-  // serve). Sull'attesa dell'Installer è SPENTO: serve l'utente (c'è «Salta
-  // per ora»); il riepilogo di Pronto dirà «Computer: in preparazione»
+  // OBD1 (fase onboarding-b-dettagli): «Continua» del passo Computer è attivo
+  // SOLO a ready (fase ready, o il computerReady del daemon). Durante
+  // download, verifica, Installer, servizio, kernel e immagine è SPENTO: il
+  // passo non è finito e un bottone attivo diceva il contrario. La sola via
+  // per andare avanti prima della fine è «Salta per ora» — la preparazione
+  // continua in background e il riepilogo di Pronto dirà «Computer: in
+  // preparazione»
   const computerPhase = boxSetup?.phase ?? 'idle'
   const computerReady = computerPhase === 'ready' || onboarding?.computerReady === true
-  const computerContinue = computerReady || boxSetupInBackground(computerPhase)
+  const computerContinue = computerReady
   const computerDoneForSummary = computerReady ? 'ready' : boxSetupActive(computerPhase) ? 'preparing' : 'todo'
   // G5: anche il passo Permessi aspetta la scelta (mockup: Continua spento
   // finché non si sceglie una delle due schede)
@@ -542,9 +545,9 @@ export function GuideView() {
     }
     if (uiStep === 'computer') {
       if (backTo) { setBackTo(null); return }
-      // a ready il passo si chiude FATTO; durante download/immagine si va
-      // avanti LO STESSO e la preparazione CONTINUA in background (il
-      // riepilogo di Pronto dirà «Computer: in preparazione»)
+      // OBD1: a ready il passo si chiude FATTO; prima della fine l'unica via
+      // è «Salta per ora» (che lascia la preparazione correre in background:
+      // il riepilogo di Pronto dirà «Computer: in preparazione»)
       if (computerContinue) void advance('computer', 'done')
       return
     }
