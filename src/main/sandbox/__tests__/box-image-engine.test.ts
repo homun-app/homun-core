@@ -66,6 +66,38 @@ describe('OBV3: ensureBoxImage col motore ESPlicitO (mai la cache dell\'auto)', 
   })
 })
 
+// ---- OBD4c: il single-flight è PER MOTORE ----
+
+describe('OBD4c: una richiesta con ALTRO motore aspetta la build in corso, poi parte col SUO', () => {
+  it('build docker in corso, richiesta apple → DUE build, la seconda col motore APPLE', async () => {
+    setActiveEngineForTests('docker')
+    const enginesOf: Array<string | undefined> = []
+    const releases: Array<() => void> = []
+    setDockerRunnerForTests((async (argv: string[], opts: { onStderrLine?: (l: string) => void } | undefined, engine?: BoxEngine) => {
+      if (argv[0] === 'image' && argv[1] === 'inspect') return { stdout: '', stderr: 'not found', exitCode: 1, signal: null }
+      if (argv[0] === 'build') {
+        enginesOf.push(engine?.id)
+        await new Promise<void>((r) => releases.push(r))
+        opts?.onStderrLine?.('#8 exporting to oci image format')
+        return { stdout: '', stderr: '', exitCode: 0, signal: null }
+      }
+      return { stdout: '', stderr: '', exitCode: 0, signal: null }
+    }) as unknown as Parameters<typeof setDockerRunnerForTests>[0])
+    const pDocker = ensureBoxImage(dockerEngine)
+    for (let i = 0; i < 100 && enginesOf.length < 1; i++) await new Promise((r) => setTimeout(r, 20))
+    expect(enginesOf).toEqual(['docker'])
+    // la richiesta con ALTRO motore: NON si aggancia alla build docker —
+    // aspetta che finisca e poi parte COL SUO motore
+    const pApple = ensureBoxImage(appleContainerEngine)
+    releases.shift()?.()
+    expect(await pDocker).toBe(true)
+    for (let i = 0; i < 100 && enginesOf.length < 2; i++) await new Promise((r) => setTimeout(r, 20))
+    expect(enginesOf).toEqual(['docker', 'apple-container'])
+    releases.shift()?.()
+    expect(await pApple).toBe(true)
+  })
+})
+
 // ---- OBD3 (fase onboarding-b-dettagli): il build condivide gli aggiornamenti ----
 
 describe('OBD3: chi si aggancia a un build già in corso riceve gli aggiornamenti (elenco di ascoltatori)', () => {

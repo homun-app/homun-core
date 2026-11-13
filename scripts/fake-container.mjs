@@ -46,9 +46,8 @@
 // log. La usa il motore al posto della CLI vera SOLO con
 // SANDBOT_TEST_USER_DATA impostata E
 // SANDBOT_TEST_CONTAINER_CLI=<percorso di questo file> (sandbox/engine).
-import { appendFileSync, readFileSync, existsSync, mkdirSync, symlinkSync, writeFileSync, statSync, realpathSync, mkdtempSync } from 'node:fs'
+import { appendFileSync, readFileSync, existsSync, mkdirSync, symlinkSync, writeFileSync, statSync } from 'node:fs'
 import { join, dirname } from 'node:path'
-import { tmpdir } from 'node:os'
 
 const MODE = process.env.SANDBOT_TEST_CONTAINER_MODE ?? 'ready'
 const argv = process.argv.slice(2)
@@ -129,15 +128,14 @@ if (argv[0] === '--version' || argv[0] === 'version') {
 
 // ---- OBV5: l'appRoot di prova e il KERNEL come FILE VERO ----
 // l'appRoot della cartella di prova: quello delle sonde, o una accanto al
-// log (così ogni «chiamata» del test ha il suo mondo, e afterAll la toglie),
-// o una mkdtemp come ultima spiaggia
-const DEV_TMP = '/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T'
-const TMP_BASE = existsSync(DEV_TMP) ? DEV_TMP : realpathSync(tmpdir())
+// log (così ogni «chiamata» del test ha il suo mondo, e afterAll la toglie).
+// OBD4a (fase onboarding-b-dettagli): la finta NON crea cartelle da sola —
+// senza appRoot i comandi che ne hanno bisogno escono 2
 const APP_ROOT =
   process.env.SANDBOT_TEST_CONTAINER_APP_ROOT ??
   (process.env.SANDBOT_TEST_CONTAINER_LOG
     ? join(dirname(process.env.SANDBOT_TEST_CONTAINER_LOG), 'fake-app-root')
-    : mkdtempSync(join(TMP_BASE, 'sandbot-fake-container-')))
+    : null)
 const KERNEL_TARGET = 'vmlinux-6.18.56-208-debug'
 const KERNEL_LINK = 'default.kernel-arm64'
 const kernelLinkPath = () => join(APP_ROOT, 'kernels', KERNEL_LINK)
@@ -203,6 +201,10 @@ const KERNEL_FILE_EXISTS_STDERR =
 
 // ---- system ----
 if (argv[0] === 'system') {
+  // OBD4a: i comandi che hanno bisogno dell'appRoot, senza appRoot escono 2
+  if ((argv[1] === 'status' || (argv[1] === 'kernel' && argv[2] === 'set')) && !APP_ROOT) {
+    die(2, 'fake-container: SANDBOT_TEST_CONTAINER_APP_ROOT mancante')
+  }
   if (argv[1] === 'status') {
     // OBV5: la finta parla come la vera — col flag il JSON (una riga), senza
     // la TABELLA di default. Il kernel è un FILE: ready lo crea (come dopo

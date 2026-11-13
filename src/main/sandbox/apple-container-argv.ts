@@ -131,10 +131,15 @@ export function parseSystemStatusJson(stdout: string): SystemStatusParsed | null
  * tabella (nessuna riga dello status).
  */
 export function parseSystemStatusTable(stdout: string): SystemStatusParsed | null {
-  const status = /^status\s+(\S+)\s*$/m.exec(stdout)
+  // OBD4d: [ \t]+ — \s+ attraversava il fine riga: con paths.appRoot VUOTO
+  // il valore diventava quello della RIGA DOPO (paths.installRoot /usr/local/).
+  // Il valore può contenere SPAZI («Application Support»): il gruppo prende
+  // la riga (il punto non attraversa \n) e si ripulisce dei bordi [ \t]
+  const status = /^status[ \t]+(\S+)[ \t]*$/m.exec(stdout)
   if (!status) return null
-  const appRoot = /^paths\.appRoot\s+(.+?)\s*$/m.exec(stdout)?.[1] ?? null
-  const arch = /^host\.architecture\s+(\S+)\s*$/m.exec(stdout)?.[1] ?? null
+  const rawAppRoot = /^paths\.appRoot[ \t]+(.*)$/m.exec(stdout)?.[1] ?? null
+  const appRoot = rawAppRoot !== null && rawAppRoot.trim() !== '' ? rawAppRoot.trim() : null
+  const arch = /^host\.architecture[ \t]+(\S+)[ \t]*$/m.exec(stdout)?.[1] ?? null
   return { running: status[1] === 'running', appRoot, arch }
 }
 

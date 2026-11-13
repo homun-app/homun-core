@@ -288,6 +288,17 @@ describe('OBV1: il parse di `system status` sui formati VERI (puro, niente euris
     expect(parseSystemStatusTable(SYSTEM_STATUS_TABLE)).toEqual({ running: true, appRoot: NEUTRAL_APP_ROOT, arch: 'arm64' })
   })
 
+  // OBD4d: \s+ attraversa il fine riga — con paths.appRoot VUOTO il valore
+  // diventava quello della RIGA DOPO (paths.installRoot /usr/local/)
+  it('OBD4d: paths.appRoot VUOTO → appRoot null, mai il valore della riga dopo', () => {
+    const empty = SYSTEM_STATUS_TABLE.replace('paths.appRoot       ' + NEUTRAL_APP_ROOT, 'paths.appRoot       ')
+    expect(empty).not.toContain(NEUTRAL_APP_ROOT) // la sostituzione è avvenuta
+    const p = parseSystemStatusTable(empty)
+    expect(p).toEqual({ running: true, appRoot: null, arch: 'arm64' })
+    expect(p?.appRoot ?? '').not.toContain('installRoot')
+    expect(p?.appRoot).not.toBe('/usr/local/')
+  })
+
   it('parseSystemStatus prova il JSON e CADE sulla tabella quando il JSON non è valido', () => {
     expect(parseSystemStatus(SYSTEM_STATUS_TABLE)).toEqual({ running: true, appRoot: NEUTRAL_APP_ROOT, arch: 'arm64' })
     expect(parseSystemStatus('non è un JSON\n' + SYSTEM_STATUS_TABLE)).toEqual({ running: true, appRoot: NEUTRAL_APP_ROOT, arch: 'arm64' })

@@ -92,6 +92,28 @@ describe('OBV4: localModelMain (pura) — l\'id dal catalogo, mai scritto a mano
   })
 })
 
+describe('OBD4b: local-model:ensure-main guarda lo stato DAVVERO (la protezione non sta solo nella UI)', () => {
+  it('modello NON installato → models.main INVARIATO, nessuna scrittura e passo NON chiuso', async () => {
+    // NESSUN GGUF su disco e nessun download in corso: la Continua del
+    // pannello Integrato non deve scrivere NIENTE (prima creava il provider
+    // e assegnava models.main col modello che non c'è)
+    const main = (await api['local-model:ensure-main']!([])) as MainModel | null
+    expect(main).toBeNull() // torna il models.main di adesso: null
+    const after = (await api['settings:get']!(['models.main', null])) as MainModel | null
+    expect(after).toBeNull() // e NON è stato scritto
+    expect(closed).toBe(0) // modelBecameReady MAI: il passo non si chiude
+    expect(events.some((e) => e.type === 'models')).toBe(false)
+  })
+
+  it('un models.main già scelto, modello non installato → resta QUELLO, passo non chiuso', async () => {
+    const chosen: MainModel = { providerId: 'provina', model: 'un-modello', thinking: null }
+    setSetting('models.main', chosen)
+    const main = (await api['local-model:ensure-main']!([])) as MainModel | null
+    expect(main).toEqual(chosen)
+    expect(closed).toBe(0)
+  })
+})
+
 describe('OBV4: chi sa che il modello è pronto scrive models.main', () => {
   it('la RIPARAZIONE dello status (il modello c\'è già su disco): provider creato E models.main assegnato, evento models', async () => {
     placeGguf()

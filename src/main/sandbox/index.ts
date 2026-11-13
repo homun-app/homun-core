@@ -418,6 +418,9 @@ let boxNotWritableError: string | null = null
  */
 let boxImageBuild: Promise<boolean> | null = null
 
+/** OBD4c: il motore della build in corso — il single-flight è PER MOTORE. */
+let boxImageBuildEngine: import('./engine').BoxEngineId | null = null
+
 /** OBD3: gli ascoltatori del progresso della build in corso. */
 const boxImageBuildListeners = new Set<(p: import('./build-progress').BuildProgress) => void>()
 
@@ -469,11 +472,22 @@ export function ensureBoxImage(
   engine?: import('./engine').BoxEngine,
   onProgress?: (p: import('./build-progress').BuildProgress) => void
 ): Promise<boolean> {
-  if (onProgress) boxImageBuildListeners.add(onProgress)
-  if (!boxImageBuild) {
+  if (boxImageBuild) {
+    // OBD4c: il single-flight è PER MOTORE — una richiesta con un motore
+    // DIVERSO da quello in corso NON si aggancia: aspetta che finisca, poi
+    // parte col SUO motore
+    if (engine && boxImageBuildEngine !== null && engine.id !== boxImageBuildEngine) {
+      return boxImageBuild.then(() => ensureBoxImage(engine, onProgress))
+    }
+    if (onProgress) boxImageBuildListeners.add(onProgress)
+    return boxImageBuild
+  }
+  {
+    // OBV3: il motore di QUESTA build (esplicito o attivo) — e il log lo dice
+    const e = engine ?? activeBoxEngine()
+    boxImageBuildEngine = e.id
+    if (onProgress) boxImageBuildListeners.add(onProgress)
     boxImageBuild = (async () => {
-      // OBV3: il motore di QUESTA build (esplicito o attivo) — e il log lo dice
-      const e = engine ?? activeBoxEngine()
       const tag = boxImage()
       const has = await dockerRunner(e.argv.imageInspect(tag), { timeoutMs: 15_000 }, e)
       if (has.exitCode === 0) return true
@@ -523,6 +537,7 @@ export function ensureBoxImage(
       // la corsa è chiusa: la PROSSIMA richiesta ricontrolla l'immagine, e
       // gli ascoltatori di questa build non contano più
       boxImageBuild = null
+      boxImageBuildEngine = null
       boxImageBuildListeners.clear()
     })
   }

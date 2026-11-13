@@ -103,7 +103,7 @@ describe('BX5: la CLI finta di container — i comportamenti per variabile d\'am
     const wrapper = join(TMP, 'cli')
     writeFileSync(wrapper, `#!/bin/sh\nexec ${process.execPath} ${FAKE} "$@"\n`)
     chmodSync(wrapper, 0o755)
-    const r = spawnSync(wrapper, ['--version'], { encoding: 'utf8', env: { PATH: process.env.PATH, SANDBOT_TEST_CONTAINER_MODE: 'ready' } })
+    const r = spawnSync(wrapper, ['--version'], { encoding: 'utf8', env: { PATH: process.env.PATH, SANDBOT_TEST_CONTAINER_MODE: 'ready', SANDBOT_TEST_CONTAINER_LOG: join(TMP, 'log-ob6-wrapper.jsonl') } })
     expect(r.status).toBe(0)
   })
 
@@ -155,6 +155,32 @@ describe('BX5: la CLI finta di container — i comportamenti per variabile d\'am
   })
 })
 
+// ---- OBD4a: senza le variabili la finta NON crea cartelle ----
+// La finta lasciava una mkdtemp VUOTA a ogni invocazione senza
+// SANDBOT_TEST_CONTAINER_APP_ROOT né SANDBOT_TEST_CONTAINER_LOG (15 giri di
+// suite = 15 cartelle in T). Ora senza appRoot i comandi che ne hanno
+// bisogno escono 2; gli altri funzionano come prima.
+describe('OBD4a: invocazione senza APP_ROOT né LOG → nessuna cartella nuova, exit 2 dove serve', () => {
+  it('nessuna cartella sandbot-fake-container-* in T; system status esce 2 col messaggio chiaro; gli altri comandi come prima', async () => {
+    const { readdirSync } = await import('node:fs')
+    const { TEST_TMP_BASE } = await import('../../src/test-tmp')
+    const bare = { PATH: process.env.PATH, SANDBOT_TEST_CONTAINER_MODE: 'ready' }
+    const fakeDirs = (): string[] => readdirSync(TEST_TMP_BASE).filter((n) => n.startsWith('sandbot-fake-container-')).sort()
+    const before = fakeDirs()
+    const status = spawnSync(process.execPath, [FAKE, 'system', 'status'], { encoding: 'utf8', env: bare })
+    expect(status.status).toBe(2)
+    expect(status.stderr).toContain('fake-container: SANDBOT_TEST_CONTAINER_APP_ROOT mancante')
+    // anche kernel set (l'altro comando che scrive nell'appRoot)
+    const kset = spawnSync(process.execPath, [FAKE, 'system', 'kernel', 'set', '--recommended'], { encoding: 'utf8', env: bare })
+    expect(kset.status).toBe(2)
+    // gli ALTRI comandi funzionano come prima (niente appRoot necessario)
+    expect(spawnSync(process.execPath, [FAKE, '--version'], { encoding: 'utf8', env: bare }).status).toBe(0)
+    expect(spawnSync(process.execPath, [FAKE, 'system', 'start', '--disable-kernel-install'], { encoding: 'utf8', env: bare }).status).toBe(0)
+    expect(spawnSync(process.execPath, [FAKE, 'build', '-t', 'x', '.'], { encoding: 'utf8', env: bare }).status).toBe(0)
+    expect(fakeDirs()).toEqual(before) // NESSUNA cartella nuova
+  })
+})
+
 // ---- OB6 (fase onboarding-b): la build può DURARE ----
 describe('OB6: la build finta può durare (SANDBOT_TEST_CONTAINER_BUILD_DELAY_MS)', () => {
   it('senza ritardo risponde subito; col ritardo ci mette almeno quel tempo', () => {
@@ -165,7 +191,7 @@ describe('OB6: la build finta può durare (SANDBOT_TEST_CONTAINER_BUILD_DELAY_MS
     const t1 = Date.now()
     const slow = spawnSync(process.execPath, [FAKE, 'build'], {
       encoding: 'utf8',
-      env: { PATH: process.env.PATH, SANDBOT_TEST_CONTAINER_MODE: 'ready', SANDBOT_TEST_CONTAINER_BUILD_DELAY_MS: '1200' }
+      env: { PATH: process.env.PATH, SANDBOT_TEST_CONTAINER_MODE: 'ready', SANDBOT_TEST_CONTAINER_LOG: join(TMP, 'log-ob6-delay.jsonl'), SANDBOT_TEST_CONTAINER_BUILD_DELAY_MS: '1200' }
     })
     expect(slow.status).toBe(0)
     expect(Date.now() - t1).toBeGreaterThanOrEqual(1_100)

@@ -2163,6 +2163,19 @@ export function buildApiMethods(
      * CHIUDE (modelBecameReady). Torna il models.main di adesso.
      */
     'local-model:ensure-main': async () => {
+      // OBD4b (fase onboarding-b-dettagli): la protezione non sta solo nella
+      // UI — il daemon LEGGE lo stato (come local-model:status): senza
+      // modello pronto NESSUNA scrittura (prima creava il provider e
+      // assegnava models.main col modello che non c'è) e niente modelBecameReady
+      const lmStatus = await import('./local-model')
+      const { localModelStatus } = await import('../main/agent/local-model')
+      const stNow = localModelStatus({
+        modelsDir: lmStatus.localModelsDir(),
+        entry: lmStatus.localModelCatalogEntry(),
+        downloading: lmStatus.localModelDownloading(),
+        lastError: lmStatus.localModelDownloadError()
+      })
+      if (stNow.state !== 'ready') return store.getSetting<MainModel | null>('models.main', null)
       await ensureLocalModelProvider()
       opts.onboarding?.modelBecameReady()
       // OA5: e i messaggi rimasti in attesa ripartono, una volta sola
