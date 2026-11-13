@@ -1,27 +1,34 @@
-// Fase box-container (BX4): la riga «Computer dei bot» nelle Impostazioni ›
-// Generali: il motore in uso (o quello che l'Automatico ha scelto), lo stato
-// in parole semplici — «Pronto (Apple container)», «Spento — Accendi», «Da
-// installare: serve macOS 26 o successivo», «Manca il kernel di Linux» — e
-// il selettore Automatico / Apple container / Docker. «Accendi» usa
+// Fase box-container (BX4) + OB3 (fase onboarding-b): la riga «Computer dei
+// bot» nelle Impostazioni › Generali: il motore in uso (o quello che
+// l'Automatico ha scelto), lo stato in parole semplici — «Pronto (Apple
+// container)», «Spento — Accendi», «Manca il kernel di Linux» — e il
+// selettore Automatico / Apple container / Docker. «Accendi» usa
 // `container system start --disable-kernel-install` (il kernel NON si
 // scarica mai di nascosto); il kernel si installa SOLO col consenso
-// esplicito. Installare Apple container lo fa l'utente col pacchetto di
-// Apple: qui c'è il link alle release e l'avviso della password del Mac.
+// esplicito. OB3: con `not-installed` il bottone «Installa» avvia la
+// STESSA preparazione della guida (box:setup-start) e mostra la STESSA
+// lista d'avanzamento (BoxSetupProgress, il componente condiviso); il
+// link alle release resta come «Dettagli»; con la preparazione in corso
+// o in errore, la stessa lista con Riprova o Annulla.
 import { useEffect, useState } from 'react'
 import { useLingui } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
-import { api } from '../../store'
+import { api, useStore } from '../../store'
 import type { EngineStatusInfo } from '../../../../shared/types'
+import { BoxSetupProgress } from '../BoxSetupProgress'
+import { boxSetupActive } from '../../lib/box-setup-rows'
 
 export const APPLE_CONTAINER_RELEASES_URL = 'https://github.com/apple/container/releases'
 
 /**
  * Lo stato in PAROLE della riga (pura): prima il motore SCELTO (docker può
  * essere la scelta anche su un Mac che regge Apple), poi gli stati del
- * motore Apple con la loro azione.
+ * motore Apple con la loro azione. OB3: not-installed ora ha l'azione
+ * «Installa» — la preparazione di OB1 (download, verifica, finestra di
+ * Apple, servizio, kernel, immagine).
  */
-export function engineStatusText(st: EngineStatusInfo): { text: MessageDescriptor; action: 'start' | 'kernel' | 'install-link' | null } {
+export function engineStatusText(st: EngineStatusInfo): { text: MessageDescriptor; action: 'start' | 'kernel' | 'install' | 'install-link' | null } {
   // il motore DI DUTY è docker: le sue parole, e non si tocca apple
   if (st.chosen === 'docker') {
     return st.dockerRunning
@@ -39,7 +46,7 @@ export function engineStatusText(st: EngineStatusInfo): { text: MessageDescripto
     case 'kernel-missing':
       return { text: msg`Manca il kernel di Linux`, action: 'kernel' }
     case 'not-installed':
-      return { text: msg`Da installare: serve macOS 26 o successivo`, action: 'install-link' }
+      return { text: msg`Da installare: serve macOS 26 o successivo`, action: 'install' }
     default:
       return { text: msg`Serve macOS 26 o successivo, con chip Apple`, action: null }
   }
@@ -59,6 +66,12 @@ export function EngineSection() {
   const [st, setSt] = useState<EngineStatusInfo | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // OB3: lo stato della preparazione (RPC + evento box-setup, senza ricaricare)
+  const boxSetup = useStore((s) => s.boxSetup)
+  const boxSetupStart = useStore((s) => s.boxSetupStart)
+  const boxSetupCancel = useStore((s) => s.boxSetupCancel)
+  const boxSetupRetry = useStore((s) => s.boxSetupRetry)
+  const boxSetupOpenInstaller = useStore((s) => s.boxSetupOpenInstaller)
 
   const load = (): void => {
     void api.boxEngineStatus().then(setSt).catch(() => undefined)
@@ -96,6 +109,9 @@ export function EngineSection() {
   }
 
   const status = st ? engineStatusText(st) : null
+  // OB3: la lista d'avanzamento si mostra quando la preparazione CORRE (o è
+  // ferma su un errore da riprovare) — a ready basta la riga del motore
+  const showProgress = boxSetup !== null && (boxSetupActive(boxSetup.phase) || boxSetup.phase === 'error')
   return (
     <section className="mt-6" data-testid="engine-section">
       <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -131,15 +147,48 @@ export function EngineSection() {
               {i18n._(msg`Installa il kernel`)}
             </button>
           )}
+          {/* OB3: «Installa» avvia la STESSA preparazione della guida */}
+          {status?.action === 'install' && (
+            <button
+              className="shrink-0 rounded-full bg-foreground px-3 py-1.5 text-xs text-background outline-none transition focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-40"
+              disabled={busy}
+              data-testid="engine-install"
+              onClick={() => { void boxSetupStart() }}
+            >
+              {i18n._(msg`Installa`)}
+            </button>
+          )}
         </div>
         {st?.appleState === 'not-installed' && (
           <div className="border-b border-border/40 px-3 py-2.5 text-xs text-muted-foreground" data-testid="engine-install-hint">
             <p>
               {i18n._(msg`Il computer dei bot senza Docker usa Apple container: lo installa Apple col suo pacchetto firmato (chiede la password del Mac).`)}{' '}
               <a className="underline" href={APPLE_CONTAINER_RELEASES_URL} target="_blank" rel="noreferrer">
-                {i18n._(msg`Le release su GitHub`)}
+                {i18n._(msg`Dettagli`)}
               </a>
             </p>
+          </div>
+        )}
+        {/* OB3: la lista d'avanzamento della preparazione, la STESSA della guida */}
+        {showProgress && boxSetup && (
+          <div className="border-b border-border/40 px-3 py-3">
+            <BoxSetupProgress
+              state={boxSetup}
+              onOpenInstaller={() => { void boxSetupOpenInstaller() }}
+              onCancel={() => { void boxSetupCancel() }}
+            />
+            {boxSetup.phase === 'error' && boxSetup.error && (
+              <div className="mt-2 flex items-center justify-between gap-3">
+                <p className="m-0 min-w-0 text-xs text-destructive" data-testid="engine-setup-error">{boxSetup.error.message}</p>
+                <button
+                  className="shrink-0 rounded-full bg-foreground px-3 py-1.5 text-xs text-background outline-none transition focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                  data-testid="engine-setup-retry"
+                  onClick={() => { void boxSetupRetry() }}
+                >
+                  {i18n._(msg`Riprova`)}
+                </button>
+              </div>
+            )}
           </div>
         )}
         <div className="flex items-center justify-between gap-3 px-3 py-2.5">
