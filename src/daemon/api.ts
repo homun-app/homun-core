@@ -85,6 +85,8 @@ import { isToolResolved, resolveTool, invalidateToolCache } from '../main/tool-p
 import { INVALID_TEST_BOX_PREFIX } from '../main/sandbox/docker-argv'
 // BX1: la risoluzione del percorso di docker vive nel modulo del motore
 import { dockerToolStatusInfo } from '../main/sandbox/docker-engine'
+// OBR1: osascript col PERCORSO ASSOLUTO, mai per nome nel PATH
+import { SYSTEM_OSASCRIPT } from '../main/sandbox/system-tools'
 // R2 (fase app — ritocchi): l'esito degli invii si ripulisce come gli errori Composio
 import { redactComposioSecrets } from '../main/connectors/composio-actions'
 import { existsSync } from 'node:fs'
@@ -2487,8 +2489,9 @@ export function buildApiMethods(
         return { ok: false, error: uiText(id) }
       }
       // 3. l'UNICO comando privilegiato: una COSTANTE, mai composta con dati
+      // (OBR1: osascript col suo percorso di sistema, mai per nome)
       const r = await engineProbeDeps
-        .runCli('osascript', [...u.UNINSTALL_OSASCRIPT_ARGV], 600_000)
+        .runCli(SYSTEM_OSASCRIPT, [...u.UNINSTALL_OSASCRIPT_ARGV], 600_000)
         .catch(() => null)
       if (!r || r.exitCode !== 0) {
         if (r?.stderr) console.error(`[box-uninstall] osascript stderr: ${r.stderr.split('\n')[0]?.slice(0, 200) ?? ''}`)

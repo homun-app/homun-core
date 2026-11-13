@@ -8,7 +8,7 @@
 // download col Range, l'attesa dell'Installer col sondaggio).
 //
 // L'installazione vera è la finestra di Apple (scelta (a) della spec):
-// `open -a Installer` sul pacchetto VERIFICATO (dimensione, sha256, pkgutil,
+// `/usr/bin/open -a Installer` sul pacchetto VERIFICATO (dimensione, sha256, pkgutil,
 // spctl — nell'ordine; UNO solo che fallisce → errore in parole, file
 // cancellato, NESSUN open). Homun non ottiene mai una shell di root: la
 // password la chiede il processo di sistema di Apple. La riga del
@@ -25,6 +25,8 @@ import {
 } from '../main/sandbox/apple-container-release'
 import { BOX_BUILD_ESTIMATED_BYTES, DISK_MARGIN_BYTES, enoughDiskSpace } from '../main/sandbox/disk-space'
 import { appleSystemStartArgv, appleKernelSetRecommendedArgv } from '../main/sandbox/apple-container-argv'
+// OBR1: gli strumenti di sistema si chiamano col PERCORSO ASSOLUTO
+import { SYSTEM_PKGUTIL, SYSTEM_SPCTL, SYSTEM_OPEN } from '../main/sandbox/system-tools'
 import { isPackagedRuntime } from '../shared/packaged'
 import { uiText } from '../main/ui-language'
 import { UI } from '../shared/ui-messages'
@@ -213,7 +215,7 @@ export interface BoxSetupRunConfig {
   url: string
   sha256: string
   sizeBytes: number
-  /** il comando che apre l'Installer (`open` in produzione) */
+  /** il comando che apre l'Installer (`/usr/bin/open` in produzione) */
   openCmd: string
   pkgutilPath: string
   spctlPath: string
@@ -222,20 +224,22 @@ export interface BoxSetupRunConfig {
 /**
  * Gli override arrivano SOLO da variabili SANDBOT_TEST_* e sono IGNORATI
  * nell'app impacchettata: lì valgono le costanti fissate, sempre. Con env
- * assurdi (dimensione non numerica) vale la costante, mai NaN.
+ * assurdi (dimensione non numerica) vale la costante, mai NaN. OBR1: i tre
+ * strumenti di sistema hanno PERCORSI ASSOLUTI fissati (system-tools.ts),
+ * mai un nome da cercare nel PATH.
  */
 export function boxSetupRunConfig(env: NodeJS.ProcessEnv = process.env, packaged = isPackagedRuntime()): BoxSetupRunConfig {
   if (packaged) {
-    return { url: APPLE_CONTAINER_PKG_URL, sha256: APPLE_CONTAINER_PKG_SHA256, sizeBytes: APPLE_CONTAINER_PKG_BYTES, openCmd: 'open', pkgutilPath: 'pkgutil', spctlPath: 'spctl' }
+    return { url: APPLE_CONTAINER_PKG_URL, sha256: APPLE_CONTAINER_PKG_SHA256, sizeBytes: APPLE_CONTAINER_PKG_BYTES, openCmd: SYSTEM_OPEN, pkgutilPath: SYSTEM_PKGUTIL, spctlPath: SYSTEM_SPCTL }
   }
   const size = Number(env.SANDBOT_TEST_PKG_SIZE ?? '')
   return {
     url: env.SANDBOT_TEST_PKG_URL ?? APPLE_CONTAINER_PKG_URL,
     sha256: env.SANDBOT_TEST_PKG_SHA256 ?? APPLE_CONTAINER_PKG_SHA256,
     sizeBytes: Number.isFinite(size) && size > 0 ? size : APPLE_CONTAINER_PKG_BYTES,
-    openCmd: env.SANDBOT_TEST_OPEN ?? 'open',
-    pkgutilPath: env.SANDBOT_TEST_PKGUTIL ?? 'pkgutil',
-    spctlPath: env.SANDBOT_TEST_SPCTL ?? 'spctl'
+    openCmd: env.SANDBOT_TEST_OPEN ?? SYSTEM_OPEN,
+    pkgutilPath: env.SANDBOT_TEST_PKGUTIL ?? SYSTEM_PKGUTIL,
+    spctlPath: env.SANDBOT_TEST_SPCTL ?? SYSTEM_SPCTL
   }
 }
 

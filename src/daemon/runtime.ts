@@ -864,8 +864,8 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
     },
     buildBoxImage: () => import('../main/sandbox').then((m) => m.ensureBoxImage()),
     openInstaller: async (pkgPath) => {
-      // `open -a Installer <pkg>` (o l'override di prova): la finestra di
-      // Apple, quella che chiede la password nel suo processo di sistema
+      // `/usr/bin/open -a Installer <pkg>` (o l'override di prova): la
+      // finestra di Apple, quella che chiede la password nel suo processo di sistema
       const { execFile } = await import('node:child_process')
       return await new Promise<{ ok: boolean; error?: string }>((resolve) => {
         execFile(boxSetupRunConfig().openCmd, ['-a', 'Installer', pkgPath], { timeout: 15_000 }, (err) => {

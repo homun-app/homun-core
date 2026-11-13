@@ -166,14 +166,14 @@ describe('OB1 boxSetupRunConfig: gli override SANDBOT_TEST_* e l\'app impacchett
     SANDBOT_TEST_SPCTL: '/bin/finto-spctl'
   }
 
-  it('senza env: le costanti vere e i comandi di sistema', () => {
+  it('senza env: le costanti vere e i comandi di sistema (OBR1: percorsi ASSOLUTI)', () => {
     const c = boxSetupRunConfig({}, false)
     expect(c.url).toBe('https://github.com/apple/container/releases/download/1.7.1/container-1.7.1-installer-signed.pkg')
     expect(c.sizeBytes).toBe(169_630_704)
     expect(c.sha256).toBe('b6739caf3d47ca53a78f1a7edf32521420a75c7941838c3cefa75f30b80f5a97')
-    expect(c.openCmd).toBe('open')
-    expect(c.pkgutilPath).toBe('pkgutil')
-    expect(c.spctlPath).toBe('spctl')
+    expect(c.openCmd).toBe('/usr/bin/open')
+    expect(c.pkgutilPath).toBe('/usr/sbin/pkgutil')
+    expect(c.spctlPath).toBe('/usr/sbin/spctl')
   })
 
   it('con env (non impacchettata): gli override vincono', () => {
@@ -191,9 +191,9 @@ describe('OB1 boxSetupRunConfig: gli override SANDBOT_TEST_* e l\'app impacchett
     expect(c.url).toBe('https://github.com/apple/container/releases/download/1.7.1/container-1.7.1-installer-signed.pkg')
     expect(c.sha256).toBe('b6739caf3d47ca53a78f1a7edf32521420a75c7941838c3cefa75f30b80f5a97')
     expect(c.sizeBytes).toBe(169_630_704)
-    expect(c.openCmd).toBe('open')
-    expect(c.pkgutilPath).toBe('pkgutil')
-    expect(c.spctlPath).toBe('spctl')
+    expect(c.openCmd).toBe('/usr/bin/open')
+    expect(c.pkgutilPath).toBe('/usr/sbin/pkgutil')
+    expect(c.spctlPath).toBe('/usr/sbin/spctl')
   })
 
   it('una dimensione d\'env assurda si ignora (mai una costante rotta)', () => {
