@@ -7,15 +7,14 @@ sezioni H2 e un punto per riga.
 
 ## [0.3.1001-beta.5] — 2026-11-12
 
-Tre cose: due grosse (una è un po' rivoluzionaria) e una che hai chiesto
-dalla beta.
+Tre cose: due grosse e una che hai chiesto dalla beta.
 
 ### Novità
 
 - **Il computer dei bot funziona anche senza Docker.** Su macOS 26 o
   successivo il box dei bot gira con Apple container: niente Docker Desktop
   da installare. L'Automatico sceglie il motore; Docker resta per chi lo
-  preferisce (Impostazioni › Generali › Computer dei bot).
+  preferisce (Impostazioni › Generali).
 - **«Spazio su disco» nelle Impostazioni.** Quanto occupano il computer dei
   bot, i modelli e lo spazio recuperabile — e come toglierli, con le
   conferme che servono sulle cose irreversibili.
@@ -23,7 +22,8 @@ dalla beta.
   sa subito quale hai collegato.** Ogni account col suo nome, dalla
   finestra App: aggiungi, rinomini, togli.
 - **Una guida che porta da zero a un bot pronto**, col modello collegato
-  e provato lì — e i messaggi senza modello ripartono da soli.
+  e provato lì — e prepara il computer del bot con lo strumento di Apple —
+  e i messaggi senza modello ripartono da soli.
 
 ## [0.3.1001-beta.4] — 2026-11-12
 
