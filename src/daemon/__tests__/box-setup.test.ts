@@ -7,9 +7,11 @@
 // INIETTABILI: nessuno spawn, nessuna rete (il fetch è finto).
 import { describe, expect, it, beforeAll } from 'vitest'
 import { createHash } from 'node:crypto'
-import { mkdtempSync, rmSync, writeFileSync, existsSync, statSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { TEST_TMP_BASE } from '../../test-tmp'
+import { parseBuildProgress } from '../../main/sandbox/build-progress'
+import type { BuildProgress } from '../../main/sandbox/build-progress'
 import type { AppleEngineState } from '../../main/sandbox/engine'
 import type { SandbotEvent } from '../../shared/types'
 import { appleKernelSetRecommendedArgv } from '../../main/sandbox/apple-container-argv'
@@ -55,11 +57,13 @@ describe('OB1 boxSetupNext: le transizioni della macchina a stati', () => {
     expect(s.phase).toBe('installing-kernel')
     s = next(s, { type: 'kernel-ok' })
     expect(s.phase).toBe('building-image')
-    s = next(s, { type: 'image-building', buildPhase: 'LOAD' })
-    expect(s.buildPhase).toBe('LOAD')
+    // OBD3: il progresso del build è STRUTTURATO (BuildProgress)
+    s = next(s, { type: 'image-progress', progress: { activity: 'running', step: 2, steps: 4, bytes: null, total: null } })
+    expect(s.buildPhase).toEqual({ activity: 'running', step: 2, steps: 4, bytes: null, total: null })
     s = next(s, { type: 'image-ok' })
     expect(s.phase).toBe('ready')
     expect(s.error).toBeNull()
+    expect(s.buildPhase).toBeNull()
   })
 
   it('ogni fallimento → error con la fase di colpa e il codice', () => {
@@ -204,6 +208,44 @@ describe('OBD2: lo stato ricorda le fasi SALTATE (skipped)', () => {
     const fin = await ctl.retry()
     expect(fin.phase).toBe('ready')
     expect(fin.skipped).toEqual(['download', 'verify', 'installer', 'service', 'kernel'])
+  })
+})
+
+// ---- OBD3: il build dice a che punto è ----
+
+describe('OBD3: il progresso del build, strutturato e con la CADENZA', () => {
+  const BUILD_FIXTURE_LINES = readFileSync(
+    join(import.meta.dirname, '..', '..', 'main', 'sandbox', '__tests__', 'fixtures', 'container-1.7.1-build-plain.txt'),
+    'utf8'
+  ).split('\n')
+
+  it('col runner finto che emette la fixture, buildPhase arriva a exporting — un evento ogni 500 ms, una scrittura ogni 5 s (orologio finto)', async () => {
+    const h = harness({ engineState: 'ready', hasImage: false, buildLines: BUILD_FIXTURE_LINES, buildLineMs: 100 })
+    let writes = 0
+    const origSet = h.deps.setSetting
+    h.deps.setSetting = (key: string, value: unknown) => { if (key === 'box.setup') writes++; origSet(key, value) }
+    const ctl = createBoxSetup(h.deps)
+    const fin = await ctl.start()
+    expect(fin.phase).toBe('ready')
+    expect(fin.startedAt).toBe(1_000)
+    // phaseStartedAt si scrive a ogni cambio di fase (qui: l'arrivo a ready)
+    expect(fin.phaseStartedAt).toBeGreaterThan(1_000)
+    // l'ultimo progresso EMESSO è l'exporting della fixture
+    const progressEvents = h.events.filter((e): e is Extract<SandbotEvent, { type: 'box-setup' }> => e.type === 'box-setup' && e.setup.phase === 'building-image' && e.setup.buildPhase !== null)
+    expect(progressEvents.length).toBeGreaterThan(0)
+    expect(progressEvents[progressEvents.length - 1]!.setup.buildPhase!.activity).toBe('exporting')
+    // cadenza: le righe sono ~61, una ogni 100 ms → al più una ogni 500 ms
+    expect(progressEvents.length).toBeLessThanOrEqual(Math.ceil((BUILD_FIXTURE_LINES.length * 100) / 500) + 2)
+    expect(progressEvents.length).toBeLessThan(BUILD_FIXTURE_LINES.length)
+    // e la scrittura del setting: al più una ogni 5 s — l'ultima C'È SEMPRE
+    expect(writes).toBeLessThanOrEqual(4)
+    expect(writes).toBeGreaterThanOrEqual(2)
+    expect((h.settings.get('box.setup') as BoxSetupState).phase).toBe('ready')
+  })
+
+  it('il progresso della build conta solo in fase building-image (fuori posto: ignorato)', () => {
+    const s = st({ phase: 'installing-kernel' })
+    expect(next(s, { type: 'image-progress', progress: { activity: 'exporting', step: null, steps: null, bytes: null, total: null } })).toBe(s)
   })
 })
 
@@ -362,6 +404,8 @@ interface Harness {
   buildEngines: (import('../../main/sandbox/engine').BoxEngineId | undefined)[]
   /** OBV3: quante volte la preparazione ha RINFRESCATO la sonda del motore */
   refreshCalls: number
+  /** OBD3: avanza l'orologio finto (deps.now) di ms millisecondi */
+  advanceClock(ms: number): void
 }
 
 /** L'arnese di prova: dipendenze fintissime, nessuno spawn, nessuna rete. */
@@ -381,6 +425,10 @@ const harness = (over: {
   refreshStates?: AppleEngineState[]
   hasImage?: boolean
   buildOk?: boolean
+  /** OBD3: le righe di stderr che la build finta emette (la fixture) */
+  buildLines?: string[]
+  /** OBD3: di quanto avanza l'orologio finto PRIMA di ogni riga della build */
+  buildLineMs?: number
   /** OBV2: l'esito di `system kernel set --recommended` (0 = installa) */
   kernelSetExit?: number
   /** OBV2: la stderr di kernel set (per esempio l'errore VERO di «File exists») */
@@ -397,15 +445,18 @@ const harness = (over: {
   const buildEngines: (import('../../main/sandbox/engine').BoxEngineId | undefined)[] = []
   let refreshCalls = 0
   let installed = false
+  // OBD3: l'orologio FINTO (la cadenza degli eventi si prova senza dormire)
+  let clockNow = 1_000
   const bytes = over.bytes ?? new Uint8Array(8).fill(7)
   const pkgutilPath = '/bin/finto-pkgutil'
   const spctlPath = '/bin/finto-spctl'
   const h: Harness = {
     dir, settings, events, opened, cliCalls, logs, engineStates, buildEngines,
     get refreshCalls() { return refreshCalls },
+    advanceClock: (ms: number) => { clockNow += ms },
     containerAppears: () => { installed = true },
     deps: {
-      now: () => 1_000,
+      now: () => clockNow,
       getSetting: <T,>(key: string, fallback: T): T => (settings.has(key) ? (settings.get(key) as T) : fallback),
       setSetting: (key: string, value: unknown) => { settings.set(key, value) },
       emit: (e: SandbotEvent) => { events.push(e) },
@@ -438,8 +489,20 @@ const harness = (over: {
         return refreshStates.length > 0 ? refreshStates.shift()! : 'ready'
       },
       hasBoxImage: async () => over.hasImage ?? false,
-      // OBV3: la build riceve il motore ESPlicitO — lo si registra
-      buildBoxImage: async (engine) => { buildEngines.push(engine); return over.buildOk ?? true },
+      // OBV3: la build riceve il motore ESPlicitO — lo si registra; OBD3:
+      // riceve anche l'ascoltatore del progresso
+      buildBoxImage: async (engine, onProgress) => {
+        buildEngines.push(engine)
+        if (over.buildLines) {
+          let p: BuildProgress | null = null
+          for (const line of over.buildLines) {
+            if (over.buildLineMs) clockNow += over.buildLineMs
+            p = parseBuildProgress(p, line)
+            onProgress?.(p)
+          }
+        }
+        return over.buildOk ?? true
+      },
       openInstaller: async (pkgPath: string) => { opened.push(pkgPath); return { ok: true } },
       log: (line: string) => { logs.push(line) },
       timings: { pollInstallerMs: 5, downloadTimeoutMs: 60_000, networkRetryDelayMs: 5 },

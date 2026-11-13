@@ -24,7 +24,7 @@ const notInstalled = (): EngineStatusInfo => ({
 })
 
 const setupState = (patch: Partial<BoxSetupState>): BoxSetupState => ({
-  phase: 'idle', bytes: null, total: null, buildPhase: null, error: null, startedAt: null, skipped: [],
+  phase: 'idle', bytes: null, total: null, buildPhase: null, error: null, startedAt: null, skipped: [], phaseStartedAt: null,
   neededBytes: 3_400_000_000, ...patch
 })
 

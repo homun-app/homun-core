@@ -275,17 +275,32 @@ if (argv[0] === 'network') {
   die(1, `container: unknown network subcommand: ${argv[1] ?? ''}`)
 }
 
-// ---- build (la build del box: dura un attimo e riesce) ----
-// OB6: con SANDBOT_TEST_CONTAINER_BUILD_DELAY_MS la build DURA (la sonda
-// prova la guida che prosegue mentre l'immagine si costruisce in background).
-// L'attesa è SINCRONA (Atomics.wait): il flusso del processo resta qui e
-// nessun altro controllo risponde al posto della build
+// ---- build (la build del box: le righe VERE della CLI, distribuite nel tempo) ----
+// OBD3 (fase onboarding-b-dettagli): la build stampa su STDERR le righe
+// della FIXTURE (lo stderr vero di `container build --progress plain` della
+// 1.7.1, copiata alla lettera nel repo) e su STDOUT una riga sola: il nome
+// dell'immagine (-t). Con SANDBOT_TEST_CONTAINER_BUILD_DELAY_MS le righe
+// sono DISTRIBUITE nel tempo (la sonda vede il progresso che avanza);
+// l'attesa è SINCRONA (Atomics.wait): il flusso del processo resta qui e
+// nessun altro controllo risponde al posto della build.
+const BUILD_FIXTURE_PATH = join(import.meta.dirname, '..', 'src', 'main', 'sandbox', '__tests__', 'fixtures', 'container-1.7.1-build-plain.txt')
 if (argv[0] === 'build') {
-  const delay = Number(process.env.SANDBOT_TEST_CONTAINER_BUILD_DELAY_MS ?? '0')
-  if (Number.isFinite(delay) && delay > 0) {
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delay)
+  let lines
+  try {
+    lines = readFileSync(BUILD_FIXTURE_PATH, 'utf8').split('\n')
+    if (lines[lines.length - 1] === '') lines.pop() // il \n finale del file
+  } catch (e) {
+    die(2, `container (fake): fixture del build non leggibile: ${BUILD_FIXTURE_PATH} (${e instanceof Error ? e.message : String(e)})`)
   }
-  out('build (fake): done')
+  const delay = Number(process.env.SANDBOT_TEST_CONTAINER_BUILD_DELAY_MS ?? '0')
+  const perLine = Number.isFinite(delay) && delay > 0 ? Math.max(1, Math.floor(delay / Math.max(1, lines.length))) : 0
+  for (const line of lines) {
+    if (perLine > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, perLine)
+    process.stderr.write(`${line}\n`)
+  }
+  // lo stdout della CLI vera è UNA riga: il nome dell'immagine
+  const t = argv.indexOf('-t')
+  if (t >= 0 && argv[t + 1]) out(argv[t + 1])
   process.exit(0)
 }
 

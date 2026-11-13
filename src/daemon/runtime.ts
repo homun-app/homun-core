@@ -870,10 +870,11 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
         .catch(() => undefined)
     },
     // OBV3: la build riceve il motore ESPlicitO — la preparazione costruisce
-    // SEMPRE con Apple, mai con la cache dell'auto
-    buildBoxImage: (engineId) =>
+    // SEMPRE con Apple, mai con la cache dell'auto. OBD3: il progresso dello
+    // stderr del build torna alla preparazione (e da lì alla UI, con la cadenza)
+    buildBoxImage: (engineId, onProgress) =>
       import('../main/sandbox/engine').then((e) =>
-        import('../main/sandbox').then((m) => m.ensureBoxImage(engineId === 'apple-container' ? e.appleContainerEngine : e.activeBoxEngine()))
+        import('../main/sandbox').then((m) => m.ensureBoxImage(engineId === 'apple-container' ? e.appleContainerEngine : e.activeBoxEngine(), onProgress))
       ),
     openInstaller: async (pkgPath) => {
       // `/usr/bin/open -a Installer <pkg>` (o l'override di prova): la

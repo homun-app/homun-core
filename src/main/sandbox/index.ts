@@ -29,6 +29,8 @@ import { resolveBoxPath } from './box-paths'
 import { enoughDiskSpace, freeDiskBytesOf, BOX_BUILD_ESTIMATED_BYTES } from './disk-space'
 // fase box-container (BX1): il MOTORE del box (docker o apple-container)
 import { activeBoxEngine } from './engine'
+// OBD3 (fase onboarding-b-dettagli): il parse PURO dell'avanzamento del build
+import { parseBuildProgress } from './build-progress'
 import {
   BOX_IMAGE_REPO,
   boxNeedsRecreateForInit,
@@ -65,6 +67,14 @@ export interface ExecOptions {
   signal?: AbortSignal
   /** Variabili d'ambiente aggiuntive (es. SANDBOT_SECRET_* risolte dal runtime). */
   env?: Record<string, string>
+  /**
+   * OBD3 (fase onboarding-b-dettagli): le RIGHE dello stderr mentre il
+   * processo corre (separate da \n o \r; la parziale finale alla chiusura).
+   * IN PIÙ: i buffer restano com'è.
+   */
+  onStderrLine?(line: string): void
+  /** OBD3: come onStderrLine, per lo stdout. */
+  onStdoutLine?(line: string): void
 }
 
 const MAX_OUTPUT_LINES = 10_000 // come l'originale (cap + stdout_trimmed)
@@ -195,6 +205,38 @@ interface SpawnResult {
   signal: string | null
 }
 
+/**
+ * Il divisore di righe dello spawn (OBD3): righe separate da \n O \r (\r\n è
+ * UN fine riga), l'ultima PARZIALE consegnata alla chiusura (flush).
+ */
+function lineSplitterOf(onLine: (line: string) => void): { push(chunk: Buffer): void; flush(): void } {
+  let pending = ''
+  let lastWasCr = false
+  return {
+    push(chunk: Buffer) {
+      pending += chunk.toString()
+      for (;;) {
+        const m = /[\r\n]/.exec(pending)
+        if (!m) break
+        const idx = m.index
+        // il \n di un \r\n già chiuso dal \r: un solo fine riga
+        if (m[0] === '\n' && lastWasCr && idx === 0) {
+          pending = pending.slice(1)
+          lastWasCr = false
+          continue
+        }
+        const line = pending.slice(0, idx)
+        pending = pending.slice(idx + 1)
+        lastWasCr = m[0] === '\r'
+        onLine(line)
+      }
+    },
+    flush() {
+      if (pending !== '') { onLine(pending); pending = '' }
+    }
+  }
+}
+
 /** Esegue un processo SENZA shell: file + argv array, output catturato, timeout/abort. */
 function runProcess(file: string, argv: string[], opts: SpawnOptions): Promise<SpawnResult> {
   return new Promise((resolve) => {
@@ -207,6 +249,8 @@ function runProcess(file: string, argv: string[], opts: SpawnOptions): Promise<S
     })
     let out = ''
     let err = ''
+    const outLines = opts.onStdoutLine ? lineSplitterOf(opts.onStdoutLine) : null
+    const errLines = opts.onStderrLine ? lineSplitterOf(opts.onStderrLine) : null
     const onAbort = () => child.kill('SIGTERM')
     signal.addEventListener('abort', onAbort, { once: true })
     const timer = setTimeout(() => child.kill('SIGKILL'), timeoutMs)
@@ -218,16 +262,23 @@ function runProcess(file: string, argv: string[], opts: SpawnOptions): Promise<S
     }
     child.stdout.on('data', (d: Buffer) => {
       if (out.length < 2_000_000) out += d.toString()
+      outLines?.push(d)
     })
     child.stderr.on('data', (d: Buffer) => {
       if (err.length < 2_000_000) err += d.toString()
+      errLines?.push(d)
     })
     child.on('error', (e) => {
       clearTimeout(timer)
+      errLines?.flush()
+      outLines?.flush()
       resolve({ stdout: out, stderr: `${err}${e.message}`, exitCode: null, signal: null })
     })
     child.on('close', (code, sig) => {
       clearTimeout(timer)
+      // l'ultima riga PARZIALE (senza fine riga) si consegna alla chiusura
+      errLines?.flush()
+      outLines?.flush()
       resolve({ stdout: out, stderr: err, exitCode: code, signal: sig })
     })
   })
@@ -361,8 +412,14 @@ let boxNotWritableError: string | null = null
  * chiedono insieme (o il tick e un exec), una sola build gira e tutti ne
  * aspettano l'esito. Prima di partire manda un notice al bot principale:
  * "preparo il computer dei bot, una volta sola, qualche minuto".
+ * OBD3 (fase onboarding-b-dettagli): chi si aggancia a una build in corso
+ * ne riceve gli AGGIORNAMENTI — un ELENCO di ascoltatori (il parse dello
+ * stderr lo fa una volta sola, qui), non solo il primo chiamante.
  */
 let boxImageBuild: Promise<boolean> | null = null
+
+/** OBD3: gli ascoltatori del progresso della build in corso. */
+const boxImageBuildListeners = new Set<(p: import('./build-progress').BuildProgress) => void>()
 
 /** Il notice al bot principale prima della build (una volta per build). */
 function notifyBoxImageBuild(): void {
@@ -403,8 +460,16 @@ let lastBoxImageBuildError: string | null = null
  * OB1 (fase onboarding-b): la build dell'immagine si USA anche dalla
  * preparazione del computer del bot (l'ultima fase della guida), in
  * background — la stessa promise single-flight del primo uso.
+ * OBD3: `onProgress` riceve il progresso (PURO, da parseBuildProgress) a
+ * ogni riga dello stderr del build — anche chi si aggancia DOPO, finché
+ * la build gira. Nel log del daemon UNA riga SOLO quando cambia il passo
+ * («[sandbox] build: passo 2 di 4»), mai per i byte.
  */
-export function ensureBoxImage(engine?: import('./engine').BoxEngine): Promise<boolean> {
+export function ensureBoxImage(
+  engine?: import('./engine').BoxEngine,
+  onProgress?: (p: import('./build-progress').BuildProgress) => void
+): Promise<boolean> {
+  if (onProgress) boxImageBuildListeners.add(onProgress)
   if (!boxImageBuild) {
     boxImageBuild = (async () => {
       // OBV3: il motore di QUESTA build (esplicito o attivo) — e il log lo dice
@@ -424,7 +489,22 @@ export function ensureBoxImage(engine?: import('./engine').BoxEngine): Promise<b
       notifyBoxImageBuild()
       const dockerfile = boxDockerfilePath()
       console.log(`[sandbox] build dell'immagine del box (${tag}) col motore ${e.id}`)
-      const build = await dockerRunner(e.argv.build(tag, dockerfile, dirname(dockerfile)), { timeoutMs: BOX_IMAGE_BUILD_TIMEOUT_MS }, e)
+      // OBD3: lo stderr si legge RIGA PER RIGA mentre il build corre — il
+      // parse è PURO e gli ascoltatori (UI compresa) ricevono il progresso
+      let progress: import('./build-progress').BuildProgress | null = null
+      let lastStep: number | null = null
+      const build = await dockerRunner(e.argv.build(tag, dockerfile, dirname(dockerfile)), {
+        timeoutMs: BOX_IMAGE_BUILD_TIMEOUT_MS,
+        onStderrLine: (line: string) => {
+          progress = parseBuildProgress(progress, line)
+          // il log dice solo quando CAMBIA IL PASSO, mai per i byte
+          if (progress.step !== null && progress.step !== lastStep) {
+            lastStep = progress.step
+            console.log(`[sandbox] build: passo ${progress.step} di ${progress.steps}`)
+          }
+          for (const l of boxImageBuildListeners) l(progress)
+        }
+      }, e)
       if (build.exitCode !== 0) {
         console.error(`[sandbox] build dell'immagine del box (${tag}, motore ${e.id}) fallita: ${(build.stderr || `exit ${build.exitCode}`).slice(0, 500)}`)
         return false
@@ -440,8 +520,10 @@ export function ensureBoxImage(engine?: import('./engine').BoxEngine): Promise<b
       }
       return true
     })().finally(() => {
-      // la corsa è chiusa: la PROSSIMA richiesta ricontrolla l'immagine
+      // la corsa è chiusa: la PROSSIMA richiesta ricontrolla l'immagine, e
+      // gli ascoltatori di questa build non contano più
       boxImageBuild = null
+      boxImageBuildListeners.clear()
     })
   }
   return boxImageBuild

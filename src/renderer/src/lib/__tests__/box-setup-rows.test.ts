@@ -8,7 +8,7 @@ import { boxSetupRows, BOX_SETUP_ROW_IDS, type BoxSetupRowState } from '../box-s
 import type { BoxSetupState } from '../../../../shared/types'
 
 const state = (patch: Partial<BoxSetupState>): BoxSetupState => ({
-  phase: 'idle', bytes: null, total: null, buildPhase: null, error: null, startedAt: null, skipped: [], neededBytes: 3_400_000_000, ...patch
+  phase: 'idle', bytes: null, total: null, buildPhase: null, error: null, startedAt: null, skipped: [], phaseStartedAt: null, neededBytes: 3_400_000_000, ...patch
 })
 
 /** le righe in forma compatta: [id, stato] */
@@ -48,8 +48,8 @@ describe('OB2 boxSetupRows (pura): la lista delle sei fasi', () => {
   it('le fasi dopo: servizio, kernel, immagine (con la fase del build)', () => {
     expect(rowsOf(state({ phase: 'starting-service' }))[3]).toEqual(['service', 'running'])
     expect(rowsOf(state({ phase: 'installing-kernel' }))[4]).toEqual(['kernel', 'running'])
-    const img = boxSetupRows(state({ phase: 'building-image', buildPhase: 'LOAD' }))[5]!
-    expect(img).toMatchObject({ id: 'image', status: 'running', buildPhase: 'LOAD' })
+    const img = boxSetupRows(state({ phase: 'building-image', buildPhase: { activity: 'running', step: 2, steps: 4, bytes: null, total: null } }))[5]!
+    expect(img).toMatchObject({ id: 'image', status: 'running', buildPhase: { activity: 'running', step: 2, steps: 4 } })
   })
 
   it('ready: tutte fatte', () => {

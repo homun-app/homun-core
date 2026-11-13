@@ -16,6 +16,7 @@ import { useStore } from '../store'
 import type { BoxSetupState, OnboardingStatus } from '../../../shared/types'
 import type { BoxSetupRowId } from '../../../shared/types'
 import { BOX_SETUP_ROW_IDS } from '../../../shared/box-setup-plan'
+import type { BuildProgress } from '../../../main/sandbox/build-progress'
 
 const GUIDE_SRC = readFileSync(fileURLToPath(new URL('../components/GuideView.tsx', import.meta.url)), 'utf8')
 
@@ -34,7 +35,7 @@ const computerStatus = (): OnboardingStatus => ({
 })
 
 const setupState = (patch: Partial<BoxSetupState>): BoxSetupState => ({
-  phase: 'idle', bytes: null, total: null, buildPhase: null, error: null, startedAt: null, skipped: [],
+  phase: 'idle', bytes: null, total: null, buildPhase: null, error: null, startedAt: null, skipped: [], phaseStartedAt: null,
   neededBytes: 3_400_000_000, ...patch
 })
 
@@ -134,10 +135,40 @@ describe('OB2: il pannello del passo Computer', () => {
   })
 
   it('la riga dell\'immagine in corso durante la build', () => {
-    const { tree } = renderComputer(setupState({ phase: 'building-image', buildPhase: 'LOAD' }))
+    const { tree } = renderComputer(setupState({ phase: 'building-image', buildPhase: { activity: 'running', step: 2, steps: 4, bytes: null, total: null } }))
     const img = byTestId(tree, 'box-setup-row-image')[0]!
     expect(img.attrs['data-status']).toBe('running')
-    expect(textOf(img)).toContain('LOAD')
+    expect(textOf(img)).toContain('Passo 2 di 4')
+  })
+
+  // OBD3: il dettaglio della riga dell'immagine, in PAROLE del catalogo —
+  // mai il testo dei comandi, mai URL: solo l'attività e i numeri
+  it('OBD3: download della base → «Scarico la base: …» con la BARRA e i MB/GB calcolati', () => {
+    const { tree } = renderComputer(setupState({
+      phase: 'building-image',
+      buildPhase: { activity: 'downloading', step: null, steps: null, bytes: 640_000_000, total: 1_400_000_000 }
+    }))
+    const img = byTestId(tree, 'box-setup-row-image')[0]!
+    expect(textOf(img)).toContain('Scarico la base: 640 MB di 1,4 GB')
+    // la barra è QUELLA della riga del download (percentuale calcolata)
+    expect(findAll(img, (n) => n.tag === 'span' && /width:\s*46%/.test(n.attrs.style ?? ''))[0]).toBeTruthy()
+  })
+
+  it('OBD3: extracting/running/exporting/preparing → le loro parole; sotto, il tempo della fase', () => {
+    const cases: Array<[BuildProgress | null, string]> = [
+      [{ activity: 'extracting', step: null, steps: null, bytes: null, total: null }, 'Estraggo la base'],
+      [{ activity: 'running', step: 2, steps: 4, bytes: null, total: null }, 'Passo 2 di 4'],
+      [{ activity: 'exporting', step: 3, steps: 4, bytes: null, total: null }, 'Salvo il computer'],
+      [{ activity: 'preparing', step: null, steps: null, bytes: null, total: null }, 'Preparo…'],
+      [null, 'Preparo…']
+    ]
+    for (const [buildPhase, text] of cases) {
+      const { tree } = renderComputer(setupState({ phase: 'building-image', buildPhase, phaseStartedAt: Date.now() - 190_000 }))
+      const img = byTestId(tree, 'box-setup-row-image')[0]!
+      expect(textOf(img), JSON.stringify(buildPhase)).toContain(text)
+      // sotto, in piccolo: il tempo dall'inizio della fase immagine
+      expect(textOf(img)).toContain('da 3 min')
+    }
   })
 
   // OBD2: le righe saltate col LORO testo sotto l'etichetta, e il segno

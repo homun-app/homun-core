@@ -37,6 +37,7 @@ import {
   type BoxSetupRowId
 } from '../shared/box-setup-plan'
 import { uiText } from '../main/ui-language'
+import type { BuildProgress } from '../main/sandbox/build-progress'
 import { UI } from '../shared/ui-messages'
 import type { UiMessageDescriptor } from '../shared/ui-text'
 import type { BoxSetupPhase, BoxSetupState, SandbotEvent } from '../shared/types'
@@ -75,7 +76,8 @@ export const INITIAL_BOX_SETUP: BoxSetupState = {
   error: null,
   startedAt: null,
   neededBytes: boxSetupNeededBytes(),
-  skipped: []
+  skipped: [],
+  phaseStartedAt: null
 }
 
 // ---- le funzioni PURA ----
@@ -97,7 +99,8 @@ export type BoxSetupEvent =
   /** OBD2: `alreadyThere` = il kernel era già presente («nessun kernel set») → riga saltata */
   | { type: 'kernel-ok'; alreadyThere?: boolean }
   | { type: 'kernel-fail'; message: string }
-  | { type: 'image-building'; buildPhase: string | null }
+  /** OBD3: il progresso del build, STRUTTURATO (BuildProgress), col ritmo dello stderr */
+  | { type: 'image-progress'; progress: BuildProgress | null }
   | { type: 'image-ok' }
   | { type: 'image-fail'; message: string }
   | { type: 'cancel' }
@@ -166,8 +169,8 @@ export function boxSetupNext(state: BoxSetupState, event: BoxSetupEvent): BoxSet
       return state.phase === 'installing-kernel'
         ? { ...state, phase: 'error', error: { phase: 'installing-kernel', code: 'kernel', message: event.message } }
         : state
-    case 'image-building':
-      return state.phase === 'building-image' ? { ...state, buildPhase: event.buildPhase } : state
+    case 'image-progress':
+      return state.phase === 'building-image' ? { ...state, buildPhase: event.progress } : state
     case 'image-ok':
       return state.phase === 'building-image' ? { ...state, ...CLEAN, phase: 'ready' } : state
     case 'image-fail':
@@ -390,7 +393,7 @@ export interface BoxSetupDeps {
    * motore ESPlicitO — la preparazione passa SEMPRE 'apple-container', mai
    * la cache di activeBoxEngine()
    */
-  buildBoxImage(engine: BoxEngineId): Promise<boolean>
+  buildBoxImage(engine: BoxEngineId, onProgress?: (p: BuildProgress) => void): Promise<boolean>
   /** apre l'Installer di macOS col pacchetto verificato */
   openInstaller(pkgPath: string): Promise<{ ok: boolean; error?: string }>
   /** una riga di log del daemon (qui finisce la stderr RIPULITA, mai in UI) */
@@ -475,12 +478,29 @@ export function createBoxSetup(deps: BoxSetupDeps): BoxSetupController {
     return { ...INITIAL_BOX_SETUP, ...raw, error: raw.error ?? null, skipped }
   }
 
+  // OBD3: la CADENZA del progresso del build — al più un evento `box-setup`
+  // ogni 500 ms e al più una scrittura del setting ogni 5 s (il build migliaia
+  // di righe); l'ultimo stato si scrive SEMPRE (gli eventi di fase non sono
+  // progressi e passano sempre)
+  let lastEventAt = Number.NEGATIVE_INFINITY
+  let lastPersistAt = Number.NEGATIVE_INFINITY
+
   function apply(event: BoxSetupEvent): BoxSetupState {
     const prev = state
     state = boxSetupNext(state, event)
     if (state !== prev) {
-      deps.setSetting(BOX_SETUP_SETTING, state)
-      deps.emit({ type: 'box-setup', setup: state })
+      // OBD3: il tempo dell'inizio della fase, a OGNI cambio di fase (per «da N min»)
+      if (state.phase !== prev.phase) state = { ...state, phaseStartedAt: deps.now() }
+      const t = deps.now()
+      const progressOnly = event.type === 'image-progress'
+      if (!progressOnly || t - lastEventAt >= 500) {
+        deps.emit({ type: 'box-setup', setup: state })
+        lastEventAt = t
+      }
+      if (!progressOnly || t - lastPersistAt >= 5_000) {
+        deps.setSetting(BOX_SETUP_SETTING, state)
+        lastPersistAt = t
+      }
     }
     return state
   }
@@ -653,8 +673,8 @@ export function createBoxSetup(deps: BoxSetupDeps): BoxSetupController {
   }
 
   async function buildImage(): Promise<void> {
-    // il build può durare MINUTI: l'utente può andare avanti nella guida
-    apply({ type: 'image-building', buildPhase: null })
+    // il build può durare MINUTI: OBD3 dice a che punto è, riga per riga
+    apply({ type: 'image-progress', progress: null })
     // OBV3: dopo l'installazione, il servizio e il kernel la sonda si
     // RINFRESCA — la cache dell'auto è della partenza (container assente →
     // docker) e non si deve MAI usare per il build della preparazione
@@ -664,7 +684,7 @@ export function createBoxSetup(deps: BoxSetupDeps): BoxSetupController {
       apply({ type: 'image-fail', message: uiText(UI.boxSetupAppleNotReady) })
       return
     }
-    const ok = await deps.buildBoxImage('apple-container')
+    const ok = await deps.buildBoxImage('apple-container', (progress) => apply({ type: 'image-progress', progress }))
     if (state.phase !== 'building-image') return // annullato mentre costruiva
     if (!ok) {
       apply({ type: 'image-fail', message: uiText(UI.boxSetupImageFailed) })

@@ -303,8 +303,9 @@ export function appleImageSizeArgv(tag: string): string[] {
   return ['image', 'inspect', '--format', '{{.size}}', tag]
 }
 
+/** OBD3 (fase onboarding-b-dettagli): --progress plain ESPLICITO — il formato #N si legge riga per riga. */
 export function appleBuildArgv(tag: string, dockerfilePath: string, contextDir: string): string[] {
-  return ['build', '-t', tag, '-f', dockerfilePath, contextDir]
+  return ['build', '--progress', 'plain', '-t', tag, '-f', dockerfilePath, contextDir]
 }
 
 export function appleVolumeLsArgv(volume: string): string[] {

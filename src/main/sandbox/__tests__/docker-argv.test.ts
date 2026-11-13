@@ -791,7 +791,8 @@ describe('H1: controllo test -w e decisione use/una ricreazione/errore chiaro', 
 
   it('punto 1: argv PURI di build, esistenza immagine e immagine del container', () => {
     const build = dockerBuildArgv('sandbot-box:abc', '/repo/resources/box/Dockerfile', '/repo/resources/box')
-    expect(build).toEqual(['build', '-t', 'sandbot-box:abc', '-f', '/repo/resources/box/Dockerfile', '/repo/resources/box'])
+    // OBD3: --progress=plain ESPLICITO — il formato #N si legge riga per riga
+    expect(build).toEqual(['build', '--progress=plain', '-t', 'sandbot-box:abc', '-f', '/repo/resources/box/Dockerfile', '/repo/resources/box'])
     // mai --platform: la build è NATIVA per l'host
     expect(build).not.toContain('--platform')
     expect(dockerImageInspectArgv('sandbot-box:abc')).toEqual(['image', 'inspect', 'sandbot-box:abc'])

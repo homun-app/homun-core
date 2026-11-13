@@ -10,8 +10,37 @@
 import { useLingui } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
-import type { BoxSetupState } from '../../../shared/types'
+import type { BoxSetupState, BuildProgress } from '../../../shared/types'
 import { boxSetupRows, boxSetupCancellable, type BoxSetupRow } from '../lib/box-setup-rows'
+
+/**
+ * OBD3: il dettaglio della riga dell'immagine in PAROLE del catalogo — solo
+ * l'attività e i numeri, mai il testo dei comandi. I MB/GB sono CALCOLATI
+ * (decimali, la virgola), mai scritti a mano.
+ */
+function buildDetailText(i18n: { t(d: MessageDescriptor, values?: Record<string, string>): string }, p: BuildProgress | null): string {
+  if (p?.activity === 'downloading' && p.bytes !== null && p.total !== null) {
+    return i18n.t(msg`Scarico la base: ${fmtBytes(p.bytes)} di ${fmtBytes(p.total)}`)
+  }
+  if (p?.activity === 'extracting') return i18n.t(msg`Estraggo la base`)
+  if (p?.activity === 'running' && p.step !== null && p.steps !== null) return i18n.t(msg`Passo ${String(p.step)} di ${String(p.steps)}`)
+  if (p?.activity === 'exporting') return i18n.t(msg`Salvo il computer`)
+  return i18n.t(msg`Preparo…`)
+}
+
+/** I byte in parole (MB/GB decimali, virgola): 640 MB, 1,4 GB. */
+function fmtBytes(n: number): string {
+  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1).replace('.', ',')} GB`
+  if (n >= 1_000_000) return `${Math.round(n / 1_000_000)} MB`
+  return `${Math.round(n / 1_000)} kB`
+}
+
+/** Il tempo dall'inizio della fase, in piccolo: «da 3 min». */
+function elapsedText(i18n: { t(d: MessageDescriptor, values?: Record<string, string>): string }, startedAt: number): string {
+  const min = Math.max(0, Math.floor((Date.now() - startedAt) / 60_000))
+  if (min >= 60) return i18n.t(msg`da ${String(Math.floor(min / 60))} h ${String(min % 60)} min`)
+  return i18n.t(msg`da ${String(min)} min`)
+}
 
 /** Le etichette delle sei righe, in parole. */
 const ROW_LABEL: Record<string, MessageDescriptor> = {
@@ -101,8 +130,26 @@ export function BoxSetupProgress({ state, onOpenInstaller, onCancel }: {
               {running && row.id === 'download' && row.bytes != null && row.total != null && (
                 <span className="text-[11.5px] text-muted-foreground" data-testid="box-setup-download-bytes">{pct}%</span>
               )}
-              {running && row.id === 'image' && row.buildPhase && (
-                <span className="text-[11.5px] text-muted-foreground">{row.buildPhase}</span>
+              {running && row.id === 'image' && (
+                <>
+                  {/* OBD3: il dettaglio del build in parole — attività e numeri, mai comandi */}
+                  <span className="text-[11.5px] text-muted-foreground" data-testid="box-setup-build-detail">
+                    {buildDetailText(i18n, row.buildPhase)}
+                  </span>
+                  {/* il download della base ha la BARRA (la stessa della riga del download) */}
+                  {row.buildPhase?.activity === 'downloading' && row.buildPhase.bytes != null && row.buildPhase.total != null && row.buildPhase.total > 0 && (
+                    <span className="block h-1.5 w-full overflow-hidden rounded-full bg-foreground/10" aria-hidden>
+                      <span
+                        className="block h-full rounded-full bg-foreground transition-all"
+                        style={{ width: `${Math.min(100, Math.round((row.buildPhase.bytes / row.buildPhase.total) * 100))}%` }}
+                      />
+                    </span>
+                  )}
+                  {/* sotto, in piccolo: il tempo dall'inizio della fase immagine */}
+                  {row.phaseStartedAt !== null && (
+                    <span className="text-[11.5px] text-muted-foreground">{elapsedText(i18n, row.phaseStartedAt)}</span>
+                  )}
+                </>
               )}
             </span>
           </div>

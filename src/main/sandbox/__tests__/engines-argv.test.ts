@@ -9,6 +9,13 @@ import * as d from '../docker-argv'
 
 const a = dockerEngine.argv
 
+describe('OBD3: la build chiede --progress plain ESPLICITO a entrambi i motori', () => {
+  it('Apple: --progress plain in due token (la forma della CLI di Apple); Docker: --progress=plain', () => {
+    expect(appleContainerEngine.argv.build('t', '/df', '/ctx')).toEqual(['build', '--progress', 'plain', '-t', 't', '-f', '/df', '/ctx'])
+    expect(a.build('t', '/df', '/ctx')).toEqual(['build', '--progress=plain', '-t', 't', '-f', '/df', '/ctx'])
+  })
+})
+
 describe('BX5: gli argv del motore Docker sono byte-identici a oggi', () => {
   it('contenitore del box: ps, start, stop, create, rm, inspect, volumi', () => {
     expect(a.ps('sandbot-box')).toEqual(d.dockerPsArgv('sandbot-box'))
@@ -28,7 +35,9 @@ describe('BX5: gli argv del motore Docker sono byte-identici a oggi', () => {
     expect(a.ensureHome('c', 'agent_x')).toEqual(d.dockerEnsureHomeArgv('c', 'agent_x'))
     expect(a.imageInspect('t')).toEqual(d.dockerImageInspectArgv('t'))
     expect(a.imageSize('t')).toEqual(d.dockerImageSizeArgv('t'))
+    // OBD3: la build chiede --progress plain ESPLICITO — Docker col =
     expect(a.build('t', '/df', '/ctx')).toEqual(d.dockerBuildArgv('t', '/df', '/ctx'))
+    expect(a.build('t', '/df', '/ctx')).toEqual(['build', '--progress=plain', '-t', 't', '-f', '/df', '/ctx'])
     expect(a.volumeLs('v')).toEqual(d.dockerVolumeLsArgv('v'))
   })
 

@@ -155,7 +155,9 @@ describe('BX1: il motore attivo (activeBoxEngine) e i due moduli motore', () => 
     expect(a.boxCreate('c', 'v', 'bridge', d.DEFAULT_BOX_LIMITS, 'img')).toEqual(d.dockerBoxCreateArgv('c', 'v', 'bridge', d.DEFAULT_BOX_LIMITS, 'img'))
     expect(a.terminal('own')).toEqual(d.dockerTerminalArgv('own'))
     expect(a.browserMcp('ag', 8085)).toEqual(d.dockerBrowserMcpArgv('ag', 8085))
+    // OBD3: la build chiede --progress plain ESPLICITO — Docker col =
     expect(a.build('t', '/df', '/ctx')).toEqual(d.dockerBuildArgv('t', '/df', '/ctx'))
+    expect(a.build('t', '/df', '/ctx')).toEqual(['build', '--progress=plain', '-t', 't', '-f', '/df', '/ctx'])
   })
 
   it('i due motori hanno id diversi e argv per TUTTE le operazioni dell\'interfaccia', () => {

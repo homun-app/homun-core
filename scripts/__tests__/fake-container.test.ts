@@ -172,6 +172,43 @@ describe('OB6: la build finta può durare (SANDBOT_TEST_CONTAINER_BUILD_DELAY_MS
   })
 })
 
+// ---- OBD3 (fase onboarding-b-dettagli): la build finta parla come la VERA ----
+// Le righe della finta sono QUELLE DELLA FIXTURE (lo stderr vero della CLI
+// 1.7.1, copiato alla lettera nel repo): il test le blocca byte per byte.
+// Se qualcosa dipende dal formato, si corregge il codice, non la finta.
+const BUILD_FIXTURE = readFileSync(join(ROOT, 'src', 'main', 'sandbox', '__tests__', 'fixtures', 'container-1.7.1-build-plain.txt'), 'utf8')
+
+describe('OBD3: `build` stampa su stderr le righe della fixture VERA, distribuite nel ritardo', () => {
+  it('con --progress plain: stderr = la fixture BYTE PER BYTE, stdout il nome dell\'immagine', () => {
+    const logFile = join(TMP, 'log-obd3-build.jsonl')
+    const r = spawnSync(process.execPath, [FAKE, 'build', '--progress', 'plain', '-t', 'sandbot-box:obd3', '-f', '/df/Dockerfile', '/ctx'], {
+      encoding: 'utf8',
+      env: { PATH: process.env.PATH, SANDBOT_TEST_CONTAINER_MODE: 'ready', SANDBOT_TEST_CONTAINER_LOG: logFile }
+    })
+    expect(r.status).toBe(0)
+    expect(r.stderr).toBe(BUILD_FIXTURE)
+    // lo stdout della CLI vera è una riga sola: il nome dell'immagine
+    expect(r.stdout.trim()).toBe('sandbot-box:obd3')
+  })
+
+  it('senza ritardo le righe escono SUBITO tutte (la build dura solo col delay)', () => {
+    const r = run('ready', ['build', '-t', 'sandbot-box:x', '.'])
+    expect(r.status).toBe(0)
+    expect(r.stderr).toBe(BUILD_FIXTURE)
+  })
+
+  it('col ritardo (SANDBOT_TEST_CONTAINER_BUILD_DELAY_MS) la build DURA e le righe restano le stesse', () => {
+    const t0 = Date.now()
+    const r = spawnSync(process.execPath, [FAKE, 'build', '-t', 'sandbot-box:x', '.'], {
+      encoding: 'utf8',
+      env: { PATH: process.env.PATH, SANDBOT_TEST_CONTAINER_MODE: 'ready', SANDBOT_TEST_CONTAINER_LOG: join(TMP, 'log-obd3-slow.jsonl'), SANDBOT_TEST_CONTAINER_BUILD_DELAY_MS: '800' }
+    })
+    expect(r.status).toBe(0)
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(700)
+    expect(r.stderr).toBe(BUILD_FIXTURE)
+  })
+})
+
 // ---- OB6: la NOSTRA immagine esiste SOLO dopo la build ----
 describe('OB6: image inspect risponde OK solo DOPO una build', () => {
   it('senza build l\'inspect dice che l\'immagine non c\'è; dopo la build c\'è', () => {

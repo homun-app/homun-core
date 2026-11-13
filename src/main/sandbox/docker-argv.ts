@@ -575,9 +575,11 @@ export function dockerContainerImageArgv(container: string): string[] {
  * La build dell'immagine del box (punto 1): argv PURO, niente --platform —
  * la build è NATIVA per l'host (arm64 sul Mac arm64). Il contesto è la
  * cartella del Dockerfile (nessuna COPY serve: tutto arriva dalla base).
+ * OBD3 (fase onboarding-b-dettagli): --progress=plain ESPLICITO (Docker
+ * con BuildKit stampa lo stesso formato #N della CLI di Apple).
  */
 export function dockerBuildArgv(tag: string, dockerfilePath: string, contextDir: string): string[] {
-  return ['build', '-t', tag, '-f', dockerfilePath, contextDir]
+  return ['build', '--progress=plain', '-t', tag, '-f', dockerfilePath, contextDir]
 }
 
 /**

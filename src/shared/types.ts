@@ -5,6 +5,9 @@ import type { UpdateChannel } from './update-channel'
 // OBD2 (fase onboarding-b-dettagli): le righe del piano della preparazione
 import type { BoxSetupRowId } from './box-setup-plan'
 export type { BoxSetupRowId }
+// OBD3 (fase onboarding-b-dettagli): il progresso strutturato del build
+import type { BuildProgress } from '../main/sandbox/build-progress'
+export type { BuildProgress }
 export type { SkillCatalogEntry } from './skill-catalog'
 
 export type AgentStatus = 'offline' | 'idle' | 'thinking' | 'running' | 'paused-for-approval'
@@ -890,8 +893,11 @@ export interface BoxSetupState {
   /** i byte scaricati e il totale (fase downloading) */
   bytes: number | null
   total: number | null
-  /** la fase che dice il build dell'immagine, se c'è */
-  buildPhase: string | null
+  /**
+   * OBD3 (fase onboarding-b-dettagli): il progresso del build dell'immagine,
+   * STRUTTURATO (parseBuildProgress): attività e numeri, mai testo di comandi.
+   */
+  buildPhase: BuildProgress | null
   /** l'errore in parole (fase error) */
   error: BoxSetupError | null
   startedAt: number | null
@@ -903,6 +909,8 @@ export interface BoxSetupState {
    * il campo si legge come [].
    */
   skipped: BoxSetupRowId[]
+  /** OBD3: quando è cominciata la fase CORRENTE (per «da N min», scritto a ogni cambio di fase) */
+  phaseStartedAt: number | null
 }
 
 /** La risposta di box:disk-space (BX3): righe, byte liberi e margine. */

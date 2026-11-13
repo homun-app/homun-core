@@ -23,6 +23,7 @@ vi.mock('../../store/db', () => ({
 const { ensureBoxImage, setDockerRunnerForTests } = await import('../index')
 const { setActiveEngineForTests, appleContainerEngine, dockerEngine } = await import('../engine')
 import type { BoxEngine } from '../engine'
+import type { BuildProgress } from '../build-progress'
 
 afterEach(() => {
   setDockerRunnerForTests(null)
@@ -62,5 +63,52 @@ describe('OBV3: ensureBoxImage col motore ESPlicitO (mai la cache dell\'auto)', 
     const build = runs.find((r) => r.argv[0] === 'build')
     expect(build!.engine?.id).toBe('docker')
     expect(build!.engine).toBe(dockerEngine)
+  })
+})
+
+// ---- OBD3 (fase onboarding-b-dettagli): il build condivide gli aggiornamenti ----
+
+describe('OBD3: chi si aggancia a un build già in corso riceve gli aggiornamenti (elenco di ascoltatori)', () => {
+  it('un SECONDO chiamante della STESSA build riceve gli stessi aggiornamenti, una sola build gira', async () => {
+    setActiveEngineForTests('apple-container')
+    const builds: string[][] = []
+    const releases: Array<() => void> = []
+    let firstGate: Promise<void> | null = null
+    let secondGate: Promise<void> | null = null
+    setDockerRunnerForTests((async (argv: string[], opts: { onStderrLine?: (l: string) => void } | undefined, engine?: BoxEngine) => {
+      if (argv[0] === 'image' && argv[1] === 'inspect') return { stdout: '', stderr: 'not found', exitCode: 1, signal: null }
+      if (argv[0] === 'build') {
+        builds.push(argv)
+        opts?.onStderrLine?.('#5 [linux/arm64 1/4] RUN echo uno')
+        // il primo aggiornamento è partito: qui il test aggancia il secondo
+        firstGate = new Promise<void>((r) => releases.push(r))
+        await firstGate
+        opts?.onStderrLine?.(`#4 sha256:${'a'.repeat(64)} 1.05MB / 4.09MB 0.2s`)
+        secondGate = new Promise<void>((r) => releases.push(r))
+        await secondGate
+        return { stdout: '', stderr: '', exitCode: 0, signal: null }
+      }
+      return { stdout: '', stderr: '', exitCode: 0, signal: null }
+    }) as unknown as Parameters<typeof setDockerRunnerForTests>[0])
+    const first: BuildProgress[] = []
+    const p1 = ensureBoxImage(appleContainerEngine, (p) => first.push(p))
+    // la build parte e manda il primo aggiornamento
+    for (let i = 0; i < 100 && first.length === 0; i++) await new Promise((r) => setTimeout(r, 20))
+    expect(first.map((p) => p.activity)).toEqual(['running'])
+    // il secondo chiamante si aggancia alla build GIÀ in corsa
+    const second: BuildProgress[] = []
+    const p2 = ensureBoxImage(appleContainerEngine, (p) => second.push(p))
+    // si rilasciano ENTRAMBI i gate (il secondo aggiornamento, poi la fine):
+    // le promise si aspettano DOPO, quando la build può finire
+    releases.shift()?.()
+    await new Promise((r) => setTimeout(r, 100))
+    releases.shift()?.()
+    expect(await p1).toBe(true)
+    expect(await p2).toBe(true)
+    // UNA build sola, DUE ascoltatori: entrambi hanno visto il download
+    expect(builds.length).toBe(1)
+    expect(first.map((p) => p.activity)).toEqual(['running', 'downloading'])
+    expect(second.map((p) => p.activity)).toEqual(['downloading'])
+    expect(second[0]).toEqual(first[1])
   })
 })

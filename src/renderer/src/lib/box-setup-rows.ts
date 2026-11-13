@@ -5,7 +5,7 @@
 // loro stato, così la UI non decide niente da sola.
 // OBD2 (fase onboarding-b-dettagli): le righe SALTATE (skipped) non sono
 // fatte: non servivano. Il segno è neutro, con il testo che dice perché.
-import type { BoxSetupPhase, BoxSetupState } from '../../../shared/types'
+import type { BoxSetupPhase, BoxSetupState, BuildProgress } from '../../../shared/types'
 import { BOX_SETUP_ROW_IDS, type BoxSetupRowId } from '../../../shared/box-setup-plan'
 
 /** Le sei fasi in parole, nell'ordine della guida (OBD2: vivono in shared, col piano). */
@@ -21,8 +21,10 @@ export interface BoxSetupRow {
   /** i byte scaricati e il totale (solo la riga del download in corso) */
   bytes: number | null
   total: number | null
-  /** la fase che dice il build, se c'è (solo la riga dell'immagine) */
-  buildPhase: string | null
+  /** il progresso strutturato del build, se c'è (solo la riga dell'immagine) */
+  buildPhase: BuildProgress | null
+  /** quando è cominciata la fase corrente (per «da N min», solo la riga in corso) */
+  phaseStartedAt: number | null
 }
 
 /** Le fasi della macchina a stati che si VEDONO nelle righe, nell'ordine. */
@@ -70,7 +72,8 @@ export function boxSetupRows(s: BoxSetupState): BoxSetupRow[] {
       status,
       bytes: isDownload ? s.bytes : null,
       total: isDownload ? s.total : null,
-      buildPhase: isImage ? s.buildPhase : null
+      buildPhase: isImage ? s.buildPhase : null,
+      phaseStartedAt: status === 'running' ? s.phaseStartedAt : null
     }
   })
 }
