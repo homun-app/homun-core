@@ -43,14 +43,19 @@ export function GuideComputerStep() {
 
       {!running && phase !== 'ready' && (
         <div className="flex flex-col gap-3.5 rounded-[20px] bg-card/55 p-[18px]">
-          <button
-            type="button"
-            data-testid="guide-computer-prepare"
-            className="min-h-[44px] self-start rounded-full bg-foreground px-[26px] py-[13px] text-base font-semibold text-background transition hover:opacity-90"
-            onClick={() => { void boxSetupStart() }}
-          >
-            {i18n.t(msg`Prepara il computer`)}
-          </button>
+          {/* OBR4: con l'errore il bottone NON c'è — «Prepara il computer» e
+              «Riprova» farebbero la stessa cosa: resta solo «Riprova», nel
+              riquadro dell'errore qui sotto; il consenso resta, in testo */}
+          {phase !== 'error' && (
+            <button
+              type="button"
+              data-testid="guide-computer-prepare"
+              className="min-h-[44px] self-start rounded-full bg-foreground px-[26px] py-[13px] text-base font-semibold text-background transition hover:opacity-90"
+              onClick={() => { void boxSetupStart() }}
+            >
+              {i18n.t(msg`Prepara il computer`)}
+            </button>
+          )}
           {/* il consenso: cosa farà, IN PAROLE (vale anche per il kernel: lo dice qui) */}
           <ul className="m-0 flex list-none flex-col gap-1.5 pl-0 text-[13.5px] leading-[1.5] text-muted-foreground" data-testid="guide-computer-consent">
             <li>{i18n.t(msg`scarico da GitHub lo strumento container di Apple (170 MB, firmato da Apple)`)}</li>

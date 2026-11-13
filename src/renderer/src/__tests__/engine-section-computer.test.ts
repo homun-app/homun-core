@@ -13,7 +13,7 @@ import { renderHtml, setStoreStateForRender, parseHtml, findAll } from './render
 import { useStore } from '../store'
 import type { BoxSetupState, EngineStatusInfo } from '../../../shared/types'
 
-const { EngineSection, engineStatusText } = await import('../components/settings/EngineSection')
+const { EngineSection, engineStatusText, engineRowAction } = await import('../components/settings/EngineSection')
 const { stubApiMethod } = await import('./render-helper-install')
 
 const notInstalled = (): EngineStatusInfo => ({
@@ -92,5 +92,41 @@ describe('OB3: la scheda del motore con la preparazione', () => {
   it('pronta o mai partita: nessuna lista (la riga del motore basta)', () => {
     expect(byTestId(renderEngine(null).tree, 'box-setup-progress').length).toBe(0)
     expect(byTestId(renderEngine(setupState({ phase: 'ready' })).tree, 'box-setup-progress').length).toBe(0)
+  })
+})
+
+describe('OBR4: nella scheda del motore, con la preparazione in errore, resta solo «Riprova»', () => {
+  beforeEach(() => {
+    stubApiMethod('boxEngineStatus', () => notInstalled())
+    stubApiMethod('boxSetupState', () => null)
+  })
+
+  it('engineRowAction (pura): con error l\'azione «Installa» sparisce — fa la stessa cosa di «Riprova»', () => {
+    expect(engineRowAction('install', 'error')).toBeNull()
+    // fuori dall'errore «Installa» resta
+    expect(engineRowAction('install', null)).toBe('install')
+    expect(engineRowAction('install', 'idle')).toBe('install')
+    expect(engineRowAction('install', 'cancelled')).toBe('install')
+    // «Accendi» e «Installa il kernel» (BX4) non sono la preparazione: restano
+    expect(engineRowAction('start', 'error')).toBe('start')
+    expect(engineRowAction('kernel', 'error')).toBe('kernel')
+    expect(engineRowAction(null, 'error')).toBeNull()
+  })
+
+  it('il bottone «Installa» passa da quell\'azione (guardia sul sorgente: nel render statico la riga del motore non si carica)', () => {
+    const SRC = readFileSync(fileURLToPath(new URL('../components/settings/EngineSection.tsx', import.meta.url)), 'utf8')
+    expect(SRC).toContain('engineRowAction(status?.action ?? null, boxSetup?.phase ?? null)')
+    expect(SRC).toContain("{rowAction === 'install' && (")
+    expect(SRC).not.toContain("{status?.action === 'install' && (")
+  })
+
+  it("nel render dell'errore: il messaggio, UN «Riprova» e nessun «Installa»", () => {
+    const { html, tree } = renderEngine(setupState({
+      phase: 'error',
+      error: { phase: 'verifying', code: 'sha256', message: 'Il pacchetto scaricato non è quello atteso: l’ho cancellato.' }
+    }))
+    expect(html).toContain('Il pacchetto scaricato non è quello atteso')
+    expect(byTestId(tree, 'engine-setup-retry').length).toBe(1)
+    expect(byTestId(tree, 'engine-install').length).toBe(0)
   })
 })

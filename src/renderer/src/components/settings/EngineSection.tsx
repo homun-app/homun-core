@@ -61,6 +61,21 @@ export function engineChoiceLabel(id: 'auto' | 'apple-container' | 'docker'): Me
   }
 }
 
+/**
+ * OBR4: l'azione che la riga del motore MOSTRA (pura). Con la preparazione
+ * in ERRORE il bottone «Installa» sparisce: fa la stessa cosa di «Riprova»
+ * (riparte la stessa preparazione) e il riquadro dell'errore deve restare
+ * l'UNICO bottone. «Accendi» e «Installa il kernel» (BX4) non sono la
+ * preparazione: restano.
+ */
+export function engineRowAction(
+  action: 'start' | 'kernel' | 'install' | 'install-link' | null,
+  setupPhase: import('../../../../shared/types').BoxSetupPhase | null
+): 'start' | 'kernel' | 'install' | 'install-link' | null {
+  if (action === 'install' && setupPhase === 'error') return null
+  return action
+}
+
 export function EngineSection() {
   const { i18n } = useLingui()
   const [st, setSt] = useState<EngineStatusInfo | null>(null)
@@ -123,6 +138,9 @@ export function EngineSection() {
   }
 
   const status = st ? engineStatusText(st) : null
+  // OBR4: l'azione che la riga mostra passa da qui — con la preparazione in
+  // errore «Installa» sparisce (resta solo «Riprova», nel riquadro dell'errore)
+  const rowAction = engineRowAction(status?.action ?? null, boxSetup?.phase ?? null)
   // OB3: la lista d'avanzamento si mostra quando la preparazione CORRE (o è
   // ferma su un errore da riprovare) — a ready basta la riga del motore
   const showProgress = boxSetup !== null && (boxSetupActive(boxSetup.phase) || boxSetup.phase === 'error')
@@ -143,7 +161,7 @@ export function EngineSection() {
               </p>
             )}
           </div>
-          {status?.action === 'start' && (
+          {rowAction === 'start' && (
             <button
               className="shrink-0 rounded-full bg-foreground px-3 py-1.5 text-xs text-background outline-none transition focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-40"
               disabled={busy}
@@ -152,7 +170,7 @@ export function EngineSection() {
               {i18n._(msg`Accendi`)}
             </button>
           )}
-          {status?.action === 'kernel' && (
+          {rowAction === 'kernel' && (
             <button
               className="shrink-0 rounded-full bg-foreground px-3 py-1.5 text-xs text-background outline-none transition focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-40"
               disabled={busy}
@@ -161,8 +179,9 @@ export function EngineSection() {
               {i18n._(msg`Installa il kernel`)}
             </button>
           )}
-          {/* OB3: «Installa» avvia la STESSA preparazione della guida */}
-          {status?.action === 'install' && (
+          {/* OB3: «Installa» avvia la STESSA preparazione della guida.
+              OBR4: con la preparazione in errore non c'è (rowAction) */}
+          {rowAction === 'install' && (
             <button
               className="shrink-0 rounded-full bg-foreground px-3 py-1.5 text-xs text-background outline-none transition focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-40"
               disabled={busy}

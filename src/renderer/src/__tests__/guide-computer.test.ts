@@ -111,6 +111,48 @@ describe('OB2: il pannello del passo Computer', () => {
   })
 })
 
+describe('OBR4: nell\'errore UN solo bottone — «Riprova»', () => {
+  const errorState = (): BoxSetupState => setupState({
+    phase: 'error',
+    error: { phase: 'verifying', code: 'sha256', message: 'Il pacchetto scaricato non è quello atteso: l’ho cancellato.' }
+  })
+
+  it('con error «Prepara il computer» NON c\'è più: resta solo «Riprova», nel riquadro dell\'errore', () => {
+    const { tree } = renderComputer(errorState())
+    // «Prepara il computer» e «Riprova» facevano la stessa cosa: ne resta uno
+    expect(byTestId(tree, 'guide-computer-prepare').length).toBe(0)
+    expect(byTestId(tree, 'guide-computer-retry').length).toBe(1)
+    const box = byTestId(tree, 'guide-computer-error')[0]!
+    expect(findAll(box, (n) => n.attrs['data-testid'] === 'guide-computer-retry').length).toBe(1)
+    // nel pannello del passo c'è UN solo bottone (la navigazione della guida è fuori)
+    const step = byTestId(tree, 'guide-step-computer')[0]!
+    expect(findAll(step, (n) => n.tag === 'button').length).toBe(1)
+  })
+
+  it('il consenso resta visibile SOPRA, in testo: le quattro righe di cosa farà, senza bottone', () => {
+    const { html, tree } = renderComputer(errorState())
+    const consent = byTestId(tree, 'guide-computer-consent')
+    expect(consent.length).toBe(1)
+    expect(findAll(consent[0]!, (n) => n.tag === 'li').length).toBe(4)
+    const text = textOf(consent[0]!)
+    expect(text).toContain('170 MB')
+    expect(text).toContain('password del Mac')
+    expect(text).toContain('kernel Linux consigliato')
+    expect(text).toContain('4 GB')
+    // nessun bottone dentro (né attorno, nello stesso riquadro) al consenso
+    expect(findAll(consent[0]!.parent!, (n) => n.tag === 'button').length).toBe(0)
+    // sopra: il consenso viene PRIMA del riquadro dell'errore
+    expect(html.indexOf('data-testid="guide-computer-consent"')).toBeGreaterThan(-1)
+    expect(html.indexOf('data-testid="guide-computer-consent"')).toBeLessThan(html.indexOf('data-testid="guide-computer-error"'))
+  })
+
+  it('fuori dall\'errore il bottone del consenso c\'è come prima (mai partita)', () => {
+    const { tree } = renderComputer(setupState({}))
+    expect(byTestId(tree, 'guide-computer-prepare').length).toBe(1)
+    expect(byTestId(tree, 'guide-computer-consent').length).toBe(1)
+  })
+})
+
 describe('OB2: la navigazione del passo Computer', () => {
   it('«Continua» SPENTO sull\'attesa dell\'Installer; «Salta per ora» c\'è', () => {
     const { tree } = renderComputer(setupState({ phase: 'awaiting-installer' }))
