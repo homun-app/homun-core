@@ -825,8 +825,12 @@ log('FASE OB: il passo Computer della guida, con clic veri…')
   // l'open FINTO «installa»: il daemon scopre la CLI e finisce da solo
   await clickTestid('box-setup-open-installer')
   const openCount = () => { try { return readFileSync(f.openLog, 'utf8').split('\n').filter(Boolean).length } catch { return 0 } }
+  // il clic attraversa RPC + spawn: la riga del log arriva DOPO — si aspetta
+  // l'EFFETTO (2 open: il daemon dopo la verifica, il clic dell'utente)
+  let opens5 = 0
+  for (let i = 0; i < 50 && opens5 < 2; i++) { opens5 = openCount(); if (opens5 < 2) await sleep(200) }
   check('OB-5 l\'Installer finto è stato aperto: dal daemon dopo la verifica, e di nuovo dal clic dell\'utente',
-    openCount() === 2, `open: ${openCount()}`)
+    opens5 === 2, `open: ${opens5}`)
   check('OB-6 installazione, servizio, kernel e immagine: ready',
     await waitDom(`document.querySelector('[data-testid="guide-scene"] [data-mood]')?.getAttribute('data-mood') === 'happy'`, 60_000),
     `phase: ${await boxPhaseOf()}`)
