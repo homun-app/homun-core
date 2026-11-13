@@ -72,6 +72,10 @@ const ALLOWED_LITERALS: ReadonlyArray<{ file: string; text: string }> = [
   { file: 'src/main/templates/index.ts', text: ': non è un oggetto' },
   { file: 'src/main/templates/index.ts', text: ': askUserFor deve essere un array di domande' },
   { file: 'src/main/daemon-client.ts', text: 'il daemon non ha scritto daemon.json entro il timeout' },
+  // OB4 (fase onboarding-b): l'errore IN PAROLE del primo uso del box
+  // mentre la preparazione corre — la frase della spec, citata dal test
+  // box-setup-gate; come BOX_ISOLATION_FAILED_MESSAGE
+  { file: 'src/main/sandbox/index.ts', text: 'Il computer del bot si sta ancora preparando.' },
   // OB1 (fase onboarding-b): le righe di LOG della preparazione del
   // computer del bot — vanno a deps.log (console.log nel wiring), come le
   // righe italiane di sandbox/local-model; MAI nella UI (lì c'è il catalogo)

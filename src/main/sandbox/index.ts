@@ -469,9 +469,24 @@ async function isolationFailClosed(cause: unknown): Promise<never> {
  * toccato). Build fallita col container che esiste ancora → si PROSEGUE col
  * vecchio (i tool senza browser continuano a funzionare); senza container →
  * errore chiaro.
+ * OB4 (fase onboarding-b): il primo uso del box PRIMA che la preparazione
+ * del computer del bot finisca dà l'errore in parole — MAI un ripiego
+ * silenzioso sul Mac.
  */
+export const BOX_PREPARING_MESSAGE = 'Il computer del bot si sta ancora preparando.'
+
+/** OB4: la fase della preparazione (setting box.setup) CORRE adesso? (pura) */
+export function boxSetupRunningOf(phase: string | null | undefined): boolean {
+  return phase !== null && phase !== undefined &&
+    phase !== 'idle' && phase !== 'ready' && phase !== 'error' && phase !== 'cancelled'
+}
+
 export async function ensureBoxContainer(): Promise<void> {
   if (sandboxMode() !== 'box') return
+  // OB4: la preparazione del computer del bot è in corsa → il box NON si
+  // usa: errore in parole, mai il Mac al posto del box
+  const setup = getSetting<{ phase?: string } | null>('box.setup', null)
+  if (boxSetupRunningOf(setup?.phase)) throw new Error(BOX_PREPARING_MESSAGE)
   // M10 (fase 0.3.1001): prefisso di prova PRESENTE ma non valido → la
   // sandbox NON parte, MAI coi nomi dell'utente (prima veniva ignorato in
   // silenzio e il box girava come sandbot-box)

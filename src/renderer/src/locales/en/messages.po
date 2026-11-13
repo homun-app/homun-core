@@ -1011,6 +1011,10 @@ msgstr "Open Settings → Auto-review with a prefilled rule"
 msgid "Apri l'installazione"
 msgstr "Open the installer"
 
+#: src/renderer/src/components/ComputerPrepRow.tsx
+msgid "Apri l’installazione"
+msgstr "Open the installer"
+
 #: src/renderer/src/components/GuideView.tsx
 msgid "Apri la chat"
 msgstr "Open the chat"
@@ -2242,6 +2246,7 @@ msgid "Descrizione / ruolo del bot (va nel system prompt)"
 msgstr "Bot description / role (goes in the system prompt)"
 
 #: src/renderer/src/components/DraftCard.tsx
+#: src/renderer/src/components/settings/EngineSection.tsx
 msgid "Dettagli"
 msgstr "Details"
 
@@ -3560,6 +3565,14 @@ msgstr "paused for absence"
 msgid "in preparazione"
 msgstr "being set up"
 
+#: src/renderer/src/components/ComputerPrepRow.tsx
+msgid "In preparazione…"
+msgstr "Being set up…"
+
+#: src/renderer/src/components/ComputerPrepRow.tsx
+msgid "In preparazione… {pct}%"
+msgstr "Being set up… {pct}%"
+
 #: src/renderer/src/components/PageView.tsx
 msgid "In questa pagina"
 msgstr "On this page"
@@ -3627,6 +3640,7 @@ msgid "Inserisci un valore"
 msgstr "Enter a value"
 
 #: src/renderer/src/components/ConnectorCards13.tsx
+#: src/renderer/src/components/settings/EngineSection.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Installa"
 msgstr "Install"
@@ -3969,10 +3983,6 @@ msgstr "The pages, charts and files of this bot end up here."
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 msgid "Le regole servono per allargare ciò che passa da solo, non sono necessarie: anche senza, il revisore fa passare quello che serve a ciò che hai chiesto."
 msgstr "Rules widen what passes on its own; they are not required: even without them, the reviewer passes what your request needs."
-
-#: src/renderer/src/components/settings/EngineSection.tsx
-msgid "Le release su GitHub"
-msgstr "Releases on GitHub"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "Le ricerche dei bot vengono inviate a questi servizi, secondo i loro termini d'uso: <0>You.com</0> · <1>Exa</1> · <2>Tavily</2>"
@@ -5329,6 +5339,7 @@ msgstr "Prompt:"
 msgid "pronto"
 msgstr "ready"
 
+#: src/renderer/src/components/ComputerPrepRow.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Pronto"
 msgstr "Ready"
@@ -5832,6 +5843,7 @@ msgstr "Restore"
 #: src/renderer/src/components/ConnectorCard.tsx
 #: src/renderer/src/components/GuideComputerStep.tsx
 #: src/renderer/src/components/LibraryPanel.tsx
+#: src/renderer/src/components/settings/EngineSection.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
 #: src/renderer/src/components/ui/ModelSelect.tsx
 msgid "Riprova"
@@ -6264,6 +6276,10 @@ msgstr "The team needs a name."
 #: src/shared/ui-messages.ts
 msgid "rpc.needsWindow"
 msgstr "the Homun window is needed to authorize"
+
+#: src/renderer/src/components/ComputerPrepRow.tsx
+msgid "Serve la tua password"
+msgstr "Your password is needed"
 
 #: src/renderer/src/components/settings/EngineSection.tsx
 msgid "Serve macOS 26 o successivo, con chip Apple"

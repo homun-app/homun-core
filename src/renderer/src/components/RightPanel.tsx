@@ -29,6 +29,7 @@ import { ChangeAvatarDialog } from './BotDialogs'
 import type { LayoutResult } from '../layout'
 // fase 19b (T1) → fase 16b (S4): il pannello «Computer» vive QUI come scheda
 import { ComputerPanel } from './ComputerPanel'
+import { ComputerPrepRow } from './ComputerPrepRow'
 import { ModelSelect } from './ui/ModelSelect'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu'
 import { Dialog, DialogContent, DialogTitle } from './ui/dialog'
@@ -664,6 +665,8 @@ function ActivityTab({ agentId }: { agentId: string }) {
     <div>
       <SuggestionsBlock agentId={agentId} />
       <ComputerCard agentId={agentId} />
+      {/* OB4: la preparazione del computer che prosegue fuori dalla guida */}
+      <ComputerPrepRow />
       <div className="mt-4">
         <div className="flex items-center justify-between">
           <p className="text-[13px] text-muted-foreground"><Trans>Routine</Trans></p>
