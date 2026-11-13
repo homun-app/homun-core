@@ -5,7 +5,7 @@
 // file .mjs con env pilotata.
 import { describe, expect, it, afterAll } from 'vitest'
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync, readFileSync, existsSync, writeFileSync, chmodSync } from 'node:fs'
+import { mkdtempSync, rmSync, readFileSync, existsSync, writeFileSync, chmodSync, mkdirSync, readlinkSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -15,14 +15,15 @@ const TMP = mkdtempSync(join(tmpdir(), 'sandbot-fake-container-test-'))
 
 /** Lancia la CLI finta con env di prova; log su un file del TMP (uno per chiamata). */
 let runSeq = 0
-function run(mode: string, argv: string[]): { status: number | null; stdout: string; stderr: string; log: string[][] } {
+function run(mode: string, argv: string[], extraEnv: Record<string, string> = {}): { status: number | null; stdout: string; stderr: string; log: string[][] } {
   const logFile = join(TMP, `log-${++runSeq}-${mode}.jsonl`)
   const r = spawnSync(process.execPath, [FAKE, ...argv], {
     encoding: 'utf8',
     env: {
       PATH: process.env.PATH,
       SANDBOT_TEST_CONTAINER_MODE: mode,
-      SANDBOT_TEST_CONTAINER_LOG: logFile
+      SANDBOT_TEST_CONTAINER_LOG: logFile,
+      ...extraEnv
     }
   })
   const log = existsSync(logFile)
@@ -39,16 +40,6 @@ describe('BX5: la CLI finta di container — i comportamenti per variabile d\'am
     expect(run('stopped', ['--version']).status).toBe(0)
     const ni = run('not-installed', ['--version'])
     expect(ni.status).not.toBe(0)
-  })
-
-  it('system status: ready → running; stopped → NON running; kernel-missing → running MA kernel mancante', () => {
-    expect(run('ready', ['system', 'status']).stdout.toLowerCase()).toContain('running: true')
-    const st = run('stopped', ['system', 'status']).stdout.toLowerCase()
-    expect(st).toContain('running: false')
-    const km = run('kernel-missing', ['system', 'status']).stdout.toLowerCase()
-    expect(km).toContain('running: true')
-    expect(km).toContain('kernel')
-    expect(km).toContain('missing')
   })
 
   it('system df --format json: voci Images/Containers/Local Volumes/Build Cache in byte umani', () => {
@@ -198,5 +189,84 @@ describe('OB6: image inspect risponde OK solo DOPO una build', () => {
     const size = fake(['image', 'inspect', '--format', '{{.size}}', 'sandbot-box:fake'])
     expect(size.status).toBe(0)
     expect(size.stdout.trim()).toBe('1180000000')
+  })
+})
+
+// ---- OBV5 (fase onboarding-b-dal-vivo): la finta parla come la VERA ----
+// Le fixture sono le uscite VERE della prova dal vivo (system-status-fixtures):
+// la finta le stampa IDENTICHE (solo l'appRoot è della cartella di prova), e
+// questi test le BLOCCANO: se la finta o la fixture cambiano forma, qui cade.
+import {
+  NEUTRAL_APP_ROOT, SYSTEM_STATUS_JSON, SYSTEM_STATUS_TABLE,
+  KERNEL_LINK_NAME, KERNEL_TARGET_NAME
+} from '../../src/main/sandbox/__tests__/system-status-fixtures'
+
+describe('OBV5: la CLI finta stampa i formati VERI (JSON e tabella), bloccati dai test', () => {
+  const APP_ROOT = join(TMP, 'obv5-app-root') // l'appRoot della cartella di prova
+  const withRoot = { SANDBOT_TEST_CONTAINER_APP_ROOT: APP_ROOT }
+
+  it('`system status --format json` (ready): il JSON VERO della 1.7.1, una riga, con l\'appRoot di prova', () => {
+    const r = run('ready', ['system', 'status', '--format', 'json'], withRoot)
+    expect(r.status).toBe(0)
+    expect(r.stdout.trim()).toBe(SYSTEM_STATUS_JSON.replace(NEUTRAL_APP_ROOT, APP_ROOT))
+  })
+
+  it('la TABELLA di default (ready): la tabella VERA, senza separatori, riga per riga', () => {
+    const r = run('ready', ['system', 'status'], withRoot)
+    expect(r.status).toBe(0)
+    expect(r.stdout.trim()).toBe(SYSTEM_STATUS_TABLE.replace(NEUTRAL_APP_ROOT, APP_ROOT))
+  })
+
+  it('stopped: il JSON dice "stopped" e anche la tabella', () => {
+    const j = run('stopped', ['system', 'status', '--format', 'json'], withRoot)
+    expect(j.status).toBe(0)
+    expect(JSON.parse(j.stdout).status).toBe('stopped')
+    const t = run('stopped', ['system', 'status'], withRoot)
+    expect(t.status).toBe(0)
+    expect(t.stdout).toMatch(/^status\s+stopped\s*$/m)
+  })
+
+  it('kernel-missing: running MA il FILE del kernel non c\'è (il JSON non ne parla)', () => {
+    const root = join(TMP, 'obv5-km-root')
+    const j = run('kernel-missing', ['system', 'status', '--format', 'json'], { SANDBOT_TEST_CONTAINER_APP_ROOT: root })
+    expect(j.status).toBe(0)
+    expect(JSON.parse(j.stdout).status).toBe('running')
+    expect(j.stdout.toLowerCase()).not.toContain('kernel') // mai più euristiche sul testo
+    expect(existsSync(join(root, 'kernels', KERNEL_LINK_NAME))).toBe(false)
+  })
+
+  it('ready: il kernel È un file della cartella kernels/ dell\'appRoot (symlink → bersaglio non vuoto)', () => {
+    const root = join(TMP, 'obv5-ready-root')
+    const j = run('ready', ['system', 'status', '--format', 'json'], { SANDBOT_TEST_CONTAINER_APP_ROOT: root })
+    expect(j.status).toBe(0)
+    const link = join(root, 'kernels', KERNEL_LINK_NAME)
+    expect(existsSync(link)).toBe(true)
+    expect(readlinkSync(link)).toBe(KERNEL_TARGET_NAME)
+    expect(statSync(link).isFile()).toBe(true) // segue il symlink
+    expect(statSync(link).size).toBeGreaterThan(0)
+  })
+
+  it('`system kernel set --recommended`: crea il kernel; la SECONDA volta esce 1 con l\'errore VERO di «File exists»', () => {
+    const root = join(TMP, 'obv5-kset-root')
+    const first = run('kernel-missing', ['system', 'kernel', 'set', '--recommended'], { SANDBOT_TEST_CONTAINER_APP_ROOT: root })
+    expect(first.status).toBe(0)
+    expect(existsSync(join(root, 'kernels', KERNEL_LINK_NAME))).toBe(true)
+    // NON è idempotente, come il vero: esce 1 col File exists
+    const second = run('kernel-missing', ['system', 'kernel', 'set', '--recommended'], { SANDBOT_TEST_CONTAINER_APP_ROOT: root })
+    expect(second.status).toBe(1)
+    expect(second.stderr).toContain('NSCocoaErrorDomain Code=516')
+    expect(second.stderr).toContain('an item with the same name already exists')
+    expect(second.stderr).toContain('NSPOSIXErrorDomain Code=17 "File exists"')
+  })
+})
+
+describe('OBV5: la corsa di test non chiama MAI la CLI vera (ora container è installato sul Mac)', () => {
+  it('containerCliPath() non risolve mai /usr/local/bin/container: la rete di sicurezza della corsa vitest', async () => {
+    // test-setup punta HOMUN_CONTAINER_PATH a un percorso inesistente della
+    // temporanea di prova: qualunque sonda non stubbata spawnerebbe ENOENT,
+    // mai la CLI VERA che ora vive in /usr/local/bin
+    const { containerCliPath } = await import('../../src/main/sandbox/apple-container-engine')
+    expect(containerCliPath()).not.toBe('/usr/local/bin/container')
+    expect(existsSync(containerCliPath())).toBe(false)
   })
 })

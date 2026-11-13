@@ -8,9 +8,20 @@
 //
 // Il comportamento si sceglie con SANDBOT_TEST_CONTAINER_MODE:
 //   not-installed  tutto esce 127 (la CLI «non c'è»)
-//   stopped        --version ok, system status: running: false
-//   kernel-missing status: running: true MA kernel: missing
-//   ready          (default) tutto a posto
+//   stopped        --version ok, system status: status "stopped"
+//   kernel-missing status: status "running" MA il FILE del kernel assente
+//   ready          (default) tutto a posto (kernel compreso)
+//
+// OBV5 (fase onboarding-b-dal-vivo): la finta PARLA COME LA VERA —
+// `system status --format json` stampa il JSON VERO della 1.7.1 (una riga,
+// le fixture della prova dal vivo) e `system status` la TABELLA VERA senza
+// separatori; l'appRoot è quello di prova (SANDBOT_TEST_CONTAINER_APP_ROOT,
+// altrimenti una cartella accanto al log). Il KERNEL è un FILE VERO della
+// cartella kernels/ dell'appRoot (default.kernel-arm64 → symlink →
+// vmlinux-6.18.56-208-debug non vuoto): lo crea `system kernel set
+// --recommended`, e se c'è GIÀ esce 1 con l'errore VERO di «File exists»
+// (il comando vero NON è idempotente). Chi legge lo status lo rileva dal
+// FILE, come il codice vero dopo OBV1.
 //
 // BR1 (fase box-rete): il STATO si ricorda rileggendo il proprio log — i
 // container creati da `run -d`/`create` (nome, rete, immagine) esistono per
@@ -31,10 +42,13 @@
 // root le mette GIÙ. L'exec della VERIFICA legge questo stato: boot senza
 // link down → «eth0 is up» (esce 1), dopo il link down → passa.
 //
-// Nessuna rete, nessuna scrittura fuori dal file di log. La usa il motore al
-// posto della CLI vera SOLO con SANDBOT_TEST_USER_DATA impostata E
+// Nessuna rete, nessuna scrittura fuori dall'appRoot di prova e dal file di
+// log. La usa il motore al posto della CLI vera SOLO con
+// SANDBOT_TEST_USER_DATA impostata E
 // SANDBOT_TEST_CONTAINER_CLI=<percorso di questo file> (sandbox/engine).
-import { appendFileSync, readFileSync } from 'node:fs'
+import { appendFileSync, readFileSync, existsSync, mkdirSync, symlinkSync, writeFileSync, statSync, realpathSync, mkdtempSync } from 'node:fs'
+import { join, dirname } from 'node:path'
+import { tmpdir } from 'node:os'
 
 const MODE = process.env.SANDBOT_TEST_CONTAINER_MODE ?? 'ready'
 const argv = process.argv.slice(2)
@@ -113,16 +127,101 @@ if (argv[0] === '--version' || argv[0] === 'version') {
   process.exit(0)
 }
 
+// ---- OBV5: l'appRoot di prova e il KERNEL come FILE VERO ----
+// l'appRoot della cartella di prova: quello delle sonde, o una accanto al
+// log (così ogni «chiamata» del test ha il suo mondo, e afterAll la toglie),
+// o una mkdtemp come ultima spiaggia
+const DEV_TMP = '/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T'
+const TMP_BASE = existsSync(DEV_TMP) ? DEV_TMP : realpathSync(tmpdir())
+const APP_ROOT =
+  process.env.SANDBOT_TEST_CONTAINER_APP_ROOT ??
+  (process.env.SANDBOT_TEST_CONTAINER_LOG
+    ? join(dirname(process.env.SANDBOT_TEST_CONTAINER_LOG), 'fake-app-root')
+    : mkdtempSync(join(TMP_BASE, 'sandbot-fake-container-')))
+const KERNEL_TARGET = 'vmlinux-6.18.56-208-debug'
+const KERNEL_LINK = 'default.kernel-arm64'
+const kernelLinkPath = () => join(APP_ROOT, 'kernels', KERNEL_LINK)
+
+/** il kernel c'è? (il SYMLINK esiste E il bersaglio è un file non vuoto) */
+const kernelPresent = () => {
+  try {
+    const st = statSync(kernelLinkPath()) // statSync SEGUE il symlink
+    return st.isFile() && st.size > 0
+  } catch {
+    return false
+  }
+}
+
+/** crea il kernel nel layout VERO: kernels/default.kernel-arm64 → vmlinux-… */
+const ensureKernel = () => {
+  mkdirSync(join(APP_ROOT, 'kernels'), { recursive: true })
+  const target = join(APP_ROOT, 'kernels', KERNEL_TARGET)
+  if (!existsSync(target)) writeFileSync(target, Buffer.alloc(64 * 1024, 7))
+  if (!existsSync(kernelLinkPath())) symlinkSync(KERNEL_TARGET, kernelLinkPath())
+}
+
+// kernel-missing è PASSIVO: il FILE decide (non si crea e NON si toglie — se
+// un `kernel set` lo mette, le sonde dopo lo VEDONO, come sulla macchina vera)
+
+// lo status DELLA MODALITÀ, pronto per JSON e tabella
+const statusOfMode = () => (MODE === 'stopped' ? 'stopped' : 'running')
+
+// OBV5: gli esiti VERI della 1.7.1 (le fixture della prova dal vivo, con
+// l'appRoot di prova e lo status della modalità)
+const statusJson = () =>
+  '{"client":{"appName":"container","build":"release","commit":"a15b46097aa4c2325da13c1fb5192b9274aab083","version":"1.7.1"},' +
+  '"host":{"architecture":"arm64","cpus":10,"operatingSystem":"Version 27.2.1 (Build 26B131)"},' +
+  `"paths":{"appRoot":"${APP_ROOT}","installRoot":"/usr/local/"},` +
+  '"resources":{"containersRunning":0,"containersTotal":0,"images":0},' +
+  '"server":{"appName":"container-apiserver","build":"release","commit":"a15b46097aa4c2325da13c1fb5192b9274aab083","version":"1.7.1"},' +
+  `"status":"${statusOfMode()}"}`
+const statusTable = () =>
+  'FIELD               VALUE\n' +
+  `status              ${statusOfMode()}\n` +
+  'client.version      1.7.1\n' +
+  'client.build        release\n' +
+  'client.commit       a15b46097aa4c2325da13c1fb5192b9274aab083\n' +
+  'host.os             Version 27.2.1 (Build 26B131)\n' +
+  'host.architecture   arm64\n' +
+  'host.cpus           10\n' +
+  'server.version      1.7.1\n' +
+  'server.build        release\n' +
+  'server.commit       a15b46097aa4c2325da13c1fb5192b9274aab083\n' +
+  'server.appName      container-apiserver\n' +
+  `paths.appRoot       ${APP_ROOT}\n` +
+  'paths.installRoot   /usr/local/\n' +
+  'paths.logRoot       \n' +
+  'containers.total    0\n' +
+  'containers.running  0\n' +
+  'images.total        0'
+
+/** l'errore VERO di kernel set quando il kernel c'è già (non è idempotente) */
+const KERNEL_FILE_EXISTS_STDERR =
+  'Error Domain=NSCocoaErrorDomain Code=516 "The file “default.kernel-arm64” couldn’t be copied because an item with the same name already exists." ' +
+  `UserInfo={NSSourceFilePathErrorKey=${APP_ROOT}/kernels/${KERNEL_TARGET}} ` +
+  'NSUnderlyingError=0x600000c4e000 (NSPOSIXErrorDomain Code=17 "File exists")'
+
 // ---- system ----
 if (argv[0] === 'system') {
   if (argv[1] === 'status') {
-    if (MODE === 'stopped') { out('running: false'); process.exit(0) }
-    if (MODE === 'kernel-missing') { out('running: true'); out('kernel: missing (use: container system kernel set --recommended)'); process.exit(0) }
-    out('running: true'); process.exit(0)
+    // OBV5: la finta parla come la vera — col flag il JSON (una riga), senza
+    // la TABELLA di default. Il kernel è un FILE: ready lo crea (come dopo
+    // un kernel set); kernel-missing è passivo (il FILE decide); stopped
+    // non lo tocca
+    if (MODE === 'ready') ensureKernel()
+    out(argv[2] === '--format' && argv[3] === 'json' ? statusJson() : statusTable())
+    process.exit(0)
   }
   if (argv[1] === 'start') { out('starting (fake): service is running'); process.exit(0) }
   if (argv[1] === 'stop') { out('stopped (fake)'); process.exit(0) }
-  if (argv[1] === 'kernel' && argv[2] === 'set') { out('kernel installed (fake)'); process.exit(0) }
+  if (argv[1] === 'kernel' && argv[2] === 'set') {
+    // OBV5: NON idempotente come il vero — col kernel già presente esce 1
+    // col File exists; se manca, lo crea nel layout vero (symlink → target)
+    if (kernelPresent()) die(1, KERNEL_FILE_EXISTS_STDERR)
+    ensureKernel()
+    out('kernel installed (fake)')
+    process.exit(0)
+  }
   if (argv[1] === 'df') {
     // il formato di `docker system df --format json`: voci col Type
     out(JSON.stringify([

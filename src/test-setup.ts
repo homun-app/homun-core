@@ -19,6 +19,13 @@ if (!current?.includes(PREFIX) || !existsSync(current)) {
   const clean = () => rmSync(dir, { recursive: true, force: true })
   afterAll(clean) // fine del file di test (un worker per file, in forks)
   process.on('exit', clean) // se il processo muore prima dell'afterAll
+
+  // OBV5 (fase onboarding-b-dal-vivo): la CLI `container` ORA è installata
+  // su questo Mac (/usr/local/bin/container, e /usr/local/bin è primo nel
+  // PATH). La corsa di test NON la chiama MAI: chi non stubba la sonda deve
+  // ricevere ENOENT come prima dell'installazione, mai la CLI vera. Il
+  // percorso inesistente vince su PATH e sul fallback (containerCliPath).
+  process.env.HOMUN_CONTAINER_PATH ??= join(dir, 'mai', 'container')
 }
 
 // fase 17c (C1): la lingua dell'interfaccia dei test è l'italiano — i testi

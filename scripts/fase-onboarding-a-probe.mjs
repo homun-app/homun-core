@@ -147,6 +147,14 @@ const obEnv = (over = {}) => ({
   SANDBOT_TEST_FAKE_ARCH: 'arm64',
   SANDBOT_TEST_FAKE_MACOS_MAJOR: '26',
   PATH: `${OB_BIN}:/usr/bin:/bin:/usr/sbin:/sbin`,
+  // OBV5: prima dell'«installazione» finta il percorso NON esiste → ENOENT
+  // (mai la CLI vera di /usr/local/bin); dopo, è il wrapper della finta.
+  // L'appRoot di prova lo decide OGNI fase (freshOb): il kernel è un FILE lì
+  HOMUN_CONTAINER_PATH: join(OB_BIN, 'container'),
+  // OBV5: la macchina finta dopo l'installazione è ACCESA ma SENZA kernel
+  // (come quella vera): il kernel lo mette `kernel set` col consenso — e
+  // dopo, il FILE si vede (kernel-missing è passivo nella finta)
+  SANDBOT_TEST_CONTAINER_MODE: 'kernel-missing',
   SANDBOT_TEST_PKG_URL: `http://127.0.0.1:${pkgPort}/finto.pkg`,
   SANDBOT_TEST_PKG_SHA256: PKG_SHA,
   SANDBOT_TEST_PKG_SIZE: String(PKG_BYTES.length),
@@ -179,6 +187,11 @@ const launchApp = (dataDir, extraEnv = {}) => {
       SANDBOT_TEST_FAKE_SAFESTORAGE: join(dataDir, 'safestorage-finta.json'),
       SANDBOT_TEST_FAKE_BROWSER: '1',
       SANDBOT_TEST_FAKE_ARCH: 'x86_64',
+      // OBV5: `container` ORA è installato sul Mac (/usr/local/bin, primo nel
+      // PATH): le fasi senza OB_BIN non lo chiamano MAI — questo percorso
+      // inesistente vince su PATH e sul fallback (le fasi OB lo passano sopra
+      // con OB_BIN/container: prima dell'«installazione» finta → ENOENT)
+      HOMUN_CONTAINER_PATH: join(TMP, 'mai', 'container'),
       ...extraEnv
     },
     stdio: ['ignore', 'pipe', 'pipe']
@@ -735,9 +748,13 @@ await stopEverything(DATA5)
 // mette il kernel e costruisce l'immagine FINTA.
 const freshOb = () => {
   try { rmSync(join(OB_BIN, 'container')) } catch { /* già pulita */ }
+  const k = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
   return {
-    cliLog: join(TMP, `ob-cli-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.jsonl`),
-    openLog: join(TMP, `ob-open-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.jsonl`)
+    cliLog: join(TMP, `ob-cli-${k}.jsonl`),
+    openLog: join(TMP, `ob-open-${k}.jsonl`),
+    // OBV5: l'appRoot di prova della CLI finta, FRESCO: il kernel è un FILE
+    // lì dentro, così ogni fase parte col mondo che vuole (con o senza kernel)
+    appRoot: join(TMP, `ob-approot-${k}`)
   }
 }
 const seedEngineApple = (dataDir) => {
@@ -756,7 +773,7 @@ log('FASE OB: il passo Computer della guida, con clic veri…')
   const DATA6 = join(TMP, 'sei')
   mkdirSync(join(DATA6, 'data'), { recursive: true })
   seedEngineApple(DATA6) // PRIMA del daemon: il motore è quello Apple (mai Docker vero)
-  await startApp(DATA6, obEnv({ SANDBOT_TEST_CONTAINER_LOG: f.cliLog, SANDBOT_TEST_OPEN_LOG: f.openLog }))
+  await startApp(DATA6, obEnv({ SANDBOT_TEST_CONTAINER_LOG: f.cliLog, SANDBOT_TEST_OPEN_LOG: f.openLog, SANDBOT_TEST_CONTAINER_APP_ROOT: f.appRoot }))
   await waitDom(`!!document.querySelector('[data-testid="guide-step-welcome"]')`, 25_000)
   await tuStep({ name: 'Bot' })
   await waitDom(`!!document.querySelector('[data-testid="guide-step-model"]')`, 10_000)
@@ -837,7 +854,7 @@ log('FASE OB-b: sha256 sbagliato…')
   const DATA7 = join(TMP, 'sette')
   mkdirSync(join(DATA7, 'data'), { recursive: true })
   seedEngineApple(DATA7)
-  await startApp(DATA7, obEnv({ SANDBOT_TEST_PKG_SHA256: '0'.repeat(64), SANDBOT_TEST_CONTAINER_LOG: f.cliLog, SANDBOT_TEST_OPEN_LOG: f.openLog }))
+  await startApp(DATA7, obEnv({ SANDBOT_TEST_PKG_SHA256: '0'.repeat(64), SANDBOT_TEST_CONTAINER_LOG: f.cliLog, SANDBOT_TEST_OPEN_LOG: f.openLog, SANDBOT_TEST_CONTAINER_APP_ROOT: f.appRoot }))
   await waitDom(`!!document.querySelector('[data-testid="guide-step-welcome"]')`, 25_000)
   await tuStep({ name: 'Bot' })
   await waitDom(`!!document.querySelector('[data-testid="guide-step-model"]')`, 10_000)
@@ -866,7 +883,7 @@ log('FASE OB-c: riavvio sull\'attesa dell\'Installer…')
   seedEngineApple(DATA8)
   // l'open finto «installa» dopo MOLTO tempo: l'utente non ha ancora dato la
   // password quando l'app si chiude — il riavvio deve trovare l'attesa intatta
-  await startApp(DATA8, obEnv({ SANDBOT_TEST_OPEN_DELAY_MS: '60000', SANDBOT_TEST_CONTAINER_LOG: f.cliLog, SANDBOT_TEST_OPEN_LOG: f.openLog }))
+  await startApp(DATA8, obEnv({ SANDBOT_TEST_OPEN_DELAY_MS: '60000', SANDBOT_TEST_CONTAINER_LOG: f.cliLog, SANDBOT_TEST_OPEN_LOG: f.openLog, SANDBOT_TEST_CONTAINER_APP_ROOT: f.appRoot }))
   await waitDom(`!!document.querySelector('[data-testid="guide-step-welcome"]')`, 25_000)
   await tuStep({ name: 'Bot' })
   await waitDom(`!!document.querySelector('[data-testid="guide-step-model"]')`, 10_000)
@@ -881,7 +898,7 @@ log('FASE OB-c: riavvio sull\'attesa dell\'Installer…')
   await stopEverything(DATA8)
   // riavvio: stesso punto (awaiting-installer), il pacchetto resta sul disco;
   // ORA la password arriva (ritardo corto) e l'installazione finisce
-  await startApp(DATA8, obEnv({ SANDBOT_TEST_OPEN_DELAY_MS: '400', SANDBOT_TEST_CONTAINER_LOG: f.cliLog, SANDBOT_TEST_OPEN_LOG: f.openLog }))
+  await startApp(DATA8, obEnv({ SANDBOT_TEST_OPEN_DELAY_MS: '400', SANDBOT_TEST_CONTAINER_LOG: f.cliLog, SANDBOT_TEST_OPEN_LOG: f.openLog, SANDBOT_TEST_CONTAINER_APP_ROOT: f.appRoot }))
   check('OB-c1 il riavvio riporta la guida sul passo Computer',
     await waitDom(`!!document.querySelector('[data-testid="guide-step-computer"]')`, 30_000))
   check('OB-c2 la preparazione riprende dallo STESSO punto (awaiting-installer)',
@@ -905,7 +922,7 @@ log('FASE OB-d: si prosegue mentre l\'immagine si costruisce…')
   mkdirSync(join(DATA9, 'data'), { recursive: true })
   seedEngineApple(DATA9)
   // la build finta DURA: la guida deve poter proseguire intanto
-  await startApp(DATA9, obEnv({ SANDBOT_TEST_CONTAINER_BUILD_DELAY_MS: '6000', SANDBOT_TEST_CONTAINER_LOG: f.cliLog, SANDBOT_TEST_OPEN_LOG: f.openLog }))
+  await startApp(DATA9, obEnv({ SANDBOT_TEST_CONTAINER_BUILD_DELAY_MS: '6000', SANDBOT_TEST_CONTAINER_LOG: f.cliLog, SANDBOT_TEST_OPEN_LOG: f.openLog, SANDBOT_TEST_CONTAINER_APP_ROOT: f.appRoot }))
   await waitDom(`!!document.querySelector('[data-testid="guide-step-welcome"]')`, 25_000)
   await tuStep({ name: 'Bot' })
   await waitDom(`!!document.querySelector('[data-testid="guide-step-model"]')`, 10_000)

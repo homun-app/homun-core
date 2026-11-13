@@ -334,7 +334,11 @@ const launchApp = () => {
       SANDBOT_TEST_FAKE_BROWSER: '1',
       // OB (fase onboarding-b): macchina NON supportata (fatto finto): il
       // passo Computer non c'è e la guida si attraversa come prima
-      SANDBOT_TEST_FAKE_ARCH: 'x86_64'
+      SANDBOT_TEST_FAKE_ARCH: 'x86_64',
+      // OBV5: `container` ORA è installato sul Mac (/usr/local/bin) — questa
+      // sonda non lo chiama MAI: un percorso inesistente vince su PATH e
+      // fallback, così la sonda del motore vede ENOENT come prima
+      HOMUN_CONTAINER_PATH: join(DATA, 'mai', 'container')
     },
     stdio: ['ignore', 'pipe', 'pipe']
   })

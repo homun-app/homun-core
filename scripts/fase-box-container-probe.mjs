@@ -122,6 +122,8 @@ const launchApp = (mode, giro) => {
   db.close()
   const cliLogFile = join(TMP, `cli-${mode}-${giro}.jsonl`)
   try { rmSync(cliLogFile) } catch { /* nuovo giro */ }
+  // OBV5: l'appRoot di prova della CLI finta (il kernel è un FILE lì dentro)
+  const appRootDir = join(TMP, `app-root-${mode}-${giro}`)
   let appLog = ''
   const proc = spawn(ELECTRON, ['.', `--remote-debugging-port=${DEBUG_PORT_BASE + giro}`], {
     cwd: ROOT,
@@ -134,7 +136,8 @@ const launchApp = (mode, giro) => {
       // BX5.2: il motore usa la CLI finta SOLO con queste due variabili
       SANDBOT_TEST_CONTAINER_CLI: FAKE_CLI,
       SANDBOT_TEST_CONTAINER_MODE: mode,
-      SANDBOT_TEST_CONTAINER_LOG: cliLogFile
+      SANDBOT_TEST_CONTAINER_LOG: cliLogFile,
+      SANDBOT_TEST_CONTAINER_APP_ROOT: appRootDir
     },
     stdio: ['ignore', 'pipe', 'pipe']
   })
@@ -495,6 +498,8 @@ try {
         SANDBOT_TEST_CONTAINER_CLI: FAKE_CLI,
         SANDBOT_TEST_CONTAINER_MODE: 'ready',
         SANDBOT_TEST_CONTAINER_LOG: cliLogFile,
+        // OBV5: l'appRoot di prova della CLI finta (accanto al suo log)
+        SANDBOT_TEST_CONTAINER_APP_ROOT: `${cliLogFile}-app-root`,
         ...(opts.extraEnv ?? {})
       },
       stdio: ['ignore', 'pipe', 'pipe']
