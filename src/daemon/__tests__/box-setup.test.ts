@@ -14,7 +14,7 @@ import type { AppleEngineState } from '../../main/sandbox/engine'
 import type { SandbotEvent } from '../../shared/types'
 import {
   boxSetupNext, boxSetupStartFrom, boxSetupResumeFrom, boxSetupNeededBytes,
-  boxSetupRunConfig, createBoxSetup, INITIAL_BOX_SETUP,
+  boxSetupRunConfig, createBoxSetup, parsePkgutilCheckSignature, INITIAL_BOX_SETUP,
   type BoxSetupState, type BoxSetupEvent, type BoxSetupDeps
 } from '../box-setup'
 
@@ -218,13 +218,35 @@ const fakeFetch = (bytes: Uint8Array, opts: { status?: number; length?: number }
 const PKGUTIL_OK = [
   'Package "container-1.7.1-installer-signed.pkg":',
   '   Status: signed by a developer certificate issued by Apple for distribution',
+  '   Notarization: trusted by the Apple notary service',
   '   Certificate Chain:',
   '    1. Developer ID Installer: Apple Inc. (TEAMIDFAKE)',
   '       SHA256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
   '    2. Developer ID Certification Authority',
-  '    3. Apple Root CA',
-  '   Status: Trusted by the Apple notary service'
+  '    3. Apple Root CA'
 ].join('\n')
+
+// ---- OBR3: le uscite di pkgutil, scritte a mano sul formato vero ----
+
+/** i pacchetti firmati da Apple STESSA: «signed Apple Software», foglia «Software Signing» */
+const PKGUTIL_APPLE = [
+  'Package "container-1.7.1-installer-signed.pkg":',
+  '   Status: signed Apple Software',
+  '   Certificate Chain:',
+  '    1. Software Signing',
+  '       Expires: 2030-06-01 00:00:00 +0000',
+  '       SHA256 fingerprint: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+  '    2. Apple Code Signing Certification Authority',
+  '       Expires: 2036-06-01 00:00:00 +0000',
+  '    3. Apple Root CA',
+  '       Expires: 2040-06-01 00:00:00 +0000'
+].join('\n')
+
+/** Developer ID SENZA la riga della notarizzazione */
+const PKGUTIL_DEVID_NO_NOTARY = PKGUTIL_OK.replace('   Notarization: trusted by the Apple notary service\n', '')
+
+/** la riga inventata di una volta NON è la notarizzazione di pkgutil */
+const PKGUTIL_OLD_TRUSTED = PKGUTIL_OK.replace('   Notarization: trusted by the Apple notary service', '   Status: Trusted by the Apple notary service')
 
 interface Harness {
   deps: BoxSetupDeps
@@ -233,6 +255,8 @@ interface Harness {
   events: SandbotEvent[]
   opened: string[]
   cliCalls: string[][]
+  /** le righe del log del daemon (OBR3: qui finisce la foglia del certificato) */
+  logs: string[]
   containerAppears: () => void
 }
 
@@ -255,12 +279,13 @@ const harness = (over: {
   const events: SandbotEvent[] = []
   const opened: string[] = []
   const cliCalls: string[][] = []
+  const logs: string[] = []
   let installed = false
   const bytes = over.bytes ?? new Uint8Array(8).fill(7)
   const pkgutilPath = '/bin/finto-pkgutil'
   const spctlPath = '/bin/finto-spctl'
   const h: Harness = {
-    dir, settings, events, opened, cliCalls,
+    dir, settings, events, opened, cliCalls, logs,
     containerAppears: () => { installed = true },
     deps: {
       now: () => 1_000,
@@ -288,7 +313,7 @@ const harness = (over: {
       hasBoxImage: async () => over.hasImage ?? false,
       buildBoxImage: async () => over.buildOk ?? true,
       openInstaller: async (pkgPath: string) => { opened.push(pkgPath); return { ok: true } },
-      log: () => undefined,
+      log: (line: string) => { logs.push(line) },
       timings: { pollInstallerMs: 5, downloadTimeoutMs: 60_000, networkRetryDelayMs: 5 },
       runConfig: () => ({
         url: 'http://127.0.0.1:9/finto.pkg',
@@ -450,6 +475,114 @@ describe('OB1 createBoxSetup: l\'esecutore, dal download al ready', () => {
     expect(h.opened).toHaveLength(1)
     h.containerAppears()
     await Promise.resolve(ctl.start()).catch(() => undefined)
+  })
+})
+
+// ---- OBR3: la firma — «signed Apple Software» non deve bloccare ----
+
+describe('OBR3 parsePkgutilCheckSignature: i due stati di Apple e la notarizzazione (puro)', () => {
+  it('«signed Apple Software» → firmato E fidato (basta lo stato), foglia «Software Signing»', () => {
+    expect(parsePkgutilCheckSignature(PKGUTIL_APPLE)).toEqual({ signed: true, trusted: true, leaf: 'Software Signing' })
+  })
+
+  it('Developer ID CON «Notarization: trusted by the Apple notary service» → firmato e fidato, foglia col Team ID', () => {
+    expect(parsePkgutilCheckSignature(PKGUTIL_OK)).toEqual({
+      signed: true, trusted: true, leaf: 'Developer ID Installer: Apple Inc. (TEAMIDFAKE)'
+    })
+  })
+
+  it('Developer ID SENZA notarizzazione → firmato ma NON fidato', () => {
+    const p = parsePkgutilCheckSignature(PKGUTIL_DEVID_NO_NOTARY)
+    expect(p.signed).toBe(true)
+    expect(p.trusted).toBe(false)
+    expect(p.leaf).toBe('Developer ID Installer: Apple Inc. (TEAMIDFAKE)')
+  })
+
+  it('«no signature» → né firmato né fidato (nemmeno con una riga di notarizzazione accanto)', () => {
+    expect(parsePkgutilCheckSignature('Package "x.pkg":\n   Status: no signature')).toMatchObject({ signed: false, trusted: false })
+    expect(parsePkgutilCheckSignature('Package "x.pkg":\n   Status: no signature\n   Notarization: trusted by the Apple notary service'))
+      .toMatchObject({ signed: false, trusted: false })
+  })
+
+  it('qualunque altro stato (non fidato, scaduto, revocato) → né firmato né fidato', () => {
+    for (const status of [
+      'signed by untrusted certificate',
+      'signed by a certificate that has since expired',
+      'signed by a certificate that has since been revoked',
+      'signed by a certificate trusted by macOS'
+    ]) {
+      const p = parsePkgutilCheckSignature(`Package "x.pkg":\n   Status: ${status}\n   Notarization: trusted by the Apple notary service`)
+      expect(p.signed, status).toBe(false)
+      expect(p.trusted, status).toBe(false)
+    }
+  })
+
+  it('la riga inventata «Status: Trusted by the Apple notary service» NON vale: serve la riga Notarization', () => {
+    const p = parsePkgutilCheckSignature(PKGUTIL_OLD_TRUSTED)
+    expect(p.signed).toBe(true)
+    expect(p.trusted).toBe(false)
+  })
+
+  it('lo stato si legge SOLO sulla riga «Status:»: un nome di pacchetto con quelle parole non firma nulla', () => {
+    const p = parsePkgutilCheckSignature('Package "Status: signed Apple Software.pkg":\n   Status: no signature')
+    expect(p).toMatchObject({ signed: false, trusted: false })
+  })
+
+  it('uscita vuota → niente', () => {
+    expect(parsePkgutilCheckSignature('')).toEqual({ signed: false, trusted: false, leaf: null })
+  })
+})
+
+describe('OBR3 createBoxSetup: la verifica coi due stati, spctl sempre obbligatorio, la foglia nel log', () => {
+  it('«signed Apple Software»: la verifica PASSA, l\'Installer si apre e la foglia va nel log', async () => {
+    const h = harness({ pkgutilOut: PKGUTIL_APPLE })
+    const ctl = createBoxSetup(h.deps)
+    void ctl.start().then(() => undefined)
+    const fin = await waitForState(ctl, (s) => s.phase === 'awaiting-installer' || s.phase === 'error')
+    expect(fin.phase).toBe('awaiting-installer')
+    expect(h.opened).toHaveLength(1)
+    expect(h.logs).toContain('[box-setup] pacchetto firmato da: Software Signing')
+    // spctl è stato chiamato comunque: resta obbligatorio
+    expect(h.cliCalls.some((c) => c[0] === '/bin/finto-spctl' && c.slice(1, 4).join(' ') === '--assess --type install')).toBe(true)
+    h.containerAppears()
+    await waitForState(ctl, (s) => s.phase === 'ready')
+  })
+
+  it('Developer ID notarizzato: la foglia (nome e Team ID) va nel log', async () => {
+    const h = harness()
+    const ctl = createBoxSetup(h.deps)
+    void ctl.start().then(() => undefined)
+    await waitForState(ctl, (s) => s.phase === 'awaiting-installer')
+    expect(h.logs).toContain('[box-setup] pacchetto firmato da: Developer ID Installer: Apple Inc. (TEAMIDFAKE)')
+    h.containerAppears()
+    await waitForState(ctl, (s) => s.phase === 'ready')
+  })
+
+  it('«signed Apple Software» ma spctl KO → errore di Gatekeeper, NESSUN open', async () => {
+    const h = harness({ pkgutilOut: PKGUTIL_APPLE, spctlExit: 3 })
+    const ctl = createBoxSetup(h.deps)
+    const fin = await ctl.start()
+    expect(fin.phase).toBe('error')
+    expect(fin.error?.code).toBe('gatekeeper')
+    expect(h.opened).toHaveLength(0)
+  })
+
+  it('Developer ID SENZA notarizzazione → errore di firma, file cancellato, NESSUN open', async () => {
+    const h = harness({ pkgutilOut: PKGUTIL_DEVID_NO_NOTARY })
+    const ctl = createBoxSetup(h.deps)
+    const fin = await ctl.start()
+    expect(fin.phase).toBe('error')
+    expect(fin.error?.code).toBe('signature')
+    expect(h.opened).toHaveLength(0)
+    expect(existsSync(join(h.dir, 'finto.pkg.part'))).toBe(false)
+  })
+
+  it('uno stato diverso (certificato non fidato) → errore di firma anche se pkgutil esce 0', async () => {
+    const h = harness({ pkgutilOut: 'Package "finto.pkg":\n   Status: signed by untrusted certificate\n   Certificate Chain:\n    1. Qualcuno' })
+    const ctl = createBoxSetup(h.deps)
+    const fin = await ctl.start()
+    expect(fin.error?.code).toBe('signature')
+    expect(h.opened).toHaveLength(0)
   })
 })
 

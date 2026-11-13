@@ -244,15 +244,31 @@ export function boxSetupRunConfig(env: NodeJS.ProcessEnv = process.env, packaged
 }
 
 /**
- * Il parse di `pkgutil --check-signature` (PURO): firmato con un certificato
- * Developer ID di Apple E catena fidata. La riga del certificato FOGLIA
- * (nome e Team ID) si torna per il log — NON si confronta con un valore
- * indovinato: il Team ID lo fissa l'utente dopo la prova dal vivo.
+ * Il parse di `pkgutil --check-signature` (PURO). OBR3: FIRMATO vale per
+ * uno dei DUE stati che Apple usa — «signed Apple Software» (i pacchetti
+ * firmati da Apple stessa: non sappiamo ancora quale dei due userà il
+ * pacchetto di container) e «signed by a developer certificate issued by
+ * Apple» (Developer ID, per esempio «… for distribution»). FIDATO: per
+ * Developer ID serve la riga della notarizzazione («Notarization: trusted
+ * by the Apple notary service»); per «signed Apple Software» basta lo
+ * stato stesso. Qualunque altro stato (no signature, certificato non
+ * fidato, scaduto o revocato) → non firmato: la verifica fallisce chiusa.
+ * Lo stato si legge SOLO sulla riga «Status:», mai come sottostringa
+ * dell'uscita (il nome del pacchetto sta sulla prima riga). La riga del
+ * certificato FOGLIA (`1. …`, QUALUNQUE sia il suo nome: «Developer ID
+ * Installer:» o «Software Signing») si torna per il log — NON si confronta
+ * con un valore indovinato: il Team ID lo fissa l'utente dopo la prova dal
+ * vivo. spctl --assess --type install resta obbligatorio in entrambi i
+ * casi, e lo sha256 resta il primo filtro (l'ordine della verifica).
  */
 export function parsePkgutilCheckSignature(stdout: string): { signed: boolean; trusted: boolean; leaf: string | null } {
-  const signed = /Status:\s*signed by a developer certificate issued by Apple/i.test(stdout)
-  const trusted = /Trusted by the Apple notary service|Status:\s*trusted/i.test(stdout)
-  const leaf = /^\s*1\.\s+(Developer ID Installer:.+)$/m.exec(stdout)?.[1]?.trim() ?? null
+  const status = /^\s*Status:\s*(.*?)\s*$/m.exec(stdout)?.[1] ?? ''
+  const appleSoftware = /^signed Apple Software$/i.test(status)
+  const developerId = /^signed by a developer certificate issued by Apple\b/i.test(status)
+  const notarized = /^\s*Notarization:\s*trusted by the Apple notary service\s*$/im.test(stdout)
+  const signed = appleSoftware || developerId
+  const trusted = appleSoftware || (developerId && notarized)
+  const leaf = /^\s*1\.\s+(\S.*?)\s*$/m.exec(stdout)?.[1] ?? null
   return { signed, trusted, leaf }
 }
 
@@ -508,7 +524,8 @@ export function createBoxSetup(deps: BoxSetupDeps): BoxSetupController {
     // 2. sha256 esatto, rispetto alla costante
     const sha = await sha256OfFile(partPath).catch(() => null)
     if (sha !== cfg.sha256) return fail('sha256', UI.boxSetupVerifySha, `atteso ${cfg.sha256}, calcolato ${sha ?? 'errore di lettura'}`)
-    // 3. pkgutil --check-signature: firmato con Developer ID di Apple, catena fidata
+    // 3. pkgutil --check-signature: firmato («signed Apple Software» o
+    // Developer ID notarizzato) — OBR3: i due stati di Apple
     const pkgutil = await deps.runCli(cfg.pkgutilPath, ['--check-signature', partPath], 30_000).catch(() => null)
     const parsed = parsePkgutilCheckSignature(pkgutil?.stdout ?? '')
     if (!pkgutil || pkgutil.exitCode !== 0 || !parsed.signed || !parsed.trusted) {

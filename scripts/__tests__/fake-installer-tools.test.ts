@@ -22,7 +22,8 @@ describe('OB6: pkgutil finto — --check-signature OK o KO a comando', () => {
     expect(r.status).toBe(0)
     expect(r.stdout).toContain('signed by a developer certificate issued by Apple for distribution')
     expect(r.stdout).toContain('Developer ID Installer: Apple Inc.')
-    expect(r.stdout).toContain('Trusted by the Apple notary service')
+    // OBR3: la riga della notarizzazione è quella VERA di pkgutil
+    expect(r.stdout).toContain('Notarization: trusted by the Apple notary service')
   })
 
   it('KO: esce diverso da 0 e NON dice firmato', () => {

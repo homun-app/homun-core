@@ -24,6 +24,10 @@ if (process.env.SANDBOT_TEST_PKGUTIL_RESULT === 'ko') {
 
 out(`Package "${pkg.split('/').pop() ?? ''}":`)
 out('   Status: signed by a developer certificate issued by Apple for distribution')
+// OBR3: la riga della notarizzazione è quella VERA di pkgutil («Notarization:
+// trusted by the Apple notary service») — la vecchia riga inventata «Status:
+// Trusted by the Apple notary service» il parse di produzione non la accetta più
+out('   Notarization: trusted by the Apple notary service')
 out('   Certificate Chain:')
 out('    1. Developer ID Installer: Apple Inc. (TEAMIDFAKE)')
 out('       SHA256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
@@ -32,5 +36,4 @@ out('    2. Developer ID Certification Authority')
 out('       Expires: 2036-01-01 00:00:00 +0000')
 out('    3. Apple Root CA')
 out('       Expires: 2040-01-01 00:00:00 +0000')
-out('   Status: Trusted by the Apple notary service')
 process.exit(0)
