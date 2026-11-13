@@ -78,23 +78,74 @@ export function appleVersionArgv(): string[] {
   return ['--version']
 }
 
-/** Lo stato del servizio (sonda: running? kernel?). */
+/** Lo stato del servizio (sonda: la TABELLA di default, il fallback). */
 export function appleSystemStatusArgv(): string[] {
   return ['system', 'status']
 }
 
 /**
- * Il parse dell'output di `system status` (PURO). Il formato esatto della CLI
- * vera è tra le cose «da verificare dal vivo»: si accettano righe `running:
- * true` (anche JSON `"running": true` / `"status": "running"`) e, se il
- * kernel è nominato, le parole missing/not installed dicono che MANCA; il
- * kernel non nominato → ok (un servizio a posto non ne parla).
+ * OBV1 (fase onboarding-b-dal-vivo): lo status si chiede in JSON —
+ * `container system status --format json`. È il formato che la sonda usa
+ * PER PRIMO; la tabella di default resta il fallback per una CLI che il
+ * flag non lo conosce.
  */
-export function parseSystemStatus(stdout: string): { running: boolean; kernelOk: boolean } {
-  const s = stdout.toLowerCase()
-  const running = /"?running"?\s*[:=]\s*"?(true|running)"?/.test(s)
-  const kernelMissing = /kernel/.test(s) && /(missing|not installed|not found|absent|none)/.test(s)
-  return { running, kernelOk: !kernelMissing }
+export function appleSystemStatusJsonArgv(): string[] {
+  return ['system', 'status', '--format', 'json']
+}
+
+/** Lo status letto dall'uscita della CLI (PURO): running, appRoot e arch. */
+export interface SystemStatusParsed {
+  running: boolean
+  /** `paths.appRoot` (dove vive il kernel): null se l'uscita non lo dice */
+  appRoot: string | null
+  /** `host.architecture`: null se l'uscita non lo dice */
+  arch: string | null
+}
+
+/**
+ * OBV1: il parse del JSON VERO di `system status --format json` (PURO). Le
+ * uscite della prova dal vivo sono le fixture dei test
+ * (system-status-fixtures.ts): `status === "running"` accende il servizio,
+ * `paths.appRoot` e `host.architecture` dicono DOVE guardare il kernel.
+ * null = non è JSON valido (o manca lo status): il chiamante prova la
+ * tabella. MAI euristiche sul testo.
+ */
+export function parseSystemStatusJson(stdout: string): SystemStatusParsed | null {
+  let o: unknown
+  try { o = JSON.parse(stdout) } catch { return null }
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return null
+  const j = o as { status?: unknown; paths?: { appRoot?: unknown }; host?: { architecture?: unknown } }
+  if (typeof j.status !== 'string') return null
+  return {
+    running: j.status === 'running',
+    appRoot: typeof j.paths?.appRoot === 'string' && j.paths.appRoot !== '' ? j.paths.appRoot : null,
+    arch: typeof j.host?.architecture === 'string' && j.host.architecture !== '' ? j.host.architecture : null
+  }
+}
+
+/**
+ * OBV1: il parse della TABELLA VERA di `system status` (il formato di
+ * default, PURO): righe «campo valore» SENZA separatori — `status running`,
+ * `paths.appRoot <percorso>`, `host.architecture arm64`. La riga dello
+ * status è `^status\s+(\S+)$`: il valore è UNA parola. null = non è la
+ * tabella (nessuna riga dello status).
+ */
+export function parseSystemStatusTable(stdout: string): SystemStatusParsed | null {
+  const status = /^status\s+(\S+)\s*$/m.exec(stdout)
+  if (!status) return null
+  const appRoot = /^paths\.appRoot\s+(.+?)\s*$/m.exec(stdout)?.[1] ?? null
+  const arch = /^host\.architecture\s+(\S+)\s*$/m.exec(stdout)?.[1] ?? null
+  return { running: status[1] === 'running', appRoot, arch }
+}
+
+/**
+ * OBV1: il parse dello status, PRIMA il JSON poi la tabella (PURO). Le
+ * vecchie euristiche sul testo (`running:` seguito da `:` o `=`, le parole
+ * missing/not installed per il kernel) sono VIA: la CLI vera stampa una
+ * tabella senza separatori e NON parla mai del kernel.
+ */
+export function parseSystemStatus(stdout: string): SystemStatusParsed {
+  return parseSystemStatusJson(stdout) ?? parseSystemStatusTable(stdout) ?? { running: false, appRoot: null, arch: null }
 }
 
 /** BX2: la rete interna del box si crea se manca (l'inspect lo dice). */

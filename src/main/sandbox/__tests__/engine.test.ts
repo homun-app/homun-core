@@ -3,8 +3,8 @@
 // migrazione di sandbox.mode ('docker' storico letto come 'box') e la regola
 // del modulo: NESSUN resolveTool('docker') fuori dal modulo del motore Docker
 // (ricerca nel sorgente, come le guardie N1/D4).
-import { describe, expect, it, vi } from 'vitest'
-import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { describe, expect, it, vi, beforeAll, afterAll, afterEach } from 'vitest'
+import { readFileSync, readdirSync, statSync, mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -208,5 +208,137 @@ describe('BX1: la regola del modulo — resolveTool(\'docker\') SOLO nel motore 
       if (readFileSync(f, 'utf8').includes("resolveTool('docker')")) offenders.push(rel)
     }
     expect(offenders).toEqual([])
+  })
+})
+
+// ---- OBV1 (fase onboarding-b-dal-vivo): la sonda legge i formati VERI e il kernel dal FILE ----
+import { TEST_TMP_BASE } from '../../../test-tmp'
+import {
+  NEUTRAL_APP_ROOT, SYSTEM_STATUS_JSON, SYSTEM_STATUS_TABLE,
+  KERNEL_LINK_NAME, KERNEL_TARGET_NAME
+} from './system-status-fixtures'
+
+const { probeBoxEngineFacts, engineProbeDeps, appleKernelFileOk } = await import('../engine')
+
+describe('OBV1: la sonda dei fatti — PRIMA il JSON, poi la tabella; il kernel dal FILE', () => {
+  const realRunCli = engineProbeDeps.runCli
+  const realStatFile = engineProbeDeps.statFile
+  const KERNEL_TARGET_BYTES_SAFE = 30_564_864
+  const asked: string[] = []
+
+  /** la CLI finta della sonda: --version ok, gli status come decisi dal test */
+  const stubCli = (answers: { json?: string; jsonExit?: number; table?: string; tableExit?: number }): void => {
+    engineProbeDeps.runCli = (async (_file: string, argv: string[]) => {
+      asked.push(argv.join(' '))
+      if (argv[0] === '--version') return { stdout: 'container version 1.7.1 (fake)', stderr: '', exitCode: 0 }
+      if (argv.join(' ') === 'system status --format json') return { stdout: answers.json ?? '', stderr: '', exitCode: answers.jsonExit ?? 0 }
+      if (argv.join(' ') === 'system status') return { stdout: answers.table ?? '', stderr: '', exitCode: answers.tableExit ?? 0 }
+      return { stdout: '', stderr: `unsupported: ${argv.join(' ')}`, exitCode: 1 }
+    }) as typeof realRunCli
+  }
+
+  /** la lettura del file del kernel: presente (file non vuoto) o assente */
+  const stubKernel = (present: boolean): void => {
+    engineProbeDeps.statFile = ((p: string) =>
+      present && p === join(NEUTRAL_APP_ROOT, 'kernels', KERNEL_LINK_NAME) ? { isFile: true, size: KERNEL_TARGET_BYTES_SAFE } : null
+    ) as typeof realStatFile
+  }
+
+  afterEach(() => {
+    engineProbeDeps.runCli = realRunCli
+    engineProbeDeps.statFile = realStatFile
+    asked.length = 0
+  })
+
+  it('il JSON vero → running, kernel dal file → appleContainerState ready (PRIMA diceva «stopped» col servizio acceso)', async () => {
+    stubCli({ json: SYSTEM_STATUS_JSON })
+    stubKernel(true)
+    const f = await probeBoxEngineFacts()
+    expect(f.containerInstalled).toBe(true)
+    expect(f.containerServiceRunning).toBe(true)
+    expect(f.containerKernelOk).toBe(true)
+    expect(appleContainerState(f)).toBe('ready')
+    // lo status si è chiesto in JSON, per primo
+    expect(asked.filter((a) => a.startsWith('system status'))[0]).toBe('system status --format json')
+  })
+
+  it('JSON non valido → si prova la TABELLA vera → running (prima la tabella dava SEMPRE false)', async () => {
+    stubCli({ json: 'uniframe non json', jsonExit: 0, table: SYSTEM_STATUS_TABLE })
+    stubKernel(true)
+    const f = await probeBoxEngineFacts()
+    expect(f.containerServiceRunning).toBe(true)
+    expect(f.containerKernelOk).toBe(true)
+    expect(appleContainerState(f)).toBe('ready')
+    expect(asked.filter((a) => a.startsWith('system status'))).toEqual(['system status --format json', 'system status'])
+  })
+
+  it('il flag --format json rifiutato (exit ≠ 0) → la tabella vera risponde lo stesso', async () => {
+    stubCli({ jsonExit: 1, table: SYSTEM_STATUS_TABLE })
+    stubKernel(true)
+    const f = await probeBoxEngineFacts()
+    expect(f.containerServiceRunning).toBe(true)
+    expect(appleContainerState(f)).toBe('ready')
+  })
+
+  it('il kernel ASSENTE (il file non c\'è) → kernel-missing col servizio ACCESO (prima «ok» per euristiche sul testo)', async () => {
+    stubCli({ json: SYSTEM_STATUS_JSON })
+    stubKernel(false)
+    const f = await probeBoxEngineFacts()
+    expect(f.containerServiceRunning).toBe(true)
+    expect(f.containerKernelOk).toBe(false)
+    expect(appleContainerState(f)).toBe('kernel-missing')
+  })
+
+  it('servizio SPENTO (status stopped) → stopped: il kernel non decide più niente', async () => {
+    stubCli({ json: SYSTEM_STATUS_JSON.replace('"status":"running"', '"status":"stopped"') })
+    stubKernel(true)
+    const f = await probeBoxEngineFacts()
+    expect(f.containerServiceRunning).toBe(false)
+    expect(appleContainerState(f)).toBe('stopped')
+  })
+
+  it('uscita VUOTA da entrambi i formati → fermo: né servizio né kernel (mai ottimisti)', async () => {
+    stubCli({})
+    stubKernel(true)
+    const f = await probeBoxEngineFacts()
+    expect(f.containerInstalled).toBe(true)
+    expect(f.containerServiceRunning).toBe(false)
+    expect(f.containerKernelOk).toBe(false)
+  })
+})
+
+describe('OBV1: appleKernelFileOk — il kernel è un FILE vero, seguito il symlink', () => {
+  const dir = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-obv1-kernel-'))
+  const kernels = join(dir, 'kernels')
+  beforeAll(() => {
+    mkdirSync(kernels)
+    writeFileSync(join(kernels, KERNEL_TARGET_NAME), Buffer.alloc(1_024))
+    symlinkSync(KERNEL_TARGET_NAME, join(kernels, KERNEL_LINK_NAME))
+  })
+  afterAll(() => rmSync(dir, { recursive: true, force: true }))
+
+  it('symlink → file NON vuoto → ok: è il layout vero di Apple dopo kernel set --recommended', () => {
+    expect(appleKernelFileOk(dir, 'arm64')).toBe(true)
+  })
+
+  it('bersaglio VUOTO → no; symlink APPESO → no; nome di un\'altra architettura → no', () => {
+    const other = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-obv1-kernel-b-'))
+    try {
+      mkdirSync(join(other, 'kernels'))
+      writeFileSync(join(other, 'kernels', KERNEL_TARGET_NAME), Buffer.alloc(0)) // vuoto
+      symlinkSync(KERNEL_TARGET_NAME, join(other, 'kernels', KERNEL_LINK_NAME))
+      expect(appleKernelFileOk(other, 'arm64')).toBe(false)
+      symlinkSync('bersaglio-che-non-esiste', join(other, 'kernels', 'default.kernel-x86_64'))
+      expect(appleKernelFileOk(other, 'x86_64')).toBe(false) // symlink appeso
+      expect(appleKernelFileOk(dir, 'x86_64')).toBe(false) // in dir c'è solo arm64
+    } finally {
+      rmSync(other, { recursive: true, force: true })
+    }
+  })
+
+  it('senza appRoot o senza arch → no (il kernel è SCONOSCIUTO, mai ottimista)', () => {
+    expect(appleKernelFileOk(null, 'arm64')).toBe(false)
+    expect(appleKernelFileOk(dir, null)).toBe(false)
+    expect(appleKernelFileOk(null, null)).toBe(false)
   })
 })

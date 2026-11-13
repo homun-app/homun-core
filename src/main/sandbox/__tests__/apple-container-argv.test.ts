@@ -266,3 +266,58 @@ describe('BX2: l\'immagine del box senza setuid utili', () => {
     expect(dockerfile).toContain('chmod a-s')
   })
 })
+
+// ---- OBV1 (fase onboarding-b-dal-vivo): lo status si legge davvero ----
+
+import {
+  parseSystemStatus,
+  parseSystemStatusJson,
+  parseSystemStatusTable,
+  appleSystemStatusJsonArgv,
+  appleSystemStatusArgv
+} from '../apple-container-argv'
+import { NEUTRAL_APP_ROOT, SYSTEM_STATUS_JSON, SYSTEM_STATUS_TABLE } from './system-status-fixtures'
+
+describe('OBV1: il parse di `system status` sui formati VERI (puro, niente euristiche sul testo)', () => {
+  it('il JSON vero → running, appRoot e arch letti dai campi (status === "running")', () => {
+    expect(parseSystemStatusJson(SYSTEM_STATUS_JSON)).toEqual({ running: true, appRoot: NEUTRAL_APP_ROOT, arch: 'arm64' })
+    expect(parseSystemStatus(SYSTEM_STATUS_JSON)).toEqual({ running: true, appRoot: NEUTRAL_APP_ROOT, arch: 'arm64' })
+  })
+
+  it('la TABELLA vera di default → running: true (prima era SEMPRE false: la tabella non ha «running:»)', () => {
+    expect(parseSystemStatusTable(SYSTEM_STATUS_TABLE)).toEqual({ running: true, appRoot: NEUTRAL_APP_ROOT, arch: 'arm64' })
+  })
+
+  it('parseSystemStatus prova il JSON e CADE sulla tabella quando il JSON non è valido', () => {
+    expect(parseSystemStatus(SYSTEM_STATUS_TABLE)).toEqual({ running: true, appRoot: NEUTRAL_APP_ROOT, arch: 'arm64' })
+    expect(parseSystemStatus('non è un JSON\n' + SYSTEM_STATUS_TABLE)).toEqual({ running: true, appRoot: NEUTRAL_APP_ROOT, arch: 'arm64' })
+  })
+
+  it('stopped: il JSON dice "stopped" → running false (il JSON valido basta, niente seconda chiamata)', () => {
+    const stoppedJson = SYSTEM_STATUS_JSON.replace('"status":"running"', '"status":"stopped"')
+    expect(parseSystemStatus(stoppedJson)).toEqual({ running: false, appRoot: NEUTRAL_APP_ROOT, arch: 'arm64' })
+  })
+
+  it('stopped: la tabella dice «status stopped» → running false', () => {
+    const stoppedTable = SYSTEM_STATUS_TABLE.replace('status              running', 'status              stopped')
+    expect(parseSystemStatus(stoppedTable)).toEqual({ running: false, appRoot: NEUTRAL_APP_ROOT, arch: 'arm64' })
+  })
+
+  it('uscita vuota, spazzatura o JSON senza status → tutto falso e niente appRoot (mai ottimisti)', () => {
+    expect(parseSystemStatus('')).toEqual({ running: false, appRoot: null, arch: null })
+    expect(parseSystemStatus('qualcosa è andato storto')).toEqual({ running: false, appRoot: null, arch: null })
+    expect(parseSystemStatus('{"client":{"version":"1.7.1"}}')).toEqual({ running: false, appRoot: null, arch: null })
+  })
+
+  it('gli argv dello status: PRIMA il JSON, poi la tabella (il fallback è un\'altra chiamata)', () => {
+    expect(appleSystemStatusJsonArgv()).toEqual(['system', 'status', '--format', 'json'])
+    expect(appleSystemStatusArgv()).toEqual(['system', 'status'])
+  })
+
+  it('le vecchie euristiche sul testo sono VIA: il parse non ha più un campo kernelOk', () => {
+    // la tabella vera non parla MAI del kernel: nessuna riga con «kernel …
+    // missing» può più cambiarne l'esito — il kernel si rileva dal FILE
+    const p = parseSystemStatus(SYSTEM_STATUS_TABLE + '\nkernel: missing (use: container system kernel set --recommended)')
+    expect(p).toEqual({ running: true, appRoot: NEUTRAL_APP_ROOT, arch: 'arm64' })
+  })
+})

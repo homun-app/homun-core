@@ -21,15 +21,21 @@ const engine = await import('../../main/sandbox/engine')
 const u = await import('../../main/sandbox/apple-uninstall')
 
 const h = vi.hoisted(() => ({ calls: [] as string[][], files: [] as string[] }))
-// la CLI finta: --version e system status rispondono PRONTI (il runner della
-// sonda è sostituibile — nessuno spawn nei test)
+// la CLI finta: --version ok e lo status nel FORMATO VERO della CLI 1.7.1
+// (OBV1, fase onboarding-b-dal-vivo: JSON prima, poi la tabella — le fixture
+// sono le uscite della prova dal vivo, con appRoot neutro). Anche la lettura
+// del FILE del kernel è finta: nessuno spawn e nessun fs nei test.
+const FIXTURES = await import('../../main/sandbox/__tests__/system-status-fixtures')
 engine.engineProbeDeps.runCli = async (file, argv) => {
   h.calls.push(argv)
   h.files.push(file)
-  if (argv[0] === '--version') return { stdout: 'container 1.7.1', stderr: '', exitCode: 0 }
-  if (argv[0] === 'system' && argv[1] === 'status') return { stdout: 'running: true', stderr: '', exitCode: 0 }
+  if (argv[0] === '--version') return { stdout: 'container version 1.7.1', stderr: '', exitCode: 0 }
+  if (argv.join(' ') === 'system status --format json') return { stdout: FIXTURES.SYSTEM_STATUS_JSON, stderr: '', exitCode: 0 }
+  if (argv.join(' ') === 'system status') return { stdout: FIXTURES.SYSTEM_STATUS_TABLE, stderr: '', exitCode: 0 }
   return { stdout: '', stderr: '', exitCode: 0 }
 }
+engine.engineProbeDeps.statFile = (path) =>
+  path === FIXTURES.NEUTRAL_APP_ROOT + 'kernels/' + FIXTURES.KERNEL_LINK_NAME ? { isFile: true, size: FIXTURES.KERNEL_TARGET_BYTES } : null
 
 import type { JobWorker } from '../worker'
 const api: Record<string, (p: unknown[]) => unknown> = buildApiMethods(() => undefined, { poke: () => undefined } as unknown as JobWorker)

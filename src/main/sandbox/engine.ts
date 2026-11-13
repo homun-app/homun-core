@@ -256,10 +256,12 @@ export function sandboxEngineSetting(): SandboxEngineSetting {
 // del motore). Mai sondato → docker, il comportamento di oggi.
 
 import { execFile } from 'node:child_process'
+import { statSync } from 'node:fs'
+import { join } from 'node:path'
 import { release } from 'node:os'
 import { dockerEngine as dockerEngineImpl, dockerToolStatusInfo } from './docker-engine'
 import { appleContainerEngine as appleContainerEngineImpl } from './apple-container-engine'
-import { parseSystemStatus } from './apple-container-argv'
+import { parseSystemStatusJson, parseSystemStatusTable, appleSystemStatusJsonArgv, appleSystemStatusArgv } from './apple-container-argv'
 // OB6: l'override dei fatti macchina vale solo non impacchettata
 import { isPackagedRuntime } from '../../shared/packaged'
 
@@ -319,8 +321,50 @@ export function defaultCliRunner(file: string, argv: string[], timeoutMs: number
   })
 }
 
-/** Le dipendenze della sonda, sostituibili nei test (nessuno spawn). */
-export const engineProbeDeps: { runCli: typeof defaultCliRunner } = { runCli: defaultCliRunner }
+/** L'esito della lettura di un file per la sonda (segue i symlink). */
+export interface KernelFileStat {
+  isFile: boolean
+  size: number
+}
+
+/** La lettura di produzione: statSync SEGUE il symlink (null = non c'è). */
+function defaultStatFile(path: string): KernelFileStat | null {
+  try {
+    const s = statSync(path)
+    return { isFile: s.isFile(), size: s.size }
+  } catch {
+    return null
+  }
+}
+
+/** Le dipendenze della sonda, sostituibili nei test (nessuno spawn, nessun fs). */
+export const engineProbeDeps: {
+  runCli: typeof defaultCliRunner
+  /** OBV1: la lettura del file del kernel (il FOLLOW del symlink sta qui) */
+  statFile: (path: string) => KernelFileStat | null
+} = { runCli: defaultCliRunner, statFile: defaultStatFile }
+
+/**
+ * OBV1 (fase onboarding-b-dal-vivo): il kernel si rileva dal FILE, non dal
+ * testo dello status (che non ne parla mai). C'è se
+ * `<appRoot>/kernels/default.kernel-<arch>` esiste e, SEGUENDO il symlink,
+ * il bersaglio è un file NON vuoto — è il layout vero dopo
+ * `container system kernel set --recommended`:
+ * `default.kernel-arm64 -> vmlinux-6.18.56-208-debug`. Senza appRoot o arch
+ * (servizio spento, uscita senza percorsi) il kernel è SCONOSCIUTO → false:
+ * si tratta come assente SOLO quando il servizio è acceso (per lo stato in
+ * parole 'stopped' viene PRIMA di 'kernel-missing', quindi da spento non
+ * decide niente). La lettura è iniettabile per i test.
+ */
+export function appleKernelFileOk(
+  appRoot: string | null,
+  arch: string | null,
+  statFile: (path: string) => KernelFileStat | null = engineProbeDeps.statFile
+): boolean {
+  if (!appRoot || !arch) return false
+  const st = statFile(join(appRoot, 'kernels', `default.kernel-${arch}`))
+  return !!st && st.isFile && st.size > 0
+}
 
 /**
  * I FATTI della macchina per la scelta del motore (BX4): versione di macOS,
@@ -328,6 +372,10 @@ export const engineProbeDeps: { runCli: typeof defaultCliRunner } = { runCli: de
  * La CLI di Apple è quella del MOTORE (con SANDBOT_TEST_USER_DATA +
  * SANDBOT_TEST_CONTAINER_CLI è la CLI finta dei test, BX5); Docker si guarda
  * senza spawn (socket, come sempre).
+ * OBV1 (fase onboarding-b-dal-vivo): lo status si chiede in JSON
+ * (`system status --format json`); JSON non valido → si prova la TABELLA di
+ * default. Il kernel NON si deduce più dal testo (che non ne parla mai): si
+ * guarda il FILE `<appRoot>/kernels/default.kernel-<arch>`.
  */
 export async function probeBoxEngineFacts(): Promise<BoxEngineFacts> {
   const cmd = appleContainerEngineImpl.command()
@@ -337,11 +385,19 @@ export async function probeBoxEngineFacts(): Promise<BoxEngineFacts> {
   const ver = await engineProbeDeps.runCli(cmd, ['--version'], 5_000).catch(() => null)
   if (ver && ver.exitCode === 0) {
     containerInstalled = true
-    const st = await engineProbeDeps.runCli(cmd, ['system', 'status'], 5_000).catch(() => null)
-    if (st && st.exitCode === 0) {
-      const parsed = parseSystemStatus(st.stdout)
+    let parsed: ReturnType<typeof parseSystemStatusJson> = null
+    const json = await engineProbeDeps.runCli(cmd, appleSystemStatusJsonArgv(), 5_000).catch(() => null)
+    if (json && json.exitCode === 0) parsed = parseSystemStatusJson(json.stdout)
+    if (!parsed) {
+      // JSON non valido (o il flag rifiutato): la TABELLA di default
+      const table = await engineProbeDeps.runCli(cmd, appleSystemStatusArgv(), 5_000).catch(() => null)
+      if (table && table.exitCode === 0) parsed = parseSystemStatusTable(table.stdout)
+    }
+    if (parsed) {
       containerServiceRunning = parsed.running
-      containerKernelOk = parsed.kernelOk
+      // il kernel: dal FILE, solo se il servizio è ACCESO (da spento è
+      // sconosciuto e non decide: lo stato direbbe 'stopped' comunque)
+      containerKernelOk = parsed.running ? appleKernelFileOk(parsed.appRoot, parsed.arch) : false
     }
   }
   const docker = dockerToolStatusInfo()
