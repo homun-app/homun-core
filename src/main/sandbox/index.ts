@@ -251,19 +251,25 @@ async function docker(argv: string[], opts: SpawnOptions = {}): Promise<SpawnRes
  * Il runner dei comandi docker del modulo (argv puri): iniettabile nei test,
  * così la sequenza container→home→exec e la memoria delle home si provano
  * senza Docker (H2).
+ * OBV3 (fase onboarding-b-dal-vivo): chi ne ha uno lo può passare ESPlicitO
+ * — il PERCORSO e l'env dei figli diventano del MOTORE PASSATO, non della
+ * cache dell'auto (che all'avvio, quando container non c'era ancora, diceva
+ * docker). Senza motore resta il comportamento di oggi: il motore attivo.
  */
-export type DockerRunner = (argv: string[], opts?: SpawnOptions) => Promise<SpawnResult>
+export type DockerRunner = (argv: string[], opts?: SpawnOptions, engine?: import('./engine').BoxEngine) => Promise<SpawnResult>
 
 // fase rilascio (A7) → BX1: il PERCORSO risolto e l'env dei figli sono del
 // MOTORE attivo (docker: percorso risolto + DOCKER_HOST quando serve il
 // socket di Docker Desktop; apple-container: la CLI di Apple)
-let dockerRunner: DockerRunner = (argv, opts) =>
-  runProcess(activeBoxEngine().command(), argv, { ...opts, env: activeBoxEngine().childEnv(opts?.env ? { ...process.env, ...opts.env } : process.env) })
+const runWithEngine = (engine: import('./engine').BoxEngine) =>
+  (argv: string[], opts: SpawnOptions = {}) =>
+    runProcess(engine.command(), argv, { ...opts, env: engine.childEnv(opts?.env ? { ...process.env, ...opts.env } : process.env) })
+
+let dockerRunner: DockerRunner = (argv, opts, engine) => runWithEngine(engine ?? activeBoxEngine())(argv, opts)
 
 /** Solo per i test: sostituisce (o ripristina) il runner dei comandi del box. */
 export function setDockerRunnerForTests(runner: DockerRunner | null): void {
-  dockerRunner = runner ?? ((argv, opts) =>
-    runProcess(activeBoxEngine().command(), argv, { ...opts, env: activeBoxEngine().childEnv(opts?.env ? { ...process.env, ...opts.env } : process.env) }))
+  dockerRunner = runner ?? ((argv, opts, engine) => runWithEngine(engine ?? activeBoxEngine())(argv, opts))
 }
 
 /** Solo per i test: azzera la memoria delle home assicurate (container fresco). */
@@ -385,6 +391,10 @@ function notifyBoxImageBuild(): void {
  * Punto 1: se l'immagine del box manca, la COSTRUISCE (timeout 20 minuti,
  * single-flight, notice al bot principale). false = build fallita (l'errore
  * lo dice il chiamante, che sa se il container vecchio esiste ancora).
+ * OBV3 (fase onboarding-b-dal-vivo): la PREPARAZIONE passa il motore
+ * ESPlicitO (Apple) — la build non guarda MAI la cache dell'auto, che
+ * all'avvio diceva docker (dal vivo: «Cannot connect to the Docker
+ * daemon»). Senza motore resta il motore attivo, come sempre.
  */
 /** L'ultimo motivo (chiaro) per cui la build del box non è partita o finita. */
 let lastBoxImageBuildError: string | null = null
@@ -394,11 +404,13 @@ let lastBoxImageBuildError: string | null = null
  * preparazione del computer del bot (l'ultima fase della guida), in
  * background — la stessa promise single-flight del primo uso.
  */
-export function ensureBoxImage(): Promise<boolean> {
+export function ensureBoxImage(engine?: import('./engine').BoxEngine): Promise<boolean> {
   if (!boxImageBuild) {
     boxImageBuild = (async () => {
+      // OBV3: il motore di QUESTA build (esplicito o attivo) — e il log lo dice
+      const e = engine ?? activeBoxEngine()
       const tag = boxImage()
-      const has = await dockerRunner(activeBoxEngine().argv.imageInspect(tag), { timeoutMs: 15_000 })
+      const has = await dockerRunner(e.argv.imageInspect(tag), { timeoutMs: 15_000 }, e)
       if (has.exitCode === 0) return true
       // BX3: prima della build si guarda lo spazio libero — servono la stima
       // PIÙ 5 GB di margine; senza, errore chiaro (quanto manca) e NESSUNA
@@ -411,16 +423,17 @@ export function ensureBoxImage(): Promise<boolean> {
       }
       notifyBoxImageBuild()
       const dockerfile = boxDockerfilePath()
-      const build = await dockerRunner(activeBoxEngine().argv.build(tag, dockerfile, dirname(dockerfile)), { timeoutMs: BOX_IMAGE_BUILD_TIMEOUT_MS })
+      console.log(`[sandbox] build dell'immagine del box (${tag}) col motore ${e.id}`)
+      const build = await dockerRunner(e.argv.build(tag, dockerfile, dirname(dockerfile)), { timeoutMs: BOX_IMAGE_BUILD_TIMEOUT_MS }, e)
       if (build.exitCode !== 0) {
-        console.error(`[sandbox] build dell'immagine del box (${tag}) fallita: ${(build.stderr || `exit ${build.exitCode}`).slice(0, 500)}`)
+        console.error(`[sandbox] build dell'immagine del box (${tag}, motore ${e.id}) fallita: ${(build.stderr || `exit ${build.exitCode}`).slice(0, 500)}`)
         return false
       }
       // BX3: build RIUSCITA → la pulizia SICURA toglie la cache di build del
       // nostro box (con Docker cresceva senza limiti: 1,15 GB sul Mac
       // dell'utente); pruneSafe non tocca MAI l'immagine in uso né i volumi
-      for (const argv of activeBoxEngine().argv.pruneSafe()) {
-        const prune = await dockerRunner(argv, { timeoutMs: 60_000 }).catch(() => null)
+      for (const argv of e.argv.pruneSafe()) {
+        const prune = await dockerRunner(argv, { timeoutMs: 60_000 }, e).catch(() => null)
         if (prune && prune.exitCode !== 0) {
           console.warn(`[sandbox] pulizia post-build (${argv.join(' ')}) non riuscita: ${(prune.stderr || '').slice(0, 200)}`)
         }

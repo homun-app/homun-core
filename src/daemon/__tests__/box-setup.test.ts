@@ -5,7 +5,7 @@
 // cancellato, NESSUN open), gli override di prova ignorati nell'app
 // impacchettata e lo spazio insufficiente. L'esecutore gira con dipendenze
 // INIETTABILI: nessuno spawn, nessuna rete (il fetch è finto).
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, beforeAll } from 'vitest'
 import { createHash } from 'node:crypto'
 import { mkdtempSync, rmSync, writeFileSync, existsSync, statSync } from 'node:fs'
 import { join } from 'node:path'
@@ -266,6 +266,10 @@ interface Harness {
    * compare mentre la preparazione gira).
    */
   engineStates: AppleEngineState[]
+  /** OBV3: i motori che la build dell'immagine ha ricevuto (espliciti) */
+  buildEngines: (import('../../main/sandbox/engine').BoxEngineId | undefined)[]
+  /** OBV3: quante volte la preparazione ha RINFRESCATO la sonda del motore */
+  refreshCalls: number
 }
 
 /** L'arnese di prova: dipendenze fintissime, nessuno spawn, nessuna rete. */
@@ -281,6 +285,8 @@ const harness = (over: {
   engineState?: AppleEngineState
   /** OBV2: la coda iniziale degli stati del motore (vedi Harness.engineStates) */
   engineStates?: AppleEngineState[]
+  /** OBV3: la coda degli stati che risponde al RINFRESCO della sonda (vuota → 'ready') */
+  refreshStates?: AppleEngineState[]
   hasImage?: boolean
   buildOk?: boolean
   /** OBV2: l'esito di `system kernel set --recommended` (0 = installa) */
@@ -295,12 +301,16 @@ const harness = (over: {
   const cliCalls: string[][] = []
   const logs: string[] = []
   const engineStates: AppleEngineState[] = [...(over.engineStates ?? [])]
+  const refreshStates: AppleEngineState[] = [...(over.refreshStates ?? [])]
+  const buildEngines: (import('../../main/sandbox/engine').BoxEngineId | undefined)[] = []
+  let refreshCalls = 0
   let installed = false
   const bytes = over.bytes ?? new Uint8Array(8).fill(7)
   const pkgutilPath = '/bin/finto-pkgutil'
   const spctlPath = '/bin/finto-spctl'
   const h: Harness = {
-    dir, settings, events, opened, cliCalls, logs, engineStates,
+    dir, settings, events, opened, cliCalls, logs, engineStates, buildEngines,
+    get refreshCalls() { return refreshCalls },
     containerAppears: () => { installed = true },
     deps: {
       now: () => 1_000,
@@ -328,8 +338,16 @@ const harness = (over: {
       },
       containerCli: () => '/bin/finto-container',
       engineState: async () => (engineStates.length > 0 ? engineStates.shift()! : over.engineState ?? 'not-installed'),
+      // OBV3: il RINFRESCO della sonda del motore — coda come engineStates;
+      // a vuoto vale 'ready' (dopo il kernel Apple È pronto: è il mondo vero
+      // in cui la preparazione arriva al build)
+      refreshEngineState: async () => {
+        refreshCalls++
+        return refreshStates.length > 0 ? refreshStates.shift()! : 'ready'
+      },
       hasBoxImage: async () => over.hasImage ?? false,
-      buildBoxImage: async () => over.buildOk ?? true,
+      // OBV3: la build riceve il motore ESPlicitO — lo si registra
+      buildBoxImage: async (engine) => { buildEngines.push(engine); return over.buildOk ?? true },
       openInstaller: async (pkgPath: string) => { opened.push(pkgPath); return { ok: true } },
       log: (line: string) => { logs.push(line) },
       timings: { pollInstallerMs: 5, downloadTimeoutMs: 60_000, networkRetryDelayMs: 5 },
@@ -710,5 +728,49 @@ describe('OBV2: il kernel si installa UNA volta sola', () => {
     expect(fin.phase).toBe('ready')
     expect(kernelSetCalls(h).length).toBe(kernelCallsBefore) // nessun ALTRO kernel set
     expect(systemStartCalls(h).length).toBe(startCallsBefore) // NESSUN system start
+  })
+})
+
+// ---- OBV3 (fase onboarding-b-dal-vivo): l'immagine si costruisce SOLO col motore Apple ----
+
+describe('OBV3: l\'immagine si costruisce SOLO col motore Apple', () => {
+  // il messaggio dell'errore in parole è quello italiano del catalogo
+  beforeAll(async () => {
+    const { setDataDir, dataDir, db, setSetting } = await import('../../main/store/db')
+    void setDataDir; void dataDir; void db
+    setSetting('ui.activeLanguage', 'it')
+  })
+
+  it('cache dell\'auto su Docker e Apple pronto dopo il RINFRESCO → build con APPLE', async () => {
+    // il difetto del vivo: la sonda dell'avvio (quando container non c'era
+    // ancora) aveva messo Docker nella cache dell'auto, e la preparazione
+    // costruiva con Docker («Cannot connect to the Docker daemon»)
+    const h = harness({ engineState: 'ready', hasImage: false, refreshStates: ['ready'] })
+    const ctl = createBoxSetup(h.deps)
+    const fin = await ctl.start()
+    expect(fin.phase).toBe('ready')
+    expect(h.refreshCalls).toBeGreaterThan(0) // la sonda si è RINFRESCATA
+    expect(h.buildEngines).toEqual(['apple-container']) // il motore ESPlicitO
+  })
+
+  it('dopo il rinfresco Apple NON pronto → errore in parole, NESSUN build (mai Docker)', async () => {
+    const h = harness({ engineState: 'ready', hasImage: false, refreshStates: ['stopped'] })
+    const ctl = createBoxSetup(h.deps)
+    const fin = await ctl.start()
+    expect(fin.phase).toBe('error')
+    expect(ctl.state().error).toMatchObject({ phase: 'building-image', code: 'image' })
+    expect(ctl.state().error?.message).toContain('non risponde ancora')
+    expect(h.buildEngines).toEqual([]) // NESSUN build, nemmeno con Docker
+  })
+
+  it('nella preparazione NESSUN argv docker: il build riceve SEMPRE il motore Apple', async () => {
+    const h = harness({ engineState: 'kernel-missing', refreshStates: ['ready'] })
+    const ctl = createBoxSetup(h.deps)
+    const fin = await ctl.start()
+    expect(fin.phase).toBe('ready')
+    expect(h.buildEngines).toEqual(['apple-container'])
+    // e OGNI CLI chiamata dalla preparazione è la CLI di Apple, mai docker
+    expect(h.cliCalls.length).toBeGreaterThan(0)
+    expect(h.cliCalls.every((c) => c[0] === '/bin/finto-container')).toBe(true)
   })
 })

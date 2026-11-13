@@ -851,6 +851,13 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
       const e = await import('../main/sandbox/engine')
       return e.appleContainerState(await e.probeBoxEngineFacts())
     },
+    // OBV3: il RINFRESCO della sonda dell'auto prima del build — la cache
+    // dell'avvio (fatta quando container non c'era ancora) diceva docker
+    refreshEngineState: async () => {
+      const e = await import('../main/sandbox/engine')
+      const { facts } = await e.refreshAutoEngine()
+      return e.appleContainerState(facts)
+    },
     hasBoxImage: () => hasBoxImageNow(),
     // OB2: la preparazione è arrivata in fondo — si rifrescano i fatti del
     // motore e l'immagine (per lo status del passo). La guida NON si
@@ -862,7 +869,12 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
         .then(() => hasBoxImageNow())
         .catch(() => undefined)
     },
-    buildBoxImage: () => import('../main/sandbox').then((m) => m.ensureBoxImage()),
+    // OBV3: la build riceve il motore ESPlicitO — la preparazione costruisce
+    // SEMPRE con Apple, mai con la cache dell'auto
+    buildBoxImage: (engineId) =>
+      import('../main/sandbox/engine').then((e) =>
+        import('../main/sandbox').then((m) => m.ensureBoxImage(engineId === 'apple-container' ? e.appleContainerEngine : e.activeBoxEngine()))
+      ),
     openInstaller: async (pkgPath) => {
       // `/usr/bin/open -a Installer <pkg>` (o l'override di prova): la
       // finestra di Apple, quella che chiede la password nel suo processo di sistema

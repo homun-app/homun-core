@@ -819,6 +819,9 @@ export const UI = {
   boxSetupServiceFailed: msg({ id: 'boxSetup.serviceFailed', message: 'Non riesco ad accendere il servizio del computer dei bot.' }),
   boxSetupKernelFailed: msg({ id: 'boxSetup.kernelFailed', message: 'Non riesco a installare il kernel Linux consigliato da Apple.' }),
   boxSetupImageFailed: msg({ id: 'boxSetup.imageFailed', message: 'Non riesco a preparare il computer del bot.' }),
+  // OBV3 (fase onboarding-b-dal-vivo): il build dell'immagine non cade MAI
+  // su Docker: se dopo il rinfresco Apple non è pronto, lo si dice in parole
+  boxSetupAppleNotReady: msg({ id: 'boxSetup.appleNotReady', message: 'Lo strumento di Apple è installato ma non risponde ancora: riprova fra poco.' }),
 
   // ---- OB5 (fase onboarding-b): togliere lo strumento di Apple ----
   boxUninstallNoScript: msg({

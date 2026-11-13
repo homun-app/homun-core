@@ -19,7 +19,7 @@ import { createReadStream, existsSync, statSync, unlinkSync, renameSync, mkdirSy
 import { open as openFile } from 'node:fs/promises'
 import { Readable } from 'node:stream'
 import { basename, dirname, join } from 'node:path'
-import type { AppleEngineState, CliRunResult } from '../main/sandbox/engine'
+import type { AppleEngineState, BoxEngineId, CliRunResult } from '../main/sandbox/engine'
 import {
   APPLE_CONTAINER_PKG_URL, APPLE_CONTAINER_PKG_BYTES, APPLE_CONTAINER_PKG_SHA256
 } from '../main/sandbox/apple-container-release'
@@ -348,10 +348,20 @@ export interface BoxSetupDeps {
   containerCli(): string
   /** lo stato del motore Apple in parole (la sonda dei fatti) */
   engineState(): Promise<AppleEngineState>
+  /**
+   * OBV3: RINFRESCA la sonda dell'auto e torna lo stato Apple letto ADESSO
+   * (la cache dell'avvio, fatta quando container non c'era ancora, dice
+   * docker: nessuno la deve più guardare per il build della preparazione)
+   */
+  refreshEngineState(): Promise<AppleEngineState>
   /** l'immagine del box c'è già? */
   hasBoxImage(): Promise<boolean>
-  /** la build dell'immagine in background (ensureBoxImage di oggi) */
-  buildBoxImage(): Promise<boolean>
+  /**
+   * OBV3: la build dell'immagine in background (ensureBoxImage di oggi) col
+   * motore ESPlicitO — la preparazione passa SEMPRE 'apple-container', mai
+   * la cache di activeBoxEngine()
+   */
+  buildBoxImage(engine: BoxEngineId): Promise<boolean>
   /** apre l'Installer di macOS col pacchetto verificato */
   openInstaller(pkgPath: string): Promise<{ ok: boolean; error?: string }>
   /** una riga di log del daemon (qui finisce la stderr RIPULITA, mai in UI) */
@@ -610,7 +620,16 @@ export function createBoxSetup(deps: BoxSetupDeps): BoxSetupController {
   async function buildImage(): Promise<void> {
     // il build può durare MINUTI: l'utente può andare avanti nella guida
     apply({ type: 'image-building', buildPhase: null })
-    const ok = await deps.buildBoxImage()
+    // OBV3: dopo l'installazione, il servizio e il kernel la sonda si
+    // RINFRESCA — la cache dell'auto è della partenza (container assente →
+    // docker) e non si deve MAI usare per il build della preparazione
+    const appleState = await deps.refreshEngineState().catch(() => 'unsupported' as AppleEngineState)
+    if (appleState !== 'ready') {
+      // MAI un build con Docker dalla preparazione: si dice in parole
+      apply({ type: 'image-fail', message: uiText(UI.boxSetupAppleNotReady) })
+      return
+    }
+    const ok = await deps.buildBoxImage('apple-container')
     if (state.phase !== 'building-image') return // annullato mentre costruiva
     if (!ok) {
       apply({ type: 'image-fail', message: uiText(UI.boxSetupImageFailed) })
