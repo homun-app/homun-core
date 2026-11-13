@@ -19,9 +19,13 @@
 // di prova. Copre: il percorso intero (download, verifica, Installer,
 // installazione, servizio, kernel, immagine, ready, happy, Continua,
 // «Computer: pronto»), lo sha256 sbagliato (errore, NESSUN open), il
-// riavvio su awaiting-installer, «Continua» durante l'immagine (la riga del
-// pannello arriva a «Pronto» DOPO la guida) e la macchina non supportata
-// (niente passo). Catture ob-* in docs/catture/onboarding-a/.
+// riavvio su awaiting-installer e la macchina non supportata (niente
+// passo). OBD (fase dettagli): durante l'immagine «Continua» è DISABILITATO
+// e si prosegue SOLO con «Salta per ora» (la riga del pannello arriva a
+// «Pronto» DOPO la guida); col kernel già presente il consenso è del PIANO
+// (solo immagine + «non serve la password del Mac»), le righe saltate col
+// loro testo e il dettaglio del build dal catalogo. Catture ob-* e obd-* in
+// docs/catture/onboarding-a/.
 // Catture guida-v2-* e oac-* in docs/catture/onboarding-a/. A FINE SONDA si
 // chiude ANCHE il daemon di sviluppo, la cartella viene rimossa, nessun push.
 import { spawn } from 'node:child_process'
@@ -918,15 +922,16 @@ log('FASE OB-c: riavvio sull\'attesa dell\'Installer…')
   await stopEverything(DATA8)
 }
 
-/** ---------------- FASE OB-d (OB6.3): «Continua» durante l'immagine ---------------- */
-log('FASE OB-d: si prosegue mentre l\'immagine si costruisce…')
+/** ---------------- FASE OB-d (OBD1): durante l'immagine si prosegue SOLO con «Salta per ora» ---------------- */
+log('FASE OB-d: si prosegue (con «Salta per ora») mentre l\'immagine si costruisce…')
 {
   const f = freshOb()
   const DATA9 = join(TMP, 'nove')
   mkdirSync(join(DATA9, 'data'), { recursive: true })
   seedEngineApple(DATA9)
-  // la build finta DURA: la guida deve poter proseguire intanto
-  await startApp(DATA9, obEnv({ SANDBOT_TEST_CONTAINER_BUILD_DELAY_MS: '6000', SANDBOT_TEST_CONTAINER_LOG: f.cliLog, SANDBOT_TEST_OPEN_LOG: f.openLog, SANDBOT_TEST_CONTAINER_APP_ROOT: f.appRoot }))
+  // la build finta DURA (le righe della fixture distribuite nel tempo): la
+  // guida deve dire la verità sul bottone, e l'unica via è «Salta per ora»
+  await startApp(DATA9, obEnv({ SANDBOT_TEST_CONTAINER_BUILD_DELAY_MS: '12000', SANDBOT_TEST_CONTAINER_LOG: f.cliLog, SANDBOT_TEST_OPEN_LOG: f.openLog, SANDBOT_TEST_CONTAINER_APP_ROOT: f.appRoot }))
   await waitDom(`!!document.querySelector('[data-testid="guide-step-welcome"]')`, 25_000)
   await tuStep({ name: 'Bot' })
   await waitDom(`!!document.querySelector('[data-testid="guide-step-model"]')`, 10_000)
@@ -935,12 +940,18 @@ log('FASE OB-d: si prosegue mentre l\'immagine si costruisce…')
   await clickTestid('guide-computer-prepare')
   await waitDom(`!!document.querySelector('[data-testid="box-setup-open-installer"]')`, 30_000)
   await clickTestid('box-setup-open-installer')
-  // l'immagine sta costruendo: «Continua» è ATTIVO (fase in background)
-  check('OB-d1 durante la build dell\'immagine «Continua» è attivo',
+  // OBD1: l'immagine sta costruendo e «Continua» è DISABILITATO — il passo
+  // non è finito; prima era attivo e sembrava il contrario
+  check('OB-d1 durante la build dell\'immagine «Continua» è DISABILITATO',
     await waitDom(`document.querySelector('[data-testid="box-setup-row-image"]')?.getAttribute('data-status') === 'running'`, 30_000)
-    && (await pageEval(`return document.querySelector('[data-testid="guide-continue"]')?.disabled !== true`)))
-  await clickTestid('guide-continue')
-  check('OB-d2 si arriva ai Permessi mentre l\'immagine costruisce', await waitDom(`!!document.querySelector('[data-testid="guide-step-approvals"]')`, 10_000))
+    && (await pageEval(`return document.querySelector('[data-testid="guide-continue"]')?.disabled === true`)),
+    `continue: ${await pageEval(`return document.querySelector('[data-testid="guide-continue"]')?.disabled`)}`)
+  // l'unica via per andare avanti prima della fine: «Salta per ora» (la
+  // preparazione CONTINUA in background)
+  check('OB-d2a «Salta per ora» c\'è mentre l\'immagine costruisce',
+    !!(await pageEval(`return !!document.querySelector('[data-testid="guide-skip"]')`)))
+  await clickTestid('guide-skip')
+  check('OB-d2 si arriva ai Permessi con «Salta per ora» mentre l\'immagine costruisce', await waitDom(`!!document.querySelector('[data-testid="guide-step-approvals"]')`, 10_000))
   await clickTestid('guide-approvals-ask')
   await waitDom(`!document.querySelector('[data-testid="guide-continue"]')?.disabled`, 10_000)
   await clickTestid('guide-continue') // → Pronto
@@ -983,12 +994,15 @@ log('FASE OBV-a: kernel già presente…')
   const DATA11 = join(TMP, 'undici')
   mkdirSync(join(DATA11, 'data'), { recursive: true })
   seedEngineApple(DATA11)
-  // la CLI finta è GIÀ nel PATH di prova (il «Mac» ha già lo strumento)
+  // la CLI finta è GIÀ nel PATH di prova (il «Mac» ha già lo strumento).
+  // OBD: la build DURA (le righe della fixture nello stderr, distribuite):
+  // si devono VEDERE il consenso del piano, le righe saltate e il dettaglio
   writeFileSync(join(OB_BIN, 'container'), readFileSync(OB_CLI_SRC))
   chmodSync(join(OB_BIN, 'container'), 0o755)
   const hitsBefore = pkgHits
   await startApp(DATA11, obEnv({
     SANDBOT_TEST_CONTAINER_MODE: 'ready',
+    SANDBOT_TEST_CONTAINER_BUILD_DELAY_MS: '9000',
     SANDBOT_TEST_CONTAINER_LOG: f.cliLog,
     SANDBOT_TEST_OPEN_LOG: f.openLog,
     SANDBOT_TEST_CONTAINER_APP_ROOT: f.appRoot
@@ -999,18 +1013,66 @@ log('FASE OBV-a: kernel già presente…')
   await clickTestid('guide-skip')
   check('OBV-a1 il passo Computer c\'è (macchina supportata, immagine assente)',
     await waitDom(`!!document.querySelector('[data-testid="guide-step-computer"]')`, 10_000), `step: ${await guideStep()}`)
+  // OBD2: il consenso del PIANO — solo il passo immagine: niente GitHub,
+  // niente password (anzi: lo DICE), niente kernel. Il piano arriva dal
+  // daemon col mount del passo: si aspetta che la lista si riempia
+  const consentReady = await waitDom(`(() => { const c = document.querySelector('[data-testid="guide-computer-consent"]'); return !!c && c.querySelectorAll('li').length > 0 })()`, 15_000)
+  const consentBefore = await pageEval(`return document.querySelector('[data-testid="guide-computer-consent"]')?.innerText ?? null`)
+  check('OBD2-a il consenso mostra SOLO la riga dell\'immagine e «non serve la password del Mac»',
+    consentReady
+    && !consentBefore.includes('GitHub') && !consentBefore.includes('170 MB')
+    && !consentBefore.includes('ti chiederà la password') && !consentBefore.toLowerCase().includes('kernel')
+    && consentBefore.includes('non serve la password del Mac')
+    && /preparo il computer del bot \(circa \d+ GB\)/.test(consentBefore),
+    consentBefore)
+  await shot('obd-consenso-solo-immagine-1440-chiaro.png')
+  await dark(true)
+  await shot('obd-consenso-solo-immagine-1440-scuro.png')
+  await dark(false)
   await clickTestid('guide-computer-prepare')
+  // OBD2: le righe di quello che NON serve sono SALTATE (segno neutro, col
+  // loro testo) — non ✓ come se fossero state fatte
+  check('OBD2-b le righe download, verify, installer, service e kernel sono skipped col loro testo',
+    await waitDom(`document.querySelector('[data-testid="box-setup-row-image"]')?.getAttribute('data-status') === 'running'`, 30_000)
+    && await waitDom(`(() => {
+      const testi = { download: 'Già installato: niente da scaricare', verify: 'Non serve', installer: 'Già installato', service: 'Era già acceso', kernel: 'Era già presente' }
+      return Object.entries(testi).every(([id, testo]) => {
+        const row = document.querySelector('[data-testid="box-setup-row-' + id + '"]')
+        return !!row && row.getAttribute('data-status') === 'skipped' && row.innerText.includes(testo) && !row.innerText.includes('✓')
+      })
+    })()`, 15_000),
+    `righe: ${await pageEval(`return [...document.querySelectorAll('[data-testid^="box-setup-row-"]')].map((r) => r.getAttribute('data-testid') + '=' + r.getAttribute('data-status')).join(' ')`)}`)
+  await shot('obd-righe-saltate-1440-chiaro.png')
+  await dark(true)
+  await shot('obd-righe-saltate-1440-scuro.png')
+  await dark(false)
+  // OBD3: durante la build la riga dell'immagine mostra un DETTAGLIO del
+  // catalogo (mai testo di comandi): «Scarico la base…», «Passo N di M»,
+  // «Estraggo la base», «Salvo il computer» o «Preparo…»
+  const detail = await waitDom(`(() => { const d = document.querySelector('[data-testid="box-setup-build-detail"]'); const t = d?.innerText ?? ''; return /^(Scarico la base:|Passo \\d+ di \\d+|Estraggo la base|Salvo il computer|Preparo…)/.test(t) })()`, 20_000)
+  const detailText = await pageEval(`return document.querySelector('[data-testid="box-setup-build-detail"]')?.innerText ?? null`)
+  check('OBD3-a durante la build la riga dell\'immagine mostra un dettaglio del catalogo', detail, detailText)
+  await shot('obd-dettaglio-build-1440-chiaro.png')
+  await dark(true)
+  await shot('obd-dettaglio-build-1440-scuro.png')
+  await dark(false)
+  // OBD1: durante la build «Continua» è DISABILITATO — si attiva SOLO a ready
+  check('OBD1-a durante la build «Continua» è DISABILITATO',
+    await waitDom(`document.querySelector('[data-testid="guide-continue"]')?.disabled === true`, 15_000))
+  check('OBD1-b «Continua» si ATTIVA solo a ready',
+    await waitDom(`document.querySelector('[data-testid="guide-continue"]')?.disabled !== true`, 90_000))
   // il percorso intelligente: NESSUN download, NESSUN system start, NESSUN
   // kernel set — solo la build dell'immagine, poi ready
   check('OBV-a2 la preparazione arriva al ready (mood happy, «Ho il mio computer!»)',
-    await waitDom(`document.querySelector('[data-testid="guide-scene"] [data-mood]')?.getAttribute('data-mood') === 'happy'`, 60_000),
+    await waitDom(`document.querySelector('[data-testid="guide-scene"] [data-mood]')?.getAttribute('data-mood') === 'happy'`, 30_000),
     `phase: ${await boxPhaseOf()}`)
   check('OBV-a3 NESSUN pacchetto scaricato (il server del pkg finto non è stato toccato)', pkgHits === hitsBefore, `hits ${hitsBefore} → ${pkgHits}`)
   const argv = (() => { try { return readFileSync(f.cliLog, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l).argv.join(' ')) } catch { return [] } })()
   check('OBV-a4 NESSUN system start e NESSUN kernel set (già accesi/presenti)',
     !argv.some((a) => a.startsWith('system start')) && !argv.some((a) => a.startsWith('system kernel set')),
     argv.slice(0, 6).join(' | '))
-  check('OBV-a5 l\'immagine sì: la build è passata dalla CLI finta', argv.some((a) => a.startsWith('build ')))
+  check('OBV-a5 l\'immagine sì: la build è passata dalla CLI finta (col --progress plain esplicito)',
+    argv.some((a) => a.startsWith('build --progress plain ')) || argv.some((a) => a.startsWith('build ')))
   await shot('obv-kernel-gia-presente-1440-chiaro.png')
   await dark(true)
   await shot('obv-kernel-gia-presente-1440-scuro.png')

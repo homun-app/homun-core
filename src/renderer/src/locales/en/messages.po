@@ -2121,6 +2121,17 @@ msgstr "invalid cron: \"{cron}\" (5 fields, e.g. \"0 9 * * *\")"
 msgid "Da {0}"
 msgstr "From {0}"
 
+#. placeholder {0}: String(Math.floor(min / 60))
+#. placeholder {1}: String(min % 60)
+#: src/renderer/src/components/BoxSetupProgress.tsx
+msgid "da {0} h {1} min"
+msgstr "for {0} h {1} min"
+
+#. placeholder {0}: String(min)
+#: src/renderer/src/components/BoxSetupProgress.tsx
+msgid "da {0} min"
+msgstr "for {0} min"
+
 #: src/renderer/src/components/DraftCard.tsx
 msgid "da {accountLabel}"
 msgstr "from {accountLabel}"
@@ -2477,6 +2488,14 @@ msgstr "Email (comma separated)"
 msgid "email in arrivo"
 msgstr "incoming email"
 
+#: src/renderer/src/components/BoxSetupProgress.tsx
+msgid "Era già acceso"
+msgstr "Already running"
+
+#: src/renderer/src/components/BoxSetupProgress.tsx
+msgid "Era già presente"
+msgstr "Already present"
+
 #: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/ConnectorCards13.tsx
 #: src/renderer/src/components/DraftCard.tsx
@@ -2536,6 +2555,10 @@ msgstr "Export"
 #: src/renderer/src/components/LibraryPanel.tsx
 msgid "Esporta in ~/Downloads/Homun ({f})"
 msgstr "Export to ~/Downloads/Homun ({f})"
+
+#: src/renderer/src/components/BoxSetupProgress.tsx
+msgid "Estraggo la base"
+msgstr "I extract the base image"
 
 #: src/renderer/src/components/LibraryCards.tsx
 #: src/renderer/src/components/VaultSettings.tsx
@@ -2751,6 +2774,14 @@ msgstr "Manage on Composio"
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "gestiscile su Composio"
 msgstr "manage them on Composio"
+
+#: src/renderer/src/components/BoxSetupProgress.tsx
+msgid "Già installato"
+msgstr "Already installed"
+
+#: src/renderer/src/components/BoxSetupProgress.tsx
+msgid "Già installato: niente da scaricare"
+msgstr "Already installed: nothing to download"
 
 #: src/renderer/src/components/GuideModelStep.tsx
 msgid "Già sul tuo Mac."
@@ -4891,6 +4922,14 @@ msgstr "Don't save"
 msgid "Non salvato"
 msgstr "Not saved"
 
+#: src/renderer/src/components/BoxSetupProgress.tsx
+msgid "Non serve"
+msgstr "Not needed"
+
+#: src/renderer/src/components/GuideComputerStep.tsx
+msgid "non serve la password del Mac"
+msgstr "you won't need your Mac password"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "dialog.moveToApplications.daemonNotStopped"
@@ -5095,6 +5134,12 @@ msgstr "partial"
 #: src/renderer/src/components/Chat.tsx
 msgid "Passaggi del turno"
 msgstr "Steps of the turn"
+
+#. placeholder {0}: String(p.step)
+#. placeholder {1}: String(p.steps)
+#: src/renderer/src/components/BoxSetupProgress.tsx
+msgid "Passo {0} di {1}"
+msgstr "Step {0} of {1}"
 
 #: src/renderer/src/lib/fill-fields.ts
 msgid "password"
@@ -5310,6 +5355,10 @@ msgstr "I set up the bot's computer (about {gb} GB)"
 #: src/renderer/src/App.tsx
 msgid "Preparo tutto…"
 msgstr "Getting everything ready…"
+
+#: src/renderer/src/components/BoxSetupProgress.tsx
+msgid "Preparo…"
+msgstr "Preparing…"
 
 #: src/renderer/src/components/TakeoverCard.tsx
 msgid "Presa di controllo dello schermo"
@@ -6029,6 +6078,10 @@ msgstr "saved"
 msgid "Salvato nel vault"
 msgstr "Saved in the vault"
 
+#: src/renderer/src/components/BoxSetupProgress.tsx
+msgid "Salvo il computer"
+msgstr "I save the computer"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "card.contactAsk"
@@ -6084,6 +6137,12 @@ msgstr "I download Apple’s container tool from GitHub (170 MB, signed by Apple
 #: src/renderer/src/components/GuideComputerStep.tsx
 msgid "scarico il kernel Linux consigliato da Apple"
 msgstr "I download the Linux kernel recommended by Apple"
+
+#. placeholder {0}: fmtBytes(p.bytes)
+#. placeholder {1}: fmtBytes(p.total)
+#: src/renderer/src/components/BoxSetupProgress.tsx
+msgid "Scarico la base: {0} di {1}"
+msgstr "I download the base image: {0} of {1}"
 
 #: src/renderer/src/components/BoxSetupProgress.tsx
 msgid "Scarico lo strumento di Apple"
