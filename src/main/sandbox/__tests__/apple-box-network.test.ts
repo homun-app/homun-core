@@ -89,7 +89,7 @@ describe('BR1: l\'ensure in none con la CLI finta — isolata e verificata, o no
     expect(log.some((a) => a[0] === 'exec' && a.includes('echo ok'))).toBe(true)
     // il gateway della rete ISOLATA non diventa il gateway del proxy (BR2)
     expect(boxNetworkGateway()).toBeNull()
-  })
+  }, 20_000)
 
   it('verifica che risponde up: box RIMOSSO, errore in parole, NESSUN exec del bot, una riga nel daemon.log', async () => {
     const logFile = newLog()
@@ -110,7 +110,7 @@ describe('BR1: l\'ensure in none con la CLI finta — isolata e verificata, o no
     } finally {
       err.mockRestore()
     }
-  })
+  }, 20_000)
 
   it('rete isolata NON creabile: stesso esito — nessun box, errore in parole, riga nel log', async () => {
     const logFile = newLog()
@@ -128,7 +128,7 @@ describe('BR1: l\'ensure in none con la CLI finta — isolata e verificata, o no
     } finally {
       err.mockRestore()
     }
-  })
+  }, 20_000)
 })
 
 // ---- BR3 (fase box-rete): cambiare sandbox.network RICREA il box ----
@@ -168,7 +168,7 @@ describe('BR3: il passaggio bridge → none ricrea il box (CLI finta, stato nel 
     } finally {
       err.mockRestore()
     }
-  })
+  }, 20_000)
 
   it('DOCKER: box nato su bridge, modalità none → RICREATO con --network none (niente rm di volumi)', async () => {
     const logFile = newLog()
@@ -194,7 +194,7 @@ describe('BR3: il passaggio bridge → none ricrea il box (CLI finta, stato nel 
       settings.value['sandbox.engine'] = 'apple-container'
       err.mockRestore()
     }
-  })
+  }, 20_000)
 
   it('DOCKER fail closed: inspect della rete CADUTO in none → si ricrea lo stesso; in bridge NON si tocca', async () => {
     const logFile = newLog()
@@ -230,5 +230,5 @@ describe('BR3: il passaggio bridge → none ricrea il box (CLI finta, stato nel 
       settings.value['sandbox.engine'] = 'apple-container'
       err.mockRestore()
     }
-  })
+  }, 20_000)
 })

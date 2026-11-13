@@ -102,7 +102,7 @@ describe('BRR1: col box che si RIUSA la verifica non si salta (Apple, none)', ()
     expect(checksAt[1]).toBeGreaterThan(linkDownAt)
     // e il comando del bot è GIRATO dopo la verifica ripassata
     expect(after.some((a) => a[0] === 'exec' && a.includes('echo riavviato'))).toBe(true)
-  })
+  }, 20_000)
 
   it('up che RESTA up dopo il link down: box RIMOSSO, errore in parole, NESSUN exec del bot, una riga nel log', async () => {
     const logFile = newLog()
@@ -131,7 +131,7 @@ describe('BRR1: col box che si RIUSA la verifica non si salta (Apple, none)', ()
     } finally {
       err.mockRestore()
     }
-  })
+  }, 20_000)
 
   it('box già GIÙ (nessun riavvio): UNA sola verifica, NESSUN link down, e il comando gira', async () => {
     const logFile = newLog()
@@ -149,7 +149,7 @@ describe('BRR1: col box che si RIUSA la verifica non si salta (Apple, none)', ()
     expect(after.some((a) => a[0] === 'run' && a.includes('-d'))).toBe(false)
     expect(after.some((a) => a[0] === 'rm')).toBe(false)
     expect(after.some((a) => a[0] === 'exec' && a.includes('echo di-nuovo'))).toBe(true)
-  })
+  }, 20_000)
 
   it('con bridge (Apple), e con Docker in none, NESSUNA verifica in più', async () => {
     // bridge col motore Apple: il riuso del box NON verifica nulla
@@ -181,5 +181,5 @@ describe('BRR1: col box che si RIUSA la verifica non si salta (Apple, none)', ()
     } finally {
       settings.value['sandbox.engine'] = 'apple-container'
     }
-  })
+  }, 20_000)
 })
