@@ -12,6 +12,7 @@ import { join } from 'node:path'
 import { TEST_TMP_BASE } from '../../test-tmp'
 import type { AppleEngineState } from '../../main/sandbox/engine'
 import type { SandbotEvent } from '../../shared/types'
+import { appleKernelSetRecommendedArgv } from '../../main/sandbox/apple-container-argv'
 import {
   boxSetupNext, boxSetupStartFrom, boxSetupResumeFrom, boxSetupNeededBytes,
   boxSetupRunConfig, createBoxSetup, parsePkgutilCheckSignature, INITIAL_BOX_SETUP,
@@ -258,6 +259,13 @@ interface Harness {
   /** le righe del log del daemon (OBR3: qui finisce la foglia del certificato) */
   logs: string[]
   containerAppears: () => void
+  /**
+   * OBV2: la CODA degli stati del motore — ogni sondaggio di engineState ne
+   * consuma uno; vuota → vale over.engineState (o 'not-installed'). Così un
+   * test può cambiare il mondo TRA una sonda e l'altra (il kernel che
+   * compare mentre la preparazione gira).
+   */
+  engineStates: AppleEngineState[]
 }
 
 /** L'arnese di prova: dipendenze fintissime, nessuno spawn, nessuna rete. */
@@ -271,8 +279,14 @@ const harness = (over: {
   freeBytes?: number | null
   fetch?: typeof fetch
   engineState?: AppleEngineState
+  /** OBV2: la coda iniziale degli stati del motore (vedi Harness.engineStates) */
+  engineStates?: AppleEngineState[]
   hasImage?: boolean
   buildOk?: boolean
+  /** OBV2: l'esito di `system kernel set --recommended` (0 = installa) */
+  kernelSetExit?: number
+  /** OBV2: la stderr di kernel set (per esempio l'errore VERO di «File exists») */
+  kernelSetStderr?: string
 } = {}): Harness => {
   const dir = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-box-setup-test-'))
   const settings = new Map<string, unknown>()
@@ -280,12 +294,13 @@ const harness = (over: {
   const opened: string[] = []
   const cliCalls: string[][] = []
   const logs: string[] = []
+  const engineStates: AppleEngineState[] = [...(over.engineStates ?? [])]
   let installed = false
   const bytes = over.bytes ?? new Uint8Array(8).fill(7)
   const pkgutilPath = '/bin/finto-pkgutil'
   const spctlPath = '/bin/finto-spctl'
   const h: Harness = {
-    dir, settings, events, opened, cliCalls, logs,
+    dir, settings, events, opened, cliCalls, logs, engineStates,
     containerAppears: () => { installed = true },
     deps: {
       now: () => 1_000,
@@ -300,6 +315,9 @@ const harness = (over: {
         if (argv[0] === '--version') {
           return installed ? { stdout: 'container 1.7.1', stderr: '', exitCode: 0 } : { stdout: '', stderr: 'not found', exitCode: 127 }
         }
+        if (argv.join(' ') === appleKernelSetRecommendedArgv().join(' ')) {
+          return { stdout: '', stderr: over.kernelSetStderr ?? '', exitCode: over.kernelSetExit ?? 0 }
+        }
         if (file === pkgutilPath) {
           return { stdout: over.pkgutilOut ?? PKGUTIL_OK, stderr: '', exitCode: over.pkgutilExit ?? 0 }
         }
@@ -309,7 +327,7 @@ const harness = (over: {
         return { stdout: '', stderr: '', exitCode: 0 }
       },
       containerCli: () => '/bin/finto-container',
-      engineState: async () => over.engineState ?? 'not-installed',
+      engineState: async () => (engineStates.length > 0 ? engineStates.shift()! : over.engineState ?? 'not-installed'),
       hasBoxImage: async () => over.hasImage ?? false,
       buildBoxImage: async () => over.buildOk ?? true,
       openInstaller: async (pkgPath: string) => { opened.push(pkgPath); return { ok: true } },
@@ -607,5 +625,90 @@ describe('OB1 createBoxSetup: il download riprende dal .part', () => {
     expect(statSync(join(h.dir, 'finto.pkg')).size).toBe(200)
     h.containerAppears()
     await waitForState(ctl, (s) => s.phase === 'ready')
+  })
+})
+
+// ---- OBV2 (fase onboarding-b-dal-vivo): il kernel si installa UNA volta sola ----
+
+/**
+ * La stderr VERA di `container system kernel set --recommended` quando il
+ * kernel c'è già (la prova dal vivo): il comando NON è idempotente, esce 1.
+ */
+const KERNEL_FILE_EXISTS_STDERR =
+  'Error Domain=NSCocoaErrorDomain Code=516 "The file “default.kernel-arm64” couldn’t be copied because an item with the same name already exists." ' +
+  'UserInfo={NSSourceFilePathErrorKey=/Users/test/Library/Application Support/com.apple.container//kernels/vmlinux-6.18.56-208-debug} ' +
+  'NSUnderlyingError=0x600000c4e000 (NSPOSIXErrorDomain Code=17 "File exists")'
+
+const kernelSetCalls = (h: Harness): string[][] =>
+  h.cliCalls.filter((c) => c.slice(1).join(' ') === appleKernelSetRecommendedArgv().join(' '))
+const systemStartCalls = (h: Harness): string[][] =>
+  h.cliCalls.filter((c) => c.slice(1).join(' ') === 'system start --disable-kernel-install')
+
+describe('OBV2: il kernel si installa UNA volta sola', () => {
+  it('il kernel GIÀ PRESENTE (stato ready): la fase è fatta SENZA chiamare kernel set', async () => {
+    // la ripresa del riavvio trova la fase installing-kernel; il kernel nel
+    // frattempo c'è già (lo vede OBV1: il FILE) → si va dritti all'immagine
+    const h = harness({ engineState: 'ready', hasImage: false })
+    h.settings.set('box.setup', st({ phase: 'installing-kernel' }))
+    const ctl = createBoxSetup(h.deps)
+    await ctl.resumeAtBoot()
+    expect(ctl.state().phase).toBe('ready')
+    expect(kernelSetCalls(h)).toHaveLength(0) // NESSUN kernel set
+    // e si è PASSATI dall'immagine (la fase dopo il kernel)
+    expect(h.events.some((e) => e.type === 'box-setup' && e.setup.phase === 'building-image')).toBe(true)
+  })
+
+  it('kernel set esce 1 con l\'errore VERO di «File exists» e il kernel c\'è → la fase è FATTA lo stesso', async () => {
+    // la sonda della ripresa e quella della guardia dicono kernel-missing
+    // (la fase parte), il comando fallisce col File exists — e la RILETTURA
+    // vede il kernel: fatto
+    const h = harness({
+      engineStates: ['kernel-missing', 'kernel-missing', 'ready'],
+      kernelSetExit: 1,
+      kernelSetStderr: KERNEL_FILE_EXISTS_STDERR
+    })
+    h.settings.set('box.setup', st({ phase: 'installing-kernel' }))
+    const ctl = createBoxSetup(h.deps)
+    await ctl.resumeAtBoot()
+    expect(ctl.state().phase).toBe('ready')
+    expect(kernelSetCalls(h)).toHaveLength(1) // UNA sola chiamata, fallita
+    expect(h.logs.some((l) => l.includes('kernel set stderr: Error Domain=NSCocoaErrorDomain Code=516'))).toBe(true)
+    expect(h.events.some((e) => e.type === 'box-setup' && e.setup.phase === 'building-image')).toBe(true)
+  })
+
+  it('kernel set fallito e il kernel MANCA DAVVERO → errore in parole (non si finge niente)', async () => {
+    const h = harness({
+      engineStates: ['kernel-missing', 'kernel-missing'],
+      kernelSetExit: 1,
+      kernelSetStderr: 'Error: qualcosa è andato storto'
+    })
+    h.settings.set('box.setup', st({ phase: 'installing-kernel' }))
+    const ctl = createBoxSetup(h.deps)
+    await ctl.resumeAtBoot()
+    expect(ctl.state().phase).toBe('error')
+    expect(ctl.state().error).toMatchObject({ phase: 'installing-kernel', code: 'kernel' })
+  })
+
+  it('«Riprova» dopo l\'errore del kernel NON riaccende il servizio già acceso (e non rifà il kernel)', async () => {
+    // la corsa del vivo: kernel set cade (File exists) e il kernel NON si
+    // vede ancora → errore; poi il kernel c'è (un'altra corsa lo ha messo,
+    // OBV1 lo vede dal FILE) — il «Riprova» riparte dagli stati VERI:
+    // niente system start, niente kernel set, si va dritti all'immagine
+    const h = harness({
+      engineStates: ['kernel-missing', 'kernel-missing', 'kernel-missing'],
+      kernelSetExit: 1,
+      kernelSetStderr: KERNEL_FILE_EXISTS_STDERR
+    })
+    const ctl = createBoxSetup(h.deps)
+    const err = await ctl.start()
+    expect(err.phase).toBe('error') // il kernel set è caduto col File exists
+    expect(ctl.state().error?.phase).toBe('installing-kernel')
+    const kernelCallsBefore = kernelSetCalls(h).length
+    const startCallsBefore = systemStartCalls(h).length
+    h.engineStates.push('ready') // ora la sonda vede il kernel (OBV1: il FILE)
+    const fin = await ctl.retry()
+    expect(fin.phase).toBe('ready')
+    expect(kernelSetCalls(h).length).toBe(kernelCallsBefore) // nessun ALTRO kernel set
+    expect(systemStartCalls(h).length).toBe(startCallsBefore) // NESSUN system start
   })
 })

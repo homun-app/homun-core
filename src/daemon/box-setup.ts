@@ -582,11 +582,27 @@ export function createBoxSetup(deps: BoxSetupDeps): BoxSetupController {
   }
 
   async function installKernel(): Promise<void> {
+    // OBV2: il kernel si installa UNA volta sola — PRIMA di `kernel set` si
+    // guarda lo stato VERO (OBV1: il FILE del kernel): se c'è già, la fase è
+    // fatta senza scaricare niente
+    const before = await deps.engineState().catch(() => null)
+    if (before === 'ready') {
+      deps.log('[box-setup] kernel già presente: nessun kernel set')
+      apply({ type: 'kernel-ok' })
+      return
+    }
     const r = await deps.runCli(deps.containerCli(), appleKernelSetRecommendedArgv(), 300_000).catch(() => null)
     if (!r || r.exitCode !== 0) {
       if (r?.stderr) deps.log(`[box-setup] kernel set stderr: ${firstLine(r.stderr)}`)
-      apply({ type: 'kernel-fail', message: uiText(UI.boxSetupKernelFailed) })
-      return
+      // OBV2: `kernel set --recommended` NON è idempotente — esce 1 con
+      // «File exists» se il kernel c'è già (o un'altra corsa lo sta mettendo):
+      // si RILEGGE il kernel e se ora c'è la fase è fatta lo stesso
+      const after = await deps.engineState().catch(() => null)
+      if (after !== 'ready') {
+        apply({ type: 'kernel-fail', message: uiText(UI.boxSetupKernelFailed) })
+        return
+      }
+      deps.log('[box-setup] kernel già presente dopo l\'errore di kernel set: fase fatta')
     }
     apply({ type: 'kernel-ok' })
   }

@@ -81,6 +81,10 @@ const ALLOWED_LITERALS: ReadonlyArray<{ file: string; text: string }> = [
   // righe italiane di sandbox/local-model; MAI nella UI (lì c'è il catalogo)
   { file: 'src/daemon/box-setup.ts', text: '[box-setup] download ritentato dopo un errore di rete: ' },
   { file: 'src/daemon/box-setup.ts', text: 'errore di lettura' },
+  // OBV2 (fase onboarding-b-dal-vivo): le righe di LOG del kernel già
+  // presente (il FILE di OBV1 lo vede) — deps.log, mai UI
+  { file: 'src/daemon/box-setup.ts', text: '[box-setup] kernel già presente: nessun kernel set' },
+  { file: 'src/daemon/box-setup.ts', text: "[box-setup] kernel già presente dopo l'errore di kernel set: fase fatta" },
   // messaggio del keychain FINTO dei test (strumento di test, non UI)
   { file: 'src/daemon/keychain.ts', text: 'operazione non supportata dal keychain finto' },
   // nome app localizzato → bundle (parser di open_app, C7)
