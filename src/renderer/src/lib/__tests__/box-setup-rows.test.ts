@@ -8,7 +8,7 @@ import { boxSetupRows, BOX_SETUP_ROW_IDS, type BoxSetupRowState } from '../box-s
 import type { BoxSetupState } from '../../../../shared/types'
 
 const state = (patch: Partial<BoxSetupState>): BoxSetupState => ({
-  phase: 'idle', bytes: null, total: null, buildPhase: null, error: null, startedAt: null, neededBytes: 3_400_000_000, ...patch
+  phase: 'idle', bytes: null, total: null, buildPhase: null, error: null, startedAt: null, skipped: [], neededBytes: 3_400_000_000, ...patch
 })
 
 /** le righe in forma compatta: [id, stato] */
@@ -75,5 +75,35 @@ describe('OB2 boxSetupRows (pura): la lista delle sei fasi', () => {
 
   it('checking-space: tutto da fare (il download non è ancora cominciato)', () => {
     expect(rowsOf(state({ phase: 'checking-space' }))[0]).toEqual(['download', 'todo'])
+  })
+})
+
+// ---- OBD2: le righe saltate ----
+
+describe('OBD2: le righe SALTATE (skipped) — segno neutro, mai il ✓ delle fasi fatte', () => {
+  it('partenza da building-image → download…kernel sono skipped, NON done (oggi mentivano)', () => {
+    const s = state({ phase: 'building-image', skipped: ['download', 'verify', 'installer', 'service', 'kernel'] })
+    expect(rowsOf(s)).toEqual([
+      ['download', 'skipped'], ['verify', 'skipped'], ['installer', 'skipped'],
+      ['service', 'skipped'], ['kernel', 'skipped'], ['image', 'running']
+    ])
+  })
+
+  it('a ready le righe saltate RESTANO saltate (le altre sono fatte ✓)', () => {
+    const s = state({ phase: 'ready', skipped: ['download', 'verify', 'installer'] })
+    expect(rowsOf(s)).toEqual([
+      ['download', 'skipped'], ['verify', 'skipped'], ['installer', 'skipped'],
+      ['service', 'done'], ['kernel', 'done'], ['image', 'done']
+    ])
+  })
+
+  it('una riga saltata non è mai in corso: lo stato la dice com\'è arrivata', () => {
+    // skipped viene da COM'È PARTITA la preparazione (o dal kernel trovato
+    // presente): le righe prima della partenza, solo quelle
+    const s = state({ phase: 'starting-service', skipped: ['download', 'verify', 'installer'] })
+    expect(rowsOf(s)).toEqual([
+      ['download', 'skipped'], ['verify', 'skipped'], ['installer', 'skipped'],
+      ['service', 'running'], ['kernel', 'todo'], ['image', 'todo']
+    ])
   })
 })

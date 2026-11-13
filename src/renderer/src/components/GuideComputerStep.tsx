@@ -2,12 +2,17 @@
 // del consenso («Prepara il computer») con SOTTO, in parole, cosa farà, e
 // la lista d'avanzamento condivisa (BoxSetupProgress). Il consenso del
 // bottone VALE ANCHE per il kernel: la frase lo dice, niente secondo
-// dialogo. I GB sono CALCOLATI dallo stato (neededBytes), mai inventati.
+// dialogo. I GB sono CALCOLATI (mai inventati).
+// OBD2 (fase onboarding-b-dettagli): il consenso elenca SOLO i passi del
+// PIANO (RPC box:setup-plan — stessa funzione pura della partenza): con lo
+// strumento già installato niente righe di GitHub, password o kernel, e la
+// riga in più «non serve la password del Mac»; i GB sono del piano.
 import { useEffect } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import { api, useStore } from '../store'
 import type { BoxSetupState } from '../../../shared/types'
+import { boxSetupPlanBytes, type BoxSetupRowId } from '../../../shared/box-setup-plan'
 import { BoxSetupProgress } from './BoxSetupProgress'
 import { boxSetupActive } from '../lib/box-setup-rows'
 
@@ -19,18 +24,27 @@ export function GuideComputerStep() {
   const boxSetupRetry = useStore((s) => s.boxSetupRetry)
   const boxSetupOpenInstaller = useStore((s) => s.boxSetupOpenInstaller)
 
-  // lo stato arriva dal daemon (RPC + evento box-setup): lo si chiede appena
-  // il passo si monta, poi lo tiene aggiornato l'evento — senza ricaricare
+  // lo stato e il PIANO arrivano dal daemon (RPC + evento box-setup): li si
+  // chiede appena il passo si monta, poi lo stato lo tiene aggiornato
+  // l'evento — senza ricaricare
   useEffect(() => {
     void api.boxSetupState().then((s) => {
       if (s) useStore.setState({ boxSetup: s })
+    }).catch(() => undefined)
+    void api.boxSetupPlan().then((p) => {
+      useStore.setState({ boxSetupPlan: p.steps })
     }).catch(() => undefined)
   }, [])
 
   const state: BoxSetupState | null = boxSetup
   const phase = state?.phase ?? 'idle'
   const running = boxSetupActive(phase)
-  const gb = Math.ceil((state?.neededBytes ?? 0) / 1e9)
+  // OBD2: il piano decide le righe del consenso e i GB (la stima dei SOLI
+  // passi che succederanno, calcolata dal piano — mai la stima intera)
+  const plan = useStore((s) => s.boxSetupPlan)
+  const planKnown = plan !== null
+  const inPlan = (id: BoxSetupRowId): boolean => plan?.includes(id) === true
+  const gb = planKnown ? Math.ceil(boxSetupPlanBytes(plan) / 1e9) : 0
 
   return (
     <div key="computer" className="guide-stepin flex w-full max-w-xl flex-col gap-7 text-left" data-testid="guide-step-computer">
@@ -56,12 +70,24 @@ export function GuideComputerStep() {
               {i18n.t(msg`Prepara il computer`)}
             </button>
           )}
-          {/* il consenso: cosa farà, IN PAROLE (vale anche per il kernel: lo dice qui) */}
+          {/* il consenso: SOLO i passi del piano, IN PAROLE (il piano è della
+              partenza: non può promettere quello che non farà) */}
           <ul className="m-0 flex list-none flex-col gap-1.5 pl-0 text-[13.5px] leading-[1.5] text-muted-foreground" data-testid="guide-computer-consent">
-            <li>{i18n.t(msg`scarico da GitHub lo strumento container di Apple (170 MB, firmato da Apple)`)}</li>
-            <li>{i18n.t(msg`si apre l'installazione di Apple, che ti chiederà la password del Mac`)}</li>
-            <li>{i18n.t(msg`scarico il kernel Linux consigliato da Apple`)}</li>
-            <li>{gb > 0 ? i18n.t(msg`preparo il computer del bot (circa ${gb} GB)`) : i18n.t(msg`preparo il computer del bot`)}</li>
+            {inPlan('download') && (
+              <li>{i18n.t(msg`scarico da GitHub lo strumento container di Apple (170 MB, firmato da Apple)`)}</li>
+            )}
+            {inPlan('installer') && (
+              <li>{i18n.t(msg`si apre l'installazione di Apple, che ti chiederà la password del Mac`)}</li>
+            )}
+            {inPlan('kernel') && (
+              <li>{i18n.t(msg`scarico il kernel Linux consigliato da Apple`)}</li>
+            )}
+            {planKnown && (
+              <li>{gb > 0 ? i18n.t(msg`preparo il computer del bot (circa ${gb} GB)`) : i18n.t(msg`preparo il computer del bot`)}</li>
+            )}
+            {planKnown && !inPlan('installer') && (
+              <li>{i18n.t(msg`non serve la password del Mac`)}</li>
+            )}
           </ul>
         </div>
       )}

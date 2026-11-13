@@ -23,11 +23,19 @@ import type { AppleEngineState, BoxEngineId, CliRunResult } from '../main/sandbo
 import {
   APPLE_CONTAINER_PKG_URL, APPLE_CONTAINER_PKG_BYTES, APPLE_CONTAINER_PKG_SHA256, APPLE_CONTAINER_LEAF_CERT
 } from '../main/sandbox/apple-container-release'
-import { BOX_BUILD_ESTIMATED_BYTES, DISK_MARGIN_BYTES, enoughDiskSpace } from '../main/sandbox/disk-space'
+import { DISK_MARGIN_BYTES, enoughDiskSpace } from '../main/sandbox/disk-space'
 import { appleSystemStartArgv, appleKernelSetRecommendedArgv } from '../main/sandbox/apple-container-argv'
 // OBR1: gli strumenti di sistema si chiamano col PERCORSO ASSOLUTO
 import { SYSTEM_PKGUTIL, SYSTEM_SPCTL, SYSTEM_OPEN } from '../main/sandbox/system-tools'
 import { isPackagedRuntime } from '../shared/packaged'
+// OBD2 (fase onboarding-b-dettagli): il piano — i passi che succederanno —
+// vive in shared (lo usa anche la UI per il consenso); boxSetupStartFrom lo
+// USA, così piano e partenza non possono divergere
+import {
+  BOX_SETUP_ROW_IDS, boxSetupPlan, boxSetupPlanBytes, boxSetupSkippedRows,
+  KERNEL_ESTIMATED_BYTES, BOX_BUILD_ESTIMATED_BYTES,
+  type BoxSetupRowId
+} from '../shared/box-setup-plan'
 import { uiText } from '../main/ui-language'
 import { UI } from '../shared/ui-messages'
 import type { UiMessageDescriptor } from '../shared/ui-text'
@@ -39,11 +47,12 @@ export type { BoxSetupPhase, BoxSetupState } from '../shared/types'
 /** Il setting dove vive lo stato della preparazione (persistito). */
 export const BOX_SETUP_SETTING = 'box.setup'
 
-/**
- * La stima del kernel (PURa): ~1 GB, come dice il testo del consenso del
- * kernel di BX4 («Verrà scaricato da Apple (circa 1 GB)»).
- */
-export const KERNEL_ESTIMATED_BYTES = 1_000_000_000
+// OBD2: il piano (e le costanti che usa) resta raggiungibile anche da qui —
+// i test e i chiamanti di sempre lo importano da box-setup
+export {
+  boxSetupPlan, boxSetupPlanBytes, boxSetupSkippedRows,
+  BOX_SETUP_ROW_IDS, KERNEL_ESTIMATED_BYTES, BOX_BUILD_ESTIMATED_BYTES
+} from '../shared/box-setup-plan'
 
 /**
  * La stima dello spazio che serve (PURa): pacchetto + installazione (il
@@ -65,13 +74,14 @@ export const INITIAL_BOX_SETUP: BoxSetupState = {
   buildPhase: null,
   error: null,
   startedAt: null,
-  neededBytes: boxSetupNeededBytes()
+  neededBytes: boxSetupNeededBytes(),
+  skipped: []
 }
 
 // ---- le funzioni PURA ----
 
 export type BoxSetupEvent =
-  | { type: 'started'; phase: BoxSetupPhase; at: number }
+  | { type: 'started'; phase: BoxSetupPhase; at: number; skipped?: BoxSetupRowId[] }
   | { type: 'space-ok' }
   | { type: 'space-no'; message: string }
   | { type: 'download-begin'; total: number }
@@ -84,7 +94,8 @@ export type BoxSetupEvent =
   | { type: 'installed' }
   | { type: 'service-ok' }
   | { type: 'service-fail'; message: string }
-  | { type: 'kernel-ok' }
+  /** OBD2: `alreadyThere` = il kernel era già presente («nessun kernel set») → riga saltata */
+  | { type: 'kernel-ok'; alreadyThere?: boolean }
   | { type: 'kernel-fail'; message: string }
   | { type: 'image-building'; buildPhase: string | null }
   | { type: 'image-ok' }
@@ -102,7 +113,10 @@ const CLEAN: Pick<BoxSetupState, 'bytes' | 'total' | 'buildPhase' | 'error'> = {
 export function boxSetupNext(state: BoxSetupState, event: BoxSetupEvent): BoxSetupState {
   switch (event.type) {
     case 'started':
-      return { ...state, ...CLEAN, phase: event.phase, startedAt: event.at }
+      // OBD2: chi parte porta le righe SALTATE della sua partenza (l'evento
+      // le calcola con boxSetupSkippedRows); senza (la ripresa di un riavvio)
+      // restano quelle dello stato persistito
+      return { ...state, ...CLEAN, phase: event.phase, startedAt: event.at, skipped: event.skipped ?? state.skipped }
     case 'space-ok':
       return state.phase === 'checking-space' ? { ...state, ...CLEAN, phase: 'downloading' } : state
     case 'space-no':
@@ -138,7 +152,16 @@ export function boxSetupNext(state: BoxSetupState, event: BoxSetupEvent): BoxSet
         ? { ...state, phase: 'error', error: { phase: 'starting-service', code: 'service', message: event.message } }
         : state
     case 'kernel-ok':
-      return state.phase === 'installing-kernel' ? { ...state, ...CLEAN, phase: 'building-image' } : state
+      // OBD2: il kernel trovato già presente («nessun kernel set») è una riga
+      // SALTATA, non fatta; il «File exists» dopo l'errore no (provato davvero)
+      return state.phase === 'installing-kernel'
+        ? {
+            ...state, ...CLEAN, phase: 'building-image',
+            skipped: event.alreadyThere === true && !state.skipped.includes('kernel')
+              ? [...state.skipped, 'kernel']
+              : state.skipped
+          }
+        : state
     case 'kernel-fail':
       return state.phase === 'installing-kernel'
         ? { ...state, phase: 'error', error: { phase: 'installing-kernel', code: 'kernel', message: event.message } }
@@ -166,17 +189,22 @@ export function boxSetupNext(state: BoxSetupState, event: BoxSetupEvent): BoxSet
 
 /**
  * La partenza intelligente (PURa): lo stato REALE del motore decide da dove
- * cominciare — mai si rifà una fase già fatta. `ready` con immagine → si è
- * già pronti; `unsupported` → niente da preparare (null).
+ * cominciare — mai si rifà una fase già fatta. OBD2: la decide il PIANO
+ * (boxSetupPlan, in shared): il primo passo del piano è la partenza, così
+ * piano e partenza non possono divergere. `ready` con immagine → si è già
+ * pronti; `unsupported` → niente da preparare (null).
  */
 export function boxSetupStartFrom(appleState: AppleEngineState, hasImage: boolean): BoxSetupPhase | null {
-  switch (appleState) {
-    case 'not-installed': return 'checking-space'
-    case 'stopped': return 'starting-service'
-    case 'kernel-missing': return 'installing-kernel'
-    case 'ready': return hasImage ? 'ready' : 'building-image'
-    default: return null
-  }
+  const plan = boxSetupPlan(appleState, hasImage)
+  const first = plan[0]
+  if (first === undefined) return appleState === 'ready' ? 'ready' : null
+  // il pacchetto (download, e la verifica che lo segue) comincia dal
+  // controllo dello spazio; gli altri passi dalla loro fase
+  if (first === 'download' || first === 'verify') return 'checking-space'
+  if (first === 'installer') return 'awaiting-installer'
+  if (first === 'service') return 'starting-service'
+  if (first === 'kernel') return 'installing-kernel'
+  return 'building-image'
 }
 
 /**
@@ -378,6 +406,8 @@ export interface BoxSetupDeps {
 export interface BoxSetupController {
   /** lo stato corrente (persistito) */
   state(): BoxSetupState
+  /** OBD2: il piano — i passi che la preparazione farà (per il consenso) */
+  plan(): Promise<BoxSetupRowId[]>
   /** la partenza intelligente (non rifà una fase già fatta) */
   start(): Promise<BoxSetupState>
   cancel(): Promise<BoxSetupState>
@@ -439,7 +469,10 @@ export function createBoxSetup(deps: BoxSetupDeps): BoxSetupController {
   function readState(): BoxSetupState {
     const raw = deps.getSetting<BoxSetupState | null>(BOX_SETUP_SETTING, null)
     if (!raw || typeof raw !== 'object' || typeof raw.phase !== 'string') return { ...INITIAL_BOX_SETUP }
-    return { ...INITIAL_BOX_SETUP, ...raw, error: raw.error ?? null }
+    // OBD2: uno stato persistito VECCHIO (senza `skipped`, o con un valore
+    // non più valido) si legge come [] — le righe saltate sono della fase dettagli
+    const skipped = Array.isArray(raw.skipped) ? raw.skipped.filter((id): id is BoxSetupRowId => (BOX_SETUP_ROW_IDS as readonly string[]).includes(id)) : []
+    return { ...INITIAL_BOX_SETUP, ...raw, error: raw.error ?? null, skipped }
   }
 
   function apply(event: BoxSetupEvent): BoxSetupState {
@@ -595,11 +628,12 @@ export function createBoxSetup(deps: BoxSetupDeps): BoxSetupController {
   async function installKernel(): Promise<void> {
     // OBV2: il kernel si installa UNA volta sola — PRIMA di `kernel set` si
     // guarda lo stato VERO (OBV1: il FILE del kernel): se c'è già, la fase è
-    // fatta senza scaricare niente
+    // fatta senza scaricare niente. OBD2: ed è una riga SALTATA («Era già
+    // presente»), non fatta
     const before = await deps.engineState().catch(() => null)
     if (before === 'ready') {
       deps.log('[box-setup] kernel già presente: nessun kernel set')
-      apply({ type: 'kernel-ok' })
+      apply({ type: 'kernel-ok', alreadyThere: true })
       return
     }
     const r = await deps.runCli(deps.containerCli(), appleKernelSetRecommendedArgv(), 300_000).catch(() => null)
@@ -673,6 +707,14 @@ export function createBoxSetup(deps: BoxSetupDeps): BoxSetupController {
 
   return {
     state: () => state,
+    /** OBD2: il piano — i passi che la preparazione farà (stessi fatti della partenza) */
+    async plan(): Promise<BoxSetupRowId[]> {
+      const [appleState, hasImage] = await Promise.all([
+        deps.engineState().catch(() => 'unsupported' as AppleEngineState),
+        deps.hasBoxImage().catch(() => false)
+      ])
+      return boxSetupPlan(appleState, hasImage)
+    },
     async start(): Promise<BoxSetupState> {
       if (running) return state
       const startFrom = await decideStart()
@@ -680,7 +722,8 @@ export function createBoxSetup(deps: BoxSetupDeps): BoxSetupController {
       if (startFrom === 'ready' && state.phase === 'ready') return state
       running = true
       try {
-        apply({ type: 'started', phase: startFrom, at: deps.now() })
+        // OBD2: le righe PRIMA della partenza sono SALTATE, non fatte
+        apply({ type: 'started', phase: startFrom, at: deps.now(), skipped: boxSetupSkippedRows(startFrom) })
         return await loop()
       } finally {
         running = false
@@ -713,9 +756,14 @@ export function createBoxSetup(deps: BoxSetupDeps): BoxSetupController {
       ])
       const phase = boxSetupResumeFrom(state, appleState, hasImage)
       if (!phase) return
+      // OBD2: le fasi del DOWNLOAD si RIDECIDONO col motore di adesso — se lo
+      // strumento è comparso mentre l'app era chiusa, le righe prima della
+      // partenza nuova sono SALTATE; le fasi oltre il pacchetto ripartono da
+      // sé e le righe restano quelle della corsa di prima (fatte o saltate)
+      const redecided = ['checking-space', 'downloading', 'verifying'].includes(state.phase)
       running = true
       try {
-        apply({ type: 'started', phase, at: deps.now() })
+        apply({ type: 'started', phase, at: deps.now(), ...(redecided ? { skipped: boxSetupSkippedRows(phase) } : {}) })
         await loop()
       } finally {
         running = false

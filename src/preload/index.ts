@@ -260,6 +260,8 @@ const api: SandbotApi = {
   boxEngineKernelInstall: () => ipcRenderer.invoke('box:engine-kernel-install'),
   // OB1 (fase onboarding-b): la preparazione del computer del bot
   boxSetupState: () => ipcRenderer.invoke('box:setup-state'),
+  /** OBD2: il piano — i passi che la preparazione farà (il consenso elenca solo quelli) */
+  boxSetupPlan: () => ipcRenderer.invoke('box:setup-plan'),
   boxSetupStart: () => ipcRenderer.invoke('box:setup-start'),
   boxSetupCancel: () => ipcRenderer.invoke('box:setup-cancel'),
   boxSetupRetry: () => ipcRenderer.invoke('box:setup-retry'),

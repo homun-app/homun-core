@@ -16,8 +16,12 @@ import { appleKernelSetRecommendedArgv } from '../../main/sandbox/apple-containe
 import {
   boxSetupNext, boxSetupStartFrom, boxSetupResumeFrom, boxSetupNeededBytes,
   boxSetupRunConfig, createBoxSetup, parsePkgutilCheckSignature, INITIAL_BOX_SETUP,
+  boxSetupPlan, boxSetupPlanBytes, KERNEL_ESTIMATED_BYTES,
   type BoxSetupState, type BoxSetupEvent, type BoxSetupDeps
 } from '../box-setup'
+// OBD2: il piano vive in shared (lo usano daemon e UI)
+import { BOX_SETUP_ROW_IDS } from '../../shared/box-setup-plan'
+import { BOX_BUILD_ESTIMATED_BYTES } from '../../main/sandbox/disk-space'
 
 const st = (patch: Partial<BoxSetupState>): BoxSetupState => ({ ...INITIAL_BOX_SETUP, ...patch })
 const next = (state: BoxSetupState, event: BoxSetupEvent): BoxSetupState => boxSetupNext(state, event)
@@ -112,6 +116,94 @@ describe('OB1 boxSetupStartFrom: da dove si comincia', () => {
     expect(boxSetupStartFrom('ready', false)).toBe('building-image')
     expect(boxSetupStartFrom('ready', true)).toBe('ready')
     expect(boxSetupStartFrom('unsupported', false)).toBeNull()
+  })
+})
+
+// ---- OBD2: il piano e le fasi saltate ----
+
+describe('OBD2 boxSetupPlan: il piano è i passi che succederanno (PURa, dagli stessi fatti della partenza)', () => {
+  it('ready senza immagine → SOLO l\'immagine; con immagine → piano vuoto (già pronti)', () => {
+    expect(boxSetupPlan('ready', false)).toEqual(['image'])
+    expect(boxSetupPlan('ready', true)).toEqual([])
+  })
+
+  it('not-installed → tutte e sei (dal pacchetto all\'immagine)', () => {
+    expect(boxSetupPlan('not-installed', false)).toEqual(['download', 'verify', 'installer', 'service', 'kernel', 'image'])
+  })
+
+  it('stopped CON immagine → service, kernel, image: il servizio si accende, la fase kernel corre (che trovi il file o lo scarichi lo decide allora), l\'immagine si costruisce/verifica — hasImage non cambia il percorso DOPO la partenza', () => {
+    expect(boxSetupPlan('stopped', true)).toEqual(['service', 'kernel', 'image'])
+  })
+
+  it('kernel-missing → kernel e immagine; unsupported → piano vuoto (niente passo Computer)', () => {
+    expect(boxSetupPlan('kernel-missing', false)).toEqual(['kernel', 'image'])
+    expect(boxSetupPlan('unsupported', false)).toEqual([])
+  })
+
+  it('la partenza USA il piano: il primo passo del piano decide da dove si comincia (non possono divergere)', () => {
+    expect(boxSetupStartFrom('not-installed', false)).toBe('checking-space') // download → prima il controllo dello spazio
+    expect(boxSetupStartFrom('stopped', false)).toBe('starting-service')
+    expect(boxSetupStartFrom('kernel-missing', false)).toBe('installing-kernel')
+    expect(boxSetupStartFrom('ready', false)).toBe('building-image')
+  })
+
+  it('la stima dei byte del piano: il piano intero è la stima di sempre; solo l\'immagine è solo la sua parte', () => {
+    expect(boxSetupPlanBytes(BOX_SETUP_ROW_IDS)).toBe(boxSetupNeededBytes())
+    expect(boxSetupPlanBytes(['image'])).toBe(BOX_BUILD_ESTIMATED_BYTES)
+    expect(boxSetupPlanBytes(['service', 'kernel', 'image'])).toBe(KERNEL_ESTIMATED_BYTES + BOX_BUILD_ESTIMATED_BYTES)
+  })
+})
+
+describe('OBD2: lo stato ricorda le fasi SALTATE (skipped)', () => {
+  it('partenza da building-image → download…kernel in skipped (oggi risulterebbero fatte)', async () => {
+    const h = harness({ engineState: 'ready', hasImage: false })
+    const ctl = createBoxSetup(h.deps)
+    const fin = await ctl.start()
+    expect(fin.phase).toBe('ready')
+    expect(fin.skipped).toEqual(['download', 'verify', 'installer', 'service', 'kernel'])
+    // NESSUN pacchetto scaricato, NESSUN system start, NESSUN kernel set
+    const flat = h.cliCalls.map((c) => c.join(' '))
+    expect(flat.some((c) => c.includes('kernel set'))).toBe(false)
+  })
+
+  it('il kernel trovato già presente da installKernel → kernel in skipped', async () => {
+    // decideStart legge 'kernel-missing' (si parte dal kernel), poi la sonda
+    // di installKernel trova 'ready': «nessun kernel set» → fase saltata
+    const h = harness({ engineStates: ['kernel-missing', 'ready'] })
+    const ctl = createBoxSetup(h.deps)
+    const fin = await ctl.start()
+    expect(fin.phase).toBe('ready')
+    expect(fin.skipped).toEqual(['download', 'verify', 'installer', 'service', 'kernel'])
+    expect(h.cliCalls.some((c) => c.join(' ').includes('kernel set'))).toBe(false)
+  })
+
+  it('il «File exists» dopo l\'errore NON è skip: il kernel set è stato provato', async () => {
+    // kernel set esce 1 col File exists vero, il kernel c'è già: la fase è
+    // FATTA, non saltata — il comando è stato eseguito davvero
+    const h = harness({ engineStates: ['kernel-missing', 'kernel-missing', 'ready'], kernelSetExit: 1, kernelSetStderr: '…NSPOSIXErrorDomain Code=17 "File exists"' })
+    const ctl = createBoxSetup(h.deps)
+    const fin = await ctl.start()
+    expect(fin.phase).toBe('ready')
+    expect(fin.skipped).toEqual(['download', 'verify', 'installer', 'service'])
+  })
+
+  it('lo stato persistito SENZA skipped si legge come []', () => {
+    const h = harness()
+    h.settings.set('box.setup', { phase: 'building-image', bytes: null, total: null, buildPhase: null, error: null, startedAt: 5, neededBytes: 1 })
+    const ctl = createBoxSetup(h.deps)
+    expect(ctl.state().skipped).toEqual([])
+  })
+
+  it('«Riprova» ricalcola skipped dalla partenza nuova', async () => {
+    // prima corsa: errore in verifica (skipped []); poi lo strumento viene
+    // installato fuori → il riparto è building-image e download…kernel
+    // diventano saltati
+    const h = harness({ engineStates: ['not-installed', 'ready'], spctlExit: 3 })
+    const ctl = createBoxSetup(h.deps)
+    expect((await ctl.start()).phase).toBe('error')
+    const fin = await ctl.retry()
+    expect(fin.phase).toBe('ready')
+    expect(fin.skipped).toEqual(['download', 'verify', 'installer', 'service', 'kernel'])
   })
 })
 

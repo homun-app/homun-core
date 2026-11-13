@@ -2,6 +2,7 @@
 import { useMemo } from 'react'
 import { create } from 'zustand'
 import type { Agent, TranscriptEntry, SandbotEvent, OnboardingStatus, OnboardingStepId, ProviderConfig, ProviderPublic, PermissionsConfig, ConnectorInfo, TaskInfo, GroupInfo, GroupMessageInfo, SubagentInfo, AgentAvatar, TurnEnd, ScreenStatus, MainModel, ComposioStatusInfo, ComposioGatewayStatusInfo, ReadingPageRef, BoxSetupState } from '../../shared/types'
+import type { BoxSetupRowId } from '../../shared/box-setup-plan'
 import type { UpdateChannel } from '../../shared/update-channel'
 // fase 16c correzioni (R4): la regola del modello risolto, condivisa col daemon
 import { resolveAgentModel, type ResolvedAgentModel } from '../../shared/agent-model'
@@ -82,6 +83,13 @@ interface Store {
    * daemon non ha ancora risposto (la UI lo chiede quando serve).
    */
   boxSetup: BoxSetupState | null
+  /**
+   * OBD2 (fase onboarding-b-dettagli): il PIANO della preparazione — i
+   * passi che succederanno (RPC box:setup-plan, stessa funzione pura della
+   * partenza). Il consenso del passo Computer elenca solo questi.
+   * null = il daemon non ha ancora risposto.
+   */
+  boxSetupPlan: BoxSetupRowId[] | null
   activeId: string | null
   entries: TranscriptEntry[]
   reasoning: Record<number, string>
@@ -340,6 +348,7 @@ export const useStore = create<Store>((set, get) => ({
   agents: [],
   onboarding: null,
   boxSetup: null,
+  boxSetupPlan: null,
   activeId: null,
   entries: [],
   reasoning: {},

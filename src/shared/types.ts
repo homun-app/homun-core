@@ -2,6 +2,9 @@
 
 import type { SkillCatalogEntry } from './skill-catalog'
 import type { UpdateChannel } from './update-channel'
+// OBD2 (fase onboarding-b-dettagli): le righe del piano della preparazione
+import type { BoxSetupRowId } from './box-setup-plan'
+export type { BoxSetupRowId }
 export type { SkillCatalogEntry } from './skill-catalog'
 
 export type AgentStatus = 'offline' | 'idle' | 'thinking' | 'running' | 'paused-for-approval'
@@ -894,6 +897,12 @@ export interface BoxSetupState {
   startedAt: number | null
   /** la stima di quanto spazio serve (per «circa N GB» calcolato, mai inventato) */
   neededBytes: number
+  /**
+   * OBD2 (fase onboarding-b-dettagli): le righe SALTATE (non fatte: non
+   * servivano — lo strumento c'era già). Uno stato persistito vecchio senza
+   * il campo si legge come [].
+   */
+  skipped: BoxSetupRowId[]
 }
 
 /** La risposta di box:disk-space (BX3): righe, byte liberi e margine. */
@@ -1256,6 +1265,8 @@ export interface SandbotApi {
   boxEngineKernelInstall(): Promise<{ ok: boolean; error?: string }>
   // OB1 (fase onboarding-b): la preparazione del computer del bot
   boxSetupState(): Promise<BoxSetupState | null>
+  /** OBD2: il piano — i passi che la preparazione farà (il consenso elenca solo quelli) */
+  boxSetupPlan(): Promise<{ steps: BoxSetupRowId[] }>
   boxSetupStart(): Promise<BoxSetupState | null>
   boxSetupCancel(): Promise<BoxSetupState | null>
   boxSetupRetry(): Promise<BoxSetupState | null>

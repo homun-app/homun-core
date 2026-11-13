@@ -3,15 +3,17 @@
 // e le IMPOSTAZIONI (scheda del motore) condividono. PURA: dalla fase
 // dello stato (setting box.setup, evento box-setup) alle sei righe col
 // loro stato, così la UI non decide niente da sola.
+// OBD2 (fase onboarding-b-dettagli): le righe SALTATE (skipped) non sono
+// fatte: non servivano. Il segno è neutro, con il testo che dice perché.
 import type { BoxSetupPhase, BoxSetupState } from '../../../shared/types'
+import { BOX_SETUP_ROW_IDS, type BoxSetupRowId } from '../../../shared/box-setup-plan'
 
-/** Le sei fasi in parole, nell'ordine della guida. */
-export const BOX_SETUP_ROW_IDS = ['download', 'verify', 'installer', 'service', 'kernel', 'image'] as const
+/** Le sei fasi in parole, nell'ordine della guida (OBD2: vivono in shared, col piano). */
+export { BOX_SETUP_ROW_IDS }
+export type { BoxSetupRowId }
 
-export type BoxSetupRowId = (typeof BOX_SETUP_ROW_IDS)[number]
-
-/** Lo stato di una riga: da fare, in corso (barra o spinner), fatta ✓, errore; «action» è il bottone. */
-export type BoxSetupRowState = 'todo' | 'running' | 'done' | 'error' | 'action'
+/** Lo stato di una riga: da fare, in corso (barra o spinner), fatta ✓, saltata –, errore; «action» è il bottone. */
+export type BoxSetupRowState = 'todo' | 'running' | 'done' | 'skipped' | 'error' | 'action'
 
 export interface BoxSetupRow {
   id: BoxSetupRowId
@@ -35,10 +37,12 @@ const ROW_PHASES: ReadonlyArray<{ phase: BoxSetupPhase; row: BoxSetupRowId }> = 
 
 /**
  * Le sei righe (PURA): le fasi già passate sono fatte, la corrente è in
- * corso (o l'azione, sull'attesa dell'Installer), le altre da fare. Con
- * l'errore, la riga della fase di colpa è in errore e le fati PRIMA di lei
- * restano fatte (non si rifà quel che è riuscito). Annullato, mai partito
- * o controllo dello spazio: tutto da fare — la riga del download COMINCIA
+ * corso (o l'azione, sull'attesa dell'Installer), le altre da fare. OBD2:
+ * le righe in `skipped` sono SALTATE — non servivano, non sono fatte, e
+ * restano saltate anche a ready (il segno neutro, mai il ✓). Con l'errore,
+ * la riga della fase di colpa è in errore e le fatte PRIMA di lei restano
+ * fatte (non si rifà quel che è riuscito). Annullato, mai partito o
+ * controllo dello spazio: tutto da fare — la riga del download COMINCIA
  * col download.
  */
 export function boxSetupRows(s: BoxSetupState): BoxSetupRow[] {
@@ -48,12 +52,14 @@ export function boxSetupRows(s: BoxSetupState): BoxSetupRow[] {
     : null
   const currentIdx = current ? ROW_PHASES.findIndex((p) => p.phase === current) : -1
   const errorIdx = errorPhase ? ROW_PHASES.findIndex((p) => p.phase === errorPhase) : -1
+  const skipped = new Set(s.skipped)
 
   return BOX_SETUP_ROW_IDS.map((id) => {
     const idx = ROW_PHASES.findIndex((p) => p.row === id)
     const rowPhase = ROW_PHASES[idx]!.phase
     let status: BoxSetupRowState = 'todo'
-    if (s.phase === 'ready') status = 'done'
+    if (skipped.has(id)) status = 'skipped'
+    else if (s.phase === 'ready') status = 'done'
     else if (errorPhase === rowPhase) status = 'error'
     else if (idx < currentIdx || (errorIdx >= 0 && idx < errorIdx)) status = 'done'
     else if (current !== null && idx === currentIdx) status = s.phase === 'awaiting-installer' ? 'action' : 'running'

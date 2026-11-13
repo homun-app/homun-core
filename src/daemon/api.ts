@@ -2496,6 +2496,12 @@ export function buildApiMethods(
     // ---- OB1 (fase onboarding-b): la preparazione del computer del bot ----
     /** Lo stato della preparazione (setting box.setup, evento box-setup). */
     'box:setup-state': async () => opts.boxSetup?.state() ?? null,
+    /**
+     * OBD2 (fase onboarding-b-dettagli): il piano — i passi che la
+     * preparazione FARÀ, dagli stessi fatti della partenza (boxSetupPlan).
+     * Il consenso del passo Computer elenca solo questi.
+     */
+    'box:setup-plan': async () => ({ steps: await opts.boxSetup?.plan() ?? [] }),
     /** «Prepara il computer»: la partenza intelligente (dallo stato del motore). */
     'box:setup-start': async () => (await opts.boxSetup?.start()) ?? null,
     /** «Annulla» (mentre il download o l'immagine corrono). */

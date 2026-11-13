@@ -127,7 +127,7 @@ export const DAEMON_RPC_CHANNELS = [
   // fase box-container (BX4): il motore nelle Impostazioni
   'box:engine-status', 'box:engine-set', 'box:engine-start', 'box:engine-kernel-install',
   // OB1 (fase onboarding-b): la preparazione del computer del bot
-  'box:setup-state', 'box:setup-start', 'box:setup-cancel', 'box:setup-retry', 'box:setup-open-installer',
+  'box:setup-state', 'box:setup-plan', 'box:setup-start', 'box:setup-cancel', 'box:setup-retry', 'box:setup-open-installer',
   // OB5: togliere lo strumento di Apple
   'box:engine-uninstall',
   // fase 7: template dei bot (catalogo + creazione col kickstart)

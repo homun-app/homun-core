@@ -14,6 +14,8 @@ import { fileURLToPath } from 'node:url'
 import { renderHtml, setStoreStateForRender, parseHtml, findAll } from './render-helper'
 import { useStore } from '../store'
 import type { BoxSetupState, OnboardingStatus } from '../../../shared/types'
+import type { BoxSetupRowId } from '../../../shared/types'
+import { BOX_SETUP_ROW_IDS } from '../../../shared/box-setup-plan'
 
 const GUIDE_SRC = readFileSync(fileURLToPath(new URL('../components/GuideView.tsx', import.meta.url)), 'utf8')
 
@@ -32,7 +34,7 @@ const computerStatus = (): OnboardingStatus => ({
 })
 
 const setupState = (patch: Partial<BoxSetupState>): BoxSetupState => ({
-  phase: 'idle', bytes: null, total: null, buildPhase: null, error: null, startedAt: null,
+  phase: 'idle', bytes: null, total: null, buildPhase: null, error: null, startedAt: null, skipped: [],
   neededBytes: 3_400_000_000, ...patch
 })
 
@@ -42,10 +44,13 @@ const byTestId = (tree: ReturnType<typeof parseHtml>, testId: string) =>
 const textOf = (n: ReturnType<typeof parseHtml>): string =>
   findAll(n, () => true).map((x) => x.text ?? '').join(' ')
 
-const renderComputer = (boxSetup: BoxSetupState | null): { html: string; tree: ReturnType<typeof parseHtml> } => {
+const renderComputer = (boxSetup: BoxSetupState | null, plan: readonly BoxSetupRowId[] | null = [...BOX_SETUP_ROW_IDS]): { html: string; tree: ReturnType<typeof parseHtml> } => {
   setStoreStateForRender(useStore, {
     onboarding: computerStatus(),
     boxSetup,
+    // OBD2: il piano del consenso (RPC box:setup-plan) — di default tutto il
+    // percorso, come i test di prima della fase dettagli
+    boxSetupPlan: plan === null ? null : [...plan],
     agents: [AGENT],
     mainAgentId: 'a_1',
     windowWidth: 1280
@@ -65,8 +70,33 @@ describe('OB2: il pannello del passo Computer', () => {
     expect(consent).toContain('170 MB')
     expect(consent).toContain('password del Mac')
     expect(consent).toContain('kernel Linux consigliato')
-    // i GB CALCOLATI dalla stima (3,4 GB → 4 per eccesso), mai inventati
-    expect(consent).toContain('4 GB')
+    // i GB CALCOLATI dalla stima del piano (2,84 GB → 3 per eccesso), mai inventati
+    expect(consent).toContain('3 GB')
+  })
+
+  // OBD2: il consenso elenca SOLO quello che succederà — le righe sono i
+  // passi del PIANO (RPC box:setup-plan, stessa funzione pura della partenza)
+  it('OBD2: con il piano di SOLO l\'immagine NESSUNA riga parla di GitHub, Installer, password o kernel — e c\'è «non serve la password del Mac»', () => {
+    const { tree } = renderComputer(setupState({}), ['image'])
+    const consent = textOf(byTestId(tree, 'guide-computer-consent')[0]!)
+    expect(consent).not.toContain('GitHub')
+    expect(consent).not.toContain('170 MB')
+    expect(consent).not.toContain('ti chiederà la password')
+    expect(consent).not.toContain('kernel')
+    // la riga in più che dice la verità: niente password stavolta
+    expect(consent).toContain('non serve la password del Mac')
+    // solo la riga dell'immagine, coi GB del piano (1,5 GB → 2 per eccesso)
+    expect(findAll(byTestId(tree, 'guide-computer-consent')[0]!, (n) => n.tag === 'li').length).toBe(2)
+    expect(consent).toContain('preparo il computer del bot (circa 2 GB)')
+  })
+
+  it('OBD2: con l\'Installer nel piano la riga della password RESTA (e niente «non serve la password»)', () => {
+    const { tree } = renderComputer(setupState({}), ['download', 'verify', 'installer', 'service', 'kernel', 'image'])
+    const consent = textOf(byTestId(tree, 'guide-computer-consent')[0]!)
+    expect(consent).toContain('ti chiederà la password del Mac')
+    expect(consent).not.toContain('non serve la password del Mac')
+    // e i GB sono della stima intera (2,84 GB → 3)
+    expect(consent).toContain('3 GB')
   })
 
   it('la nuvoletta e l\'umore: «Mi preparo un computer tutto mio?» e thinking', () => {
@@ -109,6 +139,31 @@ describe('OB2: il pannello del passo Computer', () => {
     expect(img.attrs['data-status']).toBe('running')
     expect(textOf(img)).toContain('LOAD')
   })
+
+  // OBD2: le righe saltate col LORO testo sotto l'etichetta, e il segno
+  // neutro — mai il ✓ verde delle fasi fatte
+  it('OBD2: le righe saltate col loro testo (segno neutro, non il ✓)', () => {
+    const { tree, html } = renderComputer(setupState({
+      phase: 'building-image',
+      skipped: ['download', 'verify', 'installer', 'service', 'kernel']
+    }))
+    const texts: Array<[string, string]> = [
+      ['download', 'Già installato: niente da scaricare'],
+      ['verify', 'Non serve'],
+      ['installer', 'Già installato'],
+      ['service', 'Era già acceso'],
+      ['kernel', 'Era già presente']
+    ]
+    for (const [id, text] of texts) {
+      const row = byTestId(tree, `box-setup-row-${id}`)[0]!
+      expect(row.attrs['data-status']).toBe('skipped')
+      expect(textOf(row)).toContain(text)
+      expect(textOf(row)).not.toContain('✓')
+    }
+    // la riga dell'immagine corre (non è saltata)
+    expect(byTestId(tree, 'box-setup-row-image')[0]!.attrs['data-status']).toBe('running')
+    expect(html).toContain('–')
+  })
 })
 
 describe('OBR4: nell\'errore UN solo bottone — «Riprova»', () => {
@@ -138,7 +193,7 @@ describe('OBR4: nell\'errore UN solo bottone — «Riprova»', () => {
     expect(text).toContain('170 MB')
     expect(text).toContain('password del Mac')
     expect(text).toContain('kernel Linux consigliato')
-    expect(text).toContain('4 GB')
+    expect(text).toContain('3 GB')
     // nessun bottone dentro (né attorno, nello stesso riquadro) al consenso
     expect(findAll(consent[0]!.parent!, (n) => n.tag === 'button').length).toBe(0)
     // sopra: il consenso viene PRIMA del riquadro dell'errore
