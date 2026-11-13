@@ -216,8 +216,15 @@ export function App() {
  * decidendo se serve la guida (e, se è il caso, creando il bot principale):
  * la finestra non mostra né la chat vuota né un «Bot» prematuro. Stile della
  * finestra App di oggi: fondo tenue, niente bordi.
+ * OBV6.2 (fase onboarding-b-dal-vivo): al mount lo splash mette un
+ * MARCATORE che RESTA (documentElement.dataset.bootSplashSeen) — la sonda
+ * G8-1a controlla il marcatore invece di inseguire lo splash, che dura
+ * pochissimo: era una gara di tempi della sonda, non un difetto del prodotto.
  */
 function BootSplash() {
+  useEffect(() => {
+    document.documentElement.dataset.bootSplashSeen = '1'
+  }, [])
   return (
     <div className="flex h-screen w-screen flex-col items-center justify-center gap-5 bg-muted/40 text-foreground" data-testid="boot-splash">
       <div className="flex h-16 w-16 animate-pulse items-center justify-center rounded-[18px] bg-muted text-2xl font-display" aria-hidden>🧚</div>

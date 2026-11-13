@@ -29,7 +29,8 @@ out('   Status: signed by a developer certificate issued by Apple for distributi
 // Trusted by the Apple notary service» il parse di produzione non la accetta più
 out('   Notarization: trusted by the Apple notary service')
 out('   Certificate Chain:')
-out('    1. Developer ID Installer: Apple Inc. (TEAMIDFAKE)')
+// OBV6: la foglia È quella vera vista dal vivo — il Team ID lo conosciamo
+out('    1. Developer ID Installer: Apple Inc. - Containerization (UPBK2H6LZM)')
 out('       SHA256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
 out('       Expires: 2028-01-01 00:00:00 +0000')
 out('    2. Developer ID Certification Authority')

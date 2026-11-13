@@ -21,7 +21,7 @@ describe('OB6: pkgutil finto — --check-signature OK o KO a comando', () => {
     const r = spawnSync(process.execPath, [PKGUTIL, '--check-signature', '/tmp/finto.pkg'], { encoding: 'utf8', env: { PATH: process.env.PATH } })
     expect(r.status).toBe(0)
     expect(r.stdout).toContain('signed by a developer certificate issued by Apple for distribution')
-    expect(r.stdout).toContain('Developer ID Installer: Apple Inc.')
+    expect(r.stdout).toContain('Developer ID Installer: Apple Inc. - Containerization (UPBK2H6LZM)')
     // OBR3: la riga della notarizzazione è quella VERA di pkgutil
     expect(r.stdout).toContain('Notarization: trusted by the Apple notary service')
   })

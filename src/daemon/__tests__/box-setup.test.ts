@@ -221,7 +221,7 @@ const PKGUTIL_OK = [
   '   Status: signed by a developer certificate issued by Apple for distribution',
   '   Notarization: trusted by the Apple notary service',
   '   Certificate Chain:',
-  '    1. Developer ID Installer: Apple Inc. (TEAMIDFAKE)',
+  '    1. Developer ID Installer: Apple Inc. - Containerization (UPBK2H6LZM)',
   '       SHA256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
   '    2. Developer ID Certification Authority',
   '    3. Apple Root CA'
@@ -523,7 +523,7 @@ describe('OBR3 parsePkgutilCheckSignature: i due stati di Apple e la notarizzazi
 
   it('Developer ID CON «Notarization: trusted by the Apple notary service» → firmato e fidato, foglia col Team ID', () => {
     expect(parsePkgutilCheckSignature(PKGUTIL_OK)).toEqual({
-      signed: true, trusted: true, leaf: 'Developer ID Installer: Apple Inc. (TEAMIDFAKE)'
+      signed: true, trusted: true, leaf: 'Developer ID Installer: Apple Inc. - Containerization (UPBK2H6LZM)'
     })
   })
 
@@ -531,7 +531,7 @@ describe('OBR3 parsePkgutilCheckSignature: i due stati di Apple e la notarizzazi
     const p = parsePkgutilCheckSignature(PKGUTIL_DEVID_NO_NOTARY)
     expect(p.signed).toBe(true)
     expect(p.trusted).toBe(false)
-    expect(p.leaf).toBe('Developer ID Installer: Apple Inc. (TEAMIDFAKE)')
+    expect(p.leaf).toBe('Developer ID Installer: Apple Inc. - Containerization (UPBK2H6LZM)')
   })
 
   it('«no signature» → né firmato né fidato (nemmeno con una riga di notarizzazione accanto)', () => {
@@ -589,7 +589,7 @@ describe('OBR3 createBoxSetup: la verifica coi due stati, spctl sempre obbligato
     const ctl = createBoxSetup(h.deps)
     void ctl.start().then(() => undefined)
     await waitForState(ctl, (s) => s.phase === 'awaiting-installer')
-    expect(h.logs).toContain('[box-setup] pacchetto firmato da: Developer ID Installer: Apple Inc. (TEAMIDFAKE)')
+    expect(h.logs).toContain('[box-setup] pacchetto firmato da: Developer ID Installer: Apple Inc. - Containerization (UPBK2H6LZM)')
     h.containerAppears()
     await waitForState(ctl, (s) => s.phase === 'ready')
   })
@@ -772,5 +772,44 @@ describe('OBV3: l\'immagine si costruisce SOLO col motore Apple', () => {
     // e OGNI CLI chiamata dalla preparazione è la CLI di Apple, mai docker
     expect(h.cliCalls.length).toBeGreaterThan(0)
     expect(h.cliCalls.every((c) => c[0] === '/bin/finto-container')).toBe(true)
+  })
+})
+
+// ---- OBV6 (fase onboarding-b-dal-vivo): il Team ID del firmatario ----
+
+/** Developer ID notarizzato ma con la foglia di UN ALTRO firmatario */
+const PKGUTIL_WRONG_TEAM = [
+  'Package "container-1.7.1-installer-signed.pkg":',
+  '   Status: signed by a developer certificate issued by Apple for distribution',
+  '   Notarization: trusted by the Apple notary service',
+  '   Certificate Chain:',
+  '    1. Developer ID Installer: Qualcun Altro (ALTR0TEAM)',
+  '       SHA256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+  '    2. Developer ID Certification Authority',
+  '    3. Apple Root CA'
+].join('\n')
+
+describe('OBV6: il Team ID del firmatario — la foglia attesa sulla strada Developer ID', () => {
+  it('Developer ID notarizzato ma foglia con ALTRO Team ID → firmato ma NON fidato: non è Apple', () => {
+    const p = parsePkgutilCheckSignature(PKGUTIL_WRONG_TEAM)
+    expect(p.signed).toBe(true)
+    expect(p.trusted).toBe(false)
+  })
+
+  it('la foglia VERA della prova dal vivo (Apple Inc. - Containerization, UPBK2H6LZM) → fidato', () => {
+    const p = parsePkgutilCheckSignature(PKGUTIL_OK)
+    expect(p.signed).toBe(true)
+    expect(p.trusted).toBe(true)
+    expect(p.leaf).toContain('UPBK2H6LZM')
+  })
+
+  it('createBoxSetup: foglia con un altro Team ID → errore di firma, file cancellato, NESSUN open', async () => {
+    const h = harness({ pkgutilOut: PKGUTIL_WRONG_TEAM })
+    const ctl = createBoxSetup(h.deps)
+    const fin = await ctl.start()
+    expect(fin.phase).toBe('error')
+    expect(fin.error?.code).toBe('signature')
+    expect(h.opened).toHaveLength(0)
+    expect(existsSync(join(h.dir, 'finto.pkg.part'))).toBe(false)
   })
 })

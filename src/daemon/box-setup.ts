@@ -21,7 +21,7 @@ import { Readable } from 'node:stream'
 import { basename, dirname, join } from 'node:path'
 import type { AppleEngineState, BoxEngineId, CliRunResult } from '../main/sandbox/engine'
 import {
-  APPLE_CONTAINER_PKG_URL, APPLE_CONTAINER_PKG_BYTES, APPLE_CONTAINER_PKG_SHA256
+  APPLE_CONTAINER_PKG_URL, APPLE_CONTAINER_PKG_BYTES, APPLE_CONTAINER_PKG_SHA256, APPLE_CONTAINER_LEAF_CERT
 } from '../main/sandbox/apple-container-release'
 import { BOX_BUILD_ESTIMATED_BYTES, DISK_MARGIN_BYTES, enoughDiskSpace } from '../main/sandbox/disk-space'
 import { appleSystemStartArgv, appleKernelSetRecommendedArgv } from '../main/sandbox/apple-container-argv'
@@ -246,29 +246,30 @@ export function boxSetupRunConfig(env: NodeJS.ProcessEnv = process.env, packaged
 /**
  * Il parse di `pkgutil --check-signature` (PURO). OBR3: FIRMATO vale per
  * uno dei DUE stati che Apple usa — «signed Apple Software» (i pacchetti
- * firmati da Apple stessa: non sappiamo ancora quale dei due userà il
- * pacchetto di container) e «signed by a developer certificate issued by
+ * firmati da Apple stessa) e «signed by a developer certificate issued by
  * Apple» (Developer ID, per esempio «… for distribution»). FIDATO: per
- * Developer ID serve la riga della notarizzazione («Notarization: trusted
- * by the Apple notary service»); per «signed Apple Software» basta lo
- * stato stesso. Qualunque altro stato (no signature, certificato non
- * fidato, scaduto o revocato) → non firmato: la verifica fallisce chiusa.
- * Lo stato si legge SOLO sulla riga «Status:», mai come sottostringa
- * dell'uscita (il nome del pacchetto sta sulla prima riga). La riga del
- * certificato FOGLIA (`1. …`, QUALUNQUE sia il suo nome: «Developer ID
- * Installer:» o «Software Signing») si torna per il log — NON si confronta
- * con un valore indovinato: il Team ID lo fissa l'utente dopo la prova dal
- * vivo. spctl --assess --type install resta obbligatorio in entrambi i
- * casi, e lo sha256 resta il primo filtro (l'ordine della verifica).
+ * «signed Apple Software» basta lo stato stesso; per Developer ID servono
+ * la riga della notarizzazione («Notarization: trusted by the Apple notary
+ * service») E la foglia ATTESA — OBV6 (fase onboarding-b-dal-vivo): il
+ * firmatario vero visto dalla prova è «Developer ID Installer: Apple Inc.
+ * - Containerization (UPBK2H6LZM)», e un ALTRO Team ID non è Apple (la
+ * foglia si confronta con APPLE_CONTAINER_LEAF_CERT, non si indovina).
+ * Qualunque altro stato (no signature, certificato non fidato, scaduto o
+ * revocato) → non firmato: la verifica fallisce chiusa. Lo stato si legge
+ * SOLO sulla riga «Status:», mai come sottostringa dell'uscita (il nome
+ * del pacchetto sta sulla prima riga). La riga del certificato FOGLIA
+ * (`1. …`, QUALUNQUE sia il suo nome) si torna anche per il log.
+ * spctl --assess --type install resta obbligatorio in entrambi i casi, e
+ * lo sha256 resta il primo filtro (l'ordine della verifica).
  */
 export function parsePkgutilCheckSignature(stdout: string): { signed: boolean; trusted: boolean; leaf: string | null } {
   const status = /^\s*Status:\s*(.*?)\s*$/m.exec(stdout)?.[1] ?? ''
   const appleSoftware = /^signed Apple Software$/i.test(status)
   const developerId = /^signed by a developer certificate issued by Apple\b/i.test(status)
   const notarized = /^\s*Notarization:\s*trusted by the Apple notary service\s*$/im.test(stdout)
-  const signed = appleSoftware || developerId
-  const trusted = appleSoftware || (developerId && notarized)
   const leaf = /^\s*1\.\s+(\S.*?)\s*$/m.exec(stdout)?.[1] ?? null
+  const signed = appleSoftware || developerId
+  const trusted = appleSoftware || (developerId && notarized && leaf === APPLE_CONTAINER_LEAF_CERT)
   return { signed, trusted, leaf }
 }
 

@@ -110,9 +110,11 @@ const serveSlow = (res, from, to, total) => {
     res.end()
   })()
 }
+let pkgHits = 0
 const pkgServer = createServer((req, res) => {
   const url = new URL(req.url ?? '/', 'http://127.0.0.1')
   if (!url.pathname.endsWith('/finto.pkg')) { res.writeHead(404).end(); return }
+  pkgHits++
   const range = /^bytes=(\d+)-(\d*)$/.exec(req.headers.range ?? '')
   if (range) {
     const from = Number(range[1])
@@ -339,7 +341,9 @@ const startApp = async (dataDir, extraEnv = {}) => {
   mkdirSync(dataDir, { recursive: true })
   app = launchApp(dataDir, extraEnv)
   page = await waitForPage()
-  const splashSeenHere = await waitDom(`!!document.querySelector('[data-testid="boot-splash"]')`, 8_000, 60)
+  // OBV6.2: il MARCATORE dello splash, che RESTA anche dopo lo splash —
+  // deterministico (inseguire lo splash cadeva 2 volte su 3)
+  const splashSeenHere = await waitDom(`document.documentElement?.dataset?.bootSplashSeen === '1'`, 8_000, 60)
   if (!(await waitDom(`typeof window.sandbot !== 'undefined' && !!window.sandbot.saveProvider`, 30_000))) {
     throw new Error('window.sandbot non disponibile dopo 30s')
   }
@@ -967,6 +971,84 @@ log('FASE OB-e: macchina non supportata…')
     await waitDom(`!!document.querySelector('[data-testid="guide-step-approvals"]')`, 10_000)
     && !(await pageEval(`return document.body.innerText.includes('Il computer del bot')`)))
   await stopEverything(DATA10)
+}
+
+/** ---------- FASE OBV-a (OBV7): il kernel GIÀ PRESENTE → dritti all'immagine ---------- */
+// servizio acceso, kernel presente, immagine assente: la preparazione NON
+// rifà download/servizio/kernel — solo l'immagine. La CLI finta è «installata»
+// nel PATH di prova e il suo stato è ready (il kernel è un FILE nell'appRoot).
+log('FASE OBV-a: kernel già presente…')
+{
+  const f = freshOb()
+  const DATA11 = join(TMP, 'undici')
+  mkdirSync(join(DATA11, 'data'), { recursive: true })
+  seedEngineApple(DATA11)
+  // la CLI finta è GIÀ nel PATH di prova (il «Mac» ha già lo strumento)
+  writeFileSync(join(OB_BIN, 'container'), readFileSync(OB_CLI_SRC))
+  chmodSync(join(OB_BIN, 'container'), 0o755)
+  const hitsBefore = pkgHits
+  await startApp(DATA11, obEnv({
+    SANDBOT_TEST_CONTAINER_MODE: 'ready',
+    SANDBOT_TEST_CONTAINER_LOG: f.cliLog,
+    SANDBOT_TEST_OPEN_LOG: f.openLog,
+    SANDBOT_TEST_CONTAINER_APP_ROOT: f.appRoot
+  }))
+  await waitDom(`!!document.querySelector('[data-testid="guide-step-welcome"]')`, 25_000)
+  await tuStep({ name: 'Bot' })
+  await waitDom(`!!document.querySelector('[data-testid="guide-step-model"]')`, 10_000)
+  await clickTestid('guide-skip')
+  check('OBV-a1 il passo Computer c\'è (macchina supportata, immagine assente)',
+    await waitDom(`!!document.querySelector('[data-testid="guide-step-computer"]')`, 10_000), `step: ${await guideStep()}`)
+  await clickTestid('guide-computer-prepare')
+  // il percorso intelligente: NESSUN download, NESSUN system start, NESSUN
+  // kernel set — solo la build dell'immagine, poi ready
+  check('OBV-a2 la preparazione arriva al ready (mood happy, «Ho il mio computer!»)',
+    await waitDom(`document.querySelector('[data-testid="guide-scene"] [data-mood]')?.getAttribute('data-mood') === 'happy'`, 60_000),
+    `phase: ${await boxPhaseOf()}`)
+  check('OBV-a3 NESSUN pacchetto scaricato (il server del pkg finto non è stato toccato)', pkgHits === hitsBefore, `hits ${hitsBefore} → ${pkgHits}`)
+  const argv = (() => { try { return readFileSync(f.cliLog, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l).argv.join(' ')) } catch { return [] } })()
+  check('OBV-a4 NESSUN system start e NESSUN kernel set (già accesi/presenti)',
+    !argv.some((a) => a.startsWith('system start')) && !argv.some((a) => a.startsWith('system kernel set')),
+    argv.slice(0, 6).join(' | '))
+  check('OBV-a5 l\'immagine sì: la build è passata dalla CLI finta', argv.some((a) => a.startsWith('build ')))
+  await shot('obv-kernel-gia-presente-1440-chiaro.png')
+  await dark(true)
+  await shot('obv-kernel-gia-presente-1440-scuro.png')
+  await dark(false)
+  await stopEverything(DATA11)
+}
+
+/** ---------- FASE OBV-b (OBV7): «Integrato pronto» nel passo Modello ---------- */
+// il modello integrato è GIÀ su disco (GGUF finto nella cartella modelli dei
+// dati di prova): il pannello lo vede ready SENZA download, «Continua» scrive
+// models.main e AVANZA (dal vivo il passo era un vicolo cieco).
+log('FASE OBV-b: Integrato pronto…')
+{
+  const DATA12 = join(TMP, 'dodici')
+  // il GGUF finto del catalogo VERO (qwen3.5-4b): basta che ESISTA
+  mkdirSync(join(DATA12, 'data', 'models'), { recursive: true })
+  writeFileSync(join(DATA12, 'data', 'models', 'Qwen3.5-4B-Q4_K_M.gguf'), Buffer.alloc(64 * 1024, 7))
+  await startApp(DATA12) // arch finto x86_64: niente passo Computer
+  await waitDom(`!!document.querySelector('[data-testid="guide-step-welcome"]')`, 25_000)
+  await tuStep({ name: 'Bot' })
+  await waitDom(`!!document.querySelector('[data-testid="guide-step-model"]')`, 10_000)
+  await clickTestid('guide-provider-local')
+  check('OBV-b1 il pannello Integrato dice subito «Scaricato e provato.» (ready, senza download)',
+    await waitDom(`document.querySelector('[data-testid="guide-local-label"]')?.innerText.includes('Scaricato e provato.')`, 15_000),
+    `label: ${await pageEval(`return document.querySelector('[data-testid="guide-local-label"]')?.innerText ?? null`)}`)
+  await shot('obv-integrato-pronto-1440-chiaro.png')
+  await dark(true)
+  await shot('obv-integrato-pronto-1440-scuro.png')
+  await dark(false)
+  check('OBV-b2 «Continua» è ATTIVO col modello pronto',
+    await waitDom(`!document.querySelector('[data-testid="guide-continue"]')?.disabled`, 10_000))
+  await clickTestid('guide-continue')
+  check('OBV-b3 «Continua» AVANZA (permessi): non è più un bottone che non fa nulla',
+    await waitDom(`!!document.querySelector('[data-testid="guide-step-approvals"]')`, 15_000), `step: ${await guideStep()}`)
+  const main12 = await rpc(`settingsGet('models.main', null)`)
+  check('OBV-b4 models.main è il modello integrato del catalogo (qwen3.5-4b, provider homun-local)',
+    main12?.providerId === 'homun-local' && main12?.model === 'qwen3.5-4b', JSON.stringify(main12))
+  await stopEverything(DATA12)
 }
 
 // ---- pulizia finale: 0 daemon e 0 llama-server ----

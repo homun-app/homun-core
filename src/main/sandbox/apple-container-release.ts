@@ -26,3 +26,16 @@ export const APPLE_CONTAINER_PKG_BYTES = 169_630_704
 /** Lo sha256 esatto del pacchetto (la verifica lo confronta con questo). */
 export const APPLE_CONTAINER_PKG_SHA256 =
   'b6739caf3d47ca53a78f1a7edf32521420a75c7941838c3cefa75f30b80f5a97'
+
+/**
+ * OBV6 (fase onboarding-b-dal-vivo): il firmatario VERO, visto dalla prova
+ * del 2026-11-13. Sulla strada Developer ID notarizzata la foglia di
+ * pkgutil è «Developer ID Installer: Apple Inc. - Containerization
+ * (UPBK2H6LZM)» — «signed Apple Software» NON compare. La verifica ora la
+ * CHIEDE (un altro Team ID non è Apple); la strada «signed Apple Software»
+ * resta accettata come prima.
+ */
+export const APPLE_CONTAINER_TEAM_ID = 'UPBK2H6LZM'
+
+/** La foglia attesa sulla strada Developer ID (nome e Team ID). */
+export const APPLE_CONTAINER_LEAF_CERT = `Developer ID Installer: Apple Inc. - Containerization (${APPLE_CONTAINER_TEAM_ID})`

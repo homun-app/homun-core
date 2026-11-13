@@ -9,7 +9,9 @@ import {
   APPLE_CONTAINER_PKG_FILE,
   APPLE_CONTAINER_PKG_URL,
   APPLE_CONTAINER_PKG_BYTES,
-  APPLE_CONTAINER_PKG_SHA256
+  APPLE_CONTAINER_PKG_SHA256,
+  APPLE_CONTAINER_TEAM_ID,
+  APPLE_CONTAINER_LEAF_CERT
 } from '../apple-container-release'
 
 describe('OB1: le costanti della release di Apple container (bloccate)', () => {
@@ -37,5 +39,15 @@ describe('OB1: le costanti della release di Apple container (bloccate)', () => {
 
   it('lo sha256 è un esadecimale di 64 caratteri (nessun numero inventato)', () => {
     expect(APPLE_CONTAINER_PKG_SHA256).toMatch(/^[0-9a-f]{64}$/)
+  })
+})
+
+describe('OBV6: il firmatario VERO visto dalla prova dal vivo (bloccato)', () => {
+  it('il Team ID della strada Developer ID notarizzata', () => {
+    expect(APPLE_CONTAINER_TEAM_ID).toBe('UPBK2H6LZM')
+  })
+
+  it('la FOGLIA attesa: Developer ID Installer di Apple per Containerization', () => {
+    expect(APPLE_CONTAINER_LEAF_CERT).toBe('Developer ID Installer: Apple Inc. - Containerization (UPBK2H6LZM)')
   })
 })
