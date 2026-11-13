@@ -70,9 +70,12 @@ const logArgvs = () => {
  */
 function scanState() {
   let box = null
+  let built = false
   const networks = new Set(['homun-box'])
   for (const a of logArgvs()) {
     if (!Array.isArray(a)) continue
+    // OB6: la NOSTRA immagine esiste SOLO dopo una build (il log è lo stato)
+    if (a[0] === 'build') built = true
     if ((a[0] === 'run' && a.includes('-d')) || a[0] === 'create') {
       const nameI = a.indexOf('--name')
       if (nameI >= 0) {
@@ -97,7 +100,7 @@ function scanState() {
     if ((a[0] === 'rm' || a[0] === 'delete') && box && a.slice(1).includes(box.name)) box = null
     if (a[0] === 'network' && a[1] === 'create') networks.add(a[a.length - 1])
   }
-  return { box, networks }
+  return { box, networks, built }
 }
 
 /** Il JSON dell'inspect di una rete: subnet e gateway della rete richiesta. */
@@ -139,6 +142,8 @@ if (argv[0] === 'image') {
     // `image inspect [--format F] <tag>`: la dimensione della NOSTRA immagine
     const i = argv.indexOf('--format')
     if (i >= 0 && /size/i.test(argv[i + 1] ?? '')) { out('1180000000'); process.exit(0) }
+    // OB6: senza formato è l'inspect dell'ESISTENZA: senza build non c'è
+    if (!scanState().built) die(1, `container (fake): image ${argv[argv.length - 1]} not found`)
     out('{}'); process.exit(0)
   }
   if (argv[1] === 'prune') { out('pruned (fake)'); process.exit(0) }
@@ -172,7 +177,18 @@ if (argv[0] === 'network') {
 }
 
 // ---- build (la build del box: dura un attimo e riesce) ----
-if (argv[0] === 'build') { out('build (fake): done'); process.exit(0) }
+// OB6: con SANDBOT_TEST_CONTAINER_BUILD_DELAY_MS la build DURA (la sonda
+// prova la guida che prosegue mentre l'immagine si costruisce in background).
+// L'attesa è SINCRONA (Atomics.wait): il flusso del processo resta qui e
+// nessun altro controllo risponde al posto della build
+if (argv[0] === 'build') {
+  const delay = Number(process.env.SANDBOT_TEST_CONTAINER_BUILD_DELAY_MS ?? '0')
+  if (Number.isFinite(delay) && delay > 0) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delay)
+  }
+  out('build (fake): done')
+  process.exit(0)
+}
 
 // ---- builder prune (la cache di build, per la pulizia sicura di docker) ----
 if (argv[0] === 'builder') { out('build cache pruned (fake)'); process.exit(0) }

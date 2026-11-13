@@ -4,13 +4,12 @@
 // oppure la preparazione è in corso), la sequenza col passo al posto
 // giusto (fra Modello e Permessi), l'avanzare automatico quando la
 // preparazione finisce mentre la guida è ferma lì (come il modello in
-// OA3) e il wiring di computerBecameReady del controller dell'onboarding.
+// OA3) e la riga «Computer» del riepilogo.
 import { describe, expect, it } from 'vitest'
 import type { BoxSetupPhase, OnboardingState, OnboardingStepId } from '../../shared/types'
 import {
-  onboardingStepSequence, computerStepAvailable, autoAdvanceOnboarding, initialOnboardingState, createOnboarding
+  onboardingStepSequence, computerStepAvailable, autoAdvanceOnboarding, initialOnboardingState
 } from '../onboarding'
-import type { OnboardingDeps } from '../onboarding'
 
 const avail = (computer: boolean): { computer: boolean; memory: boolean } => ({ computer, memory: false })
 const seq: readonly OnboardingStepId[] = onboardingStepSequence(avail(true))
@@ -40,6 +39,14 @@ describe('OB2: la disponibilità del passo Computer (PURa)', () => {
   it('su una macchina NON supportata il passo non c\'è mai (Docker resta la riserva in Impostazioni)', () => {
     expect(computerStepAvailable({ supported: false, readyWithImage: false }, null)).toBe(false)
     expect(computerStepAvailable({ supported: false, readyWithImage: false }, 'downloading')).toBe(false)
+    expect(computerStepAvailable({ supported: false, readyWithImage: false }, null, true)).toBe(false)
+  })
+
+  it('la guida FERMA sul passo lo tiene nella sequenza anche quando tutto è pronto: si chiude da sé', () => {
+    // senza questo, al ready il passo sparirebbe dalla sequenza PRIMA che la
+    // guida possa chiuderlo — e resterebbe inchiodata lì (visto dalla sonda)
+    expect(computerStepAvailable({ supported: true, readyWithImage: true }, 'ready', true)).toBe(true)
+    expect(computerStepAvailable({ supported: true, readyWithImage: true }, null, true)).toBe(true)
   })
 })
 
@@ -74,43 +81,5 @@ describe('OB2: il passo si chiude DA SOLO quando la preparazione finisce (OA3 pe
   it('senza preparazione pronta il passo resta aperto', () => {
     const s = stateAt('computer')
     expect(autoAdvanceOnboarding(s, { modelReady: false, computerReady: false }, seq)).toBe(s)
-  })
-})
-
-describe('OB2: computerBecameReady del controller dell\'onboarding', () => {
-  const mkDeps = (step: OnboardingStepId | null): OnboardingDeps => {
-    const store = new Map<string, unknown>()
-    if (step) store.set('onboarding.state', { step, done: [], skipped: [], startedAt: 1 })
-    return {
-      now: () => 1,
-      getSetting: <T,>(k: string, f: T): T => (store.has(k) ? (store.get(k) as T) : f),
-      setSetting: (k: string, v: unknown) => { store.set(k, v) },
-      listAgents: () => [],
-      createAgent: () => { throw new Error('mai') },
-      getAgent: () => null,
-      getEntries: () => [],
-      tx: <T,>(fn: () => T): T => fn(),
-      updateAgent: () => undefined,
-      listProviders: () => [],
-      appendSystemSend: () => undefined,
-      markWidgetResponded: () => undefined,
-      markWidgetDismissed: () => undefined,
-      connectedAppIds: async () => new Set(),
-      emit: () => undefined,
-      stepAvailability: () => avail(step === 'computer'),
-      computerReady: () => true
-    } as OnboardingDeps
-  }
-
-  it('guida ferma su computer: il passo si chiude, torna true', () => {
-    const onboarding = createOnboarding(mkDeps('computer'))
-    expect(onboarding.computerBecameReady()).toBe(true)
-    expect(onboarding.status().state?.step).toBe('approvals')
-  })
-
-  it('guida altrove (o chiusa): niente cambia, torna false', () => {
-    expect(createOnboarding(mkDeps('model')).computerBecameReady()).toBe(false)
-    expect(createOnboarding(mkDeps('chat')).computerBecameReady()).toBe(false)
-    expect(createOnboarding(mkDeps(null)).computerBecameReady()).toBe(false)
   })
 })

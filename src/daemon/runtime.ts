@@ -759,13 +759,16 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
     stepAvailability: () => {
       const facts = lastBoxEngineFacts()
       if (!facts) return { computer: false, memory: false }
+      // la guida ferma sul passo computer lo tiene in sequenza: si chiude da sé
+      const guideStep = getSetting<{ step?: string } | null>('onboarding.state', null)?.step
       return {
         computer: computerStepAvailable(
           {
             supported: appleContainerSupported(facts),
             readyWithImage: appleContainerState(facts) === 'ready' && cachedHasBoxImage
           },
-          boxSetupPhaseNow()
+          boxSetupPhaseNow(),
+          guideStep === 'computer'
         ),
         memory: false
       }
@@ -850,11 +853,13 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
     },
     hasBoxImage: () => hasBoxImageNow(),
     // OB2: la preparazione è arrivata in fondo — si rifrescano i fatti del
-    // motore e l'immagine, poi la guida ferma sul passo computer lo chiude
+    // motore e l'immagine (per lo status del passo). La guida NON si
+    // avanza da qui: chi guarda il passo vede «Ho il mio computer!» e
+    // chiusura col suo «Continua»; chi non c'è, il passo non lo vede più
+    // (la disponibilità lo esclude: è «fatto da solo», come il modello)
     onReady: () => {
       void refreshAutoEngine()
         .then(() => hasBoxImageNow())
-        .then(() => onboarding.computerBecameReady())
         .catch(() => undefined)
     },
     buildBoxImage: () => import('../main/sandbox').then((m) => m.ensureBoxImage()),

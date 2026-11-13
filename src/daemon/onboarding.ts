@@ -73,8 +73,16 @@ export function initialOnboardingState(now: number, available: { computer: boole
  * SOLO, come il modello in OA3; su una macchina non supportata non c'è
  * (Docker resta la riserva in Impostazioni, fuori dalla guida).
  */
-export function computerStepAvailable(facts: { supported: boolean; readyWithImage: boolean }, setupPhase: BoxSetupPhase | null): boolean {
+export function computerStepAvailable(
+  facts: { supported: boolean; readyWithImage: boolean },
+  setupPhase: BoxSetupPhase | null,
+  guideOnComputer = false
+): boolean {
   if (!facts.supported) return false
+  // la guida FERMA sul passo lo tiene nella sequenza finché non si chiude
+  // da sé: altrimenti il passo sparirebbe PRIMA della chiusura (visto dalla
+  // sonda OB: la guida restava inchiodata)
+  if (guideOnComputer) return true
   if (!facts.readyWithImage) return true
   // pronto: il passo resta SOLO se la preparazione sta ancora correndo
   // (errore o annullato non corrono: il passo resta spento finché non si riparte)
@@ -500,23 +508,6 @@ export function createOnboarding(deps: OnboardingDeps) {
       if (!state) return false
       const sequence = onboardingStepSequence(availabilityOf(deps))
       const next = autoAdvanceOnboarding(state, { modelReady: modelReadyOf(deps), computerReady: computerReadyOf(deps) }, sequence)
-      if (next === state) return false
-      deps.setSetting(ONBOARDING_STATE_SETTING, next)
-      reachChatIfChat(next)
-      deps.emit({ type: 'onboarding', ...statusOf(deps) })
-      return true
-    },
-    /**
-     * OB2 (fase onboarding-b): la preparazione del computer del bot è
-     * arrivata in fondo — se la guida è ferma sul passo computer, il passo
-     * si chiude DA SOLO (è «fatto», come il modello in OA3). True se ha
-     * chiuso il passo ora.
-     */
-    computerBecameReady(): boolean {
-      const state = stateOf(deps)
-      if (!state) return false
-      const sequence = onboardingStepSequence(availabilityOf(deps))
-      const next = autoAdvanceOnboarding(state, { modelReady: modelReadyOf(deps), computerReady: true }, sequence)
       if (next === state) return false
       deps.setSetting(ONBOARDING_STATE_SETTING, next)
       reachChatIfChat(next)

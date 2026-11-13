@@ -331,7 +331,10 @@ const launchApp = () => {
       SANDBOT_TEST_FAKE_KEYCHAIN: join(DATA, 'keychain-finta.json'),
       SANDBOT_TEST_FAKE_SAFESTORAGE: join(DATA, 'safestorage-finta.json'),
       SANDBOT_TEST_COMPOSIO_MCP_URL: composioState.url,
-      SANDBOT_TEST_FAKE_BROWSER: '1'
+      SANDBOT_TEST_FAKE_BROWSER: '1',
+      // OB (fase onboarding-b): macchina NON supportata (fatto finto): il
+      // passo Computer non c'è e la guida si attraversa come prima
+      SANDBOT_TEST_FAKE_ARCH: 'x86_64'
     },
     stdio: ['ignore', 'pipe', 'pipe']
   })

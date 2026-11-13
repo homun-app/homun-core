@@ -543,8 +543,9 @@ export function GuideView() {
     if (uiStep === 'computer') {
       if (backTo) { setBackTo(null); return }
       // a ready il passo si chiude FATTO; durante download/immagine si va
-      // avanti e la preparazione CONTINUA in background
-      if (computerReady) void advance('computer', 'done')
+      // avanti LO STESSO e la preparazione CONTINUA in background (il
+      // riepilogo di Pronto dirà «Computer: in preparazione»)
+      if (computerContinue) void advance('computer', 'done')
       return
     }
     if (uiStep === 'approvals') {
@@ -676,7 +677,13 @@ export function GuideView() {
           {uiStep === 'approvals' && (
             <ApprovalsStep modelReady={modelReady} chosen={chosenApprovals} onChoose={(mode) => { void chooseApprovals(mode) }} />
           )}
-          {uiStep === 'ready' && <ReadyStep modelReady={modelReady} chosen={chosenApprovals} computer={sequence.includes('computer') ? computerDoneForSummary : 'off'} />}
+          {uiStep === 'ready' && (
+            <ReadyStep
+              modelReady={modelReady}
+              chosen={chosenApprovals}
+              computer={sequence.includes('computer') || state.done.includes('computer') ? computerDoneForSummary : 'off'}
+            />
+          )}
           {daemonStep === 'computer' && <GuideComputerStep />}
           {daemonStep === 'memory' && (
             <StepPanel stepKey="memory" testId="guide-step-memory">

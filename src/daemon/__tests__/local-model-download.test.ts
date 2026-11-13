@@ -151,7 +151,6 @@ describe('fase locale correzioni 2 (LD1): la fine del download aggancia il provi
         reopen: () => false,
         providerPaths: async () => [],
         modelBecameReady: () => { closed++; return false },
-        computerBecameReady: () => false,
         answerFocus: async () => false,
         dismissFocus: () => undefined
       }

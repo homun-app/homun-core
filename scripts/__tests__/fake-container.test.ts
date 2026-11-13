@@ -163,3 +163,40 @@ describe('BX5: la CLI finta di container — i comportamenti per variabile d\'am
     expect(run(check).status).toBe(1)
   })
 })
+
+// ---- OB6 (fase onboarding-b): la build può DURARE ----
+describe('OB6: la build finta può durare (SANDBOT_TEST_CONTAINER_BUILD_DELAY_MS)', () => {
+  it('senza ritardo risponde subito; col ritardo ci mette almeno quel tempo', () => {
+    const t0 = Date.now()
+    const fast = run('ready', ['build'])
+    expect(fast.status).toBe(0)
+    expect(Date.now() - t0).toBeLessThan(2_000)
+    const t1 = Date.now()
+    const slow = spawnSync(process.execPath, [FAKE, 'build'], {
+      encoding: 'utf8',
+      env: { PATH: process.env.PATH, SANDBOT_TEST_CONTAINER_MODE: 'ready', SANDBOT_TEST_CONTAINER_BUILD_DELAY_MS: '1200' }
+    })
+    expect(slow.status).toBe(0)
+    expect(Date.now() - t1).toBeGreaterThanOrEqual(1_100)
+  })
+})
+
+// ---- OB6: la NOSTRA immagine esiste SOLO dopo la build ----
+describe('OB6: image inspect risponde OK solo DOPO una build', () => {
+  it('senza build l\'inspect dice che l\'immagine non c\'è; dopo la build c\'è', () => {
+    const logFile = join(TMP, `log-build-state-${Date.now()}.jsonl`)
+    const env = (extra: Record<string, string>) => ({ PATH: process.env.PATH, SANDBOT_TEST_CONTAINER_MODE: 'ready', SANDBOT_TEST_CONTAINER_LOG: logFile, ...extra })
+    const fake = (argv: string[]) => spawnSync(process.execPath, [FAKE, ...argv], { encoding: 'utf8', env: env({}) })
+    // il .part: la stessa sequence nel log — la build registrata rende l'immagine visibile
+    const before = fake(['image', 'inspect', 'sandbot-box:fake'])
+    expect(before.status).not.toBe(0)
+    const build = fake(['build', 'sandbot-box:fake', '.'])
+    expect(build.status).toBe(0)
+    const after = fake(['image', 'inspect', 'sandbot-box:fake'])
+    expect(after.status).toBe(0)
+    // la dimensione (--format) resta sempre disponibile (le righe di spazio su disco)
+    const size = fake(['image', 'inspect', '--format', '{{.size}}', 'sandbot-box:fake'])
+    expect(size.status).toBe(0)
+    expect(size.stdout.trim()).toBe('1180000000')
+  })
+})

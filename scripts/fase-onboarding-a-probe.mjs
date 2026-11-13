@@ -12,11 +12,21 @@
 // per chi ha già scritto (OAC4); il compositore con la card del focus
 // aperta; la SECONDA attesa del modello (OAC2); il doppio clic sul focus
 // (OAC3); le larghezze 1440/1000/820 senza scorrimento orizzontale.
+// OB (fase onboarding-b): il passo COMPUTER dalla finestra, sempre con clic
+// veri — macchina «supportata» (fatti finti) e container assente: il
+// pacchetto FINTO è servito dalla sonda su 127.0.0.1, pkgutil/spctl/open
+// FINTI (scripts/fake-*.mjs), l'open finto «installa» la CLI finta nel PATH
+// di prova. Copre: il percorso intero (download, verifica, Installer,
+// installazione, servizio, kernel, immagine, ready, happy, Continua,
+// «Computer: pronto»), lo sha256 sbagliato (errore, NESSUN open), il
+// riavvio su awaiting-installer, «Continua» durante l'immagine (la riga del
+// pannello arriva a «Pronto» DOPO la guida) e la macchina non supportata
+// (niente passo). Catture ob-* in docs/catture/onboarding-a/.
 // Catture guida-v2-* e oac-* in docs/catture/onboarding-a/. A FINE SONDA si
 // chiude ANCHE il daemon di sviluppo, la cartella viene rimossa, nessun push.
 import { spawn } from 'node:child_process'
 import { createServer } from 'node:http'
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { findProbeDaemons, stopProbeDaemons } from './lib/probe-daemons.mjs'
@@ -76,12 +86,89 @@ const providerPort = providerServer.address().port
 const PROVIDER_BASE = `http://127.0.0.1:${providerPort}/v1`
 const callsWith = (text) => chatRequests.filter((c) => JSON.stringify(c).includes(text)).length
 
+// ---- OB6: il PACCHETTO FINTO, servito su 127.0.0.1 dalla sonda ----
+// byte FISSI (niente download vero): sha256 e dimensione calcolati una volta
+// e passati al daemon con gli override SANDBOT_TEST_PKG_*
+import { createHash } from 'node:crypto'
+import { chmodSync } from 'node:fs'
+const PKG_BYTES = Buffer.alloc(3_000_000)
+for (let i = 0; i < PKG_BYTES.length; i++) PKG_BYTES[i] = (i * 7 + 13) % 251
+const PKG_SHA = createHash('sha256').update(PKG_BYTES).digest('hex')
+// il download DURA (30 KB ogni 50 ms ≈ 5 s): dalla finestra si deve VEDERE
+// l'avanzamento, non un lampo — è la prova del passo, non una gara
+const serveSlow = (res, from, to, total) => {
+  res.writeHead(res.statusCode === 206 ? 206 : 200, {
+    'content-type': 'application/octet-stream',
+    'content-length': String(to - from + 1),
+    ...(res.statusCode === 206 ? { 'content-range': `bytes ${from}-${to}/${total}` } : {})
+  })
+  void (async () => {
+    for (let at = from; at <= to; at += 30_000) {
+      res.write(PKG_BYTES.subarray(at, Math.min(at + 30_000, to + 1)))
+      await new Promise((r) => setTimeout(r, 50))
+    }
+    res.end()
+  })()
+}
+const pkgServer = createServer((req, res) => {
+  const url = new URL(req.url ?? '/', 'http://127.0.0.1')
+  if (!url.pathname.endsWith('/finto.pkg')) { res.writeHead(404).end(); return }
+  const range = /^bytes=(\d+)-(\d*)$/.exec(req.headers.range ?? '')
+  if (range) {
+    const from = Number(range[1])
+    const to = range[2] ? Math.min(Number(range[2]), PKG_BYTES.length - 1) : PKG_BYTES.length - 1
+    res.statusCode = 206
+    serveSlow(res, from, to, PKG_BYTES.length)
+    return
+  }
+  res.statusCode = 200
+  serveSlow(res, 0, PKG_BYTES.length - 1, PKG_BYTES.length)
+})
+await new Promise((r) => pkgServer.listen(0, '127.0.0.1', r))
+const pkgPort = pkgServer.address().port
+
+// i comandi FINTI come wrapper eseguibili (il PATH del daemon è minimo): gli
+// .mjs veri stanno in scripts/, il wrapper invoca il node ESPPLICITO
+const wrap = (dir, name, script) => {
+  const file = join(dir, name)
+  writeFileSync(file, `#!/bin/sh\nexec "${process.execPath}" "${join(ROOT, 'scripts', script)}" "$@"\n`)
+  chmodSync(file, 0o755)
+  return file
+}
+// la cartella del PATH di prova: VUOTA finché l'open finto non «installa»
+const OB_BIN = join(TMP, 'ob-bin')
+mkdirSync(OB_BIN, { recursive: true })
+const OB_CLI_SRC = wrap(TMP, 'ob-cli-container', 'fake-container.mjs')
+const FAKE_PKGUTIL = wrap(TMP, 'ob-pkgutil', 'fake-pkgutil.mjs')
+const FAKE_SPCTL = wrap(TMP, 'ob-spctl', 'fake-spctl.mjs')
+const FAKE_OPEN = wrap(TMP, 'ob-open', 'fake-open.mjs')
+const obEnv = (over = {}) => ({
+  SANDBOT_TEST_FAKE_PLATFORM: 'darwin',
+  SANDBOT_TEST_FAKE_ARCH: 'arm64',
+  SANDBOT_TEST_FAKE_MACOS_MAJOR: '26',
+  PATH: `${OB_BIN}:/usr/bin:/bin:/usr/sbin:/sbin`,
+  SANDBOT_TEST_PKG_URL: `http://127.0.0.1:${pkgPort}/finto.pkg`,
+  SANDBOT_TEST_PKG_SHA256: PKG_SHA,
+  SANDBOT_TEST_PKG_SIZE: String(PKG_BYTES.length),
+  SANDBOT_TEST_PKGUTIL: FAKE_PKGUTIL,
+  SANDBOT_TEST_SPCTL: FAKE_SPCTL,
+  SANDBOT_TEST_OPEN: FAKE_OPEN,
+  SANDBOT_TEST_OPEN_DELAY_MS: '4000',
+  SANDBOT_TEST_OPEN_CLI_SRC: OB_CLI_SRC,
+  SANDBOT_TEST_OPEN_INSTALL_DIR: OB_BIN,
+  SANDBOT_TEST_CONTAINER_LOG: '', // lo decide ogni fase (file nel TMP)
+  ...over
+})
+
 // ---- l'app Electron (build di sviluppo) ----
 const ELECTRON = join(ROOT, 'node_modules', 'electron', 'dist', 'Electron.app', 'Contents', 'MacOS', 'Electron')
 const DEBUG_PORT = 9357
 let appLog = ''
 let app = null
-const launchApp = (dataDir) => {
+// OB6: extraEnv porta gli override di prova di OGNI fase (fatti macchina,
+// pacchetto finto, strumenti finti); le fasi 1–5 fingono una macchina NON
+// supportata: il passo Computer non c'è e il percorso resta quello di oggi
+const launchApp = (dataDir, extraEnv = {}) => {
   const proc = spawn(ELECTRON, ['.', `--remote-debugging-port=${DEBUG_PORT}`], {
     cwd: ROOT,
     env: {
@@ -90,7 +177,9 @@ const launchApp = (dataDir) => {
       SANDBOT_TEST_USER_DATA: dataDir,
       SANDBOT_TEST_FAKE_KEYCHAIN: join(dataDir, 'keychain-finta.json'),
       SANDBOT_TEST_FAKE_SAFESTORAGE: join(dataDir, 'safestorage-finta.json'),
-      SANDBOT_TEST_FAKE_BROWSER: '1'
+      SANDBOT_TEST_FAKE_BROWSER: '1',
+      SANDBOT_TEST_FAKE_ARCH: 'x86_64',
+      ...extraEnv
     },
     stdio: ['ignore', 'pipe', 'pipe']
   })
@@ -233,9 +322,9 @@ const dark = async (on) => {
   await sleep(350)
 }
 /** avvia l'app su una cartella dati e aspetta la pagina (con la finestra a 1440) */
-const startApp = async (dataDir) => {
+const startApp = async (dataDir, extraEnv = {}) => {
   mkdirSync(dataDir, { recursive: true })
-  app = launchApp(dataDir)
+  app = launchApp(dataDir, extraEnv)
   page = await waitForPage()
   const splashSeenHere = await waitDom(`!!document.querySelector('[data-testid="boot-splash"]')`, 8_000, 60)
   if (!(await waitDom(`typeof window.sandbot !== 'undefined' && !!window.sandbot.saveProvider`, 30_000))) {
@@ -538,7 +627,8 @@ check('OAC4.2b la guida riaperta rifà il passo Modello (saltato: si rivede la g
   await waitDom(`!!document.querySelector('[data-testid="guide-step-model"]')`, 15_000))
 await clickTestid('guide-skip')
 check('OAC4.2c saltato di nuovo, si torna ai Permessi',
-  await waitDom(`!!document.querySelector('[data-testid="guide-step-approvals"]')`, 15_000))
+  await waitDom(`!!document.querySelector('[data-testid="guide-step-approvals"]')`, 15_000),
+  `step: ${await guideStep()}`)
 await approvalsToChat()
 check('OAC4.2d di nuovo in chat: lo STESSO bot e la card del focus NON doppia',
   await waitDom(`!!document.querySelector('form textarea')`, 20_000)
@@ -637,6 +727,230 @@ const doneNoState = await rpc(`settingsGet('onboarding.done', false)`)
 check('G8-5d chi ha già messaggi e MAI guida: NESSUNA guida (e onboarding.done si scrive)',
   guideNoState === false && doneNoState === true, `guida=${guideNoState} done=${doneNoState}`)
 await stopEverything(DATA5)
+
+/** ---------------- FASE OB (OB6.2): il passo Computer, tutto con clic veri ---------------- */
+// macchina «supportata» (fatti finti), container ASSENTE: il pacchetto finto
+// è servito dalla sonda su 127.0.0.1, pkgutil/spctl/open FINTI. Il daemon
+// scarica, verifica, apre l'Installer FINTO, installa, accende il servizio,
+// mette il kernel e costruisce l'immagine FINTA.
+const freshOb = () => {
+  try { rmSync(join(OB_BIN, 'container')) } catch { /* già pulita */ }
+  return {
+    cliLog: join(TMP, `ob-cli-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.jsonl`),
+    openLog: join(TMP, `ob-open-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.jsonl`)
+  }
+}
+const seedEngineApple = (dataDir) => {
+  // il selettore ESPLICITO su apple-container: l'auto, su un Mac con Docker
+  // che risponde, guarderebbe quello (e sondare Docker vero è vietato qui)
+  const db6 = new DatabaseSync(join(dataDir, 'data', 'sandbot.db'))
+  db6.exec('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
+  db6.prepare('INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)').run('sandbox.engine', '"apple-container"')
+  db6.close()
+}
+const boxPhaseOf = () => rpc('boxSetupState()').then((r) => r?.phase ?? null)
+
+log('FASE OB: il passo Computer della guida, con clic veri…')
+{
+  const f = freshOb()
+  const DATA6 = join(TMP, 'sei')
+  mkdirSync(join(DATA6, 'data'), { recursive: true })
+  seedEngineApple(DATA6) // PRIMA del daemon: il motore è quello Apple (mai Docker vero)
+  await startApp(DATA6, obEnv({ SANDBOT_TEST_CONTAINER_LOG: f.cliLog, SANDBOT_TEST_OPEN_LOG: f.openLog }))
+  await waitDom(`!!document.querySelector('[data-testid="guide-step-welcome"]')`, 25_000)
+  await tuStep({ name: 'Bot' })
+  await waitDom(`!!document.querySelector('[data-testid="guide-step-model"]')`, 10_000)
+  await clickTestid('guide-skip')
+  check('OB-1 il passo Computer sta fra Modello e Permessi',
+    await waitDom(`!!document.querySelector('[data-testid="guide-step-computer"]')`, 10_000), `step: ${await guideStep()}`)
+  check('OB-2 il titolo, la riga del mockup e il consenso in parole (con i GB calcolati)',
+    (await visibleText()).includes('Il computer del bot')
+    && (await visibleText()).includes('Un computer tutto suo, dentro il tuo Mac')
+    && (await visibleText()).includes('170 MB')
+    && (await visibleText()).includes('kernel Linux consigliato')
+    && (await visibleText()).match(/circa \d+ GB/) !== null)
+  await shot('ob-computer-prima-1440-chiaro.png')
+  await dark(true)
+  await shot('ob-computer-prima-1440-scuro.png')
+  await dark(false)
+
+  // «Prepara il computer»: il download parte e l'avanzamento si vede
+  await clickTestid('guide-computer-prepare')
+  check('OB-3 l\'avanzamento del download (riga in corso, percentuale)',
+    await waitDom(`document.querySelector('[data-testid="box-setup-row-download"]')?.getAttribute('data-status') === 'running'`, 15_000)
+    && await waitDom(`document.querySelector('[data-testid="guide-scene"] [data-mood]')?.getAttribute('data-mood') === 'listening'`, 5_000))
+  await shot('ob-computer-durante-1440-chiaro.png')
+  await dark(true)
+  await shot('ob-computer-durante-1440-scuro.png')
+  await dark(false)
+
+  // verifica OK → awaiting-installer: la riga diventa «Apri l'installazione»
+  check('OB-4 la verifica passa e si aspetta l\'utente: «Apri l\'installazione»',
+    await waitDom(`!!document.querySelector('[data-testid="box-setup-open-installer"]')`, 30_000))
+  check('OB-4b la nuvoletta chiede la password del Mac',
+    (await visibleText()).includes('Mi serve la tua password del Mac per installare lo strumento di Apple.'))
+  check('OB-4c «Continua» è SPENTO sull\'attesa (serve l\'utente) ma «Salta per ora» c\'è',
+    (await pageEval(`return document.querySelector('[data-testid="guide-continue"]')?.disabled === true`))
+    && !!(await pageEval(`return !!document.querySelector('[data-testid="guide-skip"]')`)))
+  await shot('ob-computer-installer-1440-chiaro.png')
+  await dark(true)
+  await shot('ob-computer-installer-1440-scuro.png')
+  await dark(false)
+
+  // l'open FINTO «installa»: il daemon scopre la CLI e finisce da solo
+  await clickTestid('box-setup-open-installer')
+  const openCount = () => { try { return readFileSync(f.openLog, 'utf8').split('\n').filter(Boolean).length } catch { return 0 } }
+  check('OB-5 l\'Installer finto è stato aperto: dal daemon dopo la verifica, e di nuovo dal clic dell\'utente',
+    openCount() === 2, `open: ${openCount()}`)
+  check('OB-6 installazione, servizio, kernel e immagine: ready',
+    await waitDom(`document.querySelector('[data-testid="guide-scene"] [data-mood]')?.getAttribute('data-mood') === 'happy'`, 60_000),
+    `phase: ${await boxPhaseOf()}`)
+  check('OB-6b la nuvoletta: «Ho il mio computer!»', (await visibleText()).includes('Ho il mio computer!'))
+  // il servizio e il kernel: gli argv di oggi SULLA CLI finta
+  const cliArgv = (() => { try { return readFileSync(f.cliLog, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l).argv.join(' ')) } catch { return [] } })()
+  check('OB-7 il servizio: system start --disable-kernel-install', cliArgv.some((a) => a === 'system start --disable-kernel-install'), cliArgv.slice(0, 8).join(' | '))
+  check('OB-8 il kernel: system kernel set --recommended', cliArgv.some((a) => a === 'system kernel set --recommended'))
+  check('OB-9 la build dell\'immagine è passata dalla CLI finta', cliArgv.some((a) => a === 'build sandbot-box:current .') || cliArgv.some((a) => a.startsWith('build ')))
+  await shot('ob-computer-pronto-1440-chiaro.png')
+  await dark(true)
+  await shot('ob-computer-pronto-1440-scuro.png')
+  await dark(false)
+
+  // «Continua» a ready → Permessi → Pronto con «Computer: pronto» → chat
+  await clickTestid('guide-continue')
+  check('OB-10 «Continua» porta ai Permessi', await waitDom(`!!document.querySelector('[data-testid="guide-step-approvals"]')`, 10_000))
+  await clickTestid('guide-approvals-ask')
+  await waitDom(`!document.querySelector('[data-testid="guide-continue"]')?.disabled`, 10_000)
+  await clickTestid('guide-continue') // → Pronto
+  await waitDom(`!!document.querySelector('[data-testid="guide-step-ready"]')`, 10_000)
+  check('OB-11 «Pronto» dice «Computer: pronto»',
+    ((await pageEval(`return (() => { const row = [...document.querySelectorAll('[data-testid^="guide-summary-"]')].find((n) => n.innerText.includes('Computer')); return row ? row.innerText : null })()`)) ?? '').includes('pronto'))
+  await clickTestid('guide-continue') // «Apri la chat»
+  await waitDom(`!!document.querySelector('form textarea')`, 20_000)
+  await stopEverything(DATA6)
+}
+
+/** ---------------- FASE OB-b (OB6.3): lo sha256 SBAGLIATO → nessun open ---------------- */
+log('FASE OB-b: sha256 sbagliato…')
+{
+  const f = freshOb()
+  const DATA7 = join(TMP, 'sette')
+  mkdirSync(join(DATA7, 'data'), { recursive: true })
+  seedEngineApple(DATA7)
+  await startApp(DATA7, obEnv({ SANDBOT_TEST_PKG_SHA256: '0'.repeat(64), SANDBOT_TEST_CONTAINER_LOG: f.cliLog, SANDBOT_TEST_OPEN_LOG: f.openLog }))
+  await waitDom(`!!document.querySelector('[data-testid="guide-step-welcome"]')`, 25_000)
+  await tuStep({ name: 'Bot' })
+  await waitDom(`!!document.querySelector('[data-testid="guide-step-model"]')`, 10_000)
+  await clickTestid('guide-skip')
+  await waitDom(`!!document.querySelector('[data-testid="guide-step-computer"]')`, 10_000)
+  await clickTestid('guide-computer-prepare')
+  check('OB-b1 lo sha256 sbagliato dà l\'errore in parole e il bottone Riprova',
+    await waitDom(`!!document.querySelector('[data-testid="guide-computer-error"]')`, 30_000)
+    && (await visibleText()).includes('Il pacchetto scaricato non è quello atteso'))
+  check('OB-b2 la nuvoletta dell\'errore rimanda alla lista', (await visibleText()).includes('Qualcosa non è andato'))
+  check('OB-b3 NESSUN open: il log dell\'open finto non esiste',
+    !existsSync(f.openLog))
+  await shot('ob-computer-errore-1440-chiaro.png')
+  await dark(true)
+  await shot('ob-computer-errore-1440-scuro.png')
+  await dark(false)
+  await stopEverything(DATA7)
+}
+
+/** ---------------- FASE OB-c (OB6.3): il riavvio su awaiting-installer riprende ---------------- */
+log('FASE OB-c: riavvio sull\'attesa dell\'Installer…')
+{
+  const f = freshOb()
+  const DATA8 = join(TMP, 'otto')
+  mkdirSync(join(DATA8, 'data'), { recursive: true })
+  seedEngineApple(DATA8)
+  // l'open finto «installa» dopo MOLTO tempo: l'utente non ha ancora dato la
+  // password quando l'app si chiude — il riavvio deve trovare l'attesa intatta
+  await startApp(DATA8, obEnv({ SANDBOT_TEST_OPEN_DELAY_MS: '60000', SANDBOT_TEST_CONTAINER_LOG: f.cliLog, SANDBOT_TEST_OPEN_LOG: f.openLog }))
+  await waitDom(`!!document.querySelector('[data-testid="guide-step-welcome"]')`, 25_000)
+  await tuStep({ name: 'Bot' })
+  await waitDom(`!!document.querySelector('[data-testid="guide-step-model"]')`, 10_000)
+  await clickTestid('guide-skip')
+  await waitDom(`!!document.querySelector('[data-testid="guide-step-computer"]')`, 10_000)
+  await clickTestid('guide-computer-prepare')
+  await waitDom(`!!document.querySelector('[data-testid="box-setup-open-installer"]')`, 30_000)
+  // il daemon apre l'Installer DA SÉ dopo la verifica: UN open (dell'utente
+  // che installa, qui, non se ne fa nulla: il ritardo è lungo). Questo
+  // conteggio NON deve crescere dopo il riavvio, finché non si clicca
+  const opensBefore = (() => { try { return readFileSync(f.openLog, 'utf8').split('\n').filter(Boolean).length } catch { return 0 } })()
+  await stopEverything(DATA8)
+  // riavvio: stesso punto (awaiting-installer), il pacchetto resta sul disco;
+  // ORA la password arriva (ritardo corto) e l'installazione finisce
+  await startApp(DATA8, obEnv({ SANDBOT_TEST_OPEN_DELAY_MS: '400', SANDBOT_TEST_CONTAINER_LOG: f.cliLog, SANDBOT_TEST_OPEN_LOG: f.openLog }))
+  check('OB-c1 il riavvio riporta la guida sul passo Computer',
+    await waitDom(`!!document.querySelector('[data-testid="guide-step-computer"]')`, 30_000))
+  check('OB-c2 la preparazione riprende dallo STESSO punto (awaiting-installer)',
+    (await boxPhaseOf()) === 'awaiting-installer', `phase: ${await boxPhaseOf()}`)
+  const opensAfter = (() => { try { return readFileSync(f.openLog, 'utf8').split('\n').filter(Boolean).length } catch { return 0 } })()
+  check('OB-c3 il bottone «Apri l\'installazione» c\'è ancora e il riavvio NON ha riaperto nulla',
+    await waitDom(`!!document.querySelector('[data-testid="box-setup-open-installer"]')`, 30_000)
+    && opensAfter === opensBefore, `opens ${opensBefore} → ${opensAfter}`)
+  await clickTestid('box-setup-open-installer')
+  check('OB-c4 l\'installazione finisce e si arriva al ready',
+    await waitDom(`document.querySelector('[data-testid="guide-scene"] [data-mood]')?.getAttribute('data-mood') === 'happy'`, 60_000),
+    `phase: ${await boxPhaseOf()}`)
+  await stopEverything(DATA8)
+}
+
+/** ---------------- FASE OB-d (OB6.3): «Continua» durante l'immagine ---------------- */
+log('FASE OB-d: si prosegue mentre l\'immagine si costruisce…')
+{
+  const f = freshOb()
+  const DATA9 = join(TMP, 'nove')
+  mkdirSync(join(DATA9, 'data'), { recursive: true })
+  seedEngineApple(DATA9)
+  // la build finta DURA: la guida deve poter proseguire intanto
+  await startApp(DATA9, obEnv({ SANDBOT_TEST_CONTAINER_BUILD_DELAY_MS: '6000', SANDBOT_TEST_CONTAINER_LOG: f.cliLog, SANDBOT_TEST_OPEN_LOG: f.openLog }))
+  await waitDom(`!!document.querySelector('[data-testid="guide-step-welcome"]')`, 25_000)
+  await tuStep({ name: 'Bot' })
+  await waitDom(`!!document.querySelector('[data-testid="guide-step-model"]')`, 10_000)
+  await clickTestid('guide-skip')
+  await waitDom(`!!document.querySelector('[data-testid="guide-step-computer"]')`, 10_000)
+  await clickTestid('guide-computer-prepare')
+  await waitDom(`!!document.querySelector('[data-testid="box-setup-open-installer"]')`, 30_000)
+  await clickTestid('box-setup-open-installer')
+  // l'immagine sta costruendo: «Continua» è ATTIVO (fase in background)
+  check('OB-d1 durante la build dell\'immagine «Continua» è attivo',
+    await waitDom(`document.querySelector('[data-testid="box-setup-row-image"]')?.getAttribute('data-status') === 'running'`, 30_000)
+    && (await pageEval(`return document.querySelector('[data-testid="guide-continue"]')?.disabled !== true`)))
+  await clickTestid('guide-continue')
+  check('OB-d2 si arriva ai Permessi mentre l\'immagine costruisce', await waitDom(`!!document.querySelector('[data-testid="guide-step-approvals"]')`, 10_000))
+  await clickTestid('guide-approvals-ask')
+  await waitDom(`!document.querySelector('[data-testid="guide-continue"]')?.disabled`, 10_000)
+  await clickTestid('guide-continue') // → Pronto
+  await waitDom(`!!document.querySelector('[data-testid="guide-step-ready"]')`, 10_000)
+  check('OB-d3 «Pronto» dice «Computer: in preparazione»',
+    ((await pageEval(`return (() => { const row = [...document.querySelectorAll('[data-testid^="guide-summary-"]')].find((n) => n.innerText.includes('Computer')); return row ? row.innerText : null })()`)) ?? '').includes('in preparazione'))
+  await clickTestid('guide-continue') // «Apri la chat»
+  await waitDom(`!!document.querySelector('form textarea')`, 20_000)
+  // nel pannello del bot la riga discreta: «In preparazione…» poi «Pronto»
+  check('OB-d4 la riga del pannello dice «In preparazione…»',
+    await waitDom(`!!document.querySelector('[data-testid="bot-prep-row"]') && document.querySelector('[data-testid="bot-prep-row"]').innerText.includes('In preparazione')`, 15_000))
+  check('OB-d5 a fine costruzione la riga dice «Pronto»',
+    await waitDom(`document.querySelector('[data-testid="bot-prep-row"]')?.innerText.includes('Pronto')`, 60_000),
+    `row: ${await pageEval(`return document.querySelector('[data-testid="bot-prep-row"]')?.innerText ?? null`)}`)
+  await stopEverything(DATA9)
+}
+
+/** ---------------- FASE OB-e (OB6.3): macchina NON supportata → niente passo ---------------- */
+log('FASE OB-e: macchina non supportata…')
+{
+  const DATA10 = join(TMP, 'dieci')
+  await startApp(DATA10, {}) // arch finto x86_64: non supportata
+  await waitDom(`!!document.querySelector('[data-testid="guide-step-welcome"]')`, 25_000)
+  await tuStep({ name: 'Bot' })
+  await waitDom(`!!document.querySelector('[data-testid="guide-step-model"]')`, 10_000)
+  await clickTestid('guide-skip')
+  check('OB-e1 su una macchina non supportata NON c\'è il passo Computer (si va ai Permessi)',
+    await waitDom(`!!document.querySelector('[data-testid="guide-step-approvals"]')`, 10_000)
+    && !(await pageEval(`return document.body.innerText.includes('Il computer del bot')`)))
+  await stopEverything(DATA10)
+}
 
 // ---- pulizia finale: 0 daemon e 0 llama-server ----
 const leftDaemons = findProbeDaemons('sandbot-fase-onboarding-a')
