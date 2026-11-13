@@ -55,6 +55,8 @@ import { UI } from '../shared/ui-messages'
 import { secondaryPrompts } from '../main/agent/prompts'
 import { loadTemplates } from '../main/templates'
 import { createOnboarding, createMainBotEnsurer } from './onboarding'
+// OB1 (fase onboarding-b): la preparazione del computer del bot (la guida)
+import { createBoxSetup, boxSetupRunConfig } from './box-setup'
 import { join } from 'node:path'
 import type { SandbotEvent } from '../shared/types'
 import { currentUserLanguage } from '../main/agent/user-language'
@@ -65,6 +67,10 @@ import { daemonHasSealedData } from './sealed-data'
 import type { SafeStorageLike } from '../main/vault'
 // fase rilascio (A7): docker si trova anche fuori dal Terminale
 import { activeBoxEngine } from '../main/sandbox/engine'
+// OB1 (fase onboarding-b): la preparazione del computer del bot — i byte
+// liberi del disco (disk-space.ts) e il percorso della CLI di Apple
+import { freeDiskBytesOf } from '../main/sandbox/disk-space'
+import { containerCliPath } from '../main/sandbox/apple-container-engine'
 // fase memoria-engramma (M1): il motore Engramma vive solo qui, nel demone
 import { openMemoryEngine, closeMemoryEngine } from '../main/memory/engine'
 
@@ -784,6 +790,48 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
     emit: (e) => broadcast(e)
   })
 
+  // OB1 (fase onboarding-b): la preparazione del computer del bot — la
+  // macchina a stati riprendibile (download col Range, verifica
+  // dimensione/sha256/pkgutil/spctl, finestra di Installer di Apple,
+  // servizio, kernel, immagine in background). TUTTE le dipendenze vere
+  // qui: negli test nessuno spawn e nessuna rete.
+  const boxSetup = createBoxSetup({
+    now: () => Date.now(),
+    getSetting,
+    setSetting,
+    emit: (e) => broadcast(e),
+    downloadsDir: () => join(dataDir(), 'downloads'),
+    freeBytes: () => freeDiskBytesOf(dataDir()),
+    fetch: (url, init) => fetch(url, init),
+    runCli: (file, argv, timeoutMs) =>
+      import('../main/sandbox/engine').then((e) => e.engineProbeDeps.runCli(file, argv, timeoutMs)),
+    containerCli: () => containerCliPath(),
+    engineState: async () => {
+      const e = await import('../main/sandbox/engine')
+      return e.appleContainerState(await e.probeBoxEngineFacts())
+    },
+    hasBoxImage: async () => {
+      const { runDockerRaw, boxImage } = await import('../main/sandbox')
+      const r = await runDockerRaw(activeBoxEngine().argv.imageInspect(boxImage()), { timeoutMs: 15_000 }).catch(() => null)
+      return !!r && r.exitCode === 0
+    },
+    buildBoxImage: () => import('../main/sandbox').then((m) => m.ensureBoxImage()),
+    openInstaller: async (pkgPath) => {
+      // `open -a Installer <pkg>` (o l'override di prova): la finestra di
+      // Apple, quella che chiede la password nel suo processo di sistema
+      const { execFile } = await import('node:child_process')
+      return await new Promise<{ ok: boolean; error?: string }>((resolve) => {
+        execFile(boxSetupRunConfig().openCmd, ['-a', 'Installer', pkgPath], { timeout: 15_000 }, (err) => {
+          resolve(err ? { ok: false, error: String(err) } : { ok: true })
+        })
+      })
+    },
+    log: (line) => console.log(line)
+  })
+  // OB1: una preparazione rimasta a metà si RIPRENDE al boot — il download
+  // col Range, l'attesa dell'Installer col sondaggio, mai una fase rifatta
+  void boxSetup.resumeAtBoot()
+
   // fase rilascio (A2): chiusura pulita per aggiornamento — smette di prendere
   // job, aspetta i turni in corso (≤10 s) ed esce con 0
   let draining = false
@@ -815,7 +863,7 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
   }
 
   server.methods = {
-    ...buildApiMethods(emit, worker, connectors, presence, { webhookPort: server.port, onboarding, marketplaces, composio, composioGateway: composioGatewayManager }),
+    ...buildApiMethods(emit, worker, connectors, presence, { webhookPort: server.port, onboarding, marketplaces, composio, composioGateway: composioGatewayManager, boxSetup }),
     // fase rilascio (A2): la UI chiede CHI sei (versione/build) e di uscire bene
     'daemon:describe': () => ({ pid: process.pid, version: opts.getVersion(), build: opts.buildId }),
     'daemon:restart': async () => {

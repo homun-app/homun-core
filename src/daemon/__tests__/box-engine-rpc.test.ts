@@ -90,3 +90,27 @@ describe('BX4: la sonda dei fatti con la CLI runner finta', () => {
     expect(facts.macOsMajor).toBeGreaterThanOrEqual(26) // il Mac di sviluppo
   })
 })
+
+describe('OB1 (fase onboarding-b): le RPC della preparazione del computer del bot', () => {
+  it('box:setup-*: il controller registrato dal runtime risponde (senza: null)', async () => {
+    const calls: string[] = []
+    const state: import('../../shared/types').BoxSetupState = { phase: 'awaiting-installer', bytes: null, total: null, buildPhase: null, error: null, startedAt: 1, neededBytes: 1 }
+    const stub = {
+      state: () => state,
+      start: async () => { calls.push('start'); return state },
+      cancel: async () => { calls.push('cancel'); return state },
+      retry: async () => { calls.push('retry'); return state },
+      openInstallerNow: async () => { calls.push('open'); return state },
+      resumeAtBoot: async () => undefined
+    }
+    const withCtl = buildApiMethods(() => undefined, { poke: () => undefined } as unknown as JobWorker, undefined, undefined, { boxSetup: stub })
+    expect(await withCtl['box:setup-state']!([])).toBe(state)
+    await withCtl['box:setup-start']!([])
+    await withCtl['box:setup-cancel']!([])
+    await withCtl['box:setup-retry']!([])
+    await withCtl['box:setup-open-installer']!([])
+    expect(calls).toEqual(['start', 'cancel', 'retry', 'open'])
+    // senza controller (daemon vecchio / test minimale): null, mai un crash
+    expect(await api['box:setup-state']!([])).toBeNull()
+  })
+})

@@ -3187,6 +3187,16 @@ msgstr "The model download failed."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
+msgid "boxSetup.downloadTimeout"
+msgstr "The download of the Apple tool is taking too long: try again."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "boxSetup.downloadFailed"
+msgstr "The download of the Apple tool failed."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
 msgid "skill.fileTooLarge"
 msgstr "The file \"{file}\" is too large: {n} KB (max 256 KB)."
 
@@ -3289,6 +3299,16 @@ msgstr "The main model {model} is not responding ({why}): switching to the fallb
 #: src/shared/ui-messages.ts
 msgid "skill.nameFolderMismatch"
 msgstr "The name in the file ({name}) is different from the folder ({folder})."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "boxSetup.verifySize"
+msgstr "The downloaded package has the wrong size: I deleted it."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "boxSetup.verifySha"
+msgstr "The downloaded package is not the expected one: I deleted it."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -3808,6 +3828,11 @@ msgstr "The description must be text."
 msgid "skill.descriptionTooLong"
 msgstr "The description must be at most 1024 characters (now {n})."
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "boxSetup.verifySignature"
+msgstr "The package signature doesn't appear to be Apple's: I deleted it."
+
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "la libreria dei bot: chi le usa, le versioni, l'import da GitHub"
 msgstr "the bots' library: who uses them, versions, GitHub import"
@@ -4045,6 +4070,11 @@ msgstr "Mon–Fri"
 msgid "lunedì"
 msgstr "Monday"
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "boxSetup.verifyGatekeeper"
+msgstr "macOS does not approve the package: I deleted it."
+
 #: src/renderer/src/components/settings/EngineSection.tsx
 msgid "Manca il kernel di Linux"
 msgstr "The Linux kernel is missing"
@@ -4137,6 +4167,11 @@ msgstr "pause"
 #: src/renderer/src/lib/guide-scene.ts
 msgid "Mi serve un cervello. Con cosa penso?"
 msgstr "I need a brain. What do I think with?"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "boxSetup.noSpace"
+msgstr "I need about {needed} GB of free space, I can see {free}."
 
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "Mie"
@@ -4713,6 +4748,11 @@ msgstr "Can’t search your Mac: try again."
 msgid "Non riesco a collegarmi: riprova."
 msgstr "Cannot connect: try again."
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "boxSetup.kernelFailed"
+msgstr "I can't install the Linux kernel recommended by Apple."
+
 #: src/renderer/src/components/LibraryPanel.tsx
 msgid "Non riesco a leggere la libreria"
 msgstr "Can’t read the library"
@@ -4721,9 +4761,24 @@ msgstr "Can’t read the library"
 msgid "Non riesco a leggere le attività"
 msgstr "Can’t read the activity"
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "boxSetup.imageFailed"
+msgstr "I can't prepare the bot's computer."
+
 #: src/renderer/src/components/GuideModelStep.tsx
 msgid "Non riesco a raggiungere {providerLabel}. Controlla la connessione e riprova."
 msgstr "I can’t reach {providerLabel}. Check the connection and try again."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "boxSetup.serviceFailed"
+msgstr "I can't turn on the bot computer's service."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "boxSetup.installerOpenFailed"
+msgstr "I can't open the Apple installer."
 
 #: src/renderer/src/components/settings/ModelsPage.tsx
 #: src/renderer/src/components/ui/ModelSelect.tsx

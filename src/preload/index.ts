@@ -256,6 +256,12 @@ const api: SandbotApi = {
   boxEngineSet: (engine) => ipcRenderer.invoke('box:engine-set', engine),
   boxEngineStart: () => ipcRenderer.invoke('box:engine-start'),
   boxEngineKernelInstall: () => ipcRenderer.invoke('box:engine-kernel-install'),
+  // OB1 (fase onboarding-b): la preparazione del computer del bot
+  boxSetupState: () => ipcRenderer.invoke('box:setup-state'),
+  boxSetupStart: () => ipcRenderer.invoke('box:setup-start'),
+  boxSetupCancel: () => ipcRenderer.invoke('box:setup-cancel'),
+  boxSetupRetry: () => ipcRenderer.invoke('box:setup-retry'),
+  boxSetupOpenInstaller: () => ipcRenderer.invoke('box:setup-open-installer'),
   // fase rilascio (A8): aggiornamento e rinnovo da Homun 2.
   // RP3 (fase rilascio di prova): il canale si cambia dall'interruttore delle
   // Impostazioni e ha effetto immediato (nessun riavvio)

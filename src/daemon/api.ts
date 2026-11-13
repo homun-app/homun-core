@@ -191,6 +191,8 @@ export function buildApiMethods(
     composio?: import('../main/connectors/composio').ComposioManager
     /** fase Composio OAuth (C5): il gateway delle app dentro il server Composio */
     composioGateway?: import('../main/connectors/composio-gateway').ComposioGatewayManager
+    /** OB1 (fase onboarding-b): la preparazione del computer del bot */
+    boxSetup?: import('./box-setup').BoxSetupController
   } = {}
 ): Record<string, (params: unknown[]) => unknown> {
   const mcp = () => import('../main/mcp')
@@ -2455,6 +2457,17 @@ export function buildApiMethods(
       if (r.exitCode !== 0) return { ok: false, error: r.stderr || `exit ${r.exitCode}` }
       return { ok: true }
     },
+    // ---- OB1 (fase onboarding-b): la preparazione del computer del bot ----
+    /** Lo stato della preparazione (setting box.setup, evento box-setup). */
+    'box:setup-state': async () => opts.boxSetup?.state() ?? null,
+    /** «Prepara il computer»: la partenza intelligente (dallo stato del motore). */
+    'box:setup-start': async () => (await opts.boxSetup?.start()) ?? null,
+    /** «Annulla» (mentre il download o l'immagine corrono). */
+    'box:setup-cancel': async () => (await opts.boxSetup?.cancel()) ?? null,
+    /** «Riprova» (dall'errore o dall'annullato). */
+    'box:setup-retry': async () => (await opts.boxSetup?.retry()) ?? null,
+    /** «Apri l'installazione» / «Riapri l'installazione» (su awaiting-installer). */
+    'box:setup-open-installer': async () => (await opts.boxSetup?.openInstallerNow()) ?? null,
     /** «Rimuovi» il modello della memoria: la memoria torna alla ricerca per testo. */
     'memory:model-remove': async () => {
       const m = await import('../main/memory/engine')

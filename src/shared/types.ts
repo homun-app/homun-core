@@ -728,6 +728,10 @@ export type SandbotEvent =
   // cambiati (guida, Impostazioni, modello integrato pronto) — lo store del
   // renderer ricarica provider e models.main senza ricaricare la finestra
   | { type: 'models' }
+  // OB1 (fase onboarding-b): la preparazione del computer del bot è andata
+  // avanti (fase, byte, errore): la guida e le Impostazioni aggiornano la
+  // lista d'avanzamento SENZA ricaricare (la lezione di GC6.1)
+  | { type: 'box-setup'; setup: BoxSetupState }
   // fase 10: i messaggi o i membri di un gruppo sono cambiati (sidebar + vista gruppo)
   | { type: 'groups' }
   // fase 12: lo stato di un sottoagente di questo padre è cambiato (card + pannello)
@@ -844,6 +848,47 @@ export interface EngineStatusInfo {
   chosen: string | null
   appleState: 'unsupported' | 'not-installed' | 'stopped' | 'kernel-missing' | 'ready'
   dockerRunning: boolean
+}
+
+// ---- La preparazione del computer del bot (OB1, fase onboarding-b) ----
+
+/** Le fasi della preparazione: una macchina a stati riprendibile. */
+export type BoxSetupPhase =
+  | 'idle'
+  | 'checking-space'
+  | 'downloading'
+  | 'verifying'
+  | 'awaiting-installer'
+  | 'starting-service'
+  | 'installing-kernel'
+  | 'building-image'
+  | 'ready'
+  | 'error'
+  | 'cancelled'
+
+/** L'errore della preparazione: la fase di colpa, il codice, il messaggio in parole. */
+export interface BoxSetupError {
+  phase: BoxSetupPhase
+  code: string
+  message: string
+}
+
+/**
+ * Lo stato della preparazione, persistito nel setting `box.setup` e portato
+ * alla UI dall'evento `box-setup` (RPC box:setup-state).
+ */
+export interface BoxSetupState {
+  phase: BoxSetupPhase
+  /** i byte scaricati e il totale (fase downloading) */
+  bytes: number | null
+  total: number | null
+  /** la fase che dice il build dell'immagine, se c'è */
+  buildPhase: string | null
+  /** l'errore in parole (fase error) */
+  error: BoxSetupError | null
+  startedAt: number | null
+  /** la stima di quanto spazio serve (per «circa N GB» calcolato, mai inventato) */
+  neededBytes: number
 }
 
 /** La risposta di box:disk-space (BX3): righe, byte liberi e margine. */
@@ -1198,6 +1243,12 @@ export interface SandbotApi {
   boxEngineSet(engine: string): Promise<EngineStatusInfo>
   boxEngineStart(): Promise<{ ok: boolean; error?: string }>
   boxEngineKernelInstall(): Promise<{ ok: boolean; error?: string }>
+  // OB1 (fase onboarding-b): la preparazione del computer del bot
+  boxSetupState(): Promise<BoxSetupState | null>
+  boxSetupStart(): Promise<BoxSetupState | null>
+  boxSetupCancel(): Promise<BoxSetupState | null>
+  boxSetupRetry(): Promise<BoxSetupState | null>
+  boxSetupOpenInstaller(): Promise<BoxSetupState | null>
   // fase rilascio (A8): l'aggiornamento (main process).
   // RP3 (fase rilascio di prova): lo stato porta il canale ('stable'|'beta')
   // e l'interruttore delle Impostazioni lo cambia (effetto immediato)

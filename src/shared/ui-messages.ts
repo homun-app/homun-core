@@ -802,7 +802,23 @@ export const UI = {
     id: 'dialog.moveToApplications.daemonNotStopped',
     message: 'Non sono riuscito a fermare il bot in background: un\u2019app in esecuzione non si sostituisce mai. Chiudi Homun e riprova.'
   }),
-  moveToApplicationsCopyFailed: msg({ id: 'dialog.moveToApplications.copyFailed', message: 'La copia in Applicazioni non è riuscita.' })
+  moveToApplicationsCopyFailed: msg({ id: 'dialog.moveToApplications.copyFailed', message: 'La copia in Applicazioni non è riuscita.' }),
+
+  // ---- OB1 (fase onboarding-b): gli errori in parole della preparazione del computer del bot ----
+  boxSetupNoSpace: msg({
+    id: 'boxSetup.noSpace',
+    message: 'Mi servono circa {needed} GB liberi, ne vedo {free}.'
+  }),
+  boxSetupDownloadFailed: msg({ id: 'boxSetup.downloadFailed', message: 'Il download dello strumento di Apple non è riuscito.' }),
+  boxSetupDownloadTimeout: msg({ id: 'boxSetup.downloadTimeout', message: 'Il download dello strumento di Apple ci sta mettendo troppo: riprova.' }),
+  boxSetupVerifySize: msg({ id: 'boxSetup.verifySize', message: 'Il pacchetto scaricato ha la dimensione sbagliata: l’ho cancellato.' }),
+  boxSetupVerifySha: msg({ id: 'boxSetup.verifySha', message: 'Il pacchetto scaricato non è quello atteso: l’ho cancellato.' }),
+  boxSetupVerifySignature: msg({ id: 'boxSetup.verifySignature', message: 'La firma del pacchetto non risulta di Apple: l’ho cancellato.' }),
+  boxSetupVerifyGatekeeper: msg({ id: 'boxSetup.verifyGatekeeper', message: 'macOS non approva il pacchetto: l’ho cancellato.' }),
+  boxSetupInstallerOpenFailed: msg({ id: 'boxSetup.installerOpenFailed', message: 'Non riesco ad aprire l’installazione di Apple.' }),
+  boxSetupServiceFailed: msg({ id: 'boxSetup.serviceFailed', message: 'Non riesco ad accendere il servizio del computer dei bot.' }),
+  boxSetupKernelFailed: msg({ id: 'boxSetup.kernelFailed', message: 'Non riesco a installare il kernel Linux consigliato da Apple.' }),
+  boxSetupImageFailed: msg({ id: 'boxSetup.imageFailed', message: 'Non riesco a preparare il computer del bot.' })
 } as const
 
 export type UiMessage = (typeof UI)[keyof typeof UI]

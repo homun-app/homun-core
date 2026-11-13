@@ -389,7 +389,12 @@ function notifyBoxImageBuild(): void {
 /** L'ultimo motivo (chiaro) per cui la build del box non è partita o finita. */
 let lastBoxImageBuildError: string | null = null
 
-function ensureBoxImage(): Promise<boolean> {
+/**
+ * OB1 (fase onboarding-b): la build dell'immagine si USA anche dalla
+ * preparazione del computer del bot (l'ultima fase della guida), in
+ * background — la stessa promise single-flight del primo uso.
+ */
+export function ensureBoxImage(): Promise<boolean> {
   if (!boxImageBuild) {
     boxImageBuild = (async () => {
       const tag = boxImage()
