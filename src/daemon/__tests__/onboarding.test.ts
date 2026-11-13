@@ -381,7 +381,7 @@ describe('OA2 startOnboarding: onboarding.state nasce qui e NON si tocca più', 
     const st = log.settings[ONBOARDING_STATE_SETTING] as OnboardingState | undefined
     expect(st).toEqual({ step: 'welcome', done: [], skipped: [], startedAt: 1_000_000_000_000 })
     expect(log.events).toContainEqual({
-      type: 'onboarding', needed: true, modelReady: false, guideOpen: true,
+      type: 'onboarding', needed: true, modelReady: false, computerReady: false, guideOpen: true,
       state: { step: 'welcome', done: [], skipped: [], startedAt: 1_000_000_000_000 },
       sequence: ['welcome', 'model', 'approvals', 'chat']
     })

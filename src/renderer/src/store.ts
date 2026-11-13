@@ -1,7 +1,7 @@
 // State renderer: agenti, transcript dell'agente attivo, eventi dal main.
 import { useMemo } from 'react'
 import { create } from 'zustand'
-import type { Agent, TranscriptEntry, SandbotEvent, OnboardingStatus, OnboardingStepId, ProviderConfig, ProviderPublic, PermissionsConfig, ConnectorInfo, TaskInfo, GroupInfo, GroupMessageInfo, SubagentInfo, AgentAvatar, TurnEnd, ScreenStatus, MainModel, ComposioStatusInfo, ComposioGatewayStatusInfo, ReadingPageRef } from '../../shared/types'
+import type { Agent, TranscriptEntry, SandbotEvent, OnboardingStatus, OnboardingStepId, ProviderConfig, ProviderPublic, PermissionsConfig, ConnectorInfo, TaskInfo, GroupInfo, GroupMessageInfo, SubagentInfo, AgentAvatar, TurnEnd, ScreenStatus, MainModel, ComposioStatusInfo, ComposioGatewayStatusInfo, ReadingPageRef, BoxSetupState } from '../../shared/types'
 import type { UpdateChannel } from '../../shared/update-channel'
 // fase 16c correzioni (R4): la regola del modello risolto, condivisa col daemon
 import { resolveAgentModel, type ResolvedAgentModel } from '../../shared/agent-model'
@@ -75,6 +75,13 @@ interface Store {
    * OA2: porta anche lo stato della GUIDA (onboarding.state) e la sequenza.
    */
   onboarding: OnboardingStatus | null
+  /**
+   * OB1/OB2 (fase onboarding-b): lo stato della preparazione del computer
+   * del bot, dal daemon (RPC box:setup-state + evento box-setup). Lo store
+   * lo tiene AGGIORNATO senza ricaricare — la lezione di GC6.1. null = il
+   * daemon non ha ancora risposto (la UI lo chiede quando serve).
+   */
+  boxSetup: BoxSetupState | null
   activeId: string | null
   entries: TranscriptEntry[]
   reasoning: Record<number, string>
@@ -287,6 +294,11 @@ interface Store {
   onboardingAdvance(step: OnboardingStepId, outcome: 'done' | 'skipped'): Promise<void>
   /** OA2: riapre la guida su un passo saltato, o la rifà da capo ('restart') */
   onboardingReopen(target: OnboardingStepId | 'restart'): Promise<void>
+  /** OB1 (fase onboarding-b): la preparazione del computer del bot */
+  boxSetupStart(): Promise<void>
+  boxSetupCancel(): Promise<void>
+  boxSetupRetry(): Promise<void>
+  boxSetupOpenInstaller(): Promise<void>
   /** fase 16: tema (classe dark su <html>) e pannello destro */
   setTheme(t: UiTheme): void
   /** fase 17a: lingua dell'interfaccia — si applica subito e resta nel setting */
@@ -327,6 +339,7 @@ interface Store {
 export const useStore = create<Store>((set, get) => ({
   agents: [],
   onboarding: null,
+  boxSetup: null,
   activeId: null,
   entries: [],
   reasoning: {},
@@ -530,6 +543,12 @@ export const useStore = create<Store>((set, get) => ({
             const mainId = s.mainAgentId ?? s.agents[0]?.id ?? null
             if (mainId && s.activeId !== mainId) void s.select(mainId)
           }
+          break
+        }
+        case 'box-setup': {
+          // OB2: l'avanzamento della preparazione arriva dal daemon — lo
+          // store lo tiene SENZA ricaricare la finestra (GC6.1)
+          set({ boxSetup: e.setup })
           break
         }
         case 'status': {
@@ -903,6 +922,22 @@ export const useStore = create<Store>((set, get) => ({
   async onboardingReopen(target) {
     const r = await api.onboardingReopen(target)
     if (r) set({ onboarding: r })
+  },
+  async boxSetupStart() {
+    const r = await api.boxSetupStart().catch(() => null)
+    if (r) set({ boxSetup: r })
+  },
+  async boxSetupCancel() {
+    const r = await api.boxSetupCancel().catch(() => null)
+    if (r) set({ boxSetup: r })
+  },
+  async boxSetupRetry() {
+    const r = await api.boxSetupRetry().catch(() => null)
+    if (r) set({ boxSetup: r })
+  },
+  async boxSetupOpenInstaller() {
+    const r = await api.boxSetupOpenInstaller().catch(() => null)
+    if (r) set({ boxSetup: r })
   },
   setSettingsOpen(v) {
     set({ settingsOpen: v })

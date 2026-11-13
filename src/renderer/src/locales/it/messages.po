@@ -629,6 +629,10 @@ msgstr "Accedi tu sul suo schermo, poi premi «Ho finito». La password non pass
 msgid "Accendi"
 msgstr "Accendi"
 
+#: src/renderer/src/components/BoxSetupProgress.tsx
+msgid "Accendo il servizio"
+msgstr "Accendo il servizio"
+
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Acceso"
 msgstr "Acceso"
@@ -874,6 +878,7 @@ msgstr "ancora nessun passo"
 
 #: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/BotDialogs.tsx
+#: src/renderer/src/components/BoxSetupProgress.tsx
 #: src/renderer/src/components/ConnectorCard.tsx
 #: src/renderer/src/components/DraftCard.tsx
 #: src/renderer/src/components/GuideModelStep.tsx
@@ -1001,6 +1006,10 @@ msgstr "Apri i membri di {0}"
 #: src/renderer/src/components/ApprovalCard.tsx
 msgid "Apri Impostazioni → Approvazione automatica con una regola precompilata"
 msgstr "Apri Impostazioni → Approvazione automatica con una regola precompilata"
+
+#: src/renderer/src/components/BoxSetupProgress.tsx
+msgid "Apri l'installazione"
+msgstr "Apri l'installazione"
 
 #: src/renderer/src/components/GuideView.tsx
 msgid "Apri la chat"
@@ -1728,6 +1737,7 @@ msgstr "Composio non raggiungibile: controlla la connessione e riprova."
 msgid "Composio non raggiungibile: controlla la connessione e riprova."
 msgstr "Composio non raggiungibile: controlla la connessione e riprova."
 
+#: src/renderer/src/components/GuideView.tsx
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Computer"
 msgstr "Computer"
@@ -1970,6 +1980,10 @@ msgstr "Controlla aggiornamenti"
 msgid "controlla le app collegate…"
 msgstr "controlla le app collegate…"
 
+#: src/renderer/src/components/BoxSetupProgress.tsx
+msgid "Controllo che sia autentico"
+msgstr "Controllo che sia autentico"
+
 #: src/renderer/src/components/Settings.tsx
 msgid "Controllo non riuscito"
 msgstr "Controllo non riuscito"
@@ -2155,6 +2169,10 @@ msgstr "Da installare: serve macOS 26 o successivo"
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "Da plugin"
 msgstr "Da plugin"
+
+#: src/renderer/src/components/GuideView.tsx
+msgid "da preparare"
+msgstr "da preparare"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -2983,6 +3001,10 @@ msgstr "Hai scritto: {0}"
 msgid "Ho finito"
 msgstr "Ho finito"
 
+#: src/renderer/src/lib/guide-scene.ts
+msgid "Ho il mio computer!"
+msgstr "Ho il mio computer!"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "presence.awayPrompt"
@@ -3166,6 +3188,10 @@ msgstr "Il computer dei bot ora è UNO solo, condiviso (radice: {root}).\n"
 #: src/renderer/src/components/settings/EngineSection.tsx
 msgid "Il computer dei bot senza Docker usa Apple container: lo installa Apple col suo pacchetto firmato (chiede la password del Mac)."
 msgstr "Il computer dei bot senza Docker usa Apple container: lo installa Apple col suo pacchetto firmato (chiede la password del Mac)."
+
+#: src/renderer/src/components/GuideComputerStep.tsx
+msgid "Il computer del bot"
+msgstr "Il computer del bot"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -3530,6 +3556,10 @@ msgstr "in pausa"
 msgid "in pausa per assenza"
 msgstr "in pausa per assenza"
 
+#: src/renderer/src/components/GuideView.tsx
+msgid "in preparazione"
+msgstr "in preparazione"
+
 #: src/renderer/src/components/PageView.tsx
 msgid "In questa pagina"
 msgstr "In questa pagina"
@@ -3631,6 +3661,10 @@ msgstr "Installare {0} ({1} GB) da {2}, licenza {3}?"
 msgid "Installare il kernel di Linux raccomandato? Verrà scaricato da Apple (circa 1 GB)."
 msgstr "Installare il kernel di Linux raccomandato? Verrà scaricato da Apple (circa 1 GB)."
 
+#: src/renderer/src/components/BoxSetupProgress.tsx
+msgid "Installazione"
+msgstr "Installazione"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "rpc.installUnavailable"
@@ -3723,6 +3757,10 @@ msgstr "Istruzioni (markdown)"
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Istruzioni personalizzate (vanno nel prompt del bot quando il connettore è attivo)"
 msgstr "Istruzioni personalizzate (vanno nel prompt del bot quando il connettore è attivo)"
+
+#: src/renderer/src/components/BoxSetupProgress.tsx
+msgid "Kernel"
+msgstr "Kernel"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -4163,6 +4201,14 @@ msgstr "metodo sconosciuto: {method}"
 #: src/renderer/src/components/Settings.tsx
 msgid "metti in pausa"
 msgstr "metti in pausa"
+
+#: src/renderer/src/lib/guide-scene.ts
+msgid "Mi preparo un computer tutto mio?"
+msgstr "Mi preparo un computer tutto mio?"
+
+#: src/renderer/src/lib/guide-scene.ts
+msgid "Mi serve la tua password del Mac per installare lo strumento di Apple."
+msgstr "Mi serve la tua password del Mac per installare lo strumento di Apple."
 
 #: src/renderer/src/lib/guide-scene.ts
 msgid "Mi serve un cervello. Con cosa penso?"
@@ -5202,10 +5248,26 @@ msgstr "prende nota…"
 msgid "Prendi il controllo"
 msgstr "Prendi il controllo"
 
+#: src/renderer/src/components/GuideComputerStep.tsx
+msgid "Prepara il computer"
+msgstr "Prepara il computer"
+
+#: src/renderer/src/components/BoxSetupProgress.tsx
+msgid "Preparo il computer"
+msgstr "Preparo il computer"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "notice.boxPreparing"
 msgstr "Preparo il computer dei bot (immagine del box con il browser): una volta sola, qualche minuto. I bot riprendono appena è pronta."
+
+#: src/renderer/src/components/GuideComputerStep.tsx
+msgid "preparo il computer del bot"
+msgstr "preparo il computer del bot"
+
+#: src/renderer/src/components/GuideComputerStep.tsx
+msgid "preparo il computer del bot (circa {gb} GB)"
+msgstr "preparo il computer del bot (circa {gb} GB)"
 
 #: src/renderer/src/App.tsx
 msgid "Preparo tutto…"
@@ -5262,6 +5324,10 @@ msgstr "Progetto (titolo nella barra)"
 #: src/renderer/src/components/ApprovalCard.tsx
 msgid "Prompt:"
 msgstr "Prompt:"
+
+#: src/renderer/src/components/GuideView.tsx
+msgid "pronto"
+msgstr "pronto"
 
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Pronto"
@@ -5397,6 +5463,10 @@ msgstr "Punto di contatto principale: coordina gli altri bot."
 #: src/renderer/src/components/Settings.tsx
 msgid "Può cominciare con /nome di una skill: il bot la caricherà a ogni esecuzione."
 msgstr "Può cominciare con /nome di una skill: il bot la caricherà a ogni esecuzione."
+
+#: src/renderer/src/lib/guide-scene.ts
+msgid "Qualcosa non è andato: te lo dico qui sotto."
+msgstr "Qualcosa non è andato: te lo dico qui sotto."
 
 #: src/renderer/src/components/settings/AddProviderSheet.tsx
 msgid "qualsiasi servizio compatibile OpenAI"
@@ -5760,6 +5830,7 @@ msgstr "Ripristina"
 #: src/renderer/src/components/ComputerPanel.tsx
 #: src/renderer/src/components/ComputerTerminal.tsx
 #: src/renderer/src/components/ConnectorCard.tsx
+#: src/renderer/src/components/GuideComputerStep.tsx
 #: src/renderer/src/components/LibraryPanel.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
 #: src/renderer/src/components/ui/ModelSelect.tsx
@@ -5965,6 +6036,18 @@ msgstr "Scaricato: {0}"
 #: src/renderer/src/lib/guide-scene.ts
 msgid "Scaricato: penso da qui."
 msgstr "Scaricato: penso da qui."
+
+#: src/renderer/src/components/GuideComputerStep.tsx
+msgid "scarico da GitHub lo strumento container di Apple (170 MB, firmato da Apple)"
+msgstr "scarico da GitHub lo strumento container di Apple (170 MB, firmato da Apple)"
+
+#: src/renderer/src/components/GuideComputerStep.tsx
+msgid "scarico il kernel Linux consigliato da Apple"
+msgstr "scarico il kernel Linux consigliato da Apple"
+
+#: src/renderer/src/components/BoxSetupProgress.tsx
+msgid "Scarico lo strumento di Apple"
+msgstr "Scarico lo strumento di Apple"
 
 #. placeholder {0}: localSizeGb ?? '—'
 #: src/renderer/src/components/GuideModelStep.tsx
@@ -6316,6 +6399,10 @@ msgstr "Shell del bot — stessa identità dei suoi comandi."
 msgid "Si apre il browser per accedere: è la via più semplice."
 msgstr "Si apre il browser per accedere: è la via più semplice."
 
+#: src/renderer/src/components/GuideComputerStep.tsx
+msgid "si apre l'installazione di Apple, che ti chiederà la password del Mac"
+msgstr "si apre l'installazione di Apple, che ti chiederà la password del Mac"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "install.hostModeCard"
@@ -6535,6 +6622,10 @@ msgstr "stdio (comando locale)"
 #: src/renderer/src/components/settings/EngineSection.tsx
 msgid "Sto guardando…"
 msgstr "Sto guardando…"
+
+#: src/renderer/src/lib/guide-scene.ts
+msgid "Sto sistemando la scrivania…"
+msgstr "Sto sistemando la scrivania…"
 
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "Storico delle versioni"
@@ -6906,6 +6997,10 @@ msgstr "Ultimo passo: collega {0}"
 #: src/renderer/src/components/settings/AddProviderSheet.tsx
 msgid "Un altro server"
 msgstr "Un altro server"
+
+#: src/renderer/src/components/GuideComputerStep.tsx
+msgid "Un computer tutto suo, dentro il tuo Mac: lavora lì senza toccare i tuoi file, e tu decidi cosa può vedere."
+msgstr "Un computer tutto suo, dentro il tuo Mac: lavora lì senza toccare i tuoi file, e tu decidi cosa può vedere."
 
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Un gateway custodisce l'accesso a tutte le app che colleghi lì: è un servizio di terzi"

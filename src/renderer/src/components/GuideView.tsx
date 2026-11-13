@@ -23,14 +23,21 @@ import { SUPPORTED_UI_LANGUAGES } from '../../../shared/ui-language'
 import { TRAFFIC_LIGHT_INSET } from '../layout'
 import { approvalsChoices } from '../lib/guide-steps'
 import { guideMood, guideBubble, guideBubbleKey, EMPTY_GUIDE_FACTS, type GuideFacts, type GuideUiStep } from '../lib/guide-scene'
+import { boxSetupInBackground, boxSetupActive } from '../lib/box-setup-rows'
 import { Bot } from '../bot/Bot'
 // G4: il passo Modello vive in un componente suo (griglia, prova, Ollama, Integrato)
 import { GuideModelStep, type ModelStepFacts } from './GuideModelStep'
+// OB2 (fase onboarding-b): il passo Computer — la preparazione del computer del bot
+import { GuideComputerStep } from './GuideComputerStep'
 // G6: l'arrivo in chat — la mascotte vola dalla scena al pannello del bot
 import { stashMascotFlight } from '../lib/guide-arrival'
 
-/** L'ordine dei passi della guida nella UI («Pronto» è solo UI, G6). */
-const UI_STEPS: readonly GuideUiStep[] = ['welcome', 'model', 'approvals', 'ready']
+/**
+ * L'ordine dei passi della guida nella UI («Pronto» è solo UI, G6). OB2: il
+ * passo Computer sta fra Modello e Permessi quando la macchina lo regge (lo
+ * dice la sequenza del daemon; i puntini lo mostrano solo se c'è).
+ */
+const UI_STEPS: readonly GuideUiStep[] = ['welcome', 'model', 'computer', 'approvals', 'ready']
 
 /**
  * La scena a sinistra: nuvoletta, mascotte, ombra, nome. Le misure seguono
@@ -107,13 +114,18 @@ function SceneColumn({ phrase, bubbleKey, mood, avatar, displayName, width, masc
 }
 
 /** Un puntino dell'avanzamento, col corrente allungato e i fatti pieni. */
-function StepDots({ current, reachedEnd }: { current: GuideUiStep; reachedEnd: boolean }) {
+function StepDots({ current, reachedEnd, withComputer }: { current: GuideUiStep; reachedEnd: boolean; withComputer: boolean }) {
   const { t } = useLingui()
-  const visible: Array<'welcome' | 'model' | 'approvals'> = ['welcome', 'model', 'approvals']
-  // le etichette della fila (Tu · Modello · Permessi), col macro t in scope
-  const labels: Record<'welcome' | 'model' | 'approvals', string> = {
+  // OB2: il puntino del Computer c'è SOLO se il passo c'è (la sequenza del
+  // daemon decide; su una macchina non supportata restano i tre di sempre)
+  const visible: Array<'welcome' | 'model' | 'computer' | 'approvals'> = withComputer
+    ? ['welcome', 'model', 'computer', 'approvals']
+    : ['welcome', 'model', 'approvals']
+  // le etichette della fila (Tu · Modello · Computer · Permessi), col macro t in scope
+  const labels: Record<'welcome' | 'model' | 'computer' | 'approvals', string> = {
     welcome: t`Tu`,
     model: t`Modello`,
+    computer: t`Computer`,
     approvals: t`Permessi`
   }
   const idx = UI_STEPS.indexOf(current)
@@ -316,7 +328,7 @@ function ApprovalsStep({ modelReady, chosen, onChoose }: {
  * scegliere», i permessi) e il bottone «Apri la chat», che fa l'avanzare di
  * approvals e porta in chat (la mascotte ci vola, FLIP in lib/guide-arrival).
  */
-function ReadyStep({ modelReady, chosen }: { modelReady: boolean; chosen: 'ask' | 'auto' | null }) {
+function ReadyStep({ modelReady, chosen, computer }: { modelReady: boolean; chosen: 'ask' | 'auto' | null; computer: 'off' | 'ready' | 'preparing' | 'todo' }) {
   const { t } = useLingui()
   const [summary, setSummary] = useState<{ model: string; approvals: 'ask' | 'auto' } | null>(null)
   const agents = useStore((st) => st.agents)
@@ -349,6 +361,9 @@ function ReadyStep({ modelReady, chosen }: { modelReady: boolean; chosen: 'ask' 
             : avatar.color === 'c6' ? t`Turchese` : t`Grafite`
   const rows: Array<{ test: string; k: string; v: string; ok: boolean }> = [
     { test: 'guide-summary-bot', k: t`Il tuo bot`, v: `${main?.name ?? 'Bot'} · ${familyLabel}, ${colorLabel.toLowerCase()}`, ok: true },
+    // OB2: la riga «Computer» c'è quando il passo c'è — pronto, in
+    // preparazione (la preparazione prosegue in background) o da preparare
+    ...(computer !== 'off' ? [{ test: 'guide-summary-computer', k: t`Computer`, v: computer === 'ready' ? t`pronto` : computer === 'preparing' ? t`in preparazione` : t`da preparare`, ok: computer === 'ready' }] : []),
     { test: 'guide-summary-model', k: t`Modello`, v: summary?.model ?? t`da scegliere`, ok: modelReady },
     { test: 'guide-summary-permissions', k: t`Permessi`, v: (summary?.approvals ?? 'ask') === 'auto' ? t`Fai quello che ti chiedo` : t`Chiedimi prima`, ok: true }
   ]
@@ -390,6 +405,10 @@ export function GuideView() {
   const state = onboarding?.state ?? null
   const modelReady = onboarding?.modelReady ?? false
   const paths = onboarding?.providerPaths
+  // OB2: la sequenza del daemon (dice se il passo Computer c'è) e lo stato
+  // della preparazione (RPC + evento box-setup, senza ricaricare)
+  const sequence = onboarding?.sequence ?? ['welcome', 'model', 'approvals', 'chat']
+  const boxSetup = useStore((s) => s.boxSetup)
 
   // G2: «Indietro» è una VISTA sul passo precedente: lo stato del daemon non
   // torna mai indietro (si avanfa soltanto); Continua riporta al passo vero
@@ -455,6 +474,8 @@ export function GuideView() {
     name: typedName,
     modelReady,
     flashHappy,
+    // OB2: il passo Computer e la sua preparazione
+    boxSetup: boxSetup ? { phase: boxSetup.phase, hasError: boxSetup.phase === 'error' } : null,
     // G4: lo stato del pannello del passo Modello (strada, prova, download)
     providerPath: modelFacts.providerPath,
     probe: modelFacts.probe,
@@ -475,12 +496,21 @@ export function GuideView() {
   // prova riuscita col modello scelto, Ollama scelto, o l'integrato pronto);
   // il modelReady del daemon copre il caso limite di un salvataggio esterno
   const modelReadyHere = modelLocalReady || modelReady
+  // OB2: «Continua» del passo Computer è attivo a ready, oppure quando la
+  // preparazione corre SOLO in background (download o immagine: l'utente non
+  // serve). Sull'attesa dell'Installer è SPENTO: serve l'utente (c'è «Salta
+  // per ora»); il riepilogo di Pronto dirà «Computer: in preparazione»
+  const computerPhase = boxSetup?.phase ?? 'idle'
+  const computerReady = computerPhase === 'ready' || onboarding?.computerReady === true
+  const computerContinue = computerReady || boxSetupInBackground(computerPhase)
+  const computerDoneForSummary = computerReady ? 'ready' : boxSetupActive(computerPhase) ? 'preparing' : 'todo'
   // G5: anche il passo Permessi aspetta la scelta (mockup: Continua spento
   // finché non si sceglie una delle due schede)
-  const nextDisabled = (uiStep === 'model' && !modelReadyHere) || (uiStep === 'approvals' && chosenApprovals === null)
+  const nextDisabled = (uiStep === 'model' && !modelReadyHere) || (uiStep === 'approvals' && chosenApprovals === null) || (uiStep === 'computer' && !computerContinue)
   const nextLabel = uiStep === 'ready' ? t`Apri la chat` : t`Continua`
   const canBack = stepIdx > 0 && daemonStep !== 'welcome'
-  const canSkip = uiStep === 'model' && !modelReadyHere
+  // OB2: sul passo Computer «Salta per ora» c'è SEMPRE finché non è ready
+  const canSkip = (uiStep === 'model' && !modelReadyHere) || (uiStep === 'computer' && !computerReady)
   // G3: «Continua» del passo Tu salva nome e aspetto del bot principale
   // (agents:update, con la validazione dell'avatar che il daemon già fa)
   const saveTuStep = async (): Promise<void> => {
@@ -510,6 +540,13 @@ export function GuideView() {
       else if (modelReady) void advance('model', 'done')
       return
     }
+    if (uiStep === 'computer') {
+      if (backTo) { setBackTo(null); return }
+      // a ready il passo si chiude FATTO; durante download/immagine si va
+      // avanti e la preparazione CONTINUA in background
+      if (computerReady) void advance('computer', 'done')
+      return
+    }
     if (uiStep === 'approvals') {
       if (backTo) { setBackTo(null); return }
       // la scelta ha GIÀ scritto i setting (OA3): Continua porta al passo
@@ -527,6 +564,7 @@ export function GuideView() {
   }
   const onSkip = (): void => {
     if (uiStep === 'model') void advance('model', 'skipped')
+    if (uiStep === 'computer') void advance('computer', 'skipped')
   }
   const onBack = (): void => {
     if (backTo) {
@@ -596,7 +634,7 @@ export function GuideView() {
       >
         {/* in alto: l'avanzamento a puntini e la lingua */}
         <div className="flex h-8 shrink-0 items-center justify-between gap-3">
-          <StepDots current={uiStep} reachedEnd={uiStep === 'ready'} />
+          <StepDots current={uiStep} reachedEnd={uiStep === 'ready'} withComputer={sequence.includes('computer')} />
           <label className="flex shrink-0 items-center gap-2 text-[13px] text-muted-foreground">
             <Trans>Lingua</Trans>
             <select
@@ -638,9 +676,10 @@ export function GuideView() {
           {uiStep === 'approvals' && (
             <ApprovalsStep modelReady={modelReady} chosen={chosenApprovals} onChoose={(mode) => { void chooseApprovals(mode) }} />
           )}
-          {uiStep === 'ready' && <ReadyStep modelReady={modelReady} chosen={chosenApprovals} />}
-          {(daemonStep === 'computer' || daemonStep === 'memory') && (
-            <StepPanel stepKey={daemonStep} testId={`guide-step-${daemonStep}`}>
+          {uiStep === 'ready' && <ReadyStep modelReady={modelReady} chosen={chosenApprovals} computer={sequence.includes('computer') ? computerDoneForSummary : 'off'} />}
+          {daemonStep === 'computer' && <GuideComputerStep />}
+          {daemonStep === 'memory' && (
+            <StepPanel stepKey="memory" testId="guide-step-memory">
               <h1 className="m-0 font-display text-[40px] font-semibold leading-[1.1] tracking-[-0.01em]">{t`Prossimamente`}</h1>
               <p className="m-0 max-w-md text-base leading-[1.6] text-muted-foreground">
                 {t`Questo passo arriva con un aggiornamento prossimo: per ora puoi proseguire.`}

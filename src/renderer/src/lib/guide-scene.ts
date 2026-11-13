@@ -8,7 +8,7 @@ import type { MessageDescriptor } from '@lingui/core'
 import type { BotState } from '../bot/bot-state'
 
 /** I passi della guida come li vede la scena (la UI; il daemon resta com'è). */
-export type GuideUiStep = 'welcome' | 'model' | 'approvals' | 'ready'
+export type GuideUiStep = 'welcome' | 'model' | 'computer' | 'approvals' | 'ready'
 
 /** I fatti della scena: ciò che la mascotte deve sapere del passo corrente. */
 export interface GuideFacts {
@@ -26,11 +26,16 @@ export interface GuideFacts {
   modelReady: boolean
   /** il lampo felice (~1 s) dopo la scelta di una faccia o un colore */
   flashHappy: boolean
+  /**
+   * OB2 (fase onboarding-b): la preparazione del computer del bot, per il
+   * passo Computer (null = il passo non c'è o lo stato non è ancora arrivato)
+   */
+  boxSetup?: { phase: import('../../../shared/types').BoxSetupPhase; hasError: boolean } | null
 }
 
 export const EMPTY_GUIDE_FACTS: GuideFacts = {
   name: '', providerPath: null, probe: 'idle', ollamaChosen: false,
-  download: 'idle', modelReady: false, flashHappy: false
+  download: 'idle', modelReady: false, flashHappy: false, boxSetup: null
 }
 
 /**
@@ -61,6 +66,15 @@ export function guideMood(step: GuideUiStep, f: GuideFacts): BotState {
       if (modelReadyHere(f)) return 'happy'
       if (f.probe === 'bad') return 'waiting'
       return 'thinking'
+    case 'computer': {
+      // OB2: senza preparazione pensa; mentre lavora ascolta; sull'Installer
+      // e sugli errori aspetta; a fine preparazione è felice
+      const phase = f.boxSetup?.phase ?? 'idle'
+      if (phase === 'ready') return 'happy'
+      if (phase === 'awaiting-installer' || phase === 'error' || phase === 'cancelled') return 'waiting'
+      if (phase === 'idle') return 'thinking'
+      return 'listening'
+    }
     case 'approvals':
       return 'speaking'
     case 'ready':
@@ -98,6 +112,16 @@ export function guideBubble(step: GuideUiStep, f: GuideFacts): MessageDescriptor
       if (f.download === 'running') return msg`Scarico… ci vuole qualche minuto.`
       if (ready) return msg`Scaricato: penso da qui.`
       return msg`Posso pensare tutto qui sul Mac.`
+    }
+    case 'computer': {
+      // OB2: le frasi del mockup — la domanda, il lavoro, la password,
+      // l'errore rimandato alla lista qui sotto, la gioia finale
+      const phase = f.boxSetup?.phase ?? 'idle'
+      if (phase === 'ready') return msg`Ho il mio computer!`
+      if (phase === 'awaiting-installer') return msg`Mi serve la tua password del Mac per installare lo strumento di Apple.`
+      if (phase === 'error') return msg`Qualcosa non è andato: te lo dico qui sotto.`
+      if (phase === 'idle' || phase === 'cancelled') return msg`Mi preparo un computer tutto mio?`
+      return msg`Sto sistemando la scrivania…`
     }
     case 'approvals':
       return msg`Quanto posso fare senza chiederti?`

@@ -72,6 +72,11 @@ const ALLOWED_LITERALS: ReadonlyArray<{ file: string; text: string }> = [
   { file: 'src/main/templates/index.ts', text: ': non è un oggetto' },
   { file: 'src/main/templates/index.ts', text: ': askUserFor deve essere un array di domande' },
   { file: 'src/main/daemon-client.ts', text: 'il daemon non ha scritto daemon.json entro il timeout' },
+  // OB1 (fase onboarding-b): le righe di LOG della preparazione del
+  // computer del bot — vanno a deps.log (console.log nel wiring), come le
+  // righe italiane di sandbox/local-model; MAI nella UI (lì c'è il catalogo)
+  { file: 'src/daemon/box-setup.ts', text: '[box-setup] download ritentato dopo un errore di rete: ' },
+  { file: 'src/daemon/box-setup.ts', text: 'errore di lettura' },
   // messaggio del keychain FINTO dei test (strumento di test, non UI)
   { file: 'src/daemon/keychain.ts', text: 'operazione non supportata dal keychain finto' },
   // nome app localizzato → bundle (parser di open_app, C7)

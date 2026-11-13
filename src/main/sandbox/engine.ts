@@ -260,6 +260,8 @@ import { release } from 'node:os'
 import { dockerEngine as dockerEngineImpl, dockerToolStatusInfo } from './docker-engine'
 import { appleContainerEngine as appleContainerEngineImpl } from './apple-container-engine'
 import { parseSystemStatus } from './apple-container-argv'
+// OB6: l'override dei fatti macchina vale solo non impacchettata
+import { isPackagedRuntime } from '../../shared/packaged'
 
 /** I due motori (ri-esportati: i punti d'uso li prendono da qui). */
 export const dockerEngine = dockerEngineImpl
@@ -343,15 +345,56 @@ export async function probeBoxEngineFacts(): Promise<BoxEngineFacts> {
     }
   }
   const docker = dockerToolStatusInfo()
-  return {
-    platform: process.platform,
-    arch: process.arch,
-    macOsMajor: process.platform === 'darwin' ? macOsMajorFromDarwin(release()) : 0,
+  // OB6 (fase onboarding-b): i fatti macchina si possono fingere SOLO nei
+  // test e nelle sonde (mai nell'app impacchettata)
+  const fake = machineFactsOverride()
+  const facts: BoxEngineFacts = {
+    platform: fake?.platform ?? process.platform,
+    arch: fake?.arch ?? process.arch,
+    macOsMajor: fake?.macOsMajor ?? (process.platform === 'darwin' ? macOsMajorFromDarwin(release()) : 0),
     containerInstalled,
     containerServiceRunning,
     containerKernelOk,
     dockerInstalled: docker.installed,
     dockerResponds: docker.running
+  }
+  // OB2: l'ULTIMA sonda si ricorda — la disponibilità del passo computer
+  // della guida è sincrona e legge da qui
+  lastFacts = facts
+  return facts
+}
+
+/** OB2: i fatti dell'ultima sonda (null = mai sondata; la lettura è sincrona). */
+let lastFacts: BoxEngineFacts | null = null
+export function lastBoxEngineFacts(): BoxEngineFacts | null {
+  return lastFacts
+}
+
+/** Solo per i test: azzera (o fissa) la cache dei fatti dell'ultima sonda. */
+export function setLastBoxEngineFactsForTests(f: BoxEngineFacts | null): void {
+  lastFacts = f
+}
+
+/**
+ * OB6 (fase onboarding-b, PURa): l'override dei FATTI MACCHINA per le prove
+ * (piattaforma, architettura, major di macOS) — la sonda della finestra fa
+ * finta di essere su un Mac che regge il motore Apple, o su uno che NON lo
+ * regge. Arriva SOLO da SANDBOT_TEST_FAKE_* ed è IGNORATO nell'app
+ * impacchettata: la sonda dice sempre la verità della macchina vera.
+ */
+export function machineFactsOverride(
+  env: NodeJS.ProcessEnv = process.env,
+  packaged = isPackagedRuntime()
+): { platform?: string; arch?: string; macOsMajor?: number } | null {
+  if (packaged) return null
+  if (env.SANDBOT_TEST_FAKE_PLATFORM === undefined && env.SANDBOT_TEST_FAKE_ARCH === undefined && env.SANDBOT_TEST_FAKE_MACOS_MAJOR === undefined) {
+    return null
+  }
+  const major = Number(env.SANDBOT_TEST_FAKE_MACOS_MAJOR ?? '')
+  return {
+    ...(env.SANDBOT_TEST_FAKE_PLATFORM !== undefined ? { platform: env.SANDBOT_TEST_FAKE_PLATFORM } : {}),
+    ...(env.SANDBOT_TEST_FAKE_ARCH !== undefined ? { arch: env.SANDBOT_TEST_FAKE_ARCH } : {}),
+    ...(Number.isFinite(major) && major > 0 ? { macOsMajor: major } : {})
   }
 }
 

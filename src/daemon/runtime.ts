@@ -54,7 +54,7 @@ import { uiLanguage, formatUi, ui } from '../main/ui-language'
 import { UI } from '../shared/ui-messages'
 import { secondaryPrompts } from '../main/agent/prompts'
 import { loadTemplates } from '../main/templates'
-import { createOnboarding, createMainBotEnsurer } from './onboarding'
+import { createOnboarding, createMainBotEnsurer, computerStepAvailable } from './onboarding'
 // OB1 (fase onboarding-b): la preparazione del computer del bot (la guida)
 import { createBoxSetup, boxSetupRunConfig } from './box-setup'
 import { join } from 'node:path'
@@ -66,7 +66,7 @@ import { setMasterKeyStorage, setMasterKeySealedDataProbe, safeStorageBackendFor
 import { daemonHasSealedData } from './sealed-data'
 import type { SafeStorageLike } from '../main/vault'
 // fase rilascio (A7): docker si trova anche fuori dal Terminale
-import { activeBoxEngine } from '../main/sandbox/engine'
+import { activeBoxEngine, appleContainerState, appleContainerSupported, lastBoxEngineFacts, refreshAutoEngine } from '../main/sandbox/engine'
 // OB1 (fase onboarding-b): la preparazione del computer del bot — i byte
 // liberi del disco (disk-space.ts) e il percorso della CLI di Apple
 import { freeDiskBytesOf } from '../main/sandbox/disk-space'
@@ -714,6 +714,23 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
     createAgent: (name, description) => createAgent(name, description),
     tx: onboardingTx
   })
+  // OB2 (fase onboarding-b): l'immagine del box c'è già? La risposta della
+  // sonda si ricorda in una cache SINCRONA — la disponibilità del passo
+  // computer della guida la legge da lì (si aggiorna al boot, quando il
+  // motore si sonsa e quando la preparazione finisce)
+  let cachedHasBoxImage = false
+  const hasBoxImageNow = async (): Promise<boolean> => {
+    const { runDockerRaw, boxImage } = await import('../main/sandbox')
+    const r = await runDockerRaw(activeBoxEngine().argv.imageInspect(boxImage()), { timeoutMs: 15_000 }).catch(() => null)
+    cachedHasBoxImage = !!r && r.exitCode === 0
+    return cachedHasBoxImage
+  }
+
+  // OB2: il controller della preparazione nasce DOPO (gli servono sonda e
+  // immagine): l'onboarding lo legge da qui, mai direttamente
+  let boxSetupRef: import('./box-setup').BoxSetupController | null = null
+  const boxSetupPhaseNow = (): import('../shared/types').BoxSetupPhase | null => boxSetupRef?.state().phase ?? null
+
   const onboarding = createOnboarding({
     now: () => Date.now(),
     getSetting,
@@ -736,6 +753,27 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
       }
     },
     localEligibilityFacts: () => localModelFacts(),
+    // OB2 (fase onboarding-b): il passo computer — c'è se la macchina regge
+    // il motore Apple e il computer non è già pronto (o la preparazione
+    // corre); si chiude DA SOLO quando la preparazione finisce
+    stepAvailability: () => {
+      const facts = lastBoxEngineFacts()
+      if (!facts) return { computer: false, memory: false }
+      return {
+        computer: computerStepAvailable(
+          {
+            supported: appleContainerSupported(facts),
+            readyWithImage: appleContainerState(facts) === 'ready' && cachedHasBoxImage
+          },
+          boxSetupPhaseNow()
+        ),
+        memory: false
+      }
+    },
+    computerReady: () => {
+      const facts = lastBoxEngineFacts()
+      return !!facts && appleContainerState(facts) === 'ready' && cachedHasBoxImage
+    },
     appendSystemSend: (agentId, message, meta) => {
       const content = message.type === 'text' ? message.text : message.type === 'widget' ? message.prompt : ''
       const entry = appendEntry({
@@ -810,10 +848,14 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
       const e = await import('../main/sandbox/engine')
       return e.appleContainerState(await e.probeBoxEngineFacts())
     },
-    hasBoxImage: async () => {
-      const { runDockerRaw, boxImage } = await import('../main/sandbox')
-      const r = await runDockerRaw(activeBoxEngine().argv.imageInspect(boxImage()), { timeoutMs: 15_000 }).catch(() => null)
-      return !!r && r.exitCode === 0
+    hasBoxImage: () => hasBoxImageNow(),
+    // OB2: la preparazione è arrivata in fondo — si rifrescano i fatti del
+    // motore e l'immagine, poi la guida ferma sul passo computer lo chiude
+    onReady: () => {
+      void refreshAutoEngine()
+        .then(() => hasBoxImageNow())
+        .then(() => onboarding.computerBecameReady())
+        .catch(() => undefined)
     },
     buildBoxImage: () => import('../main/sandbox').then((m) => m.ensureBoxImage()),
     openInstaller: async (pkgPath) => {
@@ -828,6 +870,7 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
     },
     log: (line) => console.log(line)
   })
+  boxSetupRef = boxSetup
   // OB1: una preparazione rimasta a metà si RIPRENDE al boot — il download
   // col Range, l'attesa dell'Installer col sondaggio, mai una fase rifatta
   void boxSetup.resumeAtBoot()
@@ -960,6 +1003,8 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
   // fuori dalla corsa); OA2/OA3: la guida riprende dallo stesso passo e il
   // passo model si chiude da solo se il modello c'è già
   void onboarding.start().catch((e) => console.error('[sandbotd] avvio onboarding:', e))
+  // OB2: la prima risposta dell'immagine del box (per il passo computer)
+  void hasBoxImageNow().catch(() => undefined)
   // OA5 (fase onboarding-a): messaggi rimasti in attesa di un modello che nel
   // frattempo c'è già (per esempio salvato mentre l'app era chiusa): ripartono
   const bootMain = getSetting<import('../shared/types').MainModel | null>('models.main', null)

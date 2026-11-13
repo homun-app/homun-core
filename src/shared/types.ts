@@ -653,6 +653,11 @@ export interface OnboardingStatus {
   /** OA3: c'è già un provider attivo col modello principale? */
   modelReady: boolean
   /**
+   * OB2 (fase onboarding-b): il computer del bot è pronto (motore Apple
+   * pronto con immagine)? Chiude il passo computer da solo, come il modello.
+   */
+  computerReady?: boolean
+  /**
    * OAC1 (fase guida): la guida è APERTA adesso? Lo dice lo STATO (esiste e
    * passo ≠ chat), non «needed»: chi ha già scritto può riaprire la guida da
    * Impostazioni e lo stato a metà si riprende al boot. La finestra la

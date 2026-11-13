@@ -17,7 +17,7 @@
 // bot da template col kickstart, il benvenuto fisso, il widget del provider
 // e la sua ripresa) è STATO RIMOSSO con i suoi test.
 // Tutto a dipendenze iniettabili: nei test niente LLM, niente rete.
-import type { Agent, OnboardingState, OnboardingStatus, OnboardingStepId, ProviderConfig, SendMessagePayload, SandbotEvent, TranscriptEntry } from '../shared/types'
+import type { Agent, BoxSetupPhase, OnboardingState, OnboardingStatus, OnboardingStepId, ProviderConfig, SendMessagePayload, SandbotEvent, TranscriptEntry } from '../shared/types'
 // fase locale (L4): l'idoneità della macchina per la strada «Integrato»
 import { localEligibility } from '../main/agent/local-catalog'
 import { currentUserLanguage } from '../main/agent/user-language'
@@ -63,6 +63,22 @@ export function onboardingStepSequence(available: { computer: boolean; memory: b
 /** Lo stato iniziale della guida: dal primo passo della sequenza. */
 export function initialOnboardingState(now: number, available: { computer: boolean; memory: boolean }): OnboardingState {
   return { step: onboardingStepSequence(available)[0]!, done: [], skipped: [], startedAt: now }
+}
+
+/**
+ * OB2 (fase onboarding-b, PURa): il passo «Computer» c'è? C'è se la macchina
+ * regge il motore Apple E il computer non è già pronto (motore pronto con
+ * immagine), OPPURE se la preparazione è in corsa (la si mostra che finisce,
+ * e chiude il passo da sola). Con ready più immagine il passo è FATTO DA
+ * SOLO, come il modello in OA3; su una macchina non supportata non c'è
+ * (Docker resta la riserva in Impostazioni, fuori dalla guida).
+ */
+export function computerStepAvailable(facts: { supported: boolean; readyWithImage: boolean }, setupPhase: BoxSetupPhase | null): boolean {
+  if (!facts.supported) return false
+  if (!facts.readyWithImage) return true
+  // pronto: il passo resta SOLO se la preparazione sta ancora correndo
+  // (errore o annullato non corrono: il passo resta spento finché non si riparte)
+  return setupPhase !== null && setupPhase !== 'idle' && setupPhase !== 'ready' && setupPhase !== 'error' && setupPhase !== 'cancelled'
 }
 
 /**
@@ -113,13 +129,21 @@ export function reopenOnboarding(
  * OA3 (PURA): il passo del modello si chiude DA SOLO quando il modello c'è
  * già (un provider attivo col modello principale): il passo è FATTO, non
  * saltato. Vale SOLO per il passo corrente: gli altri passi non si toccano.
+ * OB2 (fase onboarding-b): lo stesso vale per il passo computer quando la
+ * preparazione del computer del bot arriva in fondo (computerReady).
  */
 export function autoAdvanceOnboarding(
   state: OnboardingState,
-  facts: { modelReady: boolean },
+  facts: { modelReady: boolean; computerReady?: boolean },
   sequence: readonly OnboardingStepId[]
 ): OnboardingState {
-  if (state.step !== 'model' || !facts.modelReady) return state
+  if (state.step !== 'model' && state.step !== 'computer') return state
+  // OB2: anche il passo computer si chiude DA SOLO quando la preparazione
+  // finisce (motore pronto con immagine) mentre la guida è ferma lì
+  if (state.step === 'computer') {
+    return facts.computerReady === true ? advanceOnboardingStep(state, 'computer', 'done', sequence) : state
+  }
+  if (!facts.modelReady) return state
   return advanceOnboardingStep(state, 'model', 'done', sequence)
 }
 
@@ -237,6 +261,12 @@ export interface OnboardingDeps {
    * memory non ci sono ancora: default { computer: false, memory: false }.
    */
   stepAvailability?: () => { computer: boolean; memory: boolean }
+  /**
+   * OB2 (fase onboarding-b): il computer del bot è pronto (motore Apple
+   * pronto CON immagine)? Lo dice il wiring col setting box.setup e la
+   * sonda del motore; senza, il passo computer non si chiude da solo.
+   */
+  computerReady?: () => boolean
   /** OA4: la riga del focus va in descrizione del bot (il nome non si tocca) */
   updateAgent(id: string, patch: { providerId?: string | null; model?: string | null; description?: string }): void
   listProviders(): ProviderConfig[]
@@ -289,6 +319,11 @@ function modelReadyOf(deps: OnboardingDeps): boolean {
   return deps.listProviders().some((p) => p.id === main.providerId && p.enabled)
 }
 
+/** Il computer del bot è pronto? (OB2: chiude il passo da solo, come il modello) */
+function computerReadyOf(deps: OnboardingDeps): boolean {
+  return deps.computerReady?.() ?? false
+}
+
 /** Lo status completo per RPC ed eventi (nessun effetto). */
 function statusOf(deps: OnboardingDeps): OnboardingStatus {
   const decision = onboardingNeeded(onboardingFactsOf(deps))
@@ -297,6 +332,7 @@ function statusOf(deps: OnboardingDeps): OnboardingStatus {
     state: stateOf(deps),
     sequence: onboardingStepSequence(availabilityOf(deps)),
     modelReady: modelReadyOf(deps),
+    computerReady: computerReadyOf(deps),
     // OAC1: la finestra la mostra da QUI, non da needed
     guideOpen: guideOpenOf(stateOf(deps))
   }
@@ -369,7 +405,7 @@ export async function startOnboarding(deps: OnboardingDeps): Promise<void> {
   // model si chiude da solo prima di mostrarsi
   const sequence = onboardingStepSequence(availabilityOf(deps))
   const state = stateOf(deps) ?? initialOnboardingState(deps.now(), availabilityOf(deps))
-  const auto = autoAdvanceOnboarding(state, { modelReady: modelReadyOf(deps) }, sequence)
+  const auto = autoAdvanceOnboarding(state, { modelReady: modelReadyOf(deps), computerReady: computerReadyOf(deps) }, sequence)
   deps.setSetting(ONBOARDING_STATE_SETTING, auto)
   deps.emit({ type: 'agents' })
   deps.emit({ type: 'onboarding', ...statusOf(deps) })
@@ -427,7 +463,7 @@ export function createOnboarding(deps: OnboardingDeps) {
       // il modello è arrivato mentre la guida era ferma prima
       const next = autoAdvanceOnboarding(
         advanceOnboardingStep(state, step, outcome, sequence),
-        { modelReady: modelReadyOf(deps) },
+        { modelReady: modelReadyOf(deps), computerReady: computerReadyOf(deps) },
         sequence
       )
       if (next === state) return false
@@ -463,7 +499,24 @@ export function createOnboarding(deps: OnboardingDeps) {
       const state = stateOf(deps)
       if (!state) return false
       const sequence = onboardingStepSequence(availabilityOf(deps))
-      const next = autoAdvanceOnboarding(state, { modelReady: modelReadyOf(deps) }, sequence)
+      const next = autoAdvanceOnboarding(state, { modelReady: modelReadyOf(deps), computerReady: computerReadyOf(deps) }, sequence)
+      if (next === state) return false
+      deps.setSetting(ONBOARDING_STATE_SETTING, next)
+      reachChatIfChat(next)
+      deps.emit({ type: 'onboarding', ...statusOf(deps) })
+      return true
+    },
+    /**
+     * OB2 (fase onboarding-b): la preparazione del computer del bot è
+     * arrivata in fondo — se la guida è ferma sul passo computer, il passo
+     * si chiude DA SOLO (è «fatto», come il modello in OA3). True se ha
+     * chiuso il passo ora.
+     */
+    computerBecameReady(): boolean {
+      const state = stateOf(deps)
+      if (!state) return false
+      const sequence = onboardingStepSequence(availabilityOf(deps))
+      const next = autoAdvanceOnboarding(state, { modelReady: modelReadyOf(deps), computerReady: true }, sequence)
       if (next === state) return false
       deps.setSetting(ONBOARDING_STATE_SETTING, next)
       reachChatIfChat(next)

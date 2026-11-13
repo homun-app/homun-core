@@ -113,3 +113,48 @@ describe('G2 guideBubble (pura): le frasi della nuvoletta, in it e en', () => {
     expect(phrase('en', 'ready', facts({}))).toBe('Here I am! Shall we go?')
   })
 })
+
+// ---- OB2 (fase onboarding-b): il passo «Computer» della guida ----
+
+describe('OB2: guideMood del passo Computer (pura)', () => {
+  it('senza preparazione thinking; durante le fasi che lavorano listening', () => {
+    expect(guideMood('computer', facts({ boxSetup: { phase: 'idle', hasError: false } }))).toBe('thinking')
+    for (const phase of ['checking-space', 'downloading', 'verifying', 'starting-service', 'installing-kernel', 'building-image'] as const) {
+      expect(guideMood('computer', facts({ boxSetup: { phase, hasError: false } })), phase).toBe('listening')
+    }
+  })
+
+  it('sull\'attesa dell\'Installer e sugli errori waiting; a ready happy', () => {
+    expect(guideMood('computer', facts({ boxSetup: { phase: 'awaiting-installer', hasError: false } }))).toBe('waiting')
+    expect(guideMood('computer', facts({ boxSetup: { phase: 'error', hasError: true } }))).toBe('waiting')
+    expect(guideMood('computer', facts({ boxSetup: { phase: 'ready', hasError: false } }))).toBe('happy')
+  })
+})
+
+describe('OB2: guideBubble del passo Computer (pura) — le frasi del mockup', () => {
+  it('senza preparazione: «Mi preparo un computer tutto mio?»', () => {
+    expect(phrase('it', 'computer', facts({ boxSetup: { phase: 'idle', hasError: false } }))).toBe('Mi preparo un computer tutto mio?')
+    expect(phrase('en', 'computer', facts({ boxSetup: { phase: 'idle', hasError: false } }))).toBe('Shall I get a computer of my own ready?')
+  })
+
+  it('durante il download e l\'immagine: «Sto sistemando la scrivania…»', () => {
+    expect(phrase('it', 'computer', facts({ boxSetup: { phase: 'downloading', hasError: false } }))).toBe('Sto sistemando la scrivania…')
+    expect(phrase('it', 'computer', facts({ boxSetup: { phase: 'building-image', hasError: false } }))).toBe('Sto sistemando la scrivania…')
+    expect(phrase('en', 'computer', facts({ boxSetup: { phase: 'downloading', hasError: false } }))).toBe('Tidying up the desk…')
+  })
+
+  it('in attesa dell\'Installer: la password del Mac', () => {
+    expect(phrase('it', 'computer', facts({ boxSetup: { phase: 'awaiting-installer', hasError: false } }))).toBe('Mi serve la tua password del Mac per installare lo strumento di Apple.')
+    expect(phrase('en', 'computer', facts({ boxSetup: { phase: 'awaiting-installer', hasError: false } }))).toBe('I need your Mac password to install the Apple tool.')
+  })
+
+  it('con un errore: «Qualcosa non è andato: te lo dico qui sotto.»', () => {
+    expect(phrase('it', 'computer', facts({ boxSetup: { phase: 'error', hasError: true } }))).toBe('Qualcosa non è andato: te lo dico qui sotto.')
+    expect(phrase('en', 'computer', facts({ boxSetup: { phase: 'error', hasError: true } }))).toBe("Something didn't go well: I'll tell you below.")
+  })
+
+  it('a fine preparazione: «Ho il mio computer!»', () => {
+    expect(phrase('it', 'computer', facts({ boxSetup: { phase: 'ready', hasError: false } }))).toBe('Ho il mio computer!')
+    expect(phrase('en', 'computer', facts({ boxSetup: { phase: 'ready', hasError: false } }))).toBe('I have my own computer!')
+  })
+})
