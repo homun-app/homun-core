@@ -963,6 +963,12 @@ export interface SandbotApi {
   localModelRestart(): Promise<{ started: boolean; error?: string }>
   localModelRemove(): Promise<{ freedGb: number }>
   /**
+   * OBV4 (fase onboarding-b-dal-vivo): la «Continua» del pannello Integrato
+   * della guida col modello pronto — models.main si scrive se manca (id dal
+   * catalogo) e il passo si chiude; torna il models.main di adesso.
+   */
+  localModelEnsureMain(): Promise<MainModel | null>
+  /**
    * Fase 18b (K3): le capacità di UN modello, SENZA l'elenco completo e senza
    * prezzo personalizzato. Nessuna rete per i provider di catalogo; per
    * ollama al massimo UNA /api/show (1500 ms) se la cache è vuota.

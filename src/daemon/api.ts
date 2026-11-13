@@ -229,18 +229,35 @@ export function buildApiMethods(
    * IDEMPOTENTE (lo chiama la fine del download E la riparazione di
    * local-model:status). Il nome passa dal catalogo UI (it/en), non più
    * scritto a mano. Torna true se lo ha CREATO (con l'evento agents).
+   * OBV4 (fase onboarding-b-dal-vivo): il modello integrato PRONTO diventa
+   * anche il modello PRINCIPALE se models.main è vuoto — l'id dal catalogo
+   * (localModelMain, pura), mai scritto a mano; una scelta dell'utente non
+   * si tocca. Vale da fine download, dalla riparazione dello status e da
+   * Impostazioni (chi chiama questa funzione sa che il modello c'è).
    */
   const ensureLocalModelProvider = async (): Promise<boolean> => {
-    if (providers.getProvider('homun-local')) return false
-    await providers.saveProvider({
-      id: 'homun-local', name: uiText(UI.localModelProviderName), kind: 'homun-local',
-      baseUrl: '', enabled: true
-    })
-    emit({ type: 'agents' })
-    // GC6.1 (fase guida-correzioni): i provider sono cambiati → la finestra
-    // si ricarica l'elenco (e il modello principale se è questo il caso)
-    emit({ type: 'models' })
-    return true
+    const created = !providers.getProvider('homun-local')
+    if (created) {
+      await providers.saveProvider({
+        id: 'homun-local', name: uiText(UI.localModelProviderName), kind: 'homun-local',
+        baseUrl: '', enabled: true
+      })
+      emit({ type: 'agents' })
+    }
+    // OBV4: models.main vuoto → il modello del provider integrato
+    const lm = await import('./local-model')
+    const main = lm.localModelMain(store.getSetting<MainModel | null>('models.main', null), lm.localModelCatalogEntry())
+    if (main) {
+      store.setSetting('models.main', main)
+      // GC6.1: il modello principale è cambiato → la finestra si ricarica
+      emit({ type: 'models' })
+    }
+    if (created) {
+      // GC6.1 (fase guida-correzioni): i provider sono cambiati → la finestra
+      // si ricarica l'elenco (e il modello principale se è questo il caso)
+      emit({ type: 'models' })
+    }
+    return created
   }
 
   // LD1: il lavoro di fine download (provider + agents + onboarding) sta in
@@ -2138,6 +2155,23 @@ export function buildApiMethods(
     'local-model:cancel': async () => {
       const lm = await import('./local-model')
       return { cancelled: lm.cancelLocalModelDownload() }
+    },
+    /**
+     * OBV4 (fase onboarding-b-dal-vivo): la «Continua» del pannello
+     * Integrato della guida — il modello è pronto: models.main si scrive se
+     * manca (ensureLocalModelProvider: l'id dal catalogo) e il passo si
+     * CHIUDE (modelBecameReady). Torna il models.main di adesso.
+     */
+    'local-model:ensure-main': async () => {
+      await ensureLocalModelProvider()
+      opts.onboarding?.modelBecameReady()
+      // OA5: e i messaggi rimasti in attesa ripartono, una volta sola
+      const released = releaseJobsHeldForModel(db(), Date.now())
+      if (released > 0) {
+        console.log(`[sandbotd] ${released} messaggi in attesa ripartono col modello integrato`)
+        worker.poke()
+      }
+      return store.getSetting<MainModel | null>('models.main', null)
     },
     // LC2: «Ricomincia» — cancella il .part e riparte da zero (con paused o
     // error: un .part che non si sa se è buono non si riprende, si ricomincia)

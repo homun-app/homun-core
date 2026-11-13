@@ -12,7 +12,7 @@ import { existsSync, rmSync, statfs } from 'node:fs'
 import { homedir, totalmem } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { ProviderConfig } from '../shared/types'
+import type { MainModel, ProviderConfig } from '../shared/types'
 import { dataDir } from '../main/store/db'
 import { uiText } from '../main/ui-language'
 import { UI } from '../shared/ui-messages'
@@ -83,6 +83,17 @@ export function setLocalModelCatalogForTest(e: LocalCatalogEntry | null): void {
 /** La voce del catalogo di turno: l'override dei test o l'unica vera. */
 export function localModelCatalogEntry(): LocalCatalogEntry {
   return catalogEntryOverride ?? LOCAL_MODEL_CATALOG[0]!
+}
+
+/**
+ * OBV4 (fase onboarding-b-dal-vivo, PURA): il modello principale da
+ * assegnare quando il modello integrato è PRONTO — SOLO se models.main è
+ * vuoto (una scelta dell'utente non si tocca). L'id del modello si LEGGE
+ * dal catalogo (per esempio qwen3.5-4b), mai scritto a mano. null = niente
+ * da assegnare.
+ */
+export function localModelMain(current: MainModel | null, entry: LocalCatalogEntry = localModelCatalogEntry()): MainModel | null {
+  return current ? null : { providerId: 'homun-local', model: entry.id, thinking: null }
 }
 
 let serverSingleton: LocalModelServer | null = null

@@ -235,6 +235,22 @@ export function GuideModelStep({ paths, onFactsChange, onReadyChange, registerCo
     }
   }, [ollamaModel, providers])
 
+  // OBV4: la Continua del pannello Integrato col modello PRONTO — dal vivo
+  // non faceva nulla (continueFn nullo) e il passo era un vicolo cieco. La
+  // RPC del daemon scrive models.main se manca (l'id dal catalogo, mai
+  // scritto a mano qui) e chiude il passo (modelBecameReady): la finestra
+  // avanza con l'evento onboarding, come gli altri pannelli.
+  const localContinue = useCallback(async (): Promise<boolean> => {
+    if (localState !== 'ready' || continueBusy.current) return false
+    continueBusy.current = true
+    try {
+      const main = await api.localModelEnsureMain().catch(() => null)
+      return !!main && main.providerId === 'homun-local'
+    } finally {
+      continueBusy.current = false
+    }
+  }, [localState])
+
   // Integrato: lo stato si polla col driver condiviso (lib/guide-local-model,
   // 1 s durante il download come la scheda Impostazioni); al modello pronto
   // il passo si chiude da solo (daemon). GC6.2: il loop riparte anche DOPO
@@ -296,7 +312,7 @@ export function GuideModelStep({ paths, onFactsChange, onReadyChange, registerCo
         ? localState === 'ready'
         : false
   useEffect(() => { onReadyChange(ready) }, [ready, onReadyChange])
-  const continueFn = isCloudPanel ? cloudContinue : panel === 'ollama' ? ollamaContinue : null
+  const continueFn = isCloudPanel ? cloudContinue : panel === 'ollama' ? ollamaContinue : panel === 'local' ? localContinue : null
   useEffect(() => { registerContinue(continueFn) }, [continueFn, registerContinue])
 
   // ---- il pannello con chiave ----

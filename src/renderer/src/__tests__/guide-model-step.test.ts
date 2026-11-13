@@ -142,6 +142,19 @@ describe('GC6.2: «Scarica» mostra il download SUBITO e riprende il polling', (
   })
 })
 
+// OBV4 (fase onboarding-b-dal-vivo): col modello integrato PRONTO il
+// «Continua» del pannello local fa QUALCOSA — dal vivo non faceva nulla (per
+// il pannello local continueFn era nullo) e il passo restava un vicolo cieco
+describe('OBV4: il pannello Integrato pronto ha la SUA Continua', () => {
+  it('continueFn per local NON è nullo: scrive models.main se manca (RPC del daemon) e avanza', () => {
+    expect(MODEL_SRC).toContain('localContinue')
+    expect(MODEL_SRC).toContain("panel === 'local' ? localContinue : null")
+    // la Continua del pannello Integrato chiama la RPC che assegna
+    // models.main lato daemon (l'id dal catalogo, mai scritto a mano qui)
+    expect(MODEL_SRC).toContain('localModelEnsureMain')
+  })
+})
+
 describe('GC2: le pillole dei modelli del pannello con chiave', () => {
   it('un SOLO controllo «Altri modelli…» e nessun testo di modello ripetuto', async () => {
     const { GuideModelPills } = await import('../components/GuideModelStep')

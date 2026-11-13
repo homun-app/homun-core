@@ -73,6 +73,8 @@ const api: SandbotApi = {
   localModelCancel: () => ipcRenderer.invoke('local-model:cancel'),
   localModelRestart: () => ipcRenderer.invoke('local-model:restart'),
   localModelRemove: () => ipcRenderer.invoke('local-model:remove'),
+  // OBV4: la Continua del pannello Integrato — models.main se manca, passo chiuso
+  localModelEnsureMain: () => ipcRenderer.invoke('local-model:ensure-main'),
   // fase 18b (K3): le capacità di UN modello (nessun elenco completo in chat)
   modelCapabilities: (providerId, model) => ipcRenderer.invoke('models:capabilities', providerId, model),
   // fase 18b (H6): uso e costi aggregati (per modello/bot/origine)
