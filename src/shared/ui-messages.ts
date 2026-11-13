@@ -827,7 +827,7 @@ export const UI = {
   }),
   boxUninstallUnsafe: msg({
     id: 'boxUninstall.unsafe',
-    message: 'Lo script di disinstallazione di Apple non è come me lo aspetto (proprietario o permessi): per sicurezza non rimuovo nulla.'
+    message: 'Lo script di disinstallazione di Apple non è come me lo aspetto: per sicurezza non rimuovo nulla. Disinstalla a mano dal Terminale: {command}'
   }),
   boxUninstallFailed: msg({ id: 'boxUninstall.failed', message: 'La disinstallazione non è riuscita: prova di nuovo.' })
 } as const

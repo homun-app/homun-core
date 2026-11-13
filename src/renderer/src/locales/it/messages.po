@@ -4096,7 +4096,7 @@ msgstr "Lo schermo richiede la modalità docker (Impostazioni → Sandbox): non 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "boxUninstall.unsafe"
-msgstr "Lo script di disinstallazione di Apple non è come me lo aspetto (proprietario o permessi): per sicurezza non rimuovo nulla."
+msgstr "Lo script di disinstallazione di Apple non è come me lo aspetto: per sicurezza non rimuovo nulla. Disinstalla a mano dal Terminale: {command}"
 
 #: src/renderer/src/components/settings/EngineSection.tsx
 msgid "Lo strumento di Apple si può togliere: chiede la password del Mac e rimuove i computer dei bot."

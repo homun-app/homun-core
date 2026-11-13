@@ -2471,22 +2471,25 @@ export function buildApiMethods(
     /** «Apri l'installazione» / «Riapri l'installazione» (su awaiting-installer). */
     'box:setup-open-installer': async () => (await opts.boxSetup?.openInstallerNow()) ?? null,
     /**
-     * OB5 (fase onboarding-b): «Disinstalla lo strumento di Apple» — stop
-     * best-effort, poi osascript con l'UNICO comando FISSO, e SOLO se lo
-     * script di disinstallazione di Apple esiste, è di root:wheel e non è
-     * scrivibile da gruppo o altri (la guardia di apple-uninstall.ts). Alla
-     * fine la sonda dello stato del motore.
+     * OB5 (fase onboarding-b) + OBR2: «Disinstalla lo strumento di Apple» —
+     * stop best-effort, poi osascript con l'UNICO comando FISSO, e SOLO se la
+     * guardia di apple-uninstall.ts passa: lo script è un FILE REGOLARE di
+     * root:wheel senza scrittura per gruppo o altri, e anche le cartelle
+     * /usr/local/bin e /usr/local sono di root e non scrivibili. Se una
+     * condizione non vale, NESSUN osascript: l'errore in parole dice di
+     * disinstallare a mano, col comando di Apple come TESTO da copiare (mai
+     * eseguito da Homun). Alla fine la sonda dello stato del motore.
      */
     'box:engine-uninstall': async () => {
       const { appleContainerEngine, engineProbeDeps, refreshAutoEngine } = await import('../main/sandbox/engine')
       const u = await import('../main/sandbox/apple-uninstall')
       // 1. il servizio si spegne, best-effort
       await engineProbeDeps.runCli(appleContainerEngine.command(), ['system', 'stop'], 30_000).catch(() => null)
-      // 2. la guardia sullo script di Apple: senza, NIENTE osascript
-      const guard = u.uninstallScriptGuardOk(u.uninstallScriptStat())
+      // 2. la guardia su script E cartelle: senza, NIENTE osascript
+      const guard = u.uninstallScriptGuardOk(u.uninstallGuardFacts())
       if (!guard.ok) {
-        const id = guard.reason === 'missing' ? UI.boxUninstallNoScript : UI.boxUninstallUnsafe
-        return { ok: false, error: uiText(id) }
+        if (guard.reason === 'missing') return { ok: false, error: uiText(UI.boxUninstallNoScript) }
+        return { ok: false, error: uiText(UI.boxUninstallUnsafe, { command: u.UNINSTALL_MANUAL_COMMAND }) }
       }
       // 3. l'UNICO comando privilegiato: una COSTANTE, mai composta con dati
       // (OBR1: osascript col suo percorso di sistema, mai per nome)

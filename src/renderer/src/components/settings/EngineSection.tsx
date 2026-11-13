@@ -239,7 +239,9 @@ export function EngineSection() {
         </div>
         {error && (
           <p className="px-3 pb-2 pt-1 text-xs text-destructive" data-testid="engine-error">
-            {error.slice(0, 200)}
+            {/* OBR2: il messaggio dell'uninstall manuale porta il comando di Apple
+                da COPIARE (~210 caratteri): il tetto non lo deve tagliare */}
+            {error.slice(0, 320)}
           </p>
         )}
       </div>

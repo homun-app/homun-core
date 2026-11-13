@@ -20,11 +20,12 @@ const { buildApiMethods } = await import('../api')
 const engine = await import('../../main/sandbox/engine')
 const u = await import('../../main/sandbox/apple-uninstall')
 
-const h = vi.hoisted(() => ({ calls: [] as string[][] }))
+const h = vi.hoisted(() => ({ calls: [] as string[][], files: [] as string[] }))
 // la CLI finta: --version e system status rispondono PRONTI (il runner della
 // sonda è sostituibile — nessuno spawn nei test)
-engine.engineProbeDeps.runCli = async (_file, argv) => {
+engine.engineProbeDeps.runCli = async (file, argv) => {
   h.calls.push(argv)
+  h.files.push(file)
   if (argv[0] === '--version') return { stdout: 'container 1.7.1', stderr: '', exitCode: 0 }
   if (argv[0] === 'system' && argv[1] === 'status') return { stdout: 'running: true', stderr: '', exitCode: 0 }
   return { stdout: '', stderr: '', exitCode: 0 }
@@ -116,40 +117,78 @@ describe('OB1 (fase onboarding-b): le RPC della preparazione del computer del bo
   })
 })
 
-describe('OB5 (fase onboarding-b): la RPC della disinstallazione dello strumento di Apple', () => {
+describe('OB5 + OBR2: la RPC della disinstallazione dello strumento di Apple', () => {
   const OSA = u.UNINSTALL_OSASCRIPT_ARGV.join(' ')
-
-  it('stop best-effort, guardia OK → osascript col comando FISSO, poi la sonda dello stato', async () => {
-    u.setUninstallStatProbeForTests(() => ({ exists: true, uid: 0, gid: 0, mode: 0o755 }))
+  const MANUAL = 'sudo /usr/local/bin/uninstall-container.sh -d'
+  type Stat = NonNullable<ReturnType<typeof u.uninstallScriptStat>>
+  const fileStat: Stat = { exists: true, isFile: true, isDirectory: false, uid: 0, gid: 0, mode: 0o755 }
+  const dirStat: Stat = { exists: true, isFile: false, isDirectory: true, uid: 0, gid: 0, mode: 0o755 }
+  /** la sonda dei TRE percorsi (script, /usr/local/bin, /usr/local), sostituibili uno per uno */
+  const probe = (over: { script?: Stat | null; dir?: Stat | null; parentDir?: Stat | null } = {}) =>
+    (path: string): Stat | null => {
+      if (path === u.UNINSTALL_CONTAINER_SCRIPT) return 'script' in over ? over.script ?? null : fileStat
+      if (path === u.UNINSTALL_SCRIPT_DIR) return 'dir' in over ? over.dir ?? null : dirStat
+      if (path === u.UNINSTALL_SCRIPT_PARENT_DIR) return 'parentDir' in over ? over.parentDir ?? null : dirStat
+      return null
+    }
+  const run = async (): Promise<{ ok: boolean; error?: string }> => {
     h.calls.length = 0
-    const r = (await api['box:engine-uninstall']!([])) as { ok: boolean; error?: string }
+    h.files.length = 0
+    return (await api['box:engine-uninstall']!([])) as { ok: boolean; error?: string }
+  }
+  const osascriptRan = (): boolean => h.calls.some((c) => c[0] === '-e') || h.files.some((f) => f.includes('osascript'))
+
+  it('stop best-effort, guardia OK → osascript col comando FISSO e il percorso di sistema, poi la sonda dello stato', async () => {
+    u.setUninstallStatProbeForTests(probe())
+    const r = await run()
     expect(r.ok).toBe(true)
-    // il fake registra SOLO gli argv (il file è il primo argomento del runner)
     expect(h.calls.some((c) => c.join(' ') === 'system stop')).toBe(true)
     expect(h.calls.some((c) => c.join(' ') === OSA)).toBe(true)
     // il comando dell'osascript è la COSTANTE: mai composto con dati
     expect(OSA).toBe('-e do shell script "/usr/local/bin/uninstall-container.sh -d" with administrator privileges')
+    // OBR1: osascript col PERCORSO ASSOLUTO, mai per nome nel PATH
+    expect(h.files[h.calls.findIndex((c) => c.join(' ') === OSA)]).toBe('/usr/bin/osascript')
     u.setUninstallStatProbeForTests(null)
   })
 
   it('script ASSENTE → NESSUN osascript, errore in parole', async () => {
-    u.setUninstallStatProbeForTests(() => null)
-    h.calls.length = 0
-    const r = (await api['box:engine-uninstall']!([])) as { ok: boolean; error?: string }
+    u.setUninstallStatProbeForTests(probe({ script: null }))
+    const r = await run()
     expect(r.ok).toBe(false)
     expect(r.error).toBeTruthy()
-    expect(h.calls.some((c) => c[0] === '-e')).toBe(false)
+    expect(osascriptRan()).toBe(false)
     u.setUninstallStatProbeForTests(null)
   })
 
   it('script non di root, o scrivibile da gruppo/altri → NESSUN osascript, errore in parole', async () => {
-    for (const stat of [{ exists: true, uid: 501, gid: 0, mode: 0o755 }, { exists: true, uid: 0, gid: 0, mode: 0o775 }]) {
-      u.setUninstallStatProbeForTests(() => stat)
-      h.calls.length = 0
-      const r = (await api['box:engine-uninstall']!([])) as { ok: boolean; error?: string }
-      expect(r.ok, JSON.stringify(stat)).toBe(false)
+    for (const script of [{ ...fileStat, uid: 501 }, { ...fileStat, mode: 0o775 }]) {
+      u.setUninstallStatProbeForTests(probe({ script }))
+      const r = await run()
+      expect(r.ok, JSON.stringify(script)).toBe(false)
       expect(r.error).toBeTruthy()
-      expect(h.calls.some((c) => c[0] === '-e'), JSON.stringify(stat)).toBe(false)
+      expect(osascriptRan(), JSON.stringify(script)).toBe(false)
+    }
+    u.setUninstallStatProbeForTests(null)
+  })
+
+  it('OBR2: lo script è un SYMLINK → NESSUN osascript; l\'errore dà il comando di Apple da copiare a mano', async () => {
+    u.setUninstallStatProbeForTests(probe({ script: { ...fileStat, isFile: false, mode: 0o777 } }))
+    const r = await run()
+    expect(r.ok).toBe(false)
+    expect(osascriptRan()).toBe(false)
+    // il comando è TESTO nel messaggio (mai eseguito): intero, non tagliato
+    expect(r.error).toContain(MANUAL)
+    expect(u.UNINSTALL_MANUAL_COMMAND).toBe(MANUAL)
+    u.setUninstallStatProbeForTests(null)
+  })
+
+  it('OBR2: /usr/local/bin scrivibile, o /usr/local non di root → NESSUN osascript, stesso errore col comando manuale', async () => {
+    for (const over of [{ dir: { ...dirStat, mode: 0o775 } }, { dir: { ...dirStat, uid: 501 } }, { parentDir: { ...dirStat, mode: 0o757 } }, { parentDir: { ...dirStat, uid: 501 } }]) {
+      u.setUninstallStatProbeForTests(probe(over))
+      const r = await run()
+      expect(r.ok, JSON.stringify(over)).toBe(false)
+      expect(osascriptRan(), JSON.stringify(over)).toBe(false)
+      expect(r.error, JSON.stringify(over)).toContain(MANUAL)
     }
     u.setUninstallStatProbeForTests(null)
   })
