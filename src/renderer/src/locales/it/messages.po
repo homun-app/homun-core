@@ -2315,6 +2315,10 @@ msgstr "Disinstalla"
 msgid "Disinstalla davvero"
 msgstr "Disinstalla davvero"
 
+#: src/renderer/src/components/settings/EngineSection.tsx
+msgid "Disinstalla lo strumento di Apple"
+msgstr "Disinstalla lo strumento di Apple"
+
 #: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "disponibile"
@@ -3882,6 +3886,11 @@ msgstr "La descrizione può essere al massimo 1024 caratteri (ora {n})."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
+msgid "boxUninstall.failed"
+msgstr "La disinstallazione non è riuscita: prova di nuovo."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
 msgid "boxSetup.verifySignature"
 msgstr "La firma del pacchetto non risulta di Apple: l’ho cancellato."
 
@@ -4083,6 +4092,15 @@ msgstr "Lo schermo non risponde."
 #: src/shared/ui-messages.ts
 msgid "rpc.screenUnavailable"
 msgstr "Lo schermo richiede la modalità docker (Impostazioni → Sandbox): non è disponibile qui."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "boxUninstall.unsafe"
+msgstr "Lo script di disinstallazione di Apple non è come me lo aspetto (proprietario o permessi): per sicurezza non rimuovo nulla."
+
+#: src/renderer/src/components/settings/EngineSection.tsx
+msgid "Lo strumento di Apple si può togliere: chiede la password del Mac e rimuove i computer dei bot."
+msgstr "Lo strumento di Apple si può togliere: chiede la password del Mac e rimuove i computer dei bot."
 
 #: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/ui/ModelPicker.tsx
@@ -4877,6 +4895,11 @@ msgstr "Non sono riuscito a fermare il bot in background: un’app in esecuzione
 #: src/renderer/src/components/ConnectorCards13.tsx
 msgid "non supportato: valore in argv ({0})"
 msgstr "non supportato: valore in argv ({0})"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "boxUninstall.noScript"
+msgstr "Non trovo lo script di disinstallazione di Apple: non rimuovo nulla."
 
 #: src/renderer/src/components/GuideModelStep.tsx
 msgid "non usa i tool: non adatto"
@@ -6767,6 +6790,10 @@ msgstr "Togli"
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Togli davvero"
 msgstr "Togli davvero"
+
+#: src/renderer/src/components/settings/EngineSection.tsx
+msgid "Toglie container da /usr/local. Ti chiederà la password del Mac. I computer dei bot vengono rimossi."
+msgstr "Toglie container da /usr/local. Ti chiederà la password del Mac. I computer dei bot vengono rimossi."
 
 #: src/renderer/src/components/ServerSetup.tsx
 msgid "Token di accesso"

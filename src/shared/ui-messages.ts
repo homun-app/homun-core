@@ -818,7 +818,18 @@ export const UI = {
   boxSetupInstallerOpenFailed: msg({ id: 'boxSetup.installerOpenFailed', message: 'Non riesco ad aprire l’installazione di Apple.' }),
   boxSetupServiceFailed: msg({ id: 'boxSetup.serviceFailed', message: 'Non riesco ad accendere il servizio del computer dei bot.' }),
   boxSetupKernelFailed: msg({ id: 'boxSetup.kernelFailed', message: 'Non riesco a installare il kernel Linux consigliato da Apple.' }),
-  boxSetupImageFailed: msg({ id: 'boxSetup.imageFailed', message: 'Non riesco a preparare il computer del bot.' })
+  boxSetupImageFailed: msg({ id: 'boxSetup.imageFailed', message: 'Non riesco a preparare il computer del bot.' }),
+
+  // ---- OB5 (fase onboarding-b): togliere lo strumento di Apple ----
+  boxUninstallNoScript: msg({
+    id: 'boxUninstall.noScript',
+    message: 'Non trovo lo script di disinstallazione di Apple: non rimuovo nulla.'
+  }),
+  boxUninstallUnsafe: msg({
+    id: 'boxUninstall.unsafe',
+    message: 'Lo script di disinstallazione di Apple non è come me lo aspetto (proprietario o permessi): per sicurezza non rimuovo nulla.'
+  }),
+  boxUninstallFailed: msg({ id: 'boxUninstall.failed', message: 'La disinstallazione non è riuscita: prova di nuovo.' })
 } as const
 
 export type UiMessage = (typeof UI)[keyof typeof UI]

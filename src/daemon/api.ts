@@ -2468,6 +2468,36 @@ export function buildApiMethods(
     'box:setup-retry': async () => (await opts.boxSetup?.retry()) ?? null,
     /** «Apri l'installazione» / «Riapri l'installazione» (su awaiting-installer). */
     'box:setup-open-installer': async () => (await opts.boxSetup?.openInstallerNow()) ?? null,
+    /**
+     * OB5 (fase onboarding-b): «Disinstalla lo strumento di Apple» — stop
+     * best-effort, poi osascript con l'UNICO comando FISSO, e SOLO se lo
+     * script di disinstallazione di Apple esiste, è di root:wheel e non è
+     * scrivibile da gruppo o altri (la guardia di apple-uninstall.ts). Alla
+     * fine la sonda dello stato del motore.
+     */
+    'box:engine-uninstall': async () => {
+      const { appleContainerEngine, engineProbeDeps, refreshAutoEngine } = await import('../main/sandbox/engine')
+      const u = await import('../main/sandbox/apple-uninstall')
+      // 1. il servizio si spegne, best-effort
+      await engineProbeDeps.runCli(appleContainerEngine.command(), ['system', 'stop'], 30_000).catch(() => null)
+      // 2. la guardia sullo script di Apple: senza, NIENTE osascript
+      const guard = u.uninstallScriptGuardOk(u.uninstallScriptStat())
+      if (!guard.ok) {
+        const id = guard.reason === 'missing' ? UI.boxUninstallNoScript : UI.boxUninstallUnsafe
+        return { ok: false, error: uiText(id) }
+      }
+      // 3. l'UNICO comando privilegiato: una COSTANTE, mai composta con dati
+      const r = await engineProbeDeps
+        .runCli('osascript', [...u.UNINSTALL_OSASCRIPT_ARGV], 600_000)
+        .catch(() => null)
+      if (!r || r.exitCode !== 0) {
+        if (r?.stderr) console.error(`[box-uninstall] osascript stderr: ${r.stderr.split('\n')[0]?.slice(0, 200) ?? ''}`)
+        return { ok: false, error: uiText(UI.boxUninstallFailed) }
+      }
+      // 4. lo stato del motore si riguarda
+      await refreshAutoEngine().catch(() => undefined)
+      return { ok: true }
+    },
     /** «Rimuovi» il modello della memoria: la memoria torna alla ricerca per testo. */
     'memory:model-remove': async () => {
       const m = await import('../main/memory/engine')

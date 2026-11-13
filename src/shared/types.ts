@@ -1254,6 +1254,8 @@ export interface SandbotApi {
   boxSetupCancel(): Promise<BoxSetupState | null>
   boxSetupRetry(): Promise<BoxSetupState | null>
   boxSetupOpenInstaller(): Promise<BoxSetupState | null>
+  /** OB5: «Disinstalla lo strumento di Apple» (guardia sullo script, osascript col comando FISSO) */
+  boxEngineUninstall(): Promise<{ ok: boolean; error?: string }>
   // fase rilascio (A8): l'aggiornamento (main process).
   // RP3 (fase rilascio di prova): lo stato porta il canale ('stable'|'beta')
   // e l'interruttore delle Impostazioni lo cambia (effetto immediato)

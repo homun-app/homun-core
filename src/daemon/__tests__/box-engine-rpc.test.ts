@@ -18,6 +18,7 @@ vi.mock('../../main/agent/permissions', () => ({
 const { setDataDir, dataDir, db } = await import('../../main/store/db')
 const { buildApiMethods } = await import('../api')
 const engine = await import('../../main/sandbox/engine')
+const u = await import('../../main/sandbox/apple-uninstall')
 
 const h = vi.hoisted(() => ({ calls: [] as string[][] }))
 // la CLI finta: --version e system status rispondono PRONTI (il runner della
@@ -112,5 +113,44 @@ describe('OB1 (fase onboarding-b): le RPC della preparazione del computer del bo
     expect(calls).toEqual(['start', 'cancel', 'retry', 'open'])
     // senza controller (daemon vecchio / test minimale): null, mai un crash
     expect(await api['box:setup-state']!([])).toBeNull()
+  })
+})
+
+describe('OB5 (fase onboarding-b): la RPC della disinstallazione dello strumento di Apple', () => {
+  const OSA = u.UNINSTALL_OSASCRIPT_ARGV.join(' ')
+
+  it('stop best-effort, guardia OK → osascript col comando FISSO, poi la sonda dello stato', async () => {
+    u.setUninstallStatProbeForTests(() => ({ exists: true, uid: 0, gid: 0, mode: 0o755 }))
+    h.calls.length = 0
+    const r = (await api['box:engine-uninstall']!([])) as { ok: boolean; error?: string }
+    expect(r.ok).toBe(true)
+    // il fake registra SOLO gli argv (il file è il primo argomento del runner)
+    expect(h.calls.some((c) => c.join(' ') === 'system stop')).toBe(true)
+    expect(h.calls.some((c) => c.join(' ') === OSA)).toBe(true)
+    // il comando dell'osascript è la COSTANTE: mai composto con dati
+    expect(OSA).toBe('-e do shell script "/usr/local/bin/uninstall-container.sh -d" with administrator privileges')
+    u.setUninstallStatProbeForTests(null)
+  })
+
+  it('script ASSENTE → NESSUN osascript, errore in parole', async () => {
+    u.setUninstallStatProbeForTests(() => null)
+    h.calls.length = 0
+    const r = (await api['box:engine-uninstall']!([])) as { ok: boolean; error?: string }
+    expect(r.ok).toBe(false)
+    expect(r.error).toBeTruthy()
+    expect(h.calls.some((c) => c[0] === '-e')).toBe(false)
+    u.setUninstallStatProbeForTests(null)
+  })
+
+  it('script non di root, o scrivibile da gruppo/altri → NESSUN osascript, errore in parole', async () => {
+    for (const stat of [{ exists: true, uid: 501, gid: 0, mode: 0o755 }, { exists: true, uid: 0, gid: 0, mode: 0o775 }]) {
+      u.setUninstallStatProbeForTests(() => stat)
+      h.calls.length = 0
+      const r = (await api['box:engine-uninstall']!([])) as { ok: boolean; error?: string }
+      expect(r.ok, JSON.stringify(stat)).toBe(false)
+      expect(r.error).toBeTruthy()
+      expect(h.calls.some((c) => c[0] === '-e'), JSON.stringify(stat)).toBe(false)
+    }
+    u.setUninstallStatProbeForTests(null)
   })
 })

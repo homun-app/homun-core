@@ -2315,6 +2315,10 @@ msgstr "Uninstall"
 msgid "Disinstalla davvero"
 msgstr "Really uninstall"
 
+#: src/renderer/src/components/settings/EngineSection.tsx
+msgid "Disinstalla lo strumento di Apple"
+msgstr "Uninstall Apple’s tool"
+
 #: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "disponibile"
@@ -3882,6 +3886,11 @@ msgstr "The description must be at most 1024 characters (now {n})."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
+msgid "boxUninstall.failed"
+msgstr "The uninstall didn't work: try again."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
 msgid "boxSetup.verifySignature"
 msgstr "The package signature doesn't appear to be Apple's: I deleted it."
 
@@ -4083,6 +4092,15 @@ msgstr "The screen is not responding."
 #: src/shared/ui-messages.ts
 msgid "rpc.screenUnavailable"
 msgstr "The screen requires docker mode (Settings → Sandbox): it is not available here."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "boxUninstall.unsafe"
+msgstr "Apple's uninstall script isn't as I expect it (owner or permissions): to be safe I'm not removing anything."
+
+#: src/renderer/src/components/settings/EngineSection.tsx
+msgid "Lo strumento di Apple si può togliere: chiede la password del Mac e rimuove i computer dei bot."
+msgstr "Apple’s tool can be removed: it asks for your Mac password and removes the bots’ computers."
 
 #: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/ui/ModelPicker.tsx
@@ -4877,6 +4895,11 @@ msgstr "I could not stop the background bot: an app that is running is never rep
 #: src/renderer/src/components/ConnectorCards13.tsx
 msgid "non supportato: valore in argv ({0})"
 msgstr "unsupported: value in argv ({0})"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "boxUninstall.noScript"
+msgstr "I can't find Apple's uninstall script: I'm not removing anything."
 
 #: src/renderer/src/components/GuideModelStep.tsx
 msgid "non usa i tool: non adatto"
@@ -6767,6 +6790,10 @@ msgstr "Remove"
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Togli davvero"
 msgstr "Really remove"
+
+#: src/renderer/src/components/settings/EngineSection.tsx
+msgid "Toglie container da /usr/local. Ti chiederà la password del Mac. I computer dei bot vengono rimossi."
+msgstr "It removes container from /usr/local. It will ask for your Mac password. The bots’ computers are removed."
 
 #: src/renderer/src/components/ServerSetup.tsx
 msgid "Token di accesso"

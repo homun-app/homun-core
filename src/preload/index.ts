@@ -262,6 +262,7 @@ const api: SandbotApi = {
   boxSetupCancel: () => ipcRenderer.invoke('box:setup-cancel'),
   boxSetupRetry: () => ipcRenderer.invoke('box:setup-retry'),
   boxSetupOpenInstaller: () => ipcRenderer.invoke('box:setup-open-installer'),
+  boxEngineUninstall: () => ipcRenderer.invoke('box:engine-uninstall'),
   // fase rilascio (A8): aggiornamento e rinnovo da Homun 2.
   // RP3 (fase rilascio di prova): il canale si cambia dall'interruttore delle
   // Impostazioni e ha effetto immediato (nessun riavvio)

@@ -72,6 +72,9 @@ export function EngineSection() {
   const boxSetupCancel = useStore((s) => s.boxSetupCancel)
   const boxSetupRetry = useStore((s) => s.boxSetupRetry)
   const boxSetupOpenInstaller = useStore((s) => s.boxSetupOpenInstaller)
+  // OB5: «Disinstalla lo strumento di Apple» (visibile solo se installato)
+  const [uninstalling, setUninstalling] = useState(false)
+  const containerInstalled = st !== null && st.appleState !== 'not-installed' && st.appleState !== 'unsupported'
 
   const load = (): void => {
     void api.boxEngineStatus().then(setSt).catch(() => undefined)
@@ -106,6 +109,17 @@ export function EngineSection() {
       setBusy(false)
       load()
     })
+  }
+
+  const runUninstall = (): void => {
+    // il dialogo di conferma, IN PAROLE (la spec lo fissa)
+    if (!window.confirm(i18n._(msg`Toglie container da /usr/local. Ti chiederà la password del Mac. I computer dei bot vengono rimossi.`))) return
+    setUninstalling(true)
+    setError(null)
+    void api.boxEngineUninstall()
+      .then((r) => { if (!r.ok) setError(r.error ?? 'error') })
+      .catch(() => setError('error'))
+      .finally(() => { setUninstalling(false); load() })
   }
 
   const status = st ? engineStatusText(st) : null
@@ -189,6 +203,21 @@ export function EngineSection() {
                 </button>
               </div>
             )}
+          </div>
+        )}
+        {containerInstalled && (
+          <div className="flex items-center justify-between gap-3 border-b border-border/40 px-3 py-2.5">
+            <p className="min-w-0 text-xs text-muted-foreground" data-testid="engine-uninstall-hint">
+              {i18n._(msg`Lo strumento di Apple si può togliere: chiede la password del Mac e rimuove i computer dei bot.`)}
+            </p>
+            <button
+              className="shrink-0 rounded-full px-3 py-1.5 text-xs text-destructive outline-none transition focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-40"
+              disabled={uninstalling}
+              data-testid="engine-uninstall"
+              onClick={() => runUninstall()}
+            >
+              {i18n._(msg`Disinstalla lo strumento di Apple`)}
+            </button>
           </div>
         )}
         <div className="flex items-center justify-between gap-3 px-3 py-2.5">
