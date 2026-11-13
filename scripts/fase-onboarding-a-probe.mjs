@@ -911,10 +911,11 @@ log('FASE OB-c: riavvio sull\'attesa dell\'Installer…')
     await waitDom(`!!document.querySelector('[data-testid="guide-step-computer"]')`, 30_000))
   check('OB-c2 la preparazione riprende dallo STESSO punto (awaiting-installer)',
     (await boxPhaseOf()) === 'awaiting-installer', `phase: ${await boxPhaseOf()}`)
-  const opensAfter = (() => { try { return readFileSync(f.openLog, 'utf8').split('\n').filter(Boolean).length } catch { return 0 } })()
+  const openLines = (() => { try { return readFileSync(f.openLog, 'utf8').split('\n').filter(Boolean) } catch { return [] } })()
+  const opensAfter = openLines.length
   check('OB-c3 il bottone «Apri l\'installazione» c\'è ancora e il riavvio NON ha riaperto nulla',
     await waitDom(`!!document.querySelector('[data-testid="box-setup-open-installer"]')`, 30_000)
-    && opensAfter === opensBefore, `opens ${opensBefore} → ${opensAfter}`)
+    && opensAfter === opensBefore, `opens ${opensBefore} → ${opensAfter}: ${openLines.join(' | ')}`)
   await clickTestid('box-setup-open-installer')
   check('OB-c4 l\'installazione finisce e si arriva al ready',
     await waitDom(`document.querySelector('[data-testid="guide-scene"] [data-mood]')?.getAttribute('data-mood') === 'happy'`, 60_000),

@@ -17,7 +17,11 @@ const argv = process.argv.slice(2)
 const die = (code, msg) => { process.stderr.write(`${msg}\n`); process.exit(code) }
 
 // il processo staccato: aspetta il ritardo e copia la CLI (il timer tiene
-// vivo il processo; si esce SOLO a copia fatta)
+// vivo il processo; si esce SOLO a copia fatta). OBD5 (fase
+// onboarding-b-dettagli): questo figlio NON è un «open» e NON si registra
+// nel log — prima ricadeva nel codice qui sotto e aggiungeva una riga con
+// pkg = sorgente della CLI, e il conteggio degli open della sonda ballava
+// con una corsa di millisecondi (OB-c3 cadeva a intermittenza)
 if (argv[0] === '--__install') {
   const [, delayRaw, cliSrc, installDir] = argv
   const delay = Number(delayRaw)
@@ -32,27 +36,28 @@ if (argv[0] === '--__install') {
   }, Number.isFinite(delay) && delay >= 0 ? delay : 800)
 } else if (argv[0] !== '-a' || argv[1] !== 'Installer') {
   die(64, 'fake open: uso -a Installer <pkg>')
-}
-const pkg = argv[2] ?? ''
-const delay = process.env.SANDBOT_TEST_OPEN_DELAY_MS ?? '800'
-const cliSrc = process.env.SANDBOT_TEST_OPEN_CLI_SRC
-const installDir = process.env.SANDBOT_TEST_OPEN_INSTALL_DIR
+} else {
+  const pkg = argv[2] ?? ''
+  const delay = process.env.SANDBOT_TEST_OPEN_DELAY_MS ?? '800'
+  const cliSrc = process.env.SANDBOT_TEST_OPEN_CLI_SRC
+  const installDir = process.env.SANDBOT_TEST_OPEN_INSTALL_DIR
 
-// la registrazione PRIMA di tutto: la sonda prova che l'open C'È STATO
-// (o che NON c'è stato, quando la verifica fallisce)
-if (process.env.SANDBOT_TEST_OPEN_LOG) {
-  try {
-    appendFileSync(process.env.SANDBOT_TEST_OPEN_LOG, `${JSON.stringify({ at: Date.now(), app: 'Installer', pkg })}\n`)
-  } catch { /* best-effort */ }
-}
+  // la registrazione PRIMA di tutto: la sonda prova che l'open C'È STATO
+  // (o che NON c'è stato, quando la verifica fallisce)
+  if (process.env.SANDBOT_TEST_OPEN_LOG) {
+    try {
+      appendFileSync(process.env.SANDBOT_TEST_OPEN_LOG, `${JSON.stringify({ at: Date.now(), app: 'Installer', pkg })}\n`)
+    } catch { /* best-effort */ }
+  }
 
-// «l'utente ha dato la password e l'Installer ha installato»: come il vero
-// open, si esce SUBITO; l'installazione avviene DOPO, staccata
-if (cliSrc && installDir && argv[0] === '-a') {
-  const child = spawn(process.execPath, [process.argv[1] ?? '', '--__install', delay, cliSrc, installDir], {
-    detached: true,
-    stdio: 'ignore'
-  })
-  child.unref()
+  // «l'utente ha dato la password e l'Installer ha installato»: come il vero
+  // open, si esce SUBITO; l'installazione avviene DOPO, staccato
+  if (cliSrc && installDir) {
+    const child = spawn(process.execPath, [process.argv[1] ?? '', '--__install', delay, cliSrc, installDir], {
+      detached: true,
+      stdio: 'ignore'
+    })
+    child.unref()
+  }
+  process.exit(0)
 }
-if (argv[0] === '-a') process.exit(0)
