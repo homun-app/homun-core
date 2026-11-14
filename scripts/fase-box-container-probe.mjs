@@ -18,6 +18,8 @@
 // si rimuove. Mai il Portachiavi vero, mai i dati veri dell'utente.
 import { spawn, spawnSync } from 'node:child_process'
 import { createServer } from 'node:http'
+import * as net from 'node:net'
+import * as os from 'node:os'
 import { DatabaseSync } from 'node:sqlite'
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, chmodSync, mkdirSync, existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -32,11 +34,24 @@ mkdirSync(SHOTS, { recursive: true })
 
 // la CLI finta come wrapper ESEGUIBILE nel TMP: il PATH del daemon è minimo
 // (niente node), quindi lo shebang `env node` non partirebbe — il wrapper
-// invoca il node ESPPLICITO (process.execPath) con la fake .mjs
+// invoca il node ESPPLICITO (process.execPath) con la fake .mjs. Il wrapper
+// registra anche OGNI argv che riceve (BRV): lo spawn del LAUNCHER del
+// browser MCP non porta l'env della finta (getDefaultEnvironment del SDK
+// MCP), quindi il SUO argv — quello col --proxy-server — si vede SOLO qui.
 const FAKE_SRC = join(ROOT, 'scripts', 'fake-container.mjs')
 const FAKE_CLI = join(TMP, 'container')
-writeFileSync(FAKE_CLI, `#!/bin/sh\nexec "${process.execPath}" "${FAKE_SRC}" "$@"\n`)
+const SPAWN_ARGV_LOG = join(TMP, 'argv-passanti.log')
+writeFileSync(FAKE_CLI, `#!/bin/sh\nprintf '%s\\036' "$@" >> ${JSON.stringify(SPAWN_ARGV_LOG)}; printf '\\n' >> ${JSON.stringify(SPAWN_ARGV_LOG)}\nexec "${process.execPath}" "${FAKE_SRC}" "$@"\n`)
 chmodSync(FAKE_CLI, 0o755)
+
+/** Gli argv passati al wrapper della CLI (una riga per spawn, campi da US). */
+const readSpawnArgv = () => {
+  try {
+    return readFileSync(SPAWN_ARGV_LOG, 'utf8').split('\n').filter(Boolean).map((l) => l.split('\u001e').filter(Boolean))
+  } catch {
+    return []
+  }
+}
 
 const log = (...a) => console.log('[sonda]', ...a)
 
@@ -733,6 +748,87 @@ try {
       JSON.stringify(dopo.filter((a) => a[0] === 'volume')))
     check('BAV-due-volte: il box non si TOCCA più (zero rm, zero run -d dopo la nascita)', dopo.some((a) => a[0] === 'rm') === false && dopo.some((a) => a[0] === 'run' && a.includes('-d')) === false,
       JSON.stringify(dopo.filter((a) => ['rm', 'run'].includes(a[0])).map((a) => a.slice(0, 3))))
+  }
+  // ---- BRV (fase box-apple-rete-vera): il browser del box verso il PROXY ----
+  // Un turno vero col motore Apple in bridge e la CLI finta che dichiara la
+  // RETE nella forma della fixture: il browser del bot riceve --proxy-server
+  // http://<GATEWAY DICHIARATO DALLA FINTA>:<porta del SECONDO ASCOLTO> e il
+  // secondo ascolto STA su quel gateway, MAI su 0.0.0.0 (si prova a
+  // collegarsi: dal gateway sì, da un ALTRO indirizzo locale no). Il gateway
+  // dichiarato in questa corsa è 127.0.0.1 (SANDBOT_TEST_CONTAINER_GATEWAY):
+  // l'unico ascoltabile senza la vmnet attiva — come i test del proxy
+  // iniettano l'host, la logica provata è QUALE indirizzo e QUALE porta; il
+  // 192.168.128.1 della fixture lo prova il parse (BRV3) e la forma della
+  // finta (BRV2).
+  {
+    log('--- BRV: il browser del box riceve il proxy al GATEWAY della rete ---')
+    const brvLog = join(TMP, 'cli-brv-browser.jsonl')
+    try { rmSync(brvLog) } catch { /* nuovo giro */ }
+    const knob = { SANDBOT_TEST_CONTAINER_GATEWAY: '127.0.0.1', SANDBOT_TEST_CONTAINER_SUBNET: '127.0.0.0/8' }
+    // il gateway che la FINTA dichiara (stesso env del turno, log a parte per
+    // non toccare quello del giro): è la verità con cui confrontare i flag
+    const declared = JSON.parse(spawnSync(process.execPath, [FAKE_SRC, 'network', 'inspect', 'homun-box'], {
+      encoding: 'utf8',
+      env: { ...process.env, SANDBOT_TEST_CONTAINER_MODE: 'ready', SANDBOT_TEST_CONTAINER_LOG: join(TMP, 'cli-brv-ask.jsonl'), ...knob }
+    }).stdout)[0].status
+    check('BRV la finta dichiara la rete nella FORMA della fixture (gateway e sottorete pilotati)', declared.ipv4Gateway === '127.0.0.1' && declared.ipv4Subnet === '127.0.0.0/8', JSON.stringify(declared))
+    // il gruppo browser si ATTIVA alla prima chiamata («call it again»): la
+    // chiamata DOPO gira davvero e arriva al launcher col --proxy-server. Se
+    // ne spingono TRE: una la può consumare una richiesta spuria dell'app
+    // (titolo/routine all'apertura della chat), una attiva il gruppo, una
+    // gira — in ogni ordine il launcher parte almeno una volta
+    const chatFrom = chatRequests.length
+    pushTool('browser_open', { url: 'https://example.com/' })
+    pushTool('browser_open', { url: 'https://example.com/' })
+    pushTool('browser_open', { url: 'https://example.com/' })
+    pushText('Browser fatto.')
+    const page = await boxTurn(30, { network: 'bridge', cliLogFile: brvLog, extraEnv: knob }, 'Apri https://example.com/ nel browser', 'Browser fatto.')
+    const turnTools = chatRequests
+      .slice(chatFrom)
+      .flatMap((r) => (r.messages ?? []).filter((m) => m.role === 'tool').map((m) => String(m.content).slice(0, 160)))
+      .join(' | ')
+    // il flag del launcher si legge dal registro degli SPAWN (il launcher MCP
+    // gira senza l'env della finta: il suo argv non finisce nel log della
+    // CLI). Lo script del wrapper porta CAPOLINEI: la riga dello spawn si
+    // frantuma — ma --proxy-server e il suo valore sono CAMPI ADIACENTI,
+    // restano nello stesso frammento
+    const spawnLines = (() => {
+      try {
+        return readFileSync(SPAWN_ARGV_LOG, 'utf8').split('\n').filter((l) => l.includes('\u001e'))
+      } catch {
+        return []
+      }
+    })()
+    const fields = spawnLines.find((l) => l.includes('--proxy-server'))?.split('\u001e').filter(Boolean) ?? []
+    const pi = fields.indexOf('--proxy-server')
+    const token = pi >= 0 ? String(fields[pi + 1] ?? '') : ''
+    const m = /^http:\/\/(127\.0\.0\.1):(\d+)$/.exec(token)
+    const why = `token=${token || '(nessuno)'} gateway dichiarato=${declared.ipv4Gateway} — tool del turno: ${turnTools || '(nessuno)'} (spawn visti: ${readSpawnArgv().length}; richieste: ${chatRequests.slice(chatFrom).map((r) => `${(r.messages ?? []).length}${(r.messages ?? []).at(-1)?.role === 'tool' ? 'T' : ''}`).join(' ')})`
+    check('BRV il browser del box riceve --proxy-server=http://<gateway della finta>:<porta del secondo ascolto>',
+      !!m && m[1] === declared.ipv4Gateway, why)
+    // il SECONDO ASCOLTO sta sul gateway dichiarato (ci si collega), MAI su
+    // 0.0.0.0 (da un ALTRO indirizzo locale si rifiuta: un ascolto su 0.0.0.0
+    // accetterebbe anche lì)
+    if (m) {
+      const port = Number(m[2])
+      const canConnect = (host, p, ms = 4000) => new Promise((resolve) => {
+        const s = net.connect({ host, port: p })
+        const done = (ok) => { try { s.destroy() } catch { /* già chiusa */ } resolve(ok) }
+        s.setTimeout(ms, () => done(false))
+        s.on('connect', () => done(true))
+        s.on('error', () => done(false))
+      })
+      check('BRV il secondo ascolto STA sul gateway dichiarato (la porta risponde lì)', await canConnect(m[1], port), `connect ${m[1]}:${port}`)
+      const otherIp = Object.values(os.networkInterfaces()).flat().filter((a) => a && a.family === 'IPv4' && !a.internal).map((a) => a.address)[0] ?? null
+      check('BRV il secondo ascolto NON è su 0.0.0.0 (da un ALTRO indirizzo locale si rifiuta)',
+        otherIp ? !(await canConnect(otherIp, port, 2500)) : true, otherIp ? `connect ${otherIp}:${port} rifiutato` : 'nessun altro indirizzo locale (saltato)')
+      // e il daemon NON è passato per le vie d'uscita: niente EADDRNOTAVAIL
+      // esaurito, niente errore in parole del gateway mancante
+      const dlog = (() => { try { return readFileSync(join(app.dataDir, 'data', 'daemon.log'), 'utf8') } catch { return '' } })()
+      check('BRV il daemon.log NON ha le vie d\'uscita (mai comparso / gateway non noto)', !dlog.includes('non è mai comparso') && !dlog.includes('non noti nemmeno dopo la rilettura'), dlog.slice(-400))
+    }
+    await shot(page, 'brv-browser-proxy-gateway.png')
+    page.close()
   }
   try { providerServer.closeAllConnections?.(); providerServer.close() } catch { /* già chiusa */ }
 } catch (e) {
