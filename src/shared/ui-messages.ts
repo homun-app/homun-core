@@ -97,6 +97,14 @@ export const UI = {
     message:
       'Preparo il computer dei bot (immagine del box con il browser): una volta sola, qualche minuto. I bot riprendono appena è pronta.'
   }),
+  // BRV4 (fase box-apple-rete-vera): il gateway (o la sottorete) della rete
+  // del box non si è letto nemmeno dopo la RILETTURA — lo strumento del
+  // browser fallisce con QUESTE parole, mai Chromium avviato verso un proxy
+  // irraggiungibile (il motivo tecnico va nel log del daemon)
+  browserBoxNetwork: msg({
+    id: 'notice.browserBoxNetwork',
+    message: 'Il browser del computer del bot non riesce a raggiungere la rete di Homun'
+  }),
   boxMigrated: msg({
     id: 'notice.boxMigrated',
     message:

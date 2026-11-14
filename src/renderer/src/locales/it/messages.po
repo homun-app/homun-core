@@ -3207,6 +3207,11 @@ msgstr "Il bottone apre la pagina di login dell'app nel browser: finisci lì, po
 msgid "rpc.terminalBoxFailed"
 msgstr "Il box non è partito, il terminale non è disponibile: riprova."
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "notice.browserBoxNetwork"
+msgstr "Il browser del computer del bot non riesce a raggiungere la rete di Homun"
+
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Il cervello dei bot"
 msgstr "Il cervello dei bot"

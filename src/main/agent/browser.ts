@@ -39,7 +39,8 @@ import {
   sandboxMode, sandboxNetwork, browserSandboxOk, ensureBoxContainer, ensureBotHome, runDockerRaw, runDockerArgv,
   boxOwnerOf, isSubagent
 } from '../sandbox'
-import { boxNetworkGateway, boxNetworkSubnet } from '../sandbox/apple-container-engine'
+import { boxNetworkGateway, boxNetworkSubnet, ensureAppleBoxNetwork } from '../sandbox/apple-container-engine'
+import { uiError, UI } from '../ui-language'
 import { ensureBrowserProxy, ensureBrowserProxyGateway } from './browser-proxy'
 import { parseShellPgid } from './shells'
 // fase 19a (V2): il timer di inattività si SOSPENDE mentre lo schermo del bot
@@ -364,18 +365,27 @@ async function startBrowserSession(agentId: string): Promise<BrowserSession> {
     // BR2 (fase box-rete): col motore Apple in bridge il browser del box
     // raggiunge il Mac al GATEWAY di homun-box (host.docker.internal non
     // esiste): il proxy apre un SECONDO ascolto lì — MAI su 0.0.0.0, MAI sul
-    // gateway della isolata — e i flag del browser usano la SUA porta. Il
-    // gateway esiste solo a rete vmnet attiva: se non compare, il browser
-    // del bot fallisce in parole (lo dice ensureBrowserProxyGateway)
+    // gateway della isolata — e i flag del browser usano la SUA porta.
+    // BRV4 (fase box-apple-rete-vera): il gateway o la sottorete mancanti si
+    // rileggono UNA volta (ensureAppleBoxNetwork ripopola la cache — col
+    // parse BRV3 la CLI vera li dice); se mancano ANCORA lo strumento del
+    // browser fallisce IN PAROLE dal catalogo it/en e Chromium NON parte:
+    // MAI un browser avviato verso un proxy irraggiungibile (il difetto dal
+    // vivo: warn e via, il bot vedeva «No internet» e non capiva)
     if (activeBoxEngine().id === 'apple-container' && sandboxNetwork() === 'bridge') {
-      const gw = boxNetworkGateway()
-      const subnet = boxNetworkSubnet()
-      if (gw && subnet) {
-        const listen = await ensureBrowserProxyGateway(gw, subnet)
-        proxyPort = listen.port
-      } else {
-        console.warn('[browser] gateway o sottorete di homun-box non ancora noti: il browser del box potrebbe non raggiungere il proxy')
+      let gw = boxNetworkGateway()
+      let subnet = boxNetworkSubnet()
+      if (!gw || !subnet) {
+        await ensureAppleBoxNetwork(runDockerRaw, 'bridge')
+        gw = boxNetworkGateway()
+        subnet = boxNetworkSubnet()
       }
+      if (!gw || !subnet) {
+        console.error(`[browser] gateway o sottorete di homun-box non noti nemmeno dopo la rilettura (gateway=${boxNetworkGateway()} sottorete=${boxNetworkSubnet()}): il browser del box resterebbe senza proxy, non parte`)
+        throw uiError(UI.browserBoxNetwork)
+      }
+      const listen = await ensureBrowserProxyGateway(gw, subnet)
+      proxyPort = listen.port
     }
     const w = await runDockerRaw(activeBoxEngine().argv.browserWritable(BOX_CONTAINER), { timeoutMs: 15_000 })
     if (w.exitCode !== 0) {
