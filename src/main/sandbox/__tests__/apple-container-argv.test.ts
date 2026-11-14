@@ -12,6 +12,7 @@
 //   Dockerfile: con --cap-drop assente, un setuid in più peserebbe).
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import {
   APPLE_BOX_NETWORK,
   APPLE_BOX_ISOLATED_NETWORK,
@@ -31,6 +32,14 @@ import {
 } from '../apple-container-argv'
 import { DEFAULT_BOX_LIMITS, browserMcpFlags, CONTAINER_USER, BOX_MOUNT, PLUGINS_MOUNT, BROWSER_MOUNT } from '../docker-argv'
 const { ensureAppleBoxNetwork, boxNetworkGateway, setBoxNetworkGateway, boxNetworkSubnet, setBoxNetworkSubnet, appleContainerEngine } = await import('../apple-container-engine')
+
+const FIXTURES = join(import.meta.dirname, 'fixtures', 'container-1.7.1')
+
+/** Il corpo di una fixture: senza la riga `$ container…` e senza `[exit N]`. */
+const fixture = (name: string): string => {
+  const text = readFileSync(join(FIXTURES, name), 'utf8')
+  return text.replace(/^\$ container[^\n]*\n/, '').replace(/\[exit \d+\]\n?$/, '').trim()
+}
 
 const runArgv = (network: 'bridge' | 'none') =>
   appleBoxRunArgv('sandbot-box', 'sandbot-box', network, DEFAULT_BOX_LIMITS, 'sandbot-box:abc')
@@ -133,18 +142,36 @@ describe('BR1: none → la rete isolata e le interfacce GIÙ (difesa in profondi
 })
 
 describe('BX2: il proxy del browser al GATEWAY della rete interna', () => {
-  it('parseNetworkGateway: dal JSON dell\'inspect viene fuori l\'IPv4 del gateway', () => {
-    expect(parseNetworkGateway('{"name":"homun-box","subnets":[{"subnet":"192.0.15.0/24","gateway":"192.0.15.1"}]}')).toBe('192.0.15.1')
-    expect(parseNetworkGateway('gateway: 192.0.9.1')).toBe('192.0.9.1')
-    expect(parseNetworkGateway('{}')).toBeNull()
-    expect(parseNetworkGateway('gateway:.non.un.ip')).toBeNull()
+  // BRV3 (fase box-apple-rete-vera): il parse legge il JSON VERO della CLI
+  // 1.7.1 — le FIXTURE delle prove dal vivo, `status.ipv4Gateway` del PRIMO
+  // elemento dell'array. MAI regex sul testo, MAI ripieghi sul formato
+  // inventato {subnets[]} della vecchia finta (erano loro che lasciavano il
+  // gateway a null e il browser senza proxy). Visti FALLIRE il 2026-11-14:
+  // le vecchie regex non scattavano sulla fixture vera.
+  it('BRV3 parseNetworkGateway: status.ipv4Gateway del JSON VERO (fixture) → 192.168.128.1 / 192.168.64.1', () => {
+    expect(parseNetworkGateway(fixture('network-inspect-homun-box.txt'))).toBe('192.168.128.1')
+    expect(parseNetworkGateway(fixture('network-inspect-default.txt'))).toBe('192.168.64.1')
   })
 
-  it('BR2 parseNetworkSubnet: la sottorete (CIDR) dello stesso inspect, per il filtro del proxy', () => {
-    expect(parseNetworkSubnet('{"name":"homun-box","subnets":[{"subnet":"192.0.15.0/24","gateway":"192.0.15.1"}]}')).toBe('192.0.15.0/24')
-    expect(parseNetworkSubnet('subnet: 192.0.9.0/24')).toBe('192.0.9.0/24')
-    expect(parseNetworkSubnet('{"subnets":[{"gateway":"192.0.15.1"}]}')).toBeNull()
-    expect(parseNetworkSubnet('subnet: non.un.cifr')).toBeNull()
+  it('BRV3 parseNetworkGateway: JSON illeggibile, campo assente o formato INVENTATO → null (niente ripieghi sul testo)', () => {
+    expect(parseNetworkGateway('')).toBeNull()
+    expect(parseNetworkGateway('Error: network not found: homun-box')).toBeNull()
+    expect(parseNetworkGateway('gateway: 192.0.9.1')).toBeNull() // riga di testo: VIA il ripiego
+    expect(parseNetworkGateway('{}')).toBeNull()
+    expect(parseNetworkGateway('[]')).toBeNull() // array VUOTO: nessun elemento da leggere
+    expect(parseNetworkGateway(JSON.stringify([{ status: { ipv4Subnet: '192.168.128.0/24' } }]))).toBeNull() // c'è la subnet, non il gateway
+    expect(parseNetworkGateway(JSON.stringify([{ status: { ipv4Gateway: 'non.un.ip' } }]))).toBeNull()
+    expect(parseNetworkGateway('{"name":"homun-box","subnets":[{"gateway":"192.0.15.1"}]}')).toBeNull() // il vecchio formato della finta
+  })
+
+  it('BRV3 parseNetworkSubnet: status.ipv4Subnet dello stesso inspect (fixture) → 192.168.128.0/24', () => {
+    expect(parseNetworkSubnet(fixture('network-inspect-homun-box.txt'))).toBe('192.168.128.0/24')
+    expect(parseNetworkSubnet(fixture('network-inspect-default.txt'))).toBe('192.168.64.0/24')
+    expect(parseNetworkSubnet('')).toBeNull()
+    expect(parseNetworkSubnet('subnet: 192.0.9.0/24')).toBeNull() // VIA il ripiego sulle righe
+    expect(parseNetworkSubnet(JSON.stringify([{ status: { ipv4Gateway: '192.168.128.1' } }]))).toBeNull()
+    expect(parseNetworkSubnet(JSON.stringify([{ status: { ipv4Subnet: '192.168.128.0' } }]))).toBeNull() // non è un CIDR
+    expect(parseNetworkSubnet('{"subnets":[{"subnet":"192.0.15.0/24"}]}')).toBeNull() // il vecchio formato
   })
 
   it('browserMcpFlagsWithGateway: --proxy-server cambia indirizzo, il RESTO dei flag resta identico e in ordine', () => {
@@ -170,12 +197,20 @@ describe('BX2: il proxy del browser al GATEWAY della rete interna', () => {
 })
 
 describe('BX2: l\'ensure della rete del box (ensureAppleBoxNetwork)', () => {
+  /**
+   * BRV3: l'uscita di un network inspect nella FORMA VERA della CLI 1.7.1
+   * (il campo `status.ipv4Gateway`/`ipv4Subnet` del primo elemento — mai il
+   * vecchio `subnets[]` inventato, che il parse di oggi non legge più).
+   */
+  const netJson = (gateway: string, subnet: string): string =>
+    JSON.stringify([{ configuration: { creationDate: '2026-11-14T07:30:36Z', labels: {}, mode: 'hostOnly', name: 'homun-box', options: {}, plugin: 'container-network-vmnet' }, id: 'homun-box', status: { ipv4Gateway: gateway, ipv4Subnet: subnet, ipv6Subnet: 'fdcb:b3be:434:c533::/64' } }])
+
   /** Runner finto: la rete manca alla PRIMA inspect, c'è dopo la create. */
   const fakeRun = (calls: string[][]) => async (argv: string[]) => {
     calls.push(argv)
     if (argv[0] === 'network' && argv[1] === 'inspect') {
       return calls.filter((c) => c[1] === 'create').length > 0
-        ? { stdout: '{"subnets":[{"subnet":"192.0.15.0/24","gateway":"192.0.15.1"}]}', stderr: '', exitCode: 0 }
+        ? { stdout: netJson('192.0.15.1', '192.0.15.0/24'), stderr: '', exitCode: 0 }
         : { stdout: '', stderr: 'network not found', exitCode: 1 }
     }
     return { stdout: '', stderr: '', exitCode: 0 }
@@ -200,7 +235,7 @@ describe('BX2: l\'ensure della rete del box (ensureAppleBoxNetwork)', () => {
     const run = async (argv: string[]) => {
       calls.push(argv)
       if (argv[0] === 'network' && argv[1] === 'inspect') {
-        return { stdout: '{"subnets":[{"gateway":"192.0.2.1"}]}', stderr: '', exitCode: 0 }
+        return { stdout: netJson('192.0.2.1', '192.0.2.0/24'), stderr: '', exitCode: 0 }
       }
       return { stdout: '', stderr: '', exitCode: 0 }
     }
@@ -215,7 +250,7 @@ describe('BX2: l\'ensure della rete del box (ensureAppleBoxNetwork)', () => {
     setBoxNetworkSubnet(null)
     const run = async (argv: string[]) =>
       argv[0] === 'network' && argv[1] === 'inspect'
-        ? { stdout: '{"subnets":[{"subnet":"192.0.15.0/24","gateway":"192.0.15.1"}]}', stderr: '', exitCode: 0 }
+        ? { stdout: netJson('192.0.15.1', '192.0.15.0/24'), stderr: '', exitCode: 0 }
         : { stdout: '', stderr: '', exitCode: 0 }
     await ensureAppleBoxNetwork(run)
     expect(boxNetworkGateway()).toBe('192.0.15.1')
@@ -234,10 +269,10 @@ describe('BX2: l\'ensure della rete del box (ensureAppleBoxNetwork)', () => {
       if (argv[0] === 'network' && argv[1] === 'inspect') {
         if (argv.includes('homun-box-isolated')) {
           return created
-            ? { stdout: '{"subnets":[{"subnet":"192.0.16.0/24","gateway":"192.0.16.1"}]}', stderr: '', exitCode: 0 }
+            ? { stdout: netJson('192.0.16.1', '192.0.16.0/24'), stderr: '', exitCode: 0 }
             : { stdout: '', stderr: 'network not found', exitCode: 1 }
         }
-        return { stdout: '{"subnets":[{"subnet":"192.0.15.0/24","gateway":"192.0.15.1"}]}', stderr: '', exitCode: 0 }
+        return { stdout: netJson('192.0.15.1', '192.0.15.0/24'), stderr: '', exitCode: 0 }
       }
       if (argv[0] === 'network' && argv[1] === 'create') { created = true; return { stdout: '', stderr: '', exitCode: 0 } }
       return { stdout: '', stderr: '', exitCode: 0 }

@@ -105,8 +105,9 @@ describe('BAV3: la RETE segue la stessa regola (create fallita → RILETTURA pri
     let created = false
     const run = async (argv: string[]) => {
       if (argv[0] === 'network' && argv[1] === 'inspect') {
+        // BRV3: la forma VERA dell'inspect (status.ipv4Gateway/ipv4Subnet)
         return created
-          ? { stdout: '{"subnets":[{"subnet":"192.0.15.0/24","gateway":"192.0.15.1"}]}', stderr: '', exitCode: 0 }
+          ? { stdout: JSON.stringify([{ id: 'homun-box', status: { ipv4Gateway: '192.0.15.1', ipv4Subnet: '192.0.15.0/24', ipv6Subnet: 'fdcb:b3be:434:c533::/64' } }]), stderr: '', exitCode: 0 }
           : { stdout: '', stderr: 'network not found', exitCode: 1 }
       }
       if (argv[0] === 'network' && argv[1] === 'create') {

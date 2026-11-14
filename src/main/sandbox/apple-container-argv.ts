@@ -164,25 +164,38 @@ export function appleNetworkInspectArgv(network: string = APPLE_BOX_NETWORK): st
 }
 
 /**
- * Il gateway della rete dal suo inspect (PURO): JSON con subnet 192.0.x.y/24
- * e gateway 192.0.x.1 (il formato di container), oppure righe
- * `gateway: <ip>`. Il primo IPv4 del campo gateway.
+ * BRV3 (fase box-apple-rete-vera): il gateway della rete dal suo inspect
+ * (PURO) — il JSON VERO della CLI 1.7.1, quello della fixture
+ * network-inspect-homun-box: si fa JSON.parse, si prende il PRIMO elemento
+ * dell'array e si legge `status.ipv4Gateway` (la CLI vera scrive `"gateway"`
+ * attaccato a `ipv4`: NESSUNA regex sul testo lo vede — il difetto che dal
+ * vivo lasciava il browser del box senza proxy). Validazione IPv4 come
+ * sempre (dotted-quad). null = JSON illeggibile, array vuoto o campo
+ * assente: MAI ripieghi su formati inventati né righe `gateway: <ip>`.
  */
 export function parseNetworkGateway(stdout: string): string | null {
-  const m = /"gateway"\s*:\s*"([0-9.]+)"/.exec(stdout) ?? /gateway[=:]\s*([0-9.]+)/i.exec(stdout)
-  return m && /^\d+\.\d+\.\d+\.\d+$/.test(m[1]!) ? m[1]! : null
+  let o: unknown
+  try { o = JSON.parse(stdout) } catch { return null }
+  if (!Array.isArray(o) || o.length === 0) return null
+  const gw = (o[0] as { status?: { ipv4Gateway?: unknown } })?.status?.ipv4Gateway
+  return typeof gw === 'string' && /^\d+\.\d+\.\d+\.\d+$/.test(gw) ? gw : null
 }
 
 /**
- * BR2 (fase box-rete): la SOTTORETE della rete (CIDR) dal suo inspect (PURO):
- * come il gateway, dal campo subnet della stessa risposta. È il confine del
- * secondo ascolto del proxy (chi ci può parlare) e della regola d'uscita
- * (quali destinazioni sono vietate): 192.0.x.y NON è un intervallo privato
- * classico, la lista dei privati non lo conosce.
+ * BR2 (fase box-rete): la SOTTORETE della rete (CIDR) dal suo inspect (PURO).
+ * BRV3: come il gateway, dal `status.ipv4Subnet` del JSON VERO (fixture
+ * network-inspect-homun-box) — niente regex sul testo, niente il vecchio
+ * campo `subnets[].subnet` del formato inventato dalla finta di una volta.
+ * È il confine del secondo ascolto del proxy (chi ci può parlare) e della
+ * regola d'uscita (quali destinazioni sono vietate): 192.0.x.y NON è un
+ * intervallo privato classico, la lista dei privati non lo conosce.
  */
 export function parseNetworkSubnet(stdout: string): string | null {
-  const m = /"subnet"\s*:\s*"([0-9.]+\/\d+)"/.exec(stdout) ?? /subnet[=:]\s*([0-9.]+\/\d+)/i.exec(stdout)
-  return m && /^\d+\.\d+\.\d+\.\d+\/\d{1,2}$/.test(m[1]!) ? m[1]! : null
+  let o: unknown
+  try { o = JSON.parse(stdout) } catch { return null }
+  if (!Array.isArray(o) || o.length === 0) return null
+  const cidr = (o[0] as { status?: { ipv4Subnet?: unknown } })?.status?.ipv4Subnet
+  return typeof cidr === 'string' && /^\d+\.\d+\.\d+\.\d+\/\d{1,2}$/.test(cidr) ? cidr : null
 }
 
 /**
