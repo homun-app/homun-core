@@ -1,0 +1,21 @@
+$ container network create --help
+OVERVIEW: Create a new network
+
+USAGE: container network create [--internal] [--label <label> ...] [--option <option> ...] [--plugin <plugin>] [--subnet <subnet>] [--subnet-v6 <subnet-v6>] [--debug] <name>
+
+ARGUMENTS:
+  <name>                  Network name
+
+OPTIONS:
+  --internal              Restrict to host-only network
+  --label <label>         Set metadata for a network
+  --option <option>       Set a plugin-specific option (key=value)
+  --plugin <plugin>       Set the plugin to use to create this network.
+                          (default: container-network-vmnet)
+  --subnet <subnet>       Set subnet for a network
+  --subnet-v6 <subnet-v6> Set the IPv6 prefix for a network
+  --debug                 Enable debug output [environment: CONTAINER_DEBUG]
+  --version               Show the version.
+  -h, --help              Show help information.
+
+[exit 0]

@@ -1,0 +1,2 @@
+$ container exec -i sandbot-box cat
+[exit 0]

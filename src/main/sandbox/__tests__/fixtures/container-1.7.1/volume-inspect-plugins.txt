@@ -1,0 +1,21 @@
+$ container volume inspect sandbot-plugins
+[
+  {
+    "configuration" : {
+      "creationDate" : "2026-11-14T07:30:36Z",
+      "driver" : "local",
+      "format" : "ext4",
+      "labels" : {
+
+      },
+      "name" : "sandbot-plugins",
+      "options" : {
+
+      },
+      "sizeInBytes" : 549755813888,
+      "source" : "/Users/test/Library/Application Support/com.apple.container/volumes/sandbot-plugins/volume.img"
+    },
+    "id" : "sandbot-plugins"
+  }
+]
+[exit 0]

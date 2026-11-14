@@ -1,0 +1,22 @@
+$ container system df --format json
+{
+  "containers" : {
+    "active" : 2,
+    "reclaimable" : 0,
+    "sizeInBytes" : 10580217856,
+    "total" : 2
+  },
+  "images" : {
+    "active" : 2,
+    "reclaimable" : 244289536,
+    "sizeInBytes" : 5396357120,
+    "total" : 4
+  },
+  "volumes" : {
+    "active" : 3,
+    "reclaimable" : 0,
+    "sizeInBytes" : 119730176,
+    "total" : 3
+  }
+}
+[exit 0]

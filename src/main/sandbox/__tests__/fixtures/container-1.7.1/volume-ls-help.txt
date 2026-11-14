@@ -1,0 +1,14 @@
+$ container volume ls --help
+OVERVIEW: List volumes
+
+USAGE: container volume list [--format <format>] [--quiet] [--debug]
+
+OPTIONS:
+  --format <format>       Format of the output (values: json, table, yaml,
+                          toml; default: table)
+  -q, --quiet             Only output the volume name
+  --debug                 Enable debug output [environment: CONTAINER_DEBUG]
+  --version               Show the version.
+  -h, --help              Show help information.
+
+[exit 0]

@@ -1,0 +1,15 @@
+$ container cp --help
+OVERVIEW: Copy files/folders between a container and the local filesystem
+
+USAGE: container copy [--debug] <source> <destination>
+
+ARGUMENTS:
+  <source>                Source path (container:path or local path)
+  <destination>           Destination path (container:path or local path)
+
+OPTIONS:
+  --debug                 Enable debug output [environment: CONTAINER_DEBUG]
+  --version               Show the version.
+  -h, --help              Show help information.
+
+[exit 0]

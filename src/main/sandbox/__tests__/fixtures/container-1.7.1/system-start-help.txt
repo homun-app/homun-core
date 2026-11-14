@@ -1,0 +1,23 @@
+$ container system start --help
+OVERVIEW: Start `container` services
+
+USAGE: container system start [--app-root <app-root>] [--install-root <install-root>] [--log-root <log-root>] [--enable-kernel-install] [--disable-kernel-install] [--timeout <timeout>] [--debug]
+
+OPTIONS:
+  -a, --app-root <app-root>
+                          Path to the root directory for application data
+  --install-root <install-root>
+                          Path to the root directory for application
+                          executables and plugins
+  --log-root <log-root>   Path to the root directory for log data, using macOS
+                          log facility if not set
+  --enable-kernel-install/--disable-kernel-install
+                          Specify whether the default kernel should be
+                          installed or not (default: prompt user)
+  --timeout <timeout>     Number of seconds to wait for API service to become
+                          responsive
+  --debug                 Enable debug output [environment: CONTAINER_DEBUG]
+  --version               Show the version.
+  -h, --help              Show help information.
+
+[exit 0]

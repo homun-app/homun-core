@@ -1,0 +1,15 @@
+$ container volume delete --help
+OVERVIEW: Delete one or more volumes
+
+USAGE: container volume delete [--all] [--debug] [<names> ...]
+
+ARGUMENTS:
+  <names>                 Volume names
+
+OPTIONS:
+  -a, --all               Delete all volumes
+  --debug                 Enable debug output [environment: CONTAINER_DEBUG]
+  --version               Show the version.
+  -h, --help              Show help information.
+
+[exit 0]

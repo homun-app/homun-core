@@ -42,24 +42,34 @@ describe('BX5: la CLI finta di container — i comportamenti per variabile d\'am
     expect(ni.status).not.toBe(0)
   })
 
-  it('system df --format json: voci Images/Containers/Local Volumes/Build Cache in byte umani', () => {
-    const out = run('ready', ['system', 'df', '--format', 'json']).stdout
-    const df = JSON.parse(out) as Array<{ Type: string; Size: string; Reclaimable: string }>
-    const types = df.map((e) => e.Type)
-    for (const want of ['Images', 'Containers', 'Local Volumes', 'Build Cache']) expect(types).toContain(want)
-    const volumes = df.find((e) => e.Type === 'Local Volumes')!
-    expect(parseFloat(volumes.Size)).toBeGreaterThan(0)
+  it('BAV1 system df --format json: la forma VERA di Apple — un OGGETTO containers/images/volumes con sizeInBytes e reclaimable', () => {
+    const r = run('ready', ['system', 'df', '--format', 'json'])
+    expect(r.status).toBe(0)
+    const df = JSON.parse(r.stdout) as Record<string, { active: number; reclaimable: number; sizeInBytes: number; total: number }>
+    for (const k of ['containers', 'images', 'volumes']) {
+      expect(df[k], k).toBeDefined()
+      expect(df[k].sizeInBytes).toBeGreaterThanOrEqual(0)
+      expect(df[k].reclaimable).toBeGreaterThanOrEqual(0)
+    }
+    // NON è l'array di Docker con le voci Type/Size: la CLI vera stampa un oggetto
+    expect(Array.isArray(df)).toBe(false)
   })
 
-  it('image inspect --format {{.size}} → un numero di byte', () => {
-    const r = run('ready', ['image', 'inspect', '--format', '{{.size}}', 'sandbot-box:abc'])
+  it('BAV1 image inspect SENZA --format: exit 0 solo dopo la build, e il JSON porta variants[].size', () => {
+    const logFile = join(TMP, `log-bav1-imgsize-${Date.now()}.jsonl`)
+    const env = { PATH: process.env.PATH, SANDBOT_TEST_CONTAINER_MODE: 'ready', SANDBOT_TEST_CONTAINER_LOG: logFile }
+    const fake = (argv: string[]) => spawnSync(process.execPath, [FAKE, ...argv], { encoding: 'utf8', env })
+    expect(fake(['image', 'inspect', 'sandbot-box:abc']).status).not.toBe(0)
+    expect(fake(['build', '-t', 'sandbot-box:abc', '.']).status).toBe(0)
+    const r = fake(['image', 'inspect', 'sandbot-box:abc'])
     expect(r.status).toBe(0)
-    expect(Number(r.stdout.trim())).toBeGreaterThan(1_000_000_000)
+    const img = JSON.parse(r.stdout) as Array<{ variants: Array<{ size: number }> }>
+    expect(img[0]!.variants[0]!.size).toBeGreaterThan(1_000_000_000)
   })
 
   it('la pulizia sicura risponde: image prune e builder prune; image delete e volume delete pure', () => {
-    expect(run('ready', ['image', 'prune', '-f']).status).toBe(0)
-    expect(run('ready', ['builder', 'prune', '-f']).status).toBe(0)
+    expect(run('ready', ['image', 'prune']).status).toBe(0)
+    expect(run('ready', ['builder', 'prune']).status).toBe(0)
     expect(run('ready', ['image', 'delete', 'sandbot-box:vecchia']).status).toBe(0)
     expect(run('ready', ['volume', 'delete', 'sandbot-box']).status).toBe(0)
   })
@@ -248,10 +258,10 @@ describe('OB6: image inspect risponde OK solo DOPO una build', () => {
     expect(build.status).toBe(0)
     const after = fake(['image', 'inspect', 'sandbot-box:fake'])
     expect(after.status).toBe(0)
-    // la dimensione (--format) resta sempre disponibile (le righe di spazio su disco)
-    const size = fake(['image', 'inspect', '--format', '{{.size}}', 'sandbot-box:fake'])
+    // la dimensione sta nel JSON dell'inspect (variants[].size), MAI col --format
+    const size = fake(['image', 'inspect', 'sandbot-box:fake'])
     expect(size.status).toBe(0)
-    expect(size.stdout.trim()).toBe('1180000000')
+    expect(JSON.parse(size.stdout)[0].variants[0].size).toBeGreaterThan(1_000_000_000)
   })
 })
 
@@ -331,5 +341,156 @@ describe('OBV5: la corsa di test non chiama MAI la CLI vera (ora container è in
     const { containerCliPath } = await import('../../src/main/sandbox/apple-container-engine')
     expect(containerCliPath()).not.toBe('/usr/local/bin/container')
     expect(existsSync(containerCliPath())).toBe(false)
+  })
+})
+
+// ---- BAV1 (fase box-apple-cli-vera): la finta è SEVERA come la VERA ----
+// La prova dal vivo: la CLI vera esce 64 sui --format inventati e su
+// inspect --format, e volume create NON è idempotente. La finta che li
+// accettava nascondeva il difetto (la catena del guasto del 2026-11-14).
+// Questi test sono stati visti FALLIRE sulla finta di prima della fase.
+describe('BAV1: la CLI finta rifiuta quello che rifiuta la vera', () => {
+  it('--format con un valore inventato → exit 64 con l\'errore VERO', () => {
+    for (const argv of [
+      ['ls', '-a', '--format', '{{.name}}'],
+      ['volume', 'ls', '--format', '{{.name}}'],
+      ['system', 'df', '--format', 'pretty']
+    ]) {
+      const r = run('ready', argv)
+      expect(r.status, JSON.stringify(argv)).toBe(64)
+      expect(r.stderr.trim(), JSON.stringify(argv)).toBe(`Error: The value '${argv[argv.indexOf('--format') + 1]}' is invalid for '--format <format>'. Please provide one of 'json', 'table', 'yaml' or 'toml'.`)
+    }
+    // i valori veri passano
+    expect(run('ready', ['ls', '-a', '--format', 'json']).status).toBe(0)
+    expect(run('ready', ['volume', 'ls', '--format', 'json']).status).toBe(0)
+  })
+
+  it('inspect --format → Error: Unknown option \'--format\', exit 64 (l\'errore del vivo)', () => {
+    const r = run('ready', ['inspect', '--format', '{{.running}}', 'sandbot-box'])
+    expect(r.status).toBe(64)
+    expect(r.stderr.trim()).toBe("Error: Unknown option '--format'")
+    const img = run('ready', ['image', 'inspect', '--format', '{{.size}}', 'sandbot-box:abc'])
+    expect(img.status).toBe(64)
+    expect(img.stderr.trim()).toBe("Error: Unknown option '--format'")
+  })
+
+  it('volume create di un volume che ESISTE → exit 1 con l\'errore VERO (non è idempotente)', () => {
+    const logFile = join(TMP, `log-bav1-vol-${Date.now()}.jsonl`)
+    const env = { PATH: process.env.PATH, SANDBOT_TEST_CONTAINER_MODE: 'ready', SANDBOT_TEST_CONTAINER_LOG: logFile }
+    const fake = (argv: string[]) => spawnSync(process.execPath, [FAKE, ...argv], { encoding: 'utf8', env })
+    expect(fake(['volume', 'create', 'sandbot-plugins']).status).toBe(0)
+    const second = fake(['volume', 'create', 'sandbot-plugins'])
+    expect(second.status).toBe(1)
+    expect(second.stderr.trim()).toBe("Error: volume 'sandbot-plugins' already exists")
+    // e il volume ORMAI c'è: l'elenco lo dice (BAV2/BAV3 leggono prima di creare)
+    const ls = fake(['volume', 'ls', '--format', 'json'])
+    expect(ls.status).toBe(0)
+    expect(JSON.parse(ls.stdout).map((v: { configuration: { name: string } }) => v.configuration.name)).toContain('sandbot-plugins')
+  })
+
+  it('inspect di un container che non c\'è → l\'errore VERO della fixture, exit 1', () => {
+    const r = run('ready', ['inspect', 'nonesiste'])
+    expect(r.status).toBe(1)
+    expect(r.stderr.trim()).toBe('Error: container not found: nonesiste')
+  })
+
+  it('le opzioni sono quelle della HELP VERA: --filter su volume ls esce 64 come sconosciuta', () => {
+    const r = run('ready', ['volume', 'ls', '--format', 'json', '--filter', 'name=^/sandbot-box$'])
+    expect(r.status).toBe(64)
+    expect(r.stderr.trim()).toBe("Error: Unknown option '--filter'")
+  })
+})
+
+// ---- BAV1: le forme VERE delle fixture, riempite con lo stato della finta ----
+// La finta stampa il FORMATO della CLI vera (stesse chiavi, stessa forma) per
+// ls --format json, inspect, volume ls --format json e system df --format
+// json: le fixture copiate alla lettera sono il blocco (confronto
+// STRUTTURALE: stesse chiavi a ogni livello, i valori sono dello stato).
+const FIXTURES = join(ROOT, 'src', 'main', 'sandbox', '__tests__', 'fixtures', 'container-1.7.1')
+
+/** Le chiavi di un valore JSON, RICORSIVE: le foglie (stringhe/numeri) sono uguali per forma. */
+const shapeOf = (v: unknown): unknown => {
+  if (Array.isArray(v)) return v.length ? [shapeOf(v[0])] : []
+  if (v !== null && typeof v === 'object') {
+    return Object.fromEntries(Object.keys(v as Record<string, unknown>).sort().map((k) => [k, shapeOf((v as Record<string, unknown>)[k])]))
+  }
+  return typeof v
+}
+
+/** Il corpo di una fixture: senza la riga `$ container…` e senza la riga `[exit N]`. */
+const fixtureBody = (name: string): string => {
+  const text = readFileSync(join(FIXTURES, name), 'utf8')
+  return text.replace(/^\$ container[^\n]*\n/, '').replace(/\[exit \d+\]\n?$/, '').trim()
+}
+
+describe('BAV1: la finta stampa le FORME vere (stesse chiavi delle fixture)', () => {
+  /** Il box della finta: un run -d con tutto quello che serve, in un log solo. */
+  const boxLog = () => {
+    const logFile = join(TMP, `log-bav1-shape-${Date.now()}.jsonl`)
+    const env = { PATH: process.env.PATH, SANDBOT_TEST_CONTAINER_MODE: 'ready', SANDBOT_TEST_CONTAINER_LOG: logFile }
+    const fake = (argv: string[]) => spawnSync(process.execPath, [FAKE, ...argv], { encoding: 'utf8', env })
+    fake(['build', '-t', 'sandbot-box:abab9640c765', '.'])
+    fake(['volume', 'create', 'sandbot-box'])
+    fake(['volume', 'create', 'sandbot-plugins'])
+    fake(['volume', 'create', 'sandbot-browser'])
+    fake([
+      'run', '-d', '--init', '--name', 'sandbot-box', '-u', '1000:1000', '-m', '4g', '-c', '2',
+      '--network', 'homun-box', '-v', 'sandbot-box:/box', '-v', 'sandbot-plugins:/plugins:ro', '-v', 'sandbot-browser:/browser',
+      '-w', '/box', 'sandbot-box:abab9640c765', 'sleep', 'infinity'
+    ])
+    return { logFile, fake }
+  }
+
+  it('ls -a --format json: l\'array di oggetti {configuration, id, status} della fixture', () => {
+    const { fake } = boxLog()
+    const r = fake(['ls', '-a', '--format', 'json'])
+    expect(r.status).toBe(0)
+    const got = JSON.parse(r.stdout)
+    expect(Array.isArray(got)).toBe(true)
+    expect(got).toHaveLength(1)
+    const want = JSON.parse(fixtureBody('ls-a-json.txt'))
+    expect(shapeOf(got[0])).toEqual(shapeOf(want[0]))
+    expect(got[0].configuration.id).toBe('sandbot-box')
+    expect(got[0].configuration.useInit).toBe(true)
+    expect(got[0].configuration.mounts.map((m: { destination: string; options: string[] }) => `${m.destination}:${m.options.includes('ro') ? 'ro' : 'rw'}`)).toEqual(['/box:rw', '/plugins:ro', '/browser:rw'])
+    expect(got[0].status.state).toBe('running')
+  })
+
+  it('inspect sandbot-box: l\'elemento del box, stessa forma della fixture inspect-box', () => {
+    const { fake } = boxLog()
+    const r = fake(['inspect', 'sandbot-box'])
+    expect(r.status).toBe(0)
+    const got = JSON.parse(r.stdout)
+    const want = JSON.parse(fixtureBody('inspect-box.txt'))
+    expect(shapeOf(got[0])).toEqual(shapeOf(want[0]))
+    expect(got[0].configuration.image.reference).toBe('docker.io/library/sandbot-box:abab9640c765')
+    expect(got[0].configuration.networks[0].network).toBe('homun-box')
+  })
+
+  it('volume ls --format json: le voci {configuration, id} con configuration.name', () => {
+    const { fake } = boxLog()
+    const r = fake(['volume', 'ls', '--format', 'json'])
+    expect(r.status).toBe(0)
+    const got = JSON.parse(r.stdout)
+    const want = JSON.parse(fixtureBody('volume-ls-json.txt'))
+    expect(got.map((v: { configuration: { name: string } }) => v.configuration.name).sort()).toEqual(['sandbot-box', 'sandbot-browser', 'sandbot-plugins'])
+    expect(shapeOf(got[0])).toEqual(shapeOf(want[0]))
+  })
+
+  it('system df --format json: l\'OGGETTO {containers, images, volumes} della fixture', () => {
+    const { fake } = boxLog()
+    const r = fake(['system', 'df', '--format', 'json'])
+    expect(r.status).toBe(0)
+    const got = JSON.parse(r.stdout)
+    const want = JSON.parse(fixtureBody('system-df-json.txt'))
+    expect(shapeOf(got)).toEqual(shapeOf(want))
+    expect(got.volumes.total).toBe(3)
+  })
+
+  it('ls -a -q: i SOLI nomi, uno per riga (come la fixture quiet)', () => {
+    const { fake } = boxLog()
+    const r = fake(['ls', '-a', '-q'])
+    expect(r.status).toBe(0)
+    expect(r.stdout.trim()).toBe('sandbot-box')
   })
 })

@@ -1,0 +1,3 @@
+$ container network ls --format json
+[{"configuration":{"creationDate":"2026-11-13T18:38:09Z","labels":{"com.apple.container.resource.role":"builtin"},"mode":"nat","name":"default","options":{},"plugin":"container-network-vmnet"},"id":"default","status":{"ipv4Gateway":"192.168.64.1","ipv4Subnet":"192.168.64.0/24","ipv6Subnet":"fdf1:4449:9256:c8aa::/64"}},{"configuration":{"creationDate":"2026-11-14T07:30:36Z","labels":{},"mode":"hostOnly","name":"homun-box","options":{},"plugin":"container-network-vmnet"},"id":"homun-box","status":{"ipv4Gateway":"192.168.128.1","ipv4Subnet":"192.168.128.0/24","ipv6Subnet":"fdcb:b3be:434:c533::/64"}}]
+[exit 0]

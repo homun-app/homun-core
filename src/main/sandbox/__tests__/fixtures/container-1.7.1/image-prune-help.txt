@@ -1,0 +1,12 @@
+$ container image prune --help
+OVERVIEW: Remove unused or all images
+
+USAGE: container image prune [--debug] [--all]
+
+OPTIONS:
+  --debug                 Enable debug output [environment: CONTAINER_DEBUG]
+  -a, --all               Remove all unused images, not just dangling ones
+  --version               Show the version.
+  -h, --help              Show help information.
+
+[exit 0]

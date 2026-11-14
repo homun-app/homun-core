@@ -1,0 +1,5 @@
+$ container ls -a
+ID           IMAGE                                                OS     ARCH   STATE    IP                CPUS  MEMORY   STARTED
+sandbot-box  docker.io/library/sandbot-box:abab9640c765           linux  arm64  running  192.168.128.2/24  2     4096 MB  2026-11-14T07:30:39Z
+buildkit     ghcr.io/apple/container-builder-shim/builder:0.13.3  linux  arm64  running  192.168.64.2/24   2     2048 MB  2026-11-13T21:07:38Z
+[exit 0]

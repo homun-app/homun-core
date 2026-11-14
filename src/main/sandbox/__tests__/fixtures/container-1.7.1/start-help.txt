@@ -1,0 +1,16 @@
+$ container start --help
+OVERVIEW: Start a container
+
+USAGE: container start [--attach] [--interactive] [--debug] <container-id>
+
+ARGUMENTS:
+  <container-id>          Container ID
+
+OPTIONS:
+  -a, --attach            Attach stdout/stderr
+  -i, --interactive       Attach stdin
+  --debug                 Enable debug output [environment: CONTAINER_DEBUG]
+  --version               Show the version.
+  -h, --help              Show help information.
+
+[exit 0]

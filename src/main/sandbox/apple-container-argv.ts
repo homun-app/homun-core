@@ -198,9 +198,15 @@ export function browserMcpFlagsWithGateway(agentId: string, proxyPort: number, g
 
 // ---- il contenitore del box ----
 
-/** L'elenco dei container (un nome per riga, -a anche i fermi: come ps -a). */
+/**
+ * BAV1 (fase box-apple-cli-vera): l'elenco dei container in JSON, MAI coi
+ * template Go — la CLI vera li rifiuta (`--format {{.name}}` esce 64: i
+ * valori sono solo json/table/yaml/toml). L'elenco è l'array di oggetti
+ * `{configuration:{id,…}, status:{state,…}, id}` della fixture ls-a-json:
+ * l'esistenza si legge col parse puro (BAV2), non dalle righe.
+ */
 export function applePsArgv(): string[] {
-  return ['ls', '-a', '--format', '{{.name}}']
+  return ['ls', '-a', '--format', 'json']
 }
 
 export function appleStartArgv(container: string): string[] {
@@ -273,13 +279,18 @@ export function appleIsolationCheckArgv(container: string): string[] {
   return ['exec', '-u', '0', container, 'sh', '-c', APPLE_ISOLATION_CHECK_SH]
 }
 
-/** La creazione di ALWAYS: ogni container Apple ha l'init suo nella VM. */
+/**
+ * BAV1: gli inspect del box MAI con --format — la CLI vera dice
+ * `Error: Unknown option '--format'` ed esce 64. L'inspect senza opzioni
+ * stampa l'array JSON VERO (fixture inspect-box): i fatti li legge il parse
+ * puro di BAV2, non i template.
+ */
 export function appleBoxInitCheckArgv(container: string): string[] {
-  return ['inspect', '--format', '{{.running}}', container]
+  return ['inspect', container]
 }
 
 export function appleBoxMountsArgv(container: string): string[] {
-  return ['inspect', '--format', `{{range .mounts}}{{.destination}}:{{if .readOnly}}ro{{else}}rw{{end}} {{end}}`, container]
+  return ['inspect', container]
 }
 
 export function appleBoxWritableArgv(container: string): string[] {
@@ -287,12 +298,12 @@ export function appleBoxWritableArgv(container: string): string[] {
 }
 
 export function appleContainerImageArgv(container: string): string[] {
-  return ['inspect', '--format', '{{.image}}', container]
+  return ['inspect', container]
 }
 
-/** BR3: la RETE del box esistente (l'inspect da confrontare con appleNetworkOf). */
+/** BR3: la RETE del box esistente (dal JSON dell'inspect, confronto con appleNetworkOf). */
 export function appleContainerNetworkArgv(container: string): string[] {
-  return ['inspect', '--format', '{{.network}}', container]
+  return ['inspect', container]
 }
 
 export function appleEnsureHomeArgv(container: string, agentId: string): string[] {
@@ -303,9 +314,13 @@ export function appleImageInspectArgv(tag: string): string[] {
   return ['image', 'inspect', tag]
 }
 
-/** La dimensione in byte della NOSTRA immagine (BX3; formato da verificare dal vivo). */
+/**
+ * La dimensione in byte della NOSTRA immagine (BX3): anche qui NESSUN
+ * --format (BAV1) — l'inspect stampa il JSON VERO (fixture image-inspect) e
+ * la dimensione si legge dal campo `variants[].size` col parse puro di BAV2.
+ */
 export function appleImageSizeArgv(tag: string): string[] {
-  return ['image', 'inspect', '--format', '{{.size}}', tag]
+  return ['image', 'inspect', tag]
 }
 
 /** OBD3 (fase onboarding-b-dettagli): --progress plain ESPLICITO — il formato #N si legge riga per riga. */
@@ -313,8 +328,13 @@ export function appleBuildArgv(tag: string, dockerfilePath: string, contextDir: 
   return ['build', '--progress', 'plain', '-t', tag, '-f', dockerfilePath, contextDir]
 }
 
-export function appleVolumeLsArgv(volume: string): string[] {
-  return ['volume', 'ls', '--format', '{{.name}}', '--filter', `name=^/${volume}$`]
+/**
+ * BAV1: l'elenco dei volumi in JSON. La CLI di Apple NON ha --filter (la
+ * help vera non lo elenca): i nomi si filtrano qui, dal parse puro di BAV2
+ * (`configuration.name` per voce — fixture volume-ls-json).
+ */
+export function appleVolumeLsArgv(_volume: string): string[] {
+  return ['volume', 'ls', '--format', 'json']
 }
 
 // ---- exec (stessa forma di Docker: il manuale dichiara -i -u -w -e -d) ----

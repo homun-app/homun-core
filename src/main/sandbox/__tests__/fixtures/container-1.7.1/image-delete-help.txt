@@ -1,0 +1,16 @@
+$ container image delete --help
+OVERVIEW: Delete one or more images
+
+USAGE: container image delete [--all] [--force] [<images> ...] [--debug]
+
+ARGUMENTS:
+  <images>
+
+OPTIONS:
+  -a, --all               Delete all images
+  -f, --force             Ignore errors for images that are not found
+  --debug                 Enable debug output [environment: CONTAINER_DEBUG]
+  --version               Show the version.
+  -h, --help              Show help information.
+
+[exit 0]

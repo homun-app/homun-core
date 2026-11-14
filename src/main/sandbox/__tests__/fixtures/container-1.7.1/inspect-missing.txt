@@ -1,0 +1,3 @@
+$ container inspect nonesiste
+Error: container not found: nonesiste
+[exit 1]

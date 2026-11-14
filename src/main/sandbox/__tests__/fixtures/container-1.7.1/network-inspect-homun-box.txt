@@ -1,0 +1,23 @@
+[
+  {
+    "configuration" : {
+      "creationDate" : "2026-11-14T07:30:36Z",
+      "labels" : {
+
+      },
+      "mode" : "hostOnly",
+      "name" : "homun-box",
+      "options" : {
+
+      },
+      "plugin" : "container-network-vmnet"
+    },
+    "id" : "homun-box",
+    "status" : {
+      "ipv4Gateway" : "192.168.128.1",
+      "ipv4Subnet" : "192.168.128.0/24",
+      "ipv6Subnet" : "fdcb:b3be:434:c533::/64"
+    }
+  }
+]
+[exit 0]

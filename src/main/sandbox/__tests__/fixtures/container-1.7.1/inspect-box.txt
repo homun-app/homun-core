@@ -1,0 +1,190 @@
+$ container inspect sandbot-box
+[
+  {
+    "configuration" : {
+      "capAdd" : [
+
+      ],
+      "capDrop" : [
+
+      ],
+      "creationDate" : "2026-11-14T07:30:38Z",
+      "dns" : {
+        "nameservers" : [
+
+        ],
+        "options" : [
+
+        ],
+        "searchDomains" : [
+
+        ]
+      },
+      "id" : "sandbot-box",
+      "image" : {
+        "descriptor" : {
+          "annotations" : {
+            "com.apple.containerization.image.name" : "docker.io/library/sandbot-box:abab9640c765",
+            "io.containerd.image.name" : "docker.io/library/sandbot-box:abab9640c765",
+            "org.opencontainers.image.created" : "2026-11-13T21:11:08Z",
+            "org.opencontainers.image.ref.name" : "abab9640c765"
+          },
+          "digest" : "sha256:ba8e44dff3b9103e8c6931f8d9091954a97c0c703d9f2b4324d61780967bddc8",
+          "mediaType" : "application/vnd.oci.image.index.v1+json",
+          "size" : 375
+        },
+        "reference" : "docker.io/library/sandbot-box:abab9640c765"
+      },
+      "initProcess" : {
+        "arguments" : [
+          "infinity"
+        ],
+        "environment" : [
+          "PLAYWRIGHT_BROWSERS_PATH=/ms-playwright",
+          "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+          "LC_ALL=C.UTF-8",
+          "LANG=C.UTF-8"
+        ],
+        "executable" : "sleep",
+        "rlimits" : [
+
+        ],
+        "supplementalGroups" : [
+
+        ],
+        "terminal" : false,
+        "user" : {
+          "raw" : {
+            "userString" : "1000:1000"
+          }
+        },
+        "workingDirectory" : "/box"
+      },
+      "labels" : {
+
+      },
+      "mounts" : [
+        {
+          "destination" : "/box",
+          "options" : [
+
+          ],
+          "source" : "/Users/test/Library/Application Support/com.apple.container/volumes/sandbot-box/volume.img",
+          "type" : {
+            "volume" : {
+              "cache" : {
+                "on" : {
+
+                }
+              },
+              "format" : "ext4",
+              "name" : "sandbot-box",
+              "sync" : {
+                "fsync" : {
+
+                }
+              }
+            }
+          }
+        },
+        {
+          "destination" : "/plugins",
+          "options" : [
+            "ro"
+          ],
+          "source" : "/Users/test/Library/Application Support/com.apple.container/volumes/sandbot-plugins/volume.img",
+          "type" : {
+            "volume" : {
+              "cache" : {
+                "on" : {
+
+                }
+              },
+              "format" : "ext4",
+              "name" : "sandbot-plugins",
+              "sync" : {
+                "fsync" : {
+
+                }
+              }
+            }
+          }
+        },
+        {
+          "destination" : "/browser",
+          "options" : [
+
+          ],
+          "source" : "/Users/test/Library/Application Support/com.apple.container/volumes/sandbot-browser/volume.img",
+          "type" : {
+            "volume" : {
+              "cache" : {
+                "on" : {
+
+                }
+              },
+              "format" : "ext4",
+              "name" : "sandbot-browser",
+              "sync" : {
+                "fsync" : {
+
+                }
+              }
+            }
+          }
+        }
+      ],
+      "networks" : [
+        {
+          "network" : "homun-box",
+          "options" : {
+            "hostname" : "sandbot-box",
+            "mtu" : 1280
+          }
+        }
+      ],
+      "platform" : {
+        "architecture" : "arm64",
+        "os" : "linux"
+      },
+      "publishedPorts" : [
+
+      ],
+      "publishedSockets" : [
+
+      ],
+      "readOnly" : false,
+      "resources" : {
+        "cpuOverhead" : 1,
+        "cpus" : 2,
+        "memoryInBytes" : 4294967296
+      },
+      "rosetta" : false,
+      "runtimeHandler" : "container-runtime-linux",
+      "ssh" : false,
+      "sysctls" : {
+
+      },
+      "useInit" : false,
+      "virtualization" : false
+    },
+    "id" : "sandbot-box",
+    "status" : {
+      "networks" : [
+        {
+          "hostname" : "sandbot-box",
+          "ipv4Address" : "192.168.128.2/24",
+          "ipv4Gateway" : "192.168.128.1",
+          "ipv6Address" : "fdcb:b3be:434:c533:f8ac:c0ff:feb9:408c/64",
+          "macAddress" : "fa:ac:c0:b9:40:8c",
+          "mtu" : 1280,
+          "network" : "homun-box",
+          "variant" : "reserved"
+        }
+      ],
+      "startedDate" : "2026-11-14T07:30:39Z",
+      "state" : "running"
+    }
+  }
+]
+[exit 0]

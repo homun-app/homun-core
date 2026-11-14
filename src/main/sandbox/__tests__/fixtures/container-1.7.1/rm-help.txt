@@ -1,0 +1,16 @@
+$ container rm --help
+OVERVIEW: Delete one or more containers
+
+USAGE: container delete [--all] [--force] [--debug] [<container-ids> ...]
+
+ARGUMENTS:
+  <container-ids>         Container IDs
+
+OPTIONS:
+  -a, --all               Delete all containers
+  -f, --force             Delete containers even if they are running
+  --debug                 Enable debug output [environment: CONTAINER_DEBUG]
+  --version               Show the version.
+  -h, --help              Show help information.
+
+[exit 0]

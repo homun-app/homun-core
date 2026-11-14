@@ -1,0 +1,4 @@
+$ container ls -a -q
+sandbot-box
+buildkit
+[exit 0]

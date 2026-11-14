@@ -1,0 +1,3 @@
+$ container exec -e FOO=bar sandbot-box sh -c echo $FOO
+bar
+[exit 0]

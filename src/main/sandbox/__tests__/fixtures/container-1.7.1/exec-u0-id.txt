@@ -1,0 +1,3 @@
+$ container exec -u 0 sandbot-box id
+uid=0(root) gid=0(root) groups=0(root)
+[exit 0]

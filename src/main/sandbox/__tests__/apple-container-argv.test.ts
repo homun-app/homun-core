@@ -126,8 +126,8 @@ describe('BR1: none → la rete isolata e le interfacce GIÙ (difesa in profondi
     expect(script).toContain('lo')
   })
 
-  it('BR3: la rete DEL box esistente si ispeziona (inspect --format {{.network}})', () => {
-    expect(appleContainerNetworkArgv('sandbot-box')).toEqual(['inspect', '--format', '{{.network}}', 'sandbot-box'])
+  it('BR3/BAV1: la rete DEL box esistente si ispeziona SENZA --format (il JSON la dice)', () => {
+    expect(appleContainerNetworkArgv('sandbot-box')).toEqual(['inspect', 'sandbot-box'])
   })
 })
 

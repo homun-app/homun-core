@@ -1,0 +1,3 @@
+$ container volume create sandbot-plugins
+Error: volume 'sandbot-plugins' already exists
+[exit 1]

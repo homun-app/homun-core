@@ -1,0 +1,3 @@
+$ container exec -u 1000 -w /box sandbot-box pwd
+/box
+[exit 0]

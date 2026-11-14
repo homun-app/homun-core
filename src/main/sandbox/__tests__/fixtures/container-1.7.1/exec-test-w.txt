@@ -1,0 +1,2 @@
+$ container exec sandbot-box test -w /box/workspace
+[exit 0]
