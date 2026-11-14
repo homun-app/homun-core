@@ -27,6 +27,7 @@ import {
   appleBoxRmArgv,
   appleBoxInspectArgv,
   appleLsJsonIds,
+  appleBoxStateFromLsJson,
   parseAppleBoxInspect,
   appleVolumeNamesFromLsJson,
   appleImageSizeBytesFromInspect,
@@ -290,7 +291,11 @@ const reads: BoxEngineReads = {
   volumeLsArgv: () => appleVolumeLsArgv(''),
   volumeNames: (stdout) => appleVolumeNamesFromLsJson(stdout),
   imageSizeArgv: appleImageSizeArgv,
-  imageSizeBytes: appleImageSizeBytesFromInspect
+  imageSizeBytes: appleImageSizeBytesFromInspect,
+  // CC2 (fase computer-card): lo stato del box dallo STESSO elenco di prima
+  // (ls -a --format json), status.state della voce — un solo spawn in più
+  // MAI: il refresh riusa l'argv del ps di oggi
+  boxState: appleBoxStateFromLsJson
 }
 
 /**

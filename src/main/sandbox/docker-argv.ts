@@ -204,6 +204,16 @@ export function dockerContainerNetworkArgv(container: string): string[] {
   return ['inspect', '-f', '{{.HostConfig.NetworkMode}}', container]
 }
 
+/**
+ * CC2 (fase computer-card): il box GIRA? — `inspect -f` stampa true/false,
+ * argv puro come gli altri inspect di oggi. NON entra nell'argv map del
+ * motore (il contratto BX5 resta a 66 chiavi): lo chiama solo la lettura
+ * dello stato del box (box-runtime.ts), col ps di oggi per l'esistenza.
+ */
+export function dockerContainerRunningArgv(container: string): string[] {
+  return ['inspect', '-f', '{{.State.Running}}', container]
+}
+
 /** G2: rimozione del SOLO container da ricreare (il volume non si tocca MAI). */
 export function dockerBoxRmArgv(container: string): string[] {
   return ['rm', '-f', container]

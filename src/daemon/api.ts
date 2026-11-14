@@ -2419,11 +2419,15 @@ export function buildApiMethods(
       const { runDockerRaw, boxImage } = await import('../main/sandbox')
       const { activeBoxEngine } = await import('../main/sandbox/engine')
       const { BOX_CONTAINER } = await import('../main/sandbox/docker-argv')
+      const { setBoxRuntime } = await import('../main/sandbox/box-runtime')
       const engine = activeBoxEngine()
       const stop = await runDockerRaw(engine.argv.stop(BOX_CONTAINER), { timeoutMs: 30_000 }).catch(() => null)
       void stop
       const rm = await runDockerRaw(engine.argv.removeImage(boxImage()), { timeoutMs: 60_000 })
       if (rm.exitCode !== 0) return { ok: false, error: rm.stderr || `exit ${rm.exitCode}` }
+      // CC2 (fase computer-card): stop esplicito riuscito — il computer del
+      // bot non gira più (il container c'è ancora, fermo)
+      setBoxRuntime('stopped')
       return { ok: true }
     },
     /** «Elimina i file dei bot»: IRREVERSIBILE (la UI chiede la conferma). */
@@ -2431,13 +2435,26 @@ export function buildApiMethods(
       const { runDockerRaw } = await import('../main/sandbox')
       const { activeBoxEngine } = await import('../main/sandbox/engine')
       const { BOX_CONTAINER, BOX_VOLUME } = await import('../main/sandbox/docker-argv')
+      const { setBoxRuntime } = await import('../main/sandbox/box-runtime')
       const engine = activeBoxEngine()
       // il container va via prima: il volume è in suo uso finché esiste
       await runDockerRaw(engine.argv.stop(BOX_CONTAINER), { timeoutMs: 30_000 }).catch(() => null)
       await runDockerRaw(engine.argv.boxRm(BOX_CONTAINER), { timeoutMs: 30_000 }).catch(() => null)
       const rm = await runDockerRaw(engine.argv.removeVolumes([BOX_VOLUME]), { timeoutMs: 60_000 })
       if (rm.exitCode !== 0) return { ok: false, error: rm.stderr || `exit ${rm.exitCode}` }
+      // CC2 (fase computer-card): il box non c'è PIÙ (container e volume tolti)
+      setBoxRuntime('missing')
       return { ok: true }
+    },
+    /**
+     * CC2 (fase computer-card): lo stato del BOX — il computer del bot — per
+     * la card «Computer». La RPC RILEGGE (le reads del motore) e risponde;
+     * l'evento `box` arriva poi SOLO se lo stato è cambiato.
+     */
+    'box:runtime': async () => {
+      const m = await import('../main/sandbox/box-runtime')
+      await m.refreshBoxRuntime()
+      return m.boxRuntime()
     },
     /** «Libera spazio»: pruneSafe — mai l'immagine in uso, mai i file dei bot. */
     'box:space-prune': async () => {
@@ -2540,15 +2557,19 @@ export function buildApiMethods(
     'box:engine-uninstall': async () => {
       const { appleContainerEngine, engineProbeDeps, refreshAutoEngine } = await import('../main/sandbox/engine')
       const u = await import('../main/sandbox/apple-uninstall')
+      const { setBoxRuntime } = await import('../main/sandbox/box-runtime')
       // 1. il servizio si spegne, best-effort
       await engineProbeDeps.runCli(appleContainerEngine.command(), ['system', 'stop'], 30_000).catch(() => null)
+      // CC2 (fase computer-card): il motore è SPENTO — qualunque cosa faccia
+      // la guardia dopo, il computer del bot non gira più
+      setBoxRuntime('stopped')
       // 2. la guardia su script E cartelle: senza, NIENTE osascript
       const guard = u.uninstallScriptGuardOk(u.uninstallGuardFacts())
       if (!guard.ok) {
         if (guard.reason === 'missing') return { ok: false, error: uiText(UI.boxUninstallNoScript) }
         return { ok: false, error: uiText(UI.boxUninstallUnsafe, { command: u.UNINSTALL_MANUAL_COMMAND }) }
       }
-      // 3. l'UNICO comando privilegiato: una COSTANTE, mai composta con dati
+      // 3. l'UNICO comando privilegiato: una COSTANTE, mai composto con dati
       // (OBR1: osascript col suo percorso di sistema, mai per nome)
       const r = await engineProbeDeps
         .runCli(SYSTEM_OSASCRIPT, [...u.UNINSTALL_OSASCRIPT_ARGV], 600_000)

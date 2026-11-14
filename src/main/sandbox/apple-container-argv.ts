@@ -332,6 +332,26 @@ export function appleLsJsonIds(stdout: string): string[] | null {
   return ids
 }
 
+/**
+ * CC2 (fase computer-card): lo stato del box dall'uscita di `ls -a --format
+ * json` (PURO, fixture ls-a-json): il `status.state` della VOCE del box —
+ * 'running' se gira, qualunque altro stato → 'stopped'; il box ASSENTE
+ * dall'elenco → 'missing'; JSON illeggibile → 'unknown' (non si indovina
+ * MAI: chi chiama lo mostra e riprova alla prossima lettura).
+ */
+export function appleBoxStateFromLsJson(stdout: string, container: string): 'running' | 'stopped' | 'missing' | 'unknown' {
+  let o: unknown
+  try { o = JSON.parse(stdout) } catch { return 'unknown' }
+  if (!Array.isArray(o)) return 'unknown'
+  for (const el of o) {
+    const id = (el as { configuration?: { id?: unknown }; id?: unknown })?.configuration?.id ?? (el as { id?: unknown })?.id
+    if (id !== container) continue
+    const state = (el as { status?: { state?: unknown } })?.status?.state
+    return state === 'running' ? 'running' : 'stopped'
+  }
+  return 'missing'
+}
+
 /** Il riferimento dell'immagine NORMALIZZATO (PURO): via il prefisso docker.io/library/. */
 export function normalizeAppleImageRef(ref: string): string {
   return ref.startsWith('docker.io/library/') ? ref.slice('docker.io/library/'.length) : ref

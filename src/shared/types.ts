@@ -750,6 +750,10 @@ export type SandbotEvent =
   // fase 19a (V3.4): lo stato dello SCHERMO di un bot è cambiato (browser
   // aperto/chiuso, controllo attivo, richiesta di presa di controllo in attesa)
   | { type: 'screen'; agentId: string; status: ScreenStatus }
+  // CC2 (fase computer-card): lo stato del BOX — il computer del bot — è
+  // CAMBIATO (ensure riuscito, stop esplicito, lettura del daemon). La card
+  // «Computer» lo mostra; l'evento parte SOLO al cambio
+  | { type: 'box'; runtime: BoxRuntime }
   // fase 19b (T4.1): una nuova riga di computer_actions o un cambio di stato
   // di shell_jobs — il feed «Attività» e la vista File del PROPRIETARIO
   // ricaricano (niente payload pesante: la UI legge quello che serve)
@@ -772,6 +776,21 @@ export interface ScreenStatus {
    * in attesa) — il timer di inattività del browser è sospeso.
    */
   held?: boolean
+}
+
+/**
+ * CC2 (fase computer-card): lo stato del BOX, il computer Linux del bot dove
+ * girano comandi, file e browser. Lo tiene il daemon (box-runtime.ts) e lo
+ * manda alla UI con l'evento `box` (solo al cambio) e la RPC `box:runtime`.
+ */
+export interface BoxRuntime {
+  /**
+   * running: il box gira · stopped: c'è ma non gira · missing: non c'è più ·
+   * unknown: non ancora letto (o lettura caduta: non si indovina MAI).
+   */
+  state: 'running' | 'stopped' | 'missing' | 'unknown'
+  /** quando è entrato in questo stato (ms dall'epoch). */
+  since: number
 }
 
 // ---- fase 19b (T3/T4): i file e l'attività del computer del bot ----
@@ -1265,6 +1284,8 @@ export interface SandbotApi {
   boxImageRemove(): Promise<{ ok: boolean; error?: string }>
   boxBoxFilesRemove(): Promise<{ ok: boolean; error?: string }>
   boxSpacePrune(): Promise<{ ok: boolean; error?: string }>
+  /** CC2 (fase computer-card): lo stato del box (la RPC rilegge e risponde). */
+  boxRuntime(): Promise<BoxRuntime>
   memoryModelRemove(): Promise<{ freedBytes: number }>
   // fase box-container (BX4): il motore del computer dei bot
   boxEngineStatus(): Promise<EngineStatusInfo>

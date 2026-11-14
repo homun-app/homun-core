@@ -29,6 +29,8 @@ import { resolveBoxPath } from './box-paths'
 import { enoughDiskSpace, freeDiskBytesOf, BOX_BUILD_ESTIMATED_BYTES } from './disk-space'
 // fase box-container (BX1): il MOTORE del box (docker o apple-container)
 import { activeBoxEngine } from './engine'
+// CC2 (fase computer-card): lo stato del box in memoria (evento `box` alla UI)
+import { setBoxRuntime } from './box-runtime'
 // OBD3 (fase onboarding-b-dettagli): il parse PURO dell'avanzamento del build
 import { parseBuildProgress } from './build-progress'
 import {
@@ -729,6 +731,9 @@ export async function ensureBoxContainer(): Promise<void> {
         }
       }
     }
+    // CC2 (fase computer-card): l'ensure È RIUSCITO col box riusato — il
+    // computer del bot GIRA (un fatto che già sappiamo, nessuno spawn in più)
+    setBoxRuntime('running')
     return
   }
   // N1 (fase 13 correzioni 3): il MOTIVO di ogni ricreazione una riga nel log
@@ -798,6 +803,10 @@ export async function ensureBoxContainer(): Promise<void> {
       })
       .catch(() => undefined)
   }
+  // CC2 (fase computer-card): l'ensure È RIUSCITO col box nato o ricreato —
+  // il computer del bot GIRA (se l'ensure FALLISCE non si arriva qui: lo
+  // stato non si indovina, lo dirà la prossima LETTURA)
+  setBoxRuntime('running')
 }
 
 export async function execCommand(agentId: string, command: string, opts: ExecOptions = {}): Promise<ExecResult> {

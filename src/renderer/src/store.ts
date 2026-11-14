@@ -1,7 +1,7 @@
 // State renderer: agenti, transcript dell'agente attivo, eventi dal main.
 import { useMemo } from 'react'
 import { create } from 'zustand'
-import type { Agent, TranscriptEntry, SandbotEvent, OnboardingStatus, OnboardingStepId, ProviderConfig, ProviderPublic, PermissionsConfig, ConnectorInfo, TaskInfo, GroupInfo, GroupMessageInfo, SubagentInfo, AgentAvatar, TurnEnd, ScreenStatus, MainModel, ComposioStatusInfo, ComposioGatewayStatusInfo, ReadingPageRef, BoxSetupState } from '../../shared/types'
+import type { Agent, TranscriptEntry, SandbotEvent, OnboardingStatus, OnboardingStepId, ProviderConfig, ProviderPublic, PermissionsConfig, ConnectorInfo, TaskInfo, GroupInfo, GroupMessageInfo, SubagentInfo, AgentAvatar, TurnEnd, ScreenStatus, BoxRuntime, MainModel, ComposioStatusInfo, ComposioGatewayStatusInfo, ReadingPageRef, BoxSetupState } from '../../shared/types'
 import type { BoxSetupRowId } from '../../shared/box-setup-plan'
 import type { UpdateChannel } from '../../shared/update-channel'
 // fase 16c correzioni (R4): la regola del modello risolto, condivisa col daemon
@@ -166,6 +166,8 @@ interface Store {
   computerTabByAgent: Record<string, ComputerTab>
   /** fase 19a (V3.4): ultimo stato dello schermo per bot (evento screen) */
   screenStatus: Record<string, ScreenStatus>
+  /** CC2 (fase computer-card): lo stato del BOX, il computer del bot (evento box; null = non ancora letto) */
+  boxRuntime: BoxRuntime | null
   /** fase 16 (U3): l'utente sta scrivendo nel composer di QUESTO bot */
   typingAgentId: string | null
   /** fase 16 (U3): ultimo delta per agente (testo in streaming → speaking) */
@@ -388,6 +390,7 @@ export const useStore = create<Store>((set, get) => ({
   computerPanel: { open: false, tab: 'activity', mode: 'view' },
   computerTabByAgent: {},
   screenStatus: {},
+  boxRuntime: null,
   typingAgentId: null,
   lastDeltaAt: {},
   lastSendAt: {},
@@ -665,6 +668,11 @@ export const useStore = create<Store>((set, get) => ({
         // fase 19a (V3.4): lo stato dello schermo di un bot è cambiato
         case 'screen': {
           set({ screenStatus: { ...s.screenStatus, [e.agentId]: e.status } })
+          break
+        }
+        // CC2 (fase computer-card): lo stato del BOX è cambiato (solo al cambio)
+        case 'box': {
+          set({ boxRuntime: e.runtime })
           break
         }
         // fase memoria-engramma (M6): download del modello e indicizzazione

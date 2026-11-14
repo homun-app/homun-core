@@ -252,6 +252,8 @@ const api: SandbotApi = {
   boxImageRemove: () => ipcRenderer.invoke('box:image-remove'),
   boxBoxFilesRemove: () => ipcRenderer.invoke('box:box-files-remove'),
   boxSpacePrune: () => ipcRenderer.invoke('box:space-prune'),
+  /** CC2 (fase computer-card): lo stato del box (la RPC RILEGGE e risponde) */
+  boxRuntime: () => ipcRenderer.invoke('box:runtime'),
   memoryModelRemove: () => ipcRenderer.invoke('memory:model-remove'),
   // fase box-container (BX4): il motore nelle Impostazioni
   boxEngineStatus: () => ipcRenderer.invoke('box:engine-status'),

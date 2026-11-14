@@ -454,6 +454,21 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
     })
   }
 
+  // CC2 (fase computer-card): lo STATO DEL BOX in memoria (evento `box` alla
+  // UI, solo al cambio). Si REGISTRA qui e si LEGGE SUBITO una volta
+  // all'avvio (con la modalità box attiva); il tick la rilegge ogni 60 s
+  // SOLO con un client UI connesso — mai un polling a vuoto con l'app chiusa
+  {
+    const { runDockerRaw } = await import('../main/sandbox')
+    const boxRuntimeMod = await import('../main/sandbox/box-runtime')
+    boxRuntimeMod.initBoxRuntime({
+      emit: (e) => broadcast(e),
+      run: (argv, opts) => runDockerRaw(argv, opts),
+      boxMode: () => sandboxMode() === 'box'
+    })
+    void boxRuntimeMod.refreshBoxRuntime().catch((e) => console.error('[sandbotd] lettura dello stato del box:', e))
+  }
+
   // fase 6 (§3bis L9): ultima notifica consegnata per agente (throttle 5 s)
   const lastNotified = new Map<string, number>()
   const emit = (e: SandbotEvent): void => {
@@ -951,6 +966,15 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
         screen.tickScreen(Date.now())
       } catch (e) {
         console.error('[sandbotd] scadenze schermo:', e)
+      }
+      // CC2 (fase computer-card): la rilettura dello stato del box (il tick
+      // corre ogni 30 s; la spaziatura a 60 s e il SOLO con la UI connessa
+      // li decide tickBoxRuntime)
+      try {
+        const boxRuntimeMod = await import('../main/sandbox/box-runtime')
+        await boxRuntimeMod.tickBoxRuntime(Date.now(), server.hasUi())
+      } catch (e) {
+        console.error('[sandbotd] stato del box:', e)
       }
       // fase 19b (T2.3): le scadenze del terminale — capability non usate e
       // sessioni senza input da 30 minuti (chiuse col codice 4002)

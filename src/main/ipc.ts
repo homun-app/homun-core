@@ -123,6 +123,8 @@ export const DAEMON_RPC_CHANNELS = [
   'box:docker-status', 'box:docker-retry',
   // fase box-container (BX3): lo spazio su disco del computer dei bot
   'box:disk-space', 'box:image-remove', 'box:box-files-remove', 'box:space-prune',
+  // CC2 (fase computer-card): lo stato del box per la card «Computer»
+  'box:runtime',
   'memory:model-remove',
   // fase box-container (BX4): il motore nelle Impostazioni
   'box:engine-status', 'box:engine-set', 'box:engine-start', 'box:engine-kernel-install',

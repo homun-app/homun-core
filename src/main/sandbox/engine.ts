@@ -174,6 +174,14 @@ export interface BoxEngineReads {
   imageSizeArgv(tag: string): string[]
   /** i byte dell'immagine intera dall'uscita dell'inspect (null = illeggibile). */
   imageSizeBytes(imageInspectStdout: string): number | null
+  /**
+   * CC2 (fase computer-card): lo stato del box dall'uscita dell'ELENCO dei
+   * container (PURO, lo stesso argv di psArgv): 'running' | 'stopped' |
+   * 'missing' | 'unknown' — Apple dal `status.state` del `ls -a --format
+   * json`. Facoltativo: chi non c'è si legge con il ps + l'inspect
+   * containerRunning (Docker, gli argv di oggi).
+   */
+  boxState?(lsStdout: string, container: string): 'running' | 'stopped' | 'missing' | 'unknown'
 }
 
 /** Un motore del box: chi è, come si lancia un suo processo, i SUOI argv. */
