@@ -41,6 +41,13 @@
 //     (container, volumi, rete, immagine — vissuti nel log).
 // Se qualcosa dipende dal formato si corregge il codice, non la finta.
 //
+// BRV2 (fase box-apple-rete-vera): anche `network inspect` e `network ls`
+// stampano la FORMA delle fixture vere (network-inspect-homun-box,
+// network-ls-json): l'array di {configuration{…}, id, status{ipv4Gateway,
+// ipv4Subnet, ipv6Subnet}}. Il vecchio {name, internal, subnets[]} era un
+// formato INVENTATO: il parse vero non lo vedrà MAI dalla CLI 1.7.1, e le
+// sonde restavano verdi col difetto. Lo stato resta della finta: homun-box
+// 192.168.128.0/24 gateway .1, homun-box-isolated una sottorete sua.
 // Il DIALETTO Docker (i test di confronto dei motori passano qui i loro
 // argv: `ps`, `inspect -f`, `create`, `image rm`, `builder`): quelle
 // chiamate restano come prima, e in quella corsa volume create resta
@@ -293,9 +300,40 @@ function scanState(opts = {}) {
   return { box, networks, volumes, built }
 }
 
-/** Il JSON dell'inspect di una rete: subnet e gateway della rete richiesta. */
-const networkJson = (name) =>
-  JSON.stringify({ name, internal: true, subnets: [{ subnet: name === 'homun-box-isolated' ? '192.0.16.0/24' : '192.0.15.0/24', gateway: name === 'homun-box-isolated' ? '192.0.16.1' : '192.0.15.1' }] })
+/**
+ * BRV2 (fase box-apple-rete-vera): l'elemento di una rete nella FORMA della
+ * fixture VERA (network-inspect-homun-box / network-ls-json):
+ * {configuration{creationDate, labels, mode, name, options, plugin}, id,
+ * status{ipv4Gateway, ipv4Subnet, ipv6Subnet}} — MAI il {name, internal,
+ * subnets[]} inventato di prima, il formato che nascondeva il difetto del
+ * parse (le vecchie regex non scattavano su quello VERO). Lo Stato è della
+ * finta: homun-box 192.168.128.0/24 gateway .1 (i VALORI della fixture),
+ * homun-box-isolated una sottorete SUA, diversa; default quella del NAT
+ * della sua fixture. Il gateway/sottorete che homun-box DICHIARA si può
+ * pilotare (SANDBOT_TEST_CONTAINER_GATEWAY/SUBNET): è l'indirizzo che il
+ * daemon deve ascoltare col secondo ascolto del proxy (nei test 127.0.0.1,
+ * come l'host INIETTABILE dei test del proxy — l'unico bindable senza vmnet).
+ */
+const networkState = (name) => {
+  if (name === 'homun-box-isolated') return { gateway: '192.0.16.1', subnet: '192.0.16.0/24', ipv6: 'fdcb:b3be:434:c544::/64' }
+  if (name === 'default') return { gateway: '192.168.64.1', subnet: '192.168.64.0/24', ipv6: 'fdf1:4449:9256:c8aa::/64' }
+  const gateway = process.env.SANDBOT_TEST_CONTAINER_GATEWAY ?? '192.168.128.1'
+  const subnet = process.env.SANDBOT_TEST_CONTAINER_SUBNET ?? '192.168.128.0/24'
+  return { gateway, subnet, ipv6: 'fdcb:b3be:434:c533::/64' }
+}
+
+/** L'elemento di una rete: le CHIAVI della fixture, i valori dello stato della finta. */
+const networkElement = (name) => {
+  const st = networkState(name)
+  return {
+    configuration: { creationDate: CREATED, labels: {}, mode: name === 'default' ? 'nat' : 'hostOnly', name, options: {}, plugin: 'container-network-vmnet' },
+    id: name,
+    status: { ipv4Gateway: st.gateway, ipv4Subnet: st.subnet, ipv6Subnet: st.ipv6 }
+  }
+}
+
+/** Il JSON dell'inspect di una rete: l'array di UN elemento, nella forma della fixture. */
+const networkJson = (name) => JSON.stringify([networkElement(name)])
 
 // ---- BAV1: le FORME VERE delle fixture, riempite con lo stato della finta ----
 
@@ -601,7 +639,9 @@ if (argv[0] === 'network') {
     out(networkJson(name)); process.exit(0)
   }
   if (argv[1] === 'ls' || argv[1] === 'list') {
-    out(JSON.stringify([...scanState().networks].map((n) => ({ configuration: { name: n }, id: n }))))
+    // BRV2: la forma della fixture network-ls-json — l'array di elementi
+    // COMPLETI ({configuration, id, status}), non le voci col solo nome
+    out(JSON.stringify([...scanState().networks].sort().map(networkElement)))
     process.exit(0)
   }
   die(1, `container: unknown network subcommand: ${argv[1] ?? ''}`)

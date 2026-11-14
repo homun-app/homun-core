@@ -74,11 +74,12 @@ describe('BX5: la CLI finta di container — i comportamenti per variabile d\'am
     expect(run('ready', ['volume', 'delete', 'sandbot-box']).status).toBe(0)
   })
 
-  it('network inspect homun-box → il gateway della rete interna', () => {
+  it('BRV2 network inspect homun-box → il gateway .1 della sottorete 192.168.128.0/24, dalla FORMA della fixture', () => {
     const r = run('ready', ['network', 'inspect', 'homun-box'])
     expect(r.status).toBe(0)
-    expect(r.stdout).toContain('gateway')
-    expect(r.stdout).toMatch(/192\.0\.\d+\.1/)
+    const net = JSON.parse(r.stdout)
+    expect(net[0].status.ipv4Gateway).toBe('192.168.128.1')
+    expect(net[0].status.ipv4Subnet).toBe('192.168.128.0/24')
   })
 
   // BR1 (fase box-rete): la CLI finta RIFIUTA un run -d senza --network —
@@ -492,6 +493,89 @@ describe('BAV1: la finta stampa le FORME vere (stesse chiavi delle fixture)', ()
     const r = fake(['ls', '-a', '-q'])
     expect(r.status).toBe(0)
     expect(r.stdout.trim()).toBe('sandbot-box')
+  })
+})
+
+// ---- BRV2 (fase box-apple-rete-vera): anche la RETE parla la fixture ----
+// `network inspect` e `network ls` della finta stampano la FORMA delle
+// fixture VERE (network-inspect-homun-box, network-ls-json): l'array di
+// {configuration{creationDate, labels, mode, name, options, plugin}, id,
+// status{ipv4Gateway, ipv4Subnet, ipv6Subnet}} — MAI il {name, internal,
+// subnets[]} inventato di prima (il formato che nascondeva il difetto del
+// parse). Lo stato resta quello della finta: homun-box 192.168.128.0/24
+// gateway .1; homun-box-isolated una sottorete SUA, diversa. I VALORI del
+// gateway/sottorete di homun-box si possono pilotare (SANDBOT_TEST_
+// CONTAINER_GATEWAY/SUBNET) come i test del proxy iniettano 127.0.0.1:
+// l'indirizzo dichiarato è quello che il daemon deve ascoltare.
+describe('BRV2: la finta stampa la rete nella FORMA della fixture (stesse chiavi alla stessa profondità)', () => {
+  it('network inspect homun-box: l\'elemento della fixture, con gateway .1 e sottorete 192.168.128.0/24', () => {
+    const logFile = join(TMP, `log-brv2-net-${Date.now()}.jsonl`)
+    const env = { PATH: process.env.PATH, SANDBOT_TEST_CONTAINER_MODE: 'ready', SANDBOT_TEST_CONTAINER_LOG: logFile }
+    const fake = (argv: string[]) => spawnSync(process.execPath, [FAKE, ...argv], { encoding: 'utf8', env })
+    const r = fake(['network', 'inspect', 'homun-box'])
+    expect(r.status).toBe(0)
+    const got = JSON.parse(r.stdout)
+    const want = JSON.parse(fixtureBody('network-inspect-homun-box.txt'))
+    expect(shapeOf(got[0])).toEqual(shapeOf(want[0]))
+    expect(got[0].configuration.name).toBe('homun-box')
+    expect(got[0].configuration.mode).toBe('hostOnly')
+    expect(got[0].id).toBe('homun-box')
+    expect(got[0].status.ipv4Gateway).toBe('192.168.128.1')
+    expect(got[0].status.ipv4Subnet).toBe('192.168.128.0/24')
+    // il vecchio formato INVENTATO ({name, internal, subnets[]}) è VIA
+    expect(got[0].internal).toBeUndefined()
+    expect(got[0].subnets).toBeUndefined()
+  })
+
+  it('network inspect homun-box-isolated: la STESSA forma ma una sottorete SUA, diversa da homun-box', () => {
+    const logFile = join(TMP, `log-brv2-iso-${Date.now()}.jsonl`)
+    const env = { PATH: process.env.PATH, SANDBOT_TEST_CONTAINER_MODE: 'ready', SANDBOT_TEST_CONTAINER_LOG: logFile }
+    const fake = (argv: string[]) => spawnSync(process.execPath, [FAKE, ...argv], { encoding: 'utf8', env })
+    expect(fake(['network', 'create', '--internal', 'homun-box-isolated']).status).toBe(0)
+    const r = fake(['network', 'inspect', 'homun-box-isolated'])
+    expect(r.status).toBe(0)
+    const got = JSON.parse(r.stdout)
+    const want = JSON.parse(fixtureBody('network-inspect-homun-box.txt'))
+    expect(shapeOf(got[0])).toEqual(shapeOf(want[0]))
+    expect(got[0].configuration.mode).toBe('hostOnly')
+    expect(got[0].status.ipv4Gateway).not.toBe('192.168.128.1')
+    expect(got[0].status.ipv4Subnet).not.toBe('192.168.128.0/24')
+    expect(got[0].status.ipv4Subnet).toMatch(/^\d+\.\d+\.\d+\.\d+\/\d+$/)
+  })
+
+  it('network ls --format json: la forma della fixture network-ls-json (le voci dello stato della finta)', () => {
+    const logFile = join(TMP, `log-brv2-ls-${Date.now()}.jsonl`)
+    const env = { PATH: process.env.PATH, SANDBOT_TEST_CONTAINER_MODE: 'ready', SANDBOT_TEST_CONTAINER_LOG: logFile }
+    const fake = (argv: string[]) => spawnSync(process.execPath, [FAKE, ...argv], { encoding: 'utf8', env })
+    const r = fake(['network', 'ls', '--format', 'json'])
+    expect(r.status).toBe(0)
+    const got = JSON.parse(r.stdout)
+    const want = JSON.parse(fixtureBody('network-ls-json.txt'))
+    expect(Array.isArray(got)).toBe(true)
+    expect(got.length).toBeGreaterThanOrEqual(1)
+    // il riferimento di forma è la voce homun-box della fixture (labels
+    // vuote come la finta; la voce default porta un label builtin suo)
+    const wantHomun = want.find((n: { id: string }) => n.id === 'homun-box')
+    for (const el of got) expect(shapeOf(el)).toEqual(shapeOf(wantHomun))
+    const homun = got.find((n: { id: string }) => n.id === 'homun-box')
+    expect(homun.status.ipv4Gateway).toBe('192.168.128.1')
+    expect(homun.status.ipv4Subnet).toBe('192.168.128.0/24')
+  })
+
+  it('i VALORI di homun-box si pilotano (gateway/sottorete dichiarati): il percorso dei test del proxy e della sonda', () => {
+    const logFile = join(TMP, `log-brv2-env-${Date.now()}.jsonl`)
+    const env = {
+      PATH: process.env.PATH, SANDBOT_TEST_CONTAINER_MODE: 'ready', SANDBOT_TEST_CONTAINER_LOG: logFile,
+      SANDBOT_TEST_CONTAINER_GATEWAY: '127.0.0.1', SANDBOT_TEST_CONTAINER_SUBNET: '127.0.0.0/8'
+    }
+    const r = spawnSync(process.execPath, [FAKE, 'network', 'inspect', 'homun-box'], { encoding: 'utf8', env })
+    expect(r.status).toBe(0)
+    const got = JSON.parse(r.stdout)
+    expect(got[0].status.ipv4Gateway).toBe('127.0.0.1')
+    expect(got[0].status.ipv4Subnet).toBe('127.0.0.0/8')
+    // la forma NON cambia: sono i soli VALORI dello stato della finta
+    const want = JSON.parse(fixtureBody('network-inspect-homun-box.txt'))
+    expect(shapeOf(got[0])).toEqual(shapeOf(want[0]))
   })
 })
 
