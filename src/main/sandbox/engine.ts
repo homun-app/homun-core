@@ -38,12 +38,17 @@ export interface BoxEngineArgv {
   stop(container: string): string[]
   boxCreate(container: string, volume: string, network: 'bridge' | 'none', limits: BoxLimits, image: string): string[]
   boxRm(container: string): string[]
-  boxInitCheck(container: string): string[]
-  boxMounts(container: string): string[]
+  /**
+   * G2: l'init del container esistente. Facoltativo: i motori che leggono
+   * TUTTI i fatti da un solo inspect (Apple, BAV2: reads.boxInspectArgv) non
+   * lo implementano — Docker tiene i suoi quattro inspect -f di sempre.
+   */
+  boxInitCheck?(container: string): string[]
+  boxMounts?(container: string): string[]
   boxWritable(container: string): string[]
-  containerImage(container: string): string[]
+  containerImage?(container: string): string[]
   /** BR3: la RETE del box esistente (l'inspect da confrontare con networkNameOf). */
-  containerNetwork(container: string): string[]
+  containerNetwork?(container: string): string[]
   ensureHome(container: string, agentId: string): string[]
   imageInspect(tag: string): string[]
   /** BX3: la dimensione in byte della NOSTRA immagine. */
@@ -119,6 +124,58 @@ export interface BoxEngineArgv {
   removeVolumes(names: string[]): string[]
 }
 
+/** I fatti del box esistente che l'ensure decide (gli stessi di BoxEnsureFacts). */
+export interface BoxReadFacts {
+  /** G2/BAV4: il box è nato CON l'init (false → recreate 'senza-init'). */
+  initOk: boolean
+  /** punto 1: l'immagine del box è quella attesa; undefined = non si sa. */
+  imageOk?: boolean
+  /** l'immagine VECCHIA da togliere quando il box riparte con la nuova (BX3). */
+  staleImage: string | null
+  /** M4: il volume dei plugin montato RO; undefined = non si sa. */
+  pluginsMountOk?: boolean
+  /** P2: il volume del browser montato RW; undefined = non si sa. */
+  browserMountOk?: boolean
+  /** BR3: la rete è quella della modalità; undefined = non si sa. */
+  networkOk?: boolean
+}
+
+/**
+ * BAV2: le LETTURE del box PER MOTORE, PURA (argv da costruire, stdout da
+ * leggere). Apple: `ls -a --format json` per l'esistenza, UN solo
+ * `inspect` per TUTTI i fatti del box esistente, `volume ls --format json`
+ * per i nomi, il JSON dell'`image inspect` per la dimensione. Docker non
+ * le implementa: le sue letture restano i template Go dell'argv.
+ */
+export interface BoxEngineReads {
+  /** l'argv dell'elenco dei container del motore. */
+  psArgv(container: string): string[]
+  /** il box c'è, dall'uscita dell'elenco (l'exit 0 lo ha già controllato chi chiama). */
+  psExists(psStdout: string, container: string): boolean
+  /** l'argv dell'inspect che porta TUTTI i fatti del box esistente. */
+  boxInspectArgv(container: string): string[]
+  /**
+   * I fatti dall'uscita dell'inspect (PURO). null = inspect caduto o JSON
+   * illeggibile: le regole di oggi (non si ricrea, salvo none che fallisce chiuso).
+   */
+  boxFacts(inspectStdout: string, opts: {
+    /** il tag atteso dell'immagine (già normalizzato, com'è boxImage()). */
+    expectedImage: string
+    /** la build dell'immagine è riuscita (senza di lei imageOk resta ignoto). */
+    imageKnown: boolean
+    /** la rete che la modalità corrente richiede (networkNameOf). */
+    networkName: string
+  }): BoxReadFacts | null
+  /** l'argv dell'elenco dei volumi del motore (la migrazione cerca i vecchi). */
+  volumeLsArgv(): string[]
+  /** i nomi dei volumi dall'uscita dell'elenco (null = illeggibile). */
+  volumeNames(volumeLsStdout: string): string[] | null
+  /** l'argv della dimensione dell'immagine. */
+  imageSizeArgv(tag: string): string[]
+  /** i byte dell'immagine intera dall'uscita dell'inspect (null = illeggibile). */
+  imageSizeBytes(imageInspectStdout: string): number | null
+}
+
 /** Un motore del box: chi è, come si lancia un suo processo, i SUOI argv. */
 export interface BoxEngine {
   readonly id: BoxEngineId
@@ -127,6 +184,14 @@ export interface BoxEngine {
   /** L'env dei processi figli (docker: + DOCKER_HOST quando serve). */
   childEnv(env: NodeJS.ProcessEnv): Record<string, string>
   readonly argv: BoxEngineArgv
+  /**
+   * BAV2 (fase box-apple-cli-vera): le LETTURE del motore, quando parlano un
+   * formato DAI NOMI PER RIGA di Docker (Apple: JSON puri — ls --format json,
+   * UN solo inspect per tutti i fatti del box). Mancano → le letture di oggi
+   * (ps + i quattro inspect -f dell'argv, i template Go di Docker che lì
+   * sono validi). Podman e WSL2 le riuseranno.
+   */
+  reads?: BoxEngineReads
   /**
    * BR3 (fase box-rete): la rete che questo motore usa per la modalità —
    * Docker i nomi di Docker ('bridge' | 'none'), Apple le reti di Homun

@@ -20,7 +20,7 @@ import {
   appleNetworkInspectArgv,
   appleIsolateLinkDownArgv,
   appleIsolationCheckArgv,
-  appleContainerNetworkArgv,
+  appleBoxInspectArgv,
   appleBrowserMcpArgv,
   browserMcpFlagsWithGateway,
   parseNetworkGateway,
@@ -126,8 +126,8 @@ describe('BR1: none → la rete isolata e le interfacce GIÙ (difesa in profondi
     expect(script).toContain('lo')
   })
 
-  it('BR3/BAV1: la rete DEL box esistente si ispeziona SENZA --format (il JSON la dice)', () => {
-    expect(appleContainerNetworkArgv('sandbot-box')).toEqual(['inspect', 'sandbot-box'])
+  it('BAV2: TUTTI i fatti del box esistente da UN solo inspect, senza --format (il JSON li dice)', () => {
+    expect(appleBoxInspectArgv('sandbot-box')).toEqual(['inspect', 'sandbot-box'])
   })
 })
 

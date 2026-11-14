@@ -35,11 +35,13 @@ export interface EngineDf {
 type RawDf = Array<{ Type?: string; Size?: string | number; Reclaimable?: string | number }>
 
 /**
- * Il parse dell'output di `system df --format json` (PURO). Accetta l'array
- * di voci di docker; il formato esatto della CLI di Apple è tra le cose «da
- * verificare dal vivo» (stessa forma: voci col Type e Size/Reclaimable).
- * Output non JSON o senza voci riconoscibili → null: le righe restano senza
- * dimensione, mai numeri inventati.
+ * Il parse dell'output di `system df --format json` (PURO). Accenta le DUE
+ * forme vere: l'array di voci di docker (Type/Size/Reclaimable) e, da
+ * BAV2 (fase box-apple-cli-vera), l'OGGETTO della CLI di Apple
+ * `{containers, images, volumes}` con `sizeInBytes` e `reclaimable`
+ * (fixture system-df-json — NON l'array di Docker). Output non JSON o senza
+ * voci riconoscibili → null: le righe restano senza dimensione, mai numeri
+ * inventati.
  */
 export function parseDfJson(stdout: string): EngineDf | null {
   let parsed: unknown
@@ -47,6 +49,33 @@ export function parseDfJson(stdout: string): EngineDf | null {
     parsed = JSON.parse(stdout)
   } catch {
     return null
+  }
+  // BAV2: la forma Apple — un oggetto con le sezioni containers/images/volumes
+  if (!Array.isArray(parsed) && typeof parsed === 'object' && parsed !== null) {
+    const j = parsed as Record<string, { sizeInBytes?: unknown; reclaimable?: unknown }>
+    const section = (name: string): { sizeInBytes: number; reclaimable: number } | null => {
+      const s = j[name]
+      if (s === null || typeof s !== 'object') return null
+      const size = (s as { sizeInBytes?: unknown }).sizeInBytes
+      const rec = (s as { reclaimable?: unknown }).reclaimable
+      if (typeof size !== 'number' || !Number.isFinite(size)) return null
+      return { sizeInBytes: size, reclaimable: typeof rec === 'number' && Number.isFinite(rec) ? rec : 0 }
+    }
+    const images = section('images')
+    const containers = section('containers')
+    const volumes = section('volumes')
+    if (!images && !containers && !volumes) return null
+    // la CLI di Apple NON ha la voce della cache di build: resta a zero
+    return {
+      imagesBytes: images?.sizeInBytes ?? 0,
+      imagesReclaimableBytes: images?.reclaimable ?? 0,
+      containersBytes: containers?.sizeInBytes ?? 0,
+      containersReclaimableBytes: containers?.reclaimable ?? 0,
+      volumesBytes: volumes?.sizeInBytes ?? 0,
+      volumesReclaimableBytes: volumes?.reclaimable ?? 0,
+      buildCacheBytes: 0,
+      buildCacheReclaimableBytes: 0
+    }
   }
   const entries: RawDf = Array.isArray(parsed) ? (parsed as RawDf) : typeof parsed === 'object' && parsed !== null ? [parsed as RawDf[0]] : []
   const bytes = (v: string | number | undefined): number => {

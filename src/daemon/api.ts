@@ -2382,10 +2382,14 @@ export function buildApiMethods(
       const df = dfRaw && dfRaw.exitCode === 0 ? parseDfJson(dfRaw.stdout) : null
       let boxImageBytes: number | null = null
       if (df) {
-        const sz = await runDockerRaw(engine.argv.imageSize(boxImage()), { timeoutMs: 15_000 }).catch(() => null)
+        // BAV2 (fase box-apple-cli-vera): la dimensione la legge il MOTORE —
+        // Apple dal JSON dell'image inspect (variants[].size), Docker dal
+        // numero in USCITA del suo --format {{.Size}}
+        const sz = await runDockerRaw(engine.reads ? engine.reads.imageSizeArgv(boxImage()) : engine.argv.imageSize(boxImage()), { timeoutMs: 15_000 }).catch(() => null)
         if (sz && sz.exitCode === 0) {
-          const n = Number(sz.stdout.trim())
-          boxImageBytes = Number.isFinite(n) ? n : null
+          boxImageBytes = engine.reads
+            ? engine.reads.imageSizeBytes(sz.stdout)
+            : (() => { const n = Number(sz.stdout.trim()); return Number.isFinite(n) ? n : null })()
         }
       }
       // il modello locale: la dimensione del file installato, se c'è

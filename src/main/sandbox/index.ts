@@ -611,8 +611,12 @@ export async function ensureBoxContainer(): Promise<void> {
   // punto 1: l'immagine del box esiste (o viene costruita) PRIMA di tutto
   const image = boxImage()
   const imageOk = await ensureBoxImage()
-  const ps = await dockerRunner(activeBoxEngine().argv.ps(BOX_CONTAINER), { timeoutMs: 15_000 })
-  const exists = ps.exitCode === 0 && ps.stdout.trim().split('\n').includes(BOX_CONTAINER)
+  // BAV2 (fase box-apple-cli-vera): l'esistenza la legge il MOTORE — Apple
+  // `ls -a --format json` col parse puro, Docker il suo ps --filter di sempre
+  // (nomi per riga: i template Go lì sono validi)
+  const ps = await dockerRunner(engine.argv.ps(BOX_CONTAINER), { timeoutMs: 15_000 })
+  const exists = ps.exitCode === 0 &&
+    (engine.reads ? engine.reads.psExists(ps.stdout, BOX_CONTAINER) : ps.stdout.trim().split('\n').includes(BOX_CONTAINER))
   if (!imageOk && !exists) {
     throw new Error(
       lastBoxImageBuildError ??
@@ -624,42 +628,65 @@ export async function ensureBoxContainer(): Promise<void> {
   // SOLO a box ripartito con la nuova — mai due versioni dell'immagine
   let staleImage: string | null = null
   if (exists) {
-    // G2: un container nato PRIMA di --init non raccoglie gli zombie (PID 1 è
-    // `sleep infinity`) e con --pids-limit condiviso li accumula a ogni comando
-    // in background: si ricrea. Si rimuove SOLO il container — il volume con i
-    // dati dei bot non si tocca MAI. Inspect fallito/output inatteso: si tiene
-    // il container che funziona (la ricreazione è ottimale, non vitale).
-    const init = await dockerRunner(activeBoxEngine().argv.boxInitCheck(BOX_CONTAINER), { timeoutMs: 15_000 })
-    facts.initOk = !(init.exitCode === 0 && boxNeedsRecreateForInit(init.stdout))
-    if (facts.initOk) {
-      // punto 1: container nato con un'IMMAGINE DIVERSA (Dockerfile cambiato)
-      // → stessa regola di G2/H1. L'inspect fallito NON ricrea (imageOk resta
-      // undefined): un falso positivo fermerebbe i bot senza bisogno; con la
-      // build fallita non si ricrea nemmeno (l'immagine nuova non c'è).
-      if (imageOk) {
-        const img = await dockerRunner(activeBoxEngine().argv.containerImage(BOX_CONTAINER), { timeoutMs: 15_000 })
-        facts.imageOk = img.exitCode === 0 ? img.stdout.trim() === image : undefined
-        if (facts.imageOk === false && img.stdout.trim().startsWith(`${BOX_IMAGE_REPO}:`)) staleImage = img.stdout.trim()
+    if (engine.reads) {
+      // BAV2: TUTTI i fatti del box esistente da UN SOLO inspect JSON (Apple)
+      // — G2 (init), immagine, M4/P2 (mount) e BR3 (rete) insieme: un solo
+      // spawn invece di quattro. Inspect fallito o JSON illeggibile: le
+      // regole di oggi (non si ricrea, salvo none che fallisce chiuso)
+      const ins = await dockerRunner(engine.reads.boxInspectArgv(BOX_CONTAINER), { timeoutMs: 15_000 })
+      const f = ins.exitCode === 0
+        ? engine.reads.boxFacts(ins.stdout, { expectedImage: image, imageKnown: imageOk, networkName: engine.networkNameOf(network) })
+        : null
+      if (f) {
+        facts.initOk = f.initOk
+        facts.imageOk = f.imageOk
+        facts.pluginsMountOk = f.pluginsMountOk
+        facts.browserMountOk = f.browserMountOk
+        facts.networkOk = f.networkOk
+        staleImage = f.staleImage
+      } else {
+        facts.networkOk = network === 'none' ? false : undefined
       }
-      // M4 + P2: container nato PRIMA del volume dei plugin / del volume del
-      // browser → manca il mount corrispondente → si ricrea (solo il
-      // container; i volumi restano intatti). Inspect fallito: come sopra,
-      // NON si ricrea
-      const mounts = await dockerRunner(activeBoxEngine().argv.boxMounts(BOX_CONTAINER), { timeoutMs: 15_000 })
-      facts.pluginsMountOk = mounts.exitCode === 0 ? boxHasPluginsMountRo(mounts.stdout) : undefined
-      facts.browserMountOk = mounts.exitCode === 0 ? boxHasBrowserMountRw(mounts.stdout) : undefined
-      // BR3 (fase box-rete): la RETE del box esistente contro quella che la
-      // modalità corrente richiede — la rete si legge solo alla creazione, un
-      // box nato bridge resta bridge dopo il passaggio a none. Inspect caduto:
-      // in `none` si ricrea (fail closed: mai un box none non verificato), in
-      // `bridge` la regola di oggi (si tiene il box che funziona)
-      const netInsp = await dockerRunner(engine.argv.containerNetwork(BOX_CONTAINER), { timeoutMs: 15_000 })
-      facts.networkOk = netInsp.exitCode === 0
-        ? netInsp.stdout.trim() === engine.networkNameOf(network)
-        : network === 'none' ? false : undefined
-      const start = await dockerRunner(activeBoxEngine().argv.start(BOX_CONTAINER), { timeoutMs: 30_000 })
+    } else {
+      // G2: un container nato PRIMA di --init non raccoglie gli zombie (PID 1 è
+      // `sleep infinity`) e con --pids-limit condiviso li accumula a ogni comando
+      // in background: si ricrea. Si rimuove SOLO il container — il volume con i
+      // dati dei bot non si tocca MAI. Inspect fallito/output inatteso: si tiene
+      // il container che funziona (la ricreazione è ottimale, non vitale).
+      const init = await dockerRunner(engine.argv.boxInitCheck!(BOX_CONTAINER), { timeoutMs: 15_000 })
+      facts.initOk = !(init.exitCode === 0 && boxNeedsRecreateForInit(init.stdout))
+      if (facts.initOk) {
+        // punto 1: container nato con un'IMMAGINE DIVERSA (Dockerfile cambiato)
+        // → stessa regola di G2/H1. L'inspect fallito NON ricrea (imageOk resta
+        // undefined): un falso positivo fermerebbe i bot senza bisogno; con la
+        // build fallita non si ricrea nemmeno (l'immagine nuova non c'è).
+        if (imageOk) {
+          const img = await dockerRunner(engine.argv.containerImage!(BOX_CONTAINER), { timeoutMs: 15_000 })
+          facts.imageOk = img.exitCode === 0 ? img.stdout.trim() === image : undefined
+          if (facts.imageOk === false && img.stdout.trim().startsWith(`${BOX_IMAGE_REPO}:`)) staleImage = img.stdout.trim()
+        }
+        // M4 + P2: container nato PRIMA del volume dei plugin / del volume del
+        // browser → manca il mount corrispondente → si ricrea (solo il
+        // container; i volumi restano intatti). Inspect fallito: come sopra,
+        // NON si ricrea
+        const mounts = await dockerRunner(engine.argv.boxMounts!(BOX_CONTAINER), { timeoutMs: 15_000 })
+        facts.pluginsMountOk = mounts.exitCode === 0 ? boxHasPluginsMountRo(mounts.stdout) : undefined
+        facts.browserMountOk = mounts.exitCode === 0 ? boxHasBrowserMountRw(mounts.stdout) : undefined
+        // BR3 (fase box-rete): la RETE del box esistente contro quella che la
+        // modalità corrente richiede — la rete si legge solo alla creazione, un
+        // box nato bridge resta bridge dopo il passaggio a none. Inspect caduto:
+        // in `none` si ricrea (fail closed: mai un box none non verificato), in
+        // `bridge` la regola di oggi (si tiene il box che funziona)
+        const netInsp = await dockerRunner(engine.argv.containerNetwork!(BOX_CONTAINER), { timeoutMs: 15_000 })
+        facts.networkOk = netInsp.exitCode === 0
+          ? netInsp.stdout.trim() === engine.networkNameOf(network)
+          : network === 'none' ? false : undefined
+      }
+    }
+    if (facts.initOk) {
+      const start = await dockerRunner(engine.argv.start(BOX_CONTAINER), { timeoutMs: 30_000 })
       if (start.exitCode !== 0) throw new Error(`docker start fallito: ${start.stderr}`)
-      const w = await dockerRunner(activeBoxEngine().argv.boxWritable(BOX_CONTAINER), { timeoutMs: 15_000 })
+      const w = await dockerRunner(engine.argv.boxWritable(BOX_CONTAINER), { timeoutMs: 15_000 })
       facts.writable = w.exitCode === 0
     }
   }
@@ -936,8 +963,11 @@ export async function migrateLegacyBoxes(
     const failed: Array<{ agentId: string; from: string }> = []
     for (const a of agents) {
       const oldVolume = `sandbot-${a.id}-box`
-      const ls = await run(engine.argv.volumeLs(oldVolume))
-      if (ls.exitCode === 0 && ls.stdout.trim().split('\n').includes(oldVolume)) {
+      // BAV2: l'elenco dei volumi lo legge il MOTORE (Apple: volume ls
+      // --format json + parse puro; Docker: il suo volume ls --filter)
+      const ls = await run(engine.reads ? engine.reads.volumeLsArgv() : engine.argv.volumeLs(oldVolume))
+      const names = engine.reads ? engine.reads.volumeNames(ls.stdout) : ls.stdout.trim().split('\n')
+      if (ls.exitCode === 0 && (names ?? []).includes(oldVolume)) {
         const copy = await run(engine.argv.boxMigrate(oldVolume, a.id, image))
         if (copy.exitCode === 0) migrated.push({ agentId: a.id, from: `volume docker ${oldVolume}`, to: `/box/home/${a.id}` })
         else failed.push({ agentId: a.id, from: `volume docker ${oldVolume}` })

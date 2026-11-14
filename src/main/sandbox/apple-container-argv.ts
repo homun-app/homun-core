@@ -280,16 +280,12 @@ export function appleIsolationCheckArgv(container: string): string[] {
 }
 
 /**
- * BAV1: gli inspect del box MAI con --format — la CLI vera dice
- * `Error: Unknown option '--format'` ed esce 64. L'inspect senza opzioni
- * stampa l'array JSON VERO (fixture inspect-box): i fatti li legge il parse
- * puro di BAV2, non i template.
+ * BAV2 (fase box-apple-cli-vera): l'inspect DEL box, l'unico spawn da cui
+ * escono TUTTI i fatti del container esistente (init, immagine, mount, rete)
+ * — l'array JSON VERO della fixture inspect-box, letto dal parse puro
+ * parseAppleBoxInspect. Al posto dei quattro inspect -f di Docker.
  */
-export function appleBoxInitCheckArgv(container: string): string[] {
-  return ['inspect', container]
-}
-
-export function appleBoxMountsArgv(container: string): string[] {
+export function appleBoxInspectArgv(container: string): string[] {
   return ['inspect', container]
 }
 
@@ -297,13 +293,119 @@ export function appleBoxWritableArgv(container: string): string[] {
   return ['exec', container, 'test', '-w', `${BOX_MOUNT}/workspace`]
 }
 
-export function appleContainerImageArgv(container: string): string[] {
-  return ['inspect', container]
+// ---- BAV2: i parse PURI delle uscite JSON VERE (fixture container-1.7.1) ----
+
+/**
+ * Gli id dei container dall'uscita di `ls -a --format json` (PURO): l'array
+ * di oggetti `{configuration:{id,…}, status:{state,…}, id}` della fixture
+ * ls-a-json — l'ESISTENZA non passa più dai nomi per riga. null = non è
+ * JSON valido: il chiamante lo tratta come elenco vuoto, mai un errore che
+ * ferma i bot (le regole di oggi del ps).
+ */
+export function appleLsJsonIds(stdout: string): string[] | null {
+  let o: unknown
+  try { o = JSON.parse(stdout) } catch { return null }
+  if (!Array.isArray(o)) return null
+  const ids: string[] = []
+  for (const el of o) {
+    const id = (el as { configuration?: { id?: unknown }; id?: unknown })?.configuration?.id ?? (el as { id?: unknown })?.id
+    if (typeof id === 'string' && id !== '') ids.push(id)
+  }
+  return ids
 }
 
-/** BR3: la RETE del box esistente (dal JSON dell'inspect, confronto con appleNetworkOf). */
-export function appleContainerNetworkArgv(container: string): string[] {
-  return ['inspect', container]
+/** Il riferimento dell'immagine NORMALIZZATO (PURO): via il prefisso docker.io/library/. */
+export function normalizeAppleImageRef(ref: string): string {
+  return ref.startsWith('docker.io/library/') ? ref.slice('docker.io/library/'.length) : ref
+}
+
+/** I fatti del box esistente dall'UNICO inspect JSON (PURO, fixture inspect-box). */
+export interface AppleBoxInspect {
+  /** `status.state === 'running'`. */
+  running: boolean
+  /** `configuration.useInit` (G2/BAV4: nato senza --init → si ricrea una volta). */
+  useInit: boolean
+  /** `configuration.image.reference`, NORMALIZZATO (via docker.io/library/). */
+  imageRef: string
+  /** i mount: destinazione e sola lettura (`options` contiene "ro"). */
+  mounts: Array<{ destination: string; ro: boolean }>
+  /** `configuration.networks[0].network` (BR3). */
+  network: string
+}
+
+/**
+ * Il parse dell'uscita di `container inspect <box>` (PURO): TUTTI i fatti
+ * del box esistente da UN solo spawn — running, useInit, l'immagine
+ * normalizzata (docker.io/library/sandbot-box:x ≡ sandbot-box:x), i mount
+ * con il loro ro, la rete. null = JSON illeggibile o senza il container:
+ * le regole di oggi (non si ricrea, salvo none che fallisce chiuso).
+ */
+export function parseAppleBoxInspect(stdout: string): AppleBoxInspect | null {
+  let o: unknown
+  try { o = JSON.parse(stdout) } catch { return null }
+  if (!Array.isArray(o) || o.length === 0) return null
+  const c = (o[0] as { configuration?: Record<string, unknown>; status?: Record<string, unknown> })?.configuration
+  const st = (o[0] as { status?: Record<string, unknown> })?.status
+  if (!c || typeof c !== 'object') return null
+  const refRaw = (c.image as { reference?: unknown } | undefined)?.reference
+  const mountsRaw = Array.isArray(c.mounts) ? c.mounts : []
+  const mounts = mountsRaw.map((m) => {
+    const mount = m as { destination?: unknown; options?: unknown }
+    return {
+      destination: typeof mount.destination === 'string' ? mount.destination : '',
+      ro: Array.isArray(mount.options) && mount.options.includes('ro')
+    }
+  })
+  const networks = Array.isArray(c.networks) ? c.networks : []
+  const network = typeof (networks[0] as { network?: unknown } | undefined)?.network === 'string'
+    ? (networks[0] as { network: string }).network
+    : ''
+  return {
+    running: (st?.state as unknown) === 'running',
+    useInit: c.useInit === true,
+    imageRef: typeof refRaw === 'string' ? normalizeAppleImageRef(refRaw) : '',
+    mounts,
+    network
+  }
+}
+
+/**
+ * I nomi dei volumi dall'uscita di `volume ls --format json` (PURO): un nome
+ * per voce, dal campo `configuration.name` (fixture volume-ls-json). null =
+ * JSON illeggibile. La CLI NON ha --filter: il filtro lo fa chi chiama.
+ */
+export function appleVolumeNamesFromLsJson(stdout: string): string[] | null {
+  let o: unknown
+  try { o = JSON.parse(stdout) } catch { return null }
+  if (!Array.isArray(o)) return null
+  const names: string[] = []
+  for (const el of o) {
+    const name = (el as { configuration?: { name?: unknown } })?.configuration?.name
+    if (typeof name === 'string' && name !== '') names.push(name)
+  }
+  return names
+}
+
+/**
+ * La dimensione in byte dell'immagine INTERA dall'uscita di `image inspect`
+ * (PURO): la SOMMA dei `variants[].size` — ogni variante è l'immagine
+ * completa per una piattaforma (la fixture image-inspect ne ha una,
+ * 1 302 970 425 byte). Il `descriptor.size` del manifest NON è quello: sono
+ * i 375 byte del solo JSON dell'indice. null = JSON illeggibile.
+ */
+export function appleImageSizeBytesFromInspect(stdout: string): number | null {
+  let o: unknown
+  try { o = JSON.parse(stdout) } catch { return null }
+  if (!Array.isArray(o) || o.length === 0) return null
+  const variants = (o[0] as { variants?: unknown }).variants
+  if (!Array.isArray(variants) || variants.length === 0) return null
+  let total = 0
+  for (const v of variants) {
+    const size = (v as { size?: unknown }).size
+    if (typeof size !== 'number' || !Number.isFinite(size)) return null
+    total += size
+  }
+  return total
 }
 
 export function appleEnsureHomeArgv(container: string, agentId: string): string[] {

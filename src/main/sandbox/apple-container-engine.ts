@@ -7,8 +7,8 @@
 // (dove lo mette il pacchetto firmato di Apple).
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import type { BoxEngine, BoxEngineArgv } from './engine'
-import { BOX_CONTAINER, BOX_VOLUME } from './docker-argv'
+import type { BoxEngine, BoxEngineArgv, BoxEngineReads } from './engine'
+import { BOX_CONTAINER, BOX_VOLUME, BOX_IMAGE_REPO, PLUGINS_MOUNT, BROWSER_MOUNT } from './docker-argv'
 import {
   APPLE_BOX_NETWORK,
   appleNetworkOf,
@@ -25,11 +25,12 @@ import {
   appleStopArgv,
   appleBoxRunArgv,
   appleBoxRmArgv,
-  appleBoxInitCheckArgv,
-  appleBoxMountsArgv,
+  appleBoxInspectArgv,
+  appleLsJsonIds,
+  parseAppleBoxInspect,
+  appleVolumeNamesFromLsJson,
+  appleImageSizeBytesFromInspect,
   appleBoxWritableArgv,
-  appleContainerImageArgv,
-  appleContainerNetworkArgv,
   appleEnsureHomeArgv,
   appleImageInspectArgv,
   appleImageSizeArgv,
@@ -172,11 +173,7 @@ const argv: BoxEngineArgv = {
   stop: appleStopArgv,
   boxCreate: appleBoxRunArgv,
   boxRm: appleBoxRmArgv,
-  boxInitCheck: appleBoxInitCheckArgv,
-  boxMounts: appleBoxMountsArgv,
   boxWritable: appleBoxWritableArgv,
-  containerImage: appleContainerImageArgv,
-  containerNetwork: appleContainerNetworkArgv,
   ensureHome: appleEnsureHomeArgv,
   imageInspect: appleImageInspectArgv,
   imageSize: appleImageSizeArgv,
@@ -234,6 +231,39 @@ const argv: BoxEngineArgv = {
 }
 
 /**
+ * BAV2: le LETTURE del motore Apple — JSON puri, MAI template Go né nomi
+ * per riga. L'esistenza dall'elenco `ls -a --format json`, TUTTI i fatti
+ * del box esistente da UN solo `inspect` (un solo spawn invece di quattro),
+ * i nomi dei volumi dal `volume ls --format json`, la dimensione
+ * dell'immagine dal JSON dell'`image inspect` (variants[].size).
+ */
+const reads: BoxEngineReads = {
+  psArgv: (container) => applePsArgv(),
+  psExists: (stdout, container) => appleLsJsonIds(stdout)?.includes(container) ?? false,
+  boxInspectArgv: appleBoxInspectArgv,
+  boxFacts: (stdout, opts) => {
+    const p = parseAppleBoxInspect(stdout)
+    if (!p) return null
+    // punto 1: il confronto dell'immagine sul nome NORMALIZZATO
+    // (docker.io/library/sandbot-box:x ≡ sandbot-box:x)
+    const imageOk = opts.imageKnown ? p.imageRef === opts.expectedImage : undefined
+    return {
+      initOk: p.useInit,
+      imageOk,
+      staleImage: imageOk === false && p.imageRef.startsWith(`${BOX_IMAGE_REPO}:`) ? p.imageRef : null,
+      // M4/P2: i mount ci sono tutti? (inspect leggibile MA senza mount → ignoto)
+      pluginsMountOk: p.mounts.length > 0 ? p.mounts.some((m) => m.destination === PLUGINS_MOUNT && m.ro) : undefined,
+      browserMountOk: p.mounts.length > 0 ? p.mounts.some((m) => m.destination === BROWSER_MOUNT && !m.ro) : undefined,
+      networkOk: p.network !== '' ? p.network === opts.networkName : undefined
+    }
+  },
+  volumeLsArgv: () => appleVolumeLsArgv(''),
+  volumeNames: (stdout) => appleVolumeNamesFromLsJson(stdout),
+  imageSizeArgv: appleImageSizeArgv,
+  imageSizeBytes: appleImageSizeBytesFromInspect
+}
+
+/**
  * BR1 + BRR1: la VERIFICA operstate come ROOT, un solo exec — ogni
  * interfaccia diversa da lo deve essere down. Lancia se non passa (il
  * chiamante riprova col link down, o fallisce chiuso).
@@ -251,6 +281,7 @@ export const appleContainerEngine: BoxEngine = {
   command: () => containerCliPath(),
   childEnv: (env) => Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined)),
   argv,
+  reads,
   /** BR3: le reti di Homun, non i nomi di Docker. */
   networkNameOf: appleNetworkOf,
   prepareNetwork: async (run, network) => {
