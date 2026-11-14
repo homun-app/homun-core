@@ -22,7 +22,7 @@ import * as net from 'node:net'
 import * as os from 'node:os'
 import { DatabaseSync } from 'node:sqlite'
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, chmodSync, mkdirSync, existsSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { join, resolve, dirname } from 'node:path'
 import { findProbeDaemons, stopProbeDaemons } from './lib/probe-daemons.mjs'
 
 const ROOT = resolve(import.meta.dirname, '..')
@@ -462,9 +462,13 @@ try {
     if (req.method === 'POST' && url.pathname.endsWith('/chat/completions')) {
       let body = ''
       req.on('data', (c) => (body += c))
-      req.on('end', () => {
+      req.on('end', async () => {
         chatRequests.push(JSON.parse(body))
         const next = replies.shift() ?? { text: 'ok' }
+        // CC (fase computer-card): una risposta può RITARDARE di qualche
+        // secondo — tiene il turno del bot APERTO mentre un tool gira, così
+        // la card «Computer» si legge DURANTE l'attività
+        if (next.delayMs) await sleep(next.delayMs)
         res.writeHead(200, { 'content-type': 'text/event-stream' })
         const chunk = (delta, finish = null) =>
           res.write(`data: ${JSON.stringify({ id: 'chatcmpl-finto', object: 'chat.completion.chunk', created: 1, model: 'finto', choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`)
@@ -485,6 +489,8 @@ try {
   const providerPort = providerServer.address().port
   const pushTool = (name, args) => replies.push({ toolCalls: [{ name, arguments: args }] })
   const pushText = (text) => replies.push({ text })
+  /** CC: una risposta libera (col delayMs che tiene il turno aperto). */
+  const pushReply = (r) => replies.push(r)
 
   /** L'app col box PILOTATO: settings seminati nel DB, log della CLI finta scelto, env extra a piacere. */
   const launchBoxApp = (giro, opts) => {
@@ -511,6 +517,15 @@ try {
     db.prepare('INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)').run('onboarding.done', 'true')
     db.prepare('INSERT OR REPLACE INTO agents(id, name, description, status, unread, created_at) VALUES (?, ?, ?, ?, 0, ?)').run('agent_main', 'Bot', '', 'idle', Date.now())
     db.prepare('INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)').run('mainAgentId', '"agent_main"')
+    // CC (fase computer-card): un box.setup seminato fa RIPARTIRE la
+    // preparazione al boot (resumeAtBoot) — awaiting-installer resta FERMA
+    // ad aspettare l'utente: la card «Computer» dice «In preparazione»
+    if (opts.setupPhase) {
+      db.prepare('INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)').run(
+        'box.setup',
+        JSON.stringify({ phase: opts.setupPhase, bytes: null, total: null, buildPhase: null, error: null, startedAt: Date.now(), neededBytes: null, skipped: [], phaseStartedAt: null })
+      )
+    }
     db.close()
     const cliLogFile = opts.cliLogFile
     let appLog = ''
@@ -523,7 +538,7 @@ try {
         SANDBOT_TEST_FAKE_KEYCHAIN: join(dataDir, 'keychain-finta.json'),
         SANDBOT_TEST_FAKE_SAFESTORAGE: join(dataDir, 'safestorage-finta.json'),
         SANDBOT_TEST_CONTAINER_CLI: FAKE_CLI,
-        SANDBOT_TEST_CONTAINER_MODE: 'ready',
+        SANDBOT_TEST_CONTAINER_MODE: opts.mode ?? 'ready',
         SANDBOT_TEST_CONTAINER_LOG: cliLogFile,
         // OBV5: l'appRoot di prova della CLI finta (accanto al suo log)
         SANDBOT_TEST_CONTAINER_APP_ROOT: `${cliLogFile}-app-root`,
@@ -536,43 +551,63 @@ try {
     return { proc, dataDir, cliLogFile, getAppLog: () => appLog, stop: () => { try { proc.kill('SIGTERM') } catch { /* già via */ } } }
   }
 
-  /** Apre l'app, collega il bot al provider finto e MANDA un messaggio in chat. */
-  const boxTurn = async (giro, opts, userText, replyWhen) => {
-    app = launchBoxApp(giro, opts)
+  /** Apre la pagina dell'app GIÀ lanciata (debug, finestra, guida, focus). */
+  const openBotUi = async (giro) => {
     const port = DEBUG_PORT_BASE + giro
     const page = await waitForPage(port, (t) => (t.url ?? '').startsWith('http') || (t.url ?? '').startsWith('homun://'))
-    if (!page) throw new Error(`nessuna pagina app (BR giro ${giro}): log:\n${app.getAppLog().slice(-1500)}`)
-    if (!(await waitDom(page, `typeof window.sandbot !== 'undefined'`, 40_000))) throw new Error('window.sandbot non disponibile (BR)')
-    const rpc = (callExpr) => pageEval(page, `return await window.sandbot.${callExpr}`)
+    if (!page) throw new Error(`nessuna pagina app (giro ${giro}): log:\n${app.getAppLog().slice(-1500)}`)
+    if (!(await waitDom(page, `typeof window.sandbot !== 'undefined'`, 40_000))) throw new Error('window.sandbot non disponibile')
     // fase onboarding-a: la guida del primo avvio va attraversata anche qui
-    if (!(await crossOnboardingGuide(page))) throw new Error('la guida del primo avvio non si attraversa (BR)')
+    if (!(await crossOnboardingGuide(page))) throw new Error('la guida del primo avvio non si attraversa')
     if (await waitDom(page, `!!document.querySelector('[data-testid="focus-dismiss"]')`, 8_000)) {
       await pageEval(page, `document.querySelector('[data-testid="focus-dismiss"]').click(); return 'chiusa'`)
     }
+    return page
+  }
+
+  /** Collega il bot al provider finto e prepara il compositore (1440×900). */
+  const connectBot = async (page) => {
+    const rpc = (callExpr) => pageEval(page, `return await window.sandbot.${callExpr}`)
     const agents = await rpc('listAgents()')
-    if (!agents?.[0]) throw new Error('nessun bot (BR)')
+    if (!agents?.[0]) throw new Error('nessun bot')
     await rpc(`updateAgent(${JSON.stringify(agents[0].id)}, ${JSON.stringify({ providerId: 'finto', model: 'finto' })})`)
     await page.send('Page.reload')
-    if (!(await waitDom(page, `!!document.querySelector('form textarea')`, 25_000))) throw new Error('compositore non pronto (BR)')
+    if (!(await waitDom(page, `!!document.querySelector('form textarea')`, 25_000))) throw new Error('compositore non pronto')
     await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, mobile: false, deviceScaleFactor: 2 })
     await sleep(700)
-    await pageEval(page, `
-      const ta = document.querySelector('form textarea')
-      if (!ta) throw new Error('compositore non trovato')
-      const set = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set
-      set.call(ta, ${JSON.stringify(userText)})
-      ta.dispatchEvent(new Event('input', { bubbles: true }))
-      await new Promise((r) => setTimeout(r, 120))
-      ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
-      return 'inviato'
-    `)
-    // la risposta del bot chiude il turno (il testo atteso arriva col reply scriptato)
+  }
+
+  /** MANDA un messaggio in chat (setter nativo + Enter). */
+  const sendChat = (page, userText) => pageEval(page, `
+    const ta = document.querySelector('form textarea')
+    if (!ta) throw new Error('compositore non trovato')
+    const set = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set
+    set.call(ta, ${JSON.stringify(userText)})
+    ta.dispatchEvent(new Event('input', { bubbles: true }))
+    await new Promise((r) => setTimeout(r, 120))
+    ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+    return 'inviato'
+  `)
+
+  /** Aspetta la risposta del bot che chiude il turno (testo scriptato). */
+  const waitBotReply = async (page, giro, replyWhen) => {
     const seen = await waitDom(page, `[...document.querySelectorAll('div')].some((d) => d.textContent.trim() === ${JSON.stringify(replyWhen)})`, 60_000)
     if (!seen) {
       const chatText = await pageEval(page, `return document.body.innerText.slice(0, 1200)`).catch(() => '(chat illeggibile)')
-      throw new Error(`la risposta del bot non è arrivata (BR giro ${giro}) — richieste al provider: ${chatRequests.length}; chat:\n${chatText}\n--- log app:\n${app.getAppLog().slice(-1200)}`)
+      throw new Error(`la risposta del bot non è arrivata (giro ${giro}) — richieste al provider: ${chatRequests.length}; chat:\n${chatText}\n--- log app:\n${app.getAppLog().slice(-1200)}`)
     }
     await sleep(600)
+    return true
+  }
+
+  /** Apre l'app, collega il bot al provider finto e MANDA un messaggio in chat. */
+  const boxTurn = async (giro, opts, userText, replyWhen) => {
+    app = launchBoxApp(giro, opts)
+    const page = await openBotUi(giro)
+    await connectBot(page)
+    await sendChat(page, userText)
+    // la risposta del bot chiude il turno (il testo atteso arriva col reply scriptato)
+    await waitBotReply(page, giro, replyWhen)
     return page
   }
 
@@ -829,6 +864,181 @@ try {
     }
     await shot(page, 'brv-browser-proxy-gateway.png')
     page.close()
+  }
+
+  // ---- CC (fase computer-card): la card «Computer» dice lo stato VERO del
+  // computer del bot. Due lanci: (1) la PREPARAZIONE in corsa (box.setup
+  // seminato ad awaiting-installer: riparte al boot e resta FERMA ad aspettare
+  // l'utente) → «In preparazione»; (2) il box acceso col provider finto che
+  // TIENE APERTO il turno qualche secondo (delayMs): durante un run-command
+  // la card dice «Acceso / esegue un comando…» SENZA il testo del comando,
+  // durante browser_open «Acceso» con la frase del browser; dopo il turno
+  // «In attesa» e «Browser aperto» (l'evento screen dell'APERTURA, CC1); e
+  // dopo «Rimuovi immagine» dalle Impostazioni la card dice «Spento». Il
+  // browser del bot è il server MCP FINTO del repo (node nel PATH del
+  // lancio), la CLI del motore resta la finta. Catture dei quattro stati,
+  // chiaro e scuro, in docs/catture/computer-card/.
+  {
+    log('--- CC: la card «Computer» dice lo stato vero del computer del bot ---')
+    const SHOTS_CC = join(ROOT, 'docs', 'catture', 'computer-card')
+    mkdirSync(SHOTS_CC, { recursive: true })
+    const shotCc = (page, name) => page.send('Page.captureScreenshot', { format: 'png' }).then((r) => {
+      writeFileSync(join(SHOTS_CC, name), Buffer.from(r.data, 'base64'))
+      log('cattura', name)
+    })
+    const dark = (page, on) => pageEval(page, `document.documentElement.classList.${on ? 'add' : 'remove'}('dark'); return true`)
+    /** Il testo della card «Computer»: stato, riga sotto, tutto il testo. */
+    const cardFacts = (page) => pageEval(page, `return (() => {
+      const card = document.querySelector('[data-testid="bot-computer-card"]')
+      if (!card) return null
+      const status = card.querySelector('[data-testid="bot-computer-status"]')
+      const line = card.querySelector('[data-testid="bot-computer-line"]')
+      return { all: card.textContent.trim(), status: status ? status.textContent.trim() : '', line: line ? line.textContent.trim() : '' }
+    })()`)
+    const waitCard = async (page, pred, timeoutMs = 25_000) => {
+      const deadline = Date.now() + timeoutMs
+      for (;;) {
+        const f = await cardFacts(page).catch(() => null)
+        if (f && pred(f)) return f
+        if (Date.now() > deadline) return null
+        await sleep(300)
+      }
+    }
+
+    // CC-1: la preparazione in corsa → «In preparazione», STABILE. Con la CLI
+    // finta NOT-INSTALLED il setup ripartito resta AD AWAITING-INSTALLER per
+    // davvero (aspetta il pacchetto: col motore pronto scavalcherebbe e
+    // finirebbe in secondi, come il daemon.log della prima corsa)
+    {
+      const prepLog = join(TMP, 'cli-cc-prep.jsonl')
+      try { rmSync(prepLog) } catch { /* nuovo giro */ }
+      app = launchBoxApp(40, { network: 'bridge', cliLogFile: prepLog, setupPhase: 'awaiting-installer', mode: 'not-installed' })
+      const page = await openBotUi(40)
+      await connectBot(page)
+      const f = await waitCard(page, (x) => x.status.includes('In preparazione'))
+      check('CC durante la preparazione del computer la card dice «In preparazione»', !!f, JSON.stringify(await cardFacts(page).catch(() => null)))
+      await shotCc(page, 'cc-preparazione-1440-chiaro.png')
+      await dark(page, true)
+      await shotCc(page, 'cc-preparazione-1440-scuro.png')
+      await dark(page, false)
+      page.close()
+      await app.stop()
+      await sleep(1200)
+      await stopProbeDaemons(PREFIX)
+    }
+
+    // CC-2: i fatti dal vivo — comando, browser, rimozione dell'immagine
+    {
+      const ccLog = join(TMP, 'cli-cc-card.jsonl')
+      try { rmSync(ccLog) } catch { /* nuovo giro */ }
+      // il browser del bot: il server MCP FINTO del repo (serve `node` nel
+      // PATH del daemon: il lancio di questa sonda gira col node della sonda)
+      const ccEnv = {
+        SANDBOT_TEST_FAKE_BROWSER_MCP: join(ROOT, 'scripts', 'fake-browser-mcp.mjs'),
+        PATH: `${dirname(process.execPath)}:/usr/bin:/bin:/usr/sbin:/sbin`
+      }
+      app = launchBoxApp(41, { network: 'bridge', cliLogFile: ccLog, extraEnv: ccEnv })
+      const page = await openBotUi(41)
+      await connectBot(page)
+
+      // a) il box nasce col primo comando; la risposta finale RITARDA: il
+      // turno resta APERTO e la card si legge DURANTE il comando
+      pushReply({ toolCalls: [{ name: 'run-command', arguments: { command: 'echo cc-komando-segreto-8721' } }] })
+      pushReply({ text: 'Fatto il comando.', delayMs: 6_000 })
+      await sendChat(page, 'Esegui echo cc-komando-segreto-8721')
+      {
+        const f = await waitCard(page, (x) => x.status.includes('Acceso'))
+        check('CC durante un run-command la card dice «Acceso» con la riga «esegue un comando…»',
+          !!f && f.line === 'esegue un comando…', JSON.stringify(f))
+        check('CC il TESTO del comando NON compare MAI nella card (la chat lo mostra abbreviato, la card no)',
+          !!f && !f.all.includes('cc-komando-segreto-8721'), JSON.stringify(f))
+      }
+      await waitBotReply(page, 41, 'Fatto il comando.')
+      // b) fine turno, browser chiuso: «In attesa», senza riga
+      {
+        const f = await waitCard(page, (x) => x.status.includes('In attesa') && x.line === '')
+        check('CC a box nato e bot fermo la card dice «In attesa» (senza riga)', !!f, JSON.stringify(f))
+        await shotCc(page, 'cc-in-attesa-1440-chiaro.png')
+        await dark(page, true)
+        await shotCc(page, 'cc-in-attesa-1440-scuro.png')
+        await dark(page, false)
+      }
+
+      // b2) browser_open: la card «Acceso» con la frase del browser; dopo il
+      // turno il browser resta APERTO → «In attesa» + «Browser aperto».
+      // Come BRV: TRE browser_open (una la può consumare una richiesta
+      // spuria, una ATTIVA il gruppo, una GIRA davvero). La CHIUSURA del
+      // turno RITARDA di 20 s (il turno resta APERTO: la card si legge e si
+      // cattura DURANTE il browser) e la coda si RIPOPOLA: una richiesta
+      // spuria dell'app può rubare la reply di chiusura — il turno non deve
+      // chiudere prima del tempo
+      replies.length = 0
+      for (let i = 0; i < 3; i++) {
+        pushReply({ toolCalls: [{ name: 'browser_open', arguments: { url: 'https://it.wikipedia.org' } }] })
+      }
+      // la chiusura È in coda da subito; e se una richiesta spuria la ruba,
+      // la coda si ripopola in fretta (50 ms) — il turno non chiude con la
+      // risposta di default 'ok' del provider
+      pushReply({ text: 'Letto dal browser.', delayMs: 20_000 })
+      const refillB2 = setInterval(() => { if (replies.length === 0) replies.push({ text: 'Letto dal browser.', delayMs: 20_000 }) }, 50)
+      try {
+        await sendChat(page, 'Apri https://it.wikipedia.org nel browser')
+        {
+          let last = null
+          const f = await waitCard(page, (x) => { last = x; return x.status.includes('Acceso') }, 30_000)
+          check('CC durante browser_open la card dice «Acceso» con la frase del browser',
+            !!f && f.line === 'apre it.wikipedia.org…', 'ultima card vista: ' + JSON.stringify(last))
+          await shotCc(page, 'cc-acceso-browser-1440-chiaro.png')
+          await dark(page, true)
+          await shotCc(page, 'cc-acceso-browser-1440-scuro.png')
+          await dark(page, false)
+        }
+        await waitBotReply(page, 41, 'Letto dal browser.')
+      } finally {
+        clearInterval(refillB2)
+      }
+      {
+        const f = await waitCard(page, (x) => x.status.includes('In attesa') && x.line.includes('Browser aperto'))
+        check('CC dopo il browser: «In attesa» con la riga «Browser aperto» (l\'evento screen dell\'APERTURA, CC1)', !!f, JSON.stringify(f))
+      }
+
+      // c) «Rimuovi immagine» dalle Impostazioni: stop + delete dell'immagine
+      // alla CLI finta, e la card passa a «Spento» (l'evento box dello stop).
+      // La riga dell'immagine arriva quando le dimensioni sono lette
+      await openSettings(page)
+      if (!(await waitDom(page, `!!document.querySelector('[data-testid="disk-space-section"]')`, 25_000))) {
+        throw new Error('la sezione «Spazio su disco» non compare (CC)')
+      }
+      if (!(await waitDom(page, `!!document.querySelector('[data-testid="disk-space-box-image"] button:not([disabled])')`, 20_000))) {
+        throw new Error('la riga «Rimuovi immagine» non arriva (CC)')
+      }
+      await pageEval(page, 'window.confirm = () => true; return true')
+      {
+        const clicked = await clickRowAction(page, 'box-image')
+        check('CC «Rimuovi immagine» si può cliccare', clicked?.ok === true, String(clicked?.why ?? ''))
+        const gotRemove = await waitForArgv(ccLog, isImageRemove)
+        const all = readCliLog(ccLog)
+        const gotStop = all.some((argv) => argv[0] === 'stop' && argv[1] === 'sandbot-box')
+        check('CC «Rimuovi immagine» → STOP del box e DELETE dell\'immagine', gotRemove && gotStop,
+          JSON.stringify(all.filter((a) => a[0] === 'stop' || a[0] === 'image').slice(-3)))
+      }
+      // le Impostazioni si chiudono (Escape trusted) e la card si riguarda
+      await page.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 })
+      await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 })
+      await waitDom(page, `!document.querySelector('[role="dialog"] nav')`, 8_000)
+      {
+        const f = await waitCard(page, (x) => x.status.includes('Spento'))
+        check('CC dopo «Rimuovi immagine» la card dice «Spento»', !!f, JSON.stringify(f))
+        await shotCc(page, 'cc-spento-1440-chiaro.png')
+        await dark(page, true)
+        await shotCc(page, 'cc-spento-1440-scuro.png')
+        await dark(page, false)
+      }
+      page.close()
+      await app.stop()
+      await sleep(1200)
+      await stopProbeDaemons(PREFIX)
+    }
   }
   try { providerServer.closeAllConnections?.(); providerServer.close() } catch { /* già chiusa */ }
 } catch (e) {

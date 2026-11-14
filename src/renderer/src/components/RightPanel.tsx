@@ -616,9 +616,12 @@ function ComputerCard({ agentId }: { agentId: string }) {
   useEffect(() => {
     let alive = true
     // la RPC RILEGGE lo stato del box (l'evento `box` aggiorna lo store);
-    // screen:status copre l'apertura della finestra, l'evento screen i cambi
+    // screen:status copre l'apertura della finestra, l'evento screen i cambi.
+    // Anche il box-setup si RILEGGE: l'evento della preparazione può partire
+    // mentre la finestra è chiusa (resumeAtBoot del daemon) e andrebbe perso
     void api.screenStatus(agentId).then((s) => { if (alive) setBrowser(s.browser) }).catch(() => undefined)
     void api.boxRuntime().catch(() => undefined)
+    void api.boxSetupState().then((s) => { if (alive && s) useStore.setState({ boxSetup: s }) }).catch(() => undefined)
     void api.settingsGet<string>('sandbox.mode', 'host')
       .then((mode) => { if (alive) setBoxInUse(mode === 'box' || mode === 'docker') })
       .catch(() => undefined)
