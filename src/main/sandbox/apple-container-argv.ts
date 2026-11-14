@@ -223,7 +223,12 @@ export function appleStopArgv(container: string): string[] {
  * --memory/--cpus (pids NON esiste nella CLI di Apple: il confine dei
  * processi è la VM del container — annotato nel REPORT), i TRE volumi di
  * oggi (box rw, plugin RO dal kernel, browser rw), la RETE dedicata interna.
- * Niente --cap-drop/--security-opt: non esistono; il confine è la VM.
+ * BAV4 (fase box-apple-cli-vera): `--init` C'È nella CLI vera (run-help:
+ * «Run an init process inside the container that forwards signals and reaps
+ * processes») — la stessa ragione di G2 per Docker: PID 1 raccoglie gli
+ * zombie dei comandi in background. Il box nato senza (useInit:false,
+ * come quello creato dal vivo) si ricrea UNA volta, ragione 'senza-init'.
+ * Niente --cap-drop/--security-opt nel NOSTRO argv; il confine è la VM.
  * BR1 (fase box-rete): SEMPRE esattamente un --network, con una rete di
  * Homun — `bridge` → homun-box, `none` → homun-box-isolated + --no-dns. Mai
  * la rete predefinita di Apple (NAT verso Internet): «senza rete» non si fa
@@ -231,7 +236,7 @@ export function appleStopArgv(container: string): string[] {
  */
 export function appleBoxRunArgv(container: string, volume: string, network: 'bridge' | 'none', limits: BoxLimits, image: string): string[] {
   return [
-    'run', '-d',
+    'run', '-d', '--init',
     '--name', container,
     '-u', CONTAINER_USER,
     '-m', limits.memory,

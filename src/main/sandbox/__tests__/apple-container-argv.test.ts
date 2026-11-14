@@ -1,7 +1,8 @@
 // Fase box-container (BX2): le protezioni del box con Apple container. Pure:
 // - UTENTE non root (-u 1000:1000, come CONTAINER_USER di Docker);
-// - NESSUN --cap-drop/--security-opt/--init/--pids-limit (non esistono: il
-//   confine è la VM per container; pids si annota nel REPORT);
+// - --init C'È (BAV4: la help vera della CLI 1.7.1 lo dichiara), NESSUN
+//   --cap-drop/--security-opt nel nostro argv e NESSUN --pids-limit (non
+//   esiste: il confine è la VM per container; pids si annota nel REPORT);
 // - limiti --memory/--cpus da DEFAULT_BOX_LIMITS;
 // - la RETE dedicata --internal homun-box (il box parla SOLO col Mac) e il
 //   browser che raggiunge il proxy al GATEWAY di quella rete, al posto di
@@ -49,11 +50,11 @@ describe('BX2: le protezioni del box con container', () => {
     expect(argv.join(' ')).not.toContain('pids')
   })
 
-  it('NESSUN flag docker-only: --cap-drop, --security-opt, --init (il confine è la VM)', () => {
-    const argv = runArgv('bridge').join(' ')
-    expect(argv).not.toContain('--cap-drop')
-    expect(argv).not.toContain('--security-opt')
-    expect(argv).not.toContain('--init')
+  it('BAV4: --init C\'È (la help vera della 1.7.1 lo dichiara: PID 1 raccoglie gli zombie); NESSUN --cap-drop né --security-opt nel nostro argv', () => {
+    const argv = runArgv('bridge')
+    expect(argv).toContain('--init')
+    expect(argv.join(' ')).not.toContain('--cap-drop')
+    expect(argv.join(' ')).not.toContain('--security-opt')
   })
 
   it('i TRE volumi di oggi: box rw, plugin :ro dal KERNEL, browser rw', () => {
