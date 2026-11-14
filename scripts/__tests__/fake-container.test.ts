@@ -494,3 +494,54 @@ describe('BAV1: la finta stampa le FORME vere (stesse chiavi delle fixture)', ()
     expect(r.stdout.trim()).toBe('sandbot-box')
   })
 })
+
+// ---- BAV5: il wrapper di BACKGROUND del daemon — i file che scrive nel box ----
+// Il run-command foreground parte col wrapper (sh -c <wrapper> sh <cmd> <log>
+// <exit> <pid>) e il daemon aspetta l'EXIT FILE leggendolo col cat del box:
+// il «box» della finta non ha filesystem, quindi la finta risponde alle
+// letture dei percorsi del wrapper (exit → 0, log → vuoto, pid → un pid).
+describe('BAV5: la finta onora il contratto del wrapper di background', () => {
+  it('cat dell\'exit file → 0, del log → vuoto, del pid → un pid (il comando finisce)', () => {
+    const logFile = join(TMP, `log-bav5-wrapper-${Date.now()}.jsonl`)
+    const env = { PATH: process.env.PATH, SANDBOT_TEST_CONTAINER_MODE: 'ready', SANDBOT_TEST_CONTAINER_LOG: logFile }
+    const fake = (argv: string[]) => spawnSync(process.execPath, [FAKE, ...argv], { encoding: 'utf8', env })
+    // il wrapper vero del daemon (le righe costanti di docker-argv)
+    const WRAPPER = [
+      'mkdir -p "$(dirname "$2")"',
+      'if command -v setsid >/dev/null 2>&1; then',
+      '  setsid sh -c "$1" >"$2" 2>&1 &',
+      '  cmd=$!',
+      '  echo "$cmd" >"$4"',
+      'else',
+      '  sh -c "$1" >"$2" 2>&1 &',
+      '  cmd=$!',
+      '  echo "$$" >"$4"',
+      'fi',
+      'wait "$cmd"',
+      'echo "$?" >"$3"'
+    ].join('\n')
+    const launch = fake(['exec', '-d', '-w', '/box', 'sandbot-box', 'sh', '-c', WRAPPER, 'sh', 'echo uno', '/box/home/a/x.log', '/box/home/a/x.exit', '/box/home/a/x.pid'])
+    expect(launch.status).toBe(0)
+    // il polling del daemon: cat dell'exit file → il comando è FINITO con 0
+    expect(fake(['exec', '-i', '-w', '/box', 'sandbot-box', 'cat', '--', '/box/home/a/x.exit']).stdout).toBe('0\n')
+    // il log del comando: vuoto (la finta non interpreta il comando)
+    expect(fake(['exec', '-i', '-w', '/box', 'sandbot-box', 'cat', '--', '/box/home/a/x.log']).stdout).toBe('\n')
+    // il pid del comando: un numero
+    expect(fake(['exec', '-i', '-w', '/box', 'sandbot-box', 'cat', '--', '/box/home/a/x.pid']).stdout.trim()).toBe('4242')
+    // gli ALTRI file del box restano come prima (cat qualsiasi → vuoto, exit 0)
+    expect(fake(['exec', '-i', '-w', '/box', 'sandbot-box', 'cat', '--', '/box/home/a/altro.txt']).status).toBe(0)
+  })
+
+  it('i percorsi del wrapper sono RELATIVI alla home: il cat arriva COL PERCORSO ASSOLUTO (come il daemon)', () => {
+    const logFile = join(TMP, `log-bav5-wrapper-rel-${Date.now()}.jsonl`)
+    const env = { PATH: process.env.PATH, SANDBOT_TEST_CONTAINER_MODE: 'ready', SANDBOT_TEST_CONTAINER_LOG: logFile }
+    const fake = (argv: string[]) => spawnSync(process.execPath, [FAKE, ...argv], { encoding: 'utf8', env })
+    const WRAPPER = 'mkdir -p "$(dirname "$2")"\nif command -v setsid >/dev/null 2>&1; then\n  setsid sh -c "$1" >"$2" 2>&1 &\n  cmd=$!\n  echo "$cmd" >"$4"\nelse\n  sh -c "$1" >"$2" 2>&1 &\n  cmd=$!\n  echo "$$" >"$4"\nfi\nwait "$cmd"\necho "$?" >"$3"'
+    // il lancio vero del daemon: percorsi RELATIVI (l'exec -w li risolve nel box)
+    expect(fake(['exec', '-d', '-w', '/box/home/a', '-e', 'HOME=/box/home/a', 'sandbot-box', 'sh', '-c', WRAPPER, 'sh', 'echo due', '.sandbot/shells/sh-x.log', '.sandbot/shells/sh-x.exit', '.sandbot/shells/sh-x.pid']).status).toBe(0)
+    // il polling legge l'ASSOLUTO
+    const exit = fake(['exec', '-i', '-w', '/box', 'sandbot-box', 'cat', '--', '/box/home/a/.sandbot/shells/sh-x.exit'])
+    expect(exit.status).toBe(0)
+    expect(exit.stdout).toBe('0\n')
+  })
+})

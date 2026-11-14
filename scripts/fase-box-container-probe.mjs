@@ -353,6 +353,18 @@ try {
   log('--- giro 5/5: le azioni di «Spazio su disco» (CLI finta pronta) ---')
   const giro = 4
   app = launchApp('ready', giro)
+  // BAV: il mondo del df della finta severa — l'immagine ESISTE (c'è una
+  // build nel suo log) e i TRE volumi pure: il df Apple (BAV2) dice byte
+  // VERI, non le voci Type/Size di Docker. (DOPO launchApp: il lancio
+  // ricrea il log da zero.)
+  {
+    const seed = (argv) => spawnSync(process.execPath, [FAKE_SRC, ...argv], {
+      encoding: 'utf8',
+      env: { PATH: process.env.PATH, SANDBOT_TEST_CONTAINER_MODE: 'ready', SANDBOT_TEST_CONTAINER_LOG: app.cliLogFile }
+    })
+    seed(['build', '-t', 'sandbot-box:abab9640c765', '.'])
+    for (const v of ['sandbot-box', 'sandbot-plugins', 'sandbot-browser']) seed(['volume', 'create', v])
+  }
   const port = DEBUG_PORT_BASE + giro
   let page = await waitForPage(port, (t) => (t.url ?? '').startsWith('http') || (t.url ?? '').startsWith('homun://'))
   if (!page) throw new Error('nessuna pagina app (ready-azioni): log:\n' + app.getAppLog().slice(-1500))
@@ -372,8 +384,8 @@ try {
   const by = Object.fromEntries((rows ?? []).map((r) => [r.id, r]))
   const daemonTail = () => { try { return readFileSync(join(app.dataDir, 'data', 'daemon.log'), 'utf8').slice(-1500) } catch { return '(niente daemon.log)' } }
   check('BX5 Spazio su disco: le CINQUE righe ci sono', (rows ?? []).length === 5, JSON.stringify((rows ?? []).map((r) => r.id)) + '\ndaemon.log:\n' + daemonTail())
-  check('BX5 le dimensioni finte del df: immagine 1.2 GB, file dei bot 315 MB, recuperabile 1.2 GB',
-    by['box-image']?.size === '1.2 GB' && by['box-files']?.size === '315 MB' && by.reclaimable?.size === '1.2 GB',
+  check('BAV5 le dimensioni del df APPLE (forma vera: oggetto con sizeInBytes): immagine 1.3 GB, file dei bot 120 MB, recuperabile 244 MB',
+    by['box-image']?.size === '1.3 GB' && by['box-files']?.size === '120 MB' && by.reclaimable?.size === '244 MB',
     `immagine=${by['box-image']?.size} file=${by['box-files']?.size} recuperabile=${by.reclaimable?.size}`)
   check('BX5 senza modelli installati le righe modello restano senza dimensione (bottone spento)',
     by.model?.size === '—' && by.model?.disabled === true && by['memory-model']?.size === '—' && by['memory-model']?.disabled === true,
@@ -659,6 +671,68 @@ try {
       'nessun exec di scrittura')
     await shot(page, 'brr-riavvio-riuso-verificato.png')
     page.close()
+  }
+  // ---- BAV (fase box-apple-cli-vera): OGNI comando DUE volte di fila sullo
+  // STESSO box — il caso che dal vivo moriva al secondo giro (volume create
+  // non idempotente + sintassi Docker rifiutata). Quattro turni veri del
+  // bot (provider finto su 127.0.0.1), tutti sullo stesso log della CLI
+  // finta severa: shell due volte, file due volte. Il box nasce UNA volta e
+  // non si tocca più: zero rm, zero run -d dopo la nascita, zero volume
+  // create dopo il primo giro.
+  {
+    log('--- BAV: ogni comando DUE volte di fila sullo stesso box ---')
+    const bavLog = join(TMP, 'cli-bav-due-volte.jsonl')
+    try { rmSync(bavLog) } catch { /* nuovo giro */ }
+    const nascitaDelBox = async () => {
+      // il primo turno fa nascere il box (create del container e dei volumi)
+      pushTool('run-command', { command: 'echo uno' })
+      pushText('Fatto uno.')
+      const page = await boxTurn(20, { network: 'bridge', cliLogFile: bavLog }, 'Esegui echo uno', 'Fatto uno.')
+      await shot(page, 'bav-due-volte-1.png')
+      page.close()
+    }
+    await nascitaDelBox()
+    await app.stop()
+    await sleep(1200)
+    await stopProbeDaemons(PREFIX)
+
+    const dopoNascita = readCliLog(bavLog).length
+    const nati = readCliLog(bavLog).filter((a) => a[0] === 'run' && a.includes('-d'))
+    check('BAV-due-volte: il box è nato UNA volta sola (run -d con --init, la help vera)', nati.length === 1 && nati[0].includes('--init'), JSON.stringify(nati.map((a) => a.slice(0, 4))))
+    check('BAV-due-volte: alla nascita i volumi sono create-and-forget (poi MAI più)', readCliLog(bavLog).filter((a) => a[0] === 'volume' && a[1] === 'create').length === 3,
+      JSON.stringify(readCliLog(bavLog).filter((a) => a[0] === 'volume')))
+
+    // il SECONDO giro di comandi, due volte CIASCUNO, sullo stesso box
+    pushTool('run-command', { command: 'echo due' })
+    pushText('Fatto due.')
+    let page = await boxTurn(21, { network: 'bridge', cliLogFile: bavLog }, 'Esegui echo due', 'Fatto due.')
+    page.close()
+    await app.stop()
+    await sleep(1200)
+    await stopProbeDaemons(PREFIX)
+    pushTool('write-file', { path: 'due-volte-1.txt', content: 'prima' })
+    pushText('Scritto una.')
+    page = await boxTurn(22, { network: 'bridge', cliLogFile: bavLog }, 'Scrivi il file due-volte-1.txt', 'Scritto una.')
+    page.close()
+    await app.stop()
+    await sleep(1200)
+    await stopProbeDaemons(PREFIX)
+    pushTool('write-file', { path: 'due-volte-2.txt', content: 'seconda' })
+    pushText('Scritto due.')
+    page = await boxTurn(23, { network: 'bridge', cliLogFile: bavLog }, 'Scrivi il file due-volte-2.txt', 'Scritto due.')
+    await shot(page, 'bav-due-volte-2.png')
+    page.close()
+
+    const dopo = readCliLog(bavLog).slice(dopoNascita)
+    const tutto = readCliLog(bavLog)
+    check('BAV-due-volte: la SHELL gira DUE volte di fila sullo stesso box', tutto.some((a) => a[0] === 'exec' && a.some((x) => typeof x === 'string' && x.includes('echo uno'))) && dopo.some((a) => a[0] === 'exec' && a.some((x) => typeof x === 'string' && x.includes('echo due'))),
+      'echo uno (nascita) / echo due (riuso)')
+    check('BAV-due-volte: i FILE si scrivono DUE volte di fila sullo stesso box', dopo.some((a) => a[0] === 'exec' && a.some((x) => typeof x === 'string' && x.includes('due-volte-1.txt'))) && dopo.some((a) => a[0] === 'exec' && a.some((x) => typeof x === 'string' && x.includes('due-volte-2.txt'))),
+      'due-volte-1.txt / due-volte-2.txt')
+    check('BAV-due-volte: NESSUN volume create dopo la nascita (il caso che dal vivo moriva)', dopo.filter((a) => a[0] === 'volume' && a[1] === 'create').length === 0,
+      JSON.stringify(dopo.filter((a) => a[0] === 'volume')))
+    check('BAV-due-volte: il box non si TOCCA più (zero rm, zero run -d dopo la nascita)', dopo.some((a) => a[0] === 'rm') === false && dopo.some((a) => a[0] === 'run' && a.includes('-d')) === false,
+      JSON.stringify(dopo.filter((a) => ['rm', 'run'].includes(a[0])).map((a) => a.slice(0, 3))))
   }
   try { providerServer.closeAllConnections?.(); providerServer.close() } catch { /* già chiusa */ }
 } catch (e) {

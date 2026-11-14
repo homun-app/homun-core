@@ -187,6 +187,29 @@ if (!dockerDialect()) {
 }
 
 /**
+ * BAV5: i file del WRAPPER DI BACKGROUND visti nel log. Ogni exec -d col
+ * wrapper (sh -c <wrapper> sh <cmd> <log> <exit> <pid>) «ha scritto» i suoi
+ * tre file nel box: le letture (cat) di quei percorsi rispondono.
+ */
+function shellWrapperFiles(all) {
+  const files = { log: new Set(), exit: new Set(), pid: new Set() }
+  for (const a of all) {
+    if (!Array.isArray(a) || a[0] !== 'exec' || !a.includes('-d')) continue
+    const ci = a.indexOf('-c')
+    const script = ci >= 0 ? a[ci + 1] : ''
+    if (typeof script !== 'string' || !script.includes('setsid') || !script.includes('"$3"')) continue
+    // dopo lo script: 'sh', <comando>, <log>, <exit>, <pid>
+    const log = a[ci + 4]
+    const exit = a[ci + 5]
+    const pid = a[ci + 6]
+    if (typeof log === 'string') files.log.add(log)
+    if (typeof exit === 'string') files.exit.add(exit)
+    if (typeof pid === 'string') files.pid.add(pid)
+  }
+  return files
+}
+
+/**
  * BR1: lo stato dal log — l'ULTIMO container creato da run -d/create (nome,
  * rete, immagine, --init, i mount, i limiti) finché un rm/delete col suo
  * nome non lo toglie; le reti create (homun-box esiste GIÀ, come la prima
@@ -665,6 +688,31 @@ if (argv[0] === 'exec') {
   if (argv.some((a) => typeof a === 'string' && a.includes('operstate'))) {
     const suPerSempre = process.env.SANDBOT_TEST_CONTAINER_OPERSTATE === 'up'
     if (suPerSempre || scanState().box?.linksUp) die(1, 'eth0 is up')
+  }
+  // BAV5: il WRAPPER DI BACKGROUND del daemon (sh -c <wrapper> sh <cmd>
+  // <log> <exit> <pid>) scrive i suoi file DENTRO il box — il «box» della
+  // finta non ha filesystem, quindi i file si emulano rispondendo alle
+  // letture: cat dell'exit file → 0 (il comando è andato), del log → vuoto,
+  // del pid → un pid. Senza questo il foreground del run-command non finiva
+  // MAI (il polling dell'exit file non vedeva nulla).
+  if (argv.includes('-d')) {
+    const ci = argv.indexOf('-c')
+    const script = ci >= 0 ? argv[ci + 1] : ''
+    if (typeof script === 'string' && script.includes('setsid') && script.includes('"$3"')) process.exit(0)
+  }
+  if (argv.includes('cat')) {
+    const pi = argv.indexOf('--')
+    const path = pi >= 0 ? argv[pi + 1] : undefined
+    if (typeof path === 'string') {
+      // i percorsi del wrapper sono RELATIVI alla home del bot (l'exec -w li
+      // risolve nel box): il cat arriva col PERCORSO ASSOLUTO — si confronta
+      // per suffisso
+      const files = shellWrapperFiles(logArgvs())
+      const hit = (set) => [...set].some((rel) => path === rel || path.endsWith(`/${rel}`))
+      if (hit(files.exit)) { out('0'); process.exit(0) }
+      if (hit(files.log)) { out(''); process.exit(0) }
+      if (hit(files.pid)) { out('4242'); process.exit(0) }
+    }
   }
   process.exit(0)
 }
