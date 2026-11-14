@@ -49,7 +49,7 @@ import { parseShellPgid } from './shells'
 // importa browser.ts SOLO dinamicamente: nessun ciclo statico.
 // fase 19a (correzioni 3, M5.3): userControlActive — mai la nota del login
 // mentre l'utente sta accedendo lui sullo schermo del bot.
-import { browserHoldMs, screenBrowserClosed, userControlActive } from './screen'
+import { browserHoldMs, screenBrowserClosed, screenBrowserOpened, userControlActive } from './screen'
 import { randomUUID } from 'node:crypto'
 
 /** Il browser è disponibile? (docker + rete bridge; il flag di test attiva il percorso in host). */
@@ -418,6 +418,9 @@ async function startBrowserSession(agentId: string): Promise<BrowserSession> {
     }
   }
   sessions.set(agentId, session)
+  // CC1 (fase computer-card): l'evento `screen` parte pure all'APERTURA —
+  // la card «Computer» non aspetta più la chiusura per sapere che c'è un browser
+  screenBrowserOpened(agentId)
   touchSession(agentId, session)
   return session
 }

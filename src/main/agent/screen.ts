@@ -442,6 +442,18 @@ export function screenBrowserClosed(agentId: string): void {
   void emitStatus(agentId)
 }
 
+/**
+ * CC1 (fase computer-card): il browser del bot è PARTITO. L'evento `screen`
+ * nasceva solo alla CHIUSURA (screenBrowserClosed): la card «Computer» restava
+ * sullo stato letto all'apertura, «Spento» mentre il bot navigava. Qui si
+ * emette lo stato appena la sessione entra nella mappa (browser: running).
+ * Vale per i figli anche: la loro sessione è nella STESSA mappa, con il loro
+ * agentId (startBrowserSession è una sola).
+ */
+export function screenBrowserOpened(agentId: string): void {
+  void emitStatus(agentId)
+}
+
 // ---- la presa di controllo chiesta dal bot (V5) ----
 
 /**
