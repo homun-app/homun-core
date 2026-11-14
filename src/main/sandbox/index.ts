@@ -744,16 +744,21 @@ export async function ensureBoxContainer(): Promise<void> {
     const rm = await dockerRunner(activeBoxEngine().argv.boxRm(BOX_CONTAINER), { timeoutMs: 30_000 })
     if (rm.exitCode !== 0) throw new Error(`container removal (${plan.reason}) failed: ${rm.stderr}`)
   }
-  // M4: il volume DEDICATO dei plugin esiste PRIMA del create che lo monta
-  // (volume create è idempotente: lo crea solo se manca)
-  const pvc = await dockerRunner(activeBoxEngine().argv.pluginsVolumeCreate(), { timeoutMs: 15_000 })
-  if (pvc.exitCode !== 0) throw new Error(`creation of volume ${PLUGINS_VOLUME} failed: ${pvc.stderr}`)
-  // P2 (fase 14 correzioni): il volume DEDICATO del browser esiste e la sua
-  // RADICE è di 1001 (pwuser) e 0700 — il one-shot di root tocca SOLO la
-  // radice del volume (regola del modulo: mai un percorso che il bot può
-  // scrivere), è idempotente e gira a ogni (ri)creazione del box
-  const bvc = await dockerRunner(activeBoxEngine().argv.browserVolumeCreate(), { timeoutMs: 15_000 })
-  if (bvc.exitCode !== 0) throw new Error(`creation of volume ${BROWSER_VOLUME} failed: ${bvc.stderr}`)
+  // M4 + P2 + BAV3 (fase box-apple-cli-vera): i volumi DEDICATI esistono
+  // PRIMA del create che li monta. Con Apple la `volume create` NON è
+  // idempotente (esce 1 se il volume c'è — la morte del secondo comando dal
+  // vivo): engine.ensureVolume LEGGE prima e RILEGGE se la create cade. Con
+  // Docker resta la create diretta di sempre (lì idempotente per davvero).
+  if (engine.ensureVolume) {
+    await engine.ensureVolume(dockerRunner, BOX_VOLUME)
+    await engine.ensureVolume(dockerRunner, PLUGINS_VOLUME)
+    await engine.ensureVolume(dockerRunner, BROWSER_VOLUME)
+  } else {
+    const pvc = await dockerRunner(engine.argv.pluginsVolumeCreate(), { timeoutMs: 15_000 })
+    if (pvc.exitCode !== 0) throw new Error(`creation of volume ${PLUGINS_VOLUME} failed: ${pvc.stderr}`)
+    const bvc = await dockerRunner(engine.argv.browserVolumeCreate(), { timeoutMs: 15_000 })
+    if (bvc.exitCode !== 0) throw new Error(`creation of volume ${BROWSER_VOLUME} failed: ${bvc.stderr}`)
+  }
   const browserRoot = await dockerRunner(activeBoxEngine().argv.browserRoot(image), { timeoutMs: 60_000 })
   if (browserRoot.exitCode !== 0) throw new Error(`init of volume ${BROWSER_VOLUME} failed: ${browserRoot.stderr}`)
   // creazione (prima volta o ricreazione G2/H1): il one-shot rende il volume

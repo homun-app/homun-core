@@ -118,6 +118,29 @@ export function boxNetworkSubnet(): string | null {
 }
 
 /**
+ * BAV3 (fase box-apple-cli-vera): l'ensure IDEMPOTENTE di un volume, il
+ * kernel di OBV2. La `volume create` della CLI di Apple NON è idempotente
+ * (esce 1 con «volume 'x' already exists» — l'errore che dal vivo fermava
+ * OGNI comando al secondo giro): si LEGGE l'elenco (BAV2: volume ls --format
+ * json), se il volume c'è è fatto; se manca si crea; se la create esce ≠ 0
+ * si RILEGGE — se ora c'è («already exists», o una corsa parallela che l'ha
+ * fatto prima di noi) è fatto lo stesso, solo se manca davvero è errore.
+ */
+export async function ensureAppleVolume(run: BoxArgvRunner, name: string): Promise<void> {
+  const readNames = async (): Promise<string[] | null> => {
+    const ls = await run(appleVolumeLsArgv(name), { timeoutMs: 15_000 })
+    return ls.exitCode === 0 ? appleVolumeNamesFromLsJson(ls.stdout) : null
+  }
+  const names = await readNames()
+  if (names?.includes(name)) return
+  const create = await run(['volume', 'create', name], { timeoutMs: 30_000 })
+  if (create.exitCode === 0) return
+  const again = await readNames()
+  if (again?.includes(name)) return
+  throw new Error(`creation of volume ${name} failed: ${create.stderr || `exit ${create.exitCode}`}`)
+}
+
+/**
  * BX2: il terreno della RETE del box, prima del run. La rete DEDICATA
  * --internal homun-box si crea se manca (inspect → create → inspect) e il
  * suo GATEWAY si ricorda: è l'indirizzo del Mac con cui il browser del bot
@@ -128,6 +151,8 @@ export function boxNetworkSubnet(): string | null {
  * homun-box-isolated (host-only pure lei): si crea e si ispeziona uguale,
  * MA il suo gateway NON si ricorda — il proxy non ascolta MAI lì (BR2) e il
  * gateway del browser resta quello di homun-box, letto in bridge.
+ * BAV3: se la create esce ≠ 0 si RILEGGE come per i volumi — una corsa
+ * parallela può averla fatta prima di noi; solo se manca davvero è errore.
  */
 export async function ensureAppleBoxNetwork(run: BoxArgvRunner, network: 'bridge' | 'none' = 'bridge'): Promise<string | null> {
   const name = appleNetworkOf(network)
@@ -135,9 +160,14 @@ export async function ensureAppleBoxNetwork(run: BoxArgvRunner, network: 'bridge
   if (ins.exitCode !== 0) {
     const create = await run(appleNetworkCreateArgv(name), { timeoutMs: 30_000 })
     if (create.exitCode !== 0) {
-      throw new Error(`creation of the internal network ${name} failed: ${create.stderr || `exit ${create.exitCode}`}`)
+      const retry = await run(appleNetworkInspectArgv(name), { timeoutMs: 15_000 })
+      if (retry.exitCode !== 0) {
+        throw new Error(`creation of the internal network ${name} failed: ${create.stderr || `exit ${create.exitCode}`}`)
+      }
+      ins = retry
+    } else {
+      ins = await run(appleNetworkInspectArgv(name), { timeoutMs: 15_000 })
     }
-    ins = await run(appleNetworkInspectArgv(name), { timeoutMs: 15_000 })
   }
   const gw = parseNetworkGateway(ins.stdout)
   if (network === 'bridge') {
@@ -286,6 +316,10 @@ export const appleContainerEngine: BoxEngine = {
   networkNameOf: appleNetworkOf,
   prepareNetwork: async (run, network) => {
     await ensureAppleBoxNetwork(run, network)
+  },
+  /** BAV3: i volumi di Homun con la create NON idempotente della CLI di Apple. */
+  ensureVolume: async (run, name) => {
+    await ensureAppleVolume(run, name)
   },
   /**
    * BR1: le interfacce del box GIÙ come root e la VERIFICA operstate. Ogni

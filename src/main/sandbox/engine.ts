@@ -207,6 +207,14 @@ export interface BoxEngine {
    */
   prepareNetwork?(run: (argv: string[], opts?: { timeoutMs?: number }) => Promise<{ stdout: string; stderr: string; exitCode: number | null }>, network: 'bridge' | 'none'): Promise<void>
   /**
+   * BAV3 (fase box-apple-cli-vera): l'ensure IDEMPOTENTE di un volume, per
+   * i motori la cui `volume create` NON lo è (Apple: esce 1 se esiste).
+   * Leggi, crea se manca, RILEGGI se la create esce male («already exists»
+   * o una corsa parallela). Mancano → la create diretta di oggi (Docker:
+   * idempotente per davvero).
+   */
+  ensureVolume?(run: (argv: string[], opts?: { timeoutMs?: number }) => Promise<{ stdout: string; stderr: string; exitCode: number | null }>, name: string): Promise<void>
+  /**
    * BR1 (fase box-rete): la difesa in profondità della modalità none, se il
    * motore ce l'ha (apple-container): le interfacce del box GIÙ come root e
    * la VERIFICA operstate. Lancia errore se non ci si riesce: il chiamante

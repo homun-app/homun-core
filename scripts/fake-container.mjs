@@ -263,6 +263,9 @@ function scanState(opts = {}) {
     }
     if ((a[0] === 'rm' || a[0] === 'delete') && box && a.slice(1).includes(box.name)) box = null
     if (a[0] === 'network' && a[1] === 'create') networks.add(a[a.length - 1])
+    // BAV3: la create CADUTA non lascia la rete (la finta lo segna col
+    // contrario, così chi RILEGGE vede il vero)
+    if (a[0] === 'network' && (a[1] === 'delete' || a[1] === 'rm')) networks.delete(a[a.length - 1])
   }
   return { box, networks, volumes, built }
 }
@@ -558,6 +561,13 @@ if (argv[0] === 'network') {
   if (argv[1] === 'create') {
     const name = argv[argv.length - 1]
     if (name === 'homun-box-isolated' && process.env.SANDBOT_TEST_CONTAINER_ISOLATED_FAIL === '1') {
+      // BAV3: la create è CADUTA — la rete NON esiste. Il log registra il
+      // CONTRARIO della create (così chi rilegge non la vede, come nel vero)
+      if (process.env.SANDBOT_TEST_CONTAINER_LOG) {
+        try {
+          appendFileSync(process.env.SANDBOT_TEST_CONTAINER_LOG, `${JSON.stringify({ at: Date.now(), mode: MODE, argv: ['network', 'delete', name] })}\n`)
+        } catch { /* il log è best-effort */ }
+      }
       die(1, `container (fake): creation of the internal network ${name} failed`)
     }
     out(name ?? 'network'); process.exit(0)
