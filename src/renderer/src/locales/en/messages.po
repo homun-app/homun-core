@@ -633,7 +633,7 @@ msgstr "Turn on"
 msgid "Accendo il servizio"
 msgstr "I turn on the service"
 
-#: src/renderer/src/components/RightPanel.tsx
+#: src/renderer/src/lib/computer-card.ts
 msgid "Acceso"
 msgstr "On"
 
@@ -1274,6 +1274,10 @@ msgstr "Draft not found"
 #: src/renderer/src/sidebar-utils.ts
 msgid "Bozza per {0}"
 msgstr "Draft for {0}"
+
+#: src/renderer/src/lib/computer-card.ts
+msgid "Browser aperto"
+msgstr "Browser open"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -3560,6 +3564,10 @@ msgstr "Bot settings"
 msgid "dialog.moveToApplications.replaceBody"
 msgstr "Homun is already in Applications: replace it with this copy? Your settings and chats don\\u2019t change."
 
+#: src/renderer/src/lib/computer-card.ts
+msgid "In attesa"
+msgstr "Idle"
+
 #: src/renderer/src/components/ConnectorCard.tsx
 msgid "In attesa del login nel browser…"
 msgstr "Waiting for you to log in in the browser…"
@@ -3605,6 +3613,10 @@ msgstr "paused for absence"
 msgid "in preparazione"
 msgstr "being set up"
 
+#: src/renderer/src/lib/computer-card.ts
+msgid "In preparazione"
+msgstr "Preparing"
+
 #: src/renderer/src/components/ComputerPrepRow.tsx
 msgid "In preparazione…"
 msgstr "Being set up…"
@@ -3625,10 +3637,6 @@ msgstr "cooling down"
 #: src/renderer/src/components/Settings.tsx
 msgid "in raffreddamento fino a {0}"
 msgstr "cooling down until {0}"
-
-#: src/renderer/src/components/RightPanel.tsx
-msgid "In sospensione"
-msgstr "Suspended"
 
 #: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/settings/AddProviderSheet.tsx
@@ -4815,6 +4823,10 @@ msgstr "This is not a GitHub address: paste an https://github.com/… URL."
 #: src/renderer/src/components/ConnectorCards13.tsx
 msgid "Non importati (non girano in Homun): {0}"
 msgstr "Not imported (they don't run in Homun): {0}"
+
+#: src/renderer/src/lib/computer-card.ts
+msgid "Non in uso"
+msgstr "Not in use"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -6660,9 +6672,9 @@ msgstr "Disk space"
 msgid "Spazio su disco insufficiente."
 msgstr "Not enough disk space."
 
-#: src/renderer/src/components/RightPanel.tsx
 #: src/renderer/src/components/settings/EngineSection.tsx
 #: src/renderer/src/components/ui/ModelPicker.tsx
+#: src/renderer/src/lib/computer-card.ts
 msgid "Spento"
 msgstr "Off"
 

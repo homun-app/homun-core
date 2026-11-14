@@ -155,6 +155,36 @@ export const TOOL_FAMILIES: readonly ToolFamily[] = [
 
 const FAMILY_BY_TOOL = new Map<string, ToolFamily>(TOOL_FAMILIES.flatMap((f) => f.tools.map((t) => [t, f] as const)))
 
+// ---- CC3/CC4 (fase computer-card): quali strumenti sono «del computer» ----
+
+/**
+ * Gli strumenti che girano nel COMPUTER del bot (il box): comandi e loro
+ * gestione in background, i file del box e lo scambio col Mac, il computer
+ * stesso (gli occhi e le mani). L'elenco è ESPLICITO e il test di coerenza
+ * lo blinda contro il REGISTRO degli strumenti: uno strumento nuovo o sta
+ * QUI, o tra gli esclusi espliciti — mai nel mezzo (la card «Computer» di
+ * questa fase lo usa per distinguere «Acceso» da «In attesa»).
+ * I browser NON stanno qui come nomi: sono la FAMIGLIA `browser_*` del
+ * registro (browser.ts) più la facciata `browser` — vedi isComputerTool.
+ */
+export const COMPUTER_TOOLS: ReadonlySet<string> = new Set([
+  // i comandi del box e la loro gestione in background
+  'run-command', 'await_shell',
+  // i file del box e lo scambio file col Mac
+  'read-file', 'write-file', 'list-directory', 'copy_to_box', 'copy_from_box',
+  // il computer del bot: gli occhi e le mani
+  'computer_observe', 'computer_act'
+])
+
+/**
+ * Lo strumento gira nel computer del bot? Tutta la famiglia `browser*` e la
+ * facciata `browser` contano; i tool MCP generici (`mcp__…`) e gli strumenti
+ * esterni NO — non toccano il computer del bot.
+ */
+export function isComputerTool(tool: string): boolean {
+  return COMPUTER_TOOLS.has(tool) || tool.startsWith('browser_') || tool === 'browser'
+}
+
 /** Il nome leggibile di uno slug di server (linear → Linear, il_mio_server → Il mio server). */
 function readableServerName(slug: string): string {
   const words = slug.trim().replace(/[_\-.]+/g, ' ').trim()

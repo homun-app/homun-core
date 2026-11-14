@@ -633,7 +633,7 @@ msgstr "Accendi"
 msgid "Accendo il servizio"
 msgstr "Accendo il servizio"
 
-#: src/renderer/src/components/RightPanel.tsx
+#: src/renderer/src/lib/computer-card.ts
 msgid "Acceso"
 msgstr "Acceso"
 
@@ -1274,6 +1274,10 @@ msgstr "Bozza non trovata"
 #: src/renderer/src/sidebar-utils.ts
 msgid "Bozza per {0}"
 msgstr "Bozza per {0}"
+
+#: src/renderer/src/lib/computer-card.ts
+msgid "Browser aperto"
+msgstr "Browser aperto"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -3560,6 +3564,10 @@ msgstr "Impostazioni del bot"
 msgid "dialog.moveToApplications.replaceBody"
 msgstr "In Applicazioni c’è già Homun: lo sostituisco con questa copia? Le tue impostazioni e le chat non cambiano."
 
+#: src/renderer/src/lib/computer-card.ts
+msgid "In attesa"
+msgstr "In attesa"
+
 #: src/renderer/src/components/ConnectorCard.tsx
 msgid "In attesa del login nel browser…"
 msgstr "In attesa del login nel browser…"
@@ -3605,6 +3613,10 @@ msgstr "in pausa per assenza"
 msgid "in preparazione"
 msgstr "in preparazione"
 
+#: src/renderer/src/lib/computer-card.ts
+msgid "In preparazione"
+msgstr "In preparazione"
+
 #: src/renderer/src/components/ComputerPrepRow.tsx
 msgid "In preparazione…"
 msgstr "In preparazione…"
@@ -3625,10 +3637,6 @@ msgstr "in raffreddamento"
 #: src/renderer/src/components/Settings.tsx
 msgid "in raffreddamento fino a {0}"
 msgstr "in raffreddamento fino a {0}"
-
-#: src/renderer/src/components/RightPanel.tsx
-msgid "In sospensione"
-msgstr "In sospensione"
 
 #: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/settings/AddProviderSheet.tsx
@@ -4815,6 +4823,10 @@ msgstr "Non è un indirizzo GitHub: incolla un URL https://github.com/…"
 #: src/renderer/src/components/ConnectorCards13.tsx
 msgid "Non importati (non girano in Homun): {0}"
 msgstr "Non importati (non girano in Homun): {0}"
+
+#: src/renderer/src/lib/computer-card.ts
+msgid "Non in uso"
+msgstr "Non in uso"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -6660,9 +6672,9 @@ msgstr "Spazio su disco"
 msgid "Spazio su disco insufficiente."
 msgstr "Spazio su disco insufficiente."
 
-#: src/renderer/src/components/RightPanel.tsx
 #: src/renderer/src/components/settings/EngineSection.tsx
 #: src/renderer/src/components/ui/ModelPicker.tsx
+#: src/renderer/src/lib/computer-card.ts
 msgid "Spento"
 msgstr "Spento"
 

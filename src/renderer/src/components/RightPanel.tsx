@@ -21,6 +21,8 @@ import { Bot } from '../bot/Bot'
 import { useBotInfo } from '../bot/use-bot'
 // fase pagine (G4): i suggerimenti, da regole e non dal modello
 import { botSuggestions, type BotSuggestion } from '../lib/bot-suggestions'
+// CC3 (fase computer-card): lo stato della card «Computer» dai TRE fatti (PURa)
+import { computerCardState } from '../lib/computer-card'
 // fase catalogo app: l'elenco unico per la regola «Collega <App>»
 import { loadAppCatalog } from '../../../shared/app-catalog'
 import type { GroupInfo, LibraryItemInfo, RoutineInfo, ThinkingSetting, Agent, AgentAvatar, ScreenStatus } from '../../../shared/types'
@@ -603,17 +605,32 @@ function ComputerCard({ agentId }: { agentId: string }) {
   const { i18n } = useLingui()
   const openBotTab = useStore((s) => s.openBotTab)
   const screenStatus = useStore((s) => s.screenStatus[agentId])
-  const [status, setStatus] = useState<ScreenStatus | null>(null)
+  // CC3 (fase computer-card): i TRE fatti — lo stato del box (evento box /
+  // RPC box:runtime), l'attività del bot e il browser. La logica sta nella
+  // funzione PURA computerCardState: qui si mostra soltanto
+  const boxRuntime = useStore((s) => s.boxRuntime)
+  const activity = useStore((s) => s.activity[agentId] ?? null)
+  const boxSetup = useStore((s) => s.boxSetup)
+  const [browser, setBrowser] = useState<ScreenStatus['browser']>('stopped')
+  const [boxInUse, setBoxInUse] = useState(false)
   useEffect(() => {
     let alive = true
-    setStatus(null)
-    void api.screenStatus(agentId).then((s) => { if (alive) setStatus(s) }).catch(() => undefined)
+    // la RPC RILEGGE lo stato del box (l'evento `box` aggiorna lo store);
+    // screen:status copre l'apertura della finestra, l'evento screen i cambi
+    void api.screenStatus(agentId).then((s) => { if (alive) setBrowser(s.browser) }).catch(() => undefined)
+    void api.boxRuntime().catch(() => undefined)
+    void api.settingsGet<string>('sandbox.mode', 'host')
+      .then((mode) => { if (alive) setBoxInUse(mode === 'box' || mode === 'docker') })
+      .catch(() => undefined)
     return () => { alive = false }
-  }, [agentId, screenStatus])
-  const browser = status?.browser ?? screenStatus?.browser ?? 'stopped'
-  // running e in uso → Acceso; running a riposo → In sospensione; spento → Spento
-  const label = browser === 'running' ? (status?.held ?? screenStatus?.held) ? i18n.t(msg`Acceso`) : i18n.t(msg`In sospensione`) : i18n.t(msg`Spento`)
-  const dot = browser === 'stopped' ? 'bg-muted-foreground/40' : (status?.held ?? screenStatus?.held) ? 'bg-chart-2' : 'bg-waiting'
+  }, [agentId])
+  const view = computerCardState({
+    boxRuntime,
+    activity,
+    browser: screenStatus?.browser ?? browser,
+    boxSetupPhase: boxSetup?.phase ?? null,
+    boxInUse
+  })
   return (
     <button
       className="w-full overflow-hidden rounded-[16px] bg-muted/60 text-left transition hover:bg-muted"
@@ -632,10 +649,17 @@ function ComputerCard({ agentId }: { agentId: string }) {
         <Monitor className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
         <span className="min-w-0 flex-1 truncate text-sm"><Trans>Computer</Trans></span>
         <span className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground" data-testid="bot-computer-status">
-          <span className={`size-2 rounded-full ${dot}`} aria-hidden="true" />
-          {label}
+          <span className={`size-2 rounded-full ${view.dot}`} aria-hidden="true" />
+          {i18n.t(view.label)}
         </span>
       </span>
+      {/* la riga sotto: la frase dell'attività del computer (mai il testo di
+          un comando) oppure «Browser aperto»; niente quando non c'è niente */}
+      {view.line !== null && (
+        <span className="block truncate px-3 pb-2 text-xs text-muted-foreground" data-testid="bot-computer-line">
+          {i18n.t(view.line)}
+        </span>
+      )}
     </button>
   )
 }
