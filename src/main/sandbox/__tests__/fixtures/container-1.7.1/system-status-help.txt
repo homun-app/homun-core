@@ -1,0 +1,15 @@
+$ container system status --help
+OVERVIEW: Show the status of `container` services and system-wide information
+
+USAGE: container system status [--prefix <prefix>] [--format <format>] [--debug]
+
+OPTIONS:
+  -p, --prefix <prefix>   Launchd prefix for services (default:
+                          com.apple.container.)
+  --format <format>       Format of the output (values: json, table, yaml,
+                          toml; default: table)
+  --debug                 Enable debug output [environment: CONTAINER_DEBUG]
+  --version               Show the version.
+  -h, --help              Show help information.
+
+[exit 0]

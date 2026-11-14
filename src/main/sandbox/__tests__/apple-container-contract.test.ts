@@ -8,10 +8,13 @@
 // motore qualunque — Podman e WSL2 lo riusano); questo test è la tavoletta
 // Apple: la tabella dei valori di prova per OGNI funzione esportata.
 //
-// Le help che MANCANO nelle fixture: il contratto le segnala ('help-missing')
-// e l'elenco sta FISSO qui sotto (MANCANTI): la CLI vera non si chiama MAI dai
-// test — le si cattura dal vivo. Appena una help entra nelle fixture, il
-// sottocomando diventa a tutti gli effetti OBBLIGATORIO.
+// BRV1 (fase box-apple-rete-vera): le help sono TUTTE nelle fixture — anche
+// le 10 che BAV segnalava mancanti (system kernel set, system status, system
+// df, ls, stop, inspect, image inspect, volume create, build, network
+// inspect). Il contratto è OBBLIGATORIO: un sottocomando usato da un
+// apple*Argv senza la sua help in fixture è una VIOLAZIONE che ferma il
+// test — l'elenco fisso dei «mancanti» è VIA. La CLI vera non si chiama MAI
+// dai test: una help nuova si cattura dal vivo e si copia con lo script.
 import { describe, expect, it } from 'vitest'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
@@ -27,11 +30,21 @@ const HELP_FILES: Record<string, string> = {
   'exec-help.txt': 'exec',
   'cp-help.txt': 'cp',
   'start-help.txt': 'start',
+  'stop-help.txt': 'stop',
   'rm-help.txt': 'rm',
+  'ls-help.txt': 'ls',
+  'inspect-help.txt': 'inspect',
+  'build-help.txt': 'build',
   'system-start-help.txt': 'system start',
+  'system-status-help.txt': 'system status',
+  'system-df-help.txt': 'system df',
+  'system-kernel-set-help.txt': 'system kernel set',
+  'volume-create-help.txt': 'volume create',
   'volume-ls-help.txt': 'volume ls',
   'volume-delete-help.txt': 'volume delete',
   'network-create-help.txt': 'network create',
+  'network-inspect-help.txt': 'network inspect',
+  'image-inspect-help.txt': 'image inspect',
   'image-prune-help.txt': 'image prune',
   'image-delete-help.txt': 'image delete'
 }
@@ -119,24 +132,6 @@ const S: Record<string, { args: unknown[]; sub: string }> = {
   appleRemoveVolumesArgv: { args: [['sandbot-box', 'sandbot-browser']], sub: 'volume delete' }
 }
 
-/**
- * Le help che MANCANO (elenco FISSO, segnalato nel REPORT): questi
- * sottocomandi non si controllano sulle opzioni finché la help vera non
- * entra nelle fixture — la CLI vera non si chiama MAI dai test.
- */
-const MANCANTI = [
-  'system kernel set',
-  'system status',
-  'system df',
-  'ls',
-  'stop',
-  'inspect',
-  'image inspect',
-  'volume create',
-  'build',
-  'network inspect'
-]
-
 describe('BAV1: il contratto argv ↔ help vera della CLI container 1.7.1', () => {
   it('la tabella dei valori di prova copre OGNI funzione apple*Argv esportata (nessuna via)', () => {
     const esportate = Object.entries(MOD)
@@ -155,6 +150,9 @@ describe('BAV1: il contratto argv ↔ help vera della CLI container 1.7.1', () =
   // OGNI funzione: l'argv costruito coi valori di prova parla la CLI vera.
   // Visto FALLIRE il 2026-11-14 su applePsArgv (ls --format {{.name}}), i
   // quattro inspect --format, volume ls --filter, image inspect --format.
+  // BRV1: NESSUNA violazione è più tollerata — nemmeno 'help-missing': le
+  // help sono TUTTE nelle fixture e ogni sottocomando usato si controlla.
+  // Visto FALLIRE il 2026-11-14 (BRV) sulle 10 help ancora mancanti.
   for (const [name, { args, sub }] of Object.entries(S)) {
     it(`${name} parla la help vera di «${sub || 'container'}»`, () => {
       const built = (MOD as unknown as Record<string, (...a: unknown[]) => string[] | string[][]>)[name]!(...args)
@@ -166,22 +164,26 @@ describe('BAV1: il contratto argv ↔ help vera della CLI container 1.7.1', () =
           formatValues: FORMAT_VALUES,
           noFormatSubcommands: NO_FORMAT
         })
-        expect(hardViolations(violations), `${name}: ${JSON.stringify(argv)} → ${JSON.stringify(violations)}`).toEqual([])
+        expect(violations, `${name}: ${JSON.stringify(argv)} → ${JSON.stringify(violations)}`).toEqual([])
       }
     })
   }
 
-  it('le help MANCANTI sono esattamente l\'elenco fisso (appena una entra, il contratto la pretende)', () => {
-    const mancanti = new Set<string>()
+  it('BRV1 il contratto è OBBLIGATORIO: OGNI sottocomando usato da un apple*Argv ha la sua help in fixture (nessun elenco fisso di mancanti)', () => {
+    const usati = new Set<string>()
     for (const [name, { args, sub }] of Object.entries(S)) {
+      if (sub === '') continue // `--version`: solo opzioni globali, niente help
+      usati.add(sub)
       const built = (MOD as unknown as Record<string, (...a: unknown[]) => string[] | string[][]>)[name]!(...args)
       for (const argv of Array.isArray(built[0]) ? (built as string[][]) : [built as string[]]) {
         for (const v of checkEngineArgv(argv, { subcommand: sub, helps, formatValues: FORMAT_VALUES, noFormatSubcommands: NO_FORMAT })) {
-          if (v.kind === 'help-missing') mancanti.add(v.subcommand)
+          expect(v.kind, `${name}: ${JSON.stringify(argv)} → ${JSON.stringify(v)}`).not.toBe('help-missing')
         }
       }
     }
-    expect([...mancanti].sort()).toEqual([...MANCANTI].sort())
+    // e la tabella dei valori di prova non lascia sottocomandi SCOPERTI:
+    // ogni help in fixture serve ad almeno un argv (le due tabelle si coprono)
+    expect([...usati].sort()).toEqual(Object.values(HELP_FILES).sort())
   })
 })
 
@@ -210,8 +212,8 @@ describe('BAV1: il modulo generico del contratto (la firma letta dalla help)', (
   })
 
   it('il contratto è GENERICO: la stessa help vera rifiuta l\'argv Docker del bug dal vivo', () => {
-    // l'uscita vera della 1.7.1: exit 64 sul template Go (ls non ha help in
-    // fixture: i controlli che non la richiedono scattano lo stesso)
+    // l'uscita vera della 1.7.1: exit 64 sul template Go (BRV1: anche ls ha
+    // la sua help in fixture — template e valore si rifiutano da lì)
     const v1 = hardViolations(checkEngineArgv(['ls', '-a', '--format', '{{.name}}'], { subcommand: 'ls', helps, formatValues: FORMAT_VALUES }))
     expect(v1).toContainEqual({ kind: 'go-template', token: '{{.name}}' })
     expect(v1).toContainEqual({ kind: 'format-value', value: '{{.name}}', allowed: FORMAT_VALUES })

@@ -1,0 +1,42 @@
+$ container build --help
+OVERVIEW: Build an image from a Dockerfile or Containerfile
+
+USAGE: build [<options>] [<context-dir>]
+
+ARGUMENTS:
+  <context-dir>           Build directory (default: .)
+
+OPTIONS:
+  -a, --arch <value>      Add the architecture type to the build
+  --build-arg <key=val>   Set build-time variables
+  -c, --cpus <cpus>       Number of CPUs to allocate to the builder container
+  -f, --file <path>       Path to Dockerfile
+  -l, --label <key=val>   Set a label
+  -m, --memory <memory>   Amount of builder container memory (1MiByte
+                          granularity), with optional K, M, G, T, or P suffix
+  --no-cache              Do not use cache
+  -o, --output <value>    Output configuration for the build (format:
+                          type=<oci|tar|local>[,dest=]) (default: type=oci)
+  --os <value>            Add the OS type to the build
+  --platform <platform>   Add the platform to the build (format:
+                          os/arch[/variant], takes precedence over --os and
+                          --arch) [environment: CONTAINER_DEFAULT_PLATFORM]
+  --progress <type>       Progress type (format: auto|plain|tty) (default: auto)
+  -q, --quiet             Suppress build output
+  --secret <id=key,...>   Set build-time secrets (format:
+                          id=<key>[,env=<ENV_VAR>|,src=<local/path>])
+  --ssh <default>         Forward SSH agent authentication to the build
+                          (format: default)
+  -t, --tag <name>        Name for the built image (default:
+                          68c74c01-eb68-4e94-aed6-fb1015817fa1)
+  --target <stage>        Set the target build stage
+  --vsock-port <port>     Builder shim vsock port (default: 8088)
+  --debug                 Enable debug output [environment: CONTAINER_DEBUG]
+  --dns <ip>              DNS nameserver IP address
+  --dns-domain <domain>   Default DNS domain
+  --dns-option <option>   DNS options
+  --dns-search <domain>   DNS search domains
+  --pull                  Pull latest image
+  -h, --help              Show help information.
+
+[exit 0]

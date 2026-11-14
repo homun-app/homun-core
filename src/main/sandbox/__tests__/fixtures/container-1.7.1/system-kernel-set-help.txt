@@ -1,0 +1,22 @@
+$ container system kernel set --help
+OVERVIEW: Set the default kernel
+
+USAGE: container system kernel set [--arch <arch>] [--binary <binary>] [--force] [--recommended] [--tar <tar>] [--digest <digest>] [--debug]
+
+OPTIONS:
+  --arch <arch>           The architecture of the kernel binary (values: amd64,
+                          arm64) (default: arm64)
+  --binary <binary>       Path to the kernel file (or archive member, if used
+                          with --tar)
+  --force                 Overwrites an existing kernel with the same name
+  --recommended           Download and install the recommended kernel as the
+                          default (takes precedence over all other flags)
+  --tar <tar>             Filesystem path or remote URL to a tar archive
+                          containing a kernel file
+  --digest <digest>       Expected digest for the tar archive, for example
+                          sha256:<hex>. Required when --tar is a remote URL.
+  --debug                 Enable debug output [environment: CONTAINER_DEBUG]
+  --version               Show the version.
+  -h, --help              Show help information.
+
+[exit 0]

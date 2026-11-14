@@ -1,0 +1,15 @@
+$ container ls --help
+OVERVIEW: List running containers
+
+USAGE: container list [--all] [--format <format>] [--quiet] [--debug]
+
+OPTIONS:
+  -a, --all               Include containers that are not running
+  --format <format>       Format of the output (values: json, table, yaml,
+                          toml; default: table)
+  -q, --quiet             Only output the container ID
+  --debug                 Enable debug output [environment: CONTAINER_DEBUG]
+  --version               Show the version.
+  -h, --help              Show help information.
+
+[exit 0]

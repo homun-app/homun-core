@@ -1,0 +1,14 @@
+$ container image inspect --help
+OVERVIEW: Display information about one or more images
+
+USAGE: container image inspect [--debug] <images> ...
+
+ARGUMENTS:
+  <images>                Images to inspect
+
+OPTIONS:
+  --debug                 Enable debug output [environment: CONTAINER_DEBUG]
+  --version               Show the version.
+  -h, --help              Show help information.
+
+[exit 0]

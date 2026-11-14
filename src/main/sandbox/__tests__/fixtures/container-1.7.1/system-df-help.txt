@@ -1,0 +1,13 @@
+$ container system df --help
+OVERVIEW: Show disk usage for images, containers, and volumes
+
+USAGE: container system df [--format <format>] [--debug]
+
+OPTIONS:
+  --format <format>       Format of the output (values: json, table, yaml,
+                          toml; default: table)
+  --debug                 Enable debug output [environment: CONTAINER_DEBUG]
+  --version               Show the version.
+  -h, --help              Show help information.
+
+[exit 0]

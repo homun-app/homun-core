@@ -1,0 +1,18 @@
+$ container stop --help
+OVERVIEW: Stop one or more running containers
+
+USAGE: container stop [--all] [--signal <signal>] [--time <time>] [--debug] [<container-ids> ...]
+
+ARGUMENTS:
+  <container-ids>         Container IDs
+
+OPTIONS:
+  -a, --all               Stop all running containers
+  -s, --signal <signal>   Signal to send to the containers
+  -t, --time <time>       Seconds to wait before killing the containers
+                          (default: 5)
+  --debug                 Enable debug output [environment: CONTAINER_DEBUG]
+  --version               Show the version.
+  -h, --help              Show help information.
+
+[exit 0]

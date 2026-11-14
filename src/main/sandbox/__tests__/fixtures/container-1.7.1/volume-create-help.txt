@@ -1,0 +1,18 @@
+$ container volume create --help
+OVERVIEW: Create a new volume
+
+USAGE: container volume create [--label <label> ...] [--opt <opt> ...] [-s <s>] [--debug] <name>
+
+ARGUMENTS:
+  <name>                  Volume name
+
+OPTIONS:
+  --label <label>         Set metadata for a volume
+  --opt <opt>             Set driver specific options
+  -s <s>                  Size of the volume in bytes, with optional K, M, G,
+                          T, or P suffix
+  --debug                 Enable debug output [environment: CONTAINER_DEBUG]
+  --version               Show the version.
+  -h, --help              Show help information.
+
+[exit 0]

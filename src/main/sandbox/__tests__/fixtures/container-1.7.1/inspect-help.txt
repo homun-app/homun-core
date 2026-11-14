@@ -1,0 +1,14 @@
+$ container inspect --help
+OVERVIEW: Display information about one or more containers
+
+USAGE: container inspect [--debug] <container-ids> ...
+
+ARGUMENTS:
+  <container-ids>         Container IDs to inspect
+
+OPTIONS:
+  --debug                 Enable debug output [environment: CONTAINER_DEBUG]
+  --version               Show the version.
+  -h, --help              Show help information.
+
+[exit 0]
