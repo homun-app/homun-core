@@ -14,8 +14,17 @@ interface Step {
   run?: string
   env?: Record<string, unknown>
 }
+interface Job {
+  name?: string
+  'runs-on'?: string
+  if?: string
+  permissions?: Record<string, string>
+  'timeout-minutes'?: number
+  steps: Step[]
+}
 interface Workflow {
-  jobs: { build: { steps: Step[] } }
+  on?: { push?: { branches?: string[]; tags?: string[] }; pull_request?: { branches?: string[] }; workflow_dispatch?: unknown }
+  jobs: Record<string, Job> & { build: Job }
 }
 
 const WF_PATH = join(import.meta.dirname, '..', '..', '.github', 'workflows', 'build.yml')
@@ -43,6 +52,60 @@ describe('fase rilascio di prova (RP1): la CI prepara i vendor nativi dagli asse
     const prepare = steps.find((s) => runOf(s).includes('node scripts/prepare-engramma.mjs') && runOf(s).includes('node scripts/fetch-llama.mjs'))
     expect(prepare, 'manca lo step che prepara Engramma e llama-server in CI').toBeDefined()
     expect(Object.keys(prepare?.env ?? {})).toEqual([])
+  })
+})
+
+// Fase ci-beta5 (CB4): la CI della beta.5 era rossa PERCHÉ i test giravano
+// solo sui tag v* — la prima volta che la suite ha corso sul runner (macos-15)
+// ha trovato i sette test che dipendevano dalla macchina. Un job leggero
+// «Typecheck and tests» parte a OGNI push su main e sulle PR: niente build,
+// niente firma, niente segreti. Il job di build resta com'era (tag v*, PR,
+// dispatch) e NON parte sui push di main.
+describe('fase ci-beta5 (CB4): i test girano a ogni push su main', () => {
+  const light = (): Job => {
+    const j = Object.values(wf.jobs).find((job) => (job.name ?? '').includes('Typecheck and tests'))
+    expect(j, 'manca il job leggero «Typecheck and tests»').toBeDefined()
+    return j as Job
+  }
+
+  it('il workflow parte anche sui PUSH a main (i tag v* e le PR restano)', () => {
+    expect(wf.on?.push?.branches ?? [], 'on.push deve includere main').toContain('main')
+    expect(wf.on?.push?.tags ?? []).toContain('v*')
+    expect(wf.on?.pull_request?.branches ?? []).toContain('main')
+  })
+
+  it('il job leggero fa SOLO typecheck e test: niente electron-builder, niente upload, niente release', () => {
+    const runs = light().steps.map(runOf).join('\n')
+    expect(runs).toContain('npm run typecheck')
+    expect(runs).toContain('npm test')
+    // i vendor nativi si preparano anche qui: i test li vogliono (pretest fa
+    // il fast path, ma fetch-llama spetta a chi lancia)
+    expect(runs).toContain('node scripts/prepare-engramma.mjs')
+    expect(runs).toContain('node scripts/fetch-llama.mjs')
+    for (const banned of ['electron-builder', 'gh release', 'upload-artifact', 'notarytool']) {
+      expect(runs, `il job leggero non deve fare «${banned}»`).not.toContain(banned)
+    }
+  })
+
+  it('il job leggero: permissions contents: read, NESSUN segreto, NESSUN github.event.* negli step run', () => {
+    const j = light()
+    expect(j.permissions).toEqual({ contents: 'read' })
+    for (const s of j.steps) {
+      const run = runOf(s)
+      expect(run, `«${s.name}» interpola github.event.* in uno step run`).not.toContain('github.event')
+      const env = Object.values(s.env ?? {}).map(String).join(' ')
+      expect(env, `«${s.name}» usa un segreto`).not.toContain('${{ secrets.')
+      expect(run, `«${s.name}» usa un segreto`).not.toContain('${{ secrets.')
+    }
+  })
+
+  it('il job di build NON parte sui push di main: resta com\'era su tag v*, PR e dispatch', () => {
+    const cond = wf.jobs.build.if ?? ''
+    expect(cond, 'al job di build serve la guardia che esclude i push di main').toContain('refs/tags/v')
+    expect(cond).toContain('pull_request')
+    expect(cond).toContain('workflow_dispatch')
+    // e i SUOI step non cambiano: la firma e la pubblicazione restano ai tag
+    expect(steps.some((s) => runOf(s).includes('electron-builder'))).toBe(true)
   })
 })
 

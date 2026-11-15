@@ -13,6 +13,12 @@ name: Build installers
 #   rivedere e pubblicare a mano.
 # - PR su main / esecuzione manuale → build NON firmata, solo artifact: prova
 #   la pipeline senza taggare.
+# - CB4 (fase ci-beta5): push su main e PR → anche il job leggero
+#   «Typecheck and tests» (solo typecheck e suite, niente build/firma/
+#   upload): la CI della beta.5 era rossa perché i test giravano SOLO sui
+#   tag — la prima corsa sul runner ha trovato i test che dipendevano dalla
+#   macchina. Il job di build NON parte sui push di main (guardia if): su
+#   tag v*, PR e dispatch resta esattamente com'era.
 #
 # Security note: nessun input non fidato github.event.* è interpolato negli
 # step run. Le uniche espressioni ${{ }} dentro comandi sono secrets e valori
@@ -20,6 +26,7 @@ name: Build installers
 
 on:
   push:
+    branches: [main]
     tags:
       - "v*"
   pull_request:
@@ -30,10 +37,50 @@ permissions:
   contents: read # la pubblicazione va su homun-releases via RELEASES_TOKEN
 
 jobs:
+  # CB4 (fase ci-beta5): i test a OGNI push su main e sulle PR, senza build
+  # né firma né upload. Nessun segreto (i vendor nativi sono asset pubblici
+  # verificati), permissions contents: read, nessuna interpolazione di
+  # github.event.* negli step run (nota di sicurezza in testa al file).
+  typecheck-and-tests:
+    name: Typecheck and tests
+    runs-on: macos-15
+    timeout-minutes: 30
+    # sui tag v* i test li fa già il job di build: niente corsa doppia
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # i test vogliono i vendor nativi pronti (come nel job di build: il
+      # pretest rifà il fast path di Engramma, il bundle llama si prende qui)
+      - name: Prepare native vendor assets (Engramma + llama-server)
+        run: |
+          node scripts/prepare-engramma.mjs
+          node scripts/fetch-llama.mjs
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Tests
+        run: npm test
+
   build:
     name: Build (macOS arm64)
     runs-on: macos-15
     timeout-minutes: 40
+    # CB4 (fase ci-beta5): il job di build NON parte sui push di main (ci
+    # pensa il job leggero): su tag v*, PR e dispatch resta com'era
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     steps:
       - uses: actions/checkout@v4
 
