@@ -273,12 +273,19 @@ const server = new Server({ name: 'fake-browser-mcp', version: '0.0.0' }, { capa
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }))
 
 const DIE_ON_CALL = Number(process.env.SANDBOT_TEST_FAKE_BROWSER_MCP_DIE_ON_CALL ?? '0')
+// CCK2 (fase computer-card-correzioni): la risposta di OGNI chiamata può
+// RITARDARE di un tempo pilotato — la sonda della card «Computer» legge lo
+// stato «Acceso» DURANTE l'apertura del browser, e quella finestra deve
+// durare più dei poll della card (300 ms): MAI affidarsi alla velocità di uno
+// spawn caldo. Flag solo-test, come DIE_ON_CALL: senza env, nessun ritardo.
+const CALL_DELAY_MS = Number(process.env.SANDBOT_TEST_FAKE_BROWSER_MCP_DELAY_MS ?? '0')
 let calls = 0
 
 server.setRequestHandler(CallToolRequestSchema, async (req) => {
   const { name, arguments: args = {} } = req.params
   calls++
   if (DIE_ON_CALL > 0 && calls >= DIE_ON_CALL) process.exit(0) // muore SENZA rispondere (I4)
+  if (CALL_DELAY_MS > 0) await new Promise((r) => setTimeout(r, CALL_DELAY_MS))
   if (name === 'browser_navigate') {
     const url = String(args.url ?? '')
     navigations++ // dalla seconda navigazione i ref prendono il prefisso f<n>

@@ -350,6 +350,16 @@ async function startBrowserSession(agentId: string): Promise<BrowserSession> {
       env = { SANDBOT_TEST_FAKE_BROWSER_MCP_DIE_ON_CALL: dieOnCall }
       delete process.env.SANDBOT_TEST_FAKE_BROWSER_MCP_DIE_ON_CALL
     }
+    // CCK2 (fase computer-card-correzioni): il ritardo pilotato di OGNI
+    // chiamata del finto — la finestra «Acceso» della card «Computer» deve
+    // durare più dei poll della sonda, MAI affidata alla velocità di uno
+    // spawn caldo. Come DIE_ON_CALL si passa ESPPLICITO: l'env del launcher
+    // MCP non eredita quello del daemon. Flag solo-test, fuori dalle prove
+    // non esiste e non cambia niente
+    const delayMs = process.env.SANDBOT_TEST_FAKE_BROWSER_MCP_DELAY_MS
+    if (delayMs) {
+      env = { ...env, SANDBOT_TEST_FAKE_BROWSER_MCP_DELAY_MS: delayMs }
+    }
   } else {
     await ensureBoxContainer()
     await ensureBotHome(agentId) // la home del proprietario serve ai file del BOT

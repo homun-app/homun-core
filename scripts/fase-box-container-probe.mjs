@@ -457,6 +457,9 @@ try {
   log('--- BR: la rete del box (none isolata, cambio che ricrea) ---')
   const chatRequests = []
   const replies = []
+  // CCK2 (fase computer-card-correzioni): la reply SCRIPTATA PER FORMA — la
+  // RICHIESTA decide cosa ricevere, non la posizione in coda (vedi b2)
+  let scriptReply = null
   const providerServer = createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1')
     if (req.method === 'POST' && url.pathname.endsWith('/chat/completions')) {
@@ -464,7 +467,8 @@ try {
       req.on('data', (c) => (body += c))
       req.on('end', async () => {
         chatRequests.push(JSON.parse(body))
-        const next = replies.shift() ?? { text: 'ok' }
+        const scripted = scriptReply ? scriptReply(JSON.parse(body)) : null
+        const next = scripted ?? replies.shift() ?? { text: 'ok' }
         // CC (fase computer-card): una risposta può RITARDARE di qualche
         // secondo — tiene il turno del bot APERTO mentre un tool gira, così
         // la card «Computer» si legge DURANTE l'attività
@@ -492,41 +496,46 @@ try {
   /** CC: una risposta libera (col delayMs che tiene il turno aperto). */
   const pushReply = (r) => replies.push(r)
 
-  /** L'app col box PILOTATO: settings seminati nel DB, log della CLI finta scelto, env extra a piacere. */
+  /** L'app col box PILOTATO: settings seminati nel DB, log della CLI finta scelto, env extra a piacere.
+   *  CCK2: noSeed=true RIAPRE l'app sugli STESSI dati senza toccare il DB né il
+   *  log della CLI (il daemon VIVO ce li ha aperti: la finestra si riapre come
+   *  farebbe l'app dal Dock, col daemon più VECCHIO della finestra). */
   const launchBoxApp = (giro, opts) => {
     const dataDir = join(TMP, `data-br-${giro}`)
     mkdirSync(join(dataDir, 'data'), { recursive: true })
-    const db = new DatabaseSync(join(dataDir, 'data', 'sandbot.db'))
-    db.exec('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
-    db.exec('CREATE TABLE IF NOT EXISTS agents (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT DEFAULT \'\', provider_id TEXT, model TEXT, status TEXT DEFAULT \'offline\', unread INTEGER DEFAULT 0, created_at INTEGER)')
-    db.prepare('INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)').run(
-      'providers',
-      JSON.stringify([{ id: 'finto', name: 'Finto (locale)', kind: 'openai-compatible', baseUrl: `http://127.0.0.1:${providerPort}/v1`, apiKey: 'k', enabled: true }])
-    )
-    db.prepare('INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)').run('sandbox.engine', '"apple-container"')
-    db.prepare('INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)').run('sandbox.mode', '"box"')
-    db.prepare('INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)').run('sandbox.network', JSON.stringify(opts.network))
-    // i turni della sonda non chiedono approvazioni: si scrive un FILE del
-    // bot (nessun comando da approvare, nessun output da aspettare)
-    db.prepare('INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)').run('approvals.mode', '"never"')
-    // fase guida: la guida ora CHIEDE i permessi (niente più Salta), e la
-    // scelta scriverebbe approvals.mode sopra il «never» seminato. Questa
-    // sonda non prova la guida (c'è la sua, fase-onboarding-a-probe): si
-    // semina un principal GIÀ fatto con modello pronto, e la guida non parte
-    db.prepare('INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)').run('models.main', JSON.stringify({ providerId: 'finto', model: 'finto', thinking: null }))
-    db.prepare('INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)').run('onboarding.done', 'true')
-    db.prepare('INSERT OR REPLACE INTO agents(id, name, description, status, unread, created_at) VALUES (?, ?, ?, ?, 0, ?)').run('agent_main', 'Bot', '', 'idle', Date.now())
-    db.prepare('INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)').run('mainAgentId', '"agent_main"')
-    // CC (fase computer-card): un box.setup seminato fa RIPARTIRE la
-    // preparazione al boot (resumeAtBoot) — awaiting-installer resta FERMA
-    // ad aspettare l'utente: la card «Computer» dice «In preparazione»
-    if (opts.setupPhase) {
+    if (!opts.noSeed) {
+      const db = new DatabaseSync(join(dataDir, 'data', 'sandbot.db'))
+      db.exec('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
+      db.exec('CREATE TABLE IF NOT EXISTS agents (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT DEFAULT \'\', provider_id TEXT, model TEXT, status TEXT DEFAULT \'offline\', unread INTEGER DEFAULT 0, created_at INTEGER)')
       db.prepare('INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)').run(
-        'box.setup',
-        JSON.stringify({ phase: opts.setupPhase, bytes: null, total: null, buildPhase: null, error: null, startedAt: Date.now(), neededBytes: null, skipped: [], phaseStartedAt: null })
+        'providers',
+        JSON.stringify([{ id: 'finto', name: 'Finto (locale)', kind: 'openai-compatible', baseUrl: `http://127.0.0.1:${providerPort}/v1`, apiKey: 'k', enabled: true }])
       )
+      db.prepare('INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)').run('sandbox.engine', '"apple-container"')
+      db.prepare('INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)').run('sandbox.mode', '"box"')
+      db.prepare('INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)').run('sandbox.network', JSON.stringify(opts.network))
+      // i turni della sonda non chiedono approvazioni: si scrive un FILE del
+      // bot (nessun comando da approvare, nessun output da aspettare)
+      db.prepare('INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)').run('approvals.mode', '"never"')
+      // fase guida: la guida ora CHIEDE i permessi (niente più Salta), e la
+      // scelta scriverebbe approvals.mode sopra il «never» seminato. Questa
+      // sonda non prova la guida (c'è la sua, fase-onboarding-a-probe): si
+      // semina un principal GIÀ fatto con modello pronto, e la guida non parte
+      db.prepare('INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)').run('models.main', JSON.stringify({ providerId: 'finto', model: 'finto', thinking: null }))
+      db.prepare('INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)').run('onboarding.done', 'true')
+      db.prepare('INSERT OR REPLACE INTO agents(id, name, description, status, unread, created_at) VALUES (?, ?, ?, ?, 0, ?)').run('agent_main', 'Bot', '', 'idle', Date.now())
+      db.prepare('INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)').run('mainAgentId', '"agent_main"')
+      // CC (fase computer-card): un box.setup seminato fa RIPARTIRE la
+      // preparazione al boot (resumeAtBoot) — awaiting-installer resta FERMA
+      // ad aspettare l'utente: la card «Computer» dice «In preparazione»
+      if (opts.setupPhase) {
+        db.prepare('INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)').run(
+          'box.setup',
+          JSON.stringify({ phase: opts.setupPhase, bytes: null, total: null, buildPhase: null, error: null, startedAt: Date.now(), neededBytes: null, skipped: [], phaseStartedAt: null })
+        )
+      }
+      db.close()
     }
-    db.close()
     const cliLogFile = opts.cliLogFile
     let appLog = ''
     const proc = spawn(ELECTRON, ['.', `--remote-debugging-port=${DEBUG_PORT_BASE + giro}`], {
@@ -548,7 +557,13 @@ try {
     })
     proc.stdout.on('data', (d) => { appLog += d.toString() })
     proc.stderr.on('data', (d) => { appLog += d.toString() })
-    return { proc, dataDir, cliLogFile, getAppLog: () => appLog, stop: () => { try { proc.kill('SIGTERM') } catch { /* già via */ } } }
+    // CCK2: stopHard chiude l'app e la ASPETTA davvero (SIGTERM, 3 s, SIGKILL)
+    // — il daemon NON si tocca: deve restare VIVO per la finestra riaperta
+    return {
+      proc, dataDir, cliLogFile, getAppLog: () => appLog,
+      stop: () => { try { proc.kill('SIGTERM') } catch { /* già via */ } },
+      stopHard: () => stopAppHard(proc)
+    }
   }
 
   /** Apre la pagina dell'app GIÀ lanciata (debug, finestra, guida, focus). */
@@ -935,10 +950,13 @@ try {
       // PATH del daemon: il lancio di questa sonda gira col node della sonda)
       const ccEnv = {
         SANDBOT_TEST_FAKE_BROWSER_MCP: join(ROOT, 'scripts', 'fake-browser-mcp.mjs'),
-        PATH: `${dirname(process.execPath)}:/usr/bin:/bin:/usr/sbin:/sbin`
+        // CCK2: ogni chiamata al browser finto dura 3 s — la finestra
+        // «Acceso» della card dura più dei suoi poll (300 ms), sempre
+        PATH: `${dirname(process.execPath)}:/usr/bin:/bin:/usr/sbin:/sbin`,
+        SANDBOT_TEST_FAKE_BROWSER_MCP_DELAY_MS: '3000'
       }
       app = launchBoxApp(41, { network: 'bridge', cliLogFile: ccLog, extraEnv: ccEnv })
-      const page = await openBotUi(41)
+      let page = await openBotUi(41)
       await connectBot(page)
 
       // a) il box nasce col primo comando; la risposta finale RITARDA: il
@@ -964,23 +982,70 @@ try {
         await dark(page, false)
       }
 
+      // CCK2 (fase computer-card-correzioni): la FINESTRA RIAPRE col box GIÀ
+      // ACCESO — il caso dell'app installata (daemon all'avvio del Mac,
+      // finestra aperta dopo): il box NON cambia stato, NESSUN evento `box`
+      // parte, la card lo può sapere SOLO rileggendo la RPC. Nessun comando
+      // del bot in mezzo. Prima il Page.reload via CDP (la finestra che si
+      // ricarica), poi la finestra NUOVA: l'app si chiude (SIGTERM, aspettata)
+      // col daemon che RESTA VIVO (su macOS le finestre chiuse non fermano i
+      // bot, §6.2) e si RIAPRE sugli stessi dati — come l'app dal Dock
+      {
+        await page.send('Page.reload')
+        if (!(await waitDom(page, `!!document.querySelector('[data-testid="bot-computer-card"]')`, 25_000))) {
+          throw new Error('la card «Computer» non torna dopo il Page.reload (CCK2)')
+        }
+        const f = await waitCard(page, (x) => x.status.includes('In attesa') && x.line === '', 8_000)
+        check('CCK2 Page.reload col box GIÀ acceso: la card torna a «In attesa» DA SOLA, senza eventi né comandi', !!f,
+          JSON.stringify(f ?? (await cardFacts(page).catch(() => null))))
+      }
+      {
+        await app.stopHard()
+        await sleep(1500)
+        const vivi = findProbeDaemons(PREFIX)
+        check('CCK2 la finestra chiusa NON ferma il daemon (il box resta acceso)', vivi.length >= 1,
+          `${vivi.length} daemon di sviluppo vivi dopo la chiusura dell'app`)
+        app = launchBoxApp(41, { network: 'bridge', cliLogFile: ccLog, extraEnv: ccEnv, noSeed: true })
+        const page2 = await openBotUi(41)
+        await connectBot(page2)
+        const f = await waitCard(page2, (x) => x.status.includes('In attesa') && x.line === '', 15_000)
+        check('CCK2 la finestra NUOVA (app riaperta, daemon sopravvissuto) trova il box GIÀ acceso: «In attesa» senza eventi', !!f,
+          JSON.stringify(f ?? (await cardFacts(page2).catch(() => null))))
+        page.close()
+        page = page2
+      }
+
       // b2) browser_open: la card «Acceso» con la frase del browser; dopo il
       // turno il browser resta APERTO → «In attesa» + «Browser aperto».
-      // Come BRV: TRE browser_open (una la può consumare una richiesta
-      // spuria, una ATTIVA il gruppo, una GIRA davvero). La CHIUSURA del
-      // turno RITARDA di 20 s (il turno resta APERTO: la card si legge e si
-      // cattura DURANTE il browser) e la coda si RIPOPOLA: una richiesta
-      // spuria dell'app può rubare la reply di chiusura — il turno non deve
-      // chiudere prima del tempo
+      // CCK2 (fase computer-card-correzioni): le reply del browser sono
+      // SCRIPTATE PER FORMA (scriptReply), NON in coda. Con la coda, la
+      // finestra RIAPERTA riparte col suo picco di richieste spurie (titolo,
+      // presenza, routine) e una di loro poteva RUBARE la reply del
+      // browser_open: apriva il browser PRIMA del turno, e il browser_open
+      // dell'utente diventava un no-op Veloce (invisibile ai poll della
+      // card), col turno che finiva pure nella guardia anti-loop delle
+      // chiamate identiche — la marginalità della fase CC (50/51) diventava
+      // sistematica col riavvio della finestra. Qui: il messaggio «Apri …»
+      // dell'utente riceve il browser_open (se il gruppo non è attivo, la
+      // chiamata lo ATTIVA e la successiva DEL TURNO gira DAVVERO col
+      // browser ancora chiuso), le richieste spurie ricevono 'ok' e non
+      // toccano niente, e la chiusura del turno RITARDA di 20 s — il turno
+      // resta APERTO e la card si legge e si cattura DURANTE il browser
       replies.length = 0
-      for (let i = 0; i < 3; i++) {
-        pushReply({ toolCalls: [{ name: 'browser_open', arguments: { url: 'https://it.wikipedia.org' } }] })
+      {
+        let browserTurn = 0
+        scriptReply = (r) => {
+          const msgs = r.messages ?? []
+          const last = msgs.at(-1)
+          const isBrowserUser = !!last && last.role === 'user' && String(last.content ?? '').includes('Apri https://it.wikipedia.org')
+          const turnGoing = browserTurn > 0 && !!last && last.role === 'tool'
+          if (!isBrowserUser && !turnGoing) return null
+          browserTurn += 1
+          if (browserTurn <= 2) return { toolCalls: [{ name: 'browser_open', arguments: { url: 'https://it.wikipedia.org' } }] }
+          if (browserTurn === 3) return { text: 'Letto dal browser.', delayMs: 20_000 }
+          return null
+        }
       }
-      // la chiusura È in coda da subito; e se una richiesta spuria la ruba,
-      // la coda si ripopola in fretta (50 ms) — il turno non chiude con la
-      // risposta di default 'ok' del provider
-      pushReply({ text: 'Letto dal browser.', delayMs: 20_000 })
-      const refillB2 = setInterval(() => { if (replies.length === 0) replies.push({ text: 'Letto dal browser.', delayMs: 20_000 }) }, 50)
       try {
         await sendChat(page, 'Apri https://it.wikipedia.org nel browser')
         {
@@ -995,7 +1060,7 @@ try {
         }
         await waitBotReply(page, 41, 'Letto dal browser.')
       } finally {
-        clearInterval(refillB2)
+        scriptReply = null
       }
       {
         const f = await waitCard(page, (x) => x.status.includes('In attesa') && x.line.includes('Browser aperto'))
