@@ -611,20 +611,22 @@ function ComputerCard({ agentId }: { agentId: string }) {
   const boxRuntime = useStore((s) => s.boxRuntime)
   const activity = useStore((s) => s.activity[agentId] ?? null)
   const boxSetup = useStore((s) => s.boxSetup)
+  const boxInUse = useStore((s) => s.boxInUse)
   const [browser, setBrowser] = useState<ScreenStatus['browser']>('stopped')
-  const [boxInUse, setBoxInUse] = useState(false)
   useEffect(() => {
     let alive = true
-    // la RPC RILEGGE lo stato del box (l'evento `box` aggiorna lo store);
-    // screen:status copre l'apertura della finestra, l'evento screen i cambi.
-    // Anche il box-setup si RILEGGE: l'evento della preparazione può partire
-    // mentre la finestra è chiusa (resumeAtBoot del daemon) e andrebbe perso
+    // CCK1 (fase computer-card-correzioni): la RISPOSTA della RPC box:runtime
+    // ENTRA nello store (readBoxRuntime, la STESSA azione dell'evento `box`):
+    // l'evento parte SOLO al cambio, la finestra aperta col box GIÀ acceso
+    // non lo riceverebbe mai e la card resterebbe «Spento». Così anche la
+    // modalità della card (readBoxInUse). screen:status copre l'apertura
+    // della finestra, l'evento screen i cambi. Anche il box-setup si RILEGGE:
+    // l'evento della preparazione può partire mentre la finestra è chiusa
+    // (resumeAtBoot del daemon) e andrebbe perso
     void api.screenStatus(agentId).then((s) => { if (alive) setBrowser(s.browser) }).catch(() => undefined)
-    void api.boxRuntime().catch(() => undefined)
+    void useStore.getState().readBoxRuntime()
+    void useStore.getState().readBoxInUse()
     void api.boxSetupState().then((s) => { if (alive && s) useStore.setState({ boxSetup: s }) }).catch(() => undefined)
-    void api.settingsGet<string>('sandbox.mode', 'host')
-      .then((mode) => { if (alive) setBoxInUse(mode === 'box' || mode === 'docker') })
-      .catch(() => undefined)
     return () => { alive = false }
   }, [agentId])
   const view = computerCardState({

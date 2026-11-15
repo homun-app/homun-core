@@ -168,6 +168,12 @@ interface Store {
   screenStatus: Record<string, ScreenStatus>
   /** CC2 (fase computer-card): lo stato del BOX, il computer del bot (evento box; null = non ancora letto) */
   boxRuntime: BoxRuntime | null
+  /**
+   * CCK1 (fase computer-card-correzioni): la card «Computer» usa il computer
+   * del bot (sandbox.mode box/docker)? Dallo store, non dal componente: la
+   * risposta della RPC e la modalità si LEGGONO all'apertura della card.
+   */
+  boxInUse: boolean
   /** fase 16 (U3): l'utente sta scrivendo nel composer di QUESTO bot */
   typingAgentId: string | null
   /** fase 16 (U3): ultimo delta per agente (testo in streaming → speaking) */
@@ -309,6 +315,20 @@ interface Store {
   boxSetupCancel(): Promise<void>
   boxSetupRetry(): Promise<void>
   boxSetupOpenInstaller(): Promise<void>
+  /**
+   * CCK1 (fase computer-card-correzioni): lo stato del box ENTRA nello store
+   * da qui — la STESSA azione per l'evento `box` e per la risposta della RPC
+   * box:runtime. L'evento parte SOLO al cambio di stato: la finestra che si
+   * apre (o si ricarica) col box GIÀ acceso non lo riceverà mai, e senza la
+   * risposta della RPC la card resterebbe «Spento» (il bug di partenza).
+   * Vince il `since` più recente: una risposta più VECCHIA di un evento già
+   * arrivato non lo sovrascrive.
+   */
+  setBoxRuntime(runtime: BoxRuntime): void
+  /** CCK1: la LETTURA della RPC box:runtime (la risposta entra nello store). */
+  readBoxRuntime(): Promise<void>
+  /** CCK1: la lettura della modalità sandbox della card «Computer». */
+  readBoxInUse(): Promise<void>
   /** fase 16: tema (classe dark su <html>) e pannello destro */
   setTheme(t: UiTheme): void
   /** fase 17a: lingua dell'interfaccia — si applica subito e resta nel setting */
@@ -391,6 +411,8 @@ export const useStore = create<Store>((set, get) => ({
   computerTabByAgent: {},
   screenStatus: {},
   boxRuntime: null,
+  // CCK1 (fase computer-card-correzioni): la modalità della card, letta all'apertura
+  boxInUse: false,
   typingAgentId: null,
   lastDeltaAt: {},
   lastSendAt: {},
@@ -670,9 +692,10 @@ export const useStore = create<Store>((set, get) => ({
           set({ screenStatus: { ...s.screenStatus, [e.agentId]: e.status } })
           break
         }
-        // CC2 (fase computer-card): lo stato del BOX è cambiato (solo al cambio)
+        // CC2 (fase computer-card): lo stato del BOX è cambiato (solo al
+        // cambio) — CCK1: passa dalla STESSA azione della risposta della RPC
         case 'box': {
-          set({ boxRuntime: e.runtime })
+          s.setBoxRuntime(e.runtime)
           break
         }
         // fase memoria-engramma (M6): download del modello e indicizzazione
@@ -943,6 +966,23 @@ export const useStore = create<Store>((set, get) => ({
   async boxSetupStart() {
     const r = await api.boxSetupStart().catch(() => null)
     if (r) set({ boxSetup: r })
+  },
+  // CCK1 (fase computer-card-correzioni): la risposta della RPC box:runtime
+  // NON si butta via — entra nello store con la STESSA azione dell'evento
+  // `box`, e vince il `since` più recente (una risposta più vecchia di un
+  // evento già arrivato non lo sovrascrive)
+  setBoxRuntime(runtime: BoxRuntime) {
+    const cur = get().boxRuntime
+    if (cur !== null && runtime.since < cur.since) return
+    set({ boxRuntime: runtime })
+  },
+  async readBoxRuntime() {
+    const r = await api.boxRuntime().catch(() => null)
+    if (r !== null) get().setBoxRuntime(r)
+  },
+  async readBoxInUse() {
+    const mode = await api.settingsGet<string>('sandbox.mode', 'host').catch(() => null)
+    if (mode !== null) set({ boxInUse: mode === 'box' || mode === 'docker' })
   },
   async boxSetupCancel() {
     const r = await api.boxSetupCancel().catch(() => null)
