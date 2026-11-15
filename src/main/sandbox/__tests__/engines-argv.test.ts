@@ -89,6 +89,9 @@ describe('BX5: gli argv del motore Docker sono byte-identici a oggi', () => {
   it('browser e desktop: launcher, stato, screenshot, ponte, xdotool', () => {
     expect(a.browserWritable('c')).toEqual(d.dockerBrowserWritableArgv('c'))
     expect(a.browserOldProfileRm('c', 'own')).toEqual(d.dockerBrowserOldProfileRmArgv('c', 'own'))
+    // BRB2 (fase browser-riavvio-box): il rm dei lock di un avvio precedente
+    // — la UNICA chiave con cui il contratto BX5 cresce in questa fase
+    expect(a.browserLocksRm('c', 'own')).toEqual(d.dockerBrowserLocksRmArgv('c', 'own'))
     expect(a.browserMcp('agent_x', 8085)).toEqual(d.dockerBrowserMcpArgv('agent_x', 8085))
     expect(a.browserMcp('agent_x', 8085, { child: true, owner: 'own' }))
       .toEqual(d.dockerBrowserMcpArgv('agent_x', 8085, { child: true, owner: 'own' }))
@@ -131,7 +134,7 @@ describe('BX5: gli argv del motore Docker sono byte-identici a oggi', () => {
       'exec', 'execBackground', 'killGroup', 'statSize', 'stdioMcp',
       'readFile', 'writeFile', 'listDir', 'realpath', 'findList', 'readB64', 'testPath', 'rmDir', 'cpFromBox',
       'pluginsVolumeCreate', 'pluginCopyCreate', 'pluginsMkdir', 'pluginCp', 'pluginsChown', 'pluginsChmod', 'pluginsRmHelper',
-      'browserVolumeCreate', 'browserRoot', 'browserWritable', 'browserOldProfileRm', 'browserMcp', 'browserReadFile',
+      'browserVolumeCreate', 'browserRoot', 'browserWritable', 'browserOldProfileRm', 'browserLocksRm', 'browserMcp', 'browserReadFile',
       'browserReadB64', 'browserWriteB64', 'browserRmFile',
       'screenControlVnc', 'screenControlPidRead', 'screenSocketReady', 'screenDisplayRead', 'screenBridge', 'xdotool',
       'screenCapture', 'screenGeometry',

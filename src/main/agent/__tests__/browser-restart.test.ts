@@ -62,6 +62,9 @@ const writeFakeCli = (logFile: string): void => {
 /** Lo script COSTANTE della lettura pid+boot, come lo manda il daemon. */
 const pidBootScriptOf = (a: string[]): string => String(a[a.indexOf('-c') + 1] ?? '')
 
+/** L'argv del rm dei lock di BRB2: un rm COME 1001 che nomina i Singleton*. */
+const isLocksRm = (a: string[]): boolean => a[0] === 'exec' && a.includes('rm') && a.some((x) => typeof x === 'string' && x.includes('SingletonLock'))
+
 /**
  * Il runner del box: la CLI FINTA VERA per tutto, TRANNE la lettura pid+boot
  * (l'uscita la decide il test: pid file di un altro avvio, di questo, o nel
@@ -75,7 +78,7 @@ const netJson = (): string =>
     status: { ipv4Gateway: '127.0.0.1', ipv4Subnet: '127.0.0.0/8', ipv6Subnet: 'fdcb:b3be:434:c533::/64' }
   }])
 
-function runner(logFile: string, pidBootOut: () => string, calls: string[][]) {
+function runner(logFile: string, pidBootOut: () => string, calls: string[][], opts: { orphanDead?: boolean } = {}) {
   return async (argv: string[]): Promise<{ stdout: string; stderr: string; exitCode: number | null; signal: null }> => {
     calls.push(argv)
     if (argv[0] === 'network' && argv[1] === 'inspect') {
@@ -83,6 +86,11 @@ function runner(logFile: string, pidBootOut: () => string, calls: string[][]) {
     }
     if (pidBootScriptOf(argv).includes('/proc/sys/kernel/random/boot_id')) {
       return { stdout: pidBootOut(), stderr: '', exitCode: 0, signal: null }
+    }
+    // il segnale 0 di ESISTENZA del gruppo dell'orfano (BRB2): il test decide
+    // se il processo dell'avvio di adesso è vivo (0) o morto (1)
+    if (argv.includes('kill') && argv.includes('-0')) {
+      return { stdout: '', stderr: '', exitCode: opts.orphanDead ? 1 : 0, signal: null }
     }
     const r = spawnSync(process.execPath, [FAKE_SRC, ...argv], {
       encoding: 'utf8',
@@ -197,5 +205,79 @@ describe('BRB1: il pid file porta l\'avvio — il kill dell\'orfano parte SOLO c
     const out = await openBrowser('agent_brba')
     expect(out).toMatch(/^err:/)
     expect(calls.some((a) => a.includes('kill'))).toBe(false)
+  }, 60_000)
+})
+
+describe('BRB2: i lock di Chromium di un avvio precedente si tolgono (solo browser PRINCIPALE, solo senza un MCP vivo di questo avvio)', () => {
+  it('l\'argv puro del rm: COME 1001, rm -f -- coi CINQUE path (i tre Singleton* del profilo e i due lock di xauth)', async () => {
+    const d = await import('../../sandbox/docker-argv')
+    expect(d.dockerBrowserLocksRmArgv('sandbot-box', 'agent_x')).toEqual([
+      'exec', '-u', '1001:1001', 'sandbot-box', 'rm', '-f', '--',
+      '/browser/agent_x/profile/SingletonLock',
+      '/browser/agent_x/profile/SingletonSocket',
+      '/browser/agent_x/profile/SingletonCookie',
+      '/browser/agent_x/Xauthority-c',
+      '/browser/agent_x/Xauthority-l'
+    ])
+  })
+
+  it('l\'ordine degli argv: lettura del pid file → (nessun kill, avvio diverso) → rm dei lock → avvio di playwright-mcp', async () => {
+    const logFile = join(TMP, `cli-brb2-ordine-${++seq}.jsonl`)
+    writeFakeCli(logFile)
+    const calls: string[][] = []
+    setDockerRunnerForTests(runner(logFile, () => '33 boot-della-scora-scorsa\nboot boot-di-adesso\n', calls))
+    const out = await openBrowser('agent_brba')
+    expect(out).toMatch(/^err:/)
+    const readAt = calls.findIndex((a) => pidBootScriptOf(a).includes('/proc/sys/kernel/random/boot_id'))
+    const rmAt = calls.findIndex(isLocksRm)
+    const writableAt = calls.findIndex((a) => a.includes('test') && a.includes('-O') && a.includes('/browser'))
+    expect(readAt).toBeGreaterThanOrEqual(0)
+    expect(rmAt, 'l\'rm dei lock').toBeGreaterThan(readAt)
+    expect(writableAt, 'il controllo di /browser viene DOPO il rm').toBeGreaterThan(rmAt)
+    // nessun kill con l'avvio diverso, e il launcher di playwright-mcp È partito
+    // (nel log della CLI finta: PRIMA il rm, POI il launcher)
+    expect(calls.some((a) => a.includes('kill'))).toBe(false)
+    const log = readCliLog(logFile)
+    const rmLogAt = log.findIndex(isLocksRm)
+    const launchLogAt = log.findIndex((a) => pidBootScriptOf(a).includes('exec playwright-mcp'))
+    expect(rmLogAt).toBeGreaterThanOrEqual(0)
+    expect(launchLogAt).toBeGreaterThan(rmLogAt)
+  }, 60_000)
+
+  it('con un MCP VIVO dello stesso avvio (kill -0 = 0): NESSUN rm dei lock — il kill di BRB1 resta', async () => {
+    const logFile = join(TMP, `cli-brb2-vivo-${++seq}.jsonl`)
+    writeFakeCli(logFile)
+    const calls: string[][] = []
+    setDockerRunnerForTests(runner(logFile, () => '33 boot-di-adesso\nboot boot-di-adesso\n', calls, { orphanDead: false }))
+    const out = await openBrowser('agent_brba')
+    expect(out).toMatch(/^err:/)
+    expect(calls.some((a) => a.includes('kill') && a.includes('-TERM'))).toBe(true)
+    expect(calls.some(isLocksRm)).toBe(false)
+  }, 60_000)
+
+  it('stesso avvio ma col processo MORTO (kill -0 ≠ 0): il rm dei lock ARRIVA', async () => {
+    const logFile = join(TMP, `cli-brb2-morto-${++seq}.jsonl`)
+    writeFakeCli(logFile)
+    const calls: string[][] = []
+    setDockerRunnerForTests(runner(logFile, () => '33 boot-di-adesso\nboot boot-di-adesso\n', calls, { orphanDead: true }))
+    const out = await openBrowser('agent_brba')
+    expect(out).toMatch(/^err:/)
+    const kills = calls.filter((a) => a.includes('kill'))
+    expect(kills.some((k) => k.includes('-TERM'))).toBe(true)
+    expect(kills.some((k) => k.includes('-0'))).toBe(true)
+    expect(calls.some(isLocksRm)).toBe(true)
+  }, 60_000)
+
+  it('per un FIGLIO (--isolated, niente profilo condiviso): NESSUN rm dei lock; la lettura pid+boot è del SUO pid file', async () => {
+    const logFile = join(TMP, `cli-brb2-figlio-${++seq}.jsonl`)
+    writeFakeCli(logFile)
+    const calls: string[][] = []
+    setDockerRunnerForTests(runner(logFile, () => 'boot boot-di-adesso\n', calls))
+    const out = await openBrowser('sub_a1b2c3d4')
+    expect(out).toMatch(/^err:/)
+    const readAt = calls.findIndex((a) => pidBootScriptOf(a).includes('/proc/sys/kernel/random/boot_id'))
+    expect(readAt).toBeGreaterThanOrEqual(0)
+    expect(calls[readAt]).toContain('/browser/agent_padre/mcp-sub_a1b2c3d4.pid')
+    expect(calls.some(isLocksRm)).toBe(false)
   }, 60_000)
 })

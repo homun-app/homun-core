@@ -89,6 +89,12 @@ export interface BoxEngineArgv {
   browserRoot(image: string): string[]
   browserWritable(container: string): string[]
   browserOldProfileRm(container: string, owner: string): string[]
+  /**
+   * BRB2 (fase browser-riavvio-box): i lock di Chromium (Singleton*) e di
+   * xauth lasciati nel volume da un avvio precedente, COME 1001 e argv puri
+   * — la UNICA chiave con cui il contratto BX5 cresce in questa fase.
+   */
+  browserLocksRm(container: string, owner: string): string[]
   browserMcp(agentId: string, proxyPort: number, opts?: { child?: boolean; owner?: string }): string[]
   browserReadFile(container: string, path: string): string[]
   browserReadB64(container: string, path: string): string[]

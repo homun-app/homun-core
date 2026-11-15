@@ -107,6 +107,8 @@ const S: Record<string, { args: unknown[]; sub: string }> = {
   appleBrowserRootArgv: { args: ['sandbot-box:abab9640c765', 'sh -c browser-root'], sub: 'run' },
   appleBrowserWritableArgv: { args: ['sandbot-box'], sub: 'exec' },
   appleBrowserOldProfileRmArgv: { args: ['sandbot-box', 'agent_x'], sub: 'exec' },
+  // BRB2 (fase browser-riavvio-box): il rm dei lock di un avvio precedente
+  appleBrowserLocksRmArgv: { args: ['sandbot-box', 'agent_x'], sub: 'exec' },
   appleBrowserMcpArgv: { args: ['agent_x', 8085, { gateway: '192.0.15.1' }, 'sandbot-box'], sub: 'exec' },
   appleBrowserReadFileArgv: { args: ['sandbot-box', '/browser/f'], sub: 'exec' },
   // BRB1 (fase browser-riavvio-box): la lettura pid+boot in un solo exec — il

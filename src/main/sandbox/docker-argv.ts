@@ -739,6 +739,31 @@ export function dockerBrowserOldProfileRmArgv(container: string, owner: string):
 }
 
 /**
+ * BRB2 (fase browser-riavvio-box): i lock di un avvio PRECEDENTE si tolgono
+ * dal volume del browser PRIMA dell'avvio del browser PRINCIPALE (i figli
+ * --isolated non usano il profilo e non ne hanno bisogno). Il volume
+ * /browser sopravvive allo stop del box: Chromium legge SingletonLock
+ * («hostname-pid»), e se nella VM NUOVA un processo qualsiasi ha quel pid,
+ * crede il profilo IN USO e l'avvio muore con «Browser is already in use»
+ * (il difetto visto dal vivo, 1 corsa su 4). Con l'avvio di BRB1 si SA che
+ * il pid file non è di questa VM: i lock sono necessariamente stantii. Si
+ * tolgono anche i lock di xauth (Xauthority-c/-l), l'altra traccia di un
+ * avvio precedente («xauth: timeout in locking authority file»). Come 1001
+ * (BROWSER_USER, i file sono suoi) e argv PURI: un solo rm -f -- coi CINQUE
+ * path esatti, chiamato SOLO senza un MCP vivo di QUESTO avvio.
+ */
+export function dockerBrowserLocksRmArgv(container: string, owner: string): string[] {
+  return [
+    'exec', '-u', BROWSER_USER, container, 'rm', '-f', '--',
+    `${browserProfilePath(owner)}/SingletonLock`,
+    `${browserProfilePath(owner)}/SingletonSocket`,
+    `${browserProfilePath(owner)}/SingletonCookie`,
+    `${browserStateDir(owner)}/Xauthority-c`,
+    `${browserStateDir(owner)}/Xauthority-l`
+  ]
+}
+
+/**
  * Il pid file dell'istanza browser di un proprietario, nel volume del browser
  * (P2): per un FIGLIO il nome porta il suo id. È di 1001 e sta in 0700 di
  * 1001: la shell del bot NON può leggerlo né scriverlo (non può nemmeno

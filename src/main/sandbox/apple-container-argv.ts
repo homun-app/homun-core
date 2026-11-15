@@ -617,6 +617,22 @@ export function appleBrowserOldProfileRmArgv(container: string, owner: string): 
 }
 
 /**
+ * BRB2 (fase browser-riavvio-box): i lock di Chromium e di xauth di un
+ * avvio precedente si tolgono COME 1001 prima del browser principale —
+ * argv puri col profilo e la cartella del proprietario, come Docker.
+ */
+export function appleBrowserLocksRmArgv(container: string, owner: string): string[] {
+  return [
+    'exec', '-u', BROWSER_USER, container, 'rm', '-f', '--',
+    `${browserProfilePath(owner)}/SingletonLock`,
+    `${browserProfilePath(owner)}/SingletonSocket`,
+    `${browserProfilePath(owner)}/SingletonCookie`,
+    `${browserStateDir(owner)}/Xauthority-c`,
+    `${browserStateDir(owner)}/Xauthority-l`
+  ]
+}
+
+/**
  * Il launcher del server MCP del browser (BX2): gli STESSI wrapper e flag di
  * Docker (le stringhe COSTANTI), come 1001 nel volume /browser, col proxy al
  * GATEWAY della rete interna al posto di host.docker.internal.

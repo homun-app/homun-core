@@ -348,6 +348,32 @@ export async function killBrowserOrphan(agentId: string): Promise<void> {
   await checkAndKillBrowserOrphan(pidFile)
 }
 
+/**
+ * BRB2 (fase browser-riavvio-box): i lock di Chromium (SingletonLock,
+ * SingletonSocket, SingletonCookie) e di xauth (Xauthority-c/-l) lasciati
+ * nel volume da un avvio PRECEDENTE si tolgono dal profilo del browser
+ * PRINCIPALE prima dell'avvio — Chromium legge SingletonLock come
+ * «hostname-pid» e se nella VM nuova un processo qualsiasi ha quel pid,
+ * rifiuta il profilo («Browser is already in use», il difetto vivo di una
+ * corsa su quattro). SOLO se nessun MCP di QUESTO avvio è vivo per quel
+ * proprietario: pid file assente, di un altro avvio, o col processo morto
+ * (il segnale 0 del gruppo, come i comandi in background). Con un MCP vivo
+ * dello stesso avvio i lock sono SUOI e non si toccano. Best effort: un rm
+ * che fallisce lascia una riga nel log del daemon, il browser parte lo
+ * stesso.
+ */
+async function rmBrowserStaleLocks(orphan: BrowserOrphanCheck, owner: string): Promise<void> {
+  if (!orphan.read) return // lettura caduta: non si sa nulla, niente rm
+  if (orphan.sameBoot && orphan.pgid !== null) {
+    const alive = await runDockerRaw(activeBoxEngine().argv.killGroup(BOX_CONTAINER, orphan.pgid, '0', BROWSER_USER), { timeoutMs: 15_000 }).catch(() => null)
+    if (alive && alive.exitCode === 0) return // un MCP di QUESTO avvio è vivo: i lock sono suoi
+  }
+  const rm = await runDockerRaw(activeBoxEngine().argv.browserLocksRm(BOX_CONTAINER, owner), { timeoutMs: 15_000 }).catch(() => null)
+  if (rm && rm.exitCode !== 0) {
+    console.warn(`[browser] rimozione dei lock di un avvio precedente fallita (${rm.stderr || `exit ${rm.exitCode}`}): l'avvio del browser può fallire con «already in use»`)
+  }
+}
+
 /** Al boot del daemon: kill degli orfani di TUTTI i bot (solo docker). */
 export async function killBrowserOrphans(agentIds: ReadonlyArray<string>): Promise<void> {
   if (sandboxMode() !== 'box') return
@@ -407,7 +433,11 @@ async function startBrowserSession(agentId: string): Promise<BrowserSession> {
     // BRB1 (fase browser-riavvio-box): il controllo dell'orfano legge pid file
     // e boot_id del box in UN SOLO exec; il kill parte SOLO se il pid file è
     // di QUESTO avvio (il volume /browser sopravvive allo stop del box)
-    await checkAndKillBrowserOrphan(browserPidFile(owner, child ? agentId : undefined))
+    const orphan = await checkAndKillBrowserOrphan(browserPidFile(owner, child ? agentId : undefined))
+    // BRB2: i lock di Chromium/xauth di un avvio precedente si tolgono dal
+    // profilo del PRINCIPALE (i figli --isolated non usano il profilo),
+    // DOPO il controllo dell'orfano e PRIMA dell'avvio
+    if (!child) await rmBrowserStaleLocks(orphan, owner)
     // P2 (fase 14 correzioni): il terreno del browser — TUTTO nello stato di
     // 1001 nel volume /browser. Il controllo come 1001 (radice di 1001 e
     // scrivibile) è la verifica del one-shot della radice che ensureBoxContainer
