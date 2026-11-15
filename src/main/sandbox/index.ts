@@ -30,7 +30,7 @@ import { enoughDiskSpace, freeDiskBytesOf, BOX_BUILD_ESTIMATED_BYTES } from './d
 // fase box-container (BX1): il MOTORE del box (docker o apple-container)
 import { activeBoxEngine } from './engine'
 // CC2 (fase computer-card): lo stato del box in memoria (evento `box` alla UI)
-import { setBoxRuntime } from './box-runtime'
+import { setBoxRuntime, refreshBoxRuntime } from './box-runtime'
 // OBD3 (fase onboarding-b-dettagli): il parse PURO dell'avanzamento del build
 import { parseBuildProgress } from './build-progress'
 import {
@@ -594,6 +594,20 @@ export function boxSetupRunningOf(phase: string | null | undefined): boolean {
 }
 
 export async function ensureBoxContainer(): Promise<void> {
+  try {
+    await ensureBoxContainerUnchecked()
+  } catch (e) {
+    // CCK4 (fase computer-card-correzioni): l'ensure è FALLITO — lo stato del
+    // box NON si indovina e NON si ricorda: restare sul vecchio (per esempio
+    // running) farebbe dire «Acceso» alla card fino al tick dei 60 s. Si
+    // LEGGE, best-effort: se anche la lettura cade si butta via solo la
+    // rilettura. L'errore ORIGINALE si propaga COM'È, intatto
+    await refreshBoxRuntime().catch(() => undefined)
+    throw e
+  }
+}
+
+async function ensureBoxContainerUnchecked(): Promise<void> {
   if (sandboxMode() !== 'box') return
   // OB4: la preparazione del computer del bot è in corsa → il box NON si
   // usa: errore in parole, mai il Mac al posto del box
@@ -805,7 +819,8 @@ export async function ensureBoxContainer(): Promise<void> {
   }
   // CC2 (fase computer-card): l'ensure È RIUSCITO col box nato o ricreato —
   // il computer del bot GIRA (se l'ensure FALLISCE non si arriva qui: lo
-  // stato non si indovina, lo dirà la prossima LETTURA)
+  // stato non si indovina — la rilettura best-effort del catch CCK4 lo dice
+  // subito, non al prossimo tick)
   setBoxRuntime('running')
 }
 

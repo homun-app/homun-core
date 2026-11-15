@@ -187,3 +187,44 @@ describe('CC2: il tick — MAI polling senza client UI connessi (orologio finto)
     expect(calls).toHaveLength(2)
   })
 })
+
+describe('CCK4 (fase computer-card-correzioni): ensure FALLITO → si LEGGE, non si indovina', () => {
+  afterEach(() => { resetBoxRuntimeForTests(); settings.value = {}; setDockerRunnerForTests(null) })
+
+  it("stato running, poi un ensure che fallisce col box ASSENTE al ps → lo stato diventa missing ed esce un evento box; l'errore originale si propaga com'è", async () => {
+    resetBoxRuntimeForTests()
+    const events: SandbotEvent[] = []
+    settings.value = { 'sandbox.mode': 'box', 'sandbox.engine': 'apple-container', 'sandbox.network': 'bridge' }
+    // il box GIRA e l'immagine c'è: il primo ensure RIUSCISCE (la fixture vera)
+    initBoxRuntime({ emit: (e) => { events.push(e) }, run: fakeRun([]), boxMode: () => true, now: () => 6_000 })
+    setDockerRunnerForTests(async (argv) => {
+      if (argv[0] === 'ls') return { stdout: fixture('ls-a-json.txt'), stderr: '', exitCode: 0, signal: null }
+      if (argv[0] === 'inspect') return { stdout: fixture('inspect-box.txt'), stderr: '', exitCode: 0, signal: null }
+      if (argv[0] === 'image' && argv[1] === 'ls') return { stdout: fixture('image-ls-json.txt'), stderr: '', exitCode: 0, signal: null }
+      if (argv[0] === 'network' && argv[1] === 'ls') return { stdout: fixture('network-ls-json.txt'), stderr: '', exitCode: 0, signal: null }
+      if (argv[0] === 'network' && argv[1] === 'inspect') return { stdout: fixture('network-inspect-homun-box.txt'), stderr: '', exitCode: 0, signal: null }
+      return { stdout: '', stderr: '', exitCode: 0, signal: null }
+    })
+    await ensureBoxContainer()
+    expect(boxRuntime().state).toBe('running')
+    // ORA il runner finto risponde «box ASSENTE» al ps e l'immagine non c'è
+    // più (inspect a 1, build a 1): l'ensure FALLISCE — e lo stato si LEGGE
+    initBoxRuntime({
+      emit: (e) => { events.push(e) },
+      run: fakeRun([], (argv) => argv[0] === 'ls' ? { stdout: '[]', stderr: '', exitCode: 0 } : undefined),
+      boxMode: () => true, now: () => 7_000
+    })
+    setDockerRunnerForTests(async (argv) => {
+      if (argv[0] === 'ls') return { stdout: '[]', stderr: '', exitCode: 0, signal: null }
+      if (argv[0] === 'image' && argv[1] === 'inspect') return { stdout: '', stderr: 'no such image', exitCode: 1, signal: null }
+      if (argv[0] === 'build') return { stdout: '', stderr: 'build fallita', exitCode: 1, signal: null }
+      return { stdout: '', stderr: '', exitCode: 0, signal: null }
+    })
+    let err: unknown = null
+    try { await ensureBoxContainer() } catch (e) { err = e }
+    expect(String(err)).toContain('box image build') // l'errore ORIGINALE, com'è
+    expect(boxRuntime()).toEqual({ state: 'missing', since: 7_000 })
+    const boxes = events.filter((e) => e.type === 'box')
+    expect(boxes.some((b) => b.runtime.state === 'missing')).toBe(true)
+  })
+})
