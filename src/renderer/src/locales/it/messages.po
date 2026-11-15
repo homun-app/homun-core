@@ -3586,6 +3586,10 @@ msgstr "in attesa di conferma"
 msgid "In attesa di conferma: rispondi alle card qui sopra."
 msgstr "In attesa di conferma: rispondi alle card qui sopra."
 
+#: src/renderer/src/lib/computer-card.ts
+msgid "In avvio"
+msgstr "In avvio"
+
 #: src/renderer/src/components/SubagentCard.tsx
 msgid "in coda"
 msgstr "in coda"

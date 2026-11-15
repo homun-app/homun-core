@@ -137,3 +137,42 @@ describe('CCK3 (fase computer-card-correzioni): boxInUse NON ancora letto (null)
     expect(i18n.t(v.label)).toBe('Non in uso')
   })
 })
+
+describe('BRB5 (fase browser-riavvio-box): «In avvio» mentre il box parte per un\'attività del computer', () => {
+  it('box STOPPED con un run-command in corso → «In avvio» col pallino d\'attesa e la riga «esegue un comando…» (MAI il comando)', () => {
+    const v = computerCardState(facts({ boxRuntime: { state: 'stopped', since: 2 } satisfies BoxRuntime, activity: { tool: 'run-command', target: 'ls /usr/bin' } }))
+    expect(v.status).toBe('starting')
+    expect(i18n.t(v.label)).toBe('In avvio')
+    expect(v.dot).toBe('bg-waiting')
+    const line = i18n.t(v.line!)
+    expect(line).toBe('esegue un comando…')
+    expect(line).not.toContain('ls')
+  })
+
+  it('boxRuntime ANCORA NULL con attività in corso → «In avvio» pure (la prima lettura non è arrivata)', () => {
+    const v = computerCardState(facts({ boxRuntime: null, activity: { tool: 'run-command', target: 'x' } }))
+    expect(v.status).toBe('starting')
+    expect(i18n.t(v.label)).toBe('In avvio')
+    expect(i18n.t(v.line!)).toBe('esegue un comando…')
+  })
+
+  it('box MISSING con attività → «In avvio» (nasce per quel comando); SENZA attività del computer resta «Spento»', () => {
+    const v = computerCardState(facts({ boxRuntime: { state: 'missing', since: 2 } satisfies BoxRuntime, activity: { tool: 'browser_open', target: 'https://it.wikipedia.org' } }))
+    expect(v.status).toBe('starting')
+    expect(i18n.t(v.line!)).toBe('apre it.wikipedia.org…')
+    expect(computerCardState(facts({ boxRuntime: { state: 'missing', since: 2 } satisfies BoxRuntime })).status).toBe('off')
+  })
+
+  it('un\'attività NON del computer col box fermo NON accende «In avvio» (resta «Spento»)', () => {
+    const v = computerCardState(facts({ boxRuntime: { state: 'stopped', since: 2 } satisfies BoxRuntime, activity: { tool: 'send_to_user', target: '' } }))
+    expect(v.status).toBe('off')
+    expect(v.line).toBeNull()
+  })
+
+  it('l\'etichetta nuova c\'è nei cataloghi VERI it/en («In avvio» / «Starting»)', () => {
+    const it = itCatalogEntries()
+    const en = enCatalogEntries()
+    expect(it['In avvio']).toBe('In avvio')
+    expect(en['In avvio']).toBe('Starting')
+  })
+})

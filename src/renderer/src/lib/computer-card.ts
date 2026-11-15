@@ -23,7 +23,7 @@ export const DOT_WAITING = 'bg-waiting'
 /** il pallino grigio (spento, non in uso). */
 export const DOT_OFF = 'bg-muted-foreground/40'
 
-export type ComputerCardStatus = 'prep' | 'on' | 'waiting' | 'off' | 'unavailable'
+export type ComputerCardStatus = 'prep' | 'on' | 'starting' | 'waiting' | 'off' | 'unavailable'
 
 export interface ComputerCardView {
   status: ComputerCardStatus
@@ -76,6 +76,14 @@ export function computerCardState(f: ComputerCardFacts): ComputerCardView {
     return busy
       ? { status: 'on', dot: DOT_ON, label: msg`Acceso`, line }
       : { status: 'waiting', dot: DOT_WAITING, label: msg`In attesa`, line }
+  }
+  // BRB5 (fase browser-riavvio-box): il box non gira MA un'attività del
+  // computer è in corso → il box sta PARTENDO per quel comando (dal vivo,
+  // 1–2 s all'inizio del primo comando: la card diceva «Spento / esegue un
+  // comando…», etichetta e riga in CONTRADDIZIONE). Pallino d'attesa,
+  // «In avvio» e la frase dell'attività (MAI il testo di un comando)
+  if (busy) {
+    return { status: 'starting', dot: DOT_WAITING, label: msg`In avvio`, line }
   }
   // 3. il box non gira: stopped, missing — o non ancora letto (null): Spento
   // come oggi finché la prima lettura (RPC all'apertura, tick ogni 60 s)
