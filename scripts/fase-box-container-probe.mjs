@@ -1105,6 +1105,108 @@ try {
       await stopProbeDaemons(PREFIX)
     }
   }
+
+  // ---- BRB (fase browser-riavvio-box): il browser RIPARTE dopo un box
+  // FERMATO. Il volume /browser sopravvive allo stop e tiene i lock di
+  // Chromium e il pid file del server MCP dell'avvio di prima, coi pid
+  // PICCOLI che la VM nuova riusa (la finta li scrive sempre 33, come dal
+  // vivo: mcp.pid → 33, SingletonLock → sandbot-box-66). Tre passi sullo
+  // STESSO log della CLI finta (il volume vive lì), motore Apple in bridge:
+  // (1) un browser_open VERO — il launcher del server MCP parte e la finta
+  //     scrive nel volume il pid file col boot DI QUESTO avvio, coi lock;
+  // (2) lo STOP del box (come «Rimuovi immagine»): il volume RESTA com'è;
+  // (3) un SECONDO browser_open — il box riparte (boot NUOVO): NESSUN kill
+  //     sul gruppo vecchio nella decisione della prima apertura (avvio
+  //     diverso), i lock di un avvio precedente TOLTI prima del launcher, e
+  //     il pid file riscritto col boot nuovo (stesso pid 33).
+  {
+    log('--- BRB: il browser riparte dopo un box fermato ---')
+    const brbLog = join(TMP, 'cli-brb-restart.jsonl')
+    try { rmSync(brbLog) } catch { /* nuovo giro */ }
+    const gatewayKnob = { SANDBOT_TEST_CONTAINER_GATEWAY: '127.0.0.1', SANDBOT_TEST_CONTAINER_SUBNET: '127.0.0.0/8' }
+    // il launcher MCP non passa dall'env della finta (getDefaultEnvironment
+    // del SDK): il SUO argv si vede solo nel registro degli spawn del wrapper.
+    // E perché la finta viva il VOLUME (il wrapper del browser «scrive» il pid
+    // file nel log), il wrapper della CLI inietta il log di QUESTO giro come
+    // DEFAULT: lo spawn del launcher finisce nello STESSO log del daemon
+    writeFileSync(FAKE_CLI, `#!/bin/sh\nprintf '%s\\036' "$@" >> ${JSON.stringify(SPAWN_ARGV_LOG)}; printf '\\n' >> ${JSON.stringify(SPAWN_ARGV_LOG)}\nexport SANDBOT_TEST_CONTAINER_LOG="\${SANDBOT_TEST_CONTAINER_LOG:-${brbLog}}"\nexec "${process.execPath}" "${FAKE_SRC}" "$@"\n`)
+    const launcherSpawns = () => readSpawnArgv().filter((f) => f.some((x) => typeof x === 'string' && x.includes('exec playwright-mcp')))
+    // la lettura pid+boot COME LA FA IL DAEMON (script COSTANTE, il path come $1)
+    const PID_BOOT_SH = 'if [ -f "$1" ]; then cat "$1"; fi\nprintf \'boot %s\\n\' "$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)"'
+    const fakeExec = (argv) => spawnSync(process.execPath, [FAKE_SRC, ...argv], {
+      encoding: 'utf8',
+      env: { ...process.env, SANDBOT_TEST_CONTAINER_MODE: 'ready', SANDBOT_TEST_CONTAINER_LOG: brbLog }
+    })
+    const readPidBoot = () => String(fakeExec(['exec', '-i', '-u', '1001:1001', '-w', '/browser', 'sandbot-box', 'sh', '-c', PID_BOOT_SH, 'sh', '/browser/agent_main/mcp.pid']).stdout ?? '')
+    const lockExists = (name) => fakeExec(['exec', '-u', '1001:1001', 'sandbot-box', 'test', '-e', `/browser/agent_main/profile/${name}`]).status === 0
+    const pidLineOf = (out) => out.split('\n').find((l) => l && !l.startsWith('boot '))
+    const bootLineOf = (out) => { const l = out.split('\n').find((l) => l.startsWith('boot ')); return l ? l.slice(5).trim() : null }
+
+    // (1) il primo browser_open: il launcher parte e il volume si riempie
+    const launchersBefore = launcherSpawns().length
+    pushTool('browser_open', { url: 'https://example.com/' })
+    pushTool('browser_open', { url: 'https://example.com/' })
+    pushTool('browser_open', { url: 'https://example.com/' })
+    pushText('Browser fatto.')
+    {
+      const page = await boxTurn(60, { network: 'bridge', cliLogFile: brbLog, extraEnv: gatewayKnob }, 'Apri il browser', 'Browser fatto.')
+      page.close()
+    }
+    await app.stop()
+    await sleep(1200)
+    await stopProbeDaemons(PREFIX)
+    const firstRead = readPidBoot()
+    const firstBoot = bootLineOf(firstRead)
+    check('BRB 1 il primo browser_open fa partire il launcher del server MCP e il volume ha pid file e lock del primo avvio',
+      launcherSpawns().length > launchersBefore && pidLineOf(firstRead)?.startsWith('33 ') === true && firstBoot !== null && lockExists('SingletonLock'),
+      `launcher +${launcherSpawns().length - launchersBefore}; lettura: ${JSON.stringify(firstRead)}; lock: ${lockExists('SingletonLock')}`)
+
+    // (2) lo STOP del box: il volume resta com'è (pid file e lock con il pid 33)
+    const stop = spawnSync(process.execPath, [FAKE_SRC, 'stop', 'sandbot-box'], {
+      encoding: 'utf8',
+      env: { ...process.env, SANDBOT_TEST_CONTAINER_MODE: 'ready', SANDBOT_TEST_CONTAINER_LOG: brbLog }
+    })
+    if (stop.status !== 0) throw new Error('lo stop del box non è riuscito')
+    const afterStop = readPidBoot()
+    check('BRB 2 dopo lo STOP il volume tiene il pid file e i lock dell\'avvio di prima (lo stesso pid 33 che la VM nuova riusa)',
+      pidLineOf(afterStop) === pidLineOf(firstRead) && bootLineOf(afterStop) === firstBoot && lockExists('SingletonLock'),
+      `prima=${JSON.stringify(firstRead)} dopo=${JSON.stringify(afterStop)}`)
+
+    // (3) il secondo browser_open: boot NUOVO, NESSUN kill sul gruppo vecchio
+    // nella decisione della prima apertura, RM dei lock, launcher
+    const launchersBefore2 = launcherSpawns().length
+    const stopAt = readCliLog(brbLog).length
+    pushTool('browser_open', { url: 'https://example.org/' })
+    pushTool('browser_open', { url: 'https://example.org/' })
+    pushTool('browser_open', { url: 'https://example.org/' })
+    pushText('Browser rifatto.')
+    {
+      const page = await boxTurn(61, { network: 'bridge', cliLogFile: brbLog, extraEnv: gatewayKnob }, 'Apri di nuovo il browser', 'Browser rifatto.')
+      page.close()
+    }
+    await app.stop()
+    await sleep(1200)
+    await stopProbeDaemons(PREFIX)
+    // la decisione si guarda DAL RIAVVIO del box in poi: il controllo orfani
+    // del BOOT del daemon (che sulla CLI VERA cadrebbe: il box è FERMO e
+    // l'exec non risponde — la finta invece serve anche da fermo) può aver
+    // visto il vecchio boot come attuale e mandato un TERM prima dello start
+    const all2 = readCliLog(brbLog)
+    const startIdx = all2.findIndex((a, i) => i >= stopAt && a[0] === 'start' && a.includes('sandbot-box'))
+    const after = all2.slice(startIdx)
+    const rmAt = after.findIndex((a) => a[0] === 'exec' && a.includes('rm') && a.some((x) => typeof x === 'string' && x.includes('SingletonLock')))
+    const killBeforeRm = after.slice(0, rmAt).some((a) => a[0] === 'exec' && a.includes('kill'))
+    check('BRB 3 il secondo browser_open: il box RIPARTE (start, boot nuovo) e NESSUN kill sul gruppo vecchio nella decisione dopo il riavvio',
+      startIdx >= 0 && rmAt >= 0 && !killBeforeRm,
+      `start@${startIdx} rm@${rmAt} killPrimaDelRm=${killBeforeRm}`)
+    check('BRB 3 il secondo browser_open: l\'RM dei lock (Singleton* e xauth) arriva PRIMA del nuovo launcher',
+      rmAt >= 0 && launcherSpawns().length > launchersBefore2,
+      `rm@${rmAt} launcher +${launcherSpawns().length - launchersBefore2}`)
+    const secondRead = readPidBoot()
+    check('BRB 4 il boot è CAMBIATO col nuovo avvio e il pid file ora porta il boot NUOVO (stesso pid 33)',
+      bootLineOf(secondRead) !== null && bootLineOf(secondRead) !== firstBoot && pidLineOf(secondRead)?.startsWith(`33 ${bootLineOf(secondRead)}`) === true,
+      `primo=${firstBoot} secondo=${JSON.stringify(secondRead)}`)
+  }
   try { providerServer.closeAllConnections?.(); providerServer.close() } catch { /* già chiusa */ }
 } catch (e) {
   failures++
