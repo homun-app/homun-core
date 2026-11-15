@@ -172,8 +172,10 @@ interface Store {
    * CCK1 (fase computer-card-correzioni): la card «Computer» usa il computer
    * del bot (sandbox.mode box/docker)? Dallo store, non dal componente: la
    * risposta della RPC e la modalità si LEGGONO all'apertura della card.
+   * CCK3: parte da null (NON ancora letto) — la card segue lo stato del box,
+   * MAI un lampo di «Non in uso» finché la lettura non arriva.
    */
-  boxInUse: boolean
+  boxInUse: boolean | null
   /** fase 16 (U3): l'utente sta scrivendo nel composer di QUESTO bot */
   typingAgentId: string | null
   /** fase 16 (U3): ultimo delta per agente (testo in streaming → speaking) */
@@ -411,8 +413,9 @@ export const useStore = create<Store>((set, get) => ({
   computerTabByAgent: {},
   screenStatus: {},
   boxRuntime: null,
-  // CCK1 (fase computer-card-correzioni): la modalità della card, letta all'apertura
-  boxInUse: false,
+  // CCK1/CCK3 (fase computer-card-correzioni): la modalità della card, letta
+  // all'apertura — null finché la lettura non arriva (mai «Non in uso» per un attimo)
+  boxInUse: null,
   typingAgentId: null,
   lastDeltaAt: {},
   lastSendAt: {},

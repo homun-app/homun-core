@@ -45,8 +45,12 @@ export interface ComputerCardFacts {
   browser: ScreenStatus['browser']
   /** la fase della preparazione del computer del bot (box-setup) */
   boxSetupPhase: BoxSetupPhase | null
-  /** sandbox.mode è box (o il valore storico docker): il computer del bot c'è */
-  boxInUse: boolean
+  /**
+   * sandbox.mode è box (o il valore storico docker): il computer del bot c'è.
+   * CCK3 (fase computer-card-correzioni): null = NON ancora letto — si segue
+   * lo stato del box come in modalità box, MAI un lampo di «Non in uso».
+   */
+  boxInUse: boolean | null
 }
 
 /** Lo stato della card «Computer» dai tre fatti + la preparazione (PURa). */
@@ -55,8 +59,10 @@ export function computerCardState(f: ComputerCardFacts): ComputerCardView {
   if (f.boxSetupPhase !== null && boxSetupActive(f.boxSetupPhase)) {
     return { status: 'prep', dot: DOT_WAITING, label: msg`In preparazione`, line: null }
   }
-  // 2. questa installazione non usa il computer del bot
-  if (!f.boxInUse) {
+  // 2. questa installazione non usa il computer del bot — SOLO quando la
+  // lettura è ARRIVATA e lo dice (CCK3: null = non ancora letto, si segue il
+  // box come in modalità box: mai un lampo di «Non in uso» all'apertura)
+  if (f.boxInUse === false) {
     return { status: 'unavailable', dot: DOT_OFF, label: msg`Non in uso`, line: null }
   }
   // la riga sotto: la frase dell'attività del computer (activityPhrase dei

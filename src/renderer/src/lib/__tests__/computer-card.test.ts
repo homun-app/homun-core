@@ -111,3 +111,29 @@ describe('CC3: i testi nuovi ci sono anche in EN (il catalogo allineato)', () =>
     i18n.activate('it')
   })
 })
+
+describe('CCK3 (fase computer-card-correzioni): boxInUse NON ancora letto (null) — mai un lampo di «Non in uso»', () => {
+  it('null SEGUE lo stato del box come in modalità box: running → «In attesa»', () => {
+    const v = computerCardState(facts({ boxInUse: null }))
+    expect(v.status).toBe('waiting')
+    expect(i18n.t(v.label)).toBe('In attesa')
+  })
+
+  it('null con box fermo → «Spento» (non «Non in uso»)', () => {
+    const v = computerCardState(facts({ boxInUse: null, boxRuntime: { state: 'stopped', since: 2 } satisfies BoxRuntime }))
+    expect(v.status).toBe('off')
+    expect(i18n.t(v.label)).toBe('Spento')
+    expect(computerCardState(facts({ boxInUse: null, boxRuntime: null })).status).toBe('off')
+  })
+
+  it('null: la preparazione vince lo stesso e l\'attività accende lo stesso', () => {
+    expect(computerCardState(facts({ boxInUse: null, boxSetupPhase: 'building-image' })).status).toBe('prep')
+    expect(computerCardState(facts({ boxInUse: null, activity: { tool: 'run-command', target: 'x' } })).status).toBe('on')
+  })
+
+  it('solo FALSE è «Non in uso» (la lettura è ARRIVATA e dice host)', () => {
+    const v = computerCardState(facts({ boxInUse: false }))
+    expect(v.status).toBe('unavailable')
+    expect(i18n.t(v.label)).toBe('Non in uso')
+  })
+})
