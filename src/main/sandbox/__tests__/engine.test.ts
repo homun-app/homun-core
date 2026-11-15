@@ -3,7 +3,7 @@
 // migrazione di sandbox.mode ('docker' storico letto come 'box') e la regola
 // del modulo: NESSUN resolveTool('docker') fuori dal modulo del motore Docker
 // (ricerca nel sorgente, come le guardie N1/D4).
-import { describe, expect, it, vi, beforeAll, afterAll, afterEach } from 'vitest'
+import { describe, expect, it, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest'
 import { readFileSync, readdirSync, statSync, mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -228,6 +228,17 @@ describe('OBV1: la sonda dei fatti — PRIMA il JSON, poi la tabella; il kernel 
   const KERNEL_TARGET_BYTES_SAFE = 30_564_864
   const asked: string[] = []
 
+  // CB2 (fase ci-beta5): la sonda legge la MACCHINA se non la si fissa — sul
+  // Mac di sviluppo (macOS 26) questi test passavano per caso, sulla CI
+  // (macos-15) l'Apple motore sarebbe «unsupported» e i rossi erano sette.
+  // La macchina descritta è FISSA (darwin, arm64, macOS 26) e ripristinata:
+  // MAI la versione vera del Mac che gira i test.
+  beforeEach(() => {
+    vi.stubEnv('SANDBOT_TEST_FAKE_PLATFORM', 'darwin')
+    vi.stubEnv('SANDBOT_TEST_FAKE_ARCH', 'arm64')
+    vi.stubEnv('SANDBOT_TEST_FAKE_MACOS_MAJOR', '26')
+  })
+
   /** la CLI finta della sonda: --version ok, gli status come decisi dal test */
   const stubCli = (answers: { json?: string; jsonExit?: number; table?: string; tableExit?: number }): void => {
     engineProbeDeps.runCli = (async (_file: string, argv: string[]) => {
@@ -247,6 +258,7 @@ describe('OBV1: la sonda dei fatti — PRIMA il JSON, poi la tabella; il kernel 
   }
 
   afterEach(() => {
+    vi.unstubAllEnvs()
     engineProbeDeps.runCli = realRunCli
     engineProbeDeps.statFile = realStatFile
     asked.length = 0
@@ -306,6 +318,21 @@ describe('OBV1: la sonda dei fatti — PRIMA il JSON, poi la tabella; il kernel 
     expect(f.containerInstalled).toBe(true)
     expect(f.containerServiceRunning).toBe(false)
     expect(f.containerKernelOk).toBe(false)
+  })
+
+  it('CB2 (fase ci-beta5): macOS 15 FINTO con la CLI pronta → unsupported — è ciò che vede la CI (macos-15) ed è giusto così', async () => {
+    // il beforeEach fissa macOS 26: QUI si finge 15, come il runner della CI.
+    // La CLI risponde a tutto (installata, servizio acceso, kernel ok), ma la
+    // MACCHINA non regge il motore Apple: lo stato in parole è unsupported
+    stubCli({ json: SYSTEM_STATUS_JSON })
+    stubKernel(true)
+    vi.stubEnv('SANDBOT_TEST_FAKE_MACOS_MAJOR', '15')
+    const f = await probeBoxEngineFacts()
+    expect(f.containerInstalled).toBe(true)
+    expect(f.containerServiceRunning).toBe(true)
+    expect(f.containerKernelOk).toBe(true)
+    expect(f.macOsMajor).toBe(15)
+    expect(appleContainerState(f)).toBe('unsupported')
   })
 })
 

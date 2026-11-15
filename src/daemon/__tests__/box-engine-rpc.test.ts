@@ -4,7 +4,7 @@
 // (system start --disable-kernel-install, MAI download nascosto) e il
 // consenso esplicito al kernel (system kernel set --recommended). La sonda
 // dei fatti è SOSTITUIBILE: nessun spawn nei test.
-import { describe, expect, it, beforeAll, afterAll, vi } from 'vitest'
+import { describe, expect, it, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -55,6 +55,17 @@ interface EngineStatus {
 }
 
 describe('BX4: la RPC del motore (box:engine-status / engine-set / start / kernel)', () => {
+  // CB2 (fase ci-beta5): la RPC sondata la MACCHINA se non la si fissa — sul
+  // Mac di sviluppo «ready» passava per caso, sulla CI (macos-15) sarebbe
+  // «unsupported». La macchina descritta è FISSA (darwin, arm64, macOS 26) e
+  // ripristinata: MAI la versione vera del Mac che gira i test.
+  beforeEach(() => {
+    vi.stubEnv('SANDBOT_TEST_FAKE_PLATFORM', 'darwin')
+    vi.stubEnv('SANDBOT_TEST_FAKE_ARCH', 'arm64')
+    vi.stubEnv('SANDBOT_TEST_FAKE_MACOS_MAJOR', '26')
+  })
+  afterEach(() => vi.unstubAllEnvs())
+
   it('box:engine-status: il motore scelto e lo stato del motore Apple', async () => {
     const r = (await api['box:engine-status']!([])) as EngineStatus
     expect(r.setting).toBe('auto')
@@ -89,13 +100,21 @@ describe('BX4: la RPC del motore (box:engine-status / engine-set / start / kerne
 })
 
 describe('BX4: la sonda dei fatti con la CLI runner finta', () => {
+  // CB2 (fase ci-beta5): come sopra — la macchina è FISSA, mai la versione vera
+  beforeEach(() => {
+    vi.stubEnv('SANDBOT_TEST_FAKE_PLATFORM', 'darwin')
+    vi.stubEnv('SANDBOT_TEST_FAKE_ARCH', 'arm64')
+    vi.stubEnv('SANDBOT_TEST_FAKE_MACOS_MAJOR', '26')
+  })
+  afterEach(() => vi.unstubAllEnvs())
+
   it('probeBoxEngineFacts: da --version e system status ai fatti (running, kernel)', async () => {
     const facts = await engine.probeBoxEngineFacts()
     expect(facts.containerInstalled).toBe(true)
     expect(facts.containerServiceRunning).toBe(true)
     expect(facts.containerKernelOk).toBe(true)
     expect(facts.platform).toBe('darwin')
-    expect(facts.macOsMajor).toBeGreaterThanOrEqual(26) // il Mac di sviluppo
+    expect(facts.macOsMajor).toBe(26) // la macchina FISSA dallo stub: mai la versione vera
   })
 })
 
