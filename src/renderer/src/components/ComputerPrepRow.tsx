@@ -5,6 +5,11 @@
 // dell'Installer, e a fine «Pronto». NESSUNA notifica di sistema. La riga
 // c'è SOLO mentre la preparazione corre (o è appena finita): senza, mai
 // partita o in errore non c'è — niente rumore.
+// MB4 (fase modalita-box): «Pronto» non si dice se il computer del bot NON
+// è in uso (boxInUse === false): contraddirebbe la card «Computer» che dice
+// «Non in uso» — la preparazione era finita, la scelta non era registrata.
+// Con boxInUse null (lettura non ancora arrivata) la riga resta: CCK3, mai
+// un lampo di assenza.
 import { useLingui } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import { useStore } from '../store'
@@ -14,8 +19,9 @@ export function ComputerPrepRow() {
   const { i18n } = useLingui()
   const boxSetup = useStore((s) => s.boxSetup)
   const boxSetupOpenInstaller = useStore((s) => s.boxSetupOpenInstaller)
+  const boxInUse = useStore((s) => s.boxInUse)
   const phase = boxSetup?.phase ?? 'idle'
-  const show = boxSetup !== null && (boxSetupActive(phase) || phase === 'ready')
+  const show = boxSetup !== null && (boxSetupActive(phase) || (phase === 'ready' && boxInUse !== false))
   if (!show) return null
 
   // la percentuale si calcola dai byte veri del download (mai a caso)

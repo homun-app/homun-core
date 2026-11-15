@@ -24,8 +24,8 @@ const byTestId = (tree: ReturnType<typeof parseHtml>, testId: string) =>
 const textOf = (n: ReturnType<typeof parseHtml>): string =>
   findAll(n, () => true).map((x) => x.text ?? '').join(' ')
 
-const renderRow = (boxSetup: BoxSetupState | null): { html: string; tree: ReturnType<typeof parseHtml> } => {
-  setStoreStateForRender(useStore, { boxSetup })
+const renderRow = (boxSetup: BoxSetupState | null, boxInUse: boolean | null = null): { html: string; tree: ReturnType<typeof parseHtml> } => {
+  setStoreStateForRender(useStore, { boxSetup, boxInUse })
   const html = renderHtml(createElement(ComputerPrepRow))
   return { html, tree: parseHtml(html) }
 }
@@ -51,6 +51,14 @@ describe('OB4: la riga della preparazione nel pannello del bot', () => {
 
   it('a fine preparazione: «Pronto»', () => {
     expect(renderRow(setupState({ phase: 'ready' })).html).toContain('Pronto')
+    // e anche a lettura non ancora arrivata (boxInUse null, CCK3: mai un lampo)
+    expect(renderRow(setupState({ phase: 'ready' }), null).html).toContain('Pronto')
+  })
+
+  it('MB4: box.setup ready ma computer del bot NON in uso → NESSUNA riga «Pronto» (niente contraddizione con «Non in uso»)', () => {
+    const { html, tree } = renderRow(setupState({ phase: 'ready' }), false)
+    expect(html).not.toContain('Pronto')
+    expect(byTestId(tree, 'bot-prep-row').length).toBe(0)
   })
 
   it('senza preparazione (o annullata, o in errore): NESSUNA riga — niente rumore', () => {
