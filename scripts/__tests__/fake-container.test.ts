@@ -629,3 +629,92 @@ describe('BAV5: la finta onora il contratto del wrapper di background', () => {
     expect(exit.stdout).toBe('0\n')
   })
 })
+
+// ---- BRB (fase browser-riavvio-box): il volume /browser e gli avvii ----
+describe('BRB: la CLI finta vive il volume /browser — boot_id per avvio, pid file e lock che sopravvivono', () => {
+  /** Un mondo della finta: UN log per la sequenza, env pilotabile a piacere. */
+  const brbWorld = () => {
+    const logFile = join(TMP, `log-brb3-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.jsonl`)
+    const env = (extra: Record<string, string> = {}) => ({
+      PATH: process.env.PATH,
+      SANDBOT_TEST_CONTAINER_MODE: 'ready',
+      SANDBOT_TEST_CONTAINER_LOG: logFile,
+      ...extra
+    })
+    const fake = (argv: string[], extra: Record<string, string> = {}) =>
+      spawnSync(process.execPath, [FAKE, ...argv], { encoding: 'utf8', env: env(extra) })
+    return { fake, logFile }
+  }
+  /** Lo script COSTANTE della lettura pid+boot, come lo manda il daemon (BRB1). */
+  const PID_BOOT_SH = 'if [ -f "$1" ]; then cat "$1"; fi\nprintf \'boot %s\\n\' "$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)"'
+  const READ_PID_BOOT = ['exec', '-i', '-u', '1001:1001', '-w', '/browser', 'sandbot-box', 'sh', '-c', PID_BOOT_SH, 'sh', '/browser/agent_main/mcp.pid']
+  /** Il wrapper del browser principale (la riga che conta: il pid col boot_id, poi playwright-mcp). */
+  const WRAPPER = 'mkdir -p "$(dirname "$1")" && cd "$(dirname "$1")" || exit 1\necho "$$ $(cat /proc/sys/kernel/random/boot_id 2>/dev/null)" >"$1"\nshift\nexec playwright-mcp "$@"'
+  const LAUNCH_BROWSER = ['exec', '-i', '-u', '1001:1001', '-w', '/browser', 'sandbot-box', 'sh', '-c', WRAPPER, 'sh', '/browser/agent_main/mcp.pid', '--browser', 'chromium']
+  const bootLine = (stdout: string): string | undefined => /^boot (\S*)$/m.exec(stdout)?.[1]
+  const pidLine = (stdout: string): string | undefined => stdout.split('\n').find((l) => l !== '' && !l.startsWith('boot '))
+
+  it('ogni avvio ha il suo boot_id (run -d è un boot, lo start di un box FERMATO è un boot NUOVO) e il volume /browser SOPRAVVIVE: il pid file del wrapper resta COM\'È', () => {
+    const { fake } = brbWorld()
+    // il box nasce (boot 1) e il browser del bot parte: il wrapper scrive il
+    // pid file nel volume (pid 33, come i pid bassi della VM vera) coi lock
+    expect(fake(['build', '-t', 'sandbot-box:abab9640c765', '.']).status).toBe(0)
+    expect(fake(['run', '-d', '--init', '--name', 'sandbot-box', '--network', 'homun-box', '-v', 'sandbot-box:/box', '-v', 'sandbot-plugins:/plugins:ro', '-v', 'sandbot-browser:/browser', '-w', '/box', 'sandbot-box:abab9640c765', 'sleep', 'infinity']).status).toBe(0)
+    expect(fake(LAUNCH_BROWSER).status).toBe(0)
+    const first = fake(READ_PID_BOOT).stdout
+    expect(pidLine(first)).toBe('33 ' + bootLine(first)) // il pid file porta il boot DI QUESTO avvio
+    const boot1 = bootLine(first)
+    expect(boot1).toBeTruthy()
+    expect(fake(['exec', '-u', '1001:1001', 'sandbot-box', 'test', '-e', '/browser/agent_main/profile/SingletonLock']).status).toBe(0)
+    // lo STOP: il volume resta COM\'È (pid file e lock, stesso boot — nessun avvio nuovo)
+    expect(fake(['stop', 'sandbot-box']).status).toBe(0)
+    expect(fake(READ_PID_BOOT).stdout).toBe(first)
+    expect(fake(['exec', '-u', '1001:1001', 'sandbot-box', 'test', '-e', '/browser/agent_main/profile/SingletonLock']).status).toBe(0)
+    // lo START: boot NUOVO (il boot_id cambia), il volume NON cambia — il
+    // pid file di prima è ancora lì col suo avvio: è il caso del browser che
+    // riparte dopo un box fermato
+    expect(fake(['start', 'sandbot-box']).status).toBe(0)
+    const second = fake(READ_PID_BOOT).stdout
+    const boot2 = bootLine(second)
+    expect(boot2).toBeTruthy()
+    expect(boot2).not.toBe(boot1)
+    expect(pidLine(second)).toBe(pidLine(first)) // il pid 33 di prima, il boot di adesso
+    expect(fake(['exec', '-u', '1001:1001', 'sandbot-box', 'test', '-e', '/browser/agent_main/profile/SingletonLock']).status).toBe(0)
+    // il boot_id NON compare MAI nelle uscite di ls/inspect: il confronto
+    // strutturale con le fixture vere non cambia
+    const ls = fake(['ls', '-a', '--format', 'json']).stdout
+    const insp = fake(['inspect', 'sandbot-box']).stdout
+    for (const out of [ls, insp]) {
+      expect(out).not.toContain(String(boot1))
+      expect(out).not.toContain(String(boot2))
+    }
+  })
+
+  it('la finta SEMINA un pid file e i lock di un avvio precedente (SANDBOT_TEST_CONTAINER_SEED_BROWSER_PID: @prev, @cur e il VECCHIO formato)', () => {
+    const { fake } = brbWorld()
+    expect(fake(['build', '-t', 'sandbot-box:abab9640c765', '.']).status).toBe(0)
+    expect(fake(['run', '-d', '--init', '--name', 'sandbot-box', '--network', 'homun-box', '-v', 'sandbot-box:/box', '-v', 'sandbot-browser:/browser', 'sandbot-box:abab9640c765', 'sleep', 'infinity']).status).toBe(0)
+    const boot1 = bootLine(fake(READ_PID_BOOT).stdout)
+    expect(boot1).toBeTruthy()
+    // @prev: il pid file di un avvio PRECEDENTE (diverso da quello di adesso)
+    const prev = fake(READ_PID_BOOT, { SANDBOT_TEST_CONTAINER_SEED_BROWSER_PID: '33 @prev' }).stdout
+    expect(pidLine(prev)).toMatch(/^33 \S+$/)
+    expect(pidLine(prev)).not.toBe('33 ' + boot1)
+    expect(bootLine(prev)).toBe(boot1) // il box non è mica riavviato
+    // i lock SEMINATI esistono, e il rm di BRB2 li toglie (il seme viaggia
+    // nell'env della finta: vale per le chiamate che lo portano)
+    const seedPrev = { SANDBOT_TEST_CONTAINER_SEED_BROWSER_PID: '33 @prev' }
+    expect(fake(['exec', '-u', '1001:1001', 'sandbot-box', 'test', '-e', '/browser/agent_main/profile/SingletonLock'], seedPrev).status, 'con il seme').toBe(0)
+    expect(fake(['exec', '-u', '1001:1001', 'sandbot-box', 'rm', '-f', '--', '/browser/agent_main/profile/SingletonLock', '/browser/agent_main/profile/SingletonSocket', '/browser/agent_main/profile/SingletonCookie', '/browser/agent_main/Xauthority-c', '/browser/agent_main/Xauthority-l'], seedPrev).status).toBe(0)
+    expect(fake(['exec', '-u', '1001:1001', 'sandbot-box', 'test', '-e', '/browser/agent_main/profile/SingletonLock'], seedPrev).status, 'dopo il rm').toBe(1)
+    // @cur: l'avvio di ADESSO (il caso del kill che serve ancora)
+    const cur = fake(READ_PID_BOOT, { SANDBOT_TEST_CONTAINER_SEED_BROWSER_PID: '33 @cur' }).stdout
+    expect(pidLine(cur)).toBe('33 ' + boot1)
+    // il VECCHIO formato: solo il numero, avvio sconosciuto
+    const old = fake(READ_PID_BOOT, { SANDBOT_TEST_CONTAINER_SEED_BROWSER_PID: '33' }).stdout
+    expect(pidLine(old)).toBe('33')
+    // e anche il cat di una volta legge il pid file seminato
+    const cat = fake(['exec', '-i', '-u', '1001:1001', '-w', '/browser', 'sandbot-box', 'cat', '--', '/browser/agent_main/mcp.pid'], { SANDBOT_TEST_CONTAINER_SEED_BROWSER_PID: '33 @cur' }).stdout
+    expect(cat.trim()).toBe('33 ' + boot1)
+  })
+})

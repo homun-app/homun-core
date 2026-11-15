@@ -281,3 +281,57 @@ describe('BRB2: i lock di Chromium di un avvio precedente si tolgono (solo brows
     expect(calls.some(isLocksRm)).toBe(false)
   }, 60_000)
 })
+
+describe('BRB3: la CLI finta vive il volume del browser — integrale col daemon', () => {
+  it('INTEGRALE con la CLI finta (seed, NESSUNA intercettazione): il pid file di QUESTO avvio → il kill; quello di un avvio PRECEDENTE → nessun kill, rm dei lock e launcher, in ordine nel log', async () => {
+    // BRB3: il mondo è tutto della finta (gateway ascoltabile + pid file
+    // seminato): il daemon legge pid file e boot_id DALLA FINTA e decide da solo
+    process.env.SANDBOT_TEST_CONTAINER_GATEWAY = '127.0.0.1'
+    process.env.SANDBOT_TEST_CONTAINER_SUBNET = '127.0.0.0/8'
+    // il log corrente: runner e wrapper della CLI puntano allo STESSO file,
+    // così daemon e launcher finiscono in UN log in ordine
+    let logFile = join(TMP, `cli-brb3-cur-${++seq}.jsonl`)
+    try {
+      setDockerRunnerForTests(async (argv: string[]): Promise<{ stdout: string; stderr: string; exitCode: number | null; signal: null }> => {
+        const r = spawnSync(process.execPath, [FAKE_SRC, ...argv], {
+          encoding: 'utf8',
+          env: { ...process.env, SANDBOT_TEST_CONTAINER_MODE: 'ready', SANDBOT_TEST_CONTAINER_LOG: logFile }
+        })
+        return { stdout: r.stdout ?? '', stderr: r.stderr ?? '', exitCode: r.status, signal: null }
+      })
+      // il pid file porta il boot di ADESSO (@cur): il kill di BRB1 parte,
+      // letto dalla risposta VERA della finta
+      process.env.SANDBOT_TEST_CONTAINER_SEED_BROWSER_PID = '33 @cur'
+      writeFakeCli(logFile)
+      const outA = await openBrowser('agent_brba')
+      expect(outA).toMatch(/^err:/)
+      const logA = readCliLog(logFile)
+      expect(logA.some((a) => pidBootScriptOf(a).includes('/proc/sys/kernel/random/boot_id'))).toBe(true)
+      expect(logA.some((a) => a.includes('kill') && a.includes('-TERM') && a.includes('-33'))).toBe(true)
+
+      // il pid file di un avvio PRECEDENTE (@prev, il box riavviato): NESSUN
+      // kill, il rm dei lock e POI il launcher — l'ordine del log della finta
+      process.env.SANDBOT_TEST_CONTAINER_SEED_BROWSER_PID = '33 @prev'
+      logFile = join(TMP, `cli-brb3-prev-${++seq}.jsonl`)
+      writeFakeCli(logFile)
+      const outB = await openBrowser('agent_brbb')
+      expect(outB).toMatch(/^err:/)
+      const logB = readCliLog(logFile)
+      const readAt = logB.findIndex((a) => pidBootScriptOf(a).includes('/proc/sys/kernel/random/boot_id'))
+      const rmAt = logB.findIndex(isLocksRm)
+      const launchAt = logB.findIndex((a) => pidBootScriptOf(a).includes('exec playwright-mcp'))
+      expect(readAt).toBeGreaterThanOrEqual(0)
+      // NESSUN kill sul gruppo vecchio nella DECISIONE della prima apertura
+      // (il pid file era di un altro avvio); un kill PUÒ venire dopo, dal
+      // RETRY: il launcher del primo tentativo ha scritto un pid file di
+      // QUESTO avvio, e quello è l'orfano giusto da chiudere
+      expect(logB.slice(0, launchAt).some((a) => a.includes('kill'))).toBe(false)
+      expect(rmAt).toBeGreaterThan(readAt)
+      expect(launchAt).toBeGreaterThan(rmAt)
+    } finally {
+      delete process.env.SANDBOT_TEST_CONTAINER_GATEWAY
+      delete process.env.SANDBOT_TEST_CONTAINER_SUBNET
+      delete process.env.SANDBOT_TEST_CONTAINER_SEED_BROWSER_PID
+    }
+  }, 60_000)
+})

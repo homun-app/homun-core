@@ -73,6 +73,18 @@
 // root le mette GIÙ. L'exec della VERIFICA legge questo stato: boot senza
 // link down → «eth0 is up» (esce 1), dopo il link down → passa.
 //
+// BRB (fase browser-riavvio-box): il VOLUME /browser sopravvive a stop/start
+// e ogni avvio ha il suo BOOT_ID (deterministico dal log). L'exec collo
+// script che legge /proc/sys/kernel/random/boot_id (la lettura pid+boot del
+// daemon) risponde col pid file del volume (scritto dal wrapper del browser:
+// pid 33 SEMPRE, come i pid bassi e ripetibili della VM vera) e la riga
+// «boot <id>»; un `test -e` dice se un lock di Chromium/xauth esiste; il rm
+// dei lock (BRB2) li toglie. Con SANDBOT_TEST_CONTAINER_SEED_BROWSER_PID la
+// finta semina un pid file e i lock di un avvio PRECEDENTE senza girare il
+// browser: il valore è il contenuto del pid file, coi token '@prev'
+// (l'avvio di prima) e '@cur' (quello di adesso); il solo numero è il
+// VECCHIO formato. Il boot_id NON compare MAI nelle uscite di ls/inspect.
+//
 // Nessuna rete, nessuna scrittura fuori dall'appRoot di prova e dal file di
 // log. La usa il motore al posto della CLI vera SOLO con
 // SANDBOT_TEST_USER_DATA impostata E
@@ -224,12 +236,36 @@ function shellWrapperFiles(all) {
  * dopo un run/create che li monta. BRR: il box sa anche se CORRE e se le
  * interfacce sono SU — il run -d è un boot (interfacce su), lo start di un
  * box FERMATO pure, il link down come root le mette giù.
+ * BRB (fase browser-riavvio-box): ogni boot ha il suo BOOT_ID (deterministico
+ * dal log: il numero d'ordine del boot) e il VOLUME /browser sopravvive a
+ * stop/start — l'exec col WRAPPER del browser (lo script che finisce con
+ * `exec playwright-mcp "$@"`) «scrive» il pid file del volume col pid 33 e
+ * il boot di quel momento, e i lock di Chromium/xauth del proprietario
+ * ESISTONO finché un rm non li nomina (BRB2). Il pid 33 è sempre 33: i pid
+ * della VM nuova ripartono bassi e RIPETIBILI, come dal vivo.
  */
+const BOOT_ID_PREFIX = 'f0000000-0000-4000-8000-'
+/** Il boot_id deterministico dell'avvio n (stesso log → stessi id). */
+const bootIdOf = (n) => `${BOOT_ID_PREFIX}${String(n).padStart(12, '0')}`
+/** L'id dell'avvio «di prima» quando di boot ce n'è uno solo: DIVERSO da qualunque boot vero. */
+const OTHER_BOOT_ID = 'dead0000-0000-4000-8000-00000000dead'
+
+/** I file del volume /browser che la finta vive nel log: pid file e lock. */
+const BROWSER_LOCK_SUFFIXES = ['profile/SingletonLock', 'profile/SingletonSocket', 'profile/SingletonCookie', 'Xauthority-c', 'Xauthority-l']
+/** È il path di un pid file del volume del browser (letto per uccidere processi). */
+const isBrowserPidPath = (p) => /\/(mcp(-[^/]+)?|vnc-control)\.pid$/.test(p)
+/** È il path di un lock di Chromium/xauth nel volume del browser. */
+const isBrowserLockPath = (p) => /\/(profile\/Singleton(Lock|Socket|Cookie)|Xauthority-[cl])$/.test(p)
+
 function scanState(opts = {}) {
   let box = null
   let built = false
   const networks = new Set(['homun-box'])
   const volumes = new Set()
+  const boots = []
+  const pidFiles = new Map()
+  const locks = new Set()
+  const locksRemoved = new Set()
   const all = logArgvs()
   // skipLast: la CHIAMATA CORRENTE è già nel log (registrata prima di tutto)
   // — volume create decide dello stato PRIMA di sé
@@ -253,7 +289,7 @@ function scanState(opts = {}) {
         const user = a[a.indexOf('-u') + 1] ?? '1000:1000'
         const mem = String(a[a.indexOf('-m') + 1] ?? '4g')
         const memMult = /g/i.test(mem) ? 1024 ** 3 : /m/i.test(mem) ? 1024 ** 2 : /k/i.test(mem) ? 1024 : 1
-        // run -d: il box CORRE e il boot ha messo le interfacce SU; create
+        // run -d: il box CORRE e il BOOT ha messo le interfacce SU; create
         // (il run di Docker) parte FERMO: le decide lo start
         box = {
           name: a[nameI + 1],
@@ -268,6 +304,7 @@ function scanState(opts = {}) {
           running: a[0] === 'run',
           linksUp: a[0] === 'run'
         }
+        if (a[0] === 'run') boots.push(bootIdOf(boots.length + 1))
       }
     }
     // i volumi montati da un run/create ESISTONO (la CLI crea il volume mancante)
@@ -280,16 +317,46 @@ function scanState(opts = {}) {
       }
     }
     if (a[0] === 'volume' && a[1] === 'create' && typeof a[2] === 'string') volumes.add(a[2])
-    // BRR: il «riavvio» — start di un box FERMATO = boot nuovo, interfacce
-    // SU; su un box che già corre lo start non tocca nulla
+    // BRR: il «riavvio» — start di un box FERMATO = boot NUOVO (BRB: boot_id
+    // nuovo), interfacce SU; su un box che già corre lo start non tocca nulla
     if (a[0] === 'start' && box && a.slice(1).includes(box.name) && !box.running) {
       box.running = true
       box.linksUp = true
+      boots.push(bootIdOf(boots.length + 1))
     }
     if (a[0] === 'stop' && box && a.slice(1).includes(box.name)) box.running = false
     // il link down COME ROOT: le interfacce vanno GIÙ (il boot le aveva messe su)
     if (a[0] === 'exec' && a[1] === '-u' && a[2] === '0' && a.some((x) => typeof x === 'string' && x.includes('ip link set')) && box) {
       box.linksUp = false
+    }
+    // BRB: il WRAPPER del browser «scrive» il pid file nel volume (pid 33,
+    // sempre lo stesso: i pid della VM nuova ripartono bassi) e i lock del
+    // proprietario ESISTONO (Chromium li crea col profilo)
+    if (a[0] === 'exec') {
+      const ci = a.indexOf('-c')
+      const script = ci >= 0 ? a[ci + 1] : ''
+      if (typeof script === 'string' && script.includes('exec playwright-mcp "$@"')) {
+        const pidFile = a[ci + 3]
+        if (typeof pidFile === 'string' && pidFile.startsWith('/browser/')) {
+          const boot = boots.length > 0 ? boots[boots.length - 1] : bootIdOf(1)
+          pidFiles.set(pidFile, `33 ${boot}`)
+          const dir = pidFile.slice(0, pidFile.lastIndexOf('/'))
+          for (const suffix of BROWSER_LOCK_SUFFIXES) {
+            locks.add(`${dir}/${suffix}`)
+            locksRemoved.delete(`${dir}/${suffix}`)
+          }
+        }
+      }
+      // BRB2: il rm dei lock (argv puri, i path dopo --) li TOGLIE dal volume
+      if (a.includes('rm') && a.includes('-f') && a.some((x) => typeof x === 'string' && x.includes('SingletonLock'))) {
+        const di = a.indexOf('--')
+        for (const p of di >= 0 ? a.slice(di + 1) : []) {
+          if (typeof p === 'string') {
+            locks.delete(p)
+            locksRemoved.add(p)
+          }
+        }
+      }
     }
     if ((a[0] === 'rm' || a[0] === 'delete') && box && a.slice(1).includes(box.name)) box = null
     if (a[0] === 'network' && a[1] === 'create') networks.add(a[a.length - 1])
@@ -297,7 +364,45 @@ function scanState(opts = {}) {
     // contrario, così chi RILEGGE vede il vero)
     if (a[0] === 'network' && (a[1] === 'delete' || a[1] === 'rm')) networks.delete(a[a.length - 1])
   }
-  return { box, networks, volumes, built }
+  return {
+    box, networks, volumes, built,
+    // BRB: l'avvio di adesso, quello di prima, i pid file e i lock del volume
+    boot: boots.length > 0 ? boots[boots.length - 1] : null,
+    prevBoot: boots.length > 1 ? boots[boots.length - 2] : null,
+    browser: { pidFiles, locks, locksRemoved }
+  }
+}
+
+// ---- BRB (fase browser-riavvio-box): il volume /browser e i suoi file ----
+//
+// Il pid file e i lock vivono nel VOLUME e sopravvivono a stop/start; la
+// finta li vive nel log (il wrapper li «scrive», il rm li toglie). Con
+// SANDBOT_TEST_CONTAINER_SEED_BROWSER_PID la finta può SEMINARE un pid file
+// e i lock di un avvio PRECEDENTE senza far girare il browser: il valore è
+// il CONTENUTO del pid file, con due token — '@prev' (l'avvio di prima, o
+// un id che non è MAI quello di adesso) e '@cur' (l'avvio di adesso); il
+// solo numero è il VECCHIO formato (avvio sconosciuto).
+
+/** Il contenuto seminato del pid file, coi token risolti sugli avvii del log. */
+const seededPidContent = (st) => {
+  const raw = process.env.SANDBOT_TEST_CONTAINER_SEED_BROWSER_PID
+  if (raw === undefined) return null
+  return raw.replace('@cur', st.boot ?? 'nessun-boot').replace('@prev', st.prevBoot ?? OTHER_BOOT_ID)
+}
+
+/** Il contenuto di un pid file del volume: quello del wrapper, o il seme. */
+const browserPidContent = (st, path) => {
+  if (typeof path !== 'string' || !isBrowserPidPath(path)) return null
+  const written = st.browser.pidFiles.get(path)
+  if (written !== undefined) return written
+  return seededPidContent(st)
+}
+
+/** Un lock del volume esiste? (del wrapper, o seminato; il rm lo toglie) */
+const browserLockExists = (st, path) => {
+  if (typeof path !== 'string' || !isBrowserLockPath(path)) return false
+  if (st.browser.locksRemoved.has(path)) return false
+  return st.browser.locks.has(path) || seededPidContent(st) !== null
 }
 
 /**
@@ -740,9 +845,37 @@ if (argv[0] === 'exec') {
     const script = ci >= 0 ? argv[ci + 1] : ''
     if (typeof script === 'string' && script.includes('setsid') && script.includes('"$3"')) process.exit(0)
   }
+  // BRB (fase browser-riavvio-box): la lettura pid+boot in UN SOLO exec (lo
+  // script COSTANTE del daemon che legge /proc/sys/kernel/random/boot_id)
+  // risponde col pid file del volume e la riga «boot <id>» dell'avvio di
+  // adesso — il pid file sopravvive a stop/start, il boot_id CAMBIA a ogni
+  // avvio (run -d, start di un box fermato)
+  {
+    const ci = argv.indexOf('-c')
+    const script = ci >= 0 ? argv[ci + 1] : ''
+    if (typeof script === 'string' && script.includes('/proc/sys/kernel/random/boot_id')) {
+      const st = scanState()
+      const content = browserPidContent(st, argv[ci + 3])
+      if (content !== null) out(content)
+      out(`boot ${st.boot ?? ''}`)
+      process.exit(0)
+    }
+  }
+  // BRB: l'ESISTENZA di un lock del volume (test -e come 1001) — seminato o
+  // scritto dal wrapper del browser, tolto dal rm di BRB2
+  if (argv.includes('test') && argv.includes('-e')) {
+    const path = argv[argv.indexOf('-e') + 1]
+    if (typeof path === 'string' && isBrowserLockPath(path)) {
+      process.exit(browserLockExists(scanState(), path) ? 0 : 1)
+    }
+  }
   if (argv.includes('cat')) {
     const pi = argv.indexOf('--')
     const path = pi >= 0 ? argv[pi + 1] : undefined
+    // BRB: il cat di un pid file del volume risponde col contenuto (quello
+    // del wrapper, o il seme dell'env) — la forma di lettura di prima
+    const pidContent = path !== undefined ? browserPidContent(scanState(), path) : null
+    if (pidContent !== null) { out(pidContent); process.exit(0) }
     if (typeof path === 'string') {
       // i percorsi del wrapper sono RELATIVI alla home del bot (l'exec -w li
       // risolve nel box): il cat arriva col PERCORSO ASSOLUTO — si confronta
