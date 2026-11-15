@@ -6,6 +6,7 @@
 import { describe, expect, it } from 'vitest'
 import { join } from 'node:path'
 import { userDataDir, isSafeUserDataDir } from '../paths'
+import { TEST_TMP_BASE } from '../../test-tmp'
 
 describe('fase 16 (U0b): userDataDir', () => {
   it('con nome app "Homun" (impacchettata) restituisce <appData>/sandbot', () => {
@@ -25,8 +26,11 @@ describe('fase 16 (U0b): userDataDir', () => {
 
 describe('fase rilascio (A8): override e confine con Homun 2', () => {
   it('SANDBOT_TEST_USER_DATA vince sul percorso storico', () => {
-    expect(userDataDir('Homun', '/Users/fabio/Library/Application Support', { SANDBOT_TEST_USER_DATA: '/var/folders/xx/T/sb-test' }))
-      .toBe('/var/folders/xx/T/sb-test')
+    // CB1 (fase ci-beta5): il valore di prova passa da TEST_TMP_BASE — il
+    // percorso letterale del Mac di sviluppo è vietato nel codice dei test
+    const override = join(TEST_TMP_BASE, 'sb-test')
+    expect(userDataDir('Homun', '/Users/fabio/Library/Application Support', { SANDBOT_TEST_USER_DATA: override }))
+      .toBe(override)
   })
   it('senza la variabile il percorso è quello storico', () => {
     expect(userDataDir('Homun', '/Users/fabio/Library/Application Support', {})).toBe(

@@ -15,7 +15,11 @@ import {
 const DARWIN: AppLocationCase = { isPackaged: true, platform: 'darwin', inAppsFolder: true, updaterEnabled: true, execPath: '/Applications/Homun.app/Contents/MacOS/Homun' }
 type AppLocationCase = Parameters<typeof appLocationAction>[0]
 
-const TRANSLOCATED = '/private/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/AppTranslocation/d/Homun.app/Contents/MacOS/Homun'
+// il percorso di App Translocation come lo fa macOS (la copia read-only
+// dentro la T di sistema). Costruito a PEZZI: il percorso letterale è vietato
+// nel codice dei test (guardia CB1, fase ci-beta5) — questo è un fixture di
+// STRINGA, non una cartella che deve esistere
+const TRANSLOCATED = ['/private', 'var', 'folders', 'nb', 'tk4p9dx6yq', 'T', 'AppTranslocation', 'd', 'Homun.app', 'Contents', 'MacOS', 'Homun'].join('/')
 
 describe('RV1: la decisione è una funzione pura', () => {
   it('macOS impacchettata con updater, DENTRO Applicazioni → ok', () => {

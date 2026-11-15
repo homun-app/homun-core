@@ -9,8 +9,10 @@ import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
-// cartelle temporanee SOLO con mkdtemp nella directory fissata
-const TMP = mkdtempSync(join('/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T', 'sandbot-cc1-'))
+// cartelle temporanee SOLO con mkdtemp nella directory fissata (CB1, fase
+// ci-beta5: da TEST_TMP_BASE — sulla CI è la cartella temporanea del sistema)
+import { TEST_TMP_BASE } from '../../../test-tmp'
+const TMP = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-cc1-'))
 const { setDataDir } = await import('../../store/db')
 setDataDir(TMP)
 

@@ -26,6 +26,7 @@ vi.mock('../../main/agent/providers', () => ({
 
 const { setDataDir, dataDir, db } = await import('../../main/store/db')
 const { buildApiMethods } = await import('../api')
+import { TEST_TMP_BASE } from '../../test-tmp'
 import type { SandbotEvent, MainModel } from '../../shared/types'
 
 const MAIN: MainModel = { providerId: 'ollama', model: 'glm-5.3-flash:cloud', thinking: null }
@@ -35,7 +36,9 @@ const emit: (e: SandbotEvent) => void = (e) => events.push(e)
 const api: Record<string, (p: unknown[]) => unknown> = buildApiMethods(emit, { poke: () => undefined } as never)
 
 beforeAll(() => {
-  const dir = mkdtempSync('/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/sandbot-models-event-')
+  // CB1 (fase ci-beta5): mkdtemp da TEST_TMP_BASE — il percorso letterale del
+  // Mac di sviluppo non esiste sulla CI e il file non partiva (ENOENT)
+  const dir = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-models-event-'))
   setDataDir(dir)
   dataDir()
   db()

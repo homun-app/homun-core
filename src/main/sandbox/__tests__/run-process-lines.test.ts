@@ -10,9 +10,15 @@ const { runDockerRaw, setDockerRunnerForTests } = await import('../index')
 const { setActiveEngineForTests } = await import('../engine')
 
 // la CLI del motore Apple diventa il node di prova: runDockerRaw spawna il
-// comando del motore attivo con l'argv che gli passo
+// comando del motore attivo con l'argv che gli passo. Il valore di prova
+// passa da TEST_TMP_BASE (CB1, fase ci-beta5: il percorso letterale del Mac
+// di sviluppo è vietato nel codice dei test — qui è solo il valore che apre
+// l'override della CLI, nessuna cartella viene creata)
+import { join } from 'node:path'
+import { TEST_TMP_BASE } from '../../../test-tmp'
+
 const ENV = {
-  SANDBOT_TEST_USER_DATA: '/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/sandbot-lines-test',
+  SANDBOT_TEST_USER_DATA: join(TEST_TMP_BASE, 'sandbot-lines-test'),
   SANDBOT_TEST_CONTAINER_CLI: process.execPath
 }
 

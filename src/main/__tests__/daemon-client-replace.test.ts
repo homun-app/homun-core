@@ -14,10 +14,15 @@ import { ensureDaemonRunning } from '../../main/daemon-client'
 import { setDaemonSpawnContext, resetDaemonSpawnContext } from '../../main/daemon-context'
 import { TEST_TMP_BASE } from '../../test-tmp'
 
-// l'eseguibile della UI «buona» e quello della copia translocata (sola lettura)
+// l'eseguibile della UI «buona» e quello della copia translocata (sola
+// lettura). Il percorso di Translocation è costruito a PEZZI: il percorso
+// letterale è vietato nel codice dei test (guardia CB1, fase ci-beta5) —
+// fixture di STRINGA, non una cartella che deve esistere
 const GOOD_EXEC = '/Applications/Homun.app/Contents/MacOS/Homun'
-const TRANSLOCATED_EXEC =
-  '/private/var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/AppTranslocation/d/Homun.app/Contents/MacOS/Homun'
+const TRANSLOCATED_EXEC = [
+  '/private', 'var', 'folders', 'nb', 'tk4p9dx6yq', 'T', 'AppTranslocation', 'd',
+  'Homun.app', 'Contents', 'MacOS', 'Homun'
+].join('/')
 
 let dir: string
 let live: ChildProcess
