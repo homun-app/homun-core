@@ -265,6 +265,8 @@ const api: SandbotApi = {
   /** OBD2: il piano — i passi che la preparazione farà (il consenso elenca solo quelli) */
   boxSetupPlan: () => ipcRenderer.invoke('box:setup-plan'),
   boxSetupStart: () => ipcRenderer.invoke('box:setup-start'),
+  /** MB3 (fase modalita-box): la scelta dell'utente — dove girano i comandi del bot */
+  boxModeSet: (mode: 'box' | 'host') => ipcRenderer.invoke('box:mode-set', mode),
   boxSetupCancel: () => ipcRenderer.invoke('box:setup-cancel'),
   boxSetupRetry: () => ipcRenderer.invoke('box:setup-retry'),
   boxSetupOpenInstaller: () => ipcRenderer.invoke('box:setup-open-installer'),

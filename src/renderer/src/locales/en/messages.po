@@ -1958,6 +1958,10 @@ msgstr "Recommended for you"
 msgid "consigliato"
 msgstr "recommended"
 
+#: src/renderer/src/components/settings/EngineSection.tsx
+msgid "Consigliato: i comandi e il browser del bot girano nel loro computer, non sul Mac."
+msgstr "Recommended: the bot's commands and browser run on its own computer, not on your Mac."
+
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "Contatti"
 msgstr "Contacts"
@@ -2294,6 +2298,10 @@ msgstr "Forget this memory forever? The text is completely erased and there is n
 msgid "Diretta: il permesso resta sul tuo Mac"
 msgstr "Direct: the permission stays on your Mac"
 
+#: src/renderer/src/components/settings/EngineSection.tsx
+msgid "Direttamente sul Mac"
+msgstr "Directly on the Mac"
+
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Disattiva"
 msgstr "Deactivate"
@@ -2390,6 +2398,10 @@ msgstr "After this many days away, routines pause."
 #: src/renderer/src/components/ConnectorCards13.tsx
 msgid "Dove gira: sul server {0} che indichi tu"
 msgstr "Where it runs: on the {0} server you choose"
+
+#: src/renderer/src/components/settings/EngineSection.tsx
+msgid "Dove girano i comandi"
+msgstr "Where commands run"
 
 #: src/renderer/src/components/GuideModelStep.tsx
 msgid "Dove la trovo?"
@@ -3104,6 +3116,10 @@ msgstr "https://user.github.io/sandbot/client.json"
 #: src/renderer/src/components/Settings.tsx
 msgid "I bot restano attivi anche a finestra chiusa."
 msgstr "Bots stay active even with the window closed."
+
+#: src/renderer/src/components/settings/EngineSection.tsx
+msgid "I comandi girano direttamente sul Mac, con le approvazioni; niente browser del bot."
+msgstr "Commands run directly on the Mac, with approvals; no bot browser."
 
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "I contatti sono dati personali VISIBILI ai bot (servono a scrivere bozze) ma cifrati a riposo."
@@ -6763,6 +6779,10 @@ msgstr "What do you want me to help you with first?"
 #: src/renderer/src/components/Settings.tsx
 msgid "suggerimento routine"
 msgstr "routine suggestion"
+
+#: src/renderer/src/components/settings/EngineSection.tsx
+msgid "Sul computer del bot"
+msgstr "On the bot's computer"
 
 #: src/renderer/src/components/settings/AddProviderSheet.tsx
 msgid "Sul tuo Mac"

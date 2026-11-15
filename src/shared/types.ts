@@ -1297,6 +1297,8 @@ export interface SandbotApi {
   /** OBD2: il piano — i passi che la preparazione farà (il consenso elenca solo quelli) */
   boxSetupPlan(): Promise<{ steps: BoxSetupRowId[] }>
   boxSetupStart(): Promise<BoxSetupState | null>
+  /** MB3 (fase modalita-box): la scelta dell'utente — scrive sandbox.mode E sandbox.modeSet */
+  boxModeSet(mode: 'box' | 'host'): Promise<{ mode: string; modeSet: boolean }>
   boxSetupCancel(): Promise<BoxSetupState | null>
   boxSetupRetry(): Promise<BoxSetupState | null>
   boxSetupOpenInstaller(): Promise<BoxSetupState | null>

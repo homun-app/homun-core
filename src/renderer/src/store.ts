@@ -314,6 +314,14 @@ interface Store {
   onboardingReopen(target: OnboardingStepId | 'restart'): Promise<void>
   /** OB1 (fase onboarding-b): la preparazione del computer del bot */
   boxSetupStart(): Promise<void>
+  /**
+   * MB3 (fase modalita-box): la SCELTA dell'utente dalle Impostazioni — dove
+   * girano i comandi del bot. UNA RPC che scrive sandbox.mode E
+   * sandbox.modeSet insieme; la card «Computer» segue il cambio rileggendo
+   * la modalità (CCK3); «Sul computer del bot» con la preparazione mai fatta
+   * (o in errore) avvia la STESSA preparazione della guida (boxSetupStart).
+   */
+  sandboxModeSet(mode: 'box' | 'host'): Promise<void>
   boxSetupCancel(): Promise<void>
   boxSetupRetry(): Promise<void>
   boxSetupOpenInstaller(): Promise<void>
@@ -969,6 +977,25 @@ export const useStore = create<Store>((set, get) => ({
   async boxSetupStart() {
     const r = await api.boxSetupStart().catch(() => null)
     if (r) set({ boxSetup: r })
+  },
+  // MB3 (fase modalita-box): la scelta dell'utente — UNA RPC scrive
+  // sandbox.mode E sandbox.modeSet insieme (una scelta esplicita non si
+  // ribelta MAI); la card «Computer» segue il cambio rileggendo la modalità
+  // (il meccanismo di CCK3); «Sul computer del bot» con la preparazione mai
+  // fatta (o in errore, o annullata) avvia la preparazione con lo STESSO
+  // flusso della guida — boxSetupStart, l'azione del bottone «Prepara il
+  // computer», nessun percorso nuovo (il consenso è il clic esplicito sulla
+  // scelta, come «Installa» di OB3 nella stessa scheda)
+  async sandboxModeSet(mode) {
+    const r = await api.boxModeSet(mode).catch(() => null)
+    if (!r) return
+    await get().readBoxInUse()
+    if (mode === 'box') {
+      const phase = get().boxSetup?.phase ?? 'idle'
+      if (phase === 'idle' || phase === 'error' || phase === 'cancelled') {
+        void get().boxSetupStart()
+      }
+    }
   },
   // CCK1 (fase computer-card-correzioni): la risposta della RPC box:runtime
   // NON si butta via — entra nello store con la STESSA azione dell'evento

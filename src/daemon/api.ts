@@ -2538,6 +2538,21 @@ export function buildApiMethods(
     'box:setup-plan': async () => ({ steps: await opts.boxSetup?.plan() ?? [] }),
     /** «Prepara il computer»: la partenza intelligente (dallo stato del motore). */
     'box:setup-start': async () => (await opts.boxSetup?.start()) ?? null,
+    /**
+     * MB3 (fase modalita-box): la SCELTA dell'utente dalle Impostazioni —
+     * dove girano i comandi del bot. Scrive sandbox.mode E sandbox.modeSet
+     * INSIEME: una scelta esplicita non si ribalta MAI (né dalla partenza
+     * della preparazione di MB1, né dalla migrazione di MB2).
+     */
+    'box:mode-set': async ([v]) => {
+      const value = String(v ?? '')
+      if (value !== 'box' && value !== 'host') {
+        throw new Error(`invalid sandbox.mode "${value}": box | host`)
+      }
+      store.setSetting('sandbox.mode', value)
+      store.setSetting('sandbox.modeSet', true)
+      return { mode: value, modeSet: true }
+    },
     /** «Annulla» (mentre il download o l'immagine corrono). */
     'box:setup-cancel': async () => (await opts.boxSetup?.cancel()) ?? null,
     /** «Riprova» (dall'errore o dall'annullato). */
