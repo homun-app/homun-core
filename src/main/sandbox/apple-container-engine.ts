@@ -65,6 +65,7 @@ import {
   appleBrowserOldProfileRmArgv,
   appleBrowserMcpArgv,
   appleBrowserReadFileArgv,
+  appleBrowserPidBootReadArgv,
   appleBrowserReadB64Argv,
   appleBrowserRmFileArgv,
   appleScreenControlVncArgv,
@@ -344,5 +345,7 @@ export const appleContainerEngine: BoxEngine = {
    * boot nuovo che riporta le interfacce SU, e la seconda difesa deve
    * tornare a valere PRIMA di ogni exec del bot.
    */
-  isolationCheck: verifyBoxInterfaces
+  isolationCheck: verifyBoxInterfaces,
+  /** BRB1 (fase browser-riavvio-box): la lettura pid+boot in un solo exec. */
+  browserPidBootRead: appleBrowserPidBootReadArgv
 }

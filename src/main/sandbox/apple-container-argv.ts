@@ -32,6 +32,7 @@ import {
   DOCKER_BG_WRAPPER_SH,
   DOCKER_BROWSER_WRAPPER_SH,
   DOCKER_BROWSER_DESKTOP_WRAPPER_SH,
+  DOCKER_BROWSER_PID_BOOT_SH,
   DOCKER_SCREEN_CONTROL_VNC_SH,
   SCREEN_BRIDGE_NODE_JS,
   TERMINAL_PROGRAM_PY,
@@ -638,6 +639,15 @@ export function appleBrowserMcpArgv(agentId: string, proxyPort: number, opts: { 
 
 export function appleBrowserReadFileArgv(container: string, path: string): string[] {
   return ['exec', '-i', '-u', BROWSER_USER, '-w', BROWSER_MOUNT, container, 'cat', '--', path]
+}
+
+/**
+ * BRB1 (fase browser-riavvio-box): la lettura pid+boot in UN SOLO exec come
+ * 1001 — lo script COSTANTE è quello di docker-argv (dentro il box gira
+ * Linux uguale), il path del pid file come argomento posizionale.
+ */
+export function appleBrowserPidBootReadArgv(container: string, pidFile: string): string[] {
+  return ['exec', '-i', '-u', BROWSER_USER, '-w', BROWSER_MOUNT, container, 'sh', '-c', DOCKER_BROWSER_PID_BOOT_SH, 'sh', pidFile]
 }
 
 export function appleBrowserReadB64Argv(container: string, path: string): string[] {

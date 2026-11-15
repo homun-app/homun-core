@@ -52,6 +52,7 @@ import {
   dockerBrowserOldProfileRmArgv,
   dockerBrowserMcpArgv,
   dockerBrowserReadFileArgv,
+  dockerBrowserPidBootReadArgv,
   dockerBrowserReadB64Argv,
   dockerBrowserRmFileArgv,
   dockerScreenControlVncArgv,
@@ -150,7 +151,9 @@ export const dockerEngine: BoxEngine = {
   childEnv: (env) => dockerChildEnv(env),
   argv,
   /** BR3: Docker usa i SUOI nomi di rete, nessuna rete di Homun. */
-  networkNameOf: (network) => network
+  networkNameOf: (network) => network,
+  /** BRB1 (fase browser-riavvio-box): la lettura pid+boot in un solo exec. */
+  browserPidBootRead: dockerBrowserPidBootReadArgv
 }
 
 /**

@@ -764,13 +764,40 @@ export function browserPidFile(owner: string, child?: string): string {
  * copyBrowserScreenshot. Se mkdir o cd falliscono il wrapper esce SUBITO
  * (`|| exit 1`): meglio un errore chiaro che un server vivo nella cartella
  * sbagliata (screenshot dispersi, pid file altrove).
+ * BRB1 (fase browser-riavvio-box): accanto al pid si scrive il BOOT_ID del
+ * kernel («$$ <boot_id>») — il volume /browser SOPRAVVIVE allo stop e i pid
+ * della VM nuova ripartono bassi: senza l'avvio, il pid di un riavvio
+ * precedente ammazzerebbe il gruppo di un processo qualunque di pwuser.
  */
 export const DOCKER_BROWSER_WRAPPER_SH = [
   'mkdir -p "$(dirname "$1")" && cd "$(dirname "$1")" || exit 1',
-  'echo $$ >"$1"',
+  'echo "$$ $(cat /proc/sys/kernel/random/boot_id 2>/dev/null)" >"$1"',
   'shift',
   'exec playwright-mcp "$@"'
 ].join('\n')
+
+/**
+ * BRB1 (fase browser-riavvio-box): lo script COSTANTE che legge pid file e
+ * boot_id del box in UN SOLO exec — il pid file (se c'è) e poi la riga
+ * «boot <id>» col boot_id di ADESSO. Il path del pid file entra come $1:
+ * MAI dati composti in una shell, e il confronto dei DUE valori (quello del
+ * file e quello del box) non può vederli di due exec diversi (il box
+ * potrebbe riavviarsi in mezzo). Se il boot_id non si legge, la riga esce
+ * col valore VUOTO: avvio sconosciuto, niente kill.
+ */
+export const DOCKER_BROWSER_PID_BOOT_SH = [
+  'if [ -f "$1" ]; then cat "$1"; fi',
+  "printf 'boot %s\\n' \"$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)\""
+].join('\n')
+
+/**
+ * BRB1: l'argv della lettura pid+boot, COME 1001 (il pid file sta nella
+ * cartella 0700 di pwuser), `-w /browser` (esiste sempre) e lo script
+ * COSTANTE col pid file come argomento posizionale.
+ */
+export function dockerBrowserPidBootReadArgv(container: string, pidFile: string): string[] {
+  return ['exec', '-i', '-u', BROWSER_USER, '-w', BROWSER_MOUNT, container, 'sh', '-c', DOCKER_BROWSER_PID_BOOT_SH, 'sh', pidFile]
+}
 
 // ---- fase 19a (V2): il DESKTOP del bot — solo per il browser PRINCIPALE ----
 
@@ -814,7 +841,8 @@ export function browserControlPidFile(owner: string): string {
  */
 export const DOCKER_BROWSER_DESKTOP_WRAPPER_SH = [
   'mkdir -p "$(dirname "$1")" && cd "$(dirname "$1")" || exit 1',
-  'echo $$ >"$1"',
+  // BRB1: il pid col BOOT_ID del kernel (il volume sopravvive al riavvio del box)
+  'echo "$$ $(cat /proc/sys/kernel/random/boot_id 2>/dev/null)" >"$1"',
   'if command -v mcookie >/dev/null 2>&1; then cookie="$(mcookie)"; else cookie="$(od -An -N16 -tx1 /dev/urandom | tr -d \' \\n\')"; fi',
   'xauth -f ./Xauthority add ":0" . "$cookie" || exit 1',
   'xauth -f ./Xauthority nlist | sed -e \'s/^..../ffff/\' | xauth -f ./Xauthority nmerge -',
@@ -1012,7 +1040,9 @@ export function dockerBrowserRmFileArgv(container: string, path: string): string
  * che COMANDA il browser in cui l'utente ha fatto login).
  */
 export const DOCKER_SCREEN_CONTROL_VNC_SH = [
-  'echo $$ >./vnc-control.pid',
+  // BRB1: il pid col BOOT_ID del kernel (come i wrapper del browser: anche
+  // questo pid file serve a uccidere un processo e vive nel volume /browser)
+  'echo "$$ $(cat /proc/sys/kernel/random/boot_id 2>/dev/null)" >./vnc-control.pid',
   // T8.1 (fase 19b): come la vista, lo stderr del x11vnc di CONTROLLO va nel
   // suo file (riscritto a ogni avvio), non nel log del daemon
   'exec x11vnc -display ":$1" -auth ./Xauthority -rfbport 0 -rfbportv6 -1 -noipv6 -unixsock ./vnc-control.sock -shared -forever -nopw -quiet 2>./x11vnc-control.log'

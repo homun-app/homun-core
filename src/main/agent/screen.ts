@@ -31,11 +31,13 @@ import {
   encodeFrame, decodeFrame, acceptKey, OP_CONT, OP_BINARY, OP_CLOSE, OP_PING, OP_PONG
 } from '../../shared/ws'
 import {
-  browserViewSocket, browserControlSocket,
-  dockerScreenBridgeArgv, dockerScreenControlVncArgv, dockerScreenControlPidReadArgv,
+  browserViewSocket, browserControlSocket, browserControlPidFile,
+  dockerScreenBridgeArgv, dockerScreenControlVncArgv,
   dockerScreenSocketReadyArgv, dockerScreenDisplayReadArgv, SCREEN_BRIDGE_NODE_JS,
   dockerKillGroupArgv, BROWSER_USER, BOX_CONTAINER
 } from '../sandbox/docker-argv'
+// BRB1 (fase browser-riavvio-box): i parse puri del pid file col boot_id
+import { parseBrowserPidFile, parsePidBootRead } from './shells'
 import { boxOwnerOf, runDockerRaw } from '../sandbox'
 import { UiError } from '../../shared/ui-text'
 import { ui } from '../ui-language'
@@ -258,15 +260,24 @@ async function ensureControlVnc(agentId: string): Promise<void> {
   await waitForSocket(browserControlSocket(owner))
 }
 
-/** Uccide il x11vnc di controllo di un proprietario (kill di gruppo dal pid file). */
+/**
+ * Uccide il x11vnc di controllo di un proprietario (kill di gruppo dal pid
+ * file). BRB1 (fase browser-riavvio-box): il pid file porta il boot_id e il
+ * kill parte SOLO se è quello di adesso — il volume /browser sopravvive allo
+ * stop del box e il pid di un avvio precedente può essere il gruppo di un
+ * altro processo di questa VM. Lettura pid+boot in UN SOLO exec (lo stesso
+ * script COSTANTE del browser), mai dati composti in una shell.
+ */
 async function stopControlVnc(agentId: string): Promise<void> {
   const owner = boxOwnerOf(agentId)
   controlVncOwners.delete(owner)
   if (fakeScreenSocketDir()) return
-  const pid = await runDockerRaw(activeBoxEngine().argv.screenControlPidRead(BOX_CONTAINER, owner), { timeoutMs: 10_000 }).catch(() => null)
-  const pgid = pid && pid.exitCode === 0 ? Number(pid.stdout.trim()) : NaN
-  if (Number.isInteger(pgid) && pgid > 0) {
-    await runDockerRaw(dockerKillGroupArgv(BOX_CONTAINER, pgid, 'TERM', BROWSER_USER), { timeoutMs: 15_000 }).catch(() => undefined)
+  const read = await runDockerRaw(activeBoxEngine().browserPidBootRead(BOX_CONTAINER, browserControlPidFile(owner)), { timeoutMs: 10_000 }).catch(() => null)
+  if (!read || read.exitCode !== 0) return
+  const { pidRaw, bootId } = parsePidBootRead(read.stdout)
+  const parsed = parseBrowserPidFile(pidRaw)
+  if (parsed.ok && parsed.bootId !== null && parsed.bootId === bootId) {
+    await runDockerRaw(dockerKillGroupArgv(BOX_CONTAINER, parsed.pgid, 'TERM', BROWSER_USER), { timeoutMs: 15_000 }).catch(() => undefined)
   }
 }
 

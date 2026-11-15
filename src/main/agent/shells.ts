@@ -61,6 +61,43 @@ export function parseShellPgid(raw: string | null): { ok: true; pgid: number } |
 }
 
 /**
+ * BRB1 (fase browser-riavvio-box): il parse del pid file del volume del
+ * browser, dove il wrapper scrive «$$ <boot_id>» col boot_id del kernel
+ * (PURO). Restituisce { pgid, bootId }: il pgid del gruppo del server MCP e
+ * l'AVVIO in cui è nato. Il VECCHIO formato (solo il numero) vale bootId
+ * null, cioè AVVIO SCONOSCIUTO — meglio un orfano mancato, che è già morto
+ * con la VM, che il gruppo di un altro processo ucciso: il kill partirà
+ * SOLO col boot_id di adesso. Spazzatura → ok:false, come parseShellPgid.
+ */
+export function parseBrowserPidFile(raw: string | null): { ok: true; pgid: number; bootId: string | null } | { ok: false; reason: string } {
+  const t = raw?.trim() ?? ''
+  if (t === '') return { ok: false, reason: 'pid file empty: no kill' }
+  const m = /^(\d+)(?:[ \t]+(\S+))?$/.exec(t)
+  if (!m || Number(m[1]) <= 0) {
+    return { ok: false, reason: `pid file not a "<pgid> <boot_id>" pair ("${t.slice(0, 50)}"): no kill` }
+  }
+  return { ok: true, pgid: Number(m[1]), bootId: m[2] ?? null }
+}
+
+/**
+ * BRB1 (fase browser-riavvio-box): il parse dell'uscita della lettura
+ * pid+boot (UN solo exec, script COSTANTE): il pid file com'è, poi la riga
+ * «boot <id>» col boot_id del box ADESSO (PURO). L'ultima riga dice il boot;
+ * sopra c'è il contenuto del pid file (null se il file non c'era). Senza la
+ * riga «boot …», o col valore VUOTO (boot_id non leggibile), il boot è
+ * SCONOSCIUTO: niente kill.
+ */
+export function parsePidBootRead(stdout: string): { pidRaw: string | null; bootId: string | null } {
+  const lines = stdout.replace(/\r/g, '').split('\n')
+  while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
+  const last = lines[lines.length - 1]
+  if (last === undefined || !last.startsWith('boot ')) return { pidRaw: null, bootId: null }
+  const boot = last.slice('boot '.length).trim()
+  const pidRaw = lines.slice(0, -1).join('\n')
+  return { pidRaw: pidRaw === '' ? null : pidRaw, bootId: boot === '' ? null : boot }
+}
+
+/**
  * Esito dell'avvio di un comando in background (H2): ok col pid (host), o —
  * solo in docker — l'exit code ≠ 0 di `docker exec -d` con lo stderr: -d torna
  * subito, ma gli errori di avvio (es. il chdir di una home assente) arrivano

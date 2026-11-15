@@ -42,7 +42,9 @@ import {
 import { boxNetworkGateway, boxNetworkSubnet, ensureAppleBoxNetwork } from '../sandbox/apple-container-engine'
 import { uiError, UI } from '../ui-language'
 import { ensureBrowserProxy, ensureBrowserProxyGateway } from './browser-proxy'
-import { parseShellPgid } from './shells'
+// BRB1 (fase browser-riavvio-box): i parse puri del pid file col boot_id e
+// dell'uscita della lettura pid+boot (un solo exec)
+import { parseBrowserPidFile, parsePidBootRead } from './shells'
 // fase 19a (V2): il timer di inattività si SOSPENDE mentre lo schermo del bot
 // è in uso (vista, controllo o richiesta di presa di controllo), e la chiusura
 // della sessione revoca connessioni e capability dello schermo. screen.ts
@@ -286,17 +288,53 @@ function armCloseTimer(agentId: string, s: BrowserSession): void {
 }
 
 /**
+ * BRB1 (fase browser-riavvio-box): l'esito del controllo dell'orfano. Il
+ * volume /browser SOPRAVVIVE allo stop del box (riavvio del Mac, system
+ * stop, «Rimuovi immagine», stop dalla CLI) e tiene il pid file di un
+ * avvio PRECEDENTE; ogni avvio del box è una VM nuova con hostname e pid
+ * piccoli e ripetibili — il numero del pid file vecchio può essere il gruppo
+ * di un ALTRO processo di pwuser (per esempio il browser di un altro bot).
+ * Il kill parte SOLO se il pid file porta il boot_id di ADESSO.
+ */
+export interface BrowserOrphanCheck {
+  /** la lettura pid+boot è riuscita (altrimenti niente kill e niente rm) */
+  read: boolean
+  /** il contenuto del pid file com'era (null = assente o lettura caduta) */
+  pidRaw: string | null
+  /** il boot_id del box ADESSO (null = non leggibile: avvio sconosciuto) */
+  bootId: string | null
+  /** il pid file è di QUESTO avvio, col pgid valido (l'unico caso col kill) */
+  sameBoot: boolean
+  /** il pgid del pid file (null se non valido) */
+  pgid: number | null
+}
+
+/**
  * Kill dell'eventuale ORFANO del bot, dal pid file (argv puri, come G1): se il
  * daemon è morto senza chiudere, il server nel container è ancora vivo e
  * terrà il profilo bloccato. Chiamato al boot e prima di ogni avvio.
  * P2 (fase 14 correzioni): il pid file sta nel volume /browser (di 1001) e il
  * processo è di pwuser — lettura E kill girano come 1001:1001 (un kill come
  * 1000 riceverebbe EPERM e l'orfano terrebbe il SingletonLock del profilo).
+ * BRB1: pid file e boot_id del box si leggono nello STESSO exec (script
+ * COSTANTE, il path come $1); il kill parte SOLO se il boot_id del file è
+ * quello di adesso. Il vecchio formato (solo il numero) e un avvio diverso
+ * non uccidono NULLA: meglio un orfano mancato, che è già morto con la VM,
+ * che il gruppo di un altro processo ucciso.
  */
-async function killOrphanByPidFile(pidFileContent: string | null): Promise<void> {
-  const parsed = parseShellPgid(pidFileContent)
-  if (!parsed.ok) return
-  await runDockerRaw(activeBoxEngine().argv.killGroup(BOX_CONTAINER, parsed.pgid, 'TERM', BROWSER_USER), { timeoutMs: 15_000 }).catch(() => undefined)
+async function checkAndKillBrowserOrphan(pidFile: string): Promise<BrowserOrphanCheck> {
+  const r = await runDockerRaw(activeBoxEngine().browserPidBootRead(BOX_CONTAINER, pidFile), { timeoutMs: 15_000 }).catch(() => null)
+  if (!r || r.exitCode !== 0) return { read: false, pidRaw: null, bootId: null, sameBoot: false, pgid: null }
+  const { pidRaw, bootId } = parsePidBootRead(r.stdout)
+  const parsed = parseBrowserPidFile(pidRaw)
+  const sameBoot = parsed.ok && parsed.bootId !== null && parsed.bootId === bootId
+  if (parsed.ok && !sameBoot) {
+    console.warn(`[browser] pid file ${pidFile} di un altro avvio (pid ${parsed.pgid}, boot ${parsed.bootId ?? 'sconosciuto'} ≠ ${bootId ?? 'sconosciuto'}): NESSUN kill — il numero può essere di un altro processo di questa VM`)
+  }
+  if (sameBoot) {
+    await runDockerRaw(activeBoxEngine().argv.killGroup(BOX_CONTAINER, parsed.pgid, 'TERM', BROWSER_USER), { timeoutMs: 15_000 }).catch(() => undefined)
+  }
+  return { read: true, pidRaw, bootId, sameBoot, pgid: parsed.ok ? parsed.pgid : null }
 }
 
 export async function killBrowserOrphan(agentId: string): Promise<void> {
@@ -307,9 +345,7 @@ export async function killBrowserOrphan(agentId: string): Promise<void> {
   const child = isSubagent(agentId)
   const pidFile = browserPidFile(owner, child ? agentId : undefined)
   // best effort: senza container o senza pid file non c'è nessun orfano
-  const r = await runDockerRaw(activeBoxEngine().argv.browserReadFile(BOX_CONTAINER, pidFile), { timeoutMs: 15_000 }).catch(() => null)
-  if (!r || r.exitCode !== 0) return
-  await killOrphanByPidFile(r.stdout)
+  await checkAndKillBrowserOrphan(pidFile)
 }
 
 /** Al boot del daemon: kill degli orfani di TUTTI i bot (solo docker). */
@@ -363,15 +399,21 @@ async function startBrowserSession(agentId: string): Promise<BrowserSession> {
   } else {
     await ensureBoxContainer()
     await ensureBotHome(agentId) // la home del proprietario serve ai file del BOT
-    await killBrowserOrphan(agentId)
+    // fase 12 (punto 1) + P2: il browser di un FIGLIO ha istanza e pid file
+    // SUOI (--isolated, output- e pid col suo id) ma gira ANCH'ESSO come 1001
+    // nello stato del PADRE (/browser/<owner>)
+    const child = isSubagent(agentId)
+    const owner = boxOwnerOf(agentId)
+    // BRB1 (fase browser-riavvio-box): il controllo dell'orfano legge pid file
+    // e boot_id del box in UN SOLO exec; il kill parte SOLO se il pid file è
+    // di QUESTO avvio (il volume /browser sopravvive allo stop del box)
+    await checkAndKillBrowserOrphan(browserPidFile(owner, child ? agentId : undefined))
     // P2 (fase 14 correzioni): il terreno del browser — TUTTO nello stato di
     // 1001 nel volume /browser. Il controllo come 1001 (radice di 1001 e
     // scrivibile) è la verifica del one-shot della radice che ensureBoxContainer
     // gira a ogni (ri)creazione; il profilo VECCHIO rimasto nella home del bot
     // (fase 14 7a) si cancella COME 1000: file del bot, nessun privilegio, e
     // un rm di una cartella assente non costa nulla
-    const child = isSubagent(agentId)
-    const owner = boxOwnerOf(agentId)
     // BR2 (fase box-rete): col motore Apple in bridge il browser del box
     // raggiunge il Mac al GATEWAY di homun-box (host.docker.internal non
     // esiste): il proxy apre un SECONDO ascolto lì — MAI su 0.0.0.0, MAI sul

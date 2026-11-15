@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, readFileSync, existsSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+  dockerBrowserPidBootReadArgv,
   dockerStdioMcpArgv,
   dockerRmDirArgv,
   dockerPluginCopyCreateArgv,
@@ -256,16 +257,20 @@ describe('il launcher del browser: argv PURI con TUTTI i flag obbligatori e NESS
     expect(argv).toContain('/browser/agent_x/mcp.pid')
     // I2: NIENTE setsid (il processo di docker exec è già leader di sessione:
     // setsid forka e il padre chiude lo stdio del client) e il pid si scrive
-    // PRIMA dell'exec — quel pid è anche il pgid per il kill di gruppo
+    // PRIMA dell'exec — quel pid è anche il pgid per il kill di gruppo.
+    // BRB1 (fase browser-riavvio-box): accanto al pid c'è il BOOT_ID del
+    // kernel («$$ <boot_id>») — il volume /browser sopravvive al riavvio del
+    // box e i pid ripartono bassi: senza l'avvio, il kill dell'orfano
+    // ammazzerebbe il gruppo di un processo qualunque della VM nuova
     expect(DOCKER_BROWSER_WRAPPER_SH).not.toContain('setsid')
-    expect(DOCKER_BROWSER_WRAPPER_SH.indexOf('echo $$')).toBeLessThan(DOCKER_BROWSER_WRAPPER_SH.indexOf('exec playwright-mcp'))
+    expect(DOCKER_BROWSER_WRAPPER_SH.indexOf('echo "$$')).toBeLessThan(DOCKER_BROWSER_WRAPPER_SH.indexOf('exec playwright-mcp'))
     expect(DOCKER_BROWSER_WRAPPER_SH).toContain('exec playwright-mcp')
-    expect(DOCKER_BROWSER_WRAPPER_SH).toContain('echo $$')
+    expect(DOCKER_BROWSER_WRAPPER_SH).toContain('echo "$$ $(cat /proc/sys/kernel/random/boot_id 2>/dev/null)" >"$1"')
     // Q1: il wrapper crea la cartella del pid e CI ENTRA (la cwd del server è
     // /browser/<owner>, dove finisce il filename RELATIVO dello screenshot);
     // se mkdir o cd falliscono esce SUBITO: mai un server nella cartella sbagliata
     expect(DOCKER_BROWSER_WRAPPER_SH).toContain('mkdir -p "$(dirname "$1")" && cd "$(dirname "$1")" || exit 1')
-    expect(DOCKER_BROWSER_WRAPPER_SH.indexOf('cd "$(dirname "$1")"')).toBeLessThan(DOCKER_BROWSER_WRAPPER_SH.indexOf('echo $$'))
+    expect(DOCKER_BROWSER_WRAPPER_SH.indexOf('cd "$(dirname "$1")"')).toBeLessThan(DOCKER_BROWSER_WRAPPER_SH.indexOf('echo "$$'))
     // TUTTI i flag obbligatori (valori compresi), con il tetto delle uscite (I8)
     const flags = browserMcpFlags('agent_x', 18765)
     for (const [f, v] of [
@@ -411,7 +416,9 @@ describe('fase 19a: il wrapper del DESKTOP (solo browser principale) e i suoi ar
       'sh', '-c', DOCKER_SCREEN_CONTROL_VNC_SH, 'sh',
       '42'
     ])
-    expect(DOCKER_SCREEN_CONTROL_VNC_SH).toContain('echo $$ >./vnc-control.pid')
+    // BRB1: anche questo pid file serve a uccidere un processo e vive nel
+    // volume /browser: porta il boot_id del kernel accanto al pid
+    expect(DOCKER_SCREEN_CONTROL_VNC_SH).toContain('echo "$$ $(cat /proc/sys/kernel/random/boot_id 2>/dev/null)" >./vnc-control.pid')
     expect(DOCKER_SCREEN_CONTROL_VNC_SH).toContain('exec x11vnc -display ":$1" -auth ./Xauthority')
     // SENZA -viewonly (è il controllo), sempre socket unix, mai porta TCP
     expect(DOCKER_SCREEN_CONTROL_VNC_SH).not.toContain('-viewonly')
@@ -1051,6 +1058,7 @@ describe('Q1: il `-w` di un docker exec è SOLO un percorso che esiste già', ()
       dockerBrowserMcpArgv('agent_x', 18765), // launcher del browser principale
       dockerBrowserMcpArgv('sub_a1b2c3d4', 18765, { child: true, owner: 'agent_padre' }), // e del figlio
       dockerBrowserReadFileArgv(BOX_CONTAINER, '/browser/agent_x/mcp.pid'),
+      dockerBrowserPidBootReadArgv(BOX_CONTAINER, '/browser/agent_x/mcp.pid'), // BRB1: lettura pid+boot in UN exec
       dockerBrowserWriteB64Argv(BOX_CONTAINER, '/box/home/agent_x/.browser/screens/ab12cd34.png')
     ]
     for (const argv of argvsWithW) {

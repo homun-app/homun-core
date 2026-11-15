@@ -109,6 +109,9 @@ const S: Record<string, { args: unknown[]; sub: string }> = {
   appleBrowserOldProfileRmArgv: { args: ['sandbot-box', 'agent_x'], sub: 'exec' },
   appleBrowserMcpArgv: { args: ['agent_x', 8085, { gateway: '192.0.15.1' }, 'sandbot-box'], sub: 'exec' },
   appleBrowserReadFileArgv: { args: ['sandbot-box', '/browser/f'], sub: 'exec' },
+  // BRB1 (fase browser-riavvio-box): la lettura pid+boot in un solo exec — il
+  // sottocomando exec è già nelle help in fixture
+  appleBrowserPidBootReadArgv: { args: ['sandbot-box', '/browser/agent_x/mcp.pid'], sub: 'exec' },
   appleBrowserReadB64Argv: { args: ['sandbot-box', '/browser/f'], sub: 'exec' },
   appleBrowserRmFileArgv: { args: ['sandbot-box', '/browser/f'], sub: 'exec' },
   appleScreenControlVncArgv: { args: ['sandbot-box', 'agent_x', ':0'], sub: 'exec' },

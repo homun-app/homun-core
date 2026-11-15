@@ -239,6 +239,17 @@ export interface BoxEngine {
    * chiamante riprova con isolateBoxNetwork, poi fallisce chiuso).
    */
   isolationCheck?(run: (argv: string[], opts?: { timeoutMs?: number }) => Promise<{ stdout: string; stderr: string; exitCode: number | null }>): Promise<void>
+  /**
+   * BRB1 (fase browser-riavvio-box): l'argv che legge pid file e boot_id del
+   * box in UN SOLO exec come 1001 (il pid file vive nella cartella 0700 di
+   * pwuser): script sh -c COSTANTE, il path del pid file come argomento
+   * posizionale — dati MAI composti in una shell, e i DUE valori (quello
+   * scritto nel file e quello del box di adesso) mai letti da due exec
+   * diversi. NON entra nell'argv map: il contratto BX5 cresce della sola
+   * chiave browserLocksRm di BRB2; è un'operazione del motore, come
+   * networkNameOf.
+   */
+  browserPidBootRead(container: string, pidFile: string): string[]
 }
 
 // ---- la scelta del motore (PURa) ----
