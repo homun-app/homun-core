@@ -10,6 +10,10 @@ import { createHash } from 'node:crypto'
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { TEST_TMP_BASE } from '../../test-tmp'
+import { setDataDir, db, dataDir, getSetting, setSetting } from '../../main/store/db'
+// MB1 (fase modalita-box): la modalità si legge dalla sandbox VERA, che legge
+// lo store vero — come in produzione
+import { sandboxMode } from '../../main/sandbox'
 import { parseBuildProgress } from '../../main/sandbox/build-progress'
 import type { BuildProgress } from '../../main/sandbox/build-progress'
 import type { AppleEngineState } from '../../main/sandbox/engine'
@@ -966,5 +970,69 @@ describe('OBV6: il Team ID del firmatario — la foglia attesa sulla strada Deve
     expect(fin.error?.code).toBe('signature')
     expect(h.opened).toHaveLength(0)
     expect(existsSync(join(h.dir, 'finto.pkg.part'))).toBe(false)
+  })
+})
+
+// ---- MB1 (fase modalita-box): la partenza della preparazione È la scelta
+// del computer del bot — il daemon scrive sandbox.mode = 'box' quando la
+// preparazione PARTE davvero (la partenza «già ready» compresa), MAI se
+// l'utente ha scelto esplicitamente (sandbox.modeSet). Annulla/errore NON
+// riportano a host: la scelta registrata resta.
+
+describe('MB1: start() registra la scelta del computer del bot', () => {
+  it('da un DB pulito (nessuna riga sandbox.mode), start() con la CLI finta → sandboxMode() === \'box\'', async () => {
+    // DB VERO in una cartella temporanea di test: la prova legge sandboxMode(),
+    // che legge il setting dallo store vero (come farà il daemon in produzione)
+    const dir = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-mb1-pulito-'))
+    const prevDir = dataDir()
+    setDataDir(dir)
+    try {
+      db()
+      expect(getSetting<string | null>('sandbox.mode', null)).toBeNull() // pulito davvero
+      const h = harness()
+      const ctl = createBoxSetup({
+        ...h.deps,
+        getSetting: <T,>(key: string, fallback: T): T => getSetting(key, fallback),
+        setSetting: (key: string, value: unknown) => setSetting(key, value)
+      })
+      expect(sandboxMode()).toBe('host') // prima della scelta: i comandi sul Mac
+      void ctl.start().then(() => undefined)
+      await waitForState(ctl, (s) => s.phase === 'awaiting-installer')
+      h.containerAppears()
+      await waitForState(ctl, (s) => s.phase === 'ready' || s.phase === 'error')
+      expect(ctl.state().phase).toBe('ready')
+      expect(sandboxMode()).toBe('box')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+      setDataDir(prevDir)
+    }
+  })
+
+  it('con sandbox.modeSet = true e sandbox.mode = \'host\' → start() NON cambia la modalità (scelta esplicita mai ribaltata)', async () => {
+    const h = harness({ engineState: 'ready', hasImage: true })
+    h.settings.set('sandbox.modeSet', true)
+    h.settings.set('sandbox.mode', 'host')
+    const ctl = createBoxSetup(h.deps)
+    const s = await ctl.start()
+    expect(s.phase).toBe('ready')
+    expect(h.settings.get('sandbox.mode')).toBe('host')
+    expect(h.settings.get('sandbox.modeSet')).toBe(true)
+  })
+
+  it('con Apple già ready e l\'immagine presente (partenza ready) → sandbox.mode = \'box\'', async () => {
+    const h = harness({ engineState: 'ready', hasImage: true })
+    const ctl = createBoxSetup(h.deps)
+    const s = await ctl.start()
+    expect(s.phase).toBe('ready')
+    expect(h.settings.get('sandbox.mode')).toBe('box')
+  })
+
+  it('l\'errore della preparazione NON riporta a host: la scelta resta (qui con lo spazio che manca)', async () => {
+    const h = harness({ freeBytes: 1_000 }) // spazio insufficiente → errore subito
+    const ctl = createBoxSetup(h.deps)
+    const s = await ctl.start()
+    expect(s.phase).toBe('error')
+    expect(s.error?.code).toBe('no-space')
+    expect(h.settings.get('sandbox.mode')).toBe('box') // la scelta NON si ribalta
   })
 })

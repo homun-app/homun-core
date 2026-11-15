@@ -739,6 +739,15 @@ export function createBoxSetup(deps: BoxSetupDeps): BoxSetupController {
       if (running) return state
       const startFrom = await decideStart()
       if (!startFrom) return state
+      // MB1 (fase modalita-box): la preparazione che PARTE è la SCELTA del
+      // computer del bot — il daemon la registra scrivendo sandbox.mode =
+      // 'box' (anche nella partenza «già ready»: scegliere di preparare È
+      // scegliere il computer del bot). MAI se l'utente ha scelto esplicita-
+      // mente (sandbox.modeSet): una scelta esplicita non si ribalta. Annulla
+      // o errore NON la cambiano: resta finché l'utente non scelga diversamente
+      if (!deps.getSetting<boolean>('sandbox.modeSet', false)) {
+        deps.setSetting('sandbox.mode', 'box')
+      }
       if (startFrom === 'ready' && state.phase === 'ready') return state
       running = true
       try {
