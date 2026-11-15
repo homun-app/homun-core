@@ -22,6 +22,10 @@ const fixture = (over: Partial<MigrationInput> = {}): MigrationInput => ({
   modelDefaults: {},
   autoReview: { ...DEFAULT_AUTO_REVIEW },
   approvalsMode: undefined,
+  // MB2: nessuna riga sandbox.mode, nessuna scelta esplicita, nessuna preparazione
+  sandboxMode: undefined,
+  sandboxModeSet: false,
+  boxSetupPhase: null,
   flags: {},
   ...over
 })
@@ -102,6 +106,56 @@ describe('I4.1 — materializeApprovalsMode (il modo nasce da enabled)', () => {
 
   it('la migrazione non scrive MAI never', () => {
     expect(materializeApprovalsMode(fixture())).not.toBe('never')
+  })
+})
+
+// ---- MB2 (fase modalita-box): la migrazione per chi ha GIÀ installato la
+// beta.5 — la guida era arrivata fino in fondo (box.setup ready, o una fase
+// in corsa) ma sandbox.mode non l'aveva scritto nessuno: il computer del bot
+// era pronto e il bot girava sul Mac. La migrazione lo registra, MAI toccando
+// una scelta: né una riga sandbox.mode già presente (anche 'docker' storico),
+// né un sandbox.modeSet esplicito.
+
+describe('MB2 — materializeSandboxMode (la beta.5 col box pronto si apre in box)', () => {
+  it('nessuna riga sandbox.mode + box.setup ready → sandbox.mode = \'box\'', () => {
+    expect(runSettingsMigrations(fixture({ boxSetupPhase: 'ready' })).sandboxMode).toBe('box')
+  })
+
+  it('nessuna riga sandbox.mode + fase IN CORSO (download che girava al momento dell’aggiornamento) → \'box\'', () => {
+    expect(runSettingsMigrations(fixture({ boxSetupPhase: 'downloading' })).sandboxMode).toBe('box')
+    expect(runSettingsMigrations(fixture({ boxSetupPhase: 'awaiting-installer' })).sandboxMode).toBe('box')
+    expect(runSettingsMigrations(fixture({ boxSetupPhase: 'building-image' })).sandboxMode).toBe('box')
+  })
+
+  it('sandbox.mode GIÀ presente NON si tocca, QUALUNQUE valore (anche \'docker\' storico)', () => {
+    expect(runSettingsMigrations(fixture({ sandboxMode: 'docker', boxSetupPhase: 'ready' })).sandboxMode).toBeUndefined()
+    expect(runSettingsMigrations(fixture({ sandboxMode: 'host', boxSetupPhase: 'ready' })).sandboxMode).toBeUndefined()
+    expect(runSettingsMigrations(fixture({ sandboxMode: 'box', boxSetupPhase: 'idle' })).sandboxMode).toBeUndefined()
+  })
+
+  it('sandbox.modeSet vero (scelta esplicita dell’utente) → NON si ribalta', () => {
+    expect(runSettingsMigrations(fixture({ sandboxModeSet: true, boxSetupPhase: 'ready' })).sandboxMode).toBeUndefined()
+  })
+
+  it('box.setup MANCANTE, idle o cancelled → niente (chi non ha preparato resta sul Mac)', () => {
+    expect(runSettingsMigrations(fixture({ boxSetupPhase: null })).sandboxMode).toBeUndefined()
+    expect(runSettingsMigrations(fixture({ boxSetupPhase: 'idle' })).sandboxMode).toBeUndefined()
+    expect(runSettingsMigrations(fixture({ boxSetupPhase: 'cancelled' })).sandboxMode).toBeUndefined()
+  })
+
+  it('box.setup in error → niente: l’errore resta in parole, la scelta la rifà l’utente', () => {
+    expect(runSettingsMigrations(fixture({ boxSetupPhase: 'error' })).sandboxMode).toBeUndefined()
+  })
+
+  it('IDEMPOTENTE: alla seconda corsa (sandbox.mode ormai scritto) non cambia niente', () => {
+    const first = runSettingsMigrations(fixture({ boxSetupPhase: 'ready' }))
+    expect(first.sandboxMode).toBe('box')
+    const second = runSettingsMigrations(fixture({
+      sandboxMode: first.sandboxMode,
+      boxSetupPhase: 'ready',
+      flags: first.flags
+    }))
+    expect(second.sandboxMode).toBeUndefined()
   })
 })
 

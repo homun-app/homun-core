@@ -85,6 +85,10 @@ const ALLOWED_LITERALS: ReadonlyArray<{ file: string; text: string }> = [
   // presente (il FILE di OBV1 lo vede) — deps.log, mai UI
   { file: 'src/daemon/box-setup.ts', text: '[box-setup] kernel già presente: nessun kernel set' },
   { file: 'src/daemon/box-setup.ts', text: "[box-setup] kernel già presente dopo l'errore di kernel set: fase fatta" },
+  // MB2 (fase modalita-box): la riga di LOG della migrazione del setting —
+  // console.log nel runner (migrazione impostazioni), come le righe di LOG
+  // di box-setup qui sopra; MAI nella UI (lì c'è il catalogo)
+  { file: 'src/main/store/settings-migrations.ts', text: 'modalità del computer del bot = ' },
   // messaggio del keychain FINTO dei test (strumento di test, non UI)
   { file: 'src/daemon/keychain.ts', text: 'operazione non supportata dal keychain finto' },
   // nome app localizzato → bundle (parser di open_app, C7)
