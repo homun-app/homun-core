@@ -1021,6 +1021,10 @@ function NoticeRow({ entry, repeat = 1 }: { entry: TranscriptEntry; repeat?: num
   const providers = useStore((s) => s.providers)
   const openBotModel = useStore((s) => s.openBotModel)
   const uiId = (entry.meta?.ui as { id?: string } | undefined)?.id
+  // fase chat-limiti (CL7): la riga della memoria in quarantena — il bottone
+  // apre la sezione Memoria SU QUELLA voce
+  const memoryQuarantined = uiId === 'notice.memoryQuarantined'
+  const openMemoryNote = useStore((s) => s.openMemoryNote)
   // fase use-app (U4): manca l'Accessibilità → il bottone apre la pagina
   // giusta delle Impostazioni di sistema
   const accessibility = uiId === 'notice.computerAccessibility'
@@ -1028,6 +1032,24 @@ function NoticeRow({ entry, repeat = 1 }: { entry: TranscriptEntry; repeat?: num
   // un modello» ha la via d'uscita — stesso bottone «Scegli un modello»
   const withAction = accessibility || uiId === 'notice.modelError' || uiId === 'notice.modelNotResponding' || uiId === 'notice.configureProviderFirst'
   const fallback = uiId === 'notice.modelFallback' || uiId === 'notice.modelFallbackRoute' || uiId === 'notice.modelRouteCooled'
+  if (memoryQuarantined) {
+    const memoryId = String((entry.meta as { memoryId?: unknown } | undefined)?.memoryId ?? '')
+    return (
+      <div className="flex items-center gap-3 rounded-[14px] bg-muted/70 px-4 py-2.5 text-sm text-foreground">
+        <span className="min-w-0 flex-1">
+          {uiTextOf(entry)}
+          {repeat > 1 && <RepeatMark repeat={repeat} />}
+        </span>
+        <button
+          className="shrink-0 rounded-full bg-card px-3 py-1.5 text-xs text-foreground transition hover:ring-1 hover:ring-foreground/20"
+          data-testid="memory-quarantined-open"
+          onClick={() => openMemoryNote(memoryId)}
+        >
+          <Trans>Apri Memoria</Trans>
+        </button>
+      </div>
+    )
+  }
   if (needModel) {
     return (
       <div className="flex items-center gap-3 rounded-[14px] bg-muted/70 px-4 py-2.5 text-sm text-foreground">

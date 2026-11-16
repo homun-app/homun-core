@@ -74,6 +74,10 @@ export const UI = {
   modelError: msg({ id: 'notice.modelError', message: 'Errore dal modello: {message}' }),
   modelEmpty: msg({ id: 'notice.modelEmpty', message: 'Il modello non ha prodotto risposta (vuota).' }),
   toolLoop: msg({ id: 'notice.toolLoop', message: 'Turno interrotto: la stessa identica chiamata si ripete (loop).' }),
+  // fase chat-limiti (CL7): la memoria nata da contenuto esterno aspetta la
+  // conferma dell'utente — lo dice l'APP sotto il turno, col bottone che
+  // apre la sezione Memoria su quella voce
+  memoryQuarantined: msg({ id: 'notice.memoryQuarantined', message: 'Una cosa da ricordare aspetta la tua conferma.' }),
   taskCancelled: msg({ id: 'notice.taskCancelled', message: 'Task {id} annullato: esecuzione saltata.' }),
   approvalExpired: msg({ id: 'notice.approvalExpired', message: 'Approvazione scaduta.' }),
   wakeNudge: msg({ id: 'notice.wakeNudge', message: 'Sollecito di consegna al padre (wake_parent).' }),

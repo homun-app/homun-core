@@ -43,7 +43,7 @@ import { systemPrompt, secondaryPrompts, mainAgentSection, withLanguage, ROUTINE
 // fase use-app (U1/U4): i rifiuti del loop per Homun stesso e per il tetto
 // degli errori di Accessibilità
 import { KEYBOARD_MOUSE_ACTIONS, ACCESSIBILITY_RESULT, HOMUN_SELF_RESULT, isHomunAppName } from '../computeruse'
-import { toolDefs, executeTool } from './tools'
+import { toolDefs, executeTool, quarantinedMemoryNotice } from './tools'
 import * as permissions from './permissions'
 // fase 16c (C1/C3.3): i provider si leggono dal modulo providers (vista del
 // daemon, chiavi in memoria) — MAI dallo store grezzo, che non ha la chiave
@@ -1567,13 +1567,19 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     let mcpToolDefs: import('./llm').ToolDef[] = []
     let mcpGroupApps: Record<string, string[]> = {}
     try {
-      const { activeTools, mcpGroupAppsForAgent } = await import('../mcp')
+      const { activeTools } = await import('../mcp')
       mcpToolDefs = await activeTools(agentId)
-      // fase chat-limiti (CL6): le app collegate per gruppo mcp — find_tools
-      // col NOME dell'app trova i suoi strumenti
-      mcpGroupApps = await mcpGroupAppsForAgent(mcpToolDefs)
     } catch {
       // MCP non disponibile: prosegue coi tool base
+    }
+    try {
+      // fase chat-limiti (CL6): le app collegate per gruppo mcp — find_tools
+      // col NOME dell'app trova i suoi strumenti (import a parte: un modulo
+      // che non la esporta non deve togliere i tool del turno)
+      const { mcpGroupAppsForAgent } = await import('../mcp')
+      mcpGroupApps = await mcpGroupAppsForAgent(mcpToolDefs)
+    } catch {
+      // niente app collegate note: l'indice di find_tools resta com'era
     }
     // B2 (fase beta.4): il turno di presentazione usa SOLO la domanda e il
     // proprio profilo (come il trigger «created» di Rakazo): niente MCP
@@ -4797,6 +4803,17 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             }
           })
           emit({ type: 'entries', agentId, entries: [res] })
+          // fase chat-limiti (CL7): una memoria nata in quarantena la dice
+          // L'APP — riga di sistema sotto il turno col bottone che apre la
+          // sezione Memoria su quella voce (il result lo chiede al modello,
+          // ma il modello se lo dimenticava: la prova della beta.5)
+          {
+            const q = quarantinedMemoryNotice(meta)
+            if (q) {
+              const qEntry = appendEntry(uiSystemEntry(agentId, 'notice', q.ui, { memoryId: q.memoryId }))
+              emit({ type: 'entries', agentId, entries: [qEntry] })
+            }
+          }
           // fase 14 (punti 2-3): la card del documento/grafico salvato in
           // libreria — stessa destinazione dei messaggi del turno, col bottone
           // Apri; il documento NON si incolla in chat

@@ -1036,6 +1036,10 @@ msgstr "Apri la finestra di Homun per autorizzare"
 msgid "Apri lo schermo"
 msgstr "Apri lo schermo"
 
+#: src/renderer/src/components/Chat.tsx
+msgid "Apri Memoria"
+msgstr "Apri Memoria"
+
 #: src/renderer/src/components/Settings.tsx
 msgid "Apri nel pannello del bot"
 msgstr "Apri nel pannello del bot"
@@ -7180,6 +7184,11 @@ msgstr "Un modello controlla ogni azione: fa passare quello che serve a ciò che
 #: src/shared/ui-messages.ts
 msgid "onboarding.focusEverything"
 msgstr "Un po’ di tutto"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "notice.memoryQuarantined"
+msgstr "Una cosa da ricordare aspetta la tua conferma."
 
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 msgid "Una di queste regole vince sempre sulle altre: l’azione diventa una card."

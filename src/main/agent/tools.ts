@@ -3,6 +3,9 @@ import type { ToolDef } from './llm'
 import * as sandbox from '../sandbox'
 import { resolveSecretRefs } from './secrets'
 import { formatTaskDone } from '../../shared/agent-message'
+import { ui } from '../../shared/ui-text'
+import { UI } from '../../shared/ui-messages'
+import type { UiText } from '../../shared/types'
 import { MAX_GROUP_MEMBERS, coordinatorNowText } from './group-turns'
 import { WAKE_SUMMARY_MAX_CHARS } from './subagents'
 // fase memoria-engramma (M3): gli strumenti di memoria girano sul motore
@@ -53,6 +56,17 @@ export const NO_MEMORY_FOUND_PRIVATE = 'No memory found for this search. Past co
  */
 export function quarantinedMemoryResult(shortId: string, tier: string, scope: string): string {
   return `Memory saved pending the user's confirmation (id ${shortId}, tier ${tier}, scope ${scope}): it came from untrusted content and will not be recalled until the user confirms it.\nTell the user it awaits their confirmation in the Memory section: do not say it is remembered.`
+}
+
+/**
+ * Fase chat-limiti (CL7): una memoria nata in quarantena la dice L'APP, non
+ * il modello (che spesso se lo dimenticava): la riga di sistema sotto il
+ * turno, col bottone che apre la sezione Memoria su quella voce. Puro: dal
+ * meta del result di update_memory; null per una scrittura normale.
+ */
+export function quarantinedMemoryNotice(meta: Record<string, unknown>): { ui: UiText; memoryId: string } | null {
+  if (meta?.quarantined !== true || typeof meta?.memoryId !== 'string' || !meta.memoryId) return null
+  return { ui: ui(UI.memoryQuarantined), memoryId: meta.memoryId }
 }
 
 /** Fase memoria-engramma (M5): il testo VERO del result di search_history a vuoto. */

@@ -63,6 +63,23 @@ export function MemoryPanel({ agentId, onClose }: { agentId: string; onClose: ()
   }
   useEffect(reload, [agentId, owner, tier, status])
 
+  // fase chat-limiti (CL7): aperto SU UNA nota (la riga di sistema della
+  // quarantena) → filtro «in attesa di conferma» e la nota in evidenza
+  const memoryFocusId = useStore((s) => s.memoryFocusId)
+  useEffect(() => {
+    if (memoryFocusId) setStatus('quarantined')
+  }, [memoryFocusId])
+  useEffect(() => {
+    if (!memoryFocusId || loading || !notes.length) return
+    const el =
+      document.querySelector(`[data-memory-id="${CSS.escape(memoryFocusId)}"]`) ??
+      [...document.querySelectorAll('[data-memory-id]')].find((n) => {
+        const id = n.getAttribute('data-memory-id') ?? ''
+        return id.endsWith(memoryFocusId) || memoryFocusId.endsWith(id)
+      })
+    el?.scrollIntoView({ block: 'center' })
+  }, [memoryFocusId, loading, notes])
+
   // quando il download del modello finisce (bene o male), si rilesce lo stato
   useEffect(() => {
     if (memoryProgress?.phase === 'model-pull' && memoryProgress.finished) reloadOverview()
@@ -259,7 +276,15 @@ export function MemoryPanel({ agentId, onClose }: { agentId: string; onClose: ()
           )}
           <div className="mt-2 space-y-2">
             {notes.map((m) => (
-              <div key={m.id} className="rounded-lg border border-border bg-muted px-3 py-2">
+              <div
+                key={m.id}
+                data-memory-id={m.id}
+                className={`rounded-lg border border-border bg-muted px-3 py-2 ${
+                  memoryFocusId && (m.id === memoryFocusId || m.id.endsWith(memoryFocusId) || memoryFocusId.endsWith(m.id))
+                    ? 'ring-1 ring-primary/60'
+                    : ''
+                }`}
+              >
                 <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
                   <span className={`rounded px-1.5 py-0.5 ${m.owner === 'user' ? 'bg-primary/15 text-primary' : 'bg-muted text-foreground'}`}>
                     {m.owner === 'user' ? <Trans>condivisa</Trans> : <Trans>agente</Trans>}

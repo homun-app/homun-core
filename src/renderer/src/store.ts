@@ -190,6 +190,8 @@ interface Store {
   previews: Record<string, SidebarPreview>
   /** fase 16 (U5): pannelli Memoria e Skill della vista dell'agente (anche dal pannello destro) */
   memoryOpen: boolean
+  /** fase chat-limiti (CL7): la nota su cui aprire il pannello Memoria (riga di sistema della quarantena) */
+  memoryFocusId: string | null
   /** fase memoria-engramma (M6): l'avanzamento dei lavori della memoria */
   memoryProgress: { phase: 'story-backfill' | 'model-pull'; done: number; total: number; finished?: boolean; error?: string } | null
   skillsOpen: boolean
@@ -354,6 +356,8 @@ interface Store {
   setTyping(agentId: string | null): void
   /** fase 16 (U5): apre/chiude i pannelli Memoria e Skill */
   setMemoryOpen(v: boolean): void
+  /** fase chat-limiti (CL7): apre la sezione Memoria su UNA nota (quella in quarantena) */
+  openMemoryNote(id: string): void
   setSkillsOpen(v: boolean): void
   /**
    * Fase 16b correzioni 2 (Q1): la larghezza della finestra (listener resize
@@ -431,6 +435,7 @@ export const useStore = create<Store>((set, get) => ({
   nowTick: 0,
   previews: {},
   memoryOpen: false,
+  memoryFocusId: null,
   memoryProgress: null,
   skillsOpen: false,
   skillsFilterAgent: null,
@@ -1137,6 +1142,14 @@ export const useStore = create<Store>((set, get) => ({
 
   setMemoryOpen(v) {
     set({ memoryOpen: v })
+    // fase chat-limiti (CL7): il pannello si apre senza focus se si chiude
+    if (!v) set({ memoryFocusId: null })
+  },
+
+  // fase chat-limiti (CL7): apre la sezione Memoria su UNA voce (quella in
+  // quarantena della riga di sistema sotto il turno)
+  openMemoryNote(id) {
+    set({ memoryOpen: true, memoryFocusId: id })
   },
 
   setSkillsOpen(v) {

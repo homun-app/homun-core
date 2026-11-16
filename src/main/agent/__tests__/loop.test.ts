@@ -760,6 +760,8 @@ vi.mock('../../mcp', () => ({
   activeServersForAgent: async () => [],
   listServers: () => [],
   McpNeedsReconnectError: class extends Error {},
+  // fase chat-limiti (CL6): nessuna app collegata nei test del loop
+  mcpGroupAppsForAgent: async () => ({}),
   callTool: async () => {
     h.mcp.calls++
     return 'email inviata'
