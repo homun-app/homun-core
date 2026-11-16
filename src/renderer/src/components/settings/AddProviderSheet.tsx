@@ -10,10 +10,11 @@ import { useEffect, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
-import { ChevronLeft, Search } from 'lucide-react'
+import { ChevronLeft, Search , Server } from 'lucide-react'
 import { api } from '../../store'
 import type { ProviderKind, ProviderPublic } from '../../../../shared/types'
 import { providerLogoUrl, providerLogoSvg } from '../../lib/provider-logos'
+import { suggestedNameOf } from '../../lib/use-provider-setup'
 import { CONNECTABLE_KINDS } from '../../lib/model-select'
 // i nomi dei tipi e la logica di prova/salvataggio: hook condiviso (G4), usato
 // anche dalla guida del primo avvio
@@ -36,6 +37,14 @@ export function ProviderMark({ kind, name, size = 'md' }: { kind: ProviderKind |
   const url = providerLogoUrl(kind as ProviderKind)
   const dim = size === 'md' ? 'size-11 text-base' : 'size-7 text-xs'
   const mono = providerLogoSvg(kind as ProviderKind)
+  // U6: il compatibile e il custom non sono un'azienda: icona GENERICA Server, monocroma
+  if (kind === 'openai-compatible' || kind === 'custom') {
+    return (
+      <span className={`${dim} grid shrink-0 place-items-center rounded-[12px] bg-card text-foreground`} title={name}>
+        <Server className={size === 'md' ? 'size-5' : 'size-4'} aria-hidden="true" />
+      </span>
+    )
+  }
   if (mono) {
     return (
       <span
@@ -79,6 +88,8 @@ export function AddProviderSheet({ initialKind, onClose, onSaved }: AddProviderS
   const setup = useProviderSetup(kind, { autoProbe: true })
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [serverName, setServerName] = useState('')
+  // U6: il modello scritto a mano quando il servizio non elenca i suoi
+  const [manualModel, setManualModel] = useState('')
   const { apiKey, baseUrl, probe, busy, group, effectiveBaseUrl, setApiKey, setBaseUrl, reset } = setup
 
   // il tipo già scelto da «Collega»: la scansione del Mac parte DA SOLA
@@ -257,7 +268,7 @@ export function AddProviderSheet({ initialKind, onClose, onSaved }: AddProviderS
               <input
                 className="w-full rounded-[12px] bg-muted px-3 py-2 text-sm outline-none"
                 placeholder={t`Nome (es. Il mio gateway)`}
-                value={serverName}
+                value={serverName || suggestedNameOf(effectiveBaseUrl)}
                 onChange={(e) => setServerName(e.target.value)}
               />
             )}
@@ -274,7 +285,9 @@ export function AddProviderSheet({ initialKind, onClose, onSaved }: AddProviderS
                 />
               )}
             </div>
-            <label className="block text-[13px] text-muted-foreground" htmlFor="sandbot-addprovider-key"><Trans>Incolla la chiave</Trans></label>
+            <label className="block text-[13px] text-muted-foreground" htmlFor="sandbot-addprovider-key">
+              {group === 'server' ? <Trans>La chiave (lasciala vuota se il server non la chiede)</Trans> : <Trans>Incolla la chiave</Trans>}
+            </label>
             <input
               id="sandbot-addprovider-key"
               className="h-10 w-full rounded-[12px] bg-muted px-3 py-2 text-sm outline-none"
@@ -284,8 +297,21 @@ export function AddProviderSheet({ initialKind, onClose, onSaved }: AddProviderS
               onChange={(e) => setApiKey(e.target.value)}
             />
             {probe.probing && <p className="text-[13px] text-muted-foreground"><Trans>Provo la chiave…</Trans></p>}
-            {probe.ok === true && (
+            {probe.ok === true && probe.models.length > 0 && (
               <p className="text-[14px] text-chart-2"><Trans>✓ Funziona · {probe.models.length} modelli disponibili</Trans></p>
+            )}
+            {probe.ok === true && probe.models.length === 0 && (
+              /* U6: il servizio è raggiunto ma non elenca i modelli: si scrive a mano */
+              <label className="block text-[13px] text-muted-foreground">
+                <Trans>Il servizio non elenca i modelli: scrivi il nome del modello</Trans>
+                <input
+                  data-testid="sheet-manual-model"
+                  className="mt-1 h-10 w-full rounded-[12px] bg-muted px-3 py-2 text-sm text-foreground outline-none"
+                  placeholder={t`es. llama-3.2-3b-instruct`}
+                  value={manualModel}
+                  onChange={(e) => setManualModel(e.target.value)}
+                />
+              </label>
             )}
             {probe.ok === false && <p className="text-[14px] text-destructive">{probeErrorText(probe.error ?? 'error')}</p>}
             <p className="text-xs text-muted-foreground"><Trans>La chiave resta nel Portachiavi del Mac.</Trans></p>

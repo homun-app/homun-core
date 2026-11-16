@@ -18,7 +18,8 @@ import { uiText, uiError } from '../ui-language'
 import { UI } from '../../shared/ui-messages'
 import type { ProviderConfig, ProviderKind, ProviderPublic, ProviderSaveInput, ModelInfo, SealedKey, MainModel } from '../../shared/types'
 export type { ProviderSaveInput } from '../../shared/types'
-import { liveModelsUrl, liveModelsHeaders, ollamaCapabilities, setOllamaCapabilities, readOllamaCapabilities, parseOllamaShow, isLocalKind, KNOWN_BASE_URLS } from './live-models'
+import { liveModelsUrl, liveModelsHeaders, ollamaCapabilities, setOllamaCapabilities, readOllamaCapabilities, parseOllamaShow, KNOWN_BASE_URLS } from './live-models'
+import { isLocalProvider } from '../../shared/network-host'
 import { sealProviderKey, openProviderKey, keyHintOf, isSealedKey, type ProviderKeyDeps } from './provider-keys'
 import { getProvidersKey, type SecurityRunner } from '../../daemon/keychain'
 import { isMasterKeyUnavailableError } from '../../daemon/master-keys'
@@ -253,7 +254,7 @@ function liveInfo(p: ProviderConfig, id: string, label?: string): ModelInfo {
     thinkingLevels: [],
     cost: null,
     costSource: null,
-    local: isLocalKind(p.kind)
+    local: isLocalProvider(p)
   }
 }
 
@@ -378,6 +379,13 @@ export async function probeProvider(config: { kind: ProviderKind; baseUrl: strin
     const models = await listProviderModels(probe)
     return { ok: true, models: models.map((m) => m.id) }
   } catch (e) {
+    // U6 (fase prima-release): 404 su /models = il server è STATO raggiunto
+    // ma l'elenco non c'è (llama.cpp senza /v1/models, vLLM minimal…): la
+    // prova ARRIVA e l'elenco è vuoto — il modello si scrive a mano. Gli
+    // errori di autenticazione e di rete restano errori.
+    const status = (e as { status?: unknown }).status
+    const msg = e instanceof Error ? e.message : String(e)
+    if (status === 404 || /\b404\b/.test(msg)) return { ok: true, models: [] }
     return { ok: false, error: probeProviderError(e) }
   }
 }

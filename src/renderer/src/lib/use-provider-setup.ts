@@ -8,7 +8,8 @@
 import { useRef, useState } from 'react'
 import { api, useStore } from '../store'
 import type { ProviderKind } from '../../../shared/types'
-import { KNOWN_BASE_URLS } from '../../../main/agent/live-models'
+import { KNOWN_BASE_URLS, openAiCompatBase } from '../../../main/agent/live-models'
+import { hostOfBaseUrl } from '../../../shared/network-host'
 import { nextModelProbe, EMPTY_MODEL_PROBE, type ModelProbeState } from './model-probe'
 import { CONNECTABLE_KINDS } from './model-select'
 
@@ -25,6 +26,21 @@ export const KIND_LABELS: Record<string, string> = {
   deepseek: 'DeepSeek',
   groq: 'Groq',
   'openai-compatible': 'OpenAI-compatible'
+}
+
+/** U6 (fase prima-release): il Nome suggerito per un server compatibile — l'host dell'indirizzo. */
+export function suggestedNameOf(baseUrl: string): string {
+  return hostOfBaseUrl(baseUrl.trim()) ?? ''
+}
+
+/**
+ * U6: «Prova» si abilita col SOLO indirizzo quando il tipo lo chiede (i
+ * server locali più comuni non hanno chiave); per i tipi a chiave resta la
+ * chiave. PURA, con i test.
+ */
+export function probeButtonDisabled(input: { probing: boolean; apiKey: string; baseUrl: string; needsAddress: boolean }): boolean {
+  if (input.probing) return true
+  return input.needsAddress ? !input.baseUrl.trim() : !input.apiKey.trim()
 }
 
 /** Il gruppo del foglio di collegamento: sul Mac / con chiave / altro server. */
@@ -49,6 +65,11 @@ export interface UseProviderSetupOpts {
 }
 
 export interface ProviderSetup {
+  /** U6: il Nome del provider (precompilato con l'host dell'indirizzo) */
+  name: string
+  setName(v: string): void
+  /** U6: il Nome suggerito dall'indirizzo (cambia finché il campo non è stato ritoccato) */
+  suggestedName: string
   apiKey: string
   /** scrive la chiave (e con autoProbe rilancia la prova) */
   setApiKey(v: string): void
@@ -78,6 +99,7 @@ export interface ProviderSetup {
 export function useProviderSetup(kind: ProviderKind | null, opts: UseProviderSetupOpts = {}): ProviderSetup {
   const { autoProbe = false, debounceMs = 400 } = opts
   const refreshProviders = useStore((s) => s.refreshProviders)
+  const [name, setNameState] = useState('')
   const [apiKey, setApiKeyState] = useState('')
   const [baseUrl, setBaseUrlState] = useState('')
   const [busy, setBusy] = useState(false)
@@ -89,7 +111,8 @@ export function useProviderSetup(kind: ProviderKind | null, opts: UseProviderSet
 
   /** La prova con la revisione che scarta le risposte vecchie. */
   const runProbe = (key: string, url: string): void => {
-    if (!url.trim() || !key.trim()) return
+    // U6: la chiave è FACOLTATIVA — basta l'indirizzo (i server locali non la chiedono)
+    if (!url.trim()) return
     const revision = ++probeRevision.current
     setProbe((s) => nextModelProbe(s, { type: 'start', revision }, probeRevision.current))
     void api.probeProvider({ kind: kind ?? 'openai-compatible', baseUrl: url.trim(), ...(key.trim() ? { apiKey: key.trim() } : {}) })
@@ -116,11 +139,16 @@ export function useProviderSetup(kind: ProviderKind | null, opts: UseProviderSet
     if (autoProbe) scheduleProbe(v, effectiveBaseUrl)
     else setProbe(EMPTY_MODEL_PROBE)
   }
+  const suggestedName = suggestedNameOf(effectiveBaseUrl)
   const setBaseUrl = (v: string): void => {
     setBaseUrlState(v)
+    // U6: il Nome precompilato segue l'indirizzo finché l'utente non l'ha ritoccato
+    const nextSuggestion = suggestedNameOf(effectiveBaseUrlOf(kind, v))
+    setNameState((cur) => (cur === '' || cur === suggestedName ? nextSuggestion : cur))
     if (autoProbe) scheduleProbe(apiKey, effectiveBaseUrlOf(kind, v))
     else setProbe(EMPTY_MODEL_PROBE)
   }
+  const setName = (v: string): void => setNameState(v)
   const probeNow = (): void => runProbe(apiKey, effectiveBaseUrl)
   const reset = (): void => {
     if (probeTimer.current) clearTimeout(probeTimer.current)
@@ -134,13 +162,13 @@ export function useProviderSetup(kind: ProviderKind | null, opts: UseProviderSet
     setBusy(true)
     try {
       const isServer = group === 'server'
-      const name = over?.name ?? (isServer ? 'Server' : KIND_LABELS[kind] ?? String(kind))
+      const savedName = over?.name ?? (name.trim() || suggestedName || (isServer ? 'Server' : KIND_LABELS[kind] ?? String(kind)))
       const id = `${isServer ? 'custom' : kind}_${Date.now()}`
       const url = (over?.baseUrl ?? effectiveBaseUrl).trim()
       const key = (over?.apiKey ?? apiKey).trim()
       await api.saveProvider({
         id,
-        name,
+        name: savedName,
         kind: isServer ? 'openai-compatible' : kind,
         baseUrl: url,
         enabled: true,
@@ -155,5 +183,5 @@ export function useProviderSetup(kind: ProviderKind | null, opts: UseProviderSet
     }
   }
 
-  return { apiKey, setApiKey, baseUrl, setBaseUrl, probe, busy, group, effectiveBaseUrl, probeNow, reset, save }
+  return { name, setName, suggestedName, apiKey, setApiKey, baseUrl, setBaseUrl, probe, busy, group, effectiveBaseUrl, probeNow, reset, save }
 }

@@ -112,7 +112,8 @@ import { coolDown, isCooled, cooledUntil, markHealthy } from './route-health'
 // fase 18b (K3): la lettura delle capability Ollama prima di calcolare la visione
 // fase 18b (K7): i dati noti di un anello per la regola pura routeIncompatibility
 import { modelCapabilities, routeModelCaps } from './llm-pi'
-import { readOllamaCapabilities, isLocalKind } from './live-models'
+import { readOllamaCapabilities } from './live-models'
+import { isLocalProvider } from '../../shared/network-host'
 import type { ThinkingSetting } from '../../shared/types'
 // fase 10: gruppi (store) e regole del turno di gruppo (puro); correzioni C1-C3;
 // correzione E2 (terzo giro): il recupero dei turni di gruppo finiti con la
@@ -2385,7 +2386,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       // Da qui in poi srotolamento facciate, coercizione, argGuard,
       // attivazione per nome e permessi sono quelli di sempre: nessuna
       // scorciatoia. Il blocco NON finisce mai nel testo consegnato.
-      if (!final.toolCalls?.length && isLocalKind(activeProvider.kind)) {
+      if (!final.toolCalls?.length && isLocalProvider(activeProvider)) {
         const rec = parseTextToolCalls(final.text, knownCatalogNames)
         if (rec.calls.length) {
           final = {

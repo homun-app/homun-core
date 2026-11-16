@@ -215,6 +215,21 @@ export function hostOfBaseUrl(baseUrl: string): string | null {
  * su localhost, quindi il risultato non cambia; un openai-compatible su un
  * server remoto NON è «gratis e privato»).
  */
+/**
+ * U6 (fase prima-release): il provider è LOCALE? Per openai-compatible e
+ * custom lo decide l'INDIRIZZO — loopback, rete privata o .local — non il
+ * tipo: un gateway in rete (Together, Fireworks, un server aziendale) non è
+ * locale, altrimenti sbagliano i costi, la privacy e il comportamento del
+ * loop. Ollama, lmstudio e homun-local restano locali per tipo.
+ */
+export function isLocalProvider(p: { kind?: string; baseUrl?: string | null }): boolean {
+  const kind = String(p.kind ?? '')
+  if (kind === 'ollama' || kind === 'lmstudio' || kind === 'homun-local') return true
+  if (kind !== 'openai-compatible' && kind !== 'custom') return false
+  const host = hostOfBaseUrl(String(p.baseUrl ?? ''))
+  return host !== null && isPrivateNetworkHost(host)
+}
+
 export function providerPlace(p: { baseUrl?: string | null; discovered?: boolean; kind?: string }): ProviderPlace {
   void p.discovered
   void p.kind

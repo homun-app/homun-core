@@ -360,3 +360,50 @@ describe('R2.3 — providers:probe con { providerId } usa la chiave già salvata
     expect(ghost.error).toBe('invalid-key')
   })
 })
+
+
+// ---- U6 (fase prima-release): la chiave è FACOLTATIVA e /models può mancare ----
+// un secondo server finto che NON controlla l'Authorization (come llama.cpp
+// server, vLLM, LM Studio, LocalAI di default) e sa anche NON avere /models
+describe("U6 — providers:probe senza chiave, con /models presente e assente (server finto su 127.0.0.1)", () => {
+  let free: Server
+  let freePort = 0
+  beforeAll(async () => {
+    free = createServer((req, res) => {
+      const url = new URL(req.url ?? '/', 'http://127.0.0.1')
+      // il percorso «senza /models»: il server c'è, l'elenco no
+      if (url.pathname.startsWith('/nolist/')) {
+        res.writeHead(404, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ error: 'not found' }))
+        return
+      }
+      // NESSUN controllo della chiave: il server locale non la chiede
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ data: [{ id: 'llama-manual' }, { id: 'qwen-mini' }] }))
+    })
+    await new Promise<void>((r) => free.listen(0, '127.0.0.1', r))
+    freePort = (free.address() as { port: number }).port
+  })
+  afterAll(async () => {
+    free.closeAllConnections?.()
+    await new Promise<void>((r) => free.close(() => r()))
+  })
+
+  it('SENZA chiave contro un server che non la chiede: ok con i modelli', async () => {
+    const r = await (api['providers:probe']!([{ kind: 'openai-compatible', baseUrl: `http://127.0.0.1:${freePort}/v1` }]) as Promise<ProviderProbeResult>)
+    expect(r.ok).toBe(true)
+    expect(r.models).toEqual(['llama-manual', 'qwen-mini'])
+  })
+
+  it('il server c\'è ma /models MANCA (404): la prova ARRIVA e torna ok con l\'elenco VUOTO — il modello si scrive a mano', async () => {
+    const r = await (api['providers:probe']!([{ kind: 'openai-compatible', baseUrl: `http://127.0.0.1:${freePort}/nolist/v1` }]) as Promise<ProviderProbeResult>)
+    expect(r.ok).toBe(true)
+    expect(r.models).toEqual([])
+  })
+
+  it('un 401 senza chiave resta «chiave non valida», non «elenco vuoto»', async () => {
+    const r = await (api['providers:probe']!([{ kind: 'openai-compatible', baseUrl: `http://127.0.0.1:${port}/v1` }]) as Promise<ProviderProbeResult>)
+    expect(r.ok).toBe(false)
+    expect(r.error).toBe('invalid-key')
+  })
+})

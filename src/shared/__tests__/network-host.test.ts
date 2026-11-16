@@ -4,7 +4,7 @@
 // (rete), 169.254.169.254 (internet, MAI rete), api.example.com (internet).
 import { describe, expect, it } from 'vitest'
 import {
-  providerPlace, isLoopbackHost, isPrivateNetworkHost, isLoopbackAddress,
+  providerPlace, isLocalProvider, isLoopbackHost, isPrivateNetworkHost, isLoopbackAddress,
   isCloudMetadataAddress, hostOfBaseUrl
 } from '../network-host'
 
@@ -96,5 +96,34 @@ describe('R5.1 — providerPlace (decide l\'HOST, non il kind né discovered)', 
     expect(providerPlace({ baseUrl: '127.0.0.1:11434' })).toBe('mac')
     expect(providerPlace({ baseUrl: '' })).toBe('internet')
     expect(providerPlace({ baseUrl: '---' })).toBe('internet')
+  })
+})
+
+
+describe("U6 (fase prima-release): isLocalProvider — locale lo decide l'INDIRIZZO, non il tipo", () => {
+  it('openai-compatible su loopback, rete privata o .local → locale', () => {
+    for (const baseUrl of ['http://127.0.0.1:8000/v1', 'http://localhost:8000/v1', 'http://192.168.1.10:8000/v1', 'http://10.0.0.5:8000/v1', 'http://nas.local:8000/v1']) {
+      expect(isLocalProvider({ kind: 'openai-compatible', baseUrl }), baseUrl).toBe(true)
+    }
+  })
+
+  it('IPv6 ::1 → locale', () => {
+    expect(isLocalProvider({ kind: 'openai-compatible', baseUrl: 'http://[::1]:8000/v1' })).toBe(true)
+  })
+
+  it('openai-compatible su un servizio in RETE (api.together.xyz) → NON locale', () => {
+    expect(isLocalProvider({ kind: 'openai-compatible', baseUrl: 'https://api.together.xyz/v1' })).toBe(false)
+    expect(isLocalProvider({ kind: 'custom', baseUrl: 'https://api.fireworks.ai/v1' })).toBe(false)
+  })
+
+  it('ollama, lmstudio e homun-local restano locali PER TIPO', () => {
+    expect(isLocalProvider({ kind: 'ollama', baseUrl: 'http://localhost:11434' })).toBe(true)
+    expect(isLocalProvider({ kind: 'lmstudio', baseUrl: '' })).toBe(true)
+    expect(isLocalProvider({ kind: 'homun-local' })).toBe(true)
+  })
+
+  it('i kind col marchio NON sono locali checché dica l\'indirizzo', () => {
+    expect(isLocalProvider({ kind: 'anthropic', baseUrl: 'http://127.0.0.1:9' })).toBe(false)
+    expect(isLocalProvider({ kind: 'openai', baseUrl: 'http://127.0.0.1:9' })).toBe(false)
   })
 })

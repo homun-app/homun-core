@@ -14,11 +14,12 @@ import { useLingui, Trans } from '@lingui/react/macro'
 import { MoreHorizontal, Cpu } from 'lucide-react'
 import { api, useStore } from '../store'
 import type { ModelInfo, OnboardingProviderPath, ProviderKind, ProviderPublic } from '../../../shared/types'
-import { KIND_LABELS, useProviderSetup } from '../lib/use-provider-setup'
+import { KIND_LABELS, useProviderSetup, probeButtonDisabled, suggestedNameOf } from '../lib/use-provider-setup'
 import { guideProviderCards, GUIDE_OTHER_KINDS, type GuideProviderCardId } from '../lib/guide-provider-cards'
 import { providerKeyUrl } from '../lib/provider-key-urls'
 import { recommendedModel } from '../lib/recommended-model'
 import { guideModelPills } from '../lib/guide-model-pills'
+import { openAiCompatBase } from '../../../main/agent/live-models'
 import { runLocalModelPolling } from '../lib/guide-local-model'
 import { ModelPicker } from './ui/ModelPicker'
 import { ProviderMark } from './settings/AddProviderSheet'
@@ -133,6 +134,9 @@ export function GuideModelStep({ paths, onFactsChange, onReadyChange, registerCo
   // la prova/salvataggio della chiave: l'hook condiviso col foglio Impostazioni
   const setup = useProviderSetup(panel !== 'grid' && panel !== 'others' && panel !== 'ollama' && panel !== 'local' ? panel : null)
   const [selectedModel, setSelectedModel] = useState<string | null>(null)
+  // U6: il campo «Nome del modello» scritto a mano (aperto da «Altro…», o
+  // obbligatorio quando /models manca o è vuoto)
+  const [manualModelOpen, setManualModelOpen] = useState(false)
   // Ollama: il provider scoperto e i suoi modelli (con i tool)
   const [ollamaModels, setOllamaModels] = useState<ModelInfo[] | null>(null)
   const [ollamaModel, setOllamaModel] = useState<string | null>(null)
@@ -343,20 +347,37 @@ export function GuideModelStep({ paths, onFactsChange, onReadyChange, registerCo
         </button>
         <div className="flex flex-col gap-3 rounded-[18px] bg-card p-[18px]">
           {needsAddress && (
-            <label className="flex flex-col gap-2 text-sm font-semibold">
-              {t`L'indirizzo del servizio`}
-              <input
-                data-testid="guide-baseurl-input"
-                className="rounded-[12px] bg-background px-3.5 py-3 text-base font-medium text-foreground outline-none"
-                placeholder={t`Indirizzo (es. http://127.0.0.1:8000/v1)`}
-                value={setup.baseUrl}
-                onChange={(e) => setup.setBaseUrl(e.target.value)}
-              />
-            </label>
+            <>
+              {/* U6: il Nome — precompilato con l'host dell'indirizzo, modificabile */}
+              <label className="flex flex-col gap-2 text-sm font-semibold">
+                {t`Il nome del servizio`}
+                <input
+                  data-testid="guide-name-input"
+                  className="rounded-[12px] bg-background px-3.5 py-3 text-base font-medium text-foreground outline-none"
+                  placeholder={setup.suggestedName || t`es. Il mio gateway`}
+                  value={setup.name}
+                  onChange={(e) => setup.setName(e.target.value)}
+                />
+              </label>
+              <label className="flex flex-col gap-2 text-sm font-semibold">
+                {t`L'indirizzo del servizio`}
+                <input
+                  data-testid="guide-baseurl-input"
+                  className="rounded-[12px] bg-background px-3.5 py-3 text-base font-medium text-foreground outline-none"
+                  placeholder={t`Indirizzo (es. http://127.0.0.1:8000/v1)`}
+                  value={setup.baseUrl}
+                  onChange={(e) => setup.setBaseUrl(e.target.value)}
+                />
+                {/* U6: l'URL che la prova chiama DAVVERO — si vede se manca /v1, niente correzioni silenziose */}
+                <span className="text-xs font-normal text-muted-foreground" data-testid="guide-probe-url">
+                  <Trans>La prova chiama {openAiCompatBase({ baseUrl: setup.baseUrl || 'http://…' }) + '/models'}</Trans>
+                </span>
+              </label>
+            </>
           )}
           <label className="flex flex-col gap-2 text-sm font-semibold">
             <span className="flex items-center justify-between gap-3">
-              {t`La chiave di ${providerLabel}`}
+              {needsAddress ? t`La chiave (facoltativa)` : t`La chiave di ${providerLabel}`}
               {keyUrl && (
                 <a href={keyUrl} target="_blank" rel="noreferrer" className="text-[13px] font-medium text-primary hover:underline">
                   <Trans>Dove la trovo?</Trans>
@@ -369,7 +390,7 @@ export function GuideModelStep({ paths, onFactsChange, onReadyChange, registerCo
                 type="password"
                 autoComplete="off"
                 className="min-w-0 flex-1 rounded-[12px] bg-background px-3.5 py-3 text-base font-medium text-foreground outline-none"
-                placeholder={t`Incolla qui la chiave`}
+                placeholder={needsAddress ? t`lasciala vuota se il server non la chiede` : t`Incolla qui la chiave`}
                 value={setup.apiKey}
                 onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); setup.probeNow() } }}
                 onChange={(e) => setup.setApiKey(e.target.value)}
@@ -378,7 +399,7 @@ export function GuideModelStep({ paths, onFactsChange, onReadyChange, registerCo
                 type="button"
                 data-testid="guide-key-probe"
                 className="shrink-0 rounded-[12px] bg-foreground px-[18px] text-sm font-semibold text-background transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-35"
-                disabled={setup.probe.probing || !setup.apiKey.trim() || (needsAddress && !setup.baseUrl.trim())}
+                disabled={probeButtonDisabled({ probing: setup.probe.probing, apiKey: setup.apiKey, baseUrl: needsAddress ? setup.effectiveBaseUrl : setup.apiKey, needsAddress })}
                 onClick={() => setup.probeNow()}
               >
                 {setup.probe.probing ? t`Provo…` : t`Prova`}
@@ -399,7 +420,29 @@ export function GuideModelStep({ paths, onFactsChange, onReadyChange, registerCo
                   onSelect={setSelectedModel}
                   pickerLabel={t`Altri modelli…`}
                 />
+                {/* U6: «Altro…» accanto alle pillole per scrivere il modello a mano */}
+                <button
+                  type="button"
+                  data-testid="guide-model-other"
+                  className={`min-h-[36px] rounded-full px-3.5 text-[13px] font-medium transition ${manualModelOpen || selectedModel === null ? 'bg-muted text-foreground' : 'bg-muted/50 text-muted-foreground hover:text-foreground'}`}
+                  onClick={() => setManualModelOpen((v) => !v)}
+                >
+                  <Trans>Altro…</Trans>
+                </button>
               </div>
+              {(manualModelOpen || setup.probe.models.length === 0) && (
+                /* U6: /models manca o è vuoto, o l'utente vuole scrivere a mano */
+                <label className="flex flex-col gap-2 text-sm font-semibold">
+                  {setup.probe.models.length === 0 ? t`Il servizio non elenca i modelli: scrivi il nome del modello` : t`Il nome del modello`}
+                  <input
+                    data-testid="guide-manual-model"
+                    className="rounded-[12px] bg-background px-3.5 py-3 text-base font-medium text-foreground outline-none"
+                    placeholder={t`es. llama-3.2-3b-instruct`}
+                    value={selectedModel ?? ''}
+                    onChange={(e) => setSelectedModel(e.target.value.trim() || null)}
+                  />
+                </label>
+              )}
             </div>
           )}
           {setup.probe.ok === false && (

@@ -870,6 +870,10 @@ msgstr "Altri…"
 msgid "Altro ▾"
 msgstr "Altro ▾"
 
+#: src/renderer/src/components/GuideModelStep.tsx
+msgid "Altro…"
+msgstr "Altro…"
+
 #: src/renderer/src/components/Settings.tsx
 msgid "analizzo…"
 msgstr "analizzo…"
@@ -2560,6 +2564,15 @@ msgstr "Errore: {0}"
 msgid "es. comandi ls e cat dentro la home del bot"
 msgstr "es. comandi ls e cat dentro la home del bot"
 
+#: src/renderer/src/components/GuideModelStep.tsx
+msgid "es. Il mio gateway"
+msgstr "es. Il mio gateway"
+
+#: src/renderer/src/components/GuideModelStep.tsx
+#: src/renderer/src/components/settings/AddProviderSheet.tsx
+msgid "es. llama-3.2-3b-instruct"
+msgstr "es. llama-3.2-3b-instruct"
+
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "es. Usa questo account solo per lavoro; le email in italiano vanno riassunte in bulleted list…"
 msgstr "es. Usa questo account solo per lavoro; le email in italiano vanno riassunte in bulleted list…"
@@ -3418,6 +3431,14 @@ msgstr "Il modello non risponde ({why}): turno interrotto."
 msgid "notice.modelFallback"
 msgstr "Il modello principale {model} non risponde ({why}): uso la riserva {fallback}."
 
+#: src/renderer/src/components/GuideModelStep.tsx
+msgid "Il nome del modello"
+msgstr "Il nome del modello"
+
+#: src/renderer/src/components/GuideModelStep.tsx
+msgid "Il nome del servizio"
+msgstr "Il nome del servizio"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "skill.nameFolderMismatch"
@@ -3525,6 +3546,11 @@ msgstr "il server non ha un URL"
 #: src/shared/ui-messages.ts
 msgid "rpc.notOauth"
 msgstr "il server non usa OAuth"
+
+#: src/renderer/src/components/GuideModelStep.tsx
+#: src/renderer/src/components/settings/AddProviderSheet.tsx
+msgid "Il servizio non elenca i modelli: scrivi il nome del modello"
+msgstr "Il servizio non elenca i modelli: scrivi il nome del modello"
 
 #: src/renderer/src/components/settings/AddProviderSheet.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
@@ -3957,6 +3983,14 @@ msgid "skill.libraryTooLarge"
 msgstr "La cartella della skill è troppo grande: {n} KB (massimo 2 MB in tutto)."
 
 #: src/renderer/src/components/GuideModelStep.tsx
+msgid "La chiave (facoltativa)"
+msgstr "La chiave (facoltativa)"
+
+#: src/renderer/src/components/settings/AddProviderSheet.tsx
+msgid "La chiave (lasciala vuota se il server non la chiede)"
+msgstr "La chiave (lasciala vuota se il server non la chiede)"
+
+#: src/renderer/src/components/GuideModelStep.tsx
 msgid "La chiave di {providerLabel}"
 msgstr "La chiave di {providerLabel}"
 
@@ -4019,6 +4053,11 @@ msgstr "La libreria è vuota: i documenti, i grafici e i file che i bot preparan
 msgid "La libreria supera 2 GB: valuta cosa cancellare (nessun blocco automatico)."
 msgstr "La libreria supera 2 GB: valuta cosa cancellare (nessun blocco automatico)."
 
+#. placeholder {0}: openAiCompatBase({ baseUrl: setup.baseUrl || 'http://…' }) + '/models'
+#: src/renderer/src/components/GuideModelStep.tsx
+msgid "La prova chiama {0}"
+msgstr "La prova chiama {0}"
+
 #: src/renderer/src/components/settings/AddProviderSheet.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "La prova non è riuscita"
@@ -4046,6 +4085,10 @@ msgstr "La skill nel repository non è valida: non si può aggiungere."
 #: src/shared/ui-messages.ts
 msgid "skill.err.catalogPin"
 msgstr "La versione fissata dal catalogo non è più reperibile nel repository: non si scarica nient’altro."
+
+#: src/renderer/src/components/GuideModelStep.tsx
+msgid "lasciala vuota se il server non la chiede"
+msgstr "lasciala vuota se il server non la chiede"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts

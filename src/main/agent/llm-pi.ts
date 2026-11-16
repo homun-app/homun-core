@@ -14,6 +14,7 @@
 //   di terzi): z.ai passa da un provider openai-completions sull'API a
 //   consumo https://api.z.ai/api/paas/v4;
 // - niente chiavi in log, trace o errori: traceLlmCall resta solo numeri.
+import { isLocalProvider } from '../../shared/network-host'
 import {
   createModels,
   createProvider,
@@ -316,7 +317,7 @@ export function piCacheEntryFor(p: ProviderConfig): PiCacheEntry {
     baseUrl,
     catalogIds,
     catalogModels: modelsList,
-    local: LOCAL_KINDS.has(p.kind)
+    local: isLocalProvider(p)
   }
   modelsCache.set(key, entry)
   return entry
@@ -522,7 +523,7 @@ export function catalogModelInfos(p: ProviderConfig, prices?: ModelPriceMap): Mo
         thinkingLevels: caps.thinkingLevels,
         cost: caps.cost,
         costSource: caps.costSource,
-        local: LOCAL_KINDS.has(p.kind)
+        local: isLocalProvider(p)
       }
     })
 }
