@@ -25,7 +25,7 @@ describe('R7 — la rotaia ha Crea, Cerca e menu account (guarda sul codice)', (
     // dentro CollapsedColumn: il + apre il dialogo direttamente, come la barra larga
     const collapsed = SIDEBAR.slice(
       SIDEBAR.indexOf('function CollapsedColumn'),
-      SIDEBAR.indexOf('export function Sidebar')
+      SIDEBAR.indexOf('export function Sidebar({ layout')
     )
     expect(collapsed).toContain('aria-label={i18n.t(msg`Crea`)}')
     expect(collapsed).toContain('onClick={onNewBot}')
@@ -36,7 +36,7 @@ describe('R7 — la rotaia ha Crea, Cerca e menu account (guarda sul codice)', (
   it('la lente di Cerca c\'è, e la ricerca sospesa vive nella Sidebar (fuori dalla rotaia)', () => {
     const collapsed = SIDEBAR.slice(
       SIDEBAR.indexOf('function CollapsedColumn'),
-      SIDEBAR.indexOf('export function Sidebar')
+      SIDEBAR.indexOf('export function Sidebar({ layout')
     )
     expect(collapsed).toContain('aria-label={i18n.t(msg`Cerca`)}')
     // l'input sospeso è nel render della Sidebar, non dentro la colonna
@@ -44,17 +44,18 @@ describe('R7 — la rotaia ha Crea, Cerca e menu account (guarda sul codice)', (
     expect(SIDEBAR).toContain('placeholder={t`Cerca bot e squadre`}')
   })
 
-  it('il bottone in fondo apre il menu ACCOUNT; «Allarga la barra» solo se NON forzata', () => {
+  it('il bottone in fondo apre il menu ACCOUNT; U2: la voce che allargava la barra è USCITA dal menu', () => {
     expect(SIDEBAR).toContain('<AccountMenu')
-    expect(SIDEBAR).toContain('rail={{ forced, onExpand }}')
-    // la voce vive nel menu ed è gated: sotto AUTO_RAIL_BELOW non c'è
-    expect(SIDEBAR).toContain('{props?.rail && !props.rail.forced && (')
-    expect(SIDEBAR).toContain('<Trans>Allarga la barra</Trans>')
+    // allargare ha il suo bottone fisso accanto ai semafori (SidebarToggleButton),
+    // la voce del menu non esiste più in nessuno stato
+    expect(SIDEBAR).not.toContain('Allarga la barra')
+    expect(SIDEBAR).toContain('export function SidebarToggleButton')
+    expect(APP).toContain('<SidebarToggleButton layout={layout} />')
   })
 
   it('la finestra «Nuovo» si apre ANCHE in rotaia (render fuori dal ramo); la squadra non nasce più da un dialogo', () => {
     // il dialogo è nel render della Sidebar, dopo il ternary collapsed
-    const tail = SIDEBAR.slice(SIDEBAR.indexOf('export function Sidebar'))
+    const tail = SIDEBAR.slice(SIDEBAR.indexOf('export function Sidebar({ layout'))
     expect(tail).toContain('{newBotOpen && <NewBotDialog')
     expect(tail).not.toContain('NewTeamDialog')
   })

@@ -16,7 +16,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
-import { Plus, Search, Library as LibraryIcon, LayoutGrid, ChevronRight, Activity as ActivityIcon } from 'lucide-react'
+import { Plus, Search, Library as LibraryIcon, LayoutGrid, ChevronRight, Activity as ActivityIcon, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { useStore, useResolvedModel } from '../store'
 import { buildSidebarModel, collapsedVoices, teamOpenState, type SidebarModel, type SidebarTeam, type SidebarBot, type CollapsedVoice } from '../sidebar-utils'
 // fase 16b correzioni 2 (Q1): il massimo del trascinamento e i limiti della barra
@@ -35,6 +35,40 @@ import {
   DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger,
   DropdownMenuRadioGroup, DropdownMenuRadioItem
 } from './ui/dropdown-menu'
+
+/**
+ * U2 (fase prima-release): il bottone della barra laterale, SEMPRE nello
+ * stesso punto nella fascia dei semafori (App lo rende sopra le colonne):
+ * PanelLeftClose da larga, PanelLeftOpen da stretta, ⌘\ fa lo stesso. In
+ * rotaia FORZATA (finestra sotto AUTO_RAIL_BELOW) resta visibile ma
+ * disabilitato, col perché nel tooltip.
+ */
+export function SidebarToggleButton({ layout }: { layout: LayoutResult }) {
+  const { t } = useLingui()
+  const setSidebarCollapsed = useStore((s) => s.setSidebarCollapsed)
+  const windowWidth = useStore((s) => s.windowWidth)
+  const collapsed = layout.sidebar === 'rail'
+  const forced = collapsed && windowWidth < AUTO_RAIL_BELOW
+  const Icon = collapsed ? PanelLeftOpen : PanelLeftClose
+  const label = collapsed
+    ? forced
+      ? t`Allarga la finestra per aprire la barra`
+      : t`Apri la barra (⌘\\)`
+    : t`Chiudi la barra (⌘\\)`
+  return (
+    <button
+      data-testid="sidebar-toggle"
+      className="no-drag grid size-9 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+      aria-label={label}
+      aria-expanded={!collapsed}
+      title={label}
+      disabled={forced}
+      onClick={() => setSidebarCollapsed(!collapsed)}
+    >
+      <Icon className="size-4" />
+    </button>
+  )
+}
 
 /** La larghezza sotto cui la barra diventa STRETTA (S2). */
 export const SIDEBAR_COLLAPSE_BELOW = 200
@@ -288,10 +322,11 @@ function VoiceMascot({ agentId, size }: { agentId: string; size: number }) {
  * Il menu account di oggi, adattato: te + Collega app/Skill/Impostazioni/Tema
  * (fase skill · sfoglia, B1: «Skill» vive QUI, sotto «Collega app»).
  * Fase 16c correzioni (R7): in ROTAI lo stesso menu pende dal bottone in
- * fondo — con la voce «Allarga la barra» SOLO quando la rotaia non è forzata
- * (sotto AUTO_RAIL_BELOW allargarla non si può: la voce non c'è, il menu sì).
+ * fondo. U2 (fase prima-release): la voce che allargava la barra è uscita
+ * dal menu — allargare ha il suo bottone fisso accanto ai semafori.
  */
-function AccountMenu(props?: { rail?: { forced: boolean; onExpand(): void }; triggerClassName?: string }) {
+/** rail: il menu pende dal bottone in fondo della barra STRETTA (trigger ridotto all'iniziale, allineamento a destra). */
+function AccountMenu(props?: { rail?: boolean; triggerClassName?: string }) {
   const { t } = useLingui()
   const agents = useStore((s) => s.agents)
   const mainAgentId = useStore((s) => s.mainAgentId)
@@ -348,9 +383,6 @@ function AccountMenu(props?: { rail?: { forced: boolean; onExpand(): void }; tri
             app — non più come bottone nella barra accanto ad App */}
         <DropdownMenuItem data-testid="menu-skills" onClick={() => { openedWindow.current = true; setSkillsOpen(true) }}><Trans>Skill</Trans></DropdownMenuItem>
         <DropdownMenuItem onClick={() => { openedWindow.current = true; setSettingsOpen(true) }}><Trans>Impostazioni</Trans></DropdownMenuItem>
-        {props?.rail && !props.rail.forced && (
-          <DropdownMenuItem onClick={props.rail.onExpand}><Trans>Allarga la barra</Trans></DropdownMenuItem>
-        )}
         <DropdownMenuSeparator />
         <DropdownMenuSub>
           <DropdownMenuSubTrigger><Trans>Tema</Trans></DropdownMenuSubTrigger>
@@ -371,21 +403,16 @@ function AccountMenu(props?: { rail?: { forced: boolean; onExpand(): void }; tri
  * La barra STRETTA: solo mascotte nello stesso ordine, contatore e tooltip.
  * Fase 16c correzioni (R7): sotto i bot CI SONO ANCHE il bottone «+» col
  * bottone «+» del dialogo «Nuovo» e la lente di Cerca; il bottone in
- * fondo apre il menu ACCOUNT (non più «Allarga la barra»: sotto AUTO_RAIL_BELOW
- * non può funzionare — la voce vive nel menu, solo quando non è forzata).
+ * fondo apre il menu ACCOUNT (U2, fase prima-release: allargare la barra
+ * non passa più da qui — c'è il bottone fisso accanto ai semafori).
  */
 function CollapsedColumn({
   model,
-  onExpand,
-  forced,
   onSearch,
   searchOpen,
   onNewBot
 }: {
   model: SidebarModel
-  onExpand(): void
-  /** la rotaia è FORZATA dalla finestra (sotto AUTO_RAIL_BELOW) */
-  forced: boolean
   onSearch(): void
   searchOpen: boolean
   onNewBot(): void
@@ -494,7 +521,7 @@ function CollapsedColumn({
             margine sotto — lo stesso centro verticale della pillola della chat */}
         <div className="mb-4 flex h-[60px] shrink-0 items-center justify-center">
           <AccountMenu
-            rail={{ forced, onExpand }}
+            rail
             triggerClassName="grid size-9 shrink-0 place-items-center rounded-full bg-muted text-sm font-semibold text-foreground transition hover:bg-muted/70 focus:outline-none"
           />
         </div>
@@ -527,7 +554,8 @@ export function Sidebar({ layout }: { layout: LayoutResult }) {
   const [newBotOpen, setNewBotOpen] = useState(false)
   const collapsed = layout.sidebar === 'rail'
   // fase 16c correzioni (R7): la rotaia è FORZATA quando la finestra scende
-  // sotto AUTO_RAIL_BELOW — «Allarga la barra» può comparire solo se non lo è
+  // sotto AUTO_RAIL_BELOW — da forzata non si allarga (bottone disabilitato,
+  // bordo senza trascinamento)
   const windowWidth = useStore((s) => s.windowWidth)
   const railForced = windowWidth < AUTO_RAIL_BELOW
   const dragging = useRef(false)
@@ -552,7 +580,9 @@ export function Sidebar({ layout }: { layout: LayoutResult }) {
     e.preventDefault()
     dragging.current = true
     const startX = e.clientX
-    const startWidth = useStore.getState().sidebarWidth
+    // U2: il bordo si trascina anche in rotaia — l'ancora è la larghezza RESA
+    // (la rotaia è 76 px), così «oltre la soglia» è dove sta il puntatore
+    const startWidth = collapsed ? layout.sidebarWidth : useStore.getState().sidebarWidth
     const onMove = (ev: MouseEvent): void => {
       if (!dragging.current) return
       const next = startWidth + (ev.clientX - startX)
@@ -587,14 +617,14 @@ export function Sidebar({ layout }: { layout: LayoutResult }) {
       className="relative flex shrink-0 select-none flex-col border-r border-border/50 bg-card"
       style={{ width: layout.sidebarWidth }}
     >
-      {/* il bordo trascinabile (nascosto in rotaia, anche automatica) */}
-      {layout.sidebar === 'full' && <div className="absolute right-0 top-0 z-10 h-full w-1.5 cursor-col-resize" onMouseDown={startDrag} aria-hidden="true" />}
+      {/* U2: il bordo trascinabile c'è SEMPRE, tranne in rotaia FORZATA
+          (sotto AUTO_RAIL_BELOW allargare non si può): da stretta,
+          trascinarlo oltre la soglia allarga la barra */}
+      {!(collapsed && railForced) && <div className="absolute right-0 top-0 z-10 h-full w-1.5 cursor-col-resize" onMouseDown={startDrag} aria-hidden="true" />}
 
       {collapsed ? (
         <CollapsedColumn
           model={model}
-          onExpand={() => setSidebarCollapsed(false)}
-          forced={railForced}
           searchOpen={searchOpen}
           onSearch={() => {
             setSearchOpen((v) => !v)

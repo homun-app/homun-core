@@ -50,6 +50,6 @@ describe("B1: «Skill» nel menu in fondo, non più nella barra", () => {
     const src = readFileSync(SIDEBAR, 'utf8')
     expect((src.match(/function AccountMenu\(/g) ?? []).length).toBe(1)
     // la rotaia pende dal bottone in fondo, che è l'AccountMenu con props rail
-    expect(src).toMatch(/<AccountMenu\s+rail=/)
+    expect(src).toMatch(/<AccountMenu\s+rail\b/)
   })
 })

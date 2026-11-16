@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { useStore } from './store'
-import { Sidebar } from './components/Sidebar'
+import { Sidebar, SidebarToggleButton } from './components/Sidebar'
 import { Chat } from './components/Chat'
 // fase 16b (S5): la squadra è una vista di prima classe, al posto della chat
 import { TeamChat } from './components/TeamChat'
@@ -196,6 +196,12 @@ export function App() {
     <div className="relative flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
       <LegacyHomun2Notice />
       <div className="relative flex min-h-0 flex-1">
+      {/* U2 (fase prima-release): il bottone della barra, FISSO accanto ai
+          semafori nella STESSA posizione da larga e da stretta (sopra le
+          colonne: da rotaia la barra è 76 px e il bottone non ci starebbe) */}
+      <div className="absolute left-0 top-0 z-30" style={{ paddingLeft: TRAFFIC_LIGHT_INSET, paddingTop: 12 }}>
+        <SidebarToggleButton layout={layout} />
+      </div>
       <Sidebar layout={layout} />
       <div className="relative flex min-w-0 flex-1">
         {openGroupId === null ? <Chat layout={layout} /> : <TeamChat />}

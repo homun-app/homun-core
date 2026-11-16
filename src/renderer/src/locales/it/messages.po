@@ -812,8 +812,8 @@ msgid "kick.10"
 msgstr "Alla fine manda un messaggio breve che dica che sei pronto, seguito dalle domande del campo askUserFor, una per riga, a testo semplice."
 
 #: src/renderer/src/components/Sidebar.tsx
-msgid "Allarga la barra"
-msgstr "Allarga la barra"
+msgid "Allarga la finestra per aprire la barra"
+msgstr "Allarga la finestra per aprire la barra"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -1020,6 +1020,10 @@ msgstr "Apri l'installazione"
 #: src/renderer/src/components/ComputerPrepRow.tsx
 msgid "Apri l’installazione"
 msgstr "Apri l’installazione"
+
+#: src/renderer/src/components/Sidebar.tsx
+msgid "Apri la barra (⌘\\)"
+msgstr "Apri la barra (⌘\\)"
 
 #: src/renderer/src/components/GuideView.tsx
 msgid "Apri la chat"
@@ -1568,6 +1572,10 @@ msgstr "Chiudi i membri di {0}"
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Chiudi il pannello"
 msgstr "Chiudi il pannello"
+
+#: src/renderer/src/components/Sidebar.tsx
+msgid "Chiudi la barra (⌘\\)"
+msgstr "Chiudi la barra (⌘\\)"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
