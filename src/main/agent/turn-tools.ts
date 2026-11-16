@@ -19,7 +19,22 @@ import { toolsDeferred, rankTools, findToolsGroupedDef } from '../mcp/find-tools
 import { wakeParentToolDef } from './tools'
 import { buildFacadeDef, facadeCovering, FACADES } from './facades'
 import { groupGuideOf } from './prompts'
+import { BOX_NO_INTERNET_LINE } from '../sandbox/box-egress'
 import type { TranscriptEntry } from '../../shared/types'
+
+/**
+ * AH6 (fase aiutanti): nel box SENZA uscita di rete, la descrizione di
+ * run-command porta la riga che lo dice (per il web: web_fetch o il browser).
+ * PURA: con isolated false l'elenco torna com'era (stessi oggetti).
+ */
+export function applyBoxNoInternet(defs: ToolDef[], isolated: boolean): ToolDef[] {
+  if (!isolated) return defs
+  return defs.map((t) =>
+    t.name === 'run-command'
+      ? { ...t, description: `${t.description ?? ''} ${BOX_NO_INTERNET_LINE}`.trim() }
+      : t
+  )
+}
 
 /** L'input di assembleTurnTools: i builtin del turno GIÀ filtrati (whitelist del figlio, toolsForTurnSource). */
 export interface AssembleTurnToolsInput {

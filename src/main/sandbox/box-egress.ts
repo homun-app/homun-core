@@ -21,3 +21,26 @@ export function boxShellEgress(engine: 'apple-container' | 'docker', network: 'b
   if (network === 'none') return 'none'
   return engine === 'apple-container' ? 'none' : 'direct'
 }
+
+/**
+ * AH6 (fase aiutanti): la riga UNICA che dice al modello che i comandi del
+ * box non escono su internet — nella descrizione di run-command e nel prompt.
+ */
+export const BOX_NO_INTERNET_LINE =
+  'In this computer commands have no internet: for the web use web_fetch or the browser.'
+
+/**
+ * AH6 (fase aiutanti): la nota in coda al result di un comando del box che
+ * fallisce con un errore di nome o di rete (l'utente vede «Could not resolve
+ * host» tre volte di fila, il modello non sa perché). PURA.
+ */
+export const BOX_NO_INTERNET_NOTE =
+  '[note: the bot computer has no internet for commands: use web_fetch or the browser]'
+
+const NETWORK_ERROR_RE =
+  /Could not resolve host|Temporary failure in name resolution|Network is unreachable/i
+
+/** La nota in coda SOLO se l'output contiene un errore di nome/rete. PURA. */
+export function withNoInternetNote(output: string): string {
+  return NETWORK_ERROR_RE.test(output) ? `${output}\n${BOX_NO_INTERNET_NOTE}` : output
+}

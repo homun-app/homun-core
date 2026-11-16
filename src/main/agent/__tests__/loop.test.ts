@@ -61,7 +61,11 @@ const h = vi.hoisted(() => {
   }
   const sandboxMock = {
     exec: { command: '', env: {} as Record<string, string>, calls: 0 },
-    result: { stdout: '', stderr: '', exitCode: 0, signal: null as string | null, trimmed: false }
+    result: { stdout: '', stderr: '', exitCode: 0, signal: null as string | null, trimmed: false },
+    // AH5/AH6 (fase aiutanti): modalità sandbox e uscita di rete dei comandi,
+    // commutabili dai test (default: host, come prima)
+    mode: 'host' as 'host' | 'box',
+    egress: 'direct' as 'none' | 'direct'
   }
   const mcp = { calls: 0 }
   // fase eval-deboli (D1): i comandi partiti in background (startBackgroundShell)
@@ -529,7 +533,8 @@ vi.mock('../llm', () => ({
 }))
 
 vi.mock('../../sandbox', () => ({
-  sandboxMode: () => 'host' as const,
+  sandboxMode: () => h.sandboxMock.mode,
+  boxShellEgressOf: () => h.sandboxMock.egress,
   browserSandboxOk: () => false,
   boxDir: (id: string) => `/tmp/sandbot-${id}`,
   // fase 12: il proprietario delle risorse del box (il padre di un figlio)
@@ -1111,8 +1116,35 @@ describe('§5.1+approval: gate asincrono e standing grant esatta', () => {
     expect(String(secondTool.content)).toContain('do not ask again')
   })
 
-  it('AH4: dopo un RIFIUTO la stessa chiamata non riapre una card (come per la scadenza)', async () => {
-    h.db.settings.set('permissions.timeoutMs', 60_000)
+  it('AH6: nel box senza uscita la descrizione di run-command porta la riga e l\'errore DNS riceve la nota', async () => {
+    h.sandboxMock.mode = 'box'
+    h.sandboxMock.egress = 'none'
+    h.db.settings.set('permissions', { default: 'needs_approval', rules: [] })
+    h.db.settings.set('approvals.mode', 'ask')
+    h.sandboxMock.result.stdout = 'curl: (6) Could not resolve host: dealer.moto.it\n'
+    h.llm.queue = [
+      { toolCalls: [{ id: 'c1', name: 'run-command', arguments: JSON.stringify({ command: 'curl https://dealer.moto.it' }) }] },
+      { text: 'fatto' }
+    ]
+    try {
+      await runTurn(AGENT, 'prova le foto', emit)
+      // la descrizione offerta al modello porta la riga del niente internet
+      const rc = (h.llm.toolsList[0] as Array<{ name: string; description?: string }>).find((t) => t.name === 'run-command')
+      expect(rc?.description ?? '').toContain('no internet')
+      // AH5 dal vivo: nel box + «Chiedi» il comando parte SENZA card…
+      expect(h.db.entries.filter((e) => e.kind === 'approval')).toHaveLength(0)
+      expect(h.sandboxMock.exec.calls).toBe(1)
+      // …e l'errore di nome riceve la nota in coda (il modello lo sa)
+      const toolMsg = [...h.llm.calls[1]!].reverse().find((m) => m.role === 'tool')!
+      expect(String(toolMsg.content)).toContain('Could not resolve host')
+      expect(String(toolMsg.content)).toContain('no internet for commands: use web_fetch or the browser')
+    } finally {
+      h.sandboxMock.mode = 'host'
+      h.sandboxMock.egress = 'direct'
+    }
+  })
+
+  it('AH4: dopo un RIFIUTO la stessa chiamata non riapre una card (come per la scadenza)', async () => {    h.db.settings.set('permissions.timeoutMs', 60_000)
     h.llm.queue = [
       { toolCalls: [{ id: 'c1', name: 'run-command', arguments: JSON.stringify({ command: 'rm -rf /tmp/x' }) }] },
       { toolCalls: [{ id: 'c2', name: 'run-command', arguments: JSON.stringify({ command: 'rm -rf /tmp/x' }) }] },

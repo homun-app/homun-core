@@ -77,6 +77,7 @@ import { parseShowImagesInput, downloadShowImage, saveShowImage, imageUrlsInMark
 import type { ChatGalleryImage } from '../../shared/chat-images'
 // fase chat-limiti (CL4): le letture identiche del turno si rispondono dalla cache
 import { TurnWebReads, ALREADY_READ_PREFIX } from './web-tools'
+import { withNoInternetNote } from '../sandbox/box-egress'
 import { nextWithDeadline, DEFAULT_STREAM_DEADLINES, StreamDeadlineError } from './stream-deadline'
 // fase 9 (punto 0): regole dei send_to_user dentro il turno (dedup, tetto
 // avanzamenti, result col testo consegnato)
@@ -123,7 +124,7 @@ import {
 // fase velocità (S3): elenco core fisso + integrati differiti dietro find_tools/use_tool;
 // fase token (T0/T1/T2): l'elenco lo costruisce l'unica fonte pura assembleTurnTools
 // (nucleo + gruppi attivabili); use_tool resta solo per le storie vecchie
-import { assembleTurnTools, offeredMcpOf, activateGroupsResult, toolDefsOfGroups, groupsNamedInResult, RESULT_ACTIVATES, activeGroupsFromTranscript, groupActivationText, GROUP_ACTIVATION_ACT_NOW, type ToolGroupPresent } from './turn-tools'
+import { assembleTurnTools, offeredMcpOf, activateGroupsResult, toolDefsOfGroups, groupsNamedInResult, RESULT_ACTIVATES, activeGroupsFromTranscript, groupActivationText, GROUP_ACTIVATION_ACT_NOW, applyBoxNoInternet, type ToolGroupPresent } from './turn-tools'
 // RW (fase revisore sulla richiesta): il nome che non esiste, con i vicini
 import { unknownToolMessage, offeredToolNames } from '../mcp/unknown-tool'
 import { useToolDef } from './core-tools'
@@ -1602,6 +1603,11 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       agentMessage: opts.agentMessage,
       initiator: opts.initiator
     })
+    // AH6 (fase aiutanti): nel box SENZA uscita di rete, la descrizione di
+    // run-command porta la riga che lo dice (per il web: web_fetch o il browser)
+    if (await boxRunCommandIsolated()) {
+      builtins = applyBoxNoInternet(builtins, true)
+    }
     // fase token (T0/T1/T2): i tool MCP del bot e la soglia differita si
     // calcolano qui (la sezione "Connettori attivi" del prompt li serve);
     // l'elenco del turno lo costruisce l'UNICA fonte pura assembleTurnTools
@@ -4755,6 +4761,12 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           // Fase app (A5): i result degli strumenti Composio sono dati esterni
           // ALLO STESSO MODO, con la fonte composio:<toolkit>.
           let finalOutput = output
+          // AH6 (fase aiutanti): un comando del box SENZA uscita che fallisce
+          // con errore di nome o di rete riceve la nota in coda — il modello
+          // sa perché e usa web_fetch o il browser, invece di riprovare uguale
+          if (call.name === 'run-command' && runCmdBoxIsolated) {
+            finalOutput = withNoInternetNote(finalOutput)
+          }
           if (call.name.startsWith('mcp__') || call.name.startsWith('composio__')) {
             const [prefix, slugPart] = call.name.split('__')
             const originalName = call.name.split('__').slice(2).join('__')

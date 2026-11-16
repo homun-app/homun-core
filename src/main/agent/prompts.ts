@@ -13,7 +13,22 @@
 // applicata dal loop per ULTIMA (posizione di recenza).
 import type { Agent } from '../../shared/types'
 import { languageName, type Lang } from '../../shared/language'
-import { sandboxMode, browserSandboxOk } from '../sandbox'
+import { sandboxMode, browserSandboxOk, boxShellEgressOf } from '../sandbox'
+import { BOX_NO_INTERNET_LINE } from '../sandbox/box-egress'
+
+/**
+ * AH6 (fase aiutanti): i comandi del box di QUESTO ambiente non escono su
+ * internet? Difensivo: se l'uscita non si legge (moduli mockati dei test), si
+ * sta zitti — la riga dice una cosa che deve essere VERA.
+ */
+function boxNoInternetOn(): boolean {
+  if (sandboxMode() !== 'box') return false
+  try {
+    return boxShellEgressOf() === 'none'
+  } catch {
+    return false
+  }
+}
 
 /**
  * Budget del prompt base (token stimati caratteri/4) — testato, non superare.
@@ -144,12 +159,15 @@ export function computerSection(groups: ReadonlyArray<string> = [], opts: { grou
 - For web pages PREFER browser_* (snapshot text and refs: cheaper and safer); computer_* only for what the refs cannot reach (it acts on YOUR screen in the sandbox, not on the user's Mac — that is use-app). For logins, 2FA codes and anti-bot challenges call request_takeover: the user solves them on your screen.`
     : ''
   const groupBlock = groupWhenBlock(groups)
+  // AH6 (fase aiutanti): con uscita none, UNA riga dice che i comandi non
+  // escono su internet e per il web ci sono web_fetch e il browser
+  const noInternet = boxNoInternetOn() ? `\n- ${BOX_NO_INTERNET_LINE}` : ''
   return `# Your computer
 You have a computer (the box): ${env}
 - \`/workspace\` (the shared box) is the COMMON space of all your bots: deliverables that the others need too go there, in \`/workspace/<project>/…\`, and you cite the path in the group.
 - Your home is yours: relative paths start there.
 - Before redoing work, check whether another bot has already left it in \`/workspace\`.
-Base tools: run-command (background: true for long ones${background}), read-file, write-file, list-directory, web_search / web_fetch (web search and reading), memory (save / recall), document (write / read / edit), skill.${groupBlock ? `\n${groupBlock}` : ''}
+Base tools: run-command (background: true for long ones${background}), read-file, write-file, list-directory, web_search / web_fetch (web search and reading), memory (save / recall), document (write / read / edit), skill.${groupBlock ? `\n${groupBlock}` : ''}${noInternet}
 ${documentRule()}
 - On the user's own Mac (use-app): For services that need the user's own account (video or image generators, banking, shops), open the page with open_url and hand over to the user to sign in; do not drive the login or the service step by step.${browser}
 Credentials: names with list-credentials; you NEVER see the values. Write {{secret:NAME}} where needed in the command (e.g. \`curl -H "Authorization: Bearer {{secret:API_KEY}}" ...\`): the value is injected only at execution time and stays hidden in the output.`
