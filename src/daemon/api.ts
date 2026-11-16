@@ -2762,7 +2762,10 @@ export async function notifyComposioAppConnected(
     enqueueUserMessage(
       db(),
       agent.id,
-      `[sistema] The user connected ${name} (via Composio): its composio__${slug}__* tools are now available (find the exact names with find_tools).`,
+      // fase chat-limiti (CL6): la strada indicata FUNZIONA davvero —
+      // find_tools col nome o slug dell'app trova i suoi strumenti (le app
+      // collegate entrano nel testo cercabile del gruppo del connettore)
+      `[sistema] The user connected ${name} (via Composio): its ${slug} tools are now available (find them with find_tools({query: "${slug}"})).`,
       undefined,
       emit,
       undefined,

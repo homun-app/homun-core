@@ -427,6 +427,37 @@ export async function activeTools(agentId?: string): Promise<ToolDef[]> {
 }
 
 /**
+ * Fase chat-limiti (CL6): le APP COLLEGATE per gruppo mcp:<server>, sui tool
+ * MCP del turno — così find_tools({query: <nome o slug dell'app>}) trova gli
+ * strumenti dell'app collegata. Flusso GATEWAY: il server «Composio For You»
+ * espone solo i proxy mcp__composio__*, e il gruppo si chiama mcp:composio:
+ * senza le app nel testo del gruppo la query «gmail» non trovava niente («No
+ * tool groups match» — la prova della beta.5). Flusso SDK: i tool
+ * composio__<slug>__* portano lo slug nel proprio gruppo mcp:<slug>.
+ */
+export async function mcpGroupAppsForAgent(mcpToolDefs: ToolDef[]): Promise<Record<string, string[]>> {
+  const out: Record<string, string[]> = {}
+  if (mcpToolDefs.some((t) => t.name.startsWith('mcp__composio__'))) {
+    try {
+      const { composioGateway } = await import('../connectors/composio-gateway')
+      const apps = (composioGateway()?.status().connected ?? []).filter((a) => a.status === 'ACTIVE')
+      if (apps.length) {
+        out['mcp:composio'] = apps.flatMap((a) => [a.slug, a.name]).filter(Boolean)
+      }
+    } catch {
+      // gateway non interrogabile: nessuna app nel testo del gruppo
+    }
+  }
+  for (const t of mcpToolDefs) {
+    const m = /^composio__(.+?)__/.exec(t.name)
+    if (m && !out[`mcp:${m[1]}`]?.length) {
+      out[`mcp:${m[1]}`] = [m[1]!]
+    }
+  }
+  return out
+}
+
+/**
  * I tool MCP raggruppati per server, per un bot (fase 13, punto 5): serve alla
  * sezione "Connettori attivi" del prompt quando i tool sono deferiti.
  */

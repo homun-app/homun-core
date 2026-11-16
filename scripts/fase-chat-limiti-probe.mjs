@@ -168,7 +168,21 @@ const app = spawn(ELECTRON, ['.', `--remote-debugging-port=${DEBUG_PORT}`], {
 })
 app.stdout.on('data', (d) => { appLog += d.toString() })
 app.stderr.on('data', (d) => { appLog += d.toString() })
-const stopApp = () => { try { app?.kill('SIGTERM') } catch { /* già via */ } }
+const stopApp = () => {
+  try { app?.kill('SIGTERM') } catch { /* già via */ }
+}
+/** chiude l'app ASPETTANDO che il processo esca davvero (SIGTERM, poi di nuovo, poi SIGKILL): un'UI orfana con la stdout su una pipe chiusa va in crash-loop di EPIPE — visto dal vivo, SIGTERM ignorato a metà avvio */
+const stopAppAndWait = async () => {
+  const pid = app?.pid
+  stopApp()
+  for (let i = 0; i < 15; i++) {
+    try { process.kill(pid, 0) } catch { return }
+    await sleep(400)
+    if (i === 7) stopApp()
+  }
+  try { app?.kill('SIGKILL') } catch { /* già via */ }
+  await sleep(400)
+}
 const daemonPid = () => {
   try {
     const v = JSON.parse(readFileSync(join(DATA, 'data', 'daemon.lock'), 'utf8'))
@@ -396,8 +410,7 @@ try {
   try { console.log('--- daemon.log (coda) ---\n' + readFileSync(join(DATA, 'data', 'daemon.log'), 'utf8').slice(-4000)) } catch { /* niente log */ }
   try { providerServer.closeAllConnections?.(); providerServer.close() } catch { /* già chiusa */ }
   try { webServer.closeAllConnections?.(); webServer.close() } catch { /* già chiusa */ }
-  stopApp()
-  await sleep(800)
+  await stopAppAndWait()
   // Vincoli (fase): a fine sonda si chiude ANCHE il daemon di sviluppo
   await stopDaemon()
   try { rmSync(TMP, { recursive: true, force: true }) } catch { /* l'app può essere ancora viva */ }

@@ -1565,9 +1565,13 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     // filtro dei tool che restituiscono immagini (H4) agisce sul CATALOGO,
     // prima dell'assemblaggio, così un gruppo non si attiva senza i suoi tool.
     let mcpToolDefs: import('./llm').ToolDef[] = []
+    let mcpGroupApps: Record<string, string[]> = {}
     try {
-      const { activeTools } = await import('../mcp')
+      const { activeTools, mcpGroupAppsForAgent } = await import('../mcp')
       mcpToolDefs = await activeTools(agentId)
+      // fase chat-limiti (CL6): le app collegate per gruppo mcp — find_tools
+      // col NOME dell'app trova i suoi strumenti
+      mcpGroupApps = await mcpGroupAppsForAgent(mcpToolDefs)
     } catch {
       // MCP non disponibile: prosegue coi tool base
     }
@@ -1725,6 +1729,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             browserAvailable: browserOn,
             browserDefs,
             mcpToolDefs,
+            mcpGroupApps,
             maxInlineTools,
             // fase token · nucleo (R8.2): il gruppo subagents (check/message/stop)
             // si attiva DA SOLO nei turni in cui il bot ha almeno un figlio APERTO o

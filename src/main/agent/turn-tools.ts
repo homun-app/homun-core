@@ -31,6 +31,14 @@ export interface AssembleTurnToolsInput {
   browserDefs: ToolDef[]
   /** i tool MCP del bot (server esterni → mcp__<server>__<tool>) */
   mcpToolDefs: ToolDef[]
+  /**
+   * Fase chat-limiti (CL6): le APP COLLEGATE per gruppo mcp:<server>
+   * (id → [slug, nome umano, …]), da mcpGroupAppsForAgent: entrano nel testo
+   * cercabile del gruppo, così find_tools({query: "gmail"}) trova gli
+   * strumenti dell'app collegata anche quando il gruppo si chiama solo
+   * «composio» (flusso gateway).
+   */
+  mcpGroupApps?: Record<string, string[]>
   /** soglia connectors.maxInlineTools: sopra, i tool MCP si differiscono per server */
   maxInlineTools: number
   /** i gruppi già attivati nella conversazione (dal transcript: id di gruppo, più i nomi MCP legacy) */
@@ -154,20 +162,27 @@ function presentBuiltinGroups(catalog: ToolDef[], browserAvailable: boolean): Ar
 }
 
 /** i gruppi mcp:<server> quando i tool MCP sono differiti (una voce per server) */
-function presentMcpGroups(mcpToolDefs: ToolDef[]): ToolGroupPresent[] {
+function presentMcpGroups(mcpToolDefs: ToolDef[], groupApps: Record<string, string[]> = {}): ToolGroupPresent[] {
   const byServer = new Map<string, ToolDef[]>()
   for (const t of mcpToolDefs) {
     const g = mcpGroupOf(t.name)
     if (!g) continue
     byServer.set(g, [...(byServer.get(g) ?? []), t])
   }
-  return [...byServer.entries()].map(([id, tools]) => ({
-    id,
-    description: `${tools.length} tools from the "${id.slice(4)}" connector: call find_tools({group: "${id}"}) to load them.`,
-    tools,
-    internalNames: tools.map((t) => t.name),
-    guide: ''
-  }))
+  return [...byServer.entries()].map(([id, tools]) => {
+    // fase chat-limiti (CL6): le app collegate di quel connettore entrano
+    // nella descrizione — sono le parole con cui l'utente (e il messaggio di
+    // sistema dopo il collegamento) chiede gli strumenti: «gmail»
+    const apps = [...new Set(groupApps[id] ?? [])].filter(Boolean)
+    const appsText = apps.length ? ` (connected apps: ${apps.join(', ')})` : ''
+    return {
+      id,
+      description: `${tools.length} tools from the "${id.slice(4)}" connector${appsText}: call find_tools({group: "${id}"}) to load them.`,
+      tools,
+      internalNames: tools.map((t) => t.name),
+      guide: ''
+    }
+  })
 }
 
 /** L'ordine FISSO del nucleo (T1): parlare, computer, web, memory (facciata), document (facciata, R7.2), skill, spawn (R8.2).
@@ -206,7 +221,7 @@ export function assembleTurnTools(input: AssembleTurnToolsInput): AssembleTurnTo
 
   // i gruppi presenti: builtin + (se MCP differiti) i mcp:<server>
   const builtinPresent = presentBuiltinGroups(catalog, input.browserAvailable)
-  const mcpPresent = deferredMcp ? presentMcpGroups(input.mcpToolDefs) : []
+  const mcpPresent = deferredMcp ? presentMcpGroups(input.mcpToolDefs, input.mcpGroupApps) : []
   const deferredIndex: ToolGroupPresent[] = [...builtinPresent.map((b) => b.present), ...mcpPresent]
   const presentById = new Map(deferredIndex.map((g) => [g.id, g]))
 

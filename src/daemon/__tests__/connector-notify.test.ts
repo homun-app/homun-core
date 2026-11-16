@@ -160,7 +160,9 @@ describe('fase mcp-setup (M5.3): notifyComposioAppConnected (via Composio dalla 
     const mine = rows.map((r) => JSON.parse(r.payload_json) as { text: string; initiator?: string; extraMeta?: { ui?: { id: string } } })
       .filter((p) => p.initiator === 'CONNECTOR_CONNECTED' && p.text.includes('via Composio'))
     expect(mine).toHaveLength(1)
-    expect(mine[0]!.text).toBe('[sistema] The user connected Gmail (via Composio): its composio__gmail__* tools are now available (find the exact names with find_tools).')
+    // fase chat-limiti (CL6): la strada indicata FUNZIONA — find_tools con la
+    // query dello slug dell'app trova i suoi strumenti
+    expect(mine[0]!.text).toBe('[sistema] The user connected Gmail (via Composio): its gmail tools are now available (find them with find_tools({query: "gmail"})).')
     expect(mine[0]!.extraMeta?.ui?.id).toBe('sistema.composioAppConnected')
     // la seconda volta NESSUNA nuova notifica (l'offerta è già connessa)
     await notifyComposioAppConnected('gmail', 'Gmail', () => undefined, worker)
