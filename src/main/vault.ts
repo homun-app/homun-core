@@ -10,6 +10,7 @@
 // (setting vault.masterKeySafe, fasi 1–5), la UI appena aperta la decifra via
 // HostBridge, il daemon la porta nel Keychain e rimuove il setting.
 // Nessuna chiave in chiaro su disco, mai nell'argv di un processo.
+import type { VaultItemInfoUi } from '../shared/types'
 import { randomBytes, createCipheriv, createDecipheriv } from 'node:crypto'
 import { getSetting, setSetting, deleteSetting } from './store/db'
 import { VAULT_SERVICE, type SecurityRunner } from '../daemon/keychain'
@@ -246,7 +247,7 @@ export type VaultItemInfo =
   | { kind: 'contact'; id: string; name: string; createdAt: number }
 
 /** listVaultItems (punto 7b): tutto il vault, MAI i valori (hasTotp decifra ma esce solo il booleano). */
-export async function listVaultItems(): Promise<VaultItemInfo[]> {
+export async function listVaultItems(): Promise<VaultItemInfoUi[]> {
   const key = await getMasterKey()
   const loginInfos = logins().map((l) => {
     let hasTotp = false
@@ -258,9 +259,13 @@ export async function listVaultItems(): Promise<VaultItemInfo[]> {
     return { kind: 'login' as const, id: l.id, label: l.label, origins: [...l.origins], hasTotp, createdAt: l.createdAt }
   })
   return [
-    ...secrets().map((s) => ({ kind: 'secret' as const, name: s.name, createdAt: s.createdAt })),
-    ...loginInfos,
-    ...contacts().map((c) => ({ kind: 'contact' as const, id: c.id, name: c.name, createdAt: c.createdAt }))
+    // U8 (fase prima-release, correzione dalla sonda): la UI della Cassaforte
+    // lavora per CHIAVE (VaultItemInfoUi.key) — listVaultItems ora la riporta
+    // per ogni tipo, con la label da mostrare: prima ogni «elimina» chiamava
+    // vaultDeleteItem(kind, "undefined") e non cancellava niente.
+    ...secrets().map((s) => ({ kind: 'secret' as const, key: s.name, label: s.name, name: s.name, createdAt: s.createdAt })),
+    ...loginInfos.map((l) => ({ ...l, key: l.id })),
+    ...contacts().map((c) => ({ kind: 'contact' as const, key: c.id, label: c.name, id: c.id, name: c.name, createdAt: c.createdAt }))
   ]
 }
 

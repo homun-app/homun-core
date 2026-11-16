@@ -191,3 +191,34 @@ describe('migrazione dalla chiave safeStorage (fasi 1–5) — fase rilascio A6:
     expect(key.equals(Buffer.from('a'.repeat(32), 'utf8'))).toBe(true)
   })
 })
+
+
+// U8 (fase prima-release) — correzione dalla sonda: la UI della Cassaforte
+// elimina/modifica per CHIAVE (VaultItemInfoUi.key), ma listVaultItems non
+// la riportava: ogni «elimina» chiamava vaultDeleteItem(kind, "undefined")
+// e non cancellava NIENTE (login, segreti e contatti).
+describe("U8 correzione — listVaultItems riporta la key (e la label) che la UI usa", () => {
+  beforeEach(() => registerStorage())
+  it("ogni voce ha key e label: secret key=name label=name, login key=id, contact key=id label=name", async () => {
+    await vault.saveLogin({ label: 'Portale ASPI', origins: ['https://aspi.example'], username: 'u', password: 'p' })
+    await vault.storeSecret('API_KEY', 'valore-finto')
+    await vault.saveContact({ name: 'Bianchi Rossi', emails: ['b@example.com'] })
+    const items = await vault.listVaultItems()
+    const secret = items.find((i) => i.kind === 'secret' && i.name === 'API_KEY')!
+    expect(secret.key).toBe('API_KEY')
+    expect(secret.label).toBe('API_KEY')
+    const login = items.find((i) => i.kind === 'login' && i.label === 'Portale ASPI')!
+    expect(login.key).toBe(login.id)
+    const contact = items.find((i) => i.kind === 'contact')!
+    expect(contact.key).toBe(contact.id)
+    expect(contact.label).toBe('Bianchi Rossi')
+  })
+
+  it("con la key, deleteVaultItem CANCELLA davvero quello che la UI gli passa", async () => {
+    await vault.saveLogin({ label: 'Da cancellare', origins: ['https://x.example'], username: 'u', password: 'p' })
+    const items = await vault.listVaultItems()
+    const login = items.find((i) => i.kind === 'login')!
+    expect(await vault.deleteVaultItem('login', login.key)).toBe(true)
+    expect((await vault.listVaultItems()).some((i) => i.kind === 'login' && i.key === login.key)).toBe(false)
+  })
+})

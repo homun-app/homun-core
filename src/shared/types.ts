@@ -1854,11 +1854,15 @@ export interface LibraryContentInfo {
 /** Una voce del vault come la vede la UI (mai i valori). */
 export interface VaultItemInfoUi {
   kind: 'secret' | 'login' | 'contact'
+  /** U8: la CHIAVE con cui la UI elimina/modifica (secret: nome; login/contact: id) */
   key: string
   label: string
   origins?: string[]
   hasTotp?: boolean
   createdAt: number
+  /** campi in più che il daemon manda da sempre (diagnosi): l'id del vault, il nome grezzo */
+  id?: string
+  name?: string
 }
 
 /** Una concessione "Sempre per questo sito" di fill_credential, revocabile. */
