@@ -376,6 +376,11 @@ export const UI = {
     id: 'rpc.screenControlFailed',
     message: 'Impossibile avviare il controllo dello schermo: riprova.'
   }),
+  // SV1 (fase schermo-vivo): l'anteprima è sempre in sola lettura
+  rpcScreenPeekControl: msg({
+    id: 'rpc.screenPeekControl',
+    message: 'L’anteprima è in sola lettura: non può controllare lo schermo.'
+  }),
 
   // ---- fase 19b (T2/T3): terminale, file, attività ----
   rpcTerminalUnavailable: msg({

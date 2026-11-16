@@ -35,10 +35,10 @@ import {
   initScreen, resetScreenForTests, screenOpen, consumeScreenCap, handleScreenUpgrade,
   screenRelease, screenBrowserClosed, markTakeoverPending, takeoverPendingOf,
   userControlActive, browserHoldMs, tickScreen, TAKEOVER_DONE_TEXT,
-  SCREEN_CAP_TTL_MS, TAKEOVER_TIMEOUT_MS, SCREEN_HOLD_MAX_MS
+  SCREEN_CAP_TTL_MS, TAKEOVER_TIMEOUT_MS, SCREEN_HOLD_MAX_MS, screenStatus
 } from '../../main/agent/screen'
 import { UiError } from '../../shared/ui-text'
-import { resetBrowserForTests } from '../../main/agent/browser'
+import { resetBrowserForTests, ensureBrowserForScreen, isBrowserRunning } from '../../main/agent/browser'
 import { TEST_TMP_BASE } from '../../test-tmp'
 
 /** Un finto server RFB su socket unix: handshake RFB + echo dei byte. */
@@ -97,15 +97,18 @@ function firstBinaryFrame(parts: Buffer[]): Buffer | null {
   return null
 }
 
+// lo stato condiviso anche dai describe successivi (SV1): orologio finto,
+// registro delle dependency e i due finti server RFB
+let clock = 1_000_000
+const recorded = {
+  turns: [] as Array<{ agentId: string; text: string; initiator: string }>,
+  cards: [] as Array<{ agentId: string; entryId: number; status: string }>
+}
+let server: WsRpcServer
+let view: Awaited<ReturnType<typeof fakeRfbServer>>
+let control: Awaited<ReturnType<typeof fakeRfbServer>>
+
 describe('fase 19a (V9): il ponte dello schermo', () => {
-  let clock = 1_000_000
-  const recorded = {
-    turns: [] as Array<{ agentId: string; text: string; initiator: string }>,
-    cards: [] as Array<{ agentId: string; entryId: number; status: string }>
-  }
-  let server: WsRpcServer
-  let view: Awaited<ReturnType<typeof fakeRfbServer>>
-  let control: Awaited<ReturnType<typeof fakeRfbServer>>
 
   beforeAll(async () => {
     view = await fakeRfbServer(join(FAKE_DIR, 'vnc-view.sock'))
@@ -142,15 +145,18 @@ describe('fase 19a (V9): il ponte dello schermo', () => {
     rmSync(FAKE_DIR, { recursive: true, force: true })
   })
 
-  beforeEach(() => {
+  beforeEach(async () => {
     resetScreenForTests()
+    // SV1: ogni test parte col browser di TUTTI i bot SPENTO (i test peek lo
+    // accendono da soli con ensureBrowserForScreen quando serve)
+    await resetBrowserForTests()
     recorded.turns.length = 0
     recorded.cards.length = 0
     dockerCalls.argvs.length = 0
   })
 
   it('screen:open view: URL con capability sul server ws, NESSUN x11vnc di controllo', async () => {
-    const { url } = await screenOpen('agent_x', 'view')
+    const { url } = (await screenOpen('agent_x', 'view'))!
     expect(url).toBe(`ws://127.0.0.1:${server.port}/screen/${url.split('/screen/')[1]}`)
     expect(url.startsWith(`ws://127.0.0.1:${server.port}/screen/`)).toBe(true)
     // una capability VIEW non avvia il x11vnc di controllo (nessun argv x11vnc)
@@ -164,27 +170,27 @@ describe('fase 19a (V9): il ponte dello schermo', () => {
     })
     // il take-over in attesa SBLOCCA il controllo (il bot l'ha chiesto lui)
     markTakeoverPending('busy_bot', 'login richiesto', 7)
-    const { url } = await screenOpen('busy_bot', 'control')
+    const { url } = (await screenOpen('busy_bot', 'control'))!
     expect(url).toContain('/screen/')
     await expect(screenOpen('busy_bot', 'view')).resolves.toBeTruthy()
   })
 
   it('una capability vale UN upgrade solo; scade dopo 30 s (orologio finto)', async () => {
-    const { url } = await screenOpen('agent_x', 'view')
+    const { url } = (await screenOpen('agent_x', 'view'))!
     const cap = url.split('/screen/')[1]!
-    // valido ora
-    expect(consumeScreenCap(cap, clock)).toEqual({ agentId: 'agent_x', mode: 'view' })
+    // valido ora (SV1: la capability porta anche il segno peek)
+    expect(consumeScreenCap(cap, clock)).toEqual({ agentId: 'agent_x', mode: 'view', peek: false })
     // RIUSO: la seconda volta non vale più (monouso)
     expect(consumeScreenCap(cap, clock)).toBeNull()
     // una capability nuova scade dopo SCREEN_CAP_TTL_MS
-    const { url: url2 } = await screenOpen('agent_x', 'view')
+    const { url: url2 } = (await screenOpen('agent_x', 'view'))!
     const cap2 = url2.split('/screen/')[1]!
     clock += SCREEN_CAP_TTL_MS + 1
     expect(consumeScreenCap(cap2, clock)).toBeNull()
   })
 
   it('i frame BINARI passano intatti nei DUE sensi (client → socket unix → client)', async () => {
-    const { url } = await screenOpen('agent_x', 'view')
+    const { url } = (await screenOpen('agent_x', 'view'))!
     const cap = url.split('/screen/')[1]!
     const parts: Buffer[] = []
     const sock = tcpConnect({ port: server.port, host: '127.0.0.1' }, () => {
@@ -211,7 +217,7 @@ describe('fase 19a (V9): il ponte dello schermo', () => {
   })
 
   it('la chiusura del BROWSER chiude le connessioni dello schermo e invalida le capability', async () => {
-    const { url } = await screenOpen('agent_x', 'view')
+    const { url } = (await screenOpen('agent_x', 'view'))!
     const cap = url.split('/screen/')[1]!
     const parts: Buffer[] = []
     const sock = tcpConnect({ port: server.port, host: '127.0.0.1' }, () => sock.write(upgradeWith(cap)))
@@ -228,7 +234,7 @@ describe('fase 19a (V9): il ponte dello schermo', () => {
   it('il controllo dell\'utente è attivo con una connessione control, e il timer del browser resta sospeso', async () => {
     expect(userControlActive('agent_x')).toBe(false)
     expect(browserHoldMs('agent_x', clock)).toBeNull()
-    const { url } = await screenOpen('agent_x', 'control')
+    const { url } = (await screenOpen('agent_x', 'control'))!
     const cap = url.split('/screen/')[1]!
     const parts: Buffer[] = []
     const sock = tcpConnect({ port: server.port, host: '127.0.0.1' }, () => sock.write(upgradeWith(cap)))
@@ -278,5 +284,69 @@ describe('fase 19a (V9): il ponte dello schermo', () => {
     } finally {
       if (had) process.env.SANDBOT_TEST_FAKE_BROWSER_MCP = had
     }
+  })
+
+  // ---- SV1 (fase schermo-vivo): aprire la vista senza accendere niente ----
+
+  it('SV1: screen:open { peek } con il browser SPENTO torna null: nessun avvio, nessun docker, nessuna connessione al socket', async () => {
+    const before = view.received.length
+    const r = await screenOpen('agent_peek', 'view', { peek: true })
+    expect(r).toBeNull()
+    // il finto browser NON ha ricevuto avvii (nessuna sessione creata)
+    expect(isBrowserRunning('agent_peek')).toBe(false)
+    // nessun x11vnc / docker exec partito, nessun byte verso il socket della vista
+    expect(dockerCalls.argvs).toEqual([])
+    expect(view.received.length).toBe(before)
+  })
+
+  it('con il browser ACCESO torna l\'url come oggi, con la capability segnata peek', async () => {
+    await ensureBrowserForScreen('agent_peek')
+    expect(isBrowserRunning('agent_peek')).toBe(true)
+    const r = await screenOpen('agent_peek', 'view', { peek: true })
+    expect(r).not.toBeNull()
+    const cap = r!.url.split('/screen/')[1]!
+    // la capability consumata porta il segno peek (la connessione non conterà nel timer)
+    expect(consumeScreenCap(cap, clock)).toMatchObject({ agentId: 'agent_peek', mode: 'view', peek: true })
+  })
+
+  it('una connessione peek APERTA non sospende il timer (browserHoldMs null, held false); una view normale sì', async () => {
+    await ensureBrowserForScreen('agent_peek')
+    const peek = await screenOpen('agent_peek', 'view', { peek: true })
+    const cap = peek!.url.split('/screen/')[1]!
+    const parts: Buffer[] = []
+    const sock = tcpConnect({ port: server.port, host: '127.0.0.1' }, () => sock.write(upgradeWith(cap)))
+    sock.on('data', (d: Buffer) => parts.push(d))
+    await vi.waitFor(() => expect(Buffer.concat(parts).includes('101 Switching Protocols')).toBe(true))
+    // la vista peek NON conta: il timer di inattività va avanti come se non ci fosse
+    expect(browserHoldMs('agent_peek', clock)).toBeNull()
+    expect((await screenStatus('agent_peek')).held).toBeFalsy()
+    // una view NORMALE invece sospende il timer (come oggi)
+    const normal = await screenOpen('agent_peek', 'view')
+    const cap2 = normal!.url.split('/screen/')[1]!
+    const parts2: Buffer[] = []
+    const sock2 = tcpConnect({ port: server.port, host: '127.0.0.1' }, () => sock2.write(upgradeWith(cap2)))
+    sock2.on('data', (d: Buffer) => parts2.push(d))
+    await vi.waitFor(() => expect(Buffer.concat(parts2).includes('101 Switching Protocols')).toBe(true))
+    expect(browserHoldMs('agent_peek', clock)).toBe(SCREEN_HOLD_MAX_MS)
+    sock.destroy()
+    sock2.destroy()
+  })
+
+  it('una capability peek con mode control si rifiuta (l\'anteprima è sempre in sola lettura)', async () => {
+    await ensureBrowserForScreen('agent_peek')
+    await expect(screenOpen('agent_peek', 'control', { peek: true })).rejects.toBeInstanceOf(UiError)
+  })
+
+  it('quando il browser si chiude la connessione peek si chiude come le altre', async () => {
+    await ensureBrowserForScreen('agent_peek')
+    const peek = await screenOpen('agent_peek', 'view', { peek: true })
+    const cap = peek!.url.split('/screen/')[1]!
+    const parts: Buffer[] = []
+    const sock = tcpConnect({ port: server.port, host: '127.0.0.1' }, () => sock.write(upgradeWith(cap)))
+    sock.on('data', (d: Buffer) => parts.push(d))
+    await vi.waitFor(() => expect(Buffer.concat(parts).includes('101 Switching Protocols')).toBe(true))
+    const closed = new Promise<void>((r) => sock.on('close', () => r()))
+    screenBrowserClosed('agent_peek')
+    await closed
   })
 })

@@ -1107,8 +1107,11 @@ export interface SandbotApi {
    * torna l'URL WebSocket con una capability MONOUSO (scade in 30 s); con
    * mode 'control' su bot occupato risponde rpcScreenBotBusy. screen:release
    * chiude il controllo (e riapre il turno se c'era una richiesta in attesa).
+   * SV1 (fase schermo-vivo): con `{ peek: true }` (solo view) l'apertura non
+   * avvia MAI il browser — spento torna null, accesa torna l'url di oggi con
+   * una connessione che NON sospende il timer di inattività.
    */
-  screenOpen(agentId: string, mode: 'view' | 'control'): Promise<{ url: string }>
+  screenOpen(agentId: string, mode: 'view' | 'control', opts?: { peek?: boolean }): Promise<{ url: string } | null>
   screenRelease(agentId: string, note?: string): Promise<{ ok: boolean }>
   screenStatus(agentId: string): Promise<ScreenStatus>
   /**

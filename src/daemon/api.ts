@@ -572,9 +572,13 @@ export function buildApiMethods(
     },
 
     // ---- fase 19a (V3): lo schermo del bot ----
-    'screen:open': async ([agentId, mode]) => {
+    'screen:open': async ([agentId, mode, opts]) => {
       const { screenOpen } = await import('../main/agent/screen')
-      return screenOpen(String(agentId ?? ''), mode === 'control' ? 'control' : 'view')
+      return screenOpen(
+        String(agentId ?? ''),
+        mode === 'control' ? 'control' : 'view',
+        opts && typeof opts === 'object' && (opts as { peek?: unknown }).peek === true ? { peek: true } : undefined
+      )
     },
     'screen:release': async ([agentId, note]) => {
       const { screenRelease } = await import('../main/agent/screen')

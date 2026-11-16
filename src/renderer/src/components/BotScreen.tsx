@@ -53,8 +53,16 @@ export function BotScreen({ agentId, onClose, inPanel = false }: { agentId: stri
     let timer: ReturnType<typeof setTimeout> | undefined
     try {
       // screen:open avvia il browser del bot (lazy) e torna l'URL con la
-      // capability monouso; su bot occupato risponde rpcScreenBotBusy
-      const { url } = await api.screenOpen(agentId, wanted)
+      // capability monouso; su bot occupato risponde rpcScreenBotBusy.
+      // SV1: senza opts non torna MAI null (il browser lo avvia lui), il
+      // controllo del tipo resta per i chiamanti con { peek } / { noLaunch }
+      const opened = await api.screenOpen(agentId, wanted)
+      if (!opened) {
+        setPhase('error')
+        setError(t`Il bot non ha uno schermo aperto.`)
+        return
+      }
+      const { url } = opened
       setMode(wanted)
       setPhase('connecting')
       const el = holder.current

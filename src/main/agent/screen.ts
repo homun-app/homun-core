@@ -110,12 +110,16 @@ interface ScreenCap {
   mode: 'view' | 'control'
   expiresAt: number
   used: boolean
+  /** SV1: capability di un'ANTEPRIMA — la connessione non conterà nel timer. */
+  peek?: boolean
 }
 const caps = new Map<string, ScreenCap>()
 
 interface ScreenConn {
   agentId: string
   mode: 'view' | 'control'
+  /** SV1: connessione di un'anteprima (non sospende il timer del browser). */
+  peek?: boolean
   /** chiude socket e processo del ponte, idempotente. */
   destroy: () => void
 }
@@ -156,12 +160,14 @@ async function emitStatus(agentId: string): Promise<void> {
 /**
  * Quanto tempo ancora il browser di quel bot deve restare vivo OLTRE il timer
  * di inattività: null = nessuna sospensione (si chiude pure). La sospensione
- * vale mentre c'è una vista o un controllo aperto o una richiesta di presa di
- * controllo in attesa, e dura AL MASSIMO 30 minuti dal primo istante.
+ * vale mentre c'è una vista o un controllo aperto o una richiesta di presa
+ * di controllo in attesa, e dura AL MASSIMO 30 minuti dal primo istante.
+ * SV1 (fase schermo-vivo): le connessioni PEEK (le anteprime) non contano —
+ * guardare non tiene acceso niente.
  */
 export function browserHoldMs(agentId: string, now: number): number | null {
   const held =
-    [...conns].some((c) => c.agentId === agentId) || takeovers.has(agentId)
+    [...conns].some((c) => c.agentId === agentId && !c.peek) || takeovers.has(agentId)
   if (!held) {
     holdSince.delete(agentId)
     return null
@@ -172,38 +178,58 @@ export function browserHoldMs(agentId: string, now: number): number | null {
 
 // ---- l'apertura: screen:open (V3.1) ----
 
+/** Le opzioni di screen:open (SV1). */
+export interface ScreenOpenOpts {
+  /**
+   * SV1: è un'ANTEPRIMA. Non avvia MAI il browser (torna null se è spento, senza
+   * toccare niente), la sua connessione è sempre in sola lettura e NON sospende
+   * il timer di inattività del browser. Solo con mode = 'view'.
+   */
+  peek?: boolean
+}
+
 /**
- * RPC `screen:open [agentId, mode]`: avvia il browser del bot se non c'è (lazy,
- * about:blank), aspetta il socket della vista e — per `control` — avvia il
- * secondo x11vnc senza -viewonly. Torna l'URL WebSocket con una capability
+ * RPC `screen:open [agentId, mode, opts?]`: avvia il browser del bot se non c'è
+ * (lazy, about:blank), aspetta il socket della vista e — per `control` — avvia
+ * il secondo x11vnc senza -viewonly. Torna l'URL WebSocket con una capability
  * MONOUSO che scade dopo 30 s. `control` su bot con turno in corso (senza una
  * sua richiesta in attesa) → UiError rpcScreenBotBusy.
+ *
+ * SV1 (fase schermo-vivo): con `{ peek: true }` l'apertura non accende NIENTE:
+ * browser spento → null (nessun ensureBrowserForScreen, nessun x11vnc, nessuna
+ * connessione); browser acceso → l'url di oggi, con la capability segnata peek.
+ * Un'anteprima non naviga nemmeno su about:blank: guardare non cambia lo stato.
  */
-export async function screenOpen(agentId: string, mode: 'view' | 'control'): Promise<{ url: string }> {
+export async function screenOpen(agentId: string, mode: 'view' | 'control', opts: ScreenOpenOpts = {}): Promise<{ url: string } | null> {
   const browser = await import('./browser')
   if (!browser.browserAvailable()) {
     throw new UiError(browser.BROWSER_UNAVAILABLE, ui(UI.rpcScreenUnavailable))
   }
+  if (opts.peek && mode === 'control') {
+    throw new UiError('peek is read-only: the preview cannot take control', ui(UI.rpcScreenPeekControl))
+  }
   if (mode === 'control' && deps.isBusy(agentId) && !takeovers.has(agentId)) {
     throw new UiError('The bot is working: stop it before taking control.', ui(UI.rpcScreenBotBusy))
   }
-  await browser.ensureBrowserForScreen(agentId)
+  const running = browser.isBrowserRunning(agentId)
+  if (opts.peek && !running) return null // l'anteprima non accende niente
+  if (!running) await browser.ensureBrowserForScreen(agentId)
   await waitForSocket(browserViewSocket(boxOwnerOf(agentId)))
   if (mode === 'control') await ensureControlVnc(agentId)
   const cap = randomBytes(32).toString('base64url')
-  caps.set(cap, { agentId, mode, expiresAt: deps.now() + SCREEN_CAP_TTL_MS, used: false })
+  caps.set(cap, { agentId, mode, expiresAt: deps.now() + SCREEN_CAP_TTL_MS, used: false, ...(opts.peek ? { peek: true } : {}) })
   void emitStatus(agentId)
   return { url: `ws://127.0.0.1:${deps.wsPort}/screen/${cap}` }
 }
 
 /** Consuma una capability: valida, non ancora usata e non scaduta (V3.2). */
-export function consumeScreenCap(capId: string, now: number): { agentId: string; mode: 'view' | 'control' } | null {
+export function consumeScreenCap(capId: string, now: number): { agentId: string; mode: 'view' | 'control'; peek: boolean } | null {
   const cap = caps.get(capId)
   if (!cap) return null
   caps.delete(capId) // MONOUSO: vale un upgrade, riuso o scadenza la bruciano
   if (cap.used || now > cap.expiresAt) return null
   cap.used = true
-  return { agentId: cap.agentId, mode: cap.mode }
+  return { agentId: cap.agentId, mode: cap.mode, peek: cap.peek === true }
 }
 
 // ---- i socket del desktop: attesa e x11vnc di controllo (V3.1) ----
@@ -322,7 +348,7 @@ export function handleScreenUpgrade(capId: string, req: IncomingMessage, socket:
     conns.delete(conn)
     void afterClose(target)
   }
-  const conn: ScreenConn = { agentId: target.agentId, mode: target.mode, destroy: teardown }
+  const conn: ScreenConn = { agentId: target.agentId, mode: target.mode, ...(target.peek ? { peek: true } : {}), destroy: teardown }
   conns.add(conn)
 
   // client → socket unix: i frame BINARI (frammentati e no) vanno allo stdin

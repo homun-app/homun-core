@@ -3869,6 +3869,11 @@ msgstr "L’aiutante «{0}» chiede:"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
+msgid "rpc.screenPeekControl"
+msgstr "L’anteprima è in sola lettura: non può controllare lo schermo."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
 msgid "skill.err.catalogPreviewMissing"
 msgstr "L’anteprima non è più valida: chiudi e riapri la voce."
 

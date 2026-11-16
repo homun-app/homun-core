@@ -16,7 +16,8 @@ const api: SandbotApi = {
   interrupt: (agentId) => ipcRenderer.invoke('chat:interrupt', agentId),
   widgetRespond: (agentId, entryId, value) => ipcRenderer.invoke('widget:respond', agentId, entryId, value),
   // fase 19a: lo schermo del bot (vista dal vivo, presa di controllo, stato)
-  screenOpen: (agentId, mode) => ipcRenderer.invoke('screen:open', agentId, mode),
+  // SV1 (fase schermo-vivo): opts.peek = anteprima che non avvia mai il browser
+  screenOpen: (agentId, mode, opts) => ipcRenderer.invoke('screen:open', agentId, mode, opts),
   screenRelease: (agentId, note) => ipcRenderer.invoke('screen:release', agentId, note),
   screenStatus: (agentId) => ipcRenderer.invoke('screen:status', agentId),
   // fase 19b (T2): il terminale del bot (solo docker)

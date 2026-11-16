@@ -3869,6 +3869,11 @@ msgstr "The helper “{0}” is asking:"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
+msgid "rpc.screenPeekControl"
+msgstr "The preview is read-only: it cannot control the screen."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
 msgid "skill.err.catalogPreviewMissing"
 msgstr "The preview is no longer valid: close and reopen the entry."
 
