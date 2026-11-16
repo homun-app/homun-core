@@ -5,15 +5,15 @@
 // Computer nella scheda del pannello. Le voci tool-call/tool-result NON
 // compaiono più: mentre il bot lavora lo racconta la MASCOTTE con la mezza
 // riga d'attività (activityPhrase) e col popover dei passaggi; dopo il turno
-// restano dietro la «ⓘ» del messaggio (o in Impostazioni › Generali, con la
-// voce di debug che rimette le righe di una volta).
+// li rimette solo la voce di debug di Impostazioni › Generali. U1 (fase
+// prima-release): sotto il messaggio resta il solo «Copia» con la spunta.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useLingui, Trans, Plural } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Paperclip, PanelRight, ArrowUp, Square, Copy, Quote, Info, Brain } from 'lucide-react'
+import { Paperclip, PanelRight, ArrowUp, Square, Copy, Check, Brain } from 'lucide-react'
 import { api, useStore, useResolvedModel } from '../store'
 // fase 17c (C2): il testo di notice/eventi/system dal meta.ui (lingua attiva)
 import { uiTextOf, uiTextOfTools } from '../lib/ui-text'
@@ -239,59 +239,39 @@ function LiveReplyBubble({ agentId }: { agentId: string }) {
   )
 }
 
-/** Le azioni al passaggio su un messaggio del bot: cita, copia, ⓘ passaggi. */
+/** U1 (fase prima-release): per quanto tempo la spunta del «Copia» resta accesa. */
+const COPY_FEEDBACK_MS = 1500
+
+/** Le azioni al passaggio su un messaggio del bot: solo «Copia» (i bottoni
+ *  di citazione e di passaggi, U1 fase prima-release, non avevano un uso
+ *  chiaro). «Copia» risponde: l'icona diventa una spunta per
+ *  COPY_FEEDBACK_MS col tooltip «Copiato»; se il clipboard fallisce, la
+ *  spunta non compare. */
 function MessageActions({ entry }: { entry: TranscriptEntry }) {
   const { t } = useLingui()
-  const setQuote = useStore((s) => s.setQuote)
-  const [steps, setSteps] = useState(false)
-  const quote = entry.content.slice(0, 160)
+  const [copied, setCopied] = useState(false)
+  const onCopy = () => {
+    void navigator.clipboard?.writeText(entry.content).then(
+      () => {
+        setCopied(true)
+        setTimeout(() => setCopied(false), COPY_FEEDBACK_MS)
+      },
+      () => undefined // il clipboard ha detto no: niente spunta
+    )
+  }
+  const Icon = copied ? Check : Copy
   return (
-    // il riquadro dei passaggi vive dentro questa riga: aperto, la riga resta
-    // visibile anche senza il mouse sopra il messaggio (prima spariva aperto)
-    <div className={`relative flex flex-col items-center self-end transition ${steps ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
-      <div className="flex items-center gap-0.5 text-muted-foreground">
-        <button
-          className="grid size-7 place-items-center rounded-full transition hover:bg-muted hover:text-foreground"
-          title={t`Rispondi citando`}
-          aria-label={t`Rispondi citando`}
-          onClick={() => setQuote(quote)}
-        >
-          <Quote className="size-3.5" />
-        </button>
-        <button
-          className="grid size-7 place-items-center rounded-full transition hover:bg-muted hover:text-foreground"
-          title={t`Copia`}
-          aria-label={t`Copia`}
-          onClick={() => void navigator.clipboard?.writeText(entry.content).catch(() => undefined)}
-        >
-          <Copy className="size-3.5" />
-        </button>
-        <button
-          className="grid size-7 place-items-center rounded-full transition hover:bg-muted hover:text-foreground"
-          title={t`Passaggi del turno`}
-          aria-label={t`Passaggi del turno`}
-          aria-expanded={steps}
-          onClick={() => setSteps((v) => !v)}
-        >
-          <Info className="size-3.5" />
-        </button>
-      </div>
-      {steps && <StepsPopoverBox entry={entry} />}
+    <div className="flex items-center self-end opacity-0 transition group-hover:opacity-100">
+      <button
+        className="grid size-7 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
+        data-testid="message-copy"
+        title={copied ? t`Copiato` : t`Copia`}
+        aria-label={copied ? t`Copiato` : t`Copia`}
+        onClick={onCopy}
+      >
+        <Icon className="size-3.5" />
+      </button>
     </div>
-  )
-}
-
-/** Il popover dei passaggi agganciato a un messaggio del turno finito —
- *  correzioni 2 (Q4): ancorato a destra alle azioni, dentro la finestra.
- *  V4 (prova vera): verso l'ALTO quando sotto non c'è spazio, come quello
- *  della mascotte (PopoverBox). */
-function StepsPopoverBox({ entry }: { entry: TranscriptEntry }) {
-  const entries = useStore((s) => s.entries)
-  const [up, setUp] = useState(false)
-  return (
-    <PopoverBox up={up} setUp={setUp} align="right">
-      <StepsPopover group={stepsOfTurn(entries, { entryId: entry.id })} live={false} />
-    </PopoverBox>
   )
 }
 
@@ -304,8 +284,6 @@ export function Chat({ layout }: { layout?: LayoutResult }) {
   const interrupt = useStore((s) => s.interrupt)
   const setTyping = useStore((s) => s.setTyping)
   const debugSteps = useStore((s) => s.debugSteps)
-  const quote = useStore((s) => s.quote)
-  const setQuote = useStore((s) => s.setQuote)
   // fase pagine (G2): la pagina aperta copre il transcript, non il compositore;
   // G4: la precompilazione del compositore (suggerimento «Crea una routine»)
   const openPageInfo = useStore((s) => s.openPageInfo)
@@ -470,15 +448,6 @@ export function Chat({ layout }: { layout?: LayoutResult }) {
       else localStorage.removeItem(draftKey)
     }
   }, [draftKey, text])
-
-  // «rispondi citando»: la citazione finisce nel campo (S3.2)
-  useEffect(() => {
-    if (quote && activeId) {
-      setText((cur) => `${cur ? cur + '\n' : ''}> ${quote.replace(/\n/g, '\n> ')}\n`)
-      setQuote(null)
-      setTyping(activeId)
-    }
-  }, [quote, activeId, setQuote, setTyping])
 
   // fase pagine (G4): la precompilazione del compositore (il suggerimento
   // «Crea una routine» scrive la richiesta nel campo, pronta da inviare)

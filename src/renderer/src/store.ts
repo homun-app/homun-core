@@ -204,9 +204,6 @@ interface Store {
   /** fase skill: il filtro bot della finestra «Skill» (null = tutti i bot) */
   skillsFilterAgent: string | null
   setSkillsFilterAgent(v: string | null): void
-  /** fase 16b (S3.2): «rispondi citando» — la citazione da inserire nel composer */
-  quote: string | null
-  setQuote(text: string | null): void
   /**
    * Fase 16b (S3.3): «Mostra i passaggi in chat» (Impostazioni › Generali,
    * default spenta) — rimette le righe tool-call/tool-result di oggi.
@@ -451,7 +448,6 @@ export const useStore = create<Store>((set, get) => ({
   memoryProgress: null,
   skillsOpen: false,
   skillsFilterAgent: null,
-  quote: null,
   botPanelTabRequest: null,
   // fase pagine (G3): il foglio Impostazioni del bot (chiuso, nessun focus)
   botSheetOpen: false,
@@ -1110,10 +1106,6 @@ export const useStore = create<Store>((set, get) => ({
   // fase 16 (U3): solo i cambiamenti di stato passano (niente set per tasto)
   setTyping(agentId) {
     if (get().typingAgentId !== agentId) set({ typingAgentId: agentId })
-  },
-
-  setQuote(text) {
-    set({ quote: text })
   },
 
   clearBotPanelTabRequest() {
