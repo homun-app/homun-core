@@ -5,7 +5,7 @@
 // cancellato, NESSUN open), gli override di prova ignorati nell'app
 // impacchettata e lo spazio insufficiente. L'esecutore gira con dipendenze
 // INIETTABILI: nessuno spawn, nessuna rete (il fetch è finto).
-import { describe, expect, it, beforeAll } from 'vitest'
+import { describe, expect, it, beforeAll, afterEach } from 'vitest'
 import { createHash } from 'node:crypto'
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, statSync } from 'node:fs'
 import { join } from 'node:path'
@@ -28,6 +28,17 @@ import {
 // OBD2: il piano vive in shared (lo usano daemon e UI)
 import { BOX_SETUP_ROW_IDS } from '../../shared/box-setup-plan'
 import { BOX_BUILD_ESTIMATED_BYTES } from '../../main/sandbox/disk-space'
+
+// T2 (fase prima-release): l'harness registra ogni cartella che crea e un
+// afterEach la cancella — ogni temporanea si cancella a fine test (il
+// controllo di fine corsa T1, src/test-tmp-guard.ts, lo verifica).
+const createdDirs: string[] = []
+afterEach(async () => {
+  // i timer corti dell'harness (poll 5–10 ms, il ritmo dell'intervallo finto
+  // è 15 ms) si chiudono PRIMA della pulizia: niente scrive più in h.dir
+  await new Promise((r) => setTimeout(r, 25))
+  for (const d of createdDirs.splice(0)) rmSync(d, { recursive: true, force: true })
+})
 
 const st = (patch: Partial<BoxSetupState>): BoxSetupState => ({ ...INITIAL_BOX_SETUP, ...patch })
 const next = (state: BoxSetupState, event: BoxSetupEvent): BoxSetupState => boxSetupNext(state, event)
@@ -439,6 +450,7 @@ const harness = (over: {
   kernelSetStderr?: string
 } = {}): Harness => {
   const dir = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-box-setup-test-'))
+  createdDirs.push(dir)
   const settings = new Map<string, unknown>()
   const events: SandbotEvent[] = []
   const opened: string[] = []
