@@ -165,7 +165,7 @@ export function BotScreen({ agentId, onClose, inPanel = false }: { agentId: stri
 
   return (
     <section
-      className={inPanel ? 'flex h-full flex-col' : 'mx-5 mt-3 flex flex-col overflow-hidden rounded-xl border bg-card shadow-soft'}
+      className={inPanel ? 'flex h-full flex-col overflow-y-auto scroll-thin' : 'mx-5 mt-3 flex flex-col overflow-hidden rounded-xl border bg-card shadow-soft'}
       style={inPanel ? { borderColor: mode === 'control' && phase === 'connected' ? color : undefined } : undefined}
     >
       <header className="flex items-center justify-between gap-3 border-b border-border px-4 py-2">
@@ -200,6 +200,20 @@ export function BotScreen({ agentId, onClose, inPanel = false }: { agentId: stri
                 <PictureInPicture2 className="size-3.5" aria-hidden="true" />
                 <Trans>Stacca</Trans>
               </span>
+            </button>
+          )}
+          {/* U9 (fase prima-release): in controllo «Ho finito» sta QUI, nel
+              posto di «Prendi il controllo», col colore del bot — col piede
+              fuori vista non c'era più modo di chiudere */}
+          {mode === 'control' && (
+            <button
+              className="shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold text-background transition hover:opacity-90"
+              data-testid="bot-screen-done"
+              style={{ background: color }}
+              title={t`Chiude il controllo e torna alla vista`}
+              onClick={() => { void release() }}
+            >
+              <Trans>Ho finito</Trans>
             </button>
           )}
           {phase === 'connected' && mode === 'view' && (
@@ -249,7 +263,7 @@ export function BotScreen({ agentId, onClose, inPanel = false }: { agentId: stri
           </button>
         </div>
       ) : (
-        <div ref={holder} className="min-h-[320px] flex-1 bg-black/90" />
+        <div ref={holder} className="min-h-0 flex-1 bg-black/90" />
       )}
 
       {mode === 'control' && phase === 'connected' && (
@@ -260,13 +274,6 @@ export function BotScreen({ agentId, onClose, inPanel = false }: { agentId: stri
             value={note}
             onChange={(e) => setNote(e.target.value)}
           />
-          <button
-            className="rounded-lg px-3 py-1.5 text-xs font-medium text-background transition hover:opacity-90"
-            style={{ background: color }}
-            onClick={() => void release()}
-          >
-            <Trans>Ho finito</Trans>
-          </button>
         </footer>
       )}
 
