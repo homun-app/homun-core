@@ -1,0 +1,12 @@
+$ container builder delete --help
+OVERVIEW: Delete the builder container
+
+USAGE: container builder delete [--debug] [--force]
+
+OPTIONS:
+  --debug                 Enable debug output [environment: CONTAINER_DEBUG]
+  -f, --force             Delete the builder container without prompting
+  --version               Show the version.
+  -h, --help              Show help information.
+
+[exit 0]

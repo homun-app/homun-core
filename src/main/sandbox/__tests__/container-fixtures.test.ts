@@ -20,6 +20,12 @@ const SRC = '/Users/fabio/SandBot/prompts/fixtures/container-1.7.1'
 /** Gli sha256 delle fixture copiate (byte per byte, radice /Users/test). */
 const SHA256: Record<string, string> = {
   'build-help.txt': 'e8f8e0e40d6e95aa45b8c74b17d63bfc4436bc31e1b29dd8676fcf85c672bbcd',
+  // U4 (fase prima-release): i dati VERI della spec (df con reclaimable
+  // 6.946.705.408 e ls col buildkit FERMO) e la help di builder delete
+  // trascritta dalla citazione della spec
+  'builder-delete-help.txt': 'c459b41af4a3ad58afbde19eb5ba3abc81a83fc918431af625a374301ebef4d0',
+  'ls-a-prima-release.txt': 'cb7fb08036bd1506e73d8eaded8b4dfa76a4e6a380195020252a83c48d95db26',
+  'system-df-prima-release.txt': '4f427769a7bafde0c0dd3c4e0882fbe844b2b8aa5c14e02e6b7d13de27751e24',
   'cp-help.txt': 'e3e876fe12975530a926cf21aacbbc2525fdbf11af343673901babf7739fdf35',
   'exec-env.txt': '36425bfca5a8522b84b478ec363749b283d648c2adc01b397ba5aca9547beea2',
   'exec-help.txt': 'f0c579a0a79ae45465a00af0d86f9f263a3761791e5c841e9b6f8d11c20b7600',

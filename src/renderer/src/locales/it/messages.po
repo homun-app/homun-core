@@ -3282,6 +3282,10 @@ msgstr "Il computer dei bot ora è UNO solo, condiviso (radice: {root}).\n"
 msgid "Il computer dei bot senza Docker usa Apple container: lo installa Apple col suo pacchetto firmato (chiede la password del Mac)."
 msgstr "Il computer dei bot senza Docker usa Apple container: lo installa Apple col suo pacchetto firmato (chiede la password del Mac)."
 
+#: src/renderer/src/components/settings/DiskSpaceSection.tsx
+msgid "Il computer dei bot si sta costruendo: riprova quando ha finito"
+msgstr "Il computer dei bot si sta costruendo: riprova quando ha finito"
+
 #: src/renderer/src/components/GuideComputerStep.tsx
 msgid "Il computer del bot"
 msgstr "Il computer del bot"
@@ -4147,9 +4151,18 @@ msgstr "Leggo e cerco da solo. Prima di cambiare qualcosa, ti chiedo."
 msgid "Libera spazio"
 msgstr "Libera spazio"
 
+#. placeholder {0}: fmtBytes(outcome.bytes)
+#: src/renderer/src/components/settings/DiskSpaceSection.tsx
+msgid "Liberati {0}"
+msgstr "Liberati {0}"
+
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Liberati {freed} GB."
 msgstr "Liberati {freed} GB."
+
+#: src/renderer/src/components/settings/DiskSpaceSection.tsx
+msgid "Libero spazio…"
+msgstr "Libero spazio…"
 
 #: src/renderer/src/components/LibraryPanel.tsx
 #: src/renderer/src/components/RightPanel.tsx
@@ -4866,6 +4879,10 @@ msgstr "Nome utente"
 #: src/shared/ui-messages.ts
 msgid "localModel.noSpace"
 msgstr "Non c’è abbastanza spazio su disco per il modello integrato: servono {needed} GB liberi (liberi ora: {free} GB)."
+
+#: src/renderer/src/components/settings/DiskSpaceSection.tsx
+msgid "Non c'era niente da liberare."
+msgstr "Non c'era niente da liberare."
 
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 msgid "Non chiedere"

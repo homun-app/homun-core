@@ -105,6 +105,20 @@ export function reclaimableBytes(df: EngineDf): number {
   return df.imagesReclaimableBytes + df.buildCacheReclaimableBytes + df.containersReclaimableBytes
 }
 
+/**
+ * U4 (fase prima-release): la stima della pulizia Apple conta SOLO ciò che
+ * la pulizia toglie davvero. containers.reclaimable si conta SOLO se tutti
+ * i container fermi sono builder (appleStoppedAllBuildersFromLsJson): sono
+ * i 6,9 GB del buildkit fermo che `container builder delete` libera; con
+ * un fermo che non è builder (il box) la parte container è sconosciuta e
+ * NON si conta. Le immagini non si contano: le orfane di `image prune`
+ * senza --all non hanno dimensione separata nel df. null = df mancante.
+ */
+export function appleCleanupReclaimableBytes(df: EngineDf | null, stoppedAllBuilders: boolean | null): number | null {
+  if (!df) return null
+  return stoppedAllBuilders === true ? df.containersReclaimableBytes : 0
+}
+
 /** Il margine di spazio libero che resta SEMPRE libero: 5 GB. */
 export const DISK_MARGIN_BYTES = 5_000_000_000
 
@@ -142,11 +156,13 @@ export function diskSpaceRows(input: {
   boxImageBytes: number | null
   modelBytes: number | null
   memoryModelBytes: number | null
+  /** U4: la stima del motore Apple (appleCleanupReclaimableBytes) vince sulla somma grezza; undefined = come oggi */
+  reclaimable?: number | null
 }): DiskSpaceRow[] {
   return [
     { id: 'box-image', bytes: input.boxImageBytes ?? input.df?.imagesBytes ?? null, destructive: true },
     { id: 'box-files', bytes: input.df?.volumesBytes ?? null, destructive: true },
-    { id: 'reclaimable', bytes: input.df ? reclaimableBytes(input.df) : null, destructive: false },
+    { id: 'reclaimable', bytes: input.reclaimable !== undefined ? input.reclaimable : input.df ? reclaimableBytes(input.df) : null, destructive: false },
     { id: 'model', bytes: input.modelBytes, destructive: true },
     { id: 'memory-model', bytes: input.memoryModelBytes, destructive: true }
   ]

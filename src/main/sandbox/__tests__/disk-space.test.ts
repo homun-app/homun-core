@@ -4,11 +4,17 @@
 // DOPO una build riuscita; l'immagine VECCHIA si elimina quando la nuova è
 // pronta e il box è ripartito) — col runner finto, senza Docker.
 import { describe, expect, it, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const TMP = mkdtempSync(join(tmpdir(), 'sandbot-disk-space-test-'))
+const FIXTURES = join(import.meta.dirname, 'fixtures', 'container-1.7.1')
+/** Il corpo di una fixture: senza la riga `$ container…` e senza `[exit N]`. */
+const fixture = (name: string): string => {
+  const text = readFileSync(join(FIXTURES, name), 'utf8')
+  return text.replace(/^\$ container[^\n]*\n/, '').replace(/\[exit \d+\]\n?$/, '').trim()
+}
 const mode = vi.hoisted(() => ({ value: 'host' as string }))
 vi.mock('../../store/db', () => ({
   getSetting: (key: string, fallback: unknown) => (key === 'sandbox.mode' ? mode.value : fallback),
@@ -190,5 +196,32 @@ describe('BX3: i comportamenti automatici dell\'ensure del box', () => {
     expect(disk.freeDiskBytesOf('/')).toBe(123)
     disk.setDiskSpaceProbeForTests(null)
     expect(disk.freeDiskBytesOf('/')).toBeGreaterThan(1_000_000_000) // il disco vero ha più di 1 GB
+  })
+})
+
+describe("U4 (fase prima-release): la stima Apple conta SOLO ciò che la pulizia toglie davvero", () => {
+  // i NUMERI VERI del Mac dell'utente (fixture system-df-prima-release): i
+  // 6,9 GB «recuperabili» sono il container buildkit FERMO, i 244 MB di
+  // immagini sono l'immagine base di Playwright che NON va tolta
+  const df = disk.parseDfJson(fixture('system-df-prima-release.txt'))!
+
+  it("tutti i FERMI sono builder → si contano SOLO i containers.reclaimable (6.946.705.408), le immagini NON si contano", () => {
+    expect(disk.appleCleanupReclaimableBytes(df, true)).toBe(6_946_705_408)
+  })
+
+  it("con il BOX fermo (un fermo NON è builder) la parte container è sconosciuta e NON si conta: 0", () => {
+    expect(disk.appleCleanupReclaimableBytes(df, false)).toBe(0)
+  })
+
+  it("lettura ls mancata → 0 (non si conta); df mancante → null", () => {
+    expect(disk.appleCleanupReclaimableBytes(df, null)).toBe(0)
+    expect(disk.appleCleanupReclaimableBytes(null, true)).toBe(null)
+  })
+
+  it("diskSpaceRows accetta la stima Apple come valore della riga reclaimable (l'override vince su reclaimableBytes)", () => {
+    const rows = disk.diskSpaceRows({ df, boxImageBytes: null, modelBytes: null, memoryModelBytes: null, reclaimable: disk.appleCleanupReclaimableBytes(df, true) })
+    expect(rows.find((r) => r.id === 'reclaimable')!.bytes).toBe(6_946_705_408)
+    const oggi = disk.diskSpaceRows({ df, boxImageBytes: null, modelBytes: null, memoryModelBytes: null })
+    expect(oggi.find((r) => r.id === 'reclaimable')!.bytes).toBe(244_289_536 + 6_946_705_408)
   })
 })

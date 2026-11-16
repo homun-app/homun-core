@@ -1313,7 +1313,8 @@ export interface SandbotApi {
   boxDiskSpace(): Promise<DiskSpaceInfo>
   boxImageRemove(): Promise<{ ok: boolean; error?: string }>
   boxBoxFilesRemove(): Promise<{ ok: boolean; error?: string }>
-  boxSpacePrune(): Promise<{ ok: boolean; error?: string }>
+  /** U4: freedBytes = spazio libero del disco DOPO meno PRIMA (null se non misurabile). */
+  boxSpacePrune(): Promise<{ ok: boolean; error?: string; freedBytes?: number | null }>
   /** CC2 (fase computer-card): lo stato del box (la RPC rilegge e risponde). */
   boxRuntime(): Promise<BoxRuntime>
   memoryModelRemove(): Promise<{ freedBytes: number }>

@@ -46,7 +46,11 @@ const HELP_FILES: Record<string, string> = {
   'network-inspect-help.txt': 'network inspect',
   'image-inspect-help.txt': 'image inspect',
   'image-prune-help.txt': 'image prune',
-  'image-delete-help.txt': 'image delete'
+  'image-delete-help.txt': 'image delete',
+  // U4 (fase prima-release): la cancellazione del builder fermo — help
+  // trascritta dalla spec (OVERVIEW e USAGE citate dal vivo, blocco OPZIONI
+  // con il boilerplate della famiglia; sandbot non usa --force)
+  'builder-delete-help.txt': 'builder delete'
 }
 const helps: Record<string, string> = Object.fromEntries(
   Object.entries(HELP_FILES).map(([file, sub]) => [sub, readFileSync(join(FIXTURES, file), 'utf8')])
@@ -133,6 +137,7 @@ const S: Record<string, { args: unknown[]; sub: string }> = {
   appleBoxMarkerWriteArgv: { args: ['sandbot-box:abab9640c765', 'sandbot-box'], sub: 'run' },
   appleDfArgv: { args: [], sub: 'system df' },
   applePruneSafeArgv: { args: [], sub: 'image prune' },
+  appleCleanupArgv: { args: [false], sub: 'builder delete' },
   appleRemoveImageArgv: { args: ['sandbot-box:vecchia'], sub: 'image delete' },
   appleRemoveVolumesArgv: { args: [['sandbot-box', 'sandbot-browser']], sub: 'volume delete' }
 }

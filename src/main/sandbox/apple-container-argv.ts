@@ -750,6 +750,72 @@ export function applePruneSafeArgv(): string[][] {
   return [['image', 'prune']]
 }
 
+/** Una voce dell'elenco `ls -a --format json` già ridotta ai campi che contano (U4). */
+interface AppleLsEntry { id: string; state: string; labels: Record<string, string> }
+
+/** Le voci dell'elenco `ls -a --format json` (PURO): null se non è JSON valido. */
+function appleLsEntries(stdout: string): AppleLsEntry[] | null {
+  let o: unknown
+  try { o = JSON.parse(stdout) } catch { return null }
+  if (!Array.isArray(o)) return null
+  const entries: AppleLsEntry[] = []
+  for (const el of o) {
+    const c = el as { configuration?: { id?: unknown; labels?: unknown }; id?: unknown; status?: { state?: unknown } }
+    const id = c?.configuration?.id ?? c?.id
+    if (typeof id !== 'string' || id === '') continue
+    const labels = (c?.configuration?.labels ?? {}) as Record<string, unknown>
+    entries.push({
+      id,
+      state: typeof c?.status?.state === 'string' ? c.status.state : '',
+      labels: Object.fromEntries(Object.entries(labels).filter(([, v]) => typeof v === 'string')) as Record<string, string>
+    })
+  }
+  return entries
+}
+
+/** L'etichetta con cui la CLI Apple marca il container del costruttore (builder). */
+export const APPLE_BUILDER_ROLE_LABEL = 'com.apple.container.resource.role'
+
+/**
+ * U4 (fase prima-release): il builder è ACCESO? (una build è in corso) —
+ * dall'uscita di `ls -a --format json` (fixture ls-a-prima-release): la
+ * voce con l'etichetta del builder in state 'running'. null = uscita non
+ * valida: non si decide, il chiamante resta prudente.
+ */
+export function appleBuilderRunningFromLsJson(stdout: string): boolean | null {
+  const entries = appleLsEntries(stdout)
+  if (entries === null) return null
+  return entries.some((e) => e.labels[APPLE_BUILDER_ROLE_LABEL] === 'builder' && e.state === 'running')
+}
+
+/**
+ * U4 (fase prima-release): TUTTI i container FERMI sono builder? È la
+ * condizione per contare containers.reclaimable nella stima: se c'è un
+ * fermo che NON è builder (per esempio il box), la pulizia non lo tocca e
+ * la parte container è sconosciuta. null = uscita non valida.
+ */
+export function appleStoppedAllBuildersFromLsJson(stdout: string): boolean | null {
+  const entries = appleLsEntries(stdout)
+  if (entries === null) return null
+  const stopped = entries.filter((e) => e.state !== 'running')
+  return stopped.every((e) => e.labels[APPLE_BUILDER_ROLE_LABEL] === 'builder')
+}
+
+/**
+ * La pulizia Apple della UI «Libera spazio» (U4, fase prima-release): il
+ * builder FERMO si cancella con `container builder delete` (il costruttore
+ * delle immagini con la sua cache: si ricrea da solo alla prossima build),
+ * POI `container image prune` SENZA --all (solo le immagini orfane). A
+ * builder ACCESO una build è in corso: NESSUN argv; a lettura sconosciuta
+ * si fa solo la parte sicura (le orfane). MAI `container prune` (col box
+ * fermo cancellerebbe anche lui) e MAI `image prune --all` (tolgerebbe
+ * l'immagine base di Playwright, che serve alla build).
+ */
+export function appleCleanupArgv(builderRunning: boolean | null): string[][] {
+  if (builderRunning === true) return [] // build in corso: NESSUNA pulizia
+  return [...(builderRunning === false ? [['builder', 'delete'] as string[]] : []), ['image', 'prune']]
+}
+
 export function appleRemoveImageArgv(tag: string): string[] {
   return ['image', 'delete', tag]
 }

@@ -1,0 +1,3 @@
+$ container ls -a --format json
+[{"configuration":{"id":"sandbot-box","labels":{}},"id":"sandbot-box","status":{"state":"running"}},{"configuration":{"id":"buildkit","labels":{"com.apple.container.plugin":"builder","com.apple.container.resource.role":"builder"}},"id":"buildkit","status":{"state":"stopped"}}]
+[exit 0]

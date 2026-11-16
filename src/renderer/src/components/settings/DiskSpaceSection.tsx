@@ -11,6 +11,7 @@ import { useEffect, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
+import { Loader2 } from 'lucide-react'
 import { api } from '../../store'
 import type { DiskSpaceInfo } from '../../../../shared/types'
 
@@ -55,11 +56,61 @@ function rowAction(id: RowId, size: string): { label: MessageDescriptor; confirm
   }
 }
 
+/**
+ * U4 (fase prima-release): l'esito di «Libera spazio» — i byte liberati
+ * DAVVERO (misurati sul disco) oppure niente, quando il guadagno sta sotto
+ * la soglia. PURA, con i test.
+ */
+export const PRUNE_NOTHING_THRESHOLD_BYTES = 50_000_000
+
+/** L'esito della pulizia (pura): vedi pruneOutcome. */
+export type PruneOutcome = { kind: 'freed'; bytes: number } | { kind: 'nothing' } | null
+
+/** U4: dai byte liberati misurati all'esito da mostrare (soglia: 50 MB). */
+export function pruneOutcome(freedBytes: number | null): PruneOutcome {
+  if (freedBytes === null || !Number.isFinite(freedBytes)) return null
+  return freedBytes >= PRUNE_NOTHING_THRESHOLD_BYTES ? { kind: 'freed', bytes: freedBytes } : { kind: 'nothing' }
+}
+
+/**
+ * U4: la riga del lavoro e dell'esito di «Libera spazio», sotto la sezione:
+ * spinner e «Libero spazio…» mentre lavora, poi «Liberati X» con i byte
+ * misurati sul disco, o «Non c'era niente da liberare.» sotto la soglia.
+ */
+export function PruneFeedback({ working, outcome }: { working: boolean; outcome: PruneOutcome }) {
+  const { i18n } = useLingui()
+  if (working) {
+    return (
+      <p className="flex items-center gap-1.5 px-3 pb-2 pt-1 text-xs text-muted-foreground" data-testid="disk-space-prune-working">
+        <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+        {i18n._(msg`Libero spazio…`)}
+      </p>
+    )
+  }
+  if (outcome?.kind === 'freed') {
+    return (
+      <p className="px-3 pb-2 pt-1 text-xs text-muted-foreground" data-testid="disk-space-freed">
+        <Trans>Liberati {fmtBytes(outcome.bytes)}</Trans>
+      </p>
+    )
+  }
+  if (outcome?.kind === 'nothing') {
+    return (
+      <p className="px-3 pb-2 pt-1 text-xs text-muted-foreground" data-testid="disk-space-nothing">
+        <Trans>Non c'era niente da liberare.</Trans>
+      </p>
+    )
+  }
+  return null
+}
+
 export function DiskSpaceSection() {
   const { i18n } = useLingui()
   const [info, setInfo] = useState<DiskSpaceInfo | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [lastError, setLastError] = useState<string | null>(null)
+  // U4: il lavoro e l'esito di «Libera spazio» si vedono (spinner, byte liberati)
+  const [prune, setPrune] = useState<{ working: boolean; outcome: PruneOutcome }>({ working: false, outcome: null })
 
   const load = (): void => {
     void api.boxDiskSpace().then(setInfo).catch(() => undefined)
@@ -71,8 +122,10 @@ export function DiskSpaceSection() {
     if (destructive && action.confirm && !window.confirm(i18n._(action.confirm))) return
     setBusy(id)
     setLastError(null)
-    const done = (r: { ok: boolean; error?: string }): void => {
-      if (!r.ok) setLastError(r.error ?? 'error')
+    const done = (r: { ok: boolean; error?: string; freedBytes?: number | null }): void => {
+      // U4: a build in corso l'errore ha le sue parole; gli altri restano come oggi
+      if (!r.ok) setLastError(r.error === 'build-in-progress' ? i18n._(msg`Il computer dei bot si sta costruendo: riprova quando ha finito`) : r.error ?? 'error')
+      if (id === 'reclaimable') setPrune({ working: false, outcome: r.ok ? pruneOutcome(r.freedBytes ?? null) : null })
       setBusy(null)
       load()
     }
@@ -82,8 +135,11 @@ export function DiskSpaceSection() {
     }
     if (id === 'box-image') void api.boxImageRemove().then(done).catch(gone)
     else if (id === 'box-files') void api.boxBoxFilesRemove().then(done).catch(gone)
-    else if (id === 'reclaimable') void api.boxSpacePrune().then(done).catch(gone)
-    else if (id === 'model') void api.localModelRemove().then(gone).catch(gone)
+    else if (id === 'reclaimable') {
+      // U4: il clic si VEDE — spinner e «Libero spazio…» finché la pulizia non finisce
+      setPrune({ working: true, outcome: null })
+      void api.boxSpacePrune().then(done).catch(gone)
+    } else if (id === 'model') void api.localModelRemove().then(gone).catch(gone)
     else if (id === 'memory-model') void api.memoryModelRemove().then(gone).catch(gone)
   }
 
@@ -112,11 +168,12 @@ export function DiskSpaceSection() {
                 disabled={busy !== null || row.bytes === null}
                 onClick={() => runAction(row.id, row.destructive, size)}
               >
-                {i18n._(action.label)}
+                {busy === 'reclaimable' && row.id === 'reclaimable' ? i18n._(msg`Libero spazio…`) : i18n._(action.label)}
               </button>
             </div>
           )
         })}
+        <PruneFeedback working={prune.working} outcome={prune.outcome} />
         {free !== null && (
           <p className="px-3 pb-2 pt-1 text-xs text-muted-foreground">
             <Trans>Spazio libero sul Mac: {fmtBytes(free)} — prima di costruire o scaricare ne restano sempre 5 GB.</Trans>

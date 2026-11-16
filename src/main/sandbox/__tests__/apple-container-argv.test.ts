@@ -28,7 +28,10 @@ import {
   parseNetworkGateway,
   parseNetworkSubnet,
   appleSystemStartArgv,
-  appleKernelSetRecommendedArgv
+  appleKernelSetRecommendedArgv,
+  appleCleanupArgv,
+  appleBuilderRunningFromLsJson,
+  appleStoppedAllBuildersFromLsJson
 } from '../apple-container-argv'
 import { DEFAULT_BOX_LIMITS, browserMcpFlags, CONTAINER_USER, BOX_MOUNT, PLUGINS_MOUNT, BROWSER_MOUNT } from '../docker-argv'
 const { ensureAppleBoxNetwork, boxNetworkGateway, setBoxNetworkGateway, boxNetworkSubnet, setBoxNetworkSubnet, appleContainerEngine } = await import('../apple-container-engine')
@@ -366,5 +369,45 @@ describe('OBV1: il parse di `system status` sui formati VERI (puro, niente euris
     // missing» può più cambiarne l'esito — il kernel si rileva dal FILE
     const p = parseSystemStatus(SYSTEM_STATUS_TABLE + '\nkernel: missing (use: container system kernel set --recommended)')
     expect(p).toEqual({ running: true, appRoot: NEUTRAL_APP_ROOT, arch: 'arm64' })
+  })
+})
+
+describe("U4 (fase prima-release): la pulizia Apple della UI — builder fermo + image prune SENZA --all", () => {
+  it("builder FERMO: container builder delete POI container image prune (che si ricrea alla prossima build)", () => {
+    expect(appleCleanupArgv(false)).toEqual([['builder', 'delete'], ['image', 'prune']])
+  })
+
+  it("builder ACCESO (una build è in corso): NESSUN argv — la UI dice di riprovare a build finita", () => {
+    expect(appleCleanupArgv(true)).toEqual([])
+  })
+
+  it("builder SCONOSCIUTO (la lettura non è riuscita): prudente, SOLO image prune", () => {
+    expect(appleCleanupArgv(null)).toEqual([['image', 'prune']])
+  })
+
+  it("MAI «container prune» (col box fermo cancellerebbe anche lui) e MAI --all (tolgerebbe l'immagine base di Playwright)", () => {
+    for (const running of [false, true, null] as const) {
+      for (const argv of appleCleanupArgv(running)) {
+        expect(argv[0], "mai il sottocomando prune dei container").not.toBe('prune')
+        expect(argv, "mai --all").not.toContain('--all')
+      }
+    }
+  })
+
+  it("appleBuilderRunningFromLsJson sulla fixture VERA della spec: buildkit fermo → false; acceso → true; spazzatura → null", () => {
+    const fermo = fixture('ls-a-prima-release.txt')
+    expect(appleBuilderRunningFromLsJson(fermo)).toBe(false)
+    const acceso = fermo.replace('"state":"stopped"', '"state":"running"')
+    expect(appleBuilderRunningFromLsJson(acceso)).toBe(true)
+    expect(appleBuilderRunningFromLsJson('non è json')).toBe(null)
+    expect(appleBuilderRunningFromLsJson('[]')).toBe(false)
+  })
+
+  it("appleStoppedAllBuildersFromLsJson: tutti i FERMI sono builder → true; col BOX fermo in mezzo → false", () => {
+    const running = fixture('ls-a-prima-release.txt')
+    expect(appleStoppedAllBuildersFromLsJson(running)).toBe(true)
+    const boxFermo = running.replace('"state":"running"', '"state":"stopped"')
+    expect(appleStoppedAllBuildersFromLsJson(boxFermo)).toBe(false)
+    expect(appleStoppedAllBuildersFromLsJson('non è json')).toBe(null)
   })
 })

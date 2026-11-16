@@ -2401,6 +2401,16 @@ export function buildApiMethods(
       // dimensione, MAI numeri inventati
       const dfRaw = await runDockerRaw(engine.argv.df(), { timeoutMs: 15_000 }).catch(() => null)
       const df = dfRaw && dfRaw.exitCode === 0 ? parseDfJson(dfRaw.stdout) : null
+      // U4 (fase prima-release): la stima Apple conta SOLO ciò che la pulizia
+      // toglie davvero (il buildkit fermo se TUTTI i fermi sono builder) —
+      // si decide dall'elenco dei container, non dal tipo
+      let reclaimable: number | null | undefined
+      if (engine.id === 'apple-container') {
+        const { applePsArgv, appleStoppedAllBuildersFromLsJson } = await import('../main/sandbox/apple-container-argv')
+        const ls = await runDockerRaw(applePsArgv(), { timeoutMs: 15_000 }).catch(() => null)
+        const { appleCleanupReclaimableBytes } = await import('../main/sandbox/disk-space')
+        reclaimable = appleCleanupReclaimableBytes(df, ls && ls.exitCode === 0 ? appleStoppedAllBuildersFromLsJson(ls.stdout) : null)
+      }
       let boxImageBytes: number | null = null
       if (df) {
         // BAV2 (fase box-apple-cli-vera): la dimensione la legge il MOTORE —
@@ -2430,7 +2440,7 @@ export function buildApiMethods(
       } catch { /* memoria non disponibile */ }
       return {
         engine: engine.id,
-        rows: diskSpaceRows({ df, boxImageBytes, modelBytes, memoryModelBytes }),
+        rows: diskSpaceRows({ df, boxImageBytes, modelBytes, memoryModelBytes, reclaimable }),
         freeBytes: freeDiskBytesOf(dataDir()),
         marginBytes: DISK_MARGIN_BYTES
       }
@@ -2477,16 +2487,35 @@ export function buildApiMethods(
       await m.refreshBoxRuntime()
       return m.boxRuntime()
     },
-    /** «Libera spazio»: pruneSafe — mai l'immagine in uso, mai i file dei bot. */
+    /**
+     * «Libera spazio» (U4, fase prima-release): la pulizia SICURA del motore
+     * con la MISURA dei byte liberati DAVVERO (spazio libero del disco dopo
+     * meno prima). Apple: il builder FERMO si cancella e poi le immagini
+     * orfane SENZA --all; a builder ACCESO una build è in corso → nessuna
+     * pulizia e l'errore 'build-in-progress' (la UI lo dice a parole). Mai
+     * l'immagine in uso, mai i file dei bot.
+     */
     'box:space-prune': async () => {
       const { runDockerRaw } = await import('../main/sandbox')
       const { activeBoxEngine } = await import('../main/sandbox/engine')
+      const { freeDiskBytesOf } = await import('../main/sandbox/disk-space')
       const engine = activeBoxEngine()
-      for (const argv of engine.argv.pruneSafe()) {
+      const before = freeDiskBytesOf(dataDir())
+      let argvs = engine.argv.pruneSafe()
+      if (engine.id === 'apple-container') {
+        const { applePsArgv, appleBuilderRunningFromLsJson, appleCleanupArgv } = await import('../main/sandbox/apple-container-argv')
+        const ls = await runDockerRaw(applePsArgv(), { timeoutMs: 15_000 }).catch(() => null)
+        const running = ls && ls.exitCode === 0 ? appleBuilderRunningFromLsJson(ls.stdout) : null
+        if (running === true) return { ok: false, error: 'build-in-progress' }
+        argvs = appleCleanupArgv(running)
+      }
+      for (const argv of argvs) {
         const r = await runDockerRaw(argv, { timeoutMs: 120_000 }).catch(() => null)
         if (r && r.exitCode !== 0) return { ok: false, error: r.stderr || `exit ${r.exitCode}` }
       }
-      return { ok: true }
+      const after = freeDiskBytesOf(dataDir())
+      const freedBytes = before !== null && after !== null ? Math.max(0, after - before) : null
+      return { ok: true, freedBytes }
     },
     // ---- fase box-container (BX4): il motore nelle Impostazioni ----
     /**
