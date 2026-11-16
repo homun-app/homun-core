@@ -21,6 +21,7 @@ const {
   thumbShouldConnect,
   ScreenThumbController,
   THUMB_LAST_IMAGE_MS,
+  THUMB_RETRY_MS,
   THUMB_QUALITY_LEVEL,
   THUMB_COMPRESSION_LEVEL
 } = await import('../components/screen-thumb')
@@ -262,6 +263,143 @@ describe('SV2: il controller dell\'anteprima (RFB finto)', () => {
     const before = h.phases.length
     h.advance(THUMB_LAST_IMAGE_MS * 2)
     expect(h.phases.length).toBe(before)
+  })
+})
+
+// ---- SV3: tre fallimenti fermano i tentativi; l'evento screen li riapre ----
+
+describe('SV3: il costo resta basso — stop dopo 3 fallimenti, un evento screen li riapre', () => {
+  /** L'arnese dei fallimenti: openScreen che riuscisce ma l'RFB cade SUBITO
+   * (disconnect senza connect), oppure openScreen che rifiuta. */
+  function failingHarness(mode: 'rfb-drops' | 'open-throws'): {
+    h: Harness
+    attempts: () => number
+  } {
+    let attempts = 0
+    const clock = manualClock()
+    FakeRfb.instances = []
+    const phases: Array<{ phase: string; image: string | null }> = []
+    const controller = new ScreenThumbController({
+      openScreen: async () => {
+        attempts++
+        if (mode === 'open-throws') throw new Error('rpc error')
+        return { url: `ws://x/${attempts}` }
+      },
+      createRfb: async (el, url, wsProtocols) => new FakeRfb(el, url, wsProtocols),
+      captureImage: () => null,
+      element: () => ({}),
+      schedule: clock.schedule,
+      onPhase: (phase, image) => phases.push({ phase, image })
+    })
+    return {
+      h: {
+        controller,
+        rfb: () => FakeRfb.instances[FakeRfb.instances.length - 1],
+        phases,
+        advance: clock.advance
+      },
+      attempts: () => attempts
+    }
+  }
+
+  it('tre tentativi FALLITI di fila fermano i tentativi (RFB che cade prima di connettersi)', async () => {
+    const { h, attempts } = failingHarness('rfb-drops')
+    h.controller.onFacts(ALL)
+    await flush()
+    h.rfb()!.emit('disconnect') // 1° fallimento
+    await flush()
+    h.advance(THUMB_RETRY_MS + 10)
+    await flush()
+    h.rfb()!.emit('disconnect') // 2° fallimento
+    await flush()
+    h.advance(THUMB_RETRY_MS + 10)
+    await flush()
+    h.rfb()!.emit('disconnect') // 3° fallimento: BASTA
+    await flush()
+    expect(attempts()).toBe(3)
+    // il tempo passa: nessun quarto tentativo (niente cicli di riconnessione)
+    h.advance(THUMB_RETRY_MS * 5)
+    await flush()
+    expect(attempts()).toBe(3)
+    expect(h.phases[h.phases.length - 1]!.phase).toBe('idle') // il riquadro di oggi
+  })
+
+  it('tre openScreen che RIFIUTANO di fila fermano i tentativi', async () => {
+    const { h, attempts } = failingHarness('open-throws')
+    h.controller.onFacts(ALL)
+    await flush()
+    h.advance(THUMB_RETRY_MS + 10)
+    await flush()
+    h.advance(THUMB_RETRY_MS + 10)
+    await flush()
+    expect(attempts()).toBe(3)
+    h.advance(THUMB_RETRY_MS * 5)
+    await flush()
+    expect(attempts()).toBe(3)
+  })
+
+  it('un evento screen NUOVO riapre i tentativi dopo lo stop', async () => {
+    const { h, attempts } = failingHarness('rfb-drops')
+    h.controller.onFacts(ALL)
+    await flush()
+    for (let i = 0; i < 3; i++) {
+      h.rfb()!.emit('disconnect')
+      await flush()
+      h.advance(THUMB_RETRY_MS + 10)
+      await flush()
+    }
+    expect(attempts()).toBe(3)
+    // arriva l'evento `screen` (il daemon lo emette a OGNI cambio di stato):
+    // i tentativi si riaprono, ma i fatti devono essere ancora tutti veri
+    h.controller.browserStateChanged()
+    await flush()
+    expect(attempts()).toBe(4)
+  })
+
+  it('lo stop NON si riapre da solo: servono i fatti veri o l\'evento screen', async () => {
+    const { h, attempts } = failingHarness('rfb-drops')
+    h.controller.onFacts(ALL)
+    await flush()
+    for (let i = 0; i < 3; i++) {
+      h.rfb()!.emit('disconnect')
+      await flush()
+      h.advance(THUMB_RETRY_MS + 10)
+      await flush()
+    }
+    expect(attempts()).toBe(3)
+    // onFacts con gli stessi fatti NON riapre (il controller è stopped)
+    h.controller.onFacts(ALL)
+    await flush()
+    expect(attempts()).toBe(3)
+    // e con i fatti FALSI ancora meno
+    h.controller.onFacts(factsWith({ browserRunning: false }))
+    h.advance(THUMB_RETRY_MS * 3)
+    await flush()
+    expect(attempts()).toBe(3)
+  })
+
+  it('MAI due peek per lo stesso bot dalla stessa finestra: una connessione viva alla volta', async () => {
+    let n = 0
+    const clock = manualClock()
+    FakeRfb.instances = []
+    const phases: Array<{ phase: string; image: string | null }> = []
+    const controller = new ScreenThumbController({
+      openScreen: async () => ({ url: `ws://x/${n++}` }),
+      createRfb: async (el, url, wsProtocols) => new FakeRfb(el, url, wsProtocols),
+      captureImage: () => null,
+      element: () => ({}),
+      schedule: clock.schedule,
+      onPhase: (phase, image) => phases.push({ phase, image })
+    })
+    controller.onFacts(ALL)
+    await flush()
+    controller.onFacts(factsWith({ windowVisible: false }))
+    controller.onFacts(ALL)
+    await flush()
+    controller.onFacts(ALL) // nessuna seconda apertura se c'è già
+    await flush()
+    expect(FakeRfb.instances).toHaveLength(2)
+    expect(FakeRfb.instances.filter((r) => !r.disconnected)).toHaveLength(1)
   })
 })
 

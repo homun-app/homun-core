@@ -95,6 +95,15 @@ export function ScreenThumb({
     })
   }, [browserRunning, windowVisible, panelTab, pipAgentId, agentId])
 
+  // SV3: a OGNI evento `screen` di questo bot (il daemon lo emette a ogni
+  // cambio di stato) i tentativi dopo i tre fallimenti si riaprono
+  useEffect(() => {
+    const off = api.onEvent((e) => {
+      if (e.type === 'screen' && e.agentId === agentId) controller.current?.browserStateChanged()
+    })
+    return off
+  }, [agentId])
+
   const live = phase === 'connecting' || phase === 'connected'
 
   return (

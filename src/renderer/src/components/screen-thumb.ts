@@ -22,6 +22,12 @@ export const THUMB_COMPRESSION_LEVEL = 6
 /** Quanto resta l'«Ultima immagine» prima di tornare al riquadro di oggi. */
 export const THUMB_LAST_IMAGE_MS = 60_000
 
+/** SV3: dopo un tentativo fallito si riprova dopo questo ritardo. */
+export const THUMB_RETRY_MS = 1_000
+
+/** SV3: dopo 3 tentativi falliti di fila l'anteprima smette di riprovare. */
+export const THUMB_MAX_FAILURES = 3
+
 /** I fatti che decidono se l'anteprima si collega: TUTTI insieme o niente. */
 export interface ThumbFacts {
   /** il browser del bot è acceso (screenStatus.browser === 'running') */
@@ -106,22 +112,42 @@ export class ScreenThumbController {
   private phase: ThumbPhase = 'idle'
   private lastImage: string | null = null
   private cancelLastTimer: (() => void) | null = null
+  private cancelRetryTimer: (() => void) | null = null
+  private failures = 0
+  private givenUp = false
+  private facts: ThumbFacts | null = null
 
   constructor(private readonly deps: ThumbDeps) {}
 
   /** I fatti sono cambiati (visibilità, scheda, stato del browser, PiP). */
   onFacts(facts: ThumbFacts): void {
+    this.facts = facts
     if (!thumbShouldConnect(facts)) {
       this.close()
       return
     }
     if (this.rfb !== null || this.opening) return
+    if (this.givenUp) return // SV3: tre fallimenti di fila, si riprova solo al prossimo evento `screen`
     void this.open()
+  }
+
+  /**
+   * SV3: il segnale che lo stato del browser è CAMBIATO (evento `screen` del
+   * daemon, a ogni cambio): azzera i fallimenti e riapre i tentativi se i
+   * fatti sono ancora tutti veri (l'evento arriva anche quando il browser si
+   * spegne: in quel caso non si apre niente, ci pensano i fatti).
+   */
+  browserStateChanged(): void {
+    this.failures = 0
+    this.givenUp = false
+    if (this.facts && thumbShouldConnect(this.facts) && this.rfb === null && !this.opening) void this.open()
   }
 
   /** Chiusura definitiva (smontaggio del componente). */
   destroy(): void {
     this.close()
+    this.cancelRetryTimer?.()
+    this.cancelRetryTimer = null
     this.cancelLastTimer?.()
     this.cancelLastTimer = null
     this.lastImage = null
@@ -136,6 +162,8 @@ export class ScreenThumbController {
   private close(): void {
     // invalida le aperture in volo (i listener dell'RFB vecchio non contano più)
     this.gen++
+    this.cancelRetryTimer?.()
+    this.cancelRetryTimer = null
     if (this.rfb) {
       const image = this.deps.captureImage(this.deps.element())
       this.rfb.disconnect()
@@ -171,26 +199,51 @@ export class ScreenThumbController {
       rfb.compressionLevel = THUMB_COMPRESSION_LEVEL
       rfb.addEventListener('connect', () => {
         if (gen !== this.gen) return
+        this.failures = 0 // SV3: collegato, la serie dei fallimenti riparte
         this.setPhase('connected')
       })
       rfb.addEventListener('disconnect', () => {
         if (gen !== this.gen) return
         // la connessione è CADUTA (o il browser si è chiuso): l'ultima
         // immagine resta velata per 60 s, mai mostrata come dal vivo
+        const wasConnected = this.phase === 'connected'
         const image = this.deps.captureImage(this.deps.element())
         this.rfb = null
         this.gen++
         if (image) this.showLast(image)
-        else this.setPhase('idle')
+        else {
+          if (!wasConnected) this.countFailure() // caduta prima di connettersi
+          this.setPhase('idle')
+        }
       })
       this.rfb = rfb
     } catch {
       if (gen !== this.gen) return
       this.rfb = null
+      this.countFailure() // openScreen rifiutata: è un tentativo fallito
       this.setPhase('idle')
     } finally {
       if (gen === this.gen) this.opening = false
     }
+  }
+
+  /**
+   * SV3: un tentativo è FALLITO (apertura rifiututa o connessione caduta prima
+   * di connettersi). Dopo THUMB_RETRY_MS si riprova se i fatti sono ancora
+   * tutti veri; dopo THUMB_MAX_FAILURES di fila ci si ferma — niente cicli di
+   * riconnessione — finché non arriva un evento `screen` nuovo.
+   */
+  private countFailure(): void {
+    this.failures++
+    if (this.failures >= THUMB_MAX_FAILURES) {
+      this.givenUp = true
+      return
+    }
+    this.cancelRetryTimer?.()
+    this.cancelRetryTimer = this.deps.schedule(() => {
+      this.cancelRetryTimer = null
+      if (this.facts && thumbShouldConnect(this.facts) && this.rfb === null && !this.opening) void this.open()
+    }, THUMB_RETRY_MS)
   }
 
   /** L'ultima immagine, velata, per 60 s: mai mostrata come se fosse dal vivo. */
