@@ -39,6 +39,8 @@ import { McpServerCard, PluginCard } from './ConnectorCards13'
 import { RuleProposalCard } from './RuleProposalCard'
 import { TaskCard } from './TaskCard'
 import { SubagentCard } from './SubagentCard'
+// fase chat-limiti (CL3): la galleria delle foto mostrate dal tool show_images
+import { ImageGalleryCard } from './ImageGalleryCard'
 import { DocumentCard, ChartCard, FillCard, SecureInputCard, ContactCard } from './LibraryCards'
 // fase pagine (G2): la pagina aperta al posto del transcript (il compositore resta sospeso)
 import { PageView } from './PageView'
@@ -927,6 +929,8 @@ function EntryRow({ entry, repeat = 1, showReasoning, debugSteps }: { entry: Tra
       // fase 8/12/14: task, sottoagenti, documenti, fill, modulo sicuro, contatti
       if (message?.type === 'task') return <TaskCard entry={entry} />
       if (message?.type === 'subagent') return <SubagentCard entry={entry} />
+      // fase chat-limiti (CL3): la galleria delle foto di una pagina letta
+      if (message?.type === 'images') return <ImageGalleryCard entry={entry} />
       if (message?.type === 'document') return <DocumentCard entry={entry} />
       if (message?.type === 'chart') return <ChartCard entry={entry} />
       if (message?.type === 'fill') return <FillCard entry={entry} />

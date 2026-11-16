@@ -26,7 +26,7 @@
 // FINISHED | STOPPED | SUPERSEDED | AWAITING_USER.
 import { randomUUID, createHash } from 'node:crypto'
 import { TurnHeldForModel } from './turn-held'
-import { getAgent, listAgents, listRoutines, getEntries, updateAgent, appendEntry, updateEntryContent, updateEntryMeta, updateEntryKindRole, getSetting, holdOutboxEntry, db, getTask, createTask, updateTask, openTasksOf, MAX_OPEN_TASKS, createAgent, subagentRefusal, addGrant, listGrants, recordModelUsage, type Grant, type AppendEntry } from '../store/db'
+import { getAgent, listAgents, listRoutines, getEntries, updateAgent, appendEntry, updateEntryContent, updateEntryMeta, updateEntryKindRole, getSetting, holdOutboxEntry, db, getTask, createTask, updateTask, openTasksOf, MAX_OPEN_TASKS, createAgent, subagentRefusal, addGrant, listGrants, recordModelUsage, dataDir, type Grant, type AppendEntry } from '../store/db'
 // R2 (fase app — ritocchi): l'esito degli invii automatici si ripulisce come gli errori Composio
 import { redactComposioSecrets, composioActionOfToolName } from '../connectors/composio-actions'
 // fase Composio OAuth (C2/C4/C5/C7): il blocco, la fiducia per app, le bozze estratte
@@ -72,6 +72,9 @@ import { analyzeCommand } from './shell-ast'
 import { commandKey, isNeverAuto } from './permission-rules'
 import { autoReviewDecision, neverAskDecision, approvalsMode, reviewWithConfiguredModel, liftContaminatedAllow, ownerWordsOf, botBriefOf, AUTO_REVIEW_MAX_PER_TURN, type AutoReviewAction } from './auto-review'
 import { activityOf, isToolLoop, stopReasonOfError } from './loop-guard'
+// fase chat-limiti (CL3): le foto di una pagina in chat (show_images)
+import { parseShowImagesInput, downloadShowImage, saveShowImage, imageUrlsInMarkdown } from './show-images'
+import type { ChatGalleryImage } from '../../shared/chat-images'
 import { nextWithDeadline, DEFAULT_STREAM_DEADLINES, StreamDeadlineError } from './stream-deadline'
 // fase 9 (punto 0): regole dei send_to_user dentro il turno (dedup, tetto
 // avanzamenti, result col testo consegnato)
@@ -352,6 +355,13 @@ interface Running {
    */
   composioTrustedApps: Set<string>
   composioDenied: Array<{ toolName: string; args: unknown }>
+  /**
+   * Fase chat-limiti (CL3): gli url di IMMAGINE visti nei risultati di
+   * web_fetch di QUESTO turno (url → pagina finale dove sono apparsi).
+   * show_images può mostrare solo questi: un url inventato dal modello o
+   * preso da un altro turno è rifiutato. Vive solo nel turno.
+   */
+  turnImages: Map<string, string>
 }
 const running = new Map<string, Running>()
 
@@ -491,6 +501,7 @@ function appendSend(
     : message.type === 'connector' ? (message.reason || message.name)
     : message.type === 'task' ? message.title
     : message.type === 'subagent' ? message.title
+    : message.type === 'images' ? (message.caption || '🖼')
     : message.type === 'rule' ? message.text
     : message.type === 'document' ? message.title
     : message.type === 'chart' ? message.title
@@ -979,7 +990,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
   if (!provider) throw new Error('provider not found')
 
   const controller = new AbortController()
-  const run: Running = { controller, approvals: new Map(), turnAllows: new Set(), turnGrantEpoch: 0, composioTrustedApps: new Set(), composioDenied: [], accessibilityFailures: 0 }
+  const run: Running = { controller, approvals: new Map(), turnAllows: new Set(), turnGrantEpoch: 0, composioTrustedApps: new Set(), composioDenied: [], accessibilityFailures: 0, turnImages: new Map() }
   if (opts.taskId !== undefined) run.taskId = opts.taskId
   running.set(agentId, run)
 
@@ -2872,7 +2883,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             // coprono le azioni successive (contenuto non fidato + effetti):
             // chi concede la card DI QUESTO turno mantiene il grant per il
             // resto del turno, come oggi. L'epoca revoca anche i grant ancora
-            // in fase di registrazione (l'analisi shell è async).
+            // in fase di registrazione (analisi shell async).
             if (!contaminated) {
               // RW: il grant «Per questo turno» delle letture grezze PROXY
               // sopravvive: copre solo GET/HEAD dello stesso toolkit fino a fine turno
@@ -2882,6 +2893,12 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               run.turnGrantEpoch++
             }
             contaminated = true
+          }
+          // fase chat-limiti (CL3): gli url di immagine emersi da CL2 nel
+          // testo della pagina si registrano per il turno: show_images può
+          // mostrare SOLO questi (url → pagina finale dove sono apparsi)
+          if (call.name === 'web_fetch' && typeof meta.finalUrl === 'string') {
+            for (const u of imageUrlsInMarkdown(output)) run.turnImages.set(u, String(meta.finalUrl))
           }
           const evidence = call.name === 'web_search'
             ? formatWebSearchEvidence(String(input.query ?? ''), output)
@@ -2906,6 +2923,54 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           })
           emit({ type: 'entries', agentId, entries: [res] })
           messages.push({ role: 'tool', toolCallId: call.id, content: evidence.slice(0, 50_000) })
+          continue
+        }
+
+        // fase chat-limiti (CL3): le foto di una pagina IN CHAT. È una
+        // LETTURA a effetti zero (stessa categoria di web_fetch: nessun gate,
+        // NESSUNA card per immagine); il bot scarica con le guardie di
+        // web_fetch e la chat carica da homun://, mai dal sito. Solo url di
+        // immagini visti in un web_fetch DI QUESTO TURNO: un url inventato o
+        // di altro turno è rifiutato in PAROLE, senza rete.
+        if (call.name === 'show_images') {
+          emit({ type: 'activity', agentId, activity: activityOf(call.name, input) })
+          const siEntry = add({
+            agentId, kind: 'tool-call', role: 'assistant', content: 'show_images',
+            meta: { id: call.id, name: call.name, arguments: call.arguments, ...(facadeOf ? { facade: facadeOf } : {}) }
+          })
+          emit({ type: 'entries', agentId, entries: [siEntry] })
+          const parsed = parseShowImagesInput(input, run.turnImages)
+          if (!parsed.ok) {
+            messages.push({ role: 'tool', toolCallId: call.id, content: parsed.error })
+            const res = add({ agentId, kind: 'tool-result', role: 'system', content: parsed.error, meta: { callId: call.id, error: true } })
+            emit({ type: 'entries', agentId, entries: [res] })
+            continue
+          }
+          const images: ChatGalleryImage[] = []
+          const failed: string[] = []
+          for (const u of parsed.urls) {
+            const dl = await downloadShowImage(u)
+            if (!dl.ok) {
+              failed.push(`${u}: ${dl.error}`)
+              continue
+            }
+            await saveShowImage(dataDir(), dl)
+            let domain = ''
+            try { domain = new URL(u).hostname } catch { domain = '' }
+            images.push({ file: dl.file, mime: dl.mime, domain, pageUrl: run.turnImages.get(u) ?? '' })
+          }
+          const shownText = images.length
+            ? `Shown in chat: ${images.length} image${images.length === 1 ? '' : 's'} from ${images[0]!.domain || 'the page just read'} (gallery card under your reply).${failed.length ? ` NOT shown: ${failed.join(' | ')}` : ''}`
+            : `No image shown: ${failed.join(' | ')}`
+          const res = add({
+            agentId, kind: 'tool-result', role: 'system', content: shownText,
+            meta: { callId: call.id, shownImages: images.length, ...(failed.length ? { error: true } : {}) }
+          })
+          emit({ type: 'entries', agentId, entries: [res] })
+          messages.push({ role: 'tool', toolCallId: call.id, content: shownText })
+          if (images.length) {
+            appendSend(agentId, call, { type: 'images', images, ...(parsed.caption ? { caption: parsed.caption } : {}) }, emit, {}, opts.taskId)
+          }
           continue
         }
 

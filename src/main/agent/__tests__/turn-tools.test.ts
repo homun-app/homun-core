@@ -22,11 +22,11 @@ const childBuiltin = toolsForTurnSource(
 )
 const childBrowser = allBrowser.filter((t) => subagentToolDenyReason(t.name) === null)
 
-/** il nucleo del turno normale (T1): parlare, pc, web, memory (facciata), document (facciata, R7.2), skill, spawn_subagent (R8.2), find_tools. BU1 (fase beta.4): update_self dopo ask_user */
+/** il nucleo del turno normale (T1): parlare, pc, web, memory (facciata), document (facciata, R7.2), skill, spawn_subagent (R8.2), find_tools. BU1 (fase beta.4): update_self dopo ask_user. fase chat-limiti (CL3): show_images dopo web_fetch */
 const CORE_NORMAL = [
   'message_user', 'ask_user', 'update_self',
   'run-command', 'read-file', 'write-file', 'list-directory',
-  'web_search', 'web_fetch',
+  'web_search', 'web_fetch', 'show_images',
   'memory', 'document', 'skill', 'spawn_subagent', 'find_tools'
 ]
 

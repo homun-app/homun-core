@@ -510,7 +510,8 @@ export async function webFetchCached(rawUrl: string, deps: WebFetchDeps = {}): P
 
 /** User-agent onesto (SandBot/<versione>): definito in shared/web-limits, riesportato. */
 
-async function resolveHost(host: string, deps: WebFetchDeps): Promise<string[]> {
+/** La risoluzione host con la lookup iniettabile (la usano anche le immagini di CL3). */
+export async function resolveHost(host: string, deps: WebFetchDeps): Promise<string[]> {
   if (deps.lookup) return deps.lookup(host)
   const { lookup } = await import('node:dns').then((m) => m.promises)
   const all = await lookup(host, { all: true })
@@ -600,7 +601,8 @@ function flattenHeaders(res: { headers: Record<string, string | string[] | undef
  * il download (memoria limitata) e si tengono i primi maxBytes. Una SCADENZA
  * TOTALE copre connessione, header e corpo.
  */
-const realTransport: HttpTransport = (url, opts) =>
+/** Il trasporto reale (node:http/https): lo riusano anche le immagini di CL3. */
+export const realTransport: HttpTransport = (url, opts) =>
   new Promise<HttpHop>((resolve, reject) => {
     let req: http.ClientRequest | undefined
     let settled = false

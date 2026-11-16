@@ -177,7 +177,7 @@ function presentMcpGroups(mcpToolDefs: ToolDef[]): ToolGroupPresent[] {
 export const CORE_ORDER: ReadonlyArray<string> = [
   'send_to_user', 'message_user', 'ask_user', 'update_self',
   'run-command', 'read-file', 'write-file', 'list-directory',
-  'web_search', 'web_fetch',
+  'web_search', 'web_fetch', 'show_images',
   'update_memory', 'recall_memory',
   'write_document', 'read_document', 'edit_document',
   'skill',

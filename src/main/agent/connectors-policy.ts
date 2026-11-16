@@ -22,8 +22,10 @@ export const CONNECTOR_PROPOSAL_TOOLS = new Set(['add_mcp_server', 'install_plug
  * dedicato del loop.
  */
 // fase memoria-engramma (M8): la storia delle chat PRIVATE non entra nei
-// turni di gruppo (ciò che il bot riporta lì lo leggono gli altri bot)
-export const GROUP_EXCLUDED_TOOLS = new Set(['fill_credential', 'spawn_subagent', 'search_history', 'read_history'])
+// turni di gruppo (ciò che il bot riporta lì lo leggono gli altri bot).
+// fase chat-limiti (CL3): show_images non esiste nei turni di gruppo (la
+// galleria vive nella chat privata; il gruppo la riceve come testo/link)
+export const GROUP_EXCLUDED_TOOLS = new Set(['fill_credential', 'spawn_subagent', 'search_history', 'read_history', 'show_images'])
 
 // fase risposta (R2): fuori dai gruppi si offre message_user (i progressi dei
 // lavori lunghi) e NON send_to_user — la risposta all'utente è il testo

@@ -30,6 +30,8 @@ export const CORE_TOOL_NAMES: ReadonlySet<string> = new Set([
   // il web in lettura
   'web_search',
   'web_fetch',
+  // fase chat-limiti (CL3): le foto di una pagina letta, mostrate in chat
+  'show_images',
   // la facciata memory (update_memory + recall_memory)
   'update_memory',
   'recall_memory',

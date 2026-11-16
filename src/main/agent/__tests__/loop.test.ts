@@ -6413,10 +6413,10 @@ describe('fase velocità (S3): elenco core fisso, differiti dietro find_tools/us
     // fase token (T1): il nucleo esatto — niente charts/libreria, task, credenziali, bot…
     // (fase token · scoperta R7.2: la facciata document É nel nucleo;
     //  fase token · nucleo R8.2: anche spawn_subagent; BU1 fase beta.4:
-    //  update_self dopo ask_user)
+    //  update_self dopo ask_user; fase chat-limiti CL3: show_images dopo web_fetch)
     expect(offered).toEqual([
       'message_user', 'ask_user', 'update_self', 'run-command', 'read-file', 'write-file', 'list-directory',
-      'web_search', 'web_fetch', 'memory', 'document', 'skill', 'spawn_subagent', 'find_tools',
+      'web_search', 'web_fetch', 'show_images', 'memory', 'document', 'skill', 'spawn_subagent', 'find_tools',
       'mcp__gmail__send_message'
     ])
     // use_tool NON si offre più (storie vecchie a parte)
@@ -6575,7 +6575,7 @@ describe('fase velocità (S3): elenco core fisso, differiti dietro find_tools/us
     // dal passo dopo gli schemi del gruppo sono nella lista, in CODA (R7.2:
     // document nel nucleo; R8.2: anche spawn_subagent, prima di find_tools;
     // BU1 fase beta.4: update_self dopo ask_user)
-    expect(afterTools.slice(0, 14)).toEqual(['message_user', 'ask_user', 'update_self', 'run-command', 'read-file', 'write-file', 'list-directory', 'web_search', 'web_fetch', 'memory', 'document', 'skill', 'spawn_subagent', 'find_tools'])
+    expect(afterTools.slice(0, 15)).toEqual(['message_user', 'ask_user', 'update_self', 'run-command', 'read-file', 'write-file', 'list-directory', 'web_search', 'web_fetch', 'show_images', 'memory', 'document', 'skill', 'spawn_subagent', 'find_tools'])
     expect(afterTools.slice(14)).toContain('create_agent')
   })
 })

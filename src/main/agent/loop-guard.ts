@@ -52,6 +52,9 @@ export function activityOf(
   // fase 16b correzioni (P2): anche web_fetch porta l'URL letto — la mascotte
   // dice «legge <host>…» invece della pagina web generica
   else if (tool === 'web_fetch') target = String(input.url ?? '')
+  // fase chat-limiti (CL3): quante foto — gli url NON si mostrano (la
+  // sidebar dice «mostra 3 foto…», senza testo dal web)
+  else if (tool === 'show_images') target = `${Array.isArray(input.urls) ? input.urls.length : 0} foto`
   // fase 11b: il browser — l'URL per l'apertura, il ref per le azioni
   else if (tool === 'browser_open') target = String(input.url ?? '')
   else if (tool.startsWith('browser_')) target = String(input.ref ?? '')

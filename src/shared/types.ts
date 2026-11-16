@@ -2,6 +2,8 @@
 
 import type { SkillCatalogEntry } from './skill-catalog'
 import type { UpdateChannel } from './update-channel'
+import type { ChatGalleryImage } from './chat-images'
+export type { ChatGalleryImage }
 // OBD2 (fase onboarding-b-dettagli): le righe del piano della preparazione
 import type { BoxSetupRowId } from './box-setup-plan'
 export type { BoxSetupRowId }
@@ -250,6 +252,17 @@ export type SendMessagePayload =
       type: 'subagent'
       subagentId: string
       title: string
+    }
+  | {
+      /**
+       * Fase chat-limiti (CL3): galleria di immagini lette dal web e mostrate
+       * in chat. Il file è in <dataDir>/chat-images col nome dall'hash: il
+       * renderer lo carica da homun:// (shared/chat-images), MAI dall'URL
+       * remoto del sito (privacy: il sito non deve vedere l'IP dell'utente).
+       */
+      type: 'images'
+      images: ChatGalleryImage[]
+      caption?: string
     }
   | {
       /** fase 14 (punto 2): card del documento salvato in libreria, col bottone Apri */

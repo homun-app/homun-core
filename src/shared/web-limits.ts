@@ -9,5 +9,9 @@ export const WEB_SEARCH_DEFAULT_RESULTS = 5
 export const WEB_SEARCH_MAX_RESULTS = 10
 // fase 15 (S1): timeout di OGNI chiamata ai provider di ricerca (keyless e no)
 export const WEB_SEARCH_TIMEOUT_MS = 15_000
+/** fase chat-limiti (CL3): show_images — massimo url per chiamata. */
+export const SHOW_IMAGES_MAX_URLS = 6
+/** fase chat-limiti (CL3): show_images — tetto di byte per immagine scaricata. */
+export const SHOW_IMAGE_MAX_BYTES = 8 * 1024 * 1024
 /** User-agent onesto di ogni richiesta web di SandBot (ricerca e lettura). */
 export const SANDBOT_USER_AGENT = 'Homun/0.1.0'

@@ -4,12 +4,48 @@
 // - un URL esterno si apre solo se http/https/mailto (mai file:, javascript:,
 //   schemi dell'app);
 // - lo schema dei permessi: tutto negato salvo la copia negli appunti.
-import { describe, expect, it } from 'vitest'
-import { resolveRendererPath, RENDERER_CSP, MIME_TYPES } from '../protocol'
+import { describe, expect, it, afterAll } from 'vitest'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { resolveRendererPath, resolveMediaPath, createRendererHandler, realFs, RENDERER_CSP, MIME_TYPES } from '../protocol'
 import { canOpenExternally } from '../external-url'
 import { permissionAllowed } from '../permissions'
+import { TEST_TMP_BASE } from '../../test-tmp'
 
 const ROOT = '/out/renderer'
+
+describe('fase chat-limiti (CL3): /media/ serve le immagini della chat, e SOLO quelle', () => {
+  const MEDIA = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-media-test-'))
+  afterAll(() => rmSync(MEDIA, { recursive: true, force: true }))
+
+  it('resolveMediaPath: solo <sha256>.<png|jpe?g|gif|webp>; tutto il resto è rifiutato', () => {
+    const hash = 'a'.repeat(64)
+    expect(resolveMediaPath('/media/dir', `/media/${hash}.png`)).toBe(join('/media/dir', `${hash}.png`))
+    expect(resolveMediaPath('/media/dir', `/media/${hash}.webp`)).toBe(join('/media/dir', `${hash}.webp`))
+    expect(resolveMediaPath('/media/dir', `/media/${hash}.html`)).toBeNull()
+    expect(resolveMediaPath('/media/dir', `/media/${'A'.repeat(64)}.png`)).toBeNull() // non esadecimale
+    expect(resolveMediaPath('/media/dir', `/media/../../etc/passwd`)).toBeNull()
+    expect(resolveMediaPath('/media/dir', `/media/${hash}.png/x`)).toBeNull()
+    expect(resolveMediaPath('/media/dir', '/media/foto.png')).toBeNull()
+    expect(resolveMediaPath('/media/dir', '/index.html')).toBeNull()
+  })
+
+  it('l\'handler serve il file con content-type immagine e la CSP; nomi fuori forma → 403', async () => {
+    const hash = 'b'.repeat(64)
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+    writeFileSync(join(MEDIA, `${hash}.png`), png)
+    const handler = createRendererHandler('/out/renderer', realFs, { dir: MEDIA })
+    const ok = await handler(new Request(`homun://app/media/${hash}.png`))
+    expect(ok.status).toBe(200)
+    expect(ok.headers.get('content-type')).toBe('image/png')
+    expect(ok.headers.get('content-security-policy')).toBe(RENDERER_CSP)
+    expect(Buffer.from(await ok.arrayBuffer()).equals(png)).toBe(true)
+    const bad = await handler(new Request(`homun://app/media/${'c'.repeat(64)}.html`))
+    expect(bad.status).toBe(403)
+    const missing = await handler(new Request(`homun://app/media/${'d'.repeat(64)}.png`))
+    expect([403, 404]).toContain(missing.status)
+  })
+})
 
 describe('fase rilascio (A5): percorsi del protocollo homun://', () => {
   it('i file del renderer si risolvono dentro la radice', () => {

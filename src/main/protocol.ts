@@ -41,7 +41,8 @@ export interface ProtocolFs {
   stat(p: string): Promise<{ isFile(): boolean }>
 }
 
-const realFs: ProtocolFs = {
+/** il fs reale (esportato per il wiring del main) */
+export const realFs: ProtocolFs = {
   realpath: (p) => realpath(p),
   readFile: (p) => readFile(p),
   stat: (p) => stat(p)
@@ -65,8 +66,33 @@ export function resolveRendererPath(root: string, pathname: string): string | nu
   return candidate
 }
 
+/**
+ * Fase chat-limiti (CL3): il percorso di un'immagine della chat sotto
+ * /media/. Il nome è deciso dal daemon (sha-256 del contenuto + estensione
+ * immagine): QUALSIASI altra forma è rifiutata (nessun percorso arbitrario,
+ * niente .., niente html). Puro.
+ */
+export function resolveMediaPath(mediaDir: string, pathname: string): string | null {
+  let decoded: string
+  try {
+    decoded = decodeURIComponent(pathname)
+  } catch {
+    return null
+  }
+  if (decoded.includes('\0')) return null
+  const m = /^\/media\/([a-f0-9]{64}\.(?:png|jpe?g|gif|webp))$/.exec(decoded)
+  if (!m) return null
+  return path.join(mediaDir, m[1]!)
+}
+
+export interface MediaDir {
+  /** la cartella dei file media della chat (chat-images dei dati dell'app) */
+  dir: string
+  fs?: ProtocolFs
+}
+
 /** L'handler del protocollo homun:// (solo host "app", solo GET di file). */
-export function createRendererHandler(webRoot: string, fs: ProtocolFs = realFs) {
+export function createRendererHandler(webRoot: string, fs: ProtocolFs = realFs, media?: MediaDir) {
   return async (request: Request): Promise<Response> => {
     const url = new URL(request.url)
     if (url.protocol !== 'homun:' || url.host !== 'app') {
@@ -76,6 +102,29 @@ export function createRendererHandler(webRoot: string, fs: ProtocolFs = realFs) 
       return new Response('Method not allowed', { status: 405 })
     }
     try {
+      // fase chat-limiti (CL3): le immagini mostrate in chat dal tool
+      // show_images si servono da qui — il renderer NON le carica mai dal
+      // sito remoto (privacy: nessuna richiesta verso l'esterno)
+      if (media && url.pathname.startsWith('/media/')) {
+        const mediaFs = media.fs ?? fs
+        const mediaRoot = await mediaFs.realpath(media.dir).then((p) => p, () => media.dir)
+        const named = resolveMediaPath(mediaRoot, url.pathname)
+        if (named === null) return new Response('Forbidden', { status: 403 })
+        const real = await mediaFs.realpath(named).then((p) => p, () => null)
+        if (real === null || !real.startsWith(mediaRoot + path.sep)) {
+          return new Response('Forbidden', { status: 403 })
+        }
+        const body = await mediaFs.readFile(real)
+        return new Response(new Uint8Array(body), {
+          headers: {
+            'Content-Type': MIME_TYPES[path.extname(real)] ?? 'application/octet-stream',
+            'Content-Security-Policy': RENDERER_CSP,
+            'X-Content-Type-Options': 'nosniff',
+            // il nome È l'hash del contenuto: immutabile per costruzione
+            'Cache-Control': 'immutable, max-age=31536000, private'
+          }
+        })
+      }
       const root = await fs.realpath(webRoot)
       let candidate = resolveRendererPath(root, url.pathname)
       if (candidate === null) {

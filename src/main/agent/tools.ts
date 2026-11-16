@@ -522,6 +522,21 @@ export const toolDefs: ToolDef[] = [
     }
   },
   {
+    // fase chat-limiti (CL3): le foto di una pagina letta, IN CHAT — solo url
+    // di immagini visti in un web_fetch DI QUESTO TURNO; le scarica il bot con
+    // le guardie di web_fetch (la chat non contatta mai il sito)
+    name: 'show_images',
+    description: 'Shows the user photos in chat as a gallery: ONLY image urls seen in a web_fetch result of THIS turn (1-6). When asked for photos, use this; never say you cannot show them.',
+    parameters: {
+      type: 'object',
+      properties: {
+        urls: { type: 'array', items: { type: 'string' }, description: 'Image urls copied from the web_fetch result of this turn (1-6)' },
+        caption: { type: 'string', description: 'Short caption shown under the gallery (optional)' }
+      },
+      required: ['urls']
+    }
+  },
+  {
     name: 'post_to_group',
     description: 'Writes a message in one of your groups: the ONLY way to write in the group. In a group turn the group is set; otherwise pass groupId. One message per turn; @name calls a member, @all everyone.',
     parameters: {

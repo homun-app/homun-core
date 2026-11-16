@@ -5141,6 +5141,10 @@ msgstr "Origini https://… (separate da virgola)"
 msgid "owner/repo di GitHub oppure URL git https"
 msgstr "owner/repo di GitHub oppure URL git https"
 
+#: src/renderer/src/components/ImageGalleryCard.tsx
+msgid "pagina"
+msgstr "pagina"
+
 #: src/renderer/src/components/LibraryCards.tsx
 #: src/renderer/src/components/LibraryPanel.tsx
 #: src/renderer/src/components/RightPanel.tsx

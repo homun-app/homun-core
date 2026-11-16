@@ -15,7 +15,7 @@ import { app, BrowserWindow, protocol, safeStorage, screen, session, shell } fro
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { registerIpc } from './ipc'
-import { setDataDir } from './store/db'
+import { setDataDir, dataDir } from './store/db'
 import { createTray, refreshTray } from './tray'
 import { initMainLanguage, applyStartupLanguage } from './i18n'
 import { DaemonClient } from './daemon-client'
@@ -24,7 +24,7 @@ import { userDataDir } from './paths'
 import { isDaemonMode, resolveDataDirArgv } from './mode'
 import { runDaemonRuntime } from '../daemon/runtime'
 import { APP_BUILD_ID } from './build-id'
-import { createRendererHandler, RENDERER_CSP } from './protocol'
+import { createRendererHandler, realFs, RENDERER_CSP } from './protocol'
 import { canOpenExternally } from './external-url'
 import { permissionAllowed } from './permissions'
 import { cleanupLegacyLaunchAgent } from './launchagent'
@@ -183,8 +183,11 @@ if (isDaemonMode(process.argv)) {
       session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => cb(allowPermission(permission)))
       session.defaultSession.setPermissionCheckHandler((_wc, permission) => allowPermission(permission))
 
-      // A5: la pagina dal protocollo dell'app, non da file://
-      protocol.handle('homun', createRendererHandler(join(__dirname, '../renderer')))
+      // A5: la pagina dal protocollo dell'app, non da file://.
+      // fase chat-limiti (CL3): /media/ serve le immagini mostrate in chat
+      // dal tool show_images (cartella chat-images dei dati dell'app, nomi
+      // dall'hash — il renderer non contatta mai il sito remoto)
+      protocol.handle('homun', createRendererHandler(join(__dirname, '../renderer'), realFs, { dir: join(dataDir(), 'chat-images') }))
 
       // fase rilascio (A3): pulizia del vecchio LaunchAgent di SandBot, solo
       // quel file esatto (bootout/unload + unlink), best-effort
