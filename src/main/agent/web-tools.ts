@@ -851,6 +851,9 @@ function resolveLinkHref(href: string, baseUrl?: string): string | null {
   }
 }
 
+/** fase chat-limiti (CL2): massimo immagini con indirizzo nel testo di una pagina. */
+export const HTML_IMAGES_MAX = 20
+
 /**
  * Estrazione dell'articolo e conversione essenziale in markdown (puro): via
  * script/style/nav ealtro rumore; se c'è <article> o <main> si usa quello;
@@ -879,16 +882,48 @@ export function htmlToMarkdown(html: string, baseUrl?: string): string {
       if (body) s = body[0]
     }
   }
+  // fase chat-limiti (CL2): le immagini tengono l'INDIRIZZO — <img> diventa
+  // ![alt](url) con url ASSOLUTO http(s) risolto contro baseUrl (l'URL finale
+  // della pagina, come gli href di G3). Precedenza: src, poi data-src, poi il
+  // primo URL di srcset (fermandosi al PRIMO che risolve http(s)). Scartate
+  // data:, i pixel di tracciamento (width o height ≤ 2) e le immagini senza
+  // url valido; massimo HTML_IMAGES_MAX nel testo, oltre una riga di conto.
+  let imagesShown = 0
+  let imagesOver = 0
+  s = s.replace(/<img\b[^>]*\/?>/gi, (tag) => {
+    // attributo con virgolette COERENTI: un apostrofo dentro alt="...d'epoca"
+    // non chiude il valore
+    const attr = (n: string): string => {
+      const m = new RegExp(`\\s${n}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, 'i').exec(tag)
+      return (m?.[1] ?? m?.[2] ?? '').trim()
+    }
+    const alt = attr('alt')
+    const srcsetFirst = attr('srcset').split(',')[0]?.trim().split(/\s+/)[0] ?? ''
+    const url = [attr('src'), attr('data-src'), srcsetFirst]
+      .map((c) => (c ? resolveLinkHref(c, baseUrl) : null))
+      .find((u): u is string => u !== null)
+    if (!url) return '' // data:, javascript: o senza url valido: scartata
+    const dim = (n: string) => Number.parseInt(attr(n), 10)
+    const w = dim('width')
+    const h = dim('height')
+    if ((Number.isFinite(w) && w > 0 && w <= 2) || (Number.isFinite(h) && h > 0 && h <= 2)) return '' // pixel di tracciamento
+    if (imagesShown >= HTML_IMAGES_MAX) {
+      imagesOver++
+      return ''
+    }
+    imagesShown++
+    return `![${alt}](${url})`
+  })
   s = s
     // CL1.3: i link si convertono PRIMA degli heading, così il link nel titolo
-    // di un annuncio (dentro <h2>) non perde l'indirizzo
+    // di un annuncio (dentro <h2>) non perde l'indirizzo; un'immagine dentro
+    // un <a> (già convertita sopra) diventa un link immagine [![alt](img)](url)
     .replace(/<a\s[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, (_, href: string, inner: string) => {
       const label = inner.replace(/<[^>]+>/g, '').trim()
       const url = resolveLinkHref(href, baseUrl)
       return label && url ? `[${label}](${url})` : label
     })
     .replace(/<h([1-6])[^>]*>([\s\S]*?)<\/h\1>/gi, (_, lvl: string, inner: string) => `\n\n${'#'.repeat(Number(lvl))} ${inner.replace(/<[^>]+>/g, '').trim()}`)
-    .replace(/<img\s[^>]*alt=["']([^"']*)["'][^>]*>/gi, (_, alt: string) => (alt ? ` ![${alt}]` : ''))
     .replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, (_, inner: string) => `\n- ${inner.replace(/<[^>]+>/g, '').trim()}`)
     .replace(/<blockquote[^>]*>([\s\S]*?)<\/blockquote>/gi, (_, inner: string) => `\n> ${inner.replace(/<[^>]+>/g, '').trim()}`)
     .replace(/<(pre|code)[^>]*>([\s\S]*?)<\/\1>/gi, (_, _t, inner: string) => `\`${inner.replace(/<[^>]+>/g, '')}\``)
@@ -897,12 +932,13 @@ export function htmlToMarkdown(html: string, baseUrl?: string): string {
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<\/(p|div|section|article|ul|ol|table|tr|li|h[1-6])>/gi, '\n')
   s = decodeEntities(s.replace(/<[^>]+>/g, ''))
-  return s
+  const body = s
     .split('\n')
     .map((l) => l.replace(/[ \t]+/g, ' ').trim())
     .filter((l, i, arr) => l !== '' || (i > 0 && arr[i - 1] !== ''))
     .join('\n')
     .trim()
+  return imagesOver > 0 ? `${body}\n\n[${imagesOver} more images]` : body
 }
 
 // ---- l'output dei tool (il loop lo incarta nel blocco evidenza) ----
