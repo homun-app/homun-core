@@ -5,6 +5,25 @@ pubblicata finisce nel corpo della GitHub Release (da cui l'app mostra il
 «cosa cambia» quando propone un aggiornamento). Formato: `## [x.y.z] — data`,
 sezioni H2 e un punto per riga.
 
+## [0.3.1001-beta.7] — 2026-11-16
+
+Gli aiutanti del bot e le richieste di conferma, dalla prova della beta.6.
+
+### Correzioni
+
+- **Le richieste di un aiutante arrivano in chat:** compaiono sotto la
+  card «Aiutante», con la notifica, e le confermi da lì. Anche dal pannello
+  dell'aiutante ora la conferma funziona.
+- **La card «Aiutante» si segue:** dice quando aspetta te, cosa sta facendo
+  in quel momento, da quanto lavora e quanti passi ha fatto.
+- **Una richiesta scaduta non torna uguale:** il bot sa che non hai
+  risposto, non che hai rifiutato, e non la ripropone identica.
+- **Nel computer dei bot i comandi girano senza chiedere**, anche in
+  «Chiedi»: è isolato dal Mac. Chiedono ancora i comandi con un segreto e
+  lo scambio di file col Mac; sul Mac non cambia niente.
+- **Il bot sa che nel suo computer i comandi non vanno su internet** e per
+  il web usa la lettura delle pagine o il browser.
+
 ## [0.3.1001-beta.6] — 2026-11-16
 
 Le correzioni dalla prova della beta.5 installata da zero.
