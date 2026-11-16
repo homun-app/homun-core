@@ -36,8 +36,9 @@ describe('fase token (T3): lo schema della facciata', () => {
   it('ogni parametro porta, tra parentesi, le azioni che lo usano', () => {
     const def = buildFacadeDef('browser', [...browserToolDefs])!
     const props = (def.parameters as { properties: Record<string, { description?: string }> }).properties
-    // ref lo usano snapshot (opzionale), click, type e select
-    expect(props.ref!.description).toMatch(/\(snapshot, click, type, select\)/)
+    // ref lo usano snapshot (opzionale), click, type, select — e da SV8
+    // (fase schermo-vivo) anche screenshot (la cattura di un solo elemento)
+    expect(props.ref!.description).toMatch(/\(snapshot, click, type, select, screenshot\)/)
     expect(props.url!.description).toMatch(/\(open, tabs\)/)
   })
 

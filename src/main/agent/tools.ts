@@ -540,14 +540,15 @@ export const toolDefs: ToolDef[] = [
     // di immagini visti in un web_fetch DI QUESTO TURNO; le scarica il bot con
     // le guardie di web_fetch (la chat non contatta mai il sito)
     name: 'show_images',
-    description: 'Shows the user photos in chat as a gallery: ONLY image urls seen in a web_fetch result of THIS turn (1-6). When asked for photos, use this; never say you cannot show them.',
+    description: 'Shows the user photos in chat as a gallery (1-6 total): urls seen in a web_fetch of this turn, and/or image files of your computer (your home or /workspace, e.g. browser_screenshot files).',
     parameters: {
       type: 'object',
       properties: {
-        urls: { type: 'array', items: { type: 'string' }, description: 'Image urls copied from the web_fetch result of this turn (1-6)' },
+        urls: { type: 'array', items: { type: 'string' }, description: 'Image urls copied from the web_fetch result of this turn' },
+        paths: { type: 'array', items: { type: 'string' }, description: 'Files of your computer: /box/home/<you>/… or /workspace/…' },
         caption: { type: 'string', description: 'Short caption shown under the gallery (optional)' }
       },
-      required: ['urls']
+      required: []
     }
   },
   {

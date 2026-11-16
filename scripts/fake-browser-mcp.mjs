@@ -238,7 +238,7 @@ const TOOLS = [
   { name: 'browser_click', description: 'clicca un ref', inputSchema: { type: 'object', properties: { target: { type: 'string' } }, required: ['target'] } },
   { name: 'browser_type', description: 'scrive in un ref', inputSchema: { type: 'object', properties: { target: { type: 'string' }, text: { type: 'string' } }, required: ['target', 'text'] } },
   { name: 'browser_press_key', description: 'preme un tasto', inputSchema: { type: 'object', properties: { key: { type: 'string' } }, required: ['key'] } },
-  { name: 'browser_take_screenshot', description: 'screenshot', inputSchema: { type: 'object', properties: { filename: { type: 'string' } } } },
+  { name: 'browser_take_screenshot', description: 'screenshot', inputSchema: { type: 'object', properties: { filename: { type: 'string' }, element: { type: 'string' }, target: { type: 'string' } } } },
   { name: 'browser_wait_for', description: 'attende', inputSchema: { type: 'object', properties: {} } },
   // fase 12 (0a): lo schema della 0.0.83 — obbligatorio solo `function`; il
   // daemon lo chiama internamente col target = ref per leggere il tipo del
@@ -337,7 +337,12 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     return text(actionResult(`await page.keyboard.press('${String(args.key ?? '')}')`))
   }
   if (name === 'browser_take_screenshot') {
-    return text(`Screenshot saved to: ${String(args.filename ?? 'screenshot.png')}`)
+    // SV8 (fase schermo-vivo): il finto è FEDELE al Playwright MCP 0.0.83,
+    // che accotta { element, target } (optionalElementSchema) per catturare
+    // SOLO l'elemento — il target ricevuto si ECHOA, così i test PROVANO che
+    // il ref del tool arriva davvero allo strumento di cattura
+    const el = args.target ? `\n- Element captured: target=${String(args.target)}` : ''
+    return text(`Screenshot saved to: ${String(args.filename ?? 'screenshot.png')}${el}`)
   }
   if (name === 'browser_wait_for') {
     return text(actionResult('await page.waitForTimeout(1000)'))

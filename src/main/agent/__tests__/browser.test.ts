@@ -175,7 +175,7 @@ describe('il browser col MCP finto (avvio lazy, stato, tetti)', () => {
 
 // ---- P2 (fase 14 correzioni): la copia dello screenshot col runner docker FINTO ----
 
-import { copyBrowserScreenshot } from '../browser'
+import { screenshotMcpArgs,  copyBrowserScreenshot } from '../browser'
 import { setDockerRunnerForTests } from '../../sandbox'
 
 describe('P2: copia dello screenshot — lettura come 1001, scrittura atomica come 1000, rm come 1001', () => {
@@ -331,10 +331,35 @@ describe('fase 12 0c: il result dello screenshot è solo il path (più l\'eventu
   it('nessun ### Ran Playwright code né link alle uscite del server', async () => {
     const r = await callBrowserTool(AGENT, 'browser_screenshot', {})
     expect(r.output).toContain('Screenshot saved in the computer: ')
-    expect(r.output).toMatch(/\.png$/)
+    expect(r.output).toMatch(/\.png\nTo show it to the user: show_images with paths: \[\/box\/home\/agent_browser\/.browser\/screens\/[0-9a-f]{8}\.png\]\.$/)
     expect(r.output).not.toContain('### Ran Playwright code')
     expect(r.output).not.toContain('.browser/output')
     expect(r.output).not.toContain('Screenshot saved to')
     expect(r.meta.screenshot).toMatch(/\.browser\/screens\/.+\.png$/)
+  })
+})
+
+// ---- SV8 (fase schermo-vivo): il ref dello screenshot e la riga per mostrarlo ----
+
+describe('SV8: browser_screenshot con ref facoltativo', () => {
+  it('la riga in coda dice come mostrare la foto all’utente (show_images col path)', async () => {
+    const r = await callBrowserTool(AGENT, 'browser_screenshot', {})
+    expect(r.output).toMatch(/To show it to the user: show_images with paths: \[\/box\/home\/agent_browser\/\.browser\/screens\/[0-9a-f]{8}\.png\]\./)
+  })
+
+  it('il REF arriva allo strumento di cattura del browser MCP (elemento dello snapshot)', async () => {
+    // screenshotMcpArgs è quello che parte per il browser_take_screenshot del
+    // MCP (0.0.83: optionalElementSchema { element, target }): col ref gli
+    // argomenti portano target=ref, senza restano solo filename e type
+    expect(screenshotMcpArgs('sc-1.png', 'e12')).toEqual({
+      filename: 'sc-1.png',
+      type: 'png',
+      element: 'the element with this ref from the last snapshot',
+      target: 'e12'
+    })
+    expect(screenshotMcpArgs('sc-1.png', '')).toEqual({ filename: 'sc-1.png', type: 'png' })
+    // e la chiamata col ref funziona dal vivo (il finto accetta il target)
+    const r = await callBrowserTool(AGENT, 'browser_screenshot', { ref: 'e12' })
+    expect(r.meta.screenshot).toMatch(/\.png$/)
   })
 })

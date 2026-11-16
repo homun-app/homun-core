@@ -78,7 +78,14 @@ import {
   type ToolStreakState, type ToolStreakStop
 } from './loop-guard'
 // fase chat-limiti (CL3): le foto di una pagina in chat (show_images)
-import { parseShowImagesInput, downloadShowImage, saveShowImage, imageUrlsInMarkdown } from './show-images'
+import {
+  parseShowImagesInput, downloadShowImage, saveShowImage, imageUrlsInMarkdown,
+  showImageFileOf, sniffImageMime
+} from './show-images'
+// SV8 (fase schermo-vivo): i path del computer del bot, risolti come gli
+// strumenti dei file e letti DAL BOX (mai file del Mac)
+import { resolveBoxPath, readBoxBytesRel } from './computer-files'
+import { SHOW_IMAGE_MAX_BYTES } from '../../shared/web-limits'
 import type { ChatGalleryImage } from '../../shared/chat-images'
 // fase chat-limiti (CL4): le letture identiche del turno si rispondono dalla cache
 import { TurnWebReads, ALREADY_READ_PREFIX } from './web-tools'
@@ -3108,8 +3115,39 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             try { domain = new URL(u).hostname } catch { domain = '' }
             images.push({ file: dl.file, mime: dl.mime, domain, pageUrl: run.turnImages.get(u) ?? '' })
           }
+          // SV8 (fase schermo-vivo): i path sono file immagine nel COMPUTER
+          // DEL BOT (home o /workspace): risolti come gli altri strumenti dei
+          // file, letti DAL BOX (mai file del Mac), tipo dai BYTE, stesso
+          // tetto per file del download, stessa galleria in chat
+          for (const p of parsed.paths) {
+            const resolved = await resolveBoxPath(agentId, p)
+            if (!resolved.ok) {
+              failed.push(`${p}: ${resolved.error}`)
+              continue
+            }
+            const bytes = await readBoxBytesRel(resolved.rel)
+            if (!bytes) {
+              failed.push(`${p}: file not found in the bot's computer.`)
+              continue
+            }
+            if (bytes.length > SHOW_IMAGE_MAX_BYTES) {
+              failed.push(`${p}: image too big: the limit is 8 MB.`)
+              continue
+            }
+            const mime = sniffImageMime(bytes)
+            if (!mime) {
+              failed.push(`${p}: not an image (checked the file bytes: only png, jpeg, gif and webp).`)
+              continue
+            }
+            const file = showImageFileOf(bytes, mime)
+            await saveShowImage(dataDir(), { file, bytes })
+            images.push({ file, mime, domain: '', pageUrl: '' })
+          }
+          const fromWhere = images.some((i) => i.domain) && images.some((i) => !i.domain)
+            ? 'the page you read and your computer'
+            : images[0]?.domain || 'your computer'
           const shownText = images.length
-            ? `Shown in chat: ${images.length} image${images.length === 1 ? '' : 's'} from ${images[0]!.domain || 'the page just read'} (gallery card under your reply).${failed.length ? ` NOT shown: ${failed.join(' | ')}` : ''}`
+            ? `Shown in chat: ${images.length} image${images.length === 1 ? '' : 's'} from ${fromWhere} (gallery card under your reply).${failed.length ? ` NOT shown: ${failed.join(' | ')}` : ''}`
             : `No image shown: ${failed.join(' | ')}`
           const res = add({
             agentId, kind: 'tool-result', role: 'system', content: shownText,

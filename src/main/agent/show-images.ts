@@ -45,25 +45,37 @@ export function sniffImageMime(bytes: Buffer): 'image/png' | 'image/jpeg' | 'ima
 const MIME_EXT: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp' }
 
 export type ParsedShowImages =
-  | { ok: true; urls: string[]; caption?: string }
+  | { ok: true; urls: string[]; paths: string[]; caption?: string }
   | { ok: false; error: string }
 
 /**
- * La chiamata di show_images (puro): al massimo SHOW_IMAGES_MAX_URLS url, e
- * SOLO url di immagini visti in un risultato di web_fetch DI QUESTO TURNO
- * (la mappa url → pagina la riempie il loop). Un url inventato dal modello o
- * preso da un altro turno è rifiutato in PAROLE, prima di qualsiasi rete.
+ * La chiamata di show_images (puro): al massimo SHOW_IMAGES_MAX_URLS immagini
+ * IN TUTTO tra url e path. Gli url SOLO di immagini visti in un risultato di
+ * web_fetch DI QUESTO TURNO (la mappa url → pagina la riempie il loop); i
+ * path (SV8, fase schermo-vivo) sono file immagine nel COMPUTER DEL BOT — la
+ * sua home o /workspace, come le catture di browser_screenshot — e li legge e
+ * li controlla il loop con le funzioni dei file. Un url inventato dal modello
+ * o preso da un altro turno è rifiutato in PAROLE, prima di qualsiasi rete.
  */
 export function parseShowImagesInput(input: Record<string, unknown>, seen: Map<string, string>): ParsedShowImages {
   const raw = input.urls
-  if (!Array.isArray(raw) || raw.length === 0) {
-    return { ok: false, error: `show_images needs {urls: [image urls]}: pass the image urls that appeared in a web_fetch result of this turn (max ${SHOW_IMAGES_MAX_URLS}).` }
+  const rawPaths = input.paths
+  const hasUrls = Array.isArray(raw) && raw.length > 0
+  const hasPaths = Array.isArray(rawPaths) && rawPaths.length > 0
+  if (!hasUrls && !hasPaths) {
+    return {
+      ok: false,
+      error: `show_images needs {urls: [image urls]} or {paths: [files in your computer]}: pass the image urls that appeared in a web_fetch result of this turn, or paths of image files in your computer (your home or /workspace, like the screenshots of browser_screenshot). At most ${SHOW_IMAGES_MAX_URLS} images per call, urls and paths together.`
+    }
   }
-  if (raw.length > SHOW_IMAGES_MAX_URLS) {
-    return { ok: false, error: `Too many urls (${raw.length}): show_images shows at most ${SHOW_IMAGES_MAX_URLS} images per call.` }
+  if (raw !== undefined && !Array.isArray(raw)) {
+    return { ok: false, error: 'urls must be an array of image urls.' }
+  }
+  if (rawPaths !== undefined && !Array.isArray(rawPaths)) {
+    return { ok: false, error: 'paths must be an array of files of your computer.' }
   }
   const urls: string[] = []
-  for (const u of raw) {
+  for (const u of (hasUrls ? raw : []) as unknown[]) {
     if (typeof u !== 'string') return { ok: false, error: 'Every url in urls must be a string.' }
     if (!seen.has(u)) {
       return {
@@ -73,8 +85,26 @@ export function parseShowImagesInput(input: Record<string, unknown>, seen: Map<s
     }
     if (!urls.includes(u)) urls.push(u)
   }
+  const paths: string[] = []
+  for (const p of (hasPaths ? rawPaths : []) as unknown[]) {
+    if (typeof p !== 'string') return { ok: false, error: 'Every path in paths must be a string.' }
+    if (!paths.includes(p)) paths.push(p)
+  }
+  if (urls.length + paths.length > SHOW_IMAGES_MAX_URLS) {
+    return { ok: false, error: `Too many images (${urls.length + paths.length}): show_images shows at most ${SHOW_IMAGES_MAX_URLS} images per call, urls and paths together.` }
+  }
   const caption = typeof input.caption === 'string' && input.caption.trim() ? input.caption.trim().slice(0, 500) : undefined
-  return { ok: true, urls, ...(caption ? { caption } : {}) }
+  return { ok: true, urls, paths, ...(caption ? { caption } : {}) }
+}
+
+/**
+ * SV8: il nome del file di chat per un'immagine letta dal computer del bot —
+ * la STESSA forma del download (sha256 del contenuto + estensione dal tipo
+ * vero) e la stessa cartella di saveShowImage: la galleria è UNA.
+ */
+export function showImageFileOf(bytes: Buffer, mime: string): string {
+  const ext = MIME_EXT[mime] ?? 'png'
+  return `${createHash('sha256').update(bytes).digest('hex')}.${ext}`
 }
 
 export type ShowImageDownload =

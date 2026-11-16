@@ -111,6 +111,55 @@ async function realPathInside(rel: string): Promise<string> {
   return real
 }
 
+// ---- SV8 (fase schermo-vivo): i path del COMPUTER DEL BOT per show_images ----
+
+/**
+ * SV8: risolve un path come lo scrive il MODELLO (assoluto, nel computer del
+ * bot) in un path RELATIVO della radice dei file — valgono SOLO la home del
+ * bot (/box/home/<bot>/…) e /workspace/…, mai file fuori (e mai del Mac): il
+ * confine è quello degli altri strumenti dei file (parseFilesRelPath +
+ * realpath DENTRO la radice, symlink compresi). Puro il più possibile: il
+ * realpath è l'unica parte asincrona.
+ */
+export async function resolveBoxPath(
+  agentId: string,
+  raw: unknown
+): Promise<{ ok: true; rel: string } | { ok: false; error: string }> {
+  const how = `show_images paths must be absolute paths in the bot's computer, like /box/home/<bot>/pictures/photo.png or /workspace/photo.png`
+  if (typeof raw !== 'string' || raw.length === 0) {
+    return { ok: false, error: `${how}: "${String(raw ?? '').slice(0, 120)}" is not one.` }
+  }
+  if (!raw.startsWith('/')) {
+    return { ok: false, error: `${how}: "${raw.slice(0, 120)}" is relative.` }
+  }
+  const owner = boxOwnerOf(agentId)
+  const homePrefix = `${BOX_MOUNT}/home/${owner}/`
+  let rel: string
+  if (raw.startsWith(homePrefix)) rel = `home/${owner}/${raw.slice(homePrefix.length)}`
+  else if (raw === '/workspace' || raw.startsWith('/workspace/')) rel = `workspace${raw.slice('/workspace'.length)}`
+  else {
+    return {
+      ok: false,
+      error: `path outside the bot's computer: only files inside the bot's home (/box/home/${owner}) or /workspace can be shown, never files of the user's Mac.`
+    }
+  }
+  const parsed = parseFilesRelPath(rel)
+  if (!parsed.ok) {
+    return { ok: false, error: `path outside the bot's computer: "${raw.slice(0, 120)}" resolves outside the allowed roots.` }
+  }
+  try {
+    await realPathInside(parsed.rel)
+  } catch (e) {
+    return { ok: false, error: `file not found in the bot's computer: "${raw.slice(0, 120)}".` }
+  }
+  return { ok: true, rel: parsed.rel }
+}
+
+/** SV8: i byte di un file del computer del bot (relativo alla radice dei file). */
+export async function readBoxBytesRel(rel: string): Promise<Buffer | null> {
+  return readBytes(absOf(rel))
+}
+
 /** Il bot deve esistere (T3.1, per tutte le RPC). */
 function requireAgent(agentId: string): void {
   if (!getAgent(agentId)) throw uiError(UI.rpcAgentNotFound)

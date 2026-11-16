@@ -537,6 +537,10 @@ vi.mock('../../sandbox', () => ({
   boxShellEgressOf: () => h.sandboxMock.egress,
   browserSandboxOk: () => false,
   boxDir: (id: string) => `/tmp/sandbot-${id}`,
+  // SV8 (fase schermo-vivo): la radice dei FILE del computer del bot per gli
+  // strumenti che risolvono i path (resolveBoxPath in host legge da qui)
+  boxRoot: () => join(h.db.dataDir, 'box'),
+  runDockerArgv: async () => ({ stdout: '', stderr: '', exitCode: 1, signal: null, trimmed: false }),
   // fase 12: il proprietario delle risorse del box (il padre di un figlio)
   boxOwnerOf: (id: string) => h.db.agents.get(id)?.parentId ?? id,
   isSubagent: (id: string) => h.db.agents.get(id)?.parentId != null,
@@ -8500,5 +8504,52 @@ describe('SV7: fusibile e protezioni della serie', () => {
     expect(h.db.entries.some((e) => e.kind === 'event' && e.meta?.turnEnd === 'STOPPED')).toBe(true)
     expect(h.db.entries.some((e) => e.kind === 'send-message')).toBe(false)
     expect(h.llm.calls.length).toBe(3)
+  })
+})
+
+// ---- SV8 (fase schermo-vivo): show_images con i PATH del computer del bot ----
+
+describe('SV8: show_images mostra le foto catturate nel computer del bot', () => {
+  it('un path nella home del bot finisce nella STESSA galleria (appendSend images)', async () => {
+    const { mkdirSync, writeFileSync } = await import('node:fs')
+    const home = join(h.db.dataDir, 'box', 'home', AGENT, '.browser', 'screens')
+    mkdirSync(home, { recursive: true })
+    const png = Buffer.from('89504e470d0a1a0a', 'hex') // magie di una png (il controllo è nei byte: qui basta il percorso felice del loop)
+    const dest = join(home, 'sc-1234.png')
+    // una PNG VERA 1x1 (il tipo si controlla DAI BYTE)
+    writeFileSync(dest, Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+      0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+      0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x62, 0x00, 0x01, 0x00, 0x00,
+      0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae,
+      0x42, 0x60, 0x82
+    ]))
+    h.llm.queue = [
+      { toolCalls: [{ id: 'si1', name: 'show_images', arguments: JSON.stringify({ paths: [`/box/home/${AGENT}/.browser/screens/sc-1234.png`] }) }] },
+      { text: 'ecco la foto' }
+    ]
+    await runTurn(AGENT, 'mostra la cattura', emit)
+    // il result dice COSA è stato mostrato (dal computer del bot)
+    const res = h.db.entries.find((e) => e.kind === 'tool-result' && e.meta?.callId === 'si1')
+    expect(String(res?.content)).toMatch(/Shown in chat: 1 image from your computer/)
+    // la galleria in chat è la STESSA (send con immagini salvate in chat-images)
+    const sent = h.db.entries.find((e) => e.kind === 'send-message' && (e.meta?.message as { type?: string } | undefined)?.type === 'images')
+    expect(sent).toBeTruthy()
+    expect((sent!.meta!.message as { images: Array<{ file: string }> }).images[0]!.file).toMatch(/\.png$/)
+    // e il FILE salvato esiste nella cartella delle foto in chat
+    const { existsSync } = await import('node:fs')
+    const file = (sent!.meta!.message as { images: Array<{ file: string }> }).images[0]!.file
+    expect(existsSync(join(h.db.dataDir, 'chat-images', file))).toBe(true)
+  })
+
+  it('un path del Mac viene rifiutato IN PAROLE e non si legge NIENTE dal Mac', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 'si2', name: 'show_images', arguments: JSON.stringify({ paths: ['/Users/fabio/Desktop/foto.png'] }) }] },
+      { text: 'non posso' }
+    ]
+    await runTurn(AGENT, 'mostra quella del Desktop', emit)
+    const res = h.db.entries.find((e) => e.kind === 'tool-result' && e.meta?.callId === 'si2')
+    expect(String(res?.content)).toMatch(/No image shown: .*outside the bot's computer/s)
+    expect(h.db.entries.some((e) => e.kind === 'send-message' && (e.meta?.message as { type?: string } | undefined)?.type === 'images')).toBe(false)
   })
 })

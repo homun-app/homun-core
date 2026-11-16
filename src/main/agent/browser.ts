@@ -175,8 +175,14 @@ export const browserToolDefs: ToolDef[] = [
   },
   {
     name: 'browser_screenshot',
-    description: 'Takes a screenshot of the page and saves it in the computer: the result gives the path of the png file.',
-    parameters: { type: 'object', properties: {}, required: [] }
+    description: 'Takes a screenshot of the page (or of only the element of the last snapshot given with ref) and saves it in the computer: the result gives the path of the png file and how to show it to the user.',
+    parameters: {
+      type: 'object',
+      properties: {
+        ref: { type: 'string', description: 'optional: capture only this element (a ref of the last snapshot), not the whole page' }
+      },
+      required: []
+    }
   },
   {
     name: 'browser_close',
@@ -930,6 +936,30 @@ export async function copyBrowserScreenshot(owner: string, name: string, dest: s
   return null
 }
 
+/**
+ * SV8 (fase schermo-vivo): gli argomenti per lo strumento di cattura del
+ * browser MCP. Col ref (l'elemento dell'ultimo snapshot) si cattura SOLO
+ * quell'elemento: il Playwright MCP 0.0.83 accetta { element, target } nel
+ * browser_take_screenshot (optionalElementSchema) e fa
+ * locator.screenshot(). PURA, esportata per i test.
+ */
+export function screenshotMcpArgs(filename: string, ref: string): Record<string, string> {
+  return {
+    filename,
+    type: 'png',
+    ...(ref
+      ? { element: 'the element with this ref from the last snapshot', target: ref }
+      : {})
+  }
+}
+
+/**
+ * SV8: la riga in coda al result dello screenshot — dice al modello COME
+ * mostrare la foto all'utente (show_images col path nel computer del bot).
+ */
+export const SCREENSHOT_SHOW_HINT = (dest: string): string =>
+  `To show it to the user: show_images with paths: [${dest}].`
+
 async function runBrowserTool(agentId: string, tool: string, input: Record<string, unknown>): Promise<BrowserToolResult> {
   const session = await getBrowserSession(agentId)
   const ref = String(input.ref ?? '')
@@ -992,21 +1022,31 @@ async function runBrowserTool(agentId: string, tool: string, input: Record<strin
       // 1001, scrittura atomica come 1000, cancellazione dell'originale come
       // 1001. Il modello vede lo STESSO path di prima; uno screenshot mostra i
       // campi password mascherati, ma comunque non resta nel volume privato.
+      // SV8 (fase schermo-vivo): il ref facoltativo cattura SOLO l'elemento
+      // dell'ultimo snapshot — il Playwright MCP 0.0.83 lo supporta
+      // (optionalElementSchema: { element, target } nel browser_take_screenshot)
       const id = randomUUID().slice(0, 8)
       const owner = boxOwnerOf(agentId)
       const name = `screenshot-${id}.png`
-      const res = await session.client.callTool({ name: 'browser_take_screenshot', arguments: { filename: name, type: 'png' } })
+      const ref = typeof input.ref === 'string' && input.ref.trim() ? input.ref.trim() : ''
+      const res = await session.client.callTool({ name: 'browser_take_screenshot', arguments: screenshotMcpArgs(name, ref) })
       // fase 12 (0c): al modello solo il path del file e l'eventuale errore —
       // niente `### Ran Playwright code` né link alle uscite del server
       const err = errorSection(mcpText(res))
       const dest = `${boxHomePath(owner)}/.browser/screens/${id}.png`
       if (fakeBrowserMcpPath()) {
         // MODALITÀ TEST (server finto sull'host): nessun file vero da copiare
-        return { output: `Screenshot saved in the computer: ${dest}${err ? `\n${err}` : ''}`, meta: { screenshot: dest } }
+        return {
+          output: `Screenshot saved in the computer: ${dest}${err ? `\n${err}` : ''}\n${SCREENSHOT_SHOW_HINT(dest)}`,
+          meta: { screenshot: dest }
+        }
       }
       const copyErr = await copyBrowserScreenshot(owner, name, dest)
       if (copyErr) return { output: copyErr, meta: { browserError: true } }
-      return { output: `Screenshot saved in the computer: ${dest}${err ? `\n${err}` : ''}`, meta: { screenshot: dest } }
+      return {
+        output: `Screenshot saved in the computer: ${dest}${err ? `\n${err}` : ''}\n${SCREENSHOT_SHOW_HINT(dest)}`,
+        meta: { screenshot: dest }
+      }
     }
     case 'browser_close':
       mcpName = 'browser_close'
