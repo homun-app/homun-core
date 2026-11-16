@@ -2640,9 +2640,17 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         if (isToolLoop(executedCalls, { name: call.name, args: call.arguments })) {
           add({ ...uiSystemEntry(agentId, 'notice', ui(UI.toolLoop)) })
           emitLastEntry(agentId, emit)
-          // fase 12 (punto 3): il figlio inceppato chiude failed col motivo
-          // (fase 17c correzioni D2: inglese — il summary arriva al PADRE)
-          failSubagent(`the model kept repeating the exact same call (${call.name})`)
+          // fase chat-limiti (CL5): il figlio inceppato chiude STOPPED-LOOP —
+          // l'esito VERO per il padre (il risultato è parziale, non
+          // presentato come done); il summary resta inglese (fase 17c D2)
+          if (opts.subagent && !controller.signal.aborted) {
+            const closed = closeSubagent(db(), opts.subagent.id, {
+              status: 'stopped-loop',
+              summary: `the model kept repeating the exact same call (${call.name})`,
+              finishedAt: Date.now()
+            })
+            if (closed) onSubagentTerminal(db(), opts.subagent.id, emit)
+          }
           endTurn(agentId, 'STOPPED', emit, opts.taskId, 'loop')
           setStatus(agentId, 'idle', emit)
           return

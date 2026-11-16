@@ -9,8 +9,12 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { randomUUID } from 'node:crypto'
 
-/** Gli stati della riga: queued/running sono APERTI, gli altri TERMINALI. */
-export type SubagentStatus = 'queued' | 'running' | 'done' | 'failed' | 'stopped' | 'expired'
+/**
+ * Gli stati della riga: queued/running sono APERTI, gli altri TERMINALI.
+ * Fase chat-limiti (CL5): 'stopped-loop' è il figlio fermato dal controllo
+ * anti-loop — un esito DIVERSO da done, il risultato è parziale.
+ */
+export type SubagentStatus = 'queued' | 'running' | 'done' | 'failed' | 'stopped' | 'stopped-loop' | 'expired'
 
 export interface SubagentRow {
   id: string
@@ -94,7 +98,7 @@ export function newSubagentBatchId(): string {
   return randomUUID()
 }
 
-export const TERMINAL_SUBAGENT_STATUSES: readonly SubagentStatus[] = ['done', 'failed', 'stopped', 'expired']
+export const TERMINAL_SUBAGENT_STATUSES: readonly SubagentStatus[] = ['done', 'failed', 'stopped', 'stopped-loop', 'expired']
 
 export function isTerminalStatus(s: SubagentStatus): boolean {
   return TERMINAL_SUBAGENT_STATUSES.includes(s)

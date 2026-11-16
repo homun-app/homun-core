@@ -3783,6 +3783,10 @@ msgstr "Interrompi"
 msgid "Interrompi task"
 msgstr "Interrompi task"
 
+#: src/renderer/src/components/SubagentCard.tsx
+msgid "interrotto"
+msgstr "interrotto"
+
 #: src/renderer/src/components/Chat.tsx
 #: src/renderer/src/components/DraftCard.tsx
 #: src/renderer/src/components/TeamChat.tsx

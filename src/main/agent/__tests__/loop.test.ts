@@ -5207,6 +5207,24 @@ describe('fase 12: il FIGLIO — tool, prompt, whitelist e consegna', () => {
     expect(h.llm.calls).toHaveLength(1)
   })
 
+  it('fase chat-limiti (CL5): figlio fermato dal controllo anti-loop → status STOPPED-LOOP (esito vero, non done)', async () => {
+    childAgent()
+    setWebFetchForTests(async () => ({ ok: true, text: 'pagina', contentType: 'text/html', finalUrl: 'https://x.example/a', downloadedBytes: 6 }))
+    // la STESSA identica chiamata tre volte di fila: alla terza scatta il
+    // controllo anti-loop (fase 8 L11) e il figlio si ferma
+    const sameCall = { toolCalls: [{ id: 'r1', name: 'web_fetch', arguments: JSON.stringify({ url: 'https://x.example/a' }) }] }
+    h.llm.queue = [sameCall, sameCall, sameCall, { text: 'mai raggiunto' }]
+    await runTurn(CHILD, 'brief', emit, undefined, { source: 'user', subagent: { id: CHILD, parentId: AGENT } })
+    const row = subagentsState.rows.find((r) => r.id === CHILD)!
+    expect(row.status).toBe('stopped-loop')
+    expect(row.summary).toContain('the model kept repeating the exact same call (web_fetch)')
+    expect(subagentsState.terminal).toContain(CHILD)
+    // alla TERZA risposta identica il controllo scatta PRIMA di eseguirla:
+    // tre chiamate al modello, nessuna quarta
+    expect(h.llm.calls).toHaveLength(3)
+    expect(h.db.entries.filter((e) => e.kind === 'tool-call' && e.content === 'web_fetch').length).toBeLessThanOrEqual(3)
+  })
+
   it('MAX_STEPS senza wake_parent → sollecito e poi chiusura automatica', async () => {
     childAgent()
     // 24+1 risposte di solo testo (nessuna consegna), poi il sollecito (vuoto)

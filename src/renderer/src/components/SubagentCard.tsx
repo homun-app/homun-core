@@ -16,6 +16,8 @@ const STATUS_LABEL: Record<SubagentInfo['status'], MessageDescriptor> = {
   done: msg`finito`,
   failed: msg`fallito`,
   stopped: msg`fermato`,
+  // fase chat-limiti (CL5): fermato dal controllo anti-loop — l'esito si VEDE
+  'stopped-loop': msg`interrotto`,
   expired: msg`scaduto`
 }
 const STATUS_CLS: Record<SubagentInfo['status'], string> = {
@@ -24,6 +26,7 @@ const STATUS_CLS: Record<SubagentInfo['status'], string> = {
   done: 'text-chart-2',
   failed: 'text-destructive',
   stopped: 'text-muted-foreground',
+  'stopped-loop': 'text-destructive',
   expired: 'text-destructive'
 }
 
@@ -55,7 +58,7 @@ export function SubagentCard({ entry }: { entry: TranscriptEntry }) {
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs font-medium text-muted-foreground"><Trans>Aiutante</Trans></span>
         <span className={`text-[11px] font-medium ${STATUS_CLS[status]}`}>
-          {status === 'done' ? '✓' : status === 'failed' ? '⚠' : status === 'stopped' ? '⛔' : status === 'expired' ? '⏱' : '⏳'}
+          {status === 'done' ? '✓' : status === 'failed' ? '⚠' : status === 'stopped' ? '⛔' : status === 'stopped-loop' ? '⏹' : status === 'expired' ? '⏱' : '⏳'}
           {' '}{waiting ? t`in attesa di conferma` : i18n.t(STATUS_LABEL[status])}
         </span>
       </div>

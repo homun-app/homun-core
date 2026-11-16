@@ -1706,7 +1706,8 @@ export interface SubagentInfo {
   /** il lotto: i figli dello stesso turno del padre si svegliano insieme */
   batchId: string
   title: string
-  status: 'queued' | 'running' | 'done' | 'failed' | 'stopped' | 'expired'
+  /** fase chat-limiti (CL5): 'stopped-loop' = fermato dal controllo anti-loop (parziale) */
+  status: 'queued' | 'running' | 'done' | 'failed' | 'stopped' | 'stopped-loop' | 'expired'
   summary: string | null
   reportPath: string | null
   createdAt: number
