@@ -64,9 +64,6 @@ export function activityOf(
   return { tool, target, ...(app ? { app } : {}), ...(args ? { args } : {}) }
 }
 
-/** Quante chiamate identiche di fila fanno scattare la loop detection. */
-export const TOOL_LOOP_REPEATS = 3
-
 /**
  * La chiave di ripetizione di una chiamata (pura). Fase 19a (V6): per
  * computer_act la chiave è l'HASH delle azioni — ripetere le STESSE azioni
@@ -85,22 +82,181 @@ export function repeatKeyOf(name: string, args: string): string {
   }
 }
 
+// ---- SV7 (fase schermo-vivo): la serie con i RISULTATI, come Rakazo ----
+//
+// La vecchia loop detection guardava SOLO gli argomenti PRIMA della chiamata:
+// fermava chi aspettava legittimamente una pagina con chiamate identiche che
+// davano risultati diversi, e non riconosceva chi girava a vuoto con chiamate
+// un po' diverse. Qui la serie si traccia DOPO il risultato, con l'impronta
+// del risultato (per lo schermo il FRAME, non il testo con l'ora): il
+// controllo è PURO e le soglie sono ESPORtate (i perché nel REPORT).
+
+/** Quante chiamate identiche FALLITE di fila fermano il turno. */
+export const IDENTICAL_FAILING_STOP = 3
+
+/** Quante chiamate identiche con la STESSA risposta riuscita di fila fermano. */
+export const IDENTICAL_NO_PROGRESS_STOP = 6
+
+/** Quante chiamate identiche con risposte diverse, o quasi-uguali (solo cifre), fermano. */
+export const SIMILAR_STOP = 25
+
+/** Quante volte di fila lo STESSO strumento risponde uguale qualunque input fermano. */
+export const SAME_RESULT_STOP = 25
+
+/** Quanti lotti computer_act oltre il limite rifiutati di fila fermano. */
+export const OVER_LIMIT_ACTIONS_STOP = 4
+
 /**
- * Loop detection (§3bis L11, puro): la PROSSIMA chiamata sarebbe la terza
- * identica di fila (stessa chiave di ripetizione: nome + argomenti, o l'hash
- * delle azioni per computer_act) nello stesso turno? true = il turno va
- * fermato con una notice leggibile invece di consumare MAX_STEPS.
+ * Gli strumenti di ATTESA: aspettare è il loro mestiere — la stessa risposta
+ * riuscita NON è mancanza di progresso per loro, contano solo nella serie
+ * «simili» (la chiamata identica con la stessa risposta resta legittima).
  */
-export function isToolLoop(
-  seq: Array<{ name: string; args: string }>,
-  next: { name: string; args: string }
-): boolean {
-  const key = repeatKeyOf(next.name, next.args)
-  const last = seq.slice(-(TOOL_LOOP_REPEATS - 1))
-  return last.length === TOOL_LOOP_REPEATS - 1 &&
-    last.every((c) => repeatKeyOf(c.name, c.args) === key)
+const WAIT_TOOLS = new Set(['await_shell', 'browser_wait'])
+
+/** Il tipo di fermata della serie (il summary del figlio lo nomina). */
+export type ToolStreakStop =
+  | 'identical-failing'
+  | 'identical-no-progress'
+  | 'similar'
+  | 'same-result'
+  | 'over-limit-actions'
+
+/** Lo stato della serie di un turno (opaco: si porta in giro e si passa indietro). */
+export interface ToolStreakState {
+  key: string | null
+  keyFailing: number
+  keySameOk: number
+  shape: string | null
+  similar: number
+  tool: string | null
+  toolFingerprint: string | null
+  toolSameFingerprint: number
+  overLimit: number
 }
 
+/** La serie all'inizio del turno. */
+export function initialToolStreakState(): ToolStreakState {
+  return {
+    key: null,
+    keyFailing: 0,
+    keySameOk: 0,
+    shape: null,
+    similar: 0,
+    tool: null,
+    toolFingerprint: null,
+    toolSameFingerprint: 0,
+    overLimit: 0
+  }
+}
+
+/**
+ * La chiave «SIMILE» (come `shape` in Rakazo): gli argomenti con le sequenze
+ * di cifre sostituite — sfogliare pagine o leggere a pezzi cambia solo i
+ * numeri. Pura.
+ */
+export function shapeKeyOf(name: string, args: string): string {
+  return repeatKeyOf(name, args.replace(/\d+/g, '#'))
+}
+
+/**
+ * Il contenuto di un result visto dal modello SENZA tempi e durate (pura):
+ * i timestamp e le durate cambiano a ogni chiamata anche quando tutto il
+ * resto è identico, e non sono progresso.
+ */
+export function normalizeResultForFingerprint(content: string): string {
+  return content
+    // timestamp ISO e orari
+    .replace(/\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})?/g, '#TIME')
+    .replace(/\b\d{1,2}:\d{2}(:\d{2})?\b/g, '#TIME')
+    // durate: 12 ms, 1.5s, 3 sec, 2 minutes…
+    .replace(/\b\d+(\.\d+)?\s*(ms|millisecond[is]o?|s|sec|seconds?|secondi|min|minutes?|minuti)\b/gi, '#DUR')
+}
+
+/** L'impronta del result (pura): hash del contenuto normalizzato. */
+export function toolResultFingerprint(content: string): string {
+  return createHash('sha256').update(normalizeResultForFingerprint(content)).digest('hex')
+}
+
+/** La chiamata tracciata (nome + argomenti come arrivano dal modello). */
+export interface TrackedToolCall {
+  name: string
+  args: string
+}
+
+/** Il risultato tracciato: impronta, esito e l'eventuale lotto rifiutato. */
+export interface TrackedToolResult {
+  fingerprint: string
+  failed: boolean
+  /** computer_act oltre COMPUTER_ACTIONS_MAX: il rifiuto c'è già, si CONTA */
+  overLimit?: boolean
+}
+
+/**
+ * UN passo della serie (PURA): registra la chiamata con il SUO risultato e
+ * dice se la serie ha passato una soglia. Il controllo sta DOPO il risultato:
+ * la chiamata che fa scattare la soglia è già stata eseguita — la successiva
+ * non parte. Le soglie e i loro perché stanno sopra (e nel REPORT).
+ */
+export function trackToolStreak(
+  state: ToolStreakState,
+  call: TrackedToolCall,
+  result: TrackedToolResult
+): { state: ToolStreakState; stop: ToolStreakStop | null } {
+  const s: ToolStreakState = { ...state }
+  const key = repeatKeyOf(call.name, call.args)
+  const shape = shapeKeyOf(call.name, call.args)
+  const sameKey = key === s.key
+  const sameShape = shape === s.shape
+  // quando più soglie passano nello stesso passo vince la più SPECIFICA
+  // (il lotto rifiutato è un segnale più netto di «identica che fallisce»,
+  // la stessa risposta riuscita è più netta di «simili»)
+  let stop: ToolStreakStop | null = null
+
+  // lotti computer_act rifiutati DI FILA (il rifiuto esiste già: qui si CONTA)
+  if (result.overLimit === true) {
+    s.overLimit++
+    if (s.overLimit >= OVER_LIMIT_ACTIONS_STOP) stop ??= 'over-limit-actions'
+  } else {
+    s.overLimit = 0
+  }
+
+  // identiche che FALLISCONO di fila (conta la prima della serie)
+  if (result.failed) {
+    s.keyFailing = sameKey ? s.keyFailing + 1 : 1
+    if (s.keyFailing >= IDENTICAL_FAILING_STOP) stop ??= 'identical-failing'
+  } else {
+    s.keyFailing = 0
+    // identiche con la STESSA risposta riuscita di fila (le attese escluse:
+    // aspettare è il loro mestiere, restano nella serie «simile»)
+    if (WAIT_TOOLS.has(call.name)) {
+      s.keySameOk = 0
+    } else {
+      s.keySameOk = sameKey && result.fingerprint === s.toolFingerprint ? s.keySameOk + 1 : 1
+      if (s.keySameOk >= IDENTICAL_NO_PROGRESS_STOP) stop ??= 'identical-no-progress'
+    }
+  }
+
+  // lo STESSO strumento risponde uguale QUALUNQUE input, di fila (le attese
+  // escluse anche qui: la stessa risposta è il loro mestiere)
+  if (!result.failed && !WAIT_TOOLS.has(call.name) && call.name === s.tool && result.fingerprint === s.toolFingerprint) {
+    s.toolSameFingerprint++
+    if (s.toolSameFingerprint >= SAME_RESULT_STOP) stop ??= 'same-result'
+  } else {
+    s.toolSameFingerprint = 1
+  }
+
+  // la serie «simile»: LUNGHEZZA della sequenza di chiamate con la STESSA
+  // forma (identiche, o che cambiano solo nei numeri) — conta la prima
+  if (sameShape) s.similar++
+  else s.similar = 1
+  if (s.similar >= SIMILAR_STOP) stop ??= 'similar'
+
+  s.key = key
+  s.shape = shape
+  s.tool = call.name
+  s.toolFingerprint = result.fingerprint
+  return { state: s, stop }
+}
 /**
  * Correzione C5 (fase 10): il motivo per cui un turno finisce STOPPED per un
  * errore del modello. 429 (o il testo "usage limit"/"rate limit", come scrive

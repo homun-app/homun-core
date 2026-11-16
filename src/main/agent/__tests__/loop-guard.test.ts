@@ -1,38 +1,11 @@
 // Test delle protezioni di runtime pure (fase 8, §3bis L11): loop detection
 // e stato live (nome del tool + target, senza testo generato dal modello).
 import { describe, expect, it } from 'vitest'
-import { activityOf, abbreviateCommand, isToolLoop, TOOL_LOOP_REPEATS } from '../loop-guard'
+import { activityOf, abbreviateCommand } from '../loop-guard'
 
-describe('isToolLoop: la stessa tool call ripetuta 3 volte di fila', () => {
-  const same = { name: 'run-command', args: '{"command":"ls"}' }
-
-  it('la terza identica di fila è un loop (nome + argomenti identici)', () => {
-    expect(isToolLoop([same, same], same)).toBe(true)
-  })
-
-  it('due sole ripetizioni non bastano; la terza chiamata diversa resetta', () => {
-    expect(isToolLoop([same], same)).toBe(false)
-    expect(isToolLoop([same, { name: 'run-command', args: '{"command":"ls -la"}' }], same)).toBe(false)
-    expect(isToolLoop([{ ...same, name: 'read-file' }, { ...same, name: 'read-file' }], { ...same, name: 'read-file' })).toBe(true)
-  })
-
-  it('argomenti diversi non sono un loop, nemmeno a nome uguale', () => {
-    const a = { name: 'send_to_user', args: '{"text":"ciao"}' }
-    const b = { name: 'send_to_user', args: '{"text":"ancora ciao"}' }
-    expect(isToolLoop([a, a], b)).toBe(false)
-    expect(isToolLoop([a, b], a)).toBe(false)
-  })
-
-  it('le chiamate di ritorno dopo una diversa non contano', () => {
-    const other = { name: 'read-file', args: '{"path":"/x"}' }
-    expect(isToolLoop([same, other, same], same)).toBe(false)
-    expect(isToolLoop([other, same, same], same)).toBe(true)
-  })
-
-  it('la soglia è 3 (TOOL_LOOP_REPEATS)', () => {
-    expect(TOOL_LOOP_REPEATS).toBe(3)
-  })
-})
+// SV7 (fase schermo-vivo): isToolLoop non esiste più — il controllo sta
+// DOPO il risultato e vive in trackToolStreak (tabella dei casi in
+// loop-streak.test.ts). Qui restano i test dell'attività live.
 
 describe('activityOf: nome del tool e target, mai testo del modello', () => {
   it('run-command → comando abbreviato su una riga', () => {
@@ -108,12 +81,19 @@ describe('fase 19a (V6): computer_act con le stesse azioni ripetute e lo schermo
     expect(repeatKeyOf('browser_open', '{"url":"a"}')).toBe('browser_open\u0000{"url":"a"}')
   })
 
-  it('la TERZA chiamata identica di fila ferma il turno (la regola delle altre ripetizioni)', () => {
+  it('SV7: le azioni di computer_act con la stessa CHIAVE (hash) sono la stessa chiamata per la serie', async () => {
+    const { repeatKeyOf, trackToolStreak, initialToolStreakState } = await import('../loop-guard')
     const a1 = act(CLICK, { observe: true })
     const a2 = act(CLICK, { observe: false }) // stessa chiave: il modello crede di variare
-    const seq = [{ name: 'computer_act', args: a1 }, { name: 'computer_act', args: a2 }]
-    expect(isToolLoop(seq, { name: 'computer_act', args: act(CLICK) })).toBe(true)
-    // due e poi una DIVERSA: non è un loop
-    expect(isToolLoop([seq[0]!], { name: 'computer_act', args: act([{ kind: 'key', key: 'Tab' }]) })).toBe(false)
+    expect(repeatKeyOf('computer_act', a1)).toBe(repeatKeyOf('computer_act', a2))
+    // tre identiche FALLITE di fila fermano (identical-failing)
+    let st = initialToolStreakState()
+    let stop = null as string | null
+    for (let i = 0; i < 3; i++) {
+      const out = trackToolStreak(st, { name: 'computer_act', args: a1 }, { fingerprint: 'f' + i, failed: true })
+      st = out.state
+      stop = out.stop
+    }
+    expect(stop).toBe('identical-failing')
   })
 })

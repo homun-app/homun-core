@@ -3226,6 +3226,11 @@ msgstr "The bot has no screen open."
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
+msgid "notice.toolStuck"
+msgstr "The bot got stuck repeating the same action: write “continue” or ask it for another way."
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
 msgid "rpc.screenBotBusy"
 msgstr "The bot is working: stop it before taking control."
 
@@ -4156,6 +4161,11 @@ msgstr "License"
 #: src/renderer/src/components/ActivityPanel.tsx
 msgid "limite d'uso"
 msgstr "usage limit"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "notice.stepsLimitContinue"
+msgstr "Step limit reached: write “continue” to go on."
 
 #: src/renderer/src/components/GuideView.tsx
 #: src/renderer/src/components/Settings.tsx

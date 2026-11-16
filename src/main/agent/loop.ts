@@ -71,7 +71,12 @@ import { mainAgentOf } from '../../daemon/presence'
 import { analyzeCommand } from './shell-ast'
 import { commandKey, isNeverAuto } from './permission-rules'
 import { autoReviewDecision, neverAskDecision, approvalsMode, reviewWithConfiguredModel, liftContaminatedAllow, ownerWordsOf, botBriefOf, AUTO_REVIEW_MAX_PER_TURN, type AutoReviewAction } from './auto-review'
-import { activityOf, isToolLoop, stopReasonOfError } from './loop-guard'
+import { activityOf, stopReasonOfError } from './loop-guard'
+// SV7 (fase schermo-vivo): la serie con i RISULTATI (le soglie stanno lì)
+import {
+  trackToolStreak, initialToolStreakState, toolResultFingerprint,
+  type ToolStreakState, type ToolStreakStop
+} from './loop-guard'
 // fase chat-limiti (CL3): le foto di una pagina in chat (show_images)
 import { parseShowImagesInput, downloadShowImage, saveShowImage, imageUrlsInMarkdown } from './show-images'
 import type { ChatGalleryImage } from '../../shared/chat-images'
@@ -289,8 +294,35 @@ async function describeComposio(toolName: string): Promise<{ app: string; action
 // §5.3: buildMessages vive in history.ts (modulo puro, testabile senza Electron)
 export { buildMessages } from './history'
 
-/** I passi di un turno (correzione J4: l'eval lo IMPORTA, così il figlio eval ha lo stesso budget del loop vero). */
-export const MAX_STEPS = 24
+/**
+ * I passi di un turno. SV7 (fase schermo-vivo): da 24 a 100 — un lavoro sullo
+ * schermo costa ~3 passi per oggetto (guardare, cliccare, catturare) e 24
+ * fermavano il turno a metà, IN SILENZIO. Restano le protezioni della serie
+ * (loop-guard) per chi gira a vuoto: il tetto è solo il fusibile. L'eval
+ * (behaviors.eval.ts) lo IMPORTA (correzione J4): il figlio eval ha lo stesso
+ * budget del loop vero — con 100 l'eval consuma più passi per scenario, ma
+ * non si esegue in questa fase (scritto nel REPORT).
+ */
+export const MAX_STEPS = 100
+
+/** SV7: quando mancano questi passi alla fine, il result riceve l'avviso. */
+export const STEPS_WARNING_LEFT = 5
+
+/** SV7: l'avviso in coda al result del modello (inglese, una volta per turno). */
+export const stepsLeftWarning = (left: number): string =>
+  `[${left} steps left in this turn: wrap up now — show the user what you have (show_images for pictures) and answer.]`
+
+/** SV7: l'avviso per il FIGLIO (chiama wake_parent con quello che ha). */
+export const stepsLeftWarningChild = (left: number): string =>
+  `[${left} steps left in this turn: wrap up now — call wake_parent with what you have.]`
+
+/** SV7: il sollecito della CHIAMATA FINALE quando brucia il fusibile. */
+export const STEPS_LIMIT_NUDGE =
+  'You reached the step limit of this turn: tell the user in plain text what you did, what you found and what is left, so they can say "continue".'
+
+/** SV7: il sollecito della CHIAMATA FINALE quando ferma una protezione della serie. */
+export const toolStuckNudge = (tool: string): string =>
+  `You were stopped for repeating ${tool} without progress: tell the user in plain text what you did, what you found, where you got stuck and what else could be tried.`
 
 /**
  * Fase 3 → fase risposta (R5): il sollecito dell'UNICA chiamata di recupero
@@ -1143,7 +1175,18 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
   // fase 10 (§3): le entry di un TURNO DI GRUPPO portano meta.groupId — restano
   // nella storia del membro (il suo transcript unico) ma la chat diretta le
   // nasconde; i messaggi all'utente e le card NON lo portano e restano visibili
-  const add = (e: AppendEntry): import('../../shared/types').TranscriptEntry =>
+  // ---- SV7 (fase schermo-vivo): la serie con i risultati ----
+  // Il controllo sta DOPO il risultato: ogni tool-result che entra nel
+  // transcript passa da qui, con la sua impronta (per lo schermo il FRAME),
+  // e trackToolStreak (puro) dice se una soglia è passata. La chiamata che
+  // fa scattare la soglia è già stata eseguita: la SUCCESSIVA non parte.
+  let streakState: ToolStreakState = initialToolStreakState()
+  let streakStop: ToolStreakStop | null = null
+  let lastStuckTool: string | null = null
+  const trackedCalls = new Map<string, { name: string; args: string }>()
+  const frameFingerprint = { hash: null as string | null }
+  let stepsWarningDone = false
+  const addBase = (e: AppendEntry): import('../../shared/types').TranscriptEntry =>
     appendEntry(
       opts.taskId === undefined && opts.groupTurn === undefined
         ? e
@@ -1156,6 +1199,32 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             }
           }
     )
+  const add = (e: AppendEntry): import('../../shared/types').TranscriptEntry => {
+    const entry = addBase(e)
+    // SV7: la serie si aggiorna a OGNI tool-result (dopo che il risultato c'è)
+    if (e.kind === 'tool-result' && !streakStop) {
+      const tracked = trackedCalls.get(String(e.meta?.callId ?? ''))
+      if (tracked) {
+        const failed = e.meta?.error === true
+        let fingerprint: string
+        if (e.meta?.screenUnchanged === true) {
+          fingerprint = 'screen-unchanged' // il fatto che il loop già rileva
+        } else if ((tracked.name === 'computer_observe' || tracked.name === 'computer_act') && frameFingerprint.hash) {
+          fingerprint = 'frame:' + frameFingerprint.hash // il FRAME, non il testo con l'ora
+        } else {
+          fingerprint = toolResultFingerprint(e.content)
+        }
+        const overLimit = tracked.name === 'computer_act' && failed && /too many actions/i.test(e.content)
+        const out = trackToolStreak(streakState, tracked, { fingerprint, failed, ...(overLimit ? { overLimit: true } : {}) })
+        streakState = out.state
+        if (out.stop) {
+          streakStop = out.stop
+          lastStuckTool = tracked.name
+        }
+      }
+    }
+    return entry
+  }
   /**
    * Fase 12 (punto 3): chiusura di FALLIMENTO del figlio per errore del modello
    * (niente sollecito su un modello che non risponde). Se il turno è stato
@@ -2500,6 +2569,12 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
 
       for (let call of final.toolCalls) {
         if (controller.signal.aborted) break
+        // SV7: la chiamata si registra SUBITO — anche un RIFIUTO di un gate
+        // (strumento sconosciuto, lotto troppo grande…) è un risultato che
+        // conta nella serie, e arriva prima del vecchio punto di registrazione
+        trackedCalls.set(call.id, { name: call.name, args: call.arguments })
+        // SV7: la chiamata PRECEDENTE ha già fermato il turno? questa non parte
+        if (streakStop) break
         let input: Record<string, unknown>
         try {
           input = JSON.parse(call.arguments || '{}')
@@ -2695,27 +2770,11 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           continue
         }
 
-        // fase 8 (§3bis L11): loop detection — la stessa identica chiamata
-        // (nome + argomenti) per la TERZA volta di fila ferma il turno con una
-        // notice leggibile, invece di consumare tutti i MAX_STEPS
-        if (isToolLoop(executedCalls, { name: call.name, args: call.arguments })) {
-          add({ ...uiSystemEntry(agentId, 'notice', ui(UI.toolLoop)) })
-          emitLastEntry(agentId, emit)
-          // fase chat-limiti (CL5): il figlio inceppato chiude STOPPED-LOOP —
-          // l'esito VERO per il padre (il risultato è parziale, non
-          // presentato come done); il summary resta inglese (fase 17c D2)
-          if (opts.subagent && !controller.signal.aborted) {
-            const closed = closeSubagent(db(), opts.subagent.id, {
-              status: 'stopped-loop',
-              summary: `the model kept repeating the exact same call (${call.name})`,
-              finishedAt: Date.now()
-            })
-            if (closed) onSubagentTerminal(db(), opts.subagent.id, emit)
-          }
-          endTurn(agentId, 'STOPPED', emit, opts.taskId, 'loop')
-          setStatus(agentId, 'idle', emit)
-          return
-        }
+        // SV7 (fase schermo-vivo): la protezione della serie sta DOPO il
+        // risultato (vedi add, sopra). Qui si REGISTRA la chiamata e si
+        // controlla se la chiamata PRECEDENTE ha già fermato il turno: la
+        // chiamata che fa scattare la soglia è stata eseguita, questa no.
+        if (streakStop) break
         executedCalls.push({ name: call.name, args: call.arguments })
         // fase 9 (punto 0d): ogni tool che non è "parlare" è lavoro — azzera
         // il conteggio dei messaggi consecutivi senza lavoro in mezzo
@@ -3275,6 +3334,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               return
             }
             lastScreenHash = hash
+            frameFingerprint.hash = hash // SV7: l'impronta del result è il FRAME
             pushResult(`${prefix}\nThe screenshot follows (the coordinates you want to click are in pixels of THAT image).`, meta)
             messages.push({
               role: 'user',
@@ -4979,6 +5039,19 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       if (paused && messages[messages.length - 1]?.role === 'tool') {
         // dopo un rifiuto il modello può decidere come proseguire: continua il loop
       }
+      // SV7: quando mancano STEPS_WARNING_LEFT passi alla fine, il result
+      // dell'ULTIMA chiamata del passo riceve in coda l'avviso per il modello
+      // (inglese, UNA volta per turno; nel figlio dice di chiamare wake_parent)
+      if (!stepsWarningDone && MAX_STEPS - (step + 1) === STEPS_WARNING_LEFT) {
+        stepsWarningDone = true
+        const lastToolMsg = [...messages].reverse().find((m) => m.role === 'tool')
+        if (lastToolMsg) {
+          const warn = opts.subagent ? stepsLeftWarningChild(STEPS_WARNING_LEFT) : stepsLeftWarning(STEPS_WARNING_LEFT)
+          lastToolMsg.content = `${lastToolMsg.content}\n${warn}`
+        }
+      }
+      // SV7: una protezione della serie ha fermato il turno in questo passo
+      if (streakStop) break
       // correzione C1: pass ha chiuso il turno di gruppo (niente altre chiamate).
       // fase 12: anche wake_parent chiude il turno del FIGLIO lì
       if (awaitingUser || passedSilence || wakeDone || controller.signal.aborted) break
@@ -4989,7 +5062,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     // risposta vuota): UNA chiamata di recupero col sollecito (solo wake_parent),
     // poi chiusura automatica — done col testo libero se c'è, failed se è vuoto.
     // Turno abortito (stop/scadenza): la riga è già terminale, qui non si tocca
-    if (opts.subagent && !wakeDone && !controller.signal.aborted) {
+    if (opts.subagent && !wakeDone && !controller.signal.aborted && !streakStop) {
       const decision = subagentClosure({ wakeCalled: false, nudged: subagentNudged, freeText: lastFreeText, modelError: false })
       if (decision.kind === 'nudge') {
         subagentNudged = true
@@ -5069,10 +5142,92 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     } else if (controller.signal.aborted) {
       endTurn(agentId, run.superseded ? 'SUPERSEDED' : 'STOPPED', emit, opts.taskId, 'interrupt')
     } else if (!finished) {
-      // fase 12: nel figlio la notice non serve (la chiusura robusta ha già
-      // scritto cosa è successo: sollecito o chiusura automatica)
-      if (!opts.subagent) {
-        add({ ...uiSystemEntry(agentId, 'notice', ui(UI.stepsLimit)) })
+      // ---- SV7 (fase schermo-vivo): il turno si ferma (fusibile o protezione
+      // della serie) ma NON in silenzio. In chat privata UNA chiamata finale
+      // SENZA strumenti sul percorso del recupero R5: il suo testo è la
+      // risposta del turno, sotto resta la notice. Nei figli e nei gruppi la
+      // chiusura resta quella di oggi (CL5 per le protezioni, chiusura robusta
+      // per il fusibile) ----
+      if (opts.subagent) {
+        // la chiusura robusta del figlio ha già girato sopra (fusibile);
+        // per una PROTEZIONE il figlio chiude stopped-loop col CASO nel summary
+        if (streakStop && !controller.signal.aborted) {
+          const closed = closeSubagent(db(), opts.subagent.id, {
+            status: 'stopped-loop',
+            summary: `stopped by the loop guard (${streakStop}${lastStuckTool ? ` on ${lastStuckTool}` : ''})`,
+            finishedAt: Date.now()
+          })
+          if (closed) onSubagentTerminal(db(), opts.subagent.id, emit)
+        }
+      } else if (opts.groupTurn !== undefined) {
+        // i gruppi chiudono come oggi: notice (la protezione col testo di
+        // sempre, il fusibile col suo) e STOPPED, nessuna chiamata finale
+        add({ ...uiSystemEntry(agentId, 'notice', ui(streakStop ? UI.toolLoop : UI.stepsLimit)) })
+        emitLastEntry(agentId, emit)
+      } else if (privateHumanTurn) {
+        // MAI in silenzio: la chiamata finale senza strumenti
+        const nudge = streakStop
+          ? toolStuckNudge(lastStuckTool ?? 'the same tool')
+          : STEPS_LIMIT_NUDGE
+        messages.push({ role: 'user', content: withSentStamp(nudge, Date.now(), sentZone) })
+        setStatus(agentId, 'thinking', emit)
+        let finaleText = ''
+        try {
+          const fstream = llmStream(activeProvider, activeRoute.model, messages, [], controller.signal, {
+            thinking: turnThinking,
+            modelPrices,
+            sessionId,
+            trace: { turnId: traceTurnId, callIndex: traceCallIndex++ }
+          })
+          let fUsage: import('./llm').LlmChunk['usage'] | undefined
+          let fToolCalls: ToolCall[] = []
+          const fit = fstream[Symbol.asyncIterator]()
+          for (;;) {
+            const r = await nextWithDeadline(fit, false, deadlines)
+            if (r.done) break
+            const ch = r.value
+            if (ch.textDelta) finaleText += ch.textDelta
+            if (ch.toolCalls) fToolCalls = ch.toolCalls
+            if (ch.usage) fUsage = ch.usage
+          }
+          if (fUsage) {
+            recordModelUsage({
+              agentId,
+              providerId: activeProvider.id,
+              providerKind: activeProvider.kind,
+              model: activeRoute.model,
+              source: 'wake',
+              input: fUsage.input,
+              output: fUsage.output,
+              cacheRead: fUsage.cacheRead ?? 0,
+              cacheWrite: fUsage.cacheWrite ?? 0,
+              costUsd: fUsage.costUsd ?? null
+            })
+          }
+          // le chiamate di strumento inventate nella chiamata finale NON si
+          // eseguono: valgono il result del recupero (percorso R5)
+          if (fToolCalls.length) {
+            messages.push({ role: 'assistant', content: '', toolCalls: fToolCalls })
+            for (const c of fToolCalls) {
+              messages.push({ role: 'tool', toolCallId: c.id, content: RECOVERY_NO_TOOLS_RESULT })
+            }
+          }
+        } catch {
+          // la chiamata finale stessa fallisce: resta la notice (mai il silenzio)
+        }
+        if (finaleText.trim()) {
+          const answer = finaleText.trim()
+          add({
+            agentId, kind: 'send-message', role: 'assistant', content: answer,
+            meta: { message: { type: 'text', text: answer }, finalNudge: streakStop ?? 'steps-limit' }
+          })
+          emitLastEntry(agentId, emit)
+        }
+        add({ ...uiSystemEntry(agentId, 'notice', ui(streakStop ? UI.toolStuck : UI.stepsLimitContinue)) })
+        emitLastEntry(agentId, emit)
+      } else {
+        // turni non di chat (task, routine…): la chiusura di oggi (notice + STOPPED)
+        add({ ...uiSystemEntry(agentId, 'notice', ui(streakStop ? UI.toolLoop : UI.stepsLimit)) })
         emitLastEntry(agentId, emit)
       }
       endTurn(agentId, 'STOPPED', emit, opts.taskId, 'loop')

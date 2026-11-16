@@ -376,6 +376,15 @@ export const UI = {
     id: 'rpc.screenControlFailed',
     message: 'Impossibile avviare il controllo dello schermo: riprova.'
   }),
+  // SV7 (fase schermo-vivo): le notice sotto la risposta della chiamata finale
+  stepsLimitContinue: msg({
+    id: 'notice.stepsLimitContinue',
+    message: 'Limite di passi raggiunto: scrivi «continua» per andare avanti.'
+  }),
+  toolStuck: msg({
+    id: 'notice.toolStuck',
+    message: 'Il bot si è bloccato ripetendo la stessa azione: scrivi «continua» o chiedigli un’altra strada.'
+  }),
   // SV1 (fase schermo-vivo): l'anteprima è sempre in sola lettura
   rpcScreenPeekControl: msg({
     id: 'rpc.screenPeekControl',

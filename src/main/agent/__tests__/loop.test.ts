@@ -2924,16 +2924,19 @@ describe('fase 8 (§3bis L7): ciclo di vita del task', () => {
 // ---- fase 8 (§3bis L11): protezioni di runtime ----
 
 describe('fase 8 (§3bis L11): loop detection', () => {
-  it('la stessa identica chiamata per la TERZA volta di fila ferma il turno con notice leggibile', async () => {
-    // fase 9 (0c): le send identiche vengono intercettate dalla dedup prima
-    // della loop detection, quindi il veicolo qui è un tool di lavoro
-    const resp = { toolCalls: [{ id: 'x', name: 'list-credentials', arguments: '{}' }] }
-    h.llm.queue = [resp, resp, resp, resp]
+  it('SV7: la stessa identica chiamata con la STESSA risposta per la SESTA volta di fila ferma il turno (e risponde, non più in silenzio)', async () => {
+    // il controllo sta DOPO il risultato: sei chiamate identiche con la
+    // stessa risposta riuscita → identical-no-progress. La sesta È stata
+    // eseguita; la settima non parte; la chiamata finale risponde all'utente
+    const resp = { toolCalls: [{ id: 'x', name: 'find_tools', arguments: '{"group":"tasks"}' }] }
+    h.llm.queue = Array.from({ length: 6 }, () => resp)
+    h.llm.queue.push({ text: 'Ho provato sei volte la stessa cosa senza novità.' })
     await runTurn(AGENT, 'vai', emit)
-    // la terza identica NON è stata eseguita: due esecuzioni e una notice di loop
-    const calls = h.db.entries.filter((e) => e.kind === 'tool-call' && e.meta?.name === 'list-credentials')
-    expect(calls).toHaveLength(2)
-    expect(h.db.entries.some((e) => e.kind === 'notice' && e.content.includes('loop'))).toBe(true)
+    const calls = h.db.entries.filter((e) => e.kind === 'tool-call' && e.meta?.name === 'find_tools')
+    expect(calls).toHaveLength(6)
+    // la risposta della chiamata finale È la risposta del turno, sotto la notice
+    expect(h.db.entries.some((e) => e.kind === 'send-message' && e.content.includes('sei volte'))).toBe(true)
+    expect(h.db.entries.some((e) => e.kind === 'notice' && e.content.includes('bloccato ripetendo'))).toBe(true)
     expect(h.db.entries.some((e) => e.kind === 'event' && e.meta?.turnEnd === 'STOPPED')).toBe(true)
   })
 
@@ -3022,18 +3025,20 @@ describe('correzione B1: l\'origine del turno vive sulla riga del task e nei suo
 
   it('task nato da una routine (automatic) → send_to_user in outbox e un solo urgent', async () => {
     mkTask(1, { automatic: 1 })
-    // fase 9 (0d): un lavoro separa le send (senza, dalla seconda non si consegnano)
+    // fase 9 (0d): un lavoro separa le send (senza, dalla seconda non si consegnano).
+    // SV7: il lavoro è find_tools a gruppi alternati — nel harness list-credentials
+    // FALLISCE e tre fallimenti identici fermano il turno (serie di SV7)
     h.llm.queue = [
       { toolCalls: [
-        { id: 'w1', name: 'list-credentials', arguments: '{}' },
+        { id: 'w1', name: 'find_tools', arguments: '{"group":"tasks"}' },
         { id: 'a', name: 'send_to_user', arguments: JSON.stringify({ text: 'avanzamento' }) }
       ] },
       { toolCalls: [
-        { id: 'w2', name: 'list-credentials', arguments: '{}' },
+        { id: 'w2', name: 'find_tools', arguments: '{"group":"bots"}' },
         { id: 'b', name: 'send_to_user', arguments: JSON.stringify({ text: 'servono dati', urgent: true }) }
       ] },
       { toolCalls: [
-        { id: 'w3', name: 'list-credentials', arguments: '{}' },
+        { id: 'w3', name: 'find_tools', arguments: '{"group":"documents"}' },
         { id: 'c', name: 'send_to_user', arguments: JSON.stringify({ text: 'altro urgent', urgent: true }) }
       ] },
       { text: '.' }
@@ -3306,16 +3311,18 @@ describe('fase 9: send senza testo', () => {
 describe('fase 10 (residuo 0c): al massimo 3 send consegnati per turno', () => {
   const mkSend = (id: string, text: string): FakeToolCall =>
     ({ id, name: 'send_to_user', arguments: JSON.stringify({ text }) })
-  const lavoro = (id: string): FakeToolCall => ({ id, name: 'list-credentials', arguments: '{}' })
+  // SV7: il lavoro è find_tools a gruppi alternati (list-credentials nel
+  // harness FALLISCE: tre fallimenti identici fermerebbero il turno)
+  const lavoro = (id: string, n: number): FakeToolCall => ({ id, name: 'find_tools', arguments: JSON.stringify({ group: ['tasks', 'bots', 'documents'][n % 3] }) })
 
   it('dal quarto send (con lavoro in mezzo, quindi legittimo per 0d) il testo è ragionamento', async () => {
     h.llm.queue = [
       { toolCalls: [mkSend('c1', 'primo messaggio')] },
-      { toolCalls: [lavoro('w1')] },
+      { toolCalls: [lavoro('w1', 0)] },
       { toolCalls: [mkSend('c2', 'secondo messaggio')] },
-      { toolCalls: [lavoro('w2')] },
+      { toolCalls: [lavoro('w2', 1)] },
       { toolCalls: [mkSend('c3', 'terzo messaggio')] },
-      { toolCalls: [lavoro('w3')] },
+      { toolCalls: [lavoro('w3', 2)] },
       // il quarto, pur separato dal lavoro, supera il tetto del TURNO
       { toolCalls: [mkSend('c4', 'quarto messaggio')] },
       { text: 'fine' }
@@ -5311,30 +5318,43 @@ describe('fase 12: il FIGLIO — tool, prompt, whitelist e consegna', () => {
   it('fase chat-limiti (CL5): figlio fermato dal controllo anti-loop → status STOPPED-LOOP (esito vero, non done)', async () => {
     childAgent()
     setWebFetchForTests(async () => ({ ok: true, text: 'pagina', contentType: 'text/html', finalUrl: 'https://x.example/a', downloadedBytes: 6 }))
-    // la STESSA identica chiamata tre volte di fila: alla terza scatta il
-    // controllo anti-loop (fase 8 L11) e il figlio si ferma
+    // SV7: il controllo sta DOPO il risultato. La PRIMA lettura torna la
+    // pagina, le seguenti «[already read: same content]»: dalla seconda la
+    // risposta è SEMPRE la stessa — sei volte di fila (seconda…settima) →
+    // identical-no-progress, il figlio si ferma alla SETTIMA chiamata
     const sameCall = { toolCalls: [{ id: 'r1', name: 'web_fetch', arguments: JSON.stringify({ url: 'https://x.example/a' }) }] }
-    h.llm.queue = [sameCall, sameCall, sameCall, { text: 'mai raggiunto' }]
+    h.llm.queue = Array.from({ length: 7 }, () => sameCall)
     await runTurn(CHILD, 'brief', emit, undefined, { source: 'user', subagent: { id: CHILD, parentId: AGENT } })
     const row = subagentsState.rows.find((r) => r.id === CHILD)!
     expect(row.status).toBe('stopped-loop')
-    expect(row.summary).toContain('the model kept repeating the exact same call (web_fetch)')
+    expect(row.summary).toContain('identical-no-progress')
+    expect(row.summary).toContain('web_fetch')
     expect(subagentsState.terminal).toContain(CHILD)
-    // alla TERZA risposta identica il controllo scatta PRIMA di eseguirla:
-    // tre chiamate al modello, nessuna quarta
-    expect(h.llm.calls).toHaveLength(3)
-    expect(h.db.entries.filter((e) => e.kind === 'tool-call' && e.content === 'web_fetch').length).toBeLessThanOrEqual(3)
+    // la settima È stata eseguita (il controllo è dopo il risultato), l'ottava
+    // non parte: sette chiamate al modello, nessuna ottava
+    expect(h.llm.calls).toHaveLength(7)
+    expect(h.db.entries.filter((e) => e.kind === 'tool-call' && e.content === 'web_fetch').length).toBeLessThanOrEqual(7)
   })
 
   it('MAX_STEPS senza wake_parent → sollecito e poi chiusura automatica', async () => {
     childAgent()
-    // 24+1 risposte di solo testo (nessuna consegna), poi il sollecito (vuoto)
-    h.llm.queue = Array.from({ length: 40 }, () => ({ text: 'lavoro…' }))
+    // SV7: il fusibile è a 100 — 100 passi col tool del catalogo (gruppi
+    // alternati: forme e risposte diverse, la serie non ferma), poi il
+    // sollecito del figlio risponde e chiude
+    const groups = ['tasks', 'bots', 'documents']
+    h.llm.queue = Array.from({ length: 100 }, (_v, i) => ({
+      toolCalls: [{ id: `f${i}`, name: 'find_tools', arguments: JSON.stringify({ group: groups[i % groups.length] }) }]
+    }))
+    h.llm.queue.push({ text: 'consegna: fatto il lavoro' })
     await runTurn(CHILD, 'brief', emit, undefined, { source: 'user', subagent: { id: CHILD, parentId: AGENT } })
     const row = subagentsState.rows.find((r) => r.id === CHILD)!
     expect(row.status).toBe('done') // c'è testo libero
-    expect(row.summary).toContain('lavoro')
+    expect(row.summary).toContain('consegna: fatto il lavoro')
     expect(row.summary).toContain('(automatic close')
+    // l'avviso a 5 dalla fine è arrivato al figlio (una volta sola)
+    const withWarn = h.llm.calls[h.llm.calls.length - 1]!.filter((m) => String(m.content ?? '').includes('steps left in this turn'))
+    expect(withWarn.length).toBe(1)
+    expect(String(withWarn[0]!.content)).toContain('wake_parent')
   })
 })
 
@@ -6909,11 +6929,13 @@ describe('fase risposta: message_user — solo progressi (R2)', () => {
   })
 
   it('il QUARTO message_user consegnato del turno → ragionamento, come oggi', async () => {
-    const work = (id: string): FakeToolCall => ({ id, name: 'list-credentials', arguments: '{}' })
+    // SV7: il lavoro è find_tools a gruppi alternati (list-credentials nel
+    // harness fallisce: tre fallimenti identici fermerebbero il turno)
+    const work = (id: string, group: string): FakeToolCall => ({ id, name: 'find_tools', arguments: JSON.stringify({ group }) })
     h.llm.queue = [
-      { toolCalls: [mu('m1', { text: 'uno' }), work('w1')] },
-      { toolCalls: [mu('m2', { text: 'due' }), work('w2')] },
-      { toolCalls: [mu('m3', { text: 'tre' }), work('w3')] },
+      { toolCalls: [mu('m1', { text: 'uno' }), work('w1', 'tasks')] },
+      { toolCalls: [mu('m2', { text: 'due' }), work('w2', 'bots')] },
+      { toolCalls: [mu('m3', { text: 'tre' }), work('w3', 'documents')] },
       { toolCalls: [mu('m4', { text: 'quattro' })] },
       { text: '' }
     ]
@@ -8386,5 +8408,97 @@ describe('BU1 (fase beta.4): update_self arriva al modello in OGNI turno', () =>
     expect(names).toContain('update_self')
     const system = String(h.llm.calls[0]![0]!.content)
     expect(system).toContain('update_self')
+  })
+})
+
+// ---- SV7 (fase schermo-vivo): le protezioni con i RISULTATI, il fusibile alto, mai in silenzio ----
+
+describe('SV7: fusibile e protezioni della serie', () => {
+  it('il caso della prova NON si ferma più a 24: 99 passi con risultati diversi proseguono e il fusibile scatta a 100', async () => {
+    // find_tools con gruppi DIVERSI: chiamate diverse per forma e per risposta
+    // (come il bot che lavora sullo schermo: guarda, clicca, cattura)
+    const groups = ['browser', 'documents', 'tasks', 'bots', 'subagents']
+    h.llm.queue = Array.from({ length: 100 }, (_v, i) => ({
+      toolCalls: [{ id: `t${i}`, name: 'find_tools', arguments: JSON.stringify({ group: groups[i % groups.length] }) }]
+    }))
+    h.llm.queue.push({ text: 'Ecco cosa ho fatto: ho cercato e trovato. Scrivi «continua» per il resto.' })
+    await runTurn(AGENT, 'lavoro lungo', emit)
+    // tutti e 100 i passi sono girati + LA CHIAMATA FINALE senza strumenti
+    expect(h.llm.calls.length).toBe(101)
+    // l'avviso a 5 dalla fine: UNA volta sola (nell'ULTIMO result di quel
+    // passo — e resta nelle chiamate successive: si conta sull'ultima)
+    const inLast = h.llm.calls[h.llm.calls.length - 1]!.filter((m) => String(m.content ?? '').includes('[5 steps left in this turn')).length
+    const inMid = h.llm.calls[50]!.filter((m) => String(m.content ?? '').includes('[5 steps left in this turn')).length
+    expect(inLast).toBe(1)
+    expect(inMid).toBe(0)
+    // la chiamata finale è SENZA strumenti e porta il sollecito del fusibile
+    const lastTools = h.llm.toolsList?.[h.llm.toolsList.length - 1]
+    expect(Array.isArray(lastTools) ? lastTools.length : 0).toBe(0)
+    expect(h.llm.calls[100]!.some((m) => String(m.content ?? '').includes('step limit of this turn'))).toBe(true)
+    // il testo della chiamata finale È la risposta del turno
+    const sent = h.db.entries.filter((e) => e.kind === 'send-message')
+    expect(sent.some((e) => e.content.includes('Ecco cosa ho fatto'))).toBe(true)
+    // sotto c'è la notice NUOVA del fusibile
+    expect(h.db.entries.some((e) => e.kind === 'notice' && e.content.includes('Limite di passi raggiunto: scrivi «continua»'))).toBe(true)
+    expect(h.db.entries.some((e) => e.kind === 'event' && e.meta?.turnEnd === 'STOPPED')).toBe(true)
+  })
+
+  it('TRE fallimenti identici fermano il turno: chiamata finale senza strumenti, notice della protezione', async () => {
+    const resp = () => ({ toolCalls: [{ id: 'x', name: 'mcp__fantasma__nope', arguments: '{}' }] })
+    h.llm.queue = [resp(), resp(), resp(), { text: 'Mi sono bloccato su uno strumento che non esiste: ho provato tre volte.' }]
+    await runTurn(AGENT, 'vai', emit)
+    // i tre rifiuti sono arrivati tutti (il controllo sta DOPO il risultato)
+    const refused = h.db.entries.filter((e) => e.kind === 'tool-result' && /fantasma|not available|unknown/i.test(e.content))
+    expect(refused.length).toBeGreaterThanOrEqual(3)
+    // il sollecito della protezione NOMINA lo strumento
+    expect(h.llm.calls[h.llm.calls.length - 1]!.some((m) => String(m.content ?? '').includes('repeating mcp__fantasma__nope without progress'))).toBe(true)
+    // la risposta finale è il testo della chiamata finale
+    expect(h.db.entries.some((e) => e.kind === 'send-message' && e.content.includes('bloccato su uno strumento'))).toBe(true)
+    expect(h.db.entries.some((e) => e.kind === 'notice' && e.content.includes('Il bot si è bloccato ripetendo la stessa azione'))).toBe(true)
+    expect(h.db.entries.some((e) => e.kind === 'event' && e.meta?.turnEnd === 'STOPPED')).toBe(true)
+  })
+
+  it('uno strumento INVENTATO nella chiamata finale NON viene eseguito', async () => {
+    const resp = () => ({ toolCalls: [{ id: 'x', name: 'mcp__fantasma__nope', arguments: '{}' }] })
+    h.llm.queue = [resp(), resp(), resp(), { text: 'Riepilogo breve.', toolCalls: [{ id: 'y', name: 'list-credentials', arguments: '{}' }] }]
+    await runTurn(AGENT, 'vai', emit)
+    // dopo i tre rifiuti nessuna esecuzione di list-credentials
+    expect(h.db.entries.some((e) => e.kind === 'tool-call' && e.meta?.name === 'list-credentials')).toBe(false)
+    // e il testo resta la risposta
+    expect(h.db.entries.some((e) => e.kind === 'send-message' && e.content.includes('Riepilogo breve.'))).toBe(true)
+  })
+
+  it('il FIGLIO fermato da una protezione chiude stopped-loop col CASO nel summary, senza chiamata finale', async () => {
+    const CHILD = 'sub_sv7c'
+    h.db.agents.set(CHILD, {
+      id: CHILD, name: 'TestBot · Ricerca', description: 'Ricerca', providerId: 'prov', model: 'm1',
+      status: 'idle', unread: 0, createdAt: 1, createdBy: null, section: '', parentId: AGENT
+    })
+    subagentsState.rows.push({
+      id: CHILD, parent_id: AGENT, parent_task_id: null, batch_id: 'b-sv7', title: 'Ricerca', brief: 'b',
+      status: 'running', summary: null, report_path: null,
+      contaminated: 0, untrusted: 0, automatic: 0, woken: 0, sealed: 0,
+      created_at: Date.now() - 60_000, started_at: Date.now() - 30_000, finished_at: null, deadline_at: Date.now() + 60_000
+    })
+    const resp = () => ({ toolCalls: [{ id: 'x', name: 'mcp__fantasma__nope', arguments: '{}' }] })
+    h.llm.queue = [resp(), resp(), resp()]
+    await runTurn(CHILD, 'brief', emit, undefined, { source: 'user', subagent: { id: CHILD, parentId: AGENT } })
+    const closed = subagentsState.rows.find((r) => r.id === CHILD)
+    expect(closed?.status).toBe('stopped-loop')
+    expect(String(closed?.summary)).toMatch(/identical-failing.*mcp__fantasma__nope/)
+    // NESSUNA chiamata finale senza strumenti e NESSUN sollecito wake: tre e basta
+    expect(h.llm.calls.length).toBe(3)
+    expect(h.llm.calls.some((_msgs, i) => Array.isArray(h.llm.toolsList?.[i]) && h.llm.toolsList![i]!.length === 0)).toBe(false)
+    expect(h.db.entries.some((e) => e.kind === 'notice' && e.content.includes('wake_parent'))).toBe(false)
+  })
+
+  it('i GRUPPI chiudono come oggi: notice e STOPPED, nessuna chiamata finale', async () => {
+    const resp = () => ({ toolCalls: [{ id: 'x', name: 'mcp__fantasma__nope', arguments: '{}' }] })
+    h.llm.queue = [resp(), resp(), resp()]
+    h.db.agents.set(AGENT, { id: AGENT, name: 'TestBot', description: '', providerId: 'prov', model: 'm1', status: 'idle', unread: 0, createdAt: 1 })
+    await runTurn(AGENT, '<turno_di_gruppo riassunto>', emit, undefined, { groupTurn: { groupId: 1, readMaxDepth: 0, rootId: 1 }, untrusted: true })
+    expect(h.db.entries.some((e) => e.kind === 'event' && e.meta?.turnEnd === 'STOPPED')).toBe(true)
+    expect(h.db.entries.some((e) => e.kind === 'send-message')).toBe(false)
+    expect(h.llm.calls.length).toBe(3)
   })
 })
