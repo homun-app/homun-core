@@ -370,8 +370,33 @@ interface Running {
    * nel turno.
    */
   webReads: TurnWebReads
+  /**
+   * AH4 (fase aiutanti): le chiamate RIFIUTATE o SCADUTE in questo turno, per
+   * chiave (tool + argomenti). La STESSA chiamata non riapre una card: si
+   * risponde subito al modello in parole (niente card a raffica identiche).
+   */
+  refusedCalls: Map<string, 'denied' | 'expired'>
 }
 const running = new Map<string, Running>()
+
+/**
+ * AH4 (fase aiutanti): la chiave della chiamata per il registro dei rifiuti —
+ * stesso tool e STESSI argomenti (le chiavi degli oggetti si ordinano, così
+ * {a,b} e {b,a} sono la stessa chiamata). PURA.
+ */
+export function refusedCallKey(tool: string, args: Record<string, unknown>): string {
+  const sorted = (v: unknown): unknown =>
+    Array.isArray(v)
+      ? v.map(sorted)
+      : v && typeof v === 'object'
+        ? Object.fromEntries(
+            Object.entries(v as Record<string, unknown>)
+              .sort(([a], [b]) => a.localeCompare(b))
+              .map(([k, x]) => [k, sorted(x)])
+          )
+        : v
+  return `${tool}\n${JSON.stringify(sorted(args))}`
+}
 
 /**
  * M5 (fase 0.3.1001): i messaggi «in consegna» al turno in corso. Un messaggio
@@ -1003,7 +1028,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
   if (!provider) throw new Error('provider not found')
 
   const controller = new AbortController()
-  const run: Running = { controller, approvals: new Map(), turnAllows: new Set(), turnGrantEpoch: 0, composioTrustedApps: new Set(), composioDenied: [], accessibilityFailures: 0, turnImages: new Map(), webReads: new TurnWebReads() }
+  const run: Running = { controller, approvals: new Map(), turnAllows: new Set(), turnGrantEpoch: 0, composioTrustedApps: new Set(), composioDenied: [], accessibilityFailures: 0, turnImages: new Map(), webReads: new TurnWebReads(), refusedCalls: new Map() }
   if (opts.taskId !== undefined) run.taskId = opts.taskId
   running.set(agentId, run)
 
@@ -4408,6 +4433,24 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         }
 
         if (verdict.kind === 'ask') {
+          // AH4 (fase aiutanti): la STESSA chiamata (stesso tool, stessi
+          // argomenti) già RIFIUTATA o SCADUTA in questo turno NON riapre una
+          // card — si risponde subito in parole, senza card
+          const refusedBefore = run.refusedCalls.get(refusedCallKey(call.name, input))
+          if (refusedBefore) {
+            const repeatMsg =
+              refusedBefore === 'denied'
+                ? 'Denied by the user earlier in this turn: action refused. Do not call it again in this turn; continue without it or finish with what you have.'
+                : 'Approval expired earlier in this turn (the user did not answer): do not ask again for the same action — continue without it or finish with what you have.'
+            messages.push({ role: 'tool', toolCallId: call.id, content: repeatMsg })
+            const res = add({
+              agentId, kind: 'tool-result', role: 'system',
+              content: refusedBefore === 'denied' ? 'Refused by the user (already refused in this turn)' : 'Approval expired (already asked in this turn)',
+              meta: { callId: call.id }
+            })
+            emit({ type: 'entries', agentId, entries: [res] })
+            continue
+          }
           // fase 8 (punto 2): una grant "per questo turno" appena concessa può
           // essere ancora in fase di calcolo (l'analisi shell è async)
           if (run.pendingTurnGrant) {
@@ -4566,11 +4609,25 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               if (decision === 'deny' && (call.name.startsWith('mcp__') || call.name.startsWith('composio__'))) {
                 run.composioDenied.push({ toolName: call.name, args: input })
               }
+              // AH4 (fase aiutanti): la decisione si ricorda per il turno —
+              // rifiuto o scadenza, la STESSA chiamata non riapre una card
+              if (decision === 'deny' || decision === 'timeout') {
+                run.refusedCalls.set(refusedCallKey(call.name, input), decision === 'deny' ? 'denied' : 'expired')
+              }
+              // AH4: la scadenza dice la VERITÀ al modello — l'utente NON ha
+              // risposto, non ha rifiutato; e non si ritenta uguale nel turno
               messages.push({
                 role: 'tool', toolCallId: call.id,
-                content: decision === 'deny' ? 'Denied by user: action refused.' : 'Approval expired.'
+                content:
+                  decision === 'deny'
+                    ? 'Denied by user: action refused.'
+                    : 'Approval expired: the user did not answer in time (this is not a refusal). Do not ask again for the same action in this turn: continue without it or finish with what you have.'
               })
-              const res = add({ agentId, kind: 'tool-result', role: 'system', content: 'Refused by the user', meta: { callId: call.id } })
+              const res = add({
+                agentId, kind: 'tool-result', role: 'system',
+                content: decision === 'deny' ? 'Refused by the user' : 'Approval expired (the user did not answer)',
+                meta: { callId: call.id }
+              })
               emit({ type: 'entries', agentId, entries: [res] })
               setStatus(agentId, 'thinking', emit)
               paused = true

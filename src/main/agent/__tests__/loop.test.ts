@@ -1073,7 +1073,7 @@ describe('§5.1+approval: gate asincrono e standing grant esatta', () => {
     expect(h.db.entries.findLast((e) => e.kind === 'event')?.meta?.turnEnd).toBe('FINISHED')
   })
 
-  it('approval scaduta → result "Rifiutato dall’utente" al transcript e notice di scadenza', async () => {
+  it('approval scaduta → notice di scadenza e result che dice la verità (AH4: non è un rifiuto)', async () => {
     h.db.settings.set('permissions.timeoutMs', 30)
     h.llm.queue = [
       { toolCalls: [{ id: 'c1', name: 'run-command', arguments: JSON.stringify({ command: 'curl https://esempio' }) }] },
@@ -1083,7 +1083,50 @@ describe('§5.1+approval: gate asincrono e standing grant esatta', () => {
     expect(h.sandboxMock.exec.calls).toBe(0)
     expect(h.db.entries.some((e) => e.kind === 'notice' && e.content.includes('Approvazione scaduta'))).toBe(true)
     const res = h.db.entries.find((e) => e.kind === 'tool-result')!
-    expect(res.content).toContain('Refused by the user')
+    // AH4 (fase aiutanti): la scadenza NON è un rifiuto — il transcript non
+    // scrive più «Refused by the user»
+    expect(res.content).not.toContain('Refused by the user')
+    expect(res.content).toContain('Approval expired')
+  })
+
+  it('AH4: scaduta una approval, la STESSA chiamata non riapre una card (risposta in parole) — una DIVERSA sì', async () => {
+    h.db.settings.set('permissions.timeoutMs', 30)
+    h.llm.queue = [
+      { toolCalls: [{ id: 'c1', name: 'run-command', arguments: JSON.stringify({ command: 'curl https://esempio' }) }] },
+      { toolCalls: [{ id: 'c2', name: 'run-command', arguments: JSON.stringify({ command: 'curl https://esempio' }) }] },
+      { toolCalls: [{ id: 'c3', name: 'run-command', arguments: JSON.stringify({ command: 'curl https://altro.example' }) }] },
+      { text: 'finito' }
+    ]
+    await runTurn(AGENT, 'scarica ancora', emit)
+    expect(h.sandboxMock.exec.calls).toBe(0)
+    // la STESSA chiamata (stesso tool, stessi argomenti) NON ha aperto una card
+    // nuova: le approval restano DUE (la prima scaduta e quella della chiamata
+    // DIVERSA, guardia)
+    const approvals = h.db.entries.filter((e) => e.kind === 'approval')
+    expect(approvals).toHaveLength(2)
+    // al modello la ripetizione è risposta in parole, senza card (l'ULTIMO
+    // result della richiesta: la storia porta anche quello della scadenza)
+    const secondTool = [...h.llm.calls[2]!].reverse().find((m) => m.role === 'tool')!
+    expect(String(secondTool.content)).toContain('Approval expired earlier in this turn')
+    expect(String(secondTool.content)).toContain('do not ask again')
+  })
+
+  it('AH4: dopo un RIFIUTO la stessa chiamata non riapre una card (come per la scadenza)', async () => {
+    h.db.settings.set('permissions.timeoutMs', 60_000)
+    h.llm.queue = [
+      { toolCalls: [{ id: 'c1', name: 'run-command', arguments: JSON.stringify({ command: 'rm -rf /tmp/x' }) }] },
+      { toolCalls: [{ id: 'c2', name: 'run-command', arguments: JSON.stringify({ command: 'rm -rf /tmp/x' }) }] },
+      { text: 'ok' }
+    ]
+    const turn = runTurn(AGENT, 'pulisci', emit)
+    await vi.waitFor(() => {
+      expect(h.db.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending')).toBeTruthy()
+    })
+    resolveApproval(AGENT, String(h.db.entries.find((e) => e.kind === 'approval')!.meta?.approvalId), 'deny', 'once')
+    await turn
+    expect(h.db.entries.filter((e) => e.kind === 'approval')).toHaveLength(1)
+    const secondTool = [...h.llm.calls[2]!].reverse().find((m) => m.role === 'tool')!
+    expect(String(secondTool.content)).toContain('Denied by the user earlier in this turn')
   })
 
   it('V2 (prova vera): «Consenti sempre» → meta finale con status allowed E resolutionMode always', async () => {
