@@ -56,8 +56,8 @@ const NOT_COMPUTER_TOOLS: ReadonlySet<string> = new Set([
   'list-credentials', 'fill_credential', 'find_contacts', 'save_contact',
   // le skill
   'skill', 'update_skill',
-  // la ricerca web e i suoi provider
-  'web_search', 'web_fetch', 'you', 'exa', 'tavily', 'web_search_exa',
+  // la ricerca web e i suoi provider (show_images: la galleria in chat, CL3)
+  'web_search', 'web_fetch', 'show_images', 'you', 'exa', 'tavily', 'web_search_exa',
   // le facciate che NON sono il browser
   'document', 'task', 'memory',
   // la richiesta di presa di controllo è una domanda ALL'UTENTE, non un'azione nel box
