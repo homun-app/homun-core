@@ -5,6 +5,30 @@ pubblicata finisce nel corpo della GitHub Release (da cui l'app mostra il
 «cosa cambia» quando propone un aggiornamento). Formato: `## [x.y.z] — data`,
 sezioni H2 e un punto per riga.
 
+## [0.3.1001-beta.8] — 2026-11-16
+
+Lo schermo del bot sempre a vista e i lavori lunghi che non si fermano a
+metà, dalla prova della beta.7.
+
+### Novità
+
+- **La card «Computer» mostra lo schermo vero:** mentre il bot usa il
+  browser vedi cosa sta facendo, dal vivo. Guardare non accende niente e
+  non tiene acceso il browser.
+- **Lo schermo in una finestra a parte:** «Stacca» lo apre in una piccola
+  finestra sempre in primo piano, che puoi spostare e ridimensionare;
+  «Riporta qui» lo rimette nella scheda Computer.
+- **Il bot ti mostra le foto che cattura** nel suo computer, nella stessa
+  galleria della chat.
+
+### Correzioni
+
+- **I lavori lunghi non si fermano più a metà:** il bot ha molti più passi
+  a disposizione e si ferma prima solo se ripete la stessa azione senza
+  andare avanti.
+- **Quando si ferma, il bot risponde sempre:** dice cosa ha fatto, cosa ha
+  trovato e cosa resta; scrivi «continua» per andare avanti.
+
 ## [0.3.1001-beta.7] — 2026-11-16
 
 Gli aiutanti del bot e le richieste di conferma, dalla prova della beta.6.
