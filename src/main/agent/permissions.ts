@@ -3,11 +3,12 @@
 // Dal gate §5.1: run-command passa dall'analisi shell (tree-sitter), le grant
 // fanno match per chiave ESATTA ("name" o "name sub"), mai per prefisso.
 import { realpathSync } from 'node:fs'
-import { getPermissions, listGrants, addGrant, getRoutine } from '../store/db'
+import { getPermissions, listGrants, addGrant, getRoutine, getSetting } from '../store/db'
 import { sandboxMode, boxRoot, boxDir } from '../sandbox'
 import { resolveBoxPath } from '../sandbox/box-paths'
 import type { PermissionMode } from '../../shared/types'
 import { targetKey, runCommandVerdict, commandKey, isNeverAuto, ruleToolMatches, mcpAnnotationMode, serverReadGrantCovers, grantActive, useAppAlwaysAsk, useAppTargetsMatch, type McpAnnotationsLike } from './permission-rules'
+import { approvalsMode } from './auto-review'
 // fase app (A6): la classificazione delle azioni di Composio (pura)
 import { classifyComposioToolName } from '../connectors/composio-actions'
 // fase Composio OAuth (C2/C3/C5/C4): il gate del blocco e degli strumenti
@@ -127,6 +128,20 @@ function matchRule(tool: string, target: string, rules: ReturnType<typeof getPer
 }
 
 /**
+ * AH5 (fase aiutanti): il comando gira nel box E le approvazioni sono in
+ * «Chiedi»? Il getSetting può mancare nei moduli mockati dei test: in quel
+ * caso si resta sul comportamento di oggi (chiedere).
+ */
+function boxCommandNoAsk(): boolean {
+  if (sandboxMode() !== 'box') return false
+  try {
+    return approvalsMode({ getSetting }) === 'ask'
+  } catch {
+    return false
+  }
+}
+
+/**
  * Scope della memoria esistente per update/delete (M3): l'argomento può non
  * riportarlo, ma modificare una memoria GIÀ condivisa chiede comunque. Lettura
  * best-effort: se la memoria non si trova (assente, id malformato, store non
@@ -229,6 +244,15 @@ export async function check(
     const grants = listGrants().filter((g) => g.tool === tool).map((g) => g.target)
     const d = runCommandVerdict(analysis, grants, cfg.rules, cfg.default)
     if (d.kind === 'deny') return { kind: 'deny', reason: d.reasons[0] ?? 'Command blocked by permissions configuration' }
+    // AH5 (fase aiutanti): quando il comando gira DAVVERO nel box
+    // (sandboxMode = box) in modalità «Chiedi», run-command NON chiede — il
+    // confine lo fa l'isolamento, non il nome del comando (come Codex e
+    // Claude Code col sandbox). Restano: blocked (deny sopra), i secretRefs
+    // (chiedono) e lo scambio file col Mac (copy_to_box/copy_from_box, ramo
+    // loro, ALWAYS_ASK_TOOLS). In host e negli altri modi nulla cambia.
+    if (d.kind === 'ask' && !d.secretRefs.length && boxCommandNoAsk()) {
+      return { kind: 'allow', via: 'rule' }
+    }
     if (d.kind === 'allow') return { kind: 'allow', via: d.via ?? 'rule' }
     return {
       kind: 'ask',

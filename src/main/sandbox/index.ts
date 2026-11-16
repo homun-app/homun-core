@@ -29,6 +29,7 @@ import { resolveBoxPath } from './box-paths'
 import { enoughDiskSpace, freeDiskBytesOf, BOX_BUILD_ESTIMATED_BYTES } from './disk-space'
 // fase box-container (BX1): il MOTORE del box (docker o apple-container)
 import { activeBoxEngine } from './engine'
+import { boxShellEgress } from './box-egress'
 // CC2 (fase computer-card): lo stato del box in memoria (evento `box` alla UI)
 import { setBoxRuntime, refreshBoxRuntime } from './box-runtime'
 // OBD3 (fase onboarding-b-dettagli): il parse PURO dell'avanzamento del build
@@ -106,6 +107,19 @@ export function sandboxNetwork(): SandboxNetwork {
  */
 export function browserSandboxOk(): boolean {
   return sandboxMode() === 'box' && sandboxNetwork() === 'bridge'
+}
+
+/**
+ * AH5/AH6 (fase aiutanti): l'uscita di rete dei COMANDI del box, dai fatti
+ * veri (motore attivo + modalità di rete). In caso di dubbio 'direct' —
+ * chiudi chiedendo: le eccezioni del gate non scattano se non si sa.
+ */
+export function boxShellEgressOf(): import('./box-egress').ShellEgress {
+  try {
+    return boxShellEgress(activeBoxEngine().id, sandboxNetwork())
+  } catch {
+    return 'direct'
+  }
 }
 
 /** Limiti condivisi del box, configurabili (punto 1: memoria 4g, cpu 2, pids 1024). */

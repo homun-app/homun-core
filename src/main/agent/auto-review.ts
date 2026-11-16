@@ -180,10 +180,19 @@ export const CONTAMINATED_ASK_TOOLS = new Set([
  * a differenza di forcedOriginAsk che salta il check del tutto. Il grant di
  * turno dato su una card del turno contaminato vale per il resto del turno:
  * il loop lo controlla dopo, come oggi.
+ * AH5 (fase aiutanti): run-command nel box con uscita di rete NONE non torna
+ * a chiedere — il comando non può far uscire niente, il confine lo fa
+ * l'isolamento (con 'direct', la bridge di Docker, resta come oggi).
  */
-export function liftContaminatedAllow(verdict: Verdict, tool: string, contaminated: boolean): Verdict {
+export function liftContaminatedAllow(
+  verdict: Verdict,
+  tool: string,
+  contaminated: boolean,
+  runCommandIsolated = false
+): Verdict {
   if (!contaminated || verdict.kind !== 'allow') return verdict
   if (!CONTAMINATED_ASK_TOOLS.has(tool)) return verdict
+  if (tool === 'run-command' && runCommandIsolated) return verdict
   return {
     kind: 'ask',
     reason: `${tool}: the turn has read untrusted web content — the action with effects goes back to the user`,

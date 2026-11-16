@@ -399,6 +399,20 @@ export function refusedCallKey(tool: string, args: Record<string, unknown>): str
 }
 
 /**
+ * AH5 (fase aiutanti): run-command nel box con uscita di rete NONE (i fatti
+ * veri: modalità sandbox + motore attivo + rete). Import dinamico: il mock
+ * dei test di '../../sandbox' resta quello di sempre.
+ */
+async function boxRunCommandIsolated(): Promise<boolean> {
+  try {
+    const { sandboxMode, boxShellEgressOf } = await import('../sandbox')
+    return sandboxMode() === 'box' && boxShellEgressOf() === 'none'
+  } catch {
+    return false
+  }
+}
+
+/**
  * M5 (fase 0.3.1001): i messaggi «in consegna» al turno in corso. Un messaggio
  * DIRETTO dell'utente (niente initiator, niente respondedTo) che arriva mentre
  * un turno è attivo — e non è fermo su un'approvazione — si consegna al confine
@@ -4420,7 +4434,11 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         // proprio target) dei tool con effetti torna a chiedere — contenuto
         // non fidato + strumento con effetti non passano insieme. Le regole
         // blocked continuano a negare: il check è già stato eseguito sopra.
-        verdict = liftContaminatedAllow(verdict, call.name, contaminated)
+        // AH5 (fase aiutanti): run-command nel box con uscita di rete NONE non
+        // si alza — il comando non può far uscire niente, il confine lo fa
+        // l'isolamento (con 'direct', la bridge di Docker, resta come oggi)
+        const runCmdBoxIsolated = await boxRunCommandIsolated()
+        verdict = liftContaminatedAllow(verdict, call.name, contaminated, runCmdBoxIsolated)
 
         if (verdict.kind === 'deny') {
           const denied = add({
@@ -4474,7 +4492,10 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             // le azioni con effetti di un turno CONTAMINATO da contenuti web
             const action: AutoReviewAction = {
               tool: call.name, args: input, neverAuto: neverAutoCmd || forcedOriginAsk, untrustedTurn,
-              ...(contaminated ? { contaminated: true } : {}),
+              // AH5: run-command nel box SENZA uscita di rete non conta come
+              // contaminato (non può far uscire niente): né il lift né le
+              // esclusioni fissero dell'auto-review lo fermano
+              ...(contaminated && !(call.name === 'run-command' && runCmdBoxIsolated) ? { contaminated: true } : {}),
               ownerWords, botBrief
             }
             // fase impostazioni (I4.3): modo «Non chiedere» — allow sintetico,

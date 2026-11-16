@@ -108,6 +108,13 @@ export function ApprovalsPage() {
             ))}
           </div>
           <p className="mt-2 text-[13px] text-muted-foreground">{i18n.t(MODE_SENTENCES[mode])}</p>
+          {/* AH5 (fase aiutanti): accanto a «Chiedi», la riga che dice cosa
+              cambia nel computer dei bot */}
+          {mode === 'ask' && (
+            <p className="mt-1 text-[13px] text-muted-foreground">
+              <Trans>Nel computer dei bot i comandi girano senza chiedere: è isolato dal Mac.</Trans>
+            </p>
+          )}
         </div>
 
         {/* Automatico: il modello del revisore e le regole di oggi */}

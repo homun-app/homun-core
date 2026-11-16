@@ -4574,6 +4574,10 @@ msgstr "nel bot ›"
 msgid "nel box: {0}"
 msgstr "nel box: {0}"
 
+#: src/renderer/src/components/settings/ApprovalsPage.tsx
+msgid "Nel computer dei bot i comandi girano senza chiedere: è isolato dal Mac."
+msgstr "Nel computer dei bot i comandi girano senza chiedere: è isolato dal Mac."
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "cron.weekend"
