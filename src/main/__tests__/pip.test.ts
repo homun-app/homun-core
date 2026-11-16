@@ -120,6 +120,7 @@ class FakePipWindow implements PipWindowHandle {
     return { ...this.bounds }
   }
   setAlwaysOnTop(flag: boolean, level: string): void { this.calls.push(['setAlwaysOnTop', flag, level]) }
+  isAlwaysOnTop(): boolean { return true }
   setVisibleOnAllWorkspaces(flag: boolean, opts: { visibleOnFullScreen: boolean }): void {
     this.calls.push(['setVisibleOnAllWorkspaces', flag, opts])
   }
@@ -227,6 +228,13 @@ describe('SV4: il manager della PiP (finestra finta)', () => {
     win.beforeInput!({ type: 'keyDown', key: 'Escape' })
     expect(win.closed).toBe(true)
     expect(ctx.emitted[ctx.emitted.length - 1]).toEqual({ type: 'pip', agentId: null })
+  })
+
+  it('state() dice aperto, bot e alwaysOnTop letto dalla finestra', async () => {
+    const ctx = makeManager()
+    expect(ctx.manager.state()).toEqual({ open: false, agentId: null, alwaysOnTop: false })
+    await ctx.manager.open('bot-a')
+    expect(ctx.manager.state()).toEqual({ open: true, agentId: 'bot-a', alwaysOnTop: true })
   })
 
   it('focus-main porta in primo piano Homun sul bot giusto', async () => {

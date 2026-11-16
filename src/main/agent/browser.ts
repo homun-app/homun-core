@@ -422,6 +422,13 @@ async function startBrowserSession(agentId: string): Promise<BrowserSession> {
     if (delayMs) {
       env = { ...env, SANDBOT_TEST_FAKE_BROWSER_MCP_DELAY_MS: delayMs }
     }
+    // SV6 (fase schermo-vivo): il FILE che fa uscire il finto MCP — la sonda
+    // chiude così il browser del bot in modo deterministico (→ «Ultima
+    // immagine» nell'anteprima). Come gli altri flag: solo-test, esplicito
+    const exitFile = process.env.SANDBOT_TEST_FAKE_BROWSER_MCP_EXIT_FILE
+    if (exitFile) {
+      env = { ...env, SANDBOT_TEST_FAKE_BROWSER_MCP_EXIT_FILE: exitFile }
+    }
   } else {
     await ensureBoxContainer()
     await ensureBotHome(agentId) // la home del proprietario serve ai file del BOT

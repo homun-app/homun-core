@@ -149,6 +149,7 @@ if (isDaemonMode(process.argv)) {
         close: () => { win.close() },
         getBounds: () => win.getBounds(),
         setAlwaysOnTop: (flag, level) => { win.setAlwaysOnTop(flag, level as 'floating') },
+        isAlwaysOnTop: () => win.isAlwaysOnTop(),
         setVisibleOnAllWorkspaces: (flag, opts) => { win.setVisibleOnAllWorkspaces(flag, opts) },
         setAspectRatio: (aspect) => { win.setAspectRatio(aspect) },
         setMinimumSize: (w, h) => { win.setMinimumSize(w, h) },

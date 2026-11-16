@@ -133,13 +133,15 @@ export class ScreenThumbController {
 
   /**
    * SV3: il segnale che lo stato del browser è CAMBIATO (evento `screen` del
-   * daemon, a ogni cambio): azzera i fallimenti e riapre i tentativi se i
-   * fatti sono ancora tutti veri (l'evento arriva anche quando il browser si
-   * spegne: in quel caso non si apre niente, ci pensano i fatti).
+   * daemon, a ogni cambio): azzera i fallimenti e riapre i tentativi SOLO coi
+   * fatti NUOVI — l'evento porta lo stato fresco del browser (arriva anche
+   * quando si SPEGNE: i fatti si aggiornano subito e non si apre niente, mai
+   * coi fatti stantii dell'ultimo render, che riaprirebbero a browser morto).
    */
-  browserStateChanged(): void {
+  browserStateChanged(browserRunning: boolean): void {
     this.failures = 0
     this.givenUp = false
+    if (this.facts) this.facts = { ...this.facts, browserRunning }
     if (this.facts && thumbShouldConnect(this.facts) && this.rfb === null && !this.opening) void this.open()
   }
 

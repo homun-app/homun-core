@@ -349,9 +349,9 @@ describe('SV3: il costo resta basso — stop dopo 3 fallimenti, un evento screen
       await flush()
     }
     expect(attempts()).toBe(3)
-    // arriva l'evento `screen` (il daemon lo emette a OGNI cambio di stato):
-    // i tentativi si riaprono, ma i fatti devono essere ancora tutti veri
-    h.controller.browserStateChanged()
+    // arriva l'evento `screen` con lo stato FRESCO del browser (il daemon lo
+    // emette a OGNI cambio di stato): i tentativi si riaprono, coi fatti nuovi
+    h.controller.browserStateChanged(true)
     await flush()
     expect(attempts()).toBe(4)
   })
@@ -376,6 +376,34 @@ describe('SV3: il costo resta basso — stop dopo 3 fallimenti, un evento screen
     h.advance(THUMB_RETRY_MS * 3)
     await flush()
     expect(attempts()).toBe(3)
+  })
+
+  it('l\'evento screen con browser SPENTO non riapre niente (mai fatti stantii)', async () => {
+    let attempts = 0
+    const clock = manualClock()
+    FakeRfb.instances = []
+    const phases: Array<{ phase: string; image: string | null }> = []
+    const controller = new ScreenThumbController({
+      openScreen: async () => { attempts++; return { url: `ws://x/${attempts}` } },
+      createRfb: async (el, url, wsProtocols) => new FakeRfb(el, url, wsProtocols),
+      captureImage: () => 'data:image/png;base64,frame',
+      element: () => ({}),
+      schedule: clock.schedule,
+      onPhase: (phase, image) => phases.push({ phase, image })
+    })
+    controller.onFacts(ALL)
+    await flush()
+    FakeRfb.instances[0]!.emit('connect')
+    FakeRfb.instances[0]!.emit('disconnect') // cade
+    await flush()
+    // il browser SI SPEGNE: l'evento screen con false aggiorna i fatti e non
+    // riapre MAI, anche se l'ultimo render diceva ancora «running»
+    controller.browserStateChanged(false)
+    clock.advance(THUMB_RETRY_MS * 5)
+    await flush()
+    expect(attempts).toBe(1) // NESSUNA riapertura
+    // e l'ULTIMA IMMAGINE resta (velata): la fase non torna al riquadro
+    expect(phases[phases.length - 1]!.phase).toBe('last')
   })
 
   it('MAI due peek per lo stesso bot dalla stessa finestra: una connessione viva alla volta', async () => {

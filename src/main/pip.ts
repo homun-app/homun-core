@@ -122,6 +122,7 @@ export interface PipWindowHandle {
   close(): void
   getBounds(): PipRect
   setAlwaysOnTop(flag: boolean, level: string): void
+  isAlwaysOnTop(): boolean
   setVisibleOnAllWorkspaces(flag: boolean, opts: { visibleOnFullScreen: boolean }): void
   setAspectRatio(aspect: number): void
   setMinimumSize(w: number, h: number): void
@@ -231,6 +232,18 @@ export class PipManager {
   /** Chiude la PiP (bottone «Chiudi», Esc, sostituzione). */
   close(): void {
     this.win?.close()
+  }
+
+  /**
+   * Lo stato della PiP (per la UI e per la sonda, che legge alwaysOnTop DAL
+   * MAIN: è il main che ha creato la finestra).
+   */
+  state(): { open: boolean; agentId: string | null; alwaysOnTop: boolean } {
+    return {
+      open: this.win !== null,
+      agentId: this.agentId,
+      alwaysOnTop: this.win !== null && this.win.isAlwaysOnTop()
+    }
   }
 
   /** «Apri in Homun»: la finestra principale in primo piano, scheda Computer del bot. */

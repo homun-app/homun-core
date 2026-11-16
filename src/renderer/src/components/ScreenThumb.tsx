@@ -49,6 +49,10 @@ export function ScreenThumb({
     return () => document.removeEventListener('visibilitychange', onVis)
   }, [])
 
+  // l'ultimo canvas VISTO collegato (per l'«Ultima immagine» anche quando la
+  // chiusura arriva dal server e noVNC ha già staccato il canvas)
+  const lastCanvasRef = useRef<{ el: HTMLCanvasElement | null }>({ el: null })
+
   // il controller vive quanto il componente (lo SMONTAGGIO della scheda
   // Attività, quando non è più quella visibile, scollega da solo)
   useEffect(() => {
@@ -59,7 +63,7 @@ export function ScreenThumb({
         return new RFB(el as HTMLElement, url, { wsProtocols }) as unknown as ThumbRfb
       },
       captureImage: (el) => {
-        const canvas = (el as HTMLElement | null)?.querySelector('canvas')
+        const canvas = (el as HTMLElement | null)?.querySelector('canvas') ?? lastCanvasRef.current.el
         try {
           return canvas ? canvas.toDataURL('image/png') : null
         } catch {
@@ -74,6 +78,10 @@ export function ScreenThumb({
       onPhase: (p, img) => {
         setPhase(p)
         setLastImage(img)
+        // il riferimento al canvas VIVO: quando la chiusura arriva dal SERVER
+        // noVNC stacca il canvas PRIMA dell'evento disconnect — senza questo
+        // riferimento l'ultima immagine andrebbe persa proprio in quel caso
+        if (p === 'connected') lastCanvasRef.current.el = holder.current?.querySelector('canvas') ?? lastCanvasRef.current.el
       }
     })
     controller.current = c
@@ -99,7 +107,9 @@ export function ScreenThumb({
   // cambio di stato) i tentativi dopo i tre fallimenti si riaprono
   useEffect(() => {
     const off = api.onEvent((e) => {
-      if (e.type === 'screen' && e.agentId === agentId) controller.current?.browserStateChanged()
+      if (e.type === 'screen' && e.agentId === agentId) {
+        controller.current?.browserStateChanged(e.status.browser === 'running')
+      }
     })
     return off
   }, [agentId])

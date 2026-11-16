@@ -17,6 +17,17 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js'
+import { existsSync } from 'node:fs'
+
+// SV6 (fase schermo-vivo): SANDBOT_TEST_FAKE_BROWSER_MCP_EXIT_FILE=<path> fa
+// USCIRE questo processo quando il file compare — la sonda chiude così il
+// browser del bot in modo deterministico (il transport chiuso spegne la
+// sessione). Solo-test, come gli altri flag del finto.
+const EXIT_FILE = process.env.SANDBOT_TEST_FAKE_BROWSER_MCP_EXIT_FILE
+if (EXIT_FILE) {
+  setInterval(() => { if (existsSync(EXIT_FILE)) process.exit(0) }, 300)
+  setInterval(() => undefined, 1 << 30) // tiene il loop vivo finché non esce
+}
 
 // lo snapshot inline di browser_snapshot inizia con le righe di pagina (- Page URL/
 // - Page Title), come il server VERO: fase 12 (0b) le righe del result composto

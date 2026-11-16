@@ -144,7 +144,12 @@ export const DAEMON_RPC_CHANNELS = [
 export function registerIpc(
   client: DaemonClient,
   getWindows: () => BrowserWindow[],
-  pip?: { open(agentId: string): Promise<void>; close(): void; focusMain(agentId: string): void }
+  pip?: {
+    open(agentId: string): Promise<void>
+    close(): void
+    focusMain(agentId: string): void
+    state(): { open: boolean; agentId: string | null; alwaysOnTop: boolean }
+  }
 ): void {
   // ---- inoltro RPC al daemon ----
   for (const ch of DAEMON_RPC_CHANNELS) {
@@ -166,6 +171,10 @@ export function registerIpc(
     pip?.focusMain(String(agentId ?? ''))
     return { ok: true }
   })
+  // SV6 (fase schermo-vivo): lo stato della PiP — la sonda legge alwaysOnTop
+  // DAL MAIN (è lui che ha creato la finestra)
+  ipcMain.handle('pip:state', () =>
+    pip?.state() ?? { open: false, agentId: null, alwaysOnTop: false })
   // fase skill (S4): «Mostra nel Finder» — apre la cartella della skill nella
   // libreria (shell è di Electron, sta qui e non nel daemon RPC)
   ipcMain.handle('skills:show-in-finder', (_e, name: string) => {

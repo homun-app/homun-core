@@ -1126,6 +1126,8 @@ export interface SandbotApi {
   pipOpen(agentId: string): Promise<{ ok: boolean }>
   pipClose(): Promise<{ ok: boolean }>
   pipFocusMain(agentId: string): Promise<{ ok: boolean }>
+  /** SV6: lo stato della PiP letto dal main (alwaysOnTop incluso) */
+  pipState(): Promise<{ open: boolean; agentId: string | null; alwaysOnTop: boolean }>
   /**
    * Fase 19b (T2): il terminale del bot (solo docker). terminal:open torna
    * l'URL WebSocket con una capability MONOUSO (30 s) per /term/<cap>; il
