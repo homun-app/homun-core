@@ -864,19 +864,30 @@ export function htmlToMarkdown(html: string, baseUrl?: string): string {
     .replace(/<!--[\s\S]*?-->/g, '')
     .replace(/<(script|style|noscript|svg|template|iframe|form)[\s\S]*?<\/\1>/gi, '')
     .replace(/<(nav|header|footer|aside)[\s\S]*?<\/\1>/gi, ' ')
-  const main = /<article[\s>][\s\S]*?<\/article>/i.exec(s) ?? /<main[\s>][\s\S]*?<\/main>/i.exec(s)
-  if (main) s = main[0]
-  else {
-    const body = /<body[\s>][\s\S]*?<\/body>/i.exec(s)
-    if (body) s = body[0]
+  // fase chat-limiti (CL1): un elenco (annunci, risultati, prodotti) è MOLTI
+  // <article>, anche annidati in un <main>: si tengono TUTTI, nell'ordine,
+  // ognuno separato da una riga vuota e un divisore. Un solo <article> o un
+  // <main> restano come sempre; senza l'uno e l'altro si legge il body.
+  const articles = s.match(/<article[\s>][\s\S]*?<\/article>/gi)
+  if (articles && articles.length >= 2) {
+    s = articles.join('\n\n---\n\n')
+  } else {
+    const main = /<article[\s>][\s\S]*?<\/article>/i.exec(s) ?? /<main[\s>][\s\S]*?<\/main>/i.exec(s)
+    if (main) s = main[0]
+    else {
+      const body = /<body[\s>][\s\S]*?<\/body>/i.exec(s)
+      if (body) s = body[0]
+    }
   }
   s = s
-    .replace(/<h([1-6])[^>]*>([\s\S]*?)<\/h\1>/gi, (_, lvl: string, inner: string) => `\n\n${'#'.repeat(Number(lvl))} ${inner.replace(/<[^>]+>/g, '').trim()}`)
+    // CL1.3: i link si convertono PRIMA degli heading, così il link nel titolo
+    // di un annuncio (dentro <h2>) non perde l'indirizzo
     .replace(/<a\s[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, (_, href: string, inner: string) => {
       const label = inner.replace(/<[^>]+>/g, '').trim()
       const url = resolveLinkHref(href, baseUrl)
       return label && url ? `[${label}](${url})` : label
     })
+    .replace(/<h([1-6])[^>]*>([\s\S]*?)<\/h\1>/gi, (_, lvl: string, inner: string) => `\n\n${'#'.repeat(Number(lvl))} ${inner.replace(/<[^>]+>/g, '').trim()}`)
     .replace(/<img\s[^>]*alt=["']([^"']*)["'][^>]*>/gi, (_, alt: string) => (alt ? ` ![${alt}]` : ''))
     .replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, (_, inner: string) => `\n- ${inner.replace(/<[^>]+>/g, '').trim()}`)
     .replace(/<blockquote[^>]*>([\s\S]*?)<\/blockquote>/gi, (_, inner: string) => `\n> ${inner.replace(/<[^>]+>/g, '').trim()}`)
