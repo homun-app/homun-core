@@ -434,6 +434,11 @@ function hhmmOf(ms: number): string {
 function setStatus(agentId: string, status: import('../../shared/types').AgentStatus, emit: Emitter): void {
   updateAgent(agentId, { status })
   emit({ type: 'status', agentId, status })
+  // AH3 (fase aiutanti): lo stato di un FIGLIO muove anche la card «Aiutante»
+  // del padre — il daemon emette subagents col parentId (scelta dichiarata:
+  // è il daemon la fonte, il renderer non deve indovinare chi è figlio di chi)
+  const parent = getAgent(agentId)?.parentId
+  if (parent) emit({ type: 'subagents', parentId: parent })
 }
 
 function emitLastEntry(agentId: string, emit: Emitter): void {

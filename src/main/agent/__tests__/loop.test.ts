@@ -5122,6 +5122,30 @@ describe('fase 12: il FIGLIO — tool, prompt, whitelist e consegna', () => {
     expect(h.db.entries.filter((e) => e.kind === 'send-message')).toHaveLength(0)
   })
 
+  it('AH3 (fase aiutanti): la pausa del figlio su una card emette subagents col parentId — la card «Aiutante» del padre si aggiorna senza reload', async () => {
+    childAgent()
+    h.db.settings.set('permissions', { default: 'needs_approval', rules: [] })
+    const events: import('../../../shared/types').SandbotEvent[] = []
+    const emitAh3 = (e: import('../../../shared/types').SandbotEvent): void => { events.push(e) }
+    h.llm.queue = [
+      { toolCalls: [{ id: 'rc1', name: 'run-command', arguments: JSON.stringify({ command: 'echo x' }) }] },
+      { text: 'ok' }
+    ]
+    const turn = runTurn(CHILD, 'brief', emitAh3, undefined, { source: 'user', subagent: { id: CHILD, parentId: AGENT } })
+    await vi.waitFor(() => {
+      expect(h.db.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending')).toBeTruthy()
+    })
+    // il figlio è paused-for-approval e il daemon l'ha DETTO al padre
+    const subEv = events.filter((e) => e.type === 'subagents') as Array<{ parentId: string }>
+    expect(subEv.length).toBeGreaterThan(0)
+    expect(subEv[0]!.parentId).toBe(AGENT)
+    resolveApproval(CHILD, String(h.db.entries.find((e) => e.kind === 'approval')!.meta?.approvalId), 'allow', 'once')
+    await turn
+    // e alla ripartenza (thinking) il padre riceve un altro aggiornamento
+    const after = events.filter((e) => e.type === 'subagents') as Array<{ parentId: string }>
+    expect(after.length).toBeGreaterThan(subEv.length)
+  })
+
   it('wake_parent chiude il figlio (status, summary, report_path, contaminazione) e chiama il lotto; il turno finisce lì', async () => {
     childAgent()
     // il figlio legge una pagina (fetch finto, come gli altri test web)

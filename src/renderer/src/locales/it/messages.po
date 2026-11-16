@@ -255,10 +255,12 @@ msgid "{0} tramite Composio ({1})"
 msgstr "{0} tramite Composio ({1})"
 
 #. placeholder {0}: i18n.t(fmtAgo(sub.startedAt ?? sub.createdAt, now))
-#. placeholder {1}: sub.status === 'done' && sub.summary ? ` — ${sub.summary.slice(0, 120)}` : ''
+#. placeholder {1}: sub.steps
+#. placeholder {2}: sub.steps === 1 ? t`passo` : t`passi`
+#. placeholder {3}: sub.status === 'done' && sub.summary ? ` — ${sub.summary.slice(0, 120)}` : ''
 #: src/renderer/src/components/SubagentCard.tsx
-msgid "{0} trascorsi{1}"
-msgstr "{0} trascorsi{1}"
+msgid "{0} trascorsi · {1} {2}{3}"
+msgstr "{0} trascorsi · {1} {2}{3}"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -3597,8 +3599,11 @@ msgstr "In attesa del login nel browser…"
 msgid "notice.turnEndAwaitingUser"
 msgstr "In attesa della risposta dell’utente"
 
-#: src/renderer/src/components/MemoryPanel.tsx
 #: src/renderer/src/components/SubagentCard.tsx
+msgid "in attesa della tua conferma"
+msgstr "in attesa della tua conferma"
+
+#: src/renderer/src/components/MemoryPanel.tsx
 msgid "in attesa di conferma"
 msgstr "in attesa di conferma"
 
@@ -5188,6 +5193,14 @@ msgstr "parziale"
 #: src/renderer/src/components/Chat.tsx
 msgid "Passaggi del turno"
 msgstr "Passaggi del turno"
+
+#: src/renderer/src/components/SubagentCard.tsx
+msgid "passi"
+msgstr "passi"
+
+#: src/renderer/src/components/SubagentCard.tsx
+msgid "passo"
+msgstr "passo"
 
 #. placeholder {0}: String(p.step)
 #. placeholder {1}: String(p.steps)

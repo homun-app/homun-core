@@ -1716,6 +1716,8 @@ export interface SubagentInfo {
   deadlineAt: number
   /** stato live dell'agente figlio (paused-for-approval = "in attesa di conferma") */
   agentStatus: AgentStatus | null
+  /** AH3 (fase aiutanti): i passi fatti (chiamate di strumento nel suo transcript) */
+  steps: number
   /**
    * AH2 (fase aiutanti): le approvazioni PENDING del figlio APERTO, lette dal
    * SUO transcript (la STESSA approvazione, nessuna copia nel DB) — la chat

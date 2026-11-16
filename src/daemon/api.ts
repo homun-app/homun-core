@@ -971,20 +971,25 @@ export function buildApiMethods(
     // ---- fase 12: sottoagenti (card in chat, pannello del figlio, Ferma) ----
     'subagents:list': async ([parentId]) => {
       const { listSubagentsOf } = await import('../main/store/subagents')
-      return listSubagentsOf(db(), String(parentId ?? '')).map((r): import('../shared/types').SubagentInfo => ({
-        id: r.id, parentId: r.parent_id, parentTaskId: r.parent_task_id, batchId: r.batch_id, title: r.title, status: r.status,
-        summary: r.summary, reportPath: r.report_path,
-        createdAt: r.created_at, startedAt: r.started_at, finishedAt: r.finished_at, deadlineAt: r.deadline_at,
-        // stato live dell'agente figlio (paused-for-approval = card in attesa)
-        agentStatus: store.getAgent(r.id)?.status ?? null,
-        // AH2 (fase aiutanti): le approvazioni PENDING del figlio APERTO, lette
-        // dal SUO transcript — la chat del padre le mostra sotto la card
-        // «Aiutante» (la STESSA approvazione, nessuna copia nel DB)
-        pendingApprovals:
-          r.status === 'queued' || r.status === 'running'
-            ? store.getEntries(r.id).filter((e) => e.kind === 'approval' && e.meta?.status === 'pending')
-            : []
-      }))
+      return listSubagentsOf(db(), String(parentId ?? '')).map((r): import('../shared/types').SubagentInfo => {
+        // AH2/AH3: per il figlio APERTO si legge il transcript UNA volta —
+        // le approvazioni pending per la chat del padre e i passi per la card
+        const open = r.status === 'queued' || r.status === 'running'
+        const entries = open ? store.getEntries(r.id) : []
+        return {
+          id: r.id, parentId: r.parent_id, parentTaskId: r.parent_task_id, batchId: r.batch_id, title: r.title, status: r.status,
+          summary: r.summary, reportPath: r.report_path,
+          createdAt: r.created_at, startedAt: r.started_at, finishedAt: r.finished_at, deadlineAt: r.deadline_at,
+          // stato live dell'agente figlio (paused-for-approval = card in attesa)
+          agentStatus: store.getAgent(r.id)?.status ?? null,
+          // AH3 (fase aiutanti): i PASSI fatti (le chiamate di strumento)
+          steps: entries.filter((e) => e.kind === 'tool-call').length,
+          // AH2 (fase aiutanti): le approvazioni PENDING del figlio APERTO, lette
+          // dal SUO transcript — la chat del padre le mostra sotto la card
+          // «Aiutante» (la STESSA approvazione, nessuna copia nel DB)
+          pendingApprovals: entries.filter((e) => e.kind === 'approval' && e.meta?.status === 'pending')
+        }
+      })
     },
     'subagents:stop': async ([id]) => {
       // lo stesso di stop_subagent: interrompe il turno, cancella i job in

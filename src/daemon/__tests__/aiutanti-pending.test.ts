@@ -57,6 +57,18 @@ function familyWithPendingApproval(): { parent: string; child: string } {
   return { parent: parent.id, child: child.id }
 }
 
+describe('AH3: subagents:list porta anche i PASSI del figlio aperto', () => {
+  it('le chiamate di strumento nel transcript del figlio si contano (steps cresce)', async () => {
+    const { parent, child } = familyWithPendingApproval()
+    const before = (await api['subagents:list']!([parent])) as Array<{ steps: number }>
+    expect(before[0]!.steps).toBe(0)
+    appendEntry({ agentId: child, kind: 'tool-call', role: 'assistant', content: 'run-command', meta: { name: 'run-command', arguments: '{}' } })
+    appendEntry({ agentId: child, kind: 'tool-call', role: 'assistant', content: 'web_fetch', meta: { name: 'web_fetch', arguments: '{}' } })
+    const after = (await api['subagents:list']!([parent])) as Array<{ steps: number }>
+    expect(after[0]!.steps).toBe(2)
+  })
+})
+
 describe('AH2: subagents:list porta le approvazioni PENDING del figlio aperto', () => {
   it('figlio in paused-for-approval → pendingApprovals contiene la SUA entry (agentId del figlio, stessa approvalId)', async () => {
     const { parent, child } = familyWithPendingApproval()

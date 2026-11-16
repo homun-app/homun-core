@@ -6,6 +6,12 @@
 // AH2 (fase aiutanti): quando il figlio ha un'approvazione IN ATTESA, la card
 // del FIGLIO compare QUI SOTTO — è la STESSA approvazione (entry del figlio,
 // letta da subagents:list), il clic risolve sul figlio (entry.agentId, AH1).
+// AH3 (fase aiutanti): la card è VIVA — lo stato cambia senza ricaricare la
+// chat (il daemon emette subagents al cambio di stato del figlio), la riga
+// dell'attività corrente riusa le etichette della riga del bot (mai l'argomento
+// grezzo), il tempo scorre ogni secondo finché il figlio è aperto e i passi si
+// contano.
+import { useEffect, useState } from 'react'
 import { useStore } from '../store'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
@@ -13,6 +19,7 @@ import type { MessageDescriptor } from '@lingui/core'
 import type { TranscriptEntry, SendMessageMeta, SendMessagePayload, SubagentInfo } from '../../../shared/types'
 import { CardShell } from './DecidedRow'
 import { ApprovalCard } from './ApprovalCard'
+import { activityPhrase } from '../lib/activity'
 
 const STATUS_LABEL: Record<SubagentInfo['status'], MessageDescriptor> = {
   queued: msg`in coda`,
@@ -48,29 +55,52 @@ export function SubagentCard({ entry }: { entry: TranscriptEntry }) {
   const stopSubagent = useStore((s) => s.stopSubagent)
   const meta = (entry.meta ?? {}) as Partial<SendMessageMeta>
   const message = meta.message as Extract<SendMessagePayload, { type: 'subagent' }> | undefined
+  // AH3: l'attività corrente del figlio (gli eventi activity arrivano per il
+  // SUO id) — stessa etichetta della riga del bot. Hook PRIMA dell'early return
+  const activity = useStore((s) => (message ? s.activity[message.subagentId] : undefined))
+  // AH3: il tempo scorre — un tick al secondo finché la card è di un figlio aperto
+  const sub = message ? subagents.find((x) => x.id === message.subagentId) : undefined
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!(sub === undefined || sub.status === 'queued' || sub.status === 'running')) return
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [sub?.status])
   if (!message) return null
-  const sub = subagents.find((x) => x.id === message.subagentId)
-  const now = Date.now()
+  const open = sub === undefined || sub.status === 'queued' || sub.status === 'running'
   // stato live: il registro dice queued/running/…; un figlio fermo su una card
-  // dell'utente è "in attesa di conferma"
+  // dell'utente è "in attesa di conferma" — AH3: colore e icona propri
   const waiting = sub?.status === 'running' && sub.agentStatus === 'paused-for-approval'
   const status = sub?.status ?? 'queued'
-  const open = status === 'queued' || status === 'running'
 
   return (
     <>
       <CardShell testid="card-aiutante">
         <div className="flex items-center justify-between gap-2">
           <span className="text-xs font-medium text-muted-foreground"><Trans>Aiutante</Trans></span>
-          <span className={`text-[11px] font-medium ${STATUS_CLS[status]}`} data-testid="card-aiutante-stato">
-            {status === 'done' ? '✓' : status === 'failed' ? '⚠' : status === 'stopped' ? '⛔' : status === 'stopped-loop' ? '⏹' : status === 'expired' ? '⏱' : '⏳'}
-            {' '}{waiting ? t`in attesa di conferma` : i18n.t(STATUS_LABEL[status])}
+          <span
+            className={`text-[11px] font-medium ${waiting ? 'text-waiting' : STATUS_CLS[status]}`}
+            data-testid="card-aiutante-stato"
+          >
+            {waiting
+              ? `✋ ${t`in attesa della tua conferma`}`
+              : `${status === 'done' ? '✓' : status === 'failed' ? '⚠' : status === 'stopped' ? '⛔' : status === 'stopped-loop' ? '⏹' : status === 'expired' ? '⏱' : '⏳'} ${i18n.t(STATUS_LABEL[status])}`}
           </span>
         </div>
-        <p className="mt-1 text-sm text-foreground">{message.title}</p>
+        <p
+          className="mt-1 cursor-pointer text-sm text-foreground transition hover:underline"
+          onClick={() => openSubagent(message.subagentId)}
+        >
+          {message.title}
+        </p>
         {sub && (
-          <p className="mt-0.5 text-[11px] text-muted-foreground">
-            <Trans>{i18n.t(fmtAgo(sub.startedAt ?? sub.createdAt, now))} trascorsi{sub.status === 'done' && sub.summary ? ` — ${sub.summary.slice(0, 120)}` : ''}</Trans>
+          <p className="mt-0.5 text-[11px] text-muted-foreground" data-testid="aiutante-tempo">
+            <Trans>{i18n.t(fmtAgo(sub.startedAt ?? sub.createdAt, now))} trascorsi · {sub.steps} {sub.steps === 1 ? t`passo` : t`passi`}{sub.status === 'done' && sub.summary ? ` — ${sub.summary.slice(0, 120)}` : ''}</Trans>
+          </p>
+        )}
+        {sub && open && activity && (
+          <p className="mt-0.5 text-[11px] text-muted-foreground" data-testid="aiutante-attivita">
+            {i18n.t(activityPhrase(activity, 'present', i18n.locale === 'en' ? 'en' : 'it'))}
           </p>
         )}
         <div className="mt-2 flex gap-2">
@@ -80,7 +110,7 @@ export function SubagentCard({ entry }: { entry: TranscriptEntry }) {
           >
             <Trans>Apri</Trans>
           </button>
-          {open && (
+          {open && sub && (
             <button
               className="rounded-[10px] px-3 py-1.5 text-sm text-muted-foreground transition hover:text-foreground"
               onClick={() => stopSubagent(message.subagentId)}
