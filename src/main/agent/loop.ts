@@ -5200,7 +5200,8 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       } else if (opts.groupTurn !== undefined) {
         // i gruppi chiudono come oggi: notice (la protezione col testo di
         // sempre, il fusibile col suo) e STOPPED, nessuna chiamata finale
-        add({ ...uiSystemEntry(agentId, 'notice', ui(streakStop ? UI.toolLoop : UI.stepsLimit)) })
+        const closingNotice = streakStop ? ui(UI.toolLoop) : ui(UI.stepsLimit)
+        add({ ...uiSystemEntry(agentId, 'notice', closingNotice) })
         emitLastEntry(agentId, emit)
       } else if (privateHumanTurn) {
         // MAI in silenzio: la chiamata finale senza strumenti
@@ -5261,11 +5262,13 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           })
           emitLastEntry(agentId, emit)
         }
-        add({ ...uiSystemEntry(agentId, 'notice', ui(streakStop ? UI.toolStuck : UI.stepsLimitContinue)) })
+        const closingNotice = streakStop ? ui(UI.toolStuck) : ui(UI.stepsLimitContinue)
+        add({ ...uiSystemEntry(agentId, 'notice', closingNotice) })
         emitLastEntry(agentId, emit)
       } else {
         // turni non di chat (task, routine…): la chiusura di oggi (notice + STOPPED)
-        add({ ...uiSystemEntry(agentId, 'notice', ui(streakStop ? UI.toolLoop : UI.stepsLimit)) })
+        const closingNotice = streakStop ? ui(UI.toolLoop) : ui(UI.stepsLimit)
+        add({ ...uiSystemEntry(agentId, 'notice', closingNotice) })
         emitLastEntry(agentId, emit)
       }
       endTurn(agentId, 'STOPPED', emit, opts.taskId, 'loop')
