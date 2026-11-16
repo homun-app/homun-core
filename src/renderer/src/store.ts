@@ -722,7 +722,7 @@ export const useStore = create<Store>((set, get) => ({
           set({ pipAgentId: e.agentId })
           break
         }
-        // SV4: «Apri in Homun» dalla PiP — primo piano sulla scheda Computer
+        // SV4/U3: «Riporta in Homun» dalla PiP — primo piano sulla scheda Computer
         case 'open-computer': {
           if (e.agentId !== s.activeId) void s.select(e.agentId)
           s.openBotTab('computer')

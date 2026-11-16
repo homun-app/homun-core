@@ -150,7 +150,6 @@ if (isDaemonMode(process.argv)) {
         getBounds: () => win.getBounds(),
         setAlwaysOnTop: (flag, level) => { win.setAlwaysOnTop(flag, level as 'floating') },
         isAlwaysOnTop: () => win.isAlwaysOnTop(),
-        setVisibleOnAllWorkspaces: (flag, opts) => { win.setVisibleOnAllWorkspaces(flag, opts) },
         setAspectRatio: (aspect) => { win.setAspectRatio(aspect) },
         setMinimumSize: (w, h) => { win.setMinimumSize(w, h) },
         setMaximumSize: (w, h) => { win.setMaximumSize(w, h) },
@@ -274,7 +273,7 @@ if (isDaemonMode(process.argv)) {
       })
       // SV4 (fase schermo-vivo): il gestore della PiP — una sola per volta,
       // misure ricordate in ui.pip.bounds (setting del daemon), evento `pip`
-      // a tutte le finestre, «Apri in Homun» ricrea la principale se chiusa
+      // a tutte le finestre, «Riporta in Homun» ricrea la principale se chiusa
       const pip = new PipManager({
         preloadPath: () => preload,
         createWindow: createPipHandle,
@@ -303,6 +302,12 @@ if (isDaemonMode(process.argv)) {
           win.show()
           win.focus()
           win.webContents.send('sandbot:event', { type: 'open-computer', agentId })
+        },
+        // U3: la principale non si nasconde MAI staccando — la sonda lo legge
+        // da pip:state (una finestra visibile che NON sia la PiP stessa)
+        mainVisible: () => {
+          const wins = BrowserWindow.getAllWindows()
+          return wins.length === 0 ? true : wins.some((w) => w.isVisible() && !w.webContents.getURL().includes('/pip/'))
         }
       })
       registerIpc(client, () => BrowserWindow.getAllWindows(), pip)

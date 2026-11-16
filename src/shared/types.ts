@@ -728,7 +728,7 @@ export type SandbotEvent =
   | { type: 'open-agent'; agentId: string }
   /** SV4 (fase schermo-vivo): la finestra PiP è cambiata (id del bot o null) */
   | { type: 'pip'; agentId: string | null }
-  /** SV4: «Apri in Homun» dalla PiP — primo piano, scheda Computer del bot */
+  /** SV4/U3: «Riporta in Homun» dalla PiP — primo piano, scheda Computer del bot */
   | { type: 'open-computer'; agentId: string }
   // residuo fase 4 (0b): il client del daemon si è RICONNESSO dopo una
   // disconnessione — la UI ricarica agenti ed entry (il transcript può essere
@@ -1127,7 +1127,7 @@ export interface SandbotApi {
   pipClose(): Promise<{ ok: boolean }>
   pipFocusMain(agentId: string): Promise<{ ok: boolean }>
   /** SV6: lo stato della PiP letto dal main (alwaysOnTop incluso) */
-  pipState(): Promise<{ open: boolean; agentId: string | null; alwaysOnTop: boolean }>
+  pipState(): Promise<{ open: boolean; agentId: string | null; alwaysOnTop: boolean; mainVisible: boolean }>
   /**
    * Fase 19b (T2): il terminale del bot (solo docker). terminal:open torna
    * l'URL WebSocket con una capability MONOUSO (30 s) per /term/<cap>; il

@@ -5,10 +5,16 @@
 // un'avvio: con il browser spento mostra «Il bot non ha il browser aperto» e
 // si collega da sola quando si accende (evento `screen`), aprendo la vista
 // con { noLaunch: true }. Nessun controllo del mouse o della tastiera qui:
-// per prendere il controllo c'è la scheda Computer («Apri in Homun»).
+// per prendere il controllo c'è la scheda Computer («Riporta in Homun»).
+//
+// U3 (fase prima-release): la barra in alto è SEMPRE visibile (stile
+// mini-player) con mascotte+nome a sinistra e «Riporta in Homun»/«Chiudi» a
+// destra — i comandi sotto l'hover non scattavano mai: su macOS un'area di
+// trascinamento non riceve gli eventi del mouse. Solo la barra trascina la
+// finestra; i bottoni sono no-drag e lo schermo sotto è no-drag e senza input.
 import { useEffect, useRef, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
-import { X, SquareArrowOutUpRight } from 'lucide-react'
+import { X, CornerUpLeft } from 'lucide-react'
 import type RFB from '@novnc/novnc'
 import { api, useStore } from '../store'
 import { useBotInfo } from '../bot/use-bot'
@@ -23,9 +29,10 @@ export const PIP_COMPRESSION_LEVEL = 2
 
 /**
  * La vista della finestra PiP (rotta #/pip/<agentId>, si rende SOLO lei).
- * La finestra si trascina ovunque (-webkit-app-region: drag sul fondo), tranne
- * sui bottoni; al passaggio del mouse compaiono il nome del bot con la
- * mascotte (in alto a sinistra) e «Apri in Homun» / «Chiudi» (in alto a destra).
+ * La finestra si trascina dalla BARRA in alto (unica area drag); «Riporta in
+ * Homun» è un gesto solo: chiude la PiP, porta la finestra principale in
+ * primo piano (la ricrea se chiusa) e apre la scheda Computer del bot, dove
+ * lo schermo torna da solo (SV5).
  */
 export function PipView({ agentId }: { agentId: string }) {
   const { t } = useLingui()
@@ -98,54 +105,58 @@ export function PipView({ agentId }: { agentId: string }) {
   }, [agentId, browserRunning, reconnect])
 
   return (
-    <div
-      data-testid="pip-view"
-      // trascinabile ovunque tranne i bottoni (no-drag) — la finestra non ha cornice
-      className="group relative h-screen w-screen overflow-hidden bg-black"
-      style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
-    >
-      {/* il canvas di noVNC: NESSUN input (pointer-events: none, aria-hidden) */}
-      <div ref={holder} aria-hidden="true" className="absolute inset-0" style={{ pointerEvents: 'none' }} />
-      {!browserRunning && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background px-6 text-center">
-          {info ? (
-            <Bot family={info.avatar.family} color={info.avatar.color} state={info.state} size={64} label={info.agent.name} />
-          ) : (
-            <div className="h-16 w-16" aria-hidden="true" />
-          )}
-          <p className="text-sm text-muted-foreground">
-            <Trans>Il bot non ha il browser aperto</Trans>
-          </p>
-        </div>
-      )}
-      {/* al passaggio del mouse: in alto a sinistra il bot, in alto a destra i comandi */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-2 p-2 opacity-0 transition group-hover:opacity-100">
-        <div className="flex min-w-0 items-center gap-2 rounded-lg bg-black/50 px-2 py-1 text-white/90 backdrop-blur-sm">
-          {info ? <Bot family={info.avatar.family} color={info.avatar.color} state={info.state} size={20} label={undefined} /> : null}
+    <div data-testid="pip-view" className="flex h-screen w-screen flex-col overflow-hidden bg-black">
+      {/* la barra SEMPRE visibile (~28 px, stile mini-player): l'UNICA area di
+          trascinamento — i bottoni sono no-drag, lo schermo sotto è no-drag */}
+      <div
+        data-testid="pip-bar"
+        className="flex h-7 shrink-0 select-none items-center justify-between gap-2 bg-black/60 px-2 text-white/90"
+        style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
+      >
+        <div className="flex min-w-0 items-center gap-1.5">
+          {info ? <Bot family={info.avatar.family} color={info.avatar.color} state={info.state} size={16} label={undefined} /> : null}
           <span className="truncate text-xs font-medium">{info?.agent.name ?? ''}</span>
         </div>
         <div className="flex shrink-0 items-center gap-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
           <button
             type="button"
-            data-testid="pip-open-in-homun"
-            className="flex items-center gap-1 rounded-lg bg-black/50 px-2 py-1 text-xs font-medium text-white/90 backdrop-blur-sm transition hover:bg-black/70"
-            title={t`Apri in Homun`}
+            data-testid="pip-bring-back"
+            className="flex items-center gap-1 rounded-lg px-2 py-0.5 text-xs font-medium text-white/90 transition hover:bg-white/20"
+            style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+            title={t`Riporta in Homun`}
             onClick={() => { void api.pipFocusMain(agentId).catch(() => undefined) }}
           >
-            <SquareArrowOutUpRight className="size-3.5" aria-hidden="true" />
-            <Trans>Apri in Homun</Trans>
+            <CornerUpLeft className="size-3.5" aria-hidden="true" />
+            <Trans>Riporta in Homun</Trans>
           </button>
           <button
             type="button"
             data-testid="pip-close"
             aria-label={t`Chiudi`}
-            className="grid size-7 place-items-center rounded-lg bg-black/50 text-white/90 backdrop-blur-sm transition hover:bg-black/70"
+            className="grid size-6 place-items-center rounded-lg text-white/90 transition hover:bg-white/20"
+            style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
             title={t`Chiudi`}
             onClick={() => { void api.pipClose().catch(() => undefined) }}
           >
             <X className="size-4" aria-hidden="true" />
           </button>
         </div>
+      </div>
+      {/* lo schermo: NESSUN input e NESSUN trascinamento (pointer-events none, aria-hidden) */}
+      <div className="relative min-h-0 flex-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+        <div ref={holder} aria-hidden="true" className="absolute inset-0" style={{ pointerEvents: 'none' }} />
+        {!browserRunning && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background px-6 text-center">
+            {info ? (
+              <Bot family={info.avatar.family} color={info.avatar.color} state={info.state} size={64} label={info.agent.name} />
+            ) : (
+              <div className="h-16 w-16" aria-hidden="true" />
+            )}
+            <p className="text-sm text-muted-foreground">
+              <Trans>Il bot non ha il browser aperto</Trans>
+            </p>
+          </div>
+        )}
       </div>
     </div>
   )

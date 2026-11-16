@@ -1009,10 +1009,6 @@ msgstr "Apri i membri di {0}"
 msgid "Apri Impostazioni → Approvazione automatica con una regola precompilata"
 msgstr "Apri Impostazioni → Approvazione automatica con una regola precompilata"
 
-#: src/renderer/src/components/PipView.tsx
-msgid "Apri in Homun"
-msgstr "Apri in Homun"
-
 #: src/renderer/src/components/BoxSetupProgress.tsx
 msgid "Apri l'installazione"
 msgstr "Apri l'installazione"
@@ -6002,6 +5998,10 @@ msgstr "Rimuovi davvero"
 #: src/renderer/src/components/LibraryPanel.tsx
 msgid "Rinomina"
 msgstr "Rinomina"
+
+#: src/renderer/src/components/PipView.tsx
+msgid "Riporta in Homun"
+msgstr "Riporta in Homun"
 
 #: src/renderer/src/components/BotScreen.tsx
 msgid "Riporta qui"

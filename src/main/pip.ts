@@ -123,7 +123,6 @@ export interface PipWindowHandle {
   getBounds(): PipRect
   setAlwaysOnTop(flag: boolean, level: string): void
   isAlwaysOnTop(): boolean
-  setVisibleOnAllWorkspaces(flag: boolean, opts: { visibleOnFullScreen: boolean }): void
   setAspectRatio(aspect: number): void
   setMinimumSize(w: number, h: number): void
   setMaximumSize(w: number, h: number): void
@@ -148,8 +147,10 @@ export interface PipManagerDeps {
   setSetting(key: string, value: unknown): Promise<void>
   /** l'evento `pip` con l'id del bot (o null): la card sa che deve scollegarsi (SV2) */
   emit(e: { type: 'pip'; agentId: string | null }): void
-  /** «Apri in Homun»: primo piano sulla finestra principale, scheda Computer */
+  /** «Riporta in Homun»: primo piano sulla finestra principale, scheda Computer */
   focusMain(agentId: string): void
+  /** la finestra principale è visibile? (U3: staccare NON la nasconde mai — la sonda lo legge da pip:state) */
+  mainVisible(): boolean
 }
 
 /**
@@ -188,9 +189,11 @@ export class PipManager {
           (displays.find((d) => homun && displayOf(homun, [d])) ?? displays[0] ?? { workArea: { x: 0, y: 0, width: 1200, height: 800 } }).workArea
         )
     const win = this.deps.createWindow(pipWindowOptions(this.deps.preloadPath(), bounds), this.deps.urlFor(agentId))
-    // sempre sopra le altre app, in TUTTI gli spazi (anche a schermo pieno)
+    // U3 (fase prima-release): sempre sopra le altre app con floating, e
+    // BASTA. setVisibleOnAllWorkspaces con visibleOnFullScreen trasformava il
+    // processo in UIElementApplication (senza Dock né menu) e nascondeva le
+    // finestre: Homun spariva staccando lo schermo. Scelta nel REPORT.
     win.setAlwaysOnTop(true, 'floating')
-    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
     // il rapporto 16:10 resta bloccato mentre si ridimensiona
     win.setAspectRatio(PIP_ASPECT)
     win.setMinimumSize(PIP_MIN_WIDTH, Math.round(PIP_MIN_WIDTH / PIP_ASPECT))
@@ -238,17 +241,20 @@ export class PipManager {
    * Lo stato della PiP (per la UI e per la sonda, che legge alwaysOnTop DAL
    * MAIN: è il main che ha creato la finestra).
    */
-  state(): { open: boolean; agentId: string | null; alwaysOnTop: boolean } {
+  state(): { open: boolean; agentId: string | null; alwaysOnTop: boolean; mainVisible: boolean } {
     return {
       open: this.win !== null,
       agentId: this.agentId,
-      alwaysOnTop: this.win !== null && this.win.isAlwaysOnTop()
+      alwaysOnTop: this.win !== null && this.win.isAlwaysOnTop(),
+      mainVisible: this.deps.mainVisible()
     }
   }
 
-  /** «Apri in Homun»: la finestra principale in primo piano, scheda Computer del bot. */
+  /** «Riporta in Homun» (U3): UN gesto — chiude la PiP, la finestra principale
+   *  in primo piano (la ricrea se chiusa) e apre la scheda Computer del bot. */
   focusMain(agentId: string): void {
     if (!agentId) return
+    this.close()
     this.deps.focusMain(agentId)
   }
 

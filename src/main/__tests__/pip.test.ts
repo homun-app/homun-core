@@ -142,7 +142,7 @@ interface ManagerCtx {
   focusedMain: string[]
 }
 
-function makeManager(over: { saved?: PipRect | null } = {}): ManagerCtx {
+function makeManager(over: { saved?: PipRect | null; mainVisible?: boolean } = {}): ManagerCtx {
   FakePipWindow.created = []
   const emitted: Array<{ type: 'pip'; agentId: string | null }> = []
   const settingsWritten: Array<[string, unknown]> = []
@@ -159,7 +159,8 @@ function makeManager(over: { saved?: PipRect | null } = {}): ManagerCtx {
     getSetting: async <T,>(_key: string, fallback: T) => (over.saved ?? fallback) as T,
     setSetting: async (key: string, value: unknown) => { settingsWritten.push([key, value]) },
     emit: (e) => { emitted.push(e) },
-    focusMain: (agentId: string) => { focusedMain.push(agentId) }
+    focusMain: (agentId: string) => { focusedMain.push(agentId) },
+    mainVisible: () => over.mainVisible ?? true
   })
   return { manager, windows: () => FakePipWindow.created, emitted, settingsWritten, focusedMain }
 }
@@ -169,13 +170,13 @@ describe('SV4: il manager della PiP (finestra finta)', () => {
     vi.useRealTimers()
   })
 
-  it('open: finestra SEMPRE SOPRA (floating), visibile in TUTTI gli spazi anche a schermo pieno, rapporto 16:10, rotta #/pip/<bot>', async () => {
+  it('open: finestra SEMPRE SOPRA (floating), MAI setVisibleOnAllWorkspaces (U3: trasformava il processo in UIElementApplication e Homun spariva), rapporto 16:10, rotta #/pip/<bot>', async () => {
     const ctx = makeManager()
     await ctx.manager.open('bot-a')
     const win = ctx.windows()[0]!
     expect(win.url).toBe('homun://app/#/pip/bot-a')
     expect(win.calls).toContainEqual(['setAlwaysOnTop', true, 'floating'])
-    expect(win.calls).toContainEqual(['setVisibleOnAllWorkspaces', true, { visibleOnFullScreen: true }])
+    expect(win.calls.filter((c) => c[0] === 'setVisibleOnAllWorkspaces'), 'mai setVisibleOnAllWorkspaces, con o senza visibleOnFullScreen').toEqual([])
     expect(win.calls).toContainEqual(['setAspectRatio', PIP_ASPECT])
     expect(win.calls).toContainEqual(['setMinimumSize', PIP_MIN_WIDTH, PIP_MIN_WIDTH / PIP_ASPECT])
     expect(win.calls).toContainEqual(['setMaximumSize', PIP_MAX_WIDTH, PIP_MAX_WIDTH / PIP_ASPECT])
@@ -230,17 +231,45 @@ describe('SV4: il manager della PiP (finestra finta)', () => {
     expect(ctx.emitted[ctx.emitted.length - 1]).toEqual({ type: 'pip', agentId: null })
   })
 
-  it('state() dice aperto, bot e alwaysOnTop letto dalla finestra', async () => {
+  it('state() dice aperto, bot, alwaysOnTop letto dalla finestra e mainVisible (U3: la principale non si nasconde MAI)', async () => {
     const ctx = makeManager()
-    expect(ctx.manager.state()).toEqual({ open: false, agentId: null, alwaysOnTop: false })
+    expect(ctx.manager.state()).toEqual({ open: false, agentId: null, alwaysOnTop: false, mainVisible: true })
     await ctx.manager.open('bot-a')
-    expect(ctx.manager.state()).toEqual({ open: true, agentId: 'bot-a', alwaysOnTop: true })
+    expect(ctx.manager.state()).toEqual({ open: true, agentId: 'bot-a', alwaysOnTop: true, mainVisible: true })
+    // e se la principale fosse nascosta, la sonda lo vede dallo stato
+    const hidden = makeManager({ mainVisible: false })
+    await hidden.manager.open('bot-b')
+    expect(hidden.manager.state().mainVisible).toBe(false)
   })
 
-  it('focus-main porta in primo piano Homun sul bot giusto', async () => {
+  it('«Riporta in Homun» (focusMain) è UN gesto: CHIUDE la PiP e porta Homun sul bot giusto', async () => {
     const ctx = makeManager()
     await ctx.manager.open('bot-a')
     ctx.manager.focusMain('bot-a')
     expect(ctx.focusedMain).toEqual(['bot-a'])
+    expect(ctx.windows()[0]!.closed, 'la PiP si chiude nello stesso gesto').toBe(true)
+    expect(ctx.emitted[ctx.emitted.length - 1]).toEqual({ type: 'pip', agentId: null })
+  })
+})
+
+describe("U3: l'adattatore vero non tocca MAI la visibilità dell'app (guarda sul codice)", () => {
+  it("né pip.ts né l'adattatore di index.ts chiamano setVisibleOnAllWorkspaces, dock.hide o setActivationPolicy", async () => {
+    const { readFileSync } = await import('node:fs')
+    const { fileURLToPath } = await import('node:url')
+    const pip = readFileSync(fileURLToPath(new URL('../pip.ts', import.meta.url)), 'utf8')
+    const index = readFileSync(fileURLToPath(new URL('../index.ts', import.meta.url)), 'utf8')
+    // le CHIAMATE, non le parole nei commenti: è la chiamata che trasforma
+    // il processo (UIElementApplication) e fa sparire Homun
+    for (const src of [pip, index]) {
+      expect(src).not.toContain('.setVisibleOnAllWorkspaces(')
+      expect(src).not.toContain('.dock.hide(')
+    }
+    // setActivationPolicy compare SOLO nella modalità daemon (processo senza
+    // finestre, legittimamente accessory): il percorso GUI non la chiama mai
+    const daemonStart = index.indexOf('if (isDaemonMode(process.argv))')
+    const gui = daemonStart < 0 ? index : index.slice(0, daemonStart) + index.slice(index.indexOf('app.whenReady()', daemonStart))
+    expect(gui).not.toContain('.setActivationPolicy(')
+    // la principale non viene nascosta da nessuna parte del main
+    expect(index).not.toContain('.hide()')
   })
 })

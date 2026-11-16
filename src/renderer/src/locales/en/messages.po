@@ -1009,10 +1009,6 @@ msgstr "Open the members of {0}"
 msgid "Apri Impostazioni → Approvazione automatica con una regola precompilata"
 msgstr "Open Settings → Auto-review with a prefilled rule"
 
-#: src/renderer/src/components/PipView.tsx
-msgid "Apri in Homun"
-msgstr "Open in Homun"
-
 #: src/renderer/src/components/BoxSetupProgress.tsx
 msgid "Apri l'installazione"
 msgstr "Open the installer"
@@ -6002,6 +5998,10 @@ msgstr "Really remove"
 #: src/renderer/src/components/LibraryPanel.tsx
 msgid "Rinomina"
 msgstr "Rename"
+
+#: src/renderer/src/components/PipView.tsx
+msgid "Riporta in Homun"
+msgstr "Bring back to Homun"
 
 #: src/renderer/src/components/BotScreen.tsx
 msgid "Riporta qui"
