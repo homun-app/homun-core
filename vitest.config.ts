@@ -15,5 +15,8 @@ export default defineConfig({
     // N2 (fase 13 correzioni 3): SANDBOT_DATA_DIR su una temporanea per tutta
     // la corsa (src/test-setup.ts) — nessun test può più aprire ~/.sandbot/data
     setupFiles: ['src/test-setup.ts'],
+    // T1 (fase prima-release): il controllo di fine corsa — se una cartella
+    // temporanea sandbot- resta dopo i test, la corsa FALLISCE.
+    globalSetup: ['src/test-tmp-guard.ts'],
   },
 })
