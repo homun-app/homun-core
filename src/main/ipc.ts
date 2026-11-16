@@ -141,13 +141,31 @@ export const DAEMON_RPC_CHANNELS = [
   'onboarding:state', 'onboarding:advance', 'onboarding:reopen', 'onboarding:focus-dismiss'
 ] as const
 
-export function registerIpc(client: DaemonClient, getWindows: () => BrowserWindow[]): void {
+export function registerIpc(
+  client: DaemonClient,
+  getWindows: () => BrowserWindow[],
+  pip?: { open(agentId: string): Promise<void>; close(): void; focusMain(agentId: string): void }
+): void {
   // ---- inoltro RPC al daemon ----
   for (const ch of DAEMON_RPC_CHANNELS) {
     ipcMain.handle(ch, (_e, ...args: unknown[]) => client.call(ch, args))
   }
 
   // ---- API locali (finestre/dialoghi/sistema) ----
+
+  // ---- SV4 (fase schermo-vivo): la finestra PiP (canali LOCALI del main) ----
+  ipcMain.handle('pip:open', (_e, agentId: string) => {
+    void pip?.open(String(agentId ?? ''))
+    return { ok: true }
+  })
+  ipcMain.handle('pip:close', () => {
+    pip?.close()
+    return { ok: true }
+  })
+  ipcMain.handle('pip:focus-main', (_e, agentId: string) => {
+    pip?.focusMain(String(agentId ?? ''))
+    return { ok: true }
+  })
   // fase skill (S4): «Mostra nel Finder» — apre la cartella della skill nella
   // libreria (shell è di Electron, sta qui e non nel daemon RPC)
   ipcMain.handle('skills:show-in-finder', (_e, name: string) => {

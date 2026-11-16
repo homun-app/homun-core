@@ -337,6 +337,33 @@ describe('fase 19a (V9): il ponte dello schermo', () => {
     await expect(screenOpen('agent_peek', 'control', { peek: true })).rejects.toBeInstanceOf(UiError)
   })
 
+  it('SV4: { noLaunch: true } col browser SPENTO torna null e NON avvia (come peek)', async () => {
+    const before = view.received.length
+    const r = await screenOpen('agent_pip', 'view', { noLaunch: true })
+    expect(r).toBeNull()
+    expect(isBrowserRunning('agent_pip')).toBe(false)
+    expect(dockerCalls.argvs).toEqual([])
+    expect(view.received.length).toBe(before)
+  })
+
+  it('SV4: { noLaunch: true } col browser ACCESO torna l\'url e la connessione TIENE vivo il timer (non è peek)', async () => {
+    await ensureBrowserForScreen('agent_pip')
+    const r = await screenOpen('agent_pip', 'view', { noLaunch: true })
+    expect(r).not.toBeNull()
+    // il segno peek è FALSO (è una vista normale che tiene vivo il browser):
+    // lo si legge su una capability GEMELLA (monouso: quella dell'upgrade si brucia)
+    const r2 = await screenOpen('agent_pip', 'view', { noLaunch: true })
+    expect(consumeScreenCap(r2!.url.split('/screen/')[1]!, clock)).toMatchObject({ agentId: 'agent_pip', mode: 'view', peek: false })
+    const cap = r!.url.split('/screen/')[1]!
+    const parts: Buffer[] = []
+    const sock = tcpConnect({ port: server.port, host: '127.0.0.1' }, () => sock.write(upgradeWith(cap)))
+    sock.on('data', (d: Buffer) => parts.push(d))
+    await vi.waitFor(() => expect(Buffer.concat(parts).includes('101 Switching Protocols')).toBe(true))
+    // la PiP tiene il browser acceso come la scheda Computer (stesso tetto)
+    expect(browserHoldMs('agent_pip', clock)).toBe(SCREEN_HOLD_MAX_MS)
+    sock.destroy()
+  })
+
   it('quando il browser si chiude la connessione peek si chiude come le altre', async () => {
     await ensureBrowserForScreen('agent_peek')
     const peek = await screenOpen('agent_peek', 'view', { peek: true })

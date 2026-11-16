@@ -726,6 +726,10 @@ export type SandbotEvent =
   | { type: 'onboarding' } & OnboardingStatus
   | { type: 'approval'; agentId: string; approval: Approval }
   | { type: 'open-agent'; agentId: string }
+  /** SV4 (fase schermo-vivo): la finestra PiP è cambiata (id del bot o null) */
+  | { type: 'pip'; agentId: string | null }
+  /** SV4: «Apri in Homun» dalla PiP — primo piano, scheda Computer del bot */
+  | { type: 'open-computer'; agentId: string }
   // residuo fase 4 (0b): il client del daemon si è RICONNESSO dopo una
   // disconnessione — la UI ricarica agenti ed entry (il transcript può essere
   // cambiato mentre eravamo sconnessi)
@@ -1111,9 +1115,17 @@ export interface SandbotApi {
    * avvia MAI il browser — spento torna null, accesa torna l'url di oggi con
    * una connessione che NON sospende il timer di inattività.
    */
-  screenOpen(agentId: string, mode: 'view' | 'control', opts?: { peek?: boolean }): Promise<{ url: string } | null>
+  screenOpen(agentId: string, mode: 'view' | 'control', opts?: { peek?: boolean; noLaunch?: boolean }): Promise<{ url: string } | null>
   screenRelease(agentId: string, note?: string): Promise<{ ok: boolean }>
   screenStatus(agentId: string): Promise<ScreenStatus>
+  /**
+   * SV4 (fase schermo-vivo): la finestra PiP. pipOpen stacca lo schermo di un
+   * bot (una sola PiP per volta, l'altra si sostituisce); pipClose la chiude;
+   * pipFocusMain porta in primo piano Homun sulla scheda Computer del bot.
+   */
+  pipOpen(agentId: string): Promise<{ ok: boolean }>
+  pipClose(): Promise<{ ok: boolean }>
+  pipFocusMain(agentId: string): Promise<{ ok: boolean }>
   /**
    * Fase 19b (T2): il terminale del bot (solo docker). terminal:open torna
    * l'URL WebSocket con una capability MONOUSO (30 s) per /term/<cap>; il

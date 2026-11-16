@@ -654,7 +654,11 @@ function ComputerCard({ agentId }: { agentId: string }) {
       {/* SV2 (fase schermo-vivo): l'anteprima DAL VIVO dello schermo del bot
           (sola lettura, NESSUN input) quando il browser è acceso; spento resta
           il riquadro di oggi. Il clic qui attorno apre la scheda Computer */}
-      <ScreenThumb agentId={agentId} browserRunning={(screenStatus?.browser ?? browser) === 'running'} />
+      <ScreenThumb
+        agentId={agentId}
+        browserRunning={(screenStatus?.browser ?? browser) === 'running'}
+        onDetach={() => { void api.pipOpen(agentId).catch(() => undefined) }}
+      />
       <span className="flex items-center gap-2 px-3 py-2">
         <Monitor className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
         <span className="min-w-0 flex-1 truncate text-sm"><Trans>Computer</Trans></span>

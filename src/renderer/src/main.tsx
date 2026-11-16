@@ -4,6 +4,7 @@ import { I18nProvider } from '@lingui/react'
 import { i18n, activateUiLanguage } from './lib/i18n'
 import { resolveUiLanguage, type UiLanguageSetting } from '../../shared/ui-language'
 import { App } from './App'
+import { PipView } from './components/PipView'
 import './styles.css'
 
 // Fase 17a (L2): l'app si monta SOLO dopo la prima attivazione della lingua
@@ -28,10 +29,13 @@ async function boot(): Promise<void> {
   const lang = resolveUiLanguage(setting, navigator.languages)
   await activateUiLanguage(lang)
   void api.uiLanguageChanged(lang).catch(() => undefined)
+  // SV4 (fase schermo-vivo): la finestra PiP carica la STESSA pagina con la
+  // rotta #/pip/<agentId> — si rende SOLO quella vista (nessuna shell)
+  const pipMatch = location.hash.match(/^#\/pip\/([A-Za-z0-9_-]+)$/)
   createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
       <I18nProvider i18n={i18n}>
-        <App />
+        {pipMatch ? <PipView agentId={pipMatch[1]!} /> : <App />}
       </I18nProvider>
     </React.StrictMode>
   )

@@ -178,7 +178,7 @@ export function browserHoldMs(agentId: string, now: number): number | null {
 
 // ---- l'apertura: screen:open (V3.1) ----
 
-/** Le opzioni di screen:open (SV1). */
+/** Le opzioni di screen:open (SV1/SV4). */
 export interface ScreenOpenOpts {
   /**
    * SV1: è un'ANTEPRIMA. Non avvia MAI il browser (torna null se è spento, senza
@@ -186,6 +186,13 @@ export interface ScreenOpenOpts {
    * il timer di inattività del browser. Solo con mode = 'view'.
    */
   peek?: boolean
+  /**
+   * SV4 (fase schermo-vivo): non avviare il browser nemmeno qui (torna null se
+   * è spento), ma la connessione — quando il browser c'è — è una vista NORMALE:
+   * tiene vivo il timer di inattività come la scheda Computer (tetto di 30 min).
+   * È la finestra PiP: un gesto esplicito dell'utente che guarda, non avvia.
+   */
+  noLaunch?: boolean
 }
 
 /**
@@ -212,7 +219,8 @@ export async function screenOpen(agentId: string, mode: 'view' | 'control', opts
     throw new UiError('The bot is working: stop it before taking control.', ui(UI.rpcScreenBotBusy))
   }
   const running = browser.isBrowserRunning(agentId)
-  if (opts.peek && !running) return null // l'anteprima non accende niente
+  // né l'anteprima (SV1) né la PiP (SV4, noLaunch) accendono il browser
+  if ((opts.peek || opts.noLaunch) && !running) return null
   if (!running) await browser.ensureBrowserForScreen(agentId)
   await waitForSocket(browserViewSocket(boxOwnerOf(agentId)))
   if (mode === 'control') await ensureControlVnc(agentId)

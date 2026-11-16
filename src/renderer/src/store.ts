@@ -720,6 +720,18 @@ export const useStore = create<Store>((set, get) => ({
           set({ screenStatus: { ...s.screenStatus, [e.agentId]: e.status } })
           break
         }
+        // SV4 (fase schermo-vivo): la finestra PiP è cambiata (id del bot o
+        // null) — l'anteprima della card (SV2) si scollega quando è il suo bot
+        case 'pip': {
+          set({ pipAgentId: e.agentId })
+          break
+        }
+        // SV4: «Apri in Homun» dalla PiP — primo piano sulla scheda Computer
+        case 'open-computer': {
+          if (e.agentId !== s.activeId) void s.select(e.agentId)
+          s.openBotTab('computer')
+          break
+        }
         // CC2 (fase computer-card): lo stato del BOX è cambiato (solo al
         // cambio) — CCK1: passa dalla STESSA azione della risposta della RPC
         case 'box': {

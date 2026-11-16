@@ -33,6 +33,8 @@ import { initUpdater, setUpdaterDaemonStopper, shouldAutoCheckUpdates, hasUpdate
 // RV1 (fase beta.2): l'app fuori da Applicazioni o translocata (sola lettura)
 import { appLocationAction, proposeMoveToApplications, setAppNeedsMove, appNeedsMove } from './app-location'
 import { stopRunningDaemon } from './daemon-client'
+// SV4 (fase schermo-vivo): la finestra PiP
+import { PipManager, type PipWindowHandle } from './pip'
 import { UPDATE_CHANNEL_SETTING, parseUpdateChannel } from '../shared/update-channel'
 import { safeStorageBackendForEnv } from '../daemon/master-keys'
 
@@ -110,6 +112,53 @@ if (isDaemonMode(process.argv)) {
       win.show()
       win.focus()
       win.webContents.send('sandbot:event', { type: 'open-agent', agentId })
+    }
+
+    // SV4 (fase schermo-vivo): l'adattatore Electron della PiP — la logica
+    // (bounds, sempre-sopra, sostituzione, Esc) sta nel PipManager puro di
+    // pip.ts, qui solo la finestra vera con la SICUREZZA della principale
+    function createPipHandle(options: Record<string, unknown>, url: string): PipWindowHandle {
+      const win = new BrowserWindow(options as ConstructorParameters<typeof BrowserWindow>[0])
+      const appOrigin = process.env.ELECTRON_RENDERER_URL
+        ? new URL(process.env.ELECTRON_RENDERER_URL).origin + '/'
+        : 'homun://app/'
+      const isAppNavigation = (u: string): boolean => {
+        if (u.startsWith(appOrigin)) return true
+        try {
+          return new URL(u).href === new URL(appOrigin).href
+        } catch {
+          return false
+        }
+      }
+      // niente finestre/popup; i link http(s) al browser esterno dopo il controllo dello schema
+      win.webContents.setWindowOpenHandler(({ url: u }) => {
+        if (canOpenExternally(u)) void shell.openExternal(u)
+        return { action: 'deny' }
+      })
+      // la navigazione resta nell'origine dell'app (la rotta è #/pip/<bot>)
+      win.webContents.on('will-navigate', (event, u) => {
+        if (!isAppNavigation(u)) event.preventDefault()
+      })
+      win.webContents.on('will-redirect', (event, u) => {
+        if (!isAppNavigation(u)) event.preventDefault()
+      })
+      win.webContents.on('will-attach-webview', (event) => event.preventDefault())
+      void win.loadURL(url)
+      return {
+        on: (event, cb) => { win.on(event as 'closed', cb) },
+        close: () => { win.close() },
+        getBounds: () => win.getBounds(),
+        setAlwaysOnTop: (flag, level) => { win.setAlwaysOnTop(flag, level as 'floating') },
+        setVisibleOnAllWorkspaces: (flag, opts) => { win.setVisibleOnAllWorkspaces(flag, opts) },
+        setAspectRatio: (aspect) => { win.setAspectRatio(aspect) },
+        setMinimumSize: (w, h) => { win.setMinimumSize(w, h) },
+        setMaximumSize: (w, h) => { win.setMaximumSize(w, h) },
+        webContents: {
+          on: (event, cb) => {
+            win.webContents.on(event, (_e, input) => cb(input))
+          }
+        }
+      }
     }
 
     function createWindow(): void {
@@ -222,7 +271,40 @@ if (isDaemonMode(process.argv)) {
         }
         return shell.openExternal(current)
       })
-      registerIpc(client, () => BrowserWindow.getAllWindows())
+      // SV4 (fase schermo-vivo): il gestore della PiP — una sola per volta,
+      // misure ricordate in ui.pip.bounds (setting del daemon), evento `pip`
+      // a tutte le finestre, «Apri in Homun» ricrea la principale se chiusa
+      const pip = new PipManager({
+        preloadPath: () => preload,
+        createWindow: createPipHandle,
+        urlFor: (agentId) =>
+          process.env.ELECTRON_RENDERER_URL
+            ? process.env.ELECTRON_RENDERER_URL + '#/pip/' + agentId
+            : 'homun://app/#/pip/' + agentId,
+        displays: () => screen.getAllDisplays().map((d) => ({ workArea: d.workArea })),
+        homunBounds: () => {
+          const b = getMainWindow()?.getBounds()
+          return b ? { x: b.x, y: b.y, width: b.width, height: b.height } : null
+        },
+        getSetting: (key, fallback) =>
+          client.call('settings:get', [key, fallback]) as Promise<unknown> as Promise<typeof fallback>,
+        setSetting: (key, value) => client.call('settings:set', [key, value]) as Promise<void>,
+        emit: (e) => {
+          for (const w of BrowserWindow.getAllWindows()) w.webContents.send('sandbot:event', e)
+        },
+        focusMain: (agentId) => {
+          let win = getMainWindow()
+          if (!win) {
+            createWindow()
+            win = getMainWindow()
+          }
+          if (!win) return
+          win.show()
+          win.focus()
+          win.webContents.send('sandbot:event', { type: 'open-computer', agentId })
+        }
+      })
+      registerIpc(client, () => BrowserWindow.getAllWindows(), pip)
       // A8: prima di installare un aggiornamento il daemon si ferma BENE.
       // RV1 (fase beta.2): lo STESSO meccanismo dello spostamento in
       // Applicazioni (stopRunningDaemon: la RPC daemon:restart di A2 senza

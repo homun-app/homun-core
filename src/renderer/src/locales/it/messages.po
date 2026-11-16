@@ -1009,6 +1009,10 @@ msgstr "Apri i membri di {0}"
 msgid "Apri Impostazioni → Approvazione automatica con una regola precompilata"
 msgstr "Apri Impostazioni → Approvazione automatica con una regola precompilata"
 
+#: src/renderer/src/components/PipView.tsx
+msgid "Apri in Homun"
+msgstr "Apri in Homun"
+
 #: src/renderer/src/components/BoxSetupProgress.tsx
 msgid "Apri l'installazione"
 msgstr "Apri l'installazione"
@@ -1547,6 +1551,7 @@ msgstr "chiudi"
 #: src/renderer/src/components/BotScreen.tsx
 #: src/renderer/src/components/Chat.tsx
 #: src/renderer/src/components/ComputerPanel.tsx
+#: src/renderer/src/components/PipView.tsx
 #: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
 #: src/renderer/src/components/SkillsWindow.tsx
@@ -3205,6 +3210,10 @@ msgstr "Il bot non è un membro della squadra."
 #: src/renderer/src/components/ComputerActivity.tsx
 msgid "Il bot non ha ancora usato il suo computer."
 msgstr "Il bot non ha ancora usato il suo computer."
+
+#: src/renderer/src/components/PipView.tsx
+msgid "Il bot non ha il browser aperto"
+msgstr "Il bot non ha il browser aperto"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts

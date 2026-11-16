@@ -20,6 +20,10 @@ const api: SandbotApi = {
   screenOpen: (agentId, mode, opts) => ipcRenderer.invoke('screen:open', agentId, mode, opts),
   screenRelease: (agentId, note) => ipcRenderer.invoke('screen:release', agentId, note),
   screenStatus: (agentId) => ipcRenderer.invoke('screen:status', agentId),
+  // SV4 (fase schermo-vivo): la finestra PiP (canali LOCALI del main)
+  pipOpen: (agentId) => ipcRenderer.invoke('pip:open', agentId),
+  pipClose: () => ipcRenderer.invoke('pip:close'),
+  pipFocusMain: (agentId) => ipcRenderer.invoke('pip:focus-main', agentId),
   // fase 19b (T2): il terminale del bot (solo docker)
   terminalOpen: (agentId) => ipcRenderer.invoke('terminal:open', agentId),
   // fase 19b (T3): i file del box — elenco, anteprima e le finestre del Mac
