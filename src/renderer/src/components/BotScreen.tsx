@@ -8,6 +8,7 @@
 // mostra l'errore, non un riquadro nero.
 import { useEffect, useRef, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
+import { PictureInPicture2 } from 'lucide-react'
 import RFB from '@novnc/novnc'
 import { api, useStore } from '../store'
 import { useBotInfo } from '../bot/use-bot'
@@ -28,6 +29,8 @@ export function BotScreen({ agentId, onClose, inPanel = false }: { agentId: stri
   // presa di controllo lo apre GIÀ in controllo)
   const initialMode = useStore((s) => s.computerPanel.mode)
   const [mode, setMode] = useState<'view' | 'control'>(initialMode)
+  // SV5 (fase schermo-vivo): lo schermo di QUESTO bot è in una finestra PiP?
+  const pipForMe = useStore((s) => s.pipAgentId === agentId)
   const [phase, setPhase] = useState<'idle' | 'opening' | 'connecting' | 'connected' | 'error'>('idle')
   const [error, setError] = useState('')
   const [status, setStatus] = useState<ScreenStatus | null>(null)
@@ -38,6 +41,9 @@ export function BotScreen({ agentId, onClose, inPanel = false }: { agentId: stri
   // la fase vista dai listener di noVNC (evita le stale closure)
   const phaseRef = useRef(phase)
   useEffect(() => { phaseRef.current = phase }, [phase])
+  // SV5: il modo VISTO dagli effetti (la riapertura dopo la PiP vale solo in vista)
+  const modeRef = useRef<'view' | 'control'>(initialMode)
+  useEffect(() => { modeRef.current = mode }, [mode])
 
   const destroy = () => {
     rfb.current?.disconnect()
@@ -46,6 +52,9 @@ export function BotScreen({ agentId, onClose, inPanel = false }: { agentId: stri
 
   const open = async (wanted: 'view' | 'control') => {
     if (opening.current) return
+    // SV5: lo schermo di questo bot è in una finestra a parte — la vista
+    // grande resta giù finché la PiP non si chiude
+    if (useStore.getState().pipAgentId === agentId) return
     opening.current = true
     destroy()
     setError('')
@@ -123,6 +132,23 @@ export function BotScreen({ agentId, onClose, inPanel = false }: { agentId: stri
     return off
   }, [agentId])
 
+  // SV5: la PiP di questo bot si apre → la vista grande si SCOLLEGA (la
+  // stessa cosa in grande basta una volta); si chiude → la vista torna. La
+  // riapertura vale solo in VISTA: se nel frattempo l'utente ha preso il
+  // CONTROLLO, il posto è suo
+  const pipRef = useRef(pipForMe)
+  useEffect(() => {
+    if (pipForMe === pipRef.current) return
+    pipRef.current = pipForMe
+    if (pipForMe) {
+      destroy()
+      setPhase('idle')
+    } else if (modeRef.current === 'view') {
+      void open('view')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pipForMe])
+
   // «Ho finito»: chiude il controllo (con l'eventuale nota per il bot) e
   // torna in vista
   const release = async () => {
@@ -160,6 +186,22 @@ export function BotScreen({ agentId, onClose, inPanel = false }: { agentId: stri
           )}
         </div>
         <div className="flex items-center gap-2">
+          {/* SV5: «Stacca» sta SEMPRE accanto ai comandi (anche a browser
+              spento: la PiP allora dice che non c'è il browser) — tranne quando
+              lo schermo è già nella finestra a parte */}
+          {!pipForMe && (
+            <button
+              className="rounded-lg bg-muted px-3 py-1.5 text-xs font-medium text-foreground transition hover:bg-accent"
+              data-testid="bot-screen-detach"
+              title={t`Stacca in una finestra`}
+              onClick={() => { void api.pipOpen(agentId).catch(() => undefined) }}
+            >
+              <span className="flex items-center gap-1.5">
+                <PictureInPicture2 className="size-3.5" aria-hidden="true" />
+                <Trans>Stacca</Trans>
+              </span>
+            </button>
+          )}
           {phase === 'connected' && mode === 'view' && (
             busy ? (
               <button
@@ -192,8 +234,23 @@ export function BotScreen({ agentId, onClose, inPanel = false }: { agentId: stri
         </div>
       </header>
 
-      {/* il canvas di noVNC vive qui */}
-      <div ref={holder} className="min-h-[320px] flex-1 bg-black/90" />
+      {/* il canvas di noVNC vive qui — SPARISCE mentre lo schermo è nella PiP */}
+      {pipForMe ? (
+        <div className="flex min-h-[320px] flex-1 flex-col items-center justify-center gap-3 bg-black/40 px-6 text-center">
+          <p className="text-sm text-muted-foreground">
+            <Trans>Lo schermo è in una finestra a parte</Trans>
+          </p>
+          <button
+            className="rounded-lg bg-muted px-3 py-1.5 text-xs font-medium text-foreground transition hover:bg-accent"
+            data-testid="bot-screen-restore"
+            onClick={() => { void api.pipClose().catch(() => undefined) }}
+          >
+            <Trans>Riporta qui</Trans>
+          </button>
+        </div>
+      ) : (
+        <div ref={holder} className="min-h-[320px] flex-1 bg-black/90" />
+      )}
 
       {mode === 'control' && phase === 'connected' && (
         <footer className="space-y-2 border-t border-border px-4 py-3">

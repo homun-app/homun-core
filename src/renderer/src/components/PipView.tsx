@@ -52,6 +52,13 @@ export function PipView({ agentId }: { agentId: string }) {
     return off
   }, [agentId])
 
+  // SV5: l'utente prende il CONTROLLO nella scheda Computer — il controllo ha
+  // bisogno della vista grande e dello stesso schermo non servono due viste:
+  // la PiP si chiude da sé appena il suo schermo risulta controllato
+  useEffect(() => {
+    if (status?.control) void api.pipClose().catch(() => undefined)
+  }, [status?.control])
+
   // la connessione: SOLO se il browser è GIÀ acceso (noLaunch — la PiP non lo
   // avvia mai). Vista NORMALE in sola lettura: tiene vivo il timer come la
   // scheda Computer

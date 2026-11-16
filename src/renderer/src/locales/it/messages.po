@@ -4181,6 +4181,10 @@ msgid "rpc.screenNotReady"
 msgstr "Lo schermo del bot non è pronto (il socket non risponde): riprova tra poco."
 
 #: src/renderer/src/components/BotScreen.tsx
+msgid "Lo schermo è in una finestra a parte"
+msgstr "Lo schermo è in una finestra a parte"
+
+#: src/renderer/src/components/BotScreen.tsx
 msgid "Lo schermo non risponde."
 msgstr "Lo schermo non risponde."
 
@@ -5981,6 +5985,10 @@ msgstr "Rimuovi davvero"
 msgid "Rinomina"
 msgstr "Rinomina"
 
+#: src/renderer/src/components/BotScreen.tsx
+msgid "Riporta qui"
+msgstr "Riporta qui"
+
 #: src/renderer/src/components/RightPanel.tsx
 msgid "riprendi"
 msgstr "riprendi"
@@ -6798,10 +6806,12 @@ msgstr "Sta pensando…"
 msgid "Sta scrivendo…"
 msgstr "Sta scrivendo…"
 
+#: src/renderer/src/components/BotScreen.tsx
 #: src/renderer/src/components/ScreenThumb.tsx
 msgid "Stacca"
 msgstr "Stacca"
 
+#: src/renderer/src/components/BotScreen.tsx
 #: src/renderer/src/components/ScreenThumb.tsx
 msgid "Stacca in una finestra"
 msgstr "Stacca in una finestra"
