@@ -336,7 +336,9 @@ async function runOnce(run) {
   const ELECTRON = join(ROOT, 'node_modules', 'electron', 'dist', 'Electron.app', 'Contents', 'MacOS', 'Electron')
   const DEBUG_PORT = 9367 + run
   let appLog = ''
-  const app = spawn(ELECTRON, ['.', `--remote-debugging-port=${DEBUG_PORT}`], {
+  // --lang=it: la lingua della UI è deterministica (a volte il sistema
+  // risolve «system» in inglese e i testid dei bottoni cambiano)
+  const app = spawn(ELECTRON, ['.', `--remote-debugging-port=${DEBUG_PORT}`, '--lang=it'], {
     cwd: ROOT,
     env: {
       HOME: process.env.HOME,
