@@ -12,9 +12,9 @@
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import { createServer, type Server } from 'node:http'
 import { spawn } from 'node:child_process'
-import { mkdtempSync, readdirSync, readFileSync, existsSync, statSync } from 'node:fs'
+import { mkdtempSync, readdirSync, readFileSync, existsSync, statSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
-import { tmpdir } from 'node:os'
+import { TEST_TMP_BASE } from '../../src/test-tmp'
 
 const KEY = 'ak_chiave-segreta-della-prova-7f3d'
 const ROOT = join(import.meta.dirname, '..', '..')
@@ -107,6 +107,9 @@ beforeAll(async () => {
 afterAll(async () => {
   server.closeAllConnections?.()
   await new Promise<void>((r) => server.close(() => r()))
+  // i figli dello script sono usciti dentro i test (run() risolve sul
+  // 'close' del processo); il server è chiuso: ora si può pulire
+  for (const d of createdDirs.splice(0)) rmSync(d, { recursive: true, force: true })
 })
 
 /**
@@ -154,7 +157,16 @@ const filesOf = (dir: string): Array<{ path: string; content: Buffer }> => {
   return out
 }
 
-const tmp = () => mkdtempSync(join(tmpdir(), 'sandbot-catalogo-'))
+// T3 (fase prima-release): le temporanee dello script stanno nella base
+// della corsa (TEST_TMP_BASE, non tmpdir()) e si registrano: l'afterAll le
+// cancella DOPO la chiusura del server finto e l'uscita dei figli, perché lo
+// script scrive in --out (il controllo di fine corsa T1 lo verifica).
+const createdDirs: string[] = []
+const tmp = () => {
+  const d = mkdtempSync(join(TEST_TMP_BASE, 'sandbot-catalogo-'))
+  createdDirs.push(d)
+  return d
+}
 
 describe('P1 — aggiorna-catalogo-composio (server finto su 127.0.0.1)', async () => {
   it('senza COMPOSIO_CATALOG_KEY esce subito con un messaggio chiaro, senza chiamare l\'API', async () => {
