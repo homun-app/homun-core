@@ -6789,6 +6789,14 @@ msgstr "Thinking…"
 msgid "Sta scrivendo…"
 msgstr "Typing…"
 
+#: src/renderer/src/components/ScreenThumb.tsx
+msgid "Stacca"
+msgstr "Detach"
+
+#: src/renderer/src/components/ScreenThumb.tsx
+msgid "Stacca in una finestra"
+msgstr "Detach into a window"
+
 #. placeholder {0}: agent?.name ?? ''
 #: src/renderer/src/components/BotScreen.tsx
 msgid "Stai controllando lo schermo di {0}"
@@ -7156,6 +7164,10 @@ msgstr "killed"
 #: src/renderer/src/components/TaskCard.tsx
 msgid "ultima attività {0}{1}"
 msgstr "last activity {0}{1}"
+
+#: src/renderer/src/components/ScreenThumb.tsx
+msgid "Ultima immagine"
+msgstr "Last image"
 
 #. placeholder {0}: formatDate(r.last_run)
 #: src/renderer/src/components/Settings.tsx

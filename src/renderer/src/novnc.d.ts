@@ -26,6 +26,12 @@ declare module '@novnc/novnc' {
     clipViewport: boolean
     /** il server può ridimensionare la sessione alla finestra */
     resizeSession: boolean
+    /** SV2 (fase schermo-vivo): l'anteprima non prende MAI il focus al clic */
+    focusOnClick: boolean
+    /** SV2: qualità JPEG richiesta (0 = minima, 9 = massima) */
+    qualityLevel: number
+    /** SV2: compressione richiesta (0 = minima, 9 = massima) */
+    compressionLevel: number
     disconnect(): void
     sendCredentials(creds: { username?: string; password?: string; target?: string }): void
     sendCtrlAltDel(): void

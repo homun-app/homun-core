@@ -32,6 +32,7 @@ import type { LayoutResult } from '../layout'
 // fase 19b (T1) → fase 16b (S4): il pannello «Computer» vive QUI come scheda
 import { ComputerPanel } from './ComputerPanel'
 import { ComputerPrepRow } from './ComputerPrepRow'
+import { ScreenThumb } from './ScreenThumb'
 import { ModelSelect } from './ui/ModelSelect'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu'
 import { Dialog, DialogContent, DialogTitle } from './ui/dialog'
@@ -637,19 +638,23 @@ function ComputerCard({ agentId }: { agentId: string }) {
     boxInUse
   })
   return (
-    <button
-      className="w-full overflow-hidden rounded-[16px] bg-muted/60 text-left transition hover:bg-muted"
+    <div
+      role="button"
+      tabIndex={0}
+      className="group w-full cursor-pointer overflow-hidden rounded-[16px] bg-muted/60 text-left transition hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground/40"
       data-testid="bot-computer-card"
       onClick={() => openBotTab('computer')}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          openBotTab('computer')
+        }
+      }}
     >
-      {/* l'anteprima piccola dello schermo: il riquadro del desktop del bot */}
-      <span className="block h-24 w-full bg-black/85 px-3 pb-3 pt-2" aria-hidden="true">
-        <span className="flex h-full flex-col justify-end gap-1.5 rounded-[8px] bg-white/5 p-2">
-          <span className="h-1.5 w-3/5 rounded-full bg-white/20" />
-          <span className="h-1.5 w-4/5 rounded-full bg-white/10" />
-          <span className="h-1.5 w-2/5 rounded-full bg-white/10" />
-        </span>
-      </span>
+      {/* SV2 (fase schermo-vivo): l'anteprima DAL VIVO dello schermo del bot
+          (sola lettura, NESSUN input) quando il browser è acceso; spento resta
+          il riquadro di oggi. Il clic qui attorno apre la scheda Computer */}
+      <ScreenThumb agentId={agentId} browserRunning={(screenStatus?.browser ?? browser) === 'running'} />
       <span className="flex items-center gap-2 px-3 py-2">
         <Monitor className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
         <span className="min-w-0 flex-1 truncate text-sm"><Trans>Computer</Trans></span>
@@ -658,14 +663,14 @@ function ComputerCard({ agentId }: { agentId: string }) {
           {i18n.t(view.label)}
         </span>
       </span>
-      {/* la riga sotto: la frase dell'attività del computer (mai il testo di
-          un comando) oppure «Browser aperto»; niente quando non c'è niente */}
+      {/* la riga sotto: la frase dell'attività del computer (mai il testo di un
+          comando) oppure «Browser aperto»; niente quando non c'è niente */}
       {view.line !== null && (
         <span className="block truncate px-3 pb-2 text-xs text-muted-foreground" data-testid="bot-computer-line">
           {i18n.t(view.line)}
         </span>
       )}
-    </button>
+    </div>
   )
 }
 

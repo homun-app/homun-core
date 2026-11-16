@@ -166,6 +166,12 @@ interface Store {
   computerTabByAgent: Record<string, ComputerTab>
   /** fase 19a (V3.4): ultimo stato dello schermo per bot (evento screen) */
   screenStatus: Record<string, ScreenStatus>
+  /**
+   * SV4 (fase schermo-vivo): il bot la cui finestra PiP è aperta (una sola per
+   * volta), null se nessuna. L'evento `pip` lo aggiorna; l'anteprima (SV2) si
+   * scollega quando è il suo bot.
+   */
+  pipAgentId: string | null
   /** CC2 (fase computer-card): lo stato del BOX, il computer del bot (evento box; null = non ancora letto) */
   boxRuntime: BoxRuntime | null
   /**
@@ -429,6 +435,7 @@ export const useStore = create<Store>((set, get) => ({
   computerPanel: { open: false, tab: 'activity', mode: 'view' },
   computerTabByAgent: {},
   screenStatus: {},
+  pipAgentId: null,
   boxRuntime: null,
   // CCK1/CCK3 (fase computer-card-correzioni): la modalità della card, letta
   // all'apertura — null finché la lettura non arriva (mai «Non in uso» per un attimo)
