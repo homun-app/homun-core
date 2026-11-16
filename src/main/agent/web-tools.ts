@@ -956,12 +956,57 @@ export function webSearchToolOutput(results: WebSearchResult[], sourceLabel?: st
   return sourceLabel ? `${list}\n\nSearch source: ${sourceLabel}` : list
 }
 
-/** Il testo della finestra richiesto dal modello (offset + indicazione per proseguire). */
+/**
+ * Il testo della finestra richiesto dal modello (offset + indicazione per
+ * proseguire). Fase chat-limiti (CL4): un offset OLTRE la fine dà un testo
+ * CHIARO («la pagina è finita: N caratteri in tutto, nessun segmento oltre
+ * l'offset X») — mai un segmento vuoto che il modello non riconosce come fine.
+ */
 export function webFetchWindowOutput(text: string, offset: number | undefined): string {
+  if (offset !== undefined && Number.isFinite(offset) && Math.floor(offset) >= text.length) {
+    return `[the page ended: ${text.length} characters in total, no segment past offset ${Math.floor(offset)}]`
+  }
   const w = sliceWithOffset(text, offset)
   const head = offset ? `[segment from offset ${Math.max(0, Math.floor(offset))} of ${w.totalLength} characters]\n` : ''
   const tail = w.nextOffset !== null ? `\n\n[long page: ${w.totalLength} characters — continue it with web_fetch({url, offset: ${w.nextOffset}})]` : ''
   return head + w.text + tail
+}
+
+// ---- fase chat-limiti (CL4): la cache delle letture del TURNO ----
+
+/** La riga che va DAVANTI all'output di una lettura già fatta in questo turno. */
+export const ALREADY_READ_PREFIX = '[already read in this turn: same content]'
+
+export interface TurnWebRead {
+  output: string
+  finalUrl: string
+}
+
+/**
+ * CL4 (puro): le letture web di QUESTO turno, per url finale e offset. La
+ * stessa lettura identica (stesso url e stesso offset) si risponde da qui,
+ * con la riga ALREADY_READ_PREFIX davanti e NESSUNA rete; un offset diverso
+ * manca e legge davvero. Vive solo nel turno (nel Running del loop).
+ */
+export class TurnWebReads {
+  private byKey = new Map<string, TurnWebRead>()
+
+  private static key(url: string, offset: number | undefined): string {
+    return `${url}\u0000${Math.floor(offset ?? 0)}`
+  }
+
+  /** La lettura di questo url+offset già fatta nel turno, o null. */
+  lookup(rawUrl: string, offset: number | undefined): TurnWebRead | null {
+    return this.byKey.get(TurnWebReads.key(rawUrl, offset)) ?? null
+  }
+
+  /** Registra la lettura sotto l'url RICHIESTO e sotto l'url FINALE (dopo i redirect). */
+  remember(rawUrl: string, offset: number | undefined, read: TurnWebRead): void {
+    this.byKey.set(TurnWebReads.key(rawUrl, offset), read)
+    if (read.finalUrl && read.finalUrl !== rawUrl) {
+      this.byKey.set(TurnWebReads.key(read.finalUrl, offset), read)
+    }
+  }
 }
 
 /** Clamp del numero di risultati: 5 di default, al massimo 10, almeno 1. */

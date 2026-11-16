@@ -75,6 +75,8 @@ import { activityOf, isToolLoop, stopReasonOfError } from './loop-guard'
 // fase chat-limiti (CL3): le foto di una pagina in chat (show_images)
 import { parseShowImagesInput, downloadShowImage, saveShowImage, imageUrlsInMarkdown } from './show-images'
 import type { ChatGalleryImage } from '../../shared/chat-images'
+// fase chat-limiti (CL4): le letture identiche del turno si rispondono dalla cache
+import { TurnWebReads, ALREADY_READ_PREFIX } from './web-tools'
 import { nextWithDeadline, DEFAULT_STREAM_DEADLINES, StreamDeadlineError } from './stream-deadline'
 // fase 9 (punto 0): regole dei send_to_user dentro il turno (dedup, tetto
 // avanzamenti, result col testo consegnato)
@@ -362,6 +364,12 @@ interface Running {
    * preso da un altro turno è rifiutato. Vive solo nel turno.
    */
   turnImages: Map<string, string>
+  /**
+   * Fase chat-limiti (CL4): le letture web di QUESTO turno per url finale e
+   * offset — la lettura identica si risponde da qui, senza rete. Vive solo
+   * nel turno.
+   */
+  webReads: TurnWebReads
 }
 const running = new Map<string, Running>()
 
@@ -990,7 +998,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
   if (!provider) throw new Error('provider not found')
 
   const controller = new AbortController()
-  const run: Running = { controller, approvals: new Map(), turnAllows: new Set(), turnGrantEpoch: 0, composioTrustedApps: new Set(), composioDenied: [], accessibilityFailures: 0, turnImages: new Map() }
+  const run: Running = { controller, approvals: new Map(), turnAllows: new Set(), turnGrantEpoch: 0, composioTrustedApps: new Set(), composioDenied: [], accessibilityFailures: 0, turnImages: new Map(), webReads: new TurnWebReads() }
   if (opts.taskId !== undefined) run.taskId = opts.taskId
   running.set(agentId, run)
 
@@ -2870,13 +2878,26 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           emit({ type: 'entries', agentId, entries: [webEntry] })
           let output = ''
           let meta: Record<string, unknown> = {}
-          try {
-            const r = await executeTool(agentId, call.name, input, { turnInitiator: opts.initiator })
-            output = r.output
-            meta = r.meta
-          } catch (e) {
-            output = `Error: ${e instanceof Error ? e.message : String(e)}`
-            meta = { error: true }
+          // fase chat-limiti (CL4): la lettura IDENTICA di questo turno
+          // (stesso url finale e stesso offset) si risponde dalla cache del
+          // turno con la riga davanti — NESSUNA rete; un offset diverso legge
+          const wfOffset = input.offset !== undefined && input.offset !== null && Number.isFinite(Number(input.offset)) ? Number(input.offset) : undefined
+          const cachedRead = call.name === 'web_fetch' ? run.webReads.lookup(String(input.url ?? ''), wfOffset) : null
+          if (cachedRead) {
+            output = `${ALREADY_READ_PREFIX}\n${cachedRead.output}`
+            meta = { webContent: true, finalUrl: cachedRead.finalUrl }
+          } else {
+            try {
+              const r = await executeTool(agentId, call.name, input, { turnInitiator: opts.initiator })
+              output = r.output
+              meta = r.meta
+            } catch (e) {
+              output = `Error: ${e instanceof Error ? e.message : String(e)}`
+              meta = { error: true }
+            }
+            if (call.name === 'web_fetch' && meta.webContent && typeof meta.finalUrl === 'string') {
+              run.webReads.remember(String(input.url ?? ''), wfOffset, { output, finalUrl: String(meta.finalUrl) })
+            }
           }
           if (meta.webContent) {
             // F8: i grant "per questo turno" dati PRIMA della lettura web non
