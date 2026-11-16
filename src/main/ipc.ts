@@ -361,7 +361,9 @@ export function registerIpc(client: DaemonClient, getWindows: () => BrowserWindo
   // (agent-done / agent-needs-input); qui resta solo la notifica nativa.
   // fase 16b (S1.2): openGroupId dice che il click apre la SQUADRA
   // (riepilogo del coordinatore), non la chat del bot
-  client.registerHost('host.notify', ([title, body, openGroupId]) => {
+  // AH2 (fase aiutanti): openAgentId dice che il click apre la CHAT del PADRE
+  // (notifica di un figlio fermo su una card; il pannello del figlio resta chiuso)
+  client.registerHost('host.notify', ([title, body, openGroupId, openAgentId]) => {
     const windows = getWindows()
     const n = new Notification({
       title: String(title ?? 'Homun'),
@@ -373,6 +375,9 @@ export function registerIpc(client: DaemonClient, getWindows: () => BrowserWindo
       w?.focus()
       if (typeof openGroupId === 'number') {
         w?.webContents.send('sandbot:event', { type: 'open-group', groupId: openGroupId })
+      }
+      if (typeof openAgentId === 'string' && openAgentId) {
+        w?.webContents.send('sandbot:event', { type: 'open-agent', agentId: openAgentId })
       }
     })
     n.show()

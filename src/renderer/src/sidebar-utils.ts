@@ -51,11 +51,18 @@ export interface SidebarBot {
   agent: Agent
   /** la sezione «progetto», se c'è */
   section: string | null
+  /**
+   * AH2 (fase aiutanti): un FIGLIO di questo bot ha una card aperta — la
+   * barra lo segna «ti aspetta» anche se il suo turno è finito.
+   */
+  childWaiting: boolean
 }
 
 /** Il modello completo: principale, squadre (ordinate), bot singoli. */
 export interface SidebarModel {
   main: Agent | null
+  /** AH2 (fase aiutanti): anche il principale può avere un figlio che aspetta */
+  mainWaiting: boolean
   teams: SidebarTeam[]
   bots: SidebarBot[]
 }
@@ -77,7 +84,9 @@ export function buildSidebarModel(
   agents: Agent[],
   groups: GroupInfo[],
   mainAgentId: string | null,
-  query = ''
+  query = '',
+  /** AH2 (fase aiutanti): bot con un FIGLIO fermo su una card («ti aspetta») */
+  waitingOnChildren: ReadonlySet<string> = new Set()
 ): SidebarModel {
   // i FIGLI (sottoagenti) non compaiono MAI nella barra
   const bots = agents.filter((a) => !a.parentId)
@@ -105,12 +114,14 @@ export function buildSidebarModel(
   teams.sort((a, b) => Number(b.waiting) - Number(a.waiting) || b.lastAt - a.lastAt)
 
   const free = bots.filter((a) => a.id !== main?.id && !inTeams.has(a.id))
-  const botsOut: SidebarBot[] = free.map((agent) => ({ agent, section: agent.section || null }))
+  const botsOut: SidebarBot[] = free.map((agent) => ({ agent, section: agent.section || null, childWaiting: waitingOnChildren.has(agent.id) }))
 
   const q = query.trim()
-  if (!q) return { main, teams, bots: botsOut }
+  const mainWaiting = main !== null && waitingOnChildren.has(main.id)
+  if (!q) return { main, mainWaiting, teams, bots: botsOut }
   return {
     main,
+    mainWaiting,
     teams: teams.filter(
       (t) =>
         matchesQuery(t.group.name, q) ||
@@ -147,7 +158,8 @@ const statusOf = (a: Agent): 'waiting' | 'busy' | 'idle' =>
 export function collapsedVoices(model: SidebarModel): CollapsedVoice[] {
   const out: CollapsedVoice[] = []
   if (model.main) {
-    out.push({ kind: 'main', key: model.main.id, name: model.main.name, status: statusOf(model.main), counter: model.main.unread })
+    // AH2: un figlio che aspetta segna «ti aspetta» anche il principale
+    out.push({ kind: 'main', key: model.main.id, name: model.main.name, status: model.mainWaiting || statusOf(model.main) === 'waiting' ? 'waiting' : statusOf(model.main), counter: model.main.unread })
   }
   for (const t of model.teams) {
     out.push({
@@ -159,7 +171,7 @@ export function collapsedVoices(model: SidebarModel): CollapsedVoice[] {
     })
   }
   for (const b of model.bots) {
-    out.push({ kind: 'bot', key: b.agent.id, name: b.agent.name, status: statusOf(b.agent), counter: b.agent.unread })
+    out.push({ kind: 'bot', key: b.agent.id, name: b.agent.name, status: b.childWaiting || statusOf(b.agent) === 'waiting' ? 'waiting' : statusOf(b.agent), counter: b.agent.unread })
   }
   return out
 }

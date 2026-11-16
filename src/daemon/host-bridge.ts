@@ -47,9 +47,11 @@ export function uiSafeStorage(deps: HostBridgeDeps): SafeStorageLike {
  * dalle regole di soppressione del daemon, agent-done/agent-needs-input).
  * Fase 16b (S1.2): notify accetta un openGroupId — il click sulla notifica
  * apre la SQUADRA (riepilogo del coordinatore), non la chat privata.
+ * AH2 (fase aiutanti): openAgentId — il click sulla notifica di un FIGLIO
+ * apre la chat del PADRE (dove la card del figlio si decide).
  */
 export function attachHostBridge(deps: HostBridgeDeps): {
-  notify(title: string, body: string, openGroupId?: number): void
+  notify(title: string, body: string, openGroupId?: number, openAgentId?: string): void
   refreshScale(): void
 } {
   setSafeStorage(uiSafeStorage(deps))
@@ -106,13 +108,15 @@ export function attachHostBridge(deps: HostBridgeDeps): {
     refreshScale,
     /**
      * Notifica nativa con la UI aperta (il click riporta alla finestra — e
-     * alla squadra, con openGroupId), osascript senza UI.
+     * alla squadra, con openGroupId; alla chat del padre, con openAgentId),
+     * osascript senza UI.
      */
-    notify(title: string, body: string, openGroupId?: number): void {
+    notify(title: string, body: string, openGroupId?: number, openAgentId?: string): void {
       if (deps.hasUi()) {
-        void deps.callUi('host.notify', [title, body, ...(openGroupId !== undefined ? [openGroupId] : [])]).catch(() =>
-          osascriptNotify(title, body)
-        )
+        const args: unknown[] = [title, body]
+        if (openGroupId !== undefined) args.push(openGroupId)
+        else if (openAgentId !== undefined) args.push(undefined, openAgentId)
+        void deps.callUi('host.notify', args).catch(() => osascriptNotify(title, body))
       } else {
         osascriptNotify(title, body)
       }

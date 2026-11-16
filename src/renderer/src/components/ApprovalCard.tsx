@@ -61,7 +61,7 @@ function askTitle(tool: string, meta: Record<string, unknown> | null | undefined
   return i18n.t(approvalAskTitle(tool, meta, name, lang))
 }
 
-export function ApprovalCard({ entry, readOnly = false }: { entry: TranscriptEntry; readOnly?: boolean }) {
+export function ApprovalCard({ entry, readOnly = false, ownerName }: { entry: TranscriptEntry; readOnly?: boolean; ownerName?: string }) {
   const { t } = useLingui()
   // fase 17c (C6): la schedule in linguaggio naturale nella lingua attiva
   const activeLang = i18n.locale === 'en' ? 'en' : 'it'
@@ -72,7 +72,9 @@ export function ApprovalCard({ entry, readOnly = false }: { entry: TranscriptEnt
   const approvalId = entry.meta?.approvalId as string | undefined
   const status = (entry.meta?.status as string | undefined) ?? 'pending'
   const tool = String(entry.meta?.tool)
-  const agentName = agents.find((a) => a.id === activeId)?.name ?? ''
+  // AH2 (fase aiutanti): la card del figlio nella chat del padre porta il
+  // TITOLO dell'aiutante, non il nome del bot attivo (il figlio non è in roster)
+  const agentName = ownerName ?? agents.find((a) => a.id === activeId)?.name ?? ''
   const input = entry.meta?.input as Record<string, unknown> | undefined
 
   // R3 (fase app — ritocchi): per gli strumenti Composio e MCP il motivo è
@@ -364,10 +366,10 @@ export function ApprovalCard({ entry, readOnly = false }: { entry: TranscriptEnt
         summary={appInfo ? (appInfo.kind === 'composio' && resolvedTitle ? resolvedTitle : appInfo.app) : useAppSummary ?? approvalSummary(tool, input, entry.meta, activeLang)}
         at={entry.createdAt}
       >
-        <CardShell tone="waiting">{body}</CardShell>
+        <CardShell tone="waiting" testid="card-approvazione">{body}</CardShell>
       </DecidedRow>
     )
   }
 
-  return <CardShell tone="waiting">{body}</CardShell>
+  return <CardShell tone="waiting" testid="card-approvazione">{body}</CardShell>
 }

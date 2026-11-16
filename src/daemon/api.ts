@@ -976,7 +976,14 @@ export function buildApiMethods(
         summary: r.summary, reportPath: r.report_path,
         createdAt: r.created_at, startedAt: r.started_at, finishedAt: r.finished_at, deadlineAt: r.deadline_at,
         // stato live dell'agente figlio (paused-for-approval = card in attesa)
-        agentStatus: store.getAgent(r.id)?.status ?? null
+        agentStatus: store.getAgent(r.id)?.status ?? null,
+        // AH2 (fase aiutanti): le approvazioni PENDING del figlio APERTO, lette
+        // dal SUO transcript — la chat del padre le mostra sotto la card
+        // «Aiutante» (la STESSA approvazione, nessuna copia nel DB)
+        pendingApprovals:
+          r.status === 'queued' || r.status === 'running'
+            ? store.getEntries(r.id).filter((e) => e.kind === 'approval' && e.meta?.status === 'pending')
+            : []
       }))
     },
     'subagents:stop': async ([id]) => {
@@ -2021,6 +2028,11 @@ export function buildApiMethods(
         const updated = store.getEntries(aid).find((e) => e.id === entry.id)
         if (updated) emit({ type: 'entries', agentId: aid, entries: [updated] })
       }
+      // AH2 (fase aiutanti): la decisione su una card del FIGLIO rinfresca la
+      // card «Aiutante» e la card del figlio nella chat del padre (la lista
+      // subagents la rilegge: pendingApprovals cambia)
+      const parentOf = store.getAgent(aid)?.parentId
+      if (parentOf) emit({ type: 'subagents', parentId: parentOf })
       loop.resolveApproval(aid, approvalId as string, decision as 'allow' | 'deny', m)
     },
     // debug/test: risolve l'approval pending più recente di un agente

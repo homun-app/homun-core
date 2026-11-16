@@ -3,12 +3,16 @@
 // figlio: paused-for-approval = "in attesa di conferma"), tempo trascorso e i
 // bottoni Apri (pannello del transcript del figlio) e Ferma. Come TaskCard, lo
 // stato arriva dal registro, non dal testo del modello.
+// AH2 (fase aiutanti): quando il figlio ha un'approvazione IN ATTESA, la card
+// del FIGLIO compare QUI SOTTO — è la STESSA approvazione (entry del figlio,
+// letta da subagents:list), il clic risolve sul figlio (entry.agentId, AH1).
 import { useStore } from '../store'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
 import type { TranscriptEntry, SendMessageMeta, SendMessagePayload, SubagentInfo } from '../../../shared/types'
 import { CardShell } from './DecidedRow'
+import { ApprovalCard } from './ApprovalCard'
 
 const STATUS_LABEL: Record<SubagentInfo['status'], MessageDescriptor> = {
   queued: msg`in coda`,
@@ -54,36 +58,49 @@ export function SubagentCard({ entry }: { entry: TranscriptEntry }) {
   const open = status === 'queued' || status === 'running'
 
   return (
-    <CardShell>
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-medium text-muted-foreground"><Trans>Aiutante</Trans></span>
-        <span className={`text-[11px] font-medium ${STATUS_CLS[status]}`}>
-          {status === 'done' ? '✓' : status === 'failed' ? '⚠' : status === 'stopped' ? '⛔' : status === 'stopped-loop' ? '⏹' : status === 'expired' ? '⏱' : '⏳'}
-          {' '}{waiting ? t`in attesa di conferma` : i18n.t(STATUS_LABEL[status])}
-        </span>
-      </div>
-      <p className="mt-1 text-sm text-foreground">{message.title}</p>
-      {sub && (
-        <p className="mt-0.5 text-[11px] text-muted-foreground">
-          <Trans>{i18n.t(fmtAgo(sub.startedAt ?? sub.createdAt, now))} trascorsi{sub.status === 'done' && sub.summary ? ` — ${sub.summary.slice(0, 120)}` : ''}</Trans>
-        </p>
-      )}
-      <div className="mt-2 flex gap-2">
-        <button
-          className="rounded-[10px] bg-card px-3.5 py-1.5 text-sm transition hover:bg-muted"
-          onClick={() => openSubagent(message.subagentId)}
-        >
-          <Trans>Apri</Trans>
-        </button>
-        {open && (
-          <button
-            className="rounded-[10px] px-3 py-1.5 text-sm text-muted-foreground transition hover:text-foreground"
-            onClick={() => stopSubagent(message.subagentId)}
-          >
-            <Trans>Ferma</Trans>
-          </button>
+    <>
+      <CardShell testid="card-aiutante">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs font-medium text-muted-foreground"><Trans>Aiutante</Trans></span>
+          <span className={`text-[11px] font-medium ${STATUS_CLS[status]}`} data-testid="card-aiutante-stato">
+            {status === 'done' ? '✓' : status === 'failed' ? '⚠' : status === 'stopped' ? '⛔' : status === 'stopped-loop' ? '⏹' : status === 'expired' ? '⏱' : '⏳'}
+            {' '}{waiting ? t`in attesa di conferma` : i18n.t(STATUS_LABEL[status])}
+          </span>
+        </div>
+        <p className="mt-1 text-sm text-foreground">{message.title}</p>
+        {sub && (
+          <p className="mt-0.5 text-[11px] text-muted-foreground">
+            <Trans>{i18n.t(fmtAgo(sub.startedAt ?? sub.createdAt, now))} trascorsi{sub.status === 'done' && sub.summary ? ` — ${sub.summary.slice(0, 120)}` : ''}</Trans>
+          </p>
         )}
-      </div>
-    </CardShell>
+        <div className="mt-2 flex gap-2">
+          <button
+            className="rounded-[10px] bg-card px-3.5 py-1.5 text-sm transition hover:bg-muted"
+            onClick={() => openSubagent(message.subagentId)}
+          >
+            <Trans>Apri</Trans>
+          </button>
+          {open && (
+            <button
+              className="rounded-[10px] px-3 py-1.5 text-sm text-muted-foreground transition hover:text-foreground"
+              onClick={() => stopSubagent(message.subagentId)}
+            >
+              <Trans>Ferma</Trans>
+            </button>
+          )}
+        </div>
+      </CardShell>
+      {/* AH2: le approvazioni del figlio, la STESSA card del suo transcript —
+          decisa qui si risolve sul FIGLIO (entry.agentId) e, decisa altrove,
+          sparisce da qui (il daemon emette subagents alla risoluzione) */}
+      {(sub?.pendingApprovals ?? []).map((ap) => (
+        <div key={ap.id} data-testid="aiutante-card-figlio" className="mt-1">
+          <p className="mb-1 text-[11px] font-medium text-muted-foreground">
+            <Trans>L’aiutante «{message.title}» chiede:</Trans>
+          </p>
+          <ApprovalCard entry={ap} ownerName={message.title} />
+        </div>
+      ))}
+    </>
   )
 }

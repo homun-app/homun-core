@@ -46,6 +46,16 @@ export function decideNotification(i: NotificationInput): NotificationDecision {
 
 export type AgentNotifyEvent = Extract<SandbotEvent, { type: 'agent-notify' }>
 
+/**
+ * AH2 (fase aiutanti): la notifica di un FIGLIO (un sottoagente fermo su una
+ * card) apre la chat del PADRE, mai il pannello del figlio — il click porta
+ * l'utente dove la card si può decidere. Un bot normale non porta da nessuna
+ * parte (come oggi: la finestra va a fuoco e basta).
+ */
+export function notifyOpenAgentOf(agent: { parentId?: string | null } | null | undefined): string | undefined {
+  return agent?.parentId ?? undefined
+}
+
 /** Titolo/corpo della notifica per kind (agent-done / agent-needs-input). Fase 17c: titolo nel catalogo UI, corpo = anteprima vera. */
 export function notifyTexts(agentName: string, e: AgentNotifyEvent, lang: 'it' | 'en' = uiLanguage()): { title: string; body: string } {
   if (e.kind === 'needs-input') {

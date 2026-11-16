@@ -3857,6 +3857,11 @@ msgstr "Kernel"
 msgid "rpc.keychainUnavailable"
 msgstr "Keychain unavailable: cannot store the key"
 
+#. placeholder {0}: message.title
+#: src/renderer/src/components/SubagentCard.tsx
+msgid "L’aiutante «{0}» chiede:"
+msgstr "The helper “{0}” is asking:"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "skill.err.catalogPreviewMissing"

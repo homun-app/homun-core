@@ -121,7 +121,7 @@ function TeamCluster({ team, size = 34, narrow = false }: { team: SidebarTeam; s
 }
 
 /** La riga del bot PRINCIPALE: mascotte 40 px, nome in grassetto, stato. */
-function MainRow({ agent }: { agent: Agent }) {
+function MainRow({ agent, childWaiting }: { agent: Agent; childWaiting?: boolean }) {
   const { i18n } = useLingui()
   const info = useBotInfo(agent.id)
   const select = useStore((s) => s.select)
@@ -137,7 +137,7 @@ function MainRow({ agent }: { agent: Agent }) {
         agent.id === activeId && openGroupId === null ? 'bg-muted' : 'hover:bg-muted/60'
       }`}
     >
-      <Bot family={info.avatar.family} color={info.avatar.color} state={info.state} size={40} track={false} dimmed={info.dimmed} label={agent.name} />
+      <Bot family={info.avatar.family} color={info.avatar.color} state={childWaiting && info.state !== 'waiting' ? 'waiting' : info.state} size={40} track={false} dimmed={info.dimmed} label={agent.name} />
       <span className="min-w-0 flex-1">
         <span className="block truncate text-[15px] font-semibold leading-tight">{agent.name}</span>
         <span className="block truncate text-[13px] text-muted-foreground">
@@ -265,7 +265,7 @@ function BotRow({ bot }: { bot: SidebarBot }) {
         bot.agent.id === activeId && openGroupId === null ? 'bg-muted' : 'hover:bg-muted/60'
       }`}
     >
-      <Bot family={info.avatar.family} color={info.avatar.color} state={info.state} size={36} track={false} dimmed={info.dimmed} label={bot.agent.name} />
+      <Bot family={info.avatar.family} color={info.avatar.color} state={bot.childWaiting && info.state !== 'waiting' ? 'waiting' : info.state} size={36} track={false} dimmed={info.dimmed} label={bot.agent.name} />
       <span className="min-w-0 flex-1">
         <span className="block truncate text-[15px] leading-tight">{bot.agent.name}</span>
         <span className="block truncate text-[13px] text-muted-foreground">
@@ -508,6 +508,10 @@ export function Sidebar({ layout }: { layout: LayoutResult }) {
   const agents = useStore((s) => s.agents)
   const groups = useStore((s) => s.groups)
   const mainAgentId = useStore((s) => s.mainAgentId)
+  // AH2 (fase aiutanti): il bot con un FIGLIO fermo su una card è «in attesa
+  // di te» — i subagents si conoscono per il bot APERTO (chi lo guarda)
+  const activeId = useStore((s) => s.activeId)
+  const subagents = useStore((s) => s.subagents)
   const openLibraryId = useStore((s) => s.openLibraryId)
   const openLibrary = useStore((s) => s.openLibrary)
   const activityOpen = useStore((s) => s.activityOpen)
@@ -570,7 +574,11 @@ export function Sidebar({ layout }: { layout: LayoutResult }) {
     window.addEventListener('mouseup', onUp)
   }
 
-  const model = buildSidebarModel(agents, groups, mainAgentId, query)
+  // AH2: l'insieme dei bot con un figlio che aspetta l'utente (pendingApprovals)
+  const waitingOnChildren = new Set<string>(
+    activeId && subagents.some((s) => (s.pendingApprovals?.length ?? 0) > 0) ? [activeId] : []
+  )
+  const model = buildSidebarModel(agents, groups, mainAgentId, query, waitingOnChildren)
   const noSection = model.bots.filter((b) => !b.section)
   const sections = [...new Set(model.bots.map((b) => b.section).filter((s): s is string => !!s))]
 
@@ -648,7 +656,7 @@ export function Sidebar({ layout }: { layout: LayoutResult }) {
 
           {/* pt-1 (Q3): il principale parte a 64 px come il primo messaggio */}
           <nav className="flex-1 space-y-0.5 overflow-y-auto scroll-thin px-2 pb-2 pt-1">
-            {model.main && <MainRow agent={model.main} />}
+            {model.main && <MainRow agent={model.main} childWaiting={model.mainWaiting} />}
             {model.teams.length > 0 && <Title><Trans>Squadre</Trans></Title>}
             {model.teams.map((team) => (
               <TeamRows key={team.group.id} team={team} />

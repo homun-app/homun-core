@@ -47,7 +47,7 @@ import { createPresence, mainAgentOf } from './presence'
 import { localModelFacts } from './local-model'
 import { handleWebhook } from './webhooks'
 import { deliverDueHeld } from './outbox'
-import { decideNotification, notifyTexts } from './notifications'
+import { decideNotification, notifyTexts, notifyOpenAgentOf } from './notifications'
 import { enqueueUserMessage } from './enqueue'
 // fase 17c (C2): notice col testo del catalogo UI
 import { uiLanguage, formatUi, ui } from '../main/ui-language'
@@ -486,8 +486,10 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
     if (decision.deliver) {
       lastNotified.set(e.agentId, Date.now())
       const { title, body } = notifyTexts(agent.name, e)
-      // fase 16b (S1.2): il click porta alla SQUADRA quando è il riepilogo
-      bridge?.notify(title, body, e.openGroupId)
+      // fase 16b (S1.2): il click porta alla SQUADRA quando è il riepilogo.
+      // AH2 (fase aiutanti): la notifica di un FIGLIO apre la chat del PADRE
+      // (dove la card del figlio si può decidere), non il pannello del figlio
+      bridge?.notify(title, body, e.openGroupId, notifyOpenAgentOf(agent))
     }
   }
   broadcast = emit

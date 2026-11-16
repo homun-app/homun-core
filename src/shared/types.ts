@@ -1716,6 +1716,12 @@ export interface SubagentInfo {
   deadlineAt: number
   /** stato live dell'agente figlio (paused-for-approval = "in attesa di conferma") */
   agentStatus: AgentStatus | null
+  /**
+   * AH2 (fase aiutanti): le approvazioni PENDING del figlio APERTO, lette dal
+   * SUO transcript (la STESSA approvazione, nessuna copia nel DB) — la chat
+   * del padre le mostra sotto la card «Aiutante». Vuoto per i figli terminali.
+   */
+  pendingApprovals: TranscriptEntry[]
 }
 
 // ---- gruppi (fase 10, T7) ----
