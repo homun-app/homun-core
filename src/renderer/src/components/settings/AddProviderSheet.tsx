@@ -13,7 +13,7 @@ import type { MessageDescriptor } from '@lingui/core'
 import { ChevronLeft, Search } from 'lucide-react'
 import { api } from '../../store'
 import type { ProviderKind, ProviderPublic } from '../../../../shared/types'
-import { providerLogoUrl } from '../../lib/provider-logos'
+import { providerLogoUrl, providerLogoSvg } from '../../lib/provider-logos'
 import { CONNECTABLE_KINDS } from '../../lib/model-select'
 // i nomi dei tipi e la logica di prova/salvataggio: hook condiviso (G4), usato
 // anche dalla guida del primo avvio
@@ -27,10 +27,24 @@ const GROUP_LABELS: Record<'mac' | 'key' | 'server', MessageDescriptor> = {
   server: msg`Un altro server`
 }
 
-/** La piastrella del tipo: il logo vero se c'è, l'iniziale altrimenti (I2.4). */
+/** La piastrella del tipo: il logo vero se c'è, l'iniziale altrimenti (I2.4).
+ *  U5 (fase prima-release): i loghi MONOCROMI (Anthropic, OpenAI — Simple
+ *  Icons, CC0) si rendono INLINE col colore del testo, SENZA piastrella:
+ *  dentro un <img> un SVG non eredita currentColor. Un solo componente per
+ *  tutti i loghi: guida, Impostazioni › Modelli, foglio, scelta del modello. */
 export function ProviderMark({ kind, name, size = 'md' }: { kind: ProviderKind | string; name: string; size?: 'sm' | 'md' }) {
   const url = providerLogoUrl(kind as ProviderKind)
   const dim = size === 'md' ? 'size-11 text-base' : 'size-7 text-xs'
+  const mono = providerLogoSvg(kind as ProviderKind)
+  if (mono) {
+    return (
+      <span
+        className={`${dim} grid shrink-0 place-items-center text-foreground [&>svg]:size-3/4`}
+        title={name}
+        dangerouslySetInnerHTML={{ __html: mono }}
+      />
+    )
+  }
   if (url) {
     return (
       <span className={`grid ${dim} shrink-0 place-items-center overflow-hidden rounded-[12px] bg-card dark:bg-white`} title={name}>

@@ -38,6 +38,14 @@ const KINDS = [
   { kind: 'groq', slugs: ['groq', 'groqcloud'] }
 ]
 
+/**
+ * U5 (fase prima-release): i loghi che lo script NON deve toccare, curati a
+ * mano nel repo — anthropic.svg e openai.svg sono i marchi VERI di Simple
+ * Icons 15.0.0 (CC0, fill="currentColor", senza piastrella): il CDN darebbe
+ * la stellina di Claude e il ricalco blu di prima.
+ */
+export const LOGHI_ESCLUSI = new Set(['anthropic', 'openai'])
+
 const args = process.argv.slice(2)
 const dryRun = args.includes('--dry-run')
 const outDirIdx = args.indexOf('--out')
@@ -80,11 +88,17 @@ async function downloadFirst(slugs) {
   return null
 }
 
+// il main gira SOLO da riga di comando (mai quando il test importa il modulo)
+if (import.meta.url === new URL(`file://${process.argv[1]}`).href) {
 try {
   if (!dryRun) mkdirSync(outDir, { recursive: true })
   let ok = 0
   const missing = []
   for (const { kind, slugs } of KINDS) {
+    if (LOGHI_ESCLUSI.has(kind)) {
+      log(`${kind}: ESCLUSO (marchio curato a mano, Simple Icons CC0)`)
+      continue
+    }
     const logo = await downloadFirst(slugs)
     const file = `${kind}.${logo?.ext ?? 'svg'}`
     if (!logo) {
@@ -114,3 +128,5 @@ try {
   console.error(`[loghi-provider] ${e.message ?? e}`)
   process.exit(1)
 }
+}
+
