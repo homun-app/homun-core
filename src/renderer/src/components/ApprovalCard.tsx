@@ -270,13 +270,13 @@ export function ApprovalCard({ entry, readOnly = false }: { entry: TranscriptEnt
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <button
             className="rounded-[10px] bg-foreground px-3.5 py-1.5 text-sm font-semibold text-background transition hover:opacity-90"
-            onClick={() => resolve(approvalId, 'allow', 'once')}
+            onClick={() => resolve(entry.agentId, approvalId, 'allow', 'once')}
           >
             <Trans>Consenti</Trans>
           </button>
           <button
             className="rounded-[10px] bg-card px-3.5 py-1.5 text-sm transition hover:bg-muted"
-            onClick={() => resolve(approvalId, 'deny', 'once')}
+            onClick={() => resolve(entry.agentId, approvalId, 'deny', 'once')}
           >
             <Trans>Rifiuta</Trans>
           </button>
@@ -288,14 +288,14 @@ export function ApprovalCard({ entry, readOnly = false }: { entry: TranscriptEnt
               <DropdownMenuItem
                 disabled={noTurn}
                 title={noTurn ? t`Questa azione chiede sempre l'approvazione` : t`Vale per lo stesso tool fino alla fine di questo turno`}
-                onClick={() => resolve(approvalId, 'allow', 'turn')}
+                onClick={() => resolve(entry.agentId, approvalId, 'allow', 'turn')}
               >
                 <Trans>Per questo turno</Trans>
               </DropdownMenuItem>
               {useApp?.kind === 'app' && useApp.app && !useAppSend && (
                 <DropdownMenuItem
                   title={t`Le azioni su ${useApp.app} non chiederanno per 10 minuti`}
-                  onClick={() => resolve(approvalId, 'allow', 'minutes10')}
+                  onClick={() => resolve(entry.agentId, approvalId, 'allow', 'minutes10')}
                 >
                   <Trans>Consenti per 10 minuti a {useApp.app}</Trans>
                 </DropdownMenuItem>
@@ -303,7 +303,7 @@ export function ApprovalCard({ entry, readOnly = false }: { entry: TranscriptEnt
               <DropdownMenuItem
                 disabled={noAlways}
                 title={noAlways ? (useAppSend ? t`Questa azione chiede sempre l'approvazione` : entry.meta?.composioDestructive === true ? t`Questa azione chiede sempre l'approvazione` : t`Le modifiche di automazione chiedono ogni volta`) : undefined}
-                onClick={() => resolve(approvalId, 'allow', 'always')}
+                onClick={() => resolve(entry.agentId, approvalId, 'allow', 'always')}
               >
                 {useApp?.kind === 'app' && useApp.app && !useAppSend ? (
                   <Trans>Consenti sempre a {useApp.app}</Trans>
@@ -316,7 +316,7 @@ export function ApprovalCard({ entry, readOnly = false }: { entry: TranscriptEnt
                   title={t`Le letture di questo server non chiederanno più (solo i tool dichiarati in sola lettura)`}
                   onClick={() => {
                     void api.grantServerReads(mcpServerRead.slug!).catch(() => undefined)
-                    resolve(approvalId, 'allow', 'once')
+                    resolve(entry.agentId, approvalId, 'allow', 'once')
                   }}
                 >
                   <Trans>Consenti sempre le letture di {mcpServerRead.name ?? mcpServerRead.slug}</Trans>

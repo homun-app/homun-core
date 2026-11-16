@@ -268,8 +268,13 @@ interface Store {
   draftSend(entryId: number, body?: string): void
   draftDiscard(entryId: number): void
   draftUpdate(entryId: number, body: string): void
-  /** fase 8: mode 'once' | 'always' | 'turn' (fino a fine turno); fase use-app: anche 'minutes10' */
-  resolveApproval(approvalId: string, decision: 'allow' | 'deny', mode: 'once' | 'always' | 'turn' | 'minutes10'): void
+  /**
+   * fase 8: mode 'once' | 'always' | 'turn' (fino a fine turno); fase use-app: anche 'minutes10'.
+   * AH1 (fase aiutanti): la RPC va all'agente a cui appartiene la CARD
+   * (entry.agentId — il figlio quando la card sta nel suo pannello o nella
+   * chat del padre), MAI all'agente attivo.
+   */
+  resolveApproval(agentId: string, approvalId: string, decision: 'allow' | 'deny', mode: 'once' | 'always' | 'turn' | 'minutes10'): void
   /** fase 8: decisione sulla regola di auto-review proposta dal bot */
   autoreviewRuleDecision(entryId: number, action: 'add' | 'dismiss'): void
   /** fase 8: "Crea regola da questa azione" — apre l'editor precompilato */
@@ -823,18 +828,18 @@ export const useStore = create<Store>((set, get) => ({
     void api.draftUpdate(id, entryId, body)
   },
 
-  resolveApproval(approvalId, decision, mode) {
-    const id = get().activeId
-    if (!id) return
+  resolveApproval(agentId, approvalId, decision, mode) {
     const s = get()
-    set({
-      entries: s.entries.map((en) =>
-        en.meta?.approvalId === approvalId
-          ? { ...en, meta: { ...en.meta!, status: decision === 'allow' ? 'allowed' : 'denied', resolutionMode: mode } }
-          : en
-      )
-    })
-    void api.resolveApproval(id, approvalId, decision, mode)
+    // AH1 (fase aiutanti): l'ottimistico tocca la lista dove sta la card —
+    // entries per l'agente aperto in chat, subEntries per il figlio aperto
+    // nel pannello (il clic nel pannello del figlio va al FIGLIO)
+    const decided = (en: TranscriptEntry): TranscriptEntry =>
+      en.meta?.approvalId === approvalId
+        ? { ...en, meta: { ...en.meta!, status: decision === 'allow' ? 'allowed' : 'denied', resolutionMode: mode } }
+        : en
+    if (agentId === s.activeId) set({ entries: s.entries.map(decided) })
+    if (agentId === s.openSubagentId) set({ subEntries: s.subEntries.map(decided) })
+    void api.resolveApproval(agentId, approvalId, decision, mode)
   },
 
   // fase 8: la regola proposta si aggiunge SOLO al click (la RPC scrive nei

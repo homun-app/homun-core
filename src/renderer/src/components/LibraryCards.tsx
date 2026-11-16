@@ -139,19 +139,19 @@ export function FillCard({ entry }: { entry: TranscriptEntry }) {
         <div className="mt-3 flex flex-wrap gap-2">
           <button
             className="rounded-[10px] bg-foreground px-3.5 py-1.5 text-sm font-semibold text-background transition hover:opacity-90"
-            onClick={() => resolveApproval(m.approvalId!, 'allow', 'turn')}
+            onClick={() => resolveApproval(entry.agentId, m.approvalId!, 'allow', 'turn')}
           >
             <Trans>Consenti</Trans>
           </button>
           <button
             className="rounded-[10px] bg-card px-3.5 py-1.5 text-sm transition hover:bg-muted"
-            onClick={() => resolveApproval(m.approvalId!, 'allow', 'always')}
+            onClick={() => resolveApproval(entry.agentId, m.approvalId!, 'allow', 'always')}
           >
             <Trans>Sempre per questo sito</Trans>
           </button>
           <button
             className="rounded-[10px] px-3 py-1.5 text-sm text-muted-foreground transition hover:bg-card hover:text-foreground"
-            onClick={() => resolveApproval(m.approvalId!, 'deny', 'once')}
+            onClick={() => resolveApproval(entry.agentId, m.approvalId!, 'deny', 'once')}
           >
             <Trans>Rifiuta</Trans>
           </button>
@@ -257,7 +257,7 @@ export function SecureInputCard({ entry }: { entry: TranscriptEntry }) {
             </button>
             <button
               className="rounded-[10px] px-3 py-1.5 text-sm text-muted-foreground transition hover:bg-card hover:text-foreground"
-              onClick={() => useStore.getState().resolveApproval(m.approvalId!, 'deny', 'once')}
+              onClick={() => useStore.getState().resolveApproval(entry.agentId, m.approvalId!, 'deny', 'once')}
             >
               <Trans>Annulla</Trans>
             </button>
@@ -304,13 +304,13 @@ export function ContactCard({ entry }: { entry: TranscriptEntry }) {
         <div className="mt-3 flex gap-2">
           <button
             className="rounded-[10px] bg-foreground px-3.5 py-1.5 text-sm font-semibold text-background transition hover:opacity-90"
-            onClick={() => resolveApproval(m.approvalId!, 'allow', 'once')}
+            onClick={() => resolveApproval(entry.agentId, m.approvalId!, 'allow', 'once')}
           >
             <Trans>Salva</Trans>
           </button>
           <button
             className="rounded-[10px] px-3 py-1.5 text-sm text-muted-foreground transition hover:bg-card hover:text-foreground"
-            onClick={() => resolveApproval(m.approvalId!, 'deny', 'once')}
+            onClick={() => resolveApproval(entry.agentId, m.approvalId!, 'deny', 'once')}
           >
             <Trans>Non salvare</Trans>
           </button>
