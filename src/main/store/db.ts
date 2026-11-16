@@ -74,7 +74,8 @@ function open(): DatabaseSync {
       tool TEXT NOT NULL,
       target TEXT NOT NULL,
       created_at INTEGER,
-      scope TEXT
+      scope TEXT,
+      agent_id TEXT
     );
     CREATE TABLE IF NOT EXISTS approvals (
       id TEXT PRIMARY KEY,
@@ -213,6 +214,12 @@ function open(): DatabaseSync {
   // app:<Nome> e url:<host>: i vecchi target davano il permesso di digitare
   // in qualunque app, Homun compreso)
   if (!grantCols.some((c) => c.name === 'expires_at')) db.exec('ALTER TABLE grants ADD COLUMN expires_at INTEGER')
+  // U7 (fase prima-release): le concessioni valgono per IL BOT — agent_id
+  // NULL = «tutti i bot» (le righe di oggi); i doppioni si fondono e l'indice
+  // UNICO li rende impossibili in futuro
+  if (!grantCols.some((c) => c.name === 'agent_id')) db.exec('ALTER TABLE grants ADD COLUMN agent_id TEXT')
+  dedupeGrants()
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_grants_unique ON grants(tool, target, coalesce(scope,''), coalesce(agent_id,''))")
   migrateUseAppActionGrants()
   // fase use-app · ritocchi (R5): all'apertura i grant già scaduti si cancellano
   purgeExpiredGrants()
@@ -530,6 +537,8 @@ export interface Grant {
   scope?: 'readOnly' | null
   /** fase use-app (U3): scadenza dei permessi a tempo («per 10 minuti»); null = per sempre */
   expiresAt?: number | null
+  /** U7 (fase prima-release): il bot per cui vale la concessione; null = tutti i bot (le righe di oggi) */
+  agentId?: string | null
 }
 
 /**
@@ -556,11 +565,48 @@ export function purgeExpiredGrants(): void {
 
 export function listGrants(): Grant[] {
   purgeExpiredGrants()
-  return db().prepare('SELECT id, tool, target, created_at AS createdAt, scope, expires_at AS expiresAt FROM grants').all() as unknown as Grant[]
+  return db().prepare('SELECT id, tool, target, created_at AS createdAt, scope, expires_at AS expiresAt, agent_id AS agentId FROM grants').all() as unknown as Grant[]
 }
 
-export function addGrant(tool: string, target: string, scope?: 'readOnly', expiresAt?: number): void {
-  db().prepare('INSERT INTO grants(tool, target, created_at, scope, expires_at) VALUES(?,?,?,?,?)').run(tool, target, Date.now(), scope ?? null, expiresAt ?? null)
+/**
+ * U7 (fase prima-release): i doppioni di (tool, target, scope, agent_id) si
+ * fondono — resta la più VECCHIA, con la scadenza più LONTANO tra le sue
+ * gemelle. Il database dell'utente aveva 15 righe per 8 concessioni.
+ */
+export function dedupeGrants(): { removed: number } {
+  const rows = db().prepare('SELECT id, tool, target, created_at AS createdAt, scope, expires_at AS expiresAt, agent_id AS agentId FROM grants ORDER BY created_at, id').all() as unknown as Array<Grant & { id: number }>
+  const keep = new Map<string, Grant & { id: number }>()
+  let removed = 0
+  for (const r of rows) {
+    const key = `${r.tool}\u0000${r.target}\u0000${r.scope ?? ''}\u0000${r.agentId ?? ''}`
+    const cur = keep.get(key)
+    if (!cur) {
+      keep.set(key, r)
+      continue
+    }
+    // resta cur (la più vecchia: l'ordine la mette prima); la scadenza più lontana vince
+    if (r.expiresAt != null && (cur.expiresAt == null || r.expiresAt > cur.expiresAt)) {
+      db().prepare('UPDATE grants SET expires_at = ? WHERE id = ?').run(r.expiresAt, cur.id)
+      cur.expiresAt = r.expiresAt
+    }
+    db().prepare('DELETE FROM grants WHERE id = ?').run(r.id)
+    removed++
+  }
+  return { removed }
+}
+
+/**
+ * U7: addGrant è IDEMPOTENTE (INSERT … ON CONFLICT DO UPDATE sull'indice
+ * unico): ripetere «Consenti sempre» non crea doppioni; per le concessioni
+ * A TEMPO la scadenza si ALLUNGA (vince la più lontana), per le altre non
+ * cambia niente (created_at resta quello della prima).
+ */
+export function addGrant(tool: string, target: string, scope?: 'readOnly', expiresAt?: number, agentId?: string | null): void {
+  db().prepare(`INSERT INTO grants(tool, target, created_at, scope, expires_at, agent_id) VALUES(?,?,?,?,?,?)
+    ON CONFLICT(tool, target, coalesce(scope,''), coalesce(agent_id,'')) DO UPDATE SET
+      expires_at = CASE WHEN excluded.expires_at IS NOT NULL AND (grants.expires_at IS NULL OR excluded.expires_at > grants.expires_at)
+                        THEN excluded.expires_at ELSE grants.expires_at END`)
+    .run(tool, target, Date.now(), scope ?? null, expiresAt ?? null, agentId ?? null)
 }
 
 export function removeGrant(id: number): void {

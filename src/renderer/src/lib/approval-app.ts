@@ -324,3 +324,42 @@ export function grantDisplayName(
   }
   return toolDisplayName(g.tool, lang)
 }
+
+
+/** Un consenso salvato così come arriva da grants:list (U7: con agentId). */
+export interface GrantLike {
+  id: number
+  tool: string
+  target: string
+  createdAt: number
+  scope?: 'readOnly' | null
+  expiresAt?: number | null
+  agentId?: string | null
+}
+
+/**
+ * U7 (fase prima-release): i consensi raggruppati per BOT — un gruppo per
+ * agentId e in FONDO il gruppo «Tutti i bot» (agentId NULL, le righe di
+ * oggi). PURA, con i test. Niente doppioni: l'indice unico del DB li rende
+ * impossibili.
+ */
+export function groupGrantsByBot(grants: GrantLike[]): Array<{ agentId: string | null; grants: GrantLike[] }> {
+  const groups = new Map<string, { agentId: string | null; grants: GrantLike[] }>()
+  for (const g of grants) {
+    const key = g.agentId ?? '\u0000tutti'
+    const cur = groups.get(key) ?? { agentId: g.agentId ?? null, grants: [] }
+    cur.grants.push(g)
+    groups.set(key, cur)
+  }
+  const out = [...groups.values()]
+  // il gruppo «Tutti i bot» (NULL) sta per ULTIMO
+  out.sort((a, b) => Number(a.agentId === null) - Number(b.agentId === null))
+  return out
+}
+
+/** U7: il tipo in chiaro del consenso («comando», «app», «strumento»). PURA. */
+export function grantKindOf(tool: string): 'comando' | 'app' | 'strumento' {
+  if (tool === 'run-command') return 'comando'
+  if (tool === 'use-app') return 'app'
+  return 'strumento'
+}

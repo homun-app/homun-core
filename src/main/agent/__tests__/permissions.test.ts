@@ -18,8 +18,9 @@ const DEFAULT_RULES: PermissionRule[] = [
 const state = {
   sandboxMode: 'host' as 'host' | 'docker',
   rules: DEFAULT_RULES.map((r) => ({ ...r })),
-  grants: [] as Array<{ tool: string; target: string; expiresAt?: number | null }>,
-  routines: [] as Array<{ id: number; title: string; prompt: string; schedule: string; enabled: number }>
+  grants: [] as Array<{ tool: string; target: string; expiresAt?: number | null; agentId?: string | null }>,
+  routines: [] as Array<{ id: number; title: string; prompt: string; schedule: string; enabled: number }>,
+  agents: [] as Array<{ id: string; parentId: string | null }>
 }
 
 const TMP = mkdtempSync(join(tmpdir(), 'sandbot-permissions-test-'))
@@ -28,9 +29,10 @@ const OUTSIDE = join(TMP, 'outside')
 
 vi.mock('../../store/db', () => ({
   getPermissions: () => ({ default: 'needs_approval' as const, rules: state.rules }),
-  listGrants: () => state.grants.map((g, i) => ({ id: i + 1, tool: g.tool, target: g.target, createdAt: 0, expiresAt: g.expiresAt ?? null })),
-  addGrant: (tool: string, target: string, scope?: 'readOnly', expiresAt?: number) => { state.grants.push({ tool, target, expiresAt }) },
-  getRoutine: (id: number) => state.routines.find((r) => r.id === id) ?? null
+  listGrants: () => state.grants.map((g, i) => ({ id: i + 1, tool: g.tool, target: g.target, createdAt: 0, expiresAt: g.expiresAt ?? null, agentId: g.agentId ?? null })),
+  addGrant: (tool: string, target: string, scope?: 'readOnly', expiresAt?: number, agentId?: string | null) => { state.grants.push({ tool, target, expiresAt, agentId: agentId ?? null }) },
+  getRoutine: (id: number) => state.routines.find((r) => r.id === id) ?? null,
+  getAgent: (id: string) => state.agents.find((a) => a.id === id) ?? null
 }))
 
 vi.mock('../../sandbox', () => ({
@@ -52,6 +54,7 @@ beforeAll(() => {
 afterAll(() => rmSync(TMP, { recursive: true, force: true }))
 beforeEach(() => {
   state.grants = []
+  state.agents = []
   state.sandboxMode = 'host'
   state.rules = DEFAULT_RULES.map((r) => ({ ...r }))
   state.routines = []
@@ -97,7 +100,7 @@ describe('C1: grantStanding non salva mai chiavi never-auto', () => {
 
   it('una chiave pulita resta concedibile (controllo positivo)', async () => {
     await grantStanding('run-command', { command: 'git status' })
-    expect(state.grants).toEqual([{ tool: 'run-command', target: 'git status' }])
+    expect(state.grants).toEqual([{ tool: 'run-command', target: 'git status', agentId: null }])
   })
 })
 
@@ -332,7 +335,7 @@ describe('fase use-app (U3): la chiave è l\'app, non l\'azione', () => {
     expect(await check('use-app', { action: 'open_url', url: 'https://sora.chatgpt.com', app: 'safari' })).toEqual({ kind: 'allow', via: 'grant' })
     // la CHIAVE SALVATA resta come l'ha scritta il modello (serve per mostrarla)
     await grantStanding('use-app', { action: 'type', app: 'safari', text: 'x' })
-    expect(state.grants.at(-1)).toEqual({ tool: 'use-app', target: 'app:safari', expiresAt: undefined })
+    expect(state.grants.at(-1)).toEqual({ tool: 'use-app', target: 'app:safari', expiresAt: undefined, agentId: null })
   })
 
   it('il permesso a 10 minuti vale finché non scade, poi chiede di nuovo', async () => {
@@ -369,13 +372,13 @@ describe('fase use-app (U3): la chiave è l\'app, non l\'azione', () => {
 
   it('grantStanding di use-app salva la chiave PER APP (e la scadenza quando c\'è)', async () => {
     await grantStanding('use-app', { action: 'type', app: 'Safari', text: 'x' })
-    expect(state.grants).toEqual([{ tool: 'use-app', target: 'app:Safari', expiresAt: undefined }])
+    expect(state.grants).toEqual([{ tool: 'use-app', target: 'app:Safari', expiresAt: undefined, agentId: null }])
     state.grants = []
     await grantStanding('use-app', { action: 'type', app: 'Safari', text: 'x' }, { expiresAtMs: 1_234 })
-    expect(state.grants).toEqual([{ tool: 'use-app', target: 'app:Safari', expiresAt: 1234 }])
+    expect(state.grants).toEqual([{ tool: 'use-app', target: 'app:Safari', expiresAt: 1234, agentId: null }])
     state.grants = []
     await grantStanding('use-app', { action: 'open_url', url: 'https://sora.chatgpt.com' })
-    expect(state.grants).toEqual([{ tool: 'use-app', target: 'url:sora.chatgpt.com', expiresAt: undefined }])
+    expect(state.grants).toEqual([{ tool: 'use-app', target: 'url:sora.chatgpt.com', expiresAt: undefined, agentId: null }])
   })
 })
 
@@ -401,5 +404,36 @@ describe('RW3: grantStanding rifiuta un mcp__ che non corrisponde a uno strument
     await grantStanding('mcp__composio-2__COMPROSIO_PROXY_EXECUTE', { toolkit_slug: 'trello' })
     await grantStanding('mcp__fantasioso__qualsiasi', {})
     expect(state.grants.length).toBe(before)
+  })
+})
+
+
+describe("U7 (fase prima-release): le grant valgono per IL BOT (e quelle NULL per tutti)", () => {
+  it('la grant del bot A NON vale per il bot B; quella NULL vale per tutti', async () => {
+    state.agents = [{ id: 'bot-a', parentId: null }, { id: 'bot-b', parentId: null }]
+    state.grants = [{ tool: 'run-command', target: 'uptime', agentId: 'bot-a' }]
+    expect((await check('run-command', { command: 'uptime' }, 'bot-a', {})).kind).toBe('allow')
+    expect((await check('run-command', { command: 'uptime' }, 'bot-b', {})).kind).toBe('ask')
+    // NULL = le righe di oggi: tutti i bot
+    state.grants = [{ tool: 'run-command', target: 'uptime', agentId: null }]
+    expect((await check('run-command', { command: 'uptime' }, 'bot-b', {})).kind).toBe('allow')
+  })
+
+  it('il FIGLIO usa la grant del PADRE (gli aiutanti nascono e muoiono: la concessione al padre serve ancora)', async () => {
+    state.agents = [{ id: 'bot-a', parentId: null }, { id: 'sub-1', parentId: 'bot-a' }]
+    state.grants = [{ tool: 'run-command', target: 'uptime', agentId: 'bot-a' }]
+    expect((await check('run-command', { command: 'uptime' }, 'sub-1', {})).kind).toBe('allow')
+    // la grant del FIGLIO non esiste nemmeno come concetto da salvare: grantStanding riceve il PADRE
+  })
+
+  it('grantStanding salva col PADRE del bot che ha chiesto (per un aiutante: il bot che l\'ha lanciato)', async () => {
+    state.agents = [{ id: 'bot-a', parentId: null }, { id: 'sub-1', parentId: 'bot-a' }]
+    await grantStanding('run-command', { command: 'date' }, { agentId: 'sub-1' })
+    expect(state.grants.filter((g) => g.target === 'date')).toEqual([{ tool: 'run-command', target: 'date', expiresAt: undefined, agentId: 'bot-a' }])
+  })
+
+  it('grantStanding senza contesto agente salva NULL (come oggi, tutti i bot)', async () => {
+    await grantStanding('run-command', { command: 'hostname' })
+    expect(state.grants.filter((g) => g.target === 'hostname')[0]!.agentId).toBe(null)
   })
 })

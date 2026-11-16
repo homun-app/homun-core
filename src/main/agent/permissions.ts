@@ -3,7 +3,7 @@
 // Dal gate §5.1: run-command passa dall'analisi shell (tree-sitter), le grant
 // fanno match per chiave ESATTA ("name" o "name sub"), mai per prefisso.
 import { realpathSync } from 'node:fs'
-import { getPermissions, listGrants, addGrant, getRoutine, getSetting } from '../store/db'
+import { getPermissions, listGrants, addGrant, getRoutine, getSetting, getAgent } from '../store/db'
 import { sandboxMode, boxRoot, boxDir } from '../sandbox'
 import { resolveBoxPath } from '../sandbox/box-paths'
 import type { PermissionMode } from '../../shared/types'
@@ -160,6 +160,21 @@ async function currentMemoryScope(agentId: string | undefined, id: unknown): Pro
 }
 
 /**
+ * U7 (fase prima-release): il BOT proprietario del turno — per un aiutante
+ * (sottoagente) è il bot che l'ha lanciato, perché gli aiutanti nascono e
+ * muoiono e una concessione a loro non servirebbe più.
+ */
+function ownerAgentIdOf(agentId: string | undefined): string | null {
+  if (!agentId) return null
+  return getAgent(agentId)?.parentId ?? agentId
+}
+
+/** U7: la concessione vale per il bot (o per tutti, quando agent_id è NULL). */
+function grantForAgent(g: { agentId?: string | null }, owner: string | null): boolean {
+  return g.agentId == null || g.agentId === owner
+}
+
+/**
  * Verdetto per una chiamata tool. Async: run-command richiede l'analisi shell.
  * `agentId` serve al gate C5 (lettura file dentro/fuori dalla box in host).
  * M3 (fase 0.3.1001): `turn.userDirectTurn` dice se il turno è aperto da un
@@ -175,6 +190,9 @@ export async function check(
   turn: { userDirectTurn?: boolean; composioTrust?: ComposioTurnTrust } = {}
 ): Promise<Verdict> {
   const cfg = getPermissions()
+  // U7 (fase prima-release): le concessioni salvate valgono per il BOT del
+  // turno (o per tutti, quando agent_id è NULL)
+  const owner = ownerAgentIdOf(agentId)
 
   // fase 4: la LETTURA di memoria e skill tocca solo i file dell'agente →
   // sempre consentita, anche con config utente personalizzata (viene prima
@@ -241,7 +259,7 @@ export async function check(
     const analysis = await analyzeCommand(String(input.command ?? ''))
     // grant esatte per questo tool; le righe vecchie (prima parola, es. "git")
     // restano nel DB ma ora fanno match solo sulla chiave identica
-    const grants = listGrants().filter((g) => g.tool === tool).map((g) => g.target)
+    const grants = listGrants().filter((g) => g.tool === tool && grantForAgent(g, owner)).map((g) => g.target)
     const d = runCommandVerdict(analysis, grants, cfg.rules, cfg.default)
     if (d.kind === 'deny') return { kind: 'deny', reason: d.reasons[0] ?? 'Command blocked by permissions configuration' }
     // AH5 (fase aiutanti): quando il comando gira DAVVERO nel box
@@ -285,7 +303,7 @@ export async function check(
         ? { kind: 'allow', via: 'rule' }
         : { kind: 'ask', reason: `${tool} requires approval`, ui: ui(UI.approvalToolRequires, { tool }), composio: { destructive: false } }
     }
-    if (listGrants().some((g) => g.tool === tool && g.target === '*')) {
+    if (listGrants().some((g) => g.tool === tool && g.target === '*' && grantForAgent(g, owner))) {
       return { kind: 'allow', via: 'grant' }
     }
     const kind = classifyComposioToolName(tool)
@@ -391,7 +409,7 @@ export async function check(
         ? { kind: 'allow', via: 'rule' }
         : { kind: 'ask', reason: `${tool} requires approval`, ui: ui(UI.approvalToolRequires, { tool }) }
     }
-    if (listGrants().some((g) => g.tool === tool && g.target === '*')) {
+    if (listGrants().some((g) => g.tool === tool && g.target === '*' && grantForAgent(g, owner))) {
       return { kind: 'allow', via: 'grant' }
     }
     const info = mcpAnnotationsLookup(tool)
@@ -399,7 +417,7 @@ export async function check(
     // (mcp__<server>__* scope readOnly) copre QUESTA chiamata solo se le
     // annotazioni CORRENTI del tool sono readOnly e non destructive — il
     // controllo è a ogni chiamata, non alla concessione
-    if (info && listGrants().some((g) => serverReadGrantCovers(g.tool, g.scope, tool, info.annotations))) {
+    if (info && listGrants().some((g) => grantForAgent(g, owner) && serverReadGrantCovers(g.tool, g.scope, tool, info.annotations))) {
       return { kind: 'allow', via: 'grant' }
     }
     const annotated = mcpAnnotationMode(info?.annotations, info?.catalogServer ?? false)
@@ -465,6 +483,7 @@ export async function check(
   const grant = listGrants().find((g) =>
     g.tool === tool &&
     (tool === 'use-app' ? useAppTargetsMatch(g.target, target) : g.target === target) &&
+    grantForAgent(g, owner) &&
     grantActive(g)
   )
   if (grant) return { kind: 'allow', via: 'grant' }
@@ -501,12 +520,14 @@ export async function check(
  *   futuri del prompt di una routine attiva — le sue card non offrono
  *   "Consenti sempre" e il gate non consulta più le grant già salvate.
  */
-export async function grantStanding(tool: string, input: Record<string, unknown>, opts: { expiresAtMs?: number } = {}): Promise<void> {
+export async function grantStanding(tool: string, input: Record<string, unknown>, opts: { expiresAtMs?: number; agentId?: string } = {}): Promise<void> {
+  // U7: si salva per il BOT della card — per un aiutante, il bot che l'ha lanciato
+  const owner = ownerAgentIdOf(opts.agentId)
   if (tool === 'update_state') return
   if (tool === 'run-command') {
     const analysis = await analyzeCommand(String(input.command ?? ''))
     if (analysis.secretRefs.length) return
-    for (const key of new Set(analysis.commands.filter((c) => !isNeverAuto(c)).map(commandKey))) addGrant(tool, key)
+    for (const key of new Set(analysis.commands.filter((c) => !isNeverAuto(c)).map(commandKey))) addGrant(tool, key, undefined, undefined, owner)
     return
   }
   // fase Composio OAuth (C7 punto 2): «Consenti sempre» su un blocco salva un
@@ -522,11 +543,11 @@ export async function grantStanding(tool: string, input: Record<string, unknown>
     if (shape) {
       const { batchActions, composioActionKey } = await import('../connectors/tool-batch')
       const parsed = batchActions(shape, input)
-      for (const slug of parsed.actions) addGrant(composioActionKey(slug), '*')
+      for (const slug of parsed.actions) addGrant(composioActionKey(slug), '*', undefined, undefined, owner)
       return
     }
   }
   // fase use-app (U3): «Consenti per 10 minuti a <App>» salva la grant con la
   // scadenza (expires_at); senza opts resta il «Consenti sempre» di sempre
-  addGrant(tool, targetKey(tool, input), undefined, opts.expiresAtMs)
+  addGrant(tool, targetKey(tool, input), undefined, opts.expiresAtMs, owner)
 }

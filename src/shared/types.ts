@@ -1041,7 +1041,7 @@ export interface SandbotApi {
   getPermissions(): Promise<PermissionsConfig>
   setPermissions(cfg: PermissionsConfig): Promise<void>
   /** M4 (fase 0.3.1001): le standing grant salvate («Consenti sempre» delle card) */
-  grantsList(): Promise<Array<{ id: number; tool: string; target: string; createdAt: number; scope?: 'readOnly' | null }>>
+  grantsList(): Promise<Array<{ id: number; tool: string; target: string; createdAt: number; scope?: 'readOnly' | null; expiresAt?: number | null; agentId?: string | null }>>
   /** M4: revoca una standing grant da Impostazioni → Approvazioni */
   grantRevoke(id: number): Promise<{ ok: boolean }>
   /** M4: «Consenti sempre le letture di <server>» (grant mcp__<server>__* scope readOnly) */

@@ -1941,8 +1941,12 @@ msgstr "Always allow"
 
 #. placeholder {0}: useApp.app
 #: src/renderer/src/components/ApprovalCard.tsx
-msgid "Consenti sempre a {0}"
-msgstr "Always allow on {0}"
+msgid "Consenti sempre a {0} (per {agentName})"
+msgstr "Always allow {0} (for {agentName})"
+
+#: src/renderer/src/components/ApprovalCard.tsx
+msgid "Consenti sempre a {agentName}"
+msgstr "Always allow for {agentName}"
 
 #. placeholder {0}: mcpServerRead.name ?? mcpServerRead.slug
 #: src/renderer/src/components/ApprovalCard.tsx
@@ -6498,10 +6502,6 @@ msgstr "TOTP secret (optional)"
 msgid "Seleziona un file per vederne il contenuto."
 msgstr "Select a file to see its content."
 
-#: src/renderer/src/components/ApprovalCard.tsx
-msgid "Sempre"
-msgstr "Always"
-
 #: src/renderer/src/components/LibraryCards.tsx
 msgid "Sempre per questo sito"
 msgstr "Always for this site"
@@ -7227,6 +7227,7 @@ msgstr "All"
 #: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/LibraryPanel.tsx
 #: src/renderer/src/components/ServerSheet.tsx
+#: src/renderer/src/components/settings/ApprovalsPage.tsx
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "Tutti i bot"
 msgstr "All bots"

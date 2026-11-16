@@ -10,11 +10,13 @@ import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
 import { api, useStore } from '../../store'
+import { useBotInfo } from '../../bot/use-bot'
+import { Bot } from '../../bot/Bot'
 import type { ApprovalsMode, AutoReviewSettings, PermissionMode } from '../../../../shared/types'
 import { DEFAULT_AUTO_REVIEW, approvalsModeOf } from '../../../../shared/types'
 import { toolDisplayName } from '../../../../shared/tool-names'
 // fase use-app (U3): i consensi di use-app si chiamano per APP o per HOST
-import { grantDisplayName } from '../../lib/approval-app'
+import { grantDisplayName, groupGrantsByBot, grantKindOf, type GrantLike } from '../../lib/approval-app'
 import { SettingsPage } from './SettingsPage'
 import { SettingsGroup } from './SettingsGroup'
 import { SettingsRow } from './SettingsRow'
@@ -32,6 +34,32 @@ const MODE_SENTENCES: Record<ApprovalsMode, MessageDescriptor> = {
   // serve a ciò che hai chiesto, chiede ciò che va oltre e non si annulla
   auto: msg`Un modello controlla ogni azione: fa passare quello che serve a ciò che hai chiesto e ti chiede quando va oltre e non si annulla facilmente (scrivere a qualcuno, pagare, cancellare, pubblicare). Le tue regole vengono prima.`,
   never: msg`Ogni azione parte senza aspettare.`
+}
+
+/** U7: l'intestazione di un gruppo di consensi — il bot (mascotte e nome), o «Tutti i bot» per le righe NULL. */
+function GrantBotHeader({ agentId }: { agentId: string | null }) {
+  const agents = useStore((s) => s.agents)
+  const info = useBotInfo(agentId ?? '')
+  if (agentId === null) {
+    return (
+      <p className="px-4 pb-1 pt-3 text-xs font-medium uppercase tracking-wide text-muted-foreground" data-testid="grants-bot-all">
+        <Trans>Tutti i bot</Trans>
+      </p>
+    )
+  }
+  return (
+    <p className="flex items-center gap-1.5 px-4 pb-1 pt-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+      {info ? <Bot family={info.avatar.family} color={info.avatar.color} state={info.state} size={16} label={undefined} /> : null}
+      {agents.find((a) => a.id === agentId)?.name ?? agentId}
+    </p>
+  )
+}
+
+/** U7: il tipo del consenso in chiaro («comando», «app», «strumento»). */
+function grantKindLabelOf(tool: string, locale: 'it' | 'en'): string {
+  const kind = grantKindOf(tool)
+  if (locale === 'en') return kind === 'comando' ? 'command' : kind === 'app' ? 'app' : 'tool'
+  return kind
 }
 
 export function ApprovalsPage() {
@@ -167,29 +195,38 @@ export function ApprovalsPage() {
       >
         {grants === null && <div className="px-4 py-3 text-sm text-muted-foreground">…</div>}
         {grants?.length === 0 && <div className="px-4 py-3 text-sm text-muted-foreground"><Trans>(nessun consenso salvato)</Trans></div>}
-        {grants?.map((g) => (
-          <SettingsRow
-            key={g.id}
-            title={grantDisplayName(g, i18n.locale === 'en' ? 'en' : 'it')}
-            description={
-              <span>
-                <code className="font-mono text-[11px]">{g.tool}{g.target !== '*' ? ` · ${g.target}` : ''}</code>
-                {g.expiresAt != null && (
-                  <span className="ml-2 text-[11px] text-muted-foreground">
-                    <Trans>Scade: {new Date(g.expiresAt).toLocaleTimeString(i18n.locale, { hour: '2-digit', minute: '2-digit' })}</Trans>
+        {/* U7 (fase prima-release): i consensi raggruppati per BOT (nome e
+            mascotte), col gruppo «Tutti i bot» per quelli di oggi (NULL) */}
+        {grants !== null && groupGrantsByBot(grants as GrantLike[]).map((group) => (
+          <div key={group.agentId ?? '__tutti__'} data-testid="grants-bot-group">
+            <GrantBotHeader agentId={group.agentId} />
+            {group.grants.map((g) => (
+              <SettingsRow
+                key={g.id}
+                title={grantDisplayName(g, i18n.locale === 'en' ? 'en' : 'it')}
+                description={
+                  <span>
+                    {/* U7: la parola in monospazio e il tipo in chiaro */}
+                    {g.tool === 'run-command' ? <code className="font-mono text-[11px]">{g.target}</code> : <code className="font-mono text-[11px]">{g.tool}{g.target !== '*' ? ` · ${g.target}` : ''}</code>}
+                    <span className="ml-2 text-[11px] text-muted-foreground">{grantKindLabelOf(g.tool, i18n.locale === 'en' ? 'en' : 'it')}</span>
+                    {g.expiresAt != null && (
+                      <span className="ml-2 text-[11px] text-muted-foreground">
+                        <Trans>Scade: {new Date(g.expiresAt).toLocaleTimeString(i18n.locale, { hour: '2-digit', minute: '2-digit' })}</Trans>
+                      </span>
+                    )}
                   </span>
-                )}
-              </span>
-            }
-            control={
-              <button
-                className="rounded-full bg-card px-2.5 py-1 text-xs text-muted-foreground transition hover:text-destructive"
-                onClick={() => { void api.grantRevoke(g.id).then(loadGrants).catch(() => undefined) }}
-              >
-                <Trans>Revoca</Trans>
-              </button>
-            }
-          />
+                }
+                control={
+                  <button
+                    className="rounded-full bg-card px-2.5 py-1 text-xs text-muted-foreground transition hover:text-destructive"
+                    onClick={() => { void api.grantRevoke(g.id).then(loadGrants).catch(() => undefined) }}
+                  >
+                    <Trans>Revoca</Trans>
+                  </button>
+                }
+              />
+            ))}
+          </div>
         ))}
       </SettingsGroup>
 

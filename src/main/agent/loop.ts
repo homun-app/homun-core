@@ -5396,7 +5396,8 @@ export function resolveApproval(
       void permissions.grantStanding(
         String(entry.meta?.tool),
         entry.meta?.input as Record<string, unknown>,
-        mode === 'minutes10' ? { expiresAtMs: Date.now() + 10 * 60_000 } : {}
+        // U7: si salva per il bot della card (per un aiutante: il padre)
+        mode === 'minutes10' ? { expiresAtMs: Date.now() + 10 * 60_000, agentId } : { agentId }
       )
     }
   }

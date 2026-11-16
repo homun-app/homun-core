@@ -307,10 +307,12 @@ export function ApprovalCard({ entry, readOnly = false, ownerName }: { entry: Tr
                 title={noAlways ? (useAppSend ? t`Questa azione chiede sempre l'approvazione` : entry.meta?.composioDestructive === true ? t`Questa azione chiede sempre l'approvazione` : t`Le modifiche di automazione chiedono ogni volta`) : undefined}
                 onClick={() => resolve(entry.agentId, approvalId, 'allow', 'always')}
               >
+                {/* U7 (fase prima-release): la concessione vale per il BOT —
+                    il nome lo dice (per un aiutante: il bot che l'ha lanciato) */}
                 {useApp?.kind === 'app' && useApp.app && !useAppSend ? (
-                  <Trans>Consenti sempre a {useApp.app}</Trans>
+                  <Trans>Consenti sempre a {useApp.app} (per {agentName})</Trans>
                 ) : (
-                  <Trans>Sempre</Trans>
+                  <Trans>Consenti sempre a {agentName}</Trans>
                 )}
               </DropdownMenuItem>
               {mcpServerRead?.slug && (
