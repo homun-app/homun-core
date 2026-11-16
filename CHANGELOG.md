@@ -5,6 +5,26 @@ pubblicata finisce nel corpo della GitHub Release (da cui l'app mostra il
 «cosa cambia» quando propone un aggiornamento). Formato: `## [x.y.z] — data`,
 sezioni H2 e un punto per riga.
 
+## [0.3.1001-beta.6] — 2026-11-16
+
+Le correzioni dalla prova della beta.5 installata da zero.
+
+### Correzioni
+
+- **Il computer dei bot preparato dalla guida si usa davvero.** Prima i
+  comandi giravano comunque sul Mac; chi ha già la beta.5 lo trova sistemato
+  al primo avvio. In Impostazioni › Generali › Computer dei bot scegli
+  «Dove girano i comandi».
+- **Il bot legge tutti gli annunci di una pagina**, non solo il primo, e
+  non rilegge la stessa pagina a vuoto.
+- **Le foto in chat:** il bot ti mostra le immagini della pagina che ha
+  letto. Le scarica lui, così il sito non vede il tuo indirizzo.
+- **Il bot dice il vero:** un assistente interrotto non risulta finito, e
+  un'azione non riuscita non diventa «fatto».
+- **Dopo aver collegato un'app il bot ne trova subito gli strumenti.**
+- **Una cosa da ricordare che aspetta la tua conferma** compare in chat
+  con il bottone per aprirla.
+
 ## [0.3.1001-beta.5] — 2026-11-15
 
 ### Novità
