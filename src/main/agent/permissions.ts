@@ -340,7 +340,9 @@ export async function check(
     // PER NOME ORIGINALE su qualunque server MCP (come Rakazo).
     const originalName = tool.split('__').slice(2).join('__')
     if (toolBatchOf(originalName) || originalName === 'COMPOSIO_MANAGE_CONNECTIONS' || originalName === 'COMPOSIO_PROXY_EXECUTE') {
-      const grants = listGrants().filter((g) => g.target === '*').map((g) => g.tool)
+      // K2 (correzioni): anche questi consensi valgono per IL BOT del turno
+      // (o per tutti, quando agent_id è NULL) — come ogni altra lettura del gate
+      const grants = listGrants().filter((g) => g.target === '*' && grantForAgent(g, owner)).map((g) => g.tool)
       const { uiLanguage } = await import('../ui-language')
       const { composioGateway } = await import('../connectors/composio-gateway')
       const gateInput = {

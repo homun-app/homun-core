@@ -32,7 +32,9 @@ vi.mock('../../store/db', () => ({
   listGrants: () => state.grants.map((g, i) => ({ id: i + 1, tool: g.tool, target: g.target, createdAt: 0, expiresAt: g.expiresAt ?? null, agentId: g.agentId ?? null })),
   addGrant: (tool: string, target: string, scope?: 'readOnly', expiresAt?: number, agentId?: string | null) => { state.grants.push({ tool, target, expiresAt, agentId: agentId ?? null }) },
   getRoutine: (id: number) => state.routines.find((r) => r.id === id) ?? null,
-  getAgent: (id: string) => state.agents.find((a) => a.id === id) ?? null
+  getAgent: (id: string) => state.agents.find((a) => a.id === id) ?? null,
+  // K2: il cancello del blocco Composio legge la lingua della UI (getSetting)
+  getSetting: (_key: string, fallback: unknown) => fallback
 }))
 
 vi.mock('../../sandbox', () => ({
@@ -435,5 +437,32 @@ describe("U7 (fase prima-release): le grant valgono per IL BOT (e quelle NULL pe
   it('grantStanding senza contesto agente salva NULL (come oggi, tutti i bot)', async () => {
     await grantStanding('run-command', { command: 'hostname' })
     expect(state.grants.filter((g) => g.target === 'hostname')[0]!.agentId).toBe(null)
+  })
+})
+
+describe('K2 (correzioni): il cancello Composio del blocco rispetta il bot', () => {
+  const BATCH = 'mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL'
+  const batchArgs = { tools: [{ tool_slug: 'NOTION_CREATE_PAGE', arguments: { title: 'x' } }], sync_response_to_workbench: false }
+  const CONSENSO = { tool: 'composio-action:NOTION_CREATE_PAGE', target: '*' }
+
+  it("il consenso PER AZIONE del bot A NON apre l'azione al bot B", async () => {
+    state.agents = [{ id: 'bot-a', parentId: null }, { id: 'bot-b', parentId: null }]
+    state.grants = [{ ...CONSENSO, agentId: 'bot-a' }]
+    // il bot A: il suo consenso vale
+    expect((await check(BATCH, batchArgs, 'bot-a', {})).kind).toBe('allow')
+    // il bot B: chiede — il consenso di A non è suo
+    expect((await check(BATCH, batchArgs, 'bot-b', {})).kind).toBe('ask')
+  })
+
+  it('il consenso con agent_id NULL apre l\'azione a tutti i bot (le righe di oggi)', async () => {
+    state.agents = [{ id: 'bot-a', parentId: null }, { id: 'bot-b', parentId: null }]
+    state.grants = [{ ...CONSENSO, agentId: null }]
+    expect((await check(BATCH, batchArgs, 'bot-b', {})).kind).toBe('allow')
+  })
+
+  it("l'aiutante usa il consenso del padre (il proprietario del turno)", async () => {
+    state.agents = [{ id: 'bot-a', parentId: null }, { id: 'sub-1', parentId: 'bot-a' }]
+    state.grants = [{ ...CONSENSO, agentId: 'bot-a' }]
+    expect((await check(BATCH, batchArgs, 'sub-1', {})).kind).toBe('allow')
   })
 })
