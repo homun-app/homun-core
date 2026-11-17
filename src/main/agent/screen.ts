@@ -23,7 +23,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 // fase rilascio (A7): docker fuori dal PATH del Terminale
 import { activeBoxEngine } from '../sandbox/engine'
 import { randomBytes } from 'node:crypto'
-import { existsSync } from 'node:fs'
+import { appendFileSync, existsSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import type { Duplex } from 'node:stream'
 import type { IncomingMessage } from 'node:http'
@@ -59,6 +59,32 @@ export const TAKEOVER_DONE_TEXT = '[The user finished on your screen.]'
 /** Il flag di test: il ponte si collega a un socket unix locale invece di docker exec. */
 export function fakeScreenSocketDir(): string | null {
   return process.env.SANDBOT_TEST_FAKE_SCREEN_SOCKET ?? null
+}
+
+// ---- K3 (fase prima-release correzioni): la traccia di sola prova ----
+
+/**
+ * SANDBOT_TEST_SCREEN_TRACE=<file>: la traccia SOLO-TEST del ponte
+ * /screen/<cap> — per ogni connessione APERTURA (modalità: view, peek,
+ * noLaunch, control) e CHIUSURA (chi chiude: client, server oltre il ponte,
+ * figlio del ponte, revoca) e quando. Spenta di default (null), mai la
+ * capability nel file (non si logga in nessun caso), mai in produzione: la
+ * raccoglie la sonda e la stampa a un KO.
+ */
+export function screenTraceFile(): string | null {
+  return process.env.SANDBOT_TEST_SCREEN_TRACE ?? null
+}
+
+/** Il numero progressivo delle connessioni (per accoppiare apertura e chiusura). */
+let traceConnSeq = 0
+
+/** Una riga JSON nella traccia (se il flag c'è); non rompe MAI il ponte. */
+function screenTrace(e: Record<string, unknown>): void {
+  const file = screenTraceFile()
+  if (!file) return
+  try {
+    appendFileSync(file, JSON.stringify({ t: Date.now(), ...e }) + '\n')
+  } catch { /* la traccia è best-effort: il ponte non si ferma per lei */ }
 }
 
 // ---- le dipendenze del daemon (iniettabili per i test) ----
@@ -112,6 +138,8 @@ interface ScreenCap {
   used: boolean
   /** SV1: capability di un'ANTEPRIMA — la connessione non conterà nel timer. */
   peek?: boolean
+  /** K3 (correzioni): capability della finestra PiP (SV4, noLaunch) — la traccia la distingue dalla vista della scheda. */
+  noLaunch?: boolean
 }
 const caps = new Map<string, ScreenCap>()
 
@@ -120,8 +148,12 @@ interface ScreenConn {
   mode: 'view' | 'control'
   /** SV1: connessione di un'anteprima (non sospende il timer del browser). */
   peek?: boolean
-  /** chiude socket e processo del ponte, idempotente. */
-  destroy: () => void
+  /** K3 (correzioni): connessione della PiP (noLaunch) — solo per la traccia. */
+  noLaunch?: boolean
+  /** il numero della traccia (accoppia apertura e chiusura). */
+  id: number
+  /** chiude socket e processo del ponte, idempotente; `who` finisce nella traccia. */
+  destroy: (who?: string) => void
 }
 const conns = new Set<ScreenConn>()
 
@@ -225,19 +257,25 @@ export async function screenOpen(agentId: string, mode: 'view' | 'control', opts
   await waitForSocket(browserViewSocket(boxOwnerOf(agentId)))
   if (mode === 'control') await ensureControlVnc(agentId)
   const cap = randomBytes(32).toString('base64url')
-  caps.set(cap, { agentId, mode, expiresAt: deps.now() + SCREEN_CAP_TTL_MS, used: false, ...(opts.peek ? { peek: true } : {}) })
+  caps.set(cap, {
+    agentId, mode, expiresAt: deps.now() + SCREEN_CAP_TTL_MS, used: false,
+    ...(opts.peek ? { peek: true } : {}),
+    ...(opts.noLaunch && !opts.peek ? { noLaunch: true } : {})
+  })
+  // K3: la nascita della capability (senza il valore!) apre la storia nella traccia
+  screenTrace({ event: 'cap', agent: agentId, mode, peek: opts.peek === true, noLaunch: opts.noLaunch === true && opts.peek !== true })
   void emitStatus(agentId)
   return { url: `ws://127.0.0.1:${deps.wsPort}/screen/${cap}` }
 }
 
 /** Consuma una capability: valida, non ancora usata e non scaduta (V3.2). */
-export function consumeScreenCap(capId: string, now: number): { agentId: string; mode: 'view' | 'control'; peek: boolean } | null {
+export function consumeScreenCap(capId: string, now: number): { agentId: string; mode: 'view' | 'control'; peek: boolean; noLaunch: boolean } | null {
   const cap = caps.get(capId)
   if (!cap) return null
   caps.delete(capId) // MONOUSO: vale un upgrade, riuso o scadenza la bruciano
   if (cap.used || now > cap.expiresAt) return null
   cap.used = true
-  return { agentId: cap.agentId, mode: cap.mode, peek: cap.peek === true }
+  return { agentId: cap.agentId, mode: cap.mode, peek: cap.peek === true, noLaunch: cap.noLaunch === true }
 }
 
 // ---- i socket del desktop: attesa e x11vnc di controllo (V3.1) ----
@@ -348,16 +386,30 @@ export function handleScreenUpgrade(capId: string, req: IncomingMessage, socket:
     : browserViewSocket(boxOwnerOf(target.agentId))
   const child = spawnBridge(socketPath)
   let closed = false
-  const teardown = (): void => {
+  // K3: `who` dice CHI chiude — 'client-close' (frame WebSocket di chiusura),
+  // 'client-socket' (reset/FIN/errore del client), 'client-protocol' (frame
+  // rotto), 'server-closed' (il lato unix oltre il ponte ha chiuso: il server
+  // dello schermo), 'bridge-exit'/'bridge-error' (il figlio del ponte),
+  // 'release' (screen:release, «Ho finito»), 'browser-closed' (revoca totale)
+  const teardown = (who = 'unknown'): void => {
     if (closed) return
     closed = true
+    screenTrace({ event: 'close', id: conn.id, agent: target.agentId, mode: target.mode, peek: target.peek === true, noLaunch: target.noLaunch === true, who })
     socket.destroy()
     child.kill('SIGKILL') // il processo del ponte si uccide SEMPRE
     conns.delete(conn)
     void afterClose(target)
   }
-  const conn: ScreenConn = { agentId: target.agentId, mode: target.mode, ...(target.peek ? { peek: true } : {}), destroy: teardown }
+  const conn: ScreenConn = {
+    id: ++traceConnSeq,
+    agentId: target.agentId,
+    mode: target.mode,
+    ...(target.peek ? { peek: true } : {}),
+    ...(target.noLaunch ? { noLaunch: true } : {}),
+    destroy: teardown
+  }
   conns.add(conn)
+  screenTrace({ event: 'open', id: conn.id, agent: target.agentId, mode: target.mode, peek: target.peek === true, noLaunch: target.noLaunch === true })
 
   // client → socket unix: i frame BINARI (frammentati e no) vanno allo stdin
   let buf: Buffer = Buffer.alloc(0)
@@ -373,7 +425,7 @@ export function handleScreenUpgrade(capId: string, req: IncomingMessage, socket:
       try {
         parsed = decodeFrame(buf)
       } catch {
-        teardown()
+        teardown('client-protocol')
         return
       }
       if (!parsed) return
@@ -386,7 +438,7 @@ export function handleScreenUpgrade(capId: string, req: IncomingMessage, socket:
       if (opcode === OP_PONG) continue
       if (opcode === OP_CLOSE) {
         socket.write(encodeFrame(OP_CLOSE, payload, false))
-        teardown()
+        teardown('client-close')
         return
       }
       if (opcode === OP_BINARY) {
@@ -406,18 +458,18 @@ export function handleScreenUpgrade(capId: string, req: IncomingMessage, socket:
   })
   // la chiusura da uno dei due lati chiude l'altro: close (reset), end (FIN
   // senza handshake WebSocket) ed exit/error del processo del ponte
-  socket.on('close', teardown)
-  socket.on('end', teardown)
-  socket.on('error', teardown)
+  socket.on('close', () => teardown('client-socket'))
+  socket.on('end', () => teardown('client-socket'))
+  socket.on('error', () => teardown('client-socket'))
 
   // socket unix → client: lo stdout del ponte esce in frame BINARI
   child.stdout.on('data', (d: Buffer) => {
     if (!closed) socket.write(encodeFrame(OP_BINARY, d, false))
   })
-  child.stdout.on('end', teardown)
-  child.stdout.on('error', teardown)
-  child.on('exit', teardown)
-  child.on('error', teardown)
+  child.stdout.on('end', () => teardown('server-closed'))
+  child.stdout.on('error', () => teardown('server-closed'))
+  child.on('exit', () => teardown('bridge-exit'))
+  child.on('error', () => teardown('bridge-error'))
 
   if (head.length > 0) socket.emit('data', head)
 }
@@ -449,8 +501,9 @@ function spawnBridge(socketPath: string): ChildProcessWithoutNullStreams {
  * dell'utente, delimitata come testo dell'utente.
  */
 export async function screenRelease(agentId: string, note?: string): Promise<{ ok: true }> {
+  screenTrace({ event: 'release', agent: agentId })
   for (const c of [...conns]) {
-    if (c.agentId === agentId && c.mode === 'control') c.destroy()
+    if (c.agentId === agentId && c.mode === 'control') c.destroy('release')
   }
   await stopControlVnc(agentId).catch(() => undefined)
   const pending = takeovers.get(agentId)
@@ -477,11 +530,12 @@ export async function screenRelease(agentId: string, note?: string): Promise<{ o
  */
 export function screenBrowserClosed(agentId: string): void {
   const owner = boxOwnerOf(agentId)
+  screenTrace({ event: 'browser-closed', agent: agentId })
   for (const cap of caps) {
     if (cap[1].agentId === agentId) caps.delete(cap[0])
   }
   for (const c of [...conns]) {
-    if (c.agentId === agentId) c.destroy()
+    if (c.agentId === agentId) c.destroy('browser-closed')
   }
   void stopControlVnc(agentId).catch(() => undefined)
   void emitStatus(agentId)

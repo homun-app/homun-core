@@ -76,13 +76,22 @@ chmodSync(FAKE_CONTAINER, 0o755)
 const SOCK = join(DATA, 'sock')
 mkdirSync(SOCK)
 const rfbChildMain = (sockPath) => {
-  // handshake RFB 003.008 come la sonda fase-schermo-vivo (lì noVNC si
-  // connette): versione, SecurityResult OK, ServerInit con pixel format
-  // 32bpp vero-colore, poi un fotogramma intero RAW a ogni richiesta
+  // handshake RFB 003.008 COME LO PARLA noVNC (la causa di K3 era qui): RFB 3.8
+  // vuole il passo dei TIPI DI SICUREZZA — [1, 1] (un tipo: None), la scelta
+  // del client, POI il SecurityResult. Il vecchio server saltava il passo e
+  // rispondeva [0,0,0,0] subito dopo la versione: noVNC leggeva il primo 0
+  // come «zero tipi» e aspettava per sempre i 4 byte della «reason» → la vista
+  // della scheda Schermo non si collegava MAI («La connessione allo schermo si
+  // è chiusa», niente «Prendi il controllo»). Il SetPixelFormat (tipo 6) è 20
+  // byte FISSI: leggerlo come 8+n col n preso dai byte del pixel format lo
+  // bloccava su 537 MB e il fotogramma non partiva mai. Un client che sparisce
+  // (il ponte SIGKILLato dal daemon) non uccide il server: l'errore del socket
+  // si ingoia (x11vnc sopravvive ai client morti).
   const W = 1280, H = 800
   const createServer = createNetServer
   const server = createServer((sock) => {
     sock.write(Buffer.from('RFB 003.008\n'))
+    sock.on('error', () => { /* un client morto non uccide il desktop finto */ })
     let buf = Buffer.alloc(0)
     let stage = 'version'
     let lastFrame = 0
@@ -108,6 +117,13 @@ const rfbChildMain = (sockPath) => {
           const i = buf.indexOf(0x0a)
           if (i < 0) return
           buf = buf.subarray(i + 1)
+          stage = 'types'
+          sock.write(Buffer.from([1, 1])) // RFB 3.8: UN tipo di sicurezza: None
+          continue
+        }
+        if (stage === 'types') {
+          if (buf.length < 1) return
+          buf = buf.subarray(1) // la scelta del client (1 = None)
           stage = 'client-init'
           sock.write(Buffer.from([0, 0, 0, 0])) // SecurityResult: OK (nessuna sicurezza)
           continue
@@ -148,10 +164,11 @@ const rfbChildMain = (sockPath) => {
           continue
         }
         if (type === 6) {
-          if (buf.length < 8) return
-          const n = Math.max(0, buf.readInt32BE(4))
-          if (buf.length < 8 + n) return
-          buf = buf.subarray(8 + n)
+          // SetPixelFormat: [6][pad3][16 byte di formato][pad3] = 20 byte FISSI
+          // (K3: leggerlo come 8+n col n dai byte del formato lo bloccava su
+          // 537 MB e il fotogramma non partiva MAI)
+          if (buf.length < 20) return
+          buf = buf.subarray(20)
           continue
         }
         if (type === 3) {
@@ -194,6 +211,11 @@ const startRfb = () => {
   rmSync(join(SOCK, 'vnc-control.sock'), { force: true })
   rfbView = spawn(process.execPath, [new URL(import.meta.url).pathname, '--rfb-server', join(SOCK, 'vnc-view.sock')], { stdio: 'ignore' })
   rfbControl = spawn(process.execPath, [new URL(import.meta.url).pathname, '--rfb-server', join(SOCK, 'vnc-control.sock')], { stdio: 'ignore' })
+  // K3: se un server RFB finto ESCE, le connessioni dopo cadono per colpa sua —
+  // un indizio che il prodotto non c'entra (il file socket resterebbe, nessuno
+  // ascolta più: i ponti muoiono subito)
+  rfbView.on('exit', (code, signal) => log('ATTENZIONE: il server RFB finto VIEW è uscito', { code: String(code), signal: String(signal) }))
+  rfbControl.on('exit', (code, signal) => log('ATTENZIONE: il server RFB finto CONTROL è uscito', { code: String(code), signal: String(signal) }))
 }
 const stopRfb = () => {
   rfbView?.kill('SIGTERM')
@@ -261,6 +283,9 @@ const app = spawn(ELECTRON, ['.', `--remote-debugging-port=${DEBUG_PORT}`, '--la
     SANDBOT_TEST_FAKE_SAFESTORAGE: join(DATA, 'safestorage-finta.json'),
     SANDBOT_TEST_FAKE_BROWSER_MCP: join(ROOT, 'scripts', 'fake-browser-mcp.mjs'),
     SANDBOT_TEST_FAKE_SCREEN_SOCKET: SOCK,
+    // K3: la traccia di sola prova del ponte /screen (apertura, modalità, chi
+    // chiude e quando) — la sonda la stampa a un KO
+    SANDBOT_TEST_SCREEN_TRACE: join(DATA, 'screen-trace.jsonl'),
     // host FINTO: i comandi dei bot girano nella shell che logga, mai sul Mac
     SHELL: FAKE_SHELL,
     // CLI container FINTA: vince su PATH e sul fallback
@@ -472,12 +497,20 @@ try {
   }
 
   // =========== Cassaforte: la UI (Impostazioni › Cassaforte) ===========
+  // SANDBOT_PROBE_FAST=1 (solo per indagare K3): salta Cassaforte, segreto,
+  // routine e concessioni e va dritto a U3+U9+K3 — la corsa COMPLETA resta
+  // quella senza la variabile
+  const FAST = process.env.SANDBOT_PROBE_FAST === '1'
+  // il valore segreto e il log dell'env del turno di prova (servono ANCHE al
+  // controllo finale: stanno nello scope del try, fuori dal blocco NON-FAST)
+  const SECRET_VALUE = 'sk-valore-segreto-7f3d9a'
+  const SECRET_ENV_LOG = join(DATA, 'secret-in-command.log')
+  if (!FAST) {
   check('Cassaforte: le Impostazioni si aprono (⌘, come il Mac)', await openSettings() && await waitDom(`[role="dialog"]`, 10_000))
   check('Cassaforte: la scheda si apre', await clickText('Cassaforte', { scope: 'document', exact: true }))
   await waitDom(`document.body.textContent.includes('Aggiungi login')`)
 
   // — Login: aggiungi (etichetta, origini, utente, password), la password non si vede —
-  const SECRET_VALUE = 'sk-valore-segreto-7f3d9a'
   check('Login: «+ Aggiungi login» apre il modulo', await clickText('+ Aggiungi login'))
   await fillByPlaceholder('Etichetta', 'Portale ASPI')
   await fillByPlaceholder('Origini', 'https://aspi.example')
@@ -537,7 +570,6 @@ try {
   await pressEscape()
   await sleep(700)
   await waitDom(`document.querySelector('form textarea')`)
-  const SECRET_ENV_LOG = join(DATA, 'secret-in-command.log')
   callTool('run-command', { command: `echo "{{secret:API_KEY}}" > ${JSON.stringify(SECRET_ENV_LOG)} ; echo finto-ok-host` }, 'apri il portale')
   sayText('Fatto: la pagina del portale risponde.', 'apri il portale')
   check('Segreto: il messaggio parte dalla UI', await sendMessage('apri il portale con la mia chiave'))
@@ -714,6 +746,11 @@ try {
     return false
   })())
   await shot('cassaforte.png')
+  } // fine del blocco NON-FAST (Cassaforte+segreto+routine+concessioni)
+  // in FAST il computer dei bot torna «box» QUI (il ritorno a box della
+  // sezione segreto/routine sta nel blocco saltato): senza box la scheda
+  // Schermo non esiste (BX1)
+  if (FAST) await rpc(`settingsSet(${JSON.stringify('sandbox.mode')}, ${JSON.stringify('box')})`).catch(() => undefined)
 
 
   // =========== U3: la PiP — Homun resta visibile, barra sempre visibile, Riporta ===========
@@ -784,7 +821,7 @@ try {
   try {
     // la scheda Schermo interna, poi «Apri» se lo schermo non è partito
     await clickText('Schermo', { exact: true }).catch(() => undefined)
-    for (let i = 0; i < 25; i++) {
+    for (let i = 0; i < (process.env.SANDBOT_PROBE_FAST === '1' ? 3 : 25); i++) {
       if (await pageEval(`return [...document.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Prendi il controllo' || b.textContent.trim() === 'Ferma e prendi il controllo')`).catch(() => false)) break
       await clickText('Apri', { exact: true }).catch(() => undefined)
       await clickText('Riprova', { exact: true }).catch(() => undefined)
@@ -803,6 +840,188 @@ try {
     check('U9: a 600 px «Ho finito» è DENTRO la vista (getBoundingClientRect)', inView, JSON.stringify(rect))
     await shot('ho-finito-600px.png')
     await setViewport(1280, 860)
+
+    // =========== K3: «Stacca → Riporta in Homun → Prendi il controllo» × 20 ===========
+    // Il difetto intermittente visto nella verifica (la scheda Schermo che
+    // dice «La connessione allo schermo si è chiusa» senza «Prendi il
+    // controllo»): qui la sequenza si ripete 20 volte DI FILA nella stessa
+    // corsa, si contano le cadute e a ogni caduta si stampa la TRACCIA di
+    // sola prova del ponte (SANDBOT_TEST_SCREEN_TRACE): apertura, modalità
+    // (view/peek/noLaunch/control), CHI chiude e quando.
+    const K3_ROUNDS = Number(process.env.SANDBOT_PROBE_K3_ROUNDS ?? 20)
+    const traceFile = join(DATA, 'screen-trace.jsonl')
+    const readTrace = () => {
+      try { return readFileSync(traceFile, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) } catch { return [] }
+    }
+    const printTrace = (since = 0) => {
+      for (const l of readTrace().filter((l) => Number(l.t ?? 0) >= since)) log('traccia schermo:', JSON.stringify(l))
+    }
+    /** il canarino del server RFB finto: handshake GREZZO dal processo della
+     *  sonda (versione → tipi di sicurezza [1,1] → scelta → SecurityResult →
+     *  ServerInit) — dice se il VERO colpevole è il server finto quando le
+     *  viste dell'app cadono. */
+    const rfbCanary = async (sockName) => {
+      const { connect } = await import('node:net')
+      return await new Promise((resolve) => {
+        const t0 = Date.now()
+        let stage = 1
+        const done = (r) => { try { sock.destroy() } catch { /* via */ }; resolve(r) }
+        const timer = setTimeout(() => done(`timeout-${stage} (${Date.now() - t0} ms)`), 2500)
+        const sock = connect(join(SOCK, sockName), () => {})
+        sock.on('data', (d) => {
+          if (stage === 1 && d.includes(0x0a)) {
+            stage = 2
+            sock.write('RFB 003.008\n') // la versione del client
+            return
+          }
+          if (stage === 2 && d.length >= 2 && d[0] === 1) {
+            stage = 3
+            sock.write(Buffer.from([1])) // scelgo None
+            return
+          }
+          if (stage === 3 && d.length >= 2) {
+            sock.write(Buffer.from([1])) // ClientInit
+            stage = 4
+            return
+          }
+          if (stage === 4 && d.length >= 24) {
+            clearTimeout(timer)
+            done(`ok (${Date.now() - t0} ms)`)
+          }
+        })
+        sock.on('error', (e) => { clearTimeout(timer); done(`errore ${e.code}`) })
+      })
+    }
+    const printAppLog = () => {
+      log('--- ultime 60 righe del log app/daemon alla caduta: ---')
+      for (const line of appLog.split('\n').slice(-60)) log('app:', line.slice(0, 220))
+    }
+    const prendiVisible = () => pageEval(`return [...document.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Prendi il controllo' || b.textContent.trim() === 'Ferma e prendi il controllo')`).catch(() => false)
+    /** la finestra PiP di QUESTO giro: il target #/pip/ del BOT corrente (una
+     *  finestra in chiusura può restare in lista un attimo e rubare il posto:
+     *  ci si vincola all'id del bot e si RITROVA a ogni tentativo del clic). */
+    const waitForPip = async (timeoutMs = 30_000) => {
+      const deadline = Date.now() + timeoutMs
+      while (Date.now() < deadline) {
+        try {
+          const list = await httpJson('/json/list')
+          const t = list.find((x) => x.type === 'page' && (x.url ?? '').includes(`#/pip/${bot.id}`))
+          if (t) return { cdp: await openCdp(t.webSocketDebuggerUrl), url: t.url }
+        } catch { /* il debugger non è ancora su */ }
+        await sleep(200)
+      }
+      return null
+    }
+    log('canarino RFB all\'inizio dei giri: view =', await rfbCanary('vnc-view.sock'), ' control =', await rfbCanary('vnc-control.sock'))
+    const falls = []
+    for (let round = 1; round <= K3_ROUNDS; round++) {
+      const startedAt = Date.now()
+      let why = ''
+      // recupero da uno stato rotto di un giro precedente (Riprova/Apri non
+      // fanno niente se non ci sono); una PiP rimasta APERTA da una caduta si
+      // chiude qui (chiamata di igiene, il giro la riaprirà col gesto vero);
+      // un CONTROLLO rimasto attivo (il blocco U9 lo lascia: la PiP allora si
+      // autochiude e il giro cadrebbe) si chiude col suo «Ho finito»
+      if (((await rpc('pipState()').catch(() => null))?.open) === true) {
+        await rpc('pipClose()').catch(() => undefined)
+        for (let i = 0; i < 20 && ((await rpc('pipState()').catch(() => null))?.open) === true; i++) await sleep(250)
+      }
+      if (await pageEval(`return !!document.querySelector('[data-testid="bot-screen-done"]')`).catch(() => false)) {
+        await clickText('Ho finito', { exact: true, timeoutMs: 4000 }).catch(() => undefined)
+        await sleep(900)
+      }
+      await clickText('Riprova', { exact: true, timeoutMs: 1200 }).catch(() => undefined)
+      await clickText('Apri', { exact: true, timeoutMs: 1200 }).catch(() => undefined)
+      // se la scheda Computer non c'è (pannello chiuso o altra vista), si
+      // rimonta DETERMINISTICAMENTE: pannello → card Computer → scheda Schermo
+      if (!(await pageEval(`return [...document.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Stacca')`).catch(() => false))) {
+        await pressEscape().catch(() => undefined)
+        await closeDialog().catch(() => undefined)
+        await clickText('Mostra il pannello del bot', { timeoutMs: 3000 }).catch(() => undefined)
+        await sleep(300)
+        await clickTestid('bot-computer-card').catch(() => undefined)
+        await sleep(400)
+        await clickText('Schermo', { exact: true, timeoutMs: 3000 }).catch(() => undefined)
+        await sleep(400)
+      }
+      let ok = true
+      // — Stacca: la PiP si apre, la vista grande si scollega —
+      const detached = await clickText('Stacca', { exact: true, timeoutMs: 8000 })
+      let pipPage = null
+      if (detached) pipPage = await waitForPip()
+      if (!detached || !pipPage) {
+        ok = false
+        why = detached ? 'la finestra PiP non è comparsa' : '«Stacca» non c\'è'
+      }
+      // — Riporta in Homun: il bottone della barra della PiP (si aspetta che il
+      //   bottone ESISTA nella finestra, poi si clicca) —
+      if (ok) {
+        // il clic può perdere la sua RISPOSTA: la finestra si chiude SUBITO
+        // dopo («Riporta in Homun» è un gesto solo) e il socket CDP muore con
+        // lei — la evaluate non torna e sembrerebbe un clic mancato. La VERITÀ
+        // è lo stato della PiP, che si rilegge dopo OGNI tentativo (e il
+        // target si RITROVA: una finestra appena nata o morente non è affare
+        // del giro)
+        let closed = false
+        for (let i = 0; i < 24 && !closed; i++) {
+          const fresh = await waitForPip(1_500)
+          if (fresh) pipPage = fresh
+          await withTimeout(pipPage.cdp.send('Runtime.evaluate', {
+            expression: `(() => { const b = document.querySelector('[data-testid="pip-bring-back"]'); if (!b) return false; b.click(); return true })()`,
+            returnByValue: true
+          }), 6_000, 'pip bring back').catch(() => undefined)
+          for (let j = 0; j < 10 && !closed; j++) {
+            closed = ((await rpc('pipState()').catch(() => null))?.open) === false
+            if (!closed) await sleep(250)
+          }
+        }
+        if (!closed) {
+          ok = false
+          why = 'la PiP non risulta chiusa dopo «Riporta in Homun»'
+          // che cosa c'era davvero nella finestra PiP? (diagnosi della caduta)
+          await withTimeout(pipPage.cdp.send('Runtime.evaluate', {
+            expression: `JSON.stringify({ url: location.hash, testid: [...document.querySelectorAll('[data-testid]')].map((e) => e.getAttribute('data-testid')).slice(0, 6), testo: document.body.textContent.trim().slice(0, 90) })`,
+            returnByValue: true
+          }), 5_000, 'pip diag').then((r) => { if (r?.result?.value) log('giro ' + round + ' — finestra PiP:', r.result.value) }).catch(() => undefined)
+        }
+      }
+      // — Prendi il controllo: DEVE comparire nella finestra principale —
+      if (ok && !(await waitDom(`[...document.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Prendi il controllo' || b.textContent.trim() === 'Ferma e prendi il controllo')`, 20_000, 400))) {
+        ok = false
+        why = '«Prendi il controllo» non è comparso dopo il ritorno dalla PiP'
+      }
+      // — controllo preso, poi «Ho finito» per tornare in vista —
+      if (ok) {
+        if (await pageEval(`return [...document.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Ferma e prendi il controllo')`).catch(() => false)) {
+          await clickText('Ferma e prendi il controllo', { exact: true })
+        } else {
+          await clickText('Prendi il controllo', { exact: true })
+        }
+        if (!(await waitDom(`!!document.querySelector('[data-testid="bot-screen-done"]')`, 20_000, 400))) {
+          ok = false
+          why = 'il controllo non è arrivato («Ho finito» non c\'è)'
+        } else {
+          await clickText('Ho finito', { exact: true })
+          if (!(await waitDom(`[...document.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Prendi il controllo' || b.textContent.trim() === 'Ferma e prendi il controllo')`, 20_000, 400))) {
+            ok = false
+            why = 'non è tornato in vista dopo «Ho finito»'
+          }
+        }
+      }
+      if (!ok) {
+        falls.push(round)
+        log(`giro ${round}/${K3_ROUNDS}: CADUTO — ${why} — canarino view: ${await rfbCanary('vnc-view.sock')}`)
+        printTrace(startedAt - 2000)
+        if (falls.length === 1) printAppLog()
+      } else {
+        log(`giro ${round}/${K3_ROUNDS}: verde`)
+      }
+    }
+    check(`K3: ${K3_ROUNDS} giri di fila «Stacca → Riporta in Homun → Prendi il controllo» senza cadute`, falls.length === 0,
+      falls.length ? `caduti i giri ${falls.join(', ')} (${falls.length}/${K3_ROUNDS})` : `${K3_ROUNDS}/${K3_ROUNDS} verdi`)
+    if (falls.length) printTrace()
+    // l'errore visibile all'utente non dev'essere in nessun giro
+    check('K3: mai «La connessione allo schermo si è chiusa» in vista', !(await pageEval(`return document.body.textContent.includes('La connessione allo schermo si è chiusa')`).catch(() => false)))
   } catch (e9) {
     check('U9: il blocco del controllo gira senza eccezioni', false, String(e9?.message ?? e9).slice(0, 200))
   } finally {
@@ -839,7 +1058,7 @@ try {
 
 
   // =========== il VALORE non è da nessuna parte (transcript, entry, log, DB) ===========
-  {
+  if (!FAST) {
     // nel renderer (transcript vivo)
     const inDom = await pageEval(`return document.body.textContent.includes(${JSON.stringify(SECRET_VALUE)})`)
     // nei file dei dati temporanei (DB, WAL, log del daemon) e nel log dell'app

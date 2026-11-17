@@ -5,7 +5,7 @@
 // intatti nei due sensi e la chiusura del browser chiude le connessioni.
 // Niente Docker: il ponte gira con `node -e` sul socket locale del test.
 import { describe, expect, it, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { createServer, type Socket } from 'node:net'
 import { join } from 'node:path'
 import { connect as tcpConnect } from 'node:net'
@@ -178,8 +178,8 @@ describe('fase 19a (V9): il ponte dello schermo', () => {
   it('una capability vale UN upgrade solo; scade dopo 30 s (orologio finto)', async () => {
     const { url } = (await screenOpen('agent_x', 'view'))!
     const cap = url.split('/screen/')[1]!
-    // valido ora (SV1: la capability porta anche il segno peek)
-    expect(consumeScreenCap(cap, clock)).toEqual({ agentId: 'agent_x', mode: 'view', peek: false })
+    // valido ora (SV1: la capability porta anche il segno peek; K3: e noLaunch)
+    expect(consumeScreenCap(cap, clock)).toEqual({ agentId: 'agent_x', mode: 'view', peek: false, noLaunch: false })
     // RIUSO: la seconda volta non vale più (monouso)
     expect(consumeScreenCap(cap, clock)).toBeNull()
     // una capability nuova scade dopo SCREEN_CAP_TTL_MS
@@ -375,5 +375,101 @@ describe('fase 19a (V9): il ponte dello schermo', () => {
     const closed = new Promise<void>((r) => sock.on('close', () => r()))
     screenBrowserClosed('agent_peek')
     await closed
+  })
+
+  // ---- K3 (fase prima-release correzioni): la traccia di sola prova ----
+
+  describe('K3: la traccia SANDBOT_TEST_SCREEN_TRACE del ponte /screen', () => {
+  const TRACE = join(FAKE_DIR, 'screen-trace.jsonl')
+  const readTrace = () =>
+    readFileSync(TRACE, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l) as Record<string, unknown>)
+
+  /** apre una connessione VERA (cap + upgrade) e torna socket e capability. */
+  const openConn = async (agentId: string, opts?: { mode?: 'view' | 'control'; noLaunch?: boolean }) => {
+    const { url } = (await screenOpen(agentId, opts?.mode ?? 'view', opts?.noLaunch ? { noLaunch: true } : {}))!
+    const cap = url.split('/screen/')[1]!
+    const parts: Buffer[] = []
+    const sock = tcpConnect({ port: server.port, host: '127.0.0.1' }, () => sock.write(upgradeWith(cap)))
+    sock.on('data', (d: Buffer) => parts.push(d))
+    await vi.waitFor(() => expect(Buffer.concat(parts).includes('101 Switching Protocols')).toBe(true))
+    return { sock, cap }
+  }
+
+  // ogni test parte con la traccia PULITA (i file si accumulano altrimenti)
+  beforeEach(() => {
+    rmSync(TRACE, { force: true })
+  })
+
+  afterEach(() => {
+    delete process.env.SANDBOT_TEST_SCREEN_TRACE
+  })
+
+  it('SPENTA di default: nessuna riga, nessun file', async () => {
+    delete process.env.SANDBOT_TEST_SCREEN_TRACE
+    await ensureBrowserForScreen('agent_trace')
+    const { sock } = await openConn('agent_trace')
+    sock.destroy()
+    await new Promise((r) => setTimeout(r, 150))
+    expect(existsSync(TRACE)).toBe(false)
+  })
+
+  it('apertura e chiusura di ogni connessione, col CHI chiude (client-socket) e MAI la capability', async () => {
+    process.env.SANDBOT_TEST_SCREEN_TRACE = TRACE
+    await ensureBrowserForScreen('agent_trace')
+    const { sock, cap } = await openConn('agent_trace')
+    sock.destroy() // il client sparisce senza handshake
+    // la riga di chiusura arriva col processing del lato daemon: si aspetta
+    const open = await vi.waitFor(() => {
+      const l = readTrace().find((x) => x.event === 'open')
+      expect(l).toBeTruthy()
+      return l as Record<string, unknown> & { id: number }
+    })
+    expect(open).toMatchObject({ agent: 'agent_trace', mode: 'view', peek: false, noLaunch: false })
+    const close = await vi.waitFor(() => {
+      const l = readTrace().find((x) => x.event === 'close')
+      expect(l).toBeTruthy()
+      return l as Record<string, unknown>
+    })
+    expect(close).toMatchObject({ id: open.id, who: 'client-socket' })
+    // la capability non si logga MAI (nemmeno nella traccia di prova)
+    expect(readFileSync(TRACE, 'utf8').includes(cap)).toBe(false)
+  })
+
+  it('la modalità si vede: noLaunch (la PiP) e control distinti dalla vista normale', async () => {
+    process.env.SANDBOT_TEST_SCREEN_TRACE = TRACE
+    await ensureBrowserForScreen('agent_trace')
+    const pip = await openConn('agent_trace', { noLaunch: true })
+    pip.sock.destroy()
+    await vi.waitFor(() => expect(readTrace().some((l) => l.event === 'close' && l.noLaunch === true)).toBe(true))
+    expect(readTrace().find((l) => l.event === 'open' && l.noLaunch === true)).toMatchObject({ mode: 'view' })
+    const ctrl = await openConn('agent_trace', { mode: 'control' })
+    ctrl.sock.destroy()
+    await vi.waitFor(() => expect(readTrace().some((l) => l.event === 'close' && l.mode === 'control')).toBe(true))
+    expect(readTrace().find((l) => l.event === 'open' && l.mode === 'control')).toBeTruthy()
+  })
+
+  it('la revoca del browser chiude con who=browser-closed (e l\'evento si vede)', async () => {
+    process.env.SANDBOT_TEST_SCREEN_TRACE = TRACE
+    await ensureBrowserForScreen('agent_trace')
+    const { sock } = await openConn('agent_trace')
+    screenBrowserClosed('agent_trace')
+    await vi.waitFor(() => {
+      const lines = readTrace()
+      expect(lines.some((l) => l.event === 'browser-closed' && l.agent === 'agent_trace')).toBe(true)
+      expect(lines.find((l) => l.event === 'close')).toMatchObject({ who: 'browser-closed' })
+    })
+  })
+
+  it('screen:release chiude il controllo con who=release', async () => {
+    process.env.SANDBOT_TEST_SCREEN_TRACE = TRACE
+    await ensureBrowserForScreen('agent_trace')
+    await openConn('agent_trace', { mode: 'control' })
+    await screenRelease('agent_trace')
+    await vi.waitFor(() => {
+      const lines = readTrace()
+      expect(lines.some((l) => l.event === 'release' && l.agent === 'agent_trace')).toBe(true)
+      expect(lines.find((l) => l.event === 'close' && l.mode === 'control')).toMatchObject({ who: 'release' })
+    })
+  })
   })
 })
