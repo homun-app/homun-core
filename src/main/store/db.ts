@@ -572,6 +572,8 @@ export function listGrants(): Grant[] {
  * U7 (fase prima-release): i doppioni di (tool, target, scope, agent_id) si
  * fondono — resta la più VECCHIA, con la scadenza più LONTANO tra le sue
  * gemelle. Il database dell'utente aveva 15 righe per 8 concessioni.
+ * K1 (correzioni): NULL = PER SEMPRE — la fusione di due righe uguali è NULL
+ * se UNA delle due è NULL, altrimenti la scadenza più lontana.
  */
 export function dedupeGrants(): { removed: number } {
   const rows = db().prepare('SELECT id, tool, target, created_at AS createdAt, scope, expires_at AS expiresAt, agent_id AS agentId FROM grants ORDER BY created_at, id').all() as unknown as Array<Grant & { id: number }>
@@ -584,8 +586,17 @@ export function dedupeGrants(): { removed: number } {
       keep.set(key, r)
       continue
     }
-    // resta cur (la più vecchia: l'ordine la mette prima); la scadenza più lontana vince
-    if (r.expiresAt != null && (cur.expiresAt == null || r.expiresAt > cur.expiresAt)) {
+    // resta cur (la più vecchia: l'ordine la mette prima); K1: NULL = per
+    // sempre — se UNA delle due è NULL la fusione è NULL, altrimenti vince
+    // la scadenza più lontana
+    if (r.expiresAt == null) {
+      if (cur.expiresAt != null) {
+        db().prepare('UPDATE grants SET expires_at = NULL WHERE id = ?').run(cur.id)
+        cur.expiresAt = null
+      }
+    } else if (cur.expiresAt == null) {
+      // cur è già «per sempre»: resta NULL
+    } else if (r.expiresAt > cur.expiresAt) {
       db().prepare('UPDATE grants SET expires_at = ? WHERE id = ?').run(r.expiresAt, cur.id)
       cur.expiresAt = r.expiresAt
     }
@@ -600,12 +611,17 @@ export function dedupeGrants(): { removed: number } {
  * unico): ripetere «Consenti sempre» non crea doppioni; per le concessioni
  * A TEMPO la scadenza si ALLUNGA (vince la più lontana), per le altre non
  * cambia niente (created_at resta quello della prima).
+ * K1 (correzioni): NULL = PER SEMPRE — se la riga che arriva o quella che
+ * c'è è NULL la fusione è NULL (il «Consenti sempre» non può diventare a
+ * tempo, né restarlo, per l'arrivo di una scadenza); altrimenti la più
+ * lontana.
  */
 export function addGrant(tool: string, target: string, scope?: 'readOnly', expiresAt?: number, agentId?: string | null): void {
   db().prepare(`INSERT INTO grants(tool, target, created_at, scope, expires_at, agent_id) VALUES(?,?,?,?,?,?)
     ON CONFLICT(tool, target, coalesce(scope,''), coalesce(agent_id,'')) DO UPDATE SET
-      expires_at = CASE WHEN excluded.expires_at IS NOT NULL AND (grants.expires_at IS NULL OR excluded.expires_at > grants.expires_at)
-                        THEN excluded.expires_at ELSE grants.expires_at END`)
+      expires_at = CASE WHEN excluded.expires_at IS NULL OR grants.expires_at IS NULL THEN NULL
+                        WHEN excluded.expires_at > grants.expires_at THEN excluded.expires_at
+                        ELSE grants.expires_at END`)
     .run(tool, target, Date.now(), scope ?? null, expiresAt ?? null, agentId ?? null)
 }
 
