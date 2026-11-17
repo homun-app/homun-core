@@ -7,12 +7,17 @@
 // (con Apri), errore (con Riprova); se entro 15 s non arriva `connect` si
 // mostra l'errore, non un riquadro nero.
 import { useEffect, useRef, useState } from 'react'
+// U8 correzione #2 (dalla sonda fase-prima-release): noVNC si importa
+// DINAMICAMENTE, come già PipView e ScreenThumb — l'import STATICO nel
+// bundle del renderer principale non si collegava MAI (la connessione si
+// chiudeva subito), mentre le viste con l'import dinamico funzionavano
+
 import { useLingui, Trans } from '@lingui/react/macro'
 import { PictureInPicture2 } from 'lucide-react'
-import RFB from '@novnc/novnc'
 import { api, useStore } from '../store'
 import { useBotInfo } from '../bot/use-bot'
 import { ipcErrorMessage } from '../lib/ipc-error'
+import type RFB from '@novnc/novnc'
 import type { ScreenStatus } from '../../../shared/types'
 
 /** I 15 s entro cui deve arrivare `connect`, o si mostra l'errore. */
@@ -76,6 +81,7 @@ export function BotScreen({ agentId, onClose, inPanel = false }: { agentId: stri
       setPhase('connecting')
       const el = holder.current
       if (!el) return
+      const { default: RFB } = await import('@novnc/novnc')
       const client = new RFB(el, url, { wsProtocols: ['binary'] })
       rfb.current = client
       client.viewOnly = wanted === 'view'
