@@ -29,9 +29,11 @@
 import { spawn } from 'node:child_process'
 import { createServer } from 'node:http'
 import { createServer as createNetServer } from 'node:net'
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { findProbeDaemons, stopProbeDaemons } from './lib/probe-daemons.mjs'
+// K4: la pulizia vera di fine corsa (attesa dei pid, controllo delle cartelle)
+import { cleanupProbeRun } from './lib/probe-rm.mjs'
 
 const ROOT = resolve(import.meta.dirname, '..')
 // Vincoli della fase: temporanei SOLO con mkdtemp nella cartella indicata
@@ -291,6 +293,8 @@ function fakeRfbServer(sockPath) {
     setMode: (mode) => send({ c: 'mode', mode }),
     peakStart: () => send({ c: 'peak-start' }),
     peakStop: async () => (await ask('peak')).max,
+    // K4: il pid del figlio, per aspettarne l'uscita VERA prima di cancellare
+    pid: child.pid,
     close: () => new Promise((r) => { child.kill('SIGTERM'); setTimeout(() => { child.kill('SIGKILL'); r() }, 1_500) })
   }
 }
@@ -792,8 +796,8 @@ async function runOnce(run) {
         log(dlog.split('\n').slice(-20).join('\n'))
       }
     } catch { /* niente log */ }
-    // ---- chiusura: PRIMA il daemon, POI l'app, POI le cartelle ----
-    let dOk = true
+    // ---- chiusura (K4): PRIMA il daemon, POI l'app e i finti, poi le ----
+    // ---- cartelle SOLO quando i pid sono usciti DAVVERO (con controllo) ----
     try {
       const lock = JSON.parse(readFileSync(join(DAEMON_DATA, 'daemon.lock'), 'utf8'))
       if (Number.isInteger(lock.pid) && lock.pid > 1 && lock.pid !== process.pid) {
@@ -804,18 +808,20 @@ async function runOnce(run) {
       }
     } catch { /* niente lock */ }
     stopApp()
-    await sleep(1_200)
-    await stopProbeDaemons(PREFIX, { log })
-    const left = findProbeDaemons(PREFIX)
-    check(`corsa${run}: 0 daemon rimasti`, left.length === 0, left.map((d) => d.pid).join(','))
-    if (left.length > 0) dOk = false
     await rfbView.close()
     await rfbControl.close()
     await new Promise((r) => providerServer.close(() => r()))
-    if (dOk) {
-      rmSync(TMP, { recursive: true, force: true })
-      rmSync(SOCK, { recursive: true, force: true })
-    }
+    // K4: si aspetta l'uscita VERA di app e figli RFB (pid assenti, col
+    // tetto), poi rmSync e CONTROLLO che le cartelle non ci siano più
+    const { left: dirsLeft } = await cleanupProbeRun({
+      pids: [app?.pid, rfbView.pid, rfbControl.pid],
+      prefix: PREFIX,
+      dirs: [TMP, SOCK],
+      log
+    })
+    const left = findProbeDaemons(PREFIX)
+    check(`corsa${run}: 0 daemon rimasti`, left.length === 0, left.map((d) => d.pid).join(','))
+    check(`corsa${run}: K4 0 cartelle temporanee rimaste`, dirsLeft.length === 0, dirsLeft.join(', '))
   }
   return failures
 }

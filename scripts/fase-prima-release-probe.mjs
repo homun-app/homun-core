@@ -26,6 +26,8 @@ import { createServer as createNetServer } from 'node:net'
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, readdirSync, chmodSync, existsSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { findProbeDaemons, stopProbeDaemons } from './lib/probe-daemons.mjs'
+// K4: la pulizia vera di fine corsa (attesa dei pid, controllo delle cartelle)
+import { cleanupProbeRun } from './lib/probe-rm.mjs'
 
 // il figlio del server RFB si guarda SUBITO: niente cartelle né server nel figlio
 
@@ -195,6 +197,10 @@ const rfbChildMain = (sockPath) => {
   server.listen(sockPath)
 }
 if (process.argv.includes('--rfb-server')) {
+  // K4: il figlio esegue la TESTA dello script prima di arrivare qui e crea
+  // la sua cartella dati come il padre (erano le «2 cartelle da 8 KB» che le
+  // corse in errore lasciavano): la butta SUBITO, il figlio non tiene niente
+  rmSync(DATA, { recursive: true, force: true })
   rfbChildMain(process.argv[process.argv.indexOf('--rfb-server') + 1])
   await new Promise(() => undefined) // il figlio resta vivo: mai il codice della sonda
 }
@@ -848,6 +854,14 @@ try {
     // corsa, si contano le cadute e a ogni caduta si stampa la TRACCIA di
     // sola prova del ponte (SANDBOT_TEST_SCREEN_TRACE): apertura, modalità
     // (view/peek/noLaunch/control), CHI chiude e quando.
+    // SANDBOT_PROBE_FORCE_KO=1 (di sola prova, per K4): fa fallire un
+    // controllo e INTERROMPE la corsa qui — app, RFB e schermo tutti APERTI,
+    // come la corsa rossa della verifica: la pulizia deve comunque lasciare
+    // 0 cartelle.
+    if (process.env.SANDBOT_PROBE_FORCE_KO === '1') {
+      check('KO forzato di sola prova (SANDBOT_PROBE_FORCE_KO=1): questa corsa deve comunque lasciare 0 cartelle', false, 'il KO è voluto')
+      throw new Error('KO forzato di sola prova: ci si ferma qui con tutto APERTO, la pulizia parte lo stesso')
+    }
     const K3_ROUNDS = Number(process.env.SANDBOT_PROBE_K3_ROUNDS ?? 20)
     const traceFile = join(DATA, 'screen-trace.jsonl')
     const readTrace = () => {
@@ -1089,14 +1103,21 @@ try {
 } catch (e) {
   check('la sonda è arrivata in fondo senza eccezioni', false, String(e?.message ?? e).slice(0, 300))
 } finally {
-  // ---- chiusura: app, finti, daemon della sonda; cartella temporanea via ----
+  // ---- chiusura (K4): PRIMA si aspetta che i processi escano DAVVERO (pid ----
+  // ---- assenti, col tetto), POI rmSync, e si CONTROLLA che la cartella non  ----
+  // ---- esista più (un secondo tentativo, poi l'errore chiaro) — la pausa    ----
+  // ---- fissa di 1,2 s lasciava cartelle quando qualcosa riscriveva dopo     ----
   stopApp()
   rfbView?.kill('SIGTERM')
   rfbControl?.kill('SIGTERM')
   providerServer.close()
-  await stopProbeDaemons(PREFIX).catch(() => undefined)
-  await sleep(1200)
-  try { rmSync(DATA, { recursive: true, force: true }) } catch { /* best effort */ }
+  const { left, countBefore, countAfter } = await cleanupProbeRun({
+    pids: [app?.pid, rfbView?.pid, rfbControl?.pid],
+    prefix: PREFIX,
+    dirs: [DATA],
+    log
+  })
+  check(`K4: pulizia vera — cartelle ${PREFIX}-*: ${countBefore} prima, ${countAfter} dopo (0 rimaste)`, left.length === 0, left.join(', '))
 }
 
 log(`esito corsa ${run}: ${results.length - failed}/${results.length} controlli verdi`)

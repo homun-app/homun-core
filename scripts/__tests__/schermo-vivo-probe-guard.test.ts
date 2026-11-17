@@ -53,14 +53,19 @@ describe('guardia sonda fase-schermo-vivo', () => {
     const tmpBase = ['var', 'folders', 'nb', 'r6fbsdsn3z58bkbb9w55nn780000gn', 'T'].join('/')
     expect(src).toContain(`const TMP_BASE = '/${tmpBase}'`)
     expect(src.match(/mkdtempSync\(join\(TMP_BASE/g)?.length).toBeGreaterThanOrEqual(2)
-    expect(src).toContain('rmSync(TMP, { recursive: true, force: true })')
-    expect(src).toContain('rmSync(SOCK, { recursive: true, force: true })')
+    // K4: la cancellazione passa dall'helper condiviso cleanupProbeRun (attesa
+    // dei pid, rmSync, CONTROLLO che non esistano più, secondo tentativo)
+    expect(src).toContain("import { cleanupProbeRun } from './lib/probe-rm.mjs'")
+    expect(src).toMatch(/cleanupProbeRun\(\{\s*\n\s*pids: \[app\?\.pid, rfbView\.pid, rfbControl\.pid\]/)
+    expect(src).toContain('dirs: [TMP, SOCK]')
+    expect(src).toContain('K4 0 cartelle temporanee rimaste')
   })
 
   it('a fine corsa: PRIMA il daemon del lock, POI la rete di sicurezza dei daemon di prova', () => {
     expect(src).toMatch(/findProbeDaemons\(PREFIX\)/)
-    expect(src).toMatch(/stopProbeDaemons\(PREFIX, \{ log \}\)/)
     expect(src).toContain('0 daemon rimasti')
+    // K4: i daemon della sonda li ferma (e ne aspetta l'uscita) cleanupProbeRun
+    expect(src).toMatch(/cleanupProbeRun\(\{[\s\S]*prefix: PREFIX/)
   })
 
   it('il browser lo si spegne col file di uscita del finto MCP (mai un kill di processi veri)', () => {
