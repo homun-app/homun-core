@@ -3,7 +3,7 @@
 // v0.4.2 collega l'embedder da sola (pullModel sul motore APERTO). Il test
 // serve il modello VERO di ~/.cache/engramma/models da un server locale su
 // 127.0.0.1 con ENGRAMMA_PULL_BASE: nessuna rete.
-import { describe, expect, it, afterAll } from 'vitest'
+import { describe, expect, it, afterAll, vi } from 'vitest'
 import { mkdtempSync, rmSync, existsSync, statSync, createReadStream } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -77,22 +77,16 @@ describe.skipIf(!hasLocalEmbedModel())('fase memoria-engramma · correzioni C8: 
       const api = buildApiMethods((ev) => events.push(ev), { poke: () => undefined } as never)
       expect(api['memory:model-pull']([])).toEqual({ started: true })
       // si aspetta la fine (il download da 127.0.0.1 dei ~400 MB)
-      const deadline = Date.now() + 120_000
-      while (!events.some((ev) => ev.type === 'memory' && ev.phase === 'model-pull' && ev.finished)) {
-        if (Date.now() > deadline) throw new Error('il download dal server locale non è finito in 120 s')
-        await new Promise((r) => setTimeout(r, 100))
-      }
+      await vi.waitFor(
+        () => expect(events.some((ev) => ev.type === 'memory' && ev.phase === 'model-pull' && ev.finished)).toBe(true),
+        { timeout: 120_000, interval: 100 }
+      )
       const failed = events.find((ev) => ev.type === 'memory' && ev.phase === 'model-pull' && ev.finished && (ev as { error?: string }).error)
       expect(failed).toBeUndefined()
 
       // 1. present passa a true (col collegamento a caldo è immediato; la
       // vecchia riapertura ci mette il tempo di ricaricare il modello)
-      const deadlinePresent = Date.now() + 60_000
-      for (;;) {
-        if ((await e.memoryEngineStatus()).model.present) break
-        if (Date.now() > deadlinePresent) throw new Error('modelStatus().present resta false dopo il download')
-        await new Promise((r) => setTimeout(r, 100))
-      }
+      await vi.waitFor(() => e.memoryEngineStatus().then((s) => expect(s.model.present).toBe(true)), { timeout: 60_000, interval: 100 })
 
       // 2. la CELLA di prima continua a vivere (nessuna riapertura: close
       // l'avrebbe chiusa per sempre) e ci si scrive ancora

@@ -149,8 +149,7 @@ describe('AH3: lo store ricarica i subagents all\'evento (nessun reload della ch
     const before = callsOf('listSubagents').length
     const onEvent = callsOf('onEvent')[0]!.args[0] as (e: unknown) => void
     onEvent({ type: 'subagents', parentId: 'bot-padre' })
-    await new Promise((r) => setTimeout(r, 50))
-    expect(callsOf('listSubagents').length).toBeGreaterThan(before)
+    await vi.waitFor(() => expect(callsOf('listSubagents').length).toBeGreaterThan(before), { timeout: 2000, interval: 5 })
     expect(useStore.getState().subagents[0]?.agentStatus).toBe('paused-for-approval')
     // NESSUN reload della chat: le entries non si toccano
     expect(useStore.getState().entries).toEqual([subEntry])

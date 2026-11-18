@@ -5,7 +5,7 @@
 // cancellato, NESSUN open), gli override di prova ignorati nell'app
 // impacchettata e lo spazio insufficiente. L'esecutore gira con dipendenze
 // INIETTABILI: nessuno spawn, nessuna rete (il fetch è finto).
-import { describe, expect, it, beforeAll, afterEach } from 'vitest'
+import { describe, expect, it, beforeAll, afterEach, vi } from 'vitest'
 import { createHash } from 'node:crypto'
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, statSync } from 'node:fs'
 import { join } from 'node:path'
@@ -537,13 +537,11 @@ const harness = (over: {
 
 /** attende che lo stato del controller soddisfi la condizione (o scade). */
 const waitForState = async (ctl: { state(): BoxSetupState }, ok: (s: BoxSetupState) => boolean, ms = 5_000): Promise<BoxSetupState> => {
-  const deadline = Date.now() + ms
-  for (;;) {
+  return await vi.waitFor(() => {
     const s = ctl.state()
-    if (ok(s)) return s
-    if (Date.now() > deadline) throw new Error(`stato non raggiunto: ${s.phase}`)
-    await new Promise((r) => setTimeout(r, 10))
-  }
+    if (!ok(s)) throw new Error(`stato non raggiunto: ${s.phase}`)
+    return s
+  }, { timeout: ms, interval: 10 })
 }
 
 describe('OB1 createBoxSetup: l\'esecutore, dal download al ready', () => {

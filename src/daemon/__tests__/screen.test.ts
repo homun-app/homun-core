@@ -408,8 +408,14 @@ describe('fase 19a (V9): il ponte dello schermo', () => {
     delete process.env.SANDBOT_TEST_SCREEN_TRACE
     await ensureBrowserForScreen('agent_trace')
     const { sock } = await openConn('agent_trace')
+    // la connessione registrata sospende il timer del browser (held): è la
+    // prova che il lato daemon l'ha presa in carico
+    await vi.waitFor(() => expect(browserHoldMs('agent_trace', Date.now())).not.toBeNull(), { timeout: 2000, interval: 5 })
     sock.destroy()
-    await new Promise((r) => setTimeout(r, 150))
+    // il teardown del lato daemon è il segnale di «finito»: la riga di traccia
+    // si scrive PRIMA del conns.delete, quindi quando held torna null la
+    // decisione sulla traccia è già stata presa — POI il controllo al negativo
+    await vi.waitFor(() => expect(browserHoldMs('agent_trace', Date.now())).toBeNull(), { timeout: 2000, interval: 5 })
     expect(existsSync(TRACE)).toBe(false)
   })
 

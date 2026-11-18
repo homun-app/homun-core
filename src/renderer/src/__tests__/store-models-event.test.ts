@@ -3,7 +3,7 @@
 // leggeva solo in init(): la guida scriveva models.main e il pannello del bot
 // restava su «Modello: Nessun modello ›» finché non ricaricavi la finestra.
 import './render-helper-install'
-import { describe, expect, it, beforeEach } from 'vitest'
+import { describe, expect, it, beforeEach, vi } from 'vitest'
 import { callsOf, stubApiMethod } from './render-helper-install'
 import type { ProviderPublic, MainModel, SandbotEvent } from '../../../shared/types'
 
@@ -32,9 +32,11 @@ describe('GC6.1: lo store si aggiorna quando models.main o i provider cambiano',
     stubApiMethod('settingsGet', (key: unknown, fallback: unknown) => (key === 'models.main' ? MAIN : fallback))
     const onEvent = callsOf('onEvent')[0]!.args[0] as (e: SandbotEvent) => void
     onEvent({ type: 'models' })
-    // gli aggiornamenti partono SUBITO (promise microtask)
-    await new Promise((r) => setTimeout(r, 30))
-    expect(useStore.getState().providers).toEqual(PROVIDERS)
-    expect(useStore.getState().mainModel).toEqual(MAIN)
+    // gli aggiornamenti partono SUBITO (promise microtask): si aspettano con
+    // waitFor, non con un tempo fisso
+    await vi.waitFor(() => {
+      expect(useStore.getState().providers).toEqual(PROVIDERS)
+      expect(useStore.getState().mainModel).toEqual(MAIN)
+    }, { timeout: 2000, interval: 5 })
   })
 })

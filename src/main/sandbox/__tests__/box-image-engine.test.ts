@@ -84,15 +84,13 @@ describe('OBD4c: una richiesta con ALTRO motore aspetta la build in corso, poi p
       return { stdout: '', stderr: '', exitCode: 0, signal: null }
     }) as unknown as Parameters<typeof setDockerRunnerForTests>[0])
     const pDocker = ensureBoxImage(dockerEngine)
-    for (let i = 0; i < 100 && enginesOf.length < 1; i++) await new Promise((r) => setTimeout(r, 20))
-    expect(enginesOf).toEqual(['docker'])
+    await vi.waitFor(() => expect(enginesOf).toEqual(['docker']), { timeout: 2000, interval: 10 })
     // la richiesta con ALTRO motore: NON si aggancia alla build docker —
     // aspetta che finisca e poi parte COL SUO motore
     const pApple = ensureBoxImage(appleContainerEngine)
     releases.shift()?.()
     expect(await pDocker).toBe(true)
-    for (let i = 0; i < 100 && enginesOf.length < 2; i++) await new Promise((r) => setTimeout(r, 20))
-    expect(enginesOf).toEqual(['docker', 'apple-container'])
+    await vi.waitFor(() => expect(enginesOf).toEqual(['docker', 'apple-container']), { timeout: 2000, interval: 10 })
     releases.shift()?.()
     expect(await pApple).toBe(true)
   })
@@ -125,15 +123,15 @@ describe('OBD3: chi si aggancia a un build già in corso riceve gli aggiornament
     const first: BuildProgress[] = []
     const p1 = ensureBoxImage(appleContainerEngine, (p) => first.push(p))
     // la build parte e manda il primo aggiornamento
-    for (let i = 0; i < 100 && first.length === 0; i++) await new Promise((r) => setTimeout(r, 20))
-    expect(first.map((p) => p.activity)).toEqual(['running'])
+    await vi.waitFor(() => expect(first.map((p) => p.activity)).toEqual(['running']), { timeout: 2000, interval: 10 })
     // il secondo chiamante si aggancia alla build GIÀ in corsa
     const second: BuildProgress[] = []
     const p2 = ensureBoxImage(appleContainerEngine, (p) => second.push(p))
-    // si rilasciano ENTRAMBI i gate (il secondo aggiornamento, poi la fine):
-    // le promise si aspettano DOPO, quando la build può finire
+    // si rilasciano ENTRAMBI i gate: prima si aspetta che il secondo
+    // aggiornamento (il download) sia arrivato agli ascoltatori, POI si
+    // chiude la build — le promise si aspettano DOPO, quando può finire
     releases.shift()?.()
-    await new Promise((r) => setTimeout(r, 100))
+    await vi.waitFor(() => expect(second.map((p) => p.activity)).toEqual(['downloading']), { timeout: 2000, interval: 10 })
     releases.shift()?.()
     expect(await p1).toBe(true)
     expect(await p2).toBe(true)

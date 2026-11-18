@@ -1,7 +1,7 @@
 // Test di unità della fase mcp-setup: il gateway Composio avvisa quando
 // un'app diventa ACTIVE (M5.3, SOLO la transizione) e il resolver dei server
 // del registro col template risolve l'URL e rifiuta di partire con le graffe.
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createComposioGatewayManager } from '../composio-gateway'
 import { buildMcpAuthResolver } from '../wiring'
 import type { McpServerConfig } from '../../mcp'
@@ -39,11 +39,11 @@ describe('gateway: onAppActive (M5.3)', () => {
     const { manager, active } = makeGateway()
     await manager.connectApp('gmail', { name: 'Gmail' })
     // il collegamento gira: il link si apre, WAIT finisce, `list` dice ACTIVE
-    await new Promise((r) => setTimeout(r, 30))
-    expect(active).toEqual([{ slug: 'gmail', name: 'Gmail' }])
-    // il refresh di un'app GIÀ attiva NON ri-avvisa
+    await vi.waitFor(() => expect(active).toEqual([{ slug: 'gmail', name: 'Gmail' }]), { timeout: 2000, interval: 5 })
+    // il refresh di un'app GIÀ attiva NON ri-avvisa: refreshAccounts è tutta
+    // attesa interna (setApp che notifica è sincrono) — finito l'await la
+    // decisione è già presa, niente pause
     await manager.refreshAccounts()
-    await new Promise((r) => setTimeout(r, 30))
     expect(active).toHaveLength(1)
   })
 })

@@ -185,9 +185,9 @@ describe('BX3: i comportamenti automatici dell\'ensure del box', () => {
     await ensureBoxContainer()
     // la ricreazione è avvenuta (l'immagine del container era VECCHIA)...
     expect(f.calls.some((a) => a[0] === 'rm' && a[1] === '-f' && a[2] === BOX_CONTAINER)).toBe(true)
-    // ...e la VECCHIA immagine è stata tolta, la NUOVA mai
-    await new Promise((r) => setTimeout(r, 50))
-    expect(removed).toEqual([['image', 'rm', vecchia]])
+    // ...e la VECCHIA immagine è stata tolta, la NUOVA mai (la rimozione
+    // parte dopo il riparto del box: si aspetta che avvenga, non un tempo fisso)
+    await vi.waitFor(() => expect(removed).toEqual([['image', 'rm', vecchia]]), { timeout: 2000, interval: 10 })
     expect(removed.some((a) => a.includes(boxImage()))).toBe(false)
   })
 

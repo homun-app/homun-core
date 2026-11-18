@@ -4,7 +4,7 @@
 // temporanea e processi figlio VERI ma innocui (echo/sleep): nessun Docker,
 // nessuna rete, nessuna home reale. F3: il comando gira nel wrapper COSTANTE
 // (pid ed exit file scritti da lui): la chiusura NON dipende dal daemon.
-import { describe, expect, it, beforeAll, afterAll, beforeEach } from 'vitest'
+import { describe, expect, it, beforeAll, afterAll, beforeEach, vi } from 'vitest'
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -159,12 +159,7 @@ describe('notifica SHELL_DONE e riconciliazione al riavvio', () => {
     // NON lo aspettiamo: l'exit file lo scrive il WRAPPER (non c'è più un
     // gestore close del daemon); è il tick a finalizzare e notificare
     const exitPath = join(TMP, 'box', 'home', AGENT, '.sandbot/shells', `${started.shellId}.exit`)
-    for (let i = 0; i < 50; i++) {
-      let closed = false
-      try { closed = readFileSync(exitPath, 'utf8').trim() === '0' } catch { closed = false }
-      if (closed) break
-      await new Promise((r) => setTimeout(r, 100))
-    }
+    await vi.waitFor(() => expect(readFileSync(exitPath, 'utf8').trim()).toBe('0'), { timeout: 10_000, interval: 50 })
     await tickShellJobs(t.deps)
     const job = getShellJob(db(), started.shellId)!
     expect(job.status).toBe('done')
@@ -191,12 +186,7 @@ describe('notifica SHELL_DONE e riconciliazione al riavvio', () => {
     expect(getShellJob(db(), started.shellId)!.status).toBe('running')
     // il comando finisce da solo: nessun gestore del daemon, solo l'exit file
     const p = backgroundShellPaths(started.shellId)
-    for (let i = 0; i < 60; i++) {
-      let closed = false
-      try { closed = readFileSync(join(TMP, 'box', 'home', AGENT, p.exit), 'utf8').trim() === '0' } catch { closed = false }
-      if (closed) break
-      await new Promise((r) => setTimeout(r, 100))
-    }
+    await vi.waitFor(() => expect(readFileSync(join(TMP, 'box', 'home', AGENT, p.exit), 'utf8').trim()).toBe('0'), { timeout: 10_000, interval: 50 })
     touched = await tickShellJobs(t.deps, { reconcile: true })
     expect(touched).toBe(1)
     const job = getShellJob(db(), started.shellId)!
@@ -245,14 +235,15 @@ describe('notifica SHELL_DONE e riconciliazione al riavvio', () => {
     expect(getShellJob(db(), 'sh-old')!.status).toBe('expired')
     expect(t.enqueued.some((e) => e.text.includes('id="sh-old"'))).toBe(true)
     // il GRUPPO è davvero morto (TERM, poi KILL dopo la grazia: qui già andato)
-    let dead = false
-    try { process.kill(-alive.pid!, 0) } catch { dead = true }
-    if (!dead) {
-      // il figlio sleep può sopravvivere un istante: killProcessGroup escalates
-      await new Promise((r) => setTimeout(r, 6_000))
-      try { process.kill(-alive.pid!, 0) } catch { dead = true }
+    const groupAlive = (pg: number): boolean => {
+      try { process.kill(-pg, 0); return true } catch { return false }
     }
-    expect(dead).toBe(true)
+    if (groupAlive(alive.pid!)) {
+      // il figlio sleep può sopravvivere un istante: killProcessGroup escalates
+      // — si aspetta che il gruppo muoia davvero, non un tempo fisso
+      await vi.waitFor(() => expect(groupAlive(alive.pid!)).toBe(false), { timeout: 10_000, interval: 100 })
+    }
+    expect(groupAlive(alive.pid!)).toBe(false)
   })
 
   it("il bot ha GIÀ letto l'esito con await_shell → nessuna notifica SHELL_DONE dopo la chiusura", async () => {

@@ -211,11 +211,14 @@ describe('SV4: il manager della PiP (finestra finta)', () => {
     // le misure salvate DENTRO gli schermi si usano
     expect(win.options.x).toBe(5)
     expect(win.options.width).toBe(400)
-    // la finestra si sposta: il bounds nuovo si salva
+    // la finestra si sposta: il bounds nuovo si salva (il debounce è un timer
+    // VERO del prodotto, 250 ms: si aspetta l'EFFETTO — la scritture del
+    // setting — non un tempo fisso sopra il debounce)
     win.bounds = { x: 40, y: 50, width: 520, height: 325 }
     win.emit('resize')
     win.emit('move')
-    await new Promise((r) => setTimeout(r, 400)) // il debounce del salvataggio
+    const boundsWritten = () => ctx.settingsWritten.filter(([k]) => k === 'ui.pip.bounds').map(([, v]) => v as PipRect)
+    await vi.waitFor(() => expect(boundsWritten().at(-1)).toEqual({ x: 40, y: 50, width: 520, height: 325 }), { timeout: 2000, interval: 10 })
     ctx.manager.close()
     const saved = ctx.settingsWritten.filter(([k]) => k === 'ui.pip.bounds').map(([, v]) => v as PipRect)
     expect(saved[saved.length - 1]).toEqual({ x: 40, y: 50, width: 520, height: 325 })

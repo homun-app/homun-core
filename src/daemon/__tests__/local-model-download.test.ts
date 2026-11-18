@@ -57,13 +57,15 @@ beforeAll(async () => {
       const target = from + Math.min(slice.length, 20_000)
       res.write(slice.slice(0, 20_000), () => {
         void (async () => {
-          for (let i = 0; i < 500; i++) {
-            try {
-              if (existsSync(partPath()) && statSync(partPath()).size >= target) break
-            } catch { /* il .part compare e cresce: si riprova */ }
-            await new Promise((r) => setTimeout(r, 10))
+          // come RU2 nel test dell'agente: si aspetta il file con waitFor
+          // (mai un orologio fisso); in ogni caso la risposta si chiude
+          try {
+            await vi.waitFor(() => {
+              if (!existsSync(partPath()) || statSync(partPath()).size < target) throw new Error('i byte non sono ancora sul .part')
+            }, { timeout: 5000, interval: 10 })
+          } finally {
+            res.destroy()
           }
-          res.destroy()
         })()
       })
       return
@@ -131,11 +133,12 @@ const statusOf = async (): Promise<LocalModelStatusRpc> =>
 
 /** attende che una condizione diventi vera (attesa sullo STATO, mai su un tempo fisso) */
 const waitFor = async (cond: () => boolean | Promise<boolean>, what: string, attempts = 500): Promise<void> => {
-  for (let i = 0; i < attempts; i++) {
-    if (await cond()) return
-    await new Promise((r) => setTimeout(r, 20))
-  }
-  throw new Error(`attesa fallita: ${what}`)
+  // la condizione falsa si tramuta in ERRORE: la waitFor di vitest con una
+  // callback async risolve alla prima risoluzione, qualunque sia il valore —
+  // solo il throw la tiene in attesa
+  await vi.waitFor(async () => {
+    if (!(await cond())) throw new Error(`attesa fallita: ${what}`)
+  }, { timeout: attempts * 20, interval: 20 })
 }
 
 describe('fase locale correzioni 2 (LD1): la fine del download aggancia il provider UNA volta per tutte', () => {
@@ -253,7 +256,7 @@ describe('fase locale correzioni (LC2): Annulla → paused (NON error), Riprendi
     seenRanges.length = 0
     await lm.restartLocalModelDownload({ fetch: fakeFetch as unknown as typeof fetch, url: `${base}/${ENTRY.file}`, entry: ENTRY })
     // si aspetta che il download ricominciato ARRIVI in fondo (il .part non c'è già più)
-    for (let i = 0; i < 100 && !existsSync(finalPath()); i++) await new Promise((r) => setTimeout(r, 20))
+    await waitFor(() => existsSync(finalPath()), 'il download ricominciato non è arrivato in fondo')
     expect(seenRanges.at(-1)).toBe('') // nessun Range: da zero
     expect(await statusOf()).toMatchObject({ state: expect.stringMatching(/ready|running/) })
   })

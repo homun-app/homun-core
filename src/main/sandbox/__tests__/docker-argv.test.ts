@@ -622,19 +622,17 @@ describe('DOCKER_BG_WRAPPER_SH col vero /bin/sh (F1)', () => {
       child.unref()
       const pidFile = join(tmp, '.sandbot/shells/sh-k.pid')
       let pgid = 0
-      for (let i = 0; i < 40 && !pgid; i++) {
-        try { pgid = Number(readFileSync(pidFile, 'utf8').trim()) } catch { await new Promise((r) => setTimeout(r, 100)) }
-      }
-      expect(pgid).toBeGreaterThan(0)
+      await vi.waitFor(() => {
+        try { pgid = Number(readFileSync(pidFile, 'utf8').trim()) } catch { throw new Error('il pid file non è ancora comparso') }
+        expect(pgid).toBeGreaterThan(0)
+      }, { timeout: 5000, interval: 50 })
       // come il wrapper docker: TERM all'INTERO gruppo (pid negativo)
       process.kill(-pgid, 'SIGTERM')
       // il gruppo muore: shell E figlio (pieno di grazia, poi si controlla)
-      let dead = false
-      for (let i = 0; i < 50 && !dead; i++) {
-        try { process.kill(-pgid, 0) } catch { dead = true }
-        if (!dead) await new Promise((r) => setTimeout(r, 100))
+      const groupAlive = (pg: number): boolean => {
+        try { process.kill(-pg, 0); return true } catch { return false }
       }
-      expect(dead).toBe(true)
+      await vi.waitFor(() => expect(groupAlive(pgid)).toBe(false), { timeout: 5000, interval: 50 })
       // il wrapper ucciso NON ha scritto l'exit file (nessuna chiusura spuria)
       expect(existsSync(join(tmp, '.sandbot/shells/sh-k.exit'))).toBe(false)
     } finally {

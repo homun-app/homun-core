@@ -6,7 +6,7 @@
 // — dentro onProgress alla prima chiamata con byte > 0, MAI con un timer che
 // gareggia contro l'I/O; e il «cut» del server chiude solo dopo che i byte
 // sono arrivati sul .part (poll sul file).
-import { describe, expect, it, beforeAll, afterAll } from 'vitest'
+import { describe, expect, it, beforeAll, afterAll, vi } from 'vitest'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, statSync, createReadStream, readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
@@ -67,14 +67,16 @@ beforeAll(async () => {
       const target = from + Math.min(slice.length, abortAfterBytes)
       res.write(slice.slice(0, abortAfterBytes), () => {
         void (async () => {
-          for (let i = 0; i < 500; i++) {
-            try {
-              if (existsSync(join(MODELS_DIR, ENTRY.file + '.part')) &&
-                  statSync(join(MODELS_DIR, ENTRY.file + '.part')).size >= target) break
-            } catch { /* il .part compare e cresce: si riprova */ }
-            await new Promise((r) => setTimeout(r, 10))
+          // si aspetta il file con waitFor (mai un orologio fisso); in ogni
+          // caso la risposta si chiude
+          try {
+            await vi.waitFor(() => {
+              const p = join(MODELS_DIR, ENTRY.file + '.part')
+              if (!existsSync(p) || statSync(p).size < target) throw new Error('i byte non sono ancora sul .part')
+            }, { timeout: 5000, interval: 10 })
+          } finally {
+            res.destroy()
           }
-          res.destroy()
         })()
       })
       return
