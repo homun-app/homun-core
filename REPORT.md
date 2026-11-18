@@ -1,3 +1,81 @@
+# REPORT FASE ATTESE-TEST (A1, A2, prova di carico): niente pause fisse dove si aspetta che qualcosa SUCCEDA — apps-connect aspetta eventi, gli altri file pure, e sotto carico il prima/dopo è 0/200 contro 178/200
+
+Base d642e563 (main, tag v0.3.1001-beta.9) → 3 commit: A1 (6315cb59), A2 (ce0d9986), questo REPORT; tag di chiusura `fase-attese-test` (annotato, dopo il commit del REPORT). Toccati SOLO file di test (apps-connect + i 13 file di A2 con pause da correggere): nessun file di prodotto, NESSUNA correzione ha richiesto di toccarlo (nessuna proposta bloccata). CHANGELOG invariato, eval/auto-review.eval.ts NON eseguito, nessun push, nessun tag v*.
+
+## Il ROSSO di A1 (visto prima del commit)
+
+Nel `loginGate`, dopo `gate.release()`, una pausa di 50 ms prima di risolvere `{ status: 'connected' }` (il login lento di una macchina carica); pause fisse del test ancora a 20 ms. `npx vitest run src/daemon/__tests__/apps-connect.test.ts`: **2 failed | 7 passed (9)**, durata 1,98 s, con lo stesso identico sintomo di entrambi i punti caldi:
+
+- «non entrato → login → appena connesso parte connectApp per lo slug GIUSTO» → `AssertionError: expected [] to deeply equal [ { slug: 'gmail', name: 'Gmail' } ]` (apps-connect.test.ts:157:43)
+- «un secondo clic SOSTITUISCE l'intenzione (un solo flusso di login)» → `AssertionError: expected [] to deeply equal [ { slug: 'slack', name: 'Slack' } ]` (apps-connect.test.ts:184:43)
+
+Le due pause «controllo che NON succeda» (righe 199 e 239) passavano per caso: a 20 ms il flusso non era ancora finito, quindi connectAppCalls era vuoto per pigrizia del tempo, non perché la decisione fosse presa.
+
+## A1 — apps-connect.test.ts
+
+Le 5 pause, con le due regole della fase:
+
+- riga 150 (il login è fermo sul lucchetto): `await new Promise(setImmediate)` — macrotask, zero millisecondi; il controllo non può dare falsi rossi perché connectApp non può partire finché il lucchetto tiene.
+- righe 153 e 179: `await vi.waitFor(() => expect(connectAppCalls).toEqual([...]))` con `{ timeout: 2000, interval: 5 }`. Nella 179 il controllo «un solo flusso di Composio» (runConnectCalls composio = 1) arriva DOPO il waitFor, come chiesto.
+- righe 199 e 239: l'emit registrante (`emitRecorder`) registra gli eventi arrivati DOPO il rilascio e scioglie una promise al primo `connectors` di quel gruppo — è la fine vera del flusso nel prodotto (runComposioLoginWithIntent termina lì quando l'app NON parte: è così che la UI si aggiorna). Aspettato quello, poi `connectAppCalls` vuoto. Nella 239 l'attesa è `vi.waitFor`; nella 199 no (vedi sotto).
+
+`Date.now` del test di scadenza: scelto `vi.spyOn(Date, 'now')` con `mockRestore` nel `finally` (contro l'assegnazione a mano `Date.now = ...`). Perché: il finally col mockRestore rimette il metodo vero anche cadendo prima, e il mock resta tracciato nei registri di vitest invece di una mutazione globale tacita. La finestra finta però NON si può chiudere al rilascio: il prodotto legge `Date.now()` per la scadenza DOPO che il login lento ha risolto (50 ms dopo `gate.release()`); ripristinare prima falsificherebbe la scadenza (l'intenzione sembrerebbe viva e connectApp partirebbe). Perciò il finto vale finché il prodotto non ha deciso: la fine del flusso è l'evento `connectors`, atteso con la promise sciolta dall'emit — niente millisecondi e niente waitFor col tempo finto — e il `mockRestore` arriva PRIMA di qualunque `vi.waitFor` (che in quel test, dopo la fine del flusso, nemmeno serve: la decisione è già presa, resta l'expect). Nota verificata sul codice installato (vitest 5.0.5): il tetto di `vi.waitFor` usa i timer di `getSafeTimers()` (setTimeout/setInterval), NON `Date.now` — la cautela della fase resta giusta per le versioni a venire, qui non morde.
+
+Il login lento RESTA nel test (`LOGIN_DELAY_MS = 50` nel loginGate, parametrizzato): verde 9/9 a 50 ms (1,54 s); provato UNA volta a 500 ms → 9/9 in 3,23 s, poi riportato a 50.
+
+Scoperta sul vivo, finita nei commenti degli helper: nella vitest 5.0.5 una callback ASYNC di `vi.waitFor` risolve la waitFor alla prima RISOLUZIONE della promise, qualunque sia il valore — solo il rifiuto la fa riprovare. Le condizioni async vanno scritte con expect/throw (il primo giro di A2 è caduto qui: local-model-download dava stato `not-installed` perché la waitFor riteneva riuscita una condizione ancora falsa).
+
+## A2 — le pause degli altri 15 file
+
+Tipo: 1 «aspetto che succeda», 2 «controllo che non succeda», 3 «la pausa È il comportamento provato». Corretti solo 1 e 2; le righe sono quelle dei file PRIMA delle correzioni.
+
+| file:riga | tipo | decisione |
+|---|---|---|
+| box-image-engine.test.ts:87 | 1 | vi.waitFor su enginesOf = ['docker'] {2000,10} |
+| box-image-engine.test.ts:94 | 1 | vi.waitFor su ['docker','apple-container'] |
+| box-image-engine.test.ts:128 | 1 | vi.waitFor su first = ['running'] |
+| box-image-engine.test.ts:136 | 1 | pausa cieca diventata segnale: vi.waitFor su second = ['downloading'] PRIMA di chiudere la build |
+| local-model-download.test.ts:64 | 1 | il server finto aspetta i byte sul .part con vi.waitFor {5000,10}, res.destroy in finally (fail-open come prima) |
+| local-model-download.test.ts:136 | 1 | è l'helper waitFor del file: riscritto su vi.waitFor; la condizione async falsa diventa throw (vedi sopra) |
+| local-model-download.test.ts:256 | 1 | waitFor del file su existsSync(finalPath()) |
+| local-model-download.test.ts:342 | 3 | la latenza finta del fetch È il caso provato (LD5: consegna ritardata) — resta |
+| docker-argv.test.ts:626 | 1 | vi.waitFor sul pid file del wrapper {5000,50} |
+| docker-argv.test.ts:635 | 1 | vi.waitFor che il gruppo muoia (kill(-pgid,0) che throw) |
+| fase-mcp-setup.test.ts:42 | 1 | vi.waitFor su active = [gmail] {2000,5} |
+| fase-mcp-setup.test.ts:46 | 2 | segnale di finito = l'await stesso: refreshAccounts è tutta attesa interna (setApp che notifica è sincrono) → pausa tolta, controllo dopo l'await |
+| shells.test.ts:166 | 1 | vi.waitFor sull'exit file '0' {10000,50} |
+| shells.test.ts:198 | 1 | idem |
+| shells.test.ts:252 | 1 | i 6 s fissi diventano vi.waitFor che il gruppo ucciso muoia {10000,100} |
+| model-pull.test.ts:83 | 1 | vi.waitFor sull'evento memory/model-pull finished {120000,100} |
+| model-pull.test.ts:94 | 1 | vi.waitFor su model.present {60000,100} |
+| box-setup.test.ts:39 | 3 (drain) | svuota i timer VERI dell'harness prima della rmSync di pulizia: non precede nessuna asserzione e non c'è un segnale di fine senza tracciare i controller — resta (proposta sotto) |
+| box-setup.test.ts:545 | 1 | è l'helper waitForState: riscritto su vi.waitFor, stesso messaggio d'errore, interval 10 |
+| store-models-event.test.ts:36 | 1 | vi.waitFor su providers+mainModel dello store {2000,5} |
+| screen-thumb.test.ts:127 | 3 | flush di macrotask a 0 ms: nessun millisecondo, l'ordine di coda non è sensibile al carico — resta |
+| aiutanti-card-viva.test.ts:152 | 1 | vi.waitFor su listSubagents richiamato {2000,5} |
+| disk-space.test.ts:189 | 1 | la rimozione dell'immagine vecchia è fire-and-forget nel prodotto: vi.waitFor su removed {2000,10} |
+| model-capability.test.ts:142 | 3 | la latenza finta del fetch rende misurabile il tetto di 4 /api/show in parallelo — resta |
+| local-model.test.ts:75 | 1 | come LD5: vi.waitFor sui byte del .part {5000,10}, destroy in finally |
+| pip.test.ts:218 | 1 (timer vero) | il debounce (250 ms) è un timer vero del prodotto: si aspetta l'EFFETTO osservabile — la scrittura di ui.pip.bounds in settingsWritten — con vi.waitFor {2000,10}, prima della chiusura |
+| screen.test.ts:412 | 2 | segnale di finito = il teardown del ponte: la riga di traccia si scrive PRIMA del conns.delete, quindi quando browserHoldMs torna null la decisione sulla traccia è già presa. waitFor su held≠null (connessione presa in carico), destroy, waitFor su held=null, poi expect(existsSync(TRACE)).toBe(false) |
+
+Nessuna di queste correzioni ha richiesto il prodotto. Proposta (NON fatta, fuori perimetro): box-setup.test.ts:39 — il segnale di fine esisterebbe solo tracciando i controller creati dai test (createBoxSetup ×34 nel file) e attendendone la fine (start risolto o cancel) in afterEach: ristrutturazione dell'intero file per una pausa di pulizia, non un'attesa-asserzione.
+
+## Prova di carico
+
+Il carico serve a vedere la differenza: le corse parallele di suite intere giravano in un namespace temporaneo separato (TMPDIR e SANDBOT_TEST_TMP_BASE su una mktemp dedicata) perché due vitest concorrenti sulla stessa base si falserebbero a vicenda il controllo T1 (la foto iniziale non conosce le radici dell'altra corsa).
+
+- Post-fix (repo, commit ce0d9986): ciclo di 200 `npx vitest run src/daemon/__tests__/apps-connect.test.ts` con in parallelo una catena ininterrotta di suite intere come carico → **0 cadute su 200** (16 suite di carico completate, ~20 minuti).
+- Pre-fix (la stessa prova, una volta): worktree staccato su mktemp nella temporanea di sistema al commit d642e563 (node_modules symlink, nessun download), stesso ciclo di 200 con le suite in parallelo → **178 cadute su 200**, lo stesso messaggio del ROSSO (`AssertionError: expected [] to deeply equal [ { slug: 'gmail', name: 'Gmail' } ]`). Il carico basta e avanza: la versione vecchia cade 9 volte su 10. Worktree e mkdtemp cancellati a fine prova.
+
+Osservazione dalla prova di carico (non è una pausa fissa, da trattare a parte): in TUTTE le 32 suite di carico (post-fix e pre-fix) src/daemon/__tests__/screen.test.ts è caduto per `Error: Hook timed out in 10000ms` nel beforeAll (fakeRfbServer, riga 113) e l'afterAll successivo è morto su `server` undefined lasciando le sue sandbot-screen-* nel namespace isolato del carico — T1 ha regolarmente bocciato quelle corse. Sotto carico estremo l'hook di setup del ponte supera il tetto predefinito di vitest: proposta un tetto esplicito all'hook (o un hook più tollerante), da valutare in una fase sua. Senza carico artificiale la suite gira verde (vedi sotto).
+
+## Corse finali (controllo delle temporanee attivo, guard T1 in globalSetup)
+
+- `npx vitest run` ×3 giri: **361 file passed (361)** ogni giro (~70 s a giro), 0 cartelle sandbot-* nuove nella temporanea e 0 sandbot-daemon/llama-server dopo ogni corsa.
+- `npm run test:ci-sim` ×2: **359 file passed | 2 skipped (361), 4976 test passed | 3 skipped (4979)** (71,06 s / 70,31 s), stessa pulizia dopo ogni corsa.
+- typecheck pulito; `eval/auto-review.eval.ts` NON eseguito; CHANGELOG invariato; out-review/ intatto.
+
 # REPORT FASE CI TEMPORANEI (C1–C3): i file di test saltati non lasciano più cartelle — una radice della corsa per le cartelle dati, niente mkdtemp al caricamento dei file, e la simula della CI che salta gli stessi file del runner
 
 Tre punti dalla CI rossa della beta.9 (run 44261684763: 358 file verdi più 2 saltati, ma il controllo T1 trovava 3 cartelle rimaste). Base f3924446 (tag v0.3.1001-beta.9, che NON ha prodotto release) → 4 commit (C3 visto rosso per primo, poi C1, poi C2, poi questo REPORT). Numeri delle corse finali: npx vitest run 361 file / 4979 test × 3 giri col controllo delle temporanee ATTIVO (42,77 s / 45,67 s / 44,60 s), tutte con 0 cartelle sandbot-* nuove; npm run test:ci-sim 359 file passed | 2 skipped, 4976 test passed | 3 skipped × 2 corse (41,19 s / 42,46 s), 0 cartelle nuove; typecheck pulito; build ✓; eval/auto-review.eval.ts NON eseguito; 0 daemon e 0 llama-server dopo ogni corsa. CHANGELOG invariato (la sezione beta.9 resta com'è). Nessun push, nessun tag v*, tag di chiusura `fase-ci-temporanei` (annotato, dopo il commit del REPORT).
