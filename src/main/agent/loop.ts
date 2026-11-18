@@ -659,7 +659,18 @@ export interface RunTurnOptions {
    * Fase 7 (§3bis L8): il turno è stato aperto da un messaggio di un altro
    * bot (initiator AGENT) — serve al limite anti-ciclo dei send_to_agent.
    */
-  agentMessage?: { fromAgentId: string; fromAgentName: string; hop: number }
+  agentMessage?: {
+    fromAgentId: string
+    fromAgentName: string
+    hop: number
+    /**
+     * Q3 (fase squadra): il filo aperto dal send_to_agent — a fine turno il
+     * testo finale torna da solo al mittente come risposta collegata.
+     */
+    threadId?: string
+    /** Q3: questo turno È una risposta collegata automatica (mai un'altra) */
+    autoReply?: boolean
+  }
   /**
    * Fase 7 (correzione A3): il turno è una catena tra bot partita da un turno
    * automatico (routine/trigger, o a sua volta una catena automatica): i suoi
@@ -1156,6 +1167,11 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
   // Fase 12 (punto 5): può PARTIRE contaminato (risveglio SUBAGENTS_DONE con
   // un figlio contaminato nel lotto) — stessi lift, stessi divieti
   let contaminated = opts.contaminated === true
+  // Q3 (fase squadra): a chi questo turno ha scritto con send_to_agent (se ha
+  // già scritto al mittente del filo, la risposta collegata non parte) e il
+  // testo finale consegnato (la risposta collegata da rimandare al mittente)
+  const sentToAgentIds = new Set<string>()
+  let threadReplyText: string | null = null
   // Q1 (fase squadra): il turno è DI UNA SQUADRA quando nasce da un messaggio
   // nella chat di squadra, da un post_to_group, da una delega tra membri o da
   // un sottoagente di uno di questi turni: vale l'AUTONOMIA del gruppo (il
@@ -2482,6 +2498,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             // R1: consegna con le regole comuni; se il turno la declina
             // (doppione, tetto) il testo resta ragionamento nella entry
             deliverFinalText(reply, entry)
+            // Q3 (fase squadra): il testo finale di un turno aperto da un
+            // altro bot torna da solo al mittente del filo (a fine turno)
+            if (opts.agentMessage?.threadId) threadReplyText = reply
             finished = true
             break
           }
@@ -2505,6 +2524,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               meta: { message: { type: 'text', text: fallback }, fallback: true }
             })
             emitLastEntry(agentId, emit)
+            if (opts.agentMessage?.threadId) threadReplyText = fallback
             finished = true
             break
           }
@@ -4368,11 +4388,15 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           appendSend(agentId, call, { type: 'text', text }, emit, {
             toAgentId: toId, toAgentName: dest.name, hop: guard.hop, agentSend: true
           }, opts.taskId)
+          // Q3 (fase squadra): il filo della delega — la risposta collegata
+          // torna al mittente a fine turno di chi riceve
+          const threadId = `t-${randomUUID().slice(0, 8)}`
+          sentToAgentIds.add(toId)
           enqueueJob(db(), {
             agentId: toId,
             kind: 'user-message',
             payload: {
-              text: formatAgentMessage(agent.name, text),
+              text: formatAgentMessage(agent.name, text, { id: agentId }),
               initiator: 'AGENT',
               fromAgentId: agentId,
               fromAgentName: agent.name,
@@ -4383,6 +4407,8 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               // la contaminazione passa avanti
               ...(sendSquadId !== null ? { squadId: sendSquadId } : {}),
               ...(contaminated && (sendSquadAllows || sendMissionAllowed) ? { contaminated: true } : {}),
+              // Q3: il filo della delega (la risposta collegata lo usa)
+              threadId,
               // correzione A3: la catena eredita l'automaticità del turno
               // mittente (routine/trigger, o catena automatica a sua volta)
               ...(automatic ? { automatic: true } : {})
@@ -5406,6 +5432,39 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     // passo) — si buttano via QUI: i job corrispondenti restano in coda e i
     // messaggi partiranno come turni nuovi (gara), senza doppioni
     midTurnDeliveries.delete(agentId)
+    // Q3 (fase squadra): la RISPOSTA COLLEGATA — il testo finale del turno di
+    // chi riceve torna da solo al mittente del filo e lo risveglia. Non parte
+    // se chi riceve ha GIÀ scritto al mittente con send_to_agent in questo
+    // turno, né se QUESTO turno è già una risposta (niente cicli A↔B). La
+    // risposta non è un salto in più (stesso hop), ma il suo risveglio conta
+    // nel tetto orario della coppia come gli altri messaggi.
+    if (
+      opts.agentMessage?.threadId && !opts.agentMessage.autoReply &&
+      threadReplyText !== null && !sentToAgentIds.has(opts.agentMessage.fromAgentId)
+    ) {
+      const from = getAgent(opts.agentMessage.fromAgentId)
+      if (from) {
+        const { enqueueJob: enqueueReply } = await import('../store/jobs')
+        enqueueReply(db(), {
+          agentId: from.id,
+          kind: 'user-message',
+          payload: {
+            text: formatAgentMessage(agent.name, threadReplyText, { id: agentId, reply: true }),
+            initiator: 'AGENT',
+            fromAgentId: agentId,
+            fromAgentName: agent.name,
+            toAgentId: from.id,
+            hop: opts.agentMessage.hop,
+            threadId: opts.agentMessage.threadId,
+            autoReply: true,
+            ...(opts.squadId !== undefined ? { squadId: opts.squadId } : {}),
+            ...(automatic ? { automatic: true } : {})
+          },
+          runAt: Date.now(),
+          now: Date.now()
+        })
+      }
+    }
     // fase risposta (R6): a fine turno, con qualunque esito, nessuna bolla di
     // diretta resta appesa (la entry promossa, quando c'è, è già in chat)
     emit({ type: 'live-reply', agentId, entryId: 0, text: '' })

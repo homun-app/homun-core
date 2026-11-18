@@ -2191,8 +2191,9 @@ describe('fase 7: send_to_agent', () => {
     expect(job.payload.fromAgentName).toBe('TestBot')
     expect(job.payload.toAgentId).toBe(OTHER)
     expect(job.payload.hop).toBe(1)
-    // il testo entra nel blocco evidenza col nome del mittente
-    expect(String(job.payload.text)).toContain('<messaggio_da_agente nome="TestBot">')
+    // il testo entra nel blocco evidenza col nome e l'ID del mittente (Q3:
+    // la risposta collegata torna a chi ha chiesto)
+    expect(String(job.payload.text)).toContain(`<messaggio_da_agente nome="TestBot" id="${AGENT}">`)
     expect(String(job.payload.text)).toContain('controlla la posta di stamattina')
     // al modello: conferma leggibile
     const lastCall = h.llm.calls[h.llm.calls.length - 1]!
