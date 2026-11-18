@@ -156,7 +156,6 @@ function ArtifactCard({ m, agents }: { m: GroupMessageInfo; agents: Agent[] }) {
 /** Q2/Q4: la card di approvazione dentro la timeline, nel punto in cui è nata. */
 function TimelineApprovalCard({ c }: { c: { agentId: string; agentName: string; approvalId: string; phrase: string; pending: boolean; fixed: boolean } }) {
   const resolveGroupApproval = useStore((s) => s.resolveGroupApproval)
-  const info = useBotInfo(c.agentId)
   return (
     <div className="max-w-[85%] rounded-[16px] bg-card px-4 py-3 shadow-soft" data-testid="timeline-approval">
       <p className="text-xs text-muted-foreground">
@@ -179,7 +178,6 @@ function TimelineApprovalCard({ c }: { c: { agentId: string; agentName: string; 
           </button>
         </div>
       ) : null}
-      {info ? null : null}
     </div>
   )
 }

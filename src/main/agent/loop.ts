@@ -3644,7 +3644,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             meta: {
               approvalId: approval.id, tool: call.name, input, status: 'pending', ui: exchangeUi,
               fileExchange: { direction: pre.plan.direction, macPath: pre.plan.macPath, boxPath: pre.plan.boxPath, size: pre.plan.size },
-              keys: [arrow]
+              keys: [arrow],
+              // Q2 (fase squadra): lo scambio file col Mac è dell'insieme FISSO
+              ...(squad ? { squadId: squad.id, squadAlwaysAsk: true } : {})
             }
           })
           setStatus(agentId, 'paused-for-approval', emit)
@@ -3952,7 +3954,10 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               const fillUi = ui(UI.cardFillAsk, { label: login.label, origin })
               const decision = await awaitCard(approval, 'send-message', formatUi(fillUi, loopUiLanguage()), {
                 message: { type: 'fill', id: login.id, label: login.label, origin, fields },
-                tool: call.name, input: { ...input, origin }, fill: { loginId: login.id, origin }, ui: fillUi
+                tool: call.name, input: { ...input, origin }, fill: { loginId: login.id, origin }, ui: fillUi,
+                // Q2 (fase squadra): fill_credential è dell'insieme FISSO — la
+                // coda della squadra lo dice (e offre solo «Consenti una volta»)
+                ...(squad ? { squadId: squad.id, squadAlwaysAsk: true } : {})
               })
               if (decision === 'allow') return 'allow-turn' // 'always' lo registra resolveApproval
               if (decision === 'deny') return 'deny'

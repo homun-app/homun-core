@@ -1054,6 +1054,40 @@ function BotPanel({ layout, onClose }: { layout: LayoutResult; onClose(): void }
   )
 }
 
+/** Q5 (fase squadra): la riga di un membro nella vista del team (hook a posto:
+ * nome nel colore del bot, stato, ruolo, attività o contatori). */
+function TeamMemberRow({ m, activity }: {
+  m: { agentId: string; name: string; state: 'lavora' | 'aspetta-te' | 'fermo' | 'finito' | 'coordina'; role: string; pagesRead: number; filesWritten: number; subagents: number }
+  activity: MessageDescriptor | null
+}) {
+  const { i18n } = useLingui()
+  const info = useBotInfo(m.agentId)
+  const av = info ? `var(--bot-${info.avatar.color})` : undefined
+  const stateLabel =
+    m.state === 'lavora' ? <Trans>lavora</Trans>
+    : m.state === 'aspetta-te' ? <Trans>aspetta te</Trans>
+    : m.state === 'finito' ? <Trans>finito</Trans>
+    : m.state === 'coordina' ? <Trans>coordina</Trans>
+    : <Trans>fermo</Trans>
+  const counters = [
+    `${m.pagesRead} ${i18n.t(msg`pagine lette`)}`,
+    ...(m.filesWritten ? [`${m.filesWritten} ${i18n.t(msg`file`)}`] : []),
+    ...(m.subagents ? [`${m.subagents} ${i18n.t(msg`sottoagenti`)}`] : [])
+  ].join(' · ')
+  return (
+    <div className="rounded-[14px] bg-muted/50 px-3 py-2.5">
+      <p className="flex items-baseline gap-2 text-sm">
+        <span className="font-semibold" style={av ? { color: av } : undefined}>{m.name}</span>
+        <span className={m.state === 'aspetta-te' ? 'text-xs font-semibold text-waiting' : 'text-xs text-muted-foreground'}>{stateLabel}</span>
+      </p>
+      {m.role && <p className="mt-0.5 text-xs leading-snug text-muted-foreground">{m.role}</p>}
+      <p className="mt-0.5 text-xs text-muted-foreground/80">
+        {activity ? i18n.t(activity) : counters}
+      </p>
+    </div>
+  )
+}
+
 /** Il pannello della SQUADRA: Membri (S4). */
 function MembersPanel({ layout, group, onClose }: { layout: LayoutResult; group: GroupInfo; onClose(): void }) {
   const { i18n } = useLingui()
@@ -1099,33 +1133,9 @@ function MembersPanel({ layout, group, onClose }: { layout: LayoutResult; group:
             attività di adesso e contatori per ogni membro */}
         <p className="mb-1 mt-4 text-[13px] font-semibold"><Trans>Il team</Trans></p>
         <div className="space-y-2.5" data-testid="team-overview">
-          {groupOverview.members.map((m) => {
-            const info = useBotInfo(m.agentId)
-            const av = info ? `var(--bot-${info.avatar.color})` : undefined
-            const stateLabel =
-              m.state === 'lavora' ? <Trans>lavora</Trans>
-              : m.state === 'aspetta-te' ? <Trans>aspetta te</Trans>
-              : m.state === 'finito' ? <Trans>finito</Trans>
-              : m.state === 'coordina' ? <Trans>coordina</Trans>
-              : <Trans>fermo</Trans>
-            const counters = [
-              `${m.pagesRead} ${i18n.t(msg`pagine lette`)}`,
-              ...(m.filesWritten ? [`${m.filesWritten} ${i18n.t(msg`file`)}`] : []),
-              ...(m.subagents ? [`${m.subagents} ${i18n.t(msg`sottoagenti`)}`] : [])
-            ].join(' · ')
-            return (
-              <div key={m.agentId} className="rounded-[14px] bg-muted/50 px-3 py-2.5">
-                <p className="flex items-baseline gap-2 text-sm">
-                  <span className="font-semibold" style={av ? { color: av } : undefined}>{m.name}</span>
-                  <span className={m.state === 'aspetta-te' ? 'text-xs font-semibold text-waiting' : 'text-xs text-muted-foreground'}>{stateLabel}</span>
-                </p>
-                {m.role && <p className="mt-0.5 text-xs leading-snug text-muted-foreground">{m.role}</p>}
-                <p className="mt-0.5 text-xs text-muted-foreground/80">
-                  {activityOf(m.agentId) ? i18n.t(activityOf(m.agentId)!) : counters}
-                </p>
-              </div>
-            )
-          })}
+          {groupOverview.members.map((m) => (
+            <TeamMemberRow key={m.agentId} m={m} activity={activityOf(m.agentId)} />
+          ))}
         </div>
         {/* Q5: «Prodotto dalla squadra» — i documenti creati nei turni della squadra */}
         {groupOverview.produced.length > 0 && (

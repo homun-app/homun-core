@@ -191,6 +191,8 @@ export function App() {
   const rightPanel = useStore((s) => s.rightPanel)
   // «members» quando la squadra è aperta: il pannello non è mai wide
   const panelTab = useStore((s) => (s.openGroupId !== null ? ('members' as const) : s.panelTab))
+  // Q2 (fase squadra): la coda «Da approvare» copre l'area centrale Solo quando è APERTA
+  const approvalsQueueOpen = useStore((s) => s.approvalsQueueOpen)
   const layout = layoutFor({ windowWidth, sidebarCollapsedByUser: sidebarCollapsed, sidebarWidthPref: sidebarWidth, panelOpen: rightPanel, panelTab })
   if (!onboardingKnown || guideView === 'loading') return <BootSplash />
   if (guideView === 'guide') return <GuideView />
@@ -208,7 +210,7 @@ export function App() {
       <div className="relative flex min-w-0 flex-1">
         {openGroupId === null ? <Chat layout={layout} /> : <TeamChat />}
         {/* Q2 (fase squadra): la coda copre l'area centrale quando è aperta */}
-        {openGroupId !== null && <ApprovalsQueue />}
+        {openGroupId !== null && approvalsQueueOpen && <ApprovalsQueue />}
         <LibraryPanel />
         <ActivityPanel />
       </div>
