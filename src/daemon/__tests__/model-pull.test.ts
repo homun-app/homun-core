@@ -5,12 +5,13 @@
 // 127.0.0.1 con ENGRAMMA_PULL_BASE: nessuna rete.
 import { describe, expect, it, afterAll } from 'vitest'
 import { mkdtempSync, rmSync, existsSync, statSync, createReadStream } from 'node:fs'
-import { tmpdir, homedir } from 'node:os'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
+import { hasLocalEmbedModel, LOCAL_EMBED_MODEL } from '../../test-local-model'
 
-const MODEL_CACHE = join(homedir(), '.cache', 'engramma', 'models', 'granite-embedding-97m-multilingual-r2')
+const MODEL_CACHE = LOCAL_EMBED_MODEL
 
 const ROOTS: string[] = []
 const SERVERS: Server[] = []
@@ -44,7 +45,7 @@ function startModelServer(): Promise<number> {
   })
 }
 
-describe.skipIf(!existsSync(MODEL_CACHE))('fase memoria-engramma · correzioni C8: model-pull collega il modello a caldo', () => {
+describe.skipIf(!hasLocalEmbedModel())('fase memoria-engramma · correzioni C8: model-pull collega il modello a caldo', () => {
   // LD5: il test scarica ~400 MB dal server locale (su 127.0.0.1) e collega
   // l'embedder: supera i 5 s predefiniti di vitest pure da solo. Le attese
   // dentro sono su EVENTI (finished) e STATO (present), mai su tempi fissi;

@@ -9,11 +9,12 @@
 // nella modelDir temporanea (come i test JS di Engramma): niente rete, il
 // modelStatus lo trova già lì.
 import { describe, expect, it, beforeAll, afterAll } from 'vitest'
-import { mkdtempSync, rmSync, mkdirSync, symlinkSync, existsSync } from 'node:fs'
-import { tmpdir, homedir } from 'node:os'
+import { mkdtempSync, rmSync, mkdirSync, symlinkSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { hasLocalEmbedModel, LOCAL_EMBED_MODEL } from '../../../test-local-model'
 
-const MODEL_SRC = join(homedir(), '.cache', 'engramma', 'models', 'granite-embedding-97m-multilingual-r2')
+const MODEL_SRC = LOCAL_EMBED_MODEL
 const ROOT = mkdtempSync(join(tmpdir(), 'sandbot-mem-embed-'))
 const DATA = join(ROOT, 'data')
 afterAll(() => rmSync(ROOT, { recursive: true, force: true }))
@@ -29,7 +30,7 @@ beforeAll(async () => {
   symlinkSync(MODEL_SRC, join(DATA, 'models', 'granite-embedding-97m-multilingual-r2'))
 })
 
-describe.skipIf(!existsSync(MODEL_SRC))('fase memoria-engramma · correzioni C7: il job incorpora le celle di quell agente', () => {
+describe.skipIf(!hasLocalEmbedModel())('fase memoria-engramma · correzioni C7: il job incorpora le celle di quell agente', () => {
   // LD5: il test apre il motore e incorpora col modello vero (secondi, non
   // millisecondi) — il tetto predefinito di 5 s di vitest lo uccideva a caso
   // sotto carico: le attese dentro sono già sull'ESITO, il tetto è solo un

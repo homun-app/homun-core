@@ -12,7 +12,7 @@
     "predist": "node scripts/prepare-wasm.mjs && node scripts/prepare-engramma.mjs && node scripts/fetch-llama.mjs",
     "prebuild": "node scripts/prepare-engramma.mjs",
     "test": "vitest run",
-    "test:ci-sim": "d=$(node -e \"const{realpathSync}=require('fs'),{tmpdir}=require('os');process.stdout.write(realpathSync(tmpdir()))\") || exit 1; echo \"ci-sim: macOS 15 finto, SANDBOT_TEST_TMP_BASE=$d (la temporanea di sistema RISOLTA, come fa la CI)\"; SANDBOT_TEST_FAKE_MACOS_MAJOR=15 SANDBOT_TEST_TMP_BASE=\"$d\" npm test",
+    "test:ci-sim": "d=$(node -e \"const{realpathSync}=require('fs'),{tmpdir}=require('os');process.stdout.write(realpathSync(tmpdir()))\") || exit 1; echo \"ci-sim: macOS 15 finto, modelli locali ASSENTI (SANDBOT_TEST_NO_LOCAL_MODELS=1), SANDBOT_TEST_TMP_BASE=$d (la temporanea di sistema RISOLTA, come fa la CI)\"; SANDBOT_TEST_FAKE_MACOS_MAJOR=15 SANDBOT_TEST_NO_LOCAL_MODELS=1 SANDBOT_TEST_TMP_BASE=\"$d\" npm test",
     "i18n:extract": "lingui extract --clean && lingui compile --namespace es",
     "eval": "node scripts/run-eval.mjs",
     "dev": "electron-vite dev",
