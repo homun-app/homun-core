@@ -5,7 +5,9 @@
 // La programmazione dei turni è in agent/group-turns.ts (puro): qui c'è la
 // colla che registra, accoda job e scrive le righe di sistema.
 import type { DatabaseSync } from 'node:sqlite'
-import { db, getAgent, listAgents, getEntries } from './db'
+import { db, getAgent, listAgents, getEntries, addGrant } from './db'
+import type { TranscriptEntry } from '../../shared/types'
+import { collectPendingApprovals, missionGrantAllowed, squadApprovalCategory, missionGrantTarget, squadActivityCounters, MISSION_GRANT_MS, type SquadPendingApproval } from '../agent/squad-approvals'
 import { enqueueJob } from './jobs'
 import {
   planGroupTurns, GROUP_HOURLY_CAP_TEXT, closingTurnNonce, type GroupPlanResult
@@ -641,6 +643,110 @@ export function groupWithMembers(group: Group): {
     lastMessageAt: lastGroupMessageAt(group.id),
     autonomy: group.autonomy
   }
+}
+
+// ---- Q2 (fase squadra): la coda delle approvazioni della squadra ----
+
+/**
+ * Q2: le approvazioni in attesa di tutti i membri della squadra e dei loro
+ * sottoagenti (i figli sono righe agents con parent_id). Per ognuna: bot,
+ * strumento, frase leggibile (il content della card di oggi), categoria,
+ * perché chiede e quando. L'ordine è dal più recente.
+ */
+export function pendingApprovalsForGroup(groupId: number): SquadPendingApproval[] {
+  const members = groupMemberIds(groupId)
+  const named = members
+    .map((id) => getAgentRowName(id))
+    .filter((m): m is { agentId: string; name: string } => !!m)
+  const childrenOf = (memberId: string): Array<{ id: string; name: string }> =>
+    (listAgents === undefined ? [] : familyIdsOf(memberId)).map((id) => ({ id, name: getAgentRowName(id)?.name ?? id }))
+  return collectPendingApprovals(named, (id) => getEntries(id), childrenOf)
+}
+
+/** il nome di un bot dalla riga agents (null se sparito) */
+function getAgentRowName(id: string): { agentId: string; name: string } | null {
+  const row = db().prepare('SELECT id, name FROM agents WHERE id = ?').get(id) as { id: string; name: string } | undefined
+  return row ? { agentId: row.id, name: row.name } : null
+}
+
+/** i FIGLI (sottoagenti) di un bot: righe agents con parent_id = lui */
+function familyIdsOf(memberId: string): string[] {
+  return (db().prepare('SELECT id FROM agents WHERE parent_id = ?').all(memberId) as Array<{ id: string }>).map((r) => r.id)
+}
+
+/**
+ * Q2: «Consenti per questa missione» — un grant per OGNI membro della squadra
+ * con scadenza di 8 ore (addGrant con agent_id, senza tabelle nuove). SOLO per
+ * le categorie sito-interattivo e squadra, MAI per l'insieme fisso: altrove
+ * non fa niente (la card vale «una volta»). Torna quanti grant ha creato.
+ */
+export function applyMissionGrant(input: { agentId: string; approvalId: string; now: number }): number {
+  const entry = getEntries(input.agentId).findLast(
+    (e: TranscriptEntry) => (e.kind === 'approval' || e.kind === 'send-message') && e.meta?.approvalId === input.approvalId
+  )
+  const meta = (entry?.meta ?? {}) as Record<string, unknown>
+  const tool = String(meta.tool ?? '')
+  if (!entry || !tool) return 0
+  if (meta.squadAlwaysAsk === true) return 0
+  if (!missionGrantAllowed(squadApprovalCategory(entry))) return 0
+  const gid = Number(meta.squadId ?? 0)
+  if (!gid || !getGroup(gid)) return 0
+  const browserUrl = (meta.browser as { url?: string } | undefined)?.url ?? null
+  const target = missionGrantTarget(tool, meta.input as Record<string, unknown>, browserUrl)
+  const expiresAt = input.now + MISSION_GRANT_MS
+  for (const memberId of groupMemberIds(gid)) {
+    addGrant(tool, target, undefined, expiresAt, memberId)
+  }
+  return groupMemberIds(gid).length
+}
+
+/**
+ * Q2: i contatori di «Fatto da soli, senza chiederti» — file, comandi e
+ * pagine dei turni della squadra (entry con meta.squadId) e i messaggi dei
+ * bot nel gruppo.
+ */
+export function squadActivityForGroup(groupId: number): Array<{ id: 'files' | 'commands' | 'pages' | 'bot-messages'; count: number; who: string[] }> {
+  const members = groupMemberIds(groupId)
+  const entriesByAgent = members
+    .map((id) => {
+      const row = db().prepare('SELECT name FROM agents WHERE id = ?').get(id) as { name?: string } | undefined
+      return row ? { agentId: id, name: row.name ?? id, entries: getEntries(id) } : null
+    })
+    .filter((x): x is { agentId: string; name: string; entries: ReturnType<typeof getEntries> } => !!x)
+  return squadActivityCounters(entriesByAgent, groupMessages(groupId), groupId)
+}
+
+/** una riga di «Lasciato passare dal revisore» (Q2) */
+export interface ReviewerPassedRow {
+  agentId: string
+  agentName: string
+  tool: string
+  reason: string | null
+  when: number
+  /** la concessione che copre quest'azione (mission), se c'è: si può annullare */
+  grantId: number | null
+}
+
+/**
+ * Q2: le azioni dei turni della squadra che il revisore ha lasciato passare
+ * (card chiuse «Approvato automaticamente»), con l'eventuale concessione
+ * attiva che le copre (le mission: si possono annullare dalla coda).
+ */
+export function reviewerPassedForGroup(groupId: number): ReviewerPassedRow[] {
+  const rows: ReviewerPassedRow[] = []
+  const grants = (db().prepare('SELECT id, tool, target, agent_id, expires_at FROM grants').all() as Array<{ id: number; tool: string; target: string; agent_id: string | null; expires_at: number | null }>)
+    .filter((g) => g.expires_at == null || g.expires_at > Date.now())
+  for (const id of groupMemberIds(groupId)) {
+    const name = (db().prepare('SELECT name FROM agents WHERE id = ?').get(id) as { name?: string } | undefined)?.name ?? id
+    for (const e of getEntries(id)) {
+      const meta = (e.meta ?? {}) as Record<string, unknown>
+      if (meta.squadId !== groupId || meta.autoApproved !== true) continue
+      const tool = String(meta.tool ?? '')
+      const grant = grants.find((g) => g.tool === tool && (g.agent_id == null || g.agent_id === id))
+      rows.push({ agentId: id, agentName: name, tool, reason: typeof meta.reason === 'string' ? meta.reason : null, when: e.createdAt, grantId: grant?.id ?? null })
+    }
+  }
+  return rows.sort((a, b) => b.when - a.when).slice(0, 20)
 }
 
 /** Annulla i job group-turn di un gruppo (membri rimossi, gruppo modificato). */

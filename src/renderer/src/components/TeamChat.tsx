@@ -18,6 +18,8 @@ import { i18n } from '../lib/i18n'
 import { groupSystemText } from './Chat'
 // Q1 (fase squadra): la pillola dell'autonomia nella fascia alta (tavola 1)
 import { autonomyShortLabel } from './TeamAutonomySheet'
+// Q2 (fase squadra): la barra delle azioni in attesa e la coda (tavole 1 e 2)
+import { pendingWantsLine } from './ApprovalsQueue'
 
 /** Il testo col le @menzioni rese come pillole nel colore del bot menzionato. */
 function MentionedText({ text, members, agents, effectiveMain }: {
@@ -124,6 +126,9 @@ export function TeamChat() {
   const groupMessages = useStore((s) => s.groupMessages)
   const agents = useStore((s) => s.agents)
   const sendGroupMessage = useStore((s) => s.sendGroupMessage)
+  // Q2 (fase squadra): le azioni in attesa e la coda
+  const groupPending = useStore((s) => s.groupPending)
+  const setApprovalsQueueOpen = useStore((s) => s.setApprovalsQueueOpen)
   const rightPanel = useStore((s) => s.rightPanel)
   const setRightPanel = useStore((s) => s.setRightPanel)
   // G2 (fase 0.3.1001 grafica): pannello chiuso → il focus torna al bottone
@@ -239,6 +244,22 @@ export function TeamChat() {
       </div>
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto scroll-thin px-6 pb-4 pt-16">
+        {/* Q2 (fase squadra): la barra in cima — quante azioni aspettano te e
+            chi le chiede, con «Rivedi tutte» (tavola 1) */}
+        {groupPending.length > 0 && (
+          <div className="mx-auto mb-4 mt-2 max-w-3xl rounded-[16px] bg-card px-4 py-3 shadow-soft" data-testid="team-pending-bar">
+            <p className="text-sm">
+              <span className="font-semibold"><Trans>{groupPending.length} azioni aspettano te</Trans></span>
+              <span className="text-muted-foreground"> · {groupPending.slice(0, 3).map((r) => pendingWantsLine(r, i18n)).join(' · ')}{groupPending.length > 3 ? ' · …' : ''}</span>
+            </p>
+            <button
+              className="mt-1.5 text-sm text-foreground underline-offset-2 transition hover:underline"
+              onClick={() => setApprovalsQueueOpen(true)}
+            >
+              <Trans>Rivedi tutte</Trans>
+            </button>
+          </div>
+        )}
         {groupMessages.length === 0 && (
           <p className="mt-16 text-center text-sm text-muted-foreground"><Trans>Nessun messaggio nella squadra.</Trans></p>
         )}

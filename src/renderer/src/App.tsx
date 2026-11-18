@@ -5,6 +5,8 @@ import { Sidebar, SidebarToggleButton } from './components/Sidebar'
 import { Chat } from './components/Chat'
 // fase 16b (S5): la squadra è una vista di prima classe, al posto della chat
 import { TeamChat } from './components/TeamChat'
+// Q2 (fase squadra): la coda «Da approvare» della squadra (tavola 2)
+import { ApprovalsQueue } from './components/ApprovalsQueue'
 import { RightPanel } from './components/RightPanel'
 import { Settings } from './components/Settings'
 // OA2 (fase onboarding-a): la guida a passi del primo avvio, a tutta finestra
@@ -205,6 +207,8 @@ export function App() {
       <Sidebar layout={layout} />
       <div className="relative flex min-w-0 flex-1">
         {openGroupId === null ? <Chat layout={layout} /> : <TeamChat />}
+        {/* Q2 (fase squadra): la coda copre l'area centrale quando è aperta */}
+        {openGroupId !== null && <ApprovalsQueue />}
         <LibraryPanel />
         <ActivityPanel />
       </div>

@@ -196,9 +196,13 @@ function TeamRows({ team }: { team: SidebarTeam }) {
   const [open, setOpen] = useState(() => teamOpenState(readLS(`${TEAM_OPEN_PREFIX}${team.group.id}`)))
   // lo stato più importante: chi ti aspetta vince; poi il coordinatore al lavoro
   const waitingMember = [team.coordinator, ...team.members].find((a) => a && a.status === 'paused-for-approval')
+  // Q2 (fase squadra): il numero delle azioni in attesa nella coda della squadra
+  const pendingCount = useStore((s) => s.groupPendingCount[team.group.id] ?? 0)
   const coordBusy = coordInfo?.state === 'thinking' || coordInfo?.state === 'speaking' || coordInfo?.state === 'listening'
-  const sub = waitingMember
-    ? { cls: 'text-waiting font-semibold', text: i18n.t(msg`${waitingMember.name} ti aspetta`) }
+  const sub = pendingCount > 0
+    ? { cls: 'text-waiting font-semibold', text: i18n.t(msg`${pendingCount} azioni da approvare`) }
+    : waitingMember
+      ? { cls: 'text-waiting font-semibold', text: i18n.t(msg`${waitingMember.name} ti aspetta`) }
     : coordBusy && team.coordinator
       ? { cls: 'text-muted-foreground', text: i18n.t(msg`${team.coordinator.name} scrive…`) }
       : {

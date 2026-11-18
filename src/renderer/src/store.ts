@@ -1,7 +1,7 @@
 // State renderer: agenti, transcript dell'agente attivo, eventi dal main.
 import { useMemo } from 'react'
 import { create } from 'zustand'
-import type { Agent, TranscriptEntry, SandbotEvent, OnboardingStatus, OnboardingStepId, ProviderConfig, ProviderPublic, PermissionsConfig, ConnectorInfo, TaskInfo, GroupInfo, GroupMessageInfo, SubagentInfo, AgentAvatar, TurnEnd, ScreenStatus, BoxRuntime, MainModel, ComposioStatusInfo, ComposioGatewayStatusInfo, ReadingPageRef, BoxSetupState, GroupAutonomy } from '../../shared/types'
+import type { Agent, TranscriptEntry, SandbotEvent, OnboardingStatus, OnboardingStepId, ProviderConfig, ProviderPublic, PermissionsConfig, ConnectorInfo, TaskInfo, GroupInfo, GroupMessageInfo, SubagentInfo, AgentAvatar, TurnEnd, ScreenStatus, BoxRuntime, MainModel, ComposioStatusInfo, ComposioGatewayStatusInfo, ReadingPageRef, BoxSetupState, GroupAutonomy, SquadPendingApprovalInfo } from '../../shared/types'
 import type { BoxSetupRowId } from '../../shared/box-setup-plan'
 import type { UpdateChannel } from '../../shared/update-channel'
 // fase 16c correzioni (R4): la regola del modello risolto, condivisa col daemon
@@ -133,6 +133,18 @@ interface Store {
   groups: GroupInfo[]
   /** fase 10: gruppo aperto nella vista gruppo */
   openGroupId: number | null
+  /** Q2: il timer del debounce di refreshGroupPending (interno) */
+  _pendingRefreshTimer: ReturnType<typeof setTimeout> | null
+  /** Q2 (fase squadra): le card pendenti della squadra aperta (coda «Da approvare») */
+  groupPending: SquadPendingApprovalInfo[]
+  /** Q2 (fase squadra): il numero di card pendenti per OGNI squadra (badge barra) */
+  groupPendingCount: Record<number, number>
+  /** Q2: «Fatto da soli, senza chiederti» della squadra aperta */
+  groupActivity: Array<{ id: 'files' | 'commands' | 'pages' | 'bot-messages'; count: number; who: string[] }>
+  /** Q2: «Lasciato passare dal revisore» della squadra aperta */
+  groupReviewerPassed: Array<{ agentId: string; agentName: string; tool: string; reason: string | null; when: number; grantId: number | null }>
+  /** Q2 (fase squadra): la coda «Da approvare» copre l'area centrale */
+  approvalsQueueOpen: boolean
   /** fase 10: messaggi del gruppo aperto */
   groupMessages: GroupMessageInfo[]
   /** fase 12: sottoagenti dell'agente attivo (card in chat + stato live) */
@@ -278,7 +290,7 @@ interface Store {
    * (entry.agentId — il figlio quando la card sta nel suo pannello o nella
    * chat del padre), MAI all'agente attivo.
    */
-  resolveApproval(agentId: string, approvalId: string, decision: 'allow' | 'deny', mode: 'once' | 'always' | 'turn' | 'minutes10'): void
+  resolveApproval(agentId: string, approvalId: string, decision: 'allow' | 'deny', mode: 'once' | 'always' | 'turn' | 'minutes10' | 'mission'): void
   /** fase 8: decisione sulla regola di auto-review proposta dal bot */
   autoreviewRuleDecision(entryId: number, action: 'add' | 'dismiss'): void
   /** fase 8: "Crea regola da questa azione" — apre l'editor precompilato */
@@ -299,6 +311,11 @@ interface Store {
   cancelTask(taskId: number): void
   /** fase 10: apre la vista di un gruppo (o torna alla chat) */
   openGroup(id: number | null): void
+  /** Q2 (fase squadra): ricarica le card pendenti (squadra aperta + contatori barra) */
+  refreshGroupPending(): void
+  setApprovalsQueueOpen(open: boolean): void
+  /** Q2: decide dalla coda della squadra con la resolveApproval di oggi */
+  resolveGroupApproval(agentId: string, approvalId: string, decision: 'allow' | 'deny', mode: 'once' | 'mission'): void
   /** fase 10: l'utente scrive nel gruppo (@menzioni comprese) */
   sendGroupMessage(text: string): void
   /** fase 12: apre/chiude la vista del transcript di un sottoagente */
@@ -415,6 +432,12 @@ export const useStore = create<Store>((set, get) => ({
   activity: {},
   groups: [],
   openGroupId: null,
+  _pendingRefreshTimer: null,
+  groupPending: [],
+  groupPendingCount: {},
+  groupActivity: [],
+  groupReviewerPassed: [],
+  approvalsQueueOpen: false,
   groupMessages: [],
   subagents: [],
   openSubagentId: null,
@@ -691,6 +714,8 @@ export const useStore = create<Store>((set, get) => ({
             if (i >= 0) merged[i] = { ...merged[i], meta: { ...merged[i].meta!, status: e.approval.status } }
             set({ entries: merged })
           }
+          // Q2 (fase squadra): una card nuova entra nella coda della squadra
+          s.refreshGroupPending()
           break
         }
         case 'open-agent': {
@@ -747,6 +772,8 @@ export const useStore = create<Store>((set, get) => ({
           if (s.openGroupId !== null) {
             api.groupMessages(s.openGroupId).then((groupMessages) => set({ groupMessages })).catch(() => undefined)
           }
+          // Q2 (fase squadra): la coda si aggiorna appena una card nasce o si chiude
+          s.refreshGroupPending()
           break
         }
         // fase 16b (S1.2): apri la squadra (notifica del riepilogo del coordinatore)
@@ -932,9 +959,11 @@ export const useStore = create<Store>((set, get) => ({
   openGroup(id) {
     // verifica impostazioni (navigazione): aprire una squadra riporta alla
     // chat; chiuderla (null) non tocca Attività né Libreria
-    set(id !== null ? { openGroupId: id, groupMessages: [], activityOpen: false, openLibraryId: null } : { openGroupId: id, groupMessages: [] })
+    set(id !== null ? { openGroupId: id, groupMessages: [], activityOpen: false, openLibraryId: null, approvalsQueueOpen: false } : { openGroupId: id, groupMessages: [], approvalsQueueOpen: false })
     if (id !== null) {
       void api.groupMessages(id).then((groupMessages) => set({ groupMessages })).catch(() => undefined)
+      // Q2 (fase squadra): la coda della squadra parte col numero giusto
+      get().refreshGroupPending()
     }
   },
 
@@ -1190,6 +1219,40 @@ export const useStore = create<Store>((set, get) => ({
     await api.groupCreate(name, memberIds, coordinatorId, description)
     const groups = await api.listGroups().catch(() => get().groups)
     set({ groups })
+  },
+
+  // Q2 (fase squadra): le pendenti della squadra aperta e il conteggio per
+  // OGNI squadra (il badge della barra laterale); debounce leggero
+  refreshGroupPending() {
+    const s = get()
+    if (s._pendingRefreshTimer) clearTimeout(s._pendingRefreshTimer)
+    s._pendingRefreshTimer = setTimeout(() => {
+      const cur = get()
+      if (cur.openGroupId !== null) {
+        api.groupPendingApprovals(cur.openGroupId)
+          .then((r) => set({ groupPending: r.pending, groupActivity: r.activity, groupReviewerPassed: r.reviewerPassed }))
+          .catch(() => undefined)
+      }
+      // il numero per la barra: una chiamata per squadra (sono al massimo poche)
+      for (const g of cur.groups) {
+        api.groupPendingApprovals(g.id)
+          .then((r) => set({ groupPendingCount: { ...get().groupPendingCount, [g.id]: r.pending.length } }))
+          .catch(() => undefined)
+      }
+    }, 150)
+  },
+
+  setApprovalsQueueOpen(open) {
+    set({ approvalsQueueOpen: open })
+  },
+
+  resolveGroupApproval(agentId, approvalId, decision, mode) {
+    // l'ottimistico della chat del bot lo fa la resolveApproval di oggi
+    get().resolveApproval(agentId, approvalId, decision, mode)
+    // la riga esce dalla coda subito
+    const s = get()
+    set({ groupPending: s.groupPending.filter((r) => !(r.agentId === agentId && r.approvalId === approvalId)) })
+    s.refreshGroupPending()
   },
 
   async groupUpdate(groupId, patch) {

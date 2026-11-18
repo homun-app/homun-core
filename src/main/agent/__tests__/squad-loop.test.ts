@@ -240,6 +240,55 @@ describe('Q1: il sottoagente di un turno di squadra', () => {
   })
 })
 
+describe('Q2: «Consenti per questa missione» nel loop', () => {
+  /** gira un turno decidendo le card col mode dato (mission per la prova) */
+  const runTurnAllowing = async (agentId: string, opts: Record<string, unknown>, mode: 'mission' | 'once'): Promise<void> => {
+    let running = false
+    const p = runTurn(agentId, 'lavoro', emit, undefined, opts as never)
+    p.finally(() => { running = false }).catch(() => undefined)
+    running = true
+    const deadline = Date.now() + 30_000
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 40))
+      const appr = store.getEntries(agentId).find((e) => e.kind === 'approval' && e.meta?.status === 'pending')
+      if (appr) resolveApproval(agentId, String(appr.meta?.approvalId), 'allow', mode)
+      if (!running && !isRunning(agentId)) break
+    }
+    await p
+  }
+
+  it('la delega contaminata chiede con ask; con la missione concessa, la STESSA delega di un ALTRO membro passa senza card', async () => {
+    const treni = makeAgent('Treni missione')
+    const alloggio = makeAgent('Alloggio missione')
+    activateGroups(treni, ['bots'])
+    activateGroups(alloggio, ['bots'])
+    const gid = makeGroup(treni, alloggio, 'ask')
+    // Treni delega contaminato: la card nasce, e si concede PER LA MISSIONE
+    queue = [
+      { tool: { name: 'send_to_agent', args: { agentId: alloggio, text: 'check-in?' } } },
+      { text: 'inviato' }
+    ]
+    await runTurnAllowing(treni, { squadId: gid, contaminated: true }, 'mission')
+    const card = store.getEntries(treni).find((e) => e.kind === 'approval')
+    expect(card).toBeTruthy()
+    expect(card!.meta?.status).toBe('allowed')
+    // il grant di missione esiste per ENTRAMBI i membri
+    const grants = listJobs === null ? [] : store.db().prepare("SELECT tool, target, agent_id, expires_at FROM grants WHERE tool = 'send_to_agent'").all() as Array<{ agent_id: string | null; expires_at: number }>
+    expect(grants.map((g) => g.agent_id).sort()).toEqual([alloggio, treni].sort())
+    expect(grants.every((g) => g.expires_at > Date.now() + 7 * 60 * 60 * 1000)).toBe(true)
+    // ora ALLOGGIO delega contaminato verso Treni: niente card (grant di missione)
+    queue = [
+      { tool: { name: 'send_to_agent', args: { agentId: treni, text: 'fatto' } } },
+      { text: 'inviato' }
+    ]
+    await runTurnAllowing(alloggio, { squadId: gid, contaminated: true }, 'mission')
+    expect(store.getEntries(alloggio).some((e) => e.kind === 'approval')).toBe(false)
+    const job = listJobs(store.db()).find((j) => j.kind === 'user-message' && j.agent_id === treni)
+    expect(job).toBeTruthy()
+    expect((job!.payload as Record<string, unknown>).contaminated).toBe(true)
+  })
+})
+
 describe('Q1: il runner dei job riporta la squadra alle opzioni del turno', () => {
   it('user-message con squadId e contaminated → opts.squadId e opts.contaminated', async () => {
     const { enqueueJob } = await import('../../store/jobs')

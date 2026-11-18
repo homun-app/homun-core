@@ -986,7 +986,7 @@ export interface SandbotApi {
   draftUpdate(agentId: string, entryId: number, body: string): Promise<void>
   // approvazioni
   /** fase 8: mode 'once' (una volta), 'always' (standing grant), 'turn' (fino a fine turno, in memoria) */
-  resolveApproval(agentId: string, approvalId: string, decision: 'allow' | 'deny', mode: 'once' | 'always' | 'turn' | 'minutes10'): Promise<void>
+  resolveApproval(agentId: string, approvalId: string, decision: 'allow' | 'deny', mode: 'once' | 'always' | 'turn' | 'minutes10' | 'mission'): Promise<void>
   // provider e modelli
   /** fase 16c (C1): MAI la chiave — apiKey sempre '', hasKey e keyHint al posto */
   listProviders(): Promise<ProviderPublic[]>
@@ -1105,6 +1105,17 @@ export interface SandbotApi {
   }): Promise<GroupInfo>
   /** Fase 16b (S1.3): cancella squadra e messaggi; i bot restano. */
   groupDelete(groupId: number): Promise<void>
+  /**
+   * Q2 (fase squadra): le approvazioni in attesa di tutti i membri della
+   * squadra e dei loro sottoagenti (la coda «Da approvare»).
+   */
+  groupPendingApprovals(groupId: number): Promise<{
+    pending: SquadPendingApprovalInfo[]
+    /** Q2: «Fatto da soli, senza chiederti» (file, comandi, pagine, messaggi) */
+    activity: Array<{ id: 'files' | 'commands' | 'pages' | 'bot-messages'; count: number; who: string[] }>
+    /** Q2: «Lasciato passare dal revisore», con la concessione revocabile */
+    reviewerPassed: Array<{ agentId: string; agentName: string; tool: string; reason: string | null; when: number; grantId: number | null }>
+  }>
   // fase 12: sottoagenti del padre (card + pannello) e bottone Ferma
   listSubagents(parentId: string): Promise<SubagentInfo[]>
   stopSubagent(id: string): Promise<void>
@@ -1778,6 +1789,23 @@ export interface GroupInfo {
   lastMessageAt: number | null
   /** Q1 (fase squadra): l'autonomia della squadra */
   autonomy: GroupAutonomy
+}
+
+/**
+ * Q2 (fase squadra): una card pendente della coda «Da approvare» della
+ * squadra — la frase è quella della card di oggi, il perché dice perché
+ * chiede (contaminato, revisore in dubbio, insieme fisso).
+ */
+export interface SquadPendingApprovalInfo {
+  agentId: string
+  agentName: string
+  approvalId: string
+  tool: string
+  phrase: string
+  category: 'dati-tuoi' | 'pagamento' | 'invio' | 'sito-interattivo' | 'mac' | 'squadra' | 'altro'
+  why: 'contaminato' | 'revisore' | 'fisso' | null
+  when: number
+  fromSubagent: boolean
 }
 
 /** Un messaggio di gruppo come lo vede la UI. */

@@ -131,6 +131,8 @@ const api: SandbotApi = {
     ipcRenderer.invoke('groups:create', name, memberIds, coordinatorId, description),
   groupUpdate: (groupId, patch) => ipcRenderer.invoke('groups:update', groupId, patch),
   groupDelete: (groupId) => ipcRenderer.invoke('groups:delete', groupId),
+  /** Q2 (fase squadra): le card pendenti dei membri e dei loro sottoagenti */
+  groupPendingApprovals: (groupId: number) => ipcRenderer.invoke('groups:pending-approvals', groupId),
   // fase 12: sottoagenti del padre e bottone Ferma sulla card
   listSubagents: (parentId) => ipcRenderer.invoke('subagents:list', parentId),
   stopSubagent: (id) => ipcRenderer.invoke('subagents:stop', id),

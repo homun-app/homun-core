@@ -1132,6 +1132,20 @@ export function buildApiMethods(
       return groups.groupWithMembers(updated)
     },
 
+    // Q2 (fase squadra): la coda delle approvazioni della squadra — le card
+    // pendenti di tutti i membri e dei loro sottoagenti
+    'groups:pending-approvals': async ([groupId]) => {
+      const groups = await import('../main/store/groups')
+      const gid = Number(groupId)
+      // Q2: la coda completa della tavola 2 — pendenti, «Fatto da soli» e
+      // «Lasciato passare dal revisore»
+      return {
+        pending: groups.pendingApprovalsForGroup(gid),
+        activity: groups.squadActivityForGroup(gid),
+        reviewerPassed: groups.reviewerPassedForGroup(gid)
+      }
+    },
+
     'groups:delete': async ([groupId]) => {
       const groups = await import('../main/store/groups')
       const gid = Number(groupId)
@@ -2027,7 +2041,9 @@ export function buildApiMethods(
     // fase 8 (punto 2): mode 'once' | 'always' (standing grant) | 'turn' (fino
     // a fine turno) | 'minutes10' (fase use-app U3: standing grant con scadenza)
     'approvals:resolve': ([agentId, approvalId, decision, mode]) => {
-      const m = mode === 'always' ? 'always' : mode === 'turn' ? 'turn' : mode === 'minutes10' ? 'minutes10' : 'once'
+      // Q2 (fase squadra): 'mission' = «Consenti per questa missione» (un grant
+      // di 8 ore per OGNI membro, solo sito-interattivo e squadra)
+      const m = mode === 'always' ? 'always' : mode === 'turn' ? 'turn' : mode === 'minutes10' ? 'minutes10' : mode === 'mission' ? 'mission' : 'once'
       // fase 16b (S6): la modalità finisce nel meta dell'entry — la riga dopo
       // la decisione dice «Consentito una volta / per il turno / sempre»
       const aid = String(agentId)
@@ -2045,6 +2061,8 @@ export function buildApiMethods(
       const parentOf = store.getAgent(aid)?.parentId
       if (parentOf) emit({ type: 'subagents', parentId: parentOf })
       loop.resolveApproval(aid, approvalId as string, decision as 'allow' | 'deny', m)
+      // Q2 (fase squadra): la coda della squadra si aggiorna appena la card si chiude
+      if (entry?.meta?.squadId) emit({ type: 'groups' })
     },
     // debug/test: risolve l'approval pending più recente di un agente
     'approvals:resolve-latest': ([agentId, decision]) => {
