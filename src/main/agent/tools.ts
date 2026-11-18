@@ -1326,9 +1326,13 @@ export async function executeTool(
       const rawUrl = String(input.url ?? '')
       const offset = input.offset !== undefined && input.offset !== null ? Number(input.offset) : undefined
       const outcome = await getWebFetchFn()(rawUrl)
+      // Q7 (fase squadra): la prima riga del result è lo stato HTTP e la
+      // durata — il bot può rispondere a «risponde in meno di 2 secondi?»
+      const timingLine = (o: { status?: number; elapsedMs?: number }): string =>
+        o.status !== undefined && o.elapsedMs !== undefined ? `HTTP ${o.status} · ${o.elapsedMs} ms\n` : ''
       if (!outcome.ok) {
         return {
-          output: outcome.reason,
+          output: timingLine(outcome) + outcome.reason,
           meta: { ...(outcome.blocked ? { blocked: true } : {}), ...(outcome.unsupported ? { unsupported: true } : {}) }
         }
       }
@@ -1346,7 +1350,7 @@ export async function executeTool(
         }
       }
       return {
-        output: webFetchWindowOutput(outcome.text, offset) + hint,
+        output: timingLine(outcome) + webFetchWindowOutput(outcome.text, offset) + hint,
         meta: { webContent: true, finalUrl: outcome.finalUrl, ...(outcome.jsBuilt ? { jsBuilt: true } : {}) }
       }
     }
@@ -1826,9 +1830,27 @@ export async function executeTool(
         coordinatorNote = ` ${coordName} now coordinates the team.`
       }
       if (input.coordinatorId !== undefined && input.coordinatorId !== null) {
-        const coord = String(input.coordinatorId)
+        let coord = String(input.coordinatorId)
+        // Q7 (fase squadra): il NOME esatto di un membro va bene come l'id
         if (!groupsMod.isGroupMember(groupId, coord)) {
-          return { output: 'The coordinator must be a member of the group (add it first with addMemberIds).', meta: { groupChanged: groupId } }
+          const byName = groupsMod.groupMemberIds(groupId)
+            .map((id: string) => dbMod.getAgent(id))
+            .filter((a): a is NonNullable<typeof a> => !!a)
+            .find((a) => a.name === coord)
+          if (byName) coord = byName.id
+        }
+        if (!groupsMod.isGroupMember(groupId, coord)) {
+          // Q7: l'errore elenca gli ID e i NOMI dei membri
+          const roster = groupsMod.groupMemberIds(groupId)
+            .map((id: string) => dbMod.getAgent(id))
+            .filter((a): a is NonNullable<typeof a> => !!a)
+            .map((a) => `${a.id} (${a.name})`)
+            .join(', ')
+          return { output: `The coordinator must be a member of the group (pass its id or its exact name). Members: ${roster}.`, meta: { groupChanged: groupId } }
+        }
+        // Q7: chi chiama È GIÀ il coordinatore — niente da cambiare
+        if (coord === group.coordinator_id && coord === agentId) {
+          return { output: 'You already coordinate this team: pass a different coordinatorId (a member) if you want to hand it over.', meta: { groupChanged: groupId } }
         }
         if (coord !== group.coordinator_id) {
           groupsMod.updateGroup(groupId, { coordinator_id: coord })

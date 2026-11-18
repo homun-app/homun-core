@@ -488,8 +488,8 @@ export interface WebFetchDeps {
 }
 
 export type WebFetchOutcome =
-  | { ok: true; text: string; contentType: string; finalUrl: string; downloadedBytes: number; truncated?: boolean; jsBuilt?: boolean }
-  | { ok: false; reason: string; blocked?: boolean; unsupported?: boolean }
+  | { ok: true; text: string; contentType: string; finalUrl: string; downloadedBytes: number; truncated?: boolean; jsBuilt?: boolean; status: number; elapsedMs: number }
+  | { ok: false; reason: string; blocked?: boolean; unsupported?: boolean; status?: number; elapsedMs?: number }
 
 /** Cache per URL di 15 minuti (punto 2): dentro al modulo, iniettabile l'orologio. */
 const fetchCache = new Map<string, { at: number; outcome: WebFetchOutcome }>()
@@ -689,6 +689,9 @@ export function challengeBlocked(status: number, rawHtml: string, extractedText:
  */
 export async function webFetch(rawUrl: string, deps: WebFetchDeps = {}): Promise<WebFetchOutcome> {
   const now = deps.now ?? Date.now
+  // Q7 (fase squadra): il result comincia con lo stato HTTP e la durata — il
+  // bot può rispondere a «risponde in meno di 2 secondi?»
+  const startedAt = now()
   const check = checkUrl(rawUrl)
   if (!check.ok) return { ok: false, reason: check.reason }
   let current = check.url
@@ -769,19 +772,21 @@ export async function webFetch(rawUrl: string, deps: WebFetchDeps = {}): Promise
   }
 
   // F5: lo stato di sfida si dichiara SOLO con le firme note
+  const measured = (): { status: number; elapsedMs: number } => ({ status: hop.status, elapsedMs: now() - startedAt })
   if (hop.status === 403 || hop.status === 429 || hop.status === 503) {
     const sig = CHALLENGE_SIGNATURES.find((s) => hop.body.toString('latin1').toLowerCase().includes(s))
     if (sig) {
       return {
         ok: false,
         blocked: true,
-        reason: `the site blocked the request (HTTP ${hop.status}, challenge "${sig}"): DO NOT bypass the block, tell the user that the page cannot be read`
+        reason: `the site blocked the request (HTTP ${hop.status}, challenge "${sig}"): DO NOT bypass the block, tell the user that the page cannot be read`,
+        ...measured()
       }
     }
-    return { ok: false, reason: `the page responds HTTP ${hop.status}` }
+    return { ok: false, reason: `the page responds HTTP ${hop.status}`, ...measured() }
   }
   if (hop.status >= 400) {
-    return { ok: false, reason: `the page responds HTTP ${hop.status}` }
+    return { ok: false, reason: `the page responds HTTP ${hop.status}`, ...measured() }
   }
 
   const contentType = (hop.headers['content-type'] ?? '').split(';')[0]!.trim().toLowerCase()
@@ -801,14 +806,16 @@ export async function webFetch(rawUrl: string, deps: WebFetchDeps = {}): Promise
       ok: true, text: text + truncatedNote, contentType: 'text/html',
       finalUrl: current.toString(), downloadedBytes: hop.body.length,
       ...(hop.truncated ? { truncated: true } : {}),
-      ...(looksJsBuiltPage(raw, text) ? { jsBuilt: true } : {})
+      ...(looksJsBuiltPage(raw, text) ? { jsBuilt: true } : {}),
+      ...measured()
     }
   }
   if (contentType.startsWith('text/') || contentType.includes('json')) {
     return {
       ok: true, text: bodyText() + truncatedNote, contentType,
       finalUrl: current.toString(), downloadedBytes: hop.body.length,
-      ...(hop.truncated ? { truncated: true } : {})
+      ...(hop.truncated ? { truncated: true } : {}),
+      ...measured()
     }
   }
   return {

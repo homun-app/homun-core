@@ -187,8 +187,8 @@ describe('mcp-setup: la voce vera di Mattermost legge TUTTO il remoto (M1)', () 
 // ---- L8: fetchRegistryEntries — registro giù vs zero risultati, e la cache ----
 
 // l'esito ok del fetch SSRF (WebFetchOutcome completo, iniettabile)
-const okFetchOutcome = (body: unknown): { ok: true; text: string; contentType: string; finalUrl: string; downloadedBytes: number } =>
-  ({ ok: true, text: typeof body === 'string' ? body : JSON.stringify(body), contentType: 'application/json', finalUrl: 'https://registry.example/', downloadedBytes: 1 })
+const okFetchOutcome = (body: unknown): { ok: true; text: string; contentType: string; finalUrl: string; downloadedBytes: number; status: number; elapsedMs: number } =>
+  ({ ok: true, text: typeof body === 'string' ? body : JSON.stringify(body), contentType: 'application/json', finalUrl: 'https://registry.example/', downloadedBytes: 1, status: 200, elapsedMs: 12 })
 
 describe('L8: fetchRegistryEntries — null solo per errore (non in cache), [] per zero risultati (in cache)', () => {
   const fixtureAsEntry = parseRegistryResponse(fixture)[0]!

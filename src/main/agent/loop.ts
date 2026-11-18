@@ -810,6 +810,8 @@ interface SubagentToolDeps {
   automatic: boolean
   /** Q1 (fase squadra): la squadra del turno (il figlio eredita l'autonomia) */
   squadId?: number
+  /** Q7 (fase squadra): la lingua della conversazione (il brief la porta) */
+  language?: 'it' | 'en'
   /** le spawn già passate di qui in questo turno (compresa l'eventuale corrente) */
   spawnsInTurn: number
   /** il lotto del turno corrente (creato alla prima spawn) */
@@ -886,7 +888,12 @@ async function runSubagentTool(
     const { enqueueJob } = await import('../store/jobs')
     enqueueJob(database, {
       agentId: childId, kind: 'subagent-run',
-      payload: { subagentId: childId, first: true, ...(deps.squadId !== undefined ? { squadId: deps.squadId } : {}) },
+      payload: {
+        subagentId: childId, first: true,
+        ...(deps.squadId !== undefined ? { squadId: deps.squadId } : {}),
+        // Q7: il brief del figlio porta la lingua della conversazione
+        ...(deps.language ? { language: deps.language } : {})
+      },
       runAt: now, now
     })
     return {
@@ -4212,6 +4219,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             automatic,
             // Q1 (fase squadra): il figlio di un turno di squadra ne eredita la squadra
             ...(squad ? { squadId: squad.id } : {}),
+            language: userLang,
             // il tetto conta le spawn già passate di qui nel turno (compresa questa)
             spawnsInTurn: executedCalls.filter((c) => c.name === 'spawn_subagent').length,
             batchIdOf: () => {

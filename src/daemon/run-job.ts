@@ -124,7 +124,7 @@ export function makeJobRunner(db: DatabaseSync, runTurnFn: RunTurnFn = runTurn) 
     // figlio è un agente con le sue entry). Un figlio già terminale (stop o
     // scadenza arrivati prima del job) non parte.
     if (job.kind === 'subagent-run') {
-      const p = job.payload as { subagentId: string; first?: boolean; message?: string; entryId?: number; squadId?: number }
+      const p = job.payload as { subagentId: string; first?: boolean; message?: string; entryId?: number; squadId?: number; language?: 'it' | 'en' }
       const { getSubagent, updateSubagent } = await import('../main/store/subagents')
       const row = getSubagent(db, p.subagentId)
       if (!row) return
@@ -138,9 +138,10 @@ export function makeJobRunner(db: DatabaseSync, runTurnFn: RunTurnFn = runTurn) 
       // righe del task): il runner non dipende dallo store globale
       const parent = db.prepare('SELECT name FROM agents WHERE id = ?').get(row.parent_id) as { name?: string } | undefined
       const agentMessage = await import('../shared/agent-message')
+      // Q7 (fase squadra): il brief porta la lingua della conversazione
       const opening = p.message !== undefined && parent
         ? agentMessage.formatSubagentParentMessage(parent.name ?? row.parent_id, p.message)
-        : agentMessage.formatSubagentBrief(row.title, row.brief)
+        : agentMessage.formatSubagentBrief(row.title, row.brief, p.language)
       await runTurnFn(row.id, opening, emit, undefined, {
         source: 'user',
         subagent: { id: row.id, parentId: row.parent_id },

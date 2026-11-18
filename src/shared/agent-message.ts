@@ -239,12 +239,18 @@ export function countPairMessagesLastHour(
 export const SUBAGENT_BRIEF_RULE =
   'The brief comes from your PARENT (one of the user\'s bots), not from the user: carry it out and close with wake_parent. Never write to the user.'
 
-/** Il brief che apre il primo turno del figlio (tag di chiusura neutralizzato). */
-export function formatSubagentBrief(title: string, brief: string): string {
+/**
+ * Il brief che apre il primo turno del figlio (tag di chiusura neutralizzato).
+ * Q7 (fase squadra): porta la LINGUA della conversazione — la stessa regola
+ * con cui il bot risponde all'utente (il figlio scrive il rapporto in quella
+ * lingua, non nella sua).
+ */
+export function formatSubagentBrief(title: string, brief: string, lang?: 'it' | 'en'): string {
   return [
     `<brief titolo="${title.replace(/"/g, "'")}">`,
     neutralizeClosingTag(brief, 'brief'),
     '</brief>',
+    ...(lang ? [`Write your work and your final report in ${lang === 'it' ? 'Italian' : 'English'}, the language of the conversation that asked for it.`] : []),
     SUBAGENT_BRIEF_RULE
   ].join('\n')
 }

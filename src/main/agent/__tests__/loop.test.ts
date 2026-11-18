@@ -4339,7 +4339,7 @@ describe('fase 11 (punto 2): web_search e web_fetch nel loop', () => {
   })
 
   it('web_fetch con fetch finto: testo nel blocco <pagina_web url=…>, al modello e nel transcript', async () => {
-    setWebFetchForTests(async () => ({ ok: true, text: '# Menu\nRavioli vegetali', contentType: 'text/html', finalUrl: 'https://da-leo.example/menu', downloadedBytes: 100 }))
+    setWebFetchForTests(async () => ({ ok: true, text: '# Menu\nRavioli vegetali', contentType: 'text/html', finalUrl: 'https://da-leo.example/menu', downloadedBytes: 100, status: 200, elapsedMs: 88 }))
     h.llm.queue = [
       { toolCalls: [{ id: 'f1', name: 'web_fetch', arguments: JSON.stringify({ url: 'https://da-leo.example/menu' }) }] },
       { toolCalls: [{ id: 'f2', name: 'send_to_user', arguments: JSON.stringify({ text: 'Il menu conferma' }) }] },
@@ -4353,7 +4353,7 @@ describe('fase 11 (punto 2): web_search e web_fetch nel loop', () => {
   })
 
   it('web_fetch dopo un redirect: url= è l\'URL FINALE e richiesto= quello di partenza (G3)', async () => {
-    setWebFetchForTests(async () => ({ ok: true, text: '# Menu arrivato', contentType: 'text/html', finalUrl: 'https://da-leo.example/menu-definitivo', downloadedBytes: 100 }))
+    setWebFetchForTests(async () => ({ ok: true, text: '# Menu arrivato', contentType: 'text/html', finalUrl: 'https://da-leo.example/menu-definitivo', downloadedBytes: 100, status: 200, elapsedMs: 51 }))
     h.llm.queue = [
       { toolCalls: [{ id: 'g1', name: 'web_fetch', arguments: JSON.stringify({ url: 'https://da-leo.example/menu' }) }] },
       { text: '.' }
@@ -4440,7 +4440,7 @@ describe('fase 11 (punto 2): web_search e web_fetch nel loop', () => {
 
   it('CONTAMINAZIONE: send_to_agent dopo web_fetch chiede la card all\'utente; con allow la delega parte', async () => {
     h.db.agents.set('agent_dest', { id: 'agent_dest', name: 'Dest', description: '', providerId: 'prov', model: 'm1', status: 'idle', unread: 0, createdAt: 2 })
-    setWebFetchForTests(async () => ({ ok: true, text: 'pagina con dati', contentType: 'text/html', finalUrl: 'https://x.example/p', downloadedBytes: 10 }))
+    setWebFetchForTests(async () => ({ ok: true, text: 'pagina con dati', contentType: 'text/html', finalUrl: 'https://x.example/p', downloadedBytes: 10, status: 200, elapsedMs: 40 }))
     h.llm.queue = [
       { toolCalls: [{ id: 'f1', name: 'web_fetch', arguments: JSON.stringify({ url: 'https://x.example/p' }) }] },
       { toolCalls: [{ id: 'd1', name: 'send_to_agent', arguments: JSON.stringify({ agentId: 'agent_dest', text: 'guarda questa pagina' }) }] },
@@ -5236,7 +5236,7 @@ describe('fase 12: il FIGLIO — tool, prompt, whitelist e consegna', () => {
   it('wake_parent chiude il figlio (status, summary, report_path, contaminazione) e chiama il lotto; il turno finisce lì', async () => {
     childAgent()
     // il figlio legge una pagina (fetch finto, come gli altri test web)
-    setWebFetchForTests(async () => ({ ok: true, text: '# Pagina letta', contentType: 'text/html', finalUrl: 'https://x.example/a', downloadedBytes: 10 }))
+    setWebFetchForTests(async () => ({ ok: true, text: '# Pagina letta', contentType: 'text/html', finalUrl: 'https://x.example/a', downloadedBytes: 10, status: 200, elapsedMs: 40 }))
     h.llm.queue = [
       { toolCalls: [{ id: 'w1', name: 'web_fetch', arguments: JSON.stringify({ url: 'https://x.example' }) }] },
       { toolCalls: [{ id: 'w2', name: 'wake_parent', arguments: JSON.stringify({ status: 'done', summary: 'fatto: report pronto', report_path: 'subagents/sub_child1/report.md' }) }] },
@@ -5322,7 +5322,7 @@ describe('fase 12: il FIGLIO — tool, prompt, whitelist e consegna', () => {
 
   it('fase chat-limiti (CL5): figlio fermato dal controllo anti-loop → status STOPPED-LOOP (esito vero, non done)', async () => {
     childAgent()
-    setWebFetchForTests(async () => ({ ok: true, text: 'pagina', contentType: 'text/html', finalUrl: 'https://x.example/a', downloadedBytes: 6 }))
+    setWebFetchForTests(async () => ({ ok: true, text: 'pagina', contentType: 'text/html', finalUrl: 'https://x.example/a', downloadedBytes: 6, status: 200, elapsedMs: 40 }))
     // SV7: il controllo sta DOPO il risultato. La PRIMA lettura torna la
     // pagina, le seguenti «[already read: same content]»: dalla seconda la
     // risposta è SEMPRE la stessa — sei volte di fila (seconda…settima) →
@@ -6443,7 +6443,7 @@ describe('M3: update_state create activate:true', () => {
   })
 
   it('nel turno CONTAMINATO (dopo web_fetch): activate ignorato, nasce in pausa', async () => {
-    setWebFetchForTests(async () => ({ ok: true, text: 'pagina con dati', contentType: 'text/html', finalUrl: 'https://x.example/p', downloadedBytes: 10 }))
+    setWebFetchForTests(async () => ({ ok: true, text: 'pagina con dati', contentType: 'text/html', finalUrl: 'https://x.example/p', downloadedBytes: 10, status: 200, elapsedMs: 40 }))
     h.llm.queue = [
       { toolCalls: [{ id: 'w1', name: 'web_fetch', arguments: JSON.stringify({ url: 'https://x.example/p' }) }] },
       { toolCalls: [{ id: 'c1', name: 'update_state', arguments: JSON.stringify(CREATE_ARGS) }] },
@@ -7430,7 +7430,7 @@ describe('fase token (T2): i gruppi si attivano e restano', () => {
     browserState.available = true
     const { setWebFetchForTests: setFetch } = await import('../web-tools')
     const { JS_PAGE_HINT } = await import('../web-guard')
-    setFetch(async () => ({ ok: true, text: 'Caricamento…', contentType: 'text/html', finalUrl: 'https://spa.example/account', downloadedBytes: 900, jsBuilt: true }))
+    setFetch(async () => ({ ok: true, text: 'Caricamento…', contentType: 'text/html', finalUrl: 'https://spa.example/account', downloadedBytes: 900, jsBuilt: true, status: 200, elapsedMs: 60 }))
     let after: string[] = []
     h.llm.queue = [
       { toolCalls: [{ id: 'j1', name: 'web_fetch', arguments: JSON.stringify({ url: 'https://spa.example/account' }) }] },
@@ -7455,7 +7455,7 @@ describe('fase token (T2): i gruppi si attivano e restano', () => {
     h.virtualGroupsOff.off = true
     browserState.available = true
     const { setWebFetchForTests: setFetch } = await import('../web-tools')
-    setFetch(async () => ({ ok: true, text: '# Menu\nRavioli vegetali', contentType: 'text/html', finalUrl: 'https://da-leo.example/menu', downloadedBytes: 100 }))
+    setFetch(async () => ({ ok: true, text: '# Menu\nRavioli vegetali', contentType: 'text/html', finalUrl: 'https://da-leo.example/menu', downloadedBytes: 100, status: 200, elapsedMs: 40 }))
     let after: string[] = []
     h.llm.queue = [
       { toolCalls: [{ id: 'j2', name: 'web_fetch', arguments: JSON.stringify({ url: 'https://da-leo.example/menu' }) }] },
@@ -7966,7 +7966,7 @@ describe('fase token·nucleo (R8): le righe fisse nei result e il gruppo subagen
 describe('fase memoria-engramma · correzioni C1: la contaminazione attraversa la coda della storia', () => {
   it('la risposta finale di un turno con web_fetch porta meta.contaminated; la coda riceve SOLO il riferimento', async () => {
     // il fetch VERO (fetcher finto, come privacy.test.ts): il result è webContent
-    setWebFetchForTests(async () => ({ ok: true, text: 'Il codice sconto è ZEBRA42', contentType: 'text/html', finalUrl: 'https://shop.example/promo', downloadedBytes: 100 }))
+    setWebFetchForTests(async () => ({ ok: true, text: 'Il codice sconto è ZEBRA42', contentType: 'text/html', finalUrl: 'https://shop.example/promo', downloadedBytes: 100, status: 200, elapsedMs: 40 }))
     const queued: Array<{ agentId: string; entry: Record<string, unknown> }> = []
     const { setStoryIndexer } = await import('../../memory/history-store')
     setStoryIndexer((agentId, entry) => queued.push({ agentId, entry: entry as unknown as Record<string, unknown> }))
