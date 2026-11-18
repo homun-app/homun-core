@@ -82,9 +82,9 @@ const fakeManagers = (state: FakeState) => {
   return { connectors, composio, gateway }
 }
 
-const apiOf = (state: FakeState) => {
+const apiOf = (state: FakeState, emit?: (e: { type: string }) => void) => {
   const { connectors, composio, gateway } = fakeManagers(state)
-  return buildApiMethods(() => undefined, fakeWorker, connectors, undefined, { composio, composioGateway: gateway })
+  return buildApiMethods(emit ?? (() => undefined), fakeWorker, connectors, undefined, { composio, composioGateway: gateway })
 }
 
 const appsConnect = (api: ReturnType<typeof buildApiMethods>, appId: string) =>
@@ -128,12 +128,45 @@ describe('P4 — apps:connect, la strada la decide la riga', () => {
 })
 
 describe('P4 — l\'intenzione sta nel daemon e prosegue da sola', () => {
-  /** Il login finto: risolve «connected» solo quando si molla il lucchetto. */
-  const loginGate = () => {
+  /**
+   * Il login finto: risolve «connected» solo quando si molla il lucchetto.
+   * Dopo il rilascio il login resta LENTO (LOGIN_DELAY_MS): è il caso che
+   * questi test proteggono — su una macchina carica il lavoro vero che
+   * segue il lucchetto (notifyConnectorConnected, connectApp) arriva quando
+   * arriva, e una pausa fissa nel test non lo può sapere.
+   */
+  const LOGIN_DELAY_MS = 50
+  const loginGate = (delayMs = LOGIN_DELAY_MS) => {
     let release!: () => void
     const done = new Promise<void>((r) => { release = r })
-    const promise = done.then(() => ({ status: 'connected' }))
+    const promise = done.then(async () => {
+      await new Promise((r) => setTimeout(r, delayMs))
+      return { status: 'connected' }
+    })
     return { release, promise }
+  }
+
+  /**
+   * L'emit che registra gli eventi arrivati DOPO il rilascio del login e si
+   * scioglie al primo `connectors` di quel gruppo: quando l'app NON parte,
+   * runComposioLoginWithIntent finisce proprio lì (è il contratto con cui
+   * la UI si aggiorna) — è il segnale di «finito» dei controlli al negativo.
+   */
+  const emitRecorder = () => {
+    const events: string[] = []
+    let released = false
+    let atEnd!: () => void
+    const endOfLogin = new Promise<void>((r) => { atEnd = r })
+    return {
+      events,
+      endOfLogin,
+      markReleased: () => { released = true },
+      emit: (e: { type: string }) => {
+        if (!released) return
+        events.push(e.type)
+        if (e.type === 'connectors') atEnd()
+      }
+    }
   }
 
   it('non entrato → login → appena connesso parte connectApp per lo slug GIUSTO', async () => {
@@ -146,12 +179,15 @@ describe('P4 — l\'intenzione sta nel daemon e prosegue da sola', () => {
     const api = apiOf(state)
     expect(await appsConnect(api, 'gmail')).toEqual({ started: true, phase: 'login' })
     expect(state.runConnectCalls.map((e) => e.id)).toEqual(['composio'])
-    // il login non è ancora finito: nessun connectApp
-    await new Promise((r) => setTimeout(r, 20))
+    // il login è fermo sul lucchetto: connectApp NON può essere partito.
+    // Questo controllo non può dare falsi rossi — basta far scorrere le
+    // macrotask, niente millisecondi
+    await new Promise(setImmediate)
     expect(state.gateway.connectAppCalls).toHaveLength(0)
     gate.release()
-    await new Promise((r) => setTimeout(r, 20))
-    expect(state.gateway.connectAppCalls).toEqual([{ slug: 'gmail', name: 'Gmail' }])
+    // «aspetto che succeda»: waitFor con tetto largo, veloce quando la
+    // macchina è libera e che regge il login lento quando è carica
+    await vi.waitFor(() => expect(state.gateway.connectAppCalls).toEqual([{ slug: 'gmail', name: 'Gmail' }]), { timeout: 2000, interval: 5 })
   })
 
   it('già entrato: connectApp subito, senza passare dal login', async () => {
@@ -176,31 +212,42 @@ describe('P4 — l\'intenzione sta nel daemon e prosegue da sola', () => {
     await appsConnect(api, 'gmail')
     await appsConnect(api, 'slack') // il secondo clic vince
     gate.release()
-    await new Promise((r) => setTimeout(r, 20))
+    // prima si aspetta che il flusso sia arrivato (waitFor su connectApp)…
+    await vi.waitFor(() => expect(state.gateway.connectAppCalls).toEqual([{ slug: 'slack', name: 'Slack' }]), { timeout: 2000, interval: 5 })
+    // …e SOLO dopo il controllo «un solo flusso di Composio»
     expect(state.runConnectCalls.filter((e) => e.id === 'composio')).toHaveLength(1) // UN flusso solo
-    expect(state.gateway.connectAppCalls).toEqual([{ slug: 'slack', name: 'Slack' }])
   })
 
   it('l\'intenzione scade dopo 10 minuti: il login riesce ma l\'app non parte', async () => {
-    const realNow = Date.now
-    let fakeNow = realNow()
-    Date.now = () => fakeNow
+    const gate = loginGate()
+    const state: FakeState = {
+      staticClients: new Set(), runConnect: async (e) => (e.id === 'composio' ? gate.promise : { status: 'connected' }),
+      runConnectCalls: [], disconnectCalls: [],
+      composioStatus: { active: false }, gateway: { active: false, pending: null, connectAppCalls: [], cancelWaitCalls: 0 }
+    }
+    const rec = emitRecorder()
+    const api = apiOf(state, rec.emit)
+    // Date.now finto con spyOn (scelto contro l'assegnazione a mano): il
+    // mockRestore in finally rimette a posto il metodo anche cadendo prima,
+    // e resta nei registri di vitest finché non è restaurato.
+    const now = vi.spyOn(Date, 'now')
+    let fakeNow = Date.now()
+    now.mockImplementation(() => fakeNow)
     try {
-      const gate = loginGate()
-      const state: FakeState = {
-        staticClients: new Set(), runConnect: async (e) => (e.id === 'composio' ? gate.promise : { status: 'connected' }),
-        runConnectCalls: [], disconnectCalls: [],
-        composioStatus: { active: false }, gateway: { active: false, pending: null, connectAppCalls: [], cancelWaitCalls: 0 }
-      }
-      const api = apiOf(state)
       await appsConnect(api, 'gmail')
       fakeNow += 10 * 60_000 + 1 // scaduta
+      rec.markReleased()
       gate.release()
-      await new Promise((r) => setTimeout(r, 20))
-      expect(state.gateway.connectAppCalls).toHaveLength(0)
+      // Il prodotto legge Date.now SOLO DOPO che il login lento ha risolto:
+      // il finto deve valere fino alla decisione. La fine del flusso è
+      // l'evento `connectors` di fine login, atteso con la promise sciolta
+      // dall'emit — niente waitFor qui, così il tempo torna vero PRIMA di
+      // qualunque attesa col tetto (il mockRestore qui sotto).
+      await rec.endOfLogin
     } finally {
-      Date.now = realNow
+      now.mockRestore()
     }
+    expect(state.gateway.connectAppCalls).toHaveLength(0)
   })
 
   it('con la chiave di progetto attiva risponde conflict (le due strade non insieme)', async () => {
@@ -231,12 +278,16 @@ describe('P4 — l\'intenzione sta nel daemon e prosegue da sola', () => {
       runConnectCalls: [], disconnectCalls: [],
       composioStatus: { active: false }, gateway: { active: false, pending: null, connectAppCalls: [], cancelWaitCalls: 0 }
     }
-    const apiLogin = apiOf(stateLogin)
+    const rec = emitRecorder()
+    const apiLogin = apiOf(stateLogin, rec.emit)
     await appsConnect(apiLogin, 'gmail')
     await appsCancel(apiLogin, 'gmail')
     expect(stateLogin.disconnectCalls).toEqual(['composio'])
+    rec.markReleased()
     gate.release() // il login infine riesce lo stesso: niente app
-    await new Promise((r) => setTimeout(r, 20))
+    // prima il segnale di «finito» (l'evento connectors di fine login, con
+    // waitFor), POI il controllo che l'app NON sia partita
+    await vi.waitFor(() => expect(rec.events).toContain('connectors'), { timeout: 2000, interval: 5 })
     expect(stateLogin.gateway.connectAppCalls).toHaveLength(0)
   })
 })
