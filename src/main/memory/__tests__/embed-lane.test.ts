@@ -15,22 +15,28 @@ import { join } from 'node:path'
 import { hasLocalEmbedModel, LOCAL_EMBED_MODEL } from '../../../test-local-model'
 
 const MODEL_SRC = LOCAL_EMBED_MODEL
-const ROOT = mkdtempSync(join(tmpdir(), 'sandbot-mem-embed-'))
-const DATA = join(ROOT, 'data')
-afterAll(() => rmSync(ROOT, { recursive: true, force: true }))
-
 const A = 'agent_emb_a'
 const B = 'agent_emb_b'
 
-beforeAll(async () => {
-  const { setDataDir } = await import('../../store/db')
-  setDataDir(DATA)
-  // il modello come symlink (nessuna copia: il disco è stretto)
-  mkdirSync(join(DATA, 'models'), { recursive: true })
-  symlinkSync(MODEL_SRC, join(DATA, 'models', 'granite-embedding-97m-multilingual-r2'))
-})
-
 describe.skipIf(!hasLocalEmbedModel())('fase memoria-engramma · correzioni C7: il job incorpora le celle di quell agente', () => {
+  // C2 (fase ci-temporanei): la cartella nasce nel beforeAll del describe e
+  // muore nel suo afterAll, NON più a livello di modulo: in un file saltato
+  // per intero (describe.skipIf — il runner della CI senza modelli locali)
+  // vitest non gira NESSUN hook, e la mkdtemp al caricamento restava sul
+  // disco (la sandbot-mem-embed- ×1 della corsa rossa).
+  let ROOT = ''
+  let DATA = ''
+  beforeAll(async () => {
+    ROOT = mkdtempSync(join(tmpdir(), 'sandbot-mem-embed-'))
+    DATA = join(ROOT, 'data')
+    const { setDataDir } = await import('../../store/db')
+    setDataDir(DATA)
+    // il modello come symlink (nessuna copia: il disco è stretto)
+    mkdirSync(join(DATA, 'models'), { recursive: true })
+    symlinkSync(MODEL_SRC, join(DATA, 'models', 'granite-embedding-97m-multilingual-r2'))
+  })
+  afterAll(() => rmSync(ROOT, { recursive: true, force: true }))
+
   // LD5: il test apre il motore e incorpora col modello vero (secondi, non
   // millisecondi) — il tetto predefinito di 5 s di vitest lo uccideva a caso
   // sotto carico: le attese dentro sono già sull'ESITO, il tetto è solo un
