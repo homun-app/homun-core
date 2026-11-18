@@ -4,13 +4,15 @@
 // fanno match per chiave ESATTA ("name" o "name sub"), mai per prefisso.
 import { realpathSync } from 'node:fs'
 import { getPermissions, listGrants, addGrant, getRoutine, getSetting, getAgent } from '../store/db'
-import { sandboxMode, boxRoot, boxDir } from '../sandbox'
+import { sandboxMode, boxRoot, boxDir, boxShellEgressOf } from '../sandbox'
 import { resolveBoxPath } from '../sandbox/box-paths'
 import type { PermissionMode } from '../../shared/types'
 import { targetKey, runCommandVerdict, commandKey, isNeverAuto, ruleToolMatches, mcpAnnotationMode, serverReadGrantCovers, grantActive, useAppAlwaysAsk, useAppTargetsMatch, type McpAnnotationsLike } from './permission-rules'
 import { approvalsMode } from './auto-review'
 // fase app (A6): la classificazione delle azioni di Composio (pura)
 import { classifyComposioToolName } from '../connectors/composio-actions'
+// Q1 (fase squadra): l'autonomia della squadra e l'insieme FISSO (pura)
+import { squadAlwaysAsks, type GroupAutonomy } from './squad-autonomy'
 // fase Composio OAuth (C2/C3/C5/C4): il gate del blocco e degli strumenti
 // del server «For You», riconosciuti PER NOME su qualunque server MCP
 import {
@@ -175,6 +177,16 @@ function grantForAgent(g: { agentId?: string | null }, owner: string | null): bo
 }
 
 /**
+ * Q1 (fase squadra): il turno è di una SQUADRA con questa autonomia — decide
+ * cosa passa da solo (file e comandi nel computer) e attiva l'insieme FISSO
+ * che nemmeno regole e grant dell'utente possono togliere.
+ */
+export interface SquadTurnInfo {
+  id: number
+  autonomy: GroupAutonomy
+}
+
+/**
  * Verdetto per una chiamata tool. Async: run-command richiede l'analisi shell.
  * `agentId` serve al gate C5 (lettura file dentro/fuori dalla box in host).
  * M3 (fase 0.3.1001): `turn.userDirectTurn` dice se il turno è aperto da un
@@ -182,12 +194,13 @@ function grantForAgent(g: { agentId?: string | null }, owner: string | null): bo
  * contaminato) — serve a update_state create activate:true.
  * Fase Composio OAuth (C4): `turn.composioTrust` porta la fiducia del turno
  * per le letture Composio (toolkit usati/approvati e contaminazione).
+ * Q1 (fase squadra): `turn.squad` dice che il turno appartiene a una squadra.
  */
 export async function check(
   tool: string,
   input: Record<string, unknown>,
   agentId?: string,
-  turn: { userDirectTurn?: boolean; composioTrust?: ComposioTurnTrust } = {}
+  turn: { userDirectTurn?: boolean; composioTrust?: ComposioTurnTrust; squad?: SquadTurnInfo } = {}
 ): Promise<Verdict> {
   const cfg = getPermissions()
   // U7 (fase prima-release): le concessioni salvate valgono per il BOT del
@@ -268,8 +281,25 @@ export async function check(
     // Claude Code col sandbox). Restano: blocked (deny sopra), i secretRefs
     // (chiedono) e lo scambio file col Mac (copy_to_box/copy_from_box, ramo
     // loro, ALWAYS_ASK_TOOLS). In host e negli altri modi nulla cambia.
-    if (d.kind === 'ask' && !d.secretRefs.length && boxCommandNoAsk()) {
-      return { kind: 'allow', via: 'rule' }
+    if (d.kind === 'ask' && !d.secretRefs.length) {
+      // Q1 (fase squadra): nei turni di squadra decide l'AUTONOMIA del gruppo:
+      // box/box_review passano solo con il comando DENTRO il box e uscita di
+      // rete NONE — con la rete aperta la card resta (un comando con la rete
+      // può far uscire i file), e con 'ask' chiede tutto
+      if (turn.squad) {
+        if (turn.squad.autonomy !== 'ask' && sandboxMode() === 'box' && boxShellEgressOf() === 'none') {
+          return { kind: 'allow', via: 'rule' }
+        }
+        return {
+          kind: 'ask',
+          reason: d.reasons.join('; '),
+          ...(d.uis.length ? { uis: d.uis } : {}),
+          keys: d.keys
+        }
+      }
+      if (boxCommandNoAsk()) {
+        return { kind: 'allow', via: 'rule' }
+      }
     }
     if (d.kind === 'allow') return { kind: 'allow', via: d.via ?? 'rule' }
     return {
@@ -454,6 +484,38 @@ export async function check(
   const target = targetKey(tool, input)
   const mode = matchRule(tool, target, cfg.rules) ?? cfg.default
   if (mode === 'blocked') return { kind: 'deny', reason: 'Command blocked by permissions configuration' }
+
+  // Q1 (fase squadra): l'insieme FISSO chiede SEMPRE nell'autonomia di una
+  // squadra — nemmeno le regole always_allow e le standing grant
+  // dell'utente lo tolgono (il lookup delle grant sta QUI sotto). Le regole
+  // «Blocca» vincono comunque: il deny è già tornato sopra.
+  if (
+    turn.squad &&
+    squadAlwaysAsks(tool, input, {
+      ...(agentId ? { callerAgentId: agentId } : {}),
+      createdByOf: (id) => getAgent(id)?.createdBy ?? null
+    })
+  ) {
+    return {
+      kind: 'ask',
+      reason: `${tool}: in a team this action always needs the user's approval`,
+      ui: ui(UI.approvalSquadFixed, { tool }),
+      keys: [tool]
+    }
+  }
+
+  // Q1 (fase squadra): con box/box_review il write-file DENTRO la radice del
+  // box passa senza card (lo stesso confine di resolveBoxPath già usato per
+  // read-file); fuori dal box la card resta come oggi
+  if (
+    tool === 'write-file' &&
+    turn.squad &&
+    turn.squad.autonomy !== 'ask' &&
+    agentId &&
+    resolveBoxPath(String(input.path ?? ''), boxRoot(), boxDir(agentId), realpathSync).ok
+  ) {
+    return { kind: 'allow', via: 'rule' }
+  }
 
   // C5: in modalità host i tool di lettura sono always_allow (o coperti da
   // grant) SOLO per i path DENTRO il box condiviso (fase 11: la radice è

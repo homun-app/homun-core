@@ -157,6 +157,8 @@ export const UI = {
 
   // ---- motivi delle card di approvazione (ui accanto a reason, C2) ----
   approvalToolRequires: msg({ id: 'approval.toolRequires', message: '{tool} richiede approvazione' }),
+  // Q1 (fase squadra): l'insieme FISSO nei turni di squadra — sempre all'utente
+  approvalSquadFixed: msg({ id: 'approval.squadFixed', message: 'Nella squadra «{tool}» lo decidi sempre tu: quest’azione chiede sempre la tua approvazione.' }),
   approvalToolTargetRequires: msg({ id: 'approval.toolTargetRequires', message: '{tool} ({target}) richiede approvazione' }),
   // fase use-app (U3): la card dice l'app o l'host, mai la chiave tecnica
   approvalUseApp: msg({ id: 'approval.useApp', message: 'Vuole usare {app} sul tuo Mac.' }),

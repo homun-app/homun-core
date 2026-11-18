@@ -53,6 +53,9 @@ export function makeJobRunner(db: DatabaseSync, runTurnFn: RunTurnFn = runTurn) 
         extraMeta?: Record<string, unknown>
         // fase pagine (G2/G6): la pagina della libreria che l'utente sta leggendo
         readingPage?: import('../shared/types').ReadingPageMeta
+        // Q1 (fase squadra): il turno appartiene a questa squadra (la delega
+        // tra membri lo decide all'invio)
+        squadId?: number
       }
       // correzione A3: le opzioni derivate dal payload vengono DOPO `opts`, così
       // sopravvivono anche alla ripresa (payload.entryId): una catena automatica
@@ -68,7 +71,8 @@ export function makeJobRunner(db: DatabaseSync, runTurnFn: RunTurnFn = runTurn) 
         ...(p.untrusted ? { untrusted: true } : {}),
         ...(p.contaminated ? { contaminated: true } : {}),
         ...(p.extraMeta ? { extraMeta: p.extraMeta } : {}),
-        ...(p.readingPage ? { readingPage: p.readingPage } : {})
+        ...(p.readingPage ? { readingPage: p.readingPage } : {}),
+        ...(p.squadId !== undefined ? { squadId: p.squadId } : {})
       })
       return
     }
@@ -112,7 +116,7 @@ export function makeJobRunner(db: DatabaseSync, runTurnFn: RunTurnFn = runTurn) 
     // figlio è un agente con le sue entry). Un figlio già terminale (stop o
     // scadenza arrivati prima del job) non parte.
     if (job.kind === 'subagent-run') {
-      const p = job.payload as { subagentId: string; first?: boolean; message?: string; entryId?: number }
+      const p = job.payload as { subagentId: string; first?: boolean; message?: string; entryId?: number; squadId?: number }
       const { getSubagent, updateSubagent } = await import('../main/store/subagents')
       const row = getSubagent(db, p.subagentId)
       if (!row) return
@@ -135,7 +139,8 @@ export function makeJobRunner(db: DatabaseSync, runTurnFn: RunTurnFn = runTurn) 
         ...opts,
         onTurnEntry,
         ...(row.untrusted ? { untrusted: true } : {}),
-        ...(row.automatic ? { automatic: true } : {})
+        ...(row.automatic ? { automatic: true } : {}),
+        ...(p.squadId !== undefined ? { squadId: p.squadId } : {})
       })
       return
     }

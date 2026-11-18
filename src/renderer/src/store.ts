@@ -1,7 +1,7 @@
 // State renderer: agenti, transcript dell'agente attivo, eventi dal main.
 import { useMemo } from 'react'
 import { create } from 'zustand'
-import type { Agent, TranscriptEntry, SandbotEvent, OnboardingStatus, OnboardingStepId, ProviderConfig, ProviderPublic, PermissionsConfig, ConnectorInfo, TaskInfo, GroupInfo, GroupMessageInfo, SubagentInfo, AgentAvatar, TurnEnd, ScreenStatus, BoxRuntime, MainModel, ComposioStatusInfo, ComposioGatewayStatusInfo, ReadingPageRef, BoxSetupState } from '../../shared/types'
+import type { Agent, TranscriptEntry, SandbotEvent, OnboardingStatus, OnboardingStepId, ProviderConfig, ProviderPublic, PermissionsConfig, ConnectorInfo, TaskInfo, GroupInfo, GroupMessageInfo, SubagentInfo, AgentAvatar, TurnEnd, ScreenStatus, BoxRuntime, MainModel, ComposioStatusInfo, ComposioGatewayStatusInfo, ReadingPageRef, BoxSetupState, GroupAutonomy } from '../../shared/types'
 import type { BoxSetupRowId } from '../../shared/box-setup-plan'
 import type { UpdateChannel } from '../../shared/update-channel'
 // fase 16c correzioni (R4): la regola del modello risolto, condivisa col daemon
@@ -255,6 +255,7 @@ interface Store {
     addMemberIds?: string[]
     removeMemberIds?: string[]
     coordinatorId?: string
+    autonomy?: GroupAutonomy
   }): Promise<void>
   groupDelete(groupId: number): Promise<void>
   init(): Promise<void>

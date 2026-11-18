@@ -11,7 +11,7 @@ import { join } from 'node:path'
 import { JOBS_DDL } from './jobs'
 // fase 16c (C5): lo storico delle esecuzioni delle routine (Attività globale)
 import { ROUTINE_RUNS_DDL } from './routine-runs'
-import { GROUPS_DDL, migrateGroupCoordinators, ensureGroupCoordinator, groupsOfMember } from './groups'
+import { GROUPS_DDL, migrateGroupCoordinators, migrateGroupAutonomy, ensureGroupCoordinator, groupsOfMember } from './groups'
 import { SHELL_JOBS_DDL } from './shell-jobs'
 import { COMPUTER_ACTIONS_DDL } from './computer-actions'
 import { SUBAGENTS_DDL } from './subagents'
@@ -226,6 +226,9 @@ function open(): DatabaseSync {
   // fase 16b (S1.2): il flag del riepilogo di chiusura del coordinatore
   const groupMsgCols = db.prepare("SELECT name FROM pragma_table_info('group_messages')").all() as Array<{ name: string }>
   if (!groupMsgCols.some((c) => c.name === 'summary')) db.exec('ALTER TABLE group_messages ADD COLUMN summary INTEGER DEFAULT 0')
+  // Q1 (fase squadra): l'autonomia della squadra — le squadre esistenti (e i
+  // valori NULL dei DB appena migrati) valgono 'box', il default della spec
+  migrateGroupAutonomy(db)
   // fase 16b (S1.1, migrazione): ogni gruppo esistente ha un coordinatore
   // (created_by se è ancora membro, altrimenti il primo membro); idempotente
   migrateGroupCoordinators()

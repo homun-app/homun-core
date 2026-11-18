@@ -19,7 +19,8 @@ const agent = (id: string, name: string, section: string | null = null): Agent =
 })
 
 const group = (id: number, name: string, members: GroupInfo['members'] = [], coordinatorId: string | null = null, lastMessageAt: number | null = null): GroupInfo => ({
-  id, name, description: '', createdBy: 'u', coordinatorId, members, createdAt: 1, lastMessageAt
+  id, name, description: '', createdBy: 'u', coordinatorId, members, createdAt: 1, lastMessageAt,
+  autonomy: 'box'
 })
 
 const entry = (over: Partial<TranscriptEntry> & Pick<TranscriptEntry, 'id' | 'kind' | 'role'>): TranscriptEntry => ({

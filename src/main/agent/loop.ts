@@ -70,7 +70,7 @@ import { formatAgentMessage, agentSendGuard, countPairMessagesLastHour, AGENT_HO
 import { mainAgentOf } from '../../daemon/presence'
 import { analyzeCommand } from './shell-ast'
 import { commandKey, isNeverAuto } from './permission-rules'
-import { autoReviewDecision, neverAskDecision, approvalsMode, reviewWithConfiguredModel, liftContaminatedAllow, ownerWordsOf, botBriefOf, AUTO_REVIEW_MAX_PER_TURN, type AutoReviewAction } from './auto-review'
+import { autoReviewDecision, neverAskDecision, approvalsMode, reviewWithConfiguredModel, liftContaminatedAllow, squadBrowserReviewDecision, ownerWordsOf, botBriefOf, AUTO_REVIEW_MAX_PER_TURN, type AutoReviewAction } from './auto-review'
 import { activityOf, stopReasonOfError } from './loop-guard'
 // SV7 (fase schermo-vivo): la serie con i RISULTATI (le soglie stanno lì)
 import {
@@ -118,7 +118,7 @@ import type { ThinkingSetting } from '../../shared/types'
 // fase 10: gruppi (store) e regole del turno di gruppo (puro); correzioni C1-C3;
 // correzione E2 (terzo giro): il recupero dei turni di gruppo finiti con la
 // consegna scritta come testo libero
-import { getGroup, getGroupMessage, isGroupMember, addGroupMessage, scheduleTurnsForMessage } from '../store/groups'
+import { getGroup, getGroupMessage, isGroupMember, addGroupMessage, scheduleTurnsForMessage, groupsOfMember } from '../store/groups'
 import {
   nextPostDepth, hasSentToUserInChain, alreadySentToUserResult,
   needsGroupRecovery, groupRecoveryTools, groupRecoveryAttemptsLeft,
@@ -138,6 +138,8 @@ import {
 // fase token (T0/T1/T2): l'elenco lo costruisce l'unica fonte pura assembleTurnTools
 // (nucleo + gruppi attivabili); use_tool resta solo per le storie vecchie
 import { assembleTurnTools, offeredMcpOf, activateGroupsResult, toolDefsOfGroups, groupsNamedInResult, RESULT_ACTIVATES, activeGroupsFromTranscript, groupActivationText, GROUP_ACTIVATION_ACT_NOW, applyBoxNoInternet, type ToolGroupPresent } from './turn-tools'
+// Q1 (fase squadra): l'autonomia della squadra (pura)
+import { normalizeGroupAutonomy, squadAlwaysAsks, delegationSquadId } from './squad-autonomy'
 // RW (fase revisore sulla richiesta): il nome che non esiste, con i vicini
 import { unknownToolMessage, offeredToolNames } from '../mcp/unknown-tool'
 import { useToolDef } from './core-tools'
@@ -733,6 +735,13 @@ export interface RunTurnOptions {
      */
     called?: boolean
   }
+  /**
+   * Q1 (fase squadra): il turno appartiene a questa SQUADRA (messaggio nella
+   * chat di squadra, post_to_group, send_to_agent tra membri, o un
+   * sottoagente di uno di questi turni). Vale l'autonomia del gruppo; senza
+   * squadId le impostazioni globali restano quelle di oggi.
+   */
+  squadId?: number
 }
 
 /**
@@ -786,6 +795,8 @@ interface SubagentToolDeps {
   parentTaskId?: number
   untrustedTurn: boolean
   automatic: boolean
+  /** Q1 (fase squadra): la squadra del turno (il figlio eredita l'autonomia) */
+  squadId?: number
   /** le spawn già passate di qui in questo turno (compresa l'eventuale corrente) */
   spawnsInTurn: number
   /** il lotto del turno corrente (creato alla prima spawn) */
@@ -862,7 +873,7 @@ async function runSubagentTool(
     const { enqueueJob } = await import('../store/jobs')
     enqueueJob(database, {
       agentId: childId, kind: 'subagent-run',
-      payload: { subagentId: childId, first: true },
+      payload: { subagentId: childId, first: true, ...(deps.squadId !== undefined ? { squadId: deps.squadId } : {}) },
       runAt: now, now
     })
     return {
@@ -1143,6 +1154,15 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
   // Fase 12 (punto 5): può PARTIRE contaminato (risveglio SUBAGENTS_DONE con
   // un figlio contaminato nel lotto) — stessi lift, stessi divieti
   let contaminated = opts.contaminated === true
+  // Q1 (fase squadra): il turno è DI UNA SQUADRA quando nasce da un messaggio
+  // nella chat di squadra, da un post_to_group, da una delega tra membri o da
+  // un sottoagente di uno di questi turni: vale l'AUTONOMIA del gruppo (il
+  // job e il turno portano squadId). Senza squadra tutto resta come oggi.
+  const squadGroupId = opts.squadId ?? opts.groupTurn?.groupId ?? null
+  const squadGroupRow = squadGroupId !== null ? getGroup(squadGroupId) : null
+  const squad = squadGroupRow
+    ? { id: squadGroupId as number, autonomy: normalizeGroupAutonomy(squadGroupRow.autonomy) }
+    : null
 
   // id dell'entry che apre il turno: serve a decidere se l'utente ha VISTO qualcosa
   let turnEntryId = 0
@@ -3211,19 +3231,27 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             // approvare da sola: la card va all'utente.
             // Fase impostazioni (I4.3): nel modo «Non chiedere» le esclusioni
             // fisse valgono uguale — neverAllow le rispetta
+            // Q1 (fase squadra): i PAGAMENTI sono dell'insieme fisso (card,
+            // sempre); con box_review le ALTRE azioni del browser vanno al
+            // revisore ANCHE nei turni contaminati — vede il contesto
+            // (untrustedTurn/contaminated nell'<azione>) e se dubita la card
+            // va all'utente
+            const squadBrowserFixed = squad
+              ? squadAlwaysAsks(call.name, input, { browserAsk: risk.ask ? { kind: risk.ask.kind, name: risk.ask.name } : null })
+              : false
+            const squadBoxReview = squad?.autonomy === 'box_review' && !squadBrowserFixed
             let autoAllowed: { basis: 'rule' | 'request'; ruleMatched?: string; reason?: string } | null = null
             const action: AutoReviewAction = {
               tool: call.name, args: input, neverAuto: false, untrustedTurn,
               ...(contaminated ? { contaminated: true } : {}),
               ownerWords, botBrief
             }
-            const neverReason = neverAllow(action)
-            if (neverReason !== null) {
-              autoAllowed = { basis: 'rule', ruleMatched: '', reason: neverReason }
-            } else {
+            if (squadBrowserFixed) {
+              // insieme fisso: nessun revisore, la card va all'utente
+            } else if (squadBoxReview) {
               const review = await reviewWithConfiguredModel(action, userLang)
               if (review) {
-                const decision = autoReviewDecision(review.cfg, action, review.outcome, autoApprovals)
+                const decision = squadBrowserReviewDecision(review.cfg, review.outcome, autoApprovals)
                 if (decision.autoAllow) {
                   autoAllowed = {
                     basis: decision.basis,
@@ -3231,6 +3259,24 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
                     ...(decision.reason ? { reason: decision.reason } : {})
                   }
                   autoApprovals++
+                }
+              }
+            } else {
+              const neverReason = neverAllow(action)
+              if (neverReason !== null) {
+                autoAllowed = { basis: 'rule', ruleMatched: '', reason: neverReason }
+              } else {
+                const review = await reviewWithConfiguredModel(action, userLang)
+                if (review) {
+                  const decision = autoReviewDecision(review.cfg, action, review.outcome, autoApprovals)
+                  if (decision.autoAllow) {
+                    autoAllowed = {
+                      basis: decision.basis,
+                      ...(decision.basis === 'rule' && decision.ruleMatched ? { ruleMatched: decision.ruleMatched } : {}),
+                      ...(decision.reason ? { reason: decision.reason } : {})
+                    }
+                    autoApprovals++
+                  }
                 }
               }
             }
@@ -3264,6 +3310,10 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
                 content: formatUi(askUi, loopUiLanguage()),
                 meta: {
                   approvalId: approval.id, tool: call.name, input, status: 'pending', ui: askUi,
+                  // Q1/Q2 (fase squadra): i marcatori per la coda della squadra
+                  ...(squad ? { squadId: squad.id } : {}),
+                  ...(squadBrowserFixed ? { squadAlwaysAsk: true } : {}),
+                  ...(squadBoxReview && !autoAllowed ? { squadReviewerAsk: true } : {}),
                   browser: {
                     url,
                     ...(info ? { element: info } : {}),
@@ -3836,9 +3886,11 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             refInfo: (ref) => browser.refInfoOf(agentId, ref),
             probe: (ref) => browser.probeFieldType(agentId, ref),
             typeInto: (ref, value) => browser.typeIntoFieldForFill(agentId, ref, value),
+            // Q1 (fase squadra): fill_credential è dell'insieme FISSO — nelle
+            // squadre niente concessioni salvate né grant di turno
             hasStandingGrant: (loginId, origin) =>
-              listGrants().some((g: Grant) => g.tool === 'fill_credential' && g.target === `${loginId}|${origin}`),
-            hasTurnAllow: (loginId, origin) => run.turnAllows.has(`fill_credential|${loginId}|${origin}`),
+              !squad && listGrants().some((g: Grant) => g.tool === 'fill_credential' && g.target === `${loginId}|${origin}`),
+            hasTurnAllow: (loginId, origin) => !squad && run.turnAllows.has(`fill_credential|${loginId}|${origin}`),
             requestApproval: async (login, origin, fields) => {
               const approval: Approval = { id: randomUUID(), agentId, tool: call.name, input: { ...input, origin }, status: 'pending', createdAt: Date.now() }
               const fillUi = ui(UI.cardFillAsk, { label: login.label, origin })
@@ -4109,6 +4161,8 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             parentTaskId: opts.taskId,
             untrustedTurn,
             automatic,
+            // Q1 (fase squadra): il figlio di un turno di squadra ne eredita la squadra
+            ...(squad ? { squadId: squad.id } : {}),
             // il tetto conta le spawn già passate di qui nel turno (compresa questa)
             spawnsInTurn: executedCalls.filter((c) => c.name === 'spawn_subagent').length,
             batchIdOf: () => {
@@ -4231,10 +4285,21 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             })
             continue
           }
+          // Q1 (fase squadra): la delega tra MEMBRI della stessa squadra (anche
+          // quando il turno del mittente non era di squadra) è un turno DELLA
+          // SQUADRA; con autonomia box/box_review passa ANCHE col turno
+          // contaminato — al posto del blocco, la contaminazione passa avanti
+          const sendSquadId = delegationSquadId(
+            squad ? squad.id : null,
+            groupsOfMember(agentId).map((g) => g.id),
+            groupsOfMember(toId).map((g) => g.id)
+          )
+          const sendSquadAllows =
+            sendSquadId !== null && normalizeGroupAutonomy(getGroup(sendSquadId)?.autonomy) !== 'ask'
           // fase 11 (punto 2): il turno è CONTAMINATO da contenuti web → anche
           // la delega a un altro bot torna all'utente: è un canale verso
           // l'esterno e una pagina iniettata non deve poter usarlo
-          if (contaminated) {
+          if (contaminated && !sendSquadAllows) {
             const approval: Approval = {
               id: randomUUID(), agentId, tool: call.name, input, status: 'pending', createdAt: Date.now()
             }
@@ -4245,7 +4310,8 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               content: formatUi(delegationUi, loopUiLanguage()),
               meta: {
                 approvalId: approval.id, tool: call.name, input, status: 'pending', ui: delegationUi,
-                contaminated: true, keys: [`delega a ${dest.name}`]
+                contaminated: true, keys: [`delega a ${dest.name}`],
+                ...(squad ? { squadId: squad.id } : {})
               }
             })
             setStatus(agentId, 'paused-for-approval', emit)
@@ -4290,6 +4356,11 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               fromAgentName: agent.name,
               toAgentId: toId,
               hop: guard.hop,
+              // Q1 (fase squadra): il turno del destinatario è della squadra
+              // della delega; se la delega è passata col turno contaminato,
+              // la contaminazione passa avanti
+              ...(sendSquadId !== null ? { squadId: sendSquadId } : {}),
+              ...(contaminated && sendSquadAllows ? { contaminated: true } : {}),
               // correzione A3: la catena eredita l'automaticità del turno
               // mittente (routine/trigger, o catena automatica a sua volta)
               ...(automatic ? { automatic: true } : {})
@@ -4532,7 +4603,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           verdict = await permissions.check(call.name, input, agentId, {
             ...(userDirectTurn ? { userDirectTurn: true } : {}),
             // C4: la fiducia per app del turno (toolkit usati/approvati + contaminazione)
-            composioTrust: { tainted: contaminated, trustedApps: [...run.composioTrustedApps] }
+            composioTrust: { tainted: contaminated, trustedApps: [...run.composioTrustedApps] },
+            // Q1 (fase squadra): l'autonomia del gruppo e l'insieme fisso
+            ...(squad ? { squad } : {})
           })
         }
         // F8: nel turno contaminato un allow (regola dell'utente o bypass del
@@ -4591,7 +4664,12 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           const neverAutoCmd = call.name === 'run-command'
             ? (await analyzeCommand(String(input.command ?? ''))).commands.some((c) => isNeverAuto(c))
             : false
-          if (!turnGranted) {
+          // Q1 (fase squadra): l'insieme FISSO chiede SEMPRE — niente
+          // auto-review, niente grant di turno: solo «Consenti una volta»
+          const squadFixedAsk = squad
+            ? squadAlwaysAsks(call.name, input, { callerAgentId: agentId, createdByOf: (id) => getAgent(id)?.createdBy ?? null })
+            : false
+          if (!turnGranted && !squadFixedAsk) {
             // fase 10: le ask forzate dall'ORIGINE non sono mai auto-approvabili
             // (il revisore giudicherebbe testo non dell'utente); fase 11: nemmeno
             // le azioni con effetti di un turno CONTAMINATO da contenuti web
@@ -4650,7 +4728,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             })
             emit({ type: 'entries', agentId, entries: [approvalEntry] })
             // fall through: esecuzione come dopo un "allow" dell'utente
-          } else if (!turnGranted) {
+          } else if (!turnGranted || squadFixedAsk) {
             // pause-for-approval: crea approval, attende decisione (come l'originale)
             const approval: Approval = {
               id: randomUUID(), agentId, tool: call.name, input, status: 'pending', createdAt: Date.now()
@@ -4664,6 +4742,10 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               // Fase 17c (C2): meta.ui (id+valori) per la lingua dell'interfaccia
               meta: {
                 approvalId: approval.id, tool: call.name, input, status: 'pending', keys: verdict.keys,
+                // Q1/Q2 (fase squadra): la card nata dall'insieme fisso in un
+                // turno di squadra offre solo «Consenti una volta»
+                ...(squadFixedAsk ? { squadAlwaysAsk: true } : {}),
+                ...(squad ? { squadId: squad.id } : {}),
                 ...(verdictUiOf(verdict) ? { ui: verdictUiOf(verdict)! } : {}),
                 ...(verdict.secretRefs?.length ? { secretRefs: verdict.secretRefs } : {}),
                 ...(verdict.mcpServerRead ? { mcpServerRead: verdict.mcpServerRead } : {}),

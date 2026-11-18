@@ -33,6 +33,8 @@ import type { LayoutResult } from '../layout'
 import { ComputerPanel } from './ComputerPanel'
 import { ComputerPrepRow } from './ComputerPrepRow'
 import { ScreenThumb } from './ScreenThumb'
+// Q1 (fase squadra): la schermata Autonomia della squadra (tavola 3 del disegno)
+import { TeamAutonomySheet, autonomyShortLabel, autonomyBlurb } from './TeamAutonomySheet'
 import { ModelSelect } from './ui/ModelSelect'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu'
 import { Dialog, DialogContent, DialogTitle } from './ui/dialog'
@@ -1059,6 +1061,8 @@ function MembersPanel({ layout, group, onClose }: { layout: LayoutResult; group:
   const [description, setDescription] = useState(group.description)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [busy, setBusy] = useState(false)
+  // Q1 (fase squadra): la schermata 3 del disegno (autonomia della squadra)
+  const [autonomyOpen, setAutonomyOpen] = useState(false)
   const asideRef = useRef<HTMLElement>(null)
   // G2 (fase 0.3.1001 grafica): anche il pannello dei membri docked prende il
   // focus sul primo controllo all'apertura, come l'overlay
@@ -1138,6 +1142,17 @@ function MembersPanel({ layout, group, onClose }: { layout: LayoutResult; group:
           onChange={(e) => setDescription(e.target.value)}
           onBlur={() => { if (description !== group.description) void groupUpdate(group.id, { description }) }}
         />
+        {/* Q1 (fase squadra): il riquadro Autonomia del disegno (tavola 1) —
+            apre la schermata 3 */}
+        <button
+          className="mt-4 block w-full rounded-[14px] bg-muted/60 px-3.5 py-3 text-left transition hover:bg-muted"
+          data-testid="team-autonomy-open"
+          onClick={() => setAutonomyOpen(true)}
+        >
+          <span className="text-sm font-medium"><Trans>Autonomia: {autonomyShortLabel(group.autonomy, i18n)}</Trans></span>
+          <span className="mt-0.5 block text-[12px] leading-snug text-muted-foreground">{autonomyBlurb(group.autonomy, i18n)}</span>
+        </button>
+        {autonomyOpen && <TeamAutonomySheet group={group} onClose={() => setAutonomyOpen(false)} />}
         {confirmDelete ? (
           <div className="mt-6 space-y-1.5">
             <p className="text-xs text-destructive"><Trans>Eliminare la squadra «{group.name}» e i suoi messaggi? I bot restano.</Trans></p>

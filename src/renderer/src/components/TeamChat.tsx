@@ -16,6 +16,8 @@ import { useBotInfo } from '../bot/use-bot'
 import { activityPhrase } from '../lib/activity'
 import { i18n } from '../lib/i18n'
 import { groupSystemText } from './Chat'
+// Q1 (fase squadra): la pillola dell'autonomia nella fascia alta (tavola 1)
+import { autonomyShortLabel } from './TeamAutonomySheet'
 
 /** Il testo col le @menzioni rese come pillole nel colore del bot menzionato. */
 function MentionedText({ text, members, agents, effectiveMain }: {
@@ -216,6 +218,8 @@ export function TeamChat() {
               {coordinator && (
                 <span className="truncate text-[13px] text-muted-foreground">· <Trans>Risponde {coordinator.name}</Trans></span>
               )}
+              {/* Q1 (fase squadra): l'autonomia della squadra, come nel disegno */}
+              <span className="shrink-0 truncate text-[13px] text-muted-foreground">· <Trans>Autonomia:</Trans> {autonomyShortLabel(group.autonomy, i18n)}</span>
             </button>
           </span>
           {rightPanel ? (

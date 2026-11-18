@@ -1100,6 +1100,8 @@ export interface SandbotApi {
     addMemberIds?: string[]
     removeMemberIds?: string[]
     coordinatorId?: string
+    /** Q1 (fase squadra): l'autonomia della squadra */
+    autonomy?: GroupAutonomy
   }): Promise<GroupInfo>
   /** Fase 16b (S1.3): cancella squadra e messaggi; i bot restano. */
   groupDelete(groupId: number): Promise<void>
@@ -1750,6 +1752,14 @@ export interface SubagentInfo {
 export type GroupAuthorKind = 'user' | 'agent' | 'system'
 
 /**
+ * Q1 (fase squadra): l'autonomia della squadra — 'ask' chiede tutto, 'box'
+ * libera nel computer isolato (default), 'box_review' aggiunge il revisore
+ * per le azioni del browser. I turni SENZA squadra seguono le impostazioni
+ * globali come oggi.
+ */
+export type GroupAutonomy = 'ask' | 'box' | 'box_review'
+
+/**
  * Un gruppo di bot con l'utente (fase 10): stanza di chat con fino a 6 bot;
  * l'utente ne è sempre membro. Il coordinatore (obbligatorio dalla 16b, S1.1)
  * è uno dei bot.
@@ -1766,6 +1776,8 @@ export interface GroupInfo {
   createdAt: number
   /** fase 16b (S2): l'attività recente per l'ordinamento della barra (null se vuota) */
   lastMessageAt: number | null
+  /** Q1 (fase squadra): l'autonomia della squadra */
+  autonomy: GroupAutonomy
 }
 
 /** Un messaggio di gruppo come lo vede la UI. */

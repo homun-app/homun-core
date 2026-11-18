@@ -219,6 +219,9 @@ export async function runGroupTurnJob(
     source: 'user',
     initiator: 'GROUP_TURN',
     untrusted: true,
+    // Q1 (fase squadra): il turno di gruppo è un turno DELLA SQUADRA — vale
+    // l'autonomia del gruppo (letta dal loop, può cambiare a metà)
+    squadId: group.id,
     ...(p.automatic ? { automatic: true } : {}),
     groupTurn: {
       groupId: group.id,

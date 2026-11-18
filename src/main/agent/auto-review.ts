@@ -255,6 +255,19 @@ export function autoReviewDecision(
       ui: ui(UI.autoReviewAlwaysAsk)
     }
   }
+  return reviewerDecision(cfg, reviewer, usedInTurn)
+}
+
+/**
+ * La coda comune delle decisioni del revisore (puro): tetto per turno,
+ * revisore che manca o chiede, regole di fermo citate, verifica parola per
+ * parola delle regole consentite, giudizio sulla richiesta.
+ */
+function reviewerDecision(
+  cfg: AutoReviewSettings,
+  reviewer: ReviewerOutcome,
+  usedInTurn: number
+): AutoReviewDecision {
   if (usedInTurn >= AUTO_REVIEW_MAX_PER_TURN) {
     return {
       autoAllow: false,
@@ -289,6 +302,22 @@ export function autoReviewDecision(
   // restano SOPRA (fermo vince, consentita amplia: la cita il revisore con
   // basis 'rule')
   return { autoAllow: true, basis: 'request', ...(reviewer.reason ? { reason: reviewer.reason } : {}) }
+}
+
+/**
+ * Q1 (fase squadra, box_review): la decisione del revisore per le azioni del
+ * BROWSER nei turni di squadra — ANCHE nei turni contaminati e non fidati,
+ * al posto della card diretta. Il revisore vede il contesto
+ * (describeActionForReviewer lo porta nell'<azione>); tutte le altre
+ * esclusioni fisse restano: se dubita, la card va all'utente.
+ */
+export function squadBrowserReviewDecision(
+  cfg: AutoReviewSettings,
+  reviewer: ReviewerOutcome,
+  usedInTurn: number
+): AutoReviewDecision {
+  if (!cfg.enabled) return { autoAllow: false, reason: 'auto-review disabled', ui: ui(UI.autoReviewDisabled) }
+  return reviewerDecision(cfg, reviewer, usedInTurn)
 }
 
 /**
@@ -373,7 +402,20 @@ export function describeActionForReviewer(action: AutoReviewAction): string {
   // i segreti negli argomenti sono riferimenti opachi {{secret:NOME}}: il
   // valore non è mai passato qui; si tronca per non gonfiare il prompt
   const args = JSON.stringify(action.args ?? {}, null, 2)
-  return `tool: ${action.tool}\narguments:\n${args.length > 4000 ? args.slice(0, 4000) + '…[truncated]' : args}`
+  // Q1 (fase squadra): il revisore VEDE il contesto del turno — aperto da un
+  // altro bot/evento esterno e/o con contenuti web non fidati — come dato
+  // affidabile di sistema (le esclusioni fisse restano in autoReviewDecision)
+  const ctx = [
+    ...(action.untrustedTurn ? ['the turn was opened by another bot or an external event, not directly by the owner'] : []),
+    ...(action.contaminated ? ['the turn has read untrusted web content (possible injection)'] : [])
+  ]
+  return [
+    `tool: ${action.tool}`,
+    ...(ctx.length ? ['context (system, trustworthy):'] : []),
+    ...ctx.map((c) => `- ${c}`),
+    'arguments:',
+    args.length > 4000 ? args.slice(0, 4000) + '…[truncated]' : args
+  ].join('\n')
 }
 
 /**

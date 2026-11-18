@@ -161,6 +161,11 @@ msgstr "{0, plural, one {# passo} other {# passaggi}}"
 msgid "{0}"
 msgstr "{0}"
 
+#. placeholder {0}: group.name
+#: src/renderer/src/components/TeamAutonomySheet.tsx
+msgid "{0} · vale per tutti i bot della squadra, finché la squadra esiste"
+msgstr "{0} · vale per tutti i bot della squadra, finché la squadra esiste"
+
 #. placeholder {0}: memories === null ? '…' : `${memories} note`
 #. placeholder {0}: skills === null ? '…' : `${skills}`
 #: src/renderer/src/components/RightPanel.tsx
@@ -896,6 +901,7 @@ msgstr "ancora nessun passo"
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
 #: src/renderer/src/components/SkillsWindow.tsx
+#: src/renderer/src/components/TeamAutonomySheet.tsx
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "Annulla"
 msgstr "Annulla"
@@ -1140,6 +1146,19 @@ msgstr "auto-review disattivata"
 msgid "Automatico"
 msgstr "Automatico"
 
+#: src/renderer/src/components/TeamAutonomySheet.tsx
+msgid "Autonomia della squadra"
+msgstr "Autonomia della squadra"
+
+#: src/renderer/src/components/TeamChat.tsx
+msgid "Autonomia:"
+msgstr "Autonomia:"
+
+#. placeholder {0}: autonomyShortLabel(group.autonomy, i18n)
+#: src/renderer/src/components/RightPanel.tsx
+msgid "Autonomia: {0}"
+msgstr "Autonomia: {0}"
+
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "autorizza nel browser…"
 msgstr "autorizza nel browser…"
@@ -1206,6 +1225,10 @@ msgstr "Avvio automatico"
 #: src/renderer/src/components/Settings.tsx
 msgid "avvisa"
 msgstr "avvisa"
+
+#: src/renderer/src/components/TeamAutonomySheet.tsx
+msgid "azioni sul tuo Mac fuori dal computer"
+msgstr "azioni sul tuo Mac fuori dal computer"
 
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "Azzera"
@@ -1529,6 +1552,18 @@ msgstr "chiede a un aiutante…"
 msgid "chiede anche l'indirizzo"
 msgstr "chiede anche l'indirizzo"
 
+#: src/renderer/src/components/TeamAutonomySheet.tsx
+msgid "Chiede sempre a te"
+msgstr "Chiede sempre a te"
+
+#: src/renderer/src/components/TeamAutonomySheet.tsx
+msgid "chiede tutto"
+msgstr "chiede tutto"
+
+#: src/renderer/src/components/TeamAutonomySheet.tsx
+msgid "Chiede tutto"
+msgstr "Chiede tutto"
+
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 msgid "Chiedi"
 msgstr "Chiedi"
@@ -1545,6 +1580,10 @@ msgstr "Chiedi qualcosa a {0} senza inquinare la conversazione…"
 #: src/renderer/src/components/GuideView.tsx
 msgid "Chiedimi prima"
 msgstr "Chiedimi prima"
+
+#: src/renderer/src/components/BotScreen.tsx
+msgid "Chiude il controllo e torna alla vista"
+msgstr "Chiude il controllo e torna alla vista"
 
 #: src/renderer/src/components/ConnectorCards13.tsx
 #: src/renderer/src/components/SkillsWindow.tsx
@@ -1769,6 +1808,10 @@ msgstr "Composio non raggiungibile: controlla la connessione e riprova."
 msgid "Computer"
 msgstr "Computer"
 
+#: src/renderer/src/components/TeamAutonomySheet.tsx
+msgid "computer + revisore"
+msgstr "computer + revisore"
+
 #: src/renderer/src/components/settings/EngineSection.tsx
 msgid "Computer dei bot"
 msgstr "Computer dei bot"
@@ -1973,6 +2016,10 @@ msgstr "Consentito sempre"
 msgid "Consentito una volta"
 msgstr "Consentito una volta"
 
+#: src/renderer/src/components/TeamAutonomySheet.tsx
+msgid "consigliata"
+msgstr "consigliata"
+
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Consigliate per te"
 msgstr "Consigliate per te"
@@ -2102,6 +2149,10 @@ msgstr "Crea una regola"
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Crea una routine"
 msgstr "Crea una routine"
+
+#: src/renderer/src/components/TeamAutonomySheet.tsx
+msgid "creare e modificare file nel computer"
+msgstr "creare e modificare file nel computer"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -2257,6 +2308,10 @@ msgstr "dashboard.composio.dev"
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Decide da solo le richieste semplici quando le Approvazioni sono su Automatico."
 msgstr "Decide da solo le richieste semplici quando le Approvazioni sono su Automatico."
+
+#: src/renderer/src/components/TeamAutonomySheet.tsx
+msgid "Decidono regole fisse e, se scelto, un revisore che vede solo la tua richiesta e l'azione. Il coordinatore non approva al posto tuo: legge le pagine del web, e una pagina ostile potrebbe convincerlo."
+msgstr "Decidono regole fisse e, se scelto, un revisore che vede solo la tua richiesta e l'azione. Il coordinatore non approva al posto tuo: legge le pagine del web, e una pagina ostile potrebbe convincerlo."
 
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "dedotto dal bot"
@@ -2515,6 +2570,10 @@ msgstr "Eliminare {size}? Verranno cancellati per sempre i file che i bot hanno 
 msgid "Eliminare la squadra «{0}» e i suoi messaggi? I bot restano."
 msgstr "Eliminare la squadra «{0}» e i suoi messaggi? I bot restano."
 
+#: src/renderer/src/components/TeamAutonomySheet.tsx
+msgid "eliminare un bot"
+msgstr "eliminare un bot"
+
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "eliminata"
 msgstr "eliminata"
@@ -2530,6 +2589,10 @@ msgstr "Email (separate da virgola)"
 #: src/renderer/src/components/Settings.tsx
 msgid "email in arrivo"
 msgstr "email in arrivo"
+
+#: src/renderer/src/components/TeamAutonomySheet.tsx
+msgid "email, messaggi e post verso fuori"
+msgstr "email, messaggi e post verso fuori"
 
 #: src/renderer/src/components/BoxSetupProgress.tsx
 msgid "Era già acceso"
@@ -2585,6 +2648,10 @@ msgstr "es. Usa questo account solo per lavoro; le email in italiano vanno riass
 msgid "esegue un comando…"
 msgstr "esegue un comando…"
 
+#: src/renderer/src/components/TeamAutonomySheet.tsx
+msgid "eseguire comandi e codice nel computer, senza rete"
+msgstr "eseguire comandi e codice nel computer, senza rete"
+
 #: src/renderer/src/components/ApprovalCard.tsx
 msgid "Eseguito senza chiedere (Approvazioni: non chiedere)"
 msgstr "Eseguito senza chiedere (Approvazioni: non chiedere)"
@@ -2630,6 +2697,10 @@ msgstr "exit {0}"
 #: src/shared/ui-messages.ts
 msgid "card.exportLibrary"
 msgstr "export_from_library: «{name}» ({format}) → {destination}"
+
+#: src/renderer/src/components/TeamAutonomySheet.tsx
+msgid "Fa da sola"
+msgstr "Fa da sola"
 
 #: src/renderer/src/lib/activity.ts
 msgid "fa un grafico…"
@@ -2742,6 +2813,14 @@ msgstr "File tolti: {0}"
 #: src/shared/ui-messages.ts
 msgid "rpc.filesTooLarge"
 msgstr "File troppo grande ({size} byte, limite {limit}): non caricato."
+
+#: src/renderer/src/components/TeamAutonomySheet.tsx
+msgid "File, comandi e letture fanno da soli; i clic sui siti li controlla il revisore. Dati tuoi, pagamenti e invii chiedono sempre a te."
+msgstr "File, comandi e letture fanno da soli; i clic sui siti li controlla il revisore. Dati tuoi, pagamenti e invii chiedono sempre a te."
+
+#: src/renderer/src/components/TeamAutonomySheet.tsx
+msgid "File, comandi e letture fanno da soli. Dati tuoi, pagamenti e invii chiedono sempre a te."
+msgstr "File, comandi e letture fanno da soli. Dati tuoi, pagamenti e invii chiedono sempre a te."
 
 #. placeholder {0}: item?.fileName
 #. placeholder {1}: item?.fileSize
@@ -3694,6 +3773,10 @@ msgstr "in pausa"
 msgid "in pausa per assenza"
 msgstr "in pausa per assenza"
 
+#: src/renderer/src/components/TeamAutonomySheet.tsx
+msgid "In più, un revisore controlla ogni clic sui siti rispetto alla tua richiesta e lascia passare quelli che servono. I dubbi arrivano a te."
+msgstr "In più, un revisore controlla ogni clic sui siti rispetto alla tua richiesta e lascia passare quelli che servono. I dubbi arrivano a te."
+
 #: src/renderer/src/components/GuideView.tsx
 msgid "in preparazione"
 msgstr "in preparazione"
@@ -4090,6 +4173,10 @@ msgstr "La skill nel repository non è valida: non si può aggiungere."
 msgid "skill.err.catalogPin"
 msgstr "La versione fissata dal catalogo non è più reperibile nel repository: non si scarica nient’altro."
 
+#: src/renderer/src/components/TeamAutonomySheet.tsx
+msgid "lanciare sottoagenti"
+msgstr "lanciare sottoagenti"
+
 #: src/renderer/src/components/GuideModelStep.tsx
 msgid "lasciala vuota se il server non la chiede"
 msgstr "lasciala vuota se il server non la chiede"
@@ -4186,6 +4273,10 @@ msgstr "legge un file…"
 msgid "legge una pagina web…"
 msgstr "legge una pagina web…"
 
+#: src/renderer/src/components/TeamAutonomySheet.tsx
+msgid "leggere e cercare pagine web"
+msgstr "leggere e cercare pagine web"
+
 #: src/renderer/src/components/GuideView.tsx
 msgid "leggere la posta, cercare sul web, preparare bozze"
 msgstr "leggere la posta, cercare sul web, preparare bozze"
@@ -4193,6 +4284,14 @@ msgstr "leggere la posta, cercare sul web, preparare bozze"
 #: src/renderer/src/components/GuideView.tsx
 msgid "Leggo e cerco da solo. Prima di cambiare qualcosa, ti chiedo."
 msgstr "Leggo e cerco da solo. Prima di cambiare qualcosa, ti chiedo."
+
+#: src/renderer/src/components/TeamAutonomySheet.tsx
+msgid "Libera nel computer"
+msgstr "Libera nel computer"
+
+#: src/renderer/src/components/TeamAutonomySheet.tsx
+msgid "Libera nel computer + revisore"
+msgstr "Libera nel computer + revisore"
 
 #: src/renderer/src/components/settings/DiskSpaceSection.tsx
 msgid "Libera spazio"
@@ -4540,6 +4639,10 @@ msgstr "modificare l’esecuzione della routine attiva \"{title}\""
 msgid "approval.usUpdateWithPrompt"
 msgstr "modificare l’esecuzione della routine attiva \"{title}\" — prompt: {preview}"
 
+#: src/renderer/src/components/TeamAutonomySheet.tsx
+msgid "moduli con i tuoi dati, login, Cassaforte"
+msgstr "moduli con i tuoi dati, login, Cassaforte"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "rpc.formNotFound"
@@ -4670,6 +4773,10 @@ msgstr "nel bot ›"
 msgid "nel box: {0}"
 msgstr "nel box: {0}"
 
+#: src/renderer/src/components/TeamAutonomySheet.tsx
+msgid "nel computer"
+msgstr "nel computer"
+
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 msgid "Nel computer dei bot i comandi girano senza chiedere: è isolato dal Mac."
 msgstr "Nel computer dei bot i comandi girano senza chiedere: è isolato dal Mac."
@@ -4678,6 +4785,11 @@ msgstr "Nel computer dei bot i comandi girano senza chiedere: è isolato dal Mac
 #: src/shared/ui-messages.ts
 msgid "cron.weekend"
 msgstr "nel weekend"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "approval.squadFixed"
+msgstr "Nella squadra «{tool}» lo decidi sempre tu: quest’azione chiede sempre la tua approvazione."
 
 #: src/renderer/src/components/Chat.tsx
 msgid "Nessun agente"
@@ -5181,6 +5293,14 @@ msgstr "ogni {n} minuti"
 msgid "cron.everyNHours"
 msgstr "ogni {n} ore{withMin, select, yes { al minuto {m}} other {}}"
 
+#: src/renderer/src/components/TeamAutonomySheet.tsx
+msgid "Ogni azione con effetti passa da te."
+msgstr "Ogni azione con effetti passa da te."
+
+#: src/renderer/src/components/TeamAutonomySheet.tsx
+msgid "Ogni azione con effetti passa da te. Per provare una squadra nuova."
+msgstr "Ogni azione con effetti passa da te. Per provare una squadra nuova."
+
 #: src/renderer/src/components/settings/ApprovalsPage.tsx
 msgid "Ogni azione parte senza aspettare."
 msgstr "Ogni azione parte senza aspettare."
@@ -5263,6 +5383,10 @@ msgstr "Origini https://… (separate da virgola)"
 msgid "owner/repo di GitHub oppure URL git https"
 msgstr "owner/repo di GitHub oppure URL git https"
 
+#: src/renderer/src/components/TeamAutonomySheet.tsx
+msgid "pagamenti e acquisti"
+msgstr "pagamenti e acquisti"
+
 #: src/renderer/src/components/ImageGalleryCard.tsx
 msgid "pagina"
 msgstr "pagina"
@@ -5285,6 +5409,10 @@ msgstr "Pagine"
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Pannello del bot"
 msgstr "Pannello del bot"
+
+#: src/renderer/src/components/TeamAutonomySheet.tsx
+msgid "parlarsi tra bot della squadra"
+msgstr "parlarsi tra bot della squadra"
 
 #: src/renderer/src/components/BotDialogs.tsx
 msgid "Parti da un modello"
@@ -5772,6 +5900,10 @@ msgstr "quando torni al computer"
 msgid "trigger.presence"
 msgstr "quando torni al computer dopo un’assenza"
 
+#: src/renderer/src/components/TeamAutonomySheet.tsx
+msgid "Quanto fa da sola"
+msgstr "Quanto fa da sola"
+
 #: src/renderer/src/components/GuideView.tsx
 msgid "Quanto posso fare da solo?"
 msgstr "Quanto posso fare da solo?"
@@ -5799,6 +5931,10 @@ msgstr "Questa build non riceve aggiornamenti"
 #: src/renderer/src/components/GuideModelStep.tsx
 msgid "Questa chiave non funziona: {providerLabel} risponde “non autorizzata”. Controlla di averla copiata intera."
 msgstr "Questa chiave non funziona: {providerLabel} risponde “non autorizzata”. Controlla di averla copiata intera."
+
+#: src/renderer/src/components/TeamAutonomySheet.tsx
+msgid "Questa colonna non si può svuotare."
+msgstr "Questa colonna non si può svuotare."
 
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Questa è una chiave di Composio «For You» (inizia con ck_). Homun usa la chiave di un progetto Composio: su composio.dev apri il pannello per sviluppatori, crea un progetto e copia la sua chiave API da Settings → API Keys (inizia con ak_)."
@@ -6220,6 +6356,7 @@ msgstr "Salta per ora"
 #: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
 #: src/renderer/src/components/SkillsWindow.tsx
+#: src/renderer/src/components/TeamAutonomySheet.tsx
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "Salva"
 msgstr "Salva"
@@ -6452,6 +6589,10 @@ msgstr "scrive un file…"
 #: src/renderer/src/components/Sidebar.tsx
 msgid "scrive…"
 msgstr "scrive…"
+
+#: src/renderer/src/components/TeamAutonomySheet.tsx
+msgid "scrivere documenti nella Libreria"
+msgstr "scrivere documenti nella Libreria"
 
 #. placeholder {0}: agent.name
 #: src/renderer/src/components/Chat.tsx
@@ -7244,6 +7385,10 @@ msgstr "Tutti i tipi"
 #: src/renderer/src/components/GuideView.tsx
 msgid "Tutto pronto."
 msgstr "Tutto pronto."
+
+#: src/renderer/src/components/TeamAutonomySheet.tsx
+msgid "Tutto quello che resta nel computer isolato lo fa da sola. Fuori dal computer chiede."
+msgstr "Tutto quello che resta nel computer isolato lo fa da sola. Fuori dal computer chiede."
 
 #: src/renderer/src/components/GuideView.tsx
 msgid "tutto quello che serve a ciò che mi hai chiesto"

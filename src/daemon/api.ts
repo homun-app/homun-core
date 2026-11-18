@@ -1075,7 +1075,7 @@ export function buildApiMethods(
       const gid = Number(groupId)
       const g = groups.getGroup(gid)
       if (!g) throw uiError(UI.rpcGroupNotFound)
-      const p = (patch ?? {}) as { name?: string; description?: string; addMemberIds?: string[]; removeMemberIds?: string[]; coordinatorId?: string }
+      const p = (patch ?? {}) as { name?: string; description?: string; addMemberIds?: string[]; removeMemberIds?: string[]; coordinatorId?: string; autonomy?: 'ask' | 'box' | 'box_review' }
       const add = [...new Set(Array.isArray(p.addMemberIds) ? p.addMemberIds.map((m) => String(m)) : [])]
       const remove = [...new Set(Array.isArray(p.removeMemberIds) ? p.removeMemberIds.map((m) => String(m)) : [])]
       // fase 16b correzioni (P4): l'ESITO si valida PRIMA di modificare —
@@ -1092,6 +1092,8 @@ export function buildApiMethods(
       }
       if (p.name !== undefined && String(p.name).trim()) groups.updateGroup(gid, { name: String(p.name).trim() })
       if (p.description !== undefined) groups.updateGroup(gid, { description: String(p.description ?? '').trim() })
+      // Q1 (fase squadra): l'autonomia della squadra (updateGroup normalizza)
+      if (p.autonomy !== undefined) groups.updateGroup(gid, { autonomy: p.autonomy })
       const agents = store.listAgents()
       for (const id of add) {
         const refusal = store.subagentRefusal(id)

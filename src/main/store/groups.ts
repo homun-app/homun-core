@@ -10,6 +10,8 @@ import { enqueueJob } from './jobs'
 import {
   planGroupTurns, GROUP_HOURLY_CAP_TEXT, closingTurnNonce, type GroupPlanResult
 } from '../agent/group-turns'
+// Q1 (fase squadra): l'autonomia della squadra (pura, per la normalizzazione)
+import { normalizeGroupAutonomy } from '../agent/squad-autonomy'
 
 export const GROUPS_DDL = `
     CREATE TABLE IF NOT EXISTS groups (
@@ -18,7 +20,8 @@ export const GROUPS_DDL = `
       description TEXT DEFAULT '',
       created_by TEXT NOT NULL,
       coordinator_id TEXT,
-      created_at INTEGER NOT NULL
+      created_at INTEGER NOT NULL,
+      autonomy TEXT DEFAULT 'box'
     );
     CREATE TABLE IF NOT EXISTS group_members (
       group_id INTEGER NOT NULL,
@@ -69,11 +72,13 @@ export interface Group {
   created_by: string
   coordinator_id: string | null
   created_at: number
+  /** Q1 (fase squadra): 'ask' | 'box' | 'box_review' (default 'box') */
+  autonomy: 'ask' | 'box' | 'box_review'
 }
 
 interface GroupRow {
   id: number; name: string; description: string; created_by: string
-  coordinator_id: string | null; created_at: number
+  coordinator_id: string | null; created_at: number; autonomy?: string | null
 }
 
 export interface GroupMessage {
@@ -115,7 +120,8 @@ export interface GroupTurn {
 function rowToGroup(r: GroupRow): Group {
   return {
     id: r.id, name: r.name, description: r.description, created_by: r.created_by,
-    coordinator_id: r.coordinator_id, created_at: r.created_at
+    coordinator_id: r.coordinator_id, created_at: r.created_at,
+    autonomy: normalizeGroupAutonomy(r.autonomy)
   }
 }
 
@@ -148,7 +154,7 @@ export function createGroup(
   const coordinator = coordinatorId ?? (isUser ? members[0] ?? null : createdBy)
   const now = Date.now()
   const r = db()
-    .prepare('INSERT INTO groups(name, description, created_by, coordinator_id, created_at) VALUES(?,?,?,?,?)')
+    .prepare("INSERT INTO groups(name, description, created_by, coordinator_id, created_at, autonomy) VALUES(?,?,?,?,?,'box')")
     .run(name, description, createdBy, coordinator, now)
   const id = Number(r.lastInsertRowid)
   const ins = db().prepare('INSERT INTO group_members(group_id, agent_id, joined_at) VALUES(?,?,?)')
@@ -159,7 +165,7 @@ export function createGroup(
     ins.run(id, m, joined)
     joined += 1
   }
-  return { id, name, description, created_by: createdBy, coordinator_id: coordinator, created_at: now }
+  return { id, name, description, created_by: createdBy, coordinator_id: coordinator, created_at: now, autonomy: 'box' }
 }
 
 export function getGroup(id: number): Group | null {
@@ -169,13 +175,15 @@ export function getGroup(id: number): Group | null {
 
 export function updateGroup(
   id: number,
-  patch: Partial<Pick<Group, 'name' | 'description' | 'coordinator_id'>>
+  patch: Partial<Pick<Group, 'name' | 'description' | 'coordinator_id' | 'autonomy'>>
 ): void {
   const cur = getGroup(id)
   if (!cur) return
+  // Q1 (fase squadra): l'autonomia si NORMALIZZA — mai valori fantasma nel DB
+  const autonomy = patch.autonomy !== undefined ? normalizeGroupAutonomy(patch.autonomy) : cur.autonomy
   db()
-    .prepare('UPDATE groups SET name=?, description=?, coordinator_id=? WHERE id=?')
-    .run(patch.name ?? cur.name, patch.description ?? cur.description, patch.coordinator_id ?? cur.coordinator_id, id)
+    .prepare('UPDATE groups SET name=?, description=?, coordinator_id=?, autonomy=? WHERE id=?')
+    .run(patch.name ?? cur.name, patch.description ?? cur.description, patch.coordinator_id ?? cur.coordinator_id, autonomy, id)
 }
 
 /**
@@ -204,6 +212,19 @@ export function ensureGroupCoordinator(groupId: number): { changed: boolean; coo
  */
 export function migrateGroupCoordinators(): void {
   for (const g of listGroups()) ensureGroupCoordinator(g.id)
+}
+
+/**
+ * Q1 (fase squadra), migrazione: aggiunge groups.autonomy ai DB esistenti —
+ * ogni squadra esistente (e ogni NULL futuro) vale 'box', il default della
+ * spec. Idempotente e silenziosa, come le altre migrazioni.
+ */
+export function migrateGroupAutonomy(dbs: DatabaseSync): void {
+  const cols = dbs.prepare("SELECT name FROM pragma_table_info('groups')").all() as Array<{ name: string }>
+  if (!cols.some((c) => c.name === 'autonomy')) {
+    dbs.exec("ALTER TABLE groups ADD COLUMN autonomy TEXT DEFAULT 'box'")
+  }
+  dbs.exec("UPDATE groups SET autonomy = 'box' WHERE autonomy IS NULL")
 }
 
 /** Tutti i gruppi (la sidebar li mostra in una sezione propria). */
@@ -606,6 +627,8 @@ export function groupWithMembers(group: Group): {
   id: number; name: string; description: string; createdBy: string
   coordinatorId: string | null; members: Array<{ agentId: string; name: string; coordinator: boolean }>; createdAt: number
   lastMessageAt: number | null
+  /** Q1 (fase squadra): l'autonomia della squadra per la UI */
+  autonomy: Group['autonomy']
 } {
   const names = new Map(listAgents().map((a) => [a.id, a.name]))
   return {
@@ -615,7 +638,8 @@ export function groupWithMembers(group: Group): {
       agentId: id, name: names.get(id) ?? id, coordinator: id === group.coordinator_id
     })),
     createdAt: group.created_at,
-    lastMessageAt: lastGroupMessageAt(group.id)
+    lastMessageAt: lastGroupMessageAt(group.id),
+    autonomy: group.autonomy
   }
 }
 
