@@ -2,7 +2,7 @@
 // (o su una squadra) nella barra deve riportare alla chat — prima select()
 // cambiava bot ma lasciava la vista sopra, e sembrava che non succedesse nulla.
 // Lo store legge window.sandbot all'import: shim minimo con le chiamate che
-// select() e openGroup() fanno.
+// select() e openGroup() fanno (Q2/Q4 fase squadra: coda e card della squadra).
 import { describe, expect, it, beforeAll } from 'vitest'
 
 beforeAll(async () => {
@@ -10,7 +10,8 @@ beforeAll(async () => {
   ;(globalThis as { window?: unknown }).window = {
     sandbot: {
       getEntries: ok, listSubagents: ok, updateAgent: ok, presenceViewing: ok,
-      outboxOpened: ok, groupMessages: ok
+      outboxOpened: ok, groupMessages: ok, groupApprovalCards: ok,
+      groupPendingApprovals: ok, listGroups: ok, resolveApproval: ok
     }
   }
 })

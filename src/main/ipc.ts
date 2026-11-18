@@ -50,7 +50,7 @@ export const DAEMON_RPC_CHANNELS = [
   // fase 10: gruppi di bot (sidebar, vista gruppo, scrittura come utente)
   'groups:list', 'groups:messages', 'groups:send-user',
   // fase 16b (S1.3): squadre create e modificate dalla UI
-  'groups:create', 'groups:update', 'groups:delete', 'groups:pending-approvals',
+  'groups:create', 'groups:update', 'groups:delete', 'groups:pending-approvals', 'groups:approval-cards',
   'memory:list', 'memory:delete',
   // fase memoria-engramma (M6): la sezione Memoria sul motore
   'memory:overview', 'memory:search', 'memory:note', 'memory:save', 'memory:confirm', 'memory:discard',

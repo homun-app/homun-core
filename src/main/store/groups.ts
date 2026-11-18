@@ -86,7 +86,8 @@ interface GroupRow {
 export interface GroupMessage {
   id: number
   group_id: number
-  author_kind: 'user' | 'agent' | 'system'
+  /** Q4 (fase squadra): 'relay'/'artifact' = sola visualizzazione (payload JSON nel testo) */
+  author_kind: 'user' | 'agent' | 'system' | 'relay' | 'artifact'
   author_id: string | null
   author_name: string
   text: string
@@ -307,7 +308,7 @@ export function deleteGroup(dbs: DatabaseSync, groupId: number): void {
 
 export interface NewGroupMessage {
   groupId: number
-  authorKind: 'user' | 'agent' | 'system'
+  authorKind: 'user' | 'agent' | 'system' | 'relay' | 'artifact'
   authorId: string | null
   authorName: string
   text: string
@@ -564,7 +565,9 @@ export function scheduleTurnsForMessage(message: GroupMessage, emit: (e: { type:
   const group = getGroup(message.group_id)
   const result: ScheduledTurns = { plan: { turns: [], skipped: [], systemNotice: null, capNotice: false }, jobs: [] }
   // fase 16b (S1.2): un riepilogo NON genera turni (né righe di sistema)
-  if (!group || message.author_kind === 'system' || message.summary === 1) return result
+  // Q4 (fase squadra): le righe relay/artifact sono di SOLA visualizzazione:
+  // non svegliano nessuno e non contano nei turni o nei tetti del gruppo
+  if (!group || message.author_kind === 'system' || message.author_kind === 'relay' || message.author_kind === 'artifact' || message.summary === 1) return result
   const memberIds = groupMemberIds(group.id)
   const members = memberIds
     .map((id) => getAgent(id))
@@ -747,6 +750,46 @@ export function reviewerPassedForGroup(groupId: number): ReviewerPassedRow[] {
     }
   }
   return rows.sort((a, b) => b.when - a.when).slice(0, 20)
+}
+
+/** Una card di approvazione della timeline della squadra (Q4). */
+export interface SquadApprovalCardRow {
+  id: number
+  agentId: string
+  agentName: string
+  approvalId: string
+  tool: string
+  /** la frase leggibile della card di oggi */
+  phrase: string
+  status: string
+  pending: boolean
+  /** Q1: l'insieme fisso (solo «Consenti una volta») */
+  fixed: boolean
+  when: number
+}
+
+/**
+ * Q4 (fase squadra): le card di approvazione nate nei turni della squadra
+ * (entry kind approval con meta.squadId), da fondere nella timeline nel
+ * punto in cui sono nate. Pending e decise.
+ */
+export function squadApprovalCardsForGroup(groupId: number): SquadApprovalCardRow[] {
+  const rows: SquadApprovalCardRow[] = []
+  for (const id of groupMemberIds(groupId)) {
+    const name = (db().prepare('SELECT name FROM agents WHERE id = ?').get(id) as { name?: string } | undefined)?.name ?? id
+    for (const e of getEntries(id)) {
+      if (e.kind !== 'approval') continue
+      const meta = (e.meta ?? {}) as Record<string, unknown>
+      if (meta.squadId !== groupId || typeof meta.approvalId !== 'string') continue
+      rows.push({
+        id: e.id, agentId: id, agentName: name, approvalId: meta.approvalId,
+        tool: String(meta.tool ?? ''), phrase: e.content,
+        status: String(meta.status ?? 'pending'), pending: meta.status === 'pending',
+        fixed: meta.squadAlwaysAsk === true, when: e.createdAt
+      })
+    }
+  }
+  return rows.sort((a, b) => a.when - b.when)
 }
 
 /** Annulla i job group-turn di un gruppo (membri rimossi, gruppo modificato). */

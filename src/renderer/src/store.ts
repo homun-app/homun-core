@@ -137,6 +137,8 @@ interface Store {
   _pendingRefreshTimer: ReturnType<typeof setTimeout> | null
   /** Q2 (fase squadra): le card pendenti della squadra aperta (coda «Da approvare») */
   groupPending: SquadPendingApprovalInfo[]
+  /** Q4 (fase squadra): le card di approvazione della timeline (pending e decise) */
+  groupCards: Array<{ id: number; agentId: string; agentName: string; approvalId: string; tool: string; phrase: string; status: string; pending: boolean; fixed: boolean; when: number }>
   /** Q2 (fase squadra): il numero di card pendenti per OGNI squadra (badge barra) */
   groupPendingCount: Record<number, number>
   /** Q2: «Fatto da soli, senza chiederti» della squadra aperta */
@@ -434,6 +436,7 @@ export const useStore = create<Store>((set, get) => ({
   openGroupId: null,
   _pendingRefreshTimer: null,
   groupPending: [],
+  groupCards: [],
   groupPendingCount: {},
   groupActivity: [],
   groupReviewerPassed: [],
@@ -708,6 +711,10 @@ export const useStore = create<Store>((set, get) => ({
           break
         }
         case 'approval': {
+          // Q4: le card della timeline della squadra seguono le decisioni
+          if (s.openGroupId !== null) {
+            api.groupApprovalCards(s.openGroupId).then((groupCards) => set({ groupCards })).catch(() => undefined)
+          }
           if (e.agentId === s.activeId) {
             const merged = [...s.entries]
             const i = merged.findIndex((x) => x.meta?.approvalId === e.approval.id)
@@ -771,6 +778,7 @@ export const useStore = create<Store>((set, get) => ({
           api.listGroups().then((groups) => set({ groups })).catch(() => undefined)
           if (s.openGroupId !== null) {
             api.groupMessages(s.openGroupId).then((groupMessages) => set({ groupMessages })).catch(() => undefined)
+            api.groupApprovalCards(s.openGroupId).then((groupCards) => set({ groupCards })).catch(() => undefined)
           }
           // Q2 (fase squadra): la coda si aggiorna appena una card nasce o si chiude
           s.refreshGroupPending()
@@ -962,6 +970,7 @@ export const useStore = create<Store>((set, get) => ({
     set(id !== null ? { openGroupId: id, groupMessages: [], activityOpen: false, openLibraryId: null, approvalsQueueOpen: false } : { openGroupId: id, groupMessages: [], approvalsQueueOpen: false })
     if (id !== null) {
       void api.groupMessages(id).then((groupMessages) => set({ groupMessages })).catch(() => undefined)
+      void api.groupApprovalCards(id).then((groupCards) => set({ groupCards })).catch(() => undefined)
       // Q2 (fase squadra): la coda della squadra parte col numero giusto
       get().refreshGroupPending()
     }

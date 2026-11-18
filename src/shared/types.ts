@@ -1109,6 +1109,22 @@ export interface SandbotApi {
    * Q2 (fase squadra): le approvazioni in attesa di tutti i membri della
    * squadra e dei loro sottoagenti (la coda «Da approvare»).
    */
+  /**
+   * Q4 (fase squadra): le card di approvazione nate nei turni della squadra
+   * (pending e decise), da fondere nella timeline.
+   */
+  groupApprovalCards(groupId: number): Promise<Array<{
+    id: number
+    agentId: string
+    agentName: string
+    approvalId: string
+    tool: string
+    phrase: string
+    status: string
+    pending: boolean
+    fixed: boolean
+    when: number
+  }>>
   groupPendingApprovals(groupId: number): Promise<{
     pending: SquadPendingApprovalInfo[]
     /** Q2: «Fatto da soli, senza chiederti» (file, comandi, pagine, messaggi) */
@@ -1759,8 +1775,13 @@ export interface SubagentInfo {
 
 // ---- gruppi (fase 10, T7) ----
 
-/** Chi ha scritto un messaggio di gruppo: l'utente, un bot o una riga di sistema. */
-export type GroupAuthorKind = 'user' | 'agent' | 'system'
+/**
+ * Chi ha scritto un messaggio di gruppo: l'utente, un bot o una riga di
+ * sistema. Q4 (fase squadra): 'relay' è lo scambio 1-a-1 tra bot mostrato
+ * nella timeline (SOLA visualizzazione), 'artifact' le card che si aprono
+ * (documenti e file della cartella condivisa) — non svegliano mai nessuno.
+ */
+export type GroupAuthorKind = 'user' | 'agent' | 'system' | 'relay' | 'artifact'
 
 /**
  * Q1 (fase squadra): l'autonomia della squadra — 'ask' chiede tutto, 'box'
@@ -1812,6 +1833,7 @@ export interface SquadPendingApprovalInfo {
 export interface GroupMessageInfo {
   id: number
   groupId: number
+  /** 'relay'/'artifact' sono righe di sola visualizzazione: il testo è un payload JSON */
   authorKind: GroupAuthorKind
   authorId: string | null
   authorName: string

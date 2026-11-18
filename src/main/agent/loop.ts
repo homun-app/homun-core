@@ -1172,6 +1172,19 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
   // testo finale consegnato (la risposta collegata da rimandare al mittente)
   const sentToAgentIds = new Set<string>()
   let threadReplyText: string | null = null
+  /**
+   * Q4 (fase squadra): le righe di SOLA VISUALIZZAZIONE della timeline —
+   * relay (scambi 1-a-1 tra membri) e artifact (documenti e file della
+   * cartella condivisa). Non svegliano nessuno: scheduleTurnsForMessage le
+   * salta per costruzione (author_kind relay/artifact).
+   */
+  const addTimelineRow = (kind: 'relay' | 'artifact', text: string): void => {
+    if (opts.squadId === undefined) return
+    addGroupMessage({
+      groupId: opts.squadId, authorKind: kind, authorId: agentId, authorName: agent.name, text
+    })
+    emit({ type: 'groups' })
+  }
   // Q1 (fase squadra): il turno è DI UNA SQUADRA quando nasce da un messaggio
   // nella chat di squadra, da un post_to_group, da una delega tra membri o da
   // un sottoagente di uno di questi turni: vale l'AUTONOMIA del gruppo (il
@@ -4392,6 +4405,14 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           // torna al mittente a fine turno di chi riceve
           const threadId = `t-${randomUUID().slice(0, 8)}`
           sentToAgentIds.add(toId)
+          // Q4: lo scambio tra membri entra nella timeline della squadra
+          if (sendSquadId !== null) {
+            addGroupMessage({
+              groupId: sendSquadId, authorKind: 'relay', authorId: agentId, authorName: agent.name,
+              text: JSON.stringify({ to: toId, toName: dest.name, text: text.slice(0, 500) })
+            })
+            emit({ type: 'groups' })
+          }
           enqueueJob(db(), {
             agentId: toId,
             kind: 'user-message',
@@ -4996,6 +5017,16 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           if (call.name === 'run-command' && runCmdBoxIsolated) {
             finalOutput = withNoInternetNote(finalOutput)
           }
+          // Q4 (fase squadra): un file scritto nella cartella CONDIVISA
+          // (/workspace) in un turno della squadra entra nella timeline come
+          // card che si apre; la home privata del bot no
+          if (call.name === 'write-file' && opts.squadId !== undefined && (meta as Record<string, unknown>).error !== true) {
+            const resolvedFile = await resolveBoxPath(agentId, String(input.path ?? ''))
+            if (resolvedFile.ok && resolvedFile.rel.split('/').shift() === 'workspace') {
+              const title = resolvedFile.rel.split('/').pop() ?? resolvedFile.rel
+              addTimelineRow('artifact', JSON.stringify({ kind: 'file', title, path: resolvedFile.rel }))
+            }
+          }
           if (call.name.startsWith('mcp__') || call.name.startsWith('composio__')) {
             const [prefix, slugPart] = call.name.split('__')
             const originalName = call.name.split('__').slice(2).join('__')
@@ -5142,6 +5173,12 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           // libreria — stessa destinazione dei messaggi del turno, col bottone
           // Apri; il documento NON si incolla in chat
           if (meta.libraryCard) {
+            // Q4 (fase squadra): il documento scritto in un turno della
+            // squadra entra nella timeline come card che si apre
+            const lib = meta.libraryCard as { type?: string; id?: string; title?: string }
+            if (opts.squadId !== undefined && lib.id) {
+              addTimelineRow('artifact', JSON.stringify({ kind: 'document', id: lib.id, title: lib.title ?? lib.id }))
+            }
             appendSend(agentId, call, meta.libraryCard as SendMessagePayload, emit, {}, opts.taskId)
           }
           // fase 5: il tool MCP ha rifiutato perché il connettore ha il token
@@ -5444,6 +5481,14 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
     ) {
       const from = getAgent(opts.agentMessage.fromAgentId)
       if (from) {
+        // Q4: anche la risposta entra nella timeline della squadra
+        if (opts.squadId !== undefined) {
+          addGroupMessage({
+            groupId: opts.squadId, authorKind: 'relay', authorId: agentId, authorName: agent.name,
+            text: JSON.stringify({ to: from.id, toName: from.name, text: threadReplyText.slice(0, 500), reply: true })
+          })
+          emit({ type: 'groups' })
+        }
         const { enqueueJob: enqueueReply } = await import('../store/jobs')
         enqueueReply(db(), {
           agentId: from.id,

@@ -1146,6 +1146,13 @@ export function buildApiMethods(
       }
     },
 
+    // Q4 (fase squadra): le card di approvazione nate nei turni della squadra,
+    // da fondere nella timeline nel punto in cui sono nate
+    'groups:approval-cards': async ([groupId]) => {
+      const groups = await import('../main/store/groups')
+      return groups.squadApprovalCardsForGroup(Number(groupId))
+    },
+
     'groups:delete': async ([groupId]) => {
       const groups = await import('../main/store/groups')
       const gid = Number(groupId)

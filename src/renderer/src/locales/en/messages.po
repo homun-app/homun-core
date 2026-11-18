@@ -1032,6 +1032,10 @@ msgstr "open"
 msgid "Apri"
 msgstr "Open"
 
+#: src/renderer/src/components/TeamChat.tsx
+msgid "apri a lato"
+msgstr "open at the side"
+
 #: src/renderer/src/components/Chat.tsx
 msgid "Apri Accessibilità"
 msgstr "Open Accessibility"
@@ -1582,6 +1586,10 @@ msgstr "key for Ollama's web search"
 msgid "chiave salvata (nel vault)"
 msgstr "key saved (in the vault)"
 
+#: src/renderer/src/components/TeamChat.tsx
+msgid "chiede a te"
+msgstr "is asking you"
+
 #: src/renderer/src/lib/activity.ts
 msgid "chiede a un aiutante…"
 msgstr "asks a helper…"
@@ -2051,6 +2059,7 @@ msgid "Consenti sempre le letture di {0}"
 msgstr "Always allow reads from {0}"
 
 #: src/renderer/src/components/ApprovalsQueue.tsx
+#: src/renderer/src/components/TeamChat.tsx
 msgid "Consenti una volta"
 msgstr "Allow once"
 
@@ -6268,6 +6277,7 @@ msgstr "Start over"
 #: src/renderer/src/components/ApprovalCard.tsx
 #: src/renderer/src/components/ApprovalsQueue.tsx
 #: src/renderer/src/components/LibraryCards.tsx
+#: src/renderer/src/components/TeamChat.tsx
 msgid "Rifiuta"
 msgstr "Deny"
 
@@ -6759,6 +6769,7 @@ msgid "Seleziona un file per vederne il contenuto."
 msgstr "Select a file to see its content."
 
 #: src/renderer/src/components/ApprovalsQueue.tsx
+#: src/renderer/src/components/TeamChat.tsx
 msgid "sempre a te"
 msgstr "always yours"
 
@@ -6932,6 +6943,10 @@ msgstr "The browser opens to sign in: it is the easiest way."
 #: src/renderer/src/components/GuideComputerStep.tsx
 msgid "si apre l'installazione di Apple, che ti chiederà la password del Mac"
 msgstr "Apple's installer opens, and it will ask for your Mac password"
+
+#: src/renderer/src/components/TeamChat.tsx
+msgid "si apre qui"
+msgstr "opens here"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts

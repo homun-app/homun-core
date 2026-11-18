@@ -7,7 +7,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
-import { ArrowUp, PanelRight } from 'lucide-react'
+import { ArrowUp, ArrowRight, PanelRight, FileText } from 'lucide-react'
+import { api } from '../store'
 import { useStore } from '../store'
 import { avatarOf } from '../../../shared/avatar'
 import type { GroupInfo, GroupMessageInfo, Agent } from '../../../shared/types'
@@ -99,6 +100,88 @@ function TeamBotMessage({ m, group }: { m: GroupMessageInfo; group: GroupInfo })
   )
 }
 
+/** Q4: il payload JSON delle righe di sola visualizzazione (difensivo). */
+interface RelayPayload { to?: string; toName?: string; text?: string; reply?: boolean }
+interface ArtifactPayload { kind?: string; id?: string; title?: string; path?: string }
+
+/** Q4: la riga compatta dello scambio tra bot («Treni → Alloggio: …»). */
+function RelayRow({ m }: { m: GroupMessageInfo }) {
+  let p: RelayPayload = {}
+  try { p = JSON.parse(m.text) as RelayPayload } catch { p = { text: m.text } }
+  return (
+    <p className="flex items-center gap-1.5 text-[13px] text-muted-foreground" data-testid="relay-row">
+      <ArrowRight className="size-3 shrink-0" aria-hidden />
+      <span className="truncate">
+        <span className="font-medium">{m.authorName}</span> → <span className="font-medium">{p.toName ?? '…'}</span>: {p.text}
+      </span>
+    </p>
+  )
+}
+
+/** Q4: la card che si apre — documento della Libreria («apri a lato») o file della cartella condivisa («si apre qui»). */
+function ArtifactCard({ m, agents }: { m: GroupMessageInfo; agents: Agent[] }) {
+  let p: ArtifactPayload = {}
+  try { p = JSON.parse(m.text) as ArtifactPayload } catch { p = { title: m.text } }
+  const openPage = useStore((s) => s.openPage)
+  const [preview, setPreview] = useState<string | null>(null)
+  const isDoc = p.kind === 'document' && !!p.id
+  const info = useBotInfo(m.authorId ?? null)
+  return (
+    <div className="flex max-w-[85%] items-center gap-3 rounded-[16px] bg-muted/60 px-3.5 py-2.5">
+      {info && <Bot family={info.avatar.family} color={info.avatar.color} state="idle" size={28} track={false} />}
+      <div className="min-w-0">
+        <button
+          className="flex min-w-0 items-center gap-1.5 text-left text-sm font-medium underline-offset-2 transition hover:underline"
+          data-testid="artifact-card"
+          onClick={() => {
+            if (isDoc) openPage(p.id!, 'library')
+            else if (p.path) void api.filesRead(m.authorId ?? agents[0]?.id ?? '', p.path).then((r) => setPreview(r && r.kind === 'text' ? r.content : '(file binario)')).catch(() => setPreview(null))
+          }}
+        >
+          <FileText className="size-3.5 shrink-0" aria-hidden /> {p.title ?? 'file'}
+        </button>
+        <p className="text-xs text-muted-foreground">
+          {m.authorName} · {isDoc ? <Trans>apri a lato</Trans> : <Trans>si apre qui</Trans>}
+        </p>
+      </div>
+      {preview !== null && (
+        <pre className="max-h-40 flex-1 overflow-auto scroll-thin whitespace-pre-wrap rounded-[10px] bg-card px-3 py-2 text-xs">{preview}</pre>
+      )}
+    </div>
+  )
+}
+
+/** Q2/Q4: la card di approvazione dentro la timeline, nel punto in cui è nata. */
+function TimelineApprovalCard({ c }: { c: { agentId: string; agentName: string; approvalId: string; phrase: string; pending: boolean; fixed: boolean } }) {
+  const resolveGroupApproval = useStore((s) => s.resolveGroupApproval)
+  const info = useBotInfo(c.agentId)
+  return (
+    <div className="max-w-[85%] rounded-[16px] bg-card px-4 py-3 shadow-soft" data-testid="timeline-approval">
+      <p className="text-xs text-muted-foreground">
+        {c.agentName} · <Trans>chiede a te</Trans>{c.fixed ? <> · <Trans>sempre a te</Trans></> : null}
+      </p>
+      <p className="mt-1 text-sm leading-relaxed">{c.phrase}</p>
+      {c.pending ? (
+        <div className="mt-2 flex gap-2">
+          <button
+            className="rounded-full bg-foreground px-3.5 py-1.5 text-[13px] text-background transition hover:opacity-90"
+            onClick={() => resolveGroupApproval(c.agentId, c.approvalId, 'allow', 'once')}
+          >
+            <Trans>Consenti una volta</Trans>
+          </button>
+          <button
+            className="rounded-full px-3.5 py-1.5 text-[13px] text-muted-foreground transition hover:text-destructive"
+            onClick={() => resolveGroupApproval(c.agentId, c.approvalId, 'deny', 'once')}
+          >
+            <Trans>Rifiuta</Trans>
+          </button>
+        </div>
+      ) : null}
+      {info ? null : null}
+    </div>
+  )
+}
+
 /** La mascotte di un membro che lavora, con la mezza riga (S5 + S3.3). */
 function MemberActivity({ agentId }: { agentId: string }) {
   const { i18n } = useLingui()
@@ -128,6 +211,7 @@ export function TeamChat() {
   const sendGroupMessage = useStore((s) => s.sendGroupMessage)
   // Q2 (fase squadra): le azioni in attesa e la coda
   const groupPending = useStore((s) => s.groupPending)
+  const groupCards = useStore((s) => s.groupCards)
   const setApprovalsQueueOpen = useStore((s) => s.setApprovalsQueueOpen)
   const rightPanel = useStore((s) => s.rightPanel)
   const setRightPanel = useStore((s) => s.setRightPanel)
@@ -264,21 +348,39 @@ export function TeamChat() {
           <p className="mt-16 text-center text-sm text-muted-foreground"><Trans>Nessun messaggio nella squadra.</Trans></p>
         )}
         <div className="mx-auto max-w-3xl space-y-4">
-          {groupMessages.map((m) =>
-            m.authorKind === 'system' ? (
-              <p key={m.id} className="text-center text-xs text-muted-foreground">{groupSystemText(m.text)}</p>
-            ) : m.authorKind === 'user' ? (
-              <div key={m.id} className="flex justify-end">
-                {/* G1 (fase 0.3.1001 grafica): bolla utente NEUTRA, gli stessi
-                    token --bubble-user della chat uno-a-uno */}
-                <div className="max-w-[75%] rounded-[20px] rounded-br-md bg-[var(--bubble-user)] px-4 py-2.5 text-sm whitespace-pre-wrap text-[var(--bubble-user-foreground)]">
-                  {m.text}
-                </div>
-              </div>
-            ) : (
-              <TeamBotMessage key={m.id} m={m} group={group} />
-            )
-          )}
+          {/* Q4 (fase squadra): la timeline fonde i messaggi e le card di
+              approvazione nate nei turni della squadra, nel punto in cui sono
+              nate (ordine per tempo) */}
+          {(() => {
+            type Row = { key: string; at: number; node: React.ReactNode }
+            const rows: Row[] = []
+            for (const m of groupMessages) {
+              const node =
+                m.authorKind === 'system' ? (
+                  <p className="text-center text-xs text-muted-foreground">{groupSystemText(m.text)}</p>
+                ) : m.authorKind === 'user' ? (
+                  <div className="flex justify-end">
+                    {/* G1 (fase 0.3.1001 grafica): bolla utente NEUTRA, gli stessi
+                        token --bubble-user della chat uno-a-uno */}
+                    <div className="max-w-[75%] rounded-[20px] rounded-br-md bg-[var(--bubble-user)] px-4 py-2.5 text-sm whitespace-pre-wrap text-[var(--bubble-user-foreground)]">
+                      {m.text}
+                    </div>
+                  </div>
+                ) : m.authorKind === 'relay' ? (
+                  <RelayRow m={m} />
+                ) : m.authorKind === 'artifact' ? (
+                  <ArtifactCard m={m} agents={agents} />
+                ) : (
+                  <TeamBotMessage m={m} group={group} />
+                )
+              rows.push({ key: `m${m.id}`, at: m.createdAt, node })
+            }
+            for (const c of groupCards) {
+              rows.push({ key: `c${c.id}`, at: c.when, node: <TimelineApprovalCard c={c} /> })
+            }
+            rows.sort((a, b) => a.at - b.at)
+            return rows.map((r) => <div key={r.key}>{r.node}</div>)
+          })()}
           {working.length > 0 && (
             <div className="space-y-2 pt-1">
               {working.map((a) => (

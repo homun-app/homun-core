@@ -79,7 +79,9 @@ export function readWindow(
   sourceDepth: number | null = null
 ): { messages: ReturnType<typeof groupMessages>; lastId: number; maxDepth: number; rootId: number | null } {
   const after = getGroupCursor(groupId, memberId)
-  const messages = groupMessages(groupId, after)
+  // Q4 (fase squadra): le righe relay/artifact sono di SOLA visualizzazione:
+  // non entrano nella finestra che il modello legge (non svegliano, non contano)
+  const messages = groupMessages(groupId, after).filter((m) => m.author_kind !== 'relay' && m.author_kind !== 'artifact')
   let lastId = after
   for (const m of messages) lastId = Math.max(lastId, m.id)
   const { rootId, maxDepth } = readChainDepth({ messages, memberId, sourceDepth })
@@ -194,7 +196,7 @@ export async function runGroupTurnJob(
     ),
     newMessages: win.messages.map((m) => ({
       id: m.id,
-      authorKind: m.author_kind,
+      authorKind: m.author_kind as 'user' | 'agent' | 'system',
       authorName: m.author_name,
       text: m.text,
       replyTo: m.reply_to
