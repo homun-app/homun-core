@@ -5,6 +5,38 @@ pubblicata finisce nel corpo della GitHub Release (da cui l'app mostra il
 «cosa cambia» quando propone un aggiornamento). Formato: `## [x.y.z] — data`,
 sezioni H2 e un punto per riga.
 
+## [0.3.1001-beta.9] — 2026-11-18
+
+Più semplice da usare, in vista della prima versione pubblica.
+
+### Novità
+
+- **La barra di sinistra si apre e si chiude da un bottone** sempre
+  visibile in alto, accanto ai semafori, anche quando è stretta.
+- **«Libera spazio» libera davvero:** toglie la cache di costruzione del
+  computer dei bot, mostra che sta lavorando e dice quanto spazio hai
+  recuperato.
+- **«Compatibile OpenAI» più completo:** un nome per riconoscerlo, la
+  chiave facoltativa per i server che non la chiedono e il modello da
+  scrivere a mano quando il server non ne dà l'elenco. È «locale» solo se
+  l'indirizzo è sul tuo computer o sulla tua rete.
+- **Le approvazioni salvate valgono per il bot:** «Consenti sempre» vale
+  per il bot che l'ha chiesto, senza più doppioni. In Impostazioni ›
+  Approvazioni le trovi divise per bot.
+
+### Correzioni
+
+- **La finestra a parte dello schermo non fa più sparire Homun:** ha una
+  barra sempre visibile e «Riporta in Homun» rimette lo schermo al suo
+  posto.
+- **«Ho finito» si vede sempre** quando controlli lo schermo, anche con la
+  finestra bassa: prende il posto di «Prendi il controllo».
+- **Sotto i messaggi resta solo «Copia»**, che ora conferma con una spunta.
+- **I loghi di Anthropic e OpenAI sono quelli giusti** e si leggono nei due
+  temi.
+- **«Elimina» nella Cassaforte cancella davvero** login, segreti e
+  contatti.
+
 ## [0.3.1001-beta.8] — 2026-11-16
 
 Lo schermo del bot sempre a vista e i lavori lunghi che non si fermano a
