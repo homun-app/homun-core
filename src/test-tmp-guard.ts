@@ -6,12 +6,18 @@
 // `sandbot-fase-*` sono le sonde, che puliscono da sole e possono girare in
 // un altro terminale: escluse. Se resta anche una cartella nuova, la corsa
 // FALLISCE con quante, per prefisso, i primi 5 nomi e la regola del progetto.
-import { readdirSync, realpathSync } from 'node:fs'
+import { readdirSync, realpathSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { TEST_TMP_BASE } from './test-tmp'
 
 export const RULE = 'ogni cartella temporanea si cancella a fine test o a fine corsa'
+
+/** C1 (fase ci-temporanei): il prefisso della radice che possiede la corsa. */
+export const RUN_ROOT_PREFIX = 'sandbot-vitest-run-'
+
+/** C1: cancella la radice — il teardown la chiama PRIMA del controllo. */
+export const wipeRunRoot = (root: string): void => rmSync(root, { recursive: true, force: true })
 
 const isSandbotName = (name: string): boolean => name.startsWith('sandbot-')
 const isProbeName = (name: string): boolean => name.startsWith('sandbot-fase-')
@@ -75,7 +81,19 @@ const scan = (dir: string): string[] => {
 export default function testTmpGuard(): () => void {
   const dirs = uniqueDirs([real(TEST_TMP_BASE), real(tmpdir())])
   const start = dirs.flatMap(scan)
+  // C1 (fase ci-temporanei): UNA radice per corsa, la creano e la cancellano
+  // i globalSetup — chi possiede la corsa intera, non gli hook dei file: nei
+  // file saltati per intero (describe.skipIf, il runner senza modelli locali)
+  // vitest non gira né afterAll né exit, e le cartelle DATI dei file finiscono
+  // DENTRO questa radice: spariscono col teardown comunque. Nasce DOPO la
+  // foto: se il teardown la dimenticasse, il controllo la segnala. Arriva ai
+  // worker con l'env — verificato dal vivo su vitest 5.0.5: process.env
+  // impostato qui è ereditato dai fork (provide/inject invece crasha lo
+  // startup all'import di provide da 'vitest' nel globalSetup).
+  const runRoot = mkdtempSync(join(TEST_TMP_BASE, RUN_ROOT_PREFIX))
+  process.env.SANDBOT_VITEST_RUN_ROOT = runRoot
   return () => {
+    wipeRunRoot(runRoot) // PRIMA del controllo: la radice non conta come rimasta
     const left = newLeftovers(start, dirs.flatMap(scan))
     if (left.length > 0) throw new Error(guardMessage(left))
   }

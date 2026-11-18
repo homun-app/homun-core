@@ -14,7 +14,13 @@ import { join } from 'node:path'
 const PREFIX = 'sandbot-vitest-data-'
 const current = process.env.SANDBOT_DATA_DIR
 if (!current?.includes(PREFIX) || !existsSync(current)) {
-  const dir = mkdtempSync(join(tmpdir(), PREFIX))
+  // C1 (fase ci-temporanei): la cartella dati del file sta DENTRO la radice
+  // della corsa (SANDBOT_VITEST_RUN_ROOT, la crea il globalSetup) quando c'è:
+  // nei file saltati per intero né afterAll né exit girano mai, e la radice
+  // la cancella comunque il teardown. afterAll+exit restano come pulizia
+  // anticipata (la radice cresce meno), la garanzia è lei.
+  const base = process.env.SANDBOT_VITEST_RUN_ROOT
+  const dir = mkdtempSync(join(base !== undefined && existsSync(base) ? base : tmpdir(), PREFIX))
   process.env.SANDBOT_DATA_DIR = dir
   const clean = () => rmSync(dir, { recursive: true, force: true })
   afterAll(clean) // fine del file di test (un worker per file, in forks)
