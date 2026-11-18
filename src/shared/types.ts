@@ -1113,6 +1113,24 @@ export interface SandbotApi {
    * Q4 (fase squadra): le card di approvazione nate nei turni della squadra
    * (pending e decise), da fondere nella timeline.
    */
+  /**
+   * Q5 (fase squadra): la vista del team del pannello destro — lo stato di
+   * ogni membro (lavora/aspetta te/fermo/finito/coordina), i contatori dei
+   * turni della squadra, il ruolo e «Prodotto dalla squadra».
+   */
+  groupOverview(groupId: number): Promise<{
+    members: Array<{
+      agentId: string
+      name: string
+      state: 'lavora' | 'aspetta-te' | 'fermo' | 'finito' | 'coordina'
+      role: string
+      coordinator: boolean
+      pagesRead: number
+      filesWritten: number
+      subagents: number
+    }>
+    produced: Array<{ kind: 'document' | 'file'; id?: string; title: string; path?: string; authorName: string; when: number }>
+  }>
   groupApprovalCards(groupId: number): Promise<Array<{
     id: number
     agentId: string

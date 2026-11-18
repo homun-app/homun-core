@@ -139,6 +139,11 @@ interface Store {
   groupPending: SquadPendingApprovalInfo[]
   /** Q4 (fase squadra): le card di approvazione della timeline (pending e decise) */
   groupCards: Array<{ id: number; agentId: string; agentName: string; approvalId: string; tool: string; phrase: string; status: string; pending: boolean; fixed: boolean; when: number }>
+  /** Q5 (fase squadra): la vista del team del pannello destro */
+  groupOverview: {
+    members: Array<{ agentId: string; name: string; state: 'lavora' | 'aspetta-te' | 'fermo' | 'finito' | 'coordina'; role: string; coordinator: boolean; pagesRead: number; filesWritten: number; subagents: number }>
+    produced: Array<{ kind: 'document' | 'file'; id?: string; title: string; path?: string; authorName: string; when: number }>
+  }
   /** Q2 (fase squadra): il numero di card pendenti per OGNI squadra (badge barra) */
   groupPendingCount: Record<number, number>
   /** Q2: «Fatto da soli, senza chiederti» della squadra aperta */
@@ -437,6 +442,11 @@ export const useStore = create<Store>((set, get) => ({
   _pendingRefreshTimer: null,
   groupPending: [],
   groupCards: [],
+  /** Q5 (fase squadra): la vista del team del pannello destro */
+  groupOverview: { members: [], produced: [] } as {
+    members: Array<{ agentId: string; name: string; state: 'lavora' | 'aspetta-te' | 'fermo' | 'finito' | 'coordina'; role: string; coordinator: boolean; pagesRead: number; filesWritten: number; subagents: number }>
+    produced: Array<{ kind: 'document' | 'file'; id?: string; title: string; path?: string; authorName: string; when: number }>
+  },
   groupPendingCount: {},
   groupActivity: [],
   groupReviewerPassed: [],
@@ -592,6 +602,10 @@ export const useStore = create<Store>((set, get) => ({
           break
         }
         case 'agents':
+          // Q5 (fase squadra): gli stati del team cambiano con gli eventi
+          if (s.openGroupId !== null) {
+            api.groupOverview(s.openGroupId).then((groupOverview) => set({ groupOverview })).catch(() => undefined)
+          }
           void api.listAgents().then((agents2) => set({ agents: agents2 }))
           break
         case 'models': {
@@ -714,6 +728,7 @@ export const useStore = create<Store>((set, get) => ({
           // Q4: le card della timeline della squadra seguono le decisioni
           if (s.openGroupId !== null) {
             api.groupApprovalCards(s.openGroupId).then((groupCards) => set({ groupCards })).catch(() => undefined)
+            api.groupOverview(s.openGroupId).then((groupOverview) => set({ groupOverview })).catch(() => undefined)
           }
           if (e.agentId === s.activeId) {
             const merged = [...s.entries]
@@ -779,6 +794,7 @@ export const useStore = create<Store>((set, get) => ({
           if (s.openGroupId !== null) {
             api.groupMessages(s.openGroupId).then((groupMessages) => set({ groupMessages })).catch(() => undefined)
             api.groupApprovalCards(s.openGroupId).then((groupCards) => set({ groupCards })).catch(() => undefined)
+            api.groupOverview(s.openGroupId).then((groupOverview) => set({ groupOverview })).catch(() => undefined)
           }
           // Q2 (fase squadra): la coda si aggiorna appena una card nasce o si chiude
           s.refreshGroupPending()
@@ -971,6 +987,7 @@ export const useStore = create<Store>((set, get) => ({
     if (id !== null) {
       void api.groupMessages(id).then((groupMessages) => set({ groupMessages })).catch(() => undefined)
       void api.groupApprovalCards(id).then((groupCards) => set({ groupCards })).catch(() => undefined)
+      void api.groupOverview(id).then((groupOverview) => set({ groupOverview })).catch(() => undefined)
       // Q2 (fase squadra): la coda della squadra parte col numero giusto
       get().refreshGroupPending()
     }

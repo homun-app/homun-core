@@ -35,6 +35,8 @@ import { ComputerPrepRow } from './ComputerPrepRow'
 import { ScreenThumb } from './ScreenThumb'
 // Q1 (fase squadra): la schermata Autonomia della squadra (tavola 3 del disegno)
 import { TeamAutonomySheet, autonomyShortLabel, autonomyBlurb } from './TeamAutonomySheet'
+// Q5 (fase squadra): la vista del team (tavola 1) — stati, contatori, prodotto
+import { activityPhrase } from '../lib/activity'
 import { ModelSelect } from './ui/ModelSelect'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu'
 import { Dialog, DialogContent, DialogTitle } from './ui/dialog'
@@ -1064,6 +1066,13 @@ function MembersPanel({ layout, group, onClose }: { layout: LayoutResult; group:
   // Q1 (fase squadra): la schermata 3 del disegno (autonomia della squadra)
   const [autonomyOpen, setAutonomyOpen] = useState(false)
   const asideRef = useRef<HTMLElement>(null)
+  // Q5 (fase squadra): la vista del team e l'attività live dei membri
+  const groupOverview = useStore((s) => s.groupOverview)
+  const openPage = useStore((s) => s.openPage)
+  const activityOf = (agentId: string): MessageDescriptor | null => {
+    const a = useStore.getState().activity[agentId]
+    return a ? activityPhrase(a, 'present', i18n.locale === 'en' ? 'en' : 'it') : null
+  }
   // G2 (fase 0.3.1001 grafica): anche il pannello dei membri docked prende il
   // focus sul primo controllo all'apertura, come l'overlay
   useEffect(() => {
@@ -1086,7 +1095,57 @@ function MembersPanel({ layout, group, onClose }: { layout: LayoutResult; group:
       <PanelTopBand onClose={onClose} />
       <div className="flex-1 overflow-y-auto scroll-thin px-5 pb-5 pt-14">
         <h2 className="font-display text-[22px]">{group.name}</h2>
-        <p className="mt-3 text-[13px] text-muted-foreground"><Trans>Membri</Trans></p>
+        {/* Q5 (fase squadra): la vista del team del disegno — stato, ruolo,
+            attività di adesso e contatori per ogni membro */}
+        <p className="mb-1 mt-4 text-[13px] font-semibold"><Trans>Il team</Trans></p>
+        <div className="space-y-2.5" data-testid="team-overview">
+          {groupOverview.members.map((m) => {
+            const info = useBotInfo(m.agentId)
+            const av = info ? `var(--bot-${info.avatar.color})` : undefined
+            const stateLabel =
+              m.state === 'lavora' ? <Trans>lavora</Trans>
+              : m.state === 'aspetta-te' ? <Trans>aspetta te</Trans>
+              : m.state === 'finito' ? <Trans>finito</Trans>
+              : m.state === 'coordina' ? <Trans>coordina</Trans>
+              : <Trans>fermo</Trans>
+            const counters = [
+              `${m.pagesRead} ${i18n.t(msg`pagine lette`)}`,
+              ...(m.filesWritten ? [`${m.filesWritten} ${i18n.t(msg`file`)}`] : []),
+              ...(m.subagents ? [`${m.subagents} ${i18n.t(msg`sottoagenti`)}`] : [])
+            ].join(' · ')
+            return (
+              <div key={m.agentId} className="rounded-[14px] bg-muted/50 px-3 py-2.5">
+                <p className="flex items-baseline gap-2 text-sm">
+                  <span className="font-semibold" style={av ? { color: av } : undefined}>{m.name}</span>
+                  <span className={m.state === 'aspetta-te' ? 'text-xs font-semibold text-waiting' : 'text-xs text-muted-foreground'}>{stateLabel}</span>
+                </p>
+                {m.role && <p className="mt-0.5 text-xs leading-snug text-muted-foreground">{m.role}</p>}
+                <p className="mt-0.5 text-xs text-muted-foreground/80">
+                  {activityOf(m.agentId) ? i18n.t(activityOf(m.agentId)!) : counters}
+                </p>
+              </div>
+            )
+          })}
+        </div>
+        {/* Q5: «Prodotto dalla squadra» — i documenti creati nei turni della squadra */}
+        {groupOverview.produced.length > 0 && (
+          <div className="mt-4">
+            <p className="mb-1 text-[13px] font-semibold"><Trans>Prodotto dalla squadra</Trans></p>
+            <div className="space-y-1" data-testid="team-produced">
+              {groupOverview.produced.map((it, i) => (
+                <button
+                  key={i}
+                  className="flex w-full items-center gap-2 rounded-[12px] px-2.5 py-1.5 text-left text-sm transition hover:bg-muted/60"
+                  onClick={() => it.kind === 'document' && it.id && openPage(it.id, 'library')}
+                >
+                  <span className="min-w-0 flex-1 truncate">{it.title}</span>
+                  <span className="shrink-0 text-xs text-muted-foreground">{it.authorName}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        <p className="mb-1 mt-4 text-[13px] text-muted-foreground"><Trans>Membri</Trans></p>
         <div className="mt-1 space-y-1">
           {group.members.map((m) => {
             const a = memberAgent(m.agentId)

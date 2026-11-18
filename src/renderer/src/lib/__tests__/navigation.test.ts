@@ -10,7 +10,7 @@ beforeAll(async () => {
   ;(globalThis as { window?: unknown }).window = {
     sandbot: {
       getEntries: ok, listSubagents: ok, updateAgent: ok, presenceViewing: ok,
-      outboxOpened: ok, groupMessages: ok, groupApprovalCards: ok,
+      outboxOpened: ok, groupMessages: ok, groupApprovalCards: ok, groupOverview: ok,
       groupPendingApprovals: ok, listGroups: ok, resolveApproval: ok
     }
   }

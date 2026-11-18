@@ -752,6 +752,103 @@ export function reviewerPassedForGroup(groupId: number): ReviewerPassedRow[] {
   return rows.sort((a, b) => b.when - a.when).slice(0, 20)
 }
 
+// ---- Q5 (fase squadra): il pannello del team — groups:overview ----
+
+/** Lo stato di un membro per il pannello: cambia con gli eventi. */
+export type SquadMemberState = 'lavora' | 'aspetta-te' | 'fermo' | 'finito' | 'coordina'
+
+export interface SquadOverviewMember {
+  agentId: string
+  name: string
+  state: SquadMemberState
+  /** il ruolo è la descrizione del bot */
+  role: string
+  coordinator: boolean
+  pagesRead: number
+  filesWritten: number
+  subagents: number
+}
+
+export interface SquadProducedItem {
+  kind: 'document' | 'file'
+  /** id del documento in Libreria (solo kind document) */
+  id?: string
+  title: string
+  /** percorso nel box (solo kind file) */
+  path?: string
+  authorName: string
+  when: number
+}
+
+/**
+ * Q5 (fase squadra): la vista del team per il pannello destro. Stati:
+ * aspetta-te (una card pendente o paused-for-approval), lavora
+ * (thinking/running), finito (ultimo turno di gruppo SENT), coordina (il
+ * coordinatore fermo coordina), fermo (il resto). Contatori dai turni della
+ * squadra (entry con meta.squadId); «Prodotto dalla squadra» dalle card
+ * artifact della timeline (documenti e file condivisi).
+ */
+export function squadOverviewForGroup(groupId: number): { members: SquadOverviewMember[]; produced: SquadProducedItem[] } {
+  const group = getGroup(groupId)
+  if (!group) return { members: [], produced: [] }
+  const members: SquadOverviewMember[] = []
+  for (const id of groupMemberIds(groupId)) {
+    const row = db().prepare('SELECT name, description, status, parent_id FROM agents WHERE id = ?').get(id) as
+      | { name: string; description: string; status: string; parent_id: string | null }
+      | undefined
+    if (!row) continue
+    const pendingCard = getEntries(id).some(
+      (e) => e.kind === 'approval' && e.meta?.status === 'pending'
+    )
+    // l'ultimo turno di gruppo CHIUSO di questo membro
+    const last = db()
+      .prepare("SELECT outcome FROM group_turns WHERE group_id = ? AND member_id = ? AND outcome IS NOT NULL ORDER BY ended_at DESC, rowid DESC LIMIT 1")
+      .get(groupId, id) as { outcome: string } | undefined
+    let state: SquadMemberState
+    if (pendingCard || row.status === 'paused-for-approval') state = 'aspetta-te'
+    else if (row.status === 'thinking' || row.status === 'running') state = 'lavora'
+    else if (id === group.coordinator_id) state = 'coordina'
+    else if (last?.outcome === 'SENT') state = 'finito'
+    else state = 'fermo'
+    let pagesRead = 0
+    let filesWritten = 0
+    let subagents = 0
+    for (const e of getEntries(id)) {
+      const meta = (e.meta ?? {}) as Record<string, unknown>
+      if (meta.squadId !== groupId || e.kind !== 'tool-call') continue
+      const name = String(meta.name ?? e.content)
+      if (name === 'web_fetch' || name === 'web_search') pagesRead++
+      else if (name === 'write-file') filesWritten++
+      else if (name === 'spawn_subagent') subagents++
+    }
+    members.push({
+      agentId: id, name: row.name, state, role: row.description ?? '',
+      coordinator: id === group.coordinator_id,
+      pagesRead, filesWritten, subagents
+    })
+  }
+  const produced: SquadProducedItem[] = []
+  for (const m of groupMessages(groupId)) {
+    if (m.author_kind !== 'artifact') continue
+    try {
+      const p = JSON.parse(m.text) as { kind?: string; id?: string; title?: string; path?: string }
+      if (p.kind !== 'document' && p.kind !== 'file') continue
+      produced.push({
+        kind: p.kind,
+        ...(p.kind === 'document' && p.id ? { id: p.id } : {}),
+        title: p.title ?? '',
+        ...(p.kind === 'file' && p.path ? { path: p.path } : {}),
+        authorName: m.author_name,
+        when: m.created_at
+      })
+    } catch {
+      // payload rotto: si salta
+    }
+  }
+  // ordine cronologico (il più recente in fondo), come nella timeline
+  return { members, produced }
+}
+
 /** Una card di approvazione della timeline della squadra (Q4). */
 export interface SquadApprovalCardRow {
   id: number

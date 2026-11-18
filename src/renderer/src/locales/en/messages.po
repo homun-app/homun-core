@@ -1124,6 +1124,7 @@ msgid "args JSON, es. {\"query\":\"x\"}"
 msgstr "args JSON, e.g. {\"query\":\"x\"}"
 
 #: src/renderer/src/components/ActivityPanel.tsx
+#: src/renderer/src/components/RightPanel.tsx
 msgid "aspetta te"
 msgstr "waiting for you"
 
@@ -2141,6 +2142,10 @@ msgstr "I check that it is authentic"
 msgid "Controllo non riuscito"
 msgstr "Check failed"
 
+#: src/renderer/src/components/RightPanel.tsx
+msgid "coordina"
+msgstr "coordinates"
+
 #. placeholder {0}: coordinates[0]!.name
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Coordina «{0}»"
@@ -2835,6 +2840,7 @@ msgstr "Stop and always ask me when…"
 msgid "fermato"
 msgstr "stopped"
 
+#: src/renderer/src/components/RightPanel.tsx
 #: src/renderer/src/components/Sidebar.tsx
 msgid "fermo"
 msgstr "idle"
@@ -2846,6 +2852,7 @@ msgid "fiducia: {pluginTrust} · commit {0}{1}"
 msgstr "trust: {pluginTrust} · commit {0}{1}"
 
 #: src/renderer/src/components/LibraryPanel.tsx
+#: src/renderer/src/components/RightPanel.tsx
 msgid "file"
 msgstr "file"
 
@@ -2920,6 +2927,7 @@ msgstr "window closed: authorization postponed"
 msgid "Finestra di consegna"
 msgstr "Delivery window"
 
+#: src/renderer/src/components/RightPanel.tsx
 #: src/renderer/src/components/SubagentCard.tsx
 msgid "finito"
 msgstr "done"
@@ -3739,6 +3747,10 @@ msgstr "The subagent has no activity yet."
 msgid "Il task non ha ancora attività."
 msgstr "The task has no activity yet."
 
+#: src/renderer/src/components/RightPanel.tsx
+msgid "Il team"
+msgstr "The team"
+
 #: src/renderer/src/components/ComputerTerminal.tsx
 msgid "Il terminale non risponde."
 msgstr "The terminal is not responding."
@@ -4288,6 +4300,10 @@ msgstr "Keep them paused"
 #: src/renderer/src/components/ApprovalsQueue.tsx
 msgid "Lasciato passare dal revisore"
 msgstr "Let through by the reviewer"
+
+#: src/renderer/src/components/RightPanel.tsx
+msgid "lavora"
+msgstr "working"
 
 #: src/renderer/src/lib/activity.ts
 msgid "lavora…"
@@ -5521,6 +5537,10 @@ msgstr "Page · version {0}"
 msgid "Pagine"
 msgstr "Pages"
 
+#: src/renderer/src/components/RightPanel.tsx
+msgid "pagine lette"
+msgstr "pages read"
+
 #: src/renderer/src/components/ApprovalsQueue.tsx
 msgid "pagine web lette"
 msgstr "web pages read"
@@ -5813,6 +5833,10 @@ msgstr "Before offering connectors, check with search_connectors which ones are 
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Principale"
 msgstr "Main"
+
+#: src/renderer/src/components/RightPanel.tsx
+msgid "Prodotto dalla squadra"
+msgstr "Produced by the team"
 
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Profilo"
@@ -7087,6 +7111,10 @@ msgstr "Subagent"
 #: src/shared/ui-messages.ts
 msgid "rpc.subagentNotFound"
 msgstr "Subagent not found"
+
+#: src/renderer/src/components/RightPanel.tsx
+msgid "sottoagenti"
+msgstr "subagents"
 
 #. placeholder {0}: fmtBytes(free)
 #: src/renderer/src/components/settings/DiskSpaceSection.tsx
