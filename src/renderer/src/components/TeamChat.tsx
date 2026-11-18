@@ -21,6 +21,8 @@ import { groupSystemText } from './Chat'
 import { autonomyShortLabel } from './TeamAutonomySheet'
 // Q2 (fase squadra): la barra delle azioni in attesa e la coda (tavole 1 e 2)
 import { pendingWantsLine } from './ApprovalsQueue'
+// Q6 (fase squadra): la pagina si apre a lato anche dentro la chat di squadra
+import { PageView } from './PageView'
 
 /** Il testo col le @menzioni rese come pillole nel colore del bot menzionato. */
 function MentionedText({ text, members, agents, effectiveMain }: {
@@ -284,6 +286,10 @@ export function TeamChat() {
 
   return (
     <main className="relative flex min-w-0 flex-1 flex-col">
+      {/* Q6 (fase squadra): PageView copre la timeline quando una pagina è
+          aperta (dalla Libreria, dalle card della timeline e da «Prodotto
+          dalla squadra») — lo stesso componente della chat uno-a-uno */}
+      <PageView />
       {/* fase 16b correzioni 2 (Q3): la fascia alta di 60 px come nella chat —
           pillola della squadra (nome + chi risponde, che tronca) sulla riga
           comune y 12–48 e bottone del pannello a destra.
