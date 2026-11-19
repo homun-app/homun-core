@@ -5516,6 +5516,12 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             threadId: opts.agentMessage.threadId,
             autoReply: true,
             ...(opts.squadId !== undefined ? { squadId: opts.squadId } : {}),
+            // C1 (fase squadra-correzioni): il contagio attraversa la risposta
+            // collegata — il valore di `contaminated` A FINE TURNO di chi
+            // risponde (ha letto il web DOPO la domanda), non quello iniziale;
+            // il turno di chi riceve parte contaminato (opts.contaminated) e il
+            // lift F8 torna a scattare sulle sue regole allow
+            ...(contaminated ? { contaminated: true } : {}),
             ...(automatic ? { automatic: true } : {})
           },
           runAt: Date.now(),
