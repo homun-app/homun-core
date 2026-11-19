@@ -3311,6 +3311,20 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           const squadBrowserFixed = squad
             ? squadAlwaysAsks(call.name, input, { browserAsk: risk.kind === 'ask' && risk.ask ? { kind: risk.ask.kind, name: risk.ask.name } : null })
             : false
+          // S2 (fase squadra-sicurezza): nei turni di squadra CONTAMINATI con
+          // box_review l'INSERIMENTO di testo (browser_type, anche senza
+          // submit) e le azioni che inviano un modulo (submit, Invio) NON
+          // vanno al revisore: una pagina ostile può far scrivere dati
+          // dell'utente (presi dal contesto) in un suo modulo e il revisore
+          // non vede la pagina per accorgersene — la card va all'utente.
+          // I CLIC non di pagamento restano al revisore, come oggi (tavola 3:
+          // «un revisore controlla ogni clic»); nei turni non contaminati
+          // nulla cambia
+          const squadContaminatedFormAsk =
+            contaminated &&
+            squad?.autonomy === 'box_review' &&
+            (call.name === 'browser_type' ||
+              (risk.kind === 'ask' && (risk.ask.kind === 'submit' || risk.ask.kind === 'enter')))
           // Q2 (fase squadra): il grant di missione del SITO (8 ore, «Consenti
           // per questa missione» dalla coda) copre quest'azione NON FISSA: si
           // esegue senza chiedere di nuovo. S1: il target porta la SQUADRA
@@ -3325,26 +3339,28 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           // S1: l'insieme fisso si valuta PRIMA del grant — se l'azione è fissa
           // la card va all'utente ANCHE con un grant di missione attivo; il
           // grant salta il blocco solo per le ask NON fisse
-          if (risk.kind === 'ask' && (squadBrowserFixed || !missionSiteGrantActive)) {
+          if (risk.kind === 'ask' && (squadBrowserFixed || squadContaminatedFormAsk || !missionSiteGrantActive)) {
             // auto-review come per le altre ask; nel turno contaminato (dopo
             // una pagina letta lo è SEMPRE) CONTAMINATED_ASK_TOOLS non lascia
             // approvare da sola: la card va all'utente.
             // Fase impostazioni (I4.3): nel modo «Non chiedere» le esclusioni
             // fisse valgono uguale — neverAllow le rispetta
             // Q1 (fase squadra): i PAGAMENTI sono dell'insieme fisso (card,
-            // sempre); con box_review le ALTRE azioni del browser vanno al
+            // sempre); con box_review gli ALTRI CLIC del browser vanno al
             // revisore ANCHE nei turni contaminati — vede il contesto
             // (untrustedTurn/contaminated nell'<azione>) e se dubita la card
-            // va all'utente
-            const squadBoxReview = squad?.autonomy === 'box_review' && !squadBrowserFixed
+            // va all'utente. L'inserimento di testo e l'invio di un modulo
+            // no (S2): la card va all'utente
+            const squadBoxReview = squad?.autonomy === 'box_review' && !squadBrowserFixed && !squadContaminatedFormAsk
             let autoAllowed: { basis: 'rule' | 'request'; ruleMatched?: string; reason?: string } | null = null
             const action: AutoReviewAction = {
               tool: call.name, args: input, neverAuto: false, untrustedTurn,
               ...(contaminated ? { contaminated: true } : {}),
               ownerWords, botBrief
             }
-            if (squadBrowserFixed) {
-              // insieme fisso: nessun revisore, la card va all'utente
+            if (squadBrowserFixed || squadContaminatedFormAsk) {
+              // insieme fisso o (S2) inserimento/invio di un modulo nel
+              // turno contaminato: nessun revisore, la card va all'utente
             } else if (squadBoxReview) {
               const review = await reviewWithConfiguredModel(action, userLang)
               if (review) {
@@ -3410,6 +3426,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
                   // Q1/Q2 (fase squadra): i marcatori per la coda della squadra
                   ...(squad ? { squadId: squad.id } : {}),
                   ...(squadBrowserFixed ? { squadAlwaysAsk: true } : {}),
+                  // S2: la card dell'inserimento/invio nel turno contaminato
+                  // dice il perché (la coda la mostra come «contaminato»)
+                  ...(squadContaminatedFormAsk ? { contaminated: true } : {}),
                   ...(squadBoxReview && !autoAllowed ? { squadReviewerAsk: true } : {}),
                   // Q2: il motivo dell'ask (categoria della coda: pagamento,
                   // dati tuoi, sito interattivo)

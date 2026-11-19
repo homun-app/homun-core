@@ -5012,6 +5012,102 @@ describe('S1 (fase squadra-sicurezza): il grant di missione del sito non scavalc
   })
 })
 
+// ---- S2 (fase squadra-sicurezza): nei turni contaminati il revisore non decide l'inserimento di dati ----
+
+describe('S2 (fase squadra-sicurezza): box_review + turno contaminato — il revisore non decide l\'inserimento di dati', () => {
+  /** crea una squadra (mock in memoria) con l'autonomia data e AGENT membro */
+  const mkSquad = (autonomy: 'ask' | 'box' | 'box_review'): number => {
+    const g = createGroup('Revisore S2', '', AGENT, [])
+    const row = h.db.groupsState.groups.find((x) => x.id === g.id)! as { autonomy?: string }
+    row.autonomy = autonomy
+    return g.id
+  }
+  /** gira un turno NEGANDO via via le card pendenti */
+  const runTurnDenying = async (opts: Record<string, unknown>): Promise<void> => {
+    const p = runTurn(AGENT, 'lavoro', emit, undefined, opts as never)
+    p.catch(() => undefined)
+    const deadline = Date.now() + 30_000
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 40))
+      const appr = h.db.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending')
+      if (appr) resolveApproval(AGENT, String(appr.meta?.approvalId), 'deny')
+      if (!isRunning(AGENT)) break
+    }
+    await p
+  }
+  /** le chiamate al REVISORE (un solo messaggio utente con l'<azione> in blocco dati) */
+  const reviewerCalls = (): number =>
+    h.llm.calls.filter((c) => c.length === 1 && c[0]!.role === 'user' && String(c[0]!.content).includes('<azione>')).length
+
+  beforeEach(() => {
+    browserState.available = true
+    browserState.calls.length = 0
+    browserState.fieldProbe = null
+    browserState.lastUrl = null
+    enableAutoReview()
+    reviewerAllow(AR_RULE)
+  })
+
+  it('browser_type (anche SENZA submit) in un turno contaminato → CARD all\'utente, il revisore NON viene chiamato', async () => {
+    const gid = mkSquad('box_review')
+    // ref presente nello snapshot ma non risolvibile come campo: ask refMissing,
+    // né probe né submit — l'inserimento di testo torna all'utente
+    h.llm.queue = [
+      { toolCalls: [{ id: 'r1', name: 'browser_type', arguments: JSON.stringify({ ref: 'e40', text: 'Fabio Rossi' }) }] },
+      { toolCalls: [{ id: 'r2', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurnDenying({ squadId: gid, contaminated: true })
+    const appr = h.db.entries.find((e) => e.kind === 'approval')!
+    expect(appr.meta?.status).toBe('denied')
+    expect(appr.meta?.contaminated).toBe(true)
+    expect(reviewerCalls()).toBe(0)
+    expect(browserState.calls).toHaveLength(0)
+  })
+
+  it('browser_type con submit:true e press_key Enter (inviano il modulo) in un turno contaminato → CARD, revisore non chiamato', async () => {
+    const gid = mkSquad('box_review')
+    for (const [id, args] of [
+      ['r3', { name: 'browser_type', args: { ref: 'e2', text: 'fabio@example.com', submit: true } }],
+      ['r4', { name: 'browser_press_key', args: { key: 'Enter' } }]
+    ] as const) {
+      h.llm.queue = [
+        { toolCalls: [{ id, name: args.name, arguments: JSON.stringify(args.args) }] },
+        { toolCalls: [{ id: 'r5', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+      ]
+      await runTurnDenying({ squadId: gid, contaminated: true })
+    }
+    const approvals = h.db.entries.filter((e) => e.kind === 'approval')
+    expect(approvals).toHaveLength(2)
+    expect(approvals.every((a) => a.meta?.status === 'denied')).toBe(true)
+    expect(reviewerCalls()).toBe(0)
+    expect(browserState.calls).toHaveLength(0)
+  })
+
+  it('GUARDIA: il clic NON di pagamento in un turno contaminato resta al REVISORE (come oggi con box_review)', async () => {
+    const gid = mkSquad('box_review')
+    h.llm.queue = [
+      { toolCalls: [{ id: 'r6', name: 'browser_click', arguments: JSON.stringify({ ref: 'e8' }) }] },
+      { toolCalls: [{ id: 'r7', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurn(AGENT, 'conferma', emit, undefined, { squadId: gid, contaminated: true } as never)
+    expect(h.db.entries.filter((e) => e.kind === 'approval')).toEqual([])
+    expect(reviewerCalls()).toBe(1)
+    expect(browserState.calls.map((c) => c.tool)).toEqual(['browser_click'])
+  })
+
+  it('GUARDIA: il browser_type in un turno PULITO va al revisore come oggi', async () => {
+    const gid = mkSquad('box_review')
+    h.llm.queue = [
+      { toolCalls: [{ id: 'r8', name: 'browser_type', arguments: JSON.stringify({ ref: 'e40', text: 'Fabio Rossi' }) }] },
+      { toolCalls: [{ id: 'r9', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurn(AGENT, 'scrivi', emit, undefined, { squadId: gid } as never)
+    expect(h.db.entries.filter((e) => e.kind === 'approval')).toEqual([])
+    expect(reviewerCalls()).toBe(1)
+    expect(browserState.calls.map((c) => c.tool)).toEqual(['browser_type'])
+  })
+})
+
 // ---- fase 12 (punto 0): residui della fase 11b nel loop ----
 
 describe('fase 12 0a/0d: probe interno del tipo di campo e card di press_key', () => {
