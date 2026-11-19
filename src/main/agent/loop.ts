@@ -617,6 +617,13 @@ function appendSend(
       ...extra, ...(taskId !== undefined ? { taskId } : {})
     }
   })
+  // A1 (fase centro-autorizzazioni): anche la BOZZA d'invio in attesa entra
+  // nell'indice del centro (id sintetico draft:<entry>: si risolve con i
+  // bottoni della bozza, non con approvals:resolve; la chiusura la vede
+  // l'auto-guarigione dell'indice sullo status dell'entry)
+  if (message.type === 'draft' && extra.status === 'pending') {
+    recordPendingApproval({ id: `draft:${entry.id}`, agentId, tool: 'draft_external', input: {}, entryId: entry.id, createdAt: entry.createdAt })
+  }
   emit({ type: 'entries', agentId, entries: [entry] })
   return entry
 }

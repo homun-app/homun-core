@@ -61,7 +61,7 @@ describe('A1: approvals:pending-all — righe, gruppi e ordinamento', () => {
 
     pendingCard(a1.id, 'ap-museo', { tool: 'fill_credential', squadId: g1.id, squadAlwaysAsk: true, input: { origin: 'https://museo.example' } }, 'approval', 'Compilare il modulo del Museo Egizio con nome ed email.')
     pendingCard(b1.id, 'ap-click', { tool: 'browser_click', squadId: g1.id, browser: { url: 'https://booking.example/verifica' } }, 'approval', 'Cliccare «Verifica disponibilità».')
-    pendingCard(c1.id, 'ap-mail', { tool: 'draft_external', squadId: g2.id, message: { to: 'amministrazione@rossi.example', subject: 'Fattura 214' } }, 'send-message', 'Sollecito di pagamento.')
+    pendingCard(c1.id, 'ap-mail', { tool: 'draft_external', squadId: g2.id, message: { type: 'draft', to: 'amministrazione@rossi.example', subject: 'Fattura 214' } }, 'send-message', 'Sollecito di pagamento.')
     pendingCard(figlio.id, 'ap-login', { tool: 'browser_click' }, 'approval', 'Accedere a LinkedIn.')
 
     const rows = (await api['approvals:pending-all']!([])) as Array<Record<string, unknown>>

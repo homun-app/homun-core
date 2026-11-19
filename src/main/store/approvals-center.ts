@@ -93,7 +93,12 @@ export function pendingApprovalsAll(): ApprovalsCenterRow[] {
     }
     const entry = row.entry_id != null ? entryById(row.entry_id) : null
     const meta = (entry?.meta ?? null) as Record<string, unknown> | null
-    if (!entry || meta?.status !== 'pending' || meta?.approvalId !== row.id) {
+    // le card vere si riconoscono dall'approvalId; le BOZZE (id sintetico
+    // draft:<entry>) dal payload in attesa
+    const isDraftRow = row.id.startsWith('draft:')
+    const entryPending = meta?.status === 'pending' &&
+      (isDraftRow ? (meta?.message as { type?: string } | undefined)?.type === 'draft' : meta?.approvalId === row.id)
+    if (!entry || !entryPending) {
       // l'indice era rimasto indietro (la entry è già decisa o sparita)
       setApprovalRowStatus(row.id, entry ? String(meta?.status ?? 'closed') : 'closed')
       continue
@@ -121,12 +126,17 @@ export function pendingApprovalsAll(): ApprovalsCenterRow[] {
       squad,
       approvalId: row.id,
       entryId: entry.id,
-      tool: String(meta?.tool ?? ''),
+      // le bozze non hanno meta.tool: il nome della chiamata (draft_external)
+      tool: String(meta?.tool ?? (meta?.call as { name?: unknown } | undefined)?.name ?? ''),
+
       phrase: entry.content,
-      category: squadApprovalCategory(entry),
+      // la categoria dalla entry col tool risolto (le bozze: draft_external → invio)
+      category: squadApprovalCategory({ kind: entry.kind, content: entry.content, meta: { ...meta, tool: String(meta?.tool ?? (meta?.call as { name?: unknown } | undefined)?.name ?? '') } }),
       why: squadApprovalWhy(meta),
       when: entry.createdAt || row.created_at,
-      isDraft: entry.kind === 'send-message',
+      // la BOZZA si riconosce dal payload (le card fill/modulo sono anch'esse
+      // kind 'send-message' ma non hanno message.type 'draft')
+      isDraft: ((meta?.message as { type?: string } | null)?.type) === 'draft',
       preview: centerPreviewOf(meta)
     })
   }
