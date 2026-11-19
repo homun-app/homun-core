@@ -1150,6 +1150,8 @@ export interface SandbotApi {
     /** Q2: «Lasciato passare dal revisore», con la concessione revocabile */
     reviewerPassed: Array<{ agentId: string; agentName: string; tool: string; reason: string | null; when: number; grantId: number | null }>
   }>
+  /** A1 (fase centro-autorizzazioni): tutte le richieste pendenti, per il centro */
+  approvalsPendingAll(): Promise<ApprovalsCenterRow[]>
   // fase 12: sottoagenti del padre (card + pannello) e bottone Ferma
   listSubagents(parentId: string): Promise<SubagentInfo[]>
   stopSubagent(id: string): Promise<void>
@@ -1845,6 +1847,40 @@ export interface SquadPendingApprovalInfo {
   why: 'contaminato' | 'revisore' | 'fisso' | null
   when: number
   fromSubagent: boolean
+}
+
+/**
+ * A1 (fase centro-autorizzazioni): una richiesta pendente del centro «Da
+ * approvare» — chi chiede (il padre, se è un sottoagente), la squadra quando
+ * c'è, la categoria e il perché della card di oggi. Il centro è una VISTA:
+ * decidere passa da approvals:resolve come in chat.
+ */
+export interface ApprovalsCenterRow {
+  /** chi ha fatto nascere la richiesta (il FIGLIO se è un sottoagente) */
+  agentId: string
+  agentName: string
+  /** il sottoagente: il bot mostrato è il padre, «tramite un sottoagente» */
+  parentId: string | null
+  parentName: string | null
+  fromSubagent: boolean
+  /** il bot del gruppo: il padre per i sottoagenti, l'agente stesso altrimenti */
+  botId: string
+  botName: string
+  /** la squadra: dal marcatore della card se c'è, altrimenti dalla squadra
+   *  del padre se è unica; altrimenti null (bot singolo) */
+  squad: { id: number; name: string } | null
+  approvalId: string
+  tool: string
+  /** la frase leggibile della card di oggi (il content dell'entry) */
+  phrase: string
+  category: SquadPendingApprovalInfo['category']
+  why: SquadPendingApprovalInfo['why']
+  when: number
+  /** bozza d'invio esterno in attesa (i bottoni sono quelli della bozza) */
+  isDraft: boolean
+  /** l'anteprima GIÀ presente nella card — destinatario e oggetto per gli
+   *  invii, URL e campi per i moduli — solo se c'è nel meta */
+  preview: { to?: string; subject?: string; url?: string; origin?: string } | null
 }
 
 /** Un messaggio di gruppo come lo vede la UI. */

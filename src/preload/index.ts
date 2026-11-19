@@ -60,6 +60,8 @@ const api: SandbotApi = {
   // fase 8: mode 'once' | 'always' | 'turn' (fino a fine turno); fase use-app: anche 'minutes10'
   resolveApproval: (agentId, approvalId, decision, mode) =>
     ipcRenderer.invoke('approvals:resolve', agentId, approvalId, decision, mode),
+  // A1 (fase centro-autorizzazioni): tutte le richieste pendenti, per il centro
+  approvalsPendingAll: () => ipcRenderer.invoke('approvals:pending-all'),
   // fase 8 (§3bis L5): decisione dell'utente sulla regola proposta dal bot
   autoreviewRuleDecision: (agentId, entryId, action) =>
     ipcRenderer.invoke('autoreview:rule-decision', agentId, entryId, action),

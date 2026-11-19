@@ -27,6 +27,8 @@
 import { randomUUID, createHash } from 'node:crypto'
 import { TurnHeldForModel } from './turn-held'
 import { getAgent, listAgents, listRoutines, getEntries, updateAgent, appendEntry, updateEntryContent, updateEntryMeta, updateEntryKindRole, getSetting, holdOutboxEntry, db, getTask, createTask, updateTask, openTasksOf, MAX_OPEN_TASKS, createAgent, subagentRefusal, addGrant, listGrants, recordModelUsage, dataDir, type Grant, type AppendEntry } from '../store/db'
+// A1 (fase centro-autorizzazioni): l'indice delle richieste pendenti del centro
+import { recordPendingApproval, setApprovalRowStatus } from '../store/approvals-center'
 // R2 (fase app — ritocchi): l'esito degli invii automatici si ripulisce come gli errori Composio
 import { redactComposioSecrets, composioActionOfToolName } from '../connectors/composio-actions'
 // fase Composio OAuth (C2/C4/C5/C7): il blocco, la fiducia per app, le bozze estratte
@@ -264,6 +266,8 @@ function verdictReasonText(verdict: import('./permissions').Verdict): string {
 export function setApprovalStatus(agentId: string, entryId: number, status: string, emit: (e: SandbotEvent) => void): void {
   const freshMeta = getEntries(agentId).find((x) => x.id === entryId)?.meta ?? {}
   updateEntryMeta(entryId, { ...freshMeta, status })
+  // A1: l'indice del centro segue lo stato della card
+  if (typeof freshMeta.approvalId === 'string') setApprovalRowStatus(freshMeta.approvalId, status)
   const updated = getEntries(agentId).find((x) => x.id === entryId)
   if (updated) emit({ type: 'entries', agentId, entries: [updated] })
 }
@@ -1252,8 +1256,8 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
   const trackedCalls = new Map<string, { name: string; args: string }>()
   const frameFingerprint = { hash: null as string | null }
   let stepsWarningDone = false
-  const addBase = (e: AppendEntry): import('../../shared/types').TranscriptEntry =>
-    appendEntry(
+  const addBase = (e: AppendEntry): import('../../shared/types').TranscriptEntry => {
+    const entry = appendEntry(
       opts.taskId === undefined && opts.groupTurn === undefined && opts.squadId === undefined
         ? e
         : {
@@ -1263,11 +1267,26 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               ...(opts.taskId !== undefined ? { taskId: opts.taskId } : {}),
               ...(opts.groupTurn !== undefined ? { groupId: opts.groupTurn.groupId } : {}),
               // Q2/Q5 (fase squadra): ogni entry del turno porta la squadra
-              // (i contatori di «Fatto da soli» e «Prodotto dalla squadra»)
+              // (i contatori di «Fatto da soli» e «Prodotto della squadra»)
               ...(opts.squadId !== undefined ? { squadId: opts.squadId } : {})
             }
           }
     )
+    // A1 (fase centro-autorizzazioni): OGNI card pendente che nasce nel turno
+    // (gate, browser, computer, scambio file, delega, bozze — tutte passano da
+    // qui) scrive la riga dell'indice del centro: la lettura del centro costa
+    // come il numero delle richieste, non come la lunghezza delle chat
+    if ((e.kind === 'approval' || e.kind === 'send-message') &&
+        e.meta?.status === 'pending' && typeof e.meta?.approvalId === 'string') {
+      recordPendingApproval({
+        id: e.meta.approvalId, agentId: e.agentId,
+        tool: String(e.meta.tool ?? ''),
+        input: (e.meta.input ?? {}) as Record<string, unknown>,
+        entryId: entry.id, createdAt: entry.createdAt
+      })
+    }
+    return entry
+  }
   const add = (e: AppendEntry): import('../../shared/types').TranscriptEntry => {
     const entry = addBase(e)
     // SV7: la serie si aggiorna a OGNI tool-result (dopo che il risultato c'è)

@@ -239,6 +239,19 @@ vi.mock('../../store/db', () => ({
     }
 }))
 
+// A1 (fase centro-autorizzazioni): l'indice delle richieste pendenti del
+// centro, in memoria (il loop lo scrive alla nascita/chiusura delle card)
+const approvalsIndex = vi.hoisted(() => ({ rows: [] as Array<{ id: string; agentId: string; entryId: number; status: string }> }))
+vi.mock('../../store/approvals-center', () => ({
+  recordPendingApproval: (e: { id: string; agentId: string; entryId: number }) => {
+    approvalsIndex.rows.push({ id: e.id, agentId: e.agentId, entryId: e.entryId, status: 'pending' })
+  },
+  setApprovalRowStatus: (id: string, status: string) => {
+    const r = approvalsIndex.rows.find((x) => x.id === id)
+    if (r) r.status = status
+  }
+}))
+
 vi.mock('../../store/jobs', () => ({
   MAX_USER_MESSAGE_QUEUE: 10,
   enqueueJob: (_db: unknown, input: { agentId: string; kind: string; payload: Record<string, unknown>; runAt: number; now: number }) => {
@@ -850,6 +863,7 @@ function gated(text: string) {
 }
 
 beforeEach(() => {
+  approvalsIndex.rows.length = 0
   h.db.entries.length = 0
   h.db.agents.clear()
   h.db.settings.clear()
@@ -8552,5 +8566,26 @@ describe('SV8: show_images mostra le foto catturate nel computer del bot', () =>
     const res = h.db.entries.find((e) => e.kind === 'tool-result' && e.meta?.callId === 'si2')
     expect(String(res?.content)).toMatch(/No image shown: .*outside the bot's computer/s)
     expect(h.db.entries.some((e) => e.kind === 'send-message' && (e.meta?.message as { type?: string } | undefined)?.type === 'images')).toBe(false)
+  })
+})
+
+// A1 (fase centro-autorizzazioni): il loop scrive l'indice del centro
+describe('A1: l\'indice del centro nasce e si chiude con la card', () => {
+  it('la card pendente scrive la riga; la decisione la chiude', async () => {
+    h.db.settings.set('permissions', { default: 'needs_approval', rules: [] })
+    h.llm.queue = [
+      { toolCalls: [{ id: 'c1', name: 'run-command', arguments: JSON.stringify({ command: 'curl https://esempio' }) }] },
+      { text: 'fatto' }
+    ]
+    const turn = runTurn(AGENT, 'chiama', emit)
+    await vi.waitFor(() => {
+      expect(h.db.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending')).toBeTruthy()
+    })
+    const appr = h.db.entries.find((e) => e.kind === 'approval')!
+    expect(approvalsIndex.rows).toHaveLength(1)
+    expect(approvalsIndex.rows[0]).toMatchObject({ id: String(appr.meta?.approvalId), agentId: AGENT, entryId: appr.id, status: 'pending' })
+    resolveApproval(AGENT, String(appr.meta?.approvalId), 'deny', 'once')
+    await turn
+    expect(approvalsIndex.rows[0]!.status).toBe('denied')
   })
 })

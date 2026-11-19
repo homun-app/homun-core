@@ -1153,6 +1153,14 @@ export function buildApiMethods(
       return groups.squadOverviewForGroup(Number(groupId))
     },
 
+    // A1 (fase centro-autorizzazioni): tutte le richieste pendenti che
+    // spettano all'utente, dalLA tabella approvals (indice su status) unita
+    // alle entry delle card — il costo è del numero delle richieste
+    'approvals:pending-all': async () => {
+      const center = await import('../main/store/approvals-center')
+      return center.pendingApprovalsAll()
+    },
+
     // Q4 (fase squadra): le card di approvazione nate nei turni della squadra,
     // da fondere nella timeline nel punto in cui sono nate
     'groups:approval-cards': async ([groupId]) => {

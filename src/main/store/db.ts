@@ -226,6 +226,14 @@ function open(): DatabaseSync {
   // fase 16b (S1.2): il flag del riepilogo di chiusura del coordinatore
   const groupMsgCols = db.prepare("SELECT name FROM pragma_table_info('group_messages')").all() as Array<{ name: string }>
   if (!groupMsgCols.some((c) => c.name === 'summary')) db.exec('ALTER TABLE group_messages ADD COLUMN summary INTEGER DEFAULT 0')
+  // A1 (fase centro-autorizzazioni): la tabella approvals torna a vivere come
+  // INDICE delle richieste pendenti del centro — la riga punta alla ENTRY
+  // della card (entry_id, chiave primaria: il costo del join è una lettura
+  // per richiesta, non una passata sui transcript) e l'indice su status fa
+  // sì che il costo dipenda dal numero delle richieste, non dalle chat
+  const approvalCols = db.prepare("SELECT name FROM pragma_table_info('approvals')").all() as Array<{ name: string }>
+  if (!approvalCols.some((c) => c.name === 'entry_id')) db.exec('ALTER TABLE approvals ADD COLUMN entry_id INTEGER')
+  db.exec('CREATE INDEX IF NOT EXISTS idx_approvals_status ON approvals(status)')
   // Q1 (fase squadra): l'autonomia della squadra — le squadre esistenti (e i
   // valori NULL dei DB appena migrati) valgono 'box', il default della spec
   migrateGroupAutonomy(db)
