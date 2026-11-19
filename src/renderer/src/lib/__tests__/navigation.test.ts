@@ -14,7 +14,9 @@ beforeAll(async () => {
     sandbot: {
       getEntries: ok, listSubagents: ok, updateAgent: ok, presenceViewing: ok,
       outboxOpened: ok, groupMessages: ok, groupApprovalCards: ok, groupOverview: ok,
-      groupPendingApprovals: pending, listGroups: ok, listAgents: ok, resolveApproval: ok
+      groupPendingApprovals: pending, listGroups: ok, listAgents: ok, resolveApproval: ok,
+      // A2 (fase centro-autorizzazioni): la passata legge anche le pendenti globali
+      approvalsPendingAll: ok
     }
   }
 })

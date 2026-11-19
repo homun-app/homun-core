@@ -254,6 +254,11 @@ msgstr "{0} min"
 msgid "{0} min fa"
 msgstr "{0} min fa"
 
+#. placeholder {0}: rows.length
+#: src/renderer/src/components/ApprovalsCenter.tsx
+msgid "{0} richieste da {bots} bot · solo tu puoi deciderle · ogni richiesta si decide anche dove è nata"
+msgstr "{0} richieste da {bots} bot · solo tu puoi deciderle · ogni richiesta si decide anche dove è nata"
+
 #. placeholder {0}: team.coordinator.name
 #: src/renderer/src/components/Sidebar.tsx
 msgid "{0} scrive…"
@@ -459,6 +464,10 @@ msgid "{name}? Mi piace. E che faccia ho?"
 msgstr "{name}? Mi piace. E che faccia ho?"
 
 #: src/renderer/src/components/Sidebar.tsx
+msgid "{pending} azioni da approvare"
+msgstr "{pending} azioni da approvare"
+
+#: src/renderer/src/components/Sidebar.tsx
 msgid "{pendingCount} azioni da approvare"
 msgstr "{pendingCount} azioni da approvare"
 
@@ -641,6 +650,8 @@ msgid "7 giorni"
 msgstr "7 giorni"
 
 #. placeholder {0}: draft.to || t`(nessun destinatario)`
+#. placeholder {0}: r.preview.to
+#: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/DraftCard.tsx
 msgid "A: {0}"
 msgstr "A: {0}"
@@ -901,7 +912,9 @@ msgstr "Altri provider"
 msgid "Altri…"
 msgstr "Altri…"
 
+#: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/ApprovalsQueue.tsx
+#: src/renderer/src/lib/approvals-center.ts
 msgid "altro"
 msgstr "altro"
 
@@ -921,6 +934,7 @@ msgstr "analizzo…"
 msgid "ancora nessun passo"
 msgstr "ancora nessun passo"
 
+#: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/BotDialogs.tsx
 #: src/renderer/src/components/BoxSetupProgress.tsx
@@ -1090,6 +1104,10 @@ msgstr "Apri la finestra dell'app per autorizzare."
 msgid "conn.needsAuthOpenWindow"
 msgstr "Apri la finestra di Homun per autorizzare"
 
+#: src/renderer/src/components/ApprovalsCenter.tsx
+msgid "Apri la squadra"
+msgstr "Apri la squadra"
+
 #: src/renderer/src/components/TakeoverCard.tsx
 msgid "Apri lo schermo"
 msgstr "Apri lo schermo"
@@ -1122,6 +1140,11 @@ msgstr "Argomenti separati per spazio"
 #: src/renderer/src/components/Settings.tsx
 msgid "args JSON, es. {\"query\":\"x\"}"
 msgstr "args JSON, es. {\"query\":\"x\"}"
+
+#. placeholder {0}: timeAgo(r.when, now)
+#: src/renderer/src/components/ApprovalsCenter.tsx
+msgid "aspetta da {0}"
+msgstr "aspetta da {0}"
 
 #: src/renderer/src/components/ActivityPanel.tsx
 #: src/renderer/src/components/RightPanel.tsx
@@ -1645,6 +1668,7 @@ msgstr "Chiude il controllo e torna alla vista"
 msgid "chiudi"
 msgstr "chiudi"
 
+#: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/BotScreen.tsx
 #: src/renderer/src/components/Chat.tsx
@@ -2037,6 +2061,7 @@ msgstr "Consenti"
 msgid "Consenti per 10 minuti a {0}"
 msgstr "Consenti per 10 minuti a {0}"
 
+#: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/ApprovalsQueue.tsx
 msgid "Consenti per questa missione"
 msgstr "Consenti per questa missione"
@@ -2059,6 +2084,7 @@ msgstr "Consenti sempre a {agentName}"
 msgid "Consenti sempre le letture di {0}"
 msgstr "Consenti sempre le letture di {0}"
 
+#: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/ApprovalsQueue.tsx
 #: src/renderer/src/components/TeamChat.tsx
 msgid "Consenti una volta"
@@ -2108,6 +2134,7 @@ msgstr "Contatti"
 msgid "Contatto da salvare nel vault"
 msgstr "Contatto da salvare nel vault"
 
+#: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/ApprovalsQueue.tsx
 msgid "contenuti non fidati nel turno"
 msgstr "contenuti non fidati nel turno"
@@ -2303,9 +2330,15 @@ msgstr "da {accountLabel}"
 msgid "dialog.moveToApplications.stillRunning"
 msgstr "Da Applicazioni sta girando ancora un Homun: un’app in esecuzione non si sostituisce mai. Chiudila e riprova."
 
+#: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/ApprovalsQueue.tsx
+#: src/renderer/src/components/Sidebar.tsx
 msgid "Da approvare"
 msgstr "Da approvare"
+
+#: src/renderer/src/components/Sidebar.tsx
+msgid "Da approvare, {count} richieste"
+msgstr "Da approvare, {count} richieste"
 
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "da autorizzare"
@@ -2438,6 +2471,11 @@ msgstr "Dettagli tecnici"
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "detto dall'utente"
 msgstr "detto dall'utente"
+
+#. placeholder {0}: h.rows[0]!.botName
+#: src/renderer/src/components/ApprovalsCenter.tsx
+msgid "di {0}"
+msgstr "di {0}"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -2918,6 +2956,10 @@ msgstr "File, comandi e letture fanno da soli. Dati tuoi, pagamenti e invii chie
 msgid "File: {0} ({1} byte) — esportalo per vederlo."
 msgstr "File: {0} ({1} byte) — esportalo per vederlo."
 
+#: src/renderer/src/components/ApprovalsCenter.tsx
+msgid "Filtra per tipo"
+msgstr "Filtra per tipo"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "conn.windowClosed"
@@ -3347,9 +3389,14 @@ msgstr "I secret servono ai COMANDI dei bot (<0>{SECRET_TEMPLATE}</0>): il valor
 msgid "I token stanno cifrati sul tuo Mac."
 msgstr "I token stanno cifrati sul tuo Mac."
 
+#: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/ApprovalsQueue.tsx
 msgid "i tuoi dati"
 msgstr "i tuoi dati"
+
+#: src/renderer/src/lib/approvals-center.ts
+msgid "I tuoi dati"
+msgstr "I tuoi dati"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "idField (es. \"messages[].id\")"
@@ -3681,6 +3728,7 @@ msgstr "il revisore ha chiesto la conferma dell’utente"
 msgid "autoreview.blockRule"
 msgstr "il revisore ha citato una regola di fermo"
 
+#: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/ApprovalsQueue.tsx
 msgid "il revisore non è sicuro"
 msgstr "il revisore non è sicuro"
@@ -3760,6 +3808,10 @@ msgstr "Il terminale non risponde."
 msgid "rpc.terminalUnavailable"
 msgstr "Il terminale richiede la modalità docker (Impostazioni → Sandbox): non è disponibile qui."
 
+#: src/renderer/src/components/ApprovalsCenter.tsx
+msgid "Il testo della bozza"
+msgstr "Il testo della bozza"
+
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "Il testo sparisce del tutto e non si torna indietro. Continuare?"
 msgstr "Il testo sparisce del tutto e non si torna indietro. Continuare?"
@@ -3773,6 +3825,7 @@ msgstr "il tool \"{tool}\" non è in sola lettura (readOnlyHint): il trigger vie
 msgid "Il tuo bot"
 msgstr "Il tuo bot"
 
+#: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/ApprovalsQueue.tsx
 msgid "il tuo Mac"
 msgstr "il tuo Mac"
@@ -4042,6 +4095,7 @@ msgstr "Interrompi task"
 msgid "interrotto"
 msgstr "interrotto"
 
+#: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/Chat.tsx
 #: src/renderer/src/components/DraftCard.tsx
 #: src/renderer/src/components/TeamChat.tsx
@@ -4072,6 +4126,14 @@ msgstr "Inviata automaticamente dalla regola: {0}"
 msgid "Inviata automaticamente: {0}"
 msgstr "Inviata automaticamente: {0}"
 
+#: src/renderer/src/lib/approvals-center.ts
+msgid "invii"
+msgstr "invii"
+
+#: src/renderer/src/lib/approvals-center.ts
+msgid "Invii"
+msgstr "Invii"
+
 #: src/renderer/src/components/DraftCard.tsx
 msgid "invio esterno"
 msgstr "invio esterno"
@@ -4081,6 +4143,7 @@ msgstr "invio esterno"
 msgid "rpc.draftSendError"
 msgstr "Invio non riuscito: {error}"
 
+#: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/ApprovalsQueue.tsx
 msgid "invio verso fuori"
 msgstr "invio verso fuori"
@@ -4512,6 +4575,10 @@ msgstr "locale"
 msgid "log"
 msgstr "log"
 
+#: src/renderer/src/lib/approvals-center.ts
+msgid "login"
+msgstr "login"
+
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "Login"
 msgstr "Login"
@@ -4747,6 +4814,7 @@ msgstr "Modello:"
 msgid "modifica"
 msgstr "modifica"
 
+#: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/DraftCard.tsx
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "Modifica"
@@ -5024,6 +5092,11 @@ msgstr "Nessuna memoria eliminata: quelle che elimini restano qui finché non le
 msgid "Nessuna memoria: chiedi al bot di ricordare una preferenza."
 msgstr "Nessuna memoria: chiedi al bot di ricordare una preferenza."
 
+#: src/renderer/src/components/ApprovalsCenter.tsx
+msgid "Nessuna richiesta di dati tuoi, pagamenti o invii passa senza di te."
+msgstr "Nessuna richiesta di dati tuoi, pagamenti o invii passa senza di te."
+
+#: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/ApprovalsQueue.tsx
 msgid "Nessuna richiesta in attesa."
 msgstr "Nessuna richiesta in attesa."
@@ -5397,6 +5470,8 @@ msgid "Offline"
 msgstr "Offline"
 
 #. placeholder {0}: draft.subject
+#. placeholder {0}: r.preview.subject
+#: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/DraftCard.tsx
 msgid "Oggetto: {0}"
 msgstr "Oggetto: {0}"
@@ -5510,10 +5585,15 @@ msgstr "Origini https://… (separate da virgola)"
 msgid "owner/repo di GitHub oppure URL git https"
 msgstr "owner/repo di GitHub oppure URL git https"
 
+#: src/renderer/src/lib/approvals-center.ts
+msgid "pagamenti"
+msgstr "pagamenti"
+
 #: src/renderer/src/components/TeamAutonomySheet.tsx
 msgid "pagamenti e acquisti"
 msgstr "pagamenti e acquisti"
 
+#: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/ApprovalsQueue.tsx
 msgid "pagamento"
 msgstr "pagamento"
@@ -6153,6 +6233,10 @@ msgstr "Ragionamento"
 msgid "Ragionamento: Predefinito"
 msgstr "Ragionamento: Predefinito"
 
+#: src/renderer/src/components/ApprovalsCenter.tsx
+msgid "Registro di oggi"
+msgstr "Registro di oggi"
+
 #: src/renderer/src/components/ServerSheet.tsx
 msgid "registro MCP"
 msgstr "registro MCP"
@@ -6299,6 +6383,7 @@ msgid "Rifai da capo"
 msgstr "Rifai da capo"
 
 #: src/renderer/src/components/ApprovalCard.tsx
+#: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/ApprovalsQueue.tsx
 #: src/renderer/src/components/LibraryCards.tsx
 #: src/renderer/src/components/TeamChat.tsx
@@ -6309,6 +6394,10 @@ msgstr "Rifiuta"
 #: src/renderer/src/components/LibraryCards.tsx
 msgid "Rifiutato"
 msgstr "Rifiutato"
+
+#: src/renderer/src/components/ApprovalsCenter.tsx
+msgid "Rimanda"
+msgstr "Rimanda"
 
 #: src/renderer/src/components/settings/DiskSpaceSection.tsx
 msgid "Rimuovere il modello della memoria ({size})? La memoria torna alla ricerca per testo."
@@ -6496,6 +6585,7 @@ msgstr "sabato"
 msgid "Salta per ora"
 msgstr "Salta per ora"
 
+#: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/BotDialogs.tsx
 #: src/renderer/src/components/DraftCard.tsx
@@ -6792,6 +6882,7 @@ msgstr "Segreto TOTP (opzionale)"
 msgid "Seleziona un file per vederne il contenuto."
 msgstr "Seleziona un file per vederne il contenuto."
 
+#: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/ApprovalsQueue.tsx
 #: src/renderer/src/components/TeamChat.tsx
 msgid "sempre a te"
@@ -7000,6 +7091,15 @@ msgstr "Si salvano cifrate sul tuo Mac quando premi Collega."
 msgid "Sistema"
 msgstr "Sistema"
 
+#: src/renderer/src/lib/approvals-center.ts
+msgid "Siti"
+msgstr "Siti"
+
+#: src/renderer/src/lib/approvals-center.ts
+msgid "siti interattivi"
+msgstr "siti interattivi"
+
+#: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/ApprovalsQueue.tsx
 msgid "sito nuovo, interattivo"
 msgstr "sito nuovo, interattivo"
@@ -7116,6 +7216,10 @@ msgstr "Sottoagente non trovato"
 msgid "sottoagenti"
 msgstr "sottoagenti"
 
+#: src/renderer/src/components/ApprovalsCenter.tsx
+msgid "Sparisce da qui per un'ora; resta in attesa nel bot"
+msgstr "Sparisce da qui per un'ora; resta in attesa nel bot"
+
 #. placeholder {0}: fmtBytes(free)
 #: src/renderer/src/components/settings/DiskSpaceSection.tsx
 msgid "Spazio libero sul Mac: {0} — prima di costruire o scaricare ne restano sempre 5 GB."
@@ -7166,7 +7270,9 @@ msgstr "Sposta su"
 msgid "dialog.moveToApplications.failedTitle"
 msgstr "Spostamento non riuscito"
 
+#: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/ApprovalsQueue.tsx
+#: src/renderer/src/lib/approvals-center.ts
 msgid "squadra"
 msgstr "squadra"
 
@@ -7429,6 +7535,10 @@ msgstr "tramite Composio"
 msgid "Tramite Composio: login e azioni passano dai suoi server"
 msgstr "Tramite Composio: login e azioni passano dai suoi server"
 
+#: src/renderer/src/components/ApprovalsCenter.tsx
+msgid "tramite un sottoagente"
+msgstr "tramite un sottoagente"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "kick.2"
@@ -7538,6 +7648,11 @@ msgstr "tutte"
 msgid "Tutte"
 msgstr "Tutte"
 
+#. placeholder {0}: rows.length
+#: src/renderer/src/components/ApprovalsCenter.tsx
+msgid "Tutte · {0}"
+msgstr "Tutte · {0}"
+
 #: src/renderer/src/components/ActivityPanel.tsx
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Tutti"
@@ -7618,6 +7733,7 @@ msgstr "Un altro server"
 msgid "Un computer tutto suo, dentro il tuo Mac: lavora lì senza toccare i tuoi file, e tu decidi cosa può vedere."
 msgstr "Un computer tutto suo, dentro il tuo Mac: lavora lì senza toccare i tuoi file, e tu decidi cosa può vedere."
 
+#: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/ApprovalsQueue.tsx
 msgid "Un consenso di 8 ore per tutta la squadra, solo per questo"
 msgstr "Un consenso di 8 ore per tutta la squadra, solo per questo"
@@ -7723,6 +7839,10 @@ msgstr "usa un’app…"
 msgid "uscita $/M"
 msgstr "uscita $/M"
 
+#: src/renderer/src/lib/approvals-center.ts
+msgid "uso del Mac"
+msgstr "uso del Mac"
+
 #: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Uso e costi"
@@ -7771,6 +7891,10 @@ msgstr "Variabili d'ambiente"
 #: src/renderer/src/components/ui/ModelSelect.tsx
 msgid "vede (immagini)"
 msgstr "vede (immagini)"
+
+#: src/renderer/src/components/ApprovalsCenter.tsx
+msgid "Vedi"
+msgstr "Vedi"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "venerdì"

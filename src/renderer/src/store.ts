@@ -1,7 +1,9 @@
 // State renderer: agenti, transcript dell'agente attivo, eventi dal main.
 import { useMemo } from 'react'
 import { create } from 'zustand'
-import type { Agent, TranscriptEntry, SandbotEvent, OnboardingStatus, OnboardingStepId, ProviderConfig, ProviderPublic, PermissionsConfig, ConnectorInfo, TaskInfo, GroupInfo, GroupMessageInfo, SubagentInfo, AgentAvatar, TurnEnd, ScreenStatus, BoxRuntime, MainModel, ComposioStatusInfo, ComposioGatewayStatusInfo, ReadingPageRef, BoxSetupState, GroupAutonomy, SquadPendingApprovalInfo } from '../../shared/types'
+import type { Agent, TranscriptEntry, SandbotEvent, OnboardingStatus, OnboardingStepId, ProviderConfig, ProviderPublic, PermissionsConfig, ConnectorInfo, TaskInfo, GroupInfo, GroupMessageInfo, SubagentInfo, AgentAvatar, TurnEnd, ScreenStatus, BoxRuntime, MainModel, ComposioStatusInfo, ComposioGatewayStatusInfo, ReadingPageRef, BoxSetupState, GroupAutonomy, SquadPendingApprovalInfo, ApprovalsCenterRow } from '../../shared/types'
+// A2 (fase centro-autorizzazioni): l'ora dei «Rimanda» del centro
+import { APPROVALS_SNOOZE_MS } from './lib/approvals-center'
 import type { BoxSetupRowId } from '../../shared/box-setup-plan'
 import type { UpdateChannel } from '../../shared/update-channel'
 // fase 16c correzioni (R4): la regola del modello risolto, condivisa col daemon
@@ -193,6 +195,18 @@ interface Store {
   groupReviewerPassed: Array<{ agentId: string; agentName: string; tool: string; reason: string | null; when: number; grantId: number | null }>
   /** Q2 (fase squadra): la coda «Da approvare» copre l'area centrale */
   approvalsQueueOpen: boolean
+  /** A1/A2 (fase centro-autorizzazioni): TUTTE le richieste pendenti — una sola chiamata approvals:pending-all per passata alimenta centro, barra e riquadro */
+  approvalsAll: ApprovalsCenterRow[]
+  /** A2: il centro «Da approvare» copre l'area centrale */
+  approvalsOpen: boolean
+  /** A2/A3/A4: la richiesta su cui aprire il centro (dal riquadro o dalla notifica) */
+  approvalsFocusId: string | null
+  /** A2: i «Rimanda» di un'ora — SOLO vista: la richiesta resta in attesa nel bot e nei conteggi */
+  approvalsSnoozed: Record<string, number>
+  /** A2: il numero di richieste per OGNI bot singolo (badge della barra, quelle senza squadra) */
+  approvalsBotCount: Record<string, number>
+  /** A3: il riquadro in cima alle chat ridotto a una riga (per la sessione) */
+  approvalsBannerCollapsed: boolean
   /** fase 10: messaggi del gruppo aperto */
   groupMessages: GroupMessageInfo[]
   /** fase 12: sottoagenti dell'agente attivo (card in chat + stato live) */
@@ -368,6 +382,12 @@ interface Store {
    */
   refreshSquadData(opts?: { forceBadges?: boolean }): void
   setApprovalsQueueOpen(open: boolean): void
+  /** A2: apre il centro «Da approvare» (eventualmente su UNA richiesta) */
+  setApprovalsOpen(open: boolean, focusId?: string | null): void
+  /** A2: «Rimanda» — nasconde la richiesta dal centro e dal riquadro per un'ora (setting) */
+  approvalsSnooze(approvalId: string): void
+  /** A3: il riquadro delle chat ridotto/riaperto (sessione) */
+  setApprovalsBannerCollapsed(v: boolean): void
   /** Q2: decide dalla coda della squadra con la resolveApproval di oggi */
   resolveGroupApproval(agentId: string, approvalId: string, decision: 'allow' | 'deny', mode: 'once' | 'mission'): void
   /** fase 10: l'utente scrive nel gruppo (@menzioni comprese) */
@@ -498,6 +518,12 @@ export const useStore = create<Store>((set, get) => ({
   groupActivity: [],
   groupReviewerPassed: [],
   approvalsQueueOpen: false,
+  approvalsAll: [],
+  approvalsOpen: false,
+  approvalsFocusId: null,
+  approvalsSnoozed: {},
+  approvalsBotCount: {},
+  approvalsBannerCollapsed: false,
   groupMessages: [],
   subagents: [],
   openSubagentId: null,
@@ -591,6 +617,9 @@ export const useStore = create<Store>((set, get) => ({
     // fase 16b (S3.3): la voce di debug «Mostra i passaggi in chat»
     const debugSteps = await api.settingsGet<boolean>('ui.debugSteps', false).catch(() => false)
     set({ debugSteps })
+    // A2 (fase centro-autorizzazioni): i «Rimanda» del centro (solo vista)
+    const approvalsSnoozed = await api.settingsGet<Record<string, number>>('approvals.snoozed', {}).catch(() => ({}))
+    set({ approvalsSnoozed })
     applyTheme(theme)
     watchSystemTheme(() => applyTheme(get().theme))
     // fase 17a (L2): la lingua del setting (il catalogo l'ha già attivato
@@ -861,7 +890,7 @@ export const useStore = create<Store>((set, get) => ({
     // fase 16b (S5): la squadra aperta lascia il posto alla chat del bot
     // verifica impostazioni (navigazione): scegliere un bot riporta alla sua
     // chat — Attività e Libreria si chiudono (prima restavano sopra la chat)
-    set({ activeId: agentId, entries: [], openSubagentId: null, subEntries: [], typingAgentId: null, openGroupId: null, groupMessages: [], activityOpen: false, openLibraryId: null, openPageInfo: null })
+    set({ activeId: agentId, entries: [], openSubagentId: null, subEntries: [], typingAgentId: null, openGroupId: null, groupMessages: [], activityOpen: false, openLibraryId: null, openPageInfo: null, approvalsOpen: false, approvalsFocusId: null })
     set({ entries: await api.getEntries(agentId) })
     // fase 12: i sottoagenti dell'agente scelto
     api.listSubagents(agentId).then((subagents) => set({ subagents })).catch(() => undefined)
@@ -1021,7 +1050,7 @@ export const useStore = create<Store>((set, get) => ({
   openGroup(id) {
     // verifica impostazioni (navigazione): aprire una squadra riporta alla
     // chat; chiuderla (null) non tocca Attività né Libreria
-    set(id !== null ? { openGroupId: id, groupMessages: [], activityOpen: false, openLibraryId: null, approvalsQueueOpen: false } : { openGroupId: id, groupMessages: [], approvalsQueueOpen: false })
+    set(id !== null ? { openGroupId: id, groupMessages: [], activityOpen: false, openLibraryId: null, approvalsQueueOpen: false, approvalsOpen: false, approvalsFocusId: null } : { openGroupId: id, groupMessages: [], approvalsQueueOpen: false })
     if (id !== null) {
       void api.groupMessages(id).then((groupMessages) => set({ groupMessages })).catch(() => undefined)
       void api.groupApprovalCards(id).then((groupCards) => set({ groupCards })).catch(() => undefined)
@@ -1050,7 +1079,8 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   openLibrary(id) {
-    set({ openLibraryId: id })
+    // A2: aprire la Libreria chiude il centro «Da approvare» (come Attività)
+    set(id !== null ? { openLibraryId: id, approvalsOpen: false, approvalsFocusId: null } : { openLibraryId: id })
   },
 
   // fase 16c (C4): la finestra «Collega app»
@@ -1058,9 +1088,10 @@ export const useStore = create<Store>((set, get) => ({
     set({ appsOpen: v })
   },
 
-  // fase 16c (C5): la vista centrale «Attività»
+  // fase 16c (C5): la vista centrale «Attività» — A2: aprire lei chiude il
+  // centro «Da approvare» e la Libreria (una vista centrale alla volta)
   setActivityOpen(v) {
-    set({ activityOpen: v })
+    set(v ? { activityOpen: true, approvalsOpen: false, approvalsFocusId: null, openLibraryId: null } : { activityOpen: false })
   },
 
   // fase 16c (C3.2): il modello principale cambia → lo ricordano i bot che lo
@@ -1342,6 +1373,22 @@ export const useStore = create<Store>((set, get) => ({
       const gid = get().openGroupId
       void api.listGroups().then((groups) => apply('groups', groups)).catch(() => undefined)
       void api.listAgents().then((agents2) => apply('agents', agents2)).catch(() => undefined)
+      // A1/A2/A5 (fase centro-autorizzazioni): UNA chiamata per passata per
+      // TUTTE le richieste pendenti — alimenta il centro, il riquadro delle
+      // chat e i numeri della barra laterale (squadre e bot singoli)
+      void api.approvalsPendingAll()
+        .then((approvalsAll) => {
+          apply('approvalsAll', approvalsAll)
+          const squadCounts: Record<number, number> = {}
+          const botCounts: Record<string, number> = {}
+          for (const r of approvalsAll) {
+            if (r.squad) squadCounts[r.squad.id] = (squadCounts[r.squad.id] ?? 0) + 1
+            else botCounts[r.botId] = (botCounts[r.botId] ?? 0) + 1
+          }
+          apply('groupPendingCount', squadCounts)
+          apply('approvalsBotCount', botCounts)
+        })
+        .catch(() => undefined)
       if (gid !== null) {
         void api.groupMessages(gid).then((groupMessages) => apply('groupMessages', groupMessages)).catch(() => undefined)
         void api.groupApprovalCards(gid).then((groupCards) => apply('groupCards', groupCards)).catch(() => undefined)
@@ -1356,21 +1403,49 @@ export const useStore = create<Store>((set, get) => ({
           })
           .catch(() => undefined)
       }
-      if (forceBadges || Date.now() - get()._badgeRefreshAt >= 2000) {
-        set({ _badgeRefreshAt: Date.now() })
-        // il numero per la barra: una chiamata per le ALTRE squadre (poche)
-        for (const g of get().groups) {
-          if (g.id === gid) continue
-          void api.groupPendingApprovals(g.id)
-            .then((r) => apply('groupPendingCount', { ...countsOf(), [g.id]: r.pending.length }))
-            .catch(() => undefined)
-        }
-      }
+      // (i badge delle altre squadre derivano da approvals:pending-all —
+      // una sola chiamata per passata, niente giro per squadra)
+      void forceBadges
     }
   },
 
   setApprovalsQueueOpen(open) {
     set({ approvalsQueueOpen: open })
+  },
+
+  // A2 (fase centro-autorizzazioni): il centro «Da approvare» — apre su una
+  // richiesta precisa (dal riquadro in cima alle chat o dalla notifica) o
+  // sull'insieme; copre l'area centrale come Attività e Libreria
+  setApprovalsOpen(open, focusId = null) {
+    set(open ? { approvalsOpen: true, approvalsFocusId: focusId, activityOpen: false, openLibraryId: null, approvalsQueueOpen: false } : { approvalsOpen: false, approvalsFocusId: null })
+    if (open) get().refreshSquadData({ forceBadges: true })
+  },
+
+  // A2: «Rimanda» — solo nella VISTA: la richiesta resta in attesa nel bot e
+  // il conteggio della barra laterale la conta ancora. Stato in un setting.
+  approvalsSnooze(approvalId) {
+    const now = Date.now()
+    const snoozed: Record<string, number> = {}
+    for (const [id, until] of Object.entries(get().approvalsSnoozed)) {
+      if (until > now) snoozed[id] = until
+    }
+    snoozed[approvalId] = now + APPROVALS_SNOOZE_MS
+    set({ approvalsSnoozed: snoozed })
+    void api.settingsSet('approvals.snoozed', snoozed).catch(() => undefined)
+    // all'ora esatta la richiesta torna visibile da sola
+    const ms = APPROVALS_SNOOZE_MS + 5
+    const t = setTimeout(() => {
+      const cur = get().approvalsSnoozed
+      if (cur[approvalId] !== undefined && Date.now() >= cur[approvalId]!) {
+        const next = { ...cur }
+        delete next[approvalId]
+        set({ approvalsSnoozed: next })
+      }
+    }, ms)
+  },
+
+  setApprovalsBannerCollapsed(v) {
+    set({ approvalsBannerCollapsed: v })
   },
 
   resolveGroupApproval(agentId, approvalId, decision, mode) {

@@ -120,6 +120,7 @@ export function pendingApprovalsAll(): ApprovalsCenterRow[] {
       botName,
       squad,
       approvalId: row.id,
+      entryId: entry.id,
       tool: String(meta?.tool ?? ''),
       phrase: entry.content,
       category: squadApprovalCategory(entry),

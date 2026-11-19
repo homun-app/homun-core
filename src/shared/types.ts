@@ -1870,6 +1870,8 @@ export interface ApprovalsCenterRow {
    *  del padre se è unica; altrimenti null (bot singolo) */
   squad: { id: number; name: string } | null
   approvalId: string
+  /** l'entry della card (per le bozze: Invia/Modifica/Rifiuta con l'agente giusto) */
+  entryId: number
   tool: string
   /** la frase leggibile della card di oggi (il content dell'entry) */
   phrase: string

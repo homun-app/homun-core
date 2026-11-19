@@ -16,7 +16,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
-import { Plus, Search, Library as LibraryIcon, LayoutGrid, ChevronRight, Activity as ActivityIcon, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { Plus, Search, Library as LibraryIcon, LayoutGrid, ChevronRight, Activity as ActivityIcon, PanelLeftClose, PanelLeftOpen, ShieldCheck } from 'lucide-react'
 import { useStore, useResolvedModel } from '../store'
 import { buildSidebarModel, collapsedVoices, teamOpenState, type SidebarModel, type SidebarTeam, type SidebarBot, type CollapsedVoice } from '../sidebar-utils'
 // fase 16b correzioni 2 (Q1): il massimo del trascinamento e i limiti della barra
@@ -154,6 +154,37 @@ function TeamCluster({ team, size = 34, narrow = false }: { team: SidebarTeam; s
   )
 }
 
+/**
+ * A2 (fase centro-autorizzazioni): la voce fissa «Da approvare», in alto
+ * sopra «Squadre» (tavola 4). Con 0 richieste la voce resta, senza pallino
+ * e senza numero; il conteggio conta TUTTE le richieste pendenti (anche i
+ * «Rimanda», che restano in attesa nel bot).
+ */
+function ApprovalsRow() {
+  const { i18n } = useLingui()
+  const count = useStore((s) => s.approvalsAll.length)
+  const approvalsOpen = useStore((s) => s.approvalsOpen)
+  const setApprovalsOpen = useStore((s) => s.setApprovalsOpen)
+  return (
+    <button
+      className={`mt-1 flex w-full items-center gap-2.5 rounded-[14px] px-2.5 py-2 text-left text-sm transition ${
+        approvalsOpen ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/60'
+      }`}
+      data-testid="sidebar-approvals"
+      aria-label={count > 0 ? i18n.t(msg`Da approvare, ${count} richieste`) : i18n.t(msg`Da approvare`)}
+      onClick={() => setApprovalsOpen(!approvalsOpen)}
+    >
+      <span className="relative grid size-6 shrink-0 place-items-center">
+        <ShieldCheck className="size-4" />
+        {count > 0 && <span className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-waiting" aria-hidden="true" />}
+      </span>
+      <span className="min-w-0 flex-1 truncate"><Trans>Da approvare</Trans></span>
+      {count > 0 && <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs font-semibold text-waiting">{count}</span>}
+    </button>
+  )
+}
+
+
 /** La riga del bot PRINCIPALE: mascotte 40 px, nome in grassetto, stato. */
 function MainRow({ agent, childWaiting }: { agent: Agent; childWaiting?: boolean }) {
   const { i18n } = useLingui()
@@ -162,6 +193,8 @@ function MainRow({ agent, childWaiting }: { agent: Agent; childWaiting?: boolean
   const activeId = useStore((s) => s.activeId)
   const openGroupId = useStore((s) => s.openGroupId)
   const previews = useStore((s) => s.previews)
+  // A2: il numero delle richieste del bot (le sue, senza squadra)
+  const pending = useStore((s) => s.approvalsBotCount[agent.id] ?? 0)
   if (!info) return null
   const preview = previews[agent.id] || info.statusText
   return (
@@ -178,6 +211,9 @@ function MainRow({ agent, childWaiting }: { agent: Agent; childWaiting?: boolean
           {typeof preview === 'string' ? preview : i18n.t(preview)}
         </span>
       </span>
+      {pending > 0 && (
+        <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs font-semibold text-waiting" aria-label={i18n.t(msg`${pending} azioni da approvare`)}>{pending}</span>
+      )}
       {agent.unread > 0 && <span className="size-2 shrink-0 rounded-full bg-foreground" aria-label={i18n.t(msg`non letto`)} />}
     </button>
   )
@@ -294,6 +330,8 @@ function BotRow({ bot }: { bot: SidebarBot }) {
   const activeId = useStore((s) => s.activeId)
   const openGroupId = useStore((s) => s.openGroupId)
   const previews = useStore((s) => s.previews)
+  // A2: il numero delle richieste del bot (le sue, senza squadra)
+  const pending = useStore((s) => s.approvalsBotCount[bot.agent.id] ?? 0)
   if (!info) return null
   const preview = previews[bot.agent.id] || info.statusText
   return (
@@ -310,6 +348,9 @@ function BotRow({ bot }: { bot: SidebarBot }) {
           {typeof preview === 'string' ? preview : i18n.t(preview)}
         </span>
       </span>
+      {pending > 0 && (
+        <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs font-semibold text-waiting" aria-label={i18n.t(msg`${pending} azioni da approvare`)}>{pending}</span>
+      )}
       {bot.agent.unread > 0 && <span className="size-2 shrink-0 rounded-full bg-foreground" aria-label={i18n.t(msg`non letto`)} />}
     </button>
   )
@@ -329,6 +370,29 @@ function VoiceMascot({ agentId, size }: { agentId: string; size: number }) {
  * fondo. U2 (fase prima-release): la voce che allargava la barra è uscita
  * dal menu — allargare ha il suo bottone fisso accanto ai semafori.
  */
+/** A2: la voce «Da approvare» della barra stretta, col numero delle richieste. */
+function RailApprovals() {
+  const { i18n } = useLingui()
+  const count = useStore((s) => s.approvalsAll.length)
+  const approvalsOpen = useStore((s) => s.approvalsOpen)
+  const setApprovalsOpen = useStore((s) => s.setApprovalsOpen)
+  return (
+    <button
+      className={`relative grid size-9 shrink-0 place-items-center rounded-full transition ${approvalsOpen ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
+      data-testid="rail-approvals"
+      aria-label={count > 0 ? i18n.t(msg`Da approvare, ${count} richieste`) : i18n.t(msg`Da approvare`)}
+      onClick={() => setApprovalsOpen(!approvalsOpen)}
+    >
+      <ShieldCheck className="size-4" />
+      {count > 0 && (
+        <span className="absolute -right-1 -top-1 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-waiting px-1 text-[11px] font-bold text-background">
+          {count}
+        </span>
+      )}
+    </button>
+  )
+}
+
 /** rail: il menu pende dal bottone in fondo della barra STRETTA (trigger ridotto all'iniziale, allineamento a destra). */
 function AccountMenu(props?: { rail?: boolean; triggerClassName?: string }) {
   const { t } = useLingui()
@@ -442,6 +506,9 @@ function CollapsedColumn({
           la fascia di trascinamento finisce dove inizia la prima mascotte */}
       <div className="drag-region h-12 shrink-0" aria-hidden="true" />
       <div className="flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto scroll-thin px-2 pt-2">
+        {/* A2 (fase centro-autorizzazioni): la voce «Da approvare» anche in rotaia */}
+        <RailApprovals />
+        <span className="my-1 h-px w-6 shrink-0 bg-border/60" aria-hidden="true" />
         {voices.map((v) => {
           const newSection = v.kind !== 'main' && !separated
           if (newSection) separated = true
@@ -691,6 +758,7 @@ export function Sidebar({ layout }: { layout: LayoutResult }) {
           {/* pt-1 (Q3): il principale parte a 64 px come il primo messaggio */}
           <nav className="flex-1 space-y-0.5 overflow-y-auto scroll-thin px-2 pb-2 pt-1">
             {model.main && <MainRow agent={model.main} childWaiting={model.mainWaiting} />}
+            <ApprovalsRow />
             {model.teams.length > 0 && <Title><Trans>Squadre</Trans></Title>}
             {model.teams.map((team) => (
               <TeamRows key={team.group.id} team={team} />

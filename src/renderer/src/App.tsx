@@ -7,6 +7,8 @@ import { Chat } from './components/Chat'
 import { TeamChat } from './components/TeamChat'
 // Q2 (fase squadra): la coda «Da approvare» della squadra (tavola 2)
 import { ApprovalsQueue } from './components/ApprovalsQueue'
+// A2 (fase centro-autorizzazioni): il centro «Da approvare» (tavola 4)
+import { ApprovalsCenter } from './components/ApprovalsCenter'
 import { RightPanel } from './components/RightPanel'
 import { Settings } from './components/Settings'
 // OA2 (fase onboarding-a): la guida a passi del primo avvio, a tutta finestra
@@ -193,6 +195,8 @@ export function App() {
   const panelTab = useStore((s) => (s.openGroupId !== null ? ('members' as const) : s.panelTab))
   // Q2 (fase squadra): la coda «Da approvare» copre l'area centrale Solo quando è APERTA
   const approvalsQueueOpen = useStore((s) => s.approvalsQueueOpen)
+  // A2 (fase centro-autorizzazioni): il centro «Da approvare» copre l'area centrale quando è aperto
+  const approvalsOpen = useStore((s) => s.approvalsOpen)
   const layout = layoutFor({ windowWidth, sidebarCollapsedByUser: sidebarCollapsed, sidebarWidthPref: sidebarWidth, panelOpen: rightPanel, panelTab })
   if (!onboardingKnown || guideView === 'loading') return <BootSplash />
   if (guideView === 'guide') return <GuideView />
@@ -211,6 +215,7 @@ export function App() {
         {openGroupId === null ? <Chat layout={layout} /> : <TeamChat />}
         {/* Q2 (fase squadra): la coda copre l'area centrale quando è aperta */}
         {openGroupId !== null && approvalsQueueOpen && <ApprovalsQueue />}
+        <ApprovalsCenter />
         <LibraryPanel />
         <ActivityPanel />
       </div>
