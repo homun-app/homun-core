@@ -60,18 +60,21 @@ function armHappyTimer(set: (partial: Partial<Store>) => void): void {
 /**
  * C3 (fase squadra-correzioni): il refresh coalescente della squadra con
  * trailing a 200 ms SENZA affidarsi ai timer. Una finestra coperta viene
- * strozzata da Chromium — rAF in pausa, setTimeout anche a un colpo al minuto
- * e i task di un MessageChannel non è detto che arrivino — mentre i task degli
- * eventi IPC (che portano la richiesta) girano sempre. Il trailing si giudica
- * con l'orologio a muro DENTRO quei task: ogni evento prova a far scattare la
- * passata matura; canale e timer restano come acceleratori per l'ultimo
- * respiro di una raffica (finestra visiva), ma nessun dato resta appeso a loro.
+ * strozzata da Chromium — rAF in pausa, setTimeout anche a un colpo al
+ * minuto — mentre i task degli eventi IPC (che portano la richiesta) girano
+ * sempre: la passata matura si giudica con l'orologio a muro DENTRO quei
+ * task (la via maestra).
+ * A5 (fase centro-autorizzazioni): l'«acceleratore» col MessageChannel che si
+ * rimandava un messaggio da solo finché non passavano 200 ms è VIA — era un
+ * giro continuo di task che tiene occupata la CPU a ogni raffica (batteria).
+ * Restano: la via maestra + UN solo setTimeout per il trailing a finestra
+ * visibile; una finestra coperta può restare indietro (i timer sono
+ * strozzati), ma appena l'utente la guarda il listener qui sotto rifà la
+ * passata SUBITO (visibilitychange → visible e focus).
  */
-const squadChan = new MessageChannel()
 let squadFirstPendingAt = 0
 let squadPending = false
 let squadForceBadges = false
-let squadLoop = false
 let squadTimer: ReturnType<typeof setTimeout> | null = null
 let squadPass: ((forceBadges: boolean) => void) | null = null
 
@@ -80,20 +83,33 @@ const squadTryRun = (): void => {
   if (!squadPending) return
   if (Date.now() - squadFirstPendingAt < 200) return
   squadPending = false
-  squadLoop = false
   if (squadTimer) { clearTimeout(squadTimer); squadTimer = null }
   const force = squadForceBadges
   squadForceBadges = false
   squadPass?.(force)
 }
 
-squadChan.port1.onmessage = (): void => {
-  if (!squadPending || Date.now() - squadFirstPendingAt >= 200) {
-    squadLoop = false
-    squadTryRun()
-    return
+/**
+ * A5: la pagina è tornata visibile (o la finestra a fuoco) — la passata
+ * parte ADESSO, una sola, anche se la finestra di debouncing non era matura:
+ * una finestra coperta può essere rimasta indietro, ma chi la guarda deve
+ * vedere i dati di adesso.
+ */
+export function squadWindowBecameVisible(): void {
+  squadPending = false
+  squadForceBadges = false
+  if (squadTimer) { clearTimeout(squadTimer); squadTimer = null }
+  squadPass?.(false)
+}
+
+// il listener vive una volta per finestra (nel renderer; nei test di node non
+// c'è document e non si registra nulla)
+if (typeof document !== 'undefined') {
+  const onVisible = (): void => {
+    if (document.visibilityState === 'visible') squadWindowBecameVisible()
   }
-  squadChan.port2.postMessage(0)
+  document.addEventListener('visibilitychange', onVisible)
+  window.addEventListener('focus', onVisible)
 }
 
 /** L'ultimo fine turno di un transcript, col momento dell'ultimo send-message visibile. */
@@ -1347,18 +1363,14 @@ export const useStore = create<Store>((set, get) => ({
     // l'azione dell'utente (aprire la squadra, decidere dalla coda) non aspetta
     if (opts.forceBadges) {
       squadPending = false
-      squadLoop = false
       if (squadTimer) { clearTimeout(squadTimer); squadTimer = null }
       const force = squadForceBadges
       squadForceBadges = false
       squadPass?.(force)
       return
     }
-    // acceleratori (finestra visibile): canale e timer provano il trailing
-    if (!squadLoop) {
-      squadLoop = true
-      squadChan.port2.postMessage(0)
-    }
+    // A5: UN solo setTimeout per il trailing a finestra visibile (niente più
+    // canale che si rimanda messaggi in un giro continuo di task)
     if (!squadTimer) squadTimer = setTimeout(squadTryRun, 250)
     // la via maestra: se la passata è GIÀ matura, parte ADESSO nel task
     // dell'evento — i task IPC non vengono strozzati dalla finestra coperta

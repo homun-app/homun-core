@@ -4,7 +4,7 @@
 // quando il dato tornato è identico (React non ri-renderizza la timeline a
 // vuoto). L'evento che porta un dato NUOVO aggiorna lo store una volta sola.
 import './render-helper-install'
-import { describe, expect, it, beforeEach } from 'vitest'
+import { describe, expect, it, beforeEach, vi, afterEach } from 'vitest'
 import { callsOf, stubApiMethod } from './render-helper-install'
 import type { Agent, GroupInfo, GroupMessageInfo, SandbotEvent } from '../../../shared/types'
 
@@ -105,5 +105,51 @@ describe('C3: il refresh della squadra coalesce gli eventi', () => {
     } finally {
       unsub()
     }
+  })
+})
+
+// A5 (fase centro-autorizzazioni): la correzione dell'acceleratore di C3 —
+// il MessageChannel che si rimandava un messaggio da solo finché non
+// passavano 200 ms era un giro continuo di task che tiene occupata la CPU a
+// ogni raffica (batteria). Via: UN solo setTimeout per il trailing a
+// finestra visibile; refresh immediato su visibilitychange → visible (e su
+// focus). Una finestra coperta può restare indietro (i timer sono
+// strozzati), ma appena l'utente la guarda è aggiornata subito.
+describe('A5: niente canale che si rimanda messaggi; visibile → UNA passata', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('una raffica NON manda NESSUN messaggio su un MessageChannel (il canale non c’è più)', async () => {
+    const { useStore } = await import('../store')
+    const portPost = vi.spyOn(MessagePort.prototype, 'postMessage')
+    useStore.getState().openGroup(7)
+    await sleep(500)
+    const onEvent = callsOf('onEvent')[0]!.args[0] as (e: SandbotEvent) => void
+    portPost.mockClear()
+    for (let i = 0; i < 25; i++) onEvent({ type: 'groups' })
+    for (let i = 0; i < 25; i++) onEvent({ type: 'agents' })
+    await sleep(700)
+    expect(portPost).not.toHaveBeenCalled()
+    // e la passata è arrivata comunque (via maestra + UN setTimeout)
+    expect(callsOf('listGroups').length).toBeGreaterThan(0)
+  })
+
+  it('dopo visibilitychange → visible parte UNA passata immediata', async () => {
+    const { useStore, squadWindowBecameVisible } = await import('../store')
+    useStore.getState().openGroup(7)
+    await sleep(500)
+    const onEvent = callsOf('onEvent')[0]!.args[0] as (e: SandbotEvent) => void
+    // una raffica apre la finestra di debouncing...
+    for (let i = 0; i < 10; i++) onEvent({ type: 'groups' })
+    await sleep(30)
+    const before = callsOf('listGroups').length
+    // ...e la pagina torna visibile SUBITO, prima dei 200 ms
+    squadWindowBecameVisible()
+    await sleep(80)
+    expect(callsOf('listGroups').length - before).toBe(1)
+    // e NESSUN'altra passata dopo (il trailing si è esaurito lì)
+    await sleep(600)
+    expect(callsOf('listGroups').length - before).toBe(1)
   })
 })
