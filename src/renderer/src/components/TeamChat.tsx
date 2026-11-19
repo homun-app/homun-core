@@ -21,6 +21,8 @@ import { groupSystemText } from './Chat'
 import { autonomyShortLabel } from './TeamAutonomySheet'
 // Q2 (fase squadra): la barra delle azioni in attesa e la coda (tavole 1 e 2)
 import { pendingWantsLine } from './ApprovalsQueue'
+// A3 (fase centro-autorizzazioni): il riquadro globale ridotto sopra la barra di Q2
+import { ApprovalsBannerElsewhere } from './ApprovalsBanner'
 // Q6 (fase squadra): la pagina si apre a lato anche dentro la chat di squadra
 import { PageView } from './PageView'
 
@@ -331,6 +333,10 @@ export function TeamChat() {
         </div>
       </div>
 
+      {/* A3 (fase centro-autorizzazioni): sopra resta il riquadro GLOBALE,
+          ridotto («+N altrove»), solo per richieste di altre squadre o bot —
+          la barra della squadra è quella di Q2, qui sotto */}
+      <ApprovalsBannerElsewhere />
       <div ref={scrollRef} className="flex-1 overflow-y-auto scroll-thin px-6 pb-4 pt-16">
         {/* Q2 (fase squadra): la barra in cima — quante azioni aspettano te e
             chi le chiede, con «Rivedi tutte» (tavola 1) */}

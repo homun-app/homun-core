@@ -30,6 +30,8 @@ import { GROUP_CHAIN_CLOSED_TEXT, GROUP_RATE_LIMIT_TEXT, GROUP_HOURLY_CAP_TEXT, 
 import { agentMessageDisplay } from '../../../shared/agent-message'
 import type { TranscriptEntry, SendMessageMeta, SendMessagePayload, ThinkingSetting } from '../../../shared/types'
 import { ApprovalCard } from './ApprovalCard'
+// A3 (fase centro-autorizzazioni): il riquadro delle richieste in cima alla chat
+import { ApprovalsBanner } from './ApprovalsBanner'
 import { WidgetCard } from './WidgetCard'
 import { AgentSendRow } from './AgentSendRow'
 import { RoutineCreatedRow } from './RoutineCreatedRow'
@@ -576,6 +578,9 @@ export function Chat({ layout }: { layout?: LayoutResult }) {
           scorrimento al ritorno); la pagina aperta gli passa SOPRA, il
           compositore resta sospeso in basso */}
       <div className="relative flex min-h-0 flex-1 flex-col">
+        {/* A3 (fase centro-autorizzazioni): il riquadro delle richieste, FISSO
+            sopra i messaggi (tavola 5) — fuori dal contenitore che scorre */}
+        <ApprovalsBanner />
         <div ref={scrollRef} className="flex-1 overflow-y-auto overflow-x-hidden scroll-thin px-6 pb-4 pt-16">
           {entries.length === 0 && (
             <p className="mt-16 text-center text-sm text-muted-foreground">

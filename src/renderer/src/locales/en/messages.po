@@ -255,6 +255,11 @@ msgid "{0} min fa"
 msgstr "{0} min ago"
 
 #. placeholder {0}: rows.length
+#: src/renderer/src/components/ApprovalsBanner.tsx
+msgid "{0} richieste aspettano te"
+msgstr "{0} requests are waiting for you"
+
+#. placeholder {0}: rows.length
 #: src/renderer/src/components/ApprovalsCenter.tsx
 msgid "{0} richieste da {bots} bot · solo tu puoi deciderle · ogni richiesta si decide anche dove è nata"
 msgstr "{0} requests from {bots} bots · only you can decide them · each request is also decided where it was born"
@@ -926,6 +931,10 @@ msgstr "More ▾"
 msgid "Altro…"
 msgstr "Other…"
 
+#: src/renderer/src/components/ApprovalsBanner.tsx
+msgid "altrove"
+msgstr "elsewhere"
+
 #: src/renderer/src/components/Settings.tsx
 msgid "analizzo…"
 msgstr "analyzing…"
@@ -1045,6 +1054,10 @@ msgstr "open"
 #: src/renderer/src/components/TaskCard.tsx
 msgid "Apri"
 msgstr "Open"
+
+#: src/renderer/src/components/ApprovalsBanner.tsx
+msgid "Apri «Da approvare»"
+msgstr "Open “To approve”"
 
 #: src/renderer/src/components/TeamChat.tsx
 msgid "apri a lato"
@@ -2422,6 +2435,10 @@ msgstr "dashboard.composio.dev"
 msgid "Decide da solo le richieste semplici quando le Approvazioni sono su Automatico."
 msgstr "It handles the simple requests on its own when Approvals is set to Automatic."
 
+#: src/renderer/src/components/ApprovalsBanner.tsx
+msgid "Decidi"
+msgstr "Decide"
+
 #: src/renderer/src/components/TeamAutonomySheet.tsx
 msgid "Decidono regole fisse e, se scelto, un revisore che vede solo la tua richiesta e l'azione. Il coordinatore non approva al posto tuo: legge le pagine del web, e una pagina ostile potrebbe convincerlo."
 msgstr "Fixed rules decide and, if chosen, a reviewer that sees only your request and the action. The coordinator never approves on your behalf: it reads web pages, and a hostile page could convince it."
@@ -2630,6 +2647,11 @@ msgstr "Download paused · {0}%"
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "Download non riuscito: {0}"
 msgstr "Download failed: {0}"
+
+#. placeholder {0}: rest.length
+#: src/renderer/src/components/ApprovalsBanner.tsx
+msgid "e altre {0}: {summary}"
+msgstr "and {0} more: {summary}"
 
 #: src/renderer/src/components/GuideView.tsx
 msgid "È il tuo punto di contatto in Homun: ti risponde, lavora per te e coordina gli altri bot. Puoi cambiarlo quando vuoi."
@@ -6345,6 +6367,10 @@ msgstr "Get pre-release versions"
 msgid "oauth.errPage"
 msgstr "Invalid request (wrong state): try the connection again from Homun."
 
+#: src/renderer/src/components/ApprovalsBanner.tsx
+msgid "Richieste che aspettano te"
+msgstr "Requests waiting for you"
+
 #: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/ServerSheet.tsx
 msgid "Ricollega"
@@ -6369,6 +6395,10 @@ msgstr "Reconnect"
 #: src/renderer/src/lib/activity.ts
 msgid "ricorda…"
 msgstr "remembers…"
+
+#: src/renderer/src/components/ApprovalsBanner.tsx
+msgid "Riduci"
+msgstr "Collapse"
 
 #: src/renderer/src/components/TeamChat.tsx
 msgid "riepilogo per te"
@@ -7972,6 +8002,10 @@ msgstr "item not found"
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "voce non trovata"
 msgstr "item not found"
+
+#: src/renderer/src/components/ApprovalsBanner.tsx
+msgid "vuole"
+msgstr "wants to"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
