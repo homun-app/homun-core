@@ -7,11 +7,14 @@ import { describe, expect, it, beforeAll } from 'vitest'
 
 beforeAll(async () => {
   const ok = async (): Promise<unknown> => []
+  // C3: la passata coalescente legge anche gli agenti; le pendenti hanno la
+  // loro forma (pending/activity/reviewerPassed)
+  const pending = async (): Promise<unknown> => ({ pending: [], activity: [], reviewerPassed: [] })
   ;(globalThis as { window?: unknown }).window = {
     sandbot: {
       getEntries: ok, listSubagents: ok, updateAgent: ok, presenceViewing: ok,
       outboxOpened: ok, groupMessages: ok, groupApprovalCards: ok, groupOverview: ok,
-      groupPendingApprovals: ok, listGroups: ok, resolveApproval: ok
+      groupPendingApprovals: pending, listGroups: ok, listAgents: ok, resolveApproval: ok
     }
   }
 })

@@ -55,6 +55,45 @@ function armHappyTimer(set: (partial: Partial<Store>) => void): void {
   }, 1550)
 }
 
+/**
+ * C3 (fase squadra-correzioni): il refresh coalescente della squadra con
+ * trailing a 200 ms SENZA affidarsi ai timer. Una finestra coperta viene
+ * strozzata da Chromium — rAF in pausa, setTimeout anche a un colpo al minuto
+ * e i task di un MessageChannel non è detto che arrivino — mentre i task degli
+ * eventi IPC (che portano la richiesta) girano sempre. Il trailing si giudica
+ * con l'orologio a muro DENTRO quei task: ogni evento prova a far scattare la
+ * passata matura; canale e timer restano come acceleratori per l'ultimo
+ * respiro di una raffica (finestra visiva), ma nessun dato resta appeso a loro.
+ */
+const squadChan = new MessageChannel()
+let squadFirstPendingAt = 0
+let squadPending = false
+let squadForceBadges = false
+let squadLoop = false
+let squadTimer: ReturnType<typeof setTimeout> | null = null
+let squadPass: ((forceBadges: boolean) => void) | null = null
+
+/** La passata scatta SOLO se pendente e matura (200 ms dalla PRIMA richiesta). */
+const squadTryRun = (): void => {
+  if (!squadPending) return
+  if (Date.now() - squadFirstPendingAt < 200) return
+  squadPending = false
+  squadLoop = false
+  if (squadTimer) { clearTimeout(squadTimer); squadTimer = null }
+  const force = squadForceBadges
+  squadForceBadges = false
+  squadPass?.(force)
+}
+
+squadChan.port1.onmessage = (): void => {
+  if (!squadPending || Date.now() - squadFirstPendingAt >= 200) {
+    squadLoop = false
+    squadTryRun()
+    return
+  }
+  squadChan.port2.postMessage(0)
+}
+
 /** L'ultimo fine turno di un transcript, col momento dell'ultimo send-message visibile. */
 function lastTurnEndOf(entries: TranscriptEntry[]): { value: TurnEnd; sendAt: number | null } | null {
   let sendAt: number | null = null
@@ -133,8 +172,10 @@ interface Store {
   groups: GroupInfo[]
   /** fase 10: gruppo aperto nella vista gruppo */
   openGroupId: number | null
-  /** Q2: il timer del debounce di refreshGroupPending (interno) */
-  _pendingRefreshTimer: ReturnType<typeof setTimeout> | null
+  /** C3 (fase squadra-correzioni): l'ultimo giro dei badge delle ALTRE squadre */
+  _badgeRefreshAt: number
+  /** C3: la passata del refresh coalescente (interna — la fa scattare il canale) */
+  _squadRefreshPass(forceBadges: boolean): void
   /** Q2 (fase squadra): le card pendenti della squadra aperta (coda «Da approvare») */
   groupPending: SquadPendingApprovalInfo[]
   /** Q4 (fase squadra): le card di approvazione della timeline (pending e decise) */
@@ -318,8 +359,14 @@ interface Store {
   cancelTask(taskId: number): void
   /** fase 10: apre la vista di un gruppo (o torna alla chat) */
   openGroup(id: number | null): void
-  /** Q2 (fase squadra): ricarica le card pendenti (squadra aperta + contatori barra) */
-  refreshGroupPending(): void
+  /**
+   * C3 (fase squadra-correzioni): l'UNICO refresh della squadra, coalescente
+   * (debounce ~200 ms trailing): lista, messaggi, card, overview, pendenti e
+   * agenti in UNA passata — niente RPC per ogni singolo evento groups/agents/
+   * approval. `forceBadges` scavalca il limite dei 2 s dei badge delle altre
+   * squadre (azioni dell'utente: apertura, decisione dalla coda).
+   */
+  refreshSquadData(opts?: { forceBadges?: boolean }): void
   setApprovalsQueueOpen(open: boolean): void
   /** Q2: decide dalla coda della squadra con la resolveApproval di oggi */
   resolveGroupApproval(agentId: string, approvalId: string, decision: 'allow' | 'deny', mode: 'once' | 'mission'): void
@@ -439,7 +486,7 @@ export const useStore = create<Store>((set, get) => ({
   activity: {},
   groups: [],
   openGroupId: null,
-  _pendingRefreshTimer: null,
+  _badgeRefreshAt: 0,
   groupPending: [],
   groupCards: [],
   /** Q5 (fase squadra): la vista del team del pannello destro */
@@ -602,11 +649,9 @@ export const useStore = create<Store>((set, get) => ({
           break
         }
         case 'agents':
-          // Q5 (fase squadra): gli stati del team cambiano con gli eventi
-          if (s.openGroupId !== null) {
-            api.groupOverview(s.openGroupId).then((groupOverview) => set({ groupOverview })).catch(() => undefined)
-          }
-          void api.listAgents().then((agents2) => set({ agents: agents2 }))
+          // Q5 (fase squadra) · C3: gli stati del team cambiano con gli eventi,
+          // ma il refresh è COALESCENTE (una passata sola, non una per evento)
+          s.refreshSquadData()
           break
         case 'models': {
           // GC6.1 (fase guida-correzioni): il daemon dice che models.main o i
@@ -725,19 +770,16 @@ export const useStore = create<Store>((set, get) => ({
           break
         }
         case 'approval': {
-          // Q4: le card della timeline della squadra seguono le decisioni
-          if (s.openGroupId !== null) {
-            api.groupApprovalCards(s.openGroupId).then((groupCards) => set({ groupCards })).catch(() => undefined)
-            api.groupOverview(s.openGroupId).then((groupOverview) => set({ groupOverview })).catch(() => undefined)
-          }
+          // Q4 · C3: le card della timeline seguono le decisioni, la coda si
+          // aggiorna appena una card nasce o si chiude — tutto nel refresh
+          // coalescente, il merge locale dell'entry resta immediato
           if (e.agentId === s.activeId) {
             const merged = [...s.entries]
             const i = merged.findIndex((x) => x.meta?.approvalId === e.approval.id)
             if (i >= 0) merged[i] = { ...merged[i], meta: { ...merged[i].meta!, status: e.approval.status } }
             set({ entries: merged })
           }
-          // Q2 (fase squadra): una card nuova entra nella coda della squadra
-          s.refreshGroupPending()
+          s.refreshSquadData()
           break
         }
         case 'open-agent': {
@@ -789,15 +831,11 @@ export const useStore = create<Store>((set, get) => ({
           break
         }
         // fase 10: un gruppo o i suoi messaggi sono cambiati (sidebar + vista)
+        // C3: UN refresh coalescente — con 3–4 bot al lavoro gli eventi sono
+        // decine al secondo e una ricarica per evento sostituiva gli array a
+        // ogni giro, ri-renderizzando tutta la timeline
         case 'groups': {
-          api.listGroups().then((groups) => set({ groups })).catch(() => undefined)
-          if (s.openGroupId !== null) {
-            api.groupMessages(s.openGroupId).then((groupMessages) => set({ groupMessages })).catch(() => undefined)
-            api.groupApprovalCards(s.openGroupId).then((groupCards) => set({ groupCards })).catch(() => undefined)
-            api.groupOverview(s.openGroupId).then((groupOverview) => set({ groupOverview })).catch(() => undefined)
-          }
-          // Q2 (fase squadra): la coda si aggiorna appena una card nasce o si chiude
-          s.refreshGroupPending()
+          s.refreshSquadData()
           break
         }
         // fase 16b (S1.2): apri la squadra (notifica del riepilogo del coordinatore)
@@ -988,8 +1026,9 @@ export const useStore = create<Store>((set, get) => ({
       void api.groupMessages(id).then((groupMessages) => set({ groupMessages })).catch(() => undefined)
       void api.groupApprovalCards(id).then((groupCards) => set({ groupCards })).catch(() => undefined)
       void api.groupOverview(id).then((groupOverview) => set({ groupOverview })).catch(() => undefined)
-      // Q2 (fase squadra): la coda della squadra parte col numero giusto
-      get().refreshGroupPending()
+      // Q2 (fase squadra) · C3: la coda della squadra parte col numero giusto
+      // (i badge SUBITO: è un'azione dell'utente)
+      get().refreshSquadData({ forceBadges: true })
     }
   },
 
@@ -1247,25 +1286,87 @@ export const useStore = create<Store>((set, get) => ({
     set({ groups })
   },
 
-  // Q2 (fase squadra): le pendenti della squadra aperta e il conteggio per
-  // OGNI squadra (il badge della barra laterale); debounce leggero
-  refreshGroupPending() {
-    const s = get()
-    if (s._pendingRefreshTimer) clearTimeout(s._pendingRefreshTimer)
-    s._pendingRefreshTimer = setTimeout(() => {
-      const cur = get()
-      if (cur.openGroupId !== null) {
-        api.groupPendingApprovals(cur.openGroupId)
-          .then((r) => set({ groupPending: r.pending, groupActivity: r.activity, groupReviewerPassed: r.reviewerPassed }))
+  // C3 (fase squadra-correzioni): l'UNICO refresh della squadra — coalescente.
+  // Ogni evento groups/agents/approval CHIEDE il refresh; la passata parte
+  // 200 ms dopo l'ULTIMO (trailing) e legge tutto insieme: lista dei gruppi,
+  // agenti, messaggi/card/overview/pendenti della squadra APERTA. Ogni lettura
+  // scrive DA SÉ il suo pezzo, SOLO se è cambiato (confronto leggero per
+  // valore): una lettura lenta o persa non blocca le altre — niente set
+  // accoppiati ad ariafamiglia — e React non ri-renderizza la timeline a vuoto
+  // quando il dato è identico. I badge delle ALTRE squadre (il numero della
+  // barra laterale) al massimo ogni 2 s; quello della squadra aperta deriva
+  // dalle sue pendenti.
+  refreshSquadData(opts: { forceBadges?: boolean } = {}) {
+    // la PRIMA richiesta della raffica apre la finestra, le altre aspettano:
+    // UNA passata per raffica, matura 200 ms dopo la sua prima richiesta
+    if (!squadPending) {
+      squadPending = true
+      squadFirstPendingAt = Date.now()
+    }
+    if (opts.forceBadges) squadForceBadges = true
+    if (!squadPass) squadPass = (f) => { get()._squadRefreshPass(f) }
+    // l'azione dell'utente (aprire la squadra, decidere dalla coda) non aspetta
+    if (opts.forceBadges) {
+      squadPending = false
+      squadLoop = false
+      if (squadTimer) { clearTimeout(squadTimer); squadTimer = null }
+      const force = squadForceBadges
+      squadForceBadges = false
+      squadPass?.(force)
+      return
+    }
+    // acceleratori (finestra visibile): canale e timer provano il trailing
+    if (!squadLoop) {
+      squadLoop = true
+      squadChan.port2.postMessage(0)
+    }
+    if (!squadTimer) squadTimer = setTimeout(squadTryRun, 250)
+    // la via maestra: se la passata è GIÀ matura, parte ADESSO nel task
+    // dell'evento — i task IPC non vengono strozzati dalla finestra coperta
+    squadTryRun()
+  },
+
+  // C3: la passata del refresh coalescente (il canale la fa scattare 200 ms
+  // dopo l'ultima richiesta; il corpo vive qui per leggere get()/set())
+  _squadRefreshPass(forceBadges: boolean) {
+    {
+      const apply = (k: string, v: unknown): void => {
+        const cur = get() as unknown as Record<string, unknown>
+        if (JSON.stringify(cur[k]) === JSON.stringify(v)) return
+        set({ [k]: v } as unknown as Partial<Store>)
+      }
+      const countsOf = (): Record<number, number> => {
+        const c = (get() as unknown as Record<string, unknown>).groupPendingCount
+        return c && typeof c === 'object' ? { ...(c as Record<number, number>) } : {}
+      }
+      const gid = get().openGroupId
+      void api.listGroups().then((groups) => apply('groups', groups)).catch(() => undefined)
+      void api.listAgents().then((agents2) => apply('agents', agents2)).catch(() => undefined)
+      if (gid !== null) {
+        void api.groupMessages(gid).then((groupMessages) => apply('groupMessages', groupMessages)).catch(() => undefined)
+        void api.groupApprovalCards(gid).then((groupCards) => apply('groupCards', groupCards)).catch(() => undefined)
+        void api.groupOverview(gid).then((groupOverview) => apply('groupOverview', groupOverview)).catch(() => undefined)
+        void api.groupPendingApprovals(gid)
+          .then((r) => {
+            apply('groupPending', r.pending)
+            apply('groupActivity', r.activity)
+            apply('groupReviewerPassed', r.reviewerPassed)
+            // il badge della squadra aperta deriva dalle SUE pendenti
+            apply('groupPendingCount', { ...countsOf(), [gid]: r.pending.length })
+          })
           .catch(() => undefined)
       }
-      // il numero per la barra: una chiamata per squadra (sono al massimo poche)
-      for (const g of cur.groups) {
-        api.groupPendingApprovals(g.id)
-          .then((r) => set({ groupPendingCount: { ...get().groupPendingCount, [g.id]: r.pending.length } }))
-          .catch(() => undefined)
+      if (forceBadges || Date.now() - get()._badgeRefreshAt >= 2000) {
+        set({ _badgeRefreshAt: Date.now() })
+        // il numero per la barra: una chiamata per le ALTRE squadre (poche)
+        for (const g of get().groups) {
+          if (g.id === gid) continue
+          void api.groupPendingApprovals(g.id)
+            .then((r) => apply('groupPendingCount', { ...countsOf(), [g.id]: r.pending.length }))
+            .catch(() => undefined)
+        }
       }
-    }, 150)
+    }
   },
 
   setApprovalsQueueOpen(open) {
@@ -1278,7 +1379,8 @@ export const useStore = create<Store>((set, get) => ({
     // la riga esce dalla coda subito
     const s = get()
     set({ groupPending: s.groupPending.filter((r) => !(r.agentId === agentId && r.approvalId === approvalId)) })
-    s.refreshGroupPending()
+    // l'azione dell'utente forza anche i badge (la coda si è svuotata)
+    s.refreshSquadData({ forceBadges: true })
   },
 
   async groupUpdate(groupId, patch) {

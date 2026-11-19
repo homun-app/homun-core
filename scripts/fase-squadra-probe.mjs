@@ -133,6 +133,14 @@ const app = spawn(ELECTRON, ['.', `--remote-debugging-port=${DEBUG_PORT}`, '--la
 app.stdout.on('data', (d) => { appLog += d.toString() })
 app.stderr.on('data', (d) => { appLog += d.toString() })
 const stopApp = () => { try { app?.kill('SIGTERM') } catch { /* già via */ } }
+// C3: i llama-server GIÀ in corsa (per esempio l'Ollama dell'utente) non sono
+// della sonda — il controllo di pulizia conta solo quelli NASCI dopo
+const llamaBaseline = (() => {
+  try {
+    const { execSync } = require('node:child_process')
+    return new Set(execSync('pgrep -x llama-server || true', { encoding: 'utf8' }).trim().split('\n').filter(Boolean))
+  } catch { return new Set() }
+})()
 process.on('SIGINT', () => { stopApp(); process.exit(130) })
 process.on('SIGTERM', () => { stopApp(); process.exit(143) })
 
@@ -241,8 +249,13 @@ const setViewport = async (width, height) => {
   await sleep(700)
 }
 const settle = async () => {
+  // C3: la finestra in primo piano — coperta, Chromium sospende i rAF e il
+  // settle sottile non terminerebbe (falsa lentezza, non dell'app)
+  await page.send('Page.bringToFront').catch(() => undefined)
   await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
-  await pageEval(`await new Promise((resolve) => { let n = 0; const step = () => { if (++n >= 2) resolve(); else requestAnimationFrame(step) }; requestAnimationFrame(step) })`)
+  // C3: 2 frame OPPURE 1,5 s — la finestra coperta sospende i rAF e l'attesa
+  // pura non finirebbe mai (misurerebbe l'occlusione, non l'app)
+  await pageEval(`await Promise.race([new Promise((resolve) => { let n = 0; const step = () => { if (++n >= 2) resolve(); else requestAnimationFrame(step) }; requestAnimationFrame(step) }), new Promise((resolve) => setTimeout(resolve, 1500))])`)
   await sleep(350)
 }
 const shot = async (name) => {
@@ -251,7 +264,7 @@ const shot = async (name) => {
   writeFileSync(join(SHOTS, name), Buffer.from(r.data, 'base64'))
   log('cattura', name)
 }
-const clickTestid = async (testid, timeoutMs = 15_000) => {
+const clickTestid = async (testid, timeoutMs = 5_000) => {
   const deadline = Date.now() + timeoutMs
   for (;;) {
     const ok = await pageEval(`
@@ -267,7 +280,7 @@ const clickTestid = async (testid, timeoutMs = 15_000) => {
   }
 }
 
-const clickText = async (text, { scope = 'document', exact = false, timeoutMs = 15_000 } = {}) => {
+const clickText = async (text, { scope = 'document', exact = false, timeoutMs = 5_000 } = {}) => {
   const deadline = Date.now() + timeoutMs
   for (;;) {
     const ok = await pageEval(`
@@ -285,18 +298,22 @@ const clickText = async (text, { scope = 'document', exact = false, timeoutMs = 
     await sleep(300)
   }
 }
-/** seleziona un bot nella barra laterale (la riga porta anche lo stato: match per prefisso) e aspetta il compositore privato */
+/** seleziona un bot nella barra laterale (la riga porta anche lo stato: match per prefisso) e aspetta il compositore privato — si RIPROVA per 5 s: è un click UI, e la riga può arrivare col refresh coalescente della squadra (C3) */
 const selectBot = async (name) => {
-  const ok = await pageEval(`
-    const rows = [...document.querySelectorAll('aside button')]
-    const row = rows.find((b) => b.textContent.trim().startsWith(${JSON.stringify(name)}))
-    if (!row) return false
-    row.scrollIntoView({ block: 'center' })
-    row.click()
-    return true
-  `)
-  if (!ok) return false
-  return waitDom(`document.querySelector('form textarea') && (document.querySelector('form textarea').placeholder ?? '').includes(${JSON.stringify(name)})`, 15_000)
+  const deadline = Date.now() + 5_000
+  for (;;) {
+    const ok = await pageEval(`
+      const rows = [...document.querySelectorAll('aside button')]
+      const row = rows.find((b) => b.textContent.trim().startsWith(${JSON.stringify(name)}))
+      if (!row) return false
+      row.scrollIntoView({ block: 'center' })
+      row.click()
+      return true
+    `).catch(() => false)
+    if (ok && await waitDom(`document.querySelector('form textarea') && (document.querySelector('form textarea').placeholder ?? '').includes(${JSON.stringify(name)})`, 5_000)) return true
+    if (Date.now() > deadline) return false
+    await sleep(300)
+  }
 }
 
 const sendMessage = async (text) => pageEval(`
@@ -402,7 +419,7 @@ try {
   }
 
   await clickText('Weekend Torino', { exact: false })
-  await waitDom(`document.querySelector('form textarea')`)
+  await waitDom(`document.querySelector('form textarea')`, 5_000)
   await sendMessage('@Treni guida-definitiva: scrivi la guida definitiva come documento in Libreria')
   const docDone = await waitDom(`document.body.textContent.includes('Guida pronta')`, 60_000, 500)
   check('Q4: il riepilogo del coordinatore è nella timeline', docDone)
@@ -453,10 +470,10 @@ try {
   // la barra in cima alla chat di squadra: «N azioni aspettano te» + Rivedi tutte
   await waitQuiet()
   await clickText('Weekend Torino', { exact: false })
-  const barSeen = await waitDom(`document.querySelector('[data-testid="team-pending-bar"]')`, 20_000)
+  const barSeen = await waitDom(`document.querySelector('[data-testid="team-pending-bar"]')`, 5_000)
   check('Q2: la barra in cima dice «N azioni aspettano te»', barSeen && (await pageEval(`return document.querySelector('[data-testid="team-pending-bar"]').textContent`)).includes('azioni aspettano te'))
   const queueOpened = await clickText('Rivedi tutte', { exact: true }) &&
-    await waitDom(`document.querySelector('[data-testid="approvals-queue"]') !== null`, 20_000, 500)
+    await waitDom(`document.querySelector('[data-testid="approvals-queue"]') !== null`, 5_000, 500)
   check('Q2: «Rivedi tutte» apre la coda', queueOpened)
   await shot('2-da-approvare.png')
   // «Consenti per questa missione» NON c'è per i dati tuoi
@@ -473,7 +490,7 @@ try {
   // =========== 4. il pannello del team (Q5) e la schermata Autonomia (Q1) ===========
   await clickText('Torna alla squadra', { exact: true })
   await waitQuiet()
-  await waitDom(`document.querySelector('form textarea')`)
+  await waitDom(`document.querySelector('form textarea')`, 5_000)
   // il pannello del team: il bottone PanelRight da chiuso, ALTRIMENTI la
   // pillola della squadra nella fascia alta lo apre (aria-expanded)
   let panelOk = await clickText('Mostra il pannello dei membri', { exact: false })
@@ -485,7 +502,7 @@ try {
       return true
     `)
   }
-  check('Q5: il pannello del team si apre', panelOk && await waitDom(`document.querySelector('[data-testid="team-overview"]') !== null`, 20_000, 500))
+  check('Q5: il pannello del team si apre', panelOk && await waitDom(`document.querySelector('[data-testid="team-overview"]') !== null`, 5_000, 500))
   await sleep(800)
   const overview = await rpc(`groupOverview(${group.id})`)
   const states = Object.fromEntries(overview.members.map((m) => [m.name, m.state]))
@@ -498,7 +515,7 @@ try {
 
   await waitQuiet()
   // la schermata Autonomia dal riquadro del team
-  check('Q1: il riquadro Autonomia apre la schermata 3', await clickTestid('team-autonomy-open') && await waitDom(`document.querySelector('[data-testid="team-autonomy"]') !== null`, 20_000, 500))
+  check('Q1: il riquadro Autonomia apre la schermata 3', await clickTestid('team-autonomy-open') && await waitDom(`document.querySelector('[data-testid="team-autonomy"]') !== null`, 5_000, 500))
   await sleep(600)
   const autonomyText = (await pageEval(`return document.querySelector('[data-testid="team-autonomy"]')?.textContent ?? ''`)) ?? ''
   check('Q1: le tre voci e le due colonne del disegno', autonomyText.includes('Chiede tutto') && autonomyText.includes('Libera nel computer') && autonomyText.includes('revisore') && autonomyText.includes('Questa colonna non si può svuotare'))
@@ -509,9 +526,9 @@ try {
   // =========== 5. il documento si apre dalla Libreria con la squadra aperta (Q6) ===========
   await waitQuiet()
   await clickText('Libreria', { exact: true })
-  const libSeen = await waitDom(`document.body.textContent.includes('Torino weekend — guida definitiva')`, 40_000, 500)
+  const libSeen = await waitDom(`document.body.textContent.includes('Torino weekend — guida definitiva')`, 5_000, 500)
   check('Q6: la guida è nella Libreria', libSeen)
-  check('Q6: il clic la apre A LATO con la squadra aperta', await clickText('Torino weekend — guida definitiva', { exact: false }) && await waitDom(`document.querySelector('[data-testid="page-view"]') !== null`, 20_000, 500))
+  check('Q6: il clic la apre A LATO con la squadra aperta', await clickText('Torino weekend — guida definitiva', { exact: false }) && await waitDom(`document.querySelector('[data-testid="page-view"]') !== null`, 5_000, 500))
   await shot('4-documento-aperto.png')
   // chiude la pagina e torna alla squadra
   await pageEval(`document.querySelector('[data-testid="page-view"] button')?.click(); return true`)
@@ -566,8 +583,8 @@ try {
   check('pulizia K4: 0 cartelle sandbot-fase-squadra-* rimaste', leftDirs.length === 0, `${leftDirs.length} cartelle: ${leftDirs.join(', ')}`)
   const daemons = findProbeDaemons(PREFIX)
   check('pulizia K4: 0 daemon della sonda', daemons.length === 0, JSON.stringify(daemons))
-  const llamas = (await import('node:child_process').then((c) => c.execSync('pgrep -fl llama-server || true', { encoding: 'utf8' }).trim().split('\n').filter(Boolean)))
-  check('pulizia K4: 0 llama-server', llamas.length === 0, llamas.join('; '))
+  const llamas = (await import('node:child_process').then((c) => c.execSync('pgrep -x llama-server || true', { encoding: 'utf8' }).trim().split('\n').filter(Boolean))).filter((pid) => !llamaBaseline.has(pid))
+  check('pulizia K4: 0 llama-server nati con la corsa', llamas.length === 0, `baseline ${llamaBaseline.size}, nuovi ${llamas.length}`)
   if (failed > 0) log('risposte servite (diagnostica):', JSON.stringify(served))
   await new Promise((r) => providerServer.close(r))
 }

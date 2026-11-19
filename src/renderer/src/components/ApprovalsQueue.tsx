@@ -75,7 +75,7 @@ export function ApprovalsQueue() {
   const groupReviewerPassed = useStore((s) => s.groupReviewerPassed)
   const resolveGroupApproval = useStore((s) => s.resolveGroupApproval)
   const setApprovalsQueueOpen = useStore((s) => s.setApprovalsQueueOpen)
-  const refreshGroupPending = useStore((s) => s.refreshGroupPending)
+  const refreshSquadData = useStore((s) => s.refreshSquadData)
   const group = groups.find((g) => g.id === openGroupId)
   if (openGroupId === null || !group) return null
   const now = Date.now()
@@ -172,7 +172,7 @@ export function ApprovalsQueue() {
                     {r.grantId !== null && (
                       <button
                         className="shrink-0 text-xs text-muted-foreground underline-offset-2 transition hover:text-destructive hover:underline"
-                        onClick={() => { void api.grantRevoke(r.grantId!).then(() => refreshGroupPending()) }}
+                        onClick={() => { void api.grantRevoke(r.grantId!).then(() => refreshSquadData({ forceBadges: true })) }}
                       >
                         <Trans>Annulla la concessione</Trans>
                       </button>

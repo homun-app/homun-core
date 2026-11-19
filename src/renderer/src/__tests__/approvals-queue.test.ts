@@ -44,7 +44,7 @@ function renderQueue(pending: Array<Record<string, unknown>>): ReturnType<typeof
       resolved.push({ agentId, approvalId, decision, mode })
     },
     setApprovalsQueueOpen: () => resolved.push({ close: true }),
-    refreshGroupPending: () => undefined
+    refreshSquadData: () => undefined
   })
   const html = renderHtml(createElement(ApprovalsQueue))
   return parseHtml(html)
