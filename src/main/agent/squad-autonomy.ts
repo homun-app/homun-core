@@ -4,6 +4,10 @@
 // l'insieme FISSO che nessuna autonomia, regola o revisore può togliere:
 // a decidere restano il prodotto e l'utente, MAI un bot (coordinatore compreso).
 import type { BrowserAskInfo } from './browser-guard'
+// C2 (fase squadra-correzioni): le azioni Composio verso fuori (email,
+// messaggi, post — la riga «outbound» della colonna «Chiede sempre a te»)
+import { classifyComposioToolName } from '../connectors/composio-actions'
+import { batchActions, classifyBatchAction, toolBatchOf } from '../connectors/tool-batch'
 
 /** I tre valori di groups.autonomy. */
 export type GroupAutonomy = 'ask' | 'box' | 'box_review'
@@ -136,12 +140,32 @@ export interface SquadAlwaysAsksOpts {
 }
 
 /**
+ * C2 (fase squadra-correzioni): l'azione Composio agisce VERSO FUORI? La
+ * riga «email, messaggi e post verso fuori» della colonna «Chiede sempre a
+ * te»: gli strumenti composio__<toolkit>__<AZIONE> classificati non-read e i
+ * blocchi COMPOSIO_MULTI_EXECUTE_TOOL (riconosciuti per nome originale su
+ * qualunque server MCP) con almeno un'azione non-read. Le letture non cambiano.
+ */
+export function composioActsOutward(tool: string, input: Record<string, unknown> | undefined): boolean {
+  if (tool.startsWith('composio__')) return classifyComposioToolName(tool) !== 'read'
+  if (tool.startsWith('mcp__')) {
+    const shape = toolBatchOf(tool.split('__').slice(2).join('__'))
+    if (!shape) return false
+    const actions = batchActions(shape, input).actions
+    return actions.length > 0 && actions.some((slug) => classifyBatchAction(slug) !== 'read')
+  }
+  return false
+}
+
+/**
  * Q1: quest'azione è dell'insieme FISSO che in un turno di squadra chiede
  * SEMPRE all'utente? Nessuna autonomia, regola, grant o revisore la toglie:
  * la card offre solo «Consenti una volta».
  */
 export function squadAlwaysAsks(tool: string, input: Record<string, unknown> | undefined, opts: SquadAlwaysAsksOpts = {}): boolean {
   if (SQUAD_ALWAYS_ASK_TOOLS.has(tool)) return true
+  // C2: le azioni Composio verso fuori (email, messaggi e post)
+  if (composioActsOutward(tool, input)) return true
   // update_agent sul bot DI UN ALTRO: il proprio si modifica come oggi
   if (tool === 'update_agent') {
     const target = String(input?.agentId ?? '')

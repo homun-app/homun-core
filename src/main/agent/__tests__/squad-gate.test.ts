@@ -166,3 +166,54 @@ describe('Q1: l\'insieme FISSO nel gate — nemmeno le regole e le grant lo tolg
     expect(v.kind).toBe('allow')
   })
 })
+
+describe('C2 (fase squadra-correzioni): le azioni Composio verso fuori nell\'insieme fisso della squadra', () => {
+  const SEND = 'composio__gmail__GMAIL_SEND_EMAIL'
+  const READ = 'composio__gmail__GMAIL_FETCH_EMAILS'
+  const BATCH = 'mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL'
+
+  it('squadra + standing grant su GMAIL_SEND_EMAIL → ask con la ui dell\'insieme fisso', async () => {
+    state.grants = [{ tool: SEND, target: '*' }]
+    const v = await check(SEND, { to: 'a@b.c', subject: 'ciao', body: 'ciao' }, 'agent_x', squadBox)
+    expect(v.kind).toBe('ask')
+    if (v.kind === 'ask') {
+      expect(v.ui?.id).toBe('approval.squadFixed')
+      expect(v.keys).toEqual([SEND])
+    }
+  })
+
+  it('la STESSA grant SENZA squadra → allow come oggi (GUARDIA)', async () => {
+    state.grants = [{ tool: SEND, target: '*' }]
+    const v = await check(SEND, { to: 'a@b.c', subject: 'ciao', body: 'ciao' }, 'agent_x')
+    expect(v.kind).toBe('allow')
+    if (v.kind === 'allow') expect(v.via).toBe('grant')
+  })
+
+  it('squadra + regola blocked → deny (le regole «Blocca» vincono sempre)', async () => {
+    state.defaultRules = false
+    state.rules = [{ tool: 'composio__*', pattern: '*', mode: 'blocked' }]
+    state.grants = [{ tool: SEND, target: '*' }]
+    const v = await check(SEND, { to: 'a@b.c', subject: 'ciao', body: 'ciao' }, 'agent_x', squadBox)
+    expect(v.kind).toBe('deny')
+  })
+
+  it('squadra + lettura Composio → come oggi, nessuna card (GUARDIA)', async () => {
+    const v = await check(READ, { query: 'torino' }, 'agent_x', squadBox)
+    expect(v.kind).toBe('allow')
+  })
+
+  it('batch Composio con un\'azione di invio in squadra → ask dell\'insieme fisso (anche con la grant per azione)', async () => {
+    state.grants = [{ tool: 'composio-action:GMAIL_SEND_EMAIL', target: '*' }]
+    const v = await check(BATCH, { tools: [{ tool_slug: 'GMAIL_SEND_EMAIL', arguments: { to: 'a@b.c', body: 'ciao' } }] }, 'agent_x', squadBox)
+    expect(v.kind).toBe('ask')
+    if (v.kind === 'ask') expect(v.ui?.id).toBe('approval.squadFixed')
+    // senza squadra la grant per azione vale come oggi (GUARDIA)
+    const v2 = await check(BATCH, { tools: [{ tool_slug: 'GMAIL_SEND_EMAIL', arguments: { to: 'a@b.c', body: 'ciao' } }] }, 'agent_x')
+    expect(v2.kind).toBe('allow')
+  })
+
+  it('batch Composio di SOLO letture in squadra → allow come oggi (GUARDIA)', async () => {
+    const v = await check(BATCH, { tools: [{ tool_slug: 'GMAIL_LIST_THREADS', arguments: {} }] }, 'agent_x', squadBox)
+    expect(v.kind).toBe('allow')
+  })
+})

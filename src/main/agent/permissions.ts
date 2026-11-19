@@ -327,6 +327,18 @@ export async function check(
     if (matching.some((r) => r.mode === 'blocked')) {
       return { kind: 'deny', reason: 'Command blocked by permissions configuration' }
     }
+    // C2 (fase squadra-correzioni): le azioni Composio verso fuori sono
+    // dell'insieme FISSO della squadra — chiedono SEMPRE, PRIMA del lookup di
+    // regole specifiche e grant (la colonna non si svuota); le regole «Blocca»
+    // vincono ancora (il deny è già tornato sopra), le letture non cambiano
+    if (turn.squad && squadAlwaysAsks(tool, input)) {
+      return {
+        kind: 'ask',
+        reason: `${tool}: in a team this action always needs the user's approval`,
+        ui: ui(UI.approvalSquadFixed, { tool }),
+        keys: [tool]
+      }
+    }
     const specific = matching.find((r) => r.tool !== '*' && r.tool !== 'composio__*')
     if (specific) {
       return specific.mode === 'always_allow'
@@ -389,8 +401,20 @@ export async function check(
         : originalName === 'COMPOSIO_MANAGE_CONNECTIONS'
           ? manageConnectionsGate(gateInput)
           : proxyExecuteGate(gateInput)
-      if (outcome.kind === 'allow') return { kind: 'allow', via: outcome.via }
       if (outcome.kind === 'deny') return { kind: 'deny', reason: 'Command blocked by permissions configuration' }
+      // C2 (fase squadra-correzioni): il blocco Composio con azioni verso
+      // fuori è dell'insieme FISSO della squadra — ask PRIMA che regole e
+      // grant dello strumento possano farlo passare; il deny del gate (regole
+      // «Blocca», già tornato sopra) vince comunque, le letture non cambiano
+      if (turn.squad && squadAlwaysAsks(tool, input)) {
+        return {
+          kind: 'ask',
+          reason: `${tool}: in a team this action always needs the user's approval`,
+          ui: ui(UI.approvalSquadFixed, { tool }),
+          keys: [tool]
+        }
+      }
+      if (outcome.kind === 'allow') return { kind: 'allow', via: outcome.via }
       const count = outcome.actions.length
       const reasonText =
         outcome.reason === 'trust'
