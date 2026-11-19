@@ -43,7 +43,7 @@ export const DAEMON_RPC_CHANNELS = [
   'quickask',
   'routines:list', 'routines:create', 'routines:update', 'routines:delete', 'routines:suggest',
   'routines:create-trigger', 'routines:update-trigger',
-  'presence:signal', 'presence:viewing', 'outbox:opened',
+  'presence:signal', 'presence:viewing', 'presence:window-focus', 'outbox:opened',
   // fase 8 (§3bis L7): task thread
   'tasks:list', 'tasks:cancel',
   'subagents:list', 'subagents:stop',
@@ -390,7 +390,7 @@ export function registerIpc(
   // (riepilogo del coordinatore), non la chat del bot
   // AH2 (fase aiutanti): openAgentId dice che il click apre la CHAT del PADRE
   // (notifica di un figlio fermo su una card; il pannello del figlio resta chiuso)
-  client.registerHost('host.notify', ([title, body, openGroupId, openAgentId]) => {
+  client.registerHost('host.notify', ([title, body, openGroupId, openAgentId, openApprovalsFor]) => {
     const windows = getWindows()
     const n = new Notification({
       title: String(title ?? 'Homun'),
@@ -405,6 +405,11 @@ export function registerIpc(
       }
       if (typeof openAgentId === 'string' && openAgentId) {
         w?.webContents.send('sandbot:event', { type: 'open-agent', agentId: openAgentId })
+      }
+      // A4 (fase centro-autorizzazioni): il click sulla notifica di una
+      // richiesta apre il centro «Da approvare» SU quella richiesta
+      if (typeof openApprovalsFor === 'string' && openApprovalsFor) {
+        w?.webContents.send('sandbot:event', { type: 'open-approvals', approvalId: openApprovalsFor === 'all' ? null : openApprovalsFor })
       }
     })
     n.show()

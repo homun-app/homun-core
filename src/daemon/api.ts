@@ -942,6 +942,12 @@ export function buildApiMethods(
       if (!presence) throw uiError(UI.rpcPresenceUnavailable)
       presence.onViewing(typeof agentId === 'string' && agentId ? agentId : null)
     },
+
+    // A4 (fase centro-autorizzazioni): il fuoco della finestra (focus/blur)
+    'presence:window-focus': ([focused]) => {
+      if (!presence) throw uiError(UI.rpcPresenceUnavailable)
+      presence.onWindowFocus(focused === true)
+    },
     'outbox:opened': ([agentId]) => {
       // l'utente ha aperto la chat di questo agente: la sua outbox si consegna subito
       const delivered = deliverHeldForAgent(agentId as string, emit, {

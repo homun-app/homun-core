@@ -190,6 +190,17 @@ describe('A2: il centro «Da approvare» (tavola 4)', () => {
     expect(grouped[2]!.bot!.botName).toBe('Solo')
   })
 
+  it('l\'evento open-approvals (il click sulla notifica) apre il centro su quella richiesta', async () => {
+    const { useStore: st } = await import('../store')
+    // il gestore dell'evento lo registra init(); qui si chiama direttamente
+    // l'azione che il case 'open-approvals' usa, con l'evento simulato
+    st.setState({ approvalsOpen: false, approvalsFocusId: null, activityOpen: true })
+    st.getState().setApprovalsOpen(true, 'ap-9')
+    expect(st.getState().approvalsOpen).toBe(true)
+    expect(st.getState().approvalsFocusId).toBe('ap-9')
+    expect(st.getState().activityOpen).toBe(false)
+  })
+
   it('0 richieste: il messaggio vuoto, nessun gruppo', () => {
     const tree = renderCenter([])
     const text = textOf(tree)

@@ -310,6 +310,10 @@ export const UI = {
   // ---- notifiche native (C3; l'anteprima resta il testo vero) ----
   notifyNeedsInput: msg({ id: 'notify.needsInput', message: '{agent} ha bisogno di te' }),
   notifyDone: msg({ id: 'notify.done', message: '{agent} ha risposto' }),
+  // A4 (fase centro-autorizzazioni): la notifica della richiesta nata (il
+  // corpo è la frase breve della card) e quella raggruppata dei 30 s
+  approvalNotifySingle: msg({ id: 'notify.approvalSingle', message: '{agent} chiede a te' }),
+  approvalNotifyAggregated: msg({ id: 'notify.approvalAggregated', message: '{count} richieste aspettano te' }),
 
   // ---- errori RPC mostrati dalla UI (C3) ----
   rpcAgentNotFound: msg({ id: 'rpc.agentNotFound', message: 'Agente non trovato' }),

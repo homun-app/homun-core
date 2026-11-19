@@ -86,6 +86,9 @@ export function createPresence(deps: PresenceDeps) {
   let lastActiveAccepted = 0
   /** agente che l'utente sta guardando (finestra a fuoco sulla sua chat). */
   let viewingAgent: string | null = null
+  /** A4 (fase centro-autorizzazioni): la finestra dell'app è in primo piano?
+   *  La UI lo segnala a focus/blur; di default sì (appena aperta lo è). */
+  let windowFocused = true
 
   /** Le routine attive che verrebbero messe in pausa per assenza lunga. */
   const pausableRoutines = (): Routine[] => deps.listRoutines().filter((r) => r.enabled)
@@ -99,6 +102,16 @@ export function createPresence(deps: PresenceDeps) {
     /** L'agente che l'utente sta guardando (per la soppressione delle notifiche). */
     viewingAgent(): string | null {
       return viewingAgent
+    },
+
+    /** A4: la finestra è in primo piano (le notifiche delle richieste spariscono). */
+    windowFocused(): boolean {
+      return windowFocused
+    },
+
+    /** A4: il segnale focus/blur della finestra (dalla UI). */
+    onWindowFocus(focused: boolean): void {
+      windowFocused = focused
     },
 
     /** Quando l'utente ha letto l'ultima volta la chat di un agente (0 = mai). */

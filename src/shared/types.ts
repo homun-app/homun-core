@@ -742,9 +742,12 @@ export type SandbotEvent =
   // decisione se notificare (soppressioni) sta nel daemon.
   // fase 16b (S1.2): openGroupId dice che il click apre la SQUADRA, non la
   // chat privata del bot (riepilogo del coordinatore pubblicato nel gruppo)
-  | { type: 'agent-notify'; agentId: string; kind: 'done' | 'needs-input'; preview: string; at: number; openGroupId?: number }
+  | { type: 'agent-notify'; agentId: string; kind: 'done' | 'needs-input'; preview: string; at: number; openGroupId?: number; /** A4: la card che aspetta (notifica raggruppata del centro) */ approvalId?: string }
   // fase 16b (S1.2/S5): apri la squadra (notifica del riepilogo, deep link)
   | { type: 'open-group'; groupId: number }
+  // A4 (fase centro-autorizzazioni): apri il centro «Da approvare», su una
+  // richiesta precisa quando c'è (click sulla notifica raggruppata)
+  | { type: 'open-approvals'; approvalId: string | null }
   // fase 8 (§3bis L7): lo stato di un task è cambiato — la card in chat e la
   // sidebar (task in corso) si aggiornano
   | { type: 'tasks' }
@@ -1076,6 +1079,8 @@ export interface SandbotApi {
   // fase 6: presenza (§3ter T2) — 'active' al massimo uno ogni 30s
   presenceSignal(kind: 'active' | 'typing'): Promise<void>
   presenceViewing(agentId: string | null): Promise<void>
+  /** A4 (fase centro-autorizzazioni): il fuoco della finestra (focus/blur) */
+  presenceWindowFocus(focused: boolean): Promise<void>
   // fase 6: consegna dell'outbox quando l'utente apre la chat dell'agente
   outboxOpened(agentId: string): Promise<void>
   // fase 8 (§3bis L7): task thread — elenco (tutti gli agenti se undefined) e interruzione

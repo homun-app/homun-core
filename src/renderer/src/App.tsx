@@ -148,6 +148,20 @@ export function App() {
     }
   }, [])
 
+  // A4 (fase centro-autorizzazioni): il fuoco della finestra al daemon — le
+  // notifiche delle richieste spariscono quando l'utente guarda l'app (ci
+  // pensano il riquadro e la barra), tornano quando la copre
+  useEffect(() => {
+    const signal = (): void => { void api.presenceWindowFocus(document.hasFocus()).catch(() => undefined) }
+    window.addEventListener('focus', signal)
+    window.addEventListener('blur', signal)
+    signal()
+    return () => {
+      window.removeEventListener('focus', signal)
+      window.removeEventListener('blur', signal)
+    }
+  }, [])
+
   // fase 16b correzioni 2 (Q1): la larghezza della finestra nello store, con
   // un listener resize appena debounced — la chat non scende mai sotto
   // CHAT_MIN, prima cede il pannello poi la barra (vedi layout.ts)

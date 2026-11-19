@@ -111,11 +111,12 @@ export function attachHostBridge(deps: HostBridgeDeps): {
      * alla squadra, con openGroupId; alla chat del padre, con openAgentId),
      * osascript senza UI.
      */
-    notify(title: string, body: string, openGroupId?: number, openAgentId?: string): void {
+    notify(title: string, body: string, openGroupId?: number, openAgentId?: string, openApprovalsFor?: string): void {
       if (deps.hasUi()) {
         const args: unknown[] = [title, body]
         if (openGroupId !== undefined) args.push(openGroupId)
         else if (openAgentId !== undefined) args.push(undefined, openAgentId)
+        else if (openApprovalsFor !== undefined) args.push(undefined, undefined, openApprovalsFor)
         void deps.callUi('host.notify', args).catch(() => osascriptNotify(title, body))
       } else {
         osascriptNotify(title, body)

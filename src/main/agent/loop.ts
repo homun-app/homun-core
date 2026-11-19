@@ -621,9 +621,14 @@ function appendSend(
   return entry
 }
 
-/** Fase 6 (§3bis L9): l'agente aspetta l'utente (ask_user/approval/bozza) → evento di notifica. */
+/** Fase 6 (§3bis L9): l'agente aspetta l'utente (ask_user/approval/bozza) → evento di notifica.
+ *  A4 (fase centro-autorizzazioni): le CARD pendenti portano l'approvalId —
+ *  la notifica raggruppata del centro le riconosce da lì. */
 function emitNeedsInput(agentId: string, entry: import('../../shared/types').TranscriptEntry, preview: string, emit: Emitter): void {
-  emit({ type: 'agent-notify', agentId, kind: 'needs-input', preview, at: entry.createdAt })
+  // (nome volutamente unico: la guardia notice-severity risolve le const per
+  // NOME su tutto il file — niente nomi comuni come «entry» o «approvalId»)
+  const bornApprovalId = (entry.meta as Record<string, unknown> | null)?.approvalId
+  emit({ type: 'agent-notify', agentId, kind: 'needs-input', preview, at: entry.createdAt, ...(typeof bornApprovalId === 'string' ? { approvalId: bornApprovalId } : {}) })
 }
 
 /**
@@ -1257,7 +1262,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
   const frameFingerprint = { hash: null as string | null }
   let stepsWarningDone = false
   const addBase = (e: AppendEntry): import('../../shared/types').TranscriptEntry => {
-    const entry = appendEntry(
+    // (il nome è volutamente NON «entry»: la guardia notice-severity risolve
+    // le const per NOME su tutto il file, e «entry» è già di appendCard)
+    const recorded = appendEntry(
       opts.taskId === undefined && opts.groupTurn === undefined && opts.squadId === undefined
         ? e
         : {
@@ -1282,10 +1289,10 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
         id: e.meta.approvalId, agentId: e.agentId,
         tool: String(e.meta.tool ?? ''),
         input: (e.meta.input ?? {}) as Record<string, unknown>,
-        entryId: entry.id, createdAt: entry.createdAt
+        entryId: recorded.id, createdAt: recorded.createdAt
       })
     }
-    return entry
+    return recorded
   }
   const add = (e: AppendEntry): import('../../shared/types').TranscriptEntry => {
     const entry = addBase(e)

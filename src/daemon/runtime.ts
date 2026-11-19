@@ -48,6 +48,8 @@ import { localModelFacts } from './local-model'
 import { handleWebhook } from './webhooks'
 import { deliverDueHeld } from './outbox'
 import { decideNotification, notifyTexts, notifyOpenAgentOf } from './notifications'
+// A4 (fase centro-autorizzazioni): il raggruppatore delle notifiche delle richieste
+import { createApprovalNotifier } from './approval-notifications'
 import { enqueueUserMessage } from './enqueue'
 // fase 17c (C2): notice col testo del catalogo UI
 import { uiLanguage, formatUi, ui } from '../main/ui-language'

@@ -314,6 +314,16 @@ msgstr "{agent} needs you"
 msgid "notify.done"
 msgstr "{agent} replied"
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "notify.approvalSingle"
+msgstr "{agent} is asking you"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "notify.approvalAggregated"
+msgstr "{count} requests are waiting for you"
+
 #. placeholder {0}: useApp.app
 #: src/renderer/src/components/ApprovalCard.tsx
 msgid "{agentName} vuole usare {0} sul tuo Mac"

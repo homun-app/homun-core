@@ -120,6 +120,7 @@ const api: SandbotApi = {
   // fase 6: presenza e consegna outbox
   presenceSignal: (kind) => ipcRenderer.invoke('presence:signal', kind),
   presenceViewing: (agentId) => ipcRenderer.invoke('presence:viewing', agentId),
+  presenceWindowFocus: (focused) => ipcRenderer.invoke('presence:window-focus', focused),
   outboxOpened: (agentId) => ipcRenderer.invoke('outbox:opened', agentId),
   // fase 8 (§3bis L7): task thread
   listTasks: (agentId) => ipcRenderer.invoke('tasks:list', agentId),

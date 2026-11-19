@@ -874,6 +874,14 @@ export const useStore = create<Store>((set, get) => ({
           w.focus?.()
           break
         }
+        // A4 (fase centro-autorizzazioni): apri il centro «Da approvare»,
+        // sulla richiesta della notifica quando c'è
+        case 'open-approvals': {
+          s.setApprovalsOpen(true, e.approvalId)
+          const w = window as unknown as { focus?: () => void }
+          w.focus?.()
+          break
+        }
         // fase 12: lo stato di un sottoagente è cambiato (card + pannello)
         case 'subagents': {
           if (e.parentId === s.activeId) {
