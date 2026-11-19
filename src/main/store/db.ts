@@ -12,6 +12,9 @@ import { JOBS_DDL } from './jobs'
 // fase 16c (C5): lo storico delle esecuzioni delle routine (Attività globale)
 import { ROUTINE_RUNS_DDL } from './routine-runs'
 import { GROUPS_DDL, migrateGroupCoordinators, migrateGroupAutonomy, ensureGroupCoordinator, groupsOfMember } from './groups'
+// S1 (fase squadra-sicurezza): la durata del grant di missione (8 ore) per
+// riconoscere alla migrazione i grant del formato vecchio
+import { MISSION_GRANT_MS } from '../agent/squad-approvals'
 import { SHELL_JOBS_DDL } from './shell-jobs'
 import { COMPUTER_ACTIONS_DDL } from './computer-actions'
 import { SUBAGENTS_DDL } from './subagents'
@@ -221,6 +224,9 @@ function open(): DatabaseSync {
   dedupeGrants()
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_grants_unique ON grants(tool, target, coalesce(scope,''), coalesce(agent_id,''))")
   migrateUseAppActionGrants()
+  // S1 (fase squadra-sicurezza): i grant di missione col formato vecchio
+  // (senza la squadra nel target) si revocano alla migrazione
+  revokeLegacyMissionGrants()
   // fase use-app · ritocchi (R5): all'apertura i grant già scaduti si cancellano
   purgeExpiredGrants()
   // fase 16b (S1.2): il flag del riepilogo di chiusura del coordinatore
@@ -561,6 +567,31 @@ export interface Grant {
 export function migrateUseAppActionGrants(): { removed: number } {
   const rows = db().prepare('SELECT id FROM grants WHERE tool = ? AND target IN (?,?,?,?,?,?)')
     .all('use-app', 'type', 'key', 'click', 'double_click', 'right_click', 'open_app') as Array<{ id: number }>
+  for (const r of rows) db().prepare('DELETE FROM grants WHERE id=?').run(r.id)
+  return { removed: rows.length }
+}
+
+/**
+ * S1 (fase squadra-sicurezza): revoca alla migrazione i grant di missione
+ * creati col FORMATO VECCHIO da applyMissionGrant (fase squadra Q2), che non
+ * portavano la squadra nel target e valevano in qualunque turno del bot:
+ * `site:<host>` (anche a host vuoto) per i tool del browser e `*` per i tool
+ * di squadra. Si riconoscono CON CERTEZZA perché nessun altro percorso crea
+ * quelle righe: «Consenti sempre» non ha scadenza, «Consenti per 10 minuti»
+ * (solo use-app) dura 10 minuti esatti e le grant dei comandi hanno chiavi
+ * esatte — un expires_at ESATTAMENTE 8 ore (MISSION_GRANT_MS) dopo created_at
+ * è solo di applyMissionGrant. La fusione di una missione SU una grant
+ * «per sempre» pre-esistente resta a scadenza NULL (addGrant): quella riga è
+ * indistinguibile dalla concessione dell'utente e non si tocca. Idempotente:
+ * nel formato nuovo (squad:<gid>|…) questi target non esistono più.
+ */
+export function revokeLegacyMissionGrants(): { removed: number } {
+  const squadTools = ['send_to_agent', 'create_agent', 'create_group', 'update_group', 'update_agent', 'delete_agent']
+  const rows = [
+    ...db().prepare("SELECT id FROM grants WHERE tool LIKE 'browser\\_%' ESCAPE '\\' AND target LIKE 'site:%'").all() as Array<{ id: number }>,
+    ...db().prepare('SELECT id FROM grants WHERE tool IN (?,?,?,?,?,?) AND target = ? AND expires_at IS NOT NULL AND expires_at - created_at = ?')
+      .all(...squadTools, '*', MISSION_GRANT_MS) as Array<{ id: number }>
+  ]
   for (const r of rows) db().prepare('DELETE FROM grants WHERE id=?').run(r.id)
   return { removed: rows.length }
 }

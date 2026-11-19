@@ -240,7 +240,7 @@ describe('Q1: il sottoagente di un turno di squadra', () => {
   })
 })
 
-describe('Q2: «Consenti per questa missione» nel loop', () => {
+describe('Q2/S1 (fase squadra-sicurezza): «Consenti per questa missione» nel loop', () => {
   /** gira un turno decidendo le card col mode dato (mission per la prova) */
   const runTurnAllowing = async (agentId: string, opts: Record<string, unknown>, mode: 'mission' | 'once'): Promise<void> => {
     let running = false
@@ -257,13 +257,17 @@ describe('Q2: «Consenti per questa missione» nel loop', () => {
     await p
   }
 
-  it('la delega contaminata chiede con ask; con la missione concessa, la STESSA delega di un ALTRO membro passa senza card', async () => {
+  it('la delega contaminata chiede con ask; la missione copre SOLO il destinatario della card, nella squadra e finché è membro', async () => {
     const treni = makeAgent('Treni missione')
     const alloggio = makeAgent('Alloggio missione')
+    const capo = makeAgent('Capo missione')
     activateGroups(treni, ['bots'])
     activateGroups(alloggio, ['bots'])
-    const gid = makeGroup(treni, alloggio, 'ask')
-    // Treni delega contaminato: la card nasce, e si concede PER LA MISSIONE
+    activateGroups(capo, ['bots'])
+    const g = createGroup('Weekend', '', treni, [alloggio, capo], treni)
+    updateGroupRow(g.id, { autonomy: 'ask' })
+    const gid = g.id
+    // Treni delega contaminato verso Alloggio: la card nasce, si concede PER LA MISSIONE
     queue = [
       { tool: { name: 'send_to_agent', args: { agentId: alloggio, text: 'check-in?' } } },
       { text: 'inviato' }
@@ -272,20 +276,98 @@ describe('Q2: «Consenti per questa missione» nel loop', () => {
     const card = store.getEntries(treni).find((e) => e.kind === 'approval')
     expect(card).toBeTruthy()
     expect(card!.meta?.status).toBe('allowed')
-    // il grant di missione esiste per ENTRAMBI i membri
-    const grants = listJobs === null ? [] : store.db().prepare("SELECT tool, target, agent_id, expires_at FROM grants WHERE tool = 'send_to_agent'").all() as Array<{ agent_id: string | null; expires_at: number }>
-    expect(grants.map((g) => g.agent_id).sort()).toEqual([alloggio, treni].sort())
-    expect(grants.every((g) => g.expires_at > Date.now() + 7 * 60 * 60 * 1000)).toBe(true)
-    // ora ALLOGGIO delega contaminato verso Treni: niente card (grant di missione)
+    // il grant di missione esiste per OGNI membro e porta SQUADRA e DESTINATARIO
+    const grants = store.db().prepare("SELECT tool, target, agent_id, expires_at FROM grants WHERE tool = 'send_to_agent'").all() as Array<{ target: string; agent_id: string | null; expires_at: number }>
+    expect(grants.map((gr) => gr.agent_id).sort()).toEqual([alloggio, capo, treni].sort())
+    expect(grants.every((gr) => gr.target === `squad:${gid}|agent:${alloggio}`)).toBe(true)
+    expect(grants.every((gr) => gr.expires_at > Date.now() + 7 * 60 * 60 * 1000)).toBe(true)
+    // la STESSA delega (stesso destinatario) passa ora senza card
+    queue = [
+      { tool: { name: 'send_to_agent', args: { agentId: alloggio, text: 'e il parcheggio?' } } },
+      { text: 'inviato' }
+    ]
+    await runTurnAllowing(treni, { squadId: gid, contaminated: true }, 'mission')
+    expect(store.getEntries(treni).filter((e) => e.kind === 'approval')).toHaveLength(1)
+    // una delega verso un ALTRO destinatario chiede di nuovo (il grant è del destinatario della card)
     queue = [
       { tool: { name: 'send_to_agent', args: { agentId: treni, text: 'fatto' } } },
       { text: 'inviato' }
     ]
-    await runTurnAllowing(alloggio, { squadId: gid, contaminated: true }, 'mission')
-    expect(store.getEntries(alloggio).some((e) => e.kind === 'approval')).toBe(false)
-    const job = listJobs(store.db()).find((j) => j.kind === 'user-message' && j.agent_id === treni)
-    expect(job).toBeTruthy()
-    expect((job!.payload as Record<string, unknown>).contaminated).toBe(true)
+    await runTurnDeciding(alloggio, { squadId: gid, contaminated: true })
+    const card2 = store.getEntries(alloggio).find((e) => e.kind === 'approval')
+    expect(card2).toBeTruthy()
+    expect(card2!.meta?.status).toBe('denied')
+    // Alloggio NON è più membro: la missione non lo copre più
+    const { removeGroupMember } = await import('../../store/groups')
+    removeGroupMember(gid, alloggio)
+    queue = [
+      { tool: { name: 'send_to_agent', args: { agentId: alloggio, text: 'ultimissimo' } } },
+      { text: 'inviato' }
+    ]
+    await runTurnDeciding(treni, { squadId: gid, contaminated: true })
+    const card3 = store.getEntries(treni).filter((e) => e.kind === 'approval').find((e) => e.meta?.status === 'denied')
+    expect(card3).toBeTruthy()
+  })
+
+  it('la missione di delega NON copre un bot fuori dalla squadra (torna a chiedere)', async () => {
+    const treni = makeAgent('Treni missione fuori')
+    const alloggio = makeAgent('Alloggio missione fuori')
+    const estraneo = makeAgent('Estraneo missione fuori')
+    activateGroups(treni, ['bots'])
+    activateGroups(alloggio, ['bots'])
+    const gid = makeGroup(treni, alloggio, 'ask')
+    // missione concessa per la delega Treni→Alloggio
+    queue = [
+      { tool: { name: 'send_to_agent', args: { agentId: alloggio, text: 'check-in?' } } },
+      { text: 'inviato' }
+    ]
+    await runTurnAllowing(treni, { squadId: gid, contaminated: true }, 'mission')
+    // la delega contaminata verso l'ESTRANEO chiede comunque
+    queue = [
+      { tool: { name: 'send_to_agent', args: { agentId: estraneo, text: 'ehi' } } },
+      { text: 'inviato' }
+    ]
+    await runTurnDeciding(treni, { squadId: gid, contaminated: true })
+    const card = store.getEntries(treni).filter((e) => e.kind === 'approval').find((e) => e.meta?.status === 'denied')
+    expect(card).toBeTruthy()
+    expect(listJobs(store.db()).some((j) => j.kind === 'user-message' && j.agent_id === estraneo)).toBe(false)
+  })
+
+  it('S1: la missione di un ALTRO tool (update_group) vale SOLO nei turni di quella squadra', async () => {
+    // l'aggiornatore è un MEMBRO non creatore: il creatore bypassa il gate
+    const capo = makeAgent('Capo gruppo missione')
+    const a = makeAgent('Membro gruppo missione')
+    activateGroups(a, ['bots'])
+    const g = createGroup('Weekend', '', capo, [a], capo)
+    updateGroupRow(g.id, { autonomy: 'ask' })
+    const gid = g.id
+    // la card di update_group in un turno di squadra, concessa PER LA MISSIONE
+    queue = [
+      { tool: { name: 'update_group', args: { groupId: gid, description: 'missione' } } },
+      { text: 'fatto' }
+    ]
+    await runTurnAllowing(a, { squadId: gid }, 'mission')
+    const card = store.getEntries(a).find((e) => e.kind === 'approval')
+    expect(card).toBeTruthy()
+    expect(card!.meta?.status).toBe('allowed')
+    const grants = store.db().prepare("SELECT tool, target FROM grants WHERE tool = 'update_group'").all() as Array<{ target: string }>
+    expect(grants.length).toBeGreaterThan(0)
+    expect(grants.every((gr) => gr.target === `squad:${gid}|*`)).toBe(true)
+    // nel turno DELLA SQUADRA l'update_group passa senza card
+    queue = [
+      { tool: { name: 'update_group', args: { groupId: gid, description: 'missione 2' } } },
+      { text: 'fatto' }
+    ]
+    await runTurnAllowing(a, { squadId: gid }, 'mission')
+    expect(store.getEntries(a).filter((e) => e.kind === 'approval')).toHaveLength(1)
+    // in un turno PRIVATO dello stesso bot la card torna
+    queue = [
+      { tool: { name: 'update_group', args: { groupId: gid, description: 'missione 3' } } },
+      { text: 'fatto' }
+    ]
+    await runTurnDeciding(a, {})
+    const cardPrivato = store.getEntries(a).filter((e) => e.kind === 'approval').find((e) => e.meta?.status === 'denied')
+    expect(cardPrivato).toBeTruthy()
   })
 })
 

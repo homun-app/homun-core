@@ -175,6 +175,11 @@ export function squadAlwaysAsks(tool: string, input: Record<string, unknown> | u
   // pagamenti e acquisti nel browser: il clic di conferma con parole di
   // pagamento è dell'insieme fisso (gli altri clic possono andare al revisore)
   if (opts.browserAsk && opts.browserAsk.kind === 'commit' && matchesWholeWord(opts.browserAsk.name ?? '', SQUAD_PAYMENT_WORDS)) return true
+  // S1 (fase squadra-sicurezza): l'ask PROBE di browser_type — la guardia non
+  // è riuscita a verificare il tipo del campo, quindi potrebbe essere una
+  // credenziale o un dato personale — è dell'insieme fisso: nemmeno un grant
+  // di missione la copre (il grant si guarda solo DOPO l'insieme fisso)
+  if (tool === 'browser_type' && opts.browserAsk && opts.browserAsk.kind === 'probe') return true
   return false
 }
 

@@ -8,6 +8,8 @@ import {
   missionGrantAllowed,
   collectPendingApprovals,
   squadActivityCounters,
+  missionGrantTarget,
+  missionGrantKey,
   MISSION_GRANT_MS
 } from '../squad-approvals'
 
@@ -79,6 +81,34 @@ describe('Q2: «Consenti per questa missione»', () => {
 
   it('la missione dura 8 ore', () => {
     expect(MISSION_GRANT_MS).toBe(8 * 60 * 60 * 1000)
+  })
+})
+
+describe('S1 (fase squadra-sicurezza): il target del grant di missione ha SEMPRE un confine', () => {
+  it('browser: host http/https pieno → site:<host>; NULL su about:blank, data:, file:, url illeggibile o mancante (mai «site:» vuoto)', () => {
+    expect(missionGrantTarget('browser_click', {}, 'https://booking.example/prenota')).toBe('site:booking.example')
+    expect(missionGrantTarget('browser_click', {}, 'http://booking.example')).toBe('site:booking.example')
+    expect(missionGrantTarget('browser_type', {}, 'about:blank')).toBeNull()
+    expect(missionGrantTarget('browser_click', {}, 'data:text/html,<h1>ciao</h1>')).toBeNull()
+    expect(missionGrantTarget('browser_click', {}, 'file:///Users/fabio/x.html')).toBeNull()
+    expect(missionGrantTarget('browser_click', {}, 'non una url')).toBeNull()
+    expect(missionGrantTarget('browser_click', {}, '')).toBeNull()
+    expect(missionGrantTarget('browser_click', {}, null)).toBeNull()
+    expect(missionGrantTarget('browser_click', {})).toBeNull()
+  })
+
+  it('delega: IL DESTINATARIO della card, mai «*»; senza destinatario → NULL (niente grant)', () => {
+    expect(missionGrantTarget('send_to_agent', { agentId: 'b2', text: 'x' })).toBe('agent:b2')
+    expect(missionGrantTarget('send_to_agent', {})).toBeNull()
+  })
+
+  it('gli altri tool: la chiave di permesso di sempre', () => {
+    expect(missionGrantTarget('update_skill', { name: 'volo' })).toBe('skill volo')
+  })
+
+  it('il target completo porta la SQUADRA: squad:<gid>|<target>', () => {
+    expect(missionGrantKey(3, 'site:x.example')).toBe('squad:3|site:x.example')
+    expect(missionGrantKey(7, 'agent:b2')).toBe('squad:7|agent:b2')
   })
 })
 

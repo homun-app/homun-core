@@ -704,7 +704,9 @@ const browserState = vi.hoisted(() => ({
    * Fase 12 (0a): il result del probe INTERNO del tipo di campo
    * (fieldIsCredentialRef): true/false = valutazione riuscita, null = errore.
    */
-  fieldProbe: null as boolean | null
+  fieldProbe: null as boolean | null,
+  /** S1 (fase squadra-sicurezza): l'ultima URL della pagina (default quella di sempre) */
+  lastUrl: null as string | null
 }))
 vi.mock('../browser', async (importOriginal) => {
   const real = await importOriginal<typeof import('../browser')>()
@@ -712,10 +714,11 @@ vi.mock('../browser', async (importOriginal) => {
     ...real,
     browserAvailable: () => browserState.available,
     BROWSER_UNAVAILABLE: real.BROWSER_UNAVAILABLE,
-    lastUrlOf: () => 'https://spa.example/prenota',
+    lastUrlOf: () => browserState.lastUrl ?? 'https://spa.example/prenota',
     // la verità dei ref è lo snapshot (qui fisso, come l'ultimo ricevuto)
     refInfoOf: (_agentId: string, ref: string) =>
       ref === 'e8' ? { role: 'button', name: 'Conferma prenotazione', text: '' }
+        : ref === 'e7' ? { role: 'button', name: 'Paga ora', text: '' }
         : ref === 'e6' ? { role: 'textbox', name: 'Numero carta', text: '' }
         : ref === 'e2' ? { role: 'link', name: 'Vedi il menu', text: '' }
         // correzione J3: il campo username di quotes.toscrape.com/login — il
@@ -805,6 +808,8 @@ const mcpMock = await import('../../mcp')
 const dbm = await import('../../store/db')
 // correzione E1: le descrizioni dei tool di gruppo (il modulo gira già coi mock)
 const { toolDefs } = await import('../tools')
+// S1 (fase squadra-sicurezza): il createGroup del MOCK in memoria dei gruppi
+const { createGroup } = await import('../../store/groups')
 
 const emit = () => undefined
 const AGENT = 'agent_t'
@@ -4886,6 +4891,124 @@ describe('fase 11b: il browser del bot nel loop', () => {
       const d = autoReviewDecision(cfg, { tool, neverAuto: false, untrustedTurn: false, contaminated: true }, reviewer, 0)
       expect(d.autoAllow, tool).toBe(false)
     }
+  })
+})
+
+// ---- S1 (fase squadra-sicurezza): il grant «per questa missione» non scavalca l'insieme fisso ----
+
+describe('S1 (fase squadra-sicurezza): il grant di missione del sito non scavalca l\'insieme fisso', () => {
+  /** crea una squadra (mock in memoria) con l'autonomia data e AGENT membro */
+  const mkSquad = (autonomy: 'ask' | 'box' | 'box_review'): number => {
+    const g = createGroup('Missione S1', '', AGENT, [])
+    const row = h.db.groupsState.groups.find((x) => x.id === g.id)! as { autonomy?: string }
+    row.autonomy = autonomy
+    return g.id
+  }
+  /** gira un turno NEGANDO via via le card pendenti (come la sonda squad-loop) */
+  const runTurnDenying = async (opts: Record<string, unknown>): Promise<void> => {
+    const p = runTurn(AGENT, 'lavoro', emit, undefined, opts as never)
+    p.catch(() => undefined)
+    const deadline = Date.now() + 30_000
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 40))
+      const appr = h.db.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending')
+      if (appr) resolveApproval(AGENT, String(appr.meta?.approvalId), 'deny')
+      if (!isRunning(AGENT)) break
+    }
+    await p
+  }
+
+  beforeEach(() => {
+    browserState.available = true
+    browserState.calls.length = 0
+    browserState.fieldProbe = null
+    browserState.lastUrl = null
+  })
+
+  it('grant di missione sul sito + clic «Paga ora» (pagamento, insieme fisso) → la card va all\'utente', async () => {
+    const gid = mkSquad('box')
+    // formato VECCHIO del grant di missione (senza squadra nel target)
+    h.db.grants.push({ tool: 'browser_click', target: 'site:spa.example' })
+    h.llm.queue = [
+      { toolCalls: [{ id: 's1a', name: 'browser_click', arguments: JSON.stringify({ ref: 'e7' }) }] },
+      { toolCalls: [{ id: 's1b', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurnDenying({ squadId: gid })
+    const appr = h.db.entries.find((e) => e.kind === 'approval')!
+    expect(appr.meta?.status).toBe('denied')
+    expect(appr.meta?.squadAlwaysAsk).toBe(true)
+    expect(browserState.calls).toHaveLength(0)
+  })
+
+  it('stesso grant + browser_type su un campo PROBE (credenziale/dato personale non verificabile) → card dell\'insieme fisso', async () => {
+    const gid = mkSquad('box')
+    h.db.grants.push({ tool: 'browser_type', target: 'site:spa.example' })
+    // la verifica INTERNA del campo fallisce (fieldProbe null) → ask probe
+    browserState.fieldProbe = null
+    h.llm.queue = [
+      { toolCalls: [{ id: 's2a', name: 'browser_type', arguments: JSON.stringify({ ref: 'e9', text: 'Fabio Rossi' }) }] },
+      { toolCalls: [{ id: 's2b', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurnDenying({ squadId: gid })
+    const appr = h.db.entries.find((e) => e.kind === 'approval')!
+    expect(appr.meta?.status).toBe('denied')
+    expect(appr.meta?.squadAlwaysAsk).toBe(true)
+    expect(browserState.calls).toHaveLength(0)
+  })
+
+  it('un grant «site:» a host VUOTO (formato vecchio) non copre le pagine senza host (data:, about:blank)', async () => {
+    const gid = mkSquad('box')
+    h.db.grants.push({ tool: 'browser_click', target: 'site:' })
+    browserState.lastUrl = 'data:text/html,<h1>paglia</h1>'
+    h.llm.queue = [
+      { toolCalls: [{ id: 's3a', name: 'browser_click', arguments: JSON.stringify({ ref: 'e8' }) }] },
+      { toolCalls: [{ id: 's3b', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurnDenying({ squadId: gid })
+    // il clic «Conferma prenotazione» NON è dell'insieme fisso e non ha un
+    // confine di sito valido: senza grant resta la card di oggi
+    const appr = h.db.entries.find((e) => e.kind === 'approval')!
+    expect(appr.meta?.status).toBe('denied')
+    expect(browserState.calls).toHaveLength(0)
+  })
+
+  it('il grant nel FORMATO NUOVO (squad:<gid>|site:<host>) copre il clic non fisso NEL turno di quella squadra', async () => {
+    const gid = mkSquad('box')
+    h.db.grants.push({ tool: 'browser_click', target: `squad:${gid}|site:spa.example` })
+    h.llm.queue = [
+      { toolCalls: [{ id: 's4a', name: 'browser_click', arguments: JSON.stringify({ ref: 'e8' }) }] },
+      { toolCalls: [{ id: 's4b', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurnDenying({ squadId: gid })
+    expect(h.db.entries.filter((e) => e.kind === 'approval')).toEqual([])
+    expect(browserState.calls.map((c) => c.tool)).toEqual(['browser_click'])
+  })
+
+  it('il grant vecchio «site:» non vale FUORI dalla squadra dello stesso bot', async () => {
+    h.db.grants.push({ tool: 'browser_click', target: 'site:spa.example' })
+    h.llm.queue = [
+      { toolCalls: [{ id: 's5a', name: 'browser_click', arguments: JSON.stringify({ ref: 'e8' }) }] },
+      { toolCalls: [{ id: 's5b', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    // turno PRIVATO dello stesso bot: nessuna squadra → la card torna
+    await runTurnDenying({})
+    const appr = h.db.entries.find((e) => e.kind === 'approval')!
+    expect(appr.meta?.status).toBe('denied')
+    expect(browserState.calls).toHaveLength(0)
+  })
+
+  it('il grant vecchio «site:» non vale nemmeno nel turno di UN\'ALTRA squadra', async () => {
+    mkSquad('box') // squadra 1 (non usata nel turno)
+    const gid2 = mkSquad('box')
+    h.db.grants.push({ tool: 'browser_click', target: 'site:spa.example' })
+    h.llm.queue = [
+      { toolCalls: [{ id: 's6a', name: 'browser_click', arguments: JSON.stringify({ ref: 'e8' }) }] },
+      { toolCalls: [{ id: 's6b', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurnDenying({ squadId: gid2 })
+    const appr = h.db.entries.find((e) => e.kind === 'approval')!
+    expect(appr.meta?.status).toBe('denied')
+    expect(browserState.calls).toHaveLength(0)
   })
 })
 

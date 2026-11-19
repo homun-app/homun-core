@@ -143,7 +143,7 @@ import { assembleTurnTools, offeredMcpOf, activateGroupsResult, toolDefsOfGroups
 // Q1 (fase squadra): l'autonomia della squadra (pura)
 import { normalizeGroupAutonomy, squadAlwaysAsks, delegationSquadId } from './squad-autonomy'
 // Q2 (fase squadra): la coda delle approvazioni e il grant di missione
-import { missionGrantTarget } from './squad-approvals'
+import { missionGrantTarget, missionGrantKey } from './squad-approvals'
 // RW (fase revisore sulla richiesta): il nome che non esiste, con i vicini
 import { unknownToolMessage, offeredToolNames } from '../mcp/unknown-tool'
 import { useToolDef } from './core-tools'
@@ -3303,15 +3303,29 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             pushResult(risk.reason, { browserDeny: true })
             continue
           }
+          // Q1/S1 (fase squadra-sicurezza): PRIMA l'insieme FISSO (i pagamenti
+          // E le ask di tipo probe/credenziale/campo personale della guardia):
+          // se l'azione è dell'insieme fisso la card va all'utente IGNORANDO
+          // qualunque grant di missione — il grant si guarda solo DOPO, e solo
+          // per le ask non fisse
+          const squadBrowserFixed = squad
+            ? squadAlwaysAsks(call.name, input, { browserAsk: risk.kind === 'ask' && risk.ask ? { kind: risk.ask.kind, name: risk.ask.name } : null })
+            : false
           // Q2 (fase squadra): il grant di missione del SITO (8 ore, «Consenti
-          // per questa missione» dalla coda) copre quest'azione: si esegue
-          // senza chiedere di nuovo
-          const missionSiteGrantActive = (() => {
+          // per questa missione» dalla coda) copre quest'azione NON FISSA: si
+          // esegue senza chiedere di nuovo. S1: il target porta la SQUADRA
+          // (vale SOLO nei turni di quella squadra) e MAI un host vuoto —
+          // about:blank/data:/file: non hanno un confine di sito, niente grant
+          const missionSiteGrantActive = squad !== null && (() => {
             const target = missionGrantTarget(call.name, input, browser.lastUrlOf(agentId))
+            if (target === null) return false
             const owner = getAgent(agentId)?.parentId ?? agentId
-            return listGrants().some((g: Grant) => g.tool === call.name && g.target === target && (g.agentId == null || g.agentId === owner) && grantActive(g))
+            return listGrants().some((g: Grant) => g.tool === call.name && g.target === missionGrantKey(squad.id, target) && (g.agentId == null || g.agentId === owner) && grantActive(g))
           })()
-          if (risk.kind === 'ask' && !missionSiteGrantActive) {
+          // S1: l'insieme fisso si valuta PRIMA del grant — se l'azione è fissa
+          // la card va all'utente ANCHE con un grant di missione attivo; il
+          // grant salta il blocco solo per le ask NON fisse
+          if (risk.kind === 'ask' && (squadBrowserFixed || !missionSiteGrantActive)) {
             // auto-review come per le altre ask; nel turno contaminato (dopo
             // una pagina letta lo è SEMPRE) CONTAMINATED_ASK_TOOLS non lascia
             // approvare da sola: la card va all'utente.
@@ -3322,9 +3336,6 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             // revisore ANCHE nei turni contaminati — vede il contesto
             // (untrustedTurn/contaminated nell'<azione>) e se dubita la card
             // va all'utente
-            const squadBrowserFixed = squad
-              ? squadAlwaysAsks(call.name, input, { browserAsk: risk.ask ? { kind: risk.ask.kind, name: risk.ask.name } : null })
-              : false
             const squadBoxReview = squad?.autonomy === 'box_review' && !squadBrowserFixed
             let autoAllowed: { basis: 'rule' | 'request'; ruleMatched?: string; reason?: string } | null = null
             const action: AutoReviewAction = {
@@ -4392,10 +4403,19 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           const sendSquadAllows =
             sendSquadId !== null && normalizeGroupAutonomy(getGroup(sendSquadId)?.autonomy) !== 'ask'
           // Q2: la missione («Consenti per questa missione» dalla coda) copre
-          // la delega contaminata per chi ha il grant
+          // la delega contaminata per chi ha il grant. S1 (fase
+          // squadra-sicurezza): il grant porta la SQUADRA e il DESTINATARIO
+          // della card (mai «*») — vale SOLO nei turni di quella squadra e
+          // solo finché il destinatario ne è ancora membro
           const sendMissionAllowed = (() => {
+            if (!squad) return false
             const owner = getAgent(agentId)?.parentId ?? agentId
-            return listGrants().some((g: Grant) => g.tool === 'send_to_agent' && g.target === '*' && (g.agentId == null || g.agentId === owner) && grantActive(g))
+            return listGrants().some((g: Grant) =>
+              g.tool === 'send_to_agent' &&
+              g.target === missionGrantKey(squad.id, `agent:${toId}`) &&
+              (g.agentId == null || g.agentId === owner) &&
+              grantActive(g) &&
+              isGroupMember(squad.id, toId))
           })()
           // fase 11 (punto 2): il turno è CONTAMINATO da contenuti web → anche
           // la delega a un altro bot torna all'utente: è un canale verso
@@ -4784,7 +4804,18 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           const squadFixedAsk = squad
             ? squadAlwaysAsks(call.name, input, { callerAgentId: agentId, createdByOf: (id) => getAgent(id)?.createdBy ?? null })
             : false
-          if (!turnGranted && !squadFixedAsk) {
+          // S1 (fase squadra-sicurezza): il grant di missione degli ALTRI
+          // tool porta la squadra nel target (squad:<gid>|<chiave>): vale
+          // SOLO nei turni di quella squadra, e si guarda solo DOPO l'insieme
+          // fisso
+          const missionToolGrantActive = squad !== null && (() => {
+            const owner = getAgent(agentId)?.parentId ?? agentId
+            return listGrants().some((g: Grant) =>
+              g.tool === call.name &&
+              g.target === missionGrantKey(squad.id, permissions.targetKey(call.name, input)) &&
+              (g.agentId == null || g.agentId === owner) && grantActive(g))
+          })()
+          if (!turnGranted && !squadFixedAsk && !missionToolGrantActive) {
             // fase 10: le ask forzate dall'ORIGINE non sono mai auto-approvabili
             // (il revisore giudicherebbe testo non dell'utente); fase 11: nemmeno
             // le azioni con effetti di un turno CONTAMINATO da contenuti web
@@ -4843,7 +4874,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             })
             emit({ type: 'entries', agentId, entries: [approvalEntry] })
             // fall through: esecuzione come dopo un "allow" dell'utente
-          } else if (!turnGranted || squadFixedAsk) {
+          } else if (squadFixedAsk || (!turnGranted && !missionToolGrantActive)) {
             // pause-for-approval: crea approval, attende decisione (come l'originale)
             const approval: Approval = {
               id: randomUUID(), agentId, tool: call.name, input, status: 'pending', createdAt: Date.now()

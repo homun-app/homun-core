@@ -100,6 +100,11 @@ describe('Q1: squadAlwaysAsks — l\'insieme fisso nel codice', () => {
     expect(squadAlwaysAsks('browser_click', { ref: 'e5' }, { browserAsk: { kind: 'probe', name: 'Nome' } })).toBe(false)
   })
 
+  it('S1 (fase squadra-sicurezza): l\'ask PROBE di browser_type (campo credenziale/personale non verificabile) è dell\'insieme fisso', () => {
+    expect(squadAlwaysAsks('browser_type', { ref: 'e5', text: 'Fabio' }, { browserAsk: { kind: 'probe', name: 'Nome e cognome' } })).toBe(true)
+    expect(squadAlwaysAsks('browser_type', { ref: 'e5', text: 'x' }, { browserAsk: { kind: 'probe' } })).toBe(true)
+  })
+
   it('quello che NON è nell\'insieme non chiede per il solo fatto di esserci', () => {
     expect(squadAlwaysAsks('write-file', { path: '/workspace/x.md' }, {})).toBe(false)
     expect(squadAlwaysAsks('run-command', { command: 'ls' }, {})).toBe(false)

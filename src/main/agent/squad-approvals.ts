@@ -82,20 +82,39 @@ export function missionGrantAllowed(category: SquadApprovalCategory): boolean {
 export const MISSION_GRANT_MS = 8 * 60 * 60 * 1000
 
 /**
- * Il target del grant di missione: le azioni del browser valgono per IL SITO
- * (site:host della pagina della card), la delega per il tool, le altre per la
- * chiave di permesso di sempre.
+ * S1 (fase squadra-sicurezza): il target del grant di missione ha SEMPRE un
+ * confine preciso, mai vuoto e mai «*». Le azioni del browser valgono per IL
+ * SITO (site:host della pagina della card) e SOLO http/https con host pieno:
+ * about:blank, data:, file:, un'url illeggibile o mancante tornano NULL (niente
+ * grant: la decisione vale «una volta»). La delega vale per IL DESTINATARIO
+ * della card (agent:<id>), le altre per la chiave di permesso di sempre.
  */
-export function missionGrantTarget(tool: string, input: Record<string, unknown>, browserUrl?: string | null): string {
+export function missionGrantTarget(tool: string, input: Record<string, unknown>, browserUrl?: string | null): string | null {
   if (tool.startsWith('browser_')) {
+    if (!browserUrl) return null
     try {
-      return `site:${new URL(String(browserUrl ?? '')).host}`
+      const u = new URL(String(browserUrl))
+      if ((u.protocol !== 'http:' && u.protocol !== 'https:') || !u.host) return null
+      return `site:${u.host}`
     } catch {
-      return 'site:'
+      return null
     }
   }
-  if (tool === 'send_to_agent') return '*'
+  if (tool === 'send_to_agent') {
+    const dest = String(input.agentId ?? '')
+    return dest ? `agent:${dest}` : null
+  }
   return targetKey(tool, input)
+}
+
+/**
+ * S1 (fase squadra-sicurezza): il target COMPLETO di un grant di missione
+ * porta la SQUADRA — squad:<gid>|<target> — perché il grant vale SOLO nei
+ * turni di quella squadra (e, per la delega, solo verso il destinatario
+ * della card finché ne è membro).
+ */
+export function missionGrantKey(squadId: number, target: string): string {
+  return `squad:${squadId}|${target}`
 }
 
 // ---- la raccolta delle card pendenti della squadra ----

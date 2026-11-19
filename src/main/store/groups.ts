@@ -7,7 +7,7 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { db, getAgent, listAgents, getEntries, addGrant } from './db'
 import type { TranscriptEntry } from '../../shared/types'
-import { collectPendingApprovals, missionGrantAllowed, squadApprovalCategory, missionGrantTarget, squadActivityCounters, MISSION_GRANT_MS, type SquadPendingApproval } from '../agent/squad-approvals'
+import { collectPendingApprovals, missionGrantAllowed, squadApprovalCategory, missionGrantTarget, missionGrantKey, squadActivityCounters, MISSION_GRANT_MS, type SquadPendingApproval } from '../agent/squad-approvals'
 import { enqueueJob } from './jobs'
 import {
   planGroupTurns, GROUP_HOURLY_CAP_TEXT, closingTurnNonce, type GroupPlanResult
@@ -682,6 +682,11 @@ function familyIdsOf(memberId: string): string[] {
  * con scadenza di 8 ore (addGrant con agent_id, senza tabelle nuove). SOLO per
  * le categorie sito-interattivo e squadra, MAI per l'insieme fisso: altrove
  * non fa niente (la card vale «una volta»). Torna quanti grant ha creato.
+ * S1 (fase squadra-sicurezza): il target porta la SQUADRA e il CONFINE
+ * dell'azione (squad:<gid>|site:<host> per il browser, squad:<gid>|agent:<id>
+ * per la delega, squad:<gid>|<chiave> per gli altri) — senza un confine
+ * preciso (host vuoto, destinatario assente) NON si crea nessun grant: la
+ * decisione vale «una volta» e la coda la chiude così.
  */
 export function applyMissionGrant(input: { agentId: string; approvalId: string; now: number }): number {
   const entry = getEntries(input.agentId).findLast(
@@ -696,11 +701,13 @@ export function applyMissionGrant(input: { agentId: string; approvalId: string; 
   if (!gid || !getGroup(gid)) return 0
   const browserUrl = (meta.browser as { url?: string } | undefined)?.url ?? null
   const target = missionGrantTarget(tool, meta.input as Record<string, unknown>, browserUrl)
+  if (target === null) return 0
   const expiresAt = input.now + MISSION_GRANT_MS
-  for (const memberId of groupMemberIds(gid)) {
-    addGrant(tool, target, undefined, expiresAt, memberId)
+  const members = groupMemberIds(gid)
+  for (const memberId of members) {
+    addGrant(tool, missionGrantKey(gid, target), undefined, expiresAt, memberId)
   }
-  return groupMemberIds(gid).length
+  return members.length
 }
 
 /**
