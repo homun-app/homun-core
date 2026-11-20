@@ -5,6 +5,32 @@ pubblicata finisce nel corpo della GitHub Release (da cui l'app mostra il
 «cosa cambia» quando propone un aggiornamento). Formato: `## [x.y.z] — data`,
 sezioni H2 e un punto per riga.
 
+## [0.3.1001-beta.14] — 2026-11-20
+
+Homun si apre sempre, e collega i server MCP che usi già.
+
+### Novità
+
+- **«Importa da Cursor, Claude o ZCode»** nella finestra Server MCP: scegli
+  quali server portare in Homun, e token e chiavi finiscono cifrati.
+- **I server MCP che girano sul tuo Mac accettano le variabili** (indirizzi,
+  token, team), con i valori segreti salvati cifrati. Homun trova `npx` e
+  `node` anche quando li hai installati con fnm o nvm.
+- **Il bot può proporti un server MCP da npm** quando un servizio non è nel
+  catalogo: vedi pacchetto, versione, autore e download prima di
+  confermare. Gira nel computer isolato, con la rete aperta solo verso il
+  servizio che deve usare, e la versione resta fissa finché non approvi un
+  aggiornamento.
+
+### Correzioni
+
+- **Homun si apre sempre al primo clic:** dal Dock o riaprendo l'app,
+  la finestra ricompare anche se l'avevi chiusa.
+- **All'avvio la finestra non resta più vuota:** dice che sta avviando o
+  aggiornando il motore, e dopo un po' offre «Riprova».
+- **Il bot non scambia più una pagina web per un server MCP** e ti indica
+  la strada giusta per collegarlo.
+
 ## [0.3.1001-beta.13] — 2026-11-20
 
 Collegare i tuoi strumenti è più facile da trovare.
