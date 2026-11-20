@@ -95,6 +95,16 @@ const denyConnect = (socket: net.Socket, reason: string): void => {
   socket.end(`HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain; charset=utf-8\r\nConnection: close\r\n\r\n${reason}\r\n`)
 }
 
+/**
+ * N2 (fase mcp-egress-sicurezza): l'Host da mandare all'upstream è SEMPRE
+ * quello del target VALIDATO — l'autorità dell'URL, con `:porta` solo quando
+ * non è quella predefinita del protocollo (PURO).
+ */
+export function upstreamHostHeader(host: string, port: number, https: boolean): string {
+  const defaultPort = https ? 443 : 80
+  return port === defaultPort ? host : `${host}:${port}`
+}
+
 /** Il server proxy di UN server MCP (come createBrowserProxy, con l'allowlist). */
 export function createMcpEgressProxy(serverId: string, getAllowHosts: () => readonly string[]): http.Server {
   const decide = (host: string, port: number, ips: string[]) => mcpEgressDecision(host, port, getAllowHosts(), ips)
@@ -102,8 +112,10 @@ export function createMcpEgressProxy(serverId: string, getAllowHosts: () => read
     void (async () => {
       let target: { host: string; port: number } | null = null
       let originPath = ''
+      let httpsTarget = false
       try {
         const u = new URL(req.url ?? '')
+        httpsTarget = u.protocol === 'https:'
         target = parseTarget(`${u.hostname.replace(/^\[|\]$/g, '')}:${u.port || (u.protocol === 'https:' ? '443' : '80')}`, 80)
         originPath = u.pathname + u.search
       } catch {
@@ -123,12 +135,23 @@ export function createMcpEgressProxy(serverId: string, getAllowHosts: () => read
         res.end(`${decision.reason}\r\n`)
         return
       }
+      // N2 (fase mcp-egress-sicurezza): l'Host verso l'upstream è SEMPRE quello
+      // del target validato; un Host del client DIVERSO dall'autorità dell'URL
+      // è domain fronting (CDN/vhost condivisi) → 403 + riga di log (mai l'URL)
+      const expectedHost = upstreamHostHeader(target.host, target.port, httpsTarget)
+      const sentHost = typeof req.headers.host === 'string' ? req.headers.host : null
+      if (sentHost !== null && sentHost.toLowerCase() !== expectedHost.toLowerCase()) {
+        console.log(`[mcp-egress-proxy ${serverId}] rifiutato ${target.host}:${target.port}: Host header "${sentHost}" ≠ authority "${expectedHost}" (domain fronting)`)
+        res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' })
+        res.end(`host header does not match the validated target (${target.host}): domain fronting is not allowed\r\n`)
+        return
+      }
       const headers: Record<string, string> = {}
       for (const [k, v] of Object.entries(req.headers)) {
         if (HOP_BY_HOP.has(k.toLowerCase())) continue
         headers[k] = Array.isArray(v) ? v.join(', ') : String(v)
       }
-      headers.host = req.headers.host ?? target.host
+      headers.host = expectedHost
       const upstream = http.request(
         { host: ips[0], port: target.port, method: req.method, path: originPath, headers },
         (ur) => {
