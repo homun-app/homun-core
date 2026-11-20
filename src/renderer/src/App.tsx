@@ -229,7 +229,11 @@ export function App() {
         {openGroupId === null ? <Chat layout={layout} /> : <TeamChat />}
         {/* Q2 (fase squadra): la coda copre l'area centrale quando è aperta */}
         {openGroupId !== null && approvalsQueueOpen && <ApprovalsQueue />}
-        <ApprovalsCenter />
+        {/* B1 (fase beta10-correzioni): il centro copre l'area centrale SOLO
+            quando è aperto — reso senza condizione restava per sempre sopra la
+            chat e la finestra non si usava più (select, squadra, Libreria e
+            Attività chiudono approvalsOpen: qui è l'UNICO punto che decide) */}
+        {approvalsOpen && <ApprovalsCenter />}
         <LibraryPanel />
         <ActivityPanel />
       </div>
