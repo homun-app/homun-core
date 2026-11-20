@@ -320,6 +320,18 @@ const clickText = async (text, { scope = 'document', exact = false, timeoutMs = 
   }
 }
 /** seleziona un bot nella barra laterale (la riga porta anche lo stato: match per prefisso) e aspetta il compositore privato — si RIPROVA per 5 s: è un click UI, e la riga può arrivare col refresh coalescente della squadra (C3) */
+/** fase barra-sobria: le squadre sono CHIUSE di default — i membri si
+ *  aprono dalla chevron, la strada di prodotto, prima di selezionarli */
+const openTeamMembers = async (teamName) => {
+  const ok = await pageEval(`
+    const btns = [...document.querySelectorAll('aside button[aria-label]')]
+    const b = btns.find((x) => (x.getAttribute('aria-label') ?? '').includes(${JSON.stringify(`Apri i membri di ${teamName}`)}))
+    if (!b) return false
+    b.click()
+    return true
+  `).catch(() => false)
+  return ok === true
+}
 const selectBot = async (name) => {
   const deadline = Date.now() + 5_000
   for (;;) {
@@ -379,6 +391,10 @@ try {
   // laterale (sta nella riga della squadra), e la sonda seleziona i bot dalle
   // loro righe — Capo resta membro selezionabile come mittente delle deleghe
   const group = await rpc(`groupCreate(${JSON.stringify('Weekend Torino')}, ${JSON.stringify([capo.id, treni.id, turismo.id])}, ${JSON.stringify(treni.id)}, ${JSON.stringify('Guida per un weekend a Torino in treno')})`)
+  // fase barra-sobria: la squadra è chiusa di default e i turni passano da
+  // Capo (membro): si aprono i membri dalla chevron (scelta che si ricorda)
+  await sleep(800)
+  if (!(await openTeamMembers('Weekend Torino'))) throw new Error('apertura membri di Weekend Torino non riuscita')
   check('setup: la squadra nasce con autonomia box (il default)', group.autonomy === 'box', `autonomy=${group.autonomy}`)
 
   // il login della Cassaforte per il modulo del museo (origine del sito finto)

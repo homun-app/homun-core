@@ -284,6 +284,18 @@ const clickText = async (text, { scope = 'document', exact = false, timeoutMs = 
  * La RIGA può arrivare col refresh coalescente (fino a 10 s per trovarla); la
  * REAZIONE al click — il compositore del bot — resta entro 5 s: se la UI
  * rallenta, la sonda deve essere rossa. */
+/** fase barra-sobria: le squadre sono CHIUSE di default — i membri si
+ *  aprono dalla chevron, la strada di prodotto, prima di selezionarli */
+const openTeamMembers = async (teamName) => {
+  const ok = await pageEval(`
+    const btns = [...document.querySelectorAll('aside button[aria-label]')]
+    const b = btns.find((x) => (x.getAttribute('aria-label') ?? '').includes(${JSON.stringify(`Apri i membri di ${teamName}`)}))
+    if (!b) return false
+    b.click()
+    return true
+  `).catch(() => false)
+  return ok === true
+}
 const selectBot = async (name) => {
   const findDeadline = Date.now() + 10_000
   for (;;) {
@@ -383,6 +395,12 @@ try {
   // i tool del server siano offerti al modello
   await page.send('Page.reload')
   if (!(await waitDom(`document.querySelector('aside')`, 25_000))) throw new Error('la pagina non è tornata dopo il reload: ' + appLog.slice(-500))
+  // fase barra-sobria: le squadre sono chiuse di default e i turni della
+  // sonda passano dai MEMBRI — si aprono dalla chevron (scelta che si ricorda)
+  for (const teamName of ['Weekend Torino', 'Fatture marzo']) {
+    if (!(await openTeamMembers(teamName))) throw new Error(`apertura membri di ${teamName} non riuscita`)
+  }
+  if (!(await waitDom(`[...document.querySelectorAll('aside button')].some((b) => b.textContent.trim().startsWith('Turismo'))`, 5_000))) throw new Error('i membri aperti non si vedono')
 
   // =========== lo script del modello: le 5 richieste ===========
   // 1. Turismo (Weekend Torino): fill_credential col login del museo → i tuoi dati
