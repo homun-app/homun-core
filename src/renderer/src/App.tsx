@@ -304,7 +304,15 @@ function BootSplash() {
   }
   return (
     <div className="flex h-screen w-screen flex-col items-center justify-center gap-5 bg-muted/40 text-foreground" data-testid="boot-splash">
-      <div className="flex h-16 w-16 animate-pulse items-center justify-center rounded-[18px] bg-muted text-2xl font-display" aria-hidden>🧚</div>
+      {/* l'icona di Homun (build/icon.svg, variante B): gli occhi sbattono
+          piano con il keyframe della mascotte (bot-blink) mentre carica */}
+      <svg className="h-16 w-16" viewBox="100 100 824 824" aria-hidden="true" data-testid="boot-splash-mark">
+        <rect x="100" y="100" width="824" height="824" rx="185" fill="#157A6E" />
+        <g className="bot-blink" style={{ transformOrigin: '512px 510px' }}>
+          <rect x="358" y="408" width="92" height="205" rx="46" fill="#F4F1EE" />
+          <rect x="574" y="408" width="92" height="205" rx="46" fill="#F4F1EE" />
+        </g>
+      </svg>
       <div className="flex flex-col items-center gap-2">
         <p className="font-display text-xl">Homun</p>
         <p className="text-xs text-muted-foreground" data-testid="boot-splash-line">
