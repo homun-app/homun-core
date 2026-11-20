@@ -439,8 +439,11 @@ try {
     for (let i = 0; i < 6; i++) callPass(who)
   }
 
-  await clickText('Weekend Torino', { exact: false })
-  await waitDom(`document.querySelector('form textarea')`, 5_000)
+  // B1 (fase beta10-correzioni): qui c'era un waitDom il cui risultato veniva
+  // ignorato — «aprire la squadra ne mostra la chat» è un comportamento del
+  // prodotto, diventa check
+  check('Q4: aprire la squadra dalla barra ne mostra la chat (composer)', await clickText('Weekend Torino', { exact: false }) &&
+    await waitDom(`document.querySelector('form textarea')`, 5_000))
   await sendMessage('@Treni guida-definitiva: scrivi la guida definitiva come documento in Libreria')
   const docDone = await waitDom(`document.body.textContent.includes('Guida pronta')`, 60_000, 500)
   check('Q4: il riepilogo del coordinatore è nella timeline', docDone)
@@ -509,9 +512,11 @@ try {
   check('Q2: la coda si svuota (la card si è chiusa)', queueEmpty)
 
   // =========== 4. il pannello del team (Q5) e la schermata Autonomia (Q1) ===========
-  await clickText('Torna alla squadra', { exact: true })
+  // B1: idem — anche «Torna alla squadra» deve riportare alla chat della
+  // squadra: era un waitDom ignorato, ora è un check
+  check('Q5: «Torna alla squadra» riporta alla chat della squadra (composer)', await clickText('Torna alla squadra', { exact: true }) &&
+    await waitDom(`document.querySelector('form textarea')`, 5_000))
   await waitQuiet()
-  await waitDom(`document.querySelector('form textarea')`, 5_000)
   // il pannello del team: il bottone PanelRight da chiuso, ALTRIMENTI la
   // pillola della squadra nella fascia alta lo apre (aria-expanded)
   let panelOk = await clickText('Mostra il pannello dei membri', { exact: false })

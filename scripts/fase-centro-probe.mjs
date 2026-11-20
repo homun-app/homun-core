@@ -507,15 +507,26 @@ try {
     rows.map((r) => `${r.botName}:${r.category}`).join(','))
 
   // =========== 6 (prima delle decisioni). il riquadro nella chat principale ===========
-  // (il centro aperto per rifiutare la richiesta del figlio si chiude: il
-  // riquadro vive nelle chat)
-  await clickTestid('approvals-center-close')
-  await waitDom(`!document.querySelector('[data-testid="approvals-center"]')`, 5_000)
-  if (!(await selectBot('Bot'))) throw new Error('selezione del bot principale non riuscita')
+  // B1 (fase beta10-correzioni): «Chiudi» deve chiudere DAVVERO il centro e
+  // riportare la chat. Prima qui c'era un waitDom il cui risultato veniva
+  // ignorato: la beta.10 disegnava il centro per sempre e la cattura 5
+  // mostrava il centro al posto della chat
+  check('«Chiudi» chiude il centro e torna alla chat (composer visibile)', await clickTestid('approvals-center-close') &&
+    await waitDom(`!document.querySelector('[data-testid="approvals-center"]') && !!document.querySelector('form textarea')`, 5_000))
+  // B1: dal centro RIAPERTO, il clic su un bot della barra laterale porta alla
+  // SUA chat: composer di quel bot e centro assente
+  const botViaSidebar = await clickTestid('sidebar-approvals') &&
+    await waitDom(`document.querySelector('[data-testid="approvals-center"]')`, 5_000) &&
+    await selectBot('Bot') &&
+    await waitDom(`!document.querySelector('[data-testid="approvals-center"]') && (document.querySelector('form textarea')?.placeholder ?? '').includes('Bot')`, 5_000)
+  check('dal centro aperto, il clic su un bot della barra laterale porta alla sua chat', botViaSidebar)
   const banner = await waitDom(`document.querySelector('[data-testid="approvals-banner"]')`, 10_000)
   const bannerText = banner ? await pageEval(`return document.querySelector('[data-testid="approvals-banner"]').textContent`) : ''
   check('il riquadro in cima alla chat principale: «5 richieste aspettano te»', banner && bannerText.includes('5 richieste aspettano te'), String(bannerText).slice(0, 160))
   check('le 2 più urgenti e «e altre 3»', banner && bannerText.includes('e altre 3') && (bannerText.match(/Decidi/g) ?? []).length === 2, String(bannerText).slice(0, 200))
+  // B1: la cattura 5 è la CHAT col riquadro — il centro non deve esserci nel
+  // DOM al momento dello shot
+  check('la cattura 5 mostra la chat col riquadro: il centro NON c\'è al momento dello shot', banner && !(await pageEval(`return document.querySelector('[data-testid="approvals-center"]') !== null`).catch(() => true)))
   await shot('5-chat-principale-riquadro.png')
 
   // =========== 7. «Riduci» ===========
