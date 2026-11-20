@@ -190,7 +190,7 @@ export function registerIpc(
   // Dock non si può simulare altrimenti. SOLO con SANDBOT_TEST_USER_DATA
   // (fuori dalle prove l'handler rifiuta), emette l'activate VERO
   ipcMain.handle('test:emit-activate', () => {
-    if (!process.env.SANDBOT_TEST_USER_DATA) throw new Error('test:emit-activate è solo delle sonde (SANDBOT_TEST_USER_DATA)')
+    if (!process.env.SANDBOT_TEST_USER_DATA) throw new Error('test:emit-activate is probe-only (needs SANDBOT_TEST_USER_DATA)')
     app.emit('activate')
     return { ok: true }
   })
