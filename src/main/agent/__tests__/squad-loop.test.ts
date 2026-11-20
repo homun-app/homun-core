@@ -281,13 +281,16 @@ describe('Q2/S1 (fase squadra-sicurezza): «Consenti per questa missione» nel l
     expect(grants.map((gr) => gr.agent_id).sort()).toEqual([alloggio, capo, treni].sort())
     expect(grants.every((gr) => gr.target === `squad:${gid}|agent:${alloggio}`)).toBe(true)
     expect(grants.every((gr) => gr.expires_at > Date.now() + 7 * 60 * 60 * 1000)).toBe(true)
-    // la STESSA delega (stesso destinatario) passa ora senza card
+    // S3 (fase squadra-sicurezza-2): la STESSA delega contaminata chiede DI
+    // NUOVO anche col grant — con ask il grant non scavalca F8; tra membri si
+    // passa solo via Q1 (box/box_review, propagando il contagio), non col grant
     queue = [
       { tool: { name: 'send_to_agent', args: { agentId: alloggio, text: 'e il parcheggio?' } } },
       { text: 'inviato' }
     ]
-    await runTurnAllowing(treni, { squadId: gid, contaminated: true }, 'mission')
-    expect(store.getEntries(treni).filter((e) => e.kind === 'approval')).toHaveLength(1)
+    await runTurnDeciding(treni, { squadId: gid, contaminated: true })
+    const cardSame = store.getEntries(treni).filter((e) => e.kind === 'approval').find((e) => e.meta?.status === 'denied')
+    expect(cardSame).toBeTruthy()
     // una delega verso un ALTRO destinatario chiede di nuovo (il grant è del destinatario della card)
     queue = [
       { tool: { name: 'send_to_agent', args: { agentId: treni, text: 'fatto' } } },
@@ -352,7 +355,8 @@ describe('Q2/S1 (fase squadra-sicurezza): «Consenti per questa missione» nel l
     expect(card!.meta?.status).toBe('allowed')
     const grants = store.db().prepare("SELECT tool, target FROM grants WHERE tool = 'update_group'").all() as Array<{ target: string }>
     expect(grants.length).toBeGreaterThan(0)
-    expect(grants.every((gr) => gr.target === `squad:${gid}|*`)).toBe(true)
+    // S3 (fase squadra-sicurezza-2): il bersaglio è la PROPRIA squadra
+    expect(grants.every((gr) => gr.target === `squad:${gid}|group:${gid}`)).toBe(true)
     // nel turno DELLA SQUADRA l'update_group passa senza card
     queue = [
       { tool: { name: 'update_group', args: { groupId: gid, description: 'missione 2' } } },
@@ -368,6 +372,32 @@ describe('Q2/S1 (fase squadra-sicurezza): «Consenti per questa missione» nel l
     await runTurnDeciding(a, {})
     const cardPrivato = store.getEntries(a).filter((e) => e.kind === 'approval').find((e) => e.meta?.status === 'denied')
     expect(cardPrivato).toBeTruthy()
+  })
+
+  it('S3: con autonomia ask la missione di DELEGA non copre il turno contaminato (tra membri passa solo via Q1: box/box_review)', async () => {
+    const treni = makeAgent('Treni S3 missione')
+    const alloggio = makeAgent('Alloggio S3 missione')
+    activateGroups(treni, ['bots'])
+    activateGroups(alloggio, ['bots'])
+    const gid = makeGroup(treni, alloggio, 'ask')
+    // la prima delega contaminata chiede e si concede PER LA MISSIONE
+    queue = [
+      { tool: { name: 'send_to_agent', args: { agentId: alloggio, text: 'check-in?' } } },
+      { text: 'inviato' }
+    ]
+    await runTurnAllowing(treni, { squadId: gid, contaminated: true }, 'mission')
+    const card = store.getEntries(treni).find((e) => e.kind === 'approval')
+    expect(card).toBeTruthy()
+    expect(card!.meta?.status).toBe('allowed')
+    // la STESSA delega contaminata chiede DI NUOVO: il grant non scavalca F8
+    queue = [
+      { tool: { name: 'send_to_agent', args: { agentId: alloggio, text: 'e il parcheggio?' } } },
+      { text: 'inviato' }
+    ]
+    await runTurnDeciding(treni, { squadId: gid, contaminated: true })
+    const card2 = store.getEntries(treni).filter((e) => e.kind === 'approval').find((e) => e.meta?.status === 'denied')
+    expect(card2).toBeTruthy()
+    expect(listJobs(store.db()).filter((j) => j.kind === 'user-message' && j.agent_id === alloggio).length).toBe(1)
   })
 })
 

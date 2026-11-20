@@ -696,12 +696,17 @@ export function applyMissionGrant(input: { agentId: string; approvalId: string; 
   const tool = String(meta.tool ?? '')
   if (!entry || !tool) return 0
   if (meta.squadAlwaysAsk === true) return 0
-  if (!missionGrantAllowed(squadApprovalCategory(entry))) return 0
+  if (!missionGrantAllowed(squadApprovalCategory(entry), tool)) return 0
   const gid = Number(meta.squadId ?? 0)
   if (!gid || !getGroup(gid)) return 0
   const browserUrl = (meta.browser as { url?: string } | undefined)?.url ?? null
   const target = missionGrantTarget(tool, meta.input as Record<string, unknown>, browserUrl)
   if (target === null) return 0
+  // S3 (fase squadra-sicurezza-2): update_group vale solo per la PROPRIA
+  // squadra (il grant nasce squad:<gid>|group:<gid>), update_agent solo per
+  // un bot MEMBRO di quella squadra (squad:<gid>|agent:<id>)
+  if (tool === 'update_group' && target !== `group:${gid}`) return 0
+  if (tool === 'update_agent' && !isGroupMember(gid, String((meta.input as Record<string, unknown>)?.agentId ?? ''))) return 0
   const expiresAt = input.now + MISSION_GRANT_MS
   const members = groupMemberIds(gid)
   for (const memberId of members) {

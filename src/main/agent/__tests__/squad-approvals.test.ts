@@ -112,6 +112,28 @@ describe('S1 (fase squadra-sicurezza): il target del grant di missione ha SEMPRE
   })
 })
 
+describe('S3 (fase squadra-sicurezza-2): bersaglio preciso per update_group/update_agent, mai «*»', () => {
+  it('update_group → group:<gid> della squadra aggiornata; senza groupId valido → NULL (niente grant)', () => {
+    expect(missionGrantTarget('update_group', { groupId: 5, description: 'x' })).toBe('group:5')
+    expect(missionGrantTarget('update_group', {})).toBeNull()
+    expect(missionGrantTarget('update_group', { groupId: 'pippo' })).toBeNull()
+  })
+
+  it('update_agent → agent:<id> del bot aggiornato; senza agentId → NULL (niente grant)', () => {
+    expect(missionGrantTarget('update_agent', { agentId: 'b7', role: 'x' })).toBe('agent:b7')
+    expect(missionGrantTarget('update_agent', {})).toBeNull()
+  })
+
+  it('create_agent/create_group NON hanno grant di missione: missionGrantAllowed li esclude (la coda non offre il bottone)', () => {
+    expect(missionGrantAllowed('squadra', 'create_agent')).toBe(false)
+    expect(missionGrantAllowed('squadra', 'create_group')).toBe(false)
+    // gli altri della stessa categoria restano offerti
+    expect(missionGrantAllowed('squadra', 'update_group')).toBe(true)
+    expect(missionGrantAllowed('squadra', 'send_to_agent')).toBe(true)
+    expect(missionGrantAllowed('sito-interattivo', 'browser_click')).toBe(true)
+  })
+})
+
 describe('Q2: collectPendingApprovals — membri e sottoagenti', () => {
   const entry = (over: Record<string, unknown>) => over as never
   it('raccoglie le pendenti dei membri E dei figli, escluse le decise, dalla più recente', () => {

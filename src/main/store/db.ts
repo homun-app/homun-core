@@ -584,13 +584,24 @@ export function migrateUseAppActionGrants(): { removed: number } {
  * «per sempre» pre-esistente resta a scadenza NULL (addGrant): quella riga è
  * indistinguibile dalla concessione dell'utente e non si tocca. Idempotente:
  * nel formato nuovo (squad:<gid>|…) questi target non esistono più.
+ *
+ * S3 (fase squadra-sicurezza-2): revoca anche i grant col formato DELLA FASE
+ * SCORSA per i tool il cui bersaglio ora è PRECISO — `squad:<gid>|*` per
+ * update_group/update_agent/create_agent/create_group — riconoscibili CON
+ * CERTEZZA dal prefisso `squad:` e dal tool (solo applyMissionGrant crea
+ * target con prefisso squad:, e da questa fase quei tool non hanno più target
+ * `|*`: update_group/update_agent portano group:/agent: e create_* non hanno
+ * più nessun grant). Idempotente: le righe nuove (squad:<gid>|group:<gid>,
+ * squad:<gid>|agent:<id>) non finiscono con `|*` e restano.
  */
 export function revokeLegacyMissionGrants(): { removed: number } {
   const squadTools = ['send_to_agent', 'create_agent', 'create_group', 'update_group', 'update_agent', 'delete_agent']
   const rows = [
     ...db().prepare("SELECT id FROM grants WHERE tool LIKE 'browser\\_%' ESCAPE '\\' AND target LIKE 'site:%'").all() as Array<{ id: number }>,
     ...db().prepare('SELECT id FROM grants WHERE tool IN (?,?,?,?,?,?) AND target = ? AND expires_at IS NOT NULL AND expires_at - created_at = ?')
-      .all(...squadTools, '*', MISSION_GRANT_MS) as Array<{ id: number }>
+      .all(...squadTools, '*', MISSION_GRANT_MS) as Array<{ id: number }>,
+    ...db().prepare("SELECT id FROM grants WHERE tool IN (?,?,?,?) AND target LIKE 'squad:%|*'")
+      .all('update_group', 'update_agent', 'create_agent', 'create_group') as Array<{ id: number }>
   ]
   for (const r of rows) db().prepare('DELETE FROM grants WHERE id=?').run(r.id)
   return { removed: rows.length }

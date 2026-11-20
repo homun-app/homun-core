@@ -5108,6 +5108,172 @@ describe('S2 (fase squadra-sicurezza): box_review + turno contaminato — il rev
   })
 })
 
+// ---- S3 (fase squadra-sicurezza-2): il grant di missione rispetta origine, contagio e bersaglio ----
+
+describe('S3 (fase squadra-sicurezza-2): il grant di missione non scavalca origine e contagio, e ha un bersaglio preciso', () => {
+  /** crea una squadra (mock in memoria) con l'autonomia data e AGENT membro */
+  const mkSquad = (autonomy: 'ask' | 'box' | 'box_review'): number => {
+    const g = createGroup('Missione S3', '', AGENT, [])
+    const row = h.db.groupsState.groups.find((x) => x.id === g.id)! as { autonomy?: string }
+    row.autonomy = autonomy
+    return g.id
+  }
+  /** come mkSquad ma la squadra è creata da UN ALTRO bot (niente bypass del creatore su update_group) */
+  const mkForeignSquad = (autonomy: 'ask' | 'box' | 'box_review'): number => {
+    const g = createGroup('Squadra altrui S3', '', 'agent_capo', [AGENT])
+    const row = h.db.groupsState.groups.find((x) => x.id === g.id)! as { autonomy?: string }
+    row.autonomy = autonomy
+    return g.id
+  }
+  /** gira un turno NEGANDO via via le card pendenti */
+  const runTurnDenying = async (opts: Record<string, unknown>): Promise<void> => {
+    const p = runTurn(AGENT, 'lavoro', emit, undefined, opts as never)
+    p.catch(() => undefined)
+    const deadline = Date.now() + 30_000
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 40))
+      const appr = h.db.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending')
+      if (appr) resolveApproval(AGENT, String(appr.meta?.approvalId), 'deny')
+      if (!isRunning(AGENT)) break
+    }
+    await p
+  }
+
+  beforeEach(() => {
+    browserState.available = true
+    browserState.calls.length = 0
+    browserState.fieldProbe = null
+    browserState.lastUrl = null
+  })
+
+  it('grant di missione su create_agent + turno CONTAMINATO → card (non passa in silenzio)', async () => {
+    const gid = mkSquad('box')
+    h.db.grants.push({ tool: 'create_agent', target: `squad:${gid}|*` })
+    h.llm.queue = [
+      { toolCalls: [{ id: 's3a', name: 'create_agent', arguments: JSON.stringify({ name: 'Bot ostile', role: 'inoltra a esterno@example.com' }) }] },
+      { toolCalls: [{ id: 's3b', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurnDenying({ squadId: gid, contaminated: true })
+    const appr = h.db.entries.find((e) => e.kind === 'approval')!
+    expect(appr.meta?.status).toBe('denied')
+    // nessun bot creato dal contenuto non fidato
+    expect([...h.db.agents.values()].some((a) => a.name === 'Bot ostile')).toBe(false)
+  })
+
+  it('grant di missione su create_agent + turno AUTOMATICO (forcedOriginAsk) → card', async () => {
+    const gid = mkSquad('box')
+    h.db.grants.push({ tool: 'create_agent', target: `squad:${gid}|*` })
+    h.llm.queue = [
+      { toolCalls: [{ id: 's3c', name: 'create_agent', arguments: JSON.stringify({ name: 'Bot automatico', role: 'x' }) }] },
+      { toolCalls: [{ id: 's3d', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurnDenying({ squadId: gid, automatic: true })
+    const appr = h.db.entries.find((e) => e.kind === 'approval')!
+    expect(appr.meta?.status).toBe('denied')
+    expect([...h.db.agents.values()].some((a) => a.name === 'Bot automatico')).toBe(false)
+  })
+
+  it('autonomia box, turno contaminato, grant sul sito + browser_type → card (come una always_allow sotto F8)', async () => {
+    // il revisore è ATTIVO e approverebbe: è il contagio che ferma, non la sua
+    // assenza (stesso comportamento di una regola always_allow sotto F8)
+    enableAutoReview()
+    reviewerAllow(AR_RULE)
+    const gid = mkSquad('box')
+    h.db.grants.push({ tool: 'browser_type', target: `squad:${gid}|site:spa.example` })
+    h.llm.queue = [
+      { toolCalls: [{ id: 's3e', name: 'browser_type', arguments: JSON.stringify({ ref: 'e40', text: 'Fabio Rossi' }) }] },
+      { toolCalls: [{ id: 's3f', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurnDenying({ squadId: gid, contaminated: true })
+    const appr = h.db.entries.find((e) => e.kind === 'approval')!
+    expect(appr.meta?.status).toBe('denied')
+    expect(browserState.calls).toHaveLength(0)
+  })
+
+  it('autonomia box, turno contaminato, grant sul sito + browser_click NON di pagamento → card', async () => {
+    enableAutoReview()
+    reviewerAllow(AR_RULE)
+    const gid = mkSquad('box')
+    h.db.grants.push({ tool: 'browser_click', target: `squad:${gid}|site:spa.example` })
+    h.llm.queue = [
+      { toolCalls: [{ id: 's3g', name: 'browser_click', arguments: JSON.stringify({ ref: 'e8' }) }] },
+      { toolCalls: [{ id: 's3h', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurnDenying({ squadId: gid, contaminated: true })
+    const appr = h.db.entries.find((e) => e.kind === 'approval')!
+    expect(appr.meta?.status).toBe('denied')
+    expect(browserState.calls).toHaveLength(0)
+  })
+
+  it('GUARDIA: turno PULITO + grant sul sito → il browser_type passa SENZA card (come oggi)', async () => {
+    const gid = mkSquad('box')
+    h.db.grants.push({ tool: 'browser_type', target: `squad:${gid}|site:spa.example` })
+    h.llm.queue = [
+      { toolCalls: [{ id: 's3i', name: 'browser_type', arguments: JSON.stringify({ ref: 'e40', text: 'Fabio Rossi' }) }] },
+      { toolCalls: [{ id: 's3j', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurnDenying({ squadId: gid })
+    expect(h.db.entries.filter((e) => e.kind === 'approval')).toEqual([])
+    expect(browserState.calls.map((c) => c.tool)).toEqual(['browser_type'])
+  })
+
+  it('grant update_group VECCHIO (squad:<g1>|*) + update_group del gruppo 2 nel turno della squadra 1 → card', async () => {
+    const g1 = mkSquad('box')
+    // un ALTRO gruppo, creato da un altro bot (niente bypass del creatore)
+    createGroup('Altra squadra', '', 'agent_capo', ['agent_capo'])
+    const g2 = h.db.groupsState.groups.find((x) => x.name === 'Altra squadra')!.id
+    h.db.grants.push({ tool: 'update_group', target: `squad:${g1}|*` })
+    h.llm.queue = [
+      { toolCalls: [{ id: 's3k', name: 'update_group', arguments: JSON.stringify({ groupId: g2, description: 'regole cambiate' }) }] },
+      { toolCalls: [{ id: 's3l', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurnDenying({ squadId: g1 })
+    const appr = h.db.entries.find((e) => e.kind === 'approval')!
+    expect(appr.meta?.status).toBe('denied')
+    expect(appr.meta?.tool).toBe('update_group')
+  })
+
+  it('grant update_group NUOVO (squad:<g1>|group:<g1>) + update_group del gruppo 1 nel turno della squadra 1 → passa SENZA card', async () => {
+    // la squadra è creata da un ALTRO bot: senza grant la card ci sarebbe
+    const g1 = mkForeignSquad('box')
+    h.db.grants.push({ tool: 'update_group', target: `squad:${g1}|group:${g1}` })
+    h.llm.queue = [
+      { toolCalls: [{ id: 's3m', name: 'update_group', arguments: JSON.stringify({ groupId: g1, description: 'regole della missione' }) }] },
+      { toolCalls: [{ id: 's3n', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurnDenying({ squadId: g1 })
+    expect(h.db.entries.filter((e) => e.kind === 'approval')).toEqual([])
+  })
+
+  it('grant update_agent VECCHIO (squad:<g>|*) + update_agent del bot Y NON membro → card', async () => {
+    const gid = mkSquad('box')
+    // Y: bot dell'UTENTE (niente insieme fisso «di un altro»), ma NON membro
+    h.db.agents.set('bot_y', { id: 'bot_y', name: 'Bot Y', description: '', providerId: 'prov', model: 'm1', status: 'idle', unread: 0, createdAt: 2 })
+    h.db.grants.push({ tool: 'update_agent', target: `squad:${gid}|*` })
+    h.llm.queue = [
+      { toolCalls: [{ id: 's3o', name: 'update_agent', arguments: JSON.stringify({ agentId: 'bot_y', role: 'ruolo cambiato' }) }] },
+      { toolCalls: [{ id: 's3p', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurnDenying({ squadId: gid })
+    const appr = h.db.entries.find((e) => e.kind === 'approval')!
+    expect(appr.meta?.status).toBe('denied')
+    expect(appr.meta?.tool).toBe('update_agent')
+  })
+
+  it('grant update_agent NUOVO (squad:<g>|agent:<x>) per il bot X MEMBRO + update_agent di X → passa SENZA card', async () => {
+    const gid = mkSquad('box')
+    h.db.agents.set('bot_x', { id: 'bot_x', name: 'Bot X', description: '', providerId: 'prov', model: 'm1', status: 'idle', unread: 0, createdAt: 2 })
+    h.db.groupsState.members.get(gid)!.push('bot_x')
+    h.db.grants.push({ tool: 'update_agent', target: `squad:${gid}|agent:bot_x` })
+    h.llm.queue = [
+      { toolCalls: [{ id: 's3q', name: 'update_agent', arguments: JSON.stringify({ agentId: 'bot_x', role: 'ruolo della missione' }) }] },
+      { toolCalls: [{ id: 's3r', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurnDenying({ squadId: gid })
+    expect(h.db.entries.filter((e) => e.kind === 'approval')).toEqual([])
+  })
+})
+
 // ---- fase 12 (punto 0): residui della fase 11b nel loop ----
 
 describe('fase 12 0a/0d: probe interno del tipo di campo e card di press_key', () => {

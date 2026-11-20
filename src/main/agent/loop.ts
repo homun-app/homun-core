@@ -72,7 +72,7 @@ import { formatAgentMessage, agentSendGuard, countPairMessagesLastHour, AGENT_HO
 import { mainAgentOf } from '../../daemon/presence'
 import { analyzeCommand } from './shell-ast'
 import { commandKey, isNeverAuto , grantActive} from './permission-rules'
-import { autoReviewDecision, neverAskDecision, approvalsMode, reviewWithConfiguredModel, liftContaminatedAllow, squadBrowserReviewDecision, ownerWordsOf, botBriefOf, AUTO_REVIEW_MAX_PER_TURN, type AutoReviewAction } from './auto-review'
+import { autoReviewDecision, neverAskDecision, approvalsMode, reviewWithConfiguredModel, liftContaminatedAllow, squadBrowserReviewDecision, ownerWordsOf, botBriefOf, AUTO_REVIEW_MAX_PER_TURN, CONTAMINATED_ASK_TOOLS, type AutoReviewAction } from './auto-review'
 import { activityOf, stopReasonOfError } from './loop-guard'
 // SV7 (fase schermo-vivo): la serie con i RISULTATI (le soglie stanno lì)
 import {
@@ -3329,13 +3329,18 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           // per questa missione» dalla coda) copre quest'azione NON FISSA: si
           // esegue senza chiedere di nuovo. S1: il target porta la SQUADRA
           // (vale SOLO nei turni di quella squadra) e MAI un host vuoto —
-          // about:blank/data:/file: non hanno un confine di sito, niente grant
-          const missionSiteGrantActive = squad !== null && (() => {
-            const target = missionGrantTarget(call.name, input, browser.lastUrlOf(agentId))
-            if (target === null) return false
-            const owner = getAgent(agentId)?.parentId ?? agentId
-            return listGrants().some((g: Grant) => g.tool === call.name && g.target === missionGrantKey(squad.id, target) && (g.agentId == null || g.agentId === owner) && grantActive(g))
-          })()
+          // about:blank/data:/file: non hanno un confine di sito, niente grant.
+          // S3 (fase squadra-sicurezza-2): il grant NON scavalca il contagio —
+          // nei turni contaminati i tool del browser con effetti (F8:
+          // CONTAMINATED_ASK_TOOLS) tornano all'utente, come una regola
+          // always_allow di oggi: il grant non può fare di più
+          const missionSiteGrantActive = squad !== null &&
+            !(contaminated && CONTAMINATED_ASK_TOOLS.has(call.name)) && (() => {
+              const target = missionGrantTarget(call.name, input, browser.lastUrlOf(agentId))
+              if (target === null) return false
+              const owner = getAgent(agentId)?.parentId ?? agentId
+              return listGrants().some((g: Grant) => g.tool === call.name && g.target === missionGrantKey(squad.id, target) && (g.agentId == null || g.agentId === owner) && grantActive(g))
+            })()
           // S1: l'insieme fisso si valuta PRIMA del grant — se l'azione è fissa
           // la card va all'utente ANCHE con un grant di missione attivo; il
           // grant salta il blocco solo per le ask NON fisse
@@ -4425,9 +4430,14 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           // la delega contaminata per chi ha il grant. S1 (fase
           // squadra-sicurezza): il grant porta la SQUADRA e il DESTINATARIO
           // della card (mai «*») — vale SOLO nei turni di quella squadra e
-          // solo finché il destinatario ne è ancora membro
+          // solo finché il destinatario ne è ancora membro.
+          // S3 (fase squadra-sicurezza-2): il grant NON scavalca il contagio —
+          // send_to_agent è un CONTAMINATED_ASK_TOOL e nei turni contaminati
+          // la delega tra membri passa già per la regola Q1 (autonomia
+          // box/box_review, con la propagazione del contagio al turno di chi
+          // riceve), non per il grant; con autonomia ask la card resta
           const sendMissionAllowed = (() => {
-            if (!squad) return false
+            if (!squad || contaminated) return false
             const owner = getAgent(agentId)?.parentId ?? agentId
             return listGrants().some((g: Grant) =>
               g.tool === 'send_to_agent' &&
@@ -4826,14 +4836,22 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           // S1 (fase squadra-sicurezza): il grant di missione degli ALTRI
           // tool porta la squadra nel target (squad:<gid>|<chiave>): vale
           // SOLO nei turni di quella squadra, e si guarda solo DOPO l'insieme
-          // fisso
-          const missionToolGrantActive = squad !== null && (() => {
-            const owner = getAgent(agentId)?.parentId ?? agentId
-            return listGrants().some((g: Grant) =>
-              g.tool === call.name &&
-              g.target === missionGrantKey(squad.id, permissions.targetKey(call.name, input)) &&
-              (g.agentId == null || g.agentId === owner) && grantActive(g))
-          })()
+          // fisso. S3 (fase squadra-sicurezza-2): il grant NON scavalca i
+          // blocchi di oggi — con forcedOriginAsk (create_* nei turni non
+          // dell'utente) e nei turni CONTAMINATI per i CONTAMINATED_ASK_TOOLS
+          // la card va all'utente come sempre (fa eccezione send_to_agent tra
+          // membri, che passa dalla regola Q1 nel ramo suo, non da qui); e il
+          // bersaglio è PRECISO: update_group solo per la propria squadra
+          // (group:<gid>), update_agent solo per un bot membro (agent:<id>)
+          const missionToolGrantActive = squad !== null && !forcedOriginAsk &&
+            !(contaminated && CONTAMINATED_ASK_TOOLS.has(call.name)) && (() => {
+              const owner = getAgent(agentId)?.parentId ?? agentId
+              if (call.name === 'update_agent' && !isGroupMember(squad.id, String(input.agentId ?? ''))) return false
+              return listGrants().some((g: Grant) =>
+                g.tool === call.name &&
+                g.target === missionGrantKey(squad.id, permissions.targetKey(call.name, input)) &&
+                (g.agentId == null || g.agentId === owner) && grantActive(g))
+            })()
           if (!turnGranted && !squadFixedAsk && !missionToolGrantActive) {
             // fase 10: le ask forzate dall'ORIGINE non sono mai auto-approvabili
             // (il revisore giudicherebbe testo non dell'utente); fase 11: nemmeno

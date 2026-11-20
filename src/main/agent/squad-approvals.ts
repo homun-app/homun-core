@@ -73,8 +73,12 @@ export function squadApprovalWhy(meta: Record<string, unknown> | null | undefine
 /**
  * «Consenti per questa missione» esiste SOLO per sito-interattivo e squadra
  * (8 ore, un grant per membro): mai per dati tuoi, pagamenti, invii, Mac.
+ * S3 (fase squadra-sicurezza-2): nemmeno per create_agent/create_group —
+ * nascono bot e squadre NUOVI, e quei turni sono protetti da forcedOriginAsk
+ * (l'origine del turno decide, non una concessione): la card vale «una volta».
  */
-export function missionGrantAllowed(category: SquadApprovalCategory): boolean {
+export function missionGrantAllowed(category: SquadApprovalCategory, tool = ''): boolean {
+  if (tool === 'create_agent' || tool === 'create_group') return false
   return category === 'sito-interattivo' || category === 'squadra'
 }
 
@@ -104,7 +108,11 @@ export function missionGrantTarget(tool: string, input: Record<string, unknown>,
     const dest = String(input.agentId ?? '')
     return dest ? `agent:${dest}` : null
   }
-  return targetKey(tool, input)
+  // S3: update_group → group:<gid>, update_agent → agent:<id> (targetKey);
+  // la chiave «*» (argomento assente o invalido) NON è un confine → NULL,
+  // la decisione vale «una volta»
+  const key = targetKey(tool, input)
+  return key === '*' ? null : key
 }
 
 /**

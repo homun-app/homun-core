@@ -38,6 +38,19 @@ export function targetKey(tool: string, input: Record<string, unknown>): string 
   if (tool === 'update_state') {
     return input.target === 'routine' ? `routine ${String(input.id ?? '')}` : 'memory'
   }
+  // S3 (fase squadra-sicurezza-2): il grant di missione di update_group e
+  // update_agent ha un bersaglio PRECISO — la squadra aggiornata (group:<gid>)
+  // e il bot aggiornato (agent:<id>) — mai «*», che col grant squad:<gid>|*
+  // copriva l'aggiornamento di qualunque squadra e di qualunque bot. Senza
+  // l'argomento valido resta «*» (chiave senza confine: nessun grant la copre)
+  if (tool === 'update_group') {
+    const gid = Number(input.groupId)
+    return Number.isInteger(gid) && gid > 0 ? `group:${gid}` : '*'
+  }
+  if (tool === 'update_agent') {
+    const id = String(input.agentId ?? '')
+    return id ? `agent:${id}` : '*'
+  }
   return '*'
 }
 

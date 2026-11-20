@@ -85,9 +85,23 @@ describe('Q2: la coda «Da approvare» (tavola 2)', () => {
     ])
     expect(findAll(tree, (n) => n.attrs['data-testid'] === 'approval-mission').length).toBe(2)
     // e la purea: missionOffered
-    expect(missionOffered('sito-interattivo')).toBe(true)
-    expect(missionOffered('squadra')).toBe(true)
-    for (const c of ['dati-tuoi', 'pagamento', 'invio', 'mac', 'altro'] as const) expect(missionOffered(c), c).toBe(false)
+    expect(missionOffered('sito-interattivo', 'browser_click')).toBe(true)
+    expect(missionOffered('squadra', 'send_to_agent')).toBe(true)
+    for (const c of ['dati-tuoi', 'pagamento', 'invio', 'mac', 'altro'] as const) expect(missionOffered(c, 'browser_click'), c).toBe(false)
+  })
+
+  it('S3: «Consenti per questa missione» NON c\'è per create_agent/create_group (la card vale «una volta»)', () => {
+    const tree = renderQueue([
+      row({ approvalId: 'ap-ca', category: 'squadra', tool: 'create_agent', why: null }),
+      row({ approvalId: 'ap-cg', category: 'squadra', tool: 'create_group', why: null })
+    ])
+    expect(findAll(tree, (n) => n.attrs['data-testid'] === 'approval-mission').length).toBe(0)
+    expect(textOf(tree)).toContain('Consenti una volta')
+    // e la purea: missionOffered con il tool
+    expect(missionOffered('squadra', 'create_agent')).toBe(false)
+    expect(missionOffered('squadra', 'create_group')).toBe(false)
+    // gli altri tool di squadra restano
+    expect(missionOffered('squadra', 'update_group')).toBe(true)
   })
 
   it('la riga breve della barra: «Turismo vuole compilare un modulo con i tuoi dati»', () => {

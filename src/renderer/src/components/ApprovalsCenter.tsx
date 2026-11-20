@@ -49,9 +49,12 @@ function timeAgo(when: number, now: number): string {
 }
 
 /** «Consenti per questa missione» dove Q2 lo permette GIÀ: sito o squadra,
- *  con squadra, mai per l'insieme fisso e mai per le bozze. */
+ *  con squadra, mai per l'insieme fisso e mai per le bozze. S3 (fase
+ *  squadra-sicurezza-2): nemmeno per create_agent/create_group — quei turni
+ *  li protegge l'origine (forcedOriginAsk), la card vale «una volta». */
 function missionOffered(r: ApprovalsCenterRow): boolean {
   return !r.isDraft && r.squad !== null && r.why !== 'fisso' &&
+    r.tool !== 'create_agent' && r.tool !== 'create_group' &&
     (r.category === 'sito-interattivo' || r.category === 'squadra')
 }
 

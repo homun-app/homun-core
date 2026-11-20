@@ -185,3 +185,96 @@ describe('S1 (fase squadra-sicurezza): revoca alla migrazione dei grant di missi
     ].sort())
   })
 })
+
+describe('S3 (fase squadra-sicurezza-2): bersaglio preciso e niente missione per create_*', () => {
+  it('create_agent/create_group NON creano grant di missione (la card vale «una volta»)', () => {
+    const a = store.createAgent('Capo crea', '')
+    const b = store.createAgent('Membro crea', '')
+    const g = createGroup('Weekend', '', a.id, [b.id], a.id)
+    for (const [apid, tool] of [['ap-s3a', 'create_agent'], ['ap-s3b', 'create_group']] as const) {
+      store.appendEntry({
+        agentId: b.id, kind: 'approval', role: 'system', content: 'crea',
+        meta: { approvalId: apid, tool, input: { name: 'Nuovo' }, status: 'pending', squadId: g.id }
+      })
+      applyMissionGrant({ agentId: b.id, approvalId: apid, now: Date.now() })
+    }
+    expect(listGrants().filter((gr) => gr.tool === 'create_agent' || gr.tool === 'create_group')).toEqual([])
+  })
+
+  it('update_group di UN\'ALTRA squadra non crea grant (il grant copre solo la PROPRIA squadra)', () => {
+    const a = store.createAgent('Capo proprio', '')
+    const b = store.createAgent('Membro proprio', '')
+    const g1 = createGroup('Weekend', '', a.id, [b.id], a.id)
+    const g2 = createGroup('Altra', '', a.id, [], a.id)
+    store.appendEntry({
+      agentId: b.id, kind: 'approval', role: 'system', content: 'aggiorna l\'altra',
+      meta: { approvalId: 'ap-s3c', tool: 'update_group', input: { groupId: g2.id, description: 'x' }, status: 'pending', squadId: g1.id }
+    })
+    applyMissionGrant({ agentId: b.id, approvalId: 'ap-s3c', now: Date.now() })
+    expect(listGrants().filter((gr) => gr.tool === 'update_group')).toEqual([])
+  })
+
+  it('update_group della PROPRIA squadra crea il grant squad:<gid>|group:<gid> (per ogni membro)', () => {
+    const a = store.createAgent('Capo gruppo', '')
+    const b = store.createAgent('Membro gruppo', '')
+    const g = createGroup('Weekend', '', a.id, [b.id], a.id)
+    store.appendEntry({
+      agentId: b.id, kind: 'approval', role: 'system', content: 'aggiorna la propria',
+      meta: { approvalId: 'ap-s3d', tool: 'update_group', input: { groupId: g.id, description: 'x' }, status: 'pending', squadId: g.id }
+    })
+    applyMissionGrant({ agentId: b.id, approvalId: 'ap-s3d', now: Date.now() })
+    const grants = listGrants().filter((gr) => gr.tool === 'update_group')
+    expect(grants.map((gr) => gr.agentId).sort()).toEqual([a.id, b.id].sort())
+    expect(grants.every((gr) => gr.target === `squad:${g.id}|group:${g.id}`)).toBe(true)
+  })
+
+  it('update_agent di un bot NON membro non crea grant; di un MEMBRO crea squad:<gid>|agent:<id>', () => {
+    const a = store.createAgent('Capo bot', '')
+    const b = store.createAgent('Membro bot', '')
+    const membro = store.createAgent('Bot membro', '')
+    const estraneo = store.createAgent('Bot fuori', '')
+    const g = createGroup('Weekend', '', a.id, [b.id, membro.id], a.id)
+    store.appendEntry({
+      agentId: b.id, kind: 'approval', role: 'system', content: 'aggiorna lo straniero',
+      meta: { approvalId: 'ap-s3e', tool: 'update_agent', input: { agentId: estraneo.id, role: 'x' }, status: 'pending', squadId: g.id }
+    })
+    applyMissionGrant({ agentId: b.id, approvalId: 'ap-s3e', now: Date.now() })
+    expect(listGrants().filter((gr) => gr.tool === 'update_agent' && gr.target === `squad:${g.id}|agent:${estraneo.id}`)).toEqual([])
+    store.appendEntry({
+      agentId: b.id, kind: 'approval', role: 'system', content: 'aggiorna il membro',
+      meta: { approvalId: 'ap-s3f', tool: 'update_agent', input: { agentId: membro.id, role: 'x' }, status: 'pending', squadId: g.id }
+    })
+    applyMissionGrant({ agentId: b.id, approvalId: 'ap-s3f', now: Date.now() })
+    const grants = listGrants().filter((gr) => gr.tool === 'update_agent')
+    expect(grants.length).toBeGreaterThan(0)
+    expect(grants.every((gr) => gr.target === `squad:${g.id}|agent:${membro.id}`)).toBe(true)
+  })
+})
+
+describe('S3 (fase squadra-sicurezza-2): revoca alla migrazione dei grant squad:<gid>|* del formato della fase scorsa', () => {
+  it('i squad:%|* di update_group/update_agent/create_* vengono revocati; i nuovi (group:/agent:), le deleghe e i siti restano', () => {
+    const ins = store.db().prepare('INSERT INTO grants(tool, target, created_at, expires_at, agent_id) VALUES(?,?,?,?,?)')
+    const now = Date.now()
+    // formato della fase scorsa: riconoscibili dal prefisso squad: e dal tool
+    ins.run('update_group', 'squad:1|*', now, now + 8 * 60 * 60 * 1000, 'a1')
+    ins.run('update_agent', 'squad:1|*', now, now + 8 * 60 * 60 * 1000, 'a1')
+    ins.run('create_agent', 'squad:1|*', now, now + 8 * 60 * 60 * 1000, 'a2')
+    ins.run('create_group', 'squad:2|*', now, now + 8 * 60 * 60 * 1000, 'a3')
+    // formato NUOVO di questa fase e grant degli altri tool: restano
+    ins.run('update_group', 'squad:1|group:1', now, now + 8 * 60 * 60 * 1000, 'a1')
+    ins.run('update_agent', 'squad:1|agent:b7', now, now + 8 * 60 * 60 * 1000, 'a1')
+    ins.run('send_to_agent', 'squad:1|agent:b2', now, now + 8 * 60 * 60 * 1000, 'a1')
+    ins.run('browser_click', 'squad:1|site:booking.example', now, now + 8 * 60 * 60 * 1000, 'a1')
+    ins.run('run-command', 'ls', now, null, 'a1')
+    const { removed } = revokeLegacyMissionGrants()
+    expect(removed).toBe(4)
+    const left = listGrants().map((gr) => `${gr.tool}|${gr.target}`).sort()
+    expect(left).toEqual([
+      'browser_click|squad:1|site:booking.example',
+      'run-command|ls',
+      'send_to_agent|squad:1|agent:b2',
+      'update_agent|squad:1|agent:b7',
+      'update_group|squad:1|group:1'
+    ].sort())
+  })
+})

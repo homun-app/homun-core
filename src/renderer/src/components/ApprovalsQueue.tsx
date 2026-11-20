@@ -23,8 +23,11 @@ const CATEGORY_LABEL: Record<SquadPendingApprovalInfo['category'], MessageDescri
   altro: msg`altro`
 }
 
-/** «Consenti per questa missione» esiste solo per sito-interattivo e squadra. */
-export function missionOffered(category: SquadPendingApprovalInfo['category']): boolean {
+/** «Consenti per questa missione» esiste solo per sito-interattivo e squadra.
+ *  S3 (fase squadra-sicurezza-2): mai per create_agent/create_group — quei
+ *  turni li protegge l'origine (forcedOriginAsk), la card vale «una volta». */
+export function missionOffered(category: SquadPendingApprovalInfo['category'], tool: string): boolean {
+  if (tool === 'create_agent' || tool === 'create_group') return false
   return category === 'sito-interattivo' || category === 'squadra'
 }
 
@@ -124,7 +127,7 @@ export function ApprovalsQueue() {
                     >
                       <Trans>Consenti una volta</Trans>
                     </button>
-                    {missionOffered(r.category) && (
+                    {missionOffered(r.category, r.tool) && (
                       <button
                         className="rounded-full bg-muted px-4 py-2 text-sm transition hover:bg-accent"
                         data-testid="approval-mission"
