@@ -1355,6 +1355,10 @@ export async function executeTool(
       // fase 11 (punto 2): lettura LOCALE con difese SSRF, limiti e conversione;
       // cache per URL di 15 minuti; al modello al più 20k caratteri con offset
       const { getWebFetchFn, webFetchWindowOutput } = await import('./web-tools')
+      // T2 (fase web-strategia): la CAUSA giusta in testa — host inesistente,
+      // pagina inesistente, blocco anti-bot, manutenzione (mai «mi blocca»
+      // davanti a un nome che non risolve)
+      const { classifyWebFetchOutcome, WEB_ERROR_LINES } = await import('./web-errors')
       const rawUrl = String(input.url ?? '')
       const offset = input.offset !== undefined && input.offset !== null ? Number(input.offset) : undefined
       const outcome = await getWebFetchFn()(rawUrl)
@@ -1362,10 +1366,12 @@ export async function executeTool(
       // durata — il bot può rispondere a «risponde in meno di 2 secondi?»
       const timingLine = (o: { status?: number; elapsedMs?: number }): string =>
         o.status !== undefined && o.elapsedMs !== undefined ? `HTTP ${o.status} · ${o.elapsedMs} ms\n` : ''
+      const errorKind = classifyWebFetchOutcome(outcome)
+      const errorLine = errorKind ? `${WEB_ERROR_LINES[errorKind]}\n\n` : ''
       if (!outcome.ok) {
         return {
-          output: timingLine(outcome) + outcome.reason,
-          meta: { ...(outcome.blocked ? { blocked: true } : {}), ...(outcome.unsupported ? { unsupported: true } : {}) }
+          output: errorLine + timingLine(outcome) + outcome.reason,
+          meta: { ...(outcome.blocked ? { blocked: true } : {}), ...(outcome.unsupported ? { unsupported: true } : {}), ...(errorKind ? { webError: errorKind } : {}) }
         }
       }
       // fase 11b (punto 2): pagina costruita in JavaScript e browser
@@ -1382,8 +1388,8 @@ export async function executeTool(
         }
       }
       return {
-        output: timingLine(outcome) + webFetchWindowOutput(outcome.text, offset) + hint,
-        meta: { webContent: true, finalUrl: outcome.finalUrl, ...(outcome.jsBuilt ? { jsBuilt: true } : {}) }
+        output: errorLine + timingLine(outcome) + webFetchWindowOutput(outcome.text, offset) + hint,
+        meta: { webContent: true, finalUrl: outcome.finalUrl, ...(outcome.jsBuilt ? { jsBuilt: true } : {}), ...(errorKind ? { webError: errorKind } : {}) }
       }
     }
     case 'recall_memory': {

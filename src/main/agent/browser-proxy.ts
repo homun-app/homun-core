@@ -66,10 +66,52 @@ export function proxyDecision(host: string, port: number, ips: string[], boxSubn
 
 /** Risolve un host (i letterali non passano dal DNS, puro-ish ma iniettabile). */
 async function resolveHost(host: string): Promise<string[]> {
+  if (resolveOverrideForTests) return resolveOverrideForTests(host)
   const literal = literalHostIp(host)
   if (literal !== null) return [literal]
   const all = await lookup(host, { all: true })
   return all.map((a) => a.address)
+}
+
+/** Solo per i test: la risoluzione DNS del proxy (DNS FINTO, nessuna rete). */
+let resolveOverrideForTests: ((host: string) => Promise<string[]>) | null = null
+
+export function setBrowserProxyResolveForTests(fn: ((host: string) => Promise<string[]>) | null): void {
+  resolveOverrideForTests = fn
+}
+
+// ---- T2 (fase web-strategia): il DNS fallito è DISTINGUIBILE ----
+//
+// Chromium davanti a un CONNECT rifiutato dice solo ERR_TUNNEL_CONNECTION_FAILED,
+// senza IL PERCHÉ. Il proxy registra gli host rifiutati perché NON risolvono
+// (con tetto e scadenza): browser_open guarda il registro e traduce l'errore
+// generico nella riga «questo indirizzo non esiste».
+
+const dnsRefusedHosts = new Map<string, number>()
+const DNS_REFUSAL_TTL_MS = 10 * 60_000
+const DNS_REFUSAL_MAX = 64
+
+function noteDnsRefusal(host: string): void {
+  const now = Date.now()
+  for (const [h, t] of dnsRefusedHosts) {
+    if (now - t > DNS_REFUSAL_TTL_MS) dnsRefusedHosts.delete(h)
+  }
+  if (dnsRefusedHosts.size >= DNS_REFUSAL_MAX) {
+    const oldest = dnsRefusedHosts.keys().next().value
+    if (oldest !== undefined) dnsRefusedHosts.delete(oldest)
+  }
+  dnsRefusedHosts.set(host.toLowerCase(), now)
+}
+
+/** T2: QUESTO host è stato rifiultato dal proxy perché il DNS non lo risolve? */
+export function browserProxyDnsRefusedRecently(host: string): boolean {
+  const t = dnsRefusedHosts.get(host.toLowerCase())
+  return t !== undefined && Date.now() - t <= DNS_REFUSAL_TTL_MS
+}
+
+/** Solo per i test: azzera il registro dei rifiuti DNS. */
+export function resetBrowserProxyDnsRefusalsForTests(): void {
+  dnsRefusedHosts.clear()
 }
 
 /** host:port della richiesta (CONNECT o URI assoluta); porta di default per schema. */
@@ -127,6 +169,9 @@ export function createBrowserProxy(): http.Server {
       } catch {
         ips = []
       }
+      // T2: il DNS che non risolve si REGISTRA (il browser vede solo un
+      // tunnel rifiutato; il registro distingue «non esiste» da «vietato»)
+      if (!ips.length) noteDnsRefusal(target.host)
       const decision = proxyDecision(target.host, target.port, ips, boxEgressSubnets())
       if (!decision.allow) {
         console.log(`[browser-proxy] rifiutato ${target.host}:${target.port}: ${decision.reason}`)
@@ -170,6 +215,8 @@ export function createBrowserProxy(): http.Server {
       } catch {
         ips = []
       }
+      // T2: come per la URI assoluta — il DNS fallito finisce nel registro
+      if (!ips.length) noteDnsRefusal(target.host)
       const decision = proxyDecision(target.host, target.port, ips, boxEgressSubnets())
       if (!decision.allow) {
         console.log(`[browser-proxy] rifiutato ${target.host}:${target.port}: ${decision.reason}`)

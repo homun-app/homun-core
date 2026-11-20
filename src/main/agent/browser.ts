@@ -1087,6 +1087,31 @@ async function runBrowserTool(agentId: string, tool: string, input: Record<strin
   const loginNote = challenge ? null : await loginNoteFor(agentId, session, tool)
   let output = challenge ? `${truncated.text}\n\n${SNAPSHOT_BLOCKED_NOTE}` : truncated.text
   if (loginNote) output = `${output}\n\n${loginNote.text}`
+  // T2 (fase web-strategia): per browser_open la CAUSA giusta in testa — il
+  // registro del proxy del browser distingue «questo host non esiste» (DNS
+  // che non risolve) dal tunnel rifiutato per altro; l'URL finale not-found,
+  // la sfida anti-bot e la manutenzione si leggono dal result. Mai concludere
+  // «il sito mi blocca» davanti a un nome che non risolve.
+  let webErrorKind: 'host-missing' | 'page-missing' | 'anti-bot' | 'maintenance' | null = null
+  if (tool === 'browser_open') {
+    const { classifyBrowserOpenError } = await import('./web-errors')
+    const { browserProxyDnsRefusedRecently } = await import('./browser-proxy')
+    let host = ''
+    try {
+      host = new URL(String(mcpArgs.url ?? '')).hostname
+    } catch {
+      host = ''
+    }
+    webErrorKind = classifyBrowserOpenError({
+      resultText: composed.slice(0, 2_000),
+      finalUrl: session.url,
+      hostDnsRefused: host ? browserProxyDnsRefusedRecently(host) : false
+    })
+  }
+  if (webErrorKind) {
+    const { WEB_ERROR_LINES } = await import('./web-errors')
+    output = `${WEB_ERROR_LINES[webErrorKind]}\n\n${output}`
+  }
   return {
     output,
     meta: {
@@ -1094,7 +1119,8 @@ async function runBrowserTool(agentId: string, tool: string, input: Record<strin
       url: session.url,
       ...(truncated.truncated ? { snapshotTruncated: true } : {}),
       ...(challenge ? { challenge: true } : {}),
-      ...(loginNote ? { loginForm: loginNote.kind } : {})
+      ...(loginNote ? { loginForm: loginNote.kind } : {}),
+      ...(webErrorKind ? { webError: webErrorKind } : {})
     }
   }
 }
