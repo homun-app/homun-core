@@ -192,6 +192,21 @@ export function McpServerCard({ entry }: { entry: TranscriptEntry }) {
       </div>
       <p className="mt-1 text-xs text-muted-foreground">{trust} · {where}</p>
       {access && <p className="mt-0.5 text-xs text-muted-foreground">{access}</p>}
+      {/* E4 (fase mcp-env): i metadati del pacchetto npm e la RETE che avrà:
+          versione FISSATA, autore, pubblicazione, download settimanali, gli
+          host dichiarati e il computer isolato */}
+      {message.npmMeta && (
+        <p className="mt-0.5 text-xs text-muted-foreground" data-testid="mcp-card-npm-meta">
+          {t`versione ${message.npmMeta.version} · di ${message.npmMeta.author ?? message.publisher ?? message.name}`
+            + (message.npmMeta.publishedAt ? ' · ' + t`pubblicato il ${new Date(message.npmMeta.publishedAt).toLocaleDateString()}` : '')
+            + ' · ' + t`download settimanali: ${message.npmMeta.weeklyDownloads.toLocaleString()}`}
+        </p>
+      )}
+      {message.allowHosts && message.allowHosts.length > 0 && (
+        <p className="mt-0.5 text-xs text-muted-foreground" data-testid="mcp-card-allow-hosts">
+          {t`Rete: solo ${message.allowHosts.join(', ')} · gira nel computer isolato`}
+        </p>
+      )}
       {message.siteUrl && (
         <a className="mt-0.5 block truncate text-[11px] text-primary hover:underline" href={message.siteUrl} target="_blank" rel="noreferrer">{message.siteUrl}</a>
       )}

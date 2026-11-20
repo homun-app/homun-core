@@ -2707,6 +2707,11 @@ msgstr "Download in pausa · {0}%"
 msgid "Download non riuscito: {0}"
 msgstr "Download non riuscito: {0}"
 
+#. placeholder {0}: message.npmMeta.weeklyDownloads.toLocaleString()
+#: src/renderer/src/components/ConnectorCards13.tsx
+msgid "download settimanali: {0}"
+msgstr "download settimanali: {0}"
+
 #. placeholder {0}: rest.length
 #: src/renderer/src/components/ApprovalsBanner.tsx
 msgid "e altre {0}: {summary}"
@@ -6180,6 +6185,11 @@ msgstr "Pubblicato da {0} (dominio verificato)"
 msgid "Pubblicato da {0} su GitHub"
 msgstr "Pubblicato da {0} su GitHub"
 
+#. placeholder {0}: new Date(message.npmMeta.publishedAt).toLocaleDateString()
+#: src/renderer/src/components/ConnectorCards13.tsx
+msgid "pubblicato il {0}"
+msgstr "pubblicato il {0}"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "onboarding.mainBotDescription"
@@ -6397,6 +6407,11 @@ msgstr "repository"
 #: src/shared/ui-messages.ts
 msgid "skill.err.repoNotFound"
 msgstr "Repository non trovato (o non raggiungibile). Controlla l'indirizzo."
+
+#. placeholder {0}: message.allowHosts.join(', ')
+#: src/renderer/src/components/ConnectorCards13.tsx
+msgid "Rete: solo {0} · gira nel computer isolato"
+msgstr "Rete: solo {0} · gira nel computer isolato"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "review"
@@ -8072,6 +8087,12 @@ msgstr "Verde"
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "versione {0}"
 msgstr "versione {0}"
+
+#. placeholder {0}: message.npmMeta.version
+#. placeholder {1}: message.npmMeta.author ?? message.publisher ?? message.name
+#: src/renderer/src/components/ConnectorCards13.tsx
+msgid "versione {0} · di {1}"
+msgstr "versione {0} · di {1}"
 
 #: src/renderer/src/components/PageView.tsx
 msgid "versione {version}"
