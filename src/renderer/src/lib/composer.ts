@@ -25,3 +25,30 @@ export function composerFormRadius(multiRow: boolean): string {
 export function composerMultiFromMeasure(scrollHeight: number, singleRowHeight: number): boolean {
   return scrollHeight > singleRowHeight + 2
 }
+
+/**
+ * Lo stato «più righe» con ISTERESI: da due righe in su il campo va a tutta
+ * larghezza e i bottoni scendono sotto — e un campo più largo può far stare
+ * di nuovo il testo su una riga. Senza margine si avrebbe un'altalena. Si
+ * torna a una riga solo senza a capo e con il testo sotto il 90% della
+ * lunghezza a cui era diventato «più righe» (o vuoto).
+ */
+export function nextComposerMulti(
+  prev: { multi: boolean; enteredAt: number },
+  text: string,
+  measuredMulti: boolean
+): { multi: boolean; enteredAt: number } {
+  if (!prev.multi) {
+    return measuredMulti || text.includes('\n') ? { multi: true, enteredAt: text.length } : prev
+  }
+  if (text.length === 0) return { multi: false, enteredAt: 0 }
+  if (!text.includes('\n') && !measuredMulti && text.length < prev.enteredAt * 0.9) return { multi: false, enteredAt: 0 }
+  return prev
+}
+
+/** Le classi del layout a più righe: il campo sopra a tutta larghezza, i bottoni sotto. */
+export function composerLayout(multiRow: boolean): { form: string; field: string; push: string } {
+  return multiRow
+    ? { form: 'flex-wrap', field: 'order-first basis-full', push: 'ml-auto' }
+    : { form: '', field: '', push: '' }
+}

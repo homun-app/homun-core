@@ -106,3 +106,31 @@ describe('M1: TeamChat.tsx allineato allo stesso comportamento', () => {
     expect(Number(m![1])).toBeLessThanOrEqual(150)
   })
 })
+
+// Passata di design (beta.13): da due righe il campo va a tutta larghezza e i
+// bottoni scendono sotto; l'isteresi evita l'altalena al limite della riga.
+import { nextComposerMulti, composerLayout } from '../lib/composer'
+
+describe('composer a più righe: layout e isteresi', () => {
+  it('a una riga nessuna classe; a più righe campo sopra a tutta larghezza e bottoni sotto', () => {
+    expect(composerLayout(false)).toEqual({ form: '', field: '', push: '' })
+    expect(composerLayout(true)).toEqual({ form: 'flex-wrap', field: 'order-first basis-full', push: 'ml-auto' })
+  })
+  it('entra in «più righe» con la misura o con un a capo, e ricorda la lunghezza', () => {
+    const zero = { multi: false, enteredAt: 0 }
+    expect(nextComposerMulti(zero, 'ciao', false)).toEqual(zero)
+    expect(nextComposerMulti(zero, 'a'.repeat(80), true)).toEqual({ multi: true, enteredAt: 80 })
+    expect(nextComposerMulti(zero, 'riga 1\nriga 2', false).multi).toBe(true)
+  })
+  it('non torna indietro appena il campo largo fa stare il testo su una riga (niente altalena)', () => {
+    const multi = { multi: true, enteredAt: 80 }
+    expect(nextComposerMulti(multi, 'a'.repeat(80), false)).toEqual(multi)
+    expect(nextComposerMulti(multi, 'a'.repeat(75), false)).toEqual(multi)
+  })
+  it('torna a una riga quando il testo si accorcia davvero, o si svuota', () => {
+    const multi = { multi: true, enteredAt: 80 }
+    expect(nextComposerMulti(multi, 'a'.repeat(60), false)).toEqual({ multi: false, enteredAt: 0 })
+    expect(nextComposerMulti(multi, '', false)).toEqual({ multi: false, enteredAt: 0 })
+    expect(nextComposerMulti(multi, 'riga\nriga', false)).toEqual(multi)
+  })
+})

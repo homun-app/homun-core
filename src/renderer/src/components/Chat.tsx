@@ -59,7 +59,7 @@ import { narrationStatusLine } from '../../../shared/narration'
 import type { LayoutResult } from '../layout'
 import { THINKING_LABELS } from './ui/ModelPicker'
 // M1 (fase beta12-correzioni): il raggio dinamico del composer
-import { composerFormRadius, composerMultiFromMeasure, CHAT_COMPOSER_SINGLE_ROW_PX } from '../lib/composer'
+import { composerFormRadius, composerMultiFromMeasure, composerLayout, nextComposerMulti, CHAT_COMPOSER_SINGLE_ROW_PX } from '../lib/composer'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu'
 
 /** Il popover dei passaggi: «N passaggi · Xs» e l'elenco ✓/○ (S3.3).
@@ -336,11 +336,16 @@ export function Chat({ layout }: { layout?: LayoutResult }) {
   // diventa un riquadro arrotondato — lo decide la MISURA del textarea
   // (scrollHeight contro l'altezza della riga unica), così il testo lungo
   // che va a capo da solo conta come lo \n esplicito
-  const [multiRow, setMultiRow] = useState(false)
+  // con l'isteresi di nextComposerMulti: il campo a tutta larghezza non deve
+  // riportare indietro il layout appena il testo ci sta su una riga
+  const [multiState, setMultiState] = useState({ multi: false, enteredAt: 0 })
+  const multiRow = multiState.multi
   useEffect(() => {
     const ta = composerRef.current
-    setMultiRow(ta ? composerMultiFromMeasure(ta.scrollHeight, CHAT_COMPOSER_SINGLE_ROW_PX) : false)
+    const measured = ta ? composerMultiFromMeasure(ta.scrollHeight, CHAT_COMPOSER_SINGLE_ROW_PX) : false
+    setMultiState((prev) => nextComposerMulti(prev, text, measured))
   }, [text])
+  const layoutCls = composerLayout(multiRow)
   // fase skill (S7): le skill visibili a QUESTO bot (libreria + plugin) per
   // l'elenco `/` del compositore; il highlight della selezione.
   // K2 (fase skill ritocchi): l'elenco arriva dal RPC skills:invocable — la
@@ -654,7 +659,7 @@ export function Chat({ layout }: { layout?: LayoutResult }) {
           </p>
         )}
         <form
-          className={`mx-auto flex max-w-3xl items-end gap-2 bg-card py-2 pl-2 pr-2 shadow-soft transition-[border-radius] duration-150 ${composerFormRadius(multiRow)}`}
+          className={`mx-auto flex max-w-3xl items-end gap-2 bg-card py-2 pl-2 pr-2 shadow-soft transition-[border-radius] duration-150 ${composerFormRadius(multiRow)} ${layoutCls.form}`}
           onSubmit={(e) => { e.preventDefault(); sendNow() }}
         >
           <button
@@ -678,7 +683,7 @@ export function Chat({ layout }: { layout?: LayoutResult }) {
               Ragiona e Invia; a capo cresce verso l'alto (il form resta items-end) */}
           <textarea
             ref={composerRef}
-            className="max-h-40 min-h-9 min-w-[120px] flex-1 resize-none bg-transparent py-2 pl-3 pr-5 text-sm leading-5 outline-none placeholder:text-muted-foreground"
+            className={`max-h-40 min-h-9 min-w-[120px] flex-1 resize-none bg-transparent py-2 pl-3 pr-5 text-sm leading-5 outline-none placeholder:text-muted-foreground ${layoutCls.field}`}
             placeholder={t`Scrivi a ${agent.name}`}
             rows={Math.min(6, text.split('\n').length)}
             value={text}
@@ -722,7 +727,7 @@ export function Chat({ layout }: { layout?: LayoutResult }) {
               testo vive in aria-label e tooltip; il menu è identico */}
           <DropdownMenu onOpenChange={(open) => { if (open) clampReasonMenuSoon() }}>
             <DropdownMenuTrigger
-              className="grid h-9 shrink-0 place-items-center rounded-full px-3 text-[13px] text-muted-foreground transition hover:bg-muted hover:text-foreground"
+              className={`grid h-9 shrink-0 place-items-center rounded-full px-3 text-[13px] text-muted-foreground transition hover:bg-muted hover:text-foreground ${layoutCls.push}`}
               aria-label={t`Livello di ragionamento`}
               title={reasonLabel}
             >
