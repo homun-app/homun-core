@@ -2102,7 +2102,7 @@ export function buildApiMethods(
     'approvals:resolve': ([agentId, approvalId, decision, mode]) => {
       // Q2 (fase squadra): 'mission' = «Consenti per questa missione» (un grant
       // di 8 ore per OGNI membro, solo sito-interattivo e squadra)
-      const m = mode === 'always' ? 'always' : mode === 'turn' ? 'turn' : mode === 'minutes10' ? 'minutes10' : mode === 'mission' ? 'mission' : 'once'
+      const m = mode === 'always' ? 'always' : mode === 'turn' ? 'turn' : mode === 'minutes10' ? 'minutes10' : mode === 'mission' ? 'mission' : mode === 'site' ? 'site' : 'once'
       // fase 16b (S6): la modalità finisce nel meta dell'entry — la riga dopo
       // la decisione dice «Consentito una volta / per il turno / sempre»
       const aid = String(agentId)

@@ -11,7 +11,7 @@ const h = vi.hoisted(() => {
     entries: [] as Array<import('../../../shared/types').TranscriptEntry & { id: number }>,
     agents: new Map<string, import('../../../shared/types').Agent>(),
     settings: new Map<string, unknown>(),
-    grants: [] as Array<{ tool: string; target: string }>,
+    grants: [] as Array<{ tool: string; target: string; agentId?: string | null; expiresAt?: number | null }>,
     routines: [] as Array<{ id: number; agent_id: string; title: string; prompt: string; schedule: string; enabled: number; provenance?: string; description?: string; timezone?: string }>,
     // fase 6: righe dell'outbox (le send-message trattenute dei turni automatici)
     outbox: [] as Array<{ entry_id: number; agent_id: string; created_at: number }>,
@@ -172,7 +172,7 @@ vi.mock('../../store/db', () => ({
     h.db.outbox.push({ entry_id: entryId, agent_id: agentId, created_at: createdAt })
   },
   heldOutboxForAgent: (agentId: string) => h.db.outbox.filter((o) => o.agent_id === agentId),
-  listGrants: () => h.db.grants.map((g, i) => ({ id: i + 1, tool: g.tool, target: g.target, createdAt: 0 })),
+  listGrants: () => h.db.grants.map((g, i) => ({ id: i + 1, tool: g.tool, target: g.target, createdAt: 0, agentId: (g as { agentId?: string | null }).agentId ?? null, expiresAt: (g as { expiresAt?: number | null }).expiresAt ?? null })),
   addGrant: (tool: string, target: string) => { h.db.grants.push({ tool, target }) },
   // fase 4: CRUD routine per update_state (verdetto del gate + esecuzione)
   getRoutine: (id: number) => h.db.routines.find((r) => r.id === id) ?? null,
@@ -5350,6 +5350,173 @@ describe('S3 (fase squadra-sicurezza-2): il grant di missione non scavalca origi
     ]
     await runTurnDenying({ squadId: gid })
     expect(h.db.entries.filter((e) => e.kind === 'approval')).toEqual([])
+  })
+})
+
+// ---- P3 (fase uso-permessi): «Consenti sempre su <dominio>» — un permesso per DOMINIO che resta ----
+
+describe('P3: il grant di sito copre navigazione e clic non di conferma, anche nei turni contaminati', () => {
+  const AGENT2 = 'agent_p3_due'
+  /** gira un turno NEGANDO via via le card pendenti (come la sonda squad-loop) */
+  const runTurnDenying = async (agentId: string, text: string): Promise<void> => {
+    const p = runTurn(agentId, text, emit)
+    p.catch(() => undefined)
+    const deadline = Date.now() + 30_000
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 40))
+      const appr = h.db.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending' && e.agentId === agentId)
+      if (appr) resolveApproval(agentId, String(appr.meta?.approvalId), 'deny')
+      if (!isRunning(agentId)) break
+    }
+    await p
+  }
+
+  beforeEach(() => {
+    browserState.available = true
+    browserState.calls.length = 0
+    browserState.fieldProbe = null
+    browserState.lastUrl = null
+    h.db.grants.length = 0
+    h.db.agents.set(AGENT2, { id: AGENT2, name: 'AltroBot', description: '', providerId: 'prov', model: 'm1', status: 'idle', unread: 0, createdAt: 3 })
+  })
+
+  it('la card del ref scaduto (sito interattivo) propone «Consenti sempre su spa.example» nel meta', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 'p3a', name: 'browser_click', arguments: JSON.stringify({ ref: 'e42' }) }] },
+      { toolCalls: [{ id: 'p3b', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    const turn = runTurn(AGENT, 'vai avanti', emit)
+    await vi.waitFor(() => {
+      expect(h.db.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending')).toBeTruthy()
+    })
+    const appr = h.db.entries.find((e) => e.kind === 'approval')!
+    // il meta che accende il bottone «Consenti sempre su <dominio registrabile>»
+    expect(appr.meta?.siteGrant).toEqual({ domain: 'spa.example' })
+    resolveApproval(AGENT, String(appr.meta?.approvalId), 'deny')
+    await turn
+  })
+
+  it('«Consenti sempre su <dominio>» (mode site) salva il grant site:<dominio> per il BOT e questa volta passa', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 'p3c', name: 'browser_click', arguments: JSON.stringify({ ref: 'e42' }) }] },
+      { toolCalls: [{ id: 'p3d', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    const turn = runTurn(AGENT, 'vai avanti', emit)
+    await vi.waitFor(() => {
+      expect(h.db.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending')).toBeTruthy()
+    })
+    const appr = h.db.entries.find((e) => e.kind === 'approval')!
+    resolveApproval(AGENT, String(appr.meta?.approvalId), 'allow', 'site')
+    await turn
+    // il grant è site:spa.example, del tool virtuale browser-site, per IL bot
+    expect(h.db.grants).toContainEqual({ tool: 'browser-site', target: 'site:spa.example' })
+    // e la card è stata consentita (il clic è partito)
+    expect(browserState.calls.map((c) => c.tool)).toEqual(['browser_click'])
+  })
+
+  it('col grant attivo: il click di navigazione (ref scaduto) NON chiede, ANCHE in turno contaminato da pagina letta', async () => {
+    h.db.grants.push({ tool: 'browser-site', target: 'site:spa.example' })
+    h.llm.queue = [
+      // la pagina letta CONTAMINA il turno (F8), poi il clic col ref scaduto:
+      // il grant di sito resta valido anche qui — è il compromesso dichiarato
+      { toolCalls: [{ id: 'p3e', name: 'browser_open', arguments: JSON.stringify({ url: 'https://spa.example/prenota' }) }] },
+      { toolCalls: [{ id: 'p3f', name: 'browser_click', arguments: JSON.stringify({ ref: 'e42' }) }] },
+      { toolCalls: [{ id: 'p3g', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurn(AGENT, 'guarda https://spa.example/prenota e procedi', emit).catch(() => undefined)
+    await vi.waitFor(() => expect(isRunning(AGENT)).toBe(false))
+    expect(h.db.entries.filter((e) => e.kind === 'approval')).toEqual([])
+    // la pagina è stata letta E il clic è partito senza chiedere
+    expect(browserState.calls.map((c) => c.tool)).toEqual(['browser_open', 'browser_click'])
+  })
+
+  it('col grant attivo: il SOTTODOMINIO dello stesso dominio registrabile non chiede', async () => {
+    h.db.grants.push({ tool: 'browser-site', target: 'site:spa.example' })
+    browserState.lastUrl = 'https://biglietti.spa.example/it/acquista'
+    h.llm.queue = [
+      { toolCalls: [{ id: 'p3h', name: 'browser_click', arguments: JSON.stringify({ ref: 'e42' }) }] },
+      { toolCalls: [{ id: 'p3i', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurn(AGENT, 'vai avanti', emit).catch(() => undefined)
+    await vi.waitFor(() => expect(isRunning(AGENT)).toBe(false))
+    expect(h.db.entries.filter((e) => e.kind === 'approval')).toEqual([])
+    expect(browserState.calls.map((c) => c.tool)).toEqual(['browser_click'])
+  })
+
+  it('col grant attivo: il click «Conferma prenotazione» (COMMIT) chiede lo stesso', async () => {
+    h.db.grants.push({ tool: 'browser-site', target: 'site:spa.example' })
+    h.llm.queue = [
+      { toolCalls: [{ id: 'p3l', name: 'browser_click', arguments: JSON.stringify({ ref: 'e8' }) }] },
+      { toolCalls: [{ id: 'p3m', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurnDenying(AGENT, 'conferma')
+    const appr = h.db.entries.find((e) => e.kind === 'approval')!
+    expect(appr.meta?.status).toBe('denied')
+    expect(appr.meta?.browserAsk).toEqual({ kind: 'commit', name: 'Conferma prenotazione' })
+    expect(browserState.calls).toHaveLength(0)
+  })
+
+  it('col grant attivo: browser_type su un campo PROBE (non verificabile) chiede lo stesso (insieme fisso)', async () => {
+    h.db.grants.push({ tool: 'browser-site', target: 'site:spa.example' })
+    browserState.fieldProbe = null // la verifica interna del campo FALLISCE → ask probe
+    h.llm.queue = [
+      { toolCalls: [{ id: 'p3n', name: 'browser_type', arguments: JSON.stringify({ ref: 'e9', text: 'Fabio Rossi' }) }] },
+      { toolCalls: [{ id: 'p3o', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurnDenying(AGENT, 'compila')
+    const appr = h.db.entries.find((e) => e.kind === 'approval')!
+    expect(appr.meta?.status).toBe('denied')
+    expect((appr.meta?.browserAsk as { kind: string }).kind).toBe('probe')
+    expect(browserState.calls).toHaveLength(0)
+  })
+
+  it('col grant attivo: lo stesso click su un ALTRO dominio chiede (l\'uscita dal dominio non è coperta)', async () => {
+    h.db.grants.push({ tool: 'browser-site', target: 'site:spa.example' })
+    browserState.lastUrl = 'https://altro.example/prenota'
+    h.llm.queue = [
+      { toolCalls: [{ id: 'p3p', name: 'browser_click', arguments: JSON.stringify({ ref: 'e42' }) }] },
+      { toolCalls: [{ id: 'p3q', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurnDenying(AGENT, 'vai avanti')
+    const appr = h.db.entries.find((e) => e.kind === 'approval')!
+    expect(appr.meta?.status).toBe('denied')
+    // e la card del dominio nuovo offre il SUO dominio, non quello del grant
+    expect(appr.meta?.siteGrant).toEqual({ domain: 'altro.example' })
+  })
+
+  it('col grant attivo: un ALTRO bot chiede (il grant vale per il bot che l\'ha ricevuto)', async () => {
+    h.db.grants.push({ tool: 'browser-site', target: 'site:spa.example', agentId: AGENT })
+    // il gruppo browser non è ancora attivo per AGENT2: la prima chiamata lo
+    // attiva («Call it again»), la seconda è il click vero
+    h.llm.queue = [
+      { toolCalls: [{ id: 'p3r0', name: 'browser_click', arguments: JSON.stringify({ ref: 'e42' }) }] },
+      { toolCalls: [{ id: 'p3r', name: 'browser_click', arguments: JSON.stringify({ ref: 'e42' }) }] },
+      { toolCalls: [{ id: 'p3s', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurnDenying(AGENT2, 'vai avanti')
+    const appr = h.db.entries.find((e) => e.kind === 'approval' && e.agentId === AGENT2)!
+    expect(appr.meta?.status).toBe('denied')
+    expect(browserState.calls).toHaveLength(0)
+  })
+
+  it('la REVOCA del grant (Impostazioni › Approvazioni) lo toglie: il click torna a chiedere', async () => {
+    h.db.grants.push({ tool: 'browser-site', target: 'site:spa.example' })
+    h.llm.queue = [
+      { toolCalls: [{ id: 'p3t', name: 'browser_click', arguments: JSON.stringify({ ref: 'e42' }) }] },
+      { toolCalls: [{ id: 'p3u', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurn(AGENT, 'vai avanti', emit).catch(() => undefined)
+    await vi.waitFor(() => expect(isRunning(AGENT)).toBe(false))
+    expect(h.db.entries.filter((e) => e.kind === 'approval')).toEqual([])
+    // revoca: il grant sparisce e la card torna
+    h.db.grants.length = 0
+    h.llm.queue = [
+      { toolCalls: [{ id: 'p3v', name: 'browser_click', arguments: JSON.stringify({ ref: 'e42' }) }] },
+      { toolCalls: [{ id: 'p3w', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurnDenying(AGENT, 'ancora')
+    const appr = h.db.entries.filter((e) => e.kind === 'approval').at(-1)!
+    expect(appr.meta?.status).toBe('denied')
   })
 })
 

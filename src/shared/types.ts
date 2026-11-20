@@ -1010,7 +1010,7 @@ export interface SandbotApi {
   draftUpdate(agentId: string, entryId: number, body: string): Promise<void>
   // approvazioni
   /** fase 8: mode 'once' (una volta), 'always' (standing grant), 'turn' (fino a fine turno, in memoria) */
-  resolveApproval(agentId: string, approvalId: string, decision: 'allow' | 'deny', mode: 'once' | 'always' | 'turn' | 'minutes10' | 'mission'): Promise<void>
+  resolveApproval(agentId: string, approvalId: string, decision: 'allow' | 'deny', mode: 'once' | 'always' | 'turn' | 'minutes10' | 'mission' | 'site'): Promise<void>
   // provider e modelli
   /** fase 16c (C1): MAI la chiave — apiKey sempre '', hasKey e keyHint al posto */
   listProviders(): Promise<ProviderPublic[]>

@@ -322,9 +322,26 @@ export function grantDisplayName(
     const server = g.tool.slice(5, -3)
     return lang === 'en' ? `Reads of ${server}` : `Letture di ${server}`
   }
+  // P3 (fase uso-permessi): il dominio del grant di sito, in parole
+  if (g.tool === 'browser-site' && g.target.startsWith('site:')) {
+    const domain = g.target.slice(5)
+    return lang === 'en' ? `Browser on ${domain} (navigation and non-commit clicks)` : `Browser su ${domain} (navigazione e clic non di conferma)`
+  }
   return toolDisplayName(g.tool, lang)
 }
 
+
+/**
+ * P3 (fase uso-permessi): l'opzione «Consenti sempre su <dominio registrabile>»
+ * della card di un'azione del browser — c'è SOLO quando il meta porta un
+ * dominio (il loop lo mette solo dove il grant copre: navigazione e clic non
+ * di conferma, mai conferme, invii del modulo o campi probe). PURO.
+ */
+export function siteGrantOptionOf(meta: Record<string, unknown> | null | undefined): { domain: string } | null {
+  const site = (meta as { siteGrant?: { domain?: unknown } } | null)?.siteGrant
+  const domain = typeof site?.domain === 'string' ? site.domain.trim() : ''
+  return domain ? { domain } : null
+}
 
 /** Un consenso salvato così come arriva da grants:list (U7: con agentId). */
 export interface GrantLike {
@@ -358,8 +375,10 @@ export function groupGrantsByBot(grants: GrantLike[]): Array<{ agentId: string |
 }
 
 /** U7: il tipo in chiaro del consenso («comando», «app», «strumento»). PURA. */
-export function grantKindOf(tool: string): 'comando' | 'app' | 'strumento' {
+export function grantKindOf(tool: string): 'comando' | 'app' | 'sito' | 'strumento' {
   if (tool === 'run-command') return 'comando'
   if (tool === 'use-app') return 'app'
+  // P3 (fase uso-permessi): il grant di sito «Consenti sempre su <dominio>»
+  if (tool === 'browser-site') return 'sito'
   return 'strumento'
 }

@@ -16,7 +16,7 @@ import { uiTextOfMetaTools, toolCtxOfMeta } from '../lib/ui-text'
 import { i18n } from '../lib/i18n'
 // R3 (fase app — ritocchi): il modello puro della card per Composio e MCP
 // fase Composio OAuth (C7): anche il modello del blocco
-import { approvalAppOf, approvalTitleOf, approvalReasonPhrase, approvalTechnicalLine, approvalBatchArgumentLines, approvalAskTitle, approvalOptionFlags, useAppCardModel, useAppDecidedSummary, type ComposioBatchActionMeta } from '../lib/approval-app'
+import { approvalAppOf, approvalTitleOf, approvalReasonPhrase, approvalTechnicalLine, approvalBatchArgumentLines, approvalAskTitle, approvalOptionFlags, useAppCardModel, useAppDecidedSummary, siteGrantOptionOf, type ComposioBatchActionMeta } from '../lib/approval-app'
 import { accountLabelOf } from '../lib/apps-view'
 import { toolDisplayName } from '../../../shared/tool-names'
 import type { TranscriptEntry } from '../../../shared/types'
@@ -92,6 +92,13 @@ export function ApprovalCard({ entry, readOnly = false, ownerName }: { entry: Tr
   // «Consenti sempre le letture di <server>» (grant scope readOnly, controllata
   // sulle annotazioni a ogni chiamata); dopo il click QUESTA chiamata passa once
   const mcpServerRead = entry.meta?.mcpServerRead as { slug?: string; name?: string } | undefined
+
+  // P3 (fase uso-permessi): «Consenti sempre su <dominio registrabile>» — la
+  // card di un'azione del browser «sito interattivo» che il grant copre (mai
+  // su conferme, invii del modulo o campi probe); dopo il click le navigazioni
+  // e i clic non di conferma su quel dominio non chiedono più, revocabile in
+  // Impostazioni › Approvazioni
+  const siteGrant = siteGrantOptionOf(entry.meta)
 
   // fase use-app (U3): la card parla di APP o di HOST — «Vuole aprire
   // sora.chatgpt.com nel tuo browser», «Consenti per 10 minuti a Safari». I
@@ -326,6 +333,14 @@ export function ApprovalCard({ entry, readOnly = false, ownerName }: { entry: Tr
                   <Trans>Consenti sempre le letture di {mcpServerRead.name ?? mcpServerRead.slug}</Trans>
                 </DropdownMenuItem>
               )}
+              {siteGrant?.domain && (
+                <DropdownMenuItem
+                  title={t`Navigare, aprire link e cliccare controlli non di conferma su ${siteGrant.domain} non chiederanno più; le conferme, i pagamenti e i dati tuoi sì. Revocabile in Impostazioni › Approvazioni.`}
+                  onClick={() => resolve(entry.agentId, approvalId, 'allow', 'site')}
+                >
+                  <Trans>Consenti sempre su {siteGrant.domain}</Trans>
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem
                 title={t`Apri Impostazioni → Approvazione automatica con una regola precompilata`}
                 onClick={() => proposeRule(suggestedRule(tool, input))}
@@ -350,7 +365,9 @@ export function ApprovalCard({ entry, readOnly = false, ownerName }: { entry: Tr
               ? i18n.t(msg`Consentito per 10 minuti`)
               : mode === 'always'
                 ? i18n.t(msg`Consentito sempre`)
-                : i18n.t(msg`Consentito una volta`))
+                : mode === 'site'
+                  ? i18n.t(msg`Consentito sempre su ${siteGrant?.domain ?? ''}`)
+                  : i18n.t(msg`Consentito una volta`))
         : status === 'denied'
           ? i18n.t(msg`Rifiutato`)
           : status === 'cancelled'

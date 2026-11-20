@@ -2156,6 +2156,11 @@ msgstr "Always allow for {agentName}"
 msgid "Consenti sempre le letture di {0}"
 msgstr "Always allow reads from {0}"
 
+#. placeholder {0}: siteGrant.domain
+#: src/renderer/src/components/ApprovalCard.tsx
+msgid "Consenti sempre su {0}"
+msgstr "Always allow on {0}"
+
 #: src/renderer/src/components/ApprovalsCenter.tsx
 #: src/renderer/src/components/ApprovalsQueue.tsx
 #: src/renderer/src/components/TeamChat.tsx
@@ -2177,6 +2182,11 @@ msgstr "Allowed for this turn"
 #: src/renderer/src/components/ApprovalCard.tsx
 msgid "Consentito sempre"
 msgstr "Allowed always"
+
+#. placeholder {0}: siteGrant?.domain ?? ''
+#: src/renderer/src/components/ApprovalCard.tsx
+msgid "Consentito sempre su {0}"
+msgstr "Always allowed on {0}"
 
 #: src/renderer/src/components/ApprovalCard.tsx
 msgid "Consentito una volta"
@@ -5068,6 +5078,11 @@ msgstr "Hide the bot panel"
 msgid "naviga…"
 msgstr "browsing…"
 
+#. placeholder {0}: siteGrant.domain
+#: src/renderer/src/components/ApprovalCard.tsx
+msgid "Navigare, aprire link e cliccare controlli non di conferma su {0} non chiederanno più; le conferme, i pagamenti e i dati tuoi sì. Revocabile in Impostazioni › Approvazioni."
+msgstr "Navigating, opening links and clicking non-confirm controls on {0} will not ask again; confirmations, payments and your data still will. Revocable in Settings › Approvals."
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "cron.weekdays"
@@ -5082,7 +5097,7 @@ msgstr "on weekdays {at}"
 msgid "nel bot ›"
 msgstr "in the bot ›"
 
-#. placeholder {0}: message.runtime.command
+#. placeholder {0}: [message.runtime.command, ...message.runtime.args].join(' ')
 #. placeholder {0}: sv.runtimeDetail ?? ''
 #: src/renderer/src/components/ConnectorCards13.tsx
 msgid "nel box: {0}"

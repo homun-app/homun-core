@@ -255,3 +255,25 @@ describe('RW2 — «Per questo turno» per le letture grezze COMPOSIO_PROXY_EXEC
     expect(approvalOptionFlags('update_state', {})).toEqual({ noAlways: true, noTurn: true })
   })
 })
+
+
+// ---- P3 (fase uso-permessi): «Consenti sempre su <dominio registrabile>» ----
+
+describe('P3 — l\'opzione di sito della card del browser e il grant nelle Impostazioni', () => {
+  it('la card con meta.siteGrant offre il DOMINIO REGISTRABILE (www.lefrecce.it → lefrecce.it)', async () => {
+    const { siteGrantOptionOf } = await import('../lib/approval-app')
+    // il meta lo scrive il loop col dominio registrabile dell'URL della pagina
+    expect(siteGrantOptionOf({ siteGrant: { domain: 'lefrecce.it' } })).toEqual({ domain: 'lefrecce.it' })
+    // senza dominio (commit, invio del modulo, campo probe, about:blank) l'opzione NON c'è
+    expect(siteGrantOptionOf({})).toBeNull()
+    expect(siteGrantOptionOf({ siteGrant: { domain: '  ' } })).toBeNull()
+    expect(siteGrantOptionOf(null)).toBeNull()
+  })
+
+  it('il consenso salvato si legge in Impostazioni › Approvazioni, in IT e EN', async () => {
+    const { grantDisplayName, grantKindOf } = await import('../lib/approval-app')
+    expect(grantKindOf('browser-site')).toBe('sito')
+    expect(grantDisplayName({ tool: 'browser-site', target: 'site:lefrecce.it' }, 'it')).toBe('Browser su lefrecce.it (navigazione e clic non di conferma)')
+    expect(grantDisplayName({ tool: 'browser-site', target: 'site:lefrecce.it' }, 'en')).toBe('Browser on lefrecce.it (navigation and non-commit clicks)')
+  })
+})

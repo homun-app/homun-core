@@ -55,10 +55,10 @@ function GrantBotHeader({ agentId }: { agentId: string | null }) {
   )
 }
 
-/** U7: il tipo del consenso in chiaro («comando», «app», «strumento»). */
+/** U7: il tipo del consenso in chiaro («comando», «app», «sito», «strumento»). */
 function grantKindLabelOf(tool: string, locale: 'it' | 'en'): string {
   const kind = grantKindOf(tool)
-  if (locale === 'en') return kind === 'comando' ? 'command' : kind === 'app' ? 'app' : 'tool'
+  if (locale === 'en') return kind === 'comando' ? 'command' : kind === 'app' ? 'app' : kind === 'sito' ? 'site' : 'tool'
   return kind
 }
 

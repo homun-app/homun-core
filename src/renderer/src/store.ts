@@ -368,7 +368,7 @@ interface Store {
    * (entry.agentId — il figlio quando la card sta nel suo pannello o nella
    * chat del padre), MAI all'agente attivo.
    */
-  resolveApproval(agentId: string, approvalId: string, decision: 'allow' | 'deny', mode: 'once' | 'always' | 'turn' | 'minutes10' | 'mission'): void
+  resolveApproval(agentId: string, approvalId: string, decision: 'allow' | 'deny', mode: 'once' | 'always' | 'turn' | 'minutes10' | 'mission' | 'site'): void
   /** fase 8: decisione sulla regola di auto-review proposta dal bot */
   autoreviewRuleDecision(entryId: number, action: 'add' | 'dismiss'): void
   /** fase 8: "Crea regola da questa azione" — apre l'editor precompilato */

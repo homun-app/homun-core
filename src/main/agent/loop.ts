@@ -149,6 +149,8 @@ import { assembleTurnTools, offeredMcpOf, activateGroupsResult, toolDefsOfGroups
 import { normalizeGroupAutonomy, squadAlwaysAsks, delegationSquadId } from './squad-autonomy'
 // Q2 (fase squadra): la coda delle approvazioni e il grant di missione
 import { missionGrantTarget, missionGrantKey } from './squad-approvals'
+// P3 (fase uso-permessi): il grant di sito «Consenti sempre su <dominio>»
+import { SITE_GRANT_TOOL, siteGrantKey, siteGrantDomainOfUrl, siteGrantCoversAsk, siteGrantOfferable } from './site-grants'
 // RW (fase revisore sulla richiesta): il nome che non esiste, con i vicini
 import { unknownToolMessage, offeredToolNames } from '../mcp/unknown-tool'
 import { useToolDef } from './core-tools'
@@ -3461,10 +3463,28 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               if (!isGroupMember(squad.id, owner)) return false
               return listGrants().some((g: Grant) => g.tool === call.name && g.target === missionGrantKey(squad.id, target) && (g.agentId == null || g.agentId === owner) && grantActive(g))
             })()
+          // P3 (fase uso-permessi): il grant di SITO («Consenti sempre su
+          // <dominio registrabile>», revocabile in Impostazioni › Approvazioni)
+          // copre navigazione e clic non di conferma SU quel dominio e i suoi
+          // sottodomini — il ref scaduto delle pagine JavaScript — e VALE ANCHE
+          // NEI TURNI CONTAMINATI (compromesso dichiarato: una pagina ostile
+          // letta altrove può spingere il bot a navigare o cliccare controlli
+          // non di conferma su quel sito, mai a confermare o pagare). DOPO
+          // l'insieme fisso: commit, probe e l'inserimento di moduli nei turni
+          // di squadra contaminati (S2) continuano alla card; il grant vale per
+          // il BOT (il padre, per i sottoagenti), senza scadenza.
+          const siteDomain = siteGrantDomainOfUrl(browser.lastUrlOf(agentId) ?? '')
+          const siteGrantActive = risk.kind === 'ask' && risk.ask !== null &&
+            siteGrantCoversAsk(risk.ask.kind) && !squadBrowserFixed && !squadContaminatedFormAsk &&
+            siteDomain !== null &&
+            listGrants().some((g: Grant) =>
+              g.tool === SITE_GRANT_TOOL && g.target === siteGrantKey(siteDomain) &&
+              (g.agentId == null || g.agentId === (getAgent(agentId)?.parentId ?? agentId)) &&
+              grantActive(g))
           // S1: l'insieme fisso si valuta PRIMA del grant — se l'azione è fissa
           // la card va all'utente ANCHE con un grant di missione attivo; il
           // grant salta il blocco solo per le ask NON fisse
-          if (risk.kind === 'ask' && (squadBrowserFixed || squadContaminatedFormAsk || !missionSiteGrantActive)) {
+          if (risk.kind === 'ask' && !siteGrantActive && (squadBrowserFixed || squadContaminatedFormAsk || !missionSiteGrantActive)) {
             // auto-review come per le altre ask; nel turno contaminato (dopo
             // una pagina letta lo è SEMPRE) CONTAMINATED_ASK_TOOLS non lascia
             // approvare da sola: la card va all'utente.
@@ -3558,6 +3578,12 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
                   // Q2: il motivo dell'ask (categoria della coda: pagamento,
                   // dati tuoi, sito interattivo)
                   ...(risk.ask ? { browserAsk: { kind: risk.ask.kind, ...(risk.ask.name ? { name: risk.ask.name } : {}) } } : {}),
+                  // P3: «Consenti sempre su <dominio registrabile>» — la card lo
+                  // propone solo dove il grant copre (mai su conferme, invii o
+                  // campi probe) e solo con un dominio vero in pagina
+                  ...(risk.ask && siteDomain !== null && siteGrantOfferable(risk.ask.kind)
+                    ? { siteGrant: { domain: siteDomain } }
+                    : {}),
                   browser: {
                     url,
                     ...(info ? { element: info } : {}),
@@ -5873,6 +5899,11 @@ export function supersedeIfPaused(agentId: string): boolean {
  * (mai nel DB). Fase use-app (U3): 'minutes10' = standing grant CON SCADENZA
  * (10 minuti) — «Consenti per 10 minuti a <App>»: una card sola per la
  * sessione d'uso dell'app, senza permesso per sempre.
+ * P3 (fase uso-permessi): 'site' = «Consenti sempre su <dominio registrabile>»
+ * — il grant site:<dominio> del tool virtuale browser-site, senza scadenza,
+ * per il bot della card (il padre per gli aiutanti); QUESTA chiamata passa
+ * una volta, le prossime navigazioni e i clic non di conferma su quel dominio
+ * no (siteGrantCoversAsk decide cosa copre).
  * Per update_state e comandi never-auto 'turn' ricade su
  * 'once' (turnGrantKey → null): valgono gli stessi divieti di "Consenti sempre".
  */
@@ -5880,7 +5911,7 @@ export function resolveApproval(
   agentId: string,
   approvalId: string,
   decision: 'allow' | 'deny',
-  mode: 'once' | 'always' | 'turn' | 'minutes10' | 'mission' = 'once'
+  mode: 'once' | 'always' | 'turn' | 'minutes10' | 'mission' | 'site' = 'once'
 ): void {
   const run = running.get(agentId)
   const cb = run?.approvals.get(approvalId)
@@ -5917,6 +5948,14 @@ export function resolveApproval(
   // applyMissionGrant decide e torna 0 altrimenti). La card resta «una volta».
   if (decision === 'allow' && mode === 'mission') {
     applyMissionGrant({ agentId, approvalId, now: Date.now() })
+  }
+  // P3 (fase uso-permessi): «Consenti sempre su <dominio registrabile>» — il
+  // grant di SITO del bot (il padre per gli aiutanti), senza scadenza,
+  // revocabile in Impostazioni › Approvazioni. Il dominio è quello del meta
+  // della card (siteGrant), il confine site:<dominio registrabile>.
+  if (decision === 'allow' && mode === 'site') {
+    const site = (entry?.meta?.siteGrant as { domain?: string } | undefined)?.domain
+    if (site) addGrant(SITE_GRANT_TOOL, siteGrantKey(site), undefined, undefined, getAgent(agentId)?.parentId ?? agentId)
   }
   if (decision === 'allow' && mode === 'turn' && entry) {
     // la chiave è registrata appena l'analisi shell è pronta; il prossimo
