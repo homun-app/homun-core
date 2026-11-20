@@ -43,8 +43,13 @@ function boxNoInternetOn(): boolean {
  * senza browser) + 60 di margine. Il prompt del bot normale CON browser
  * misura 2158: il blocco del browser (~172 token) esiste solo in docker ed
  * è conteggiato nel bilancio del TURNO (TURN_TOKEN_BUDGET), non qui.
+ * T3 (fase web-strategia): le tre righe di navigazione WEB_NAVIGATION_RULES
+ * (~75 token, sempre caricate) portano il caso peggiore (bot senza ruolo +
+ * turno di gruppo, senza browser) a ~2069 misurati: 2069 + 30 di margine =
+ * 2099 ≈ il TETTO 2100 dichiarato in R8.4. Da qui in poi il prompt NON
+ * cresce più senza comprimere: le aggiunte future pagano compressione.
  */
-export const PROMPT_TOKEN_BUDGET = 2046
+export const PROMPT_TOKEN_BUDGET = 2100
 
 /**
  * Chi sei: nome, ruolo scelto dall'utente. La lingua la dà la sezione Language
@@ -147,6 +152,18 @@ export function documentRule(): string {
  * regola del background che fino a 7ceae173 stava nella descrizione di
  * await_shell, sempre caricata: avvisare l'utente che l'esito arriverà.
  */
+/**
+ * T3 (fase web-strategia): la strategia di navigazione nel prompt del
+ * computer — il bot naviga come una persona, non costruisce indirizzi.
+ * Tre righe COMPRESSE (~82 token stimati, caratteri/4: il budget del prompt
+ * è pieno): la prima mossa per «trova X sul sito Y», il «non esiste» che NON
+ * è un blocco, e «il sito mi blocca» detto solo dopo un blocco VERO. Dal
+ * caso vero: indirizzi profondi e sottodomini di Trenitalia inventati, tutti
+ * inesistenti, e la conclusione «Trenitalia blocca il mio computer».
+ */
+export const WEB_NAVIGATION_RULES = `- Search ON a site from its home or an address seen in a page/search result; NEVER invent deep paths or subdomains ("X on site Y": web_search Y + X, or Y's home).
+- "Does not exist" is not a block: go to the home. "The site blocks me": only after a real anti-bot block, never for a missing address.`
+
 export function computerSection(groups: ReadonlyArray<string> = [], opts: { groupTurn?: boolean } = {}): string {
   const docker = sandboxMode() === 'box'
   const env = docker
@@ -168,6 +185,7 @@ You have a computer (the box): ${env}
 - Your home is yours: relative paths start there.
 - Before redoing work, check whether another bot has already left it in \`/workspace\`.
 Base tools: run-command (background: true for long ones${background}), read-file, write-file, list-directory, web_search / web_fetch (web search and reading), memory (save / recall), document (write / read / edit), skill.${groupBlock ? `\n${groupBlock}` : ''}${noInternet}
+${WEB_NAVIGATION_RULES}
 ${documentRule()}
 - On the user's own Mac (use-app): For services that need the user's own account (video or image generators, banking, shops), open the page with open_url and hand over to the user to sign in; do not drive the login or the service step by step.${browser}
 Credentials: names with list-credentials; you NEVER see the values. Write {{secret:NAME}} where needed in the command (e.g. \`curl -H "Authorization: Bearer {{secret:API_KEY}}" ...\`): the value is injected only at execution time and stays hidden in the output.`

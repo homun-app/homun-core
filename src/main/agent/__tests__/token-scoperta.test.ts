@@ -162,7 +162,8 @@ describe('fase token·scoperta (R7.5): i budget nuovi (valori aggiornati da R8.4
     // BU1 (fase beta.4): 4763 misurati (il test T7 dell'eval,
     // language-judges.eval.ts: la prima richiesta del caso 3) + 60
     expect(TURN_TOKEN_BUDGET).toBe(4823)
-    expect(PROMPT_TOKEN_BUDGET).toBe(2046)
+    // T3 (fase web-strategia): 2069 misurati + 30, il TETTO 2100 di R8.4
+    expect(PROMPT_TOKEN_BUDGET).toBe(2100)
     expect(TURN_TOKEN_BUDGET).toBeLessThanOrEqual(5000)
     expect(PROMPT_TOKEN_BUDGET).toBeLessThanOrEqual(2400)
   })

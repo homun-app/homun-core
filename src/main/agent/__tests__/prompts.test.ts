@@ -478,8 +478,8 @@ import { browserToolDefs } from '../browser'
 const NO_BROWSER_GROUPS = ['documents', 'tasks', 'credentials', 'outside', 'subagents', 'bots', 'connectors', 'apps', 'admin']
 
 describe('fase token (T4): il prompt di base scende e le sezioni vanno nelle guide', () => {
-  it('PROMPT_TOKEN_BUDGET è 2046 (fase token: 1600; R7.5: 1900; R8.4: 2046 = 1986 misurati + 60, tetto 2100)', () => {
-    expect(PROMPT_TOKEN_BUDGET).toBe(2046)
+  it('PROMPT_TOKEN_BUDGET è 2100 (fase token: 1600; R7.5: 1900; R8.4: 2046 = 1986 + 60; T3 fase web-strategia: 2069 misurati + 30, TETTO 2100 raggiunto)', () => {
+    expect(PROMPT_TOKEN_BUDGET).toBe(2100)
   })
 
   it('prompt di base ≤ PROMPT_TOKEN_BUDGET per bot normale, turno di gruppo e bot con connettori (con le righe dei gruppi)', () => {
@@ -592,5 +592,37 @@ describe('BC2: il bot senza ruolo si scrive il profilo (identitySection)', () =>
       systemPrompt(vuoto, { subagents: true, groups: [...NO_BROWSER_GROUPS, 'mcp:gw'] }) + '\n# Active connectors\n- gw: 60 tools — gateway'
     ]
     for (const v of variants) expect(v.length / 4, v.slice(0, 40)).toBeLessThanOrEqual(PROMPT_TOKEN_BUDGET)
+  })
+})
+
+
+// ---- T3 (fase web-strategia): la strategia di navigazione nel prompt ----
+
+describe('T3 (fase web-strategia): navigare come una persona, nel prompt del computer', () => {
+  it('le tre regole ci sono: niente indirizzi inventati, il «non esiste» NON è un blocco, «mi blocca» solo dopo un blocco VERO', () => {
+    const s = computerSection()
+    // 1) la prima mossa per «trova X sul sito Y»: web_search o la HOME del sito
+    expect(s).toMatch(/web_search Y \+ X/)
+    expect(s).toMatch(/or Y's home/)
+    expect(s).toMatch(/never invent deep paths or subdomains/i)
+    // 2) dopo un «non esiste» non si conclude che il sito blocca
+    expect(s).toMatch(/"Does not exist" is not a block/)
+    // 3) «il sito mi blocca» solo dopo un blocco VERO (anti-bot), mai per un indirizzo inesistente
+    expect(s).toMatch(/only after a real anti-bot block, never for a missing address/)
+  })
+
+  it('la strategia sta nel prompt ANCHE senza browser (vale per web_search/web_fetch)', () => {
+    // computerSection con il browser spento (il default dei test) porta le righe
+    const s = computerSection()
+    expect(s).toMatch(/never invent deep/i)
+    const p = systemPrompt(agent)
+    expect(p).toMatch(/never invent deep/i)
+  })
+
+  it('la strategia è PICCOLA: il blocco sta in ~120 token stimati (caratteri/4) e il totale resta nel budget', async () => {
+    const { WEB_NAVIGATION_RULES, PROMPT_TOKEN_BUDGET } = await import('../prompts')
+    expect(WEB_NAVIGATION_RULES.length / 4).toBeLessThanOrEqual(120)
+    const p = systemPrompt(agent)
+    expect(p.length / 4).toBeLessThanOrEqual(PROMPT_TOKEN_BUDGET)
   })
 })
