@@ -960,11 +960,35 @@ export function screenshotMcpArgs(filename: string, ref: string): Record<string,
 export const SCREENSHOT_SHOW_HINT = (dest: string): string =>
   `To show it to the user: show_images with paths: [${dest}].`
 
+// ---- T4 (fase web-strategia): i menu a tendina dei campi di ricerca ----
+
+/** T4: quanto si aspettano le opzioni della listbox dopo la scrittura. */
+export const COMBOBOX_OPTIONS_WAIT_MS = 3_000
+/** T4: il sonno fra uno snapshot e l'altro mentre le opzioni arrivano. */
+export const COMBOBOX_OPTIONS_POLL_MS = 400
+
+/** T4: la riga che dice la mossa giusta quando le opzioni sono nello snapshot. */
+export const COMBOBOX_CHOOSE_LINE =
+  'Combobox field: no submit — choose one of the options below with browser_click.'
+
+/**
+ * T4 (PURO): le righe option di una listbox nello snapshot, CON i loro ref
+ * (il modello ci clicca sopra con browser_click). Le pagine che carica in
+ * ritardo le mostrano solo dopo la scrittura; senza opzioni → vuoto.
+ */
+export function comboboxOptionsOf(snapshot: string | null): string[] {
+  if (!snapshot) return []
+  return snapshot.split('\n').filter((l) => /^\s*-\s+option\b/.test(l))
+}
+
 async function runBrowserTool(agentId: string, tool: string, input: Record<string, unknown>): Promise<BrowserToolResult> {
   const session = await getBrowserSession(agentId)
   const ref = String(input.ref ?? '')
   let mcpName: string
   let mcpArgs: Record<string, unknown>
+  // T4 (fase web-strategia): il campo appena scritto è una COMBOBOX? Su una
+  // combobox browser_type NON fa submit: le opzioni si aspettano e si scelgono
+  let comboboxTyped = false
   switch (tool) {
     case 'browser_open': {
       // URL validato con checkUrl (come web_fetch): solo http/https, niente credenziali
@@ -984,8 +1008,12 @@ async function runBrowserTool(agentId: string, tool: string, input: Record<strin
       break
     case 'browser_type': {
       const text = String(input.text ?? '')
+      // T4: su un elemento combobox (i menu a tendina dei campi di ricerca)
+      // il submit NON sceglie niente: si scrive, si aspettano le opzioni e si
+      // clicca quella giusta — il submit si IGNORA anche se il modello lo chiede
+      comboboxTyped = refInfoOf(agentId, ref)?.role === 'combobox'
       mcpName = 'browser_type'
-      mcpArgs = { target: ref, text, ...(input.submit === true ? { submit: true } : {}) }
+      mcpArgs = { target: ref, text, ...(input.submit === true && !comboboxTyped ? { submit: true } : {}) }
       break
     }    case 'browser_select':
       mcpName = 'browser_select_option'
@@ -1071,6 +1099,18 @@ async function runBrowserTool(agentId: string, tool: string, input: Record<strin
   } else if (raw.includes('[ref=')) {
     session.snapshot = redactBrowserSecrets(agentId, raw).slice(0, 200_000)
   }
+  // T4 (fase web-strategia): scritta una COMBOBOX, le opzioni della listbox
+  // si ASPETTANO (≤ 3 s, la pagina le carica in ritardo) e restano nello
+  // snapshot del result: il modello sceglie con browser_click sull'opzione
+  if (comboboxTyped) {
+    const deadline = Date.now() + COMBOBOX_OPTIONS_WAIT_MS
+    while (comboboxOptionsOf(snapshotRaw).length === 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, COMBOBOX_OPTIONS_POLL_MS))
+      const again = await session.client.callTool({ name: 'browser_snapshot', arguments: {} })
+      snapshotRaw = mcpText(again)
+    }
+    if (snapshotRaw) session.snapshot = redactBrowserSecrets(agentId, snapshotRaw).slice(0, 200_000)
+  }
   // l'URL corrente: dal result dell'azione, o dallo snapshot ricevuto a parte
   const pageUrl = browserPageUrl(raw) ?? browserPageUrl(snapshotRaw)
   if (pageUrl) session.url = pageUrl
@@ -1087,6 +1127,10 @@ async function runBrowserTool(agentId: string, tool: string, input: Record<strin
   const loginNote = challenge ? null : await loginNoteFor(agentId, session, tool)
   let output = challenge ? `${truncated.text}\n\n${SNAPSHOT_BLOCKED_NOTE}` : truncated.text
   if (loginNote) output = `${output}\n\n${loginNote.text}`
+  // T4: le opzioni della combobox ci sono → la riga che dice la mossa giusta
+  if (comboboxTyped && comboboxOptionsOf(snapshotRaw).length > 0) {
+    output = `${output}\n\n${COMBOBOX_CHOOSE_LINE}`
+  }
   // T2 (fase web-strategia): per browser_open la CAUSA giusta in testa — il
   // registro del proxy del browser distingue «questo host non esiste» (DNS
   // che non risolve) dal tunnel rifiutato per altro; l'URL finale not-found,

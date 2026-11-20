@@ -59,6 +59,30 @@ const PAGES = {
       '- link "Torna alle offerte" [ref=e2]'
     ]
   },
+  // T4 (fase web-strategia): la pagina con la COMBOBOX di ricerca (come il
+  // campo «From» di Trainline): le opzioni della listbox compaiono solo dal
+  // SECONDO snapshot dopo la scrittura (il daemon le ASPETTA, ≤ 3 s)
+  'https://spa.example/treni': {
+    title: 'Cerca treni',
+    file: 'page-treni',
+    lines: [
+      '- Page URL: https://spa.example/treni',
+      '- Page Title: Cerca treni',
+      '- heading "Cerca treni" [ref=e1]',
+      '- combobox "From" [ref=e4]',
+      '- button "Cerca treni" [ref=e8]'
+    ]
+  },
+  'https://spa.example/treni?inviato': {
+    title: 'Ricerca inviata',
+    file: 'page-treni-inviato',
+    lines: [
+      '- Page URL: https://spa.example/treni?inviato',
+      '- Page Title: Ricerca inviata',
+      '- heading "Ricerca inviata" [ref=e1]',
+      '- text "La ricerca è partita."'
+    ]
+  },
   'https://spa.example/prenota': {
     title: 'Prenotazione cena',
     file: 'page-prenota',
@@ -217,6 +241,8 @@ const LOGIN_FORM_FN =
 // campi compilati: è così che la REDAZIONE di fase 14 si vede davvero)
 const state = { url: '', page: null }
 const typed = {}
+// T4: gli snapshot letti DA QUANDO la combobox e4 è scritta (le opzioni compaiono dal secondo)
+let comboSnaps = 0
 
 // Q2 (fase 14 correzioni 2): come il Playwright MCP 0.0.83 VERO, dalla
 // SECONDA navigazione nella stessa sessione i ref del documento PRINCIPALE
@@ -308,7 +334,26 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     // l'UNICO result con lo snapshot inline (comprese le righe di pagina); i
     // campi compilati mostrano il loro testo, come nello snapshot VERO
     if (!state.page) return text('(nessuna pagina aperta)')
-    const withTyped = withPrefix(state.page.lines).map((l) => {
+    let lines = state.page.lines
+    // T4: la combobox scritta mostra il testo E, dal secondo snapshot, la
+    // listbox con le opzioni (come una pagina vera che le carica in ritardo)
+    if (state.url === 'https://spa.example/treni') {
+      comboSnaps++
+      lines = state.page.lines.flatMap((l) => {
+        if (/combobox "From" \[ref=e4\]/.test(l) && typed.e4 !== undefined) {
+          const base = [l.replace(/\[ref=e4\]/, `[ref=e4]: ${typed.e4}`)]
+          if (comboSnaps >= 2) {
+            base.push('- listbox "Stazioni" [ref=e9]')
+            base.push('  - option "Milano Centrale" [ref=e10]')
+            base.push('  - option "Milano Porta Garibaldi" [ref=e11]')
+            base.push('  - option "Milano Lambrate" [ref=e12]')
+          }
+          return base
+        }
+        return [l]
+      })
+    }
+    const withTyped = withPrefix(lines).map((l) => {
       const m = /^(\s*-\s+textbox[^\n]*?\[ref=(\w+)\])([^\n]*)$/.exec(l)
       if (m && typed[m[2]] !== undefined) return `${m[1]}: ${typed[m[2]]}`
       return l
@@ -331,6 +376,13 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     // daemon redige ogni output del bot); il testo resta nel campo e RIAPPARE
     // nello snapshot successivo (come nel browser vero)
     typed[String(args.target ?? '')] = String(args.text ?? '')
+    if (baseRef(String(args.target ?? '')) === 'e4') comboSnaps = 0
+    // T4: il submit SU UNA COMBOBOX non deve mai arrivare qui; se arriva, la
+    // pagina lo dice (il test lo vede dall'URL)
+    if (args.submit === true && state.url === 'https://spa.example/treni') {
+      state.url = 'https://spa.example/treni?inviato'
+      state.page = PAGES[state.url]
+    }
     return text(actionResult(`await page.getByTestId('${String(args.target ?? '')}').fill('${String(args.text ?? '')}')`))
   }
   if (name === 'browser_press_key') {
