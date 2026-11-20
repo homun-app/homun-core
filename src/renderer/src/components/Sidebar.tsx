@@ -19,7 +19,7 @@ import { Plus, Search, Library as LibraryIcon, LayoutGrid, ChevronRight, Activit
 import { useStore, useResolvedModel } from '../store'
 import {
   buildSidebarModel, collapsedVoices, teamOpenState, teamAutoOpens, orderRows, cutRows, memberCut,
-  timeAgoShort, rowStateOf, SIDEBAR_ROW_LIMIT,
+  timeAgoShort, rowStateOf, SIDEBAR_ROW_LIMIT, TEAM_MEMBER_LIMIT,
   type SidebarModel, type SidebarTeam, type SidebarBot, type CollapsedVoice, type RowState
 } from '../sidebar-utils'
 // fase 16b correzioni 2 (Q1): il massimo del trascinamento e i limiti della barra
@@ -337,7 +337,7 @@ function TeamRows({ team, states, lastSendAt, now }: { team: SidebarTeam; states
           {cut.visible.map(({ member }) => (
             <MemberRow key={member.id} member={member} state={states[member.id] ?? 'idle'} lastAt={lastSendAt[member.id] ?? member.createdAt} now={now} />
           ))}
-          {cut.hidden > 0 && (
+          {members.length > TEAM_MEMBER_LIMIT && (
             <button
               className="rounded-[14px] px-2 py-1.5 pl-8 text-left text-[13px] text-muted-foreground transition hover:bg-muted/60"
               aria-expanded={allMembers}
@@ -404,7 +404,8 @@ function BotRow({ bot, now }: { bot: SidebarBot; now: number }) {
   )
 }
 
-/** «Mostra tutti (N)» / «Mostra tutte (N)» — l'espansione della sezione. */
+/** «Mostra tutti (N)» / «Mostra tutte (N)» — l'espansione della sezione
+ *  (espansa, il bottone diventa «Meno» e la richiude). */
 function ShowAllRow({ hidden, feminine, expanded, onToggle }: { hidden: number; feminine: boolean; expanded: boolean; onToggle(): void }) {
   const { i18n } = useLingui()
   const total = hidden + SIDEBAR_ROW_LIMIT
@@ -414,7 +415,11 @@ function ShowAllRow({ hidden, feminine, expanded, onToggle }: { hidden: number; 
       aria-expanded={expanded}
       onClick={onToggle}
     >
-      {feminine ? i18n.t(msg`Mostra tutte (${total})`) : i18n.t(msg`Mostra tutti (${total})`)}
+      {expanded
+        ? i18n.t(msg`Meno`)
+        : feminine
+          ? i18n.t(msg`Mostra tutte (${total})`)
+          : i18n.t(msg`Mostra tutti (${total})`)}
     </button>
   )
 }
@@ -922,15 +927,15 @@ export function Sidebar({ layout }: { layout: LayoutResult }) {
             {teamsCut.visible.map((team) => (
               <TeamRows key={team.group.id} team={team} states={states} lastSendAt={lastSendAtMap} now={now} />
             ))}
-            {teamsCut.hidden > 0 && (
+            {model.teams.length > SIDEBAR_ROW_LIMIT && (
               <ShowAllRow hidden={teamsCut.hidden} feminine expanded={sectionOpen('teams')} onToggle={() => toggleSection('teams')} />
             )}
 
-            {(noSection.hidden > 0 || noSection.visible.length > 0 || sections.length > 0) && <Title><Trans>Bot</Trans></Title>}
+            {(orderedBots.length > 0 || sections.length > 0) && <Title><Trans>Bot</Trans></Title>}
             {noSection.visible.map((b) => (
               <BotRow key={b.agent.id} bot={b} now={now} />
             ))}
-            {noSection.hidden > 0 && (
+            {orderedBots.filter((b) => !b.section).length > SIDEBAR_ROW_LIMIT && (
               <ShowAllRow hidden={noSection.hidden} feminine={false} expanded={sectionOpen('bots')} onToggle={() => toggleSection('bots')} />
             )}
             {sections.map((sec) => {
@@ -942,7 +947,7 @@ export function Sidebar({ layout }: { layout: LayoutResult }) {
                   {cut.visible.map((b) => (
                     <BotRow key={b.agent.id} bot={b} now={now} />
                   ))}
-                  {cut.hidden > 0 && (
+                  {rows.length > SIDEBAR_ROW_LIMIT && (
                     <ShowAllRow hidden={cut.hidden} feminine={false} expanded={sectionOpen(`section.${sec}`)} onToggle={() => toggleSection(`section.${sec}`)} />
                   )}
                 </div>
