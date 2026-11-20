@@ -17,12 +17,16 @@ const PREVIEW_LINES = 3
 
 export function BriefCard({ entry }: { entry: TranscriptEntry }) {
   const agents = useStore((s) => s.agents)
+  // il figlio NON è nel roster (AH2): il padre si trova dai subagents e, in
+  // mancanza, dalla riga dell'agente stessa
+  const subagents = useStore((s) => s.subagents)
   const brief = parseSubagentBrief(entry.content)
   const [open, setOpen] = useState(false)
   if (!brief) return null
   // chi ha affidato il compito: il PADRE del sottoagente (il brief è testo del
   // padre, non dell'utente)
-  const parentId = agents.find((a) => a.id === entry.agentId)?.parentId
+  const parentId = subagents.find((x) => x.id === entry.agentId)?.parentId
+    ?? agents.find((a) => a.id === entry.agentId)?.parentId
   const parentName = agents.find((a) => a.id === parentId)?.name
   const lines = brief.body.split('\n')
   const shown = open ? lines : lines.slice(0, PREVIEW_LINES)

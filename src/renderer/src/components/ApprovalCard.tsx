@@ -290,7 +290,7 @@ export function ApprovalCard({ entry, readOnly = false, ownerName }: { entry: Tr
             <Trans>Rifiuta</Trans>
           </button>
           <DropdownMenu>
-            <DropdownMenuTrigger className="rounded-[10px] px-2.5 py-1.5 text-sm text-muted-foreground transition hover:text-foreground">
+            <DropdownMenuTrigger data-testid="approval-altre-opzioni" className="rounded-[10px] px-2.5 py-1.5 text-sm text-muted-foreground transition hover:text-foreground">
               <Trans>Altre opzioni ▾</Trans>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start">
@@ -335,6 +335,7 @@ export function ApprovalCard({ entry, readOnly = false, ownerName }: { entry: Tr
               )}
               {siteGrant?.domain && (
                 <DropdownMenuItem
+                  data-testid="approval-site-always"
                   title={t`Navigare, aprire link e cliccare controlli non di conferma su ${siteGrant.domain} non chiederanno più; le conferme, i pagamenti e i dati tuoi sì. Revocabile in Impostazioni › Approvazioni.`}
                   onClick={() => resolve(entry.agentId, approvalId, 'allow', 'site')}
                 >

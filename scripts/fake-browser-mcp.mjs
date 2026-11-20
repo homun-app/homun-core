@@ -18,6 +18,49 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js'
 import { existsSync } from 'node:fs'
+import * as http from 'node:http'
+
+// P3/P4 (fase uso-permessi): il SITO FINTO SERVITO su 127.0.0.1 — la sonda
+// alza un server HTTP locale e il finto MCP legge DAVVERO le sue pagine
+// (navigazione vera su loopback, mai rete fuori da 127.0.0.1). Il corpo di
+// ogni pagina: la PRIMA riga è il titolo, le altre sono le righe dello
+// snapshot; un link con destinazione si scrive `- link "Nome" [ref=e2] -> /percorso`
+// (il click sul ref naviga a quell'indirizzo del sito).
+const dynFetch = (url) => new Promise((resolve) => {
+  try {
+    const u = new URL(url)
+    if (u.hostname !== '127.0.0.1' && u.hostname !== 'localhost') return resolve(null)
+    const req = http.request({ host: u.hostname, port: Number(u.port) || 80, method: 'GET', path: u.pathname + u.search }, (res) => {
+      let b = ''
+      res.on('data', (d) => { b += d })
+      res.on('end', () => resolve(res.statusCode === 200 ? b : null))
+    })
+    req.on('error', () => resolve(null))
+    req.end()
+  } catch {
+    resolve(null)
+  }
+})
+const dynPageOf = async (url) => {
+  const body = await dynFetch(url)
+  if (body === null) return null
+  const lines = body.split('\n').map((l) => l.trimEnd()).filter((l, i) => i > 0 || l !== '')
+  const title = (lines.shift() ?? 'Pagina').replace(/^#\s*/, '')
+  return {
+    title,
+    file: 'page-dinamica',
+    lines: [`- Page URL: ${url}`, `- Page Title: ${title}`, ...lines]
+  }
+}
+/** la destinazione `/percorso` di un ref della pagina corrente (i link del sito finto). */
+const dynRefTarget = (ref) => {
+  if (!state.page) return null
+  for (const l of state.page.lines) {
+    const m = new RegExp(`\\[ref=${ref}\\]\\s*->\\s*(\\S+)`).exec(l)
+    if (m) return m[1]
+  }
+  return null
+}
 
 // SV6 (fase schermo-vivo): SANDBOT_TEST_FAKE_BROWSER_MCP_EXIT_FILE=<path> fa
 // USCIRE questo processo quando il file compare — la sonda chiude così il
@@ -327,7 +370,8 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     const url = String(args.url ?? '')
     navigations++ // dalla seconda navigazione i ref prendono il prefisso f<n>
     state.url = url
-    state.page = pageAt(url)
+    // P3/P4: il sito finto su 127.0.0.1 si legge DAVVERO dal suo server
+    state.page = (await dynPageOf(url)) ?? pageAt(url)
     return text(actionResult(`await page.goto('${url}')`))
   }
   if (name === 'browser_snapshot') {
@@ -367,6 +411,19 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     if (baseRef(target) === 'e2' && state.url === 'https://spa.example/offerte') {
       state.url = 'https://spa.example/menu'
       state.page = PAGES[state.url]
+    }
+    // P3/P4: il click su un link del sito finto su 127.0.0.1 naviga DAVVERO
+    // alla sua destinazione (e cresce l'albero dei documenti, come nel vero:
+    // i ref della pagina nuova prendono il prefisso)
+    const dynTarget = dynRefTarget(baseRef(target))
+    if (dynTarget !== null && state.url.startsWith('http://127.0.0.1')) {
+      const next = new URL(dynTarget, state.url).toString()
+      const page = await dynPageOf(next)
+      if (page) {
+        navigations++
+        state.url = next
+        state.page = page
+      }
     }
     return text(actionResult(`await page.getByTestId('${target}').click()`))
   }
