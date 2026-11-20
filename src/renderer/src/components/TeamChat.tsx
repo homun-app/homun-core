@@ -25,6 +25,8 @@ import { pendingWantsLine } from './ApprovalsQueue'
 import { ApprovalsBannerElsewhere } from './ApprovalsBanner'
 // Q6 (fase squadra): la pagina si apre a lato anche dentro la chat di squadra
 import { PageView } from './PageView'
+// M1 (fase beta12-correzioni): il raggio dinamico del composer (come Chat)
+import { composerFormRadius, composerMultiFromMeasure, TEAM_COMPOSER_SINGLE_ROW_PX } from '../lib/composer'
 
 /** Il testo col le @menzioni rese come pillole nel colore del bot menzionato. */
 function MentionedText({ text, members, agents, effectiveMain }: {
@@ -225,6 +227,13 @@ export function TeamChat() {
     if (panelFocusRestore > 0) panelBtnRef.current?.focus()
   }, [panelFocusRestore])
   const [text, setText] = useState('')
+  // M1 (fase beta12-correzioni): come Chat — da due righe in su la pillola
+  // diventa un riquadro arrotondato, deciso dalla misura del textarea
+  const [multiRow, setMultiRow] = useState(false)
+  useEffect(() => {
+    const ta = taRef.current
+    setMultiRow(ta ? composerMultiFromMeasure(ta.scrollHeight, TEAM_COMPOSER_SINGLE_ROW_PX) : false)
+  }, [text])
   const [mentionIdx, setMentionIdx] = useState(0)
   const scrollRef = useRef<HTMLDivElement>(null)
   const taRef = useRef<HTMLTextAreaElement>(null)
@@ -422,12 +431,12 @@ export function TeamChat() {
             </div>
           )}
           <form
-            className="flex items-end gap-2 rounded-full bg-card py-2 pl-5 pr-2 shadow-soft"
+            className={`flex items-end gap-2 bg-card py-2 pl-5 pr-2 shadow-soft transition-[border-radius] duration-150 ${composerFormRadius(multiRow)}`}
             onSubmit={(e) => { e.preventDefault(); sendNow() }}
           >
             <textarea
               ref={taRef}
-              className="max-h-40 min-h-11 min-w-[120px] flex-1 resize-none bg-transparent py-2.5 text-sm outline-none placeholder:text-muted-foreground"
+              className="max-h-40 min-h-11 min-w-[120px] flex-1 resize-none bg-transparent py-2.5 pr-5 text-sm outline-none placeholder:text-muted-foreground"
               placeholder={placeholder}
               rows={Math.min(4, text.split('\n').length)}
               value={text}
