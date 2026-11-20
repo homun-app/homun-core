@@ -22,6 +22,9 @@ import type { DaemonClient } from './daemon-client'
 import { setUpdateChannel, checkNow, hasUpdateConfig } from './updater'
 // W2 (fase avvio-finestra): lo stato del caricamento mentre il daemon si avvia
 import type { BootStatusInfo } from './boot-status'
+// E2 (fase mcp-env): le vie dei file di Cursor/Claude/ZCode (il tipo basta:
+// i file si legano SOLO dentro i due gestori del clic)
+import type { ImportSource, ImportedFileJson } from './mcp/import-sources'
 // RV1 (fase beta.2): lo spostamento in Applicazioni (stato, controllo, riproposta)
 import { appNeedsMove, proposeMoveToApplications, updateCheckResultWhenMoveNeeded } from './app-location'
 import { UPDATE_CHANNEL_SETTING, parseUpdateChannel } from '../shared/update-channel'
@@ -193,6 +196,50 @@ export function registerIpc(
     if (!process.env.SANDBOT_TEST_USER_DATA) throw new Error('test:emit-activate is probe-only (needs SANDBOT_TEST_USER_DATA)')
     app.emit('activate')
     return { ok: true }
+  })
+  // E2 (fase mcp-env): «Importa da Cursor, Claude o ZCode» — i tre file si
+  // leggono SOLO qui, SOLO al clic dell'utente (mai all'avvio, mai dal bot).
+  // La scansione mostra nome e tipo MAI i valori; la conferma crea i server
+  // scelti (i segreti cifrati via mcp:save) e i doppioni non si sovrascrivono
+  const readImportJson = async (path: string): Promise<ImportedFileJson | null> => {
+    try {
+      return JSON.parse(await readFile(path, 'utf8')) as ImportedFileJson
+    } catch {
+      return null // assente o malformato: si salta in silenzio
+    }
+  }
+  ipcMain.handle('mcp-import:scan', async () => {
+    const { scanImportedSources } = await import('./mcp/import-sources')
+    return scanImportedSources({ readJson: readImportJson })
+  })
+  ipcMain.handle('mcp-import:apply', async (_e, picks: unknown) => {
+    const { importSourcePaths, buildImportedServer } = await import('./mcp/import-sources')
+    const paths = importSourcePaths()
+    const bySource = new Map(paths.map((p) => [p.source, p.path]))
+    const existing = new Set(((await client.call('mcp:list', [])) as Array<{ name: string }>).map((s) => s.name))
+    const out: Array<{ name: string; outcome: 'created' | 'duplicate' | 'missing' }> = []
+    for (const pick of Array.isArray(picks) ? (picks as Array<{ source?: string; name?: string }>) : []) {
+      const name = String(pick?.name ?? '')
+      const path = pick?.source ? bySource.get(pick.source as ImportSource) : undefined
+      if (!name || !path) {
+        out.push({ name, outcome: 'missing' })
+        continue
+      }
+      if (existing.has(name)) {
+        out.push({ name, outcome: 'duplicate' }) // già presente: non si sovrascrive
+        continue
+      }
+      const json = await readImportJson(path)
+      const built = json ? buildImportedServer(pick.source as ImportSource, name, json) : null
+      if (!built) {
+        out.push({ name, outcome: 'missing' })
+        continue
+      }
+      await client.call('mcp:save', [built.cfg, built.secret])
+      existing.add(name)
+      out.push({ name, outcome: 'created' })
+    }
+    return out
   })
   // fase skill (S4): «Mostra nel Finder» — apre la cartella della skill nella
   // libreria (shell è di Electron, sta qui e non nel daemon RPC)

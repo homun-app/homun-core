@@ -3133,6 +3133,10 @@ msgstr "Already installed"
 msgid "Già installato: niente da scaricare"
 msgstr "Already installed: nothing to download"
 
+#: src/renderer/src/components/McpWindow.tsx
+msgid "già presente"
+msgstr "already present"
+
 #: src/renderer/src/components/GuideModelStep.tsx
 msgid "Già sul tuo Mac."
 msgstr "Already on your Mac."
@@ -3924,6 +3928,14 @@ msgstr "the turn is not the user’s — creating bots or groups requires their 
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "Il vault è cifrato a riposo (AES-256-GCM, chiave nel Keychain). I valori non si rileggono mai in chiaro: si possono solo sostituire. I bot vedono i nomi con <0>list-credentials</0> e i login si compilano con <1>fill_credential</1>, sempre col tuo consenso."
 msgstr "The vault is encrypted at rest (AES-256-GCM, key in the Keychain). Values are never read back in clear: they can only be replaced. Bots see names with <0>list-credentials</0> and logins are filled with <1>fill_credential</1>, always with your consent."
+
+#: src/renderer/src/components/McpWindow.tsx
+msgid "Importa"
+msgstr "Import"
+
+#: src/renderer/src/components/McpWindow.tsx
+msgid "Importa da Cursor, Claude o ZCode"
+msgstr "Import from Cursor, Claude or ZCode"
 
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "importata · modificata"
@@ -5154,6 +5166,10 @@ msgstr "No skipped step to resume"
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "Nessun risultato."
 msgstr "No results."
+
+#: src/renderer/src/components/McpWindow.tsx
+msgid "Nessun server trovato in Cursor, Claude o ZCode."
+msgstr "No servers found in Cursor, Claude or ZCode."
 
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Nessun server trovato."

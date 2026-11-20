@@ -181,6 +181,13 @@ const api: SandbotApi = {
   mcpSave: (s, secret) => ipcRenderer.invoke('mcp:save', s, secret),
   mcpDelete: (id) => ipcRenderer.invoke('mcp:delete', id),
   mcpTest: (id) => ipcRenderer.invoke('mcp:test', id),
+  /**
+   * E2 (fase mcp-env): «Importa da Cursor, Claude o ZCode» — la scansione e
+   * la conferma leggono quei file SOLO al clic, nel main. Le righe non
+   * portano MAI valori (solo nomi e quali sono segreti).
+   */
+  mcpImportScan: () => ipcRenderer.invoke('mcp-import:scan'),
+  mcpImportApply: (picks) => ipcRenderer.invoke('mcp-import:apply', picks),
   // fase 5: connettori del catalogo ("Connetti app")
   connectorsList: () => ipcRenderer.invoke('connectors:list'),
   connectorsConnect: (id) => ipcRenderer.invoke('connectors:connect', id),

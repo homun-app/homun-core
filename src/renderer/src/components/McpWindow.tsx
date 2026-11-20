@@ -98,6 +98,10 @@ function ManualServers() {
   // E1 (fase mcp-env): le righe Variabili del server stdio manuale
   const [envRows, setEnvRows] = useState<EnvRow[]>([])
   const [tests, setTests] = useState<Record<string, { ok: boolean; error?: string; tools?: string[] }>>({})
+  // E2 (fase mcp-env): l'import da Cursor/Claude/ZCode — la scansione parte
+  // SOLO al clic del bottone (i file si leggono nel main, solo allora)
+  const [importRows, setImportRows] = useState<Array<{ source: string; name: string; transport: string; envNames: string[]; secretNames: string[] }> | null>(null)
+  const [importPicks, setImportPicks] = useState<Record<string, boolean>>({})
 
   const refresh = async () => {
     setServers(await api.mcpList())
@@ -254,9 +258,75 @@ function ManualServers() {
           </div>
         </div>
       ) : (
-        <button className="w-full rounded-2xl bg-muted px-3 py-2.5 text-sm text-muted-foreground transition hover:text-foreground" onClick={() => { setEdit({ id: '', name: '', transport: 'stdio', command: '', args: [], enabled: true }); setEditBearer(''); setEnvRows([newEnvRow()]) }}>
-          <Trans>+ Aggiungi server MCP</Trans>
-        </button>
+        <div className="space-y-2">
+          <button className="w-full rounded-2xl bg-muted px-3 py-2.5 text-sm text-muted-foreground transition hover:text-foreground" onClick={() => { setEdit({ id: '', name: '', transport: 'stdio', command: '', args: [], enabled: true }); setEditBearer(''); setEnvRows([newEnvRow()]) }}>
+            <Trans>+ Aggiungi server MCP</Trans>
+          </button>
+          {/* E2 (fase mcp-env): i file di Cursor/Claude/ZCode si leggono SOLO
+              al clic di questo bottone, nel main; l'elenco che torna non ha
+              MAI valori segreti e niente è spuntato di default */}
+          <button
+            className="w-full rounded-2xl bg-muted px-3 py-2.5 text-sm text-muted-foreground transition hover:text-foreground"
+            data-testid="mcp-import-button"
+            onClick={async () => {
+              const rows = await api.mcpImportScan().catch(() => [])
+              setImportRows(rows)
+              setImportPicks({})
+            }}
+          >
+            <Trans>Importa da Cursor, Claude o ZCode</Trans>
+          </button>
+          {importRows && (
+            <div className="rounded-2xl bg-muted p-3" data-testid="mcp-import-list">
+              {importRows.length === 0 ? (
+                <p className="text-xs text-muted-foreground"><Trans>Nessun server trovato in Cursor, Claude o ZCode.</Trans></p>
+              ) : (
+                <>
+                  <div className="space-y-1">
+                    {importRows.map((r) => {
+                      const key = `${r.source}:${r.name}`
+                      const existing = servers.some((s) => s.name === r.name)
+                      return (
+                        <label key={key} className={`flex items-center gap-2 text-sm ${existing ? 'opacity-60' : ''}`}>
+                          <input
+                            type="checkbox"
+                            data-testid="mcp-import-check"
+                            checked={importPicks[key] === true}
+                            disabled={existing}
+                            onChange={(e) => setImportPicks((p) => ({ ...p, [key]: e.target.checked }))}
+                          />
+                          <span className="truncate">{r.name}</span>
+                          <span className="rounded-full bg-card px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">{r.transport}</span>
+                          <span className="truncate text-[11px] text-muted-foreground">{r.source}</span>
+                          {r.secretNames.length > 0 && <span className="text-[11px] text-muted-foreground">🔒 {r.secretNames.length}</span>}
+                          {existing && <span className="text-[11px] text-muted-foreground"><Trans>già presente</Trans></span>}
+                          <span className="flex-1" />
+                        </label>
+                      )
+                    })}
+                  </div>
+                  <div className="flex justify-end gap-2 pt-2">
+                    <button className="rounded-full px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground" onClick={() => setImportRows(null)}><Trans>Annulla</Trans></button>
+                    <button
+                      className="rounded-full bg-foreground px-4 py-1.5 text-xs font-medium text-background transition hover:opacity-90"
+                      onClick={async () => {
+                        const picks = importRows
+                          .filter((r) => importPicks[`${r.source}:${r.name}`] === true)
+                          .map((r) => ({ source: r.source as 'cursor' | 'claude' | 'zcode', name: r.name }))
+                        await api.mcpImportApply(picks).catch(() => [])
+                        setImportRows(null)
+                        setImportPicks({})
+                        await refresh()
+                      }}
+                    >
+                      <Trans>Importa</Trans>
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </div>
       )}
     </div>
   )
