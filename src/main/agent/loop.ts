@@ -84,6 +84,11 @@ import {
   parseShowImagesInput, downloadShowImage, saveShowImage, imageUrlsInMarkdown,
   showImageFileOf, sniffImageMime
 } from './show-images'
+// T5 (fase web-strategia): la provenienza degli URL nel turno — cercare
+// prima, aprire dopo (regola del codice, non solo del prompt)
+import {
+  createSeenUrlState, noteSeenUrls, noteSeenUrl, seenUrlDecision, type TurnSeenUrls
+} from './seen-urls'
 // SV8 (fase schermo-vivo): i path del computer del bot, risolti come gli
 // strumenti dei file e letti DAL BOX (mai file del Mac)
 import { resolveBoxPath, readBoxBytesRel } from './computer-files'
@@ -423,6 +428,13 @@ interface Running {
    * nel turno.
    */
   webReads: TurnWebReads
+  /**
+   * T5 (fase web-strategia): gli URL e gli host VISTI in questo turno
+   * (messaggi, result di ricerca e di lettura, memoria/skill/Libreria che
+   * entrano come result, brief del figlio): un URL profondo mai visto non si
+   * apre. Vive solo nel turno.
+   */
+  seenUrls: TurnSeenUrls
   /**
    * AH4 (fase aiutanti): le chiamate RIFIUTATE o SCADUTE in questo turno, per
    * chiave (tool + argomenti). La STESSA chiamata non riapre una card: si
@@ -1196,7 +1208,11 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
   if (!provider) throw new Error('provider not found')
 
   const controller = new AbortController()
-  const run: Running = { controller, approvals: new Map(), turnAllows: new Set(), turnGrantEpoch: 0, composioTrustedApps: new Set(), composioDenied: [], accessibilityFailures: 0, turnImages: new Map(), webReads: new TurnWebReads(), refusedCalls: new Map() }
+  const run: Running = { controller, approvals: new Map(), turnAllows: new Set(), turnGrantEpoch: 0, composioTrustedApps: new Set(), composioDenied: [], accessibilityFailures: 0, turnImages: new Map(), webReads: new TurnWebReads(), refusedCalls: new Map(), seenUrls: createSeenUrlState() }
+  // T5 (fase web-strategia): gli URL del testo di apertura del turno sono
+  // VISTI (il messaggio dell'utente, o il BRIEF del figlio: così il figlio
+  // eredita gli URL che il padre gli ha messo nel brief)
+  noteSeenUrls(run.seenUrls, userText)
   if (opts.taskId !== undefined) run.taskId = opts.taskId
   running.set(agentId, run)
 
@@ -1369,6 +1385,13 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
   }
   const add = (e: AppendEntry): import('../../shared/types').TranscriptEntry => {
     const entry = addBase(e)
+    // T5 (fase web-strategia): OGNI result semina gli URL visti nel turno —
+    // i risultati di web_search, i link delle pagine lette (web_fetch e
+    // browser portano la pagina nel result), e ciò che entra dalla memoria,
+    // dalle skill e dalle pagine della Libreria
+    if (e.kind === 'tool-result' && typeof e.content === 'string') {
+      noteSeenUrls(run.seenUrls, e.content)
+    }
     // SV7: la serie si aggiorna a OGNI tool-result (dopo che il risultato c'è)
     if (e.kind === 'tool-result' && !streakStop) {
       const tracked = trackedCalls.get(String(e.meta?.callId ?? ''))
@@ -2362,6 +2385,8 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
       if (due?.length) {
         midTurnDeliveries.delete(agentId)
         for (const d of due) {
+          // T5: anche i messaggi consegnati a metà turno seminano i loro URL
+          noteSeenUrls(run.seenUrls, d.text)
           const delivered = add({
             agentId, kind: 'message', role: 'user', content: d.text,
             meta: { ...(d.images?.length ? { images: d.images.length } : {}), ...(d.readingPage ? { readingPage: d.readingPage } : {}) }
@@ -3186,9 +3211,15 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           // turno con la riga davanti — NESSUNA rete; un offset diverso legge
           const wfOffset = input.offset !== undefined && input.offset !== null && Number.isFinite(Number(input.offset)) ? Number(input.offset) : undefined
           const cachedRead = call.name === 'web_fetch' ? run.webReads.lookup(String(input.url ?? ''), wfOffset) : null
+          // T5 (fase web-strategia): un URL PROFONDO mai visto nel turno non
+          // si legge — il result rimanda a web_search o alla home del sito
+          const unseen = call.name === 'web_fetch' ? seenUrlDecision(run.seenUrls, String(input.url ?? '')) : { allow: true as const }
           if (cachedRead) {
             output = `${ALREADY_READ_PREFIX}\n${cachedRead.output}`
             meta = { webContent: true, finalUrl: cachedRead.finalUrl }
+          } else if (!unseen.allow) {
+            output = unseen.line
+            meta = { unseenUrl: true }
           } else {
             try {
               const r = await executeTool(agentId, call.name, input, { turnInitiator: opts.initiator })
@@ -3352,6 +3383,16 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           if (!browser.browserAvailable()) {
             pushResult(browser.BROWSER_UNAVAILABLE, { browserUnavailable: true })
             continue
+          }
+          // T5 (fase web-strategia): un indirizzo PROFONDO mai visto nel
+          // turno non si apre — il result rimanda a web_search o alla home;
+          // non chiede niente all'utente, rimette il bot sulla strada giusta
+          if (call.name === 'browser_open') {
+            const unseen = seenUrlDecision(run.seenUrls, String(input.url ?? ''))
+            if (!unseen.allow) {
+              pushResult(unseen.line, { unseenUrl: true })
+              continue
+            }
           }
           let risk = guard.browserActionRisk(call.name, input, browser.refInfoOf(agentId, String(input.ref ?? '')))
           // fase 12 (0a, correzione J3, giro K1): per browser_type col ref
@@ -3547,6 +3588,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             const r = await browser.callBrowserTool(agentId, call.name, input)
             bOutput = r.output
             bMeta = r.meta
+            // T5: la pagina APERTA è vista (anche l'indirizzo richiesto, prima
+            // dei redirect: i suoi link arrivano dal result)
+            if (call.name === 'browser_open' && typeof input.url === 'string') noteSeenUrl(run.seenUrls, input.url)
           } catch (e) {
             bOutput = `Browser error: ${e instanceof Error ? e.message : String(e)}`
             bMeta = { error: true }

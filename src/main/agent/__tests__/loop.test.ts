@@ -1786,7 +1786,7 @@ describe('fase 4: memoria e skill nel system prompt', () => {
         { toolCalls: [{ id: 'f1', name: 'web_fetch', arguments: JSON.stringify({ url: promoUrl }) }] },
         { text: 'Secondo il sito, il codice sconto è ZEBRA42.' }
       ]
-      await runTurn(AGENT, 'che codice sconto c\'è sul sito?', emit)
+      await runTurn(AGENT, `che codice sconto c'è sul sito? ${promoUrl}`, emit)
       const page = h.db.entries.find((e) => e.kind === 'tool-result' && e.content.includes('pagina-promo'))!
       expect(page.content).toContain('<pagina_web')
       const reply1 = h.db.entries.find((e) => e.kind === 'send-message' && e.meta?.final === true && e.content.includes('ZEBRA42'))!
@@ -4427,7 +4427,7 @@ describe('fase 11 (punto 2): web_search e web_fetch nel loop', () => {
       { toolCalls: [{ id: 'f2', name: 'send_to_user', arguments: JSON.stringify({ text: 'Il menu conferma' }) }] },
       { text: '.' }
     ]
-    await runTurn(AGENT, 'apri il menu', emit)
+    await runTurn(AGENT, 'apri il menu di https://da-leo.example/menu', emit)
     const toolMsg = h.llm.calls[1]!.find((m) => m.role === 'tool')!
     expect(String(toolMsg.content)).toContain('<pagina_web url="https://da-leo.example/menu">')
     expect(String(toolMsg.content)).toContain('# Menu')
@@ -4440,7 +4440,7 @@ describe('fase 11 (punto 2): web_search e web_fetch nel loop', () => {
       { toolCalls: [{ id: 'g1', name: 'web_fetch', arguments: JSON.stringify({ url: 'https://da-leo.example/menu' }) }] },
       { text: '.' }
     ]
-    await runTurn(AGENT, 'apri il menu', emit)
+    await runTurn(AGENT, 'apri il menu di https://da-leo.example/menu', emit)
     const toolMsg = h.llm.calls[1]!.find((m) => m.role === 'tool')!
     expect(String(toolMsg.content)).toContain('<pagina_web url="https://da-leo.example/menu-definitivo" richiesto="https://da-leo.example/menu">')
   })
@@ -4528,7 +4528,7 @@ describe('fase 11 (punto 2): web_search e web_fetch nel loop', () => {
       { toolCalls: [{ id: 'd1', name: 'send_to_agent', arguments: JSON.stringify({ agentId: 'agent_dest', text: 'guarda questa pagina' }) }] },
       { text: '.' }
     ]
-    const turn = runTurn(AGENT, 'leggi e gira al collega', emit)
+    const turn = runTurn(AGENT, 'leggi https://x.example/p e gira al collega', emit)
     await vi.waitFor(() => {
       expect(h.db.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending' && e.meta?.tool === 'send_to_agent')).toBeTruthy()
     })
@@ -4926,7 +4926,7 @@ describe('fase 11b: il browser del bot nel loop', () => {
       { toolCalls: [{ id: 'b7', name: 'run-command', arguments: JSON.stringify({ command: 'curl https://esempio' }) }] },
       { toolCalls: [{ id: 'b8', name: 'send_to_user', arguments: JSON.stringify({ text: 'fatto' }) }] }
     ]
-    const turn = runTurn(AGENT, 'guarda e scarica', emit)
+    const turn = runTurn(AGENT, 'guarda https://spa.example/prenota e scarica', emit)
     await vi.waitFor(() => {
       expect(h.db.entries.find((e) => e.kind === 'approval' && e.meta?.status === 'pending' && e.meta?.tool === 'run-command')).toBeTruthy()
     })
@@ -5889,7 +5889,7 @@ describe('fase 12: il FIGLIO — tool, prompt, whitelist e consegna', () => {
     // identical-no-progress, il figlio si ferma alla SETTIMA chiamata
     const sameCall = { toolCalls: [{ id: 'r1', name: 'web_fetch', arguments: JSON.stringify({ url: 'https://x.example/a' }) }] }
     h.llm.queue = Array.from({ length: 7 }, () => sameCall)
-    await runTurn(CHILD, 'brief', emit, undefined, { source: 'user', subagent: { id: CHILD, parentId: AGENT } })
+    await runTurn(CHILD, 'brief: leggi https://x.example/a', emit, undefined, { source: 'user', subagent: { id: CHILD, parentId: AGENT } })
     const row = subagentsState.rows.find((r) => r.id === CHILD)!
     expect(row.status).toBe('stopped-loop')
     expect(row.summary).toContain('identical-no-progress')
@@ -6188,6 +6188,121 @@ describe('T1 (fase web-strategia): check_subagent è un\'attesa VERA, non un cic
     } finally {
       setCheckSubagentWaitForTests(null)
     }
+  })
+})
+
+describe('T5 (fase web-strategia): la provenienza degli URL nel turno', () => {
+  beforeEach(() => {
+    browserState.available = false
+    browserState.calls.length = 0
+  })
+  afterEach(() => {
+    setWebFetchForTests(null)
+    setWebSearchProviderForTests(null)
+    resetWebSearchStateForTests()
+  })
+
+  const DEEP = 'https://www.trenitalia.com/it/acquista/cerca-soluzioni'
+  const fetchCounter = (): { n: number; spy(): Promise<unknown> } => {
+    const c = { n: 0 }
+    setWebFetchForTests(async () => {
+      c.n++
+      return { ok: true, text: 'orari', contentType: 'text/html', finalUrl: DEEP, downloadedBytes: 1, status: 200, elapsedMs: 5 }
+    })
+    return { get n() { return c.n }, spy: async () => undefined }
+  }
+
+  it('web_fetch con URL PROFONDO mai visto → NON legge: la fetch non parte e il result rimanda a web_search o alla home', async () => {
+    const f = fetchCounter()
+    h.llm.queue = [
+      { toolCalls: [{ id: 'u1', name: 'web_fetch', arguments: JSON.stringify({ url: DEEP }) }] },
+      { toolCalls: [{ id: 'u2', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurn(AGENT, 'cerca un treno per roma', emit)
+    expect(f.n).toBe(0)
+    const res = h.llm.calls[h.llm.calls.length - 1]!.filter((m) => m.role === 'tool').map((m) => String(m.content))[0]!
+    expect(res).toMatch(/web_search/)
+    expect(res).toMatch(/home/i)
+  })
+
+  it('lo STESSO URL dopo che è comparso in un risultato di web_search → si apre', async () => {
+    const f = fetchCounter()
+    setWebSearchProviderForTests({
+      name: 'you', label: 'You.com',
+      search: async () => [{ title: 'Cerca soluzioni', url: DEEP, snippet: 'orari e prezzi' }]
+    })
+    h.llm.queue = [
+      { toolCalls: [{ id: 's1', name: 'web_search', arguments: JSON.stringify({ query: 'trenitalia cerca soluzioni' }) }] },
+      { toolCalls: [{ id: 's2', name: 'web_fetch', arguments: JSON.stringify({ url: DEEP }) }] },
+      { toolCalls: [{ id: 's3', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurn(AGENT, 'cerca un treno per roma', emit)
+    expect(f.n).toBe(1)
+  })
+
+  it('l\'URL nel MESSAGGIO dell\'utente si apre', async () => {
+    const f = fetchCounter()
+    h.llm.queue = [
+      { toolCalls: [{ id: 'm1', name: 'web_fetch', arguments: JSON.stringify({ url: DEEP }) }] },
+      { toolCalls: [{ id: 'm2', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurn(AGENT, `guarda questo: ${DEEP}`, emit)
+    expect(f.n).toBe(1)
+  })
+
+  it('la HOME di un dominio mai visto si apre; il SOTTODOMINIO inventato no', async () => {
+    let reads = 0
+    setWebFetchForTests(async () => {
+      reads++
+      return { ok: true, text: 'home', contentType: 'text/html', finalUrl: 'https://www.trenitalia.com/', downloadedBytes: 1, status: 200, elapsedMs: 5 }
+    })
+    h.llm.queue = [
+      { toolCalls: [{ id: 'h1', name: 'web_fetch', arguments: JSON.stringify({ url: 'https://www.trenitalia.com/' }) }] },
+      { toolCalls: [{ id: 'h2', name: 'web_fetch', arguments: JSON.stringify({ url: 'https://biglietti.trenitalia.com/' }) }] },
+      { toolCalls: [{ id: 'h3', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurn(AGENT, 'trenitalia', emit)
+    const results = h.llm.calls[h.llm.calls.length - 1]!.filter((m) => m.role === 'tool').map((m) => String(m.content))
+    expect(results[0]).not.toMatch(/does not come from anything/)
+    expect(results[1]).toMatch(/does not come from anything/)
+    expect(reads).toBe(1)
+  })
+
+  it('browser_open con URL profondo mai visto → NON apre (nessuna azione al browser) e il result rimanda alla ricerca', async () => {
+    browserState.available = true
+    h.llm.queue = [
+      { toolCalls: [{ id: 'b1', name: 'browser_open', arguments: JSON.stringify({ url: DEEP }) }] },
+      { toolCalls: [{ id: 'b2', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurn(AGENT, 'cerca un treno per roma', emit)
+    expect(browserState.calls.filter((c) => c.tool === 'browser_open')).toHaveLength(0)
+    const res = h.llm.calls[h.llm.calls.length - 1]!.filter((m) => m.role === 'tool').map((m) => String(m.content))[0]!
+    expect(res).toMatch(/web_search/)
+  })
+
+  it('il FIGLIO eredita gli URL visti dal brief del padre: l\'URL nel brief si apre nel turno del figlio', async () => {
+    const CHILD = 'sub_t5'
+    h.db.agents.set(CHILD, {
+      id: CHILD, name: 'TestBot · Treni', description: '', providerId: 'prov', model: 'm1',
+      status: 'idle', unread: 0, createdAt: 1, createdBy: null, section: '', parentId: AGENT
+    })
+    subagentsState.rows.push({
+      id: CHILD, parent_id: AGENT, parent_task_id: null, batch_id: 'b-t5', title: 'Treni', brief: 'b',
+      status: 'running', summary: null, report_path: null,
+      contaminated: 0, untrusted: 0, automatic: 0, woken: 0, sealed: 0,
+      created_at: Date.now(), started_at: Date.now(), finished_at: null, deadline_at: Date.now() + 60_000
+    })
+    const f = fetchCounter()
+    h.llm.queue = [
+      { toolCalls: [{ id: 'c1', name: 'web_fetch', arguments: JSON.stringify({ url: DEEP }) }] },
+      { toolCalls: [{ id: 'c1b', name: 'web_fetch', arguments: JSON.stringify({ url: 'https://e656.net/orari/milano-roma' }) }] },
+      { toolCalls: [{ id: 'c2', name: 'wake_parent', arguments: JSON.stringify({ status: 'done', summary: 'fatto'.padEnd(220, '.') }) }] }
+    ]
+    await runTurn(CHILD, `Trova il treno: parti da ${DEEP} e leggi gli orari. Consegna il risultato al padre.`, emit, undefined, { source: 'user', subagent: { id: CHILD, parentId: AGENT } })
+    // l'URL del brief si apre; quello INVENTATO (fuori dal brief) no
+    expect(f.n).toBe(1)
+    const results = h.llm.calls[h.llm.calls.length - 1]!.filter((m) => m.role === 'tool').map((m) => String(m.content))
+    expect(results[1]).toMatch(/web_search/)
   })
 })
 
@@ -7123,7 +7238,7 @@ describe('M3: update_state create activate:true', () => {
       { toolCalls: [{ id: 'c1', name: 'update_state', arguments: JSON.stringify(CREATE_ARGS) }] },
       { text: '.' }
     ]
-    await runTurn(AGENT, 'guarda la pagina e crea la routine', emit)
+    await runTurn(AGENT, 'guarda https://x.example/p e crea la routine', emit)
     expect(h.db.entries.filter((e) => e.kind === 'approval')).toHaveLength(0)
     const r = h.db.routines.find((x) => x.title === 'Backup')!
     expect(r.enabled).toBe(0)
@@ -8136,7 +8251,7 @@ describe('fase token (T2): i gruppi si attivano e restano', () => {
       async (_m: unknown[], tools: Array<{ name: string }>) => { after = tools.map((t) => t.name); return { text: 'ok' } }
     ]
     try {
-      await runTurn(AGENT, 'apri il menu', emit)
+      await runTurn(AGENT, 'apri il menu di https://da-leo.example/menu', emit)
     } finally {
       setFetch(null)
       browserState.available = false
@@ -8649,7 +8764,7 @@ describe('fase memoria-engramma · correzioni C1: la contaminazione attraversa l
         { toolCalls: [{ id: 'f1', name: 'web_fetch', arguments: JSON.stringify({ url: 'https://shop.example/promo' }) }] },
         { text: 'Secondo il sito, il codice sconto è ZEBRA42' }
       ]
-      await runTurn(AGENT, 'che codice sconto c\'è?', emit)
+      await runTurn(AGENT, 'che codice sconto c\'è? guarda https://shop.example/promo', emit)
       // la RISPOSTA FINALE del turno contaminato porta il segno (stesso
       // updateEntryMeta del final): il job della storia lo rilegge da lì
       const final = h.db.entries.find((e) => e.kind === 'send-message' && e.meta?.final === true)!

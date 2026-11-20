@@ -264,7 +264,7 @@ describe('C1 (fase squadra-correzioni): la risposta collegata porta il contagio'
         { tool: { name: 'web_fetch', args: { url: 'https://hotel.example/checkin' } } },
         { text: 'Il check-in è dalle 15:00 alle 22:00.' }
       ]
-      await runTurn(alloggio, 'domanda', emit, undefined, {
+      await runTurn(alloggio, 'domanda: leggi https://hotel.example/checkin', emit, undefined, {
         initiator: 'AGENT',
         agentMessage: { fromAgentId: treni, fromAgentName: 'Treni C1', hop: 1, threadId: 'thr-c1' }
       })
@@ -304,7 +304,7 @@ describe('C1 (fase squadra-correzioni): la risposta collegata porta il contagio'
         { tool: { name: 'web_fetch', args: { url: 'https://hotel.example/checkin' } } },
         { text: 'Il check-in è dalle 15:00.' }
       ]
-      await runTurn(alloggio, 'domanda', emit, undefined, {
+      await runTurn(alloggio, 'domanda: leggi https://hotel.example/checkin', emit, undefined, {
         initiator: 'AGENT',
         agentMessage: { fromAgentId: treni, fromAgentName: 'Treni C1 lift', hop: 1, threadId: 'thr-c1-lift' }
       })
@@ -342,7 +342,7 @@ describe('C1 (fase squadra-correzioni): la risposta collegata porta il contagio'
         { tool: { name: 'web_fetch', args: { url: 'https://hotel.example/checkin' } } },
         { text: 'Il check-in è dalle 15:00.' }
       ]
-      await runTurn(alloggio, 'domanda', emit, undefined, {
+      await runTurn(alloggio, 'domanda: leggi https://hotel.example/checkin', emit, undefined, {
         initiator: 'AGENT',
         agentMessage: { fromAgentId: treni, fromAgentName: 'Treni C1 click', hop: 1, threadId: 'thr-c1-click' }
       })
