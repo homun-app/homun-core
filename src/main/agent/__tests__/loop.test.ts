@@ -5949,19 +5949,28 @@ describe('fase 12: check/message/stop_subagent e i rifiuti sugli id dei figli', 
 
   it('check_subagent: stato, tempi, passi, ultima attività; solo figli PROPRI', async () => {
     seedOpen()
-    h.llm.queue = [
-      { toolCalls: [{ id: 'k1', name: 'check_subagent', arguments: JSON.stringify({ id: CHILD }) }] },
-      { toolCalls: [{ id: 'k1b', name: 'check_subagent', arguments: JSON.stringify({ id: 'sub_altro' }) }] },
-      { toolCalls: [{ id: 'k2', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
-    ]
-    await runTurn(AGENT, 'come va', emit)
-    // l'ULTIMA chiamata contiene tutti i tool result accumulati
-    const results = h.llm.calls[h.llm.calls.length - 1]!.filter((m) => m.role === 'tool').map((m) => String(m.content))
-    expect(results[0]).toContain(`Subagent "Ricerca" (id ${CHILD}): status running`)
-    expect(results[0]).toContain('Steps: 1')
-    expect(results[0]).toContain('Last activity: web_fetch')
-    // un id che non è un figlio tuo: rifiuto generico di non trovato
-    expect(results[1]).toContain('Subagent not found')
+    // T1 (fase web-strategia): su un figlio in corso check_subagent ora è
+    // un'attesa VERA — qui il figlio è FERMO: attesa corta da test, il result
+    // porta la riga «ancora in corso, nessuna novità»
+    const { setCheckSubagentWaitForTests } = await import('../loop')
+    setCheckSubagentWaitForTests({ maxMs: 5, pollMs: 2 })
+    try {
+      h.llm.queue = [
+        { toolCalls: [{ id: 'k1', name: 'check_subagent', arguments: JSON.stringify({ id: CHILD }) }] },
+        { toolCalls: [{ id: 'k1b', name: 'check_subagent', arguments: JSON.stringify({ id: 'sub_altro' }) }] },
+        { toolCalls: [{ id: 'k2', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+      ]
+      await runTurn(AGENT, 'come va', emit)
+      // l'ULTIMA chiamata contiene tutti i tool result accumulati
+      const results = h.llm.calls[h.llm.calls.length - 1]!.filter((m) => m.role === 'tool').map((m) => String(m.content))
+      expect(results[0]).toContain(`Subagent "Ricerca" (id ${CHILD}): status running`)
+      expect(results[0]).toContain('Steps: 1')
+      expect(results[0]).toContain('Last activity: web_fetch')
+      // un id che non è un figlio tuo: rifiuto generico di non trovato
+      expect(results[1]).toContain('Subagent not found')
+    } finally {
+      setCheckSubagentWaitForTests(null)
+    }
   })
 
   it('message_subagent: al figlio APERTO accoda un job col blocco <messaggio_dal_padre>; al figlio DONE lo RIAPRE (lotto nuovo, woken 0)', async () => {
@@ -6075,6 +6084,110 @@ describe('fase 12: check/message/stop_subagent e i rifiuti sugli id dei figli', 
     const res = h.llm.calls[1]!.find((m) => m.role === 'tool')!
     expect(String(res.content)).toContain('not available to subagents: no subagents inside subagents')
     expect(subagentsState.rows.filter((r) => r.parent_id === 'sub_no1')).toHaveLength(0)
+  })
+})
+
+describe('T1 (fase web-strategia): check_subagent è un\'attesa VERA, non un ciclo', () => {
+  beforeEach(() => {
+    browserState.available = false
+    browserState.calls.length = 0
+  })
+
+  const CHILD = 'sub_t1'
+  const seedRunning = (): void => {
+    h.db.agents.set(CHILD, {
+      id: CHILD, name: 'TestBot · Ricerca', description: 'Ricerca', providerId: 'prov', model: 'm1',
+      status: 'idle', unread: 0, createdAt: 1, createdBy: null, section: '', parentId: AGENT
+    })
+    subagentsState.rows.push({
+      id: CHILD, parent_id: AGENT, parent_task_id: null, batch_id: 'b-t1', title: 'Ricerca', brief: 'b',
+      status: 'running', summary: null, report_path: null,
+      contaminated: 0, untrusted: 0, automatic: 0, woken: 0, sealed: 0,
+      created_at: Date.now() - 60_000, started_at: Date.now() - 30_000, finished_at: null, deadline_at: Date.now() + 60_000
+    })
+    h.db.entries.push({
+      id: h.db.nextId++, agentId: CHILD, kind: 'tool-call', role: 'assistant', content: 'web_fetch',
+      meta: { id: 'tc1', name: 'web_fetch', arguments: JSON.stringify({ url: 'https://x.example/a' }) }, createdAt: Date.now()
+    })
+  }
+
+  it('figlio che AVANZA durante l\'attesa: il result torna SUBITO col passo nuovo, senza «nessuna novità»', async () => {
+    const { setCheckSubagentWaitForTests } = await import('../loop')
+    setCheckSubagentWaitForTests({ maxMs: 5_000, pollMs: 5 })
+    try {
+      seedRunning()
+      h.llm.queue = [
+        { toolCalls: [{ id: 't1a', name: 'check_subagent', arguments: JSON.stringify({ id: CHILD }) }] },
+        { toolCalls: [{ id: 't1b', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+      ]
+      const turn = runTurn(AGENT, 'come va la ricerca', emit)
+      // il figlio fa un passo in più SOLO DOPO che l'attesa è partita (la
+      // tool-call di check è nel transcript del padre)
+      await vi.waitFor(() => {
+        if (!h.db.entries.some((e) => e.agentId === AGENT && e.kind === 'tool-call' && e.content === 'check_subagent')) {
+          throw new Error('check_subagent non ancora partito')
+        }
+      }, { timeout: 3_000, interval: 5 })
+      await new Promise((r) => setTimeout(r, 25))
+      h.db.entries.push({
+        id: h.db.nextId++, agentId: CHILD, kind: 'tool-call', role: 'assistant', content: 'web_fetch',
+        meta: { id: 'tc2', name: 'web_fetch', arguments: JSON.stringify({ url: 'https://x.example/b' }) }, createdAt: Date.now()
+      })
+      await turn
+      const res = h.llm.calls[h.llm.calls.length - 1]!.find((m) => m.role === 'tool')!
+      const text = String(res.content)
+      expect(text).toContain(`Subagent "Ricerca" (id ${CHILD}): status running`)
+      expect(text).toContain('Steps: 2')
+      expect(text).not.toMatch(/nothing new/i)
+    } finally {
+      setCheckSubagentWaitForTests(null)
+    }
+  }, 15_000)
+
+  it('figlio FERMO: prima attesa a vuoto → «ancora in corso, nessuna novità»; SECONDA → la riga che dice di CHIUDERE il turno', async () => {
+    const { setCheckSubagentWaitForTests } = await import('../loop')
+    setCheckSubagentWaitForTests({ maxMs: 5, pollMs: 2 })
+    try {
+      seedRunning()
+      h.llm.queue = [
+        { toolCalls: [{ id: 't2a', name: 'check_subagent', arguments: JSON.stringify({ id: CHILD }) }] },
+        { toolCalls: [{ id: 't2b', name: 'check_subagent', arguments: JSON.stringify({ id: CHILD }) }] },
+        { toolCalls: [{ id: 't2c', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+      ]
+      await runTurn(AGENT, 'come va', emit)
+      const results = h.llm.calls[h.llm.calls.length - 1]!.filter((m) => m.role === 'tool').map((m) => String(m.content))
+      expect(results[0]).toMatch(/nothing new/i)
+      expect(results[0]).not.toMatch(/close your turn/i)
+      expect(results[1]).toMatch(/nothing new/i)
+      expect(results[1]).toMatch(/close your turn/i)
+    } finally {
+      setCheckSubagentWaitForTests(null)
+    }
+  })
+
+  it('figlio TERMINALE: risposta immediata di oggi, con summary (niente attesa, niente «nothing new»)', async () => {
+    const { setCheckSubagentWaitForTests } = await import('../loop')
+    setCheckSubagentWaitForTests({ maxMs: 60_000, pollMs: 10 })
+    try {
+      seedRunning()
+      const row = subagentsState.rows.find((r) => r.id === CHILD)!
+      row.status = 'done'
+      row.summary = 'orari trovati su e656'
+      const start = Date.now()
+      h.llm.queue = [
+        { toolCalls: [{ id: 't4a', name: 'check_subagent', arguments: JSON.stringify({ id: CHILD }) }] },
+        { toolCalls: [{ id: 't4b', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+      ]
+      await runTurn(AGENT, 'com\'è finita', emit)
+      expect(Date.now() - start).toBeLessThan(5_000)
+      const res = h.llm.calls[h.llm.calls.length - 1]!.find((m) => m.role === 'tool')!
+      const text = String(res.content)
+      expect(text).toContain('status done')
+      expect(text).toContain('orari trovati su e656')
+      expect(text).not.toMatch(/nothing new/i)
+    } finally {
+      setCheckSubagentWaitForTests(null)
+    }
   })
 })
 

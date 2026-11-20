@@ -164,7 +164,11 @@ import type { Approval, ProviderConfig, SandbotEvent, SendMessagePayload, TurnEn
 // fase 12: sottoagenti — policy pura del figlio, store del registro, formatters
 import {
   subagentToolDenyReason, subagentBriefError, subagentClosure, autoCloseSummary,
-  SUBAGENT_RECOVERY_NUDGE, MAX_SPAWNS_PER_TURN, MAX_OPEN_SUBAGENTS, WAKE_SUMMARY_MAX_CHARS
+  SUBAGENT_RECOVERY_NUDGE, MAX_SPAWNS_PER_TURN, MAX_OPEN_SUBAGENTS, WAKE_SUMMARY_MAX_CHARS,
+  // T1 (fase web-strategia): l'attesa VERA di check_subagent
+  waitForSubagentChange, subagentInProgress, noNewsWaitCount,
+  CHECK_SUBAGENT_NOTHING_NEW_LINE, CHECK_SUBAGENT_CLOSE_TURN_LINE,
+  type SubagentCheckSnapshot
 } from './subagents'
 import {
   insertSubagent, getSubagent, updateSubagent, closeSubagent, openSubagentsOf,
@@ -841,7 +845,28 @@ interface SubagentToolResult {
   card?: SendMessagePayload
   /** lo stato dei figli è cambiato: evento alla UI */
   changed?: boolean
+  /** T1 (fase web-strategia): meta del tool-result (subagentNews per la serie del loop-guard) */
+  meta?: Record<string, unknown>
 }
+
+// T1 (fase web-strategia): i parametri dell'attesa di check_subagent —
+// l'override dei test accorcia attesa e sondaggio
+let checkSubagentWaitOpts: { maxMs: number; pollMs: number } | null = null
+
+/** Solo per i test: attesa e sondaggio di check_subagent brevi (null = i veri). */
+export function setCheckSubagentWaitForTests(opts: { maxMs: number; pollMs: number } | null): void {
+  checkSubagentWaitOpts = opts
+}
+
+/**
+ * T1: le attese di check_subagent SENZA novità, CONSECUTIVE per figlio (chiave
+ * `<padre>:<figlio>`): la novità o lo stato terminale le azzerano. Alla
+ * SECONDA di fila il result porta la riga che dice di chiudere il turno.
+ */
+const subagentEmptyWaits = new Map<string, number>()
+
+/** L'attesa di un passo del loop (il sonno breve del long-poll). */
+const subagentWaitSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
 /**
  * Fase token · nucleo (R8.2): la riga che CHIUDE il result della spawn
@@ -930,32 +955,72 @@ async function runSubagentTool(
   }
 
   if (call.name === 'check_subagent') {
-    const entries = getEntries(row.id)
-    const steps = entries.filter((e) => e.kind === 'tool-call').length
-    const lastCall = [...entries].reverse().find((e) => e.kind === 'tool-call' && e.meta?.name)
-    let activity = 'no activity yet'
-    if (lastCall) {
-      try {
-        const args = JSON.parse(String(lastCall.meta?.arguments ?? '{}')) as Record<string, unknown>
-        activity = `${String(lastCall.meta?.name)} ${activityOf(String(lastCall.meta?.name), args).target}`.trim()
-      } catch {
-        activity = String(lastCall.meta?.name ?? '')
+    // T1 (fase web-strategia): su un figlio IN CORSO questa non è più una
+    // fotografia istantanea ma un'attesa VERA (long-poll): ritorna appena il
+    // figlio cambia qualcosa (passo nuovo, stato, risultato) o dopo al
+    // massimo 60 s con «ancora in corso, nessuna novità». Due attese di fila
+    // senza novità → il result dice di CHIUDERE il turno: il figlio sveglia
+    // da solo con wake_parent.
+    const snapshot = (): SubagentCheckSnapshot => {
+      const r = getSubagent(database, row.id) ?? row
+      return {
+        status: r.status,
+        steps: getEntries(r.id).filter((e) => e.kind === 'tool-call').length,
+        summary: r.summary ?? null
       }
     }
-    const now = Date.now()
-    const elapsed = Math.max(0, Math.round((now - row.created_at) / 60_000))
-    const left = Math.max(0, Math.round((row.deadline_at - now) / 60_000))
-    const childStatus = getAgent(row.id)?.status
-    const waiting = childStatus === 'paused-for-approval' ? ' — waiting for the user\'s confirmation on one of the child\'s cards' : ''
-    const lines = [
-      `Subagent "${row.title}" (id ${row.id}): status ${row.status}${waiting}.`,
-      `Time: ${elapsed} min elapsed, deadline in ${left} min. Steps: ${steps}. Last activity: ${activity}.`
-    ]
-    if (row.status === 'done' || row.status === 'failed' || row.status === 'stopped' || row.status === 'expired') {
-      lines.push(`Summary: ${row.summary ?? '(none)'}`)
-      if (row.report_path) lines.push(`Report: ${row.report_path}`)
+    const render = (): string => {
+      const fresh = getSubagent(database, row.id) ?? row
+      const entries = getEntries(fresh.id)
+      const steps = entries.filter((e) => e.kind === 'tool-call').length
+      const lastCall = [...entries].reverse().find((e) => e.kind === 'tool-call' && e.meta?.name)
+      let activity = 'no activity yet'
+      if (lastCall) {
+        try {
+          const args = JSON.parse(String(lastCall.meta?.arguments ?? '{}')) as Record<string, unknown>
+          activity = `${String(lastCall.meta?.name)} ${activityOf(String(lastCall.meta?.name), args).target}`.trim()
+        } catch {
+          activity = String(lastCall.meta?.name ?? '')
+        }
+      }
+      const now = Date.now()
+      const elapsed = Math.max(0, Math.round((now - fresh.created_at) / 60_000))
+      const left = Math.max(0, Math.round((fresh.deadline_at - now) / 60_000))
+      const childStatus = getAgent(fresh.id)?.status
+      const waiting = childStatus === 'paused-for-approval' ? ' — waiting for the user\'s confirmation on one of the child\'s cards' : ''
+      const lines = [
+        `Subagent "${fresh.title}" (id ${fresh.id}): status ${fresh.status}${waiting}.`,
+        `Time: ${elapsed} min elapsed, deadline in ${left} min. Steps: ${steps}. Last activity: ${activity}.`
+      ]
+      if (fresh.status === 'done' || fresh.status === 'failed' || fresh.status === 'stopped' || fresh.status === 'expired') {
+        lines.push(`Summary: ${fresh.summary ?? '(none)'}`)
+        if (fresh.report_path) lines.push(`Report: ${fresh.report_path}`)
+      }
+      return lines.join('\n')
     }
-    return { output: lines.join('\n') }
+    if (!subagentInProgress(row.status)) {
+      // terminale: la risposta di oggi, immediata
+      subagentEmptyWaits.delete(`${agentId}:${row.id}`)
+      return { output: render() }
+    }
+    const wait = await waitForSubagentChange({
+      snapshot,
+      sleep: subagentWaitSleep,
+      now: () => Date.now(),
+      ...(checkSubagentWaitOpts ? { maxMs: checkSubagentWaitOpts.maxMs, pollMs: checkSubagentWaitOpts.pollMs } : {})
+    })
+    let output = render()
+    const key = `${agentId}:${row.id}`
+    if (wait.changed) {
+      // la novità azzera le attese a vuoto
+      subagentEmptyWaits.delete(key)
+      return { output, meta: { subagentNews: true } }
+    }
+    const empty = noNewsWaitCount(subagentEmptyWaits.get(key) ?? 0, wait)
+    subagentEmptyWaits.set(key, empty)
+    output += `\n${CHECK_SUBAGENT_NOTHING_NEW_LINE}`
+    if (empty >= 2) output += `\n${CHECK_SUBAGENT_CLOSE_TURN_LINE}`
+    return { output, meta: { subagentNews: false } }
   }
 
   if (call.name === 'message_subagent') {
@@ -1318,7 +1383,10 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           fingerprint = toolResultFingerprint(e.content)
         }
         const overLimit = tracked.name === 'computer_act' && failed && /too many actions/i.test(e.content)
-        const out = trackToolStreak(streakState, tracked, { fingerprint, failed, ...(overLimit ? { overLimit: true } : {}) })
+        // T1 (fase web-strategia): il result di check_subagent che porta
+        // NOVITÀ del figlio è progresso, non ripetizione
+        const subagentNews = tracked.name === 'check_subagent' && e.meta?.subagentNews === true
+        const out = trackToolStreak(streakState, tracked, { fingerprint, failed, ...(overLimit ? { overLimit: true } : {}), ...(subagentNews ? { progress: true } : {}) })
         streakState = out.state
         if (out.stop) {
           streakStop = out.stop
@@ -4365,7 +4433,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             spawnSucceededThisTurn = true
           }
           if (result.changed) subagentsChanged(agentId, emit)
-          const res = add({ agentId, kind: 'tool-result', role: 'system', content: result.output, meta: { callId: call.id } })
+          // T1: il meta del result (subagentNews) attraversa e alimenta la
+          // serie del loop-guard (l'attesa su un figlio che avanza non conta)
+          const res = add({ agentId, kind: 'tool-result', role: 'system', content: result.output, meta: { callId: call.id, ...(result.meta ?? {}) } })
           emit({ type: 'entries', agentId, entries: [res] })
           messages.push({ role: 'tool', toolCallId: call.id, content: result.output })
           continue

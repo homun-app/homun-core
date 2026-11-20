@@ -657,7 +657,7 @@ export const toolDefs: ToolDef[] = [
   },
   {
     name: 'check_subagent',
-    description: 'The status of one of your subagents: state, elapsed time and deadline, last activity, number of steps; summary and report when it has finished.',
+    description: 'The status of one of your subagents: state, elapsed time and deadline, last activity, number of steps; summary and report when it has finished. While it runs this call WAITS and returns as soon as something changes (a new step, the result) or after 60 s: waiting twice with nothing new means closing your turn with an update — the subagent will wake you when done.',
     parameters: {
       type: 'object',
       properties: { id: { type: 'string', description: 'Subagent id (sub_…, from the spawn)' } },

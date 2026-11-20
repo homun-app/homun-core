@@ -189,6 +189,13 @@ export interface TrackedToolResult {
   failed: boolean
   /** computer_act oltre COMPUTER_ACTIONS_MAX: il rifiuto c'è già, si CONTA */
   overLimit?: boolean
+  /**
+   * T1 (fase web-strategia): questo result porta le NOVITÀ di un figlio
+   * (check_subagent che torna perché il figlio è AVANZATO) — l'attesa su un
+   * figlio che fa progressi non è «la stessa azione ripetuta»: la serie
+   * «simile» si azzera. Conta solo se il figlio è fermo.
+   */
+  progress?: boolean
 }
 
 /**
@@ -246,7 +253,11 @@ export function trackToolStreak(
   }
 
   // la serie «simile»: LUNGHEZZA della sequenza di chiamate con la STESSA
-  // forma (identiche, o che cambiano solo nei numeri) — conta la prima
+  // forma (identiche, o che cambiano solo nei numeri) — conta la prima.
+  // T1 (fase web-strategia): un result che porta NOVITÀ di un figlio (le
+  // attese di check_subagent su chi avanza) azzera la serie: aspettare un
+  // figlio che lavora non è ripetere la stessa azione; conta solo se è fermo
+  if (result.progress === true) s.similar = 0
   if (sameShape) s.similar++
   else s.similar = 1
   if (s.similar >= SIMILAR_STOP) stop ??= 'similar'

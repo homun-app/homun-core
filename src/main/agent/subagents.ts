@@ -236,3 +236,73 @@ export function expiredSummary(freeText: string, minutes: number): string {
   const text = freeText.trim().slice(0, WAKE_SUMMARY_MAX_CHARS)
   return [text, `(expired after ${minutes} minutes)`].filter((l) => l).join('\n')
 }
+
+// ---- T1 (fase web-strategia): aspettare un figlio non è un ciclo ----
+
+/** T1: il tetto di UNA attesa di check_subagent (long-poll). */
+export const CHECK_SUBAGENT_WAIT_MAX_MS = 60_000
+
+/** T1: la riga quando l'attesa finisce senza novità del figlio. */
+export const CHECK_SUBAGENT_NOTHING_NEW_LINE = 'Still in progress, nothing new.'
+
+/**
+ * T1: due attese di fila senza novità → il result dice al bot di CHIUDERE il
+ * turno con un aggiornamento all'utente: il figlio lo sveglierà da solo con
+ * wake_parent (meccanismo di oggi).
+ */
+export const CHECK_SUBAGENT_CLOSE_TURN_LINE =
+  'The subagent will wake you on its own when it is done: close your turn now with an update to the user.'
+
+/** T1: la fotografia del figlio che conta come «novità» (puro). */
+export interface SubagentCheckSnapshot {
+  status: string
+  steps: number
+  summary: string | null
+}
+
+/** T1: il figlio è IN CORSO (l'attesa ha senso)? (puro) */
+export function subagentInProgress(status: string): boolean {
+  return status === 'queued' || status === 'running'
+}
+
+/** T1: cos'è una novità: stato, passi o summary diversi (puro). */
+export function subagentCheckChanged(a: SubagentCheckSnapshot, b: SubagentCheckSnapshot): boolean {
+  return a.status !== b.status || a.steps !== b.steps || (a.summary ?? null) !== (b.summary ?? null)
+}
+
+/** T1: il conteggio delle attese a vuoto CONSECUTIVE: una novità azzera (puro). */
+export function noNewsWaitCount(prev: number, r: { changed: boolean }): number {
+  return r.changed ? 0 : prev + 1
+}
+
+/** T1: le dipendenze dell'attesa (tutte iniettabili: orologio incluso). */
+export interface SubagentWaitDeps {
+  snapshot(): SubagentCheckSnapshot
+  sleep(ms: number): Promise<void>
+  now(): number
+  pollMs?: number
+  maxMs?: number
+  /** il turno del padre interrotto: l'attesa smette subito */
+  signal?: { aborted: boolean }
+}
+
+/**
+ * T1: l'attesa VERA di check_subagent (long-poll, puro con dipendenze
+ * iniettate): ritorna appena il figlio cambia qualcosa — passo nuovo, stato,
+ * risultato — o dopo al massimo `maxMs` (default 60 s) senza novità.
+ */
+export async function waitForSubagentChange(
+  deps: SubagentWaitDeps
+): Promise<{ changed: boolean; final: SubagentCheckSnapshot; start: SubagentCheckSnapshot }> {
+  const pollMs = deps.pollMs ?? 500
+  const maxMs = deps.maxMs ?? CHECK_SUBAGENT_WAIT_MAX_MS
+  const start = deps.snapshot()
+  const t0 = deps.now()
+  for (;;) {
+    if (deps.signal?.aborted) return { changed: false, final: deps.snapshot(), start }
+    await deps.sleep(pollMs)
+    const cur = deps.snapshot()
+    if (subagentCheckChanged(start, cur)) return { changed: true, final: cur, start }
+    if (deps.now() - t0 >= maxMs) return { changed: false, final: cur, start }
+  }
+}
