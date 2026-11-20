@@ -66,11 +66,32 @@ const script = []
 // `when` può essere una stringa o UNA LISTA (tutte presenti nel body): la
 // lista marca la richiesta per BOT + evento («You are Treni» + «file-treni»),
 // così i marker non «filano» nella storia di un altro bot (l'eco del
-// messaggio inviato contiene il testo della delega)
-const matches = (body, when) => when == null || (Array.isArray(when) ? when.every((w) => body.includes(w)) : body.includes(when))
+// messaggio inviato contiene il testo della delega).
+// `not` (fase squadra-sicurezza-2, indagine sulla corsa-1-dopo-build rossa):
+// stringa o lista NESSUNA delle quali deve stare nel body. Serve ai `pass`
+// dei turni di gruppo: l'apertura <turno_di_gruppo> di un turno di gruppo
+// PRECEDENTE resta nella storia del bot, quindi una richiesta SUCCESSIVA di
+// quel bot (la delega privata, il risveglio) contiene «You are <bot>» +
+// «turno_di_gruppo» e si portava via un pass avanzato PRIMA delle voci della
+// sezione 3 — il turno di Turismo finiva fuori copione e la card della
+// Cassaforte non nasceva mai. I marker negativi sono le parole che stanno
+// SOLO nei messaggi PRIVATI (le righe relay non entrano nei turni di gruppo:
+// group-runner le filtra), quindi un turno di gruppo VERO non le contiene
+// mai e lo scenario non cambia.
+const matches = (body, x) =>
+  (x.when == null || (Array.isArray(x.when) ? x.when.every((w) => body.includes(w)) : body.includes(x.when))) &&
+  (x.not == null || (Array.isArray(x.not) ? x.not.every((w) => !body.includes(w)) : !body.includes(x.not)))
 const sayText = (text, when = null) => script.push({ kind: 'text', text, when })
 const callTool = (name, args, when = null) => script.push({ kind: 'tool', name, args, when })
 const callTools = (calls, when = null) => script.push({ kind: 'tools', calls, when })
+// il `pass` di un turno di gruppo: vale SOLO lì — le parole dei messaggi
+// PRIVATI (deleghe, risposta collegata) nel body dicono che la richiesta è
+// un altro turno e il pass non deve calzare
+const callPass = (bot) => script.push({
+  kind: 'tool', name: 'pass', args: {},
+  when: [`You are ${bot}`, 'turno_di_gruppo'],
+  not: ['file-treni', 'delega-treni', 'risposta=', 'delega-museo', 'modulo-museo']
+})
 const chatRequests = []
 const served = []
 const sse = (delta, finish) => 'data: ' + JSON.stringify({ id: 'x', object: 'chat.completion.chunk', created: 0, model: 'finto', choices: [{ index: 0, delta, finish_reason: finish }] }) + '\n\n'
@@ -87,7 +108,7 @@ const providerServer = createServer((req, res) => {
     }
     if (req.method === 'POST' && url.pathname.endsWith('/chat/completions')) {
       chatRequests.push(body)
-      const idx = script.findIndex((x) => matches(body, x.when))
+      const idx = script.findIndex((x) => matches(body, x))
       const next = idx >= 0 ? script.splice(idx, 1)[0] : { kind: 'text', text: 'ok' }
       const who = /You are (@?[\wÀ-ÿ']+)/.exec(body)?.[1] ?? '?'
       const lastUser = body.slice(Math.max(0, body.lastIndexOf('"role":"user"')), Math.max(0, body.lastIndexOf('"role":"user"')) + 220).replace(/\n/g, ' ')
@@ -415,7 +436,7 @@ try {
   // membri: i loro turni di gruppo (e i successivi) chiudono col silenzio
   // (pass) — DOPO le entry della guida, così non la intercettano
   for (const who of ['Capo', 'Turismo', 'Treni']) {
-    for (let i = 0; i < 6; i++) callTool('pass', {}, [`You are ${who}`, 'turno_di_gruppo'])
+    for (let i = 0; i < 6; i++) callPass(who)
   }
 
   await clickText('Weekend Torino', { exact: false })
