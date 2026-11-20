@@ -260,10 +260,14 @@ export function addGroupMember(groupId: number, agentId: string): void {
  * coordinatore, se il coordinatore era lui — il nuovo è il primo membro
  * rimasto in ordine di ingresso (ensureGroupCoordinator). Il chiamante
  * scrive la riga di sistema nel gruppo.
+ * S4 (fase squadra-sicurezza-2): revoca anche i grant di missione di quella
+ * squadra per quel bot (squad:<gid>|…) — uscendo, perde i permessi della
+ * squadra fino alla scadenza NON vale più.
  */
 export function removeGroupMember(groupId: number, agentId: string): { coordinatorChanged: boolean } {
   db().prepare('DELETE FROM group_members WHERE group_id = ? AND agent_id = ?').run(groupId, agentId)
   db().prepare('DELETE FROM group_cursors WHERE group_id = ? AND agent_id = ?').run(groupId, agentId)
+  db().prepare('DELETE FROM grants WHERE target LIKE ? AND agent_id = ?').run(`squad:${groupId}|%`, agentId)
   // i turni PIANIFICATI e non partiti si chiudono: altrimenti resterebbero
   // "in coda" per sempre e la fusione silenzierebbe il membro ri-aggiunto
   db().prepare(`
@@ -294,6 +298,8 @@ export function removeAgentMemberships(agentId: string): Array<{ groupId: number
 /**
  * Fase 16b (S1.3): cancella la squadra e i suoi messaggi; i bot restano.
  * Anche cursori, registro dei turni e job group-turn in coda.
+ * S4 (fase squadra-sicurezza-2): revoca TUTTI i grant di missione della
+ * squadra (squad:<gid>|…) — la squadra non c'è più, i suoi permessi nemmeno.
  */
 export function deleteGroup(dbs: DatabaseSync, groupId: number): void {
   cancelGroupJobs(dbs, groupId)
@@ -301,6 +307,7 @@ export function deleteGroup(dbs: DatabaseSync, groupId: number): void {
   dbs.prepare('DELETE FROM group_members WHERE group_id = ?').run(groupId)
   dbs.prepare('DELETE FROM group_cursors WHERE group_id = ?').run(groupId)
   dbs.prepare('DELETE FROM group_turns WHERE group_id = ?').run(groupId)
+  dbs.prepare('DELETE FROM grants WHERE target LIKE ?').run(`squad:${groupId}|%`)
   dbs.prepare('DELETE FROM groups WHERE id = ?').run(groupId)
 }
 

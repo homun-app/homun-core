@@ -809,7 +809,7 @@ const dbm = await import('../../store/db')
 // correzione E1: le descrizioni dei tool di gruppo (il modulo gira già coi mock)
 const { toolDefs } = await import('../tools')
 // S1 (fase squadra-sicurezza): il createGroup del MOCK in memoria dei gruppi
-const { createGroup } = await import('../../store/groups')
+const { createGroup, removeGroupMember } = await import('../../store/groups')
 
 const emit = () => undefined
 const AGENT = 'agent_t'
@@ -5271,6 +5271,104 @@ describe('S3 (fase squadra-sicurezza-2): il grant di missione non scavalca origi
     ]
     await runTurnDenying({ squadId: gid })
     expect(h.db.entries.filter((e) => e.kind === 'approval')).toEqual([])
+  })
+})
+
+// ---- S4 (fase squadra-sicurezza-2): un bot tolto dalla squadra perde i permessi di quella squadra ----
+
+describe('S4 (fase squadra-sicurezza-2): chi agisce deve essere ANCORA membro della squadra', () => {
+  /** squadra di un ALTRO bot (niente bypass del creatore) con AGENT membro */
+  const mkForeignSquad = (autonomy: 'ask' | 'box' | 'box_review'): number => {
+    const g = createGroup('Squadra altrui S4', '', 'agent_capo', [AGENT])
+    const row = h.db.groupsState.groups.find((x) => x.id === g.id)! as { autonomy?: string }
+    row.autonomy = autonomy
+    return g.id
+  }
+  /** gira un turno NEGANDO via via le card pendenti (per il bot dato) */
+  const runTurnDenying = async (who: string, opts: Record<string, unknown>): Promise<void> => {
+    const p = runTurn(who, 'lavoro', emit, undefined, opts as never)
+    p.catch(() => undefined)
+    const deadline = Date.now() + 30_000
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 40))
+      const appr = h.db.entries.find((e) => e.agentId === who && e.kind === 'approval' && e.meta?.status === 'pending')
+      if (appr) resolveApproval(who, String(appr.meta?.approvalId), 'deny')
+      if (!isRunning(who)) break
+    }
+    await p
+  }
+  /** il turno di update_group del gruppo della squadra (il tool del grant generico) */
+  const queueUpdateGroup = (gid: number): void => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 's4a', name: 'update_group', arguments: JSON.stringify({ groupId: gid, description: 'regole' }) }] },
+      { toolCalls: [{ id: 's4b', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+  }
+
+  beforeEach(() => {
+    browserState.available = true
+    browserState.calls.length = 0
+    browserState.fieldProbe = null
+    browserState.lastUrl = null
+  })
+
+  it('grant di missione attivo + removeGroupMember → il turno con squadId di quel bot chiede di nuovo', async () => {
+    const gid = mkForeignSquad('box')
+    h.db.grants.push({ tool: 'update_group', target: `squad:${gid}|group:${gid}` })
+    queueUpdateGroup(gid)
+    await runTurnDenying(AGENT, { squadId: gid })
+    // GUARDIA: da membro il grant vale (nessuna card)
+    expect(h.db.entries.filter((e) => e.kind === 'approval')).toEqual([])
+    // rimosso dalla squadra: il grant di quella squadra non vale più
+    removeGroupMember(gid, AGENT)
+    h.db.entries.length = 0
+    queueUpdateGroup(gid)
+    await runTurnDenying(AGENT, { squadId: gid })
+    const appr = h.db.entries.find((e) => e.kind === 'approval')!
+    expect(appr.meta?.status).toBe('denied')
+    expect(appr.meta?.tool).toBe('update_group')
+  })
+
+  it('il SOTTOAGENTE di un membro rimosso non usa il grant (owner = il padre)', async () => {
+    const gid = mkForeignSquad('box')
+    h.db.agents.set('agent_figlio', { id: 'agent_figlio', name: 'Figlio', description: '', providerId: 'prov', model: 'm1', status: 'idle', unread: 0, createdAt: 2, parentId: AGENT })
+    // attivazione dei gruppi per il figlio (il seed virtuale vale solo per AGENT)
+    h.db.entries.push({ id: h.db.nextId++, agentId: 'agent_figlio', kind: 'tool-result', role: 'system', content: 'groups active', createdAt: 0, meta: { callId: 'seed-figlio', activatedGroups: ['bots'] } })
+    h.db.grants.push({ tool: 'update_group', target: `squad:${gid}|group:${gid}` })
+    queueUpdateGroup(gid)
+    await runTurnDenying('agent_figlio', { squadId: gid })
+    // GUARDIA: il padre è ancora membro → il grant copre anche il figlio
+    expect(h.db.entries.filter((e) => e.agentId === 'agent_figlio' && e.kind === 'approval')).toEqual([])
+    // il padre esce dalla squadra: il figlio perde il permesso di quella squadra
+    removeGroupMember(gid, AGENT)
+    queueUpdateGroup(gid)
+    await runTurnDenying('agent_figlio', { squadId: gid })
+    const appr = h.db.entries.find((e) => e.agentId === 'agent_figlio' && e.kind === 'approval')!
+    expect(appr.meta?.status).toBe('denied')
+  })
+
+  it('il grant del SITO non vale più per un membro rimosso (ramo browser)', async () => {
+    const gid = mkForeignSquad('box')
+    h.db.grants.push({ tool: 'browser_click', target: `squad:${gid}|site:spa.example` })
+    h.llm.queue = [
+      { toolCalls: [{ id: 's4c', name: 'browser_click', arguments: JSON.stringify({ ref: 'e8' }) }] },
+      { toolCalls: [{ id: 's4d', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurnDenying(AGENT, { squadId: gid })
+    // GUARDIA: da membro il grant del sito copre il clic non fisso
+    expect(h.db.entries.filter((e) => e.kind === 'approval')).toEqual([])
+    expect(browserState.calls.map((c) => c.tool)).toEqual(['browser_click'])
+    removeGroupMember(gid, AGENT)
+    h.db.entries.length = 0
+    browserState.calls.length = 0
+    h.llm.queue = [
+      { toolCalls: [{ id: 's4e', name: 'browser_click', arguments: JSON.stringify({ ref: 'e8' }) }] },
+      { toolCalls: [{ id: 's4f', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurnDenying(AGENT, { squadId: gid })
+    const appr = h.db.entries.find((e) => e.kind === 'approval')!
+    expect(appr.meta?.status).toBe('denied')
+    expect(browserState.calls).toHaveLength(0)
   })
 })
 

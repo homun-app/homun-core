@@ -278,3 +278,42 @@ describe('S3 (fase squadra-sicurezza-2): revoca alla migrazione dei grant squad:
     ].sort())
   })
 })
+
+describe('S4 (fase squadra-sicurezza-2): un bot tolto dalla squadra perde i permessi di quella squadra', () => {
+  it('removeGroupMember revoca i grant squad:<gid>|… di quel bot (e SOLO i suoi)', async () => {
+    const { removeGroupMember } = await import('../groups')
+    const a = store.createAgent('Capo revoca', '')
+    const b = store.createAgent('Membro revoca', '')
+    const g = createGroup('Weekend', '', a.id, [b.id], a.id)
+    const now = Date.now()
+    const ins = store.db().prepare('INSERT INTO grants(tool, target, created_at, expires_at, agent_id) VALUES(?,?,?,?,?)')
+    ins.run('browser_click', `squad:${g.id}|site:booking.example`, now, now + 8 * 60 * 60 * 1000, a.id)
+    ins.run('browser_click', `squad:${g.id}|site:booking.example`, now, now + 8 * 60 * 60 * 1000, b.id)
+    // una concessione NON di missione dello stesso bot: resta
+    ins.run('run-command', 'ls', now, null, b.id)
+    removeGroupMember(g.id, b.id)
+    const left = listGrants().map((gr) => `${gr.tool}|${gr.target}|${gr.agentId}`).sort()
+    expect(left).toEqual([
+      'browser_click|squad:' + g.id + '|site:booking.example|' + a.id,
+      'run-command|ls|' + b.id
+    ].sort())
+  })
+
+  it('la cancellazione della squadra revoca TUTTI i grant squad:<gid>|…', async () => {
+    const { deleteGroup } = await import('../groups')
+    const a = store.createAgent('Capo canc', '')
+    const b = store.createAgent('Membro canc', '')
+    const g = createGroup('Weekend', '', a.id, [b.id], a.id)
+    const g2 = createGroup('Altra resta', '', a.id, [], a.id)
+    const now = Date.now()
+    const ins = store.db().prepare('INSERT INTO grants(tool, target, created_at, expires_at, agent_id) VALUES(?,?,?,?,?)')
+    ins.run('browser_click', `squad:${g.id}|site:booking.example`, now, now + 8 * 60 * 60 * 1000, a.id)
+    ins.run('update_group', `squad:${g.id}|group:${g.id}`, now, now + 8 * 60 * 60 * 1000, b.id)
+    ins.run('send_to_agent', `squad:${g.id}|agent:${b.id}`, now, now + 8 * 60 * 60 * 1000, a.id)
+    // un grant dell'ALTRA squadra: resta
+    ins.run('browser_click', `squad:${g2.id}|site:altro.example`, now, now + 8 * 60 * 60 * 1000, a.id)
+    deleteGroup(store.db(), g.id)
+    const left = listGrants().map((gr) => `${gr.tool}|${gr.target}`).sort()
+    expect(left).toEqual([`browser_click|squad:${g2.id}|site:altro.example`])
+  })
+})

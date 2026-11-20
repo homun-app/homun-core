@@ -3339,6 +3339,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
               const target = missionGrantTarget(call.name, input, browser.lastUrlOf(agentId))
               if (target === null) return false
               const owner = getAgent(agentId)?.parentId ?? agentId
+              // S4: il grant vale solo se chi agisce (il padre per i sottoagenti)
+              // è ANCORA membro della squadra
+              if (!isGroupMember(squad.id, owner)) return false
               return listGrants().some((g: Grant) => g.tool === call.name && g.target === missionGrantKey(squad.id, target) && (g.agentId == null || g.agentId === owner) && grantActive(g))
             })()
           // S1: l'insieme fisso si valuta PRIMA del grant — se l'azione è fissa
@@ -4439,6 +4442,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           const sendMissionAllowed = (() => {
             if (!squad || contaminated) return false
             const owner = getAgent(agentId)?.parentId ?? agentId
+            // S4: anche il mittente (il padre per i sottoagenti) dev'essere
+            // ANCORA membro della squadra del grant
+            if (!isGroupMember(squad.id, owner)) return false
             return listGrants().some((g: Grant) =>
               g.tool === 'send_to_agent' &&
               g.target === missionGrantKey(squad.id, `agent:${toId}`) &&
@@ -4846,6 +4852,9 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           const missionToolGrantActive = squad !== null && !forcedOriginAsk &&
             !(contaminated && CONTAMINATED_ASK_TOOLS.has(call.name)) && (() => {
               const owner = getAgent(agentId)?.parentId ?? agentId
+              // S4: il grant vale solo se chi agisce (il padre per i
+              // sottoagenti) è ANCORA membro della squadra
+              if (!isGroupMember(squad.id, owner)) return false
               if (call.name === 'update_agent' && !isGroupMember(squad.id, String(input.agentId ?? ''))) return false
               return listGrants().some((g: Grant) =>
                 g.tool === call.name &&
