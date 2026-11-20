@@ -5,6 +5,43 @@ pubblicata finisce nel corpo della GitHub Release (da cui l'app mostra il
 «cosa cambia» quando propone un aggiornamento). Formato: `## [x.y.z] — data`,
 sezioni H2 e un punto per riga.
 
+## [0.3.1001-beta.10] — 2026-11-20
+
+Squadre di bot più autonome e tutte le richieste in un posto solo, in
+vista della prima versione pubblica.
+
+### Novità
+
+- **«Da approvare»: tutte le richieste in un posto.** Una voce in cima
+  alla barra di sinistra raccoglie quello che i bot, le squadre e i loro
+  aiutanti ti chiedono, con chi lo chiede e perché. Ogni richiesta si
+  decide da lì o dalla chat in cui è nata.
+- **Le richieste restano in cima alla chat** finché c'è qualcosa da
+  decidere: vedi le due più urgenti senza doverle cercare. Se Homun non è
+  in primo piano, ti arriva una notifica.
+- **Squadre più autonome nel computer dei bot.** Una squadra crea file e
+  lancia comandi nel suo computer isolato senza chiederti ogni volta. Nella
+  scheda «Autonomia» scegli quanto fa da sola. Dati tuoi, pagamenti, invii
+  verso fuori, azioni sul Mac ed eliminazione di bot chiedono sempre a te.
+- **Una chat di squadra che racconta il lavoro:** vedi gli scambi tra i
+  bot, i file e i documenti prodotti, e le richieste nel punto in cui sono
+  nate.
+- **Il pannello «Il team»** mostra cosa fa ogni bot, chi aspetta te e
+  cosa ha prodotto la squadra.
+- **Quando un bot chiede qualcosa a un altro, la risposta torna da sola**
+  a chi ha chiesto, che prosegue il lavoro.
+- **«Consenti per questa missione»** lascia proseguire una squadra su un
+  sito per 8 ore. Non vale mai per pagamenti e dati tuoi, né dopo che un
+  bot ha letto contenuti non fidati.
+
+### Correzioni
+
+- **I documenti della Libreria si aprono** anche con una squadra aperta.
+- **La chat di squadra non si blocca più** mentre i bot lavorano.
+- **Gli aiutanti dei bot rispondono nella tua lingua.**
+- **Un bot tolto da una squadra perde subito i permessi** che aveva in
+  quella squadra.
+
 ## [0.3.1001-beta.9] — 2026-11-18
 
 Più semplice da usare, in vista della prima versione pubblica.
