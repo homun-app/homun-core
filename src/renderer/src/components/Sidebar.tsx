@@ -93,10 +93,13 @@ const writeLS = (key: string, value: string): void => {
 }
 
 /** Titoletto semplice e grigio, niente maiuscole (S2). */
+/** Tavola 6: la riga sobria — 13,5 px, alta 30, raggio 8, padding 6/10. */
+const ROW = 'flex w-full min-h-[30px] items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13.5px] transition'
+
 function Title({ children, action }: { children: React.ReactNode; action?: React.ReactNode }) {
   return (
     <div className="flex items-center justify-between pr-1">
-      <p className="px-2.5 pb-1 pt-3 text-[13px] text-muted-foreground">{children}</p>
+      <p className="px-2.5 pb-1 pt-3.5 text-xs text-muted-foreground">{children}</p>
       {action}
     </div>
   )
@@ -110,12 +113,12 @@ function NewRow({ onNewBot }: { onNewBot(): void }) {
   const { t } = useLingui()
   return (
     <button
-      className="flex w-full items-center gap-2.5 rounded-[14px] px-2.5 py-2 text-left text-sm text-muted-foreground transition hover:bg-muted/60 hover:text-foreground"
+      className={`${ROW} text-muted-foreground hover:bg-muted/60 hover:text-foreground`}
       aria-label={t`Nuovo`}
       title={t`Nuovo`}
       onClick={onNewBot}
     >
-      <span className="grid size-6 shrink-0 place-items-center">
+      <span className="grid size-4 shrink-0 place-items-center">
         <Plus className="size-4" />
       </span>
       <span className="min-w-0 flex-1 truncate"><Trans>Nuovo</Trans></span>
@@ -136,19 +139,19 @@ function ApprovalsRow() {
   const setApprovalsOpen = useStore((s) => s.setApprovalsOpen)
   return (
     <button
-      className={`flex w-full items-center gap-2.5 rounded-[14px] px-2.5 py-2 text-left text-sm transition ${
+      className={`${ROW} ${
         approvalsOpen ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/60'
       }`}
       data-testid="sidebar-approvals"
       aria-label={count > 0 ? i18n.t(msg`Da approvare, ${count} richieste`) : i18n.t(msg`Da approvare`)}
       onClick={() => setApprovalsOpen(!approvalsOpen)}
     >
-      <span className="relative grid size-6 shrink-0 place-items-center">
+      <span className="relative grid size-4 shrink-0 place-items-center">
         <ShieldCheck className="size-4" />
         {count > 0 && <span className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-waiting" aria-hidden="true" />}
       </span>
       <span className="min-w-0 flex-1 truncate"><Trans>Da approvare</Trans></span>
-      {count > 0 && <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs font-semibold text-waiting">{count}</span>}
+      {count > 0 && <span className="shrink-0 text-xs font-semibold tabular-nums text-waiting">{count}</span>}
     </button>
   )
 }
@@ -266,13 +269,13 @@ function MainRow({ agent, childWaiting, preview, state }: { agent: Agent; childW
   return (
     <button
       onClick={() => void select(agent.id)}
-      className={`flex w-full items-center gap-2.5 rounded-[14px] px-2.5 py-2 text-left transition ${
+      className={`flex w-full min-h-[34px] items-center gap-2 rounded-lg px-2.5 py-1.5 text-left transition ${
         agent.id === activeId && openGroupId === null ? 'bg-muted' : 'hover:bg-muted/60'
       }`}
       title={tip}
     >
       <Bot family={info.avatar.family} color={info.avatar.color} state={state} size={22} track={false} dimmed={info.dimmed} label={agent.name} />
-      <span className="min-w-0 flex-1 truncate text-[15px] font-semibold leading-tight">{agent.name}</span>
+      <span className="min-w-0 flex-1 truncate text-[13.5px] font-semibold">{agent.name}</span>
       <span className="shrink-0 text-xs text-muted-foreground"><Trans>la tua chat</Trans></span>
     </button>
   )
@@ -304,22 +307,22 @@ function TeamRows({ team, states, lastSendAt, now }: { team: SidebarTeam; states
     : team.group.name
   return (
     <div>
-      <div className={`flex items-center gap-2 rounded-[14px] pl-2 pr-1.5 text-left transition ${openGroupId === team.group.id ? 'bg-muted' : 'hover:bg-muted/60'}`}>
+      <div className={`flex items-center gap-1 rounded-lg pl-2.5 pr-1 text-left transition ${openGroupId === team.group.id ? 'bg-muted' : 'hover:bg-muted/60'}`}>
         <button
-          className="flex min-w-0 flex-1 items-center gap-2.5 py-2 text-left"
+          className="flex min-h-[30px] min-w-0 flex-1 items-center gap-2 py-1.5 text-left"
           onClick={() => openGroup(team.group.id)}
           title={tip}
         >
           <TeamRobot team={team} />
-          <span className="min-w-0 flex-1 truncate text-[15px] leading-tight">{team.group.name}</span>
+          <span className={`min-w-0 flex-1 truncate text-[13.5px] ${open || openGroupId === team.group.id ? 'font-semibold' : ''}`}>{team.group.name}</span>
           {team.waitingCount > 0 && (
-            <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs font-semibold text-waiting" aria-label={i18n.t(msg`${team.waitingCount} ti aspettano`)}>{team.waitingCount}</span>
+            <span className="shrink-0 text-xs font-semibold tabular-nums text-waiting" aria-label={i18n.t(msg`${team.waitingCount} ti aspettano`)}>{team.waitingCount}</span>
           )}
           <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{i18n.t(timeAgoShort(team.lastAt, now))}</span>
         </button>
         {team.members.length > 0 && (
           <button
-            className="grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
+            className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground"
             aria-expanded={open}
             aria-label={open ? i18n.t(msg`Chiudi i membri di ${team.group.name}`) : i18n.t(msg`Apri i membri di ${team.group.name}`)}
             onClick={() => {
@@ -328,18 +331,18 @@ function TeamRows({ team, states, lastSendAt, now }: { team: SidebarTeam; states
               writeLS(`${TEAM_OPEN_PREFIX}${team.group.id}`, next ? '1' : '0')
             }}
           >
-            <ChevronRight className={`size-4 transition-transform ${open ? 'rotate-90' : ''}`} />
+            <ChevronRight className={`size-3.5 transition-transform ${open ? 'rotate-90' : ''}`} />
           </button>
         )}
       </div>
       {open && (
-        <div className="flex flex-col pl-6">
+        <div className="flex flex-col pl-5">
           {cut.visible.map(({ member }) => (
             <MemberRow key={member.id} member={member} state={states[member.id] ?? 'idle'} lastAt={lastSendAt[member.id] ?? member.createdAt} now={now} />
           ))}
           {members.length > TEAM_MEMBER_LIMIT && (
             <button
-              className="rounded-[14px] px-2 py-1.5 pl-8 text-left text-[13px] text-muted-foreground transition hover:bg-muted/60"
+              className="rounded-lg px-2 py-1 pl-[26px] text-left text-[12.5px] text-muted-foreground transition hover:bg-muted/60"
               aria-expanded={allMembers}
               onClick={() => {
                 const next = !allMembers
@@ -365,12 +368,12 @@ function MemberRow({ member, state, lastAt, now }: { member: Agent; state: BotSt
   const tip = [typeof preview === 'string' ? preview : preview ? i18n.t(preview) : '', i18n.t(rowStateName(rowStateOf(state)))].filter(Boolean).join(' · ')
   return (
     <button
-      className="flex items-center gap-2.5 rounded-[14px] px-2 py-1.5 text-left transition hover:bg-muted/60"
+      className="flex min-h-[28px] items-center gap-2 rounded-lg px-2.5 py-1 text-left text-[13.5px] transition hover:bg-muted/60"
       onClick={() => { openGroup(null); void select(member.id) }}
       title={tip || member.name}
     >
       <ColorDot agent={member} />
-      <span className="min-w-0 flex-1 truncate text-sm">{member.name}</span>
+      <span className="min-w-0 flex-1 truncate">{member.name}</span>
       <RightSide state={state} lastAt={lastAt} now={now} />
     </button>
   )
@@ -392,13 +395,13 @@ function BotRow({ bot, now }: { bot: SidebarBot; now: number }) {
   return (
     <button
       onClick={() => void select(bot.agent.id)}
-      className={`flex w-full items-center gap-2.5 rounded-[14px] px-2.5 py-2 text-left transition ${
+      className={`${ROW} ${
         bot.agent.id === activeId && openGroupId === null ? 'bg-muted' : 'hover:bg-muted/60'
       }`}
       title={tip}
     >
       <ColorDot agent={bot.agent} />
-      <span className="min-w-0 flex-1 truncate text-sm">{bot.agent.name}</span>
+      <span className="min-w-0 flex-1 truncate">{bot.agent.name}</span>
       <RightSide state={bot.state} childWaiting={bot.childWaiting} lastAt={bot.lastAt} now={now} />
     </button>
   )
@@ -411,7 +414,7 @@ function ShowAllRow({ hidden, feminine, expanded, onToggle }: { hidden: number; 
   const total = hidden + SIDEBAR_ROW_LIMIT
   return (
     <button
-      className="rounded-[14px] px-2.5 py-1.5 text-left text-[13px] text-muted-foreground transition hover:bg-muted/60"
+      className="rounded-lg py-1 pl-[26px] pr-2.5 text-left text-[12.5px] text-muted-foreground transition hover:bg-muted/60"
       aria-expanded={expanded}
       onClick={onToggle}
     >
@@ -488,16 +491,16 @@ function AccountMenu(props?: { rail?: boolean; triggerClassName?: string }) {
         data-testid="account-menu-trigger"
         className={
           props?.triggerClassName ??
-          'flex min-w-0 flex-1 items-center gap-2.5 rounded-[14px] px-1.5 py-1.5 text-left transition hover:bg-muted/60 focus:outline-none'
+          'flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2.5 py-1.5 text-left transition hover:bg-muted/60 focus:outline-none'
         }
       >
         {/* in rotaia solo l'iniziale (come il vecchio bottone), nel resto
             della barra la riga nome + modello risolto */}
-        <span className={`grid shrink-0 place-items-center rounded-full bg-muted text-sm font-semibold text-foreground ${props?.rail ? 'size-9' : 'size-8'}`}>
+        <span className={`grid shrink-0 place-items-center rounded-full bg-muted font-semibold text-foreground ${props?.rail ? 'size-9 text-sm' : 'size-6 text-[11px]'}`}>
           {main ? main.name.slice(0, 1).toUpperCase() : '·'}
         </span>
         {!props?.rail && (
-          <span className="min-w-0 text-sm">
+          <span className="min-w-0 text-[13.5px]">
             <span className="block truncate font-medium leading-tight">{main ? main.name : t`nessun bot`}</span>
             <span className="block truncate text-xs text-muted-foreground">
               {main ? (resolved ? `${resolved.providerId} · ${resolved.model}` : t`nessun modello`) : t`nessun bot`}
@@ -832,7 +835,7 @@ export function Sidebar({ layout }: { layout: LayoutResult }) {
           <div className="drag-region h-[60px] shrink-0">
             <div className="mt-3 flex h-9 items-center justify-end gap-2 px-3" style={{ paddingLeft: TRAFFIC_LIGHT_INSET }}>
               <button
-                className={`no-drag grid size-9 place-items-center rounded-full transition ${searchOpen ? 'bg-muted text-foreground' : 'bg-muted/60 text-muted-foreground hover:text-foreground'}`}
+                className={`no-drag grid size-8 place-items-center rounded-lg transition ${searchOpen ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'}`}
                 aria-label={t`Cerca`}
                 title={t`Cerca`}
                 onClick={() => {
@@ -845,7 +848,7 @@ export function Sidebar({ layout }: { layout: LayoutResult }) {
               {/* B2 (fase beta.4): il «+» apre SUBITO il dialogo «Nuovo» (come
                   la voce Nuovo della barra, che la tavola 6 mette in cima) */}
               <button
-                className="no-drag grid size-9 place-items-center rounded-full bg-muted/60 text-muted-foreground transition hover:text-foreground"
+                className="no-drag grid size-8 place-items-center rounded-lg text-muted-foreground transition hover:bg-muted/60 hover:text-foreground"
                 aria-label={t`Crea`}
                 title={t`Crea`}
                 onClick={() => setNewBotOpen(true)}
@@ -876,7 +879,7 @@ export function Sidebar({ layout }: { layout: LayoutResult }) {
           {/* pt-1 (Q3): il primo contenuto parte a 64 px come il primo messaggio.
               Le voci fisse in cima, nell'ordine della tavola 6: Nuovo, Bot (la
               tua chat), Da approvare, Attività, Libreria (salgono dal fondo) */}
-          <nav className="flex-1 space-y-0.5 overflow-y-auto scroll-thin px-2 pb-2 pt-1">
+          <nav className="flex-1 space-y-px overflow-y-auto scroll-thin px-2 pb-2 pt-1">
             <NewRow onNewBot={() => setNewBotOpen(true)} />
             {model.main && (
               <MainRow
@@ -888,23 +891,23 @@ export function Sidebar({ layout }: { layout: LayoutResult }) {
             )}
             <ApprovalsRow />
             <button
-              className={`flex w-full items-center gap-2.5 rounded-[14px] px-2.5 py-2 text-left text-sm transition ${
+              className={`${ROW} ${
                 activityOpen ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/60'
               }`}
               onClick={() => { setActivityOpen(!activityOpen); if (!activityOpen) openLibrary(null) }}
             >
-              <span className="grid size-6 shrink-0 place-items-center">
+              <span className="grid size-4 shrink-0 place-items-center">
                 <ActivityIcon className="size-4" />
               </span>
               <span className="min-w-0 flex-1 truncate"><Trans>Attività</Trans></span>
             </button>
             <button
-              className={`flex w-full items-center gap-2.5 rounded-[14px] px-2.5 py-2 text-left text-sm transition ${
+              className={`${ROW} ${
                 openLibraryId !== null ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/60'
               }`}
               onClick={() => { openLibraryId === null ? openLibrary('') : openLibrary(null); if (openLibraryId === null) setActivityOpen(false) }}
             >
-              <span className="grid size-6 shrink-0 place-items-center">
+              <span className="grid size-4 shrink-0 place-items-center">
                 <LibraryIcon className="size-4" />
               </span>
               <span className="min-w-0 flex-1 truncate"><Trans>Libreria</Trans></span>
@@ -957,7 +960,7 @@ export function Sidebar({ layout }: { layout: LayoutResult }) {
 
           {/* fase barra-sobria (R1): in fondo CHI SEI, il modello e
               l'ingranaggio — tutto nell'AccountMenu (tavola 6) */}
-          <div className="mb-4 flex h-[60px] shrink-0 items-center px-3">
+          <div className="mb-3 flex h-[52px] shrink-0 items-center px-2">
             <AccountMenu />
           </div>
         </>
