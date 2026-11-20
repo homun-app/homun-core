@@ -39,7 +39,7 @@ const entry = {
       publisher: 'Donach',
       trust: 'unverified',
       trustKind: 'unverified',
-      runtime: { kind: 'box-npm', command: 'npx -y @donach/mattermost-mcp@2.3.4' },
+      runtime: { kind: 'box-npm', command: 'npx', args: ['--yes', '@donach/mattermost-mcp@2.3.4'] },
       allowHosts: ['mattermost.competitoor.com'],
       npmMeta: { version: '2.3.4', author: 'Donach', publishedAt: '2026-11-02T10:00:00.000Z', weeklyDownloads: 42017 },
       needs: { kind: 'env', vars: [{ name: 'MATTERMOST_TOKEN', required: true, description: 'Access token' }] },
@@ -69,6 +69,13 @@ describe('E4: la card del server npm (metadati, host, non verificato, niente ins
     fakeApiCalls.length = 0
     renderHtml(createElement(McpServerCard, { entry }))
     expect(fakeApiCalls.length).toBe(0)
+  })
+
+  it('N3: il runtime box-npm è ARGV — la card mostra command e args uniti (npx --yes <pkg>@<versione>)', () => {
+    capture.els.length = 0
+    const html = renderHtml(createElement(McpServerCard, { entry }))
+    const texts = findAll(parseHtml(html), () => true).map((n) => textOf(n)).join('\n')
+    expect(texts).toContain('nel box: npx --yes @donach/mattermost-mcp@2.3.4')
   })
 
   it('senza npmMeta la card resta quella di oggi (nessuna riga npm)', () => {

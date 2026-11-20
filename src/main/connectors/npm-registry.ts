@@ -13,6 +13,24 @@ export const NPM_REGISTRY_BASE = process.env.SANDBOT_TEST_NPM_REGISTRY_URL || 'h
 /** L'host fisso delle statistiche di download. */
 export const NPM_DOWNLOADS_BASE = process.env.SANDBOT_TEST_NPM_DOWNLOADS_URL || 'https://api.npmjs.org'
 
+/**
+ * N3 (fase mcp-egress-sicurezza): le REGOLE DI NPM per il nome di un
+ * pacchetto, prima di OGNI fetch o avvio — il nome finisce nell'URL del
+ * registro e nell'argv di npx: un nome che comincia con `-` (o con spazi,
+ * `;`, `:`, `..`, `#`, `?`) diventa un'opzione di npx o un'iniezione.
+ * Lunghezza ≤ 214, minuscole, niente iniziale `.`/`_`/`-` per la parte del
+ * nome. Restituisce l'errore in parole, o null se il nome è valido (PURO).
+ */
+const NPM_NAME_RE = /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/
+
+export function npmPackageNameError(name: string): string | null {
+  if (name.length > 214) return `invalid npm package name (longer than 214 chars): ${name.slice(0, 40)}…`
+  if (!NPM_NAME_RE.test(name)) return `invalid npm package name: ${name} (npm naming rules: lowercase letters, digits, - . _ ~, optional @scope/; no spaces, dashes only inside, no ; : # ? ..)`
+  const namePart = name.includes('/') ? name.slice(name.indexOf('/') + 1) : name
+  if (/^[._-]/.test(namePart)) return `invalid npm package name: ${name} (the name part cannot start with '.', '_' or '-')`
+  return null
+}
+
 /** L'id npm: di add_mcp_server (PURO). «latest» e le tag sono VIETATE. */
 export function parseNpmServerId(id: string): { kind: 'npm'; name: string; version?: string } | { error: string } {
   if (!id.startsWith('npm:')) return { error: 'invalid id: use npm:<package>[@<version>], registry:<name> or url:https://…' }
@@ -21,21 +39,32 @@ export function parseNpmServerId(id: string): { kind: 'npm'; name: string; versi
   const at = rest.lastIndexOf('@')
   const name = at > 0 ? rest.slice(0, at) : rest
   const version = at > 0 ? rest.slice(at + 1) : undefined
-  if (!name || name === '@' || name.startsWith('/') || name.endsWith('/')) return { error: `invalid npm package name: ${rest}` }
+  // N3: le regole di npm PRIMA di tutto il resto (fetch, card, argv)
+  const nameError = npmPackageNameError(name)
+  if (nameError) return { error: nameError }
   if (version !== undefined) {
     if (!/^\d+\.\d+\.\d+(-[\w.-]+)?$/.test(version)) return { error: `npm version must be pinned (a number like 1.2.3), not a tag: ${version}` }
   }
   return { kind: 'npm', name, ...(version ? { version } : {}) }
 }
 
+/**
+ * Il nome codificato per l'URL del registro (PURO): encodeURIComponent sul
+ * nome INTERO, con la `@` iniziale dello scope preservata come la vuole il
+ * registro (@donach%2Fmattermost-mcp).
+ */
+function encodeNpmName(name: string): string {
+  return name.startsWith('@') ? `@${encodeURIComponent(name.slice(1))}` : encodeURIComponent(name)
+}
+
 /** L'URL del packument (PURO; gli scoped vanno codificati con %2F). */
 export function npmPackumentUrl(name: string): string {
-  return `${NPM_REGISTRY_BASE}/${name.replace('/', '%2F')}`
+  return `${NPM_REGISTRY_BASE}/${encodeNpmName(name)}`
 }
 
 /** L'URL dei download dell'ultima settimana (PURO). */
 export function npmDownloadsUrl(name: string): string {
-  return `${NPM_DOWNLOADS_BASE}/downloads/point/last-week/${name.replace('/', '%2F')}`
+  return `${NPM_DOWNLOADS_BASE}/downloads/point/last-week/${encodeNpmName(name)}`
 }
 
 /** I metadati del pacchetto che la card mostra. */

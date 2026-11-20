@@ -180,7 +180,12 @@ export type SendMessagePayload =
       /** il dettaglio del kind (dominio verificato o utente GitHub) */
       trustDetail?: string
       siteUrl?: string
-      runtime: { kind: 'remote'; host: string } | { kind: 'box-npm'; command: string }
+      /**
+       * N3 (fase mcp-egress-sicurezza): il runtime box-npm è ARGV — command +
+       * args separati (npx --yes <pacchetto>@<versione>), MAI una stringa da
+       * far interpretare a una shell.
+       */
+      runtime: { kind: 'remote'; host: string } | { kind: 'box-npm'; command: string; args: string[] }
       /** E4 (fase mcp-env): gli host che il server npm potrà raggiungere dal box */
       allowHosts?: string[]
       /** E4 (fase mcp-env): i metadati del pacchetto npm per la conferma */

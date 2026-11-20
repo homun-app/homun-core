@@ -147,7 +147,7 @@ describe('buildMcpServerCard (pura a deps iniettati)', () => {
     const r = await buildMcpServerCard('registry:com.foreverworks/notion', '', makeDeps())
     expect(r.ok).toBe(true)
     if (!r.ok) return
-    expect(r.card.runtime).toEqual({ kind: 'box-npm', command: 'npx -y @foreverworks/mcp-notion@0.1.0' })
+    expect(r.card.runtime).toEqual({ kind: 'box-npm', command: 'npx', args: ['--yes', '@foreverworks/mcp-notion@0.1.0'] })
     expect(r.card.needs).toEqual({ kind: 'env', vars: [{ name: 'NOTION_TOKENS_DIR', required: true, description: 'A folder holding one file per workspace…' }] })
   })
 
@@ -245,7 +245,7 @@ describe('installMcpServer (regole 1-3)', () => {
       workdir: '/box/home/agent_alice',
       home: '/box/home/agent_alice',
       command: 'npx',
-      args: ['-y', '@foreverworks/mcp-notion@0.1.0'],
+      args: ['--yes', '@foreverworks/mcp-notion@0.1.0'],
       envKeys: ['NOTION_TOKENS_DIR']
     })
     expect(cfg.needsAuth).toEqual({ kind: 'env', keys: ['NOTION_TOKENS_DIR'] })

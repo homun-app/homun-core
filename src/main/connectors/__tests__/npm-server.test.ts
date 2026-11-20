@@ -68,7 +68,7 @@ describe('E4: la card del server npm (versione FISSATA, metadati dal registro, n
       technicalName: '@donach/mattermost-mcp',
       publisher: 'Donach',
       trustKind: 'unverified',
-      runtime: { kind: 'box-npm', command: 'npx -y @donach/mattermost-mcp@2.3.4' },
+      runtime: { kind: 'box-npm', command: 'npx', args: ['--yes', '@donach/mattermost-mcp@2.3.4'] },
       needs: { kind: 'env', vars: ENV.map(({ name, description }) => ({ name, required: true, description })) },
       allowHosts: ['mattermost.competitoor.com'],
       npmMeta: { version: '2.3.4', author: 'Donach', publishedAt: '2026-11-02T10:00:00.000Z', weeklyDownloads: 42017 },
@@ -79,7 +79,7 @@ describe('E4: la card del server npm (versione FISSATA, metadati dal registro, n
   it('con la versione nel pid → QUELLA versione', async () => {
     const r = await buildMcpServerCard('npm:@donach/mattermost-mcp@1.0.0', '', makeDeps(), [], [])
     expect(r.ok).toBe(true)
-    if (r.ok) expect(r.card.runtime).toEqual({ kind: 'box-npm', command: 'npx -y @donach/mattermost-mcp@1.0.0' })
+    if (r.ok) expect(r.card.runtime).toEqual({ kind: 'box-npm', command: 'npx', args: ['--yes', '@donach/mattermost-mcp@1.0.0'] })
   })
 
   it('pacchetto introvabile → NESSUNA card, l\'errore torna al modello', async () => {
@@ -103,7 +103,7 @@ describe('E4: installMcpServer per npm: — NEL BOX, egress con allowlist, MAI s
     expect(r.ok).toBe(true)
     const cfg = deps.listServers()[0]!
     expect(cfg.transport).toBe('stdio')
-    expect(cfg.box).toMatchObject({ command: 'npx', args: ['-y', '@donach/mattermost-mcp@2.3.4'], envKeys: ['MATTERMOST_URL', 'MATTERMOST_TOKEN'] })
+    expect(cfg.box).toMatchObject({ command: 'npx', args: ['--yes', '@donach/mattermost-mcp@2.3.4'], envKeys: ['MATTERMOST_URL', 'MATTERMOST_TOKEN'] })
     expect(cfg.egress).toEqual({ allowHosts: ['mattermost.competitoor.com'] })
     expect(cfg.source).toMatchObject({ kind: 'npm', package: '@donach/mattermost-mcp', version: '2.3.4' })
     expect(cfg.trustKind).toBe('unverified')

@@ -148,13 +148,15 @@ export function McpServerCard({ entry }: { entry: TranscriptEntry }) {
           ? t`non verificato`
           : message.trust
   // M4.1: dove gira e accesso, senza segnaposto e senza «serve: una chiave»
+  // N3 (fase mcp-egress-sicurezza): il runtime box-npm è ARGV — si mostra
+  // command + args uniti, mai una stringa sola lasciata dal mittente
   const hasUrlVars = (message.setup?.urlVariables ?? []).some((v) => v.isRequired)
   const where =
     message.runtime.kind === 'remote'
       ? hasUrlVars
         ? t`Dove gira: sul server ${message.name} che indichi tu`
         : t`remoto (${message.runtime.host})`
-      : t`nel box: ${message.runtime.command}`
+      : t`nel box: ${[message.runtime.command, ...message.runtime.args].join(' ')}`
   const access =
     message.setup
       ? message.setup.auth === 'oauth'

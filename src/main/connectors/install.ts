@@ -177,7 +177,7 @@ export async function buildMcpServerCard(
         publisher: info.author ?? info.maintainers[0] ?? info.name,
         trust: 'unverified',
         trustKind: 'unverified',
-        runtime: { kind: 'box-npm', command: `npx -y ${info.name}@${info.version}` },
+        runtime: { kind: 'box-npm', command: 'npx', args: ['--yes', `${info.name}@${info.version}`] },
         allowHosts,
         npmMeta: {
           version: info.version,
@@ -251,7 +251,7 @@ export async function buildMcpServerCard(
     ok: true,
     card: {
       ...base,
-      runtime: { kind: 'box-npm', command: `npx -y ${rt.identifier}@${rt.version}` },
+      runtime: { kind: 'box-npm', command: 'npx', args: ['--yes', `${rt.identifier}@${rt.version}`] },
       needs: { kind: 'env', vars: registryEnvVars(entry) },
       ...(trust.kind !== 'verified-domain' ? { thirdPartyWarning: true as const } : {}),
       ...(deps.dockerMode() ? {} : { disabledReason: HOST_MODE_DISABLED_REASON })
@@ -437,7 +437,7 @@ function registryServerCfg(entry: RegistryEntry, agentId: string, existing: McpS
       workdir: boxHomePath(agentId),
       home: boxHomePath(agentId),
       command: 'npx',
-      args: ['-y', `${rt.identifier}@${rt.version}`],
+      args: ['--yes', `${rt.identifier}@${rt.version}`],
       envKeys: vars.map((v) => v.name)
     },
     enabledFor: [agentId],
@@ -515,7 +515,7 @@ function npmServerCfg(
       workdir: boxHomePath(agentId),
       home: boxHomePath(agentId),
       command: 'npx',
-      args: ['-y', `${info.name}@${info.version}`],
+      args: ['--yes', `${info.name}@${info.version}`],
       envKeys: vars
     },
     egress: { allowHosts },
