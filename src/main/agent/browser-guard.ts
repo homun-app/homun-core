@@ -112,6 +112,12 @@ export type BrowserActionRisk =
   | { kind: 'free' }
   | { kind: 'ask'; reason: string; ask: BrowserAskInfo }
   | { kind: 'deny'; reason: string }
+  /**
+   * P1 (fase uso-permessi): l'azione non parte e la risposta in parole torna
+   * al modello SENZA card e SENZA chiedere all'utente — la sola lettura della
+   * pagina non passa mai dalla card (browser_snapshot con ref scaduto).
+   */
+  | { kind: 'error'; reason: string }
 
 /** Il testo del deny sui campi con credenziali o dati di pagamento. */
 export const CREDENTIAL_DENY_TEXT =
@@ -144,6 +150,17 @@ export function browserActionRisk(
       return { kind: 'deny', reason: INVALID_REF_DENY_TEXT }
     }
     if (!ref) {
+      // P1 (fase uso-permessi): browser_snapshot è SOLA LETTURA — con un ref
+      // che non è nell'ultimo snapshot l'errore in parole torna al modello
+      // senza card e senza eseguire niente (il difetto dal vivo: 4 card su 5
+      // del sottoagente erano proprio questa). Per le azioni con EFFETTI il
+      // ref mancante continua a chiedere all'utente.
+      if (tool === 'browser_snapshot') {
+        return {
+          kind: 'error',
+          reason: `ref "${askedRef}" not present in the last snapshot received: take a new browser_snapshot (without ref) to see the current page again`
+        }
+      }
       return {
         kind: 'ask',
         reason: `ref "${askedRef}" not present in the last snapshot received: reload the page with browser_snapshot before acting`,

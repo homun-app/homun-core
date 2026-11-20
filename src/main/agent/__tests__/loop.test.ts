@@ -4878,6 +4878,22 @@ describe('fase 11b: il browser del bot nel loop', () => {
     expect(String(res.content)).toContain('Use only snapshot refs (e.g. e12)')
   })
 
+  it('P1 (uso-permessi): browser_snapshot con ref SCADUTO → NESSUNA card, errore in parole nel result', async () => {
+    browserState.available = true
+    h.llm.queue = [
+      { toolCalls: [{ id: 'p1a', name: 'browser_snapshot', arguments: JSON.stringify({ ref: 'e42' }) }] },
+      { toolCalls: [{ id: 'p1b', name: 'send_to_user', arguments: JSON.stringify({ text: 'ok' }) }] }
+    ]
+    await runTurn(AGENT, 'rileggi la pagina', emit)
+    // guardare la pagina non chiede MAI: nessuna approval in attesa né decisa
+    expect(h.db.entries.filter((e) => e.kind === 'approval')).toHaveLength(0)
+    // e NESSUNA chiamata al browser: il ref non c'è, il result lo dice in parole
+    expect(browserState.calls).toHaveLength(0)
+    const res = h.llm.calls[1]!.find((m) => m.role === 'tool')!
+    expect(String(res.content)).toContain('not present in the last snapshot')
+    expect(String(res.content)).toContain('browser_snapshot')
+  })
+
   it('I6: press_key Enter → CARD (Invio può inviare il modulo), anche senza aver scritto', async () => {
     browserState.available = true
     h.llm.queue = [

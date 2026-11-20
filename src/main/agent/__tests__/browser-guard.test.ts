@@ -66,7 +66,8 @@ describe('I5: il ref deve essere ESATTAMENTE un ref dello snapshot', () => {
   })
   it('browser_snapshot col ref segue la STESSA regola; senza ref resta libero', () => {
     expect(risk('browser_snapshot', { ref: '#pay' }).kind).toBe('deny')
-    expect(risk('browser_snapshot', { ref: 'e99' }).kind).toBe('ask') // valido ma non presente
+    // P1 (fase uso-permessi): valido ma non presente → ERROR in parole, MAI ask
+    expect(risk('browser_snapshot', { ref: 'e99' }).kind).toBe('error')
     expect(risk('browser_snapshot', {}).kind).toBe('free') // snapshot intero: nessun ref
   })
   it('ref ben formato e presente → ok (f5e44 come nei formati reali)', () => {
@@ -177,6 +178,37 @@ describe('browserActionRisk: la tabella IT ed EN (ask / deny / free) a parole in
   })
   it('browser_select su un menu noto → free (non è un invio)', () => {
     expect(risk('browser_select', { ref: 'e4', values: ['2'] }, SNAP, 'e4').kind).toBe('free')
+  })
+})
+
+// ---- P1 (fase uso-permessi): guardare una pagina non chiede MAI ----
+
+describe('P1: browser_snapshot e le azioni di sola lettura non passano mai dalla card', () => {
+  const risk = (tool: string, args: Record<string, unknown>, snap: string | null, ref: string) =>
+    browserActionRisk(tool, args, refInfo(snap, ref))
+
+  it('browser_snapshot con ref ben formato NON presente → ERROR in parole (niente card, niente esecuzione)', () => {
+    const r = risk('browser_snapshot', { ref: 'e42' }, SNAP, 'e42')
+    expect(r.kind).toBe('error')
+    if (r.kind === 'error') {
+      // l'errore in PAROLE: il ref non c'è, si rifà lo snapshot — mai una card
+      expect(r.reason).toContain('not present in the last snapshot')
+      expect(r.reason).toContain('browser_snapshot')
+    }
+    // anche senza nessuno snapshot ricevuto: stessa risposta, mai ask
+    expect(risk('browser_snapshot', { ref: 'e8' }, null, 'e8').kind).toBe('error')
+  })
+
+  it('il ref MALFORMATO resta deny (I5); senza ref browser_snapshot e browser_wait restano liberi', () => {
+    expect(risk('browser_snapshot', { ref: '[e5]' }, SNAP, '[e5]').kind).toBe('deny')
+    expect(risk('browser_snapshot', {}, SNAP, '').kind).toBe('free')
+    expect(risk('browser_wait', { seconds: 2 }, SNAP, '').kind).toBe('free')
+  })
+
+  it('click, type e select col ref SCONOSCIUTO continuano a chiedere (hanno effetti sulla pagina)', () => {
+    expect(risk('browser_click', { ref: 'e42' }, SNAP, 'e42').kind).toBe('ask')
+    expect(risk('browser_type', { ref: 'e42', text: 'a' }, SNAP, 'e42').kind).toBe('ask')
+    expect(risk('browser_select', { ref: 'e42', values: ['a'] }, SNAP, 'e42').kind).toBe('ask')
   })
 })
 

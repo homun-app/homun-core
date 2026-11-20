@@ -3413,6 +3413,13 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             pushResult(risk.reason, { browserDeny: true })
             continue
           }
+          // P1 (fase uso-permessi): la sola lettura non chiede MAI —
+          // browser_snapshot con ref scaduto torna l'errore in parole al
+          // modello, senza card e senza eseguire niente
+          if (risk.kind === 'error') {
+            pushResult(risk.reason, { browserError: true, browserRefMissing: true })
+            continue
+          }
           // Q1/S1 (fase squadra-sicurezza): PRIMA l'insieme FISSO (i pagamenti
           // E le ask di tipo probe/credenziale/campo personale della guardia):
           // se l'azione è dell'insieme fisso la card va all'utente IGNORANDO
