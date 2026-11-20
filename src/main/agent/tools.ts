@@ -359,7 +359,7 @@ export const toolDefs: ToolDef[] = [
   },
   {
     name: 'search_connectors',
-    description: 'Searches connectable apps and MCP servers across three sources by trust: verified catalog, plugins, public registry. Each line: id (for offer_connector and friends), source, trust.',
+    description: 'Searches connectable apps and MCP servers by trust: catalog, plugins, registry. Each line: id, source, trust. Missing everywhere is not impossible: offer it as an MCP server (offer_mcp_window).',
     parameters: {
       type: 'object',
       properties: {
@@ -370,7 +370,7 @@ export const toolDefs: ToolDef[] = [
   },
   {
     name: 'offer_connector',
-    description: 'Offers the user to connect a catalog app: a card in chat with a Connect button and your reason. The connection happens only from the user click. Find ids with search_connectors.',
+    description: 'Offers to connect a catalog app: a card with a Connect button and your reason; connection only from the user click. Ids from search_connectors; not in the catalog? offer_mcp_window.',
     parameters: {
       type: 'object',
       properties: {
@@ -378,6 +378,20 @@ export const toolDefs: ToolDef[] = [
         reason: { type: 'string', description: 'Why this app would help (one sentence, shown in the card)' }
       },
       required: ['id', 'reason']
+    }
+  },
+  {
+    // M3 (fase beta12-correzioni): quando il connettore NON c'è, il bot
+    // INDICA la finestra «Server MCP» invece di dire «non si può»
+    name: 'offer_mcp_window',
+    description: 'For a service in no source: a card with an "Apri Server MCP" button that opens the MCP servers window. Adds nothing itself: the user adds the server (Cursor, Claude). Ask if they have one.',
+    parameters: {
+      type: 'object',
+      properties: {
+        service: { type: 'string', description: 'Service name as the user calls it' },
+        reason: { type: 'string', description: 'One line for the card' }
+      },
+      required: ['service']
     }
   },
   {

@@ -109,7 +109,15 @@ export const GROUP_TOKEN_BUDGET: Record<string, number> = {
   documents: 700,
   tasks: 700,
   bots: 700,
-  subagents: 340
+  subagents: 340,
+  /**
+   * M3 (fase beta12-correzioni): offer_mcp_window ENTRA nel gruppo (il
+   * connettore che manca non è impossibile) e le descrizioni di
+   * search_connectors/offer_connector dicono la strada dei server MCP:
+   * 610 misurati + margine. Prima del tool nuovo il gruppo stava nel
+   * default 500; i numeri stanno nel REPORT della fase.
+   */
+  connectors: 650
 }
 export const GROUP_TOKEN_BUDGET_DEFAULT = 500
 

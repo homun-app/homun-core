@@ -2087,6 +2087,67 @@ describe('fase 5: funnel dei connettori (offer_connector) e card Riconnetti', ()
     // ripristino del mock
     ;(mcpMock as unknown as { callTool: unknown }).callTool = prevCallTool
   })
+
+  // ---- M3 (fase beta12-correzioni): offer_mcp_window — il bot indica il server MCP ----
+
+  it('M3: dopo un COMPOSIO_MANAGE_CONNECTIONS «not found» la card «Apri Server MCP» si può emettere', async () => {
+    // il tool Composio risponde come il vero: «Toolkit mattermost not found»
+    const prevCallTool = (mcpMock as unknown as { callTool: unknown }).callTool
+    ;(mcpMock as unknown as { callTool: unknown }).callTool = async () => 'Toolkit mattermost not found'
+    const prevActive = (mcpMock as unknown as { activeTools: unknown }).activeTools
+    ;(mcpMock as unknown as { activeTools: unknown }).activeTools = async () => [
+      { name: 'mcp__composio__COMPOSIO_MANAGE_CONNECTIONS', description: 'connect apps', parameters: { type: 'object', properties: {} } }
+    ]
+    h.llm.queue = [
+      // la voce «list» è una LETTURA nel gate (manageConnectionsGate): passa
+      // senza regole, come nel vero
+      { toolCalls: [{ id: 'cm1', name: 'mcp__composio__COMPOSIO_MANAGE_CONNECTIONS', arguments: '{"toolkits":[{"name":"mattermost","action":"list"}]}' }] },
+      { toolCalls: [{ id: 'omw1', name: 'offer_mcp_window', arguments: JSON.stringify({ service: 'Mattermost', reason: 'per leggere i canali della tua azienda' }) }] },
+      { text: 'Mattermost non è tra le app collegate, ma si può aggiungere con un server MCP: lo usi già in Cursor o Claude?' }
+    ]
+    await runTurn(AGENT, 'postami su mattermost', emit)
+    try {
+      // il «not found» di Composio è arrivato al modello
+      const second = h.llm.calls[1]!
+      expect(second.some((m) => m.role === 'tool' && String(m.content).includes('Toolkit mattermost not found'))).toBe(true)
+      // la card «Apri Server MCP» esiste: payload type mcp-window, NESSUNA aggiunta
+      const card = h.db.entries.find((e) => (e.meta?.message as { type?: string } | undefined)?.type === 'mcp-window')
+      expect(card).toBeDefined()
+      expect(card!.meta?.message).toMatchObject({ type: 'mcp-window', service: 'Mattermost', reason: 'per leggere i canali della tua azienda' })
+      expect(h.mcp.calls).toBe(0)
+      // al modello: la card apre la finestra, l'aggiunta è dell'utente
+      const third = h.llm.calls[2]!
+      const offerResult = third.filter((m) => m.role === 'tool').map((m) => String(m.content)).find((c) => c.includes('MCP servers window')) ?? ''
+      expect(offerResult).toContain('MCP servers window')
+      expect(offerResult).toContain('Cursor or Claude')
+      expect(offerResult).toContain('never say the service cannot be connected')
+    } finally {
+      ;(mcpMock as unknown as { callTool: unknown }).callTool = prevCallTool
+      ;(mcpMock as unknown as { activeTools: unknown }).activeTools = prevActive
+    }
+  })
+
+  it('M3: offer_mcp_window senza service → errore, NESSUNA card', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 'omw2', name: 'offer_mcp_window', arguments: '{"reason":"x"}' }] },
+      { text: 'ok' }
+    ]
+    await runTurn(AGENT, 'collega mattermost', emit)
+    expect(h.db.entries.some((e) => (e.meta?.message as { type?: string } | undefined)?.type === 'mcp-window')).toBe(false)
+    const second = h.llm.calls[1]!
+    expect(second.some((m) => m.role === 'tool' && String(m.content).includes('service name is required'))).toBe(true)
+  })
+
+  it('M3: fuori da un turno dell\'utente offer_mcp_window è negato come le altre proposte', async () => {
+    h.llm.queue = [
+      { toolCalls: [{ id: 'omw3', name: 'offer_mcp_window', arguments: '{"service":"Mattermost"}' }] },
+      { text: 'ok' }
+    ]
+    await runTurn(AGENT, '[routine] collega', emit, undefined, { source: 'routine', title: 'Routine' })
+    expect(h.db.entries.some((e) => (e.meta?.message as { type?: string } | undefined)?.type === 'mcp-window')).toBe(false)
+    const second = h.llm.calls[1]!
+    expect(second.some((m) => m.role === 'tool' && String(m.content).includes('only when the user asks you in chat'))).toBe(true)
+  })
 })
 
 // ---- fase 6: outbox — i send_to_user non urgenti dei turni AUTOMATICI ----

@@ -9,8 +9,8 @@ import type { ToolDef } from './llm'
 export const CONNECTOR_PROPOSAL_DENIED =
   'you may propose connectors only when the user asks you in chat'
 
-/** I due tool che il turno può offrire SOLO se è dell'utente. */
-export const CONNECTOR_PROPOSAL_TOOLS = new Set(['add_mcp_server', 'install_plugin'])
+/** I tool che il turno può offrire SOLO se è dell'utente (M3: anche offer_mcp_window). */
+export const CONNECTOR_PROPOSAL_TOOLS = new Set(['add_mcp_server', 'install_plugin', 'offer_mcp_window'])
 
 /**
  * Fase 14 (punto 7d): fill_credential NON esiste nei turni di GRUPPO (Grok:

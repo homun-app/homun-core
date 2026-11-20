@@ -590,6 +590,7 @@ function appendSend(
   // meta.ui sulla entry, content nella lingua dell'interfaccia
   const cardUi: UiText | null =
     message.type === 'mcp-server' ? ui(UI.cardMcpServer, { name: message.name })
+    : message.type === 'mcp-window' ? ui(UI.cardOpenMcpWindow, { service: message.service ?? '' })
     : message.type === 'plugin' ? ui(UI.cardPlugin, { name: message.name })
     : message.type === 'fill' ? ui(UI.cardFill, { label: message.label, origin: message.origin })
     : message.type === 'secure-input' ? ui(UI.cardSecureInput, { reason: message.reason })
@@ -4208,6 +4209,44 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
             // vero (toolSlug, o composio__ se passa per Composio) lo dice SOLO
             // il messaggio di sistema CONNECTOR_CONNECTED che arriva al click
             content: `offer shown to the user: connecting ${entry2.name} happens ONLY from their click on the Connect button. When the user connects you will receive a system message with the exact names of the new tools: use those names, do not guess them.`
+          })
+          continue
+        }
+
+        // M3 (fase beta12-correzioni): il connettore NON c'è (catalogo,
+        // plugin, registro, Composio) — il bot INDICA la finestra «Server
+        // MCP» invece di concludere che è impossibile. La card NON collega
+        // niente: un bottone che apre la finestra; l'aggiunta del server è un
+        // gesto dell'utente (magari lo usa già in Cursor o Claude). Come le
+        // altre proposte: SOLO nei turni nati da un messaggio dell'utente.
+        if (call.name === 'offer_mcp_window') {
+          const offerFacts = {
+            source, groupTurn: opts.groupTurn, subagent: opts.subagent, taskId: opts.taskId,
+            automatic, agentMessage: opts.agentMessage, initiator: opts.initiator
+          }
+          if (!connectorProposalOffered(offerFacts)) {
+            const refused = CONNECTOR_PROPOSAL_DENIED
+            messages.push({ role: 'tool', toolCallId: call.id, content: refused })
+            const res = add({ agentId, kind: 'tool-result', role: 'system', content: refused, meta: { callId: call.id } })
+            emit({ type: 'entries', agentId, entries: [res] })
+            continue
+          }
+          const service = String(input.service ?? '').trim()
+          if (!service) {
+            messages.push({
+              role: 'tool', toolCallId: call.id,
+              content: 'Invalid offer: the service name is required (as the user calls it).'
+            })
+            continue
+          }
+          const message: SendMessagePayload = {
+            type: 'mcp-window', service,
+            ...(input.reason !== undefined ? { reason: String(input.reason) } : {})
+          }
+          appendSend(agentId, call, message, emit, {}, opts.taskId)
+          messages.push({
+            role: 'tool', toolCallId: call.id,
+            content: `card shown to the user with a button that opens the MCP servers window: they add the server themselves, with the same command or address they may already use in Cursor or Claude. Ask them if they already have one; never say the service cannot be connected. When they add and enable the server you will receive its tools in a later turn.`
           })
           continue
         }

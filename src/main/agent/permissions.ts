@@ -221,8 +221,9 @@ export async function check(
   // connessione vera parte dal click dell'utente). Fase 13 (punti 2 e 4):
   // add_mcp_server e install_plugin sono uguali — PROPONGONO una card, non
   // installano nulla; l'installazione parte dal click e non passa di qui
-  // (mai "Consenti sempre" su quelle card).
-  if (tool === 'search_connectors' || tool === 'offer_connector' || tool === 'add_mcp_server' || tool === 'install_plugin') {
+  // (mai "Consenti sempre" su quelle card). M3 (fase beta12-correzioni):
+  // offer_mcp_window apre SOLO la finestra «Server MCP» — niente da approvare.
+  if (tool === 'search_connectors' || tool === 'offer_connector' || tool === 'add_mcp_server' || tool === 'install_plugin' || tool === 'offer_mcp_window') {
     return { kind: 'allow', via: 'rule' }
   }
 

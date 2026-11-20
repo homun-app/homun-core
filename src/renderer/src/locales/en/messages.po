@@ -254,6 +254,11 @@ msgstr "{0} min"
 msgid "{0} min fa"
 msgstr "{0} min ago"
 
+#. placeholder {0}: message.service
+#: src/renderer/src/components/ConnectorCards13.tsx
+msgid "{0} non è tra le app del catalogo, ma si può collegare con un server MCP"
+msgstr "{0} is not among the catalog apps, but it can be connected with an MCP server"
+
 #. placeholder {0}: rows.length
 #: src/renderer/src/components/ApprovalsBanner.tsx
 msgid "{0} richieste aspettano te"
@@ -1155,6 +1160,10 @@ msgstr "Open Memory"
 #: src/renderer/src/components/Settings.tsx
 msgid "Apri nel pannello del bot"
 msgstr "Open in the bot panel"
+
+#: src/renderer/src/components/ConnectorCards13.tsx
+msgid "Apri Server MCP"
+msgstr "Open MCP servers"
 
 #. placeholder {0}: useApp.host
 #: src/renderer/src/components/ApprovalCard.tsx
@@ -6941,6 +6950,10 @@ msgstr "If the model does not answer, bots switch to the fallback."
 msgid "kick.9"
 msgstr "If the template has skills, create them with update_skill (name, description, content): every write goes through the user’s approval card."
 
+#: src/renderer/src/components/ConnectorCards13.tsx
+msgid "Se lo usi già in Cursor o Claude è lo stesso server: si aggiunge con lo stesso comando o lo stesso indirizzo."
+msgstr "If you already use it in Cursor or Claude it is the same server: add it with the same command or the same address."
+
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Se ospiti un documento dei metadati del client (CIMD, es. su GitHub Pages, https e con percorso), incollalo qui; vuoto = registrazione dinamica (DCR)."
 msgstr "If you host a client metadata document (CIMD, e.g. on GitHub Pages, https with a path), paste it here; empty = dynamic registration (DCR)."
@@ -7058,6 +7071,11 @@ msgstr "MCP server · Published by {0}"
 msgid "Server MCP manuali (stdio o HTTP, con header/bearer salvati cifrati)."
 msgstr "Manual MCP servers (stdio or HTTP, with headers/bearer stored encrypted)."
 
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "card.openMcpWindow"
+msgstr "MCP server for {service}"
+
 #: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/McpWindow.tsx
 msgid "Server MCP personalizzato"
@@ -7150,6 +7168,10 @@ msgstr "it installs only in the bots’ computer (docker mode)"
 #: src/renderer/src/components/ConnectorCards13.tsx
 msgid "si installa solo nel computer dei bot (modalità docker)"
 msgstr "it installs only in the bots’ computer (docker mode)"
+
+#: src/renderer/src/components/ConnectorCards13.tsx
+msgid "Si può collegare con un server MCP"
+msgstr "It can be connected with an MCP server"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts

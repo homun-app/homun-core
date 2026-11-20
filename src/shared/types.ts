@@ -223,6 +223,18 @@ export type SendMessagePayload =
     }
   | {
       /**
+       * M3 (fase beta12-correzioni): il bot indica la finestra «Server MCP»
+       * quando un connettore non c'è né nel catalogo né in Composio. La card
+       * NON collega niente da sola: un solo bottone «Apri Server MCP» che
+       * apre la finestra — l'aggiunta resta un gesto dell'utente.
+       */
+      type: 'mcp-window'
+      /** il servizio che manca, come lo nomina il bot (es. "Mattermost") */
+      service?: string
+      reason?: string
+    }
+  | {
+      /**
        * Fase 13 (punto 4): proposta di installare un plugin di un marketplace
        * (formato Claude Code). L'installazione parte SOLO dal click su
        * Installa; hook/bin/monitor/LSP non si importano MAI (elenco "ignored").

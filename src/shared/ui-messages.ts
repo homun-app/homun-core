@@ -121,6 +121,8 @@ export const UI = {
 
   // ---- titoli fissi delle card in chat (appendSend, C2) ----
   cardMcpServer: msg({ id: 'card.mcpServer', message: 'Aggiungi server MCP: {name}' }),
+  // M3 (fase beta12-correzioni): la card che apre la finestra «Server MCP»
+  cardOpenMcpWindow: msg({ id: 'card.openMcpWindow', message: 'Server MCP per {service}' }),
   cardPlugin: msg({ id: 'card.plugin', message: 'Installa plugin: {name}' }),
   cardFill: msg({ id: 'card.fill', message: 'Compila il login «{label}» su {origin}' }),
   cardFillAsk: msg({ id: 'card.fillAsk', message: 'Compilo il login «{label}» su {origin}?' }),

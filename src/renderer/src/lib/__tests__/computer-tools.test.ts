@@ -50,8 +50,9 @@ const NOT_COMPUTER_TOOLS: ReadonlySet<string> = new Set([
   'create_task', 'update_task', 'pass', 'propose_rule_change',
   'send_to_agent', 'list_agents', 'create_agent', 'update_agent', 'update_self', 'delete_agent',
   'create_group', 'update_group', 'spawn_subagent', 'check_subagent', 'message_subagent', 'stop_subagent', 'update_state', 'wake_parent',
-  // le app del Mac/Composio e i connettori (NON toccano il box del bot)
-  'use-app', 'search_connectors', 'offer_connector', 'add_mcp_server', 'install_plugin', 'find_tools',
+  // le app del Mac/Composio e i connettori (NON toccano il box del bot;
+  // offer_mcp_window M3: apre la finestra «Server MCP», niente box)
+  'use-app', 'search_connectors', 'offer_connector', 'add_mcp_server', 'install_plugin', 'offer_mcp_window', 'find_tools',
   // credenziali e contatti (il vault del daemon, non il box)
   'list-credentials', 'fill_credential', 'find_contacts', 'save_contact',
   // le skill

@@ -15,7 +15,7 @@ import { useLingui, Trans } from '@lingui/react/macro'
 // fase 17c (C5): fiducia, runtime e disabledReason arrivano come CODICI dal
 // daemon — qui si mostrano nella lingua attiva (fallback sul campo grezzo per
 // le card salvate prima della 17c)
-import { api } from '../store'
+import { api, useStore } from '../store'
 import type { McpServerSetupSpec, TranscriptEntry } from '../../../shared/types'
 import { CardShell } from './DecidedRow'
 import { ServerSetupModule } from './ServerSetup'
@@ -27,6 +27,10 @@ type McpServerMessage = Extract<
 type PluginMessage = Extract<
   import('../../../shared/types').SendMessagePayload,
   { type: 'plugin' }
+>
+type McpWindowMessage = Extract<
+  import('../../../shared/types').SendMessagePayload,
+  { type: 'mcp-window' }
 >
 
 /** Il runtime di un server del plugin dal CODICE runtimeKind (fase 17c, C5); fallback sul label salvato (card vecchie). */
@@ -236,6 +240,44 @@ export function McpServerCard({ entry }: { entry: TranscriptEntry }) {
           </button>
         </div>
       )}
+    </CardShell>
+  )
+}
+
+/**
+ * M3 (fase beta12-correzioni): la card «Apri Server MCP» — quando un
+ * connettore non c'è da nessuna parte il bot la emette invece di dire
+ * «non si può». La card NON collega niente e NON aggiunge server: un solo
+ * bottone che apre la finestra «Server MCP» (M2); l'aggiunta resta un gesto
+ * dell'utente, che magari il server lo usa già in Cursor o Claude.
+ */
+export function McpWindowCard({ entry }: { entry: TranscriptEntry }) {
+  const { t } = useLingui()
+  const setMcpOpen = useStore((s) => s.setMcpOpen)
+  const message = (entry.meta?.message ?? {}) as McpWindowMessage
+  if (message.type !== 'mcp-window') return null
+  return (
+    <CardShell testid="mcp-window-card">
+      <div className="flex items-center gap-2 text-sm text-foreground">
+        <span className="font-medium">
+          {message.service
+            ? t`${message.service} non è tra le app del catalogo, ma si può collegare con un server MCP`
+            : t`Si può collegare con un server MCP`}
+        </span>
+      </div>
+      <p className="mt-1 text-xs text-muted-foreground">
+        <Trans>Se lo usi già in Cursor o Claude è lo stesso server: si aggiunge con lo stesso comando o lo stesso indirizzo.</Trans>
+      </p>
+      {message.reason && <p className="mt-1 text-sm text-foreground">{message.reason}</p>}
+      <div className="mt-2 flex items-center gap-2">
+        <button
+          className="rounded-[10px] bg-foreground px-3.5 py-1.5 text-sm font-semibold text-background transition hover:opacity-90"
+          data-testid="mcp-window-card-open"
+          onClick={() => setMcpOpen(true)}
+        >
+          <Trans>Apri Server MCP</Trans>
+        </button>
+      </div>
     </CardShell>
   )
 }

@@ -191,8 +191,10 @@ describe('fase 9 (punto 2): system prompt componibile', () => {
     expect(s).toContain('find_tools before saying "I can\'t"')
     // ~180 token stimati (caratteri/4). P9 (fase pulizia): la frase piana
     // dell'installazione costa ~25 token più della vecchia compressione —
-    // il tetto sale a 185 stimati
-    expect(s.length / 4).toBeLessThanOrEqual(185)
+    // il tetto sale a 185 stimati. M3 (fase beta12-correzioni): le due regole
+    // nuove (il servizio che manca NON è impossibile + mcp.json nominato va
+    // ascoltato) portano la sezione a ~240 token stimati
+    expect(s.length / 4).toBeLessThanOrEqual(245)
   })
 
   it('fase token (T4): la sezione è la GUIDA del gruppo connectors, ASSENTE da ogni prompt di base', () => {
