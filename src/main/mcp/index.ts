@@ -27,6 +27,8 @@ import { setMcpAnnotationsLookup } from '../agent/permissions'
 import { composioToolPolicy } from '../connectors/composio-meta'
 import { mcpCallIsRead } from '../connectors/tool-batch'
 import { callMcpWithRetry } from './retry'
+// E1 (fase mcp-env): il PATH dei comandi dei server stdio manuali
+import { lookupServerCommand } from './command-path'
 import { COMPOSIO_MULTI_EXECUTE_TOOL, forceSyncResponseToWorkbenchOff } from '../connectors/tool-batch'
 import { boxOwnerOf, ensureBoxContainer, ensureBotHome } from '../sandbox'
 import type { ToolDef } from '../agent/llm'
@@ -68,6 +70,14 @@ export interface McpServerConfig {
    * Mai un valore dell'utente qui dentro.
    */
   pluginSpec?: { url?: string; headers?: Record<string, string>; env?: Record<string, string> }
+  /**
+   * E1 (fase mcp-env): le VARIABILI del server stdio MANUALE — solo la
+   * DICHIARAZIONE (nome + segreto sì/no) e i valori NON segreti (envValues);
+   * i valori SEGRETI vivono solo nello store cifrato (kind 'env'), mai qui.
+   */
+  envSpec?: Array<{ name: string; secret: boolean }>
+  /** E1: i valori NON segreti delle variabili dichiarate in envSpec */
+  envValues?: Record<string, string>
   /**
    * fase mcp-setup (M1): il template `{var}` dell'URL di un remote del
    * registro (pubblico, dal registro stesso) e i valori NON segreti delle
@@ -305,7 +315,19 @@ async function connect(cfg: McpServerConfig): Promise<Client> {
       )
       return client
     }
-    await client.connect(new StdioClientTransport({ command: cfg.command ?? '', args: cfg.args ?? [] }))
+    // E1 (fase mcp-env): i server stdio MANUALI — il comando si risolve
+    // (PATH ridotto del Finder + posti noti di fnm/nvm/Homebrew, errore chiaro
+    // se manca) e il processo riceve l'env di base di oggi + le variabili
+    // dell'utente (non segrete dalla config, segrete dallo store cifrato,
+    // entrambe dal resolver come stdioEnv)
+    const resolved = lookupServerCommand(cfg.command ?? '')
+    if ('error' in resolved) throw new Error(resolved.error)
+    const a = await authResolver(cfg)
+    await client.connect(
+      a.stdioEnv && Object.keys(a.stdioEnv).length
+        ? new StdioClientTransport({ command: resolved.command, args: cfg.args ?? [], env: a.stdioEnv })
+        : new StdioClientTransport({ command: resolved.command, args: cfg.args ?? [] })
+    )
   } else {
     const a = await authResolver(cfg)
     // L1: l'url di un server di plugin arriva RISOLTO dal resolver (i

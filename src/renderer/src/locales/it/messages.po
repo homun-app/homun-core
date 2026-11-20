@@ -575,6 +575,10 @@ msgstr "+ Aggiungi server MCP"
 msgid "+ Nuova routine"
 msgstr "+ Nuova routine"
 
+#: src/renderer/src/components/McpWindow.tsx
+msgid "+ Variabile"
+msgstr "+ Variabile"
+
 #: src/renderer/src/components/LibraryCards.tsx
 msgid "⚠ dati letti da una fonte esterna"
 msgstr "⚠ dati letti da una fonte esterna"
@@ -1189,6 +1193,10 @@ msgstr "Argomenti separati per spazio"
 #: src/renderer/src/components/Settings.tsx
 msgid "args JSON, es. {\"query\":\"x\"}"
 msgstr "args JSON, es. {\"query\":\"x\"}"
+
+#: src/renderer/src/components/McpWindow.tsx
+msgid "Arrivano al comando come variabili d'ambiente. Quelle segrete si salvano cifrate: nell'elenco si vedono solo i nomi."
+msgstr "Arrivano al comando come variabili d'ambiente. Quelle segrete si salvano cifrate: nell'elenco si vedono solo i nomi."
 
 #. placeholder {0}: timeAgo(r.when, now)
 #: src/renderer/src/components/ApprovalsCenter.tsx
@@ -1843,6 +1851,11 @@ msgstr "comandi nel computer, senza rete"
 #: src/renderer/src/components/ServerSheet.tsx
 msgid "Comando"
 msgstr "Comando"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "mcp.commandNotFound"
+msgstr "comando \"{command}\" non trovato: usa il percorso completo"
 
 #: src/renderer/src/components/McpWindow.tsx
 msgid "Comando (es. node)"
@@ -5288,6 +5301,10 @@ msgid "Nome (es. Il mio gateway)"
 msgstr "Nome (es. Il mio gateway)"
 
 #: src/renderer/src/components/McpWindow.tsx
+msgid "Nome (es. MATTERMOST_URL)"
+msgstr "Nome (es. MATTERMOST_URL)"
+
+#: src/renderer/src/components/McpWindow.tsx
 msgid "Nome (es. weather)"
 msgstr "Nome (es. weather)"
 
@@ -6715,6 +6732,10 @@ msgstr "salva nella Libreria…"
 msgid "salvata"
 msgstr "salvata"
 
+#: src/renderer/src/components/McpWindow.tsx
+msgid "salvato cifrato — scrivi per sostituire"
+msgstr "salvato cifrato — scrivi per sostituire"
+
 #: src/renderer/src/components/LibraryCards.tsx
 msgid "Salvato nel vault"
 msgstr "Salvato nel vault"
@@ -6966,6 +6987,14 @@ msgstr "Se ospiti un documento dei metadati del client (CIMD, es. su GitHub Page
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "Segreti"
 msgstr "Segreti"
+
+#: src/renderer/src/components/McpWindow.tsx
+msgid "segreto"
+msgstr "segreto"
+
+#: src/renderer/src/components/McpWindow.tsx
+msgid "Segreto (salvato cifrato)"
+msgstr "Segreto (salvato cifrato)"
 
 #: src/renderer/src/components/LibraryCards.tsx
 #: src/renderer/src/components/VaultSettings.tsx
@@ -7558,6 +7587,10 @@ msgstr "Togli"
 msgid "Togli davvero"
 msgstr "Togli davvero"
 
+#: src/renderer/src/components/McpWindow.tsx
+msgid "Togli la variabile"
+msgstr "Togli la variabile"
+
 #: src/renderer/src/components/settings/EngineSection.tsx
 msgid "Toglie container da /usr/local. Ti chiederà la password del Mac. I computer dei bot vengono rimossi."
 msgstr "Toglie container da /usr/local. Ti chiederà la password del Mac. I computer dei bot vengono rimossi."
@@ -7987,12 +8020,17 @@ msgid "validità: {0} → {1}"
 msgstr "validità: {0} → {1}"
 
 #: src/renderer/src/components/LibraryCards.tsx
+#: src/renderer/src/components/McpWindow.tsx
 msgid "Valore"
 msgstr "Valore"
 
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "Valore (sostituisce)"
 msgstr "Valore (sostituisce)"
+
+#: src/renderer/src/components/McpWindow.tsx
+msgid "Variabili"
+msgstr "Variabili"
 
 #: src/renderer/src/components/ServerSetup.tsx
 msgid "Variabili d'ambiente"

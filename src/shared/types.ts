@@ -2099,6 +2099,14 @@ export interface McpServerInfo {
    */
   pluginSpec?: { url?: string; headers?: Record<string, string>; env?: Record<string, string> }
   /**
+   * E1 (fase mcp-env): le VARIABILI del server stdio manuale — solo la
+   * DICHIARAZIONE (nome + segreto sì/no); i valori SEGRETI vivono solo nello
+   * store cifrato (mai qui, mai nei settings in chiaro)
+   */
+  envSpec?: Array<{ name: string; secret: boolean }>
+  /** E1: i valori NON segreti delle variabili dichiarate in envSpec */
+  envValues?: Record<string, string>
+  /**
    * fase mcp-setup (M1): template `{var}` dell'URL del registro + valori NON
    * segreti; i segreti vivono solo nello store cifrato
    */
@@ -2190,6 +2198,8 @@ export interface McpServerConnectResult {
 export interface McpServerSecret {
   bearerToken?: string
   headers?: Record<string, string>
+  /** E1 (fase mcp-env): i valori SEGRETI delle variabili del server stdio manuale (cifrati nello store, kind 'env') */
+  env?: Record<string, string>
 }
 
 // ---- connettori del catalogo (fase 5: "Connetti app") ----

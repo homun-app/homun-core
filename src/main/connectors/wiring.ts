@@ -222,6 +222,13 @@ export function buildMcpAuthResolver(deps: AuthResolverDeps): McpAuthResolver {
       const env = await deps.store.read<Record<string, string>>(cfg.id, SECRET_KIND.env)
       return { stdioEnv: env ?? {} }
     }
+    // E1 (fase mcp-env): server stdio MANUALE — i valori NON segreti dalla
+    // config (envValues) e i SEGRETI dallo store cifrato (kind 'env'),
+    // fusi: il processo riceve l'env di base + queste
+    if (cfg.transport === 'stdio' && (cfg.envSpec?.length || cfg.envValues)) {
+      const sealedEnv = (await deps.store.read<Record<string, string>>(cfg.id, SECRET_KIND.env)) ?? {}
+      return { stdioEnv: { ...(cfg.envValues ?? {}), ...sealedEnv } }
+    }
     return {}
   }
 }

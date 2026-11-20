@@ -1381,22 +1381,40 @@ export function buildApiMethods(
         const { toolSlugKeeping } = await import('../main/mcp/slug')
         incoming.toolSlug = toolSlugKeeping(x.listServers(), incoming.id, incoming.name)
       }
+      // E1 (fase mcp-env): le VARIABILI del server stdio manuale — i valori
+      // NON segreti restano in config, i SEGRETI mai (sanificati qui, vanno
+      // cifrati sotto); chi dichiara una riga segreta non vedrà mai il valore
+      // tornare indietro da mcp:list
+      const storeMod = await import('../main/connectors/sealed-store')
+      const { createConnectorsSecretStore } = storeMod
+      const { getConnectorsKey } = await import('./keychain')
+      const sealed = createConnectorsSecretStore({
+        getKey: () => getConnectorsKey(),
+        getSetting: store.getSetting,
+        setSetting: store.setSetting
+      })
+      const sec = secret as McpServerSecret | undefined
+      if (incoming.transport === 'stdio' && (incoming.envSpec?.length || incoming.envValues)) {
+        const { splitManualServerEnv } = await import('../main/mcp/manual-env')
+        const { SECRET_KIND } = await import('../main/connectors/install')
+        const old = (await sealed.read<Record<string, string>>(incoming.id, SECRET_KIND.env).catch(() => null)) ?? {}
+        const split = splitManualServerEnv({ envSpec: incoming.envSpec, envValues: incoming.envValues }, sec?.env ?? {}, old)
+        incoming.envValues = split.configEnvValues
+        try {
+          if (Object.keys(split.sealedEnv).length) await sealed.write(incoming.id, SECRET_KIND.env, split.sealedEnv)
+          else await sealed.remove(incoming.id, [SECRET_KIND.env])
+        } catch (e) {
+          if (isMasterKeyUnavailableError(e)) throw e
+          throw uiError(UI.rpcSecretSaveFailed, { error: e instanceof Error ? e.message : String(e) })
+        }
+      }
       x.saveServers([...x.listServers().filter((y) => y.id !== (s as { id: string }).id), incoming])
       // fase 5: bearer/header statici del server manuale → store CIFRATO (mai nei settings)
       const cfg = s as McpServerInfo
-      const sec = secret as McpServerSecret | undefined
       if (sec) {
-        const storeMod = await import('../main/connectors/sealed-store')
         // il daemon reale ha il wiring con la chiave Keychain; nei test senza
         // chiave il salvataggio segreto fallisce e il server resta senza auth
         try {
-          const { createConnectorsSecretStore } = storeMod
-          const { getConnectorsKey } = await import('./keychain')
-          const sealed = createConnectorsSecretStore({
-            getKey: () => getConnectorsKey(),
-            getSetting: store.getSetting,
-            setSetting: store.setSetting
-          })
           if (sec.bearerToken) {
             const { SECRET_KIND } = await import('../main/connectors/install')
             await sealed.write(cfg.id, SECRET_KIND.bearer, sec.bearerToken)

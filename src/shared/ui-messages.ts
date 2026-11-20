@@ -582,6 +582,9 @@ export const UI = {
   connToolsAvailable: msg({ id: 'conn.toolsAvailable', message: '{count, plural, one {1 tool disponibile} other {# tool disponibili}}' }),
   connSessionExpired: msg({ id: 'conn.sessionExpired', message: 'Sessione scaduta: riconnetti' }),
   connTokenExpired: msg({ id: 'conn.tokenExpired', message: 'token scaduto: riconnetti' }),
+  // E1 (fase mcp-env): il comando del server stdio manuale non si trova né nel
+  // PATH né nei posti noti (fnm, nvm, Homebrew)
+  mcpCommandNotFound: msg({ id: 'mcp.commandNotFound', message: 'comando "{command}" non trovato: usa il percorso completo' }),
   connNeedsAuthSettings: msg({ id: 'conn.needsAuthSettings', message: 'da autorizzare (Impostazioni → Installati → Connetti)' }),
   connNoBrowserNoWindow: msg({ id: 'conn.noBrowserNoWindow', message: 'browser non disponibile senza la finestra di Homun' }),
   connSilentNoClient: msg({

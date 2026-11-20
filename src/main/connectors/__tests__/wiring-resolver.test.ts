@@ -544,3 +544,36 @@ describe('M2/M3: server di PLUGIN — Connetti dalla scheda Installati e ${VAR} 
     mcp.setMcpAuthResolver(() => ({}))
   })
 })
+
+// E1 (fase mcp-env): le variabili del server stdio MANUALE — non segreti dalla
+// config (envValues), segreti dallo store cifrato (kind 'env') — arrivano
+// FUSE al processo come stdioEnv.
+describe('E1: il resolver porta le variabili del server stdio manuale', () => {
+  it('envValues (non segreti) + store kind env (segreti) → stdioEnv fuso', async () => {
+    const { resolver, store } = makeResolver()
+    const cfg: McpServerConfig = {
+      id: 'mcp_manuale', name: 'mattermost', transport: 'stdio', command: 'npx', args: ['-y', '@donach/mattermost-mcp'],
+      enabled: true,
+      envSpec: [
+        { name: 'MATTERMOST_URL', secret: false },
+        { name: 'MATTERMOST_TOKEN', secret: true },
+        { name: 'MATTERMOST_TEAM_ID', secret: false }
+      ],
+      envValues: { MATTERMOST_URL: 'https://mattermost.competitoor.com', MATTERMOST_TEAM_ID: 'team-1' }
+    }
+    await saveAsUi(store, 'mcp_manuale', 'env', { MATTERMOST_TOKEN: 'tok-cifrato-finto' })
+    await expect(resolver(cfg)).resolves.toEqual({
+      stdioEnv: {
+        MATTERMOST_URL: 'https://mattermost.competitoor.com',
+        MATTERMOST_TEAM_ID: 'team-1',
+        MATTERMOST_TOKEN: 'tok-cifrato-finto'
+      }
+    })
+  })
+
+  it('senza variabili dichiarate il resolver manuale non tocca niente ({} di oggi)', async () => {
+    const { resolver } = makeResolver()
+    const cfg: McpServerConfig = { id: 'mcp_semplice', name: 'semplice', transport: 'stdio', command: 'node', args: ['x.js'], enabled: true }
+    await expect(resolver(cfg)).resolves.toEqual({})
+  })
+})
