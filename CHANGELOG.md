@@ -5,6 +5,18 @@ pubblicata finisce nel corpo della GitHub Release (da cui l'app mostra il
 «cosa cambia» quando propone un aggiornamento). Formato: `## [x.y.z] — data`,
 sezioni H2 e un punto per riga.
 
+## [0.3.1001-beta.12] — 2026-11-20
+
+La barra di sinistra rifinita.
+
+### Correzioni
+
+- **La barra di sinistra è più compatta e ordinata:** testo più piccolo,
+  righe più basse, numeri arancio senza riquadro e pulsanti in alto più
+  leggeri.
+- **I segni di stato sono più discreti:** puntini e pallino più piccoli,
+  con un'onda sottile quando un bot aspetta te.
+
 ## [0.3.1001-beta.11] — 2026-11-20
 
 Una barra più pulita per chi ha tanti bot, e l'icona nuova.
