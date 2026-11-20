@@ -299,7 +299,13 @@ function TeamRows({ team, states, lastSendAt, now }: { team: SidebarTeam; states
   const [open, setOpen] = useState(() => teamOpenState(readLS(`${TEAM_OPEN_PREFIX}${team.group.id}`), teamAutoOpens(team, openGroupId)))
   const [allMembers, setAllMembers] = useState(() => readLS(`${SECTION_OPEN_PREFIX}members.${team.group.id}`) === '1')
   const members = orderRows(
-    team.members.map((m) => ({ member: m, waiting: states[m.id] === 'waiting', lastAt: lastSendAt[m.id] ?? m.createdAt }))
+    team.members.map((m) => ({
+      member: m,
+      waiting: states[m.id] === 'waiting',
+      // M4 (fase beta12-correzioni): chi lavora adesso conta per l'ordine
+      works: states[m.id] === 'thinking' || states[m.id] === 'speaking' || states[m.id] === 'listening',
+      lastAt: lastSendAt[m.id] ?? m.createdAt
+    }))
   )
   const cut = memberCut(members, allMembers)
   const tip = team.group.description

@@ -64,6 +64,12 @@ export interface SidebarBot {
   childWaiting: boolean
   /** R1 (fase barra-sobria): la riga lo mostra col pallino, non più con la mascotte */
   waiting: boolean
+  /**
+   * M4 (fase beta12-correzioni): lavora ADESSO (thinking/speaking/listening)
+   * — per l'ordine conta come attività di adesso: sta subito dopo chi
+   * aspetta te, sopra chi è fermo da poco.
+   */
+  works: boolean
   /** lo stato della mascotte, per il segno a destra (R2) e l'ordinamento */
   state: BotState
   /** l'ultima attività: lastSendAt, o la creazione (per «4m», «1g») */
@@ -141,6 +147,8 @@ export function buildSidebarModel(
       childWaiting: waitingOnChildren.has(agent.id),
       state,
       waiting: waitingOnChildren.has(agent.id) || state === 'waiting',
+      // M4: lavora adesso conta come attività ADESSO per l'ordine
+      works: state === 'thinking' || state === 'speaking' || state === 'listening',
       lastAt: opts.lastSendAt?.[agent.id] ?? agent.createdAt
     }
   })
@@ -201,10 +209,19 @@ function stateOfAgent(a: Agent, states?: Readonly<Record<string, BotState>>): Bo
   return 'idle'
 }
 
-/** L'ordine dentro ogni sezione: prima chi aspetta te, poi ultima attività. */
-export function orderRows<T extends { waiting: boolean; lastAt: number | null }>(rows: T[]): T[] {
+/**
+ * L'ordine dentro ogni sezione: prima chi aspetta te, poi chi lavora adesso,
+ * poi ultima attività.
+ * M4 (fase beta12-correzioni): un bot in thinking/speaking/listening conta
+ * come attività ADESSO — sta subito dopo chi aspetta te, sopra un bot fermo
+ * più recente (nella cattura «Ricerche» che lavorava non compariva in cima).
+ */
+export function orderRows<T extends { waiting: boolean; works: boolean; lastAt: number | null }>(rows: T[]): T[] {
   return [...rows].sort(
-    (a, b) => Number(b.waiting) - Number(a.waiting) || (b.lastAt ?? -Infinity) - (a.lastAt ?? -Infinity)
+    (a, b) =>
+      Number(b.waiting) - Number(a.waiting) ||
+      Number(b.works) - Number(a.works) ||
+      (b.lastAt ?? -Infinity) - (a.lastAt ?? -Infinity)
   )
 }
 
@@ -280,7 +297,9 @@ export function collapsedVoices(model: SidebarModel): CollapsedVoice[] {
       counter: t.waitingCount
     })
   }
-  for (const b of model.bots) {
+  // M4 (fase beta12-correzioni): i bot della rotaia nello STESSO ordine della
+  // barra larga — chi aspetta te, poi chi lavora adesso, poi ultima attività
+  for (const b of orderRows(model.bots)) {
     out.push({
       kind: 'bot',
       key: b.agent.id,

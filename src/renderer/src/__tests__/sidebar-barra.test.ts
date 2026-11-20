@@ -10,7 +10,7 @@ import { createElement } from 'react'
 import { i18n } from '@lingui/core'
 import {
   buildSidebarModel, orderRows, cutRows, memberCut, teamAutoOpens, teamOpenState,
-  timeAgoShort, rowStateOf, teamRowState, type SidebarTeam
+  timeAgoShort, rowStateOf, teamRowState, collapsedVoices, type SidebarTeam
 } from '../sidebar-utils'
 import type { BotState } from '../bot/bot-state'
 import { renderHtml, setStoreStateForRender, parseHtml, findAll, textOf, accessibleName } from './render-helper'
@@ -94,14 +94,56 @@ describe('R1: buildSidebarModel con stati e tempi (le righe col pallino)', () =>
 describe('R1: l\'ordine dentro ogni sezione — prima chi aspetta te, poi ultima attività', () => {
   it('le righe in attesa salgono; le altre per lastAt decrescente (null in fondo)', () => {
     const rows = [
-      { id: 'a', waiting: false, lastAt: 100 },
-      { id: 'b', waiting: true, lastAt: 5 },
-      { id: 'c', waiting: false, lastAt: 300 },
-      { id: 'd', waiting: false, lastAt: null },
-      { id: 'e', waiting: true, lastAt: 900 }
+      { id: 'a', waiting: false, works: false, lastAt: 100 },
+      { id: 'b', waiting: true, works: false, lastAt: 5 },
+      { id: 'c', waiting: false, works: false, lastAt: 300 },
+      { id: 'd', waiting: false, works: false, lastAt: null },
+      { id: 'e', waiting: true, works: false, lastAt: 900 }
     ]
     // tra due in attesa vince l'ultima attività: e (900) prima di b (5)
     expect(orderRows(rows).map((r) => r.id)).toEqual(['e', 'b', 'c', 'a', 'd'])
+  })
+})
+
+// ---- M4 (fase beta12-correzioni): chi lavora ADESSO conta come attività ----
+
+describe('M4: chi lavora adesso sta subito dopo chi aspetta te', () => {
+  it('un bot che lavora (thinking/speaking/listening) con attività VECCHIA sta sopra un bot fermo più recente', () => {
+    const rows = [
+      { id: 'recente', waiting: false, works: false, lastAt: 900 },
+      { id: 'lavora', waiting: false, works: true, lastAt: 5 }
+    ]
+    expect(orderRows(rows).map((r) => r.id)).toEqual(['lavora', 'recente'])
+  })
+
+  it('chi aspetta te resta PRIMA di chi lavora; tra chi lavora vince l\'ultima attività', () => {
+    const rows = [
+      { id: 'lavora-vecchio', waiting: false, works: true, lastAt: 5 },
+      { id: 'aspetta', waiting: true, works: false, lastAt: 1 },
+      { id: 'lavora-nuovo', waiting: false, works: true, lastAt: 800 }
+    ]
+    expect(orderRows(rows).map((r) => r.id)).toEqual(['aspetta', 'lavora-nuovo', 'lavora-vecchio'])
+  })
+
+  it('buildSidebarModel: il bot in thinking con lastSendAt vecchio viene per primo tra i singoli', () => {
+    const agents = [agent('m', 'Main'), agent('ricerche', 'Ricerche'), agent('chiacchiere', 'Chiacchiere')]
+    const mdl = buildSidebarModel(agents, [], 'm', '', new Set(), {
+      states: { m: 'idle', ricerche: 'thinking', chiacchiere: 'idle' },
+      lastSendAt: { ricerche: 5, chiacchiere: 900 }
+    })
+    expect(orderRows(mdl.bots).map((b) => b.agent.id)).toEqual(['ricerche', 'chiacchiere'])
+    // e la riga dichiara works per la barra
+    expect(mdl.bots.find((b) => b.agent.id === 'ricerche')!.works).toBe(true)
+  })
+
+  it('la ROTAIA segue lo stesso ordine per i bot (il robottino che lavora prima di quello fermo recente)', () => {
+    const agents = [agent('m', 'Main'), agent('ricerche', 'Ricerche'), agent('chiacchiere', 'Chiacchiere')]
+    const mdl = buildSidebarModel(agents, [], 'm', '', new Set(), {
+      states: { m: 'idle', ricerche: 'thinking', chiacchiere: 'idle' },
+      lastSendAt: { ricerche: 5, chiacchiere: 900 }
+    })
+    const botVoices = collapsedVoices(mdl).filter((v) => v.kind === 'bot')
+    expect(botVoices.map((v) => v.name)).toEqual(['Ricerche', 'Chiacchiere'])
   })
 })
 
