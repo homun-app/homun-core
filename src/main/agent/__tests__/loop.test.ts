@@ -1157,10 +1157,12 @@ describe('§5.1+approval: gate asincrono e standing grant esatta', () => {
       // AH5 dal vivo: nel box + «Chiedi» il comando parte SENZA card…
       expect(h.db.entries.filter((e) => e.kind === 'approval')).toHaveLength(0)
       expect(h.sandboxMock.exec.calls).toBe(1)
-      // …e l'errore di nome riceve la nota in coda (il modello lo sa)
+      // …e l'errore di nome riceve la nota IN TESTA (P7: dice che NON è un
+      // problema del sito né del DNS, il modello lo sa prima di riprovare)
       const toolMsg = [...h.llm.calls[1]!].reverse().find((m) => m.role === 'tool')!
       expect(String(toolMsg.content)).toContain('Could not resolve host')
-      expect(String(toolMsg.content)).toContain('no internet for commands: use web_fetch or the browser')
+      expect(String(toolMsg.content)).toContain('no internet: this is not a problem with the site or with the DNS')
+      expect(String(toolMsg.content).indexOf('no internet')).toBeLessThan(String(toolMsg.content).indexOf('Could not resolve host'))
     } finally {
       h.sandboxMock.mode = 'host'
       h.sandboxMock.egress = 'direct'

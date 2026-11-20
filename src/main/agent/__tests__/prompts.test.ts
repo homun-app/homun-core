@@ -192,9 +192,9 @@ describe('fase 9 (punto 2): system prompt componibile', () => {
     // P7 (fase uso-permessi): quando un servizio serve e NON c'è un server MCP
     // funzionante, PRIMA l'import da Cursor/Claude/Zcode POI il server npm;
     // e MAI curl dal computer isolato per raggiungere un servizio
-    expect(s).toContain('FIRST offer the import from Cursor, Claude or Zcode')
+    expect(s).toContain('FIRST offer the import from Cursor, Claude or ZCode')
     expect(s).toContain('THEN an npm server')
-    expect(s).toContain('Never reach a web service with curl or run-command from your isolated computer')
+    expect(s).toContain('Never reach a web service with curl or run-command: the isolated computer has no internet')
     // ~180 token stimati (caratteri/4). P9 (fase pulizia): la frase piana
     // dell'installazione costa ~25 token più della vecchia compressione —
     // il tetto sale a 185 stimati. M3 (fase beta12-correzioni): le due regole

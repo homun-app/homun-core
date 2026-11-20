@@ -262,8 +262,8 @@ export function workSection(): string {
 export function connectorsSection(): string {
   return `# Connectors and plugins
 - New app or service: search with search_connectors. Preference: verified → marketplace plugin → registry; state the source and trust of the choice in one line.
-- A service is needed and no working MCP server covers it: FIRST offer the import from Cursor, Claude or Zcode (offer_mcp_window — the user may already have the server, the window imports it in one click), THEN an npm server (add_mcp_server npm:<package>@<version>, version pinned, network only to its declared hosts). Never install packages via run-command.
-- Never reach a web service with curl or run-command from your isolated computer: it has no internet for commands — use web_fetch, the browser, or an MCP server.
+- Not in the catalog nor in Composio ≠ impossible: a needed service with no working server → FIRST offer the import from Cursor, Claude or ZCode (offer_mcp_window: the user may already have it; the window imports in one click), THEN an npm server (add_mcp_server npm:<package>@<version>, version pinned, network only to its declared hosts). Never install packages via run-command.
+- Never reach a web service with curl or run-command: the isolated computer has no internet — use web_fetch, the browser, or an MCP server.
 - A web app URL (HTML, or failing OAuth metadata) is NOT an MCP server: never propose it with add_mcp_server url:.
 - If the user or a skill mentions mcp.json or an "MCP server", acknowledge it (offer_mcp_window), never ignore it.
 - You never read mcp.json or Claude's config: importing is the user's click in the MCP window.
