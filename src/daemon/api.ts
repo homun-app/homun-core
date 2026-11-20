@@ -1566,9 +1566,17 @@ export function buildApiMethods(
         const cfg = sid ? (await mcp()).listServers().find((s) => s.id === sid) : null
         if (cfg && !cfg.needsAuth) await notifyMcpServerConnected([message.id], cfg, emit, worker)
       }
+      // E3 (fase mcp-env): se l'aggiunta fallisce su un INDIRIZZO proposto
+      // dal bot (url:) o con l'odore del not-mcp, la guida dice la strada
+      // giusta: niente colpa al servizio, card offer_mcp_window e la frase
+      // dell'import da Cursor/Claude/ZCode (il bot NON legge quei file)
+      const { classifyConnectError } = await import('../main/connectors/install')
+      const { MCP_WINDOW_IMPORT_GUIDANCE } = await import('../main/agent/connectors-policy')
+      const guidaImport = !r.ok && (message.id.startsWith('url:') || classifyConnectError(r.error) === 'not-mcp')
+        ? ` ${MCP_WINDOW_IMPORT_GUIDANCE}` : ''
       // fase 17c (C2, MU): il testo per il modello resta inglese; meta.ui
       // dice alla UI cosa mostrare nella lingua dell'interfaccia
-      const text = r.ok ? `[sistema] ${r.message}` : `[sistema] Server "${message.name}" NOT added: ${r.error}`
+      const text = r.ok ? `[sistema] ${r.message}` : `[sistema] Server "${message.name}" NOT added: ${r.error}${guidaImport}`
       enqueueUserMessage(db(), aid, text, undefined, emit, undefined, 'CONNECTOR_INSTALLED', {
         ui: r.ok ? ui(UI.sistemaServerAdded, { name: message.name }) : ui(UI.sistemaServerAddFailed, { name: message.name, error: r.error })
       })

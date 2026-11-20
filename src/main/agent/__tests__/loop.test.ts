@@ -2119,7 +2119,9 @@ describe('fase 5: funnel dei connettori (offer_connector) e card Riconnetti', ()
       const third = h.llm.calls[2]!
       const offerResult = third.filter((m) => m.role === 'tool').map((m) => String(m.content)).find((c) => c.includes('MCP servers window')) ?? ''
       expect(offerResult).toContain('MCP servers window')
-      expect(offerResult).toContain('Cursor or Claude')
+      // E3 (fase mcp-env): la frase ora include ZCode e l'import
+      expect(offerResult).toContain('Cursor, Claude or ZCode')
+      expect(offerResult).toContain('imports their servers in one click')
       expect(offerResult).toContain('never say the service cannot be connected')
     } finally {
       ;(mcpMock as unknown as { callTool: unknown }).callTool = prevCallTool

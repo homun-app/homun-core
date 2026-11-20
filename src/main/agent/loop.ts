@@ -4246,7 +4246,7 @@ export async function runTurn(agentId: string, userText: string, emit: Emitter, 
           appendSend(agentId, call, message, emit, {}, opts.taskId)
           messages.push({
             role: 'tool', toolCallId: call.id,
-            content: `card shown to the user with a button that opens the MCP servers window: they add the server themselves, with the same command or address they may already use in Cursor or Claude. Ask them if they already have one; never say the service cannot be connected. When they add and enable the server you will receive its tools in a later turn.`
+            content: `card shown to the user with a button that opens the MCP servers window: they add the server themselves, with the same command or address they may already use in Cursor, Claude or ZCode — the window imports their servers in one click. Ask them if they already have one; never say the service cannot be connected. When they add and enable the server you will receive its tools in a later turn.`
           })
           continue
         }

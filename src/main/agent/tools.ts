@@ -384,7 +384,7 @@ export const toolDefs: ToolDef[] = [
     // M3 (fase beta12-correzioni): quando il connettore NON c'è, il bot
     // INDICA la finestra «Server MCP» invece di dire «non si può»
     name: 'offer_mcp_window',
-    description: 'For a service in no source: a card with an "Apri Server MCP" button that opens the MCP servers window. Adds nothing itself: the user adds the server (Cursor, Claude). Ask if they have one.',
+    description: 'For a service in no source: a card with an "Apri Server MCP" button that opens the MCP servers window. Adds nothing itself: the user adds the server, or imports theirs from Cursor, Claude or ZCode.',
     parameters: {
       type: 'object',
       properties: {

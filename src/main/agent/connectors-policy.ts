@@ -13,6 +13,16 @@ export const CONNECTOR_PROPOSAL_DENIED =
 export const CONNECTOR_PROPOSAL_TOOLS = new Set(['add_mcp_server', 'install_plugin', 'offer_mcp_window'])
 
 /**
+ * E3 (fase mcp-env): la guida che accompagna l'esito NEGATIVO del click su
+ * una card «Aggiungi server MCP» quando l'indirizzo proposto era la WEB APP
+ * del servizio (risponde HTML o l'OAuth metadata fallisce): niente colpa al
+ * servizio — il bot propone la card «Apri Server MCP» e dice la frase
+ * dell'import. Il bot NON legge i file di Cursor/Claude da solo (E2).
+ */
+export const MCP_WINDOW_IMPORT_GUIDANCE =
+  'That address may be the service web app, not its MCP endpoint: do not blame the service. Propose offer_mcp_window; if the user already uses the service in Cursor, Claude or ZCode, the MCP servers window imports their server in one click — tell them: «se lo usi già in Cursor, Claude o ZCode, importalo da lì» (in their language).'
+
+/**
  * Fase 14 (punto 7d): fill_credential NON esiste nei turni di GRUPPO (Grok:
  * niente accessi né dati sensibili nei gruppi). Nei figli non c'è già: la
  * whitelist del sottoagente non lo contiene.

@@ -193,8 +193,11 @@ describe('fase 9 (punto 2): system prompt componibile', () => {
     // dell'installazione costa ~25 token più della vecchia compressione —
     // il tetto sale a 185 stimati. M3 (fase beta12-correzioni): le due regole
     // nuove (il servizio che manca NON è impossibile + mcp.json nominato va
-    // ascoltato) portano la sezione a ~240 token stimati
-    expect(s.length / 4).toBeLessThanOrEqual(245)
+    // ascoltato) portano la sezione a ~240 token stimati. E3 (fase mcp-env):
+    // le tre regole nuove (import da Cursor/Claude/ZCode, la web app NON è
+    // un server MCP, il bot non legge mcp.json) portano la sezione a ~298
+    // stimati — compresse al minimo senza perdere le regole di M3
+    expect(s.length / 4).toBeLessThanOrEqual(300)
   })
 
   it('fase token (T4): la sezione è la GUIDA del gruppo connectors, ASSENTE da ogni prompt di base', () => {
