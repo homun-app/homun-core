@@ -198,7 +198,7 @@ writeFileSync(FAKE_DOCKER, [
   '  if (f.includes("Init")) out("true\\n")',
   '  if (f.includes("Config.Image")) out((lastTag || "sandbot-box:finto") + "\\n")',
   '  if (f.includes("Mounts")) out("/box:rw /plugins:ro /browser:rw \\n")',
-  '  if (f.includes("NetworkMode")) out("bridge\\n")',
+  '  if (f.includes("NetworkMode")) out("none\\n")',
   '  ok0()',
   '}',
   'if (sub === "start" || sub === "stop" || sub === "rm" || sub === "volume" || sub === "run" || sub === "create") ok0()',
@@ -366,6 +366,11 @@ try {
   await rpc(cdp, `settingsSet('models.main', ${JSON.stringify({ providerId: 'finto', model: 'finto', thinking: null })})`)
   await rpc(cdp, `settingsSet('sandbox.mode', 'box')`)
   await rpc(cdp, `settingsSet('sandbox.engine', 'docker')`)
+  // N1 (fase mcp-egress-sicurezza): il box della sonda modella la rete
+  // INTERNA (il proxy è l'unica uscita): con 'bridge' l'app RIFIUTA i server
+  // npm perché col motore Docker l'uscita è libera — e il rifiuto si PROVA
+  // in fondo alla corsa passando appunto a 'bridge'
+  await rpc(cdp, `settingsSet('sandbox.network', 'none')`)
   for (let round = 0; round < 5; round++) {
     for (const step of ['welcome', 'model', 'computer', 'approvals']) {
       await rpc(cdp, `onboardingAdvance('${step}', 'skipped')`).catch(() => undefined)
@@ -509,7 +514,7 @@ try {
     JSON.stringify(install ?? {}).slice(0, 140))
   servers = await rpc(cdp, 'mcpList()')
   const npmCfg = servers.find((s) => s.source?.kind === 'npm')
-  check('E4: il server creato è NEL BOX (npx -y @finto/mattermost-finto@1.4.2) con egress.allowHosts e versione fissata',
+  check('E4: il server creato è NEL BOX (npx --yes @finto/mattermost-finto@1.4.2, ARGV senza shell — N3) con egress.allowHosts e versione fissata',
     !!npmCfg && npmCfg.box?.command === 'npx' && (npmCfg.box?.args ?? []).join(' ').includes(`@finto/mattermost-finto@${NPM_VERSION}`) &&
       JSON.stringify(npmCfg.egress?.allowHosts) === JSON.stringify(['127.0.0.1']) && npmCfg.source?.version === NPM_VERSION,
     JSON.stringify({ box: npmCfg?.box, egress: npmCfg?.egress, source: npmCfg?.source }))
@@ -580,6 +585,40 @@ try {
   check('E4: il registro npm finto è stato letto in SOLA LETTURA (packument + download, nient\'altro)',
     npmCalls.every((u) => String(u).includes('mattermost-finto')), JSON.stringify(npmCalls))
   await shot(cdp, '4-strumenti-via-proxy.png')
+
+  // =========== N1 (fase mcp-egress-sicurezza): col motore Docker (uscita libera) i server npm NON partono ===========
+  // il motore passa alla rete bridge: la PROPOSTA si rifiuta in parole (nel
+  // result del bot, NESSUNA card) e il server GIÀ INSTALLATO non parte più,
+  // con lo stato d'errore che il foglio del server mostra
+  await rpc(cdp, `settingsSet('sandbox.network', 'bridge')`)
+  const cardPrima = ((await rpc(cdp, `getEntries(${JSON.stringify(agentId)})`).catch(() => [])) ?? [])
+    .filter((e) => e.kind === 'send-message' && e.meta?.message?.type === 'mcp-server').length
+  script.queue = [proposta, proposta, { content: 'Non si può con Docker.' }]
+  await rpc(cdp, `sendMessage(${JSON.stringify(agentId)}, 'Collegami ancora mattermost')`)
+  let vociN1 = []
+  for (let i = 0; i < 100; i++) {
+    await sleep(400)
+    vociN1 = await rpc(cdp, `getEntries(${JSON.stringify(agentId)})`).catch(() => [])
+    if ((vociN1 ?? []).some((e) => e.kind === 'send-message' && String(e.content) === 'Non si può con Docker.')) break
+  }
+  const esitoN1 = (vociN1 ?? []).filter((e) => e.kind === 'tool-result').slice(-3).map((e) => String(e.content))
+  const cardNuove = (vociN1 ?? []).filter((e) => e.kind === 'send-message' && e.meta?.message?.type === 'mcp-server').length - cardPrima
+  check('N1: con l\'uscita libera (bridge) la PROPOSTA del server npm è RIFIUTATA in parole nel result del bot',
+    esitoN1.some((r) => r.includes('unverified npm servers do not start')),
+    esitoN1.join(' || ').slice(0, 200))
+  check('N1: NESSUNA card di server npm compare (niente promessa di recinto)', cardNuove === 0, `card: ${cardNuove}`)
+  const testDirect = await rpc(cdp, `mcpTest(${JSON.stringify(npmCfg.id)})`)
+  check('N1: il server GIÀ INSTALLATO non parte con l\'uscita libera (rifiuto in parole)',
+    testDirect && testDirect.ok === false && String(testDirect.error ?? testDirect.message ?? JSON.stringify(testDirect)).includes('do not start'),
+    JSON.stringify(testDirect ?? {}).slice(0, 180))
+  const installati = await rpc(cdp, 'connectorsInstalled()').catch(() => null)
+  const rigaN1 = installati?.servers?.find((x) => x.id === npmCfg.id)
+  check('N1: lo stato del server dice l\'errore (il foglio del server lo mostra)',
+    rigaN1?.stateStatus === 'error' && String(rigaN1?.stateError ?? '').includes('do not start'),
+    JSON.stringify({ stateStatus: rigaN1?.stateStatus, stateError: rigaN1?.stateError }).slice(0, 180))
+  // si torna alla rete interna per le corse successive (la corsa finisce qui,
+  // ma il setting resta pulito nel dato temporaneo)
+  await rpc(cdp, `settingsSet('sandbox.network', 'none')`)
 
   // ---- pulizia K4 ----
   stopApp()
