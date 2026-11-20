@@ -562,7 +562,7 @@ msgstr "+ Add contact"
 msgid "+ Aggiungi login"
 msgstr "+ Add login"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/McpWindow.tsx
 msgid "+ Aggiungi server MCP"
 msgstr "+ Add MCP server"
 
@@ -610,7 +610,7 @@ msgstr "✓ {0} connected · {toolsCount} tools"
 
 #. placeholder {0}: tests[s.id].tools?.length ?? 0
 #. placeholder {1}: (tests[s.id].tools ?? []).join(', ').slice(0, 200)
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/McpWindow.tsx
 msgid "✓ {0} tool: {1}"
 msgstr "✓ {0} tool: {1}"
 
@@ -643,7 +643,7 @@ msgid "✓ Installato — il bot ha ricevuto l'esito"
 msgstr "✓ Installed — the bot received the result"
 
 #. placeholder {0}: tests[s.id].error ?? ''
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/McpWindow.tsx
 msgid "✕ {0}"
 msgstr "✕ {0}"
 
@@ -970,6 +970,7 @@ msgstr "no steps yet"
 #: src/renderer/src/components/GuideModelStep.tsx
 #: src/renderer/src/components/LibraryCards.tsx
 #: src/renderer/src/components/LibraryPanel.tsx
+#: src/renderer/src/components/McpWindow.tsx
 #: src/renderer/src/components/MemoryPanel.tsx
 #: src/renderer/src/components/RightPanel.tsx
 #: src/renderer/src/components/Settings.tsx
@@ -1135,6 +1136,10 @@ msgstr "Open the app window to authorize."
 msgid "conn.needsAuthOpenWindow"
 msgstr "Open the Homun window to authorize"
 
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "Apri la finestra Server MCP"
+msgstr "Open the Server MCP window"
+
 #: src/renderer/src/components/ApprovalsCenter.tsx
 msgid "Apri la squadra"
 msgstr "Open the team"
@@ -1164,7 +1169,7 @@ msgstr "Orange"
 msgid "Argomenti (args) non sono JSON valido"
 msgstr "Arguments (args) are not valid JSON"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/McpWindow.tsx
 msgid "Argomenti separati per spazio"
 msgstr "Arguments separated by space"
 
@@ -1340,7 +1345,7 @@ msgstr "Base URL"
 msgid "Basso"
 msgstr "Low"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/McpWindow.tsx
 msgid "Bearer token (opzionale — salvato cifrato)"
 msgstr "Bearer token (optional — stored encrypted)"
 
@@ -1705,6 +1710,7 @@ msgstr "close"
 #: src/renderer/src/components/BotScreen.tsx
 #: src/renderer/src/components/Chat.tsx
 #: src/renderer/src/components/ComputerPanel.tsx
+#: src/renderer/src/components/McpWindow.tsx
 #: src/renderer/src/components/PipView.tsx
 #: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
@@ -1800,6 +1806,10 @@ msgstr "Connect a model"
 msgid "composio.cancelled"
 msgstr "Connection of {name} cancelled."
 
+#: src/renderer/src/components/McpWindow.tsx
+msgid "Collegano Homun ai tuoi strumenti e ai servizi della tua azienda. Se usi già Cursor o Claude, sono gli stessi server: aggiungili qui con lo stesso comando o lo stesso indirizzo."
+msgstr "They connect Homun to your tools and your company’s services. If you already use Cursor or Claude, these are the same servers: add them here with the same command or the same address."
+
 #: src/renderer/src/components/settings/AddProviderSheet.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
 msgid "Collegato"
@@ -1817,7 +1827,7 @@ msgstr "commands in the computer, no network"
 msgid "Comando"
 msgstr "Command"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/McpWindow.tsx
 msgid "Comando (es. node)"
 msgstr "Command (e.g. node)"
 
@@ -2693,7 +2703,7 @@ msgstr "Listing truncated to {0} entries."
 msgid "Elenco"
 msgstr "List"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/McpWindow.tsx
 #: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "elimina"
@@ -3060,6 +3070,10 @@ msgstr "Invalid time zone: \"{tz}\""
 msgid "gateway"
 msgstr "gateway"
 
+#: src/renderer/src/components/McpWindow.tsx
+msgid "Gateway, plugin e registro"
+msgstr "Gateways, plugins and the registry"
+
 #: src/renderer/src/components/BotDialogs.tsx
 #: src/renderer/src/components/GuideView.tsx
 msgid "Gelatina"
@@ -3379,7 +3393,7 @@ msgstr "Homun lacks the Accessibility permission: clicks and typing on your Mac 
 msgid "rpc.masterKeyUnavailable"
 msgstr "Homun can’t read the keys that protect your secrets. If macOS asked for Keychain access, allow it and press Retry."
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/McpWindow.tsx
 msgid "http (URL)"
 msgstr "http (URL)"
 
@@ -3422,6 +3436,10 @@ msgstr "the steps of the turn"
 #: src/renderer/src/components/VaultSettings.tsx
 msgid "I secret servono ai COMANDI dei bot (<0>{SECRET_TEMPLATE}</0>): il valore entra solo nell'env del processo, mai nel transcript."
 msgstr "Secrets are used by the bots' COMMANDS (<0>{SECRET_TEMPLATE}</0>): the value only enters the process env, never the transcript."
+
+#: src/renderer/src/components/AppsWindow.tsx
+msgid "I server MCP aggiunti a mano stanno nella finestra «Server MCP»: la apri dal menu del tuo account, sotto Skill."
+msgstr "Manually added MCP servers live in the “Server MCP” window: open it from your account menu, below Skill."
 
 #: src/renderer/src/components/ServerSheet.tsx
 msgid "I token stanno cifrati sul tuo Mac."
@@ -4858,7 +4876,7 @@ msgstr "model out of credit"
 msgid "Modello:"
 msgstr "Model:"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/McpWindow.tsx
 #: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/SkillsWindow.tsx
 #: src/renderer/src/components/VaultSettings.tsx
@@ -5252,7 +5270,7 @@ msgstr "Name (e.g. Composio)"
 msgid "Nome (es. Il mio gateway)"
 msgstr "Name (e.g. My gateway)"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/McpWindow.tsx
 msgid "Nome (es. weather)"
 msgstr "Name (e.g. weather)"
 
@@ -6652,6 +6670,7 @@ msgstr "Skip for now"
 #: src/renderer/src/components/DraftCard.tsx
 #: src/renderer/src/components/LibraryCards.tsx
 #: src/renderer/src/components/LibraryPanel.tsx
+#: src/renderer/src/components/McpWindow.tsx
 #: src/renderer/src/components/MemoryPanel.tsx
 #: src/renderer/src/components/Settings.tsx
 #: src/renderer/src/components/settings/ModelsPage.tsx
@@ -7024,7 +7043,9 @@ msgid "Server esterno"
 msgstr "External server"
 
 #: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/McpWindow.tsx
 #: src/renderer/src/components/ServerSheet.tsx
+#: src/renderer/src/components/Sidebar.tsx
 msgid "Server MCP"
 msgstr "MCP server"
 
@@ -7033,11 +7054,12 @@ msgstr "MCP server"
 msgid "Server MCP · Pubblicato da {0}"
 msgstr "MCP server · Published by {0}"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/McpWindow.tsx
 msgid "Server MCP manuali (stdio o HTTP, con header/bearer salvati cifrati)."
 msgstr "Manual MCP servers (stdio or HTTP, with headers/bearer stored encrypted)."
 
 #: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/McpWindow.tsx
 msgid "Server MCP personalizzato"
 msgstr "Custom MCP server"
 
@@ -7365,7 +7387,7 @@ msgstr "Detach into a window"
 msgid "Stai controllando lo schermo di {0}"
 msgstr "You are controlling the screen of {0}"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/McpWindow.tsx
 msgid "stdio (comando locale)"
 msgstr "stdio (local command)"
 
@@ -7459,7 +7481,7 @@ msgstr "unknown template: {id}"
 msgid "Terminale"
 msgstr "Terminal"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/McpWindow.tsx
 msgid "test"
 msgstr "test"
 
@@ -7837,7 +7859,7 @@ msgstr "otpauth URI of type \"{type}\" not supported: totp is required"
 msgid "totp.badUri"
 msgstr "invalid otpauth URI: copy the base32 secret shown under the QR code"
 
-#: src/renderer/src/components/AppsWindow.tsx
+#: src/renderer/src/components/McpWindow.tsx
 msgid "URL (es. http://localhost:3001/mcp)"
 msgstr "URL (e.g. http://localhost:3001/mcp)"
 
@@ -7882,6 +7904,15 @@ msgstr "use the \"Connect apps\" view for catalog connectors"
 #: src/renderer/src/lib/activity.ts
 msgid "usa un’app…"
 msgstr "uses an app…"
+
+#: src/renderer/src/components/McpWindow.tsx
+msgid "usato da tutti i bot"
+msgstr "used by all bots"
+
+#. placeholder {0}: s.enabledFor.map((id) => agents.find((a) => a.id === id)?.name ?? id).join(', ')
+#: src/renderer/src/components/McpWindow.tsx
+msgid "usato da: {0}"
+msgstr "used by: {0}"
 
 #: src/renderer/src/components/Settings.tsx
 msgid "uscita $/M"

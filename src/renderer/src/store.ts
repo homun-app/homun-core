@@ -417,6 +417,16 @@ interface Store {
   /** fase 16c (C4): la finestra «Collega app» */
   appsOpen: boolean
   setAppsOpen(v: boolean): void
+  /**
+   * M2 (fase beta12-correzioni): la finestra «Server MCP» — si apre dalla
+   * voce del menu dell'account; il rimando «Gateway, plugin e registro»
+   * apre la finestra App DIRETTAMENTE sul foglio «Per sviluppatori».
+   */
+  mcpOpen: boolean
+  setMcpOpen(v: boolean): void
+  /** M2: apre AppsWindow col foglio «Per sviluppatori» già aperto (si consuma lì) */
+  appsOpenDevelopers: boolean
+  setAppsOpenDevelopers(v: boolean): void
   /** fase 16c (C5): la vista centrale «Attività» (false = chat) */
   activityOpen: boolean
   setActivityOpen(v: boolean): void
@@ -546,6 +556,9 @@ export const useStore = create<Store>((set, get) => ({
   subEntries: [],
   openLibraryId: null,
   appsOpen: false,
+  // M2 (fase beta12-correzioni): la finestra «Server MCP» (chiusa)
+  mcpOpen: false,
+  appsOpenDevelopers: false,
   activityOpen: false,
   // fase 16
   theme: 'system',
@@ -1110,6 +1123,15 @@ export const useStore = create<Store>((set, get) => ({
   // fase 16c (C4): la finestra «Collega app»
   setAppsOpen(v) {
     set({ appsOpen: v })
+  },
+
+  // M2 (fase beta12-correzioni): la finestra «Server MCP»
+  setMcpOpen(v) {
+    set({ mcpOpen: v })
+  },
+
+  setAppsOpenDevelopers(v) {
+    set({ appsOpenDevelopers: v })
   },
 
   // fase 16c (C5): la vista centrale «Attività» — A2: aprire lei chiude il

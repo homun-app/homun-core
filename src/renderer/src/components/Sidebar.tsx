@@ -476,6 +476,8 @@ function AccountMenu(props?: { rail?: boolean; triggerClassName?: string }) {
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
   const setAppsOpen = useStore((s) => s.setAppsOpen)
   const setSkillsOpen = useStore((s) => s.setSkillsOpen)
+  // M2 (fase beta12-correzioni): la finestra «Server MCP»
+  const setMcpOpen = useStore((s) => s.setMcpOpen)
   const effectiveMain = mainAgentId ?? agents[0]?.id ?? null
   const main = agents.find((a) => a.id === effectiveMain)
   // fase 16c correzioni (R4): il modello mostrato è quello RISOLTO, dal
@@ -518,6 +520,9 @@ function AccountMenu(props?: { rail?: boolean; triggerClassName?: string }) {
         {/* fase skill · sfoglia (B1): «Skill» sta QUI nel menu, sotto Collega
             app — non più come bottone nella barra accanto ad App */}
         <DropdownMenuItem data-testid="menu-skills" onClick={() => { openedWindow.current = true; setSkillsOpen(true) }}><Trans>Skill</Trans></DropdownMenuItem>
+        {/* M2 (fase beta12-correzioni): «Server MCP» tra Skill e
+            Impostazioni — la finestra sua, come le Skill */}
+        <DropdownMenuItem data-testid="menu-mcp" onClick={() => { openedWindow.current = true; setMcpOpen(true) }}><Trans>Server MCP</Trans></DropdownMenuItem>
         <DropdownMenuItem onClick={() => { openedWindow.current = true; setSettingsOpen(true) }}><Trans>Impostazioni</Trans></DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuSub>

@@ -18,6 +18,8 @@ import { LibraryPanel } from './components/LibraryPanel'
 import { ActivityPanel } from './components/ActivityPanel'
 import { AppsWindow } from './components/AppsWindow'
 import { SkillsWindow } from './components/SkillsWindow'
+// M2 (fase beta12-correzioni): la finestra «Server MCP» (menu dell'account)
+import { McpWindow } from './components/McpWindow'
 import { api } from './store'
 // fase 16b correzioni 2 (Q1): il layout a tre colonne è UNA funzione pura
 import { layoutFor, TRAFFIC_LIGHT_INSET } from './layout'
@@ -90,6 +92,8 @@ export function App() {
   const appsOpen = useStore((s) => s.appsOpen)
   // fase skill (S4): la finestra «Skill» (libreria unica)
   const skillsOpen = useStore((s) => s.skillsOpen)
+  // M2 (fase beta12-correzioni): la finestra «Server MCP»
+  const mcpOpen = useStore((s) => s.mcpOpen)
   // OA1 (fase onboarding-a): finché il daemon non dice lo stato del primo
   // avvio, la finestra CARICA — niente chat vuota, niente «Bot» da sola.
   // OAC1 (fase guida): la GUIDA si vede quando è APERTA (guideOpen: lo dice
@@ -241,6 +245,7 @@ export function App() {
       {settingsOpen && <Settings />}
       {appsOpen && <AppsWindow />}
       {skillsOpen && <SkillsWindow />}
+      {mcpOpen && <McpWindow />}
       </div>
     </div>
   )

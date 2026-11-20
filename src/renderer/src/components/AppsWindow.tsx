@@ -17,7 +17,7 @@ import { Search, X } from 'lucide-react'
 import { api, useStore } from '../store'
 import { i18n } from '../lib/i18n'
 import { loadAppCatalog, appCategoryLabel, appTaglineOf, type AppCatalogRow, type AppCategoryId } from '../../../shared/app-catalog'
-import type { McpServerInfo, McpServerSecret, AppsRegistryResult, ComposioGatewayAppInfo } from '../../../shared/types'
+import type { AppsRegistryResult, ComposioGatewayAppInfo } from '../../../shared/types'
 import { appsViewModel, appsCatalogModel, botsToggleState, gatewayAccountRows, accountLimitMessage, type AppsFilter, type InstalledServerLike, type InstalledPluginLike, type ConnectedRow, type CatalogRowView } from '../lib/apps-view'
 import { mcpToolPresentation } from '../../../shared/tool-names'
 import { SettingsGroup } from './settings/SettingsGroup'
@@ -80,106 +80,8 @@ function ServerDetail({ sv, onDone }: { sv: InstalledServerLike & Record<string,
   return <ServerSheet sv={sv as never} onDone={onDone} />
 }
 
-/** Server MCP aggiunti a mano: il form di oggi, dentro un foglio. */
-export function ManualServersSheet({ onClose }: { onClose(): void }) {
-  return (
-    <div className="no-drag fixed inset-0 z-50 grid place-items-center bg-foreground/20 p-4" onClick={onClose}>
-      <div className="max-h-[85vh] w-full max-w-xl overflow-y-auto scroll-thin rounded-3xl bg-card p-5 shadow-soft" onClick={(e) => e.stopPropagation()}>
-        <ManualServers />
-      </div>
-    </div>
-  )
-}
-
-/** Server MCP aggiunti a mano (stdio o HTTP, con header/bearer salvati cifrati). */
-function ManualServers() {
-  const { t } = useLingui()
-  const [servers, setServers] = useState<McpServerInfo[]>([])
-  const [edit, setEdit] = useState<McpServerInfo | null>(null)
-  // fase 5: bearer token del server manuale (salvato CIFRATO, mai nei settings)
-  const [editBearer, setEditBearer] = useState('')
-  const [tests, setTests] = useState<Record<string, { ok: boolean; error?: string; tools?: string[] }>>({})
-
-  const refresh = async () => {
-    setServers(await api.mcpList())
-  }
-  useEffect(() => { void refresh() }, [])
-
-  return (
-    <div className="space-y-3">
-      <strong className="block font-display text-lg"><Trans>Server MCP personalizzato</Trans></strong>
-      <p className="text-xs text-muted-foreground"><Trans>Server MCP manuali (stdio o HTTP, con header/bearer salvati cifrati).</Trans></p>
-      {servers.map((s) => (
-        <div key={s.id} className="rounded-2xl bg-muted px-3 py-2.5">
-          <div className="flex items-center gap-2">
-            <span className={`h-2 w-2 rounded-full ${s.enabled ? 'bg-chart-2' : 'bg-muted-foreground/40'}`} />
-            <span className="text-sm">{s.name}</span>
-            <span className="rounded-full bg-card px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">{s.transport}</span>
-            <span className="flex-1 truncate text-xs text-muted-foreground">{s.transport === 'stdio' ? `${s.command} ${(s.args ?? []).join(' ')}` : s.url}</span>
-            <button className="text-xs text-muted-foreground hover:text-foreground" onClick={async () => {
-              setTests((p) => ({ ...p, [s.id]: { ok: true, tools: ['test…'] } }))
-              const r = await api.mcpTest(s.id)
-              setTests((p) => ({ ...p, [s.id]: r }))
-            }}><Trans>test</Trans></button>
-            <button className="text-xs text-muted-foreground hover:text-foreground" onClick={() => { setEdit(s); setEditBearer('') }}><Trans>modifica</Trans></button>
-            <button className="text-xs text-muted-foreground hover:text-destructive" onClick={async () => { await api.mcpDelete(s.id); await refresh() }}><Trans>elimina</Trans></button>
-          </div>
-          {tests[s.id] && (
-            <div className={`mt-2 text-xs ${tests[s.id].ok ? 'text-chart-2' : 'text-destructive'}`}>
-              {tests[s.id].ok ? t`✓ ${tests[s.id].tools?.length ?? 0} tool: ${(tests[s.id].tools ?? []).join(', ').slice(0, 200)}` : t`✕ ${tests[s.id].error ?? ''}`}
-            </div>
-          )}
-        </div>
-      ))}
-      {edit ? (
-        <div className="space-y-2 rounded-2xl bg-muted p-3">
-          <div className="grid grid-cols-2 gap-2">
-            <input className="rounded-lg bg-card px-2.5 py-1.5 text-sm outline-none" placeholder={t`Nome (es. weather)`} value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} />
-            <select className="rounded-lg bg-card px-2.5 py-1.5 text-sm outline-none" value={edit.transport} onChange={(e) => setEdit({ ...edit, transport: e.target.value as 'stdio' | 'http' })}>
-              <option value="stdio">{t`stdio (comando locale)`}</option>
-              <option value="http">{t`http (URL)`}</option>
-            </select>
-          </div>
-          {edit.transport === 'stdio' ? (
-            <div className="grid grid-cols-2 gap-2">
-              <input className="rounded-lg bg-card px-2.5 py-1.5 text-sm outline-none" placeholder={t`Comando (es. node)`} value={edit.command ?? ''} onChange={(e) => setEdit({ ...edit, command: e.target.value })} />
-              <input className="rounded-lg bg-card px-2.5 py-1.5 text-sm outline-none" placeholder={t`Argomenti separati per spazio`} value={(edit.args ?? []).join(' ')} onChange={(e) => setEdit({ ...edit, args: e.target.value ? e.target.value.split(/\s+/) : [] })} />
-            </div>
-          ) : (
-            <>
-              <input className="w-full rounded-lg bg-card px-2.5 py-1.5 text-sm outline-none" placeholder={t`URL (es. http://localhost:3001/mcp)`} value={edit.url ?? ''} onChange={(e) => setEdit({ ...edit, url: e.target.value })} />
-              <input
-                className="w-full rounded-lg bg-card px-2.5 py-1.5 text-sm outline-none"
-                type="password"
-                placeholder={t`Bearer token (opzionale — salvato cifrato)`}
-                value={editBearer}
-                onChange={(e) => setEditBearer(e.target.value)}
-              />
-            </>
-          )}
-          <div className="flex justify-end gap-2 pt-1">
-            <button className="rounded-full px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground" onClick={() => setEdit(null)}><Trans>Annulla</Trans></button>
-            <button
-              className="rounded-full bg-foreground px-4 py-1.5 text-xs font-medium text-background transition hover:opacity-90"
-              onClick={async () => {
-                const secret: McpServerSecret | undefined = edit.transport === 'http' && editBearer.trim() ? { bearerToken: editBearer.trim() } : undefined
-                await api.mcpSave({ ...edit, id: edit.id || 'mcp_' + Date.now() }, secret)
-                setEdit(null); setEditBearer('')
-                await refresh()
-              }}
-            >
-              <Trans>Salva</Trans>
-            </button>
-          </div>
-        </div>
-      ) : (
-        <button className="w-full rounded-2xl bg-muted px-3 py-2.5 text-sm text-muted-foreground transition hover:text-foreground" onClick={() => { setEdit({ id: '', name: '', transport: 'stdio', command: '', args: [], enabled: true }); setEditBearer('') }}>
-          <Trans>+ Aggiungi server MCP</Trans>
-        </button>
-      )}
-    </div>
-  )
-}
+// M2 (fase beta12-correzioni): ManualServers (e il suo foglio) sono SPOSTATI
+// nella finestra «Server MCP» (McpWindow.tsx) — si apre dal menu dell'account.
 
 /** Scheda Marketplace (restilizzata): elenco, aggiungi (owner/repo o URL git), rimuovi. */
 function MarketplaceTab() {
@@ -472,6 +374,8 @@ function ComposioActivationSheet({ onClose, onDone }: { onClose(): void; onDone(
  */
 function DevelopersSheet({ onClose }: { onClose(): void }) {
   const { t } = useLingui()
+  // M2: il rimando apre la finestra «Server MCP»
+  const setMcpOpen = useStore((s) => s.setMcpOpen)
   const [query, setQuery] = useState('')
   const [registry, setRegistry] = useState<AppsRegistryResult[] | null>(null)
   const [registryFailed, setRegistryFailed] = useState(false)
@@ -502,7 +406,20 @@ function DevelopersSheet({ onClose }: { onClose(): void }) {
               qui — per la maggior parte delle persone c'è il «Connetti» delle
               app dell'elenco; le due strade non insieme */}
           <ComposioKeySection />
-          <ManualServers />
+          {/* M2 (fase beta12-correzioni): i server MCP manuali stanno nella
+              finestra «Server MCP» (menu dell'account) — qui solo il rimando,
+              ogni cosa in un posto solo */}
+          <div className="space-y-1">
+            <p className="text-[13px] font-medium"><Trans>Server MCP personalizzato</Trans></p>
+            <p className="text-xs text-muted-foreground"><Trans>I server MCP aggiunti a mano stanno nella finestra «Server MCP»: la apri dal menu del tuo account, sotto Skill.</Trans></p>
+            <button
+              className="rounded-full bg-foreground px-3.5 py-1.5 text-xs font-medium text-background transition hover:opacity-90"
+              onClick={() => { onClose(); setMcpOpen(true) }}
+              data-testid="developers-open-mcp"
+            >
+              <Trans>Apri la finestra Server MCP</Trans>
+            </button>
+          </div>
           <GatewayTab />
           <MarketplaceTab />
           <ClientMetadataUrlRow />
@@ -730,6 +647,14 @@ export function AppsView({ embedded = false }: { embedded?: boolean }) {
     setDetailId(appsOpenApp)
     useStore.setState({ appsOpenApp: null })
   }, [appsOpenApp])
+  // M2 (fase beta12-correzioni): il rimando della finestra «Server MCP» apre
+  // questa finestra col foglio «Per sviluppatori» GIÀ aperto (si consuma qui)
+  const appsOpenDevelopers = useStore((s) => s.appsOpenDevelopers)
+  useEffect(() => {
+    if (!appsOpenDevelopers) return
+    setDevelopersOpen(true)
+    useStore.setState({ appsOpenDevelopers: false })
+  }, [appsOpenDevelopers])
   const [accountOpen, setAccountOpen] = useState(false)
   const [overflowOpen, setOverflowOpen] = useState(false)
   // P4: le righe con un flusso in corso, per id ('login' → 'app' da sole)
