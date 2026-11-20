@@ -40,7 +40,7 @@ import { findRegistryEntry, fetchRegistryEntries } from '../main/connectors/regi
 import { setConnectorsSearchRunner } from '../main/connectors/search-runtime'
 import { setInstallDeps } from '../main/connectors/install-bridge'
 import { getConnectorsKey } from './keychain'
-import { sandboxMode } from '../main/sandbox'
+import { sandboxMode, boxShellEgressOf } from '../main/sandbox'
 import { spawn } from 'node:child_process'
 import { createPresence, mainAgentOf } from './presence'
 // fase locale (L2/L3): il modello integrato — fatti macchina e ciclo di vita
@@ -593,6 +593,9 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
     hasUi: () => server.hasUi(),
     // fase box-container (BX1): boxMode — il computer dei bot, qualunque motore
     dockerMode: () => sandboxMode() === 'box',
+    // N1 (fase mcp-egress-sicurezza): il motore garantisce che il proxy è
+    // l'unica uscita? Con Docker (uscita libera) i server npm non partono
+    npmEgressGuaranteed: () => boxShellEgressOf() === 'none',
     dataDir,
     // fase rilascio (A7): il percorso di docker risolto (PATH minimo di launchd)
     runDocker: (argv) =>

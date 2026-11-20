@@ -493,6 +493,7 @@ describe('M2/M3: server di PLUGIN — Connetti dalla scheda Installati e ${VAR} 
       },
       hasUi: () => true,
       dockerMode: () => false,
+      npmEgressGuaranteed: () => true,
       dataDir: () => tmp,
       onChange: () => undefined
     }, getSetting, setSetting)

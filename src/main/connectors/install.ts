@@ -26,6 +26,9 @@ import type { McpServerConfig } from '../mcp'
 // fase mcp-setup ritocchi (R1): il prefisso stabile degli strumenti
 import { toolSlugKeeping } from '../mcp/slug'
 import { boxHomePath, dockerRmDirArgv } from '../sandbox/docker-argv'
+// N1 (fase mcp-egress-sicurezza): la frase del rifiuto dei server npm quando
+// il motore non garantisce il recinto (uscita di rete libera)
+import { NPM_SERVERS_EGRESS_REFUSED } from '../sandbox/box-egress'
 import { createOAuthProvider, authorizeWithLoopback } from './oauth-provider'
 import type { ConnectorsSecretStore } from './sealed-store'
 import {
@@ -110,6 +113,12 @@ export interface InstallDeps {
   openExternal(url: string): Promise<void>
   hasUi(): boolean
   dockerMode(): boolean
+  /**
+   * N1 (fase mcp-egress-sicurezza): il motore del box garantisce che il proxy
+   * è l'unica uscita (rete interna)? Con l'uscita libera («direct») i server
+   * npm non verificati non si propongono e non partono.
+   */
+  npmEgressGuaranteed(): boolean
   /** la dir dati dell'installazione (<dataDir>/plugins/…) */
   dataDir(): string
   /** runner docker (cp/chmod/rm nel box), iniettabile */
@@ -147,6 +156,10 @@ export async function buildMcpServerCard(
   // fiducia «non verificato», gli host che potrà raggiungere e il modulo
   // delle variabili; si installa SOLO al clic dell'utente
   if (parsed.kind === 'npm') {
+    // N1 (fase mcp-egress-sicurezza): con l'uscita di rete «direct» (Docker)
+    // il recinto del proxy è un consiglio, non un muro — NESSUNA card, il
+    // rifiuto in parole torna al bot (PRIMA di leggere il registro)
+    if (!deps.npmEgressGuaranteed()) return { ok: false, error: NPM_SERVERS_EGRESS_REFUSED }
     let info: NpmPackageInfo
     try {
       info = await (deps.findNpmPackage ?? fetchNpmPackageInfo)(parsed.name, parsed.version)
@@ -537,6 +550,10 @@ export async function installMcpServer(
   // agli host dichiarati, MAI sul Mac (niente ripiego silenzioso)
   if (parsed.kind === 'npm') {
     if (!deps.dockerMode()) return { ok: false, error: HOST_MODE_DISABLED }
+    // N1 (fase mcp-egress-sicurezza): la card può essere nata col recinto e
+    // il motore essere passato a Docker nel frattempo — l'installazione si
+    // rifiuta in parole, NESSUN avvio possibile
+    if (!deps.npmEgressGuaranteed()) return { ok: false, error: NPM_SERVERS_EGRESS_REFUSED }
     let info: NpmPackageInfo
     try {
       info = await (deps.findNpmPackage ?? fetchNpmPackageInfo)(parsed.name, parsed.version)

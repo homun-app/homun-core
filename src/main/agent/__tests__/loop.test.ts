@@ -6139,6 +6139,7 @@ describe('fase 13: add_mcp_server / install_plugin / find_tools / result MCP', (
       openExternal: async () => undefined,
       hasUi: () => true,
       dockerMode: () => false,
+      npmEgressGuaranteed: () => true,
       dataDir: () => TMP,
       onChange: () => undefined
     })

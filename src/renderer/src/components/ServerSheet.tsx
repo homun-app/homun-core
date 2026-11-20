@@ -136,6 +136,12 @@ export function ServerSheet({ sv, onDone }: { sv: ServerSheetInfo; onDone(): voi
         )}
       </div>
 
+      {/* N1 (fase mcp-egress-sicurezza): l'errore dell'ultima prova in parole —
+          es. il motore del box non garantisce il recinto e il server non parte */}
+      {sv.stateStatus === 'error' && sv.stateError && (
+        <p className="text-[12px] leading-snug text-destructive" data-testid="server-sheet-error">{sv.stateError}</p>
+      )}
+
       {/* il modulo M3, quando serve; collegato e senza coda: niente (R5 —
           lo stato in alto dice già «Connessa») */}
       {setupLoaded && setup && setup.needsSetup && (

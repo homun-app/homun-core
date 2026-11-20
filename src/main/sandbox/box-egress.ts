@@ -23,6 +23,24 @@ export function boxShellEgress(engine: 'apple-container' | 'docker', network: 'b
 }
 
 /**
+ * N1 (fase mcp-egress-sicurezza): il motore GARANTISCE che il proxy di uscita
+ * è l'unica via? Solo con 'none' (rete interna del box) il recinto dei server
+ * npm è un muro; con 'direct' il processo può aprire connessioni proprie e
+ * l'allowlist del proxy resta un consiglio.
+ */
+export function npmEgressGuaranteedBy(egress: ShellEgress): boolean {
+  return egress === 'none'
+}
+
+/**
+ * N1: la frase del rifiuto, in parole (bot, card e foglio del server). Con
+ * Docker il computer isolato ha internet libero: i server npm non verificati
+ * non partono.
+ */
+export const NPM_SERVERS_EGRESS_REFUSED =
+  'With the Docker engine the isolated computer has unrestricted internet: unverified npm servers do not start. Use the Apple engine, or import the server from Cursor, Claude or Zcode.'
+
+/**
  * AH6 (fase aiutanti): la riga UNICA che dice al modello che i comandi del
  * box non escono su internet — nella descrizione di run-command e nel prompt.
  */

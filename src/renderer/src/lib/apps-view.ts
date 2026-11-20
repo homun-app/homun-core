@@ -21,6 +21,8 @@ export interface InstalledServerLike {
   needsAuth?: { kind: string; keys: string[] } | null
   /** fase mcp-setup (M6.1): lo stato dell'ultima prova (connectors.state) */
   stateStatus?: string
+  /** N1 (fase mcp-egress-sicurezza): l'errore dell'ultima prova, in parole (il foglio lo mostra) */
+  stateError?: string
   source?: { kind?: string; name?: string } | null
 }
 

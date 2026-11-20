@@ -1489,7 +1489,9 @@ export function buildApiMethods(
       const mcpMod = await mcp()
       const { installedPlugins } = await import('../main/connectors/install')
       const { getSetting } = store
-      const states = getSetting<Record<string, { status?: string }>>('connectors.state', {})
+      // N1 (fase mcp-egress-sicurezza): anche l'errore dell'ultima prova — il
+      // foglio del server dice PERCHÉ non parte (es. motore senza recinto)
+      const states = getSetting<Record<string, { status?: string; error?: string }>>('connectors.state', {})
       // M2: il bottone di un server OAuth in needs_auth dice "Connetti" se non
       // ha MAI avuto token (plugin appena installato) e "Riconnetti" se la
       // sessione è scaduta — i token, quando ci sono, stanno nello store cifrato
@@ -1504,7 +1506,8 @@ export function buildApiMethods(
         // fase mcp-setup (M6.1): lo stato dell'ULTIMA PROVA del server — la
         // riga della finestra App dice «Connessa» solo se è davvero partito
         const stateStatus = states[s.id]?.status
-        servers.push({ ...s, needsReauth, stateStatus, ...(neverAuthorized !== undefined ? { neverAuthorized } : {}) })
+        const stateError = states[s.id]?.error
+        servers.push({ ...s, needsReauth, stateStatus, stateError, ...(neverAuthorized !== undefined ? { neverAuthorized } : {}) })
       }
       // punto 4: "nuova versione disponibile" se lo sha del marketplace è
       // cambiato rispetto a quello installato (aggiornare = nuova card)

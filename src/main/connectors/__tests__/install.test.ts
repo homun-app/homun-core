@@ -61,6 +61,7 @@ function makeDeps(over: Partial<InstallDeps> = {}): InstallDeps {
     openExternal: async () => undefined,
     hasUi: () => true,
     dockerMode: () => true,
+    npmEgressGuaranteed: () => true,
     dataDir: () => DATA,
     onChange: () => undefined,
     ...over
@@ -646,6 +647,7 @@ describe('plugin: card, installazione, disinstallazione', () => {
       openExternal: async () => undefined,
       hasUi: () => true,
       dockerMode: () => false, // test senza docker: la copia nel box si salta
+      npmEgressGuaranteed: () => true,
       dataDir: () => DATA,
       onChange: () => undefined
     }
@@ -937,6 +939,7 @@ describe('L5: copia del plugin nel box — sequenza, esiti, ripristino', () => {
       openExternal: async () => undefined,
       hasUi: () => true,
       dockerMode: () => true,
+      npmEgressGuaranteed: () => true,
       dataDir: () => DATA,
       runDocker,
       onChange: () => undefined
@@ -1096,6 +1099,7 @@ describe('M1/M2/M3: linear, github, terraform — i .mcp.json veri del marketpla
       openExternal: async () => { opened++ },
       hasUi: () => true,
       dockerMode: () => false, // plugin http-only: nessuna copia nel box
+      npmEgressGuaranteed: () => true,
       dataDir: () => DATA,
       onChange: () => undefined
     }

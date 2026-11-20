@@ -41,6 +41,7 @@ function makeDeps(over: Partial<InstallDeps> = {}): InstallDeps {
     openExternal: async () => undefined,
     hasUi: () => true,
     dockerMode: () => true,
+    npmEgressGuaranteed: () => true,
     dataDir: () => DATA,
     onChange: () => undefined,
     ...over

@@ -35,6 +35,10 @@ import { COMPOSIO_MULTI_EXECUTE_TOOL, forceSyncResponseToWorkbenchOff } from '..
 import { boxOwnerOf, ensureBoxContainer, ensureBotHome } from '../sandbox'
 // E4 (fase mcp-env): la rete del box (il gateway Apple decide l'indirizzo del proxy)
 import { sandboxNetwork } from '../sandbox'
+// N1 (fase mcp-egress-sicurezza): i server npm non verificati partono solo se
+// il motore garantisce che il proxy è l'unica uscita
+import { boxShellEgressOf } from '../sandbox'
+import { NPM_SERVERS_EGRESS_REFUSED } from '../sandbox/box-egress'
 import type { ToolDef } from '../agent/llm'
 // fase 17c (C3/C5): lo stato needs_auth che la UI mostra è nel catalogo UI; trustKind per la vista Installati
 import { uiText } from '../ui-language'
@@ -307,6 +311,19 @@ function markNeedsAuth(cfg: McpServerConfig, message: string): void {
 }
 
 /**
+ * N1 (fase mcp-egress-sicurezza): l'ultima prova del server è FALLITA per un
+ * motivo che l'utente deve vedere (es. il motore non garantisce il recinto) —
+ * lo stato 'error' col messaggio arriva al foglio del server.
+ */
+function markStateError(cfg: McpServerConfig, message: string): void {
+  const id = cfg.catalogId ?? cfg.id
+  if (!cfg.catalogId && !cfg.source) return
+  const all = getSetting<Record<string, Record<string, unknown>>>('connectors.state', {})
+  const cur = (all[id] ?? {}) as Record<string, unknown>
+  setSetting('connectors.state', { ...all, [id]: { ...cur, status: 'error', error: message } })
+}
+
+/**
  * E4 (fase mcp-env): l'env di USCITA di un server npm nel box — il proxy
  * per-server (allowlist letta a OGNI richiesta: registry.npmjs.org sparisce
  * da solo appena l'installazione è avvenuta), l'indirizzo come lo vede il
@@ -344,6 +361,15 @@ async function connect(cfg: McpServerConfig): Promise<Client> {
   const client = new Client({ name: 'sandbot', version: '0.1.0' })
   if (cfg.transport === 'stdio') {
     if (cfg.box) {
+      // N1 (fase mcp-egress-sicurezza): un server npm NON VERIFICATO parte
+      // solo se il motore garantisce che il proxy di uscita è l'unica via
+      // (rete interna del box). Con Docker (uscita libera) il rifiuto è in
+      // parole, PRIMA di ogni exec — e lo stato del connettore lo dice, così
+      // il foglio del server lo mostra.
+      if (cfg.egress && boxShellEgressOf() !== 'none') {
+        markStateError(cfg, NPM_SERVERS_EGRESS_REFUSED)
+        throw new Error(NPM_SERVERS_EGRESS_REFUSED)
+      }
       // fase 13: server stdio di registro/plugin — gira NEL BOX (docker exec),
       // mai sul Mac; le env col solo NOME in argv, i valori nell'env del figlio.
       // L4: il box esiste PRIMA dell'exec (container, poi home, poi exec — la
