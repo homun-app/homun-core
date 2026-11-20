@@ -5,6 +5,26 @@ pubblicata finisce nel corpo della GitHub Release (da cui l'app mostra il
 «cosa cambia» quando propone un aggiornamento). Formato: `## [x.y.z] — data`,
 sezioni H2 e un punto per riga.
 
+## [0.3.1001-beta.13] — 2026-11-20
+
+Collegare i tuoi strumenti è più facile da trovare.
+
+### Novità
+
+- **«Server MCP» ha una finestra sua,** nel menu in basso accanto a
+  «Skill». Se usi già Cursor o Claude, sono gli stessi server: li
+  aggiungi qui con lo stesso comando o lo stesso indirizzo.
+- **Se un'app non c'è nel catalogo, il bot non si arrende:** ti chiede se
+  hai un server MCP per quel servizio e ti porta con un bottone dove
+  aggiungerlo.
+
+### Correzioni
+
+- **Il campo di scrittura non si deforma più con i testi lunghi:** da due
+  righe in su il testo va a tutta larghezza e i bottoni scendono sotto.
+- **Nella barra di sinistra chi sta lavorando sale in cima,** subito dopo
+  chi aspetta te.
+
 ## [0.3.1001-beta.12] — 2026-11-20
 
 La barra di sinistra rifinita.
