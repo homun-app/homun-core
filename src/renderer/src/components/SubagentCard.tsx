@@ -53,6 +53,9 @@ export function SubagentCard({ entry }: { entry: TranscriptEntry }) {
   const subagents = useStore((s) => s.subagents)
   const openSubagent = useStore((s) => s.openSubagent)
   const stopSubagent = useStore((s) => s.stopSubagent)
+  // P4 (fase uso-permessi): «Decidi» apre il centro «Da approvare» SU quella
+  // richiesta — l'utente decide senza aprire l'aiutante
+  const setApprovalsOpen = useStore((s) => s.setApprovalsOpen)
   const meta = (entry.meta ?? {}) as Partial<SendMessageMeta>
   const message = meta.message as Extract<SendMessagePayload, { type: 'subagent' }> | undefined
   // AH3: l'attività corrente del figlio (gli eventi activity arrivano per il
@@ -102,6 +105,26 @@ export function SubagentCard({ entry }: { entry: TranscriptEntry }) {
           <p className="mt-0.5 text-[11px] text-muted-foreground" data-testid="aiutante-attivita">
             {i18n.t(activityPhrase(activity, 'present', i18n.locale === 'en' ? 'en' : 'it'))}
           </p>
+        )}
+        {/* P4 (fase uso-permessi): l'aiutante che aspetta una decisione si VEDE
+            qui, nella chat del padre — «aspetta te» (lo stato della barra) con
+            la FRASE della richiesta e «Decidi» che apre il centro su di essa */}
+        {waiting && (sub?.pendingApprovals?.length ?? 0) > 0 && (
+          <div className="mt-2 flex items-start justify-between gap-2 rounded-[12px] bg-waiting/10 px-3 py-2" data-testid="card-aiutante-aspetta-te">
+            <div className="min-w-0">
+              <p className="text-[13px] font-semibold text-waiting"><Trans>aspetta te</Trans></p>
+              <p className="mt-0.5 line-clamp-2 text-xs text-foreground/80">
+                {sub!.pendingApprovals![0]!.content}
+              </p>
+            </div>
+            <button
+              className="shrink-0 self-center rounded-[10px] bg-foreground px-3 py-1.5 text-sm font-semibold text-background transition hover:opacity-90"
+              data-testid="aiutante-decidi"
+              onClick={() => setApprovalsOpen(true, String(sub!.pendingApprovals![0]!.meta?.approvalId ?? ''))}
+            >
+              <Trans>Decidi</Trans>
+            </button>
+          </div>
         )}
         <div className="mt-2 flex gap-2">
           <button
