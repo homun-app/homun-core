@@ -35,6 +35,8 @@ import { appLocationAction, proposeMoveToApplications, setAppNeedsMove, appNeeds
 import { stopRunningDaemon } from './daemon-client'
 // SV4 (fase schermo-vivo): la finestra PiP
 import { PipManager, type PipWindowHandle } from './pip'
+// W1 (fase avvio-finestra): la porta UNICA della finestra principale
+import { createMainWindowManager } from './main-window'
 import { UPDATE_CHANNEL_SETTING, parseUpdateChannel } from '../shared/update-channel'
 import { safeStorageBackendForEnv } from '../daemon/master-keys'
 
@@ -83,12 +85,9 @@ if (isDaemonMode(process.argv)) {
     app.quit()
   } else {
     app.on('second-instance', () => {
-      for (const w of BrowserWindow.getAllWindows()) {
-        if (!w.isDestroyed()) {
-          w.show()
-          w.focus()
-        }
-      }
+      // W1 (fase avvio-finestra): SOLO la principale — si ricrea se chiusa e
+      // non si toccano le altre finestre (PiP, aggiornamento, offscreen)
+      showMainWindow()
     })
 
     // fase rilascio (A1): il client del daemon lancia process.execPath con
@@ -100,17 +99,21 @@ if (isDaemonMode(process.argv)) {
     const preloadPath = join(__dirname, '../preload/index.cjs')
     const preload = existsSync(preloadPath) ? preloadPath : join(__dirname, '../preload/index.js')
 
-    let mainWindow: BrowserWindow | undefined
+    // W1 (fase avvio-finestra): la principale vive nel manager — UNA porta
+    // sola (showMainWindow: crea se manca, restore+show+focus altrimenti) e
+    // getMainWindow che torna SOLO lei, mai la PiP né le altre finestre
+    const mainWindows = createMainWindowManager<BrowserWindow>(createWindow)
 
     function getMainWindow(): BrowserWindow | undefined {
-      return mainWindow ?? BrowserWindow.getAllWindows()[0]
+      return mainWindows.getMainWindow()
+    }
+
+    function showMainWindow(): BrowserWindow {
+      return mainWindows.showMainWindow()
     }
 
     function openAgent(agentId: string): void {
-      const win = getMainWindow()
-      if (!win) return
-      win.show()
-      win.focus()
+      const win = showMainWindow()
       win.webContents.send('sandbot:event', { type: 'open-agent', agentId })
     }
 
@@ -161,7 +164,7 @@ if (isDaemonMode(process.argv)) {
       }
     }
 
-    function createWindow(): void {
+    function createWindow(): BrowserWindow {
       const win = new BrowserWindow({
         width: 1200,
         height: 800,
@@ -178,8 +181,8 @@ if (isDaemonMode(process.argv)) {
           webviewTag: false
         }
       })
-      mainWindow = win
-      win.on('closed', () => { if (mainWindow === win) mainWindow = undefined })
+      // W1: la chiusura si comunica al manager (che dimentica SOLO la principale)
+      win.on('closed', () => mainWindows.forget(win))
 
       // A5: niente finestre/popup dal renderer; i link http(s) al browser
       // esterno SOLO dopo il controllo dello schema (mai file:, javascript:,
@@ -215,6 +218,7 @@ if (isDaemonMode(process.argv)) {
       } else {
         void win.loadURL('homun://app/')
       }
+      return win
     }
 
     app.whenReady().then(async () => {
@@ -293,14 +297,8 @@ if (isDaemonMode(process.argv)) {
           for (const w of BrowserWindow.getAllWindows()) w.webContents.send('sandbot:event', e)
         },
         focusMain: (agentId) => {
-          let win = getMainWindow()
-          if (!win) {
-            createWindow()
-            win = getMainWindow()
-          }
-          if (!win) return
-          win.show()
-          win.focus()
+          // W1: anche «Riporta in Homun» dalla PiP passa dalla porta unica
+          const win = showMainWindow()
           win.webContents.send('sandbot:event', { type: 'open-computer', agentId })
         },
         // U3: la principale non si nasconde MAI staccando — la sonda lo legge
@@ -310,7 +308,15 @@ if (isDaemonMode(process.argv)) {
           return wins.length === 0 ? true : wins.some((w) => w.isVisible() && !w.webContents.getURL().includes('/pip/'))
         }
       })
-      registerIpc(client, () => BrowserWindow.getAllWindows(), pip)
+      // W1 (fase avvio-finestra): le finestre per IPC (dialoghi, notifiche,
+      // broadcast eventi) con la PRINCIPALE PER PRIMA — prima il ripiego
+      // getAllWindows()[0] poteva dare la PiP o una finestra dell'aggiornamento
+      const windowsForIpc = (): BrowserWindow[] => {
+        const main = getMainWindow()
+        const all = BrowserWindow.getAllWindows()
+        return main ? [main, ...all.filter((w) => w !== main)] : all
+      }
+      registerIpc(client, windowsForIpc, pip)
       // A8: prima di installare un aggiornamento il daemon si ferma BENE.
       // RV1 (fase beta.2): lo STESSO meccanismo dello spostamento in
       // Applicazioni (stopRunningDaemon: la RPC daemon:restart di A2 senza
@@ -344,7 +350,8 @@ if (isDaemonMode(process.argv)) {
       // finestra e basta: la UI resta in caricamento finché il daemon non
       // dice lo stato dell'onboarding.
       createWindow()
-      createTray(getMainWindow)
+      // W1: il tray riceve la PORTA UNICA (crea la principale se manca)
+      createTray(showMainWindow)
       refreshTray()
 
       // B1 (fase beta.4): il gancio di prova delle sonde — con
@@ -357,12 +364,14 @@ if (isDaemonMode(process.argv)) {
       app.setAsDefaultProtocolClient('sandbot')
       app.on('open-url', (_e, url) => {
         const m = url.match(/^sandbot:\/\/agent\/([A-Za-z0-9_-]+)$/)
-        if (m) openAgent(m[1]!)
-        else { getMainWindow()?.show(); getMainWindow()?.focus() }
+        if (m) openAgent(m[1])
+        else showMainWindow()
       })
 
+      // W1: dal Dock la principale torna SEMPRE — anche se esistono altre
+      // finestre (PiP, aggiornamento, offscreen) che prima tenevano il conteggio
       app.on('activate', () => {
-        if (BrowserWindow.getAllWindows().length === 0) createWindow()
+        showMainWindow()
       })
 
       // RV1 (fase beta.2): l'app va in Applicazioni PRIMA di avviare il daemon

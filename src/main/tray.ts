@@ -14,7 +14,10 @@ const statusGlyph: Record<AgentStatus, string> = {
 }
 
 let tray: Tray | null = null
-let getWindow: () => BrowserWindow | undefined = () => undefined
+// W1 (fase avvio-finestra): il tray riceve la PORTA UNICA della principale —
+// la mostra e la RICREA se è stata chiusa (prima faceva solo show() di quella
+// trovata, e con la principale chiusa non succedeva niente)
+let openMain: () => BrowserWindow | undefined = () => undefined
 
 function icon(): Electron.NativeImage {
   // B2 (fase beta10-correzioni): l'icona del tray è la STESSA forma dell'app
@@ -36,10 +39,8 @@ export function refreshTray(): void {
   const items = agents.map((a) => ({
     label: `${a.unread > 0 ? '● ' : ''}${a.name} ${statusGlyph[a.status] ?? ''}`.trim(),
     click: () => {
-      const win = getWindow()
+      const win = openMain()
       if (win) {
-        win.show()
-        win.focus()
         win.webContents.send('sandbot:event', { type: 'open-agent', agentId: a.id })
       }
     }
@@ -48,16 +49,17 @@ export function refreshTray(): void {
     Menu.buildFromTemplate([
       ...items,
       { type: 'separator' as const },
-      // fase 17a: i testi del tray nella lingua attiva del main
-      { label: mainStrings().tray.open, click: () => { const w = getWindow(); w?.show(); w?.focus() } },
+      // fase 17a: i testi del tray nella lingua attiva del main. W1: la voce
+      // «Apri Homun» usa la porta unica (ricrea la principale se chiusa)
+      { label: mainStrings().tray.open, click: () => { openMain() } },
       { label: mainStrings().tray.quit, click: () => app.quit() }
     ])
   )
   tray.setToolTip(mainStrings().tooltip)
 }
 
-export function createTray(getMainWindow: () => BrowserWindow | undefined): void {
-  getWindow = getMainWindow
+export function createTray(openMainWindow: () => BrowserWindow | undefined): void {
+  openMain = openMainWindow
   tray = new Tray(icon())
   tray.setToolTip('Homun')
   refreshTray()
