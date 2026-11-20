@@ -543,6 +543,18 @@ try {
   const leggi = toolNames.find((t) => t.includes('leggi_servizio'))
   const negato = toolNames.find((t) => t.includes('prova_negato'))
   if (!leggi || !negato) throw new Error('strumenti del server non trovati: ' + JSON.stringify(toolNames))
+  // T5 (fase web-strategia, corsa vista dal vivo): il messaggio [sistema]
+  // del collegamento (M5.2) apre un turno tutto suo quando il bot è libero —
+  // si aspetta che sia FINITO prima di mettere in coda le chiamate degli
+  // strumenti, altrimenti è lui a consumarle (e l'attesa dell'approvazione
+  // verrebbe soprammessa dal turno vero)
+  for (let i = 0; i < 60; i++) {
+    const es = await rpc(cdp, `getEntries(${JSON.stringify(agentId)})`).catch(() => [])
+    const sysIdx = (es ?? []).findIndex((e) => e.kind === 'message' && String(e.content).startsWith('[sistema]'))
+    const done = sysIdx >= 0 && (es ?? []).slice(sysIdx).some((e) => e.kind === 'event' && String(e.content).includes('Turno completato'))
+    if (done) break
+    await sleep(500)
+  }
   script.queue = [
     { tool: leggi, args: {} },
     { tool: negato, args: {} },

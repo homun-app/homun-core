@@ -483,8 +483,8 @@ try {
   // =========== 3. la coda: il modulo con i dati della Cassaforte (Q2) ===========
   const CAPO_MUSEO = ['You are Capo', 'delega-museo']
   const TURISMO_MODULO = ['You are Turismo', 'modulo-museo']
-  callTool('send_to_agent', { agentId: turismo.id, text: 'modulo-museo: compila il modulo di prenotazione del museo con i miei dati della Cassaforte' }, CAPO_MUSEO)
-  callTool('send_to_agent', { agentId: turismo.id, text: 'modulo-museo: compila il modulo di prenotazione del museo con i miei dati della Cassaforte' }, CAPO_MUSEO)
+  callTool('send_to_agent', { agentId: turismo.id, text: 'modulo-museo: compila il modulo di prenotazione del museo (https://spa.example/login) con i miei dati della Cassaforte' }, CAPO_MUSEO)
+  callTool('send_to_agent', { agentId: turismo.id, text: 'modulo-museo: compila il modulo di prenotazione del museo (https://spa.example/login) con i miei dati della Cassaforte' }, CAPO_MUSEO)
   // il turno di Turismo (di squadra): apre la pagina (attivazione POI
   // esecuzione della facciata browser), poi il fill (anche lui due passaggi:
   // attivazione POI esecuzione del gruppo credentials)

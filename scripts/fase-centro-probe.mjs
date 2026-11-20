@@ -457,9 +457,9 @@ try {
     return { totale: pids.length, chiusi: toKill.length }
   }
   for (const [bot, msg] of [
-    [turismo, 'modulo-museo: compila il modulo del museo con i miei dati della Cassaforte'],
-    [alloggio, 'verifica-alloggio: scrivi la mia email nel modulo di verifica e invialo'],
-    [archivio, 'fatture-archivio: scrivi il nome Rossi Srl nel modulo della pagina e invialo'],
+    [turismo, 'modulo-museo: compila il modulo del museo (https://spa.example/login) con i miei dati della Cassaforte'],
+    [alloggio, 'verifica-alloggio: scrivi la mia email nel modulo di verifica (https://spa.example/prenota) e invialo'],
+    [archivio, 'fatture-archivio: scrivi il nome Rossi Srl nel modulo della pagina (https://spa.example/prenota) e invialo'],
     [solleciti, 'sollecito-rossi: manda la email di sollecito a Rossi Srl']
   ]) {
     if (!(await selectBot(bot.name))) throw new Error(`selezione di ${bot.name} non riuscita`)
@@ -477,7 +477,7 @@ try {
   await sleep(1_000)
   // prima il FIGLIO (quel turno finisce in fretta), poi il login (che mette
   // il turno in pausa sulla card: i messaggi dopo resterebbero in coda)
-  for (const msg of ['compito-figlio: lancia l\'aiutante per il controllo della fattura', 'login-linkedin: accedi a LinkedIn col mio login della Cassaforte']) {
+  for (const msg of ['compito-figlio: lancia l\'aiutante per il controllo della fattura', 'login-linkedin: accedi a LinkedIn (https://spa.example/login) col mio login della Cassaforte']) {
     if (!(await selectBot(ricerche.name))) throw new Error('selezione di Ricerche non riuscita')
     await sendMessage(msg)
     await sleep(400)
