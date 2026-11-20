@@ -255,6 +255,21 @@ export function formatSubagentBrief(title: string, brief: string, lang?: 'it' | 
   ].join('\n')
 }
 
+/**
+ * P5 (fase uso-permessi): il brief GREZZO del messaggio di apertura del figlio
+ * diventa titolo e corpo per la card «Compito affidato da <bot>» — niente tag
+ * visibili in chat. Riconosce SOLO l'output di formatSubagentBrief (il tag di
+ * apertura in testa e la chiusura su riga propria); null su ogni altro testo.
+ * La regola per il modello e la riga della lingua NON sono corpo del compito.
+ */
+export function parseSubagentBrief(content: string): { title: string; body: string } | null {
+  const m = /^<brief titolo="([^"\n]*)">\n([\s\S]*?)\n<\/brief>\n/.exec(content)
+  if (!m) return null
+  const body = m[2]!.trim()
+  if (!body) return null
+  return { title: m[1]!.trim(), body }
+}
+
 /** Il messaggio del padre a un figlio (message_subagent), come evidenza delimitata. */
 export function formatSubagentParentMessage(parentName: string, text: string): string {
   return [

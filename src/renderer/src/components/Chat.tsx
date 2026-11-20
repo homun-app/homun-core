@@ -41,6 +41,9 @@ import { McpServerCard, PluginCard, McpWindowCard } from './ConnectorCards13'
 import { RuleProposalCard } from './RuleProposalCard'
 import { TaskCard } from './TaskCard'
 import { SubagentCard } from './SubagentCard'
+// P5 (fase uso-permessi): il brief del figlio come card «Compito affidato da <bot>»
+import { BriefCard } from './BriefCard'
+import { parseSubagentBrief } from '../../../shared/agent-message'
 // fase chat-limiti (CL3): la galleria delle foto mostrate dal tool show_images
 import { ImageGalleryCard } from './ImageGalleryCard'
 import { DocumentCard, ChartCard, FillCard, SecureInputCard, ContactCard } from './LibraryCards'
@@ -849,7 +852,14 @@ function EntryRow({ entry, repeat = 1, showReasoning, debugSteps }: { entry: Tra
       // B2 (fase beta.4): il prompt NASCOSTO della presentazione del bot nuovo
       // non compare in chat: la domanda arriva come card ask_user
       if (opening.kind === 'hidden') return null
-      // B3 (fase beta.4): la risposta a una domanda NON si ripete come bolla
+      // P5 (fase uso-permessi): il brief di apertura del sottoagente è una card
+      // «Compito affidato da <bot>» (titolo, prime righe, mostra tutto) — mai
+      // la bola scura dell'utente con il XML grezzo
+      if (entry.role === 'user') {
+        const brief = parseSubagentBrief(entry.content)
+        if (brief) return <BriefCard entry={entry} />
+      }
+      // B3 (fase beta.4): la risposta a una domanda NON si ripete come bola
       // utente separata — resta la riga della card, riapribile
       if (entry.role === 'user' && hidesUserBubble(entry)) return null
       return entry.role === 'user' ? (

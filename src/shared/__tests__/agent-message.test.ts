@@ -245,3 +245,25 @@ describe('fase 12: i blocchi evidenza dei sottoagenti', () => {
     expect(text.split('</risultati_sottoagenti>').length - 1).toBe(1)
   })
 })
+
+// ---- P5 (fase uso-permessi): il brief si legge come un compito, non come XML ----
+
+import { parseSubagentBrief } from '../agent-message'
+
+describe('P5: parseSubagentBrief — il brief grezzo diventa titolo e righe', () => {
+  it('il messaggio di apertura del figlio: titolo dal tag e corpo fra i tag, senza la regola', () => {
+    const text = formatSubagentBrief('Cerca i biglietti', 'Trova i treni Roma–Torino di domattina.\nSolo biglietti di andata.\nRiporta prezzo e orario.', 'it')
+    const parsed = parseSubagentBrief(text)
+    expect(parsed).not.toBeNull()
+    expect(parsed!.title).toBe('Cerca i biglietti')
+    expect(parsed!.body).toContain('Trova i treni Roma–Torino di domattina.')
+    // la regola del brief (per il modello) NON è corpo del compito
+    expect(parsed!.body).not.toContain('wake_parent')
+  })
+
+  it('null su qualunque altro messaggio: la bolla dell\'utente resta solo per i messaggi dell\'utente', () => {
+    expect(parseSubagentBrief('cerca i biglietti per favore')).toBeNull()
+    expect(parseSubagentBrief('<messaggio_da_agente nome="X">\nciao\n</messaggio_da_agente>')).toBeNull()
+    expect(parseSubagentBrief('')).toBeNull()
+  })
+})

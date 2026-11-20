@@ -1915,6 +1915,14 @@ msgstr "Fill in the \"{0}\" login on <0>{1}</0>?"
 msgid "card.fillAsk"
 msgstr "Fill in the “{label}” login on {origin}?"
 
+#: src/renderer/src/components/BriefCard.tsx
+msgid "Compito affidato"
+msgstr "Assigned task"
+
+#: src/renderer/src/components/BriefCard.tsx
+msgid "Compito affidato da {parentName}"
+msgstr "Task assigned by {parentName}"
+
 #. placeholder {0}: row.app.name
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "Completa il login di {0} nel browser…"
@@ -5019,6 +5027,10 @@ msgstr "Show the bot panel"
 msgid "Mostra il ragionamento in chat"
 msgstr "Show reasoning in chat"
 
+#: src/renderer/src/components/BriefCard.tsx
+msgid "mostra meno"
+msgstr "show less"
+
 #: src/renderer/src/App.tsx
 #: src/renderer/src/components/SkillsWindow.tsx
 msgid "Mostra nel Finder"
@@ -5036,6 +5048,10 @@ msgstr "Show all ({0})"
 #: src/renderer/src/components/Sidebar.tsx
 msgid "Mostra tutti ({total})"
 msgstr "Show all ({total})"
+
+#: src/renderer/src/components/BriefCard.tsx
+msgid "mostra tutto"
+msgstr "show all"
 
 #: src/renderer/src/components/settings/EngineSection.tsx
 msgid "Motore"
