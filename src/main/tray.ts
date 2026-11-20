@@ -1,8 +1,8 @@
 // Tray menubar — lista bot con unread e stato, come il tray dell'originale.
 import { Tray, Menu, app, BrowserWindow, nativeImage } from 'electron'
-import { join } from 'node:path'
 import { listAgents } from './store/db'
 import { mainStrings } from './i18n'
+import { TRAY_TEMPLATE_16_PNG_BASE64, TRAY_TEMPLATE_32_PNG_BASE64 } from './tray-icon.generated'
 import type { AgentStatus } from '../shared/types'
 
 const statusGlyph: Record<AgentStatus, string> = {
@@ -17,16 +17,15 @@ let tray: Tray | null = null
 let getWindow: () => BrowserWindow | undefined = () => undefined
 
 function icon(): Electron.NativeImage {
-  // icona minimale 16x16 disegnata a runtime (nessuna risorsa da embeddere)
-  const img = nativeImage.createFromBuffer(
-    Buffer.from(
-      'iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAmklEQVR4nKWTwQ3DIAxFn9k/pM5QhWi' +
-      'dITN0A5jZwdKFlFBCQkrpaP/8SccHOpN7nZk3b+oBIBJAIAmBQEwmzQQ2msaYSa2U0rhBRBdIk6Zp' +
-      'SssGWmeMMeustFoBoChKAZqmnWarRSIi2gOstcbK6QNTNB3HcbRNK5xtWyedgU2n0wCoC0LUdZ2Q' +
-      'Pj0kSRL0+wOSSqUih8NhBEHwn4TNZvOfO1nvP4aNCwAAAABJRU5ErkJggg==',
-      'base64'
-    )
-  )
+  // B2 (fase beta10-correzioni): l'icona del tray è la STESSA forma dell'app
+  // (variante B: quadrato arrotondato pieno, due occhi buco) in versione
+  // template monocroma — 16 px + la @2x da 32, come vuole macOS. I PNG escono
+  // da scripts/genera-icone.mjs partendo da build/icon.svg.
+  const img = nativeImage.createFromBuffer(Buffer.from(TRAY_TEMPLATE_16_PNG_BASE64, 'base64'))
+  img.addRepresentation({
+    scaleFactor: 2,
+    buffer: Buffer.from(TRAY_TEMPLATE_32_PNG_BASE64, 'base64')
+  })
   img.setTemplateImage(true)
   return img
 }

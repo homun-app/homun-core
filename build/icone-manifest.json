@@ -1,0 +1,22 @@
+{
+  "generato": "scripts/genera-icone.mjs — Electron del repo, finestra nascosta, canvas→PNG deterministico",
+  "occhiScala": 1,
+  "iconSvg": {
+    "sha256": "b1eda2f048acef3ae00a81ea225977491f84692b4d64f8b3d78412116731d76d"
+  },
+  "iconPng": {
+    "sha256": "c48c95815ffea4750bf9e52f62cf03e737dd6627e9a9c65b291fb6cbc6149839",
+    "width": 1024,
+    "height": 1024
+  },
+  "tray16": {
+    "sha256": "02ce303771d01fa5ededbc31e20803e337dc5dd4af23e32baf51189770ecdacf",
+    "width": 16,
+    "height": 16
+  },
+  "tray32": {
+    "sha256": "5315094d7511132507026371cac8a687fe78bd855ca784653dbf52c8eb5d9a0b",
+    "width": 32,
+    "height": 32
+  }
+}
