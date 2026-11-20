@@ -1,32 +1,34 @@
-// Sidebar (fase 16b, S2): «chi ti risponde». Regola: chi ti risponde sta in
-// fila; chi lavora per lui sta sotto, rientrato e più piccolo. In alto solo
-// Cerca e Crea; il principale; le SQUADRE (una riga col grappolo del
-// coordinatore, i membri si aprono con ▸/▾ e restano rientrati); i BOT
-// singoli con le sezioni come titoletti; Libreria; in basso te e il bottone
-// App. Niente bordi: le superfici si distinguono coi fondi (bg-muted per la
-// selezione, angoli 14 px), i divisori tra le colonne restano sottili.
-// STRETTA (76 px): trascinando il bordo destro sotto i 200 px o con ⌘\ —
-// solo mascotte nello stesso ordine, contatore nero per chi ti aspetta,
-// tooltip e aria-label «Nome, stato». La scelta si ricorda (localStorage).
-// correzioni 2 (Q1/Q3): la larghezza la decide layoutFor (rotaia anche da
-// sola sotto AUTO_RAIL_BELOW, senza toccare la preferenza); Cerca e Crea
-// salgono sulla riga comune a y 12, il primo contenuto parte a 64 px e la
-// riga dell'utente in fondo ha centro 46 px come la pillola della chat.
+// Sidebar — fase barra-sobria (tavola 6): la barra per MOLTI progetti.
+// Testo e pochi segni: in alto le voci fisse (Nuovo, Bot con «la tua chat»,
+// Da approvare, Attività, Libreria — che salgono dal fondo); le SQUADRE col
+// robottino piccolo 16 px che vive gli stati della mascotte (R2) e si aprono
+// da sole SOLO se attive o se aspettano te, i membri rientrati col pallino
+// dell'8 px; i BOT fuori squadra col pallino del loro colore. NIENTE
+// anteprima sotto il nome: l'anteprima e lo stato vivono nel suggerimento
+// (title). Ogni sezione mostra le prime 4, poi «Mostra tutti (N)»; dentro le
+// squadre al massimo 2 membri più «Altri N» (stati salvati come teamOpen).
+// In fondo chi sei e il modello (AccountMenu). STRETTA (76 px): le voci
+// fisse come icone, le squadre col robottino, i bot come cerchio 22 px col
+// colore e l'iniziale, suggerimenti col nome. Ridimensionare, rotaia e
+// bottone accanto ai semafori restano quelli di oggi (layoutFor/⌘\).
 import { useEffect, useRef, useState } from 'react'
 import { useLingui, Trans } from '@lingui/react/macro'
 import { msg } from '@lingui/core/macro'
 import type { MessageDescriptor } from '@lingui/core'
 import { Plus, Search, Library as LibraryIcon, LayoutGrid, ChevronRight, Activity as ActivityIcon, PanelLeftClose, PanelLeftOpen, ShieldCheck } from 'lucide-react'
 import { useStore, useResolvedModel } from '../store'
-import { buildSidebarModel, collapsedVoices, teamOpenState, type SidebarModel, type SidebarTeam, type SidebarBot, type CollapsedVoice } from '../sidebar-utils'
+import {
+  buildSidebarModel, collapsedVoices, teamOpenState, teamAutoOpens, orderRows, cutRows, memberCut,
+  timeAgoShort, rowStateOf, SIDEBAR_ROW_LIMIT,
+  type SidebarModel, type SidebarTeam, type SidebarBot, type CollapsedVoice, type RowState
+} from '../sidebar-utils'
 // fase 16b correzioni 2 (Q1): il massimo del trascinamento e i limiti della barra
 import { sidebarMaxFor, SIDEBAR_MIN, AUTO_RAIL_BELOW, TRAFFIC_LIGHT_INSET, type LayoutResult } from '../layout'
 import { avatarOf } from '../../../shared/avatar'
 import type { Agent } from '../../../shared/types'
 import { Bot } from '../bot/Bot'
 import { useBotInfo } from '../bot/use-bot'
-// fase 16b (S3.3): la mezza riga d'attività dello stato breve dei membri
-import { activityPhrase } from '../lib/activity'
+import { botStateFor, isStreaming, type BotState } from '../bot/bot-state'
 import { i18n } from '../lib/i18n'
 import type { UiTheme } from '../theme'
 import { NewBotDialog } from './BotDialogs'
@@ -73,6 +75,7 @@ export function SidebarToggleButton({ layout }: { layout: LayoutResult }) {
 /** La larghezza sotto cui la barra diventa STRETTA (S2). */
 export const SIDEBAR_COLLAPSE_BELOW = 200
 const TEAM_OPEN_PREFIX = 'sandbot:sidebar.teamOpen.'
+const SECTION_OPEN_PREFIX = 'sandbot:sidebar.sectionOpen.'
 
 const readLS = (key: string): string | null => {
   try {
@@ -88,69 +91,35 @@ const writeLS = (key: string, value: string): void => {
     // localStorage non disponibile: la scelta dura finché la finestra vive
   }
 }
-/** fase 16b correzioni (P3): riaprire una squadra cancella il ricordo della chiusura */
-const removeLS = (key: string): void => {
-  try {
-    localStorage.removeItem(key)
-  } catch {
-    // come sopra: la scelta dura finché la finestra vive
-  }
-}
 
 /** Titoletto semplice e grigio, niente maiuscole (S2). */
-function Title({ children }: { children: React.ReactNode }) {
-  return <p className="px-2.5 pb-1 pt-3 text-[13px] text-muted-foreground">{children}</p>
+function Title({ children, action }: { children: React.ReactNode; action?: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between pr-1">
+      <p className="px-2.5 pb-1 pt-3 text-[13px] text-muted-foreground">{children}</p>
+      {action}
+    </div>
+  )
 }
 
 /**
- * Il grappolo della squadra: la mascotte del coordinatore + i membri piccoli.
- * Nella barra LARGA i cerchietti sporgono a destra (c'è il testo accanto);
- * con narrow (fase 16b correzioni, P3) le stesse misure stanno in un BOX di
- * 40×40 — coordinatore davanti, cerchietti dei membri in basso a destra
- * sovrapposti alla mascotte ma DENTRO il box: la voce occupa la sua altezza
- * e non tocca la voce sotto.
+ * R1 (fase barra-sobria): «Nuovo», la prima voce fissa della tavola 6. Apre
+ * SUBITO il dialogo (come il «+» della riga della ricerca, B2 fase beta.4).
  */
-function TeamCluster({ team, size = 34, narrow = false }: { team: SidebarTeam; size?: number; narrow?: boolean }) {
-  const agents = useStore((s) => s.agents)
-  const mainAgentId = useStore((s) => s.mainAgentId)
-  const effectiveMain = mainAgentId ?? agents[0]?.id ?? null
-  const coordInfo = useBotInfo(team.coordinator?.id ?? null)
-  // nel box da 40 px della barra stretta ci stanno due cerchietti e il +N;
-  // nella barra larga i cerchietti sono tre (e possono sporgere a destra)
-  const dots = team.members.slice(0, narrow ? 2 : 3)
-  const extra = team.members.length - dots.length
+function NewRow({ onNewBot }: { onNewBot(): void }) {
+  const { t } = useLingui()
   return (
-    <span
-      className="relative block shrink-0"
-      style={narrow ? { width: 40, height: 40 } : { width: size + 8, height: size + 8 }}
+    <button
+      className="flex w-full items-center gap-2.5 rounded-[14px] px-2.5 py-2 text-left text-sm text-muted-foreground transition hover:bg-muted/60 hover:text-foreground"
+      aria-label={t`Nuovo`}
+      title={t`Nuovo`}
+      onClick={onNewBot}
     >
-      {coordInfo ? (
-        <span className="absolute left-0 top-0">
-          <Bot family={coordInfo.avatar.family} color={coordInfo.avatar.color} state={coordInfo.state} size={size} track={false} dimmed={coordInfo.dimmed} />
-        </span>
-      ) : (
-        <span className="absolute left-0 top-0 grid place-items-center rounded-full bg-muted" style={{ width: size, height: size }}>
-          <span className="text-xs text-muted-foreground">{team.group.name.slice(0, 1)}</span>
-        </span>
-      )}
-      <span className={`absolute bottom-0 right-0 flex items-center ${narrow ? '' : 'translate-x-[6px]'}`}>
-        {dots.map((m, i) => {
-          const av = avatarOf(m, agents, effectiveMain)
-          return (
-            <span
-              key={m.id}
-              className="size-3.5 rounded-full ring-2 ring-card"
-              style={{ background: `var(--bot-${av.color})`, marginLeft: i === 0 ? 0 : -4 }}
-            />
-          )
-        })}
-        {extra > 0 && (
-          <span className="ml-0.5 grid h-3.5 min-w-3.5 place-items-center rounded-full bg-muted text-[9px] text-muted-foreground ring-2 ring-card">
-            +{extra}
-          </span>
-        )}
+      <span className="grid size-6 shrink-0 place-items-center">
+        <Plus className="size-4" />
       </span>
-    </span>
+      <span className="min-w-0 flex-1 truncate"><Trans>Nuovo</Trans></span>
+    </button>
   )
 }
 
@@ -158,7 +127,7 @@ function TeamCluster({ team, size = 34, narrow = false }: { team: SidebarTeam; s
  * A2 (fase centro-autorizzazioni): la voce fissa «Da approvare», in alto
  * sopra «Squadre» (tavola 4). Con 0 richieste la voce resta, senza pallino
  * e senza numero; il conteggio conta TUTTE le richieste pendenti (anche i
- * «Rimanda», che restano in attesa nel bot).
+ * «Rimanda», che restano in attesa nel bot). R1: resta terza, dopo Bot.
  */
 function ApprovalsRow() {
   const { i18n } = useLingui()
@@ -167,7 +136,7 @@ function ApprovalsRow() {
   const setApprovalsOpen = useStore((s) => s.setApprovalsOpen)
   return (
     <button
-      className={`mt-1 flex w-full items-center gap-2.5 rounded-[14px] px-2.5 py-2 text-left text-sm transition ${
+      className={`flex w-full items-center gap-2.5 rounded-[14px] px-2.5 py-2 text-left text-sm transition ${
         approvalsOpen ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/60'
       }`}
       data-testid="sidebar-approvals"
@@ -184,80 +153,112 @@ function ApprovalsRow() {
   )
 }
 
+/** Il nome dello stato della riga, per i suggerimenti (R2 lo riusa per aria-label). */
+export function rowStateName(state: RowState): MessageDescriptor {
+  switch (state) {
+    case 'lavora':
+      return msg`lavora`
+    case 'aspetta-te':
+      return msg`aspetta te`
+    case 'finito':
+      return msg`finito`
+    default:
+      return msg`fermo`
+  }
+}
 
-/** La riga del bot PRINCIPALE: mascotte 40 px, nome in grassetto, stato. */
-function MainRow({ agent, childWaiting }: { agent: Agent; childWaiting?: boolean }) {
+/** Il robottino piccolo della squadra: 16 px, famiglia e colore del coordinatore. */
+function TeamRobot({ team, state }: { team: SidebarTeam; state: BotState }) {
+  const coordInfo = useBotInfo(team.coordinator?.id ?? null)
+  if (!coordInfo) {
+    return <span className="grid size-4 shrink-0 place-items-center rounded-full bg-muted text-[8px] text-muted-foreground">{team.group.name.slice(0, 1)}</span>
+  }
+  return (
+    <Bot family={coordInfo.avatar.family} color={coordInfo.avatar.color} state={state} size={16} track={false} dimmed={coordInfo.dimmed} />
+  )
+}
+
+/** Il pallino del colore del bot: decorativo, 8 px (aria-hidden). */
+function ColorDot({ agent }: { agent: Agent }) {
+  const agents = useStore((s) => s.agents)
+  const mainAgentId = useStore((s) => s.mainAgentId)
+  const av = avatarOf(agent, agents, mainAgentId ?? agents[0]?.id ?? null)
+  return (
+    <span
+      data-testid="bot-dot-color"
+      aria-hidden="true"
+      className="size-2 shrink-0 rounded-full"
+      style={{ background: `var(--bot-${av.color})` }}
+    />
+  )
+}
+
+/**
+ * La riga del bot PRINCIPALE: l'unica con la mascotte (22 px) e «la tua
+ * chat» a destra. L'anteprima e lo stato vivono nel suggerimento.
+ */
+function MainRow({ agent, childWaiting, preview, state }: { agent: Agent; childWaiting: boolean; preview: string; state: BotState }) {
   const { i18n } = useLingui()
   const info = useBotInfo(agent.id)
   const select = useStore((s) => s.select)
   const activeId = useStore((s) => s.activeId)
   const openGroupId = useStore((s) => s.openGroupId)
-  const previews = useStore((s) => s.previews)
-  // A2: il numero delle richieste del bot (le sue, senza squadra)
-  const pending = useStore((s) => s.approvalsBotCount[agent.id] ?? 0)
   if (!info) return null
-  const preview = previews[agent.id] || info.statusText
+  const tip = [preview || i18n.t(info.statusText), i18n.t(rowStateName(rowStateOf(state, childWaiting)))].filter(Boolean).join(' · ')
   return (
     <button
       onClick={() => void select(agent.id)}
-      className={`flex w-full items-center gap-3 rounded-[14px] px-2.5 py-2 text-left transition ${
+      className={`flex w-full items-center gap-2.5 rounded-[14px] px-2.5 py-2 text-left transition ${
         agent.id === activeId && openGroupId === null ? 'bg-muted' : 'hover:bg-muted/60'
       }`}
+      title={tip}
     >
-      <Bot family={info.avatar.family} color={info.avatar.color} state={childWaiting && info.state !== 'waiting' ? 'waiting' : info.state} size={40} track={false} dimmed={info.dimmed} label={agent.name} />
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-[15px] font-semibold leading-tight">{agent.name}</span>
-        <span className="block truncate text-[13px] text-muted-foreground">
-          {typeof preview === 'string' ? preview : i18n.t(preview)}
-        </span>
-      </span>
-      {pending > 0 && (
-        <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs font-semibold text-waiting" aria-label={i18n.t(msg`${pending} azioni da approvare`)}>{pending}</span>
-      )}
-      {agent.unread > 0 && <span className="size-2 shrink-0 rounded-full bg-foreground" aria-label={i18n.t(msg`non letto`)} />}
+      <Bot family={info.avatar.family} color={info.avatar.color} state={state} size={22} track={false} dimmed={info.dimmed} label={agent.name} />
+      <span className="min-w-0 flex-1 truncate text-[15px] font-semibold leading-tight">{agent.name}</span>
+      <span className="shrink-0 text-xs text-muted-foreground"><Trans>la tua chat</Trans></span>
     </button>
   )
 }
 
-/** La riga UNA della squadra + i membri aperti, rientrati (S2). */
-function TeamRows({ team }: { team: SidebarTeam }) {
+/** Il tempo a destra della riga: «4m», «1g» (o il segno di stato, in R2). */
+function RightSide({ state, lastAt, now }: { state: BotState; lastAt: number | null; now: number }) {
+  if (rowStateOf(state) !== 'fermo') return null
+  const d = timeAgoShort(lastAt, now)
+  return <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{i18n.t(d)}</span>
+}
+
+/** La riga UNA della squadra + i membri aperti, rientrati (tavola 6). */
+function TeamRows({ team, states, lastSendAt, now }: { team: SidebarTeam; states: Record<string, BotState>; lastSendAt: Record<string, number>; now: number }) {
   const { i18n } = useLingui()
-  const agents = useStore((s) => s.agents)
   const openGroupId = useStore((s) => s.openGroupId)
   const openGroup = useStore((s) => s.openGroup)
-  const select = useStore((s) => s.select)
-  const coordInfo = useBotInfo(team.coordinator?.id ?? null)
-  // fase 16b correzioni (P3): le squadre sono APERTE di default — si ricorda
-  // solo la chiusura scelta dall'utente ('0'), riaprire cancella il ricordo
-  const [open, setOpen] = useState(() => teamOpenState(readLS(`${TEAM_OPEN_PREFIX}${team.group.id}`)))
-  // lo stato più importante: chi ti aspetta vince; poi il coordinatore al lavoro
-  const waitingMember = [team.coordinator, ...team.members].find((a) => a && a.status === 'paused-for-approval')
-  // Q2 (fase squadra): il numero delle azioni in attesa nella coda della squadra
-  const pendingCount = useStore((s) => s.groupPendingCount[team.group.id] ?? 0)
-  const coordBusy = coordInfo?.state === 'thinking' || coordInfo?.state === 'speaking' || coordInfo?.state === 'listening'
-  const sub = pendingCount > 0
-    ? { cls: 'text-waiting font-semibold', text: i18n.t(msg`${pendingCount} azioni da approvare`) }
-    : waitingMember
-      ? { cls: 'text-waiting font-semibold', text: i18n.t(msg`${waitingMember.name} ti aspetta`) }
-    : coordBusy && team.coordinator
-      ? { cls: 'text-muted-foreground', text: i18n.t(msg`${team.coordinator.name} scrive…`) }
-      : {
-          cls: 'text-muted-foreground',
-          text: team.coordinator ? i18n.t(msg`Risponde ${team.coordinator.name}`) : i18n.t(msg`solo tu`)
-        }
+  // R1: le squadre sono CHIUSE di default — si aprono da sole solo l'attiva
+  // o quella che aspetta te; l'utente comanda col suo stato salvato
+  const [open, setOpen] = useState(() => teamOpenState(readLS(`${TEAM_OPEN_PREFIX}${team.group.id}`), teamAutoOpens(team, openGroupId)))
+  const [allMembers, setAllMembers] = useState(() => readLS(`${SECTION_OPEN_PREFIX}members.${team.group.id}`) === '1')
+  const members = orderRows(
+    team.members.map((m) => ({ member: m, waiting: states[m.id] === 'waiting', lastAt: lastSendAt[m.id] ?? m.createdAt }))
+  )
+  const cut = memberCut(members, allMembers)
+  const botStateOfTeam: BotState =
+    team.state === 'aspetta-te' ? 'waiting' : team.state === 'finito' ? 'happy' : 'idle'
+  const tip = team.group.description
+    ? `${team.group.name} · ${team.group.description}`
+    : team.group.name
   return (
     <div>
       <div className={`flex items-center gap-2 rounded-[14px] pl-2 pr-1.5 text-left transition ${openGroupId === team.group.id ? 'bg-muted' : 'hover:bg-muted/60'}`}>
         <button
-          className="flex min-w-0 flex-1 items-center gap-3 py-2 text-left"
+          className="flex min-w-0 flex-1 items-center gap-2.5 py-2 text-left"
           onClick={() => openGroup(team.group.id)}
-          title={team.group.description}
+          title={tip}
         >
-          <TeamCluster team={team} />
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-[15px] font-semibold leading-tight">{team.group.name}</span>
-            <span className={`block truncate text-[13px] ${sub.cls}`}>{sub.text}</span>
-          </span>
+          <TeamRobot team={team} state={botStateOfTeam} />
+          <span className="min-w-0 flex-1 truncate text-[15px] leading-tight">{team.group.name}</span>
+          {team.waitingCount > 0 && (
+            <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs font-semibold text-waiting" aria-label={i18n.t(msg`${team.waitingCount} ti aspettano`)}>{team.waitingCount}</span>
+          )}
+          <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{i18n.t(timeAgoShort(team.lastAt, now))}</span>
         </button>
         {team.members.length > 0 && (
           <button
@@ -267,9 +268,7 @@ function TeamRows({ team }: { team: SidebarTeam }) {
             onClick={() => {
               const next = !open
               setOpen(next)
-              const key = `${TEAM_OPEN_PREFIX}${team.group.id}`
-              if (next) removeLS(key)
-              else writeLS(key, '0')
+              writeLS(`${TEAM_OPEN_PREFIX}${team.group.id}`, next ? '1' : '0')
             }}
           >
             <ChevronRight className={`size-4 transition-transform ${open ? 'rotate-90' : ''}`} />
@@ -277,81 +276,88 @@ function TeamRows({ team }: { team: SidebarTeam }) {
         )}
       </div>
       {open && (
-        <div className="flex flex-col pl-7">
-          {team.members.map((m) => (
-            <MemberRow key={m.id} member={m} />
+        <div className="flex flex-col pl-6">
+          {cut.visible.map(({ member }) => (
+            <MemberRow key={member.id} member={member} state={states[member.id] ?? 'idle'} lastAt={lastSendAt[member.id] ?? member.createdAt} now={now} />
           ))}
+          {cut.hidden > 0 && (
+            <button
+              className="rounded-[14px] px-2 py-1.5 pl-8 text-left text-[13px] text-muted-foreground transition hover:bg-muted/60"
+              aria-expanded={allMembers}
+              onClick={() => {
+                const next = !allMembers
+                setAllMembers(next)
+                writeLS(`${SECTION_OPEN_PREFIX}members.${team.group.id}`, next ? '1' : '0')
+              }}
+            >
+              {allMembers ? i18n.t(msg`Meno`) : i18n.t(msg`Altri ${cut.hidden}`)}
+            </button>
+          )}
         </div>
       )}
     </div>
   )
 }
 
-/** Un membro della squadra, rientrato: mascotte 22 px, nome e stato breve. */
-function MemberRow({ member }: { member: Agent }) {
-  const info = useBotInfo(member.id)
-  const activity = useStore((s) => s.activity[member.id])
+/** Un membro della squadra, rientrato: pallino 8 px, nome, segno o tempo. */
+function MemberRow({ member, state, lastAt, now }: { member: Agent; state: BotState; lastAt: number; now: number }) {
   const openGroup = useStore((s) => s.openGroup)
   const select = useStore((s) => s.select)
-  if (!info) return null
-  const d: MessageDescriptor = (() => {
-    switch (info.state) {
-      case 'waiting':
-        return msg`ti aspetta`
-      case 'thinking':
-        return msg`pensa…`
-      case 'speaking':
-        return msg`scrive…`
-      case 'listening':
-        return activityPhrase(activity, 'present', i18n.locale === 'en' ? 'en' : 'it')
-      case 'happy':
-        return msg`ha finito`
-      default:
-        return msg`fermo`
-    }
-  })()
+  const previews = useStore((s) => s.previews)
+  const preview = previews[member.id]
+  const tip = [typeof preview === 'string' ? preview : preview ? i18n.t(preview) : '', i18n.t(rowStateName(rowStateOf(state)))].filter(Boolean).join(' · ')
   return (
     <button
       className="flex items-center gap-2.5 rounded-[14px] px-2 py-1.5 text-left transition hover:bg-muted/60"
       onClick={() => { openGroup(null); void select(member.id) }}
+      title={tip || member.name}
     >
-      <Bot family={info.avatar.family} color={info.avatar.color} state={info.state} size={22} track={false} dimmed={info.dimmed} />
+      <ColorDot agent={member} />
       <span className="min-w-0 flex-1 truncate text-sm">{member.name}</span>
-      <span className={`shrink-0 text-xs ${info.state === 'waiting' ? 'text-waiting font-semibold' : 'text-muted-foreground'}`}>{i18n.t(d)}</span>
+      <RightSide state={state} lastAt={lastAt} now={now} />
     </button>
   )
 }
 
-/** Un bot singolo: mascotte 36 px, nome e anteprima, senza bordi (S2). */
-function BotRow({ bot }: { bot: SidebarBot }) {
-  const { i18n } = useLingui()
+/** Un bot singolo: pallino del colore, nome, segno o tempo (tavola 6). */
+function BotRow({ bot, now }: { bot: SidebarBot; now: number }) {
   const info = useBotInfo(bot.agent.id)
   const select = useStore((s) => s.select)
   const activeId = useStore((s) => s.activeId)
   const openGroupId = useStore((s) => s.openGroupId)
   const previews = useStore((s) => s.previews)
-  // A2: il numero delle richieste del bot (le sue, senza squadra)
-  const pending = useStore((s) => s.approvalsBotCount[bot.agent.id] ?? 0)
   if (!info) return null
-  const preview = previews[bot.agent.id] || info.statusText
+  const preview = previews[bot.agent.id]
+  const tip = [
+    typeof preview === 'string' ? preview : preview ? i18n.t(preview) : i18n.t(info.statusText),
+    i18n.t(rowStateName(rowStateOf(bot.state, bot.childWaiting)))
+  ].filter(Boolean).join(' · ')
   return (
     <button
       onClick={() => void select(bot.agent.id)}
-      className={`flex w-full items-center gap-3 rounded-[14px] px-2.5 py-2 text-left transition ${
+      className={`flex w-full items-center gap-2.5 rounded-[14px] px-2.5 py-2 text-left transition ${
         bot.agent.id === activeId && openGroupId === null ? 'bg-muted' : 'hover:bg-muted/60'
       }`}
+      title={tip}
     >
-      <Bot family={info.avatar.family} color={info.avatar.color} state={bot.childWaiting && info.state !== 'waiting' ? 'waiting' : info.state} size={36} track={false} dimmed={info.dimmed} label={bot.agent.name} />
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-[15px] leading-tight">{bot.agent.name}</span>
-        <span className="block truncate text-[13px] text-muted-foreground">
-          {typeof preview === 'string' ? preview : i18n.t(preview)}
-        </span>
-      </span>
-      {pending > 0 && (
-        <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs font-semibold text-waiting" aria-label={i18n.t(msg`${pending} azioni da approvare`)}>{pending}</span>
-      )}
-      {bot.agent.unread > 0 && <span className="size-2 shrink-0 rounded-full bg-foreground" aria-label={i18n.t(msg`non letto`)} />}
+      <ColorDot agent={bot.agent} />
+      <span className="min-w-0 flex-1 truncate text-sm">{bot.agent.name}</span>
+      <RightSide state={bot.state} lastAt={bot.lastAt} now={now} />
+    </button>
+  )
+}
+
+/** «Mostra tutti (N)» / «Mostra tutte (N)» — l'espansione della sezione. */
+function ShowAllRow({ hidden, feminine, expanded, onToggle }: { hidden: number; feminine: boolean; expanded: boolean; onToggle(): void }) {
+  const { i18n } = useLingui()
+  const total = hidden + SIDEBAR_ROW_LIMIT
+  return (
+    <button
+      className="rounded-[14px] px-2.5 py-1.5 text-left text-[13px] text-muted-foreground transition hover:bg-muted/60"
+      aria-expanded={expanded}
+      onClick={onToggle}
+    >
+      {feminine ? i18n.t(msg`Mostra tutte (${total})`) : i18n.t(msg`Mostra tutti (${total})`)}
     </button>
   )
 }
@@ -369,6 +375,8 @@ function VoiceMascot({ agentId, size }: { agentId: string; size: number }) {
  * Fase 16c correzioni (R7): in ROTAI lo stesso menu pende dal bottone in
  * fondo. U2 (fase prima-release): la voce che allargava la barra è uscita
  * dal menu — allargare ha il suo bottone fisso accanto ai semafori.
+ * Fase barra-sobria (R1): nel fondo della barra larga c'è SOLO questo —
+ * «Collega app» resta nel menu (il bottone App dedicato resta in rotaia).
  */
 /** A2: la voce «Da approvare» della barra stretta, col numero delle richieste. */
 function RailApprovals() {
@@ -398,7 +406,6 @@ function AccountMenu(props?: { rail?: boolean; triggerClassName?: string }) {
   const { t } = useLingui()
   const agents = useStore((s) => s.agents)
   const mainAgentId = useStore((s) => s.mainAgentId)
-  const mainModel = useStore((s) => s.mainModel)
   const theme = useStore((s) => s.theme)
   const setTheme = useStore((s) => s.setTheme)
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
@@ -411,11 +418,7 @@ function AccountMenu(props?: { rail?: boolean; triggerClassName?: string }) {
   const resolved = useResolvedModel(main?.id ?? null)
   // U3 (fase pulizia · ritocchi): una voce che APRE una finestra (App, Skill,
   // Impostazioni) lo segna qui, e alla chiusura il menu NON riprende il focus
-  // sul suo trigger: il focus è della finestra (il campo di ricerca). Il menu
-  // Radix lo restituirebbe a fine animazione (~165 ms), sempre DOPO il frame
-  // in cui la finestra lo dà: a riportarlo indietro resta solo la trappola del
-  // dialogo, che vive di focusin — e a finestra senza focus di sistema
-  // (document.hasFocus() falso) focusin non arriva e il focus resta qui.
+  // sul suo trigger: il focus è della finestra (il campo di ricerca).
   const openedWindow = useRef(false)
   return (
     <DropdownMenu>
@@ -467,83 +470,91 @@ function AccountMenu(props?: { rail?: boolean; triggerClassName?: string }) {
   )
 }
 
+/** Il cerchio 22 px del bot nella ROTAIa: colore del bot + iniziale. */
+function RailBotCircle({ agent, state }: { agent: Agent; state: BotState }) {
+  const agents = useStore((s) => s.agents)
+  const mainAgentId = useStore((s) => s.mainAgentId)
+  const av = avatarOf(agent, agents, mainAgentId ?? agents[0]?.id ?? null)
+  const { i18n } = useLingui()
+  return (
+    <span className="relative grid shrink-0 place-items-center">
+      <span
+        data-testid="rail-bot-circle"
+        data-size="22"
+        className="grid size-[22px] place-items-center rounded-full text-[10px] font-bold text-background"
+        style={{ background: `var(--bot-${av.color})` }}
+        aria-hidden="true"
+      >
+        {agent.name.slice(0, 1).toUpperCase()}
+      </span>
+      {rowStateOf(state) !== 'fermo' && (
+        <span
+          role="img"
+          aria-label={i18n.t(rowStateName(rowStateOf(state)))}
+          data-testid="rail-state-sign"
+          className="absolute -bottom-0.5 -right-0.5 size-2 rounded-full ring-2 ring-card"
+          style={{ background: rowStateOf(state) === 'aspetta-te' ? 'var(--waiting)' : 'var(--bot-c4)' }}
+        />
+      )}
+    </span>
+  )
+}
+
 /**
- * La barra STRETTA: solo mascotte nello stesso ordine, contatore e tooltip.
- * Fase 16c correzioni (R7): sotto i bot CI SONO ANCHE il bottone «+» col
- * bottone «+» del dialogo «Nuovo» e la lente di Cerca; il bottone in
- * fondo apre il menu ACCOUNT (U2, fase prima-release: allargare la barra
- * non passa più da qui — c'è il bottone fisso accanto ai semafori).
+ * La barra STRETTA (fase barra-sobria): le voci fisse come ICONE (Nuovo, il
+ * bot principale, Da approvare, Attività, Libreria), le squadre col
+ * robottino a 16 px, i bot come cerchio 22 px nel loro colore con
+ * l'iniziale; il segno di stato in piccolo sull'angolo, i suggerimenti col
+ * nome. In fondo Cerca, App e il menu account (come oggi).
  */
 function CollapsedColumn({
   model,
+  states,
   onSearch,
   searchOpen,
   onNewBot
 }: {
   model: SidebarModel
+  states: Record<string, BotState>
   onSearch(): void
   searchOpen: boolean
   onNewBot(): void
 }) {
   const { i18n } = useLingui()
   const select = useStore((s) => s.select)
-  const activeId = useStore((s) => s.activeId)
-  const openGroupId = useStore((s) => s.openGroupId)
   const openGroup = useStore((s) => s.openGroup)
-  const openLibraryId = useStore((s) => s.openLibraryId)
-  const openLibrary = useStore((s) => s.openLibrary)
   const setActivityOpen = useStore((s) => s.setActivityOpen)
   const activityOpen = useStore((s) => s.activityOpen)
   const setAppsOpen = useStore((s) => s.setAppsOpen)
-  const agents = useStore((s) => s.agents)
   const voices = collapsedVoices(model)
-  const statusLabel = (st: CollapsedVoice['status']): string =>
-    st === 'waiting' ? i18n.t(msg`ti aspetta`) : st === 'busy' ? i18n.t(msg`sta lavorando`) : i18n.t(msg`fermo`)
-  let separated = false
+  const stateName = (st: RowState): string => i18n.t(rowStateName(st))
   return (
     <>
       {/* fase 16b correzioni 2 (Q3): in rotaia i semafori occupano la cima —
-          la fascia di trascinamento finisce dove inizia la prima mascotte */}
+          la fascia di trascinamento finisce dove inizia la prima voce */}
       <div className="drag-region h-12 shrink-0" aria-hidden="true" />
       <div className="flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto scroll-thin px-2 pt-2">
-        {/* A2 (fase centro-autorizzazioni): la voce «Da approvare» anche in rotaia */}
+        {/* le voci fisse come icone, nell'ordine della barra larga — il «+»
+            apre SUBITO il dialogo «Nuovo» (B2 fase beta.4) */}
+        <button
+          className="grid size-9 shrink-0 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
+          aria-label={i18n.t(msg`Crea`)}
+          title={i18n.t(msg`Crea`)}
+          onClick={onNewBot}
+        >
+          <Plus className="size-4" />
+        </button>
+        {model.main && (
+          <button
+            className="relative my-0.5 shrink-0"
+            aria-label={`${model.main.name}, ${i18n.t(msg`la tua chat`)}` }
+            title={model.main.name}
+            onClick={() => { openGroup(null); void select(model.main!.id) }}
+          >
+            <RailBotCircle agent={model.main} state={states[model.main.id] ?? 'idle'} />
+          </button>
+        )}
         <RailApprovals />
-        <span className="my-1 h-px w-6 shrink-0 bg-border/60" aria-hidden="true" />
-        {voices.map((v) => {
-          const newSection = v.kind !== 'main' && !separated
-          if (newSection) separated = true
-          return (
-            <div key={v.key} className="contents">
-              {newSection && <span className="my-1 h-px w-6 shrink-0 bg-border/60" aria-hidden="true" />}
-              <button
-                className="relative my-0.5 shrink-0"
-                aria-label={`${v.name}, ${statusLabel(v.status)}`}
-                title={`${v.name}, ${statusLabel(v.status)}`}
-                onClick={() => {
-                  const team = model.teams.find((t) => `g${t.group.id}` === v.key)
-                  if (team) openGroup(team.group.id)
-                  else {
-                    const agent = [model.main, ...model.bots.map((b) => b.agent)].find((a) => a?.id === v.key)
-                    if (agent) { openGroup(null); void select(agent.id) }
-                  }
-                }}
-              >
-                {v.kind === 'team' ? (
-                  <TeamCluster team={model.teams.find((t) => `g${t.group.id}` === v.key)!} narrow />
-                ) : (
-                  <VoiceMascot agentId={v.key} size={v.kind === 'main' ? 42 : 34} />
-                )}
-                {v.counter > 0 && (
-                  <span className="absolute -right-1 -top-1 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-foreground px-1 text-[11px] font-bold text-background">
-                    {v.counter}
-                  </span>
-                )}
-              </button>
-            </div>
-          )
-        })}
-        <span className="my-1 h-px w-6 shrink-0 bg-border/60" aria-hidden="true" />
-        {/* fase 16c (C5): la voce Attività, sopra la Libreria */}
         <button
           className={`grid size-9 shrink-0 place-items-center rounded-full transition ${activityOpen ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
           aria-label={i18n.t(msg`Attività`)}
@@ -556,10 +567,39 @@ function CollapsedColumn({
           className="grid size-9 shrink-0 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
           aria-label={i18n.t(msg`Libreria`)}
           title={i18n.t(msg`Libreria`)}
-          onClick={() => { setActivityOpen(false); openLibraryId === null ? openLibrary('') : openLibrary(null) }}
+          onClick={() => { const s = useStore.getState(); s.openLibraryId === null ? s.openLibrary('') : s.openLibrary(null) }}
         >
           <LibraryIcon className="size-4" />
         </button>
+        <span className="my-1 h-px w-6 shrink-0 bg-border/60" aria-hidden="true" />
+        {voices.filter((v) => v.kind !== 'main').map((v: CollapsedVoice) => (
+          <button
+            key={v.key}
+            className="relative my-0.5 shrink-0"
+            aria-label={`${v.name}, ${stateName(v.status)}`}
+            title={v.name}
+            onClick={() => {
+              const team = model.teams.find((t) => `g${t.group.id}` === v.key)
+              if (team) openGroup(team.group.id)
+              else {
+                const agent = model.bots.map((b) => b.agent).find((a) => a.id === v.key)
+                if (agent) { openGroup(null); void select(agent.id) }
+              }
+            }}
+          >
+            {v.kind === 'team' ? (
+              <TeamRobot team={model.teams.find((t) => `g${t.group.id}` === v.key)!} state={model.teams.find((t) => `g${t.group.id}` === v.key)!.state === 'aspetta-te' ? 'waiting' : 'idle'} />
+            ) : (
+              <RailBotCircle agent={model.bots.find((b) => b.agent.id === v.key)!.agent} state={states[v.key] ?? 'idle'} />
+            )}
+            {v.counter > 0 && (
+              <span className="absolute -right-1 -top-1 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-foreground px-1 text-[11px] font-bold text-background">
+                {v.counter}
+              </span>
+            )}
+          </button>
+        ))}
+        <span className="my-1 h-px w-6 shrink-0 bg-border/60" aria-hidden="true" />
         {/* R7: la lente di Cerca — apre la ricerca sospesa in alto a sinistra */}
         <button
           className={`grid size-9 shrink-0 place-items-center rounded-full transition ${searchOpen ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
@@ -568,16 +608,6 @@ function CollapsedColumn({
           onClick={onSearch}
         >
           <Search className="size-4" />
-        </button>
-        {/* B2 (fase beta.4): «+» che apre SUBITO il dialogo «Nuovo», come la
-            barra larga (nessuna funzione sparisce sotto i 1000 px) */}
-        <button
-          className="grid size-9 shrink-0 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
-          aria-label={i18n.t(msg`Crea`)}
-          title={i18n.t(msg`Crea`)}
-          onClick={onNewBot}
-        >
-          <Plus className="size-4" />
         </button>
         <div className="flex-1" />
         <button
@@ -614,7 +644,12 @@ export function Sidebar({ layout }: { layout: LayoutResult }) {
   const openLibrary = useStore((s) => s.openLibrary)
   const activityOpen = useStore((s) => s.activityOpen)
   const setActivityOpen = useStore((s) => s.setActivityOpen)
-  const setAppsOpen = useStore((s) => s.setAppsOpen)
+  const previews = useStore((s) => s.previews)
+  const turnEnds = useStore((s) => s.turnEnds)
+  const lastDeltaAt = useStore((s) => s.lastDeltaAt)
+  const typingAgentId = useStore((s) => s.typingAgentId)
+  const nowTick = useStore((s) => s.nowTick)
+  const lastSendAt = useStore((s) => s.lastSendAt)
   // fase 16b correzioni 2 (Q1): le preferenze vivono nello store (localStorage
   // lì); la barra resa è quella di layoutFor — la rotaia automatica sotto
   // AUTO_RAIL_BELOW non tocca la preferenza dell'utente
@@ -630,6 +665,14 @@ export function Sidebar({ layout }: { layout: LayoutResult }) {
   const windowWidth = useStore((s) => s.windowWidth)
   const railForced = windowWidth < AUTO_RAIL_BELOW
   const dragging = useRef(false)
+  // R1: le sezioni espanse («Mostra tutti») si ricordano come teamOpen
+  const [sectionsOpen, setSectionsOpen] = useState<Record<string, boolean>>({})
+  const sectionOpen = (key: string): boolean => sectionsOpen[key] ?? readLS(`${SECTION_OPEN_PREFIX}${key}`) === '1'
+  const toggleSection = (key: string): void => {
+    const next = !sectionOpen(key)
+    setSectionsOpen((s) => ({ ...s, [key]: next }))
+    writeLS(`${SECTION_OPEN_PREFIX}${key}`, next ? '1' : '0')
+  }
 
   // ⌘\ apre/chiude la barra stretta; la scelta si ricorda
   useEffect(() => {
@@ -679,9 +722,27 @@ export function Sidebar({ layout }: { layout: LayoutResult }) {
   const waitingOnChildren = new Set<string>(
     activeId && subagents.some((s) => (s.pendingApprovals?.length ?? 0) > 0) ? [activeId] : []
   )
-  const model = buildSidebarModel(agents, groups, mainAgentId, query, waitingOnChildren)
-  const noSection = model.bots.filter((b) => !b.section)
+  // R1 (fase barra-sobria): gli stati della mascotte risolti UNA volta per
+  // tutte (la stessa funzione pura di useBotInfo) — il modello ordina per
+  // «prima chi aspetta te» e le righe disegnano il segno giusto
+  const now = nowTick || Date.now()
+  const states: Record<string, BotState> = {}
+  for (const a of agents) {
+    states[a.id] = botStateFor({
+      status: a.status,
+      streaming: isStreaming(lastDeltaAt[a.id], now),
+      userTyping: typingAgentId === a.id,
+      turnEnd: turnEnds[a.id] ?? null,
+      now
+    })
+  }
+  const lastSendAtMap: Record<string, number> = lastSendAt
+  const model = buildSidebarModel(agents, groups, mainAgentId, query, waitingOnChildren, { states, lastSendAt: lastSendAtMap })
+  const orderedBots = orderRows(model.bots)
+  const noSection = cutRows(orderRows(orderedBots.filter((b) => !b.section)), sectionOpen('bots'))
   const sections = [...new Set(model.bots.map((b) => b.section).filter((s): s is string => !!s))]
+  const teamsCut = cutRows(model.teams, sectionOpen('teams'))
+  const mainPreview = model.main ? previews[model.main.id] : undefined
 
   return (
     <aside
@@ -696,6 +757,7 @@ export function Sidebar({ layout }: { layout: LayoutResult }) {
       {collapsed ? (
         <CollapsedColumn
           model={model}
+          states={states}
           searchOpen={searchOpen}
           onSearch={() => {
             setSearchOpen((v) => !v)
@@ -710,7 +772,7 @@ export function Sidebar({ layout }: { layout: LayoutResult }) {
               allineati a destra — a sinistra restano i semafori di macOS.
               K4 (fase rilascio — correzioni): il loro spazio è la STESSA
               costante (TRAFFIC_LIGHT_INSET) che lascia libero la riga del
-              rinnovo in cima alla finestra */}
+              rinnovo in cima alla finestra. Ricerca: resta nel punto di oggi. */}
           <div className="drag-region h-[60px] shrink-0">
             <div className="mt-3 flex h-9 items-center justify-end gap-2 px-3" style={{ paddingLeft: TRAFFIC_LIGHT_INSET }}>
               <button
@@ -724,8 +786,8 @@ export function Sidebar({ layout }: { layout: LayoutResult }) {
               >
                 <Search className="size-4" />
               </button>
-              {/* B2 (fase beta.4): il «+» apre SUBITO il dialogo «Nuovo» (solo
-                  nome e aspetto; la squadra nasce in chat, non da un menu) */}
+              {/* B2 (fase beta.4): il «+» apre SUBITO il dialogo «Nuovo» (come
+                  la voce Nuovo della barra, che la tavola 6 mette in cima) */}
               <button
                 className="no-drag grid size-9 place-items-center rounded-full bg-muted/60 text-muted-foreground transition hover:text-foreground"
                 aria-label={t`Crea`}
@@ -755,35 +817,30 @@ export function Sidebar({ layout }: { layout: LayoutResult }) {
             </div>
           )}
 
-          {/* pt-1 (Q3): il principale parte a 64 px come il primo messaggio */}
+          {/* pt-1 (Q3): il primo contenuto parte a 64 px come il primo messaggio.
+              Le voci fisse in cima, nell'ordine della tavola 6: Nuovo, Bot (la
+              tua chat), Da approvare, Attività, Libreria (salgono dal fondo) */}
           <nav className="flex-1 space-y-0.5 overflow-y-auto scroll-thin px-2 pb-2 pt-1">
-            {model.main && <MainRow agent={model.main} childWaiting={model.mainWaiting} />}
+            <NewRow onNewBot={() => setNewBotOpen(true)} />
+            {model.main && (
+              <MainRow
+                agent={model.main}
+                childWaiting={model.mainWaiting}
+                preview={typeof mainPreview === 'string' ? mainPreview : mainPreview ? i18n.t(mainPreview) : ''}
+                state={states[model.main.id] ?? 'idle'}
+              />
+            )}
             <ApprovalsRow />
-            {model.teams.length > 0 && <Title><Trans>Squadre</Trans></Title>}
-            {model.teams.map((team) => (
-              <TeamRows key={team.group.id} team={team} />
-            ))}
-            {(noSection.length > 0 || sections.length > 0) && <Title><Trans>Bot</Trans></Title>}
-            {noSection.map((b) => (
-              <BotRow key={b.agent.id} bot={b} />
-            ))}
-            {sections.map((sec) => (
-              <div key={sec}>
-                <Title>{sec}</Title>
-                {model.bots.filter((b) => b.section === sec).map((b) => (
-                  <BotRow key={b.agent.id} bot={b} />
-                ))}
-              </div>
-            ))}
-            {/* fase 16c (C5/C6): Attività sopra la Libreria, entrambe voci globali */}
             <button
-              className={`mt-2 flex w-full items-center gap-2.5 rounded-[14px] px-2.5 py-2 text-left text-sm transition ${
+              className={`flex w-full items-center gap-2.5 rounded-[14px] px-2.5 py-2 text-left text-sm transition ${
                 activityOpen ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/60'
               }`}
               onClick={() => { setActivityOpen(!activityOpen); if (!activityOpen) openLibrary(null) }}
             >
-              <ActivityIcon className="size-4" />
-              <Trans>Attività</Trans>
+              <span className="grid size-6 shrink-0 place-items-center">
+                <ActivityIcon className="size-4" />
+              </span>
+              <span className="min-w-0 flex-1 truncate"><Trans>Attività</Trans></span>
             </button>
             <button
               className={`flex w-full items-center gap-2.5 rounded-[14px] px-2.5 py-2 text-left text-sm transition ${
@@ -791,31 +848,67 @@ export function Sidebar({ layout }: { layout: LayoutResult }) {
               }`}
               onClick={() => { openLibraryId === null ? openLibrary('') : openLibrary(null); if (openLibraryId === null) setActivityOpen(false) }}
             >
-              <LibraryIcon className="size-4" />
-              <Trans>Libreria</Trans>
+              <span className="grid size-6 shrink-0 place-items-center">
+                <LibraryIcon className="size-4" />
+              </span>
+              <span className="min-w-0 flex-1 truncate"><Trans>Libreria</Trans></span>
             </button>
+
+            {model.teams.length > 0 && (
+              <Title action={
+                /* B2 (fase beta.4): la squadra NASCE IN CHAT, non da un menu —
+                   il «+» della tavola 6 apre il dialogo «Nuovo» del BOT */
+                <button
+                  className="mr-1 grid size-6 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                  aria-label={t`Crea`}
+                  title={t`Crea`}
+                  onClick={() => setNewBotOpen(true)}
+                >
+                  <Plus className="size-3.5" />
+                </button>
+              }><Trans>Squadre</Trans></Title>
+            )}
+            {teamsCut.visible.map((team) => (
+              <TeamRows key={team.group.id} team={team} states={states} lastSendAt={lastSendAtMap} now={now} />
+            ))}
+            {teamsCut.hidden > 0 && (
+              <ShowAllRow hidden={teamsCut.hidden} feminine expanded={sectionOpen('teams')} onToggle={() => toggleSection('teams')} />
+            )}
+
+            {(noSection.hidden > 0 || noSection.visible.length > 0 || sections.length > 0) && <Title><Trans>Bot</Trans></Title>}
+            {noSection.visible.map((b) => (
+              <BotRow key={b.agent.id} bot={b} now={now} />
+            ))}
+            {noSection.hidden > 0 && (
+              <ShowAllRow hidden={noSection.hidden} feminine={false} expanded={sectionOpen('bots')} onToggle={() => toggleSection('bots')} />
+            )}
+            {sections.map((sec) => {
+              const rows = orderRows(model.bots.filter((b) => b.section === sec))
+              const cut = cutRows(rows, sectionOpen(`section.${sec}`))
+              return (
+                <div key={sec}>
+                  <Title>{sec}</Title>
+                  {cut.visible.map((b) => (
+                    <BotRow key={b.agent.id} bot={b} now={now} />
+                  ))}
+                  {cut.hidden > 0 && (
+                    <ShowAllRow hidden={cut.hidden} feminine={false} expanded={sectionOpen(`section.${sec}`)} onToggle={() => toggleSection(`section.${sec}`)} />
+                  )}
+                </div>
+              )
+            })}
           </nav>
 
-          {/* fase 16b correzioni 2 (Q3): riga alta 60 con 16 di margine sotto —
-              lo stesso centro verticale della pillola del campo di scrittura.
-              fase skill · sfoglia (B1): «Skill» non è più un bottone qui
-              accanto ad App: sta nel menu dell'account, sotto Collega app */}
-          <div className="mb-4 flex h-[60px] shrink-0 items-center gap-1.5 px-3">
+          {/* fase barra-sobria (R1): in fondo CHI SEI, il modello e
+              l'ingranaggio — tutto nell'AccountMenu (tavola 6) */}
+          <div className="mb-4 flex h-[60px] shrink-0 items-center px-3">
             <AccountMenu />
-            <button
-              className="grid size-9 shrink-0 place-items-center rounded-full bg-muted/60 text-muted-foreground transition hover:text-foreground"
-              aria-label={t`App`}
-              title={t`App`}
-              onClick={() => setAppsOpen(true)}
-            >
-              <LayoutGrid className="size-4" />
-            </button>
           </div>
         </>
       )}
 
       {/* fase 16c correzioni (R7): la ricerca della rotaia, sospesa in alto a
-          sinistra (sopra le mascotte); filtra le voci come nella barra larga */}
+          sinistra (sopra le voci); filtra le voci come nella barra larga */}
       {collapsed && searchOpen && (
         <div className="absolute left-2 top-14 z-30 w-60">
           <input

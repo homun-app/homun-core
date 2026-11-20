@@ -6,6 +6,7 @@
 import type { MessageDescriptor } from '@lingui/core'
 import { msg } from '@lingui/core/macro'
 import type { Agent, GroupInfo, TranscriptEntry } from '../../shared/types'
+import type { BotState } from './bot/bot-state'
 
 /** L'anteprima della sidebar: testo di dati oppure un descriptor da tradurre. */
 export type SidebarPreview = string | MessageDescriptor
@@ -44,6 +45,11 @@ export interface SidebarTeam {
   waitingCount: number
   /** l'attività recente: l'ultimo messaggio, o la creazione */
   lastAt: number
+  /**
+   * R1/R2 (fase barra-sobria): lo stato AGGREGATO della squadra — l'ordine
+   * della priorità è «aspetta te» > «lavora» > «finito» > «fermo».
+   */
+  state: RowState
 }
 
 /** Un bot singolo della barra (né principale, né in squadra, né figlio). */
@@ -56,6 +62,12 @@ export interface SidebarBot {
    * barra lo segna «ti aspetta» anche se il suo turno è finito.
    */
   childWaiting: boolean
+  /** R1 (fase barra-sobria): la riga lo mostra col pallino, non più con la mascotte */
+  waiting: boolean
+  /** lo stato della mascotte, per il segno a destra (R2) e l'ordinamento */
+  state: BotState
+  /** l'ultima attività: lastSendAt, o la creazione (per «4m», «1g») */
+  lastAt: number | null
 }
 
 /** Il modello completo: principale, squadre (ordinate), bot singoli. */
@@ -86,7 +98,13 @@ export function buildSidebarModel(
   mainAgentId: string | null,
   query = '',
   /** AH2 (fase aiutanti): bot con un FIGLIO fermo su una card («ti aspetta») */
-  waitingOnChildren: ReadonlySet<string> = new Set()
+  waitingOnChildren: ReadonlySet<string> = new Set(),
+  /**
+   * R1 (fase barra-sobria): gli stati della mascotte e i tempi dell'ultima
+   * attività, già risolti da chi chiama (botStateFor/lastSendAt dello store).
+   * Senza opzioni si torna alla sola lettura dello status, come prima.
+   */
+  opts: { states?: Readonly<Record<string, BotState>>; lastSendAt?: Readonly<Record<string, number>> } = {}
 ): SidebarModel {
   // i FIGLI (sottoagenti) non compaiono MAI nella barra
   const bots = agents.filter((a) => !a.parentId)
@@ -107,14 +125,25 @@ export function buildSidebarModel(
     teams.push({
       group: g, coordinator, members,
       waiting: waitingCount > 0, waitingCount,
-      lastAt: g.lastMessageAt ?? g.createdAt
+      lastAt: g.lastMessageAt ?? g.createdAt,
+      state: teamRowState(resolved.map((a) => stateOfAgent(a, opts.states)))
     })
   }
   // prima le squadre con qualcuno che ti aspetta, poi per attività recente
   teams.sort((a, b) => Number(b.waiting) - Number(a.waiting) || b.lastAt - a.lastAt)
 
   const free = bots.filter((a) => a.id !== main?.id && !inTeams.has(a.id))
-  const botsOut: SidebarBot[] = free.map((agent) => ({ agent, section: agent.section || null, childWaiting: waitingOnChildren.has(agent.id) }))
+  const botsOut: SidebarBot[] = free.map((agent) => {
+    const state = stateOfAgent(agent, opts.states)
+    return {
+      agent,
+      section: agent.section || null,
+      childWaiting: waitingOnChildren.has(agent.id),
+      state,
+      waiting: waitingOnChildren.has(agent.id) || state === 'waiting',
+      lastAt: opts.lastSendAt?.[agent.id] ?? agent.createdAt
+    }
+  })
 
   const q = query.trim()
   const mainWaiting = main !== null && waitingOnChildren.has(main.id)
@@ -132,6 +161,86 @@ export function buildSidebarModel(
   }
 }
 
+// ---- fase barra-sobria (R1): la barra per molti progetti (tavola 6) ----
+
+/**
+ * Lo stato della riga, PRESO DALLA MASCOTTE (R2): le animazioni sono quelle
+ * che la mascotte usa già in styles.css — qui solo il nome del segno.
+ */
+export type RowState = 'lavora' | 'aspetta-te' | 'finito' | 'fermo'
+
+/** Quante righe si vedono di ogni sezione prima di «Mostra tutti (N)». */
+export const SIDEBAR_ROW_LIMIT = 4
+
+/** Quanti membri di una squadra aperta prima di «Altri N». */
+export const TEAM_MEMBER_LIMIT = 2
+
+/** lo stato della riga dallo stato della mascotte (childWaiting: AH2). */
+export function rowStateOf(state: BotState, childWaiting = false): RowState {
+  if (childWaiting || state === 'waiting') return 'aspetta-te'
+  if (state === 'thinking' || state === 'speaking' || state === 'listening') return 'lavora'
+  if (state === 'happy') return 'finito'
+  return 'fermo'
+}
+
+/** lo stato aggregato della squadra: aspetta te > lavora > finito > fermo. */
+export function teamRowState(states: BotState[]): RowState {
+  if (states.some((s) => s === 'waiting')) return 'aspetta-te'
+  if (states.some((s) => s === 'thinking' || s === 'speaking' || s === 'listening')) return 'lavora'
+  if (states.some((s) => s === 'happy')) return 'finito'
+  return 'fermo'
+}
+
+/** lo stato di un agente: dalla mappa risolta, o dal solo status come prima. */
+function stateOfAgent(a: Agent, states?: Readonly<Record<string, BotState>>): BotState {
+  const s = states?.[a.id]
+  if (s) return s
+  if (a.status === 'paused-for-approval') return 'waiting'
+  if (a.status === 'thinking') return 'thinking'
+  if (a.status === 'running') return 'listening'
+  return 'idle'
+}
+
+/** L'ordine dentro ogni sezione: prima chi aspetta te, poi ultima attività. */
+export function orderRows<T extends { waiting: boolean; lastAt: number | null }>(rows: T[]): T[] {
+  return [...rows].sort(
+    (a, b) => Number(b.waiting) - Number(a.waiting) || (b.lastAt ?? -Infinity) - (a.lastAt ?? -Infinity)
+  )
+}
+
+/** Il taglio a SIDEBAR_ROW_LIMIT con «Mostra tutti (N)». */
+export function cutRows<T>(rows: T[], expanded: boolean): { visible: T[]; hidden: number } {
+  if (expanded || rows.length <= SIDEBAR_ROW_LIMIT) return { visible: rows, hidden: 0 }
+  return { visible: rows.slice(0, SIDEBAR_ROW_LIMIT), hidden: rows.length - SIDEBAR_ROW_LIMIT }
+}
+
+/** I membri della squadra aperta: al massimo TEAM_MEMBER_LIMIT più «Altri N». */
+export function memberCut<T>(rows: T[], expanded: boolean): { visible: T[]; hidden: number } {
+  if (expanded || rows.length <= TEAM_MEMBER_LIMIT) return { visible: rows, hidden: 0 }
+  return { visible: rows.slice(0, TEAM_MEMBER_LIMIT), hidden: rows.length - TEAM_MEMBER_LIMIT }
+}
+
+/** Le squadre che si aprono DA SOLE: solo quella attiva o quella che aspetta te. */
+export function teamAutoOpens(team: Pick<SidebarTeam, 'waiting'> & { group: { id: number } }, activeGroupId: number | null): boolean {
+  return team.waiting || team.group.id === activeGroupId
+}
+
+/**
+ * Il tempo dell'ultima attività, corto come nella tavola: «adesso», «4m»,
+ * «2h», «1g». at null (mai usato) → «mai».
+ */
+export function timeAgoShort(at: number | null, now: number): MessageDescriptor {
+  if (at == null) return msg`mai`
+  const s = Math.max(0, Math.floor((now - at) / 1000))
+  if (s < 60) return msg`adesso`
+  const m = Math.floor(s / 60)
+  if (m < 60) return msg`${m}m`
+  const h = Math.floor(m / 60)
+  if (h < 24) return msg`${h}h`
+  const g = Math.floor(h / 24)
+  return msg`${g}g`
+}
+
 // ---- fase 16b (S2): la barra STRETTA — solo mascotte, in quest'ordine ----
 
 /** Una voce della barra stretta: principale, squadra (grappolo) o bot. */
@@ -139,16 +248,11 @@ export interface CollapsedVoice {
   kind: 'main' | 'team' | 'bot'
   key: string
   name: string
-  /** stato breve per tooltip e aria-label */
-  status: 'waiting' | 'busy' | 'idle'
+  /** R2 (fase barra-sobria): lo stato della riga, preso dalla mascotte */
+  status: RowState
   /** il contatore nero: i non letti del bot, i membri che aspettano per la squadra */
   counter: number
 }
-
-const statusOf = (a: Agent): 'waiting' | 'busy' | 'idle' =>
-  a.status === 'paused-for-approval' ? 'waiting'
-    : a.status === 'thinking' || a.status === 'running' ? 'busy'
-      : 'idle'
 
 /**
  * Le voci della barra stretta, nello stesso ordine della barra larga:
@@ -159,32 +263,46 @@ export function collapsedVoices(model: SidebarModel): CollapsedVoice[] {
   const out: CollapsedVoice[] = []
   if (model.main) {
     // AH2: un figlio che aspetta segna «ti aspetta» anche il principale
-    out.push({ kind: 'main', key: model.main.id, name: model.main.name, status: model.mainWaiting || statusOf(model.main) === 'waiting' ? 'waiting' : statusOf(model.main), counter: model.main.unread })
+    out.push({
+      kind: 'main',
+      key: model.main.id,
+      name: model.main.name,
+      status: rowStateOf(stateOfAgent(model.main), model.mainWaiting),
+      counter: model.main.unread
+    })
   }
   for (const t of model.teams) {
     out.push({
       kind: 'team',
       key: `g${t.group.id}`,
       name: t.group.name,
-      status: t.waiting ? 'waiting' : t.coordinator ? statusOf(t.coordinator) : 'idle',
+      status: t.state,
       counter: t.waitingCount
     })
   }
   for (const b of model.bots) {
-    out.push({ kind: 'bot', key: b.agent.id, name: b.agent.name, status: b.childWaiting || statusOf(b.agent) === 'waiting' ? 'waiting' : statusOf(b.agent), counter: b.agent.unread })
+    out.push({
+      kind: 'bot',
+      key: b.agent.id,
+      name: b.agent.name,
+      status: rowStateOf(b.state, b.childWaiting),
+      counter: b.agent.unread
+    })
   }
   return out
 }
 
 /**
- * Fase 16b correzioni (P3): una squadra della barra è APERTA di default (i
- * membri si vedono sotto il coordinatore — «chi lavora per lui sta sotto,
- * rientrato»). In localStorage si ricorda solo la CHIUSURA scelta
- * dall'utente ('0'); riaprire cancella il ricordo e si torna al default.
- * saved = ciò che restituisce localStorage per la squadra (null se assente).
+ * Fase barra-sobria (R1): una squadra della barra è CHIUSA di default — si
+ * apre da sola SOLO la squadra attiva o quella che aspetta te (auto, da
+ * teamAutoOpens). L'utente comanda col suo stato salvato in localStorage
+ * ('1' = aperta, '0' = chiusa); senza scelta conta l'auto. Prima (fase 16b
+ * correzioni P3) erano aperte di default e si ricordava solo la chiusura.
  */
-export function teamOpenState(saved: string | null): boolean {
-  return saved !== '0'
+export function teamOpenState(saved: string | null, auto: boolean): boolean {
+  if (saved === '1') return true
+  if (saved === '0') return false
+  return auto
 }
 
 /**

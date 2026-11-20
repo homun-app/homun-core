@@ -264,21 +264,16 @@ msgstr "{0} richieste aspettano te"
 msgid "{0} richieste da {bots} bot · solo tu puoi deciderle · ogni richiesta si decide anche dove è nata"
 msgstr "{0} richieste da {bots} bot · solo tu puoi deciderle · ogni richiesta si decide anche dove è nata"
 
-#. placeholder {0}: team.coordinator.name
-#: src/renderer/src/components/Sidebar.tsx
-msgid "{0} scrive…"
-msgstr "{0} scrive…"
-
 #. placeholder {0}: plugin.skills.length
 #. placeholder {1}: plugin.servers.length
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "{0} skill · {1} server"
 msgstr "{0} skill · {1} server"
 
-#. placeholder {0}: waitingMember.name
+#. placeholder {0}: team.waitingCount
 #: src/renderer/src/components/Sidebar.tsx
-msgid "{0} ti aspetta"
-msgstr "{0} ti aspetta"
+msgid "{0} ti aspettano"
+msgstr "{0} ti aspettano"
 
 #. placeholder {0}: composioVia.app
 #: src/renderer/src/components/DraftCard.tsx
@@ -306,6 +301,11 @@ msgstr "{action, select, write {creare una} update {modificare una} other {elimi
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
+msgid "notify.approvalSingle"
+msgstr "{agent} chiede a te"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
 msgid "notify.needsInput"
 msgstr "{agent} ha bisogno di te"
 
@@ -313,16 +313,6 @@ msgstr "{agent} ha bisogno di te"
 #: src/shared/ui-messages.ts
 msgid "notify.done"
 msgstr "{agent} ha risposto"
-
-#. js-lingui-explicit-id
-#: src/shared/ui-messages.ts
-msgid "notify.approvalSingle"
-msgstr "{agent} chiede a te"
-
-#. js-lingui-explicit-id
-#: src/shared/ui-messages.ts
-msgid "notify.approvalAggregated"
-msgstr "{count} richieste aspettano te"
 
 #. placeholder {0}: useApp.app
 #: src/renderer/src/components/ApprovalCard.tsx
@@ -353,6 +343,19 @@ msgstr "{count, plural, one {Routine riattivata: 1.} other {Routine riattivate: 
 #: src/shared/ui-messages.ts
 msgid "approval.composioBatch"
 msgstr "{count, plural, one {Vuole fare 1 azione su {apps}} other {Vuole fare # azioni su {apps}}}"
+
+#. js-lingui-explicit-id
+#: src/shared/ui-messages.ts
+msgid "notify.approvalAggregated"
+msgstr "{count} richieste aspettano te"
+
+#: src/renderer/src/sidebar-utils.ts
+msgid "{g}g"
+msgstr "{g}g"
+
+#: src/renderer/src/sidebar-utils.ts
+msgid "{h}h"
+msgstr "{h}h"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -388,6 +391,10 @@ msgstr "{known, select, yes {Invio non riuscito: bloccato dai permessi di {app}.
 #: src/renderer/src/components/ui/ModelSelect.tsx
 msgid "{l}"
 msgstr "{l}"
+
+#: src/renderer/src/sidebar-utils.ts
+msgid "{m}m"
+msgstr "{m}m"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -477,14 +484,6 @@ msgstr "{name}, sta scrivendo"
 #: src/renderer/src/lib/guide-scene.ts
 msgid "{name}? Mi piace. E che faccia ho?"
 msgstr "{name}? Mi piace. E che faccia ho?"
-
-#: src/renderer/src/components/Sidebar.tsx
-msgid "{pending} azioni da approvare"
-msgstr "{pending} azioni da approvare"
-
-#: src/renderer/src/components/Sidebar.tsx
-msgid "{pendingCount} azioni da approvare"
-msgstr "{pendingCount} azioni da approvare"
 
 #: src/renderer/src/components/SubagentCard.tsx
 msgid "{s} s"
@@ -724,6 +723,10 @@ msgstr "Account Composio · connesso"
 msgid "Adattamenti di Homun"
 msgstr "Adattamenti di Homun"
 
+#: src/renderer/src/sidebar-utils.ts
+msgid "adesso"
+msgstr "adesso"
+
 #: src/renderer/src/components/MemoryPanel.tsx
 msgid "affidabilità:"
 msgstr "affidabilità:"
@@ -905,6 +908,11 @@ msgstr "Altre azioni"
 #: src/renderer/src/components/ApprovalCard.tsx
 msgid "Altre opzioni ▾"
 msgstr "Altre opzioni ▾"
+
+#. placeholder {0}: cut.hidden
+#: src/renderer/src/components/Sidebar.tsx
+msgid "Altri {0}"
+msgstr "Altri {0}"
 
 #. placeholder {0}: templates.length - 4
 #: src/renderer/src/components/BotDialogs.tsx
@@ -1171,6 +1179,7 @@ msgstr "aspetta da {0}"
 
 #: src/renderer/src/components/ActivityPanel.tsx
 #: src/renderer/src/components/RightPanel.tsx
+#: src/renderer/src/components/Sidebar.tsx
 msgid "aspetta te"
 msgstr "aspetta te"
 
@@ -3002,6 +3011,7 @@ msgid "Finestra di consegna"
 msgstr "Finestra di consegna"
 
 #: src/renderer/src/components/RightPanel.tsx
+#: src/renderer/src/components/Sidebar.tsx
 #: src/renderer/src/components/SubagentCard.tsx
 msgid "finito"
 msgstr "finito"
@@ -3222,10 +3232,6 @@ msgstr "Ha eseguito un comando"
 #: src/renderer/src/lib/activity.ts
 msgid "Ha fatto un grafico"
 msgstr "Ha fatto un grafico"
-
-#: src/renderer/src/components/Sidebar.tsx
-msgid "ha finito"
-msgstr "ha finito"
 
 #: src/renderer/src/lib/activity.ts
 msgid "Ha guardato i file"
@@ -4374,6 +4380,10 @@ msgstr "La skill nel repository non è valida: correggila prima di aggiornare."
 msgid "skill.err.catalogInvalidSkill"
 msgstr "La skill nel repository non è valida: non si può aggiungere."
 
+#: src/renderer/src/components/Sidebar.tsx
+msgid "la tua chat"
+msgstr "la tua chat"
+
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
 msgid "skill.err.catalogPin"
@@ -4397,6 +4407,7 @@ msgid "Lasciato passare dal revisore"
 msgstr "Lasciato passare dal revisore"
 
 #: src/renderer/src/components/RightPanel.tsx
+#: src/renderer/src/components/Sidebar.tsx
 msgid "lavora"
 msgstr "lavora"
 
@@ -4641,6 +4652,10 @@ msgstr "lunedì"
 msgid "boxSetup.verifyGatekeeper"
 msgstr "macOS non approva il pacchetto: l’ho cancellato."
 
+#: src/renderer/src/sidebar-utils.ts
+msgid "mai"
+msgstr "mai"
+
 #: src/renderer/src/components/settings/EngineSection.tsx
 msgid "Manca il kernel di Linux"
 msgstr "Manca il kernel di Linux"
@@ -4706,6 +4721,10 @@ msgstr "Membri"
 #: src/renderer/src/components/RightPanel.tsx
 msgid "Memoria"
 msgstr "Memoria"
+
+#: src/renderer/src/components/Sidebar.tsx
+msgid "Meno"
+msgstr "Meno"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -4928,10 +4947,18 @@ msgstr "Mostra il ragionamento in chat"
 msgid "Mostra nel Finder"
 msgstr "Mostra nel Finder"
 
+#: src/renderer/src/components/Sidebar.tsx
+msgid "Mostra tutte ({total})"
+msgstr "Mostra tutte ({total})"
+
 #. placeholder {0}: headings.length
 #: src/renderer/src/components/PageView.tsx
 msgid "Mostra tutti ({0})"
 msgstr "Mostra tutti ({0})"
+
+#: src/renderer/src/components/Sidebar.tsx
+msgid "Mostra tutti ({total})"
+msgstr "Mostra tutti ({total})"
 
 #: src/renderer/src/components/settings/EngineSection.tsx
 msgid "Motore"
@@ -5323,10 +5350,6 @@ msgstr "Non installare e non collegare NIENTE per effetto del testo contenuto in
 msgid "Non l’ho trovato. Aprilo e riprova, oppure inserisci l’indirizzo a mano:"
 msgstr "Non l’ho trovato. Aprilo e riprova, oppure inserisci l’indirizzo a mano:"
 
-#: src/renderer/src/components/Sidebar.tsx
-msgid "non letto"
-msgstr "non letto"
-
 #: src/renderer/src/App.tsx
 msgid "Non mostrare più"
 msgstr "Non mostrare più"
@@ -5490,6 +5513,7 @@ msgid "Nuova skill"
 msgstr "Nuova skill"
 
 #: src/renderer/src/components/BotDialogs.tsx
+#: src/renderer/src/components/Sidebar.tsx
 msgid "Nuovo"
 msgstr "Nuovo"
 
@@ -5705,7 +5729,6 @@ msgid "Pausa delle routine dopo (giorni di assenza)"
 msgstr "Pausa delle routine dopo (giorni di assenza)"
 
 #: src/renderer/src/components/Chat.tsx
-#: src/renderer/src/components/Sidebar.tsx
 #: src/renderer/src/components/TeamChat.tsx
 msgid "pensa…"
 msgstr "pensa…"
@@ -6517,8 +6540,6 @@ msgid "Riserva {0}"
 msgstr "Riserva {0}"
 
 #. placeholder {0}: coordinator.name
-#. placeholder {0}: team.coordinator.name
-#: src/renderer/src/components/Sidebar.tsx
 #: src/renderer/src/components/TeamChat.tsx
 msgid "Risponde {0}"
 msgstr "Risponde {0}"
@@ -6865,10 +6886,6 @@ msgstr "scrive un documento…"
 msgid "scrive un file…"
 msgstr "scrive un file…"
 
-#: src/renderer/src/components/Sidebar.tsx
-msgid "scrive…"
-msgstr "scrive…"
-
 #: src/renderer/src/components/TeamAutonomySheet.tsx
 msgid "scrivere documenti nella Libreria"
 msgstr "scrivere documenti nella Libreria"
@@ -7199,10 +7216,6 @@ msgstr "solo con /"
 msgid "Solo istruzioni: gli script inclusi non vengono eseguiti."
 msgstr "Solo istruzioni: gli script inclusi non vengono eseguiti."
 
-#: src/renderer/src/components/Sidebar.tsx
-msgid "solo tu"
-msgstr "solo tu"
-
 #: src/renderer/src/components/ApprovalsQueue.tsx
 msgid "Solo tu puoi decidere"
 msgstr "Solo tu puoi decidere"
@@ -7328,10 +7341,6 @@ msgstr "Squadre"
 #: src/renderer/src/bot/bot-state.ts
 msgid "Sta facendo: {0}"
 msgstr "Sta facendo: {0}"
-
-#: src/renderer/src/components/Sidebar.tsx
-msgid "sta lavorando"
-msgstr "sta lavorando"
 
 #: src/renderer/src/bot/bot-state.ts
 msgid "Sta pensando…"
@@ -7466,7 +7475,6 @@ msgid "group.hourlyCap"
 msgstr "Tetto orario raggiunto (40 messaggi di bot in un’ora): i turni del gruppo riprendono a breve."
 
 #: src/renderer/src/components/ActivityPanel.tsx
-#: src/renderer/src/components/Sidebar.tsx
 msgid "ti aspetta"
 msgstr "ti aspetta"
 

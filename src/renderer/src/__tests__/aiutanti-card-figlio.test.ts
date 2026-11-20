@@ -93,19 +93,20 @@ describe('AH2: la sidebar segna il bot «ti aspetta» finché c’è una card de
     { id: 'bot-2', name: 'Altro', description: '', providerId: null, model: null, status: 'idle', unread: 0, createdAt: 2 }
   ]
 
-  it('un bot con figli in attesa → la barra stretta dice waiting («ti aspetta»)', () => {
+  it('un bot con figli in attesa → la barra stretta dice aspetta te («ti aspetta»)', () => {
     const model = buildSidebarModel(agents, [], 'bot-padre', '', new Set(['bot-padre']))
     const padre = collapsedVoices(model).find((v) => v.key === 'bot-padre')
-    expect(padre?.status).toBe('waiting')
+    // fase barra-sobria (R2): gli stati della rotaia sono quelli della mascotte
+    expect(padre?.status).toBe('aspetta-te')
   })
 
   it('GUARDIA: senza figli in attesa lo stato resta quello dell’agente (idle)', () => {
     const model = buildSidebarModel(agents, [], 'bot-padre', '', new Set())
     const padre = collapsedVoices(model).find((v) => v.key === 'bot-padre')
-    expect(padre?.status).toBe('idle')
+    expect(padre?.status).toBe('fermo')
     // e il proprio stato dell'agente vince comunque per gli altri bot
     const altro = collapsedVoices(model).find((v) => v.key === 'bot-2')
-    expect(altro?.status).toBe('idle')
+    expect(altro?.status).toBe('fermo')
   })
 })
 

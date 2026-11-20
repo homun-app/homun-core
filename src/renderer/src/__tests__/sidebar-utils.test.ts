@@ -217,9 +217,10 @@ describe('fase 16b (S2): la barra stretta (collapsedVoices)', () => {
     const voices = collapsedVoices(model)
     expect(voices.map((v) => v.kind)).toEqual(['main', 'team', 'bot', 'bot'])
     expect(voices.map((v) => v.name)).toEqual(['Nina', 'Weekend', 'Contabile', 'Zio'])
-    // la squadra con un membro in attesa porta il contatore, lo stato waiting
+    // la squadra con un membro in attesa porta il contatore, lo stato aspetta-te
+    // (fase barra-sobria R2: gli stati della rotaia sono quelli della mascotte)
     expect(voices[1]!.counter).toBe(1)
-    expect(voices[1]!.status).toBe('waiting')
+    expect(voices[1]!.status).toBe('aspetta-te')
     // un bot con non letti porta il contatore
     const withUnread = [{ ...agents[2]!, unread: 3 }] as Agent[]
     const m2 = buildSidebarModel([agents[0]!, withUnread[0]!], [], 'n')
@@ -227,15 +228,18 @@ describe('fase 16b (S2): la barra stretta (collapsedVoices)', () => {
   })
 })
 
-// fase 16b correzioni (P3): le squadre sono APERTE di default — in localStorage
-// si ricorda solo la CHIUSURA scelta dall'utente
-describe('fase 16b correzioni (P3): teamOpenState — una squadra senza stato salvato è aperta', () => {
-  it('senza stato salvato (null) la squadra è APERTA', () => {
-    expect(teamOpenState(null)).toBe(true)
+// fase barra-sobria (R1): le squadre sono CHIUSE di default — si aprono da
+// sole solo la squadra attiva o quella che aspetta te; l'utente comanda col
+// suo stato salvato ('1' aperta, '0' chiusa). Prima (fase 16b correzioni P3)
+// erano aperte di default e si ricordava solo la chiusura.
+describe('fase barra-sobria (R1): teamOpenState — chiusa di default, salvo auto o scelta dell\'utente', () => {
+  it('senza stato salvato: aperta SOLO se si apre da sola (attiva o aspetta te)', () => {
+    expect(teamOpenState(null, true)).toBe(true)
+    expect(teamOpenState(null, false)).toBe(false)
   })
-  it('si ricorda solo la chiusura: \'0\' è chiusa, ogni altro valore è aperta', () => {
-    expect(teamOpenState('0')).toBe(false)
-    expect(teamOpenState('1')).toBe(true)
+  it('la scelta dell\'utente vince su tutto: \'1\' aperta, \'0\' chiusa', () => {
+    expect(teamOpenState('1', false)).toBe(true)
+    expect(teamOpenState('0', true)).toBe(false)
   })
 })
 
