@@ -5,6 +5,27 @@ pubblicata finisce nel corpo della GitHub Release (da cui l'app mostra il
 «cosa cambia» quando propone un aggiornamento). Formato: `## [x.y.z] — data`,
 sezioni H2 e un punto per riga.
 
+## [0.3.1001-beta.15] — 2026-11-20
+
+I bot cercano meglio sul web, e i server npm sono chiusi in un recinto vero.
+
+### Correzioni
+
+- **Il bot cerca prima di aprire:** non inventa più indirizzi di pagine o
+  di siti. Parte da una ricerca o dalla home del sito e usa la sua ricerca.
+- **Quando una pagina non si apre, il bot dice perché:** indirizzo
+  inesistente, pagina non trovata, sito che blocca l'accesso automatico o
+  sito in manutenzione. Dice «mi bloccano» solo quando è vero.
+- **Il bot non si ferma più mentre aspetta un suo aiutante:** ti dà un
+  aggiornamento e riprende da solo quando l'aiutante ha finito.
+- **Nei campi di ricerca con suggerimenti** (per esempio la stazione di
+  partenza) il bot sceglie tra le opzioni proposte invece di inviare a
+  vuoto.
+- **Server MCP da npm più sicuri:** partono solo quando il computer
+  isolato non ha altre uscite verso internet. Il nome del pacchetto è
+  controllato con le regole di npm, e il filtro di rete non si può aggirare
+  cambiando il nome del sito nella richiesta.
+
 ## [0.3.1001-beta.14] — 2026-11-20
 
 Homun si apre sempre, e collega i server MCP che usi già.
