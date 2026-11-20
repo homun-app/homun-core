@@ -20,6 +20,8 @@ import { daemonSpawnContext } from './daemon-context'
 import { DAEMON_FLAG } from './mode'
 import type { DaemonClient } from './daemon-client'
 import { setUpdateChannel, checkNow, hasUpdateConfig } from './updater'
+// W2 (fase avvio-finestra): lo stato del caricamento mentre il daemon si avvia
+import type { BootStatusInfo } from './boot-status'
 // RV1 (fase beta.2): lo spostamento in Applicazioni (stato, controllo, riproposta)
 import { appNeedsMove, proposeMoveToApplications, updateCheckResultWhenMoveNeeded } from './app-location'
 import { UPDATE_CHANNEL_SETTING, parseUpdateChannel } from '../shared/update-channel'
@@ -149,6 +151,11 @@ export function registerIpc(
     close(): void
     focusMain(agentId: string): void
     state(): { open: boolean; agentId: string | null; alwaysOnTop: boolean }
+  },
+  // W2 (fase avvio-finestra): lo stato del caricamento (riga del BootSplash e «Riprova»)
+  boot?: {
+    status(): BootStatusInfo
+    retry(): Promise<{ ok: boolean; restarted: boolean }>
   }
 ): void {
   // ---- inoltro RPC al daemon ----
@@ -175,6 +182,10 @@ export function registerIpc(
   // DAL MAIN (è lui che ha creato la finestra)
   ipcMain.handle('pip:state', () =>
     pip?.state() ?? { open: false, agentId: null, alwaysOnTop: false, mainVisible: true })
+  // W2 (fase avvio-finestra): il caricamento dice cosa sta succedendo (e
+  // «Riprova» rifà la connessione, riavviando il daemon se non c'è)
+  ipcMain.handle('boot:status', () => boot?.status() ?? { connected: client.connected, restartingForUpdate: false })
+  ipcMain.handle('boot:retry', () => boot?.retry() ?? Promise.resolve({ ok: true, restarted: false }))
   // fase skill (S4): «Mostra nel Finder» — apre la cartella della skill nella
   // libreria (shell è di Electron, sta qui e non nel daemon RPC)
   ipcMain.handle('skills:show-in-finder', (_e, name: string) => {

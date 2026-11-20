@@ -29,6 +29,8 @@ import { guideWindowState } from './lib/guide-window'
 // G6 (fase guida): all'arrivo in chat la mascotte VOLA dalla scena al
 // pannello del bot (FLIP via Web Animations); se non si può, semplice dissolvenza
 import { flyStashedMascotTo } from './lib/guide-arrival'
+// W2 (fase avvio-finestra): il modello puro del caricamento (riga + «Riprova» a 20 s)
+import { bootSplashView, type BootStatusInfo } from './lib/boot-splash-model'
 
 /** Minimo intervallo tra due segnali 'active' (il daemon ne scarta uno ogni 30 s). */
 const ACTIVE_EVERY_MS = 30_000
@@ -260,19 +262,68 @@ export function App() {
  * MARCATORE che RESTA (documentElement.dataset.bootSplashSeen) — la sonda
  * G8-1a controlla il marcatore invece di inseguire lo splash, che dura
  * pochissimo: era una gara di tempi della sonda, non un difetto del prodotto.
+ * W2 (fase avvio-finestra): il caricamento DICE cosa sta succedendo — la riga
+ * «Sto avviando il motore di Homun…», «Aggiorno il motore alla versione
+ * nuova…» quando il main sa del riavvio per aggiornamento (boot:status), e
+ * dopo 20 s senza connessione «Ci sta mettendo più del solito» col bottone
+ * «Riprova» (boot:retry) che rifà la connessione riavviando il daemon se non
+ * c'è. MAI una finestra vuota senza testo. Il modello puro (che riga, quando
+ * l'avviso) sta in lib/boot-splash-model.ts.
  */
 function BootSplash() {
   useEffect(() => {
     document.documentElement.dataset.bootSplashSeen = '1'
   }, [])
+  const startedAt = useRef(Date.now())
+  // il conteggio dei 20 s riparte dall'ULTIMO «Riprova», non dal mount
+  const lastRetryAt = useRef<number | null>(null)
+  const [info, setInfo] = useState<BootStatusInfo>({ connected: false, restartingForUpdate: false })
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    let alive = true
+    const poll = (): void => {
+      void api.bootStatus()
+        .then((s) => { if (alive) setInfo({ connected: s.connected, restartingForUpdate: s.restartingForUpdate }) })
+        .catch(() => undefined)
+    }
+    poll()
+    const t = setInterval(() => {
+      poll()
+      setNow(Date.now())
+    }, 1_000)
+    return () => {
+      alive = false
+      clearInterval(t)
+    }
+  }, [])
+  const view = bootSplashView(info, now - (lastRetryAt.current ?? startedAt.current))
+  const onRetry = (): void => {
+    lastRetryAt.current = Date.now()
+    setNow(Date.now())
+    void api.bootRetry().catch(() => undefined)
+  }
   return (
     <div className="flex h-screen w-screen flex-col items-center justify-center gap-5 bg-muted/40 text-foreground" data-testid="boot-splash">
       <div className="flex h-16 w-16 animate-pulse items-center justify-center rounded-[18px] bg-muted text-2xl font-display" aria-hidden>🧚</div>
       <div className="flex flex-col items-center gap-2">
         <p className="font-display text-xl">Homun</p>
-        <p className="text-xs text-muted-foreground">
-          <Trans>Preparo tutto…</Trans>
+        <p className="text-xs text-muted-foreground" data-testid="boot-splash-line">
+          {view.line === 'updating'
+            ? <Trans>Aggiorno il motore alla versione nuova…</Trans>
+            : <Trans>Sto avviando il motore di Homun…</Trans>}
         </p>
+        {view.slow && (
+          <div className="flex flex-col items-center gap-2 pt-1">
+            <p className="text-xs text-muted-foreground"><Trans>Ci sta mettendo più del solito</Trans></p>
+            <button
+              className="rounded-full bg-foreground px-3 py-1 text-[11px] text-background"
+              data-testid="boot-splash-retry"
+              onClick={onRetry}
+            >
+              <Trans>Riprova</Trans>
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )

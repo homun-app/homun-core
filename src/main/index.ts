@@ -32,11 +32,13 @@ import { findLegacyHomun2Dir, legacyNoticeMarkerPath } from './legacy-homun2'
 import { initUpdater, setUpdaterDaemonStopper, shouldAutoCheckUpdates, hasUpdateConfig, openTestUpdateWindowIfRequested } from './updater'
 // RV1 (fase beta.2): l'app fuori da Applicazioni o translocata (sola lettura)
 import { appLocationAction, proposeMoveToApplications, setAppNeedsMove, appNeedsMove } from './app-location'
-import { stopRunningDaemon } from './daemon-client'
+import { stopRunningDaemon, setDaemonRestartListener } from './daemon-client'
 // SV4 (fase schermo-vivo): la finestra PiP
 import { PipManager, type PipWindowHandle } from './pip'
 // W1 (fase avvio-finestra): la porta UNICA della finestra principale
 import { createMainWindowManager } from './main-window'
+// W2 (fase avvio-finestra): lo stato del caricamento mentre il daemon si avvia
+import { BootStatusTracker } from './boot-status'
 import { UPDATE_CHANNEL_SETTING, parseUpdateChannel } from '../shared/update-channel'
 import { safeStorageBackendForEnv } from '../daemon/master-keys'
 
@@ -248,6 +250,12 @@ if (isDaemonMode(process.argv)) {
 
       // client del daemon: lo avvia se non attivo, inoltra RPC/host API/eventi
       const client = new DaemonClient()
+      // W2 (fase avvio-finestra): lo stato del caricamento (boot:status /
+      // boot:retry, canali LOCALI di registerIpc): la riga «Aggiorno il
+      // motore…» quando il daemon si fa sostituire per versione, e «Riprova»
+      // che rifà la connessione riavviando il daemon se non c'è
+      const boot = new BootStatusTracker(client)
+      setDaemonRestartListener((reason) => boot.handleRestart(reason))
       client.registerHost('host.screen.scaleFactor', () => screen.getPrimaryDisplay().scaleFactor || 1)
       // K1.7 (fase rilascio — correzioni): le API ASINCRONE di safeStorage
       // (Electron 45 depreca le sincrone e avvisa nel log)
@@ -316,7 +324,7 @@ if (isDaemonMode(process.argv)) {
         const all = BrowserWindow.getAllWindows()
         return main ? [main, ...all.filter((w) => w !== main)] : all
       }
-      registerIpc(client, windowsForIpc, pip)
+      registerIpc(client, windowsForIpc, pip, boot)
       // A8: prima di installare un aggiornamento il daemon si ferma BENE.
       // RV1 (fase beta.2): lo STESSO meccanismo dello spostamento in
       // Applicazioni (stopRunningDaemon: la RPC daemon:restart di A2 senza

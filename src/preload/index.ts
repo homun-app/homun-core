@@ -297,6 +297,10 @@ const api: SandbotApi = {
   legacyHomun2: () => ipcRenderer.invoke('app:legacy-homun2'),
   legacyHomun2Dismiss: () => ipcRenderer.invoke('app:legacy-homun2-dismiss'),
   revealInFinder: (dir) => ipcRenderer.invoke('app:reveal-in-finder', dir),
+  // W2 (fase avvio-finestra): lo stato del caricamento (e «Riprova») mentre
+  // il daemon si avvia — canali LOCALI del main
+  bootStatus: () => ipcRenderer.invoke('boot:status'),
+  bootRetry: () => ipcRenderer.invoke('boot:retry'),
   // fase 17a (L5): il main ricostruisce il tray nella lingua scelta
   uiLanguageChanged: (lang) => ipcRenderer.invoke('ui:language-changed', lang),
   onEvent: (cb) => {

@@ -127,6 +127,22 @@ export interface EnsureDaemonDeps {
 }
 
 /**
+ * W2 (fase avvio-finestra): perché ensureDaemonRunning sta fermando un daemon
+ * VIVO per sostituirlo. 'update' = versione/build diversa (dopo un
+ * aggiornamento), 'legacy' = daemon della fase ≤16c, 'path' = stesso bundle
+ * ma eseguibile di un'altra copia dell'app. Il main lo racconta al
+ * caricamento della finestra («Aggiorno il motore alla versione nuova…»).
+ */
+export type DaemonRestartReason = 'legacy' | 'update' | 'path'
+
+let daemonRestartListener: ((reason: DaemonRestartReason) => void) | null = null
+
+/** Chi vuole sapere dei riavvii del daemon (il main UI per boot:status). */
+export function setDaemonRestartListener(cb: ((reason: DaemonRestartReason) => void) | null): void {
+  daemonRestartListener = cb
+}
+
+/**
  * Avvia il daemon se non è già attivo e ne aspetta il daemon.json fresco.
  * Un daemon.json con pid morto o con pid appartenente ad altro processo è
  * stantio: viene rimosso (col lock) e il daemon riparte. Un daemon VIVO ma
@@ -147,17 +163,21 @@ export async function ensureDaemonRunning(expected?: DaemonBuild, deps: EnsureDa
     if (existing.pid === process.pid) return existing
     if (cmd && isLegacyDaemonCommandLine(cmd)) {
       // daemon della ≤16c (ELECTRON_RUN_AS_NODE): fermalo, entra quello nuovo
+      daemonRestartListener?.('legacy')
       await askRestart(dir, existing)
     } else if (cmd && isDaemonCommandLine(cmd)) {
       // RV1 (fase beta.2): si riusa SOLO se è della build giusta E parte dal
       // bundle CORRENTE — un daemon vivo da un altro eseguibile (per esempio
       // quello rimasto acceso dal percorso di App Translocation di una copia
       // con la quarantena) viene sostituito, come già i daemon di build diversa
-      if ((!expected || daemonMatchesBuild(existing, expected)) && daemonRunsFromExecutable(cmd, execPath)) {
+      const buildOk = !expected || daemonMatchesBuild(existing, expected)
+      if (buildOk && daemonRunsFromExecutable(cmd, execPath)) {
         return existing
       }
       // versione/build diversi, o eseguibile di un'altra copia: il daemon esce
-      // BENE (A2) e si rilancia da qui
+      // BENE (A2) e si rilancia da qui. W2: il motivo va al caricamento della
+      // finestra («aggiornamento» solo per la versione, non per la copia)
+      daemonRestartListener?.(buildOk ? 'path' : 'update')
       await askRestart(dir, existing)
     } else {
       // pid riusato dal SO per un altro processo: info stantia
@@ -192,7 +212,10 @@ export async function ensureDaemonRunning(expected?: DaemonBuild, deps: EnsureDa
       if (expected && !daemonMatchesBuild(info, expected)) {
         // è partito ma non è della build attesa (es. spawn che ha riusato un
         // vecchio bundle): si riparte dal principio una volta
-        if (pidAlive(info.pid)) await askRestart(dir, info)
+        if (pidAlive(info.pid)) {
+          daemonRestartListener?.('update')
+          await askRestart(dir, info)
+        }
         continue
       }
       return info

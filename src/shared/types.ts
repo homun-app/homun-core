@@ -1417,6 +1417,14 @@ export interface SandbotApi {
   legacyHomun2(): Promise<{ dir: string } | null>
   legacyHomun2Dismiss(): Promise<{ ok: boolean }>
   revealInFinder(dir: string): Promise<{ ok: boolean }>
+  /**
+   * W2 (fase avvio-finestra): lo stato del caricamento mentre il daemon si
+   * avvia — restartingForUpdate true solo durante il riavvio per
+   * aggiornamento («Aggiorno il motore alla versione nuova…»).
+   */
+  bootStatus(): Promise<{ connected: boolean; restartingForUpdate: boolean }>
+  /** W2: il bottone «Riprova» — rifà la connessione (e avvia il daemon se non c'è). */
+  bootRetry(): Promise<{ ok: boolean; restarted: boolean }>
   // fase 17a: il renderer avvisa che la lingua dell'interfaccia è cambiata
   // (il main ricostruisce tray e notifiche nella lingua attiva)
   uiLanguageChanged(lang: 'it' | 'en'): Promise<void>

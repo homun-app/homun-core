@@ -785,6 +785,10 @@ msgstr "aggiornata da GitHub"
 msgid "Aggiornato"
 msgstr "Aggiornato"
 
+#: src/renderer/src/App.tsx
+msgid "Aggiorno il motore alla versione nuova…"
+msgstr "Aggiorno il motore alla versione nuova…"
+
 #: src/renderer/src/components/AppsWindow.tsx
 msgid "aggiungi"
 msgstr "aggiungi"
@@ -1741,6 +1745,10 @@ msgstr "Chiudi il pannello"
 #: src/renderer/src/components/Sidebar.tsx
 msgid "Chiudi la barra (⌘\\)"
 msgstr "Chiudi la barra (⌘\\)"
+
+#: src/renderer/src/App.tsx
+msgid "Ci sta mettendo più del solito"
+msgstr "Ci sta mettendo più del solito"
 
 #. js-lingui-explicit-id
 #: src/shared/ui-messages.ts
@@ -5948,10 +5956,6 @@ msgstr "preparo il computer del bot"
 msgid "preparo il computer del bot (circa {gb} GB)"
 msgstr "preparo il computer del bot (circa {gb} GB)"
 
-#: src/renderer/src/App.tsx
-msgid "Preparo tutto…"
-msgstr "Preparo tutto…"
-
 #: src/renderer/src/components/BoxSetupProgress.tsx
 msgid "Preparo…"
 msgstr "Preparo…"
@@ -6545,6 +6549,7 @@ msgstr "Riprendi"
 msgid "Ripristina"
 msgstr "Ripristina"
 
+#: src/renderer/src/App.tsx
 #: src/renderer/src/components/ActivityPanel.tsx
 #: src/renderer/src/components/AppsWindow.tsx
 #: src/renderer/src/components/BotScreen.tsx
@@ -7412,6 +7417,10 @@ msgstr "Stai controllando lo schermo di {0}"
 #: src/renderer/src/components/McpWindow.tsx
 msgid "stdio (comando locale)"
 msgstr "stdio (comando locale)"
+
+#: src/renderer/src/App.tsx
+msgid "Sto avviando il motore di Homun…"
+msgstr "Sto avviando il motore di Homun…"
 
 #: src/renderer/src/components/settings/EngineSection.tsx
 msgid "Sto guardando…"
