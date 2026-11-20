@@ -20,7 +20,7 @@ export const CONNECTOR_PROPOSAL_TOOLS = new Set(['add_mcp_server', 'install_plug
  * dell'import. Il bot NON legge i file di Cursor/Claude da solo (E2).
  */
 export const MCP_WINDOW_IMPORT_GUIDANCE =
-  'That address may be the service web app, not its MCP endpoint: do not blame the service. Propose offer_mcp_window; if the user already uses the service in Cursor, Claude or ZCode, the MCP servers window imports their server in one click — tell them: «se lo usi già in Cursor, Claude o ZCode, importalo da lì» (in their language).'
+  'That address may be the service web app, not its MCP endpoint: do not blame the service. Propose offer_mcp_window; if the user already uses the service in Cursor, Claude or ZCode, the MCP servers window imports their server in one click — tell them, in their language, that if they already use it there they can import the server from that window.'
 
 /**
  * Fase 14 (punto 7d): fill_credential NON esiste nei turni di GRUPPO (Grok:

@@ -56,7 +56,7 @@ describe('E3: l\'aggiunta fallita guida verso la card e la frase', () => {
     expect(MCP_WINDOW_IMPORT_GUIDANCE).toMatch(/do not blame/i)
     expect(MCP_WINDOW_IMPORT_GUIDANCE).toMatch(/offer_mcp_window/)
     expect(MCP_WINDOW_IMPORT_GUIDANCE).toMatch(/Cursor, Claude or ZCode/)
-    expect(MCP_WINDOW_IMPORT_GUIDANCE).toMatch(/se lo usi già in Cursor, Claude o ZCode, importalo da lì/)
+    expect(MCP_WINDOW_IMPORT_GUIDANCE).toMatch(/import the server from that window/)
   })
 
   it('l\'esito negativo del click sulla card porta la guida (snapshot del sorgente del resolver)', () => {
