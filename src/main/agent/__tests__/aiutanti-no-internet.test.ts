@@ -57,19 +57,21 @@ describe('AH6: la riga «niente internet per i comandi» con uscita none (descri
   })
 })
 
-describe('AH6: la nota in coda agli errori di rete/DNS', () => {
-  it('«Could not resolve host» (curl) riceve la nota in coda', () => {
+describe('AH6: la nota agli errori di rete/DNS — P7: IN TESTA, e dice che non è colpa del sito né del DNS', () => {
+  it('«Could not resolve host» (curl, exit 6): la riga è la PRIMA del result', () => {
     const out = withNoInternetNote('curl: (6) Could not resolve host: dealer.moto.it\n[exit 6]')
     expect(out).toContain('Could not resolve host')
-    expect(out.trim().endsWith(']'))
-    expect(out).toContain('the bot computer has no internet for commands: use web_fetch or the browser')
-    // la nota è IN CODA
-    expect(out.indexOf('[exit 6]')).toBeLessThan(out.indexOf('no internet for commands'))
+    expect(out).toContain('no internet: this is not a problem with the site or with the DNS')
+    // P7 (fase uso-permessi): IN TESTA e non più in coda — il modello la legge
+    // prima di concludere «non va il DNS»
+    expect(out.indexOf('no internet')).toBeLessThan(out.indexOf('Could not resolve host'))
   })
 
-  it('anche «Temporary failure in name resolution» e «Network is unreachable»', () => {
-    expect(withNoInternetNote('wget: Temporary failure in name resolution')).toContain('no internet for commands')
-    expect(withNoInternetNote('ping: Network is unreachable')).toContain('no internet for commands')
+  it('anche exit 7 (connection refused/Failed to connect), «Temporary failure» e «Network is unreachable»', () => {
+    expect(withNoInternetNote('curl: (7) Failed to connect to host: esample.test\n[exit 7]')).toContain('no internet')
+    expect(withNoInternetNote('curl: (7) Failed to connect to esample.test port 443: Connection refused\n[exit 7]')).toContain('no internet')
+    expect(withNoInternetNote('wget: Temporary failure in name resolution')).toContain('no internet')
+    expect(withNoInternetNote('ping: Network is unreachable')).toContain('no internet')
   })
 
   it('un output SENZA errori di rete resta com' + 'è (guardia)', () => {

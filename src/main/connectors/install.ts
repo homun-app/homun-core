@@ -629,10 +629,29 @@ export async function installMcpServer(
       const tools = await deps.toolsOfServer(cfg.id)
       return { ok: true, message: serverInstalledMessage(cfg.name, tools) }
     } catch (e) {
+      // P7 (fase uso-permessi): aggiunta fallita = server SPENTO
+      disableFailedServer(cfg, deps)
       return { ok: false, error: `Server ${cfg.name} registered but does not respond: ${e instanceof Error ? e.message : String(e)}` }
     }
   }
   return finishRemoteInstall(cfg, deps)
+}
+
+/**
+ * P7 (fase uso-permessi): un'aggiunta FALLITA non lascia il server ABILITATO
+ * — il caso Competitoor diceva «NOT added: authorization failed» ma il server
+ * restava in mcp.servers e acceso. Resta registrato ma SPENTO, da
+ * riconfigurare (lo riaccende l'utente dalla finestra «Server MCP»).
+ */
+function disableFailedServer(cfg: McpServerConfig, deps: InstallDeps): void {
+  // copia: listServers può restituire lo STESSO array che saveServers svuota
+  const all = [...deps.listServers()]
+  const i = all.findIndex((s) => s.id === cfg.id)
+  if (i !== -1 && all[i]!.enabled) {
+    all[i] = { ...all[i]!, enabled: false }
+    deps.saveServers(all)
+    deps.onChange()
+  }
 }
 
 /** Regola 1: remoto senza header — connessione; su 401 il flusso OAuth (fase 5 + punto 6). */
@@ -645,6 +664,9 @@ async function finishRemoteInstall(cfg: McpServerConfig, deps: InstallDeps): Pro
   } catch {
     // 401 o connessione rifiutata: flusso OAuth col loopback e iss verificato
     if (!deps.hasUi()) {
+      // P7: anche questo esito fallito lascia il server SPENTO (si riaccende
+      // quando l'utente completa l'accesso dalla finestra «Server MCP»)
+      disableFailedServer(cfg, deps)
       return { ok: false, error: `Server ${cfg.name} registered: sign-in with your account is needed (OAuth). Open the Homun window and restart the connection from Settings.` }
     }
     try {
@@ -660,6 +682,8 @@ async function finishRemoteInstall(cfg: McpServerConfig, deps: InstallDeps): Pro
       const tools = await deps.toolsOfServer(cfg.id)
       return { ok: true, message: serverInstalledMessage(cfg.name, tools) }
     } catch (e) {
+      // P7: l'autorizzazione fallita NON lascia il server acceso
+      disableFailedServer(cfg, deps)
       return { ok: false, error: `Server ${cfg.name}: authorization failed (${e instanceof Error ? e.message : String(e)})` }
     }
   }

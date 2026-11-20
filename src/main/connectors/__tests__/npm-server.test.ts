@@ -138,9 +138,13 @@ describe('E4: il tool del bot e le regole del prompt', () => {
     expect(s).toMatch(/version/)
   })
 
-  it('la strada dell\'IMPORT resta la prima, se l\'utente usa Cursor/Claude/ZCode', () => {
+  it('la strada dell\'IMPORT resta la prima, se l\'utente usa Cursor/Claude/Zcode (P7: PRIMA dell\'npm, nel testo della regola)', () => {
     const s = connectorsSection()
-    expect(s.indexOf('Cursor, Claude, ZCode')).toBeGreaterThanOrEqual(0)
+    expect(s.indexOf('Cursor, Claude or Zcode')).toBeGreaterThanOrEqual(0)
     expect(s).toMatch(/run-command/)
+    // P7 (fase uso-permessi): l'ordine della regola è import PRIMA, npm POI
+    const rule = s.split('\n').find((l) => l.includes('FIRST offer the import from Cursor')) ?? ''
+    expect(rule).not.toBe('')
+    expect(rule.indexOf('Cursor')).toBeLessThan(rule.indexOf('npm:'))
   })
 })

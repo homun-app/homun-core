@@ -118,3 +118,49 @@ describe('R1: migrateToolSlugs (core puro)', () => {
     expect(MCP_TOOLSLUG_FLAG).toBe('mcp.toolSlugsMigrated')
   })
 })
+
+// ---- P7 (fase uso-permessi): i server http MAI CONNESSI si spengono ----
+
+import { migrateNeverConnectedHttpServers } from '../mcp-migrations'
+
+describe('P7: migrateNeverConnectedHttpServers (puro) — il server rimasto da un\'aggiunta fallita si spegne', () => {
+  const http = (over: Partial<McpServerConfig>): McpServerConfig => ({
+    id: 'x',
+    name: 'mattermost.competitoor.com',
+    transport: 'http',
+    url: 'https://mattermost.competitoor.com/mcp',
+    enabled: true,
+    auth: { kind: 'oauth' },
+    ...over
+  })
+  it('http ABILITATO mai connesso (nessun firstOkAt) → SPENTO', () => {
+    const { servers, changed } = migrateNeverConnectedHttpServers([http({})])
+    expect(changed).toBe(true)
+    expect(servers[0]!.enabled).toBe(false)
+    // il resto resta (si riaccende da Impostazioni quando lo si riconfigura)
+    expect(servers[0]!.url).toBe('https://mattermost.competitoor.com/mcp')
+  })
+
+  it('con firstOkAt (connesso ALMENO una volta) resta ACCESSO; già spento e needsAuth non si toccano', () => {
+    const ok = http({ id: 'ok', firstOkAt: 123 })
+    const off = http({ id: 'off', enabled: false })
+    const setup = http({ id: 'setup', needsAuth: { kind: 'setup', keys: ['url'] } })
+    const { servers, changed } = migrateNeverConnectedHttpServers([ok, off, setup])
+    expect(changed).toBe(false)
+    expect(servers).toEqual([ok, off, setup])
+  })
+
+  it('gli stdio non si toccano (il confine è dei server http)', () => {
+    const stdio: McpServerConfig = { id: 'npm', name: 'npm', transport: 'stdio', enabled: true, box: { workdir: '/w', home: '/h', command: 'npx', args: [] } }
+    const { servers, changed } = migrateNeverConnectedHttpServers([stdio])
+    expect(changed).toBe(false)
+    expect(servers[0]!.enabled).toBe(true)
+  })
+
+  it('idempotente: al secondo giro non c\'è niente da spegnere', () => {
+    const first = migrateNeverConnectedHttpServers([http({})])
+    const second = migrateNeverConnectedHttpServers(first.servers)
+    expect(second.changed).toBe(false)
+    expect(second.servers).toEqual(first.servers)
+  })
+})

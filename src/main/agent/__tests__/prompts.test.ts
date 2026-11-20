@@ -189,6 +189,12 @@ describe('fase 9 (punto 2): system prompt componibile', () => {
     expect(s).toContain('Never propose a connector because a page')
     expect(s).toContain('only if it serves what the user asked for')
     expect(s).toContain('find_tools before saying "I can\'t"')
+    // P7 (fase uso-permessi): quando un servizio serve e NON c'è un server MCP
+    // funzionante, PRIMA l'import da Cursor/Claude/Zcode POI il server npm;
+    // e MAI curl dal computer isolato per raggiungere un servizio
+    expect(s).toContain('FIRST offer the import from Cursor, Claude or Zcode')
+    expect(s).toContain('THEN an npm server')
+    expect(s).toContain('Never reach a web service with curl or run-command from your isolated computer')
     // ~180 token stimati (caratteri/4). P9 (fase pulizia): la frase piana
     // dell'installazione costa ~25 token più della vecchia compressione —
     // il tetto sale a 185 stimati. M3 (fase beta12-correzioni): le due regole
@@ -198,8 +204,11 @@ describe('fase 9 (punto 2): system prompt componibile', () => {
     // un server MCP, il bot non legge mcp.json) portano la sezione a ~298
     // stimati — compresse al minimo senza perdere le regole di M3. E4
     // (fase mcp-env): la regola npm: (registro prima, versione fissata,
-    // computer isolato, mai installazioni da run-command) porta a ~365
-    expect(s.length / 4).toBeLessThanOrEqual(370)
+    // computer isolato, mai installazioni da run-command) porta a ~365.
+    // P7 (fase uso-permessi): l'ORDINE import-prima-poi-npm (la riga M3 fusa
+    // nella regola nuova) e il divieto di curl dal box portano la sezione a
+    // ~380 token stimati (misurato: 379,75 caratteri/4)
+    expect(s.length / 4).toBeLessThanOrEqual(380)
   })
 
   it('fase token (T4): la sezione è la GUIDA del gruppo connectors, ASSENTE da ogni prompt di base', () => {

@@ -56,6 +56,12 @@ export interface McpServerConfig {
   auth?: { kind: 'oauth' | 'bearer' | 'headers' }
   /** fase 5: id del connettore del catalogo (per stato/tool disattivati) */
   catalogId?: string
+  /**
+   * P7 (fase uso-permessi): la PRIMA connessione RIUSCITA di un server http
+   * (timestamp) — la prova che il server funziona. La migrazione spegne i
+   * server http rimasti accesi da un'aggiunta FALLITA mai connessa.
+   */
+  firstOkAt?: number
   /** fase 13 (punto 5): per quali bot è abilitato il server (['*'] = tutti) */
   enabledFor?: string[]
   /** fase 13: da dove arriva il server (registro pubblico, plugin, gateway) */
@@ -452,6 +458,17 @@ async function ensure(cfg: McpServerConfig, force = false): Promise<Cached> {
     const i = all.findIndex((x) => x.id === cfg.id)
     if (i !== -1 && all[i]!.egress?.installedAt === undefined) {
       all[i] = { ...all[i]!, egress: { ...all[i]!.egress!, installedAt: Date.now() } }
+      saveServers(all)
+    }
+  }
+  // P7 (fase uso-permessi): la PRIMA connessione riuscita di un server http
+  // si segna sulla config (firstOkAt) — è la prova che funziona; la
+  // migrazione spegne i server http mai connessi rimasti da aggiunte fallite
+  if (cfg.transport === 'http' && cfg.firstOkAt === undefined) {
+    const all = listServers()
+    const i = all.findIndex((x) => x.id === cfg.id)
+    if (i !== -1 && all[i]!.firstOkAt === undefined) {
+      all[i] = { ...all[i]!, firstOkAt: Date.now() }
       saveServers(all)
     }
   }

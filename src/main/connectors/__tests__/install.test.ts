@@ -217,6 +217,32 @@ describe('installMcpServer (regole 1-3)', () => {
     if (!r.ok) expect(r.error).toContain('OAuth')
   })
 
+  it('P7 (uso-permessi): aggiunta http con OAuth FALLITA → il server NON risulta abilitato', async () => {
+    // il caso Competitoor: «Server … NOT added: authorization failed» ma il
+    // server restava in mcp.servers e ABILITATO — ora resta SPENTO
+    const deps = makeDeps({
+      toolsOfServer: async () => { throw new Error('401') },
+      authorize: async () => { throw new Error('access denied') }
+    })
+    const card = await buildMcpServerCard('registry:com.notion/mcp', '', deps)
+    if (!card.ok) throw new Error('card')
+    const r = await installMcpServer(card.card, 'agent_alice', deps)
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toContain('authorization failed')
+    const cfg = deps.listServers()[0]!
+    expect(cfg.enabled).toBe(false)
+  })
+
+  it('P7: anche il ramo senza UI (401, OAuth da completare) lascia il server SPENTO', async () => {
+    const deps = makeDeps({ toolsOfServer: async () => { throw new Error('401 Unauthorized') }, hasUi: () => false })
+    const card = await buildMcpServerCard('registry:com.notion/mcp', '', deps)
+    if (!card.ok) throw new Error('card')
+    const r = await installMcpServer(card.card, 'agent_alice', deps)
+    expect(r.ok).toBe(false)
+    const cfg = deps.listServers()[0]!
+    expect(cfg.enabled).toBe(false)
+  })
+
   it('regola 2 (M5): header OBBLIGATORIO → needsAuth setup e "the user completes the setup in the card" (mai Settings, mai "the key is needed")', async () => {
     const deps = makeDeps({ toolsOfServer: async () => { throw new Error('401') } })
     const card = await buildMcpServerCard('registry:ai.smithery/smithery-notion', '', deps)

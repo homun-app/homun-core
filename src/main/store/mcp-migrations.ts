@@ -124,3 +124,41 @@ export function migrateToolSlugFreeze(): void {
   }
   setSetting(MCP_TOOLSLUG_FLAG, true)
 }
+
+// ---- P7 (fase uso-permessi): i server http MAI CONNESSI si spengono ----
+
+/** P7: il setting che marca la migrazione fatta (idempotente). */
+export const MCP_HTTP_MIGRATION_FLAG = 'mcp.httpNeverConnectedOff'
+
+/**
+ * P7 (core puro): un'aggiunta http FALLITA di una volta lasciava il server in
+ * mcp.servers e ABILITATO (il caso Competitoor: «Server … NOT added:
+ * authorization failed», e il server restava acceso). La migrazione SPENGE i
+ * server http accesi che non si sono MAI connessi con successo (nessun
+ * firstOkAt, il timestamp che ensure() scrive alla prima connessione riuscita
+ * da questa fase in poi). NON si toccano: i server con firstOkAt (hanno
+ * funzionato), quelli già spenti, quelli che aspettano la configurazione
+ * (needsAuth: il modulo è già «da riconfigurare») e gli stdio. Il server
+ * spento resta nella config: si riaccende dalla finestra «Server MCP».
+ */
+export function migrateNeverConnectedHttpServers(servers: McpServerConfig[]): { servers: McpServerConfig[]; changed: boolean } {
+  let changed = false
+  const out = servers.map((s) => {
+    if (s.transport !== 'http' || !s.enabled || s.firstOkAt !== undefined || s.needsAuth) return s
+    changed = true
+    return { ...s, enabled: false }
+  })
+  return { servers: out, changed }
+}
+
+/** P7 (runner, primo avvio del daemon): una riga di log, idempotente per flag. */
+export function migrateHttpNeverConnectedOff(): void {
+  if (getSetting<boolean>(MCP_HTTP_MIGRATION_FLAG, false)) return
+  const { servers, changed } = migrateNeverConnectedHttpServers(getSetting<McpServerConfig[]>('mcp.servers', []))
+  if (changed) {
+    setSetting('mcp.servers', servers)
+    const n = servers.filter((s) => s.transport === 'http' && !s.enabled && s.firstOkAt === undefined && !s.needsAuth).length
+    console.log(`[sandbotd] migrazione server http: ${n} mai connessi rimasti accesi da aggiunte fallite → spenti`)
+  }
+  setSetting(MCP_HTTP_MIGRATION_FLAG, true)
+}

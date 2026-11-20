@@ -48,17 +48,19 @@ export const BOX_NO_INTERNET_LINE =
   'In this computer commands have no internet: for the web use web_fetch or the browser.'
 
 /**
- * AH6 (fase aiutanti): la nota in coda al result di un comando del box che
- * fallisce con un errore di nome o di rete (l'utente vede «Could not resolve
- * host» tre volte di fila, il modello non sa perché). PURA.
+ * AH6 (fase aiutanti) + P7 (fase uso-permessi): la nota IN TESTA al result di
+ * un comando del box che fallisce con un errore di nome o di rete — il caso
+ * Competitoor: tre curl di fila, «non va il DNS». La riga dice subito CHE COSA
+ * è (il computer isolato non ha internet) e CHE COSA NON è (non è un problema
+ * del sito né del DNS), e la strada giusta (web_fetch o il browser). PURA.
  */
 export const BOX_NO_INTERNET_NOTE =
-  '[note: the bot computer has no internet for commands: use web_fetch or the browser]'
+  '[the isolated computer has no internet: this is not a problem with the site or with the DNS — for the web use web_fetch or the browser]'
 
 const NETWORK_ERROR_RE =
-  /Could not resolve host|Temporary failure in name resolution|Network is unreachable/i
+  /Could not resolve host|Temporary failure in name resolution|Network is unreachable|Failed to connect to (?:host|[\w.-]+ port)|Connection refused|\[exit [67]\]/i
 
-/** La nota in coda SOLO se l'output contiene un errore di nome/rete. PURA. */
+/** La nota IN TESTA SOLO se l'output contiene un errore di nome/rete (anche solo l'exit 6/7 di curl). PURA. */
 export function withNoInternetNote(output: string): string {
-  return NETWORK_ERROR_RE.test(output) ? `${output}\n${BOX_NO_INTERNET_NOTE}` : output
+  return NETWORK_ERROR_RE.test(output) ? `${BOX_NO_INTERNET_NOTE}\n${output}` : output
 }

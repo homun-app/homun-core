@@ -203,6 +203,17 @@ export async function runDaemonRuntime(opts: DaemonRuntimeOptions): Promise<void
     }
   }
 
+  // P7 (fase uso-permessi): i server http ACCESI mai connessi con successo
+  // (rimasti da aggiunte fallite) si SPENGONO (una tantum, flag idempotente)
+  {
+    const { migrateHttpNeverConnectedOff } = await import('../main/store/mcp-migrations')
+    try {
+      migrateHttpNeverConnectedOff()
+    } catch (e) {
+      console.error('[sandbotd] spegnimento dei server http mai connessi rimandato al prossimo avvio:', e instanceof Error ? e.message : e)
+    }
+  }
+
   // fase memoria-engramma (M1): il motore della memoria — UNA volta per
   // processo (il modello occupa ~400 MB), su <dataDir>/memory, con il modello
   // in <dataDir>/models (mai scaricato da solo). Se il modulo non si carica
